@@ -1,6 +1,7 @@
 #lang s-exp "type-env-lang.rkt"
 
-(require "../types/abbrev.rkt" "../types/union.rkt" "../types/numeric-tower.rkt" "../rep/type-rep.rkt")
+(require "../types/abbrev.rkt" "../types/union.rkt"
+         "../types/numeric-tower.rkt" "../rep/type-rep.rkt")
 
 [Complex -Number]
 [Number -Number]
@@ -114,6 +115,7 @@
 [Identifier Ident]
 [Procedure top-func]
 [BoxTop -BoxTop]
+[Weak-BoxTop -Weak-BoxTop]
 [ChannelTop -ChannelTop]
 [Async-ChannelTop -Async-ChannelTop]
 [VectorTop -VectorTop]
@@ -148,6 +150,7 @@
 [Thread-Group -Thread-Group]
 [Impersonator-Property -Impersonator-Property]
 [Semaphore -Semaphore]
+[FSemaphore -FSemaphore]
 [Bytes-Converter -Bytes-Converter]
 [Pseudo-Random-Generator -Pseudo-Random-Generator]
 [Logger -Logger]
@@ -168,6 +171,7 @@
 [Promise (-poly (a) (-Promise a))]
 [Pair (-poly (a b) (-pair a b))]
 [Boxof (-poly (a) (make-Box a))]
+[Weak-Boxof (-poly (a) (-weak-box a))]
 [Channelof (-poly (a) (make-Channel a))]
 [Async-Channelof (-poly (a) (make-Async-Channel a))]
 [Ephemeronof (-poly (a) (make-Ephemeron a))]

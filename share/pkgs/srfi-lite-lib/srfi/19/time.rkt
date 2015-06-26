@@ -217,9 +217,27 @@
 ;; each entry is ( utc seconds since epoch . # seconds to add for tai )
 ;; note they go higher to lower, and end in 1972.
 ;;
-;; up-to-date as of 2013-01-18
+#|
+;; some useful code for filling in this table from Pierpaolo Bernardi
+#lang racket
+(require racket/date)
+
+;; Computes the constant for the leap seconds table of SRFI-19.
+;; Year and month are the ones to which the leap second is added.
+;; January = 1. Example: for the leap second added to JUNE 2015
+;; use (leap-table 2015 6).
+(define (leap-table year month)
+  (define-values (adj-year next-month)
+    (if (= month 12)
+      (values (add1 year) 1)
+      (values year (add1 month))))
+  (define dd (date 0 0 0 1 next-month adj-year 0 0 #f 0))
+  (date->seconds dd #f))
+|#
+;; up-to-date as of 2015-01-08
 (define tm:leap-second-table
-  '((1341100800 . 35) ; 2012-07-01
+  '((1435708800 . 36) ; 2015-07-01
+    (1341100800 . 35) ; 2012-07-01
     (1230768000 . 34) ; 2009-01-01
     (1136073600 . 33) ; 2006-01-01
     (915148800  . 32) ; 1999-01-01
@@ -1467,7 +1485,7 @@
          (locale-reader-long-month   (tm:make-locale-reader
                                       tm:locale-long-month->index))
          (char-fail (lambda (ch) #t))
-         (do-nothing (lambda (val object) (values)))
+         (do-nothing (lambda (val object) object))
          )
 
     (list

@@ -69,6 +69,11 @@ does not refer to the @racket[bitmap%] class. Typically such image-bitmaps
 come about via the @onscreen{Insert Image...} menu item in DrRacket}
 Existing images can be rotated, scaled, flipped, and overlaid on top of each other.
 
+In some situations images are rendered into bitmaps (e.g. when being shown in
+the DrRacket Interactions window) In order to avoid bad performance
+penalties, the rendering process limits the area of the images to
+about 25,000,000 pixels (which requires about 100 MB of storage).
+
 @section{Basic Images}
 
 @defproc*[([(circle [radius (and/c real? (not/c negative?))]
@@ -182,6 +187,48 @@ Unlike @racket[scene+curve], if the line passes outside of @racket[image], the i
                              -20 -20 0 1 
                              120 120 0 1
                              "red")]
+}
+
+@defproc[(add-solid-curve [image image?] 
+                          [x1 real?] [y1 real?] [angle1 angle?] [pull1 real?]
+                          [x2 real?] [y2 real?] [angle2 angle?] [pull2 real?]
+                          [color image-color?])
+         image?]{
+
+Adds a curve to @racket[image] like
+@racket[add-curve], except it fills in the region
+inside the curve.
+
+@image-examples[(add-solid-curve (rectangle 100 100 "solid" "black")
+                                 20 20 0 1 
+                                 80 80 0 1
+                                 "white")
+                
+                (add-solid-curve
+                 (add-solid-curve
+                  (rectangle 100 100 "solid" "black")
+                  50 20 180 1/10
+                  50 80 0 1
+                  "white")
+                 50 20 0 1/10
+                 50 80 180 1
+                 "white")
+                
+                (add-solid-curve
+                 (add-solid-curve
+                  (rectangle 100 100 "solid" "black")
+                  51 20 180 1/10
+                  50 80 0 1
+                  "white")
+                 49 20 0 1/10
+                 50 80 180 1
+                 "white")
+                
+                (add-solid-curve (rectangle 100 100 "solid" "black")
+                                 -20 -20 0 1 
+                                 120 120 0 1
+                                 "red")]
+@history[#:added "1.2"]
 }
 
 @defproc[(text [string string?] [font-size (and/c integer? (<=/c 1 255))] [color image-color?])
@@ -630,12 +677,43 @@ the @racket[point-count] argument determines how many points the star has.
                   (regular-polygon 20 8 "solid" "red")]
 }
 
+@defproc*[([(pulled-regular-polygon [side-length (and/c real? (not/c negative?))]
+                                    [side-count side-count?]
+                                    [pull (and/c real? (not/c negative?))]
+                                    [angle angle?]
+                                    [mode mode?]
+                                    [color image-color?])
+            image?]
+           [(pulled-regular-polygon [side-length (and/c real? (not/c negative?))]
+                                    [side-count side-count?]
+                                    [pull (and/c real? (not/c negative?))]
+                                    [angle angle?]
+                                    [outline-mode (or/c 'outline "outline")]
+                                    [pen-or-color (or/c pen? image-color?)])
+            image?])]{
+  Constructs a regular polygon with @racket[side-count] sides where each side
+  is curved according to the @racket[pull] and @racket[angle] arguments. The
+  @racket[angle] argument controls the angle at which the curved version of
+  polygon edge makes with the original edge of the polygon. Larger the @racket[pull]
+  arguments mean that the angle is preserved more at each vertex.
+  
+  @mode/color-and-nitty-text
 
-@defproc*[([(polygon [vertices (listof real-valued-posn?)] 
+  @image-examples[(pulled-regular-polygon 60 4 1/3 30 "solid" "blue")
+                  (pulled-regular-polygon 50 5 1/2 -10 "solid" "red")
+                  (pulled-regular-polygon 50 5 1 140 "solid" "purple")
+                  (pulled-regular-polygon 50 5 1.1 140 "solid" "purple")
+                  (pulled-regular-polygon 100 3 1.8 30 "solid" "blue")]
+
+  @history[#:added "1.3"]
+}
+
+
+@defproc*[([(polygon [vertices (listof (or/c real-valued-posn? pulled-point?))]
                      [mode mode?]
                      [color image-color?])
             image?]
-           [(polygon [vertices (listof real-valued-posn?)] 
+           [(polygon [vertices (listof (or/c real-valued-posn? pulled-point?))]
                      [outline-mode (or/c 'outline "outline")]
                      [pen-or-color (or/c pen? image-color?)])
             image?])]{
@@ -646,6 +724,12 @@ the @racket[point-count] argument determines how many points the star has.
   @image-examples[(polygon (list (make-posn 0 0)
                                  (make-posn -10 20)
                                  (make-posn 60 0)
+                                 (make-posn -10 -20))
+                           "solid" 
+                           "burlywood")
+                  (polygon (list (make-pulled-point 1/2 20 0 0 1/2 -20)
+                                 (make-posn -10 20)
+                                 (make-pulled-point 1/2 -20 60 0 1/2 20)
                                  (make-posn -10 -20))
                            "solid" 
                            "burlywood")
@@ -678,6 +762,8 @@ the @racket[point-count] argument determines how many points the star has.
                           (make-posn 50 50))
                     "outline"
                     (make-pen "darkslategray" 10 "solid" "projecting" "miter")))]
+  
+  @history[#:changed "1.3" @list{Accepts @racket[pulled-point]s.}]
 }
 
 @defproc[(add-polygon [image image?]
@@ -692,39 +778,38 @@ the @racket[point-count] argument determines how many points the star has.
 
 @mode/color-and-nitty-text
 
-@image-examples[(add-polygon (rectangle 55 34 "solid" "light blue")
-                          (list (make-posn 50 10)
-                                (make-posn 20 15)
-                                (make-posn 50 20)
-                                (make-posn 10 25)
-                                (make-posn 35 30))
-                          "outline" "red")
+@image-examples[(add-polygon (square 65 "solid" "light blue")
+                             (list (make-posn 30 -20)
+                                   (make-posn 50 50)
+                                   (make-posn -20 30))
+                             "solid" "forest green")
                 (add-polygon (square 65 "solid" "light blue")
-                          (list (make-posn 30 -20)
-                                (make-posn 50 50)
-                                (make-posn -20 30))
-                          "solid" "forest green")
+                             (list (make-posn 30 -20)
+                                   (make-pulled-point 1/2 30 50 50 1/2 -30)
+                                   (make-posn -20 30))
+                             "solid" "forest green")
                 (add-polygon (square 180 "solid" "yellow")
-                          (list
-                           (make-posn 109 160)
-                           (make-posn 26 148)
-                           (make-posn 46 36)
-                           (make-posn 93 44)
-                           (make-posn 89 68)
-                           (make-posn 122 72))
-                          "outline" "dark blue")
+                             (list (make-posn 109 160)
+                                   (make-posn 26 148)
+                                   (make-posn 46 36)
+                                   (make-posn 93 44)
+                                   (make-posn 89 68)
+                                   (make-posn 122 72))
+                             "outline" "dark blue")
                 (add-polygon (square 50 "solid" "light blue")
-                          (list (make-posn 25 -10)
-                                (make-posn 60 25)
-                                (make-posn 25 60)
-                                (make-posn -10 25))
-                          "solid" "pink")]
-                                     }
+                             (list (make-posn 25 -10)
+                                   (make-posn 60 25)
+                                   (make-posn 25 60)
+                                   (make-posn -10 25))
+                             "solid" "pink")]
+  @history[#:changed "1.3" @list{Accepts @racket[pulled-point]s.}]
+
+}
 
 @defproc[(scene+polygon [image image?]
-                     [posns (listof posn?)]
-                     [mode mode?]
-                     [color image-color?])
+                        [posns (listof posn?)]
+                        [mode mode?]
+                        [color image-color?])
          image?]{
   Adds a closed polygon to the image @racket[image], with vertices as specified in @racket[posns]
  (relative to the top-left corner of @racket[image]).  Unlike @racket[add-polygon], if the
@@ -732,34 +817,33 @@ the @racket[point-count] argument determines how many points the star has.
                                      
 @crop-warning
 
-@image-examples[(scene+polygon (rectangle 55 34 "solid" "light blue")
-                          (list (make-posn 50 10)
-                                (make-posn 20 15)
-                                (make-posn 50 20)
-                                (make-posn 10 25)
-                                (make-posn 35 30))
-                          "outline" "red")
+@image-examples[(scene+polygon (square 65 "solid" "light blue")
+                               (list (make-posn 30 -20)
+                                     (make-posn 50 50)
+                                     (make-posn -20 30))
+                               "solid" "forest green")
                 (scene+polygon (square 65 "solid" "light blue")
-                          (list (make-posn 30 -20)
-                                (make-posn 50 50)
-                                (make-posn -20 30))
-                          "solid" "forest green")
+                               (list (make-posn 30 -20)
+                                     (make-pulled-point 1/2 -30 50 50 1/2 30)
+                                     (make-posn -20 30))
+                               "solid" "forest green")
                 (scene+polygon (square 180 "solid" "yellow")
-                          (list
-                           (make-posn 109 160)
-                           (make-posn 26 148)
-                           (make-posn 46 36)
-                           (make-posn 93 44)
-                           (make-posn 89 68)
-                           (make-posn 122 72))
-                          "outline" "dark blue")
+                               (list (make-posn 109 160)
+                                     (make-posn 26 148)
+                                     (make-posn 46 36)
+                                     (make-posn 93 44)
+                                     (make-posn 89 68)
+                                     (make-posn 122 72))
+                               "outline" "dark blue")
                 (scene+polygon (square 50 "solid" "light blue")
-                          (list (make-posn 25 -10)
-                                (make-posn 60 25)
-                                (make-posn 25 60)
-                                (make-posn -10 25))
-                          "solid" "pink")]
-                                     }
+                               (list (make-posn 25 -10)
+                                     (make-posn 60 25)
+                                     (make-posn 25 60)
+                                     (make-posn -10 25))
+                               "solid" "pink")]
+
+@history[#:changed "1.3" @list{Accepts @racket[pulled-point]s.}]
+}
 
 
 @section{Overlaying Images}
@@ -1644,6 +1728,31 @@ This section lists predicates for the basic structures provided by the image lib
   The constructor, @racket[make-color], also accepts only three arguments, in which case
   the three arguments are used for the @racket[red], @racket[green], and @racket[blue] fields, and the
   @racket[alpha] field defaults to @racket[255].
+}
+
+@defstruct[pulled-point ([lpull real?]
+                         [langle angle?]
+                         [x real?]
+                         [y real?]
+                         [rpull real?]
+                         [rangle angle?])]{
+  The @racket[pulled-point] struct defines a point with
+      @racket[x] and @racket[y] coordinates, but also with
+      two angles (@racket[langle] and @racket[rangle]) and
+      two pulls (@racket[lpull] and @racket[rpull]).
+
+      These points are used with the @racket[polygon] function
+      and control how the edges can be curved.
+      
+      The first two pull and angle arguments indicate
+      how an edge coming into this point should be curved.
+      The angle argument indicates the angle as the edge
+      reaches (@racket[x],@racket[y]) and a larger pull argument
+      means that the edge should hold the angle longer.
+      The last two are the same, except they apply to
+      the edge leaving the point.
+      
+  @history[#:added "1.3"]
 }
 
 @defproc[(y-place? [x any/c]) boolean?]{

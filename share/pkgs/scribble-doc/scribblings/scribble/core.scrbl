@@ -1586,11 +1586,15 @@ part.  Clicking on a section title within the part may show
 other documents can link to the section.
 
 More specifically, the section title is given the HTML attributes
-@tt{x-source-module} and @tt{x-part-tag}. The
+@tt{x-source-module} and @tt{x-part-tag}, plus @tt{x-part-prefixes}
+if the section or enclosing sections declare tag prefixes, and
+@tt{x-source-pkg} if the source is found within a package at document-build time. The
 @racketmodname[scribble/manual] style recognizes those tags to make
 clicking a title show cross-reference information.
 
-@history[#:added "1.2"]}
+@history[#:added "1.2"
+         #:changed "1.7" @elem{Added @tt{x-part-prefixes}.}
+         #:changed "1.9" @elem{Added @tt{x-source-pkg}.}]}
 
 
 @defstruct[html-defaults ([prefix (or/c bytes? path-string? 

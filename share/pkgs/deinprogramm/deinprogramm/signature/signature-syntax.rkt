@@ -140,15 +140,21 @@
      (with-syntax ((?stx (phase-lift stx))
 		   (?name name)
 		   ((?signature-expr ...) (map (lambda (sig)
-						(parse-signature #f sig))
-					      (syntax->list #'(?signature ...)))))
-
+						 (let ((d (syntax->datum sig)))
+						   ;; allow literals to be used directly
+						   (if (or (number? d)
+							   (boolean? d)
+							   (string? d))
+						       d
+						       (parse-signature #f sig))))
+					       (syntax->list #'(?signature ...)))))
+       
        (with-syntax
 	   ((?call (syntax/loc stx (?signature-abstr ?signature-expr ...))))
 	 #'(make-call-signature '?name
-			       (delay ?call)
-			       (delay ?signature-abstr) (delay (list ?signature-expr ...))
-			       ?stx))))
+				(delay ?call)
+				(delay ?signature-abstr) (delay (list ?signature-expr ...))
+				?stx))))
     (else
      (raise-syntax-error #f
 			 "ungültige Signatur" stx))))

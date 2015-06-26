@@ -10,24 +10,14 @@ work right.
 Most of the exports are just for use in 2htdp/image
 (technically, 2htdp/private/image-more). The main
 use of this library is the snip class addition it
-does (and any code that does not depend on
+does (and any code that does not depend on that
 has been moved out).
-
-
--- in the middle of text:
-
-  - bounding boxes
-  - rotating (and bounding boxes)
-  - hbl append(?)
-  - this doesn't work (how to test?)
-(beside/places "baseline"
-                 (text "ijy" 12 'black)
-                 (text "ijy" 24 'black))
-  - /places => /align
 
 |#
 
 (require racket/class
+         racket/list
+         racket/match
          (except-in racket/draw 
                     make-pen make-color)
          (for-syntax racket/base)
@@ -174,7 +164,7 @@ has been moved out).
 ;; a curve-segment is
 ;;
 ;;  - (make-curve-segment point real real point real real color)
-(define-struct/reg-mk curve-segment (start s-angle s-pull end e-angle e-pull color)
+(define-struct/reg-mk curve-segment (start s-angle s-pull end e-angle e-pull mode color)
   #:transparent #:omit-define-syntaxes)
 
 ;; a normalized-shape (subtype of shape) is either
@@ -213,6 +203,17 @@ has been moved out).
          (λ (r g b [a 255])
            (make-color r g b a))])
     make-color))
+
+
+;; a pulled-point is
+;;  - (make-pulled-point real real real real real real)
+(define-struct/reg-mk pulled-point (lpull langle x y rpull rangle) #:transparent)
+(define (build-pulled-point lpull langle x y rpull rangle)
+  (make-pulled-point lpull
+                     (if (zero? lpull) 0 langle)
+                     x y
+                     rpull
+                     (if (zero? rpull) 0 rangle)))
 ;                                                   
 ;                                                   
 ;                                                   
@@ -255,16 +256,8 @@ has been moved out).
                    (ceiling (inexact->exact (- (bb-bottom the-bb) 
                                                (bb-baseline the-bb))))))])))
 
-;; these are used when building a bitmap to render the final image
-;; they are probably smaller than the allowed maximum, but they are
-;; still huge
-(define maximum-width 5000)
-(define maximum-height 5000)
-
 (define (to-bitmap img)
-  (define bb (send img get-bb))
-  (define w (min (inexact->exact (ceiling (bb-right bb))) maximum-width))
-  (define h (min (inexact->exact (ceiling (bb-bottom bb))) maximum-height)) 
+  (define-values (w h) (get-size/but-subject-to-max (send img get-bb)))
   (define bm (make-bitmap w h))
   (define bdc (new bitmap-dc% [bitmap bm]))
   (render-image img bdc 0 0)
@@ -273,8 +266,8 @@ has been moved out).
 
 (define (to-svg-bytes img)
   (define bb (send img get-bb))
-  (define w (min (inexact->exact (ceiling (bb-right bb))) maximum-width))
-  (define h (min (inexact->exact (ceiling (bb-bottom bb))) maximum-height)) 
+  (define w (inexact->exact (ceiling (bb-right bb))))
+  (define h (inexact->exact (ceiling (bb-bottom bb))))
   (define s (open-output-bytes))
   (define svg-dc (new svg-dc% [width w] [height h] [output s]))
   (send svg-dc start-doc "")
@@ -283,6 +276,41 @@ has been moved out).
   (send svg-dc end-page)
   (send svg-dc end-doc)
   (get-output-bytes s))
+
+(define max-size (* 5000 5000))
+(define (get-size/but-subject-to-max bb)
+  (define w (inexact->exact (ceiling (bb-right bb))))
+  (define h (inexact->exact (ceiling (bb-bottom bb))))
+  (get-size/but-subject-to-max/wh w h))
+
+(define (get-size/but-subject-to-max/wh w h)
+  (cond
+    [(<= (* w h) max-size) (values w h)]
+    [(< w h) (values w (ceiling (/ max-size w)))]
+    [else (values (ceiling (/ max-size h)) h)]))
+
+(module+ test 
+  (require rackunit)
+  (check-equal? (call-with-values
+                 (λ () (get-size/but-subject-to-max/wh 10 10))
+                 list)
+                '(10 10))
+  (check-equal? (call-with-values
+                 (λ () (get-size/but-subject-to-max/wh 5000 10000))
+                 list)
+                '(5000 5000))
+  (check-equal? (call-with-values
+                 (λ () (get-size/but-subject-to-max/wh 10000 5000))
+                 list)
+                '(5000 5000))
+  (check-equal? (call-with-values
+                 (λ () (get-size/but-subject-to-max/wh 5001 5000))
+                 list)
+                '(5000 5000))
+  (check-equal? (call-with-values
+                 (λ () (get-size/but-subject-to-max/wh 6000 6001))
+                 list)
+                '(6000 4167)))
 
 (define-local-member-name 
   set-use-bitmap-cache?!
@@ -309,8 +337,8 @@ has been moved out).
                  (or (and (not (skip-image-equality-fast-path))  ;; this makes testing more effective
                           (equal? (get-normalized-shape) (send that get-normalized-shape)))
                      
-                     ;; some shapes (ie, rectangles) draw 1 outside the bounding box
-                     ;; so we make the bitmap slightly bigger to accommodate that.
+                     ;; some shapes (ie, outline rectangles with a 1 pixel edge) draw 1 outside
+                     ;; the bounding box so we make the bitmap slightly bigger to accommodate that.
                      (let ([w (+ 1 (round (inexact->exact (bb-right bb))))]
                            [h (+ 1 (round (inexact->exact (bb-bottom bb))))])
                        (or ;(zero? w)
@@ -392,9 +420,8 @@ has been moved out).
     (define/public (compute-cached-bitmap)
       (when use-cached-bitmap?
         (unless cached-bitmap
-          (set! cached-bitmap
-                (make-bitmap (min (+ (inexact->exact (round (bb-right bb))) 1) maximum-width) 
-                             (min (+ (inexact->exact (round (bb-bottom bb))) 1) maximum-height)))
+          (define-values (w h) (get-size/but-subject-to-max bb))
+          (set! cached-bitmap (make-bitmap (+ w 1) (+ h 1)))
           (define bdc (make-object bitmap-dc% cached-bitmap))
           (send bdc erase)
           (render-image this bdc 0 0)
@@ -435,6 +462,22 @@ has been moved out).
     
     (inherit set-snipclass)
     (set-snipclass snip-class)))
+
+(define (definitely-same-image? i1 i2)
+  (cond
+    [(and (is-a? i1 image<%>) (is-a? i2 image<%>))
+     (equal? (send i1 get-normalized-shape)
+             (send i2 get-normalized-shape))]
+    [(or (is-a? i1 image<%>) (is-a? i2 image<%>))
+     #f]
+    [else
+     (define bm1 (if (is-a? i1 image-snip%)
+                     (send i1 get-bitmap)
+                     i2))
+     (define bm2 (if (is-a? i2 image-snip%)
+                     (send i2 get-bitmap)
+                     i2))
+     (eq? bm1 bm2)]))
 
 (define (same-bb? bb1 bb2)
   (and (same-width/height? bb1 bb2)
@@ -494,6 +537,22 @@ has been moved out).
                        [arg-count (length args)]
                        [parsed-args (map loop args)])
                   (cond
+                    [(and constructor
+                          (procedure-arity-includes? constructor arg-count)
+                          (equal? tag 'struct:polygon))
+                     (define points (list-ref parsed-args 0))
+                     ;; in older versions, polygons had points as the
+                     ;; first argument, but now they have pulled-points
+                     (define adjusted-points
+                       (for/list ([p (in-list points)])
+                         (cond
+                           [(point? p)
+                            (make-pulled-point 0 0
+                                               (point-x p)
+                                               (point-y p)
+                                               0 0)]
+                           [else p])))
+                     (apply constructor adjusted-points (cdr parsed-args))]
                     [(and constructor (procedure-arity-includes? constructor arg-count))
                      (apply constructor parsed-args)]
                     [(and (eq? tag 'struct:bitmap)
@@ -526,6 +585,19 @@ has been moved out).
                                  (list-ref parsed-args 1)
                                  (list-ref parsed-args 2)
                                  255)]
+                    [(and (eq? tag 'struct:curve-segment)
+                          (= arg-count 7))
+                     ;; new version (start s-angle s-pull end e-angle e-pull mode color)
+                     ;; old version (start s-angle s-pull end e-angle e-pull color)
+                     ;; with mode defaulting to 'outline
+                     (make-curve-segment (list-ref parsed-args 0)
+                                         (list-ref parsed-args 1)
+                                         (list-ref parsed-args 2)
+                                         (list-ref parsed-args 3)
+                                         (list-ref parsed-args 4)
+                                         (list-ref parsed-args 5)
+                                         'outline
+                                         (list-ref parsed-args 6))]
                     [else
                      (k #f)]))]))]
         [else sexp]))))
@@ -580,6 +652,13 @@ has been moved out).
     (define (scale-point p)
       (make-point (+ dx (* x-scale (point-x p)))
                   (+ dy (* y-scale (point-y p)))))
+    (define (scale-pulled-point p)
+      (make-pulled-point (pulled-point-lpull p)
+                         (pulled-point-langle p)
+                         (+ dx (* x-scale (pulled-point-x p)))
+                         (+ dy (* y-scale (pulled-point-y p)))
+                         (pulled-point-rpull p)
+                         (pulled-point-rangle p)))
     (cond
       [(translate? shape)
        (loop (translate-shape shape)
@@ -612,13 +691,13 @@ has been moved out).
              (make-overlay bottom this-one)
              this-one))]
       [(polygon? shape)
-       (let* ([this-one 
-               (make-polygon (map scale-point (polygon-points shape))
-                             (polygon-mode shape)
-                             (scale-color (polygon-color shape) x-scale y-scale))])
-         (if bottom
-             (make-overlay bottom this-one)
-             this-one))]
+       (define this-one
+         (make-polygon (map scale-pulled-point (polygon-points shape))
+                       (polygon-mode shape)
+                       (scale-color (polygon-color shape) x-scale y-scale)))
+       (if bottom
+           (make-overlay bottom this-one)
+           this-one)]
       [(line-segment? shape)
        (let ([this-one 
               (make-line-segment (scale-point (line-segment-start shape))
@@ -638,6 +717,7 @@ has been moved out).
                                   (scale-point (curve-segment-end shape))
                                   (curve-segment-e-angle shape)
                                   (curve-segment-e-pull shape)
+                                  (curve-segment-mode shape)
                                   (scale-color (curve-segment-color shape) x-scale y-scale))])
          (if bottom
              (make-overlay bottom this-one)
@@ -827,6 +907,13 @@ has been moved out).
     (define (scale-point p)
       (make-point (* x-scale (point-x p))
                   (* y-scale (point-y p))))
+    (define (scale-pulled-point p)
+      (make-pulled-point (pulled-point-lpull p)
+                         (pulled-point-langle p)
+                         (* x-scale (pulled-point-x p))
+                         (* y-scale (pulled-point-y p))
+                         (pulled-point-rpull p)
+                         (pulled-point-rangle p)))
     (cond
       [(translate? shape)
        (loop (translate-shape shape)
@@ -849,11 +936,11 @@ has been moved out).
         (crop-shape shape)
         (λ (s) (loop s dx dy x-scale y-scale)) dc dx dy)]
       [(polygon? shape)
-       (let* ([this-one 
-               (make-polygon (map scale-point (polygon-points shape))
-                             (polygon-mode shape)
-                             (scale-color (polygon-color shape) x-scale y-scale))])
-         (render-poly/line-segment/curve-segment this-one dc dx dy))]
+       (define this-one
+         (make-polygon (map scale-pulled-point (polygon-points shape))
+                       (polygon-mode shape)
+                       (scale-color (polygon-color shape) x-scale y-scale)))
+       (render-poly/line-segment/curve-segment this-one dc dx dy)]
       [(line-segment? shape)
        (let ([this-one 
               (make-line-segment (scale-point (line-segment-start shape))
@@ -864,15 +951,16 @@ has been moved out).
        ;; the pull is multiplied by the distance 
        ;; between the two points when it is drawn,
        ;; so we don't need to scale it here
-       (let ([this-one 
-              (make-curve-segment (scale-point (curve-segment-start shape))
-                                  (curve-segment-s-angle shape)
-                                  (curve-segment-s-pull shape)
-                                  (scale-point (curve-segment-end shape))
-                                  (curve-segment-e-angle shape)
-                                  (curve-segment-e-pull shape)
-                                  (scale-color (curve-segment-color shape) x-scale y-scale))])
-         (render-poly/line-segment/curve-segment this-one dc dx dy))]
+       (define this-one
+         (make-curve-segment (scale-point (curve-segment-start shape))
+                             (curve-segment-s-angle shape)
+                             (curve-segment-s-pull shape)
+                             (scale-point (curve-segment-end shape))
+                             (curve-segment-e-angle shape)
+                             (curve-segment-e-pull shape)
+                             (curve-segment-mode shape)
+                             (scale-color (curve-segment-color shape) x-scale y-scale)))
+       (render-poly/line-segment/curve-segment this-one dc dx dy)]
       [(or (ibitmap? shape) (np-atomic-shape? shape))
        (let* ([shape (if (ibitmap? shape) 
                          (make-flip #f shape)
@@ -888,7 +976,7 @@ has been moved out).
     [(polygon? simple-shape)
      (let ([mode (polygon-mode simple-shape)]
            [color (polygon-color simple-shape)]
-           [path (polygon-points->path (polygon-points simple-shape))])
+           [path (polygon-pulled-points->path (polygon-points simple-shape))])
        (send dc set-pen (mode-color->pen mode color))
        (send dc set-brush (mode-color->brush mode color))
        (send dc set-smoothing (mode-color->smoothing mode color))
@@ -909,8 +997,10 @@ has been moved out).
        (send dc draw-path path dx dy))]
     [(curve-segment? simple-shape)
      (define path (curve-segment->path simple-shape))
-     (send dc set-pen (mode-color->pen 'outline (curve-segment-color simple-shape)))
-     (send dc set-brush "black" 'transparent)
+     (send dc set-pen (mode-color->pen (curve-segment-mode simple-shape)
+                                       (curve-segment-color simple-shape)))
+     (send dc set-brush (mode-color->brush (curve-segment-mode simple-shape)
+                                           (curve-segment-color simple-shape)))
      (send dc set-smoothing 'smoothed)
      (send dc draw-path path dx dy)]))
 
@@ -1008,46 +1098,78 @@ has been moved out).
                  (imag-part p) 
                  #f 0 θ))))]))
 
-(define (polygon-points->path points)
-  (let ([path (new dc-path%)])
-    (send path move-to (point-x (car points)) (point-y (car points)))
-    (let loop ([points (cdr points)])
-      (unless (null? points)
-        (send path line-to 
-              (point-x (car points))
-              (point-y (car points)))
-        (loop (cdr points))))
-    (send path close)
-    ;(send path line-to (round (point-x (car points))) (round (point-y (car points))))
-    path))
+(define (polygon-pulled-points->path pulled-points)
+  (define path (new dc-path%))
+  (define first-point (car pulled-points))
+  (send path move-to (pulled-point-x first-point) (pulled-point-y first-point))
+  (let loop ([prev-point (car pulled-points)]
+             [pulled-points (cdr pulled-points)])
+    (define this-point (if (null? pulled-points)
+                           first-point
+                           (car pulled-points)))
+    (match-define (pulled-point slpull slangle sx sy srpull srangle) prev-point)
+    (match-define (pulled-point elpull elangle ex ey erpull erangle) this-point)
+    (define vec (- (make-rectangular ex ey) (make-rectangular sx sy)))
+    (define sa (degrees->radians srangle))
+    (define ea (degrees->radians elangle))
+    (define p1 (* vec (make-polar srpull sa)))
+    (define p2 (* (- vec) (make-polar elpull ea)))
+    
+    (send path curve-to
+          (+ sx (real-part p1))
+          (+ sy (imag-part p1))
+          (+ ex (real-part p2))
+          (+ ey (imag-part p2))
+          ex
+          ey)
+    (unless (null? pulled-points)
+      (loop (car pulled-points) (cdr pulled-points))))
+  (send path close)
+  path)
 
-(define (points->bb-path points)
-  (let ([path (new dc-path%)])
-    (let-values ([(left top right bottom) (points->ltrb-values points)])
-      (send path move-to left top)
-      (send path line-to right top)
-      (send path line-to right bottom)
-      (send path line-to left bottom)
-      (send path line-to left top)
-      path)))
+(define (polygon-points->path points)
+  (define path (new dc-path%))
+  (send path move-to (point-x (car points)) (point-y (car points)))
+  (let loop ([points (cdr points)])
+    (unless (null? points)
+      (define pt (car points))
+      (send path line-to (point-x pt) (point-y pt))
+      (loop (cdr points))))
+  (send path close)
+  path)
 
 ;; points->ltrb-values : (cons point (listof points)) -> (values number number number number)
 (define (points->ltrb-values points)
-  (let* ([fx (point-x (car points))]
-         [fy (point-y (car points))]
-         [left fx]
-         [top fy]
-         [right fx]
-         [bottom fy])
-    (for-each (λ (point)
-                (let ([new-x (point-x point)]
-                      [new-y (point-y point)])
-                  (set! left (min new-x left))
-                  (set! top (min new-y top))
-                  (set! right (max new-x right))
-                  (set! bottom (max new-y bottom))))
-              (cdr points))
-    (values left top right bottom)))
+  (unless (and (list? points)
+               (pair? points)
+               (andmap (or/c point? pulled-point?) points))
+    (raise-argument-error 'points->ltrb-values
+                          "(non-empty-listof (or/c point? pulled-point?))"
+                          0 points))
+  (define fx (pp->x (car points)))
+  (define fy (pp->y (car points)))
+  (define left fx)
+  (define top fy)
+  (define right fx)
+  (define bottom fy)
+  (for ([point (in-list (cdr points))])
+    (define new-x (pp->x point))
+    (define new-y (pp->y point))
+    (set! left (min new-x left))
+    (set! top (min new-y top))
+    (set! right (max new-x right))
+    (set! bottom (max new-y bottom)))
+  (values left top right bottom))
+
+(define (pp->x p)
+  (if (pulled-point? p)
+      (pulled-point-x p)
+      (point-x p)))
+
+(define (pp->y p)
+  (if (pulled-point? p)
+      (pulled-point-y p)
+      (point-y p)))
   
 #|
 
@@ -1276,7 +1398,7 @@ the mask bitmap and the original bitmap are all together in a single bytes!
        (let-values ([(w h) (if (is-a? is cis:cache-image-snip%)
                                (send is get-size)
                                (values 0 0))])
-         (make-image (make-polygon
+         (make-image (construct-polygon
                       (list (make-point 0 0)
                             (make-point w 0)
                             (make-point w h)
@@ -1288,6 +1410,19 @@ the mask bitmap and the original bitmap are all together in a single bytes!
        (bitmap->image bm
                       (or (send is get-bitmap-mask)
                           (send bm get-loaded-mask)))])))
+
+(define (construct-polygon points mode color)
+  (make-polygon
+   (for/list ([prev (in-list (cons (last points) points))]
+              [p (in-list points)]
+              [next (in-list (append (cdr points) (list (car points))))])
+     (cond
+       [(point? p)
+        (define x (point-x p))
+        (define y (point-y p))
+        (make-pulled-point 0 0 x y 0 0)]
+       [else p]))
+   mode color))
 
 (define (bitmap->image bm [mask-bm (send bm get-loaded-mask)])
   (define w (send bm get-width))
@@ -1335,7 +1470,7 @@ the mask bitmap and the original bitmap are all together in a single bytes!
          un/cache-image compute-image-cache
          
          (struct-out bb)
-         (struct-out point)
+         (struct-out point) (struct-out pulled-point) build-pulled-point
          make-overlay overlay? overlay-top overlay-bottom
          make-translate translate? translate-dx translate-dy translate-shape
          make-scale scale? scale-x scale-y scale-shape
@@ -1343,12 +1478,14 @@ the mask bitmap and the original bitmap are all together in a single bytes!
          make-ellipse ellipse? ellipse-width ellipse-height ellipse-angle ellipse-mode ellipse-color
          make-text text? text-string text-angle text-y-scale text-color
          text-angle text-size text-face text-family text-style text-weight text-underline
-         make-polygon polygon? polygon-points polygon-mode polygon-color
+         (contract-out [rename construct-polygon make-polygon
+                               (-> (listof (or/c point? pulled-point?)) any/c any/c polygon?)])
+         polygon? polygon-points polygon-mode polygon-color
          make-line-segment line-segment? line-segment-start line-segment-end line-segment-color
          make-curve-segment curve-segment? 
          curve-segment-start curve-segment-s-angle curve-segment-s-pull
          curve-segment-end curve-segment-e-angle curve-segment-e-pull 
-         curve-segment-color
+         curve-segment-mode curve-segment-color
          make-pen pen? pen-color pen-width pen-style pen-cap pen-join pen
          
          make-ibitmap ibitmap? ibitmap-raw-bitmap ibitmap-angle ibitmap-x-scale ibitmap-y-scale 
@@ -1383,10 +1520,11 @@ the mask bitmap and the original bitmap are all together in a single bytes!
          curve-segment->path
          mode-color->pen
          
-         snipclass-bytes->image)
+         snipclass-bytes->image
+         (contract-out
+          [definitely-same-image? (-> image? image? boolean?)]))
 
 ;; method names
 (provide get-shape get-bb get-pinhole get-normalized? get-normalized-shape)
 
 (provide np-atomic-shape? atomic-shape? simple-shape? cn-or-simple-shape? normalized-shape?)
-

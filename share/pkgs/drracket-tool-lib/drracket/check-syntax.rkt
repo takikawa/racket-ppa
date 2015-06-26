@@ -41,6 +41,7 @@
  syncheck:add-rename-menu
  syncheck:add-arrow
  syncheck:add-arrow/name-dup
+ syncheck:add-arrow/name-dup/pxpy
  syncheck:add-tail-arrow
  syncheck:add-mouse-over-status
  syncheck:add-jump-to-definition
@@ -66,6 +67,7 @@
           (expand
            (call-with-input-file file-or-stx
              (λ (port)
+               (port-count-lines! port)
                (with-module-reading-parameterization
                 (λ ()
                   (read-syntax file-or-stx port))))))))]

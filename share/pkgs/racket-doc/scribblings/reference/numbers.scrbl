@@ -30,14 +30,14 @@ Orthogonal to those categories, each number is also either an
 otherwise specified, computations that involve an inexact number
 produce inexact results. Certain operations on inexact numbers,
 however, produce an exact number, such as multiplying an inexact
-number with an exact @racket[0]. Some operations, which can produce an
-irrational number for rational arguments (e.g., @racket[sqrt]), may
+number with an exact @racket[0]. Operations that mathematically produce
+irrational numbers for some rational arguments (e.g., @racket[sqrt]) may
 produce inexact results even for exact arguments.
 
 In the case of complex numbers, either the real and imaginary parts
-are both exact or inexact, or the number has an exact zero real part
-and an inexact imaginary part; a complex number with an exact zero
-imaginary part is a real number.
+are both exact or inexact with the same precision, or the number has
+an exact zero real part and an inexact imaginary part; a complex
+number with an exact zero imaginary part is a real number.
 
 Inexact real numbers are implemented as either single- or
 double-precision @as-index{IEEE floating-point numbers}---the latter
@@ -45,11 +45,6 @@ by default, and the former only when a computation starts with
 numerical constants specified as single-precision numbers. Inexact
 real numbers that are represented as double-precision floating-point
 numbers are @deftech{flonums}.
-
-The precision and size of exact numbers is limited only by available
-memory (and the precision of operations that can produce irrational
-numbers). In particular, adding, multiplying, subtracting, and
-dividing exact numbers always produces an exact result.
 
 Inexact numbers can be coerced to exact form, except for the inexact
 numbers @racket[+inf.0], @racket[+inf.f],
@@ -73,6 +68,11 @@ cases where IEEE provides no specification,
 the result corresponds to the limit approaching
 infinity, or @racket[+nan.0] or @racket[+nan.f] if no such limit exists.
 
+The precision and size of exact numbers is limited only by available
+memory (and the precision of operations that can produce irrational
+numbers). In particular, adding, multiplying, subtracting, and
+dividing exact numbers always produces an exact result.
+
 A @deftech{fixnum} is an exact integer whose two's complement
 representation fit into 31 bits on a 32-bit platform or 63 bits on a
 64-bit platform; furthermore, no allocation is required when computing
@@ -84,10 +84,11 @@ applied to two numbers is undefined, except that numbers produced
 by the default reader in @racket[read-syntax] mode are @tech{interned} and therefore @racket[eq?]
 when they are @racket[eqv?].
 
-Two numbers are @racket[eqv?] when they are both inexact with the same precision or both
+Two real numbers are @racket[eqv?] when they are both inexact with the same precision or both
 exact, and when they are @racket[=] (except for @racket[+nan.0], @racket[+nan.f],
-@racket[+0.0], @racket[+0.0f0], @racket[-0.0], and @racket[-0.0f0], as noted above). Two numbers are
-@racket[equal?] when they are @racket[eqv?].
+@racket[+0.0], @racket[+0.0f0], @racket[-0.0], and @racket[-0.0f0], as noted above). 
+Two complex numbers are @racket[eqv?] when their real and imaginary parts are @racket[eqv?].
+Two numbers are @racket[equal?] when they are @racket[eqv?].
 
 @see-read-print["number"]{numbers}
 
@@ -213,7 +214,8 @@ number, @racket[#f] otherwise.}
 
 @defproc[(inexact->exact [z number?]) exact?]{ Coerces @racket[z] to an
  exact number. If @racket[z] is already exact, it is returned. If @racket[z]
- is @racket[+inf.0], @racket[-inf.0], or @racket[+nan.0], then the
+ is @racket[+inf.0], @racket[-inf.0], @racket[+nan.0],
+ @racket[+inf.f], @racket[-inf.f], or @racket[+nan.f], then the
  @exnraise[exn:fail:contract].
 
 @mz-examples[(inexact->exact 1) (inexact->exact 1.0)]}
@@ -1114,16 +1116,17 @@ Converts @racket[x] radians to degrees.
 
 Returns @racket[(* z z)].}
 
-@defproc[(sgn [x real?]) (or/c 1 0 -1 1.0 0.0 -1.0)]{
+@defproc[(sgn [x real?]) (or/c (=/c -1) (=/c 0) (=/c 1) +nan.0 +nan.f)]{
 
-Returns the sign of @racket[x] as either @math{-1}, @math{0}, or
-@math{1}.
+Returns the sign of @racket[x] as either @math{-1}, @math{0},
+@math{1}, or not-a-number.
 
 @mz-examples[
 #:eval math-eval
 (sgn 10)
 (sgn -10.0)
 (sgn 0)
+(sgn +nan.0)
 ]}
 
 @defproc[(conjugate [z number?]) number?]{

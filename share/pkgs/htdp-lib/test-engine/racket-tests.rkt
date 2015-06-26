@@ -5,14 +5,14 @@
 ;; *****************************************
 
 (require lang/private/teachprims
-         (for-syntax racket/base
-                     lang/private/rewrite-error-message)
+         (for-syntax racket/base lang/private/rewrite-error-message)
          racket/class
          racket/match
-         racket/function
+         ; racket/function
+         htdp/error
          lang/private/continuation-mark-key
          lang/private/rewrite-error-message
-         ; (for-template lang/private/firstorder)
+         (for-syntax #;"requiring from" lang/private/firstorder #;"avoids load cycle")
          "test-engine.rkt"
          "test-info.scm")
 
@@ -187,36 +187,63 @@
 
 (define-syntax (check-satisfied stx)
   (syntax-case stx ()
-    [(_ actual:exp expected-property:exp)
-     (identifier? #'expected-property:exp)
-     (begin 
+    [(_ actual:exp expected-property:id)
+     (identifier? #'expected-property:id)
+     (let* ([prop (first-order->higher-order #'expected-property:id)]
+            [name (symbol->string (syntax-e  #'expected-property:id))]
+            [code 
+             #`(lambda (x)
+                 (with-handlers ([exn:fail:contract:arity?
+                                  (lambda (x) 
+                                    (error-check (lambda (v) #f) #,name SATISFIED-FMT #t))])
+                   (#,prop x)))])
        (check-expect-maker stx 
                            #'check-values-property 
                            #'actual:exp
-                           (list #'(lambda (x) (expected-property:exp x))
-                                 (symbol->string (syntax-e #'expected-property:exp)))
+                           (list code name)
+                           'comes-from-check-satisfied))]
+    [(_ actual:exp expected-property:exp)
+     (let* ([prop #'(let ([p? expected-property:exp])
+                       (unless (and (procedure? p?) (procedure-arity-includes? p? 1))
+                         (define name (object-name p?))
+                         (if name
+                             (error-check (lambda (v) #f) name SATISFIED-FMT #t)
+                             (error-check (lambda (v) #f) p? SATISFIED-FMT #t)))
+                      p?)])
+       (check-expect-maker stx 
+                           #'check-values-property 
+                           #'actual:exp
+                           (list prop "unknown name")
                            'comes-from-check-satisfied))]
     [(_ actual:exp expected-property:exp) 
      (raise-syntax-error 'check-satisfied "expects named function in second position." stx)]
     [_ (raise-syntax-error 'check-satisfied (argcount-error-message/stx 2 stx) stx)]))
 
-(define (check-values-property test actual property? src test-engine)
+(define (check-values-property produce-v actual name src test-engine)
   ;; it is okay if actual is a procedure because property testing may use
   ;; it, but it is possibly weird for students
   (send (send test-engine get-info) add-check)
   (run-and-check
    ;; check
-   (lambda (p? v _what-is-this?) (p? v))
+   (lambda (p? v _what-is-this?)
+     (unless (and (procedure? p?) (procedure-arity-includes? p? 1))
+       (error-check (lambda (v) #f) name SATISFIED-FMT #t))
+     (define r (p? v))
+     (cond
+       [(boolean? r) r]
+       [else 
+        (error-check (lambda (v) #f) name "expected a boolean" #t)
+        (check-result (format "~a [as predicate in check-satisfied]" name) boolean? "boolean" r)]))
    ;; maker
-   (lambda (src format v1 _v2 _) (make-satisfied-failed src format v1 property?))
+   (lambda (src format v1 _v2 _) (make-satisfied-failed src format v1 name))
    ;; test 
-   test
+   produce-v
    ;; expect 
    actual
    #f
    src
    test-engine
-   (list 'check-satisfied property?)))
+   (list 'check-satisfied name)))
 
 ;; check-values-expected: (-> scheme-val) (-> nat scheme-val) src test-engine -> void
 (define (check-random-values test actual-maker src test-engine)
@@ -373,19 +400,13 @@
                                   (define name (exn:fail:wish-name e))
                                   (define args (exn:fail:wish-args e))
                                   (list (unimplemented-wish src (test-format) name args) 'error #f))]
-                               [(lambda (x)
-                                  (and (exn:fail:contract:arity? x)
-                                       (pair? kind)
-                                       (eq? 'check-satisfied (car kind))))
-                                (lambda (_)
-                                  (error-check (lambda (v) #f) (cadr kind) SATISFIED-FMT #t))]
                                [exn:fail?
                                 (lambda (e)
                                   (define display (error-display-handler))
                                   (define msg (get-rewriten-error-message e))
                                   (if (and (pair? kind) (eq? 'check-satisfied (car kind)))
                                       (list (unsatisfied-error src (test-format) (cadr kind) msg e) 
-                                             'error e)
+                                            'error e)
                                       (list (unexpected-error src (test-format) expect msg e) 
                                             'error e)))])
                  (define test-val (test))
@@ -398,10 +419,6 @@
            (send c check-failed result (check-fail-src result) exn)
            (if exn (raise exn) #f)]
           [else #t])))
-
-(define (tee x)
-  (displayln `(tee ,x))
-  x)
 
 ;;Wishes
 (struct exn:fail:wish exn:fail (name args))
@@ -555,3 +572,8 @@
 
 (provide scheme-test-data test-format test-execute test-silence error-handler 
          signature-test-info% build-test-engine)
+
+; (check-satisfied 1 equal?)
+; (check-satisfied 1 (values odd?))
+; (check-satisfied (random 10) 11)
+; (test)

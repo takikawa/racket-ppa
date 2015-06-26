@@ -76,10 +76,11 @@
  ;; read the specified file as a file of comma-separated values, apply the second
  ;; argument to each row, i.e., list of CSV on one line 
  read-csv-file/rows (_ row-processor))
+
 (provide 
  ;; String -> Nothing 
  ;; send the specified file name as a URL to default browser 
- (rename-out [send-url/file show])
+ (rename-out [send-url/file show-file])
  
  ;; --------------------------------------------------------------------------------------------------
  ;; data definition 
@@ -317,7 +318,7 @@
       [(number? x) #t]
       [(and (cons? x) (symbol? (first x)))
        (define body (rest x))
-       (or (and (list-of-attributes? (first body)) (list-of-xexpr? (rest body))) 
+       (or (and (cons? body) (list-of-attributes? (first body)) (list-of-xexpr? (rest body)))
            (list-of-xexpr? body))]
       [else (raise (cons tag x))]))
   

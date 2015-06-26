@@ -32,6 +32,7 @@
                     racket/path
                     setup/collects
                     syntax/modcollapse
+                    racket/runtime-path
                     pkg/path))
 
 @(define-syntax-rule (local-module mod . body)
@@ -50,6 +51,8 @@
 @(define (defaults v) 
    @elem{The default is @|v|.})
 
+@(define pkg-doc '(lib "pkg/scribblings/pkg.scrbl"))
+
 @title[#:tag "setup" #:style 'toc]{@exec{raco setup}: Installation Management}
 
 The @exec{raco setup} command builds bytecode, documentation,
@@ -57,7 +60,7 @@ executables, and metadata indexes for all installed collections.
 
 The collections that are built by @exec{raco setup} can be part of the
 original Racket distribution, installed via the package manager (see
-@other-manual['(lib "pkg/scribblings/pkg.scrbl")]), installed via
+@other-manual[pkg-doc]), installed via
 @|PLaneT| (see @other-manual['(lib "planet/planet.scrbl")]), linked
 via @exec{raco link}, in a directory that is listed in the
 @envvar{PLTCOLLECTS} environment variable, or placed into one of the
@@ -153,6 +156,11 @@ flags:
    libraries (as specified in @filepath{info.rkt}; see
    @secref["setup-info"]).}
 
+ @item{@DFlag{only-foreign-libs} --- disable actions other than
+   installing foreign libraries; equivalent to @Flag{nxiIdD}, except
+   that @DFlag{only-foreign-libs} doesn't reject (redundant)
+   specification of those individual flags.}
+
  @item{@DFlag{no-install} or @Flag{i} --- refrain from running
    pre-install actions (as specified in @filepath{info.rkt} files; see
    @secref["setup-info"]).}
@@ -177,30 +185,25 @@ flags:
   whether dependencies among libraries are properly reflected by
   package-level dependency declarations, whether modules are declared
   by multiple packages, and whether package version dependencies are
-  satisfied. Dependency checking uses @filepath{.zo} files, associated
-  @filepath{.dep} files, and the documentation index. Unless
-  @DFlag{check-pkg-deps} is specified, dependency checking is disabled
-  if any collection is specified for @exec{raco setup}, and missing
-  dependencies are not treated as an error for a package that has no
-  dependency declarations.}
+  satisfied. See @secref["setup-check-deps"] for more information.}
 
  @item{@DFlag{check-pkg-deps} --- checks package dependencies (unless
   explicitly disabled) even when specific collections are provided to
-  @exec{raco setup}, and even for packages that have no
-  dependency declarations. Currently, dependency checking related to
-  documentation cross-referencing is constrained to documents among
-  specified collections.}
+  @exec{raco setup}, and even for packages that have no dependency
+  declarations. See @secref["setup-check-deps"] for more information.}
 
  @item{@DFlag{fix-pkg-deps} --- attempt to correct dependency
-  mismatches by adjusting package @filepath{info.rkt} files (which makes
-  sense only for packages that are installed as links).}
+  mismatches by adjusting package @filepath{info.rkt} files (which
+  makes sense only for packages that are installed as links). See
+  @secref["setup-check-deps"] for more information.}
 
  @item{@DFlag{unused-pkg-deps} --- attempt to report dependencies that
   are declared but are unused. Beware that some package dependencies
   may be intentionally unused (e.g., declared to force installation of
   other packages as a convenience), and beware that package
   dependencies may be reported as unused only because compilation of
-  relevant modules has been suppressed.}
+  relevant modules has been suppressed.  See
+  @secref["setup-check-deps"] for more information.}
 
 ]}
 @item{Constraining user versus installation setup:
@@ -214,6 +217,10 @@ flags:
 
  @item{@DFlag{avoid-main} --- refrain from any setup actions that
   affect the installation, as opposed to user-specific actions.}
+
+ @item{@DFlag{force-user-docs} --- when building documentation, create
+  a user-specific documentation entry point even if it has the same
+  content as the main installation.}
 
 ]}
 @item{Selecting parallelism and other build modes:
@@ -277,9 +284,11 @@ collections during an install:
 
    @commandline{env PLT_SETUP_OPTIONS="-j 1" make install}
 
-@history[#:changed "1.2" @elem{Added the @DFlag{pkgs},
+@history[#:changed "6.1" @elem{Added the @DFlag{pkgs},
                                @DFlag{check-pkg-deps}, and
-                               @DFlag{fail-fast} flags.}]
+                               @DFlag{fail-fast} flags.}
+         #:changed "6.1.1" @elem{Added the @DFlag{force-user-docs} flag.}
+         #:changed "6.1.1.6" @elem{Added the @DFlag{only-foreign-libs} flag.}]
 
 @; ------------------------------------------------------------------------
 
@@ -315,6 +324,12 @@ specific instructions on compiling the collection. See
 @racket[compile-collection-zos] for more information on the fields of
 @filepath{info.rkt} that it uses, and see @secref["info.rkt"] for
 information on the format of an @filepath{info.rkt} file.
+
+Additional fields are used by the
+@seclink["top" #:doc '(lib "pkg/scribblings/pkg.scrbl") "Racket package manager"]
+and are documented in @secref["metadata" #:doc '(lib "pkg/scribblings/pkg.scrbl")].
+The @exec{raco test} command also recognizes additional fields, which are
+documented in @secref["test-config-info" #:doc '(lib "scribblings/raco/raco.scrbl")].
 
 Optional @filepath{info.rkt} fields trigger additional actions by
 @exec{raco setup}:
@@ -614,7 +629,24 @@ Optional @filepath{info.rkt} fields trigger additional actions by
    includes a library reference that starts @litchar{@"@"loader_path/},
    and if the referenced library exists in a different location among
    the paths listed by @racket[(get-lib-search-dirs)], then the
-   library reference is updated to an absolute path.}
+   library reference is updated to an absolute path.
+
+   On Unix, when an ELF file is copied, if the copied file includes an
+   RPATH setting of @litchar{$ORIGIN} and the file is being installed
+   to a user-specific location, then the file's RPATH is adjusted to
+   @litchar{$ORIGIN:} followed by the path to the main installation's
+   library directory as reported by @racket[(find-lib-dir)].
+
+   On Windows, deleting a previously installed foreign library may be
+   complicated by a lock on the file, if it is in use. To compensate,
+   @exec{raco setup} deletes a foriegn-library file by first renaming
+   the file to have the prefix @filepath{raco-setup-delete-}; it then
+   attempts to delete the renamed file and merely issues a warning on
+   a failure to delete the renamed file. Meanwhile, in modes where
+   @exec{raco setup} removes uninstalled libraries, it attempts to
+   delete any file in the foreign-library directory whose name starts
+   with @filepath{raco-setup-delete-} (in an attempt to clean up after
+   previous failures).}
 
  @item{@indexed-racket[move-foreign-libs] : @racket[(listof (and/c
    path-string? relative-path?))] --- Like @racket[copy-foreign-libs],
@@ -625,7 +657,11 @@ Optional @filepath{info.rkt} fields trigger additional actions by
    path-string? relative-path?))] --- Files to copy into a
    directory where shared files are found.
    If @racket[install-platform] is defined, then the files are copied
-   only if the current platform matches the definition.}
+   only if the current platform matches the definition.
+
+   On Windows, uninstalled files are deleted in the same way as for
+   @racket[copy-foreign-libs], and the name prefix
+   @filepath{raco-setup-delete-} is similarly special.}
 
  @item{@indexed-racket[move-shared-files] : @racket[(listof (and/c
    path-string? relative-path?))] --- Like @racket[copy-shared-files],
@@ -636,7 +672,11 @@ Optional @filepath{info.rkt} fields trigger additional actions by
    path-string? relative-path? filename-extension))] --- Files to copy
    into a @tt{man} directory. The file suffix determines its category;
    for example, @litchar{.1} should be used for a @tt{man} page
-   describing an executable.}
+   describing an executable.
+
+   On Windows, uninstalled files are deleted in the same way as for
+   @racket[copy-foreign-libs], and the name prefix
+   @filepath{raco-setup-delete-} is similarly special.}
 
  @item{@indexed-racket[move-man-pages] : @racket[(listof (and/c
    path-string? relative-path? filename-extension))] --- Like
@@ -658,7 +698,7 @@ Optional @filepath{info.rkt} fields trigger additional actions by
    parent of the Racket installation's @filepath{collects} directory; the
    second argument, if accepted, is a path to the collection's own
    directory; the third argument, if accepted, is a boolean indicating
-   whether the collection is installed as user-specific (@racket[#f])
+   whether the collection is installed as user-specific (@racket[#t])
    or installation-wide (@racket[#f]). The procedure should perform collection-specific
    installation work, and it should avoid unnecessary work in the case
    that it is called multiple times for the same installation.}
@@ -704,19 +744,92 @@ Optional @filepath{info.rkt} fields trigger additional actions by
    module. More specifically, used modules are determined when
    deleting a @filepath{.dep} file, which would have been created to
    accompany a @filepath{.zo} file when the @filepath{.zo} was built
-   by @exec{raco setup}. If the @filepath{.dep} file indicates another
-   module, that module's @filepath{.zo} is deleted only if it also has
-   an accompanying @filepath{.dep} file. In that case, the
-   @filepath{.dep} file is deleted, and additional used modules are
-   deleted based on the used module's @filepath{.dep} file, etc.
-   Supplying a specific list of collections to @exec{raco setup} disables
-   this dependency-based deletion of compiled files.}
+   by @exec{raco setup} or @exec{raco make} (see
+   @secref["Dependency\x20Files"]). If the @filepath{.dep} file
+   indicates another module, that module's @filepath{.zo} is deleted
+   only if it also has an accompanying @filepath{.dep} file. In that
+   case, the @filepath{.dep} file is deleted, and additional used
+   modules are deleted based on the used module's @filepath{.dep}
+   file, etc. Supplying a specific list of collections to @exec{raco
+   setup} disables this dependency-based deletion of compiled files.}
 
 ]
 
 @; ------------------------------------------------------------------------
 
 @include-section["info.scrbl"]
+
+@; ------------------------------------------------------------------------
+
+@section[#:tag "setup-check-deps"]{Package Dependency Checking}
+
+When @exec{raco setup} is run with no arguments,@margin-note*{Unless
+@DFlag{check-pkg-deps} is specified, dependency checking is disabled
+if any collection is specified for @exec{raco setup}.} after building
+all collections and documentation, @exec{raco setup} check package
+dependencies. Specifically, it inspects compiled files and
+documentation to check that references across package boundaries are
+reflected by dependency declarations in each package-level
+@filepath{info.rkt} file (see @secref[#:doc pkg-doc "metadata"]).
+
+Dependency checking in @exec{raco setup} is intended as an aid to
+package developers to help them declare dependencies correctly. The
+@exec{raco setup} process itself does not depend on package dependency
+declarations. Similarly, a package with a missing dependency
+declaration may install successfully for other users, as long as they
+happen to have the dependencies installed already. A missing
+dependency creates trouble for others who install a package without
+having the dependency installed already.
+
+Practically every package depends on the @filepath{base} package,
+which includes the collections that are in a minimal variant of
+Racket. Declaring a dependency on @filepath{base} may seem
+unnecessary, since its collections are always installed. In a future
+version of Racket, however, the minimal collections may change, and
+the new set of minimal collections will then have a package name, such
+as @filepath{base2}. Declaring a dependency on @filepath{base} ensures
+forward compatibility, and @exec{raco setup} complains if the
+declaration is missing.
+
+To accommodate the early stages of package development, missing
+dependencies are not treated as an error for a package that has no
+dependency declarations.
+
+@subsection{Declaring Build-Time Dependencies}
+
+A build-time dependency is one that is not present in a package if it
+is converted to a @tech[#:doc pkg-doc]{binary package} (see
+@secref[#:doc pkg-doc "strip"]). For example, @filepath{tests} and
+@filepath{scribblings} directories are stripped away in a binary
+package by default, so cross-package references from directories with
+those names are treated as build dependencies. Similarly,
+@racketidfont{test} and @racketidfont{doc} submodules are stripped
+away, so references within those submodules create build dependencies.
+
+Build-time-only dependencies can be listed as @racket[build-deps]
+instead of @racket[deps] in a package's @filepath{info.rkt} file.
+Dependencies listed in @racket[deps], meanwhile, are treated as both
+run-time and build-time dependencies. The advantage of using
+@racket[build-deps], instead of listing all dependencies in
+@racket[deps], is that a binary version of the package can install
+with fewer dependencies.
+
+@subsection{How Dependency Checking Works}
+
+Dependency checking uses @filepath{.zo} files, associated
+@filepath{.dep} files (see @secref["Dependency Files"]), and the
+documentation index. Dynamic references, such as through
+@racket[dynamic-require], are not visible to the dependency checker;
+only dependencies via @racket[require],
+@racket[define-runtime-module-path-index], and other forms that
+cooperate with @racket[raco make] are visible for dependency checking.
+
+Dependency checking is sensitive to whether a dependency is needed
+only as a build-time dependency. If @exec{raco setup} detects that a
+missing dependency could be added as a built-time dependency, it will
+suggest the addition, but @exec{raco setup} will not suggest
+converting a normal dependency to a build-time dependency (since every
+normal dependency counts as a build-time dependency, too).
 
 @; ------------------------------------------------------------------------
 
@@ -736,6 +849,7 @@ Optional @filepath{info.rkt} fields trigger additional actions by
                 [#:avoid-main? avoid-main? any/c #f]
                 [#:make-docs? make-docs? any/c #t]
                 [#:make-doc-index? make-doc-index? any/c #f]
+                [#:force-user-docs? force-user-docs? any/c #f]
                 [#:clean? clean? any/c #f]
                 [#:tidy? tidy? any/c #f]
                 [#:jobs jobs exact-nonnegative-integer? #f]
@@ -764,9 +878,13 @@ Runs @exec{raco setup} with various options:
  @item{@racket[make-docs?] --- if @racket[#f], disables any
        documentation-specific setup actions}
 
- @item{@racket[make-doc-index?] --- if @racket[#t], builds
+ @item{@racket[make-doc-index?] --- if true, builds
        documentation index collections in addition to @racket[collections],
        assuming that documentation is built}
+
+ @item{@racket[force-user-docs?] --- if true, then when building
+       documentation, create a user-specific documentation entry point
+       even if it has the same content as the installation}
 
  @item{@racket[clean?] --- if true, enables cleaning mode instead of setup mode}
 
@@ -786,7 +904,11 @@ Runs @exec{raco setup} with various options:
 ]
 
 The result is @racket[#t] if @exec{raco setup} completes without error,
-@racket[#f] otherwise.}
+@racket[#f] otherwise.
+
+@history[#:changed "6.1" @elem{Added the @racket[fail-fast?] argument.}
+         #:changed "6.1.1" @elem{Added the @racket[force-user-docs?] argument.}]}
+
 
 
 @subsection{@exec{raco setup} Unit}
@@ -1155,6 +1277,26 @@ function for installing a single @filepath{.plt} file.
   Returns a path to a user-specific @filepath{lib} directory; the directory
   indicated by the returned path may or may not exist.}
 
+@defproc[(get-lib-search-dirs) (listof path?)]{
+  Returns a list of paths to search for foreign libraries. Unless it is
+  configured otherwise, the result includes any non-@racket[#f] result of
+  @racket[(find-lib-dir)] and
+  and @racket[(find-user-lib-dir)]---but the latter is included only if the
+  value of the @racket[use-user-specific-search-paths] parameter
+  is @racket[#t].
+
+  @history[#:changed "6.1.1.4" @elem{Dropped @racket[(find-dll-dir)]
+                                     from the set of paths to
+                                     explicitly include in the
+                                     default.}]}
+
+@defproc[(find-dll-dir) (or/c path? #f)]{
+  Returns a path to the directory that contains DLLs for use with the
+  current executable (e.g., @filepath{libracket.dll} on Windows).
+  The result is @racket[#f] if no such directory is available, or if no
+  specific directory is available (i.e., other than the platform's normal
+  search path).}
+
 @defproc[(find-share-dir) (or/c path? #f)]{ Returns a path to the
   installation's @filepath{share} directory, which contains installed
   packages and other platform-independent files. The result is
@@ -1163,21 +1305,6 @@ function for installing a single @filepath{.plt} file.
 @defproc[(find-user-share-dir) path?]{
   Returns a path to a user-specific @filepath{share} directory; the directory
   indicated by the returned path may or may not exist.}
-
-@defproc[(find-dll-dir) (or/c path? #f)]{
-  Returns a path to the directory that contains DLLs for use with the
-  current executable (e.g., @filepath{libmzsch.dll} on Windows).
-  The result is @racket[#f] if no such directory is available, or if no
-  specific directory is available (i.e., other than the platform's normal
-  search path).}
-
-@defproc[(get-lib-search-dirs) (listof path?)]{
-  Returns a list of paths to search for foreign libraries. Unless it is
-  configured otherwise, the result includes any non-@racket[#f] result of
-  @racket[(find-lib-dir)], @racket[(find-dll-dir)],
-  and @racket[(find-user-lib-dir)]---but the last is included only if the
-  value of the @racket[use-user-specific-search-paths] parameter
-  is @racket[#t].}
 
 @defproc[(find-include-dir) (or/c path? #f)]{
   Returns a path to the installation's @filepath{include} directory, which
@@ -1267,7 +1394,9 @@ function for installing a single @filepath{.plt} file.
 
 @defmodule[setup/getinfo]{ The @racketmodname[setup/getinfo] library
    provides functions for accessing fields in @filepath{info.rkt}
-   files.}
+   files. The file format for @filepath{info.rkt} files is documented
+   in @secref["info.rkt" #:doc '(lib "scribblings/raco/raco.scrbl")].
+}
 
 @defproc[(get-info [collection-names (listof string?)]
                    [#:namespace namespace (or/c namespace? #f) #f]
@@ -1469,6 +1598,28 @@ The inverse of @racket[path->main-collects-relative]: if @racket[rel]
 is a pair that starts with @racket['collects], then it is converted
 back to a path relative to @racket[(find-collects-dir)].}
 
+@subsection{Representing Paths Relative to the Documentation}
+
+@defmodule[setup/main-doc]
+
+@defproc[(path->main-doc-relative [path (or/c bytes? path-string?)])
+         (or/c path? (cons/c 'doc (non-empty-listof bytes?)))]{
+ Like @racket[path->main-collects-relative], except that it checks
+ for a prefix relative to @racket[(find-doc-dir)] and returns a list
+ starting with @racket['doc] if so.
+}
+
+@defproc[(main-doc-relative->path
+          [rel (or/c bytes?
+                     path-string?
+                     (cons/c 'doc (non-empty-listof bytes?)))])
+         path>]{
+
+ Like @racket[path->main-collects-relative], except it is the inverse
+ of @racket[path->main-doc-relative].
+}
+
+
 @subsection{Displaying Paths Relative to a Common Root}
 
 @defmodule[setup/path-to-relative]
@@ -1485,8 +1636,9 @@ back to a path relative to @racket[(find-collects-dir)].}
   is an absolute one that is inside the @filepath{collects} tree, the
   result is a string that begins with @racket["<collects>/"].
   Similarly, a path in the user-specific collects results in a prefix of
-  @racket["<user-collects>/"], and a @PLaneT path results in
-  @racket["<planet>/"].
+  @racket["<user-collects>/"], a @PLaneT path results in
+  @racket["<planet>/"], and a path into documentation results in
+  @racket["<doc>/"] or @racket["<user-doc>/"].
 
   If @racket[cache] is not @racket[#f], it is used as a cache argument
   for @racket[pkg->path] to speed up detection and conversion of
@@ -1602,4 +1754,90 @@ the regexp matches @racket[(path->string sys-lib-subpath)],
          xref?]{
 
 Like @racket[load-xref], but automatically find all cross-reference files for
-manuals that have been installed with @exec{raco setup}.}
+manuals that have been installed with @exec{raco setup}.
+
+A cached copy of cross-reference information can be used, in which
+case @racket[on-load] is @emph{not} called.}
+
+
+@defproc[(make-collections-xref [#:no-user? no-user? any/c #f]
+                                [#:no-main? no-main? any/c #f]
+                                [#:doc-db db-path (or/c #f path?) #f]
+                                [#:quiet-fail? quiet-fail? any/c #f]
+                                [#:register-shutdown! register-shutdown! ((-> any) . -> . any) void])
+         xref?]{
+
+Like @racket[load-collections-xref], but takes advantage of a
+cross-reference database @racket[db-path], when support is available,
+to delay the loading of cross-reference details until needed.
+
+Cross-reference information is skipped when it is installed in the
+main installation or in a user-specific location, respectively, if
+@racket[no-main?] or @racket[no-user?] is @racket[#t].
+
+If @racket[quiet-fail?] is true, then errors are suppressed while
+loading cross-reference information.
+
+The @racket[register-shutdown!] callback may be called to register a
+function that closes database connections when the result of
+@racket[make-collections-xref] is no longer needed. If
+@racket[register-shutdown!] is not supplied or if a function sent to
+@racket[register-shutdown!] is never called, database connections will
+be closed only though a @tech[#:doc reference-doc]{custodian}.}
+
+
+@defproc[(get-rendered-doc-directories [no-user? any/c]
+                                       [no-main? any/c])
+         (listof path?)]{
+
+Returns a list of directories for all documentation for all installed
+collections, omitting documentation that is installed in the main
+installation or in a user-specific location, respectively, if
+@racket[no-main?] or @racket[no-user?] is @racket[#t].}
+
+
+@defproc[(get-current-doc-state) doc-state?]{
+ Records the time stamps of files that are touched whenever the
+ documentation is changed.
+ 
+ @history[#:added "1.2"]
+}
+
+@defproc[(doc-state-changed? [doc-state doc-state?]) boolean?]{
+ Returns @racket[#t] when the time stamps of the files in
+ @racket[doc-state] changed (or new files appeared) and @racket[#f] otherwise.
+
+ If the result is @racket[#t], then the documentation in this installation of
+ Racket has changed and otherwise it hasn't.
+
+ @history[#:added "1.2"]
+}
+@defproc[(doc-state? [v any/c]) boolean?]{
+ A predicate to recognize the result of @racket[get-current-doc-state].
+ 
+ @history[#:added "1.2"]
+}
+
+@; ------------------------------------------------------------------------
+
+@section[#:tag "materialize-user-docs"]{API for Materializing User-Specific Documentation}
+
+@defmodule[setup/materialize-user-docs]
+
+@history[#:added "1.1"]
+
+@defproc[(materialize-user-docs [on-setup ((-> boolean?) -> any) (lambda (setup) (setup))])
+         void?]{
+
+Checks whether a user-specific documentation entry point already
+exists in @racket[(find-user-doc-dir)], and if not, runs @exec{raco
+setup} in a mode that will create the entry point (to have the same
+content as the installation's documentation entry point.)
+
+The run of @exec{raco setup} is packaged in a thunk that is provided to
+@racket[on-setup], which can adjust the current output and error ports
+as appropriate and check the thunk's result for success.
+
+The @racket[on-setup] argument is not called if the documentation entry
+point already exists in @racket[(find-user-doc-dir)].
+}

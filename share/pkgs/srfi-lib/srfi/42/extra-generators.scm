@@ -2,7 +2,7 @@
 ;;; EXTRA GENERATORS (NOT IN SRFI-42)
 ;;;
 
-(module extra-generators mzscheme
+(module extra-generators "mzscheme2.rkt"
   (provide :let-values
 	   :repeat
 	   :iterate

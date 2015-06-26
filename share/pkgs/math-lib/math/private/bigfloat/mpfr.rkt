@@ -5,6 +5,7 @@
          ffi/unsafe/cvector
          ffi/unsafe/custodian
          ffi/unsafe/define
+         ffi/unsafe/atomic
          racket/math
          racket/runtime-path
          racket/promise
@@ -70,21 +71,35 @@
 
 (define mpfr-lib (ffi-lib libmpfr-so '("4" "1" "") #:fail (λ () #f)))
 
+;; The mpfr_buildopt_tls_p() function indicates whether mpfr was compiled as thread-safe:
+(define thread-safe? ((get-ffi-obj 'mpfr_buildopt_tls_p mpfr-lib (_fun -> _bool)
+                                   ;; If mpfr_buildopt_tls_p() is not available,
+                                   ;; assume that the library is not thread-safe:
+                                   (lambda () (lambda () #f)))))
+
 (define-syntax get-mpfr-fun
   (syntax-rules ()
     [(_ name type) (get-mpfr-fun name type (make-not-available name))]
-    [(_ name type fail-thunk) (get-ffi-obj name mpfr-lib type fail-thunk)]))
+    [(_ name (_fun fun-arg ...) fail-thunk)
+     (get-ffi-obj name mpfr-lib (_fun #:in-original-place? (not thread-safe?) fun-arg ...) fail-thunk)]))
 
 (define mpfr-free-cache (get-mpfr-fun 'mpfr_free_cache (_fun -> _void)))
 
-(define mpfr-shutdown
-  (register-custodian-shutdown 
-   mpfr-free-cache ; acts as a "random" object for a shutdown handle
-   (λ (free) 
-     (when mpfr-lib
-       ;; The direct reference here is important, since custodian holds only
-       ;; a weak reference to shutdown handle:
-       (mpfr-free-cache)))))
+(when mpfr-lib
+  ;; Register `mpfr-free-cache` as shutdown action once within each place
+  (let ([ht ((get-ffi-obj 'scheme_get_place_table #f (_fun -> _racket)))])
+    (unless (hash-ref ht 'mpfr-finalization-registered? #f)
+      (let ([root-custodian ((get-ffi-obj 'scheme_make_custodian #f (_fun _pointer -> _scheme)) #f)])
+        (call-as-atomic
+         (lambda ()
+           (parameterize ([current-custodian root-custodian])
+             (register-custodian-shutdown
+              mpfr-free-cache ; acts as a "random" object for a shutdown handle
+              (λ (free)
+                ;; The direct reference here is important, since custodian holds only
+                ;; a weak reference to shutdown handle:
+                (mpfr-free-cache))))
+           (hash-set! ht 'mpfr-finalization-registered? #t)))))))
 
 ;; ===================================================================================================
 ;; MPFR types

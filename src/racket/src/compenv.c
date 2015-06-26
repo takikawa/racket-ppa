@@ -1799,7 +1799,7 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
 	  if (SCHEME_FALSEP(val)) {
 	    /* Corresponds to a run-time binding (but will be replaced later
 	       through a renaming to a different binding) */
-            if (flags & SCHEME_OUT_OF_CONTEXT_LOCAL)
+            if (flags & (SCHEME_OUT_OF_CONTEXT_LOCAL | SCHEME_SETTING))
               return scheme_make_local(scheme_local_type, 0, 0);
             return NULL;
 	  }
@@ -2354,7 +2354,7 @@ Scheme_Object *scheme_local_lift_require(Scheme_Object *form, Scheme_Object *ori
   mark = scheme_new_mark();
 
   if (SCHEME_RPAIRP(data))
-    form = scheme_parse_lifted_require(form, phase, mark, SCHEME_CAR(data));
+    form = scheme_parse_lifted_require(form, phase, mark, SCHEME_CAR(data), &orig_form);
   else {
     form = scheme_toplevel_require_for_expand(form, phase, env, mark);
     need_prepare = 1;

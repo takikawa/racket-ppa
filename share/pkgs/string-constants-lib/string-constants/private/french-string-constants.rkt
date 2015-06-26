@@ -245,8 +245,9 @@
   ;; the online check syntax status messages (mouse over the bottom right of drracket's window to see the messages during online expansion's various phases)
   (online-expansion-running "Expansion en arrière-plan en cours") ; used to be "Vérification syntaxique" instead of "Expansion"
   (online-expansion-only-raw-text-files-supported "Seul les fichiers texte purs sont supportés")
-  (online-expansion-abnormal-termination "Expansion terminée anormalement")
-  (online-expansion-finished-successfully "Expansion terminée correctement")
+  (online-expansion-abnormal-termination "Expansion en arrière-plan terminée anormalement")
+  (online-expansion-abnormal-termination-out-of-memory "Expansion en arrière-plan terminée anormalement (plus de mémoire disponible)")
+  (online-expansion-finished-successfully "Expansion en arrière-plan terminée correctement")
 
   (jump-to-error "Aller à l'erreur")
   (online-expansion-is-disabled "L'expansion en arrière-plan est interdite")
@@ -277,6 +278,8 @@
   (not-running "en attente") ; "en attente" ; pause ?
 
   (install-package-button "Installer ~a") ;; button label: ~a is filled with the name of a pkg
+  (update-catalog "Mettre à jour le catalogue") ;; button label; shown when there is a missing module, but no matching package
+  (updating-catalog-from "Mise à jour à partir de ~a...") ;; message label; used as a status message when updating the pkg catalog
 
   ;;; misc
   (welcome-to-something "Bienvenue dans ~a.")
@@ -829,7 +832,7 @@
   (keybindings-menu-remove "Enlever ~a")
   (keybindings-choose-user-defined-file "Sélectionnez un fichier contenant des raccourcis clavier.")
   (keybindings-planet-malformed-spec "Cette spécification de fichier PLaneT est malformée : ~a") ; the string will be what the user typed in
-  (keybindings-type-planet-spec "Veuillez spécifier un fichier PLaneT (sans le `require')")
+  (keybindings-type-planet-spec "Veuillez spécifier un fichier PLaneT (sans le « require »)")
 
   ; first ~a will be a string naming the file or planet package where the keybindings come from;
   ; second ~a will be an error message
@@ -1076,6 +1079,7 @@
   (executable-base "Base")
   (filename "Nom de fichier : ")
   (create "Créer")
+  (files-for-icons-etc "Fichiers pour icônes, etc.")
   (please-specify-a-filename "Veuillez spécifier le nom du fichier à créer.")
   (~a-must-end-with-~a
    "Le nom de fichier ~a\n\n  ~a\n\nest illégal. Le nom de fichier doit se terminer par « .~a ».")
@@ -1148,7 +1152,7 @@
   (remove-and-add-teachpack "Supprimer ~a et ajouter ~a")
   (teachpack-already-installed "Un teachpack nommé '~a' a déjà été installé.  Voulez-vous l'écraser ?")
   ; ~a is filled with a list of language names. Each name is separated by a newline and is indented two spaces (no commas, no 'and')
-  (teachpacks-only-in-languages "Le menu pour les teachpacks n'est disponible que pour les langages suivants : ~a\n\nPour les autres langages, utilisez 'require' à la place.")
+  (teachpacks-only-in-languages "Le menu pour les teachpacks n'est disponible que pour les langages suivants : ~a\n\nPour les autres langages, utilisez « require » à la place.")
 
 
   ;;; Language dialog
@@ -1801,6 +1805,10 @@
   ; puts the path to the spell program in the ~a and then the error message
   ; is put following this string (with a blank line in between)
   (spell-program-wrote-to-stderr-on-startup "Le programme de vérification orthographique (~a) à émit un message d'erreur :")
+  (spell-skip-to-next-misspelled-word "Sauter au mot incorrect suivant") ;; menu item
+  (spell-suggest-corrections "Suggérer de possibles corrections...") ;; menu item
+  (spell-correction-suggestions "Suggestions de corrections") ;; dialog title
+  (spell-choose-replacement-word "Sélectionner un mot de remplacement") ;; label in dialog 
 
   ;; GUI for installing a pkg package; available via File|Install Package...
   (install-pkg-install-by-source "Faire ce que je pense")         ; tab label
@@ -1820,6 +1828,7 @@
   (install-pkg-dir "Répertoire")
   (install-pkg-dir-url "Répertoire distant")
   (install-pkg-file-url "Fichier distant")
+  (install-pkg-git "Entrepôt Git")
   (install-pkg-github "Github")
   (install-pkg-name "Nom (consultation du résolveur)")
   (install-pkg-inferred-as "Le type inféré est ~a") ; ~a gets install-pkg-{file,dir,...}
@@ -1893,7 +1902,7 @@
                             " abandonnez l'installation ou la mise à jour actuelle, ou attendez-en la fin.")
   
   ;; open a file via a collection path (new "Open" menu item in DrRacket)
-  ;; now obsolete; replaced by open-require-path (open-collection-path "Ouvrir un chemin de répertoires pour une collection...")
+  (open-require-path "Ouvrir un chemin pour « require »...")
   (enter-subcollection "Spécifier une sous-collection") ; button in new dialog
   (path-to-racket-binary "Chemin de répertoires vers le fichier binaire")
   (use-a-different-racket "Utiliser une version de racket différente")

@@ -96,13 +96,14 @@
     ;; If the tests use `rackunit`, collect result stats:
     (define test-results 
       (test-log #:display? #f #:exit? #f))
+
     ;; Return test results. If we don't get this far, the result
     ;; code of the place determines whether it the test counts as
     ;; successful.
     (place-channel-put pch
                        ;; If the test did not use `rackunit`, claim
                        ;; success:
-                       (if (zero? (car test-results))
+                       (if (zero? (cdr test-results))
                            (cons 0 1)
                            test-results))))
 
@@ -250,8 +251,8 @@
            
            (values (proc 'exit-code)
                    (and (pair? results)
-                        (exact-positive-integer? (car results))
-                        (exact-positive-integer? (cdr results))
+                        (exact-nonnegative-integer? (car results))
+                        (exact-nonnegative-integer? (cdr results))
                         results))]))
       
       ;; Shut down the place/process (usually a no-op unless it timed out):
@@ -263,7 +264,8 @@
                   (or (equal? #"" s)
                       (ormap (lambda (p) (regexp-match? p s))
                              ignore-stderr-patterns)))
-          (error test-exe-name "non-empty stderr: ~e" (get-output-bytes e))))
+          (parameterize ([error-print-width 16384])
+            (error test-exe-name "non-empty stderr: ~e" (get-output-bytes e)))))
       (unless (zero? result-code)
         (error test-exe-name "non-zero exit: ~e" result-code))
       (cond
@@ -703,7 +705,7 @@
        (define rmp ((current-module-name-resolver) x #f #f #f))
        (define p (resolved-module-path-name rmp))
        (and (file-exists? p) p))
-     (match (find (string->symbol e))
+     (match (find `(lib ,e))
        [#f
         (error test-exe-name
                (string-append "module not found\n"

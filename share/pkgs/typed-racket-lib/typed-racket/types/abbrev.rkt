@@ -12,9 +12,9 @@
          unstable/function
 
          (prefix-in c: (contract-req))
-         (rename-in (rep type-rep filter-rep object-rep rep-utils)
+         (rename-in (rep type-rep filter-rep object-rep)
                     [make-Base make-Base*])
-         (types union numeric-tower)
+         (types union numeric-tower prefab)
          ;; Using this form so all-from-out works
          "base-abbrev.rkt" "match-expanders.rkt"
 
@@ -32,6 +32,7 @@
            (only-in racket/flonum flvector?)
            (only-in racket/extflonum extflvector?)
            (only-in racket/fixnum fxvector?)
+           (only-in racket/future fsemaphore?)
            (only-in '#%place place? place-channel?))
          (only-in racket/pretty pretty-print-style-table?)
          (only-in racket/udp udp?)
@@ -39,6 +40,7 @@
          (only-in racket/flonum flvector?)
          (only-in racket/extflonum extflvector?)
          (only-in racket/fixnum fxvector?)
+         (only-in racket/future fsemaphore?)
          (only-in '#%place place? place-channel?))
 
 (provide (except-out (all-defined-out) make-Base)
@@ -59,8 +61,13 @@
 (define -Promise make-Promise)
 (define -set make-Set)
 (define -vec make-Vector)
+(define (-vec* . ts) (make-HeterogeneousVector ts))
 (define -future make-Future)
 (define -evt make-Evt)
+(define -weak-box make-Weak-Box)
+(define -inst make-Instance)
+(define (-prefab key . types)
+  (make-Prefab (normalize-prefab-key key (length types)) types))
 
 (define (-seq . args) (make-Sequence args))
 
@@ -112,8 +119,9 @@
 (define/decl -Pattern (Un -Bytes -Regexp -Byte-Regexp -String))
 (define/decl -Keyword (make-Base 'Keyword #'keyword? keyword?))
 (define/decl -Thread (make-Base 'Thread #'thread? thread?))
+(define/decl -Path (make-Base 'Path #'path? path?))
 (define/decl -Module-Path
-  (Un -Symbol -String
+  (Un -Symbol -String -Path
       (-lst* (-val 'quote) -Symbol)
       (-lst* (-val 'lib) -String)
       (-lst* (-val 'file) -String)
@@ -136,7 +144,6 @@
 	     (conjoin  compiled-expression? (negate compiled-module-expression?))))
 (define/decl -Compiled-Expression (Un -Compiled-Module-Expression -Compiled-Non-Module-Expression))
 (define/decl -Cont-Mark-Set (make-Base 'Continuation-Mark-Set #'continuation-mark-set? continuation-mark-set?))
-(define/decl -Path (make-Base 'Path #'path? path?))
 (define/decl -OtherSystemPath
   (make-Base 'OtherSystemPath
 	     #'(and/c path-for-some-system? (not/c path?))
@@ -176,6 +183,7 @@
 (define Ident (-Syntax -Symbol))
 (define -HT make-Hashtable)
 (define/decl -BoxTop (make-BoxTop))
+(define/decl -Weak-BoxTop (make-Weak-BoxTop))
 (define/decl -ChannelTop (make-ChannelTop))
 (define/decl -Async-ChannelTop (make-Async-ChannelTop))
 (define/decl -HashTop (make-HashtableTop))
@@ -218,6 +226,7 @@
 (define/decl -Impersonator-Property
   (make-Base 'Impersonator-Property #'impersonator-property? impersonator-property?))
 (define/decl -Semaphore (make-Base 'Semaphore #'semaphore? semaphore?))
+(define/decl -FSemaphore (make-Base 'FSemaphore #'fsemaphore? fsemaphore?))
 (define/decl -Bytes-Converter (make-Base 'Bytes-Converter #'bytes-converter? bytes-converter?))
 (define/decl -Pseudo-Random-Generator
   (make-Base 'Pseudo-Random-Generator #'pseudo-random-generator? pseudo-random-generator?))
@@ -236,6 +245,10 @@
 (define/decl -cdr (make-CdrPE))
 (define/decl -syntax-e (make-SyntaxPE))
 (define/decl -force (make-ForcePE))
+
+;; Type alias names
+(define (-struct-name name)
+  (make-Name name 0 #t))
 
 ;; Structs
 (define (-struct name parent flds [proc #f] [poly #f] [pred #'dummy])

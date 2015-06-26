@@ -42,28 +42,17 @@
 
 (define (build-trace stxes the-source orig-cust path)
   (parameterize ([current-max-to-send-at-once 50])
-    (with-handlers ((exn:fail? (λ (x) 
-                                 (printf "exception noticed in online-comp.rkt\n")
-                                 (printf "~a\n" (exn-message x))
-                                 (printf "---\n")
-                                 (for ([x (in-list 
-                                           (continuation-mark-set->context 
-                                            (exn-continuation-marks
-                                             x)))])
-                                   (printf "  ~s\n" x))
-                                 (printf "===\n")
-                                 (raise x))))
-      (define obj (new build-place-chan-trace%
-                       [src the-source]
-                       [orig-cust orig-cust]))
-      (define-values (expanded-expression expansion-completed) 
-        (make-traversal (current-namespace)
-                        (get-init-dir path)))
-      (parameterize ([current-annotations obj])
-        (for ([stx (in-list stxes)])
-          (expanded-expression stx))
-        (expansion-completed))
-      (send obj get-trace))))
+    (define obj (new build-place-chan-trace%
+                     [src the-source]
+                     [orig-cust orig-cust]))
+    (define-values (expanded-expression expansion-completed)
+      (make-traversal (current-namespace)
+                      (get-init-dir path)))
+    (parameterize ([current-annotations obj])
+      (for ([stx (in-list stxes)])
+        (expanded-expression stx))
+      (expansion-completed))
+    (send obj get-trace)))
 
 (define build-place-chan-trace%
   (class build-trace%
@@ -72,14 +61,18 @@
     (define-values (remote-chan local-chan) (place-channel))
     (define table (make-hash))
     (create-rename-answerer-thread orig-cust local-chan table)
-    (define/override (syncheck:add-arrow/name-dup _start-text start-pos-left start-pos-right
-                                                  _end-text end-pos-left end-pos-right
-                                                  actual? level require-arrow? name-dup?)
+    (define/override (syncheck:add-arrow/name-dup/pxpy _start-text
+                                                       start-pos-left start-pos-right
+                                                       start-px start-py
+                                                       _end-text
+                                                       end-pos-left end-pos-right
+                                                       end-px end-py
+                                                       actual? level require-arrow? name-dup?)
       (define id (hash-count table))
       (hash-set! table id name-dup?)
-      (add-to-trace (vector 'syncheck:add-arrow/name-dup
-                            start-pos-left start-pos-right
-                            end-pos-left end-pos-right
+      (add-to-trace (vector 'syncheck:add-arrow/name-dup/pxpy
+                            start-pos-left start-pos-right start-px start-py
+                            end-pos-left end-pos-right end-px end-py
                             actual? level require-arrow? remote-chan id)))
     
     (define/override (syncheck:add-id-set to-be-renamed/poss dup-name?)
@@ -101,8 +94,14 @@
          [(vector level message obj name)
           (cond
             [(and (list? obj) (andmap syntax? obj))
-             (define trace (build-trace obj the-source orig-cust path))
-             (send-back trace)]
+             (with-handlers ([exn:fail?
+                              (λ (exn)
+                                (define sp (open-output-string))
+                                (parameterize ([current-error-port sp])
+                                  ((error-display-handler) (exn-message exn) exn))
+                                (send-back (get-output-string sp)))])
+               (define trace (build-trace obj the-source orig-cust path))
+               (send-back trace))]
             [(channel? obj)
              ;; signal back to the main place that we've gotten everything
              ;; and sent it back over

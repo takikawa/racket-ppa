@@ -31,7 +31,9 @@
    (except for the garbage collector, which is in `gc', `sgc', or
    `gc2', depending on which one you're using). */
 
-#define __MINGW32_DELAY_LOAD__ 1
+#ifdef __MINGW32__
+# define __MINGW32_DELAY_LOAD__ 1
+#endif
 #include "scheme.h"
 
 /*========================================================================*/
@@ -304,11 +306,13 @@ void load_delayed()
 {
   (void)SetErrorMode(SEM_FAILCRITICALERRORS);
 
+# ifndef MZ_NO_LIBRACKET_DLL
   /* Order matters: load dependencies first */
-# ifndef MZ_PRECISE_GC
+#  ifndef MZ_PRECISE_GC
   load_delayed_dll(NULL, "libmzgcxxxxxxx.dll");
-# endif
+#  endif
   load_delayed_dll(NULL, "libracket" DLL_3M_SUFFIX "xxxxxxx.dll");
+# endif
   record_dll_path();
 # ifdef IMPLEMENT_THREAD_LOCAL_VIA_WIN_TLS
 #  ifdef __MINGW32__

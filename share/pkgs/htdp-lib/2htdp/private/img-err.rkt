@@ -162,7 +162,7 @@
                 'integer\ greater\ than\ 2
                 i arg)
      arg]
-    [(dx dy x y x1 y1 x2 y2 pull1 pull2)
+    [(dx dy x y x1 y1 x2 y2 pull pull1 pull2)
      (check-arg fn-name
                 (real? arg)
                 'real\ number
@@ -193,6 +193,11 @@
                 'angle\ in\ degrees
                 i arg)
      (angle->proper-range arg)]
+    [(color-only)
+     (check-arg fn-name (image-color? arg) 'image-color i arg)
+     (cond
+       [(color? arg) arg]
+       [else (convert-symbol-or-string-to-color-string arg)])]
     [(color)
      (check-arg fn-name (or (image-color? arg) (pen? arg)) 'image-color-or-pen i arg)
      ;; return either a string, color, or a pen,
@@ -205,15 +210,7 @@
      (cond
        [(color? arg) arg]
        [(pen? arg) arg]
-       [else
-        (define color-str
-          (if (symbol? arg)
-              (symbol->string arg)
-              arg))
-        (cond
-          [(equal? color-str "transparent") "transparent"]
-          [(send the-color-database find-color color-str) color-str]
-          [else "black"])])]
+       [else (convert-symbol-or-string-to-color-string arg)])]
     [(color-list)
      (check-arg fn-name (and (list? arg) (andmap image-color? arg)) 'color-list i arg)
      arg]
@@ -254,6 +251,21 @@
      (check-arg fn-name
                 (>= (length arg) 3)
                 'list-of-at-least-three-posns
+                i arg)
+     arg]
+    [(posns-or-pulled-points)
+     (check-arg fn-name
+                (and (list? arg)
+                     (andmap (or/c posn? pulled-point?) arg))
+                'list-of-posns-or-pulled-points
+                i arg)
+     (check-arg fn-name
+                (andmap (or/c pulled-point? real-valued-posn?) arg)
+                'list-of-posns-with-real-valued-x-and-y-coordinates
+                i arg)
+     (check-arg fn-name
+                (>= (length arg) 3)
+                'list-of-at-least-three-posns-or-pulled-points
                 i arg)
      arg]
     [(zero-or-more-posns)
@@ -298,6 +310,16 @@
      (error 'check "the function ~a has an argument with an unknown name: ~s"
             fn-name
             argname)]))
+
+(define (convert-symbol-or-string-to-color-string arg)
+  (define color-str
+    (if (symbol? arg)
+        (symbol->string arg)
+        arg))
+  (cond
+    [(equal? color-str "transparent") "transparent"]
+    [(send the-color-database find-color color-str) color-str]
+    [else "black"]))
 
 (define (y-place? arg)
   (and (member arg '("top" top "bottom" bottom "middle" middle "center" center 

@@ -1240,7 +1240,9 @@
       ;; Done case (no more clauses, and no generated clauses to emit):
       [(_ [orig-stx nested? emit? ()] ([fold-var fold-init] ...) ()
           expr1 expr ...)
-       #`(let ([fold-var fold-init] ...) (let () expr1 expr ...))]
+       #`(let ([fold-var fold-init] ...)
+           (let-values ([(fold-var ...) (let () expr1 expr ...)])
+             (values fold-var ...)))]
       ;; Switch-to-emit case (no more clauses to generate):
       [(_ [orig-stx nested? #f binds] ([fold-var fold-init] ...) () . body)
        #`(for/foldX/derived [orig-stx nested? #t binds]
@@ -1323,6 +1325,9 @@
            (if d
                (syntax-property r 'disappeared-use d)
                r)))]
+      [(_ [orig-stx . _] for-bind clauses . _)
+       (not (syntax->list #'clauses))
+       (raise-syntax-error #f "bad sequence binding clauses" #'orig-stx #'clauses)]
       [(_ [orig-stx . _] . _)
        (raise-syntax-error #f "bad syntax" #'orig-stx)]))
 

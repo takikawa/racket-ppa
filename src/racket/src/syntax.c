@@ -656,7 +656,7 @@ Scheme_Object *scheme_stx_track(Scheme_Object *naya,
 	for (; SCHEME_PAIRP(oe); oe = SCHEME_CDR(oe)) {
 	  a = SCHEME_CAR(SCHEME_CAR(oe));
 	  if (!SAME_OBJ(a, source_symbol) && !SAME_OBJ(a, share_symbol)) {
-	    if (!SAME_OBJ(a, origin_symbol)) {
+	    if (!origin || !SAME_OBJ(a, origin_symbol)) {
 	      p = ICONS(SCHEME_CAR(oe), scheme_null);
 	    } else {
 	      p = ICONS(ICONS(a, ICONS(origin, 
@@ -675,7 +675,7 @@ Scheme_Object *scheme_stx_track(Scheme_Object *naya,
 
 	oe = first;
       } 
-      if (add) {
+      if (add && origin) {
 	oe = ICONS(ICONS(origin_symbol, 
 			 ICONS(origin, scheme_null)),
 		  oe);
@@ -686,10 +686,14 @@ Scheme_Object *scheme_stx_track(Scheme_Object *naya,
     oe = NULL;
   }
 
-  if (!oe)
-    oe = ICONS(ICONS(origin_symbol, 
-		     ICONS(origin, scheme_null)),
-	      scheme_null);
+  if (!oe) {
+    if (origin)
+      oe = ICONS(ICONS(origin_symbol, 
+                       ICONS(origin, scheme_null)),
+                 scheme_null);
+    else
+      oe = scheme_null;
+  }
 
   /* Merge ne and oe (ne takes precedence). */
   
@@ -3808,7 +3812,6 @@ static Scheme_Object *resolve_env(Scheme_Object *a, Scheme_Object *orig_phase,
   EXPLAIN(fprintf(stderr, "%d Resolving %s@%d [skips: %s]: -------------\n", 
                   depth, SCHEME_SYM_VAL(SCHEME_STX_VAL(a)), SCHEME_INT_VAL(orig_phase),
                   scheme_write_to_string(skip_ribs ? skip_ribs : scheme_false, NULL)));
-
   WRAP_POS_INIT(wraps, ((Scheme_Stx *)a)->wraps);
 
   while (1) {
@@ -8793,8 +8796,8 @@ static Scheme_Object *syntax_disarm(int argc, Scheme_Object **argv)
     insp = argv[1];
   } else
     insp = scheme_false;
-   
-  return scheme_stx_taint_disarm(argv[0], insp);
+
+  return scheme_syntax_taint_disarm(argv[0], insp);
 }
 
 static Scheme_Object *syntax_rearm(int argc, Scheme_Object **argv)

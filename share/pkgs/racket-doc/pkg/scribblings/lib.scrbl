@@ -91,11 +91,32 @@ a parameter's value is @racket[#f], then the user's configuration is
 used.}
 
 
-@defproc[(pkg-directory [name string?]) (or/c path-string? #f)]{
+@deftogether[(
+@defparam[current-pkg-trash-max-packages max-packages (or/c #f real?)]
+@defparam[current-pkg-trash-max-seconds max-seconds (or/c #f real?)]
+)]{
+
+Parameters that determine the trash-directory limits.  If
+a parameter's value is @racket[#f], then the user's configuration is
+used.
+
+@history[#:added "6.1.1.6"]}
+
+
+@defproc[(pkg-directory [name string?]
+                        [#:cache cache (or/c #f (and/c hash? (not/c immutable?))) #f])
+         (or/c path-string? #f)]{
 
 Returns the directory that holds the installation of the installed
 (in any scope) package @racket[name], or @racket[#f] if no such package
-is installed.}
+is installed.
+
+For multiple calls to @racket[pkg-directory], supply the same
+@racket[equal?]-based mutable hash table (initially empty) as the
+@racket[cache] argument. Otherwise, package-installation information
+must be re-parsed on every call to @racket[pkg-directory].
+
+@history[#:changed "6.1.1.6" @elem{Added the @racket[#:cache] argument.}]}
 
 
 @defproc[(default-pkg-scope) (or/c 'installation 'user
@@ -125,18 +146,27 @@ scope}.}
 @deftogether[(
 @defproc[(pkg-desc? [v any/c]) boolean?]
 @defproc[(pkg-desc [source string?]
-                   [type (or/c #f 'file 'dir 'link 'static-link 
-                               'file-url 'dir-url 'github 'name)]
+                   [type (or/c #f 'name 'file 'dir 'link 'static-link
+                               'file-url 'dir-url 'git 'github 'clone)]
                    [name (or/c string? #f)]
                    [checksum (or/c string? #f)]
-                   [auto? boolean?])
+                   [auto? boolean?]
+                   [#:path path (or/c #f path-string?) #f])
          pkg-desc?]
 )]{
 
 A @racket[pkg-desc] value describes a package source plus details of its
 intended interpretation, where the @racket[auto?] field indicates that
 the package is should be treated as installed automatically for a
-dependency.}
+dependency.
+
+The optional @racket[path] argument is intended for use when
+@racket[type] is @racket['clone], in which case it specifies< a
+directory containing the repository clone (where the repository itself
+is a directory within @racket[path]).
+
+@history[#:changed "6.1.1.1" @elem{Added @racket['git] as a @racket[type].}
+         #:changed "6.1.1.5" @elem{Added @racket['clone] as a @racket[type].}]}
 
 
 @defproc[(pkg-stage [desc pkg-desc?]
@@ -216,10 +246,13 @@ is true, error messages may suggest specific command-line flags for
                            [#:ignore-checksums? ignore-checksums? boolean? #f]
                            [#:strict-doc-conflicts? strict-doc-conflicts? boolean? #f]
                            [#:use-cache? use-cache? boolean? #t]
-                           [#:quiet? boolean? quiet? #f]
+                           [#:quiet? quiet? boolean? #f]
+                           [#:use-trash? use-trash? boolean? #f]
                            [#:from-command-line? from-command-line? boolean? #f]
                            [#:strip strip (or/c #f 'source 'binary 'binary-lib) #f]
                            [#:force-strip? force-string? boolean? #f]
+                           [#:multi-clone-mode multi-clone-mode (or/c 'fail 'force 'convert 'ask) 'fail]
+                           [#:pull-mode pull-mode (or/c 'ff-only 'try 'rebase) 'ff-only]
                            [#:link-dirs? link-dirs? boolean? #f])
          (or/c 'skip
                #f
@@ -236,6 +269,11 @@ inferred to be directory paths should be treated as links or copied
 (like other package sources). Note that the default is @racket[#f],
 unlike the default built into @racket[pkg-install-command].
 
+A @racket[pkg-desc] can have the type @racket['clone] and a source
+with the syntax of a package name, in which case it refers to a
+@tech{package name} that must be mapped to a Git repository by the
+@tech{package catalog}, and in will be installed as a clone.
+
 Status information and debugging details are mostly reported to a logger
 named @racket['pkg], but information that is especially relevant to a
 user (such as a download action) is reported to the current output
@@ -244,10 +282,15 @@ port, unless @racket[quiet?] is true.
 If @racket[from-command-line?]  is true, error messages may suggest
 specific command-line flags for @command-ref{install}.
 
-The package lock must be held; see @racket[with-pkg-lock].}
+The package lock must be held; see @racket[with-pkg-lock].
+
+@history[#:changed "6.1.1.5" @elem{Added the @racket[#:multi-clone-mode] 
+                                   and @racket[#:infer-clone-from-dir?] arguments.}
+         #:changed "6.1.1.6" @elem{Added the @racket[#:use-trash?] argument.}
+         #:changed "6.1.1.8" @elem{Added the @racket[#:pull-mode] argument.}]}
 
 
-@defproc[(pkg-update      [names (listof (or/c string? pkg-desc?))]
+@defproc[(pkg-update      [sources (listof (or/c string? pkg-desc?))]
                           [#:all? all? boolean? #f]
                           [#:dep-behavior dep-behavior
                                           (or/c #f 'fail 'force 'search-ask 'search-auto)
@@ -256,12 +299,18 @@ The package lock must be held; see @racket[with-pkg-lock].}
                           [#:force? force? boolean? #f]
                           [#:ignore-checksums? ignore-checksums? boolean? #f]
                           [#:strict-doc-conflicts? strict-doc-conflicts? boolean? #f]
-                          [#:use-cache? use-cache? quiet? #t]
-                          [#:quiet? boolean? quiet? #f]
+                          [#:use-cache? use-cache? boolean? #t]
+                          [#:skip-uninstalled? skip-uninstalled? boolean? #t]
+                          [#:quiet? quiet? boolean? #f]
+                          [#:use-trash? boolean? use-trash? #f]
                           [#:from-command-line? from-command-line? boolean? #f]
                           [#:strip strip (or/c #f 'source 'binary 'binary-lib) #f]
                           [#:force-strip? force-string? boolean? #f]
-                          [#:link-dirs? link-dirs? boolean? #f])
+                          [#:lookup-for-clone? lookup-for-clone? boolean? #f]
+                          [#:multi-clone-mode multi-clone-mode (or/c 'fail 'force 'convert 'ask) 'fail]
+                          [#:pull-mode pull-mode (or/c 'ff-only 'try 'rebase) 'ff-only]
+                          [#:link-dirs? link-dirs? boolean? #f]
+                          [#:infer-clone-from-dir? infer-clone-from-dir? boolean? #f])
         (or/c 'skip
               #f
               (listof (or/c path-string?
@@ -270,21 +319,41 @@ The package lock must be held; see @racket[with-pkg-lock].}
 Implements @racket[pkg-update-command]. The result is the same as for
 @racket[pkg-install].
 
-A string in @racket[names] refers to an installed package that should
-be checked for updates. A @racket[pkg-desc] in @racket[names] indicates
-a package source that should replace the current installation.
+A string in @racket[sources] refers to an installed package that should
+be checked for updates. A @racket[pkg-desc] in @racket[sources]
+indicates a package source that should replace the current
+installation; as an exception, if a @racket[pkg-desc] has the type
+@racket['clone] and a source with the syntax of a package name, it
+refers to an existing package installation that should be converted to
+a Git repository clone---unless @racket[lookup-for-clone?] is true,
+in which case the package name is resolved through a catalog to
+locate a Git repository clone.
+
+The @racket[link-dirs?] and @racket[infer-clone-from-dir?] arguments
+affect how directory paths in @racket[sources] are treated. The
+@racket[link-dirs?] argument is propagated to
+@racket[package-source->name+type], while
+@racket[infer-clone-from-dir?]  introduces a conversion from a
+directory source to a repository-clone source when the directory
+corresponds to an existing repository-clone installation.
 
 If @racket[from-command-line?]  is true, error messages may suggest
 specific command-line flags for @command-ref{update}.
 
-The package lock must be held; see @racket[with-pkg-lock].}
+The package lock must be held; see @racket[with-pkg-lock].
+
+@history[#:changed "6.1.1.5" @elem{Added the @racket[#:multi-clone-mode] 
+                                   and @racket[#:infer-clone-from-dir?] arguments.}
+         #:changed "6.1.1.6" @elem{Added the @racket[#:use-trash?] argument.}
+         #:changed "6.1.1.8" @elem{Added the @racket[#:skip-uninstalled?] and @racket[#:pull-mode] arguments.}]}
 
 
 @defproc[(pkg-remove      [names (listof string?)]
                           [#:demote? demote? boolean? #f]
                           [#:auto? auto? boolean? #f]
                           [#:force? force? boolean? #f]
-                          [#:quiet? boolean? quiet? #f]
+                          [#:quiet? quiet? boolean? #f]
+                          [#:use-trash? boolean? use-trash? #f]
                           [#:from-command-line? from-command-line? boolean? #f])
          (or/c 'skip
                #f
@@ -298,10 +367,22 @@ Implements @racket[pkg-remove-command]. The result is the same as for
 If @racket[from-command-line?]  is true, error messages may suggest
 specific command-line flags for @command-ref{remove}.
 
-The package lock must be held; see @racket[with-pkg-lock].}
+The package lock must be held; see @racket[with-pkg-lock].
+
+@history[#:changed "6.1.1.6" @elem{Added the @racket[#:use-trash?] argument.}]}
+
+
+@defproc[(pkg-new [name path-string?])
+         (void?)]{
+Implements @racket[pkg-new-command].
+
+The @racket[name] parameter is the name of the new package.
+}
 
 
 @defproc[(pkg-show [indent string?]
+                   [#:auto? auto? boolean? #f]
+                   [#:long? long? boolean? #f]
                    [#:directory show-dir? boolean? #f])
          void?]{
 
@@ -310,7 +391,9 @@ printing to the current output port. See also
 @racket[installed-pkg-names] and @racket[installed-pkg-table].
 
 The package lock must be held to allow reads; see
-@racket[with-pkg-lock/read-only].}
+@racket[with-pkg-lock/read-only].
+
+@history[#:changed "6.1.1.5" @elem{Added the @racket[#:long?] argument.}]}
 
 
 @defproc[(pkg-migrate      [from-version string?]
@@ -321,7 +404,7 @@ The package lock must be held to allow reads; see
                            [#:use-cache? use-cache? boolean? #t]
                            [#:ignore-checksums? ignore-checksums? boolean? #f]
                            [#:strict-doc-conflicts? strict-doc-conflicts? boolean? #f]
-                           [#:quiet? boolean? quiet? #f]
+                           [#:quiet? quiet? boolean? #f]
                            [#:from-command-line? from-command-line? boolean? #f]
                            [#:strip strip (or/c #f 'source 'binary 'binary-lib) #f]
                            [#:force-strip? force-string? boolean? #f])
@@ -418,6 +501,15 @@ would allow archiving to continue for other packages.
 @history[#:added "6.1.0.8"]}
 
 
+@defproc[(pkg-empty-trash [#:list? show-list? boolean? #f]
+                          [#:quiet? quiet? boolean? #t])
+         void?]{
+
+Implements @racket[pkg-empty-trash].
+
+@history[#:added "6.1.1.6"]}
+
+
 @defproc[(pkg-catalog-update-local [#:catalogs catalogs (listof string?) (pkg-config-catalogs)]
                                    [#:catalog-file catalog-file path-string? (current-pkg-catalog-file)]
                                    [#:quiet? quiet? boolean? #f]
@@ -507,7 +599,10 @@ is passed on to @racket[get-info/full].}
                            ((or/c #f
                                   ((symbol?) ((-> any)) . ->* . any))
                             . -> . any)
-                           (lambda (get-pkg-info) ...)])
+                           (lambda (get-pkg-info) ...)]
+                          [#:namespace namespace namespace? (make-base-namespace)]
+                          [#:use-cache? use-cache? boolean? #f]
+                          [#:quiet? quiet? boolean? #t])
          (values (or/c #f string?) 
                  (listof module-path?)
                  any/c)]{
@@ -533,10 +628,22 @@ The results are as follows:
        information-getting function (or @racket[#f]) as returned by
        @racket[get-info].}
 
-]}
+]
+
+The @racket[namespace] argument is effectively passed along to
+@racket[get-info/full] and/or @racket[pkg-stage] for reading package
+and collection @filepath{info.rkt} files.
+
+The @racket[use-cache?] and @racket[quiet?] arguments are effectively
+passed to @racket[pkg-stage] to control the use of a download cache
+and status reporting.
+
+@history[#:changed "6.1.1.2" @elem{Added the @racket[#:use-cache?] and
+                                   @racket[#:quiet?] arguments.}]}
+
 
 @defproc[(extract-pkg-dependencies [info (symbol? (-> any/c) . -> . any/c)]
-                                   [#:build-deps? build-deps? boolean? #f]
+                                   [#:build-deps? build-deps? boolean? #t]
                                    [#:filter? filter? boolean? #f]
                                    [#:versions? versions? boolean? #f])
          (listof (or/c string? (cons/c string? list?)))]{

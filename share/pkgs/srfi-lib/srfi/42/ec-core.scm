@@ -1,4 +1,4 @@
-(module ec-core mzscheme
+(module ec-core "mzscheme2.rkt"
   (require "expansion.scm"
            "generators.scm"
            "comprehensions.scm"

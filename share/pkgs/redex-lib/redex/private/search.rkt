@@ -15,7 +15,8 @@
          (struct-out eqn)
          (struct-out dqn)
          search/next
-         (struct-out gen-trace))
+         (struct-out gen-trace)
+         get-dist)
 
 ;; search tracing facility
 (provide enable-gen-trace!
@@ -47,7 +48,7 @@
 (define-struct fail-cont (env fringe bound)
   #:transparent)
 
-(define depth-dependent-order? (make-parameter #t))
+(define depth-dependent-order? (make-parameter 'random))
 
 (define-struct gen-trace (tr-loc clause input state bound env) #:prefab)
 
@@ -71,40 +72,43 @@
   (pushdown-count (add1 (pushdown-count))))
 
 (define (search/next clauses input bound lang)
-  (define name-nums 0)
-  (define fresh-pat (parameterize ([unique-name-nums 0])
-                      (begin0
-                        (fresh-pat-vars input (make-hash))
-                        (set! name-nums (unique-name-nums)))))
-  (define fs (list (fail-cont empty-env
-                              (list (make-partial-rule 
-                                     fresh-pat 
-                                     (if (shuffle-clauses?)
-                                         (shuffle-clauses clauses 0 bound)
-                                         (order-clauses clauses))
-                                     '() bound))
-                              bound)))
-  (define v-locs (make-hash))
-  (λ ()
-    (parameterize ([unique-name-nums name-nums]
-                   [bt-count 0]
-                   [bt-limit (* bound 10)]
-                   [pushdown-count 0]
-                   [pushdown-limit (* bound 200)])
-      (define-values (ans fails)
-        (with-handlers ([exn:fail:redex:search-failure? (λ (e) 
-                                                          (define f-conts (exn:fail:redex:search-failure-fails e))
-                                                          (values (unif-fail) (trim-fails f-conts)))])
-          (define-values (env/f fails)
-            (fail-back fs))
-          (values (and/fail env/f (unify fresh-pat 'any env/f lang))
-                  fails)))
-      (set-last-gen-trace! (generation-trace))
-      (set! fs (if (success-jump?)
-                   fails
-                   (shuffle-fails fails)))  ;; how to test if we're randomizing here?
-      (set! name-nums (unique-name-nums))
-      ans)))
+  (parameterize ([depth-dependent-order? (if (equal? (depth-dependent-order?) 'random)
+                                             (> 0.5 (random))
+                                             (depth-dependent-order?))])
+    (define name-nums 0)
+    (define fresh-pat (parameterize ([unique-name-nums 0])
+                        (begin0
+                          (fresh-pat-vars input (make-hash))
+                          (set! name-nums (unique-name-nums)))))
+    (define fs (list (fail-cont empty-env
+                                (list (make-partial-rule 
+                                       fresh-pat 
+                                       (if (shuffle-clauses?)
+                                           (shuffle-clauses clauses 0 bound)
+                                           (order-clauses clauses))
+                                       '() bound))
+                                bound)))
+    (define v-locs (make-hash))
+    (λ ()
+      (parameterize ([unique-name-nums name-nums]
+                     [bt-count 0]
+                     [bt-limit (* bound 10)]
+                     [pushdown-count 0]
+                     [pushdown-limit (* bound 200)])
+        (define-values (ans fails)
+          (with-handlers ([exn:fail:redex:search-failure? (λ (e) 
+                                                            (define f-conts (exn:fail:redex:search-failure-fails e))
+                                                            (values (unif-fail) (trim-fails f-conts)))])
+            (define-values (env/f fails)
+              (fail-back fs))
+            (values (and/fail env/f (unify fresh-pat 'any env/f lang))
+                    fails)))
+        (set-last-gen-trace! (generation-trace))
+        (set! fs (if (success-jump?)
+                     fails
+                     (shuffle-fails fails)))  ;; how to test if we're randomizing here?
+        (set! name-nums (unique-name-nums))
+        ans))))
 
 (define (trim-fails fs)
   (define rev-fs (reverse fs))
@@ -188,24 +192,24 @@
                 #:key (λ (cls) (length (clause-prems cls)))))
 
 (define (random-order l depth max-depth #:key [key values])
-  (define bd (get-dist l depth max-depth))
+  (define len (length l))
+  (define bd (get-dist len depth max-depth))
   (define n (round ((distribution-sample bd))))
-  (define perm (nth-lexico-perm (length l) 
-                                (inexact->exact n)))
+  (define perm (nth-lexico-perm len (inexact->exact n)))
   (define l-sorted (reverse (sort (shuffle l) < #:key key)))
   (for/list ([i (in-list perm)])
     (list-ref l-sorted i)))
 
 (define get-dist
   (let ([cache (make-hash)])
-    (λ (l depth max-depth)
-      (hash-ref cache (list (length l) depth max-depth)
+    (λ (number-of-choices depth max-depth)
+      (hash-ref cache (list number-of-choices depth max-depth)
                 (λ ()
-                  (define nperms (factorial (length l)))
+                  (define nperms (factorial number-of-choices))
                   (define d (binomial-dist (sub1 nperms) 
                                            (+ (/ depth max-depth) 
                                               (* 0.05 (- 0.5 (/ depth max-depth))))))
-                  (hash-set! cache (list (length l) depth max-depth) d)
+                  (hash-set! cache (list number-of-choices depth max-depth) d)
                   d)))))
 
 (define (nth-lexico-perm len n)

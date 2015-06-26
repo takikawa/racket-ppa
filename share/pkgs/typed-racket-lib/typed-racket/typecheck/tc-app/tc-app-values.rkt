@@ -5,7 +5,7 @@
          "utils.rkt"
          syntax/parse racket/match unstable/sequence unstable/syntax
          (typecheck signatures tc-funapp)
-         (types utils abbrev)
+         (types utils)
 
          (for-label racket/base))
 
@@ -22,6 +22,8 @@
     (match (tc/funapp #'prod #'() (tc-expr/t #'prod) null #f)
       [(tc-results: ts fs os)
        (tc/funapp #'con #'(prod) (tc-expr/t #'con) (map ret ts fs os) expected)]
+      [(tc-results: ts fs os drest dbound)
+       (tc-error/expr "`call-with-values` with ... is not supported")]
       [(tc-any-results: _)
        (tc/app-regular this-syntax expected)]))
   ;; special case for `values' with single argument

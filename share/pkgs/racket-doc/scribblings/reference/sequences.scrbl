@@ -25,7 +25,8 @@ vice-versa.
 
 @(define sequence-evaluator
    (let ([evaluator (make-base-eval)])
-     (evaluator '(require racket/generic racket/list racket/stream racket/sequence))
+     (evaluator '(require racket/generic racket/list racket/stream racket/sequence
+                          racket/contract))
      evaluator))
 
 @guideintro["sequences"]{sequences}
@@ -613,7 +614,7 @@ each element in the sequence.
   values in the sequence), the @exnraise[exn:fail:contract].}
 
 @; ----------------------------------------------------------------------
-@subsection[#:tag "more-sequences"]{Sequence Combinations}
+@subsection[#:tag "more-sequences"]{Sequence Combinations & Contract}
 
 @note-lib[racket/sequence]
 
@@ -742,6 +743,43 @@ each element in the sequence.
     ]
 }
 
+@defproc[(sequence/c [#:min-count min-count (or/c #f exact-nonnegative-integer?) #f]
+                     [elem/c contract?] ...)
+         contract?]{
+
+Wraps a @tech{sequence},
+obligating it to produce as many values as there are @racket[elem/c] contracts,
+and obligating each value to satisfy the corresponding @racket[elem/c].  The
+result is not guaranteed to be the same kind of sequence as the original value;
+for instance, a wrapped list is not guaranteed to satisfy @racket[list?].
+
+If @racket[min-count] is a number, the stream is required to have at least that many elements in it.
+
+@defexamples[
+#:eval sequence-evaluator
+(define/contract predicates
+  (sequence/c (-> any/c boolean?))
+  (in-list (list integer?
+                 string->symbol)))
+(for ([P predicates])
+  (printf "~s\n" (P "cat")))
+(define/contract numbers&strings
+  (sequence/c number? string?)
+  (in-dict (list (cons 1 "one")
+                 (cons 2 "two")
+                 (cons 3 'three))))
+(for ([(N S) numbers&strings])
+  (printf "~s: ~a\n" N S))
+(define/contract a-sequence
+  (sequence/c #:min-count 2 char?)
+  "x")
+(for ([x a-sequence]
+      [i (in-naturals)])
+  (printf "~a is ~a\n" i x))
+]
+
+}
+
 @; ======================================================================
 @section[#:tag "streams"]{Streams}
 
@@ -759,7 +797,7 @@ stream, but plain lists can be used as streams, and functions such as
 }
 
 @defproc[(stream-empty? [s stream?]) boolean?]{
-  Returns @racket[#f] if @racket[s] has no elements, @racket[#f]
+  Returns @racket[#t] if @racket[s] has no elements, @racket[#f]
   otherwise.
 }
 
@@ -939,6 +977,32 @@ stream, but plain lists can be used as streams, and functions such as
   Accepts a vector of three procedures taking the same arguments as
   the methods in @racket[gen:stream].
 }
+
+@defproc[(stream/c [c contract?]) contract?]{
+Returns a contract that recognizes streams. All elements of the stream must match
+@racket[c].
+
+If the @racket[c] argument is a flat contract or a chaperone contract, then the
+result will be a chaperone contract. Otherwise, the result will be an
+impersonator contract.
+
+When an @racket[stream/c] contract is applied to an asynchronous channel,
+the result is not @racket[eq?] to the input. The result will be either a
+@tech{chaperone} or @tech{impersonator} of the input depending on the type of
+contract.
+
+Contracts on streams are evaluated lazily by necessity (since streams may be
+infinite). Contract violations will not be raised until the value in violation
+is retrieved from the stream. As an exception to this rule, streams that are
+lists are checked immediately, as if @racket[c] had been used with
+@racket[listof].
+
+If a contract is applied to a stream, and that stream is subsequently used as
+the tail of another stream (as the second parameter to @racket[stream-cons]),
+the new elements will not be checked with the contract, but the tail's elements
+will still be enforced.
+
+@history[#:added "6.1.1.8"]}
 
 @close-eval[sequence-evaluator]
 

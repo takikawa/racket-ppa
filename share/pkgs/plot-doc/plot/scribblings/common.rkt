@@ -7,11 +7,7 @@
                     db
                     plot
                     plot/utils
-                    unstable/contract)
-         plot
-         plot/utils
-         plot/private/doc
-         unstable/latent-contract/defthing)
+                    unstable/contract))
 
 (provide (all-defined-out)
          (all-from-out scribble/eval)
@@ -21,11 +17,16 @@
                                   db
                                   plot
                                   plot/utils
-                                  unstable/contract))
-         (all-from-out plot)
-         (all-from-out plot/private/doc)
-         (all-from-out plot/utils)
-         doc-apply)
+                                  unstable/contract)))
+
+(require (for-syntax racket/base
+                     syntax/parse
+                     racket/syntax)
+         (prefix-in s. scribble/manual)
+         (only-in racket/contract any/c)
+         (for-label (only-in racket/contract any/c)))
+
+(define (author-email) "neil.toronto@gmail.com")
 
 (define (plot-name) "Plot")
 

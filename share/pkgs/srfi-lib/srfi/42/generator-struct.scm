@@ -3,7 +3,7 @@
 ;;;
 
 
-(module generator-struct mzscheme
+(module generator-struct "mzscheme2.rkt"
   (provide generator     
            generator?
            generator-clause->loop     

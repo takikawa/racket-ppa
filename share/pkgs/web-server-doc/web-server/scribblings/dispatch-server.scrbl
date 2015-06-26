@@ -6,6 +6,7 @@
                      web-server/private/dispatch-server-sig
                      web-server/private/util
                      web-server/private/connection-manager
+                     web-server/web-server
                      net/tcp-sig
                      unstable/contract
                      racket/async-channel
@@ -38,6 +39,22 @@ The @racket[dispatch-server^] signature is an alias for
  }
 }
 
+@defsignature[dispatch-server-connect^ ()]{
+
+The @racket[dispatch-server-connect^] signature abstracts the conversion of connection
+ports (e.g., to implement SSL) as used by the dispatch server.
+
+ @defproc[(port->real-ports [ip input-port?]
+                            [op output-port?])
+          (values input-port? output-port?)]{
+  Converts connection ports as necessary.
+
+  The connection ports are normally TCP ports, but an alternate
+  implementation of @racket[tcp^] linked to the dispatcher can supply
+  different kinds of ports.
+ }
+}
+
 @defsignature[dispatch-server-config^ ()]{
 
  @defthing[port tcp-listen-port?]{Specifies the port to serve on.}
@@ -64,13 +81,22 @@ The @racket[dispatch-server^] signature is an alias for
 The @racketmodname[web-server/private/dispatch-server-unit] module
 provides the unit that actually implements a dispatching server.
 
-@defthing[dispatch-server@ (unit/c (import tcp^ dispatch-server-config^) 
-                                   (export dispatch-server^))]{
+@defthing[dispatch-server-with-connect@ (unit/c (import tcp^
+                                                        dispatch-server-connect^
+                                                        dispatch-server-config^) 
+                                                (export dispatch-server^))]{
  Runs the dispatching server config in a very basic way, except that it uses
  @secref["connection-manager"] to manage connections.
-}
+
+@history[#:added "1.1"]}
 
 }
+
+@defthing[dispatch-server@ (unit/c (import tcp^
+                                           dispatch-server-config^) 
+                                   (export dispatch-server^))]{
+ Like @racket[dispatch-server-with-connect@], but using @racket[raw:dispatch-server-connect@].}
+
 
 @section{Threads and Custodians}
 

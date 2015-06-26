@@ -158,16 +158,6 @@
 	  [i (bitwise-and c low) ])
       (vector-set! vec i (bitwise-ior #x8000 (vector-ref vec i))))))
 
-(define midletters
-  (call-with-input-file "Unicode/WordBreakProperty.txt"
-    (lambda (i)
-      (let loop ()
-	(let ([re (regexp-match #rx"\n([0-9A-F]+)  *; *MidLetter" i)])
-	  (if re
-	      (cons (string->number (bytes->string/latin-1 (cadr re)) 16)
-		    (loop))
-	      null))))))
-
 (define (string->codes s)
   (let ([m (regexp-match #rx"^[^0-9A-F]*([0-9A-F]+)" s)])
     (if m
@@ -216,13 +206,14 @@
 (define lower-case  (make-hash))
 (define upper-case  (make-hash))
 (define alphabetic  (make-hash))
+(define case-ignorable (make-hash))
 
 (with-input-from-file "Unicode/DerivedCoreProperties.txt"
   (lambda ()
     (let loop ()
       (let ([l (read-line)])
 	(unless (eof-object? l)
-	  (let ([m (regexp-match #rx"^([0-9A-F.]+) *; ((Lower|Upper)case|Alphabetic)" l)])
+	  (let ([m (regexp-match #rx"^([0-9A-F.]+) *; ((Lower|Upper)case|Alphabetic|Case_Ignorable)" l)])
 	    (when m
 	      (let* ([start (string->number (car (regexp-match #rx"^[0-9A-F]+" (car m))) 16)]
 		     [end (let ([m (regexp-match #rx"^[0-9A-F]+[.][.]([0-9A-F]+)" (car m))])
@@ -233,6 +224,7 @@
                          [(string=? (caddr m) "Lowercase") lower-case]
                          [(string=? (caddr m) "Uppercase") upper-case]
                          [(string=? (caddr m) "Alphabetic") alphabetic]
+                         [(string=? (caddr m) "Case_Ignorable") case-ignorable]
                          [else (error "unknown property section")])])
 		(let loop ([i start])
 		  (hash-set! t i #t)
@@ -277,6 +269,21 @@
 		(hash-set! do-not-compose-ht code #t))))
 	  (loop))))))
 
+(define (composition-key a b)
+  ;; If `a` and `b` are both in the BMP (i.e., both fit in 16 bits),
+  ;; map to a 32-bit key.
+  (bitwise-ior (arithmetic-shift (bitwise-and a #xFFFF) 16)
+               (bitwise-and b #xFFFF)
+               (arithmetic-shift 
+                (bitwise-ior (arithmetic-shift (arithmetic-shift a -16)
+                                               5)
+                             (arithmetic-shift b -16))
+                32)))
+
+(define (composition-key-first k)
+  (bitwise-ior (bitwise-and (arithmetic-shift k -16) #xFFFF)
+               (arithmetic-shift (arithmetic-shift k -37) 16)))
+
 (define (extract-decomp decomp code)
   (if (string=? decomp "")
       #f
@@ -293,9 +300,9 @@
                                         code
                                         (lambda () #f))))
 		(hash-set! compose-initial-ht a #t)
-		(let ([key (bitwise-ior (arithmetic-shift a 16) b)])
+		(let ([key (composition-key a b)])
 		  (when (hash-ref compose-map key (lambda () #f))
-		    (error 'decomp "composition already mapped: ~e" key))
+		    (error 'decomp "composition already mapped: ~x for: ~x" key code))
 		  (hash-set! compose-map key code)))
 	      (hash-set! decomp-ht code (cons a b))
 	      #t)
@@ -344,8 +351,7 @@
                        (or (hash-ref special-casings code (lambda () #f))
                            (hash-ref special-case-foldings code (lambda () #f)))
                        ;; case-ignoreable
-                       (or (member code midletters)
-                           (member cat '("Mn" "Me" "Cf" "Lm" "Sk")))
+                       (hash-ref case-ignorable code #f)
                        ;; graphic
                        (or alphabetic?
                            numeric?
@@ -423,7 +429,7 @@
 ;;  4.0, there are only four of these: U+0344, U+0F73,
 ;;  U+0F75, and U+0F81.
 (for-each (lambda (k)
-	    (let ([a (arithmetic-shift k -16)])
+	    (let ([a (composition-key-first k)])
 	      (unless (zero? (hash-ref combining-class-ht a))
 		(hash-remove! compose-map k))))
 	  (hash-map compose-map (lambda (k v) k)))
@@ -734,11 +740,21 @@
 
 
 (let ()
+  (define (make-composes-table ps)
+    (list->vector (sort ps (lambda (a b) (< (car a) (car b))))))
+    
   (define canon-composes
-    (list->vector (sort (hash-map compose-map cons)
-                        (lambda (a b) (< (car a) (car b))))))
-  (define count (hash-count compose-map))
-  
+    (make-composes-table (for/list ([(k v) (in-hash compose-map)]
+                                    #:when (k . <= . #xFFFFFFFF))
+                           (cons k v))))
+  (define count (vector-length canon-composes))
+
+  (define long-canon-composes
+    (make-composes-table (for/list ([(k v) (in-hash compose-map)]
+                                    #:when (k . > . #xFFFFFFFF))
+                           (cons k v))))
+  (define long-count (vector-length long-canon-composes))
+
   (define-values (all-composes decomp-vector long-composes)
     (let ([decomp-pos-ht (make-hasheq)]
 	  [counter count]
@@ -748,7 +764,7 @@
       (hash-for-each decomp-ht
                      (lambda (k v)
                        ;; Use table of composed shorts:
-                       (let ([key (+ (arithmetic-shift (car v) 16) (cdr v))])
+                       (let ([key (composition-key (car v) (cdr v))])
                          (let ([pos 
                                 (if (and ((car v) . <= . #xFFFF)
                                          ((cdr v) . <= . #xFFFF))
@@ -812,6 +828,15 @@
     (printf "   Negative values in utable_decomp_indices map to this table; add one to\n")
     (printf "   the mapped index, negate, then multiply by 2 to find the pair. */\n")
     (print-compose-data "unsigned int" "compose_long_pairs" values long-composes (vector-length long-composes) #t 8)
+    (printf "\n")
+    (printf "/* utable_canon_compose_long_pairs repeats information from utable_compose_long_pairs,\n")
+    (printf "   but for canonical compositions only. The two characters are combined by putting the\n")
+    (printf "   lower 16 bits of the combined numbers in the low 32 bits, and then the next higher 10\n")
+    (printf "   bits provide the remaining 5 bits of each character, and the array is sorted. The\n")
+    (printf "   canon_compose_long_result array provides in parellel the composed character. */\n")
+    (printf "#define LONG_COMPOSE_TABLE_SIZE ~a\n\n" long-count)
+    (print-compose-data "mzlonglong" "canon_compose_long_pairs" car long-canon-composes long-count #t 8)
+    (print-compose-data "unsigned int" "canon_compose_long_result" cdr long-canon-composes long-count #t 8)
     (printf "\n")
     (printf "/* utable_decomp_keys identifies characters that have a canonical decomposition;\n")
     (printf "   it is sorted, so binary search can be used, but use scheme_needs_decompose()\n")

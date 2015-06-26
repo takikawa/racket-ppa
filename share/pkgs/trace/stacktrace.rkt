@@ -37,6 +37,16 @@
        stx]
       [(#%declare . provide-specs)
        stx]
+      [(module name lang (#%plain-module-begin body ...))
+       #`(module name lang
+           (#%plain-module-begin
+            #,@(map (λ (b) (module-level-expr-iterator b))
+                    (syntax->list #'(body ...)))))]
+      [(module* name lang (#%plain-module-begin body ...))
+       #`(module* name lang
+           (#%plain-module-begin
+            #,@(map (λ (b) (module-level-expr-iterator b))
+                    (syntax->list #'(body ...)))))]
       [else-stx
        (general-top-level-expr-iterator stx)]))
 

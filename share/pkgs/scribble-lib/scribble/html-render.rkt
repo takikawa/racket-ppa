@@ -19,6 +19,7 @@
          net/base64
          scheme/serialize
          racket/draw/gif
+         pkg/path
          (prefix-in xml: xml/xml)
          (for-syntax scheme/base)
          "search.rkt"
@@ -312,6 +313,7 @@
              root-relative?)
 
     (define path-cache (make-hash))
+    (define pkg-cache (make-hash))
 
     (define (path->relative p)
       (let ([p (path->main-doc-relative p)])
@@ -1116,6 +1118,18 @@
                                                (cadr t)))])
                             (if (and src taglet)
                                 `([x-source-module ,(format "~s" src)]
+                                  ,@(let* ([path (resolved-module-path-name
+                                                  (module-path-index-resolve
+                                                   (module-path-index-join src #f)))]
+                                           [pkg (and (path? path)
+                                                     (path->pkg path #:cache pkg-cache))])
+                                      (if pkg
+                                          `([x-source-pkg ,pkg])
+                                          null))
+                                  ,@(let ([prefixes (current-tag-prefixes)])
+                                      (if (null? prefixes)
+                                          null
+                                          `([x-part-prefixes ,(format "~s" prefixes)])))
                                   [x-part-tag ,(format "~s" taglet)])
                                 '()))
                          ,@(format-number number '((tt nbsp)))
@@ -1233,6 +1247,19 @@
                 [svg? (regexp-match? #rx#"[.]svg$" (if (path? src) (path->bytes src) src))]
                 [sz (cond
                      [svg?
+                      (define (to-scaled-num-from-str s)
+                        (define parts
+                          (regexp-match
+                           #rx"^([+-]?[0-9]*\\.?([0-9]+)?)(em|ex|px|in|cm|mm|pt|pc|%|)$"
+                           s))
+                        (cond
+                          [parts
+                           (string-append
+                            (number->string
+                             (* scale
+                                (string->number (list-ref parts 1))))
+                            (list-ref parts 3))]
+                          [else s]))
                       (call-with-input-file*
                        src
                        (lambda (in)
@@ -1253,7 +1280,8 @@
                                   [w (ormap (check-name 'width) attribs)]
                                   [h (ormap (check-name 'height) attribs)])
                              (if (and w h)
-                                 `([width ,w][height ,h])
+                                 `([width ,(to-scaled-num-from-str w)]
+                                   [height ,(to-scaled-num-from-str h)])
                                  null)))))]
                      [else
                       ;; Try to extract file size:
@@ -1318,10 +1346,15 @@
                  `((a ([href
                       ,(cond
                         [(and ext-id external-root-url
-                              (let ([rel (find-relative-path
-                                          (find-doc-dir)
-                                          (relative->path (dest-path dest)))])
-                                (and (relative-path? rel)
+                              (let* ([ref-path (relative->path (dest-path dest))]
+                                     [rel (if (relative-path? ref-path)
+                                              #f
+                                              (find-relative-path
+                                               (find-doc-dir)
+                                               ref-path))])
+                                (and rel
+                                     (relative-path? rel)
+                                     (not (memq 'up (explode-path rel)))
                                      rel)))
                          => (lambda (rel)
                               (url->string*

@@ -1411,13 +1411,15 @@ static Scheme_Object *print_k(void)
     pp->print_escape = save;
     return scheme_void;
   } else {
-    return print(o, 
-		 p->ku.k.i1, 
-		 p->ku.k.i2, 
-		 ht,
-                 mt,
-		 pp) 
-      ? scheme_true : scheme_false;
+    int r;
+    r = print(o,
+              p->ku.k.i1,
+              p->ku.k.i2,
+              ht,
+              mt,
+              pp);
+    pp->print_escape = save;
+    return r ? scheme_true : scheme_false;
   }
 }
 #endif
@@ -2905,7 +2907,7 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
 		       notdisplay, 1, ht, mt, pp);
       } else if (pp->print_unreadable) {
 	Scheme_Stx *stx = (Scheme_Stx *)obj;
-	if ((stx->srcloc->line >= 0) || (stx->srcloc->pos >= 0)) {
+	if (stx->srcloc && ((stx->srcloc->line >= 0) || (stx->srcloc->pos >= 0))) {
 	  print_utf8_string(pp, "#<syntax:", 0, 9);
 	  if (stx->srcloc->src && SCHEME_PATHP(stx->srcloc->src)) {
 	    print_utf8_string(pp, SCHEME_BYTE_STR_VAL(stx->srcloc->src), 0, SCHEME_BYTE_STRLEN_VAL(stx->srcloc->src));

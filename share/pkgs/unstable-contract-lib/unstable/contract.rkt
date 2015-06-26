@@ -1,5 +1,7 @@
 #lang racket/base
-(require racket/contract/base racket/contract/combinator)
+(require racket/contract/base
+         racket/contract/combinator
+         racket/sequence)
 
 (define path-piece?
   (or/c path-string? (symbols 'up 'same)))
@@ -127,72 +129,6 @@
 (define truth/c
   (flat-named-contract '|truth value| (lambda (x) #t)))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-;;  Contracted Sequences
-;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(define (sequence/c #:min-count [min-count #f] . elem/cs)
-  (define ctcs (for/list ([elem/c (in-list elem/cs)])
-                 (coerce-contract 'sequence/c elem/c)))
-  (define elem/mk-projs 
-    (for/list ([ctc (in-list ctcs)])
-      (contract-projection ctc)))
-  (define n-cs (length elem/cs))
-  (make-contract
-   #:name (apply build-compound-type-name 'sequence/c 
-                 (append
-                  (if min-count
-                      (list '#:min-count min-count)
-                      '())
-                  ctcs))
-   #:first-order sequence?
-   #:projection
-   (λ (orig-blame)
-     (define blame (blame-add-context orig-blame "an element of"))
-     (define ps (for/list ([mk-proj (in-list elem/mk-projs)])
-                  (mk-proj blame)))
-     (λ (seq)
-       (unless (sequence? seq)
-         (raise-blame-error
-          orig-blame seq
-          '(expected: "a sequence" given: "~e")
-          seq))
-       (make-do-sequence
-        (lambda ()
-          (let*-values ([(more? next) (sequence-generate seq)])
-            (values
-             (lambda (idx)
-               (call-with-values next
-                                 (lambda elems
-                                   (define n-elems (length elems))
-                                   (unless (= n-elems n-cs)
-                                     (raise-blame-error
-                                      blame seq
-                                      '(expected: "a sequence of ~a values" given: "~a values\n values: ~e")
-                                      n-cs n-elems elems))
-                                   (apply
-                                    values
-                                    (for/list ([elem (in-list elems)]
-                                               [p (in-list ps)])
-                                      (p elem))))))
-             add1
-             0
-             (lambda (idx) 
-               (define ans (more?))
-               (when (and min-count (idx . < . min-count))
-                 (unless ans
-                   (raise-blame-error 
-                    orig-blame
-                    seq
-                    '(expected: "a sequence that contains at least ~a values" given: "~e")
-                    min-count
-                    seq)))
-               ans)
-             (lambda elems #t)
-             (lambda (idx . elems) #t)))))))))
-
 ;; Added by ntoronto
 
 (define (treeof elem-contract)
@@ -218,11 +154,6 @@
  [rename option/c maybe/c (-> contract? contract?)]
 
  [truth/c flat-contract?]
-
- [sequence/c (->* () 
-                  (#:min-count (or/c #f exact-nonnegative-integer?))
-                  #:rest (listof contract?) 
-                  contract?)]
  
  [treeof (contract? . -> . contract?)])
-
+(provide sequence/c)

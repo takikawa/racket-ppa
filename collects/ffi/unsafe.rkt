@@ -351,7 +351,7 @@
          [else (set! keys (cons (cons key val) keys))]))
      (let loop ([t (disarm orig)])
        (define (next rest . args) (apply setkey! args) (loop rest))
-       (define (rearm e) (syntax-rearm e orig))
+       (define (rearm e) (syntax-rearm e orig #t))
        (syntax-case* t
            (type: expr: bind: 1st-arg: prev-arg: pre: post: keywords: =>)
            id=?
@@ -494,8 +494,9 @@
 
 (provide _fun)
 (define-for-syntax _fun-keywords
-  `([#:abi ,#'#f] [#:keep ,#'#t] [#:atomic? ,#'#f] [#:in-original-place? ,#'#f] 
-    [#:async-apply ,#'#f] [#:save-errno ,#'#f]))
+  `([#:abi ,#'#f] [#:keep ,#'#t] [#:atomic? ,#'#f] [#:in-original-place? ,#'#f]
+    [#:async-apply ,#'#f] [#:save-errno ,#'#f]
+    [#:retry #f]))
 (define-syntax (_fun stx)
   (define (err msg . sub) (apply raise-syntax-error '_fun msg stx sub))
   (define xs     #f)
@@ -528,7 +529,7 @@
                        sub)]
                  [(assq k _fun-keywords) (set! ks (cons (cons k v) ks))]
                  [else (err "unknown keyword" sub)]))))))
-  (define ((t-n-e clause) type name expr)
+  (define ((t-n-e clause) type name expr #:name-ok? [name-ok? #t])
     (let ([keys (custom-type->keys type err)])
       (define (getkey key) (cond [(assq key keys) => cdr] [else #f]))
       (define (arg x . no-expr?) ;; can mutate `name'
@@ -558,6 +559,14 @@
                    (err "got a custom type that wants prev arg too early"
                         clause)))])
         x)
+      (unless (or name-ok?
+                  expr
+                  (and keys (or (getkey 'expr)
+                                (getkey 'pre))))
+        (err (string-append
+              "unnamed argument (without an expression) is not allowed when "
+              "argument names are provided before `::'")
+             clause))
       (when keys
         (set! type (getkey 'type))
         (cond [(and (not expr) (getkey 'expr)) => (lambda (x) (set! expr x))])
@@ -622,7 +631,7 @@
                      [(name : type)        (t-n-e #'type #'name #f)]
                      [(type = expr)        (t-n-e #'type temp   #'expr)]
                      [(name : type = expr) (t-n-e #'type #'name #'expr)]
-                     [type                 (t-n-e #'type temp   #f)])))
+                     [type                 (t-n-e #'type temp   #f #:name-ok? (not input-names))])))
                inputs
                (generate-temporaries (map (lambda (x) 'tmp) inputs))))
     ;; when processing the output type, only the post code matters
@@ -668,22 +677,43 @@
                             inputs)]
                [ffi-args
                 (filter-map (lambda (x) (and (car x) (cadr x))) inputs)]
+               [retry-spec
+                (let ([r (kwd-ref '#:retry)])
+                  (when r
+                    (syntax-case r ()
+                      [(retry-id [arg-id arg-val] ...)
+                       (and (identifier? #'retry-id)
+                            (andmap identifier? (syntax->list #'(arg-id ...))))
+                       (let ([dup (check-duplicate-identifier (syntax->list #'(arg-id ...)))])
+                         (when dup
+                           (err "duplicate identifier in retry specification" dup))
+                         r)]
+                      [_
+                       (err "ill-formed retry specification" r)]))
+                  r)]
+               [add-retry
+                (lambda (body)
+                  (if retry-spec
+                      #`(let #,(car (syntax-e retry-spec)) #,(cdr (syntax-e retry-spec))
+                          #,body)
+                      body))]
                ;; the actual wrapper body
                [body (quasisyntax/loc stx
                        (lambda #,input-names
-                         (let* (#,@args
-                                #,@bind
-                                #,@pre)
-                           #,(if (or output-expr
-                                     (cadr output))
-                                 (let ([res (or (cadr output)
-                                                (car (generate-temporaries #'(ret))))])
-                                   #`(let* ([#,res (ffi #,@ffi-args)]
-                                            #,@post)
-                                       #,(or output-expr res)))
-                                 #`(begin0
-                                    (ffi #,@ffi-args)
-                                    (let* (#,@post) (void)))))))]
+                         #,(add-retry
+                            #`(let* (#,@args
+                                     #,@bind
+                                     #,@pre)
+                                #,(if (or output-expr
+                                          (cadr output))
+                                      (let ([res (or (cadr output)
+                                                     (car (generate-temporaries #'(ret))))])
+                                        #`(let* ([#,res (ffi #,@ffi-args)]
+                                                 #,@post)
+                                            #,(or output-expr res)))
+                                      #`(begin0
+                                         (ffi #,@ffi-args)
+                                         (let* (#,@post) (void))))))))]
                ;; if there is a string 'ffi-name property, use it as a name
                [body (let ([n (cond [(syntax-property stx 'ffi-name)
                                      => syntax->datum]
@@ -786,9 +816,13 @@
 ;; ----------------------------------------------------------------------------
 ;; Utility types
 
-;; Call this with a name (symbol) and a list of symbols, where a symbol can be
+;; Call this with a name (symbol or #f) and a list of symbols, where a symbol can be
 ;; followed by a '= and an integer to have a similar effect of C's enum.
-(define (_enum name symbols [basetype _ufixint] #:unknown [unknown _enum])
+(define ((_enum name) symbols [basetype _ufixint] #:unknown [unknown _enum])
+  (unless (list? symbols)
+    (raise-argument-error '_enum "list?" symbols))
+  (when (and (procedure? unknown) (not (procedure-arity-includes? unknown 1)))
+    (raise-argument-error '_enum "(if/c procedure? (procedure-arity-includes/c 1) any/c)" unknown))
   (define sym->int '())
   (define int->sym '())
   (define s->c
@@ -802,8 +836,19 @@
                                       (pair? (cddr symbols)))
                                (values (caddr symbols) (cdddr symbols))
                                (values i (cdr symbols)))])
-        (set! sym->int (cons (cons (car symbols) i) sym->int))
-        (set! int->sym (cons (cons i (car symbols)) int->sym))
+        (define sym (car symbols))
+        (unless (symbol? sym)
+          (raise-arguments-error '_enum "key is not a symbol"
+                                 "symbols" symbols
+                                 "key" sym
+                                 "value" i))
+        (unless (exact-integer? i)
+          (raise-arguments-error '_enum "value is not an integer"
+                                 "symbols" symbols
+                                 "key" sym
+                                 "value" i))
+        (set! sym->int (cons (cons sym i) sym->int))
+        (set! int->sym (cons (cons i sym) int->sym))
         (loop (add1 i) rest))))
   (make-ctype basetype
     (lambda (x)
@@ -824,8 +869,8 @@
 (define-syntax (_enum* stx)
   (syntax-case stx ()
     [(_ x ...)
-     (with-syntax ([name (syntax-local-name)]) #'(_enum 'name x ...))]
-    [id (identifier? #'id) #'_enum]))
+     (with-syntax ([name (syntax-local-name)]) #'((_enum 'name) x ...))]
+    [id (identifier? #'id) #'(_enum #f)]))
 
 ;; Call this with a name (symbol) and a list of (symbol int) or symbols like
 ;; the above with '= -- but the numbers have to be specified in some way.  The
@@ -1294,27 +1339,31 @@
                      [_TYPE/null (id "_" name "/null")])
          #'(define-values (_TYPE _TYPE/null TYPE? TYPE-tag)
              (let ([TYPE-tag 'TYPE])
+               ;; Make the predicate function have the right inferred name
+               (define (TYPE? x)
+                 (and (cpointer? x) (cpointer-has-tag? x TYPE-tag)))
                (values (_cpointer      TYPE-tag ptr-type scheme->c c->scheme)
                        (_cpointer/null TYPE-tag ptr-type scheme->c c->scheme)
-                       (lambda (x)
-                         (and (cpointer? x) (cpointer-has-tag? x TYPE-tag)))
+                       TYPE?
                        TYPE-tag)))))]))
 
 ;; ----------------------------------------------------------------------------
 ;; Struct wrappers
 
-(define (compute-offsets types alignment)
+(define (compute-offsets types alignment declared)
   (let ([alignment (if (memq alignment '(#f 1 2 4 8 16))
                        alignment
                        #f)])
-    (let loop ([ts types] [cur 0] [r '()])
+    (let loop ([ts types] [ds declared] [cur 0] [r '()])
       (if (null? ts)
           (reverse r)
           (let* ([algn (if alignment 
                            (min alignment (ctype-alignof (car ts)))
                            (ctype-alignof (car ts)))]
-                 [pos  (+ cur (modulo (- (modulo cur algn)) algn))])
+                 [pos (or (car ds)
+                          (+ cur (modulo (- (modulo cur algn)) algn)))])
             (loop (cdr ts)
+                  (cdr ds)
                   (+ pos (ctype-sizeof (car ts)))
                   (cons pos r)))))))
 
@@ -1325,7 +1374,7 @@
                        type . types)
   (let* ([types   (cons type types)]
          [stype   (make-cstruct-type types #f alignment)]
-         [offsets (compute-offsets types alignment)]
+         [offsets (compute-offsets types alignment (map (lambda (x) #f) types))]
          [len     (length types)])
     (make-ctype stype
       (lambda (vals)
@@ -1363,7 +1412,7 @@
 ;; type.
 (provide define-cstruct)
 (define-syntax (define-cstruct stx)
-  (define (make-syntax _TYPE-stx has-super? slot-names-stx slot-types-stx 
+  (define (make-syntax _TYPE-stx has-super? slot-names-stx slot-types-stx slot-offsets-stx
                        alignment-stx malloc-mode-stx property-stxes property-binding-stxes
                        no-equal?)
     (define name
@@ -1389,6 +1438,7 @@
          [struct-string        (format "~a?" name)]
          [(slot ...)           slot-names-stx]
          [(slot-type ...)      slot-types-stx]
+         [(slot-offset ...)    slot-offsets-stx]
          [TYPE                 (id name)]
          [cpointer:TYPE        (id "cpointer:"name)]
          [struct:cpointer:TYPE (if (null? property-stxes)
@@ -1496,7 +1546,7 @@
                 (define-values (stype ...)  (values slot-type ...))
                 (define types (list stype ...))
                 (define alignment-v alignment)
-                (define offsets (compute-offsets types alignment-v))
+                (define offsets (compute-offsets types alignment-v (list slot-offset ...)))
                 (define-values (offset ...) (apply values offsets))
                 (define all-tags (cons TYPE-tag super-tags))
                 (define _TYPE*
@@ -1596,9 +1646,9 @@
            (if (list? what) (apply string-append what) what)
            stx xs))
   (syntax-case stx ()
-    [(_ type ([slot slot-type] ...) . more)
+    [(_ type (slot-def ...) . more)
      (or (stx-pair? #'type)
-         (stx-pair? #'(slot ...)))
+         (stx-pair? #'(slot-def ...)))
      (let-values ([(_TYPE _SUPER)
                    (syntax-case #'type ()
                      [(t s) (values #'t #'s)]
@@ -1627,7 +1677,7 @@
                        [(#:malloc-mode m . rest) 
                         (not malloc-mode)
                         (loop #'rest alignment #'m properties property-bindings no-equal?)]
-                       [(#:alignment m . rest) 
+                       [(#:malloc-mode m . rest) 
                         (err "multiple specifications of #:malloc-mode" (head))]
                        [(#:property) (err "missing property expression for #:property" (head))]
                        [(#:property prop) (err "missing value expression for #:property" (head))]
@@ -1656,28 +1706,32 @@
               _TYPE))
        (unless (regexp-match? #rx"^_." (symbol->string (syntax-e _TYPE)))
          (err "cstruct name must begin with a `_'" _TYPE))
-       (for ([s (in-list (syntax->list #'(slot ...)))])
-         (unless (identifier? s)
-           (err "bad field name, expecting an identifier" s)))
-       (if _SUPER
-         (make-syntax _TYPE #t
-                      #`(#,(datum->syntax _TYPE 'super _TYPE) slot ...)
-                      #`(#,_SUPER slot-type ...)
-                      alignment
-                      malloc-mode
-                      properties
-                      property-bindings
-                      no-equal?)
-         (make-syntax _TYPE #f #'(slot ...) #`(slot-type ...) 
-                      alignment malloc-mode properties property-bindings no-equal?)))]
+       
+       (with-syntax ([(#(slot slot-type slot-offset) ...) 
+                      (for/list ([slot-def (in-list (syntax->list #'(slot-def ...)))])
+                        (define (check-slot name type offset)
+                          (unless (identifier? name)
+                            (err "bad field name, expecting an identifier" name))
+                          (vector name type offset))
+                        (syntax-case slot-def ()
+                          [(slot slot-type) (check-slot #'slot #'slot-type #f)]
+                          [(slot slot-type #:offset slot-offset) (check-slot #'slot #'slot-type #'slot-offset)]
+                          [_ (err "bad field specification, expecting `[name ctype]' or `[name ctype #:offset offset]'" #'slot-def)]))])
+         (if _SUPER
+             (make-syntax _TYPE #t
+                          #`(#,(datum->syntax _TYPE 'super _TYPE) slot ...)
+                          #`(#,_SUPER slot-type ...)
+                          #'(0 slot-offset ...)
+                          alignment
+                          malloc-mode
+                          properties
+                          property-bindings
+                          no-equal?)
+             (make-syntax _TYPE #f #'(slot ...) #`(slot-type ...) #`(slot-offset ...)
+                          alignment malloc-mode properties property-bindings no-equal?))))]
     [(_ type () . more)
      (identifier? #'type)
      (err "must have either a supertype or at least one field")]
-    ;; specific errors for bad slot specs, leave the rest for a generic error
-    [(_ type (bad ...) . more)
-     (err "bad field specification, expecting `[name ctype]'"
-          (ormap (lambda (s) (syntax-case s () [[n ct] #t] [_ s]))
-                 (syntax->list #'(bad ...))))]
     [(_ type bad . more)
      (err "bad field specification, expecting a sequence of `[name ctype]'"
           #'bad)]))

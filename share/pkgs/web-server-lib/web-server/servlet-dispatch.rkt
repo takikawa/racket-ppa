@@ -9,11 +9,8 @@
          racket/list
          racket/unit
          racket/serialize
-         net/tcp-unit
-         net/tcp-sig
          net/url
-         unstable/contract
-         net/ssl-tcp-unit)
+         unstable/contract)
 (require web-server/web-server
          web-server/managers/lru
          web-server/managers/manager
@@ -121,15 +118,9 @@
            #:listen-ip listen-ip
            #:port port-arg
            #:max-waiting max-waiting
-           #:tcp@ (if ssl?
-                      (let ()
-                        (define-unit-binding ssl-tcp@
-                          (make-ssl-tcp@
-                           ssl-cert ssl-key
-                           #f #f #f #f #f)
-                          (import) (export tcp^))
-                        ssl-tcp@)
-                      tcp@)))
+           #:dispatch-server-connect@ (if ssl?
+                                          (make-ssl-connect@ ssl-cert ssl-key)
+                                          raw:dispatch-server-connect@)))
   (define serve-res (async-channel-get confirm-ch))
   (if (exn? serve-res)
       (begin

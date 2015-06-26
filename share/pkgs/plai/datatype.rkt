@@ -1,6 +1,8 @@
 #lang racket/base
 (require (for-syntax racket/base
-                     racket/list)
+                     racket/list
+                     (except-in racket/syntax
+                                format-id))
          racket/list
          racket/contract
          racket/undefined)
@@ -50,8 +52,12 @@
 
 (define-for-syntax type-symbol (gensym))
 
+(begin-for-syntax
+  (define (plai-stx-type? lst)
+    (and (list? lst) (eq? type-symbol (first lst)))))
+
 (define-for-syntax (validate-and-remove-type-symbol stx-loc lst)
-  (if (and (list? lst) (eq? type-symbol (first lst)))
+  (if (plai-stx-type? lst)
     (rest lst)
     (plai-syntax-error 'type-case stx-loc type-case:not-a-type)))
 
@@ -67,7 +73,7 @@
     (set! SRBS null))
   (define (GRAB-SRBS)
     SRBS)
-
+  
   (define (format-id lctx fmt #:source src . v)
     (define-values
       (fmt+vs-strs final-make-srbs)
@@ -142,26 +148,31 @@
 (define-syntax (define-type stx)
   (syntax-parse
       stx
-    [(_ datatype:id
+    [(_ datatype:id (~and (~seq immut ...) (~optional #:immutable))
         [variant:id (field:id field/c:expr) ...]
         ...)
-
+     
+     (define mut?
+       (syntax-parse #'(immut ...)
+         [() #t]
+         [(#:immutable) #f]))
+     
      ;; Ensure we have at least one variant.
      (when (empty? (syntax->list #'(variant ...)))
        (plai-syntax-error 'define-type stx define-type:zero-variants
                           (syntax-e #'datatype)))
-
+     
      ;; Ensure variant names are unique.
      (assert-unique #'(variant ...))
      ;; Ensure each set of fields have unique names.
      (stx-map assert-unique #'((field ...) ...))
-
+     
      ;; Ensure type and variant names are unbound
      (map (assert-unbound 'define-type)
           (cons #'datatype? (syntax->list #'(variant ...))))
-
+     
      (CLEAR-SRBS!)
-
+     
      (with-syntax
          ([(variant* ...)
            (stx-map (λ (x) (datum->syntax #f (syntax->datum x)))
@@ -169,7 +180,7 @@
           [(underlying-variant ...)
            (stx-map (λ (x) (datum->syntax #f (syntax->datum x)))
                     #'(variant ...))])
-
+       
        (with-syntax
            ([((field/c-val ...) ...)
              (stx-map generate-temporaries #'((field/c ...) ...))]
@@ -185,7 +196,7 @@
              (stx-map (λ (x) (format-id stx "make-~a" x #:source x)) #'(variant ...))]
             [(make-variant* ...)
              (stx-map (λ (x) (format-id x "make-~a" x #:source x)) #'(variant* ...))])
-
+         
          (with-syntax
              ([((f:variant? ...) ...)
                (stx-map (lambda (v? fs)
@@ -204,7 +215,7 @@
                                    fields))
                         #'(variant* ...)
                         #'((field ...) ...))]
-
+              
               [((set-variant-field! ...) ...)
                (stx-map (lambda (variant fields)
                           (stx-map (λ (f) (format-id stx "set-~a-~a!" variant f #:source f))
@@ -217,11 +228,11 @@
                                    fields))
                         #'(variant* ...)
                         #'((field ...) ...))])
-
+           
            (define srbs (GRAB-SRBS))
-
+           
            (syntax-property
-            (syntax/loc stx
+            (quasisyntax/loc stx
               (begin
                 (define-syntax datatype
                   (list type-symbol
@@ -231,7 +242,7 @@
                 (define-struct variant* (field ...)
                   #:transparent
                   #:omit-define-syntaxes
-                  #:mutable
+                  #,@(if mut? #'[#:mutable] #'[])
                   #:reflection-name 'variant)
                 ...
                 (define variant?
@@ -248,15 +259,15 @@
                   ;; that would break web which doesn't use the plai
                   ;; language AND would complicate going to a
                   ;; student-language based deployment
-
+                  
                   ;; (define field/c-val field/c)
                   ;; ...
-
+                  
                   (define (the-field/c)
                     (or/c undefined?
                           field/c))
                   ...
-
+                  
                   (define make-variant
                     (lambda-memocontract (field ...)
                                          (contract ((the-field/c) ... . -> . variant?)
@@ -277,7 +288,9 @@
                              #'make-variant*
                              #'variant*?
                              (reverse (list #'variant*-field ...))
-                             (reverse (list #'set-variant*-field! ...))
+                             (if #,mut?
+                                 (reverse (list #'set-variant*-field! ...))
+                                 (stx-map (λ (_) #f) #'(field ...)))
                              #t))
                      (λ () #'underlying-variant)))
                   (define variant-field
@@ -287,15 +300,20 @@
                                                    'variant-field 'use
                                                    'variant-field #'field)))
                   ...
-                  (define set-variant-field!
-                    (lambda-memocontract (v nv)
-                                         (contract (f:variant? (the-field/c) . -> . void)
-                                                   set-variant*-field!
-                                                   'set-variant-field! 'use
-                                                   'set-variant-field! #'field)))
-                  ...
                   )
-                ...))
+                ...
+                #,@(if mut?
+                       #'[(define set-variant-field!
+                            (lambda-memocontract (v nv)
+                                                 (contract (f:variant? (the-field/c) . -> . void)
+                                                           set-variant*-field!
+                                                           'set-variant-field! 'use
+                                                           'set-variant-field! #'field)))
+                          ...
+                          ...
+                          ]
+                       #'[])
+                ))
             'sub-range-binders
             srbs))))]))
 
@@ -309,9 +327,10 @@
 ;;; Asserts that variant-id-stx is a variant of the type described by
 ;;; type-stx.
 (define-for-syntax ((assert-variant type-info) variant-id-stx)
-  (unless (ormap (λ (stx) (free-identifier=? variant-id-stx stx))
-                 (map first type-info))
-    (plai-syntax-error 'type-case variant-id-stx type-case:not-a-variant)))
+  (if (ormap (λ (stx) (free-identifier=? variant-id-stx stx))
+             (map first type-info))
+      (record-disappeared-uses (list variant-id-stx))
+      (plai-syntax-error 'type-case variant-id-stx type-case:not-a-variant)))
 
 ;;; Asserts that the number of fields is appropriate.
 (define-for-syntax ((assert-field-count type-info) variant-id-stx field-stx)
@@ -384,6 +403,7 @@
        #'(bind-fields-in (binding-name ...) case-variant-id rest value-id body-expr))]))
 
 (define-syntax (type-case stx)
+  (with-disappeared-uses
   (syntax-case stx (else)
     [(_ type-id test-expr [variant (field ...) case-expr] ... [else else-expr])
      ;; Ensure that everything that should be an identifier is an identifier.
@@ -392,7 +412,7 @@
           (andmap (λ (stx) (andmap identifier? (syntax->list stx)))
                   (syntax->list #'((field ...) ...))))
      (let* ([info (validate-and-remove-type-symbol
-                   #'type-id (syntax-local-value #'type-id (λ () #f)))]
+                   #'type-id (syntax-local-value/record #'type-id plai-stx-type?))]
             [type-info (first info)]
             [type? (second info)])
 
@@ -433,7 +453,7 @@
           (andmap (λ (stx) (andmap identifier? (syntax->list stx)))
                   (syntax->list #'((field ...) ...))))
      (let* ([info (validate-and-remove-type-symbol
-                   #'type-id (syntax-local-value #'type-id (λ () #f)))]
+                   #'type-id (syntax-local-value/record #'type-id plai-stx-type?))]
             [type-info (first info)]
             [type? (second info)])
 
@@ -472,7 +492,7 @@
      (begin
        (unless (identifier? #'type-id)
          (plai-syntax-error 'type-case #'type-id type-case:not-a-type))
-       (validate-and-remove-type-symbol #'type-id (syntax-local-value #'type-id (λ () #f)))
+       (validate-and-remove-type-symbol #'type-id (syntax-local-value/record #'type-id plai-stx-type?))
        (andmap validate-clause (syntax->list #'(clauses ...)))
        (plai-syntax-error 'type-case stx "Unknown error"))]
-    [_ (plai-syntax-error 'type-case stx type-case:generic)]))
+    [_ (plai-syntax-error 'type-case stx type-case:generic)])))

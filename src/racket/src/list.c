@@ -33,6 +33,7 @@ READ_ONLY Scheme_Object *scheme_pair_p_proc;
 READ_ONLY Scheme_Object *scheme_mpair_p_proc;
 READ_ONLY Scheme_Object *scheme_cons_proc;
 READ_ONLY Scheme_Object *scheme_mcons_proc;
+READ_ONLY Scheme_Object *scheme_list_p_proc;
 READ_ONLY Scheme_Object *scheme_list_proc;
 READ_ONLY Scheme_Object *scheme_list_star_proc;
 READ_ONLY Scheme_Object *scheme_box_proc;
@@ -249,7 +250,9 @@ scheme_init_list (Scheme_Env *env)
                                                             | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant ("null?", p, env);
 
+  REGISTER_SO(scheme_list_p_proc);
   p = scheme_make_folding_prim(list_p_prim, "list?", 1, 1, 1);
+  scheme_list_p_proc = p;
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
                                                             | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant ("list?", p, env);
@@ -272,11 +275,9 @@ scheme_init_list (Scheme_Env *env)
                                                             | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant ("list*", p, env);
 
-  scheme_add_global_constant("immutable?",
-			     scheme_make_folding_prim(immutablep,
-						      "immutable?",
-						      1, 1, 1),
-			     env);
+  p = scheme_make_folding_prim(immutablep, "immutable?", 1, 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_OMITABLE);
+  scheme_add_global_constant("immutable?", p, env);
 
   p = scheme_make_immed_prim(length_prim, "length", 1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED);
@@ -2916,6 +2917,9 @@ static Scheme_Object *do_chaperone_hash(const char *name, int is_impersonator, i
   } else
     clear = scheme_false;
 
+  /* The allocation of this vector is used to detect when two
+     chaperoned immutable hash tables can be
+     `{chaperone,impersonator}-of?` when they're not eq. */
   redirects = scheme_make_vector(5, NULL);
   SCHEME_VEC_ELS(redirects)[0] = argv[1];
   SCHEME_VEC_ELS(redirects)[1] = argv[2];
@@ -3494,13 +3498,13 @@ extern void *GC_base(void *d);
 # define GC_did_mark_stack_overflow() 0
 # define GC_mark_overflow_recover(ptr) /**/
 #else
-extern MZ_DLLIMPORT void *GC_base(void *);
-extern MZ_DLLIMPORT int GC_is_marked(void *);
-extern MZ_DLLIMPORT int GC_did_mark_stack_overflow(void);
-extern MZ_DLLIMPORT void GC_mark_overflow_recover(void *p);
+extern MZGC_DLLIMPORT void *GC_base(void *);
+extern MZGC_DLLIMPORT int GC_is_marked(void *);
+extern MZGC_DLLIMPORT int GC_did_mark_stack_overflow(void);
+extern MZGC_DLLIMPORT void GC_mark_overflow_recover(void *p);
 #endif
-extern MZ_DLLIMPORT void GC_push_all_stack(void *, void *);
-extern MZ_DLLIMPORT void GC_flush_mark_stack(void);
+extern MZGC_DLLIMPORT void GC_push_all_stack(void *, void *);
+extern MZGC_DLLIMPORT void GC_flush_mark_stack(void);
 
 #endif
 
@@ -3674,7 +3678,7 @@ void scheme_clear_ephemerons()
   done_ephemerons = NULL;
 }
 
-extern MZ_DLLIMPORT void (*GC_custom_finalize)();
+extern MZGC_DLLIMPORT void (*GC_custom_finalize)();
 
 void scheme_init_ephemerons(void)
 {

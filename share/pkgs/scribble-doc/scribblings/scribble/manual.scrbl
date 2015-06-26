@@ -206,7 +206,10 @@ produces the output
 with the @racket[(loop (not x))] indented under @racket[define],
 because that's the way it is idented the use of @racket[racketblock].
 Source-location span information is used to preserve @racket[#true]
-versus @racket[#t] and @racket[#false] versus @racket[#f], and
+versus @racket[#t] and @racket[#false] versus @racket[#f]; span
+information is also used heuristically to add @racketvalfont{#i}
+to the start of an inexact number if its printed form would otherwise
+be two characters shorter than the source;
 syntax-object properties are used to preserve square brackets and
 curly braces versus parentheses; otherwise, using syntax objects tends
 to normalize the form of S-expression elements, such as rendering
@@ -299,7 +302,8 @@ A few other escapes are recognized symbolically:
 ]
 
 See also @racketmodname[scribble/comment-reader].
-}
+
+@history[#:changed "1.9" @elem{Added heuristic for adding @racketvalfont{#i} to inexact numbers.}]}
 
 @defform[(RACKETBLOCK maybe-escape datum ...)]{Like @racket[racketblock], but with
 the default expression escape @racket[UNSYNTAX] instead of @racket[unsyntax].}
@@ -1781,7 +1785,7 @@ the link.}
 @; ------------------------------------------------------------------------
 @section[#:tag "manual-indexing"]{Indexing}
 
-See also @secref["base-indexing"].
+See also @secref["base-indexing"] for @racketmodname[scribble/base].
 
 @defform[(indexed-racket datum ...)]{
 
@@ -1818,15 +1822,6 @@ key for the index iterm does not include quotes.}
 
 @defproc[(indexed-envvar [pre-content pre-content?] ...) element?]{A
 combination of @racket[envvar] and @racket[as-index].}
-
-@; ------------------------------------------------------------------------
-@section[#:tag "manual-images"]{Images}
-
-@defproc[(image/plain [filename-relative-to-source string?]
-                      [pre-element any/c] ...)
-         element?]{
-
- An alias for @racket[image] for backward compatibility.}
 
 @; ------------------------------------------------------------------------
 @section{Bibliography}
@@ -1992,6 +1987,11 @@ described by @racket[what]), where @racket[replacement] describes a
 suitable replacement. The @racket[additional-notes] are included after the
 initial deprecation message.}
 
+@defproc[(image/plain [filename-relative-to-source string?]
+                      [pre-element any/c] ...)
+         element?]{
+
+ An alias for @racket[image] for backward compatibility.}
 
 @; ------------------------------------------------------------------------
 @section[#:tag "index-entries"]{Index-Entry Descriptions}

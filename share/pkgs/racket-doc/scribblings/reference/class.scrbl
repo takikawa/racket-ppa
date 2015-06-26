@@ -252,7 +252,7 @@ interface @racket[(class->interface object%)], and is transparent
             public pubment public-final override override-final overment augment augride
             augment-final private abstract inherit inherit/super inherit/inner
             rename-super rename-inner begin lambda case-lambda let-values letrec-values
-            define-values #%plain-lambda)
+            define-values #%plain-lambda chaperone-procedure)
 (class* superclass-expr (interface-expr ...)
   class-clause
   ...)
@@ -314,7 +314,9 @@ interface @racket[(class->interface object%)], and is transparent
   (let-values ([(id) method-procedure] ...+) 
     id)
   (letrec-values ([(id) method-procedure] ...+) 
-    id)])]{
+    id)
+  (chaperone-procedure method-procedure wrapper-proc
+                       other-arg-expr ...)])]{
 
 Produces a class value.
 
@@ -1735,7 +1737,8 @@ resulting trait are the same as for @racket[trait-sum], otherwise the
 
 ([maybe-opaque
   (code:line)
-  (code:line #:opaque)]
+  (code:line #:opaque)
+  (code:line #:opaque #:ignore-local-member-names)]
 
  [member-spec
   method-spec
@@ -1783,7 +1786,9 @@ A class contract can be specified to be @emph{opaque} with the @racket[#:opaque]
 keyword. An opaque class contract will only accept a class that defines
 exactly the external methods and fields specified by the contract. A contract error
 is raised if the contracted class contains any methods or fields that are
-not specified.
+not specified. Methods or fields with local member names (i.e., defined with
+@racket[define-local-member-name]) are ignored for this check if
+@racket[#:ignore-local-member-names] is provided.
 
 The external contracts are as follows:
 
@@ -2006,6 +2011,9 @@ As with the external contracts, when a method or field name is specified
    checked on any access and/or mutation of the field that occurs in
    such subclasses.}
 
+@history[#:changed "6.1.1.8"
+         @string-append{Opaque class/c now optionally ignores local
+                        member names if an additional keyword is supplied.}]
 ]}
 
 @defform[(absent absent-spec ...)]{
@@ -2072,6 +2080,17 @@ behaves as if its class had been wrapped with the equivalent
 @defproc[(instanceof/c [class-contract contract?]) contract?]{
 Produces a contract for an object, where the object is an
 instance of a class that conforms to @racket[class-contract].
+}
+
+@defproc[(dynamic-object/c [method-names (listof symbol?)]
+                           [method-contracts (listof contract?)]
+                           [field-names (listof symbol?)]
+                           [field-contracts (listof contract?)])
+         contract?]{
+Produces a contract for an object, similar to @racket[object/c] but
+where the names and contracts for both methods and fields can be
+computed dynamically. The list of names and contracts for both
+methods and field respectively must have the same lengths.
 }
 
 @defform/subs[
@@ -2442,6 +2461,20 @@ This procedure is similar in spirit to
   (eq? obj-1 obj-2)
   (eq? obj-1 obj-3)
 ]}
+
+
+@defproc[(object-or-false=? [a (or/c object? #f)] [b (or/c object? #f)]) boolean?]{
+
+Like @racket[object=?], but accepts @racket[#f] for either argument and
+returns @racket[#t] if both arguments are @racket[#f].
+
+@defexamples[#:eval class-ctc-eval
+   (object-or-false=? #f (new object%))
+   (object-or-false=? (new object%) #f)
+   (object-or-false=? #f #f)
+   ]
+
+@history[#:added "6.1.1.8"]}
 
 
 @defproc[(object->vector [object object?] [opaque-v any/c #f]) vector?]{

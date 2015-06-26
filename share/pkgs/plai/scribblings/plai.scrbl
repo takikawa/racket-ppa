@@ -64,7 +64,8 @@ support. Also, modules written in @racketmodname[plai] export every definition
 
 @subsection[#:tag "define-type"]{Defining Types: @racket[define-type]}
 
-@defform/subs[(define-type type-id variant ...)
+@defform*/subs[[(define-type type-id variant ...)
+                (define-type type-id #:immutable variant ...)]
               ([variant (variant-id (field-id contract-expr) ...)])]{
 
 Defines the datatype @racket[_type-id].  A constructor @racket[_variant-id] is
@@ -74,7 +75,10 @@ its variant.
 The value of each field is checked by its associated @racket[_contract-expr].
 A @racket[_contract-expr] may be an arbitrary predicate or a contract.
 
-In addition to the contructors, a @racket[define-type] expression also defines:
+If the @racket[#:immutable] option is provided, the constructors create
+immutable structs. Otherwise, they can be mutated.
+
+In addition to the constructors, a @racket[define-type] expression also defines:
 
 @itemize[
 
@@ -88,8 +92,9 @@ In addition to the contructors, a @racket[define-type] expression also defines:
   @item{for each field of each variant, an accessor
     @racket[_variant-id-field-id] that returns the value of the field, and}
 
-  @item{for each field of each variant, a mutator
-    @racket[_set-variant-id-field-id!] that set the value of the field.}
+  @item{unless the @racket[#:immutable] option is provided, for each field of
+    each variant, @racket[define-type] also defines a mutator
+    @racket[_set-variant-id-field-id!] that sets the value of the field.}
 ]}
 
 @subsection[#:tag "type-case"]{Deconstructing Data Structures: @racket[type-case]}

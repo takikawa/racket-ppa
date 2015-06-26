@@ -5,9 +5,12 @@
 @(require (for-label web-server/web-server-sig
                      web-server/web-server-unit
                      net/tcp-sig
+                     web-server/private/dispatch-server-sig
+                     web-server/private/dispatch-server-unit
                      web-server/dispatchers/dispatch
                      web-server/web-config-sig
-                     web-server/web-config-unit))
+                     web-server/web-config-unit
+                     web-server/web-server))
 
 @section[#:tag "ws-sig" #:style 'hidden]{Signature}
 
@@ -31,10 +34,10 @@
 
 @section[#:tag "ws-unit" #:style 'hidden]{Unit}
 
-@defmodule[web-server/web-server-unit]{
+@defmodule[web-server/web-server-unit]
 
-@defthing[web-server@ (unit/c (web-config^ tcp^)
-                              (web-server^))]{
+@defthing[web-server-with-connect@ (unit/c (web-config^ tcp^ dispatch-server-connect^)
+                                           (web-server^))]{
 
 Uses the @racket[web-config^] to construct a @racket[dispatcher/c]
 function that sets up one virtual host dispatcher, for each virtual
@@ -53,6 +56,11 @@ operations:
 
 Using this @racket[dispatcher/c], it loads a dispatching server that provides @racket[serve]
 and @racket[serve-ports] functions that operate as expected.
-}
 
-}
+@history[#:added "1.1"]}
+
+
+@defthing[web-server@ (unit/c (web-config^ tcp^)
+                              (web-server^))]{
+
+Like @racket[web-server@], but using @racket[raw:dispatch-server-connect@].}

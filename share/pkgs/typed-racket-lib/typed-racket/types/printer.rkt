@@ -6,16 +6,16 @@
 (require racket/require racket/match unstable/sequence racket/string racket/promise
          racket/pretty
          racket/list
-         (prefix-in s: srfi/1)
+         racket/set
          (path-up "rep/type-rep.rkt" "rep/filter-rep.rkt" "rep/object-rep.rkt"
                   "rep/rep-utils.rkt" "types/subtype.rkt"
                   "types/match-expanders.rkt"
                   "types/kw-types.rkt"
                   "types/utils.rkt"
                   "types/resolve.rkt"
+                  "types/prefab.rkt"
                   "utils/utils.rkt"
-                  "utils/tc-utils.rkt"
-                  "env/type-name-env.rkt")
+                  "utils/tc-utils.rkt")
          (for-syntax racket/base syntax/parse))
 
 ;; printer-type: (one-of/c 'custom 'debug)
@@ -131,8 +131,9 @@
     [(CarPE:) 'car]
     [(CdrPE:) 'cdr]
     [(ForcePE:) 'force]
-    [(StructPE: t i) `(,(pathelem->sexp t) ,i)]
-    [else `(Unknown Path Element: ,(struct->vector pathelem))]))
+    [(StructPE: t i) `(,(type->sexp t)-,i)]
+    [(SyntaxPE:) 'syntax]
+    [else `(Invalid Path-Element: ,(struct->vector pathelem))]))
 
 ;; object->sexp : Object -> S-expression
 ;; Print an Object (see object-rep.rkt) to the given port
@@ -161,14 +162,16 @@
                 [_ #f]))
             (force (current-type-names))))
   ;; names and the sets themselves (not the union types)
-  ;; we use srfi/1 lsets as sets, to use custom type equality.
+  ;; note that racket/set supports lists with equal?, which in
+  ;; the case of Types will be type-equal?
   (define candidates
     (map (match-lambda [(cons name (Union: elts)) (cons name elts)])
          valid-names))
   ;; some types in the union may not be coverable by the candidates
   ;; (e.g. type variables, etc.)
   (define-values (uncoverable coverable)
-    (apply s:lset-diff+intersection type-equal? elems (map cdr candidates)))
+    (values (apply set-subtract elems (map cdr candidates))
+            (set-intersect elems (apply set-union null (map cdr candidates)))))
   ;; set cover, greedy algorithm, ~lg n approximation
   (let loop ([to-cover   coverable]
              [candidates candidates]
@@ -179,11 +182,13 @@
            ;; only union types can flow here, and any of those could be expanded
            (set-box! (current-print-unexpanded)
                      (append coverage-names (unbox (current-print-unexpanded))))
-           (values coverage-names uncoverable)] ; we want the names
+           ;; reverse here to retain the old ordering from when srfi/1 was
+           ;; used to process the list sets
+           (values coverage-names (reverse uncoverable))] ; we want the names
           [else
            ;; pick the candidate that covers the most uncovered types
            (define (covers-how-many? c)
-             (length (s:lset-intersection type-equal? (cdr c) to-cover)))
+             (length (set-intersect (cdr c) to-cover)))
            (define-values (next _)
              (for/fold ([next      (car candidates)]
                         [max-cover (covers-how-many? (car candidates))])
@@ -192,7 +197,7 @@
                  (if (> how-many? max-cover)
                      (values c how-many?)
                      (values next max-cover)))))
-           (loop (s:lset-difference type-equal? to-cover (cdr next))
+           (loop (set-subtract to-cover (cdr next))
                  (remove next candidates)
                  (cons next coverage))])))
 
@@ -376,7 +381,7 @@
     [(? Rep-stx a) (syntax->datum (Rep-stx a))]
     [(Univ:) 'Any]
     ;; struct names are just printed as the original syntax
-    [(Name: id _ _ #t) (syntax-e id)]
+    [(Name/struct: id) (syntax-e id)]
     ;; If a type has a name, then print it with that name.
     ;; However, we expand the alias in some cases
     ;; (i.e., the fuel is > 0) for the :type form.
@@ -402,7 +407,9 @@
     [(StructType: ty) `(Struct-Type ,(t->s ty))]
     [(StructTypeTop:) 'Struct-TypeTop]
     [(StructTop: (Struct: nm _ _ _ _ _)) `(Struct ,(syntax-e nm))]
+    [(Prefab: key fields) `(Prefab ,(abbreviate-prefab-key key) ,@fields)]
     [(BoxTop:) 'BoxTop]
+    [(Weak-BoxTop:) 'Weak-BoxTop]
     [(ChannelTop:) 'ChannelTop]
     [(Async-ChannelTop:) 'Async-ChannelTop]
     [(ThreadCellTop:) 'ThreadCellTop]
@@ -441,6 +448,7 @@
     [(Vector: e) `(Vectorof ,(t->s e))]
     [(HeterogeneousVector: e) `(Vector ,@(map t->s e))]
     [(Box: e) `(Boxof ,(t->s e))]
+    [(Weak-Box: e) `(Weak-Boxof ,(t->s e))]
     [(Future: e) `(Futureof ,(t->s e))]
     [(Channel: e) `(Channelof ,(t->s e))]
     [(Async-Channel: e) `(Async-Channelof ,(t->s e))]
@@ -496,6 +504,7 @@
     [(Syntax: t) `(Syntaxof ,(t->s t))]
     [(Instance: (and (? has-name?) cls)) `(Instance ,(t->s cls))]
     [(Instance: (? Class? cls)) (class->sexp cls #:object? #t)]
+    [(Instance: t) `(Instance ,(t->s t))] ; for cases like Error
     [(ClassTop:) 'ClassTop]
     [(? Class?) (class->sexp type)]
     [(Result: t (or (NoFilter:) (FilterSet: (Top:) (Top:))) (or (NoObject:) (Empty:))) (type->sexp t)]

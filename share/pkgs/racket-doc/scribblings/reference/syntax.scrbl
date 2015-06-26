@@ -2957,7 +2957,14 @@ syntactic forms or languages that supply a more limited kind of
 
 Attaches a @racket['compiler-hint:cross-module-inline]
 @tech{syntax property} to each @racket[form], which is useful when a
-@racket[form] is a function definition. See @racket[define-values].}
+@racket[form] is a function definition. See @racket[define-values].
+
+The @racket[begin-encourage-inline] form is also provided by the
+@racketmodname[(submod racket/performance-hint begin-encourage-inline)] module,
+which has fewer dependencies than @racketmodname[racket/performance-hint].
+
+@history[#:changed "6.2" @elem{Added the @racketmodname[(submod racket/performance-hint begin-encourage-inline)] submodule.}]
+}
 
 @defform*/subs[[(define-inline id expr)
                 (define-inline (head args) body ...+)]
@@ -3005,10 +3012,10 @@ submodule). Introduced submodules have the names
 @racket[lazy-require-]@racket[_n]@racketidfont{-}@racket[_m], where
 @racket[_n] is a phase-level number and @racket[_m] is a number.
 
-When the use of a lazily-required function triggers module loading,
-@racket[register-external-module] declares a potential compilation
-dependency (in case the function is used in the process of compiling a
-module).
+When the use of a lazily-required function triggers module loading, it
+also triggers a use of @racket[register-external-module] to declare an
+indirect compilation dependency (in case the function is used in the
+process of compiling a module).
 
 @examples[#:eval lazy-require-eval
 (lazy-require

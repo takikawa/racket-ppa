@@ -44,7 +44,8 @@
              [else #f])))
 
 (define-struct judgment-form (name mode proc mk-proc lang lws rule-names 
-                                   gen-clauses mk-gen-clauses term-proc relation?)
+                                   gen-clauses mk-gen-clauses term-proc relation?
+                                   cache)
   #:transparent)
 
 (define-struct defined-term (value))
@@ -107,7 +108,9 @@
                             (syntax-position id-stx)
                             ;; shorten the span so it covers only up to the underscore
                             (string-length (symbol->string nt))))
-        (define the-id (datum->syntax table-entry nt the-srcloc id-stx))
+        (define the-id (datum->syntax table-entry
+                                      (syntax-e table-entry)
+                                      the-srcloc id-stx))
         (syntax-property the-id 'original-for-check-syntax #t)]
        [else
         #f])]

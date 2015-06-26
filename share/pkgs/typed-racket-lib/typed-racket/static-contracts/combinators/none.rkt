@@ -8,7 +8,7 @@
          racket/match
          racket/contract
          (for-template racket/base racket/contract/base)
-         (for-syntax racket/base racket/syntax syntax/parse))
+         (for-syntax racket/base syntax/parse))
 
 (provide
   (contract-out
@@ -23,6 +23,7 @@
       (display "#<none/sc>" port)))
 
 (struct none-combinator combinator ()
+        #:transparent
         #:methods gen:sc
           [(define (sc-map v f) v)
            (define (sc-traverse v f) (void))

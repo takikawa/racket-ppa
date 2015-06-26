@@ -77,7 +77,6 @@
                      stx)]))
                #'orig-name))]))]))
 
-
 ;; procedures with documentation:
 (provide-and-wrap
  in-rator-position-only
@@ -369,8 +368,12 @@
                                     @interaction[#:eval (bsl) (angle (make-polar 3 4))]
                                     }
   @defproc[(conjugate [x number]) number]{
-                                          Extracts the conjugate of a complex number. 
-                                          @interaction[#:eval (bsl) (conjugate (make-polar 3 4))]
+                                          Flips the sign of the imaginary part of a complex number. 
+                                          @interaction[#:eval (bsl)
+(conjugate 3+4i)
+(conjugate -2-5i)
+(conjugate (make-polar 3 4))
+]
                                           }
   @defproc[(exact->inexact [x number]) number]{
                                                Converts an exact number to an inexact one. 
@@ -625,7 +628,7 @@
                                                           })
  
  ("Posns"
-  @defproc[(posn) signature]{Signature for posns.}
+  ; @defproc[(posn) signature]{Signature for posns.}
   @defproc[(make-posn [x any/c][y any/c]) posn]{
                                                 Constructs a posn from two arbitrary values.
                                                 @interaction[#:eval (bsl) (make-posn 3 3) (make-posn "hello" true)]

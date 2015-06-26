@@ -9,13 +9,11 @@
          (private parse-type)
          (typecheck internal-forms)
          (types resolve base-abbrev)
-	 data/queue
          racket/dict
-         racket/format
          racket/list
          racket/match
          syntax/id-table
-         syntax/kerncase
+         syntax/parse
          (for-template
           (typecheck internal-forms)
           racket/base))
@@ -46,7 +44,7 @@
   (define components (tarjan vertex-map))
   ;; extract the identifiers out of the results since we
   ;; don't need the whole vertex
-  (for/list ([component components])
+  (for/list ([component (in-list components)])
     (map vertex-data component)))
 
 ;; check-type-alias-contractive : Id Type -> Void
@@ -60,7 +58,7 @@
 (define (check-type-alias-contractive id type)
   (define/match (check type)
     [((Union: elems)) (andmap check elems)]
-    [((Name: name-id _ _ _))
+    [((Name/simple: name-id))
      (and (not (free-identifier=? name-id id))
           (check (resolve-once type)))]
     [((App: rator rands stx))
@@ -85,16 +83,17 @@
     (define-values (id type-stx args) (parse-type-alias type-alias))
     ;; Register type alias names with a dummy value so that it's in
     ;; scope for the registration later.
-    ;;
-    ;; The `(make-Value (gensym))` expression is used to make sure
-    ;; that unions don't collapse the aliases too soon.
     (register-resolved-type-alias id Err)
-    (register-type-name
-     id
-     (if args
-         (make-Poly (map syntax-e args) (make-Value (gensym)))
-         (make-Value (gensym))))
     (values id (list id type-stx args))))
+
+;; Identifier -> Type
+;; Construct a fresh placeholder type
+(define (make-placeholder-type id)
+  (make-Base ;; the uninterned symbol here ensures that no two type
+             ;; aliases get the same placeholder type
+             (string->uninterned-symbol (symbol->string (syntax-e id)))
+             #'(int-err "Encountered unresolved alias placeholder")
+             (lambda _ #f) #f))
 
 ;; register-all-type-aliases : Listof<Id> Dict<Id, TypeAliasInfo> -> Void
 ;;
@@ -161,7 +160,7 @@
 
   ;; Check that no #:implements clauses are recursive
   (define counterexample
-    (for/or ([component class-components])
+    (for/or ([component (in-list class-components)])
       (and (or (not (= (length component) 1))
                (has-self-cycle? component type-alias-class-map))
            component)))
@@ -185,52 +184,24 @@
                                 free-identifier=?))
       alias))
 
-  ;; Reconstruct type alias dependency map based on class parent
-  ;; information. This ensures that the `deps` field is precise
-  ;; in all type aliases involving class types
-  (define (get-all-parent-deps id)
-    (define (get-deps parent)
-      (cdr (assoc parent type-alias-dependency-map free-identifier=?)))
-    (define parents (cdr (assoc id type-alias-class-map free-identifier=?)))
-    (cond [(null? parents) null]
-          [else
-           (define all-deps
-             (for/list ([parent parents])
-               (append (get-deps parent)
-                       (get-all-parent-deps parent))))
-           (apply append all-deps)]))
-
-  (define new-dependency-map/classes
-    (for/list ([(id deps) (in-dict type-alias-dependency-map)])
-      (cond [(dict-has-key? type-alias-class-map id)
-             (define new-deps
-               (remove-duplicates (append (get-all-parent-deps id) deps)
-                                  free-identifier=?))
-             (cons id new-deps)]
-            [else (cons id deps)])))
-
-  ;; Do another pass on dependency map, using the connected
-  ;; components analysis data to determine which dependencies are
-  ;; actually needed for mutual recursion. Drop all others.
-  (define new-dependency-map
-    (for/list ([(id deps) (in-dict new-dependency-map/classes)])
-      ;; find the component this `id` participated in so
-      ;; that we can drop `deps` that aren't in that component
-      (define component
-        (findf (λ (component) (member id component free-identifier=?))
-               components))
-      (define new-deps
-        (filter (λ (dep) (member dep component free-identifier=?)) deps))
-      (cons id new-deps)))
-
   ;; Actually register recursive type aliases
   (define name-types
     (for/list ([id (in-list recursive-aliases)])
       (define record (dict-ref type-alias-map id))
       (match-define (list _ args) record)
-      (define deps (dict-ref new-dependency-map id))
-      (define name-type (make-Name id deps args #f))
+      (define name-type (make-Name id (length args) #f))
       (register-resolved-type-alias id name-type)
+      ;; The `(make-placeholder-type id)` expression is used to make sure
+      ;; that unions don't collapse the aliases too soon. This is a dummy
+      ;; value that's used until the real type is found in the pass below.
+      ;;
+      ;; A type name should not be registered for non-recursive aliases
+      ;; because dummy values will leak due to environment serialization.
+      (register-type-name
+       id
+       (if (null? args)
+           (make-placeholder-type id)
+           (make-Poly (map syntax-e args) (make-placeholder-type id))))
       name-type))
 
   ;; Register non-recursive type aliases
@@ -264,20 +235,19 @@
       (register-type-name id type)
       (add-constant-variance! id args)
       (check-type-alias-contractive id type)
-      (values id type args)))
+      (values id type (map syntax-e args))))
 
   ;; Finally, do a last pass to refine the variance
   (refine-variance! names-to-refine types-to-refine tvarss))
 
-;; Syntax -> Syntax Syntax Syntax Option<Integer>
+;; Syntax -> Syntax Syntax (Listof Syntax)
 ;; Parse a type alias internal declaration
 (define (parse-type-alias form)
-  (kernel-syntax-case* form #f
-    (define-type-alias-internal values)
-    [(define-values ()
-       (begin (quote-syntax (define-type-alias-internal nm ty args))
-              (#%plain-app values)))
-     (values #'nm #'ty (syntax-e #'args))]
+  (syntax-parse form
+    #:literal-sets (kernel-literals)
+    #:literals (values)
+    [t:type-alias
+     (values #'t.name #'t.type (syntax-e #'t.args))]
     ;; this version is for `let`-like bodies
     [(begin (quote-syntax (define-type-alias-internal nm ty args))
             (#%plain-app values))

@@ -7,7 +7,7 @@
 
 @defproc[(dynamic-rerequire [module-path module-path?]
                             [#:verbosity verbosity (or/c 'all 'reload 'none) 'reload])
-         void?]{
+	 (listof path?)]{
 
 Like @racket[(dynamic-require module-path 0)], but with reloading
 support. The @racket[dynamic-rerequire] function is intended for use
@@ -22,8 +22,12 @@ module is re-loaded. Re-loading support works only for modules that
 are first loaded (either directly or indirectly through transitive
 @racket[require]s) via @racket[dynamic-rerequire].
 
+The returned list contains the absolute paths to the modules that were
+reloaded on this call to @racket[dynamic-rerequire]. If the returned
+list is empty, no modules were changed or loaded.
+
 When @racket[enter!] loads or re-loads a module from a file, it can
 print a message to @racket[(current-error-port)], depending on
-@racket[verbosity]: @racket['verbose] prints a message for all loads and
+@racket[verbosity]: @racket['all] prints a message for all loads and
 re-loads, @racket['reload] prints a message only for
 re-loaded modules, and @racket['none] disables printouts.}

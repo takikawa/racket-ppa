@@ -1,7 +1,7 @@
 #lang racket/base
 (require
-  syntax/parse
-  (for-syntax racket/base syntax/parse racket/syntax))
+  syntax/parse/pre
+  (for-syntax racket/base syntax/parse/pre racket/syntax))
 
 (define-syntax define-matcher
   (syntax-parser
@@ -50,9 +50,8 @@
   (ignore typechecker:ignore #:mark)
   (ignore-some typechecker:ignore-some #:mark)
   (ignore-some-expr typechecker:ignore-some)
-  (contract-def/maker typechecker:contract-def/maker)
   (contract-def typechecker:contract-def)
-  (flat-contract-def typechecker:flat-contract-def)
+  (contract-def/provide typechecker:contract-def/provide)
   (external-check typechecker:external-check)
   (with-type typechecker:with-type #:mark)
   (type-ascription type-ascription)
@@ -73,6 +72,7 @@
   (tr:class:type-annotation tr:class:type-annotation)
   (tr:class:super tr:class:super)
   (tr:class:local-table tr:class:local-table)
-  (tr:class:method tr:class:method)
+  (tr:class:name-table tr:class:name-table)
+  (tr:class:def tr:class:def)
   )
 

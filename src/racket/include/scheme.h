@@ -63,8 +63,8 @@
 # define MZ_USE_SINGLE_FLOATS
 #endif
 
-/* gcc defines __SSE_MATH__ when SSE floating point is enabled: */
-#ifdef __SSE_MATH__
+/* gcc defines __SSE2_MATH__ when SSE2 floating point is enabled: */
+#ifdef __SSE2_MATH__
 # define C_COMPILER_USES_SSE 1
 #endif
 
@@ -1214,6 +1214,10 @@ typedef struct Scheme_Thread {
     } k;
   } ku;
 
+  /* To pass the current procedure from one chaperone
+     layer to the next: */
+  Scheme_Object *self_for_proc_chaperone;
+
   short suspend_break;
   short external_break;
 
@@ -1400,6 +1404,7 @@ enum {
 
   MZCONFIG_CURRENT_DIRECTORY,
   MZCONFIG_CURRENT_ENV_VARS,
+  MZCONFIG_FORCE_DELETE_PERMS,
 
   MZCONFIG_CURRENT_USER_DIRECTORY,
 
@@ -2128,8 +2133,8 @@ extern Scheme_Extension_Table *scheme_extension_table;
 # define MZ_FD_CLR(n, p) scheme_fdclr(p, n)
 # define MZ_FD_ISSET(n, p) scheme_fdisset(p, n)
 #else
-# define MZ_GET_FDSET(p, n) ((void *)(((fd_set *)p) + n))
-# define MZ_FD_ZERO(p) FD_ZERO((fd_set *)(p))
+# define MZ_GET_FDSET(p, n) ((void *)(((fd_set *)p) XFORM_OK_PLUS n))
+# define MZ_FD_ZERO(p) XFORM_HIDE_EXPR(FD_ZERO((fd_set *)(p)))
 # define MZ_FD_SET(n, p) FD_SET(n, (fd_set *)(p))
 # define MZ_FD_CLR(n, p) FD_CLR(n, (fd_set *)(p))
 # define MZ_FD_ISSET(n, p) FD_ISSET(n, (fd_set *)(p))

@@ -8,23 +8,22 @@
          racket/list
          racket/match
          racket/set
-         racket/syntax
-         syntax/id-table
          syntax/parse
          syntax/stx
          "signatures.rkt"
-         (private parse-type syntax-properties type-annotation)
-         (env lexical-env tvar-env global-env)
+         (private parse-type syntax-properties)
+         (env lexical-env tvar-env global-env type-alias-helper mvar-env)
          (types utils abbrev union subtype resolve generalize)
          (typecheck check-below internal-forms)
-         (utils tc-utils)
-         (rep type-rep)
+         (utils tc-utils mutated-vars)
+         (rep object-rep type-rep)
          (for-syntax racket/base)
          (for-template racket/base
+                       (submod "internal-forms.rkt" forms)
                        (private class-literals)
-                       (typecheck internal-forms)))
+                       (utils typed-method-property)))
 
-(import tc-if^ tc-lambda^ tc-app^ tc-let^ tc-expr^)
+(import tc-expr^)
 (export check-class^)
 
 ;; A super-init-stxs is a
@@ -63,24 +62,25 @@
 (define-syntax-class internal-class-data
   #:literal-sets (kernel-literals)
   #:literals (class-internal values)
-  (pattern (begin (quote-syntax
-                   (class-internal
-                    (#:forall type-parameter:id ...)
-                    (#:all-inits all-init-names:id ...)
-                    (#:init init-names:name-pair ...)
-                    (#:init-field init-field-names:name-pair ...)
-                    (#:init-rest (~optional init-rest-name:id))
-                    (#:optional-init optional-names:id ...)
-                    (#:field field-names:name-pair ...)
-                    (#:public public-names:name-pair ...)
-                    (#:override override-names:name-pair ...)
-                    (#:private privates:id ...)
-                    (#:private-field private-fields:id ...)
-                    (#:inherit inherit-names:name-pair ...)
-                    (#:inherit-field inherit-field-names:name-pair ...)
-                    (#:augment augment-names:name-pair ...)
-                    (#:pubment pubment-names:name-pair ...)))
-                  (#%plain-app values))
+  (pattern (let-values ([() (begin (quote
+                                    (class-internal
+                                     (#:forall type-parameter:id ...)
+                                     (#:all-inits all-init-names:id ...)
+                                     (#:init init-names:name-pair ...)
+                                     (#:init-field init-field-names:name-pair ...)
+                                     (#:init-rest (~optional init-rest-name:id))
+                                     (#:optional-init optional-names:id ...)
+                                     (#:field field-names:name-pair ...)
+                                     (#:public public-names:name-pair ...)
+                                     (#:override override-names:name-pair ...)
+                                     (#:private privates:id ...)
+                                     (#:private-field private-fields:id ...)
+                                     (#:inherit inherit-names:name-pair ...)
+                                     (#:inherit-field inherit-field-names:name-pair ...)
+                                     (#:augment augment-names:name-pair ...)
+                                     (#:pubment pubment-names:name-pair ...)))
+                                   (#%plain-app values))])
+             _)
            #:with type-parameters #'(type-parameter ...)
            #:with all-init-internals #'(all-init-names ...)
            #:with init-internals #'(init-names.internal ...)
@@ -153,38 +153,19 @@
 (define-syntax-class class-expansion
   #:literals (let-values letrec-syntaxes+values #%plain-app quote)
   #:attributes (superclass-expr
-                type-parameters
-                all-init-internals
-                init-internals init-externals
-                init-field-internals init-field-externals
-                init-rest-name
-                optional-inits
-                field-internals field-externals
-                public-internals public-externals
-                override-internals override-externals
-                inherit-internals inherit-externals
-                inherit-field-internals inherit-field-externals
-                augment-internals augment-externals
-                pubment-internals pubment-externals
-                private-names private-field-names
                 make-methods
                 initializer-body
                 initializer-self-id
                 initializer-args-id)
-  (pattern (let-values ()
-             (letrec-syntaxes+values
-              ()
-              ((() ;; residual class: data
-                   :internal-class-data))
-              (#%plain-app
-               compose-class:id
-               name:expr
-               superclass-expr:expr
-               interface-expr:expr
-               internal:expr ...
-               (~and make-methods :make-methods-class)
-               (quote :boolean)
-               (quote #f))))))
+  (pattern (#%plain-app
+            compose-class:id
+            name:expr
+            superclass-expr:expr
+            interface-expr:expr
+            internal:expr ...
+            (~and make-methods :make-methods-class)
+            (quote :boolean)
+            (quote #f))))
 
 ;; This is similar to `type-declaration` from "internal-forms.rkt", but
 ;; the expansion is slightly different in a class so we use this instead.
@@ -193,9 +174,129 @@
   #:literals (values void :-internal)
   #:attributes (name type)
   (pattern (let-values
-             ([() (begin (quote-syntax (:-internal name:id type:expr))
+             ([() (begin (quote (:-internal name:id type:expr))
                          (#%plain-app values))])
              (#%plain-app void))))
+
+;; This syntax class matches the method-procedure non-terminal from
+;; grammar for class* in section 6.2 of the Racket Reference. It is
+;; used to register types for unannotated variables and copy syntax
+;; properties to the right place.
+;;
+;; The method variables need to be annotated because forms like
+;;
+;;   (let ([x (lambda (y) ...)]) x)
+;;
+;; are not checkable even if there is an expected type for the whole
+;; let form. This is because TR doesn't implement synthesis for bare
+;; lambda terms.
+(define-syntax-class (core-method register/method
+                                  register/self)
+  #:literal-sets (kernel-literals)
+  #:attributes (form)
+  (pattern (#%plain-lambda (self . params) . rst)
+           #:do [(register/self #'self)]
+           #:with form this-syntax)
+  (pattern (case-lambda [(self x ...) body] ...)
+           #:do [(for ([self (in-list (syntax->list #'(self ...)))])
+                   (register/self self))]
+           #:with form this-syntax)
+  ;; Special case for keyword lambdas because properties need to be transferred
+  ;; differently for those. We can't typecheck keyword methods that come from
+  ;; non-TR sources (like an untyped macro) but that's the same as normal TR.
+  (pattern (~and (let-values ([(meth-name) kw-core]) meth-name-2:id)
+                 kw:kw-lambda^)
+           #:do [(register/method #'meth-name)]
+           #:with props-core
+                  (kw-lambda-property #'kw-core (attribute kw.value))
+           #:with plam-core
+                  (cond [(plambda-property this-syntax)
+                         => (λ (plam) (plambda-property #'props-core plam))]
+                        [else #'props-core])
+           #:with form #'(let-values ([(meth-name) plam-core])
+                           meth-name-2))
+  (pattern (~and (let-values ([(meth-name) opt-core]) meth-name-2:id)
+                 opt:opt-lambda^)
+           ;; it's only an interesting opt-lambda expansion if the number
+           ;; of optional arguments is greater than zero
+           #:when (> (cadr (attribute opt.value)) 0)
+           #:do [(register/method #'meth-name)]
+           #:with props-core
+                  (let* ([prop-val (attribute opt.value)]
+                         [mand (add1 (car prop-val))]
+                         [opt  (cadr prop-val)])
+                    (opt-lambda-property #'opt-core (list mand opt)))
+           #:with plam-core
+                  (cond [(plambda-property this-syntax)
+                         => (λ (plam) (plambda-property #'props-core plam))]
+                        [else #'props-core])
+           #:with form #'(let-values ([(meth-name) plam-core])
+                           meth-name-2))
+  ;; Typed Racket can't directly typecheck uses of `chaperone-procedure` which
+  ;; are allowed in method definitions (to accommodate TR object contracts).
+  ;; For special cases generated by TR's class macro, strip off the chaperone
+  ;; part and typecheck the rest. Let other cases pass through.
+  (pattern (#%plain-app (~literal chaperone-procedure)
+                        meth (quote #f) (~literal prop:typed-method) (quote #t))
+           #:declare meth (core-method register/method register/self)
+           #:with form #'meth.form)
+  (pattern (#%plain-app (~literal chaperone-procedure) meth . other-args)
+           #:declare meth (core-method register/method register/self)
+           #:with form #'(#%plain-app chaperone-procedure meth.form . other-args))
+  (pattern ((~and head (~or let-values letrec-values))
+              ([(meth-name:id) meth] ...)
+              meth-name-2:id)
+           #:declare meth (core-method register/method register/self)
+           #:do [(register/method #'meth-name-2)]
+           #:with (plam-meth ...)
+                  (for/list ([meth (in-list (syntax->list #'(meth.form ...)))])
+                    (cond [(plambda-property this-syntax)
+                           => (λ (plam) (plambda-property meth plam))]
+                          [else meth]))
+           #:with form
+                  #'(head ([(meth-name) plam-meth] ...)
+                      meth-name-2))
+  (pattern ((~and head (~or let-values letrec-values))
+            ([(meth-name) meth1] ...)
+            meth2)
+           #:declare meth1 (core-method register/method register/self)
+           #:declare meth2 (core-method register/method register/self)
+           #:with form
+                  #'(head ([(meth-name) meth1.form] ...) meth2.form))
+  ;; The syntax variants have two lists of bindings
+  (pattern (letrec-syntaxes+values stx-bindings ([(meth-name:id) meth] ...)
+             meth-name-2:id)
+           #:declare meth (core-method register/method register/self)
+           #:do [(register/method #'meth-name-2)]
+           #:with form
+                  #'(letrec-syntaxes+values
+                     stx-bindings
+                     ([(meth-name) meth.form] ...)
+                     meth-name-2))
+  (pattern (letrec-syntaxes+values stx-bindings ([(meth-name) meth1] ...)
+             meth2)
+           #:declare meth1 (core-method register/method register/self)
+           #:declare meth2 (core-method register/method register/self)
+           #:with form
+                  #'(letrec-syntaxes+values
+                     stx-bindings
+                     ([(meth-name) meth1.form] ...)
+                     meth2.form)))
+
+;; For detecting field mutations for occurrence typing
+(define-syntax-class (field-assignment local-table)
+  #:literal-sets (kernel-literals)
+  #:attributes (sub name)
+  (pattern (begin (quote ((~datum declare-field-assignment) field-name:id))
+                  sub)
+           ;; Mutation tracking needs to look at the *accessor* name
+           ;; since the predicate check happens on a read. But the accessor
+           ;; is not in the mutation expression, so we need to look up the
+           ;; corresponding identifier.
+           #:attr maybe-accessor
+                  (dict-ref local-table (syntax-e #'field-name) #f)
+           #:when (attribute maybe-accessor)
+           #:with name (car (attribute maybe-accessor))))
 
 ;; Syntax Option<TCResults> -> TCResults
 ;; Type-check a class form by trawling its innards
@@ -234,89 +335,93 @@
      ;; FIXME: maybe should check the property on this expression
      ;;        as a sanity check too
      (define super-type (tc-expr #'cls.superclass-expr))
-     ;; Save parse attributes to pass through to helper functions
-     (define type-parameters (syntax->datum #'cls.type-parameters))
-     (define fresh-parameters (map gensym type-parameters))
-     (define parse-info
-       (hash 'type-parameters     type-parameters
-             'fresh-parameters    fresh-parameters
-             'superclass-expr     #'cls.superclass-expr
-             'make-methods        #'cls.make-methods
-             'initializer-self-id #'cls.initializer-self-id
-             'initializer-args-id #'cls.initializer-args-id
-             'initializer-body    #'cls.initializer-body
-             'optional-inits      (syntax->datum #'cls.optional-inits)
-             'only-init-internals (syntax->datum #'cls.init-internals)
-             'only-init-names     (syntax->datum #'cls.init-externals)
-             ;; the order of these names reflect the order in the class,
-             ;; so use this list when retaining the order is important
-             'init-internals      (syntax->datum #'cls.all-init-internals)
-             'init-rest-name     (and (attribute cls.init-rest-name)
-                                      (syntax-e (attribute cls.init-rest-name)))
-             'public-internals   (syntax->datum #'cls.public-internals)
-             'override-internals (syntax->datum #'cls.override-internals)
-             'pubment-internals  (syntax->datum #'cls.pubment-internals)
-             'augment-internals  (syntax->datum #'cls.augment-internals)
-             'method-internals
-             (set-union (syntax->datum #'cls.public-internals)
-                        (syntax->datum #'cls.override-internals))
-             'field-internals
-             (set-union (syntax->datum #'cls.field-internals)
-                        (syntax->datum #'cls.init-field-internals))
-             'inherit-internals
-             (syntax->datum #'cls.inherit-internals)
-             'inherit-field-internals
-             (syntax->datum #'cls.inherit-field-internals)
-             'init-names
-             (set-union (syntax->datum #'cls.init-externals)
-                        (syntax->datum #'cls.init-field-externals))
-             'field-names
-             (set-union (syntax->datum #'cls.field-externals)
-                        (syntax->datum #'cls.init-field-externals))
-             'public-names   (syntax->datum #'cls.public-externals)
-             'override-names (syntax->datum #'cls.override-externals)
-             'pubment-names  (syntax->datum #'cls.pubment-externals)
-             'augment-names  (syntax->datum #'cls.augment-externals)
-             'inherit-names  (syntax->datum #'cls.inherit-externals)
-             'inherit-field-names
-             (syntax->datum #'cls.inherit-field-externals)
-             'private-names  (syntax->datum #'cls.private-names)
-             'private-fields (syntax->datum #'cls.private-field-names)
-             'overridable-names
-             (set-union (syntax->datum #'cls.public-externals)
-                        (syntax->datum #'cls.override-externals))
-             'augmentable-names
-             (set-union (syntax->datum #'cls.pubment-externals)
-                        (syntax->datum #'cls.augment-externals))
-             'method-names
-             (set-union (syntax->datum #'cls.public-externals)
-                        (syntax->datum #'cls.override-externals)
-                        (syntax->datum #'cls.augment-externals)
-                        (syntax->datum #'cls.pubment-externals))
-             'all-internal
-             (append (syntax->datum #'cls.init-internals)
-                     (syntax->datum #'cls.init-field-internals)
-                     (syntax->datum #'cls.field-internals)
-                     (syntax->datum #'cls.public-internals)
-                     (syntax->datum #'cls.override-internals)
-                     (syntax->datum #'cls.inherit-internals)
-                     (syntax->datum #'cls.inherit-field-internals)
-                     (syntax->datum #'cls.pubment-internals)
-                     (syntax->datum #'cls.augment-internals))
-             'all-external
-             (append (syntax->datum #'cls.init-externals)
-                     (syntax->datum #'cls.init-field-externals)
-                     (syntax->datum #'cls.field-externals)
-                     (syntax->datum #'cls.public-externals)
-                     (syntax->datum #'cls.override-externals)
-                     (syntax->datum #'cls.inherit-externals)
-                     (syntax->datum #'cls.inherit-field-externals)
-                     (syntax->datum #'cls.pubment-externals)
-                     (syntax->datum #'cls.augment-externals))))
-     (with-timing
-      (do-timestamp (format "methods ~a" (dict-ref parse-info 'method-names)))
-      (extend-tvars/new type-parameters fresh-parameters
-        (do-check expected super-type parse-info)))]))
+     (define class-name-table
+       (car (trawl-for-property #'cls.make-methods tr:class:name-table-property)))
+     (syntax-parse class-name-table
+       [tbl:internal-class-data
+        ;; Save parse attributes to pass through to helper functions
+        (define type-parameters (syntax->datum #'tbl.type-parameters))
+        (define fresh-parameters (map gensym type-parameters))
+        (define parse-info
+          (hash 'type-parameters     type-parameters
+                'fresh-parameters    fresh-parameters
+                'superclass-expr     #'cls.superclass-expr
+                'make-methods        #'cls.make-methods
+                'initializer-self-id #'cls.initializer-self-id
+                'initializer-args-id #'cls.initializer-args-id
+                'initializer-body    #'cls.initializer-body
+                'optional-inits      (syntax->datum #'tbl.optional-inits)
+                'only-init-internals (syntax->datum #'tbl.init-internals)
+                'only-init-names     (syntax->datum #'tbl.init-externals)
+                ;; the order of these names reflect the order in the class,
+                ;; so use this list when retaining the order is important
+                'init-internals      (syntax->datum #'tbl.all-init-internals)
+                'init-rest-name     (and (attribute tbl.init-rest-name)
+                                         (syntax-e (attribute tbl.init-rest-name)))
+                'public-internals   (syntax->datum #'tbl.public-internals)
+                'override-internals (syntax->datum #'tbl.override-internals)
+                'pubment-internals  (syntax->datum #'tbl.pubment-internals)
+                'augment-internals  (syntax->datum #'tbl.augment-internals)
+                'method-internals
+                (set-union (syntax->datum #'tbl.public-internals)
+                           (syntax->datum #'tbl.override-internals))
+                'field-internals
+                (set-union (syntax->datum #'tbl.field-internals)
+                           (syntax->datum #'tbl.init-field-internals))
+                'inherit-internals
+                (syntax->datum #'tbl.inherit-internals)
+                'inherit-field-internals
+                (syntax->datum #'tbl.inherit-field-internals)
+                'init-names
+                (set-union (syntax->datum #'tbl.init-externals)
+                           (syntax->datum #'tbl.init-field-externals))
+                'field-names
+                (set-union (syntax->datum #'tbl.field-externals)
+                           (syntax->datum #'tbl.init-field-externals))
+                'public-names   (syntax->datum #'tbl.public-externals)
+                'override-names (syntax->datum #'tbl.override-externals)
+                'pubment-names  (syntax->datum #'tbl.pubment-externals)
+                'augment-names  (syntax->datum #'tbl.augment-externals)
+                'inherit-names  (syntax->datum #'tbl.inherit-externals)
+                'inherit-field-names
+                (syntax->datum #'tbl.inherit-field-externals)
+                'private-names  (syntax->datum #'tbl.private-names)
+                'private-fields (syntax->datum #'tbl.private-field-names)
+                'overridable-names
+                (set-union (syntax->datum #'tbl.public-externals)
+                           (syntax->datum #'tbl.override-externals))
+                'augmentable-names
+                (set-union (syntax->datum #'tbl.pubment-externals)
+                           (syntax->datum #'tbl.augment-externals))
+                'method-names
+                (set-union (syntax->datum #'tbl.public-externals)
+                           (syntax->datum #'tbl.override-externals)
+                           (syntax->datum #'tbl.augment-externals)
+                           (syntax->datum #'tbl.pubment-externals))
+                'all-internal
+                (append (syntax->datum #'tbl.init-internals)
+                        (syntax->datum #'tbl.init-field-internals)
+                        (syntax->datum #'tbl.field-internals)
+                        (syntax->datum #'tbl.public-internals)
+                        (syntax->datum #'tbl.override-internals)
+                        (syntax->datum #'tbl.inherit-internals)
+                        (syntax->datum #'tbl.inherit-field-internals)
+                        (syntax->datum #'tbl.pubment-internals)
+                        (syntax->datum #'tbl.augment-internals))
+                'all-external
+                (append (syntax->datum #'tbl.init-externals)
+                        (syntax->datum #'tbl.init-field-externals)
+                        (syntax->datum #'tbl.field-externals)
+                        (syntax->datum #'tbl.public-externals)
+                        (syntax->datum #'tbl.override-externals)
+                        (syntax->datum #'tbl.inherit-externals)
+                        (syntax->datum #'tbl.inherit-field-externals)
+                        (syntax->datum #'tbl.pubment-externals)
+                        (syntax->datum #'tbl.augment-externals))))
+        (with-timing
+          (do-timestamp (format "methods ~a" (dict-ref parse-info 'method-names)))
+          (extend-tvars/new type-parameters fresh-parameters
+                            (do-check expected super-type parse-info)))])]))
 
 ;; do-check : Type Type Dict -> Type
 ;; The actual type-checking
@@ -354,6 +459,14 @@
   (define top-level-exprs
     (trawl-for-property make-methods-stx tr:class:top-level-property))
 
+  ;; Set up type aliases before any types get parsed
+  (define type-aliases
+    (filter (syntax-parser [t:type-alias #t] [_ #f])
+            (syntax->list (hash-ref parse-info 'initializer-body))))
+
+  (define-values (alias-names alias-map) (get-type-alias-info type-aliases))
+  (register-all-type-aliases alias-names alias-map)
+
   ;; Filter top level expressions into several groups, each processed
   ;; into appropriate data structures
   ;;
@@ -361,8 +474,7 @@
   ;; the only kind of type annotation that is allowed to be duplicate
   ;; (i.e., m can have type Integer -> Integer and an augment type of
   ;;          String -> String in the separate tables)
-  (define-values (super-new initializers
-                  annotation-table augment-annotation-table
+  (define-values (super-new annotation-table augment-annotation-table
                   other-top-level-exprs)
     (handle-top-levels top-level-exprs))
 
@@ -416,6 +528,24 @@
                   local-augment-table local-inner-table)
     (construct-local-mapping-tables (car locals)))
 
+  ;; trawl the body and find methods and private field definitions
+  (define def-stxs
+    (trawl-for-property make-methods-stx tr:class:def-property))
+  ;; FIXME: private field names should be stored as identifiers since
+  ;;        it's possible to have the same symbolic name for them
+  (define private-field-names (hash-ref parse-info 'private-fields))
+  (define-values (private-field-stxs method-stxs)
+    (for/fold ([private-field-stxs null]
+               [method-stxs null])
+              ([def-stx (in-list def-stxs)])
+      (define name/names (tr:class:def-property def-stx))
+      (if (stx-pair? name/names)
+          (values (cons def-stx private-field-stxs) method-stxs)
+          (if ;; FIXME: see above on syntax-e
+              (memq (syntax-e name/names) private-field-names)
+              (values (cons def-stx private-field-stxs) method-stxs)
+              (values private-field-stxs (cons def-stx method-stxs))))))
+
   ;; types for private elements
   (define private-method-types
     (for/hash ([(name type) (in-dict annotation-table)]
@@ -426,9 +556,24 @@
         #:when (set-member? (hash-ref parse-info 'private-fields) name))
     (hash-set! private-field-types name (list type)))
 
-  (synthesize-private-field-types initializers
-                                  local-private-field-table
-                                  private-field-types)
+  (define synthesized-init-val-stxs
+    (synthesize-private-field-types private-field-stxs
+                                    local-private-field-table
+                                    private-field-types))
+
+  ;; Detect mutation of private fields for occurrence typing
+  (for ([stx (in-sequences
+              (in-list (stx->list (hash-ref parse-info 'initializer-body)))
+              (in-list method-stxs))]
+        ;; Avoid counting the local table, which has dummy mutations that the
+        ;; typed class macro inserted only for analysis.
+        #:when (not (tr:class:local-table-property stx)))
+    (find-mutated-vars stx
+                       mvar-env
+                       (syntax-parser
+                        [(~var f (field-assignment local-private-field-table))
+                         (list #'f.sub #'f.name)]
+                        [_ #f])))
 
   ;; start type-checking elements in the body
   (define-values (lexical-names lexical-types
@@ -449,36 +594,33 @@
                                local-private-table private-method-types
                                self-type))
   (do-timestamp "built local tables")
-  (with-lexical-env/extend lexical-names/top-level lexical-types/top-level
+  (with-lexical-env/extend-types lexical-names/top-level lexical-types/top-level
     (check-super-new super-new super-inits super-init-rest))
   (do-timestamp "checked super-new")
-  (with-lexical-env/extend lexical-names/top-level lexical-types/top-level
+  (with-lexical-env/extend-types lexical-names/top-level lexical-types/top-level
     (for ([stx other-top-level-exprs])
       (tc-expr stx)))
   (do-timestamp "checked other top-level exprs")
-  (with-lexical-env/extend lexical-names/top-level lexical-types/top-level
+  (with-lexical-env/extend-types lexical-names/top-level lexical-types/top-level
     (check-field-set!s (hash-ref parse-info 'initializer-body)
-                       local-field-table
+                       synthesized-init-val-stxs
                        inits))
   (do-timestamp "checked field initializers")
-  ;; trawl the body and find methods and type-check them
-  (define meth-stxs
-    (trawl-for-property make-methods-stx tr:class:method-property))
   (define checked-method-types
-    (with-lexical-env/extend lexical-names lexical-types
+    (with-lexical-env/extend-types lexical-names lexical-types
       (check-methods (append (hash-ref parse-info 'pubment-names)
                              (hash-ref parse-info 'overridable-names))
-                     internal-external-mapping meth-stxs
+                     internal-external-mapping method-stxs
                      methods self-type)))
   (do-timestamp "checked methods")
   (define checked-augment-types
-    (with-lexical-env/extend lexical-names lexical-types
+    (with-lexical-env/extend-types lexical-names lexical-types
       (check-methods (hash-ref parse-info 'augment-names)
-                     internal-external-mapping meth-stxs
+                     internal-external-mapping method-stxs
                      augments self-type)))
   (do-timestamp "checked augments")
-  (with-lexical-env/extend lexical-names lexical-types
-    (check-private-methods meth-stxs (hash-ref parse-info 'private-names)
+  (with-lexical-env/extend-types lexical-names lexical-types
+    (check-private-methods method-stxs (hash-ref parse-info 'private-names)
                            private-method-types self-type))
   (do-timestamp "checked privates")
   (do-timestamp "finished methods")
@@ -492,8 +634,6 @@
    super-field-names
    super-method-names
    super-augment-names)
-  (when expected
-    (check-below final-class-type expected))
   (define class-type-parameters (hash-ref parse-info 'type-parameters))
   (do-timestamp "done")
   (if (null? class-type-parameters)
@@ -503,12 +643,11 @@
                  final-class-type)))
 
 ;; handle-top-levels : (Listof Syntax) ->
-;;                     super-init-stxs Dict Dict Hash (Listof Syntax)
+;;                     super-init-stxs Dict Hash (Listof Syntax)
 ;; Divide top level expressions into several categories, and put them
 ;; in appropriate data structures.
 (define (handle-top-levels exprs)
   (define super-new #f)
-  (define initializers (make-free-id-table))
   (define annotations (make-hash))
   (define augment-annotations (make-hash))
   (define other-exprs
@@ -517,19 +656,6 @@
       (syntax-parse expr
         #:literal-sets (kernel-literals)
         #:literals (:-augment)
-        [(begin
-           (quote ((~datum declare-field-initialization) _))
-           (let-values ([(obj:id) self])
-             (let-values ([(field:id) initial-value])
-               (with-continuation-mark _ _
-                 (#%plain-app setter:id obj2:id field2:id)))))
-         ;; There should only be one initialization expression per field
-         ;; since they are distinguished by a declaration.
-         (cond [(not (dict-has-key? initializers #'setter))
-                (free-id-table-set! initializers #'setter #'initial-value)]
-               [else
-                (int-err "more than one field initialization expression")])
-         other-exprs]
         ;; The second part of this pattern ensures that we find the actual
         ;; initialization call, rather than the '(declare-super-new) in
         ;; the expansion.
@@ -547,7 +673,7 @@
            (hash-set! annotations name type))
          other-exprs]
         ;; FIXME: use internal-forms for this instead
-        [(quote-syntax (:-augment name-stx:id type-stx))
+        [(quote (:-augment name-stx:id type-stx))
          (define name (syntax-e #'name-stx))
          (define type (parse-type #'type-stx))
          (unless (check-duplicate-member augment-annotations name type)
@@ -560,7 +686,6 @@
                      #:more "must call `super-new' at the top-level of the class")
     (set! super-new (super-init-stxs null null)))
   (values super-new
-          initializers
           annotations
           augment-annotations
           other-exprs))
@@ -586,35 +711,6 @@
          optional-external
          remaining-super-inits
          super-field-names super-method-names super-augment-names)
-  (when expected
-   (match-define (Class: _ inits fields methods augments _) expected)
-   (define exp-init-names (dict-keys inits))
-   (define exp-field-names (dict-keys fields))
-   (define exp-method-names (dict-keys methods))
-   (define exp-augment-names (dict-keys augments))
-   (define exp-optional-inits
-     (for/set ([(name val) (in-dict inits)]
-               #:when (cadr val))
-              name))
-   (check-same (set-union (hash-ref parse-info 'init-names)
-                          (dict-keys remaining-super-inits))
-               exp-init-names
-               "initialization argument")
-   (check-same (set-union (hash-ref parse-info 'public-names)
-                          (hash-ref parse-info 'pubment-names)
-                          super-method-names)
-               exp-method-names
-               "public method")
-   (check-same (set-union (hash-ref parse-info 'field-names)
-                          super-field-names)
-               exp-field-names
-               "public field")
-   (check-same (set-union (hash-ref parse-info 'augmentable-names)
-                          super-augment-names)
-               exp-augment-names
-               "public augmentable method")
-   (check-same optional-external exp-optional-inits
-               "optional init argument"))
   (check-exists super-method-names (hash-ref parse-info 'override-names)
                 "overridable method")
   (check-exists super-augment-names (hash-ref parse-info 'augment-names)
@@ -732,7 +828,7 @@
     (for/list ([m (in-set method-names)])
       (define external (dict-ref internal-external-mapping m))
       (define maybe-type (dict-ref type-map external #f))
-      (->* (list (make-Univ))
+      (->* (list Univ)
            (cond [(and maybe-type
                        (not (equal? (car maybe-type) top-func))
                        (not inner?))
@@ -741,7 +837,7 @@
                        (not (equal? (car maybe-type) top-func)))
                   (Un (-val #f)
                       (function->method (car maybe-type) self-type))]
-                 [else (make-Univ)]))))
+                 [else Univ]))))
 
   (define method-types
     (make-method-types (hash-ref parse-info 'method-internals) methods))
@@ -753,31 +849,42 @@
     (make-method-types (hash-ref parse-info 'augment-internals) augments))
   (define inner-types
     (make-method-types
-     (set-union (hash-ref parse-info 'pubment-internals)
-                (hash-ref parse-info 'augment-internals))
+     (append (hash-ref parse-info 'pubment-internals)
+             (hash-ref parse-info 'augment-internals))
      augments #:inner? #t))
 
   ;; construct field accessor types
-  (define (make-field-types field-names type-map #:private? [private? #f])
+  (define (make-field-types field-names type-map)
     (for/lists (_1 _2) ([f (in-set field-names)])
-      (define external
-        (if private?
-            f
-            (dict-ref internal-external-mapping f)))
+      (define external (dict-ref internal-external-mapping f))
       (define maybe-type (dict-ref type-map external #f))
       (values
-       (-> (make-Univ) (or (and maybe-type (car maybe-type))
-                           (make-Univ)))
-       (-> (make-Univ) (or (and maybe-type (car maybe-type))
-                           -Bottom)
+       (-> Univ (or (and maybe-type (car maybe-type)) Univ))
+       (-> Univ (or (and maybe-type (car maybe-type)) -Bottom)
+           -Void))))
+
+  (define (make-private-field-types field-names getter-ids type-map)
+    (for/lists (_1 _2) ([field-name (in-set field-names)]
+                        [getter-id (in-list getter-ids)])
+      (define maybe-type (dict-ref type-map field-name #f))
+      (values
+       ;; This case is more complicated than for public fields because private
+       ;; fields support occurrence typing. The object is set as the field's
+       ;; accessor id, so that *its* range type is refined for occurrence typing.
+       (->acc (list Univ)
+              (or (and maybe-type (car maybe-type))
+                  Univ)
+              (list (make-FieldPE))
+              #:var getter-id)
+       (-> Univ (or (and maybe-type (car maybe-type)) -Bottom)
            -Void))))
 
   (define-values (field-get-types field-set-types)
     (make-field-types (hash-ref parse-info 'field-internals) fields))
   (define-values (private-field-get-types private-field-set-types)
-    (make-field-types (hash-ref parse-info 'private-fields)
-                      private-field-types
-                      #:private? #t))
+    (make-private-field-types (hash-ref parse-info 'private-fields)
+                              localized-private-field-get-names
+                              private-field-types))
   (define-values (inherit-field-get-types inherit-field-set-types)
     (make-field-types (hash-ref parse-info 'inherit-field-internals)
                       super-fields))
@@ -790,7 +897,7 @@
       (or (and maybe-type
                (not (equal? maybe-type top-func))
                (function->method maybe-type self-type))
-          (make-Univ))))
+          Univ)))
 
   (define private-method-types
     (make-private-like-types (hash-ref parse-info 'private-names)
@@ -854,7 +961,7 @@
           (append all-types
                   init-types
                   init-rest-type
-                  (list self-type (make-Univ)))))
+                  (list self-type Univ))))
 
 ;; check-methods : Listof<Symbol> Listof<Syntax> Dict<Symbol, Symbol> Dict Type
 ;;                 -> Dict<Symbol, Type>
@@ -863,7 +970,7 @@
                        meths methods self-type)
   (for/fold ([checked '()])
             ([meth meths])
-    (define method-name (tr:class:method-property meth))
+    (define method-name (syntax-e (tr:class:def-property meth)))
     (define external-name (dict-ref internal-external-mapping method-name #f))
     (define maybe-expected (and external-name (dict-ref methods external-name #f)))
     (cond [(and maybe-expected
@@ -875,9 +982,10 @@
            (define method-type
              (function->method pre-method-type self-type))
            (define expected (ret method-type))
-           (register-method-ids meth self-type method-type)
+           (define xformed-meth
+             (process-method-syntax meth self-type method-type))
            (do-timestamp (format "started checking method ~a" external-name))
-           (tc-expr/check (add-kw-property meth) expected)
+           (tc-expr/check xformed-meth expected)
            (do-timestamp (format "finished method ~a" external-name))
            (cons (list external-name pre-method-type) checked)]
           ;; Only try to type-check if these names are in the
@@ -888,8 +996,9 @@
            ;; FIXME: this case doesn't work very well yet for keyword methods
            ;;        because TR can't recognize that the expansion is a kw
            ;;        function (unlike the expected case).
-           (register-method-ids meth self-type #f)
-           (define type (tc-expr/t (add-kw-property meth)))
+           (define xformed-meth
+             (process-method-syntax meth self-type #f))
+           (define type (tc-expr/t xformed-meth))
            (do-timestamp (format "finished method ~a" external-name))
            (cons (list external-name
                        (method->function type))
@@ -901,7 +1010,7 @@
 ;; Type-check private methods
 (define (check-private-methods stxs names types self-type)
   (for ([stx stxs])
-    (define method-name (tr:class:method-property stx))
+    (define method-name (syntax-e (tr:class:def-property stx)))
     (define private? (set-member? names method-name))
     (define annotation (dict-ref types method-name #f))
     (cond [(and private? annotation)
@@ -909,19 +1018,21 @@
            (define method-type
              (function->method pre-method-type self-type))
            (define expected (ret method-type))
-           (register-method-ids stx self-type method-type)
-           (tc-expr/check (add-kw-property stx) expected)]
+           (define xformed-stx
+             (process-method-syntax stx self-type method-type))
+           (tc-expr/check xformed-stx expected)]
           ;; not private, then ignore since it's irrelevant
           [(not private?) (void)]
           [else
-           (register-method-ids stx self-type #f)
-           (tc-expr/t (add-kw-property stx))])))
+           (define xformed-stx
+             (process-method-syntax stx self-type #f))
+           (tc-expr/t xformed-stx)])))
 
-;; check-field-set!s : Syntax Dict<Symbol, Symbol> Dict<Symbol, Type> -> Void
+;; check-field-set!s : Syntax Listof<Syntax> Dict<Symbol, Type> -> Void
 ;; Check that fields are initialized to the correct type
 ;; FIXME: use syntax classes for matching and clearly separate the handling
 ;;        of field initialization and set! uses
-(define (check-field-set!s stx local-field-table inits)
+(define (check-field-set!s stx synthed-stxs inits)
   (for ([form (syntax->list stx)])
     (syntax-parse form
       #:literal-sets (kernel-literals)
@@ -970,14 +1081,33 @@
                   (#%plain-app local-setter:id obj2:id y:id)))))
        #:when (free-identifier=? #'x #'y)
        #:when (free-identifier=? #'obj1 #'obj2)
-       ;; Remove wcm for checking since TR can't handle these cases
-       (define simplified
-         (syntax/loc form
-           (let-values (((obj1) self))
-             (let-values (((x) init-val))
-               (#%plain-app local-setter obj2 y)))))
-       (tc-expr simplified)]
+       ;; Only check init-val, trust that the rest is well-formed.
+       ;; Extracting the field type from the setter and using
+       ;; tc-expr/check propagates expected types better than
+       ;; checking the whole expression. It's also hard to extract
+       ;; the field type from a table since we don't know which
+       ;; field this setter corresponds to (except via the local
+       ;; binding name in the `let-values` which doesn't seem
+       ;; very reliable).
+       ;;
+       ;; Also don't check if this is a private field that's already
+       ;; been synthesized.
+       (unless (member #'init-val synthed-stxs)
+         (define type (setter->type #'local-setter))
+         (define processed
+           (process-private-field-init-val #'init-val))
+         (tc-expr/check processed (ret type)))]
       [_ (void)])))
+
+;; setter->type : Id -> Type
+;; Determine the field type based on its private setter name
+;; (assumption: the type environment maps this name already)
+(define (setter->type id)
+  (define f-type (lookup-type/lexical id))
+  (match f-type
+    [(Function: (list (arr: (list _ type) _ _ _ _)))
+     type]
+    [#f (int-err "setter->type ~a" (syntax-e id))]))
 
 ;; check-init-arg : Id Type Syntax -> Void
 ;; Check the initialization of an init arg variable against the
@@ -999,20 +1129,55 @@
           [else
            (tc-expr/check init-val (ret init-type))])))
 
-;; synthesize-private-field-types : IdTable Dict Hash -> Void
+;; synthesize-private-field-types : Listof<Syntax> Dict Hash -> Listof<Syntax>
 ;; Given top-level expressions in the class, synthesize types from
-;; the initialization expressions for private fields.
-(define (synthesize-private-field-types initializers locals types)
-  (for ([(name getter+setter) (in-dict locals)]
-        #:unless (hash-has-key? types name))
-    (match-define (list _ setter) getter+setter)
-    (define init-expr-stx (free-id-table-ref initializers setter #f))
-    (when init-expr-stx
-      (define type (tc-expr/t init-expr-stx))
-      ;; FIXME: this always generalizes the private field
-      ;;        type, but it's better to only generalize if
-      ;;        the field is actually mutated.
-      (hash-set! types name (list (generalize type))))))
+;; the initialization expressions for private fields. Returns the initial
+;; value expressions that were type synthesized.
+(define (synthesize-private-field-types stxs locals types)
+  (for/fold ([synthed-stxs null])
+            ([stx (in-list stxs)])
+    (syntax-parse stx
+      #:literal-sets (kernel-literals)
+      [(begin
+         (quote ((~datum declare-field-initialization) _))
+         (let-values ([(obj:id) self])
+           (let-values ([(field:id) initial-value])
+             (with-continuation-mark
+              _ _ (#%plain-app setter:id obj2:id field2:id)))))
+       (define name-stx (tr:class:def-property stx))
+       (define name (if (stx-pair? name-stx)
+                        (syntax-e (stx-car name-stx))
+                        (syntax-e name-stx)))
+       (define processed-init
+         (process-private-field-init-val #'initial-value))
+       ;; don't synthesize if there's already a type annotation
+       (cond [(hash-has-key? types name) synthed-stxs]
+             [else
+              ;; FIXME: this always generalizes the private field
+              ;;        type, but it's better to only generalize if
+              ;;        the field is actually mutated.
+              (hash-set! types name
+                         (list (generalize (tc-expr/t processed-init))))
+              (cons #'initial-value synthed-stxs)])]
+      [(let-values ([(initial-value-name:id ...)
+                     (#%plain-app _ initial-value ...)])
+         (begin
+           (quote ((~datum declare-field-initialization) _))
+           (let-values ([(obj:id) self])
+             (let-values ([(field:id) initial-value-name-2:id])
+               (with-continuation-mark
+                _ _ (#%plain-app setter:id obj2:id field2:id)))))
+         ...
+         (#%plain-app _))
+       (define names (map syntax-e (syntax-e (tr:class:def-property stx))))
+       (for/fold ([synthed-stxs synthed-stxs])
+                 ([name (in-list names)]
+                  [initial-value-stx (in-list (syntax->list #'(initial-value ...)))])
+         (cond [(hash-has-key? types name) synthed-stxs]
+               [else
+                (hash-set! types name
+                           (list (generalize (tc-expr/t initial-value-stx))))
+                (cons initial-value-stx synthed-stxs)]))])))
 
 ;; Syntax -> Dict<Symbol, Id> Dict<Symbol, Id>
 ;;           Dict<Symbol, (List Symbol Symbol)> Dict<Symbol, Id>
@@ -1332,7 +1497,11 @@
       (define (update-dict type)
         (define entry (list type))
         (dict-set type-dict external entry))
-      (assign-type name expected annotation-table update-dict default-type)))
+      ;; only use the default type if the super-type doesn't already
+      ;; have an entry, e.g., for overrides
+      (define default (or (car (dict-ref type-dict external (list #f)))
+                          default-type))
+      (assign-type name expected annotation-table update-dict default)))
 
   (define-values (expected-inits expected-fields
                   expected-publics expected-augments
@@ -1341,17 +1510,23 @@
       [(Class: _ inits fields publics augments init-rest)
        (values inits fields publics augments init-rest)]
       [_ (values #f #f #f #f #f)]))
-  (define-values (inits fields publics pubments init-rest-name)
+  (define-values (inits fields publics pubments overrides init-rest-name)
     (values (hash-ref parse-info 'init-internals)
             (hash-ref parse-info 'field-internals)
             (hash-ref parse-info 'public-internals)
             (hash-ref parse-info 'pubment-internals)
+            (hash-ref parse-info 'override-internals)
             (hash-ref parse-info 'init-rest-name)))
   (define init-types (make-inits inits super-inits expected-inits))
   (define field-types (make-type-dict fields super-fields expected-fields Univ))
-  (define public-types (make-type-dict (append publics pubments)
+
+  ;; This should consider all new public methods, but should also look at
+  ;; overrides to ensure that if an overriden method has a more specific type
+  ;; (via depth subtyping) then it's accounted for.
+  (define public-types (make-type-dict (append publics pubments overrides)
                                        super-methods expected-publics
                                        top-func))
+
   (define augment-types (make-type-dict
                          pubments super-augments expected-augments top-func
                          #:annotations-from augment-annotation-table))
@@ -1362,7 +1537,12 @@
     (cond [(not init-rest-name) super-init-rest]
           [(dict-ref annotation-table init-rest-name #f)]
           [else (-lst Univ)]))
-  (make-Instance (make-Class super-row init-types field-types
+  (make-Instance (make-Class ;; only inherit parent row if it's a variable
+                             ;; FIXME: fix this when substitution with rows
+                             ;;        is made more sensible
+                             (and (or (F? super-row) (B? super-row))
+                                  super-row)
+                             init-types field-types
                              public-types augment-types init-rest-type)))
 
 ;; function->method : Function Type -> Function
@@ -1401,63 +1581,39 @@
      (make-PolyRow ns constraints (method->function type))]
     [_ (tc-error/expr #:return -Bottom "expected a function type for method")]))
 
-;; register-method-ids : Syntax (Option Type) -> Void
-;; Register types for identifiers in a method that don't come with types
-(define (register-method-ids stx self-type method-type)
-  (define (do-register self-param meth-name)
-    (when method-type
-      (register-type meth-name method-type))
-    (register-type self-param self-type))
-  (syntax-parse stx
-    #:literals (let-values #%plain-lambda case-lambda)
-    [(let-values ([(meth-name:id)
-                   (#%plain-lambda (self-param:id . params)
-                     body ...)])
-       m)
-     (do-register #'self-param #'meth-name)]
-    [(~and (let-values ([(meth-name:id)
-                         (let-values (((core:id)
-                                       (#%plain-lambda params
-                                                       core-body ...)))
-                           method-body ...)])
-             m)
-           (~or kw:kw-lambda^ opt:opt-lambda^))
-     (do-register #'self-param #'meth-name)]
-    ;; case-lambda methods
-    [(let-values ([(meth-name:id)
-                   (case-lambda
-                     [(self x ...) body] ...)])
-       m)
-     (when method-type
-       (register-type #'meth-name method-type))
-     (for ([self-param (in-list (syntax->list #'(self ...)))])
-       (register-type self-param self-type))]
-    [_ (int-err "register-method-ids: internal error")]))
+;; process-method-syntax : Syntax (Option Type) -> Syntax
+;; Register types for identifiers in a method that don't come with types and
+;; propagate syntax properties as needed
+(define (process-method-syntax stx self-type method-type)
 
-;; Syntax -> Syntax
-;; If the method syntax is for a keyword method, then propagate the keyword
-;; property further into the syntax object.
-(define (add-kw-property stx)
+  (define (register/method meth-name)
+    (when method-type
+      (register-type meth-name method-type)))
+  (define (register/self self-name)
+    (register-type self-name self-type))
+
   (syntax-parse stx
     #:literal-sets (kernel-literals)
-    [(~and (let-values ([(meth-name:id) core]) m)
-           kw:kw-lambda^)
-      (quasisyntax/loc stx
-        (let-values ([(meth-name)
-                      #,(kw-lambda-property
-                        (syntax/loc stx core)
-                        (attribute kw.value))])
-          m))]
-    [(~and (let-values ([(meth-name:id) core]) m)
-           opt:opt-lambda^)
-     (match-define (list required optional) (attribute opt.value))
-     (quasisyntax/loc stx
-       (let-values ([(meth-name)
-                     #,(opt-lambda-property
-                        (syntax/loc stx core)
-                        (list (add1 required) ; for `this` argument
-                              optional))])
-         m))]
+    [(~var meth (core-method register/method register/self))
+     #'meth.form]
+    [_ (int-err "process-method-syntax: unexpected syntax ~a"
+                (syntax->datum stx))]))
+
+;; process-private-field-init-val : Syntax -> Syntax
+;; Pre-process field syntax before typechecking
+(define (process-private-field-init-val stx)
+  (syntax-parse stx
+    #:literal-sets (kernel-literals)
+    ;; Remove TR-specific expressions that aren't typecheckable yet.
+    ;; FIXME: can remove this hack when TR has both bounded polymorphism
+    ;;        and support for non-uniform rest-args. Also can remove
+    ;;        the analogous cases in the core-method syntax class.
+    [(#%plain-app (~literal chaperone-procedure)
+                  form
+                  (quote #f)
+                  (~literal prop:typed-method)
+                  (quote #t))
+     #'form]
     [_ stx]))
 
 ;; Set<Symbol> Set<Symbol> String -> Void

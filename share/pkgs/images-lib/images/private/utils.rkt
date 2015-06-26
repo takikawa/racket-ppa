@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require racket/draw racket/class racket/match racket/list ffi/unsafe
+(require racket/draw racket/class racket/match racket/list
          (for-syntax racket/base)
          "flomap.rkt")
 
@@ -9,56 +9,55 @@
 ;; ===================================================================================================
 ;; Caching flomaps with a hash table of weak box values
 
-(define num-callbacks 0)
-(define (get-num-callbacks) num-callbacks)
- 
-(define (register-gc-callback proc)
-  (register-finalizer (malloc 4) (λ (val)
-                                  (set! num-callbacks (+ 1 num-callbacks))
-                                  (printf "here~n")
-                                  (when (proc) (register-gc-callback proc)))))
-
-(define (weak-value-hash-clean! h)
-  (define ks (for*/list ([(k bx)  (in-hash h)]
-                         [val  (in-value (weak-box-value (car bx)))]
-                         #:when (not val))
-               k))
-  (for ([k  (in-list ks)]) (hash-remove! h k)))
-
 (define total-time-saved 0)
 (define total-time-spent 0)
 
-;; Can't simply wrap hash-ref! with weak-box-value and thnk with make-weak-box, because
+;; For a weak-value hash, we can't simply wrap hash-ref! with
+;; weak-box-value and thnk with make-weak-box, because
 ;; 1. If weak-box-value returns #f, we need to regenerate the value
-;; 2. We need to keep a handle to the generated value while it's being stored in the hash
+;; 2. We need to keep a handle to the generated value while it's being
+;;    stored in the hash
+;; So we use a pair of tables. One table maps the key to the
+;; value, but using a key whose pointer identity is private (so
+;; it's never reachable). Another table maps the value to the
+;; key, so the key is retained as long as the value is retained.
+;; Ephemerons provide the fixedpoint that ensures that the value and
+;; key are kept only if the value is reachable.
+
+(struct weak-value-hash (by-key     ; hash for (box key) -> (ephemeron (box key) (cons value msecs))
+                         by-value)) ; hash for value -> (ephemeron value (box key))
+;; The `by-key` table is used to find a cached value, while
+;; the `by-value` table ensures tha the boxed key in `by-key` is retained
+;; as long as the value is retained.
+;; We assume that that a value in the table is not reachable from its key.
+
+(define (make-weak-value-hash)
+  (weak-value-hash (make-weak-hash) (make-weak-hasheq)))
+
 (define (weak-value-hash-ref! h k thnk)
   (define (cache-ref!)
     (define start (current-milliseconds))
     (define val (thnk))
     (define time (- (current-milliseconds) start))
     (set! total-time-spent (+ total-time-spent time))
-    ;(printf "total-time-spent = ~v~n" total-time-spent)
-    (hash-set! h k (cons (make-weak-box val) time))
+    ;; (printf "total-time-spent = ~v~n" total-time-spent)
+    (define bk (box k))
+    (hash-set! (weak-value-hash-by-key h) bk (make-ephemeron bk (cons val time)))
+    (hash-set! (weak-value-hash-by-value h) val (make-ephemeron val bk))
     val)
-  (cond [(hash-has-key? h k)  (define bx (hash-ref h k))
-                              (define val (weak-box-value (car bx)))
-                              (cond [val   (set! total-time-saved (+ total-time-saved (cdr bx)))
-                                           ;(printf "total-time-saved = ~v~n" total-time-saved)
-                                           val]
-                                    [else  (cache-ref!)])]
-        [else  (cache-ref!)]))
+  (cond
+   [(hash-ref (weak-value-hash-by-key h) (box k) #f)
+    => (lambda (ephemeron)
+         (define val+msecs (ephemeron-value ephemeron))
+         (cond
+          [val+msecs
+           (set! total-time-saved (+ total-time-saved (cdr val+msecs)))
+           ;; (printf "total-time-saved = ~v~n" total-time-saved)
+           (car val+msecs)]
+          [else (cache-ref!)]))]
+   [else (cache-ref!)]))
 
-(define flomap-cache (make-hash))
-
-(define (clean-flomap-cache!)
-  (weak-value-hash-clean! flomap-cache)
-  #t)
-
-(register-gc-callback clean-flomap-cache!)
-
-(define (get-flomap-cache)
-  (for/list ([(k bx)  (in-hash flomap-cache)])
-    (cons k (cons (weak-box-value (car bx)) (cdr bx)))))
+(define flomap-cache (make-weak-value-hash))
 
 (define (get-total-time-saved) total-time-saved)
 (define (get-total-time-spent) total-time-spent)

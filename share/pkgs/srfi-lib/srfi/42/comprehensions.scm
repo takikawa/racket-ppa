@@ -2,13 +2,13 @@
 ;;; COMPREHENSIONS
 ;;;
 
-(module comprehensions mzscheme
+(module comprehensions "mzscheme2.rkt"
   (provide (all-defined))
   
   (require "generators.scm")
   (require-for-syntax "generators.scm")
   (require-for-syntax "expansion.scm")
-  (require-for-template mzscheme)
+  (require-for-template "mzscheme2.rkt")
   
   ; This is the model comprehension
   
@@ -331,26 +331,32 @@
   ;   constructs (do-ec q ... cmd) where the generators gen in q ... are
   ;   replaced by (:until gen stop).
   
-  (define-derived-comprehension ec-guarded-do-ec (nested if not and or begin)
+  (require (prefix mz: mzscheme))
+  
+  (define-derived-comprehension ec-guarded-do-ec (nested if mz:if not and or begin)
     ((ec-guarded-do-ec stop (nested (nested q1 ...) q2 ...) cmd)
      (q1 ... q2 ...)
      (ec-guarded-do-ec stop (nested q1 ... q2 ...) cmd) )
     
     ((ec-guarded-do-ec stop (nested (if test) q ...) cmd)
      (q ...)
-     (if test (ec-guarded-do-ec stop (nested q ...) cmd)) )
+     (when test (ec-guarded-do-ec stop (nested q ...) cmd)) )
+    
+    ((ec-guarded-do-ec stop (nested (mz:if test) q ...) cmd)
+     (q ...)
+     (when test (ec-guarded-do-ec stop (nested q ...) cmd)) )
     
     ((ec-guarded-do-ec stop (nested (not test) q ...) cmd)
      (q ...)
-     (if (not test) (ec-guarded-do-ec stop (nested q ...) cmd)) )
+     (when (not test) (ec-guarded-do-ec stop (nested q ...) cmd)) )
     
     ((ec-guarded-do-ec stop (nested (and test ...) q ...) cmd)
      (q ...)
-     (if (and test ...) (ec-guarded-do-ec stop (nested q ...) cmd)) )
+     (when (and test ...) (ec-guarded-do-ec stop (nested q ...) cmd)) )
     
     ((ec-guarded-do-ec stop (nested (or test ...) q ...) cmd)
      (q ...)
-     (if (or test ...) (ec-guarded-do-ec stop (nested q ...) cmd)) )
+     (when (or test ...) (ec-guarded-do-ec stop (nested q ...) cmd)) )
     
     ((ec-guarded-do-ec stop (nested (begin etc ...) q ...) cmd)
      (q ...)

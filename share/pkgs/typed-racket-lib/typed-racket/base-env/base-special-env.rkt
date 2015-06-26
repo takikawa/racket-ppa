@@ -144,7 +144,7 @@
    (->opt [-Input-Port -Symbol] (-seq -Bytes))]
   ;; in-directory
   [(make-template-identifier '*in-directory 'racket/private/for)
-   (->opt [(Un (-val #f) -Pathlike)] (-seq -Path))]
+   (->opt [(Un (-val #f) -Pathlike) (-> -Path Univ)] (-seq -Path))]
   ;; in-producer
   [(make-template-identifier 'in-producer 'racket/private/for)
    (-polydots (a b)
@@ -217,4 +217,6 @@
    (-> -FlVector (-seq -Flonum))]
   [(make-template-identifier 'in-extflvector* 'racket/extflonum)
    (-> -ExtFlVector (-seq -ExtFlonum))]
+  [(make-template-identifier 'make-namespace-anchor 'racket/private/namespace)
+   (-> -Variable-Reference -Namespace-Anchor)]
   )

@@ -2,6 +2,7 @@
 @(require "mz.rkt"
           (for-label racket/unsafe/ops
                      racket/flonum
+                     racket/fixnum
                      racket/extflonum
                      (only-in ffi/vector
                               f64vector?
@@ -282,8 +283,20 @@ fixnum).}
 
 
 @deftogether[(
+@defproc[(unsafe-fxvector-length [v fxvector?]) fixnum?]
+@defproc[(unsafe-fxvector-ref [v fxvector?] [k fixnum?]) fixnum?]
+@defproc[(unsafe-fxvector-set! [v fxvector?] [k fixnum?] [x fixnum?]) void?]
+)]{
+
+Unsafe versions of @racket[fxvector-length], @racket[fxvector-ref], and
+@racket[fxvector-set!]. A @tech{fxvector}'s size can never be larger than a
+@tech{fixnum} (so even @racket[fxvector-length] always returns a
+fixnum).}
+
+
+@deftogether[(
 @defproc[(unsafe-flvector-length [v flvector?]) fixnum?]
-@defproc[(unsafe-flvector-ref [v flvector?] [k fixnum?]) any/c]
+@defproc[(unsafe-flvector-ref [v flvector?] [k fixnum?]) flonum?]
 @defproc[(unsafe-flvector-set! [v flvector?] [k fixnum?] [x flonum?]) void?]
 )]{
 
@@ -410,7 +423,7 @@ but further constrained to consume or produce a fixnum.
 
 @deftogether[(
 @defproc[(unsafe-extflvector-length [v extflvector?]) fixnum?]
-@defproc[(unsafe-extflvector-ref [v extflvector?] [k fixnum?]) any/c]
+@defproc[(unsafe-extflvector-ref [v extflvector?] [k fixnum?]) extflonum?]
 @defproc[(unsafe-extflvector-set! [v extflvector?] [k fixnum?] [x extflonum?]) void?]
 )]{
 

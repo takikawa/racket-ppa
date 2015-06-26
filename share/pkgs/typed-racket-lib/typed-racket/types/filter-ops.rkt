@@ -2,10 +2,8 @@
 
 (require "../utils/utils.rkt"
          racket/list racket/match
-         racket/dict
          (prefix-in c: (contract-req))
          (rep type-rep filter-rep object-rep rep-utils)
-         (utils tc-utils)
          (only-in (infer infer) restrict)
          (types union subtype remove-intersect abbrev tc-result))
 
@@ -60,10 +58,16 @@
     [(f f) #t]
     [((Top:) _) #t]
     [(_ (Bot:)) #t]
+    [((OrFilter: ps) (OrFilter: qs))
+     (for/and ([q (in-list qs)])
+       (for/or ([p (in-list ps)])
+         (filter-equal? p q)))]
     [((OrFilter: fs) f2)
-     (and (memf (lambda (f) (filter-equal? f f2)) fs) #t)]
+     (for/or ([f (in-list fs)])
+       (filter-equal? f f2))]
     [(f1 (AndFilter: fs))
-     (and (memf (lambda (f) (filter-equal? f f1)) fs) #t)]
+     (for/or ([f (in-list fs)])
+       (filter-equal? f f1))]
     [((TypeFilter: t1 p) (TypeFilter: t2 p))
      (subtype t2 t1)]
     [((NotTypeFilter: t2 p) (NotTypeFilter: t1 p))

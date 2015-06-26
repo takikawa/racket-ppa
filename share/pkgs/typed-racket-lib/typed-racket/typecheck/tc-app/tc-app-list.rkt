@@ -4,7 +4,7 @@
 (require "../../utils/utils.rkt"
          "signatures.rkt"
          "utils.rkt"
-         syntax/parse syntax/stx racket/match unstable/sequence unstable/syntax
+         syntax/parse syntax/stx racket/match unstable/sequence
          (typecheck signatures tc-funapp)
          (types abbrev utils union substitute)
          (rep type-rep)
@@ -93,9 +93,9 @@
           [_ #f]))
       (ret (-Tuple
              (for/list ([i (in-syntax #'args)] [v (in-list vs)])
-                (if subst
-                    (tc-expr/check/t i (ret (subst-all subst (make-F v))))
-                    (tc-expr/t i)))))))
+               (or (and subst
+                        (tc-expr/check/t? i (ret (subst-all subst (make-F v)))))
+                   (tc-expr/t i)))))))
   ;; special case for `list*'
   (pattern (list* (~between args:expr 1 +inf.0) ...)
     (match-let* ([(list tys ... last) (stx-map tc-expr/t #'(args ...))])

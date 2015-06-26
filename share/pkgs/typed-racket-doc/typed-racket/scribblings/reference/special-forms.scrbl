@@ -237,6 +237,7 @@ variants.
 @defform[(for/last type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for/sum type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for/product type-ann-maybe (for-clause ...) expr ...+)]
+@defform[(for/set type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for*/list type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for*/hash type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for*/hasheq type-ann-maybe (for-clause ...) expr ...+)]
@@ -250,6 +251,7 @@ variants.
 @defform[(for*/last type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for*/sum type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for*/product type-ann-maybe (for-clause ...) expr ...+)]
+@defform[(for*/set type-ann-maybe (for-clause ...) expr ...+)]
 ]]{
 These behave like their non-annotated counterparts, with the exception
 that @racket[#:when] clauses can only appear as the last
@@ -375,20 +377,42 @@ those functions.
 (struct maybe-type-vars name-spec ([f : t] ...) options ...)
 ([maybe-type-vars code:blank (v ...)]
  [name-spec name (code:line name parent)]
- [options #:transparent #:mutable])]{
+ [options #:transparent #:mutable #:prefab])]{
  Defines a @rtech{structure} with the name @racket[name], where the
  fields @racket[f] have types @racket[t], similar to the behavior of @|struct-id|
  from @racketmodname[racket/base].
   When @racket[parent] is present, the
-structure is a substructure of @racket[parent].  When
-@racket[maybe-type-vars] is present, the structure is polymorphic in the type
+structure is a substructure of @racket[parent].
+
+@ex[
+  (struct camelia-sinensis ([age : Integer]))
+  (struct camelia-sinensis-assamica camelia-sinensis ())
+]
+
+When @racket[maybe-type-vars] is present, the structure is polymorphic in the type
  variables @racket[v]. If @racket[parent] is also a polymorphic struct, then
 there must be at least as many type variables as in the parent type, and the
 parent type is instantiated with a prefix of the type variables matching the
 amount it needs.
 
+@ex[
+  (struct (X Y) 2-tuple ([first : X] [second : Y]))
+  (struct (X Y Z) 3-tuple 2-tuple ([first : X] [second : Y] [third :  Z]))
+]
+
 Options provided have the same meaning as for the @|struct-id| form
-from @racketmodname[racket/base].}
+from @racketmodname[racket/base].
+
+A prefab structure type declaration will bind the given @racket[name] to a
+@racket[Prefab] type. Unlike in @racketmodname[racket/base], a non-prefab
+structure type cannot extend a prefab structure type.
+
+@ex[
+  (struct a-prefab ([x : String]) #:prefab)
+  (:type a-prefab)
+  (struct not-allowed a-prefab ())
+]
+}
 
 
 @defform/subs[

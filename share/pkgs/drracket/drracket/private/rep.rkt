@@ -224,6 +224,8 @@ TODO
     (add-drs-function "send-selection-to-repl-and-go" (λ (frame) (send frame send-selection-to-repl #t)))
     (add-drs-function "move-to-interactions" (λ (frame) (send frame move-to-interactions)))
     
+    (add-drs-function "save-definitions" (λ (frame) (send frame save)))
+    
     (map-meta-drs-function "p" "jump-to-previous-error-loc")
     (map-meta-drs-function "n" "jump-to-next-error-loc")
     (map-drs-function "c:x;`" "jump-to-next-error-loc")
@@ -241,6 +243,8 @@ TODO
     (map-drs-function "c:x;2" "split")
     
     (map-drs-function "c:c;c:z" "move-to-interactions")
+    
+    (map-drs-function "c:x;c:w" "save-definitions")
     
     (for ([i (in-range 1 10)])
       (map-drs-function (format "a:~a" i) 
@@ -490,6 +494,7 @@ TODO
                set-caret-owner
                set-clickback
                set-insertion-point
+               set-port-unsaved-name
                set-position
                set-styles-sticky
                set-styles-fixed
@@ -907,25 +912,32 @@ TODO
       (field (need-interaction-cleanup? #f))
       
       (define/private (no-user-evaluation-message frame exit-code memory-killed?)
+        (no-user-evaluation-dialog frame exit-code memory-killed? #t)
+        (set-insertion-point (last-position))
+        (insert-warning "\nInteractions disabled"))
+      
+      (define/public (no-user-evaluation-dialog frame exit-code memory-killed? program-terminated?)
         (define new-limit (and custodian-limit (+ custodian-limit custodian-limit)))
         (define-values (ans checked?)
           (if (preferences:get 'drracket:show-killed-dialog)
               (message+check-box/custom
                (string-constant evaluation-terminated)
-               (string-append
-                (string-constant evaluation-terminated-explanation)
-                (if exit-code
-                    (string-append
-                     "\n\n"
-                     (if (zero? exit-code)
-                         (string-constant exited-successfully)
-                         (format (string-constant exited-with-error-code) exit-code)))
-                    "")
-                (if memory-killed?
-                    (string-append 
-                     "\n\n"
-                     (string-constant program-ran-out-of-memory))
-                    ""))
+               (apply
+                string-append
+                (add-between
+                 (append
+                  (if program-terminated?
+                      (list (string-constant evaluation-terminated-explanation))
+                      '())
+                  (if exit-code
+                      (list (if (zero? exit-code)
+                                (string-constant exited-successfully)
+                                (format (string-constant exited-with-error-code) exit-code)))
+                      '())
+                  (if memory-killed?
+                      (list (string-constant program-ran-out-of-memory))
+                      '()))
+                 "\n\n"))
                (string-constant evaluation-terminated-ask)
                (string-constant ok)
                #f
@@ -941,9 +953,7 @@ TODO
           (preferences:set 'drracket:show-killed-dialog #f))
         (when (equal? ans 3)
           (set-custodian-limit new-limit)
-          (preferences:set 'drracket:child-only-memory-limit new-limit))
-        (set-insertion-point (last-position))
-        (insert-warning "\nInteractions disabled"))
+          (preferences:set 'drracket:child-only-memory-limit new-limit)))
       
       (define/private (cleanup-interaction) ; =Kernel=, =Handler=
         (set! need-interaction-cleanup? #f)
@@ -1006,7 +1016,7 @@ TODO
           
           (set! prompt-position #f)
           (evaluate-from-port
-           (get-in-port) 
+           (get-in-port)
            #f
            (λ ()
              ;; clear out the eof object if it wasn't consumed
@@ -1091,7 +1101,6 @@ TODO
         (update-running #t)
         (set! need-interaction-cleanup? #t)
         (define the-after-expression (after-expression))
-        
         (run-in-evaluation-thread
          (λ () ; =User=, =Handler=, =No-Breaks=
            (let* ([settings (current-language-settings)]
@@ -1209,6 +1218,9 @@ TODO
       (define/public (kill-evaluation) ; =Kernel=, =Handler=
         (when user-custodian
           (custodian-shutdown-all user-custodian))
+        (clear-input-port)
+        (clear-box-input-port)
+        (clear-output-ports)
         (set! user-custodian #f))
       
       (field (eval-thread-thunks null)
@@ -2042,7 +2054,7 @@ TODO
       (super-new)
       (auto-wrap #t)
       (set-styles-sticky #f)
-      
+      (set-port-unsaved-name "interactions from an unsaved editor")
       (inherit set-max-undo-history)
       (set-max-undo-history 'forever)))
   

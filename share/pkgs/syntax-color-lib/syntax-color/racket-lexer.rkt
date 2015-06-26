@@ -82,22 +82,25 @@
    ;; What about byte string regexp strings
    [str (:or (:: (:? (:or "#px" "#rx")) "\"" (:* string-element (:: "\\" unicode)) "\"")
              byte-str)]
-   [byte-str (:: (:? (:or "#px" "#rx")) "#\"" (:* string-element) "\"")]
+   [byte-str (:: (:? (:or "#px" "#rx")) "#\"" (:* byte-string-element) "\"")]
    [string-element (:or (:~ "\"" "\\")
-                        "\\\""
-                        "\\\\"
-                        "\\a"
-                        "\\b"
-                        "\\t"
-                        "\\n"
-                        "\\v"
-                        "\\f"
-                        "\\r"
-                        "\\e"
-                        "\\'"
-                        (:: "\\" (:** 1 3 digit8))
-                        (:: "\\x" (:** 1 2 digit16))
-                        (:: "\\" #\newline))]
+                        string-escape)]
+   [byte-string-element (:or (:- (:/ "\x00" "\xFF") "\"" "\\")
+                             string-escape)]
+   [string-escape (:or "\\\""
+                       "\\\\"
+                       "\\a"
+                       "\\b"
+                       "\\t"
+                       "\\n"
+                       "\\v"
+                       "\\f"
+                       "\\r"
+                       "\\e"
+                       "\\'"
+                       (:: "\\" (:** 1 3 digit8))
+                       (:: "\\x" (:** 1 2 digit16))
+                       (:: "\\" #\newline))]
 
    [bad-str (:: (:? (:or "#px" "#rx")) (:? "#") "\"" 
                 (:* (:~ "\"" "\\")
@@ -402,14 +405,16 @@
   (define racket-nobar-lexer/status (lexer/status nobar-identifier nobar-keyword nobar-bad-id))
   
   (define (extend-error lexeme start end in)
-    (if (memq (peek-char-or-special in)
-              `(special #\newline #\return #\tab #\space #\vtab
-                 #\" #\, #\' #\` #\( #\) #\[ #\] #\{ #\} #\;
-                 ,eof))
+    (define next (peek-char-or-special in))
+    (if (or (char-whitespace? next)
+            (memq next
+                  `(special
+                    #\" #\, #\' #\` #\( #\) #\[ #\] #\{ #\} #\;
+                    ,eof)))
         (ret lexeme 'error #f start end 'bad)
         (let-values (((rest end-pos) (get-chunk in)))
           (ret (string-append lexeme rest) 'error #f start end-pos 'bad))))
   
   (define get-chunk
     (lexer
-     ((:+ (:~ identifier-delims)) (values lexeme end-pos))))
+     [(:+ (:~ identifier-delims)) (values lexeme end-pos)]))

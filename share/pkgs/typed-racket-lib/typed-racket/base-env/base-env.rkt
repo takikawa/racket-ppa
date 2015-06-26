@@ -87,7 +87,7 @@
 [real->floating-point-bytes (->opt -Real (one-of/c  4 8) [Univ -Bytes -Nat] -Bytes)]
 [system-big-endian? (-> B)]
 
-[order-of-magnitude (-> -PosReal -Int)]
+[order-of-magnitude (cl-> [(-PosInt) -Nat] [(-PosReal) -Int])]
 
 ;; Section 4.2.5.3 (ExtFlonum-Bytes Conversions)
 [floating-point-bytes->extfl (->opt -Bytes [Univ -Nat -Nat] -ExtFlonum)]
@@ -394,6 +394,7 @@
 [string->uninterned-symbol (-String . -> . Sym)]
 [string->unreadable-symbol (-String . -> . Sym)]
 [gensym (->opt [(Un Sym -String)] Sym)]
+[symbol<? (->* (list -Symbol -Symbol) -Symbol -Boolean)]
 
 ;; Section 4.7 (Regular Expressions)
 [regexp? (make-pred-ty -Regexp)]
@@ -623,13 +624,13 @@
 [kernel:reverse (-poly (a) (-> (-lst a) (-lst a)))]
 [append (-poly (a) (->* (list) (-lst a) (-lst a)))]
 [length (-poly (a) (-> (-lst a) -Index))]
-[memq (-poly (a) (-> Univ (-lst a) (-opt (-lst a))))]
-[memv (-poly (a) (-> Univ (-lst a) (-opt (-lst a))))]
-[memf (-poly (a) ((a . -> . Univ) (-lst a) . -> . (-opt (-lst a))))]
+[memq (-poly (a) (-> Univ (-lst a) (-opt (-ne-lst a))))]
+[memv (-poly (a) (-> Univ (-lst a) (-opt (-ne-lst a))))]
+[memf (-poly (a) ((a . -> . Univ) (-lst a) . -> . (-opt (-ne-lst a))))]
 [member (-poly (a)
-          (cl->* (Univ (-lst a) . -> . (-opt (-lst a)))
+          (cl->* (Univ (-lst a) . -> . (-opt (-ne-lst a)))
                  (Univ (-lst a) (-> a a Univ)
-                       . -> . (-opt (-lst a)))))]
+                       . -> . (-opt (-ne-lst a)))))]
 [findf (-poly (a) ((a . -> . B) (-lst a) . -> . (-opt a)))]
 
 [assq  (-poly (a b) (Univ (-lst (-pair a b)) . -> . (-opt (-pair a b))))]
@@ -866,10 +867,21 @@
 [hash-eqv? (-> -HashTop B)]
 [hash-equal? (-> -HashTop B)]
 [hash-weak? (-> -HashTop B)]
-;; not a very useful type, but better than nothing
-[hash (-poly (a b) (-> (-HT a b)))]
-[hasheqv (-poly (a b) (-> (-HT a b)))]
-[hasheq (-poly (a b) (-> (-HT a b)))]
+[hash (-poly (a b) (cl->* (-> (-HT a b))
+                          (a b . -> . (-HT a b))
+                          (a b a b . -> . (-HT a b))
+                          (a b a b a b . -> . (-HT a b))
+                          (a b a b a b a b . -> . (-HT a b))))]
+[hasheqv (-poly (a b) (cl->* (-> (-HT a b))
+                             (a b . -> . (-HT a b))
+                             (a b a b . -> . (-HT a b))
+                             (a b a b a b . -> . (-HT a b))
+                             (a b a b a b a b . -> . (-HT a b))))]
+[hasheq (-poly (a b) (cl->* (-> (-HT a b))
+                            (a b . -> . (-HT a b))
+                            (a b a b . -> . (-HT a b))
+                            (a b a b a b . -> . (-HT a b))
+                            (a b a b a b a b . -> . (-HT a b))))]
 [make-hash (-poly (a b) (->opt [(-lst (-pair a b))] (-HT a b)))]
 [make-hasheq (-poly (a b) (->opt [(-lst (-pair a b))] (-HT a b)))]
 [make-hasheqv (-poly (a b) (->opt [(-lst (-pair a b))] (-HT a b)))]
@@ -1378,8 +1390,18 @@
 [semaphore-wait/enable-break (-> -Semaphore -Void)]
 [semaphore-peek-evt (-> -Semaphore (-mu x (-evt x)))]
 [semaphore-peek-evt? (asym-pred Univ B (-FS (-filter (-mu x (-evt x)) 0) -top))]
-;[call-with-semaphore ???]
-;[call-with-semaphore/enable-break ???]
+[call-with-semaphore
+ (-polydots (b a)
+   (cl->* (->... (list -Semaphore (->... '() [a a] b))
+                 [a a] b)
+          (->... (list -Semaphore (->... '() [a a] b) (-opt (-> b)))
+                 [a a] b)))]
+[call-with-semaphore/enable-break
+ (-polydots (b a)
+   (cl->* (->... (list -Semaphore (->... '() [a a] b))
+                 [a a] b)
+          (->... (list -Semaphore (->... '() [a a] b) (-opt (-> b)))
+                 [a a] b)))]
 
 ;; Section 11.3.1 (Thread Cells)
 [thread-cell? (make-pred-ty (make-ThreadCellTop))]
@@ -1413,6 +1435,14 @@
 [future? (make-pred-ty (-future Univ))]
 [would-be-future (-poly (A) ((-> A) . -> . (-future A)))]
 [processor-count (-> -PosInt)]
+
+;; Section 11.4.2 (Future Semaphores)
+[make-fsemaphore (-> -Nat -FSemaphore)]
+[fsemaphore? (make-pred-ty -FSemaphore)]
+[fsemaphore-post (-> -FSemaphore -Void)]
+[fsemaphore-wait (-> -FSemaphore -Void)]
+[fsemaphore-try-wait? (-> -FSemaphore B)]
+[fsemaphore-count (-> -FSemaphore -Nat)]
 
 ;; Section 11.5 (Places)
 [place-enabled? (-> -Boolean)]
@@ -2275,25 +2305,30 @@
   (-poly (a)
    (cl->* (-> mod (Un (one-of/c #f 0) -Void) -Void)
           (-> mod (Un (one-of/c #f 0) -Void) (-> a) (Un -Void a))
-          (->opt mod Sym [(-> Univ)] ManyUniv))))]
+          (->opt mod Sym [(-> Univ)] Univ))))]
 
 [dynamic-require-for-syntax
  (let ((mod (Un -Module-Path -Resolved-Module-Path -Module-Path-Index)))
   (-poly (a)
    (cl->* (-> mod (-val #f) -Void)
           (-> mod (-val #f) (-> a) (Un -Void a))
-          (->opt mod Sym [(-> Univ)] ManyUniv))))]
+          (->opt mod Sym [(-> Univ)] Univ))))]
+
+[module-declared?
+ (->opt (Un -Module-Path -Resolved-Module-Path -Module-Path-Index)
+        [Univ]
+        -Boolean)]
 
 [module->language-info
  (->opt (Un -Module-Path -Path -Resolved-Module-Path)
         [Univ]
         (-opt (make-HeterogeneousVector (list -Module-Path -Symbol Univ))))]
 
-[module->imports (-> -Compiled-Module-Expression
-                             (-lst (-pair (-opt -Integer)
-                                          (-lst -Module-Path-Index))))]
+[module->imports (-> (Un -Module-Path -Resolved-Module-Path -Module-Path-Index)
+                     (-lst (-pair (-opt -Integer)
+                                  (-lst -Module-Path-Index))))]
 [module->exports
- (-> -Compiled-Module-Expression
+ (-> (Un -Module-Path -Resolved-Module-Path)
      (-values
       (list
        (-lst (-pair (-opt -Integer)
@@ -2312,6 +2347,10 @@
                                              (-opt -Integer)
                                              -Symbol
                                              (-opt -Integer)))))))))))]
+
+[module-predefined?
+ (-> (Un -Module-Path -Resolved-Module-Path -Module-Path-Index)
+     -Boolean)]
 
 ;; Section 14.5 (Impersonators and Chaperones)
 [impersonator? (Univ . -> . B)]
@@ -2512,7 +2551,7 @@
 [directory-exists? (-> -Pathlike B)]
 [make-directory (-> -Pathlike -Void)]
 [delete-directory (-> -Pathlike -Void)]
-[directory-list (->opt [-Pathlike] (-lst -Path))]
+[directory-list (->optkey [-Pathlike] #:build? Univ #f (-lst -Path))]
 [filesystem-root-list (-> (-lst -Path))]
 
 ;; Section 15.2.4
@@ -2798,7 +2837,7 @@
 
 [log-message (cl->* (-> -Logger -Log-Level -String Univ -Void)
                     (-> -Logger -Log-Level (Un (-val #f) -Symbol) -String Univ -Void))]
-[log-level? (-> -Logger -Log-Level  B)]
+[log-level? (->opt -Logger -Log-Level [(-opt -Symbol)] B)]
 
 [log-receiver? (make-pred-ty -Log-Receiver)]
 [make-log-receiver (-> -Logger -Log-Level -Log-Receiver)]
@@ -2808,9 +2847,10 @@
                       (-Integer Univ . -> . -Date))]
 [current-seconds (-> -Integer)]
 [current-milliseconds (-> -Fixnum)]
-[current-inexact-milliseconds (-> -Real)]
+[current-inexact-milliseconds (-> -Flonum)]
 [current-gc-milliseconds (-> -Fixnum)]
-[current-process-milliseconds (-> -Fixnum)]
+[current-process-milliseconds
+ (->opt [(Un (-val #f) (-val 'subprocesses) -Thread)] -Fixnum)]
 
 ;; Section 15.7
 [getenv (-> -String (Un -String (-val #f)))]
@@ -2845,6 +2885,15 @@
                       ((list Univ) [a a] . ->... . b)
                       (-lst -String)
                       . -> . b))))]
+
+;; Section 16.1 (Weak Boxes)
+[make-weak-box (-poly (a) (-> a (-weak-box a)))]
+[weak-box-value
+ (-poly (a b)
+   (cl->* (-> (-weak-box a) (-opt a))
+          (-> (-weak-box a) b (Un b a))
+          (->opt -Weak-BoxTop [Univ] Univ)))]
+[weak-box? (make-pred-ty -Weak-BoxTop)]
 
 ;; Section 16.2 (Ephemerons)
 [make-ephemeron (-poly (k v) (-> k v (make-Ephemeron v)))]
@@ -2885,10 +2934,15 @@
 
 ;; Section 18.2 (Libraries and Collections)
 [find-library-collection-paths (->opt [(-lst -Pathlike) (-lst -Pathlike)] (-lst -Path))]
+[find-library-collection-links (-> (-lst (-opt -Path)))]
 [collection-file-path (->* (list -Pathlike) -Pathlike -Path)]
 [collection-path (->* (list) -Pathlike -Path)]
-[current-library-collection-paths (-Param -Path -Path)]
+[current-library-collection-paths (-Param (-lst -Path) (-lst -Path))]
+[current-library-collection-links
+ (-Param (-lst (-opt (Un -Pathlike (-HT (-opt -Symbol) (-lst -Pathlike)))))
+         (-lst (-opt (Un -Path (-HT (-opt -Symbol) (-lst -Path))))))]
 [use-user-specific-search-paths (-Param Univ B)]
+[use-collection-link-paths (-Param Univ B)]
 
 ;; Typed Racket Reference
 ;; Section 4

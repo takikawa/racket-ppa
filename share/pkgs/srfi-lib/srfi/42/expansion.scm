@@ -2,7 +2,7 @@
 ;;; EXPANSION
 ;;;
 
-(module expansion mzscheme
+(module expansion "mzscheme2.rkt"
   (provide (all-from "generator-struct.scm")
            (all-from "generator-definitions.scm")
            (all-from "loops.scm"))
@@ -16,7 +16,7 @@
   (require "generator-struct.scm"
            "loops.scm"
            "generator-definitions.scm")
-  (require-for-template mzscheme)
+  (require-for-template "mzscheme2.rkt")
   
   (define current-introducer (make-parameter #f))
   
@@ -28,8 +28,10 @@
       [_ #f]))
   
   (require (lib "stx.ss" "syntax"))
-  (require (prefix base: scheme)
+  #;(require (prefix base: scheme)
            (for-meta 1 (prefix base: scheme)))
+  (require (prefix base: racket/base)
+           (for-meta 1 (prefix base: racket/base)))
   
   (define (if-filter? stx)
       (syntax-case stx ()
@@ -38,7 +40,8 @@
               (eq? 'if (syntax-e #'head)))]
         [else #f]))
   
-  (require (prefix new- scheme))
+  ; (require (prefix new- scheme))
+  (require (prefix new- racket/base))
   
   #;(define (if-filter? stx)
     (syntax-case* stx (if new-if) module-or-top-identifier=?
@@ -48,10 +51,11 @@
   
   (define (filter-clause? clause-stx)
     (or (if-filter? clause-stx)
-        (syntax-case* clause-stx (if base:if not and or) module-or-top-identifier=?
-          [(not . more) #t]
-          [(and . more) #t]
-          [(or  . more) #t]
+        (syntax-case* clause-stx (if base:if not and or when) module-or-top-identifier=?
+          [(not  . more) #t]
+          [(and  . more) #t]
+          [(or   . more) #t]
+          [(when . more) #t]
           [_            #f])))
       
   (define (begin-clause? clause-stx)
@@ -137,19 +141,19 @@
                 [(if-filter? #'clause1)
                  (syntax-case #'clause1 ()
                    [(the-if expr)
-                    #`(if expr #,(loop2... body-stx))]
+                    #`(when expr #,(loop2... body-stx))]
                    [else (raise-syntax-error 'expand-clauses 
                                              "internal error: <if-filter> expected" #'clause1)])] 
                 [else
                  (syntax-case* #'clause1 (if not and or) module-or-top-identifier=?  ; due to not
                    #;[(if expr)  
-                      #`(if expr #,(loop2... body-stx))]
+                      #`(when expr #,(loop2... body-stx))]
                    [(not expr)
-                    #`(if (not expr) #,(loop2... body-stx))]
+                    #`(when (not expr) #,(loop2... body-stx))]
                    [(or expr ...)
-                    #`(if (or expr ...) #,(loop2... body-stx))]
+                    #`(when (or expr ...) #,(loop2... body-stx))]
                    [(and expr ...)
-                    #`(if (and expr ...) #,(loop2... body-stx))]
+                    #`(when (and expr ...) #,(loop2... body-stx))]
                    [_
                     (raise-syntax-error 'expand-clauses 
                                         "unimplemented <filter>" #'clause1)])]))]
@@ -191,7 +195,7 @@
   ;   var-stx now counts the number of
   ;   elements produced
   
-  (require-for-template mzscheme)
+  (require-for-template "mzscheme2.rkt")
   
   (define (add-index-proc l var-stx)
     (cond

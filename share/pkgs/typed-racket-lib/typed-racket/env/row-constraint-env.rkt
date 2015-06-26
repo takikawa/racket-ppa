@@ -7,8 +7,7 @@
 ;; type variables, this additional environment is
 ;; needed to keep track of the constraints.
 
-(require "../utils/utils.rkt"
-         (rep type-rep))
+(require "../utils/utils.rkt")
 
 (provide initial-row-constraint-env
          current-row-constraints
@@ -37,7 +36,7 @@
 (define (has-row-constraints? v)
   (not (not (assq v (current-row-constraints)))))
 
-;; lookup-row-constraints : Symbol -> Type
+;; lookup-row-constraints : Symbol -> RowConstraint
 ;; returns the mapped-to constraints or #f
 (define (lookup-row-constraints var)
   (cdr (assq var (current-row-constraints))))

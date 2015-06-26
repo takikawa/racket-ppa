@@ -665,19 +665,16 @@
 
   (define abs-cases ; used both for abs and magnitude
     (list
-     (map unop (list -Zero -One -PosByte -Byte -PosIndex -Index -PosFixnum -NonNegFixnum))
+     (-NonNegReal . -> . -NonNegReal : -true-filter : (-arg-path 0))
      ;; abs may not be closed on fixnums. (abs min-fixnum) is not a fixnum
      ((Un -PosInt -NegInt) . -> . -PosInt)
      (-Int . -> . -Nat)
      ((Un -PosRat -NegRat) . -> . -PosRat)
      (-Rat . -> . -NonNegRat)
-     (-FlonumZero . -> . -FlonumZero)
      ((Un -PosFlonum -NegFlonum) . -> . -PosFlonum)
      (-Flonum . -> . -NonNegFlonum)
-     (-SingleFlonumZero . -> . -SingleFlonumZero)
      ((Un -PosSingleFlonum -NegSingleFlonum) . -> . -PosSingleFlonum)
      (-SingleFlonum . -> . -NonNegSingleFlonum)
-     (-InexactRealZero . -> . -InexactRealZero)
      ((Un -PosInexactReal -NegInexactReal) . -> . -PosInexactReal)
      (-InexactReal . -> . -NonNegInexactReal)
      ((Un -PosReal -NegReal) . -> . -PosReal)
@@ -889,12 +886,10 @@
 
 ;; numeric predicates
 ;; There are 25 values that answer true to zero?. They are either reals, or inexact complexes.
+;; Note -RealZero contains NaN and zero? returns #f on it
 [zero?
-  (cl->*
-    (-> -ExactNumber B : (-FS (-filter (-val 0) 0) (-not-filter (-val 0) 0)))
-    (-> -Real B : (-FS (-filter -RealZero 0) (-not-filter -RealZero 0)))
-    (-> N B : (-FS (-filter (Un -RealZero -InexactComplex -InexactImaginary) 0)
-                   (-not-filter -RealZero 0))))]
+  (-> N B : (-FS (-filter (Un -RealZeroNoNan -InexactComplex -InexactImaginary) 0)
+                 (-not-filter -RealZeroNoNan 0)))]
 
 [number? (make-pred-ty N)]
 [integer? (asym-pred Univ B (-FS (-filter (Un -Int -Flonum -SingleFlonum) 0) ; inexact-integers exist...
@@ -912,22 +907,8 @@
 [inexact? (make-pred-ty (Un -InexactReal -InexactImaginary -InexactComplex))]
 [fixnum? (make-pred-ty -Fixnum)]
 [index? (make-pred-ty -Index)]
-[positive? (cl->* (-> -Byte B : (-FS (-filter -PosByte 0) (-filter -Zero 0)))
-                  (-> -Index B : (-FS (-filter -PosIndex 0) (-filter -Zero 0)))
-                  (-> -Fixnum B : (-FS (-filter -PosFixnum 0) (-filter -NonPosFixnum 0)))
-                  (-> -Int B : (-FS (-filter -PosInt 0) (-filter -NonPosInt 0)))
-                  (-> -Rat B : (-FS (-filter -PosRat 0) (-filter -NonPosRat 0)))
-                  (-> -Flonum B : (-FS (-filter -PosFlonum 0) (-filter -NonPosFlonum 0)))
-                  (-> -SingleFlonum B : (-FS (-filter -PosSingleFlonum 0) (-filter -NonPosSingleFlonum 0)))
-                  (-> -InexactReal B : (-FS (-filter -PosInexactReal 0) (-filter -NonPosInexactReal 0)))
-                  (-> -Real B : (-FS (-filter -PosReal 0) (-filter -NonPosReal 0))))]
-[negative? (cl->* (-> -Fixnum B : (-FS (-filter -NegFixnum 0) (-filter -NonNegFixnum 0)))
-                  (-> -Int B : (-FS (-filter -NegInt 0) (-filter -Nat 0)))
-                  (-> -Rat B : (-FS (-filter -NegRat 0) (-filter -NonNegRat 0)))
-                  (-> -Flonum B : (-FS (-filter -NegFlonum 0) (-filter -NonNegFlonum 0)))
-                  (-> -SingleFlonum B : (-FS (-filter -NegSingleFlonum 0) (-filter -NonNegSingleFlonum 0)))
-                  (-> -InexactReal B : (-FS (-filter -NegInexactReal 0) (-filter -NonNegInexactReal 0)))
-                  (-> -Real B : (-FS (-filter -NegReal 0) (-filter -NonNegReal 0))))]
+[positive? (-> -Real B : (-FS (-filter -PosReal 0) (-filter -NonPosReal 0)))]
+[negative? (-> -Real B : (-FS (-filter -NegReal 0) (-filter -NonNegReal 0)))]
 [exact-positive-integer? (make-pred-ty -Pos)]
 [exact-nonnegative-integer? (make-pred-ty -Nat)]
 
@@ -936,59 +917,26 @@
 
 [=
  (from-cases
-  (map (lambda (l) (apply exclude-zero l))
-       (list (list -Byte -PosByte)
-             (list -Index -PosIndex)
-             (list -NonNegFixnum -PosFixnum)
-             (list -NonPosFixnum -NegFixnum)
-             (list -Nat -PosInt)
-             (list -NonPosInt -NegInt)
-             (list -Int (Un -PosInt -NegInt))
-             (list -NonNegRat -PosRat)
-             (list -NonPosRat -NegRat)
-             (list -Rat (Un -PosRat -NegRat))
-             (list -NonNegFlonum -PosFlonum -FlonumZero)
-             (list -NonPosFlonum -NegFlonum -FlonumZero)
-             (list -Flonum (Un -PosFlonum -NegFlonum) -FlonumZero)
-             (list -NonNegSingleFlonum -PosSingleFlonum -SingleFlonumZero)
-             (list -NonPosSingleFlonum -NegSingleFlonum -SingleFlonumZero)
-             (list -SingleFlonum (Un -PosSingleFlonum -NegSingleFlonum) -SingleFlonumZero)
-             (list -NonNegInexactReal -PosInexactReal -InexactRealZero)
-             (list -NonPosInexactReal -NegInexactReal -InexactRealZero)
-             (list -InexactReal (Un -PosInexactReal -NegInexactReal) -InexactRealZero)
-             (list -NonNegReal -PosReal -RealZero)
-             (list -NonPosReal -NegReal -RealZero)
-             (list -Real (Un -PosReal -NegReal) -RealZero)))
+   (-> -Real -RealZero B : (-FS (-filter -RealZeroNoNan 0) (-not-filter -RealZeroNoNan 0)))
+   (-> -RealZero -Real B : (-FS (-filter -RealZeroNoNan 1) (-not-filter -RealZeroNoNan 1)))
   (map (lambda (t) (commutative-equality/filter -ExactNumber t))
        (list -One -PosByte -Byte -PosIndex -Index
              -PosFixnum -NonNegFixnum -NegFixnum -NonPosFixnum -Fixnum
              -PosInt -Nat -NegInt -NonPosInt -Int
              -PosRat -NonNegRat -NegRat -NonPosRat -Rat
              -ExactNumber))
-  (map (lambda (t) (commutative-equality/filter -Flonum t))
-       (list -FlonumZero -PosFlonum -NonNegFlonum -NegFlonum -NonPosFlonum -Flonum))
-  (map (lambda (t) (commutative-equality/filter -SingleFlonum t))
-       (list -SingleFlonumZero -PosSingleFlonum -NonNegSingleFlonum
-             -NegSingleFlonum -NonPosSingleFlonum -SingleFlonum))
-  (map (lambda (t) (commutative-equality/filter -InexactReal t))
-       (list -InexactRealZero -PosInexactReal -NonNegInexactReal
-             -NegInexactReal -NonPosInexactReal -InexactReal))
-  ;; this case should take care of mixed type equality. the filters give
-  ;; sign information, and we get exactness information from the original
-  ;; types
+  ;; For all real types: the filters give sign information, and the exactness information is preserved
+  ;; from the original types.
   (map (lambda (t) (commutative-equality/filter -Real t))
        (list -RealZero -PosReal -NonNegReal -NegReal -NonPosReal -Real))
   (->* (list N N) N B))]
 
 [<  (from-cases
-     (-> -Pos -One B : (-FS (-filter (Un) 0) -top)) ; can't happen
-     (-> -Nat -One B : (-FS (-filter -Zero 0) -top))
-     (-> -Byte -RealZero B : (-FS (-filter (Un) 0) -top))
-     (-> -Byte -One B : (-FS (-filter -Zero 0) -top))
-     (-> -Zero -Byte B : (-FS (-filter -PosByte 1) (-filter -Zero 1))) ; can't be -RealZero, which includes NaN
-     (-> -Zero -Index B : (-FS (-filter -PosIndex 1) (-filter -Zero 1)))
-     (-> -Zero -NonNegFixnum B : (-FS (-filter -PosFixnum 1) (-filter -Zero 1)))
-     (-> -Zero -Nat B : (-FS (-filter -PosInt 1) (-filter -Zero 1)))
+     (-> -Int -One B : (-FS (-filter -NonPosInt 0) (-filter -PosInt 0)))
+     (-> -Real -Zero B : (-FS (-filter -NegReal 0) (-filter -NonNegReal 0)))
+     (-> -Zero -Real B : (-FS (-filter -PosReal 1) (-filter -NonPosReal 1)))
+     (-> -Real -RealZero B : (-FS (-filter -NegReal 0) -top)) ;; False says nothing because of NaN
+     (-> -RealZero -Real B : (-FS (-filter -PosReal 1) -top)) ;; False says nothing because of NaN
      (-> -Byte -PosByte B : (-FS -top (-filter -PosByte 0)))
      (-> -Byte -Byte B : (-FS (-filter -PosByte 1) -top))
      (-> -PosInt -Byte B : (-FS (-and (-filter -PosByte 0) (-filter -PosByte 1)) -top))
@@ -998,9 +946,6 @@
      (-> -Nat -Byte B : (-FS (-and (-filter -Byte 0) (-filter -PosByte 1)) -top))
      (-> -NonNegReal -Byte B : (-FS (-filter -PosByte 1) -top))
      (-> -Byte -Nat B : (-FS -top (-filter -Byte 1)))
-     (-> -Index -RealZero B : (-FS (-filter (Un) 0) -top))
-     (-> -Index -One B : (-FS (-filter -Zero 0) -top))
-     (-> -Zero -Index B : (-FS (-filter -PosIndex 1) (-filter -Zero 1))) ; can't be -RealZero, which includes NaN
      (-> -Index -PosIndex B : (-FS -top (-filter -PosIndex 0)))
      (-> -Index -Index B : (-FS (-filter -PosIndex 1) -top))
      (-> -PosInt -Index B : (-FS (-and (-filter -PosIndex 0) (-filter -PosIndex 1)) -top))
@@ -1010,8 +955,6 @@
      (-> -Nat -Index B : (-FS (-and (-filter -Index 0) (-filter -PosIndex 1)) -top))
      (-> -NonNegReal -Index B : (-FS (-filter -PosIndex 1) -top))
      (-> -Index -Nat B : (-FS -top (-filter -Index 1)))
-     (-> -Fixnum -Zero B : (-FS (-filter -NegFixnum 0) (-filter -NonNegFixnum 0))) ; can't be -RealZero
-     (-> -Zero -Fixnum B : (-FS (-filter -PosFixnum 1) (-filter -NonPosFixnum 1)))
      (-> -Fixnum -PosInt B : (-FS -top (-and (-filter -PosFixnum 0) (-filter -PosFixnum 1))))
      (-> -Fixnum -PosRat B : (-FS -top (-filter -PosFixnum 0)))
      (-> -Fixnum -Nat B : (-FS -top (-and (-filter -NonNegFixnum 0) (-filter -NonNegFixnum 1))))
@@ -1024,14 +967,12 @@
      (-> -NegRat -Fixnum B : (-FS -top (-filter -NegFixnum 1)))
      (-> -NonPosInt -Fixnum B : (-FS -top (-and (-filter -NonPosFixnum 0) (-filter -NonPosFixnum 1))))
      (-> -NonPosRat -Fixnum B : (-FS -top (-filter -NonPosFixnum 1)))
-     (-> -Rat (-val +inf.0) B : (-FS -top (-filter (Un) 0))) ; guaranteed
-     (-> (-val +inf.0) -Rat B : (-FS (-filter (Un) 0) -top)) ; can't happen
-     (-> -Rat (-val -inf.0) B : (-FS (-filter (Un) 0) -top)) ; can't happen
-     (-> (-val -inf.0) -Rat B : (-FS -top (-filter (Un) 0))) ; guaranteed
-     (-> -Rat (-val +inf.f) B : (-FS -top (-filter (Un) 0))) ; guaranteed
-     (-> (-val +inf.f) -Rat B : (-FS (-filter (Un) 0) -top)) ; can't happen
-     (-> -Rat (-val -inf.f) B : (-FS (-filter (Un) 0) -top)) ; can't happen
-     (-> (-val -inf.f) -Rat B : (-FS -top (-filter (Un) 0))) ; guaranteed
+     (-> -Real -PosInfinity B : (-FS (-not-filter (Un -InexactRealNan -PosInfinity) 0)
+                                     (-filter (Un -InexactRealNan -PosInfinity) 0)))
+     (-> -NegInfinity -Real B : (-FS (-not-filter (Un -InexactRealNan -NegInfinity) 1)
+                                     (-filter (Un -InexactRealNan -NegInfinity) 1)))
+     (-> -PosInfinity -Real B : -false-filter)
+     (-> -Real -NegInfinity B : -false-filter)
      ;; If applying filters resulted in the interesection of the filter and the
      ;; original type, we'd only need the cases for Fixnums and those for Reals.
      ;; Cases for Integers and co would fall out naturally from the Real cases,
@@ -1046,14 +987,11 @@
      (<-type-pattern -Real -PosReal -NonNegReal -NegReal -NonPosReal)
      (->* (list R R) R B))]
 [>  (from-cases
-     (-> -One -Pos B : (-FS (-filter (Un) 1) -top)) ; can't happen
-     (-> -One -Nat B : (-FS (-filter -Zero 1) -top))
-     (-> -RealZero -Byte B : (-FS (-filter (Un) 1) -top))
-     (-> -One -Byte B : (-FS (-filter -Zero 1) -top))
-     (-> -Byte -Zero B : (-FS (-filter -PosByte 0) (-filter -Zero 0)))
-     (-> -Index -Zero B : (-FS (-filter -PosIndex 0) (-filter -Zero 0)))
-     (-> -NonNegFixnum -Zero B : (-FS (-filter -PosFixnum 0) (-filter -Zero 0)))
-     (-> -Nat -Zero B : (-FS (-filter -PosInt 0) (-filter -Zero 0)))
+     (-> -One -Int B : (-FS (-filter -NonPosInt 1) (-filter -PosInt 1)))
+     (-> -Real -Zero B : (-FS (-filter -PosReal 0) (-filter -NonPosReal 0)))
+     (-> -Zero -Real B : (-FS (-filter -NegReal 1) (-filter -NonNegReal 1)))
+     (-> -Real -RealZero B : (-FS (-filter -PosReal 0) -top)) ;; False says nothing because of NaN
+     (-> -RealZero -Real B : (-FS (-filter -NegReal 1) -top)) ;; False says nothing because of NaN
      (-> -PosByte -Byte B : (-FS -top (-filter -PosByte 1)))
      (-> -Byte -Byte B : (-FS (-filter -PosByte 0) -top))
      (-> -Byte -PosInt B : (-FS (-and (-filter -PosByte 0) (-filter -PosByte 1)) -top))
@@ -1063,9 +1001,6 @@
      (-> -Byte -Nat B : (-FS (-and (-filter -PosByte 0) (-filter -Byte 1)) -top))
      (-> -Byte -NonNegReal B : (-FS (-filter -PosByte 0) -top))
      (-> -Nat -Byte B : (-FS -top (-filter -Byte 0)))
-     (-> -RealZero -Index B : (-FS (-filter (Un) 1) -top))
-     (-> -One -Index B : (-FS (-filter -Zero 1) -top))
-     (-> -Index -Zero B : (-FS (-filter -PosIndex 0) (-filter -Zero 0)))
      (-> -PosIndex -Index B : (-FS -top (-filter -PosIndex 1)))
      (-> -Index -Index B : (-FS (-filter -PosIndex 0) -top))
      (-> -Index -PosInt B : (-FS (-and (-filter -PosIndex 0) (-filter -PosIndex 1)) -top))
@@ -1075,8 +1010,6 @@
      (-> -Index -Nat B : (-FS (-and (-filter -PosIndex 0) (-filter -Index 1)) -top))
      (-> -Index -NonNegReal B : (-FS (-filter -PosIndex 0) -top))
      (-> -Nat -Index B : (-FS -top (-filter -Index 0)))
-     (-> -Zero -Fixnum B : (-FS (-filter -NegFixnum 1) (-filter -NonNegFixnum 1)))
-     (-> -Fixnum -RealZero B : (-FS (-filter -PosFixnum 0) (-filter -NonPosFixnum 0)))
      (-> -PosInt -Fixnum B : (-FS -top (-and (-filter -PosFixnum 0) (-filter -PosFixnum 1))))
      (-> -PosRat -Fixnum B : (-FS -top (-filter -PosFixnum 1)))
      (-> -Nat -Fixnum B : (-FS -top (-and (-filter -NonNegFixnum 0) (-filter -NonNegFixnum 1))))
@@ -1089,14 +1022,12 @@
      (-> -Fixnum -NegRat B : (-FS -top (-filter -NegFixnum 0)))
      (-> -Fixnum -NonPosInt B : (-FS -top (-and (-filter -NonPosFixnum 0) (-filter -NonPosFixnum 1))))
      (-> -Fixnum -NonPosRat B : (-FS -top (-filter -NonPosFixnum 0)))
-     (-> (-val +inf.0) -Rat B : (-FS -top (-filter (Un) 0))) ; guaranteed
-     (-> -Rat (-val +inf.0) B : (-FS (-filter (Un) 0) -top)) ; can't happen
-     (-> (-val -inf.0) -Rat B : (-FS (-filter (Un) 0) -top)) ; can't happen
-     (-> -Rat (-val -inf.0) B : (-FS -top (-filter (Un) 0))) ; guaranteed
-     (-> (-val +inf.f) -Rat B : (-FS -top (-filter (Un) 0))) ; guaranteed
-     (-> -Rat (-val +inf.f) B : (-FS (-filter (Un) 0) -top)) ; can't happen
-     (-> (-val -inf.f) -Rat B : (-FS (-filter (Un) 0) -top)) ; can't happen
-     (-> -Rat (-val -inf.f) B : (-FS -top (-filter (Un) 0))) ; guaranteed
+     (-> -PosInfinity -Real B : (-FS (-not-filter (Un -InexactRealNan -PosInfinity) 1)
+                                     (-filter (Un -InexactRealNan -PosInfinity) 1)))
+     (-> -Real -NegInfinity B : (-FS (-not-filter (Un -InexactRealNan -NegInfinity) 0)
+                                     (-filter (Un -InexactRealNan -NegInfinity) 0)))
+     (-> -Real -PosInfinity B : -false-filter)
+     (-> -NegInfinity -Real B : -false-filter)
      (>-type-pattern -Int -PosInt -Nat -NegInt -NonPosInt -Zero)
      (>-type-pattern -Rat -PosRat -NonNegRat -NegRat -NonPosRat -Zero)
      (>-type-pattern -Flonum -PosFlonum -NonNegFlonum -NegFlonum -NonPosFlonum)
@@ -1105,13 +1036,12 @@
      (>-type-pattern -Real -PosReal -NonNegReal -NegReal -NonPosReal)
      (->* (list R R) R B))]
 [<= (from-cases
-     (-> -Pos -One B : (-FS (-filter -One 0) -top))
-     (-> -Byte -Zero B : (-FS (-filter -Zero 0) (-filter -PosByte 0)))
-     (-> -Index -Zero B : (-FS (-filter -Zero 0) (-filter -PosIndex 0)))
-     (-> -NonNegFixnum -Zero B : (-FS (-filter -Zero 0) (-filter -PosFixnum 0)))
-     (-> -Nat -Zero B : (-FS (-filter -Zero 0) (-filter -PosInt 0)))
-     (-> -Zero -Nat B : (-FS -top (-filter (Un) 1)))
-     (-> -One -Byte B : (-FS (-filter -PosByte 1) (-filter -Zero 1)))
+     (-> -Int -One B : (-FS (-filter (Un -NonPosInt -One) 0) (-filter -PosInt 0)))
+     (-> -One -Int B : (-FS (-filter -PosInt 1) (-filter -NonPosInt 1)))
+     (-> -Real -Zero B : (-FS (-filter -NonPosReal 0) (-filter -PosReal 0)))
+     (-> -Zero -Real B : (-FS (-filter -NonNegReal 1) (-filter -NegReal 1)))
+     (-> -Real -RealZero B : (-FS (-filter -NonPosReal 0) -top)) ;; False says nothing because of NaN
+     (-> -RealZero -Real B : (-FS (-filter -NonNegReal 0) -top)) ;; False says nothing because of NaN
      (-> -PosByte -Byte B : (-FS (-filter -PosByte 1) -top))
      (-> -Byte -Byte B : (-FS -top (-filter -PosByte 0)))
      (-> -PosInt -Byte B : (-FS (-and (-filter -PosByte 0) (-filter -PosByte 1)) -top))
@@ -1121,9 +1051,6 @@
      (-> -Nat -Byte B : (-FS (-filter -Byte 0) -top))
      (-> -Byte -Nat B : (-FS -top (-and (-filter -PosByte 0) (-filter -Byte 1))))
      (-> -Byte -NonNegRat B : (-FS -top (-filter -PosByte 0)))
-     (-> -Index -Zero B : (-FS (-filter -Zero 0) (-filter -PosIndex 0)))
-     (-> -Zero -Index B : (-FS -top (-filter (Un) 1)))
-     (-> -One -Index B : (-FS (-filter -PosIndex 1) (-filter -Zero 1)))
      (-> -PosIndex -Index B : (-FS (-filter -PosIndex 1) -top))
      (-> -Index -Index B : (-FS -top (-filter -PosIndex 0)))
      (-> -Pos -Index B : (-FS (-and (-filter -PosIndex 0) (-filter -PosIndex 1)) -top))
@@ -1133,11 +1060,6 @@
      (-> -Nat -Index B : (-FS (-filter -Index 0) -top))
      (-> -Index -Nat B : (-FS -top (-and (-filter -PosIndex 0) (-filter -Index 1))))
      (-> -Index -NonNegRat B : (-FS -top (-filter -PosIndex 0)))
-     (-> -NonNegFixnum -Zero B : (-FS (-filter -Zero 0) (-filter -PosFixnum 0)))
-     (-> -Zero -NonNegFixnum B : (-FS (-filter -Zero 1) (-filter (Un) 1)))
-     (-> -One -NonNegFixnum B : (-FS -top (-filter -Zero 1)))
-     (-> -Zero -Fixnum B : (-FS (-filter -NonNegFixnum 1) (-filter -NegFixnum 1)))
-     (-> -Fixnum -Zero B : (-FS (-filter -NonPosFixnum 0) (-filter -PosFixnum 0)))
      (-> -PosInt -Fixnum B : (-FS (-and (-filter -PosFixnum 0) (-filter -PosFixnum 1)) -top))
      (-> -PosReal -Fixnum B : (-FS (-filter -PosFixnum 1) -top))
      (-> -Nat -Fixnum B : (-FS (-and (-filter -NonNegFixnum 0) (-filter -NonNegFixnum 1)) -top))
@@ -1150,14 +1072,10 @@
      (-> -Fixnum -NegReal B : (-FS (-filter -NegFixnum 0) -top))
      (-> -Fixnum -NonPosInt B : (-FS (-and (-filter -NonPosFixnum 0) (-filter -NonPosFixnum 1)) -top))
      (-> -Fixnum -NonPosReal B : (-FS (-filter -NonPosFixnum 0) -top))
-     (-> -Rat (-val +inf.0) B : (-FS -top (-filter (Un) 0))) ; guaranteed
-     (-> (-val +inf.0) -Rat B : (-FS (-filter (Un) 0) -top)) ; can't happen
-     (-> -Rat (-val -inf.0) B : (-FS (-filter (Un) 0) -top)) ; can't happen
-     (-> (-val -inf.0) -Rat B : (-FS -top (-filter (Un) 0))) ; guaranteed
-     (-> -Rat (-val +inf.f) B : (-FS -top (-filter (Un) 0))) ; guaranteed
-     (-> (-val +inf.f) -Rat B : (-FS (-filter (Un) 0) -top)) ; can't happen
-     (-> -Rat (-val -inf.f) B : (-FS (-filter (Un) 0) -top)) ; can't happen
-     (-> (-val -inf.f) -Rat B : (-FS -top (-filter (Un) 0))) ; guaranteed
+     (-> -Real -PosInfinity B : (-FS (-not-filter -InexactRealNan 0) (-filter -InexactRealNan 0)))
+     (-> -NegInfinity -Real B : (-FS (-not-filter -InexactRealNan 1) (-filter -InexactRealNan 1)))
+     (-> -PosInfinity -Real B : (-FS (-filter -PosInfinity 1) (-not-filter -PosInfinity 1)))
+     (-> -Real -NegInfinity B : (-FS (-filter -NegInfinity 0) (-not-filter -NegInfinity 0)))
      (<=-type-pattern -Int -PosInt -Nat -NegInt -NonPosInt -Zero)
      (<=-type-pattern -Rat -PosRat -NonNegRat -NegRat -NonPosRat -Zero)
      (<=-type-pattern -Flonum -PosFlonum -NonNegFlonum -NegFlonum -NonPosFlonum)
@@ -1166,13 +1084,12 @@
      (<=-type-pattern -Real -PosReal -NonNegReal -NegReal -NonPosReal)
      (->* (list R R) R B))]
 [>= (from-cases
-     (-> -One -Pos B : (-FS (-filter -One 1) -top))
-     (-> -Zero -Byte B : (-FS (-filter -Zero 1) (-filter -PosByte 1)))
-     (-> -Zero -Index B : (-FS (-filter -Zero 1) (-filter -PosIndex 1)))
-     (-> -Zero -NonNegFixnum B : (-FS (-filter -Zero 1) (-filter -PosFixnum 1)))
-     (-> -Zero -Nat B : (-FS (-filter -Zero 1) (-filter -PosInt 1)))
-     (-> -Nat -Zero B : (-FS -top (-filter (Un) 0)))
-     (-> -Byte -One B : (-FS (-filter -PosByte 0) (-filter -Zero 0)))
+     (-> -One -Int B : (-FS (-filter (Un -One -NonPosInt) 1) (-filter -PosInt 1)))
+     (-> -Int -One B : (-FS (-filter -PosInt 0) (-filter -NonPosInt 0)))
+     (-> -Real -Zero B : (-FS (-filter -NonNegReal 0) (-filter -NegReal 0)))
+     (-> -Zero -Real B : (-FS (-filter -NonPosReal 1) (-filter -PosReal 1)))
+     (-> -Real -RealZero B : (-FS (-filter -NonNegReal 0) -top)) ;; False says nothing because of NaN
+     (-> -RealZero -Real B : (-FS (-filter -NonPosReal 0) -top)) ;; False says nothing because of NaN
      (-> -Byte -PosByte B : (-FS (-filter -PosByte 0) -top))
      (-> -Byte -Byte B : (-FS -top (-filter -PosByte 1)))
      (-> -Byte -PosInt B : (-FS (-and (-filter -PosByte 0) (-filter -PosByte 1)) -top))
@@ -1182,9 +1099,6 @@
      (-> -Byte -Nat B : (-FS (-filter -Byte 1) -top))
      (-> -Nat -Byte B : (-FS -top (-and (-filter -Byte 0) (-filter -PosByte 1))))
      (-> -NonNegRat -Byte B : (-FS -top (-filter -PosByte 1)))
-     (-> -Zero -Index B : (-FS (-filter -Zero 1) (-filter -PosIndex 1)))
-     (-> -Index -Zero B : (-FS -top (-filter (Un) 0)))
-     (-> -Index -One B : (-FS (-filter -PosIndex 0) (-filter -Zero 0)))
      (-> -Index -PosIndex B : (-FS (-filter -PosIndex 0) -top))
      (-> -Index -Index B : (-FS -top (-filter -PosIndex 1)))
      (-> -Index -Pos B : (-FS (-and (-filter -PosIndex 0) (-filter -PosIndex 1)) -top))
@@ -1194,11 +1108,6 @@
      (-> -Index -Nat B : (-FS (-filter -Index 1) -top))
      (-> -Nat -Index B : (-FS -top (-and (-filter -Index 0) (-filter -PosIndex 1))))
      (-> -NonNegRat -Index B : (-FS -top (-filter -PosIndex 1)))
-     (-> -Zero -NonNegFixnum B : (-FS (-filter -Zero 1) (-filter -PosFixnum 1)))
-     (-> -NonNegFixnum -Zero B : (-FS (-filter -Zero 0) (-filter (Un) 0)))
-     (-> -NonNegFixnum -One B : (-FS -top (-filter -Zero 0)))
-     (-> -Fixnum -Zero B : (-FS (-filter -NonNegFixnum 0) (-filter -NegFixnum 0)))
-     (-> -Zero -Fixnum B : (-FS (-filter -NonPosFixnum 1) (-filter -PosFixnum 1)))
      (-> -Fixnum -PosInt B : (-FS (-and (-filter -PosFixnum 0) (-filter -PosFixnum 1)) -top))
      (-> -Fixnum -PosReal B : (-FS (-filter -PosFixnum 0) -top))
      (-> -Fixnum -Nat B : (-FS (-and (-filter -NonNegFixnum 0) (-filter -NonNegFixnum 1)) -top))
@@ -1211,14 +1120,10 @@
      (-> -NegReal -Fixnum B : (-FS (-filter -NegFixnum 1) -top))
      (-> -NonPosInt -Fixnum B : (-FS (-and (-filter -NonPosFixnum 0) (-filter -NonPosFixnum 1)) -top))
      (-> -NonPosReal -Fixnum B : (-FS (-filter -NonPosFixnum 1) -top))
-     (-> (-val +inf.0) -Rat B : (-FS -top (-filter (Un) 0))) ; guaranteed
-     (-> -Rat (-val +inf.0) B : (-FS (-filter (Un) 0) -top)) ; can't happen
-     (-> (-val -inf.0) -Rat B : (-FS (-filter (Un) 0) -top)) ; can't happen
-     (-> -Rat (-val -inf.0) B : (-FS -top (-filter (Un) 0))) ; guaranteed
-     (-> (-val +inf.f) -Rat B : (-FS -top (-filter (Un) 0))) ; guaranteed
-     (-> -Rat (-val +inf.f) B : (-FS (-filter (Un) 0) -top)) ; can't happen
-     (-> (-val -inf.f) -Rat B : (-FS (-filter (Un) 0) -top)) ; can't happen
-     (-> -Rat (-val -inf.f) B : (-FS -top (-filter (Un) 0))) ; guaranteed
+     (-> -PosInfinity -Real B : (-FS (-not-filter -InexactRealNan 1) (-filter -InexactRealNan 1)))
+     (-> -Real -NegInfinity B : (-FS (-not-filter -InexactRealNan 0) (-filter -InexactRealNan 0)))
+     (-> -Real -PosInfinity B : (-FS (-filter -PosInfinity 0) (-not-filter -PosInfinity 0)))
+     (-> -NegInfinity -Real B : (-FS (-filter -NegInfinity 1) (-not-filter -NegInfinity 1)))
      (>=-type-pattern -Int -PosInt -Nat -NegInt -NonPosInt -Zero)
      (>=-type-pattern -Rat -PosRat -NonNegRat -NegRat -NonPosRat -Zero)
      (>=-type-pattern -Flonum -PosFlonum -NonNegFlonum -NegFlonum -NonPosFlonum)
@@ -1286,9 +1191,9 @@
     ;; reals
     (map unop real-types)
     (varop -NonNegReal) ; (* +inf.0 0.0) -> +nan.0
-    (-> -NegReal -NegReal -NonNegReal)
-    (commutative-binop -NegReal -PosReal -NonPosReal)
-    (-> -NegReal -NegReal -NegReal -NonPosReal)
+    (-> -NonPosReal -NonPosReal -NonNegReal)
+    (commutative-binop -NonPosReal -NonNegReal -NonPosReal)
+    (-> -NonPosReal -NonPosReal -NonPosReal -NonPosReal)
     (varop -Real)
     ;; complexes
     (commutative-case -FloatComplex (Un -InexactComplex -InexactReal -PosRat -NegRat) -FloatComplex)
@@ -1432,8 +1337,6 @@
     (-> -NegFlonum -NegFlonum -NegFlonum -NonPosFlonum)
     ;; limited flonum contagion rules
     ;; (/ 0 <float>) is exact 0 (i.e. not a float)
-    (-> -PosFlonum -PosReal -NonNegFlonum)
-    (-> -PosReal -PosFlonum -NonNegFlonum)
     (commutative-case -PosFlonum -PosReal -NonNegFlonum)
     (->* (list (Un -PosReal -NegReal -Flonum) -Flonum) -Flonum -Flonum)
     (->* (list -Flonum) -Real -Flonum) ; if any argument after the first is exact 0, not a problem
@@ -1452,12 +1355,12 @@
     (commutative-case -InexactReal (Un -PosRat -NegRat -InexactReal) -InexactReal)
     (varop-1+ -InexactReal)
     ;; reals
-    (varop-1+ -PosReal -NonNegReal)
-    (-> -NegReal -NonPosReal)
-    (-> -NegReal -NegReal -NonNegReal)
-    (-> -NegReal -PosReal -NonPosReal)
-    (-> -PosReal -NegReal -NonPosReal)
-    (-> -NegReal -NegReal -NegReal -NonPosReal)
+    (varop-1+ -NonNegReal -NonNegReal)
+    (-> -NonPosReal -NonPosReal)
+    (-> -NonPosReal -NonPosReal -NonNegReal)
+    (-> -NonPosReal -NonNegReal -NonPosReal)
+    (-> -NonNegReal -NonPosReal -NonPosReal)
+    (-> -NonPosReal -NonPosReal -NonPosReal -NonPosReal)
     (varop-1+ -Real)
     ;; complexes
     (varop-1+ -FloatComplex)
@@ -1731,6 +1634,8 @@
 [exact->inexact
  (from-cases (map unop all-float-types)
              (-Zero . -> . -FlonumZero)
+             (-PosInt . -> . -PosFlonum)
+             (-NegInt . -> . -NegFlonum)
              (-PosRat . -> . -NonNegFlonum)
              (-NegRat . -> . -NonPosFlonum)
              (-Rat . -> . -Flonum)
@@ -1759,16 +1664,28 @@
                     (-NegFlonum . -> . -NegInt)
                     (-NonPosFlonum . -> . -NonPosInt)
                     (-Flonum . -> . -Int))]
-[real->single-flonum (cl->* (-RealZero . -> . -SingleFlonumZero)
-                            ;; no positive / negative cases, possible underflow
-                            (-NonNegReal . -> . -NonNegSingleFlonum)
-                            (-NonPosReal . -> . -NonPosSingleFlonum)
-                            (-Real . -> . -SingleFlonumZero))]
-[real->double-flonum (cl->* (-RealZero . -> . -FlonumZero)
-                            ;; no positive / negative cases, possible underflow
-                            (-NonNegReal . -> . -NonNegFlonum)
-                            (-NonPosReal . -> . -NonPosFlonum)
-                            (-Real . -> . -Flonum))]
+[real->single-flonum
+ (from-cases (map unop single-flonum-types)
+             (-FlonumPosZero . -> . -SingleFlonumPosZero)
+             (-FlonumNegZero . -> . -SingleFlonumNegZero)
+             (-RealZero . -> . -SingleFlonumZero)
+             (-PosInt . -> . -PosSingleFlonum)
+             (-NegInt . -> . -NegSingleFlonum)
+             ;; no positive / negative cases, possible underflow
+             (-NonNegReal . -> . -NonNegSingleFlonum)
+             (-NonPosReal . -> . -NonPosSingleFlonum)
+             (-Real . -> . -SingleFlonumZero))]
+[real->double-flonum
+ (from-cases (map unop all-flonum-types)
+             (-SingleFlonumPosZero . -> . -FlonumPosZero)
+             (-SingleFlonumNegZero . -> . -FlonumNegZero)
+             (-RealZero . -> . -FlonumZero)
+             (-PosInt . -> . -PosFlonum)
+             (-NegInt . -> . -NegFlonum)
+             ;; no positive / negative cases, possible underflow
+             (-NonNegReal . -> . -NonNegFlonum)
+             (-NonPosReal . -> . -NonPosFlonum)
+             (-Real . -> . -Flonum))]
 
 [floor
  (from-cases
@@ -1880,14 +1797,13 @@
              (-PosRat -Int . -> . -PosRat)
              (-NonNegRat -Int . -> . -NonNegRat)
              (-Rat -Int . -> . -Rat)
-             (-PosFlonum -Real . -> . -PosFlonum)
-             (-PosReal -Flonum . -> . -PosFlonum)
-             (-NonNegFlonum -Real . -> . -NonNegFlonum)
-             (-NonNegReal -Flonum . -> . -NonNegFlonum)
+             (-NonNegFlonum -NonNegFlonum . -> . -NonNegFlonum)
+             (-NonNegFlonum -NonNegReal . -> . (Un -NonNegFlonum -One))
+             (-PosReal -NonNegFlonum . -> . (Un -NonNegFlonum -One))
              (-Flonum (Un -NegInt -PosInt) . -> . -Flonum)
              (-Flonum -Int . -> . (Un -Flonum -One))
              (-Flonum -Flonum . -> . (Un -Flonum -FloatComplex))
-             (-NonNegSingleFlonum (Un -SingleFlonum -NegRat -PosRat) . -> . -NonNegSingleFlonum)
+             (-NonNegSingleFlonum (Un -NonNegSingleFlonum -NegRat -PosRat) . -> . -NonNegSingleFlonum)
              (-SingleFlonum (Un -NegInt -PosInt) . -> . -SingleFlonum)
              (-SingleFlonum -Int . -> . (Un -SingleFlonum -One))
              (-SingleFlonum -SingleFlonum . -> . (Un -SingleFlonum -SingleFlonumComplex))

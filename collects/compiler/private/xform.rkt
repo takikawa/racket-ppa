@@ -881,13 +881,14 @@
                setjmp longjmp _longjmp scheme_longjmp_setjmp scheme_mz_longjmp scheme_jit_longjmp
                scheme_jit_setjmp_prepare
                scheme_get_thread_local_variables pthread_getspecific
+               __builtin_frame_address
 
                ;; The following are functions, but they don't trigger GC, and
                ;; they either take one argument or no pointer arguments.
                ;; So we can ignore them:
                
-               
                __get_errno_ptr ; QNX preprocesses errno to __get_errno_ptr
+               __getreent ; Cygwin
 
                strlen cos cosl sin sinl exp expl pow powl log logl sqrt sqrtl atan2 atan2l
                isnan isinf fpclass _fpclass __fpclassify __fpclassifyf __fpclassifyl

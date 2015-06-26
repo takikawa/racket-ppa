@@ -5,12 +5,13 @@
          (rep type-rep filter-rep object-rep rep-utils)
          (utils tc-utils early-return)
          (types utils resolve base-abbrev match-expanders
-                numeric-tower substitute current-seen)
+                numeric-tower substitute current-seen prefab)
          (for-syntax racket/base syntax/parse unstable/sequence))
 
 (lazy-require
   ("union.rkt" (Un))
-  ("../infer/infer.rkt" (infer)))
+  ("../infer/infer.rkt" (infer))
+  ("../typecheck/tc-subst.rkt" (restrict-values)))
 
 (define subtype-cache (make-hash))
 
@@ -103,19 +104,19 @@
         (arr: t1 t2 #f #f '()))
        (subtype-seq A0
                     (subtypes* t1 s1)
-                    (subtype* s2 t2))]
+                    (subtype* (restrict-values s2 t1) t2))]
       [((arr: s1 s2 #f #f s-kws)
         (arr: t1 t2 #f #f t-kws))
        (subtype-seq A0
                     (subtypes* t1 s1)
                     (kw-subtypes* s-kws t-kws)
-                    (subtype* s2 t2))]
+                    (subtype* (restrict-values s2 t1) t2))]
       [((arr: s-dom s-rng s-rest #f s-kws)
         (arr: t-dom t-rng #f #f t-kws))
        (subtype-seq A0
                     (subtypes*/varargs t-dom s-dom s-rest)
                     (kw-subtypes* s-kws t-kws)
-                    (subtype* s-rng t-rng))]
+                    (subtype* (restrict-values s-rng t-dom) t-rng))]
       [((arr: s-dom s-rng #f #f s-kws)
         (arr: t-dom t-rng t-rest #f t-kws))
        #f]
@@ -125,7 +126,7 @@
                     (subtypes*/varargs t-dom s-dom s-rest)
                     (subtype* t-rest s-rest)
                     (kw-subtypes* s-kws t-kws)
-                    (subtype* s-rng t-rng))]
+                    (subtype* (restrict-values s-rng t-dom) t-rng))]
       ;; handle ... varargs when the bounds are the same
       [((arr: s-dom s-rng #f (cons s-drest dbound) s-kws)
         (arr: t-dom t-rng #f (cons t-drest dbound) t-kws))
@@ -133,7 +134,7 @@
                     (subtype* t-drest s-drest)
                     (subtypes* t-dom s-dom)
                     (kw-subtypes* s-kws t-kws)
-                    (subtype* s-rng t-rng))]
+                    (subtype* (restrict-values s-rng t-dom) t-rng))]
       [(_ _) #f]))
 
 ;; check subtyping of filters, so that predicates subtype correctly
@@ -142,6 +143,10 @@
    [(f f) A0]
    [((Bot:) t) A0]
    [(s (Top:)) A0]
+   [((TypeFilter: t1 p) (TypeFilter: t2 p))
+    (subtype* A0 t1 t2)]
+   [((NotTypeFilter: t1 p) (NotTypeFilter: t2 p))
+    (subtype* A0 t2 t1)]
    [(_ _) #f]))
 
 (define (subtypes/varargs args dom rst)
@@ -178,9 +183,9 @@
   (lambda (stx)
     (syntax-case stx ()
       [(_ i)
-       #'(or (and (Name: _ _ _ #t)
+       #'(or (and (Name/struct:)
                   (app resolve-once (? Struct? i)))
-             (App: (and (Name: _ _ _ #t)
+             (App: (and (Name/struct:)
                         (app resolve-once (Poly: _ (? Struct? i))))
                    _ _))])))
 
@@ -210,7 +215,7 @@
     (or (free-identifier=? s-name p-name)
         (match s
           [(Poly: _ (? Struct? s*)) (in-hierarchy? s* par)]
-          [(Struct: _ (and (Name: _ _ _ #t) p) _ _ _ _)
+          [(Struct: _ (and (Name/struct:) p) _ _ _ _)
            (in-hierarchy? (resolve-once p) par)]
           [(Struct: _ (? Struct? p) _ _ _ _) (in-hierarchy? p par)]
           [(Struct: _ (Poly: _ p) _ _ _ _) (in-hierarchy? p par)]
@@ -505,6 +510,11 @@
                      (list -Symbol -String Univ
                            (Un (-val #f) -Symbol)))
                     t)]
+         ;; FIXME: change Univ to Place-Message-Allowed if/when that type is defined
+         [((Base: 'Place _ _ _) (Evt: (== Univ)))
+          #t]
+         [((Base: 'Base-Place-Channel _ _ _) (Evt: (== Univ)))
+          #t]
          [((CustodianBox: t) (Evt: t*))
           ;; Note that it's the whole box type that's being
           ;; compared against t* here
@@ -514,6 +524,8 @@
          ;; Invariant types
          [((Box: s) (Box: t)) (type-equiv? A0 s t)]
          [((Box: _) (BoxTop:)) A0]
+         [((Weak-Box: s) (Weak-Box: t)) (type-equiv? A0 s t)]
+         [((Weak-Box: _) (Weak-BoxTop:)) A0]
          [((ThreadCell: s) (ThreadCell: t)) (type-equiv? A0 s t)]
          [((ThreadCell: _) (ThreadCellTop:)) A0]
          [((Channel: s) (Channel: t)) (type-equiv? A0 s t)]
@@ -552,6 +564,20 @@
          ;; subtyping on structs follows the declared hierarchy
          [((Struct: nm (? Type/c? parent) _ _ _ _) other)
           (subtype* A0 parent other)]
+         [((Prefab: k1 ss) (Prefab: k2 ts))
+          (and (prefab-key-subtype? k1 k2)
+               (and (>= (length ss) (length ts))
+                    (for/fold ([A A0])
+                              ([s (in-list ss)]
+                               [t (in-list ts)]
+                               [mut? (in-list (prefab-key->field-mutability k2))]
+                               #:break (not A))
+                      (and A
+                           (if mut?
+                               (subtype-seq A
+                                            (subtype* t s)
+                                            (subtype* s t))
+                               (subtype* A s t))))))]
          ;; subtyping on values is pointwise, except special case for Bottom
          [((Values: (list (Result: (== -Bottom) _ _))) _)
           A0]
@@ -654,7 +680,9 @@
                (equal-clause? fields fields*)
                (equal-clause? methods methods*)
                (equal-clause? augments augments*)
-               (sub init-rest init-rest*))]
+               (or (and init-rest init-rest*
+                        (sub init-rest init-rest*))
+                   (and (not init-rest) (not init-rest*))))]
          ;; otherwise, not a subtype
          [(_ _) #f])))
      (when (null? A)

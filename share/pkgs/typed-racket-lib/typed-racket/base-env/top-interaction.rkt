@@ -1,7 +1,6 @@
 #lang racket/base
 
-(require
-  (for-syntax racket/base racket/lazy-require syntax/parse))
+(require (for-syntax racket/base racket/lazy-require))
 
 (begin-for-syntax
   (lazy-require [(submod "." implementation)
@@ -14,8 +13,9 @@
   :type :print-type :query-type/args :query-type/result)
 
 (define-for-syntax (fail _ stx)
-  (syntax-parse stx
-    [_:id
+  (syntax-case stx ()
+    [_
+     (identifier? stx)
      (raise-syntax-error #f "must be applied to arguments" stx)]
     [_ (raise-syntax-error #f "only valid at the top-level of an interaction" stx)]))
 
@@ -79,7 +79,7 @@
       [(_ e)
        (tc-toplevel/full stx #'e
          (λ (expanded type)
-           #`(display
+           #`(displayln
               #,(if (eq? type 'no-type)
                     "This form has no type (it does not produce a value)."
                     (pretty-format-type

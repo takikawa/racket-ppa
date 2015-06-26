@@ -40,6 +40,7 @@
       character]
 [expr-for-let (lambda (variable variable ...) expr)
               expr]
+[test-case @#,racket[(check-satisifed expr expr)]]
 ]
 
 @prim-nonterms[("intermediate") define define-struct]
@@ -98,6 +99,10 @@ did in the @secref["beginner-abbr"] level.
 
 
 @section[#:tag "intermediate-pre-defined" ]{Pre-defined Functions}
+
+The remaining subsections list those functions that are built into the
+programming language. All other functions are imported from a teachpack or
+must be defined in the program. 
 
 @(require (submod lang/htdp-intermediate procedures))
 @(render-sections (docs) #'here "htdp-intermediate")

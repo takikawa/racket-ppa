@@ -217,8 +217,8 @@ If the namespace does not, they are colored the unbound color.
     
     (define-struct arrow () #:mutable #:transparent)
     (define-struct (var-arrow arrow)
-      (start-text start-pos-left start-pos-right
-                  end-text end-pos-left end-pos-right
+      (start-text start-pos-left start-pos-right start-px start-py
+                  end-text end-pos-left end-pos-right end-px end-py
                   actual? level require-arrow? name-dup?)
       ;; level is one of 'lexical, 'top-level, 'import
       #:transparent)
@@ -273,7 +273,9 @@ If the namespace does not, they are colored the unbound color.
       get-next-trace-refresh?
       set-next-trace-refresh
       set-replay-state
-      get-replay-state)
+      get-replay-state
+      show-online-internal-error
+      show-error-report)
     
     ;; clearing-text-mixin : (mixin text%)
     ;; overrides methods that make sure the arrows go away appropriately.
@@ -360,7 +362,7 @@ If the namespace does not, they are colored the unbound color.
     (define make-syncheck-text%
       (λ (super%)
         (let* ([cursor-arrow (make-object cursor% 'arrow)])
-          (class* (docs-text-mixin super%) (syncheck-text<%>)
+          (class* (docs-text-defs-mixin super%) (syncheck-text<%>)
             (inherit set-cursor get-admin invalidate-bitmap-cache set-position
                      get-pos/text-dc-location position-location
                      get-canvas last-position dc-location-to-editor-location
@@ -368,7 +370,7 @@ If the namespace does not, they are colored the unbound color.
                      highlight-range unhighlight-range
                      paragraph-end-position first-line-currently-drawn-specially?
                      line-end-position position-line
-                     syncheck:add-docs-range get-padding)
+                     syncheck:add-docs-range syncheck:add-require-candidate get-padding)
             
             ;; arrow-records : (U #f hash[text% => arrow-record])
             ;; arrow-record = interval-map[(listof arrow-entry)]
@@ -529,11 +531,15 @@ If the namespace does not, they are colored the unbound color.
               (let-values ([(start-x start-y) (find-poss 
                                                (var-arrow-start-text arrow)
                                                (var-arrow-start-pos-left arrow)
-                                               (var-arrow-start-pos-right arrow))]
+                                               (var-arrow-start-pos-right arrow)
+                                               (var-arrow-start-px arrow)
+                                               (var-arrow-start-py arrow))]
                            [(end-x end-y) (find-poss 
                                            (var-arrow-end-text arrow)
                                            (var-arrow-end-pos-left arrow)
-                                           (var-arrow-end-pos-right arrow))])
+                                           (var-arrow-end-pos-right arrow)
+                                           (var-arrow-end-px arrow)
+                                           (var-arrow-end-py arrow))])
                 (values start-x start-y end-x end-y)))
             
             (define/private (get-tail-arrow-poss arrow)
@@ -546,9 +552,9 @@ If the namespace does not, they are colored the unbound color.
                     [(and snip 
                           (is-a? snip editor-snip%)
                           (= pos (send text get-snip-position snip)))
-                     (find-poss text pos pos)]
+                     (find-poss text pos pos .5 .5)]
                     [else
-                     (find-poss text pos (+ pos 1))])))
+                     (find-poss text pos (+ pos 1) .5 .5)])))
               (let-values ([(start-x start-y) (find-poss/embedded 
                                                (tail-arrow-from-text arrow)
                                                (tail-arrow-from-pos arrow))]
@@ -562,7 +568,7 @@ If the namespace does not, they are colored the unbound color.
             (define xrb (box 0))
             (define yrb (box 0))
 
-            (define/private (find-poss text left-pos right-pos)
+            (define/private (find-poss text left-pos right-pos px py)
               (send text position-location left-pos xlb ylb #t)
               (send text position-location right-pos xrb yrb #f)
               (let*-values ([(xl-off yl-off) (send text editor-location-to-dc-location 
@@ -571,8 +577,8 @@ If the namespace does not, they are colored the unbound color.
                             [(xr-off yr-off) (send text editor-location-to-dc-location 
                                                    (unbox xrb) (unbox yrb))]
                             [(xr yr) (dc-location-to-editor-location xr-off yr-off)])
-                (values (/ (+ xl xr) 2)
-                        (/ (+ yl yr) 2))))
+                (values (+ xl (* (- xr xl) px))
+                        (+ yl (* (- yr yl) py)))))
             
             ;; syncheck:init-arrows : -> void
             (define/public (syncheck:init-arrows)
@@ -646,16 +652,18 @@ If the namespace does not, they are colored the unbound color.
                      (parent menu)
                      (callback (λ (x y) (fw:handler:edit-file file))))
                 (void))
-              (syncheck:add-menu text start-pos end-pos #f (make-require-open-menu file)))
+              (syncheck:add-menu text start-pos end-pos #f (make-require-open-menu file))
+              (syncheck:add-require-candidate file))
             
             (define/public (syncheck:add-docs-menu text start-pos end-pos id
                                                    the-label
                                                    path
                                                    definition-tag
-                                                   tag)
+                                                   url-tag)
+              (syncheck:add-docs-range start-pos end-pos definition-tag path url-tag)
               (define (visit-docs-url)
                 (define url (path->url path))
-                (define url2 (if tag
+                (define url2 (if url-tag
                                  (make-url (url-scheme url)
                                            (url-user url)
                                            (url-host url)
@@ -663,10 +671,9 @@ If the namespace does not, they are colored the unbound color.
                                            (url-path-absolute? url)
                                            (url-path url)
                                            (url-query url)
-                                           tag)
+                                           url-tag)
                                  url))
                 (send-url (url->string url2)))
-              (syncheck:add-docs-range start-pos end-pos definition-tag visit-docs-url)
               (syncheck:add-menu 
                text start-pos end-pos id
                (λ (menu)
@@ -712,10 +719,11 @@ If the namespace does not, they are colored the unbound color.
                   (define arrs (filter arrow? vec-ents))
                   (and (not (null? arrs)) arrs))
                 (define arrows
-                  (or (find-arrows (send text get-start-position))
-                      (and (= (send text get-start-position) 
-                              (send text get-end-position))
-                           (find-arrows (- (send text get-start-position) 1)))))
+                  (and arrow-record
+                       (or (find-arrows (send text get-start-position))
+                           (and (= (send text get-start-position) 
+                                   (send text get-end-position))
+                                (find-arrows (- (send text get-start-position) 1))))))
                 (when arrows
                   (tack/untack-callback arrows))))
             
@@ -831,24 +839,35 @@ If the namespace does not, they are colored the unbound color.
                                     (make-colored-region color text start fin)
                                     #f #f))))
             
-            ;; this method is no longer used; see docs for more
+            ;; these two methods are no longer used; see docs for more
             (define/public (syncheck:add-arrow start-text start-pos-left start-pos-right
                                                end-text end-pos-left end-pos-right
                                                actual? level)
               (void))
-            
-            ;; syncheck:add-arrow : symbol text number number text number number boolean -> void
-            ;; pre: start-editor, end-editor are embedded in `this' (or are `this')
-            (define/public (syncheck:add-arrow/name-dup start-text start-pos-left start-pos-right
-                                                        end-text end-pos-left end-pos-right
+            (define/public (syncheck:add-arrow/name-dup start-text
+                                                        start-pos-left start-pos-right
+                                                        end-text
+                                                        end-pos-left end-pos-right
                                                         actual? level require-arrow? name-dup?)
+              (void))
+            
+            ;; pre: start-editor, end-editor are embedded in `this' (or are `this')
+            (define/public (syncheck:add-arrow/name-dup/pxpy start-text
+                                                             start-pos-left start-pos-right
+                                                             start-px start-py
+                                                             end-text
+                                                             end-pos-left end-pos-right
+                                                             end-px end-py
+                                                             actual? level require-arrow? name-dup?)
               (when (and arrow-records
                          (preferences:get 'drracket:syncheck:show-arrows?))
                 (when (add-to-bindings-table
                        start-text start-pos-left start-pos-right
                        end-text end-pos-left end-pos-right)
                   (let ([arrow (make-var-arrow start-text start-pos-left start-pos-right
+                                               start-px start-py
                                                end-text end-pos-left end-pos-right
+                                               end-px end-py
                                                actual? level require-arrow? name-dup?)])
                     (add-to-range/key start-text start-pos-left start-pos-right arrow #f #f)
                     (add-to-range/key end-text end-pos-left end-pos-right arrow #f #f)))))
@@ -1269,7 +1288,7 @@ If the namespace does not, they are colored the unbound color.
                     (f menu))
                   
                   (define-values (binding-identifiers make-identifiers-hash)
-                    (position->matching-identifiers-hash text pos (+ pos 1) #t))
+                    (position->matching-identifiers-hash text pos pos #t))
                   (unless (null? binding-identifiers)
                     (define name-to-offer (find-name-to-offer binding-identifiers))
                     (new menu-item%
@@ -1686,9 +1705,13 @@ If the namespace does not, they are colored the unbound color.
                      (send (send tab get-defs) jump-to dt))))
             
             (define/augment (after-set-next-settings settings)
-              (let ([frame (get-top-level-window)])
-                (when frame
-                  (send frame update-button-visibility/settings settings)))
+              (define frame (get-top-level-window))
+              (when frame
+                (send frame update-button-visibility/settings settings)
+                (define lang (drracket:language-configuration:language-settings-language settings))
+                (define module-language? (is-a? lang drracket:module-language:module-language<%>))
+                (unless module-language?
+                  (send frame reset-previous-check-syntax-information this)))
               (inner (void) after-set-next-settings settings))
 
             (define/public (syncheck:find-source-object stx)
@@ -1749,7 +1772,6 @@ If the namespace does not, they are colored the unbound color.
         (define/public (set-replay-state rs) (set! current-replay-state #f))
         (define/public (get-replay-state) current-replay-state)
         
-        (define report-error-text-has-something? #f)
         (define report-error-text (new (fw:text:ports-mixin fw:racket:text%)))
         (define error-report-visible? #f)
         (send report-error-text auto-wrap #t)
@@ -1775,6 +1797,16 @@ If the namespace does not, they are colored the unbound color.
           ;; this code is also run by syncheck:clear-arrows, which
           ;; used to be called here (indirectly by syncheck:clear-highlighting)
           (send (get-defs) syncheck:clear-coloring))
+
+        (define/public (show-online-internal-error str)
+          (define err-port (send (get-error-report-text) get-err-port))
+          (display "internal error: " err-port)
+          (display str err-port)
+          (flush-output err-port)
+          (turn-on-error-report)
+          (send (get-error-report-text) scroll-to-position 0)
+          (when (object=? (send (get-frame) get-current-tab) this)
+            (send (get-frame) show-error-report)))
 
         (define/public (syncheck:clear-error-message)
           (define old-error-report-visible? error-report-visible?)
@@ -1886,6 +1918,7 @@ If the namespace does not, they are colored the unbound color.
         (define/public (replay-compile-comp-trace defs-text val bx)
           (send (send defs-text get-tab) add-bkg-running-color
                 'syncheck "orchid" cs-syncheck-running)
+          (define known-dead-place-channels (make-hasheq))
           (let loop ([val val]
                      [start-time (current-inexact-milliseconds)]
                      [i 0])
@@ -1895,7 +1928,7 @@ If the namespace does not, they are colored the unbound color.
                (set-box! bx (cdr (unbox bx)))
                (loop new-val start-time i)]
               [(null? val)
-               (send defs-text syncheck:update-blue-boxes)
+               (send defs-text syncheck:update-blue-boxes (send (send defs-text get-tab) get-ints))
                (send defs-text syncheck:update-drawn-arrows)
                (send (send defs-text get-tab) remove-bkg-running-color 'syncheck)
                (set-syncheck-running-mode #f)]
@@ -1912,7 +1945,7 @@ If the namespace does not, they are colored the unbound color.
                                   (loop val (current-inexact-milliseconds) 0))))
                 #f)]
               [else
-               (process-trace-element defs-text (car val))
+               (process-trace-element known-dead-place-channels defs-text (car val))
                (loop (cdr val) start-time (+ i 1))])))
         
         (define/public (reset-previous-check-syntax-information defs-text)
@@ -1922,17 +1955,18 @@ If the namespace does not, they are colored the unbound color.
           (send defs-text syncheck:reset-docs-im)
           (send defs-text syncheck:init-arrows))
         
-        (define/private (process-trace-element defs-text x)
+        (define/private (process-trace-element known-dead-place-channels defs-text x)
           ;; using 'defs-text' all the time is wrong in the case of embedded editors,
           ;; but they already don't work and we've arranged for them to not appear here ....
           (match x
-            [`#(syncheck:add-arrow/name-dup ,start-pos-left ,start-pos-right
-                                            ,end-pos-left ,end-pos-right
-                                            ,actual? ,level ,require-arrow? ,name-dup-pc ,name-dup-id)
-             (define name-dup? (build-name-dup? name-dup-pc name-dup-id))
-             (send defs-text syncheck:add-arrow/name-dup
-                   defs-text start-pos-left start-pos-right
-                   defs-text end-pos-left end-pos-right 
+            [`#(syncheck:add-arrow/name-dup/pxpy
+                ,start-pos-left ,start-pos-right ,start-px ,start-py
+                ,end-pos-left ,end-pos-right ,end-px ,end-py
+                ,actual? ,level ,require-arrow? ,name-dup-pc ,name-dup-id)
+             (define name-dup? (build-name-dup? name-dup-pc name-dup-id  known-dead-place-channels))
+             (send defs-text syncheck:add-arrow/name-dup/pxpy
+                   defs-text start-pos-left start-pos-right start-px start-py
+                   defs-text end-pos-left end-pos-right end-px end-py
                    actual? level require-arrow? name-dup?)]
             [`#(syncheck:add-tail-arrow ,from-pos ,to-pos)
              (send defs-text syncheck:add-tail-arrow defs-text from-pos defs-text to-pos)]
@@ -1953,14 +1987,13 @@ If the namespace does not, they are colored the unbound color.
              (define to-be-renamed/poss/fixed
                (for/list ([lst (in-list to-be-renamed/poss)])
                  (list defs-text (list-ref lst 0) (list-ref lst 1))))
-             (define name-dup? (build-name-dup? name-dup-pc name-dup-id))
+             (define name-dup? (build-name-dup? name-dup-pc name-dup-id known-dead-place-channels))
              (send defs-text syncheck:add-id-set to-be-renamed/poss/fixed name-dup?)]))
         
-        (define/private (build-name-dup? name-dup-pc name-dup-id)
-          (define other-side-dead? #f)
+        (define/private (build-name-dup? name-dup-pc name-dup-id known-dead-place-channels)
           (define (name-dup? name) 
             (cond
-              [other-side-dead? 
+              [(hash-ref known-dead-place-channels name-dup-pc #f)
                ;; just give up here ...
                #f]
               [else
@@ -1969,8 +2002,7 @@ If the namespace does not, they are colored the unbound color.
                (cond
                  [(list? res) (car res)]
                  [else
-                  (printf "other side died\n")
-                  (set! other-side-dead? #t)
+                  (hash-set! known-dead-place-channels name-dup-pc #t)
                   #f])]))
           name-dup?)
         
@@ -2040,7 +2072,7 @@ If the namespace does not, they are colored the unbound color.
             (send report-error-parent-panel change-children
                   (λ (l) (remq report-error-panel l)))))
         
-        (define/private (show-error-report)
+        (define/public (show-error-report)
           (unless (syncheck:error-report-visible?)
             (send report-error-parent-panel stop-recording-prefs)
             (send report-error-parent-panel change-children
@@ -2384,7 +2416,9 @@ If the namespace does not, they are colored the unbound color.
      syncheck-add-to-online-expansion-prefs-panel)
     (drracket:language:register-capability 'drscheme:check-syntax-button (flat-contract boolean?) #t)
     (drracket:get/extend:extend-definitions-text make-syncheck-text%)
+    (drracket:get/extend:extend-interactions-text docs-text-ints-mixin)
     (drracket:get/extend:extend-definitions-canvas docs-editor-canvas-mixin)
+    (drracket:get/extend:extend-interactions-canvas docs-editor-canvas-mixin)
     (drracket:get/extend:extend-unit-frame unit-frame-mixin #f)
     (drracket:get/extend:extend-tab tab-mixin)
     
@@ -2421,20 +2455,25 @@ If the namespace does not, they are colored the unbound color.
             (send defs-text syncheck:reset-docs-im)
             (send tab add-bkg-running-color 'syncheck "orchid" cs-syncheck-running)
             (send defs-text syncheck:init-arrows))
-          
-          (define current-replay-state (send tab get-replay-state))
+
           (define drr-frame (send (send defs-text get-tab) get-frame))
           (cond
-            [(not current-replay-state)
-             (define new-replay-state (box '()))
-             (send tab set-replay-state new-replay-state)
-             (send drr-frame replay-compile-comp-trace
-                   defs-text 
-                   val
-                   (box '()))]
+            [(string? val) ;; an internal error happened
+             (send tab remove-bkg-running-color 'syncheck)
+             (send tab show-online-internal-error val)]
             [else
-             (set-box! current-replay-state 
-                       (append (unbox current-replay-state) (list val)))])])))
+             (define current-replay-state (send tab get-replay-state))
+             (cond
+               [(not current-replay-state)
+                (define new-replay-state (box '()))
+                (send tab set-replay-state new-replay-state)
+                (send drr-frame replay-compile-comp-trace
+                      defs-text
+                      val
+                      (box '()))] ;; should this box be new-replay-state instead?
+               [else
+                (set-box! current-replay-state
+                          (append (unbox current-replay-state) (list val)))])])])))
     
     (drracket:module-language-tools:add-online-expansion-handler
      online-comp.rkt

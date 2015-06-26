@@ -114,14 +114,15 @@ In all such cases, known values are at half-integer coordinates and others are i
 
 This conceptual model allows us to treat flomaps as if they were multi-valued functions on @racket[Real]×@racket[Real].
 For example, we might plot the red component of an ARGB icon:
+@interaction-eval[#:eval flomap-eval (require images/icons/misc plot/pict)]
 @interaction[#:eval flomap-eval
-                    (require images/icons/misc plot)
+                    (eval:alts (require images/icons/misc plot) (void))
                     (define icon-fm (bomb-flomap #:bomb-color "orange" #:height 48))
                     (flomap->bitmap icon-fm)
                     (define-values (icon-width icon-height) (flomap-size icon-fm))
-                    (plot3d-bitmap (contour-intervals3d
-                                    (λ (x y) (flomap-bilinear-ref icon-fm 1 x y))
-                                    -0.5 (+ 0.5 icon-width) -0.5 (+ 0.5 icon-height)))]
+                    (plot3d (contour-intervals3d
+                             (λ (x y) (flomap-bilinear-ref icon-fm 1 x y))
+                             -0.5 (+ 0.5 icon-width) -0.5 (+ 0.5 icon-height)))]
 Notice that the plot's maximum height is above saturation (@racket[1.0]).
 The tallest peak corresponds to the specular highlight (the shiny part) on the bomb.
 Specular highlights are one case where it is important to operate on oversaturated values without truncating them---until it is time to display the image.

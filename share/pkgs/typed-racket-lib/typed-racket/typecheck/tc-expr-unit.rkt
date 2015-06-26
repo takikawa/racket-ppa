@@ -4,17 +4,17 @@
 (require (rename-in "../utils/utils.rkt" [private private-in])
          racket/match (prefix-in - (contract-req))
          "signatures.rkt"
-         "check-below.rkt" "tc-app-helper.rkt" "../types/kw-types.rkt"
-         (types utils abbrev union subtype type-table classes filter-ops remove-intersect resolve generalize)
-         (private-in parse-type type-annotation syntax-properties)
-         (rep type-rep filter-rep object-rep rep-utils)
+         "check-below.rkt" "../types/kw-types.rkt"
+         (types utils abbrev union subtype type-table path-type
+                filter-ops remove-intersect resolve generalize)
+         (private-in syntax-properties)
+         (rep type-rep filter-rep object-rep)
          (only-in (infer infer) restrict)
          (utils tc-utils)
-         (env lexical-env tvar-env index-env scoped-tvar-env)
-         racket/format racket/list
+         (env lexical-env)
+         racket/list
          racket/private/class-internal
-         syntax/parse syntax/stx
-         unstable/syntax
+         syntax/parse
          (only-in racket/list split-at)
          (typecheck internal-forms tc-envops)
          unstable/sequence
@@ -42,8 +42,16 @@
   (--> identifier? full-tc-results/c)
   (define rename-id (contract-rename-id-property id))
   (define id* (or rename-id id))
-  (define ty (lookup-type/lexical id*))
-  (define obj (-id-path id*))
+  ;; see if id* is an alias for an object
+  ;; if not (-id-path id*) is returned
+  (define obj (lookup-alias/lexical id*))
+  (define-values (alias-path alias-id)
+    (match obj
+      [(Path: p x) (values p x)]
+      [(Empty:) (values (list) id*)]))
+  ;; calculate the type, resolving aliasing and paths if necessary
+  (define ty (path-type alias-path (lookup-type/lexical alias-id)))
+  
   (ret ty
        (if (overlap ty (-val #f))
            (-FS (-not-filter (-val #f) obj) (-filter (-val #f) obj))
@@ -76,6 +84,23 @@
     (add-typeof-expr form t)
     (cond-check-below t expected)))
 
+;; typecheck and return a truth value indicating a typecheck failure (#f)
+;; or success (any non-#f value)
+(define (tc-expr/check? form expected)
+  (parameterize ([current-type-error? #f])
+    (with-handlers ([exn:fail:syntax? (λ (_) #f)])
+      (dynamic-wind
+        (λ () (save-errors!))
+        (λ ()
+          (let ([result (tc-expr/check form expected)])
+            (and (not (current-type-error?)) result)))
+        (λ () (restore-errors!))))))
+
+(define (tc-expr/check/t? form expected)
+  (match (tc-expr/check? form expected)
+    [(tc-result1: t) t]
+    [#f #f]))
+
 (define (explicit-fail stx msg var)
   (cond [(and (identifier? var) (lookup-type/lexical var #:fail (λ _ #f)))
          =>
@@ -85,7 +110,7 @@
                           t))]
          [else (tc-error/expr #:stx stx (syntax-e msg))]))
 
-;; tc-expr/check : syntax maybe[tc-results] -> tc-results
+;; tc-expr/check/internal : syntax maybe[tc-results] -> tc-results
 (define/cond-contract (tc-expr/check/internal form expected)
   (--> syntax? (-or/c tc-results/c #f) full-tc-results/c)
   (parameterize ([current-orig-stx form])
@@ -178,15 +203,23 @@
       [(case-lambda [formals . body] ...)
        (tc/lambda form #'(formals ...) #'(body ...) expected)]
       ;; send
-      [(let-values (((_) meth))
-         (let-values (((_) rcvr))
-           (let-values (((_) (~and find-app (#%plain-app find-method/who _ _ _))))
-             (let-values ([_arg-var args] ...)
+      [(let-values ([(_) meth])
+         (let-values ([(rcvr-var) rcvr])
+           (let-values (((meth-var) (~and find-app (#%plain-app find-method/who _ _ _))))
+             (let-values ([(arg-var) args] ...)
                (if wrapped-object-check
                    ignore-this-case
-                   (#%plain-app _ _ _arg-var2 ...))))))
+                   (~and core-app
+                         (~or (#%plain-app _ _ _arg-var2 ...)
+                              (let-values ([(_) _] ...)
+                                (#%plain-app (#%plain-app _ _ _ _ _ _)
+                                             _ _ _ ...)))))))))
        (register-ignored! form)
-       (tc/send #'find-app #'rcvr #'meth #'(args ...) expected)]
+       (tc/send #'find-app #'core-app
+                #'rcvr-var #'rcvr
+                #'meth-var #'meth
+                #'(arg-var ...) #'(args ...)
+                expected)]
       ;; kw function def
       ;; TODO simplify this case
       [(~and (let-values ([(f) fun]) . body) kw:kw-lambda^)
@@ -258,33 +291,37 @@
           "expected single value, got multiple (or zero) values")]))
 
 
-;; check-body-form: (All (A) (syntax? (-> A) -> A))
-;; Checks an expression and then calls the function in a context with an extended lexical environment.
-;; The environment is extended with the propositions that are true if the expression returns
-;; (e.g. instead of raising an error).
-(define (check-body-form e k)
-  (define results (tc-expr/check e (tc-any-results -no-filter)))
-  (define props
-    (match results
-      [(tc-any-results: f) (list f)]
-      [(tc-results: _ (list (FilterSet: f+ f-) ...) _)
-       (map -or f+ f-)]
-      [(tc-results: _ (list (FilterSet: f+ f-) ...) _ _ _)
-       (map -or f+ f-)]))
-  (with-lexical-env/extend-props props
-    (k)))
-
 ;; tc-body/check: syntax? tc-results? -> tc-results?
 ;; Body must be a non empty sequence of expressions to typecheck.
 ;; The final one will be checked against expected.
 (define (tc-body/check body expected)
   (match (syntax->list body)
     [(list es ... e-final)
-     (define ((continue es))
-       (if (empty? es)
-           (tc-expr/check e-final expected)
-           (check-body-form (first es) (continue (rest es)))))
-     ((continue es))]))
+     ;; First, typecheck all the forms whose results are discarded.
+     ;; If any one those causes the rest to be unreachable (e.g. `exit' or `error`,
+     ;; then mark the rest as ignored.
+     (let loop ([es es])
+       (cond [(empty? es) ; Done, typecheck the return form.
+              (tc-expr/check e-final expected)]
+             [else
+              ;; Typecheck the first form.
+              (define e (first es))
+              (define results (tc-expr/check e (tc-any-results -no-filter)))
+              (define props
+                (match results
+                  [(tc-any-results: f) (list f)]
+                  [(tc-results: _ (list (FilterSet: f+ f-) ...) _)
+                   (map -or f+ f-)]
+                  [(tc-results: _ (list (FilterSet: f+ f-) ...) _ _ _)
+                   (map -or f+ f-)]))
+              (with-lexical-env/extend-props
+               props
+               ;; If `e` bails out, mark the rest as ignored.
+               #:unreachable (for ([x (in-list (cons e-final (rest es)))])
+                               (register-ignored! x))
+               ;; Keep going with an environment extended with the propositions that are
+               ;; true if execution reaches this point.
+               (loop (rest es)))]))]))
 
 ;; find-stx-type : Any [(or/c Type/c #f)] -> Type/c
 ;; recursively find the type of either a syntax object or the result of syntax-e

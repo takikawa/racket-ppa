@@ -123,7 +123,7 @@ would create only @filepath{compiled/b_rkt.zo} and
 
 @; ----------------------------------------------------------------------
 
-@section{Dependency Files}
+@section[#:tag "Dependency Files"]{Dependency Files}
 
 In addition to a bytecode file, @exec{raco make} creates a file
 @filepath{compiled/@nonterm{name}_@nonterm{ext}.dep} that records
@@ -258,6 +258,8 @@ the security guard in the @racket[current-security-guard] when
 the files are created is used (not the security guard at the point 
 @racket[make-compilation-manager-load/use-compiled-handler] is called).
 
+The continuation the compilation of a module is marked with a
+@racket[managed-compiled-context-key] and the module's source path.
 
 @emph{Do not} install the result of
 @racket[make-compilation-manager-load/use-compiled-handler] when the
@@ -265,7 +267,25 @@ current namespace contains already-loaded versions of modules that may
 need to be recompiled---unless the already-loaded modules are never
 referenced by not-yet-loaded modules. References to already-loaded
 modules may produce compiled files with inconsistent timestamps and/or
-@filepath{.dep} files with incorrect information.}
+@filepath{.dep} files with incorrect information.
+
+The handler logs messages to the topic @racket['compiler/cm] at the level
+@racket['info]. These messages are instances of a @racket[compile-event] prefab
+structure:
+
+@racketblock[
+  (struct compile-event (timestamp path type) #:prefab)
+]
+
+The @racket[timestamp] field is the time at which the event occured in
+milliseconds since the epoch.  The @racket[path] field is the path of a file
+being compiled for which the event is about. The @racket[type] field is a symbol
+which describes the action the event corresponds to. The currently logged values
+are @racket['locking], @racket['start-compile], @racket['finish-compile], and
+@racket['already-done].
+
+@history[#:changed "6.1.1.8" @elem{Added identification of the compilation
+                                    context via @racket[managed-compiled-context-key].}]}
 
 
 @defproc[(managed-compile-zo [file path-string?]
@@ -291,7 +311,38 @@ of existing files. If it is @racket[#f], then
 the security guard in the @racket[current-security-guard] when 
 the files are created is used (not the security guard at the point 
 @racket[managed-compile-zo] is called).
-}
+
+While compiling @racket[file], the @racket[error-display-handler]
+parameter is set to
+@racket[(make-compilation-context-error-display-handler
+(error-display-handler))], so that errors from uncaught exceptions
+will report the compilation context.
+
+@history[#:changed "6.1.1.8" @elem{Added @racket[error-display-handler]
+                                   configuration.}]}
+
+
+@defthing[managed-compiled-context-key any/c]{
+
+A key used as a continuation mark key by
+@racket[make-compilation-manager-load/use-compiled-handler] for the
+continuation of a module compilation. The associated value is a path
+to the module's source.
+
+@history[#:added "6.1.1.8"]}
+
+
+@defproc[(make-compilation-context-error-display-handler
+          [orig-handlers (string? any/c . -> . void?)])
+         (string? any/c . -> . void?)]{
+
+Produces a handler suitable for use as a
+@racket[error-display-handler] value, given an existing such value.
+The generated handler shows information about the compilation context
+when the handler's second argument is an exception whose continuation
+marks include @racket[managed-compiled-context-key] keys.
+
+@history[#:added "6.1.1.8"]}
 
 
 @defboolparam[trust-existing-zos trust?]{
@@ -456,18 +507,32 @@ result will not call @racket[proc] with @racket['unlock].)
 The @racketmodname[setup/parallel-build] library provides the parallel-compilation
 functionality of @exec{raco setup} and @exec{raco make}.}
 
-@defproc[(parallel-compile-files [list-of-files (listof path?)] 
-                                 [#:worker-count worker-count non-negative-integer? (processor-count)] 
-                                 [#:handler handler (->i ([handler-type symbol?]
-                                                          [path path-string?]
-                                                          [msg string?] 
-                                                          [out string?] 
-                                                          [err string?])
+Both @racket[parallel-compile-files] and @racket[parallel-compile] log messages
+to the topic @racket['setup/parallel-build] at the level @racket['info]. These
+messages are instances of a @racket[parallel-compile-event] prefab structure:
+
+@racketblock[
+  (struct parallel-compile-event (worker event) #:prefab)
+]
+
+The worker field is the index of the worker that the created the event. The event
+field is a @racket[compile-event] as document in
+@racket[make-compilation-manager-load/use-compiled-handler].
+
+
+@defproc[(parallel-compile-files [list-of-files (listof path-string?)]
+                                 [#:worker-count worker-count exact-positive-integer? (processor-count)]
+                                 [#:handler handler (->i ([_worker-id exact-integer?]
+                                                          [_handler-type symbol?]
+                                                          [_path path-string?]
+                                                          [_msg string?] 
+                                                          [_out string?] 
+                                                          [_err string?])
                                                          void?)
                                             void])
          (or/c void? #f)]{
 
-The @racket[parallel-compile] utility function is used by @exec{raco make} to
+The @racket[parallel-compile-files] utility function is used by @exec{raco make} to
 compile a list of paths in parallel.  The optional
 @racket[#:worker-count] argument specifies the number of compile workers to spawn during
 parallel compilation.  The callback, @racket[handler], is called with the symbol
@@ -495,27 +560,33 @@ The return value is @racket[(void)] if it was successful, or @racket[#f] if ther
 
 @defproc[(parallel-compile 
   [worker-count non-negative-integer?] 
-  [setup-fprintf (->* ([stage string?] [format string?]) 
+  [setup-fprintf (->i ([_stage string?] [_format string?]) 
                       () 
                       #:rest (listof any/c) void)]
-  [append-error (-> cc?
-                    [prefix string?] 
-                    [exn (or/c exn? null?)]
-                    [out string?]
-                    [err srtring?]
-                    [message string?]
-                    void?)]
+  [append-error (->i ([_cc cc?]
+                      [_prefix string?] 
+                      [_exn (or/c exn? (cons/c string? string?) #f)]
+                      [_out string?]
+                      [_err srtring?]
+                      [_message string?])
+                     void?)]
   [collects-tree (listof any/c)])  (void)]{
 
-The @racket[parallel-compile] internal utility function is used by @exec{rack
-setup} to compile collects in parallel.  The @racket[worker-count] argument
-specifies the number of compile workers to spawn during parallel compilation.
-The @racket[setup-fprintf] and @racket[append-error] functions are internal
-callback mechanisms that @exec{raco setup} uses to communicate intermediate
-compilation results.  The @racket[collects-tree] argument is a compound
-datastructure containing an in-memory tree representation of the collects
-directory.
-}
+The @racket[parallel-compile] function is used by @exec{raco setup} to
+compile collections in parallel. The @racket[worker-count] argument
+specifies the number of compilation workers to spawn during parallel
+compilation. The @racket[setup-fprintf] and @racket[append-error]
+functions communicate intermediate compilation results and errors. The
+@racket[collects-tree] argument is a compound datastructure containing
+an in-memory tree representation of the collects directory.
+
+When the @racket[_exn] argument to @racket[append-error] is a part of
+strings, the first string is a long form of the error message, and the
+second string is a short form (omitting evaluation context
+information, for example).
+
+@history[#:changed "6.1.1.8" @elem{Changed @racket[append-error] to allow
+                                   a pair of error strings.}]}
 
 @; ----------------------------------------------------------------------
 
@@ -523,25 +594,36 @@ directory.
 
 @defmodule[compiler/cm-accomplice]
 
-@defproc[(register-external-file [file (and path? complete-path?)]) void?]{
+@defproc[(register-external-file [file (and path? complete-path?)]
+                                 [#:indirect? indirect? any/c #f])
+         void?]{
 
-Logs a message (see @racket[log-message]) at level @racket['info] to 
-a logger named @racket['cm-accomplice]. The
-message data is a @racketidfont{file-dependency} prefab structure type
-with two fields; the first field's value is @racket[file] and the second
-field's value is @racket[#f] (to indicate a non-module dependency).
+Logs a message (see @racket[log-message]) at level @racket['info] to a
+logger named @racket['cm-accomplice]. The message data is a
+@racketidfont{file-dependency} prefab structure type with two fields;
+the first field's value is @racket[file] and the second field's value
+is @racket[#f] (to indicate a non-module dependency). If the
+@racket[indirect?] argument is true, the data is more specifically an
+instance of a @racketidfont{file-dependency/options} prefab structure
+type that is a subtype of @racketidfont{file-dependency} with one extra
+field: a hash table mapping @racket['indirect] to @racket[#t].
 
 A compilation manager implemented by @racketmodname[compiler/cm] looks
-for such messages to register an external dependency. The compilation
-manager records (in a @filepath{.dep} file) the path as contributing
-to the implementation of the module currently being
+for such messages to register an external dependency. In response, the
+compilation manager records (in a @filepath{.dep} file) the path as
+contributing to the implementation of the module currently being
 compiled. Afterward, if the registered file is modified, the
-compilation manager will know to recompile the module.
+compilation manager will know to recompile the module. An indirect
+dependency has no effect on recompilation, but it can signal to other
+tools, such as a package-dependency checker, that the dependency is
+indirect (and should not imply a direct package dependency).
 
 The @racket[include] macro, for example, calls this procedure with the
 path of an included file as it expands an @racket[include] form.}
 
-@defproc[(register-external-module [file (and path? complete-path?)]) void?]{
+@defproc[(register-external-module [file (and path? complete-path?)]
+                                   [#:indirect? indirect? any/c #f])
+         void?]{
 
 Like @racket[register-external-file], but logs a message with a
 @racketidfont{file-dependency} prefab structure type whose second

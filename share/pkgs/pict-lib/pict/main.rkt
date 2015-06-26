@@ -23,8 +23,20 @@
              htl-append
              hbl-append
              cellophane
-             dc)
+             dc
+             table)
  (contract-out
+  [table (->i ([ncols exact-positive-integer?]
+               [picts (non-empty-listof pict?)]
+               [col-aligns (or/c (list*of (->* () #:rest (listof pict?) pict?))
+                                 (listof (->* () #:rest (listof pict?) pict?)))]
+               [row-aligns (or/c (list*of (->* () #:rest (listof pict?) pict?))
+                                 (listof (->* () #:rest (listof pict?) pict?)))]
+               [col-seps (or/c (listof real?) (list*of real?))]
+               [row-seps (or/c (listof real?) (list*of real?))])
+              #:pre (ncols picts)
+              (zero? (remainder (length picts) ncols))
+              [result pict?])]
   [dc (->i ([draw (-> (is-a?/c dc<%>) real? real? any)]
             [w real?]
             [h real?])

@@ -157,7 +157,7 @@
 (define (write-flush msg [p (current-output-port)])
 ;  (write msg (current-output-port))
 ;  (newline)
-  (flush-output)
+;  (flush-output)
   (write msg p)
   (flush-output p))
 
@@ -731,6 +731,10 @@
       (field [subchannels null]
              [connecting #f]
              [ch #f])
+      
+      ;; semaphores for atomic reading/writing of in and out
+      (define write-message-sem (make-semaphore 1))
+      (define read-message-sem (make-semaphore 1))
 
       (define (forward-mesg x) 
         (raise (format "Getting forwarded ~a" x))
@@ -770,7 +774,9 @@
         (when (equal? out #f) (ensure-connected))
         ;(printf/f "SC ~a ~a\n" x out)
         (with-handlers ([exn:fail? handle-error])
-          (write-flush x out)))
+          (call-with-semaphore write-message-sem
+            (lambda ()
+              (write-flush x out)))))
       (define/public (remove-subchannel id)
         (set! subchannels (filter-map
                             (lambda (x) (and (not (= (car x) id)) x))
@@ -788,7 +794,9 @@
 
       (define/public (read-message)
         (when (equal? out #f) (ensure-connected))
-        (define m (read in))
+        (define m
+          (call-with-semaphore read-message-sem
+            (lambda () (read in))))
         ;(printf/f "MESSAGE ~a\n" m)
         m)
       (define/public (register nes)

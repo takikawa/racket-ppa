@@ -567,9 +567,15 @@
                                 working))
                     (define (get-one-submodule-code m)
                       (define name (cadr (module-compiled-name m)))
-                      (define mpi (module-path-index-join `(submod "." ,name) #f))
+                      (define mp `(submod "." ,name))
+                      (define mpi (module-path-index-join mp #f))
                       (get-one-code (resolve-module-path-index mpi filename)
-                                    (collapse-module-path-index mpi filename)
+                                    (if (is-lib-path? module-path)
+                                        ;; Preserve `lib`-ness of module reference:
+                                        (collapse-module-path-index
+                                         (module-path-index-join mp module-path))
+                                        ;; Ok to collapse based on filename:
+                                        (collapse-module-path-index mpi filename))
                                     m))
                     ;; Add code for pre submodules:
                     (for-each get-one-submodule-code pre-submods)
@@ -1352,6 +1358,7 @@
                                   (when (file-exists? dest)
                                     (delete-file dest)))
                               (raise x))])
+        (define old-perms (ensure-writable dest-exe))
         (when (and (eq? 'macosx (system-type))
                    (not unix-starter?))
           (let ([m (or (assq 'framework-root aux)
@@ -1648,7 +1655,8 @@
                      (let ([m (and (eq? 'windows (system-type))
                                    (assq 'subsystem aux))])
                        (when m
-                         (set-subsystem dest-exe (cdr m)))))])))))))))
+                         (set-subsystem dest-exe (cdr m)))))]))))
+          (done-writable dest-exe old-perms))))))
 
 ;; For Mac OS X GRacket, the actual executable is deep inside the
 ;;  nominal executable bundle
@@ -1658,3 +1666,20 @@
     [(list? p) (map mac-mred-collects-path-adjust p)]
     [(relative-path? p) (build-path 'up 'up 'up p)]
     [else p]))
+
+;; Returns #f (no change needed) or old permissions
+(define (ensure-writable dest-exe)
+  (cond
+   [(member 'write (file-or-directory-permissions dest-exe))
+    ;; No change needed
+    #f]
+   [else
+    (define old-perms
+      (file-or-directory-permissions dest-exe 'bits))
+    (file-or-directory-permissions dest-exe (bitwise-ior old-perms #o200))
+    old-perms]))
+
+;; Restores old permissions (if not #f)
+(define (done-writable dest-exe old-perms)
+  (when old-perms
+    (file-or-directory-permissions dest-exe old-perms)))

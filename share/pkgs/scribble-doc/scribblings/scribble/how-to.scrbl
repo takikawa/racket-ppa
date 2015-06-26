@@ -30,7 +30,7 @@ To document a collection, including a collection implemented by a
         @filepath{manual.scrbl} (but pick a more specific name in practice).}
 
   @item{Start @filepath{manual.scrbl} like this:
-          @verbatim[#:indent 2]|{
+          @codeblock|{
             #lang scribble/manual
 
             @title{My Library}
@@ -89,7 +89,8 @@ but the @racketidfont{list} identifier is not hyperlinked to the usual
 definition. To cause @racketidfont{list} to be hyperlinked, add a
 @racket[require] form like this:
 
-@verbatim[#:indent 2]|{
+@codeblock[#:keep-lang-line? #f]|{
+  #lang scribble/base
   @(require (for-label racket))
 }|
 
@@ -107,7 +108,7 @@ preferred mechanism for linking to information outside of a single
 document. Such links require no information about where and how a
 binding is documented elsewhere:
 
-@verbatim[#:indent 2]|{
+@codeblock|{
   #lang scribble/manual
   @(require (for-label racket))
 
@@ -121,7 +122,7 @@ so it ignores the source formatting of the expression. The
 @racket[racketblock] form, in contrast, typesets inset Racket code,
 and it preserves the expression's formatting from the document source.
 
-@verbatim[#:indent 2]|{
+@codeblock|{
   #lang scribble/manual
   @(require (for-label racket))
 
@@ -150,7 +151,7 @@ hyperlink with text other than the section title.
 
 The following example illustrates section hyperlinks:
 
-@verbatim[#:indent 2]|{
+@codeblock|{
   #lang scribble/manual
   @(require (for-label racket))
 
@@ -188,7 +189,7 @@ prefix, which is based on the target document's main source file.  The
 following example links to a section in the Racket reference
 manual:
 
-@verbatim[#:indent 2]|{
+@codeblock|{
   #lang scribble/manual
   @(require (for-label racket))
   @(define ref-src
@@ -240,9 +241,7 @@ To document a @racket[my-helper] procedure that is exported by
 Adding these pieces to @filepath{"manual.scrbl"} gives us the
 following:
 
-@; [Eli] This is also using `my-lib/helper' which doesn't work with
-@; planet libraries
-@verbatim[#:indent 2]|{
+@codeblock|{
   #lang scribble/manual
   @(require (for-label racket
                        "helper.rkt"))
@@ -302,38 +301,39 @@ on forms to document Racket bindings.
 @; ----------------------------------------
 @section{Showing Racket Examples}
 
-The @racket[examples] form from @racket[scribble/eval]
-helps you generate examples in your documentation.
+The @racket[examples] form from @racket[scribble/eval] helps you
+generate examples in your documentation. To use @racket[examples], the
+procedures to document must be suitable for use at documentation time,
+but the @racket[examples] form does not use any binding introduced
+into the document source by @racket[require]. Instead, create a new
+evaluator with its own namespace using @racket[make-base-eval], and
+use @racket[interaction-eval] to require @filepath{helper.rkt} in that
+evaluator. Finally, supply the same evaluator to @racket[examples]:
 
-To use @racket[examples], the procedures to document must be suitable
-for use at documentation time; in fact, @racket[examples] uses
-bindings introduced into the document source by
-@racket[require]. Thus, to generate examples using @racket[my-helper]
-from the previous section, @filepath{helper.rkt} must be imported both
-via @racket[(require (for-label ....))] and @racket[require]:
-
-@verbatim[#:indent 2]|{
+@codeblock|{
   #lang scribble/manual
-  @(require scribble/eval    ; <--- added
-            "helper.rkt"     ; <--- added
+  @(require scribble/eval
             (for-label racket
                        "helper.rkt"))
 
   @title{My Library}
 
-  @defmodule[my-lib/helper]{The @racketmodname[my-lib/helper]
-  module---now with extra cows!}
+  @defmodule[my-lib/helper]
 
   @defproc[(my-helper [lst list?])
-           (listof (not/c (one-of/c 'cow)))]{
-
+           (listof
+            (not/c (one-of/c 'cow)))]{
    Replaces each @racket['cow] in @racket[lst] with
    @racket['aardvark].
 
+   @(define helper-eval (make-base-eval))
+   @interaction-eval[#:eval helper-eval
+                     (require "helper.rkt")]
    @examples[
-     (my-helper '())
-     (my-helper '(cows such remarkable cows))
-   ]}
+       #:eval helper-eval
+       (my-helper '())
+       (my-helper '(cows such remarkable cows))
+     ]}
 }|
 
 @;----------------------------------------
@@ -351,7 +351,7 @@ sub-sections.
 
 Revising @filepath{cows.scrbl} from the previous section:
 
-@verbatim[#:indent 2]|{
+@codeblock|{
   #lang scribble/manual
 
   @title[#:style '(toc)]{Cows}

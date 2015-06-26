@@ -1,5 +1,6 @@
 #lang mzscheme
 (require mzlib/foreign
+         ffi/winapi
          "gl-types.rkt"
          "gl-vectors.rkt"
          "init.rkt")
@@ -24,7 +25,7 @@
 (define-syntax _fun*
   (syntax-rules ()
     [(_fun* x ...)
-     (if win32? (_fun #:abi 'stdcall x ...) (_fun x ...))]))
+     (_fun #:abi winapi x ...)]))
 
 (define wglGetProcAddress
   (if (eq? 'windows stype)

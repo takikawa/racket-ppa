@@ -5,16 +5,18 @@
 
 (require "../structures.rkt"
          "../constraints.rkt"
-         racket/list racket/match
+         racket/match
          (for-syntax racket/base racket/syntax syntax/stx syntax/parse)
          racket/set
-         racket/format
          unstable/contract
          (for-template racket/base
                        racket/contract/base
                        racket/set
-                       unstable/contract)
-         racket/contract)
+                       racket/async-channel
+                       unstable/contract
+                       "../../utils/evt-contract.rkt")
+         racket/contract
+         racket/async-channel)
 
 
 (begin-for-syntax
@@ -157,4 +159,6 @@
   ((parameter/sc (#:contravariant) (#:covariant)) parameter/c #:chaperone)
   ((sequence/sc . (#:covariant)) sequence/c #:impersonator)
   ((channel/sc . (#:invariant)) channel/c #:chaperone)
-  ((continuation-mark-key/sc (#:invariant)) continuation-mark-key/c #:chaperone))
+  ((continuation-mark-key/sc (#:invariant)) continuation-mark-key/c #:chaperone)
+  ((evt/sc (#:covariant)) tr:evt/c #:chaperone)
+  ((async-channel/sc (#:invariant)) async-channel/c #:chaperone))

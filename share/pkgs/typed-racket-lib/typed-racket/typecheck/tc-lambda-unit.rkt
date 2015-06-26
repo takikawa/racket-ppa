@@ -1,7 +1,7 @@
 #lang racket/unit
 
 (require "../utils/utils.rkt"
-         racket/dict racket/list syntax/parse racket/syntax syntax/stx
+         racket/dict racket/list syntax/parse syntax/stx
          racket/match syntax/id-table racket/set
          unstable/sequence
          (contract-req)
@@ -16,7 +16,6 @@
          (env lexical-env tvar-env index-env scoped-tvar-env)
          (utils tc-utils)
          (for-syntax
-           syntax/parse
            racket/base))
 
 (import tc-expr^)
@@ -82,7 +81,7 @@
   (make-arr*
     arg-types
     (abstract-results
-      (with-lexical-env/extend
+      (with-lexical-env/extend-types
         (append rest-names arg-names)
         (append rest-types arg-types)
         (tc-body/check body expected))
@@ -239,11 +238,9 @@
       [(null? (syntax-e s)) (formals (reverse acc) #f stx)]
       [else (formals (reverse acc) s stx)])))
 
+;; Currently no support for objects representing the rest argument
 (define (formals->objects formals)
-  (for/list ([i (in-list (append (formals-positional formals)
-                                 (if (formals-rest formals)
-                                     (list (formals-rest formals))
-                                     empty)))])
+  (for/list ([i (in-list (formals-positional formals))])
     (make-Path null i)))
 
 
@@ -508,8 +505,9 @@
 (define (tc/rec-lambda/check formals* body name args return)
   (define formals (syntax->list formals*))
   (define ft (t:->* args (tc-results->values return)))
-  (with-lexical-env/extend
-   (cons name formals) (cons ft args)
+  (with-lexical-env/extend-types
+   (cons name formals) 
+   (cons ft args)
    (values
      (replace-names (map (λ (f) (list f -empty-obj)) (cons name formals)) (ret ft))
      (replace-names (map (λ (f) (list f -empty-obj)) (cons name formals)) (tc-body/check body return)))))

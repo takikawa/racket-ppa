@@ -37,7 +37,7 @@
            mixin
            interface interface* interface?
            object% object? externalizable<%> printable<%> writable<%> equal<%>
-           object=?
+           object=? object-or-false=?
            new make-object instantiate
            send send/apply send/keyword-apply send* send+ dynamic-send
            class-field-accessor class-field-mutator with-method
@@ -62,6 +62,7 @@
            (struct-out exn:fail:object)
            make-primitive-class
            class/c ->m ->*m ->dm case->m object/c instanceof/c
+           dynamic-object/c
            
            ;; "keywords":
            private public override augment
@@ -632,6 +633,20 @@
                  stx)
                 stx
                 (syntax-local-introduce #'let-))))]
+          [(-#%app -chaperone-procedure expr . rst)
+           (and (free-identifier=? (syntax -#%app)
+                                   (quote-syntax #%plain-app))
+                (or (free-identifier=? (syntax -chaperone-procedure)
+                                       (quote-syntax chaperone-procedure))
+                    (free-identifier=? (syntax -chaperone-procedure)
+                                       (quote-syntax chaperone-procedure))))
+           (with-syntax ([expr (loop #'expr #t name locals)])
+             (syntax-track-origin
+              (rearm
+               (syntax/loc stx (-#%app -chaperone-procedure expr . rst))
+               stx)
+              stx
+              (syntax-local-introduce #'-#%app)))]
           [_else 
            (if can-expand?
                (loop (expand stx locals) #f name locals)
@@ -4257,10 +4272,25 @@ An example
                                  rest)))])))))))))
 
 (define (object=? o1 o2)
-  (unless (object? o1)
-    (raise-argument-error 'object=? "object?" 0 o1 o2))
-  (unless (object? o2)
-    (raise-argument-error 'object=? "object?" 1 o1 o2))
+  (cond
+   [(not (object? o1))
+    (raise-argument-error 'object=? "object?" 0 o1 o2)]
+   [(not (object? o2))
+    (raise-argument-error 'object=? "object?" 1 o1 o2)]
+   [else
+    (or (eq? o1 o2) (-object=? o1 o2))]))
+
+(define (object-or-false=? o1 o2)
+  (cond
+   [(and o1 (not (object? o1)))
+    (raise-argument-error 'object-or-false=? "(or/c object? #f)" 0 o1 o2)]
+   [(and o2 (not (object? o2)))
+    (raise-argument-error 'object-or-false=? "(or/c object? #f)" 1 o1 o2)]
+   [else
+    (or (eq? o1 o2)
+        (and o1 o2 (-object=? o1 o2)))]))
+
+(define (-object=? o1 o2)
   (let* ([orig-o1 (if (has-original-object? o1) (original-object o1) o1)]
          [orig-o2 (if (has-original-object? o2) (original-object o2) o2)]
          [orig-orig-o1 (if (wrapped-object? orig-o1)
@@ -4668,7 +4698,7 @@ An example
          class?
          mixin
          (rename-out [_interface interface]) interface* interface?
-         object% object? object=? externalizable<%> printable<%> writable<%> equal<%>
+         object% object? object=? object-or-false=? externalizable<%> printable<%> writable<%> equal<%>
          new make-object instantiate
          get-field set-field! field-bound? field-names
          dynamic-get-field dynamic-set-field!

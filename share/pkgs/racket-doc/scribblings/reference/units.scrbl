@@ -458,6 +458,11 @@ specific bindings for some of a unit's imports. The long form need not
 name all of a unit's exports or supply all of a unit's imports if the
 remaining parts can be inferred.
 
+When a unit declares initialization dependencies,
+@racket[compound-unit/infer] checks that the @racket[link] declaration
+is consistent with those dependencies, and it reports a syntax error if
+not.
+
 Like @racket[compound-unit], the @racket[compound-unit/infer] form
 produces a (compound) unit without statically binding information
 about the result unit's imports and exports. That is,
@@ -465,7 +470,12 @@ about the result unit's imports and exports. That is,
 not generate it. Two additional forms,
 @racket[define-compound-unit] and
 @racket[define-compound-unit/infer], generate static information
-(where the former does not consume static information).}
+(where the former does not consume static information).
+
+@history[#:changed "6.1.1.8" @elem{Added static checking of the @racket[link]
+                                   clause with respect to declared
+                                   initialization dependencies.}]}
+
 
 @defform[
 #:literals (import export link)
@@ -476,7 +486,9 @@ not generate it. Two additional forms,
 ]{
 
 Like @racket[compound-unit], but binds static information about the
-compound unit like @racket[define-unit].}
+compound unit like @racket[define-unit], including the propagation of
+initialization-dependency information (on remaining inports) from the
+linked units.}
 
 
 @defform[
@@ -488,7 +500,7 @@ compound unit like @racket[define-unit].}
 ]{
 
 Like @racket[compound-unit/infer], but binds static information about
-the compound unit like @racket[define-unit].}
+the compound unit like @racket[define-compound-unit].}
 
 @defform[
 #:literals (import export)
@@ -770,7 +782,6 @@ Unlike the body of a @racketmodname[racket/unit] module, a
 @racket[require] in a @racketmodname[racket/signature] module must be
 a literal use of @racket[require].
 
-
 The resulting signature is exported as
 @racket[_base]@racketidfont["^"], where @racket[_base] is derived from
 the enclosing module's name (i.e., its symbolic name, or its path
@@ -778,6 +789,11 @@ without the directory and file suffix). If the module name ends in
 @racketidfont{-sig}, then @racket[_base] corresponds to the module
 name before @racketidfont{-sig}. Otherwise, the module name serves as
 @racket[_base].
+
+A @racket[struct] form as a @racket[sig-spec] is consistent with the
+definitions introduced by @racket[define-struct], as opposed to
+definitions introduced @racket[struct]. (That behavior was originally
+a bug, but it is preserved for compatibility.)
 
 @; ----------------------------------------------------------------------
 
@@ -844,3 +860,24 @@ If @racket[sig-identifier] is not bound to a signature, then the
 @exnraise[exn:fail:syntax]. In that case, the given
 @racket[err-syntax] argument is used as the source of the error, where
 @racket[sig-identifier] is used as the detail source location.}
+
+
+@defproc[(unit-static-init-dependencies [unit-identifier identifier?]
+                                        [err-syntax syntax?])
+         (list/c (cons/c (or/c symbol? #f)
+                         identifier?))]{
+
+If @racket[unit-identifier] is bound to static unit information via
+@racket[define-unit] (or other such forms), the result is a list of
+pairs. Each pair combines a tag (or @racket[#f] for no tag) and a
+signature name, indicating an initialization dependency of the unit on
+the specified import (i.e., the same tag and signature are included in
+the first result from @racket[unit-static-signatures]).
+
+If @racket[unit-identifier] is not bound to static unit information,
+then the @exnraise[exn:fail:syntax]. In that case, the given
+@racket[err-syntax] argument is used as the source of the error, where
+@racket[unit-identifier] is used as the detail source location.
+
+@history[#:added "6.1.1.8"]}
+

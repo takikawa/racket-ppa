@@ -20,7 +20,8 @@
          scribble/base-render
          scribble/core
          scribble/html-properties
-         scribble/manual ; really shouldn't be here... see dynamic-require-doc
+         scribble/tag
+         scribble/private/manual-class-struct ; really shouldn't be here... see make-isolated-namespace
          scribble/private/run-pdflatex
          setup/xref
          scribble/xref
@@ -89,11 +90,13 @@
 (define (info<? a b)
   (doc<? (info-doc a) (info-doc b)))
 
-(define (filter-user-docs docs make-user?)
+(define (filter-user-docs docs make-user? always-user?)
   (cond ;; Specifically disabled user stuff, filter
    [(not make-user?) (filter main-doc? docs)]
    ;; If we've built user-specific before, keep building
-   [(file-exists? (build-path (find-user-doc-dir) "index.html")) docs]
+   [(or always-user?
+        (file-exists? (build-path (find-user-doc-dir) "index.html")))
+    docs]
    ;; Otherwise, see if we need it:
    [(ormap (lambda (doc)
              (not (or (doc-under-main? doc)
@@ -137,9 +140,9 @@
          program-name       ; name of program that calls setup-scribblings
          only-dirs          ; limits doc builds
          latex-dest         ; if not #f, generate Latex output
-         auto-start-doc?    ; if #t, expands `only-dir' with [user-]start to
-                                        ;  catch new docs
+         auto-start-doc?    ; if #t, expands `only-dir' with [user-]start to catch new docs
          make-user?         ; are we making user stuff?
+         always-user?       ; make user-specific even if otherwise unneeded
          tidy?              ; clean up, even beyond `only-dirs'
          avoid-main?        ; avoid main collection, even for `tidy?'
          with-record-error  ; catch & record exceptions
@@ -221,7 +224,8 @@
                          (values k #t))]
             [infos (map get-info/full (map directory-record-path recs))])
        (filter-user-docs (append-map (get-docs main-dirs) infos recs)
-                         make-user?))
+                         make-user?
+                         always-user?))
      doc<?))
   (define-values (main-docs user-docs) (partition doc-under-main? docs))
   (define main-doc-exists? (ormap (lambda (d) (member 'main-doc-root (doc-flags d))) 
@@ -272,7 +276,8 @@
                               (and tidy? (not avoid-main?)))))
   (define auto-user? (and auto-start-doc? 
                           (or (ormap can-build*? user-docs)
-                              (and tidy? make-user?))))
+                              (and tidy? make-user?)
+                              always-user?)))
   (define (can-build**? doc) (can-build? only-dirs doc auto-main? auto-user?))
   
   (unless latex-dest
@@ -1204,6 +1209,7 @@
                        (set-info-out-hash! info (get-info-out-hash doc latex-dest))
                        (set-info-need-out-write?! info #f)
                        (set-info-done-time! info (current-inexact-milliseconds)))
+
                      (when (info-need-in-write? info)
                        (render-time "xref-in" (write-in/info latex-dest info lock main-doc-exists?))
                        (set-info-need-in-write?! info #f))
@@ -1250,7 +1256,8 @@
                                ;; Maybe further actions are appropriate, but
                                ;; overall clean-up and repair is intended to be
                                ;; the job of the regular documentation builder.
-                               (log-error (exn-message exn)))])
+                               (log-error (format "error moving documentation: ~a"
+                                                  (exn-message exn))))])
     (define dest-dir (doc-dest-dir doc))
     (define move? (and src-dir
                        (not (equal? (file-or-directory-identity src-dir)
@@ -1453,7 +1460,9 @@
           "render"
           (with-record-error
            (doc-src-file doc)
-           (lambda () (send renderer render (list v) (list dest-dir) ri))
+           (lambda ()
+             (parameterize ([current-namespace (make-isolated-namespace)])
+               (send renderer render (list v) (list dest-dir) ri)))
            void))
          (unless (or latex-dest (main-doc? doc))
            ;; Since dest dir is the same place as pre-built documentation,
@@ -1480,31 +1489,32 @@
   (parameterize ([current-namespace (namespace-anchor->empty-namespace anchor)])
     body ...))
 
+(define (make-isolated-namespace)
+  ;; For loading documents or contexts where deserialization
+  ;;  might load additional modules.
+  (let ([p (make-empty-namespace)]
+        [ns (namespace-anchor->empty-namespace anchor)])
+    (namespace-attach-module ns 'scribble/base-render p)
+    (namespace-attach-module ns 'scribble/html-render p)
+    (namespace-attach-module ns 'scribble/latex-render p)
+    ;; This is here for de-serialization; we need a better repair than
+    ;;  hard-wiring the "manual.rkt" library:
+    (namespace-attach-module ns 'scribble/private/manual-class-struct p)
+    p))
+
 (define (dynamic-require-doc mod-path)
   ;; Use a separate namespace so that we don't end up with all the
   ;;  documentation loaded at once.
-  ;; Use a custodian to compensate for examples executed during the build
-  ;;  that may not be entirely clean (e.g., leaves a stuck thread).
-  (let ([p (make-empty-namespace)]
-        [c (make-custodian)]
-        [ch (make-channel)]
-        [ns (namespace-anchor->empty-namespace anchor)])
-    (parameterize ([current-custodian c])
-      (namespace-attach-module ns 'scribble/base-render p)
-      (namespace-attach-module ns 'scribble/html-render p)
-      ;; This is here for de-serialization; we need a better repair than
-      ;;  hard-wiring the "manual.rkt" library:
-      (namespace-attach-module ns 'scribble/manual p)
-      (parameterize ([current-namespace p])
-        (call-in-nested-thread (lambda ()
-                                 (define sub
-                                   (if (and (pair? mod-path)
-                                            (eq? (car mod-path) 'submod))
-                                       (append mod-path '(doc))
-                                       `(submod ,mod-path doc)))
-                                 (if (module-declared? sub #t)
-                                     (dynamic-require sub 'doc)
-                                     (dynamic-require mod-path 'doc))))))))
+  (parameterize ([current-namespace (make-isolated-namespace)])
+    (call-in-nested-thread (lambda ()
+                             (define sub
+                               (if (and (pair? mod-path)
+                                        (eq? (car mod-path) 'submod))
+                                   (append mod-path '(doc))
+                                   `(submod ,mod-path doc)))
+                             (if (module-declared? sub #t)
+                                 (dynamic-require sub 'doc)
+                                 (dynamic-require mod-path 'doc))))))
 
 (define (write- latex-dest vers doc name datas prep! final!)
   (let* ([filename (sxref-path latex-dest doc name)])

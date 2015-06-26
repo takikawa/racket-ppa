@@ -122,14 +122,16 @@
                         [val (opt/info-val opt/info)])
             (syntax
              (if next-ps val ho-ctc)))]
-         ;; FIXME something's not right with this case.
+         ;; There used to be a note here: "something's not right with this case".
+         ;; Possibly, the problem was the missing `(with-syntax ([val ....]) ....)`.
          [(> (length hos) 1)
           (define-values (exp new-lifts new-superlifts new-partials name) (opt/or-unknown stx))
           (set! lift-from-hos new-lifts)
           (set! superlift-from-hos new-superlifts)
           (set! partial-from-hos new-partials)
           (set! name-from-hos name)
-          #`(if next-ps val #,exp)])
+          (with-syntax ([val (opt/info-val opt/info)])
+            #`(if next-ps val #,exp))])
        #:lifts
        (append lift-ps lift-from-hos)
        #:superlifts
@@ -195,7 +197,9 @@
                                      [that that])
                          (syntax (<= this that))))))
               #:chaperone #t
-              #:name #''(between/c n m))))))]
+              #:name #'(if (= n m)
+                           n
+                           '(between/c n m)))))))]
     [_ (opt/unknown opt/i opt/info stx)]))
 
 (define (raise-opt-between/c-error blame val lo hi)
@@ -650,6 +654,7 @@
                               (+ arg-num 1))]))])
       (values
        (with-syntax ((blame (opt/info-blame opt/info))
+                     (val (opt/info-val opt/info))
                      ((dom-arg ...) dom-vars)
                      ((next-dom ...) next-doms)
                      (dom-len (length dom-vars)))

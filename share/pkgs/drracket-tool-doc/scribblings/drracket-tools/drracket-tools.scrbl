@@ -1,12 +1,16 @@
 #lang scribble/manual
 @(require scribble/eval
           (for-label drracket/check-syntax
+                     drracket/get-module-path
+                     drracket/find-module-path-completions
+                     framework
+                     setup/path-to-relative
                      racket))
 @(define syncheck-example-eval (make-base-eval))
 @(begin 
    (syncheck-example-eval
     '(require drracket/check-syntax racket/class
-              setup/main-doc setup/collects)))
+              setup/path-to-relative)))
                
 
 @title{DrRacket Tools}
@@ -34,7 +38,7 @@ a method in @racket[syncheck-annotations<%>] and the other elements of the vecto
 the arguments passed to the method.
 
 This doesn't work as well for use in a real tool, however, because it doesn't account for
-the callback procedures present in @method[syncheck-annotations<%> syncheck:add-arrow/name-dup]
+the callback procedures present in @method[syncheck-annotations<%> syncheck:add-arrow/name-dup/pxpy]
 and @method[syncheck-annotations<%> syncheck:add-id-set] and the resulting vectors are probably less
 convenient to work with than direct method calls for most uses of this library. Nevertheless,
 it gives a quick feel for the results that can come back from Check Syntax.
@@ -53,11 +57,7 @@ in order to make the results be platform independent.
                      [(pair? x) (cons (loop (car x)) (loop (cdr x)))]
                      [(vector? x) (for/vector ([x (in-vector x)])
                                     (loop x))]
-                     [(path? x)
-                      (define p (path->collects-relative x))
-                      (if (path? p)
-                          (path->main-doc-relative x)
-                          p)]
+                     [(path? x) (path->relative-string/library x)]
                      [else x])))
                
                (let ([example-module
@@ -170,7 +170,7 @@ in order to make the results be platform independent.
             void?]{This method is no longer called by Check Syntax. It is here
                    for backwards compatibility only. The information it provided
                    must now be synthesized from the information supplied to
-                   @method[syncheck-annotations<%> syncheck:add-arrow/name-dup].}
+                   @method[syncheck-annotations<%> syncheck:add-arrow/name-dup/pxpy].}
            
  @defmethod[(syncheck:add-arrow [start-source-obj (not/c #f)]
                                 [start-left exact-nonnegative-integer?]
@@ -182,7 +182,7 @@ in order to make the results be platform independent.
                                 [phase-level (or/c exact-nonnegative-integer? #f)])
             void?]{
     This function is not called directly anymore by Check Syntax. Instead
-    @method[syncheck-annotations<%> syncheck:add-arrow/name-dup] is.
+    @method[syncheck-annotations<%> syncheck:add-arrow/name-dup/pxpy] is.
     
     This method is invoked by the default implementation of 
     @racket[_syncheck:add-arrow/name-dup] in 
@@ -199,8 +199,33 @@ in order to make the results be platform independent.
                                          [require-arrow? boolean?]
                                          [name-dup? (-> string? boolean?)])
             void?]{
+    This function is not called directly anymore by Check Syntax. Instead
+    @method[syncheck-annotations<%> syncheck:add-arrow/name-dup/pxpy] is.
+
+    The default implementation of @method[syncheck-annotations<%> syncheck:add-arrow/name-dup/pxpy]
+    discards the @racket[_start-px] @racket[_start-py] @racket[_end-px] @racket[_end-py]
+    arguments and calls this method.
+ }
+ @defmethod[(syncheck:add-arrow/name-dup/pxpy [start-source-obj (not/c #f)]
+                                              [start-left exact-nonnegative-integer?]
+                                              [start-right exact-nonnegative-integer?]
+                                              [start-px (real-in 0 1)]
+                                              [start-py (real-in 0 1)]
+                                              [end-source-obj (not/c #f)]
+                                              [end-left exact-nonnegative-integer?]
+                                              [end-right exact-nonnegative-integer?]
+                                              [end-px (real-in 0 1)]
+                                              [end-py (real-in 0 1)]
+                                              [actual? boolean?]
+                                              [phase-level (or/c exact-nonnegative-integer? #f)]
+                                              [require-arrow? boolean?]
+                                              [name-dup? (-> string? boolean?)])
+            void?]{
    Called to indicate that there should be an arrow between the locations described by the first 
-   six arguments.
+   ten arguments. The @racket[start-px] and @racket[start-py] indicate how far along the diagonal
+   between the upper-left coordinate of the editor position @racket[start-left] and the bottom-right
+   of the editor position @racket[start-right] to draw the foot of the arrow. The @racket[end-px]
+   and @racket[end-py] indicate the same things for the head of the arrow.
    
    The @racket[phase-level] argument indicates the phase of the binding and the 
    @racket[actual?] argument indicates if the binding is a real one, or a predicted one from
@@ -283,6 +308,10 @@ in order to make the results be platform independent.
             @item{the @method[syncheck-annotations<%> syncheck:add-arrow/name-dup] method drops the
                       @racket[_require-arrow?] and @racket[_name-dup?] arguments and calls
                       @method[syncheck-annotations<%> syncheck:add-arrow]; and}
+            @item{the @method[syncheck-annotations<%> syncheck:add-arrow/name-dup/pxpy]
+                      method drops the @racket[_from-px], @racket[_from-py], @racket[_to-px],
+                      and @racket[_to-py] arguments and calls
+                      @method[syncheck-annotations<%> syncheck:add-arrow/name-dup]; and}
             @item{all of the other methods ignore their arguments and return @racket[(void)].}]
     
   Here is an example showing how use this library to extract all
@@ -299,9 +328,9 @@ in order to make the results be platform independent.
                    (super-new)
                    (define/override (syncheck:find-source-object stx)
                      stx)
-                   (define/override (syncheck:add-arrow/name-dup
-                                     start-source-obj start-left start-right
-                                     end-source-obj end-left end-right
+                   (define/override (syncheck:add-arrow/name-dup/pxpy
+                                     start-source-obj start-left start-right start-px start-py
+                                     end-source-obj end-left end-right end-px end-py
                                      actual? phase-level require-arrow? name-dup?)
                      (set! arrows
                            (cons (list start-source-obj end-source-obj)
@@ -343,6 +372,7 @@ in order to make the results be platform independent.
                     syncheck:add-rename-menu
                     syncheck:add-arrow
                     syncheck:add-arrow/name-dup
+                    syncheck:add-arrow/name-dup/pxpy
                     syncheck:add-tail-arrow
                     syncheck:add-mouse-over-status
                     syncheck:add-jump-to-definition
@@ -357,5 +387,124 @@ in order to make the results be platform independent.
   Opens a window containing the module browser for @racket[path].
 }
 
+@section{Module Path Selection}
+
+DrRacket provides two APIs for prompting the user to select a module path. 
+One that uses the @racketmodname[racket/gui]
+library with a dialog box and one, lower-level, for use with another UI that
+provides just the information needed for completions.
+
+@subsection{GUI Module Path Selection}
+
+@defmodule[drracket/get-module-path]{}
+
+@defproc[(get-module-path-from-user
+          [#:init init string? ""]
+          [#:pref pref (or/c symbol? #f) #f]
+          [#:dir? dir? boolean? #f]
+          [#:current-directory current-directory (or/c path-string? #f)])
+         (if dir?
+             (or/c (listof path?) #f)
+             (or/c path? #f))]{
+   Opens a dialog box that facilitates choosing a path in the file system 
+   accessible via a module. 
+   
+   The user types a partial require path into the dialog and is shown 
+   completions of the require path and which paths they correspond to.
+   (The initial content of the field where the user types is @racket[init].)
+   Selecting one of the completions causes this function to return with the path of the
+   selected one. If the @racket[dir?] argument is @racket[#t], then
+   the require path might not be complete, in which case the result is
+   a list of directory paths corresponding to the directories where
+   the partial require paths points. If the result is @racket[#f],
+   then the user canceled the dialog.
+   
+   The dialog also has an optional field where the path to some different
+   racket binary than the one currently running. If that is filled
+   in, then the dialog shows completions corresponding to how @racket[require]
+   would behave in that other racket binary. When that text field is edited,
+   the @racket[pref] is used with @racket[preferences:set] and 
+   @racket[preferences:get] to record
+   its value so it persists across calls to @racket[get-module-path-from-user].
+}
+@subsection{Module Path Selection Completion Computation}
+
+@defmodule[drracket/find-module-path-completions]{}
+
+@defproc[(find-module-path-completions [dir path-string?])
+         (-> string? (listof (list/c string? path?)))]{
+  This is the completion computing function for @racket[get-module-path-from-user].
+                                                
+  The @racket[dir] argument specifies a directory for relative require paths.
+  
+  The result is a function that closes over some local state that is used
+  to cache information to speed up repeated queries. (This cache should not
+  be used across interactions with the user as it captures details about
+  the current file system's directory and file layout.)
+  
+  The result function's argument is the string the user has typed and the
+  the result function's result is a new set of completions. Each element
+  of the list corresponds to a completion. The @racket[string?] portion
+  of each element is the complete require and the @racket[path?]
+  portion is the path it matches in the filesystem. The @racket[get-module-path-from-user]
+  function shows the strings to the user and uses the paths to decide
+  how to handle ``return'' keystrokes (and clicking on the ``OK'' button). 
+  If the path is a directory, then a ``return'' keystroke with descend into
+  that directory (replacing the place where the user typed with the 
+  string portion of that element). If the path is not a directory, then return
+  closes the dialog and returns the path.
+  
+  Use @racket[path->relative-string/library] to turn the paths into strings 
+  to show the user as potential completions.
+}
+
+@defproc[(find-module-path-completions/explicit-cache
+          [str string?]
+          [dir path-string?]
+          [#:pkg-dirs-cache pkg-dirs-cache (box/c (or/c #f pkg-dirs-info/c))]
+          [#:alternate-racket alternate-racket
+                              (or/c #f 
+                                    path-string?
+                                    (list/c 
+                                     current-library-collection-links-info/c 
+                                     current-library-collection-paths-info/c
+                                     pkg-dirs-info/c))
+                              #f])
+         (listof (list/c string? path?))]{
+  This is a version of @racket[find-module-path-completions] that explicates
+  the @racket[pkg-dirs-cache] argument and supports using a different racket
+  binary (as discussed in @racket[get-module-path-from-user]).
+  
+  The @racket[pkg-dirs-cache] argument should initially be @racket[(box #f)];
+  it is filled in with the cached information and then the filled in box can
+  be used on subsequent calls.
+  
+  Use @racket[alternate-racket-clcl/clcp] to get the values for the @racket[alternate-racket]
+  argument in the case that an alternate racket is used. Pass @racket[#f] for the current
+  racket.
+}
+
+@defproc[(alternate-racket-clcl/clcp [alternate-racket path-string?]
+                                     [pkg-dirs-cache (box/c (or/c #f pkg-dirs-info/c))])
+         (values current-library-collection-links-info/c 
+                 current-library-collection-paths-info/c
+                 pkg-dirs-info/c)]{
+  Computes the information needed for completions by calling out to
+  the external racket binary @racket[alternate-racket]. Use the same
+  @racket[pkg-dirs-cache] argument as with @racket[find-module-path-completions/explicit-cache].
+}
+
+@defthing[current-library-collection-links-info/c contract?]{
+  A contract specifying what information used by this library relevant
+  to the current library links.
+}
+@defthing[current-library-collection-paths-info/c contract?]{
+  A contract specifying what information used by this library relevant
+  to the current library collections.
+}
+@defthing[pkg-dirs-info/c contract?]{
+  A contract specifying what information used by this library relevant
+  to the pkg directories.
+}
 
 @(close-eval syncheck-example-eval)

@@ -26,7 +26,8 @@
 
 #lang scheme/base
 
-(require scheme/foreign)
+(require scheme/foreign
+         ffi/winapi)
 (provide (rename-out (getenv get-environment-variable))
          get-environment-variables)
 
@@ -44,8 +45,8 @@
             (cons next #f)))))
   (case (system-type)
     [(windows)
-     (let ([get (get-ffi-obj "GetEnvironmentStringsW" #f (_fun #:abi 'stdcall -> _bytes))]
-           [free (get-ffi-obj "FreeEnvironmentStringsW" #f (_fun #:abi 'stdcall _pointer -> _void))])
+     (let ([get (get-ffi-obj "GetEnvironmentStringsW" #f (_fun #:abi winapi -> _bytes))]
+           [free (get-ffi-obj "FreeEnvironmentStringsW" #f (_fun #:abi winapi _pointer -> _void))])
        (let* ([strs (get)]
               [len (let loop ([i 0])
                      (if (and (= 0 (ptr-ref strs _byte i))

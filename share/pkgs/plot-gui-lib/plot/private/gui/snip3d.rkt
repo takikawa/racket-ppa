@@ -1,9 +1,9 @@
 #lang racket/base
 
-(require racket/gui/base racket/class racket/match unstable/parameter-group
+(require racket/gui/base racket/class racket/match
          plot/private/common/math
-         plot/private/common/worker-thread
          plot/private/common/parameters
+         "worker-thread.rkt"
          "snip.rkt")
 
 (provide 3d-plot-snip% make-3d-plot-snip)

@@ -29,6 +29,9 @@
 
 (define-type t1 (c1 (n number?)))
 
+(define-type T-immutable #:immutable
+  [t-immutable (a number?)])
+
 (define ((ERR f) line#)
   (format f (+ line# THIS-LINE#)))
 
@@ -50,7 +53,7 @@
    ((ERR "~a") line#)
    (regexp-quote "\")")))
 
-(define THIS-LINE# 53)
+(define THIS-LINE# 56)
 
 (eli:test
  (i 4)

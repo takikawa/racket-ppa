@@ -8,12 +8,12 @@
 @include-section["http-client.scrbl"]
 @include-section["url.scrbl"]
 @include-section["uri-codec.scrbl"]
-@include-section["websocket.scrbl"]
 @include-section["ftp.scrbl"]
 @include-section["sendurl.scrbl"]
 @include-section["smtp.scrbl"]
 @include-section["sendmail.scrbl"]
 @include-section["head.scrbl"]
+@include-section["unihead.scrbl"]
 @include-section["imap.scrbl"]
 @include-section["pop3.scrbl"]
 @include-section["mime.scrbl"]
@@ -26,6 +26,7 @@
 @include-section["ssl-tcp-unit.scrbl"]
 @include-section["cgi.scrbl"]
 @include-section["cookie.scrbl"]
+@include-section["git-checkout.scrbl"]
 
 @(bibliography
 
@@ -89,6 +90,12 @@
             #:url "http://www.ietf.org/rfc/rfc3986.txt"
             #:date "2005")
 
+ (bib-entry #:key "RFC6265"
+            #:title "HTTP State Management Mechanism"
+            #:author "A. Barth"
+            #:location "RFC"
+            #:url "http://tools.ietf.org/html/rfc6265.html"
+            #:date "2011")
 )
 
 @index-section[]

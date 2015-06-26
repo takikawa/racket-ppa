@@ -34,7 +34,7 @@
     (lambda (stx)
       (let-values ([(here) (quote-syntax here)])
         (if (symbol? (syntax-e stx))
-            (datum->syntax here 'new-apply-proc stx stx)
+            (datum->syntax here 'new-apply-proc stx)
             (let-values ([(l) (syntax->list stx)])
               (let-values ([(app) (if (if l
                                           (ormap (lambda (x) (keyword? (syntax-e x))) l)
@@ -46,7 +46,6 @@
                  stx
                  (cons (datum->syntax here app fst fst)
                        (cdr (syntax-e stx)))
-                 stx
                  stx)))))))
 
   (define-values (new-keyword-apply)
@@ -175,12 +174,15 @@
              (rename new:procedure-rename procedure-rename)
              (rename new:chaperone-procedure chaperone-procedure)
              (rename new:impersonate-procedure impersonate-procedure)
+             (rename new:chaperone-procedure* chaperone-procedure*)
+             (rename new:impersonate-procedure* impersonate-procedure*)             
              (rename new:collection-path collection-path)
              (rename new:collection-file-path collection-file-path)
              (all-from-except '#%kernel lambda λ #%app #%module-begin apply prop:procedure 
                               procedure-arity procedure-reduce-arity raise-arity-error
                               procedure->method procedure-rename
                               chaperone-procedure impersonate-procedure
+                              chaperone-procedure* impersonate-procedure*
                               assq assv assoc
                               prop:incomplete-arity prop:method-arity-error)
              (all-from "reqprov.rkt")

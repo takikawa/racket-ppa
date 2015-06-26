@@ -261,6 +261,7 @@ These are not part of the numeric tower.
 @defidform[Place]
 @defidform[Place-Channel]
 @defidform[Semaphore]
+@defidform[FSemaphore]
 @defidform[Will-Executor]
 @defidform[Pseudo-Random-Generator]
 )]{
@@ -452,6 +453,20 @@ type @racket[_t] on each iteration.}
   appears in programs via the combination of occurrence typing and
   @racket[thread-cell?].
 @ex[(lambda: ([x : Any]) (if (thread-cell? x) x (error "not a thread cell!")))]
+}
+
+@defform[(Weak-Boxof t)]{
+  The type for a @rtech{weak box} whose value is of type @racket[t].
+
+  @ex[(make-weak-box 5)
+      (weak-box-value (make-weak-box 5))]
+}
+
+@defidform[Weak-BoxTop]{is the type of a @rtech{weak box} with an unknown element
+  type and is the supertype of all weak box types. This type
+  typically appears in programs via the combination of occurrence
+  typing and @racket[weak-box?].
+@ex[(lambda: ([x : Any]) (if (weak-box? x) x (error "not a box!")))]
 }
 
 @defform[(Ephemeronof t)]{An @rtech{ephemeron} whose value is of type @racket[t].}
@@ -767,6 +782,21 @@ descriptor values. The corresponding structure type is unknown for values of
 this top type.
 
 @ex[(struct-info (arity-at-least 0))]
+}
+
+@defform[(Prefab key type ...)]{
+  Represents a @rtech{prefab} structure type with the given prefab structure
+  key (such as one returned by @racket[prefab-struct-key] or accepted by
+  @racket[make-prefab-struct]) and with the given types for each field.
+
+  In the case of prefab structure types with supertypes, the field types of the
+  supertypes come before the field types of the child structure type. The order
+  of types matches the order of arguments to a prefab struct constructor.
+
+  @ex[#s(salad "potato" "mayo")
+      (: q-salad (Prefab (salad food 1) String String Symbol))
+      (define q-salad
+        #s((salad food 1) "quinoa" "EVOO" salad))]
 }
 
 @defalias[→ ->]

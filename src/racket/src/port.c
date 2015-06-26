@@ -199,6 +199,9 @@ typedef struct Scheme_Subprocess {
   short done;
   int status;
 #endif
+#ifdef WINDOWS_GET_PROCESS_TIMES
+  int got_time;
+#endif
   Scheme_Custodian_Reference *mref;
 } Scheme_Subprocess;
 
@@ -1212,7 +1215,7 @@ void scheme_fdzero(void *fd)
   scheme_init_fdset_array(fd, 1);
 # else
 #  if defined(FILES_HAVE_FDS) || defined(USE_TCP)
-  FD_ZERO((fd_set *)fd);
+  XFORM_HIDE_EXPR(FD_ZERO((fd_set *)fd));
 #  endif
 # endif
 }
@@ -6554,11 +6557,13 @@ static int try_get_fd_char(int fd, int *ready)
   unsigned char buf[1];
 
   old_flags = fcntl(fd, F_GETFL, 0);
-  fcntl(fd, F_SETFL, old_flags | MZ_NONBLOCKING);
+  if (!(old_flags & MZ_NONBLOCKING))
+    fcntl(fd, F_SETFL, old_flags | MZ_NONBLOCKING);
   do {
     c = read(fd, buf, 1);
   } while ((c == -1) && errno == EINTR);
-  fcntl(fd, F_SETFL, old_flags);
+  if (!(old_flags & MZ_NONBLOCKING))
+    fcntl(fd, F_SETFL, old_flags);
 
   if (c < 0) {
     *ready = 0;
@@ -6857,11 +6862,13 @@ static intptr_t fd_get_string_slow(Scheme_Input_Port *port,
       int old_flags;
 
       old_flags = fcntl(fip->fd, F_GETFL, 0);
-      fcntl(fip->fd, F_SETFL, old_flags | MZ_NONBLOCKING);
+      if (!(old_flags & MZ_NONBLOCKING))
+        fcntl(fip->fd, F_SETFL, old_flags | MZ_NONBLOCKING);
       do {
         bc = read(fip->fd, target + target_offset, target_size);
       } while ((bc == -1) && errno == EINTR);
-      fcntl(fip->fd, F_SETFL, old_flags);
+      if (!(old_flags & MZ_NONBLOCKING))
+        fcntl(fip->fd, F_SETFL, old_flags);
 
       if ((bc == -1) && (errno == EAGAIN)) {
         none_avail = 1;
@@ -8122,16 +8129,28 @@ static intptr_t flush_fd(Scheme_Output_Port *op,
       }
 #else
       int flags;
+      intptr_t amt;
 
       flags = fcntl(fop->fd, F_GETFL, 0);
-      fcntl(fop->fd, F_SETFL, flags | MZ_NONBLOCKING);
+      if (!(flags & MZ_NONBLOCKING))
+        fcntl(fop->fd, F_SETFL, flags | MZ_NONBLOCKING);
+
+      amt = buflen - offset;
 
       do {
-	len = write(fop->fd, bufstr + offset, buflen - offset);
-      } while ((len == -1) && (errno == EINTR));
+        do {
+          len = write(fop->fd, bufstr + offset, amt);
+        } while ((len == -1) && (errno == EINTR));
+
+        /* If there was no room to write `amt` bytes, then it's
+          possible that writing fewer bytes will succeed. That seems
+          to be the case with FIFOs on Mac OS X, for example. */
+        amt = amt >> 1;
+      } while ((len == -1) && (errno == EAGAIN) && (amt > 0));
 
       errsaved = errno;
-      fcntl(fop->fd, F_SETFL, flags);
+      if (!(flags & MZ_NONBLOCKING))
+        fcntl(fop->fd, F_SETFL, flags);
 
       full_write_buffer = (errsaved == EAGAIN);
 #endif
@@ -9112,6 +9131,35 @@ static Scheme_Object *redirect_get_or_peek_bytes_k(void)
 
 #if defined(UNIX_PROCESSES) || defined(WINDOWS_PROCESSES)
 
+#if defined(WINDOWS_PROCESSES)
+static void collect_process_time(DWORD w, Scheme_Subprocess *sp)
+{
+  if ((w != STILL_ACTIVE) && !sp->got_time) {
+    FILETIME cr, ex, kr, us;
+    if (GetProcessTimes(sp->handle, &cr, &ex, &kr, &us)) {
+      mzlonglong v;
+      uintptr_t msecs;
+      v = ((((mzlonglong)kr.dwHighDateTime << 32) + kr.dwLowDateTime)
+	   + (((mzlonglong)us.dwHighDateTime << 32) + us.dwLowDateTime));
+      msecs = (uintptr_t)(v / 10000);
+
+#if defined(MZ_USE_PLACES)
+      {
+        int set = 0;
+        while (!set) {
+          uintptr_t old_val = scheme_process_children_msecs;
+          set = mzrt_cas(&scheme_process_children_msecs, old_val, old_val + msecs);
+        }
+      }
+#else
+      scheme_process_children_msecs += msecs;
+#endif
+    }
+    sp->got_time = 1;
+  }
+}
+#endif
+
 static void child_mref_done(Scheme_Subprocess *sp)
 {
   if (sp->mref) {
@@ -9160,9 +9208,10 @@ static int subp_done(Scheme_Object *so)
     HANDLE sci = (HANDLE) ((Scheme_Subprocess *)sp)->handle;
     DWORD w;
     if (sci) {
-      if (GetExitCodeProcess(sci, &w))
-        return w != STILL_ACTIVE;
-      else
+      if (GetExitCodeProcess(sci, &w)) {
+        collect_process_time(w, (Scheme_Subprocess *)sp);
+        return (w != STILL_ACTIVE);
+      } else
         return 1;
     } else
       return 1;
@@ -9220,6 +9269,7 @@ static Scheme_Object *subprocess_status(int argc, Scheme_Object **argv)
     DWORD w;
     if (sp->handle) {
       if (GetExitCodeProcess((HANDLE)sp->handle, &w)) {
+        collect_process_time(w, sp);
 	if (w == STILL_ACTIVE)
 	  going = 1;
 	else
@@ -9346,6 +9396,7 @@ static Scheme_Object *do_subprocess_kill(Scheme_Object *_sp, Scheme_Object *kill
       if (GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, sp->pid))
         return scheme_void;
     } else if (GetExitCodeProcess((HANDLE)sp->handle, &w)) {
+      collect_process_time(w, sp);
       if (w != STILL_ACTIVE)
         return scheme_void;
       if (TerminateProcess((HANDLE)sp->handle, 1))
@@ -10996,7 +11047,7 @@ static void start_green_thread_timer(intptr_t usec)
   itimerdata->jit_stack_boundary_ptr = &scheme_jit_stack_boundary;
   pthread_mutex_init(&itimerdata->mutex, NULL);
   pthread_cond_init(&itimerdata->cond, NULL);
-  tmp = mz_proc_thread_create_w_stacksize(green_thread_timer, itimerdata, 4096);
+  tmp = mz_proc_thread_create_w_stacksize(green_thread_timer, itimerdata, 16384);
   itimerdata->thread = tmp;
   itimerdata->itimer = 1;
 }

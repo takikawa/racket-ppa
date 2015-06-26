@@ -43,25 +43,23 @@ The default value is @racket[100].
 
 Generally, to use this macro, wrap a @racket[bitmap%]-producing expression with it and move any identifiers it depends on into the expansion phase.
 For example, suppose we are computing a large PLT logo at run time:
-@codeblock|{#lang racket}|
-@racketblock+eval[#:eval ctime-eval
+@codeblock|{
+#lang racket
+
 (require images/logos)
 
 (define the-logo (plt-logo #:height 384))
-]
-Running this takes several seconds. It produces
-@interaction[#:eval ctime-eval the-logo]
-
-To move the cost to expansion time, we change the program to
+}|
+Running this takes several seconds. To move the cost to expansion time, we change the program to
 @codeblock|{
 #lang racket
 
 (require images/compile-time
          (for-syntax images/logos))
-         
+
 (define the-logo (compiled-bitmap (plt-logo #:height 384)))
 }|
-The logo is unchanged, but now @italic{expanding} (and thus compiling) the program takes several seconds, and running it takes a few milliseconds.
+The logo will not change, but now @italic{expanding} the program takes several seconds, and @italic{running} it takes a few milliseconds.
 Note that @racketmodname[images/logos] is now required @racket[for-syntax], so that the expansion-phase expression @racket[(plt-logo #:height 384)]
 has access to the identifier @racket[plt-logo].
 }

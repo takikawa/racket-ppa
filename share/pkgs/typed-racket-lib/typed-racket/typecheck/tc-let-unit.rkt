@@ -1,12 +1,12 @@
 #lang racket/unit
 
 (require "../utils/utils.rkt"
-         (except-in (types utils subtype abbrev union filter-ops remove-intersect) -> ->* one-of/c)
+         (except-in (types utils abbrev filter-ops remove-intersect) -> ->* one-of/c)
          (only-in (types abbrev) (-> t:->) [->* t:->*])
          (private type-annotation parse-type syntax-properties)
-         (env lexical-env type-alias-env type-alias-helper mvar-env
-              global-env type-env-structs scoped-tvar-env)
-         (rep type-rep filter-rep)
+         (env lexical-env type-alias-helper mvar-env
+              global-env scoped-tvar-env)
+         (rep filter-rep object-rep type-rep)
          syntax/free-vars
          (typecheck signatures tc-metafunctions tc-subst internal-forms tc-envops)
          (utils tarjan)
@@ -17,6 +17,7 @@
          ;; For internal type forms
          (for-template (only-in racket/base define-values)))
 
+(require-for-cond-contract (rep type-rep))
 
 (import tc-expr^)
 (export tc-let^)
@@ -42,33 +43,44 @@
    . -> .
    tc-results/c)
   (with-cond-contract t/p ([expected-types (listof (listof Type/c))]
+                           [objs           (listof (listof Object?))]
                            [props          (listof (listof Filter?))])
-    (define-values (expected-types props)
-      (for/lists (e p)
+    (define-values (expected-types objs props)
+      (for/lists (e o p)
         ([e-r   (in-list expected-results)]
          [names (in-list namess)])
         (match e-r
           [(list (tc-result: e-ts (FilterSet: fs+ fs-) os) ...)
            (values e-ts
+                   (map (λ (o n t) (if (or (is-var-mutated? n) (F? t)) -empty-obj o)) os names e-ts)
                    (apply append
                           (for/list ([n (in-list names)]
                                      [t (in-list e-ts)]
                                      [f+ (in-list fs+)]
-                                     [f- (in-list fs-)])
+                                     [f- (in-list fs-)]
+                                     [o (in-list os)])
                             (cond
                               [(not (overlap t (-val #f)))
                                (list f+)]
                               [(is-var-mutated? n)
                                (list)]
-                              [else
-                               (list (-imp (-not-filter (-val #f) n) f+)
-                                     (-imp (-filter (-val #f) n) f-))]))))]
+                              ;; n is being bound to an expression w/ object o, no new info 
+                              ;; is required due to aliasing (note: we currently do not
+                              ;; alias objects typed as type variables)
+                              [(and (Path? o) (not (F? t))) (list)]
+                              ;; n is being bound to an expression w/o an object (or whose
+                              ;; type is a type variable) so create props about n
+                              [else (list (-or (-and (-not-filter (-val #f) n) f+)
+                                               (-and (-filter (-val #f) n) f-)))]))))]
+          ;; amk: does this case ever occur?
           [(list (tc-result: e-ts (NoFilter:) _) ...)
-           (values e-ts null)]))))
+           (values e-ts (make-list (length e-ts) -empty-obj) null)]))))
   ;; extend the lexical environment for checking the body
-  (with-lexical-env/extend
+  ;; with types and potential aliases
+  (with-lexical-env/extend-types+aliases
     (append* namess)
     (append* expected-types)
+    (append* objs)
     (replace-names
       (get-names+objects namess expected-results)
       (with-lexical-env/extend-props
@@ -173,16 +185,16 @@
 
   ;; Set up vertices for Tarjan's algorithm, where each letrec-values
   ;; clause is a vertex but mapped in the table for each of the clause names
-  (define vertices (make-bound-id-table))
+  (define vertices (make-free-id-table))
   (for ([clause other-clauses])
     (match-define (lr-clause names expr) clause)
     (define relevant-free-vars
       (for/list ([var (in-list (free-vars expr))]
-                 #:when (member var flat-names bound-identifier=?))
+                 #:when (member var flat-names free-identifier=?))
         var))
     (define vertex (make-vertex clause relevant-free-vars))
     (for ([name (in-list names)])
-      (bound-id-table-set! vertices name vertex)))
+      (free-id-table-set! vertices name vertex)))
 
   (define components (tarjan vertices))
 
@@ -190,7 +202,7 @@
   (define (no-self-cycle? vertex)
     (match-define (lr-clause names _) (vertex-data vertex))
     (for/and ([id (in-list names)])
-      (andmap (λ (id2) (not (bound-identifier=? id id2)))
+      (andmap (λ (id2) (not (free-identifier=? id id2)))
               (vertex-adjacent vertex))))
 
   ;; The components with only one entry are non-recursive if they also
@@ -222,9 +234,11 @@
              (get-type/infer names expr
                              (lambda (e) (tc-expr/maybe-expected/t e names))
                              tc-expr/check))
-           (with-lexical-env/extend names ts
-             (replace-names (map list names os)
-               (loop (cdr clauses))))])))
+           (with-lexical-env/extend-types 
+            names 
+            ts
+            (replace-names (map list names os)
+                           (loop (cdr clauses))))])))
 
 ;; this is so match can provide us with a syntax property to
 ;; say that this binding is only called in tail position

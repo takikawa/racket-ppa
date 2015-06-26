@@ -9,6 +9,7 @@
          "keycode.rkt"
          "pool.rkt"
          "cursor.rkt"
+         "key-translate.rkt"
          "../common/local.rkt"
          "../../lock.rkt"
          "../common/event.rkt"
@@ -294,7 +295,13 @@
         (when wx
           (send wx reset-cursor-rects)))])
 
+(define dead-key-state (make-initial-dead-key-state))
+
+(define << arithmetic-shift)
+
 (define (do-key-event wxb event self down? mod-change? wheel)
+  (define type (tell #:type _ushort event type))
+  (define key-down? (= (bitwise-and type #b1111) NSKeyDown))
   (let ([wx (->wx wxb)])
     (and
      wx
@@ -328,7 +335,10 @@
                      (tell #:type _NSString event characters)])]
               [dead-key? (unbox set-mark)]
               [control? (bit? modifiers NSControlKeyMask)]
-              [option? (bit? modifiers NSAlternateKeyMask)]
+              [option?  (bit? modifiers NSAlternateKeyMask)]
+	      [shift?   (bit? modifiers NSShiftKeyMask)]
+              [cmd?     (bit? modifiers NSCommandKeyMask)]
+              [caps?    (bit? modifiers NSAlphaShiftKeyMask)]
               [codes (cond
                       [wheel wheel]
                       [mod-change? (case (tell #:type _ushort event keyCode)
@@ -357,9 +367,9 @@
             (let-values ([(x y) (send wx window-point-to-view pos)])
               (let ([k (new key-event%
                             [key-code one-code]
-                            [shift-down (bit? modifiers NSShiftKeyMask)]
+                            [shift-down shift?]
                             [control-down control?]
-                            [meta-down (bit? modifiers NSCommandKeyMask)]
+                            [meta-down cmd?]
                             [alt-down option?]
                             [x (->long x)]
                             [y (->long y)]
@@ -372,15 +382,54 @@
                       (let ([alt-code (string-ref alt-str 0)])
                         (unless (equal? alt-code (send k get-key-code))
                           (send k set-other-altgr-key-code alt-code)))))
-                  (when (and (or (and option? 
-                                      special-option-key?)
-                                 (and control?
-                                      (equal? (send k get-key-code) #\u00)))
+                  (when key-down?
+                    (let ()
+		      (define (toggle flag m b) (if flag (- m b) (+ m b)))
+		      (define prev-dks       (copy-dead-key-state dead-key-state))
+		      (define (old-dks-copy) (copy-dead-key-state prev-dks))
+                      (define mask 	     (+ modifier-shift-key modifier-option-key modifier-alpha-lock
+						modifier-cmd-key modifier-control-key))
+      		      (define kc             (tell #:type _ushort event keyCode))
+                      (define mods           (bitwise-and (<< modifiers -8) mask))
+		      (define s              (key-translate kc #:modifier-key-state mods
+							    #:dead-key-state dead-key-state))
+		      (define dead?          (= 0 (string-length s)))
+		      (unless dead?          (set! dead-key-state (make-initial-dead-key-state)))
+		      ;; actual char received
+		      (define c              (and (not dead?) (string-ref s 0)))
+		      ;; the other codes all assume that caps-lock is off, so make sure it is turned off
+		      (set!   mods            (if caps? (toggle caps? mods modifier-alpha-lock) mods))
+                      (define shift-mod       (toggle shift?   mods modifier-shift-key))
+                      (define alt-mod         (toggle option?  mods modifier-option-key))
+                      (define shift-alt-mod   (toggle shift? (toggle option?  mods modifier-option-key) 
+						      modifier-shift-key))
+		      ;; (define cmd-mod   (toggle cmd?     mods modifier-cmd-key))
+		      ;; (define ctrl-mod  (toggle control? mods modifier-control-key))
+		      (define (alternative who setter mod) 
+			(define s (key-translate kc #:modifier-key-state mod #:dead-key-state (old-dks-copy)))
+			(setter (if (> (string-length s) 0) (string-ref s 0) #f))
+			(void))
+		      (alternative 'shift     (lambda (c) (send k set-other-shift-key-code c))           shift-mod)
+		      (alternative 'alt       (lambda (c) (send k set-other-altgr-key-code c))             alt-mod)
+		      ;; what exacly is shift+altgr supposed to hold ?
+		      (alternative 'shift-alt (lambda (c) (send k set-other-shift-altgr-key-code c)) shift-alt-mod)))
+                  
+                  ;; If the Option key is disabled globally via
+                  ;; `special-option-key`, then swap the Option and
+                  ;; non-Option results when Option is pressed.
+                  (when (and option? 
+                             special-option-key?
                              (send k get-other-altgr-key-code))
-                    ;; swap altenate with main
                     (let ([other (send k get-other-altgr-key-code)])
                       (send k set-other-altgr-key-code (send k get-key-code))
-                      (send k set-key-code other))))
+                      (send k set-key-code other)))
+                  ;; When a Ctl- combination produces
+                  ;; no key (such as with Ctl-space), it works ok to
+                  ;; use the mapping produced with Shift also down.
+                  (when (and control?
+                             (equal? (send k get-key-code) #\u00)
+                             (send k get-other-shift-key-code))
+                    (send k set-key-code (send k get-other-shift-key-code))))
                 (unless wheel
                   (unless (or down? (and mod-change?
                                          (case (send k get-key-code)
@@ -708,7 +757,7 @@
         (accept-drags-everywhere (or accept-drag? accept-parent-drag?))))
 
     (define/public (set-focus)
-      (when (and (gets-focus?)
+      (when (and (can-accept-focus?)
                  (is-enabled-to-root?))
         (let ([w (tell cocoa window)])
           (when w
@@ -869,7 +918,8 @@
             (tellv content addCursorRect: #:type _NSRect r cursor: cursor-handle)))))
     (define/public (get-cursor-width-delta) 0)
     
-    (define/public (gets-focus?) #f)
+    (define/public (can-accept-focus?) #f)
+    (define/public (gets-focus?) (can-accept-focus?))
     (define/public (can-be-responder?) (is-enabled-to-root?))
 
     (define/public (on-color-change)

@@ -18,7 +18,7 @@
    form ...
    [test-case @#,racket[(check-expect expr expr)]
               @#,racket[(check-random expr expr)]
-              @#,racket[(check-satisifed expr name)]
+              @#,racket[(check-satisfied expr name)]
               @#,racket[(check-within expr expr expr)]
               @#,racket[(check-member-of expr expr (... ...))]
               @#,racket[(check-range expr expr expr)]
@@ -65,7 +65,7 @@
   (make-splice
    (list
 
-@t{An @racket[_name] or a @racket[_variable] is a sequence of characters
+@t{A @racket[_name] or a @racket[_variable] is a sequence of characters
 not including a space or one of the following:}
 
 @t{@hspace[2] @litchar{"} @litchar{,} @litchar{'} @litchar{`}
@@ -76,13 +76,16 @@ not including a space or one of the following:}
 @t{A @racket[_number] is a number such as @racket[123], @racket[3/2], or
 @racket[5.5].}
 
-@t{A @racket[_boolean] is one of: @racket[true], @racket[false],
-@racket[#t], @racket[#f], @code{#true}, or @code{#false}.}
+@t{A @racket[_boolean] is one of: @code{#true} or  @code{#false}.
+
+Alternative spellings for the @code{#true} constant are @racket[#t],
+@racket[true], and @code{#T}. Similarly, @code{#f}, @racket[false], or
+@code{#F} are also recognized as @code{#false}.}
 
 @t{A @racket[_symbol] is a quote character followed by a name. A
-symbol is a value, just like 0 or empty.}
+symbol is a value, just like @code{42}, @code{'()}, or @code{#false}.}
 
-@t{A @racket[_string] is enclosed by a pair of @litchar{"}. Unlike
+@t{A @racket[_string] is a sequence of characters enclosed by a pair of @litchar{"}. Unlike
 symbols, strings may be split into characters and manipulated by a
 variety of functions.  For example, @racket["abcdef"],
 @racket["This is a string"], and @racket[#,ex-str] are all strings.}

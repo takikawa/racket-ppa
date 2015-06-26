@@ -1520,8 +1520,7 @@
   (test-engine-is-unchecked "Dieses Programm hat keine Checks!")
   (test-engine-tests-disabled "Tests deaktiviert.")
   (test-engine-both-tests-passed "Beide Tests waren erfolgreich.")
-  ; ~a is replaced by count
-  (test-engine-all-tests-passed "Alle ~a Tests waren erfolgreich!")
+  (test-engine-all-tests-passed "Alle Tests waren erfolgreich!")
   (test-engine-should-be-tested "Dieses Programm sollte getestet werden.")
   (test-engine-at-line-column "in Zeile ~a, Spalte ~a")
   (test-engine-in-at-line-column "in ~a, Zeile ~a, Spalte ~a")
@@ -1706,6 +1705,7 @@
   (install-pkg-dir "Verzeichnis")
   (install-pkg-dir-url "Verzeichnis woanders")
   (install-pkg-file-url "Datei woanders")
+  (install-pkg-git "Git-Repositorium")
   (install-pkg-github "Github")
   (install-pkg-name "Name (frage Auflöser)")
   (install-pkg-inferred-as "Typ inferiert als ~a") ; ~a gets install-pkg-{file,dir,...}

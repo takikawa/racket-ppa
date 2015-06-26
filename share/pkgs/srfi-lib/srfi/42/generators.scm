@@ -3,11 +3,11 @@
 ;;;
 
 
-(module generators mzscheme
+(module generators "mzscheme2.rkt"
   (provide (all-defined))
   (require "expansion.scm")
   (require-for-syntax "expansion.scm")
-  (require-for-template mzscheme)
+  (require-for-template "mzscheme2.rkt")
   
   
   (define-generator :list
@@ -178,10 +178,10 @@
       ; special cases (partially evaluated by hand from general case)
       ((:range var 0 arg2 1)
        #'(:do (let ((b arg2))
-                (if (not (and (integer? b) (exact? b)))
-                    (error 
-                     "arguments of :range are not exact integer "
-                     "(use :real-range?)" 0 b 1 )))
+                (when (not (and (integer? b) (exact? b)))
+                  (error 
+                   "arguments of :range are not exact integer "
+                   "(use :real-range?)" 0 b 1 )))
               ((var 0))
               (< var b)
               (let ())
@@ -190,10 +190,10 @@
       
       ((:range var 0 arg2 -1)
        #'(:do (let ((b arg2))
-                (if (not (and (integer? b) (exact? b)))
-                    (error 
-                     "arguments of :range are not exact integer "
-                     "(use :real-range?)" 0 b 1 )))
+                (when (not (and (integer? b) (exact? b)))
+                  (error 
+                   "arguments of :range are not exact integer "
+                   "(use :real-range?)" 0 b 1 )))
               ((var 0))
               (> var b)
               (let ())
@@ -202,7 +202,7 @@
       
       ((:range var arg1 arg2 1)
        #'(:do (let ((a arg1) (b arg2))
-                (if (not (and (integer? a) (exact? a)
+                (when (not (and (integer? a) (exact? a)
                               (integer? b) (exact? b) ))
                     (error 
                      "arguments of :range are not exact integer "
@@ -215,7 +215,7 @@
       
       ((:range var arg1 arg2 -1)
        #'(:do (let ((a arg1) (b arg2) (s -1) (stop 0))
-                (if (not (and (integer? a) (exact? a)
+                (when (not (and (integer? a) (exact? a)
                               (integer? b) (exact? b) ))
                     (error 
                      "arguments of :range are not exact integer "
@@ -230,14 +230,14 @@
       
       ((:range var arg1 arg2 arg3)
        #'(:do (let ((a arg1) (b arg2) (s arg3) (stop 0))
-                (if (not (and (integer? a) (exact? a)
+                (when (not (and (integer? a) (exact? a)
                               (integer? b) (exact? b)
                               (integer? s) (exact? s) ))
                     (error 
                      "arguments of :range are not exact integer "
                      "(use :real-range?)" a b s ))
-                (if (zero? s)
-                    (error "step size must not be zero in :range") )
+                (when (zero? s)
+                  (error "step size must not be zero in :range") )
                 (set! stop (+ a (* (max 0 (ceiling (/ (- b a) s))) s))) )
               ((var a))
               (not (= var stop))
@@ -263,10 +263,10 @@
       ; the fully qualified case
       ((:real-range var (index i) arg1 arg2 arg3)
        #'(:do (let ((a arg1) (b arg2) (s arg3) (istop 0))
-                (if (not (and (real? a) (real? b) (real? s)))
-                    (error "arguments of :real-range are not real" a b s) )
-                (if (and (exact? a) (or (not (exact? b)) (not (exact? s))))
-                    (set! a (exact->inexact a)) )
+                (when (not (and (real? a) (real? b) (real? s)))
+                  (error "arguments of :real-range are not real" a b s) )
+                (when (and (exact? a) (or (not (exact? b)) (not (exact? s))))
+                  (set! a (exact->inexact a)) )
                 (set! istop (/ (- b a) s)) )
               ((i 0))
               (< i istop)

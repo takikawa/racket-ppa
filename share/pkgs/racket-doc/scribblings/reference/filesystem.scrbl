@@ -185,47 +185,47 @@ paths. Parts of @racket[str] that do not form a valid path are not
 included in the returned list.}
 
 
-@defproc[(find-executable-path [program-sub path-string?]
-                               [related-sub (or/c path-string? #f) #f]
+@defproc[(find-executable-path [program path-string?]
+                               [related (or/c path-string? #f) #f]
                                [deepest? any/c #f]) 
          (or/c path? #f)]{
 
-Finds a path for the executable @racket[program-sub], returning
+Finds a path for the executable @racket[program], returning
 @racket[#f] if the path cannot be found.
 
-If @racket[related-sub] is not @racket[#f], then it must be a relative
-path string, and the path found for @racket[program-sub] must be such
-that the file or directory @racket[related-sub] exists in the same
+If @racket[related] is not @racket[#f], then it must be a relative
+path string, and the path found for @racket[program] must be such
+that the file or directory @racket[related] exists in the same
 directory as the executable. The result is then the full path for the
-found @racket[related-sub], instead of the path for the executable.
+found @racket[related], instead of the path for the executable.
  
 This procedure is used by the Racket executable to find the
 standard library collection directory (see @secref["collects"]).  In
 this case, @racket[program] is the name used to start Racket and
-@racket[related] is @racket["collects"].  The @racket[related-sub]
-argument is used because, on @|AllUnix|, @racket[program-sub] may
+@racket[related] is @racket["collects"].  The @racket[related]
+argument is used because, on @|AllUnix|, @racket[program] may
 involve a sequence of soft links; in this case,
-@racket[related-sub] determines which link in the chain is relevant.
+@racket[related] determines which link in the chain is relevant.
 
-If @racket[related-sub] is not @racket[#f], then when
-@racket[find-executable-path] does not find a @racket[program-sub]
+If @racket[related] is not @racket[#f], then when
+@racket[find-executable-path] does not find a @racket[program]
 that is a link to another file path, the search can continue with the
 destination of the link. Further links are inspected until
-@racket[related-sub] is found or the end of the chain of links is
+@racket[related] is found or the end of the chain of links is
 reached. If @racket[deepest?] is @racket[#f] (the default), then the
 result corresponds to the first path in a chain of links for which
-@racket[related-sub] is found (and further links are not actually
+@racket[related] is found (and further links are not actually
 explored); otherwise, the result corresponds to the last link in the
-chain for which @racket[related-sub] is found.
+chain for which @racket[related] is found.
 
-If @racket[program-sub] is a pathless name,
+If @racket[program] is a pathless name,
 @racket[find-executable-path] gets the value of the
 @indexed-envvar{PATH} environment variable; if this environment
 variable is defined, @racket[find-executable-path] tries each path in
-@envvar{PATH} as a prefix for @racket[program-sub] using the search
+@envvar{PATH} as a prefix for @racket[program] using the search
 algorithm described above for path-containing
-@racket[program-sub]s. If the @envvar{PATH} environment variable is
-not defined, @racket[program-sub] is prefixed with the current
+@racket[program]s. If the @envvar{PATH} environment variable is
+not defined, @racket[program] is prefixed with the current
 directory and used in the search algorithm above. (On Windows, the
 current directory is always implicitly the first item in
 @envvar{PATH}, so @racket[find-executable-path] checks the current
@@ -270,8 +270,19 @@ Deletes the file with path @racket[path] if it exists, otherwise the
 @exnraise[exn:fail:filesystem]. If @racket[path] is a link, the link
 is deleted rather than the destination of the link.
 
+On Windows, if an initial attempt to delete the file fails with a
+permission error and the value of
+@racket[current-force-delete-permissions] is true, then
+@racket[delete-file] attempts to change the file's permissions (to
+allow writes) and then delete the file; the permission change followed
+by deletion is a non-atomic sequence, with no attempt to revert a
+permission change if the deletion fails.
+
 On Windows, @racket[delete-file] can delete a symbolic link, but not
-a junction. Use @racket[delete-directory] to delete a junction.}
+a junction. Use @racket[delete-directory] to delete a junction.
+
+@history[#:changed "6.1.1.7" @elem{Changed Windows behavior to use
+                                   @racket[current-force-delete-permissions].}]}
 
 
 @defproc[(rename-file-or-directory [old path-string?]
@@ -301,10 +312,16 @@ destination of the link, and it counts as a file for replacing any
 existing @racket[new].}
 
 
-@defproc[(file-or-directory-modify-seconds [path path-string?]
-                                           [secs-n (or/c exact-integer? #f) #f]
-                                           [fail-thunk (-> any) (lambda () (raise (make-exn:fail:filesystem ....)))])
-         any]{
+@defproc*[([(file-or-directory-modify-seconds [path path-string?]
+                                              [secs-n #f #f])
+            exact-integer?]
+           [(file-or-directory-modify-seconds [path path-string?]
+                                              [secs-n exact-integer?])
+            void?]
+           [(file-or-directory-modify-seconds [path path-string?]
+                                              [secs-n (or/c exact-integer? #f) #f]
+                                              [fail-thunk (-> any) (lambda () (raise (make-exn:fail:filesystem ....)))])
+            any])]{
 
 @index['("file modification date and time")]{Returns}
 the file or directory's last modification date in seconds
@@ -318,9 +335,10 @@ the modification date is returned for a file.
 If @racket[secs-n] is provided and not @racket[#f], the access and
 modification times of @racket[path] are set to the given time.
 
-On error (e.g., if no such file exists), @racket[fail-thunk] is
-called, and the default @racket[fail-thunk] raises
-@racket[exn:fail:filesystem].}
+On error (e.g., if no such file exists), then @racket[fail-thunk] is
+called (through a tail call) to produce the result of the
+@racket[file-or-directory-modify-seconds] call. If @racket[fail-thunk] is
+not provided, an error raises @racket[exn:fail:filesystem].}
 
 
 @defproc*[([(file-or-directory-permissions [path path-string?] [mode #f #f]) (listof (or/c 'read 'write 'execute))]
@@ -419,6 +437,14 @@ link as opposed to a junction.
 
 @history[#:changed "6.0.1.12" @elem{Added support for links on Windows.}]}
 
+
+@defparam[current-force-delete-permissions any/c boolean?]{
+
+A @tech{parameter} that determines on Windows whether
+@racket[delete-file] and @racket[delete-directory] attempt to change a
+file or directory's permissions to delete it. The default value is
+@racket[#t].}
+
 @;------------------------------------------------------------------------
 @section[#:tag "directories"]{Directories}
 
@@ -482,7 +508,18 @@ is not created successfully, the @exnraise[exn:fail:filesystem].}
 
 Deletes an existing directory with the path @racket[path]. If the
 directory is not deleted successfully, the
-@exnraise[exn:fail:filesystem].}
+@exnraise[exn:fail:filesystem].
+
+On Windows, if an initial attempt to delete the directory fails with a
+permission error and the value of @racket[current-force-delete-permissions]
+is true, then @racket[delete-file] attempts to change the
+directory's permissions (to allow writes) and then delete the
+directory; the permission change followed by deletion is a non-atomic
+sequence, with no attempt to revert a permission change if the deletion
+fails.
+
+@history[#:changed "6.1.1.7" @elem{Changed Windows behavior to use
+                                   @racket[current-force-delete-permissions].}]}
 
 
 @defproc[(directory-list [path path-string? (current-directory)]
@@ -909,7 +946,7 @@ is a directory, the copy applies recursively to the directory's
 content. If a source is a link, the target of the link is copied
 rather than the link itself.
 
-If @racket[keep-modify-seconds?] is @racket[#f]false, then file copies
+If @racket[keep-modify-seconds?] is @racket[#f], then file copies
 keep only the properties kept by @racket[copy-file], If
 @racket[keep-modify-seconds?] is true, then each file copy also keeps
 the modification date of the original.}
@@ -964,7 +1001,7 @@ If @racket[start-path] does not refer to an existing file or
 directory, then @racket[predicate] will be called exactly once with
 @racket[start-path] as the argument.
 
-The @racket[find-files] procedure raises and exception if it encounters 
+The @racket[find-files] procedure raises an exception if it encounters
 a directory for which @racket[directory-list] fails.}
 
 @defproc[(pathlist-closure [path-list (listof path-string?)]
@@ -1058,7 +1095,27 @@ paths disappear during the scan, then an exception is raised.}
 
 Creates directory specified by @racket[path], creating intermediate
 directories as necessary, and never failing if @racket[path] exists
-already.}
+already.
+
+If @racket[path] is a relative path and the current directory does not
+exist, then @racket[make-directory*] will not create the current
+directory, because it considers only explicit elements of
+@racket[path].}
+
+
+@defproc[(make-parent-directory* [path path-string?]) void?]{
+
+Creates the parent directory of the path specified by @racket[path],
+creating intermediate directories as necessary, and never failing if
+an ancestor of @racket[path] exists already.
+
+If @racket[path] is a filesystem root or a relative path with a single
+path element, then no directory is created. Like
+@racket[make-directory*], if @racket[path] is a relative path and the
+current directory does not exist, then @racket[make-parent-directory*]
+will not create it.
+
+@history[#:added "6.1.1.3"]}
 
 
 @defproc[(make-temporary-file [template string? "rkttmp~a"]
@@ -1101,7 +1158,7 @@ see @racket[open-output-file]) and to delete it when it is no longer
 needed.}
 
 @defproc[(call-with-atomic-output-file [file path-string?] 
-                                       [proc ([port input-port?] [tmp-path path?]  . -> . any)]
+                                       [proc ([port output-port?] [tmp-path path?]  . -> . any)]
                                        [#:security-guard security-guard (or/c #f security-guard?) #f])
          any]{
 
@@ -1114,9 +1171,9 @@ to avoid problems due to concurrent readers of @racket[file].
 
 The @racket[proc] function is called with an output port for the
 temporary file, plus the path of the temporary file. The result of
-@racket[proc] is the result of @racket[call-with-atomic-output].
+@racket[proc] is the result of @racket[call-with-atomic-output-file].
 
-The @racket[call-with-atomic-output] function arranges to delete
+The @racket[call-with-atomic-output-file] function arranges to delete
 temporary files on exceptions.
 
 Windows prevents programs from deleting or replacing files that are
@@ -1124,7 +1181,7 @@ open, but it allows renaming of open files. Therefore, on Windows,
 @racket[call-with-atomic-output-file] creates a second temporary file
 @racket[_extra-tmp-file], renames @racket[file] to
 @racket[_extra-tmp-file], renames the temporary file written by
-@racket[proc] to @racket[p], and finally deletes
+@racket[proc] to @racket[file], and finally deletes
 @racket[_extra-tmp-file].}
 
 

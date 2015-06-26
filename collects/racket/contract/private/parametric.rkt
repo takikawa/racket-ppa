@@ -3,7 +3,7 @@
          "blame.rkt"
          "misc.rkt"
          "guts.rkt"
-         (for-syntax "arr-i-parse.rkt" racket/base))
+         (for-syntax "arr-util.rkt" racket/base))
 (provide parametric->/c)
 
 (define-syntax (parametric->/c stx)
@@ -16,6 +16,12 @@
                                "expected an identifier"
                                stx
                                x)))
+       (define dup (check-duplicate-identifier (syntax->list #'(x ...))))
+       (when dup (raise-syntax-error
+                  'parametric->/c 
+                  "duplicate identifier"
+                  stx
+                  dup))
        #`(make-polymorphic-contract opaque/c
                                     '(x ...)
                                     (lambda (x ...) c)

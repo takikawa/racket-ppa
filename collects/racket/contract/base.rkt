@@ -26,10 +26,6 @@
              check-procedure
              check-procedure/more
 
-             contracted-function?
-             contracted-function-proc
-             contracted-function-ctc
-             make-contracted-function 
              contract-key
              
              ;; these two are provided for-syntax
@@ -38,6 +34,8 @@
              
              -> ->*)
  (rename-out [->2 ->] [->*2 ->*])
+ dynamic->*
+ 
  (all-from-out "private/arr-i.rkt"
                "private/box.rkt"
                "private/hash.rkt"

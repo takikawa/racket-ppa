@@ -55,7 +55,7 @@
 
 (define windows-getpid
   (delay-ffi-obj "GetCurrentProcessId" (force kernel32)
-                 (_fun #:abi 'stdcall -> _int)))
+                 (_fun #:abi winapi -> _int)))
 
 (define (getpid)
   ((force (case (system-type)

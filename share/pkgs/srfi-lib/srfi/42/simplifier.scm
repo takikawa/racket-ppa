@@ -2,7 +2,7 @@
 ;;; SIMPLIFIER
 ;;;
 
-(module simplifier mzscheme
+(module simplifier "mzscheme2.rkt"
   (provide ec-simplify)
   
   ; (ec-simplify <expression>)
@@ -37,16 +37,16 @@
       
       ; (not (not <test>))
       ((ec-simplify (if (not (not test)) consequent))
-       #'(ec-simplify (if test consequent)) )
+       #'(ec-simplify (when test consequent)) )
       
       ((ec-simplify (if (#%app not (not test)) consequent))
-       #'(ec-simplify (if test consequent)) )
+       #'(ec-simplify (when test consequent)) )
       
       ((ec-simplify (if (not (#%app not test)) consequent))
-       #'(ec-simplify (if test consequent)) )
+       #'(ec-simplify (when test consequent)) )
       
       ((ec-simplify (if (#%app not (#%app not test)) consequent))
-       #'(ec-simplify (if test consequent)) )
+       #'(ec-simplify (when test consequent)) )
       
       ((ec-simplify (if (not (not test)) consequent alternate))
        #'(ec-simplify (if test consequent alternate)) )
@@ -59,6 +59,9 @@
       
       ((ec-simplify (if (#%app not (#%app not test)) consequent alternate))
        #'(ec-simplify (if test consequent alternate)) )
+      
+      ((ec-simplify (if test consequent))
+       #'(when test consequent) )
       
       
       ; (let () <command>*) 

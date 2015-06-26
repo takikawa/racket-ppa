@@ -19,7 +19,8 @@
          (struct-out internal-class/c)
          just-check-existence just-check-existence?
          build-internal-class/c internal-class/c-proj
-         class/c-internal-name-clauses)
+         class/c-internal-name-clauses
+         dynamic-object/c)
 
 ;; Shorthand contracts that treat the implicit object argument as if it were
 ;; contracted with any/c.
@@ -36,6 +37,7 @@
   (syntax-parameterize ([making-a-method #'this-param] [method-contract? #t]) (->d . stx)))
 
 (define (class/c-check-first-order ctc cls fail)
+  (define opaque? (class/c-opaque? ctc))
   (unless (class? cls)
     (fail '(expected: "a class" given: "~v") cls))
   (define method-ht (class-method-ht cls))
@@ -54,31 +56,29 @@
             [else m/l])))
       (unless (contract-first-order-passes? c meth-proc)
         (fail "public method ~a doesn't match contract" m))))
-  (unless (class/c-opaque? ctc)
+  (unless opaque?
     (for ([m (class/c-absents ctc)])
       (when (hash-ref method-ht m #f)
         (fail "class already contains public method ~a" m))))
-  (when (class/c-opaque? ctc)
+  (when opaque?
     (for ([m (in-hash-keys method-ht)])
       (unless (memq m (class/c-methods ctc))
-        (if (symbol-interned? m)
-            (fail "method ~a not specified in contract" m)
-            (fail "some local member not specified in contract")))))
+        (when (or (not (symbol? opaque?)) (symbol-interned? m))
+          (fail "method ~a not specified in contract" m)))))
   
   (define field-ht (class-field-ht cls))
   (for ([f (class/c-fields ctc)])
     (unless (hash-ref field-ht f #f)
       (fail "no public field ~a" f)))
-  (unless (class/c-opaque? ctc)
+  (unless opaque?
     (for ([f (class/c-absent-fields ctc)])
       (when (hash-ref field-ht f #f)
         (fail "class already contains public field ~a" f))))
-  (when (class/c-opaque? ctc)
+  (when opaque?
     (for ([f (in-hash-keys field-ht)])
       (unless (memq f (class/c-fields ctc))
-        (if (symbol-interned? f)
-            (fail "field ~a not specified in contract" f)
-            (fail "some local member field not specified in contract")))))
+        (when (or (not (symbol? opaque?)) (symbol-interned? f))
+          (fail "field ~a not specified in contract" f)))))
   #t)
 
 (define (internal-class/c-check-first-order internal-ctc cls fail)
@@ -861,7 +861,7 @@
       (check-one-stronger internal-class/c-augrides internal-class/c-augride-contracts
                           this-internal that-internal)
       
-      (if (class/c-opaque? this) (class/c-opaque? that) #t)
+      (equal? (class/c-opaque? this) (class/c-opaque? that))
       (all-included? (class/c-absent-fields that) (class/c-absent-fields this))
       (all-included? (class/c-absents that) (class/c-absents this)))]
     [else #f]))
@@ -1128,6 +1128,8 @@
 (define-syntax (class/c stx)
 
   (define-splicing-syntax-class opaque-keyword
+    (pattern (~seq #:opaque #:ignore-local-member-names)
+             #:with opaque? #''ignore-local-member-names)
     (pattern (~seq #:opaque) #:with opaque? #'#t)
     (pattern (~seq) #:with opaque? #'#f))
 
@@ -1201,83 +1203,21 @@
           #:key (compose symbol->string car)))
   (values (map car sorted) (map cdr sorted)))
 
-(define (check-object-contract obj methods fields fail)
-  (unless (object? obj)
-    (fail '(expected: "an object" given: "~e") obj))
-  (let ([cls (object-ref/unwrap obj)])
-    (let ([method-ht (class-method-ht cls)])
-      (for ([m methods])
-        (unless (hash-ref method-ht m #f)
-          (fail "no public method ~a" m))))
-    (let ([field-ht (class-field-ht cls)])
-      (for ([m fields])
-        (unless (hash-ref field-ht m #f)
-          (fail "no public field ~a" m)))))
-  #t)
-
-(define (object/c-proj ctc)
-  (λ (blame)
-    (λ (obj)
-      (make-wrapper-object ctc obj blame 
-                           (base-object/c-methods ctc) (base-object/c-method-contracts ctc)
-                           (base-object/c-fields ctc) (base-object/c-field-contracts ctc)))))
-
-(define (object/c-first-order ctc)
-  (λ (obj)
-    (let/ec ret
-      (check-object-contract obj 
-                             (base-object/c-methods ctc) 
-                             (base-object/c-fields ctc)
-                             (λ args (ret #f))))))
-
-(define-struct base-object/c (methods method-contracts fields field-contracts)
-  #:property prop:custom-write custom-write-property-proc
-  #:property prop:contract
-  (build-contract-property 
-   #:projection object/c-proj
-   #:name
-   (λ (ctc)
-     (let* ([pair-ids-ctcs
-             (λ (is ctcs)
-               (map (λ (i ctc)
-                      (build-compound-type-name i ctc))
-                    is ctcs))]
-            [handle-optional
-             (λ (name is ctcs)
-               (if (null? is)
-                   null
-                   (list (cons name (pair-ids-ctcs is ctcs)))))])
-       (apply build-compound-type-name
-              'object/c 
-              (append
-               (pair-ids-ctcs (base-object/c-methods ctc) (base-object/c-method-contracts ctc))
-               (handle-optional 'field 
-                                (base-object/c-fields ctc)
-                                (base-object/c-field-contracts ctc))))))
-   #:first-order object/c-first-order))
-
-(define-syntax (object/c stx)
-  (syntax-case stx ()
-    [(_ form ...)
-     (let ()
-       (define-values (bindings pfs)
-         (parse-class/c-specs (syntax->list #'(form ...)) #t))
-       (with-syntax ([methods #`(list #,@(reverse (hash-ref pfs 'methods null)))]
-                     [method-ctcs #`(list #,@(reverse (hash-ref pfs 'method-contracts null)))]
-                     [fields #`(list #,@(reverse (hash-ref pfs 'fields null)))]
-                     [field-ctcs #`(list #,@(reverse (hash-ref pfs 'field-contracts null)))]
-                     [bindings bindings])
-         (syntax/loc stx
-           (let bindings
-             (make-base-object/c methods method-ctcs fields field-ctcs)))))]))
-
 (define (instanceof/c-proj ctc)
-  (define proj (contract-projection (base-instanceof/c-class-ctc ctc)))
+  (define proj
+    (if (base-instanceof/c? ctc)
+        (contract-projection (base-instanceof/c-class-ctc ctc))
+        (object/c-class-proj ctc)))
   (λ (blame)
-    (define p (proj blame))
+    (define p (proj (blame-add-context blame #f)))
     (λ (val)
       (unless (object? val)
         (raise-blame-error blame val '(expected: "an object" given: "~e") val))
+      (when (base-object/c? ctc)
+        (check-object-contract val
+                               (base-object/c-methods ctc)
+                               (base-object/c-fields ctc)
+                               (λ args (apply raise-blame-error blame val args))))
       (define original-obj (if (has-original-object? val) (original-object val) val))
       (define new-cls (p (object-ref val)))
       (cond
@@ -1291,9 +1231,129 @@
           (wrapped-class-info-neg-field-projs the-info)
           neg-party)]
         [else
-         (impersonate-struct val object-ref (λ (o c) new-cls)
-                             impersonator-prop:contracted ctc
-                             impersonator-prop:original-object original-obj)]))))
+         (define interposed-val
+           (if (has-impersonator-prop:instanceof/c-original-object? val)
+               (get-impersonator-prop:instanceof/c-original-object val)
+               (impersonate-struct 
+                val object-ref
+                (λ (o c) (car (get-impersonator-prop:instanceof/c-wrapped-classes o))))))
+	
+
+         ;; this code is doing a fairly complicated dance to 
+         ;; accomplish a fairly simple purpose. In particular,
+         ;; instanceof/c contracts keep all of the contracts
+         ;; that they've put on a value in a property on the
+         ;; value and then, when a new contract comes along,
+         ;; try to avoid growing the list of contracts, in the
+         ;; case that there is already checking that subsumes 
+         ;; some of the contracts. It does this by building up
+         ;; the new list of contracts (the old one, plus this one)
+         ;; and then looking for a sublist of that list like this:
+         ;;   c1, ..., ci, ..., cj, ..., ck, ... cn
+         ;; such that ci <: cj and ck <: cj. When that's the case,
+         ;; case then we know that cj is redundant (regardless of
+         ;; the blame it might assign). So this code is looking
+         ;; for such things, but the complication of the code comes
+         ;; from trying to avoid re-creating too many contracts
+         (define all-new-ctcs
+           (cons ctc
+                 (if (has-impersonator-prop:instanceof/c-ctcs? val)
+                     (get-impersonator-prop:instanceof/c-ctcs val)
+                     '())))
+         
+         (define all-new-projs
+           (cons p
+                 (if (has-impersonator-prop:instanceof/c-projs? val)
+                     (get-impersonator-prop:instanceof/c-projs val)
+                     '())))
+         
+         (define old-classes
+           (if (has-impersonator-prop:instanceof/c-wrapped-classes? val)
+               (get-impersonator-prop:instanceof/c-wrapped-classes val)
+               '()))
+         
+         (define-values (reverse-without-redundant-ctcs reverse-without-redundant-projs)
+           (let loop ([prior-ctcs '()]
+                      [prior-projs '()]
+                      [this-ctc (car all-new-ctcs)]
+                      [next-ctcs (cdr all-new-ctcs)]
+                      [this-proj (car all-new-projs)]
+                      [next-projs (cdr all-new-projs)])
+             (cond
+               [(null? next-ctcs) (values (cons this-ctc prior-ctcs)
+                                          (cons this-proj prior-projs))]
+               [else
+                (if (and (ormap (λ (x) (contract-stronger? x this-ctc)) prior-ctcs)
+                         (ormap (λ (x) (contract-stronger? this-ctc x)) next-ctcs))
+                    (loop prior-ctcs prior-projs
+                          (car next-ctcs) (cdr next-ctcs) (car next-projs) (cdr next-projs))
+                    (loop (cons this-ctc prior-ctcs) (cons this-proj prior-projs)
+                          (car next-ctcs) (cdr next-ctcs) (car next-projs) (cdr next-projs)))])))
+         
+         (define wrapped-classes 
+           (reverse
+            (let loop ([class (if (has-impersonator-prop:instanceof/c-wrapped-classes? val)
+                                  (car (reverse 
+                                        (get-impersonator-prop:instanceof/c-wrapped-classes val)))
+                                  (object-ref val))]
+                       [ctcs reverse-without-redundant-ctcs]
+                       [projs reverse-without-redundant-projs]
+                       
+                       [old-ctcs (reverse (cdr all-new-ctcs))]
+                       [old-classes (reverse old-classes)])
+              (cond
+                [(null? projs) (list class)]
+                [else
+                 (cons class
+                       (cond
+                         [(and (pair? old-ctcs) (eq? (car old-ctcs) (car ctcs)))
+                          (loop (car old-classes)
+                                (cdr ctcs)
+                                (cdr projs)
+                                (cdr old-ctcs)
+                                (cdr old-classes))]
+                         [else
+                          (loop ((car projs) class) (cdr ctcs) (cdr projs) '() '())]))]))))
+         
+         (impersonate-struct
+          interposed-val object-ref
+          
+          ;FIXME: this should be #f, but right now that triggers 
+          ;; a bug in the impersonator implementation
+          (λ (x y) y) 
+          
+          impersonator-prop:instanceof/c-original-object interposed-val
+          impersonator-prop:instanceof/c-ctcs (reverse reverse-without-redundant-ctcs)
+          impersonator-prop:instanceof/c-projs (reverse reverse-without-redundant-projs)
+          impersonator-prop:instanceof/c-wrapped-classes wrapped-classes
+          impersonator-prop:contracted ctc
+          impersonator-prop:original-object original-obj)]))))
+
+(define-values (impersonator-prop:instanceof/c-ctcs
+                has-impersonator-prop:instanceof/c-ctcs?
+                get-impersonator-prop:instanceof/c-ctcs)
+  (make-impersonator-property 'impersonator-prop:instanceof/c-ctcs))
+
+(define-values (impersonator-prop:instanceof/c-projs
+                has-impersonator-prop:instanceof/c-projs?
+                get-impersonator-prop:instanceof/c-projs)
+  (make-impersonator-property 'impersonator-prop:instanceof/c-projs))
+
+(define-values (impersonator-prop:instanceof/c-wrapped-classes
+                has-impersonator-prop:instanceof/c-wrapped-classes?
+                get-impersonator-prop:instanceof/c-wrapped-classes)
+  (make-impersonator-property 'impersonator-prop:instanceof/c-wrapped-classes))
+
+;; when an object has the original-object property, 
+;; then we also know that value of this property is
+;; an object whose object-ref has been redirected to
+;; use impersonator-prop:instanceof/c-wrapped-classes
+(define-values (impersonator-prop:instanceof/c-original-object
+                has-impersonator-prop:instanceof/c-original-object?
+                get-impersonator-prop:instanceof/c-original-object)
+  (make-impersonator-property 'impersonator-prop:instanceof/c-has-object-ref-interposition))
+
+
 
 (define (instanceof/c-first-order ctc)
   (let ([cls-ctc (base-instanceof/c-class-ctc ctc)])
@@ -1321,6 +1381,135 @@
 (define (instanceof/c cctc)
   (let ([ctc (coerce-contract 'instanceof/c cctc)])
     (make-base-instanceof/c ctc)))
+
+;; dynamic-object/c : Listof<Symbol> Listof<Contract>
+;;                    Listof<Symbol> Listof<Contract>
+;;                    -> Contract
+;; An external constructor provided in order to allow runtime
+;; construction of object contracts by libraries that want to
+;; implement their own object contract variants
+(define (dynamic-object/c method-names method-contracts
+                          field-names field-contracts)
+  (define (ensure-symbols names)
+    (unless (and (list? names) (andmap symbol? names))
+      (raise-argument-error 'dynamic-object/c "(listof symbol?)" names)))
+  (define (ensure-length names ctcs)
+    (unless (= (length names) (length ctcs))
+      (raise-arguments-error 'dynamic-object/c
+                             "expected the same number of names and contracts"
+                             "names" names
+                             "contracts" ctcs)))
+  (ensure-symbols method-names)
+  (ensure-length method-names method-contracts)
+  (ensure-symbols field-names)
+  (ensure-length field-names field-contracts)
+  (make-base-object/c
+   method-names (coerce-contracts 'dynamic-object/c method-contracts)
+   field-names (coerce-contracts 'dynamic-object/c field-contracts)))
+
+(define (object/c-class-proj ctc)
+  (define methods (base-object/c-methods ctc))
+  (define method-contracts (base-object/c-method-contracts ctc))
+  (define fields (base-object/c-fields ctc))
+  (define field-contracts (base-object/c-field-contracts ctc))
+  (λ (blame)
+    (λ (val)
+      (make-wrapper-class
+       val blame
+       methods method-contracts fields field-contracts))))
+
+(define (check-object-contract obj methods fields fail)
+  (unless (object? obj)
+    (fail '(expected: "an object" given: "~e") obj))
+  (let ([cls (object-ref/unwrap obj)])
+    (let ([method-ht (class-method-ht cls)])
+      (for ([m methods])
+        (unless (hash-ref method-ht m #f)
+          (fail "no public method ~a" m))))
+    (let ([field-ht (class-field-ht cls)])
+      (for ([m fields])
+        (unless (hash-ref field-ht m #f)
+          (fail "no public field ~a" m)))))
+  #t)
+
+(define (object/c-first-order ctc)
+  (λ (obj)
+    (let/ec ret
+      (check-object-contract obj
+                             (base-object/c-methods ctc)
+                             (base-object/c-fields ctc)
+                             (λ args (ret #f))))))
+
+(define (object/c-stronger this that)
+  (cond
+    [(base-object/c? that)
+     (and
+      ;; methods
+      (check-one-object base-object/c-methods base-object/c-method-contracts this that)
+
+      ;; check both ways for fields (since mutable)
+      (check-one-object base-object/c-fields base-object/c-field-contracts this that)
+      (check-one-object base-object/c-fields base-object/c-field-contracts that this)
+
+      ;; width subtyping
+      (all-included? (base-object/c-methods that)
+                     (base-object/c-methods this))
+      (all-included? (base-object/c-fields that)
+                     (base-object/c-fields this)))]
+    [else #f]))
+
+;; See `check-one-stronger`. The difference is that this one only checks the
+;; names that are in both this and that.
+(define (check-one-object names-sel ctcs-sel this that)
+  (for/and ([this-name (in-list (names-sel this))]
+            [this-ctc (in-list (ctcs-sel this))])
+    (or (not (member this-name (names-sel that)))
+        (for/or ([that-name (in-list (names-sel that))]
+                 [that-ctc (in-list (ctcs-sel that))])
+          (and (equal? this-name that-name)
+               (contract-stronger? this-ctc that-ctc))))))
+
+(define-struct base-object/c (methods method-contracts fields field-contracts)
+  #:property prop:custom-write custom-write-property-proc
+  #:property prop:contract
+  (build-contract-property
+   #:projection instanceof/c-proj
+   #:name
+   (λ (ctc)
+     (let* ([pair-ids-ctcs
+             (λ (is ctcs)
+               (map (λ (i ctc)
+                      (build-compound-type-name i ctc))
+                    is ctcs))]
+            [handle-optional
+             (λ (name is ctcs)
+               (if (null? is)
+                   null
+                   (list (cons name (pair-ids-ctcs is ctcs)))))])
+       (apply build-compound-type-name
+              'object/c
+              (append
+               (pair-ids-ctcs (base-object/c-methods ctc) (base-object/c-method-contracts ctc))
+               (handle-optional 'field
+                                (base-object/c-fields ctc)
+                                (base-object/c-field-contracts ctc))))))
+   #:first-order object/c-first-order
+   #:stronger object/c-stronger))
+
+(define-syntax (object/c stx)
+  (syntax-case stx ()
+    [(_ form ...)
+     (let ()
+       (define-values (bindings pfs)
+         (parse-class/c-specs (syntax->list #'(form ...)) #t))
+       (with-syntax ([methods #`(list #,@(reverse (hash-ref pfs 'methods null)))]
+                     [method-ctcs #`(list #,@(reverse (hash-ref pfs 'method-contracts null)))]
+                     [fields #`(list #,@(reverse (hash-ref pfs 'fields null)))]
+                     [field-ctcs #`(list #,@(reverse (hash-ref pfs 'field-contracts null)))]
+                     [bindings bindings])
+         (syntax/loc stx
+           (let bindings
+             (make-base-object/c methods method-ctcs fields field-ctcs)))))]))
 
 ;; make-wrapper-object: contract object blame 
 ;;                      (listof symbol) (listof contract?) (listof symbol) (listof contract?)

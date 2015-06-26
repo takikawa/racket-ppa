@@ -22,6 +22,7 @@
 (define sc-install-pkg-dir (string-constant install-pkg-dir))
 (define sc-install-pkg-dir-url (string-constant install-pkg-dir-url))
 (define sc-install-pkg-file-url (string-constant install-pkg-file-url))
+(define sc-install-pkg-git (string-constant install-pkg-git))
 (define sc-install-pkg-github (string-constant install-pkg-github))
 (define sc-install-pkg-name (string-constant install-pkg-name))
 (define sc-install-pkg-inferred-as (string-constant install-pkg-inferred-as))
@@ -65,7 +66,7 @@
     (init-field [in-terminal in-terminal])
     (init [text-field-initial-value #f]
           [(details-initially-shown? details-shown?) #f])
-    (super-new)
+    (super-new [stretchable-height #f])
     
     (inherit get-top-level-window)
 
@@ -73,13 +74,15 @@
                               [parent this] 
                               [stretchable-height #f]))
 
+    (define (save-tf!)
+      (preferences:set 'drracket:gui-installer-pkg-source (send tf get-value)))
     (define tf 
       (new text-field% 
            [parent source-panel] 
            [min-width 600]
            [label (~a sc-install-pkg-source-label ":")]
            [callback (λ (_1 _2) 
-                       (preferences:set 'drracket:gui-installer-pkg-source (send tf get-value))
+                       (save-tf!)
                        (adjust-all))]))
     (send tf set-value (or text-field-initial-value 
                            (preferences:get 'drracket:gui-installer-pkg-source)))
@@ -119,6 +122,7 @@
                                (if dir?
                                    (path->directory-path f) 
                                    f))))
+          (save-tf!)
           (adjust-all))))
     (define browse-button (new button%
                                [parent source-panel]
@@ -179,7 +183,8 @@
                           [(install) (string-constant install-pkg-abort-install)]
                           [(update) (string-constant install-pkg-abort-update)])
                         (lambda ()
-                          (keyword-apply action 
+                          (keyword-apply action
+                                         #:batch #t
                                          (cmdline-kwds res)
                                          (cmdline-kwd-args res)
                                          (cmdline-args res))))
@@ -224,6 +229,7 @@
                                        sc-install-pkg-dir
                                        sc-install-pkg-file-url
                                        sc-install-pkg-dir-url
+                                       sc-install-pkg-git
                                        sc-install-pkg-github
                                        sc-install-pkg-name)]))
     (define link-dir-checkbox (new check-box%
@@ -360,14 +366,16 @@
         [(2) 'dir]
         [(3) 'file-url]
         [(4) 'dir-url]
-        [(5) 'github]
-        [(6) 'name]))
+        [(5) 'git]
+        [(6) 'github]
+        [(7) 'name]))
     
     (define/private (type->str type)
       (case type
         [(file) sc-install-pkg-file]
         [(name) sc-install-pkg-name]
         [(dir) sc-install-pkg-dir]
+        [(git) sc-install-pkg-git]
         [(github) sc-install-pkg-github]
         [(file-url) sc-install-pkg-file-url]
         [(dir-url) sc-install-pkg-dir-url]
@@ -592,9 +600,10 @@
                     (selected-type))
            (add-kwd-arg '#:type (selected-type)))
          (when (and (not update-by-name?)
-                    (send link-dir-checkbox get-value)
                     (eq? 'dir (or (selected-type) (get-inferred-actual-type))))
-             (add-kwd-arg '#:link #t))
+           (if (send link-dir-checkbox get-value)
+               (add-kwd-arg '#:link #t)
+               (add-kwd-arg '#:copy #t)))
          (let ([scope (selected-scope)])
            (unless (and (equal? scope (default-pkg-scope))
                         ;; Don't let `update' infer a scope itself:

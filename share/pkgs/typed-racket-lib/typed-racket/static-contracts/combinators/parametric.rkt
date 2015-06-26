@@ -6,8 +6,7 @@
   "../structures.rkt"
   "../constraints.rkt"
   "../terminal.rkt"
-  racket/list racket/match
-  unstable/contract
+  racket/match
   racket/contract
   (for-template racket/base racket/contract/parametric)
   (for-syntax racket/base syntax/parse))
@@ -18,7 +17,8 @@
     [parametric-var/sc (identifier? . -> . static-contract?)])
   parametric->/sc:
   (rename-out
-    [parametric-var/sc parametric-var/sc:]))
+    [parametric-var/sc parametric-var/sc:]
+    [parametric-combinator? parametric->/sc?]))
 
 
 (struct parametric-combinator combinator (vars)

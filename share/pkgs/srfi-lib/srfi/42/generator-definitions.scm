@@ -1,8 +1,8 @@
-(module generator-definitions mzscheme
+(module generator-definitions "mzscheme2.rkt"
   (provide define-generator)
   
   (require-for-syntax "generator-struct.scm")
-  (require-for-template mzscheme)
+  (require-for-template "mzscheme2.rkt")
   
   ; syntax 
   ;    (define-generator name proc)

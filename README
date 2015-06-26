@@ -3,7 +3,7 @@ The Racket Programming Language
 
 This is the
   Racket | Source
-distribution for version 6.1.1.
+distribution for version 6.2.
 
 This distribution provides source for the Racket run-time system;
 for build and installation instructions, see "src/README".
@@ -12,7 +12,7 @@ installed packages in source form.)
 
 The distribution has been configured so that when you install or
 update packages, the package catalog at
-  http://download.racket-lang.org/releases/6.1.1/catalog/
+  http://download.racket-lang.org/releases/6.2/catalog/
 is consulted first.
 
 Visit http://racket-lang.org/ for more Racket resources.

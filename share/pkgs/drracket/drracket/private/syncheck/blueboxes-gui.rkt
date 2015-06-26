@@ -1,18 +1,27 @@
 #lang racket/base
-(require framework 
+(require framework
+         framework/private/coroutine
          racket/gui/base
          racket/class
          racket/math
+         racket/match
          racket/runtime-path
          data/interval-map
          images/icons/misc
          drracket/private/rectangle-intersect
          string-constants
          framework/private/logging-timer
-         scribble/blueboxes)
-(provide docs-text-mixin
+         scribble/blueboxes
+         net/url
+         browser/external
+         setup/xref
+         scribble/xref
+         setup/collects)
+(provide docs-text-defs-mixin
+         docs-text-ints-mixin
          docs-editor-canvas-mixin
          syncheck:add-docs-range
+         syncheck:add-require-candidate
          syncheck:reset-docs-im
          syncheck:update-blue-boxes)
 
@@ -64,7 +73,15 @@
   get-current-strs
   syncheck:reset-docs-im
   syncheck:add-docs-range
-  syncheck:update-blue-boxes)
+  syncheck:add-require-candidate
+  syncheck:update-blue-boxes
+  get-docs-im
+  get/start-docs-im
+  get-require-candidates
+  get-path->pkg-cache
+  set-original-info-text
+  add-linked
+  update-the-strs)
 
 (define docs-ec-clipping-region #f)
 (define docs-ec-last-cw #f)
@@ -143,13 +160,25 @@
       (super on-paint))
     (super-new)))
 
-(define (docs-text-mixin %)
-  (class %
+(define docs-text-info<%>
+  (interface ()
+    get-docs-im
+    get/start-docs-im
+    get-require-candidates
+    get-path->pkg-cache
+    update-the-strs
+    toggle-syncheck-docs))
+
+(define docs-text-gui-mixin
+  (mixin (color:text<%> docs-text-info<%>) ()
     (inherit get-canvas get-admin get-style-list
              dc-location-to-editor-location get-dc
              get-start-position get-end-position
              begin-edit-sequence end-edit-sequence
-             invalidate-bitmap-cache)
+             invalidate-bitmap-cache get-text
+             is-stopped? is-frozen? is-lexer-valid?
+             classify-position get-token-range
+             get/start-docs-im get-docs-im get-require-candidates get-path->pkg-cache)
     
     (define locked? (preferences:get 'drracket:syncheck:contracts-locked?))
     (define mouse-in-blue-box? #f)
@@ -157,14 +186,28 @@
     (define mouse-in-read-more? #f)
     
     (define the-strs #f)
-    (define the-strs-id-start #f)
-    (define the-strs-id-end #f)
     (define/public (get-current-strs) the-strs)
     
-    (define visit-docs-url void)
+    
+    (define visit-docs-path #f)
+    (define visit-docs-tag #f)
+    (define/private (visit-docs-url)
+      (when (and visit-docs-path visit-docs-tag)
+        (define url (path->url visit-docs-path))
+        (define url2 (if visit-docs-tag
+                         (make-url (url-scheme url)
+                                   (url-user url)
+                                   (url-host url)
+                                   (url-port url)
+                                   (url-path-absolute? url)
+                                   (url-path url)
+                                   (url-query url)
+                                   visit-docs-tag)
+                         url))
+        (send-url (url->string url2))))
     
     (define/public (get-show-docs?) (and the-strs (or locked? mouse-in-blue-box?)))
-    (define/public (toggle-syncheck-docs)
+    (define/augment (toggle-syncheck-docs)
       (begin-edit-sequence #t #f)
       (invalidate-blue-box-region)
       (cond
@@ -243,20 +286,7 @@
     (define bw (box 0))
     (define bh (box 0))
     
-    (define docs-im #f)
-    (define/public (syncheck:reset-docs-im)
-      (set! docs-im #f)) 
-    (define (get/start-docs-im) 
-      (cond 
-        [docs-im docs-im]
-        [else
-         (set! docs-im (make-interval-map))
-         docs-im]))
-    (define/public (syncheck:add-docs-range start end tag visit-docs-url) 
-      ;; the +1 to end is effectively assuming that there
-      ;; are no abutting identifiers with documentation
-      (define rng (list start (+ end 1) tag visit-docs-url))
-      (interval-map-set! (get/start-docs-im) start (+ end 1) rng))
+
     
     (define/override (on-paint before? dc left top right bottom dx dy draw-caret)
       (super on-paint before? dc left top right bottom dx dy draw-caret)
@@ -330,7 +360,6 @@
     (define last-evt-seen #f)
     (define/override (on-event evt)
       (set! last-evt-seen evt)
-      (update-the-strs/maybe-invalidate void void)
       (update-mouse-in-blue-box (in-blue-box? evt))
       (define-values (is-in-lock? is-in-read-more?) (in-lock/in-read-more? last-evt-seen))
       (update-mouse-in-lock-icon/read-more? is-in-lock? is-in-read-more?)
@@ -348,93 +377,163 @@
     
     (define timer (new logging-timer%
                        [notify-callback
-                        (λ () 
+                        (λ ()
                           (set! timer-running? #f)
                           (update-the-strs))]))
     (define timer-running? #f)
     (define/augment (after-set-position)
       (inner (void) after-set-position)
+      (trigger-buffer-changed-callback))
+    (define/augment (after-insert start len)
+      (inner (void) after-insert start len)
+      (trigger-buffer-changed-callback))
+    (define/augment (after-delete start len)
+      (inner (void) after-delete start len)
+      (trigger-buffer-changed-callback))
+    (define/augment (on-lexer-valid valid?)
+      (inner (void) on-lexer-valid valid?)
+      (when valid?
+        (trigger-buffer-changed-callback)))
+    (define/private (trigger-buffer-changed-callback)
       (when (or locked?
                 mouse-in-blue-box?
                 (not the-strs))
-        (unless timer-running?
-          (set! timer-running? #t)
-          (send timer start 300 #t))))
+        (set! update-the-strs-coroutine #f)
+        (start-the-timer)))
+    (define/private (start-the-timer)
+      (unless timer-running?
+        (set! timer-running? #t)
+        (send timer start 300 #t)))
+
+    (define update-the-strs-coroutine #f)
     
-    (define/public (syncheck:update-blue-boxes)
-      (update-the-strs))
+    (define/override (update-the-strs)
+      (unless update-the-strs-coroutine
+        (set! update-the-strs-coroutine
+              (coroutine
+               #:at-least 12
+               maybe-pause
+               init-val
+               (define sp (get-start-position))
+               (and (= sp (get-end-position))
+                    (compute-tag+rng maybe-pause sp)))))
+      (define done? (coroutine-run update-the-strs-coroutine (void)))
+      (cond
+        [done?
+         (define tag+rng (coroutine-value update-the-strs-coroutine))
+         (set! update-the-strs-coroutine #f)
+         (when tag+rng
+           (match tag+rng
+             [(list ir-start ir-end new-strs path url-tag)
+              (when new-strs
+                (begin-edit-sequence #t #f)
+                (invalidate-blue-box-region)
+                (set! the-strs new-strs)
+                (set! visit-docs-path path)
+                (set! visit-docs-tag url-tag)
+                (when last-evt-seen
+                  (update-mouse-in-blue-box (in-blue-box? last-evt-seen))
+                  (define-values (is-in-lock? is-in-read-more?) (in-lock/in-read-more? last-evt-seen))
+                  (update-mouse-in-lock-icon/read-more? is-in-lock? is-in-read-more?))
+                (invalidate-blue-box-region)
+                (end-edit-sequence))]
+             [#f (void)]))]
+        [else
+         (start-the-timer)]))
+
+    (define/private (compute-tag+rng maybe-pause pos)
+      (define basic-info
+        (or (interval-map-ref (get/start-docs-im) pos #f)
+            (check-nearby-symbol pos maybe-pause)))
+      (match basic-info
+        [(list start end tag path url-tag)
+         (define id (string->symbol (get-text start end)))
+         (define meth-tags
+           (fetch-blueboxes-method-tags id #:blueboxes-cache (get-blueboxes-cache)))
+         (cond
+           [(and (not tag) (null? meth-tags))
+            #f]
+           [else
+            (define id-strs
+              (if tag
+                  (fetch-blueboxes-strs tag #:blueboxes-cache (get-blueboxes-cache))
+                  '()))
+            (list start
+                  end
+                  (apply
+                   append
+                   id-strs
+                   (for/list ([meth-tag (in-list meth-tags)]
+                              [i (in-naturals)])
+                     (define bbs
+                       (fetch-blueboxes-strs meth-tag #:blueboxes-cache (get-blueboxes-cache)))
+                     (if (zero? i)
+                         bbs
+                         (cdr bbs))))
+                  path url-tag)])]
+        [#f #f]))
     
-    (define/private (update-the-strs)
-      (update-the-strs/maybe-invalidate
-       (λ ()
-         (begin-edit-sequence #t #f)
-         (invalidate-blue-box-region))
-       (λ ()
-         (when last-evt-seen
-           (update-mouse-in-blue-box (in-blue-box? last-evt-seen))
-           (define-values (is-in-lock? is-in-read-more?) (in-lock/in-read-more? last-evt-seen))
-           (update-mouse-in-lock-icon/read-more? is-in-lock? is-in-read-more?))
-         (invalidate-blue-box-region)
-         (end-edit-sequence))))
-    
-      ;; update-the-strs/maybe-invalidate : (-> void) (-> void) -> boolean
-      ;; returns #t if something changed (and thus invalidation should happen)
-      (define/private (update-the-strs/maybe-invalidate before after)
-        (define sp (get-start-position))
-        (when (= sp (get-end-position))
-          (define tag+rng (interval-map-ref (get/start-docs-im) sp #f))
-          (when tag+rng
-            (define ir-start (list-ref tag+rng 0))
-            (define ir-end (list-ref tag+rng 1))
-            (define tag (list-ref tag+rng 2))
-            (define new-visit-docs-url (list-ref tag+rng 3))
-            (define new-strs (fetch-blueboxes-strs tag #:blueboxes-cache blueboxes-cache))
-            (when new-strs
-              (before)
-              (set! the-strs new-strs)
-              (set! the-strs-id-start ir-start)
-              (set! the-strs-id-end ir-end)
-              (set! visit-docs-url new-visit-docs-url)
-              (after)))))
+    (define/private (check-nearby-symbol pos maybe-pause)
+      (define require-candidates (get-require-candidates))
+      (cond
+        [(or (is-stopped?)
+             (is-frozen?)
+             (not (is-lexer-valid?))
+             (null? require-candidates))
+         #f]
+        [else
+         (define-values (start end)
+           (let loop ([pos pos])
+             (define-values (this-token-start this-token-end)
+               (get-token-range pos))
+             (cond
+               [(member (classify-position pos) '(symbol keyword))
+                (get-token-range pos)]
+               [(zero? pos) (values #f #f)]
+               [else
+                (maybe-pause)
+                (loop (- pos 1))])))
+         (cond
+           [(and start end)
+            (define id (string->symbol (get-text start end)))
+            (define xref (load-collections-xref))
+            (define default (list start end #f #f #f))
+            (or (for/or ([require-candidate (in-list require-candidates)])
+                  (maybe-pause)
+                  (define mp (path->module-path require-candidate #:cache (get-path->pkg-cache)))
+                  (define definition-tag (xref-binding->definition-tag xref (list mp id) #f))
+                  (cond
+                    [definition-tag
+                      (define-values (path url-tag) (xref-tag->path+anchor xref definition-tag))
+                      (cond
+                        [path
+                         (list start
+                               end
+                               definition-tag
+                               path
+                               url-tag)]
+                        [else #f])]
+                    [else #f]))
+                default)]
+           [else #f])]))
+
     
     (define/augment (on-insert where len)
+      (define docs-im (get-docs-im))
       (when docs-im
         (clear-im-range where len)
-        (interval-map-expand! docs-im where (+ where len))
-        (possibly-clobber-strs where len #f)
-        (when the-strs-id-start
-          (when (<= where the-strs-id-start)
-            (set! the-strs-id-start (+ the-strs-id-start len))
-            (set! the-strs-id-end (+ the-strs-id-end len)))))
+        (interval-map-expand! docs-im where (+ where len)))
       (inner (void) on-insert where len))
     
     (define/augment (on-delete where len)
+      (define docs-im (get-docs-im))
       (when docs-im
         (clear-im-range where len)
-        (interval-map-contract! docs-im where (+ where len))
-        (possibly-clobber-strs where len #t)
-        (when the-strs-id-start
-          (when (<= where the-strs-id-start)
-            (set! the-strs-id-start (- the-strs-id-start len))
-            (set! the-strs-id-end (- the-strs-id-end len)))))
+        (interval-map-contract! docs-im where (+ where len)))
       (inner (void) on-delete where len))
-    
-    (define/private (possibly-clobber-strs where len delete?)
-      (when (or (not the-strs-id-start)
-                (not the-strs-id-end)
-                (and (<= the-strs-id-start where)
-                     (< where the-strs-id-end))
-                (and delete? (<= the-strs-id-start (+ where len) the-strs-id-end)))
-        (when the-strs
-          (begin-edit-sequence #t #f)
-          (invalidate-blue-box-region)
-          (set! the-strs #f)
-          (set! the-strs-id-start #f)
-          (set! the-strs-id-end #f)
-          (invalidate-blue-box-region)
-          (end-edit-sequence))))
 
     (define/private (clear-im-range where len)
+      (define docs-im (get-docs-im))
       (when docs-im
         (for ([x (in-range len)])
           (define tag+rng (interval-map-ref docs-im (+ where x) #f))
@@ -488,7 +587,96 @@
 
     (super-new)))
 
-(define blueboxes-cache (make-blueboxes-cache #f))
+(define docs-text-original-info-mixin
+  (mixin () (docs-text-info<%>)
+    (define docs-im #f)
+    (define require-candidates '())
+    (define path->pkg-cache (make-hash))
+    (define linked-texts '())
+    (define/public (get-path->pkg-cache) path->pkg-cache)
+    (define/public (syncheck:reset-docs-im)
+      (set! docs-im #f)
+      (set! require-candidates '())
+      (set! path->pkg-cache (make-hash)))
+    (define/public (get-docs-im) docs-im)
+    (define/public (get/start-docs-im) 
+      (cond
+        [docs-im docs-im]
+        [else
+         (set! docs-im (make-interval-map))
+         docs-im]))
+    (define/public (syncheck:add-docs-range start end tag path url-tag)
+      ;; the +1 to end is effectively assuming that there
+      ;; are no abutting identifiers with documentation
+      (define rng (list start (+ end 1) tag path url-tag))
+      (interval-map-set! (get/start-docs-im) start (+ end 1) rng))
+    (define/public (syncheck:add-require-candidate path)
+      (set! require-candidates (cons path require-candidates)))
+    (define/public (get-require-candidates) require-candidates)
+    (define/public (syncheck:update-blue-boxes other-text)
+      (update-the-strs)
+      (send other-text set-original-info-text this)
+      (send other-text update-the-strs))
+    (define/public (add-linked t)
+      (unless (memq t linked-texts)
+        (set! linked-texts (cons t linked-texts))))
+    (define/public (update-the-strs) (void))
+    (define/pubment (toggle-syncheck-docs)
+      (inner (void) toggle-syncheck-docs)
+      (for ([t (in-list linked-texts)])
+        (send t toggle-syncheck-docs)))
+    (super-new)))
+
+;; this is used for the REPL -- so all of the interval map state
+;; isn't correct, only the require candidates are right; so we just
+;; return empty things here.
+(define docs-text-linked-info-mixin
+  (mixin () (docs-text-info<%>)
+    (define original-info-text #f)
+    (define/public (set-original-info-text info-text)
+      ;; the twisty way this is set up means that
+      ;; this method is called multiple times with
+      ;; the same argument
+      (set! original-info-text info-text)
+      (send original-info-text add-linked this))
+    (define/public (get-path->pkg-cache)
+      (if original-info-text
+          (send original-info-text get-path->pkg-cache)
+          (make-hash)))
+    (define empty-interval-map (make-interval-map))
+    (define/public (get-docs-im) empty-interval-map)
+    (define/public (get/start-docs-im) empty-interval-map)
+    (define/public (get-require-candidates)
+      (if original-info-text
+          (send original-info-text get-require-candidates)
+          '()))
+    (define/public (update-the-strs) (void))
+    (define/pubment (toggle-syncheck-docs)
+      (inner (void) toggle-syncheck-docs))
+    (super-new)))
+
+(define (docs-text-defs-mixin %)
+  (docs-text-gui-mixin
+   (docs-text-original-info-mixin
+    %)))
+
+(define (docs-text-ints-mixin %)
+  (docs-text-gui-mixin
+   (docs-text-linked-info-mixin
+    %)))
+
+(define blueboxes-cache #f)
+(define docs-state #f)
+(define (get-blueboxes-cache)
+  (define (fetch)
+    (set! blueboxes-cache
+          (make-blueboxes-cache #t #:blueboxes-dirs (get-rendered-doc-directories #f #f)))
+    (set! docs-state (get-current-doc-state)))
+  (cond
+    [blueboxes-cache
+     (when (doc-state-changed? docs-state) (fetch))]
+    [else (fetch)])
+  blueboxes-cache)
 
 (define arrow-cursor (make-object cursor% 'arrow))
 

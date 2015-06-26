@@ -133,6 +133,8 @@
     ("models" "⊨")
     ("prec" "≺")
     ("succ" "≻")
+    ("precdot" "⋖")
+    ("succdot" "⋗")
     ("sim" "∼")
     ("perp" "⊥")
     ("bot" "⊥")
@@ -187,7 +189,10 @@
     ("vdots" "⋮")
     ("ddots" "⋱")
     ("cdots" "⋯")
-    ("hdots" "⋯")))
+    ("hdots" "⋯")
+    
+    ("langle" "⟨")
+    ("rangle" "⟩")))
 
 (module+ test
   (require racket/match)

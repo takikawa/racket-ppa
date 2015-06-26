@@ -3,6 +3,7 @@
          racket/gui/base
          racket/format
          setup/dirs
+         net/url
          pkg/lib
          pkg
          string-constants
@@ -13,11 +14,30 @@
 
 (struct ipkg (name scope auto? checksum source))
 
-(define ((ipkg->source dir) ipkg)
+(define ((ipkg->desc dir) ipkg)
+  (define name (ipkg-name ipkg))
   (define s (cadr (ipkg-source ipkg)))
-  (if (not (eq? 'catalog (car (ipkg-source ipkg))))
-      (path->string (path->complete-path s dir))
-      s))
+  (define kind (car (ipkg-source ipkg)))
+  (case kind
+    [(catalog) (pkg-desc s 'name name #f #f)]
+    [(link static-link)
+     (pkg-desc (path->string (path->complete-path s dir)) kind name #f #f)]
+    [(url) (pkg-desc s #f name #f #f)]
+    [(clone)
+     (define url-str (caddr (ipkg-source ipkg)))
+     (pkg-desc url-str
+               'clone
+               name
+               #f
+               #f
+               #:path (let loop ([p (path->complete-path s dir)]
+                                 [n (length (url-query (string->url url-str)))])
+                        (cond
+                         [(zero? n) p]
+                         [else (define-values (base name dir?) (split-path p))
+                               (if (path? base)
+                                   (loop base (sub1 n))
+                                   (error "mangled path recorded for a clone"))])))]))
 
 (define (source->string s)
   (format "~a: ~a"
@@ -26,7 +46,9 @@
             [(url) "URL"]
             [(link) "Link"]
             [(static-link) "Static link"]
-            [(file) "File"])
+            [(file) "File"]
+            [(dir) "Directory copy"]
+            [(clone) "Clone"])
           (cadr s)))
 
 (define (status-string a default-scope)
@@ -135,6 +157,7 @@
                         (lambda (names scope)
                           (apply
                            pkg-update-command
+                           #:batch #t
                            #:scope scope
                            names))))]))
 
@@ -152,14 +175,9 @@
                                        [(path? scope) scope]
                                        [(eq? scope 'installation) (find-pkgs-dir)]
                                        [else (find-user-pkgs-dir)]))
-                          ;; Also preserve link kind:
-                          (define kind (car (ipkg-source (car ipkgs))))
-                          (apply
-                           pkg-install-command
-                           #:scope scope
-                           #:link (eq? 'link kind)
-                           #:static-link (eq? 'static-link kind)
-                           (map (ipkg->source dir) ipkgs)))))]))
+                          (parameterize ([current-pkg-scope scope])
+                            (with-pkg-lock (pkg-install (map (ipkg->desc dir) ipkgs))))
+                          (void))))]))
 
     (define demote-button
       (new button%
@@ -171,6 +189,7 @@
                         (lambda (names scope)
                           (apply
                            pkg-remove-command
+                           #:batch #t
                            #:demote #t
                            #:scope scope
                            names))))]))
@@ -187,6 +206,7 @@
                         (lambda (names scope)
                           (apply
                            pkg-remove-command
+                           #:batch #t
                            #:scope scope
                            names))))]))
 
@@ -215,12 +235,7 @@
                                         (not (ipkg-auto? i)))))
       (send promote-button enable (and same-scope?
                                        (for/and ([i (in-list ipkgs)])
-                                         (ipkg-auto? i))
-                                       ;; all 'catalog, 'link, or 'static-link
-                                       (let ([kind (car (ipkg-source (car ipkgs)))])
-                                         (and (memq kind '(catalog link static-link))
-                                              (for/and ([i (in-list (cdr ipkgs))])
-                                                (eq? kind (car (ipkg-source i))))))))
+                                         (ipkg-auto? i))))
       (send update-button enable (and same-scope?
                                       (for/and ([i (in-list ipkgs)])
                                         (not (memq (car (ipkg-source i))
@@ -267,7 +282,7 @@
                                 (if (eq? (car sa) (car sb))
                                     (string<? (cadr sa) (cadr sb))
                                     (case (car sa)
-                                      [(link) #t]
+                                      [(link static-link clone) #t]
                                       [(catalog) (eq? b 'url)]
                                       [(url) #f])))])))))
       (set! sorted-installed (list->vector l))

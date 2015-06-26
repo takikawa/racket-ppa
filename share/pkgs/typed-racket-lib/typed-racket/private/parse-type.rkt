@@ -5,19 +5,17 @@
 (require "../utils/utils.rkt"
          (except-in (rep type-rep object-rep) make-arr)
          (rename-in (types abbrev union utils filter-ops resolve
-                           classes subtype)
+                           classes prefab)
                     [make-arr* make-arr])
          (utils tc-utils stxclass-util literal-syntax-class)
          syntax/stx (prefix-in c: (contract-req))
          syntax/parse unstable/sequence
-         (env tvar-env type-name-env type-alias-env mvar-env
+         (env tvar-env type-alias-env mvar-env
               lexical-env index-env row-constraint-env)
-         (only-in racket/list flatten)
          racket/dict
          racket/promise
          racket/format
          racket/match
-         racket/syntax
          (only-in unstable/list check-duplicate)
          "parse-classes.rkt"
          (for-label
@@ -97,6 +95,7 @@
 (define-literal-syntax-class #:for-label Vector)
 (define-literal-syntax-class #:for-label Struct)
 (define-literal-syntax-class #:for-label Struct-Type)
+(define-literal-syntax-class #:for-label Prefab)
 (define-literal-syntax-class #:for-label Values)
 (define-literal-syntax-class #:for-label values)
 (define-literal-syntax-class #:for-label Top)
@@ -248,9 +247,9 @@
            #:attr prop (-not-filter (parse-type #'t) (-acc-path (attribute pe.pe) (attribute o.obj))))
   (pattern (:! t:expr)
            #:attr prop (-not-filter (parse-type #'t) 0))
-  (pattern (and (~var p (prop doms)) ...)
+  (pattern ((~datum and) (~var p (prop doms)) ...)
            #:attr prop (apply -and (attribute p.prop)))
-  (pattern (or (~var p (prop doms)) ...)
+  (pattern ((~datum or) (~var p (prop doms)) ...)
            #:attr prop (apply -or (attribute p.prop)))
   (pattern ((~literal implies) (~var p1 (prop doms)) (~var p2 (prop doms)))
            #:attr prop (-imp (attribute p1.prop) (attribute p2.prop)))
@@ -343,11 +342,20 @@
       [(:Struct-Type^ t)
        (define v (parse-type #'t))
        (match (resolve v)
-         [(? Struct? s) (make-StructType s)]
+         [(or (? Struct? s) (? Prefab? s)) (make-StructType s)]
          [_ (parse-error #:delayed? #t
                          "expected a structure type for argument to Struct-Type"
                          "given" v)
             (Un)])]
+      [(:Prefab^ key ts ...)
+       #:fail-unless (prefab-key? (syntax->datum #'key)) "expected a prefab key"
+       (define num-fields (length (syntax->list #'(ts ...))))
+       (define new-key (normalize-prefab-key (syntax->datum #'key) num-fields))
+       (unless (= (prefab-key->field-count new-key) num-fields)
+         (parse-error "the number of fields in the prefab key and type disagree"
+                      "key" (prefab-key->field-count new-key)
+                      "fields" num-fields))
+       (make-Prefab new-key (parse-types #'(ts ...)))]
       [(:Instance^ t)
        (let ([v (parse-type #'t)])
          (if (not (or (F? v) (Mu? v) (Name? v) (Class? v) (Error? v)))
@@ -543,7 +551,7 @@
           [args (parse-types #'(arg args ...))])
          (resolve-app-check-error rator args stx)
          (match rator
-           [(Name: _ _ _ _) (make-App rator args stx)]
+           [(? Name?) (make-App rator args stx)]
            [(Poly: _ _) (instantiate-poly rator args)]
            [(Mu: _ _) (loop (unfold rator) args)]
            [(Error:) Err]
@@ -628,27 +636,14 @@
 ;;                         -> Option<Id> FieldDict MethodDict AugmentDict
 ;; Merges #:implements class type and the current class clauses appropriately
 (define (merge-with-parent-type row-var parent-type parent-stx fields methods augments)
-  ;; (Listof Symbol) Dict Dict String -> (Values Dict Dict)
-  ;; check for duplicates in a class clause
-  (define (check-duplicate-clause names super-names types super-types err-msg)
-    (define maybe-dup (check-duplicate (append names super-names)))
-    (cond [maybe-dup
-           (define type (car (dict-ref types maybe-dup)))
-           (define super-type (car (dict-ref super-types maybe-dup)))
-           (cond [;; if there is a duplicate, but the type is a subtype,
-                  ;; then let it through and check for any other duplicates
-                  (unless (subtype type super-type)
-                    (parse-error "class member type not a subtype of parent member type"
-                                 "member" maybe-dup
-                                 "type" type
-                                 "parent type" super-type))
-                  (check-duplicate-clause
-                   names (remove maybe-dup super-names)
-                   types (dict-remove super-types maybe-dup)
-                   err-msg)]
-                 [else
-                  (parse-error #:stx parent-stx err-msg "name" maybe-dup)])]
-          [else (values types super-types)]))
+  ;; merge-clause : Dict Dict -> Dict
+  ;; Merge all the non-duplicate entries from the parent types
+  (define (merge-clause parent-clause clause)
+    (for/fold ([clause clause])
+              ([(k v) (in-dict parent-clause)])
+      (if (dict-has-key? clause k)
+          clause
+          (dict-set clause k v))))
 
   (define (match-parent-type parent-type)
     (define resolved (resolve parent-type))
@@ -668,24 +663,6 @@
   (match-define (list (list super-method-names _) ...) super-methods)
   (match-define (list (list super-augment-names _) ...) super-augments)
 
-  ;; if any duplicates are found between this class and the superclass
-  ;; type, then raise an error
-  (define-values (checked-fields checked-super-fields)
-    (check-duplicate-clause
-     field-names super-field-names
-     fields super-fields
-     "field or init-field name conflicts with #:implements clause"))
-  (define-values (checked-methods checked-super-methods)
-    (check-duplicate-clause
-     method-names super-method-names
-     methods super-methods
-     "method name conflicts with #:implements clause"))
-  (define-values (checked-augments checked-super-augments)
-    (check-duplicate-clause
-     augment-names super-augment-names
-     augments super-augments
-     "augmentable method name conflicts with #:implements clause"))
-
   ;; it is an error for both the extending type and extended type
   ;; to have row variables
   (when (and row-var super-row-var)
@@ -693,9 +670,9 @@
                      " extend another type that has a row variable")))
 
   ;; then append the super types if there were no errors
-  (define merged-fields (append checked-super-fields checked-fields))
-  (define merged-methods (append checked-super-methods checked-methods))
-  (define merged-augments (append checked-super-augments checked-augments))
+  (define merged-fields (merge-clause super-fields fields))
+  (define merged-methods (merge-clause super-methods methods))
+  (define merged-augments (merge-clause super-augments augments))
 
   ;; make sure augments and methods are disjoint
   (define maybe-dup-method (check-duplicate (dict-keys merged-methods)))
@@ -731,8 +708,14 @@
   (syntax-parse stx
     [(kw (~var clause (class-type-clauses parse-type)))
      (add-disappeared-use #'kw)
-     (define parent-stxs (stx->list #'clause.extends-types))
-     (define parent-types (map parse-type parent-stxs))
+     (define parent-stxs (stx->list #'clause.implements))
+     (define parent/init-stx (attribute clause.implements/inits))
+     (define parent/init-type (and parent/init-stx (parse-type parent/init-stx)))
+     (define parent-types
+       (let ([types (map parse-type parent-stxs)])
+         (if parent/init-stx
+             (cons parent/init-type types)
+             types)))
      (define given-inits (attribute clause.inits))
      (define given-fields (attribute clause.fields))
      (define given-methods (attribute clause.methods))
@@ -755,7 +738,7 @@
            ;; Only proceed to create a class type when the parsing
            ;; process isn't looking for recursive type alias references.
            ;; (otherwise the merging process will error)
-           [(or (null? parent-stxs)
+           [(or (and (null? parent-stxs) (not parent/init-stx))
                 (not (current-referenced-aliases)))
 
             (check-function-types given-methods)
@@ -767,8 +750,9 @@
                          [fields given-fields]
                          [methods given-methods]
                          [augments given-augments])
-                  ([parent-type parent-types]
-                   [parent-stx  parent-stxs])
+                  ([parent-type (reverse parent-types)]
+                   [parent-stx  (reverse (append (or (list parent/init-stx) null)
+                                                 parent-stxs))])
                 (merge-with-parent-type row-var parent-type parent-stx
                                         fields methods augments)))
 
@@ -780,8 +764,15 @@
               (check-constraints methods (caddr constraints))
               (check-constraints augments (cadddr constraints)))
 
+            ;; For the #:implements/inits entry, put the inits into the type
+            ;; as well. They are appended at the end to match the runtime behavior
+            ;; of init arguments.
+            (define parent-inits (get-parent-inits parent/init-type))
+
             (define class-type
-              (make-Class row-var given-inits fields methods augments given-init-rest))
+              (make-Class row-var
+                          (append given-inits parent-inits)
+                          fields methods augments given-init-rest))
 
             class-type]
            [else
@@ -809,11 +800,25 @@
             (set-box! alias-box (cons (current-type-alias-name)
                                       (unbox alias-box)))
             (define class-box (current-referenced-class-parents))
-            (set-box! class-box (append parent-stxs (unbox class-box)))
+            (set-box! class-box (append (if parent/init-stx
+                                            (cons parent/init-stx parent-stxs)
+                                            parent-stxs)
+                                        (unbox class-box)))
             ;; Ok to return Error here, since this type will
             ;; get reparsed in another pass
             (make-Error)
             ])]))
+
+;; get-parent-inits : (U Type #f) -> Inits
+;; Extract the init arguments out of a parent class type
+(define (get-parent-inits parent)
+  (cond [(not parent) null]
+        [else
+         (define resolved (resolve parent))
+         (match resolved
+           [(Class: _ inits _ _ _ _) inits]
+           [_ (parse-error "expected a class type for #:implements/inits clause"
+                           "given" resolved)])]))
 
 ;; check-function-types : Dict<Name, Type> -> Void
 ;; ensure all types recorded in the dictionary are function types

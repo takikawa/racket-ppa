@@ -23,7 +23,7 @@ to the @exec{raco pkg} sub-subcommands.
 
  Each-long form option of the command-line interface is a keyword
  argument to the functions described below. An argument corresponding to @DFlag{type}, @DFlag{deps},
- @DFlag{format}, or @DFlag{scope} accepts its argument as a symbol, while
+ @DFlag{format}, @DFlag{scope}, or @DFlag{multi-clone} accepts its argument as a symbol, while
  other flags that take arguments expect strings.
  An argument corresponding to @DFlag{scope} is also allowed to be a path string,
  as would be provided to @DFlag{scope-dir}.
@@ -34,6 +34,7 @@ to the @exec{raco pkg} sub-subcommands.
 @defthing[pkg-install-command procedure?]{Implements @command-ref{install}.}
 @defthing[pkg-update-command procedure?]{Implements @command-ref{update}.}
 @defthing[pkg-remove-command procedure?]{Implements @command-ref{remove}.}
+@defthing[pkg-new-command procedure?]{Implements @command-ref{new}.}
 @defthing[pkg-show-command procedure?]{Implements @command-ref{show}.}
 @defthing[pkg-migrate-command procedure?]{Implements @command-ref{migrate}.}
 @defthing[pkg-config-command procedure?]{Implements @command-ref{config}.}
@@ -44,8 +45,11 @@ to the @exec{raco pkg} sub-subcommands.
                                                   @history[#:added "6.0.17"]}
 @defthing[pkg-archive-command procedure?]{Implements @command-ref{archive}.
                                                   @history[#:added "6.1.0.8"]}
+@defthing[pkg-empty-trash-command procedure?]{Implements @command-ref{empty-trash}.
+                                                  @history[#:added "6.1.1.6"]}
 
 @include-section["lib.scrbl"]
 @include-section["path.scrbl"]
 @include-section["name.scrbl"]
 @include-section["db.scrbl"]
+@include-section["dirs-catalog.scrbl"]

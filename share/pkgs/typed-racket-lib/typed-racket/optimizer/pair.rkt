@@ -1,13 +1,12 @@
 #lang racket/base
 
-(require syntax/parse syntax/stx
+(require syntax/parse
          racket/match
          (for-template racket/base racket/unsafe/ops racket/list)
          (for-syntax racket/base syntax/parse racket/syntax)
          "../utils/utils.rkt"
-         (utils tc-utils)
          (rep type-rep)
-         (types type-table utils)
+         (types type-table utils base-abbrev)
          (typecheck typechecker)
          (optimizer utils logging))
 
@@ -26,9 +25,11 @@
 
 
 (define (has-pair-type? e)
-  (match (type-of e) ; type of the operand
-    [(tc-result1: (Pair: _ _)) #t]
-    [_ #f]))
+  (and (subtypeof? e (-pair Univ Univ))
+       ;; sometimes composite operations end up with Nothing as result type,
+       ;; not sure why. TODO investigate
+       (not (isoftype? e -Bottom))))
+;; can't do the above for mpairs, as they are invariant
 (define (has-mpair-type? e)
   (match (type-of e) ; type of the operand
     [(tc-result1: (MPair: _ _)) #t]

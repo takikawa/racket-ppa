@@ -6,6 +6,7 @@
                      syntax-color/module-lexer
                      syntax-color/scribble-lexer
                      syntax-color/default-lexer
+                     syntax-color/lexer-contract
                      framework
                      framework/private/color
                      racket))
@@ -30,7 +31,7 @@ Parenthesis matching code built on top of @racket[token-tree%].
 
 @; ----------------------------------------------------------------------
 
-@section{Lexer Contract & the Don't Stop struct}
+@section{Lexer Contract & the Don't Stop Structure Type}
 
 @defmodule[syntax-color/lexer-contract]
 
@@ -39,8 +40,8 @@ Parenthesis matching code built on top of @racket[token-tree%].
   details, see @xmethod[color:text<%> start-colorer].
 }
 
-@defstruct[dont-stop ([val any/c])]{
-  A struct used to indicate to the lexer that it should not
+@defstruct*[dont-stop ([val any/c])]{
+  A structure type used to indicate to the lexer that it should not
   allow itself to be interrupted. For more details,
   see @xmethod[color:text<%> start-colorer].
 }
@@ -105,7 +106,7 @@ Like @racket[racket-lexer/status], except it treats
 This function is used by @racket[scribble-lexer].}
 
 
-@section{Default lexer}
+@section{Default Lexer}
 @defmodule[syntax-color/default-lexer]
 
 @defproc[(default-lexer [in input-port?]) 
@@ -228,6 +229,23 @@ Like @racket[racket-lexer], but for Racket extended with Scribble's
 
 Like @racket[scribble-lexer], but starting in ``text'' mode instead of
 Racket mode.}
+
+@defproc[(make-scribble-lexer [#:command-char at char? #\@])
+         lexer/c]{
+
+Produces a lexer like @racket[scribble-lexer], but using
+@racket[at] in place of @litchar["@"].
+
+@history[#:added "1.1"]}
+
+
+@defproc[(make-scribble-inside-lexer [#:command-char at char? #\@])
+         lexer/c]{
+
+Produces a lexer function like @racket[scribble-inside-lexer], but using
+@racket[at] in place of @litchar["@"].
+
+@history[#:added "1.1"]}
 
 @; ----------------------------------------------------------------------
 

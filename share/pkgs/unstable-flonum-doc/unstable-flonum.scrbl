@@ -6,14 +6,15 @@
 
 @(define the-eval (make-base-eval))
 @(the-eval '(require unstable/flonum
-                     (rename-in (except-in plot plot plot3d)
-                                [plot-bitmap  plot]
-                                [plot3d-bitmap  plot3d])))
+                     plot/pict))
 
 @unstable-title[#:tag "flonum"]{Flonums}
 @unstable[@author+email["Neil Toronto" "ntoronto@racket-lang.org"]]
 
 @defmodule[unstable/flonum]
+
+You should almost certainly @bold{use} @racketmodname[math/flonum] @bold{instead of this module},
+which is more complete and can be used in Typed Racket code.
 
 @defproc[(flonum->bit-field [x flonum?]) (integer-in 0 (- (expt 2 64) 1))]{
 Returns the bits comprising @racket[x] as an integer.

@@ -24,6 +24,7 @@ profile todo:
          "bindings-browser.rkt"
          "stack-checkpoint.rkt"
          "ellipsis-snip.rkt"
+         "local-member-names.rkt"
          net/sendurl
          net/url
          racket/match
@@ -390,7 +391,11 @@ profile todo:
              ;; and still running here?
              (send ints highlight-errors src-locs (if (null? stack1)
                                                       stack2
-                                                      stack1))))))))
+                                                      stack1))
+             
+             (when (and ints (exn:fail:out-of-memory? exn))
+               (define frame (send ints get-top-level-window))
+               (send ints no-user-evaluation-dialog frame #f #t #f))))))))
   
   (define (render-message lines)
     (define collected (collect-hidden-lines lines))
@@ -418,49 +423,11 @@ profile todo:
           (display msg (current-error-port))])]
       [else 
        (display msg (current-error-port))]))
-  
-  (define (collect-hidden-lines lines)
-    (let loop ([lines lines]
-               [ellipsis-line #f]
-               [collection #f])
-      (cond
-        [(null? lines)
-         (cond
-           [ellipsis-line
-            (list (list ellipsis-line collection))]
-           [else
-            '()])]
-        [else
-         (define line (car lines))
-         (cond
-           [ellipsis-line
-            (cond
-              [(regexp-match #rx"^   " line)
-               (loop (cdr lines) ellipsis-line (cons line collection))]
-              [else
-               (cons (list ellipsis-line collection)
-                     (loop (cdr lines) #f #f))])]
-           [else
-            (cond
-              [(regexp-match #rx"  [^ ].*[.][.][.]:$" line)
-               (loop (cdr lines) line '())]
-              [else
-               (cons line (loop (cdr lines) #f #f))])])])))
-  
+    
   (define (ellipsis-candidate? lines)
     (and ((length lines) . > . 1)
-         (for/and ([x (in-list lines)]
-                   [i (in-naturals)])
-           
-           (and
-            ;; if it's not the first line, it is indented.
-            (implies (not (zero? i))
-                     (regexp-match? #rx"^ " x))
-            
-            ;; if it has the indentation to match a `field' line,
-            ;; it has a colon
-            (implies (regexp-match? #rx"^  [^ ]" x)
-                     (regexp-match? #rx":" x))))))
+         (for/or ([x (in-list (cdr lines))])
+           (regexp-match ellipsis-error-message-field x))))
   
   (define (srcloc->edition/pair defs ints srcloc [port-name-matches-cache #f])
     (let ([src (srcloc-source srcloc)])
@@ -640,7 +607,12 @@ profile todo:
                      (display (path->string (find-relative-path n-cd n-src))
                               (current-error-port))]
                     [else
-                     (display "<unsaved editor>" (current-error-port))]))]
+                     (define name
+                       (cond
+                         [(string? src) src]
+                         [(symbol? src) (symbol->string src)]
+                         [else "<unsaved editor>"]))
+                     (display name (current-error-port))]))]
                [do-line/col (λ () (eprintf ":~a:~a" line col))]
                [do-pos (λ () (eprintf "::~a" pos))]
                [src-loc-in-defs/ints?
@@ -2437,3 +2409,114 @@ profile todo:
 
 
   (define-values/invoke-unit/infer stacktrace@))
+
+(define ellipsis-error-message-field #rx"  [^ ].*[.][.][.]:$")
+
+(define (collect-hidden-lines lines)
+  (let loop ([lines lines]
+             [ellipsis-line #f]
+             [collection #f])
+    (cond
+      [(null? lines)
+       (cond
+         [ellipsis-line
+          (list (list ellipsis-line collection))]
+         [else
+          '()])]
+      [else
+       (define line (car lines))
+       (cond
+         [ellipsis-line
+          (cond
+            [(regexp-match #rx"^   " line)
+             (loop (cdr lines) ellipsis-line (cons line collection))]
+            [else
+             (cons (list ellipsis-line collection)
+                   (loop lines #f #f))])]
+         [else
+          (cond
+            [(regexp-match ellipsis-error-message-field line)
+             (loop (cdr lines) line '())]
+            [else
+             (cons line (loop (cdr lines) #f #f))])])])))
+
+(module+ test
+  (require rackunit)
+  (check-equal?
+   (collect-hidden-lines
+    '("car: arity mismatch;"
+      " the expected number of arguments does not match the given number"
+      "  expected: 1"
+      "  given: 3"
+      "  arguments...:"
+      "   1"
+      "   2"
+      "   3"))
+   '("car: arity mismatch;"
+     " the expected number of arguments does not match the given number"
+     "  expected: 1"
+     "  given: 3"
+     ("  arguments...:" ("   3" "   2" "   1"))))
+  
+  (check-equal?
+   (collect-hidden-lines
+    '("car: arity mismatch;"
+      " the expected number of arguments does not match the given number"
+      "  expected: 1"
+      "  given: 3"
+      "  arguments...:"
+      "   1"
+      "   2"
+      "   3"
+      "  another field:"))
+   '("car: arity mismatch;"
+     " the expected number of arguments does not match the given number"
+     "  expected: 1"
+     "  given: 3"
+     ("  arguments...:" ("   3" "   2" "   1"))
+     "  another field:"))
+  
+  (check-equal?
+   (collect-hidden-lines
+    '("car: arity mismatch;"
+      " the expected number of arguments does not match the given number"
+      "  expected: 1"
+      "  given: 3"
+      "  arguments...:"
+      "   1"
+      "   2"
+      "   3"
+      "  arguments...:"
+      "   1"
+      "   2"
+      "   3"))
+   '("car: arity mismatch;"
+     " the expected number of arguments does not match the given number"
+     "  expected: 1"
+     "  given: 3"
+     ("  arguments...:" ("   3" "   2" "   1"))
+     ("  arguments...:" ("   3" "   2" "   1"))))
+  
+  (check-equal?
+   (collect-hidden-lines
+    '("car: arity mismatch;"
+      " the expected number of arguments does not match the given number"
+      "  expected: 1"
+      "  given: 3"
+      "  arguments...:"
+      "   1"
+      "   2"
+      "   3"
+      "  a different field:"
+      "  arguments...:"
+      "   1"
+      "   2"
+      "   3"))
+   '("car: arity mismatch;"
+     " the expected number of arguments does not match the given number"
+     "  expected: 1"
+     "  given: 3"
+     ("  arguments...:" ("   3" "   2" "   1"))
+     "  a different field:"
+     ("  arguments...:" ("   3" "   2" "   1")))))
+

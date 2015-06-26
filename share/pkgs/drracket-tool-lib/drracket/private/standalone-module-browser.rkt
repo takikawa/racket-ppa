@@ -8,6 +8,7 @@
          syntax/moddep
          syntax/toplevel
          framework/preferences
+         framework/gui-utils
          string-constants
          mrlib/graph
          racket/unit
@@ -282,7 +283,7 @@
       (define path (build-module-filename (to-path r-mpi) #t))
       (make-req (match r-mpi
                   [(? path?) (simplify-path r-mpi)]
-                  [`(submod ,p ,submods) `(submod ,(simplify-path p) ,submods)])
+                  [`(submod ,p ,submods ...) `(submod ,(simplify-path p) ,@submods)])
                 (get-key dr base-lib path))))
   
   (define (to-path r-mpi)
@@ -337,7 +338,7 @@
     (parameterize ([current-eventspace progress-eventspace])
       (queue-callback
        (λ ()
-         (send progress-message set-label str)))))
+         (send progress-message set-label (gui-utils:trim-string str 200))))))
   
   (define pasteboard (make-module-overview-pasteboard 
                       #f

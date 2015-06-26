@@ -2,7 +2,7 @@
 ;;; LOOPS
 ;;;
 
-(module loops mzscheme
+(module loops "mzscheme2.rkt"
   (provide loop loop-stx
            loop->syntax 
            (rename checked-make-loop make-loop)
@@ -76,7 +76,7 @@
       (if <ne1?>
           (loop <ls>*)))
   
-  (require-for-template mzscheme)
+  (require-for-template "mzscheme2.rkt")
   (require-for-template "simplifier.scm")
   
   ; make-simple-loop : stx stx stx -> loop
@@ -99,12 +99,12 @@
              oc ...
              (let loop (lb ...)
                (ec-simplify
-                (if ne1                    
+                (when ne1                    
                     (let-values (ib ...)
                       ic ...
                       (ec-simplify payload)
                       (ec-simplify
-                       (if ne2
-                           (loop ls ...))))))))))]))
+                       (when ne2
+                         (loop ls ...))))))))))]))
   
   )

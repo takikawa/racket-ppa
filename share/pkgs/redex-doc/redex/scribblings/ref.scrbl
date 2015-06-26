@@ -432,19 +432,21 @@ nested lists.
 
 @defparam[caching-enabled? on? boolean?]{
   When this parameter is @racket[#t] (the default), Redex caches the results of 
-  pattern matching and metafunction evaluation. There is a separate cache for
-  each pattern and metafunction; when one fills (see @racket[set-cache-size!]),
+  pattern matching, metafunction, and judgment-form evaluation. There is a separate cache for
+  each pattern, metafunction, and judgment-form; when one fills (see @racket[set-cache-size!]),
   Redex evicts all of the entries in that cache.
 
   Caching should be disabled when matching a pattern that depends on values
-  other than the in-scope pattern variables or evaluating a metafunction
-  that reads or writes mutable external state.
+  other than the in-scope pattern variables or evaluating a metafunction or
+  judgment-form that reads or writes mutable external state.
+  
+  @history[#:changed "1.6" @list{Extended caching to cover judgment forms.}]
 }
 
 @defproc[(set-cache-size! [size positive-integer?]) void?]{
 Changes the size of the per-pattern and per-metafunction caches.
 
-The default size is @racket[350].
+The default size is @racket[63].
 }
 
 @defparam[check-redudancy check? boolean?]{
@@ -772,9 +774,9 @@ extends all of them.
                     (if e e e)
                     true 
                     false))
-               (define-union-language L L1 L2)]
+               (define-union-language L1-plus-L2 L1 L2)]
   is equivalent to this one:
-  @racketblock[(define-language L
+  @racketblock[(define-language L1-plus-L2
                  (e ::=
                     (+ e e) 
                     number
@@ -1122,7 +1124,8 @@ reduce it further).
                                    (where/hidden pat @#,tttterm)
                                    (judgment-holds 
                                     (judgment-form-id pat/term ...))
-                                   (clause-name name)])]{
+                                   (clause-name name)
+                                   (code:line or @#,tttterm)])]{
 
 The @racket[define-metafunction] form builds a function on
 sexpressions according to the pattern and right-hand-side
@@ -1219,8 +1222,19 @@ ensures that there is a unique match for that case. Without
 it, @racket[(term (- (x x) x))] would lead to an ambiguous
 match.
 
-@history[#:changed "1.4" @list{Added @racket[#:post] conditions.}]
+The @racket[or] clause is used to define a form of conditional
+right-hand side of a metafunction. In particular, if any of the
+@racket[where] or @racket[side-condition] clauses fail, then
+evaluation continues after an @racket[or] clause, treating the
+term that follows as the result (subject to any subsequent
+@racket[where] clauses or @racket[side-condition]s. This construction
+is equivalent to simply duplicating the left-hand side of the
+clause, once for each @racket[or] expression, but signals to
+the typesetting library to use a large left curly brace to group
+the conditions in the @racket[or].
 
+@history[#:changed "1.4" @list{Added @racket[#:post] conditions.}]
+         #:changed "1.5" @list{Added @racket[or] clauses.}]
 }
 
 @defform[(define-metafunction/extension f language 
@@ -1565,7 +1579,6 @@ in the first column if the result is just returned from the cache and a
 space is printed if the metafunction call is actually performed.
 
 Defaults to @racket['()].
-
 }
 
 @section{Testing}
@@ -2199,19 +2212,20 @@ with @racket[#:satisfying].}
                     (sum nat_1 nat_2 nat_3)
                     (equal? (term nat_1) (term nat_2)))]
 
-@defparam[depth-dependent-order? depth-dependent boolean?
-                                 #:value #t]{
+@defparam[depth-dependent-order? depth-dependent (or/c boolean? 'random)
+                                 #:value 'random]{
 
-Toggles whether or not redex will dynamically adjust the
+Toggles whether or not Redex will dynamically adjust the
 chance that more recursive clauses of judgment forms or metafunctions 
 are chosen earlier when attempting to generate terms 
-with forms that use @racket[#:satisfying]. It is @racket[#t] by
-default, which causes redex to favor more recursive clauses at
+with forms that use @racket[#:satisfying]. If it is @racket[#t],
+Redex favors more recursive clauses at
 lower depths and less recursive clauses at depths closer to the
-limit, in an attempt to generate larger terms. When it is
-@racket[#f], all clause orderings have equal probability
+limit, in an attempt to generate larger terms. 
+When it is @racket[#f], all clause orderings have equal probability
 above the bound.
-
+By default, it is @racket['random], which causes Redex to
+choose between the two above alternatives with equal probability.
 }
 
 @defform/subs[(redex-generator language-id satisfying size-expr)
@@ -3019,10 +3033,11 @@ This function sets @racket[dc-for-text-size]. See also
 @history[#:changed "1.3" @list{Added @racket[#:contract?] keyword argument.}]
 }
 
-@defform[(metafunction->pict metafunction-name)]{
-  This produces a pict, but without setting @racket[dc-for-text-size].
+@defform[(metafunction->pict metafunction-name maybe-contract?)]{
+  Produces a pict like @racket[render-metafunction], but without setting @racket[dc-for-text-size].
   It is suitable for use in Slideshow or other libraries that combine
   @racketmodname[pict]s.
+  @history[#:changed "1.3" @list{Added @racket[#:contract?] keyword argument.}]
 }
 
 @defform[(metafunctions->pict metafunction-name ...)]{
@@ -3143,7 +3158,7 @@ are on the same lines as the rule, instead of on their own line below.
 
 }
 
-@defthing[reduction-rule-style/c flat-contract?]{
+@defthing[reduction-rule-style/c contract?]{
 
 A contract equivalent to
 
@@ -3152,8 +3167,44 @@ A contract equivalent to
                    'vertical-overlapping-side-conditions
                    'horizontal
                    'horizontal-left-align
-                   'horizontal-side-conditions-same-line)
-]}
+                   'horizontal-side-conditions-same-line
+                   (-> (listof rule-pict-info?) pict?))]
+
+The symbols indicate various pre-defined styles. The procedure
+implements new styles; it is give the @racket[rule-pict-info?]
+values, one for each clause in the reduction relation,
+and is expected to combine them into a single @racket[pict?]
+}
+
+@defproc[(rule-pict-info? [x any/c]) boolean?]{
+  A predicate that recognizes information about a rule for use 
+  in rendering the rule as a @racket[pict?].
+}
+@defproc[(rule-pict-info-arrow [rule-pict-info rule-pict-info?]) symbol?]{
+  Extracts the arrow used for this rule. See also @racket[arrow->pict].
+}
+@defproc[(rule-pict-info-lhs [rule-pict-info rule-pict-info?]) pict?]{
+  Extracts a pict for the left-hand side of this rule.
+}
+@defproc[(rule-pict-info-rhs [rule-pict-info rule-pict-info?]) pict?]{
+ Extracts a pict for the right-hand side of this rule.
+}
+@defproc[(rule-pict-info-label [rule-pict-info rule-pict-info?]) (or/c symbol? #f)]{
+ Returns the label used for this rule, unless there is no label
+ for the rule or @racket[_computed-label] was used,
+ in which case this returns @racket[#f].
+}
+@defproc[(rule-pict-info-computed-label [rule-pict-info rule-pict-info?]) (or/c pict? #f)]{
+  Returns a pict for the typeset version of the label of this rule, when
+  @racket[_computed-label] was used. Otherwise, returns @racket[#f].
+}
+@defproc[(rule-pict-info->side-condition-pict [rule-pict-info rule-pict-info?] 
+                                              [max-width real? +inf.0])
+         pict?]{
+  Builds a pict for the @racket[_side-condition]s and @racket[_where] clauses
+  for @racket[rule-pict-info], attempting to keep the width under @racket[max-width].
+}
+
 
 @defparam[arrow-space space natural-number/c]{
 
@@ -3197,11 +3248,55 @@ The @racket['left-right/beside-side-conditions] variant is like
 @racket['left-right], except it puts the side-conditions on the 
 same line, instead of on a new line below the case.}
 
+@defparam[metafunction-up/down-indent indent (>=/c 0)]{
+  Controls the indentation of the right-hand side clauses
+  when typesetting metafunctions in one of the up/down
+  styles (see @racket[metafunction-pict-style]). 
+  
+  The value is the amount to indent and it defaults to @racket[0].
+ 
+  @history[#:added "1.2"]
+}
+
 @defparam[delimit-ellipsis-arguments? delimit? any/c]{
 This parameter controls the typesetting of metafunction definitions
 and applications. When it is non-@racket[#f] (the default), commas
 precede ellipses that represent argument sequences; when it is 
 @racket[#f] no commas appear in those positions.
+}
+
+@defparam[white-square-bracket make-white-square-bracket (-> boolean? pict?)]{
+This parameter controls the typesetting of the brackets in metafunction
+definitions and applications. It is called to supply the two white bracket
+picts. If @racket[#t] is supplied, the function should return the open 
+white bracket (to be used at the left-hand side of an application) and if
+@racket[#f] is supplied, the function should return the close white bracket.
+
+It's default value is @racket[default-white-square-bracket]. See also
+@racket[homemade-white-square-bracket].
+
+@history[#:added "1.1"]
+}
+
+@defproc[(homemade-white-square-bracket [open? boolean?]) pict?]{
+ This function implements the default way that older versions
+ of Redex typeset whitebrackets. It uses two overlapping
+ @litchar{[} and  @litchar{]} chars with a little whitespace between them.
+
+ @history[#:added "1.1"]
+}
+
+@defproc[(default-white-square-bracket [open? boolean?]) pict?]{
+ This function returns picts built using
+ @litchar{〚} and  @litchar{〛}
+ in the style @racket[default-style], using
+ @racket[current-text] and @racket[default-font-size].
+
+ If these result in picts that are more than 1/2 whitespace,
+ then 1/3 of the whitespace is trimmed from sides (trimmed
+ only from the left of the open and the right of the close).
+ 
+ @history[#:added "1.1"]
 }
 
 @defparam[linebreaks breaks (or/c #f (listof boolean?))]{
@@ -3558,9 +3653,9 @@ appears as the first thing in the file):
 
 @racketblock[
      (build-lw (list (build-lw "(" 0 0 0 1)
-                              (build-lw 'a 0 0 1 1)
-                              (build-lw ")" 0 0 2 1))
-                        0 0 0 3)
+                     (build-lw 'a 0 0 1 1)
+                     (build-lw ")" 0 0 2 1))
+               0 0 0 3)
 ]
 
 If there is some whitespace in the sequence, like this one:

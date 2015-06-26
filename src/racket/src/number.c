@@ -57,6 +57,11 @@
 # define MAX_FIXNUM_SQRT 46339
 #endif
 
+/* read only globals */
+READ_ONLY Scheme_Object *scheme_fixnum_p_proc;
+READ_ONLY Scheme_Object *scheme_flonum_p_proc;
+READ_ONLY Scheme_Object *scheme_extflonum_p_proc;
+
 /* locals */
 static Scheme_Object *number_p (int argc, Scheme_Object *argv[]);
 static Scheme_Object *complex_p (int argc, Scheme_Object *argv[]);
@@ -504,7 +509,9 @@ scheme_init_number (Scheme_Env *env)
                                                             | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant("exact-positive-integer?", p, env);
 
+  REGISTER_SO(scheme_fixnum_p_proc);
   p = scheme_make_immed_prim(fixnum_p, "fixnum?", 1, 1);
+  scheme_fixnum_p_proc = p;
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
                                                             | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant("fixnum?", p, env);
@@ -514,7 +521,9 @@ scheme_init_number (Scheme_Env *env)
                                                             | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant("inexact-real?", p, env);
 
+  REGISTER_SO(scheme_flonum_p_proc);
   p = scheme_make_folding_prim(flonum_p, "flonum?", 1, 1, 1);
+  scheme_flonum_p_proc = p;
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
                                                             | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant("flonum?", p, env);
@@ -1012,7 +1021,7 @@ void scheme_init_flfxnum_number(Scheme_Env *env)
   else
     flags = SCHEME_PRIM_SOMETIMES_INLINED;
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(flags
-                                                            | SCHEME_PRIM_WANTS_FLONUM_FIRST
+                                                            | SCHEME_PRIM_WANTS_FLONUM_BOTH
                                                             | SCHEME_PRIM_PRODUCES_FLONUM);
   scheme_add_global_constant("flexpt", p, env);
 
@@ -1036,7 +1045,9 @@ void scheme_init_extfl_number(Scheme_Env *env)
   Scheme_Object *p;
   int flags;
 
+  REGISTER_SO(scheme_extflonum_p_proc);
   p = scheme_make_folding_prim(extflonum_p, "extflonum?", 1, 1, 1);
+  scheme_extflonum_p_proc = p;
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
                                                             | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant("extflonum?", p, env);
@@ -1277,7 +1288,7 @@ void scheme_init_extfl_number(Scheme_Env *env)
   else
     flags = SCHEME_PRIM_SOMETIMES_INLINED;
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(flags
-                                                            | SCHEME_PRIM_WANTS_EXTFLONUM_FIRST
+                                                            | SCHEME_PRIM_WANTS_EXTFLONUM_BOTH
                                                             | SCHEME_PRIM_PRODUCES_EXTFLONUM);
   scheme_add_global_constant("extflexpt", p, env);
 }
@@ -1406,7 +1417,8 @@ void scheme_init_unsafe_number(Scheme_Env *env)
                              2, 2);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED
                                                             | SCHEME_PRIM_IS_UNSAFE_OMITABLE
-                                                            | SCHEME_PRIM_IS_OMITABLE);
+                                                            | SCHEME_PRIM_IS_OMITABLE
+                                                            | SCHEME_PRIM_PRODUCES_FIXNUM);
   scheme_add_global_constant("unsafe-fxvector-ref", p, env);
 
   p = scheme_make_immed_prim(unsafe_fxvector_set, "unsafe-fxvector-set!",
@@ -3557,10 +3569,8 @@ scheme_expt(int argc, Scheme_Object *argv[])
     if ((d == 0.0)
 #ifdef NAN_EQUALS_ANYTHING
 	&& !MZ_IS_NAN(d)
-#else
-        && 1
 #endif
-	) {
+	&& 1) {
       if (SCHEME_REALP(e)) {
 	int norm = 0;
 
@@ -3577,7 +3587,10 @@ scheme_expt(int argc, Scheme_Object *argv[])
 	if (!norm) {
 	  int isnonneg, iseven, negz;
 #ifdef MZ_USE_SINGLE_FLOATS
-	  int sgl = !SCHEME_DBLP(n) && !SCHEME_DBLP(e);
+          int sgl = !SCHEME_DBLP(n) && !SCHEME_DBLP(e);
+# define SELECT_EXPT_PRECISION(f, d) (sgl ? f : d)
+#else
+# define SELECT_EXPT_PRECISION(f, d) d
 #endif
 
 	  if (scheme_is_integer(e)) {
@@ -3589,37 +3602,40 @@ scheme_expt(int argc, Scheme_Object *argv[])
 	  isnonneg = !scheme_is_negative(e);
 	  negz = scheme_minus_zero_p(d);
 
-	  if (isnonneg) {
-	    if (iseven || !negz) {
-#ifdef MZ_USE_SINGLE_FLOATS
-	      if (sgl)
-		return scheme_zerof;
-#endif
-	      return scheme_zerod;
-	    } else {
-#ifdef MZ_USE_SINGLE_FLOATS
-	      if (sgl)
-		return scheme_nzerof;
-#endif
-	      return scheme_nzerod;
-	    }
-	  } else {
-	    if (iseven || !negz) {
-#ifdef MZ_USE_SINGLE_FLOATS
-	      if (sgl)
-		return scheme_single_inf_object;
-#endif
-	      return scheme_inf_object;
-	    } else {
-#ifdef MZ_USE_SINGLE_FLOATS
-	      if (sgl)
-		return scheme_single_minus_inf_object;
-#endif
-	      return scheme_minus_inf_object;
-	    }
-	  }
+          if (isnonneg) {
+            if (iseven || !negz)
+              return SELECT_EXPT_PRECISION(scheme_zerof, scheme_zerod);
+            else
+              return SELECT_EXPT_PRECISION(scheme_nzerof, scheme_nzerod);
+          } else {
+            if (iseven || !negz)
+              return SELECT_EXPT_PRECISION(scheme_single_inf_object,
+                                           scheme_inf_object);
+            else
+              return SELECT_EXPT_PRECISION(scheme_single_minus_inf_object,
+                                           scheme_minus_inf_object);
+          }
 	}
       }
+    } else if ((d < 0.0) && (d > -1.0)) {
+      /* If `e` is a positive bignum, then the result should be zero,
+         but we won't get that result if conversion produces infinity */
+      if (SCHEME_BIGNUMP(e) && SCHEME_BIGPOS(e)) {
+#ifdef MZ_USE_SINGLE_FLOATS
+        int sgl = !SCHEME_DBLP(n);
+#endif
+        if (SCHEME_FALSEP(scheme_odd_p(1, &e)))
+          return SELECT_EXPT_PRECISION(scheme_zerof, scheme_zerod);
+        else
+          return SELECT_EXPT_PRECISION(scheme_nzerof, scheme_nzerod);
+      }
+    }
+
+    if ((d < 0.0) && SCHEME_RATIONALP(e)) {
+      /* The inexact approximation of a rational number might be an integer.
+         Make sure we stay on the complex track: */
+      return scheme_complex_power(scheme_real_to_complex(n),
+                                  scheme_real_to_complex(e));
     }
   }
 
@@ -3944,17 +3960,13 @@ scheme_inexact_to_exact (int argc, Scheme_Object *argv[])
   if (SCHEME_INTP(o))
     return o;
   t = _SCHEME_TYPE(o);
-  if (t == scheme_double_type
-#ifdef MZ_USE_SINGLE_FLOATS
-      || t == scheme_float_type
-#endif
-      ) {
-    double d = SCHEME_FLOAT_VAL(o);
+  if (t == scheme_double_type) {
+    double d = SCHEME_DBL_VAL(o);
 
     /* Try simple case: */
     Scheme_Object *i = scheme_make_integer((intptr_t)d);
     if ((double)SCHEME_INT_VAL(i) == d) {
-# ifdef NAN_EQUALS_ANYTHING
+#ifdef NAN_EQUALS_ANYTHING
       if (!MZ_IS_NAN(d))
 #endif
 	return i;
@@ -3962,6 +3974,22 @@ scheme_inexact_to_exact (int argc, Scheme_Object *argv[])
 
     return scheme_rational_from_double(d);
   }
+#ifdef MZ_USE_SINGLE_FLOATS
+  if (t == scheme_float_type) {
+    float d = SCHEME_FLT_VAL(o);
+
+    /* Try simple case: */
+    Scheme_Object *i = scheme_make_integer((intptr_t)d);
+    if ((double)SCHEME_INT_VAL(i) == d) {
+# ifdef NAN_EQUALS_ANYTHING
+      if (!MZ_IS_NAN(d))
+# endif
+	return i;
+    }
+
+    return scheme_rational_from_float(d);
+  }
+#endif
   if (t == scheme_bignum_type)
     return o;
   if (t == scheme_rational_type)
@@ -4058,13 +4086,6 @@ extfl_to_inexact (int argc, Scheme_Object *argv[])
   return NULL;
 #endif
 }
-
-#ifdef MZ_USE_SINGLE_FLOATS
-int scheme_check_float(const char *where, float f, const char *dest)
-{
-  return scheme_check_double(where, f, dest);
-}
-#endif
 
 GEN_BIN_PROT(bin_bitwise_and);
 GEN_BIN_PROT(bin_bitwise_or);
@@ -4314,50 +4335,117 @@ integer_length(int argc, Scheme_Object *argv[])
 {
   Scheme_Object *o = argv[0];
   uintptr_t n;
-  int base;
 
   if (SCHEME_INTP(o)) {
+    /* argument is a fixnum. result guaranteed to be fixnum. */
     intptr_t a = SCHEME_INT_VAL(o);
+    intptr_t result = 0;
 
     if (a < 0)
       a = ~a;
     
     n = a;
-    base = 0;
-  } else if (_SCHEME_TYPE(o) == scheme_bignum_type) {
-    bigdig d;
 
-    if (!SCHEME_BIGPOS(o)) {
-      /* Maybe we could do better... */
-      o = scheme_bignum_not(o);
+    while (n) {
+      n >>= 1;
+      result++;
     }
 
-    base = ((Scheme_Bignum *)o)->len;
-    d = ((Scheme_Bignum *)o)->digits[base - 1];
-    base = (base - 1) * (sizeof(bigdig) * 8);
+    return scheme_make_integer(result);
+  } else if (_SCHEME_TYPE(o) == scheme_bignum_type) {
+    /* argument is a bignum. result _may_ be a bignum. */
+    bigdig d;
+    intptr_t additional = 0, base;
+    intptr_t negative_power_of_two = 1;
+    
+    base = ((Scheme_Bignum *)o)->len - 1;
+    d = ((Scheme_Bignum *)o)->digits[base];
+
+    if (SCHEME_BIGPOS(o)) {
+      negative_power_of_two = 0;
+    } else {
+      /* o is a negative bignum. most of the time, we can compute
+         the answer the same way we'd do it for a positive bignum.
+         unless (abs o) is a power of two, in which case, the answer
+         will be 1 less. we'll test for that situation. */
+      int i;
+      bigdig e;
+
+      /* check the lower bigdigs. they should all be zero. */
+      for (i=0; i<base; i++) {
+        if (0 != ((Scheme_Bignum *)o)->digits[i]) {
+          negative_power_of_two = 0;
+          break;
+        }
+      }
+
+      /* check the final bigdig. it should have a single set bit. */
+      e = d;
+      while (e) {
+        if ((e&1) && (e!=1)) {
+          /* if at any point the bottom bit isn't 1, and we're not
+             finished, then the number wasn't a power of two. */
+          negative_power_of_two = 0;
+          break;
+        }
+        e >>= 1;
+      }
+    }
 
 #ifdef USE_LONG_LONG_FOR_BIGDIG
+    /* check to see if n can hold the value in the 'last' bigdig */
     n = (uintptr_t)d;
     if ((bigdig)n != d) {
-      /* Must have been overflow */
+      /* yup, d (the 'last' bigdig) overflowed n.
+         so we can throw away the bottom half of d, and just tally
+         up those bits right now. the normal execution path will handle
+         the top half. */
       d >>= (sizeof(uintptr_t) * 8);
-      base += (sizeof(uintptr_t) * 8);
+      additional += (sizeof(uintptr_t) * 8);
       n = (uintptr_t)d;
     }
 #else
     n = d;
 #endif
+
+    /* if base is large enough that our later steps risk overflow
+       then perform all the arithmetic using bignums. */
+    if (base >= (((intptr_t)1 << (MAX_SHIFT_TRY - 4))-1)) {
+      /* bignum path */
+      Scheme_Object *result;
+      result = scheme_bin_mult(scheme_make_integer_value(base),
+                               scheme_make_integer(sizeof(bigdig) * 8));
+
+      while (n) {
+        n >>= 1;
+        additional++;
+      }
+
+      additional -= negative_power_of_two;
+
+      return scheme_bin_plus(result, scheme_make_integer(additional));
+    } else {
+      /* We're far enough from overflowing a signed int that we can
+         safely use them to compute the answer. */
+      intptr_t result = base;
+      result *= (sizeof(bigdig) * 8);
+#ifdef USE_LONG_LONG_FOR_BIGDIG
+      result += additional;
+#endif
+
+      while (n) {
+        n >>= 1;
+        result++;
+      }
+
+      result -= negative_power_of_two;
+
+      return scheme_make_integer_value(result);
+    }
   } else {
     scheme_wrong_contract("integer-length", "exact-integer?", 0, argc, argv);
     ESCAPED_BEFORE_HERE;
   }
-
-  while (n) {
-    n >>= 1;
-    base++;
-  }
-
-  return scheme_make_integer(base);
 }
 
 intptr_t scheme_integer_length(Scheme_Object *n)

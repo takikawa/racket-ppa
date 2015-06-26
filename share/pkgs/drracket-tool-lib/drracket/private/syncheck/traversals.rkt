@@ -14,7 +14,9 @@
          racket/list
          racket/contract
          racket/pretty
-         syntax/boundmap
+         racket/bool
+         racket/dict
+         syntax/id-table
          scribble/manual-struct
          (for-syntax racket/base))
 
@@ -38,8 +40,8 @@
              [tl-phase-to-varrefs (make-hash)]
              [tl-phase-to-varsets (make-hash)]
              [tl-phase-to-tops (make-hash)]
-             [tl-binding-inits (make-id-set)]
-             [tl-templrefs (make-id-set)]
+             [tl-binding-inits (make-hash)]
+             [tl-templrefs (make-id-set (syntax-local-phase-level))]
              [tl-module-lang-requires (make-hash)]
              [tl-phase-to-requires (make-hash)]
              [tl-sub-identifier-binding-directives (make-hash)]
@@ -57,8 +59,8 @@
                              [phase-to-varsets (make-hash)]
                              [phase-to-tops (make-hash)]
                              [phase-to-requires (make-hash)]
-                             [binding-inits (make-id-set)]
-                             [templrefs (make-id-set)]
+                             [binding-inits (make-hash)]
+                             [templrefs (make-id-set 0)]
                              [module-lang-requires (make-hash)]
                              [requires (make-hash)]
                              [require-for-syntaxes (make-hash)]
@@ -87,8 +89,8 @@
                                              phase-to-requires
                                              sub-identifier-binding-directives)
                          (annotate-contracts sexp 
-                                             (hash-ref phase-to-binders 0 (λ () (make-id-set)))
-                                             binding-inits)
+                                             (hash-ref phase-to-binders 0 (λ () (make-id-set 0)))
+                                             (hash-ref binding-inits 0 (λ () (make-id-set 0))))
                          (when print-extra-info?
                            (print-extra-info (list (list 'phase-to-binders phase-to-binders)
                                                    (list 'phase-to-varrefs phase-to-varrefs)
@@ -103,24 +105,7 @@
                                                    (list 'require-for-templates require-for-templates)
                                                    (list 'require-for-labels require-for-templates)
                                                    (list 'sub-identifier-binding-directives
-                                                         sub-identifier-binding-directives)))
-                           (define vars (set))
-                           (let loop ([thing (list phase-to-varrefs phase-to-binders)])
-                             (cond
-                               [(pair? thing) (loop (car thing)) (loop (cdr thing))]
-                               [(hash? thing) (for ([(k v) (in-hash thing)])
-                                                (loop k)
-                                                (loop v))]
-                               [(free-identifier-mapping? thing)
-                                (free-identifier-mapping-for-each
-                                 thing
-                                 (λ (k v) (loop v)))]
-                               [(syntax? thing) (set! vars (set-add vars thing))]))
-                           (printf "--- vars\n")
-                           (for ([x (in-set vars)])
-                             (for ([y (in-set vars)])
-                               (printf "  ~s\n  ~s\n  ~s\n" x y (free-identifier=? x y))))
-                           (printf "--- vars\n\n")))]
+                                                         sub-identifier-binding-directives)))))]
                       [else
                        (annotate-basic sexp
                                        user-namespace user-directory
@@ -169,10 +154,9 @@
          [(hash? info)
           (for/hash ([(k v) (in-hash info)])
             (values (loop k) (loop v)))]
-         [(free-identifier-mapping? info)
-          (free-identifier-mapping-map
-           info
-           (λ (k v) (list (loop k) '=> (loop v))))]
+         [(free-id-table? info)
+          (for/list ([(k v) (in-dict info)])
+            (list (loop k) '=> (loop v)))]
          [(pair? info) (cons (loop (car info)) (loop (cdr info)))]
          [else info])))
     (newline)))
@@ -239,7 +223,8 @@
                  [loop (λ (sexp) (level+tail+mod-loop sexp level level-of-enclosing-module
                                                       #f #f mods))]
                  [varrefs (lookup-phase-to-mapping phase-to-varrefs
-                                                   (list (+ level level-of-enclosing-module) mods))]
+                                                   (list (+ level level-of-enclosing-module) mods)
+                                                   (+ level level-of-enclosing-module))]
                  [varsets (lookup-phase-to-mapping phase-to-varsets
                                                    (+ level level-of-enclosing-module))]
                  [binders (lookup-phase-to-mapping phase-to-binders
@@ -259,7 +244,19 @@
                                            level
                                            level-of-enclosing-module
                                            mods))])
+            
+            (define (collect-nested-general-info stx)
+              (let loop ([stx stx])
+                (cond
+                  [(syntax? stx) 
+                   (collect-general-info stx)
+                   (loop (syntax-e stx))]
+                  [(pair? stx)
+                   (loop (car stx))
+                   (loop (cdr stx))])))
+            
             (collect-general-info stx-obj)
+            
             
             (define (list-loop/tail-last bodies)
               (unless (null? bodies)
@@ -439,6 +436,7 @@
               ; top level or module top level only:
               [(#%require raw-require-specs ...)
                (let ()
+                 (collect-nested-general-info #'(raw-require-specs ...))
                  (define (handle-raw-require-spec spec)
                    (let loop ([spec spec]
                               [level level])
@@ -512,10 +510,26 @@
     (define (hash-cons! ht k v)
       (hash-set! ht k (cons v (hash-ref ht k '()))))
 
+    (define ((char-coordinates-are-right-thing? index) v)
+      (define pred?
+        (if (syntax? (vector-ref v index))
+            exact-nonnegative-integer?
+            (and/c inexact? (real-in 0 1))))
+      (and (pred? (vector-ref v (+ index 1)))
+           (pred? (vector-ref v (+ index 2)))))
+
+    (define ok-coordinate? (or/c exact-nonnegative-integer? (and/c (real-in 0 1) inexact?)))
     (define sub-range-binder-prop?
-      (vector/c #:flat? #t
-                syntax? exact-nonnegative-integer? exact-nonnegative-integer?
-                syntax? exact-nonnegative-integer? exact-nonnegative-integer?))
+      (or/c (vector/c #:flat? #t
+                      identifier? exact-nonnegative-integer? exact-nonnegative-integer?
+                      syntax? exact-nonnegative-integer? exact-nonnegative-integer?)
+            (vector/c #:flat? #t
+                      identifier?
+                      exact-nonnegative-integer? exact-nonnegative-integer?
+                      (real-in 0 1) (real-in 0 1)
+                      syntax?
+                      exact-nonnegative-integer? exact-nonnegative-integer?
+                      (real-in 0 1) (real-in 0 1))))
     (define (add-sub-range-binders stx 
                                    sub-identifier-binding-directives 
                                    level
@@ -526,14 +540,32 @@
           [(pair? prop)
            (loop (car prop))
            (loop (cdr prop))]
-          [(sub-range-binder-prop? prop) 
+          [(sub-range-binder-prop? prop)
+           (define the-vec
+             (if (= (vector-length prop) 6)
+                 (vector (vector-ref prop 0)
+                         (vector-ref prop 1)
+                         (vector-ref prop 2)
+                         .5 .5
+                         (vector-ref prop 3)
+                         (vector-ref prop 4)
+                         (vector-ref prop 5)
+                         .5 .5)
+                 prop))
+           (define (shift-it i)
+             (syntax-shift-phase-level (vector-ref the-vec i)
+                                       level-of-enclosing-module))
            (define new-entry
-             (vector (syntax-shift-phase-level (vector-ref prop 0) level-of-enclosing-module)
-                     (vector-ref prop 1)
-                     (vector-ref prop 2)
-                     (syntax-shift-phase-level (vector-ref prop 3) level-of-enclosing-module)
-                     (vector-ref prop 4)
-                     (vector-ref prop 5)))
+             (vector (shift-it 0)
+                     (vector-ref the-vec 1)
+                     (vector-ref the-vec 2)
+                     (vector-ref the-vec 3)
+                     (vector-ref the-vec 4)
+                     (shift-it 5)
+                     (vector-ref the-vec 6)
+                     (vector-ref the-vec 7)
+                     (vector-ref the-vec 8)
+                     (vector-ref the-vec 9)))
            (define key (list level mods)) 
            (hash-set! sub-identifier-binding-directives
                       key
@@ -545,7 +577,10 @@
             prop)])))
 
 (define mouse-over-tooltip-prop?
-  (vector/c #:flat? #t syntax? exact-nonnegative-integer? exact-nonnegative-integer? string?))
+  (vector/c #:flat? #t syntax? exact-nonnegative-integer? exact-nonnegative-integer?
+            (or/c string?
+                  ;; don't check the range here, since we want a predicate, not really a contract
+                  (-> any))))
 (define (add-mouse-over-tooltips stx)
   (let loop ([prop (syntax-property stx 'mouse-over-tooltips)])
     (cond
@@ -602,7 +637,7 @@
       
       (define unused/phases (make-hash))
 
-      ;; hash[(list (list src pos pos) (list src pos pos)) -o> #t
+      ;; hash[(list (list src pos pos dx dy) (list src pos pos dx dy)) -o> #t
       ;;       above indicates if this arrow has been recorded
       ;;       below indicates the number of defs and uses at this spot
       ;;      (list src pos pos) -o> (cons number number)]
@@ -688,7 +723,8 @@
         (define phase-level (list-ref level+mods 0))
         (define mods (list-ref level+mods 1))
         (for ([directive (in-list directives)])
-          (match-define (vector binding-id to-start to-span new-binding-id from-start from-span)
+          (match-define (vector binding-id to-start to-span to-dx to-dy
+                                new-binding-id from-start from-span from-dx from-dy)
             directive)
           (define all-varrefs (lookup-phase-to-mapping phase-to-varrefs (list phase-level mods)))
           (define all-binders (lookup-phase-to-mapping phase-to-binders phase-level))
@@ -696,10 +732,12 @@
           (when varrefs
             (for ([varref (in-list varrefs)])
               (connect-syntaxes new-binding-id varref #t all-binders 
-                                (id-level phase-level new-binding-id)
+                                phase-level
                                 connections #f
                                 #:from-start from-start #:from-width from-span
-                                #:to-start to-start #:to-width to-span))))))
+                                #:from-dx from-dx #:from-dy from-dy
+                                #:to-start to-start #:to-width to-span
+                                #:to-dx to-dx #:to-dy to-dy))))))
     
     ;; color-unused : hash-table[sexp -o> syntax] hash-table[sexp -o> #f] hash-table[syntax -o> #t]
     ;;             -> void
@@ -727,16 +765,6 @@
                       source-editor start fin "firebrick")))
             (color stx unused-require-style-name)))))
     
-    ;; id-level : integer-or-#f-or-'lexical identifier -> symbol
-    (define (id-level phase-level id)
-      (let ([binding (identifier-binding id phase-level)])
-        (cond [(list? binding)
-               (if (self-module? (car binding))
-                   'top-level
-                   'imported)]
-              [(eq? binding 'lexical) 'lexical]
-              [else 'top-level])))
-    
     (define (self-module? mpi)
       (let-values ([(a b) (module-path-index-split mpi)])
         (and (not a) (not b))))
@@ -757,7 +785,7 @@
       (define binders (get-ids all-binders var))
       (when binders
         (for ([x (in-list binders)])
-          (connect-syntaxes x var actual? all-binders (id-level phase-level x) connections #f)))
+          (connect-syntaxes x var actual? all-binders phase-level connections #f)))
       
       (when (and unused/phases phase-to-requires)
         (define req-path/pr (get-module-req-path var phase-level))
@@ -798,7 +826,7 @@
                                         raw-module-path
                                         req-stx)
                                     var actual? all-binders
-                                    (id-level phase-level var)
+                                    phase-level
                                     connections
                                     #t))))))))
              
@@ -936,51 +964,67 @@
     ;; adds an arrow from `from' to `to', unless they have the same source loc. 
     (define (connect-syntaxes from to actual? all-binders level connections require-arrow?
                               #:from-start [from-start 0] 
-                              #:from-width [from-width (syntax-span from)]
+                              #:from-width [from-width (if (exact? from-start)
+                                                           (syntax-span from)
+                                                           from-start)]
+                              #:from-dx [from-dx .5]
+                              #:from-dy [from-dy .5]
                               #:to-start [to-start 0] 
-                              #:to-width [to-width (syntax-span to)])
-      (let ([from-source (find-source-editor from)] 
-            [to-source (find-source-editor to)]
-            [defs-text (current-annotations)])
-        (when (and from-source to-source defs-text)
-          (let ([pos-from (syntax-position from)]
-                [span-from (syntax-span from)]
-                [pos-to (syntax-position to)]
-                [span-to (syntax-span to)])
-            (when (and pos-from span-from pos-to span-to)
-              (let* ([from-pos-left (+ (syntax-position from) -1 from-start)]
-                     [from-pos-right (+ from-pos-left from-width)]
-                     [to-pos-left (+ (syntax-position to) -1 to-start)]
-                     [to-pos-right (+ to-pos-left to-width)])
-                (unless (= from-pos-left to-pos-left)
-                  (define connections-start (list from-source from-pos-left from-pos-right))
-                  (define connections-end (list to-source to-pos-left to-pos-right))
-                  (define connections-key (list connections-start connections-end))
-                  (unless (hash-ref connections connections-key #f)
-                    (hash-set! connections connections-key #t)
-                    (define start-before (or (hash-ref connections connections-start #f) (cons 0 0)))
-                    (define end-before (or (hash-ref connections connections-end #f) (cons 0 0)))
-                    (hash-set! connections connections-start (cons (+ (car start-before) 1) 
-                                                                   (cdr start-before)))
-                    (hash-set! connections connections-end (cons (car end-before)
-                                                                 (+ 1 (cdr end-before)))))
-                  (define (name-dup? str)
-                    (define sym (string->symbol str))
-                    (define id1 (datum->syntax from sym))
-                    (define id2 (datum->syntax to sym)) ;; do I need both?
-                    (define ans #f)
-                    (for-each-ids 
-                     all-binders
-                     (λ (ids)
-                       (set! ans (or ans
-                                     (for/or ([id (in-list ids)])
-                                       (or (free-identifier=? id1 id)
-                                           (free-identifier=? id2 id)))))))
-                    ans)
-                  (send defs-text syncheck:add-arrow/name-dup
-                        from-source from-pos-left from-pos-right
-                        to-source to-pos-left to-pos-right
-                        actual? level require-arrow? name-dup?))))))))
+                              #:to-width [to-width (if (exact? to-start)
+                                                       (syntax-span to)
+                                                       to-start)]
+                              #:to-dx [to-dx .5]
+                              #:to-dy [to-dy .5])
+      (define from-source (find-source-editor from))
+      (define to-source (find-source-editor to))
+      (define defs-text (current-annotations))
+      (when (and from-source to-source defs-text)
+        (define pos-from (syntax-position from))
+        (define span-from (syntax-span from))
+        (define pos-to (syntax-position to))
+        (define span-to (syntax-span to))
+        (when (and pos-from span-from pos-to span-to)
+          (define from-pos-left (+ (syntax-position from) -1 from-start))
+          (define from-pos-right (+ from-pos-left from-width))
+          (define to-pos-left (+ (syntax-position to) -1 to-start))
+          (define to-pos-right (+ to-pos-left to-width))
+          ;; just an approximation; could be tightened if this is problematic
+          (define arrow-points-to-itself? (= from-pos-left to-pos-left))
+          (unless arrow-points-to-itself?
+            (define connections-start/no-pxpy
+              (list from-source from-pos-left from-pos-right))
+            (define connections-end/no-pxpy
+              (list to-source to-pos-left to-pos-right))
+            (define connections-key
+              (list (list from-source from-pos-left from-pos-right from-dx from-dy)
+                    (list to-source to-pos-left to-pos-right to-dx to-dy)))
+            (unless (hash-ref connections connections-key #f)
+              (hash-set! connections connections-key #t)
+              (define start-before (or (hash-ref connections connections-start/no-pxpy #f)
+                                       (cons 0 0)))
+              (define end-before (or (hash-ref connections connections-end/no-pxpy #f)
+                                     (cons 0 0)))
+              (hash-set! connections connections-start/no-pxpy
+                         (cons (+ (car start-before) 1) (cdr start-before)))
+              (hash-set! connections connections-end/no-pxpy
+                         (cons (car end-before) (+ 1 (cdr end-before)))))
+            (define (name-dup? str)
+              (define sym (string->symbol str))
+              (define id1 (datum->syntax from sym))
+              (define id2 (datum->syntax to sym)) ;; do I need both?
+              (define ans #f)
+              (for-each-id
+               all-binders
+               (λ (ids)
+                 (set! ans (or ans
+                               (for/or ([id (in-list ids)])
+                                 (or (free-identifier=? id1 id level)
+                                     (free-identifier=? id2 id level)))))))
+              ans)
+            (send defs-text syncheck:add-arrow/name-dup/pxpy
+                  from-source from-pos-left from-pos-right from-dx from-dy
+                  to-source to-pos-left to-pos-right to-dx to-dy
+                  actual? level require-arrow? name-dup?)))))
     
     ;; add-jump-to-definition : syntax symbol path -> void
     ;; registers the range in the editor so that the
@@ -1149,14 +1193,14 @@
                (if (syntax? fst)
                    (begin
                      (when binding-to-init
-                       (add-init-exp binding-to-init fst init-exp))
+                       (add-init-exp binding-to-init fst init-exp level-of-enclosing-module))
                      (add-id id-set fst level-of-enclosing-module)
                      (loop rst))
                    (loop rst)))]
             [(null? e) (void)]
             [else
              (when binding-to-init
-               (add-init-exp binding-to-init stx init-exp))
+               (add-init-exp binding-to-init stx init-exp level-of-enclosing-module))
              (add-id id-set stx level-of-enclosing-module)]))))
     
     ;; add-definition-target : syntax[(sequence of identifiers)] (listof symbol) -> void
@@ -1271,26 +1315,25 @@
     ;                                            
     
     
-    (define (lookup-phase-to-mapping phase-to n)
-      (hash-ref! phase-to n (λ () (make-id-set))))
+    (define (lookup-phase-to-mapping phase-to key [n key])
+      (hash-ref! phase-to key (λ () (make-id-set n))))
     
     ;; make-id-set : -> id-set
-    (define (make-id-set) (make-free-identifier-mapping))
+    (define (make-id-set n) (make-free-id-table #:phase n))
     
-    ;; add-init-exp : id-set identifier stx -> void
-    (define (add-init-exp mapping id init-exp)
+    (define (add-init-exp phase-to id init-exp phase)
       (when (original-enough? id)
-        (let* ([old (free-identifier-mapping-get mapping id (λ () '()))]
-               [new (cons init-exp old)])
-          (free-identifier-mapping-put! mapping id new))))
+        (define mapping (lookup-phase-to-mapping phase-to phase))
+        (define old (free-id-table-ref mapping id '()))
+        (free-id-table-set! mapping id (cons init-exp old))))
     
     ;; add-id : id-set identifier -> void
     (define (add-id mapping id level-of-enclosing-module)
       (when (original-enough? id)
         (let* ([id (syntax-shift-phase-level id level-of-enclosing-module)]
-               [old (free-identifier-mapping-get mapping id (λ () '()))]
+               [old (free-id-table-ref mapping id '())]
                [new (cons id old)])
-          (free-identifier-mapping-put! mapping id new))))
+          (free-id-table-set! mapping id new))))
     
     (define (original-enough? x)
       (or (syntax-original? x)
@@ -1298,17 +1341,16 @@
     
     ;; get-idss : id-set -> (listof (listof identifier))
     (define (get-idss mapping)
-      (free-identifier-mapping-map mapping (λ (x y) y)))
+      (for/list ([(x y) (in-dict mapping)])
+        y))
     
     ;; get-ids : id-set identifier -> (union (listof identifier) #f)
     (define (get-ids mapping var)
-      (free-identifier-mapping-get mapping var (λ () #f)))
+      (free-id-table-ref mapping var #f))
     
-    ;; for-each-ids : id-set ((listof identifier) -> void) -> void
-    (define (for-each-ids mapping f)
-      (free-identifier-mapping-for-each mapping (λ (x y) (f y))))
-
-
+    (define (for-each-id mapping f)
+      (for ([(x y) (in-dict mapping)])
+        (f y)))
 
 
 (define build-trace%
@@ -1331,9 +1373,9 @@
                (add-to-trace (vector 'name wanted-args ...))))]))
 
     (log syncheck:add-tail-arrow _from-text from-pos _to-text to-pos)
-    (log syncheck:add-arrow/name-dup
-         _start-text start-pos-left start-pos-right
-         _end-text end-pos-left end-pos-right
+    (log syncheck:add-arrow/name-dup/pxpy
+         _start-text start-pos-left start-pos-right start-px start-py
+         _end-text end-pos-left end-pos-right end-px end-py
          actual? level require-arrow? name-dup?)
     (log syncheck:add-mouse-over-status _text pos-left pos-right str)
     (log syncheck:add-background-color _text color start fin)

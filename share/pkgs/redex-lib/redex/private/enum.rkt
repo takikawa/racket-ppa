@@ -7,8 +7,10 @@
          racket/match
          racket/promise
          racket/set
-
-         "enumerator.rkt"
+         data/enumerate/lib/unsafe
+         data/enumerate/unsafe
+         
+         
          "env.rkt"
          "error.rkt"
          "lang-struct.rkt"
@@ -17,13 +19,14 @@
          "preprocess-lang.rkt")
 
 (provide 
+ enum-count
+ finite-enum?
  (contract-out
   [lang-enumerators (-> (listof nt?) (promise/c (listof nt?)) lang-enum?)]
   [pat-enumerator (-> lang-enum?
                       any/c ;; pattern
                       (or/c #f enum?))]
   [enum-ith (-> enum? exact-nonnegative-integer? any/c)]
-  [enum-size (-> enum? (or/c +inf.0 exact-nonnegative-integer?))]
   [lang-enum? (-> any/c boolean?)]
   [enum? (-> any/c boolean?)]))
 
@@ -40,12 +43,7 @@
 (struct hide-hole (term) #:transparent)
 
 ;; Top level exports
-(define enum-ith decode)
-(define (enum-size e)
-  (define s (size e))
-  (if (equal? s +inf.f)
-      +inf.0
-      s))
+(define (enum-ith e x) (from-nat e x))
 
 (define (lang-enumerators lang cc-lang)
   (define (make-lang-table! ht lang)
@@ -56,48 +54,45 @@
                    (nt-name nt)
                    (if (hash-ref cant-enumerate-table (nt-name nt))
                        #f
-                       (enum-f (nt-rhs nt) nt-enums)))))
+                       (enum-f (nt-rhs nt) ht)))))
     (enumerate-lang! fin-lang
                      (λ (rhs enums)
                         (enumerate-rhss rhs l-enum)))
     (enumerate-lang! rec-lang
                      (λ (rhs enums)
-                        (thunk/e +inf.f
-                                 (λ ()
-                                    (enumerate-rhss rhs l-enum)))))
-    ht)
+                       (delay/e (enumerate-rhss rhs l-enum)
+                                #:count +inf.f))))
   (define nt-enums (make-hash))
-  (define cc-enums (delay (make-hash)))
+  (define cc-enums (make-hash))
   (define unused-var/e
     (apply except/e
-           var/e
+           symbol/e
            (used-vars lang)))
-  (define l-enum
-    (lang-enum nt-enums cc-enums unused-var/e))
   
-  (make-lang-table! nt-enums lang)
   (define filled-cc-enums
-    (delay (make-lang-table! (force cc-enums) (force cc-lang))))
-
-  (struct-copy lang-enum l-enum [delayed-cc-enums filled-cc-enums]))
+    (delay (begin
+             (make-lang-table! cc-enums (force cc-lang))
+             cc-enums)))
+  (define l-enum
+    (lang-enum nt-enums filled-cc-enums unused-var/e))
+  (make-lang-table! nt-enums lang)
+  l-enum)
 
 (define (pat-enumerator l-enum pat)
   (cond
     [(can-enumerate? pat (lang-enum-nt-enums l-enum) (lang-enum-delayed-cc-enums l-enum))
-     (map/e
-      to-term
-      (λ (_)
-        (redex-error 'pat-enum "Enumerator is not a  bijection"))
-      (pat/e pat l-enum))]
+     (pam/e to-term (pat/e pat l-enum) #:contract any/c)]
     [else #f]))
 
 (define (enumerate-rhss rhss l-enum)
   (define (with-index i e)
-    (cons (map/e (curry production i)
-                 production-term
-                 e)
-          (λ (nd-x) (= i (production-n nd-x)))))
-  (apply disj-sum/e
+    (map/e (λ (x) (production i x))
+           production-term
+           e
+           #:contract 
+           (and/c production?
+                  (λ (p) (= i (production-n p))))))
+  (apply or/e
          (for/list ([i (in-naturals)]
                     [production (in-list rhss)])
            (with-index i
@@ -106,12 +101,13 @@
 (define (pat/e pat l-enum)
   (match-define (ann-pat nv pp-pat) (preprocess pat))
   (map/e
-   ann-pat
+   (λ (l) (apply ann-pat l))
    (λ (ap)
-      (values (ann-pat-ann ap)
-              (ann-pat-pat ap)))
-   (env/e nv l-enum)
-   (pat-refs/e pp-pat l-enum)))
+      (list (ann-pat-ann ap)
+            (ann-pat-pat ap)))
+   (list/e (env/e nv l-enum)
+           (pat-refs/e pp-pat l-enum))
+   #:contract any/c))
 
 ;; (: pat-refs/e : Pat (HashTable Symbol (Enum Pat)) (Enum Symbol) -> Enum RefPat)
 (define (pat-refs/e pat l-enum)
@@ -119,37 +115,44 @@
     (match-a-pattern
      pat
      [`any any/e]
-     [`number num/e]
+     [`number two-way-number/e]
      [`string string/e]
-     [`natural nat/e]
+     [`natural natural/e]
      [`integer integer/e]
-     [`real real/e]
+     [`real two-way-real/e]
      [`boolean bool/e]
-     [`variable var/e]
+     [`variable symbol/e]
      [`(variable-except ,s ...)
-      (apply except/e var/e s)]
+      (apply except/e symbol/e s)]
      [`(variable-prefix ,s)
       (var-prefix/e s)]
      [`variable-not-otherwise-mentioned
       (lang-enum-unused-var/e l-enum)]
-     [`hole (const/e the-hole)]
+     
+     ;; not sure this is the right equality function, 
+     ;; but it matches the plug-hole function (above)
+     [`hole (single/e the-hole #:equal? eq?)]
+     
      [`(nt ,id)
       (lang-enum-get-nt-enum l-enum id)]
      [`(name ,n ,pat)
-      (const/e (name-ref n))]
+      (single/e (name-ref n))]
      [`(mismatch-name ,n ,tag)
-      (const/e (misname-ref n tag))]
+      (single/e (misname-ref n tag))]
      [`(in-hole ,p1 ,p2)
-      (map/e decomp
-             (match-lambda
-              [(decomp ctx term)
-               (values ctx term)])
-             (loop p1)
-             (loop p2))]
+      (map/e (λ (l) (apply decomp l))
+             (λ (d)
+               (match d
+                 [(decomp ctx term)
+                  (list ctx term)]))
+             (list/e (loop p1)
+                     (loop p2))
+             #:contract any/c)]
      [`(hide-hole ,p)
       (map/e hide-hole
              hide-hole-term
-             (loop p))]
+             (loop p)
+             #:contract any/c)]
      [`(side-condition ,p ,g ,e)
       (unsupported pat)]
      [`(cross ,s)
@@ -165,14 +168,15 @@
                         ts))
              (λ (rep)
                 (repeat-terms rep))
-             (many/e (loop pat)))]
+             (listof/e (loop pat))
+             #:contract any/c)]
            [`(repeat ,tag ,n #f)
-            (const/e (nrep-ref n tag))]
+            (single/e (nrep-ref n tag))]
            [`(repeat ,pat ,n ,m)
             (unimplemented "mismatch repeats (..._!_)")]
            [else (loop sub-pat)])))]
      [(? (compose not pair?)) 
-      (const/e pat)]))
+      (single/e pat)]))
   (loop pat))
 
 (define/match (env/e nv l-enum)
@@ -186,33 +190,37 @@
       (fold-enum (λ (ts-excepts tag)
                     (define excepts
                       (map cdr ts-excepts))
-                    (cons/e (const/e tag)
-                            (apply except/e p/e excepts)))
-                 (set->list ts))])
+                    (cons/e (fin/e tag)
+                            (apply except/e p/e excepts
+                                   #:contract any/c)))
+                 (set->list ts)
+                 #:f-range-finite? (finite-enum? p/e))])
    
    (define/match (reprec/e nv-t)
      [((cons nv tpats))
       (define tpats/e
-        (hash-traverse/e val/e tpats))
-      (many/e
+        (hash-traverse/e val/e tpats #:get-contract (λ (x) any/c)))
+      (listof/e
        (cons/e (env/e nv l-enum)
                tpats/e))])
    (define names-env
-     (hash-traverse/e val/e names))
+     (hash-traverse/e val/e names #:get-contract (λ (x) any/c)))
 
    (define misnames-env
-     (hash-traverse/e misvals/e misnames))
+     (hash-traverse/e misvals/e misnames #:get-contract (λ (x) any/c)))
    
    (define nreps-env
-     (hash-traverse/e reprec/e nreps))
+     (hash-traverse/e reprec/e nreps #:get-contract (λ (x) any/c)))
    (map/e
-    t-env
-    (match-lambda
-     [(t-env  names misnames nreps)
-      (values names misnames nreps)])
-    names-env
-    misnames-env
-    nreps-env)])
+    (λ (v) (apply t-env v))
+    (λ (t-e)
+      (match t-e
+        [(t-env  names misnames nreps)
+         (list names misnames nreps)]))
+    (list/e names-env
+            misnames-env
+            nreps-env)
+    #:contract t-env?)])
 
 ;; to-term : (ann-pat t-env pat-with-refs) -> redex term
 (define/match (to-term ap)
@@ -294,3 +302,33 @@
 ;; lang-enum-get-cross-enum : lang-enum Symbol -> (or/c Enum #f)
 (define (lang-enum-get-cross-enum l-enum s)
   (hash-ref (force (lang-enum-delayed-cc-enums l-enum)) s))
+
+(define (var-prefix/e s)
+  (define as-str (symbol->string s))
+  (define ((flip f) x y) (f y x))
+  (map/e (compose string->symbol
+                  (curry string-append as-str)
+                  symbol->string)
+         (compose string->symbol
+                  list->string
+                  (curry (flip drop) (string-length as-str))
+                  string->list
+                  symbol->string)
+         symbol/e
+         #:contract (and/c symbol?
+                           (let ([reg (regexp (format "^~a" (regexp-quote as-str)))])
+                             (λ (x) 
+                               (regexp-match? reg (symbol->string x)))))))
+
+(define base/e
+  (or/e (fin/e '())
+        (cons two-way-number/e number?)
+        string/e
+        bool/e
+        symbol/e))
+
+(define any/e
+  (delay/e
+   (or/e (cons base/e (negate pair?))
+         (cons (cons/e any/e any/e) pair?))
+   #:count +inf.0))

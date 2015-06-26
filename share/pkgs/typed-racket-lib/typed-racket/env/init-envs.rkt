@@ -12,7 +12,7 @@
          (rep type-rep object-rep filter-rep rep-utils free-variance)
          (for-syntax syntax/parse racket/base)
          (types abbrev union)
-         racket/syntax racket/dict racket/list
+         racket/dict racket/list
          mzlib/pconvert racket/match)
 
 (provide ;; convenience form for defining an initial environment
@@ -78,13 +78,9 @@
      `(->acc (list ,@(map sub dom)) ,(sub t) ,(sub pth))]
     [(Result: t (FilterSet: (Top:) (Top:)) (Empty:)) `(-result ,(sub t))]
     [(Union: elems) (split-union elems)]
-    [(Base: n cnt pred _) (int-err "Base type not in predefined-type-table" n)]
-    [(Name: stx deps args struct?)
-     `(make-Name (quote-syntax ,stx)
-                 (list ,@(map (λ (x) `(quote-syntax ,x)) deps))
-                 ,(and args
-                       `(list ,@(map (λ (x) `(quote-syntax ,x)) args)))
-                 ,struct?)]
+    [(Base: n cnt pred _) (int-err "Base type ~a not in predefined-type-table" n)]
+    [(Name: stx args struct?)
+     `(make-Name (quote-syntax ,stx) ,args ,struct?)]
     [(fld: t acc mut) `(make-fld ,(sub t) (quote-syntax ,acc) ,mut)]
     [(Struct: name parent flds proc poly? pred-id)
      `(make-Struct (quote-syntax ,name) ,(sub parent)

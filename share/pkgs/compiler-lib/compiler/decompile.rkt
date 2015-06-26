@@ -178,10 +178,7 @@
   (cond
    [(symbol? modidx) modidx]
    [else 
-    (collapse-module-path-index modidx (build-path
-                                        (or (current-load-relative-directory)
-                                            (current-directory))
-                                        "here.rkt"))]))
+    (collapse-module-path-index modidx)]))
 
 (define (decompile-module mod-form orig-stack stx-ht mod-name)
   (match mod-form
@@ -425,8 +422,11 @@
      `(begin ,@(for/list ([expr (in-list exprs)])
                  (decompile-expr expr globs stack closed)))]
     [(struct beg0 (exprs))
-     `(begin0 ,@(for/list ([expr (in-list exprs)])
-                  (decompile-expr expr globs stack closed)))]
+     (if (> (length exprs) 1)
+       `(begin0 ,@(for/list ([expr (in-list exprs)])
+                    (decompile-expr expr globs stack closed)))
+       `(begin0 ,(decompile-expr (car exprs) globs stack closed)
+                (void)))]
     [(struct with-cont-mark (key val body))
      `(with-continuation-mark
           ,(decompile-expr key globs stack closed)
@@ -475,12 +475,20 @@
                                    '()
                                    (list
                                     (for/list ([pos (in-set tl-map)])
-                                      (list-ref/protect (glob-desc-vars globs)
-                                                        (if (or (pos . < . (glob-desc-num-tls globs))
-                                                                (zero? (glob-desc-num-stxs globs)))
-                                                            pos
-                                                            (+ pos (glob-desc-num-stxs globs) 1))
-                                                        'lam)))))))
+                                      (define tl-pos
+                                        (cond
+                                         [(or (pos . < . (glob-desc-num-tls globs))
+                                              (zero? (glob-desc-num-stxs globs)))
+                                          pos]
+                                         [(= pos (glob-desc-num-tls globs))
+                                          'stx]
+                                         [else
+                                          (+ pos (glob-desc-num-stxs globs))]))
+                                      (if (eq? tl-pos 'stx)
+                                          '#%syntax
+                                          (list-ref/protect (glob-desc-vars globs)
+                                                            tl-pos
+                                                            'lam))))))))
          ,(decompile-expr body globs
                           (append captures
                                   (append vars rest-vars))

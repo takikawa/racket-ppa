@@ -195,11 +195,27 @@ static char *nl_langinfo(int which)
   for (i = 0; current_locale_name[i]; i++) {
     if (current_locale_name[i] == '.') {
       if (current_locale_name[i + 1]) {
-	int len, j = 0;
+	int len, j;
 	char *enc;
 	i++;
 	len = scheme_char_strlen(current_locale_name) - i;
-	enc = (char *)scheme_malloc_atomic(len + 1);
+	enc = (char *)scheme_malloc_atomic(2 + len + 1);
+
+        /* Check whether the encoding is numberic, in which case
+           we add "CP" in front to make it an encoding name */
+        for (j = i; current_locale_name[j]; j++) {
+          if (current_locale_name[j] > 127)
+            break;
+          if (!isdigit(current_locale_name[j]))
+            break;
+        }
+        if (!current_locale_name[j]) {
+          j = 2;
+          memcpy(enc, "CP", j);
+        } else {
+          j = 0;
+        }
+
 	while (current_locale_name[i]) {
 	  if (current_locale_name[i] > 127)
 	    return "UTF-8";
@@ -1064,7 +1080,7 @@ void scheme_get_substring_indices(const char *name, Scheme_Object *str,
   intptr_t start, finish;
 
   if (SCHEME_CHAPERONE_VECTORP(str))
-    len = SCHEME_VEC_SIZE(str);
+    len = SCHEME_CHAPERONE_VEC_SIZE(str);
   else if (SCHEME_CHAR_STRINGP(str))
     len = SCHEME_CHAR_STRTAG_VAL(str);
   else
@@ -2141,7 +2157,7 @@ int scheme_any_string_has_null(Scheme_Object *o)
 /* Environment Variables                                               */
 /***********************************************************************/
 
-#ifdef OS_X
+#if defined(OS_X) && !TARGET_OS_IPHONE
 # include <crt_externs.h>
 # define GET_ENVIRON_ARRAY *_NSGetEnviron()
 #endif
@@ -2351,12 +2367,12 @@ static Scheme_Object *sch_getenv(int argc, Scheme_Object *argv[])
 #ifndef DOS_FILE_SYSTEM
 static int sch_unix_putenv(const char *var, const char *val, const intptr_t varlen, const intptr_t vallen) {
   char *buffer;
-  intptr_t total_length;
+  intptr_t total_length, r;
   total_length = varlen + vallen + 2;
 
   if (val) {
 #ifdef MZ_PRECISE_GC
-    /* Can't put moveable string into array. */
+    /* Can't put movable string into environ array */
     buffer = malloc(total_length);
 #else
     buffer = (char *)scheme_malloc_atomic(total_length);
@@ -2369,27 +2385,38 @@ static int sch_unix_putenv(const char *var, const char *val, const intptr_t varl
     buffer = NULL;
   }
 
-#ifdef MZ_PRECISE_GC
-  {
-    /* Free old, if in table: */
-    char *oldbuffer;
-    oldbuffer = (char *)putenv_str_table_get(var);
-    if (oldbuffer)
-      free(oldbuffer);
-  }
-#endif
-
-  /* if precise the buffer needs to be remembered so it can be freed */
-  /* if not precise the buffer needs to be rooted so it doesn't get collected prematurely */
-  putenv_str_table_put_name(var, buffer);
-
   if (buffer)
-    return putenv(buffer);
+    r = putenv(buffer);
   else {
     /* on some platforms, unsetenv() returns void */
     unsetenv(var);
-    return 0;
+    r = 0;
   }
+
+  if (!r) {
+#ifdef MZ_PRECISE_GC
+    char *oldbuffer;
+
+    /* Will free old, if in table: */
+    oldbuffer = (char *)putenv_str_table_get(var);
+#endif
+
+    /* If precise GC, the buffer needs to be remembered so it can be freed;
+       otherwise, the buffer needs to be referenced so it doesn't get GCed */
+    putenv_str_table_put_name(var, buffer);
+
+#ifdef MZ_PRECISE_GC
+    if (oldbuffer)
+      free(oldbuffer);
+#endif
+  } else {
+#ifdef MZ_PRECISE_GC
+    if (buffer)
+      free(buffer);
+#endif
+  }
+
+  return r;
 }
 #endif
 
@@ -2823,23 +2850,22 @@ static Scheme_Object *ok_cmdline(int argc, Scheme_Object **argv)
 {
   if (SCHEME_CHAPERONE_VECTORP(argv[0])) {
     Scheme_Object *vec = argv[0], *vec2, *str;
-    int i, size = SCHEME_VEC_SIZE(vec);
-
+    int i, size = SCHEME_CHAPERONE_VEC_SIZE(vec);
 
     if (!size)
       return vec;
-
-    for (i = 0; i < size; i++) {
-      if (!SCHEME_CHAR_STRINGP(SCHEME_VEC_ELS(vec)[i]))
-	return NULL;
-    }
 
     /* Make sure vector and strings are immutable: */
     vec2 = scheme_make_vector(size, NULL);
     if (size)
       SCHEME_SET_VECTOR_IMMUTABLE(vec2);
     for (i = 0; i < size; i++) {
-      str = SCHEME_VEC_ELS(vec)[i];
+      if (SCHEME_VECTORP(vec))
+        str = SCHEME_VEC_ELS(vec)[i];
+      else
+        str = scheme_chaperone_vector_ref(vec, i);
+      if (!SCHEME_CHAR_STRINGP(str))
+        return NULL;
       if (!SCHEME_IMMUTABLE_CHAR_STRINGP(str)) {
 	str = scheme_make_sized_char_string(SCHEME_CHAR_STR_VAL(str), SCHEME_CHAR_STRLEN_VAL(str), 0);
 	SCHEME_SET_CHAR_STRING_IMMUTABLE(str);
@@ -4124,38 +4150,68 @@ static Scheme_Object *string_foldcase (int argc, Scheme_Object *argv[])
 #define MZ_JAMO_SYLLABLE_START           0xAC00
 #define MZ_JAMO_SYLLABLE_END             (MZ_JAMO_SYLLABLE_START + 11171)
 
-static mzchar get_composition(mzchar a, mzchar b)
+XFORM_NONGCING static mzchar get_composition(mzchar a, mzchar b)
 {
-  uintptr_t key = (a << 16) | b;
-  int pos = (COMPOSE_TABLE_SIZE >> 1), new_pos;
-  int below_len = pos;
-  int above_len = (COMPOSE_TABLE_SIZE - pos - 1);
-  
-  if (a > 0xFFFF) return 0;
+  if ((a > 0xFFFF) || (b > 0xFFFF)) {
+    /* Look in long-composes table. */
+    mzlonglong key = ((((mzlonglong)a & 0x1F0000) << 21)
+                      | (((mzlonglong)a & 0xFFFF) << 16)
+                      | (((mzlonglong)b & 0x1F0000) << 16)
+                      | ((mzlonglong)b & 0xFFFF));
+    int pos = (LONG_COMPOSE_TABLE_SIZE >> 1), new_pos;
+    int below_len = pos;
+    int above_len = (LONG_COMPOSE_TABLE_SIZE - pos - 1);
 
-  /* Binary search: */
-  while (key != utable_compose_pairs[pos]) {
-    if (key > utable_compose_pairs[pos]) {
-      if (!above_len)
-	return 0;
-      new_pos = pos + (above_len >> 1) + 1;
-      below_len = (new_pos - pos - 1);
-      above_len = (above_len - below_len - 1);
-      pos = new_pos;
-    } else if (key < utable_compose_pairs[pos]) {
-      if (!below_len)
-	return 0;
-      new_pos = pos - ((below_len >> 1) + 1);
-      above_len = (pos - new_pos - 1);
-      below_len = (below_len - above_len - 1);
-      pos = new_pos;
+    /* Binary search: */
+    while (key != utable_canon_compose_long_pairs[pos]) {
+      if (key > utable_canon_compose_long_pairs[pos]) {
+        if (!above_len)
+          return 0;
+        new_pos = pos + (above_len >> 1) + 1;
+        below_len = (new_pos - pos - 1);
+        above_len = (above_len - below_len - 1);
+        pos = new_pos;
+      } else if (key < utable_canon_compose_long_pairs[pos]) {
+        if (!below_len)
+          return 0;
+        new_pos = pos - ((below_len >> 1) + 1);
+        above_len = (pos - new_pos - 1);
+        below_len = (below_len - above_len - 1);
+        pos = new_pos;
+      }
     }
-  }
+    
+    return utable_canon_compose_long_result[pos];
+  } else {
+    uintptr_t key = (a << 16) | b;
+    int pos = (COMPOSE_TABLE_SIZE >> 1), new_pos;
+    int below_len = pos;
+    int above_len = (COMPOSE_TABLE_SIZE - pos - 1);
 
-  return utable_compose_result[pos];
+    /* Binary search: */
+    while (key != utable_compose_pairs[pos]) {
+      if (key > utable_compose_pairs[pos]) {
+        if (!above_len)
+          return 0;
+        new_pos = pos + (above_len >> 1) + 1;
+        below_len = (new_pos - pos - 1);
+        above_len = (above_len - below_len - 1);
+        pos = new_pos;
+      } else if (key < utable_compose_pairs[pos]) {
+        if (!below_len)
+          return 0;
+        new_pos = pos - ((below_len >> 1) + 1);
+        above_len = (pos - new_pos - 1);
+        below_len = (below_len - above_len - 1);
+        pos = new_pos;
+      }
+    }
+    
+    return utable_compose_result[pos];
+  }
 }
 
-mzchar get_canon_decomposition(mzchar key, mzchar *b)
+XFORM_NONGCING mzchar get_canon_decomposition(mzchar key, mzchar *b)
 {
   int pos = (DECOMPOSE_TABLE_SIZE >> 1), new_pos;
   int below_len = pos;
@@ -4193,7 +4249,7 @@ mzchar get_canon_decomposition(mzchar key, mzchar *b)
   }
 }
 
-int get_kompat_decomposition(mzchar key, unsigned short **chars)
+XFORM_NONGCING int get_kompat_decomposition(mzchar key, unsigned short **chars)
 {
   int pos = (KOMPAT_DECOMPOSE_TABLE_SIZE >> 1), new_pos;
   int below_len = pos;

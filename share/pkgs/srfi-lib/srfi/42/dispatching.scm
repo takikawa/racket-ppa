@@ -2,7 +2,7 @@
 ;;; DISPATCHING
 ;;;
 
-(module dispatching mzscheme
+(module dispatching "mzscheme2.rkt"
   (provide (all-defined))
   
   (require-for-syntax "expansion.scm" "generators.scm")
@@ -19,9 +19,9 @@
                     [g #f]
                     [empty (list #f)])
                 (set! g (d args))
-                (if (not (procedure? g))
-                    (error "unrecognized arguments in dispatching"
-                           args (d '()))))
+                (when (not (procedure? g))
+                  (error "unrecognized arguments in dispatching"
+                         args (d '()))))
               ((var (g empty)))
               (not (eq? var empty))
               (let ())
@@ -148,8 +148,8 @@
     :-dispatch )
   
   (define (:-dispatch-set! dispatch)
-    (if (not (procedure? dispatch))
-        (error "not a procedure" dispatch) )
+    (when (not (procedure? dispatch))
+      (error "not a procedure" dispatch) )
     (set! :-dispatch dispatch) )
   
   (define-generator (: form-stx)

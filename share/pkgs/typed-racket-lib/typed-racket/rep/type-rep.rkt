@@ -32,6 +32,7 @@
          type-equal?
          remove-dups
          sub-t sub-f sub-o sub-pe
+         Name/simple: Name/struct:
          (rename-out [Class:* Class:]
                      [Class* make-Class]
                      [Row* make-Row]
@@ -121,12 +122,10 @@
 ;; A type name, potentially recursive or mutually recursive or pointing
 ;; to a type for a struct type
 ;; id is the name stored in the environment
-;; deps are the other aliases this depends on, if any
-;; args are the type parameters for this type (or #f if none)
+;; args is the number of arguments expected by this Name type
 ;; struct? indicates if this maps to a struct type
 (def-type Name ([id identifier?]
-                [deps (listof identifier?)]
-                [args (or/c #f (listof identifier?))]
+                [args exact-nonnegative-integer?]
                 [struct? boolean?])
   [#:intern (hash-id id)] [#:frees #f] [#:fold-rhs #:base])
 
@@ -137,7 +136,7 @@
   [#:intern (cons (Rep-seq rator) (map Rep-seq rands))]
   [#:frees (λ (f)
               (match rator 
-                ((Name: n _ _ _)
+                ((Name: n _ _)
                  (instantiate-frees n (map f rands)))
                 (else (f (resolve-app rator rands stx)))))]
 
@@ -203,6 +202,10 @@
 ;; elem is a Type
 (def-type Ephemeron ([elem Type/c])
   [#:key 'ephemeron])
+
+;; elem is a Type
+(def-type Weak-Box ([elem Type/c])
+  [#:key 'weak-box])
 
 ;; elem is a Type
 (def-type CustodianBox ([elem Type/c])
@@ -399,12 +402,22 @@
   ;; This should eventually be based on understanding of struct properties.
   [#:key '(struct procedure)])
 
+;; Represents prefab structs
+;; key  : prefab key encoding mutability, auto-fields, etc.
+;; flds : the types of all of the prefab fields
+(def-type Prefab ([key prefab-key?]
+                  [flds (listof Type/c)])
+  [#:frees (λ (f) (combine-frees (map f flds)))]
+  [#:fold-rhs (*Prefab key (map type-rec-id flds))]
+  [#:key 'prefab])
+
 ;; A structure type descriptor
 (def-type StructTypeTop () [#:fold-rhs #:base] [#:key 'struct-type])
-(def-type StructType ([s (or/c F? B? Struct?)]) [#:key 'struct-type])
+(def-type StructType ([s (or/c F? B? Struct? Prefab?)]) [#:key 'struct-type])
 
 ;; the supertype of all of these values
 (def-type BoxTop () [#:fold-rhs #:base] [#:key 'box])
+(def-type Weak-BoxTop () [#:fold-rhs #:base] [#:key 'weak-box])
 (def-type ChannelTop () [#:fold-rhs #:base] [#:key 'channel])
 (def-type Async-ChannelTop () [#:fold-rhs #:base] [#:key 'async-channel])
 (def-type VectorTop () [#:fold-rhs #:base] [#:key 'vector])
@@ -486,8 +499,8 @@
 ;; invariant: all clauses are sorted by the key name
 (def-type Row ([inits (listof (list/c symbol? Type/c boolean?))]
                [fields (listof (list/c symbol? Type/c))]
-               [methods (listof (list/c symbol? Function?))]
-               [augments (listof (list/c symbol? Function?))]
+               [methods (listof (list/c symbol? Type/c))]
+               [augments (listof (list/c symbol? Type/c))]
                [init-rest (or/c Type/c #f)])
   #:no-provide
   [#:frees (λ (f) (combine-frees
@@ -969,8 +982,8 @@
   (-> (or/c F? B? Row? #f)
       (listof (list/c symbol? Type/c boolean?))
       (listof (list/c symbol? Type/c))
-      (listof (list/c symbol? Function?))
-      (listof (list/c symbol? Function?))
+      (listof (list/c symbol? Type/c))
+      (listof (list/c symbol? Type/c))
       (or/c Type/c #f)
       Class?)
   (*Class row-var (Row* inits fields methods augments init-rest)))
@@ -1026,3 +1039,15 @@
                  (list row-pat inits-pat fields-pat
                        methods-pat augments-pat init-rest-pat)))])))
 
+;; alternative to Name: that only matches the name part
+(define-match-expander Name/simple:
+  (λ (stx)
+    (syntax-parse stx
+      [(_ name-pat) #'(Name: name-pat _ _)])))
+
+;; alternative to Name: that only matches struct names
+(define-match-expander Name/struct:
+  (λ (stx)
+    (syntax-parse stx
+      [(_) #'(Name: _ _ #t)]
+      [(_ name-pat) #'(Name: name-pat _ #t)])))

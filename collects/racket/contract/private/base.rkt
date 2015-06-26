@@ -13,7 +13,9 @@
          "blame.rkt"
          "prop.rkt"
          "arrow.rkt"
-         "misc.rkt")
+         "misc.rkt"
+         "generate.rkt"
+         )
 
 (define-for-syntax lifted-ccrs (make-hasheq))
 
@@ -62,35 +64,12 @@
                   ;; name, we'll just put something stupid here 
                   ;; instead of changing the library around.
                   (or pos "false")
-                                  
+                  
                   (if cvfp #f neg)
                   #t))
-    (define new-val
-      (cond
-        [cvfp (((cvfp blame) v) neg)]
-        [else (((contract-projection c) blame) v)]))
     (cond
-      [(and (not (parameter? new-val))  ;; when PR 11221 is fixed, remove this line
-            (procedure? new-val)
-            (object-name v)
-            (not (eq? (object-name v) (object-name new-val))))
-       (define vs-name (object-name v))
-       (cond
-         [(contracted-function? new-val)
-          ;; when PR11222 is fixed, change these things:
-          ;;   - eliminate this cond case
-          ;;   - remove the require of arrow.rkt above
-          ;;   - change (struct-out contracted-function) 
-          ;;     in arrow.rkt to make-contracted-function
-          (make-contracted-function 
-           (procedure-rename (contracted-function-proc new-val) vs-name)
-           (contracted-function-ctc new-val)
-           (if cvfp
-               (blame-add-missing-party blame neg)
-               blame))]
-         [else
-          (procedure-rename new-val vs-name)])]
-      [else new-val])))
+      [cvfp (((cvfp blame) v) neg)]
+      [else (((contract-projection c) blame) v)])))
 
 (define-syntax (invariant-assertion stx)
   (syntax-case stx ()
@@ -182,7 +161,15 @@
   (contract-first-order-passes? (force-recursive-contract ctc)
                                 val))
 
-(struct recursive-contract ([name #:mutable] thunk [ctc #:mutable] list-contract?)
+(define (recursive-contract-generate ctc)
+  (λ (fuel)
+    (cond
+      [(zero? fuel) #f]
+      [else
+       (force-recursive-contract ctc)
+       (contract-random-generate/choose (recursive-contract-ctc ctc) (- fuel 1))])))
+
+(struct recursive-contract ([name #:mutable] [thunk #:mutable] [ctc #:mutable] list-contract?)
   #:property prop:recursive-contract (λ (this)
                                        (force-recursive-contract this)
                                        (recursive-contract-ctc this)))
@@ -195,6 +182,7 @@
    #:first-order recursive-contract-first-order
    #:projection recursive-contract-projection
    #:stronger recursive-contract-stronger
+   #:generate recursive-contract-generate
    #:list-contract? recursive-contract-list-contract?))
 (struct chaperone-recursive-contract recursive-contract ()
   #:property prop:custom-write custom-write-property-proc
@@ -204,6 +192,7 @@
    #:first-order recursive-contract-first-order
    #:projection recursive-contract-projection
    #:stronger recursive-contract-stronger
+   #:generate recursive-contract-generate
    #:list-contract? recursive-contract-list-contract?))
 (struct impersonator-recursive-contract recursive-contract ()
   #:property prop:custom-write custom-write-property-proc
@@ -213,4 +202,5 @@
    #:first-order recursive-contract-first-order
    #:projection recursive-contract-projection
    #:stronger recursive-contract-stronger
+   #:generate recursive-contract-generate
    #:list-contract? recursive-contract-list-contract?))

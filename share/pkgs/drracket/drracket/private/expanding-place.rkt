@@ -5,7 +5,8 @@
          "eval-helpers-and-pref-init.rkt"
          compiler/cm
          framework/preferences
-         syntax/readerr)
+         syntax/readerr
+         wxme)
 (provide start)
 
 (struct exn-info (str src-vecs exn-stack missing-mods) #:prefab)
@@ -166,7 +167,12 @@
            (current-directory init-dir)
            (current-directory-for-user init-dir))
          (current-load-relative-directory #f)
-         (define sp (open-input-string program-as-string))
+         (define sp
+           (cond
+             [(bytes? program-as-string)
+              (wxme-port->port (open-input-bytes program-as-string))]
+             [else
+              (open-input-string program-as-string)]))
          (port-count-lines! sp)
          (ep-log-info "expanding-place.rkt: 05 installing security guard")
          (install-security-guard) ;; must come after the call to set-module-language-parameters
@@ -223,10 +229,11 @@
            (for/list ([handler (in-list handlers)]
                       #:unless (handler-monitor-pc handler))
              (define proc-res
-               ((handler-proc handler) expanded
-                                       path
-                                       the-source
-                                       orig-cust))
+               (with-handlers ([exn:fail? values])
+                 ((handler-proc handler) expanded
+                                         path
+                                         the-source
+                                         orig-cust)))
              (list (handler-key handler) proc-res)))
          (ep-log-info "expanding-place.rkt: 11 handlers finished")
          

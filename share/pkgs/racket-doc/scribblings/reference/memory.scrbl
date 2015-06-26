@@ -1,5 +1,6 @@
-#lang scribble/doc
-@(require "mz.rkt")
+#lang scribble/manual
+@(require "mz.rkt"
+          scribble/bnf)
 
 @title[#:tag "memory" #:style 'toc]{Memory Management}
 
@@ -155,7 +156,7 @@ executors as they become ready in another thread.
              (will-register an-executor a-box-to-track executor-proc)
              (eval:alts (collect-garbage) (void))
              (set! a-box-to-track #f)
-             (eval:alts (collect-garbage) (executor-proc))]
+             (eval:alts (collect-garbage) (executor-proc 'random-junk))]
 
 
 @defproc[(make-will-executor) will-executor?]{
@@ -201,7 +202,7 @@ Set the @as-index{@envvar{PLTDISABLEGC}} environment variable (to any
 value) before Racket starts to disable @tech{garbage collection}.
 
 In Racket 3m (the main variant of Racket), each garbage collection
-logs a message (see @secref["logging"]) at the @racket['debug] level to a logger named @racket['GC].
+logs a message (see @secref["logging"]) at the @racket['debug] level with topic @racket['GC].
 The data portion of the message is an instance of a @indexed-racket[gc-info]
 @tech{prefab} structure type with 10 fields as follows, but future
 versions of Racket may use a @racket[gc-info] @tech{prefab} structure
@@ -215,28 +216,74 @@ with additional fields:
   #:prefab)
 ]
 
-The @racket[major?] field indicates whether the collection was a
-``major'' collection that inspects all memory or a ``minor''
-collection that mostly inspects just recent allocations. The
-@racket[pre-amount] field reports place-local memory use (i.e., not
-counting the memory use of child places) in bytes at the time that the
-@tech{garbage collection} started. The @racket[pre-admin-amount] is a
-larger number that includes memory use for the garbage collector's
-overhead (such as space on memory pages that is not yet used). The
-@racket[code-amount] field reports additional memory use for generated
-native code (which is the same just before and after a garbage
-collection, since it is released via finalization). The
-@racket[post-amount] and @racket[post-admin-amount] fields correspond
-to @racket[pre-amount] and @racket[pre-admin-amount], but after garbage
-collection. The @racket[start-process-time] and
-@racket[end-process-time] fields report processor time (in the sense
-of @racket[current-process-milliseconds]) at the start and end of
-garbage collection; the difference is the processor time consumed by
-collection. The @racket[start-time] and @racket[end-time] fields
-report real time (in the sense of
-@racket[current-inexact-milliseconds]) at the start and end of garbage
-collection; the difference is the real time consumed by garbage
-collection.
+@itemlist[
+
+ @item{The @racket[major?] field indicates whether the collection was
+       a ``major'' collection that inspects all memory or a ``minor''
+       collection that mostly inspects just recent allocations.}
+
+ @item{The @racket[pre-amount] field reports place-local memory use
+      (i.e., not counting the memory use of child places) in bytes at
+      the time that the @tech{garbage collection} started.}
+
+ @item{The @racket[pre-admin-amount] is a larger number that includes
+       memory use for the garbage collector's overhead, such as space
+       on memory pages that are mapped but not currently used.}
+
+ @item{The @racket[code-amount] field reports additional memory use
+       for generated native code (which is the same just before and
+       after a garbage collection, since it is released via
+       finalization).}
+
+ @item{The @racket[post-amount] and @racket[post-admin-amount] fields
+       correspond to @racket[pre-amount] and
+       @racket[pre-admin-amount], but after garbage collection. In
+       typical configurations, the difference between
+       @racket[post-amount] and @racket[pre-amount] contributes to
+       @racket[post-admin-amount], since reclaimed pages tend to stay
+       in reserve with the expectation that they'll be needed again
+       (but the pages are released if multiple collections pass
+       without need for the pages).}
+
+ @item{The @racket[start-process-time] and @racket[end-process-time]
+       fields report processor time (in the sense of
+       @racket[current-process-milliseconds]) at the start and end of
+       garbage collection. The difference between the times is the
+       processor time consumed by collection.}
+
+ @item{The @racket[start-time] and @racket[end-time] fields report
+       real time (in the sense of
+       @racket[current-inexact-milliseconds]) at the start and end of
+       garbage collection. The difference between the times is the
+       real time consumed by garbage collection.}
+
+]
+
+The format of the logged message's text is subject to change.
+Currently, after a prefix that indicates the @tech{place} and
+collection mode, the text has the format
+
+@nested[#:style 'inset]{
+ @tt{@nonterm{used}(@nonterm{admin})[@nonterm{code}]; @;
+     free @nonterm{reclaimed}(@nonterm{adjust}) @nonterm{elapsed} @"@" @nonterm{timestamp}}
+
+@tabular[
+  #:sep (hspace 1)
+  (list (list @nonterm{used}
+              @elem{Collectable memory in use just prior to garbage collection})
+        (list @nonterm{admin}
+              @elem{Additional memory used as to manage collectable memory})
+        (list @nonterm{code}
+              @elem{Additional memory used for generated machine code})
+        (list @nonterm{reclaimed}
+              @elem{Collectable memory reclaimed by garbage collection})
+        (list @nonterm{adjust}
+              @elem{Negation of change to administrative memory minus @nonterm{reclaimed}})
+        (list @nonterm{elapsed}
+              @elem{Processor time used to perform garbage collection})
+        (list @nonterm{timestamp}
+              @elem{Processor time since startup of garbage collection's start}))
+]}
 
 
 @defproc[(collect-garbage) void?]{
@@ -265,7 +312,9 @@ any custodians.
 
 When Racket is compiled without support for memory accounting, the
 estimate is the same (i.e., all memory) for any individual custodian;
-see also @racket[custodian-memory-accounting-available?].}
+see also @racket[custodian-memory-accounting-available?].
+
+See also @racket[vector-set-performance-stats!].}
 
 @defproc[(dump-memory-stats [v any/c] ...) any]{
 

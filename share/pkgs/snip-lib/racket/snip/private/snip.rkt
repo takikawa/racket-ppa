@@ -145,7 +145,7 @@
   (def/public (get-admin) s-admin)
 
   (def/public (set-admin [(make-or-false snip-admin%) a])
-    (unless (and (not (eq? a s-admin))
+    (unless (and (not (object-or-false=? a s-admin))
                  (has-flag? s-flags OWNED)
                  (or a 
                      (not (has-flag? s-flags CAN-DISOWN))))
@@ -211,7 +211,7 @@
     #f)
 
   (def/public (match? [snip% other])
-    (and (eq? s-snipclass (snip->snipclass other))
+    (and (object-or-false=? s-snipclass (snip->snipclass other))
          (= s-count (get-field s-count other))))
   
   (def/public (own-caret [any? own?])
@@ -326,7 +326,7 @@
   
   (def/public (equal-to? [snip% that] [any? recur]) 
     (send that other-equal-to? this recur))
-  (def/public (other-equal-to? [snip% that] [any? recur]) (eq? this that))
+  (def/public (other-equal-to? [snip% that] [any? recur]) (object=? this that))
   (define/public (equal-hash-code-of recur) (eq-hash-code this))
   (define/public (equal-secondary-hash-code-of recur) 1))
  
@@ -529,7 +529,7 @@
 
           (let ([s (string-snip-buffer snip)])
             (unless ((string-length s) . >= . position)
-              (set-string-snip-buffer! s (make-string position))))
+              (set-string-snip-buffer! snip (make-string position))))
           
           (string-copy! (string-snip-buffer snip)
                         0
@@ -1265,7 +1265,7 @@
     (* i IMAGE-PIXELS-PER-SCROLL))
 
   (def/override (set-admin [(make-or-false snip-admin%) a])
-    (when (not (eq? a s-admin))
+    (when (not (object-or-false=? a s-admin))
       (super set-admin a))
     (when (and s-admin is-relative-path? filename)
       (load-file filename filetype #t))))

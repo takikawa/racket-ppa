@@ -11,11 +11,10 @@
 ;; a conservative extension of the earlier version (1.0.17?), and I
 ;; think you'll get graceful failures if the version is wrong.
 
-(define-runtime-path mac-ffi-path "./lib/libsndfile")
 (define libsndfile
   (match (system-type)
     ['unix (ffi-lib "libsndfile"   '("1.0.21" "1.0.20" ""))]
-    ['macosx (ffi-lib mac-ffi-path '("1.0.21" "1.0.20" ""))]
+    ['macosx (ffi-lib "libsndfile" '("1.0.21" "1.0.20" ""))]
     ['windows (error 'libsndfile "libsndfile not supported on windows.")]))
 
 ;; ==================== Types etc ====================
@@ -51,7 +50,7 @@
               sf-ambisonic-b-format = #x41)))
 
 (define str-types '(title copyright software artist comment date album license))
-(define _sf-str-type (_enum (cons "dummy" str-types))) ; begins from 1
+(define _sf-str-type (_enum (cons 'dummy str-types))) ; begins from 1
 (define _sf-error (_enum '(no-error unrecognised-format system malformed-file unsupported-encoding)))
 
 (define _sf-format

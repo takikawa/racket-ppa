@@ -19,19 +19,26 @@
          Color%
          Color-Database<%>
          DC<%>
+         DC-Path%
          Font%
          Font-List%
+         Font-Name-Directory<%>
          GL-Config%
          GL-Context<%>
          Linear-Gradient%
+         PDF-DC%
          Pen%
          Pen-List%
          Pen-Style
          Pen-Cap-Style
          Pen-Join-Style
          Point%
+         Post-Script-DC%
+         PS-Setup%
          Radial-Gradient%
-         Region%)
+         Record-DC%
+         Region%
+         SVG-DC%)
 
 (define-type LoadFileKind
  (U 'unknown 'unknown/mask 'unknown/alpha
@@ -58,15 +65,10 @@
                        Real)
                  (List Bytes Integer Integer)))
    [get-argb-pixels
-    (case-> (Real Real
-                  Exact-Nonnegative-Integer Exact-Nonnegative-Integer
-                  Bytes -> Void)
-            (Real Real
-                  Exact-Nonnegative-Integer Exact-Nonnegative-Integer
-                  Bytes Any -> Void)
-            (Real Real
-                  Exact-Nonnegative-Integer Exact-Nonnegative-Integer
-                  Bytes Any Any -> Void))]
+    (->* [Real Real Exact-Nonnegative-Integer Exact-Nonnegative-Integer Bytes]
+         [Any Any #:unscaled? Any]
+         Void)]
+   [get-backing-scale (-> Nonnegative-Real)]
    [get-depth (-> Exact-Nonnegative-Integer)]
    [get-handle (-> Any)]
    [get-height (-> Exact-Positive-Integer)]
@@ -82,18 +84,12 @@
    [make-dc (-> (Instance Bitmap-DC%))]
    [ok? (-> Boolean)]
    [save-file (case->
-               ((U Path-String Output-Port) (U 'png 'jpeg 'xbm 'xpm 'bmp) -> Boolean)
-               ((U Path-String Output-Port) (U 'png 'jpeg 'xbm 'xpm 'bmp) Natural -> Boolean))]
+               ((U Path-String Output-Port) (U 'png 'jpeg 'xbm 'xpm 'bmp) [#:unscaled? Any] -> Boolean)
+               ((U Path-String Output-Port) (U 'png 'jpeg 'xbm 'xpm 'bmp) Natural [#:unscaled? Any] -> Boolean))]
    [set-argb-pixels
-    (case-> (Real Real
-                  Exact-Nonnegative-Integer Exact-Nonnegative-Integer
-                  Bytes -> Void)
-            (Real Real
-                  Exact-Nonnegative-Integer Exact-Nonnegative-Integer
-                  Bytes Any -> Void)
-            (Real Real
-                  Exact-Nonnegative-Integer Exact-Nonnegative-Integer
-                  Bytes Any Any -> Void))]
+    (->* [Real Real Exact-Nonnegative-Integer Exact-Nonnegative-Integer Bytes]
+         [Any Any #:unscaled? Any]
+         Void)]
    [set-loaded-mask ((Instance Bitmap%) -> Void)]))
 
 (define-type Color%
@@ -317,6 +313,7 @@
          [resume-flush (-> Void)]
          [rotate (Real -> Void)]
          [scale (Real Real -> Void)]
+         [set-alignment-scale (-> Real Void)]
          [set-alpha (Nonnegative-Real -> Void)]
          [set-background ((U (Instance Color%) String) -> Void)]
          [set-brush (case->
@@ -423,6 +420,32 @@
          [set-x (Real -> Void)]
          [set-y (Real -> Void)]))
 
+(define-type PS-Setup%
+  (Class (init)
+         [copy-from (-> (Instance PS-Setup%) Any Void)]
+         [get-command (-> String)]
+         [get-editor-margin (-> (Boxof Nonnegative-Real) (Boxof Nonnegative-Real) Void)]
+         [get-file (-> (U Path-String #f))]
+         [get-level-2 (-> Boolean)]
+         [get-margin (-> (Boxof Nonnegative-Real) (Boxof Nonnegative-Real) Void)]
+         [get-mode (-> (U 'preview 'file 'printer))]
+         [get-orientation (-> (U 'portrait 'landscape))]
+         [get-paper-name (-> String)]
+         [get-preview-command (-> String)]
+         [get-scaling (-> (Boxof Nonnegative-Real) (Boxof Nonnegative-Real) Void)]
+         [get-translation (-> (Boxof Nonnegative-Real) (Boxof Nonnegative-Real) Void)]
+         [set-command (-> String Void)]
+         [set-editor-margin (-> Natural Natural Void)]
+         [set-file (-> (U Path-String #f) Void)]
+         [set-level-2 (-> Any Void)]
+         [set-margin (-> Nonnegative-Real Nonnegative-Real Void)]
+         [set-mode (-> (U 'preview 'file 'printer) Void)]
+         [set-orientation (-> (U 'portrait 'landscape) Void)]
+         [set-paper-name (-> String Void)]
+         [set-preview-command (-> String Void)]
+         [set-scaling (-> Nonnegative-Real Nonnegative-Real Void)]
+         [set-translation (-> Real Real Void)]))
+
 (define-type GL-Config%
   (Class [get-accum-size (-> Natural)]
          [get-depth-size (-> Natural)]
@@ -456,17 +479,56 @@
   (Class #:implements DC<%>
          (init [bitmap (Option (Instance Bitmap%))])
          [get-argb-pixels
-          (case-> (Real Real Integer Integer Bytes -> Void)
-                  (Real Real Integer Integer Bytes Any -> Void)
-                  (Real Real Integer Integer Bytes Any Any -> Void))]
+          (->* [Real Real Exact-Nonnegative-Integer Exact-Nonnegative-Integer Bytes]
+               [Any Any]
+               Void)]
          [get-bitmap (-> (Option (Instance Bitmap%)))]
          [get-pixel (Real Real (Instance Color%) -> Boolean)]
          [set-argb-pixels
-          (case-> (Real Real Integer Integer Bytes -> Void)
-                  (Real Real Integer Integer Bytes Any -> Void)
-                  (Real Real Integer Integer Bytes Any Any -> Void))]
+          (->* [Real Real Exact-Nonnegative-Integer Exact-Nonnegative-Integer Bytes]
+               [Any Any]
+               Void)]
          [set-bitmap ((Option (Instance Bitmap%)) -> Void)]
          [set-pixel (Real Real (Instance Color%) -> Boolean)]))
+
+(define-type Record-DC%
+  (Class #:implements DC<%>
+         (init [width Real #:optional]
+               [height Real #:optional])
+         [get-recorded-datum (-> Any)]
+         [get-recorded-procedure (-> (-> (Instance DC<%>) Void))]))
+
+(define-type PDF-DC%
+  (Class #:implements DC<%>
+         (init [interactive Any #:optional]
+               [parent (Option (U (Instance Frame%) (Instance Dialog%)))
+                       #:optional]
+               [use-paper-bbox Any #:optional]
+               [as-eps Any #:optional]
+               [width (Option Real) #:optional]
+               [height (Option Real) #:optional]
+               [output (U #f Path-String Output-Port) #:optional])))
+
+(define-type Post-Script-DC%
+  (Class #:implements DC<%>
+         (init [interactive Any #:optional]
+               [parent (Option (U (Instance Frame%) (Instance Dialog%)))
+                       #:optional]
+               [use-paper-bbox Any #:optional]
+               [as-eps Any #:optional]
+               [width (Option Real) #:optional]
+               [height (Option Real) #:optional]
+               [output (U #f Path-String Output-Port) #:optional])))
+
+(define-type SVG-DC%
+  (Class #:implements DC<%>
+         (init [width Real]
+               [height Real]
+               [output (U Path-String Output-Port)]
+               [exists (U 'error 'append 'update 'can-update
+                          'replace 'truncate
+                          'must-truncate 'truncate/replace)
+                       #:optional])))
 
 (define-type Font-List%
   (Class
@@ -492,7 +554,28 @@
 (define-type Font-Hinting (U 'aligned 'unaligned))
 
 (define-type Font%
-  (Class [get-face (-> (Option String))]
+  (Class (init-rest (U Null
+                       (List Real Font-Family)
+                       (List Real Font-Family Font-Style)
+                       (List Real Font-Family Font-Style Font-Weight)
+                       (List Real Font-Family Font-Style Font-Weight Any)
+                       (List Real Font-Family Font-Style Font-Weight Any
+                             Font-Smoothing)
+                       (List Real Font-Family Font-Style Font-Weight Any
+                             Font-Smoothing Any)
+                       (List Real Font-Family Font-Style Font-Weight Any
+                             Font-Smoothing Any Font-Hinting)
+                       (List Real String Font-Family)
+                       (List Real String Font-Family Font-Style)
+                       (List Real String Font-Family Font-Style Font-Weight)
+                       (List Real String Font-Family Font-Style Font-Weight Any)
+                       (List Real String Font-Family Font-Style Font-Weight Any
+                             Font-Smoothing)
+                       (List Real String Font-Family Font-Style Font-Weight Any
+                             Font-Smoothing Any)
+                       (List Real String Font-Family Font-Style Font-Weight Any
+                             Font-Smoothing Any Font-Hinting)))
+         [get-face (-> (Option String))]
          [get-family (-> Font-Family)]
          [get-hinting (-> Font-Hinting)]
          [get-point-size (-> Positive-Integer)]
@@ -504,6 +587,21 @@
          [screen-glyph-exists?
           (case-> (Char -> Boolean)
                   (Char Any -> Boolean))]))
+
+(define-type Font-Name-Directory<%>
+  (Class [find-family-default-font-id (-> Font-Family Integer)]
+         [find-or-create-font-id (-> String Font-Family Integer)]
+         [get-face-name (-> Integer (Option String))]
+         [get-family (-> Integer Font-Family)]
+         [get-font-id (-> String Font-Family Integer)]
+         [get-post-script-name
+          (-> Integer Font-Weight Font-Style (Option String))]
+         [get-screen-name
+          (-> Integer Font-Weight Font-Style (Option String))]
+         [set-post-script-name
+          (-> Integer Font-Weight Font-Style String Void)]
+         [set-screen-name
+          (-> Integer Font-Weight Font-Style String Void)]))
 
 ;; racket/gui
 
@@ -565,7 +663,10 @@
 (define-type Area<%>
   (Class [get-graphical-min-size (-> (Values Natural Natural))]
          [get-parent (-> (Option (Instance Area-Container<%>)))]
-         [get-top-level-window (-> (U (Instance Frame%) (Instance Dialog%)))]
+         ;; The documentation says this returns a frame% or dialog%,
+         ;; but giving it that type doesn't work for contract generation
+         ;; because it creates an `or/c` of two class contracts.
+         [get-top-level-window (-> (Instance Top-Level-Window<%>))]
          [min-width (case-> (-> Integer)
                             (Integer -> Void))]
          [min-height (case-> (-> Integer)
@@ -600,6 +701,7 @@
          [get-x (-> Integer)]
          [get-y (-> Integer)]
          [has-focus? (-> Boolean)]
+         [is-enabled? (-> Boolean)]
          [is-shown? (-> Boolean)]
          [on-drop-file (Path -> Void)]
          [on-focus (Any -> Void)]
@@ -652,15 +754,28 @@
 
 (define-type Top-Level-Window<%>
   (Class #:implements Area-Container-Window<%>
+         [can-close? (-> Boolean)]
          (augment [can-close? (-> Boolean)])
          [can-exit? (-> Boolean)]
+         [center (-> (U 'horizontal 'vertical 'both) Void)]
+         [get-edit-target-object
+          (-> (Option (U (Instance Window<%>) (Instance Editor<%>))))]
+         [get-edit-target-window (-> (Option (Instance Window<%>)))]
          [get-eventspace (-> Any)] ; FIXME: Eventspace type
+         [get-focus-object
+          (-> (Option (U (Instance Window<%>) (Instance Editor<%>))))]
+         [get-focus-window (-> (Option (Instance Window<%>)))]
          [move (Integer Integer -> Void)]
          [on-activate (Any -> Void)]
+         [on-close (-> Void)]
          (augment [on-close (-> Void)])
          [on-exit (-> Void)]
          [on-message (Any -> Void)]
+         [display-changed (-> Any)]
          (augment [display-changed (-> Any)])
+         [on-traverse-char (-> (Instance Key-Event%) Boolean)]
+         [on-system-menu-char (-> (Instance Key-Event%) Boolean)]
+         [resize (-> Integer Integer Void)]
          [set-icon
           (case->
            ((Instance Bitmap%) -> Void)
@@ -760,7 +875,8 @@
                [y (Option Integer) #:optional]
                [style (Listof (U 'no-resize-border 'no-caption
                                  'no-system-menu 'hide-menu-bar
-                                 'toolbar-button 'float 'metal))
+                                 'toolbar-button 'float 'metal
+                                 'fullscreen-button 'fullscreen-aux))
                       #:optional]
                [enabled Any #:optional]
                [border Natural #:optional]
@@ -773,9 +889,11 @@
                [stretchable-width Any #:optional]
                [stretchable-height Any #:optional])
          [create-status-line (-> Void)]
+         [fullscreen (-> Any Void)]
          [get-menu-bar (-> (Option (Instance Menu-Bar%)))]
          [has-status-line? (-> Boolean)]
          [iconize (Any -> Void)]
+         [is-fullscreened? (-> Boolean)]
          [is-iconized? (-> Boolean)]
          [is-maximized? (-> Boolean)]
          [maximize (Any -> Void)]
@@ -959,8 +1077,8 @@
 (define-type Choice%
   (Class #:implements List-Control<%>
          (init [label String]
-               [parent (Instance Area-Container<%>)] ; FIXME
                [choices (Listof String)]
+               [parent (Instance Area-Container<%>)] ; FIXME
                [callback ((Instance Choice%)
                           (Instance Control-Event%) -> Any)
                          #:optional]
@@ -1487,9 +1605,9 @@
 
 (define-type Message%
   (Class #:implements Control<%>
-         (init [parent (Instance Area-Container<%>)] ; FIXME
-               [label (U String (Instance Bitmap%)
+         (init [label (U String (Instance Bitmap%)
                          (U 'app 'caution 'stop))]
+               [parent (Instance Area-Container<%>)] ; FIXME
                [style (Listof 'deleted) #:optional]
                [font (Instance Font%) #:optional]
                [enabled Any #:optional]
@@ -2118,8 +2236,6 @@
                -> Void)]
          [on-save-file (Path Load/Save-Format -> Void)]
          [on-snip-modified ((Instance Snip%) Any -> Void)]
-         [on-goodbye-event ((Instance DC<%>) Real Real Real Real
-                            (Instance Mouse-Event%) -> Void)]
          [own-caret (Any -> Void)]
          [paste (case-> (-> Void) (Integer -> Void))]
          [paste-x-selection (case-> (-> Void) (Integer -> Void))]
@@ -2735,6 +2851,8 @@
          [on-event
           ((Instance DC<%>) Real Real Real Real
            (Instance Mouse-Event%) -> Void)]
+         [on-goodbye-event ((Instance DC<%>) Real Real Real Real
+                            (Instance Mouse-Event%) -> Void)]
          [own-caret (Any -> Void)]
          [partial-offset ((Instance DC<%>) Real Real Natural -> Real)]
          [previous (-> (Option (Instance Snip%)))]

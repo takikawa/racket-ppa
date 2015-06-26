@@ -27,7 +27,7 @@
          "local-member-names.rkt"
          "eval-helpers-and-pref-init.rkt"
          "parse-logger-args.rkt"
-         "get-module-path.rkt"
+         drracket/get-module-path
          "named-undefined.rkt"
          (prefix-in drracket:arrow: "../arrow.rkt")
          (prefix-in icons: images/compile-time)
@@ -671,6 +671,10 @@
                (let ([f (get-top-level-window)])
                  (when (and f
                             (is-a? f drracket:unit:frame<%>))
+                   (send (send f get-interactions-text) set-port-unsaved-name
+                         (if fn
+                             "interactions from an unsaved editor"
+                             (format "interactions from ~a" fn)))
                    (send f update-save-message)))]))
           
           (field
@@ -2292,7 +2296,7 @@
                      (andmap eq? tab-label-cache-valid current-paths))
           (set! tab-label-cache-valid current-paths)
           (set! tab-label-cache (make-hasheq)))
-        (define nfn (normalize-path/exists fn))
+        (define nfn (simple-form-path fn))
         (hash-ref! tab-label-cache 
                    fn
                    (lambda () 
@@ -2302,14 +2306,9 @@
                            (filter values
                                    (for/list ([other-tab (in-list tabs)])
                                      (define fn (send (send other-tab get-defs) get-filename))
-                                     (and fn (normalize-path/exists fn)))))
+                                     (and fn (simple-form-path fn)))))
                           (let-values ([(base name dir?) (split-path nfn)])
                             name))))))
-
-      (define/private (normalize-path/exists fn)
-        (if (file-exists? fn)
-            (normalize-path fn)
-            fn))
 
       (define/private (add-modified-flag text string)
         (if (send text is-modified?)

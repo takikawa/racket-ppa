@@ -1,7 +1,5 @@
 #lang racket/base
-
 (require "maze.rkt" 
-         (except-in "godel.rkt" unit/s)
          "../show-scribbling.rkt"
          racket/gui/base
          racket/class
@@ -52,13 +50,14 @@
               computer2
               player-icon)
   #:transparent)
-(define maze-count (spec-k (maze/s maze-w maze-h)))
+
+(define the-maze-count (maze-count maze-w maze-h))
 
 (define (state-next-edges the-state)
   (build-walls
-   (decode (maze/s maze-w maze-h)
-           (modulo (+ (state-maze-index the-state) 1)
-                   maze-count))
+   (decode-maze maze-w maze-h
+                (modulo (+ (state-maze-index the-state) 1)
+                        the-maze-count))
    maze-w
    maze-h))
 
@@ -80,6 +79,7 @@
 (define (current-state) (car the-states))
 (define (set-the-states! new-states)
   (set! the-states new-states)
+  (send game-number-canvas refresh)
   (send game-canvas refresh))
 
 (define (next-state! state)
@@ -132,8 +132,9 @@
                                  (state-player (current-state))
                                  new-pr))
       (next-state!
-       (struct-copy state (move-computer (current-state))
-                    [player new-pr])))))
+       (move-computer 
+        (struct-copy state (current-state)
+                     [player new-pr]))))))
 
 (define (stay-put)
   (next-state! (move-computer (current-state))))
@@ -141,7 +142,7 @@
 (define (next-maze)
   (define next-maze-state
     (fill-in-maze (current-state)
-                  (modulo (+ (state-maze-index (current-state)) 1) maze-count)))
+                  (modulo (+ (state-maze-index (current-state)) 1) the-maze-count)))
   (next-state!
    (if (game-over?)
        next-maze-state
@@ -153,10 +154,10 @@
 
 (define (move-computer the-state)
   (cond
-    [(or (equal? (state-player (current-state)) 
-                 (state-computer1 (current-state)))
-         (equal? (state-player (current-state)) 
-                 (state-computer2 (current-state))))
+    [(or (equal? (state-player the-state) 
+                 (state-computer1 the-state))
+         (equal? (state-player the-state) 
+                 (state-computer2 the-state)))
      the-state]
     [else
      (define end (state-player the-state))
@@ -207,9 +208,24 @@
               (and (loop neighbor (+ dist 1))
                    neighbor))])])))
   (values dir (hash-ref visited end)))
-  
 
 (define (add1/f n) (and n (+ n 1)))
+
+(define game-number-canvas%
+  (class canvas%
+    (inherit get-dc get-client-size)
+    (define/override (on-paint)
+      (define-values (w h) (get-client-size))
+      (define dc (get-dc))
+      (define s (str (state-maze-index (current-state))))
+      (define-values (tw _1 _2 _3) (send dc get-text-extent s))
+      (send dc draw-text s (/ (- w tw) 2) 0))
+    (define/private (str n) (format "Board #~a" n))
+    (super-new [style '(transparent)])
+    (inherit min-height)
+    (let ()
+      (define-values (_ h _2 _3) (send (get-dc) get-text-extent (str 0)))
+      (min-height (inexact->exact (ceiling h))))))
 
 (define game-canvas%
   (class canvas%
@@ -267,8 +283,8 @@
                          [min-width (* maze-w min-cell-size)]
                          [min-height (* maze-h min-cell-size)]))
 (define hp (new horizontal-panel% [parent f] [alignment '(right center)] [stretchable-height #f]))
-(define msg (new message% [parent hp] [label (format "Game #~a" initial-number)]))
-(void (new vertical-panel% [parent hp]))
+(define game-number-canvas (new game-number-canvas% [parent hp] [stretchable-height #f]))
+(void (new vertical-panel% [parent hp] [stretchable-width #f]))
 (define show-help (show-scribbling
                    '(lib "games/scribblings/games.scrbl")
                    "tally-maze"))
