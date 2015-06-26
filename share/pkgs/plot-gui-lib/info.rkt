@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.2"))) (define collection (quote multi)) (define deps (quote ("base" "plot-lib" "gui-lib" "snip-lib" "typed-racket-lib" "typed-racket-more" "unstable-lib"))) (define build-deps (quote ())) (define pkg-desc "Plot GUI interface") (define pkg-authors (quote (ntoronto)))))

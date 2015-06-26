@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.2"))) (define collection (quote multi)) (define deps (quote ("scheme-lib" "typed-racket-lib" "base"))) (define pkg-desc "compatibility library for older Typed Racket-based languages") (define pkg-authors (quote (samth stamourv))) (define version "1.1")))

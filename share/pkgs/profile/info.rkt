@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.2"))) (define collection (quote multi)) (define deps (quote ("profile-lib" "profile-doc"))) (define implies (quote ("profile-lib" "profile-doc"))) (define pkg-desc "Libraries for statistical performance profiling") (define pkg-authors (quote (eli)))))

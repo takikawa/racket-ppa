@@ -1,3 +1,0 @@
-#lang scribble/base
-
-Keep

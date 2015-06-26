@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.2"))) (define collection (quote multi)) (define version "6.2") (define deps (quasiquote ("racket-lib" ("racket" #:version (unquote version))))) (define implies (quote (core))) (define pkg-desc "Racket libraries that are currently always available") (define pkg-authors (quote (mflatt)))))

@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.2"))) (define collection (quote multi)) (define deps (quote ("srfi-lite-lib" "base"))) (define pkg-desc "implementation (no documentation) part of \"net\"") (define pkg-authors (quote (mflatt)))))

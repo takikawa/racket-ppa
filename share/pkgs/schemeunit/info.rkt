@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.2"))) (define collection "schemeunit") (define deps (quote ("base" "rackunit-lib" "rackunit-gui"))) (define pkg-desc "Legacy SchemeUnit testing framework") (define pkg-authors (quote (jay)))))

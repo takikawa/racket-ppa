@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.2"))) (define collection (quote multi)) (define deps (quote ("parser-tools-lib" "parser-tools-doc"))) (define implies (quote ("parser-tools-lib" "parser-tools-doc"))) (define pkg-desc "Lex- and Yacc-style parsing tools") (define pkg-authors (quote (mflatt)))))

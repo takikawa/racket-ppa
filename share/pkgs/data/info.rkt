@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.2"))) (define collection (quote multi)) (define deps (quote ("data-lib" "data-enumerate-lib" "data-doc"))) (define implies (quote ("data-lib" "data-enumerate-lib" "data-doc"))) (define pkg-desc "Data strucutures") (define pkg-authors (quote (ryanc)))))

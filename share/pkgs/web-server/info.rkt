@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.2"))) (define collection (quote multi)) (define deps (quote ("web-server-lib" "web-server-doc"))) (define implies (quote ("web-server-lib" "web-server-doc"))) (define pkg-desc "An HTTP server") (define pkg-authors (quote (jay)))))

@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.2"))) (define collection (quote multi)) (define deps (quote ("gui-lib" "gui-doc"))) (define implies (quote ("gui-lib" "gui-doc"))) (define pkg-desc "Graphical user interface toolkit") (define pkg-authors (quote (mflatt robby)))))
