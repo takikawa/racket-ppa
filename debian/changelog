@@ -1,3 +1,9 @@
+racket (6.2-2) unstable; urgency=medium
+
+  * Don't strip mred, as this fails almost everywhere
+
+ -- David Bremner <bremner@debian.org>  Sun, 28 Jun 2015 19:50:42 +0200
+
 racket (6.2-1) unstable; urgency=medium
 
   * New upstream release (Closes: #789758).

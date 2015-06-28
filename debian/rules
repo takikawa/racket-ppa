@@ -37,7 +37,8 @@ DEB_DH_COMPRESS_ARGS := -X.sxref -X.sqlite
 DEB_DH_BUILDDEB_ARGS := -- -Zxz
 
 # do not strip mzscheme, as this causes it to stop working
-DEB_DH_STRIP_ARGS_racket := -Xbin/mzscheme
+# do not strip mred, as this fails on some arches
+DEB_DH_STRIP_ARGS_racket := -Xbin/mzscheme -Xbin/mred
 
 DEB_MAKE_INSTALL_TARGET= no-run
 
