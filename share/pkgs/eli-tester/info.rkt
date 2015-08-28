@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.2"))) (define collection (quote multi)) (define deps (quote ("base" "rackunit-lib"))) (define pkg-desc "Testing framework") (define pkg-authors (quote (eli)))))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.2.1"))) (define collection (quote multi)) (define deps (quote ("base" "rackunit-lib"))) (define pkg-desc "Testing framework") (define pkg-authors (quote (eli)))))

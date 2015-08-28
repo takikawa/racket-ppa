@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.2"))) (define collection (quote multi)) (define deps (quote ("base"))) (define pkg-desc "Library for running a C compiler/linker") (define pkg-authors (quote (mflatt)))))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.2.1"))) (define collection (quote multi)) (define deps (quote ("base"))) (define pkg-desc "Library for running a C compiler/linker") (define pkg-authors (quote (mflatt)))))
