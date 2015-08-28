@@ -1,8 +1,8 @@
 Source: racket
 Section: lisp
 Priority: optional
-Maintainer: David Bremner <bremner@debian.org>
-Uploaders: James McCoy <jamessan@debian.org>
+Maintainer: Asumu Takikawa <asumu@ccs.neu.edu>
+Uploaders: Asumu Takikawa <asumu@ccs.neu.edu>
 Standards-Version: 3.9.3
 Build-Depends: autotools-dev, cdbs, debhelper (>= 7.0.0), patchutils, libffi-dev,
  libfreetype6-dev, libjpeg-dev, libpango1.0-dev, libpng-dev, libssl-dev,
