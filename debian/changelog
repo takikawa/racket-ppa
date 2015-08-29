@@ -1,8 +1,8 @@
-racket (6.2-20150803~trusty) trusty; urgency=medium
+racket (6.2.1-20150828~trusty) trusty; urgency=medium
 
   * Package for Ubuntu PPA
 
- -- Asumu Takikawa <asumu@ccs.neu.edu>  Mon, 03 Aug 2015 11:50:45 -0400
+ -- Asumu Takikawa <asumu@ccs.neu.edu>  Fri, 28 Aug 2015 15:23:45 -0400
 
 racket (6.2-2) unstable; urgency=medium
 
