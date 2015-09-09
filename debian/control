@@ -18,8 +18,7 @@ Architecture: any
 Depends: ${misc:Depends}, ${shlibs:Depends}, racket-common (= ${source:Version})
 Recommends: racket-doc (>= ${source:Upstream-Version}),
             libglib2.0-0, libpangocairo-1.0-0, libjpeg8, libpng12-0,
-            libgtk2.0-0, libgdk-pixbuf2.0-0
-Suggests: libunique-1.0-0
+            libgtk2.0-0, libgdk-pixbuf2.0-0, libunique-1.0-0
 Breaks: plt-scheme (<<5.0~)
 Replaces: plt-scheme (<<5.0~)
 Provides: plt-scheme
