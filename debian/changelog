@@ -1,3 +1,13 @@
+racket (6.2-3) unstable; urgency=medium
+
+  * Add recommends needed for proper functioning of DrRacket. These are
+    not found by the usual mechanism because they are dynamically loaded.
+    Thanks to Asumu Takikawa for the patch.
+  * Those using only non-graphical racket can install without
+    recommends.
+
+ -- David Bremner <bremner@debian.org>  Wed, 09 Sep 2015 07:14:51 -0300
+
 racket (6.2-2) unstable; urgency=medium
 
   * Don't strip mred, as this fails almost everywhere
