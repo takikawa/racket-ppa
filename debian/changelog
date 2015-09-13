@@ -1,3 +1,9 @@
+racket (6.2-4) UNRELEASED; urgency=medium
+
+  * Remove myself from Uploaders.
+
+ -- James McCoy <jamessan@debian.org>  Sun, 13 Sep 2015 14:55:17 -0400
+
 racket (6.2-3) unstable; urgency=medium
 
   * Add recommends needed for proper functioning of DrRacket. These are
