@@ -1,4 +1,8 @@
-/usr/share/racket/pkgs/icons/plt.xpm	/usr/share/pixmaps/plt.xpm
 /usr/share/racket/pkgs/icons/plt-16x16.png	/usr/share/pixmaps/plt-16x16.png
 /usr/share/racket/pkgs/icons/plt-32x32.png	/usr/share/pixmaps/plt-32x32.png
 /usr/share/racket/pkgs/icons/plt-48x48.png	/usr/share/pixmaps/plt-48x48.png
+/usr/share/racket/pkgs/icons/plt-16x16.png	/usr/share/icons/hicolor/16x16/apps/plt.png
+/usr/share/racket/pkgs/icons/plt-32x32.png	/usr/share/icons/hicolor/32x32/apps/plt.png
+/usr/share/racket/pkgs/icons/plt-48x48.png	/usr/share/icons/hicolor/48x48/apps/plt.png
+/usr/share/racket/pkgs/icons/plt-logo-red-shiny@2x.png	/usr/share/icons/hicolor/512x512/apps/plt.png
+/usr/share/racket/pkgs/icons/plt-logo-red-shiny.png	/usr/share/icons/hicolor/256x256/apps/plt.png
