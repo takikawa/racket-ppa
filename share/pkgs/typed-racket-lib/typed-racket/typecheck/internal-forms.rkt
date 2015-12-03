@@ -21,6 +21,7 @@
   internal
 
   type-alias
+  new-subtype-def
   type-refinement
   typed-struct
   typed-struct/exec
@@ -28,11 +29,16 @@
   typed-require/struct
   predicate-assertion
   type-declaration
+  typed-define-signature
+  typed-define-values/invoke-unit
   typecheck-failure
 
   type-alias?
+  new-subtype-def?
   typed-struct?
-  typed-struct/exec?)
+  typed-struct/exec?
+  typed-define-signature?
+  typed-define-values/invoke-unit?)
 
 (module forms racket/base
   (require (for-syntax racket/base))
@@ -50,13 +56,16 @@
   (internal-forms internal-literals
                   require/typed-internal
                   define-type-alias-internal
+                  define-new-subtype-internal
                   define-type-internal
                   define-typed-struct-internal
                   define-typed-struct/exec-internal
                   assert-predicate-internal
                   declare-refinement-internal
                   :-internal
-                  typecheck-fail-internal))
+                  typecheck-fail-internal
+                  define-signature-internal
+                  define-values/invoke-unit-internal))
 
 (require (submod "." forms) (submod "." forms literal-set))
 
@@ -88,6 +97,11 @@
            #:attr type-only (attribute options.type-only)
            #:attr maker (or (attribute options.maker) #'nm.nm)))
 
+(define-syntax-class dviu-import/export
+  (pattern (sig-id:id member-id:id ...)
+           #:with sig #'sig-id
+           #:with members #'(member-id ...)))
+
 ;;; Internal form syntax matching
 
 (define-literal-set internal-form-literals #:for-label
@@ -96,11 +110,11 @@
 (define-syntax-class internal^
    #:attributes (value)
    #:literal-sets (kernel-literals internal-form-literals)
-   (pattern (define-values () (begin (quote value:expr) (#%plain-app values))))
+   (pattern (define-values () (begin (quote-syntax value:expr #:local) (#%plain-app values))))
    ;; handles form that splicing-syntax-parameterize expands to
-   (pattern (define-values () (letrec-syntaxes+values _ () (quote value:expr) (#%plain-app values))))
+   (pattern (define-values () (let-values () (quote-syntax value:expr #:local) (#%plain-app values))))
    ;; for use in forms like classes that transform definitions
-   (pattern (let-values ([() (begin (quote value:expr) (#%plain-app values))])
+   (pattern (let-values ([() (begin (quote-syntax value:expr #:local) (#%plain-app values))])
               (#%plain-app void))))
 
 (define-syntax (define-internal-classes stx)
@@ -127,6 +141,8 @@
 (define-internal-classes
   [type-alias
     (define-type-alias-internal name type args)]
+  [new-subtype-def
+    (define-new-subtype-internal name (constructor rep-type) #:gen-id gen-id)]
   [type-refinement
     (declare-refinement-internal predicate)]
   [typed-struct
@@ -140,19 +156,33 @@
   [predicate-assertion
     (assert-predicate-internal type predicate)]
   [type-declaration
-    (:-internal id:identifier type)])
+    (:-internal id:identifier type)]
+  ;; the check field indicates whether this signature is being 
+  ;; required from an untyped context in which case the super
+  ;; value is ignored and information about parent signatures
+  ;; is inferred from static information bound to the signature
+  ;; identifier
+  [typed-define-signature
+   (define-signature-internal name #:parent-signature super (binding ...) #:check? check)]
+  ;; This should be a decent initial attempt at making
+  ;; define-values/invoke-unit work, the unit-expr is
+  ;; unnecessary at this point since it will be handled
+  ;; when expressions are typechecked
+  [typed-define-values/invoke-unit
+   (define-values/invoke-unit-internal (import:dviu-import/export ...)
+                                       (export:dviu-import/export ...))])
 
 ;; Define separately outside of `define-internal-classes` since this form
 ;; is meant to appear in expression positions, so it doesn't make sense to use
 ;; the `define-values` protocol used for other internal forms.
 (define-syntax-class typecheck-failure
   #:literal-sets (kernel-literals internal-literals)
-  (pattern (quote (typecheck-fail-internal stx message:str var))))
+  (pattern (quote-syntax (typecheck-fail-internal stx message:str var) #:local)))
 
 ;;; Internal form creation
 (define (internal stx)
   (quasisyntax/loc stx
     (define-values ()
       (begin
-        (quote #,stx)
+        (quote-syntax #,stx #:local)
         (#%plain-app values)))))

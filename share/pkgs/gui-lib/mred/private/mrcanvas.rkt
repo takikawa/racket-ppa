@@ -30,7 +30,8 @@
     on-char on-event on-paint on-tab-in
     get-dc
     set-canvas-background get-canvas-background
-    set-resize-corner))
+    set-resize-corner
+    get-scaled-client-size))
 
 (define basic-canvas%
   (class* (make-subwindow% (make-window% #f (make-subarea% area%))) (canvas<%>)
@@ -56,6 +57,9 @@
                               "exact-positive-integer?"
                               h))
       (send wx make-compatible-bitmap w h))
+
+    (define/public (get-scaled-client-size)
+      (send wx get-scaled-client-size))
 
     (define/public (suspend-flush)
       (send wx begin-refresh-sequence))
@@ -130,6 +134,8 @@
         (if ctx
             (send ctx call-as-current thunk)
             (fail))))
+    (define/public (get-gl-client-size)
+      (send wx get-gl-client-size))
     (define accept-tab-focus
       (entry-point
        (case-lambda
@@ -174,8 +180,8 @@
         (when y-len (check-gauge-integer who y-len))
         (check-gauge-integer who x-page)
         (check-gauge-integer who y-page)
-        (check-gauge-integer who x-val)
-        (check-gauge-integer who y-val)
+        (check-gauge-range-integer who x-val)
+        (check-gauge-range-integer who y-val)
         (when (and x-len (< x-len x-val))
           (raise-arguments-error (who->name who)
                                  "horizontal value is larger than the horizontal range"

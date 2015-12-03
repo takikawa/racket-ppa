@@ -244,7 +244,7 @@ each element in the sequence.
 
   @interaction[#:eval sequence-evaluator
     (define (histogram vector-of-words)
-      (define a-hash (hash))
+      (define a-hash (make-hash))
       (for ([word (in-vector vector-of-words)])
         (hash-set! a-hash word (add1 (hash-ref a-hash word 0))))
       a-hash)
@@ -614,7 +614,7 @@ each element in the sequence.
   values in the sequence), the @exnraise[exn:fail:contract].}
 
 @; ----------------------------------------------------------------------
-@subsection[#:tag "more-sequences"]{Sequence Combinations & Contract}
+@subsection[#:tag "more-sequences"]{Additional Sequence Operations}
 
 @note-lib[racket/sequence]
 
@@ -780,6 +780,32 @@ If @racket[min-count] is a number, the stream is required to have at least that 
 
 }
 
+@subsubsection{Additional Sequence Constructors}
+
+@defproc[(in-syntax [stx syntax?]) sequence?]{
+  Produces a sequence whose elements are the successive subparts of
+  @racket[stx].
+  Equivalent to @racket[(syntax->list lst)].
+  @speed[in-syntax "syntax"]
+
+@examples[#:eval sequence-evaluator
+(for/list ([x (in-syntax #'(1 2 3))])
+  x)]
+
+@history[#:added "6.3"]}
+
+@defproc[(in-slice [length exact-positive-integer?] [seq sequence?])
+         sequence?]{
+  Returns a sequence whose elements are lists with the first @racket[length]
+  elements of @racket[seq], then the next @racket[length] and so on.
+
+  @examples[#:eval sequence-evaluator
+  (for/list ([e (in-slice 3 (in-range 8))]) e)
+  ]
+  @history[#:added "6.3"]
+}
+
+
 @; ======================================================================
 @section[#:tag "streams"]{Streams}
 
@@ -827,6 +853,13 @@ stream, but plain lists can be used as streams, and functions such as
   A shorthand for nested @racket[stream-cons]es ending with
   @racket[empty-stream].
 }
+
+@defform[(stream* expr ...)]{
+  A shorthand for nested @racket[stream-cons]es, but the final @racket[expr]
+  must be a stream, and it is used as the rest of the stream instead of
+  @racket[empty-stream]. Similar to @racket[list*] but for streams.
+
+@history[#:added "6.3"]}
 
 @defproc[(in-stream [s stream?]) sequence?]{
   Returns a sequence that is equivalent to @racket[s].

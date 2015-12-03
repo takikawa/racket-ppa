@@ -4,6 +4,8 @@
            "term.rkt"
            "term-fn.rkt"
            setup/path-to-relative
+           racket/match
+           "match-a-pattern.rkt"
            (for-template
             racket/base
             "term.rkt"
@@ -15,7 +17,8 @@
            raise-ellipsis-depth-error
            make-language-id
            language-id-nts
-           bind-pattern-names)
+           bind-pattern-names
+           check-hole-sanity)
   
   (provide (struct-out id/depth))
   
@@ -29,6 +32,8 @@
     (define all-nts (if (identifier? all-nts/lang-id)
                         (language-id-nts all-nts/lang-id what)
                         all-nts/lang-id))
+    (define nt->hole (and (identifier? all-nts/lang-id)
+                          (language-id-nt-hole-map all-nts/lang-id #f)))
     (define id-stx-table (if (identifier? all-nts/lang-id)
                              (language-id-nt-identifiers all-nts/lang-id #f)
                              (hash)))
@@ -38,6 +43,7 @@
                                        n)
                           orig-stx 
                           stx))
+
     (define (expected-arguments name stx)
       (raise-syntax-error what (format "~a expected to have arguments" name) orig-stx stx))
     (define (expect-identifier src stx)
@@ -221,20 +227,24 @@
                     orig-stx
                     term)]
                   [(memq prefix-sym all-nts)
-                   (record-binder term under under-mismatch-ellipsis)
                    (record-syncheck-use term prefix-sym)
-                   (if mismatch?
-                       (values `(mismatch-name ,term (nt ,prefix-stx))
-                               '())
-                       (values `(name ,term (nt ,prefix-stx))
-                               (list (make-id/depth term (length under)))))]
+                   (cond
+                     [mismatch?
+                      (values `(mismatch-name ,term (nt ,prefix-stx))
+                              '())]
+                     [else
+                      (record-binder term under under-mismatch-ellipsis)
+                      (values `(name ,term (nt ,prefix-stx))
+                              (list (make-id/depth term (length under))))])]
                   [(memq prefix-sym underscore-allowed)
-                   (record-binder term under under-mismatch-ellipsis)
-                   (if mismatch?
-                       (values `(mismatch-name ,term ,prefix-stx)
-                               '())
-                       (values `(name ,term ,prefix-stx)
-                               (list (make-id/depth term (length under)))))]
+                   (cond
+                     [mismatch?
+                      (values `(mismatch-name ,term ,prefix-stx)
+                              '())]
+                     [else
+                      (record-binder term under under-mismatch-ellipsis)
+                      (values `(name ,term ,prefix-stx)
+                              (list (make-id/depth term (length under))))])]
                   [else
                    (raise-syntax-error
                     what
@@ -463,13 +473,113 @@
           [_ pat])))
     
     (filter-duplicates what orig-stx names)
-    
+
     (with-syntax ([(name/ellipses ...) (map build-dots names)]
                   [(name ...) (map id/depth-id names)]
                   [term ellipsis-normalized/simplified]
                   [void-stx void-stx])
+      (when nt->hole
+        (check-hole-sanity what #'term nt->hole orig-stx))
       #'(void-stx term (name ...) (name/ellipses ...))))
-  
+
+;; check-hole-sanity : pat hash[sym -o> (or/c 0 1 'unknown)] -> (or/c 0 1 'unknown)
+;; returns 'unknown if cannot figure out the answer (based on an 'unknown in the nt-map)
+;; returns 0 if the pattern cannot produce a hole
+;; returns 1 if the pattern produces a unique hole,
+;; returns 'lots if it might produce any number of holes (0, 1, or more)
+;; raises an error if there is inconsistency
+  (define (check-hole-sanity who pattern nt-map stx-to-use-for-error-messages)
+    (let loop ([pattern (syntax->datum pattern)]
+               [local-stx pattern])
+       (match-a-pattern pattern
+         [`any 0]
+         [`number 0]
+         [`string 0]
+         [`natural 0]
+         [`integer 0]
+         [`real 0]
+         [`boolean 0]
+         [`variable 0] 
+         [`(variable-except ,vars ...) 0]
+         [`(variable-prefix ,var) 0]
+         [`variable-not-otherwise-mentioned 0]
+         [`hole 1]
+         [`(nt ,id) (hash-ref nt-map id)]
+         [`(name ,name ,pat)
+          (syntax-case local-stx ()
+            [(_1 _2 sub-stx)
+             (loop pat #'sub-stx)])]
+         [`(mismatch-name ,name ,pat)
+          (syntax-case local-stx ()
+            [(_1 _2 sub-stx)
+             (loop pat #'sub-stx)])]
+         [`(in-hole ,context ,contractum)
+          (syntax-case local-stx ()
+            [(_ context-stx contractum-stx)
+             (let ()
+               (define ctxt (loop context #'context-stx))
+               (unless (or (equal? ctxt 1) (equal? ctxt 'unknown))
+                 (raise-syntax-error
+                  who
+                  (string-append
+                   "in-hole's first argument is expected to match exactly one hole"
+                   (cond
+                     [(equal? ctxt 0)
+                      ", but it cannot match a hole"]
+                     [(equal? ctxt 'lots)
+                      ", but it may match a hole many different ways"]))
+                  stx-to-use-for-error-messages))
+               (loop contractum #'contractum-stx))])]
+         [`(hide-hole ,pat)
+          (syntax-case local-stx ()
+            [(_ pat-stx)
+             (let ()
+               (define pat-resp (loop pat #'pat-stx))
+               (unless (or (equal? pat-resp 1) (equal? pat-resp 'unknown))
+                 (raise-syntax-error who "hide-hole's argument is expected to have a hole"
+                                     stx-to-use-for-error-messages))
+               0)])]
+         [`(side-condition ,pat ,condition ,expr)
+          (syntax-case local-stx ()
+            [(_ pat-stx _2 _3)
+             (loop pat #'pat-stx)])]
+         [`(cross ,nt) 1]
+         [`(list ,pats ...)
+          (syntax-case local-stx ()
+            [(_ pat-stx ...)
+             (let l-loop ([pats pats]
+                          [pat-stxes (syntax->list #'(pat-stx ...))]
+                          [all-zeros? #t]
+                          [number-of-ones 0]
+                          [all-known? #t])
+               (cond
+                 [(null? pats)
+                  (cond
+                    [all-zeros? 0]
+                    [(>= number-of-ones 2) 'lots]
+                    [(and (= number-of-ones 1) all-known?) 1]
+                    [else 'unknown])]
+                 [else
+                  (match (car pats)
+                    [`(repeat ,pat ,name ,mname)
+                     (syntax-case (car pat-stxes) ()
+                       [(repeat pat-stx _1 _2)
+                        (let ()
+                          (define this-one (loop pat #'pat-stx))
+                          (l-loop (cdr pats) (cdr pat-stxes)
+                                  (and all-zeros? (equal? this-one 0))
+                                  (if (equal? this-one 1) +inf.0 number-of-ones)
+                                  (and all-known? (not (equal? this-one 'unknown)))))])]
+                    [pat
+                     (let ()
+                       (define this-one (loop pat (car pat-stxes)))
+                       (l-loop (cdr pats)
+                               (cdr pat-stxes)
+                               (and all-zeros? (equal? this-one 0))
+                               (if (equal? this-one 1) (+ number-of-ones 1) number-of-ones)
+                               (and all-known? (not (equal? this-one 'unknown)))))])]))])]
+         [(? (compose not pair?)) 0])))
+
   (define-struct id/depth (id depth))
   
   ;; extract-names : syntax syntax -> 

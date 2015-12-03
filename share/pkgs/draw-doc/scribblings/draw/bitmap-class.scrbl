@@ -15,7 +15,7 @@ A bitmap has a @deftech{backing scale}, which is the number of pixels
  bitmap is used as a target for drawing or when the bitmap is drawn
  into another context.  For example, on Mac OS X when the main monitor
  is in Retina mode, @racket[make-screen-bitmap] returns a bitmap whose
- backing scale is @racket[2.0]. On Windows, the backing scale of a screen
+ backing scale is @racket[2.0]. On Windows and Unix, the backing scale of a screen
  bitmap corresponds to the system-wide text scale (see @secref[#:doc '(lib
  "scribblings/gui/gui.scrbl") "display-resolution"]). A monochrome bitmap always
  has a backing scale of @racket[1.0].
@@ -251,7 +251,7 @@ The @racket[kind] argument specifies the file's format:
 @item{@racket['xpm] --- load an @as-index{XPM} bitmap file, creating a color
   bitmap}
 @item{@racket['xpm/alpha] --- like @racket['xpm], but with an alpha channel}
-@item{@racket['bmp] --- load a Windows bitmap file, creating a color bitmap}
+@item{@racket['bmp] --- load a Windows bitmap (BMP) file, creating a color bitmap}
 @item{@racket['bmp/alpha] --- like @racket['bmp], but with an alpha channel}
 ]
 
@@ -260,7 +260,7 @@ An XBM image is always loaded as a monochrome bitmap. A 1-bit
  monochrome bitmap. An image in any other format is always loaded as a
  color bitmap.
 
-For PNG loading, if @racket[bg-color] is not @racket[#f], then it is
+For PNG and BMP loading, if @racket[bg-color] is not @racket[#f], then it is
  combined with the file's alpha channel or mask (if any) while loading
  the image; in this case, no separate mask bitmap is generated and the
  alpha channel fills the bitmap, even if @racket['unknown/mask],

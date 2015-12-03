@@ -1,7 +1,7 @@
 #lang scribble/manual
 
 @(require scribble/eval
-          unstable/latent-contract/defthing
+          images/private/latent-contract/defthing
           (for-label images/logos
                      racket racket/draw)
           images/logos)

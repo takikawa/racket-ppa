@@ -806,8 +806,11 @@ context when printing the error message.}
            #:inspector #f]{
 
 Raised asynchronously (when enabled) in response to a break request.
-The @racket[continuation] field can be used by a handler to resume the
-interrupted computation.}
+The @racket[continuation] field can be used to resume the interrupted
+computation in the @tech{uncaught-exception handler} or
+@racket[call-with-exception-handler] (but @emph{not}
+@racket[with-handlers] because it escapes from the exception context
+before evaluating any predicates or handlers).}
 
 @defstruct[(exn:break:hang-up exn:break) ()
            #:inspector #f]{
@@ -957,3 +960,17 @@ property, @racket[#f] otherwise.}
          (exn:missing-module? . -> . module-path?)]{
 
 Returns the @tech{module path}-getting procedure associated with @racket[v].}
+
+@;------------------------------------------------------------------------
+@section{Additional Exception Functions}
+
+@note-lib-only[racket/exn]
+
+@history[#:added "6.3"]
+
+@defproc[(exn->string [exn (or/c exn? any/c)]) string?]{
+
+Formats @racket[exn] as a string. If @racket[exn] is an @racket[exn?],
+collects and returns the output from the current
+@racket[(error-display-handler)]; otherwise, simply converts
+@racket[exn] to a string using @racket[(format "~s\n" exn)].}

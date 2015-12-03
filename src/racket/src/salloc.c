@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2014 PLT Design Inc.
+  Copyright (c) 2004-2015 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -222,6 +222,11 @@ void scheme_register_tls_space(void *tls_space, int tls_index) XFORM_SKIP_PROC
 Thread_Local_Variables *scheme_external_get_thread_local_variables() XFORM_SKIP_PROC
 {
   return scheme_get_thread_local_variables();
+}
+#else
+void scheme_register_tls_space(void *tls_space, int tls_index) XFORM_SKIP_PROC
+{
+  /* Nothing to do; provided for compatibility. */
 }
 #endif
 
@@ -1631,6 +1636,14 @@ void scheme_remove_all_finalization(void *p)
 void scheme_collect_garbage(void)
 {
   GC_gcollect();
+}
+
+void scheme_collect_garbage_minor(void)
+{
+#ifdef MZ_PRECISE_GC
+  GC_gcollect_minor();
+#else
+#endif
 }
 
 void scheme_enable_garbage_collection(int on)

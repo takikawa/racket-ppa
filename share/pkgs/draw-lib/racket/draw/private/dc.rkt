@@ -27,7 +27,8 @@
          dc-backend<%>
          default-dc-backend%
          do-set-pen!
-         do-set-brush!)
+         do-set-brush!
+         (protect-out set-font-map-init-hook!))
 
 (define-local-member-name
   do-set-pen!
@@ -43,6 +44,9 @@
       (or (send the-color-database find-color c)
           black)
       (color->immutable-color c)))
+
+(define (bounding-box-type? o)
+  (member o '(path fill stroke)))
 
 ;; dc-backend : interface
 ;;
@@ -248,6 +252,14 @@
 ;; a cache for the hash-table lookup.
 (define font-maps (make-vector 8 #f))
 
+;; This hook is used for Mac OS X control font access:
+(define font-map-init-hook void)
+(define (set-font-map-init-hook! proc)
+  (set! font-map-init-hook proc)
+  (for ([e (in-vector font-maps)])
+    (when e
+      (font-map-init-hook e))))
+
 (define UNALIGNED-INDEX 4)
 (define multi-font-map-boundary
   (case (system-type)
@@ -256,8 +268,6 @@
 
 (define (dc-mixin backend%)
   (defclass* dc% backend% (dc<%>)
-    (super-new)
-
     (inherit flush-cr get-cr release-cr end-cr init-cr-matrix init-effective-matrix
 	     get-pango
              install-color dc-adjust-smoothing get-hairline-width dc-adjust-cap-shape
@@ -589,7 +599,7 @@
 
     (define current-smoothing #f)
 
-    (define (set-font-antialias context smoothing hinting)
+    (define/private (set-font-antialias context smoothing hinting)
       (let ([o (pango_cairo_context_get_font_options context)]
             [o2 (cairo_font_options_create)])
         (when o
@@ -1172,8 +1182,6 @@
                          (lambda (x) (align-x x)) (lambda (y) (align-y y)))
            (draw cr #f #t)))))
     
-    (define (bounding-box-type? o) (member o '(path fill stroke)))
-    
     (def/public (get-path-bounding-box [dc-path% path] [bounding-box-type? type])
       (with-cr
         (values 0. 0. 0. 0.)
@@ -1364,6 +1372,7 @@
 	 [fm fm]
 	 [else
 	  (define fm (pango_cairo_font_map_new))
+          (font-map-init-hook fm)
 	  (vector-set! font-maps smoothing-index fm)
 	  fm])]))
 
@@ -2023,17 +2032,36 @@
                            (s-sel (cairo_matrix_t-xx mx)
                                   (cairo_matrix_t-yy mx)))))))))
 
-    (void))
+    (super-new))
 
   dc%)
 
 (set-text-to-path!
  (lambda (font str x y combine?)
-   (define tmp-bm (make-object bitmap% 10 10))
-   (define tmp-dc (make-object -bitmap-dc% tmp-bm))
-   (send tmp-dc set-font font)
-   (define path (send tmp-dc text-path str x y combine?))
-   (begin0
-    (cairo-path->list path)
-    (cairo_path_destroy path))))
-
+   (define s (cairo_recording_surface_create CAIRO_CONTENT_COLOR_ALPHA #f))
+   (define (get-path tmp-dc)
+     (send tmp-dc set-font font)
+     (define path (send tmp-dc text-path str x y combine?))
+     (begin0
+      (cairo-path->list path)
+      (cairo_path_destroy path)))
+   (cond
+    [s
+     (define cr (cairo_create s))
+     (cairo_surface_destroy s)
+     (define tmp-dc
+       (make-object (dc-mixin
+                     (class default-dc-backend%
+                       (super-new)
+                       (define/override (get-cr) cr)))))
+     (begin0
+      (get-path tmp-dc)
+      (cairo_destroy cr))]
+    [else
+     ;; If a recording surface is not available, fall back to using a
+     ;; bitmap, but we need one that's large enough
+     (define meas-bm (make-object bitmap% 10 10))
+     (define meas-dc (make-object -bitmap-dc% meas-bm))
+     (define-values (w h d a) (send meas-dc get-text-extent str font combine?))
+     (define tmp-bm (make-object bitmap% (inexact->exact (ceiling w)) (inexact->exact (ceiling h))))
+     (get-path (make-object -bitmap-dc% tmp-bm))])))

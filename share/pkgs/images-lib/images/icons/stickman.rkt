@@ -1,10 +1,12 @@
 #lang racket/base
 
 (require racket/class racket/draw racket/vector racket/match racket/math
-         racket/contract unstable/latent-contract unstable/latent-contract/defthing
+         racket/contract
          "../private/flomap.rkt"
          "../private/deep-flomap.rkt"
          "../private/utils.rkt"
+         "../private/latent-contract.rkt"
+         "../private/latent-contract/defthing.rkt"
          "style.rkt")
 
 (provide (activate-contract-out

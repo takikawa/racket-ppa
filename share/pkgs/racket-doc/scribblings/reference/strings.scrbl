@@ -507,6 +507,30 @@ trimmed (which is an alternative to using a @tech{regular expression}
   (string-trim "aaaxaayaa" "aa")
 ]}
 
+@defproc[(non-empty-string? [x any/c]) boolean?]{
+Returns @racket[#t] if @racket[x] is a string and is not empty;
+returns @racket[#f] otherwise.
+@history[#:added "6.3"]{}
+}
+
+@deftogether[(
+@defproc[(string-contains? [s string?] [contained string?]) boolean?]
+@defproc[(string-prefix? [s string?] [prefix string?]) boolean?]
+@defproc[(string-suffix? [s string?] [suffix string?]) boolean?])]{
+Checks whether @racket[s] includes at any location, start with, or ends with
+the second argument, respectively.
+
+@mz-examples[#:eval string-eval
+  (string-prefix? "Racket" "R")
+  (string-prefix? "Jacket" "R")
+  (string-suffix? "Racket" "et")
+  (string-contains? "Racket" "ack")
+]
+
+@history[#:added "6.3"]{}
+}
+
+
 @; ----------------------------------------
 @include-section["format.scrbl"]
 

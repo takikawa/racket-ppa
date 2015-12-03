@@ -147,7 +147,7 @@ please adhere to these guidelines:
   "Do you want to discard or save this bug report?")
  (discard "Discard") ;; a button label for a dialog box with the above question
  (bug-report-form "Bug Report Form")
- (bug-report-field-name "Name")
+ (bug-report-field-name "Your Name")
  (bug-report-field-email "Email")
  (bug-report-field-summary "Summary")
  (bug-report-field-severity "Severity")
@@ -193,6 +193,7 @@ please adhere to these guidelines:
  (cs-foreground-color "Foreground Color")
  (cs-background-color "Background Color")
  (cs-tack/untack-arrow "Tack/Untack Arrow(s)")
+ (cs-tack-crossing-arrows "Tack Crossing Arrows")
  (cs-jump-to-next-bound-occurrence "Jump to Next Bound Occurrence")
  (cs-jump-to-previous-bound-occurrence "Jump to Previous Bound Occurrence")
  (cs-jump-to-binding "Jump to Binding Occurrence")
@@ -210,6 +211,7 @@ please adhere to these guidelines:
  (cs-status-eval-compile-time "Check Syntax: eval compile time")
  (cs-status-expanding-expression "Check Syntax: expanding expression")
  (cs-status-loading-docs-index "Check Syntax: loading documentation index")
+ (cs-syncheck-running "Check Syntax Running")
  (cs-mouse-over-import "binding ~s imported from ~s")
  (cs-view-docs "View documentation for ~a")
  (cs-view-docs-from "~a from ~a")  ;; a completed version of the line above
@@ -516,6 +518,7 @@ please adhere to these guidelines:
  (warnings-prefs-panel-label "Warnings")
  (editor-prefs-panel-label "Editing")
  (general-prefs-panel-label "General")
+ (editor-general-prefs-panel-label "General Editing")
  (highlight-parens "Highlight between matching parens")
  (fixup-open-brackets "Automatically adjust opening square brackets")
  (fixup-close-parens "Automatically adjust closing parens")
@@ -596,6 +599,11 @@ please adhere to these guidelines:
  (font-smoothing-some "Some")
  (font-smoothing-all "All")
  (font-smoothing-default "Use system-wide default")
+ (font-weight-label "Weight")
+ (font-weight-light "Light")
+ (font-weight-normal "Normal")
+ (font-weight-bold "Bold")
+
  (select-font-name "Select Font Name")
  (example-text "Example Text:")
  (only-warn-once "Only warn once when definitions and interactions are not synchronized")
@@ -780,7 +788,8 @@ please adhere to these guidelines:
 
  (paste-info "Paste the most recently copied or cut items, in place of the selected items")
  (paste-menu-item "&Paste")
-
+ (paste-and-indent-menu-item "Paste and Indent")
+  
  (clear-info "Erase the selected items without affecting the clipboard or pasting")
  (clear-menu-item-windows "&Delete")
 
@@ -1165,6 +1174,9 @@ please adhere to these guidelines:
  (quasiquote-printing-style "Quasiquote")
  (write-printing-style "write")
  (print-printing-style "print")
+ (true-false-empty-style-label "Constant Style")
+ (true-false-empty-style-read "#true #false '()")
+ (true-false-empty-style-ids "true false empty")
  (sharing-printing-label "Show sharing in values")
  (use-pretty-printer-label "Insert newlines in printed values")
  (input-syntax "Input Syntax")

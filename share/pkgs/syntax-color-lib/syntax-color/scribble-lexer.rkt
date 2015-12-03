@@ -18,7 +18,7 @@
 (define-struct text-args () #:transparent)
 
 (define (make-rx:opener #:command-char [at #\@])
-  (regexp (format "^[|]([^~aa-zA-Z0-9 \t\r\n\f\\\177-\377{]*){" at)))
+  (regexp (format "^[|]([^~aa-zA-Z0-9 \t\r\n\f\\\177-\377{]*){" (regexp-quote (string at)))))
 
 (define rxes (make-weak-hash))
 (define rx-keys (make-weak-hasheq))
@@ -33,14 +33,14 @@
 
 (define (make-scribble-inside-lexer #:command-char [at #\@])
   (define rx:opener (make-rx:opener #:command-char at))
-  (define rx:^@ (regexp (format "^[~a]" at)))
+  (define rx:^@ (regexp (format "^~a" (regexp-quote (string at)))))
   (define at-bytes (string->bytes/utf-8 (string at)))
   (define default-mode
     (list
      (make-text rx:^@
                 #f
                 #f
-                (regexp (format ".*?(?:(?=[~a\r\n])|$)" at))
+                (regexp (format ".*?(?:(?=[~a\r\n])|$)" (regexp-quote (string at))))
                 #f
                 #f)))
   (define (scribble-inside-lexer orig-in offset orig-mode)
@@ -142,7 +142,8 @@
                   (cons (make-text rx:^@
                                    #rx"^}"
                                    #rx"^{"
-                                   (regexp (format ".*?(?:(?=[~a{}\r\n])|$)" at))
+                                   (regexp (format ".*?(?:(?=[~a{}\r\n])|$)"
+                                                   (regexp-quote (string at))))
                                    '|{|
                                    '|}|)
                         (no-backup mode)))))
@@ -162,12 +163,12 @@
                         [re-opener (regexp-quote (cadr m))])
                     (define (byte-rx . args)
                       (intern-byte-regexp (apply bytes-append args)))
-                    (cons (make-text (byte-rx #"^[|]" re-opener at-bytes)
+                    (cons (make-text (byte-rx #"^[|]" re-opener (regexp-quote at-bytes))
                                      (byte-rx #"^" closer)
                                      (byte-rx #"^[|]" re-opener #"{")
                                      (byte-rx #".*?(?:(?=[|]"
                                               re-opener
-                                              #"[" at-bytes #"{])|(?="
+                                              #"[" (regexp-quote at-bytes) #"{])|(?="
                                               closer
                                               #")|(?=[\r\n])|$)")
                                      '|{|  ;; Better complex paren?
@@ -287,7 +288,7 @@
                             (backup-if-needed pos)
                             mode))]
                  [(and (eq? status 'one)
-                       (regexp-try-match (regexp (format "^#?,[~a]?" at)) in))
+                       (regexp-try-match (regexp (format "^#?,[~a]?" (regexp-quote (string at)))) in))
                   ;; Other special:
                   (let-values ([(end-line end-col end-pos) (port-next-location in)])
                     (values ","
@@ -385,13 +386,15 @@
 (define scribble-lexer (make-scribble-lexer))
 
 (define (flip s)
-  (list->bytes
-   (for/list ([c (in-bytes s)])
-     (cond
-      [(equal? c (char->integer #\()) (char->integer #\))]
-      [(equal? c (char->integer #\[)) (char->integer #\])]
-      [(equal? c (char->integer #\<)) (char->integer #\>)]
-      [(equal? c (char->integer #\))) (char->integer #\()]
-      [(equal? c (char->integer #\])) (char->integer #\[)]
-      [(equal? c (char->integer #\>)) (char->integer #\<)]
-      [else c]))))
+  (string->bytes/utf-8
+   (list->string
+    (reverse
+     (for/list ([c (in-string (bytes->string/utf-8 s))])
+       (cond
+        [(equal? c #\() #\)]
+        [(equal? c #\[) #\]]
+        [(equal? c #\<) #\>]
+        [(equal? c #\)) #\(]
+        [(equal? c #\]) #\[]
+        [(equal? c #\>) #\<]
+        [else c]))))))

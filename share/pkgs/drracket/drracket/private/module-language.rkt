@@ -419,8 +419,7 @@
                     ;; the port (a second reset), construct a string holding
                     ;; the #lang, and read from it an empty module, and extract
                     ;; the base module from it (ask Matthew about this).
-                                              (raise-hopeless-exception
-                                               e "invalid module text"))])
+                                              (raise-hopeless-exception e))])
                    (super-thunk))])
             (when (eof-object? expr)
               (raise-hopeless-syntax-error (string-append
@@ -428,6 +427,8 @@
                                             "definitions window.  Try starting your program with\n"
                                             "\n"
                                             "  #lang racket\n"
+                                            "or\n"
+                                            "  #lang htdp/bsl\n"
                                             "\n"
                                             "and clicking ‘Run’.")))
             (let ([more (super-thunk)])
@@ -440,7 +441,7 @@
         (define (check-interactive-language)
           (unless (memq '#%top-interaction (namespace-mapped-symbols))
             (raise-hopeless-exception
-             #f #f ; no error message, just a suffix
+             #f ; no error message, just a suffix
              (format "~s does not support a REPL (no #%top-interaction)"
                      (syntax->datum lang)))))
         ;; We're about to send the module expression to drracket now, the rest
@@ -608,20 +609,20 @@
       (super-new
        [module #f]
        [language-position (list (string-constant module-language-name))]
-       [language-numbers (list -32768)])))
+       [language-numbers (list -32768)]
+       [reader (λ (src port)
+                 (parameterize ([read-accept-reader #t])
+                   (with-stack-checkpoint
+                    (read-syntax src port))))])))
   
   ;; can be called with #f to just kill the repl (in case we want to kill it
   ;; but keep the highlighting of a previous error)
-  (define (raise-hopeless-exception exn [prefix #f] [suffix #f])
+  (define (raise-hopeless-exception exn [suffix #f])
     (define rep (drracket:rep:current-rep))
     ;; Throw an error as usual if we don't have the drracket rep, then we just
     ;; raise the exception as normal.  (It can happen in some rare cases like
     ;; having a single empty scheme box in the definitions.)
     (unless rep (if exn (raise exn) (error "\nInteractions disabled")))
-    (when prefix 
-      (display "Module Language: " (current-error-port))
-      (display prefix (current-error-port))
-      (display "\n" (current-error-port)))
     (when exn ((error-display-handler) (exn-message exn) exn))
     ;; these are needed, otherwise the warning can appear before the output
     (flush-output (current-output-port))
@@ -1163,13 +1164,14 @@
   (define module-language-online-expand-text-mixin
     (mixin (text:basic<%> 
             drracket:unit:definitions-text<%>
-            drracket:module-language-tools:definitions-text<%>) ()
-      (inherit last-position find-first-snip get-top-level-window get-filename
+            drracket:module-language-tools:definitions-text<%>
+            text:all-string-snips<%>) ()
+      (inherit last-position get-top-level-window get-filename
                get-tab get-canvas invalidate-bitmap-cache 
                set-position get-start-position get-end-position
                highlight-range dc-location-to-editor-location
                begin-edit-sequence end-edit-sequence in-edit-sequence?
-               find-snip save-port)
+               save-port all-string-snips? find-first-snip)
 
       (define/public (fetch-data-to-send)
         (define fn (let* ([b (box #f)]
@@ -1179,35 +1181,28 @@
         (cond
           [(all-string-snips?)
            (define str (make-string (last-position) #\space))
-           (define pos-or-f (fetch-string-or-check str))
-           (cond
-             [pos-or-f
-              ;; this case shouldn't happen
-              (values #f pos-or-f)]
-             [else (values str fn)])]
+           (fetch-string str)
+           (values str fn)]
           [else
            (define bp (open-output-bytes))
            (save-port bp 'standard)
            (values (get-output-bytes bp) fn)]))
-           
 
-      ;; fetch-string-or-check : (or/c string #f) -> (or/c exact-nonnegative-integer? #f)
-      ;; returns #f if the snips are all strings
-      ;; returns a number to indicate where the first non-string snip is.
-      ;; EFFECT: if str is a string, fills it in.
+      ;; fetch-string : string -> void
+      ;; EFFECT: fills in str
       ;; str's length must be the length of the buffer
-      (define/private (fetch-string-or-check str)
+      ;; all snips in the buffer must be string snips
+      (define/private (fetch-string str)
         (let loop ([s (find-first-snip)]
                    [i 0])
           (cond
             [(not s) #f]
-            [(is-a? s string-snip%)
+            [else
              (define size (send s get-count))
              (when str (send s get-text! str 0 size i))
-             (loop (send s next) (+ i size))]
-            [else
-             i])))
-      
+             (loop (send s next) (+ i size))])))
+
+
       ;; the state of the bottom bar (when this definitions text is
       ;; in the current tab)
       ; if the bar is hidden entirely 
@@ -1512,46 +1507,12 @@
         
       (define need-to-dirty? #f)
 
-      ;; (or/c #t #f 'dont-know)
-      (define all-string-snips-state #t)
-      (define/private (all-string-snips?)
-        (cond
-          [(boolean? all-string-snips-state)
-           all-string-snips-state]
-          [else
-           (define pos-or-f (fetch-string-or-check #f))
-           (set! all-string-snips-state (not pos-or-f))
-           all-string-snips-state]))
       
       (define/augment (after-insert start end) 
         (if (in-edit-sequence?)
             (set! need-to-dirty? #t)
             (oc-set-dirty (get-tab)))
-        (inner (void) after-insert start end)
-        
-        (when (equal? all-string-snips-state #t)
-          (let loop ([s (find-snip start 'after-or-none)]
-                     [i start])
-            (cond
-              [(not s) (void)]
-              [(not (< i end)) (void)]
-              [(is-a? s string-snip%)
-               (define size (send s get-count))
-               (loop (send s next) (+ i size))]
-              [else (set! all-string-snips-state #f)]))))
-
-      (define/augment (on-delete start end)
-        (inner (void) on-delete start end)
-        (when (equal? all-string-snips-state #f)
-          (let loop ([s (find-snip start 'after-or-none)]
-                     [i start])
-            (cond
-              [(not s) (void)]
-              [(not (< i end)) (void)]
-              [(is-a? s string-snip%)
-               (define size (send s get-count))
-               (loop (send s next) (+ i size))]
-              [else (set! all-string-snips-state 'dont-know)]))))
+        (inner (void) after-insert start end))
       
       (define/augment (after-delete start end) 
         (if (in-edit-sequence?)

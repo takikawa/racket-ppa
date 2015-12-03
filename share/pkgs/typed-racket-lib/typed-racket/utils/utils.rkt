@@ -14,10 +14,13 @@ at least theoretically.
  optimize?
  ;; timing
  start-timing do-time
- ;; logging
- show-input?
  ;; provide macros
- rep utils typecheck infer env private types static-contracts)
+ rep utils typecheck infer env private types static-contracts
+ ;; misc
+ list-extend
+ filter-multiple
+ syntax-length
+ in-sequence-forever)
 
 (define optimize? (make-parameter #t))
 (define-for-syntax enable-contracts? (and (getenv "PLT_TR_CONTRACTS") #t))
@@ -29,8 +32,6 @@ at least theoretically.
                                          (require racket/contract/region))))
       (syntax-rules () [(_) (begin)])))
 (do-contract-req)
-
-(define show-input? (make-parameter #f))
 
 ;; fancy require syntax
 (define-syntax (define-requirer stx)
@@ -200,3 +201,27 @@ at least theoretically.
                       (self-ctor-transformer (struct-info-self-ctor-id ins) stx))
           #:property prop:struct-info (λ (x) (extract-struct-info (struct-info-self-ctor-info x))))
   struct-info-self-ctor))
+
+;; Listof[A] Listof[B] B -> Listof[B]
+;; pads out t to be as long as s
+(define (list-extend s t extra)
+  (append t (build-list (max 0 (- (length s) (length t))) (lambda _ extra))))
+
+(define (filter-multiple l . fs)
+  (apply values
+         (map (lambda (f) (filter f l)) fs)))
+
+(define (syntax-length stx)
+  (let ((list (syntax->list stx)))
+    (and list (length list))))
+
+(define (in-sequence-forever seq val)
+  (make-do-sequence
+   (λ ()
+     (let-values ([(more? gen) (sequence-generate seq)])
+       (values (λ (e) (if (more?) (gen) val))
+               (λ (_) #t)
+               #t
+               (λ (_) #t)
+               (λ _ #t)
+               (λ _ #t))))))

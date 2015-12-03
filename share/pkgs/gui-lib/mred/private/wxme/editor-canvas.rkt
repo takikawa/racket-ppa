@@ -92,7 +92,9 @@
     
     (define/override (notify)
       (when canvas
-        (send canvas blink-caret)))
+	(if (send canvas is-shown-to-root?)
+            (send canvas blink-caret)
+	    (kill))))
 
     (define/public (kill)
       (set! canvas #f)
@@ -144,7 +146,7 @@
   (append
    (if (or (memq 'no-hscroll style)
            (memq 'hide-hscroll style))
-       null
+        null
        '(hscroll))
    (if (or (memq 'no-vscroll style)
            (memq 'hide-vscroll style))
@@ -219,7 +221,8 @@
                              (keep-style style 'control-border)
                              (keep-style style 'combo)
                              (keep-style style 'resize-corner)
-                             (keep-style style 'no-focus))
+                             (keep-style style 'no-focus)
+                             (keep-style style 'deleted))
                      name
                      gl-config)
 
@@ -732,11 +735,11 @@
                                (if (positive? hpixels-per-scroll)
                                    (cond
                                     [(or (and (eq? bias 'start) (fw . > . iw))
-                                         (and (fw . < . iw) (localx . < . x))
+                                         (and (fw . <= . iw) (localx . < . x))
                                          (and (fw . > . iw) (not (eq? bias 'end)) (localx . < . x)))
                                      (->long (/ localx hpixels-per-scroll))]
                                     [(or (and (eq? bias 'end) (fw . > . iw))
-                                         (and (fw . < . iw) ((+ x iw) . < . (+ localx fw)))
+                                         (and (fw . <= . iw) ((+ x iw) . < . (+ localx fw)))
                                          (and (fw . > . iw) (not (eq? bias 'start)) ((+ localx fw) . > . (+ x iw))))
                                      (+ (->long (/ (+ localx (- fw iw)) hpixels-per-scroll)) 1)]
                                     [else cx])
@@ -946,20 +949,21 @@
         (or
          ;; Set x
          (and (x . > . -1)
-              (not fake-x-scroll?)
               (positive? scroll-width)
               (let ([x (min (->long (min x scroll-width)) 10000000)])
                 (and (not (= x old-x))
-                     (begin (set-scroll-pos 'horizontal x)
-                            #t))))
+                     (begin
+                       (when (not fake-x-scroll?)
+                         (set-scroll-pos 'horizontal x))
+                       #t))))
          ;; Set y
          (and (y . > . -1)
-              (not fake-y-scroll?)
               (positive? scroll-height)
               (let ([y (min (->long (min y scroll-height))  10000000)])
                 (and (not (= y old-y))
                      (begin
-                       (set-scroll-pos 'vertical y)
+                       (when (not fake-y-scroll?)
+                         (set-scroll-pos 'vertical y))
                        #t))))))
       
       (set! noloop? savenoloop?)

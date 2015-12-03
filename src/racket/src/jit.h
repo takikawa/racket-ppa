@@ -313,6 +313,8 @@ struct scheme_jit_common_record {
   void *bad_vector_length_code;
   void *bad_flvector_length_code;
   void *bad_fxvector_length_code;
+  void *bad_string_length_code;
+  void *bad_bytes_length_code;
   void *vector_ref_code, *vector_ref_check_index_code, *vector_set_code, *vector_set_check_index_code;
   void *chap_vector_ref_code, *chap_vector_ref_check_index_code, *chap_vector_set_code, *chap_vector_set_check_index_code;
   void *string_ref_code, *string_ref_check_index_code, *string_set_code, *string_set_check_index_code;
@@ -339,12 +341,14 @@ struct scheme_jit_common_record {
   void *bad_app_vals_target;
   void *app_values_slow_code, *app_values_multi_slow_code, *app_values_tail_slow_code;
   void *bad_char_to_integer_code, *slow_integer_to_char_code;
+  void *slow_cpointer_tag_code, *slow_set_cpointer_tag_code;
   void *values_code;
   void *list_p_code, *list_p_branch_code;
   void *list_length_code;
   void *list_ref_code, *list_tail_code;
   void *finish_tail_call_code, *finish_tail_call_fixup_code;
   void *module_run_start_code, *module_exprun_start_code, *module_start_start_code;
+  void *thread_start_child_code;
   void *box_flonum_from_stack_code, *box_flonum_from_reg_code;
   void *fl1_fail_code[JIT_NUM_FL_KINDS], *fl2rr_fail_code[2][JIT_NUM_FL_KINDS];
   void *fl2fr_fail_code[2][JIT_NUM_FL_KINDS], *fl2rf_fail_code[2][JIT_NUM_FL_KINDS];
@@ -353,8 +357,11 @@ struct scheme_jit_common_record {
   void *box_extflonum_from_stack_code, *box_extflonum_from_reg_code;
 #endif
   void *wcm_code, *wcm_nontail_code, *wcm_chaperone;
+  void *with_immed_mark_code;
   void *apply_to_list_tail_code, *apply_to_list_code, *apply_to_list_multi_ok_code;
   void *eqv_code, *eqv_branch_code;
+  void *bad_string_eq_2_code;
+  void *bad_bytes_eq_2_code;
   void *proc_arity_includes_code;
 
 #ifdef CAN_INLINE_ALLOC
@@ -369,6 +376,7 @@ struct scheme_jit_common_record {
   void *make_rest_list_code, *make_rest_list_clear_code;
   void *call_check_not_defined_code, *call_check_assign_not_defined_code;
   void *force_value_same_mark_code;
+  void *slow_ptr_set_code, *slow_ptr_ref_code;
 
   Continuation_Apply_Indirect continuation_apply_indirect_code;
 #ifdef MZ_USE_LWC
@@ -456,6 +464,12 @@ typedef struct {
   int addrs_count, addrs_size;
   Branch_Info_Addr *addrs;
 } Branch_Info;
+
+typedef struct {
+  int position;
+  int count;
+  char delivered;
+} Expected_Values_Info;
 
 #define mz_CURRENT_REG_STATUS_VALID() (jitter->status_at_ptr == _jit.x.pc)
 #define mz_SET_REG_STATUS_VALID(v) (jitter->status_at_ptr = (v ? _jit.x.pc : 0))
@@ -1160,7 +1174,9 @@ static void emit_indentation(mz_jit_state *jitter)
 #define jit_movi_d_fppush(rd,immd)    jit_movi_d(rd,immd)
 #define jit_ldi_d_fppush(rd, is)      jit_ldi_d(rd, is)
 #define jit_ldr_d_fppush(rd, rs)      jit_ldr_d(rd, rs)
+#define jit_ldr_f_fppush(rd, rs)      jit_ldr_f(rd, rs)
 #define jit_ldxi_d_fppush(rd, rs, is) jit_ldxi_d(rd, rs, is)
+#define jit_ldxi_f_fppush(rd, rs, is) jit_ldxi_f(rd, rs, is)
 #define jit_ldxr_d_fppush(rd, rs, is) jit_ldxr_d(rd, rs, is)
 #define jit_addr_d_fppop(rd,s1,s2)    jit_addr_d(rd,s1,s2)
 #define jit_subr_d_fppop(rd,s1,s2)    jit_subr_d(rd,s1,s2)
@@ -1173,6 +1189,7 @@ static void emit_indentation(mz_jit_state *jitter)
 #define jit_sqrt_d_fppop(rd,rs)       jit_sqrt_d(rd,rs)
 #define jit_sti_d_fppop(id, rs)       jit_sti_d(id, rs)
 #define jit_str_d_fppop(id, rd)       jit_str_d(id, rd)
+#define jit_str_f_fppop(id, rd)       jit_str_f(id, rd)
 #define jit_stxi_d_fppop(id, rd, rs)  jit_stxi_d(id, rd, rs)
 #define jit_stxr_d_fppop(id, rd, rs)  jit_stxr_d(id, rd, rs)
 #define jit_bger_d_fppop(d, s1, s2)   jit_bger_d(d, s1, s2)
@@ -1388,16 +1405,16 @@ int scheme_inlined_unary_prim(Scheme_Object *o, Scheme_Object *_app, mz_jit_stat
 int scheme_inlined_binary_prim(Scheme_Object *o, Scheme_Object *_app, mz_jit_state *jitter);
 int scheme_inlined_nary_prim(Scheme_Object *o, Scheme_Object *_app, mz_jit_state *jitter);
 int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, int is_tail, int multi_ok, 
-				  Branch_Info *for_branch, int branch_short, int need_sync, int result_ignored,
+				  Branch_Info *for_branch, int branch_short, int result_ignored,
                                   int dest);
 int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, int is_tail, int multi_ok, 
-				   Branch_Info *for_branch, int branch_short, int need_sync, int result_ignored,
+				   Branch_Info *for_branch, int branch_short, int result_ignored,
                                    int dest);
 int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int is_tail, int multi_ok, 
                                  Branch_Info *for_branch, int branch_short, int result_ignored,
                                  int dest);
 int scheme_generate_inlined_test(mz_jit_state *jitter, Scheme_Object *obj, int branch_short, 
-                                 Branch_Info *for_branch, int need_sync);
+                                 Branch_Info *for_branch);
 int scheme_generate_cons_alloc(mz_jit_state *jitter, int rev, int inline_retry, int known_list, int dest);
 int scheme_generate_struct_alloc(mz_jit_state *jitter, int num_args, 
                                  int inline_slow, int pop_and_jump,
@@ -1520,8 +1537,10 @@ int scheme_generate_struct_op(mz_jit_state *jitter, int kind, int for_branch,
 int scheme_generate_non_tail(Scheme_Object *obj, mz_jit_state *jitter, int multi_ok, int need_ends, int ignored);
 int scheme_generate_non_tail_with_branch(Scheme_Object *obj, mz_jit_state *jitter, int multi_ok, int need_ends, int ignored,  
                                          Branch_Info *for_branch);
+int scheme_generate_non_tail_for_values(Scheme_Object *obj, mz_jit_state *jitter, int multi_ok, int need_ends, int ignored,  
+                                        Expected_Values_Info *for_values);
 int scheme_generate(Scheme_Object *obj, mz_jit_state *jitter, int tail_ok, int wcm_may_replace, int multi_ok, int target,
-                    Branch_Info *for_branch);
+                    Branch_Info *for_branch, Expected_Values_Info *for_values);
 int scheme_generate_unboxed(Scheme_Object *obj, mz_jit_state *jitter, int inlined_ok, int unbox_anyway);
 
 void scheme_generate_function_prolog(mz_jit_state *jitter);

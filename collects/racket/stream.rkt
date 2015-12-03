@@ -27,6 +27,7 @@
          in-stream
 
          stream
+         stream*
          stream->list
          stream-length
          stream-ref
@@ -44,9 +45,13 @@
          stream/c)
 
 (define-syntax gen:stream
-  (make-generic-info (quote-syntax prop:stream)
+  (make-generic-info (quote-syntax gen:stream)
+                     (quote-syntax prop:stream)
                      (quote-syntax stream-via-prop?)
                      (quote-syntax stream-get-generics)
+                     (list (quote-syntax stream-empty?)
+                           (quote-syntax stream-first)
+                           (quote-syntax stream-rest))
                      (list (quote-syntax stream-empty?)
                            (quote-syntax stream-first)
                            (quote-syntax stream-rest))))
@@ -57,6 +62,13 @@
      empty-stream)
     ((_ hd tl ...)
      (stream-cons hd (stream tl ...)))))
+
+(define-syntax stream*
+  (syntax-rules ()
+    [(_ hd tl)
+     (stream-cons hd tl)]
+    [(_ hd tl ...)
+     (stream-cons hd (stream* tl ...))]))
 
 (define (stream->list s)
   (for/list ([v (in-stream s)]) v))

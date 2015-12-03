@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.2"))) (define collection "icons") (define deps (quote ("base"))) (define pkg-desc "An assortment of images") (define pkg-authors (quote (ntoronto robby)))))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.3"))) (define collection "icons") (define deps (quote ("base"))) (define pkg-desc "An assortment of images") (define pkg-authors (quote (ntoronto robby)))))

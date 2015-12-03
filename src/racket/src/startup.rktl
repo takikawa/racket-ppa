@@ -38,6 +38,7 @@
              and or
              cond
              let let* letrec
+             let*-values
              parameterize
              define)
 
@@ -126,6 +127,17 @@
                (list* 'let-values () (cdr s))
                (list 'let (list (car fst))
                      (list* 'let* (cdr fst) (cdr s)))))))))
+
+  (define-syntaxes (let*-values)
+    (lambda (stx)
+      (let-values ([(s) (cdr (syntax->list stx))])
+        (let-values ([(fst) (syntax->list (car s))])
+          (datum->syntax 
+           here-stx
+           (if (null? fst)
+               (list* 'let-values () (cdr s))
+               (list 'let-values (list (car fst))
+                     (list* 'let*-values (cdr fst) (cdr s)))))))))
 
   (define-syntaxes (parameterize)
     (lambda (stx)
@@ -617,7 +629,8 @@
     (lambda (links-path)
       ;; Use/save information in `links-cache', relying on filesystem-change events
       ;; or a copy of the file to detect when the cache is stale.
-      (call/ec (lambda (esc)
+      (call-with-escape-continuation
+                (lambda (esc)
                  (define-values (make-handler)
                    (lambda (ts)
                      (lambda (exn)

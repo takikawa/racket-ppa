@@ -5,21 +5,23 @@
 (require "../utils/utils.rkt"
          (except-in (rep type-rep object-rep) make-arr)
          (rename-in (types abbrev union utils filter-ops resolve
-                           classes prefab)
+                           classes prefab signatures)
                     [make-arr* make-arr])
          (utils tc-utils stxclass-util literal-syntax-class)
          syntax/stx (prefix-in c: (contract-req))
-         syntax/parse unstable/sequence
+         syntax/parse racket/sequence
          (env tvar-env type-alias-env mvar-env
-              lexical-env index-env row-constraint-env)
+              lexical-env index-env row-constraint-env
+              signature-env)
          racket/dict
+         racket/list
          racket/promise
          racket/format
          racket/match
-         (only-in unstable/list check-duplicate)
          "parse-classes.rkt"
          (for-label
            (except-in racket/base case-lambda)
+           racket/unit
            "../base-env/colon.rkt"
            "../base-env/base-types-extra.rkt"
            ;; match on the `case-lambda` binding in the TR primitives
@@ -79,6 +81,10 @@
 (define-literal-syntax-class #:for-label cons)
 (define-literal-syntax-class #:for-label Class)
 (define-literal-syntax-class #:for-label Object)
+(define-literal-syntax-class #:for-label Unit)
+(define-literal-syntax-class #:for-label import)
+(define-literal-syntax-class #:for-label export)
+(define-literal-syntax-class #:for-label init-depend)
 (define-literal-syntax-class #:for-label Refinement)
 (define-literal-syntax-class #:for-label Instance)
 (define-literal-syntax-class #:for-label List)
@@ -98,8 +104,10 @@
 (define-literal-syntax-class #:for-label Prefab)
 (define-literal-syntax-class #:for-label Values)
 (define-literal-syntax-class #:for-label values)
+(define-literal-syntax-class #:for-label AnyValues)
 (define-literal-syntax-class #:for-label Top)
 (define-literal-syntax-class #:for-label Bot)
+(define-literal-syntax-class #:for-label Distinction)
 
 ;; (Syntax -> Type) -> Syntax Any -> Syntax
 ;; See `parse-type/id`. This is a curried generalization.
@@ -185,23 +193,33 @@
            #:when (not (syntax->list #'t))))
 
 ;; syntax classes for parsing ->* function types
-(define-syntax-class ->*-mand
-  #:description "mandatory arguments for ->*"
+(define-syntax-class (->*-args mand?)
+  #:description "type arguments for ->*"
   #:attributes (doms kws)
-  (pattern (dom:non-keyword-ty ... kw:plain-kw-tys ...)
-           #:attr doms (syntax->list #'(dom ...))
-           #:attr kws  (attribute kw.mand-kw)))
+  (pattern ((~var dom (->*-dom mand?)) ...)
+           #:do [(define-values (kws doms)
+                   ;; would like to use `partition` but we need to traverse multiple
+                   ;; lists rather than just checking Keyword? due to laziness
+                   (for/fold ([kws null] [doms null])
+                             ([kw? (in-list (attribute dom.kw?))]
+                              [type/kw (attribute dom.result)])
+                     (if kw?
+                         (values (cons type/kw kws) doms)
+                         (values kws (cons type/kw doms)))))]
+           #:attr doms (reverse doms)
+           #:attr kws (reverse kws)))
 
-(define-splicing-syntax-class ->*-opt
-  #:description "optional arguments for ->*"
-  #:attributes (doms kws)
- (pattern (~optional (dom:non-keyword-ty ... kw:plain-kw-tys ...))
-          #:attr doms (if (attribute dom)
-                          (syntax->list #'(dom ...))
-                          null)
-          #:attr kws (if (attribute kw)
-                         (attribute kw.opt-kw)
-                         null)))
+;; parameterized syntax class for parsing ->* domains.
+(define-splicing-syntax-class (->*-dom mand?)
+  #:attributes (kw? result)
+  (pattern (~seq k:keyword t:expr)
+           #:attr kw? #t
+           #:attr result
+           (delay (make-Keyword (syntax-e #'k) (parse-type #'t) mand?)))
+  (pattern t:expr
+           #:attr kw? #f
+           ;; does not need to be delayed since there's no parsing done
+           #:attr result #'t))
 
 (define-splicing-syntax-class ->*-rest
   #:description "rest argument type for ->*"
@@ -364,6 +382,42 @@
                                  "given" v)
                     (make-Instance (Un)))
              (make-Instance v)))]
+      [(:Unit^ (:import^ import:id ...)
+               (:export^ export:id ...)
+               (~optional (:init-depend^ init-depend:id ...) 
+                          #:defaults ([(init-depend 1) null]))
+               (~optional result
+                          #:defaults ([result #f])))
+       ;; Lookup an identifier in the signature environment
+       ;; Fail with a parse error, if the lookup returns #f
+       (define (id->sig id)
+         (or (lookup-signature id)
+             (parse-error #:stx id
+                          #:delayed? #f
+                          "Unknown signature used in Unit type"
+                          "signature" (syntax-e id))))
+       (define (import/export-error)
+         (parse-error #:stx stx
+                      #:delayed? #f
+                      "Unit types must import and export distinct signatures"))
+       (define (init-depend-error)
+         (parse-error
+            #:stx stx
+            #:delayed? #f
+            "Unit type initialization dependencies must be a subset of imports"))
+       (define imports
+         (check-imports/exports (stx-map id->sig #'(import ...)) import/export-error))
+       (define exports
+         (check-imports/exports (stx-map id->sig #'(export ...)) import/export-error))
+       (define init-depends
+         (check-init-depends/imports (stx-map id->sig #'(init-depend ...))
+                                     imports
+                                     init-depend-error))
+       (define res (attribute result))
+       (make-Unit imports
+                  exports
+                  init-depends
+                  (if res (parse-values-type res) (-values (list -Void))))]
       [(:List^ ts ...)
        (parse-list-type stx)]
       [(:List*^ ts ... t)
@@ -417,11 +471,18 @@
        (parse-all-type stx)]
       [(:Opaque^ p?:id)
        (make-Opaque #'p?)]
+      [(:Distinction^ name:id unique-id:id rep-ty:expr)
+       (-Distinction (syntax-e #'name) (syntax-e #'unique-id) (parse-type #'rep-ty))]
       [(:Parameter^ t)
        (let ([ty (parse-type #'t)])
          (-Param ty ty))]
       [(:Parameter^ t1 t2)
        (-Param (parse-type #'t1) (parse-type #'t2))]
+      [((~and p :Parameter^) args ...)
+       (parse-error
+        #:stx stx
+        (~a (syntax-e #'p) " expects one or two type arguments, given "
+            (sub1 (length (syntax->list #'(args ...))))))]
       ;; curried function notation
       [((~and dom:non-keyword-ty (~not :->^)) ...
         :->^
@@ -502,7 +563,11 @@
               (parse-type #'rng)
               : (-FS (attribute latent.positive) (attribute latent.negative))
               : (attribute latent.object)))]
-      [(:->*^ mand:->*-mand opt:->*-opt rest:->*-rest rng)
+      [(:->*^ (~var mand (->*-args #t))
+              (~optional (~var opt (->*-args #f))
+                         #:defaults ([opt.doms null] [opt.kws null]))
+              rest:->*-rest
+              rng)
        (with-arity (length (attribute mand.doms))
          (define doms (for/list ([d (attribute mand.doms)])
                         (parse-type d)))
@@ -605,7 +670,7 @@
        (-Tuple (parse-types #'(tys ...)))])))
 
 ;; Syntax -> Type
-;; Parse a (Values ...) type
+;; Parse a (Values ...) or AnyValues type
 (define (parse-values-type stx)
   (parameterize ([current-orig-stx stx])
     (syntax-parse stx
@@ -627,6 +692,7 @@
                        var))]
       [((~or :Values^ :values^) tys ...)
        (-values (parse-types #'(tys ...)))]
+      [:AnyValues^ ManyUniv]
       [t
        (-values (list (parse-type #'t)))])))
 
@@ -675,10 +741,10 @@
   (define merged-augments (merge-clause super-augments augments))
 
   ;; make sure augments and methods are disjoint
-  (define maybe-dup-method (check-duplicate (dict-keys merged-methods)))
+  (define maybe-dup-method (check-duplicates (dict-keys merged-methods)))
   (when maybe-dup-method
     (parse-error "duplicate method name" "name" maybe-dup-method))
-  (define maybe-dup-augment (check-duplicate (dict-keys merged-augments)))
+  (define maybe-dup-augment (check-duplicates (dict-keys merged-augments)))
   (when maybe-dup-augment
     (parse-error "duplicate augmentable method name"
                  "name" maybe-dup-augment))
@@ -857,6 +923,7 @@
      (ret (parse-types #'(t ...))
           (stx-map (lambda (x) -no-filter) #'(t ...))
           (stx-map (lambda (x) -no-obj) #'(t ...)))]
+    [:AnyValues^ (tc-any-results -no-filter)]
     [t (ret (parse-type #'t) -no-filter -no-obj)]))
 
 (define parse-type/id (parse/id parse-type))

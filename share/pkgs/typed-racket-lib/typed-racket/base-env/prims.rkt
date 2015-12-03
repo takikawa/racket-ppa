@@ -39,6 +39,7 @@ the typed racket language.
          (all-from-out "case-lambda.rkt")
          (all-from-out (submod "prims-contract.rkt" forms))
          define-type-alias
+         define-new-subtype
          define-typed-struct
          define-typed-struct/exec
          ann inst
@@ -55,6 +56,7 @@ the typed racket language.
                      [-let* let*]
                      [-letrec letrec]
                      [-let-values let-values]
+                     [-let*-values let*-values]
                      [-letrec-values letrec-values]
                      [-let/cc let/cc]
                      [-let/ec let/ec]
@@ -62,6 +64,7 @@ the typed racket language.
                      [-let* let*:]
                      [-letrec letrec:]
                      [-let-values let-values:]
+                     [-let*-values let*-values:]
                      [-letrec-values letrec-values:]
                      [-let/cc let/cc:]
                      [-let/ec let/ec:]
@@ -123,7 +126,6 @@ the typed racket language.
           syntax/stx
           racket/list
           racket/syntax
-          unstable/syntax
           racket/base
           (only-in "../typecheck/internal-forms.rkt" internal)
           "annotate-classes.rkt"
@@ -201,6 +203,7 @@ the typed racket language.
   (let ([mk (lambda (form)
               (lambda (stx)
                 (syntax-parse stx
+                  #:context (list (syntax-e form) stx)
                   [(_ (bs:optionally-annotated-binding ...) . body)
                    (quasisyntax/loc stx (#,form (bs.binding ...) . body))])))])
     (values (mk #'let) (mk #'let*) (mk #'letrec))))
@@ -478,14 +481,17 @@ the typed racket language.
         clause:for-clauses
         a2:optional-standalone-annotation*
         c ...)
+     (define all-typed? (andmap values (attribute var.ty)))
+     (define for-stx
+       (quasisyntax/loc stx
+         (for/lists (var.ann-name ...)
+             (clause.expand* ... ...)
+           c ...)))
      ((attribute a1.annotate)
       ((attribute a2.annotate)
-       (add-ann
-        (quasisyntax/loc stx
-          (for/lists (var.ann-name ...)
-              (clause.expand* ... ...)
-            c ...))
-        #'(values var.ty ...))))]))
+       (if all-typed?
+           (add-ann for-stx #'(values var.ty ...))
+           for-stx)))]))
 (define-syntax (for*/fold: stx)
   (syntax-parse stx #:literals (:)
     [(_ a1:optional-standalone-annotation*
@@ -493,14 +499,17 @@ the typed racket language.
         clause:for-clauses
         a2:optional-standalone-annotation*
         c ...)
+     (define all-typed? (andmap values (attribute var.ty)))
+     (define for-stx
+       (quasisyntax/loc stx
+         (for/fold ((var.ann-name init) ...)
+             (clause.expand* ... ...)
+           c ...)))
      ((attribute a1.annotate)
       ((attribute a2.annotate)
-       (add-ann
-        (quasisyntax/loc stx
-          (for/fold ((var.ann-name init) ...)
-              (clause.expand* ... ...)
-            c ...))
-        #'(values var.ty ...))))]))
+       (if all-typed?
+           (add-ann for-stx #'(values var.ty ...))
+           for-stx)))]))
 
 (define-for-syntax (define-for/acc:-variant for*? for/folder: for/folder op initial final)
   (lambda (stx)
@@ -770,13 +779,13 @@ the typed racket language.
 (define-syntax (typecheck-fail stx)
   (syntax-parse stx
     [(_ orig msg:str #:covered-id var:id)
-     #'(quote (typecheck-fail-internal orig msg var))]
+     #'(quote-syntax (typecheck-fail-internal orig msg var) #:local)]
     [(_ orig msg:str)
-     #'(quote (typecheck-fail-internal orig msg #f))]
+     #'(quote-syntax (typecheck-fail-internal orig msg #f) #:local)]
     [(_ orig #:covered-id var:id)
-     #'(quote (typecheck-fail-internal orig "Incomplete case coverage" var))]
+     #'(quote-syntax (typecheck-fail-internal orig "Incomplete case coverage" var) #:local)]
     [(_ orig)
-     #'(quote(typecheck-fail-internal orig "Incomplete case coverage" #f))]))
+     #'(quote-syntax (typecheck-fail-internal orig "Incomplete case coverage" #f) #:local)]))
 
 (define-syntax (base-for/vector stx)
   (syntax-case stx ()

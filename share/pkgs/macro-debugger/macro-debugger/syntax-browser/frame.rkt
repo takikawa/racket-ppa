@@ -1,7 +1,7 @@
 #lang racket/base
 (require racket/class
          racket/gui/base
-         unstable/class-iop
+         racket/class/iop
          macro-debugger/syntax-browser/interfaces
          macro-debugger/syntax-browser/partition
          "prefs.rkt"
@@ -75,9 +75,10 @@
            (choices (map car -identifier=-choices))
            (callback 
             (lambda (c e)
-              (send/i (get-controller) controller<%> set-identifier=?
-                     (assoc (send c get-string-selection)
-                            -identifier=-choices))))))
+              (cond [(assoc (send c get-string-selection)
+                            -identifier=-choices)
+                     => (lambda (p) (send/i (get-controller) controller<%>
+                                       set-identifier=? (cdr p)))])))))
     (new button% 
          (label "Clear")
          (parent -control-panel)
@@ -91,7 +92,9 @@
                    (not (send/i config config<%> get-props-shown?))))))
 
     (send/i (get-controller) controller<%> listen-identifier=?
-           (lambda (name+func)
-             (send -choice set-selection
-                   (or (send -choice find-string (car name+func)) 0))))
+            (lambda (func)
+              (send -choice set-string-selection
+                    (for/or ([name+func (in-list -identifier=-choices)])
+                      (and (eq? (cdr name+func) func)
+                           (car name+func))))))
     ))

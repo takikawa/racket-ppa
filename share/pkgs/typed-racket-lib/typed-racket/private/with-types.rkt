@@ -12,12 +12,12 @@
          racket/syntax
          syntax/flatten-begin
          syntax/parse
-         unstable/sequence
+         racket/sequence
          "../tc-setup.rkt"
          "../standard-inits.rkt"
          (for-template
           (except-in racket/base for for* with-handlers lambda λ define
-                     let let* letrec letrec-values let-values
+                     let let* letrec letrec-values let-values let*-values
                      let/cc let/ec do case-lambda struct define-struct
                      default-continuation-prompt-tag
                      for/list for/vector for/hash for/hasheq for/hasheqv

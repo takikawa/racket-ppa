@@ -1,5 +1,5 @@
 #lang racket/base
-(require unstable/class-iop
+(require racket/class/iop
          (for-syntax racket/base))
 (provide (all-defined-out))
 
@@ -44,32 +44,30 @@
    add-syntax-display
 
    ;; remove-all-syntax-displays : -> void
-   remove-all-syntax-displays))
+   remove-all-syntax-displays
+
+   ;; refresh-all-displays : -> void
+   refresh-all-displays))
 
 ;; selection-manager<%>
 (define-interface selection-manager<%> ()
   (;; selected-syntax : notify-box of syntax/#f
    (methods:notify selected-syntax)))
 
-;; mark-manager<%>
-;; Manages marks, mappings from marks to colors
-(define-interface mark-manager<%> ()
-  (;; get-primary-partition : -> partition
-   get-primary-partition
-
-   ;; reset-primary-partition : -> void
+;; relation<%>
+(define-interface relation<%> ()
+  (;; identifier=? : notify-box of (U #f (id id -> bool))
+   (methods:notify identifier=?)
+   ;; primary-partition-factory : notify-box of (-> partition%)
+   ;; primary-partition : notify-box of partition%
+   (methods:notify primary-partition-factory)
+   (methods:notify primary-partition)
    reset-primary-partition))
-
-;; secondary-relation<%>
-(define-interface secondary-relation<%> ()
-  (;; identifier=? : notify-box of (cons string (U #f (id id -> bool)))
-   (methods:notify identifier=?)))
 
 ;; controller<%>
 (define-interface controller<%> (displays-manager<%>
                                  selection-manager<%>
-                                 mark-manager<%>
-                                 secondary-relation<%>)
+                                 relation<%>)
   ())
 
 

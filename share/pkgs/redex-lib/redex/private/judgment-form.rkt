@@ -41,13 +41,18 @@
             (values term name subs)))
 
 ;; structs that hold intermediate results when building a derivation
-(struct derivation-subs-acc (subs-so-far this-output) #:transparent)
+(struct derivation-subs-acc (subs-so-far rulename this-output) #:transparent)
 (struct derivation-with-output-only (output name subs) #:transparent)
 
 ;; Intermediate structures recording clause "extras" for typesetting.
 (define-struct metafunc-extra-side-cond (expr))
 (define-struct metafunc-extra-where (lhs rhs))
 (define-struct metafunc-extra-fresh (vars))
+
+(define-struct runtime-judgment-form (name proc mode cache)
+  #:methods gen:custom-write
+  [(define (write-proc tuple port mode)
+     (display "#<judgment-form>" port))])
 
 (begin-for-syntax
   ;; pre: (judgment-form-id? stx) holds
@@ -326,24 +331,37 @@
             (for*/list ([o output] [os (repeated-premise-outputs (cdr inputs) premise)])
               (cons o os))))))
 
+(define (IO-judgment-form? jf)
+  (and (runtime-judgment-form? jf)
+       (or (equal? (runtime-judgment-form-mode jf) '(I O))
+           (equal? (runtime-judgment-form-mode jf) '(O I)))))
+
 (define not-in-cache (gensym))
-(define (call-judgment-form form-name form-proc mode input derivation-init boxed-cache)
+(define (call-judgment-form form-name form-proc mode input derivation-init pair-of-boxed-caches)
+  (define boxed-cache (if (include-entire-derivation)
+                          (car pair-of-boxed-caches)
+                          (cdr pair-of-boxed-caches)))
   (when (caching-enabled?)
     (when (>= (hash-count (unbox boxed-cache)) cache-size)
       (set-box! boxed-cache (make-hash))))
   (define traced (current-traced-metafunctions))
   (define cache (unbox boxed-cache))
   (define in-cache? (and (caching-enabled?)
-                         (not (eq? (hash-ref cache input not-in-cache) not-in-cache))))
+                         (let ([cache-value (hash-ref cache input not-in-cache)])
+                           (not (eq? cache-value not-in-cache)))))
   (define p-a-e (print-as-expression))
   (define (form-proc/cache recur input derivation-init)
     (parameterize ([print-as-expression p-a-e])
       (cond
         [(caching-enabled?)
-         (hash-ref!
-          cache
-          input
-          (λ () (form-proc recur input derivation-init)))]
+         (define candidate (hash-ref cache input not-in-cache))
+         (cond
+           [(equal? candidate not-in-cache)
+            (define computed-ans (form-proc recur input derivation-init))
+            (hash-set! cache input computed-ans)
+            computed-ans]
+           [else
+            candidate])]
         [else (form-proc recur input derivation-init)])))
   (define vecs
     (if (or (eq? 'all traced) (memq form-name traced))
@@ -394,9 +412,11 @@
                             (if (include-entire-derivation)
                                 (reverse subs)
                                 '())))
+      (and (include-jf-rulename) rulename)
       this-output))))
 
 (define include-entire-derivation (make-parameter #f))
+(define include-jf-rulename (make-parameter #f))
 
 (define (verify-name-ok orig-name the-name)
   (unless (symbol? the-name)
@@ -635,6 +655,15 @@
                   (cons (cadr more) arg-pats))]
            [else (values (reverse arg-pats) more)])))]))
 
+(define-for-syntax (expand-to-id id stx)
+  (syntax-case stx ()
+    [(_ args ...)
+     (with-syntax ([app (datum->syntax stx '#%app)])
+       #`(app #,id args ...))]
+    [x
+     (identifier? #'x)
+     id]))
+
 (define-for-syntax (do-extended-judgment-form lang syn-err-name body orig stx is-relation?)
   (define nts (definition-nts lang stx syn-err-name))
   (define-values (judgment-form-name dup-form-names mode position-contracts invariant clauses rule-names)
@@ -649,7 +678,7 @@
             (judgment-form '#,judgment-form-name '#,(cdr (syntax->datum mode)) #'judgment-form-runtime-proc
                            #'mk-judgment-form-proc #'#,lang #'jf-lws
                            '#,rule-names #'judgment-runtime-gen-clauses #'mk-judgment-gen-clauses #'jf-term-proc #,is-relation?
-                           #'jf-cache))
+                           #'jf-cache (λ (stx) (expand-to-id #'the-runtime-judgment-form stx))))
           (define-values (mk-judgment-form-proc mk-judgment-gen-clauses)
             (compile-judgment-form #,judgment-form-name #,mode #,lang #,clauses #,rule-names #,position-contracts #,invariant
                                    #,orig #,stx #,syn-err-name judgment-runtime-gen-clauses))
@@ -657,7 +686,12 @@
           (define jf-lws (compiled-judgment-form-lws #,clauses #,judgment-form-name #,stx))
           (define judgment-runtime-gen-clauses (mk-judgment-gen-clauses #,lang (λ () (judgment-runtime-gen-clauses))))
           (define jf-term-proc (make-jf-term-proc #,judgment-form-name #,syn-err-name #,lang #,nts #,mode))
-          (define jf-cache (box (make-hash))))))
+          (define jf-cache (cons (box (make-hash)) (box (make-hash))))
+          (define the-runtime-judgment-form
+            (runtime-judgment-form '#,judgment-form-name
+                                   judgment-form-runtime-proc
+                                   '#,(cdr (syntax->datum mode))
+                                   jf-cache)))))
   (syntax-property
    (values ;prune-syntax
     (if (eq? 'top-level (syntax-local-context))
@@ -872,9 +906,7 @@
             #,(if id-or-not
                   #`(let ([#,id-or-not '()])
                       #,main-stx)
-                  #`(sort #,main-stx
-                          string<=?
-                          #:key (λ (x) (format "~s" x)))))
+                  #`(sort-as-strings #,main-stx)))
         'disappeared-use
         (syntax-local-introduce #'form-name)))]
     [(_ stx-name derivation? (not-form-name . _) . _)
@@ -884,6 +916,8 @@
      (raise-syntax-error (syntax-e #'stx-name)
                          "bad syntax"
                          stx)]))
+
+(define (sort-as-strings l) (sort l string<? #:key (λ (x) (format "~s" x))))
 
 (define-syntax (judgment-holds stx)
   (syntax-case stx ()
@@ -1090,6 +1124,7 @@
                         (term-fn? (syntax-local-value #'x (λ () #f)))]
                        [else #t])
            (raise-syntax-error syn-err-name "unbound pattern variable" #'x))]
+        [(unquote e) (void)]
         [(u ...)
          (for-each check (syntax->list #'(u ...)))]
         [_ (void)])))
@@ -1125,7 +1160,7 @@
          (check-judgment-arity orig-stx #'conc)
          (define acc-out
            (for/fold ([acc (foldl pat-pos acc-init conc-in)])
-             ([prem (drop-ellipses #'prems)])
+                     ([prem (drop-ellipses #'prems)])
              (syntax-case prem ()
                [(-where pat tmpl)
                 (where-keyword? #'-where)
@@ -1146,7 +1181,7 @@
                [_ (raise-syntax-error syn-err-name "malformed premise" prem)])))
          (for ([pos conc-out]) (tmpl-pos pos acc-out))
          acc-out)]))
-  (for ([clause clauses])
+  (for ([clause (in-list clauses)])
     (define do-tmpl
       (check-template
        (fold-clause (bind 'rhs-only) void (make-immutable-free-id-table) clause)))
@@ -1464,12 +1499,12 @@
      (if relation?
          rest
          (begin
-           (for-each 
-            (λ (clause)
-              (syntax-case clause ()
-                [(a b) (void)]
-                [x (raise-syntax-error syn-error-name "expected a pattern and a right-hand side" stx clause)]))
-            rest)
+           (for ([clause (in-list rest)])
+             (syntax-case clause ()
+               [(a b c ...) (void)]
+               [x (raise-syntax-error
+                   syn-error-name
+                   "expected a pattern and a right-hand side" stx clause)]))
            (raise-syntax-error syn-error-name "error checking failed.3" stx)))]
     [([x roc ...] ...)
      (begin
@@ -1668,6 +1703,12 @@
          judgment-holds
          build-derivations
          generate-lws
+         IO-judgment-form?
+         judgment-form?
+         call-judgment-form
+         include-jf-rulename
+         (struct-out derivation-subs-acc)
+         (struct-out runtime-judgment-form)
          (struct-out derivation)
          (for-syntax extract-term-let-binds
                      name-pattern-lws

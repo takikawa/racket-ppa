@@ -2,7 +2,7 @@
 (require racket/class
          racket/gui/base
          (only-in mzlib/string read-from-string)
-         unstable/class-iop
+         racket/class/iop
          macro-debugger/syntax-browser/interfaces
          "controller.rkt"
          "properties.rkt"

@@ -11,6 +11,7 @@
          racket/match racket/list
          racket/contract
          racket/lazy-require
+         racket/promise
          (for-syntax racket/base syntax/parse))
 
 (provide Mu-name:
@@ -66,7 +67,8 @@
           (not (Values? e))
           (not (ValuesDots? e))
           (not (AnyValues? e))
-          (not (Result? e)))))
+          (not (Result? e))
+          (not (Signature? e)))))
 
 ;; (or/c Type/c Values? Results?)
 ;; Anything that can be treated as a Values by sufficient expansion
@@ -77,7 +79,8 @@
           (not (arr? e))
           (not (fld? e))
           (not (ValuesDots? e))
-          (not (AnyValues? e)))))
+          (not (AnyValues? e))
+          (not (Signature? e)))))
 
 (define Type/c (flat-named-contract 'Type Type/c?))
 (define Values/c (flat-named-contract 'Values Values/c?))
@@ -555,6 +558,35 @@
 ;; cls : Class
 (def-type Instance ([cls Type/c]) [#:key 'instance])
 
+;; interp:
+;; name is the id of the signature
+;; extends is the extended signature or #f
+;; mapping maps variables in a signature to their types
+;; This is not a type because signatures are not values
+(def-type Signature ([name identifier?]
+                     [extends (or/c identifier? #f)]
+                     [mapping (listof (cons/c identifier? (or/c promise? Type/c)))])
+  [#:frees (lambda (f) null)]
+  [#:fold-rhs (*Signature name extends mapping)])
+
+;; The supertype of all units, ie values recognized by the
+;; predicate unit?
+(def-type UnitTop () [#:fold-rhs #:base] [#:key 'unit])
+
+;; interp: imports is the list of imported signatures
+;;         exports is the list of exported signatures
+;;         init-depends is the list of init-depend signatures
+;;         result is the type of the body of the unit
+(def-type Unit ([imports (listof Signature?)]
+                [exports (listof Signature?)]
+                [init-depends (listof Signature?)]
+                [result SomeValues/c])
+  [#:frees (lambda (f) (f result))]
+  [#:fold-rhs (*Unit (map type-rec-id imports)
+                     (map type-rec-id exports)
+                     (map type-rec-id init-depends)
+                     (type-rec-id result))])
+
 ;; sequences
 ;; includes lists, vectors, etc
 ;; tys : sequence produces this set of values at each step
@@ -578,6 +610,17 @@
 (def-type Continuation-Mark-Keyof ([value Type/c])
   [#:frees (λ (f) (make-invariant (f value)))]
   [#:key 'continuation-mark-key])
+
+;; Distinction
+;; comes from define-new-subtype
+;; nm: a symbol representing the name of the type
+;; id: a symbol created with gensym
+;; ty: a type for the representation, where this will be a subtype of ty
+(def-type Distinction ([nm symbol?] [id symbol?] [ty Type/c])
+  [#:frees (λ (f) (f ty))]
+  [#:intern (list (Rep-seq ty) nm id)]
+  [#:fold-rhs (*Distinction nm id (type-rec-id ty))]
+  [#:key (Type-key ty)])
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

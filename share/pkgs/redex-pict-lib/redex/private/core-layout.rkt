@@ -59,6 +59,9 @@
          left-curly-bracket-middle-piece
          left-curly-bracket-lower-hook
          curly-bracket-extension
+
+         current-render-pict-adjust
+         adjust
          
          ;; for test suite
          build-lines
@@ -181,14 +184,15 @@
     (parameterize ([dc-for-text-size (make-object bitmap-dc% (make-object bitmap% 1 1))])
       (lw->pict nts lw)))
   
-  (define (lw->pict nts lw)
-    (lines->pict 
+  (define (lw->pict nts lw [extra-adjust values])
+    (lines->pict
      (setup-lines 
       (build-lines 
        (if (compiled-lang? nts)
            (language-nts nts)
            nts)
-       (apply-rewrites lw)))))
+       (apply-rewrites lw)))
+     extra-adjust))
   
   (define (apply-rewrites orig-lw)
     (define (ar/lw an-lw)
@@ -638,7 +642,7 @@
   
   ;; lines->pict : (non-empty-listof line) -> pict
   ;; expects the lines to be in order from bottom to top
-  (define (lines->pict lines)
+  (define (lines->pict lines extra-adjust)
     (let ([lines-ht (make-hash)])
       
       ;; this loop builds a pict with all of the lines 
@@ -671,7 +675,9 @@
       (let ([max (apply max (map line-n lines))]
             [min (apply min (map line-n lines))])
         (let loop ([i min])
-          (let ([lines (apply lbl-superimpose (reverse (hash-ref lines-ht i (list (blank)))))])
+          (let ([lines (extra-adjust
+                        ((adjust 'lw-line)
+                         (apply lbl-superimpose (reverse (hash-ref lines-ht i (list (blank)))))))])
             (cond
               [(= i max) lines]
               [else
@@ -735,7 +741,11 @@
       [(symbol? atom)
        (list (or (rewrite-atomic col span atom literal-style)
                  (make-string-token col span (symbol->string atom) (literal-style))))]
-      [(member atom '("(" ")" "[" "]" "{" "}"))
+      [(or (member atom '("(" ")" "[" "]" "{" "}"))
+           ;; Typeset keywords in the same font as parentheses:
+           (and (string? atom)
+                ((string-length atom) . >= . 2)
+                (string=? "#:" (substring atom 0 2))))
        (list (make-string-token col span atom (paren-style)))]
       [(string? atom)
        (list (make-string-token col span atom (default-style)))]
@@ -791,47 +801,16 @@
   (define label-font-size (make-parameter 14))
   (define delimit-ellipsis-arguments? (make-parameter #t))
 
+  (define current-render-pict-adjust (make-parameter (lambda (p mode) p)))
+
+(define ((adjust mode) p) ((current-render-pict-adjust) p mode))
+
 (define white-square-bracket-cache (make-hash))
 (define (default-white-square-bracket open?)
-  (define key (list (current-text) (default-style) (default-font-size) open?))
-  (cond
-    [(hash-ref white-square-bracket-cache key #f) => values]
-    [else
-     (define candidate ((current-text) (if open? "〚" "〛") (default-style) (default-font-size)))
-     (define w (inexact->exact (ceiling (pict-width candidate))))
-     (define h (inexact->exact (ceiling (pict-height candidate))))
-     (define bmp (make-bitmap w h))
-     (define bdc (make-object bitmap-dc% bmp))
-     (draw-pict candidate bdc 0 0)
-     (define bytes (make-bytes (* w h 4)))
-     (send bmp get-argb-pixels 0 0 w h bytes)
-     (define (white-pixel? x y)
-       (define c (* 4 (+ (* y w) x)))
-       (= (bytes-ref bytes c) 0))
-     (define outermost-x
-       (let/ec k
-         (for ([x (if open?
-                      (in-range w)
-                      (in-range (- w 1) -1 -1))])
-           (define the-y
-             (for/or ([y (in-range h)])
-               (and (not (white-pixel? x y))
-                    y)))
-           (when the-y
-             (k x)))))
-     (define pict
-       (cond 
-         [(if open?
-              (<= 1/2 (/ outermost-x w))
-              (<= 1/2 (/ (- w outermost-x) w)))
-          ;; when the entire half is white
-          (if open?
-              (inset/clip candidate (- (/ w 3)) 0 0 0)
-              (inset/clip candidate 0 0 (- (/ w 3)) 0))]
-         [else
-          candidate]))
-     (hash-set! white-square-bracket-cache key pict)
-     pict]))
+  (let ([text (current-text)])
+    (text (if open? "⟦" "⟧") ; U+27E6 and U+27E7
+          (default-style)
+          (default-font-size))))
 
 (define (homemade-white-square-bracket open?)
   (white-bracket (if open? "[" "]")))

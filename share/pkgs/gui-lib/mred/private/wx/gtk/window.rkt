@@ -1,5 +1,6 @@
 #lang racket/base
 (require ffi/unsafe
+	 ffi/unsafe/define
          racket/class
          net/uri-codec
          ffi/unsafe/atomic
@@ -30,8 +31,16 @@
               gtk_widget_add_events
               gtk_widget_size_request
               gtk_widget_set_size_request
+	      gtk_widget_size_allocate
+	      gtk_widget_get_preferred_size
               gtk_widget_grab_focus
+              gtk_widget_has_focus
+	      gtk_widget_get_mapped
+	      gtk_widget_get_has_window
+	      gtk_widget_set_can_default
+	      gtk_widget_set_can_focus
               gtk_widget_set_sensitive
+	      gtk_widget_get_scale_factor
 
               connect-focus
               connect-key
@@ -88,6 +97,10 @@
 (define-gtk gtk_widget_grab_focus (_fun _GtkWidget -> _void))
 (define-gtk gtk_widget_is_focus (_fun _GtkWidget -> _gboolean))
 (define-gtk gtk_widget_set_sensitive (_fun _GtkWidget _gboolean -> _void))
+(define-gtk gtk_widget_get_preferred_size (_fun _GtkWidget _GtkRequisition-pointer/null _GtkRequisition-pointer/null -> _void)
+  #:fail (lambda () #f))
+(define-gtk gtk_widget_get_scale_factor (_fun _GtkWidget -> _int)
+  #:fail (lambda () (lambda (gtk) 1)))
 
 (define-gdk gdk_keyboard_grab (_fun _GdkWindow _gboolean _int -> _void))
 (define-gdk gdk_keyboard_ungrab (_fun _int -> _void))
@@ -99,6 +112,7 @@
 
 (define the-accelerator-group (gtk_accel_group_new))
 
+;; Only for Gtk2
 (define-cstruct _GtkWidgetT ([obj _GtkObject]
                              [private_flags _uint16]
                              [state _byte]
@@ -110,18 +124,56 @@
                              [window _GdkWindow]
                              [parent _GtkWidget]))
 
-(define (widget-window gtk)
-  (GtkWidgetT-window (cast gtk _GtkWidget _GtkWidgetT-pointer)))
+(define-gtk widget-window (_fun _GtkWidget -> _GdkWindow)
+  #:c-id gtk_widget_get_window
+  #:fail (lambda ()
+	   (lambda (gtk)
+	     (GtkWidgetT-window (cast gtk _GtkWidget _GtkWidgetT-pointer)))))
 
-(define (widget-parent gtk)
-  (GtkWidgetT-parent (cast gtk _GtkWidget _GtkWidgetT-pointer)))
+(define-gtk widget-parent (_fun _GtkWidget -> _GtkWidget)
+  #:c-id gtk_widget_get_parent
+  #:fail (lambda ()
+	   (lambda (gtk)
+	     (GtkWidgetT-parent (cast gtk _GtkWidget _GtkWidgetT-pointer)))))
 
-(define (widget-allocation gtk)
-  (GtkWidgetT-alloc (cast gtk _GtkWidget _GtkWidgetT-pointer)))
+(define-gtk widget-allocation (_fun _GtkWidget (o : (_ptr o _GtkAllocation)) -> _void -> o)
+  #:c-id gtk_widget_get_allocation
+  #:fail (lambda ()
+	   (lambda (gtk)
+	     (GtkWidgetT-alloc (cast gtk _GtkWidget _GtkWidgetT-pointer)))))
+
+;; Fallbacks for old Gtk2 versions:
+(define ((get-one-flag flag [wrap values]) gtk)
+  (wrap (positive? (bitwise-and (get-gtk-object-flags gtk)
+				flag))))
+(define ((set-one-flag! flag) gtk on?)
+  (define v (get-gtk-object-flags gtk))
+  (set-gtk-object-flags! gtk 
+			 (if on?
+			     (bitwise-ior v flag)
+			     (bitwise-and v (bitwise-not flag)))))
+
+(define-gtk gtk_widget_has_focus (_fun _GtkWidget -> _gboolean)
+  #:fail (lambda () (get-one-flag GTK_HAS_FOCUS)))
+(define-gtk gtk_widget_get_mapped (_fun _GtkWidget -> _gboolean)
+  #:fail (lambda () (get-one-flag GTK_MAPPED)))
+(define-gtk gtk_widget_get_has_window (_fun _GtkWidget -> _gboolean)
+  #:fail (lambda () (get-one-flag GTK_NO_WINDOW not)))
+(define-gtk gtk_widget_set_can_default (_fun _GtkWidget _gboolean -> _void)
+  #:fail (lambda () (set-one-flag! GTK_CAN_DEFAULT)))
+(define-gtk gtk_widget_set_can_focus (_fun _GtkWidget _gboolean -> _void)
+  #:fail (lambda () (set-one-flag! GTK_CAN_FOCUS)))
 
 (define-gtk gtk_drag_dest_add_uri_targets (_fun _GtkWidget -> _void))
 (define-gtk gtk_drag_dest_set (_fun _GtkWidget _int (_pointer = #f) (_int = 0) _int -> _void))
 (define-gtk gtk_drag_dest_unset (_fun _GtkWidget -> _void))
+
+(define-gtk gdk_event_get_scroll_deltas (_fun _GdkEventScroll-pointer
+					      (dx : (_ptr o _double))
+					      (dy : (_ptr o _double))
+					      -> _void
+					      -> (values dx dy))
+  #:make-fail make-not-available)
 
 (define GTK_DEST_DEFAULT_ALL #x07)
 (define GDK_ACTION_COPY (arithmetic-shift 1 1))
@@ -175,10 +227,10 @@
     (let ([wx (gtk->wx gtk)])
       (when wx
         (send wx save-size 
-              (GtkAllocation-x a)
-              (GtkAllocation-y a)
-              (GtkAllocation-width a)
-              (GtkAllocation-height a))))
+              (->normal (GtkAllocation-x a))
+              (->normal (GtkAllocation-y a))
+              (->normal (GtkAllocation-width a))
+              (->normal (GtkAllocation-height a)))))
     #t))
 ;; ----------------------------------------
 
@@ -223,7 +275,16 @@
                                  [(= dir GDK_SCROLL_UP) 'wheel-up]
                                  [(= dir GDK_SCROLL_DOWN) 'wheel-down]
                                  [(= dir GDK_SCROLL_LEFT) 'wheel-left]
-                                 [(= dir GDK_SCROLL_RIGHT) 'wheel-right]))
+                                 [(= dir GDK_SCROLL_RIGHT) 'wheel-right]
+				 [(= dir GDK_SCROLL_SMOOTH)
+				  (define-values (dx dy) (gdk_event_get_scroll_deltas event))
+				  (cond
+				   [(positive? dy) 'wheel-down]
+				   [(negative? dy) 'wheel-up]
+				   [(positive? dx) 'wheel-right]
+				   [(negative? dx) 'wheel-left]
+				   [else #f])]
+				 [else #f]))
                               (keyval->code (GdkEventKey-keyval event)))]
                 [k (new key-event%
                         [key-code (if (and (string? im-str)
@@ -368,13 +429,15 @@
                   [m (let-values ([(x y)
                                    (send wx
                                          adjust-event-position
-                                         (->long ((if motion? 
-                                                      GdkEventMotion-x 
-                                                      (if crossing? GdkEventCrossing-x GdkEventButton-x))
-                                                  event))
-                                         (->long ((if motion? GdkEventMotion-y 
-                                                      (if crossing? GdkEventCrossing-y GdkEventButton-y))
-                                                  event)))])
+					 (->normal
+					  (->long ((if motion? 
+						       GdkEventMotion-x 
+						       (if crossing? GdkEventCrossing-x GdkEventButton-x))
+						   event)))
+					 (->normal
+					  (->long ((if motion? GdkEventMotion-y 
+						       (if crossing? GdkEventCrossing-y GdkEventButton-y))
+						   event))))])
                        (new mouse-event%
                             [event-type type]
                             [left-down (case type
@@ -505,8 +568,9 @@
       (send parent set-child-size gtk x y w h))
 
     (define/public (set-child-size child-gtk x y w h)
-      (gtk_widget_set_size_request child-gtk w h)
-      (gtk_widget_size_allocate child-gtk (make-GtkAllocation x y w h)))
+      (gtk_widget_set_size_request child-gtk (->screen w) (->screen h))
+      (gtk_widget_size_allocate child-gtk (make-GtkAllocation (->screen x) (->screen y)
+							      (->screen w) (->screen h))))
 
     (define/public (remember-size x y w h)
       ;; called in event-pump thread
@@ -529,29 +593,39 @@
       (set! client-delta-w dw)
       (set! client-delta-h dh))
 
-    (define/public (infer-client-delta [w? #t] [h? #t] [sub-h-gtk #f])
+    (define/public (infer-client-delta [w? #t] [h? #t] [sub-h-gtk #f]
+				       #:inside [inside-gtk (get-container-gtk)])
       (let ([req (make-GtkRequisition 0 0)]
             [creq (make-GtkRequisition 0 0)]
             [hreq (make-GtkRequisition 0 0)])
+	(when gtk3? (gtk_widget_show gtk))
         (gtk_widget_size_request gtk req)
-        (gtk_widget_size_request (get-container-gtk) creq)
+        (gtk_widget_size_request inside-gtk creq)
         (when sub-h-gtk
           (gtk_widget_size_request sub-h-gtk hreq))
         (when w?
-          (set! client-delta-w (- (GtkRequisition-width req)
-                                  (max (GtkRequisition-width creq)
-                                       (GtkRequisition-width hreq)))))
+          (set! client-delta-w (->normal
+				(- (GtkRequisition-width req)
+				   (max (GtkRequisition-width creq)
+					(GtkRequisition-width hreq))))))
         (when h?
-          (set! client-delta-h (- (GtkRequisition-height req)
-                                  (GtkRequisition-height creq))))))
+          (set! client-delta-h (->normal
+				(- (GtkRequisition-height req)
+				   (GtkRequisition-height creq)))))
+	(when gtk3? (gtk_widget_show gtk))))
 
     (define/public (set-auto-size [dw 0] [dh 0])
       (let ([req (make-GtkRequisition 0 0)])
-        (gtk_widget_size_request gtk req)
+	(cond
+	 [gtk3?
+	  (unless shown? (gtk_widget_show gtk))
+	  (gtk_widget_get_preferred_size gtk req #f)
+	  (unless shown? (gtk_widget_hide gtk))]
+	 [else (gtk_widget_size_request gtk req)])
         (set-size #f
                   #f
-                  (+ (GtkRequisition-width req) dw)
-                  (+ (GtkRequisition-height req) dh))))
+                  (+ (->normal (GtkRequisition-width req)) dw)
+                  (+ (->normal (GtkRequisition-height req)) dh))))
 
     (define shown? #f)
     (define/public (direct-show on?)
@@ -565,6 +639,7 @@
     (define/public (show on?)
       (atomically
        (direct-show on?)))
+    (define/public (reset-child-freezes) (void))
     (define/public (reset-child-dcs) (void))
     (define/public (is-shown?) shown?)
     (define/public (is-shown-to-root?)
@@ -583,6 +658,7 @@
     (define/public (get-parent) parent)
     (define/public (set-parent p)
       ;; in atomic mode
+      (reset-child-freezes)
       (g_object_ref gtk)
       (gtk_container_remove (send parent get-container-gtk) gtk)
       (set! parent p)
@@ -758,6 +834,8 @@
 
     (define/public (get-client-delta)
       (values 0 0))
+    (define/public (get-stored-client-delta)
+      (values client-delta-w client-delta-h))
 
     (define/public (warp-pointer x y)
       (define xb (box x))
@@ -765,8 +843,8 @@
       (client-to-screen xb yb)
       (gdk_display_warp_pointer (gtk_widget_get_display gtk)
                                 (gtk_widget_get_screen gtk)
-                                (unbox xb)
-                                (unbox yb)))
+                                (->screen (unbox xb))
+                                (->screen (unbox yb))))
 
     (define/public (gets-focus?) #t)))
 
@@ -801,7 +879,7 @@
       (for ([i (in-range (mcdr win-box))])
         (gdk_window_thaw_updates win)))))
 
-(define (request-flush-delay win-box)
+(define (request-flush-delay win-box transparentish?)
   (do-request-flush-delay 
    win-box
    (lambda (win-box)
@@ -811,7 +889,12 @@
             ;; implementation, so force a native implementation of the
             ;; window to try to avoid it changing out from underneath
             ;; us between the freeze and thaw actions.
-            (gdk_window_ensure_native win)
+	    ;; With Gtk3, we can't use a native window for transparent
+	    ;; windows; that means we have to be extra careful that
+	    ;; the underlying window doesn't change while a freeze is
+	    ;; in effect; the `reset-child-freezes` helps with that.
+            (unless (and transparentish? gtk3?)
+              (gdk_window_ensure_native win))
             (begin
               (gdk_window_freeze_updates win)
               (set-mcdr! win-box (add1 (mcdr win-box)))

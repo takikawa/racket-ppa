@@ -67,29 +67,33 @@
     [else (error 'foreign "internal error: bad compiler size for `~s'"
                  c-type)]))
 
-;; _short etc is a convenient name for whatever is the compiler's `short'
-;; (_short is signed)
+;; _short etc is a convenient name for the compiler's `short',
+;; which is always a 16-bit value for Racket:
 (provide _short _ushort _sshort)
-(define-values (_short _ushort _sshort) (sizeof->3ints 'short))
+(define _short _int16)
+(define _ushort _uint16)
+(define _sshort _short)
 
-;; _int etc is a convenient name for whatever is the compiler's `int'
-;; (_int is signed)
+;; _int etc is a convenient name for whatever is the compiler's `int',
+;; which is always a 32-byte value for Racket:
 (provide _int _uint _sint)
-(define-values (_int _uint _sint) (sizeof->3ints 'int))
+(define _int _int32)
+(define _uint _uint32)
+(define _sint _int)
 
-;; _long etc is a convenient name for whatever is the compiler's `long'
-;; (_long is signed)
+;; _long etc is a convenient name for whatever is the compiler's `long',
+;; which varies among platforms:
 (provide _long _ulong _slong)
 (define-values (_long _ulong _slong) (sizeof->3ints 'long))
 
 ;; _llong etc is a convenient name for whatever is the compiler's `long long'
-;; (_llong is signed)
+;; which varies among platforms:
 (provide _llong _ullong _sllong)
 (define-values (_llong _ullong _sllong) (sizeof->3ints '(long long)))
 
 ;; _intptr etc is a convenient name for whatever is the integer
-;; equivalent of the compiler's pointer (see `intptr_t') (_intptr is
-;; signed)
+;; equivalent of the compiler's pointer (see `intptr_t'),
+;; which varies among platforms:
 (provide _intptr _uintptr _sintptr)
 (define-values (_intptr _uintptr _sintptr) (sizeof->3ints '(void *)))
 
@@ -452,13 +456,14 @@
                       #:keep        [keep    #t]
                       #:atomic?     [atomic? #f]
                       #:in-original-place? [orig-place? #f]
+                      #:lock-name   [lock-name #f]
                       #:async-apply [async-apply #f]
                       #:save-errno  [errno   #f])
-  (_cprocedure* itypes otype abi wrapper keep atomic? orig-place? async-apply errno))
+  (_cprocedure* itypes otype abi wrapper keep atomic? orig-place? async-apply errno lock-name))
 
 ;; for internal use
 (define held-callbacks (make-weak-hasheq))
-(define (_cprocedure* itypes otype abi wrapper keep atomic? orig-place? async-apply errno)
+(define (_cprocedure* itypes otype abi wrapper keep atomic? orig-place? async-apply errno lock-name)
   (define-syntax-rule (make-it wrap)
     (make-ctype _fpointer
       (lambda (x)
@@ -471,7 +476,7 @@
                                   (if (or (null? x) (pair? x)) (cons cb x) cb)))]
                      [(procedure? keep) (keep cb)])
                cb)))
-      (lambda (x) (and x (wrap (ffi-call x itypes otype abi errno orig-place?))))))
+      (lambda (x) (and x (wrap (ffi-call x itypes otype abi errno orig-place? lock-name))))))
   (if wrapper (make-it wrapper) (make-it begin)))
 
 ;; Syntax for the special _fun type:
@@ -494,7 +499,8 @@
 
 (provide _fun)
 (define-for-syntax _fun-keywords
-  `([#:abi ,#'#f] [#:keep ,#'#t] [#:atomic? ,#'#f] [#:in-original-place? ,#'#f]
+  `([#:abi ,#'#f] [#:keep ,#'#t] [#:atomic? ,#'#f]
+    [#:in-original-place? ,#'#f] [#:lock-name ,#'#f]
     [#:async-apply ,#'#f] [#:save-errno ,#'#f]
     [#:retry #f]))
 (define-syntax (_fun stx)
@@ -658,7 +664,8 @@
                              #,(kwd-ref '#:atomic?)
                              #,(kwd-ref '#:in-original-place?)
                              #,(kwd-ref '#:async-apply)
-                             #,(kwd-ref '#:save-errno)))])
+                             #,(kwd-ref '#:save-errno)
+                             #,(kwd-ref '#:lock-name)))])
       (if (or (caddr output) input-names (ormap caddr inputs)
               (ormap (lambda (x) (not (car x))) inputs)
               (pair? bind) (pair? pre) (pair? post))
@@ -1039,8 +1046,12 @@
 (provide (rename-out [_bytes* _bytes]))
 (define-fun-syntax _bytes*
   (syntax-id-rules (o)
-    [(_ o n) (type: _pointer
-              pre:  (make-sized-byte-string (malloc n) n)
+    [(_ o n) (type: _gcpointer
+              pre:  (let ([bstr (make-sized-byte-string (malloc (add1 n)) n)])
+                      ;; Ensure a null terminator, so that the result is
+                      ;; compatible with `_bytes`:
+                      (ptr-set! bstr _byte n 0)
+                      bstr)
               ;; post is needed when this is used as a function output type
               post: (x => (make-sized-byte-string x n)))]
     [(_ . xs) (_bytes . xs)]

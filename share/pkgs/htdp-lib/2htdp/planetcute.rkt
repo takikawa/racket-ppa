@@ -1,7 +1,7 @@
 #lang racket/base
 (require 2htdp/image
          racket/runtime-path
-         (for-syntax "private/planetcute-image-list.rkt")
+         (for-syntax racket/syntax "private/planetcute-image-list.rkt")
          (for-syntax racket/base))
 
 (define-syntax (definitions stx)
@@ -19,12 +19,13 @@
        (if (eq? 'expression (syntax-local-context))
            ;; In an expression context:
            (let* ([key (syntax-local-lift-context)]
+                  [id (generate-temporary)]
                   ;; Already lifted in this lifting context?
                   [lifted-id
                    (or (hash-ref saved-id-table key #f)
                        ;; No: lift the require for the image:
-                       (syntax-local-lift-require `(lib ,(format "~a.rkt" img) "2htdp" "planetcute")
-                                                  (datum->syntax stx img)))])
+                       (syntax-local-lift-require `(rename (lib ,(format "~a.rkt" img) "2htdp" "planetcute") ,id ,img)
+                                                  (datum->syntax stx id)))])
              (when key (hash-set! saved-id-table key lifted-id))
              ;; Expand to a use of the lifted expression:
              (with-syntax ([saved-id (syntax-local-introduce lifted-id)])

@@ -1,10 +1,12 @@
 #lang racket/base
 (require racket/private/set
+         racket/private/custom-write
          racket/stream
          racket/serialize
          racket/pretty
          racket/sequence
          (only-in racket/syntax format-symbol)
+         (only-in racket/generic exn:fail:support)
          (for-syntax racket/base racket/syntax))
 
 (provide set seteq seteqv
@@ -353,79 +355,32 @@
     [(hash-eq? x) (hash-eq? y)]))
 
 (define (write-custom-set s port mode)
+  (cond [(custom-set-spec s)
+         (define table (custom-set-table s))
+         (define key-str
+           (cond [(immutable? table) ""]
+                 [(hash-weak? table) "weak-"]
+                 [else "mutable-"]))
+         (fprintf port "#<~acustom-set>" key-str)]
+        [else (write-hash-set s port mode)]))
 
-  (define table (custom-set-table s))
-  (define key-str
-    (cond
-      [(immutable? table) ""]
-      [(hash-weak? table) "weak-"]
-      [else "mutable-"]))
-
-  (cond
-    [(custom-set-spec s) (fprintf port "#<~acustom-set>" key-str)]
-    [else
-
-     (define show
-       (case mode
-         [(#t) write]
-         [(#f) display]
-         [else (lambda (p port) (print p port mode))]))
-
-     (define-values (left-str mid-str right-str)
-       (case mode
-         [(0) (values "(" "" ")")]
-         [else (values "#<" ":" ">")]))
-     (define cmp-str
-       (cond
-         [(hash-equal? table) "set"]
-         [(hash-eqv? table) "seteqv"]
-         [(hash-eq? table) "seteq"]))
-
-     (define (show-prefix port)
-       (write-string left-str port)
-       (write-string key-str port)
-       (write-string cmp-str port)
-       (write-string mid-str port))
-
-     (define (show-suffix port)
-       (write-string right-str port))
-
-     (define (show-one-line port)
-       (show-prefix port)
-       (for ([k (in-hash-keys table)])
-         (write-string " " port)
-         (show k port))
-       (show-suffix port))
-
-     (define (show-multi-line port)
-       (define-values (line col pos) (port-next-location port))
-       (show-prefix port)
-       (for ([k (in-hash-keys table)])
-         (pretty-print-newline port (pretty-print-columns))
-         (for ([i (in-range (add1 col))])
-           (write-char #\space port))
-         (show k port))
-       (show-suffix port))
-
-     (cond
-       [(and (pretty-printing)
-             (integer? (pretty-print-columns)))
-        (define proc
-          (let/ec return
-            (define pretty-port
-              (make-tentative-pretty-print-output-port
-               port
-               (- (pretty-print-columns) 1)
-               (lambda ()
-                 (return
-                  (lambda ()
-                    (tentative-pretty-print-port-cancel pretty-port)
-                    (show-multi-line port))))))
-            (show-one-line port)
-            (tentative-pretty-print-port-transfer pretty-port port)
-            void))
-        (proc)]
-       [else (show-one-line port)])]))
+(define write-hash-set
+  (make-constructor-style-printer
+   (lambda (s)
+     (define table (custom-set-table s))
+     (define key-str
+       (cond [(immutable? table) ""]
+             [(hash-weak? table) "weak-"]
+             [else "mutable-"]))
+     (cond [(custom-set-spec s)
+            (string-append key-str "custom-set")]
+           [else
+            (define cmp-str
+              (cond [(hash-equal? table) "set"]
+                    [(hash-eqv? table) "seteqv"]
+                    [(hash-eq? table) "seteq"]))
+            (string-append key-str cmp-str)]))
+   (lambda (s) (hash-keys (custom-set-table s)))))
 
 (define (custom-in-set s)
   (define keys (in-hash-keys (custom-set-table s)))
@@ -458,6 +413,22 @@
 (define custom-set-constant
   (equal-hash-code "hash code for a set based on a hash table"))
 
+(define (((mk-not-allowed #:immut [immut #t]) method-name) s . args)
+  (raise
+   (exn:fail:support
+    (format 
+     (string-append "~a:\n"
+                    "expected: ~a\n"
+                    "given ~a: ~e\n"
+                    "argument position: 1st")
+     method-name
+     (if immut "(not/c set-mutable?)" "set-mutable?")
+     (if immut "mutable set" "immutable set")
+     s)
+    (current-continuation-marks))))
+(define mk-not-allowed/immut (mk-not-allowed #:immut #f))
+(define mk-not-allowed/mut (mk-not-allowed #:immut #t))
+
 (serializable-struct immutable-custom-set custom-set []
   #:methods gen:stream
   [(define stream-empty? custom-set-empty?)
@@ -480,12 +451,20 @@
    (define set-first custom-set-first)
    (define set-rest custom-set-rest)
    (define set-add custom-set-add)
+   (define set-add! (mk-not-allowed/immut 'set-add!))
    (define set-remove custom-set-remove)
+   (define set-remove! (mk-not-allowed/immut 'set-remove!))
    (define set-clear custom-set-clear)
+   (define set-clear! (mk-not-allowed/immut 'set-clear!))
    (define set-union custom-set-union)
+   (define set-union! (mk-not-allowed/immut 'set-union!))
    (define set-intersect custom-set-intersect)
+   (define set-intersect! (mk-not-allowed/immut 'set-intersect!))
    (define set-subtract custom-set-subtract)
-   (define set-symmetric-difference custom-set-symmetric-difference)])
+   (define set-subtract! (mk-not-allowed/immut 'set-subtract!))
+   (define set-symmetric-difference custom-set-symmetric-difference)
+   (define set-symmetric-difference! (mk-not-allowed/immut 'set-symmetric-difference!))]
+  )
 
 (serializable-struct imperative-custom-set custom-set []
   #:methods gen:set
@@ -503,12 +482,20 @@
    (define set->stream custom-set->stream)
    (define in-set custom-in-set)
    (define set-first custom-set-first)
+   (define set-rest (mk-not-allowed/mut 'set-rest))
+   (define set-add (mk-not-allowed/mut 'set-add))
    (define set-add! custom-set-add!)
+   (define set-remove (mk-not-allowed/mut 'set-remove))
    (define set-remove! custom-set-remove!)
+   (define set-clear (mk-not-allowed/mut 'set-clear))
    (define set-clear! custom-set-clear!)
+   (define set-union (mk-not-allowed/mut 'set-union))
    (define set-union! custom-set-union!)
+   (define set-intersect (mk-not-allowed/mut 'set-intersect))
    (define set-intersect! custom-set-intersect!)
+   (define set-subtract (mk-not-allowed/mut 'set-subtract))
    (define set-subtract! custom-set-subtract!)
+   (define set-symmetric-difference (mk-not-allowed/mut 'set-symmetric-difference))
    (define set-symmetric-difference! custom-set-symmetric-difference!)])
 
 (serializable-struct weak-custom-set imperative-custom-set [])

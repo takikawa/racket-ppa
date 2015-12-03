@@ -2230,6 +2230,32 @@
 ;;   to do the work
 (define-struct data/chan (data to-insert-chan))
 
+  (struct snip-special (snip name bytes))
+  (define (make-snip-special snip)
+    (define the-snipclass (send snip get-snipclass))
+    (cond
+      [the-snipclass
+       (define base (new editor-stream-out-bytes-base%))
+       (define stream (make-object editor-stream-out% base))
+       (send snip write stream)
+       (snip-special snip
+                     (send the-snipclass get-classname)
+                     (send base get-bytes))]
+      [else
+       (snip-special snip #f #f)]))
+  (define (snip-special->snip snip-special)
+    (define the-name (snip-special-name snip-special))
+    (define snipclass (and the-name (send (get-the-snip-class-list) find the-name)))
+    (cond
+      [snipclass
+       (define base (make-object editor-stream-in-bytes-base%
+                      (snip-special-bytes snip-special)))
+       (define es (make-object editor-stream-in% base))
+       (or (send snipclass read es)
+           (snip-special-snip snip-special))]
+      [else
+       (snip-special-snip snip-special)]))
+  
 (define ports-mixin
   (mixin (wide-snip<%>) (ports<%>)
     (inherit begin-edit-sequence
@@ -2578,55 +2604,59 @@
     ;; do-insertion : (listof (cons (union string snip) style-delta)) boolean -> void
     ;; thread: eventspace main thread
     (define/private (do-insertion txts showing-input?)
-      (let ([locked? (is-locked?)]
-            [sf? (get-styles-fixed)])
-        (begin-edit-sequence)
-        (lock #f)
-        (set-styles-fixed #f)
-        (set! allow-edits? #t)
-        (let loop ([txts txts])
-          (cond
-            [(null? txts) (void)]
-            [else 
-             (let* ([fst (car txts)]
-                    [str/snp (car fst)]
-                    [style (cdr fst)])
-               
-               (let ([inserted-count
-                      (if (is-a? str/snp snip%)
-                          (send str/snp get-count)
-                          (string-length str/snp))]
-                     [old-insertion-point insertion-point])
-                 (set! insertion-point (+ insertion-point inserted-count))
-                 (set! unread-start-point (+ unread-start-point inserted-count))
-                 
-                 (insert (if (is-a? str/snp snip%)
-                             (let ([s (send str/snp copy)])
-                               (if (is-a? s snip%)
-                                   s
-                                   (new snip%)))
-                             str/snp)
-                         old-insertion-point
-                         old-insertion-point
-                         #t)
-                 
-                 ;; the idea here is that if you made a string snip, you
-                 ;; could have made a string and gotten the style, so you
-                 ;; must intend to have your own style.
-                 (unless (is-a? str/snp string-snip%)
-                   (change-style style old-insertion-point insertion-point))))
-             (loop (cdr txts))]))
-        (set-styles-fixed sf?)
-        (set! allow-edits? #f)
-        (lock locked?)
-        (unless showing-input?
-          (when box-input
-            (adjust-box-input-width)
-            (when (eq? box-input (get-focus-snip))
-              (scroll-to-position (last-position)))))
-        (end-edit-sequence)
-        (unless (null? txts)
-          (after-io-insertion))))
+      (define locked? (is-locked?))
+      (define sf? (get-styles-fixed))
+      (begin-edit-sequence)
+      (lock #f)
+      (set-styles-fixed #f)
+      (set! allow-edits? #t)
+      (let loop ([txts txts])
+        (cond
+          [(null? txts) (void)]
+          [else 
+           (define fst (car txts))
+           (define str/snp
+             (cond
+               [(snip-special? (car fst))
+                (snip-special->snip (car fst))]
+               [else (car fst)]))
+           (define style (cdr fst))
+           
+           (define inserted-count
+             (if (is-a? str/snp snip%)
+                 (send str/snp get-count)
+                 (string-length str/snp)))
+           (define old-insertion-point insertion-point)
+           (set! insertion-point (+ insertion-point inserted-count))
+           (set! unread-start-point (+ unread-start-point inserted-count))
+           
+           (insert (if (is-a? str/snp snip%)
+                       (let ([s (send str/snp copy)])
+                         (if (is-a? s snip%)
+                             s
+                             (new snip%)))
+                       str/snp)
+                   old-insertion-point
+                   old-insertion-point
+                   #t)
+           
+           ;; the idea here is that if you made a string snip, you
+           ;; could have made a string and gotten the style, so you
+           ;; must intend to have your own style.
+           (unless (is-a? str/snp string-snip%)
+             (change-style style old-insertion-point insertion-point))
+           (loop (cdr txts))]))
+      (set-styles-fixed sf?)
+      (set! allow-edits? #f)
+      (lock locked?)
+      (unless showing-input?
+        (when box-input
+          (adjust-box-input-width)
+          (when (eq? box-input (get-focus-snip))
+            (scroll-to-position (last-position)))))
+      (end-edit-sequence)
+      (unless (null? txts)
+        (after-io-insertion)))
     
     (define/public (after-io-insertion) (void))
 
@@ -2762,6 +2792,7 @@
         (λ (special can-buffer? enable-breaks?)
           (define str/snp (cond
                             [(string? special) special]
+                            [(snip-special? special) special]
                             [(is-a? special snip%) special]
                             [else (format "~s" special)]))
           (define to-send (cons str/snp style))
@@ -4463,6 +4494,83 @@ designates the character that triggers autocompletion
 (define-struct saved-dc-state (smoothing pen brush font text-foreground-color text-mode))
 (define padding-dc (new bitmap-dc% [bitmap (make-screen-bitmap 1 1)]))
 
+(define all-string-snips<%>
+  (interface ()
+    all-string-snips?))
+  
+(define all-string-snips-mixin
+  (mixin ((class->interface text%)) (all-string-snips<%>)
+    (inherit find-first-snip find-snip)
+    
+    (define/private (all-string-snips?/slow)
+      (let loop ([s (find-first-snip)])
+        (cond
+          [(not s) #t]
+          [(is-a? s string-snip%) (loop (send s next))]
+          [else #f])))
+
+    (define/augment (after-insert start len)
+      (inner (void) after-insert start len)
+      (define end (+ start len))
+      (when (equal? all-string-snips-state #t)
+        (define init-i (box 0))
+        (define init-s (find-snip start 'after-or-none init-i))
+        (let loop ([s init-s]
+                   [i (unbox init-i)])
+          (cond
+            [(not s) (void)]
+            [(not (< i end)) (void)]
+            [(is-a? s string-snip%)
+             (define size (send s get-count))
+             (loop (send s next) (+ i size))]
+            [else
+             (set! all-string-snips-state #f)]))))
+    
+    (define/augment (on-delete start end)
+      (inner (void) on-delete start end)
+      (when (equal? all-string-snips-state #f)
+        (let loop ([s (find-snip start 'after-or-none)]
+                   [i start])
+          (cond
+            [(not s) (void)]
+            [(not (< i end)) (void)]
+            [(is-a? s string-snip%)
+             (define size (send s get-count))
+             (loop (send s next) (+ i size))]
+            [else (set! all-string-snips-state 'dont-know)]))))
+
+    
+    ;; (or/c #t #f 'dont-know)
+    (define all-string-snips-state #t)
+    (define/public (all-string-snips?)
+      (cond
+        [(boolean? all-string-snips-state)
+         all-string-snips-state]
+        [else
+         (define all-string-snips? (all-string-snips?/slow))
+         (set! all-string-snips-state all-string-snips?)
+         all-string-snips?]))
+    
+    (super-new)))
+
+(define overwrite-disable<%> (interface ()))
+(define overwrite-disable-mixin
+  (mixin ((class->interface text%)) (overwrite-disable<%>)
+    (inherit set-overwrite-mode)
+    
+    ;; private field held onto by the object
+    ;; because of the weak callback below
+    (define (overwrite-changed-callback p v)
+      (unless v
+        (set-overwrite-mode #f)))
+
+    (preferences:add-callback
+     'framework:overwrite-mode-keybindings
+     overwrite-changed-callback
+     #t)
+     
+    (super-new)))
+  
 (define basic% (basic-mixin (editor:basic-mixin text%)))
 (define line-spacing% (line-spacing-mixin basic%))
 (define hide-caret/selection% (hide-caret/selection-mixin line-spacing%))
@@ -4472,7 +4580,7 @@ designates the character that triggers autocompletion
 (define wide-snip% (wide-snip-mixin line-spacing%))
 (define standard-style-list% (editor:standard-style-list-mixin wide-snip%))
 (define input-box% (input-box-mixin standard-style-list%))
-(define -keymap% (editor:keymap-mixin standard-style-list%))
+(define -keymap% (overwrite-disable-mixin (editor:keymap-mixin standard-style-list%)))
 (define return% (return-mixin -keymap%))
 (define autowrap% (editor:autowrap-mixin -keymap%))
 (define file% (file-mixin (editor:file-mixin autowrap%)))

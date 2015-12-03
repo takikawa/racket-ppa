@@ -25,7 +25,8 @@
       (set! isl (lambda () *bsl))
       *bsl))
 
-  (all-from-except beginner: (submod lang/private/beginner-funs without-wrapper) procedures + * / append) 
+  (all-from-except beginner:
+                   (submod lang/private/beginner-funs without-wrapper) procedures + * / append) 
  
   ("Numbers (relaxed conditions)"
     @defproc[(+ [x number] ...) number]{
@@ -53,22 +54,24 @@
     Creates a single list from several, by concatenation of the items.
     In ISL and up: @racket[append] also works when applied to one list or none. 
     @interaction[#:eval (isl)
-		  (append (cons 1 (cons 2 empty)) (cons "a" (cons "b" empty)))
+		  (append (cons 1 (cons 2 '())) (cons "a" (cons "b" '())))
 		  (append)]}
     @defproc[((beginner-list? list?) [x any]) boolean?]{
     Checks whether the given value is a list.
     @interaction[#:eval (isl)
 		  (list? 42)
-		  (list? (cons 1 (cons 2 empty)))]}
+		  (list? (cons 1 (cons 2 '())))]}
 )
  
   ("Higher-Order Functions"
     @defproc[(map [f (X ... -> Z)] [l (listof X)] ...) (listof Z)]{
     Constructs a new list by applying a function to each item on one or more existing lists:
     @codeblock{(map f (list x-1 ... x-n)) = (list (f x-1) ... (f x-n))}
+    @codeblock{(map f (list x-1 ... x-n) (list y-1 ... y-n)) = (list (f x-1 y-1) ... (f x-n y-n))}
     @interaction[#:eval (isl) 
 		  (map add1 '(3 -4.01 2/5)) 
-		  (map (lambda (x) (list 'my-list (+ x 1))) '(3 -4.01 2/5))]
+		  (map (lambda (x) (list 'my-list (+ x 1))) '(3 -4.01 2/5))
+                  (map (lambda (x y) (+ x (* x y))) '(3 -4 2/5) '(1 2 3))]
     }
     @defproc[(for-each [f (any ... -> any)] [l (listof any)] ...) void?]{
     Applies a function to each item on one or more lists for effect only:
@@ -85,20 +88,26 @@
 		  (filter (lambda (x) (>= x threshold)) '(0 1 2 3 4 5 6 7 8 9))
 		  ]
     }
-    @defproc[((intermediate-foldr foldr) [f (X Y -> Y)] [base Y] [l (listof X)]) Y]{
+    @defproc[((intermediate-foldr foldr) [f (X ... Y -> Y)] [base Y] [l (listof X)] ...) Y]{
     @codeblock{(foldr f base (list x-1 ... x-n)) = (f x-1 ... (f x-n base))}
+    @codeblock{(foldr f base (list x-1 ... x-n) (list y-1 ... y-n))
+                = (f x-1 y-1 ... (f x-n y-n base))}
     @interaction[#:eval (isl)
-		  (foldr + 0 '(0 1 2 3 4 5 6 7 8 9))
-		  a-list
-		  (foldr (lambda (x r) (if (> x threshold) (cons (* 2 x) r) r)) '() a-list)
-		  ]
+                 (foldr + 0 '(0 1 2 3 4 5 6 7 8 9))
+                 a-list
+                 (foldr (lambda (x r) (if (> x threshold) (cons (* 2 x) r) r)) '() a-list)
+                 (foldr (lambda (x y r) (+ x y r)) 0 '(1 2 3) '(10 11 12))
+                 ]
     }
     @defproc[((intermediate-foldl foldl) [f (X Y -> Y)] [base Y] [l (listof X)]) Y]{
     @codeblock{(foldl f base (list x-1 ... x-n)) = (f x-n ... (f x-1 base))}
+    @codeblock{(foldl f base (list x-1 ... x-n) (list x-1 ... x-n))
+                = (f x-n y-n ... (f x-1 y-1 base))}
     @interaction[#:eval (isl)
 		  (foldl + 0 '(0 1 2 3 4 5 6 7 8 9))
 		  a-list
 		  (foldl (lambda (x r) (if (> x threshold) (cons (* 2 x) r) r)) '() a-list)
+                  (foldl (lambda (x y r) (+ x y r)) 0 '(1 2 3) '(10 11 12))
 		  ]
     }
     @defproc[(build-list [n nat] [f (nat -> X)]) (listof X)]{
@@ -116,14 +125,16 @@
 		  ]
     }
     @defproc[((intermediate-build-string build-string) [n nat] [f (nat -> char)]) string]{
-    Constructs a string by applying @racket[f] to the numbers between @racket[0] and @racket[(- n 1)]: 
+    Constructs a string by applying @racket[f] to the numbers between @racket[0] and
+ @racket[(- n 1)]: 
     @codeblock{(build-string n f) = (string (f 0) ... (f (- n 1)))}
     @interaction[#:eval (isl)
 		  (build-string 10 integer->char)
 		  (build-string 26 (lambda (x) (integer->char (+ 65 x))))]
     }
     @defproc[((intermediate-quicksort quicksort) [l (listof X)] [comp (X X -> boolean)]) (listof X)]{
-    Sorts the items on @racket[l], in an order according to @racket[comp] (using the quicksort algorithm).
+    Sorts the items on @racket[l], in an order according to @racket[comp] (using the quicksort
+ algorithm).
     @interaction[#:eval (isl)
 		  (quicksort '(6 7 2 1 3 4 0 5 9 8) <)]
     }
@@ -132,24 +143,28 @@
     @interaction[#:eval (isl)
 		  (sort '(6 7 2 1 3 4 0 5 9 8) <)]
     }
-    @defproc[((intermediate-andmap andmap) [p? (X -> boolean)] [l (listof X)]) boolean]{
-    Determines whether @racket[p?] holds for all items of @racket[l]:
+    @defproc[((intermediate-andmap andmap) [p? (X ... -> boolean)] [l (listof X) ...]) boolean]{
+    Determines whether @racket[p?] holds for all items of @racket[l] ...:
     @codeblock{(andmap p (list x-1 ... x-n)) = (and (p x-1) ... (p x-n))}
+    @codeblock{(andmap p (list x-1 ... x-n) (list y-1 ... y-n)) = (and (p x-1 y-1) ... (p x-n y-n))}
     @interaction[#:eval (isl)
 		  (andmap odd? '(1 3 5 7 9))
 		  threshold 
 		  (andmap (lambda (x) (< x threshold)) '(0 1 2))
 		  (andmap even? '())
+                  (andmap (lambda (x f) (f x)) (list 0 1 2) (list odd? even? positive?))
 		  ]
     }
     @defproc[((intermediate-ormap ormap)   [p? (X -> boolean)] [l (listof X)]) boolean]{
     Determines whether @racket[p?] holds for at least one items of @racket[l]:
     @codeblock{(ormap p (list x-1 ... x-n)) = (or (p x-1) ... (p x-n))}
+    @codeblock{(ormap p (list x-1 ... x-n) (list y-1 ... y-n)) = (or (p x-1 y-1) ... (p x-n y-n))}
     @interaction[#:eval (isl)
 		  (ormap odd? '(1 3 5 7 9))
 		  threshold 
 		  (ormap (lambda (x) (< x threshold)) '(6 7 8 1 5))
 		  (ormap even? '())
+                  (ormap (lambda (x f) (f x)) (list 0 1 2) (list odd? even? positive?))
 		  ]
     }
     @defproc[(argmin [f (X -> real)] [l (listof X)]) X]{
@@ -164,9 +179,9 @@
 		  (argmax second '((sam 98) (carl 78) (vincent 93) (asumu 99)))
 		  ]
     }
-    @defproc[(memf [p? (X -> any)] [l (listof X)]) (union false (listof X))]{
-    Produces @racket[false] if @racket[p?] produces @racket[false] for all
-    items on @racket[l]. If @racket[p?] produces @racket[true] for any of
+    @defproc[(memf [p? (X -> any)] [l (listof X)]) (union #false (listof X))]{
+    Produces @racket[#false] if @racket[p?] produces @racket[false] for all
+    items on @racket[l]. If @racket[p?] produces @racket[#true] for any of
     the items on @racket[l], @racket[memf] returns the sub-list starting
     from that item.
     @interaction[#:eval (isl)

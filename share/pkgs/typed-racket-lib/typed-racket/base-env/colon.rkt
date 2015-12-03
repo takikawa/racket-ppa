@@ -1,8 +1,9 @@
 #lang racket/base
 
-(require (for-syntax racket/base syntax/parse/pre unstable/syntax
+(require (for-syntax racket/base syntax/parse/pre
                      "../private/parse-classes.rkt"
                      "../utils/disappeared-use.rkt"
+                     "../utils/utils.rkt"
                      (only-in "../utils/tc-utils.rkt" tc-error/stx))
          (submod "../typecheck/internal-forms.rkt" forms)
          (prefix-in t: "base-types-extra.rkt"))
@@ -30,7 +31,7 @@
      #:when (eq? 'expression ctx)
      (err stx "must be used in a definition context")]
     [(: id (~and kw :) . more:omit-parens)
-     (add-disappeared-use #'kw)
+     (add-disappeared-use (syntax-local-introduce #'kw))
      (wrap stx #`(:-helper #,stx #,top-level? id more.type))]
     [(: e ...)
      (wrap stx #`(:-helper #,stx #,top-level? e ...))]))
@@ -45,9 +46,9 @@
                      "Declaration for `~a' provided, but `~a' has no definition"
                      (syntax-e #'i)
                      (syntax-e #'i)))
-     (syntax-property (syntax/loc stx (begin (quote (:-internal i ty))
+     (syntax-property (syntax/loc stx (begin (quote-syntax (:-internal i ty) #:local)
                                              (#%plain-app values)))
-                      'disappeared-use #'i)]
+                      'disappeared-use (syntax-local-introduce #'i))]
     [(_ orig-stx _ i x ...)
      #:fail-unless (identifier? #'i) (err #'orig-stx "expected identifier" #'i)
      (case (syntax-length #'(x ...))

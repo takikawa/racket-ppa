@@ -1,1 +1,0 @@
-(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.2"))) (define collection (quote multi)) (define deps (quote ("base" "scribble-lib" "syntax-color-lib"))) (define pkg-desc "Experimental 2d syntax") (define pkg-authors (quote (robby)))))

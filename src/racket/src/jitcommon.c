@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2006-2014 PLT Design Inc.
+  Copyright (c) 2006-2015 PLT Design Inc.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -295,13 +295,13 @@ static int common0(mz_jit_state *jitter, void *_data)
   jit_subi_p(JIT_R1, JIT_R1, WORDS_TO_BYTES(1));
   jit_rshi_ul(JIT_R1, JIT_R1, JIT_LOG_WORD_SIZE);
   CHECK_LIMIT();
-  /* Call scheme_delayed_rename: */
+  /* Call scheme_delayed_shift: */
   JIT_UPDATE_THREAD_RSPTR();
   CHECK_LIMIT();
   mz_prepare(2);
   jit_pusharg_l(JIT_R1);
   jit_pusharg_p(JIT_R0);
-  (void)mz_finish_lwe(ts_scheme_delayed_rename, ref2);
+  (void)mz_finish_lwe(ts_scheme_delayed_shift, ref2);
   CHECK_LIMIT();
   jit_retval(JIT_R0);
   /* Restore global array into JIT_R1, and put computed element at i+p+1: */
@@ -542,7 +542,7 @@ static int common1b(mz_jit_state *jitter, void *_data)
      and the ts_ version because we may be in a future */
   sjc.box_cas_fail_code = jit_get_ip();
   mz_prolog(JIT_R2);
-  JIT_UPDATE_THREAD_RSPTR_IF_NEEDED();
+  JIT_UPDATE_THREAD_RSPTR();
   jit_movi_l(JIT_R0, 3);
   mz_prepare(2);
   jit_pusharg_p(JIT_RUNSTACK);
@@ -555,6 +555,7 @@ static int common1b(mz_jit_state *jitter, void *_data)
   /* R0 is argument */
   sjc.bad_vector_length_code = jit_get_ip();
   mz_prolog(JIT_R1);
+  JIT_UPDATE_THREAD_RSPTR();
 
   /* Check for chaperone: */
   ref2 = jit_bmsi_ul(jit_forward(), JIT_R0, 0x1);
@@ -575,6 +576,7 @@ static int common1b(mz_jit_state *jitter, void *_data)
   /* R0 is argument */
   sjc.bad_flvector_length_code = jit_get_ip();
   mz_prolog(JIT_R1);
+  JIT_UPDATE_THREAD_RSPTR();
   jit_prepare(1);
   jit_pusharg_p(JIT_R0);
   (void)mz_finish_lwe(ts_scheme_flvector_length, ref);
@@ -586,6 +588,7 @@ static int common1b(mz_jit_state *jitter, void *_data)
   /* R0 is argument */
   sjc.bad_extflvector_length_code = jit_get_ip();
   mz_prolog(JIT_R1);
+  JIT_UPDATE_THREAD_RSPTR();
   jit_prepare(1);
   jit_pusharg_p(JIT_R0);
   (void)mz_finish_lwe(ts_scheme_extflvector_length, ref);
@@ -597,11 +600,58 @@ static int common1b(mz_jit_state *jitter, void *_data)
   /* R0 is argument */
   sjc.bad_fxvector_length_code = jit_get_ip();
   mz_prolog(JIT_R1);
+  JIT_UPDATE_THREAD_RSPTR();
   jit_prepare(1);
   jit_pusharg_p(JIT_R0);
   (void)mz_finish_lwe(ts_scheme_fxvector_length, ref);
   CHECK_LIMIT();
   scheme_jit_register_sub_func(jitter, sjc.bad_fxvector_length_code, scheme_false);
+
+  /* *** bad_string_length_code *** */
+  /* R0 is argument */
+  sjc.bad_string_length_code = jit_get_ip();
+  mz_prolog(JIT_R1);
+  JIT_UPDATE_THREAD_RSPTR();
+  jit_prepare(1);
+  jit_pusharg_p(JIT_R0);
+  (void)mz_finish_lwe(ts_scheme_string_length, ref);
+  CHECK_LIMIT();
+  scheme_jit_register_sub_func(jitter, sjc.bad_string_length_code, scheme_false);
+
+  /* *** bad_bytes_length_code *** */
+  /* R0 is argument */
+  sjc.bad_bytes_length_code = jit_get_ip();
+  mz_prolog(JIT_R1);
+  JIT_UPDATE_THREAD_RSPTR();
+  jit_prepare(1);
+  jit_pusharg_p(JIT_R0);
+  (void)mz_finish_lwe(ts_scheme_byte_string_length, ref);
+  CHECK_LIMIT();
+  scheme_jit_register_sub_func(jitter, sjc.bad_bytes_length_code, scheme_false);
+
+  /* *** bad_string_eq_2_code *** */
+  /* R0 and R1 are arguments */
+  sjc.bad_string_eq_2_code = jit_get_ip();
+  mz_prolog(JIT_R2);
+  JIT_UPDATE_THREAD_RSPTR();
+  jit_prepare(2);
+  jit_pusharg_p(JIT_R1);
+  jit_pusharg_p(JIT_R0);
+  (void)mz_finish_lwe(ts_scheme_string_eq_2, ref);
+  CHECK_LIMIT();
+  scheme_jit_register_sub_func(jitter, sjc.bad_string_eq_2_code, scheme_false);
+
+  /* *** bad_bytes_eq_2_code *** */
+  /* R0 and R1 are arguments */
+  sjc.bad_bytes_eq_2_code = jit_get_ip();
+  mz_prolog(JIT_R2);
+  JIT_UPDATE_THREAD_RSPTR();
+  jit_prepare(2);
+  jit_pusharg_p(JIT_R1);
+  jit_pusharg_p(JIT_R0);
+  (void)mz_finish_lwe(ts_scheme_byte_string_eq_2, ref);
+  CHECK_LIMIT();
+  scheme_jit_register_sub_func(jitter, sjc.bad_bytes_eq_2_code, scheme_false);
 
   return 1;
 }
@@ -1806,8 +1856,8 @@ static int common4(mz_jit_state *jitter, void *_data)
     (void)mz_bnei_t(reffail, JIT_R0, scheme_stx_type, JIT_R2);
     
     /* It's a syntax object... needs to propagate? */
-    jit_ldxi_l(JIT_R2, JIT_R0, &((Scheme_Stx *)0x0)->u.lazy_prefix);
-    ref = jit_beqi_l(jit_forward(), JIT_R2, 0x0);
+    jit_ldxi_l(JIT_R2, JIT_R0, &((Scheme_Stx *)0x0)->u.to_propagate);
+    ref = jit_beqi_p(jit_forward(), JIT_R2, 0x0);
     CHECK_LIMIT();
 
     /* Maybe needs to propagate; check STX_SUBSTX_FLAG flag */
@@ -2565,8 +2615,7 @@ static int common6(mz_jit_state *jitter, void *_data)
     CHECK_LIMIT();
     
     jit_andi_l(JIT_V1, JIT_R2, SCHEME_MARK_SEGMENT_MASK);
-    jit_movi_l(JIT_R1, sizeof(Scheme_Cont_Mark));
-    jit_mulr_l(JIT_V1, JIT_V1, JIT_R1);
+    jit_lshi_l(JIT_V1, JIT_V1, LOG_CONT_MARK_WORD_COUNT+JIT_LOG_WORD_SIZE);
     jit_addr_l(JIT_R0, JIT_R0, JIT_V1);
     CHECK_LIMIT();
     /* R0 now points to the right record */
@@ -2623,8 +2672,7 @@ static int common6(mz_jit_state *jitter, void *_data)
     /* R0 now points to the right array */
     
     jit_andi_l(JIT_V1, JIT_R2, SCHEME_MARK_SEGMENT_MASK);
-    jit_movi_l(JIT_R1, sizeof(Scheme_Cont_Mark));
-    jit_mulr_l(JIT_V1, JIT_V1, JIT_R1);
+    jit_lshi_l(JIT_V1, JIT_V1, LOG_CONT_MARK_WORD_COUNT+JIT_LOG_WORD_SIZE);
     jit_addr_l(JIT_R0, JIT_R0, JIT_V1);
     CHECK_LIMIT();
     /* R0 now points to the right record */
@@ -2683,6 +2731,23 @@ static int common6(mz_jit_state *jitter, void *_data)
     mz_epilog(JIT_R2);
 
     scheme_jit_register_sub_func(jitter, sjc.wcm_chaperone, scheme_false);
+  }
+
+  /* with_immed_mark_code */
+  {
+    GC_CAN_IGNORE jit_insn *ref2 USED_ONLY_FOR_FUTURES;
+    sjc.with_immed_mark_code = jit_get_ip();
+
+    mz_prolog(JIT_R2);
+    JIT_UPDATE_THREAD_RSPTR();
+    jit_prepare(2);
+    jit_pusharg_p(JIT_R1);
+    jit_pusharg_p(JIT_R0);
+    (void)mz_finish_lwe(ts_scheme_chaperone_get_immediate_cc_mark, ref2);
+    jit_retval(JIT_R0);
+    mz_epilog(JIT_R2);
+
+    scheme_jit_register_sub_func(jitter, sjc.with_immed_mark_code, scheme_false);
   }
 
   return 1;
@@ -3279,6 +3344,57 @@ static int common12(mz_jit_state *jitter, void *_data)
 
 static int common13(mz_jit_state *jitter, void *_data)
 {
+  GC_CAN_IGNORE jit_insn *refr USED_ONLY_FOR_FUTURES;
+
+  /* *** slow_ptr_ref_code *** */
+  sjc.slow_ptr_ref_code = jit_get_ip();
+  mz_prolog(JIT_R2);
+  JIT_UPDATE_THREAD_RSPTR();
+  mz_prepare(2);
+  jit_pusharg_p(JIT_RUNSTACK);
+  jit_pusharg_i(JIT_R0);
+  mz_finish_prim_lwe(ts_scheme_foreign_ptr_ref, refr);
+  jit_retval(JIT_R0);
+  mz_epilog(JIT_R2);
+  scheme_jit_register_sub_func(jitter, sjc.slow_ptr_ref_code, scheme_false);
+  CHECK_LIMIT();
+
+  /* *** slow_ptr_set_code *** */
+  sjc.slow_ptr_set_code = jit_get_ip();
+  mz_prolog(JIT_R2);
+  JIT_UPDATE_THREAD_RSPTR();
+  mz_prepare(2);
+  jit_pusharg_p(JIT_RUNSTACK);
+  jit_pusharg_i(JIT_R0);
+  mz_finish_prim_lwe(ts_scheme_foreign_ptr_set, refr);
+  mz_epilog(JIT_R2);
+  scheme_jit_register_sub_func(jitter, sjc.slow_ptr_set_code, scheme_false);
+  CHECK_LIMIT();
+    
+  /* *** slow_cpointer_tag_code *** */
+  sjc.slow_cpointer_tag_code = jit_get_ip();
+  mz_prolog(JIT_R2);
+  JIT_UPDATE_THREAD_RSPTR();
+  mz_prepare(1);
+  jit_pusharg_p(JIT_R0);
+  mz_finish_prim_lwe(ts_scheme_cpointer_tag, refr);
+  jit_retval(JIT_R0);
+  mz_epilog(JIT_R2);
+  scheme_jit_register_sub_func(jitter, sjc.slow_cpointer_tag_code, scheme_false);
+  CHECK_LIMIT();
+    
+  /* *** slow_set_cpointer_tag_code *** */
+  sjc.slow_set_cpointer_tag_code = jit_get_ip();
+  mz_prolog(JIT_R2);
+  JIT_UPDATE_THREAD_RSPTR();
+  mz_prepare(2);
+  jit_pusharg_p(JIT_R1);
+  jit_pusharg_p(JIT_R0);
+  mz_finish_prim_lwe(ts_scheme_set_cpointer_tag, refr);
+  mz_epilog(JIT_R2);
+  scheme_jit_register_sub_func(jitter, sjc.slow_set_cpointer_tag_code, scheme_false);
+  CHECK_LIMIT();
+    
   /* *** force_value_same_mark_code *** */
   /* Helper for futures: a synthetic functon that just forces values,
      which will bounce back to the runtime thread (but with lightweight
@@ -3293,8 +3409,10 @@ static int common13(mz_jit_state *jitter, void *_data)
   mz_pop_threadlocal();
   mz_pop_locals();
   jit_ret();
+
   return 1;
 }
+
 
 int scheme_do_generate_common(mz_jit_state *jitter, void *_data)
 {
@@ -3519,6 +3637,34 @@ static int more_common0(mz_jit_state *jitter, void *_data)
     CHECK_LIMIT();
 
     scheme_jit_register_sub_func(jitter, sjc.module_start_start_code, scheme_eof);
+  }
+
+  /* *** thread_start_child_code *** */
+  /* A simple indirection to generate code that libunwind can't follow,
+     particularly as used by exceptions in the Objective-C runtime */
+  {
+    int in;
+    
+    sjc.thread_start_child_code = jit_get_ip();
+    jit_prolog(2);
+    in = jit_arg_p();
+    jit_getarg_p(JIT_R0, in); /* child */
+    in = jit_arg_p();
+    jit_getarg_p(JIT_R1, in); /* child_thunk */
+    CHECK_LIMIT();
+    mz_push_locals();
+
+    jit_prepare(2);
+    jit_pusharg_p(JIT_R1);
+    jit_pusharg_p(JIT_R0);
+    (void)mz_finish(scheme_do_thread_start_child);
+    CHECK_LIMIT();
+    mz_pop_locals();
+    jit_ret();
+    CHECK_LIMIT();
+
+    /* No scheme_jit_register_sub_func, because we don't want to try to
+       traverse past this frame for a native stack trace. */
   }
 
   return 1;

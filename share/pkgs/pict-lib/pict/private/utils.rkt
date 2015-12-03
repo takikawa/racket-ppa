@@ -69,8 +69,9 @@
   (provide/contract 
    [scale (case-> (-> pict? number? number? pict?)
                   (-> pict? number? pict?))]
-   [scale-to-fit (case-> (-> pict? number? number? pict?)
-                         (-> pict? pict? pict?))]
+   [scale-to-fit (->* (pict? (or/c number? pict?))
+                      (number? #:mode (or/c 'preserve 'inset 'distort))
+                      pict?)]
    [rotate (case-> (-> pict? number? pict?))]
    [pin-line (->* (pict?
                    pict-path? (-> pict? pict-path? (values number? number?))
@@ -273,93 +274,113 @@
   (define (pip-arrows-line dx dy size)
     (arrows-line dx (- dy) size))
 
-  (define (filled-rectangle w h #:draw-border? [draw-border? #t])
-    (dc
-     (lambda (dc x y)
-       (let ([b (send dc get-brush)]
-             [p (send dc get-pen)])
-         (send dc set-brush (send the-brush-list find-or-create-brush
-                                  (send p get-color)
-                                  'solid))
-         (unless draw-border?
-           (send dc set-pen "black" 1 'transparent))
-	 (send dc draw-rectangle x y w h)
-         (send dc set-brush b)
-         (send dc set-pen p)))
-     w
-     h))
-  
-  (define (rectangle w h)
-    (dc
-     (lambda (dc x y)
-       (let ([b (send dc get-brush)])
-         (send dc set-brush (send the-brush-list find-or-create-brush
-                                  "white" 'transparent))
-         (send dc draw-rectangle x y w h)
-         (send dc set-brush b)))
-     w
-     h))
-  
-  (define (rounded-rectangle w h [corner-radius -0.25] #:angle [angle 0])
-    (let ([dc-path (new dc-path%)])
-      (send dc-path rounded-rectangle 0 0 w h corner-radius)
-      (send dc-path rotate angle)
-      (let-values ([(x y w h) (send dc-path get-bounding-box)])
-        (dc (λ (dc dx dy) 
-              (let ([brush (send dc get-brush)])
-                (send dc set-brush (send the-brush-list find-or-create-brush
-                                         "white" 'transparent))
-                (send dc draw-path dc-path (- dx x) (- dy y))
-                (send dc set-brush brush)))
-            w
-            h))))
-  
-  (define (filled-rounded-rectangle w h [corner-radius -0.25] #:angle [angle 0] #:draw-border? [draw-border? #t])
-    (let ([dc-path (new dc-path%)])
-      (send dc-path rounded-rectangle 0 0 w h corner-radius)
-      (send dc-path rotate angle)
-      (let-values ([(x y w h) (send dc-path get-bounding-box)])
-        (dc (λ (dc dx dy) 
-              (let ([brush (send dc get-brush)]
-                    [pen (send dc get-pen)])
-                (send dc set-brush (send the-brush-list find-or-create-brush
-                                         (send (send dc get-pen) get-color)
-                                         'solid))
-                (unless draw-border?
-                  (send dc set-pen "black" 1 'transparent))
-                (send dc draw-path dc-path (- dx x) (- dy y))
-                (send dc set-brush brush)
-                (send dc set-pen pen)))
-            w
-            h))))
-  
-  (define (circle size) (ellipse size size))
-  
-  (define (ellipse width height)
-    (dc (lambda (dc x y)
-	  (let ([b (send dc get-brush)])
-	    (send dc set-brush (send the-brush-list find-or-create-brush
-				     "white" 'transparent))
-	    (send dc draw-ellipse x y width height)
-	    (send dc set-brush b)))
-	width height))
+  (define (draw-shape/border w h draw-fun
+                             color [border-color #f] [border-width #f]
+                             #:draw-border? [draw-border? #t]
+                             #:transparent? [transparent? #f])
+    (dc (λ (dc dx dy)
+          (define old-brush (send dc get-brush))
+          (define old-pen   (send dc get-pen))
+          (send dc set-brush
+                (send the-brush-list find-or-create-brush
+                      (cond [transparent? "white"]
+                            [color        color]
+                            [else         (send old-pen get-color)])
+                      (if transparent? 'transparent 'solid)))
+          (if draw-border?
+              (when (or border-color border-width)
+                ;; otherwise, leave pen as is
+                (send dc set-pen (send the-pen-list
+                                       find-or-create-pen
+                                       (or border-color
+                                           (send old-pen get-color))
+                                       (or border-width
+                                           (send old-pen get-width))
+                                       (send old-pen get-style))))
+              (send dc set-pen "black" 1 'transparent))
+          (draw-fun dc dx dy)
+          (send dc set-brush old-brush)
+          (send dc set-pen   old-pen))
+        w h))
 
-  (define (disk size #:draw-border? [draw-border? #t])
-    (filled-ellipse size size #:draw-border? draw-border?))
+  (define (filled-rectangle w h
+                            #:draw-border? [draw-border? #t]
+                            #:color        [color #f]
+                            #:border-color [border-color #f]
+                            #:border-width [border-width #f])
+    (draw-shape/border w h (lambda (dc x y) (send dc draw-rectangle x y w h))
+                       color border-color border-width
+                       #:draw-border? draw-border?))
   
-  (define (filled-ellipse width height #:draw-border? [draw-border? #t])
-    (dc (lambda (dc x y)
-	  (define b (send dc get-brush))
-          (define p (send dc get-pen))
-          (send dc set-brush (send the-brush-list find-or-create-brush
-                                   (send (send dc get-pen) get-color)
-                                   'solid))
-          (unless draw-border?
-            (send dc set-pen "black" 1 'transparent))
-          (send dc draw-ellipse x y width height)
-          (send dc set-brush b)
-          (send dc set-pen p))
-	width height))
+  (define (rectangle w h
+                     #:border-color [border-color #f]
+                     #:border-width [border-width #f])
+    (draw-shape/border w h (lambda (dc x y) (send dc draw-rectangle x y w h))
+                       "white" border-color border-width
+                       #:transparent? #t))
+  
+  (define (rounded-rectangle w h [corner-radius -0.25]
+                             #:angle        [angle 0]
+                             #:border-color [border-color #f]
+                             #:border-width [border-width #f])
+    (define dc-path (new dc-path%))
+    (send dc-path rounded-rectangle 0 0 w h corner-radius)
+    (send dc-path rotate angle)
+    (let-values ([(x y w h) (send dc-path get-bounding-box)])
+      (draw-shape/border w h
+                         (lambda (dc dx dy)
+                           (send dc draw-path dc-path (- dx x) (- dy y)))
+                         "white" border-color border-width
+                         #:transparent? #t)))
+  
+  (define (filled-rounded-rectangle w h [corner-radius -0.25]
+                                    #:angle        [angle 0]
+                                    #:draw-border? [draw-border? #t]
+                                    #:color        [color #f]
+                                    #:border-color [border-color #f]
+                                    #:border-width [border-width #f])
+    (define dc-path (new dc-path%))
+    (send dc-path rounded-rectangle 0 0 w h corner-radius)
+    (send dc-path rotate angle)
+    (let-values ([(x y w h) (send dc-path get-bounding-box)])
+      (draw-shape/border w h
+                         (lambda (dc dx dy)
+                           (send dc draw-path dc-path (- dx x) (- dy y)))
+                         color border-color border-width
+                         #:draw-border? draw-border?)))
+  
+  (define (circle size
+                  #:border-color [border-color #f]
+                  #:border-width [border-width #f])
+    (ellipse size size #:border-color border-color #:border-width border-width))
+  
+  (define (ellipse width height
+                   #:border-color [border-color #f]
+                   #:border-width [border-width #f])
+    (draw-shape/border width height
+                       (lambda (dc x y) (send dc draw-ellipse x y width height))
+                       "white" border-color border-width
+                       #:transparent? #t))
+
+  (define (disk size
+                #:draw-border? [draw-border? #t]
+                #:color        [color #f]
+                #:border-color [border-color #f]
+                #:border-width [border-width #f])
+    (filled-ellipse size size #:draw-border? draw-border?
+                    #:color color
+                    #:border-color border-color
+                    #:border-width border-width))
+  
+  (define (filled-ellipse width height
+                          #:draw-border? [draw-border? #t]
+                          #:color        [color #f]
+                          #:border-color [border-color #f]
+                          #:border-width [border-width #f])
+    (draw-shape/border width height
+                       (lambda (dc x y) (send dc draw-ellipse x y width height))
+                       color border-color border-width
+                       #:draw-border? draw-border?))
 
   (define cloud
     (case-lambda
@@ -1071,13 +1092,37 @@
           (s (send c green))
           (s (send c blue))))))
   
-  (define scale-to-fit
-    (case-lambda
-      [(main-pict size-pict)
-       (scale-to-fit main-pict (pict-width size-pict) (pict-height size-pict))]
-      [(main-pict w h)
-       (scale main-pict (min (/ w (pict-width main-pict))
-                             (/ h (pict-height main-pict))))]))
+  ;; arg spec is not great. started as a case-lambda, then grew a keyword arg
+  (define (scale-to-fit main-pict w-or-size-pict [h-or-false #f]
+                        #:mode [mode 'preserve]) ; or: 'inset 'distort
+    (cond [(not h-or-false) ; scale to the size of another pict
+           (define size-pict w-or-size-pict)
+           (unless (pict? size-pict)
+             (raise-type-error 'scale-to-fit "pict?" size-pict))
+           (scale-to-fit main-pict
+                         (pict-width size-pict)
+                         (pict-height size-pict)
+                         #:mode mode)]
+          [else
+           (define w w-or-size-pict)
+           (define h h-or-false)
+           (define w0 (pict-width main-pict))
+           (define h0 (pict-height main-pict))
+           (define wfactor0 (if (zero? w0) 1 (/ w w0)))
+           (define hfactor0 (if (zero? h0) 1 (/ h h0)))
+           (define-values (wfactor hfactor)
+             (case mode
+               ((preserve inset)
+                (let ([factor (min wfactor0 hfactor0)])
+                  (values factor factor)))
+               ((distort)
+                (values wfactor0 hfactor0))))
+           (define scaled-pict (scale main-pict wfactor hfactor))
+           (case mode
+             ((inset)
+              (cc-superimpose (blank w h) scaled-pict))
+             (else
+              scaled-pict))]))
   
 (define scale
   (case-lambda

@@ -2,7 +2,7 @@
 (require racket/class
          racket/gui/base
          data/interval-map
-         unstable/arrow
+         racket/draw/arrow
          framework
          data/interval-map
          macro-debugger/syntax-browser/interfaces)

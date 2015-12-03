@@ -1,11 +1,13 @@
 #lang racket/base
 (require ffi/unsafe
+         ffi/unsafe/define
          racket/class
          racket/draw
          ffi/unsafe/alloc
          (except-in racket/draw/private/color
                     color% make-color)
          racket/draw/private/local
+         racket/draw/unsafe/cairo
          "../common/backing-dc.rkt"
          "../common/canvas-mixin.rkt"
          "../../syntax.rkt"
@@ -20,7 +22,6 @@
          "dc.rkt"
          "gl-context.rkt"
          "combo.rkt"
-         "pixbuf.rkt"
          "gcwin.rkt"
          "panel.rkt")
 
@@ -41,14 +42,33 @@
 
 (define-gtk gtk_drawing_area_new (_fun -> _GtkWidget))
 
-(define-gtk gtk_combo_box_entry_new_text (_fun -> _GtkWidget))
-(define-gtk gtk_combo_box_append_text (_fun _GtkWidget _string -> _void))
-(define-gtk gtk_combo_box_remove_text (_fun _GtkWidget _int -> _void))
+(define-gtk gtk_layout_new (_fun (_pointer = #f) (_pointer = #f) -> _GtkWidget))
+(define-gtk gtk_layout_put (_fun _GtkWidget _GtkWidget _int _int -> _void))
+(define-gtk gtk_layout_move (_fun _GtkWidget _GtkWidget _int _int -> _void))
+
+(define-gtk gtk_combo_box_text_new (_fun -> _GtkWidget)
+  #:make-fail make-not-available)
+(define-gtk gtk_combo_box_entry_new_text (_fun -> _GtkWidget)
+  #:fail (lambda () gtk_combo_box_text_new))
+
+(define-gtk gtk_combo_box_text_append_text (_fun _GtkWidget _string -> _void)
+  #:make-fail make-not-available)
+(define-gtk gtk_combo_box_append_text (_fun _GtkWidget _string -> _void)
+  #:fail (lambda () gtk_combo_box_text_append_text))
+
+(define-gtk gtk_combo_box_text_remove (_fun _GtkWidget _int -> _void)
+  #:make-fail make-not-available)
+(define-gtk gtk_combo_box_remove_text (_fun _GtkWidget _int -> _void)
+  #:fail (lambda () gtk_combo_box_text_remove))
+
 (define-gtk gtk_combo_box_popup (_fun _GtkWidget -> _void))
 
 (define-gtk gtk_widget_queue_draw (_fun _GtkWidget -> _void))
 
-(define-gtk gtk_fixed_set_has_window (_fun _GtkWidget _gboolean -> _void))
+(define-gtk gtk_widget_set_has_window (_fun _GtkWidget _gboolean -> _void)
+  #:make-fail make-not-available)
+(define-gtk gtk_fixed_set_has_window (_fun _GtkWidget _gboolean -> _void)
+  #:fail (lambda () gtk_widget_set_has_window))
 
 (define-gtk gtk_hscrollbar_new (_fun _pointer -> _GtkWidget))
 (define-gtk gtk_vscrollbar_new (_fun _pointer -> _GtkWidget))
@@ -184,12 +204,30 @@
     (let ([wx (gtk->wx gtk)])
       (if wx
           (begin
-            (unless (send wx paint-or-queue-paint)
+            (unless (send wx paint-or-queue-paint #f)
               (let ([gc (send wx get-canvas-background-for-clearing)])      
                 (when gc
                   (gdk_draw_rectangle (widget-window gtk) gc #t
                                       0 0 32000 32000)
                   (gdk_gc_unref gc))))
+            (not (send wx is-panel?)))
+          #f))))
+
+(define-signal-handler connect-draw "draw"
+  (_fun _GtkWidget _cairo_t -> _gboolean)
+  (lambda (gtk cr)
+    (let ([wx (gtk->wx gtk)])
+      (if wx
+	  (let ([col (send wx get-canvas-background-for-backing)]
+		[win (widget-window gtk)])
+            (unless (send wx paint-or-queue-paint cr)
+              (when col
+                (cairo_set_source_rgb cr
+				      (color-red col)
+				      (color-green col)
+				      (color-blue col))
+		(cairo_rectangle cr 0 0 32000 32000)
+		(cairo_fill cr)))
             (not (send wx is-panel?)))
           #f))))
 
@@ -244,15 +282,24 @@
               refresh-for-autoscroll refresh-all-children
 	      reset-auto-scroll
               get-eventspace
-	      register-extra-gtk)
+	      register-extra-gtk
+	      call-pre-on-event set-focus on-event)
 
      (define is-combo? (memq 'combo style))
      (define has-border? (or (memq 'border style)
                              (memq 'control-border style)))
+     (define for-gl? (memq 'gl style))
+     (define transparent?
+       (and (memq 'transparent style)
+            (not for-gl?))) ; 'transparent is incompatible with 'gl
+
+     (define transparentish? (or transparent? is-combo?))
 
      (define margin (if has-border? 1 0))
 
-     (define-values (client-gtk container-gtk gtk 
+     (define flush-win-box (mcons #f 0))
+
+     (define-values (client-gtk container-gtk gtk
                                 hscroll-adj vscroll-adj hscroll-gtk vscroll-gtk resize-box
                                 combo-button-gtk
                                 scroll-width)
@@ -263,7 +310,9 @@
               (memq 'vscroll style)
               (memq 'auto-vscroll style))
           (let* ([client-gtk (if (is-panel?)
-                                 (gtk_fixed_new)
+                                 (if gtk3?
+				     (gtk_layout_new)
+				     (gtk_fixed_new))
                                  (gtk_drawing_area_new))]
                  [container-gtk (if (is-panel?)
                                     (gtk_fixed_new)
@@ -274,7 +323,17 @@
                           (memq 'auto-hscroll style))]
                  [vs? (or (memq 'vscroll style)
                           (memq 'auto-vscroll style))])
-            (let ([h (as-gtk-allocation (gtk_hbox_new #f 0))]
+            (let ([container (and gtk3?
+				  ;; See `panel%` for information on why an extra
+				  ;; event-box layer is needed here.
+				  (as-gtk-allocation (gtk_event_box_new)))]
+	          [border (and has-border?
+			       (if gtk3?
+				   (gtk_hbox_new #f 0)
+				   (as-gtk-allocation (gtk_hbox_new #f 0))))]
+		  [h (if (or has-border? gtk3?)
+			 (gtk_hbox_new #f 0)
+			 (as-gtk-allocation (gtk_hbox_new #f 0)))]
                   [v (gtk_vbox_new #f 0)]
                   [v2 (gtk_vbox_new #f 0)]
                   [h2 (gtk_vbox_new #f 0)]
@@ -292,7 +351,11 @@
                 (gtk_fixed_set_has_window client-gtk #t)) ; imposes clipping
               (when has-border?
                 (gtk_container_set_border_width h margin)
-                (connect-expose-border h))
+                (connect-expose/draw-border border h))
+	      (when container
+		(gtk_container_add container (or border h))
+		(gtk_widget_show (or border h)))
+              (when border (gtk_box_pack_start border h #t #t 0))
               (gtk_box_pack_start h v #t #t 0)
               (gtk_box_pack_start v client-gtk #t #t 0)
               (gtk_box_pack_start h v2 #f #f 0)
@@ -303,7 +366,8 @@
               (when hs?
                 (gtk_widget_show hscroll))
               (gtk_widget_show vscroll)
-              (gtk_widget_show h)
+              (when border
+	        (gtk_widget_show h))
               (gtk_widget_show v)
               (when vs?
                 (gtk_widget_show v2))
@@ -312,11 +376,14 @@
                 (gtk_widget_show resize-box))
               (gtk_widget_show client-gtk)
               (unless (eq? client-gtk container-gtk)
-                (gtk_container_add client-gtk container-gtk)
+		(if gtk3?
+		    (gtk_layout_put client-gtk container-gtk 0 0)
+		    (gtk_container_add client-gtk container-gtk))
                 (gtk_widget_show container-gtk))
               (let ([req (make-GtkRequisition 0 0)])
                 (gtk_widget_size_request vscroll req)
-                (values client-gtk container-gtk h hadj vadj 
+                (values client-gtk container-gtk (or container border h)
+			hadj vadj 
                         (and hs? h2)
                         (and vs? v2)
                         (and hs? vs? resize-box)
@@ -329,17 +396,19 @@
             (values orig-entry gtk gtk #f #f #f #f #f (extract-combo-button gtk) 0))]
          [has-border?
           (let ([client-gtk (gtk_drawing_area_new)]
-                [h (as-gtk-allocation (gtk_hbox_new #f 0))])
+                [h (gtk_hbox_new #f 0)]
+                [border (as-gtk-allocation (gtk_hbox_new #f 0))])
+            (gtk_box_pack_start border h #t #t 0)
             (gtk_box_pack_start h client-gtk #t #t 0)
             (gtk_container_set_border_width h margin)
-            (connect-expose-border h)
+            (connect-expose/draw-border border h)
+            (gtk_widget_show h)
             (gtk_widget_show client-gtk)
-            (values client-gtk client-gtk h #f #f #f #f #f #f 0))]
+            (values client-gtk client-gtk border #f #f #f #f #f #f 0))]
          [else
           (let ([client-gtk (as-gtk-allocation (gtk_drawing_area_new))])
             (values client-gtk client-gtk client-gtk #f #f #f #f #f #f 0))])))
 
-     (define for-gl? (memq 'gl style))
      (when for-gl?
        (prepare-widget-gl-context client-gtk gl-config)
        (gtk_widget_set_double_buffered client-gtk #f))
@@ -375,7 +444,7 @@
          (reset-auto-scroll))
        (on-size))
      
-     (set! dc (new dc% [canvas this] [transparent? (memq 'transparent style)]))
+     (set! dc (new dc% [canvas this] [transparentish? transparentish?]))
 
      (gtk_widget_realize gtk)
      (gtk_widget_realize client-gtk)
@@ -387,7 +456,9 @@
                                       (GtkRequisition-height r)
                                       (GtkRequisition-height r))))
 
-     (connect-expose client-gtk)
+     (if gtk3?
+	 (connect-draw client-gtk)
+	 (connect-expose client-gtk))
      #;(gtk_widget_set_double_buffered client-gtk #f)
      (connect-key-and-mouse client-gtk)
      (connect-focus client-gtk)
@@ -401,8 +472,7 @@
                                                     GDK_LEAVE_NOTIFY_MASK))
      (unless (or (memq 'no-focus style)
                  (is-panel?))
-       (set-gtk-object-flags! client-gtk (bitwise-ior (get-gtk-object-flags client-gtk)
-                                                      GTK_CAN_FOCUS)))
+       (gtk_widget_set_can_focus client-gtk #t))
      (check-combo)
      (when combo-button-gtk
        (connect-combo-key-and-mouse combo-button-gtk))
@@ -411,6 +481,20 @@
 
      (when hscroll-adj (connect-value-changed-h hscroll-adj))
      (when vscroll-adj (connect-value-changed-v vscroll-adj))
+
+     (when (and gtk3? (or hscroll-gtk vscroll-gtk))
+       ;; Need to get scroll size now that the control is shown
+       (let ([req (make-GtkRequisition 0 0)])
+	 (gtk_widget_show gtk)
+	 (gtk_widget_get_preferred_size (or vscroll-gtk hscroll-gtk) req #f)
+	 (set! scroll-width (if vscroll-gtk
+				(GtkRequisition-width req)
+				(GtkRequisition-height req)))
+	 (gtk_widget_hide gtk)))
+
+     (when (and gtk3? is-combo?)
+       ;; Needed for sizing:
+       (gtk_combo_box_append_text gtk (make-string 8 #\X)))
 
      (set-auto-size)
      (adjust-client-delta (+ (* 2 margin) 
@@ -423,6 +507,9 @@
                                      (memq 'auto-hscroll style))
                                  scroll-width
                                  0)))
+     (when (and gtk3? is-combo?)
+       (infer-client-delta #:inside client-gtk)
+       (gtk_combo_box_text_remove gtk 0))
 
      (define/public (is-panel?) #f)
 
@@ -436,16 +523,36 @@
      (define/public (make-compatible-bitmap w h)
        (send dc make-backing-bitmap w h))
 
+     (define/public (get-scaled-client-size)
+       (define wb (box #f))
+       (define hb (box #f))
+       (get-client-size wb hb)
+       (define s (if gtk3?
+		     (gtk_widget_get_scale_factor gtk)
+		     1))
+       (values (* s (->screen (unbox wb))) (* s (->screen (unbox hb)))))
+
+     (define/public (get-gl-client-size)
+       (get-scaled-client-size))
+
      (define/override (get-client-gtk) client-gtk)
      (define/override (get-container-gtk) container-gtk)
      (define/override (handles-events? gtk) (not (ptr-equal? gtk combo-button-gtk)))
 
      (define/override (internal-pre-on-event gtk e)
-       (if (and (ptr-equal? gtk combo-button-gtk)
-                (send e button-down?))
-           (begin
-             (on-popup)
-             #t)
+       (if (ptr-equal? gtk combo-button-gtk)
+           (cond
+	    [gtk3?
+	     (queue-window-event this (lambda ()
+					(unless (call-pre-on-event this e)
+					  (when (send e button-down?)
+					    (set-focus))
+					  (on-event e))))
+	     #t]
+	    [(send e button-down?)
+	     (on-popup)
+             #t]
+	    [else #f])
            #f))
      (define/public (popup-combo)
        ;; Unfortunately, the user has to hold the mouse 
@@ -462,18 +569,18 @@
      ;; are defined by `canvas-mixin' from ../common/canvas-mixin
      (define/public (queue-paint) (void))
      (define/public (request-canvas-flush-delay)
-       (request-flush-delay (get-flush-window)))
+       (request-flush-delay (get-flush-window) transparentish?))
      (define/public (cancel-canvas-flush-delay req)
        (cancel-flush-delay req))
      (define/public (queue-canvas-refresh-event thunk)
        (queue-window-refresh-event this thunk))
      (define/public (skip-pre-paint?) #f)
 
-     (define/public (paint-or-queue-paint)
+     (define/public (paint-or-queue-paint cr)
        ;; in atomic mode
        (if for-gl?
 	   (queue-paint)
-	   (or (do-canvas-backing-flush #f)
+	   (or (do-canvas-backing-flush cr)
 	       (begin
 		 (queue-paint)
 		 #f))))
@@ -481,18 +588,18 @@
      ;; overridden to extend for scheduled periodic flushes:
      (define/public (schedule-periodic-backing-flush)
        (void))
-     (define/public (do-canvas-backing-flush ctx)
-       (do-backing-flush this dc (if is-combo?
-                                     (get-subwindow client-gtk)
-                                     (widget-window client-gtk))))
+     (define/public (do-canvas-backing-flush cr)
+       (do-backing-flush this dc (if gtk3?
+				     cr
+				     (if is-combo?
+					 (get-subwindow client-gtk)
+					 (widget-window client-gtk)))))
 
      (define/public (on-paint) (void))
 
-     (define flush-win-box (mcons #f 0))
      (define/public (get-flush-window) 
        (atomically
-	(if (zero? (bitwise-and (get-gtk-object-flags client-gtk) 
-				GTK_MAPPED))
+	(if (not (gtk_widget_get_mapped client-gtk))
 	    (mcons #f #f)
 	    (if (win-box-valid? flush-win-box)
 		flush-win-box
@@ -501,6 +608,11 @@
 		  flush-win-box)))))
      (define/public (unrealize)
        (unrealize-win-box flush-win-box))
+     (define/override (reset-child-freezes)
+       ;; A transparent canvas can't have a native window, so we
+       ;; need to release any freezes befre the window implementation
+       ;; might change.
+       (when transparentish? (unrealize)))
 
      (define/public (begin-refresh-sequence)
        (send dc suspend-flush))
@@ -522,7 +634,7 @@
        ;; called atomically
        (unless for-gl?
          (gtk_widget_queue_draw client-gtk)))
-     
+
      (define/override (reset-child-dcs)
        (when (dc . is-a? . dc%)
          (reset-dc)))
@@ -564,8 +676,9 @@
           [(and v? (not h?))
            ;; remove corner 
            (gtk_widget_hide resize-box)]))
-       (adjust-client-delta (+ (* 2 margin) (if v? scroll-width 0))
-                            (+ (* 2 margin) (if h? scroll-width 0))))
+       (unless is-combo?
+         (adjust-client-delta (+ (* 2 margin) (if v? scroll-width 0))
+                              (+ (* 2 margin) (if h? scroll-width 0)))))
 
      (define suspend-scroll-callbacks? #f)
      (define/public (deliver-scroll-callbacks?) (not suspend-scroll-callbacks?))
@@ -647,10 +760,8 @@
            (->long (dispatch which gtk_adjustment_get_value 0))))
      
      (define clear-bg?
-       (and (not (memq 'transparent style)) 
+       (and (not transparent?)
             (not (memq 'no-autoclear style))))
-     (define transparent?
-       (memq 'transparent style))
      (define gc #f)
      (define bg-col (make-object color% "white"))
      (define/public (get-canvas-background) (if transparent?
@@ -672,7 +783,7 @@
            #f))
 
      (when is-combo?
-       (connect-changed client-gtk))
+       (connect-changed (if gtk3? gtk client-gtk)))
 
      (define combo-count 0)
      (define/public (clear-combo-items)
@@ -780,27 +891,29 @@
 
      (define reg-blits null)
      
-     (define/private (register-one-blit x y w h on-pixbuf off-pixbuf)
-       (let* ([cwin (widget-window client-gtk)])
-         (atomically
-          (let ([win (create-gc-window cwin x y w h)])
-            (let ([r (scheme_add_gc_callback
-                      (make-gc-show-desc win on-pixbuf w h)
-                      (make-gc-hide-desc win off-pixbuf w h))])
-              (cons win r))))))
-     
+     (define/private (register-one-blit x y w h on-gc-bitmap off-gc-bitmap)
+       (atomically
+	(let ([win (create-gc-window client-gtk x y w h)])
+	  (let ([r (scheme_add_gc_callback
+		    (make-gc-show-desc win on-gc-bitmap w h)
+		    (make-gc-hide-desc win off-gc-bitmap w h))])
+	    (cons win r)))))
+
      (define/public (register-collecting-blit x y w h on off on-x on-y off-x off-y)
        (let ([on (fix-bitmap-size on w h on-x on-y)]
              [off (fix-bitmap-size off w h off-x off-y)])
-         (let ([on-pixbuf (bitmap->pixbuf on)]
-               [off-pixbuf (bitmap->pixbuf off)])
+         (let ([on-gc-bitmap (bitmap->gc-bitmap on client-gtk)]
+               [off-gc-bitmap (bitmap->gc-bitmap off client-gtk)])
            (atomically
-            (set! reg-blits (cons (register-one-blit x y w h on-pixbuf off-pixbuf) reg-blits))))))
+            (set! reg-blits (cons (register-one-blit (->screen x) (->screen y)
+						     (->screen w) (->screen h)
+						     on-gc-bitmap off-gc-bitmap)
+				  reg-blits))))))
      
      (define/public (unregister-collecting-blits)
        (atomically
         (for ([r (in-list reg-blits)])
-          (g_object_unref (car r))
+          (free-gc-window (car r))
           (scheme_remove_gc_callback (cdr r)))
         (set! reg-blits null))))))
 
@@ -821,15 +934,16 @@
         (gtk_widget_size_request container-gtk req)
         (gtk_widget_set_size_request container-gtk
                                      (max (GtkRequisition-width req)
-                                          (+ x w))
+                                          (->screen (+ x w)))
                                      (max (GtkRequisition-height req)
-                                          (+ y h))))
+                                          (->screen (+ y h)))))
       (super set-child-size child-gtk x y w h))
 
     (define/override (reset-dc-for-autoscroll)
       (super reset-dc-for-autoscroll)
-      (gtk_fixed_move (get-client-gtk) (get-container-gtk) 
-                      (- (get-virtual-h-pos))
-                      (- (get-virtual-v-pos))))
+      ((if (and gtk3? (is-panel?)) gtk_layout_move gtk_fixed_move)
+       (get-client-gtk) (get-container-gtk)
+       (- (get-virtual-h-pos))
+       (- (get-virtual-v-pos))))
 
     (super-new)))

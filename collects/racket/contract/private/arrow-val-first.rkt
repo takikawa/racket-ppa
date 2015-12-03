@@ -68,7 +68,6 @@
 (generate-popular-key-ids popular-key-ids)
 
 (define-for-syntax (build-plus-one-arity-function+chaperone-constructor
-                    stx
                     regular-args
                     optional-args
                     mandatory-kwds
@@ -179,22 +178,33 @@
                 [(arg-x ...) (generate-temporaries regular-args)]
                 [(res-x ...) (generate-temporaries (or rngs '()))]
                 [(kwd-arg-x ...) (generate-temporaries mandatory-kwds)])
-    
+
+    (define base-arg-expressions (reverse (syntax->list #'((regb arg-x neg-party) ...))))
+    (define normal-arg-vars (generate-temporaries #'(arg-x ...)))
+    (define base-arg-vars normal-arg-vars)
+
     (with-syntax ([(formal-kwd-args ...)
                    (apply append (map list mandatory-kwds (syntax->list #'(kwd-arg-x ...))))]
                   [(kwd-arg-exps ...)
-                   (apply append (map (λ (kwd kwd-arg-x kb) 
-                                        (list kwd #`((#,kb #,kwd-arg-x) neg-party)))
-                                      mandatory-kwds
-                                      (syntax->list #'(kwd-arg-x ...))
-                                      (syntax->list #'(kb ...))))]
+                   (apply
+                    append
+                    (map (λ (kwd kwd-arg-x kb)
+                           (set! base-arg-expressions
+                                 (cons #`(#,kb #,kwd-arg-x neg-party)
+                                       base-arg-expressions))
+                           (set! base-arg-vars (cons (car (generate-temporaries (list kwd-arg-x)))
+                                                     base-arg-vars))
+                           (list kwd (car base-arg-vars)))
+                         mandatory-kwds
+                         (syntax->list #'(kwd-arg-x ...))
+                         (syntax->list #'(kb ...))))]
                   [(letrec-bound-id) (generate-temporaries '(f))])
       
       (with-syntax ([(wrapper-args ...) #'(neg-party arg-x ... formal-kwd-args ...)]
-                    [(the-call ...) #'(f ((regb arg-x) neg-party) ... kwd-arg-exps ...)]
+                    [(the-call ...) #`(f #,@(reverse normal-arg-vars) kwd-arg-exps ...)]
                     [(pre-check ...)
                      (if pre 
-                         (list #`(check-pre-cond  #,pre blame neg-party f))
+                         (list #`(check-pre-cond #,pre blame neg-party f))
                          (list))]
                     [(post-check ...)
                      (if post
@@ -211,53 +221,80 @@
                (let loop ([optional-args (reverse optional-args)]
                           [ob (reverse (syntax->list #'(optb ...)))]
                           [first? #t])
+                 (define args-expressions base-arg-expressions)
+                 (define args-vars base-arg-vars)
                  (define no-rest-call
-                   #`(the-call ... #,@(for/list ([ob (in-list (reverse ob))]
-                                                 [optional-arg (in-list (reverse optional-args))])
-                                        #`((#,ob #,optional-arg) neg-party))))
+                   #`(the-call ...
+                      #,@(for/list ([ob (in-list (reverse ob))]
+                                    [optional-arg (in-list (reverse optional-args))])
+                           (set! args-expressions
+                                 (cons #`(#,ob #,optional-arg neg-party)
+                                       args-expressions))
+                           (set! args-vars
+                                 (cons (car (generate-temporaries (list optional-arg)))
+                                       args-vars))
+                           (car args-vars))))
                  (define full-call
-                   (if (and first? rest)
-                       #`(apply #,@no-rest-call ((restb rest-arg) neg-party))
-                       no-rest-call))
+                   (cond
+                     [(and first? rest)
+                      (set! args-expressions (cons #'(restb rest-arg neg-party) args-expressions))
+                      (set! args-vars (cons (car (generate-temporaries '(rest-args-arrow-contract)))
+                                            args-vars))
+                      #`(apply #,@no-rest-call #,(car args-vars))]
+                     [else
+                      no-rest-call]))
                  (define the-args #`(wrapper-args ... 
                                      #,@(reverse optional-args)
                                      #,@(if (and first? rest)
                                             #'rest-arg
                                             '())))
+                 (define let-values-clause
+                   #`[#,(reverse args-vars)
+                      (with-continuation-mark contract-continuation-mark-key
+                        blame+neg-party
+                        (values #,@(reverse args-expressions)))])
+                 
                  (define the-clause
                    (if rngs
                        #`[#,the-args
-                          pre-check ...
-                          (define-values (failed res-x ...)
-                            (call-with-values
-                             (λ () #,full-call)
-                             (case-lambda
-                               [(res-x ...)
-                                (values #f res-x ...)]
-                               [args
-                                (values args #,@(map (λ (x) #'#f) 
-                                                     (syntax->list #'(res-x ...))))])))
-                          (cond
-                            [failed
-                             (wrong-number-of-results-blame 
-                              blame neg-party f
-                              failed
-                              #,(length 
-                                 (syntax->list
-                                  #'(res-x ...))))]
-                            [else
-                             post-check ...
-                             (values ((rb res-x) neg-party) ...)])]
+                          (let ([blame+neg-party (cons blame neg-party)])
+                            pre-check ...
+                            (define-values (failed res-x ...)
+                              (call-with-values
+                               (λ () (let-values (#,let-values-clause)
+                                       #,full-call))
+                               (case-lambda
+                                 [(res-x ...)
+                                  (values #f res-x ...)]
+                                 [args
+                                  (values args #,@(map (λ (x) #'#f) 
+                                                       (syntax->list #'(res-x ...))))])))
+                            (with-continuation-mark contract-continuation-mark-key
+                              blame+neg-party
+                              (cond
+                                [failed
+                                 (wrong-number-of-results-blame
+                                  blame neg-party f
+                                  failed
+                                  #,(length
+                                     (syntax->list
+                                      #'(res-x ...))))]
+                                [else
+                                 post-check ...
+                                 (values
+                                  (rb res-x neg-party)
+                                  ...)])))]
                        #`[#,the-args
                           pre-check ...
-                          #,full-call]))
+                          (let ([blame+neg-party (cons blame neg-party)])
+                            (let-values (#,let-values-clause)
+                              #,full-call))]))
                  (cons the-clause
                        (cond
                          [(null? optional-args) '()]
                          [else (loop (cdr optional-args)
                                      (cdr ob)
                                      #f)]))))
-             
              (cond
                [(null? (cdr case-lambda-clauses))
                 ;; need to specialize this case because
@@ -268,70 +305,91 @@
                 #`(case-lambda #,@case-lambda-clauses)])]
             [else
              #`(make-checking-proc f blame
+                                   #,(if pre pre #'#f)
                                    '(#,@mandatory-kwds) (list kb ...)
                                    '(#,@optional-kwds) (list okb ...) 
                                    #,(length regular-args) (list regb ... optb ...) 
-                                   #,(if rest #'restb #'#f))]))
+                                   #,(if rest #'restb #'#f)
+                                   #,(if post post #'#f)
+                                   #,(if rngs #'(list rb ...) #'#f))]))
         #`(λ (blame f regb ... optb ... kb ... okb ... rb ... #,@(if rest (list #'restb) '()))
             #,body-proc)))))
 
-(define (make-checking-proc f blame  
+(define (make-checking-proc f blame pre
                             original-mandatory-kwds kbs
                             original-optional-kwds okbs
-                            minimum-arg-count rbs rest-ctc)
+                            minimum-arg-count rbs rest-ctc
+                            post rngs)
   (make-keyword-procedure
    (λ (actual-kwds actual-kwd-args neg-party . regular-args)
      (check-arg-count minimum-arg-count (length rbs) regular-args f blame neg-party rest-ctc)
      (check-keywords original-mandatory-kwds original-optional-kwds actual-kwds f blame neg-party)
-     (keyword-apply
-      f
-      actual-kwds
-      (let loop ([kwds actual-kwds]
-                 [kwd-args actual-kwd-args]
-                 [mandatory-kwds original-mandatory-kwds]
-                 [optional-kwds original-optional-kwds]
-                 [kbs kbs]
-                 [okbs okbs])
-        (cond
-          [(null? kwd-args) '()]
-          [else
-           (define kwd (car kwds))
-           (define kwd-arg (car kwd-args))
-           (cond
-             [(and (pair? mandatory-kwds)
-                   (equal? (car mandatory-kwds) kwd))
-              (cons (((car kbs) kwd-arg) neg-party)
-                    (loop (cdr kwds) 
-                          (cdr kwd-args)
-                          (cdr mandatory-kwds)
-                          optional-kwds
-                          (cdr kbs)
-                          okbs))]
-             [(and (pair? optional-kwds)
-                   (equal? (car optional-kwds) kwd))
-              (cons (((car okbs) kwd-arg) neg-party)
-                    (loop (cdr kwds) 
-                          (cdr kwd-args)
-                          mandatory-kwds
-                          (cdr optional-kwds)
-                          kbs
-                          (cdr okbs)))]
-             [(pair? optional-kwds)
-              (loop kwds kwd-args mandatory-kwds (cdr optional-kwds) kbs (cdr okbs))]
-             [else
-              (error 'arrow-val-first.rkt
-                     (string-append
-                      "internal error:\n  f ~s\n  actual-kwds ~s"
-                      "\n  mandatory-kwds ~s\n  optional-kwds ~s\n  neg-party ~s")
-                     f actual-kwds original-mandatory-kwds original-optional-kwds neg-party)])]))
-      (let loop ([regular-args regular-args]
-                 [rbs rbs])
-        (cond
-          [(null? regular-args) '()]
-          [(null? rbs) ((rest-ctc regular-args) neg-party)]
-          [else
-           (cons (((car rbs) (car regular-args)) neg-party)
-                 (loop (cdr regular-args) (cdr rbs)))]))))))
+     (define (mk-call)
+       (keyword-apply
+        f
+        actual-kwds
+        (let loop ([kwds actual-kwds]
+                   [kwd-args actual-kwd-args]
+                   [mandatory-kwds original-mandatory-kwds]
+                   [optional-kwds original-optional-kwds]
+                   [kbs kbs]
+                   [okbs okbs])
+          (cond
+            [(null? kwd-args) '()]
+            [else
+             (define kwd (car kwds))
+             (define kwd-arg (car kwd-args))
+             (cond
+               [(and (pair? mandatory-kwds)
+                     (equal? (car mandatory-kwds) kwd))
+                (cons ((car kbs) kwd-arg neg-party)
+                      (loop (cdr kwds) 
+                            (cdr kwd-args)
+                            (cdr mandatory-kwds)
+                            optional-kwds
+                            (cdr kbs)
+                            okbs))]
+               [(and (pair? optional-kwds)
+                     (equal? (car optional-kwds) kwd))
+                (cons ((car okbs) kwd-arg neg-party)
+                      (loop (cdr kwds) 
+                            (cdr kwd-args)
+                            mandatory-kwds
+                            (cdr optional-kwds)
+                            kbs
+                            (cdr okbs)))]
+               [(pair? optional-kwds)
+                (loop kwds kwd-args mandatory-kwds (cdr optional-kwds) kbs (cdr okbs))]
+               [else
+                (error 'arrow-val-first.rkt
+                       (string-append
+                        "internal error:\n  f ~s\n  actual-kwds ~s"
+                        "\n  mandatory-kwds ~s\n  optional-kwds ~s\n  neg-party ~s")
+                       f actual-kwds original-mandatory-kwds original-optional-kwds neg-party)])]))
+        (let loop ([regular-args regular-args]
+                   [rbs rbs])
+          (cond
+            [(null? regular-args) '()]
+            [(null? rbs) (rest-ctc regular-args neg-party)]
+            [else
+             (cons ((car rbs) (car regular-args) neg-party)
+                   (loop (cdr regular-args) (cdr rbs)))]))))
+     (define complete-blame (blame-add-missing-party blame neg-party))
+     (when pre (check-pre-cond pre blame neg-party f))
+     (cond
+       [rngs
+        (define results (call-with-values mk-call list))
+        (define rng-len (length rngs))
+        (unless (= (length results) rng-len)
+          (arrow:bad-number-of-results complete-blame f rng-len results))
+        (when post (check-post-cond post blame neg-party f))
+        (apply
+         values
+         (for/list ([result (in-list results)]
+                    [rng (in-list rngs)])
+           (rng result neg-party)))]
+       [else
+        (mk-call)]))))
 
 (build-populars popular-chaperone-key-table)
 (define (lookup-popular-chaperone-key regular-arg-count
@@ -488,7 +546,7 @@
            [rng (add-pos-obligations (list #'rng))]))
        (define-values (plus-one-arity-function chaperone-constructor)
          (build-plus-one-arity-function+chaperone-constructor 
-          stx regular-args '() kwds '() #f #f #f rngs #f #f))
+          regular-args '() kwds '() #f #f #f rngs #f #f))
        (syntax-property
         #`(let #,let-bindings
             #,(quasisyntax/loc stx
@@ -613,7 +671,6 @@
                                                  (list))])
          (define-values (plus-one-arity-function chaperone-constructor)
            (build-plus-one-arity-function+chaperone-constructor
-            stx
             (syntax->list #'(mandatory-dom ...))
             (syntax->list #'(optional-dom ...))
             (syntax->list #'(mandatory-dom-kwd ...))
@@ -709,19 +766,35 @@
     (and raw-rngs
          (for/list ([rng (in-list raw-rngs)])
            (coerce-contract who rng))))
-  (if (and (andmap chaperone-contract? regular-doms)
-           (andmap (λ (x) (chaperone-contract? (kwd-info-ctc x))) kwd-infos)
-           (andmap chaperone-contract? (or rngs '())))
-      (make--> (length raw-regular-doms) 
-               regular-doms kwd-infos rest-ctc pre-cond
-               rngs post-cond 
-               plus-one-arity-function
-               chaperone-constructor)
-      (make-impersonator-> (length raw-regular-doms)
-                           regular-doms kwd-infos rest-ctc pre-cond
-                           rngs post-cond 
-                           plus-one-arity-function
-                           chaperone-constructor)))
+  (cond
+    ;; uncomment this to specialize (-> void) contract to a
+    ;; more efficient wrapper (but there are no test cases for
+    ;; that code, so add them before pushing this)
+    #;
+    [(and (null? regular-doms)
+          (null? kwd-infos)
+          (not rest-ctc)
+          (not pre-cond)
+          (not post-cond)
+          (pair? rngs)
+          (null? (cdr rngs))
+          (flat-contract? (car rngs))
+          (eq? void? (flat-contract-predicate (car rngs))))
+     ->void-contract]
+    [(and (andmap chaperone-contract? regular-doms)
+          (andmap (λ (x) (chaperone-contract? (kwd-info-ctc x))) kwd-infos)
+          (andmap chaperone-contract? (or rngs '())))
+     (make--> (length raw-regular-doms)
+              regular-doms kwd-infos rest-ctc pre-cond
+              rngs post-cond
+              plus-one-arity-function
+              chaperone-constructor)]
+    [else
+     (make-impersonator-> (length raw-regular-doms)
+                          regular-doms kwd-infos rest-ctc pre-cond
+                          rngs post-cond
+                          plus-one-arity-function
+                          chaperone-constructor)]))
 
 (define (dynamic->* #:mandatory-domain-contracts [mandatory-domain-contracts '()]
                     #:optional-domain-contracts [optional-domain-contracts '()]
@@ -837,16 +910,16 @@
                (define kwd-results
                  (for/list ([kwd (in-list kwds)]
                             [kwd-arg (in-list kwd-args)])
-                   (((hash-ref kwd-table kwd) kwd-arg) neg-party)))
+                   ((hash-ref kwd-table kwd) kwd-arg neg-party)))
                (define regular-arg-results
                  (let loop ([args args]
                             [projs mandatory+optional-dom-projs])
                    (cond
                      [(and (null? projs) (null? args)) '()]
                      [(null? projs)
-                      ((rest-proj args) neg-party)]
+                      (rest-proj args neg-party)]
                      [(null? args) (error 'cant-happen::dynamic->*)]
-                     [else (cons (((car projs) (car args)) neg-party)
+                     [else (cons ((car projs) (car args) neg-party)
                                  (loop (cdr args) (cdr projs)))])))
                (define (result-checker . results)
                  (unless (= rng-len (length results))
@@ -855,7 +928,7 @@
                   values
                   (for/list ([res (in-list results)]
                              [neg-party-proj (in-list rng-projs)])
-                    ((neg-party-proj res) neg-party))))
+                    (neg-party-proj res neg-party))))
                (define args-dealt-with
                  (if (null? kwds)
                      regular-arg-results
@@ -1061,7 +1134,7 @@
        #t))
 
 (define (make-property build-X-property chaperone-or-impersonate-procedure)
-  (define proj 
+  (define val-first-proj
     (λ (->stct)
       (->-proj chaperone-or-impersonate-procedure ->stct
                (base->-min-arity ->stct)
@@ -1072,14 +1145,28 @@
                (base->-rngs ->stct)
                (base->-post? ->stct)
                (base->-plus-one-arity-function ->stct)
-               (base->-chaperone-constructor ->stct))))
+               (base->-chaperone-constructor ->stct)
+               #f)))
+  (define late-neg-proj
+    (λ (->stct)
+      (->-proj chaperone-or-impersonate-procedure ->stct
+               (base->-min-arity ->stct)
+               (base->-doms ->stct)
+               (base->-kwd-infos ->stct)
+               (base->-rest ->stct)
+               (base->-pre? ->stct)
+               (base->-rngs ->stct)
+               (base->-post? ->stct)
+               (base->-plus-one-arity-function ->stct)
+               (base->-chaperone-constructor ->stct)
+               #t)))
   (parameterize ([skip-projection-wrapper? #t])
     (build-X-property
      #:name base->-name 
      #:first-order ->-first-order
      #:projection
      (λ (this)
-       (define cthis (proj this))
+       (define cthis (val-first-proj this))
        (λ (blame)
          (define cblame (cthis blame))
          (λ (val)
@@ -1109,7 +1196,8 @@
             (not (base->-post? that))))
      #:generate ->-generate
      #:exercise ->-exercise
-     #:val-first-projection proj)))
+     #:val-first-projection val-first-proj
+     #:late-neg-projection late-neg-proj)))
 
 (define-struct (-> base->) ()
   #:property
@@ -1120,3 +1208,27 @@
   #:property
   prop:contract
   (make-property build-contract-property impersonate-procedure))
+
+(define ->void-contract
+  (let-syntax ([get-chaperone-constructor
+                (λ (_)
+                  ;; relies on the popular key (0 0 () () #f 1) appearing first
+                  (define ids (list-ref popular-key-ids 0))
+                  (list-ref ids 1))])
+    (make--> 0 '() '() #f #f
+             (list (coerce-contract 'whatever void?))
+             #f
+             (λ (blame f _ignored-rng-contract)
+               (λ (neg-party)
+                 (call-with-values
+                  (λ () (f))
+                  (case-lambda
+                    [(rng)
+                     (if (void? rng)
+                         rng
+                         (raise-blame-error blame #:missing-party neg-party rng
+                                            '(expected: "void?" given: "~e")
+                                            rng))]
+                    [args
+                     (wrong-number-of-results-blame blame neg-party f args 1)]))))
+             (get-chaperone-constructor))))

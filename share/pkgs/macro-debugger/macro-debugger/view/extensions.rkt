@@ -1,7 +1,7 @@
 #lang racket/base
 (require racket/class
          racket/gui/base
-         unstable/class-iop
+         racket/class/iop
          "interfaces.rkt"
          (prefix-in s: "../syntax-browser/widget.rkt")
          (prefix-in s: "../syntax-browser/keymap.rkt"))

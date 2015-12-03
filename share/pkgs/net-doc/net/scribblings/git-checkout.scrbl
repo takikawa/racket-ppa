@@ -28,13 +28,15 @@ for information on command-line arguments and flags.
                        [#:status-printf status-printf (string? any/c ... . -> . void?) (lambda args
                                                                                          (apply printf args)
                                                                                          (flush-output))]
+                       [#:initial-error initial-error (or #f (-> any)) #f]
                        [#:tmp-dir given-tmp-dir (or/c #f path-string?) #f]
                        [#:clean-tmp-dir? clean-tmp-dir? any/c (not given-tmp-dir)]
                        [#:verify-server? verify-server? any/c #t]
                        [#:port port (or/c #f (integer-in 1 65535)) (case transport
                                                                      [(git) 9418]
                                                                      [(http) 80]
-                                                                     [(https) 443])])
+                                                                     [(https) 443])]
+                       [#:strict-links? strict-links? any/c #f])
          string?]{
 
 Contacts the server at @racket[hostname] and @racket[port]
@@ -77,10 +79,23 @@ Status information is reported via @racket[status-printf]. The same
 information is always logged with the name @racket['git-checkout] at
 the @racket['info] level.
 
+If @racket[initial-error] is not @racket[#f], then it is called (to
+raise an exception or otherwise escape) if initial communication with
+the server fails to match the expected protocol---perhaps indicating
+that the server does not provide a Git repository at the given
+address. If @racket[initial-error] is @racket[#f] or returns when
+called, an exception is raised.
+
 If @racket[tmp-dir] is not @racket[#f], then it is used to store a
 temporary clone of the repository, and the files are preserved unless
 @racket[clean-tmp-dir?] is true. The clone does not currently match
 the shape that is recognized by other tools, such as @exec{git}, and
 so a preserved temporary directory is useful mainly for debugging.
 
-@history[#:added "6.1.1.1"]}
+If @racket[strict-links?] is true, then the checkout fails with an
+error if it would produce a symbolic link that refers to an absolute path
+or to a relative path that contains up-directory elements.
+
+@history[#:added "6.1.1.1"
+         #:changed "6.3" @elem{Added the @racket[initial-error] argument.}
+         #:changed "6.2.900.17" @elem{Added the @racket[strict-links?] argument.}]}

@@ -6,12 +6,13 @@
                        syntax/parse/private/runtime)
          racket/list
          racket/contract/base
+         "make.rkt"
          "minimatch.rkt"
          syntax/private/id-table
          syntax/stx
          syntax/keyword
          racket/syntax
-         unstable/struct
+         racket/struct
          "txlift.rkt"
          "rep-attrs.rkt"
          "rep-data.rkt"
@@ -812,7 +813,7 @@
 (define (name->prefix id pfx)
   (cond [(wildcard? id) #f]
         [(epsilon? id) id]
-        [else (format-id id "~a~a" (syntax-e id) pfx)]))
+        [else (format-id id "~a~a" (syntax-e id) pfx #:source id)]))
 
 (define (name->bind id)
   (cond [(wildcard? id) #f]
@@ -834,7 +835,10 @@
 
 ;; prefix-attr-name : id symbol -> id
 (define (prefix-attr-name prefix name)
-  (format-id prefix "~a~a" (syntax-e prefix) name))
+  (orig (format-id prefix "~a~a" (syntax-e prefix) name #:source prefix)))
+
+(define (orig stx)
+  (syntax-property stx 'original-for-check-syntax #t))
 
 ;; ----
 

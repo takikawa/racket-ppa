@@ -46,9 +46,7 @@
     (check-arg size)
     (check-arg attempt-num)
     (check-arg retries)
-    (let-values ([(term _) ((match raw-generators
-                              [(list g) g]
-                              [_ (pick-from-list raw-generators)])
+    (let-values ([(term _) ((pick-from-list raw-generators)
                             size attempt-num retries)])
       term)))
 
@@ -165,7 +163,7 @@
                 (quasisyntax/loc orig-stx
                   (let ([term-match (λ (generated)
                                       (cond [(test-match #,lang res-term-stx generated) => values]
-                                            [else (redex-error 'redex-check "~s does not match ~s" generated 'res-term-stx)]))])
+                                            [else (give-up-match-result)]))])
                     syncheck-exp
                     (let ([default-attempt-size (λ (s) (add1 (default-attempt-size s)))])
                       (parameterize ([attempt->size #,size-stx]
@@ -205,7 +203,7 @@
                 (quasisyntax/loc orig-stx
                   (let ([term-match (λ (generated)
                                       (cond [(test-match #,lang res-term-stx generated) => values]
-                                            [else (redex-error 'redex-check "~s does not match ~s" generated 'res-term-stx)]))])
+                                            [else (give-up-match-result)]))])
                     lhs-syncheck-exp
                     rhs-syncheck-exp
                     (let ([default-attempt-size (λ (s) (add1 (default-attempt-size s)))])
@@ -244,7 +242,7 @@
               [keep-going? #,keep-going-stx]
               [term-match (λ (generated)
                             (cond [(test-match #,lang #,pat generated) => values]
-                                  [else (redex-error 'redex-check "~s does not match ~s" generated '#,pat)]))])
+                                  [else (give-up-match-result)]))])
           syncheck-exp
           (parameterize ([attempt->size #,size-stx])
             #,(cond
@@ -308,6 +306,7 @@
 (define (default-generator lang pat)
   (define ad-hoc-generator ((compile lang 'redex-check) pat))
   (define enum (pat-enumerator (compiled-lang-enum-table lang) pat))
+  (define compiled-pat (compile-pattern lang pat #f))
   (cond
     [enum
      (define in-bounds (if (finite-enum? enum)
@@ -318,11 +317,21 @@
      (define interleave-time (+ start-time (* 1000 10))) ;; 10 seconds later
      (define pure-random-start-attempt #f)
      (define pure-random-time (+ start-time (* 1000 60 10))) ;; 10 minutes later
+     
      (λ (_size _attempt _retries)
+       (define (enum-ith/fallback enum n)
+         (define val (enum-ith enum n))
+         (if (match-pattern? compiled-pat val)
+             (values val 'ignored)
+             ;; this _attempt argument is wrong, but we don't care,
+             ;; this is just a bug avoidance change.
+             ;; when the enumerator properly handles (x_!_1 ...) patterns,
+             ;; then remove enum-ith/fallback and just use enum-ith
+             (ad-hoc-generator _size _attempt _retries)))
        (define now (current-inexact-milliseconds))
        (cond
          [(<= now interleave-time)
-          (values (enum-ith enum (in-bounds (- _attempt 1))) 'ignored)]
+          (enum-ith/fallback enum (in-bounds (- _attempt 1)))]
          [(<= now pure-random-time)
           (unless interleave-start-attempt (set! interleave-start-attempt _attempt))
           (define interleave-attempt (- _attempt interleave-start-attempt))
@@ -331,7 +340,7 @@
              (ad-hoc-generator _size (/ (- interleave-attempt 1) 2) _retries)]
             [else
              (define enum-id (in-bounds (+ interleave-start-attempt (/ interleave-attempt 2) -1)))
-             (values (enum-ith enum enum-id) 'ignored)])]
+             (enum-ith/fallback enum enum-id)])]
          [else
           (unless pure-random-start-attempt (set! pure-random-start-attempt _attempt))
           (ad-hoc-generator _size
@@ -419,6 +428,7 @@
 
 (define-struct (exn:fail:redex:test exn:fail:redex) (source term))
 (define-struct counterexample (term) #:transparent)
+(define-struct give-up-match-result ())
 
 (define-struct term-prop (pred))
 (define-struct bind-prop (pred))
@@ -456,18 +466,25 @@
                          (if term-fix (term-fix raw-term) raw-term)))
           (cond
             [(skip-term? term) (loop (- remaining 1))]
-            [(if term-match
-                 (let ([bindings (make-bindings 
-                                  (match-bindings
-                                   (pick-from-list (term-match term))))])
+            [(cond
+               [term-match
+                (define match-result (term-match term))
+                (cond
+                  [(give-up-match-result? match-result) #t]
+                  [else
+                   (define bindings
+                     (make-bindings 
+                      (match-bindings
+                       (pick-from-list match-result))))
                    (with-handlers ([exn:fail? (handler "checking" term)])
                      (match property
                        [(term-prop pred) (pred term)]
-                       [(bind-prop pred) (pred bindings)])))
-                 (with-handlers ([exn:fail? (handler "checking" term)])
-                   (match (cons property term-fix)
-                     [(cons (term-prop pred) _) (pred term)]
-                     [(cons (bind-prop pred) #f) (pred bindings)])))
+                       [(bind-prop pred) (pred bindings)]))])]
+               [else
+                (with-handlers ([exn:fail? (handler "checking" term)])
+                  (match (cons property term-fix)
+                    [(cons (term-prop pred) _) (pred term)]
+                    [(cons (bind-prop pred) #f) (pred bindings)]))])
              (loop (sub1 remaining))]
             [else
              (when show
@@ -485,18 +502,17 @@
   (define lang-gen (compile lang what))
   (define-values (pats srcs skip-term?)
     (cond [(metafunc-proc? mf/rr)
-           (values (map (λ (case) ((metafunc-case-lhs+ case) lang)) 
+           (values (map metafunc-case-lhs-pat
                         (metafunc-proc-cases mf/rr))
                    (metafunction-srcs mf/rr)
                    (compose not (metafunc-proc-in-dom? mf/rr)))]
           [(reduction-relation? mf/rr)
-           (values (map (λ (rwp) ((rewrite-proc-lhs rwp) lang)) (reduction-relation-make-procs mf/rr))
+           (values (map rewrite-proc-side-conditions-rewritten (reduction-relation-make-procs mf/rr))
                    (reduction-relation-srcs mf/rr)
                    (let ([pat (compile-pattern (reduction-relation-lang mf/rr)
                                                (reduction-relation-domain-pat mf/rr)
                                                #f)])
                      (λ (x) (not (match-pattern? pat x)))))]))
-  
   (let loop ([pats pats] [srcs srcs])
     (if (and (null? pats) (null? srcs))
         (if show
@@ -753,7 +769,7 @@
           [compile-pat (compile L 'generate-term)]
           [cases (metafunc-proc-cases f)])
      (check-cases name cases)
-     (map (λ (c) (compile-pat ((metafunc-case-lhs+ c) L))) 
+     (map (λ (c) (compile-pat (metafunc-case-lhs-pat c))) 
           cases))
    'generate-term))
 
@@ -763,7 +779,7 @@
   (make-generator
    (let* ([L (reduction-relation-lang r)]
           [compile-pat (compile L 'orig-name)])
-     (map (λ (p) (compile-pat ((rewrite-proc-lhs p) L)))
+     (map (λ (p) (compile-pat (rewrite-proc-side-conditions-rewritten p)))
           (reduction-relation-make-procs r)))
    'generate-term))
 

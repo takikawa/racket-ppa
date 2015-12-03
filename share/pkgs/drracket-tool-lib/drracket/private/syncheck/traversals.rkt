@@ -7,7 +7,6 @@
          "contract-traversal.rkt"
          "xref.rkt"
          string-constants
-         racket/unit
          racket/match
          racket/set
          racket/class
@@ -430,7 +429,7 @@
                  (for ([body (in-list (syntax->list (syntax (bodies ...))))])
                    (if (syntax-e #'lang)
                        (mod-loop body module-name)
-                       (mod-loop body #f))))]
+                       (mod-loop (syntax-shift-phase-level body (- level)) #f))))]
               
               
               ; top level or module top level only:
@@ -1021,10 +1020,12 @@
                                  (or (free-identifier=? id1 id level)
                                      (free-identifier=? id2 id level)))))))
               ans)
-            (send defs-text syncheck:add-arrow/name-dup/pxpy
-                  from-source from-pos-left from-pos-right from-dx from-dy
-                  to-source to-pos-left to-pos-right to-dx to-dy
-                  actual? level require-arrow? name-dup?)))))
+            (when (and (<= from-pos-left from-pos-right)
+                       (<= to-pos-left to-pos-right))
+              (send defs-text syncheck:add-arrow/name-dup/pxpy
+                    from-source from-pos-left from-pos-right from-dx from-dy
+                    to-source to-pos-left to-pos-right to-dx to-dy
+                    actual? level require-arrow? name-dup?))))))
     
     ;; add-jump-to-definition : syntax symbol path -> void
     ;; registers the range in the editor so that the
@@ -1107,23 +1108,6 @@
                 ss-path))))
         (values cleaned-up-path rkt-submods)))
     
-    ;; possible-suffixes : (listof string)
-    ;; these are the suffixes that are checked for the reverse
-    ;; module-path mapping.
-    (define possible-suffixes '(".rkt" ".ss" ".scm" ""))
-    
-    ;; module-name-sym->filename : symbol -> (union #f string)
-    (define (module-name-sym->filename sym)
-      (let ([str (symbol->string sym)])
-        (and ((string-length str) . > . 1)
-             (char=? (string-ref str 0) #\,)
-             (let ([fn (substring str 1 (string-length str))])
-               (ormap (λ (x)
-                        (let ([test (string->path (string-append fn x))])
-                          (and (file-exists? test)
-                               test)))
-                      possible-suffixes)))))
-    
     ;; add-origins : sexp id-set integer -> void
     (define (add-origins sexp id-set level-of-enclosing-module)
       (let ([origin (syntax-property sexp 'origin)])
@@ -1133,7 +1117,7 @@
               [(pair? ct)
                (loop (car ct))
                (loop (cdr ct))]
-              [(syntax? ct)
+              [(identifier? ct)
                (add-id id-set ct level-of-enclosing-module)]
               [else (void)])))))
     

@@ -15,7 +15,6 @@
  racket/match racket/syntax racket/list
  racket/format
  racket/dict
- unstable/list
  syntax/flatten-begin
  (only-in (types abbrev) -Bottom)
  (static-contracts instantiate optimize structures combinators)
@@ -147,7 +146,9 @@
       typed-racket/utils/any-wrap typed-racket/utils/struct-type-c
       typed-racket/utils/opaque-object
       typed-racket/utils/evt-contract
-      unstable/contract racket/contract/parametric))
+      typed-racket/utils/sealing-contract
+      racket/sequence
+      racket/contract/parametric))
 
 ;; Should the above requires be included in the output?
 ;;   This box is only used for contracts generated for `require/typed`
@@ -267,9 +268,6 @@
 (define (same sc)
   (triple sc sc sc))
 
-;; Keep track of the bound names and don't cache types where those are free
-(define bound-names (make-parameter null))
-
 ;; Macro to simplify (and avoid reindentation) of the match below
 ;;
 ;; The sc-cache hashtable is used to memoize static contracts. The keys are
@@ -284,7 +282,9 @@
                [else
                 (define sc (match type match-clause ...))
                 (define fvs (fv type))
-                (unless (or (ormap (λ (n) (member n fvs)) (bound-names))
+                ;; Only cache closed terms, otherwise open terms may show up
+                ;; out of context.
+                (unless (or (not (null? fv))
                             ;; Don't cache types with applications of Name types because
                             ;; it does the wrong thing for recursive references
                             (has-name-app? type))
@@ -351,6 +351,8 @@
          (listof/sc (t->sc elem-ty))]
         [(Base: sym cnt _ _)
          (flat/sc #`(flat-named-contract '#,sym (flat-contract-predicate #,cnt)) sym)]
+        [(Distinction: _ _ t) ; from define-new-subtype
+         (t->sc t)]
         [(Refinement: par p?)
          (and/sc (t->sc par) (flat/sc p?))]
         [(Union: elems)
@@ -394,6 +396,7 @@
         [(Prompt-TagTop:) (only-untyped prompt-tag?/sc)]
         [(Continuation-Mark-KeyTop:) (only-untyped continuation-mark-key?/sc)]
         [(ClassTop:) (only-untyped class?/sc)]
+        [(UnitTop:) (only-untyped unit?/sc)]
         [(StructTypeTop:) (struct-type/sc null)]
         ;; TODO Figure out how this should work
         ;[(StructTop: s) (struct-top/sc s)]
@@ -416,13 +419,11 @@
          (case typed-side
            [(both) (recursive-sc
                      (list both-n*)
-                     (parameterize ([bound-names (cons n (bound-names))])
-                       (list (loop b 'both rv)))
+                     (list (loop b 'both rv))
                      (recursive-sc-use both-n*))]
            [(typed untyped)
             (define (rec b side rv)
-              (parameterize ([bound-names (cons n (bound-names))])
-                (loop b side rv)))
+              (loop b side rv))
             ;; TODO not fail in cases that don't get used
             (define untyped (rec b 'untyped rv))
             (define typed (rec b 'typed rv))
@@ -472,28 +473,65 @@
          ;; we need to generate absent clauses for non-opaque class contracts
          ;; that occur inside of a mixin type
          (define absents
-           (cond [(F? row-var)
-                  (define constraints (lookup-row-constraints (F-n row-var)))
-                  ;; the constraints with no corresponding type/contract need
-                  ;; to be absent
-                  (append (remove* field-names (cadr constraints))
-                          (remove* public-names (caddr constraints)))]
+           (cond [;; row constraints are only mapped when it's a row polymorphic
+                  ;; function in *positive* position (with no sealing)
+                  (and (F? row-var) (lookup-row-constraints (F-n row-var)))
+                  =>
+                  (λ (constraints)
+                    ;; the constraints with no corresponding type/contract need
+                    ;; to be absent
+                    (append (remove* field-names (cadr constraints))
+                            (remove* public-names (caddr constraints))))]
                  [else null]))
-         (class/sc ;; only enforce opaqueness if there's no row variable
-                   ;; and we are importing from untyped
-                   (and (from-untyped? typed-side) (not row-var))
-                   (append
-                     (map (λ (n sc) (member-spec 'override n sc))
-                          override-names (map t->sc/meth override-types))
-                     (map (λ (n sc) (member-spec 'pubment n sc))
-                          pubment-names (map t->sc/meth pubment-types))
-                     (map (λ (n sc) (member-spec 'inner n sc))
-                          augment-names (map t->sc/meth augment-types))
-                     (map (λ (n sc) (member-spec 'init n sc))
-                          init-names (map t->sc/neg init-types))
-                     (map (λ (n sc) (member-spec 'field n sc))
-                          field-names (map t->sc/both field-types)))
-                   absents)]
+         ;; add a seal/unseal if there was a row variable and the
+         ;; row polymorphic function type was in negative position
+         (define seal/sc
+           (and (F? row-var)
+                (not (lookup-row-constraints (F-n row-var)))
+                (triple-lookup
+                 (hash-ref recursive-values (F-n row-var)
+                           (λ () (error 'type->static-contract
+                                        "Recursive value lookup failed. ~a ~a"
+                                        recursive-values (F-n row-var))))
+                 typed-side)))
+         (define sc-for-class
+           (class/sc ;; only enforce opaqueness if there's no row variable
+                     ;; and we are importing from untyped
+                     (and (from-untyped? typed-side) (not row-var))
+                     (append
+                       (map (λ (n sc) (member-spec 'override n sc))
+                            override-names (map t->sc/meth override-types))
+                       (map (λ (n sc) (member-spec 'pubment n sc))
+                            pubment-names (map t->sc/meth pubment-types))
+                       (map (λ (n sc) (member-spec 'inner n sc))
+                            augment-names (map t->sc/meth augment-types))
+                       (map (λ (n sc) (member-spec 'init n sc))
+                            init-names (map t->sc/neg init-types))
+                       (map (λ (n sc) (member-spec 'field n sc))
+                            field-names (map t->sc/both field-types)))
+                     absents))
+         (if seal/sc
+             (and/sc seal/sc sc-for-class)
+             sc-for-class)]
+        [(Unit: imports exports init-depends results)
+         (define (traverse sigs)
+           (for/list ([sig (in-list sigs)])
+             (define mapping 
+               (map
+                (match-lambda 
+                  [(cons id type) (cons id (t->sc type))])
+                (Signature-mapping sig)))
+             (signature-spec (Signature-name sig) (map car mapping) (map cdr mapping))))
+         
+         (define imports-specs (traverse imports))
+         (define exports-specs (traverse exports))
+         (define init-depends-ids (map Signature-name init-depends))
+         (match results
+           [(? AnyValues?)
+            (fail #:reason (~a "cannot generate contract for unit type"
+                               " with unknown return values"))]
+           [(Values: (list (Result: rngs _ _) ...))
+            (unit/sc imports-specs exports-specs init-depends-ids (map t->sc rngs))])]
         [(Struct: nm par (list (fld: flds acc-ids mut?) ...) proc poly? pred?)
          (cond
            [(dict-ref recursive-values nm #f)]
@@ -624,7 +662,7 @@
          (for/list ([t arrs])
            (match t
              [(arr: dom _ _ _ _) (length dom)])))
-       (define maybe-dup (check-duplicate arities))
+       (define maybe-dup (check-duplicates arities))
        (when maybe-dup
          (fail #:reason (~a "function type has two cases of arity " maybe-dup)))
        (if (= (length arrs) 1)
@@ -672,9 +710,8 @@
           (define rv (for/fold ((rv recursive-values)) ((temp temporaries)
                                                         (v-nm vs-nm))
                        (hash-set rv v-nm (same (parametric-var/sc temp)))))
-          (parameterize ([bound-names (append (bound-names) vs-nm)])
-            (parametric->/sc temporaries
-              (t->sc b #:recursive-values rv)))))))
+          (parametric->/sc temporaries
+            (t->sc b #:recursive-values rv))))))
 
 ;; Generate a contract for a variable-arity polymorphic function type
 (define (t->sc/polydots type fail typed-side recursive-values t->sc)
@@ -695,8 +732,28 @@
                                 (hash-set rv v (same any/sc)))))
         (extend-row-constraints vs (list constraints)
           (t->sc body #:recursive-values recursive-values)))
-      ;; FIXME: needs sealing contracts, disabled for now
-      (fail #:reason "cannot generate contract for row polymorphic type")))
+      (match-let ([(PolyRow-names: vs-nm constraints b) type])
+        ;; FIXME: abstract this
+        (define function-type?
+          (let loop ([ty b])
+            (match (resolve ty)
+              [(Function: _) #t]
+              [(Union: elems) (andmap loop elems)]
+              [(Poly: _ body) (loop body)]
+              [(PolyDots: _ body) (loop body)]
+              [_ #f])))
+        (unless function-type?
+          (fail #:reason "cannot generate contract for non-function polymorphic type"))
+        (let ([temporaries (generate-temporaries vs-nm)])
+          (define rv (for/fold ([rv recursive-values])
+                               ([temp temporaries]
+                                [v-nm vs-nm])
+                       (hash-set rv v-nm (same (sealing-var/sc temp)))))
+          ;; Only the first three sets of constraints seem to be needed
+          ;; since augment clauses don't make sense without a corresponding
+          ;; public method too. This invariant has to be enforced though.
+          (sealing->/sc temporaries (take constraints 3)
+            (t->sc b #:recursive-values rv))))))
 
 ;; Predicate that checks for an App type with a recursive
 ;; Name type in application position
@@ -747,7 +804,7 @@
   (define positive-integer/sc (numeric/sc Positive-Integer (and/c exact-integer? positive?)))
   (define natural/sc (numeric/sc Natural exact-nonnegative-integer?))
   (define negative-integer/sc (numeric/sc Negative-Integer (and/c exact-integer? negative?)))
-  (define nonpositive-integer/sc (numeric/sc Nonpositive-Integer (and/c exact-integer? nonpostive?)))
+  (define nonpositive-integer/sc (numeric/sc Nonpositive-Integer (and/c exact-integer? nonpositive?)))
   (define integer/sc (numeric/sc Integer exact-integer?))
   (define positive-rational/sc (numeric/sc Positive-Rational (and/c t:exact-rational? positive?)))
   (define nonnegative-rational/sc (numeric/sc Nonnegative-Rational (and/c t:exact-rational? nonnegative?)))

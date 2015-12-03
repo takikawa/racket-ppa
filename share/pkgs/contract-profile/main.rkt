@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require racket/list unstable/list racket/match racket/set racket/format
+(require racket/list racket/match racket/set racket/format
          racket/contract racket/contract/private/blame
          profile/sampler profile/utils profile/analyzer
          "dot.rkt" "utils.rkt" "boundary-view.rkt")

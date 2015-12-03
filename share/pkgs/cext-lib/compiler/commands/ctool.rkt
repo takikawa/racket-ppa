@@ -9,6 +9,7 @@
 
 (require (prefix-in compiler:option: compiler/option)
          compiler/compiler
+         compiler/distribute
          raco/command-name
          racket/cmdline
          dynext/file
@@ -17,7 +18,9 @@
          scheme/pretty
          setup/pack
          setup/getinfo
-         setup/dirs)
+         setup/dirs
+         racket/file
+         racket/port)
 
 (define dest-dir (make-parameter #f))
 
@@ -34,7 +37,9 @@
 (define exe-dir-output (make-parameter #f))
 
 (define mods-output (make-parameter #f))
-
+(define runtime-files-dir (make-parameter #f))
+(define runtime-files-relative-path (make-parameter #f))
+ 
 (define default-plt-name "archive")
 
 (define disable-inlining (make-parameter #f))
@@ -196,6 +201,15 @@
        ,(lambda (f l)
           (exe-embedded-libraries (append (exe-embedded-libraries) (list l))))
        ("Embed <lib> in --c-mods output" "lib")]]
+     [once-each
+      [("--runtime")
+       ,(lambda (f dir)
+          (runtime-files-dir dir))
+       ("Gather runtime files to <dir>" "dir")]
+      [("--runtime-access")
+       ,(lambda (f path)
+          (runtime-files-relative-path path))
+       ("Use <path> to reference runtime files at run time" "path")]]
      [help-labels
       "-------------------------- miscellaneous flags ------------------------------"]
      [once-each
@@ -281,7 +295,23 @@
           (append (map (lambda (l) `(#f (file ,l))) source-files)
              (map (lambda (l) `(#t (lib ,l))) (exe-embedded-libraries)))))
        (close-output-port out)
-       (let ([out (open-output-file dest #:exists 'truncate/replace)])
+       (let ([out (open-output-file dest #:exists 'truncate/replace)]
+             [in (if (runtime-files-dir)
+                     ;; Assumble runtime files to `runtime-files-dir`,
+                     ;; and update the module bundle to refer to
+                     ;; runtime files there:
+                     (let ([tmp (make-temporary-file "ctool~a")])
+                       (call-with-output-file*
+                        tmp #:exists 'truncate
+                        (lambda (o) (copy-port in o)))
+                       (assemble-distribution (runtime-files-dir)
+                                              (list tmp)
+                                              #:relative-base (runtime-files-relative-path)
+                                              #:executables? #f)
+                       (begin0
+                        (open-input-bytes (file->bytes tmp))
+                        (delete-file tmp)))
+                     in)])
          (fprintf out "#ifdef MZ_XFORM\n")
          (fprintf out "XFORM_START_SKIP;\n")
          (fprintf out "#endif\n")

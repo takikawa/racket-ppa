@@ -77,14 +77,14 @@ and @racket[code] versus @racket[racketblock] and
               #:contracts ([keep-expr any/c]
                            [indent-expr exact-nonnegative-integer?]
                            [expand-expr (or/c #f (syntax? . -> . syntax?))]
-                           [context-expr syntax?]
+                           [context-expr (or/c #f syntax?)]
                            [line-number-expr (or/c #f exact-nonnegative-integer?)]
                            [line-number-sep-expr exact-nonnegative-integer?])]{
 
 Parses the code formed by the strings produced by the
 @racket[str-expr]s as a Racket module (roughly) and produces a
 @tech{block} that typesets the code inset via @racket[nested] with the
-style @racket['code-inset].
+style @racket['code-inset]. See also @racket[typeset-code].
 
 The @racket[str-expr]s should normally start with @hash-lang[] to
 determine the reader syntax for the module, but the resulting
@@ -152,7 +152,7 @@ Like @racket[codeblock], but without the @racket['code-inset]
                        (code:line #:context context-expr)])
               #:contracts ([lang-line-expr (or/c #f string?)]
                            [expand-expr (or/c #f (syntax? . -> . syntax?))]
-                           [context-expr syntax?])]{
+                           [context-expr (or/c #f syntax?)])]{
 
 Like @racket[codeblock], but produces @tech{content} instead of a
 @tech{block}. No @hash-lang[] line should appear in the string content;
@@ -176,6 +176,21 @@ produces the typeset result
   @bold{Hi}.
 }
 
+}
+
+@defproc[(typeset-code [#:context context (or/c #f syntax?) #f]
+                       [#:expand expand (or/c #f (syntax? . -> . syntax?)) #f]
+                       [#:indent indent exact-nonnegative-integer? 2]
+                       [#:keep-lang-line? keep? any/c #t]
+                       [#:line-numbers line-numbers (or/c #f exact-nonnegative-integer?) #f]
+                       [#:line-number-sep line-number-sep exact-nonnegative-integer? 1]
+                       [#:block? block? #t]
+                       [strs string?] ...)
+         block?]{
+ A function-based version of @racket[codeblock], allowing you to compute the @racket[strs] arguments.
+
+ Unlike @racket[codeblock], the default @racket[context] argument (@racket[#f]) implies that
+ the context is untouched. The other arguments are treated the same way.
 }
 
 @; ----------------------------------------
@@ -269,19 +284,24 @@ A few other escapes are recognized symbolically:
        sequence of @racket[_datum]s (i.e., without the
        @racket[code:line] wrapper).}
 
- @item{@racket[(#,(indexed-racket code:comment) _datum)] typesets like
-       @racket[_datum], but colored as a comment and prefixed with a
-       semi-colon. A typical @racket[_datum] escapes from
+ @item{@racket[(#,(indexed-racket code:comment) _content)] typesets like
+       @racket[_content], but colored as a comment and prefixed with a
+       semi-colon. A typical @racket[_content] escapes from
        Racket-typesetting mode using @racket[unsyntax] and
-       produces a paragraph using @racket[t]: 
+       produces a string, an element using @racket[elem],
+       or a paragraph using @racket[t]:
 
        @verbatim[#:indent 2]|{
-         (code:comment @#,t{this is a comment})
+         (code:comment @#,elem{this is a comment})
        }|
 
        (Note that @litchar|{@#,foo{...}}| reads as
        @RACKET[(unsyntax (foo "..."))].)
        }
+
+ @item{@racket[(#,(indexed-racket code:contract) _datum ...)] typesets like
+       the sequence of @racket[_datum]s (including its coloring), but prefixed with a
+       semi-colon.}
 
  @item{@as-index[@racketidfont{code:blank}] typesets as a blank space.}
 
@@ -1759,6 +1779,11 @@ key; in either case, if @racket[normalize?] is true, the key is normalized in th
 @racket[deftech]. The @racket[#:doc] and @racket[#:tag-prefixes]
 arguments support cross-document and section-specific references, like
 in @racket[secref].
+For example:
+@racketblock[@tech[#:doc '(lib "scribblings/guide/guide.scrbl")]{blame object}]
+
+creates a link to @tech[#:doc '(lib "scribblings/guide/guide.scrbl")]{blame object} in
+@other-doc['(lib "scribblings/guide/guide.scrbl")].
 
 With the default style files, the hyperlink created by @racket[tech]
 is somewhat quieter than most hyperlinks: the underline in HTML output

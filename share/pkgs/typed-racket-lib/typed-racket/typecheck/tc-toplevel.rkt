@@ -2,17 +2,20 @@
 
 (require (rename-in "../utils/utils.rkt" [infer r:infer])
          racket/syntax syntax/parse syntax/stx syntax/id-table
-         racket/list unstable/list racket/dict racket/match unstable/sequence
+         racket/list racket/dict racket/match racket/sequence
          (prefix-in c: (contract-req))
          (rep type-rep)
          (types utils abbrev type-table struct-table)
          (private parse-type type-annotation syntax-properties type-contract)
          (env global-env init-envs type-name-env type-alias-env
               lexical-env env-req mvar-env scoped-tvar-env
-              type-alias-helper)
+              type-alias-helper signature-env signature-helper)
          (utils tc-utils redirect-contract)
          "provide-handling.rkt" "def-binding.rkt" "tc-structs.rkt"
          "typechecker.rkt" "internal-forms.rkt"
+         (typecheck provide-handling def-binding tc-structs
+                    typechecker internal-forms 
+                    check-below)
          syntax/location
          racket/format
          (for-template
@@ -67,6 +70,10 @@
       [_:type-alias
        (list)]
 
+      ;; define-new-subtype
+      [form:new-subtype-def
+       (handle-define-new-subtype/pass1 #'form)]
+
       ;; declare-refinement
       ;; FIXME - this sucks and should die
       [t:type-refinement
@@ -110,6 +117,15 @@
       ;; definitions lifted from contracts should be ignored
       [(define-values (lifted) expr)
        #:when (contract-lifted-property #'expr)
+       (list)]
+      
+      ;; register types of variables defined by define-values/invoke-unit forms
+      [dviu:typed-define-values/invoke-unit
+       (for ([export-sig (in-list (syntax->list #'(dviu.export.sig ...)))]
+             [export-ids (in-list (syntax->list #'(dviu.export.members ...)))])
+         (for ([id (in-list (syntax->list  export-ids))]
+               [ty (in-list (map cdr (signature->bindings export-sig)))])
+           (register-type-if-undefined id ty)))
        (list)]
 
       ;; values definitions
@@ -204,9 +220,22 @@
     (syntax-parse form
       #:literal-sets (kernel-literals)
       ;; need to special case this to avoid errors at top-level
-      [stx:tr:class^
+      [(~or stx:tr:class^
+            stx:tr:unit^
+            stx:tr:unit:invoke^
+            stx:tr:unit:compound^
+            stx:tr:unit:from-context^)
        (tc-expr #'stx)]
-
+      ;; Handle define-values/invoke-unit form typechecking, by making sure that
+      ;; inferred imports have the correct types
+      [dviu:typed-define-values/invoke-unit
+       (for ([import-sig (in-list (syntax->list #'(dviu.import.sig ...)))]
+             [import-ids (in-list (syntax->list #'(dviu.import.members ...)))])
+         (for ([member (in-list (syntax->list  import-ids))]
+               [expected-type (in-list (map cdr (signature->bindings import-sig)))])
+           (define lexical-type (lookup-type/lexical member))
+           (check-below lexical-type expected-type)))
+       'no-type]
       ;; these forms we have been instructed to ignore
       [stx:ignore^
        'no-type]
@@ -285,15 +314,22 @@
 (define (type-check forms0)
   (define forms (syntax->list forms0))
   (do-time "before form splitting")
-  (define-values (type-aliases struct-defs stx-defs0 val-defs0 provs)
+  (define-values (type-aliases struct-defs stx-defs0 val-defs0 provs signature-defs)
     (filter-multiple
      forms
      type-alias? 
      (lambda (e) (or (typed-struct? e) (typed-struct/exec? e)))
      parse-syntax-def
      parse-def
-     provide?))
+     provide?
+     typed-define-signature?))
   (do-time "Form splitting done")
+
+  ;; Register signatures in the signature environment
+  ;; but defer type parsing to allow mutually recursive refernces
+  ;; between signatures and type aliases
+  (for ([sig-form signature-defs])
+    (parse-and-register-signature! sig-form))
 
   (define-values (type-alias-names type-alias-map)
     (get-type-alias-info type-aliases))
@@ -309,6 +345,7 @@
   (do-time "after adding type names")
 
   (register-all-type-aliases type-alias-names type-alias-map)
+  (finalize-signatures!)
 
   (do-time "starting struct handling")
   ;; Parse and register the structure types
@@ -371,16 +408,22 @@
       (syntax-parse p #:literal-sets (kernel-literals)
         [(#%provide form ...)
          (for/fold ([h h]) ([f (in-syntax #'(form ...))])
-           (syntax-parse f
-             [i:id
-              (dict-update h #'i (lambda (tail) (cons #'i tail)) '())]
-             [((~datum rename) in out)
-              (dict-update h #'in (lambda (tail) (cons #'out tail)) '())]
-             [(name:unknown-provide-form . _)
-              (parameterize ([current-orig-stx f])
-                (tc-error "provide: ~a not supported by Typed Racket" (syntax-e #'name.name)))]
-             [_ (parameterize ([current-orig-stx f])
-                  (int-err "unknown provide form"))]))]
+           (let loop ([f f])
+             (syntax-parse f
+               [i:id
+                (dict-update h #'i (lambda (tail) (cons #'i tail)) '())]
+               [((~datum rename) in out)
+                (dict-update h #'in (lambda (tail) (cons #'out tail)) '())]
+               [((~datum for-meta) 0 fm)
+                (loop #'fm)]
+               ;; is this safe?
+               [((~datum for-meta) _ fm)
+                h]
+               [(name:unknown-provide-form . _)
+                (parameterize ([current-orig-stx f])
+                  (tc-error "provide: ~a not supported by Typed Racket" (syntax-e #'name.name)))]
+               [_ (parameterize ([current-orig-stx f])
+                    (int-err "unknown provide form"))])))]
         [_ (int-err "non-provide form! ~a" (syntax->datum p))])))
   ;; compute the new provides
   (define-values (new-stx/pre new-stx/post)
@@ -407,6 +450,7 @@
            (begin-for-syntax
              (module* #%type-decl #f
                (#%plain-module-begin ;; avoid top-level printing and config
+                (#%declare #:empty-namespace) ;; avoid binding info from here
                 (require typed-racket/types/numeric-tower typed-racket/env/type-name-env
                          typed-racket/env/global-env typed-racket/env/type-alias-env
                          typed-racket/types/struct-table typed-racket/types/abbrev
@@ -416,6 +460,7 @@
                 #,(tname-env-init-code)
                 #,(tvariance-env-init-code)
                 #,(mvar-env-init-code mvar-env)
+                #,(signature-env-init-code)
                 #,(make-struct-table-code)
                 #,@(for/list ([a (in-list aliases)])
                      (match-define (list from to) a)
@@ -436,7 +481,7 @@
             ;; appropriate-phase `require` statically in a module
             ;; that's non-dynamically depended on by
             ;; `typed/racket`. That makes for confusing non-local
-            ;; dependencies, though, so we do it here. 
+            ;; dependencies, though, so we do it here.
             (require typed-racket/utils/redirect-contract)
             ;; We need a submodule for a for-syntax use of
             ;; `define-runtime-module-path`:
@@ -469,8 +514,9 @@
            ;; itself) at the runtime of typed modules that don't need
            ;; them. This is similar to the reason for the
            ;; `#%type-decl` submodule. 
-           (module* #%contract-defs #f 
+           (module* #%contract-defs #f
              (#%plain-module-begin
+              (#%declare #:empty-namespace) ;; avoid binding info from here
               #,extra-requires
               new-defs ...)))
        #`(begin
@@ -507,37 +553,38 @@
   (syntax-parse stx
     [(pmb . forms) (begin0 (type-check #'forms) (do-time "finished type checking"))]))
 
-;; typecheck a top-level form
+;; typecheck a top-level form that does not have any
+;; top-level `begin`s
 ;; used only from #%top-interaction
 ;; syntax -> (or/c 'no-type tc-results/c)
 (define (tc-toplevel-form form)
+  ;; Handle type aliases
+  (when (type-alias? form)
+    (define-values (alias-names alias-map)
+      (get-type-alias-info (list form)))
+    (register-all-type-aliases alias-names alias-map))
+  ;; Handle struct definitions
+  (when (typed-struct? form)
+    (define name (name-of-struct form))
+    (define tvars (type-vars-of-struct form))
+    (register-type-name name)
+    (add-constant-variance! name tvars)
+    (define parsed (parse-typed-struct form))
+    (register-parsed-struct-sty! parsed)
+    (refine-struct-variance! (list parsed))
+    (register-parsed-struct-bindings! parsed))
+  (tc-toplevel/pass1 form)
+  (tc-toplevel/pass1.5 form)
+  (begin0 (tc-toplevel/pass2 form #f)
+          (report-all-errors)))
+
+;; handle-define-new-subtype/pass1 : Syntax -> Empty
+(define (handle-define-new-subtype/pass1 form)
   (syntax-parse form
-    ;; Don't open up `begin`s that are supposed to be ignored
-    [(~and ((~literal begin) e ...)
-           (~not (~or _:ignore^ _:ignore-some^)))
-     (begin0
-       (or (for/last ([form (in-syntax #'(e ...))])
-             (tc-toplevel-form form))
-           'no-type)
-       (report-all-errors))]
-    [_
-     ;; Handle type aliases
-     (when (type-alias? form)
-       (define-values (alias-names alias-map)
-         (get-type-alias-info (list form)))
-       (register-all-type-aliases alias-names alias-map))
-     ;; Handle struct definitions
-     (when (typed-struct? form)
-       (define name (name-of-struct form))
-       (define tvars (type-vars-of-struct form))
-       (register-type-name name)
-       (add-constant-variance! name tvars)
-       (define parsed (parse-typed-struct form))
-       (register-parsed-struct-sty! parsed)
-       (refine-struct-variance! (list parsed))
-       (register-parsed-struct-bindings! parsed))
-     (tc-toplevel/pass1 form)
-     (tc-toplevel/pass1.5 form)
-     (begin0 (tc-toplevel/pass2 form #f)
-             (report-all-errors))]))
+    [form:new-subtype-def
+     ;; (define-new-subtype-internal name (constructor rep-type) #:gen-id gen-id)
+     (define ty (parse-type (attribute form.name)))
+     (define rep-ty (parse-type (attribute form.rep-type)))
+     (register-type (attribute form.constructor) (-> rep-ty ty))
+     (list)]))
 

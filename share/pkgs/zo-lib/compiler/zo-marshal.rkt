@@ -1,6 +1,5 @@
 #lang racket/base
 (require compiler/zo-structs
-         unstable/struct
          racket/port
          racket/vector
          racket/match
@@ -19,6 +18,8 @@
  [zo-marshal-to (compilation-top? output-port? . -> . void?)])
 
 (struct not-ready ())
+
+(struct encoded-scope (relative-id [content #:mutable]) #:prefab)
 
 (define (zo-marshal top)
   (define bs (open-output-bytes))
@@ -142,18 +143,25 @@
 
 (define (zo-marshal-top-to top outp) 
   
-  ; XXX: wraps were encoded in traverse, now needs to be handled when writing
-  (define wrapped (make-hash))
+  ; For detecting sharing in wraps:
+  (define stx-objs (make-hasheq))
+  (define wraps (make-hasheq))
+  (define hash-consed (make-hash))
+  (define hash-consed-results (make-hasheq))
   
   ; (obj -> (or pos #f)) output-port -> number
   ; writes top to outp using shared-obj-pos to determine symref
   ; returns the file position at the end of the compilation top
-  (define (out-compilation-top shared-obj-pos shared-obj-unsee outp)
+  (define (out-compilation-top shared-obj-pos shared-obj-pos-any counting? outp)
     (define ct
       (match top
-        [(compilation-top max-let-depth prefix form)
-         (list* max-let-depth prefix (protect-quote form))]))
-    (out-anything ct (make-out outp shared-obj-pos shared-obj-unsee wrapped))
+        [(compilation-top max-let-depth binding-namess prefix form)
+         (list* max-let-depth
+                (binding-namess-hash->list binding-namess)
+                prefix
+                (protect-quote form))]))
+    (out-anything ct (make-out outp shared-obj-pos shared-obj-pos-any counting?
+                               stx-objs wraps hash-consed hash-consed-results))
     (file-position outp))
   
   ; -> vector
@@ -167,16 +175,12 @@
     (define (encounter! v)
       (hash-update! encountered v add1 0) 
       #f)
-    (define (unencounter! v)
-      (define how-many-encounters (hash-ref encountered v))
-      (when (= how-many-encounters 1)
-        (hash-set! encountered v 0)))
     (define (shared-obj-pos v #:error? [error? #f])
       (hash-ref shared v 
                 (if error?
                     (λ () (error 'symref "~e not in symbol table" v))
                     #f)))
-    (define (share! v) ; XXX this doesn't always set something, probably should be refactored
+    (define (share! v)
       (or (shared-obj-pos v)
           (let ([pos (add1 (hash-count shared))])
             (hash-set! shared v pos) 
@@ -198,8 +202,8 @@
           (share! v)]
          [else
           (encounter! v)]))
-     (λ (v)
-       (unencounter! v))
+     (lambda (v) #f)
+     #t
      (open-output-nowhere))
     
     (define symbol-table (make-vector (hash-count shared) (not-ready)))
@@ -227,13 +231,14 @@
                 [i (in-naturals)])
        (begin0
          (file-position outp)
-         (out-anything v (make-out outp (shared-obj-pos/modulo-v v) void wrapped))))
+         (out-anything v (make-out outp (shared-obj-pos/modulo-v v) shared-obj-pos #f
+                                   stx-objs wraps hash-consed hash-consed-results))))
      (file-position outp)))
   
   ; Calculate file positions
   (define counting-port (open-output-nowhere))
   (define-values (offsets post-shared) (out-symbol-table symbol-table counting-port))
-  (define all-forms-length (out-compilation-top shared-obj-pos void counting-port))
+  (define all-forms-length (out-compilation-top shared-obj-pos shared-obj-pos #f counting-port))
   
   ; Write the compiled form header
   (write-bytes #"#~" outp)
@@ -261,7 +266,7 @@
   (write-bytes (int->bytes all-forms-length) outp)
   ; Actually write the zo
   (out-symbol-table symbol-table outp)
-  (out-compilation-top shared-obj-pos void outp)
+  (out-compilation-top shared-obj-pos shared-obj-pos #f outp)
   (void))
 
 ;; ----------------------------------------
@@ -284,12 +289,12 @@
 (define require-form-type-num 22)
 (define varref-form-type-num 23)
 (define apply-values-type-num 24)
-(define case-lambda-sequence-type-num 25)
-(define module-type-num 26)
-(define inline-variants-type-num 27)
-(define variable-type-num 35)
-(define prefix-type-num 114)
-(define free-id-info-type-num 164)
+(define with-immed-mark-type-num 25)
+(define case-lambda-sequence-type-num 26)
+(define module-type-num 27)
+(define inline-variants-type-num 28)
+(define variable-type-num 36)
+(define prefix-type-num 121)
 
 (define-syntax define-enum
   (syntax-rules ()
@@ -334,14 +339,17 @@
   CPT_MODULE_VAR
   CPT_PATH
   CPT_CLOSURE
-  CPT_DELAY_REF ; XXX unused, but appears to be same as CPT_SYMREF
+  CPT_DELAY_REF ; XXX should be used to delay loading of syntax objects and lambda bodies
   CPT_PREFAB
-  CPT_LET_ONE_UNUSED)
+  CPT_LET_ONE_UNUSED
+  CPT_SCOPE
+  CPT_ROOT_SCOPE
+  CPT_SHARED)
 
-(define CPT_SMALL_NUMBER_START 36)
-(define CPT_SMALL_NUMBER_END 60)
+(define CPT_SMALL_NUMBER_START 39)
+(define CPT_SMALL_NUMBER_END 62)
 
-(define CPT_SMALL_SYMBOL_START 60)
+(define CPT_SMALL_SYMBOL_START 62)
 (define CPT_SMALL_SYMBOL_END 80)
 
 (define CPT_SMALL_MARSHALLED_START 80)
@@ -381,101 +389,23 @@
                           #f
                           #f))
 
-(define (encode-module-bindings module-bindings)
-  (define encode-nominal-path
-    (match-lambda
-      [(struct simple-nominal-path (value))
-       value]
-      [(struct imported-nominal-path (value import-phase))
-       (cons value import-phase)]
-      [(struct phased-nominal-path (value import-phase phase))
-       (cons value (cons import-phase phase))]))
-  (define encoded-bindings (make-vector (* (length module-bindings) 2)))
-  (for ([i (in-naturals)]
-        [(k v) (in-dict module-bindings)])
-    (vector-set! encoded-bindings (* i 2) k)
-    (vector-set! encoded-bindings (add1 (* i 2))
-                 (match v
-                   [(struct simple-module-binding (path))
-                    path]
-                   [(struct exported-module-binding (path export-name))
-                    (cons path export-name)]
-                   [(struct nominal-module-binding (path nominal-path))
-                    (cons path (encode-nominal-path nominal-path))]
-                   [(struct exported-nominal-module-binding (path export-name nominal-path nominal-export-name))
-                    (list* path export-name (encode-nominal-path nominal-path) nominal-export-name)]
-                   [(struct phased-module-binding (path phase export-name nominal-path nominal-export-name))
-                    (list* path phase export-name (encode-nominal-path nominal-path) nominal-export-name)])))
-  encoded-bindings)
-
-(define (encode-all-from-module afm)
-  (match afm
-    [(struct all-from-module (path phase src-phase '() #f '()))
-     (list* path phase src-phase)]
-    [(struct all-from-module (path phase src-phase '() #f context))
-     (list* path phase context src-phase)]
-    [(struct all-from-module (path phase src-phase exns prefix '()))
-     (list* path phase src-phase exns prefix)]))
-
-(define (encode-wraps wraps)
-  (for/list ([wrap (in-list wraps)])
-    (match wrap
-      [(struct phase-shift (amt src dest cancel-id))
-       (box (vector amt src dest #f #f cancel-id))]
-      [(struct module-rename (phase kind set-id unmarshals renames mark-renames plus-kern?))
-       (define encoded-kind (eq? kind 'marked))
-       (define encoded-unmarshals (map encode-all-from-module unmarshals))
-       (define encoded-renames (encode-module-bindings renames))
-       (define-values (maybe-unmarshals maybe-renames) (if (null? encoded-unmarshals) 
-                                                           (values encoded-renames mark-renames)
-                                                           (values encoded-unmarshals (cons encoded-renames mark-renames))))
-       (define mod-rename (list* phase encoded-kind set-id maybe-unmarshals maybe-renames))
-       (if plus-kern?
-           (cons #t mod-rename)
-           mod-rename)]
-      [(struct lexical-rename (bool1 bool2 alist))
-       (define len (length alist))
-       (define vec (make-vector (+ (* 2 len) 2))) ; + 2 for booleans at the beginning
-       (vector-set! vec 0 bool1)
-       (vector-set! vec 1 bool2)
-       (for ([(k v) (in-dict alist)]
-             [i (in-naturals)])
-         (vector-set! vec (+ 2 i) k)
-         (vector-set! vec (+ 2 i len) v))
-       vec]
-      [(struct top-level-rename (flag))
-       flag]
-      [(struct mark-barrier (value)) 
-       value]
-      [(struct prune (syms))
-       (box syms)]
-      [(struct wrap-mark (val))
-       (list val)])))
-
-(define (encode-mark-map mm)
-  mm
-  #;(for/fold ([l empty])
-      ([(k v) (in-hash ht)])
-      (list* k v l)))
-
 (define-struct protected-symref (val))
 
-(define (encode-wrapped w)
+(define (encode-stx-obj w out)
   (match w
-    [(struct wrapped (datum wraps tamper-status))
+    [(struct stx-obj (datum wraps srcloc props tamper-status))
      (let* ([enc-datum
              (match datum
-               [(cons a b) 
-                (let ([p (cons (encode-wrapped a)
+               [(cons a b)
+                (let ([p (cons (encode-stx-obj a out)
                                (let bloop ([b b])
                                  (match b
                                    ['() null]
                                    [(cons b1 b2)
-                                    (cons (encode-wrapped b1)
+                                    (cons (encode-stx-obj b1 out)
                                           (bloop b2))]
                                    [else
-                                    (encode-wrapped b)])))]
-                      ; XXX Cylic list error possible
+                                    (encode-stx-obj b out)])))]
                       [len (let loop ([datum datum][len 0])
                              (cond
                                [(null? datum) #f]
@@ -487,32 +417,96 @@
                       (cons len p) 
                       p))]
                [(box x)
-                (box (encode-wrapped x))]
+                (box (encode-stx-obj x out))]
                [(? vector? v)
-                (vector-map encode-wrapped v)]
+                (vector-map (lambda (e) (encode-stx-obj e out)) v)]
                [(? prefab-struct-key)
                 (define l (vector->list (struct->vector datum)))
                 (apply
                  make-prefab-struct
                  (car l)
-                 (map encode-wrapped (cdr l)))]
+                 (map (lambda (e) (encode-stx-obj e out)) (cdr l)))]
                [_ datum])]
-            [p (cons enc-datum
-                     (encode-wraps wraps))])
-       (case tamper-status
-         [(clean) p]
-         [(tainted) (vector p)]
-         [(armed) (vector p #f)]))]))
+            [e-wraps (share-everywhere (encode-wrap wraps (out-wraps out)) out)]
+            [esrcloc (let ()
+                       (define (avail? n) (n . >= . 0))
+                       (define (xvector a b c d e)
+                         (case (hash-ref props 'paren-shape #f)
+                           [(#\[) (vector a b c d e #\[)]
+                           [(#\{) (vector a b c d e #\{)]
+                           [else (if (or a (avail? b) (avail? c) (avail? d))
+                                     (vector a b c d e)
+                                     #f)]))
+                       (define (norm v) (or v -1))
+                       (share-everywhere
+                        (if srcloc
+                            (xvector (srcloc-source srcloc)
+                                     (norm (srcloc-line srcloc))
+                                     (norm (srcloc-column srcloc))
+                                     (norm (srcloc-position srcloc))
+                                     (norm (srcloc-span srcloc)))
+                            (xvector #f -1 -1 -1 -1))
+                        out))])
+       (cond
+        [esrcloc
+         (case tamper-status
+           [(tainted) (vector enc-datum e-wraps esrcloc 1)]
+           [(armed) (vector enc-datum e-wraps esrcloc 2)]
+           [else (vector enc-datum e-wraps esrcloc)])]
+        [(not (eq? tamper-status 'clean))
+         (vector enc-datum e-wraps 
+                 (case tamper-status
+                   [(tainted) 1]
+                   [(armed) 2]))]
+        [else
+         (cons enc-datum e-wraps)]))]))
 
-(define-struct out (s shared-index shared-unsee encoded-wraps))
+(define-struct out (s
+                    ;; The output port for writing bytecode.
+                    shared-index
+                    ;; Takes a value and reports/record sharing.
+                    ;; On the first pass, the number of times this function is
+                    ;; called for a value determines whether sharing is needed
+                    ;; for the value. That sharing is reported on later passes
+                    ;; by returning a number (a slot in "symbol" table) instead
+                    ;; of #f. On the symbol-table filling pass, the first call
+                    ;; produces #f so that a value is written into the table.
+                    shared-index-any
+                    ;; Like `shared-index`, but doesn't record any sharing or
+                    ;; produce #f for the immediate value of a symbol table.
+                    counting?
+                    ;; Set to #t for the first (sharing-finding pass), #f
+                    ;; otherwise.
+                    stx-objs
+                    ;; Hash table from syntax objects to encoded forms; set on
+                    ;; first pass and encoding are retrieved on following passes.
+                    wraps
+                    ;; Hash table from syntax-object wraps to encodings; also
+                    ;; set on first pass and used on later passes.
+                    hash-consed
+                    ;; Table of hash-consed parts of wrap encodings. This table
+                    ;; is `equal?`-based, but with a wrapper to compare self
+                    ;; modidxs with `eq?`.
+                    hash-consed-results
+                    ;; An `eq?`-based table of hash-cons results. Any of these
+                    ;; values that are shared need to be written with CPT_SHARED
+                    ;; so graph structure can be managed.
+                    ))
+
 (define (out-shared v out k)
   (if (shareable? v)
-      (let ([v ((out-shared-index out) v)])
-        (if v
+      (let ([n ((out-shared-index out) v)])
+        (if n
             (begin
               (out-byte CPT_SYMREF out)
-              (out-number v out))
-            (k)))
+              (out-number n out))
+            (let ([sharepoint? (hash-ref (out-hash-consed-results out) v #f)])
+              (when sharepoint?
+                (let ([n2 ((out-shared-index-any out) v)])
+                  (when n2
+                    (out-byte CPT_SHARED out)
+                    (out-number n2 out))))
+              (k))))
       (k)))
 
 (define (out-byte v out)
@@ -553,7 +547,9 @@
 
 (define (shareable? v)
   (define never-share-this?
-    (or-pred? v char? maybe-same-as-fixnum? empty? boolean? void? hash?))
+    (or-pred? v char? maybe-same-as-fixnum? empty? boolean? void? hash?
+              ;; For root scope:
+              scope?))
   (define always-share-this?
     (or-pred? v closure?))
   (or always-share-this?
@@ -599,7 +595,7 @@
        [(? char?)
         (out-byte CPT_CHAR out)
         (out-number (char->integer v) out)]
-       [(? maybe-same-as-fixnum?) ;XXX not sure if it's okay to use fixnum? instead of exact range check
+       [(? maybe-same-as-fixnum?)
         (if (and (v . >= . 0)
                  (v . < . (- CPT_SMALL_NUMBER_END CPT_SMALL_NUMBER_START)))
             (out-byte (+ CPT_SMALL_NUMBER_START v) out)
@@ -614,6 +610,8 @@
         (out-byte CPT_FALSE out)]
        [(? void?)
         (out-byte CPT_VOID out)]
+       [(? (lambda (s) (and (scope? s) (eq? (scope-name s) 'root))))
+        (out-byte CPT_ROOT_SCOPE out)]
        [(struct module-variable (modidx sym pos phase constantness))
         (define (to-sym n) (string->symbol (format "struct~a" n)))
         (out-byte CPT_MODULE_VAR out)
@@ -669,20 +667,16 @@
         (let ([pos ((out-shared-index out) v #:error? #t)])
           (out-number pos out)
           (out-anything lam out))]
-       [(struct prefix (num-lifts toplevels stxs))
+       [(struct prefix (num-lifts toplevels stxs src-insp-desc))
         (out-marshaled
          prefix-type-num
-         (cons num-lifts
-               (cons (list->vector toplevels)
-                     (list->vector stxs)))
+         (list* src-insp-desc
+                num-lifts
+                (list->vector toplevels)
+                (list->vector stxs))
          out)]
        [(struct global-bucket (name)) 
         (out-marshaled variable-type-num name out)]
-       [(struct free-id-info (mpi0 s0 mpi1 s1 p0 p1 p2 insp?))
-        (out-marshaled
-         free-id-info-type-num
-         (vector mpi0 s0 mpi1 s1 p0 p1 p2 insp?)
-         out)]
        [(? mod?)
         (out-module v out)]
        [(struct def-values (ids rhs))
@@ -734,7 +728,7 @@
         (out-number id out)]
        [(struct assign (id rhs undef-ok?))
         (out-marshaled set-bang-type-num
-                       (cons undef-ok? (cons id rhs))
+                       (cons undef-ok? (cons id (protect-quote rhs)))
                        out)]
        [(struct localref (unbox? offset clear? other-clears? type))
         (if (and (not clear?) (not other-clears?) (not flonum?)
@@ -821,6 +815,13 @@
                        (cons (protect-quote proc)
                              (protect-quote args-expr))
                        out)]
+       [(struct with-immed-mark (key val body))
+        (out-marshaled with-immed-mark-type-num
+                       (vector
+                        (protect-quote key)
+                        (protect-quote val)
+                        (protect-quote body))
+                       out)]
        [(struct with-cont-mark (key val body))
         (out-marshaled wcm-type-num
                        (list*
@@ -871,28 +872,23 @@
         (out-byte CPT_BOX out)
         (out-anything (unbox v) out)]
        [(? pair?)
-        ; This code will not turn two different lists that share a common tail
-        ;  e.g. (list* 1 l) and (list* 2 l)
-        ; into a form that puts l into the symbol table
-        ; (when that is possible)
-        
-        ; In contrast, if we always use CPT_PAIR, then it would
-        
-        ; Unfortunately, detecting this situation during the traversal
-        ; phase, without introducing false sharing, is difficult.
-        ; We had an implementation (see the history), but it was buggy.
         (define (list-length-before-cycle/improper-end l)
-          (let loop ([len 0] [l l] [seen (set)])
+          (let loop ([len 0] [l l])
             (cond 
-              [(set-member? seen l)
-               (values len #f)]
               [(null? l)
                (values len #t)]
               [(pair? l)
-               (loop (add1 len) (cdr l) (set-add seen l))]
+               (if ((out-shared-index out) l)
+                   (values len #f)
+                   (loop (add1 len) (cdr l)))]
               [else
                (values len #f)])))
-        (define-values (len proper?) (list-length-before-cycle/improper-end v))
+
+        (define-values (len-1 proper?)
+          (if (out-counting? out)
+              (values 0 #f)
+              (list-length-before-cycle/improper-end (cdr v))))
+        (define len (add1 len-1))
         
         (define (print-contents-as-proper)
           (for ([e (in-list v)])
@@ -945,17 +941,26 @@
           (for ([n (in-range (sub1 len) -1 -1)])
             (out-number (vector-ref vec n) out)))]
        [(? module-path-index?)
+        ;; XXX should add interning of module path indices
         (out-byte CPT_MODULE_INDEX out)
         (let-values ([(name base) (module-path-index-split v)])
           (out-anything name out)
           (out-anything base out)
           (unless (or name base)
             (out-anything (module-path-index-submodule v) out)))]
-       [(stx encoded)
+       [(stx content)
         (out-byte CPT_STX out)
-        (out-anything encoded out)]
-       [(? wrapped?)
-        (out-anything (lookup-encoded-wrapped v out) out)]
+        (out-anything content out)]
+       [(encoded-scope relative-id content)
+        (out-byte CPT_SCOPE out)
+        ;; The `out-shared` wrapper already called `((out-shared-index out) v)` 
+        ;; once, so `pos` will defintely be a number:
+        (let ([pos ((out-shared-index out) v)])
+          (out-number pos out))
+        (out-number relative-id out)
+        (out-anything (share-everywhere content out) out)]
+       [(? stx-obj?)
+        (out-anything (lookup-encoded-stx-obj v out) out)]
        [(? prefab-struct-key)
         (define pre-v (struct->vector v))
         (vector-set! pre-v 0 (prefab-struct-key v))
@@ -965,8 +970,41 @@
         (out-byte CPT_QUOTE out)
         (parameterize ([quoting? #t])
           (out-anything qv out))]
-       [(or (? path?) ; XXX Why not use CPT_PATH?
-            (? regexp?)
+       [(? path?)
+        (out-byte CPT_PATH out)
+        (define (within? p)
+          (and (relative-path? p)
+               (let loop ([p p])
+                 (define-values (base name dir?) (split-path p))
+                 (and (not (eq? name 'up))
+                      (not (eq? name 'same))
+                      (or (not (path? base))
+                          (loop base))))))
+        (define maybe-rel
+          (and (current-write-relative-directory)
+               (let ([dir (current-write-relative-directory)])
+                 (and (or (not dir)
+                          (within? (find-relative-path v
+                                                       (if (pair? dir)
+                                                           (cdr dir)
+                                                           dir))))
+                      (find-relative-path v
+                                          (if (pair? dir)
+                                              (car dir)
+                                              dir))))))
+        (cond
+         [(not maybe-rel)
+          (define bstr (path->bytes v))
+          (out-number (bytes-length bstr) out)
+          (out-bytes bstr out)]
+         [else
+          (out-number 0 out)
+          (out-anything (for/list ([e (in-list (explode-path maybe-rel))])
+                          (if (path? e)
+                              (path-element->bytes e)
+                              e))
+                        out)])]
+       [(or (? regexp?)
             (? byte-regexp?)
             (? number?)
             (? extflonum?))
@@ -998,8 +1036,11 @@
 
 (define (convert-module mod-form)
   (match mod-form
-    [(struct mod (name srcname self-modidx prefix provides requires body syntax-bodies unexported 
-                       max-let-depth dummy lang-info internal-context flags pre-submodules post-submodules))
+    [(struct mod (name srcname self-modidx
+                       prefix provides requires body syntax-bodies unexported 
+                       max-let-depth dummy lang-info
+                       internal-context binding-names
+                       flags pre-submodules post-submodules))
      (let* ([lookup-req (lambda (phase)
                           (let ([a (assq phase requires)])
                             (if a
@@ -1096,17 +1137,28 @@
             [l (cons (map convert-module post-submodules) l)]
             [l (cons (map convert-module pre-submodules) l)]
             [l (cons (if (memq 'cross-phase flags) #t #f) l)]
+            [l (append (pack-binding-names binding-names) l)]
             [l (cons self-modidx l)]
             [l (cons srcname l)]
             [l (cons (if (pair? name) (car name) name) l)]
             [l (cons (if (pair? name) (cdr name) null) l)])
        l)]))
 
-(define (lookup-encoded-wrapped w out)
-  (hash-ref! (out-encoded-wraps out) w
-            (λ ()
-              (encode-wrapped w))))
+(define (lookup-encoded-stx-obj w out)
+  (hash-ref! (out-stx-objs out) w
+             (λ ()
+               (encode-stx-obj w out))))
 
+(define (pack-binding-names binding-names)
+  (define (ht-to-vector ht)
+    (and ht (list->vector (apply append (hash-map ht list)))))
+  (list (ht-to-vector (hash-ref binding-names 0 #f))
+        (ht-to-vector (hash-ref binding-names 1 #f))
+        (list->vector
+         (apply append
+                (for/list ([(phase ht) (in-hash binding-names)]
+                           #:unless (or (= phase 0) (= phase 1)))
+                  (list phase (ht-to-vector ht)))))))
 
 (define (out-lam expr out)  
   (match expr
@@ -1198,6 +1250,260 @@
         (find-relative-path r v)
         v)))
 
+(define (binding-namess-hash->list binding-namess)
+  (for/list ([(phase t) (in-hash binding-namess)])
+    (cons phase
+          (list->vector
+           (apply append (for/list ([(id sym) (in-hash t)])
+                           (list id sym)))))))
 
 ;; ----------------------------------------
+
+;; We want to hash-cons syntax-object wraps, but a normal `equal?`-based
+;; table would equate different "self" modidxes that we need to keep
+;; separate. So, roll a `simple-equal?` that inspects wraps. We don't
+;; have to deal with cycles, since cycles would always go through a scope,
+;; and we recur into scopes.
+
+(struct modidx-must-be-eq (content)
+        #:property prop:equal+hash
+        (list (lambda (a b eql?)
+                (simple-equal? (modidx-must-be-eq-content a)
+                               (modidx-must-be-eq-content b)))
+              (lambda (a h) (h (modidx-must-be-eq-content a)))
+              (lambda (a h) (h (modidx-must-be-eq-content a)))))
+
+(define (simple-equal? a b)
+  (cond
+   [(eqv? a b) #t]
+   [(pair? a)
+    (and (pair? b)
+         (simple-equal? (car a) (car b))
+         (simple-equal? (cdr a) (cdr b)))]
+   [(vector? a)
+    (and (vector? b)
+         (= (vector-length a) (vector-length b))
+         (for/and ([ae (in-vector a)]
+                   [be (in-vector b)])
+           (simple-equal? ae be)))]
+   [(box? a)
+    (and (box? b)
+         (simple-equal? (unbox a) (unbox b)))]
+   [(module-path-index? a)
+    (and (module-path-index? b)
+         (let-values ([(a-name a-base) (module-path-index-split a)]
+                      [(b-name b-base) (module-path-index-split b)])
+           (and a-name
+                a-base
+                (simple-equal? a-name b-name)
+                (simple-equal? a-base b-base))))]
+   [else #f]))
+
+(define (share-everywhere v out)
+  (define (register r)
+    (hash-set! (out-hash-consed-results out) r #t)
+    r)
+  (hash-ref! (out-hash-consed out)
+             (modidx-must-be-eq v)
+             (lambda ()
+               (cond
+                [(pair? v)
+                 (register
+                  (cons (share-everywhere (car v) out)
+                        (share-everywhere (cdr v) out)))]
+                [(vector? v)
+                 (register
+                  (for/vector #:length (vector-length v) ([e (in-vector v)])
+                              (share-everywhere e out)))]
+                [(box? v)
+                 (register
+                  (box (share-everywhere (unbox v) out)))]
+                [else v]))))
+
+;; ----------------------------------------
+
+(define (encode-wrap w ht)
+  (hash-ref! ht w
+             (lambda ()
+               (vector (map-encode encode-shift (wrap-shifts w) ht)
+                       (encode-scope-list (wrap-simple-scopes w) ht)
+                       (map-encode encode-multi-scope (wrap-multi-scopes w) ht)))))
+
+(define (map-encode encode l ht)
+  (cond
+   [(null? l) l]
+   [else
+    (hash-ref! ht l
+               (lambda ()
+                 (cons (encode (car l) ht)
+                       (map-encode encode (cdr l) ht))))]))
+
+(define (encode-shift s ht)
+  (hash-ref! ht s
+             (lambda ()
+               (if (module-shift-from-inspector-desc s)
+                   (vector (module-shift-to s)
+                           (module-shift-from s)
+                           (module-shift-from-inspector-desc s)
+                           (module-shift-to-inspector-desc s))
+                   (vector (module-shift-to s)
+                           (module-shift-from s))))))
+
+(define (encode-scope s ht)
+  (if (eq? 'root (scope-name s))
+      s
+      (hash-ref ht s
+                (lambda ()
+                  (define es (encoded-scope (scope-name s) #f))
+                  (hash-set! ht s es)
+                  (define kind
+                    (case (scope-kind s)
+                      [(module) (if (scope-multi-owner s)
+                                    1
+                                    0)]
+                      [(macro) 2]
+                      [(local) 3]
+                      [(intdef) 4]
+                      [else 5]))
+                  (cond
+                   [(and (null? (scope-bindings s))
+                         (null? (scope-bulk-bindings s)))
+                    (set-encoded-scope-content! es kind)]
+                   [else
+                    (define binding-table
+                      (for/fold ([bt (hasheq)]) ([b (in-list (scope-bindings s))])
+                        (hash-set bt
+                                  (car b)
+                                  (cons (cons (encode-scope-list (cadr b) ht)
+                                              (encode-binding (caddr b) (car b) ht))
+                                        (hash-ref bt (car b) null)))))
+                    (define bindings
+                      (list->vector
+                       (apply
+                        append
+                        (sort (hash-map binding-table list)
+                              symbol<?
+                              #:key car))))
+                    (set-encoded-scope-content!
+                     es
+                     (cons kind
+                           (append (map-encode
+                                    encode-bulk-binding
+                                    (scope-bulk-bindings s)
+                                    ht)
+                                   bindings)))])
+                  es))))
+
+(define (encode-scope-list l ht)
+  (map-encode encode-scope
+              (sort l > #:key (lambda (s)
+                                (if (eq? 'root (scope-name s))
+                                    -1
+                                    (scope-name s))))
+              ht))
+
+(define (encode-multi-scope ms+phase ht)
+  (define ms (car ms+phase))
+  (cons (hash-ref ht ms
+                  (lambda ()
+                    (define v (make-vector (add1 (* 2 (length (multi-scope-scopes ms))))))
+                    (hash-set! ht ms v)
+                    (vector-copy!
+                     v
+                     0
+                     (list->vector
+                      (append (apply
+                               append
+                               (for/list ([e (in-list (multi-scope-scopes ms))])
+                                 (list (car e)
+                                       (encode-scope (cadr e) ht))))
+                              (list (multi-scope-src-name ms)))))
+                    v))
+        (cadr ms+phase)))
+
+(define (encode-binding b name ht)
+  (match b
+    [(free-id=?-binding base id phase)
+     (hash-ref ht b
+               (lambda ()
+                 (match b
+                   [(free-id=?-binding base id phase)
+                    (define bx (box #f))
+                    (hash-set! ht b bx)
+                    (set-box! bx
+                              (cons
+                               (cons (encode-binding base name ht)
+                                     (cons (stx-obj-datum id)
+                                           (stx-obj-wrap id)))
+                               phase))])))]
+    [_
+     (hash-ref! ht b
+                (lambda ()
+                  (match b
+                    [(local-binding name)
+                     name]
+                    [(module-binding encoded)
+                     encoded]
+                    [(? decoded-module-binding?)
+                     (encode-module-binding b name ht)])))]))
+                             
+                 
+(define (encode-module-binding b name ht)
+  (hash-ref! ht (cons name b)
+             (lambda ()
+               (match b
+                 [(decoded-module-binding path export-name phase
+                                          nominal-path nominal-export-name nominal-phase
+                                          import-phase inspector-desc)
+                  (define l 
+                    (cond
+                     [(and (eq? path nominal-path)
+                           (eq? export-name nominal-export-name)
+                           (eqv? phase 0)
+                           (eqv? import-phase 0)
+                           (eqv? nominal-phase phase))
+                      (if (eq? name export-name)
+                          path
+                          (cons path export-name))]
+                     [(and (eq? export-name nominal-export-name)
+                           (eq? name export-name)
+                           (eqv? 0 phase)
+                           (eqv? import-phase 0)
+                           (eqv? nominal-phase phase))
+                      (cons path nominal-path)]
+                     [else
+                      (define nom-mod+phase
+                        (if (eqv? nominal-phase phase)
+                            (if (eqv? 0 import-phase)
+                                nominal-path
+                                (cons nominal-path import-phase))
+                            (cons nominal-path (cons import-phase nominal-phase))))
+                      (define l (list* export-name nom-mod+phase nominal-export-name))
+                      (if (zero? phase)
+                          l
+                          (cons phase l))]))
+                  (if inspector-desc
+                      (cons inspector-desc l)
+                      l)]))))
+
+(define (encode-bulk-binding p ht)
+  (cons (encode-scope-list (car p) ht)
+        (encode-all-from-module (cadr p) ht)))
+
+(define (encode-all-from-module b ht)
+  (hash-ref! ht b
+             (lambda ()
+               (match b
+                 [(all-from-module path phase src-phase inspector-desc exceptions prefix)
+                  (vector path src-phase
+                          (cond
+                           [(and (not prefix) (null? exceptions))
+                            phase]
+                           [(not prefix)
+                            (cons phase (list->vector exceptions))]
+                           [(null? exceptions)
+                            (cons phase prefix)]
+                           [else
+                            (cons phase (cons (list->vector exceptions) prefix))])
+                          inspector-desc)]))))
 

@@ -1,7 +1,7 @@
 
 (module pconvert mzscheme
   
-  (require (only racket/base sort)
+  (require (only racket/base sort for for/vector for/list in-vector in-naturals)
            compatibility/mlist
 	   "pconvert-prop.rkt"
            racket/class
@@ -157,10 +157,12 @@
                       (build (mcdr expr)))]
                    [(vector? expr) 
                     (unless (build-sub expr)
-                      (for-each build (vector->list expr)))]
+                      (for ([v (in-vector expr)])
+                        (build v)))]
                    [(struct? expr)
                     (unless (build-sub expr)
-                      (for-each build (vector->list (struct->vector expr))))]
+                      (for ([v (in-vector (struct->vector expr))])
+                        (build v)))]
                    [else (build-sub expr)]))
                build-sub))])
         (build expr)
@@ -278,7 +280,9 @@
                       (lambda ()
                         (cond
                           [(box? expr) (box (recur (unbox expr)))]
-                          [(vector? expr) (apply vector (map recur (vector->list expr)))]
+                          [(vector? expr)
+                           (for/vector ([v (in-vector expr)])
+                             (recur v))]
                           [else (quasi-style)]))]
                      [quasi-style
                       (lambda ()
@@ -371,12 +375,19 @@
                                           `(cons ,(recur k) ,(recur v))))]
                                       [constructor
                                        (cond
-                                         [(hash-table? expr 'weak 'equal) 'make-weak-hash]
-                                         [(hash-table? expr 'equal) 'make-hash]
-                                         [(hash-table? expr 'weak 'eqv) 'make-weak-hasheqv]
-                                         [(hash-table? expr 'eqv) 'make-hasheqv]
-                                         [(hash-table? expr 'weak) 'make-weak-hasheq]
-                                         [(hash-table? expr) 'make-hasheq])])
+                                         [(immutable? expr)
+                                          (cond
+                                            [(hash-table? expr 'equal) 'make-immutable-hash]
+                                            [(hash-table? expr 'eqv) 'make-immutable-hasheqv]
+                                            [(hash-table? expr) 'make-immutable-hasheq])]
+                                         [else
+                                          (cond
+                                            [(hash-table? expr 'weak 'equal) 'make-weak-hash]
+                                            [(hash-table? expr 'equal) 'make-hash]
+                                            [(hash-table? expr 'weak 'eqv) 'make-weak-hasheqv]
+                                            [(hash-table? expr 'eqv) 'make-hasheqv]
+                                            [(hash-table? expr 'weak) 'make-weak-hasheq]
+                                            [(hash-table? expr) 'make-hasheq])])])
                                   (if (null? contents)
                                       `(,constructor)
                                       `(,constructor (list ,@contents))))]
@@ -384,7 +395,8 @@
                                 `(,(if (immutable? expr)
                                        'vector-immutable
                                        'vector)
-                                  ,@(map recur (vector->list expr)))]
+                                  ,@(for/list ([v (in-vector expr)])
+                                      (recur v)))]
                                [(symbol? expr) `',expr]
                                [(keyword? expr) `',expr]
                                [(string? expr) expr]
@@ -448,6 +460,12 @@
                                      (object-name expr))
                                 `(open-output-file ,(object-name expr))]
                                [(port? expr) expr]
+                               [(prefab-struct-key expr) ; (prefab-struct? expr)
+                                `(make-prefab-struct
+                                  ,(recur (prefab-struct-key expr))
+                                  ,@(for/list ([v (in-vector (struct->vector expr))]
+                                               [i (in-naturals)] #:unless (zero? i))
+                                      (recur v)))]
                                
                                ;; this case must be next to last, so that all of the
                                ;; things with object-name's fall into the cases above first
@@ -465,11 +483,11 @@
                                                                      (symbol->string name))])
                                                    (string->symbol (string-append "make-" str-name))))))])
                                   `(,constructor
-                                    ,@(map (lambda (x) 
-                                             (if (eq? uniq x)
-                                                 '...
-                                                 (recur x)))
-                                           (cdr (vector->list (struct->vector expr uniq))))))]
+                                    ,@(for/list ([v (in-vector (struct->vector expr uniq))]
+                                                 [i (in-naturals)] #:unless (zero? i))
+                                        (if (eq? uniq v)
+                                            '...
+                                            (recur v)))))]
                                
                                [else expr]))
                            recur)))])

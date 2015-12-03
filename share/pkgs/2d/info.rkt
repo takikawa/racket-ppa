@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.3"))) (define collection (quote multi)) (define version "1.0") (define deps (quote ("2d-lib" "2d-doc"))) (define implies (quote ("2d-lib" "2d-doc"))) (define pkg-desc "2d syntax") (define pkg-authors (quote (robby)))))

@@ -2,7 +2,7 @@
 (require racket/class
          racket/gui/base
          framework
-         unstable/class-iop
+         racket/class/iop
          "interfaces.rkt"
          "frame.rkt"
          "prefs.rkt")

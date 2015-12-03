@@ -1,12 +1,12 @@
 #lang racket/base
-(require unstable/bytes
-         net/base64
+(require net/base64
          net/cookie
          racket/match
          racket/file
          racket/contract
          web-server/http
-         web-server/stuffers/hmac-sha1)
+         web-server/stuffers/hmac-sha1
+         web-server/private/util)
 
 (define (substring* s st en)
   (substring s st (+ (string-length s) en)))
@@ -14,7 +14,7 @@
 (define (mac key v)
   (substring*
    (bytes->string/utf-8
-    (base64-encode (HMAC-SHA1 key (write/bytes v))))
+    (base64-encode (HMAC-SHA1 key (write/bytes v)) #""))
    0 -3))
 
 (define (make-secret-salt/file secret-salt-path)

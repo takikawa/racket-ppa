@@ -4,7 +4,7 @@
          racket/match
          framework
          syntax/id-table
-         unstable/class-iop
+         racket/class/iop
          macro-debugger/syntax-browser/interfaces
          "controller.rkt"
          "display.rkt"

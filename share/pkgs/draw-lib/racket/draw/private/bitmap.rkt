@@ -171,12 +171,26 @@
     ;;    is used as a mask
 
     (init-rest args)
-    (super-new)
 
     (define/public (surface-flush)
       (cairo_surface_flush s))
+    
+    (define alt? #f)
+    (define width 0)
+    (define height 0)
+    (define b&w? #f)
+    (define alpha-channel? #f)
+    (define s #f)
+    (define loaded-mask #f)
+    (define backing-scale 1.0)
+    (define shadow #f)
 
-    (define-values (alt? width height b&w? alpha-channel? s loaded-mask backing-scale)
+    (define alpha-s #f)
+    (define alpha-s-up-to-date? #f)
+
+    (super-new)
+
+    (set!-values (alt? width height b&w? alpha-channel? s loaded-mask backing-scale)
       (case-args
        args
        [([alternate-bitmap-kind? a])
@@ -293,19 +307,17 @@
                    "bitmap with mask")
                backing-scale)))
 
+    ;; Claim memory proportional to the size of the bitmap, which
+    ;; helps the GC see that we're using that much memory:
+    (set! shadow (make-phantom-bytes (* width height 4)))
+
     ;; Use for non-alpha color bitmaps when they are used as a mask:
-    (define alpha-s #f)
-    (define alpha-s-up-to-date? #f)
     (define/public (drop-alpha-s)
       (set! alpha-s-up-to-date? #f)
       (when alpha-s
         (let ([s2 alpha-s])
           (set! alpha-s #f)
           (destroy s2))))
-
-    ;; Claim memory proportional to the size of the bitmap, which
-    ;; helps the GC see that we're using that much memory:
-    (define shadow (make-phantom-bytes (* width height 4)))
 
     (def/public (get-width) (max 1 width))
     (def/public (get-height) (max 1 height))
@@ -391,7 +403,12 @@
                [(starts? #"GIF8")
                 (do-load-bitmap in 'gif bg complain-on-failure?)]
                [(starts? #"BM")
-                (do-load-bitmap in 'bmp bg complain-on-failure?)]
+                (do-load-bitmap in
+                                (if (eq? kind 'unknown/alpha)
+                                    'bmp/alpha
+                                    'bmp)
+                                bg
+                                complain-on-failure?)]
                [(starts? #"#define")
                 (do-load-bitmap in 'xbm bg complain-on-failure?)]
                [(starts? #"/* XPM */")
@@ -486,7 +503,12 @@
                     (values s #f))
                   (values #f #f)))]
            [(bmp bmp/alpha)
-            (let-values ([(w h rows) (read-bmp in)])
+            (let-values ([(w h rows) (read-bmp in #:background (and (eq? kind 'bmp)
+                                                                    (if bg
+                                                                        (list (color-red bg)
+                                                                              (color-green bg)
+                                                                              (color-blue bg))
+                                                                        (list 255 255 255))))])
               (if rows
                   (let ([s (cairo_image_surface_create CAIRO_FORMAT_ARGB32 w h)]
                         [alpha? #t])
@@ -686,8 +708,19 @@
                            (jpeg_write_scanlines c samps 1))))
                      (jpeg_finish_compress c))
                    (lambda () (destroy-compress c))))]
+            [(bmp)
+             (define bstr (make-bytes (* width height 4)))
+             (get-argb-pixels 0 0 width height bstr #:unscaled? #t)
+             (when loaded-mask
+               (send loaded-mask get-argb-pixels 0 0 width height bstr #t))
+             (define write-bmp
+               (cond
+                [b&w? write-bmp1]
+                [(or alpha-channel? loaded-mask) write-bmp32]
+                [else write-bmp24]))
+             (write-bmp bstr width height out)]
             [else (error (method-name 'bitmap% 'save-file)
-                         "kind saving not yet implemented: ~e"
+                         "saving not implemented for file kind: ~e"
                          kind)])))
 
     (def/public (ok?) (and s #t))
@@ -931,7 +964,7 @@
           (cairo_surface_mark_dirty alpha-s)
           (set! alpha-s-up-to-date? #t))))
 
-    (define/public (transparent-white! s width height)
+    (define/private (transparent-white! s width height)
       (let ([bstr (cairo_image_surface_get_data s)]
             [row-width (cairo_image_surface_get_stride s)]
             [A (a-index)])

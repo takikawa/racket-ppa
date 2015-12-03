@@ -124,14 +124,18 @@ See also @method[frame% set-status-text].
            void?]{
 
 Puts the frame in fullscreen mode or restores the frame to
- non-fullscreen mode (Mac OS X).
+ non-fullscreen mode. The frame's show state is not affected.
 
 @Unmonitored[@elem{A frame's mode} @elem{the user} @elem{a
 frame has been put in fullscreen mode} @elem{@method[frame% is-fullscreened?]}]
 
-@history[#:added "6.0.0.6"]
+On Mac OS X, the @racket[frame%] must be created with the style
+ @racket['fullscreen-button] for fullscreen mode to work, and Mac OS X
+ 10.7 or later is required.
 
-}
+@history[#:added "1.9"
+         #:changed "1.18" @elem{Changed @method[frame% fullscreen] with @racket[#t]
+                                to not imply @method[window<%> show] on Windows and Mac OS X.}]}
 
 @defmethod[(get-menu-bar)
            (or/c (is-a?/c menu-bar%) #f)]{
@@ -163,7 +167,7 @@ frame has been iconized} @elem{@method[frame% is-iconized?]}]
 @defmethod[(is-fullscreened?)
            boolean?]{
 
-Returns @racket[#t] if the frame is in fullscreen mode (Mac OS X), @racket[#f]
+Returns @racket[#t] if the frame is in fullscreen mode, @racket[#f]
 otherwise.
 
 @history[#:added "6.0.0.6"]

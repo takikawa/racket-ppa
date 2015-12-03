@@ -2,7 +2,7 @@
 (require (for-syntax racket/base syntax/parse)
          racket/path
          racket/match
-         unstable/syntax
+         syntax/location
          racket/syntax
          racket/private/this-expression-source-directory
          planet/planet-archives)

@@ -242,10 +242,10 @@
    (non-empty-listof (list/c exact-nonnegative-integer? 
                              exact-nonnegative-integer?))
    ;; the font size for that configuration
-   exact-nonnegative-integer?
+   (integer-in 0 255)
    #:flat? #t)
   ;; default font size, when none of the configs above apply
-  exact-nonnegative-integer?
+  (integer-in 0 255)
   #:flat? #t))
 
 (preferences:set-un/marshall
@@ -262,6 +262,12 @@
  'default
  (λ (x) 
    (memq x '(unsmoothed partly-smoothed smoothed default))))
+
+(preferences:set-default
+ 'framework:standard-style-list:weight
+ 'normal
+ (λ (x)
+   (memq x '(normal light bold))))
 
 (editor:set-standard-style-list-pref-callbacks)
 
@@ -390,6 +396,7 @@
               cases
                  instantiate super-instantiate
                syntax/loc quasisyntax/loc
+               datum-case
                match match* match-let match-let* match-letrec
                
                λ lambda let let* letrec recur
@@ -413,8 +420,6 @@
                splicing-letrec-syntax splicing-let-syntaxes
                splicing-letrec-syntaxes splicing-letrec-syntaxes+values
                splicing-local splicing-syntax-parameterize
-
-               ,@all-fors
 
                do:
                
@@ -446,7 +451,7 @@
                type-case))
   (preferences:set-default 
    'framework:tabify
-   (list defaults-ht #rx"^begin" #rx"^def" #f #f)
+   (list defaults-ht #rx"^begin" #rx"^def" #rx"^for\\*?(/|$)" #f)
    (list/c (hash/c symbol? (or/c 'for/fold 'define 'begin 'lambda) #:flat? #t)
            (or/c #f regexp?) (or/c #f regexp?) (or/c #f regexp?) (or/c #f regexp?)))
   

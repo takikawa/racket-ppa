@@ -5,6 +5,7 @@
          racket/port
          racket/string
          file/gunzip
+         file/private/check-path
          openssl/sha1
          openssl
          net/url
@@ -30,10 +31,12 @@
                       #:status-printf [status-printf (lambda args
                                                        (apply printf args)
                                                        (flush-output))]
+                      #:initial-error [initial-error #f]
                       #:tmp-dir [given-tmp-dir #f]
                       #:clean-tmp-dir? [clean-tmp-dir? (not given-tmp-dir)]
                       #:verify-server? [verify? #t]
-                      #:port [given-port #f])
+                      #:port [given-port #f]
+                      #:strict-links? [strict-links? #f])
   (let retry-loop ([given-depth given-depth])
     (define tmp-dir (or given-tmp-dir
                         (make-temporary-file "git~a" 'directory)))
@@ -69,7 +72,7 @@
           ;; Parse server's initial reply
           (define server-capabilities (parse-server-capabilities (car pkts)))
           (define refs ; (list (list <name> <ID>) ...)
-            (parse-initial-refs pkts))
+            (parse-initial-refs pkts initial-error))
           
           ;; Find the commits needed for `ref`:
           (define-values (ref-commit    ; #f or an ID string
@@ -170,7 +173,8 @@
              ;; Extract the tree from the packfile objects:
              (status "Extracting tree to ~a" dest-dir)
              (extract-commit-tree (hex-string->bytes commit)
-                                  obj-ids tmp dest-dir)
+                                  obj-ids tmp dest-dir
+                                  strict-links?)
              
              ;; Done; return checkout id
              (lambda () commit))
@@ -296,13 +300,15 @@
 ;; parse-initial-refs : (listof bytes) -> (listof (list bytes string))
 ;;  In each element of the returned list, first item is
 ;;  the branch or tag name, second is the ID
-(define (parse-initial-refs pkts)
+(define (parse-initial-refs pkts initial-error)
   (filter
    values
    (for/list ([pkt (in-list pkts)])
      (define m (regexp-match #px#"^([0-9a-fA-F]{40})[ \t]([^\0\n]+)[\0\n]" pkt))
-     (unless m (error 'git-checkout "could not parse ref pkt\n  pkt: ~s"
-                      pkt))
+     (unless m 
+       (when initial-error (initial-error))
+       (error 'git-checkout "could not parse ref pkt\n  pkt: ~s"
+              pkt))
      (define name (caddr m))
      (define id (bytes->string/utf-8 (cadr m)))
      (cond
@@ -600,7 +606,7 @@
 
 ;; extract-commit-tree : bytes (hash/c bytes object) tmp-info path -> void
 ;;  Extract the designated commit to `dest-dir`, using objects from `tmp`
-(define (extract-commit-tree obj-id obj-ids tmp dest-dir)
+(define (extract-commit-tree obj-id obj-ids tmp dest-dir strict-links?)
   (define obj (hash-ref obj-ids obj-id))
   (case (object-type obj)
     [(commit)
@@ -611,7 +617,7 @@
         (lambda (i)
           (extract-commit-info i obj-id))))
      (define tree-id (hex-string->bytes tree-id-str))
-     (extract-tree tree-id obj-ids tmp dest-dir)]
+     (extract-tree tree-id obj-ids tmp dest-dir strict-links?)]
     [(tag)
      (define commit-id-bstr
        (call-with-input-object
@@ -624,9 +630,9 @@
                    (bytes->hex-string obj-id)))
           (cadr m))))
      (define commit-id (hex-string->bytes (bytes->string/utf-8 commit-id-bstr)))
-     (extract-commit-tree commit-id obj-ids tmp dest-dir)]
+     (extract-commit-tree commit-id obj-ids tmp dest-dir strict-links?)]
     [(tree)
-     (extract-tree obj-id obj-ids tmp dest-dir)]
+     (extract-tree obj-id obj-ids tmp dest-dir strict-links?)]
     [else
      (error 'git-checkout "cannot extract tree from ~a: ~s"
             (object-type obj)
@@ -654,9 +660,9 @@
                (loop))
          null))))
 
-;; extract-commit-tree : bytes (hash/c bytes object) tmp-info path -> void
+;; extract-tree : bytes (hash/c bytes object) tmp-info path -> void
 ;;  Extract the designated tree to `dest-dir`, using objects from `tmp`
-(define (extract-tree tree-id obj-ids tmp dest-dir)
+(define (extract-tree tree-id obj-ids tmp dest-dir strict-links?)
   (make-directory* dest-dir)
   (define tree-obj (hash-ref obj-ids tree-id))
   (call-with-input-object
@@ -668,17 +674,23 @@
        (when id
          (define (this-object-location)
            (object-location (hash-ref obj-ids id)))
-         (case (datum-intern-literal mode)
-          [(#"100644" #"644"
-            #"100755" #"755")
+         (define (copy-this-object perms)
            (copy-object tmp
                         (this-object-location)
-                        (build-path dest-dir fn))]
+                        perms
+                        (build-path dest-dir fn)))
+         (case (datum-intern-literal mode)
+          [(#"100755") #"755"
+           (copy-this-object #o755)]
+          [(#"100644" #"644")
+           (copy-this-object #o644)]
           [(#"40000" #"040000")
-           (extract-tree id obj-ids tmp (build-path dest-dir fn))]
+           (extract-tree id obj-ids tmp (build-path dest-dir fn) strict-links?)]
           [(#"120000")
-           (make-file-or-directory-link (build-path dest-dir fn)
-                                        (object->bytes tmp (this-object-location)))]
+           (define target (bytes->path (object->bytes tmp (this-object-location))))
+           (when strict-links?
+             (check-unpack-path 'git-checkout target))
+           (make-file-or-directory-link target (build-path dest-dir fn))]
           [(#"160000")
            ;; submodule; just make a directory placeholder
            (make-directory* (build-path dest-dir fn))]
@@ -935,8 +947,8 @@
    [else
     (call-with-input-file* (build-path (tmp-info-dir tmp) location) proc)]))
 
-;; copy-object : tmp-info location path -> void
-(define (copy-object tmp location dest-file)
+;; copy-object : tmp-info location integer path -> void
+(define (copy-object tmp location perms dest-file)
   (cond
    [(pair? location)
     (define bstr (object->bytes tmp location))
@@ -947,7 +959,9 @@
    [else
     (copy-file (build-path (tmp-info-dir tmp) location)
                dest-file
-               #t)]))
+               #t)])
+  (unless (equal? 'windows (system-type 'os))
+    (file-or-directory-permissions dest-file perms)))
 
 ;; object->bytes : tmp-info location -> bytes
 (define (object->bytes tmp location)

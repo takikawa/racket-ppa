@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2014 PLT Design Inc.
+  Copyright (c) 2004-2015 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -5593,6 +5593,7 @@ Scheme_Object *scheme_file_truncate(int argc, Scheme_Object *argv[])
 
   errid = -1;
 #ifdef WINDOWS_FILE_HANDLES
+  flush_fd(scheme_output_port_record(argv[0]), NULL, 0, 0, 0, 0);
   if (win_seekable(fd)) {
     DWORD r;
     LONG lo_w, hi_w, old_lo_w, old_hi_w;
@@ -6104,12 +6105,12 @@ Scheme_Object *scheme_filesystem_change_evt(Scheme_Object *path, int flags, int 
     char *try_filename = filename;
     
     while (1) {
-      h = FindFirstChangeNotification(try_filename, FALSE, 
-                                      (FILE_NOTIFY_CHANGE_FILE_NAME
-                                       | FILE_NOTIFY_CHANGE_DIR_NAME
-                                       | FILE_NOTIFY_CHANGE_SIZE
-                                       | FILE_NOTIFY_CHANGE_LAST_WRITE
-                                       | FILE_NOTIFY_CHANGE_ATTRIBUTES));
+      h = FindFirstChangeNotificationW(WIDE_PATH(try_filename), FALSE,
+                                       (FILE_NOTIFY_CHANGE_FILE_NAME
+                                        | FILE_NOTIFY_CHANGE_DIR_NAME
+                                        | FILE_NOTIFY_CHANGE_SIZE
+                                        | FILE_NOTIFY_CHANGE_LAST_WRITE
+                                        | FILE_NOTIFY_CHANGE_ATTRIBUTES));
       if (h == INVALID_HANDLE_VALUE) {
         /* If `filename' refers to a file, then monitor its enclosing directory. */
         errid = GetLastError();
@@ -10287,7 +10288,7 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
 	scheme_contract_error(name,
                               "non-#f port argument not allowed on this platform",
                               "port", 1, args[i],
-                              NULL));
+                              NULL);
     }
 
     if (c > 4) {

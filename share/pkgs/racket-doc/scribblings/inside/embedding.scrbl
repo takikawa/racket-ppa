@@ -87,7 +87,7 @@ To embed Racket CGC in a program, follow these steps:
   @cpp{scheme_main_stack_setup} trampoline registers the C stack with
   the memory manager without creating a namespace.)
 
-  On 32-bit Windows, when support for parallelism is enabled in the Racket
+  On Windows, when support for parallelism is enabled in the Racket
   build (as is the default), then before calling
   @cpp{scheme_main_setup}, your embedding application must first call
   @cppi{scheme_register_tls_space}:
@@ -101,7 +101,12 @@ To embed Racket CGC in a program, follow these steps:
 
   @verbatim[#:indent 2]{
    static __declspec(thread) void *tls_space;
-  }}
+  }
+
+  @history[#:changed "6.3" @elem{Calling @cpp{scheme_register_tls_space} is
+                                 required on all Windows variants, although the call
+                                 may be a no-op, depending on how Racket is
+                                 built.}]}
 
  @item{Configure the namespace by adding module declarations. The
   initial namespace contains declarations only for a few primitive
@@ -199,6 +204,16 @@ int main(int argc, char *argv[])
   return scheme_main_setup(1, run, argc, argv);
 }
 }
+
+If modules embedded in the executable need to access runtime files
+(via @racketmodname[racket/runtime-path] forms), supply the
+@DFlag{runtime} flag to @exec{raco ctool}, specifying a directory
+where the runtime files are to be gathered. The modules in the
+generated @filepath{.c} file will then refer to the files in that
+directory; the directory is normally specified relative to the
+executable, but the embedding application must call
+@cppi{scheme_set_exec_cmd} to set the executable path (typically
+@cpp{argv[0]}) before declaring modules.
 
 On Mac OS X, or on Windows when Racket is compiled to a DLL
 using Cygwin, the garbage collector cannot find static variables

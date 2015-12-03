@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2014 PLT Design Inc.
+  Copyright (c) 2004-2015 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -496,7 +496,8 @@ scheme_init_string (Scheme_Env *env)
 			     env);
   
   p = scheme_make_folding_prim(string_length, "string-length", 1, 1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_PRODUCES_FIXNUM);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
+                                                            |SCHEME_PRIM_PRODUCES_FIXNUM);
   scheme_add_global_constant("string-length", p,
 			     env);
 
@@ -509,11 +510,10 @@ scheme_init_string (Scheme_Env *env)
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_NARY_INLINED);
   scheme_add_global_constant("string-set!", p, env);
 
-  scheme_add_global_constant("string=?",
-			     scheme_make_immed_prim(string_eq,
-						    "string=?",
-						    2, -1),
-			     env);
+  p = scheme_make_immed_prim(string_eq, "string=?", 2, -1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED);
+  scheme_add_global_constant("string=?", p, env);
+
   scheme_add_global_constant("string-locale=?",
 			     scheme_make_immed_prim(string_locale_eq,
 						    "string-locale=?",
@@ -774,7 +774,8 @@ scheme_init_string (Scheme_Env *env)
   GLOBAL_PRIM_W_ARITY("shared-bytes", shared_byte_string, 0, -1, env);
 
   p = scheme_make_folding_prim(byte_string_length, "bytes-length", 1, 1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_PRODUCES_FIXNUM);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
+                                                            |SCHEME_PRIM_PRODUCES_FIXNUM);
   scheme_add_global_constant("bytes-length", p, env);
 
   p = scheme_make_immed_prim(scheme_checked_byte_string_ref, "bytes-ref", 2, 2);
@@ -786,11 +787,10 @@ scheme_init_string (Scheme_Env *env)
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_NARY_INLINED);
   scheme_add_global_constant("bytes-set!", p, env);
 
-  scheme_add_global_constant("bytes=?",
-			     scheme_make_immed_prim(byte_string_eq,
-						    "bytes=?",
-						    2, -1),
-			     env);
+  p = scheme_make_immed_prim(byte_string_eq, "bytes=?", 2, -1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED);
+  scheme_add_global_constant("bytes=?", p, env);
+
   scheme_add_global_constant("bytes<?",
 			     scheme_make_immed_prim(byte_string_lt,
 						    "bytes<?",
@@ -1044,6 +1044,14 @@ scheme_make_locale_string(const char *chars)
   return scheme_byte_string_to_char_string_locale(scheme_make_byte_string((char *)chars));
 }
 
+Scheme_Object *scheme_append_strings(Scheme_Object *s1, Scheme_Object *s2)
+{
+  Scheme_Object *a[2];
+  a[0] = s1;
+  a[1] = s2;
+  return string_append(2, a);
+}
+
 /**********************************************************************/
 /*                         index helpers                              */
 /**********************************************************************/
@@ -1200,6 +1208,14 @@ GEN_STRING_COMP(string_locale_ci_eq, "string-locale-ci=?", mz_char_strcmp_ci, ==
 GEN_STRING_COMP(string_locale_ci_lt, "string-locale-ci<?", mz_char_strcmp_ci, <, 1, 0)
 GEN_STRING_COMP(string_locale_ci_gt, "string-locale-ci>?", mz_char_strcmp_ci, >, 1, 0)
 
+Scheme_Object *scheme_string_eq_2(Scheme_Object *str1, Scheme_Object *str2)
+{
+  Scheme_Object *a[2];
+  a[0] = str1;
+  a[1] = str2;       
+  return string_eq(2, a);
+}
+
 /**********************************************************************/
 /*                         byte strings                               */
 /**********************************************************************/
@@ -1265,6 +1281,14 @@ GEN_BYTE_STRING_COMP(byte_string_lt, "bytes<?", mz_strcmp, <)
 GEN_BYTE_STRING_COMP(byte_string_gt, "bytes>?", mz_strcmp, >)
 
 GEN_BYTE_STRING_PATH_COMP(path_lt, "path<?", mz_strcmp, <, SCHEME_PATHP, "path?")
+
+Scheme_Object *scheme_byte_string_eq_2(Scheme_Object *str1, Scheme_Object *str2)
+{
+  Scheme_Object *a[2];
+  a[0] = str1;
+  a[1] = str2;       
+  return byte_string_eq(2, a);
+}
 
 /**********************************************************************/
 /*                   byte string <-> char string                      */
@@ -2721,23 +2745,13 @@ void *scheme_environment_variables_to_block(Scheme_Object *ev, int *_need_free)
 
 static void machine_details(char *s);
 
+#include "systype.inc"
+
 static Scheme_Object *system_type(int argc, Scheme_Object *argv[])
 {
   if (argc) {
     if (SAME_OBJ(argv[0], link_symbol)) {
-#if defined(OS_X) && !defined(XONX)
-      return scheme_intern_symbol("framework");
-#else
-# ifdef DOS_FILE_SYSTEM
-      return scheme_intern_symbol("dll");
-# else
-#  ifdef MZ_USES_SHARED_LIB
-      return scheme_intern_symbol("shared");
-#  else
-      return scheme_intern_symbol("static");
-#  endif
-# endif
-#endif
+      return scheme_intern_symbol(MZ_SYSTEM_TYPE_LINK);
     }
 
     if (SAME_OBJ(argv[0], machine_symbol)) {
@@ -2757,27 +2771,11 @@ static Scheme_Object *system_type(int argc, Scheme_Object *argv[])
     }
 
     if (SAME_OBJ(argv[0], so_suffix_symbol)) {
-#ifdef DOS_FILE_SYSTEM
-      return scheme_make_byte_string(".dll");
-#else
-# ifdef OS_X
-      return scheme_make_byte_string(".dylib");
-# else
-#  ifdef USE_CYGWIN_SO_SUFFIX
-      return scheme_make_byte_string(".dll");
-#  else
-      return scheme_make_byte_string(".so");
-#  endif
-# endif
-#endif
+      return scheme_make_byte_string(MZ_SYSTEM_TYPE_SO_SUFFIX);
     }
 
     if (SAME_OBJ(argv[0], so_mode_symbol)) {
-#ifdef USE_DLOPEN_GLOBAL_BY_DEFAULT
-      return scheme_intern_symbol("global");
-#else
-      return scheme_intern_symbol("local");
-#endif
+      return scheme_intern_symbol(MZ_SYSTEM_TYPE_SO_MODE);
     }
 
 

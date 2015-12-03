@@ -25,7 +25,7 @@
 (define (internal-stepper stx show? error-file)
   (define steps (get-steps stx show? error-file))
   (define used-steps null)
-  (define partition (new-bound-partition))
+  (define partition (new-macro-scopes-partition))
   (define dispatch
     (case-lambda
      [() (dispatch 'next)]

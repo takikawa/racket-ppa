@@ -3,8 +3,8 @@
 (require (for-syntax racket/base
                      racket/syntax
                      (only-in racket/list append* remove-duplicates)
-                     unstable/sequence
-                     syntax/parse
+                     racket/sequence
+                     syntax/parse/pre
                      syntax/parse/experimental/template
                      racket/lazy-require
                      syntax/parse/lib/function-header))

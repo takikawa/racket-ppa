@@ -188,6 +188,7 @@
      nbsp->space<%>
      column-guide<%>
      normalize-paste<%>
+     all-string-snips<%>
      delegate<%>
      wide-snip<%>
      searching<%>
@@ -199,6 +200,7 @@
      ports<%>
      input-box<%>
      autocomplete<%>
+     overwrite-disable<%>
      
      basic% 
      line-spacing%
@@ -229,6 +231,7 @@
      nbsp->space-mixin
      column-guide-mixin
      normalize-paste-mixin
+     all-string-snips-mixin
      wide-snip-mixin
      delegate-mixin
      searching-mixin
@@ -239,7 +242,8 @@
      crlf-line-endings-mixin
      ports-mixin
      input-box-mixin
-     autocomplete-mixin))
+     autocomplete-mixin
+     overwrite-disable-mixin))
   (define-signature text^ extends text-class^
     (autocomplete-append-after
      autocomplete-limit
@@ -251,7 +255,10 @@
      range-end
      range-caret-space? 
      range-style 
-     range-color))
+     range-color
+
+     make-snip-special
+     snip-special?))
   
   (define-signature canvas-class^
     (basic<%>

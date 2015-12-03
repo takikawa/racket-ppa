@@ -5,6 +5,7 @@
          racket/set
          racket/contract
          racket/list
+         racket/promise
          syntax/moddep
          syntax/toplevel
          framework/preferences
@@ -16,6 +17,7 @@
          racket/match
          setup/private/lib-roots
          racket/port
+         compiler/module-suffix
          drracket/private/rectangle-intersect)
 
 (define oprintf
@@ -204,6 +206,9 @@
            #f))
         (add-module-code-connections base module-code))))
   
+  (define module-suffixes (delay (map (lambda (s) (bytes-append #"." s))
+                                      (get-module-suffixes))))
+
   (define (build-module-filename pth remove-extension?)
     (define (try ext)
       (define tst (bytes->path (bytes-append 
@@ -213,9 +218,7 @@
                                 ext)))
       (and (file-exists? tst)
            tst))
-    (or (try #".rkt")
-        (try #".ss")
-        (try #".scm")
+    (or (ormap try (force module-suffixes))
         (try #"")
         pth))
   
@@ -298,11 +301,16 @@
          ;; is a relative one, so any kind of require from the same
          ;; library is always displayed (regardless of hiding planet
          ;; or lib links)
-         (not (equal? requiring-libroot (get-lib-root required)))
+         ;; if `requiring-libroot` is #f we just skip this check;
+         ;; this indicates that we're not in a libroot
+         (or (not requiring-libroot)
+             (not (equal? requiring-libroot (get-lib-root required))))
          (let-values ([(a b) (module-path-index-split dr)])
-           (cond [(symbol? a) 'lib]
-                 [(pair? a) (and (symbol? (car a)) (car a))]
-                 [else #f])))))
+           (match a
+             [(? symbol?) 'lib]
+             [(list 'submod (? symbol?) _ ...) 'lib]
+             [(list (? symbol? s) _ ...) s]
+             [_ #f])))))
 
 (define (standalone-module-overview/file filename)
   (module-overview/file filename #f standalone-fill-pasteboard

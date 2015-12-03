@@ -18,7 +18,6 @@
                      syntax/stx
                      racket/list
                      racket/syntax
-                     unstable/syntax
                      racket/struct-info
                      "../typecheck/internal-forms.rkt"
                      "annotate-classes.rkt"
@@ -29,7 +28,8 @@
 (begin-for-syntax
   (lazy-require [syntax/struct (build-struct-names)]))
 
-(provide define-typed-struct -struct define-typed-struct/exec define-type-alias dtsi* dtsi/exec*)
+(provide define-typed-struct -struct define-typed-struct/exec dtsi* dtsi/exec*
+         define-type-alias define-new-subtype)
 
 (define-for-syntax (with-type* expr ty)
   (with-type #`(ann #,expr #,ty)))
@@ -128,30 +128,16 @@
        [(_ vars:maybe-type-vars nm:struct-name (fs:fld-spec ...)
            opts:struct-options)
         (let ([mutable? (if (attribute opts.mutable?) #'(#:mutable) #'())]
-              [cname (second (build-struct-names #'nm.name null #t #t))])
+              [cname (second (build-struct-names #'nm.name null #t #t))]
+              [prefab? (if (attribute opts.prefab?) #'(#:prefab) #'())])
           (with-syntax ([d-s (ignore-some
                                (syntax/loc stx (define-struct nm (fs.fld ...) . opts)))]
                         [dtsi (quasisyntax/loc stx
                                 (dtsi* (vars.vars ...) nm (fs.form ...)
                                        #:maker #,cname
-                                       #,@mutable?))])
-            (if (eq? (syntax-local-context) 'top-level)
-                ;; Use `eval` at top-level to avoid an unbound id error
-                ;; from dtsi trying to look at the d-s bindings.
-                #'(begin (eval (quote-syntax d-s))
-                         ;; It is important here that the object under the
-                         ;; eval is a quasiquoted literal in order
-                         ;; for #%top-interaction to get the lexical
-                         ;; information for TR's actual #%top-interaction.
-                         ;; This effectively lets us invoke the type-checker
-                         ;; dynamically.
-                         ;;
-                         ;; The quote-syntax is also important because we want
-                         ;; the `dtsi` to have the lexical information from
-                         ;; this module. This ensures that the `dtsi` macro
-                         ;; is actually bound to its definition above.
-                         (eval `(#%top-interaction . ,(quote-syntax dtsi))))
-                #'(begin d-s dtsi))))]))
+                                       #,@mutable?
+                                       #,@prefab?))])
+            #'(begin d-s dtsi)))]))
    (lambda (stx)
      (syntax-parse stx
        [(_ vars:maybe-type-vars nm:struct-name/new (fs:fld-spec ...)
@@ -166,11 +152,7 @@
                                        nm.old-spec (fs.form ...)
                                        #,@mutable?
                                        #,@prefab?))])
-            ;; see comment above
-            (if (eq? (syntax-local-context) 'top-level)
-                #'(begin (eval (quote-syntax d-s))
-                         (eval `(#%top-interaction . ,(quote-syntax dtsi))))
-                #'(begin d-s dtsi))))]))))
+            #'(begin d-s dtsi)))]))))
 
 
 ;; this has to live here because it's used below
@@ -209,3 +191,19 @@
                #'(begin))
          #,(internal (syntax/loc stx
                        (define-type-alias-internal tname type poly-vars))))]))
+
+(define-syntax define-new-subtype
+  (lambda (stx)
+    (unless (memq (syntax-local-context) '(module module-begin))
+      (raise-syntax-error 'define-new-subtype
+                          "can only be used at module top-level"))
+    (syntax-parse stx
+      [(define-new-subtype ty:id (constructor:id rep-ty:expr))
+       #:with gen-id (generate-temporary #'ty)
+       #`(begin
+           (define-type-alias ty (Distinction ty gen-id rep-ty))
+           #,(ignore
+              #'(define constructor (lambda (x) x)))
+           #,(internal (syntax/loc stx
+                         (define-new-subtype-internal ty (constructor rep-ty) #:gen-id gen-id))))])))
+

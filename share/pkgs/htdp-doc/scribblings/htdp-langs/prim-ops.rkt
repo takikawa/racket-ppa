@@ -50,7 +50,7 @@
  (require test-engine/racket-tests)
 (define (sorted? l)
   (cond
-    [(empty? (rest l)) true]
+    [(empty? (rest l)) #true]
     [else (and (<= (first l) (second l)) (sorted? (rest l)))]))
 
 (define (htdp-sort l)
@@ -196,7 +196,7 @@
                   #'check-member-of @racket[check-member-of]
                   #'check-range @racket[check-range]
                   #'require @racket[require]
-                  @racket[true] @racket[false]
+                  @racket[#true] @racket[#false]
                   with-beginner-function-call))
 
 (define (gen-prim-forms define-struct-id define-struct-elem ds-extras
@@ -455,12 +455,12 @@ defined functions to formulate test suites:
 ;; [cons Number [List-of Number]] -> Boolean 
 ;; a function for testing @racket[htdp-sort]
 
-(check-expect (sorted? (list 1 2 3)) true)
-(check-expect (sorted? (list 2 1 3)) false)
+(check-expect (sorted? (list 1 2 3)) #true)
+(check-expect (sorted? (list 2 1 3)) #false)
 
 (define (sorted? l)
   (cond
-    [(empty? (rest l)) true]
+    [(empty? (rest l)) #true]
     [else (and (<= (first l) (second l)) (sorted? (rest l)))]))
 
 ;; [List-of Number] -> [List-of Number]
@@ -782,7 +782,7 @@ see note on @racket[check-expect] for details.  }
     Normally, quasi-quotations are written with a backquote,
     @litchar{`}, like @racket[`(apple ,(+ 1 2))], but they can also be
     written with @quasiquote-elem, like
-    @racket[(@quasiquote-elem (apple ,(+ 1 2)))].}
+    @racket[(#, @quasiquote-elem (apple ,(+ 1 2)))].}
  
  
    @deftogether[(
@@ -920,7 +920,7 @@ see note on @racket[check-expect] for details.  }
        (make-flow
         (list
          (make-paragraph
-          (list "In function calls, the function appearing immediatly after the open parenthesis can be any functions
+          (list "In function calls, the function appearing immediately after the open parenthesis can be any functions
 defined with " (racket define) " or " (racket define-struct) ", or any one of:")))))
       (apply
        append

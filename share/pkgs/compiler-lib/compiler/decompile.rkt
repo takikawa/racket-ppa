@@ -33,7 +33,7 @@
                       (with-output-to-bytes
                           (λ () (write (cdr b)))))))])
         (let ([n (match v
-                   [(struct compilation-top (_ prefix (struct primval (n)))) n]
+                   [(struct compilation-top (_ _ prefix (struct primval (n)))) n]
                    [else #f])])
           (hash-set! table n (car b)))))
     table))
@@ -53,16 +53,95 @@
 (define (decompile top)
   (let ([stx-ht (make-hasheq)])
     (match top
-      [(struct compilation-top (max-let-depth prefix form))
+      [(struct compilation-top (max-let-depth binding-namess prefix form))
        (let-values ([(globs defns) (decompile-prefix prefix stx-ht)])
-         `(begin
+         (expose-module-path-indexes
+          `(begin
             ,@defns
-            ,(decompile-form form globs '(#%globals) (make-hasheq) stx-ht)))]
+            ,(decompile-form form globs '(#%globals) (make-hasheq) stx-ht))))]
       [else (error 'decompile "unrecognized: ~e" top)])))
+
+(define (expose-module-path-indexes e)
+  ;; This is a nearly general replace-in-graph function. (It seems like a lot
+  ;; of work to expose module path index content and sharing, though.)
+  (define ht (make-hasheq))
+  (define mconses null)
+  (define (x-mcons a b)
+    (define m (mcons a b))
+    (set! mconses (cons (cons m (cons a b)) mconses))
+    m)
+  (define main
+    (let loop ([e e])
+      (cond
+       [(hash-ref ht e #f)]
+       [(module-path-index? e)
+        (define ph (make-placeholder #f))
+        (hash-set! ht e ph)
+        (define-values (name base) (module-path-index-split e))
+        (placeholder-set! ph (x-mcons '#%modidx
+                                      (x-mcons (loop name)
+                                               (x-mcons (loop base)
+                                                        null))))
+        ph]
+       [(pair? e)
+        (define ph (make-placeholder #f))
+        (hash-set! ht e ph)
+        (placeholder-set! ph (cons (loop (car e))
+                                   (loop (cdr e))))
+        ph]
+       [(mpair? e)
+        (define m (mcons #f #f))
+        (hash-set! ht e m)
+        (set! mconses (cons (cons m (cons (loop (mcar e))
+                                          (loop (mcdr e))))
+                            mconses))
+        m]
+       [(box? e)
+        (define ph (make-placeholder #f))
+        (hash-set! ht e ph)
+        (placeholder-set! ph (box (loop (unbox e))))
+        ph]
+       [(vector? e)
+        (define ph (make-placeholder #f))
+        (hash-set! ht e ph)
+        (placeholder-set! ph
+                          (for/vector #:length (vector-length e) ([i (in-vector e)])
+                                      (loop i)))
+        ph]
+       [(hash? e)
+        (define ph (make-placeholder #f))
+        (hash-set! ht e ph)
+        (placeholder-set! ph
+                          ((cond
+                            [(hash-eq? ht)
+                             make-hasheq-placeholder]
+                            [(hash-eqv? ht)
+                             make-hasheqv-placeholder]
+                            [else make-hash-placeholder])
+                           (for/list ([(k v) (in-hash e)])
+                             (cons (loop k) (loop v)))))
+        ph]
+       [(prefab-struct-key e)
+        => (lambda (k)
+             (define ph (make-placeholder #f))
+             (hash-set! ht e ph)
+             (placeholder-set! ph
+                               (apply make-prefab-struct
+                                      k
+                                      (map loop
+                                           (cdr (vector->list (struct->vector e))))))
+             ph)]
+       [else
+        e])))
+  (define l (make-reader-graph (cons main mconses)))
+  (for ([i (in-list (cdr l))])
+    (set-mcar! (car i) (cadr i))
+    (set-mcdr! (car i) (cddr i)))
+  (car l))
 
 (define (decompile-prefix a-prefix stx-ht)
   (match a-prefix
-    [(struct prefix (num-lifts toplevels stxs))
+    [(struct prefix (num-lifts toplevels stxs src-insp-desc))
      (let ([lift-ids (for/list ([i (in-range num-lifts)])
                        (gensym 'lift))]
            [stx-ids (map (lambda (i) (gensym 'stx)) 
@@ -105,12 +184,15 @@
                 (length toplevels)
                 (length stxs)
                 num-lifts)
-               (map (lambda (stx id)
-                      `(define ,id ,(if stx
-                                        `(#%decode-syntax 
-                                          ,(decompile-stx (stx-encoded stx) stx-ht))
-                                        #f)))
-                    stxs stx-ids)))]
+               (list*
+                `(quote inspector ,src-insp-desc)
+                ;; `(quote tls ,toplevels)
+                (map (lambda (stx id)
+                       `(define ,id ,(if stx
+                                         `(#%decode-syntax 
+                                           ,(decompile-stx (stx-content stx) stx-ht))
+                                         #f)))
+                     stxs stx-ids))))]
     [else (error 'decompile-prefix "huh?: ~e" a-prefix)]))
 
 (define (decompile-stx stx stx-ht)
@@ -118,7 +200,7 @@
       (let ([p (mcons #f #f)])
         (hash-set! stx-ht stx p)
         (match stx
-          [(wrapped datum wraps tamper-status)
+          [(stx-obj datum wrap srcloc props tamper-status)
            (set-mcar! p (case tamper-status
                           [(clean) 'wrap]
                           [(tainted) 'wrap-tainted]
@@ -141,38 +223,15 @@
                           [(box? datum)
                            (box (decompile-stx (unbox datum) stx-ht))]
                           [else datum])
-                         (let loop ([wraps wraps])
-                           (cond
-                            [(null? wraps) null]
-                            [else
-                             (or (hash-ref stx-ht wraps #f)
-                                 (let ([p (mcons #f #f)])
-                                   (hash-set! stx-ht wraps p)
-                                   (set-mcar! p (decompile-wrap (car wraps) stx-ht))
-                                   (set-mcdr! p (loop (cdr wraps)))
-                                   p))]))))
+                         (let* ([l (mcons wrap null)]
+                                [l (if (hash-count props)
+                                       (mcons props l)
+                                       l)]
+                                [l (if srcloc
+                                       (mcons srcloc l)
+                                       l)])
+                           l)))
            p]))))
-
-(define (decompile-wrap w stx-ht)
-  (or (hash-ref stx-ht w #f)
-      (let ([v (match w
-                 [(lexical-rename has-free-id-renames?
-                                  ignored
-                                  alist)
-                  `(,(if has-free-id-renames? 'lexical/free-id=? 'lexical) . ,alist)]
-                 [(phase-shift amt src dest cancel-id)
-                  `(phase-shift ,amt ,src ,dest, cancel-id)]
-                 [(wrap-mark val)
-                  val]
-                 [(prune sym)
-                  `(prune ,sym)]
-                 [(module-rename phase kind set-id unmarshals renames mark-renames plus-kern?)
-                  `(module-rename ,phase ,kind ,set-id ,unmarshals ,renames ,mark-renames ,plus-kern?)]
-                 [(top-level-rename flag)
-                  `(top-level-rename ,flag)]
-                 [else w])])
-        (hash-set! stx-ht w v)
-        v)))
 
 (define (mpi->string modidx)
   (cond
@@ -182,12 +241,30 @@
 
 (define (decompile-module mod-form orig-stack stx-ht mod-name)
   (match mod-form
-    [(struct mod (name srcname self-modidx prefix provides requires body syntax-bodies unexported 
-                       max-let-depth dummy lang-info internal-context flags pre-submodules post-submodules))
+    [(struct mod (name srcname self-modidx
+                       prefix provides requires body syntax-bodies unexported 
+                       max-let-depth dummy lang-info 
+                       internal-context binding-names
+                       flags pre-submodules post-submodules))
      (let-values ([(globs defns) (decompile-prefix prefix stx-ht)]
                   [(stack) (append '(#%modvars) orig-stack)]
                   [(closed) (make-hasheq)])
        `(,mod-name ,(if (symbol? name) name (last name)) ....
+           (quote self ,self-modidx)
+           (quote internal-context 
+                  ,(if (stx? internal-context)
+                       `(#%decode-syntax 
+                         ,(decompile-stx (stx-content internal-context) stx-ht))
+                       internal-context))
+           (quote bindings ,(for/hash ([(phase ht) (in-hash binding-names)])
+                              (values phase
+                                      (for/hash ([(sym id) (in-hash ht)])
+                                        (values sym
+                                                (if (eq? id #t)
+                                                    #t
+                                                    `(#%decode-syntax 
+                                                      ,(decompile-stx (stx-content id) stx-ht))))))))
+           (quote language-info ,lang-info)
            ,@(if (null? flags) '() (list `(quote ,flags)))
            ,@(let ([l (apply
                        append
@@ -347,7 +424,7 @@
     [(struct topsyntax (depth pos midpt))
      (list-ref/protect (glob-desc-vars globs) (+ midpt pos) 'topsyntax)]
     [(struct primval (id))
-     (hash-ref primitive-table id (lambda () (error "unknown primitive")))]
+     (hash-ref primitive-table id (lambda () (error "unknown primitive: " id)))]
     [(struct assign (id rhs undef-ok?))
      `(set! ,(decompile-expr id globs stack closed)
             ,(decompile-expr rhs globs stack closed))]
@@ -418,15 +495,18 @@
     [(struct apply-values (proc args-expr))
      `(#%apply-values ,(decompile-expr proc globs stack closed) 
                       ,(decompile-expr args-expr globs stack closed))]
+    [(struct with-immed-mark (key-expr val-expr body-expr))
+     (let ([id (gensym 'cmval)])
+       `(#%call-with-immediate-continuation-mark
+         ,(decompile-expr key-expr globs stack closed)
+         (lambda (,id) ,(decompile-expr body-expr globs (cons id stack) closed))
+         ,(decompile-expr val-expr globs stack closed)))]
     [(struct seq (exprs))
      `(begin ,@(for/list ([expr (in-list exprs)])
                  (decompile-expr expr globs stack closed)))]
     [(struct beg0 (exprs))
-     (if (> (length exprs) 1)
-       `(begin0 ,@(for/list ([expr (in-list exprs)])
-                    (decompile-expr expr globs stack closed)))
-       `(begin0 ,(decompile-expr (car exprs) globs stack closed)
-                (void)))]
+     `(begin0 ,@(for/list ([expr (in-list exprs)])
+                  (decompile-expr expr globs stack closed)))]
     [(struct with-cont-mark (key val body))
      `(with-continuation-mark
           ,(decompile-expr key globs stack closed)
@@ -474,7 +554,7 @@
                              ,@(if (not tl-map)
                                    '()
                                    (list
-                                    (for/list ([pos (in-set tl-map)])
+                                    (for/list ([pos (in-list (sort (set->list tl-map) <))])
                                       (define tl-pos
                                         (cond
                                          [(or (pos . < . (glob-desc-num-tls globs))

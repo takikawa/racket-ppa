@@ -334,8 +334,8 @@ that's been a long time coming. At some point, I'm also hoping to
 combine the stepper into the main DrScheme frame.
 
 Oh yes, another major change was that evaluation is now strictly on a
-one- expression-at-a-time basis.  The read, parse, and step are now done
-indiv- idually for each expression.  This has the ancillary benefit that
+one-expression-at-a-time basis.  The read, parse, and step are now done
+individually for each expression.  This has the ancillary benefit that
 there's no longer any need to reconstruct _all_ of the old expressions
 at every step.
 
@@ -370,15 +370,15 @@ the width of an element.  The result of this procedure is used to decide
 whether a line break is necessary.  However, this hook is _also_ used to
 determine whether or not the pretty-printer will try to print the string
 itself or hand off responsibility to the display-handler hook.  In other
-words, if the width- hook procedure returns a non-false value, then the
+words, if the width-hook procedure returns a non-false value, then the
 display-handler will be called to print the actual string.  The other
-pair of hook procedures is first, a procedure which is called _before_
-display of any subexpression, and one which is called _after_ display of
-any subexpression.
+pair of hook procedures is: first, a procedure which is called _before_
+display of any subexpression, and second, one which is called _after_
+display of any subexpression.
 
 So how does the stepper use this to do its work?  Well, the stepper has
 two tricky tasks to accomplish.  First, it must highlight some
-subexpression.  Second, it must manually insert elements (i.e. images)
+subexpressions.  Second, it must manually insert elements (i.e. images)
 which the pretty-printer does not handle.
 
 Let's talk about images first.  In order to display images, the
@@ -976,3 +976,35 @@ student programs, and now I can omit that check.
 2013-05-18
 
 **************
+
+Yikes, there's a lot of technical debt here. I'm back because I'm trying
+to support the new-style languages, where rather than choosing "Beginning
+Student" from a menu, users will just begin wheir programs with
+
+#lang htdp/bsl
+
+... which is frankly a lot cleaner; less hidden program configuration.
+This makes for some changes for the stepper.
+
+First, it's no longer the case that the definitions window supplies
+s-exps one at a time; it all expands into one big module. This is a
+lot cleaner. It does mean that the stepper has to require this module
+and then require a test submodule, if it exists.
+
+Second, it means revisiting the pit of pretty-print hell. The basic issue
+here is that the stepper wants to share a whole bunch of code with
+DrRacket, regarding how values get rendered on screen. More specifically,
+since the stepper is dynamically generating terms, it's natural for
+it to work with an s-exp-based interface, whereas Robby is (reasonably
+enough) pushing to maintain a language-agnostic printer interface, which
+is not married to s-exps.  What happened last time was that I wound up
+copying lots of code from DrRacket's renderer in a nasty and fragile
+way. Not surprisingly, that's now coming back to bite me.
+
+On the other hand, there's currently code in the stepper (it actually
+comes from Stephen Chang...) that decides to show or hide steps depending
+on whether they render "the same", and ... well, I guess I could compare
+text as well as s-expressions, as long as it's always the whole program
+that's being compared. Mini-blecch.
+
+2015-08-28

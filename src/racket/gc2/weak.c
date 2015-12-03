@@ -73,8 +73,9 @@ static int fixup_weak_array(void *p, struct NewGC *gc)
 
   data = a->data;
   for (i = a->count; i--; ) {
-    if (data[i])
+    if (data[i]) {
       gcFIXUP2(data[i], gc);
+    }
   }
 
   return gcBYTES_TO_WORDS(sizeof(GC_Weak_Array) 
@@ -122,6 +123,8 @@ static void zero_weak_arrays(GCTYPE *gc, int force_zero)
       void *p = data[i];
       if (p && (force_zero || !is_marked(gc, p)))
         data[i] = wa->replace_val;
+      else
+        data[i] = GC_resolve2(p, gc);
     }
 
     wa = wa->next;
@@ -214,15 +217,15 @@ static void zero_weak_boxes(GCTYPE *gc, int is_late, int force_zero)
         page = pagemap_find_page(gc->page_maps, wb->secondary_erase);
         if (page->mprotected) {
           page->mprotected = 0;
-          mmu_write_unprotect_page(gc->mmu, page->addr, APAGE_SIZE);
-          GC_MP_CNT_INC(mp_mark_cnt);
+          mmu_write_unprotect_page(gc->mmu, page->addr, APAGE_SIZE, page_mmu_type(page), &page->mmu_src_block);
         }
 
         p = (void **)GC_resolve2(wb->secondary_erase, gc);
         *(p + wb->soffset) = NULL;
         wb->secondary_erase = NULL;
       }
-    }
+    } else
+      wb->val = GC_resolve2(wb->val, gc);
     wb = wb->next;
   }
 
@@ -312,9 +315,12 @@ static int mark_ready_ephemerons(GCTYPE *gc)
   GC_Ephemeron *waiting = NULL, *next, *eph;
   int did_one = 0;
 
+  GC_mark_no_recur(gc, 1);
+
   for (eph = gc->ephemerons; eph; eph = next) {
     next = eph->next;
     if (is_marked(gc, eph->key)) {
+      eph->key = GC_resolve2(eph->key, gc);
       gcMARK2(eph->val, gc);
       gc->num_last_seen_ephemerons++;
       did_one = 1;
@@ -324,6 +330,8 @@ static int mark_ready_ephemerons(GCTYPE *gc)
     }
   }
   gc->ephemerons = waiting;
+
+  GC_mark_no_recur(gc, 0);
 
   return did_one;
 }
