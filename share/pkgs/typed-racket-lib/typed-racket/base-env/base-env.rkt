@@ -14,6 +14,7 @@
   (only-in '#%kernel [apply kernel:apply] [reverse kernel:reverse])
   (only-in racket/private/pre-base new-apply-proc)
   compatibility/mlist
+  racket/logging
   racket/private/stx
   (only-in mzscheme make-namespace)
   (only-in racket/match/runtime match:error matchable? match-equality-test))
@@ -24,6 +25,7 @@
  (only-in (types numeric-tower) [-Number N])
  (only-in (rep type-rep)
           make-ClassTop
+          make-UnitTop
           make-Name
           make-ValuesDots
           make-MPairTop
@@ -622,7 +624,10 @@
 
 [reverse (-poly (a) (-> (-lst a) (-lst a)))]
 [kernel:reverse (-poly (a) (-> (-lst a) (-lst a)))]
-[append (-poly (a) (->* (list) (-lst a) (-lst a)))]
+[append (-poly (a)
+               (cl->*
+                (->* (list (-pair a (-lst a))) (-lst a) (-pair a (-lst a)))
+                (->* (list) (-lst a) (-lst a))))]
 [length (-poly (a) (-> (-lst a) -Index))]
 [memq (-poly (a) (-> Univ (-lst a) (-opt (-ne-lst a))))]
 [memv (-poly (a) (-> Univ (-lst a) (-opt (-ne-lst a))))]
@@ -703,8 +708,9 @@
                    . ->... .
                    -Index))]
 [partition
- (-poly (a b) (cl->* (-> (-> a Univ) (-lst a) (-values (list (-lst a) (-lst a))))
-                     (-> (make-pred-ty a) (-lst b) (-values (list (-lst a) (-lst b))))))]
+ (-poly (a b) (cl->*
+               (-> (asym-pred b Univ (-FS (-filter a 0) -top)) (-lst b) (-values (list (-lst a) (-lst b))))
+               (-> (-> a Univ) (-lst a) (-values (list (-lst a) (-lst a))))))]
 
 [last   (-poly (a) ((-lst a) . -> . a))]
 [add-between (-poly (a b) ((-lst a) b
@@ -747,6 +753,16 @@
         (asym-pred a Univ (-FS (-filter b 0) -top))
         (-values (list (-lst a) (-lst b))))
     (-> (-lst a) (-> a Univ) (-values (list (-lst a) (-lst a))))))]
+
+[list-prefix? (-poly (a b) (->opt (-lst a) (-lst b) [(-> a b Univ)] -Boolean))]
+[take-common-prefix (-poly (a b) (->opt (-lst a) (-lst b) [(-> a b Univ)] (-lst a)))]
+[drop-common-prefix
+ (-poly (a b)
+   (->opt (-lst a) (-lst b) [(-> a b Univ)] (-values (list (-lst a) (-lst b)))))]
+[split-common-prefix
+ (-poly (a b)
+   (->opt (-lst a) (-lst b) [(-> a b Univ)] (-values (list (-lst a) (-lst a) (-lst b)))))]
+
 [append-map
  (-polydots (c a b) ((list ((list a) (b b) . ->... . (-lst c)) (-lst a))
                      ((-lst b) b) . ->... .(-lst c)))]
@@ -756,6 +772,10 @@
 [in-permutations (-poly (a) (-> (-lst a) (-seq (-lst a))))]
 [argmin (-poly (a) ((a . -> . -Real) (-lst a) . -> . a))]
 [argmax (-poly (a) ((a . -> . -Real) (-lst a) . -> . a))]
+[group-by (-poly (a b) (->opt (-> a b) (-lst a) [(-> b b Univ)] (-lst (-lst a))))]
+[cartesian-product (-polydots (a) (->... '() ((-lst a) a) (-lst (make-ListDots a 'a))))]
+[remf (-poly (a) (-> (-> a Univ) (-lst a) (-lst a)))]
+[remf* (-poly (a) (-> (-> a Univ) (-lst a) (-lst a)))]
 
 ;; Section 4.9.8 (Immutable Cyclic Data)
 [make-reader-graph (-> Univ Univ)]
@@ -1070,6 +1090,8 @@
                      (-> c -Boolean : (-FS (-not-filter b 0) (-not-filter a 0))))
                  (-> ((list) [d d] . ->... . Univ)
                      ((list) [d d] . ->... . -Boolean))))]
+[conjoin (-polydots (a) (->* '() (->... '() (a a) Univ) (->... '() (a a) Univ)))]
+[disjoin (-polydots (a) (->* '() (->... '() (a a) Univ) (->... '() (a a) Univ)))]
 ;; probably the most useful cases
 ;; doesn't cover cases where we pass multiple of the function's arguments to curry,
 ;; also doesn't express that the returned function is itself curried
@@ -1137,6 +1159,9 @@
 [field-names (-> (-object) (-lst -Symbol))]
 [object-info (-> (-object) (-values (list (Un (make-ClassTop) (-val #f)) -Boolean)))]
 ;; TODO: class-info (is this sound to allow?)
+
+;; Section 7.8 (Unit Utilities)
+[unit? (make-pred-ty (make-UnitTop))]
 
 ;; Section 9.1
 [exn:misc:match? (-> Univ B)]
@@ -1571,6 +1596,8 @@
           -Nat
           (-opt -Integer)
           (-opt -Integer))))]
+[identifier-binding-symbol
+ (Ident . ->opt . [(Un -Int (-val #f))] -Symbol)]
 
 ;; Section 12.4
 [set!-transformer? (-> Univ B)]
@@ -1634,6 +1661,10 @@
 [internal-definition-context? (make-pred-ty -Internal-Definition-Context)]
 [syntax-local-make-definition-context (->opt [(-opt -Internal-Definition-Context)] -Internal-Definition-Context)]
 [syntax-local-bind-syntaxes (-> (-lst (-Syntax Sym)) (-opt (-Syntax Univ)) -Internal-Definition-Context -Void)]
+[internal-definition-context-introduce
+ (-poly (a) (->opt -Internal-Definition-Context (-Syntax a)
+                   [(one-of/c 'flip 'add 'remove)]
+                   (-Syntax a)))]
 [internal-definition-context-seal (-> -Internal-Definition-Context -Void)]
 [identifier-remove-from-definition-context (-> (-Syntax Sym) (Un -Internal-Definition-Context (-lst -Internal-Definition-Context)) (-Syntax Sym))]
 
@@ -1643,6 +1674,7 @@
 [syntax-local-lift-expression (-> (-Syntax Univ) (-Syntax Sym))]
 [syntax-local-lift-values-expression (-> -Nat (-Syntax Univ) (-lst (-Syntax Sym)))]
 [syntax-local-lift-context (-> Univ)]
+[syntax-local-lift-module (-> (-Syntax Univ) -Void)]
 [syntax-local-lift-module-end-declaration (-> (-Syntax Univ) -Void)]
 [syntax-local-lift-require (-poly (a) (-> Univ (-Syntax a) (-Syntax a)))]
 [syntax-local-lift-provide (-> Univ -Void)]
@@ -1650,14 +1682,20 @@
 [syntax-local-context (-> (Un (-val 'expression) (-val 'top-level) (-val 'module) (-val 'module-begin) (-lst Univ)))]
 [syntax-local-phase-level (-> -Int)]
 [syntax-local-module-exports (-> -Module-Path (-values (list (-lst Sym) (-lst Sym) (-lst Sym))))]
-[syntax-local-get-shadower (-> (-Syntax Sym) (-Syntax Sym))]
+[syntax-local-submodules (-> (-lst -Symbol))]
+[syntax-local-get-shadower (->opt (-Syntax Sym) [Univ] (-Syntax Sym))]
 [syntax-local-certifier (->opt [B] (-poly (a) (->opt (-Syntax a) [Univ (-opt (-poly (b) (-> (-Syntax b) (-Syntax b))))] (-Syntax a))))]
 [syntax-transforming? (-> B)]
+[syntax-transforming-module-expression? (-> B)]
 
+[syntax-local-identifier-as-binding (-> (-Syntax -Symbol) (-Syntax -Symbol))]
 [syntax-local-introduce (-poly (a) (-> (-Syntax a) (-Syntax a)))]
-[make-syntax-introducer (-> (-poly (a) (-> (-Syntax a) (-Syntax a))))]
-[make-syntax-delta-introducer (->opt (-Syntax Univ) [(-opt (-Syntax Univ)) (-opt -Int)] (-poly (a) (-> (-Syntax a) (-Syntax a))))]
-[syntax-local-make-delta-introducer (-> (-Syntax Sym) (-> (-Syntax Sym) (-Syntax Sym)))]
+[make-syntax-introducer
+ (-> (-poly (a) (->opt (-Syntax a) [(one-of/c 'flip 'add 'remove)] (-Syntax a))))]
+[make-syntax-delta-introducer
+ (->opt (-Syntax Univ) (-opt (-Syntax Univ))
+        [(-opt -Int)]
+        (-poly (a) (->opt (-Syntax a) [(one-of/c 'flip 'add 'remove)] (-Syntax a))))]
 
 [syntax-local-transforming-module-provides? (-> B)]
 [syntax-local-module-defined-identifiers (-> (-HT (Un (-val #f) -Int) (-lst (-Syntax Sym))))]
@@ -1675,6 +1713,7 @@
 
 ;; Section 12.8
 [syntax-recertify (-poly (a) (-> (-Syntax a) (-Syntax Univ) -Inspector Univ (-Syntax a)))]
+[syntax-debug-info (-poly (a) (->opt (-Syntax a) [(-opt -Integer) Univ] -HashTop))]
 
 ;; Section 12.9
 [expand (-> Univ (-Syntax Univ))]
@@ -2035,7 +2074,9 @@
 [write   (Univ [-Output-Port] . ->opt . -Void)]
 [display (Univ [-Output-Port] . ->opt . -Void)]
 [print   (Univ [-Output-Port (one-of/c 0 1)] . ->opt . -Void)]
+[writeln   (Univ [-Output-Port] . ->opt . -Void)]
 [displayln (Univ [-Output-Port] . ->opt . -Void)]
+[println   (Univ [-Output-Port (one-of/c 0 1)] . ->opt . -Void)]
 [fprintf (->* (list -Output-Port -String) Univ -Void)]
 [printf (->* (list -String) Univ -Void)]
 [eprintf (->* (list -String) Univ -Void)]
@@ -2073,7 +2114,7 @@
 [pretty-print (Univ [-Output-Port (one-of/c 0 1)] . ->opt . -Void)]
 [pretty-write (Univ [-Output-Port] . ->opt . -Void)]
 [pretty-display (Univ [-Output-Port] . ->opt . -Void)]
-[pretty-format (Univ [-Nat] . ->opt . -String)]
+[pretty-format (Univ [-Nat] #:mode -Symbol #f . ->optkey . -String)]
 [pretty-print-handler (-> Univ -Void)]
 
 [pretty-print-columns (-Param (Un -Nat (-val 'infinity)) (Un -Nat (-val 'infinity)))]
@@ -2557,7 +2598,10 @@
 ;; Section 15.2.4
 
 ;; Section 15.2.5 (racket/file)
-[copy-directory/files (->key -Pathlike -Pathlike  #:keep-modify-seconds? Univ #f -Void)]
+[copy-directory/files (->key -Pathlike -Pathlike
+                             #:keep-modify-seconds? Univ #f
+                             #:preserve-links? Univ #f
+                             -Void)]
 [delete-directory/files (->key -Pathlike #:must-exist? Univ #f -Void)]
 
 [find-files (->optkey (-> -Path Univ) [(-opt -Pathlike)] #:follow-links? Univ #f (-lst -Path))]
@@ -2842,6 +2886,21 @@
 [log-receiver? (make-pred-ty -Log-Receiver)]
 [make-log-receiver (-> -Logger -Log-Level -Log-Receiver)]
 
+;; Section 15.5.4 (Additional Logging Functions, racket/logging)
+[log-level/c (make-pred-ty (one-of/c 'none 'fatal 'error 'warning 'info 'debug))]
+[with-intercepted-logging
+ (-polydots (a)
+   (->* (list (-> (make-HeterogeneousVector (list -Symbol -String Univ (-opt -Symbol))) Univ)
+              (-> (make-ValuesDots null a 'a)))
+        (-opt (one-of/c 'none 'fatal 'error 'warning 'info 'debug))
+        (make-ValuesDots null a 'a)))]
+[with-logging-to-port
+ (-polydots (a)
+   (->* (list -Output-Port (-> (make-ValuesDots null a 'a))
+              (one-of/c 'none 'fatal 'error 'warning 'info 'debug))
+        (-opt -Symbol)
+        (make-ValuesDots null a 'a)))]
+
 ;; Section 15.6 (Time)
 [seconds->date (cl->* (-Integer . -> . -Date)
                       (-Integer Univ . -> . -Date))]
@@ -2859,6 +2918,7 @@
 ;; Section 15.8
 [system-type
  (cl->*
+  (-> (Un (-val 'unix) (-val 'windows) (-val 'macosx)))
   (-> (-val 'os) (Un (-val 'unix) (-val 'windows) (-val 'macosx)))
   (-> (-val 'gc) (Un (-val 'cgc) (-val '3m)))
   (-> (-val 'link) (Un (-val 'static) (-val 'shared) (-val 'dll) (-val 'framework)))
@@ -3112,6 +3172,12 @@
   (cl->*
    (->key (-lst a) (-> a a -Boolean) #:key (-> a a) #f #:cache-keys? -Boolean #f (-lst a))
    (->key (-lst a) (-> b b -Boolean) #:key (-> a b) #f #:cache-keys? -Boolean #f (-lst a)))))
+(check-duplicates
+ (-poly
+  (a b)
+  (cl->*
+   (->optkey (-lst a) ((-> a a Univ)) #:key (-> a a) #f (-opt a))
+   (->optkey (-lst a) ((-> b b Univ)) #:key (-> a b) #f (-opt a)))))
 (remove-duplicates
  (-poly
   (a b)

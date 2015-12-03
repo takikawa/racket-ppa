@@ -70,12 +70,20 @@
       (begin
         (define/public (method arg ...)
           (send mgr call (lambda ()
-                           (begin0
-                               (send connection method arg ...)
-                             (set! last-connected? (send connection connected?))))))
+                           (dynamic-wind
+                             void
+                             (lambda () (send connection method arg ...))
+                             (lambda () (set! last-connected? (send connection connected?)))))))
         ...))
 
-    (define/public (connected?) last-connected?)
+    (define/public (connected?)
+      ;; If mgr is busy, then just return last-connected?, otherwise, do check.
+      (sync/timeout
+       (lambda () last-connected?)
+       (send mgr call-evt
+             (lambda ()
+               (set! last-connected? (send connection connected?))
+               last-connected?))))
 
     (define-forward
       (disconnect)

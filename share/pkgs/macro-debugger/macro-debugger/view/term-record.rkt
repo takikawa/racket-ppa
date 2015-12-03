@@ -2,8 +2,8 @@
 (require racket/class
          racket/match
          syntax/stx
-         unstable/find
-         unstable/class-iop
+         racket/class/iop
+         "find.rkt"
          "interfaces.rkt"
          "step-display.rkt"
          macro-debugger/model/deriv

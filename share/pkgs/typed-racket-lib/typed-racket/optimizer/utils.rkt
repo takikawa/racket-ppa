@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require racket/match unstable/sequence
+(require racket/match racket/sequence
          racket/dict syntax/id-table racket/syntax syntax/stx
          syntax/parse
          syntax/parse/experimental/specialize
@@ -51,11 +51,12 @@
 
 ;; unlike their safe counterparts, unsafe binary operators can only take 2 arguments
 ;; this works on operations that are (A A -> A)
-(define (n-ary->binary op stx)
+(define (n-ary->binary src-stx op stx)
   (for/fold ([o (stx-car stx)]) ([e (in-syntax (stx-cdr stx))])
-    #`(#,op #,o #,e)))
+    (quasisyntax/loc src-stx
+      (#,op #,o #,e))))
 ;; this works on operations that are (A A -> B)
-(define (n-ary-comp->binary op arg1 arg2 rest)
+(define (n-ary-comp->binary src-stx op arg1 arg2 rest)
   ;; First, generate temps to bind the result of each arg2 args ...
   ;; to avoid computing them multiple times.
   (define lifted (stx-map (lambda (x) (generate-temporary)) #`(#,arg2 #,@rest)))
@@ -69,10 +70,11 @@
                         (car l)
                         (cdr l))])))
   ;; Finally, build the whole thing.
-  #`(let #,(for/list ([lhs (in-list lifted)]
+  (quasisyntax/loc src-stx
+    (let #,(for/list ([lhs (in-list lifted)]
                       [rhs (in-syntax #`(#,arg2 #,@rest))])
              #`(#,lhs #,rhs))
-      (and #,@tests)))
+      (and #,@tests))))
 
 ;; to avoid mutually recursive syntax classes
 ;; will be set to the actual optimization function at the entry point
@@ -143,13 +145,11 @@
   [pattern (#%plain-lambda formals sub-exprs:expr ...)]
   [pattern ((~or if with-continuation-mark) e1:expr e2:expr e3:expr)
     #:with (sub-exprs ...) #'(e1 e2 e3)]
-  [pattern (~or (#%top . _) (#%variable-reference . _) (quote _) (quote-syntax _) :id)
+  [pattern (~or (#%top . _) (#%variable-reference . _) (quote _) (quote-syntax . _) :id)
     #:with (sub-exprs ...) #'()]
   [pattern (case-lambda [formals e*:expr ...] ...)
     #:with (sub-exprs ...) #'(e* ... ...)]
   [pattern ((~or let-values letrec-values) ([ids e-rhs:expr] ...) e-body:expr ...)
-    #:with (sub-exprs ...) #'(e-rhs ... e-body ...)]
-  [pattern (letrec-syntaxes+values stx-bindings ([(ids ...) e-rhs:expr] ...) e-body:expr ...)
     #:with (sub-exprs ...) #'(e-rhs ... e-body ...)]
   [pattern (#%expression e:expr)
     #:with (sub-exprs ...) #'(e)]

@@ -66,7 +66,8 @@
                    [else
                     (let ([pixbuf (bitmap->pixbuf (if (pair? label) 
                                                       (car label)
-                                                      label))])
+                                                      label)
+						  (->screen 1.0))])
                       (atomically
                        (let ([gtk (if (pair? label)
                                       (as-gtk-allocation (gtk_new_with_mnemonic (cadr label)))
@@ -96,8 +97,7 @@
   (define both-labels? (pair? label))
   
   (when (eq? event-type 'button)
-    (set-gtk-object-flags! gtk (bitwise-ior (get-gtk-object-flags gtk)
-                                            GTK_CAN_DEFAULT)))
+    (gtk_widget_set_can_default gtk #t))
 
   (set-auto-size)
   
@@ -125,7 +125,7 @@
       (gtk_button_set_label gtk (mnemonic-string s))
       (when the-font (install-control-font (get-label-gtk) the-font))]
      [else
-      (let ([pixbuf (bitmap->pixbuf s)])
+      (let ([pixbuf (bitmap->pixbuf s (->screen 1.0))])
         (atomically
          (let ([image-gtk (gtk_image_new_from_pixbuf pixbuf)])
            (release-pixbuf pixbuf)

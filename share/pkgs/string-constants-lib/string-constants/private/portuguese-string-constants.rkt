@@ -219,11 +219,11 @@ please adhere to these guidelines:
  (cannot-open-because-dne "Impossível abrir ~a porque não existe.")
  
   (needs-execute-language-changed
-   "ATENÇÃO: A língua mudou. Clique Correr.")
+   "ATENÇÃO: A língua mudou. Clique Executar.")
   (needs-execute-teachpack-changed
-   "ATENÇÃO: Os pacotes de ensino mudaram. Clique Correr.")
+   "ATENÇÃO: Os pacotes de ensino mudaram. Clique Executar.")
   (needs-execute-defns-edited
-   "ATENÇÃO: A janela de definições mudou. Clique Correr.")
+   "ATENÇÃO: A janela de definições mudou. Clique Executar.")
   
  (file-is-not-saved "O ficheiro \"~a\" não está gravado.")
  (save "Gravar")
@@ -407,7 +407,7 @@ please adhere to these guidelines:
  (paren-match-color "Cor de iluminação dos parêntesis"); in prefs dialog
  (online-coloring-active "Coloração de sintaxe interactiva")
  (open-files-in-tabs "Abrir ficheiros em tabs separados (não em janelas separadas)")
- (show-interactions-on-execute "Abrir janela de interacções automaticamente quando correr um programa")
+ (show-interactions-on-execute "Abrir janela de interacções automaticamente quando executar um programa")
  (limit-interactions-size "Limitar tamanho das interacções")
  (background-color "Cor de fundo")
  (default-text-color "Texto por defeito") ;; used for configuring colors, but doesn't need the word "color"
@@ -443,7 +443,7 @@ please adhere to these guidelines:
  ; warning message when lockfile is around
  (waiting-for-pref-lock "À espera do ficheiro de tranca das preferências...")
  (pref-lock-not-gone
-  "O ficheiro de tranca:\n\n   ~a\n\nprevine que as preferências de serem guardadas. Certifique-se que nenhum software Racket está a correr e apague este ficheiro.")
+  "O ficheiro de tranca:\n\n   ~a\n\nprevine que as preferências de serem guardadas. Certifique-se que nenhum software Racket está a executar e apague este ficheiro.")
  (still-locked-exit-anyway? "As preferências não foram guardadas com sucesso. Pretende continuar?")
  
  ;;; indenting preferences panel
@@ -769,7 +769,7 @@ please adhere to these guidelines:
  
  ;;; scheme-menu
  (scheme-menu-name "Ra&cket")
- (execute-menu-item-label "Correr")
+ (execute-menu-item-label "Executar")
  (execute-menu-item-help-string "Reiniciar o programa na janela de definições")
  (break-menu-item-label "Parar")
  (break-menu-item-help-string "Break the current evaluation")
@@ -818,7 +818,7 @@ please adhere to these guidelines:
   "Create Servlet does not work with the ~a language.")
   
  ;;; buttons
- (execute-button-label "Correr") 
+ (execute-button-label "Executar") 
  (save-button-label "Gravar")
  (break-button-label "Parar")
  

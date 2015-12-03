@@ -168,10 +168,12 @@ combination with @racket[author].}
  Creates a @tech{nested flow} containing the @tech{decode}d
  @racket[pre-flow] (i.e., parsed with @racket[decode-flow]).
  
- The @racket[style] argument is handled the same as @racket[para].
- The @racket['inset] and @racket['code-inset] styles cause the nested
- flow to be inset compared to surrounding text, with the latter
- particularly intended for insetting code.}
+ The @racket[style] argument is handled the same as @racket[para]. The
+ @racket['inset] and @racket['code-inset] styles cause the nested flow
+ to be inset compared to surrounding text, with the latter
+ particularly intended for insetting code. The default style is
+ specified by the output destination (and tends to inset text for HTML
+ output and not inset for Latex output).}
 
 
 @defproc[(centered [pre-flow pre-flow?] ...) nested-flow?]{
@@ -263,7 +265,9 @@ If @racket[sep] is not @racket[#f], it is inserted as a new column
 between every column in the table; note that any
 @racket[table-columns] or @racket[table-cells] property in
 @racket[style] must take the added columns into account. Otherwise,
-the default style places no space between table columns.
+the default style places no space between table columns. When @racket[sep]
+would be placed before a @racket['cont], a @racket['cont] is inserted,
+instead.
 
 The @racket[column-properties], @racket[row-properties], and
 @racket[cell-properties] arguments specify @tech{style properties} for
@@ -322,7 +326,9 @@ properties will be used from the merger into @racket[table-cells].}
 
 @history[#:changed "1.1" @elem{Added the @racket[#:column-properties],
                                @racket[#:row-properties],
-                               and @racket[#:cell-properties] arguments.}]
+                               and @racket[#:cell-properties] arguments.}
+         #:changed "1.12" @elem{Changed @racket[sep] insertion before a
+                                @racket['cont].}]
 
 Examples:
 @codeblock[#:keep-lang-line? #f]|{

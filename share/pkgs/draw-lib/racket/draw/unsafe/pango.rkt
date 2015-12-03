@@ -121,13 +121,14 @@
 (provide (struct-out PangoGlyphItem))
 
 ;; As of Pango 1.28, Pango is not thread-safe at the C level, which
-;; means that it isn't place-safe in Racket. Also, for some reason,
-;; when parts of Pango are initialized in a non-main place under
-;; Windows, then font operations start to fail when that place exits.
-;; Run all Pango calls in the original place, which synchronizes them
-;; and avoids Windows problems.
+;; means that it isn't place-safe in Racket. Use the same lock as
+;; for Cairo, since Pango calls Cairo.
+;; [At some point, it seemes that when parts of Pango are initialized
+;; in a non-main place under Windows, then font operations start to
+;; fail when that place exits. If that still seems to be a problem,
+;; then we'll need to add `#:in-original-place? #t` for Windows.]
 (define-syntax-rule (_pfun spec ...)
-  (_fun #:in-original-place? #t spec ...))
+  (_fun #:lock-name "cairo-pango-lock" spec ...))
 
 (provide g_object_unref g_free)
 (define-gobj g_object_unref (_pfun _pointer -> _void)
@@ -150,6 +151,13 @@
 (define-pangocairo pango_cairo_font_map_get_default (_pfun -> PangoFontMap)) ;; not an allocator
 (define-pangocairo pango_cairo_font_map_new (_pfun -> PangoFontMap)
   #:wrap (allocator g_object_unref))
+(define-pangocairo pango_cairo_font_map_get_resolution (_pfun PangoFontMap -> _double)
+  #:fail (lambda () (lambda (fm) 96.0)))
+
+;; A hook added by our patch (for Mac OS X only):
+(define-pangocairo pango_core_text_add_family_for_font_descriptors
+  (_pfun PangoFontMap _string _int (_vector i _pointer) -> _void)
+  #:fail (lambda () (lambda (fm nm n decs) (void))))
 
 (define-pango pango_context_new (_pfun -> PangoContext)
   #:wrap (allocator g_object_unref))

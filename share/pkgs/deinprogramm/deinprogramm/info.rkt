@@ -12,6 +12,7 @@
   '("define-record-procedures.scm"
     "convert-explicit.scm"
     "line3d.scm"))
+(define test-omit-paths compile-omit-paths)
 
 (define get-textbook-pls
   '("textbook-pls-spec.rkt" textbook-pls))

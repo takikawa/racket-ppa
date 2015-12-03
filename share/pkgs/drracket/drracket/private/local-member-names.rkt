@@ -15,6 +15,10 @@
   set-i
   insert-auto-text)
 
+;; profiling information wiring
+(define/provide-local-member-name
+  add-profile-info)
+
 ;; in rep, for error display handler
 (define/provide-local-member-name
   no-user-evaluation-dialog)
@@ -22,6 +26,7 @@
 ;; from module-language-tools.rkt
 (define/provide-local-member-name
   when-initialized
+  initialize-module-language
   ;move-to-new-language
   get-in-module-language?)
 

@@ -205,7 +205,7 @@
 (check-error (build3-image "hello" true sqrt sqrt sqrt)
              "build3-image: Expected a natural number as first argument, but received \"hello\"")
 (check-error (build3-image 17 true sqrt sqrt sqrt)
-             "build3-image: Expected a natural number as second argument, but received true")
+             "build3-image: Expected a natural number as second argument, but received #true")
 (check-error (build3-image 17 24 sqrt sqrt sqrt)
              "build3-image: Expected a function with contract num(x) num(y) -> [0-255] as third argument")
 (check-error (build3-image 17 24 x-gradient-2 sqrt sqrt)

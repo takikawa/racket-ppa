@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require syntax/parse unstable/sequence racket/dict racket/flonum racket/promise
+(require syntax/parse racket/sequence racket/dict racket/flonum racket/promise
          syntax/parse/experimental/specialize
          (for-template racket/base racket/flonum racket/unsafe/ops racket/math)
          "../utils/utils.rkt"
@@ -192,16 +192,16 @@
                          this-syntax extra-precision-subexprs)))
                     safe-to-opt?)
            #:do [(log-fl-opt "binary float")]
-           #:with opt (n-ary->binary #'op.unsafe #'(fs.opt ...)))
+           #:with opt (n-ary->binary this-syntax #'op.unsafe #'(fs.opt ...)))
   (pattern (#%plain-app op:binary-float-comp f1:float-expr f2:float-expr)
     #:do [(log-fl-opt "binary float comp")]
-    #:with opt #'(op.unsafe f1.opt f2.opt))
+    #:with opt (syntax/loc this-syntax (op.unsafe f1.opt f2.opt)))
   (pattern (#%plain-app op:binary-float-comp
                         f1:float-expr
                         f2:float-expr
                         fs:float-expr ...)
     #:do [(log-fl-opt "multi float comp")]
-    #:with opt (n-ary-comp->binary #'op.unsafe #'f1.opt #'f2.opt #'(fs.opt ...)))
+    #:with opt (n-ary-comp->binary this-syntax #'op.unsafe #'f1.opt #'f2.opt #'(fs.opt ...)))
   (pattern (#%plain-app op:binary-float-comp args:opt-expr ...)
     ;; some args, but not all (otherwise above would have matched) are floats
     ;; mixed-type comparisons are slow and block futures
@@ -227,13 +227,13 @@
 
   (pattern (#%plain-app op:-^ f:float-expr)
     #:do [(log-fl-opt "unary float")]
-    #:with opt #'(unsafe-fl* -1.0 f.opt))
+    #:with opt (syntax/loc this-syntax (unsafe-fl* -1.0 f.opt)))
   (pattern (#%plain-app op:/^ f:float-expr)
     #:do [(log-fl-opt "unary float")]
-    #:with opt #'(unsafe-fl/ 1.0 f.opt))
+    #:with opt (syntax/loc this-syntax (unsafe-fl/ 1.0 f.opt)))
   (pattern (#%plain-app op:sqr^ f:float-expr)
     #:do [(log-fl-opt "unary float")]
-    #:with opt #'(let ([tmp f.opt]) (unsafe-fl* tmp tmp)))
+    #:with opt (syntax/loc this-syntax (let ([tmp f.opt]) (unsafe-fl* tmp tmp))))
 
   ;; we can optimize exact->inexact if we know we're giving it an Integer
   (pattern (#%plain-app op:->float^ n:int-expr)
@@ -250,19 +250,19 @@
 
   (pattern (#%plain-app op:zero?^ f:float-expr)
     #:do [(log-fl-opt "float zero?")]
-    #:with opt #'(unsafe-fl= f.opt 0.0))
+    #:with opt (syntax/loc this-syntax (unsafe-fl= f.opt 0.0)))
 
   (pattern (#%plain-app op:add1^ n:float-expr)
     #:do [(log-fl-opt "float add1")]
-    #:with opt #'(unsafe-fl+ n.opt 1.0))
+    #:with opt (syntax/loc this-syntax (unsafe-fl+ n.opt 1.0)))
   (pattern (#%plain-app op:sub1^ n:float-expr)
     #:do [(log-fl-opt "float sub1")]
-    #:with opt #'(unsafe-fl- n.opt 1.0))
+    #:with opt (syntax/loc this-syntax (unsafe-fl- n.opt 1.0)))
 
   (pattern (#%plain-app op:random-op prng:opt-expr)
     #:when (subtypeof? #'prng -Pseudo-Random-Generator)
     #:do [(log-fl-opt "float random")]
-    #:with opt #'(unsafe-flrandom prng.opt))
+    #:with opt (syntax/loc this-syntax (unsafe-flrandom prng.opt)))
   (pattern (#%plain-app op:random^) ; random with no args
     #:do [(log-fl-opt "float 0-arg random")
           ;; We introduce a reference to `current-pseudo-random-generator',
@@ -270,7 +270,7 @@
           ;; from triggering down the line (see hidden-cost.rkt), so we need
           ;; to do the logging ourselves.
           (log-optimization-info "hidden parameter (random)" #'op)]
-    #:with opt #'(unsafe-flrandom (current-pseudo-random-generator)))
+    #:with opt (syntax/loc this-syntax (unsafe-flrandom (current-pseudo-random-generator))))
 
   ;; warn about (potentially) exact real arithmetic, in general
   ;; Note: These patterns don't perform optimization. They only produce logging
@@ -278,15 +278,15 @@
   (pattern (#%plain-app op:binary-float-op n:opt-expr ...)
     #:when (maybe-exact-rational? this-syntax)
     #:do [(log-opt-info "possible exact real arith")]
-    #:with opt #'(op n.opt ...))
+    #:with opt (syntax/loc this-syntax (op n.opt ...)))
   (pattern (#%plain-app op:binary-float-comp n:opt-expr ...)
      ;; can't look at return type, since it's always bool
      #:when (andmap maybe-exact-rational? (syntax->list #'(n ...)))
      #:do [(log-opt-info "possible exact real arith")]
-     #:with opt #'(op n.opt ...))
+     #:with opt (syntax/loc this-syntax (op n.opt ...)))
   (pattern (#%plain-app op:unary-float-op n:opt-expr ...)
      #:when (maybe-exact-rational? this-syntax)
      #:do [(log-opt-info "possible exact real arith")]
-     #:with opt #'(op n.opt ...))
+     #:with opt (syntax/loc this-syntax (op n.opt ...)))
   )
 

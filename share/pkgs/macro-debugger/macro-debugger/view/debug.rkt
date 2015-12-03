@@ -1,7 +1,7 @@
 #lang racket/base
 (require racket/pretty
          racket/class
-         unstable/class-iop
+         racket/class/iop
          "interfaces.rkt"
          macro-debugger/view/debug-format
          "view.rkt")

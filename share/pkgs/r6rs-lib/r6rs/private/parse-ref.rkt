@@ -168,4 +168,4 @@
       orig
       im)]
     [_ (let ([m (parse-import-set orig im stx-err)])
-         (list m `(for-label ,m)))]))
+         (list m #`(for-label #,m)))]))

@@ -5,7 +5,8 @@
          lang/private/rewrite-error-message
          mrlib/image-core
          racket/snip
-         racket/class)
+         racket/class
+         "print-width.rkt")
 
 (provide configure)
 
@@ -60,22 +61,17 @@
                             (string-length img-str)
                             (oh val display? port))))])
       (thunk)))
-  (current-print
-   (lambda (v)
-     (unless (void? v)
-       (define converted (print-convert v))
-       (set-handlers
-        (λ () (pretty-write converted))))))
   (error-display-handler
-    (let ([o-d-h (error-display-handler)])
-      (lambda (msg exn)
-	(define x (get-rewriten-error-message exn))
-	(o-d-h x exn))))
+   (let ([o-d-h (error-display-handler)])
+     (λ (msg exn)
+       (define x (get-rewriten-error-message exn))
+       (o-d-h x exn))))
   (let ([orig (global-port-print-handler)])
     (global-port-print-handler
      (lambda (val port [depth 0])
        (parameterize ([global-port-print-handler orig])
          (let ([val (print-convert val)])
-           (parameterize ([pretty-print-columns 'infinity])
-             (set-handlers
-              (λ () (pretty-write val port))))))))))
+           (set-handlers
+            (λ ()
+              (parameterize ([pretty-print-columns (htdp-print-columns)])
+                (pretty-write val port))))))))))

@@ -32,11 +32,7 @@
 ;; ===================================================================================================
 ;; X11/GLX FFI
 
-(define x-lib (ffi-lib/complaint-on-failure "libX11" '("")))
 (define gl-lib (ffi-lib/complaint-on-failure "libGL" '("1" "")))
-
-(define-ffi-definer define-x x-lib
-  #:default-make-fail make-not-available)
 
 (define-ffi-definer define-glx gl-lib
   #:default-make-fail make-not-available)
@@ -81,14 +77,13 @@
 (define GLX_CONTEXT_CORE_PROFILE_BIT_ARB          #x1)
 (define GLX_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB #x2)
 
-(define-x XFree (_fun _pointer -> _int)
+(define-x11 XFree (_fun _pointer -> _int)
   #:wrap (deallocator))
 
-(define-x XSetErrorHandler
-  (_fun (_fun _Display _XErrorEvent -> _int)
-        -> (_fun _Display _XErrorEvent -> _int)))
+(define-x11 XSetErrorHandler
+  (_fun _fpointer -> _fpointer))
 
-(define-x XSync
+(define-x11 XSync
   (_fun _Display _int -> _void))
 
 (define-glx glXQueryVersion
@@ -148,7 +143,6 @@
 
 (define-gtk gtk_widget_get_display (_fun _GtkWidget -> _GdkDisplay))
 (define-gtk gtk_widget_get_screen (_fun _GtkWidget -> _GdkScreen))
-(define-gtk gtk_widget_get_window (_fun _GtkWidget -> _GtkWindow))
 
 ;; ===================================================================================================
 ;; GLX versions and extensions queries
@@ -247,12 +241,15 @@
   ;; Sync right now, or the sync further on could crash Racket with an [xcb] error about events
   ;; happening out of sequence
   (XSync xdisplay False)
-  
+
   (define old-handler #f)
   (define gl
     (dynamic-wind
      (λ ()
-       (set! old-handler (XSetErrorHandler flag-x-error-handler)))
+       (set! old-handler
+	     (XSetErrorHandler (cast flag-x-error-handler
+				     (_fun #:atomic? #t _Display _XErrorEvent -> _int)
+				     _fpointer))))
      (λ ()
        (set! create-context-error? #f)
        (glXCreateNewContext xdisplay cfg GLX_RGBA_TYPE share-gl #t))
@@ -260,11 +257,12 @@
        ;; Sync to ensure errors are processed
        (XSync xdisplay False)
        (XSetErrorHandler old-handler))))
-  
+
   (cond
     [(and gl create-context-error?)
-     (log-error "gl-context: glXCreateNewContext raised an error but (contrary to standards) \
-returned a non-NULL context; ignoring possibly corrupt context")
+     (log-error (string-append
+		 "gl-context: glXCreateNewContext raised an error but (contrary to standards)"
+		 " returned a non-NULL context; ignoring possibly corrupt context"))
      #f]
     [else
      (unless gl
@@ -303,8 +301,10 @@ returned a non-NULL context; ignoring possibly corrupt context")
   
   (cond
     [(and gl create-context-error?)
-     (log-error "gl-context: glXCreateContextAttribsARB raised an error for version ~a.~a but \
-(contrary to standards) returned a non-NULL context; ignoring possibly corrupt context"
+     (log-error (string-append
+		 "gl-context: glXCreateContextAttribsARB raised an error for version ~a.~a but"
+		 " (contrary to standards) returned a non-NULL context;"
+		 " ignoring possibly corrupt context")
                 gl-major gl-minor)
      #f]
     [else
@@ -428,12 +428,14 @@ returned a non-NULL context; ignoring possibly corrupt context")
         (define pixmap
           (if widget #f (glXCreateGLXPixmap xdisplay
                                             (glXGetVisualFromFBConfig xdisplay cfg)
-                                            (gdk_x11_drawable_get_xid drawable))))
+					    (if gtk3?
+						(cast drawable _Pixmap _ulong)
+						(gdk_x11_drawable_get_xid drawable)))))
         
         (define ctxt (new gl-context% [gl gl] [display display] [drawable drawable] [pixmap pixmap]))
         ;; Refcount these so they don't go away until the finalizer below destroys the GLXContext
         (g_object_ref display)
-        (g_object_ref drawable)
+        (unless (and gtk3? (not widget)) (g_object_ref drawable))
         (register-finalizer
          ctxt
          (λ (ctxt)
@@ -444,14 +446,14 @@ returned a non-NULL context; ignoring possibly corrupt context")
            (define xdisplay (gdk_x11_display_get_xdisplay display))
            (when pixmap (glXDestroyGLXPixmap xdisplay pixmap))
            (glXDestroyContext xdisplay gl)
-           (g_object_unref drawable)
+           (unless (and gtk3? (not widget)) (g_object_unref drawable))
            (g_object_unref display)))
         ctxt]
        [else  #f])]))
 
 (define (make-gtk-widget-gl-context widget conf)
   (atomically
-   (make-gtk-drawable-gl-context widget (gtk_widget_get_window widget) conf #t)))
+   (make-gtk-drawable-gl-context widget (widget-window widget) conf #t)))
 
 (define (make-gtk-pixmap-gl-context pixmap conf)
   (atomically

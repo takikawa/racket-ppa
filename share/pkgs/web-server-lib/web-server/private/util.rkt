@@ -1,18 +1,13 @@
 #lang racket/base
 (require racket/contract/base
+         racket/exn
          racket/list
-         unstable/list
-         unstable/contract
          racket/serialize
+         racket/tcp
          net/url-structs)
-(require unstable/bytes
-         unstable/contract
-         unstable/list)
-(provide
- (all-from-out
-  unstable/bytes
-  unstable/contract
-  unstable/list))
+(provide list-prefix?
+         port-number?
+         listen-port-number?)
 
 ;; --
 
@@ -29,19 +24,19 @@
 
 ;; --
 
+(define path-piece?
+  (or/c path-string? (symbols 'up 'same)))
+
+(provide/contract
+ [path-piece? predicate/c])
+
+;; --
+
 ;; network-error: symbol string . values -> void
 ;; throws a formatted exn:fail:network
 (define (network-error src fmt . args)
   (raise (make-exn:fail:network (format "~a: ~a" src (apply format fmt args))
                                 (current-continuation-marks))))
-
-;; exn->string : (or/c exn any) -> string
-(define (exn->string exn)
-  (if (exn? exn)
-      (parameterize ([current-error-port (open-output-string)])
-        ((error-display-handler) (exn-message exn) exn)
-        (get-output-string (current-error-port)))
-      (format "~s\n" exn)))
 
 (provide/contract
  [network-error (->* [symbol? string?] [] #:rest list? void?)]
@@ -98,6 +93,30 @@
  [path-without-base (path-string? path-string? . -> . (listof path-piece?))]
  [directory-part (path-string? . -> . path?)]
  [build-path-unless-absolute (path-string? path-string? . -> . path?)])
+
+;; --
+
+(define (read/bytes bs)
+  (read (open-input-bytes bs)))
+;; Eli: This is a really bad name for something that is often called
+;;   `read-from-string', or `read-from-bytes' in this case.  I first read it as
+;;   "read with bytes".  Regardless, I see little point in composing two
+;;   functions where the two names are clear enough -- you might consider
+;;   looking at the version in CL.
+;; Ryan: I agree. More useful would be a version that checked that the
+;; bytes contains only one S-expr and errors otherwise.
+
+(define (write/bytes v)
+  (define by (open-output-bytes))
+  (write v by)
+  (get-output-bytes by))
+;; Eli: Same bad name as above.  Also, is there any point in this given
+;;   (format "~s" v), and the fact that using the resulting string for printout
+;;   will get the same result.
+
+(provide/contract
+ [read/bytes (bytes? . -> . printable/c)]
+ [write/bytes (printable/c . -> . bytes?)])
 
 ;; --
 

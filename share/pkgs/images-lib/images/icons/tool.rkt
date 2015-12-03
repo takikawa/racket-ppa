@@ -1,10 +1,12 @@
 #lang racket/base
 
 (require racket/draw racket/class racket/math racket/sequence
-         racket/contract unstable/latent-contract unstable/latent-contract/defthing
+         racket/contract
          "../private/flomap.rkt"
          "../private/deep-flomap.rkt"
          "../private/utils.rkt"
+         "../private/latent-contract.rkt"
+         "../private/latent-contract/defthing.rkt"
          "control.rkt"
          "symbol.rkt"
          "misc.rkt"

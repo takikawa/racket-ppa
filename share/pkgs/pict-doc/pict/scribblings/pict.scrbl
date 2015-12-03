@@ -312,48 +312,95 @@ override settings supplied by the context.
   (frame (circle 30) #:color "chartreuse" #:line-width 3)
 ]}
 
-@defproc*[([(ellipse [w real?] [h real?]) pict?]
-           [(circle [diameter real?]) pict?]
-           [(filled-ellipse [w real?] [h real?] [#:draw-border? draw-border? any/c #t]) pict?]
+@defproc*[([(ellipse [w real?] [h real?]
+                     [#:border-color border-color (or/c #f string? (is-a?/c color<%>)) #f]
+                     [#:border-width border-width (or/c #f real?) #f])
+                     pict?]
+           [(circle [diameter real?]
+                    [#:border-color border-color (or/c #f string? (is-a?/c color<%>)) #f]
+                    [#:border-width border-width (or/c #f real?) #f])
+                    pict?]
+           [(filled-ellipse [w real?] [h real?] [#:draw-border? draw-border? any/c #t]
+                            [#:color color (or/c #f string? (is-a?/c color<%>)) #f]
+                            [#:border-color border-color (or/c #f string? (is-a?/c color<%>)) #f]
+                            [#:border-width border-width (or/c #f real?) #f])
+                            pict?]
            [(disk [diameter (and/c rational? (not/c negative?))]
-                  [#:draw-border? draw-border? any/c #t]) pict?])]{
+                  [#:draw-border? draw-border? any/c #t]
+                  [#:color color (or/c #f string? (is-a?/c color<%>)) #f]
+                  [#:border-color border-color (or/c #f string? (is-a?/c color<%>)) #f]
+                  [#:border-width border-width (or/c #f real?) #f])
+                  pict?])]{
 
 Unfilled and filled ellipses.
 
 If @racket[draw-border?] is @racket[#f], then the pen is set to be transparent
 before drawing the ellipse.
+The @racket[color], @racket[border-color] and @racket[border-width] arguments
+control the fill color, color of the border, and width of the border,
+respectively.
+If these arguments are @racket[#f], values set using @racket[linewidth] and
+@racket[colorize] are used instead.
+Passing non-@racket[#f] values as @racket[border-color] or @racket[border-width]
+when @racket[draw-border?] is @racket[#f] results in a contract violation.
 
 @examples[#:eval ss-eval
   (ellipse 40 30)
   (circle 30)
   (filled-ellipse 30 40)
   (disk 30)
-]}
+  (disk 40 #:color "Chartreuse" #:border-color "Medium Aquamarine" #:border-width 5)
+]
 
-@defproc*[([(rectangle [w real?] [h real?]) pict?]
+@history[#:changed "1.4" @elem{Added @racket[#:color], @racket[#:border-color] and @racket[#:border-width] arguments.}]{}
+}
+
+@defproc*[([(rectangle [w real?] [h real?]
+                       [#:border-color border-color (or/c #f string? (is-a?/c color<%>)) #f]
+                       [#:border-width border-width (or/c #f real?)])
+                       pict?]
            [(filled-rectangle [w real?]
                               [h real?]
-                              [#:draw-border? draw-border? any/c #t])
+                              [#:draw-border? draw-border? any/c #t]
+                              [#:color color (or/c #f string? (is-a?/c color<%>)) #f]
+                              [#:border-color border-color (or/c #f string? (is-a?/c color<%>)) #f]
+                              [#:border-width border-width (or/c #f real?)])
             pict?])]{
 
 Unfilled and filled rectangles.
 
 If @racket[draw-border?] is @racket[#f], then the pen is set to be transparent
 before drawing the rectangle.
+The @racket[color], @racket[border-color] and @racket[border-width] arguments
+control the fill color, color of the border, and width of the border,
+respectively.
+If these arguments are @racket[#f], values set using @racket[linewidth] and
+@racket[colorize] are used instead.
+Passing non-@racket[#f] values as @racket[border-color] or @racket[border-width]
+when @racket[draw-border?] is @racket[#f] results in a contract violation.
 
 @examples[#:eval ss-eval
   (rectangle 50 50)
   (filled-rectangle 50 80)
-]}
+  (filled-rectangle 60 70 #:color "Thistle" #:border-color "Gainsboro" #:border-width 10)
+]
+
+@history[#:changed "1.4" @elem{Added @racket[#:color], @racket[#:border-color] and @racket[#:border-width] arguments.}]{}
+}
 
 @defproc*[([(rounded-rectangle [w real?] [h real?] 
                                [corner-radius real? -0.25]
-                               [#:angle angle real? 0])
+                               [#:angle angle real? 0]
+                               [#:border-color border-color (or/c #f string? (is-a?/c color<%>)) #f]
+                               [#:border-width border-width (or/c #f real?)])
             pict?]
            [(filled-rounded-rectangle [w real?] [h real?]
                                       [corner-radius real? -0.25]
                                       [#:angle angle real? 0] 
-                                      [#:draw-border? draw-border? any/c #t])
+                                      [#:draw-border? draw-border? any/c #t]
+                                      [#:color color (or/c #f string? (is-a?/c color<%>)) #f]
+                                      [#:border-color border-color (or/c #f string? (is-a?/c color<%>)) #f]
+                                      [#:border-width border-width (or/c #f real?)])
             pict?])]{
 
 Unfilled and filled rectangles with rounded corners.  The
@@ -371,11 +418,22 @@ rotated, in radians.
 
 If @racket[draw-border?] is @racket[#f], then the pen is set to be transparent
 before drawing the rectangle.
+The @racket[color], @racket[border-color] and @racket[border-width] arguments
+control the fill color, color of the border, and width of the border,
+respectively.
+If these arguments are @racket[#f], values set using @racket[linewidth] and
+@racket[colorize] are used instead.
+Passing non-@racket[#f] values as @racket[border-color] or @racket[border-width]
+when @racket[draw-border?] is @racket[#f] results in a contract violation.
 
 @examples[#:eval ss-eval
   (rounded-rectangle 40 40 -0.3 #:angle (/ pi 4))
   (filled-rounded-rectangle 50 40)
-]}
+  (filled-rounded-rectangle 70 30 #:color "Burlywood" #:border-color "Bisque" #:border-width 8)
+]
+
+@history[#:changed "1.4" @elem{Added @racket[#:color], @racket[#:border-color] and @racket[#:border-width] arguments.}]{}
+}
 
 @defproc[(bitmap [img (or/c path-string?
                             (is-a?/c bitmap%)
@@ -434,7 +492,10 @@ argument for consistency with the other functions.}
                                                'xor-dot 'xor-long-dash 'xor-short-dash 
                                                'xor-dot-dash)
                                'solid]
-                      [#:under? under? any/c #f])
+                      [#:under? under? any/c #f]
+                      [#:label label pict? (blank)]
+                      [#:x-adjust-label x-adjust-label real? 0]
+                      [#:y-adjust-label y-adjust-label real? 0])
             pict?]
            [(pin-arrow-line [arrow-size real?] [pict pict?]
                       [src pict-path?]
@@ -454,6 +515,9 @@ argument for consistency with the other functions.}
                                                'xor-dot-dash)
                                'solid]
                       [#:under? under? any/c #f]
+                      [#:label label pict? (blank)]
+                      [#:x-adjust-label x-adjust-label real? 0]
+                      [#:y-adjust-label y-adjust-label real? 0]
                       [#:solid? solid? any/c #t]
 		      [#:hide-arrowhead? hide-arrowhead? any/c #f])
             pict?]
@@ -474,6 +538,9 @@ argument for consistency with the other functions.}
                                                'xor-dot 'xor-long-dash 'xor-short-dash 
                                                'xor-dot-dash)]
                       [#:under? under? any/c #f]
+                      [#:label label pict? (blank)]
+                      [#:x-adjust-label x-adjust-label real? 0]
+                      [#:y-adjust-label y-adjust-label real? 0]
                       [#:solid? solid? any/c #t]
 		      [#:hide-arrowhead? hide-arrowhead? any/c #f])
             pict?])]{
@@ -511,6 +578,9 @@ When the @racket[hide-arrowhead?] argument is a true value, then space
 for an arrowhead is kept around the line, but the arrowhead itself is
 not drawn.
 
+When the @racket[label] argument is non-false, the given pict is used as a
+label for the line, and moved by (@racket[x-adjust-label], @racket[y-adjust-label]).
+
 @defexamples[#:eval ss-eval
   (define pict-a (rectangle 40 40))
   (define pict-b (circle 40))
@@ -523,14 +593,18 @@ not drawn.
                   pict-b lc-find
                   #:line-width 3
                   #:style 'long-dash
-                  #:color "medium goldenrod")
+                  #:color "medium goldenrod"
+                  #:label (text "From Square to Circle"))
   (pin-arrows-line 30 combined
                    pict-a rc-find
                    pict-b lc-find
                    #:start-angle (/ pi 11)
                    #:end-angle (- (/ pi 11))
                    #:solid? #f)
-]}
+]
+
+@history[#:changed "1.4" @elem{Added @racket[#:label], @racket[#:x-adjust-label] and @racket[#:y-adjust-label] arguments.}]{}
+}
 
 
 @defthing[text-style/c contract?]{
@@ -747,17 +821,28 @@ scale while drawing the original @racket[pict].
 
 }
 
-@defproc*[([(scale-to-fit [pict pict?] [size-pict pict?]) pict?]
-           [(scale-to-fit [pict pict?] [width real?] [height real?]) pict?])]{
+@defproc*[([(scale-to-fit [pict pict?] [size-pict pict?]
+                          [#:mode mode (or/c 'preserve 'inset 'distort) 'preserve])
+                          pict?]
+           [(scale-to-fit [pict pict?] [width real?] [height real?]
+                          [#:mode mode (or/c 'preserve 'inset 'distort) 'preserve])
+                          pict?])]{
   Scales @racket[pict] so that it fits within the bounding box of
          @racket[size-pict] (if two arguments are supplied) or
          into a box of size @racket[width] by @racket[height] 
          (if three arguments are supplied).
-         
-         The aspect ratio of the pict is preserved, so the resulting pict
-         will have either the width or the height of the @racket[size-pict]
-         (or @racket[width] by @racket[height] box), but not necessarily
-         both.
+
+         If @racket[mode] is @racket['preserve], the width and height are
+         scaled by the same factor so @racket[pict]'s aspect ratio is
+         preserved; the result's bounding box may be smaller than
+         @racket[width] by @racket[height].
+         If @racket[mode] is @racket['inset], the aspect ratio is preserved as
+         with @racket['preserve], but the resulting pict is centered in a
+         bounding box of exactly @racket[width] by @racket[height].
+         If @racket[mode] is @racket['distort], the width and height are scaled
+         separately.
+
+@history[#:changed "1.4" @elem{Added @racket[#:mode] argument.}]{}
 }
 
 
@@ -840,6 +925,18 @@ Like the @racket[scale] procedure, but also sets
 
 A parameter that determines whether @racket[colorize] uses color or
 black-and-white colors.}
+
+@defproc[(freeze [pict pict?]) pict?]{
+ Creates a bitmap with the same size as @racket[pict], draws
+ @racket[pict] into the bitmap, and then returns a pict that
+ draws with the bitmap.
+
+ This has the effect of speeding up subsequent drawing of
+ the pict and also of cropping it to its bounding box. Any
+ sub-picts of @racket[pict] remain intact within the new
+ pict.
+}
+
 
 @; ------------------------------------------------------------------------
 
@@ -954,6 +1051,18 @@ pict with the same shape and location.}
 @; ----------------------------------------
 
 @include-section["anim.scrbl"]
+
+@; ----------------------------------------
+
+@include-section["color.scrbl"]
+
+@; ----------------------------------------
+
+@include-section["shadow.scrbl"]
+
+@; ----------------------------------------
+
+@include-section["conditional.scrbl"]
 
 @; ----------------------------------------
 

@@ -1012,7 +1012,7 @@ drawing units are used consistently for window sizes, child window
 positions, and canvas drawing. A ``point'' for font sizing is
 equivalent to a drawing unit.
 
-On Windows, screen sizes are described to users in terms of pixels,
+On Windows and Unix, screen sizes are described to users in terms of pixels,
 while a scale can be selected independently by the user to apply to
 text and other items. Typical text scales are 125%, 150%, and
 200%. The @racketmodname[racket/gui] library uses this scale for all
@@ -1024,7 +1024,13 @@ reported size of a window to be different than a size to which a
 window has just been set.  A ``point'' for font sizing is equivalent
 to @racket[(/ 96 72)] drawing units.
 
-On Unix, the @racketmodname[racket/gui] library always uses the
-drawing units of the X11 server, and it uses a backing scale of
-@math{1.0} for screen and canvas-compatible bitmaps.  A ``point'' for
-font sizing is equivalent to @racket[(/ 96 72)] drawing units.
+On Unix, if the @indexed-envvar{PLT_DISPLAY_BACKING_SCALE} environment
+variable is set to a positive real number, then it overrides certain
+system settings for @racketmodname[racket/gui] scaling. With GTK+ 3
+(see @secref["libs"]), the environment variable overrides system-wide
+text scaling; with GTK+ 2, the environment variable overrides both
+text and control scaling. Menus, control labels using the default
+label font, and non-label control parts will not use a scale specified
+through @envvar{PLT_DISPLAY_BACKING_SCALE}, however.
+
+@history[#:changed "1.14" @elem{Added support for scaling on Unix.}]

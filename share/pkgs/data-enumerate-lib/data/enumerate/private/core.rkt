@@ -7,10 +7,24 @@
          racket/promise
          syntax/location
          data/gvector
+         "unfair.rkt"
          (only-in math/number-theory
                   binomial
                   integer-root
+                  integer-root/remainder
                   factorize))
+
+;; this flag controls the pairing and alternation
+;; combinators, switching them from using the
+;; documented bijections to using unfair ones
+(define fair 'fair)
+(define-syntax-rule
+  (fair-choose e1 e2 e3)
+  (case fair
+    [(fair) e1]
+    [(mildly-unfair) e2]
+    [(brutally-unfair) e3]
+    [else (error 'fair-choose "bad value for fair: ~s" fair)]))
 
 (module+ test (require rackunit))
 
@@ -27,13 +41,13 @@ todo:
  - criterion for "less checked": avoid all checks that call from-nat/to-nat
  - coerce valid `fin/e` arguments as singleton enumerations (except #f)
  - provide false/e (from data/enumerate/lib)
- - document unsafe properly 
+ - document unsafe properly
     => export the parameter that disables the fancy contract checks
        from data/enumerate/unsafe
 
 |#
 
-(provide 
+(provide
  enum?
  enum-count
  from-nat
@@ -55,17 +69,19 @@ todo:
  dep/e-contract
  thunk/e
  list/e
+ inductive-list/e
+ binary-biased-cons/e
  cantor-list/e
  box-list/e
  prime-length-box-list/e
  bounded-list/e
  box-tuples/e
  below/e
- 
+
  give-up-escape
- 
+
  two-way-enum?
- one-way-enum? 
+ one-way-enum?
  flat-enum?
  finite-enum?
  infinite-enum?)
@@ -85,9 +101,9 @@ todo:
       [else (lambda (p port) (print p port mode))]))
   (display "#<" port)
   (define the-size (enum-count enum))
-  (cond [(infinite-enum? enum) 
+  (cond [(infinite-enum? enum)
          (display "infinite-" port)]
-        [(zero? the-size) 
+        [(zero? the-size)
          (display "empty-" port)]
         [(the-size . < . 100000000) ;; arbitrary cutoff to not print giant sizes
          (display the-size port)
@@ -111,7 +127,7 @@ todo:
                 ;; we appear to be in some kind of a bad loop here; just give up
                 #f]
                [(<= chars 20)
-                (define ele 
+                (define ele
                   ;; if something goes wrong while trying to extract
                   ;; an element, just give up (since we could very
                   ;; well be trying to print an error message here!)
@@ -122,7 +138,7 @@ todo:
                 (define s (get-output-string sp))
                 (cond
                   [(equal? s "")
-                   ;; if any enumeration values print as empty 
+                   ;; if any enumeration values print as empty
                    ;; strings, then we just give up so as to avoid
                    ;; 'i' never incrementing and never terminating
                    #t]
@@ -130,7 +146,7 @@ todo:
                    (if (zero? i)
                        (display ": " port)
                        (display " " port))
-                   
+
                    ;; only print twice up to depth 2 in order to avoid bad
                    ;; algorithmic behavior (so enumerations of enumerations
                    ;; of enumerations might look less beautiful in drracket)
@@ -139,7 +155,7 @@ todo:
                       (display s port)]
                      [else
                       (recur ele port)])
-                   
+
                    (loop (+ i 1)
                          (+ chars (string-length s) 1))])]
                [else #t]))))]))
@@ -173,7 +189,7 @@ todo:
               (define size (enum-count enum))
               (make-do-sequence
                (λ ()
-                 (values 
+                 (values
                   (λ (pos) (from-nat enum pos))
                   add1
                   0
@@ -182,7 +198,7 @@ todo:
              [else
               (make-do-sequence
                (λ ()
-                 (values 
+                 (values
                   (λ (pos) (from-nat enum pos))
                   add1
                   0
@@ -199,7 +215,7 @@ todo:
   (λ (stx)
     (syntax-case stx ()
       [[(enum-val) (_ enum)]
-       #'[(id) (:do-in ([(e the-size) 
+       #'[(id) (:do-in ([(e the-size)
                          (let ([e enum])
                            (values e
                                    (if (finite-enum? enum)
@@ -209,7 +225,7 @@ todo:
                        ([index 0])
                        (< index the-size)
                        ([(enum-val) (from-nat e index)])
-                       #t #t 
+                       #t #t
                        [(add1 index)])]]
       [_ #f])))
 
@@ -219,8 +235,8 @@ todo:
   [(define write-proc enum-write-proc)]
   #:property prop:sequence in-enum/proc)
 
-(define (map/e #:contract [ctc any/c] f inv-f e . es)
-  (cond 
+(define (map/e #:contract ctc f inv-f e . es)
+  (cond
     [(or (one-way-enum? e) (ormap one-way-enum? es))
      (apply pam/e #:contract ctc f e es)]
     [else
@@ -228,7 +244,7 @@ todo:
        (define e-from (enum-from e))
        (define e-to (enum-to e))
        (-enum (enum-count e)
-              (λ (x) 
+              (λ (x)
                 (f (e-from x)))
               (λ (n)
                 (e-to (inv-f n)))
@@ -240,7 +256,7 @@ todo:
          (λ (xs)
            (apply f xs))
          (λ (ys)
-           (call-with-values (λ () (inv-f ys)) list))   
+           (call-with-values (λ () (inv-f ys)) list))
          (apply list/e (cons e es)))])]))
 
 (define (pam/e #:contract ctc f e . es)
@@ -249,11 +265,11 @@ todo:
            (λ (x) (f (from-nat e x)))
            #f
            ctc))
-  (cond 
+  (cond
     [(empty? es) (pam1/e f e)]
     [else
      (pam1/e
-      (λ (xs) (apply f xs))   
+      (λ (xs) (apply f xs))
       (apply list/e (cons e es)))]))
 
 (define (except/e e #:contract [_contract #f] . excepts)
@@ -264,13 +280,23 @@ todo:
        (define orig-ctc (enum-contract e))
        (cond
          [(flat-contract? orig-ctc)
-          (define (an-excepted-value? x) (member x excepts))
-          (and/c (not/c an-excepted-value?)
+          (define an-excepted-value/c
+            (cond
+              [(and (<= (length excepts) 10)
+                    (andmap contract? excepts))
+               (apply or/c excepts)]
+              [else
+               (define ht (make-hash))
+               (for ([e (in-list excepts)])
+                 (hash-set! ht e #t))
+               (define (an-excepted-value? x) (hash-ref ht #f))
+               an-excepted-value?]))
+          (and/c (not/c an-excepted-value/c)
                  orig-ctc)]
          [else
           (error 'expect/e
                  (string-append
-                  "expected an explicit #:contract argument" 
+                  "expected an explicit #:contract argument"
                   " or a flat contract on the enumerator argument"))])]))
   (define (except1/e x e)
     (cond [(= (enum-count e) 0) e]
@@ -299,7 +325,9 @@ todo:
     (from-nat e i)))
 
 (define (below/e n)
-  (-enum n values values (integer-in 0 (- n 1))))
+  (if (= n +inf.0)
+      natural/e
+      (-enum n values values (integer-in 0 (- n 1)))))
 
 (define empty/e
   (-enum 0
@@ -418,7 +446,7 @@ todo:
          (length cur-inexhausteds))
        (define max-index
          (prev-max-index
-          . + . 
+          . + .
           (apply *
                  ((expt cur-bound num-inexhausted) . - . (expt prev-bound num-inexhausted))
                  (map (compose enum-count car) cur-exhausteds))))
@@ -433,7 +461,7 @@ todo:
         (list-layer 0 0 '() eis)))
 
 ;; find-dec-layer : Nat, Nonempty-Listof Upper-bound -> Upper-bound, Upper-bound
-;; Given an index, find the first layer 
+;; Given an index, find the first layer
 (define (find-dec-layer i layers)
   (find-layer-by-size i
                       upper-bound-total-bound
@@ -507,7 +535,7 @@ todo:
 (define (or/e #:one-way-enum? [one-way-enum? #f] . e-or-e/ps)
   (define e-ps (for/list ([x (in-list e-or-e/ps)])
                  (cond
-                   [(enum? x) (cons x (enum-contract x))]
+                   [(enum? x) (cons x (flat-contract-predicate (enum-contract x)))]
                    [else x])))
   (define (non-empty-e-p? e-p)
     (not (= 0 (enum-count (car e-p)))))
@@ -515,35 +543,234 @@ todo:
     ['() empty/e]
     [`(,e-p) (car e-p)]
     [non-empty-e-ps
-     (define layers
-       (disj-sum-layers (map car non-empty-e-ps)))
-     (define (dec i)
-       (define-values (prev-up-bound cur-up-bound)
-         (find-dec-layer i layers))
-       (match-define (upper-bound so-far prev-ib _)  prev-up-bound)
-       (match-define (upper-bound ctb    cib     es) cur-up-bound)
-       (define this-i (i . - . so-far))
-       (define len (vector-length es))
-       (define-values (q r) (quotient/remainder this-i len))
-       (define this-e (car (vector-ref es r))) 
-       (from-nat this-e (+ q prev-ib)))
-     (define enc
-       (and (not one-way-enum?)
-            (andmap (λ (x) (two-way-enum? (car x))) e-ps)
-            (λ (x)
-              (define-values (index which-e)
-                (find-index x non-empty-e-ps))
-              (define-values (prev-up-bound cur-up-bound cur-e-index)
-                (find-enc-layer index which-e layers))
-              (match-define (upper-bound ptb pib pes) prev-up-bound)
-              (match-define (upper-bound ctb cib ces) cur-up-bound)
-              (+ ptb
-                 cur-e-index
-                 ((vector-length ces) . * . (index . - . pib))))))
-     (-enum (apply + (map (compose enum-count car) non-empty-e-ps))
-            dec
-            enc
-            (apply or/c (map (λ (x) (enum-contract (car x))) non-empty-e-ps)))]))
+     (cond
+       [(or one-way-enum?
+            (not (andmap (λ (x) (two-way-enum? (car x))) non-empty-e-ps))
+            (not (andmap (λ (x) (infinite-enum? (car x))) non-empty-e-ps)))
+        (fair-or/e non-empty-e-ps e-ps one-way-enum?)]
+       [else
+        (fair-choose
+         (fair-or/e non-empty-e-ps e-ps one-way-enum?)
+         (mildly-unfair-or/e non-empty-e-ps)
+         (brutally-unfair-or/e non-empty-e-ps))])]))
+
+(define (fair-or/e non-empty-e-ps e-ps one-way-enum?)
+  (define layers
+    (disj-sum-layers (map car non-empty-e-ps)))
+  (define (dec i)
+    (define-values (prev-up-bound cur-up-bound)
+      (find-dec-layer i layers))
+    (match-define (upper-bound so-far prev-ib _)  prev-up-bound)
+    (match-define (upper-bound ctb    cib     es) cur-up-bound)
+    (define this-i (i . - . so-far))
+    (define len (vector-length es))
+    (define-values (q r) (quotient/remainder this-i len))
+    (define this-e (car (vector-ref es r)))
+    (from-nat this-e (+ q prev-ib)))
+  (define enc
+    (and (not one-way-enum?)
+         (andmap (λ (x) (two-way-enum? (car x))) e-ps)
+         (λ (x)
+           (define-values (index which-e)
+             (find-index x non-empty-e-ps))
+           (define-values (prev-up-bound cur-up-bound cur-e-index)
+             (find-enc-layer index which-e layers))
+           (match-define (upper-bound ptb pib pes) prev-up-bound)
+           (match-define (upper-bound ctb cib ces) cur-up-bound)
+           (+ ptb
+              cur-e-index
+              ((vector-length ces) . * . (index . - . pib))))))
+  (-enum (apply + (map (compose enum-count car) non-empty-e-ps))
+         dec
+         enc
+         (apply or/c (map (λ (x) (enum-contract (car x))) non-empty-e-ps))))
+
+(define (mildly-unfair-or/e e-ps)
+  (unfairly-generalize-binary-or/e
+   (λ (left? n) (+ (* 2 n) (if left? 0 1)))
+   (λ (n) (if (even? n)
+              (values #t (/ n 2))
+              (values #f (/ (- n 1) 2))))
+   e-ps))
+(define (brutally-unfair-or/e e-ps)
+  (unfairly-generalize-binary-or/e unfair-n+n->n unfair-n->n+n e-ps))
+
+(define (unfairly-generalize-binary-or/e n+n->n n->n+n e-ps)
+  (define-values (from to)
+    (let loop ([e-p (car e-ps)]
+               [e-ps (cdr e-ps)])
+      (define e (car e-p))
+      (define from (enum-from e))
+      (define to (enum-to e))
+      (cond
+        [(null? e-ps) (values from to)]
+        [else
+         (define p? (cdr e-p))
+         (define-values (others-from others-to) (loop (car e-ps) (cdr e-ps)))
+         (values (λ (i)
+                   (define-values (left? n) (n->n+n i))
+                   (if left?
+                       (from n)
+                       (others-from n)))
+                 (λ (v)
+                   (define left? (p? v))
+                   (define n (if left? (others-to v) (to v)))
+                   (n+n->n left? n)))])))
+  (-enum +inf.0 from to
+         (apply or/c (map (λ (x) (enum-contract (car x))) e-ps))))
+
+;; Each enum comes with a positive integer
+;; e1 : n1 + e2 : n2 + ...
+;; then every (i * (n1 + n2 + ...)) you've seen the first
+;; i * n1 from e1,
+;; i * n2 from e2,...
+(define (binary-biased-or/e e1 n1 e2 n2)
+  (define s1 (enum-count e1))
+  (define s2 (enum-count e2))
+
+  (when (not (and (infinite? s1) (infinite? s2)))
+    (error 'binary-biased-or/e "only works on inf enums for now"))
+  (define (from i)
+    (define-values (q r) (quotient/remainder i (n1 . + . n2)))
+    (cond
+      [(r . < . n1)
+       (cons 'l (from-nat e1 ((q . * . n1) . + . r)))
+       ]
+      [else
+       (cons 'r (from-nat e2 ((q . * . n2) . + . (r . - . n1))))]))
+
+  (define (to x)
+    (match x
+      [(cons 'l y)
+       (define-values (q r) (quotient/remainder (to-nat e1 y) n1))
+       ((q . * . (n1 . + . n2)) . + . r)]
+      [(cons 'r y)
+       (define-values (q r) (quotient/remainder (to-nat e2 y) n2))
+       (+ (q . * . (n1 . + . n2)) r n1)]))
+  (-enum (+ s1 s2) from to any/c))
+
+;; Boxy-style, not Cantor-style
+(define (binary-biased-cons/e e1 m e2 n)
+  (define s1 (enum-count e1))
+  (define s2 (enum-count e2))
+  (when (not (and (infinite? s1) (infinite? s2)))
+    (error 'binary-biased-cons/e "only works on inf enums for now"))
+  (define (from z)
+    (define-values (l r) (integer-root/remainder z (m . + . n)))
+    (define l^m   (expt l m))
+    (define l+1^n (expt (+ l 1) n))
+    (define l^n   (expt l n))
+    (define switch-point (* (l+1^n . - . l^n) l^m))
+    (define-values
+      (basex basey diffx diffy)
+      (cond [(r . < . switch-point)
+             (define basey l^n)
+             (define basex 0)
+             (define-values (diffy diffx) (quotient/remainder r l^m))
+             (values basex basey diffx diffy)
+            ]
+           [else
+            (define basey 0)
+            (define basex l^m)
+            (define-values (diffy diffx)
+              (quotient/remainder (r . - . switch-point)
+                                  ((expt (l . + . 1) m) . - . l^m)))
+            (values basex basey diffx diffy)]))
+    (cons (from-nat e1 (basex . + . diffx))
+          (from-nat e2 (basey . + . diffy))))
+  (define (to xy)
+    (define i (to-nat e1 (car xy)))
+    (define j (to-nat e2 (cdr xy)))
+    (define-values (iroot irem) (integer-root/remainder i m))
+    (define-values (jroot jrem) (integer-root/remainder j n))
+    (define l (max iroot jroot))
+    (define l^m (expt l m))
+    (cond [(iroot . < . jroot)
+           (+ (expt l (m . + . n))
+              (jrem . * . l^m)
+              i)]
+          [else
+           (define l+1^m (expt (add1 l) m))
+           (define l+1^n (expt (add1 l) n))
+           (+ (l^m . * . l+1^n)
+              (j . * . (l+1^m . - .  l^m))
+              irem)]))
+  (-enum +inf.0
+         from
+         (and (all-two-way? (list e1 e2))
+              to)
+         (cons/c (enum-contract e1) (enum-contract e2))))
+
+(define (weak-binary-biased-cons/e e1 n1 e2 n2)
+  (define s1 (enum-count e1))
+  (define s2 (enum-count e2))
+  (when (not (and (infinite? s1) (infinite? s2)))
+    (error 'weak-binary-biased-cons/e "only works on inf enums for now"))
+  (define (from i)
+    (define-values (q r)         (quotient/remainder i (n1 . * . n2)))
+    (match-define  (cons x y)    (binary-cantor-from q))
+    (define-values (xdiff ydiff) (quotient/remainder r n2))
+    (cons (from-nat e1
+                    ((n1 . * . x) . + . xdiff))
+          (from-nat e2
+                    ((n2 . * . y) . + . ydiff))))
+  (define (to xy)
+    (match-define (cons x y) xy)
+    (define i (to-nat e1 x))
+    (define j (to-nat e2 y))
+    (define-values (i2 idiff) (quotient/remainder i n1))
+    (define-values (j2 jdiff) (quotient/remainder j n2))
+    (define z (binary-cantor-to i2 j2))
+    ((* n1 n2 z) . + . ((idiff . * . n2) . + . jdiff))
+    )
+  (-enum (s1 . * . s2)
+         from
+         to
+         any/c))
+
+(define (bad-inductive-list/e . es)
+  (define l (length es))
+  (match l
+    [0 singleton-empty-list/e]
+    [1 (map/e list car (car es) #:contract (list/c (enum-contract (car es))))]
+    [_ (weak-binary-biased-cons/e (first es) 1
+                             (apply bad-inductive-list/e (rest es)) (l . - . 1))]))
+
+(define (inductive-list/e . es)
+  (define l (length es))
+  (let loop ([es es]
+             [l  (length es)])
+    (match l
+    [0 singleton-empty-list/e]
+    [1 (map/e list car (car es) #:contract (list/c (enum-contract (car es))))]
+    [_ (binary-biased-cons/e (first es)                   1
+                             (loop (rest es) (l . - . 1)) (l . - . 1))])))
+
+(define (binary-cantor-from z)
+  (define w (floor-untri z))
+  (define t ((w . + . (w . * . w)) . / . 2))
+  (define y (z . - . t))
+  (define x (w . - . y))
+  (cons x y))
+
+(define (binary-cantor-to x y)
+  (define xplusy (x . + . y))
+  ((* 1/2 xplusy (xplusy . + . 1))
+   . + .
+   y))
+
+(define (binary-boxy-from z)
+  (define-values (flroot r)
+    (integer-sqrt/remainder z))
+  (cond [(r . < . flroot)
+         (cons r flroot)]
+        [(cons flroot (r . - . flroot))]))
+
+(define (binary-boxy-to x y)
+  (cond [(x . >= . y)
+         ((y . * . y) . + . x)]
+        [else
+         (+ (x . * . x) x y)]))
 
 ;; Like or/e, but sequences the enumerations instead of interleaving
 (define (append/e e-p #:one-way-enum? [one-way-enum? #f] . e-ps)
@@ -726,7 +953,7 @@ todo:
   ;; 'sizes' is a memo table that caches the size of the dependent enumerators
   ;; sizes[n] = # of terms with left side index <= n
   ;; sizes : gvector int
-  (define sizes (gvector (enum-count (f (from-nat e 0)))))
+  (define sizes (gvector))
   (define (search-size sizes n)
     (when (zero? (gvector-count sizes))
       (gvector-add! sizes (enum-count (f (from-nat e 0)))))
@@ -752,18 +979,23 @@ todo:
             (loop (+ cur 1))))))
   
   (define the-enum-count
-    (if (infinite? (enum-count e))
-        +inf.0
-        (foldl
-         (λ (curSize acc)
-           (let ([sum (+ curSize acc)])
-             (gvector-add! sizes sum)
-             sum))
-         (gvector-ref sizes 0)
-         (map (compose enum-count f) (cdr (enum->list e (enum-count e)))))))
+    (cond
+      [(infinite? (enum-count e))
+       +inf.0]
+      [else
+       (gvector-add! sizes (enum-count (f (from-nat e 0))))
+       (foldl
+        (λ (curSize acc)
+          (let ([sum (+ curSize acc)])
+            (gvector-add! sizes sum)
+            sum))
+        (gvector-ref sizes 0)
+        (map (compose enum-count f) (cdr (enum->list e (enum-count e)))))]))
   
   (-enum the-enum-count
          (λ (n)
+           (when (zero? (gvector-count sizes))
+             (gvector-add! sizes (enum-count (f (from-nat e 0)))))
            (let* ([ind (or (find-size sizes n)
                            (search-size sizes n))]
                   [l (if (= ind 0)
@@ -776,6 +1008,8 @@ todo:
              (cons x y)))
          (and (not one-way?)
               (λ (ab)
+                (when (zero? (gvector-count sizes))
+                  (gvector-add! sizes (enum-count (f (from-nat e 0)))))
                 (let* ([a (car ab)]
                        [b (cdr ab)]
                        [ai (to-nat e a)]
@@ -845,13 +1079,16 @@ todo:
                 (give-up-on-bijection-checking promise/e)
                 (to-nat (force promise/e) x)))
          (if flat-enum?
-             (recursive-contract
-              (enum-contract
-               (force promise/e))
-              #:flat)
-             (recursive-contract
-              (enum-contract
-               (force promise/e))))))
+             (let ([thunk/e-ctc
+                    (recursive-contract
+                     (enum-contract
+                      (force promise/e))
+                     #:flat)])
+               thunk/e-ctc)
+             (let ([thunk/e-ctc (recursive-contract
+                                 (enum-contract
+                                  (force promise/e)))])
+               thunk/e-ctc))))
 
 (define (cantor-untuple k)
   ;; Paul Tarau Deriving a Fast Inverse of the Generalized Cantor N-tupling Bijection
@@ -1017,9 +1254,13 @@ todo:
     [(= l 0) singleton-empty-list/e]
     [(= l 1) (map/e list car (car es) #:contract (list/c (enum-contract (car es))))]
     [(all-infinite? es)
-     (if (equal? ordering 'square)
-         (apply box-list/e es)
-         (apply cantor-list/e es))]
+     (fair-choose
+      (if (equal? ordering 'square)
+          (apply inductive-list/e es)
+          (apply cantor-list/e es)
+          )
+      (mildly-unfair-box-list/e es)
+      (brutally-unfair-list/e es))]
     [(all-finite? es) (apply nested-cons-list/e es)]
     [else
      (define tagged-es
@@ -1112,6 +1353,7 @@ todo:
 
 (define (all-infinite? es) (all-something? infinite-enum? es))
 (define (all-finite? es) (all-something? finite-enum? es))
+(define (all-two-way? es) (all-something? two-way-enum? es))
 (define (all-something? p? es)
   (for/and ([e (in-list es)])
     (p? e)))
@@ -1144,6 +1386,44 @@ todo:
                  (λ (xs) (map to-nat es xs)))))
          (-enum +inf.0 dec enc 
                 (apply list/c (map enum-contract es)))]))
+
+(define (brutally-unfair-list/e es)
+  (unfair-pair-generalize-to-list
+   unfair-n->n*n
+   unfair-n*n->n
+   es))
+
+(define (mildly-unfair-box-list/e es)
+  (unfair-pair-generalize-to-list
+   (let ([f (box-untuple 2)]) (λ (n) (define lst (f n)) (values (list-ref lst 0) (list-ref lst 1))))
+   (let ([f (box-tuple 2)]) (λ (a b) (f (list a b))))
+   es))
+
+(define (unfair-pair-generalize-to-list n->n*n n*n->n es)
+  (cond
+    [(null? es) singleton-empty-list/e]
+    [else
+     (define-values (list-from list-to)
+       (let loop ([e (car es)]
+                  [es (cdr es)])
+         (define from (enum-from e))
+         (define to (enum-to e))
+         (cond
+           [(null? es)
+            (values (λ (i) (list (from i))) (λ (v) (to (car v))))]
+           [else
+            (define-values (tail-from tail-to) (loop (car es) (cdr es)))
+            ;; pile up values into the 'hd' position because the 'y'
+            ;; coordinate gets all the values of unfair-n->n*n
+            (values (λ (n)
+                      (define-values (tl-n hd-n) (n->n*n n))
+                      (cons (from hd-n) (tail-from tl-n)))
+                    (λ (v)
+                      (define hd-n (to (car v)))
+                      (define tl-n (tail-to (cdr v)))
+                      (n*n->n tl-n hd-n)))])))
+     (-enum +inf.0 list-from list-to
+            (apply list/c (map enum-contract es)))]))
 
 (define (prime-factorize k)
   (apply append
@@ -1182,7 +1462,7 @@ todo:
              es)))
   (define k (length es))
   (cond [(= k 0) singleton-empty-list/e]
-        [(= k 1) (map/e list car (car es))]
+        [(= k 1) (map/e list car (car es) #:contract (enum-contract (car es)))]
         [else
          (define factors (prime-factorize k))
          (let loop ([factors factors]
@@ -1271,4 +1551,3 @@ todo:
      (define smallest (expt layer k))
      (define layer/e (bounded-list/e k layer))
      (from-nat layer/e (n . - . smallest))))
-

@@ -21,7 +21,7 @@
 
 ;; Left-to-right reporting sometimes requires an explicit expression
 ;; check before reporting some other error. For example, in the
-;; expression (cond [true + 1 2]), the reported error should ideally
+;; expression (cond [#true + 1 2]), the reported error should ideally
 ;; be for a misuse of "+", not that there are two extra parts in the
 ;; clause. This check requires local-expanding, so it doesn't work
 ;; when checking top-level forms like `define' (because not all of the
@@ -463,7 +463,7 @@
         "a keyword"
         (something-else stx)))
   
-  (define (make-name-inventer)
+  (define (make-name-inventor)
     ;; Normally we'd use (make-syntax-introducer) because gensyming makes
     ;;  identifiers that play badly with exporting. But we don't have
     ;;  to worry about exporting in the teaching languages, while we do
@@ -475,7 +475,7 @@
   
   (define (wrap-func-definitions first-order? kinds names argcs k)
     (if first-order?
-        (let ([name2s (map (make-name-inventer) names)])
+        (let ([name2s (map (make-name-inventor) names)])
           (values (quasisyntax
                    (begin
                      #,@(map
@@ -508,7 +508,10 @@
            #'id 
            "expected a function after the open parenthesis, but found ~a"
            (syntax-e #'id))]
-         [_ (datum->syntax stx val stx)]))))
+         [_ (stepper-syntax-property
+             (datum->syntax stx val stx)
+             'stepper-hint
+             'comes-from-true/false)]))))
   
   (define beginner-true/proc (make-constant-expander #t))
   (define beginner-false/proc (make-constant-expander #f))
@@ -759,7 +762,7 @@
                'lambda
                rhs
                (syntax arg-seq)
-               "expected at least one variable after lambda, but found none"))
+               "expected (lambda (variable more-variable ...) expression), but found no variables"))
             (let ([dup (check-duplicate-identifier args)])
               (when dup
                 (teach-syntax-error
@@ -779,7 +782,7 @@
            'lambda
            rhs
            (syntax args)
-           "expected at least one variable (in parentheses) after lambda, but found ~a"
+           "expected (lambda (variable more-variable ...) expression), but found ~a"
            (something-else (syntax args)))]
          ;; Bad lambda, no args:
          [(lam)
@@ -787,7 +790,7 @@
            'lambda
            rhs
            #f
-           "expected at least one variable (in parentheses) after lambda, but nothing's there")]
+           "expected (lambda (variable more-variable ...) expression), but nothing's there")]
          [_else 'ok])]
       [_else 'ok]))
   
@@ -879,7 +882,9 @@
                               [(proc-name ...) proc-names]
                               [(getter-id ...) getter-names])
                   (define defns
-                    #`(define-values (#;#,signature-name #,parametric-signature-name def-proc-name ...)
+                    #;
+                    (#,signature-name #,parametric-signature-name def-proc-name ...)
+                    #`(define-values (#,parametric-signature-name def-proc-name ...)
                         (let ()
                           (define-values (type-descriptor
                                           raw-constructor
@@ -906,7 +911,7 @@
                               (cons prop:custom-write
                                     ;; Need a transparent-like printer, but hide auto field.
                                     ;; This simplest way to do that is to create an instance
-                                    ;; of a transparet structure with the same name and field values.
+                                    ;; of a transparent structure with the same name and field values.
                                     (let-values ([(struct:plain make-plain plain? plain-ref plain-set)
                                                   (make-struct-type 'name_ #f #,field# 0 #f null #f)])
                                       (lambda (r port mode)
@@ -2194,7 +2199,7 @@
                'lambda
                stx
                (syntax arg-seq)
-               "expected at least one variable after lambda, but found none"))
+               "expected (lambda (variable more-variable ...) expression), but found no variables"))
             (let ([dup (check-duplicate-identifier args)])
               (when dup
                 (teach-syntax-error
@@ -2214,15 +2219,15 @@
           (teach-syntax-error
            'lambda
            stx
-           (syntax args)
-           "expected at least one variable (in parentheses) after lambda, but found ~a"
-           (something-else (syntax args)))]
+           #false ;  (syntax stx)
+           "expected (lambda (variable more-variable ...) expression), but found ~a"
+           (something-else (syntax stx)))]
          [(_)
           (teach-syntax-error
            'lambda
            stx
            #f
-           "expected at least one variable (in parentheses) after lambda, but nothing's there")]
+           "expected (lambda (variable more-variable ...) expression), but nothing's there")]
          [_else
           (bad-use-error 'lambda stx)]))))
   
@@ -2416,19 +2421,19 @@
                                      (syntax->list (syntax exprs))
                                      names)
             (syntax/loc stx (lambda (name ...) . exprs)))]
-         [(_ arg-non-seq . exprs)
+         [(_ args . __)
           (teach-syntax-error
            'lambda
            stx
-           (syntax arg-non-seq)
-           "expected at least one variable (in parentheses) after lambda, but found ~a"
-           (something-else (syntax arg-non-seq)))]
+           #false ;  (syntax stx)
+           "expected (lambda (variable ...) expression), but found ~a"
+           (something-else (syntax stx)))]
          [(_)
           (teach-syntax-error
            'lambda
            stx
            #f
-           "expected at least one variable (in parentheses) after lambda, but nothing's there")]
+           "expected (lambda (variable ...) expression), but nothing's there")]
          [_else
           (bad-use-error 'lambda stx)]))))
   
@@ -2495,7 +2500,7 @@
                              (syntax id)
                              "expected a variable after set!, but found a ~a" (syntax-e #'id))]))
                        ;; If we're in a module, we'd like to check here whether
-                       ;;  the identier is bound, but we need to delay that check
+                       ;;  the identifier is bound, but we need to delay that check
                        ;;  in case the id is defined later in the module. So only
                        ;;  do this in continuing mode:
                        (when continuing?

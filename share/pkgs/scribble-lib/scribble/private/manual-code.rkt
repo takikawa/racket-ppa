@@ -102,12 +102,12 @@
 
 ;; (listof string) boolean boolean -> tokens string
 ;; tokens is a
-;; (cons metadata (listof (list T natural natural natural)))
+;; (listof (list T natural natural natural))
 ;; T being a symbol returned as a token type from the languages lexer
 ;;   OR a function created by get-tokens
 ;; the first number being the start position
 ;; the second being the end position
-;; the third 0 if T is a symbol, and 1 if its a function
+;; the third 0 if T is a symbol, and 1 or greater if its a function or element
 ;; the tokens are sorted by the start end end positions
 (define (get-tokens strs context expand)
   (let* ([xstr (apply string-append strs)]
@@ -124,6 +124,7 @@
                           (loop (if (dont-stop? mode)
                                     (dont-stop-val mode)
                                     mode))))))]
+           [program-source 'prog]
            [e (parameterize ([read-accept-reader #t])
                 ((or expand 
                      (lambda (stx) 
@@ -133,7 +134,7 @@
                  (let ([p (open-input-string bstr)])
                    (port-count-lines! p)
                    (let loop ()
-                     (let ([v (read-syntax 'prog p)])
+                     (let ([v (read-syntax program-source p)])
                        (cond
                         [expand v]
                         [(eof-object? v) null]
@@ -141,7 +142,9 @@
            [ids (let loop ([e e])
                   (cond
                    [(and (identifier? e)
-                         (syntax-original? e))
+                         (syntax-original? e)
+                         (syntax-position e)
+                         (eq? program-source (syntax-source e)))
                     (let ([pos (sub1 (syntax-position e))])
                       (list (list (lambda (str)
                                     (to-element (syntax-property
@@ -190,6 +193,13 @@
                              (map loop (syntax->list #'(form ...))))]
                      [else null]))]
            [has-hash-lang? (regexp-match? #rx"^#lang " bstr)]
+           [hash-lang (if has-hash-lang?
+                          (list (list (hash-lang)
+                                      0
+                                      5
+                                      1)
+                                (list 'white-space 5 6 0))
+                          null)]
            [language (if has-hash-lang?
                          (let ([m (regexp-match #rx"^#lang ([-0-9a-zA-Z/._+]+)" bstr)])
                            (if m
@@ -203,6 +213,7 @@
                          null)]
            [tokens (sort (append ids
                                  mods
+                                 hash-lang
                                  language
                                  (filter (lambda (x) (not (eq? (car x) 'symbol)))
                                          (if has-hash-lang?
@@ -315,14 +326,14 @@
 (module+ test
   (require racket/list
            racket/match
-           tests/eli-tester)
+           rackunit)
 
   (define (tokens strs)
     (define-values (toks _) (get-tokens strs #f #f))
-    (for/list ([tok (rest toks)])
+    (for/list ([tok (in-list toks)])
       (match tok
-        [(list _ start end 1)
-         (list 'function start end 1)]
+        [(list _ start end (or 1 2 3))
+         (list 'function start end 1)] ; this looses information
         [_ tok])))
 
   (define (make-test-result  lst)
@@ -334,24 +345,29 @@
         (values
          (cons (list (first p) count next r) result)
          next)))
-    (cons `(function 6 12 1) (reverse res)))
+    (list* `(function 0 5 1) `(white-space 5 6 0) `(function 6 12 1) `(function 6 12 1)
+           (reverse res)))
 
-  (test
+  (check-equal?
    (tokens (list "#lang racket\n1"))
-   => `((function 6 12 1) (white-space 12 13 0) (constant 13 14 0))
+   `((function 0 5 1) (white-space 5 6 0) ;"#lang "
+     (function 6 12 1) (function 6 12 1) (white-space 12 13 0) ;"racket\n"
+     (constant 13 14 0))) ; "1"
+  (check-equal?
    (tokens (list "#lang racket\n" "(+ 1 2)"))
-   => (make-test-result
-       '((white-space 1)
-         (parenthesis 1) (function 1)
-         (white-space 1) (constant 1) (white-space 1) (constant 1)
-         (parenthesis 1)))
+   (make-test-result
+    '((white-space 1)
+      (parenthesis 1) (function 1)
+      (white-space 1) (constant 1) (white-space 1) (constant 1)
+      (parenthesis 1))))
+  (check-equal?
    (tokens (list "#lang racket\n(apply x (list y))"))
-   => (make-test-result
-       '((white-space 1)
-         (parenthesis 1)
-         (function 5) (white-space 1);apply
-         (function 1) (white-space 1);x
-         (parenthesis 1)
-         (function 4) (white-space 1) (function 1);list y
-         (parenthesis 1)
-         (parenthesis 1)))))
+   (make-test-result
+    '((white-space 1)
+      (parenthesis 1)
+      (function 5) (white-space 1);apply
+      (function 1) (white-space 1);x
+      (parenthesis 1)
+      (function 4) (white-space 1) (function 1);list y
+      (parenthesis 1)
+      (parenthesis 1)))))

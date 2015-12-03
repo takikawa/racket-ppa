@@ -18,13 +18,16 @@
 (provide 
  (protect-out frame%
               location->window
-              get-front))
+              get-front
+
+              RacketEventspaceMethods
+              install-RacketGCWindow!))
 
 ;; ----------------------------------------
 
 (import-class NSWindow NSGraphicsContext NSMenu NSPanel
               NSApplication NSAutoreleasePool NSScreen
-              NSToolbar)
+              NSToolbar NSArray)
 
 (define NSWindowCloseButton 0)
 (define NSWindowToolbarButton 3)
@@ -56,11 +59,18 @@
 
 (set-screen-changed-callback! send-screen-change-notifications)
 
-(define-objc-mixin (RacketWindowMethods Superclass)
+(define RacketGCWindow #f)
+(define (install-RacketGCWindow! c) (set! RacketGCWindow c))
+
+(define-objc-mixin (RacketEventspaceMethods Superclass)
   [wxb]
   [-a _scheme (getEventspace)
       (let ([wx (->wx wxb)])
-        (and wx (send wx get-eventspace)))]
+        (and wx (send wx get-eventspace)))])
+
+(define-objc-mixin (RacketWindowMethods Superclass)
+  #:mixins (RacketEventspaceMethods)
+  [wxb]
   [-a _BOOL (canBecomeKeyWindow)
       (let ([wx (->wx wxb)])
         (and wx
@@ -189,7 +199,9 @@
                                    (not (ptr-equal? w (send root-fake-frame get-cocoa)))
                                    (is-mouse-or-key?))
                                (or (objc-is-a? w RacketWindow)
-                                   (objc-is-a? w RacketPanel))
+                                   (objc-is-a? w RacketPanel)
+                                   (and RacketGCWindow
+                                        (objc-is-a? w RacketGCWindow)))
                                (tell #:type _scheme w getEventspace))]
                          [front (send front get-eventspace)]
                          [root-fake-frame 
@@ -348,7 +360,11 @@
                        contextInfo: #f))
               (if float?
                   (tellv cocoa orderFront: #f)
-                  (tellv cocoa makeKeyAndOrderFront: #f)))
+                  (begin
+                    (tellv cocoa makeKeyAndOrderFront: #f)
+                    (when unshown-fullscreen?
+                      (set! unshown-fullscreen? #f)
+                      (tellv cocoa toggleFullScreen: #f)))))
           (begin
             (when is-a-dialog?
               (let ([p (get-parent)])
@@ -359,7 +375,13 @@
                         endSheet: cocoa))))
             (when (is-shown?) ; otherwise, `deminiaturize' can show the window
               (tellv cocoa deminiaturize: #f)
-              (tellv cocoa orderOut: #f))
+              (define fs? (fullscreened?))
+              (set! unshown-fullscreen? fs?)
+              (tellv cocoa orderOut: #f)
+              (when fs?
+                ;; Need to select another window to get rid of
+                ;; the window's screen:
+                (tellv (get-app-front-window) orderFront: #f)))
             (force-window-focus)))
       (register-frame-shown this on?)
       (let ([num (tell #:type _NSInteger cocoa windowNumber)])
@@ -377,6 +399,11 @@
             (error (string->symbol
                     (format "show method in ~a" (if is-a-dialog? 'dialog% 'frame%)))
                    "the eventspace hash been shutdown"))
+          (when (version-10.11-or-later?)
+            ;; Ensure that the basic window background is drawn before
+            ;; we potentially suspend redrawing. Otherwise, the window
+            ;; can start black and end up with a too-dark titlebar.
+            (tellv cocoa display))
           (when saved-child
             (if (eq? (current-thread) (eventspace-handler-thread es))
                 (do-paint-children)
@@ -387,6 +414,23 @@
                   (sync/timeout 1 s))))))
       (atomically
        (direct-show on?)))
+    
+    (define flush-disabled 0)
+    
+    (define/public (disable-flush-window)
+      (when (zero? flush-disabled)
+        (when (version-10.11-or-later?)
+          (tellv cocoa setAutodisplay: #:type _BOOL #f))
+        (tellv cocoa disableFlushWindow))
+      (set! flush-disabled (add1 flush-disabled)))
+
+    (define/public (enable-flush-window)
+      (set! flush-disabled (sub1 flush-disabled))
+      (when (zero? flush-disabled)
+        (tellv cocoa enableFlushWindow)
+        (when (version-10.11-or-later?)
+          (tellv cocoa setAutodisplay: #:type _BOOL #t)
+          (tellv cocoa displayIfNeeded))))
 
     (define/public (force-window-focus)
       (let ([next (get-app-front-window)])
@@ -671,11 +715,19 @@
           (tellv cocoa miniaturize: cocoa)
           (tellv cocoa deminiaturize: cocoa)))
 
+    (define unshown-fullscreen? #f)
     (define/public (fullscreened?)
-      (positive? (bitwise-and (tell #:type _NSUInteger cocoa styleMask) NSFullScreenWindowMask)))
+      (and (version-10.7-or-later?)
+           (if (tell #:type _bool cocoa isVisible)
+               (positive? (bitwise-and (tell #:type _NSUInteger cocoa styleMask) NSFullScreenWindowMask))
+               unshown-fullscreen?)))
     (define/public (fullscreen on?)
-      (unless (eq? (and on? #t) (fullscreened?))
-        (tellv cocoa toggleFullScreen: #f)))
+      (when (version-10.7-or-later?)
+        (unless (eq? (and on? #t) (fullscreened?))
+          (if (tell #:type _bool cocoa isVisible)
+              (tellv cocoa toggleFullScreen: #f)
+              (set! unshown-fullscreen? (and on? #t))))))
+
 
     (define/public (set-title s)
       (tellv cocoa setTitle: #:type _NSString s))

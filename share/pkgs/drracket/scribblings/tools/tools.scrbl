@@ -290,8 +290,11 @@ These precise colors for these identifiers are controlled by the preferences dia
 
 @language-info-def[drracket:indentation]{
  When a language's @racket[_get-info] procedure responds to @racket['drracket:indentation],
- it is expected to return @racket[(-> (is-a?/c racket:text<%>) exact-nonnegative-integer?
-                                      (or/c #f exact-nonnegative-integer?))]; the result is used
+ it is expected to return a function with this contract:
+ @racketblock[(-> (is-a?/c racket:text<%>)
+                  exact-nonnegative-integer?
+                  (or/c #f exact-nonnegative-integer?))]
+ The function is used
  to indent lines in DrRacket. It is called with the position containing the line to be
  indented. It is expected to return the number of spaces that should appear at the beginning
  of the line or @racket[#f]. If @racket[#f] is returned,
@@ -689,14 +692,12 @@ plugin API. See also @racketmodname[drracket/check-syntax].
 
 @subsection{Syntax Properties that Check Syntax Looks For}
 
-@section-index["disappeared-use" "disappeared-binding" "sub-range-binders" "mouse-over-tooltips"]
-
 Check Syntax collects the values of the 
-@racket[syntax-property]s named 
-@racket['disappeared-use],
-@racket['disappeared-binding], 
-@racket['sub-range-binders], and
-@racket['mouse-over-tooltips] and uses them to add
+@indexed-racket[syntax-property]s named
+@indexed-racket['disappeared-use],
+@indexed-racket['disappeared-binding],
+@indexed-racket['sub-range-binders], and
+@indexed-racket['mouse-over-tooltips] and uses them to add
 additional arrows to the program text. These properties are
 intended for use when a macro discards or manufactures identifiers that,
 from the programmers perspective, should be binding each other.
@@ -810,7 +811,7 @@ For example, here's a macro that shows the span of itself in a tooltip on mouseo
 (char-span (+ 1 2))}
 
 Finally, Check Syntax draws arrows only between identifiers that are @racket[syntax-original?]
-or that have the @racket[syntax-property] @racket['original-for-check-syntax]
+or that have the @racket[syntax-property] @indexed-racket['original-for-check-syntax]
 set to @racket[#t].
 
 @section{Cooperating with Background Check Syntax}
@@ -863,7 +864,7 @@ not part of DrRacket proper, but one helper library is documented here.
 @defsignature[drracket:tool-exports^ ()]{
 The @racket[drracket:tool-exports^] signature contains two
 names: @sigelem[drracket:tool-exports^ phase1] and 
-@sigelem[drracket:tool-exports^ phase1]. 
+@sigelem[drracket:tool-exports^ phase2]. 
 After all of the tools are loaded, all of
 the @tt{phase1} functions are called and then all of the
 @tt{phase2} functions are called. Certain primitives can
@@ -917,6 +918,7 @@ above for details).
 @include-section["modes.scrbl"]
 @include-section["module-language-tools.scrbl"]
 @include-section["module-language.scrbl"]
+@include-section["tracing.scrbl"]
 
 @section{Backwards Compatibility}
 
@@ -953,5 +955,6 @@ library; they are here for backwards compatibility and to provide links to the
 @(tools-include/drs "module-language")
 @(tools-include/drs "rep")
 @(tools-include/drs "unit")
+@(tools-include/drs "tracing")
 
 @index-section[]

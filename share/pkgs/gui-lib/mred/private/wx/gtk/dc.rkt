@@ -1,9 +1,11 @@
 #lang racket/base
 (require ffi/unsafe
+	 ffi/unsafe/define
          racket/class
          "utils.rkt"
          "types.rkt"
          "window.rkt"
+         "frame.rkt"
          "x11.rkt"
          "win32.rkt"
          "gl-context.rkt"
@@ -23,17 +25,24 @@
               gdk_gc_new
               gdk_gc_unref
               gdk_gc_set_rgb_fg_color
+              gdk_gc_set_line_attributes
               gdk_draw_rectangle))
 
 (define-gdk gdk_cairo_create (_fun _pointer -> _cairo_t)
   #:wrap (allocator cairo_destroy))
 
 (define-gdk gdk_gc_unref (_fun _pointer -> _void)
-  #:wrap (deallocator))
+  #:wrap (deallocator)
+  #:make-fail make-not-available)
 (define-gdk gdk_gc_new (_fun _GdkWindow -> _pointer)
-  #:wrap (allocator gdk_gc_unref))
-(define-gdk gdk_gc_set_rgb_fg_color (_fun _pointer _GdkColor-pointer -> _void))
-(define-gdk gdk_draw_rectangle (_fun _GdkWindow _pointer _gboolean _int _int _int _int -> _void))
+  #:wrap (allocator gdk_gc_unref)
+  #:make-fail make-not-available)
+(define-gdk gdk_gc_set_rgb_fg_color (_fun _pointer _GdkColor-pointer -> _void)
+  #:make-fail make-not-available)
+(define-gdk gdk_gc_set_line_attributes (_fun _pointer _int _int _int _int -> _void)
+  #:make-fail make-not-available)
+(define-gdk gdk_draw_rectangle (_fun _GdkWindow _pointer _gboolean _int _int _int _int -> _void)
+  #:make-fail make-not-available)
 
 (define-cstruct _GdkVisual-rec ([type-instance _pointer]
 				[ref_count _uint]
@@ -44,24 +53,64 @@
 
 (define x11-bitmap%
   (class bitmap%
-    (init w h gdk-win)
-    (super-make-object (make-alternate-bitmap-kind w h 1.0))
+    (init w h gtk)
 
-    (define pixmap (gdk_pixmap_new gdk-win 
-				   (min (max 1 w) 32000)
-				   (min (max 1 h) 32000)
-				   (if gdk-win 
-				       -1
-				       (GdkVisual-rec-depth
-					(gdk_visual_get_system)))))
+    (define sf
+      (if gtk3?
+	  (if gtk
+	      (->screen (gtk_widget_get_scale_factor gtk))
+	      (display-bitmap-resolution 0 (lambda () 1.0)))
+	  (->screen 1.0)))
+    (define/private (scale x)
+      (min (max 1 (ceiling (inexact->exact (* sf x)))) 32000))
+
+    (define-values (pixmap xdisplay xvisual)
+      (let ([gdk-win (and gtk (widget-window gtk))])
+	(if gtk3?
+	    (let* ([gdk-win (or gdk-win
+				(gdk_screen_get_root_window
+				 (gdk_screen_get_default)))]
+		   [xdisplay (gdk_x11_display_get_xdisplay
+			      (if gdk-win
+				  (gdk_window_get_display gdk-win)
+				  (gdk_display_get_default)))]
+		   [visual (gdk_window_get_visual gdk-win)])
+	      ;; We must not get here for a transparent canvas,
+	      ;; because getting an XID will force a native window.
+	      (values (XCreatePixmap xdisplay
+				     (gdk_x11_window_get_xid gdk-win)
+				     (scale w) (scale h)
+				     (gdk_visual_get_depth visual))
+		      xdisplay
+		      (gdk_x11_visual_get_xvisual visual)))
+	    (let ([pixmap (gdk_pixmap_new gdk-win
+					  (scale w)
+					  (scale h)
+					  (if gdk-win 
+					      -1
+					      (GdkVisual-rec-depth
+					       (gdk_visual_get_system))))])
+	      (values pixmap
+		      (gdk_x11_display_get_xdisplay
+		       (gdk_drawable_get_display pixmap))
+		      (gdk_x11_visual_get_xvisual
+		       (gdk_drawable_get_visual pixmap)))))))
+
     (define s
-      (cairo_xlib_surface_create (gdk_x11_display_get_xdisplay
-                                  (gdk_drawable_get_display pixmap))
-                                 (gdk_x11_drawable_get_xid pixmap)
-				 (gdk_x11_visual_get_xvisual
-				  (gdk_drawable_get_visual pixmap))
-                                 w
-                                 h))
+      (cairo_xlib_surface_create xdisplay
+                                 (if gtk3?
+				     (cast pixmap _Pixmap _ulong)
+				     (gdk_x11_drawable_get_xid pixmap))
+				 xvisual
+                                 (scale w)
+                                 (scale h)))
+
+    (define gl #f)
+
+    (super-make-object (make-alternate-bitmap-kind
+			w
+			h
+			sf))
 
     ;; initialize bitmap to white:
     (let ([cr (cairo_create s)])
@@ -74,7 +123,6 @@
     (define/public (get-gdk-pixmap) pixmap)
     (define/public (install-gl-context new-gl) (set! gl new-gl))
 
-    (define gl #f)
     (define/override (get-bitmap-gl-context) gl)
 
     (define/override (ok?) #t)
@@ -86,8 +134,20 @@
     (define/override (release-bitmap-storage)
       (atomically
        (cairo_surface_destroy s)
-       (gobject-unref pixmap)
+       (if gtk3?
+	   (XFreePixmap xdisplay pixmap)
+	   (gobject-unref pixmap))
        (set! s #f)))))
+
+(define cairo-bitmap%
+  (class bitmap%
+    (init w h gtk)
+    (super-make-object w h #f #t
+		       (if gtk3?
+			   (if gtk
+			       (->screen (gtk_widget_get_scale_factor gtk))
+			       (display-bitmap-resolution 0 (lambda () 1.0)))
+			   (->screen 1.0)))))
 
 (define win32-bitmap%
   (class bitmap%
@@ -118,13 +178,14 @@
 (define dc%
   (class backing-dc%
     (init [(cnvs canvas)]
-          transparent?)
+          transparentish?)
     (inherit end-delay)
     (define canvas cnvs)
-
-    (super-new [transparent? transparent?])
-
     (define gl #f)
+    (define is-transparentish? transparentish?)
+
+    (super-new [transparent? transparentish?])
+
     (define/override (get-gl-context)
       (or gl
           (let ([v (create-widget-gl-context (send canvas get-client-gtk))])
@@ -133,14 +194,15 @@
 
     (define/override (make-backing-bitmap w h)
       (cond
-       [(and (eq? 'unix (system-type))
-             (send canvas get-canvas-background))
-	(make-object x11-bitmap% w h (widget-window (send canvas get-client-gtk)))]
-       [(and (eq? 'windows (system-type))
-             (send canvas get-canvas-background))
+       [(and (not is-transparentish?)
+             (eq? 'unix (system-type)))
+	(make-object x11-bitmap% w h (send canvas get-client-gtk))]
+       [(and (not is-transparentish?)
+             (eq? 'windows (system-type)))
 	(make-object win32-bitmap% w h (widget-window (send canvas get-client-gtk)))]
        [else
-	(super make-backing-bitmap (max 1 w) (max 1 h))]))
+	;; Transparent canvas always use a Cairo bitmap:
+	(make-object cairo-bitmap% (max 1 w) (max 1 h) (send canvas get-client-gtk))]))
 
     (define/override (get-backing-size xb yb)
       (send canvas get-client-size xb yb))
@@ -161,16 +223,20 @@
       (send canvas flush))
 
     (define/override (request-delay)
-      (request-flush-delay (send canvas get-flush-window)))
+      (request-flush-delay (send canvas get-flush-window) is-transparentish?))
     (define/override (cancel-delay req)
       (cancel-flush-delay req))))
 
-(define (do-backing-flush canvas dc win)
+(define (do-backing-flush canvas dc win-or-cr)
   (send dc on-backing-flush
         (lambda (bm)
           (let ([w (box 0)]
                 [h (box 0)])
             (send canvas get-client-size w h)
-            (let ([cr (gdk_cairo_create win)])
-              (backing-draw-bm bm cr (unbox w) (unbox h))
-              (cairo_destroy cr))))))
+            (let ([cr (if gtk3?
+			  win-or-cr
+			  (gdk_cairo_create win-or-cr))])
+	      (cairo_scale cr (->screen 1.0) (->screen 1.0))
+              (backing-draw-bm bm cr (unbox w) (unbox h) 0 0 (->screen 1.0))
+	      (unless gtk3?
+                (cairo_destroy cr)))))))

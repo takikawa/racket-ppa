@@ -3,7 +3,7 @@
 ;; This module provides functions for printing types and related
 ;; data structures such as filters and objects
 
-(require racket/require racket/match unstable/sequence racket/string racket/promise
+(require racket/require racket/match racket/dict racket/string racket/promise
          racket/pretty
          racket/list
          racket/set
@@ -59,7 +59,7 @@
 ;; has-name : Type -> Maybe[Listof<Symbol>]
 (define (has-name? t)
   (define candidates
-    (for/list ([(n t*) (in-pairs (in-list (force (current-type-names))))]
+    (for/list ([(n t*) (in-dict (force (current-type-names)))]
                #:when (and print-aliases (Type? t*) (type-equal? t t*)))
       n))
   (and (pair? candidates)
@@ -378,7 +378,10 @@
       [(Value: '()) null]))
   (match type
     ;; if we know how it was written, print that
-    [(? Rep-stx a) (syntax->datum (Rep-stx a))]
+    [(? Rep-stx a)
+     (if (Error? a)
+         `(Error ,(syntax->datum (Rep-stx a)))
+         (syntax->datum (Rep-stx a)))]
     [(Univ:) 'Any]
     ;; struct names are just printed as the original syntax
     [(Name/struct: id) (syntax-e id)]
@@ -507,6 +510,14 @@
     [(Instance: t) `(Instance ,(t->s t))] ; for cases like Error
     [(ClassTop:) 'ClassTop]
     [(? Class?) (class->sexp type)]
+    [(Unit: (list imports ...) (list exports ...) (list init-depends ...) body)
+     `(Unit
+       (import ,@(map t->s imports))
+       (export ,@(map t->s exports))
+       (init-depend ,@(map t->s init-depends))
+       ,(t->s body))]
+    [(Signature: name extends mapping)
+     (syntax->datum name)]
     [(Result: t (or (NoFilter:) (FilterSet: (Top:) (Top:))) (or (NoObject:) (Empty:))) (type->sexp t)]
     [(Result: t fs (Empty:)) `(,(type->sexp t) : ,(filter->sexp fs))]
     [(Result: t fs lo) `(,(type->sexp t) : ,(filter->sexp fs) : ,(object->sexp lo))]
@@ -517,6 +528,8 @@
      `(Sequenceof ,@(map t->s ts))]
     [(Error:) 'Error]
     [(fld: t a m) `(fld ,(type->sexp t))]
+    [(Distinction: name sym ty) ; from define-new-subtype
+     name]
     [else `(Unknown Type: ,(struct->vector type))]
     ))
 

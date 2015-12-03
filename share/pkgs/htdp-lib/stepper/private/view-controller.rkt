@@ -51,7 +51,8 @@
                      "    European Symposium on Programming, 2001\n")]))
   (send dlg show #t))
 
-(define (go drracket-tab program-expander selection-start selection-end)
+;; create a new view-controller, start the model
+(define (vc-go drracket-tab program-expander dynamic-requirer selection-start selection-end)
   
   ;; get the language-level:
   (define language-settings 
@@ -421,7 +422,6 @@
          (set! disable-runaway-counter #t)
          #t]))
   
-  
 
   ;; translates a result into a step
   ;; format-result : step-result -> step?
@@ -432,7 +432,9 @@
                        [left-side pre-exps]
                        [right-side post-exps]
                        [show-inexactness? 
-                        (send language-level stepper:show-inexactness?)])
+                        (send language-level stepper:show-inexactness?)]
+                       [print-boolean-long-form? 
+                        (send language-level stepper:print-boolean-long-form?)])
                   kind 
                   (list pre-src post-src))]
       [(struct before-error-result (pre-exps err-msg pre-src))
@@ -440,7 +442,9 @@
                        [left-side pre-exps] 
                        [right-side err-msg]
                        [show-inexactness?
-                        (send language-level stepper:show-inexactness?)])
+                        (send language-level stepper:show-inexactness?)]
+                       [print-boolean-long-form? 
+                        (send language-level stepper:print-boolean-long-form?)])
                   'finished-or-error 
                   (list pre-src))]
       [(struct error-result (err-msg))
@@ -448,7 +452,9 @@
                        [left-side null]
                        [right-side err-msg]
                        [show-inexactness?
-                        (send language-level stepper:show-inexactness?)]) 
+                        (send language-level stepper:show-inexactness?)]
+                       [print-boolean-long-form? 
+                        (send language-level stepper:print-boolean-long-form?)]) 
                   'finished-or-error 
                   (list))]
       [(struct finished-stepping ())
@@ -475,7 +481,8 @@
   ;; START THE MODEL
   (start-listener-thread stepper-frame-eventspace)
   (model:go
-   program-expander-prime 
+   program-expander-prime
+   dynamic-requirer
    ;; what do do with the results:
    deliver-result-to-gui
    (get-render-settings render-to-string

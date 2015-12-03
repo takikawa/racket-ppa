@@ -2,7 +2,7 @@
 (require racket/class
          racket/gui/base
          racket/pretty
-         unstable/gui/notify
+         framework/notify
          macro-debugger/syntax-browser/interfaces)
 (provide syntax-keymap%)
 
@@ -99,8 +99,8 @@
            (callback 
             (lambda (i e)
               (call-function "clear-syntax-selection" i e))))
-      (menu-option/notify-box menu "View syntax properties"
-                              (get-field props-shown? config))
+      (notify:menu-option/notify-box menu "View syntax properties"
+                                     (get-field props-shown? config))
       (let ([pretty-menu
              (new menu%
                   (label "Change layout")

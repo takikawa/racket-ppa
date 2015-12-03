@@ -13,7 +13,10 @@
              pict->argb-pixels
              argb-pixels->pict
              colorize
-             pin-under pin-over disk
+             pin-under pin-over
+             rectangle filled-rectangle
+             rounded-rectangle filled-rounded-rectangle
+             circle disk ellipse filled-ellipse
              vl-append
              vc-append
              vr-append
@@ -71,23 +74,100 @@
                          pict?)]
   [pin-under
    (->i ([base pict?]
-         [dx/fp (or/c real? pict?)]
+         [dx/fp (or/c real? pict-path?)]
          [dy/f (dx/fp)
                (if (real? dx/fp)
                    real?
-                   (-> pict? pict? (values real? real?)))]
+                   (-> pict? pict-path? (values real? real?)))]
          [pict pict?])
         [result pict?])]
   [pin-over
    (->i ([base pict?]
-         [dx/fp (or/c real? pict?)]
+         [dx/fp (or/c real? pict-path?)]
          [dy/f (dx/fp)
                (if (real? dx/fp)
                    real?
-                   (-> pict? pict? (values real? real?)))]
+                   (-> pict? pict-path? (values real? real?)))]
          [pict pict?])
         [result pict?])]
-  [disk (->* ((and/c rational? (not/c negative?))) (#:draw-border? any/c) pict?)]))
+  [rectangle (->* ((and/c rational? (not/c negative?))
+                   (and/c rational? (not/c negative?)))
+                  (#:border-color (or/c #f string? (is-a?/c color%))
+                   #:border-width (or/c #f (and/c rational? (not/c negative?))))
+                  pict?)]
+  [filled-rectangle (->i ([w (and/c rational? (not/c negative?))]
+                          [h (and/c rational? (not/c negative?))])
+                         (#:draw-border? [draw-border? any/c]
+                          #:color        [color (or/c #f string? (is-a?/c color%))]
+                          #:border-color [border-color (or/c #f string? (is-a?/c color%))]
+                          #:border-width [border-width (or/c #f (and/c rational? (not/c negative?)))])
+                         #:pre (draw-border? border-color border-width)
+                         (if (not draw-border?)
+                             (and (or (unsupplied-arg? border-color)
+                                      (not border-color))
+                                  (or (unsupplied-arg? border-width)
+                                      (not border-width)))
+                             #t)
+                         [_ pict?])]
+  [rounded-rectangle (->* ((and/c rational? (not/c negative?))
+                           (and/c rational? (not/c negative?)))
+                          (rational?
+                           #:angle rational?
+                           #:border-color (or/c #f string? (is-a?/c color%))
+                           #:border-width (or/c #f (and/c rational? (not/c negative?))))
+                          pict?)]
+  [filled-rounded-rectangle (->i ([w (and/c rational? (not/c negative?))]
+                                  [h (and/c rational? (not/c negative?))])
+                                 ([corner-radius rational?]
+                                  #:angle        [angle rational?]
+                                  #:draw-border? [draw-border? any/c]
+                                  #:color        [color (or/c #f string? (is-a?/c color%))]
+                                  #:border-color [border-color (or/c #f string? (is-a?/c color%))]
+                                  #:border-width [border-width (or/c #f (and/c rational? (not/c negative?)))])
+                                 #:pre (draw-border? border-color border-width)
+                                 (if (not draw-border?)
+                                     (and (or (unsupplied-arg? border-color)
+                                              (not border-color))
+                                          (or (unsupplied-arg? border-width)
+                                              (not border-width)))
+                                     #t)
+                                 [_ pict?])]
+  [circle (->* ((and/c rational? (not/c negative?)))
+               (#:border-color (or/c #f string? (is-a?/c color%))
+                #:border-width (or/c #f (and/c rational? (not/c negative?))))
+               pict?)]
+  [disk (->i ([r (and/c rational? (not/c negative?))])
+             (#:draw-border? [draw-border? any/c]
+              #:color        [color (or/c #f string? (is-a?/c color%))]
+              #:border-color [border-color (or/c #f string? (is-a?/c color%))]
+              #:border-width [border-width (or/c #f (and/c rational? (not/c negative?)))])
+             #:pre (draw-border? border-color border-width)
+             (if (not draw-border?)
+                 (and (or (unsupplied-arg? border-color)
+                          (not border-color))
+                      (or (unsupplied-arg? border-width)
+                          (not border-width)))
+                 #t)
+             [_ pict?])]
+  [ellipse (->* ((and/c rational? (not/c negative?))
+                 (and/c rational? (not/c negative?)))
+                (#:border-color (or/c #f string? (is-a?/c color%))
+                 #:border-width (or/c #f (and/c rational? (not/c negative?))))
+                pict?)]
+  [filled-ellipse (->i ([w (and/c rational? (not/c negative?))]
+                        [h (and/c rational? (not/c negative?))])
+                       (#:draw-border? [draw-border? any/c]
+                        #:color        [color (or/c #f string? (is-a?/c color%))]
+                        #:border-color [border-color (or/c #f string? (is-a?/c color%))]
+                        #:border-width [border-width (or/c #f (and/c rational? (not/c negative?)))])
+                       #:pre (draw-border? border-color border-width)
+                       (if (not draw-border?)
+                           (and (or (unsupplied-arg? border-color)
+                                    (not border-color))
+                                (or (unsupplied-arg? border-width)
+                                    (not border-width)))
+                           #t)
+                       [_ pict?])]))
 
 (define (does-draw-restore-the-state-after-being-called? draw)
   (define bdc (new bitmap-dc% [bitmap (make-bitmap 1 1)]))

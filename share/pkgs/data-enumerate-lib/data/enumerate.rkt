@@ -38,7 +38,7 @@
         [res (e) (listof (enum-contract e))])]
   
   [natural/e enum?]
-  [below/e (-> exact-nonnegative-integer? enum?)]  
+  [below/e (-> (or/c exact-nonnegative-integer? +inf.0) enum?)]
   [empty/e enum?]
 
 
@@ -75,7 +75,7 @@
         [enums (listof (or/c (cons/c enum? (-> any/c boolean?))
                              enum?))]
         #:pre/name (enums is-one-way-enum?)
-        "the enums must either have at least one one-way-enum?\n or must all either by flat-enum? or have predicates"
+        "the enums must either have at least one one-way-enum?\n or must all either be flat-enum? or have predicates"
         (or (and is-one-way-enum?
                  (not (unsupplied-arg? is-one-way-enum?)))
             (either-a-one-way-enum-or-all-have-predicates? enums))
@@ -89,7 +89,7 @@
         #:rest [rest (listof (or/c (cons/c enum? (-> any/c boolean?))
                                    enum?))]
         #:pre/name (first rest is-one-way-enum?)
-        "the enums must either have at least one one-way-enum?\n or must all either by flat-enum? or have predicates"
+        "the enums must either have at least one one-way-enum?\n or must all either be flat-enum? or have predicates"
         (or (and is-one-way-enum?
                  (not (unsupplied-arg? is-one-way-enum?)))
             (either-a-one-way-enum-or-all-have-predicates? (cons first rest)))
@@ -149,7 +149,7 @@
          (if (pair? i) (car i) i)))
      (define preds
        (for/list ([i (in-list enum/pairs)])
-         (if (pair? i) (cdr i) (enum-contract i))))
+         (if (pair? i) (cdr i) (flat-contract-predicate (enum-contract i)))))
      (let/ec k
        (parameterize ([give-up-escape (λ () (k #t))])
          (for ([x (in-range 10)])

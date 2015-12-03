@@ -4,8 +4,8 @@
          "signatures.rkt"
          "utils.rkt"
          syntax/parse racket/match
-         unstable/list syntax/stx
-         unstable/sequence
+         syntax/stx
+         racket/sequence
          (typecheck signatures tc-funapp)
          (types abbrev utils)
          (private type-annotation)
@@ -44,9 +44,9 @@
         [(tc-result1: (and t Poly?))
          (tc-expr/check #'quo (ret Univ))
          (tc/funapp #'op #'(quo arg)
-                    (instantiate-poly t (extend (list Univ Univ)
-                                                (stx-map type-annotation #'(i ...))
-                                                Univ))
+                    (instantiate-poly t (list-extend (list Univ Univ)
+                                                     (stx-map type-annotation #'(i ...))
+                                                     Univ))
                     (list (ret Univ) (single-value #'arg))
                     expected)]))
   ;; special-case for not - flip the filters

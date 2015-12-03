@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require syntax/parse syntax/stx unstable/sequence
+(require syntax/parse syntax/stx racket/sequence
          syntax/parse/experimental/template
          racket/match racket/syntax
          racket/promise
@@ -99,14 +99,15 @@
          (define-syntax-class unboxed-clauses
            #:attributes (bindings)
            (pattern (clauses:unboxed-clause ...)
-             #:attr bindings (delay (template ((?@ . clauses.bindings) ...)))))]
+             #:attr bindings (delay (template ((?@ . clauses.bindings) ...)))))
+         (define top-stx this-syntax)]
 
    #:attr opt
      (syntax-parse #'(clause ...)
       [clauses:unboxed-clauses
         (delay
           (quasisyntax/loc/origin
-            this-syntax #'letk.kw
+            top-stx #'letk.kw
             (letk.key ... clauses.bindings body.opt ...)))])))
 
 
@@ -168,9 +169,7 @@
            ;; and the bindings for the final results refer to them
            #:with (key ...) #'(let*-values))
   (pattern (~and kw letrec-values)
-           #:with (key ...) #'(kw))
-  (pattern (~seq (~and kw letrec-syntaxes+values) stx-bindings)
-           #:with (key ...) #'(kw stx-bindings)))
+           #:with (key ...) #'(kw)))
 
 
 (define (direct-child-of? v exp)
@@ -190,6 +189,9 @@
 
   (define (rec exp)
     (syntax-parse exp
+      ;; if there are unreachable expressions in the body, we can't check
+      ;; if it's worth unboxing, so just give up
+      [_:ignore-table^ #f]
       ;; can be used in a complex arithmetic expr, can be a direct child
       [(~and (~not :id) exp:float-complex-arith-expr)
        (or (direct-child-of? v #'exp)

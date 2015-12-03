@@ -18,7 +18,7 @@
   (define idx-map (make-hash))
   (parameterize ([ZOS (make-hash)]
                  [MODULE-IDX-MAP idx-map]
-                 [PHASE*MODULE-CACHE (make-hash)])
+                 [PHASE*MODULE-CACHE (make-hasheq)])
     (define (get-modvar-rewrite modidx)
       (define pth (mpi->path* modidx))
       (hash-ref idx-map pth
@@ -107,9 +107,9 @@
 
 (define (nodep top phase)
   (match top
-    [(struct compilation-top (max-let-depth prefix form))
+    [(struct compilation-top (max-let-depth binding-namess prefix form))
      (define-values (modvar-rewrite lang-info new-form) (nodep-form form phase))
-     (values modvar-rewrite lang-info (make-compilation-top max-let-depth prefix new-form))]
+     (values modvar-rewrite lang-info (make-compilation-top max-let-depth #hash() prefix new-form))]
     [else (error 'nodep "unrecognized: ~e" top)]))
 
 (define (nodep-form form phase)
@@ -139,8 +139,10 @@
 
 (define (nodep-module mod-form phase)
   (match mod-form
-    [(struct mod (name srcname self-modidx prefix provides requires body syntax-bodies
-                       unexported max-let-depth dummy lang-info internal-context
+    [(struct mod (name srcname self-modidx
+                       prefix provides requires body syntax-bodies
+                       unexported max-let-depth dummy lang-info
+                       internal-context binding-names
                        flags pre-submodules post-submodules))
      (define new-prefix prefix)
      ;; Cache all the mpi paths
@@ -157,8 +159,9 @@
              (append (requires->modlist requires phase)
                      (if (and phase (zero? phase))
                          (begin (log-debug (format "[~S] lang-info : ~S" name lang-info)) ; XXX Seems to always be #f now
-                                (list (make-mod name srcname self-modidx new-prefix provides requires body empty
-                                                unexported max-let-depth dummy lang-info internal-context
+                                (list (make-mod name srcname self-modidx
+                                                new-prefix provides requires body empty
+                                                unexported max-let-depth dummy lang-info internal-context #hash()
                                                 empty empty empty)))
                          (begin (log-debug (format "[~S] Dropping module @ ~S" name phase))
                                 empty))))]              
@@ -194,13 +197,13 @@
          empty
          (begin
            (hash-set! REQUIRED ct #t)
-           (list (make-req (make-stx (make-wrapped ct empty 'clean)) (make-toplevel 0 0 #f #f)))))]
+           (list (make-req (make-stx (make-stx-obj ct (wrap empty empty empty) #f #hasheq() 'clean)) (make-toplevel 0 0 #f #f)))))]
     [(module-path-index? ct)
      (if (hash-has-key? REQUIRED ct)
          empty
          (begin
            (hash-set! REQUIRED ct #t)
-           (list (make-req (make-stx (make-wrapped ct empty 'clean)) (make-toplevel 0 0 #f #f)))))]
+           (list (make-req (make-stx (make-stx-obj ct (wrap empty empty empty) #f #hasheq() 'clean)) (make-toplevel 0 0 #f #f)))))]
     [(not ct)
      empty]
     [(@phase? ct)

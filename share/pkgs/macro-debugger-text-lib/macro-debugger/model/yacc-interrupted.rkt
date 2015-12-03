@@ -49,18 +49,17 @@
            (raise-syntax-error 'split "bad grammar option or alternate" #'other)])
         (values options (reverse alts)))))
 
-(define-for-syntax (I symbol)
-  (syntax-local-introduce
-   (syntax-local-get-shadower (datum->syntax #f symbol))))
+(define-for-syntax (mk-name ctx n)
+  (datum->syntax ctx (string->symbol (format "~a" n)) ctx))
 
-(define-for-syntax ($name n)
-  (I (format-symbol "$~a" n)))
+(define-for-syntax (mk-$name ctx n)
+  (mk-name ctx (format "$~a" n)))
 
 (define-for-syntax (interrupted-name id)
-  (I (format-symbol "~a/Interrupted" (syntax-e id))))
+  (datum->syntax id (format-symbol "~a/Interrupted" (syntax-e id)) id))
 
 (define-for-syntax (skipped-name id)
-  (I (format-symbol "~a/Skipped" (syntax-e id))))
+  (datum->syntax id (format-symbol "~a/Skipped" (syntax-e id)) id))
 
 (define-for-syntax (elaborate-skipped-tail head tail position args mk-action)
   (define-values (new-tail new-arguments)
@@ -81,7 +80,7 @@
          (loop #'parts-rest
                (add1 position)
                (cons (skipped-name #'NT) rtail)
-               (cons ($name position) arguments))])))
+               (cons (mk-$name #'NT position) arguments))])))
   (define arguments (append (reverse args) new-arguments))
   (cons #`(#,head . #,new-tail)
         (mk-action arguments)))
@@ -102,7 +101,7 @@
         [(NT . parts-rest)
          (identifier? #'NT)
          (loop #'parts-rest (cons #'NT rpattern)
-               (add1 position) (cons ($name position) args))])))
+               (add1 position) (cons (mk-$name #'NT position) args))])))
   (map (lambda (new-pattern)
          (cons (datum->syntax #f new-pattern pattern)
                #`(#,action-function #,(if wrap? okW #'values) #,@arguments)))
@@ -122,20 +121,22 @@
       [(! . parts-rest)
        (cons
         ;; Error occurs
-        (elaborate-skipped-tail (I 'syntax-error)
-                                #'parts-rest
-                                (add1 position)
-                                (cons ($name position) args)
-                                int-action)
+        (let ([id (mk-name (car (syntax-e parts)) 'syntax-error)])
+          (elaborate-skipped-tail id
+                                  #'parts-rest
+                                  (add1 position)
+                                  (cons (mk-$name id position) args)
+                                  int-action))
         ;; Error doesn't occur
         (loop #'parts-rest position (cons #'#f args)))]
       [(!!)
        (cons
-        (elaborate-skipped-tail (I 'syntax-error)
-                                #'()
-                                (add1 position)
-                                (cons ($name position) args)
-                                int-action)
+        (let ([id (mk-name (car (syntax-e parts)) 'syntax-error)])
+          (elaborate-skipped-tail id
+                                  #'()
+                                  (add1 position)
+                                  (cons (mk-$name id position) args)
+                                  int-action))
         null)]
       [((? NT) . parts-rest)
        (cons 
@@ -143,14 +144,15 @@
         (elaborate-skipped-tail (interrupted-name #'NT)
                                 #'parts-rest
                                 (add1 position)
-                                (cons ($name position) args)
+                                (cons (mk-$name #'NT position) args)
                                 int-action)
         ;; NT is not interrupted
         (loop #'(NT . parts-rest) position args))]
       [(part0 . parts-rest)
        (identifier? #'part0)
        (map (lambda (clause) (cons #`(part0 . #,(car clause)) (cdr clause)))
-            (loop #'parts-rest (add1 position) (cons ($name position) args)))])))
+            (loop #'parts-rest (add1 position) (cons (mk-$name #'part0 position)
+                                                     args)))])))
 
 (define-for-syntax (generate-action-name nt pos)
   (syntax-local-get-shadower
@@ -159,13 +161,13 @@
 (define-for-syntax ((make-rewrite-alt+def nt args-spec) alt pos)
   (define pattern (car alt))
   (define action (cdr alt))
-  (define-values (var-indexes non-var-indexes)
-    (let loop ([pattern pattern] [n 1] [vars null] [nonvars null])
+  (define variables
+    (let loop ([pattern pattern] [n 1] [vars null])
       (syntax-case pattern ()
         [(first . more)
          (syntax-case #'first (! ? !!)
            [!
-            (loop #'more (add1 n) (cons n vars) nonvars)]
+            (loop #'more (add1 n) (cons (mk-$name #'first n) vars))]
            [(! . _)
             (raise-syntax-error 'split
                                 "misuse of ! grammar form"
@@ -175,40 +177,36 @@
               (raise-syntax-error 'split
                                   "nothing may follow !!"
                                   pattern))
-            (loop #'more (add1 n) (cons n vars) nonvars)]
+            (loop #'more (add1 n) (cons (mk-$name #'first n) vars))]
            [(!! . _)
             (raise-syntax-error 'split
                                 "misuse of !! grammar form"
                                 pattern #'first)]
            [(? NT)
             (identifier? #'NT)
-            (loop #'more (add1 n) (cons n vars) nonvars)]
+            (loop #'more (add1 n) (cons (mk-$name #'NT n) vars))]
            [(? . _)
             (raise-syntax-error 'split
                                 "misuse of ? grammar form"
                                 pattern #'first)]
            [NT
             (identifier? #'NT)
-            (loop #'more (add1 n) (cons n vars) nonvars)]
+            (loop #'more (add1 n) (cons (mk-$name #'NT n) vars))]
            [other
             (raise-syntax-error 'rewrite-pattern
                                 "invalid grammar pattern"
                                 pattern #'first)])]
         [()
-         (values (reverse vars) (reverse nonvars))])))
-  (define variables (map $name var-indexes))
-  (define non-var-names (map $name non-var-indexes))
+         (reverse vars)])))
   (define action-function (generate-action-name nt pos))
   (cons (cons pattern action-function)
         (with-syntax ([(var ...) variables]
-                      [(nonvar ...) non-var-names]
                       [action-function action-function]
                       [action action])
           #`(define (action-function wrap var ...)
-              (let-syntax ([nonvar invalid-$name-use] ...)
-                #,(if args-spec
-                      #`(lambda #,args-spec (wrap action))
-                      #`(wrap action)))))))
+              #,(if args-spec
+                    #`(lambda #,args-spec (wrap action))
+                    #`(wrap action))))))
 
 (define-for-syntax (invalid-$name-use stx)
   (raise-syntax-error #f "no value for positional variable" stx))

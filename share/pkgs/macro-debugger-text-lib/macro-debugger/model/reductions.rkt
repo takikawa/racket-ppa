@@ -557,6 +557,13 @@
               ([#:rename ?block (wlderiv-es1 pass2)]
                [#:set-syntax (wlderiv-es1 pass2)]
                [List ?block pass2])])]
+    ;; Alternatively, allow lists, since `let`, etc., bodies
+    ;; (generated form an internal definition context) are
+    ;; processed as a list.
+    [(Wrap lderiv (es1 es2 ?1 derivs))
+     (R [! ?1]
+        [#:pattern (?form ...)]
+        [Expr (?form ...) derivs])]
     [#f
      (R)]))
 

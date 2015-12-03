@@ -1,14 +1,15 @@
 #lang racket/base
 (require racket/class
-         unstable/class-iop
+         racket/class/iop
          macro-debugger/syntax-browser/interfaces
          macro-debugger/syntax-browser/partition
-         unstable/gui/notify)
+         framework/notify)
 (provide controller%)
 
 ;; displays-manager-mixin
 (define displays-manager-mixin
   (mixin () (displays-manager<%>)
+    (super-new)
     ;; displays : (list-of display<%>)
     (field [displays null])
 
@@ -20,51 +21,53 @@
     (define/public (remove-all-syntax-displays)
       (set! displays null))
 
-    (super-new)))
+    ;; refresh-all-displays : -> void
+    (define/public (refresh-all-displays)
+      (for ([d (in-list displays)]) (send/i d display<%> refresh)))))
 
 ;; selection-manager-mixin
 (define selection-manager-mixin
   (mixin (displays-manager<%>) (selection-manager<%>)
-    (inherit-field displays)
-    (define-notify selected-syntax (new notify-box% (value #f)))
-
+    (inherit refresh-all-displays)
     (super-new)
+
+    (notify:define-notify selected-syntax (new notify:notify-box% (value #f)))
+
     (listen-selected-syntax
-     (lambda (new-value)
-       (for-each (lambda (display) (send/i display display<%> refresh))
-                 displays)))))
+     (lambda (new-value) (refresh-all-displays)))))
 
-;; mark-manager-mixin
-(define mark-manager-mixin
-  (mixin () (mark-manager<%>)
-    (init-field/i [primary-partition partition<%> (new-bound-partition)])
+;; relation-mixin
+(define relation-mixin
+  (mixin (displays-manager<%>) (relation<%>)
+    (inherit refresh-all-displays)
     (super-new)
 
-    ;; get-primary-partition : -> partition
-    (define/public-final (get-primary-partition)
-      primary-partition)
+    (notify:define-notify primary-partition-factory
+      (new notify:notify-box% (value new-macro-scopes-partition)))
+    (notify:define-notify primary-partition
+      (new notify:notify-box% (value ((get-primary-partition-factory)))))
+    (notify:define-notify identifier=?
+      (new notify:notify-box% (value #f)))
 
-    ;; reset-primary-partition : -> void
-    (define/public-final (reset-primary-partition)
-      (set! primary-partition (new-bound-partition)))))
+    (listen-primary-partition-factory
+     (lambda (f) (set-primary-partition (f))))
 
-;; secondary-relation-mixin
-(define secondary-relation-mixin
-  (mixin (displays-manager<%>) (secondary-relation<%>)
-    (inherit-field displays)
-    (define-notify identifier=? (new notify-box% (value #f)))
+    ;; (listen-primary-partition ...)
+    ;; When primary-partition changes, can't just refresh displays (doesn't
+    ;; change fg colors / suffixes); need to instead re-render entire contents.
+    ;; So the stepper handles that.
 
     (listen-identifier=?
-     (lambda (name+proc)
-       (for ([d (in-list displays)])
-         (send/i d display<%> refresh))))
-    (super-new)))
+     (lambda (proc) (refresh-all-displays)))
+
+    (define/public (reset-primary-partition)
+      (set-primary-partition ((get-primary-partition-factory))))
+    ))
 
 (define controller%
-  (class* (secondary-relation-mixin
+  (class* (relation-mixin
            (selection-manager-mixin
-            (mark-manager-mixin
-             (displays-manager-mixin
-              object%))))
+            (displays-manager-mixin
+             object%)))
     (controller<%>)
     (super-new)))

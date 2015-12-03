@@ -69,12 +69,16 @@
                      [def-ids (apply append (map (lambda (defn)
                                                    (syntax-case defn ()
                                                      [(_ (id ...) expr)
-                                                      (syntax->list (syntax (id ...)))]))
+                                                      (map
+                                                       syntax-local-identifier-as-binding
+                                                       (syntax->list (syntax (id ...))))]))
                                                  defns))]
                      [val-ids (apply append (map (lambda (defn)
                                                    (syntax-case defn (define-values)
                                                      [(define-values (id ...) expr)
-                                                      (syntax->list (syntax (id ...)))]
+                                                      (map
+                                                       syntax-local-identifier-as-binding
+                                                       (syntax->list (syntax (id ...))))]
                                                      [_else null]))
                                                  defns))])
                 (let ([dup (check-duplicate-identifier def-ids)])

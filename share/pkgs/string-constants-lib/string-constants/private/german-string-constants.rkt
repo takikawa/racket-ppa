@@ -71,7 +71,7 @@
  (bug-report-submit "Abschicken")
  (close-and-save-bug-report "Schließen && Speichern") ;; button in bug report dialog, next to cancel and bug-report-submit
  (bug-report-submit-menu-item "Bug-Report abschicken...") ;; in Help Menu (drs & help desk)
- (saved-bug-reports-menu-item "Gepeicherte Bug-Reports") ;; in Help Menu, submenu title
+ (saved-bug-reports-menu-item "Gespeicherte Bug-Reports") ;; in Help Menu, submenu title
  (disacard-all-saved-bug-reports "Alle gespeicherten Bug-Reports verwerfen") ;; menu item: only shows up when there is more than one saved bug report
  (no-saved-bug-reports "Kein Bug-Report wurde gespeichert") ;; an info message that shows up as a disabled menu item when no saved bug reports are around
  (new-bug-report "Neuer Bug-Report") ;; button label the user sees when there are saved bug reports, but the user asks to save another one.
@@ -93,6 +93,7 @@
  (cs-foreground-color "Vordergrundfarbe")
  (cs-background-color "Hintergrundfarbe")
  (cs-tack/untack-arrow "Pfeil befestigen/lösen")
+ (cs-tack-crossing-arrows "Querpfeile befestigen")
  (cs-jump-to-next-bound-occurrence "Zum nächsten gebundenen Vorkommen springen")
  (cs-jump-to-previous-bound-occurrence "Zum vorigen gebundenen Vorkommen springen")
  (cs-jump-to-binding "Zu bindendem Vorkommen springen")
@@ -110,6 +111,7 @@
  (cs-status-eval-compile-time "Syntaxprüfung: Compile-Time-Code ausführen")
  (cs-status-expanding-expression "Syntaxprüfung: Ausdruck expandieren")
  (cs-status-loading-docs-index "Syntaxprüfung: Dokumentations-Index laden")
+ (cs-syncheck-running "Syntaprüfung läuft")
  (cs-mouse-over-import "Bindung ~s importiert aus ~s")
 
  (cs-view-docs "Dokumentation für ~a anschauen")
@@ -403,6 +405,7 @@
  (warnings-prefs-panel-label "Warnmeldungen")
  (editor-prefs-panel-label "Editieren")
  (general-prefs-panel-label "Allgemein")
+ (editor-general-prefs-panel-label "Editieren allgemein")
  (highlight-parens "Geklammerten Text hervorheben")
  (fixup-open-brackets "Öffnende eckige Klammern automatisch anpassen")
  (fixup-close-parens "Schließende Klammern automatisch anpassen")
@@ -485,6 +488,11 @@
  (font-smoothing-some "Bißchen")
  (font-smoothing-all "Total")
  (font-smoothing-default "System-Einstellung verwenden")
+ (font-weight-label "Schriftstärke")
+ (font-weight-light "Leicht")
+ (font-weight-normal "Normal")
+ (font-weight-bold "Fett")
+
  (select-font-name "Schriftart-Name auswählen")
  (example-text "Beispieltext:")
  (only-warn-once "Nur einmal warnen, wenn Definitionen und Interaktionen nicht synchron sind")
@@ -670,6 +678,7 @@
 
  (paste-info "Ersetze die aktuelle Selektion durch die zuletzt kopierte oder ausgeschnittene Selektion")
  (paste-menu-item "&Einfügen")
+ (paste-and-indent-menu-item "Einfügen und Einrücken")
 
  (clear-info "Lösche die Selektion, ohne das Clipboard dabei zu ändern oder etwas einzufügen")
  (clear-menu-item-windows "&Löschen")
@@ -1048,6 +1057,9 @@
  (quasiquote-printing-style "Quasiquote")
  (write-printing-style "write")
  (print-printing-style "print")
+ (true-false-empty-style-label "True, False, Empty")
+ (true-false-empty-style-read "Quote-freundlich")
+ (true-false-empty-style-ids "Als Bezeichner")
  (sharing-printing-label "Zeige Sharing an")
  (use-pretty-printer-label "Zeilenumbrüche in Ausdruck einfügen")
  (input-syntax "Eingabesyntax")

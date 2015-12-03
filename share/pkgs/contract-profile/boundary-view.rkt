@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require racket/list unstable/list racket/match racket/contract racket/string
+(require racket/list racket/match racket/contract racket/string
          racket/set racket/dict
          profile/structs profile/utils
          "utils.rkt" "dot.rkt")

@@ -15,6 +15,7 @@
          "widget.rkt"
          "cursor.rkt"
          "pixbuf.rkt"
+	 "resolution.rkt"
          "../common/queue.rkt")
 
 (provide 
@@ -47,19 +48,24 @@
 (define-gtk gtk_window_set_focus_on_map (_fun _GtkWidget _gboolean -> _void))
 (define-gtk gtk_window_maximize (_fun _GtkWidget -> _void))
 (define-gtk gtk_window_unmaximize (_fun _GtkWidget -> _void))
-(define-gtk gtk_widget_set_uposition (_fun _GtkWidget _int _int -> _void))
+(define-gtk gtk_window_move (_fun _GtkWidget _int _int -> _void))
+(define-gtk gtk_widget_set_uposition (_fun _GtkWidget _int _int -> _void)
+  #:fail (lambda () (lambda (w x y) (gtk_window_move w x y))))
 (define-gtk gtk_window_get_position (_fun _GtkWidget (x : (_ptr o _int)) (y : (_ptr o _int)) 
                                           -> _void
                                           -> (values x y)))
 (define-gtk gtk_window_set_gravity (_fun _GtkWindow _int -> _void))
 (define-gtk gtk_window_set_icon_list (_fun _GtkWindow _GList -> _void))
 (define-gtk gtk_window_fullscreen (_fun _GtkWindow -> _void))
+(define-gtk gtk_window_unfullscreen (_fun _GtkWindow -> _void))
 (define-gtk gtk_window_get_focus (_fun _GtkWindow -> (_or-null _GtkWidget)))
 
 (define-gtk gtk_window_resize (_fun _GtkWidget _int _int -> _void))
 
 (define-gdk gdk_window_set_cursor (_fun _GdkWindow _pointer -> _void))
 (define-gdk gdk_screen_get_root_window (_fun _GdkScreen -> _GdkWindow))
+(define-gdk gdk_screen_get_monitor_scale_factor (_fun _GdkScreen _int -> _int)
+  #:fail (lambda () (lambda (s n) 1)))
 (define-gdk gdk_window_get_pointer (_fun _GdkWindow 
                                          (x : (_ptr o _int))
                                          (y : (_ptr o _int))
@@ -83,6 +89,8 @@
                               [win_gravity _int]))
 (define-gtk gtk_window_set_geometry_hints (_fun _GtkWindow _GtkWidget _GdkGeometry-pointer _int -> _void))
 
+(define-gtk gtk_layout_new (_fun (_pointer = #f) (_pointer = #f) -> _GtkWidget))
+(define-gtk gtk_layout_put (_fun _GtkWidget _GtkWidget _int _int -> _void))
 
 (define-signal-handler connect-delete "delete-event"
   (_fun _GtkWidget -> _gboolean)
@@ -100,10 +108,10 @@
     (let ([wx (gtk->wx gtk)])
       (when wx
         (send wx remember-size 
-              (GdkEventConfigure-x a)
-              (GdkEventConfigure-y a)
-              (GdkEventConfigure-width a)
-              (GdkEventConfigure-height a))))
+              (->normal (GdkEventConfigure-x a))
+              (->normal (GdkEventConfigure-y a))
+              (->normal (GdkEventConfigure-width a))
+              (->normal (GdkEventConfigure-height a)))))
     #f))
 
 (define-cstruct _GdkEventWindowState ([type _int]
@@ -155,7 +163,7 @@
 
     (inherit get-gtk set-size
              pre-on-char pre-on-event
-             get-client-delta get-size
+             get-stored-client-delta get-size
              get-parent get-eventspace
              adjust-client-delta
              queue-on-size)
@@ -171,22 +179,24 @@
     (when floating?
       (gtk_window_set_keep_above gtk #t)
       (gtk_window_set_focus_on_map gtk #f))
-    (define-values (vbox-gtk panel-gtk)
+    (define-values (vbox-gtk layout-gtk panel-gtk)
       (atomically
        (let ([vbox-gtk (gtk_vbox_new #f 0)]
+             [layout-gtk (and gtk3? (gtk_layout_new))]
              [panel-gtk (gtk_fixed_new)])
          (gtk_container_add gtk vbox-gtk)
-         (gtk_box_pack_end vbox-gtk panel-gtk #t #t 0)
-         (values vbox-gtk panel-gtk))))
+         (gtk_box_pack_end vbox-gtk (or layout-gtk panel-gtk) #t #t 0)
+	 (when layout-gtk
+	   (gtk_layout_put layout-gtk panel-gtk 0 0))
+         (values vbox-gtk layout-gtk panel-gtk))))
     (gtk_widget_show vbox-gtk)
+    (when layout-gtk (gtk_widget_show layout-gtk))
     (gtk_widget_show panel-gtk)
     (connect-enter-and-leave gtk)
 
     ;; Enable key events on the panel to catch events
     ;; that would otherwise go undelivered:
-    (set-gtk-object-flags! panel-gtk
-			   (bitwise-ior (get-gtk-object-flags panel-gtk)
-					GTK_CAN_FOCUS))
+    (gtk_widget_set_can_focus panel-gtk #t)
     (gtk_widget_add_events panel-gtk (bitwise-ior GDK_KEY_PRESS_MASK
 						  GDK_KEY_RELEASE_MASK))
     (connect-key panel-gtk)
@@ -226,14 +236,14 @@
     ;(gtk_window_add_accel_group (widget-window gtk) the-accelerator-group)
 
     (define/override (set-child-size child-gtk x y w h)
-      (gtk_fixed_move panel-gtk child-gtk x y)
-      (gtk_widget_set_size_request child-gtk w h))
+      (gtk_fixed_move panel-gtk child-gtk (->screen x) (->screen y))
+      (gtk_widget_set_size_request child-gtk (->screen w) (->screen h)))
 
     (define/public (on-close) #t)
 
     (define/public (set-menu-bar mb)
       (let ([mb-gtk (send mb get-gtk)])
-        (gtk_box_pack_start vbox-gtk mb-gtk #t #t 0)
+	(gtk_box_pack_start vbox-gtk mb-gtk #f #f 0)
         (gtk_widget_show mb-gtk))
       (let ([h (send mb set-top-window this)])
         ;; adjust client delta right away, so that we make
@@ -252,13 +262,13 @@
     (define saved-enforcements (vector 0 0 -1 -1))
 
     (define/public (enforce-size min-x min-y max-x max-y inc-x inc-y)
-      (define (to-max v) (if (= v -1) #x3FFFFF v))
+      (define (to-max v) (if (= v -1) #x3FFFFF (->screen v)))
       (set! saved-enforcements (vector min-x min-y max-x max-y))
       (gtk_window_set_geometry_hints gtk gtk 
-                                     (make-GdkGeometry min-x min-y
+                                     (make-GdkGeometry (->screen min-x) (->screen min-y)
                                                        (to-max max-x) (to-max max-y)
                                                        0 0
-                                                       inc-x inc-y
+                                                       (->screen inc-x) (->screen inc-y)
                                                        0.0 0.0
                                                        0)
                                      (bitwise-ior GDK_HINT_MIN_SIZE
@@ -306,12 +316,12 @@
     (define/public (set-top-position x y)
       (unless (and (not x) (not y))
         (gtk_widget_set_uposition gtk
-                                  (or x -2)
-                                  (or y -2))))
+                                  (or (and x (->screen x)) -2)
+                                  (or (and y (->screen y)) -2))))
 
     (define/override (really-set-size gtk x y processed-x processed-y w h)
       (set-top-position x y)
-      (gtk_window_resize gtk (max 1 w) (max 1 h)))
+      (gtk_window_resize gtk (max 1 (->screen w)) (max 1 (->screen h))))
 
     (define/override (show on?)
       (let ([es (get-eventspace)])
@@ -442,8 +452,7 @@
       (let ([f-gtk (gtk_window_get_focus gtk)])
         (and f-gtk
              (or even-if-not-active?
-                 (positive? (bitwise-and (get-gtk-object-flags f-gtk)
-                                         GTK_HAS_FOCUS)))
+		 (gtk_widget_has_focus f-gtk))
              (gtk->wx f-gtk))))
     
     (define/override (call-pre-on-event w e)
@@ -454,10 +463,10 @@
     (define/override (internal-client-to-screen x y)
       (gtk_window_set_gravity gtk GDK_GRAVITY_STATIC)
       (let-values ([(dx dy) (gtk_window_get_position gtk)]
-                   [(cdx cdy) (get-client-delta)])
+                   [(cdx cdy) (get-stored-client-delta)])
         (gtk_window_set_gravity gtk GDK_GRAVITY_NORTH_WEST)
-        (set-box! x (+ (unbox x) dx cdx))
-        (set-box! y (+ (unbox y) dy cdy))))
+        (set-box! x (+ (unbox x) (->normal (+ dx cdx))))
+        (set-box! y (+ (unbox y) (->normal (+ dy cdy))))))
 
     (define/public (on-toolbar-click) (void))
     (define/public (on-menu-click) (void))
@@ -505,6 +514,7 @@
       
     (define maximized? #f)
     (define is-iconized? #f)
+    (define fullscreen? #f)
     
     (define/public (is-maximized?)
       maximized?)
@@ -514,6 +524,8 @@
     (define/public (on-window-state changed value)
       (when (positive? (bitwise-and changed GDK_WINDOW_STATE_MAXIMIZED))
         (set! maximized? (positive? (bitwise-and value GDK_WINDOW_STATE_MAXIMIZED))))
+      (when (positive? (bitwise-and changed GDK_WINDOW_STATE_FULLSCREEN))
+	(set! fullscreen? (positive? (bitwise-and value GDK_WINDOW_STATE_FULLSCREEN))))
       (when (positive? (bitwise-and changed GDK_WINDOW_STATE_ICONIFIED))
         (set! is-iconized? (positive? (bitwise-and value GDK_WINDOW_STATE_ICONIFIED)))))
 
@@ -524,8 +536,12 @@
           (gtk_window_iconify gtk)
           (gtk_window_deiconify gtk)))
 
-    (define/public (fullscreened?) #f)
-    (define/public (fullscreen on?) (void))
+    (define/public (fullscreened?)
+      fullscreen?)
+    (define/public (fullscreen on?)
+      (if on?
+	  (gtk_window_fullscreen gtk)
+	  (gtk_window_unfullscreen gtk)))
       
     (def/public-unimplemented get-menu-bar)
 
@@ -555,22 +571,27 @@
 
 (define (display-origin x y all? num fail)
   (let ([r (monitor-rect num fail)])
-    (set-box! x (- (GdkRectangle-x r)))
-    (set-box! y (- (GdkRectangle-y r)))))
+    (set-box! x (->normal (- (GdkRectangle-x r))))
+    (set-box! y (->normal (- (GdkRectangle-y r))))))
 
 (define (display-size w h all? num fail)
   (let ([r (monitor-rect num fail)])
-    (set-box! w (GdkRectangle-width r))
-    (set-box! h (GdkRectangle-height r))))
+    (set-box! w (->normal (GdkRectangle-width r)))
+    (set-box! h (->normal (GdkRectangle-height r)))))
 
 (define (display-count)
   (gdk_screen_get_n_monitors (gdk_screen_get_default)))
 
 (define (display-bitmap-resolution num fail)
+  (define (get) (* (or (get-interface-scale-factor num)
+		       1.0)
+		   (gdk_screen_get_monitor_scale_factor
+		    (gdk_screen_get_default)
+		    num)))
   (if (zero? num)
-      1.0
+      (get)
       (if (num . < . (gdk_screen_get_n_monitors (gdk_screen_get_default)))
-          1.0
+          (get)
           (fail))))
 
 (define (location->window x y)

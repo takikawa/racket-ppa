@@ -2,7 +2,7 @@
 (require racket/class
          racket/match
          racket/gui/base
-         unstable/class-iop
+         racket/class/iop
          "interfaces.rkt"
          "extensions.rkt"
          "hiding-panel.rkt"
@@ -14,7 +14,7 @@
          "cursor.rkt"
          "gui-util.rkt"
          "../syntax-browser/util.rkt"
-         unstable/gui/notify
+         framework/notify
          images/compile-time
          images/gui
          (for-syntax racket/base
@@ -86,7 +86,7 @@
       (cursor:next terms))
 
     ;; current-step-index : notify of number/#f
-    (define-notify current-step-index (new notify-box% (value #f)))
+    (notify:define-notify current-step-index (new notify:notify-box% (value #f)))
 
     ;; add-deriv : Deriv -> void
     (define/public (add-deriv d)
@@ -203,9 +203,10 @@
            (parent superarea)
            (stop-callback (lambda _ (stop-processing)))))
 
-    (send/i sbc sb:controller<%>
-           listen-selected-syntax
-           (lambda (stx) (send/i macro-hiding-prefs hiding-prefs<%> set-syntax stx)))
+    (send/i sbc sb:controller<%> listen-selected-syntax
+            (lambda (stx) (send/i macro-hiding-prefs hiding-prefs<%> set-syntax stx)))
+    (send/i sbc sb:controller<%> listen-primary-partition
+            (lambda (_p) (update/preserve-view)))
     (send config listen-pretty-abbrev?
           (lambda (_) (update/preserve-view)))
     (send*/i config config<%>

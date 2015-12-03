@@ -1,7 +1,7 @@
 #lang racket/base
 (require racket/class
          racket/contract/base
-         unstable/class-iop
+         racket/class/iop
          macro-debugger/model/trace
          "view/interfaces.rkt"
          "view/view.rkt")

@@ -17,7 +17,7 @@
          syntax/parse
          (only-in racket/list split-at)
          (typecheck internal-forms tc-envops)
-         unstable/sequence
+         racket/sequence
          racket/extflonum
          ;; Needed for current implementation of typechecking letrec-syntax+values
          (for-template (only-in racket/base letrec-values)
@@ -28,7 +28,7 @@
                     (only-in racket/private/class-internal find-method/who)))
 
 (import tc-if^ tc-lambda^ tc-app^ tc-let^ tc-send^ check-subforms^ tc-literal^
-        check-class^ tc-expression^)
+        check-class^ check-unit^ tc-expression^)
 (export tc-expr^)
 
 (define-literal-set tc-expr-literals #:for-label
@@ -123,6 +123,15 @@
       ;; a TR-annotated class
       [stx:tr:class^
        (check-class form expected)]
+      ;; Unit forms
+      [stx:tr:unit^
+       (check-unit form expected)]
+      [stx:tr:unit:invoke^
+       (check-invoke-unit form expected)]
+      [stx:tr:unit:compound^
+       (check-compound-unit form expected)]
+      [stx:tr:unit:from-context^
+       (check-unit-from-context form expected)]
       [stx:exn-handlers^
        (register-ignored! form)
        (check-subforms/with-handlers form expected) ]
@@ -139,7 +148,7 @@
          [_
           (ret (tc-literal #'val) -true-filter)])]
       ;; syntax
-      [(quote-syntax datum)
+      [(quote-syntax datum . _)
        (define expected-type
          (match expected
            [(tc-result1: t) t]
@@ -182,10 +191,6 @@
       [(#%plain-app . _) (tc/app form expected)]
       ;; #%expression
       [(#%expression e) (tc/#%expression form expected)]
-      ;; syntax
-      ;; for now, we ignore the rhs of macros
-      [(letrec-syntaxes+values stxs vals . body)
-       (tc-expr/check (syntax/loc form (letrec-values vals . body)) expected)]
       ;; begin
       [(begin . es)
        (tc-body/check #'es expected)]

@@ -5,8 +5,8 @@
          (rep type-rep filter-rep object-rep rep-utils)
          (utils tc-utils early-return)
          (types utils resolve base-abbrev match-expanders
-                numeric-tower substitute current-seen prefab)
-         (for-syntax racket/base syntax/parse unstable/sequence))
+                numeric-tower substitute current-seen prefab signatures)
+         (for-syntax racket/base syntax/parse racket/sequence))
 
 (lazy-require
   ("union.rkt" (Un))
@@ -241,7 +241,10 @@
   (define st (unsafe-Rep-seq t))
   (early-return
    #:return-when (or (eq? ss st) (seen? ss st A)) A
-   (define cr (hash-ref subtype-cache (cons ss st) 'missing))
+   (define cr (let ([inner (hash-ref subtype-cache st #f)])
+                (if inner
+                    (hash-ref inner ss 'missing)
+                    'missing)))
    #:return-when (boolean? cr) (and cr A)
    (define ks (unsafe-Type-key s))
    (define kt (unsafe-Type-key t))
@@ -289,6 +292,12 @@
           #f]
          [((or (? Struct? s1) (NameStruct: s1)) (Value: (? (negate struct?) _)))
           #f]
+         ;; from define-new-subtype
+         [((Distinction: nm1 id1 t1) (app resolve (Distinction: nm2 id2 t2)))
+          #:when (and (equal? nm1 nm2) (equal? id1 id2))
+          (subtype* A0 t1 t2)]
+         [((Distinction: _ _ t1) t2)
+          (subtype* A0 t1 t2)]
          ;; sequences are covariant
          [((Sequence: ts) (Sequence: ts*))
           (subtypes* A0 ts ts*)]
@@ -683,10 +692,23 @@
                (or (and init-rest init-rest*
                         (sub init-rest init-rest*))
                    (and (not init-rest) (not init-rest*))))]
+         [((? Unit?) (UnitTop:)) A0]
+         ;; For Unit types invoke-types are covariant
+         ;; imports and init-depends are covariant in that importing fewer
+         ;; signatures results in a subtype
+         ;; exports conversely are contravariant, subtypes export more signatures
+         [((Unit: imports exports init-depends t) (Unit: imports* exports* init-depends* t*))
+          (and (check-sub-signatures? imports* imports)
+               (check-sub-signatures? exports exports*)
+               (check-sub-signatures? init-depends* init-depends)
+               (subtype-seq A0
+                            (subtype* t t*)))]
          ;; otherwise, not a subtype
          [(_ _) #f])))
      (when (null? A)
-       (hash-set! subtype-cache (cons ss st) r))
+       (hash-set!
+         (hash-ref! subtype-cache st (lambda () (make-hash)))
+         ss r))
      r))
 
 (define (type-compare? a b)

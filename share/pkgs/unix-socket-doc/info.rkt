@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.3"))) (define collection (quote multi)) (define version "1.0") (define deps (quote (("base" #:version "6.2.900.10") "unix-socket-lib"))) (define build-deps (quote ("scribble-lib" "racket-doc"))) (define pkg-authors (quote (ryanc)))))

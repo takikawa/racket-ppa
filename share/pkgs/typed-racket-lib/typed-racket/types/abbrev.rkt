@@ -9,7 +9,7 @@
          racket/match
          racket/function
          racket/undefined
-         unstable/function
+         racket/function
 
          (prefix-in c: (contract-req))
          (rename-in (rep type-rep filter-rep object-rep)
@@ -68,6 +68,8 @@
 (define -inst make-Instance)
 (define (-prefab key . types)
   (make-Prefab (normalize-prefab-key key (length types)) types))
+(define -unit make-Unit)
+(define -signature make-Signature)
 
 (define (-seq . args) (make-Sequence args))
 
@@ -121,20 +123,23 @@
 (define/decl -Thread (make-Base 'Thread #'thread? thread?))
 (define/decl -Path (make-Base 'Path #'path? path?))
 (define/decl -Module-Path
-  (Un -Symbol -String -Path
-      (-lst* (-val 'quote) -Symbol)
-      (-lst* (-val 'lib) -String)
-      (-lst* (-val 'file) -String)
-      (-pair (-val 'planet)
-	     (Un (-lst* -Symbol)
-		 (-lst* -String)
-		 (-lst* -String
-			(-lst*
-			 -String -String
-			 #:tail (make-Listof
-				 (Un -Nat
-				     (-lst* (Un -Nat (one-of/c '= '+ '-))
-					    -Nat)))))))))
+  (-mu X
+       (Un -Symbol -String -Path
+           (-lst* (-val 'quote) -Symbol)
+           (-lst* (-val 'lib) -String)
+           (-lst* (-val 'file) -String)
+           (-pair (-val 'planet)
+                  (Un (-lst* -Symbol)
+                      (-lst* -String)
+                      (-lst* -String
+                             (-lst*
+                              -String -String
+                              #:tail (make-Listof
+                                      (Un -Nat
+                                          (-lst* (Un -Nat (one-of/c '= '+ '-))
+                                                 -Nat)))))))
+           (-lst* (-val 'submod) X
+                  #:tail (-lst (Un -Symbol (-val "..")))))))
 (define/decl -Resolved-Module-Path (make-Base 'Resolved-Module-Path #'resolved-module-path? resolved-module-path?))
 (define/decl -Module-Path-Index (make-Base 'Module-Path-Index #'module-path-index? module-path-index?))
 (define/decl -Compiled-Module-Expression (make-Base 'Compiled-Module-Expression #'compiled-module-expression? compiled-module-expression?))
@@ -282,6 +287,10 @@
 
 (define-syntax-rule (->opt args ... [opt ...] res)
   (opt-fn (list args ...) (list opt ...) res))
+
+;; from define-new-subtype
+(define (-Distinction name sym ty)
+  (make-Distinction name sym ty))
 
 ;; class utilities
 

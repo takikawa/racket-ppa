@@ -373,14 +373,18 @@
                                       #'rhs def-ctx)
                                      (loop (cdr exprs)
                                            idss rhss
-                                           (cons #'(id ...) stx-idss)
+                                           (cons (map syntax-local-identifier-as-binding
+                                                      (syntax->list #'(id ...)))
+                                                 stx-idss)
                                            (cons #'rhs stx-rhss)))]
                                   [(define-values (id ...) rhs)
                                    (andmap identifier? (syntax->list #'(id ...)))
                                    (let ([ids (syntax->list #'(id ...))])
                                      (syntax-local-bind-syntaxes ids #f def-ctx)
                                      (loop (cdr exprs)
-                                           (cons #'(id ...) idss)
+                                           (cons (map syntax-local-identifier-as-binding
+                                                      (syntax->list #'(id ...)))
+                                                 idss)
                                            (cons #'rhs rhss)
                                            stx-idss stx-rhss))]
                                   [else 

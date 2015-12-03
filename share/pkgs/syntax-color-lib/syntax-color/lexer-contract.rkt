@@ -1,6 +1,6 @@
 #lang racket/base
 (require racket/contract/base
-         unstable/options)
+         racket/contract/option)
 (provide lexer/c (struct-out dont-stop))
 
 (struct dont-stop (val) #:transparent)

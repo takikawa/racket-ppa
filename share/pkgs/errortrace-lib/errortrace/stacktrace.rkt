@@ -90,7 +90,7 @@
                                       (cons (original-stx) (expanded-stx))
                                       make-new-recover)
                            (make-new-recover)))
-       (define better-stx (and stx (recover stx)))
+       (define better-stx (or (and stx (recover stx)) stx))
        (with-syntax ([quote (syntax-shift-phase-level #'quote phase)])
          #`(quote (#,(short-version better-stx 10)
                    #,(syntax-source stx)
@@ -159,7 +159,7 @@
                     [register-profile-start register-profile-start]
                     [register-profile-done register-profile-done]
                     [app (syntax-shift-phase-level #'#%plain-app (- phase base-phase))]
-                    [lt (syntax-shift-phase-level #'let (- phase base-phase))]
+                    [lt (syntax-shift-phase-level #'let-values (- phase base-phase))]
                     [qt (syntax-shift-phase-level #'quote (- phase base-phase))]
                     [bgn (syntax-shift-phase-level #'begin (- phase base-phase))]
                     [wcm (syntax-shift-phase-level #'with-continuation-mark (- phase base-phase))])
@@ -169,7 +169,7 @@
                         bodies
                         phase)])
           (syntax
-           (lt ([start (app (qt register-profile-start) (qt key))])
+           (lt ([(start) (app (qt register-profile-start) (qt key))])
              (wcm 
               (qt profile-key)
               (qt key)
@@ -199,7 +199,7 @@
          (identifier? sexpr)
          (syntax (bgn e expr))]
         [(quote _) (syntax (bgn e expr))]
-        [(quote-syntax _) (syntax (bgn e expr))]
+        [(quote-syntax . _) (syntax (bgn e expr))]
         [(#%top . d) (syntax (bgn e expr))]
         [(#%variable-reference . d) (syntax (bgn e expr))]
         
@@ -300,7 +300,7 @@
   (define ((simple-rhs? phase) expr)
     (kernel-syntax-case/phase expr phase
       [(quote _) #t]
-      [(quote-syntax _) #t]
+      [(quote-syntax . _) #t]
       [(#%plain-lambda . _) #t]
       [(case-lambda . _) #t]
       [_else #f]))
@@ -462,9 +462,9 @@
                          (add1 phase)))]
 
          [(module name init-import mb)
-          (annotate-module expr disarmed-expr)]
+          (annotate-module expr disarmed-expr 0)]
          [(module* name init-import mb)
-          (annotate-module expr disarmed-expr)]
+          (annotate-module expr disarmed-expr (if (syntax-e #'init-import) 0 phase))]
          
          [(#%expression e)
           (rearm expr #`(#%expression #,(no-cache-annotate (syntax e) phase)))]
@@ -478,7 +478,7 @@
          ;; No error possible
          [(quote _)
           expr]
-         [(quote-syntax _)
+         [(quote-syntax . _)
           expr]
          
          ;; Wrap body, also a profile point
@@ -620,14 +620,17 @@
                                            no-cache-annotate phase)))])]
          
          [_else
-          (error 'errortrace "unrecognized expression form~a: ~.s"
+          (error 'errortrace "unrecognized expression form~a~a: ~.s"
                  (if top? " at top-level" "")
+                 (if (zero? phase) "" (format " at phase ~a" phase))
                  (syntax->datum expr))])
        expr
        phase)))
 
-  (define (annotate-module expr disarmed-expr)
-    (syntax-case disarmed-expr ()
+  (define (annotate-module expr disarmed-expr phase)
+    (define shifted-disarmed-expr
+      (syntax-shift-phase-level disarmed-expr (- phase)))
+    (syntax-case shifted-disarmed-expr ()
       [(mod name init-import mb)
        (syntax-case (disarm #'mb) ()
          [(__plain-module-begin body ...)
@@ -639,13 +642,15 @@
                   [mb #'mb])
               (rearm
                expr
-               (rebuild
-                disarmed-expr
-                (list (cons
-                       mb
-                       (rearm
+               (syntax-shift-phase-level
+                (rebuild
+                 shifted-disarmed-expr
+                 (list (cons
                         mb
-                        (rebuild mb (map cons bodys bodyl)))))))))])]))
+                        (rearm
+                         mb
+                         (rebuild mb (map cons bodys bodyl))))))
+                phase))))])]))
   
   (define no-cache-annotate (make-annotate #f #f))
   (define (annotate expr phase)

@@ -2,7 +2,7 @@
 (require racket/class
          racket/match
          racket/gui/base
-         unstable/class-iop
+         racket/class/iop
          "interfaces.rkt"
          macro-debugger/model/steps
 	 (prefix-in sb: macro-debugger/syntax-browser/interfaces)

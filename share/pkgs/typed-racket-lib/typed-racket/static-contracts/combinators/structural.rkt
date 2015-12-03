@@ -8,12 +8,13 @@
          racket/match
          (for-syntax racket/base racket/syntax syntax/stx syntax/parse)
          racket/set
-         unstable/contract
+         racket/sequence
          (for-template racket/base
                        racket/contract/base
                        racket/set
                        racket/async-channel
-                       unstable/contract
+                       racket/sequence
+                       racket/promise
                        "../../utils/evt-contract.rkt")
          racket/contract
          racket/async-channel)
@@ -152,7 +153,7 @@
   ((set/sc (#:covariant #:chaperone)) set/c #:flat)
   ((vector/sc . (#:invariant)) vector/c #:chaperone)
   ((vectorof/sc (#:invariant)) vectorof #:chaperone)
-  ((promise/sc (#:covariant)) promise/c #:chaperone)
+  ((promise/sc (#:covariant)) (λ (x) (and/c (promise/c x) (not/c promise/name?))) #:chaperone)
   ((syntax/sc (#:covariant #:flat)) syntax/c #:flat)
   ((hash/sc (#:invariant #:flat) (#:invariant)) hash/c #:chaperone)
   ((box/sc (#:invariant)) box/c #:chaperone)

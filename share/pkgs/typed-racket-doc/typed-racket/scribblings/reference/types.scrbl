@@ -21,6 +21,8 @@
 
 @defidform[Any]{Any Racket value. All other types are subtypes of @racket[Any].}
 
+@defidform[AnyValues]{Any number of Racket values of any type.}
+
 @defidform[Nothing]{The empty type.  No values inhabit this type, and
 any expression of this type will not evaluate to a value.}
 
@@ -740,7 +742,7 @@ functions and continuation mark functions.
 @defform*[[(All (a ...) t)
            (All (a ... a ooo) t)]]{
   is a parameterization of type @racket[t], with
-  type variables @racket[v ...].  If @racket[t] is a function type
+  type variables @racket[a ...].  If @racket[t] is a function type
       constructed with infix @racket[->], the outer pair of parentheses
       around the function type may be omitted.
       @ex[(: list-length : (All (A) (Listof A) -> Natural))

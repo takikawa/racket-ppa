@@ -1,14 +1,18 @@
 #lang racket/base
-(require ffi/unsafe
+(require racket/promise
+	 ffi/unsafe
          ffi/unsafe/define
          ffi/unsafe/alloc
          racket/string
          racket/draw/unsafe/glib
          (only-in '#%foreign ctype-c->scheme)
+	 "gtk3.rkt"
          "../common/utils.rkt"
-         "types.rkt")
+         "types.rkt"
+	 "resolution.rkt")
 
-(provide 
+(provide
+ gtk3?
  define-mz
  define-gobj
  define-glib
@@ -48,29 +52,38 @@
               gdk_screen_get_default
 
               ;; for declaring derived structures:
-              _GtkObject)
+              _GtkObject
+
+	      ;; window size adjustments for screen scale:
+	      ->screen ->screen* ->normal)
  mnemonic-string)
 
 (define gdk-lib 
   (case (system-type)
-    [(windows) 
+    [(windows)
      (ffi-lib "libatk-1.0-0")
      (ffi-lib "libgio-2.0-0")
      (ffi-lib "libgdk_pixbuf-2.0-0")
      (ffi-lib "libgdk-win32-2.0-0")]
-    [else (ffi-lib "libgdk-x11-2.0" '("0" ""))]))
+    [else (if gtk3?
+	      (get-gdk3-lib)
+	      (ffi-lib "libgdk-x11-2.0" '("0" "")))]))
 (define gdk_pixbuf-lib 
   (case (system-type)
     [(windows)
      (ffi-lib "libgdk_pixbuf-2.0-0")]
     [(unix)
-     (ffi-lib "libgdk_pixbuf-2.0" '("0" ""))]
+     (if gtk3?
+	 #f
+	 (ffi-lib "libgdk_pixbuf-2.0" '("0" "")))]
     [else gdk-lib]))
 (define gtk-lib
   (case (system-type)
     [(windows) 
      (ffi-lib "libgtk-win32-2.0-0")]
-    [else (ffi-lib "libgtk-x11-2.0" '("0" ""))]))
+    [else (if gtk3?
+	      (get-gtk3-lib)
+	      (ffi-lib "libgtk-x11-2.0" '("0" "")))]))
 
 (define-ffi-definer define-gtk gtk-lib)
 (define-ffi-definer define-gdk gdk-lib)
@@ -114,8 +127,9 @@
 (define-gobj g_object_get_data (_fun _GtkWidget _string -> _pointer))
 
 (define-gobj g_signal_connect_data (_fun _gpointer _string _fpointer _pointer _fnpointer _int -> _ulong))
-(define (g_signal_connect obj s proc user-data)
-  (g_signal_connect_data obj s proc user-data #f 0))
+(define G_CONNECT_AFTER 1)
+(define (g_signal_connect obj s proc user-data after?)
+  (g_signal_connect_data obj s proc user-data #f (if after? G_CONNECT_AFTER 0)))
 
 (define-gobj g_object_get (_fun _GtkWidget (_string = "window") 
 				[w : (_ptr o _GdkWindow)]
@@ -133,7 +147,8 @@
 (define (get-gtk-object-flags gtk)
   (GtkObject-flags (cast gtk _pointer _GtkObject-pointer)))
 (define (set-gtk-object-flags! gtk v)
-  (set-GtkObject-flags! (cast gtk _pointer _GtkObject-pointer) v))
+  (unless gtk3?
+    (set-GtkObject-flags! (cast gtk _pointer _GtkObject-pointer) v)))
 
 (define-gmodule g_module_open (_fun _path _int -> _pointer))
 
@@ -146,8 +161,8 @@
     (define handler-proc proc)
     (define handler_function
       (function-ptr handler-proc (_fun #:atomic? #t . args)))
-    (define (connect-name gtk [user-data #f])
-      (g_signal_connect gtk signal-name handler_function user-data))))
+    (define (connect-name gtk [user-data #f] #:after? [after? #f])    
+      (g_signal_connect gtk signal-name handler_function user-data after?))))
 
 
 (define _gpath/free
@@ -196,3 +211,36 @@
        "__")
       "_\\1"))
    "&"))
+
+;; ----------------------------------------
+
+(define screen-scale-factor/promise
+  (delay
+    (inexact->exact (get-interface-scale-factor 0))))
+
+(define (->screen x)
+  (define screen-scale-factor
+    (force screen-scale-factor/promise))
+  (and x
+       (if (= screen-scale-factor 1)
+	   x
+	   (if (exact? x)
+	       (ceiling (* x screen-scale-factor))
+	       (* x screen-scale-factor)))))
+(define (->screen* x)
+  (define screen-scale-factor
+    (force screen-scale-factor/promise))
+  (if (and (not (= screen-scale-factor 1))
+	   (exact? x))
+      (floor (* x screen-scale-factor))
+      (->screen x)))
+
+(define (->normal x)
+  (define screen-scale-factor
+    (force screen-scale-factor/promise))
+  (and x
+       (if (= screen-scale-factor 1)
+	   x
+	   (if (exact? x)
+	       (floor (/ x screen-scale-factor))
+	       (/ x screen-scale-factor)))))

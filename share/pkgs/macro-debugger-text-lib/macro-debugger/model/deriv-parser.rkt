@@ -462,9 +462,10 @@
 
     (PrimLetValues
      (#:args e1 e2 rs)
-     [(prim-let-values ! renames-let (? NextEEs) next-group (? EB))
+     [(prim-let-values ! renames-let (? NextEEs) next-group (? EB/EL))
       (make p:let-values e1 e2 rs $2 $3 $4 $6)])
 
+    ;; There's no primitive `let*-values`, anymore
     (PrimLet*Values
      (#:args e1 e2 rs)
      ;; let*-values with bindings is "macro-like"
@@ -479,18 +480,18 @@
 
     (PrimLetrecValues
      (#:args e1 e2 rs)
-     [(prim-letrec-values ! renames-let (? NextEEs) next-group (? EB))
+     [(prim-letrec-values ! renames-let (? NextEEs) next-group (? EB/EL))
       (make p:letrec-values e1 e2 rs $2 $3 $4 $6)])
 
     (PrimLetrecSyntaxes+Values
      (#:args e1 e2 rs)
      [(prim-letrec-syntaxes+values ! renames-letrec-syntaxes
-       (? PrepareEnv) (? NextBindSyntaxess) next-group (? EB) OptTag)
+       (? PrepareEnv) (? NextBindSyntaxess) next-group (? EB/EL) OptTag)
       (make p:letrec-syntaxes+values e1 e2 rs $2 $3 $4 $5 #f null $7 $8)]
      [(prim-letrec-syntaxes+values renames-letrec-syntaxes 
        PrepareEnv NextBindSyntaxess next-group
        prim-letrec-values
-       renames-let (? NextEEs) next-group (? EB) OptTag)
+       renames-let (? NextEEs) next-group (? EB/EL) OptTag)
       (make p:letrec-syntaxes+values e1 e2 rs #f $2 $3 $4 $7 $8 $10 $11)])
 
     ;; Atomic expressions
@@ -548,6 +549,13 @@
       (make p:set! e1 e2 rs $2 (cons $3 $4) $5 $7)]
      [(prim-set! Resolves (? MacroStep) (? EE))
       (make p:set!-macro e1 e2 rs #f ($3 e1 $2 $4))])
+    
+    ;; When an internal-definition context expands to `let`, `letrec`, etc.,
+    ;; then the body is processed as a list (since it has already been
+    ;; processed as a block)
+    (EB/EL
+     [((? EB)) $1]
+     [((? EL)) $1])
 
     ;; Blocks
     ;; EB Answer = BlockDerivation
@@ -561,24 +569,29 @@
 
     ;; BlockPass1 Answer = (list-of BRule)
     (BlockPass1
+     [(renames-block (? BlockPass1*))
+      (map (install-renames-block $1) $2)])
+
+    ;; BlockPass1 Answer = (list-of BRule)
+    (BlockPass1*
      (#:skipped null)
      [() null]
-     [((? BRule) (? BlockPass1))
+     [((? BRule) (? BlockPass1*))
       (cons $1 $2)])
 
     ;; BRule Answer = BRule
     (BRule
      [(next !!)
       (make b:error $2)]
-     [(next renames-block (? CheckImmediateMacro))
-      (make b:expr $2 $3)]
-     [(next renames-block CheckImmediateMacro prim-begin ! splice !)
-      (make b:splice $2 $3 $5 $6 $7)]
-     [(next renames-block CheckImmediateMacro prim-define-values ! rename-one !)
-      (make b:defvals $2 $3 $5 $6 $7)]
-     [(next renames-block CheckImmediateMacro
+     [(next (? CheckImmediateMacro))
+      (make b:expr '... $2)]
+     [(next CheckImmediateMacro prim-begin ! splice !)
+      (make b:splice '... $2 $4 $5 $6)]
+     [(next CheckImmediateMacro prim-define-values ! rename-one !)
+      (make b:defvals '... $2 $4 $5 $6)]
+     [(next CheckImmediateMacro
             prim-define-syntaxes ! rename-one ! (? PrepareEnv) (? BindSyntaxes))
-      (make b:defstx $2 $3 $5 $6 $7 $8 $9)])
+      (make b:defstx '... $2 $4 $5 $6 $7 $8)])
 
     ;; BindSyntaxes Answer = Derivation
     (BindSyntaxes
@@ -608,3 +621,18 @@
      [(next (? EE) (? EL*)) (cons $2 $3)])
 
     )))
+
+;; Used to move a `renames` block that is provided once into each of
+;; a list of brules, since the old expander provided the renames for
+;; each brule
+(define ((install-renames-block renames) b)
+  (cond
+   [(b:expr? b)
+    (struct-copy b:expr b [renames #:parent brule renames])]
+   [(b:splice? b)
+    (struct-copy b:splice b [renames #:parent brule renames])]
+   [(b:defvals? b)
+    (struct-copy b:defvals b [renames #:parent brule renames])]
+   [(b:defstx? b)
+    (struct-copy b:defstx b [renames #:parent brule renames])]
+   [else (error 'internal "unrecognized brule: ~e" b)]))

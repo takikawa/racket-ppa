@@ -21,7 +21,8 @@
 	       add-selected is-selected? no-selected set-selected remove-selected
 	       get-snip-location move-to
 	       dc-location-to-editor-location
-	       set-selection-visible)
+	       set-selection-visible
+               set-area-selectable)
       
       (define select-one? #t)
       (define select-backward? #f)
@@ -33,6 +34,13 @@
       (define do-on-double-click 'flip)
       (define do-on-single-click void)
       
+      (define current-can-select (make-parameter #hash()))
+      (define/private (with-selectable c thunk)
+        (parameterize ([current-can-select (hash-set (current-can-select)
+                                                     c
+                                                     #t)])
+          (thunk)))
+
       (define selecting? #f)
       (define dragging? #f)
       (define bg-click? #f)
@@ -192,7 +200,8 @@
 		 (begin
 		   (begin-edit-sequence)
 		   (let ([l (make-overlapping-list s (list s) select-backward?)])
-		     (for-each (lambda (i) (add-selected i)) l))
+		     (for-each (lambda (i) (with-selectable i (lambda () (add-selected i))))
+                               l))
 		   (when raise-to-front?
 		     (let loop ([snip (find-next-selected-snip #f)][prev #f])
 		       (when snip
@@ -237,18 +246,19 @@
            (when dragging?
              (set! dragging? #f)
              (inner (void) after-interactive-move e)
-             (for-each-selected (lambda (snip) (send snip back-to-original-location this)))
-             (let ([cards (get-reverse-selected-list)])
-               (only-front-selected) ; in case overlap changed
-               (for-each
-                (lambda (region)
-                  (when (region-hilite? region)
-                    (mred:queue-callback
-                                        ; Call it outside the current edit sequence
-                     (lambda ()
+             (for-each-selected (lambda (snip) (send snip back-to-original-location/pre this)))
+             (mred:queue-callback
+              ;; Outside the current edit sequence
+              (lambda ()
+                (let ([cards (get-reverse-selected-list)])
+                  (only-front-selected) ; in case overlap changed
+                  (for-each
+                   (lambda (region)
+                     (when (region-hilite? region)
                        ((region-callback region) cards)
-                       (unhilite-region region)))))
-                regions))))])
+                       (unhilite-region region)))
+                   regions))
+                (for-each-selected (lambda (snip) (send snip back-to-original-location/post this)))))))])
       (override*
 	[on-default-event
 	 (lambda (e)
@@ -314,7 +324,9 @@
 		     (when (and bg-click? (not (send e dragging?)))
 		       (set! bg-click? #f)))
 		 (unless bg-click?
-		   (super on-default-event e))
+                   (with-selectable click-base
+                     (lambda ()
+                       (super on-default-event e))))
                  (when (and bg-click? dragging?)
                    ;; We didn't call super on-default-event, so we need
                    ;;  to explicitly end the drag:
@@ -354,7 +366,12 @@
 			  (not (send click-base user-can-move)))
 		 (no-selected)))
 	     (when (and click click-base)
-	       (do-on-single-click click-base))))]
+	       (do-on-single-click click-base))))])
+      (define/augment (can-select? s on?)
+        (and (inner #t can-select? s on?)
+             (or (not on?)
+                 (hash-ref (current-can-select) s #f))))
+      (override*
 	[on-double-click
 	 (lambda (s e)
 	   (cond
@@ -433,7 +450,8 @@
 		    (remq (assoc button button-map)
 			  button-map)))))])
       (super-make-object)
-      (set-selection-visible #f)))
+      (set-selection-visible #f)
+      (set-area-selectable #f)))
 
   (define table%
     (class mred:frame%
@@ -586,15 +604,23 @@
 	   (send pb set-single-click-action a))]
 	[pause
 	 (lambda (duration)
-	   (let ([s (make-semaphore)]
-		 [a (alarm-evt (+ (current-inexact-milliseconds)
+           ;; Just sleep:
+           (sleep duration)
+           ;; In older versions of `racket/gui`, handling events
+           ;; was necessary for the screen to update. It's not
+           ;; necessary any more, and suspending events during
+           ;; animation avoids race conditions:
+           #;
+	   (let ([a (alarm-evt (+ (current-inexact-milliseconds)
 				  (* duration 1000)))]
 		 [enabled? (send c is-enabled?)])
-	     ;; Can't move the cards during this time:
-	     (send c enable #f)
-	     (mred:yield a)
-	     (when enabled?
-	       (send c enable #t))))]
+             ;; Can't move the cards during this time,
+             ;; but beware that this might not be enough
+             ;; if a game has menus, etc.
+             (send c enable #f)
+             (mred:yield a)
+             (when enabled?
+               (send c enable #t))))]
 	[animated
 	 (case-lambda 
 	  [() animate?]

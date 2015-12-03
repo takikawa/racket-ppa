@@ -1,7 +1,7 @@
 #lang racket/base
 (require racket/match
          macro-debugger/model/deriv
-         unstable/struct
+         racket/struct
          "util.rkt")
 (provide deriv->refs)
 

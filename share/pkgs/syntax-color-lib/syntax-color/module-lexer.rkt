@@ -3,7 +3,7 @@
          "racket-lexer.rkt"
          "lexer-contract.rkt"
          racket/contract
-         unstable/options)
+         racket/contract/option)
 (provide 
  (contract-out [module-lexer lexer/c]))
 

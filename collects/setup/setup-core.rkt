@@ -15,12 +15,13 @@
          planet/planet-archives
          planet/private/planet-shared
          (only-in planet/resolver resolve-planet-path)
+         setup/cross-system
 
          "option.rkt"
          compiler/compiler
          (prefix-in compiler:option: compiler/option)
          launcher/launcher
-         dynext/file
+         compiler/module-suffix
 
          "unpack.rkt"
          "getinfo.rkt"
@@ -508,7 +509,7 @@
             (let loop ([l collections-to-compile])
               (append-map (lambda (cc) (cons cc (loop (get-subs cc)))) l))))
 
-  (define (collection-tree-map collections-to-compile)
+  (define (collection-tree-map collections-to-compile has-module-suffix?)
     (define (build-collection-tree cc)
       (define (make-child-cc parent-cc name)
         (collection-cc! (append (cc-collection parent-cc) (list name))
@@ -540,13 +541,15 @@
              (filter-map (lambda (x) (make-child-cc cc x)) dirs)))
       (define srcs
         (append
-         (filter extract-base-filename/ss files)
+         (filter has-module-suffix? files)
          (if make-docs?
            (filter (lambda (p) (not (member p omit)))
                    (map (lambda (s) (if (string? s) (string->path s) s))
                         (map car (call-info info 'scribblings
                                             (lambda () null) (lambda (x) #f)))))
-           null)))
+           null)
+         (map (lambda (s) (if (string? s) (string->path s) s))
+              (call-info info 'compile-include-files (lambda () null) void))))
       (list cc srcs children-ccs))
     (map build-collection-tree collections-to-compile))
 
@@ -878,7 +881,7 @@
                                (string? v)
                                (symbol? v))
                      (error "entry is not regexp, string, or symbol:" v)))))
-    (matching-platform? sys))
+    (matching-platform? sys #:cross? #t))
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;                  Make zo                      ;;
@@ -899,9 +902,11 @@
                        [compile-notify-handler doing-path])
           (thunk)))))
 
-  (define (clean-cc cc dir info)
+  (define (clean-cc cc)
     ;; Clean up bad .zos:
     (unless (assume-virtual-sources? cc)
+      (define dir (cc-path cc))
+      (define info (cc-info cc))
       (define roots
         ;; If there's more than one relative root, then there will
         ;; be multiple ways to get to a ".zo" file, and our strategy
@@ -980,7 +985,7 @@
   ;; and it makes a do-nothing setup complete much faster.
   (define caching-managed-compile-zo (make-caching-managed-compile-zo))
 
-  (define (compile-cc cc gcs)
+  (define (compile-cc cc gcs has-module-suffix?)
     (parameterize ([current-namespace (make-base-empty-namespace)])
       (begin-record-error cc "making"
         (setup-printf "making" "~a" (cc-name cc))
@@ -994,8 +999,8 @@
          (lambda ()
            (define dir  (cc-path cc))
            (define info (cc-info cc))
-           (clean-cc cc dir info)
            (compile-directory-zos dir info
+                                  #:has-module-suffix? has-module-suffix?
                                   #:omit-root (cc-omit-root cc)
                                   #:managed-compile-zo caching-managed-compile-zo
                                   #:skip-path (and (avoid-main-installation) main-collects-dir)
@@ -1022,6 +1027,14 @@
         (case where
           [(beginning) (append same diff)]
           [(end) (append diff same)])))
+    (define has-module-suffix?
+      (let ([rx (get-module-suffix-regexp
+                 #:mode (cond
+                         [(make-user) 'preferred]
+                         [else 'no-user])
+                 #:group 'libs
+                 #:namespace info-ns)])
+        (lambda (p) (regexp-match? rx p))))
     (setup-printf #f "--- compiling collections ---")
     (if ((parallel-workers) . > . 1)
       (begin
@@ -1031,26 +1044,25 @@
             (when (and (cc-main? cc)
                        (member (cc-info-root cc)
                                (current-library-collection-paths)))
-              (compile-cc cc 0))))
+              (compile-cc cc 0 has-module-suffix?))))
         (with-specified-mode
           (lambda ()
             (define cct
               (move-to 'beginning (list #rx"/compiler$" #rx"/raco$" #rx"/racket$" #rx"<pkgs>/images/")
                        (move-to 'end (list #rx"<pkgs>/drracket")
                                 (sort-collections-tree
-                                 (collection-tree-map top-level-plt-collects)))))
-            (iterate-cct (lambda (cc)
-                           (define dir (cc-path cc))
-                           (define info (cc-info cc))
-                           (clean-cc cc dir info))
-                         cct)
+                                 (collection-tree-map top-level-plt-collects
+                                                      has-module-suffix?)))))
+            (iterate-cct clean-cc cct)
             (parallel-compile (parallel-workers) setup-fprintf handle-error cct)
             (for/fold ([gcs 0]) ([cc planet-dirs-to-compile])
-              (compile-cc cc gcs)))))
+              (compile-cc cc gcs has-module-suffix?)))))
       (with-specified-mode
         (lambda ()
+          (for ([cc ccs-to-compile])
+            (clean-cc cc))
           (for/fold ([gcs 0]) ([cc ccs-to-compile])
-            (compile-cc cc gcs))))))
+            (compile-cc cc gcs has-module-suffix?))))))
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;               Info-Domain Cache               ;;
@@ -1396,7 +1408,7 @@
                     [(console) (path->relative-string/console-bin p)]
                     [else (error 'make-launcher "internal error (~s)" kind)])
                   (let ([v (current-launcher-variant)])
-                    (if (eq? v (system-type 'gc)) "" (format " [~a]" v))))
+                    (if (eq? v (cross-system-type 'gc)) "" (format " [~a]" v))))
                  (make-launcher
                   (or mzlf
                       (if (cc-collection cc)
@@ -1552,7 +1564,7 @@
                         (setup-printf "deleting" "launcher ~a" rel-exe-path)
                         (delete-directory/files exe-path)])
                       ;; Clean up any associated .desktop file and icon file:
-                      (when (eq? 'unix (system-type))
+                      (when (eq? 'unix (cross-system-type))
                         (let ([desktop (installed-executable-path->desktop-path
                                         exe-path
                                         user?)])
@@ -1769,11 +1781,11 @@
                              (error "entry is not a list of relative path strings:" l)))
                          build-path
                          this-platform?
-                         (case (system-type)
+                         (case (cross-system-type)
                            [(macosx)
                             adjust-dylib-path/install]
                            [else void])
-                         (case (system-type)
+                         (case (cross-system-type)
                            [(unix)
                             copy-file/install-elf-rpath]
                            [else copy-file])))
@@ -1894,7 +1906,8 @@
   ;; setup Body                     ;;
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-  (setup-printf "version" "~a [~a]" (version) (system-type 'gc))
+  (setup-printf "version" "~a" (version))
+  (setup-printf "platform" "~a [~a]" (cross-system-library-subpath #f) (cross-system-type 'gc))
   (setup-printf "installation name" "~a" (get-installation-name))
   (setup-printf "variants" "~a" (string-join (map symbol->string (available-mzscheme-variants)) ", "))
   (setup-printf "main collects" "~a" main-collects-dir)
@@ -1909,7 +1922,8 @@
   (setup-printf "links files" "")
   (for ([p (get-links-search-files)])
     (setup-printf #f "  ~a" p))
-  (setup-printf #f "  ~a" (find-user-links-file))
+  (when (use-user-specific-search-paths)
+    (setup-printf #f "  ~a" (find-user-links-file)))
   (setup-printf "main docs" "~a" (find-doc-dir))
 
   (when (and (not (null? (archives))) no-specific-collections?)
@@ -1932,7 +1946,7 @@
 
   (when (make-launchers) (make-launchers-step))
   (when (make-launchers) 
-    (unless (eq? 'windows (system-type))
+    (unless (eq? 'windows (cross-system-type))
       (make-mans-step)))
 
   (when make-docs?

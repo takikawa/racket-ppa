@@ -510,14 +510,4 @@ the Racket developer's
 @hyperlink["http://racket-lang.org/community.html"]{mailing list}.
 
 @; ---------------------------------------------------------------------
-@section{License Issues}
-
-Under most circumstances XREPL uses the @racketmodname[readline]
-library, and therefore a similar license caveat applies: XREPL cannot be
-enabled by default because of the @seclink["readline-license" #:doc
-RL]{readline licensing}, you have to explicitly do so yourself to use
-it.  (Note that XREPL is intended to be used only for enhanced
-interaction, not as a library; so there are no additional issues.)
-
-@; ---------------------------------------------------------------------
 @(check-all-documented)

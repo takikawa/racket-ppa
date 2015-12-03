@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require unstable/parameter-group)
+(require "parameter-group.rkt")
 
 (provide (all-defined-out))
 

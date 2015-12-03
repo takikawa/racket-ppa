@@ -19,6 +19,7 @@
          "cgl.rkt"
          "sound.rkt"
          "keycode.rkt"
+         "font.rkt"
          "../../lock.rkt"
          "../common/handlers.rkt"
          (except-in "../common/default-procs.rkt"
@@ -66,14 +67,15 @@
  file-selector
  key-symbol-to-menu-key
  needs-grow-box-spacer?
- get-current-mouse-state)
+ get-current-mouse-state
+ graphical-system-type)
 
 (import-class NSScreen NSCursor NSMenu NSEvent)
 
 (define (find-graphical-system-path what)
   #f)
 
-(define (color-from-user-platform-mode) "Show Picker")
+(define (color-from-user-platform-mode) #f) ; implementation in "colordialog.rkt" is incomplete
 
 (define-unimplemented get-font-from-user)
 (define (font-from-user-platform-mode) #f)
@@ -87,10 +89,8 @@
 (define (get-double-click-time)
   500)
 (define (get-control-font-face)
-  ;; Using `(tell NSFont systemFontOfSize: ...)` gives us an OS-determined
-  ;; font, but my attempts to extract the name give something like ".LucidaGrandeUI"
-  ;; instead of "Lucida Grande"
   (cond
+   [system-control-font-name] ; via (tell NSFont systemFontOfSize: ...)
    [(version-10.10-or-later?) "Helvetica Neue"]
    [else "Lucida Grande"]))
 (define (get-control-font-size) 13)
@@ -197,6 +197,8 @@
 
 (define (needs-grow-box-spacer?)
   (not (version-10.7-or-later?)))
+
+(define (graphical-system-type) 'cocoa)
 
 ;; ------------------------------------------------------------
 ;; Mouse and modifier-key state

@@ -25,8 +25,8 @@
          (for-syntax
            racket/base
            syntax/parse)
-         unstable/sequence unstable/list unstable/hash
-         racket/list)
+         racket/dict
+         racket/hash racket/list)
 
 (import dmap^ constraints^)
 (export infer^)
@@ -106,7 +106,7 @@
 ;; (CMap DMap -> Pair<CMap, DMap>) CSet -> CSet
 ;; Map a function over a constraint set
 (define (map/cset f cset)
-  (% make-cset (for/list/fail ([(cmap dmap) (in-pairs (cset-maps cset))])
+  (% make-cset (for/list/fail ([(cmap dmap) (in-dict (cset-maps cset))])
                  (f cmap dmap))))
 
 ;; Symbol DCon -> DMap
@@ -261,7 +261,7 @@
     ;; One is null-end the other is uniform-end
     [((seq ss (null-end))
       (seq ts (uniform-end t-rest)))
-     (cgen/list context ss (extend ss ts t-rest))]
+     (cgen/list context ss (list-extend ss ts t-rest))]
     [((seq ss (uniform-end s-rest))
       (seq ts (null-end)))
      #f]
@@ -270,7 +270,7 @@
       (seq ts (uniform-end t-rest)))
      (cgen/list context
                 (cons s-rest ss)
-                (cons t-rest (extend ss ts t-rest)))]
+                (cons t-rest (list-extend ss ts t-rest)))]
     ;; dotted below, nothing above
     [((seq ss (dotted-end dty dbound))
       (seq ts (null-end)))
@@ -358,7 +358,7 @@
         (% cset-meet
            (cgen/list context ss (if (positive? length-delta)
                                      (drop-right ts length-delta)
-                                     (extend ss ts t-rest)))
+                                     (list-extend ss ts t-rest)))
            (% move-vars+rest-to-dmap
               (% cset-meet
                  (cgen/list (context-add context #:bounds (list new-bound) #:vars vars #:indices (list new-bound))
@@ -521,6 +521,10 @@
           ;; constrain b1 to be below T, but don't mention the new vars
           [((Poly: v1 b1) T) (cgen (context-add context #:bounds v1) b1 T)]
 
+          ;; Mu's just get unfolded
+          [((? Mu? s) t) (cg (unfold s) t)]
+          [(s (? Mu? t)) (cg s (unfold t))]
+
           ;; constrain *each* element of es to be below T, and then combine the constraints
           [((Union: es) T)
            (define cs (for/list/fail ([e (in-list es)]) (cg e T)))
@@ -535,6 +539,13 @@
                         [v (in-value (cg S e))]
                         #:when v)
               v))]
+
+          ;; from define-new-subtype
+          [((Distinction: nm1 id1 S) (app resolve (Distinction: nm2 id2 T)))
+           #:when (and (equal? nm1 nm2) (equal? id1 id2))
+           (cg S T)]
+          [((Distinction: _ _ S) T)
+           (cg S T)]
 
           ;; two structs with the same name
           ;; just check pairwise on the fields
@@ -622,10 +633,6 @@
           [((Set: t) (Sequence: (list t*)))
            (cg t t*)]
 
-          ;; Mu's just get unfolded
-          ;; We unfold S first so that unions are handled in S before T
-          [((? Mu? s) t) (cg (unfold s) t)]
-          [(s (? Mu? t)) (cg s (unfold t))]
 
           ;; resolve applications
           [((App: _ _ _) _)
@@ -735,7 +742,7 @@
 ;; R : Type/c - result type into which we will be substituting
 (define/cond-contract (subst-gen C X Y R)
   (cset? (listof symbol?) (listof symbol?) (or/c Values/c AnyValues? ValuesDots?)
-   . -> . (or/c #f substitution/c))
+         . -> . (or/c #f substitution/c))
   (define var-hash (free-vars-hash (free-vars* R)))
   (define idx-hash (free-vars-hash (free-idxs* R)))
   ;; c : Constaint
@@ -772,32 +779,35 @@
      S))
   (match (car (cset-maps C))
     [(cons cmap (dmap dm))
-     (let ([subst (hash-union
+     (let* ([subst (hash-union
                     (for/hash ([(k dc) (in-hash dm)])
                       (define (c->t c) (constraint->type c (hash-ref idx-hash k Constant)))
                       (values
-                        k
-                        (match dc
-                          [(dcon fixed #f)
-                           (i-subst (map c->t fixed))]
-                          [(or (dcon fixed rest) (dcon-exact fixed rest))
-                           (i-subst/starred
-                             (map c->t fixed)
-                             (c->t rest))]
-                          [(dcon-dotted fixed dc dbound)
-                           (i-subst/dotted
-                             (map c->t fixed)
-                             (c->t dc)
-                             dbound)])))
-                   (for/hash ([(k v) (in-hash cmap)])
-                     (values k (t-subst (constraint->type v (hash-ref var-hash k Constant))))))])
+                       k
+                       (match dc
+                         [(dcon fixed #f)
+                          (i-subst (map c->t fixed))]
+                         [(or (dcon fixed rest) (dcon-exact fixed rest))
+                          (i-subst/starred
+                           (map c->t fixed)
+                           (c->t rest))]
+                         [(dcon-dotted fixed dc dbound)
+                          (i-subst/dotted
+                           (map c->t fixed)
+                           (c->t dc)
+                           dbound)])))
+                    (for/hash ([(k v) (in-hash cmap)])
+                      (values k (t-subst (constraint->type v (hash-ref var-hash k Constant))))))]
+            [subst (for/fold ([subst subst]) ([v (in-list X)])
+                     (let ([entry (hash-ref subst v #f)])
+                       ;; Make sure we got a subst entry for a type var
+                       ;; (i.e. just a type to substitute)
+                       ;; If we don't have one, there are no constraints on this variable
+                       (if (and entry (t-subst? entry))
+                           subst
+                           (hash-set subst v (t-subst Univ)))))])
        ;; verify that we got all the important variables
-       (and (for/and ([v (in-list X)])
-              (let ([entry (hash-ref subst v #f)])
-                ;; Make sure we got a subst entry for a type var
-                ;; (i.e. just a type to substitute)
-                (and entry (t-subst? entry))))
-            (extend-idxs subst)))]))
+       (extend-idxs subst))]))
 
 ;; context : the context of what to infer/not infer
 ;; S : a list of types to be the subtypes of T
@@ -848,7 +858,7 @@
 
 ;; like infer, but T-var is the vararg type:
 (define (infer/vararg X Y S T T-var R [expected #f])
-  (define new-T (if T-var (extend S T T-var) T))
+  (define new-T (if T-var (list-extend S T T-var) T))
   (and ((length S) . >= . (length T))
        (infer X Y S new-T R expected)))
 

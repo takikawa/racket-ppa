@@ -3,9 +3,11 @@
 ;; ---------------------------------------------------------------------------------------------------
 ;; provides constants and functions for specifying the shape of clauses in big-bang and universe 
 
-(provide port> nat> nat? proc> bool> num> ip> string> symbol> string-or-symbol> any> K False True)
+(provide
+ port> nat> nat? proc> bool> num> ip> string> symbol> display-mode> string-or-symbol> any>
+ K False True)
 
-(require htdp/error "check-aux.rkt")
+(require racket/format racket/string htdp/error "check-aux.rkt")
 
 (define (K w . r) w)
 (define (False w) #f)
@@ -28,6 +30,15 @@
 ;; Symbol X -> X : symbol? 
 (define (symbol> tag x)
   (check-arg tag (symbol? x) "symbol" "second" x)
+  x)
+
+(define DMODE '(normal fullscreen))
+
+;; Symbol X -> X : symbol? 
+(define (display-mode> tag x)
+  (define d (map (λ (x) (format "'~a" x)) DMODE))
+  (define dd (string-append "display mode [" (string-join d ", ")  "]"))
+  (check-arg tag (and (symbol? x) (memq x DMODE)) dd "first" x)
   x)
 
 ;; Symbol X -> X : symbol?  or string? 

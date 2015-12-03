@@ -1,7 +1,6 @@
 #lang scribble/doc
 @(require scribble/manual scribble/extract)
-@(require (for-label framework))
-@(require (for-label scheme/gui))
+@(require (for-label framework racket/gui))
 @title{Text}
 
 @definterface[text:basic<%> (editor:basic<%> text%)]{
@@ -477,10 +476,37 @@
   }
 }
 
+@definterface[text:all-string-snips<%> ()]{
+ @defmethod[(all-string-snips?) boolean?]{
+  Returns @racket[#t] if all of the snips in the @racket[text%] object
+  are @racket[string-snip%]s.
+
+  This method usually returns quickly, tracking changes to the editor
+  to update internal state. But if a non-@racket[string-snip%] is deleted,
+  then the next call to @method[text:all-string-snips<%> all-string-snips?]
+  traverses the entire content to search to see if there are other
+  non-@racket[string-snip%]s.
+ }
+}
+
+@defmixin[text:all-string-snips-mixin (text%) (text:all-string-snips<%>)]{
+ @defmethod[#:mode augment (on-insert [start exact-nonnegative-integer?]
+                                      [len exact-nonnegative-integer?]) void?]{
+  Checks to see if there were any non-@racket[string-snip%]s inserted
+  in the given range and, if so, updates the internal state.
+ }
+
+  @defmethod[#:mode augment (after-delete [start exact-nonnegative-integer?]
+                                          [len exact-nonnegative-integer?]) void?]{
+  Checks to see if there were any non-@racket[string-snip%]s deleted
+  in the given range and, if so, updates the internal state.
+ }
+}
+
 @definterface[text:searching<%> (editor:keymap<%> text:basic<%>)]{
   Any object matching this interface can be searched.
 
-  @defmethod[(set-searching-state [str (or/c #f string?)]
+  @defmethod[(set-searching-state [str (or/c #f (and/c string? (not/c "")))]
                                   [cs? boolean?]
                                   [replace-mode? boolean?]
                                   [notify-frame? boolean?])
@@ -1308,6 +1334,17 @@
   }
 }
 
+@definterface[text:overwrite-disable<%> ()]{
+ Classes implementing this interface disable overwrite mode when
+ the overwrite mode keybindings are turned off.
+}
+
+@defmixin[text:overwrite-disable-mixin (text%) (text:set-overwrite-mode<%>)]{
+ This mixin adds a callback for @racket['framework:overwrite-mode-keybindings]
+ via @racket[preferences:add-callback] that calls @method[text% set-overwrite-mode]
+ with @racket[#f] when the preference is set to @racket[#f].
+}
+
 @defclass[text:basic% (text:basic-mixin (editor:basic-mixin text%)) ()]{}
 @defclass[text:line-spacing% (text:line-spacing-mixin text:basic%) ()]{}
 @defclass[text:hide-caret/selection% (text:hide-caret/selection-mixin text:line-spacing%) ()]{}
@@ -1317,7 +1354,9 @@
 @defclass[text:wide-snip% (text:wide-snip-mixin text:line-spacing%) ()]{}
 @defclass[text:standard-style-list% (editor:standard-style-list-mixin text:wide-snip%) ()]{}
 @defclass[text:input-box% (text:input-box-mixin text:standard-style-list%) ()]{}
-@defclass[text:keymap% (editor:keymap-mixin text:standard-style-list%) ()]{}
+@defclass[text:keymap%
+          (text:overwrite-disable-mixin (editor:keymap-mixin text:standard-style-list%))
+          ()]{}
 @defclass[text:return% (text:return-mixin text:keymap%) ()]{}
 @defclass[text:autowrap% (editor:autowrap-mixin text:keymap%) ()]{}
 @defclass[text:file% (text:file-mixin (editor:file-mixin text:autowrap%)) ()]{}

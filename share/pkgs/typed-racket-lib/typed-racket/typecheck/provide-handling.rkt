@@ -1,21 +1,25 @@
 #lang racket/base
 
 (require "../utils/utils.rkt"
-         unstable/list unstable/sequence syntax/id-table racket/dict racket/syntax
+         "renamer.rkt"
+         racket/sequence syntax/id-table racket/dict racket/syntax
          racket/struct-info racket/match syntax/parse
          (only-in (private type-contract) include-extra-requires?)
          (private syntax-properties)
          (typecheck renamer def-binding)
          (utils tc-utils)
          (for-syntax racket/base)
-         (for-template racket/base "def-export.rkt"))
+         (for-template racket/base))
 
-(provide remove-provides provide? generate-prov get-alternate)
+(provide remove-provides provide? generate-prov)
 
+;; Returns #t for safe provides. Returns #f for non-provide forms
+;; and unsafe provides for which contracts will not be generated.
 (define (provide? form)
   (syntax-parse form
     #:literal-sets (kernel-literals)
-    [(#%provide . rest) form]
+    [(~and (#%provide . rest) (~not _:unsafe-provide^))
+     form]
     [_ #f]))
 
 (define (remove-provides forms)
@@ -90,11 +94,11 @@
     (define type-is-constructor? #t) ;Conservative estimate (provide/contract does the same)
     (match-define (list type-desc constr pred (list accs ...) muts super) (extract-struct-info si))
     (define-values (defns export-defns new-ids aliases)
-      (map/values 4
-                  (lambda (e) (if (identifier? e)
-                                  (mk e)
-                                  (mk-ignored-quad e)))
-                  (list* type-desc pred super accs)))
+      (for/lists (defns export-defns new-ids aliases)
+        ([e (in-list (list* type-desc pred super accs))])
+        (if (identifier? e)
+            (mk e)
+            (mk-ignored-quad e))))
     ;; Here, we recursively handle all of the identifiers referenced
     ;; in this static struct info.
     (define-values (constr-defn constr-export-defn constr-new-id constr-aliases)
@@ -136,7 +140,8 @@
                 #,(if type-is-constructor?
                       #'(make-struct-info-self-ctor constr* info)
                       #'info)))
-            (def-export export-id protected-id protected-id))
+            (define-syntax export-id
+              (make-rename-transformer #'protected-id)))
         #'export-id
         (cons (list #'export-id internal-id)
               (apply append constr-aliases aliases)))))
@@ -154,7 +159,8 @@
        #`(begin 
            (define-syntax (untyped-id stx)
              (tc-error/stx stx "Macro ~a from typed module used in untyped code" 'untyped-id))
-           (def-export export-id id untyped-id))
+           (define-syntax export-id
+             (make-typed-renaming #'id #'untyped-id)))
        new-id
        (list (list #'export-id #'id)))))
 
@@ -175,7 +181,8 @@
        #`(begin definitions (provide untyped-id))
        ;; For the main module
        #`(begin (define-syntax local-untyped-id (#,mk-redirect-id (quote-syntax untyped-id)))
-                (def-export export-id id local-untyped-id))
+                (define-syntax export-id
+                  (make-typed-renaming #'id #'local-untyped-id)))
        new-id
        null)))
 

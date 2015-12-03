@@ -14,7 +14,8 @@
                      racket/contract
                      racket/place
                      racket/place/private/async-bi-channel
-                     racket/place/define-remote-server))
+                     racket/place/define-remote-server
+                     racket/tcp))
 
 
 @(define evaler (make-base-eval))
@@ -366,7 +367,7 @@ distributed system.  The @racket[message-router] form constructs a
 a @racket[node%] instance in their initial place that serves as the
 node's message router.
 
-@defconstructor[([listen-port tcp-listen-port? #f])]{
+@defconstructor[([listen-port listen-port-number? #f])]{
  Constructs a @racket[node%] that will listen on @racket[listen-port] for inter-node connections.}
 
 @defmethod[(sync-events) void?]{
@@ -392,7 +393,7 @@ node's message router.
   sense of @racket[place-location?], which means that it can be
   supplied as the @racket[#:at] argument to @racket[dynamic-place].
 
-  @defconstructor[([listen-port tcp-listen-port? #f]
+  @defconstructor[([listen-port listen-port-number? #f]
                    [restart-on-exit any/c #f])]{
     Constructs a @racket[node%] that will listen on
     @racket[listen-port] for inter-node connections.

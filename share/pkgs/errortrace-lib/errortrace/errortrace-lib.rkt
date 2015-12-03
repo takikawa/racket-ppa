@@ -48,19 +48,29 @@
        [(#%plain-module-begin body ...)
         (let ()
           (define ((handle-top-form phase) expr)
-            (syntax-case* (disarm expr) (begin-for-syntax module module*) 
+            (define disarmed-expr (disarm expr))
+            (syntax-case* disarmed-expr (begin-for-syntax module module*)
                           (lambda (a b)
                             (free-identifier=? a b phase 0))
               [(begin-for-syntax body ...)
                (syntax-rearm
-                #`(begin-for-syntax
-                   #,@(map (handle-top-form (add1 phase)) 
-                           (syntax->list #'(body ...))))
+                #`(#,(car (syntax-e disarmed-expr))
+                    #,@(map (handle-top-form (add1 phase)) 
+                            (syntax->list #'(body ...))))
                 expr)]
               [(module . _)
-               (transform-all-modules expr proc #f)]
-              [(module* . _)
-               (transform-all-modules expr proc #f)]
+               (syntax-rearm
+                (transform-all-modules disarmed-expr proc #f)
+                expr)]
+              [(module* name init-import . _)
+               (let ([shift (if (syntax-e #'init-import)
+                                0
+                                phase)])
+                 (syntax-rearm
+                  (syntax-shift-phase-level
+                   (transform-all-modules (syntax-shift-phase-level disarmed-expr (- shift)) proc #f)
+                   shift)
+                  expr))]
               [else expr]))
           (define mod-id (or in-mod-id #'mod))
           (proc
@@ -467,6 +477,11 @@
       [_else
        (let ([e (normal top-e)])
          (let ([meta-depth ((count-meta-levels 0) e)])
+           ;; We need to force the `require`s now, so that `e` can be compiled.
+           ;; It doesn't work to reply on `begin` unrolling for a top-level `eval`,
+           ;; because we're in a compile handler and already committed to a single form.
+           (for ([i (in-range meta-depth)])
+             (namespace-require `(for-meta ,(add1 i) errortrace/errortrace-key)))
            #`(begin
                #,(generate-key-imports meta-depth)
                #,e)))])))
