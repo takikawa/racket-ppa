@@ -5,8 +5,9 @@ racket (6.3-1) UNRELEASED; urgency=medium
 
   [ David Bremner ]
   * New upstream release
+  * Re-enable anti-aliasing (#766534 is supposedly fixed)
 
- -- David Bremner <bremner@debian.org>  Thu, 03 Dec 2015 08:13:57 -0400
+ -- David Bremner <bremner@debian.org>  Thu, 03 Dec 2015 08:19:53 -0400
 
 racket (6.2-3) unstable; urgency=medium
 
