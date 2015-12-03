@@ -1,8 +1,12 @@
-racket (6.2-4) UNRELEASED; urgency=medium
+racket (6.3-1) UNRELEASED; urgency=medium
 
+  [ James McCoy ]
   * Remove myself from Uploaders.
 
- -- James McCoy <jamessan@debian.org>  Sun, 13 Sep 2015 14:55:17 -0400
+  [ David Bremner ]
+  * New upstream release
+
+ -- David Bremner <bremner@debian.org>  Thu, 03 Dec 2015 08:13:57 -0400
 
 racket (6.2-3) unstable; urgency=medium
 
