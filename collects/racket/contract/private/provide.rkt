@@ -92,9 +92,10 @@
   (define (contract-neg-party-property stx)
     (syntax-property stx neg-party-key))
 
+  (define global-saved-id-table (make-hasheq))
+
   (struct provide/contract-arrow-transformer provide/contract-info
-    (saved-id-table 
-     saved-ho-id-table 
+    (saved-ho-id-table
      partially-applied-id
      extra-neg-party-argument-fn
      valid-argument-lists)
@@ -102,7 +103,6 @@
     prop:set!-transformer
     (λ (self stx)
       (let ([partially-applied-id (provide/contract-arrow-transformer-partially-applied-id self)]
-            [saved-id-table (provide/contract-arrow-transformer-saved-id-table self)]
             [saved-ho-id-table (provide/contract-arrow-transformer-saved-ho-id-table self)]
             [extra-neg-party-argument-fn 
              (provide/contract-arrow-transformer-extra-neg-party-argument-fn self)]
@@ -115,12 +115,12 @@
               (let* ([key (syntax-local-lift-context)]
                      ;; Already lifted in this lifting context?
                      [lifted-neg-party
-                      (or (hash-ref saved-id-table key #f)
+                      (or (hash-ref global-saved-id-table key #f)
                           ;; No: lift the neg name creation
                           (syntax-local-introduce 
                            (syntax-local-lift-expression
                             #'(quote-module-name))))])
-                (when key (hash-set! saved-id-table key lifted-neg-party))
+                (when key (hash-set! global-saved-id-table key lifted-neg-party))
                 ;; Expand to a use of the lifted expression:
                 (define (adjust-location new-stx)
                   (datum->syntax new-stx (syntax-e new-stx) stx new-stx))
@@ -160,7 +160,6 @@
               ;; contexts, delay expansion until it's a good time to lift
               ;; expressions:
               (quasisyntax/loc stx (#%expression #,stx)))))))
-  
   
   (struct provide/contract-transformer provide/contract-info (saved-id-table partially-applied-id)
     #:property
@@ -222,7 +221,7 @@
   (define (make-provide/contract-arrow-transformer rename-id contract-id id pai enpfn val)
     (provide/contract-arrow-transformer rename-id
                                         contract-id id
-                                        (make-hasheq) (make-hasheq)
+                                        (make-hasheq)
                                         pai enpfn val)))
 
 
@@ -232,8 +231,9 @@
 ;; the first syntax object is used for source locations
 (define-for-syntax (tl-code-for-one-id/new-name id-for-one-id
                                                 stx id reflect-id ctrct/no-prop user-rename-id
-                                                [mangle-for-maker? #f]
-                                                [provide? #t])
+                                                pos-module-source
+                                                mangle-for-maker?
+                                                provide?)
   (define ex-id (or reflect-id id))
   (define id-rename (id-for-one-id user-rename-id reflect-id id mangle-for-maker?))
   (with-syntax ([ctrct (syntax-property 
@@ -261,7 +261,7 @@
                                                                     id-rename
                                                                     (stx->srcloc-expr srcloc-id)
                                                                     'provide/contract
-                                                                    #'pos-module-source)
+                                                                    pos-module-source)
                              #,@(if provide?
                                     (list #`(provide (rename-out [#,id-rename external-name])))
                                     null)))
@@ -1049,12 +1049,19 @@
               a:mangle-id)
           "provide/contract-id"
           (or user-rename-id reflect-id id)))
+       
+       (define pos-module-source-id
+         ;; Avoid context on this identifier, since it will be defined
+         ;; in another module, and the definition may have to pull
+         ;; along all context to support `module->namespace`:
+         (datum->syntax #f 'pos-module-source))
 
        (define (code-for-one-id/new-name stx id reflect-id ctrct/no-prop user-rename-id
                                          [mangle-for-maker? #f]
                                          [provide? #t]) 
          (tl-code-for-one-id/new-name id-for-one-id
                                       stx id reflect-id ctrct/no-prop user-rename-id
+                                      pos-module-source-id
                                       mangle-for-maker?
                                       provide?))
 
@@ -1104,10 +1111,11 @@
               [(struct (a b) ((fld ctc) ...) options ...)
                (add-struct-clause-to-struct-id-mapping #'a #'b #'(fld ...))]
               [_ (void)]))
-          (with-syntax ([(bodies ...) (code-for-each-clause p/c-clauses)])
+          (with-syntax ([(bodies ...) (code-for-each-clause p/c-clauses)]
+                        [pos-module-source-id pos-module-source-id])
             (syntax
              (begin
-               (define pos-module-source (quote-module-name))
+               (define pos-module-source-id (quote-module-name))
                bodies ...)))]))]))
 
 

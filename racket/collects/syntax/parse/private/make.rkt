@@ -1,10 +1,7 @@
 #lang racket/base
-;; owner: ryanc
 (require (for-syntax racket/base
                      racket/struct-info))
-(provide make
-         struct->list
-         (for-syntax get-struct-info))
+(provide make)
 
 ;; get-struct-info : identifier stx -> struct-info-list
 (define-for-syntax (get-struct-info id ctx)
@@ -44,33 +41,3 @@
          (syntax-property #'(constructor expr ...)
                           'disappeared-use
                           #'S)))]))
-;; Eli: You give a good point for this, but I'd prefer if the optimizer would
-;;   detect these, so you'd get the same warnings for constructors too when you
-;;   use `-W warning'.  (And then, if you really want these things to be
-;;   errors, then perhaps something at the racket level should make it throw
-;;   errors instead of warnings.)
-
-(define dummy-value (box 'dummy))
-
-;; struct->list : struct?
-;;                #:on-opaque (or/c 'error 'return-false 'skip)
-;;             -> (listof any/c)
-(define (struct->list s
-                      #:on-opaque [on-opaque 'error])
-  (define error-on-opaque? (eq? on-opaque 'error))
-  (let ([vec (struct->vector s dummy-value)])
-    ;; go through vector backwards, don't traverse 0 (struct name)
-    (let loop ([index (sub1 (vector-length vec))]
-               [elems null]
-               [any-opaque? #f])
-      (cond [(positive? index)
-             (let ([elem (vector-ref vec index)])
-               (cond [(eq? elem dummy-value)
-                      (when error-on-opaque?
-                        (raise-type-error 'struct->list "non-opaque struct" s))
-                      (loop (sub1 index) elems #t)]
-                     [else (loop (sub1 index) (cons elem elems) any-opaque?)]))]
-            [else
-             (cond [(and any-opaque? (eq? on-opaque 'return-false))
-                    #f]
-                   [else elems])]))))

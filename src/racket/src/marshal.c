@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2014 PLT Design Inc.
+  Copyright (c) 2004-2015 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -55,6 +55,8 @@ static Scheme_Object *read_varref(Scheme_Object *obj);
 static Scheme_Object *write_varref(Scheme_Object *obj);
 static Scheme_Object *read_apply_values(Scheme_Object *obj);
 static Scheme_Object *write_apply_values(Scheme_Object *obj);
+static Scheme_Object *read_with_immed_mark(Scheme_Object *obj);
+static Scheme_Object *write_with_immed_mark(Scheme_Object *obj);
 static Scheme_Object *read_inline_variant(Scheme_Object *obj);
 static Scheme_Object *write_inline_variant(Scheme_Object *obj);
 
@@ -90,6 +92,8 @@ static Scheme_Object *write_module(Scheme_Object *obj);
 static Scheme_Object *read_module(Scheme_Object *obj);
 static Scheme_Object *read_top_level_require(Scheme_Object *obj);
 static Scheme_Object *write_top_level_require(Scheme_Object *obj);
+
+static Scheme_Object *ht_to_vector(Scheme_Object *ht, int delay);
 
 void scheme_init_marshal(Scheme_Env *env) 
 {
@@ -137,6 +141,8 @@ void scheme_init_marshal(Scheme_Env *env)
   scheme_install_type_reader(scheme_varref_form_type, read_varref);
   scheme_install_type_writer(scheme_apply_values_type, write_apply_values);
   scheme_install_type_reader(scheme_apply_values_type, read_apply_values);
+  scheme_install_type_writer(scheme_with_immed_mark_type, write_with_immed_mark);
+  scheme_install_type_reader(scheme_with_immed_mark_type, read_with_immed_mark);
   scheme_install_type_writer(scheme_inline_variant_type, write_inline_variant);
   scheme_install_type_reader(scheme_inline_variant_type, read_inline_variant);
 
@@ -176,7 +182,7 @@ static Scheme_Object *write_let_value(Scheme_Object *obj)
 
   return cons(scheme_make_integer(lv->count),
 	      cons(scheme_make_integer(lv->position),
-		   cons(SCHEME_LET_AUTOBOX(lv) ? scheme_true : scheme_false,
+		   cons(SCHEME_LET_VALUE_AUTOBOX(lv) ? scheme_true : scheme_false,
 			cons(scheme_protect_quote(lv->value), 
 			     scheme_protect_quote(lv->body)))));
 }
@@ -195,7 +201,7 @@ static Scheme_Object *read_let_value(Scheme_Object *obj)
   lv->position = SCHEME_INT_VAL(SCHEME_CAR(obj));
   obj = SCHEME_CDR(obj);
   if (!SCHEME_PAIRP(obj)) return NULL;
-  SCHEME_LET_AUTOBOX(lv) = SCHEME_TRUEP(SCHEME_CAR(obj));
+  SCHEME_LET_VALUE_AUTOBOX(lv) = SCHEME_TRUEP(SCHEME_CAR(obj));
   obj = SCHEME_CDR(obj);
   if (!SCHEME_PAIRP(obj)) return NULL;
   lv->value = SCHEME_CAR(obj);
@@ -211,7 +217,7 @@ static Scheme_Object *write_let_void(Scheme_Object *obj)
   lv = (Scheme_Let_Void *)obj;
 
   return cons(scheme_make_integer(lv->count), 
-	      cons(SCHEME_LET_AUTOBOX(lv) ? scheme_true : scheme_false,
+	      cons(SCHEME_LET_VOID_AUTOBOX(lv) ? scheme_true : scheme_false,
 		   scheme_protect_quote(lv->body)));
 }
 
@@ -226,7 +232,7 @@ static Scheme_Object *read_let_void(Scheme_Object *obj)
   lv->count = SCHEME_INT_VAL(SCHEME_CAR(obj));
   obj = SCHEME_CDR(obj);
   if (!SCHEME_PAIRP(obj)) return NULL;
-  SCHEME_LET_AUTOBOX(lv) = SCHEME_TRUEP(SCHEME_CAR(obj));
+  SCHEME_LET_VOID_AUTOBOX(lv) = SCHEME_TRUEP(SCHEME_CAR(obj));
   lv->body = SCHEME_CDR(obj);
 
   return (Scheme_Object *)lv;
@@ -292,6 +298,22 @@ static Scheme_Object *read_letrec(Scheme_Object *obj)
   return (Scheme_Object *)lr;
 }
 
+static Scheme_Object *binding_namess_to_vectors(Scheme_Object *l)
+{
+  Scheme_Object *r = scheme_null;
+
+  if (!l) return scheme_null;
+
+  while (!SCHEME_NULLP(l)) {
+    r = cons(cons(SCHEME_CAR(SCHEME_CAR(l)),
+                  ht_to_vector(SCHEME_CDR(SCHEME_CAR(l)), 0)),
+             r);
+    l = SCHEME_CDR(l);
+  }
+  
+  return r;
+}
+
 static Scheme_Object *write_top(Scheme_Object *obj)
 {
   Scheme_Compilation_Top *top = (Scheme_Compilation_Top *)obj;
@@ -303,8 +325,9 @@ static Scheme_Object *write_top(Scheme_Object *obj)
                           NULL);
 
   return cons(scheme_make_integer(top->max_let_depth),
-	      cons((Scheme_Object *)top->prefix,
-		   scheme_protect_quote(top->code)));
+              cons(binding_namess_to_vectors(top->binding_namess),
+                   cons((Scheme_Object *)top->prefix,
+                        scheme_protect_quote(top->code))));
 }
 
 static Scheme_Object *read_top(Scheme_Object *obj)
@@ -315,6 +338,9 @@ static Scheme_Object *read_top(Scheme_Object *obj)
   top->iso.so.type = scheme_compilation_top_type;
   if (!SCHEME_PAIRP(obj)) return NULL;
   top->max_let_depth = SCHEME_INT_VAL(SCHEME_CAR(obj));
+  obj = SCHEME_CDR(obj);
+  if (!SCHEME_PAIRP(obj)) return NULL;
+  top->binding_namess = SCHEME_CAR(obj); /* checking is in scheme_install_binding_names() */
   obj = SCHEME_CDR(obj);
   if (!SCHEME_PAIRP(obj)) return NULL;
   top->prefix = (Resolve_Prefix *)SCHEME_CAR(obj);
@@ -372,6 +398,10 @@ static Scheme_Object *read_case_lambda(Scheme_Object *obj)
       if (!SAME_TYPE(SCHEME_TYPE(a), scheme_unclosed_procedure_type))
         return NULL;
       all_closed = 0;
+    }
+    else {
+      if (!SAME_TYPE(SCHEME_TYPE(a), scheme_closure_type))
+        return NULL;
     }
   }
 
@@ -510,6 +540,40 @@ Scheme_Object *read_apply_values(Scheme_Object *o)
   SCHEME_PTR2_VAL(data) = SCHEME_CDR(o);
   
   return data;
+}
+
+Scheme_Object *write_with_immed_mark(Scheme_Object *o)
+{
+  Scheme_With_Continuation_Mark *wcm = (Scheme_With_Continuation_Mark *)o;
+  Scheme_Object *vec, *v;
+
+  vec = scheme_make_vector(3, NULL);
+
+  v = scheme_protect_quote(wcm->key);
+  SCHEME_VEC_ELS(vec)[0] = v;
+  v = scheme_protect_quote(wcm->val);
+  SCHEME_VEC_ELS(vec)[1] = v;
+  v = scheme_protect_quote(wcm->body);
+  SCHEME_VEC_ELS(vec)[2] = v;
+  
+  return vec;
+}
+
+Scheme_Object *read_with_immed_mark(Scheme_Object *o)
+{
+  Scheme_With_Continuation_Mark *wcm;
+
+  if (!SCHEME_VECTORP(o)) return NULL;
+  if (SCHEME_VEC_SIZE(o) != 3) return NULL;
+
+  wcm = MALLOC_ONE_TAGGED(Scheme_With_Continuation_Mark);
+  wcm->so.type = scheme_with_immed_mark_type;
+  
+  wcm->key = SCHEME_VEC_ELS(o)[0];
+  wcm->val = SCHEME_VEC_ELS(o)[1];
+  wcm->body = SCHEME_VEC_ELS(o)[2];
+
+  return (Scheme_Object *)wcm;
 }
 
 Scheme_Object *write_boxenv(Scheme_Object *o)
@@ -679,15 +743,15 @@ static Scheme_Object *read_quote_syntax(Scheme_Object *obj)
 
 #define BOOL(x) (x ? scheme_true : scheme_false)
 
-static int not_relative_path(Scheme_Object *p)
+static int not_relative_path(Scheme_Object *p, Scheme_Hash_Table *cache)
 {
   Scheme_Object *dir, *rel_p;
   
   dir = scheme_get_param(scheme_current_config(),
                          MZCONFIG_WRITE_DIRECTORY);
   if (SCHEME_TRUEP(dir)) {
-    rel_p = scheme_extract_relative_to(p, dir);
-    if (SAME_OBJ(rel_p, p))
+    rel_p = scheme_extract_relative_to(p, dir, cache);
+    if (SCHEME_PATHP(rel_p))
       return 1;
   }
   
@@ -714,7 +778,7 @@ static Scheme_Object *write_compiled_closure(Scheme_Object *obj)
            /* If MZCONFIG_WRITE_DIRECTORY, drop any non-relative path
               (which might happen due to function inlining, for example)
               to avoid embedding absolute paths in bytecode files: */
-           || not_relative_path(src))
+           || not_relative_path(src, scheme_current_thread->current_mt->path_cache))
 	  && !SCHEME_CHAR_STRINGP(src)
 	  && !SCHEME_SYMBOLP(src)) {
 	/* Just keep the name */
@@ -754,7 +818,6 @@ static Scheme_Object *write_compiled_closure(Scheme_Object *obj)
   case scheme_toplevel_type:
   case scheme_local_type:
   case scheme_local_unbox_type:
-  case scheme_integer_type:
   case scheme_true_type:
   case scheme_false_type:
   case scheme_void_type:
@@ -762,62 +825,70 @@ static Scheme_Object *write_compiled_closure(Scheme_Object *obj)
     ds = code;
     break;
   default:
-    ds = NULL;
+    if (SCHEME_NUMBERP(code))
+      ds = code;
+    else
+      ds = NULL;
     break;
   }
   
   if (!ds) {
     mt = scheme_current_thread->current_mt;
-    if (!mt->pass) {
-      int key;
-
-      pos = mt->cdata_counter;
-      if ((!mt->cdata_map || (pos >= 32))
-          && !(pos & (pos - 1))) {
-        /* Need to grow the array */
-        Scheme_Object **a;
-        a = MALLOC_N(Scheme_Object *, (pos ? 2 * pos : 32));
-        memcpy(a, mt->cdata_map, pos * sizeof(Scheme_Object *));
-        mt->cdata_map = a;
-      }
-      mt->cdata_counter++;
-
-      key = pos & 255;
-      MZ_OPT_HASH_KEY(&data->iso) = ((int)MZ_OPT_HASH_KEY(&data->iso) & 0x00FF) | (key << 8);
+    if (mt->pass < 0) {
+      /* nothing to do, yet */
+      ds = scheme_false;
     } else {
-      pos = ((int)MZ_OPT_HASH_KEY(&data->iso) & 0xFF00) >> 8;
+      if (!mt->pass) {
+        int key;
 
-      while (pos < mt->cdata_counter) {
-        ds = mt->cdata_map[pos];
-        if (ds) {
-          ds = SCHEME_PTR_VAL(ds);
-          if (SAME_OBJ(data->code, ds))
-            break;
-          if (SAME_TYPE(scheme_quote_compilation_type, SCHEME_TYPE(ds)))
-            if (SAME_OBJ(data->code, SCHEME_PTR_VAL(ds)))
-              break;
+        pos = mt->cdata_counter;
+        if ((!mt->cdata_map || (pos >= 32))
+            && !(pos & (pos - 1))) {
+          /* Need to grow the array */
+          Scheme_Object **a;
+          a = MALLOC_N(Scheme_Object *, (pos ? 2 * pos : 32));
+          memcpy(a, mt->cdata_map, pos * sizeof(Scheme_Object *));
+          mt->cdata_map = a;
         }
-        pos += 256;
+        mt->cdata_counter++;
+
+        key = pos & 255;
+        MZ_OPT_HASH_KEY(&data->iso) = ((int)MZ_OPT_HASH_KEY(&data->iso) & 0x00FF) | (key << 8);
+      } else {
+        pos = ((int)MZ_OPT_HASH_KEY(&data->iso) & 0xFF00) >> 8;
+
+        while (pos < mt->cdata_counter) {
+          ds = mt->cdata_map[pos];
+          if (ds) {
+            ds = SCHEME_PTR_VAL(ds);
+            if (SAME_OBJ(data->code, ds))
+              break;
+            if (SAME_TYPE(scheme_quote_compilation_type, SCHEME_TYPE(ds)))
+              if (SAME_OBJ(data->code, SCHEME_PTR_VAL(ds)))
+                break;
+          }
+          pos += 256;
+        }
+        if (pos >= mt->cdata_counter) {
+          scheme_signal_error("didn't find delay record");
+        }
       }
-      if (pos >= mt->cdata_counter) {
-        scheme_signal_error("didn't find delay record");
+
+      ds = mt->cdata_map[pos];
+      if (!ds) {
+        if (mt->pass)
+          scheme_signal_error("broken closure-data table\n");
+
+        code = scheme_protect_quote(data->code);
+
+        ds = scheme_alloc_small_object();
+        ds->type = scheme_delay_syntax_type;
+        SCHEME_PTR_VAL(ds) = code;
+
+        MZ_OPT_HASH_KEY(&((Scheme_Small_Object *)ds)->iso) |= 1; /* => hash on ds, not contained data */
+
+        mt->cdata_map[pos] = ds;
       }
-    }
-
-    ds = mt->cdata_map[pos];
-    if (!ds) {
-      if (mt->pass)
-        scheme_signal_error("broken closure-data table\n");
-    
-      code = scheme_protect_quote(data->code);
-    
-      ds = scheme_alloc_small_object();
-      ds->type = scheme_delay_syntax_type;
-      SCHEME_PTR_VAL(ds) = code;
-
-      MZ_OPT_HASH_KEY(&((Scheme_Small_Object *)ds)->iso) |= 1; /* => hash on ds, not contained data */
-
-      mt->cdata_map[pos] = ds;
     }
   }
 
@@ -1075,6 +1146,22 @@ static Scheme_Object *read_local_unbox(Scheme_Object *obj)
   return do_read_local(scheme_local_unbox_type, obj);
 }
 
+static Scheme_Object *make_delayed_syntax(Scheme_Object *stx)
+{
+  Scheme_Object *ds;
+  Scheme_Marshal_Tables *mt;
+
+  mt = scheme_current_thread->current_mt;
+  if (mt->pass < 0)
+    return stx;
+
+  ds = scheme_alloc_small_object();
+  ds->type = scheme_delay_syntax_type;
+  SCHEME_PTR_VAL(ds) = stx;
+
+  return ds;
+}
+
 static Scheme_Object *write_resolve_prefix(Scheme_Object *obj)
 {
   Resolve_Prefix *rp = (Resolve_Prefix *)obj;
@@ -1092,15 +1179,13 @@ static Scheme_Object *write_resolve_prefix(Scheme_Object *obj)
   while (i--) {
     if (rp->stxes[i]) {
       if (SCHEME_INTP(rp->stxes[i])) {
-        /* Need to foce this object, so we can write it.
+        /* Need to force this object, so we can write it.
            This should only happen if we're writing back 
            code loaded from bytecode. */
         scheme_load_delayed_syntax(rp, i);
       }
 
-      ds = scheme_alloc_small_object();
-      ds->type = scheme_delay_syntax_type;
-      SCHEME_PTR_VAL(ds) = rp->stxes[i];
+      ds = make_delayed_syntax(rp->stxes[i]);
     } else
       ds = scheme_false;
     SCHEME_VEC_ELS(sv)[i] = ds;
@@ -1109,17 +1194,25 @@ static Scheme_Object *write_resolve_prefix(Scheme_Object *obj)
   tv = scheme_make_pair(scheme_make_integer(rp->num_lifts), 
                         scheme_make_pair(tv, sv));
 
+  tv = scheme_make_pair(rp->src_insp_desc, tv);
+  
   return tv;
 }
 
 static Scheme_Object *read_resolve_prefix(Scheme_Object *obj)
 {
   Resolve_Prefix *rp;
-  Scheme_Object *tv, *sv, **a, *stx, *tl;
+  Scheme_Object *tv, *sv, **a, *stx, *tl, *insp_desc;
   intptr_t i;
 
   if (!SCHEME_PAIRP(obj)) return NULL;
+  insp_desc = SCHEME_CAR(obj);
+  if (!SCHEME_SYMBOLP(insp_desc))
+    return NULL;
+  obj = SCHEME_CDR(obj);
 
+  if (!SCHEME_PAIRP(obj)) return NULL;
+  
   if (!SCHEME_INTP(SCHEME_CAR(obj))) {
     obj = SCHEME_CDR(obj);
   }
@@ -1181,7 +1274,71 @@ static Scheme_Object *read_resolve_prefix(Scheme_Object *obj)
   }
   rp->stxes = a;
 
+  rp->src_insp_desc = insp_desc;
+
   return (Scheme_Object *)rp;
+}
+
+static Scheme_Object *ht_to_vector(Scheme_Object *ht, int delay)
+/* recurs for values in hash table; we assume that such nesting is shallow */
+{
+  intptr_t i, j, c;
+  Scheme_Object **sorted_keys;
+  Scheme_Object *k, *val, *vec;
+  
+  if (!ht)
+    return scheme_false;
+  if (SCHEME_VECTORP(ht)) {
+    /* may need to force delayed syntax: */
+    c = SCHEME_VEC_SIZE(ht);
+    for (i = 0; i < c; i += 2) {
+      val = SCHEME_VEC_ELS(ht)[i+1];
+      if (!SAME_OBJ(scheme_true, val)) {
+        k = scheme_stx_force_delayed(val);
+        if (!SAME_OBJ(k, val))
+          SCHEME_VEC_ELS(ht)[i+1] = k;
+      }
+    }
+    return ht;
+  }
+
+  if (SCHEME_HASHTRP(ht))
+    c = ((Scheme_Hash_Tree *)ht)->count;
+  else
+    c = ((Scheme_Hash_Table *)ht)->count;
+
+  vec = scheme_make_vector(2 * c, NULL);
+  j = 0;
+
+  sorted_keys = scheme_extract_sorted_keys(ht);
+
+  if (SCHEME_HASHTRP(ht)) {
+    Scheme_Hash_Tree *t = (Scheme_Hash_Tree *)ht;
+    for (i = 0; i < c; i++) {
+      k = sorted_keys[i];
+      val = scheme_hash_tree_get(t, k);
+      if (SCHEME_HASHTRP(val) || SCHEME_HASHTP(val))
+        val = ht_to_vector(val, delay);
+      else if (delay && !SAME_OBJ(val, scheme_true))
+        val = make_delayed_syntax(val);
+      SCHEME_VEC_ELS(vec)[j++] = k;
+      SCHEME_VEC_ELS(vec)[j++] = val;
+    }
+  } else {
+    Scheme_Hash_Table *t = (Scheme_Hash_Table *)ht;
+    for (i = 0; i < c; i++) {
+      k = sorted_keys[i];
+      val = scheme_hash_get(t, k);
+      if (SCHEME_HASHTRP(val) || SCHEME_HASHTP(val))
+        val = ht_to_vector(val, delay);
+      else if (delay && !SAME_OBJ(val, scheme_true))
+        val = make_delayed_syntax(val);
+      SCHEME_VEC_ELS(vec)[j++] = k;
+      SCHEME_VEC_ELS(vec)[j++] = val;
+    }
+  }
+
+  return vec;
 }
 
 static Scheme_Object *write_module(Scheme_Object *obj)
@@ -1190,17 +1347,18 @@ static Scheme_Object *write_module(Scheme_Object *obj)
   Scheme_Module_Phase_Exports *pt;
   Scheme_Object *l, *v, *phase;
   int i, j, k, count, cnt;
+  Scheme_Object **sorted_keys;
 
   l = scheme_null;
   cnt = 0;
   if (m->other_requires) {
-    for (i = 0; i < m->other_requires->size; i++) {
-      if (m->other_requires->vals[i]) {
-        cnt++;
-        l = scheme_make_pair(m->other_requires->keys[i],
-                             scheme_make_pair(m->other_requires->vals[i],
-                                              l));
-      }
+    sorted_keys = scheme_extract_sorted_keys((Scheme_Object *)m->other_requires);
+    cnt = m->other_requires->count;
+    for (i = 0; i < cnt; i++) {
+      l = scheme_make_pair(sorted_keys[i],
+                           scheme_make_pair(scheme_hash_get(m->other_requires,
+                                                            sorted_keys[i]),
+                                            l));
     }
   }
   l = cons(scheme_make_integer(cnt), l);
@@ -1215,7 +1373,11 @@ static Scheme_Object *write_module(Scheme_Object *obj)
   }
 
   cnt = 0;
-  for (k = -3; k < (m->me->other_phases ? m->me->other_phases->size : 0); k++) {
+  if (m->me->other_phases)
+    sorted_keys = scheme_extract_sorted_keys((Scheme_Object *)m->me->other_phases);
+  else
+    sorted_keys = NULL;
+  for (k = -3; k < (m->me->other_phases ? m->me->other_phases->count : 0); k++) {
     switch (k) {
     case -3:
       phase = scheme_make_integer(-1);
@@ -1230,8 +1392,8 @@ static Scheme_Object *write_module(Scheme_Object *obj)
       pt = m->me->rt;
       break;
     default:
-      phase = m->me->other_phases->keys[k];
-      pt = (Scheme_Module_Phase_Exports *)m->me->other_phases->vals[k];
+      phase = sorted_keys[k];
+      pt = (Scheme_Module_Phase_Exports *)scheme_hash_get(m->me->other_phases, phase);
     }
     
     if (pt) {
@@ -1332,8 +1494,12 @@ static Scheme_Object *write_module(Scheme_Object *obj)
   v = m->rn_stx;
   if (!v)
     v = scheme_false;
-  else if (SCHEME_PAIRP(v))
-    v = scheme_list_to_vector(v);
+  else if (!SAME_OBJ(v, scheme_true)) {
+    v = scheme_stx_force_delayed(v);
+    if (!SAME_OBJ(v, m->rn_stx))
+      m->rn_stx = v;
+    v = make_delayed_syntax(v);
+  }
   l = cons(v, l);
 
   /* previously recorded "functional?" info: */
@@ -1361,7 +1527,11 @@ static Scheme_Object *write_module(Scheme_Object *obj)
 
   l = cons((m->phaseless ? scheme_true : scheme_false), l);
 
+  l = cons(ht_to_vector(m->other_binding_names, 1), l);
+  l = cons(ht_to_vector(m->et_binding_names, 1), l);
+  l = cons(ht_to_vector(m->binding_names, 1), l);
   l = cons(m->me->src_modidx, l);
+  
   l = cons(scheme_resolved_module_path_value(m->modsrc), l);
   l = cons(scheme_resolved_module_path_value(m->modname), l);
 
@@ -1394,7 +1564,7 @@ static int check_requires_ok(Scheme_Object *l)
 static Scheme_Object *read_module(Scheme_Object *obj)
 {
   Scheme_Module *m;
-  Scheme_Object *ie, *nie, **bodies;
+  Scheme_Object *ie, *nie, **bodies, *bns;
   Scheme_Object *esp, *esn, *esph, *es, *esnom, *e, *nve, *ne, **v;
   Scheme_Module_Exports *me;
   Scheme_Module_Phase_Exports *pt;
@@ -1438,6 +1608,30 @@ static Scheme_Object *read_module(Scheme_Object *obj)
     return_NULL();
   ((Scheme_Modidx *)me->src_modidx)->resolved = m->modname;
   m->self_modidx = me->src_modidx;
+
+  if (!SCHEME_PAIRP(obj)) return_NULL();
+  bns = SCHEME_CAR(obj);
+  if (!SCHEME_FALSEP(bns)) {
+    if (!SCHEME_VECTORP(bns)) return_NULL();
+    m->binding_names = bns;
+  }
+  obj = SCHEME_CDR(obj);
+
+  if (!SCHEME_PAIRP(obj)) return_NULL();
+  bns = SCHEME_CAR(obj);
+  if (!SCHEME_FALSEP(bns)) {
+    if (!SCHEME_VECTORP(bns)) return_NULL();
+    m->et_binding_names = bns;
+  }
+  obj = SCHEME_CDR(obj);
+
+  if (!SCHEME_PAIRP(obj)) return_NULL();
+  bns = SCHEME_CAR(obj);
+  if (!SCHEME_FALSEP(bns)) {
+    if (!SCHEME_VECTORP(bns)) return_NULL();
+    m->other_binding_names = bns;
+  }
+  obj = SCHEME_CDR(obj);
 
   if (!SCHEME_PAIRP(obj)) return_NULL();
   m->phaseless = (SCHEME_TRUEP(SCHEME_CAR(obj)) ? scheme_true : NULL);

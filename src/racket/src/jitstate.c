@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2006-2014 PLT Design Inc.
+  Copyright (c) 2006-2015 PLT Design Inc.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -545,6 +545,8 @@ void scheme_mz_runstack_skipped(mz_jit_state *jitter, int n)
 {
   int v;
 
+  if (!n) return;
+
   if (!(jitter->mappings[jitter->num_mappings] & 0x1)
       || (jitter->mappings[jitter->num_mappings] & 0x2)
       || (jitter->mappings[jitter->num_mappings] > 0)) {
@@ -560,6 +562,8 @@ void scheme_mz_runstack_skipped(mz_jit_state *jitter, int n)
 void scheme_mz_runstack_unskipped(mz_jit_state *jitter, int n) 
 {
   int v;
+
+  if (!n) return;
 
   JIT_ASSERT(jitter->mappings[jitter->num_mappings] & 0x1);
   JIT_ASSERT(!(jitter->mappings[jitter->num_mappings] & 0x2));

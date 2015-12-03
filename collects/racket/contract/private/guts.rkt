@@ -45,6 +45,7 @@
          eq-contract-val
          equal-contract?
          equal-contract-val
+         char-in/c
 
          contract-continuation-mark-key
          
@@ -243,7 +244,7 @@
                                    #f
                                    (memq x the-known-good-contracts))])]
       [(null? x) list/c-empty]
-      [(or (symbol? x) (boolean? x) (char? x) (keyword? x))
+      [(or (symbol? x) (boolean? x) (keyword? x))
        (make-eq-contract x
                          (if (name-default? name)
                              (if (or (null? x)
@@ -251,6 +252,7 @@
                                  `',x
                                  x)
                              name))]
+      [(char? x) (make-char-in/c x x)]
       [(or (bytes? x) (string? x) (equal? +nan.0 x) (equal? +nan.f x))
        (make-equal-contract x (if (name-default? name) x name))]
       [(number? x)
@@ -476,6 +478,43 @@
                ;; otherwise, just stick with the original number (80% of the time)
                v]))])))))
 
+(define-struct char-in/c (low high)
+  #:property prop:custom-write contract-custom-write-property-proc
+  #:property prop:flat-contract
+  (build-flat-contract-property
+   #:first-order
+   (λ (ctc)
+     (define low (char-in/c-low ctc))
+     (define high (char-in/c-high ctc))
+     (λ (x)
+         (and (char? x)
+              (char<=? low x high))))
+   #:name (λ (ctc)
+            (define low (char-in/c-low ctc))
+            (define high (char-in/c-high ctc))
+            (if (equal? low high)
+                low
+                `(char-in ,low ,high)))
+   #:stronger
+   (λ (this that)
+     (cond
+       [(char-in/c? that)
+        (define this-low (char-in/c-low this))
+        (define this-high (char-in/c-high this))
+        (define that-low (char-in/c-low that))
+        (define that-high (char-in/c-high that))
+        (and (char<=? that-low this-low)
+             (char<=? this-high that-high))]
+       [else #f]))
+   #:generate
+   (λ (ctc)
+     (define low (char->integer (char-in/c-low ctc)))
+     (define high (char->integer (char-in/c-high ctc)))
+     (define delta (+ (- high low) 1))
+     (λ (fuel)
+       (λ ()
+         (integer->char (+ low (random delta))))))))
+
 (define-struct regexp/c (reg name)
   #:property prop:custom-write contract-custom-write-property-proc
   #:property prop:flat-contract
@@ -505,22 +544,18 @@
                                           (predicate-contract-pred that))))
    #:name (λ (ctc) (predicate-contract-name ctc))
    #:first-order (λ (ctc) (predicate-contract-pred ctc))
-   #:val-first-projection
+   #:late-neg-projection
    (λ (ctc)
      (define p? (predicate-contract-pred ctc))
      (define name (predicate-contract-name ctc))
      (λ (blame)
-       (let ([predicate-contract-proj
-              (λ (v)
-                (if (p? v)
-                    (λ (neg-party)
-                      v)
-                    (λ (neg-party)
-                      (raise-blame-error blame v #:missing-party neg-party
-                                         '(expected: "~s" given: "~e")
-                                         name 
-                                         v))))])
-         predicate-contract-proj)))
+       (λ (v neg-party)
+         (if (p? v)
+             v
+             (raise-blame-error blame v #:missing-party neg-party
+                                '(expected: "~s" given: "~e")
+                                name 
+                                v)))))
    #:generate (λ (ctc)
                  (let ([generate (predicate-contract-generate ctc)])
                    (cond

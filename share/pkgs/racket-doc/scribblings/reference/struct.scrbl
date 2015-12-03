@@ -135,7 +135,8 @@ The @racket[inspector] argument normally controls access to reflective
 information about the structure type and its instances; see
 @secref["inspectors"] for more information. If @racket[inspector] is
 @racket['prefab], then the resulting @tech{prefab} structure type and
-its instances are always transparent.
+its instances are always transparent. If @racket[inspector] is
+@racket[#f], then the structure type's instances are transparent.
 
 If @racket[proc-spec] is an integer or procedure, instances of the
 structure type act as procedures. See @racket[prop:procedure] for
@@ -418,7 +419,7 @@ determined by the corresponding @racket[expr]. If @racket[#:parent]
 is specified, the @racket[parent-id] must be bound to a parent
 structure type of @racket[id].
 
-The @racket[id] must have a @tech{transformer binding} that
+The @racket[id] must have a @tech{transformer} binding that
 encapsulates information about a structure type (i.e., like the
 initial identifier bound by @racket[struct]), and the binding
 must supply a constructor, a predicate, and all field accessors.
@@ -606,11 +607,81 @@ key, @racket[#f] otherwise.
 
 See @racket[make-prefab-struct] for a description of valid key shapes.}
 
+@subsection{Additional Structure Utilities}
+
+@note-lib-only[racket/struct]
+
+@defproc[(make-constructor-style-printer
+            [get-constructor (-> any/c (or/c symbol? string?))]
+            [get-contents    (-> any/c sequence?)])
+         (-> any/c output-port? (or/c #t #f 0 1) void?)]{
+
+Produces a function suitable as a value for @racket[prop:custom-write]. The
+function prints values in ``constructor style.'' When the value is
+@racket[print]ed as an expression, it is shown as an application of the
+constructor (as returned by @racket[get-constructor]) to the contents (as
+returned by @racket[get-contents]). When given to @racket[write], it is shown as
+an unreadable value with the constructor separated from the contents by a colon.
+
+@(struct-eval '(require racket/struct racket/pretty))
+
+@examples[#:eval struct-eval
+(struct point (x y)
+  #:property prop:custom-write
+  (make-constructor-style-printer
+   (lambda (obj) 'point)
+   (lambda (obj) (list (point-x obj) (point-y obj)))))
+(print (point 1 2))
+(write (point 1 2))
+]
+
+The function also cooperates with @racket[pretty-print]:
+
+@examples[#:eval struct-eval
+(parameterize ((pretty-print-columns 10))
+  (pretty-print (point #e3e6 #e4e6)))
+(parameterize ((pretty-print-columns 10))
+  (pretty-write (point #e3e6 #e4e6)))
+]
+
+@history[#:added "6.3"]{}
+}
+
+@defproc[(struct->list [v any/c]
+                       [#:on-opaque on-opaque (or/c 'error 'return-false 'skip) 'error])
+         (or/c list? #f)]{
+
+Returns a list containing the struct instance @racket[v]'s
+fields. Unlike @racket[struct->vector], the struct name itself is not
+included.
+
+If any fields of @racket[v] are inaccessible via the current inspector
+the behavior of @racket[struct->list] is determined by
+@racket[on-opaque]. If @racket[on-opaque] is @racket['error] (the
+default), an error is raised. If it is @racket['return-false],
+@racket[struct->list] returns @racket[#f]. If it is @racket['skip],
+the inaccessible fields are omitted from the list.
+
+@examples[#:eval struct-eval
+(define-struct open (u v) #:transparent)
+(struct->list (make-open 'a 'b))
+(struct->list #s(pre 1 2 3))
+(define-struct (secret open) (x y))
+(struct->list (make-secret 0 1 17 22))
+(struct->list (make-secret 0 1 17 22) #:on-opaque 'return-false)
+(struct->list (make-secret 0 1 17 22) #:on-opaque 'skip)
+(struct->list 'not-a-struct #:on-opaque 'return-false)
+(struct->list 'not-a-struct #:on-opaque 'skip)
+]
+
+@history[#:added "6.3"]{}
+}
+
 @;------------------------------------------------------------------------
 @section[#:tag "structinfo"]{Structure Type Transformer Binding}
 
 The @racket[struct] form binds the name of a structure type as
-a @tech{transformer binding} that records the other identifiers bound
+a @tech{transformer} binding that records the other identifiers bound
 to the structure type, the constructor procedure, the predicate
 procedure, and the field accessor and mutator procedures. This
 information can be used during the expansion of other expressions via

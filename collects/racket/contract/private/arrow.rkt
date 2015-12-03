@@ -229,7 +229,7 @@
                     [(rng-x ...) (if rngs (generate-temporaries rngs) '())])
         (with-syntax ([(rng-checker-name ...)
                        (if rngs
-                           (list (gensym 'rng-checker))
+                           (list (gen-id 'rng-checker))
                            null)]
                       [(rng-checker ...)
                        (if rngs
@@ -322,7 +322,7 @@
                                    #,(if no-rng-checking?
                                          (outer-stx-gen #'())
                                          (check-tail-contract #'(rng-ctc ...) #'(rng-checker-name ...) outer-stx-gen))))])
-                (with-syntax ([basic-lambda-name (gensym 'basic-lambda)]
+                (with-syntax ([basic-lambda-name (gen-id 'basic-lambda)]
                               [basic-lambda #'(λ basic-params
                                                 ;; Arrow contract domain checking is instrumented
                                                 ;; both here, and in `arity-checking-wrapper'.
@@ -337,7 +337,7 @@
                                                  contract-continuation-mark-key blame
                                                  (let ()
                                                    pre ... basic-return)))]
-                              [kwd-lambda-name (gensym 'kwd-lambda)]
+                              [kwd-lambda-name (gen-id 'kwd-lambda)]
                               [kwd-lambda #`(λ kwd-lam-params
                                               (with-continuation-mark
                                                contract-continuation-mark-key blame
@@ -396,9 +396,13 @@
     [else
      (define arity-string 
        (if max-arity
-           (if (= min-method-arity max-method-arity)
-               (format "~a non-keyword argument~a" min-method-arity (if (= min-method-arity 1) "" "s"))
-               (format "~a to ~a non-keyword arguments" min-method-arity max-method-arity))
+           (cond
+             [(= min-method-arity max-method-arity)
+              (format "~a non-keyword argument~a" min-method-arity (if (= min-method-arity 1) "" "s"))]
+             [(= (+ min-method-arity 1) max-method-arity) 
+              (format "~a or ~a non-keyword arguments" min-method-arity max-method-arity)]
+             [else
+              (format "~a to ~a non-keyword arguments" min-method-arity max-method-arity)])
            (format "at least ~a non-keyword argument~a" min-method-arity (if (= min-method-arity 1) "" "s"))))
      (define-values (vr va) (procedure-keywords val))
      (define all-kwds (append req-kwd opt-kwd))
@@ -432,7 +436,7 @@
              (define args-len (length args))
              (unless (valid-number-of-args? args)
                (raise-blame-error (blame-swap blame) val
-                                  '("received ~a argument~a" expected: "~a")
+                                  '(received: "~a argument~a" expected: "~a")
                                   args-len (if (= args-len 1) "" "s") arity-string))
              
              ;; these two for loops are doing O(n^2) work that could be linear 
@@ -445,7 +449,7 @@
              (for ([k (in-list kwds)])
                (unless (memq k all-kwds)
                  (raise-blame-error (blame-swap blame) val
-                                    "received unexpected keyword argument ~a"
+                                    '(received: "unexpected keyword argument ~a")
                                     k)))
              (keyword-apply kwd-lambda kwds kwd-args args))))))
      (define basic-checker-name 
@@ -457,7 +461,7 @@
              (unless (valid-number-of-args? args)
                (define args-len (length args))
                (raise-blame-error (blame-swap blame) val
-                                  '("received ~a argument~a" expected: "~a")
+                                  '(received: "~a argument~a" expected: "~a")
                                   args-len (if (= args-len 1) "" "s") arity-string))
              (apply basic-lambda args))))
            (λ args

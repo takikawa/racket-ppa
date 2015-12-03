@@ -224,7 +224,8 @@ with additional fields:
 
  @item{The @racket[pre-amount] field reports place-local memory use
       (i.e., not counting the memory use of child places) in bytes at
-      the time that the @tech{garbage collection} started.}
+      the time that the @tech{garbage collection} started. Additional
+      bytes registered via @racket[make-phantom-bytes] are included.}
 
  @item{The @racket[pre-admin-amount] is a larger number that includes
        memory use for the garbage collector's overhead, such as space
@@ -286,7 +287,7 @@ collection mode, the text has the format
 ]}
 
 
-@defproc[(collect-garbage) void?]{
+@defproc[(collect-garbage [request (or/c 'major 'minor) 'major]) void?]{
 
 Forces an immediate @tech{garbage collection} (unless garbage
 collection is disabled by setting @envvar{PLTDISABLEGC}). Some
@@ -295,7 +296,19 @@ collector cannot prove that it is unreachable.
 
 The @racket[collect-garbage] procedure provides some control over the
 timing of collections, but garbage will obviously be collected even if
-this procedure is never called (unless garbage collection is disabled).}
+this procedure is never called (unless garbage collection is disabled).
+
+If @racket[request] is @racket['major], then a major collection is
+run. If @racket[request] is @racket['minor], then either a minor
+collection is run or no collection is run (and no
+collection occurs when @racket[(system-type 'gc)] returns
+@racket['cgc] or when a normally scheduled minor collection would
+cause a major collection); minor collections triggered by
+@racket[collect-garbage] do not cause major collections to run any
+sooner than they would have otherwise.
+
+@history[#:changed "6.3" @elem{Added the @racket[request] argument.}]}
+
 
 @defproc[(current-memory-use [cust custodian? #f]) exact-nonnegative-integer?]{
 

@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2014 PLT Design Inc.
+  Copyright (c) 2004-2015 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
   All rights reserved.
 
@@ -84,7 +84,7 @@
 #endif
 
 #ifdef MZ_LONG_DOUBLE
-# if defined(_MSC_VER)
+# ifdef MZ_LONG_DOUBLE_API_IS_EXTERNAL
 #  define BYTES_RESERVED_FOR_LONG_DOUBLE 16
 typedef struct {
   char bytes[BYTES_RESERVED_FOR_LONG_DOUBLE];
@@ -524,7 +524,7 @@ typedef intptr_t (*Scheme_Secondary_Hash_Proc)(Scheme_Object *obj, void *cycle_d
 
 #define SCHEME_BUCKTP(obj) SAME_TYPE(SCHEME_TYPE(obj),scheme_bucket_table_type)
 #define SCHEME_HASHTP(obj) SAME_TYPE(SCHEME_TYPE(obj),scheme_hash_table_type)
-#define SCHEME_HASHTRP(obj) SAME_TYPE(SCHEME_TYPE(obj),scheme_hash_tree_type)
+#define SCHEME_HASHTRP(obj) ((SCHEME_TYPE(obj) >= scheme_hash_tree_type) && (SCHEME_TYPE(obj) <= scheme_hash_tree_indirection_type))
 
 #define SCHEME_VECTORP(obj)  SAME_TYPE(SCHEME_TYPE(obj), scheme_vector_type)
 #define SCHEME_MUTABLE_VECTORP(obj)  (SCHEME_VECTORP(obj) && SCHEME_MUTABLEP(obj))
@@ -762,16 +762,11 @@ typedef struct Scheme_Offset_Cptr
 #define SCHEME_PRIM_STRUCT_TYPE_BROKEN_INDEXED_SETTER   (32 | 128)
 #define SCHEME_PRIM_TYPE_PARAMETER               64
 #define SCHEME_PRIM_TYPE_STRUCT_PROP_GETTER      (64 | 128)
-#define SCHEME_PRIM_SOMETIMES_INLINED            (64 | 256)
 #define SCHEME_PRIM_STRUCT_TYPE_STRUCT_PROP_PRED (64 | 128 | 256)
 #define SCHEME_PRIM_STRUCT_TYPE_INDEXED_GETTER   32
 #define SCHEME_PRIM_STRUCT_TYPE_PRED             (32 | 64)
 
 #define SCHEME_PRIM_PROC_FLAGS(x) (((Scheme_Prim_Proc_Header *)x)->flags)
-
-#define SCHEME_PRIM_IS_SOMETIMES_INLINED(rator) \
-  (((SCHEME_PRIM_PROC_FLAGS(rator) & SCHEME_PRIM_OTHER_TYPE_MASK) == SCHEME_PRIM_SOMETIMES_INLINED) \
-   || (SCHEME_PRIM_PROC_FLAGS(rator) & (SCHEME_PRIM_IS_UNARY_INLINED | SCHEME_PRIM_IS_BINARY_INLINED)))
 
 typedef struct Scheme_Object *(Scheme_Prim)(int argc, Scheme_Object *argv[]);
 
@@ -906,7 +901,7 @@ typedef struct {
 
 typedef struct Scheme_Hash_Table
 {
-  Scheme_Inclhash_Object iso; /* 0x1 flag => marshal as #t (hack for stxobj bytecode) */
+  Scheme_Inclhash_Object iso; /* 0x1 flag => print as opaque (e.g., exports table); 0x2 => misc (e.g., top-level multi_scopes) */
   intptr_t size; /* power of 2 */
   intptr_t count;
   Scheme_Object **keys;
@@ -943,7 +938,6 @@ typedef struct Scheme_Bucket_Table
 enum {
   SCHEME_hash_string,
   SCHEME_hash_ptr,
-  SCHEME_hash_bound_id,
   SCHEME_hash_weak_ptr,
   SCHEME_hash_late_weak_ptr
 };
@@ -1169,7 +1163,8 @@ typedef struct Scheme_Thread {
   struct Scheme_Overflow *overflow;
 
   struct Scheme_Comp_Env *current_local_env;
-  Scheme_Object *current_local_mark;
+  Scheme_Object *current_local_scope;
+  Scheme_Object *current_local_use_scope;
   Scheme_Object *current_local_name;
   Scheme_Object *current_local_modidx;
   Scheme_Env *current_local_menv;
@@ -1221,9 +1216,6 @@ typedef struct Scheme_Thread {
   short suspend_break;
   short external_break;
 
-  Scheme_Simple_Object *list_stack;
-  int list_stack_pos;
-
   /* Racket client can use: */
   void (*on_kill)(struct Scheme_Thread *p);
   void *kill_data;
@@ -1261,6 +1253,7 @@ typedef struct Scheme_Thread {
 #ifdef MZ_PRECISE_GC
   struct GC_Thread_Info *gc_info; /* managed by the GC */
   void *place_channel_msg_in_flight;
+  void *place_channel_msg_chain_in_flight;
 #endif
 
 } Scheme_Thread;
@@ -1906,8 +1899,8 @@ MZ_EXTERN void scheme_register_embedded_load(intptr_t len, const char *s);
 typedef void (*Scheme_Exit_Proc)(int v);
 MZ_EXTERN Scheme_Exit_Proc scheme_exit;
 MZ_EXTERN void scheme_set_exit(Scheme_Exit_Proc p);
-typedef void (*Scheme_At_Exit_Callback_Proc)();
-typedef void (*Scheme_At_Exit_Proc)(Scheme_At_Exit_Callback_Proc);
+typedef void (*Scheme_At_Exit_Callback_Proc)(void);
+typedef int (*Scheme_At_Exit_Proc)(Scheme_At_Exit_Callback_Proc);
 MZ_EXTERN void scheme_set_atexit(Scheme_At_Exit_Proc p);
 typedef void (*scheme_console_printf_t)(char *str, ...);
 MZ_EXTERN scheme_console_printf_t scheme_console_printf;
@@ -1989,9 +1982,7 @@ MZ_EXTERN int scheme_main_stack_setup(int no_auto_statics, Scheme_Nested_Main _m
 typedef int (*Scheme_Env_Main)(Scheme_Env *env, int argc, char **argv);
 MZ_EXTERN int scheme_main_setup(int no_auto_statics, Scheme_Env_Main _main, int argc, char **argv);
 
-#ifdef IMPLEMENT_THREAD_LOCAL_VIA_WIN_TLS
 MZ_EXTERN void scheme_register_tls_space(void *tls_space, int _tls_index);
-#endif
 
 MZ_EXTERN void scheme_register_static(void *ptr, intptr_t size);
 #if defined(MUST_REGISTER_GLOBALS) || defined(GC_MIGHT_USE_REGISTERED_STATICS)
@@ -2106,6 +2097,7 @@ extern Scheme_Extension_Table *scheme_extension_table;
 #define SCHEME_STRUCT_GEN_SET 0x40
 #define SCHEME_STRUCT_EXPTIME 0x80
 #define SCHEME_STRUCT_NO_MAKE_PREFIX 0x100
+#define SCHEME_STRUCT_NAMES_ARE_STRINGS 0x200
 
 /*========================================================================*/
 /*                           file descriptors                             */

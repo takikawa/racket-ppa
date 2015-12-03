@@ -30,49 +30,53 @@
 (provide provide-public-names
          ;; needed for Typed Racket
          (protect-out do-make-object find-method/who))
-(define-syntax-rule (provide-public-names)
-  (provide class class* class/derived
-           define-serializable-class define-serializable-class*
-           class? 
-           mixin
-           interface interface* interface?
-           object% object? externalizable<%> printable<%> writable<%> equal<%>
-           object=? object-or-false=?
-           new make-object instantiate
-           send send/apply send/keyword-apply send* send+ dynamic-send
-           class-field-accessor class-field-mutator with-method
-           get-field set-field! field-bound? field-names
-           dynamic-get-field dynamic-set-field!
-           private* public*  pubment*
-           override* overment*
-           augride* augment*
-           public-final* override-final* augment-final*
-           define/private define/public define/pubment
-           define/override define/overment
-           define/augride define/augment
-           define/public-final define/override-final define/augment-final
-           define-local-member-name define-member-name 
-           member-name-key generate-member-key 
-           member-name-key? member-name-key=? member-name-key-hash-code
-           generic make-generic send-generic
-           is-a? subclass? implementation? interface-extension?
-           object-interface object-info object->vector
-           object-method-arity-includes?
-           method-in-interface? interface->method-names class->interface class-info
-           (struct-out exn:fail:object)
-           make-primitive-class
-           class/c ->m ->*m ->dm case->m object/c instanceof/c
-           dynamic-object/c
+(define-syntax (provide-public-names stx)
+  (datum->syntax
+   stx
+   '(provide class class* class/derived
+            define-serializable-class define-serializable-class*
+            class? 
+            mixin
+            interface interface* interface?
+            object% object? externalizable<%> printable<%> writable<%> equal<%>
+            object=? object-or-false=?
+            new make-object instantiate
+            send send/apply send/keyword-apply send* send+ dynamic-send
+            class-field-accessor class-field-mutator with-method
+            get-field set-field! field-bound? field-names
+            dynamic-get-field dynamic-set-field!
+            private* public*  pubment*
+            override* overment*
+            augride* augment*
+            public-final* override-final* augment-final*
+            define/private define/public define/pubment
+            define/override define/overment
+            define/augride define/augment
+            define/public-final define/override-final define/augment-final
+            define-local-member-name define-member-name 
+            member-name-key generate-member-key 
+            member-name-key? member-name-key=? member-name-key-hash-code
+            generic make-generic send-generic
+            is-a? subclass? implementation? interface-extension?
+            object-interface object-info object->vector
+            object-method-arity-includes?
+            method-in-interface? interface->method-names class->interface class-info
+            (struct-out exn:fail:object)
+            make-primitive-class
+            class/c ->m ->*m ->dm case->m object/c instanceof/c
+            dynamic-object/c
+            class-seal class-unseal
            
            ;; "keywords":
-           private public override augment
-           pubment overment augride
-           public-final override-final augment-final
-           field init init-field init-rest
-           rename-super rename-inner inherit inherit/super inherit/inner inherit-field
-           this this% super inner
-           super-make-object super-instantiate super-new
-           inspect absent abstract))
+            private public override augment
+            pubment overment augride
+            public-final override-final augment-final
+            field init init-field init-rest
+            rename-super rename-inner inherit inherit/super inherit/inner inherit-field
+            this this% super inner
+            super-make-object super-instantiate super-new
+            inspect absent abstract)
+   stx))
 
 ;;--------------------------------------------------------------------
 ;;  keyword setup
@@ -377,12 +381,16 @@
                                          'expression
                                          null)])
                        (syntax-local-bind-syntaxes (syntax->list #'(id ...)) #'rhs def-ctx)
-                       (cons #'(define-syntaxes (id ...) rhs) (loop (cdr l)))))]
+                       (with-syntax ([(id ...) (map syntax-local-identifier-as-binding
+                                                    (syntax->list #'(id ...)))])
+                         (cons (syntax/loc e (define-syntaxes (id ...) rhs))
+                               (loop (cdr l))))))]
                   [(define-values (id ...) rhs)
                    (andmap identifier? (syntax->list #'(id ...)))
-                   (begin
-                     (map bind-local-id (syntax->list #'(id ...)))
-                     (cons e (loop (cdr l))))]
+                   (let ([ids (map bind-local-id (syntax->list #'(id ...)))])
+                     (with-syntax ([(id ...) ids])
+                       (cons (datum->syntax e (list #'define-values #'(id ...) #'rhs) e e)
+                             (loop (cdr l)))))]
                   [_else 
                    (cons e (loop (cdr l)))]))))))
     
@@ -418,9 +426,9 @@
                       (if alone
                           (map (lambda (i)
                                  (if (identifier? i)
-                                     (alone i)
-                                     (cons (stx-car i)
-                                           (stx-car (stx-cdr i)))))
+                                     (alone (syntax-local-identifier-as-binding i))
+                                     (cons (syntax-local-identifier-as-binding (stx-car i))
+                                           (syntax-local-identifier-as-binding (stx-car (stx-cdr i))))))
                                l)
                           l)))
                   l)))
@@ -437,8 +445,8 @@
                     (cons (list a a) (stx-cdr i))
                     i))]))
     
-    (define (norm-init/field-iid norm) (stx-car (stx-car norm)))
-    (define (norm-init/field-eid norm) (stx-car (stx-cdr (stx-car norm))))
+    (define (norm-init/field-iid norm) (syntax-local-identifier-as-binding (stx-car (stx-car norm))))
+    (define (norm-init/field-eid norm) (syntax-local-identifier-as-binding (stx-car (stx-cdr (stx-car norm)))))
     
     ;; expands an expression enough that we can check whether it has
     ;; the right form for a method; must use local syntax definitions
@@ -671,7 +679,7 @@
     (define (main stx super-expr deserialize-id-expr name-id interface-exprs defn-and-exprs)
       (let-values ([(this-id) #'this-id]
                    [(the-obj) (datum->syntax (quote-syntax here) (gensym 'self))]
-                   [(the-finder) (datum->syntax (quote-syntax here) (gensym 'find-self))])
+                   [(the-finder) (datum->syntax #f (gensym 'find-self))])
         
         (let* ([def-ctx (syntax-local-make-definition-context)]
                [localized-map (make-bound-identifier-mapping)]
@@ -681,13 +689,15 @@
                                       (unless (eq? id id2)
                                         (set! any-localized? #t))
                                       id2))]
-               [bind-local-id (lambda (id)
-                                (let ([l (localize/set-flag id)])
+               [bind-local-id (lambda (orig-id)
+                                (let ([l (localize/set-flag orig-id)]
+                                      [id (syntax-local-identifier-as-binding orig-id)])
                                   (syntax-local-bind-syntaxes (list id) #f def-ctx)
                                   (bound-identifier-mapping-put!
                                    localized-map
                                    id
-                                   l)))]
+                                   l)
+                                  id))]
                [lookup-localize (lambda (id)
                                   (bound-identifier-mapping-get
                                    localized-map
@@ -707,7 +717,7 @@
                                   (if (syntax? s)
                                       (syntax-e s)
                                       s)))])
-            
+
             ;; ------ Basic syntax checks -----
             (for-each (lambda (stx)
                         (syntax-case stx (-init -init-rest -field -init-field -inherit-field
@@ -1299,8 +1309,7 @@
                                                      (generate-temporaries (map car inherit/inners)))]
                           [all-inherits (append inherits inherit/supers inherit/inners)]
                           [definify (lambda (l)
-                                      (map bind-local-id l)
-                                      l)])
+                                      (map bind-local-id l))])
 
                       ;; ---- set up field and method mappings ----
                       (with-syntax ([(rename-super-orig ...) (definify (map car rename-supers))]
@@ -1691,8 +1700,6 @@
                                                                              (cdr (syntax-e stx))))))))])
                                                       (letrec-syntaxes+values
                                                           ([(plain-init-name) (make-init-redirect 
-                                                                               (quote-syntax set!)
-                                                                               (quote-syntax #%plain-app)
                                                                                (quote-syntax local-plain-init-name)
                                                                                (quote-syntax plain-init-name-localized))] ...)
                                                         ([(local-plain-init-name) unsafe-undefined] ...)
@@ -1989,6 +1996,7 @@
                       pos supers     ; pos is subclass depth, supers is vector
                       self-interface ; self interface
                       insp-mk        ; dummy struct maker to control inspection access
+                      obj-inspector  ; the inspector used for instances of this class
                       
                       method-width   ; total number of methods
                       method-ht      ; maps public names to vector positions
@@ -2147,6 +2155,34 @@ last few projections.
                                 abstract-names)
                         "method names"))
   
+  ;; -- Run class-seal/unseal checkers --
+  (when (has-seals? super)
+    (define seals (get-seals super))
+    (define all-inits init-args)
+    (define all-fields (append public-field-names inherit-field-names))
+    (define all-methods (append rename-super-names
+                                rename-inner-names
+                                pubment-names
+                                public-final-names
+                                public-normal-names
+                                overment-names
+                                override-final-names
+                                override-normal-names
+                                augment-names
+                                augment-final-names
+                                augride-normal-names
+                                inherit-names
+                                abstract-names))
+    (define all-init-checkers
+      (map (λ (sl) (seal-init-checker sl)) seals))
+    (define all-field-checkers
+      (map (λ (sl) (seal-field-checker sl)) seals))
+    (define all-method-checkers
+      (map (λ (sl) (seal-method-checker sl)) seals))
+    (for ([f all-init-checkers]) (f all-inits))
+    (for ([f all-field-checkers]) (f all-fields))
+    (for ([f all-method-checkers]) (f all-methods)))
+
   ;; -- Create new class's name --
   (let* ([name (or name
                    (let ([s (class-name super)])
@@ -2336,6 +2372,7 @@ last few projections.
                                 i
                                 (let-values ([(struct: make- ? -ref -set) (make-struct-type 'insp #f 0 0 #f null inspector)])
                                   make-)
+                                inspector
                                 method-width method-ht method-names remaining-abstract-names
                                 (interfaces->contracted-methods (list i))
                                 #f
@@ -2779,7 +2816,7 @@ last few projections.
                                            (values o
                                                    (lambda (o2)
                                                      ((class-fixup c) o o2))))))))
-                          c+ctc))))))))))))
+                          (copy-seals super c+ctc)))))))))))))
 
 ;; (listof interface?) -> (listof symbol?)
 ;; traverse the interfaces and figure out contracted methods
@@ -2924,6 +2961,99 @@ An example
      (object-ref o)]))
 
 
+
+;;--------------------------------------------------------------------
+;;  sealing/unsealing
+;;--------------------------------------------------------------------
+
+;; represents a seal on a class, only for internal use
+;;
+;; sym            - the symbol used to identify the particular seal
+;; inst-checker   - a function to run when a sealed class is instantiated
+;; init-checker   - these three fields respectively are functions to run when
+;; field-checker    a sealed class is subclassed and should error when a sealed
+;; method-checker   member is added in the subclass
+(struct seal (sym inst-checker init-checker field-checker method-checker)
+        #:transparent)
+
+(define-values (prop:seals has-seals? get-seals)
+  (make-impersonator-property 'class-seals))
+
+(define (class-seal cls seal-sym
+                    inits fields methods
+                    inst-proc
+                    member-proc)
+  (unless (class? cls)
+    (raise-argument-error 'class-seal "class?" cls))
+  (unless (symbol? seal-sym)
+    (raise-argument-error 'class-seal "symbol?" seal-sym))
+  (define (check-unsealed-names val)
+    (unless (and (list? val)
+                 (andmap symbol? val))
+      (raise-argument-error 'class-seal "(listof symbol?)" val)))
+  (check-unsealed-names inits)
+  (check-unsealed-names fields)
+  (check-unsealed-names methods)
+  (unless (procedure-arity-includes? inst-proc 1)
+    (raise-argument-error 'class-seal
+                          "(procedure-arity-includes/c 1)" inst-proc))
+  (unless (procedure-arity-includes? member-proc 2)
+    (raise-argument-error 'class-seal
+                          "(procedure-arity-includes/c 2)" member-proc))
+
+  (define new-seal
+    (seal seal-sym
+          inst-proc
+          (make-seal-checker member-proc cls inits)
+          (make-seal-checker member-proc cls fields)
+          (make-seal-checker member-proc cls methods)))
+  (define seals (cons new-seal
+                      (or (and (has-seals? cls) (get-seals cls)) null)))
+  ;; impersonate to avoid the cost of creating a class wrapper
+  (impersonate-struct cls
+                      class-object? #f      ; just here as a witness
+                      set-class-object?! #f ; also need this witness
+                      prop:seals seals))
+
+;; make-seal-checker : procedure? class? (listof symbol?)
+;;                     -> (listof symbol?) -> void?
+;; constructs a checker function parameterized over the user-provided
+;; checker procedure and the list of unsealed names
+(define ((make-seal-checker proc cls unsealed) actual)
+  (define sealed-actuals (remove* unsealed actual))
+  (unless (null? sealed-actuals)
+    (proc cls sealed-actuals)))
+
+(define (class-unseal cls sym wrong-key-proc)
+  (unless (class? cls)
+    (raise-argument-error 'class-seal "class?" cls))
+  (unless (symbol? sym)
+    (raise-argument-error 'class-seal "symbol?" seal-sym))
+
+  (define old-seals (and (has-seals? cls) (get-seals cls)))
+  (define has-seal-with-sym?
+    (and old-seals
+         (for/or ([old-seal (in-list old-seals)])
+           (eq? sym (seal-sym old-seal)))))
+  (unless has-seal-with-sym?
+    (wrong-key-proc cls))
+  (define new-seals
+    (remove sym (get-seals cls)
+            (λ (sym sl) (eq? sym (seal-sym sl)))))
+  (impersonate-struct cls
+                      class-object? #f
+                      set-class-object?! #f
+                      prop:seals new-seals))
+
+;; copy-seals : class? class? -> class?
+;; Copy the seal properties from one class to another
+(define (copy-seals cls1 cls2)
+  (if (has-seals? cls1)
+      (impersonate-struct cls2
+                          class-object? #f
+                          set-class-object?! #f
+                          prop:seals (get-seals cls1))
+      cls2))
 
 ;;--------------------------------------------------------------------
 ;;  interfaces
@@ -3133,6 +3263,7 @@ An example
                  0 (vector #f) 
                  object<%>
                  void ; never inspectable
+                 #f   ; this is for the inspector on the object
                  
                  0 (make-hasheq) null null null
                  #f
@@ -3283,6 +3414,7 @@ An example
                                (list->vector (vector->list (class-supers cls)))
                                (class-self-interface cls)
                                void ;; No inspecting
+                               (class-obj-inspector cls)
 
                                method-width
                                method-ht
@@ -3334,7 +3466,8 @@ An example
                                            0 ;; No new fields in this class replacement
                                            unsafe-undefined
                                            ;; Map object property to class:
-                                           (list (cons prop:object c)))])
+                                           (list (cons prop:object c))
+                                           (class-obj-inspector cls))])
              (set-class-struct:object! c struct:object)
              (set-class-object?! c object?)
              (set-class-make-object! c object-make)
@@ -3360,7 +3493,7 @@ An example
 
            ;; cache the concrete class
            (hash-set! (class-ictc-classes cls) blame c)
-           c)]))
+           (copy-seals cls c))]))
 
 ;; name method info -> method
 ;; appropriately wraps the method with interface contracts
@@ -3401,6 +3534,12 @@ An example
                "cannot instantiate class with abstract methods"
                "class" class
                "abstract methods" (as-write-list (class-abstract-ids class))))
+  ;; if the class is sealed, run all sealing error procedures
+  ;; usually, only running the first one is necessary since these are
+  ;; expected to be error-reporting procedures.
+  (when (has-seals? class)
+    (for ([seal (in-list (get-seals class))])
+      ((seal-inst-checker seal) class)))
   ;; Generate correct class by concretizing methods w/interface ctcs
   (define concrete-class (fetch-concrete-class class blame))
   (define o ((class-make-object concrete-class)))
@@ -3982,7 +4121,7 @@ An example
     [(_ name obj)
      (identifier? (syntax name))
      (with-syntax ([localized (localize (syntax name))])
-       (syntax (get-field/proc `localized obj)))]
+       (syntax/loc stx (get-field/proc `localized obj)))]
     [(_ name obj)
      (raise-syntax-error
       'get-field "expected a field name as first argument"
@@ -4719,6 +4858,7 @@ An example
          object-interface object-info object->vector
          object-method-arity-includes?
          method-in-interface? interface->method-names class->interface class-info
+         class-seal class-unseal copy-seals
          (struct-out exn:fail:object)
          make-primitive-class 
          (for-syntax localize) 

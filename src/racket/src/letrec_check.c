@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2015 PLT Design Inc.
 
   This library is free software; you can redistribute it and/or
   modify it under the terms of the GNU Library General Public
@@ -457,7 +457,7 @@ static Scheme_Object *letrec_check_local(Scheme_Object *o, Letrec_Check_Frame *f
 static int is_effect_free_prim(Scheme_Object *rator)
 {
   if (SCHEME_PRIMP(rator)
-      && (SCHEME_PRIM_PROC_OPT_FLAGS(rator) & SCHEME_PRIM_IS_OMITABLE))
+      && (SCHEME_PRIM_PROC_OPT_FLAGS(rator) & SCHEME_PRIM_IS_OMITABLE_ANY))
     return 1;
 
   return 0;
@@ -1083,6 +1083,9 @@ static Scheme_Object *letrec_check_expr(Scheme_Object *expr, Letrec_Check_Frame 
     return letrec_check_begin0(expr, frame, pos);
   case scheme_apply_values_type:
     return letrec_check_apply_values(expr, frame, pos);
+  case scheme_with_immed_mark_type:
+    scheme_signal_error("internal error: with-immediate-mark not expected before optimization");
+    return NULL;
   case scheme_require_form_type:
     return expr;
   case scheme_module_type:

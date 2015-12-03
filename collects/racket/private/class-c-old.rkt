@@ -213,6 +213,7 @@
                             supers
                             (class-self-interface cls)
                             void ;; No inspecting
+                            (class-obj-inspector cls) ; inherit object inspector
                             
                             method-width
                             method-ht
@@ -273,7 +274,8 @@
                                         0 ;; No new fields in this class replacement
                                         undefined
                                         ;; Map object property to class:
-                                        (list (cons prop:object c)))])
+                                        (list (cons prop:object c))
+                                        (class-obj-inspector cls))])
           (set-class-struct:object! c struct:object)
           (set-class-object?! c object?)
           (set-class-make-object! c object-make)
@@ -372,7 +374,7 @@
                    (super-go the-obj si_c si_inited? init-args null null)
                    (init the-obj super-go si_c si_inited? init-args init-args))))))
         
-        c))))
+        (copy-seals cls c)))))
 
 (define (internal-class/c-proj internal-ctc)
   (define dynamic-features
@@ -480,6 +482,7 @@
                             supers
                             (class-self-interface cls)
                             void ;; No inspecting
+                            (class-obj-inspector cls)
                             
                             method-width
                             method-ht
@@ -542,7 +545,8 @@
                                         0 ;; No new fields in this class replacement
                                         undefined
                                         ;; Map object property to class:
-                                        (list (cons prop:object c)))])
+                                        (list (cons prop:object c))
+                                        (class-obj-inspector cls))])
           (set-class-struct:object! c struct:object)
           (set-class-object?! c object?)
           (set-class-make-object! c object-make)
@@ -707,7 +711,7 @@
                  (super-go the-obj si_c si_inited? init-args null null)
                  (init the-obj super-go si_c si_inited? init-args init-args)))))
         
-        c))))
+        (copy-seals cls c)))))
 
 (define (blame-add-init-context blame name)
   (blame-add-context blame
@@ -1544,6 +1548,7 @@
                         (list->vector (vector->list (class-supers cls)))
                         (class-self-interface cls)
                         void ;; No inspecting
+                        (class-obj-inspector cls)
                         
                         method-width
                         method-ht
@@ -1603,7 +1608,8 @@
                                     0 ;; No new fields in this class replacement
                                     undefined
                                     ;; Map object property to class:
-                                    (list (cons prop:object c)))])
+                                    (list (cons prop:object c))
+                                    (class-obj-inspector cls))])
       (set-class-struct:object! c struct:object)
       (set-class-object?! c object?)
       (set-class-make-object! c object-make)
@@ -1633,4 +1639,4 @@
           (define p-neg ((contract-projection c) (blame-add-field-context blame f #:swap? #t)))
           (hash-set! field-ht f (field-info-extend-external fi p-pos p-neg)))))
     
-    c))
+    (copy-seals cls c)))

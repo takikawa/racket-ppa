@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2014 PLT Design Inc.
+  Copyright (c) 2004-2015 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -4175,7 +4175,7 @@ scheme_bitwise_shift(int argc, Scheme_Object *argv[])
     v = scheme_make_bignum(i);
   }
 
-  if (scheme_current_thread->constant_folding)
+  if (scheme_current_thread->constant_folding && (shift > 100))
     scheme_signal_error("too big");
 
   return scheme_bignum_shift(v, shift);

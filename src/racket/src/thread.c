@@ -243,6 +243,7 @@ THREAD_LOCAL_DECL(struct Scheme_GC_Pre_Post_Callback_Desc *gc_prepost_callback_d
 
 ROSYM static Scheme_Object *read_symbol, *write_symbol, *execute_symbol, *delete_symbol, *exists_symbol;
 ROSYM static Scheme_Object *client_symbol, *server_symbol;
+ROSYM static Scheme_Object *major_symbol, *minor_symbol;
 
 THREAD_LOCAL_DECL(static int do_atomic = 0);
 THREAD_LOCAL_DECL(static int missed_context_switch = 0);
@@ -436,6 +437,7 @@ static void suspend_thread(Scheme_Thread *p);
 static int check_sleep(int need_activity, int sleep_now);
 
 static int syncing_ready(Syncing *syncing, Scheme_Schedule_Info *sinfo);
+static void get_outof_or_into_lines(Syncing *syncing, int get_out);
 
 static void remove_thread(Scheme_Thread *r);
 static void exit_or_escape(Scheme_Thread *p);
@@ -519,7 +521,12 @@ void scheme_init_thread(Scheme_Env *env)
   exists_symbol = scheme_intern_symbol("exists");
   client_symbol = scheme_intern_symbol("client");
   server_symbol = scheme_intern_symbol("server");
-  
+
+  REGISTER_SO(major_symbol);
+  REGISTER_SO(minor_symbol);
+  major_symbol = scheme_intern_symbol("major");
+  minor_symbol = scheme_intern_symbol("minor");
+
   GLOBAL_PRIM_W_ARITY("dump-memory-stats"            , scheme_dump_gc_stats, 0, -1, env);
   GLOBAL_PRIM_W_ARITY("vector-set-performance-stats!", current_stats       , 1, 2, env);
 
@@ -599,7 +606,7 @@ void scheme_init_thread(Scheme_Env *env)
   scheme_add_evt_through_sema(scheme_will_executor_type, will_executor_sema, NULL);
 
 
-  GLOBAL_PRIM_W_ARITY("collect-garbage"                       , collect_garbage      , 0, 0, env);
+  GLOBAL_PRIM_W_ARITY("collect-garbage"                       , collect_garbage      , 0, 1, env);
   GLOBAL_PRIM_W_ARITY("current-memory-use"                    , current_memory_use   , 0, 1, env);
 
   GLOBAL_PRIM_W_ARITY("custodian-require-memory"              , custodian_require_mem, 3, 3, env);
@@ -710,9 +717,17 @@ void scheme_init_paramz(Scheme_Env *env)
   scheme_protect_primitive_provide(newenv, NULL);
 }
 
-static Scheme_Object *collect_garbage(int c, Scheme_Object *p[])
+static Scheme_Object *collect_garbage(int argc, Scheme_Object *argv[])
 {
-  scheme_collect_garbage();
+  if (argc == 1 && SAME_OBJ(minor_symbol, argv[0])) {
+    scheme_collect_garbage_minor();
+  } else if ((argc < 1) || SAME_OBJ(major_symbol, argv[0])) {
+    scheme_collect_garbage();
+  } else {
+    scheme_wrong_contract("collect-garbage", 
+                          "(or/c 'major 'minor)", 
+                          0, argc, argv);
+  }
 
   return scheme_void;
 }
@@ -2398,8 +2413,6 @@ static Scheme_Thread *make_thread(Scheme_Config *config,
 
   process->ran_some = 1;
 
-  process->list_stack = NULL;
-
   scheme_gmp_tls_init(process->gmp_tls);
   
   if (prefix) {
@@ -2931,8 +2944,6 @@ static void thread_is_dead(Scheme_Thread *r)
   r->suspended_box = NULL;
   r->resumed_box = NULL;
   
-  r->list_stack = NULL;
-
   r->t_set_parent = NULL;
   r->dw = NULL;
   r->init_config = NULL;
@@ -3033,11 +3044,6 @@ static void remove_thread(Scheme_Thread *r)
   r->tail_buffer = NULL;
   r->ku.multiple.array = NULL;
   r->values_buffer = NULL;
-
-#ifndef SENORA_GC_NO_FREE
-  if (r->list_stack)
-    GC_free(r->list_stack);
-#endif
 
   thread_is_dead(r);
 
@@ -3161,6 +3167,12 @@ static void start_child(Scheme_Thread * volatile child,
   }
 }
 
+void scheme_do_thread_start_child(Scheme_Thread *child, Scheme_Object *child_eval)
+  XFORM_SKIP_PROC
+{
+  return start_child(child, child_eval);
+}
+
 static Scheme_Object *make_subprocess(Scheme_Object *child_thunk,
 				      void *child_start, 
 				      Scheme_Config *config,
@@ -3217,7 +3229,7 @@ static Scheme_Object *make_subprocess(Scheme_Object *child_thunk,
   child->stack_start = child_start;
 
   /* Sets the child's jmpbuf for swapping in later: */
-  start_child(child, child_thunk);
+  scheme_thread_start_child(child, child_thunk);
 
   if (scheme_notify_multithread && turn_on_multi) {
     scheme_notify_multithread(1);
@@ -3514,9 +3526,6 @@ Scheme_Object *scheme_call_as_nested_thread(int argc, Scheme_Object *argv[], voi
     np->tail_buffer = tb;
   }
   np->tail_buffer_size = p->tail_buffer_size;
-
-  np->list_stack = p->list_stack;
-  np->list_stack_pos = p->list_stack_pos;
 
   scheme_gmp_tls_init(np->gmp_tls);
 
@@ -4076,7 +4085,7 @@ static int check_fd_semaphores()
               hit = 1;
               SCHEME_VEC_ELS(v)[0] = scheme_false;
             }
-            pfd[i].revents -= (pfd[i].revents & POLLIN);
+            pfd[i].events -= (pfd[i].events & POLLIN);
           }
           if (pfd[i].revents & (POLLOUT | POLLHUP | POLLERR)) {
             s = SCHEME_VEC_ELS(v)[1];
@@ -4085,7 +4094,7 @@ static int check_fd_semaphores()
               hit = 1;
               SCHEME_VEC_ELS(v)[1] = scheme_false;
             }
-            pfd[i].revents -= (pfd[i].revents & POLLOUT);
+            pfd[i].events -= (pfd[i].events & POLLOUT);
           }
           if (SCHEME_FALSEP(SCHEME_VEC_ELS(v)[0])
               && SCHEME_FALSEP(SCHEME_VEC_ELS(v)[1]))
@@ -4602,8 +4611,10 @@ static void raise_break(Scheme_Thread *p)
   p->external_break = 0;
 
   if (p->blocker && (p->block_check == (Scheme_Ready_Fun)syncing_ready)) {
-    /* Get out of lines for channels, etc., before calling a break exn handler. */
-    scheme_post_syncing_nacks((Syncing *)p->blocker);
+    /* Get out of lines for channels, etc., before calling a break exn handler.
+       This is only strictly necessary for `sync/enable-break`, which wants
+       to provide a sync-or-break guarantee, but we do it always for consistency. */
+    get_outof_or_into_lines((Syncing *)p->blocker, 1);
   }
 
   save_thread_schedule_state(p, &ssr, 0);
@@ -4622,6 +4633,11 @@ static void raise_break(Scheme_Thread *p)
 
   /* Continue from break... */
   restore_thread_schedule_state(p, &ssr, 0);
+
+  if (p->blocker && (p->block_check == (Scheme_Ready_Fun)syncing_ready)) {
+    /* Get back into lines for channels, etc. */
+    get_outof_or_into_lines((Syncing *)p->blocker, 0);
+  }
 }
 
 static void escape_to_kill(Scheme_Thread *p)
@@ -5779,15 +5795,17 @@ static void add_transitive_resume(Scheme_Thread *promote_to, Scheme_Thread *p)
     promote_to->transitive_resumes = (Scheme_Object *)ht;
   } else {
     /* Purge ht entries for threads that are now dead: */
-    Scheme_Hash_Table *gone= NULL;
+    Scheme_Hash_Table *gone = NULL;
+    Scheme_Object *b;
     int i;
 
     ht = (Scheme_Hash_Table *)promote_to->transitive_resumes;
     for (i = ht->size; i--; ) {
       if (ht->vals[i]) {
-	if (!SCHEME_PTR_VAL(ht->keys[i])
-            || (SAME_TYPE(SCHEME_TYPE(ht->keys[i]), scheme_weak_box_type)
-                && !SCHEME_WEAK_BOX_VAL(ht->vals[i]))) {
+        b = SCHEME_PTR_VAL(ht->keys[i]);
+	if (!b
+            || (SAME_TYPE(SCHEME_TYPE(b), scheme_weak_box_type)
+                && !SCHEME_WEAK_BOX_VAL(b))) {
 	  /* This one is dead */
 	  if (!gone)
 	    gone = scheme_make_hash_table(SCHEME_hash_ptr);
@@ -6990,6 +7008,46 @@ static void post_syncing_nacks(Syncing *syncing, int as_escape)
       } else
         as_escape = 0;
 
+      syncing = (Syncing *)SCHEME_CAR(syncs);
+      syncs = SCHEME_CDR(syncs);
+    }
+  } while (syncing);
+}
+
+static void get_outof_or_into_lines(Syncing *syncing, int get_out)
+{
+  int i, c;
+  Scheme_Object *syncs = NULL;
+  Syncing *next;
+
+  if (syncing->result) {
+    /* already done, so no need to adjust lines */
+    return;
+  }
+
+  do {
+    if (syncing->set) {
+      c = syncing->set->argc;
+    
+      for (i = 0; i < c; i++) {
+        if (SAME_TYPE(SCHEME_TYPE(syncing->set->argv[i]), scheme_channel_syncer_type)) {
+          if (get_out)
+            scheme_get_outof_line((Scheme_Channel_Syncer *)syncing->set->argv[i]);
+          else
+            scheme_get_back_into_line((Scheme_Channel_Syncer *)syncing->set->argv[i]);
+        }
+        else if (SAME_TYPE(SCHEME_TYPE(syncing->set->argv[i]), scheme_active_replace_evt_type)) {
+         /* Handle active_replace_evt specially to avoid stack overflow: */
+          next = scheme_replace_evt_get(syncing->set->argv[i]);
+          if (next)
+            syncs = scheme_make_raw_pair((Scheme_Object *)next, syncs);
+        }
+      }
+    }
+
+    if (!syncs)
+      syncing = NULL;
+    else {
       syncing = (Syncing *)SCHEME_CAR(syncs);
       syncs = SCHEME_CDR(syncs);
     }
@@ -8255,7 +8313,7 @@ static Scheme_Object *make_phantom_bytes(int argc, Scheme_Object *argv[])
   pb->size = SCHEME_INT_VAL(argv[0]);
 
 # ifdef MZ_PRECISE_GC
-  if (!GC_allocate_phantom_bytes(pb->size))
+  if (!GC_allocate_phantom_bytes(pb, pb->size))
     scheme_raise_out_of_memory("make-phantom-bytes", NULL);
 # endif
 
@@ -8276,7 +8334,7 @@ static Scheme_Object *set_phantom_bytes(int argc, Scheme_Object *argv[])
   amt = SCHEME_INT_VAL(argv[1]);
 
 # ifdef MZ_PRECISE_GC
-  if (!GC_allocate_phantom_bytes(amt - pb->size))
+  if (!GC_allocate_phantom_bytes(pb, amt - pb->size))
     scheme_raise_out_of_memory("make-phantom-bytes", NULL);
 # endif
 
@@ -8667,10 +8725,14 @@ void scheme_remove_gc_callback(Scheme_Object *key)
 # define mzOSAPI /* empty */
 #endif
 
+typedef void (*gccb_Int_to_Void)(int);
 typedef void (*gccb_Ptr_Ptr_Ptr_Int_to_Void)(void*, void*, void*, int);
 typedef void (*gccb_Ptr_Ptr_Ptr_to_Void)(void*, void*, void*);
+typedef void* (*gccb_Ptr_Ptr_to_Ptr)(void*, void*);
+typedef void (*gccb_Ptr_Ptr_to_Void)(void*, void*);
 typedef void (*gccb_Ptr_Ptr_Float_to_Void)(void*, void*, float);
 typedef void (*gccb_Ptr_Ptr_Double_to_Void)(void*, void*, double);
+typedef void (*gccb_Float_Float_Float_Float_to_Void)(float, float, float, float);
 typedef void (*gccb_Ptr_Ptr_Ptr_Nine_Ints)(void*,void*,void*,int,int,int,int,int,int,int,int,int);
 typedef void (mzOSAPI *gccb_OSapi_Ptr_Int_to_Void)(void*, int);
 typedef void (mzOSAPI *gccb_OSapi_Ptr_Ptr_to_Void)(void*, void*);
@@ -8686,6 +8748,7 @@ static void run_gc_callbacks(int pre)
 {
   Scheme_GC_Pre_Post_Callback_Desc *prev = NULL, *desc;
   Scheme_Object *acts, *act, *protocol;
+  void *save = NULL;
   int j;
 
   desc = gc_prepost_callback_descs; 
@@ -8707,7 +8770,15 @@ static void run_gc_callbacks(int pre)
         protocol = SCHEME_VEC_ELS(act)[0];
         /* The set of suported protocols is arbitary, based on what we've needed
            so far. */
-        if (!strcmp(SCHEME_SYM_VAL(protocol), "ptr_ptr_ptr_int->void")) {
+        if (!strcmp(SCHEME_SYM_VAL(protocol), "int->void")) {
+          gccb_Int_to_Void proc;
+          int i;
+
+          proc = (gccb_Int_to_Void)scheme_extract_pointer(SCHEME_VEC_ELS(act)[1]);
+          i = SCHEME_INT_VAL(SCHEME_VEC_ELS(act)[2]);
+
+          proc(i);
+        } else if (!strcmp(SCHEME_SYM_VAL(protocol), "ptr_ptr_ptr_int->void")) {
           gccb_Ptr_Ptr_Ptr_Int_to_Void proc;
           void *a, *b, *c;
           int i;
@@ -8719,6 +8790,25 @@ static void run_gc_callbacks(int pre)
           i = SCHEME_INT_VAL(SCHEME_VEC_ELS(act)[5]);
 
           proc(a, b, c, i);
+        } else if (!strcmp(SCHEME_SYM_VAL(protocol), "ptr_ptr->save")) {
+          gccb_Ptr_Ptr_to_Ptr proc;
+          void *a, *b;
+
+          proc = (gccb_Ptr_Ptr_to_Ptr)scheme_extract_pointer(SCHEME_VEC_ELS(act)[1]);
+          a = scheme_extract_pointer(SCHEME_VEC_ELS(act)[2]);
+          b = scheme_extract_pointer(SCHEME_VEC_ELS(act)[3]);
+
+          save = proc(a, b);
+        } else if (!strcmp(SCHEME_SYM_VAL(protocol), "save!_ptr->void")) {
+          if (save) {
+            gccb_Ptr_Ptr_to_Void proc;
+            void *b;
+
+            proc = (gccb_Ptr_Ptr_to_Void)scheme_extract_pointer(SCHEME_VEC_ELS(act)[1]);
+            b = scheme_extract_pointer(SCHEME_VEC_ELS(act)[2]);
+
+            proc(save, b);
+          }
         } else if (!strcmp(SCHEME_SYM_VAL(protocol), "ptr_ptr_ptr->void")) {
           gccb_Ptr_Ptr_Ptr_to_Void proc;
           void *a, *b, *c;
@@ -8751,6 +8841,17 @@ static void run_gc_callbacks(int pre)
           d = SCHEME_DBL_VAL(SCHEME_VEC_ELS(act)[4]);
 
           proc(a, b, d);
+        } else if (!strcmp(SCHEME_SYM_VAL(protocol), "float_float_float_float->void")) {
+          gccb_Float_Float_Float_Float_to_Void proc;
+          double d1, d2, d3, d4;
+
+          proc = (gccb_Float_Float_Float_Float_to_Void)scheme_extract_pointer(SCHEME_VEC_ELS(act)[1]);
+          d1 = SCHEME_DBL_VAL(SCHEME_VEC_ELS(act)[2]);
+          d2 = SCHEME_DBL_VAL(SCHEME_VEC_ELS(act)[3]);
+          d3 = SCHEME_DBL_VAL(SCHEME_VEC_ELS(act)[4]);
+          d4 = SCHEME_DBL_VAL(SCHEME_VEC_ELS(act)[5]);
+
+          proc(d1, d2, d3, d4);
         } else if (!strcmp(SCHEME_SYM_VAL(protocol), "ptr_ptr_ptr_int_int_int_int_int_int_int_int_int->void")) {
           gccb_Ptr_Ptr_Ptr_Nine_Ints proc;
           void *a, *b, *c;
@@ -8954,9 +9055,6 @@ static void prepare_thread_for_GC(Scheme_Object *t)
   }
 
   p->spare_runstack = NULL;
-
-  /* zero ununsed part of list stack */
-  scheme_clean_list_stack(p);
 }
 
 void scheme_prepare_this_thread_for_GC(Scheme_Thread *p)

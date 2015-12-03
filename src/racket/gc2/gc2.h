@@ -204,12 +204,6 @@ GC2_EXTERN void *GC_malloc_pair(void *car, void *cdr);
    The main potential advantage is that `car' and `cdr' don't
    have to be retained by the callee in the case of a GC. */
 
-GC2_EXTERN void *GC_malloc_array_tagged(size_t);
-/* 
-   Alloc an array of tagged items. Racket sets the tag in the first
-   item before a collection, by maybe not all items. When traversing,
-   use the first one for size. */
-
 GC2_EXTERN void *GC_malloc_atomic(size_t size_in_bytes);
 /*
    Alloc pointerless memory (not necessarily zeroed). */
@@ -277,10 +271,10 @@ GC2_EXTERN int GC_is_on_allocated_page(void *p);
    the GC allocates objects (although p may or may not
    be a valid pointer to the start of an alloctaed object). */
 
-GC2_EXTERN int GC_allocate_phantom_bytes(intptr_t);
+GC2_EXTERN int GC_allocate_phantom_bytes(void *pb, intptr_t);
 /* 
    Returns 0 if allocation should fail due to a memory limit, 
-   1 otherwise. */
+   1 otherwise. The representative `pb` determines who is charged. */
 
 /***************************************************************************/
 /* Memory tracing                                                          */
@@ -364,9 +358,9 @@ GC2_EXTERN void *GC_fixup_self(void *p);
    be moved after fixup. */
 
 /* INTERNAL for the current implemenation (used by macros): */
-GC2_EXTERN void GC_mark(const void *p);
+GC2_EXTERN void GC_mark(void *p);
 GC2_EXTERN void GC_fixup(void *p);
-GC2_EXTERN void GC_mark2(const void *p, struct NewGC *gc);
+GC2_EXTERN void GC_mark2(void *p, struct NewGC *gc);
 GC2_EXTERN void GC_fixup2(void *p, struct NewGC *gc);
 /*
    Used in the expansion of gcMARK and gcFIXUP. 
@@ -382,6 +376,7 @@ GC2_EXTERN int GC_is_partial(struct NewGC *gc);
 /* 
    Reports whether the current GC is a non-full collection. */
 
+GC2_EXTERN void GC_mark_no_recur(struct NewGC *gc, int enable);
 GC2_EXTERN void GC_retract_only_mark_stack_entry(void *pf, struct NewGC *gc);
 /*
    Used for very special collaboration with GC. */
@@ -584,17 +579,17 @@ GC2_EXTERN void GC_set_backpointer_object(void *p);
 #endif
 
 /* Macros (implementation-specific): */
-#if defined(__x86_64__) || defined(_WIN64)
+#ifdef SIXTY_FOUR_BIT_INTEGERS
 # define gcLOG_WORD_SIZE 3
 #else
 # define gcLOG_WORD_SIZE 2
 #endif
-#define gcMARK(x) GC_mark(x)
-#define gcMARK2(x, gc) GC_mark2(x, gc)
-#define gcMARK_TYPED(t, x) gcMARK(x)
-#define gcMARK2_TYPED(t, x, gc) gcMARK2(x, gc)
-#define gcMARK_TYPED_NOW(t, x) gcMARK(x)
-#define gcMARK2_TYPED_NOW(t, x, gc) gcMARK(x, gc)
+#define gcMARK(x) GC_mark(&(x))
+#define gcMARK2(x, gc) GC_mark2(&(x), gc)
+#define gcMARK_TYPED(t, x) gcMARK(&(x))
+#define gcMARK2_TYPED(t, x, gc) gcMARK2(&(x), gc)
+#define gcMARK_TYPED_NOW(t, x) gcMARK(&(x))
+#define gcMARK2_TYPED_NOW(t, x, gc) gcMARK(&(x), gc)
 #define gcFIXUP_TYPED_NOW(t, x) GC_fixup(&(x))
 #define gcFIXUP2_TYPED_NOW(t, x, gc) GC_fixup2(&(x), gc)
 #define gcFIXUP_TYPED(t, x) gcFIXUP_TYPED_NOW(void*, x)
@@ -603,6 +598,8 @@ GC2_EXTERN void GC_set_backpointer_object(void *p);
 #define gcFIXUP2(x, gc) gcFIXUP2_TYPED(void*, x, gc)
 #define gcBYTES_TO_WORDS(x) ((x + (1 << gcLOG_WORD_SIZE) - 1) >> gcLOG_WORD_SIZE)
 #define gcWORDS_TO_BYTES(x) (x << gcLOG_WORD_SIZE)
+
+#define GC_NO_SIZE_NEEDED_FROM_PROCS 1
 
 #define GC_INTERIORABLES_NEVER_MOVE 1
 

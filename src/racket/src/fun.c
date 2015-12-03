@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2014 PLT Design Inc.
+  Copyright (c) 2004-2015 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -35,41 +35,33 @@
 
 /* The implementations of the time primitives, such as
    `current-seconds', vary a lot from platform to platform. */
-#ifdef TIME_SYNTAX
-# ifdef USE_WIN32_TIME
-#  include <Windows.h>
-# else
-#  ifndef USE_PALMTIME
-#   if defined(OSKIT) && !defined(OSKIT_TEST)
-    /* Get FreeBSD version, not oskit/time.h version */
-#    include <freebsd/time.h>
-#   endif
-#   include <time.h>
-#   ifdef USE_FTIME
-#    include <sys/timeb.h>
-#   else
-#    include <sys/time.h>
-#   endif /* USE_FTIME */
-#   ifdef USE_GETRUSAGE
-#    include <sys/types.h>
-#    include <sys/time.h>
-#    include <sys/resource.h>
-#    include <errno.h>
-#   endif /* USE_GETRUSAGE */
-#   ifdef USE_SYSCALL_GETRUSAGE
-#    include <sys/syscall.h>
-#    define getrusage(a, b)  syscall(SYS_GETRUSAGE, a, b)
-#    define USE_GETRUSAGE
-#   endif /* USE_SYSCALL_GETRUSAGE */
-#   ifdef WINDOWS_GET_PROCESS_TIMES
-#    include <Windows.h>
-#   endif
-#   if !defined(USE_GETRUSAGE) && !defined(WINDOWS_GET_PROCESS_TIMES) && !defined(USER_TIME_IS_CLOCK)
-#    include <sys/times.h>
-#   endif
-#  endif /* USE_PALMTIME */
-# endif /* USE_MACTIME */
-#endif /* TIME_SYNTAX */
+#ifdef USE_WIN32_TIME
+# include <windows.h>
+#else
+#  if defined(OSKIT) && !defined(OSKIT_TEST)
+   /* Get FreeBSD version, not oskit/time.h version */
+#   include <freebsd/time.h>
+#  endif
+#  include <time.h>
+#  include <sys/time.h>
+#  ifdef USE_GETRUSAGE
+#   include <sys/types.h>
+#   include <sys/time.h>
+#   include <sys/resource.h>
+#   include <errno.h>
+#  endif /* USE_GETRUSAGE */
+#  ifdef USE_SYSCALL_GETRUSAGE
+#   include <sys/syscall.h>
+#   define getrusage(a, b)  syscall(SYS_GETRUSAGE, a, b)
+#   define USE_GETRUSAGE
+#  endif /* USE_SYSCALL_GETRUSAGE */
+#  ifdef WINDOWS_GET_PROCESS_TIMES
+#   include <windows.h>
+#  endif
+#  if !defined(USE_GETRUSAGE) && !defined(WINDOWS_GET_PROCESS_TIMES) && !defined(USER_TIME_IS_CLOCK)
+#   include <sys/times.h>
+#  endif
+#endif /* USE_WIN32_TIME */
 
 static void ASSERT_SUSPEND_BREAK_ZERO() {
 #if 0
@@ -88,10 +80,12 @@ READ_ONLY Scheme_Object *scheme_values_func; /* the function bound to `values' *
 READ_ONLY Scheme_Object *scheme_procedure_p_proc;
 READ_ONLY Scheme_Object *scheme_procedure_arity_includes_proc;
 READ_ONLY Scheme_Object *scheme_void_proc;
+READ_ONLY Scheme_Object *scheme_void_p_proc;
 READ_ONLY Scheme_Object *scheme_check_not_undefined_proc;
 READ_ONLY Scheme_Object *scheme_check_assign_not_undefined_proc;
 READ_ONLY Scheme_Object *scheme_apply_proc;
 READ_ONLY Scheme_Object *scheme_call_with_values_proc; /* the function bound to `call-with-values' */
+READ_ONLY Scheme_Object *scheme_call_with_immed_mark_proc;
 READ_ONLY Scheme_Object *scheme_reduced_procedure_struct;
 READ_ONLY Scheme_Object *scheme_tail_call_waiting;
 READ_ONLY Scheme_Object *scheme_default_prompt_tag;
@@ -170,7 +164,6 @@ static Scheme_Object *call_with_immediate_cc_mark (int argc, Scheme_Object *argv
 static Scheme_Object *void_func (int argc, Scheme_Object *argv[]);
 static Scheme_Object *void_p (int argc, Scheme_Object *argv[]);
 static Scheme_Object *dynamic_wind (int argc, Scheme_Object *argv[]);
-#ifdef TIME_SYNTAX
 static Scheme_Object *time_apply(int argc, Scheme_Object *argv[]);
 static Scheme_Object *current_milliseconds(int argc, Scheme_Object **argv);
 static Scheme_Object *current_inexact_milliseconds(int argc, Scheme_Object **argv);
@@ -178,7 +171,6 @@ static Scheme_Object *current_process_milliseconds(int argc, Scheme_Object **arg
 static Scheme_Object *current_gc_milliseconds(int argc, Scheme_Object **argv);
 static Scheme_Object *current_seconds(int argc, Scheme_Object **argv);
 static Scheme_Object *seconds_to_date(int argc, Scheme_Object **argv);
-#endif
 static Scheme_Object *object_name(int argc, Scheme_Object *argv[]);
 static Scheme_Object *procedure_arity(int argc, Scheme_Object *argv[]);
 static Scheme_Object *procedure_arity_p(int argc, Scheme_Object *argv[]);
@@ -329,7 +321,6 @@ scheme_init_fun (Scheme_Env *env)
 				1, 1,
 				0, -1);
   scheme_add_global_constant("call-with-escape-continuation", o, env);
-  scheme_add_global_constant("call/ec", o, env);
 
   REGISTER_SO(internal_call_cc_prim);
   internal_call_cc_prim = scheme_make_prim_w_arity2(internal_call_cc,
@@ -349,7 +340,6 @@ scheme_init_fun (Scheme_Env *env)
 				0, -1);
 
   scheme_add_global_constant("call-with-current-continuation", o, env);
-  scheme_add_global_constant("call/cc", o, env);
 
   scheme_add_global_constant("continuation?",
                              scheme_make_folding_prim(continuation_p,
@@ -482,11 +472,13 @@ scheme_init_fun (Scheme_Env *env)
   SCHEME_PRIM_PROC_FLAGS(o) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED);
   scheme_add_global_constant("continuation-mark-set-first", o, env);
 
+  REGISTER_SO(scheme_call_with_immed_mark_proc);
+  scheme_call_with_immed_mark_proc = scheme_make_prim_w_arity2(call_with_immediate_cc_mark,
+                                                               "call-with-immediate-continuation-mark",
+                                                               2, 3,
+                                                               0, -1);
   scheme_add_global_constant("call-with-immediate-continuation-mark",
-			     scheme_make_prim_w_arity2(call_with_immediate_cc_mark,
-                                                       "call-with-immediate-continuation-mark",
-                                                       2, 3,
-                                                       0, -1),
+			     scheme_call_with_immed_mark_proc,
 			     env);
   scheme_add_global_constant("continuation-mark-set?",
 			     scheme_make_prim_w_arity(cc_marks_p,
@@ -507,12 +499,12 @@ scheme_init_fun (Scheme_Env *env)
   scheme_add_global_constant("void", scheme_void_proc, env);
 
   
-  o = scheme_make_folding_prim(void_p, "void?", 1, 1, 1);
-  SCHEME_PRIM_PROC_FLAGS(o) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
-                                                            | SCHEME_PRIM_IS_OMITABLE);
-  scheme_add_global_constant("void?", o, env);
+  REGISTER_SO(scheme_void_p_proc);
+  scheme_void_p_proc = scheme_make_folding_prim(void_p, "void?", 1, 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(scheme_void_p_proc) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
+                                                                             | SCHEME_PRIM_IS_OMITABLE);
+  scheme_add_global_constant("void?", scheme_void_p_proc, env);
 
-#ifdef TIME_SYNTAX
   scheme_add_global_constant("time-apply",
 			     scheme_make_prim_w_arity2(time_apply,
 						       "time-apply",
@@ -549,7 +541,6 @@ scheme_init_fun (Scheme_Env *env)
                                                     "seconds->date",
                                                     1, 2),
 			     env);
-#endif
 
   scheme_add_global_constant("dynamic-wind",
 			     scheme_make_prim_w_arity(dynamic_wind,
@@ -1167,7 +1158,8 @@ static Scheme_Prompt *allocate_prompt(Scheme_Prompt **cached_prompt) {
 
 static void save_dynamic_state(Scheme_Thread *thread, Scheme_Dynamic_State *state) {
     state->current_local_env = thread->current_local_env;
-    state->mark              = thread->current_local_mark;
+    state->scope             = thread->current_local_scope;
+    state->use_scope         = thread->current_local_use_scope;
     state->name              = thread->current_local_name;
     state->modidx            = thread->current_local_modidx;
     state->menv              = thread->current_local_menv;
@@ -1175,19 +1167,22 @@ static void save_dynamic_state(Scheme_Thread *thread, Scheme_Dynamic_State *stat
 
 static void restore_dynamic_state(Scheme_Dynamic_State *state, Scheme_Thread *thread) {
     thread->current_local_env     = state->current_local_env;
-    thread->current_local_mark    = state->mark;
+    thread->current_local_scope   = state->scope;
+    thread->current_local_use_scope = state->use_scope;
     thread->current_local_name    = state->name;
     thread->current_local_modidx  = state->modidx;
     thread->current_local_menv    = state->menv;
 }
 
-void scheme_set_dynamic_state(Scheme_Dynamic_State *state, Scheme_Comp_Env *env, Scheme_Object *mark, 
+void scheme_set_dynamic_state(Scheme_Dynamic_State *state, Scheme_Comp_Env *env,
+                              Scheme_Object *scope, Scheme_Object *use_scope,
                               Scheme_Object *name, 
                               Scheme_Env *menv,
                               Scheme_Object *modidx)
 {
   state->current_local_env = env;
-  state->mark              = mark;
+  state->scope             = scope;
+  state->use_scope         = use_scope;
   state->name              = name;
   state->modidx            = modidx;
   state->menv              = menv;
@@ -1824,16 +1819,16 @@ cert_with_specials(Scheme_Object *code,
         name = scheme_stx_taint_disarm(code, NULL);
         name = SCHEME_STX_CAR(name);
 	if (SCHEME_STX_SYMBOLP(name)) {
-	  if (scheme_stx_module_eq_x(scheme_begin_stx, name, phase)
-              || scheme_stx_module_eq_x(scheme_module_begin_stx, name, phase)) {
+	  if (scheme_stx_free_eq_x(scheme_begin_stx, name, phase)
+              || scheme_stx_free_eq_x(scheme_module_begin_stx, name, phase)) {
 	    trans = 1;
 	    next_cadr_deflt = 0;
-	  } else if (scheme_stx_module_eq_x(scheme_begin_for_syntax_stx, name, phase)) {
+	  } else if (scheme_stx_free_eq_x(scheme_begin_for_syntax_stx, name, phase)) {
 	    trans = 1;
 	    next_cadr_deflt = 0;
             phase_delta = 1;
-	  } else if (scheme_stx_module_eq_x(scheme_define_values_stx, name, phase)
-		     || scheme_stx_module_eq_x(scheme_define_syntaxes_stx, name, phase)) {
+	  } else if (scheme_stx_free_eq_x(scheme_define_values_stx, name, phase)
+		     || scheme_stx_free_eq_x(scheme_define_syntaxes_stx, name, phase)) {
 	    trans = 1;
 	    next_cadr_deflt = 1;
 	  }
@@ -1889,19 +1884,20 @@ scheme_apply_macro(Scheme_Object *name, Scheme_Env *menv,
 		   Scheme_Object *rator, Scheme_Object *code,
 		   Scheme_Comp_Env *env, Scheme_Object *boundname,
                    Scheme_Compile_Expand_Info *rec, int drec,
-		   int for_set)
+		   int for_set,
+                   int scope_macro_use)
 {
   Scheme_Object *orig_code = code;
 
   if (scheme_is_rename_transformer(rator)) {
-    Scheme_Object *mark;
+    Scheme_Object *scope;
    
     rator = scheme_rename_transformer_id(rator);
     /* rator is now an identifier */
 
     /* and it's introduced by this expression: */
-    mark = scheme_new_mark();
-    rator = scheme_add_remove_mark(rator, mark);
+    scope = scheme_new_scope(SCHEME_STX_MACRO_SCOPE);
+    rator = scheme_stx_flip_scope(rator, scope, scheme_true);
 
     if (for_set) {
       Scheme_Object *tail, *setkw;
@@ -1926,7 +1922,7 @@ scheme_apply_macro(Scheme_Object *name, Scheme_Env *menv,
 
     return code;
   } else {
-    Scheme_Object *mark, *rands_vec[1], *track_code, *pre_code;
+    Scheme_Object *scope, *use_scope, *rands_vec[1], *track_code, *pre_code;
 
     if (scheme_is_set_transformer(rator))
       rator = scheme_set_transformer_proc(rator);
@@ -1944,13 +1940,20 @@ scheme_apply_macro(Scheme_Object *name, Scheme_Env *menv,
     }
     track_code = code;  /* after mode properties are removed */
 
-    mark = scheme_new_mark();
-    code = scheme_add_remove_mark(code, mark);
+    scope = scheme_new_scope(SCHEME_STX_MACRO_SCOPE);
+    code = scheme_stx_flip_scope(code, scope, scheme_true);
 
+    if (scope_macro_use) {
+      use_scope = scheme_new_scope(SCHEME_STX_USE_SITE_SCOPE);
+      scheme_add_compilation_frame_use_site_scope(env, use_scope);
+      code = scheme_stx_add_scope(code, use_scope, scheme_true);
+    } else
+      use_scope = NULL;
+    
     code = scheme_stx_taint_disarm(code, NULL);
 
     pre_code = code;
-    SCHEME_EXPAND_OBSERVE_MACRO_PRE_X(rec[drec].observer, code);
+    SCHEME_EXPAND_OBSERVE_MACRO_PRE_X(env->observer, code);
 
     {
       Scheme_Dynamic_State dyn_state;
@@ -1964,7 +1967,7 @@ scheme_apply_macro(Scheme_Object *name, Scheme_Env *menv,
       scheme_push_continuation_frame(&cframe);
       scheme_set_cont_mark(scheme_parameterization_key, (Scheme_Object *)config);
 
-      scheme_set_dynamic_state(&dyn_state, env, mark, boundname, 
+      scheme_set_dynamic_state(&dyn_state, env, scope, use_scope, boundname, 
                                menv, menv ? menv->link_midx : env->genv->link_midx);
 
       rands_vec[0] = code;
@@ -1973,7 +1976,7 @@ scheme_apply_macro(Scheme_Object *name, Scheme_Env *menv,
       scheme_pop_continuation_frame(&cframe);
     }
 
-    SCHEME_EXPAND_OBSERVE_MACRO_POST_X(rec[drec].observer, code, pre_code);
+    SCHEME_EXPAND_OBSERVE_MACRO_POST_X(env->observer, code, pre_code);
 
     if (!SCHEME_STXP(code)) {
       scheme_raise_exn(MZEXN_FAIL_CONTRACT,
@@ -1983,7 +1986,7 @@ scheme_apply_macro(Scheme_Object *name, Scheme_Env *menv,
                        code);
     }
 
-    code = scheme_add_remove_mark(code, mark);
+    code = scheme_stx_flip_scope(code, scope, scheme_true);
 
     code = scheme_stx_track(code, track_code, name);
     
@@ -3674,7 +3677,7 @@ Scheme_Object *scheme_apply_chaperone(Scheme_Object *o, int argc, Scheme_Object 
     app_mark = NULL;
 
   if (app_mark) {
-    v = scheme_extract_one_cc_mark(NULL, SCHEME_CAR(app_mark));
+    v = scheme_chaperone_get_immediate_cc_mark(SCHEME_CAR(app_mark), NULL);
     if (v) {
       scheme_push_continuation_frame(&cframe);
       scheme_set_cont_mark(SCHEME_CAR(app_mark), v);
@@ -4337,24 +4340,10 @@ static Scheme_Object *impersonate_continuation_mark_key(int argc, Scheme_Object 
   return do_chaperone_continuation_mark_key("impersonate-continuation-mark-key", 1, argc, argv);
 }
 
-
-static Scheme_Object *call_with_immediate_cc_mark (int argc, Scheme_Object *argv[])
+Scheme_Object *scheme_get_immediate_cc_mark(Scheme_Object *key, Scheme_Object *def_val)
 {
   Scheme_Thread *p = scheme_current_thread;
   intptr_t findpos, bottom;
-  Scheme_Object *a[1], *key;
-
-  scheme_check_proc_arity("call-with-immediate-continuation-mark", 1, 1, argc, argv);
-
-  key = argv[0];
-  if (SCHEME_NP_CHAPERONEP(key)
-      && SCHEME_CONTINUATION_MARK_KEYP(SCHEME_CHAPERONE_VAL(key)))
-    key = SCHEME_CHAPERONE_VAL(key);
-
-  if (argc > 2)
-    a[0] = argv[2];
-  else
-    a[0] = scheme_false;
 
   if (p->cont_mark_stack_segments) {
     findpos = (intptr_t)MZ_CONT_MARK_STACK;
@@ -4367,22 +4356,39 @@ static Scheme_Object *call_with_immediate_cc_mark (int argc, Scheme_Object *argv
       if ((intptr_t)find->pos < (intptr_t)MZ_CONT_MARK_POS) {
         break;
       } else {
-        if (find->key == key) {
-          /*
-           * If not equal, it was a chaperone since we unwrapped the key
-           */
-          if (argv[0] != key) {
-            Scheme_Object *val;
-            val = scheme_chaperone_do_continuation_mark("call-with-immediate-continuation-mark",
-                                                        1, argv[0], find->val);
-            a[0] = val;
-          } else
-            a[0] = find->val;
-          break;
-        }
+        if (find->key == key)
+          return find->val;
       }
     }
   }
+
+  return def_val;
+}
+
+Scheme_Object *scheme_chaperone_get_immediate_cc_mark(Scheme_Object *key, Scheme_Object *def_val)
+{
+  Scheme_Object *val;
+
+  if (SCHEME_NP_CHAPERONEP(key)
+      && SCHEME_CONTINUATION_MARK_KEYP(SCHEME_CHAPERONE_VAL(key))) {
+    val = scheme_get_immediate_cc_mark(SCHEME_CHAPERONE_VAL(key), NULL);
+    if (val)
+      return scheme_chaperone_do_continuation_mark("call-with-immediate-continuation-mark",
+                                                   1, key, val);
+    else
+      return def_val;
+  } else
+    return scheme_get_immediate_cc_mark(key, def_val);
+}
+
+static Scheme_Object *call_with_immediate_cc_mark (int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *a[1], *val;
+
+  scheme_check_proc_arity("call-with-immediate-continuation-mark", 1, 1, argc, argv);
+
+  val = scheme_chaperone_get_immediate_cc_mark(argv[0], ((argc > 2) ? argv[2] : scheme_false));
+  a[0] = val;
 
   return scheme_tail_apply(argv[1], 1, a);
 }
@@ -9399,8 +9405,6 @@ static Scheme_Object *jump_to_alt_continuation()
 /*                                  time                                  */
 /*========================================================================*/
 
-#ifdef TIME_SYNTAX
-
 #ifndef CLOCKS_PER_SEC
 #define CLOCKS_PER_SEC 1000000
 #endif
@@ -9424,22 +9428,12 @@ intptr_t scheme_get_milliseconds(void)
   XFORM_SKIP_PROC
 /* this function can be called from any OS thread */
 {
-#ifdef USE_MACTIME
-  return scheme_get_process_milliseconds();
-#else
-# ifdef USE_FTIME
-  struct MSC_IZE(timeb) now;
-  MSC_IZE(ftime)(&now);
-  return (intptr_t)(now.time * 1000 + now.millitm);
-# else
-#  ifdef USE_WIN32_TIME
+#ifdef USE_WIN32_TIME
   return (intptr_t)(get_hectonanoseconds_as_longlong() / (mzlonglong)10000);
-#  else
+#else
   struct timeval now;
   gettimeofday(&now, NULL);
   return now.tv_sec * 1000 + now.tv_usec / 1000;
-#  endif
-# endif
 #endif
 }
 
@@ -9447,32 +9441,15 @@ double scheme_get_inexact_milliseconds(void)
   XFORM_SKIP_PROC
 /* this function can be called from any OS thread */
 {
-#ifdef USE_MACTIME
-  {
-    /* This is wrong, since it's not since January 1, 1970 */
-    UnsignedWide time;
-    Microseconds(&time);
-    return (((double)(time.lo >> 10)
-	    + ((double)(time.hi >> 10) * 4294967296.0))
-	    * 1.024);
-  }
-#else
-# ifdef USE_FTIME
-  struct MSC_IZE(timeb) now;
-  MSC_IZE(ftime)(&now);
-  return (double)now.time * 1000.0 + (double)now.millitm;
-# else
-#  ifdef USE_WIN32_TIME
+#ifdef USE_WIN32_TIME
   FILETIME ft;
   mzlonglong v;
   v = get_hectonanoseconds_as_longlong();
   return (double)(v / 10000) + (((double)(v % 10000)) / 10000.0);
-#  else
+#else
   struct timeval now;
   gettimeofday(&now, NULL);
   return (double)now.tv_sec * 1000.0 + (double)now.tv_usec / 1000;
-#  endif
-# endif
 #endif
 }
 
@@ -9496,14 +9473,7 @@ intptr_t scheme_get_process_milliseconds(void)
 
   return s * 1000 + u / 1000;
 # else
-#  ifdef USE_MACTIME
-  {
-    UnsignedWide time;
-    Microseconds(&time);
-    return ((uintptr_t)time.lo) / 1000;
-  }
-#  else
-#   ifdef WINDOWS_GET_PROCESS_TIMES
+#  ifdef WINDOWS_GET_PROCESS_TIMES
   {
     FILETIME cr, ex, kr, us;
     if (GetProcessTimes(GetCurrentProcess(), &cr, &ex, &kr, &us)) {
@@ -9514,9 +9484,8 @@ intptr_t scheme_get_process_milliseconds(void)
     } else
       return 0; /* anything better to do? */
   }
-#   else
+#  else
   return clock()  * 1000 / CLOCKS_PER_SEC;
-#   endif
 
 #  endif
 # endif
@@ -9573,14 +9542,6 @@ intptr_t scheme_get_seconds(void)
 #ifdef USE_WIN32_TIME
   return (intptr_t)(get_hectonanoseconds_as_longlong() / (mzlonglong)10000000);
 #else
-# ifdef USE_PALMTIME
-  return TimGetSeconds();
-# else
-#  ifdef USE_FTIME
-  struct MSC_IZE(timeb) now;
-  MSC_IZE(ftime)(&now);
-  return (intptr_t)now.time;
-#  else
 #   ifdef USE_PLAIN_TIME
   time_t now;
   now = time(NULL);
@@ -9589,8 +9550,6 @@ intptr_t scheme_get_seconds(void)
   struct timeval now;
   gettimeofday(&now, NULL);
   return now.tv_sec;
-#   endif
-#  endif
 # endif
 #endif
 }
@@ -9719,13 +9678,8 @@ static Scheme_Object *seconds_to_date(int argc, Scheme_Object **argv)
 # define CHECK_TIME_T uintptr_t
   SYSTEMTIME localTime;
 #else
-# ifdef USE_PALMTIME
-#  define CHECK_TIME_T UInt32
-  DateTimeType localTime;
-# else
-#  define CHECK_TIME_T time_t
+# define CHECK_TIME_T time_t
   struct tm *localTime;
-# endif
 #endif
   CHECK_TIME_T now;
   char *tzn;
@@ -9781,15 +9735,11 @@ static Scheme_Object *seconds_to_date(int argc, Scheme_Object **argv)
       }
     }
 #else
-# ifdef USE_PALMTIME
-    TimSecondsToDateTime(lnow, &localTime) ;
-# else
     if (get_gmt)
       localTime = gmtime(&now);
     else
       localTime = localtime(&now);
     success = !!localTime;
-# endif
 #endif
 
     if (success) {
@@ -10027,8 +9977,6 @@ static Scheme_Object *current_seconds(int argc, Scheme_Object **argv)
   secs = scheme_get_seconds();
   return scheme_make_integer_value_from_time(secs);
 }
-
-#endif
 
 
 /*========================================================================*/

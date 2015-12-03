@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2006-2014 PLT Design Inc.
+  Copyright (c) 2006-2015 PLT Design Inc.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -545,7 +545,7 @@ int scheme_generate_tail_call(mz_jit_state *jitter, int num_rands, int direct_na
 int scheme_generate_force_value_same_mark(mz_jit_state *jitter)
 {
   GC_CAN_IGNORE jit_insn *refr USED_ONLY_FOR_FUTURES;
-  jit_movi_p(JIT_R0, SCHEME_TAIL_CALL_WAITING);
+  (void)jit_movi_p(JIT_R0, SCHEME_TAIL_CALL_WAITING);
   mz_prepare(1);
   jit_pusharg_p(JIT_R0);
   (void)mz_finish_lwe(ts_scheme_force_value_same_mark, refr);
@@ -1375,7 +1375,7 @@ static int generate_self_tail_call(Scheme_Object *rator, mz_jit_state *jitter, i
     
     mz_rs_stxi(num_rands - 1, JIT_R0);
   }
-  scheme_generate(rator, jitter, 0, 0, 0, JIT_V1, NULL);
+  scheme_generate(rator, jitter, 0, 0, 0, JIT_V1, NULL, NULL);
   CHECK_LIMIT();
   mz_rs_sync();
 
@@ -1708,7 +1708,7 @@ static int generate_call_path_with_unboxes(mz_jit_state *jitter, int direct_flos
   }
 
   /* Reset V1 to rator for slow path: */
-  scheme_generate(rator, jitter, 0, 0, 0, JIT_V1, NULL);
+  scheme_generate(rator, jitter, 0, 0, 0, JIT_V1, NULL, NULL);
   mz_rs_sync();
   
   return 1;
@@ -2073,7 +2073,7 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
 #endif
       if (inline_direct_args) {
         if (inline_direct_args[i].gen)
-          scheme_generate(arg, jitter, 0, 0, 0, inline_direct_args[i].reg, NULL);
+          scheme_generate(arg, jitter, 0, 0, 0, inline_direct_args[i].reg, NULL, NULL);
       } else
         scheme_generate_non_tail(arg, jitter, 0, !need_non_tail, 0); /* sync'd below */
     RESUME_JIT_DATA();
@@ -2114,7 +2114,7 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
 
   if (reorder_ok && !inline_direct_native) {
     if ((no_call < 2) && !apply_to_list) {
-      scheme_generate(rator, jitter, 0, 0, 0, JIT_V1, NULL); /* sync'd below, or not */
+      scheme_generate(rator, jitter, 0, 0, 0, JIT_V1, NULL, NULL); /* sync'd below, or not */
     }
     CHECK_LIMIT();
   }

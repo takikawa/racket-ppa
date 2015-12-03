@@ -37,7 +37,6 @@
 # define UNIX_FILE_SYSTEM
 # define NO_UNIX_USERS
 
-# define TIME_SYNTAX
 # define DIR_FUNCTION
 # define DIRENT_NO_NAMLEN
 # define GETENV_FUNCTION
@@ -86,7 +85,7 @@
 # include <errno.h>
 # ifdef ECHRNG
 /* Solaris */
-#  if  defined(i386)
+#  if  defined(__i386__)
 #   define SCHEME_PLATFORM_LIBRARY_SUBPATH "i386-solaris"
 #  elif defined(__x86_64)
 #   define SCHEME_PLATFORM_LIBRARY_SUBPATH "x86_64-solaris"
@@ -122,7 +121,7 @@
 #  define SUBPROCESS_USE_FORK1
 # endif
 
-# ifdef i386
+# ifdef __i386__
 #  define MZ_USE_JIT_I386
 #  define MZ_JIT_USE_MPROTECT
 # elif defined(__x86_64)
@@ -160,7 +159,7 @@
 
   /************** Linux with gcc ****************/
 
-#if defined(linux)
+#if defined(__linux__)
 
 # ifdef __ANDROID__
 #  define SPLS_LINUX "android"
@@ -168,13 +167,13 @@
 #  define SPLS_LINUX "linux"
 # endif
 
-# if defined(i386)
+# if defined(__i386__)
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "i386-"SPLS_LINUX
 #  define REGISTER_POOR_MACHINE
 #  define MZ_TRY_EXTFLONUMS
 #  define ASM_DBLPREC_CONTROL_87
 # endif
-# if defined(powerpc)
+# if defined(__powerpc__)
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "ppc-"SPLS_LINUX
 # endif
 # if defined(__mc68000__)
@@ -238,7 +237,7 @@
 
 # define FLAGS_ALREADY_SET
 
-#if defined(i386)
+#if defined(__i386__)
 # define MZ_USE_JIT_I386
 # define MZ_JIT_USE_MPROTECT
 # define MZ_USE_DWARF_LIBUNWIND
@@ -248,7 +247,7 @@
 # define MZ_JIT_USE_MPROTECT
 # define MZ_USE_DWARF_LIBUNWIND
 #endif
-#if defined(powerpc)
+#if defined(__powerpc__)
 # define MZ_USE_JIT_PPC
 #endif
 # if defined(__arm__)
@@ -264,9 +263,9 @@
 
 #if defined(__NetBSD__)
 
-#if defined(i386)
+#if defined(__i386__)
 # define SCHEME_PLATFORM_LIBRARY_SUBPATH "i386-netbsd"
-#elif defined(powerpc)
+#elif defined(__powerpc__)
 # define SCHEME_PLATFORM_LIBRARY_SUBPATH "ppc-netbsd"
 #elif defined(__x86_64__)
 # define SCHEME_PLATFORM_LIBRARY_SUBPATH "x86_64-netbsd"
@@ -296,11 +295,11 @@
 # define USE_DIVIDE_MAKE_INFINITY
 #endif
 
-#if defined(i386)
+#if defined(__i386__)
 # define MZ_USE_JIT_I386
 # define MZ_JIT_USE_MPROTECT
 #endif
-#if defined(powerpc)
+#if defined(__powerpc__)
 # define MZ_USE_JIT_PPC
 #endif
 #if defined(__x86_64__)
@@ -378,6 +377,7 @@
 #  define MZ_USE_JIT_PPC
 # elif defined(__sparc64__)
 #  define FLUSH_SPARC_REGISTER_WINDOWS
+#  define FMOD_CAN_RETURN_POS_ZERO
 # elif defined(__arm__)
 #  define MZ_USE_JIT_ARM
 #  define FFI_CALLBACK_NEED_INT_CLEAR
@@ -441,7 +441,7 @@
 
 #endif
 
-  /************** FreeBSD with gcc ****************/
+  /************** FreeBSD with clang/gcc ****************/
 
 #if defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
 
@@ -466,6 +466,8 @@
 # elif defined(__sparc64__)
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "sparc64-freebsd"
 #  define FLUSH_SPARC_REGISTER_WINDOWS
+# elif defined(__arm__)
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "arm-freebsd"
 # else
 #  error Unported platform.
 # endif
@@ -505,7 +507,7 @@
   /************** SGI/IRIX with SGI cc ****************/
 
 #if  (defined(mips) || defined(__mips)) \
-     && !(defined(ultrix) || defined(__ultrix) || defined(linux) || defined(__OpenBSD__))
+     && !(defined(ultrix) || defined(__ultrix) || defined(__linux__) || defined(__OpenBSD__))
 
 # define SCHEME_PLATFORM_LIBRARY_SUBPATH "mips-irix"
 
@@ -550,7 +552,7 @@
   /************** ALPHA/OSF1 with gcc ****************/
 
 # if (defined(__alpha) || defined(__alpha__)) \
-    && !defined(linux) && !defined(__NetBSD__) && !defined(__OpenBSD__)
+    && !defined(__linux__) && !defined(__NetBSD__) && !defined(__OpenBSD__)
 
 # define SCHEME_PLATFORM_LIBRARY_SUBPATH "alpha-osf1"
 
@@ -645,7 +647,6 @@
 #  define MKDIR_NO_MODE_FLAG
 # endif
 
-# define TIME_SYNTAX
 # define USE_WIN32_TIME
 # define WINDOWS_GET_PROCESS_TIMES
 # define GETENV_FUNCTION
@@ -657,9 +658,7 @@
 # define DO_STACK_CHECK
 # define WINDOWS_FIND_STACK_BOUNDS
 
-# if !defined(_WIN64) || (_MSC_VER >= 1600)
-#  define USE_MZ_SETJMP
-# endif
+# define USE_MZ_SETJMP
 
 # define WINDOWS_DYNAMIC_LOAD
 
@@ -726,14 +725,18 @@
 # define IGNORE_BY_BORLAND_CONTROL_87
 #endif
 
-#if defined(_MSC_VER)
+#if defined(__MINGW32__) && defined(USE_DIRECT_LONG_DOUBLE)
+/* Beware: different from the MSVC build when SSE-based floating-point
+   math is enabled in the C compiler. Sets the floating-point mode to
+   extended precision to support extflonums, and changing precision
+   may affect other libraries. */
+# define MZ_TRY_EXTFLONUMS
+# define ASM_DBLPREC_CONTROL_87
+#else
 # define MZ_LONG_DOUBLE
 # define IGNORE_BY_MS_CONTROL_87
 # define MZ_NEED_SET_EXTFL_MODE
-#endif
-#if defined(__MINGW32__)
-# define MZ_TRY_EXTFLONUMS
-# define ASM_DBLPREC_CONTROL_87
+# define MZ_LONG_DOUBLE_API_IS_EXTERNAL
 #endif
 
 # define REGISTER_POOR_MACHINE
@@ -922,7 +925,7 @@
 
 #if defined(__QNX__)
 
-#if defined(i386)
+#if defined(__i386__)
 # define SCHEME_PLATFORM_LIBRARY_SUBPATH "i386-qnx"
 #endif
 # define ASSUME_FIXED_STACK_SIZE
@@ -941,7 +944,7 @@
 
 # define BROKEN_READLINK_NUL_TERMINATOR
 
-#if defined(i386)
+#if defined(__i386__)
 # define MZ_USE_JIT_I386
 # define MZ_JIT_USE_MPROTECT
 #endif
@@ -1036,18 +1039,12 @@
  /* Language Features */
 /*********************/
 
- /* TIME_SYNTAX adds the (time ...) syntax; this may need to be
-     turned off for compilation on some systems.
-    CLOCKS_PER_SEC relates the values returned by clock() to
+ /* CLOCKS_PER_SEC relates the values returned by clock() to
      real seconds. (The difference between two clock() calls is
      divided by this number.) Usually, this is defined in <time.h>;
      it defaults to 1000000 */
 
- /* USE_FTIME uses ftime instead of gettimeofday; only for TIME_SYNTAX */
-
- /* USE_PLAIN_TIME uses time; only for TIME_SYNTAX */
-
- /* USE_MACTIME uses the Mac toolbox to implement time functions. */
+ /* USE_PLAIN_TIME uses time. */
 
  /* USE_WIN32_TIME uses the Win32 API to implement time functions. */
 
