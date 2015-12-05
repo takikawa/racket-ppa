@@ -7,8 +7,10 @@ racket (6.3-1) unstable; urgency=medium
   * New upstream release
   * Re-enable anti-aliasing (#766534 is supposedly fixed)
   * Install more icons (thanks to Asumu Takikawa for the patch)
+  * Bug fix: "No mime types defined in drracket.desktop", thanks to
+    Frederik Himpe (Closes: #700191).
 
- -- David Bremner <bremner@debian.org>  Fri, 04 Dec 2015 23:07:39 -0400
+ -- David Bremner <bremner@debian.org>  Sat, 05 Dec 2015 08:48:11 -0400
 
 racket (6.2-3) unstable; urgency=medium
 
