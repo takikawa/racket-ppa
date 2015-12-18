@@ -1,3 +1,9 @@
+racket (6.3-2) unstable; urgency=medium
+
+  * expand JIT_BUFFER_PAD_SIZE to work around build failure on armel
+
+ -- David Bremner <bremner@debian.org>  Thu, 17 Dec 2015 22:23:08 -0400
+
 racket (6.3-1) unstable; urgency=medium
 
   [ James McCoy ]
