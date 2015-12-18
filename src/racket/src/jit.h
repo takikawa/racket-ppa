@@ -1313,7 +1313,7 @@ static void emit_indentation(mz_jit_state *jitter)
 /*                             jitstate                               */
 /**********************************************************************/
 
-#if defined(SIXTY_FOUR_BIT_INTEGERS) || defined(MZ_USE_JIT_PPC)
+#if defined(SIXTY_FOUR_BIT_INTEGERS) || defined(MZ_USE_JIT_PPC) || defined(__ARMEL__)
 # define JIT_BUFFER_PAD_SIZE 200
 #else
 # define JIT_BUFFER_PAD_SIZE 100
