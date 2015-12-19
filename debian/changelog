@@ -1,3 +1,10 @@
+racket (6.3-3) unstable; urgency=medium
+
+  * Cherry pick https://github.com/racket/racket/commit/e957a7d.patch as a
+    fix for ppc64el build failures
+
+ -- David Bremner <bremner@debian.org>  Fri, 18 Dec 2015 20:24:20 -0400
+
 racket (6.3-2) unstable; urgency=medium
 
   * expand JIT_BUFFER_PAD_SIZE to work around build failure on armel
