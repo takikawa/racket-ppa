@@ -1,3 +1,9 @@
+racket (6.5-1) UNRELEASED; urgency=medium
+
+  * New upstream release
+
+ -- David Bremner <bremner@debian.org>  Mon, 02 May 2016 07:45:33 -0300
+
 racket (6.3-3) unstable; urgency=medium
 
   * Cherry pick https://github.com/racket/racket/commit/e957a7d.patch as a
