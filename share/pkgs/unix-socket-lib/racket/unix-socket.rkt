@@ -1,110 +1,25 @@
+;; Support for UNIX domain sockets.
 #lang racket/base
-
-;; Support for connecting to UNIX domain sockets.
-
-#|
-References:
-linux (64):
-  Linux Standard Base Core Specification 4.1
-macosx (64):
-  /usr/include/i386/_types.h: __darwin_socklen_t
-  /usr/include/sys/socket.h: AF_UNIX
-  /usr/include/sys/un.h: struct sockaddr_un
-|#
-
 (require racket/contract
          (rename-in ffi/unsafe (-> -->))
+         ffi/unsafe/atomic
+         ffi/unsafe/custodian
          ffi/unsafe/define
-         ffi/file)
-
-(provide
- (contract-out
-  [unix-socket-available?
-   boolean?]
-  [unix-socket-connect
-   (-> unix-socket-path? (values input-port? output-port?))]
-  [unix-socket-path?
-   (-> any/c boolean?)]))
-
-
-;; Data structures and error handling code differs between the platforms.
-(define platform
-  (cond
-    [(eq? (system-type 'os) 'macosx)
-     'macosx]
-    [(regexp-match? #rx"^Linux" (system-type 'machine))
-     'linux]
-    [else
-     #f]))
-
-
-(define unix-socket-available?
-  (and platform #t))
-
-
-(define AF-UNIX 1)
-(define SOCK-STREAM 1)
-
-(define UNIX-PATH-MAX
-  (case platform
-    [(linux) 108]
-    [else    104]))
-
-(define _socklen_t
-  (case platform
-    [(linux) _uint]
-    [else    _uint32]))
-
-(define-cstruct _linux_sockaddr_un
-  ([sun_family _ushort]
-   [sun_path   (make-array-type _byte UNIX-PATH-MAX)]))
-
-(define-cstruct _macosx_sockaddr_un
-  ([sun_len    _ubyte]
-   [sun_family _ubyte]
-   [sun_path   (make-array-type _byte UNIX-PATH-MAX)]))
-
-(define _sockaddr_un-pointer
-  (case platform
-    [(linux)  _linux_sockaddr_un-pointer]
-    [(macosx) _macosx_sockaddr_un-pointer]
-    [else     _pointer]))
-
-
-(define-ffi-definer define-libc (ffi-lib #f)
-  #:default-make-fail make-not-available)
-
-(define-libc socket
-  (_fun #:save-errno 'posix
-        _int _int _int --> _int))
-
-(define-libc connect
-  (_fun #:save-errno 'posix
-        _int _sockaddr_un-pointer _int --> _int))
-
-(define-libc close
-  (_fun #:save-errno 'posix
-        _int --> _int))
-
-(define-libc scheme_make_fd_output_port
-  (_fun _int _racket _bool _bool _bool --> _racket))
-
-(define strerror-name
-  (case platform
-    [(linux) "__xpg_strerror_r"]
-    [else    "strerror_r"]))
-
-(define strerror_r
-  (get-ffi-obj strerror-name #f
-               (_fun (errno) ::
-                     (errno : _int)
-                     (buf : _bytes = (make-bytes 1000))
-                     (buf-len : _size = (bytes-length buf))
-                     --> _void
-                     --> (cast buf _bytes _string/locale))
-               (lambda ()
-                 (lambda (errno) #f))))
-
+         ffi/file
+         "private/unix-socket-ffi.rkt")
+(provide unix-socket-available?
+         unix-socket-listener?
+         unix-socket-path?
+         (contract-out
+          [unix-socket-connect
+           (-> unix-socket-path? (values input-port? output-port?))]
+          [unix-socket-listen
+           (->* [unix-socket-path?] [exact-nonnegative-integer?]
+                unix-socket-listener?)]
+          [unix-socket-close-listener
+           (-> unix-socket-listener? any)]
+          [unix-socket-accept
+           (-> unix-socket-listener? (values input-port? output-port?))]))
 
 (define (unix-socket-path? v)
   (and (unix-socket-path->bytes v) #t))
@@ -127,46 +42,230 @@ macosx (64):
            (= (bytes-ref path 0) 0)
            path)))
 
+(define (check-available who)
+  (unless unix-socket-available?
+    (error who "unix domain sockets are not supported on this platform")))
 
-(define (make-sockaddr path-bytes)
-  (case platform
-    [(linux)
-     (make-linux_sockaddr_un AF-UNIX path-bytes)]
-    [(macosx)
-     (make-macosx_sockaddr_un (bytes-length path-bytes) AF-UNIX path-bytes)]))
-
-
-(define (unix-socket-connect path)
-  (unless platform
-    (error 'unix-socket-connect
-           "unix domain sockets are not supported on this platform"))
-
+;; do-make-sockaddr : Symbol Path/String -> (values Sockaddr-Pointer Nat)
+(define (do-make-sockaddr who path)
   (when (path-string? path)
-    (security-guard-check-file 'unix-socket-connect path '(read write)))
+    (security-guard-check-file who path '(read write)))
+  (define path-bytes (unix-socket-path->bytes path))
+  (define sockaddr   (make-sockaddr path-bytes))
+  (define addrlen    (+ (ctype-sizeof _ushort) (bytes-length path-bytes)))
+  (values sockaddr addrlen))
 
-  (let* ([path-bytes (unix-socket-path->bytes path)]
-         [sockaddr   (make-sockaddr path-bytes)]
-         [addrlen    (+ (ctype-sizeof _ushort) (bytes-length path-bytes))]
-         [socket-fd  (socket AF-UNIX SOCK-STREAM 0)])
-    (unless (positive? socket-fd)
-      (let ([errno (saved-errno)])
-        (error 'unix-socket-path->bytes
-               (format "failed to create socket\n  errno: ~a~a"
-                       errno (let ([err (strerror_r errno)])
-                               (if err (format "\n  error: ~a" err) ""))))))
+;; do-make-socket : Symbol -> (values FD Cust-Reg)
+;; Creates nonblocking socket, registers w/ custodian (returning registration).
+;; Should be called in atomic mode.
+(define (do-make-socket who)
+  (define socket-fd  (socket AF-UNIX SOCK-STREAM 0))
+  (unless (positive? socket-fd)
+    (error who "failed to create socket~a"
+           (errno-error-lines (saved-errno))))
+  (set-fd-nonblocking who socket-fd)
+  (values socket-fd (register-custodian-shutdown socket-fd close/unregister)))
 
-    (unless (zero? (connect socket-fd sockaddr addrlen))
-      (close socket-fd)
-      (let ([errno (saved-errno)])
-        (error 'unix-socket-path->bytes
-               (format "failed to connect socket\n  path: ~a\n  errno: ~a~a"
-                       ((error-value->string-handler) path (error-print-width))
-                       errno
-                       (let ([err (strerror_r errno)])
-                         (if err (format "\n  error: ~a" err) ""))))))
+;; set-fd-nonblocking : Symbol Nat -> Void
+(define (set-fd-nonblocking who fd)
+  (unless (zero? (fcntl fd F_SETFL O_NONBLOCK))
+    (close fd)
+    (error who "failed to set non-blocking mode~a"
+           (errno-error-lines (saved-errno)))))
 
-    (with-handlers ([(lambda (e) #t)
-                     (lambda (exn)
-                       (close socket-fd)
-                       (raise exn))])
-      (scheme_make_fd_output_port socket-fd 'unix-socket #f #f #t))))
+;; close/unregister : Nat Cust-Reg/#f -> Void
+(define (close/unregister fd [reg #f])
+  (close fd)
+  (scheme_fd_to_semaphore fd MZFD_REMOVE #t)
+  (when reg (unregister-custodian-shutdown fd reg)))
+
+;; make-socket-ports : Symbol FD Cust-Reg/#f -> (values Input-Port Output-Port)
+(define (make-socket-ports who socket-fd reg)
+  (with-handlers ([(lambda (e) #t)
+                   (lambda (exn)
+                     (close/unregister socket-fd reg)
+                     (raise exn))])
+    (define-values (in out) (scheme_make_fd_output_port socket-fd 'unix-socket #f #f #t))
+    ;; closing the ports closes socket-fd, so custodian no longer needs to manage directly
+    (when reg (unregister-custodian-shutdown socket-fd reg))
+    (define fd+ports (list socket-fd in out))
+    (values (wrap-input-port in fd+ports) (wrap-output-port out fd+ports))))
+
+;; wrap-output-port : Output-Port (List FD Port Port) -> Output-Port
+;; Wrap port, override close to shutdown write side of socket.
+(define (wrap-output-port out fd+ports)
+  (define (close)
+    (when out (close-output-port out)) ;; may block, so avoid in custodian shutdown
+    (call-as-atomic
+     (lambda ()
+       (when creg (unregister-custodian-shutdown out* creg) (set! creg #f))
+       (when fd+ports (do-shutdown fd+ports #t) (set! fd+ports #f)))))
+  (define (get-write-evt buf start end) (write-bytes-avail-evt buf out start end))
+  (define buffer-mode (make-buffer-mode-fun out))
+  (define out*
+    (make-output-port 'unix-socket out out close #f get-write-evt #f #f void 1 buffer-mode))
+  (define creg (register-custodian-shutdown out* (lambda (p) (set! out #f) (close-output-port p))))
+  out*)
+
+;; wrap-input-port : Input-Port (List FD Port Port) -> Input-Port
+(define (wrap-input-port in fd+ports)
+  (define (close)
+    (when in (close-input-port in))
+    (call-as-atomic
+     (lambda ()
+       (when creg (unregister-custodian-shutdown in* creg) (set! creg #f))
+       (when fd+ports (do-shutdown fd+ports #f) (set! fd+ports #f)))))
+  (define (get-progress-evt) (port-progress-evt in))
+  (define (commit k progress done) (port-commit-peeked k progress done in))
+  (define buffer-mode (make-buffer-mode-fun in))
+  (define in*
+    (make-input-port 'unix-socket in in close get-progress-evt commit #f void 1 buffer-mode))
+  (define creg (register-custodian-shutdown in* (lambda (p) (set! in #f) (close-input-port p))))
+  in*)
+
+(define (make-buffer-mode-fun port)
+  (case-lambda [() (file-stream-buffer-mode port)]
+          [(mode) (file-stream-buffer-mode port mode)]))
+
+;; do-shutdown : (List FD Port Port) Boolean -> Void
+;; Requirements:
+;; - want to shutdown RD/WR when corresponding port closed
+;; - want to shutdown *after* port closed to avoid low-level errors
+;; - must *not* call shutdown after *both* ports closed (fd is stale)
+;; So: okay to call shutdown if either of the ports is still open.
+(define (do-shutdown fd+ports output?)
+  (define socket-fd (car fd+ports))
+  (define ports (cdr fd+ports))
+  (unless (andmap port-closed? ports)
+    (unless (zero? (shutdown socket-fd (if output? SHUT_WR SHUT_RD)))
+      ;; ENOTCONN is okay; the other side may have disconnected.
+      (unless (= (saved-errno) ENOTCONN)
+        (error (if output? 'close-output-port/unix-socket 'close-input-port/unix-socket)
+               "error from shutdown~a" (errno-error-lines (saved-errno)))))))
+
+;; ============================================================
+;; Connect
+
+;; unix-socket-connect : Path/String -> (values Input-Port Output-Port)
+(define (unix-socket-connect path)
+  (check-available 'unix-socket-connect)
+  (define-values (sockaddr addrlen) (do-make-sockaddr 'unix-socket-connect path))
+  (define connect-k
+    ;; Non-blocking connect may succeed immediately or require waiting to see.
+    ;; - If succeeds immediately, make ports in same atomic block
+    ;; - If wait, must exit atomic mode to sync
+    ;; So we return a procedure to be applied in non-atomic mode that does 
+    ;; whatever needs doing.
+    (call-as-atomic
+     (lambda ()
+       (define-values (socket-fd reg) (do-make-socket 'unix-socket-connect))
+       (define r (connect socket-fd sockaddr addrlen))
+       (define errno (saved-errno))
+       (cond [(= r 0) ;; connected
+              (define-values (in out) (make-socket-ports 'unix-socket-connect socket-fd reg))
+              (lambda () (values in out))]
+             [(= errno EINPROGRESS) ;; wait and see
+              (define sema (scheme_fd_to_semaphore socket-fd MZFD_CREATE_WRITE #t))
+              (lambda () ;; called in non-atomic mode!
+                (sync sema)
+                ;; FIXME: check custodian hasn't been shut down?
+                (call-as-atomic
+                 (lambda ()
+                   (define errno (getsockopt socket-fd SOL_SOCKET SO_ERROR))
+                   (cond [(= errno 0)
+                          (make-socket-ports 'unix-socket-connect socket-fd reg)]
+                         [else
+                          (close/unregister socket-fd reg)
+                          (error 'unix-socket-connect
+                                 "failed to connect socket (non-blocking)\n  path: ~e~a"
+                                 path (errno-error-lines errno))]))))]
+             [else
+              (close/unregister socket-fd reg)
+              (error 'unix-socket-connect "failed to connect socket\n  path: ~e~a"
+                     path (errno-error-lines (saved-errno)))]))))
+  (connect-k))
+
+
+;; ============================================================
+;; Listen & Accept
+
+;; A Listener is (unix-socket-listener Nat/#f (U #f (Custodian-Boxof Cust-Reg/#f)) Semaphore)
+;; Invariant: fd is #f <=> reg-box is #f <=> sema is ready
+;; If fd is #f or reg-box contains #f, then listener is considered closed.
+(struct unix-socket-listener (fd reg-box sema)
+  #:mutable
+  #:property prop:evt (lambda (self)
+                        ;; ready when fd is readable OR if custodian is closed OR listener is closed
+                        (call-as-atomic
+                         (lambda ()
+                           (define fd (unix-socket-listener-fd self))
+                           (define reg-box (unix-socket-listener-reg-box self))
+                           (define sema (unix-socket-listener-sema self))
+                           (wrap-evt
+                            (choice-evt (if fd (scheme_fd_to_semaphore fd MZFD_CREATE_READ #t) never-evt)
+                                        (or reg-box never-evt)
+                                        (semaphore-peek-evt sema))
+                            (lambda (evt) self))))))
+
+;; unix-socket-listen : Path/String [Nat] -> Unix-Socket-Listener
+(define (unix-socket-listen path [backlog 4])
+  (check-available 'unix-socket-listen)
+  (define-values (sockaddr addrlen) (do-make-sockaddr 'unix-socket-listen path))
+  (call-as-atomic
+   (lambda ()
+     (define-values (socket-fd reg) (do-make-socket 'unix-socket-listen))
+     (unless (zero? (bind socket-fd sockaddr addrlen))
+       (close/unregister socket-fd reg)
+       (error 'unix-socket-listen "failed to bind socket\n  path: ~e~a"
+              path (errno-error-lines (saved-errno))))
+     (unless (zero? (listen socket-fd backlog))
+       (close/unregister socket-fd reg)
+       (error 'unix-socket-listen "failed to listen\n  path: ~e~a"
+              path (errno-error-lines (saved-errno))))
+     (unix-socket-listener socket-fd
+                           (make-custodian-box (current-custodian) reg)
+                           (make-semaphore 0)))))
+
+;; unix-socket-close-listener : Listener -> Void
+(define (unix-socket-close-listener l)
+  (call-as-atomic
+   (lambda ()
+     (define fd (unix-socket-listener-fd l))
+     (define sema (unix-socket-listener-sema l))
+     (define reg-box (unix-socket-listener-reg-box l))
+     (define reg (and reg-box (custodian-box-value reg-box)))
+     (when fd
+       (set-unix-socket-listener-fd! l #f)
+       (set-unix-socket-listener-reg-box! l #f)
+       (close/unregister fd reg)
+       (semaphore-post sema))
+     (void))))
+
+;; unix-socket-accept : Unix-Socket-Listener -> (values Input-Port Output-Port)
+(define (unix-socket-accept l)
+  (sync l)
+  (define accept-k
+    (call-as-atomic
+     (lambda ()
+       (define lfd (listener-fd/check-open 'unix-socket-accept l))
+       (define fd (accept lfd))
+       (cond [(< fd 0)
+              (let ([errno (saved-errno)])
+                (cond [(or (= errno EAGAIN) (= errno EWOULDBLOCK) (= errno EINTR))
+                       (lambda () ;; called in non-atomic mode
+                         (unix-socket-accept l))]
+                      [else
+                       (error 'unix-socket-accept "failed to accept socket~a"
+                              (errno-error-lines errno))]))]
+             [else
+              ;; (set-fd-nonblocking 'unix-socket-accept fd) ;; Needed?
+              (define-values (in out) (make-socket-ports 'unix-socket-accept fd #f))
+              (lambda () (values in out))]))))
+  (accept-k))
+
+(define (listener-fd/check-open who l)
+  (define fd (unix-socket-listener-fd l))
+  (define reg-box (unix-socket-listener-reg-box l))
+  (unless (and fd reg-box (custodian-box-value reg-box))
+    (error who "unix socket listener is closed"))
+  fd)

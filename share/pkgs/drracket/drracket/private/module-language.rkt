@@ -29,7 +29,8 @@
          pkg/lib
          pkg/gui
          framework/private/logging-timer
-         (submod "frame.rkt" install-pkg))
+         (submod "frame.rkt" install-pkg)
+         (for-syntax racket/base))
 
 (struct exn-info (str src-vecs exn-stack missing-mods) #:prefab)
 
@@ -205,7 +206,7 @@
                     (module->namespace modname)))))
       
       (inherit get-language-name)
-      (define/public (get-users-language-name defs-text)
+      (define/public (get-users-language-name defs-text settings)
         (define defs-port (open-input-text-editor defs-text))
         (port-count-lines! defs-port)
         (define read-successfully?
@@ -215,29 +216,42 @@
         (cond
           [read-successfully?
            (define-values (_line _col port-pos) (port-next-location defs-port))
-           (define str (send defs-text get-text 0 (- port-pos 1)))
+           (define after-comments-position
+             (let ()
+               (define p (open-input-text-editor defs-text))
+               (port-count-lines! p)
+               (skip-past-comments p)
+               (define-values (line col pos) (port-next-location p))
+               (- pos 1)))
+           (define str (send defs-text get-text after-comments-position (- port-pos 1)))
            (define pos (regexp-match-positions #rx"#(?:!|lang )" str))
            (cond
              [(not pos)
               (get-language-name)]
              [else
-              ;; newlines can break things (ie the language text won't 
-              ;; be in the right place in the interactions window, which
-              ;; at least makes the test suites unhappy), so get rid of 
-              ;; them from the name. Otherwise, if there is some weird formatting,
-              ;; so be it.
-              (regexp-replace* #rx"[\r\n]+"
-                               (substring str (cdr (car pos)) (string-length str))
-                               " ")])]
+              (define language-name-without-runtime-stuff
+                (substring str (cdr (car pos)) (string-length str)))
+              (format "~a~a"
+                      language-name-without-runtime-stuff
+                      (case (drracket:language:simple-settings-annotations settings)
+                        [(none) (string-constant module-language-repl-no-annotations)]
+                        [(debug) (string-constant module-language-repl-debug-annotations)]
+                        [(debug/profile)
+                         (string-constant module-language-repl-debug/profile-annotations)]
+                        [(test-coverage)
+                         (string-constant module-language-repl-test-annotations)]))])]
           [else
            (get-language-name)]))
-                
+      
       (define/override (use-namespace-require/copy?) #f)
       
       (define/augment (capability-value key)
         (cond
           [(eq? key 'drscheme:autocomplete-words)
            (drracket:language-configuration:get-all-manual-keywords)]
+          [(eq? key 'drscheme:define-popup)
+           '(("(define" "(define ...)" "δ")
+             ("(module" "(module ...)" "ρ"))]
           [else (drracket:language:get-capability-default key)]))
       
       ;; config-panel : as in super class
@@ -2533,13 +2547,10 @@
                      lang-wants-big-defs/ints-labels?)
             (define admin (get-admin))
             (when admin
-              (send admin get-view bx by bw bh)
+              (define-values (tx ty tw th) (get-drawing-region admin dc))
               (define α (send dc get-alpha))
               (define fore (send dc get-text-foreground))
               (send dc set-font defs/ints-font)
-              (define-values (tw th _1 _2) (send dc get-text-extent id))
-              (define tx (+ (unbox bx) (- (unbox bw) tw)))
-              (define ty (+ (unbox by) (- (unbox bh) th)))
               (when (rectangles-intersect?
                      left top right bottom
                      tx ty (+ tx tw) (+ ty th))
@@ -2549,6 +2560,37 @@
                 (send dc set-alpha α)
                 (send dc set-text-foreground fore))
               (send dc set-font defs/ints-font)))))
+
+      (define/private (get-drawing-region admin dc)
+        (send admin get-view bx by bw bh)
+        (define-values (tw th _1 _2) (send dc get-text-extent id defs/ints-font))
+        (define tx (+ (unbox bx) (- (unbox bw) tw)))
+        (define ty (+ (unbox by) (- (unbox bh) th)))
+        (values tx ty tw th))
+
+      (define to-invalidate #f)
+      (define/override (on-scroll-to)
+        (super on-scroll-to)
+        (define admin (get-admin))
+        (when admin
+          (define dc (get-dc))
+          (define-values (tx ty tw th) (get-drawing-region admin dc))
+          (set! to-invalidate (vector tx ty tw th))))
+      (define/override (after-scroll-to)
+        (super after-scroll-to)
+        (when to-invalidate
+          (invalidate-bitmap-cache
+           (vector-ref to-invalidate 0)
+           (vector-ref to-invalidate 1)
+           (vector-ref to-invalidate 2)
+           (vector-ref to-invalidate 3))
+          (set! to-invalidate #f))
+        (define admin (get-admin))
+        (when admin
+          (define dc (get-dc))
+          (define-values (tx ty tw th) (get-drawing-region admin dc))
+          (invalidate-bitmap-cache tx ty tw th)))
+      
       (super-new)))
   
   (define bx (box 0))
@@ -2750,10 +2792,12 @@
                                              (exn-message x)))
                                     #f)])
                    (dynamic-require new-surrogate-mod 'surrogate%))))
-          (set-surrogate (new (if new-surrogate
-                                  (change-lang-surrogate-mixin
-                                   new-surrogate)
-                                  default-surrogate%)))))
+          (cond
+            [new-surrogate
+             (set-surrogate (new (change-lang-surrogate-mixin new-surrogate)))]
+            [else
+             (unless (is-a? (get-surrogate) default-surrogate%)
+               (set-surrogate (new default-surrogate%)))])))
       
       (super-new)))
   
@@ -2774,3 +2818,137 @@
   (define default-surrogate%
     (change-lang-surrogate-mixin
      racket:text-mode%)))
+
+(define (skip-past-comments port)
+  (define (get-it str)
+    (for ([c1 (in-string str)])
+      (define c2 (read-char port))
+      (unless (equal? c1 c2)
+        (error 'get-it
+               "expected ~s, got ~s, orig string ~s"
+               c1 c2 str))))
+  (let loop ()
+    (define p (peek-char port))
+    (cond-strs port
+      [";"
+       (let loop ()
+         (define c (read-char port))
+         (case c
+           [(#\linefeed #\return #\u133 #\u8232 #\u8233)
+            (void)]
+           [else
+            (unless (eof-object? c)
+              (loop))]))
+       (loop)]
+      ["#|"
+       (let loop ([depth 0])
+         (define p1 (peek-char port))
+         (cond
+           [(and (equal? p1 #\|)
+                 (equal? (peek-char port 1) #\#))
+            (get-it "|#")
+            (cond
+              [(= depth 0) (void)]
+              [else (loop (- depth 1))])]
+           [(and (equal? p1 #\#)
+                 (equal? (peek-char port 1) #\|))
+            (get-it "#|")
+            (loop (+ depth 1))]
+           [else
+            (read-char port)
+            (loop depth)]))
+       (loop)]
+      ["#;"
+       (with-handlers ((exn:fail:read? void))
+         (read port)
+         (loop))]
+      ["#! "
+       (read-line-slash-terminates port)
+       (loop)]
+      ["#!/"
+       (read-line-slash-terminates port)
+       (loop)]
+      [else
+       (define p (peek-char port))
+       (cond
+         [(eof-object? p) (void)]
+         [(char-whitespace? p)
+          (read-char port)
+          (loop)]
+         [else (void)])])))
+
+(define-syntax (cond-strs stx)
+  (syntax-case stx (else)
+    [(_ port [chars rhs ...] ... [else last ...])
+     (begin
+       (for ([chars (in-list (syntax->list #'(chars ...)))])
+         (unless (string? (syntax-e chars))
+           (raise-syntax-error 'chars "expected a string" stx chars))
+         (for ([char (in-string (syntax-e chars))])
+           (unless (< (char->integer char) 128)
+             (raise-syntax-error 'chars "expected only one-byte chars" stx chars))))
+       #'(cond
+           [(check-chars port chars)
+            rhs ...]
+           ...
+           [else last ...]))]))
+
+(define (check-chars port chars)
+  (define matches?
+    (for/and ([i (in-naturals)]
+              [c (in-string chars)])
+      (equal? (peek-char port i) c)))
+  (when matches?
+    (for ([c (in-string chars)])
+      (read-char port)))
+  matches?)
+
+(define (read-line-slash-terminates port)
+  (let loop ([previous-slash? #f])
+    (define c (read-char port))
+    (case c
+      [(#\\) (loop #t)]
+      [(#\linefeed #\return)
+       (cond
+         [previous-slash?
+          (define p (peek-char port))
+          (when (and (equal? c #\return)
+                     (equal? p #\linefeed))
+            (read-char port))
+          (loop #f)]
+         [else
+          (void)])]
+      [else
+       (unless (eof-object? c)
+         (loop #f))])))
+
+(module+ test
+  (require rackunit)
+  (define (clear-em str)
+    (define sp (open-input-string str))
+    (skip-past-comments sp)
+    (apply
+     string
+     (for/list ([i (in-port read-char sp)])
+       i)))
+  (check-equal? (clear-em ";") "")
+  (check-equal? (clear-em ";\n1") "1")
+  (check-equal? (clear-em ";  \n1") "1")
+  (check-equal? (clear-em ";  \r\n1") "1")
+  (check-equal? (clear-em ";  \u8233\n1") "1")
+  (check-equal? (clear-em "         1") "1")
+  (check-equal? (clear-em "#| |#1") "1")
+  (check-equal? (clear-em "#| #| #| #| #| |# |# |# |# |#1") "1")
+  (check-equal? (clear-em "#| #| #| #| #| |# |# #| |# |# |# |#1") "1")
+  (check-equal? (clear-em "#||#1") "1")
+  (check-equal? (clear-em "#|#|#|#|#||#|#|#|#|#1") "1")
+  (check-equal? (clear-em "#|#|#|#|#||#|##||#|#|#|#1") "1")
+  (check-equal? (clear-em " #!    \n         1") "1")
+  (check-equal? (clear-em " #!/    \n         1") "1")
+  (check-equal? (clear-em " #!/    \\\n2\n         1") "1")
+  (check-equal? (clear-em " #!/    \\\r2\n         1") "1")
+  (check-equal? (clear-em " #!/    \\\r\n2\n         1") "1")
+  (check-equal? (clear-em " #!/    \n\r\n         1") "1")
+  (check-equal? (clear-em "#;()1") "1")
+  (check-equal? (clear-em "#;  (1 2 3 [] {} ;xx\n 4)  1") "1")
+  (check-equal? (clear-em "#||##|#lang rong|#1") "1"))

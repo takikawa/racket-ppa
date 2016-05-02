@@ -111,12 +111,12 @@ values.
                     #:contract (cons/c exact-nonnegative-integer?
                                        exact-nonnegative-integer?))))
           (for/list ([i (in-range 10)])
-            (from-nat ordered-pair/e i))]
+            (from-nat other-ordered-pair/e i))]
 
 Some of the combinators in the library are guaranteed to build
 enumeration functions that are bijections. But since @racket[map/e]
 accepts arbitrary functions and @racket[or/e] accepts enumerations with
-arbitrary contracts, they may projection enumerations that are not be bijections.
+arbitrary contracts, they may project enumerations that are not be bijections.
 To help avoid errors, the contracts on @racket[map/e] and @racket[or/e] does some
 random checking to see if the result would be a bijection. 
 Here's an example that, with high probability, signals a contract violation.
@@ -782,18 +782,18 @@ Like @racket[listof/e], but without the empty list.
             (enum->list (listof-n/e natural/e 3) 10)]
 }
 
-@defform[(delay/e enum-expression keyword-options)
+@defform[(delay/e enum-expression ... keyword-options)
          #:grammar ([keyword-options
                      (code:line)
                      (code:line #:count count-expression keyword-options)
                      (code:line #:two-way-enum? two-way-boolean-expression keyword-options)
                      (code:line #:flat-enum? flat-boolean-expression keyword-options)])]{
  Returns an @tech{enumeration} immediately, without
- evaluating @racket[enum-expression]. When the result
+ evaluating the @racket[enum-expression]s. When the result
  enumeration is inspected (directly or indirectly) via 
  @racket[from-nat], @racket[to-nat], or 
- @racket[enum-contract], the @racket[enum-expression] is
- evaluated and its value cached. The value is then used as
+ @racket[enum-contract], the @racket[enum-expression]s are
+ evaluated and the value of the last one is cached. The value is then used as
  the enumeration.
            
   If the @racket[count-expression] is not supplied or if it evaluates to @racket[+inf.0],
@@ -803,8 +803,8 @@ Like @racket[listof/e], but without the empty list.
   
   If @racket[two-way-boolean-expression] is supplied and it evaluates to anything
   other than @racket[#f], the resulting
-  enumeration must be a @tech{one way enumeration}; otherwise it must be a
-  @tech{two way enumeration}.
+  enumeration must be a @tech{two way enumeration}; otherwise it must be a
+  @tech{one way enumeration}.
   
   If @racket[flat-boolean-expression] is supplied and it evaluates to anything 
   other than @racket[#f], the resulting

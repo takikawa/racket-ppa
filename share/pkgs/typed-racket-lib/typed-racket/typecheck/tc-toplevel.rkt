@@ -36,13 +36,16 @@
   (parameterize ([current-orig-stx form])
     (syntax-parse form
       [t:typed-struct
-       (tc/struct (attribute t.tvars) #'t.nm (syntax->list #'(t.fields ...)) (syntax->list #'(t.types ...))
+       (tc/struct (attribute t.tvars) #'t.nm #'t.type-name
+                  (syntax->list #'(t.fields ...)) (syntax->list #'(t.types ...))
                   #:mutable (attribute t.mutable)
                   #:maker (attribute t.maker)
+                  #:extra-maker (attribute t.extra-maker)
                   #:type-only (attribute t.type-only)
                   #:prefab? (attribute t.prefab))]
       [t:typed-struct/exec
-       (tc/struct null #'t.nm (syntax->list #'(t.fields ...)) (syntax->list #'(t.types ...))
+       (tc/struct null #'t.nm #'t.type-name
+                  (syntax->list #'(t.fields ...)) (syntax->list #'(t.types ...))
                   #:proc-ty #'t.proc-type)])))
 
 (define (type-vars-of-struct form)
@@ -117,6 +120,7 @@
       ;; definitions lifted from contracts should be ignored
       [(define-values (lifted) expr)
        #:when (contract-lifted-property #'expr)
+       #:do [(register-ignored! #'expr)]
        (list)]
       
       ;; register types of variables defined by define-values/invoke-unit forms
@@ -177,6 +181,7 @@
       ;; definitions lifted from contracts should be ignored
       [(define-values (lifted) expr)
        #:when (contract-lifted-property #'expr)
+       #:do [(register-ignored! #'expr)]
        (list)]
 
       [(define-values (var ...) expr)
@@ -235,6 +240,7 @@
                [expected-type (in-list (map cdr (signature->bindings import-sig)))])
            (define lexical-type (lookup-type/lexical member))
            (check-below lexical-type expected-type)))
+       (register-ignored! #'dviu)
        'no-type]
       ;; these forms we have been instructed to ignore
       [stx:ignore^
@@ -256,6 +262,7 @@
       ;; definitions lifted from contracts should be ignored
       [(define-values (lifted) expr)
        #:when (contract-lifted-property #'expr)
+       #:do [(register-ignored! #'expr)]
        'no-type]
 
       ;; definitions just need to typecheck their bodies
@@ -403,22 +410,26 @@
   ;; provide-tbl : hash[id, listof[id]]
   ;; maps internal names to all the names they're provided as
   ;; XXX: should the external names be symbols instead of identifiers?
-  (define provide-tbl
-    (for/fold ([h (make-immutable-free-id-table)]) ([p (in-list provs)])
+  ;; extra-provs : listof[stx]
+  (define-values (provide-tbl extra-provs)
+    (for/fold ([h (make-immutable-free-id-table)] [extra null])
+              ([p (in-list provs)])
       (syntax-parse p #:literal-sets (kernel-literals)
         [(#%provide form ...)
-         (for/fold ([h h]) ([f (in-syntax #'(form ...))])
+         (for/fold ([h h] [extra extra]) ([f (in-syntax #'(form ...))])
            (let loop ([f f])
              (syntax-parse f
                [i:id
-                (dict-update h #'i (lambda (tail) (cons #'i tail)) '())]
+                (values (dict-update h #'i (lambda (tail) (cons #'i tail)) '())
+                        extra)]
                [((~datum rename) in out)
-                (dict-update h #'in (lambda (tail) (cons #'out tail)) '())]
+                (values (dict-update h #'in (lambda (tail) (cons #'out tail)) '())
+                        extra)]
                [((~datum for-meta) 0 fm)
-                (loop #'fm)]
-               ;; is this safe?
+                (values (loop #'fm) extra)]
+               ;; `(void)` is for all the things that we just pass along
                [((~datum for-meta) _ fm)
-                h]
+                (values h (cons f extra))]
                [(name:unknown-provide-form . _)
                 (parameterize ([current-orig-stx f])
                   (tc-error "provide: ~a not supported by Typed Racket" (syntax-e #'name.name)))]
@@ -525,8 +536,8 @@
            ;; indirection here (see the implementation in
            ;; provide-handling.rkt).
            ;;
-           ;; First, we generate a macro that expands to a
-           ;; `local-require` of the contracted identifier in the
+           ;; First, we generate a macro that lifts a
+           ;; `require` of the contracted identifier in the
            ;; #%contract-defs submodule:
            ;;    (define-syntax con-f (mk-redirect f))
            ;;
@@ -538,12 +549,14 @@
            ;; because it's important for `export-f` to be a
            ;; rename-transformer (making things like
            ;; `syntax-local-value` work right), but `con-f` can't be,
-           ;; since it expands to a `local-require`.
+           ;; since it lifts a `require`
            new-export-defs ...
 
            ;; Finally, we do the export:
            ;;    (provide (rename-out [export-f f]))
-           new-provs ...))))
+           new-provs ...
+           ;; At the end, include the extra provides
+           (#%provide #,@extra-provs)))))
   (do-time "finished provide generation")
   (values new-stx/pre new-stx/post))
 

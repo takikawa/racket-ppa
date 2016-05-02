@@ -28,6 +28,9 @@
 (define old-libedit #f)
 (define libreadline
   (or
+   (let ([readline-path (getenv "PLT_READLINE_LIB")])
+     (and readline-path
+          (ffi-lib readline-path (lambda () #f))))
    (find-libreadline (find-user-share-dir))
    (find-libreadline (find-share-dir))
    ;; Old versions of libedit have a 1 indexed history rather than a 0 indexed history.
@@ -37,7 +40,7 @@
      (when lib
        (set! old-libedit #t))
      lib)
-   (ffi-lib "libedit" '("3" "2" ""))))
+   (ffi-lib "libedit" '("3" "2" "0.0.43" "0.0.53" ""))))
 
 (define make-byte-string ; helper for the two types below
   (get-ffi-obj "scheme_make_byte_string" #f (_fun _pointer -> _scheme)))

@@ -286,10 +286,12 @@
                                           (maybe-undefined))])
         (let ([rhsl (map
                      (lambda (vars rhs)
-                       (no-cache-annotate-named
-                        (syntax-case vars () [(id) (syntax id)] [_else #f])
-                        rhs
-                        phase))
+                       (define rhs* (no-cache-annotate-named
+                                     (syntax-case vars () [(id) (syntax id)] [_else #f])
+                                     rhs
+                                     phase))
+                       (for/fold ([rhs rhs*]) ([name (in-list (syntax->list vars))])
+                         (test-coverage-point rhs name phase)))
                      varss
                      rhss)]
               [bodyl (map (lambda (body) (no-cache-annotate body phase))
@@ -328,7 +330,7 @@
   
   (define (disarm orig)
     (syntax-disarm orig orig-inspector))
-  
+
   (define (rebuild expr replacements)
     (let loop ([expr expr] [same-k (lambda () expr)] [diff-k (lambda (x) x)])
       (let ([a (assq expr replacements)])

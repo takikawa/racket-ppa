@@ -19,15 +19,33 @@
 
 (define-runtime-path psm-tab-bar-dir
   '(so "PSMTabBarControl.framework"))
+(define-runtime-path mm-tab-bar-dir
+  ;; This directory will not exist for platforms other than x86_64:
+  '(so "MMTabBarView.framework"))
 
-;; Load PSMTabBarControl:
-(void (ffi-lib (build-path psm-tab-bar-dir "PSMTabBarControl")))
+(define use-mm?
+  (and (version-10.10-or-later?)
+       64-bit?
+       (directory-exists? mm-tab-bar-dir)))
+
+;; Load MMTabBarView or PSMTabBarControl:
+(if use-mm?
+    (void (ffi-lib (build-path mm-tab-bar-dir "MMTabBarView")))
+    (void (ffi-lib (build-path psm-tab-bar-dir "PSMTabBarControl"))))
 (define NSNoTabsNoBorder 6)
 
 (define NSDefaultControlTint 0)
 (define NSClearControlTint 7)
 
-(import-class NSView NSTabView NSTabViewItem PSMTabBarControl)
+(import-class NSView NSTabView NSTabViewItem)
+(define TabBarControl
+  (if use-mm?
+      (let ()
+        (import-class MMTabBarView)
+        MMTabBarView)
+      (let ()
+        (import-class PSMTabBarControl)
+        PSMTabBarControl)))
 (import-protocol NSTabViewDelegate)
 
 (define NSOrderedAscending -1)
@@ -49,8 +67,26 @@
         (when (and wx (send wx callbacks-enabled?))
           (queue-window*-event wxb (lambda (wx) (send wx do-callback)))))))
 
-(define-objc-class RacketPSMTabBarControl PSMTabBarControl
-  #:mixins (FocusResponder KeyMouseResponder CursorDisplayer)
+;; The MMTabBarView widget doesn't support disabling, so we have to
+;; implement it. Also, we need to override a method to disable (for now)
+;; reordering tabs.
+(define-objc-mixin (EnableMixin Superclass)
+  [wxb]
+  (-a _id (hitTest: [_NSPoint pt])
+      (let ([wx (->wx wxb)])
+        (if (and wx
+                 (not (send wx is-enabled-to-root?)))
+            #f
+            (super-tell hitTest: #:type _NSPoint pt))))
+  (-a _BOOL (shouldStartDraggingAttachedTabBarButton: b withMouseDownEvent: evt)
+      #f))
+
+;; A no-op mixin instead of `EnableMixin` for PSMTabBarControl:
+(define-objc-mixin (EmptyMixin Superclass)
+  [wxb])
+
+(define-objc-class RacketPSMTabBarControl TabBarControl
+  #:mixins (FocusResponder KeyMouseResponder CursorDisplayer (if use-mm? EnableMixin EmptyMixin))
   [wxb]
   (-a _void (tabView: [_id cocoa] didSelectTabViewItem: [_id item-cocoa])
       (super-tell #:type _void tabView: cocoa didSelectTabViewItem: item-cocoa)
@@ -83,8 +119,10 @@
            (tellv tabv-cocoa setDelegate: i)
            (tellv tabv-cocoa setTabViewType: #:type _int NSNoTabsNoBorder)
            (tellv i setTabView: tabv-cocoa)
-           (tellv i setStyleNamed: #:type _NSString "Aqua")
-           ;;(tellv i setSizeCellsToFit: #:type _BOOL #t)
+           (tellv i setStyleNamed: #:type _NSString (if use-mm? "Yosemite" "Aqua"))
+           ;; (tellv i setSizeCellsToFit: #:type _BOOL #t)
+           (when use-mm?
+             (tellv i setResizeTabsToFitTotalWidth: #:type _BOOL #t))
            (tellv i setDisableTabClose: #:type _BOOL #t)
            i)))
 
@@ -204,7 +242,8 @@
       (tellv tabv-cocoa setControlTint: #:type _int
              (if on? NSDefaultControlTint NSClearControlTint))
       (when control-cocoa
-        (tellv control-cocoa setEnabled: #:type _BOOL on?))))
+        (unless use-mm?
+          (tellv control-cocoa setEnabled: #:type _BOOL on?)))))
 
   (define/override (can-accept-focus?)
     (and (not control-cocoa)

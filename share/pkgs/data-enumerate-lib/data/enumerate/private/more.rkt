@@ -269,10 +269,18 @@ In plain English, we'll
   (define f-range-ctc
     (and/c (if f-range-finite?
                finite-enum?
-               infinite-enum?)
-           (if (two-way-enum? e)
-               two-way-enum?
-               one-way-enum?)))
+               (suggest/c infinite-enum?
+                          "suggestion"
+                          "maybe supply `#:dep-expression-finite? #t' to cons/de?"))
+           (if one-way?
+               one-way-enum?
+               (if (two-way-enum? e)
+                   (suggest/c two-way-enum?
+                              "suggestion"
+                              "maybe supply `#:one-way #t' to cons/de?")
+                   (suggest/c one-way-enum?
+                              "suggestion"
+                              "maybe supply `#:one-way #f' to cons/de?")))))
   (define (f v)
     (contract f-range-ctc
               (_f v) 
@@ -420,14 +428,14 @@ In plain English, we'll
       make-contract])
    #:name `(reverse/c ,(contract-name ctc))
    #:first-order list?
-   #:projection
-   (let ([proj (contract-projection ctc)])
+   #:late-neg-projection
+   (let ([proj (contract-late-neg-projection ctc)])
      (λ (b)
        (define proj+b (proj b))
-       (λ (v)
+       (λ (v neg-party)
          (if (list? v)
-             (reverse (proj+b (reverse v)))
-             (proj+b v)))))
+             (reverse (proj+b (reverse v) neg-party))
+             (proj+b v neg-party)))))
    #:stronger (λ (this that) #f)
    #:list-contract? #t))
 
@@ -530,12 +538,42 @@ In plain English, we'll
 
 (define-syntax (delay/e stx)
   (syntax-case stx ()
-    [(_ expr . kwd-args)
+    [(_ expr kwd-args-and-exprs ...)
      (let ()
        (when (keyword? (syntax-e #'expr))
          (raise-syntax-error 'delay/e 
-                             "expected an expression argument first, not a keyword"
+                             "expected at least one expression argument first, not a keyword"
                              stx #'expr))
+       (define-values (exprs kwds-and-args)
+         (let loop ([more (syntax->list #'(kwd-args-and-exprs ...))]
+                    [exprs '()]
+                    [kwds-and-args '()]
+                    [kwd-mode? #f])
+           (cond
+             [(null? more) (values (reverse exprs) (reverse kwds-and-args))]
+             [else
+              (define fst (car more))
+              (cond
+                [(or kwd-mode? (keyword? (syntax-e fst)))
+                 (unless (and (keyword? (syntax-e fst))
+                              (member (syntax-e fst) '(#:count #:two-way-enum? #:flat-enum?)))
+                   (raise-syntax-error
+                    'delay/e
+                    "expected one of the keywords #:count, #:two-way-enum?, or #:flat-enum?"
+                    stx
+                    fst))
+                 (when (null? (cdr more))
+                   (raise-syntax-error
+                    'delay/e
+                    (format "exected an argument to follow keyword ~a"
+                            (syntax-e fst))
+                    stx))
+                 (loop (cddr more)
+                       exprs
+                       (list* (cadr more) (car more) kwds-and-args)
+                       #t)]
+                [else
+                 (loop (cdr more) (cons fst exprs) kwds-and-args #f)])])))
        (define other-party-name (syntax-local-lift-expression #'(quote-module-name)))
        (define the-srcloc
          #`(srcloc '#,(syntax-source stx)
@@ -543,7 +581,7 @@ In plain English, we'll
                    #,(syntax-column stx)
                    #,(syntax-position stx)
                    #,(syntax-span stx)))
-       #`((delay/e/proc #,other-party-name #,the-srcloc (λ () expr)) . kwd-args))]))
+       #`((delay/e/proc #,other-party-name #,the-srcloc (λ () expr #,@exprs)) #,@kwds-and-args))]))
 
 (define (delay/e/proc other-party-name the-srcloc thunk)
   ;; do this curried thing to get better error reporting for keyword arity errors
@@ -553,15 +591,21 @@ In plain English, we'll
     
     (define ctc
       (and/c (if (= count +inf.0)
-                 infinite-enum?
+                 (suggest/c infinite-enum?
+                            "suggestion"
+                            "maybe supply `#:count' to delay/e?")
                  (and/c finite-enum?
                         (let ([matching-count? (λ (e) (= (enum-count e) count))])
                           matching-count?)))
              (if is-two-way-enum?
-                 two-way-enum?
+                 (suggest/c two-way-enum?
+                            "suggestion"
+                            "maybe supply `#:two-way-enum? #f' to delay/e?")
                  one-way-enum?)
              (if is-flat-enum?
-                 flat-enum?
+                 (suggest/c flat-enum?
+                            "suggestion"
+                            "maybe supply `#:flat-enum? #f' to delay/e?")
                  (not/c flat-enum?))))
     (unless (or (exact-nonnegative-integer? count)
                 (and (number? count) (= count +inf.0)))

@@ -2,7 +2,7 @@
 
 (require
   "../utils/utils.rkt"
-  (typecheck signatures tc-app-helper check-below)
+  (typecheck signatures possible-domains check-below)
   (types utils abbrev classes type-table)
   (rep type-rep)
   (utils tc-utils)
@@ -18,7 +18,7 @@
 (export tc-expression^)
 
 ;; Typecheck an (#%expression e) form
-(define (tc/#%expression form expected)
+(define (tc/#%expression form [expected #f])
   (syntax-parse form
     [(exp:type-inst^ e)
      (do-inst (tc-expr #'e) (attribute exp.value))]

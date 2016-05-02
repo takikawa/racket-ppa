@@ -6,6 +6,7 @@
          racket/runtime-path
          racket/port
          racket/string
+         racket/path
          racket/list
          setup/collects
          file/convertible)
@@ -23,8 +24,11 @@
 (define-struct (toc-paragraph paragraph) ())
 
 (define-runtime-path scribble-prefix-tex "scribble-prefix.tex")
+(define-runtime-path scribble-packages-tex "scribble-packages.tex")
+(define-runtime-path scribble-load-tex "scribble-load.tex")
 (define-runtime-path scribble-tex "scribble.tex")
 (define-runtime-path scribble-style-tex "scribble-style.tex")
+(define-runtime-path scribble-load-replace-tex "scribble-load-replace.tex")
 
 (define (color->string c)
   (if (string? c)
@@ -82,6 +86,17 @@
     (define/public (render-part-depth) #f)
 
     (define/override (render-one d ri fn)
+      (define (maybe-replace file defaults)
+        (cond [(and defaults
+                    (latex-defaults+replacements? defaults)
+                    (hash-ref (latex-defaults+replacements-replacements defaults)
+                              (path->string (file-name-from-path file))
+                              #f)) =>
+               (lambda (v)
+                 (cond
+                   [(bytes? v) v]
+                   [else (collects-relative->path v)]))]
+              [else file]))
       (let* ([defaults (ormap (lambda (v) (and (latex-defaults? v) v))
                               (style-properties (part-style d)))]
              [prefix-file (or prefix-file
@@ -91,22 +106,24 @@
                                       [(bytes? v) v]
                                       [else (collects-relative->path v)])))
                               scribble-prefix-tex)]
-             [style-file (or style-file 
+             [style-file (or style-file
                              (and defaults
                                   (let ([v (latex-defaults-style defaults)])
                                     (cond
                                      [(bytes? v) v]
                                      [else (collects-relative->path v)])))
                              scribble-style-tex)]
-             [all-style-files (cons scribble-tex
-                                    (append (extract-part-style-files
-                                             d
-                                             ri
-                                             (lambda (p) #f)
-                                             tex-addition?
-                                             tex-addition-path)
-                                            (list style-file)
-                                            style-extra-files))]
+             [all-style-files (list* scribble-load-tex
+                                     (maybe-replace scribble-load-replace-tex defaults)
+                                     scribble-tex
+                                     (append (extract-part-style-files
+                                              d
+                                              ri
+                                              (lambda (p) #f)
+                                              tex-addition?
+                                              tex-addition-path)
+                                             (list style-file)
+                                             style-extra-files))]
              [whole-doc? (not (render-part-depth))])
         (if whole-doc?
             (for ([style-file (in-list (cons prefix-file all-style-files))])
@@ -445,7 +462,7 @@
                    (unless (suppress-newline-content)
                      (printf "\\hspace*{\\fill}\\\\"))]
                   [else (error 'latex-render
-                               "unrecognzied style symbol: ~s" style)])]
+                               "unrecognized style symbol: ~s" style)])]
                [(string? style-name)
                 (let* ([v (if style (style-properties style) null)]
                        [tt? (cond
@@ -849,7 +866,7 @@
                                [else (error "unexpected style for box mode")])))
                        (let ([s (style-name (nested-flow-style t))])
                          (or (and (string? s) s)
-                             (and (eq? s 'inset) "quote")
+                             (and (eq? s 'inset) "SInsetFlow")
                              (and (eq? s 'code-inset) "SCodeFlow")
                              (and (eq? s 'vertical-inset) "SVInsetFlow")))
                        "Subflow")]
@@ -985,6 +1002,8 @@
                           ;; though, so we keep this table around to avoid regressions.
                           (case c
                             [(#\╔ #\═ #\╗ #\║ #\╚ #\╝ #\╦ #\╠ #\╣ #\╬ #\╩) (box-character c)]
+                            [(#\┌ #\─ #\┐ #\│ #\└ #\┘ #\┬ #\├ #\┤ #\┼ #\┴) (box-character c)]
+                            [(#\┏ #\━ #\┓ #\┃ #\┗ #\┛ #\┳ #\┣ #\┫ #\╋ #\┻) (box-character c 2)]
                             [(#\u2011) "\\mbox{-}"] ; non-breaking hyphen
                             [(#\uB0) "$^{\\circ}$"] ; degree
                             [(#\uB2) "$^2$"]
@@ -1003,6 +1022,7 @@
                             [(#\u039B) "$\\Lambda$"]
                             [(#\u03BC) "$\\mu$"]
                             [(#\u03C0) "$\\pi$"]
+                            [(#\ϖ) "$\\varpi$"]
                             [(#\‘) "{`}"]
                             [(#\’) "{'}"]
                             [(#\“) "{``}"]
@@ -1053,12 +1073,16 @@
                             [(#\∃) "$\\exists$"]
                             [(#\∘) "$\\circ$"]
                             [(#\θ) "$\\theta$"]
+                            [(#\ϑ) "$\\vartheta$"]
                             [(#\τ) "$\\tau$"]
                             [(#\υ) "$\\upsilon$"]
                             [(#\φ) "$\\phi$"]
+                            [(#\ϕ) "$\\varphi$"]
                             [(#\δ) "$\\delta$"]
                             [(#\ρ) "$\\rho$"]
-                            [(#\ε) "$\\epsilon$"]
+                            [(#\ϱ) "$\\varrho$"]
+                            [(#\ϵ) "$\\epsilon$"]
+                            [(#\ε) "$\\varepsilon$"]
                             [(#\χ) "$\\chi$"]
                             [(#\ψ) "$\\psi$"]
                             [(#\ζ) "$\\zeta$"]
@@ -1211,10 +1235,13 @@
                 (loop (add1 i))))))]))
     
     
-    (define/private (box-character c)
+    (define/private (box-character c [line-thickness 1])
       (define (combine . args) 
         (apply string-append
                "\\setlength{\\unitlength}{0.05em}"
+               (if (= line-thickness 1)
+                   ""
+                   (format "\\linethickness{~apt}" (* 0.4 line-thickness)))
                (filter (λ (x) (not (regexp-match #rx"^[ \n]*$" x)))
                        (flatten args))))
       (define (adjust % v) 
@@ -1225,8 +1252,10 @@
       (define (x v) (adjust 1 v))
       (define (y v) (adjust 6/4 v))
       (define upper-horizontal @list{\put(@x[0],@y[6]){\line(1,0){@x[10]}}})
+      (define mid-horizontal @list{\put(@x[0],@y[5]){\line(1,0){@x[10]}}})
       (define lower-horizontal @list{\put(@x[0],@y[4]){\line(1,0){@x[10]}}})
       (define righter-vertical @list{\put(@x[6],@y[10]){\line(0,-1){@y[10]}}})
+      (define mid-vertical @list{\put(@x[5],@y[10]){\line(0,-1){@y[10]}}})
       (define lefter-vertical @list{\put(@x[4],@y[10]){\line(0,-1){@y[10]}}})
       (define bottom-right @list{\put(@x[6],@y[4]){\line(1,0){@x[4]}}
                                  \put(@x[6],@y[0]){\line(0,1){@y[4]}}})
@@ -1300,6 +1329,55 @@
                    @bottom-left
                    @upper-right
                    @bottom-right
+                   @footer}]
+        [(#\┌ #\┏)
+         @combine{@header
+                   \put(@x[5],@y[5]){\line(1,0){@x[5]}}
+                   \put(@x[5],@y[0]){\line(0,1){@y[5]}}
+                   @footer}]
+        [(#\─ #\━) @combine{@header
+                        @mid-horizontal
+                        @footer}]
+        [(#\┐ #\┓) @combine{@header
+                        \put(@x[0],@y[5]){\line(1,0){@x[5]}}
+                        \put(@x[5],@y[0]){\line(0,1){@y[5]}}
+                        @footer}]
+        [(#\│ #\┃) @combine{@header
+                        @mid-vertical
+                        @footer}]
+        [(#\└ #\┗) @combine{@header
+                        \put(@x[5],@y[5]){\line(1,0){@x[5]}}
+                        \put(@x[5],@y[10]){\line(0,-1){@y[5]}}
+                        @footer}]
+        [(#\┘ #\┛)
+         @combine{@header
+                  \put(@x[0],@y[5]){\line(1,0){@x[5]}}
+                  \put(@x[5],@y[10]){\line(0,-1){@y[5]}}
+                  @footer}]
+        [(#\┤ #\┫)
+         @combine{@header
+                  \put(@x[0],@y[5]){\line(1,0){@x[5]}}
+                  @mid-vertical
+                  @footer}]
+        [(#\├ #\┣)
+         @combine{@header
+                  \put(@x[5],@y[5]){\line(1,0){@x[5]}}
+                  @mid-vertical
+                  @footer}]
+        [(#\┴ #\┻)
+         @combine{@header
+                  \put(@x[5],@y[10]){\line(0,-1){@y[5]}}
+                  @mid-horizontal
+                  @footer}]
+        [(#\┬ #\┳)
+         @combine{@header
+                  \put(@x[5],@y[5]){\line(0,-1){@y[5]}}
+                  @mid-horizontal
+                  @footer}]
+        [(#\┼ #\╋)
+          @combine{@header
+                   @mid-horizontal
+                   @mid-vertical
                    @footer}]))
 
     ;; ----------------------------------------

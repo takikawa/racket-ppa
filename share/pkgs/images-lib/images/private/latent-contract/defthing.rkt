@@ -3,8 +3,7 @@
 ;; Definitions with contracts and contract documentation.
 
 (require racket/contract "../latent-contract.rkt" racket/provide racket/match
-         (for-syntax racket/base racket/list racket/syntax syntax/parse racket/provide-transform
-                     "serialize-syntax.rkt")
+         (for-syntax racket/base racket/list racket/syntax syntax/parse racket/provide-transform)
          (prefix-in s. scribble/manual)
          (prefix-in s. scribble/core)
          (prefix-in s. scribble/html-properties))
@@ -57,9 +56,7 @@
 (define-syntax (defthing stx)
   (syntax-parse stx
     [(_ name:id contract:expr #:document-value value:expr)
-     (with-syntax ([name:doc             (format-id #'name "~a:doc" #'name)]
-                   [serialized-contract  (serialize-syntax #'contract)]
-                   [serialized-value     (serialize-syntax #'value)])
+     (with-syntax ([name:doc             (format-id #'name "~a:doc" #'name)])
        (syntax/loc stx
          (begin
            (define/latent-contract name contract value)
@@ -67,14 +64,13 @@
              (syntax-case doc-stx ()
                [(ctx . pre-flows)
                 (with-syntax ([doc-name      (datum->syntax #'ctx (syntax-e #'name))]
-                              [doc-contract  (unserialize-syntax #'ctx 'serialized-contract)]
-                              [doc-value     (unserialize-syntax #'ctx 'serialized-value)])
+                              [doc-contract  (quote-syntax contract)]
+                              [doc-value     (quote-syntax value)])
                   (syntax/loc doc-stx
                     (s.defthing doc-name doc-contract #:value doc-value
                                 . pre-flows)))])))))]
     [(_ name:id contract:expr value:expr)
-     (with-syntax ([name:doc             (format-id #'name "~a:doc" #'name)]
-                   [serialized-contract  (serialize-syntax #'contract)])
+     (with-syntax ([name:doc             (format-id #'name "~a:doc" #'name)])
        (syntax/loc stx
          (begin
            (define/latent-contract name contract value)
@@ -82,7 +78,7 @@
              (syntax-case doc-stx ()
                [(ctx . pre-flows)
                 (with-syntax ([doc-name      (datum->syntax #'ctx (syntax-e #'name))]
-                              [doc-contract  (unserialize-syntax #'ctx 'serialized-contract)])
+                              [doc-contract  (quote-syntax contract)])
                   (syntax/loc doc-stx
                     (s.defthing doc-name doc-contract . pre-flows)))])))))]))
 
@@ -100,9 +96,7 @@
                    [(new-arg ...)       (append* (map remove-contract arg-list))]
                    [(req-contract ...)  (append* (map get-required-contract arg-list))]
                    [(opt-contract ...)  (append* (map get-optional-contract arg-list))]
-                   [serialized-args     (serialize-syntax #'(arg ...))]
-                   [serialized-result   (serialize-syntax #'result)]
-                   [serialized-body     (serialize-syntax (wrap-procedure-body #'(body ...)))])
+                   [wrapped-body        (wrap-procedure-body #'(body ...))])
        (syntax/loc stx
          (begin
            (define/latent-contract (name new-arg ...) (->* (req-contract ...) (opt-contract ...)
@@ -112,9 +106,9 @@
              (syntax-case doc-stx ()
                [(ctx . pre-flows)
                 (with-syntax ([doc-name    (datum->syntax #'ctx (syntax-e #'name))]
-                              [doc-args    (unserialize-syntax #'ctx 'serialized-args)]
-                              [doc-result  (unserialize-syntax #'ctx 'serialized-result)]
-                              [doc-body    (unserialize-syntax #'ctx 'serialized-body)])
+                              [doc-args    (quote-syntax (arg ...))]
+                              [doc-result  (quote-syntax result)]
+                              [doc-body    (quote-syntax #'wrapped-body)])
                   (syntax/loc doc-stx
                     (s.defproc (doc-name . doc-args) doc-result #:value doc-body
                                . pre-flows)))])))))]
@@ -123,9 +117,7 @@
      (with-syntax ([name:doc            (format-id #'name "~a:doc" #'name)]
                    [(new-arg ...)       (append* (map remove-contract arg-list))]
                    [(req-contract ...)  (append* (map get-required-contract arg-list))]
-                   [(opt-contract ...)  (append* (map get-optional-contract arg-list))]
-                   [serialized-args     (serialize-syntax #'(arg ...))]
-                   [serialized-result   (serialize-syntax #'result)])
+                   [(opt-contract ...)  (append* (map get-optional-contract arg-list))])
        (syntax/loc stx
          (begin
            (define/latent-contract (name new-arg ...) (->* (req-contract ...) (opt-contract ...)
@@ -135,8 +127,8 @@
              (syntax-case doc-stx ()
                [(ctx . pre-flows)
                 (with-syntax ([doc-name    (datum->syntax #'ctx (syntax-e #'name))]
-                              [doc-args    (unserialize-syntax #'ctx 'serialized-args)]
-                              [doc-result  (unserialize-syntax #'ctx 'serialized-result)])
+                              [doc-args    (quote-syntax (arg ...))]
+                              [doc-result  (quote-syntax result)])
                   (syntax/loc doc-stx
                     (s.defproc (doc-name . doc-args) doc-result . pre-flows)))])))))]))
 
@@ -144,9 +136,7 @@
 (define-syntax (defparam stx)
   (syntax-parse stx
     [(_ name:id arg:id contract:expr default:expr)
-     (with-syntax ([name:doc             (format-id #'name "~a:doc" #'name)]
-                   [serialized-contract  (serialize-syntax #'contract)]
-                   [serialized-default   (serialize-syntax #'default)])
+     (with-syntax ([name:doc             (format-id #'name "~a:doc" #'name)])
        (syntax/loc stx
          (begin
            (define/latent-contract name (parameter/c contract) (make-parameter default))
@@ -155,8 +145,8 @@
                [(ctx . pre-flows)
                 (with-syntax ([doc-name      (datum->syntax #'ctx (syntax-e #'name))]
                               [doc-arg       (datum->syntax #'ctx (syntax-e #'arg))]
-                              [doc-contract  (unserialize-syntax #'ctx 'serialized-contract)]
-                              [doc-default   (unserialize-syntax #'ctx 'serialized-default)])
+                              [doc-contract  (quote-syntax contract)]
+                              [doc-default   (quote-syntax default)])
                   #'(s.defparam doc-name doc-arg doc-contract #:value doc-default
                                 . pre-flows))])))))]
     [(_ name:id contract:expr default:expr)

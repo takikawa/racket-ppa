@@ -338,7 +338,8 @@
         (send f get-weight)
         (send f get-underlined)
         (send f get-smoothing)
-        (send f get-size-in-pixels)))
+        (send f get-size-in-pixels)
+        (send f get-hinting)))
 
 (define (unconvert-font l)
   (apply make-object font% l))
@@ -351,10 +352,38 @@
   (send dc rotate (dc-state-rotation state))
   state)
 
+(define (apply-transform state t)
+  (define im (dc-state-initial-matrix state))
+  (define mx (make-cairo_matrix_t (vector-ref im 0)
+                                  (vector-ref im 1)
+                                  (vector-ref im 2)
+                                  (vector-ref im 3)
+                                  (vector-ref im 4)
+                                  (vector-ref im 5)))
+  (cairo_matrix_translate mx (dc-state-origin-x state) (dc-state-origin-y state))
+  (cairo_matrix_scale mx (dc-state-scale-x state) (dc-state-scale-y state))
+  (cairo_matrix_rotate mx (dc-state-rotation state))
+  (cairo_matrix_multiply mx
+                         (make-cairo_matrix_t (vector-ref t 0)
+                                              (vector-ref t 1)
+                                              (vector-ref t 2)
+                                              (vector-ref t 3)
+                                              (vector-ref t 4)
+                                              (vector-ref t 5))
+                         mx)
+  (struct-copy dc-state state
+               [initial-matrix (vector-immutable (cairo_matrix_t-xx mx)
+                                                 (cairo_matrix_t-yx mx)
+                                                 (cairo_matrix_t-xy mx)
+                                                 (cairo_matrix_t-yy mx)
+                                                 (cairo_matrix_t-x0 mx)
+                                                 (cairo_matrix_t-y0 mx))]
+               [origin-x 0.0] [origin-y 0.0]
+               [scale-x 1.0] [scale-y 1.0]
+               [rotation 0.0]))
+
 (define (record-dc-mixin %)
   (class %
-    (super-new)
-
     (inherit get-origin get-scale get-rotation get-initial-matrix 
              get-pen get-brush get-font
              get-smoothing get-text-mode 
@@ -364,6 +393,12 @@
 
     (define record-limit +inf.0)
     (define current-size 0)
+    (define procs null)
+    (define converts null)
+    (define clones (make-hasheq))
+    (define converteds (make-hasheq))
+
+    (super-new)
 
     (define/public (set-recording-limit amt)
       (set! record-limit amt))
@@ -465,8 +500,6 @@
                      ...
                      [else (error 'unconvert "bad datum: ~e" cmd-tag)])))))]))
 
-    (define procs null)
-    (define converts null)
     (define/private (record proc convert)
       (when (continue-recording?)
         (start-atomic)
@@ -533,7 +566,6 @@
 
     (define/public (applies-to-default?) #t)
 
-    (define clones (make-hasheq))
     (define/private (clone clone-x x)
       (or (let ([new-x (hash-ref clones x #f)])
             (and new-x
@@ -544,7 +576,6 @@
               (hash-set! clones x new-x))
             new-x)))
 
-    (define converteds (make-hasheq))
     (define/private (convert convert-x x)
       (or (hash-ref converteds x #f)
           (let ([new-x (convert-x x)])
@@ -608,6 +639,12 @@
         (record (lambda (dc state)
                   (install-transform dc (struct-copy dc-state state [initial-matrix mi])))
                 (lambda () `(set-initial-matrix ,mi)))))
+    (define/override (transform t)
+      (super transform t)
+      (let ([t (vector->immutable-vector t)])
+        (record (lambda (dc state)
+                  (install-transform dc (apply-transform state t)))
+                (lambda () `(transform ,t)))))
 
     (generate-record-unconvert
      ([(set-clipping-region) (lambda (r) 
@@ -642,10 +679,11 @@
                           (install-transform dc (struct-copy dc-state state [rotation r]))))]
       [(set-initial-matrix) (lambda (mi)
                               (lambda (dc state)
-                                (install-transform dc (struct-copy dc-state state [initial-matrix mi]))))])
+                                (install-transform dc (struct-copy dc-state state [initial-matrix mi]))))]
+      [(transform) (lambda (t)
+                     (lambda (dc state)
+                       (install-transform dc (apply-transform state t))))])
      ;; remaining clauses are generated:
-
-     (define/record (transform [mi vector->immutable-vector]))
 
      (define/record (set-smoothing s))
 

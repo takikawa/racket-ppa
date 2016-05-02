@@ -341,12 +341,12 @@
     ;; ----------------------------------------
 
     (define/override (start-collect ds fns ci)
-      (map (lambda (d fn)
-             (parameterize ([current-output-file fn]
-                            [current-top-part d])
-               (collect-part d #f ci null 1)))
-           ds
-           fns))
+      (for-each (lambda (d fn)
+                  (parameterize ([current-output-file fn]
+                                 [current-top-part d])
+                    (collect-part d #f ci null 1 #hash())))
+                ds
+                fns))
 
     (define/public (part-whole-page? p ri)
       (let ([dest (resolve-get p ri (car (part-tags/nonempty p)))])
@@ -1346,7 +1346,7 @@
              (if (or indirect-link? dest)
                  `((a ([href
                       ,(cond
-                        [(and ext-id external-root-url
+                        [(and ext-id external-root-url dest
                               (let* ([ref-path (relative->path (dest-path dest))]
                                      [rel (if (relative-path? ref-path)
                                               #f
@@ -1378,7 +1378,7 @@
                          ;; Redirected to search:
                          (url->string*
                           (let ([u (string->url (or external-tag-path
-                                                    "http://doc.racket-lang.com/"))])
+                                                    (get-doc-search-url)))])
                             (struct-copy
                              url
                              u
@@ -1679,7 +1679,7 @@
                    (style->attribs (table-style t)
                                    (append
                                     (if starting-item?
-                                        '([style "display: inline-table; vertical-align: text-top;"])
+                                        '([style "display: inline-table; vertical-align: text-top; margin-top: 0;"])
                                         null)
                                     (if (for/or ([cell-styles (in-list cell-styless)])
                                           (for/or ([cell-style (in-list cell-styles)])
@@ -1906,14 +1906,14 @@
 
     (define/override (start-collect ds fns ci)
       (parameterize ([current-part-files (make-hash)])
-        (map (lambda (d fn)
-               (parameterize ([collecting-sub
-                               (if (part-style? d 'non-toc)
-                                   1
-                                   0)])
-                 (super start-collect (list d) (list fn) ci)))
-             ds
-             fns)))
+        (for-each (lambda (d fn)
+                    (parameterize ([collecting-sub
+                                    (if (part-style? d 'non-toc)
+                                        1
+                                        0)])
+                      (super start-collect (list d) (list fn) ci)))
+                  ds
+                  fns)))
 
     (define/private (check-duplicate-filename orig-s)
       (let ([s (string-downcase (path->string orig-s))])
@@ -1922,7 +1922,7 @@
                  orig-s))
         (hash-set! (current-part-files) s #t)))
 
-    (define/override (collect-part d parent ci number sub-init-number)
+    (define/override (collect-part d parent ci number sub-init-number sub-init-numberers)
       (let ([prev-sub (collecting-sub)])
         (parameterize ([collecting-sub (if (part-style? d 'toc)
                                            1 
@@ -1936,8 +1936,8 @@
                 (make-directory* (path-only full-filename))
                 (check-duplicate-filename full-filename)
                 (parameterize ([current-output-file full-filename])
-                  (super collect-part d parent ci number sub-init-number)))
-            (super collect-part d parent ci number sub-init-number)))))
+                  (super collect-part d parent ci number sub-init-number sub-init-numberers)))
+              (super collect-part d parent ci number sub-init-number sub-init-numberers)))))
 
     (define/override (render-top ds fns ri)
       (map (lambda (d fn)

@@ -20,8 +20,10 @@ library with the Racket @racket[read-eval-print-loop].
 
 @margin-note{Due to licensing issues, the @|readline| collection is by default
 backed by the Editline library.
-To switch to GNU's @|readline| library, install the @filepath{readline-gpl}
-package, which configures the @racket[readline] library to use @|readline|.}
+To switch to GNU's @|readline| library, either install the
+@filepath{readline-gpl} package, or set the @tt{PLT_READLINE_LIB} environment
+variable to the library, which configures the @racket[readline] collection to
+use @|readline|.}
 
 @section{Normal Use of @|Readline|}
 

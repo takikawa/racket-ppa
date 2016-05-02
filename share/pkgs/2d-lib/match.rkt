@@ -44,11 +44,21 @@
               (raise-syntax-error '2dmatch "cell at 0,0 must contain two expressions"
                                   (cell-stx-object (car cells))))
             (with-syntax ([(left-x right-x) (generate-temporaries rhses)]
-                          [(left-arg right-arg) rhses])
-              (set! let-bindings (list* #`[right-x right-arg]
-                                        #`[left-x left-arg]
+                          [(first-arg second-arg) rhses])
+              (define-values (col-arg row-arg)
+                (if (< (syntax-column #'first-arg)
+                       (syntax-column #'second-arg))
+                    ;; first argument is to the left of second, first is column
+                    (values #'first-arg #'second-arg)
+                    ;; otherwise, second argument is either aligned with first
+                    ;; (in which case it's below, otherwise it wouldn't be second)
+                    ;; or second is to the left of first
+                    ;; either way, second is column
+                    (values #'second-arg #'first-arg)))
+              (set! let-bindings (list* #`[row-x #,row-arg]
+                                        #`[col-x #,col-arg]
                                         let-bindings))
-              (set! main-args #'(left-x right-x)))]
+              (set! main-args #'(row-x col-x)))]
            [(on-boundary? cells)
             (unless (and rhses-lst (= 1 (length rhses-lst)))
               (raise-syntax-error '2dmatch 

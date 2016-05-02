@@ -1,7 +1,7 @@
 ; Do not remove all these blank lines, I use them to make sure a translation
 ; in this file appears on the same line as in english-string-constants.rkt
 
-; aâàbcçdeéêèëfghiîïjklmnoôpqrstuûùüvwxyz AÂÀBCÇDEÉÊÈËFGHIÎÏJKLMNOÔPQRSTUÛÙÜVWXYZ “” «  »
+; aâàbcçdeéêèëfghiîïjklmnoôpqrstuûùüvwxyz AÂÀBCÇDEÉÊÈËFGHIÎÏJKLMNOÔPQRSTUÛÙÜVWXYZ “” «  » …
 
 ; The following can be useful: http://www.jargonf.org/
 ;                              http://www.dicofr.com/
@@ -147,7 +147,7 @@
    "Voulez-vous abandonner ou sauvegarder ce rapport de bogue ?")
   (discard "Abandonner") ;; a button label for a dialog box with the above question
   (bug-report-form "Formulaire de soumission de bogue")
-  (bug-report-field-name "Nom")
+  (bug-report-field-name "Votre Nom")
   (bug-report-field-email "Email")
   (bug-report-field-summary "Résumé du problème")
   (bug-report-field-severity "Sévérité")
@@ -166,7 +166,7 @@
   (bug-report-show-synthesized-info "Montrer l'information synthétisée")
   (bug-report-submit "Soumettre")
   (close-and-save-bug-report "Fermer && Sauvegarder") ;; button in bug report dialog, next to cancel and bug-report-submit
-  (bug-report-submit-menu-item "Soumettre un rapport de bogue...") ;; in Help Menu (drs & help desk)
+  (bug-report-submit-menu-item "Soumettre un rapport de bogue…") ;; in Help Menu (drs & help desk)
   (saved-bug-reports-menu-item "Rapports de bogues sauvegardés") ;; in Help Menu, submenu title
   (disacard-all-saved-bug-reports "Abondonner tous les rapports de bogues sauvegardés") ;; menu item: only shows up when there is more than one saved bug report
   (no-saved-bug-reports "Aucun rapport de bogue n'a été sauvegardé") ;; an info message that shows up as a disabled menu item when no saved bug reports are around
@@ -193,6 +193,7 @@
   (cs-foreground-color "Couleur d'avant-plan")
   (cs-background-color "Couleur d'arrière-plan")
   (cs-tack/untack-arrow "Coller/décoller les flèches")
+  (cs-tack-crossing-arrows "Coller les flèches traversantes")
   (cs-jump-to-next-bound-occurrence "Aller à l'occurence suivante")
   (cs-jump-to-previous-bound-occurrence "Aller à l'occurence précédente")
   (cs-jump-to-binding "Aller à l'occurence liant celle-ci")
@@ -210,6 +211,7 @@
   (cs-status-eval-compile-time "Vérificateur de syntaxe : évaluation pour l'expansion") ; peut mieux faire?
   (cs-status-expanding-expression "Vérificateur de syntaxe : expansion d'une expression")
   (cs-status-loading-docs-index "Vérificateur de syntaxe : chargement de l'index de la documentation")
+  (cs-syncheck-running "Vérificateur de syntaxe en cours d'exécution")
   (cs-mouse-over-import "l'identificateur ~s est importé de ~s")
   (cs-view-docs "Documentation pour ~a")
   (cs-view-docs-from "~a dans ~a")  ;; a completed version of the line above
@@ -239,7 +241,7 @@
   (cs-mode-menu-show-syntax "Catégories syntaxiques")
 
   ;; the documentation blue boxes in the upper-right corner of the drracket window
-  (sc-read-more... "lire plus...")
+  (sc-read-more... "lire plus…")
   (sc-f2-to-un/lock "F2 pour (dé)verrouiller")
 
   ;; the online check syntax status messages (mouse over the bottom right of drracket's window to see the messages during online expansion's various phases)
@@ -252,7 +254,7 @@
   (jump-to-error "Aller à l'erreur")
   (online-expansion-is-disabled "L'expansion en arrière-plan est interdite")
   ; these next two show up in the bar along the bottom of the drracket window
-  (online-expansion-pending "Expansion en cours...")
+  (online-expansion-pending "Expansion en cours…")
   (online-expansion-finished "Expansion terminée") ;; note: there may still be errors in this case
   ; the next two show up in a menu when you click on the circle in the bottom right corner
   (disable-online-expansion "Interdire l'expansion en arrière-plan")
@@ -279,7 +281,7 @@
 
   (install-package-button "Installer ~a") ;; button label: ~a is filled with the name of a pkg
   (update-catalog "Mettre à jour le catalogue") ;; button label; shown when there is a missing module, but no matching package
-  (updating-catalog-from "Mise à jour à partir de ~a...") ;; message label; used as a status message when updating the pkg catalog
+  (updating-catalog-from "Mise à jour à partir de ~a…") ;; message label; used as a status message when updating the pkg catalog
 
   ;;; misc
   (welcome-to-something "Bienvenue dans ~a.")
@@ -315,7 +317,7 @@
   (clear-anyway "Effacer quand même")
 
   ;; menu item title
-  (log-definitions-and-interactions "Enregistrer les définitions et interactions...")
+  (log-definitions-and-interactions "Enregistrer les définitions et interactions…")
   (stop-logging "Stopper l'enregistrement")
   (please-choose-a-log-directory "Sélectionnez un répertoire d'enregistrement")
   (logging-to "Enregistrer dans : ")
@@ -359,9 +361,9 @@
 
 
   (url: "URL :")
-  (open-url... "Ouvrir l'URL...")
+  (open-url... "Ouvrir l'URL…")
   (open-url "Ouvrir l'URL")
-  (browse... "Naviguer...")
+  (browse... "Naviguer…")
   (bad-url "URL incorrect")
   (bad-url:this "URL incorrect : ~a")
 
@@ -389,9 +391,9 @@
   ; Help Desk configuration
   ;; refreshing manuals
   (plt:hd:refreshing-manuals "Retéléchargement des manuels")
-  (plt:hd:refresh-downloading... "Téléchargement de ~a...")
-  (plt:hd:refresh-deleting... "Effacement de l'ancienne version de ~a...")
-  (plt:hd:refresh-installing... "Installation de la nouvelle version de ~a...")
+  (plt:hd:refresh-downloading... "Téléchargement de ~a…")
+  (plt:hd:refresh-deleting... "Effacement de l'ancienne version de ~a…")
+  (plt:hd:refresh-installing... "Installation de la nouvelle version de ~a…")
   (plt:hd:refresh-clearing-indices "Effacement des indices cachés")
   (plt:hd:refreshing-manuals-finished "Terminé.")
   (plt:hd:about-help-desk "A propos de l'Aide")
@@ -440,9 +442,9 @@
   (forward-in-browser-history "Avancer")
   (home "Maison")
   (browser "Navigateur")
-  (choose-browser "Choisissez un navigateur")
   (external-browser-choice-title "Navigateur externe") ; title for radio-button set
   (browser-command-line-label "Ligne de commande :") ; label for radio button that is followed by text boxes
+  (choose-browser "Choisissez un navigateur")
   (no-browser "Demander plus tard")
   (browser-cmdline-expl-line-1 "(La ligne de commande est la concaténation du préfixe, de l'URL,") ; explanatory text for dialog, line 1
   (browser-cmdline-expl-line-2 "et du suffixe, sans espace additionel entre eux.)") ; ... line 2. (Anyone need more lines?)
@@ -455,11 +457,11 @@
   (save-downloaded-file/size "Sauvegarder le fichier téléchargé (~a octets) sous le nom") ;; label for get-file dialog
   (save-downloaded-file "Sauvegarder le fichier téléchargé sous le nom")  ;; label for get-file dialog
   (downloading "Téléchargement") ;; dialog title
-  (downloading-file... "Téléchargement du fichier en cours...")
+  (downloading-file... "Téléchargement du fichier en cours…")
   (package-was-installed "Le logiciel à été installé.")
   (download-was-saved "Le fichier téléchargé à été sauvegardé.")
 
-  (install-plt-file-menu-item... "Installer un fichier .plt...")
+  (install-plt-file-menu-item... "Installer un fichier .plt…")
   (install-plt-file-dialog-title "Installer un fichier .plt")
   (install-plt-web-tab "Web")
   (install-plt-file-tab "Fichier")
@@ -489,7 +491,7 @@
   (no "Non")
 
  ;; saving image (right click on an image to see the text)
-  (save-image "Sauvegarder l'image...")
+  (save-image "Sauvegarder l'image…")
 
   ;;; preferences
   (preferences "Préférences")
@@ -516,6 +518,7 @@
   (warnings-prefs-panel-label "Avertissements")
   (editor-prefs-panel-label "Edition")
   (general-prefs-panel-label "Général")
+  (editor-general-prefs-panel-label "Edition générale")
   (highlight-parens "Surligner les paires de parenthèses.")
   (fixup-open-brackets "Ajuster automatiquement les crochets ouvrants")
   (fixup-close-parens "Ajuster automatiquement les parenthèses fermantes")
@@ -559,7 +562,7 @@
   (background-color "Arrière-plan") ;; this is in the color section already, so shorten the name a little
   (default-text-color "Couleur du texte") ;; used for configuring colors, but doesn't need the word "color"
   (choose-a-background-color "Sélectionnez une couleur d'arrière-plan")
-  (revert-to-defaults "Retour aux valeurs par défaut")
+  (revert-to-defaults "Retour de toutes les préférences aux valeurs par défaut")
   (undo-changes "Fermer sans rien changer") ;; used in the preferences dialog to undo preference changes
 
   (color-schemes "Régime de couleurs") ;; the label in the preferences dialog for the color scheme panel
@@ -579,7 +582,7 @@
 
   (change-font-button-label "Changer")
   (fonts "Polices")
-  (other... "Autre...") ;; used in the font choice menu item
+  (other... "Autre…") ;; used in the font choice menu item
 
   ; filled with type of font, eg modern, swiss, etc.
   (choose-a-new-font "Sélectionnez une nouvelle police « ~a ».")
@@ -590,12 +593,17 @@
   (font-prefs-panel-title "Police")
   (font-name "Nom de la police")
   (font-size "Taille de la police")
-  (set-font "Appliquer la police...")
-  (font-smoothing-label  "Lissage de polices")
+  (set-font "Appliquer la police…")
+  (font-smoothing-label  "Lissage des polices")
   (font-smoothing-none "Aucune")
   (font-smoothing-some "Certaines")
   (font-smoothing-all "Toutes")
   (font-smoothing-default "Utiliser la configuration par défaut du système")
+  (font-weight-label "Graisse")
+  (font-weight-light "Légère")
+  (font-weight-normal "Normale")
+  (font-weight-bold "Grasse")
+
   (select-font-name "Sélectionnez une police")
   (example-text "Example de texte :")
   (only-warn-once "Prévenir une fois seulement quand exécutions et interactions n'ont pas été synchronisées.")
@@ -605,7 +613,7 @@
   (decrease-font-size "Diminuer la taille de la police (à ~a)")
   
   ; warning message when lockfile is around
-  (waiting-for-pref-lock "Attente sur le fichier de verrouillage des préférences...")
+  (waiting-for-pref-lock "Attente sur le fichier de verrouillage des préférences…")
   (pref-lock-not-gone
    "Les préférences sont verrouillées par le fichier :\n\n   ~a\n\nqui empêche les préférences d'être sauvegardées. Assurez-vous qu'aucun logiciel Racket n'est en cours d'exécution et effacer le fichier.")
   (still-locked-exit-anyway? "Les préférences n'ont pu être sauvegardées correctement. Quitter quand même ?")
@@ -654,10 +662,10 @@
   (undock "Détacher")
 
   ;;; multi-file-search
-  (mfs-multi-file-search-menu-item "Rechercher dans les fichiers...")
+  (mfs-multi-file-search-menu-item "Rechercher dans les fichiers…")
   (mfs-string-match/graphics "une chaîne de caractères (y compris dans les fichiers avec graphiques)")
   (mfs-regexp-match/no-graphics "une expression régulière (fichiers textuels seulement)")
-  (mfs-searching... "Recherche en cours...")
+  (mfs-searching... "Recherche en cours…")
   (mfs-configure-search "Configurer la recherche") ;; dialog title
   (mfs-files-section "Fichiers")   ;; section in config dialog
   (mfs-search-section "Rechercher") ;; section in config dialog
@@ -733,7 +741,7 @@
 
   (new-info  "Ouvrir un nouveau fichier.")
   (new-menu-item "&Nouvelle fenêtre")
-  (new-...-menu-item "&Nouvelle...")
+  (new-...-menu-item "&Nouvelle…")
 
   (open-info "Ouvrir un fichier à partir du disque dur.")
   (open-menu-item "&Ouvrir")
@@ -751,10 +759,10 @@
   (save-as-menu-item "Sauvegarder à")
 
   (print-info "Envoyer ce fichier à une imprimante.")
-  (print-menu-item "&Imprimer...")
+  (print-menu-item "&Imprimer…")
 
   (page-setup-info "Configurer les paramètres d'impression")
-  (page-setup-menu-item "Paramètres d'impression...")
+  (page-setup-menu-item "Paramètres d'impression…")
 
   (close-info "Fermer ce fichier.")
   (close-menu-item "&Fermer")
@@ -780,6 +788,7 @@
 
   (paste-info "Coller à la place des éléments sélectionnés les éléments qui ont été copiés ou coupés le plus récemment.")
   (paste-menu-item "C&oller")
+  (paste-and-indent-menu-item "Coller et indenter")
 
   (clear-info "Effacer les éléments sélectionnés sans modifier le porte-bloc ou le collage.")
   (clear-menu-item-windows "&Effacer")
@@ -811,7 +820,7 @@
   (find-case-sensitive-menu-item "Recherche sensible à la casse")
 
   (complete-word "Compléter le mot") ; the complete word menu item in the edit menu
-  (no-completions "... pas de complétion connue") ; shows up in the completions menu when there are no completions (in italics)
+  (no-completions "… pas de complétion connue") ; shows up in the completions menu when there are no completions (in italics)
 
   (overwrite-mode "Mode d'écrasement")
   (enable-overwrite-mode-keybindings "Raccourci clavier pour le mode d'écrasement")
@@ -819,7 +828,7 @@
   (enable-automatic-parens "Parenthèses automatiques") ; should "and square brackets and quotes" appear here?
 
   (preferences-info "Configurer vos préférences.")
-  (preferences-menu-item "Préférences...")
+  (preferences-menu-item "Préférences…")
 
   (keybindings-info "Montrer les raccourcis clavier actuellement actifs.")
   (keybindings-menu-item "Raccourcis clavier")
@@ -827,8 +836,8 @@
   (keybindings-frame-title "Raccourcis clavier")
   (keybindings-sort-by-name "Trier par nom")
   (keybindings-sort-by-key "Trier par raccourci")
-  (keybindings-add-user-defined-keybindings "Ajouter des raccourcis clavier...")
-  (keybindings-add-user-defined-keybindings/planet "Ajouter des raccourcis clavier à partir de PLaneT...")
+  (keybindings-add-user-defined-keybindings "Ajouter des raccourcis clavier…")
+  (keybindings-add-user-defined-keybindings/planet "Ajouter des raccourcis clavier à partir de PLaneT…")
   (keybindings-menu-remove "Enlever ~a")
   (keybindings-choose-user-defined-file "Sélectionnez un fichier contenant des raccourcis clavier.")
   (keybindings-planet-malformed-spec "Cette spécification de fichier PLaneT est malformée : ~a") ; the string will be what the user typed in
@@ -846,7 +855,7 @@
 
   ;; menu items in the "special" menu
   (insert-text-box-item "Insérer une boite texte")
-  (insert-image-item "Insérer une image...")
+  (insert-image-item "Insérer une image…")
   (insert-comment-box-menu-item-label "Insérer une boite à commentaires")
   (insert-lambda "Insérer un &Lambda")
 
@@ -858,7 +867,7 @@
   (minimize "Minimiser") ;; minimize and zoom are only used under mac os x
   (zoom "Agrandir") ; Zoomer?
   (bring-frame-to-front "Amener une fenêtre au premier plan")       ;;; title of dialog
-  (bring-frame-to-front... "Amener une fenêtre au premier plan...") ;;; corresponding title of menu item
+  (bring-frame-to-front... "Amener une fenêtre au premier plan…") ;;; corresponding title of menu item
   (most-recent-window "Fenêtre la plus récente")
   (next-tab "Onglet suivant")
   (prev-tab "Onglet précédent")
@@ -876,7 +885,7 @@
 
   (help-menu-label "&Aide")
   (about-info "Auteurs et détails concernant ce logiciel.")
-  (about-menu-item "A propos de ...")
+  (about-menu-item "A propos de …")
 
   ;; open here's new menu item
   (create-new-window-or-clear-current
@@ -970,6 +979,7 @@
   (sort-by-position "Trier par position dans le fichier")
   (no-definitions-found "« aucune définition trouvée »")
   (jump-to-defn "Aller à la définition de ~a")
+  (define-menu-configure "Configurer") ;; label of a submenu that configures the (define ...) popup menu
 
   (recent-items-sort-by-age "Trier par age")
   (recent-items-sort-by-name "Trier par nom")
@@ -991,16 +1001,16 @@
   (toolbar-hidden "Barre d'outils cachée")
 
   ;;; file menu
-  (save-definitions-as "Sauvegarder les définitions...")
+  (save-definitions-as "Sauvegarder les définitions…")
   (save-definitions "&Sauvegarder les définitions")
-  (print-definitions "&Imprimer les définitions...")
+  (print-definitions "&Imprimer les définitions…")
   (about-drscheme "A propos de DrRacket")
   (save-other "Sauvegarder autre")
-  (save-definitions-as-text "Sauvegarder les définitions au format texte...")
+  (save-definitions-as-text "Sauvegarder les définitions au format texte…")
   (save-interactions "Sauvegarder les interactions")
-  (save-interactions-as "Sauvegarder les interactions...")
-  (save-interactions-as-text "Sauvegarder les interactions au format texte...")
-  (print-interactions "Imprimer les interactions...")
+  (save-interactions-as "Sauvegarder les interactions…")
+  (save-interactions-as-text "Sauvegarder les interactions au format texte…")
+  (print-interactions "Imprimer les interactions…")
   (new-tab "Nouvel onglet")
   (close-tab "Fermer l'onglet")
   (close-tab-amp "Fermer l'onglet") ;; like close-tab, but with an ampersand on the same letter as the one in close-menu-item
@@ -1021,7 +1031,7 @@
   (ask-quit-menu-item-help-string "Utilise break-thread pour stopper la tâche principale de l'évaluation courante")
   (force-quit-menu-item-label "Forcer le programme à quitter")
   (force-quit-menu-item-help-string "Utilise custodian-shutdown-all pour terminer toute l'évaluation courante")
-  (limit-memory-menu-item-label "Limiter la mémoire...")
+  (limit-memory-menu-item-label "Limiter la mémoire…")
   (limit-memory-msg-1 "La limite prendra effet à la prochaine exécution du programme.")
   (limit-memory-msg-2 "Elle doit être d'au moins huit mégaoctets.")  ;; the minimum limit is now 8 megs
   (limit-memory-unlimited "Illimitée")
@@ -1048,7 +1058,7 @@
   (convert-to-semicolon-comment "Convertir en un commentaire avec points-virgules")
 
   ;;; executables
-  (create-executable-menu-item-label "Créer un exécutable...")
+  (create-executable-menu-item-label "Créer un exécutable…")
   (create-executable-title "Créer un exécutable")
   (drracket-creates-executables-only-in-some-languages
   "DrRacket ne supporte la création d'un exécutable que quand vous"
@@ -1089,11 +1099,11 @@
    "ATTENTION : le répertoire :\n\n  ~a\n\nva être remplacé. Voulez-vous continuer ?")
 
   (distribution-progress-window-title "Progrès de la distribution")
-  (creating-executable-progress-status "Création d'un exécutable pour la distribution...")
-  (assembling-distribution-files-progress-status "Rassemblement des fichiers pour la distribution...")
-  (packing-distribution-progress-status "Empaquetage de la distribution...")
+  (creating-executable-progress-status "Création d'un exécutable pour la distribution…")
+  (assembling-distribution-files-progress-status "Rassemblement des fichiers pour la distribution…")
+  (packing-distribution-progress-status "Empaquetage de la distribution…")
 
-  (create-servlet "Créer un servlet...") ;servlet = greffon, extension serveur?
+  (create-servlet "Créer un servlet…") ;servlet = greffon, extension serveur?
 
   ; the ~a is a language such as "module" or "algol60"
   (create-servlet-unsupported-language
@@ -1120,7 +1130,7 @@
   (insert-number/bad-whole-part "La partie entière du nombre doit être intégrale")
   (insert-number/bad-numerator "Le numérateur du nombre doit être un entier non-négatif")
   (insert-number/bad-denominator "Le dénominateur du nombre doit être un entier positif")
-  (insert-fraction-menu-item-label "Insérer une fraction...")
+  (insert-fraction-menu-item-label "Insérer une fraction…")
 
   ;; number snip popup menu
   (show-decimal-expansion "Montrer l'expansion décimale")
@@ -1133,18 +1143,18 @@
   (clear-teachpack "Enlever le teachpack ~a")
   (teachpack-error-label "DrRacket - erreur avec un teachpack.")
   (teachpack-didnt-load "Le fichier teachpack ~a n'a pas été correctement chargé.")
-  (add-teachpack-menu-item-label "Ajouter un teachpack...")
+  (add-teachpack-menu-item-label "Ajouter un teachpack…")
   (clear-all-teachpacks-menu-item-label "Enlever tous les teachpacks")
   (drscheme-teachpack-message-title "DrRacket teachpack")
   (already-added-teachpack "Le teachpack ~a a déjà été ajouté.")
 
   ; ~a is filled with the teachpack's name; the message appears in the teachpack selection dialog when a user installs a new teachpack
-  (compiling-teachpack "Compilation du teachpack ~a...")
+  (compiling-teachpack "Compilation du teachpack ~a…")
   (teachpack-pre-installed "Teachpacks préinstallés")
   (teachpack-pre-installed/htdp "Teachpacks HtDP préinstallés")
   (teachpack-pre-installed/2htdp "Teachpacks HtDP/2e préinstallés")
   (teachpack-user-installed "Teachpacks installés par l'utilisateur")
-  (add-teachpack-to-list... "Ajouter un teachpack à la liste...")
+  (add-teachpack-to-list... "Ajouter un teachpack à la liste…")
   ; first and second ~a are teachpack names, third is a symbol identifing an export
   (teachpack-conflict
    "Avertissement : le teachpack ~a déjà installé est en conflit avec ~a (le nom ~a est exporté par les deux)")
@@ -1165,6 +1175,9 @@
   (quasiquote-printing-style "Quasiquote")
   (write-printing-style "write")
   (print-printing-style "print")
+  (true-false-empty-style-label "Style pour les constantes")
+  (true-false-empty-style-read "#true #false '()")
+  (true-false-empty-style-ids "true false empty")
   (sharing-printing-label "Montrer le partage entre valeurs.")
   (use-pretty-printer-label "Insérer des retours-chariots lors de l'impression des résultats.")
   (input-syntax "Syntaxe d'entrée")
@@ -1178,7 +1191,7 @@
   (test-coverage "Couverture syntaxique de vos tests")
   (show-details-button-label "Montrer les détails")
   (hide-details-button-label "Cacher les détails")
-  (choose-language-menu-item-label "Sélectionner le langage...")
+  (choose-language-menu-item-label "Sélectionner le langage…")
   (revert-to-language-defaults "Retourner aux valeurs par défaut pour le langage.")
   (fraction-style "Style de fractions")
   (use-mixed-fractions "Fractions mêlées")
@@ -1192,7 +1205,7 @@
   (expression-level-stacktrace "Traçage de la pile au niveau des expressions")
   (function-level-stacktrace "Traçage de la pile au niveau des fonctions")
   (submodules-to-run "Sous-modules à exécuter")
-  (add-submodule "Ajouter une option de sous-module...") ;; menu item
+  (add-submodule "Ajouter une option de sous-module…") ;; menu item
   (add-submodule-title "Ajouter Un Sous-module") ;; title of dialog opened by above menu item
 
 
@@ -1244,7 +1257,7 @@
   ;; language dialog with a list
   ;; of example languages appearing between them
   (racket-language-discussion "Utilisez #lang en début de programme pour spécifier le dialecte à utiliser.  Par example :\n\n")
-  (racket-language-discussion-end "\n... et bien d'autres")
+  (racket-language-discussion-end "\n… et bien d'autres")
 
   ;; the next three string constants are put into a message-box dialog
   ;; that appears when the user clicks on the example #lang languages
@@ -1284,7 +1297,7 @@
 
   ; the three string constants are concatenated together and the middle
   ; one is hyperlinked to the dialog that suggests various languages
-  (get-guidance-before "Choisissez l'entrée « Sélectionner le langage... » dans le menu « Langage », ou ")
+  (get-guidance-before "Choisissez l'entrée « Sélectionner le langage… » dans le menu « Langage », ou ")
   (get-guidance-during "recevez de l'aide")
   (get-guidance-after ".")
 
@@ -1374,7 +1387,7 @@
   (kill? "Tuer ?")
 
   ;;; version checker
-  (version:update-menu-item "Rechercher des mises à jour...")
+  (version:update-menu-item "Rechercher des mises à jour…")
   (version:update-check "Recherche de mises à jour") ; dialog title, with the next line
   (version:connecting-server  "Connection au serveur de version Racket")
   (version:results-title      "Vérification de la version")
@@ -1390,7 +1403,7 @@
   (insert-menu "&Insérer")
 
   ;; large semi colon letters
-  (insert-large-letters... "Insérer de grandes lettres...")
+  (insert-large-letters... "Insérer de grandes lettres…")
   (large-semicolon-letters "Grandes lettres en points-virgules")
   (text-to-insert "Texte à insérer")
 
@@ -1398,19 +1411,19 @@
   (module-browser-root-filename "Nom de fichier de la racine : ~a")
   (module-browser-font-size-gauge-label "Taille de la police")
   (module-browser-progress-label "Avancement du navigateur de modules")
-  (module-browser-adding-file "Ajout du fichier : ~a...")
+  (module-browser-adding-file "Ajout du fichier : ~a…")
   (module-browser-laying-out-graph-label "Tracer le graphe")
   (module-browser-open-file-format "Ouvrir ~a")
   (module-browser "Navigateur de modules") ;; frame title
-  (module-browser... "Navigateur de &modules...") ;; menu item title
+  (module-browser... "Navigateur de &modules…") ;; menu item title
   (module-browser-in-file "Navigateur de m&odules pour ~a") ;; menu item title; ~a is filled with a filename
   (module-browser-no-file "Navigateur de modules pour ce fichier") ;; menu item title for above menu item; used when there is no saved file
   (module-browser-error-expanding "Erreur durant l'expansion du programme :\n\n~a")
   (module-browser-show-lib-paths "Montrer les fichiers chargés à l'aide de chemins de fichiers du type (lib ..)")
   (module-browser-progress "Navigateur de modules : ~a") ;; prefix in the status line
   (module-browser-compiling-defns "Navigateur de modules : compilation des définitions")
-  (module-browser-show-lib-paths/short "(require (lib ...))") ;; check box label in show module browser pane in drscheme window.
-  (module-browser-show-planet-paths/short "(require (planet ...))") ;; check box label in show module browser pane in drscheme window.
+  (module-browser-show-lib-paths/short "(require (lib …))") ;; check box label in show module browser pane in drscheme window.
+  (module-browser-show-planet-paths/short "(require (planet …))") ;; check box label in show module browser pane in drscheme window.
   (module-browser-refresh "Rafraîchir") ;; button label in show module browser pane in drscheme window.
   (module-browser-highlight "Chercher") ;; used to search in the graph; the label on a text-field% object
   (module-browser-only-in-plt-and-module-langs
@@ -1480,7 +1493,7 @@
 
   (stepper-previous "Pas")
   (stepper-next "Pas")
-  (stepper-jump "Sauter...")
+  (stepper-jump "Sauter…")
   (stepper-jump-to-beginning "au début")
   (stepper-jump-to-end "à la fin")
   (stepper-jump-to-selected "au début de la sélection")
@@ -1766,10 +1779,10 @@
   (bug-track-forget-all "Oublier tous")
 
   ;; planet status messages in the bottom of the drscheme window; the ~a is filled with the name of the package
-  (planet-downloading "PLaneT: téléchargement de ~a...")
-  (planet-installing "PLaneT: installation de ~a...")
+  (planet-downloading "PLaneT: téléchargement de ~a…")
+  (planet-installing "PLaneT: installation de ~a…")
   (planet-finished "PLaneT: ~a à jour.")
-  (planet-docs-building "PLaneT: compilation des docs (déclenché par ~a)...")
+  (planet-docs-building "PLaneT: compilation des docs (déclenché par ~a)…")
   (planet-no-status "PLaneT") ;; this can happen when there is status shown in a different and then the user switches to a tab where planet hasn't been used
 
   (bug-report-field-pkg "Information système du logiciel") ; package -> paquetage, bibliothèque ?
@@ -1806,7 +1819,7 @@
   ; is put following this string (with a blank line in between)
   (spell-program-wrote-to-stderr-on-startup "Le programme de vérification orthographique (~a) à émit un message d'erreur :")
   (spell-skip-to-next-misspelled-word "Sauter au mot incorrect suivant") ;; menu item
-  (spell-suggest-corrections "Suggérer de possibles corrections...") ;; menu item
+  (spell-suggest-corrections "Suggérer de possibles corrections…") ;; menu item
   (spell-correction-suggestions "Suggestions de corrections") ;; dialog title
   (spell-choose-replacement-word "Sélectionner un mot de remplacement") ;; label in dialog 
 
@@ -1816,7 +1829,7 @@
   (install-pkg-install-installed "Actuellement installé")    ; tab label
   (install-pkg-migrate-from "Copier de la version")           ; tab label
   (install-pkg-settings "Configuration")                        ; tab label
-  (install-pkg-menu-item... "Installer un paquetage...")
+  (install-pkg-menu-item... "Installer un paquetage…")
   (install-pkg-dialog-title "Installation de paquetage")
   (install-pkg-source-label "Source du paquetage")
   (install-pkg-package-name "Nom du paquetage")
@@ -1875,7 +1888,7 @@
   (install-pkg-close-terminal-output "Fermer la sortie de données")
   (install-pkg-show-all-options "Montrer toutes les options")
   (install-pkg-migrate-available-installations "Installations disponibles")
-  (pkg-manager-menu-item "Gestionnaire de paquetages...")  
+  (pkg-manager-menu-item "Gestionnaire de paquetages…")  
   ;; where ~a gets an installation name:
   (install-pkg-packages-for "Paquetages pour ~a")
   (install-pkg-really-remove-installation "Êtes-vous sûr de vouloir supprimer tous les paquetages installés et toutes les informations pour ~a ?")
@@ -1902,7 +1915,7 @@
                             " abandonnez l'installation ou la mise à jour actuelle, ou attendez-en la fin.")
   
   ;; open a file via a collection path (new "Open" menu item in DrRacket)
-  (open-require-path "Ouvrir un chemin pour « require »...")
+  (open-require-path "Ouvrir un chemin pour « require »…")
   (enter-subcollection "Spécifier une sous-collection") ; button in new dialog
   (path-to-racket-binary "Chemin de répertoires vers le fichier binaire")
   (use-a-different-racket "Utiliser une version de racket différente")
@@ -1923,5 +1936,5 @@
    " PATH par défaut a été configuré pour tous les utilisateurs en ajoutant le fichier"
    " ~a, pour pointer vers ~a. Voud pouvez annuler ce"
    " changement en supprimant ~a.")
-  (add-racket/bin-to-path "Configurer la ligne de commande pour racket...") ;; menu item label
-  ); aâàbcçdeéêèëfghiîïjklmnoôpqrstuûùüvwxyz AÂÀBCÇDEÉÊÈËFGHIÎÏJKLMNOÔPQRSTUÛÙÜVWXYZ “” «  »
+  (add-racket/bin-to-path "Configurer la ligne de commande pour racket…") ;; menu item label
+  ); aâàbcçdeéêèëfghiîïjklmnoôpqrstuûùüvwxyz AÂÀBCÇDEÉÊÈËFGHIÎÏJKLMNOÔPQRSTUÛÙÜVWXYZ “” «  » …

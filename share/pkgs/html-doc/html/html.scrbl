@@ -9,8 +9,12 @@
 
 @title{HTML: Parsing Library}
 
-@defmodule[html]{The @racketmodname[html] library provides
-functions to read html documents and structures to represent them.}
+@defmodule[html]{The @racketmodname[html] library provides functions
+to read conformant HTML4 documents and structures to represent
+them. Since @racketmodname[html] assumes documents are conformant and
+is restricted to the older specific, it should be viewed as a legacy
+library. We suggest using the @code{html-parsing} package for modern
+Web scraping.}
 
 
 @deftogether[(

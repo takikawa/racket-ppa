@@ -493,15 +493,18 @@
              (if (header-skip-content? header)
                  #f
                  ;; Load a manager for this snip class?
-                 (let ([lib (string->lib-path (bytes->string/latin-1 name) #f)])
-                   (if lib
-                       (let ([mgr (dynamic-require lib 'reader)])
-                         (unless (mgr . is-a? . snip-reader<%>)
-                           (error who "reader provided by ~s is not an instance of snip-reader<%>" lib))
-                         mgr)
+                 (let ([lib-or-reason (string->lib-path/reason (bytes->string/latin-1 name) #f)])
+                   (if (string? lib-or-reason)
                        (if (header-skip-unknown? header)
                            #f
-                           (error who "cannot load snip-class reader: ~s" name)))))]))))
+                           (error who "cannot load snip-class reader, ~a: ~s"
+                                  lib-or-reason
+                                  name))
+                       (let ([mgr (dynamic-require lib-or-reason 'reader)])
+                         (unless (mgr . is-a? . snip-reader<%>)
+                           (error who "reader provided by ~s is not an instance of snip-reader<%>"
+                                  lib-or-reason))
+                         mgr))))]))))
       class))
 
   (define (find-data-class pos header who port vers used?)
@@ -582,6 +585,7 @@
       (error 'register-lib-mapping! "given target is not a valid marshalable lib path: ~s" target))
     (hash-table-put! lib-mapping str target))
 
+  #;
   (define (string->lib-path str gui?)
     (or (let ([m (and (regexp-match #rx"^[(].*[)]$" str)
                       (let* ([p (open-input-string str)]
@@ -601,6 +605,50 @@
         (and (not gui?)
              (hash-table-get lib-mapping str #f))))
 
+  (define (string->lib-path str gui?)
+    (define r (string->lib-path/reason str gui?))
+    (cond
+      [(string? r) #f]
+      [else r]))
+
+  (define (string->lib-path/reason str gui?)
+    (define name-as-sexp
+      (cond
+        [(regexp-match? #rx"^[(].*[)]$" str)
+         (let* ([p (open-input-string str)]
+                [m (with-handlers ([exn:fail:read? (λ (x) #f)])
+                     (read p))])
+           (and (eof-object? (read p))
+                m))]
+        [else #f]))
+    (define two-valid-items-in-name?
+      (and (list? name-as-sexp)
+           (= (length name-as-sexp) 2)
+           (ok-lib-path? (car name-as-sexp))
+           (ok-lib-path? (cadr name-as-sexp))))
+    (cond
+      [gui?
+       (cond
+         [two-valid-items-in-name?
+          (car name-as-sexp)]
+         [(ok-lib-path? name-as-sexp)
+          name-as-sexp]
+         [else
+          "could not parse name of snipclass"])]
+      [else
+       (cond
+         [two-valid-items-in-name?
+          (cadr name-as-sexp)]
+         [else
+          (define lib-mapping-result (hash-table-get lib-mapping str #f))
+          (cond
+            [lib-mapping-result lib-mapping-result]
+            [(ok-lib-path? name-as-sexp)
+             "snipclass name has only one library path, but text mode requested"]
+            [else
+             "could not parse snipclass name as a library path and name is not in the mapping table"])])]))
+             
+  
   (register-compatibility-mappings! register-lib-mapping!)
 
   ;; ----------------------------------------

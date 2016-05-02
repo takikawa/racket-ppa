@@ -5,6 +5,7 @@
                      syntax/boundmap
                      syntax/parse
                      racket/syntax
+                     racket/match
                      (only-in racket/list flatten)
                      "keyword-macros.rkt"
                      "matcher.rkt")
@@ -233,7 +234,22 @@
       [x
        (and (identifier? (syntax x))
             (check-id (syntax->datum #'x) stx ellipsis-allowed? #f))
-       (values stx 0)]
+       (values
+        (match (symbol->string (syntax-e #'x))
+          [(regexp #rx"^(.+)«([0-9]+)»$" (list _ base-name index))
+           (datum->syntax
+            stx (string->symbol (string-append base-name "«" index "☺»")) stx)]
+          [(regexp #rx"^(.+)«([0-9]+)([☺☹]+)»$" (list _ base-name index smiley-number))
+           (datum->syntax
+            stx
+            (string->symbol (string-append base-name
+                                           "«"
+                                           index
+                                           (to-smiley-number (+ 1 (from-smiley-number smiley-number)))
+                                           "»"))
+            stx)]
+          [_ stx])
+        0)]
       [() (values stx 0)]
       [(x ... . y)
        (not (null? (syntax->list #'(x ...))))
@@ -257,7 +273,7 @@
          (values (datum->syntax stx x-rewrite stx stx) max-depth))]
       
       [_ (values stx 0)]))
-  
+
   (define (check-id id stx ellipsis-allowed? term-id?)
     (define m (regexp-match #rx"^([^_]*)_" (symbol->string id)))
     (cond
@@ -419,7 +435,7 @@
                              stx
                              #'error-name))
        (define-values (orig-names new-names depths new-x1)
-         (let loop ([stx #'x1] [depth 0])
+         (let loop ([stx #'x1] [depth 0] [seen-an-ellipsis-at-this-depth? #f])
            (define ((combine orig-names new-names depths new-pat)
                     orig-names* new-names* depths* new-pat*)
              (values (append orig-names orig-names*)
@@ -438,17 +454,21 @@
              [(x (... ...) . xs)
               (let-values ([(orig-names new-names depths new-pat)
                             (call-with-values
-                             (λ () (loop #'xs depth))
+                             (λ () (loop #'xs depth #t))
                              (call-with-values
-                              (λ () (loop #'x (add1 depth)))
+                              (λ () (loop #'x (add1 depth) #f))
                               combine))])
+                (when seen-an-ellipsis-at-this-depth?
+                  (raise-syntax-error (syntax-e #'error-name)
+                                      "only one ellipsis is allowed in each sequence"
+                                      (cadr (syntax->list stx))))
                 (values orig-names new-names depths 
                         (list* (car new-pat) #'(... ...) (cdr new-pat))))]
              [(x . xs)
               (call-with-values
-               (λ () (loop #'xs depth))
+               (λ () (loop #'xs depth seen-an-ellipsis-at-this-depth?))
                (call-with-values
-                (λ () (loop #'x depth))
+                (λ () (loop #'x depth #f))
                 combine))]
              [_
               (values '() '() '() stx)])))

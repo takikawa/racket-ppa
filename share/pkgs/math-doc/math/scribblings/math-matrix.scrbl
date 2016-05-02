@@ -50,8 +50,6 @@ Possibly the most useful unimplemented algorithms are
           @item{Eigendecomposition}
           @item{Decomposition-based solvers}
           @item{Pseudoinverse and least-squares solving}]
-All of these are planned for the next Racket release, as well as fast flonum-specific matrix
-operations and LAPACK integration.
 
 @local-table-of-contents[]
 
@@ -560,6 +558,7 @@ Like @racket[matrix-map-rows], but maps @racket[f] over columns.
 @section[#:tag "matrix:basic"]{Basic Operations}
 
 @defproc[(matrix-conjugate [M (Matrix Number)]) (Matrix Number)]{
+@margin-note*{Wikipedia: @hyperlink["https://en.wikipedia.org/wiki/Complex_conjugate"]{Conjugate}}
 Returns a matrix where each entry of the given matrix is conjugated.
 @examples[#:eval untyped-eval
                  (matrix-conjugate (matrix ([1 +i] [-1 2+i])))]

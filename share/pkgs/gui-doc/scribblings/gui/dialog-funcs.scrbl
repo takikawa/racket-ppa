@@ -58,7 +58,9 @@ On Windows and Unix, @racket[filters] determines a set of filters from
  @racket[filters] list contains two strings: a description of the filter
  as seen by the user, and a filter pattern matched against file names.
  Pattern strings can be a simple ``glob'' pattern, or a number of glob
- patterns separated by a @litchar[";"] character.
+ patterns separated by a @litchar[";"] character. These patterns are not
+ regular expressions and can only be used with a @litchar["*"] wildcard
+ character.  For example, @racket["*.jp*g;*.png"].
  On Unix, a @racket["*.*"] pattern is implicitly replaced with @racket["*"].
  On Mac OS X, suffix names are extracted from all globs that match a
  fixed suffix (e.g., two suffixes of @racket["foo"] and @racket["bar"]
@@ -84,7 +86,7 @@ See also @racket[path-dialog%] for a richer interface.
          (or/c (listof path?) #f)]{
 Like
 @racket[get-file], except that the user can select multiple files, and the
- result is either a list of file paths of @racket[#f].
+ result is either a list of file paths or @racket[#f].
 
 }
 
@@ -118,11 +120,11 @@ If @racket[directory] is not @racket[#f], it is used as the starting
  prefix.
 
 On Windows, if @racket[extension] is not @racket[#f], the returned path
- will get a default extension if the user does not supply one. If
- @racket[extension] is the empty string, then the extension is derived
+ will get a default extension if the user does not supply one. The extension is derived
  from the user's @racket[filters] choice if the corresponding pattern is
- of the form @racket[(string-append "*." extension)]; if the pattern is
- @racket["*.*"], then no default extension is added. Finally, if
+ of the form @racket[(string-append "*." _an-extension)], and the first such
+ pattern is used if the choice has multiple patterns. If the user's choice has the pattern
+ @racket["*.*"] and @racket[extension] is the empty string, then no default extension is added. Finally, if
  @racket[extension] is any string other than the empty string,
  @racket[extension] is used as the default extension when the user's
  @racket[filters] choice has the pattern @racket["*.*"].  Meanwhile, the

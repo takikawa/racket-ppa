@@ -11,6 +11,7 @@ Based on protocol documentation here:
          "../../util/private/geometry.rkt")
 (provide write-packet
          parse-packet
+         MAX-PAYLOAD
 
          packet?
          (struct-out handshake-packet)
@@ -34,6 +35,12 @@ Based on protocol documentation here:
          (struct-out fetch-packet)
          (struct-out unknown-packet)
 
+         length-code->bytes
+         binary-datum-size
+
+         LAST-ROW-SENT-BIT
+         MORE-RESULTS-EXIST-BIT
+
          supported-result-typeid?
          parse-field-dvec
          field-dvec->name
@@ -41,10 +48,10 @@ Based on protocol documentation here:
          field-dvec->flags
          field-dvec->field-info)
 
-;; MAX-PACKET-SIZE is the largest packet that the MySQL protocol can
+;; MAX-PAYLOAD is the largest packet that the MySQL protocol can
 ;; transmit. Longer data row "packets" can be split into multiple actual
 ;; packets (see comments on data rows, below).
-(define MAX-PACKET-SIZE (sub1 (expt 2 24)))
+(define MAX-PAYLOAD (sub1 (expt 2 24)))
 
 #|
 Note: There is also a max_allowed_packet server variable (and client connection
@@ -99,9 +106,6 @@ computed string on the server can be. See also:
         [(<= n #xFFFFFF)
          (io:write-byte port 253)
          (io:write-le-int24 port n)]
-        [(<= n #xFFFFFFFF)
-         (io:write-byte port 253)
-         (io:write-le-int32 port n)]
         [else
          (io:write-byte port 254)
          (io:write-le-int64 port n)]))
@@ -112,6 +116,11 @@ computed string on the server can be. See also:
 
 (define (io:write-length-coded-string port s)
   (io:write-length-coded-bytes port (string->bytes/utf-8 s)))
+
+(define (length-code->bytes n)
+  (define out (open-output-bytes))
+  (io:write-length-code out n)
+  (get-output-bytes out))
 
 ;; READING
 
@@ -130,8 +139,11 @@ computed string on the server can be. See also:
 (define (io:read-null-terminated-string port)
   (bytes->string/utf-8 (io:read-null-terminated-bytes port)))
 
-(define (io:read-byte port)
-  (read-byte port))
+(define (io:read-byte port [signed? #f])
+  (cond [signed?
+         (let ([b (read-byte port)])
+           (if (>= b 128) (- b 256) b))]
+        [else (read-byte port)]))
 
 (define (io:read-bytes-as-bytes port n)
   (read-bytes n port))
@@ -325,14 +337,27 @@ computed string on the server can be. See also:
    contents)
   #:transparent)
 
+;; write-packet : Output-Port Packet Nat -> Nat
+;; Returns next packet number (currently ignored)
+;; Notes on fragmentation:
+;; - fragmenting execute packet seems NOT to work
+;; - fragmenting long-data packet WORKS
 (define (write-packet out p number)
-  (let ([o (open-output-bytes)])
-    (write-packet* o p)
-    (let ([b (get-output-bytes o)])
-      #| (printf "writing packet #~s, length ~s\n" number (bytes-length b)) |#
-      (io:write-le-int24 out (bytes-length b))
-      (io:write-byte out number)
-      (io:write-bytes out b))))
+  (define o (open-output-bytes))
+  (write-packet* o p)
+  (define b (get-output-bytes o))
+  (define blen (bytes-length b))
+  (let loop ([start 0] [number number])
+    (define end (min blen (+ start MAX-PAYLOAD)))
+    ;;(eprintf "@ #~a   blen = ~s, start = ~s, end = ~s, end-start = ~s = ~a\n"
+    ;;         number blen start end (- end start) (number->string (- end start) 16))
+    (io:write-le-int24 out (- end start))
+    (io:write-byte out number)
+    (write-bytes b out start end)
+    (cond [(< (- end start) MAX-PAYLOAD)
+           ;; Note: if (- end start) = MAX-PAYLOAD, need to send a final empty packet.
+           (add1 number)]
+          [else (loop end (add1 number))])))
 
 (define (write-packet* out p)
   (match p
@@ -375,20 +400,14 @@ computed string on the server can be. See also:
                        (null-map-length null-map)
                        (null-map->integer null-map))
      (io:write-byte out 1) ;; first? = 1
-     (let ([param-types (map choose-param-type params)])
-       (for-each (lambda (pt) (io:write-le-int16 out (encode-type pt)))
-                 param-types)
-       (for-each (lambda (type param)
-                   (cond [(sql-null? param) (void)]
-                         [(eq? param 'long-string) (void)]
-                         [(eq? param 'long-binary) (void)]
-                         [else (write-binary-datum out type param)]))
-                 param-types params))]
+     (for ([type+param (in-list params)])
+       (io:write-le-int16 out (encode-type (car type+param))))
+     (for ([type+param (in-list params)])
+       (write-binary-datum out (car type+param) (cdr type+param)))]
     [(struct fetch-packet (statement-id count))
      (io:write-byte out (encode-command 'statement-fetch))
      (io:write-le-int32 out statement-id)
      (io:write-le-int32 out count)]))
-
 
 ;; ----
 
@@ -622,7 +641,7 @@ computed string on the server can be. See also:
                   (let loop ([len len] [ins null])
                     ;; A data row is sent as zero or more packets of max length (2^24-1)
                     ;; followed by one packet of less than max length.
-                    (cond [(= len MAX-PACKET-SIZE) ;; maximum packet length
+                    (cond [(= len MAX-PAYLOAD) ;; maximum packet length
                            (let* ([next-len (io:read-le-int24 real-in)]
                                   [next-num (io:read-byte real-in)]
                                   [next-bs (read-bytes next-len real-in)]
@@ -663,9 +682,9 @@ computed string on the server can be. See also:
 
   (case type
 
-    ((tiny) (io:read-byte in)) ;; FIXME signed/unsigned
+    ((tiny) (io:read-byte in (not (memq 'unsigned flags))))
     ((short) (io:read-le-int16 in (not (memq 'unsigned flags))))
-    ((int24) (io:read-le-int24 in)) ;; FIXME signed/unsigned
+    ((int24) (io:read-le-int32 in (not (memq 'unsigned flags)))) ;; yes, int24 sent in 32 bits
     ((long) (io:read-le-int32 in (not (memq 'unsigned flags))))
     ((longlong) (io:read-le-int64 in (not (memq 'unsigned flags))))
     ((varchar string var-string blob tiny-blob medium-blob long-blob)
@@ -772,45 +791,43 @@ computed string on the server can be. See also:
     ((null) #t)
     (else #f)))
 
-(define (choose-param-type param)
-  (cond [(or (string? param)
-             (sql-null? param)
-             (eq? param 'long-string))
-         'var-string]
-        [(int64? param)
-         'longlong]
-        [(rational? param)
-         'double]
-        [(sql-date? param)
-         'date]
-        [(sql-timestamp? param)
-         'timestamp]
-        [(or (sql-time? param) (sql-day-time-interval? param))
-         'time]
-        [(or (bytes? param)
-             (eq? param 'long-binary))
-         'blob]
-        [(sql-bits? param)
-         'bit]
-        [(geometry2d? param)
-         'geometry]
-        [else
-         (error/internal* 'choose-param-type "bad parameter value"
-                          '("value" value) param)]))
+;; upper bound on space parameter value takes in execute-packet
+(define (binary-datum-size type param)
+  (+ 2 ;; length of type code
+     1 ;; for space in null bitmap
+     (case type
+       [(null) 0]
+       [(var-string blob json geometry bit)
+        (length-coded-length (bytes-length param))]
+       [(longlong double)
+        8]
+       [(date)
+        (length-coded-length 4)]
+       [(timestamp time)
+        (length-coded-length 12)])))
+
+(define (length-coded-length n)
+  (+ n (cond [(<= n 250) 1] [(<= n #xFFFF) 3] [(<= n #xFFFFFF) 4] [else 9])))
 
 (define (write-binary-datum out type param)
   (case type
-    ((var-string)
-     (io:write-length-coded-string out param))
-    ((longlong) (io:write-le-int64 out param #t))
-    ((double)
-     (io:write-bytes out (real->floating-point-bytes (exact->inexact param) 8)))
-    ((date)
+    ;; Null: send nothing
+    [(null) (void)]
+    ;; Variable-length
+    [(var-string blob geometry bit)
+     ;; param is bytes or #f, where #f means sent as long data (don't send now)
+     (when param (io:write-length-coded-bytes out param))]
+    ;; Fixed-size cases
+    [(longlong)
+     (io:write-le-int64 out param #t)]
+    [(double)
+     (io:write-bytes out (real->floating-point-bytes (exact->inexact param) 8))]
+    [(date)
      (let ([bs (bytes-append (integer->integer-bytes (sql-date-year param) 2 #t #f)
                              (bytes (sql-date-month param))
                              (bytes (sql-date-day param)))])
-       (io:write-length-coded-bytes out bs)))
-    ((timestamp)
+       (io:write-length-coded-bytes out bs))]
+    [(timestamp)
      (let ([bs (bytes-append (integer->integer-bytes (sql-timestamp-year param) 2 #t #f)
                              (bytes (sql-timestamp-month param))
                              (bytes (sql-timestamp-day param))
@@ -820,8 +837,8 @@ computed string on the server can be. See also:
                              (integer->integer-bytes
                               (quotient (sql-timestamp-nanosecond param) 1000)
                               4 #t #f))])
-       (io:write-length-coded-bytes out bs)))
-    ((time)
+       (io:write-length-coded-bytes out bs))]
+    [(time)
      (let* ([param (if (sql-time? param) (sql-time->sql-interval param) param)]
             [days (sql-interval-days param)]
             [hours (sql-interval-hours param)]
@@ -837,18 +854,7 @@ computed string on the server can be. See also:
                               (integer->integer-bytes
                                (quotient (abs nanoseconds) 1000)
                                4 #t #f))])
-       (io:write-length-coded-bytes out bs)))
-    ((blob)
-     (io:write-length-coded-bytes out param))
-    ((bit)
-     (let-values ([(len bv start) (align-sql-bits param 'right)])
-       (io:write-length-code out (- (bytes-length bv) start))
-       (write-bytes bv out start)))
-
-    ((geometry)
-     (io:write-length-coded-bytes
-      out
-      (geometry->bytes 'mysql-geometry->bytes param #:big-endian? #f #:srid? #t)))))
+       (io:write-length-coded-bytes out bs))]))
 
 ;; ----
 
@@ -894,16 +900,28 @@ computed string on the server can be. See also:
     (#x8000  . secure-connection)
     (#x10000 . multi-statements)
     (#x20000 . multi-results)
-    (#x40000 . ps-multi-statements) ;; ???
-    (#x80000 . plugin-auth)))
+    (#x40000 . ps-multi-results) ;; ???
+    (#x80000 . plugin-auth)
+    (#x100000 . connect-attrs)
+    (#x200000 . client-plugin-auth-lenenc-client-data)
+    (#x400000 . client-can-handle-expired-passwords)
+    (#x800000 . client-session-track)
+    (#x1000000 . client-deprecate-eof)))
 (define server-flags/encoding
   (invert-alist server-flags/decoding))
 
 (define server-status-flags/decoding
   '((#x1     . in-transaction)
     (#x2     . auto-commit)
-    (64      . cursor-exists)
-    (128     . last-row-sent)))
+    (#x8     . more-results-exist)
+    (#x40    . cursor-exists)
+    (#x80    . last-row-sent)
+    (#x1000  . ps-out-params)
+    (#x2000  . in-transaction-readonly)
+    (#x4000  . session-state-changed)))
+
+(define LAST-ROW-SENT-BIT 7)
+(define MORE-RESULTS-EXIST-BIT 3)
 
 (define commands/decoding
   '((#x00 . sleep)

@@ -21,7 +21,8 @@
               do-backing-flush)
  display-bitmap-resolution
  make-screen-bitmap
- make-window-bitmap)
+ make-window-bitmap
+ NSOpenGLCPSwapInterval)
 
 (import-class NSOpenGLContext NSScreen NSGraphicsContext NSWindow)
 
@@ -31,43 +32,42 @@
   (class backing-dc%
     (init [(cnvs canvas)]
           transparent?)
-    (define canvas cnvs)
 
-    (inherit end-delay)
+    (define canvas cnvs)
+    (define gl #f)
+    (define trans? transparent?)
+
+    (inherit end-delay internal-get-bitmap internal-copy)
     (super-new [transparent? transparent?])
 
-    (define gl #f)
     (define/override (get-gl-context)
       (and (send canvas can-gl?)
            (let ([gl-ctx (tell (send canvas get-cocoa-content) openGLContext)])
              (or gl
-                 (let ([g (new (class gl-context%
-                                 (define/override (get-handle) gl-ctx)
-                                 (define/override (do-call-as-current t)
-                                   (dynamic-wind
-                                       (lambda () (tellv gl-ctx makeCurrentContext))
-                                       t
-                                       (lambda () (tellv NSOpenGLContext clearCurrentContext))))
-                                 (define/override (do-swap-buffers)
-                                   (tellv gl-ctx flushBuffer))
-                                 (super-new)))])
-                   ;; Disable screen sync for GL flushBuffer; otherwise,
+                 (let ([g (new dc-gl-context% [gl-ctx gl-ctx])])
+                   ;; By default, disable screen sync for GL flushBuffer; otherwise,
                    ;; flushBuffer can take around 10 msec depending on the timing
                    ;; of event polling, and that can be bad for examples like gears.
-                   ;; Maybe whether to sync with the screen should be a configuration
-                   ;; option, but I can't tell the difference on my screen.
-                   (tellv gl-ctx setValues: 
-                          #:type (_ptr i _long) 0
-                          forParameter: #:type _int NSOpenGLCPSwapInterval)
+                   (unless (send canvas sync-gl?)
+                     (tellv gl-ctx setValues:
+                            #:type (_ptr i _long) 0
+                            forParameter: #:type _int NSOpenGLCPSwapInterval))
                    (set! gl g)
                    g)))))
 
     ;; Use a quartz bitmap so that text looks good:
-    (define trans? transparent?)
     (define/override (make-backing-bitmap w h) 
       (make-window-bitmap w h (send canvas get-cocoa-window) 
                           trans?
                           (send canvas is-flipped?)))
+
+    (def/override (copy [real? x] [real? y] [nonnegative-real? w] [nonnegative-real? h]
+                        [real? x2] [real? y2])
+      (internal-copy x y w h x2 y2
+                     (lambda (cr x y w h x2 y2)
+                       (define bm (internal-get-bitmap))
+                       (and bm
+                            (send bm do-self-copy cr x y w h x2 y2)))))
                    
     (define/override (can-combine-text? sz) #t)
 
@@ -93,6 +93,20 @@
       (send canvas request-canvas-flush-delay))
     (define/override (cancel-delay req)
       (send canvas cancel-canvas-flush-delay req))))
+
+(define dc-gl-context%
+  (class gl-context%
+    (init [(gtx gl-ctx)])
+    (define gl-ctx gtx)
+    (define/override (get-handle) gl-ctx)
+    (define/override (do-call-as-current t)
+      (dynamic-wind
+       (lambda () (tellv gl-ctx makeCurrentContext))
+       t
+       (lambda () (tellv NSOpenGLContext clearCurrentContext))))
+    (define/override (do-swap-buffers)
+      (tellv gl-ctx flushBuffer))
+    (super-new)))
 
 (define-local-member-name get-layer)
 
@@ -145,9 +159,11 @@
                (display-bitmap-resolution 0 void)))
 
 (define (make-window-bitmap w h win [trans? #t] [flipped? #f])
-  (if win
-      (make-object layer-bitmap% w h win trans? flipped?)
-      (make-screen-bitmap w h)))
+  (let ([w (max 1 w)]
+        [h (max 1 h)])
+    (if win
+        (make-object layer-bitmap% w h win trans? flipped?)
+        (make-screen-bitmap w h))))
 
 (define layer-bitmap%
   (class quartz-bitmap%
@@ -157,20 +173,23 @@
     (define layer (make-layer win w h))
     (define layer-w w)
     (define layer-h h)
-    (define/public (get-layer) layer)
 
     (define is-trans? trans?)
+    (define s-bm #f)
 
-    (let ([bs (inexact->exact 
-               (display-bitmap-resolution 0 (lambda () 1)))])
-      (super-make-object w h trans? bs
-                         (let ([cg (CGLayerGetContext layer)])
-                           (unless flipped?
-                             (CGContextTranslateCTM cg 0 h)
-                             (CGContextScaleCTM cg 1 -1))
-                           (unless (= bs 1)
-                             (CGContextScaleCTM cg (/ 1 bs) (/ 1 bs)))
-                           cg)))
+    (define bs (inexact->exact
+                (display-bitmap-resolution 0 (lambda () 1))))
+
+    (super-make-object w h trans? bs
+                       (let ([cg (CGLayerGetContext layer)])
+                         (unless flipped?
+                           (CGContextTranslateCTM cg 0 h)
+                           (CGContextScaleCTM cg 1 -1))
+                         (unless (= bs 1)
+                           (CGContextScaleCTM cg (/ 1 bs) (/ 1 bs)))
+                         cg))
+
+    (define/public (get-layer) layer)
 
     (define/override (draw-bitmap-to cr sx sy dx dy w h alpha clipping-region)
       ;; Called when the destination rectangle is inside the clipping region
@@ -204,13 +223,7 @@
                                        (cairo_matrix_t-y0 m)))
              (cairo_surface_flush s)
              (define cg (cairo_quartz_surface_get_cg_context s))
-             (begin
-               ;; A Cairo flush doesn't reset the clipping region. The
-               ;; implementation of clipping is that there's a saved
-               ;; GState that we can use to get back to the original
-               ;; clipping region, so restore (and save again) that state:
-               (CGContextRestoreGState cg)
-               (CGContextSaveGState cg))
+             (reset-cairo-clipping cg)
              (CGContextSaveGState cg)
              (CGContextConcatCTM cg trans)
              (let ([n (cairo_rectangle_list_t-num_rectangles rs)])
@@ -237,7 +250,37 @@
           #t)]
        [else #f]))
 
-    (define s-bm #f)
+    (define/override (do-self-copy cr x y w h x2 y2)
+      (define bs (get-backing-scale))
+      (define s (cairo_get_target cr))
+      (cairo_surface_flush s)
+      (define cg (cairo_quartz_surface_get_cg_context s))
+      (define orig-size (CGLayerGetSize layer))
+      (atomically
+       (reset-cairo-clipping cg)
+       (CGContextSaveGState cg)
+       (CGContextScaleCTM cg bs (- bs))
+       (define sz (CGLayerGetSize layer))
+       (define lh (NSSize-height sz))
+       (CGContextTranslateCTM cg 0 (- lh))
+       (CGContextClipToRect cg (make-NSRect
+                                (make-NSPoint x2 (- lh (+ y2 h)))
+                                (make-NSSize w h)))
+       (CGContextDrawLayerAtPoint cg
+                                  (make-NSPoint (- x2 x) (- y y2))
+                                  layer)
+       (CGContextRestoreGState cg)
+       (cairo_surface_mark_dirty s))
+      #t)
+    
+    (define/private (reset-cairo-clipping cg)
+      ;; A Cairo flush doesn't reset the clipping region. The
+      ;; implementation of clipping is that there's a saved
+      ;; GState that we can use to get back to the original
+      ;; clipping region, so restore (and save again) that state:
+      (CGContextRestoreGState cg)
+      (CGContextSaveGState cg))
+
     (define/override (get-cairo-surface)
       ;; Convert to a platform bitmap, which Cairo understands
       (let ([t-bm (or s-bm

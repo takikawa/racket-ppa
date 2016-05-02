@@ -198,7 +198,7 @@
                                          "match-let" "match-let*" "match-letrec"
                                          "letrec"
                                          "letrec-syntaxes" "letrec-syntaxes+values" "letrec-values"
-                                         "parameterize" "parameterize*"
+                                         "parameterize" "parameterize*" "syntax-parameterize"
                                          "with-syntax" "with-handlers")))
 
 (set-square-bracket-nonum-pref 'framework:square-bracket:for/fold for/folds)
@@ -213,6 +213,10 @@
 (preferences:set-default 'framework:special-meta-key #f boolean?)
 (preferences:add-callback 'framework:special-meta-key (λ (p v) (map-command-as-meta-key v)))
 (map-command-as-meta-key (preferences:get 'framework:special-meta-key))
+
+(preferences:set-default 'framework:any-control+alt-is-altgr #f boolean?)
+(preferences:add-callback 'framework:any-control+alt-is-altgr (λ (p v) (any-control+alt-is-altgr v)))
+(any-control+alt-is-altgr (preferences:get 'framework:any-control+alt-is-altgr))
 
 (preferences:set-default 'framework:fraction-snip-style 
                          'mixed (λ (x) (memq x '(mixed improper decimal))))
@@ -441,7 +445,7 @@
                unit/sig unit/lang
                with-handlers
                interface
-               parameterize parameterize*
+               parameterize parameterize* syntax-parameterize
                call-with-input-file call-with-input-file* with-input-from-file
                with-input-from-port call-with-output-file
                with-output-to-file with-output-to-port 
@@ -451,7 +455,7 @@
                type-case))
   (preferences:set-default 
    'framework:tabify
-   (list defaults-ht #rx"^begin" #rx"^def" #rx"^for\\*?(/|$)" #f)
+   (list defaults-ht #rx"^begin" #rx"^def" #rx"^(for\\*?(/|$)|with-)" #f)
    (list/c (hash/c symbol? (or/c 'for/fold 'define 'begin 'lambda) #:flat? #t)
            (or/c #f regexp?) (or/c #f regexp?) (or/c #f regexp?) (or/c #f regexp?)))
   

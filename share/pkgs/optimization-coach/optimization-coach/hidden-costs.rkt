@@ -100,16 +100,6 @@
   (parameter-message "current-pseudo-random-generator")
   20)
 
-(define-hidden-cost
- "struct constructor"
- (string-append
-  "This struct constructor is used in hot code. "
-  "Allocating structs is expensive, consider using vectors instead. "
-  "To keep the same interface, consider defining macro wrappers "
-  "around the vector operations that have the same name as the "
-  "struct constructor and accessors.")
- 20)
-
 (define real-arith-hidden-cost-msg
   (string-append
    "This expression may use exact rational arithmetic, which is inefficient. "
@@ -162,7 +152,12 @@
    "regular expression literals using `#rx'.")
   20)
 
-;; TODO regexp thing. then try it. then reply to email thread
+(define-hidden-cost
+  "vector of floats"
+  (string-append
+   "This expression computes a vector of Float. "
+   "It may be more efficient to use FlVectors instead.")
+  20)
 
 ;; Converts an info log entry to a hidden cost report.
 ;; Optionally takes a badness multiplier, based on profiling information.

@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require racket/list racket/match racket/contract racket/string
-         racket/set racket/dict
+         racket/set racket/dict racket/format
          profile/structs profile/utils
          "utils.rkt" "dot.rkt")
 
@@ -39,12 +39,7 @@
 ;; draw borders to group functions from the same module
 (define show-module-clustering? #t)
 
-(define boundary-graph-dot-file
-  (string-append output-file-prefix "boundary-graph.dot"))
-(define contract-key-file
-  (string-append output-file-prefix "contract-key.txt"))
-
-(define (boundary-view correlated)
+(define (boundary-view correlated boundary-view-file boundary-view-key-file)
   (match-define (contract-profile
                  total-time live-contract-samples all-blames regular-profile)
     correlated)
@@ -110,20 +105,22 @@
                         s)))
       (boundary contracted-function boundary-edges b time-spent)))
 
-  (with-output-to-report-file
-   boundary-graph-dot-file
+  (with-output-to-dot
+   boundary-view-file
    (render all-boundaries all-blames contracts->keys))
-  (render-dot boundary-graph-dot-file)
   ;; print contract key
   ;; TODO find a way to add to pdf
   ;; TODO also to add to pdf: show proportion of time spent in contracts
   ;;  otherwise we have no idea if we're looking at a case where contracts are
   ;;  bottlenecks or not
-  (with-output-to-report-file contract-key-file
-                              (for ([contract+key (in-list contracts->keys)])
-                                (printf "[~a] = ~a\n"
-                                        (cdr contract+key)
-                                        (car contract+key)))))
+  (when boundary-view-key-file
+    (with-output-to-file boundary-view-key-file
+      #:exists 'replace
+      (lambda ()
+        (for ([contract+key (in-list contracts->keys)])
+          (printf "[~a] = ~a\n"
+                  (cdr contract+key)
+                  (car contract+key)))))))
 
 
 ;; given a profile node, return all the boundaries centered there
@@ -178,7 +175,7 @@
             ;; show the contract key
             (dict-ref contracts->keys (blame-contract blame))
             (party->shortened-path (blame-negative blame))
-            (boundary-time b)))
+            (~r (boundary-time b) #:precision 2)))
 
   (printf "digraph Profile {\n")
   (printf "splines=\"true\"\n") ; polyline kinda works too, maybe

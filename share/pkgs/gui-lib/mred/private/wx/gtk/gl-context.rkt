@@ -144,6 +144,9 @@
 (define-gtk gtk_widget_get_display (_fun _GtkWidget -> _GdkDisplay))
 (define-gtk gtk_widget_get_screen (_fun _GtkWidget -> _GdkScreen))
 
+(define-glx glXSwapIntervalEXT (_fun _Display _XID _int -> _void)
+  #:fail (lambda () void))
+
 ;; ===================================================================================================
 ;; GLX versions and extensions queries
 
@@ -247,9 +250,10 @@
     (dynamic-wind
      (λ ()
        (set! old-handler
-	     (XSetErrorHandler (cast flag-x-error-handler
-				     (_fun #:atomic? #t _Display _XErrorEvent -> _int)
-				     _fpointer))))
+             (XSetErrorHandler
+              (cast flag-x-error-handler
+                    (_fun #:atomic? #t _Display _XErrorEvent -> _int)
+                    _fpointer))))
      (λ ()
        (set! create-context-error? #f)
        (glXCreateNewContext xdisplay cfg GLX_RGBA_TYPE share-gl #t))
@@ -290,7 +294,11 @@
   (define gl
     (dynamic-wind
      (λ ()
-       (set! old-handler (XSetErrorHandler flag-x-error-handler)))
+       (set! old-handler
+             (XSetErrorHandler
+              (cast flag-x-error-handler
+                    (_fun #:atomic? #t _Display _XErrorEvent -> _int)
+                    _fpointer))))
      (λ ()
        (set! create-context-error? #f)
        (glXCreateContextAttribsARB xdisplay cfg share-gl #t context-attribs))
@@ -419,6 +427,9 @@
      ;; The above will return a direct rendering context when it can
      ;; If it doesn't, the context will be version 1.4 or lower, unless GLX is implemented with
      ;; proprietary extensions (NVIDIA's drivers sometimes do this)
+
+     (when (and widget (send conf get-sync-swap))
+       (glXSwapIntervalEXT xdisplay (gdk_x11_drawable_get_xid drawable) 1))
      
      ;; Now wrap the GLX context in a gl-context%
      (cond

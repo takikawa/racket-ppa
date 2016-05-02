@@ -157,11 +157,7 @@ the typed racket language.
 ;; Lazily loaded b/c they're only used sometimes, so we save a lot
 ;; of loading by not having them when they are unneeded
 (begin-for-syntax 
-  (lazy-require ["../rep/type-rep.rkt" (make-Opaque Error?)]
-                ["../types/utils.rkt" (fv)]
-                [syntax/define (normalize-definition)]
-                [typed-racket/private/parse-type (parse-type)]
-                [typed-racket/env/type-alias-env (register-resolved-type-alias)]))
+  (lazy-require [syntax/define (normalize-definition)]))
 
 (define-for-syntax (with-type* expr ty)
   (with-type #`(ann #,expr #,ty)))
@@ -812,7 +808,13 @@ the typed racket language.
                    (define i 0)
                    (for (clauses ...)
                      (define v body-expr)
-                     (cond [(unsafe-fx= i 0)  (define new-vs (ann (make-vector n v) T))
+                     ;; can't use `unsafe-fx=` here
+                     ;; if `n` is larger than a fixnum, this is unsafe, and we
+                     ;; don't know whether that's the case until we try creating
+                     ;; the vector
+                     ;; other unsafe ops are after vector allocation, and so are
+                     ;; fine
+                     (cond [(= i 0)  (define new-vs (ann (make-vector n v) T))
                                               (set! vs new-vs)]
                            [else  (unsafe-vector-set! vs i v)])
                      (set! i (unsafe-fx+ i 1))

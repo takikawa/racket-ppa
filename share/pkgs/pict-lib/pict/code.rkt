@@ -5,6 +5,12 @@
          racket/contract
          racket/class
          racket/draw
+         racket/list
+         racket/match
+         racket/string
+         syntax-color/lexer-contract
+         syntax-color/racket-lexer
+         "convert.rkt"
          (for-syntax racket/base
                      syntax/to-string
                      mzlib/list))
@@ -53,10 +59,11 @@
   [current-const-color (parameter/c (or/c string? (is-a?/c color%)))]
   [current-base-color (parameter/c (or/c string? (is-a?/c color%)))]
   [current-reader-forms (parameter/c (listof symbol?))]
-  [code-align (-> pict? pict?)]
+  [code-align (-> pict-convertible? pict?)]
   [current-keyword-list (parameter/c (listof string?))]
   [current-const-list (parameter/c (listof string?))]
-  [current-literal-list (parameter/c (listof string?))]))
+  [current-literal-list (parameter/c (listof string?))]
+  [codeblock-pict (->* (string?) (#:keep-lang-line? any/c) pict?)]))
 
 (provide define-exec-code/scale
          define-exec-code)
@@ -158,3 +165,102 @@
   (syntax-rules ()
     [(_ (a b c) . r)
      (define-exec-code/scale 1 (a b c) . r)]))
+
+
+;;------------------------------------------------
+;; codeblock-pict
+
+(define (tokenize/color s)
+  (define lang
+    (read-language (open-input-string s)
+                   (lambda () (raise-argument-error
+                               'codeblock-pict
+                               "string containing program with #lang"
+                               s))))
+  (define pre-lexer
+    (or (lang 'color-lexer #f)
+        ;; #lang racket doesn't have a color lexer, so fall back to
+        ;; the Racket lexer if we don't find one.
+        racket-lexer))
+  (define lexer ; based on framework/private/color
+    (if (procedure-arity-includes? pre-lexer 3)
+        pre-lexer ; new interface, we're good
+        (lambda (in offset mode) ; old interface, need an adapter
+          (let-values ([(lexeme type data new-token-start new-token-end)
+                        (pre-lexer in)])
+            (values lexeme type data new-token-start new-token-end 0 #f)))))
+  (define port (open-input-string s)) ; reopen, to start from the beginning
+  (port-count-lines! port)
+  (let loop ([acc            #f]
+             [rev-tokens+classes '()])
+    (define-values (_1 token-class _3 start end _6 next-acc)
+      (lexer port 0 acc))
+    (cond
+     [(equal? token-class 'eof)
+      (reverse rev-tokens+classes)]
+     [else
+      ;; if the token has newlines, split them up, so we can recognize them
+      ;; more easily later
+      (define token (substring s (sub1 start) (sub1 end)))
+      (define lines (add-between (string-split token "\n" #:trim? #f) "\n"))
+      (define new-tokens+classes
+        (for/list ([l (in-list lines)])
+          (cons l token-class)))
+      (loop (if (dont-stop? next-acc)
+                (dont-stop-val next-acc)
+                next-acc)
+            (append (reverse new-tokens+classes) rev-tokens+classes))])))
+
+(define (tokens->pict ts #:keep-lang-line? [keep-lang-line? #t])
+  ;; cache parameter lookups
+  (define tt (current-code-tt))
+  (define id-color (current-id-color))
+  (define comment-color (current-comment-color))
+  (define base-color (current-base-color))
+  (define literal-color (current-literal-color))
+  (define keyword-color (current-keyword-color))
+  (define (token-class->color c)
+    (case c
+      [(symbol) id-color]
+      [(keyword) id-color] ; We don't have a keyword color?
+      [(white-space) "white"]
+      [(comment) comment-color]
+      [(no-color) base-color]
+      [(parenthesis) base-color] ; really? pict has no color for parens?
+      [(string) literal-color]
+      [(constant) literal-color]
+      [(hash-colon-keyword) keyword-color]
+      [else base-color])) ; 'other, or others
+  (define (lang-token->pict t)
+    (match-define `(,token . ,color) t)
+    (hbl-append (colorize (tt "#lang") keyword-color)
+                (colorize (tt (substring token 5)) id-color)))
+  (define (token->pict t)
+    (match-define `(,token . ,color) t)
+    (colorize (tt token) (token-class->color color)))
+  (define (not-newline? x) (not (equal? (car x) "\n")))
+  (define lines
+    (let loop ([ts ts])
+      (cond
+       [(empty? ts)
+        '()]
+       [else
+        ;; take the next line
+        (define-values (next-line rest)
+          (splitf-at ts not-newline?))
+        (cons next-line
+              (loop (if (pair? rest) ; there is a newline to skip
+                        (cdr rest)
+                        rest)))])))
+  (define first-line (car lines))
+  (apply vl-append
+         ;; FIXME: #lang can span lines
+         ;;   (codeblock has same issue)
+         (if keep-lang-line?
+             (apply hbl-append (lang-token->pict (car first-line)) (map token->pict (cdr first-line)))
+             (blank))
+         (for/list ([line (in-list (cdr lines))])
+           (apply hbl-append (map token->pict line)))))
+
+(define (codeblock-pict s #:keep-lang-line? [keep-lang-line? #t])
+  (tokens->pict (tokenize/color s) #:keep-lang-line? keep-lang-line?))

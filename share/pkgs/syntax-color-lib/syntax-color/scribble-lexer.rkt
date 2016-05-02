@@ -1,4 +1,4 @@
-#lang scheme/base
+#lang racket/base
 (require "scheme-lexer.rkt"
          racket/contract
          "lexer-contract.rkt"
@@ -8,9 +8,8 @@
  (contract-out
   [scribble-inside-lexer lexer/c]
   [scribble-lexer lexer/c]
-  [make-scribble-inside-lexer [[] [#:command-char char?] . ->* . lexer/c]]
-  [make-scribble-lexer [[] [#:command-char char?] . ->* . lexer/c]]
-  ))
+  [make-scribble-inside-lexer (->* () (#:command-char (and/c char? (not/c (or/c #\] #\[)))) lexer/c)]
+  [make-scribble-lexer (->* () (#:command-char (and/c char? (not/c (or/c #\] #\[)))) lexer/c)]))
 
 (define-struct text (scheme-rx end-rx sub-rx string-rx open-paren close-paren) #:transparent)
 (define-struct scheme (status backup) #:transparent)
@@ -40,7 +39,9 @@
      (make-text rx:^@
                 #f
                 #f
-                (regexp (format ".*?(?:(?=[~a\r\n])|$)" (regexp-quote (string at))))
+                (if (equal? at #\^)
+                    #rx".*?(?:(?=[\r\n^])|$)"
+                    (regexp (format ".*?(?:(?=[~a\r\n])|$)" at)))
                 #f
                 #f)))
   (define (scribble-inside-lexer orig-in offset orig-mode)
@@ -142,8 +143,9 @@
                   (cons (make-text rx:^@
                                    #rx"^}"
                                    #rx"^{"
-                                   (regexp (format ".*?(?:(?=[~a{}\r\n])|$)"
-                                                   (regexp-quote (string at))))
+                                   (if (equal? at #\^)
+                                       #rx".*?(?:(?=[{}\r\n^])|$)"
+                                       (regexp (format ".*?(?:(?=[~a{}\r\n])|$)" at)))
                                    '|{|
                                    '|}|)
                         (no-backup mode)))))
@@ -288,7 +290,7 @@
                             (backup-if-needed pos)
                             mode))]
                  [(and (eq? status 'one)
-                       (regexp-try-match (regexp (format "^#?,[~a]?" (regexp-quote (string at)))) in))
+                       (regexp-try-match (regexp (format "^#?,~a?" (regexp-quote (string at)))) in))
                   ;; Other special:
                   (let-values ([(end-line end-col end-pos) (port-next-location in)])
                     (values ","

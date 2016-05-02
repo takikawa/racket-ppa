@@ -65,11 +65,11 @@
     [(variable srcloc sym)
      (sym->original-syntax sym srcloc)]
     [(constant srcloc sym)
-     (datum->syntax #f sym srcloc)]))
+     (sym->original-syntax sym srcloc)]))
 
 (define (sym->original-syntax sym srcloc)
   (define p (open-input-string (symbol->string sym)))
   (port-count-lines! p)
   (match-define (list source-name line column position span) srcloc)
   (set-port-next-location! p line column position)
-  (read-syntax source-name p))
+  (syntax-property (read-syntax source-name p) 'original-for-check-syntax #t))

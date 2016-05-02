@@ -166,7 +166,7 @@ please adhere to these guidelines:
  (bug-report-show-synthesized-info "Show Synthesized Info")
  (bug-report-submit "Submit")
  (close-and-save-bug-report "Close && Save") ;; button in bug report dialog, next to cancel and bug-report-submit
- (bug-report-submit-menu-item "Submit Bug Report...")  ;; same as above, but used when there are saved bug reports
+ (bug-report-submit-menu-item "Submit Bug Report…")  ;; same as above, but used when there are saved bug reports
  (saved-bug-reports-menu-item "Saved Bug Reports") ;; in Help Menu, submenu title
  (disacard-all-saved-bug-reports "Discard All Saved Bug Reports") ;; menu item: only shows up when there is more than one saved bug report
  (no-saved-bug-reports "No bug reports have been saved") ;; an info message that shows up as a disabled menu item when no saved bug reports are around
@@ -180,7 +180,7 @@ please adhere to these guidelines:
   " If your internet connection is otherwise working fine, please visit:\n\n    http://bugs.racket-lang.org/\n\nand"
   " submit the bug via our online web-form. Sorry for the difficulties.\n\nThe error message is:\n~a")
  (illegal-bug-report "Illegal Bug Report")
- (pls-fill-in-field "Please fill in the \"~a\" field")
+ (pls-fill-in-field "Please fill in the “~a” field")
  (malformed-email-address "Malformed email address")
  (pls-fill-in-either-description-or-reproduce "Please fill in either the Description field or the Steps to Reproduce field.")
 
@@ -241,7 +241,7 @@ please adhere to these guidelines:
   (cs-mode-menu-show-syntax "Syntactic Categories")
   
   ;; the documentation blue boxes in the upper-right corner of the drracket window
-  (sc-read-more... "read more ...")
+  (sc-read-more... "read more…")
   (sc-f2-to-un/lock "f2 to (un)lock")
   
  ;; the online check syntax status messages (mouse over the bottom right of drracket's window to see the messages during online expansion's various phases)
@@ -254,7 +254,7 @@ please adhere to these guidelines:
  (jump-to-error "Jump to Error")
  (online-expansion-is-disabled "Background expansion is disabled")
  ; these next two show up in the bar along the bottom of the drracket window
- (online-expansion-pending "Background expansion pending ...")
+ (online-expansion-pending "Background expansion pending…")
  (online-expansion-finished "Background expansion finished") ;; note: there may still be errors in this case
  ; the next two show up in a menu when you click on the circle in the bottom right corner
  (disable-online-expansion "Disable background expansion")
@@ -281,7 +281,7 @@ please adhere to these guidelines:
   
   (install-package-button "Install ~a") ;; button label: ~a is filled with the name of a pkg
   (update-catalog "Update Catalog") ;; button label; shown when there is a missing module, but no matching package
-  (updating-catalog-from "Updating from ~a...") ;; message label; used as a status message when updating the pkg catalog
+  (updating-catalog-from "Updating from ~a…") ;; message label; used as a status message when updating the pkg catalog
   
  ;;; misc
  (welcome-to-something "Welcome to ~a")
@@ -310,14 +310,14 @@ please adhere to these guidelines:
   (editor-changed-since-srcloc-recorded
    "This editor has been changed since the source location was recorded, so the highlighted region may no longer correspond to the correct source location.")
   
- (file-is-not-saved "The file \"~a\" is not saved.")
+ (file-is-not-saved "The file “~a” is not saved.")
  (save "Save")
  (close-anyway "Close Anyway")
  (dont-save "Don't Save")
  (clear-anyway "Clear Anyway")
 
  ;; menu item title
- (log-definitions-and-interactions "Log Definitions and Interactions...")
+ (log-definitions-and-interactions "Log Definitions and Interactions…")
  (stop-logging "Stop Logging")
  (please-choose-a-log-directory "Please choose a log directory")
  (logging-to "Logging to: ")
@@ -361,9 +361,9 @@ please adhere to these guidelines:
 
   
  (url: "URL:")
- (open-url... "Open URL...")
+ (open-url... "Open URL…")
  (open-url "Open URL")
- (browse... "Browse...")
+ (browse... "Browse…")
  (bad-url "Bad URL")
  (bad-url:this "Bad URL: ~a")
  
@@ -391,9 +391,9 @@ please adhere to these guidelines:
  ; Help Desk configuration
  ;; refreshing manuals
  (plt:hd:refreshing-manuals "Re-downloading Manuals")
- (plt:hd:refresh-downloading... "Downloading ~a...")
- (plt:hd:refresh-deleting... "Deleting old version of ~a...")
- (plt:hd:refresh-installing... "Installing new version of ~a...")
+ (plt:hd:refresh-downloading... "Downloading ~a…")
+ (plt:hd:refresh-deleting... "Deleting old version of ~a…")
+ (plt:hd:refresh-installing... "Installing new version of ~a…")
  (plt:hd:refresh-clearing-indices "Clearing cached indices")
  (plt:hd:refreshing-manuals-finished "Finished.")
  (plt:hd:about-help-desk "About Help Desk")
@@ -457,11 +457,11 @@ please adhere to these guidelines:
  (save-downloaded-file/size "Save downloaded file (~a bytes) as") ;; label for get-file dialog
  (save-downloaded-file "Save downloaded file as")  ;; label for get-file dialog
  (downloading "Downloading") ;; dialog title
- (downloading-file... "Downloading file...")
+ (downloading-file... "Downloading file…")
  (package-was-installed "The package was installed.")
  (download-was-saved "The downloaded file was saved.")
 
- (install-plt-file-menu-item... "Install .plt File...")
+ (install-plt-file-menu-item... "Install .plt File…")
  (install-plt-file-dialog-title "Install .plt File")
  (install-plt-web-tab "Web")
  (install-plt-file-tab "File")
@@ -491,7 +491,7 @@ please adhere to these guidelines:
  (no "No")
  
  ;; saving image (right click on an image to see the text)
-  (save-image "Save image...")
+  (save-image "Save image…")
   
  ;;; preferences
  (preferences "Preferences")
@@ -540,6 +540,7 @@ please adhere to these guidelines:
  (print-to-ps "Print to PostScript File")
  (print-to-pdf "Print to PDF File")
  (command-as-meta "Treat command key as meta") ;; macos/macos x only
+ (any-control+alt-is-altgr "Treat Control-Alt combination as AltGr") ; Windows only
  (alt-as-meta "Treat alt key as meta")
  (reuse-existing-frames "Reuse existing frames when opening new files")
  (default-fonts "Default Fonts")
@@ -555,6 +556,7 @@ please adhere to these guidelines:
  (show-line-numbers-in-definitions "Show All Line Numbers in Definitions")
     ;; the constant above shows up in the popup menu item in the bottom of
     ;; the drracket window; controls the line numbers on each line in the definitions; used in a checkable menu item
+ (reflow-paragraph-maximum-width "Maximum width when reflowing paragraphs")
  (maximum-char-width-guide-pref-check-box "Maximum character width guide")
  (hide-column-width-guide "Hide Column Width Guide for Files with ~a Columns")
  (show-column-width-guide "Show Column Width Guide at ~a Columns") ;; filled with a number > 2
@@ -562,7 +564,7 @@ please adhere to these guidelines:
  (background-color "Background") ;; this is in the color section already, so shorten the name a little
  (default-text-color "Default text") ;; used for configuring colors, but doesn't need the word "color"
  (choose-a-background-color "Please choose a background color")
- (revert-to-defaults "Revert to Defaults")
+ (revert-to-defaults "Revert All Preferences to Defaults")
  (undo-changes "Undo Changes and Close") ;; used in the preferences dialog to undo preference changes
   
   (color-schemes "Color Schemes") ;; the label in the preferences dialog for the color scheme panel
@@ -582,10 +584,10 @@ please adhere to these guidelines:
 
  (change-font-button-label "Change")
  (fonts "Fonts")
- (other... "Other...") ;; used in the font choice menu item
+ (other... "Other…") ;; used in the font choice menu item
 
  ; filled with type of font, eg modern, swiss, etc.
- (choose-a-new-font "Please choose a new \"~a\" font")
+ (choose-a-new-font "Please choose a new “~a” font")
 
  (font-size-slider-label "Size")
  (restart-to-see-font-changes "Restart to see font changes")
@@ -593,7 +595,7 @@ please adhere to these guidelines:
  (font-prefs-panel-title "Font")
  (font-name "Font Name")
  (font-size "Font Size")
- (set-font "Set Font...")
+ (set-font "Set Font…")
  (font-smoothing-label  "Font smoothing")
  (font-smoothing-none "None")
  (font-smoothing-some "Some")
@@ -613,7 +615,7 @@ please adhere to these guidelines:
  (decrease-font-size "Decrease Font Size (To ~a)")
   
  ; warning message when lockfile is around
- (waiting-for-pref-lock "Waiting for the preferences lockfile...")
+ (waiting-for-pref-lock "Waiting for the preferences lockfile…")
  (pref-lock-not-gone
   "The preferences lockfile:\n\n   ~a\n\nprevents the preferences from being saved. Ensure that no Racket software is running and delete this file.")
  (still-locked-exit-anyway? "The preferences were not saved sucessfully. Exit anyway?")
@@ -633,7 +635,7 @@ please adhere to these guidelines:
  (skip-subexpressions "Number of sub-expressions to skip")
 
  (expected-a-symbol "expected a symbol, found: ~a")
- (already-used-keyword "\"~a\" is already a specially indented keyword")
+ (already-used-keyword "“~a” is already a specially indented keyword")
  (add-keyword "Add")
  (remove-keyword "Remove")
  
@@ -662,10 +664,10 @@ please adhere to these guidelines:
   (undock "Undock")
   
  ;;; multi-file-search
- (mfs-multi-file-search-menu-item "Search in &Files...")
+ (mfs-multi-file-search-menu-item "Search in &Files…")
  (mfs-string-match/graphics "String match (handles files with graphics)")
  (mfs-regexp-match/no-graphics "Regular Expression (only raw text files)")
- (mfs-searching... "Searching...")
+ (mfs-searching... "Searching…")
  (mfs-configure-search "Configure Search") ;; dialog title
  (mfs-files-section "Files")   ;; section in config dialog
  (mfs-search-section "Search") ;; section in config dialog
@@ -674,13 +676,13 @@ please adhere to these guidelines:
  (mfs-regexp-filename-filter "Regexp filename filter")
  (mfs-search-string "Search string")
  (mfs-drscheme-multi-file-search "Multi File Search - DrRacket") ;; error message window title
- (mfs-not-a-dir "\"~a\" is not a directory")
+ (mfs-not-a-dir "“~a” is not a directory")
  (mfs-open-file "Open File")
  (mfs-stop-search "Stop Search")
  (mfs-case-sensitive-label "Case sensitive")
  (mfs-no-matches-found "No matches found.")
  (mfs-search-interrupted "Search aborted.")
- (mfs-drscheme-multi-file-search-title "Multi File Search for \"~a\" - DrRacket") ;; the ~a format specifier is filled in with the search string
+ (mfs-drscheme-multi-file-search-title "Multi File Search for “~a” - DrRacket") ;; the ~a format specifier is filled in with the search string
   
  ;;; reverting a file
  (are-you-sure-revert
@@ -698,9 +700,9 @@ please adhere to these guidelines:
 
  ;;; finder dialog
  (must-specify-a-filename "You must specify a file name")
- (file-does-not-exist "The file \"~a\" does not exist.")
- (ask-because-file-exists "The file \"~a\" already exists. Replace it?")
- (dne-or-cycle "The file \"~a\" contains a nonexistent directory or a cycle.")
+ (file-does-not-exist "The file “~a” does not exist.")
+ (ask-because-file-exists "The file “~a” already exists. Replace it?")
+ (dne-or-cycle "The file “~a” contains a nonexistent directory or a cycle.")
  (get-file "Get file")
  (put-file "Put file")
  (full-pathname "Full pathname")
@@ -741,10 +743,10 @@ please adhere to these guidelines:
 
  (new-info  "Open a new file")
  (new-menu-item "&New")
- (new-...-menu-item "&New...")
+ (new-...-menu-item "&New…")
 
  (open-info "Open a file from disk")
- (open-menu-item "&Open...")
+ (open-menu-item "&Open…")
 
  (open-recent-info "A list of the recently opened files")
  (open-recent-menu-item "Open Recen&t")
@@ -756,13 +758,13 @@ please adhere to these guidelines:
  (save-menu-item "&Save")
 
  (save-as-info "Prompt for a filename and save this file to disk")
- (save-as-menu-item "Save &As...")
+ (save-as-menu-item "Save &As…")
 
  (print-info "Send this file to a printer")
- (print-menu-item "&Print...")
+ (print-menu-item "&Print…")
 
  (page-setup-info "Configure printing parameters")
- (page-setup-menu-item "Page Setup...")
+ (page-setup-menu-item "Page Setup…")
 
  (close-info "Close this file")
  (close-menu-item "&Close")
@@ -820,7 +822,7 @@ please adhere to these guidelines:
   (find-case-sensitive-menu-item "Find Case Sensitive")
   
   (complete-word "Complete Word") ; the complete word menu item in the edit menu
-  (no-completions "... no completions available") ; shows up in the completions menu when there are no completions (in italics)
+  (no-completions "… no completions available") ; shows up in the completions menu when there are no completions (in italics)
   
   (overwrite-mode "Overwrite Mode")
   (enable-overwrite-mode-keybindings "Enable overwrite mode keybindings")
@@ -828,7 +830,7 @@ please adhere to these guidelines:
   (enable-automatic-parens "Enable automatic parentheses") ; should "and square brackets and quotes" appear here?
   
  (preferences-info "Configure your preferences")
- (preferences-menu-item "Preferences...")
+ (preferences-menu-item "Preferences…")
 
  (keybindings-info "Show the currently active keybindings")
  (keybindings-menu-item "Keybindings")
@@ -836,8 +838,8 @@ please adhere to these guidelines:
  (keybindings-frame-title "Keybindings")
  (keybindings-sort-by-name "Sort by Name")
  (keybindings-sort-by-key "Sort by Key")
- (keybindings-add-user-defined-keybindings "Add User-defined Keybindings...")
- (keybindings-add-user-defined-keybindings/planet "Add User-defined Keybindings from PLaneT...")
+ (keybindings-add-user-defined-keybindings "Add User-defined Keybindings…")
+ (keybindings-add-user-defined-keybindings/planet "Add User-defined Keybindings from PLaneT…")
  (keybindings-menu-remove "Remove ~a")
  (keybindings-choose-user-defined-file "Please choose a file containing keybindings.")
  (keybindings-planet-malformed-spec "The PLaneT spec is malformed: ~a") ; the string will be what the user typed in
@@ -855,7 +857,7 @@ please adhere to these guidelines:
   
  ;; menu items in the "special" menu
  (insert-text-box-item "Insert Text Box")
- (insert-image-item "Insert Image...")
+ (insert-image-item "Insert Image…")
  (insert-comment-box-menu-item-label "Insert Comment Box")
  (insert-lambda "Insert λ")
 
@@ -867,7 +869,7 @@ please adhere to these guidelines:
  (minimize "Minimize") ;; minimize and zoom are only used under mac os x
  (zoom "Zoom")
  (bring-frame-to-front "Bring Frame to Front")       ;;; title of dialog
- (bring-frame-to-front... "Bring Frame to Front...") ;;; corresponding title of menu item
+ (bring-frame-to-front... "Bring Frame to Front…") ;;; corresponding title of menu item
  (most-recent-window "Most Recent Window")
   (next-tab "Next Tab")
   (prev-tab "Previous Tab")
@@ -885,7 +887,7 @@ please adhere to these guidelines:
 
   (help-menu-label "&Help")
  (about-info "Credits and details for this application")
- (about-menu-item "About...")
+ (about-menu-item "About…")
  
  ;; open here's new menu item
  (create-new-window-or-clear-current
@@ -913,7 +915,7 @@ please adhere to these guidelines:
  (dont-quit "Cancel")
   
  ;;; autosaving
- (error-autosaving "Error autosaving \"~a\".") ;; ~a will be a filename
+ (error-autosaving "Error autosaving “~a”.") ;; ~a will be a filename
  (autosaving-turned-off "Autosaving is turned off\nuntil the file is saved.")
  (recover-autosave-files-frame-title "Recover Autosaved Files")
  (autosave-details "Details")
@@ -979,6 +981,7 @@ please adhere to these guidelines:
  (sort-by-position "Sort by position in file")
  (no-definitions-found "<< no definitions found >>")
  (jump-to-defn "Jump to definition of ~a")
+ (define-menu-configure "Configure") ;; label of a submenu that configures the (define ...) popup menu
 
  (recent-items-sort-by-age "Sort by Age")
  (recent-items-sort-by-name "Sort by Name")
@@ -1000,16 +1003,16 @@ please adhere to these guidelines:
  (toolbar-hidden "Toolbar Hidden")
 
  ;;; file menu
- (save-definitions-as "Save Definitions &As...")
+ (save-definitions-as "Save Definitions &As…")
  (save-definitions "Save Definitions")
- (print-definitions "Print Definitions...")
+ (print-definitions "Print Definitions…")
  (about-drscheme "About DrRacket")
  (save-other "Save Other")
- (save-definitions-as-text "Save Definitions As Text...")
+ (save-definitions-as-text "Save Definitions As Text…")
  (save-interactions "Save Interactions")
- (save-interactions-as "Save Interactions As...")
- (save-interactions-as-text "Save Interactions As Text...")
- (print-interactions "Print Interactions...")
+ (save-interactions-as "Save Interactions As…")
+ (save-interactions-as-text "Save Interactions As Text…")
+ (print-interactions "Print Interactions…")
  (new-tab "New Tab")
  (close-tab "Close Tab") ;; must not have any &s in it.
  (close-tab-amp "&Close Tab") ;; like close-tab, but with an ampersand on the same letter as the one in close-menu-item
@@ -1030,7 +1033,7 @@ please adhere to these guidelines:
  (ask-quit-menu-item-help-string "Uses break-thread to stop the primary thread of the current evaluation")
  (force-quit-menu-item-label "Force the Program to Quit")
  (force-quit-menu-item-help-string "Uses custodian-shutdown-all to abort the current evaluation")
- (limit-memory-menu-item-label "Limit Memory...")
+ (limit-memory-menu-item-label "Limit Memory…")
  (limit-memory-msg-1 "The limit will take effect the next time the program")
  (limit-memory-msg-2 "is Run, and it must be at least eight megabytes.")
  (limit-memory-unlimited "Unlimited")
@@ -1057,7 +1060,7 @@ please adhere to these guidelines:
  (convert-to-semicolon-comment "Convert to Semicolon Comment")
  
  ;;; executables
- (create-executable-menu-item-label "Create &Executable...")
+ (create-executable-menu-item-label "Create &Executable…")
  (create-executable-title "Create Executable")
  (drracket-creates-executables-only-in-some-languages
   "The creation of executables in DrRacket is supported only when you"
@@ -1091,18 +1094,18 @@ please adhere to these guidelines:
  (files-for-icons-etc "Files for icons, etc.")
  (please-specify-a-filename "Please specify a filename to create.")
  (~a-must-end-with-~a
-  "The ~a filename\n\n  ~a\n\nis illegal. The filename must end with \".~a\".")
+  "The ~a filename\n\n  ~a\n\nis illegal. The filename must end with “.~a”.")
  (macosx-executables-must-end-with-app
   "The filename\n\n  ~a\n\nis illegal. Under MacOS X, an executable must be a directory whose name ends with .app.")
  (warning-directory-will-be-replaced
   "WARNING: the directory:\n\n  ~a\n\nwill be replaced. Proceed?")
  
  (distribution-progress-window-title "Distribution Progress")
- (creating-executable-progress-status "Creating executable for distribution...")
- (assembling-distribution-files-progress-status "Assembling files for distribution...")
- (packing-distribution-progress-status "Packing distribution...")
+ (creating-executable-progress-status "Creating executable for distribution…")
+ (assembling-distribution-files-progress-status "Assembling files for distribution…")
+ (packing-distribution-progress-status "Packing distribution…")
 
- (create-servlet "Create Servlet...")
+ (create-servlet "Create Servlet…")
 
  ; the ~a is a language such as "module" or "algol60"
  (create-servlet-unsupported-language
@@ -1112,10 +1115,11 @@ please adhere to these guidelines:
  (execute-button-label "Run") 
  (save-button-label "Save")
  (break-button-label "Stop")
+ (break-button-kill-label "Kill")
  
  ;;; search help desk popup menu
- (search-help-desk-for "Search in Help Desk for \"~a\"")
- (exact-lucky-search-help-desk-for "Exact lucky search in Help Desk for \"~a\"")
+ (search-help-desk-for "Search in Help Desk for “~a”")
+ (exact-lucky-search-help-desk-for "Exact lucky search in Help Desk for “~a”")
 
  ;; collapse and expand popup menu items
  (collapse-sexp "Collapse S-expression")
@@ -1129,7 +1133,7 @@ please adhere to these guidelines:
  (insert-number/bad-whole-part "The whole part of the number must be an integral number")
  (insert-number/bad-numerator "The numerator part of the number must be a non-negative, integral number")
  (insert-number/bad-denominator "The denominator part of the number must be a positive, integral number")
- (insert-fraction-menu-item-label "Insert Fraction...")
+ (insert-fraction-menu-item-label "Insert Fraction…")
 
  ;; number snip popup menu
  (show-decimal-expansion "View decimal expansion")
@@ -1142,18 +1146,18 @@ please adhere to these guidelines:
  (clear-teachpack "Clear ~a Teachpack")
  (teachpack-error-label "DrRacket - Teachpack error")
  (teachpack-didnt-load "The teachpack file ~a did not load properly.")
- (add-teachpack-menu-item-label "Add Teachpack...")
+ (add-teachpack-menu-item-label "Add Teachpack…")
  (clear-all-teachpacks-menu-item-label "Clear All Teachpacks")
  (drscheme-teachpack-message-title "DrRacket Teachpack")
  (already-added-teachpack "Already added ~a teachpack")
   
   ; ~a is filled with the teachpack's name; the message appears in the teachpack selection dialog when a user installs a new teachpack
-  (compiling-teachpack "Compiling ~a teachpack ...")
+  (compiling-teachpack "Compiling ~a teachpack…")
   (teachpack-pre-installed "Preinstalled Teachpacks")
   (teachpack-pre-installed/htdp "Preinstalled HtDP Teachpacks")
   (teachpack-pre-installed/2htdp "Preinstalled HtDP/2e Teachpacks")
   (teachpack-user-installed "User-installed Teachpacks")
-  (add-teachpack-to-list... "Add Teachpack to List...")
+  (add-teachpack-to-list... "Add Teachpack to List…")
   ; first and second ~a are teachpack names, third is a symbol identifing an export
   (teachpack-conflict
    "WARNING: the already installed teachpack ~a conflicts with ~a (the export ~a is in both)")
@@ -1190,7 +1194,7 @@ please adhere to these guidelines:
  (test-coverage "Syntactic test suite coverage")
  (show-details-button-label "Show Details")
  (hide-details-button-label "Hide Details")
- (choose-language-menu-item-label "Choose Language...")
+ (choose-language-menu-item-label "Choose Language…")
  (revert-to-language-defaults "Revert to Language Defaults")
  (fraction-style "Fraction Style")
  (use-mixed-fractions "Mixed fractions")
@@ -1198,13 +1202,13 @@ please adhere to these guidelines:
  (decimal-notation-for-rationals "Use decimal notation for rationals")
  (enforce-primitives-group-box-label "Initial Bindings")
  (enforce-primitives-check-box-label "Disallow redefinition of initial bindings")
- (automatically-compile "Populate \"compiled\" directories (for faster loading)")
+ (automatically-compile "Populate “compiled” directories (for faster loading)")
  (preserve-stacktrace-information "Preserve stacktrace (disable some optimizations)")
  (enforce-module-constants-checkbox-label "Enforce constant definitions (enables some inlining)")
  (expression-level-stacktrace "Expression-level stacktrace")
  (function-level-stacktrace "Function-level stacktrace")
  (submodules-to-run "Submodules to Run")
- (add-submodule "Add Submodule Option ...") ;; menu item
+ (add-submodule "Add Submodule Option…") ;; menu item
  (add-submodule-title "Add Submodule") ;; title of dialog opened by above menu item
   
   
@@ -1247,7 +1251,14 @@ please adhere to these guidelines:
   (module-language-name "Determine language from source")
  (module-language-one-line-summary "The #lang line specifies the actual language")
   (module-language-auto-text "Automatic #lang line") ;; shows up in the details section of the module language
-   
+  ;; the next four string constants show up in the REPL in DrRacket in the "Racket Language",
+  ;; which is also the "Determine language from source" language. They are put right after the name
+  ;; of the language from the "#lang" line at the beginning of the source file
+  (module-language-repl-no-annotations "")
+  (module-language-repl-debug-annotations ", with debugging")
+  (module-language-repl-debug/profile-annotations ", with debugging and profiling")
+  (module-language-repl-test-annotations ", with test coverage")
+
   ;; for the upper portion of the language dialog
   (the-racket-language "The Racket Language")
   (choose-a-language "Choose a language")
@@ -1256,7 +1267,7 @@ please adhere to these guidelines:
   ;; language dialog with a list
   ;; of example languages appearing between them
   (racket-language-discussion "Start your program with #lang to specify the desired dialect. For example:\n\n")
-  (racket-language-discussion-end "\n... and many more")
+  (racket-language-discussion-end "\n… and many more")
   
   ;; the next three string constants are put into a message-box dialog
   ;; that appears when the user clicks on the example #lang languages
@@ -1296,7 +1307,7 @@ please adhere to these guidelines:
 
   ; the three string constants are concatenated together and the middle
   ; one is hyperlinked to the dialog that suggests various languages
-  (get-guidance-before "Either select the “Choose Language...” item in the “Language” menu, or ")
+  (get-guidance-before "Either select the “Choose Language…” item in the “Language” menu, or ")
   (get-guidance-during "get guidance")
   (get-guidance-after ".")
     
@@ -1342,6 +1353,9 @@ please adhere to these guidelines:
  (test-coverage-clear? "Changing the definitions window invalidates the test coverage information. Continue?")
  (test-coverage-clear-and-do-not-ask-again "Yes, and don't ask again")
  (test-coverage-ask? "Ask about clearing test coverage")
+ (test-coverage-entirely-covered "All expressions are covered")
+ (test-coverage-next-time-check-box "Show next time?")
+ (test-coverage-summary "Show test coverage results summary")
   
  (test-coverage-on "Tests covered")
  (test-coverage-off "Tests didn't cover")
@@ -1386,7 +1400,7 @@ please adhere to these guidelines:
  (kill? "Kill?")
 
  ;;; version checker
- (version:update-menu-item   "Check for Updates...")
+ (version:update-menu-item   "Check for Updates…")
  (version:update-check       "Update check") ; dialog title, with the next line
  (version:connecting-server  "Connecting to Racket version server")
  (version:results-title      "Racket Version Check")
@@ -1402,7 +1416,7 @@ please adhere to these guidelines:
  (insert-menu "&Insert")
  
  ;; large semi colon letters
- (insert-large-letters... "Insert Large Letters...")
+ (insert-large-letters... "Insert Large Letters…")
  (large-semicolon-letters "Large Semicolon Letters")
  (text-to-insert "Text to insert")
 
@@ -1410,11 +1424,11 @@ please adhere to these guidelines:
  (module-browser-root-filename "Root Filename: ~a")
  (module-browser-font-size-gauge-label "Font Size")
  (module-browser-progress-label "Module Browser Progress")
- (module-browser-adding-file "Adding file: ~a...")
+ (module-browser-adding-file "Adding file: ~a…")
  (module-browser-laying-out-graph-label "Laying out graph")
  (module-browser-open-file-format "Open ~a")
  (module-browser "Module Browser") ;; frame title
- (module-browser... "&Module Browser...") ;; menu item title
+ (module-browser... "&Module Browser…") ;; menu item title
  (module-browser-in-file "M&odule Browser on ~a") ;; menu item title; ~a is filled with a filename
  (module-browser-no-file "Module Browser on This Saved File") ;; menu item title for above menu item; used when there is no saved file
  (module-browser-error-expanding "Error expanding the program:\n\n~a")
@@ -1487,12 +1501,12 @@ please adhere to these guidelines:
  (stepper-program-window-closed "WARNING: The program window is gone.")
 
  (stepper-name "Stepper")
- (stepper-language-level-message "The stepper does not work for language \"~a\".")
+ (stepper-language-level-message "The stepper does not work for language “~a”.")
  (stepper-button-label "Step")
 
  (stepper-previous "Step")
  (stepper-next "Step")
- (stepper-jump "Jump...")
+ (stepper-jump "Jump…")
  (stepper-jump-to-beginning "to beginning")
  (stepper-jump-to-end "to end")
  (stepper-jump-to-selected "to beginning of selected")
@@ -1761,7 +1775,7 @@ please adhere to these guidelines:
   ;; GUI Tool
   (gui-tool-heading "GUI Tool")
   (gui-tool-before-clicking-message 
-   "Before clicking a tool icon, use \"Insert GUI\" from the \"Special\" menu"
+   "Before clicking a tool icon, use “Insert GUI” from the “Special” menu"
    " to insert a root GUI item, or select an already inserted GUI.")
   (gui-tool-show-gui-toolbar "Show GUI Toolbar")
   (gui-tool-hide-gui-toolbar "Hide GUI Toolbar")
@@ -1778,10 +1792,10 @@ please adhere to these guidelines:
   (bug-track-forget-all "Forget All")
     
   ;; planet status messages in the bottom of the drscheme window; the ~a is filled with the name of the package
-  (planet-downloading "PLaneT: Downloading ~a...")
-  (planet-installing "PLaneT: Installing ~a...")
+  (planet-downloading "PLaneT: Downloading ~a…")
+  (planet-installing "PLaneT: Installing ~a…")
   (planet-finished "PLaneT: Finished with ~a.")
-  (planet-docs-building "PLaneT: Building docs (triggered by ~a)...")
+  (planet-docs-building "PLaneT: Building docs (triggered by ~a)…")
   (planet-no-status "PLaneT") ;; this can happen when there is status shown in a different and then the user switches to a tab where planet hasn't been used
   
   (bug-report-field-pkg "Package system info")
@@ -1818,7 +1832,7 @@ please adhere to these guidelines:
   ; is put following this string (with a blank line in between)
   (spell-program-wrote-to-stderr-on-startup "The spell program (~a) printed an error message:")
   (spell-skip-to-next-misspelled-word "Skip to Next Mispelled Word") ;; menu item
-  (spell-suggest-corrections "Suggest Spelling Corrections...") ;; menu item
+  (spell-suggest-corrections "Suggest Spelling Corrections…") ;; menu item
   (spell-correction-suggestions "Spelling Correction Suggestions") ;; dialog title
   (spell-choose-replacement-word "Select a replacement word") ;; label in dialog 
   
@@ -1828,7 +1842,7 @@ please adhere to these guidelines:
   (install-pkg-install-installed "Currently Installed")    ; tab label
   (install-pkg-migrate-from "Copy from Version")           ; tab label
   (install-pkg-settings "Settings")                        ; tab label
-  (install-pkg-menu-item... "Install Package...")
+  (install-pkg-menu-item... "Install Package…")
   (install-pkg-dialog-title "Install Package")
   (install-pkg-source-label "Package Source")
   (install-pkg-package-name "Package Name")
@@ -1848,11 +1862,14 @@ please adhere to these guidelines:
   (install-pkg-file-or-dir? "Choose a file or a directory?")
   (install-pkg-force? "Ignore conflicts")
   (install-pkg-replace? "Updates can replace existing installations")
+  (install-pkg-dry-run? "Dry run (no installation changes)")
   (install-pkg-command-line "Equivalent command line invocation:")
   (install-pkg-error-installing-title "Error Installing Package")
   (install-pkg-action-label "Action to Take")
   (install-pkg-install "Install")
   (install-pkg-update "Update")
+  (install-pkg-setup "Setup") ; for button
+  (install-pkg-setup-long "Setup Current Installation") ; for menu
   (install-pkg-remove "Remove")
   (install-pkg-do-not-remove "Don't Remove")
   (install-pkg-action-inferred-to-be-update "Action inferred to be Update")
@@ -1883,11 +1900,12 @@ please adhere to these guidelines:
   (install-pkg-abort-demote "Abort Demote")
   (install-pkg-abort-promote "Abort Promote")
   (install-pkg-abort-migrate "Abort Migrate")
+  (install-pkg-abort-setup "Abort Setup")
   (install-pkg-abort-generic-action "Abort Action")
   (install-pkg-close-terminal-output "Close Output")
   (install-pkg-show-all-options "Show All Options")
   (install-pkg-migrate-available-installations "Available Installations")
-  (pkg-manager-menu-item "Package Manager...")  
+  (pkg-manager-menu-item "Package Manager…")
   ;; where ~a gets an installation name:
   (install-pkg-packages-for "Packages for ~a")
   (install-pkg-really-remove-installation "Are you sure you want to remove all installed packages and information for ~a?")
@@ -1914,7 +1932,7 @@ please adhere to these guidelines:
                             " either abort the current one or wait for it to finish.")
   
   ;; open a file via a collection path (new "Open" menu item in DrRacket)
-  (open-require-path "Open Require Path...")
+  (open-require-path "Open Require Path…")
   (enter-subcollection "Enter subcollection") ; button in new dialog
   (path-to-racket-binary "Path to binary")
   (use-a-different-racket "Use a different racket")
@@ -1926,7 +1944,7 @@ please adhere to these guidelines:
   ; third ~a is filled with the path to the bin directory of the current drracket
   (adding-racket/bin-to-path-failed 
    "Attempt to add racket support to the command line failed.~aSpecifically,"
-   " could not create \"~a\" with the contents \"~a\".")
+   " could not create “~a” with the contents “~a”.")
   ; first and third ~a are filled with /etc/paths.d/racket (or some other path like it in the future)
   ; and the second one is filled with the path to the bin directory that was put into that file.
   (added-racket/bin-to-path
@@ -1935,5 +1953,5 @@ please adhere to these guidelines:
    " default PATH has been configured for all users by adding the file"
    " ~a to point to ~a. You can undo this"
    " configuration by deleting ~a.")
-  (add-racket/bin-to-path "Configure Command Line for Racket...") ;; menu item label
+  (add-racket/bin-to-path "Configure Command Line for Racket…") ;; menu item label
   )

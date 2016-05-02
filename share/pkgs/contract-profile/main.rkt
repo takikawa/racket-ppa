@@ -1,9 +1,13 @@
 #lang racket/base
 
-(require racket/list racket/match racket/set racket/format
-         racket/contract racket/contract/private/blame
+(require racket/list racket/match racket/format racket/set
+         racket/contract/combinator
          profile/sampler profile/utils profile/analyzer
-         "dot.rkt" "utils.rkt" "boundary-view.rkt")
+         "utils.rkt"
+         "boundary-view.rkt" "module-graph-view.rkt"
+         (for-syntax racket/base syntax/parse))
+
+(define limit-dots " ... ")
 
 ;; (listof (U blame? #f)) profile-samples -> contract-profile struct
 (define (correlate-contract-samples contract-samples* samples*)
@@ -18,8 +22,10 @@
       ;; In some cases, blame information is missing a party, in which.
       ;; case the contract system provides a pair of the incomplete blame
       ;; and the missing party. We combine the two here.
-      (if (pair? c-s)
-          (blame-add-missing-party (car c-s) (cdr c-s))
+      (if (and (pair? c-s))
+          (if (blame-missing-party? (car c-s))
+              (blame-add-missing-party (car c-s) (cdr c-s))
+              (car c-s))
           c-s)))
   ;; combine blame info and stack trace info. samples should line up
   (define aug-contract-samples
@@ -41,30 +47,32 @@
   (define regular-profile (analyze-samples samples*))
   ;; all blames must be complete, otherwise we get bogus profiles
   (for ([b (in-list all-blames)])
-    (unless (and (blame-positive b)
-                 (blame-negative b))
+    (unless (not (blame-missing-party? b))
       (error (string-append "contract-profile: incomplete blame:\n"
                             (format-blame b)))))
   (contract-profile
    total-time live-contract-samples all-blames regular-profile))
 
 
-(define (analyze-contract-samples contract-samples samples*)
+(define (analyze-contract-samples
+         contract-samples
+         samples*
+         #:module-graph-file [module-graph-file #f]
+         #:boundary-view-file [boundary-view-file #f]
+         #:boundary-view-key-file [boundary-view-key-file #f])
   (define correlated (correlate-contract-samples contract-samples samples*))
-  (with-output-to-report-file cost-breakdown-file
-                              (print-breakdown correlated))
-  (module-graph-view correlated)
-  (boundary-view correlated))
+  (print-breakdown correlated)
+  (when module-graph-file
+    (module-graph-view correlated module-graph-file))
+  (when boundary-view-file
+    (boundary-view correlated boundary-view-file boundary-view-key-file)))
 
 
 ;;---------------------------------------------------------------------------
 ;; Break down contract checking time by contract, then by callee and by chain
 ;; of callers.
 
-(define cost-breakdown-file
-  (string-append output-file-prefix "cost-breakdown.txt"))
-
-(define (print-breakdown correlated)
+(define (print-breakdown correlated [show-by-caller? #f])
   (match-define (contract-profile
                  total-time live-contract-samples all-blames regular-profile)
     correlated)
@@ -79,48 +87,49 @@
 
   (define shorten-source
     (make-srcloc-shortener all-blames blame-source))
-  (define (print-contract/loc c)
-    (printf "~a @ ~a\n" (blame-contract c) (shorten-source c)))
+  (define (format-contract/loc c s)
+    (string-append
+     (~a (blame-contract c) #:limit-marker limit-dots #:width location-width)
+     (~a (format-samples-time s) "\n")
+     (~a (srcloc->string (shorten-source c))
+         #:limit-marker limit-dots
+         #:limit-prefix? #t
+         #:width (- location-width 1))))
+  (define (format-samples-time s)
+    (format "~a ms" (~r (samples-time s) #:precision 2)))
 
-  (displayln "\nBY CONTRACT\n")
   (define samples-by-contract
     (sort (group-by (lambda (x) (blame-contract (car x)))
                     live-contract-samples)
           > #:key length #:cache-keys? #t))
-  (for ([c (in-list samples-by-contract)])
-    (define representative (caar c))
-    (print-contract/loc representative)
-    (printf "  ~a ms\n\n" (samples-time c)))
 
-  (displayln "\nBY CALLEE\n")
+  (define location-width 65)
   (for ([g (in-list samples-by-contract)])
     (define representative (caar g))
-    (print-contract/loc representative)
+    (displayln (format-contract/loc representative g))
     (for ([x (sort
               (group-by (lambda (x)
                           (blame-value (car x))) ; callee source, maybe
                         g)
               > #:key length)])
-      (printf "  ~a\n  ~a ms\n"
-              (blame-value (caar x))
-              (samples-time x)))
+      (display (~a "    " (blame-value (caar x)) #:limit-marker limit-dots #:width location-width))
+      (displayln (format-samples-time x)))
     (newline))
 
-  (define samples-by-contract-by-caller
-    (for/list ([g (in-list samples-by-contract)])
-      (sort (group-by cddr ; pruned stack trace
-                      (map sample-prune-stack-trace g))
-            > #:key length)))
-
-  (displayln "\nBY CALLER\n")
-  (for* ([g samples-by-contract-by-caller]
-         [c g])
-    (define representative (car c))
-    (print-contract/loc (car representative))
-    (for ([frame (in-list (cddr representative))])
-      (printf "  ~a @ ~a\n" (car frame) (cdr frame)))
-    (printf "  ~a ms\n" (samples-time c))
-    (newline)))
+  (when show-by-caller?
+    (define samples-by-contract-by-caller
+      (for/list ([g (in-list samples-by-contract)])
+        (sort (group-by cddr ; pruned stack trace
+                        (map sample-prune-stack-trace g))
+              > #:key length)))
+    (displayln "\nBY CALLER\n")
+    (for* ([g samples-by-contract-by-caller]
+           [c g])
+      (define representative (car c))
+      (displayln (format-contract/loc (car representative) c))
+      (for ([frame (in-list (cddr representative))])
+        (printf "  ~a @ ~a\n" (car frame) (srcloc->string (cdr frame))))
+      (newline))))
 
 ;; Unrolls the stack until it hits a function on the negative side of the
 ;; contract boundary (based on module location info).
@@ -138,107 +147,48 @@
 
 
 ;;---------------------------------------------------------------------------
-;; Show graph of modules, with contract boundaries and contract costs for each
-;; boundary.
-;; Typed modules are in green, untyped modules are in red.
-
-(define module-graph-dot-file
-  (string-append output-file-prefix "module-graph.dot"))
-
-(define (module-graph-view correlated)
-  (match-define (contract-profile
-                 total-time live-contract-samples all-blames regular-profile)
-    correlated)
-
-  ;; first, enumerate all the relevant modules
-  (define-values (nodes edge-samples)
-    (for/fold ([nodes (set)] ; set of modules
-               ;; maps pos-neg edges (pairs) to lists of samples
-               [edge-samples (hash)])
-        ([s (in-list live-contract-samples)])
-      (match-define (list blame sample-time stack-trace ...) s)
-      (when (empty? stack-trace)
-        (log-warning "contract profiler: sample had empty stack trace"))
-      (define pos (blame-positive blame))
-      (define neg (blame-negative blame))
-      ;; We consider original blames and their swapped versions to be the same.
-      (define edge-key (if (blame-swapped? blame)
-                           (cons neg pos)
-                           (cons pos neg)))
-      (values (set-add (set-add nodes pos) neg) ; add all new modules
-              (hash-update edge-samples edge-key
-                           (lambda (ss) (cons s ss))
-                           '()))))
-
-  (define nodes->typed?
-    (for/hash ([n nodes]
-               ;; Needs to be either a file or a submodule.
-               ;; I've seen 'unit and 'not-enough-info-for-blame go by here,
-               ;; and we can't do anything with either.
-               #:when (or (path? n) (pair? n)))
-      ;; typed modules have a #%type-decl submodule
-      (define submodule? (not (path? n)))
-      (define filename (if submodule? (car n) n))
-      (define typed?
-        (with-handlers
-            ([(lambda (e)
-                (and (exn:fail:contract? e)
-                     (or (regexp-match "^dynamic-require: unknown module"
-                                       (exn-message e))
-                         (regexp-match "^path->string"
-                                       (exn-message e)))))
-              (lambda _ #f)])
-          (dynamic-require
-           (append (list 'submod (list 'file (path->string filename)))
-                   (if submodule? (cdr n) '())
-                   '(#%type-decl))
-           #f)
-          #t))
-      (values n typed?)))
-
-  ;; graphviz output
-  (with-output-to-report-file
-   module-graph-dot-file
-   (printf "digraph {\n")
-   (printf "rankdir=LR\n")
-   (define nodes->names (for/hash ([n nodes]) (values n (gensym))))
-   (define node->labels (make-shortener nodes))
-   (for ([n nodes])
-     (printf "~a[label=\"~a\"][color=\"~a\"]\n"
-             (hash-ref nodes->names n)
-             (node->labels n)
-             (if (hash-ref nodes->typed? n #f) "green" "red")))
-   (for ([(k v) (in-hash edge-samples)])
-     (match-define (cons pos neg) k)
-     (printf "~a -> ~a[label=\"~ams\"]\n"
-             (hash-ref nodes->names neg)
-             (hash-ref nodes->names pos)
-             (samples-time v)))
-   (printf "}\n"))
-  ;; render, if graphviz is installed
-  (render-dot module-graph-dot-file))
-
-
-;;---------------------------------------------------------------------------
 ;; Entry point
 
 (provide (rename-out [contract-profile/user contract-profile])
          contract-profile-thunk
          analyze-contract-samples) ; for feature-specific profiler
 
-;; TODO have kw args for profiler, etc.
-;; TODO have kw args for output files
-(define-syntax-rule (contract-profile/user body ...)
-  (let ([sampler (create-sampler (current-thread) 0.005 (current-custodian)
-                                 (list contract-continuation-mark-key))])
-    (begin0 (begin body ...)
-      (let ()
-        (sampler 'stop)
-        (define samples (sampler 'get-snapshots))
-        (define contract-samples
-          (for/list ([s (in-list (sampler 'get-custom-snapshots))])
-            (and (not (empty? s)) (vector-ref (car s) 0))))
-        (analyze-contract-samples contract-samples samples)))))
+;; TODO have kw args for sampler, etc.
+(define-syntax (contract-profile/user stx)
+  (syntax-parse stx
+    [(_ (~or
+         ;; these arguments are: (or/c filename 'stdout #f) ; #f = disabled
+         ;; absent means default filename
+         (~optional (~seq #:module-graph-file module-graph-file:expr)
+                    #:defaults ([module-graph-file #'#f]))
+         (~optional (~seq #:boundary-view-file boundary-view-file:expr)
+                    #:defaults ([boundary-view-file #'#f]))
+         (~optional (~seq #:boundary-view-key-file boundary-view-key-file:expr)
+                    #:defaults ([boundary-view-key-file #'#f])))
+        ...
+        body:expr ...)
+     #`(let ([sampler (create-sampler (current-thread) 0.005 (current-custodian)
+                                      (list contract-continuation-mark-key))])
+         (begin0 (begin body ...)
+           (let ()
+             (sampler 'stop)
+             (define samples (sampler 'get-snapshots))
+             (define contract-samples
+               (for/list ([s (in-list (sampler 'get-custom-snapshots))])
+                 (and (not (empty? s)) (vector-ref (car s) 0))))
+             (analyze-contract-samples
+              contract-samples
+              samples
+              #:module-graph-file module-graph-file
+              #:boundary-view-file boundary-view-file
+              #:boundary-view-key-file boundary-view-key-file))))]))
 
-(define (contract-profile-thunk f)
-  (contract-profile/user (f)))
+(define (contract-profile-thunk f
+                                #:module-graph-file [module-graph-file #f]
+                                #:boundary-view-file [boundary-view-file #f]
+                                #:boundary-view-key-file [boundary-view-key-file #f])
+  (contract-profile/user
+    #:module-graph-file module-graph-file
+    #:boundary-view-file boundary-view-file
+    #:boundary-view-key-file boundary-view-key-file
+    (f)))

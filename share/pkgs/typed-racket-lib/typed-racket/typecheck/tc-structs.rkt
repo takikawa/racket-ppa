@@ -9,7 +9,7 @@
          (types abbrev utils resolve substitute struct-table prefab)
          (env global-env type-name-env type-alias-env tvar-env)
          (utils tc-utils)
-         (typecheck def-binding internal-forms)
+         (typecheck def-binding internal-forms check-below)
          (for-syntax syntax/parse racket/base))
 
 (require-for-cond-contract racket/struct-info)
@@ -35,10 +35,11 @@
 ;; type-name : Id
 ;; struct-type : Id
 ;; constructor : Id
+;; extra-constructor : (Option Id)
 ;; predicate : Id
 ;; getters : Listof[Id]
 ;; setters : Listof[Id] or #f
-(struct struct-names (type-name struct-type constructor predicate getters setters) #:transparent)
+(struct struct-names (type-name struct-type constructor extra-constructor predicate getters setters) #:transparent)
 
 ;;struct-fields: holds all the relevant information about a struct type's types
 (struct struct-desc (parent-fields self-fields tvars mutable proc-ty) #:transparent)
@@ -51,8 +52,7 @@
 (define (name-of-struct stx)
   (syntax-parse stx
     [(~or t:typed-struct t:typed-struct/exec)
-     #:with nm/par:parent #'t.nm
-     #'nm/par.name]))
+     #'t.type-name]))
 
 
 ;; parse name field of struct, determining whether a parent struct was specified
@@ -79,9 +79,8 @@
 ;; generate struct names given type name, field names
 ;; and optional constructor name
 ;; all have syntax loc of name
-;; identifier listof[identifier] Option[identifier] ->
-;;   (values identifier identifier list[identifier] list[identifier])
-(define (get-struct-names nm flds maker*)
+;; identifier listof[identifier] Option[identifier] -> struct-names
+(define (get-struct-names type-name nm flds maker* extra-maker)
   (define (split l)
     (let loop ([l l] [getters '()] [setters '()])
       (if (null? l)
@@ -90,7 +89,7 @@
   (match (build-struct-names nm flds #f #f nm #:constructor-name maker*)
     [(list sty maker pred getters/setters ...)
      (let-values ([(getters setters) (split getters/setters)])
-       (struct-names nm sty maker pred getters setters))]))
+       (struct-names type-name sty maker extra-maker pred getters setters))]))
 
 ;; gets the fields of the parent type, if they exist
 ;; Option[Struct-Ty] -> Listof[Type]
@@ -192,12 +191,19 @@
             (make-def-binding s (poly-wrapper (->* (list poly-base t) -Void))))
           null))))
 
-  (add-struct-constructor! (struct-names-constructor names))
+  (define extra-constructor (struct-names-extra-constructor names))
 
   (define constructor-binding
-     (make-def-binding (struct-names-constructor names) (poly-wrapper (->* all-fields poly-base))))
+    (make-def-binding (struct-names-constructor names)
+                      (poly-wrapper (->* all-fields poly-base))))
+  (define constructor-bindings
+    (cons constructor-binding
+          (if extra-constructor
+              (list (make-def-binding extra-constructor
+                                      (poly-wrapper (->* all-fields poly-base))))
+              null)))
 
-  (for ([b (cons constructor-binding bindings)])
+  (for ([b (append constructor-bindings bindings)])
     (register-type (binding-name b) (def-binding-ty b)))
 
   (append
@@ -235,9 +241,10 @@
 ;; tc/struct : Listof[identifier] (U identifier (list identifier identifier))
 ;;             Listof[identifier] Listof[syntax]
 ;;             -> void
-(define (tc/struct vars nm/par fld-names tys
+(define (tc/struct vars nm/par type-name fld-names tys
                    #:proc-ty [proc-ty #f]
                    #:maker [maker #f]
+                   #:extra-maker [extra-maker #f]
                    #:mutable [mutable #f]
                    #:type-only [type-only #f]
                    #:prefab? [prefab? #f])
@@ -250,7 +257,7 @@
   (define types
     ;; add the type parameters of this structure to the tvar env
     (extend-tvars tvars
-      (parameterize ([current-poly-struct `#s(poly ,nm ,new-tvars)])
+      (parameterize ([current-poly-struct `#s(poly ,type-name ,new-tvars)])
         ;; parse the field types
         (map parse-type tys))))
   ;; instantiate the parent if necessary, with new-tvars
@@ -265,7 +272,7 @@
   ;; create the actual structure type, and the types of the fields
   ;; that the outside world will see
   ;; then register it
-  (define names (get-struct-names nm fld-names maker))
+  (define names (get-struct-names type-name nm fld-names maker extra-maker))
 
   (cond [prefab?
          (define-values (parent-key parent-fields)
@@ -286,12 +293,17 @@
          (parsed-struct (make-Prefab key (append parent-fields types))
                         names desc (struct-info-property nm/par) #f)]
         [else
+	 (define maybe-parsed-proc-ty
+	   (and proc-ty (parse-type proc-ty)))
+	 ;; ensure that the prop:procedure argument is really a procedure
+	 (when maybe-parsed-proc-ty
+	   (check-below maybe-parsed-proc-ty top-func))
          (define desc (struct-desc
                         (map fld-t (get-flds concrete-parent))
                         types
                         tvars
                         mutable
-                        (and proc-ty (parse-type proc-ty))))
+			maybe-parsed-proc-ty))
          (define sty (mk/inner-struct-type names desc concrete-parent))
 
          (parsed-struct sty names desc (struct-info-property nm/par) type-only)]))
@@ -310,7 +322,7 @@
     (and parent (resolve-name (make-Name parent 0 #t))))
   (define parent-tys (map fld-t (get-flds parent-type)))
 
-  (define names (get-struct-names nm fld-names #f))
+  (define names (get-struct-names nm nm fld-names #f #f))
   (define desc (struct-desc parent-tys tys null #t #f))
   (define sty (mk/inner-struct-type names desc parent-type))
 

@@ -4,6 +4,7 @@
          web-server/http
          web-server/private/xexpr
          (only-in "lib.rkt"
+                  xexpr-forest/c
                   formlet/c
                   pure
                   cross))
@@ -130,7 +131,8 @@
                      #:kind kind
                      #:attributes [attrs (λ (x) empty)]
                      #:checked? [checked? (λ (x) #f)]
-                     #:display [display (λ (x) x)])
+                     #:display [display (λ (x) x)]
+                     #:wrap [wrap (λ (x y) (list x y))])
   (define value->element (make-hasheq))
   (define i 0)
   (define (remember! e)
@@ -160,25 +162,27 @@
              (for/list ([vn (in-range i)])
                        (define e (hash-ref value->element vn))
                        (define v (number->string vn))
-                       (list
-                        `(input ([name ,name]
-                                 [type ,kind]
-                                 [value ,v]
-                                 ,@(if (checked? e)
-                                       '([checked "true"])
-                                       empty)
-                                 ,@(attrs e)))
-                        (display e))))))))
+					   (wrap 
+						 `(input ([name ,name]
+								  [type ,kind]
+								  [value ,v]
+								  ,@(if (checked? e)
+									  '([checked "true"])
+									  empty)
+								  ,@(attrs e)))
+						 (display e))))))))
 
 (define (radio-group l 
                      #:attributes [attrs (λ (x) empty)]
                      #:checked? [checked? (λ (x) #f)]
-                     #:display [display (λ (x) x)])
+                     #:display [display (λ (x) x)]
+                     #:wrap [wrap (λ (x y) (list x y))])
   (input-group l
                #:kind "radio"
                #:attributes attrs
                #:checked? checked?
-               #:display display))
+               #:display display
+               #:wrap wrap))
 
 (define (checkbox-group l 
                      #:attributes [attrs (λ (x) empty)]
@@ -353,7 +357,8 @@
                (#:attributes 
                 (-> any/c (listof (list/c symbol? string?)))
                 #:checked? (any/c . -> . boolean?)
-                #:display (any/c . -> . pretty-xexpr/c))
+                #:display (any/c . -> . pretty-xexpr/c)
+                #:wrap (any/c any/c . -> . xexpr-forest/c))
                . ->* .
                (formlet/c any/c))]
  [checkbox-group ((sequence?)

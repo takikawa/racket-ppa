@@ -489,7 +489,7 @@
     (fl-type-lambda
       (from-cases (-FlZero -Fl . -> . -FlZero)
                   ;; we don't have Pos Pos -> Pos, possible underflow
-                  (-NonNegFl -NonNegFl . -> . -NonNegFl)
+                  (-PosFl -PosFl . -> . -NonNegFl)
                   (commutative-binop -PosFl -NegFl -NonPosFl)
                   (-NegFl -NegFl . -> . -NonNegFl)
                   (binop -Fl))))
@@ -568,7 +568,8 @@
     (fl-type-lambda
       (from-cases (-FlZero -PosFl . -> . -FlZero) ; (flexpt -0.0 0.1) -> 0.0 ; not sign preserving
                   ((Un -PosFl -NegFl) -FlZero . -> . -PosFl) ; always returns 1.0
-                  (-NonNegFl -Fl . -> . -NonNegFl) ; can underflow
+                  ;; can underflow, and -0.0 breaks sign, so 1st arg can't be non-neg
+                  (-PosFl -Fl . -> . -NonNegFl)
                   (-Fl -Fl . -> . -Fl))))
 
   (define fx->fl-type
@@ -1164,12 +1165,12 @@
     (commutative-case -InexactReal (Un -PosRat -NegRat -InexactReal) -InexactReal)
     (varop-1+ -InexactReal)
     ;; reals
-    (varop-1+ -NonNegReal -NonNegReal)
+    (varop-1+ -PosReal -NonNegReal)
     (-> -NonPosReal -NonPosReal)
-    (-> -NonPosReal -NonPosReal -NonNegReal)
-    (-> -NonPosReal -NonNegReal -NonPosReal)
-    (-> -NonNegReal -NonPosReal -NonPosReal)
-    (-> -NonPosReal -NonPosReal -NonPosReal -NonPosReal)
+    (-> -NegReal -NegReal -NonNegReal) ; 0.0 is non-neg, but doesn't preserve sign
+    (-> -NegReal -PosReal -NonPosReal) ; idem
+    (-> -PosReal -NegReal -NonPosReal) ; idem
+    (-> -NegReal -NegReal -NegReal -NonPosReal) ; idem
     (varop-1+ -Real)
     ;; complexes
     (varop-1+ -FloatComplex)
@@ -1224,6 +1225,10 @@
              (map varop (list -PosByte -Byte -PosIndex -Index -PosFixnum -NonNegFixnum))
              (commutative-case -NegFixnum -Fixnum)
              (commutative-case -NonPosFixnum -Fixnum)
+             (commutative-case -PosByte -PosInt)
+             (commutative-case -Byte -Nat)
+             (commutative-case -PosFixnum -PosInt)
+             (commutative-case -NonNegFixnum -Nat)
              (map varop (list -NegFixnum -NonPosFixnum -Fixnum -PosInt -Nat))
              (commutative-case -NegInt -Int)
              (commutative-case -NonPosInt -Int)
@@ -1377,16 +1382,16 @@
                          (-Int -Int . -> . -Int))]
 
 [bitwise-and
- (let ([mix-with-int
+ (let ([mix-with-nat
         (lambda (t)
           (list (->* (list t) t t) ; closed
-                (->* (list -Int t) t t) ; brings result down
-                (->* (list t -Int) t t)))])
+                (->* (list -Nat t) t t) ; brings result down
+                (->* (list t -Nat) t t)))])
    (from-cases (-> -NegFixnum) ; no args -> -1
-               (map mix-with-int (list -Zero -Byte -Index -NonNegFixnum))
+               (map mix-with-nat (list -Zero -Byte -Index -NonNegFixnum))
                ;; closed on negatives, but not closed if we mix with positives
-               (map varop-1+ (list -NegFixnum -NonPosFixnum))
-               (map mix-with-int (list -Fixnum -Nat))
+               (map varop-1+ (list -NegFixnum -NonPosFixnum -Fixnum))
+               (map mix-with-nat (list -Nat))
                (map varop-1+ (list -NegInt -NonPosInt))
                (null -Int . ->* . -Int)))]
 [bitwise-ior
@@ -1606,25 +1611,35 @@
              (-PosRat -Int . -> . -PosRat)
              (-NonNegRat -Int . -> . -NonNegRat)
              (-Rat -Int . -> . -Rat)
-             (-NonNegFlonum -NonNegFlonum . -> . -NonNegFlonum)
-             (-NonNegFlonum -NonNegReal . -> . (Un -NonNegFlonum -One))
+             (-NonNegFlonum -Flonum . -> . -NonNegFlonum)
+             (-NonNegFlonum -Real . -> . (Un -NonNegFlonum -One))
              (-PosReal -NonNegFlonum . -> . (Un -NonNegFlonum -One))
-             (-Flonum (Un -NegInt -PosInt) . -> . -Flonum)
-             (-Flonum -Int . -> . (Un -Flonum -One))
+             ;; even integer exponents can give complex results
+             ;; too large exponents turn into infinities, and (expt -inf.0 -inf.0) => nan.0+nan.0i
+             ;; so no narrower cases for those. fixnums are ok, though
+             (-Flonum (Un -NegFixnum -PosFixnum) . -> . -Flonum)
+             (-Flonum -Fixnum . -> . (Un -Flonum -One))
              (-Flonum -Flonum . -> . (Un -Flonum -FloatComplex))
-             (-NonNegSingleFlonum (Un -NonNegSingleFlonum -NegRat -PosRat) . -> . -NonNegSingleFlonum)
-             (-SingleFlonum (Un -NegInt -PosInt) . -> . -SingleFlonum)
-             (-SingleFlonum -Int . -> . (Un -SingleFlonum -One))
+             ;; 1st arg can't be non-neg, -0.0 gives the wrong sign
+             (-PosSingleFlonum (Un -SingleFlonum -NegFixnum -PosFixnum) . -> . -NonNegSingleFlonum)
+             (-NonNegSingleFlonum (Un -SingleFlonum -NegFixnum -PosFixnum) . -> . -SingleFlonum)
+             (-SingleFlonum (Un -NegFixnum -PosFixnum) . -> . -SingleFlonum)
+             (-SingleFlonum -Fixnum . -> . (Un -SingleFlonum -One))
              (-SingleFlonum -SingleFlonum . -> . (Un -SingleFlonum -SingleFlonumComplex))
-             (-NonNegInexactReal (Un -NegReal -PosReal) . -> . -NonNegInexactReal)
-             (-NonNegReal -Real . -> . -NonNegReal)
-             (-InexactReal (Un -NegInt -PosInt) . -> . -InexactReal)
+             (-PosInexactReal (Un -NegFixnum -PosFixnum) . -> . -NonNegInexactReal)
+             (-NonNegInexactReal (Un -NegFixnum -PosFixnum) . -> . -InexactReal)
+             (-PosReal -Real . -> . -NonNegReal)
+             (-NonNegReal -Real . -> . -Real)
+             (-InexactReal (Un -NegFixnum -PosFixnum) . -> . -InexactReal)
              (-InexactReal -InexactReal . -> . (Un -InexactReal -InexactComplex))
-             (-Real -Int . -> . -Real)
-             (-FloatComplex (Un -InexactComplex -InexactReal) . -> . -FloatComplex)
-             (-SingleFlonumComplex (Un -SingleFlonum -SingleFlonumComplex) . -> . -SingleFlonumComplex)
-             ((Un -InexactReal -InexactComplex) -InexactComplex . -> . -InexactComplex)
-             (-InexactComplex (Un -InexactReal -InexactComplex) . -> . -InexactComplex)
+             (-Real -Nat . -> . -Real)
+             (-FloatComplex -FloatComplex . -> . -FloatComplex)
+             (-FloatComplex -Flonum . -> . (Un -FloatComplex -Flonum))
+             (-FloatComplex -InexactReal . -> . (Un -FloatComplex -InexactReal))
+             (-FloatComplex -InexactComplex . -> . -FloatComplex)
+             (-SingleFlonumComplex -SingleFlonumComplex . -> . -SingleFlonumComplex)
+             (-SingleFlonumComplex -SingleFlonum . -> . (Un -SingleFlonumComplex -SingleFlonum))
+             (-InexactComplex -InexactComplex . -> . -InexactComplex)
              (N N . -> . N))]
 [sqrt
  (from-cases

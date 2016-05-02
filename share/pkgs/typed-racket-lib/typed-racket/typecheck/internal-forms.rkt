@@ -74,12 +74,13 @@
 ;;; Helpers
 
 (define-splicing-syntax-class dtsi-fields
- #:attributes (mutable prefab type-only maker)
+ #:attributes (mutable prefab type-only maker extra-maker)
  (pattern
   (~seq
     (~or (~optional (~and #:mutable (~bind (mutable #t))))
          (~optional (~and #:prefab (~bind (prefab #t))))
          (~optional (~and #:type-only (~bind (type-only #t))))
+         (~optional (~seq #:extra-maker extra-maker))
          (~optional (~seq #:maker maker))) ...)))
 
 (define-syntax-class struct-name
@@ -88,14 +89,16 @@
 
 
 (define-syntax-class define-typed-struct-body
-  #:attributes (name mutable prefab type-only maker nm (tvars 1) (fields 1) (types 1))
+  #:attributes (name type-name mutable prefab type-only maker extra-maker nm
+                (tvars 1) (fields 1) (types 1))
   (pattern ((~optional (tvars:id ...) #:defaults (((tvars 1) null)))
-            nm:struct-name ([fields:id : types:expr] ...) options:dtsi-fields)
+            nm:struct-name type-name:id ([fields:id : types:expr] ...) options:dtsi-fields)
            #:attr name #'nm.nm
            #:attr mutable (attribute options.mutable)
            #:attr prefab (attribute options.prefab)
            #:attr type-only (attribute options.type-only)
-           #:attr maker (or (attribute options.maker) #'nm.nm)))
+           #:attr maker (or (attribute options.maker) #'nm.nm)
+           #:attr extra-maker (attribute options.extra-maker)))
 
 (define-syntax-class dviu-import/export
   (pattern (sig-id:id member-id:id ...)
@@ -148,7 +151,7 @@
   [typed-struct
     (define-typed-struct-internal . :define-typed-struct-body)]
   [typed-struct/exec
-    (define-typed-struct/exec-internal nm ([fields:id : types] ...) proc-type)]
+    (define-typed-struct/exec-internal nm type-name ([fields:id : types] ...) proc-type)]
   [typed-require
     (require/typed-internal name type)]
   [typed-require/struct

@@ -43,6 +43,8 @@
 (defautoload scribble/xref          xref-binding->definition-tag)
 (defautoload scribble/blueboxes     fetch-blueboxes-strs make-blueboxes-cache)
 
+(define original-input-port (current-input-port))
+
 ;; similar, but just for identifiers
 (define hidden-namespace (make-base-namespace))
 (define initial-namespace (current-namespace))
@@ -442,7 +444,8 @@
                    (string-append "$EDITOR ("env") not found in your path")
                    "no $EDITOR variable"))
          (run-command 'drracket)]
-        [(not (apply system* exe (getarg 'path 'list #:default here-path)))
+        [(not (let ([arg (getarg 'path 'list #:default here-path)])
+                    (parameterize ([current-input-port original-input-port]) (apply system* exe arg))))
          (eprintf "; (exit with an error status)\n")]
         [else (void)]))
 
@@ -1334,7 +1337,7 @@
   (define existing-readline?
     (look-for "load readline support[^\r\n]*" "(require readline/rep)"))
   (define (yes? question)
-    (define qtext (string->bytes/utf-8 (format "; ~a? " question)))
+    (define qtext (string->bytes/utf-8 (format "; ~a? (yes/no) " question)))
     (define inp
       (case (object-name (current-input-port))
         [(readline-input)

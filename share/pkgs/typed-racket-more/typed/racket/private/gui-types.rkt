@@ -1214,6 +1214,7 @@
                [demand-callback
                 ((Instance Checkable-Menu-Item%) -> Any)
                 #:optional]
+               [checked Boolean #:optional]
                [shortcut-prefix (Listof (U 'alt 'cmd 'meta 'ctl
                                            'shift 'option))
                                 #:optional])
@@ -1635,7 +1636,7 @@
                [style (Listof (U 'no-border 'control-border 'combo
                                  'no-hscroll 'no-vscroll
                                  'hide-hscroll 'hide-vscroll
-                                 'auto-vscoll 'auto-hscroll
+                                 'auto-vscroll 'auto-hscroll
                                  'resize-corner 'no-focus 'deleted
                                  'transparent))
                       #:optional]
@@ -2110,11 +2111,11 @@
           ((Option (Boxof Real)) (Option (Boxof Real)) -> Void)]
          [get-file ((Option Path) -> (Option Path-String))]
          [get-filename
-          ((Option (Boxof Any)) -> (Option Path-String))]
+          (->* () ((Option (Boxof Any))) (Option Path-String))]
          [get-flattened-text (-> String)]
          [get-focus-snip (-> (Option (Instance Snip%)))]
          [get-inactive-caret-threshold (-> (U 'no-caret 'show-inactive-caret 'show-caret))]
-         [get-keymap (-> (Option Keymap%))]
+         [get-keymap (-> (Option (Instance Keymap%)))]
          [get-load-overwrites-styles (-> Boolean)]
          [get-max-height (-> (U Nonnegative-Real 'none))]
          [get-max-undo-history (-> (U Natural 'forever))]
@@ -2299,8 +2300,8 @@
          [set-active-canvas ((Instance Editor-Canvas%) -> Void)]
          [set-admin ((Option (Instance Editor-Admin%)) -> Void)]
          [set-caret-owner
-          (case-> ((Option Snip%) -> Void)
-                  ((Option Snip%) (U 'immediate 'display 'global) -> Void))]
+          (case-> ((Option (Instance Snip%)) -> Void)
+                  ((Option (Instance Snip%)) (U 'immediate 'display 'global) -> Void))]
          [set-cursor
           (case-> ((Option (Instance Cursor%)) -> Void)
                   ((Option (Instance Cursor%)) Any -> Void))]
@@ -2310,7 +2311,7 @@
          [set-inactive-caret-threshold
           ((U 'no-caret 'show-inactive-caret 'show-caret) -> Void)]
          [set-keymap
-          (case-> (-> Void) ((Option Keymap%) -> Void))]
+          (case-> (-> Void) ((Option (Instance Keymap%)) -> Void))]
          [set-load-overwrites-styles (Any -> Void)]
          [set-max-height ((U Integer 'none) -> Void)]
          [set-max-undo-history ((U Integer 'forever) -> Void)]
@@ -2835,7 +2836,7 @@
          [get-flags (-> (Listof Symbol))]
          [get-num-scroll-steps (-> Natural)]
          [get-scroll-step-offset (Natural -> Nonnegative-Real)]
-         [get-snipclass (-> (Option Snip-Class%))]
+         [get-snipclass (-> (Option (Instance Snip-Class%)))]
          [get-style (-> (Instance Style<%>))]
          [get-text
           (case-> (Natural Natural -> String)

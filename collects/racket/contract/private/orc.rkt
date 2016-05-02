@@ -23,7 +23,7 @@
                   [flat-contracts '()]
                   [args args])
          (cond
-           [(null? args) (values ho-contracts (reverse flat-contracts))]
+           [(null? args) (values (reverse ho-contracts) (reverse flat-contracts))]
            [else 
             (let ([arg (car args)])
               (cond

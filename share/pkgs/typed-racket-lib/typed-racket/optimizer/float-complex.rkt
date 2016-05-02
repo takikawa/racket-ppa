@@ -1,11 +1,12 @@
 #lang racket/base
 
-(require syntax/parse syntax/stx racket/promise
+(require syntax/parse syntax/stx syntax/id-table racket/promise
          racket/syntax racket/match syntax/parse/experimental/specialize
          "../utils/utils.rkt" racket/unsafe/ops racket/sequence
          (for-template racket/base racket/math racket/flonum racket/unsafe/ops)
          (types numeric-tower subtype type-table utils)
-         (optimizer utils numeric-utils logging float unboxed-tables))
+         (optimizer utils numeric-utils logging float unboxed-tables)
+         (utils tc-utils))
 
 (provide float-complex-opt-expr
          float-complex-expr
@@ -50,14 +51,56 @@
       "The optimizer could optimize it better if it had type Float-Complex.")
     this-syntax))
 
-;; If a part is 0.0?
-(define (0.0? stx)
-  (equal? (syntax->datum stx) 0.0))
+;; keep track of operands that were reals (and thus had exact 0 as imaginary part)
+(define real-id-table (make-free-id-table))
+(define (was-real? stx)
+  (free-id-table-ref real-id-table stx #f))
+(define (mark-as-real stx)
+  (free-id-table-set! real-id-table stx #t)
+  stx)
+;; keep track of operands that were not floats (i.e. rationals and single floats)
+;; to avoid prematurely converting to floats, which may change results
+(define non-float-table (make-hash))
+(define (as-non-float stx)
+  (hash-ref non-float-table stx #f))
+(define (mark-as-non-float stx [orig stx])
+  (hash-set! non-float-table stx orig)
+  stx)
 
+(define (n-ary->binary/non-floats op unsafe this-syntax cs)
+  (let loop ([o (stx-car cs)] [cs (stx-cdr cs)])
+    ;; we're guaranteed to hit non-"non-float" operands before
+    ;; we hit the end of the list. otherwise we wouldn't be doing
+    ;; float-complex optimizations
+    (define c1 (stx-car cs))
+    (define o-nf (as-non-float o))
+    (define c1-nf (as-non-float c1))
+    (if (or o-nf c1-nf)
+        ;; can't convert those to floats just yet, or may change
+        ;; the result
+        (let ([new-o (mark-as-non-float
+                      (quasisyntax/loc this-syntax
+                        (#,op #,(or o-nf o) #,(or c1-nf c1))))])
+          (if (stx-null? (stx-cdr cs))
+              new-o
+              (loop new-o
+                    (stx-cdr cs))))
+        ;; we've hit floats, can start coercing
+        (n-ary->binary this-syntax unsafe (cons #`(real->double-flonum #,(or o-nf o)) cs)))))
 
 ;; a+bi / c+di, names for real and imag parts of result -> one let-values binding clause
 (define (unbox-one-complex-/ a b c d res-real res-imag)
-  (define both-real? (and (0.0? b) (0.0? d)))
+  (define first-arg-real? (was-real? b))
+  (define second-arg-real? (was-real? d))
+  ;; if both are real, we can short-circuit a lot
+  (define both-real? (and first-arg-real? second-arg-real?))
+  (define first-non-float (as-non-float a))
+  (define second-non-float (as-non-float c))
+
+  (when (and first-non-float (not second-non-float))
+    ;; we're going from non-float to float operands, so need to coerce the first
+    (set! a #`(real->double-flonum #,a)))
+
   ;; we have the same cases as the Racket `/' primitive (except for the non-float ones)
   (define d=0-case
     #`(values (unsafe-fl+ (unsafe-fl/ #,a #,c)
@@ -85,10 +128,42 @@
                         (unsafe-fl/ (unsafe-fl- (unsafe-fl* b r) a) den))])
         (values (unsafe-fl/ (unsafe-fl+ b (unsafe-fl* a r)) den)
                 i)))
-  (cond [both-real?
-         #`[(#,res-real #,res-imag)
+
+  (cond [(and first-non-float second-non-float both-real?)
+         ;; we haven't hit float operands, so we shouldn't coerce to float yet
+         #`[(#,(mark-as-non-float res-real)
+             #,(mark-as-real res-imag)) ; this case implies real
+            (values (/ #,first-non-float #,second-non-float)
+                    0.0)]]
+        [second-non-float
+         ;; may be dividing by exact 0, be conservative to preserve error
+         ;; (res-real can't be non-float, since we've hit a float, so we either
+         ;; error or coerce)
+         #`[(#,res-real #,(if both-real?
+                              (mark-as-real res-imag)
+                              res-imag))
+            (let-values ([(res-div)
+                          (/ #,(if first-arg-real?
+                                   a
+                                   #`(make-rectangular #,a #,b))
+                             #,(if second-arg-real?
+                                   second-non-float
+                                   #`(make-rectangular #,second-non-float
+                                                       #,d)))])
+              #,(if both-real?
+                    #'(values res-div 0.0)
+                    #'(values (real-part res-div)
+                              (imag-part res-div))))]]
+        [both-real?
+         #`[(#,res-real #,(mark-as-real res-imag))
             (values (unsafe-fl/ #,a #,c)
                     0.0)]] ; currently not propagated
+        [second-arg-real?
+         #`[(#,res-real #,res-imag)
+            (values (unsafe-fl/ #,a #,c)
+                    (unsafe-fl/ #,b #,c))]]
+        [first-arg-real?
+         (unbox-one-float-complex-/ a c d res-real res-imag)]
         [else
          #`[(#,res-real #,res-imag)
             (cond [(unsafe-fl= #,d 0.0) #,d=0-case]
@@ -112,7 +187,7 @@
     #`(let* ([cm    (unsafe-flabs #,c)]
              [dm    (unsafe-flabs #,d)]
              [swap? (unsafe-fl< cm dm)]
-             [a     #,a]
+             [a     #,a] ; don't swap with `b` (`0`) here, but handle below
              [c     (if swap? #,d #,c)]
              [d     (if swap? #,c #,d)]
              [r     (unsafe-fl/ c d)]
@@ -145,14 +220,24 @@
     #:with (bindings ...)
       #`(cs.bindings ... ...
          #,@(let ()
-               (define (fl-sum cs) (n-ary->binary this-syntax #'unsafe-fl+ cs))
+              (define (fl-sum cs)
+                (n-ary->binary/non-floats #'+ #'unsafe-fl+ this-syntax cs))
+              (define non-0-imags
+                ;; to preserve result sign, ignore exact 0s
+                ;; o/w, can have (+ -0.0 (->fl 0)) => 0.0, but would be -0.0
+                ;; without the coercion
+                (for/list ([i (syntax->list #'(cs.imag-binding ...))]
+                           #:unless (was-real? i))
+                  i))
                (list
                 #`((real-binding) #,(fl-sum #'(cs.real-binding ...)))
-                #`((imag-binding) #,(fl-sum #'(cs.imag-binding ...)))))))
+                #`((imag-binding)
+                   #,(if (null? (cdr non-0-imags)) ; only one actual imag part
+                         (car non-0-imags)
+                         (fl-sum non-0-imags)))))))
   (pattern (#%plain-app op:+^ :unboxed-float-complex-opt-expr)
     #:when (subtypeof? this-syntax -FloatComplex)
     #:do [(log-unboxing-opt "unboxed unary float complex")])
-
 
   (pattern (#%plain-app op:-^ (~between cs:unboxed-float-complex-opt-expr 2 +inf.0) ...)
     #:when (subtypeof? this-syntax -FloatComplex)
@@ -161,10 +246,21 @@
     #:with (bindings ...)
       #`(cs.bindings ... ...
          #,@(let ()
-              (define (fl-subtract cs) (n-ary->binary this-syntax #'unsafe-fl- cs))
+              (define (fl-subtract cs)
+                (n-ary->binary/non-floats #'- #'unsafe-fl- this-syntax cs))
               (list
                #`((real-binding) #,(fl-subtract #'(cs.real-binding ...)))
-               #`((imag-binding) #,(fl-subtract #'(cs.imag-binding ...)))))))
+               #`((imag-binding)
+                  ;; can't ignore exact 0 imag parts from real numbers, as with
+                  ;; addition, because the first value is special
+                  ;; so just conservatively use generic subtraction
+                  #,(if (ormap was-real? (syntax->list #'(cs.imag-binding ...)))
+                        (n-ary->binary
+                         this-syntax
+                         #'-
+                         (for/list ([i (syntax->list #'(cs.imag-binding ...))])
+                           (if (was-real? i) #'0 i)))
+                        (fl-subtract #'(cs.imag-binding ...))))))))
   (pattern (#%plain-app op:-^ c1:unboxed-float-complex-opt-expr) ; unary -
     #:when (subtypeof? this-syntax -FloatComplex)
     #:with (real-binding imag-binding) (binding-names)
@@ -198,27 +294,45 @@
                                               #'(cs.imag-binding ...))
                                      (list #'imag-binding))]
                          [res '()])
-                (if (null? e1)
-                    (reverse res)
-                    (loop (car rs) (car is) (cdr e1) (cdr e2) (cdr rs) (cdr is)
-                          ;; complex multiplication, imag part, then real part (reverse)
-                          ;; we eliminate operations on the imaginary parts of reals
-                          (let ((o-real? (0.0? o2))
-                                (e-real? (0.0? (car e2))))
-                            (list* #`((#,(car is))
-                                      #,(cond ((and o-real? e-real?) #'0.0)
-                                              (o-real? #`(unsafe-fl* #,o1 #,(car e2)))
-                                              (e-real? #`(unsafe-fl* #,o2 #,(car e1)))
-                                              (else
-                                               #`(unsafe-fl+ (unsafe-fl* #,o2 #,(car e1))
-                                                             (unsafe-fl* #,o1 #,(car e2))))))
-                                   #`((#,(car rs))
-                                      #,(cond ((or o-real? e-real?)
-                                               #`(unsafe-fl* #,o1 #,(car e1)))
-                                              (else
-                                               #`(unsafe-fl- (unsafe-fl* #,o1 #,(car e1))
-                                                             (unsafe-fl* #,o2 #,(car e2))))))
-                                 res))))))))
+                (cond
+                 [(null? e1)
+                  (reverse res)]
+                 [else
+                  (define o-real? (was-real? o2))
+                  (define e-real? (was-real? (car e2)))
+                  (define both-real? (and o-real? e-real?))
+                  (define o-nf (as-non-float o1))
+                  (define e-nf (as-non-float (car e1)))
+                  (define new-imag-id (if both-real?
+                                          (mark-as-real (car is))
+                                          (car is)))
+                  (loop (car rs) new-imag-id (cdr e1) (cdr e2) (cdr rs) (cdr is)
+                        ;; complex multiplication, imag part, then real part (reverse)
+                        ;; we eliminate operations on the imaginary parts of reals
+                        (list* #`((#,new-imag-id)
+                                  #,(cond ((and o-real? e-real?) #'0.0)
+                                          (o-real? #`(unsafe-fl* #,o1 #,(car e2)))
+                                          (e-real? #`(unsafe-fl* #,o2 #,(car e1)))
+                                          (else
+                                           #`(unsafe-fl+ (unsafe-fl* #,o2 #,(car e1))
+                                                         (unsafe-fl* #,o1 #,(car e2))))))
+                               #`((#,(car rs))
+                                  #,(cond [(and o-nf e-nf both-real?)
+                                           ;; we haven't seen float operands yet, so
+                                           ;; shouldn't prematurely convert to floats
+                                           (mark-as-non-float (car rs))
+                                           #`(* #,o-nf #,e-nf)]
+                                          [(or o-real? e-real?)
+                                           #`(unsafe-fl*
+                                              #,(if (as-non-float o1)
+                                                    ;; we hit floats, need to coerce
+                                                    #`(real->double-flonum #,o1)
+                                                    o1)
+                                              #,(car e1))]
+                                          [else
+                                           #`(unsafe-fl- (unsafe-fl* #,o1 #,(car e1))
+                                                         (unsafe-fl* #,o2 #,(car e2)))]))
+                               res))])))))
   (pattern (#%plain-app op:*^ :unboxed-float-complex-opt-expr)
     #:when (subtypeof? this-syntax -FloatComplex)
     #:do [(log-unboxing-opt "unboxed unary float complex")])
@@ -332,10 +446,21 @@
          ((real-binding) (unsafe-flreal-part e*))
          ((imag-binding) (unsafe-flimag-part e*))))
 
-  ;; The following optimization is incorrect and causes bugs because it turns exact numbers into inexact
   (pattern e:number-expr
     #:with e* (generate-temporary)
-    #:with (real-binding imag-binding) (binding-names)
+    #:with (real-binding* imag-binding*) (binding-names)
+    #:with real-binding (if (and (subtypeof? #'e -Real)
+                                 (not (subtypeof? #'e -Flonum)))
+                            ;; values that were originally non-floats (e.g.
+                            ;; rationals or single floats) may need to be
+                            ;; handled specially
+                            (mark-as-non-float #'real-binding* #'e*)
+                            #'real-binding*)
+    #:with imag-binding (if (subtypeof? #'e -Real)
+                            ;; values that were originally reals may need to be
+                            ;; handled specially
+                            (mark-as-real #'imag-binding*)
+                            #'imag-binding*)
     #:do [(log-unboxing-opt
             (if (subtypeof? #'e -Flonum)
                 "float in complex ops"
@@ -443,9 +568,13 @@
           [(#%plain-app op:magnitude^ c:unboxed-float-complex-opt-expr)
            (log-unboxing-opt "unboxed unary float complex")
            #`(let*-values (c.bindings ...)
-               (unsafe-flsqrt
-                 (unsafe-fl+ (unsafe-fl* c.real-binding c.real-binding)
-                             (unsafe-fl* c.imag-binding c.imag-binding))))])))
+               ;; reuses the algorithm used by the Racket runtime
+               (let*-values ([(r) (unsafe-flabs c.real-binding)]
+                             [(i) (unsafe-flabs c.imag-binding)]
+                             [(q) (unsafe-fl/ r i)])
+                 (unsafe-fl* i
+                             (unsafe-flsqrt (unsafe-fl+ 1.0
+                                                        (unsafe-fl* q q))))))])))
 
 
   (pattern (#%plain-app op:float-complex-op e:expr ...)

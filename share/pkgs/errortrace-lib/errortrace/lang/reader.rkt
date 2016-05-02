@@ -11,10 +11,10 @@
         ;; Re-write module to use `errortrace':
         (if (syntax? r)
             (syntax-case r ()
-              [(mod name lang . body)
+              [(mod name lang (mod-beg . body))
                (quasisyntax/loc r
-                 (mod name errortrace/lang/body (#,(datum->syntax #f '#%module-begin) lang . body)))])
-            `(,(car r) ,(cadr r) errortrace/lang/body (#%module-begin . ,(cddr r)))))))
+                 (mod name #,(datum->syntax r 'errortrace/lang/body) (#,(datum->syntax r '#%module-begin) lang . body)))])
+            `(,(car r) ,(cadr r) errortrace/lang/body (#%module-begin ,(caddr r) . ,(cdr (cadddr r))))))))
 
   (define-values (et-read et-read-syntax et-get-info)
     (make-meta-reader

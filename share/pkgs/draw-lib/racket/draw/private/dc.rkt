@@ -65,6 +65,7 @@
     ;;
     ;; Stops using a cairo_t obtained by a get-cr
     release-cr
+    release-unchanged-cr
 
     ;; Ends a document
     end-cr
@@ -135,9 +136,11 @@
     ;;  the color is for a background.
     install-color
 
-    ;; The public get-size & get-device-scale methods:
+    ;; The public get-size, get-device-scale, and
+    ;; get-backing-scale methods:
     get-size
     get-device-scale
+    get-backing-scale
 
     ;; set-auto-scroll : real real -> void
     ;;
@@ -173,6 +176,7 @@
 
     (define/public (get-cr) #f)
     (define/public (release-cr cr) (void))
+    (define/public (release-unchanged-cr cr) (release-cr cr))
     (define/public (end-cr) (void))
     (define/public (reset-cr) (void))
     
@@ -213,6 +217,7 @@
 
     (define/public (get-size) (values 0.0 0.0))
     (define/public (get-device-scale) (values 1.0 1.0))
+    (define/public (get-backing-scale) 1.0)
 
     (define/public (set-auto-scroll dx dy) (void))
 
@@ -268,7 +273,8 @@
 
 (define (dc-mixin backend%)
   (defclass* dc% backend% (dc<%>)
-    (inherit flush-cr get-cr release-cr end-cr init-cr-matrix init-effective-matrix
+    (inherit flush-cr get-cr release-cr release-unchanged-cr end-cr
+             init-cr-matrix init-effective-matrix
 	     get-pango
              install-color dc-adjust-smoothing get-hairline-width dc-adjust-cap-shape
              reset-clip
@@ -283,7 +289,7 @@
     ;; have a separate per-dc lock, we can hit deadlock due to
     ;; lock order.
 
-    (define-syntax-rule (with-cr default cr . body)
+    (define-syntax-rule (with-cr* release-cr default cr . body)
       ;; Faster:
       (begin
         (start-atomic)
@@ -307,6 +313,11 @@
 		   (lambda () . body) 
 		   (lambda () (release-cr cr)))
                default)))))
+    
+    (define-syntax-rule (with-cr default cr . body)
+      (with-cr* release-cr default cr . body))
+    (define-syntax-rule (with-unchanged-cr default cr . body)
+      (with-cr* release-unchanged-cr default cr . body))
 
     (define/public (in-cairo-context cb)
       (with-cr (void) cr (cb cr)))
@@ -549,7 +560,7 @@
       (cairo_rotate cr (- rotation)))
     
     (define/private (reset-matrix)
-      (with-cr
+      (with-unchanged-cr
        (void)
        cr
        (do-reset-matrix cr)))
@@ -721,7 +732,7 @@
     (def/public (set-clipping-region [(make-or-false region%) r])
       (do-set-clipping-region r))
     (define/private (do-set-clipping-region r)
-      (with-cr
+      (with-unchanged-cr
        (void)
        cr
        (when clipping-region
@@ -785,17 +796,66 @@
 
     (def/public (copy [real? x] [real? y] [nonnegative-real? w] [nonnegative-real? h]
                       [real? x2] [real? y2])
+       (internal-copy x y w h x2 y2 #f))
+
+    (define/public (internal-copy x y w h x2 y2 alt)
       (with-cr
        (check-ok 'copy)
        cr
-       (cairo_set_source_surface cr
-                                 (cairo_get_target cr)
-                                 (- x2 x) (- y2 y))
-       (cairo_set_operator cr CAIRO_OPERATOR_SOURCE)
-       (cairo_new_path cr)
-       (cairo_rectangle cr x2 y2 w h)
-       (cairo_fill cr)
-       (cairo_set_operator cr CAIRO_OPERATOR_OVER)))
+       (or (and alt
+                (alt cr x y w h x2 y2)
+                (void))
+           (begin
+             (let* ([p (cairo_pattern_create_for_surface (cairo_get_target cr))]
+                    [mx (make-cairo_matrix_t 1 0 0 1 0 0)])
+               (cairo_identity_matrix cr)
+               (init-effective-matrix mx)
+               (cairo_translate cr (* (cairo_matrix_t-xx mx) (- x2 x)) (* (cairo_matrix_t-yy mx) (- y2 y)))
+               (cairo_set_source cr p)
+               (do-reset-matrix cr)
+               (cairo_pattern_destroy p))
+             (cairo_set_operator cr CAIRO_OPERATOR_SOURCE)
+             ;; Needs more work to deal with pixel alignment:
+             (let loop ([x x] [y y] [w w] [h h] [x2 x2] [y2 y2])
+               (cond
+                [(<= w 0.0) (void)]
+                [(<= h 0.0) (void)]
+                [(or (not (or (and (<= x x2) (< x2 (+ x w)))
+                              (and (<= x2 x) (< x (+ x2 w)))))
+                     (not (or (and (<= y y2) (< y2 (+ y h)))
+                              (and (<= y2 y) (< y (+ y2 h))))))
+                 ;; No overlap
+                 (cairo_new_path cr)
+                 (cairo_rectangle cr x2 y2 w h)
+                 (cairo_fill cr)]
+                [(< (* (abs (- x x2)) h)
+                    (* (abs (- y y2)) w))
+                 ;; Move a top or bottom slice
+                 (cond
+                  [(< y2 y)
+                   ;; Move a top slice
+                   (define dy (- y y2))
+                   (loop x y w dy x2 y2)
+                   (loop x (+ y dy) w (- h dy) x2 (+ y2 dy))]
+                  [else
+                   ;; Move a bottom slice
+                   (define dy (- y2 y))
+                   (loop x (- (+ y h) dy) w dy x2 (- (+ y2 h) dy))
+                   (loop x y w (- h dy) x2 y2)])]
+                [else
+                 ;; Move a left or right slice
+                 (cond
+                  [(< x2 x)
+                   ;; Move a left slice
+                   (define dx (- x x2))
+                   (loop x y dx h x2 y2)
+                   (loop (+ x dx) y (- w dx) h (+ x2 dx) y2)]
+                  [else
+                   ;; Move a right slice
+                   (define dx (- x2 x))
+                   (loop (- (+ x w) dx) y dx h (- (+ x2 w) dx) y2)
+                   (loop x y (- w dx) h x2 y2)])]))
+             (cairo_set_operator cr CAIRO_OPERATOR_OVER)))))
 
     (define/private (make-pattern-surface cr col draw)
       (let* ([s (cairo_surface_create_similar (cairo_get_target cr)
@@ -1311,7 +1371,7 @@
                                               (values #f #f #f #f)))))))))])
           (if w
               (values w h d a)
-              (with-cr
+              (with-unchanged-cr
                (values 1.0 1.0 0.0 0.0)
                cr
                (do-text cr #f s 0 0 use-font combine? offset 0.0))))))
@@ -1470,10 +1530,10 @@
                        [else
                         (let ([logical (make-PangoRectangle 0 0 0 0)])
                           (pango_layout_get_extents layout #f logical)
-                          (let ([nh (/ (PangoRectangle-height logical) (exact->inexact PANGO_SCALE))]
-                                [nd (/ (- (PangoRectangle-height logical)
-                                          (pango_layout_get_baseline layout))
-                                       (exact->inexact PANGO_SCALE))])
+                          (let ([nh (/ (->fl (PangoRectangle-height logical)) (->fl PANGO_SCALE))]
+                                [nd (/ (->fl (- (PangoRectangle-height logical)
+                                                (pango_layout_get_baseline layout)))
+                                       (->fl PANGO_SCALE))])
                             (when draw-mode
                               (let ([bl (if measured? (- h d) (- nh nd))])
                                 (pango_layout_get_extents layout #f logical)
@@ -1493,7 +1553,8 @@
                               (let ([nw (if blank?
                                             0.0
                                             (force-hinting
-                                             (/ (PangoRectangle-width logical) (exact->inexact PANGO_SCALE))))]
+                                             (fl/ (->fl (PangoRectangle-width logical))
+                                                  (->fl PANGO_SCALE))))]
                                     [na 0.0])
                                 (loop next-s draw-mode measured? unrotate?
                                       (+ w nw) (max h nh) (max d nd) (max a na)))])))])))]))
@@ -1503,15 +1564,18 @@
                                    (not effective-scale-font-cached?))
                                #f
                                (get-size-cache desc))]
-                    [layouts (let ([attr-layouts (or (hash-ref (let ([t (vector-ref desc-layoutss smoothing-index)])
-                                                                 (or t
-                                                                     (let ([t (make-weak-hasheq)])
-                                                                       (vector-set! desc-layoutss smoothing-index t)
-                                                                       t)))
-                                                               desc 
-                                                               #f)
+                    [layouts (let ([attr-layouts (or (let ([e (hash-ref (let ([t (vector-ref desc-layoutss smoothing-index)])
+                                                                          (or t
+                                                                              (let ([t (make-weak-hasheq)])
+                                                                                (vector-set! desc-layoutss smoothing-index t)
+                                                                                t)))
+                                                                        desc 
+                                                                        #f)])
+                                                       (and e (ephemeron-value e)))
                                                      (let ([layouts (make-hasheq)])
-                                                       (hash-set! (vector-ref desc-layoutss smoothing-index) desc layouts)
+                                                       (hash-set! (vector-ref desc-layoutss smoothing-index)
+                                                                  desc
+                                                                  (make-ephemeron desc layouts))
                                                        layouts))])
                                (or (hash-ref attr-layouts attrs #f)
                                    (let ([layouts (make-hasheq)])
@@ -1597,7 +1661,9 @@
                                  ;; and draw the glyphs
                                  (cairo_move_to cr 
                                                 (text-align-x/delta x 0) 
-                                                (text-align-y/delta (+ y (/ (vector-ref first-v 4) (->fl PANGO_SCALE))) 0))
+                                                (text-align-y/delta (+ y (fl/ (->fl (vector-ref first-v 4))
+                                                                              (->fl PANGO_SCALE)))
+                                                                    0))
                                  (pango_cairo_show_glyph_string cr first-font glyph-string)
                                  (free glyph-infos)
                                  #t)))))
@@ -1609,20 +1675,22 @@
                                (let ([baseline (pango_layout_get_baseline layout)]
                                      [orig-h (PangoRectangle-height logical)])
                                  (let ([lw (force-hinting
-                                            (/ (PangoRectangle-width logical) 
-                                               (exact->inexact PANGO_SCALE)))]
-                                       [flh (/ orig-h (exact->inexact PANGO_SCALE))]
-                                       [ld (exact->inexact (/ (- orig-h baseline) (exact->inexact PANGO_SCALE)))]
+                                            (fl/ (->fl (PangoRectangle-width logical))
+                                                 (->fl PANGO_SCALE)))]
+                                       [flh (fl/ (->fl orig-h)
+                                                 (->fl PANGO_SCALE))]
+                                       [ld (fl/ (->fl (- orig-h baseline))
+                                                (->fl PANGO_SCALE))]
                                        [la 0.0])
-                                   (let ([lh (ceiling flh)])
+                                   (let ([lh (flceiling flh)])
                                      (when cache
                                        (hash-set! cache (char->integer ch) 
                                                   (vector lw lh ld la 
                                                           ;; baseline in Pango units; for fast path
                                                           baseline
                                                           ;; rounded width in Pango units; for fast path
-                                                          (inexact->exact
-                                                           (floor (* lw (->fl PANGO_SCALE))))
+                                                          (fl->exact-integer
+                                                           (flfloor (fl* lw (->fl PANGO_SCALE))))
                                                           ;; unrounded height, for slow-path alignment
                                                           flh)))
                                      (values lw lh ld la flh))))))]
@@ -1963,7 +2031,7 @@
       (and
        (not (eqv? c #\uFFFF))
        (not (eqv? c #\uFFFE))
-       (with-cr
+       (with-unchanged-cr
         #f
         cr
         (let ([desc (get-pango font)]
@@ -1983,7 +2051,7 @@
              (g_object_unref layout)))))))
     
     (def/public (get-char-width)
-      (or (with-cr
+      (or (with-unchanged-cr
            10.0
            cr
            (get-font-metric cr pango_font_metrics_get_approximate_char_width
@@ -1992,7 +2060,7 @@
             w)))
 
     (def/public (get-char-height)
-      (or (with-cr
+      (or (with-unchanged-cr
            12.0
            cr
            (get-font-metric cr (lambda (m)
@@ -2028,9 +2096,10 @@
                     (set-cairo_matrix_t-yy! mx 1.0)])
                  (let ([v (sel metrics)])
                    (pango_font_metrics_unref metrics)
-                   (/ v (* (exact->inexact PANGO_SCALE)
-                           (s-sel (cairo_matrix_t-xx mx)
-                                  (cairo_matrix_t-yy mx)))))))))
+                   (fl/ (->fl v)
+                        (fl* (->fl PANGO_SCALE)
+                               (s-sel (cairo_matrix_t-xx mx)
+                                      (cairo_matrix_t-yy mx)))))))))
 
     (super-new))
 

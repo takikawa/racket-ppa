@@ -256,6 +256,105 @@ recent test at the head.
 @include-section["collector2.scrbl"]
 @include-section["mutator2.scrbl"]
 
+@section{Generating Random Mutators}
+
+@defmodule[plai/random-mutator]
+
+This PLAI library provides a facility for generating random mutators,
+in order to test your garbage collection implementation.
+
+@defproc[(save-random-mutator
+          [file path-string?]
+          [collector-name string?]
+          [#:heap-values heap-values (cons heap-value? (listof heap-value?))
+                                     (list 0 1 -1 'x 'y #f #t '())]
+          [#:iterations iterations exact-positive-integer? 200]
+          [#:program-size program-size exact-positive-integer? 10]
+          [#:heap-size heap-size exact-positive-integer? 100]
+          [#:gc2? gc2? boolean? #f])
+         void?]{
+Creates a random mutator that uses the collector @racket[collector-name] and
+saves it in @racket[file].
+
+The mutator is created by first making a random graph whose nodes either have
+no outgoing edges, two outgoing edges, or some random number of outgoing edges
+and then picking a random path in the graph that ends at one of the nodes with
+no edges.
+
+This graph and path are then turned into a PLAI program by creating a
+@racket[let] expression that binds one variable per node in the graph.  If the
+node has no outgoing edges, it is bound to a @racket[heap-value?].  If the node
+has two outgoing edges, it is bound to a pair and the two edges are put into
+the first and rest fields. Otherwise, the node is represented as a procedure
+that accepts an integer index and returns the destination node of the
+corresponding edge.
+
+Once the @racket[let] expression has been created, the program creates a bunch
+of garbage and then traverses the graph, according to the randomly created
+path. If the result of the path is the expected heap value, the program does
+this again, up to @racket[iterations] times. If the result of the path is not
+the expected heap value, the program terminates with an error.
+
+The keyword arguments control some aspects of the generation
+of random mutators:
+@itemize[
+@item{Elements from the @racket[heap-values] argument are used as the base
+  values when creating nodes with no outgoing edges.  See also
+  @racket[find-heap-values].}
+@item{The @racket[iterations] argument controls how many times the graph is
+  created (and traversed).}
+@item{The @racket[program-size] argument is a bound on how big the program it
+  is; it limits the number of nodes, the maximum number of edges, and the
+  length of the path in the graph.}
+@item{The @racket[heap-size] argument controls the size of the heap in the
+  generated mutator.}]
+
+}
+
+Example:
+@racketblock[(save-random-mutator "tmp.rkt" "mygc.rkt" #:gc2? #t)]
+will write to @filepath{tmp.rkt} with a program like this one:
+@codeblock{
+#lang plai/gc2/mutator
+(allocator-setup "mygc.rkt" 200)
+(define (build-one)
+  (let* ((x0 1)
+         (x1 (cons #f #f))
+         (x2
+          (lambda (x)
+            (if (= x 0)
+              x0
+              (if (= x 1) x0 (if (= x 2) x1 (if (= x 3) x1 x0))))))
+         (x3 1)
+         (x4 (cons x3 x3))
+         (x5 (lambda (x) (if (= x 0) x4 (if (= x 1) x1 x2)))))
+    (set-first! x1 x2)
+    (set-rest! x1 x3)
+    x5))
+(define (traverse-one x5) (= 1 (first (x5 0))))
+(define (trigger-gc n)
+  (if (zero? n) 0 (begin (cons n n) (trigger-gc (- n 1)))))
+(define (loop i)
+  (if (zero? i)
+    'passed
+    (let ((obj (build-one)))
+      (trigger-gc 200)
+      (if (traverse-one obj) (loop (- i 1)) 'failed))))
+(loop 200)
+}
+
+
+@defproc[(find-heap-values [input (or/c path-string? input-port?)])
+         (listof heap-value?)]{
+  Processes @racket[input] looking for occurrences of @racket[heap-value?]s in
+  the source of the program and returns them. This makes a good start for the
+  @racket[_heap-values] argument to @racket[save-random-mutator].
+
+  If @racket[input] is a port, its contents are assumed to be a well-formed
+  PLAI program. If @racket[input] is a file, the contents of the file are used.
+}
+
+
 @section[#:tag "web"]{@WEB-LANG}
 
 @defmodulelang[plai/web]

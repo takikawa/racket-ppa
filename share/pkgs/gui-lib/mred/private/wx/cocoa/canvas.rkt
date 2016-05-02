@@ -99,7 +99,13 @@
 
 (define-objc-class RacketGCGLView NSOpenGLView
   #:mixins (KeyMouseResponder)
-  [wxb])
+  [wxb]
+  (-a #:async-apply (box (void))
+      _void (drawRect: [_NSRect r])
+      (when wxb
+        (let ([wx (->wx wxb)])
+          (when wx
+            (send wx draw-gc-background))))))
 
 (define-objc-class RacketGCWindow NSWindow
   #:mixins (RacketEventspaceMethods)
@@ -202,12 +208,13 @@
 (define NSOpenGLPFASampleBuffers 55)
 (define NSOpenGLPFASamples 56)
 (define NSOpenGLPFAMultisample 59)
+(define NSOpenGLPFAAllowOfflineRenderers 96)
 (define NSOpenGLPFAOpenGLProfile 99)
 
 (define NSOpenGLProfileVersionLegacy #x1000)
 (define NSOpenGLProfileVersion3_2Core #x3200)
 
-(define (gl-config->pixel-format conf)
+(define (gl-config->pixel-format conf allow-offline?)
   (let ([conf (or conf (new gl-config%))])
     (tell (tell NSOpenGLPixelFormat alloc)
           initWithAttributes: #:type (_list i _int)
@@ -218,6 +225,9 @@
                      NSOpenGLProfileVersionLegacy
                      NSOpenGLProfileVersion3_2Core))             
              null)
+           (if allow-offline?
+               (list NSOpenGLPFAAllowOfflineRenderers)
+               null)
            (if (send conf get-double-buffered) (list NSOpenGLPFADoubleBuffer) null)
            (if (send conf get-stereo) (list NSOpenGLPFAStereo) null)
            (list
@@ -383,7 +393,9 @@
      (define/override (get-cocoa-content) content-cocoa)
 
      (define is-gl? (and (not is-combo?) (memq 'gl style)))
+     (define want-sync-gl? (and is-gl? gl-config (send gl-config get-sync-swap)))
      (define/public (can-gl?) is-gl?)
+     (define/public (sync-gl?) want-sync-gl?)
 
      (define dc #f)
      (define blits null)
@@ -419,7 +431,7 @@
                     initWithFrame: #:type _NSRect r)
               (let* ([share-context (and gl-config (send gl-config get-share-context))]
                      [context-handle (and share-context (send share-context get-handle))]
-                     [pf (gl-config->pixel-format gl-config)]
+                     [pf (gl-config->pixel-format gl-config #f)]
                      [new-context (and
                                    context-handle
                                    (tell (tell NSOpenGLContext alloc)
@@ -918,9 +930,9 @@
      (define/private (suspend-all-reg-blits)
        (let ([cocoa-win (get-cocoa-window)])
          (for ([r (in-list reg-blits)])
-           (tellv cocoa-win removeChildWindow: (car r))
-           (release (car r))
-           (scheme_remove_gc_callback (cdr r))))
+           (tellv cocoa-win removeChildWindow: (vector-ref r 0))
+           (release (vector-ref r 0))
+           (scheme_remove_gc_callback (vector-ref r 1))))
        (set! reg-blits null))
 
      (define/public (resume-all-reg-blits)
@@ -928,10 +940,10 @@
          (when (pair? blits)
            (set! reg-blits
                  (for/list ([b (in-list blits)])
-                   (let-values ([(x y w h s img) (apply values b)])
-                     (register-one-blit x y w h s img)))))))
+                   (let-values ([(x y w h s img us unimg) (apply values b)])
+                     (register-one-blit x y w h s img us unimg)))))))
 
-     (define/private (register-one-blit x y w h s img)
+     (define/private (register-one-blit x y w h s img us unimg)
        (let ([xb (box x)]
              [yb (box y)])
          (client-to-screen xb yb #f)
@@ -947,7 +959,7 @@
                               backing: #:type _int NSBackingStoreBuffered
                               defer: #:type _BOOL NO))]
                   [glv (and gc-via-gl?
-                            (let ([pf (gl-config->pixel-format #f)])
+                            (let ([pf (gl-config->pixel-format #f #t)])
                               (begin0
                                (tell (tell RacketGCGLView alloc)
                                      initWithFrame: #:type _NSRect (make-NSRect (make-NSPoint 0 0)
@@ -958,10 +970,14 @@
                            (tell (tell NSImageView alloc) init))])
               (cond
                [gc-via-gl?
+                (tellv (tell glv openGLContext) setValues:
+                       #:type (_ptr i _long) 0
+                       forParameter: #:type _int NSOpenGLCPSwapInterval)
                 (tellv win setAcceptsMouseMovedEvents: #:type _BOOL #t)
                 (set-ivar! win wxb (->wxb this))
                 (set-ivar! glv wxb (->wxb this))
-                (tellv glv setWantsBestResolutionOpenGLSurface: #:type _uint 1)
+                (unless (= s 1)
+                  (tellv glv setWantsBestResolutionOpenGLSurface: #:type _uint 1))
                 (tellv (tell win contentView) addSubview: glv)]
                [else
                 (tellv win setAlphaValue: #:type _CGFloat 0.0)
@@ -974,36 +990,56 @@
               (when gc-via-gl?
                 (tellv win orderWindow: #:type _int NSWindowAbove
                        relativeTo: #:type _NSInteger (tell #:type _NSInteger cocoa-win windowNumber)))
+              (define uninstall-desc
+                (if gc-via-gl?
+                    (if (and unimg
+                             ;; all white?
+                             (not (for/and ([i (in-range 0 (bytes-length unimg) 4)])
+                                    (or (= (bytes-ref unimg i) 0)
+                                        (and (= (bytes-ref unimg (+ 1 i)) 255)
+                                             (= (bytes-ref unimg (+ 2 i)) 255)
+                                             (= (bytes-ref unimg (+ 3 i)) 255))))))
+                        (make-gl-install win glv w h unimg us)
+                        (make-gl-uninstall win glv w h))
+                    (make-gc-action-desc win (selector setAlphaValue:) 0.0)))
               (let ([r (scheme_add_gc_callback
                         (if gc-via-gl?
                             (make-gl-install win glv w h img s)
                             (make-gc-action-desc win (selector setAlphaValue:) 1.0))
-                        (if gc-via-gl?
-                            (make-gl-uninstall win glv w h)
-                            (make-gc-action-desc win (selector setAlphaValue:) 0.0)))])
+                        uninstall-desc)])
                 (when gc-via-gl?
                   (tellv glv release))
-                (cons win r)))))))
+                (vector win r uninstall-desc)))))))
      
      (define/public (register-collecting-blit x y w h on off on-x on-y off-x off-y)
        (let ([on (fix-bitmap-size on w h on-x on-y)]
-             [s (send on get-backing-scale)])
+             [off (and gc-via-gl?
+                       (fix-bitmap-size off w h on-x on-y))]
+             [s (send on get-backing-scale)]
+             [us (send off get-backing-scale)])
+         (define (bm->img on s)
+           (let* ([xw (inexact->exact (ceiling (* s w)))]
+                  [xh (inexact->exact (ceiling (* s h)))]
+                  [rgba (make-bytes (* xw xh 4))])
+             (send on get-argb-pixels 0 0 xw xh rgba #:unscaled? #t)
+             rgba))
          (let ([img (if gc-via-gl?
-                        (let* ([xw (inexact->exact (ceiling (* s w)))]
-                               [xh (inexact->exact (ceiling (* s h)))]
-                               [rgba (make-bytes (* xw xh 4))])
-                          (send on get-argb-pixels 0 0 xw xh rgba #:unscaled? #t)
-                          rgba)
-                        (bitmap->image on))])
+                        (bm->img on s)
+                        (bitmap->image on))]
+               [unimg (and gc-via-gl? (bm->img off us))])
            (atomically
-            (set! blits (cons (list x y w h s img) blits))
+            (set! blits (cons (list x y w h s img us unimg) blits))
             (when (is-shown-to-root?)
-              (set! reg-blits (cons (register-one-blit x y w h s img) reg-blits)))))))
+              (set! reg-blits (cons (register-one-blit x y w h s img us unimg) reg-blits)))))))
 
      (define/public (unregister-collecting-blits)
        (atomically
         (suspend-all-reg-blits)
-        (set! blits null))))))
+        (set! blits null)))
+
+     (define/public (draw-gc-background)
+       (for ([rb (in-list reg-blits)])
+         (do-gl-action (vector-ref rb 2)))))))
 
 (define canvas-panel%
   (class (panel-mixin canvas%)

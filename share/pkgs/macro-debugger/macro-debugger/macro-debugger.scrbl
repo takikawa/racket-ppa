@@ -165,6 +165,11 @@ transformer returns. Unmarking is suppressed if @racket[unmark?] is
 Emits an event that simulates a local expansion step from
 @racket[before] to @racket[after].
 
+The @racket[before] and @racket[after] terms are marked with
+@racket[syntax-local-introduce] so they appear in the macro stepper
+like they would if the step were truly generated from a local
+expansion.
+
 The @racket[id] argument acts as the step's ``macro'' for the purposes
 of macro hiding.
 }

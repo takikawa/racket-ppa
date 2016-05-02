@@ -293,8 +293,8 @@
 (define case-lambda-sequence-type-num 26)
 (define module-type-num 27)
 (define inline-variants-type-num 28)
-(define variable-type-num 36)
-(define prefix-type-num 121)
+(define variable-type-num 37)
+(define prefix-type-num 122)
 
 (define-syntax define-enum
   (syntax-rules ()
@@ -431,12 +431,26 @@
             [esrcloc (let ()
                        (define (avail? n) (n . >= . 0))
                        (define (xvector a b c d e)
+                         ;; Add paren-shape info, if any:
                          (case (hash-ref props 'paren-shape #f)
-                           [(#\[) (vector a b c d e #\[)]
-                           [(#\{) (vector a b c d e #\{)]
+                           [(#\[) (yvector a b c d e #\[)]
+                           [(#\{) (yvector a b c d e #\{)]
                            [else (if (or a (avail? b) (avail? c) (avail? d))
-                                     (vector a b c d e)
+                                     (yvector a b c d e #f)
                                      #f)]))
+                       (define (yvector a b c d e f)
+                         ;; Add properties, if any:
+                         (if (positive? (- (hash-count props) (if f 1 0)))
+                             (vector a b c d e f
+                                     (sort (for/list ([(k v) (in-hash props)]
+                                                      #:unless (and f
+                                                                    (eq? k 'paren-shape)))
+                                             (cons k v))
+                                           symbol<?
+                                           #:key car))
+                             (if f
+                                 (vector a b c d e f)
+                                 (vector a b c d e))))
                        (define (norm v) (or v -1))
                        (share-everywhere
                         (if srcloc
@@ -705,7 +719,6 @@
        [(struct splice (forms))
         (out-marshaled splice-sequence-type-num forms out)]
        [(struct req (reqs dummy))
-        (error "cannot handle top-level `require', yet")
         (out-marshaled require-form-type-num (cons dummy reqs) out)]
        [(struct toplevel (depth pos const? ready?))
         (out-marshaled toplevel-type-num

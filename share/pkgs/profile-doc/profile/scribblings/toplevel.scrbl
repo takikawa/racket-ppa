@@ -8,6 +8,16 @@
 
 @title{Toplevel Interface}
 
+@index["raco profile"]{
+The profiler can be invoked directly from the command-line using the
+@exec{raco profile} command, which takes a file name as argument, and runs the
+profiler on the @racket[main] submodule of that file (if it exists), or on the
+module itself (if there is no @racket[main] submodule).
+
+To allow control over its behavior, @exec{raco profile} accepts flags that
+correspond to those of @racket[profile-thunk] below.
+}
+
 @defmodule[profile]
 
 This module provides one procedure and one macro that are convenient

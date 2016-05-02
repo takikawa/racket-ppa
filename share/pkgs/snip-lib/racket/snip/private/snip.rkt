@@ -176,7 +176,8 @@
                                                 height-depends-on-y 
                                                 width-depends-on-y 
                                                 height-depends-on-x
-                                                handles-all-mouse-events)) 
+                                                handles-all-mouse-events
+                                                handles-between-events))
                           new-flags])
     (s-set-flags (symbols->flags new-flags)))
   

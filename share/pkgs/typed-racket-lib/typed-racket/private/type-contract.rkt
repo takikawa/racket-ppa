@@ -10,13 +10,13 @@
  (env type-name-env row-constraint-env)
  (rep rep-utils)
  (types resolve union utils printer)
- (prefix-in t: (types abbrev numeric-tower))
+ (prefix-in t: (types abbrev numeric-tower subtype))
  (private parse-type syntax-properties)
  racket/match racket/syntax racket/list
  racket/format
  racket/dict
  syntax/flatten-begin
- (only-in (types abbrev) -Bottom)
+ (only-in (types abbrev) -Bottom -Boolean)
  (static-contracts instantiate optimize structures combinators)
  ;; TODO make this from contract-req
  (prefix-in c: racket/contract)
@@ -111,7 +111,7 @@
                     (λ (#:reason [reason #f]) (set! failure-reason reason))))
   (syntax-parse stx
     #:literal-sets (kernel-literals)
-    [(define-values ctc-id _)
+    [(define-values (ctc-id) _)
      ;; no need for ignore, the optimizer doesn't run on this code
      (cond [failure-reason
             #`(define-syntax (#,untyped-id stx)
@@ -122,16 +122,38 @@
                                  "type" #,(pretty-format-type type #:indent 8)))]
            [else
             (match-define (list defs ctc) result)
+            (define maybe-inline-val
+              (should-inline-contract? ctc cache))
             #`(begin #,@defs
-                     (define ctc-id #,ctc)
+                     #,@(if maybe-inline-val
+                            null
+                            (list #`(define-values (ctc-id) #,ctc)))
                      (define-module-boundary-contract #,untyped-id
-                       #,orig-id ctc-id
+                       #,orig-id
+                       #,(or maybe-inline-val #'ctc-id)
                        #:pos-source #,blame-id
                        #:srcloc (vector (quote #,(syntax-source orig-id))
                                         #,(syntax-line orig-id)
                                         #,(syntax-column orig-id)
                                         #,(syntax-position orig-id)
                                         #,(syntax-span orig-id))))])]))
+
+;; Syntax (Dict Static-Contract (Cons Id Syntax)) -> (Option Syntax)
+;; A helper for generate-contract-def/provide that helps inline contract
+;; expressions when needed to cooperate with the contract system's optimizations
+(define (should-inline-contract? ctc-stx cache)
+  (and (identifier? ctc-stx)
+       (let ([match? (assoc ctc-stx (hash-values cache) free-identifier=?)])
+         (and match?
+              (or
+               ;; no need to generate an extra def for things that are already identifiers
+               (identifier? match?)
+               ;; ->* are handled specially by the contract system
+               (let ([sexp (syntax-e (cdr match?))])
+                 (and (pair? sexp)
+                      (or (free-identifier=? (car sexp) #'->)
+                          (free-identifier=? (car sexp) #'->*)))))
+              (cdr match?)))))
 
 ;; The below requires are needed since they provide identifiers that
 ;; may appear in the residual program.
@@ -147,6 +169,8 @@
       typed-racket/utils/opaque-object
       typed-racket/utils/evt-contract
       typed-racket/utils/sealing-contract
+      typed-racket/utils/promise-not-name-contract
+      typed-racket/utils/simple-result-arrow
       racket/sequence
       racket/contract/parametric))
 
@@ -361,6 +385,17 @@
          (if numeric-sc
              (apply or/sc numeric-sc (map t->sc non-numeric))
              (apply or/sc (map t->sc elems)))]
+        [(and t (Function: arrs))
+         #:when (any->bool? arrs)
+         ;; Avoid putting (-> any T) contracts on struct predicates (where Boolean <: T)
+         ;; Optimization: if the value is typed, we can assume it's not wrapped
+         ;;  in a type-unsafe chaperone/impersonator and use the unsafe contract
+         (let* ([unsafe-spp/sc (flat/sc #'struct-predicate-procedure?)]
+                [safe-spp/sc (flat/sc #'struct-predicate-procedure?/c)]
+                [optimized/sc (if (from-typed? typed-side)
+                                  unsafe-spp/sc
+                                  safe-spp/sc)])
+           (or/sc optimized/sc (t->sc/fun t)))]
         [(and t (Function: _)) (t->sc/fun t)]
         [(Set: t) (set/sc (t->sc t))]
         [(Sequence: ts) (apply sequence/sc (map t->sc ts))]
@@ -630,7 +665,7 @@
                      (map conv opt-kws))))
          (define range (map t->sc rngs))
          (define rest (and rst (listof/sc (t->sc/neg rst))))
-         (function/sc (process-dom mand-args) opt-args mand-kws opt-kws rest range))
+         (function/sc (from-typed? typed-side) (process-dom mand-args) opt-args mand-kws opt-kws rest range))
        (handle-range first-arr convert-arr)]
       [else
        (define ((f case->) a)
@@ -647,6 +682,7 @@
                           (and rst (listof/sc (t->sc/neg rst)))
                           (map t->sc rngs))
                   (function/sc
+                    (from-typed? typed-side)
                     (process-dom (map t->sc/neg dom))
                     null
                     (map conv mand-kws)
@@ -768,6 +804,15 @@
           [(Name: _ _ #f) (escape #t)]
           [_ type])]))
     #f))
+
+;; True if the arities `arrs` are what we'd expect from a struct predicate
+(define (any->bool? arrs)
+  (match arrs
+    [(list (arr: (list (Univ:))
+                 (Values: (list (Result: t _ _)))
+                 #f #f '()))
+     (t:subtype -Boolean t)]
+    [_ #f]))
 
 (module predicates racket/base
   (require racket/extflonum)

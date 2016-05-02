@@ -61,7 +61,14 @@
       (inspect #f)
       (init-field world0)
       (init-field display-mode)
-      (init-field name state register port check-with on-key on-release on-pad on-mouse record?)
+      ;; in principle, a big-bang that specifies both
+      ;;   [record? #true]
+      ;; and
+      ;;   [close-on-stop #true]
+      ;; is self-contradictory; I will wait until someone complaints -- MF, 22 Nov 2015
+      (init-field close-on-stop)
+      (init-field record?)
+      (init-field name state register port check-with on-key on-release on-pad on-mouse)
       (init on-receive on-draw stop-when)
       
       ;; -----------------------------------------------------------------------
@@ -202,6 +209,7 @@
         (create-frame/universe))
       
       ;; effect: create, show and set the-frame
+      (define the-frame #f)
       (define/pubment (create-frame/universe)
         (define play-back:cust (make-custodian))
         
@@ -250,6 +258,7 @@
         (send editor-canvas focus)
         
         (send frame fullscreen (eq? display-mode 'fullscreen))
+	(set! the-frame frame)
         (send frame show #t))
       
       ;; Image -> Void
@@ -311,6 +320,7 @@
              (define (name arg ...) 
                (queue-callback 
                 (lambda ()
+                  (collect-garbage 'incremental)
                   (define H (handler #t))
                   (with-handlers ([exn? H])
                     ; (define tag (object-name transform))
@@ -332,9 +342,7 @@
                       [(stop-the-world? nw)
                        (set! nw (stop-the-world-world nw))
                        (send world set tag nw)
-                       (last-draw)
-                       (callback-stop! 'name)
-                       (enable-images-button)]
+		       (wrap-up 'name)]
                       [else 
                        [define changed-world? (send world set tag nw)]
                        [define stop? (stop (send world get))]
@@ -357,12 +365,9 @@
                              (queue-callback (lambda () (d)) #t)]
                             [else 
                              (set! draw# (- draw# 1))])]
-                         [stop?
-                          (last-draw)
-                          (callback-stop! 'name)
-                          (enable-images-button)])
+                         [stop? (wrap-up 'name)])
                        changed-world?]))))))]))
-      
+
       ;; tick, tock : deal with a tick event for this world 
       (def/cback pubment (ptock) (lambda (w) (pptock w)) (name-of-tick-handler))
       (define/public (pptock w) (void))
@@ -410,15 +415,35 @@
       
       ;; ---------------------------------------------------------------------------------------------
       ;; start & stop
+
+      ;; wrap up actions 
+      (define/private (wrap-up name)
+	(last-draw)
+	(callback-stop! 'name)
+	(enable-images-button)
+        ;; in principle, a big-bang that specifies both
+        ;;   [record? #true]
+        ;; and
+        ;;   [close-on-stop #true]
+        ;; is self-contradictory; I will wait until someone complaints -- MF, 22 Nov 2015
+	(when close-on-stop
+          (unless (boolean? close-on-stop)
+            (sleep close-on-stop))
+	  (send the-frame show #f)))
+
       (define/public (callback-stop! msg)
         (stop! (send world get)))
-      
+
       (define (handler re-raise)
         (lambda (e)
           (disable-images-button)
           (stop! (if re-raise e (send world get)))))
       
       (define/public (start!)
+        ;; To avoid pauses, GC now and request
+        ;; incremental mode:
+        (collect-garbage)
+        (collect-garbage 'incremental)
         (with-handlers ([exn? (handler #t)])
           (when width ;; and height
             (check-scene-dimensions "your to-draw clause" width height))
