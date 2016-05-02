@@ -6,8 +6,11 @@ racket (6.5-1) unstable; urgency=medium
   * update drracket.desktop, remove menu files
   * remove transitional plt-* packages.
   * drop recommends on libjpeg8, thanks to Adam Borowski (Closes: #814866).
+  * Bug fix: "Local documentation links to remote instead of local",
+    thanks to Diogo Ramos (Closes: #783434).
+  * All patches now upstream.
 
- -- David Bremner <bremner@debian.org>  Mon, 02 May 2016 10:26:40 -0300
+ -- David Bremner <bremner@debian.org>  Mon, 02 May 2016 10:44:33 -0300
 
 racket (6.3-3) unstable; urgency=medium
 
