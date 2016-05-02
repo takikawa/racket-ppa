@@ -56,26 +56,3 @@ Replaces: plt-scheme-doc (<<5.0~)
 Provides: plt-scheme-doc
 Description: extensible programming language in the Scheme family (documentation)
  This package includes all of the documentation for Racket.
-
-Package: plt-scheme
-Section: oldlibs
-Priority: extra
-Architecture: all
-Depends: racket, ${misc:Depends}
-Description: Racket Programming Environment (transitional package)
- Racket (previously PLT Scheme) is an innovative programming language
- that builds on a rich academic and practical tradition.
- .
- This is a dummy package to aid in transitioning from the plt-scheme package
- to the racket package.
-
-Package: plt-scheme-doc
-Section: oldlibs
-Priority: extra
-Architecture: all
-Depends: racket-doc, ${misc:Depends}
-Description: PLT Scheme Documentation (transitional package)
- This package includes all of the documentation for PLT Scheme.
- .
- This is a dummy package to aid in transitioning from the plt-scheme-doc
- package to the racket-doc package.

@@ -4,8 +4,9 @@ racket (6.5-1) unstable; urgency=medium
   * Bug fix: "Recommends libpng12 which is going away, please switch to
     libpng16", thanks to Mattia Rizzolo (Closes: #823182).
   * update drracket.desktop, remove menu files
+  * remove transitional plt-* packages.
 
- -- David Bremner <bremner@debian.org>  Mon, 02 May 2016 08:34:44 -0300
+ -- David Bremner <bremner@debian.org>  Mon, 02 May 2016 09:59:17 -0300
 
 racket (6.3-3) unstable; urgency=medium
 
