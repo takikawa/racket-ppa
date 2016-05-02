@@ -177,9 +177,19 @@ typedef long FILE;
 #endif
 
 #ifdef MZ_XFORM
+/* A non-GCing function will never trigger a garbage collection.
+   The xform tool checks this declaration, and it uses this hint
+   to avoid registering variables unnecessarily. */
 # define XFORM_NONGCING __xform_nongcing__
+/* A non-GCing, non-aliasing function is non-GCing, and it may take
+   arguments that are addresses of local variables, but it doesn't
+   leak those addresses; it only filles them in. The xform tool only
+   checks the non-GCing part of this declaration, but uses both
+   facets of the hint. */
+# define XFORM_NONGCING_NONALIASING __xform_nongcing_nonaliasing__
 #else
 # define XFORM_NONGCING /* empty */
+# define XFORM_NONGCING_NONALIASING /* empty */
 #endif
 
 #ifdef MZ_XFORM
@@ -227,6 +237,7 @@ typedef struct FSSpec mzFSSpec;
 #ifdef MZ_PRECISE_GC
 # ifndef MZ_XFORM
 #  define XFORM_SKIP_PROC /* empty */
+#  define XFORM_ASSERT_NO_CONVERSION /* empty */
 #  define XFORM_CAN_IGNORE /**/
 # endif
 #else
@@ -236,6 +247,7 @@ typedef struct FSSpec mzFSSpec;
 # define XFORM_START_SUSPEND /**/
 # define XFORM_END_SUSPEND /**/
 # define XFORM_SKIP_PROC /**/
+#  define XFORM_ASSERT_NO_CONVERSION /**/
 # define XFORM_START_TRUST_ARITH /**/
 # define XFORM_END_TRUST_ARITH /**/
 # define XFORM_CAN_IGNORE /**/
@@ -514,7 +526,7 @@ typedef intptr_t (*Scheme_Secondary_Hash_Proc)(Scheme_Object *obj, void *cycle_d
 #define SCHEME_PAIRP(obj)    SAME_TYPE(SCHEME_TYPE(obj), scheme_pair_type)
 #define SCHEME_MPAIRP(obj)    SAME_TYPE(SCHEME_TYPE(obj), scheme_mutable_pair_type)
 #define SCHEME_MUTABLE_PAIRP(obj)    SCHEME_MPAIRP(obj)
-#define SCHEME_LISTP(obj)    (SCHEME_NULLP(obj) || SCHEME_PAIRP(obj))
+#define SCHEME_LISTP(obj)    scheme_is_list(obj)
 
 #define SCHEME_RPAIRP(obj)    SAME_TYPE(SCHEME_TYPE(obj), scheme_raw_pair_type)
 
@@ -700,7 +712,7 @@ typedef struct Scheme_Offset_Cptr
 /*               fast basic Scheme constructor macros                     */
 /*========================================================================*/
 
-#define scheme_make_integer(i)    LONG_TO_OBJ ((OBJ_TO_LONG(i) << 1) | 0x1)
+#define scheme_make_integer(i)    LONG_TO_OBJ ((((uintptr_t)OBJ_TO_LONG(i)) << 1) | 0x1)
 #define scheme_make_character(ch) ((((mzchar)ch) < 256) ? scheme_char_constants[(unsigned char)(ch)] : scheme_make_char(ch))
 #define scheme_make_ascii_character(ch) scheme_char_constants[(unsigned char)(ch)]
 
@@ -745,10 +757,9 @@ typedef struct Scheme_Offset_Cptr
 #define SCHEME_PRIM_IS_MULTI_RESULT 8
 #define SCHEME_PRIM_IS_CLOSURE 16
 #define SCHEME_PRIM_OTHER_TYPE_MASK (32 | 64 | 128 | 256)
-#define SCHEME_PRIM_IS_METHOD 512
 
-#define SCHEME_PRIM_OPT_INDEX_SIZE 6
-#define SCHEME_PRIM_OPT_INDEX_SHIFT 10
+#define SCHEME_PRIM_OPT_INDEX_SIZE 7
+#define SCHEME_PRIM_OPT_INDEX_SHIFT 9
 #define SCHEME_PRIM_OPT_INDEX_MASK ((1 << SCHEME_PRIM_OPT_INDEX_SIZE) - 1)
 
 /* Values with SCHEME_PRIM_OPT_MASK, earlier implies later: */
@@ -883,7 +894,7 @@ typedef struct {
 /* ------------------------------------------------- */
 
 #define SCHEME_PROCP(obj)  (!SCHEME_INTP(obj) && ((_SCHEME_TYPE(obj) >= scheme_prim_type) && (_SCHEME_TYPE(obj) <= scheme_proc_chaperone_type)))
-#define SCHEME_SYNTAXP(obj)  SAME_TYPE(SCHEME_TYPE(obj), scheme_syntax_compiler_type)
+#define SCHEME_SYNTAXP(obj)  SAME_TYPE(SCHEME_TYPE(obj), scheme_primitive_syntax_type)
 #define SCHEME_PRIMP(obj)    SAME_TYPE(SCHEME_TYPE(obj), scheme_prim_type)
 #define SCHEME_CLSD_PRIMP(obj)    SAME_TYPE(SCHEME_TYPE(obj), scheme_closed_prim_type)
 #define SCHEME_CONTP(obj)    SAME_TYPE(SCHEME_TYPE(obj), scheme_cont_type)
@@ -895,8 +906,8 @@ typedef struct {
 #define SCHEME_PRIM(obj)     (((Scheme_Primitive_Proc *)(obj))->prim_val)
 #define SCHEME_CLSD_PRIM(obj) (((Scheme_Closed_Primitive_Proc *)(obj))->prim_val)
 #define SCHEME_CLSD_PRIM_DATA(obj) (((Scheme_Closed_Primitive_Proc *)(obj))->data)
-#define SCHEME_CLOS_FUNC(obj) ((Scheme_Closure_Func)SCHEME_CAR(obj))
-#define SCHEME_CLOS_DATA(obj) SCHEME_CDR(obj)
+#define SCHEME_RAW_CLOS_FUNC(obj) ((Scheme_Closure_Func)SCHEME_CAR(obj))
+#define SCHEME_RAW_CLOS_DATA(obj) SCHEME_CDR(obj)
 
 /*========================================================================*/
 /*                      hash tables and environments                      */
@@ -1847,6 +1858,10 @@ extern void *scheme_malloc_envunbox(size_t);
 # define MZ_GC_REG()                     /* empty */
 # define MZ_GC_UNREG()                   /* empty */
 #endif
+
+#define SCHEME_GC_SHAPE_TERM       0
+#define SCHEME_GC_SHAPE_PTR_OFFSET 1
+#define SCHEME_GC_SHAPE_ADD_SIZE   2
 
 /*========================================================================*/
 /*                   embedding configuration and hooks                    */

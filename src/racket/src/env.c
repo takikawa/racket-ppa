@@ -337,6 +337,7 @@ static void init_unsafe(Scheme_Env *env)
   scheme_init_unsafe_numarith(unsafe_env);
   scheme_init_unsafe_numcomp(unsafe_env);
   scheme_init_unsafe_list(unsafe_env);
+  scheme_init_unsafe_hash(unsafe_env);
   scheme_init_unsafe_vector(unsafe_env);
   scheme_init_unsafe_fun(unsafe_env);
 
@@ -570,7 +571,6 @@ static Scheme_Env *place_instance_init(void *stack_base, int initial_main_os_thr
   scheme_init_error_config();
 
 /* BEGIN PRIMITIVE MODULES */
-  scheme_init_memtrace(env);
 #ifndef NO_TCP_SUPPORT
   scheme_init_network(env);
 #endif
@@ -855,6 +855,8 @@ static void make_kernel_env(void)
   
   scheme_init_print_global_constants();
   scheme_init_variable_references_constants();
+
+  scheme_init_longdouble_fixup();
 
   scheme_defining_primitives = 0;
 }
@@ -1425,7 +1427,8 @@ scheme_do_add_global_symbol(Scheme_Env *env, Scheme_Object *sym,
     if (constant && scheme_defining_primitives) {
       ((Scheme_Bucket_With_Flags *)b)->id = builtin_ref_counter++;
       ((Scheme_Bucket_With_Flags *)b)->flags |= (GLOB_HAS_REF_ID | GLOB_IS_CONST | GLOB_STRONG_HOME_LINK);
-    }
+    } else if (constant)
+      ((Scheme_Bucket_With_Flags *)b)->flags |= (GLOB_IS_CONST | GLOB_STRONG_HOME_LINK);
     scheme_set_bucket_home(b, env);
   } else
     scheme_add_to_table(env->syntax, (const char *)sym, obj, constant);

@@ -1,8 +1,10 @@
 #lang racket/base
 
-(require "private/arrow.rkt"
+(require "private/arrow-common.rkt"
          "private/case-arrow.rkt"
          "private/arr-i.rkt"
+         "private/arr-d.rkt"
+         "private/unconstrained-domain-arrow.rkt"
          "private/base.rkt"
          "private/box.rkt"
          "private/hash.rkt"
@@ -17,22 +19,21 @@
          "private/opt.rkt"
          "private/out.rkt"
          "private/arrow-val-first.rkt"
-         "private/orc.rkt")
+         "private/orc.rkt"
+         "private/list.rkt"
+         "private/and.rkt")
 
 (provide
  base->?
  ->d
- base->-rngs/c
- base->-doms/c
+ (rename-out [base->-rngs base->-rngs/c] [base->-doms base->-doms/c])
  unconstrained-domain->
  the-unsupplied-arg
  unsupplied-arg?
- method-contract?
  matches-arity-exactly?
  keywords-match
  bad-number-of-results
  (for-syntax check-tail-contract
-             make-this-parameters
              parse-leftover->*)
  tail-marks-match?
  values/drop
@@ -41,7 +42,7 @@
  blame-add-range-context
  blame-add-nth-arg-context
  
- (rename-out [->2 ->] [->*2 ->*])
+ -> ->*
  dynamic->*
  predicate/c
 
@@ -74,6 +75,7 @@
  false/c
  printable/c
  listof list*of non-empty-listof cons/c list/c cons/dc
+ *list/c
  promise/c
  syntax/c
  
@@ -138,6 +140,8 @@
  contract-val-first-projection
  get/build-late-neg-projection
  get/build-val-first-projection
+
+ suggest/c
  
  ;; not documented.... (ie unintentional export)
  n->th)
@@ -149,3 +153,4 @@
 ;; the argument is simply the value to return.
 (define failure-result/c
   (if/c procedure? (-> any) any/c))
+

@@ -353,7 +353,7 @@
               (not (equal? (url-host url) ""))
               (pair? strs))
          (if (equal? (car strs) "")
-             (error 'file://->path "rmpty drive element: ~e" url)
+             (error 'file://->path "empty drive element: ~e" url)
              (apply build-path
                     (string->path/win
                      (string-append "\\\\" (url-host url) "\\" (car strs) "\\"))
@@ -399,10 +399,8 @@
 (provide (struct-out url) (struct-out path/param))
 
 (provide/contract
- (string->url (-> (and/c string?
-                         (or/c #rx"^[a-zA-Z][a-zA-Z0-9+.-]*:"
-                               (not/c #rx"^[^:/?#]*:")))
-                  url?))
+ (url-regexp regexp?)
+ (string->url (-> (and/c string? url-regexp) url?))
  (path->url ((or/c path-string? path-for-some-system?) . -> . url?))
  (relative-path->relative-url-string ((and/c (or/c path-string? path-for-some-system?)
                                              relative-path?)

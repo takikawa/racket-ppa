@@ -334,8 +334,6 @@ static void register_traversers(void);
 static Scheme_Object *custodian_require_mem(int argc, Scheme_Object *args[]);
 static Scheme_Object *custodian_limit_mem(int argc, Scheme_Object *args[]);
 static Scheme_Object *custodian_can_mem(int argc, Scheme_Object *args[]);
-static Scheme_Object *new_tracking_fun(int argc, Scheme_Object *args[]);
-static Scheme_Object *union_tracking_val(int argc, Scheme_Object *args[]);
 
 static Scheme_Object *collect_garbage(int argc, Scheme_Object *args[]);
 static Scheme_Object *current_memory_use(int argc, Scheme_Object *args[]);
@@ -635,27 +633,7 @@ void scheme_init_thread_places(void) {
   REGISTER_SO(gc_prepost_callback_descs);
   REGISTER_SO(place_local_misc_table);
   REGISTER_SO(gc_info_prefab);
-  REGISTER_SO(initial_config);
   gc_info_prefab = scheme_lookup_prefab_type(scheme_intern_symbol("gc-info"), 10);
-}
-
-void scheme_init_memtrace(Scheme_Env *env)
-{
-  Scheme_Object *v;
-  Scheme_Env *newenv;
-
-  v = scheme_intern_symbol("#%memtrace");
-  newenv = scheme_primitive_module(v, env);
-    
-  v = scheme_make_symbol("memory-trace-continuation-mark");
-  scheme_add_global("memory-trace-continuation-mark", v , newenv);
-  v = scheme_make_prim_w_arity(new_tracking_fun, 
-                              "new-memtrace-tracking-function", 1, 1);
-  scheme_add_global("new-memtrace-tracking-function", v, newenv);
-  v = scheme_make_prim_w_arity(union_tracking_val, 
-                               "unioned-memtrace-tracking-value", 1, 1);
-  scheme_add_global("unioned-memtrace-tracking-value", v, newenv);
-  scheme_finish_primitive_module(newenv);
 }
 
 void scheme_init_inspector() {
@@ -914,28 +892,6 @@ static Scheme_Object *custodian_can_mem(int argc, Scheme_Object *args[])
 #else
   return scheme_false;
 #endif
-}
-
-static Scheme_Object *new_tracking_fun(int argc, Scheme_Object *args[])
-{
-  int retval = 0;
-
-#ifdef MZ_PRECISE_GC
-  retval = GC_mtrace_new_id(args[0]);
-#endif
-
-  return scheme_make_integer(retval);
-}
-
-static Scheme_Object *union_tracking_val(int argc, Scheme_Object *args[])
-{
-  int retval = 0;
-
-#ifdef MZ_PRECISE_GC
-  retval = GC_mtrace_union_current_with(SCHEME_INT_VAL(args[0]));
-#endif
-
-  return scheme_make_integer(retval);
 }
 
 static void ensure_custodian_space(Scheme_Custodian *m, int k)
@@ -2659,10 +2615,7 @@ void *scheme_register_process_global(const char *key, void *val)
   Proc_Global_Rec *pg;
   intptr_t len;
 
-#if defined(MZ_USE_MZRT)
-  if (process_global_lock)
-    mzrt_mutex_lock(process_global_lock);
-#endif
+  scheme_process_global_lock();
 
   for (pg = process_globals; pg; pg = pg->next) {
     if (!strcmp(pg->key, key)) {
@@ -2682,10 +2635,7 @@ void *scheme_register_process_global(const char *key, void *val)
     process_globals = pg;
   }
 
-#if defined(MZ_USE_MZRT)
-  if (process_global_lock)
-    mzrt_mutex_unlock(process_global_lock);
-#endif
+  scheme_process_global_unlock();
 
   return old_val;
 }
@@ -2694,6 +2644,22 @@ void scheme_init_process_globals(void)
 {
 #if defined(MZ_USE_MZRT)
   mzrt_mutex_create(&process_global_lock);
+#endif
+}
+
+void scheme_process_global_lock(void)
+{
+#if defined(MZ_USE_MZRT)
+  if (process_global_lock)
+    mzrt_mutex_lock(process_global_lock);
+#endif
+}
+
+void scheme_process_global_unlock(void)
+{
+#if defined(MZ_USE_MZRT)
+  if (process_global_lock)
+    mzrt_mutex_unlock(process_global_lock);
 #endif
 }
 
@@ -2763,8 +2729,8 @@ static void do_swap_thread()
       Scheme_Closure_Func f;
       for (l = thread_swap_callbacks; SCHEME_RPAIRP(l); l = SCHEME_CDR(l)) {
 	o = SCHEME_CAR(l);
-	f = SCHEME_CLOS_FUNC(o);
-	o = SCHEME_CLOS_DATA(o);
+	f = SCHEME_RAW_CLOS_FUNC(o);
+	o = SCHEME_RAW_CLOS_DATA(o);
 	f(o);
       }
     }
@@ -2802,8 +2768,8 @@ static void do_swap_thread()
       Scheme_Closure_Func f;
       for (l = thread_swap_out_callbacks; SCHEME_RPAIRP(l); l = SCHEME_CDR(l)) {
 	o = SCHEME_CAR(l);
-	f = SCHEME_CLOS_FUNC(o);
-	o = SCHEME_CLOS_DATA(o);
+	f = SCHEME_RAW_CLOS_FUNC(o);
+	o = SCHEME_RAW_CLOS_DATA(o);
 	f(o);
       }
     }
@@ -3099,8 +3065,8 @@ static void start_child(Scheme_Thread * volatile child,
       Scheme_Closure_Func f;
       for (l = thread_swap_callbacks; SCHEME_RPAIRP(l); l = SCHEME_CDR(l)) {
 	o = SCHEME_CAR(l);
-	f = SCHEME_CLOS_FUNC(o);
-	o = SCHEME_CLOS_DATA(o);
+	f = SCHEME_RAW_CLOS_FUNC(o);
+	o = SCHEME_RAW_CLOS_DATA(o);
 	f(o);
       }
     }
@@ -8135,6 +8101,7 @@ static void make_initial_config(Scheme_Thread *p)
     }
   }
 
+  REGISTER_SO(initial_config);
   initial_config = config;
 }
 
@@ -8991,10 +8958,11 @@ static void prepare_thread_for_GC(Scheme_Object *t)
           rs_end = saved->runstack_size;
         }
 
-        scheme_set_runstack_limits(saved->runstack_start,
-                                   saved->runstack_size,
-                                   saved->runstack_offset,
-                                   rs_end);
+        if (saved->runstack_start)
+          scheme_set_runstack_limits(saved->runstack_start,
+                                     saved->runstack_size,
+                                     saved->runstack_offset,
+                                     rs_end);
       }
     }
 

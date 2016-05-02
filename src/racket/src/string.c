@@ -179,6 +179,9 @@ static void reset_locale(void);
 
 #define current_locale_name ((const mzchar *)current_locale_name_ptr)
 
+static const mzchar empty_char_string[1] = { 0 };
+static const mzchar xes_char_string[2] = { 0x78787878, 0 };
+
 #ifdef USE_ICONV_DLL
 static char *nl_langinfo(int which)
 {
@@ -186,7 +189,7 @@ static char *nl_langinfo(int which)
 
   reset_locale();
   if (!current_locale_name)
-    current_locale_name_ptr = "\0\0\0\0";
+    current_locale_name_ptr = empty_char_string;
 
   if ((current_locale_name[0] == 'C')
       && !current_locale_name[1])
@@ -388,6 +391,8 @@ SHARED_OK static Scheme_Object *banner_str;
 SHARED_OK static Scheme_Object *fs_change_props;
 
 READ_ONLY static Scheme_Object *complete_symbol, *continues_symbol, *aborts_symbol, *error_symbol;
+
+READ_ONLY Scheme_Object *scheme_byte_string_p_proc;
 
 void
 scheme_init_string (Scheme_Env *env)
@@ -754,10 +759,12 @@ scheme_init_string (Scheme_Env *env)
 						      1, 1, 1),
 			     env);
 
+  REGISTER_SO(scheme_byte_string_p_proc);
   p = scheme_make_folding_prim(byte_string_p, "bytes?", 1, 1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_NARY_INLINED
                                                             | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant("bytes?", p, env);
+  scheme_byte_string_p_proc = p;
 
   scheme_add_global_constant("make-bytes",
 			     scheme_make_immed_prim(make_byte_string,
@@ -986,7 +993,7 @@ scheme_init_string (Scheme_Env *env)
 
 void scheme_init_string_places(void) {
   REGISTER_SO(current_locale_name_ptr);
-  current_locale_name_ptr = "xxxx\0\0\0\0";
+  current_locale_name_ptr = (void *)xes_char_string;
 }
 
 /**********************************************************************/
@@ -1008,7 +1015,7 @@ Scheme_Object *scheme_make_sized_offset_utf8_string(char *chars, intptr_t d, int
                        NULL, 0 /* not UTF-16 */, 0xFFFD);
     us[ulen] = 0;
   } else {
-    us = (mzchar *)"\0\0\0";
+    us = (mzchar *)empty_char_string;
     ulen = 0;
   }
   return scheme_make_sized_offset_char_string(us, 0, ulen, 0);
@@ -4624,6 +4631,8 @@ static Scheme_Object *string_normalize_kd (int argc, Scheme_Object *argv[])
 intptr_t scheme_char_strlen(const mzchar *s)
 {
   intptr_t i;
+  if ((intptr_t)s & 0x3)
+    abort();
   for (i = 0; s[i]; i++) {
   }
   return i;
@@ -6054,6 +6063,19 @@ void machine_details(char *buff)
 {
   Scheme_Object *subprocess_proc;
   int i;
+  Scheme_Config *config;
+  Scheme_Security_Guard *sg;
+  Scheme_Cont_Frame_Data cframe;
+ 
+  /* Use the root security guard so we can test for and run
+     executables. */
+  config = scheme_current_config();
+  sg = (Scheme_Security_Guard *)scheme_get_param(config, MZCONFIG_SECURITY_GUARD);
+  while (sg->parent) { sg = sg->parent; }
+  config = scheme_extend_config(config, MZCONFIG_SECURITY_GUARD, (Scheme_Object *)sg);
+
+  scheme_push_continuation_frame(&cframe);
+  scheme_install_config(config);
 
   subprocess_proc = scheme_builtin_value("subprocess");
 
@@ -6083,12 +6105,16 @@ void machine_details(char *buff)
 	  buff[--c] = 0;
 	}
 
+        scheme_pop_continuation_frame(&cframe);
+
 	return;
       }
     }
   }
 
   strcpy(buff, "<unknown machine>");
+
+  scheme_pop_continuation_frame(&cframe);
 }
 #endif
 

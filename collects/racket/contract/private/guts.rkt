@@ -76,7 +76,9 @@
          contract-first-order-try-less-hard
          contract-first-order-only-try-so-hard
 
-         raise-predicate-blame-error-failure)
+         raise-predicate-blame-error-failure
+
+         n->th)
 
 (define (contract-custom-write-property-proc stct port mode)
   (define (write-prefix)
@@ -297,9 +299,15 @@
       [(contract-struct? x) #f] ;; this has to come first, since some of these are procedure?.
       [(and (procedure? x) (procedure-arity-includes? x 1))
        (cond
-         [(eq? x null?) list/c-empty]
-         [(and (eq? x list?) listof-any) listof-any]
-         [(and (eq? x pair?) consc-anyany) consc-anyany]
+         [(chaperone-of? x null?) list/c-empty]
+         [(chaperone-of? x list?)
+          (unless listof-any
+            (error 'coerce-contract/f::listof-any "too soon!"))
+          listof-any]
+         [(chaperone-of? x pair?)
+          (unless consc-anyany
+            (error 'coerce-contract/f::consc-anyany "too soon!"))
+          consc-anyany]
          [else
           (make-predicate-contract (if (name-default? name)
                                        (or (object-name x) '???)
@@ -307,7 +315,10 @@
                                    x
                                    #f
                                    (memq x the-known-good-contracts))])]
-      [(null? x) list/c-empty]
+      [(null? x)
+       (unless list/c-empty
+         (error 'coerce-contract/f::list/c-empty "too soon!"))
+       list/c-empty]
       [(not x) false/c-contract]
       [(or (symbol? x) (boolean? x) (keyword? x))
        (make-eq-contract x
@@ -605,7 +616,6 @@
    (λ (this that)
       (and (regexp/c? that) (equal? (regexp/c-reg this) (regexp/c-reg that))))))
 
-
 ;; sane? : boolean -- indicates if we know that the predicate is well behaved
 ;; (for now, basically amounts to trusting primitive procedures)
 (define-struct predicate-contract (name pred generate sane?)
@@ -676,7 +686,7 @@
   (cond
     [(contract-struct-late-neg-projection ctc) => values]
     [else
-     (log-racket/contract-warning "no late-neg-projection for ~s" ctc)
+     (log-racket/contract-info "no late-neg-projection for ~s" ctc)
      (cond
        [(contract-struct-projection ctc)
         =>
@@ -713,7 +723,7 @@
 (define warn-about-val-first? (make-parameter #t))
 (define (maybe-warn-about-val-first ctc)
   (when (warn-about-val-first?)
-    (log-racket/contract-warning
+    (log-racket/contract-info
      "building val-first-projection of contract ~s for~a"
      ctc
      (build-context))))
@@ -772,11 +782,33 @@
 (define contract-continuation-mark-key
   (make-continuation-mark-key 'contract))
 
-(define-syntax-rule (with-contract-continuation-mark payload code)
+;; Instrumentation strategy:
+;; - add instrumentation at entry points to the contract system:
+;;   - `contract` (`apply-contract`, really)
+;;   - `contract-out` (`do-partial-app`, really)
+;;   - all others go through one of the above
+;;   that instrumentation picks up "top-level" flat contracts (i.e., not part of
+;;   some higher-order contract) and the "eager" parts of higher-order contracts
+;; - add instrumentation inside chaperones/impersonators created by projections
+;;   that instrumentation picks up the deferred work of higher-order contracts
+;; - add instrumentation to `plus-one-arity-functions`
+;;   those perform checking, but don't rely on chaperones
+;;   they exist for -> and ->*, and are partially implemented for ->i
+;;   TODO once they're fully implemented for ->i, will need to instrument them
+(define-syntax-rule (with-contract-continuation-mark payload code ...)
   (begin
     ;; ;; When debugging a missing blame party error, turn this on, then run
     ;; ;; the contract test suite. It should find the problematic combinator.
     ;; (unless (or (pair? payload) (not (blame-missing-party? payload)))
     ;;   (error "internal error: missing blame party" payload))
-    (with-continuation-mark contract-continuation-mark-key payload code)))
+    (with-continuation-mark contract-continuation-mark-key payload
+                            (let () code ...))))
 
+(define (n->th n)
+  (string-append 
+   (number->string n)
+   (case (modulo n 10)
+     [(1) "st"]
+     [(2) "nd"]
+     [(3) "rd"]
+     [else "th"])))

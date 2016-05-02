@@ -158,8 +158,8 @@ each element in the sequence.
   (sequence? "word")
   (sequence? #\x)]}
 
-@defproc*[([(in-range [end number?]) stream?]
-           [(in-range [start number?] [end number?] [step number? 1]) stream?])]{
+@defproc*[([(in-range [end real?]) stream?]
+           [(in-range [start real?] [end real?] [step real? 1]) stream?])]{
   Returns a sequence (that is also a @tech{stream}) whose elements are
   numbers.  The single-argument case @racket[(in-range end)] is
   equivalent to @racket[(in-range 0 end 1)].  The first number in the
@@ -232,9 +232,21 @@ each element in the sequence.
   greater or equal to @racket[end] if @racket[step] is non-negative,
   or less or equal to @racket[end] if @racket[step] is negative.
 
-  If @racket[start] is not a valid index, or @racket[stop] is not in
-  [-1, @racket[(vector-length vec)]] then the
-  @exnraise[exn:fail:contract].  If @racket[start] is less than
+  If @racket[start] is not a valid index, then the
+  @exnraise[exn:fail:contract], except when @racket[start], @racket[stop], and
+  @racket[(vector-length vec)] are equal, in which case the result is an
+  empty sequence.
+
+  @examples[#:eval sequence-evaluator
+            (for ([x (in-vector (vector 1) 1)]) x)
+            (eval:error (for ([x (in-vector (vector 1) 2)]) x))
+            (for ([x (in-vector (vector) 0 0)]) x)
+            (for ([x (in-vector (vector 1) 1 1)]) x)]
+
+  If @racket[stop] is not in [-1, @racket[(vector-length vec)]],
+  then the @exnraise[exn:fail:contract].
+  
+  If @racket[start] is less than
   @racket[stop] and @racket[step] is negative, then the
   @exnraise[exn:fail:contract:mismatch].  Similarly, if @racket[start]
   is more than @racket[stop] and @racket[step] is positive, then the
@@ -365,6 +377,53 @@ each element in the sequence.
     (for ([key+value (in-hash-pairs table)])
       (printf "key and value: ~a\n" key+value))]
 }
+
+@deftogether[(
+@defproc[(in-mutable-hash 
+          [hash (and/c hash? (not/c immutable?) (not/c hash-weak?))]) 
+	  sequence?]
+@defproc[(in-mutable-hash-keys
+          [hash (and/c hash? (not/c immutable?) (not/c hash-weak?))]) 
+	  sequence?]
+@defproc[(in-mutable-hash-values
+          [hash (and/c hash? (not/c immutable?) (not/c hash-weak?))]) 
+	  sequence?]
+@defproc[(in-mutable-hash-pairs
+          [hash (and/c hash? (not/c immutable?) (not/c hash-weak?))]) 
+	  sequence?]
+@defproc[(in-immutable-hash 
+          [hash (and/c hash? immutable?)])
+	  sequence?]
+@defproc[(in-immutable-hash-keys
+          [hash (and/c hash? immutable?)])
+	  sequence?]
+@defproc[(in-immutable-hash-values
+          [hash (and/c hash? immutable?)])
+	  sequence?]
+@defproc[(in-immutable-hash-pairs
+          [hash (and/c hash? immutable?)])
+	  sequence?]
+@defproc[(in-weak-hash 
+          [hash (and/c hash? hash-weak?)]) 
+	  sequence?]
+@defproc[(in-weak-hash-keys
+          [hash (and/c hash? hash-weak?)]) 
+	  sequence?]
+@defproc[(in-weak-hash-values
+          [hash (and/c hash? hash-weak?)]) 
+	  sequence?]
+@defproc[(in-weak-hash-pairs
+          [hash (and/c hash? hash-weak?)]) 
+	  sequence?]
+)]{
+   Sequence constructors for specific kinds of hash tables.
+   
+   These may be more performant than the analogous @racket[in-hash] 
+   forms. However, they may consume more space to help with iteration.
+   
+   @history[#:added "6.4.0.6"]
+}
+
 
 @defproc[(in-directory [dir (or/c #f path-string?) #f]
                        [use-dir? ((and/c path? complete-path?) . -> . any/c)
@@ -1016,6 +1075,26 @@ stream, but plain lists can be used as streams, and functions such as
   Returns a stream whose elements are the elements of @racket[s], but
   with @racket[e] between each pair of elements in @racket[s].  The
   new stream is constructed lazily.
+}
+
+@deftogether[(@defform[(for/stream (for-clause ...) body-or-break ... body)]
+              @defform[(for*/stream (for-clause ...) body-or-break ... body)])]{
+  Iterates like @racket[for/list] and @racket[for*/list], respectively, but the
+  results are lazily collected into a @tech{stream} instead of a list.
+
+  Unlike most @racket[for] forms, these forms are evaluated lazily, so each
+  @racket[body] will not be evaluated until the resulting stream is forced. This
+  allows @racket[for/stream] and @racket[for*/stream] to iterate over infinite
+  sequences, unlike their finite counterparts.
+
+  @examples[#:eval sequence-evaluator
+    (for/stream ([i '(1 2 3)]) (* i i))
+    (stream->list (for/stream ([i '(1 2 3)]) (* i i)))
+    (stream-ref (for/stream ([i '(1 2 3)]) (displayln i) (* i i)) 1)
+    (stream-ref (for/stream ([i (in-naturals)]) (* i i)) 25)
+  ]
+
+  @history[#:added "6.3.0.9"]
 }
 
 @defthing[gen:stream any/c]{

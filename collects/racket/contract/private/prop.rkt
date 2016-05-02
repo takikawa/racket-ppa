@@ -291,7 +291,7 @@
 
   (unless get-late-neg-projection
     (unless first-order?
-      (log-racket/contract-warning
+      (log-racket/contract-info
        "no late-neg-projection passed to ~s~a"
        proc-name
        (build-context))))
@@ -464,7 +464,7 @@
   
   (unless late-neg-projection
     (unless first-order?
-      (log-racket/contract-warning
+      (log-racket/contract-info
        "no late-neg-projection passed to ~s~a"
        proc-name
        (build-context))))
@@ -497,9 +497,10 @@
            v)))))
 
 (define (as-strong? a b)
-  (procedure-closure-contents-eq?
-   (contract-struct-projection a)
-   (contract-struct-projection b)))
+  (define late-neg-a (contract-struct-late-neg-projection a))
+  (define late-neg-b (contract-struct-late-neg-projection b))
+  (and late-neg-a late-neg-b
+       (procedure-closure-contents-eq? late-neg-a late-neg-b)))
 
 (define make-contract
   (procedure-rename 

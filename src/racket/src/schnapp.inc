@@ -25,8 +25,7 @@ static MZ_INLINE Scheme_Object *PRIM_APPLY_NAME_FAST(Scheme_Object *rator,
   prim = (Scheme_Primitive_Proc *)rator;
   
   if (argc < prim->mina || (argc > prim->mu.maxa && prim->mina >= 0)) {
-    scheme_wrong_count_m(prim->name, prim->mina, prim->mu.maxa, argc, argv,
-                         prim->pp.flags & SCHEME_PRIM_IS_METHOD);
+    scheme_wrong_count_m(prim->name, prim->mina, prim->mu.maxa, argc, argv, 0);
     return NULL; /* Shouldn't get here */
   }
   
@@ -62,13 +61,17 @@ Scheme_Object *PRIM_APPLY_NAME(Scheme_Object *rator,
 
     if ((t == scheme_proc_chaperone_type)
         && SCHEME_VECTORP(((Scheme_Chaperone *)rator)->redirects)
-        && (SCHEME_VEC_SIZE(((Scheme_Chaperone *)rator)->redirects) & 0x1)) {
-      if (SCHEME_FALSEP(SCHEME_VEC_ELS(((Scheme_Chaperone *)rator)->redirects)[0])) {
-        /* No redirection proc (i.e, chaperone is just for properties) */
+        && (SCHEME_VEC_SIZE(((Scheme_Chaperone *)rator)->redirects) & 0x1)
+        && (SCHEME_CHAPERONE_FLAGS((Scheme_Chaperone *)rator) == SCHEME_PROC_CHAPERONE_CALL_DIRECT)) {
+      if (SCHEME_FALSEP(SCHEME_VEC_ELS(((Scheme_Chaperone *)rator)->redirects)[1])
+          || SCHEME_INT_VAL(SCHEME_VEC_ELS(((Scheme_Chaperone *)rator)->redirects)[1]) == argc) {
+        /* No redirection proc, i.e, chaperone is just for
+	   properties or produced by unsafe-chaperone-procedure result -- and in the
+           latter case, the arity is right. */
         GC_CAN_IGNORE Scheme_Thread *p = scheme_current_thread;
         if (SCHEME_IMMUTABLEP(((Scheme_Chaperone *)rator)->redirects) && !p->self_for_proc_chaperone)
           p->self_for_proc_chaperone = rator;
-        rator = ((Scheme_Chaperone *)rator)->prev;
+        rator = SCHEME_VEC_ELS(((Scheme_Chaperone *)rator)->redirects)[0];
         t = _SCHEME_TYPE(rator);
       } else
         return scheme_apply_chaperone(rator, argc, argv, NULL, PRIM_CHECK_MULTI | (PRIM_CHECK_VALUE << 1));

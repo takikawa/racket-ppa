@@ -19,10 +19,11 @@
     Boston, MA 02110-1301 USA.
 */
 
-/* This file implements the first-order, top-level module system. An
-   initiantiated module is implemented essentially as a namespace. The
-   bindings at the top level of a module are namespace top-level
-   bindings. */
+/* This file implements the first-order, top-level module system --
+   both the expander and compiler front-end, as well as run-time
+   support for modules. An initiantiated module is implemented
+   essentially as a namespace. The bindings at the top level of a
+   module are namespace top-level bindings. */
 
 #include "schpriv.h"
 #include "schmach.h"
@@ -84,17 +85,17 @@ static Scheme_Object *resolved_module_path_name(int argc, Scheme_Object *argv[])
 static Scheme_Object *module_export_protected_p(int argc, Scheme_Object **argv);
 
 /* syntax */
-static Scheme_Object *module_syntax(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec, int drec);
+static Scheme_Object *module_compile(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec, int drec);
 static Scheme_Object *module_expand(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Expand_Info *erec, int drec);
-static Scheme_Object *modulestar_syntax(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec, int drec);
+static Scheme_Object *modulestar_compile(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec, int drec);
 static Scheme_Object *modulestar_expand(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Expand_Info *erec, int drec);
-static Scheme_Object *module_begin_syntax(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec, int drec);
+static Scheme_Object *module_begin_compile(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec, int drec);
 static Scheme_Object *module_begin_expand(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Expand_Info *erec, int drec);
-static Scheme_Object *declare_syntax(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec, int drec);
+static Scheme_Object *declare_compile(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec, int drec);
 static Scheme_Object *declare_expand(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Expand_Info *erec, int drec);
-static Scheme_Object *require_syntax(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec, int drec);
+static Scheme_Object *require_compile(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec, int drec);
 static Scheme_Object *require_expand(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Expand_Info *erec, int drec);
-static Scheme_Object *provide_syntax(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec, int drec);
+static Scheme_Object *provide_compile(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec, int drec);
 static Scheme_Object *provide_expand(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Expand_Info *erec, int drec);
 
 static Scheme_Module *module_load(Scheme_Object *modname, Scheme_Env *env, const char *who);
@@ -126,6 +127,7 @@ typedef struct Module_Begin_Expand_State {
   Scheme_Object *redef_modname;
   Scheme_Object *end_statementss; /* list of lists */
   Scheme_Object *modsrc; /* source for top-level module */
+  Scheme_Object **sub_iidx_ptrs; /* contains `iidx`es for `(module* name #f ...)` submodules */
 } Module_Begin_Expand_State;
 
 static Scheme_Object *do_module_begin_at_phase(Scheme_Object *form, Scheme_Comp_Env *env, 
@@ -378,34 +380,34 @@ static void qsort_provides(Scheme_Object **exs, Scheme_Object **exsns, Scheme_Ob
 void scheme_init_module(Scheme_Env *env)
 {
   scheme_add_global_keyword("module", 
-			    scheme_make_compiled_syntax(module_syntax, 
-							module_expand),
+			    scheme_make_primitive_syntax(module_compile, 
+                                                         module_expand),
 			    env);
   scheme_add_global_keyword("module*", 
-			    scheme_make_compiled_syntax(modulestar_syntax, 
-							modulestar_expand),
+			    scheme_make_primitive_syntax(modulestar_compile, 
+                                                         modulestar_expand),
 			    env);
 
   REGISTER_SO(modbeg_syntax);
-  modbeg_syntax = scheme_make_compiled_syntax(module_begin_syntax, 
-					      module_begin_expand);
+  modbeg_syntax = scheme_make_primitive_syntax(module_begin_compile, 
+                                               module_begin_expand);
 
   scheme_add_global_keyword("#%module-begin", 
 			    modbeg_syntax,
 			    env);
 
   scheme_add_global_keyword("#%declare",
-                            scheme_make_compiled_syntax(declare_syntax,
-                                                        declare_expand),
+                            scheme_make_primitive_syntax(declare_compile,
+                                                         declare_expand),
 			    env);
 
   scheme_add_global_keyword("#%require", 
-			    scheme_make_compiled_syntax(require_syntax, 
-							require_expand), 
+			    scheme_make_primitive_syntax(require_compile, 
+                                                         require_expand), 
 			    env);
   scheme_add_global_keyword("#%provide", 
-			    scheme_make_compiled_syntax(provide_syntax, 
-							provide_expand), 
+			    scheme_make_primitive_syntax(provide_compile, 
+                                                         provide_expand), 
 			    env);
 
 #ifdef MZ_USE_PLACES
@@ -2249,10 +2251,12 @@ static Scheme_Object *do_namespace_attach_module(const char *who, int argc, Sche
     }
     
     past_checkeds = SCHEME_CDR(past_checkeds);
-    from_modchain = SCHEME_VEC_ELS(from_modchain)[2];
-    if (phase > orig_phase)
-      to_modchain = SCHEME_VEC_ELS(to_modchain)[2];   
-    --phase;
+    if (!SCHEME_NULLP(past_checkeds)) {
+      from_modchain = SCHEME_VEC_ELS(from_modchain)[2];
+      if (phase > orig_phase)
+        to_modchain = SCHEME_VEC_ELS(to_modchain)[2];
+      --phase;
+    }
   }
 
   /* Notify module name resolver of attached modules: */
@@ -4345,7 +4349,7 @@ static int is_procedure_expression(Scheme_Object *e)
 
   t = SCHEME_TYPE(e);
 
-  return ((t == scheme_unclosed_procedure_type)
+  return ((t == scheme_lambda_type)
           || (t == scheme_case_lambda_sequence_type));
 }
 
@@ -4430,7 +4434,7 @@ static void setup_accessible_table(Scheme_Module *m)
                            might leave bindings out of the `toplevels' table. */
                       } else {
                         if (SCHEME_VEC_SIZE(form) == 2) {
-                          if (scheme_compiled_duplicate_ok(SCHEME_VEC_ELS(form)[0], 1)) {
+                          if (scheme_ir_duplicate_ok(SCHEME_VEC_ELS(form)[0], 1)) {
                             /* record simple constant from cross-module propagation: */
                             v = scheme_make_pair(v, SCHEME_VEC_ELS(form)[0]);
                           } else if (SAME_TYPE(SCHEME_TYPE(SCHEME_VEC_ELS(form)[0]), scheme_inline_variant_type)) {
@@ -4515,18 +4519,21 @@ Scheme_Env *scheme_module_access(Scheme_Object *name, Scheme_Env *env, intptr_t 
   return menv;
 }
 
-static void check_certified(Scheme_Object *stx,
+static void check_certified(Scheme_Object *guard_insp,
                             Scheme_Object *current_insp, Scheme_Object *binding_insp,
-                            Scheme_Object *in_modidx,
-			    Scheme_Env *env, Scheme_Object *symbol,
-			    int var, int prot, int *_would_complain)
+                            Scheme_Object *stx,  /* for error reporting */
+                            Scheme_Module *module, /* for error reporting */
+			    Scheme_Object *symbol, /* for error reporting */
+			    int var,  /* for error reporting */
+                            int prot, /* for error reporting */
+                            int *_would_complain)
 {
   int need_cert = 1;
     
   if (need_cert && current_insp)
-    need_cert = scheme_module_protected_wrt(env->guard_insp, current_insp);
+    need_cert = scheme_module_protected_wrt(guard_insp, current_insp);
   if (need_cert && binding_insp)
-    need_cert = scheme_module_protected_wrt(env->guard_insp, binding_insp);
+    need_cert = scheme_module_protected_wrt(guard_insp, binding_insp);
 
   if (need_cert) {
     if (_would_complain) {
@@ -4541,7 +4548,7 @@ static void check_certified(Scheme_Object *stx,
                           "access disallowed by code inspector to %s %s from module: %D",
                           prot ? "protected" : "unexported",
                           var ? "variable" : "syntax",
-                          scheme_get_modsrc(env->module));
+                          scheme_get_modsrc(module));
     }
   }
 }
@@ -4564,44 +4571,43 @@ static Scheme_Object *to_defined_symbol(Scheme_Object *symbol, Scheme_Env *env)
   return to_defined_symbol_at_phase(symbol, env, scheme_make_integer(env->phase));
 }
 
-Scheme_Object *scheme_check_accessible_in_module(Scheme_Env *env, Scheme_Object *in_modidx,
-						 Scheme_Object *symbol, Scheme_Object *stx,
-						 Scheme_Object *current_insp, 
+static Scheme_Object *check_accessible_in_module(Scheme_Module *module, intptr_t mod_phase, Scheme_Object *guard_insp,
+                                                 Scheme_Object *symbol,
+                                                 Scheme_Object *stx, /* for error reporting, only */
+                                                 Scheme_Object *current_insp,
                                                  Scheme_Object *binding_insp,
-						 int position, int want_pos, 
+                                                 int position, int want_pos,
                                                  int *_protected, int *_unexported,
-                                                 Scheme_Env *from_env, int *_would_complain,
+                                                 Scheme_Env *from_env, /* for error reporting, only */
+                                                 int *_would_complain,
                                                  Scheme_Object **_is_constant)
-     /* Returns the actual name when !want_pos, needed in case of
-	uninterned names.  Otherwise, returns a position value on success.
-	If position < -1, then merely checks for protected syntax.
+/* Returns the actual name when !want_pos, needed in case of
+   uninterned names.  Otherwise, returns a position value on success.
+   If position < -1, then merely checks for protected syntax.
 
-	Access for protected and unexported names depends on
-        `current_insp` (dynamic context) and `binding_insp` (static context). */
+   Access for protected and unexported names depends on
+   `current_insp` (dynamic context) and `binding_insp` (static context). */
 {
   Scheme_Module_Phase_Exports *pt;
 
-  if (!SCHEME_SYMBOLP(symbol))
-    symbol = to_defined_symbol(symbol, env);
-
-  if (scheme_is_kernel_env(env)
-      || ((env->module->primitive && !env->module->exp_infos[0]->provide_protects))) {
+  if (SAME_OBJ(scheme_get_kernel_env()->module, module)
+      || ((module->primitive && !module->exp_infos[0]->provide_protects))) {
     if (want_pos)
       return scheme_make_integer(-1);
     else
       return symbol;
   }
 
-  switch (env->mod_phase) {
+  switch (mod_phase) {
   case 0:
-    pt = env->module->me->rt;
+    pt = module->me->rt;
     break;
   case 1:
-    pt = env->module->me->et;
+    pt = module->me->et;
     break;
   default:
-    pt = (Scheme_Module_Phase_Exports *)scheme_hash_get(env->module->me->other_phases,
-                                                        scheme_make_integer(env->mod_phase));
+    pt = (Scheme_Module_Phase_Exports *)scheme_hash_get(module->me->other_phases,
+                                                        scheme_make_integer(mod_phase));
     break;
   }
 
@@ -4623,9 +4629,9 @@ Scheme_Object *scheme_check_accessible_in_module(Scheme_Env *env, Scheme_Object 
         int num_indirect_provides;
         Scheme_Object **indirect_provides;
 
-        if ((env->mod_phase >= 0) && (env->mod_phase < env->module->num_phases)) {
-          num_indirect_provides = env->module->exp_infos[env->mod_phase]->num_indirect_provides;
-          indirect_provides = env->module->exp_infos[env->mod_phase]->indirect_provides;
+        if ((mod_phase >= 0) && (mod_phase < module->num_phases)) {
+          num_indirect_provides = module->exp_infos[mod_phase]->num_indirect_provides;
+          indirect_provides = module->exp_infos[mod_phase]->indirect_provides;
         } else {
           num_indirect_provides = 0;
           indirect_provides = NULL;
@@ -4646,11 +4652,11 @@ Scheme_Object *scheme_check_accessible_in_module(Scheme_Env *env, Scheme_Object 
                 && !memcmp(SCHEME_SYM_VAL(isym), SCHEME_SYM_VAL(symbol), SCHEME_SYM_LEN(isym)))) {
 	
           if ((position < pt->num_var_provides)
-              && scheme_module_protected_wrt(env->guard_insp, current_insp)) {
+              && scheme_module_protected_wrt(guard_insp, current_insp)) {
             char *provide_protects;
 
-            if ((env->mod_phase >= 0) && (env->mod_phase < env->module->num_phases))
-              provide_protects = env->module->exp_infos[env->mod_phase]->provide_protects;
+            if ((mod_phase >= 0) && (mod_phase < module->num_phases))
+              provide_protects = module->exp_infos[mod_phase]->provide_protects;
             else
               provide_protects = NULL;
             
@@ -4658,12 +4664,12 @@ Scheme_Object *scheme_check_accessible_in_module(Scheme_Env *env, Scheme_Object 
                 && provide_protects[position]) {
               if (_protected)
                 *_protected = 1;
-              check_certified(stx, current_insp, binding_insp, in_modidx, env, symbol, 1, 1, _would_complain);
+              check_certified(guard_insp, current_insp, binding_insp, stx, module, symbol, 1, 1, _would_complain);
             }
           }
 
           if (need_cert)
-            check_certified(stx, current_insp, binding_insp, in_modidx, env, symbol, 1, 0, _would_complain);
+            check_certified(guard_insp, current_insp, binding_insp, stx, module, symbol, 1, 0, _would_complain);
 	
           if (want_pos)
             return scheme_make_integer(position);
@@ -4675,8 +4681,8 @@ Scheme_Object *scheme_check_accessible_in_module(Scheme_Env *env, Scheme_Object 
     } else {
       Scheme_Object *pos;
 
-      if (env->mod_phase < env->module->num_phases)
-        pos = scheme_hash_get(env->module->exp_infos[env->mod_phase]->accessible, symbol);
+      if (mod_phase < module->num_phases)
+        pos = scheme_hash_get(module->exp_infos[mod_phase]->accessible, symbol);
       else
         pos = NULL;
         
@@ -4716,8 +4722,8 @@ Scheme_Object *scheme_check_accessible_in_module(Scheme_Env *env, Scheme_Object 
       if (pos) {
         char *provide_protects;
 
-        if ((env->mod_phase >= 0) && (env->mod_phase < env->module->num_phases))
-          provide_protects = env->module->exp_infos[env->mod_phase]->provide_protects;
+        if ((mod_phase >= 0) && (mod_phase < module->num_phases))
+          provide_protects = module->exp_infos[mod_phase]->provide_protects;
         else
           provide_protects = NULL;
 
@@ -4726,7 +4732,7 @@ Scheme_Object *scheme_check_accessible_in_module(Scheme_Env *env, Scheme_Object 
             && provide_protects[SCHEME_INT_VAL(pos)]) {
           if (_protected)
             *_protected = 1;
-          check_certified(stx, current_insp, binding_insp, in_modidx, env, symbol, 1, 1, _would_complain);
+          check_certified(guard_insp, current_insp, binding_insp, stx, module, symbol, 1, 1, _would_complain);
         }
 
         if ((position >= -1) 
@@ -4736,7 +4742,7 @@ Scheme_Object *scheme_check_accessible_in_module(Scheme_Env *env, Scheme_Object 
             *_protected = 1;
           if (_unexported)
             *_unexported = 1;
-          check_certified(stx, current_insp, binding_insp, in_modidx, env, symbol, 1, 0, _would_complain);
+          check_certified(guard_insp, current_insp, binding_insp, stx, module, symbol, 1, 0, _would_complain);
         }
 
         if (want_pos)
@@ -4749,7 +4755,7 @@ Scheme_Object *scheme_check_accessible_in_module(Scheme_Env *env, Scheme_Object 
         /* unexported syntax -- need cert */
         if (_unexported)
           *_unexported = 1;
-        check_certified(stx, current_insp, binding_insp, in_modidx, env, symbol, 0, 0, _would_complain);
+        check_certified(guard_insp, current_insp, binding_insp, stx, module, symbol, 0, 0, _would_complain);
         return NULL;
       }
     }
@@ -4787,13 +4793,67 @@ Scheme_Object *scheme_check_accessible_in_module(Scheme_Env *env, Scheme_Object 
                         srclen ? "  importing module: " : "",
                         srcstr, srclen,
                         srclen ? "\n" : "",
-                        scheme_get_modsrc(env->module),
-                        env->mod_phase,
+                        scheme_get_modsrc(module),
+                        mod_phase,
                         (position >= 0) ? " and at the expected position" : "");
   }
 
   return NULL;
 }
+
+Scheme_Object *scheme_check_accessible_in_module_instance(Scheme_Env *env,
+                                                          Scheme_Object *symbol,
+                                                          Scheme_Object *stx, /* for error reporting, only */
+                                                          Scheme_Object *current_insp,
+                                                          Scheme_Object *binding_insp,
+                                                          int position, int want_pos,
+                                                          int *_protected, int *_unexported,
+                                                          Scheme_Env *from_env, /* for error reporting, only */
+                                                          int *_would_complain,
+                                                          Scheme_Object **_is_constant)
+{
+  if (!SCHEME_SYMBOLP(symbol))
+    symbol = to_defined_symbol(symbol, env);
+
+  return check_accessible_in_module(env->module, env->mod_phase, env->guard_insp,
+                                    symbol, stx,
+                                    current_insp, binding_insp,
+                                    position, want_pos, 
+                                    _protected, _unexported,
+                                    from_env,
+                                    _would_complain,
+                                    _is_constant);
+}
+
+Scheme_Object *scheme_check_accessible_in_module_name(Scheme_Object *modidx, intptr_t mod_phase, Scheme_Env *env,
+                                                      Scheme_Object *symbol, int position,
+                                                      Scheme_Object *current_insp, Scheme_Object *binding_insp,
+                                                      Scheme_Object **_is_constant)
+{
+  Scheme_Module *module;
+  Scheme_Object *modname, *pos;
+  int would_complain = 0;
+
+  modname = scheme_module_resolve(modidx, 0);
+
+  module = registry_get_loaded(env, modname);
+  if (!module)
+    return 0;
+
+  pos = check_accessible_in_module(module, mod_phase, scheme_make_inspector(module->insp),
+                                   symbol, NULL,
+                                   current_insp, binding_insp,
+                                   position, 1,
+                                   NULL, NULL,
+                                   NULL,
+                                   &would_complain,
+                                   _is_constant);
+
+  return (would_complain
+          ? NULL
+          : (pos ? pos : scheme_make_integer(position)));
+}
+
 
 void scheme_check_unsafe_accessible(Scheme_Object *insp, Scheme_Env *from_env)
 {
@@ -4959,7 +5019,7 @@ static void unlock_registry(Scheme_Env *env)
 
 XFORM_NONGCING static intptr_t make_key(int base_phase, int eval_exp, int eval_run)
 {
-  return ((base_phase << 3) 
+  return (((unsigned)base_phase << 3) 
           | (eval_exp ? ((eval_exp > 0) ? 2 : 4) : 0) 
           | (eval_run ? 1 : 0));
 }
@@ -5433,6 +5493,12 @@ static Scheme_Env *instantiate_module(Scheme_Module *m, Scheme_Env *env, int res
     } else {
       Scheme_Env *env2;
 
+      if (menv->module->num_phases < m->num_phases) {
+        char *running;
+        running = (char *)scheme_malloc_atomic(m->num_phases);
+        menv->running = running;
+      }
+
       menv->module = m;
       memset(menv->running, 0, menv->module->num_phases);
       menv->ran = 0;
@@ -5884,7 +5950,7 @@ static int needs_prompt(Scheme_Object *e)
       return 0;
   
     switch (t) {
-    case scheme_unclosed_procedure_type:
+    case scheme_lambda_type:
     case scheme_toplevel_type:
     case scheme_local_type:
     case scheme_local_unbox_type:
@@ -5930,7 +5996,7 @@ void *scheme_module_run_finish(Scheme_Env *menv, Scheme_Env *env)
 
   LOG_START_RUN(menv->module);
 
-  save_runstack = scheme_push_prefix(menv, m->prefix,
+  save_runstack = scheme_push_prefix(menv, 0, m->prefix,
 				     m->me->src_modidx, menv->link_midx,
 				     0, menv->phase, NULL,
                                      menv->access_insp);
@@ -6356,7 +6422,7 @@ static int is_simple_expr(Scheme_Object *v)
   Scheme_Type t;
 
   t = SCHEME_TYPE(v);
-  if (SAME_TYPE(t, scheme_unclosed_procedure_type))
+  if (SAME_TYPE(t, scheme_lambda_type))
     return 1;
 
   return 0;
@@ -6398,7 +6464,7 @@ static void eval_exptime(Scheme_Object *names, int count,
   if (SCHEME_TYPE(expr) > _scheme_values_types_) {
     vals = expr;
   } else {
-    save_runstack = scheme_push_prefix(genv, rp,
+    save_runstack = scheme_push_prefix(genv, 0, rp,
                                        (shift ? genv->module->me->src_modidx : NULL), 
                                        (shift ? genv->link_midx : NULL), 
                                        at_phase, genv->phase,
@@ -7057,7 +7123,7 @@ static Scheme_Object *do_module(Scheme_Object *form, Scheme_Comp_Env *env,
   Scheme_Comp_Env *benv;
   Scheme_Module *m;
   Scheme_Object *mbval, *orig_ii;
-  Scheme_Object *this_empty_self_modidx;
+  Scheme_Object *this_empty_self_modidx, **sub_iidx_ptrs;
   int saw_mb, check_mb = 0, shift_back = 0;
   Scheme_Object *restore_confusing_name = NULL;
   LOG_EXPAND_DECLS;
@@ -7213,6 +7279,9 @@ static Scheme_Object *do_module(Scheme_Object *form, Scheme_Comp_Env *env,
                               self_modidx,
                               scheme_false);
 
+    shift = scheme_make_pair(iidx, *super_bxs->sub_iidx_ptrs);
+    *super_bxs->sub_iidx_ptrs = shift;
+
     super_phase_shift = scheme_bin_minus(scheme_make_integer(0), super_phase_shift);
 
     shift = scheme_make_shift(super_phase_shift, 
@@ -7229,6 +7298,10 @@ static Scheme_Object *do_module(Scheme_Object *form, Scheme_Comp_Env *env,
     super_bxs_info[5] = super_phase_shift;
     m->super_bxs_info = super_bxs_info;
   }
+
+  sub_iidx_ptrs = MALLOC_N(Scheme_Object*, 1);
+  *sub_iidx_ptrs = scheme_null;
+  m->sub_iidx_ptrs = sub_iidx_ptrs;
 
   if (!rec[drec].comp) {
     SCHEME_EXPAND_OBSERVE_PREPARE_ENV(env->observer);
@@ -7398,6 +7471,7 @@ static Scheme_Object *do_module(Scheme_Object *form, Scheme_Comp_Env *env,
 
     m->ii_src = NULL;
     m->super_bxs_info = NULL;
+    m->sub_iidx_ptrs = NULL;
 
     pv = scheme_stx_property(form, scheme_intern_symbol("module-language"), NULL);
     if (pv && SCHEME_TRUEP(pv)) {
@@ -7422,6 +7496,7 @@ static Scheme_Object *do_module(Scheme_Object *form, Scheme_Comp_Env *env,
 
     m->ii_src = NULL;
     m->super_bxs_info = NULL;
+    m->sub_iidx_ptrs = NULL;
 
     hints = m->hints;
     m->hints = NULL;
@@ -7433,8 +7508,14 @@ static Scheme_Object *do_module(Scheme_Object *form, Scheme_Comp_Env *env,
                         cons(fm, scheme_null))));
 
     fm = scheme_datum_to_syntax(fm, form, ctx_form, 0, 2);
+
+    /* for future expansion, shift away from self_modidx: */
+    ps = scheme_make_shift(NULL, self_modidx, this_empty_self_modidx, NULL, NULL, NULL);
+    fm = scheme_stx_add_shift(fm, ps);
     
     if (hints) {
+      Scheme_Object *stx, *l;
+
       fm = scheme_stx_property(fm, 
 			       scheme_intern_symbol("module-direct-requires"),
 			       m->requires);
@@ -7444,6 +7525,24 @@ static Scheme_Object *do_module(Scheme_Object *form, Scheme_Comp_Env *env,
       fm = scheme_stx_property(fm, 
 			       scheme_intern_symbol("module-direct-for-template-requires"),
 			       m->tt_requires);
+
+      l = scheme_null;
+      if (!SCHEME_NULLP(m->dt_requires))
+        l = scheme_make_pair(scheme_make_pair(scheme_false, m->dt_requires),
+                             l);
+      if (m->other_requires) {
+        int i;
+        for (i = 0; i < m->other_requires->size; i++) {
+          if (m->other_requires->vals[i]) {
+            l = scheme_make_pair(scheme_make_pair(m->other_requires->keys[i],
+                                                  m->other_requires->vals[i]),
+                                 l);
+          }
+        }
+      }      
+      fm = scheme_stx_property(fm, 
+			       scheme_intern_symbol("module-direct-for-meta-requires"),
+			       l);
       
       fm = scheme_stx_property(fm, 
 			       scheme_intern_symbol("module-variable-provides"),
@@ -7463,17 +7562,40 @@ static Scheme_Object *do_module(Scheme_Object *form, Scheme_Comp_Env *env,
       fm = scheme_stx_property(fm, 
 			       scheme_intern_symbol("module-self-path-index"),
 			       this_empty_self_modidx);
+
+      fm = scheme_stx_property(fm, 
+                               scheme_intern_symbol("module-body-context-simple?"),
+                               (SAME_OBJ(scheme_true, m->rn_stx)
+                                ? scheme_true
+                                : scheme_false));
+
+      stx = scheme_datum_to_syntax(scheme_intern_symbol("inside"), scheme_false, scheme_false, 0, 0);
+      stx = scheme_stx_add_module_context(stx, rn_set);
+      fm = scheme_stx_property(fm,
+                               scheme_intern_symbol("module-body-context"),
+                               scheme_stx_add_shift(stx, ps));
+
+      stx = scheme_datum_to_syntax(scheme_intern_symbol("outside"), scheme_false, scheme_false, 0, 0);
+      stx = scheme_stx_introduce_to_module_context(stx, rn_set);
+      fm = scheme_stx_property(fm,
+                               scheme_intern_symbol("module-body-inside-context"),
+                               scheme_stx_add_shift(stx, ps));
     }
 
-    /* for future expansion, shift away from self_modidx: */
-    ps = scheme_make_shift(NULL, self_modidx, this_empty_self_modidx, NULL, NULL, NULL);
-    fm = scheme_stx_add_shift(fm, ps);
-
-    /* make self_modidx like the empty modidx */
+    /* make self_modidx like the empty modidx; this update plays the
+       role of applying a shift to identifiers that are in syntax
+       properties, such as the 'origin property */
     if (SAME_OBJ(this_empty_self_modidx, empty_self_modidx))
       ((Scheme_Modidx *)self_modidx)->resolved = empty_self_modname;
     else
       ((Scheme_Modidx *)self_modidx)->resolved = ((Scheme_Modidx *)this_empty_self_modidx)->resolved;
+
+    while (SCHEME_PAIRP(*sub_iidx_ptrs)) {
+      /* Each in `*sub_iidx_ptrs` corresponds to the implicit `..` import for
+         a `(module* name #f ...)` submodule: */
+      ((Scheme_Modidx *)SCHEME_CAR(*sub_iidx_ptrs))->resolved = ((Scheme_Modidx *)self_modidx)->resolved;
+      *sub_iidx_ptrs = SCHEME_CDR(*sub_iidx_ptrs);
+    }
   }
 
   if (rec[drec].comp || (rec[drec].depth != -2)) {
@@ -7492,7 +7614,7 @@ static Scheme_Object *do_module(Scheme_Object *form, Scheme_Comp_Env *env,
 }
 
 static Scheme_Object *
-module_syntax(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec, int drec)
+module_compile(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec, int drec)
 {
   return do_module(form, env, rec, drec, scheme_null, scheme_null, 0,
                    NULL, scheme_make_integer(0));
@@ -7506,7 +7628,7 @@ module_expand(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Expand_Info *ere
 }
 
 static Scheme_Object *
-modulestar_syntax(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec, int drec)
+modulestar_compile(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec, int drec)
 {
   scheme_wrong_syntax(NULL, NULL, form, "illegal use (not in a module top-level)");
   return NULL;
@@ -7515,7 +7637,7 @@ modulestar_syntax(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info
 static Scheme_Object *
 modulestar_expand(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Expand_Info *erec, int drec)
 {
-  return modulestar_syntax(form, env, erec, drec);
+  return modulestar_compile(form, env, erec, drec);
 }
 
 /* For mzc: */
@@ -8249,6 +8371,7 @@ static Scheme_Object *do_module_begin(Scheme_Object *orig_form, Scheme_Comp_Env 
   bxs->redef_modname = redef_modname;
   bxs->end_statementss = scheme_null;
   bxs->modsrc = env->genv->module->modsrc;
+  bxs->sub_iidx_ptrs = env->genv->module->sub_iidx_ptrs;
 
   if (env->genv->module->super_bxs_info) {
     /* initialize imports that are available for export from the enclosing module's
@@ -8383,7 +8506,7 @@ static Scheme_Object *do_module_begin(Scheme_Object *orig_form, Scheme_Comp_Env 
 
     result = scheme_null;
 
-    /* kernel re-export info (always #f): */
+    /* kernel re-export info (now always #f): */
     result = scheme_make_pair(scheme_false, result);
 
     /* Indirect provides */ 
@@ -8467,6 +8590,12 @@ static Scheme_Object *do_module_begin(Scheme_Object *orig_form, Scheme_Comp_Env 
         add_binding_names_from_environment(env->genv->module, bnenv);
       }
     }
+  } else {
+    /* For a property on the expanded module: */
+    if (*all_simple_bindings && env->genv->module->rn_stx) {
+      /* We will be able to reconstruct binding for `module->namespace`: */
+      env->genv->module->rn_stx = scheme_true;
+    }
   }
 
   if (rec[drec].comp || has_submodules) {
@@ -8505,7 +8634,7 @@ static Scheme_Object *do_module_begin(Scheme_Object *orig_form, Scheme_Comp_Env 
 
       o = scheme_letrec_check_expr((Scheme_Object *)env->genv->module);
 
-      oi = scheme_optimize_info_create(env->prefix, 1);
+      oi = scheme_optimize_info_create(env->prefix, env->genv, env->insp, 1);
       scheme_optimize_info_enforce_const(oi, rec[drec].comp_flags & COMP_ENFORCE_CONSTS);
       if (!(rec[drec].comp_flags & COMP_CAN_INLINE))
         scheme_optimize_info_never_inline(oi);
@@ -9203,7 +9332,7 @@ static Scheme_Object *do_module_begin_at_phase(Scheme_Object *form, Scheme_Comp_
               body_lists = SCHEME_CDR(m);
             m = SCHEME_CAR(m);
             /* turn list of compiled expressions into a splice: */
-            m = scheme_make_sequence_compilation(m, 0);
+            m = scheme_make_sequence_compilation(m, 0, 0);
             if (m->type == scheme_sequence_type)
               m->type = scheme_splice_sequence_type;
           } else {
@@ -9233,7 +9362,7 @@ static Scheme_Object *do_module_begin_at_phase(Scheme_Object *form, Scheme_Comp_
 
           m = scheme_letrec_check_expr(m);
 
-	  oi = scheme_optimize_info_create(eenv->prefix, 1);
+	  oi = scheme_optimize_info_create(eenv->prefix, eenv->genv, env->insp, 1);
           scheme_optimize_info_set_context(oi, (Scheme_Object *)env->genv->module);
           if (!(rec[drec].comp_flags & COMP_CAN_INLINE))
             scheme_optimize_info_never_inline(oi);
@@ -9675,7 +9804,7 @@ static Scheme_Object *do_module_begin_at_phase(Scheme_Object *form, Scheme_Comp_
     Scheme_Object *prev = NULL, *next;
     for (p = first; !SCHEME_NULLP(p); p = next) {
       next = SCHEME_CDR(p);
-      if (scheme_omittable_expr(SCHEME_CAR(p), -1, -1, 0, NULL, NULL, 0, 0, 0)) {
+      if (scheme_omittable_expr(SCHEME_CAR(p), -1, -1, 0, NULL, NULL)) {
 	if (prev)
 	  SCHEME_CDR(prev) = next;
 	else
@@ -10036,7 +10165,7 @@ static void install_stops(Scheme_Comp_Env *xenv, int phase, Scheme_Object **_beg
 }
 
 static Scheme_Object *
-module_begin_syntax(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec, int drec)
+module_begin_compile(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec, int drec)
 {
   return do_module_begin(form, env, rec, drec);
 }
@@ -12674,7 +12803,7 @@ static Scheme_Object *do_require(Scheme_Object *form, Scheme_Comp_Env *env,
 }
 
 static Scheme_Object *
-require_syntax(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec, int drec)
+require_compile(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec, int drec)
 {
   return do_require(form, env, rec, drec);
 }
@@ -12707,7 +12836,7 @@ Scheme_Object *scheme_toplevel_require_for_expand(Scheme_Object *module_path,
 /**********************************************************************/
 
 static Scheme_Object *
-provide_syntax(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec, int drec)
+provide_compile(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec, int drec)
 {
   scheme_wrong_syntax(NULL, NULL, form, "not in module body");
   return NULL;
@@ -12722,7 +12851,7 @@ provide_expand(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Expand_Info *er
 }
 
 static Scheme_Object *
-declare_syntax(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec, int drec)
+declare_compile(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec, int drec)
 {
   scheme_wrong_syntax(NULL, NULL, form, "not in module body");
   return NULL;

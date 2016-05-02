@@ -102,6 +102,7 @@ static Scheme_Object *rehash_symbol_bucket(Scheme_Hash_Table *table,
 static Scheme_Object *symbol_bucket(Scheme_Hash_Table *table,
 				    GC_CAN_IGNORE const char *key, uintptr_t length,
 				    Scheme_Object *naya)
+  XFORM_ASSERT_NO_CONVERSION
 {
   hash_v_t h, h2;
   uintptr_t mask;
@@ -127,6 +128,11 @@ static Scheme_Object *symbol_bucket(Scheme_Hash_Table *table,
     /* post hash mixing helps for short symbols */
     h ^= (h << 5) + (h >> 2) + 0xA0A0;
     h ^= (h << 5) + (h >> 2) + 0x0505;
+
+    if (naya) {
+      /* record hash code (or some fragment of it) for `equal?` hashing: */
+      scheme_install_symbol_hash_code(naya, h);
+    }
 
     h = h & mask;
     h2 = h2 & mask;
@@ -698,7 +704,7 @@ const char *scheme_symbol_name_and_size(Scheme_Object *sym, uintptr_t *length, i
       mzchar cbuf[100], *cs, *cresult;
       intptr_t clen;
       int p = 0;
-      uintptr_t i = 0;
+      intptr_t i = 0;
       intptr_t rlen;
 
       dz = 0;

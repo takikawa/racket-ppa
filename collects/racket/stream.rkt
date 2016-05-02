@@ -4,6 +4,7 @@
          racket/generic
          racket/contract/base
          racket/contract/combinator
+         racket/generator
          (rename-in "private/for.rkt"
                     [stream-ref stream-get-generics])
          "private/sequence.rkt"
@@ -42,7 +43,10 @@
          stream-add-between
          stream-count
          
-         stream/c)
+         stream/c
+
+         for/stream
+         for*/stream)
 
 (define-syntax gen:stream
   (make-generic-info (quote-syntax gen:stream)
@@ -256,15 +260,20 @@
       (unless (stream? val)
         (raise-blame-error blame #:missing-party neg-party
                            val '(expected "a stream" given: "~e") val))
+      (define blame+neg-party (cons blame neg-party))
       (if (list? val)
           (listof-elem-ctc-neg-acceptor val neg-party)
           (impersonate/chaperone-stream
            val
-           (λ (v) (elem-ctc-late-neg-acceptor v neg-party))
+           (λ (v) (with-contract-continuation-mark
+                   blame+neg-party
+                   (elem-ctc-late-neg-acceptor v neg-party)))
            (λ (v)
-             (if (list? v)
-                 (listof-elem-ctc-neg-acceptor v neg-party)
-                 (stream/c-late-neg-proj-val-acceptor v neg-party)))
+             (with-contract-continuation-mark
+              blame+neg-party
+              (if (list? v)
+                  (listof-elem-ctc-neg-acceptor v neg-party)
+                  (stream/c-late-neg-proj-val-acceptor v neg-party))))
            impersonator-prop:contracted ctc
            impersonator-prop:blame stream-blame)))
     stream/c-late-neg-proj-val-acceptor))
@@ -295,3 +304,23 @@
   (if (chaperone-contract? ctc)
       (chaperone-stream/c ctc)
       (impersonator-stream/c ctc)))
+
+;; Stream comprehensions -----------------------------------------------------------------------------
+
+(define-syntaxes (for/stream for*/stream)
+  (let ()
+    (define ((make-for/stream derived-stx) stx)
+      (syntax-case stx ()
+        [(_ clauses . body)
+         (begin
+           (when (null? (syntax->list #'body))
+             (raise-syntax-error (syntax-e #'derived-stx)
+                                 "missing body expression after sequence bindings"
+                                 stx #'body))
+           #`(sequence->stream
+              (in-generator
+               (#,derived-stx #,stx () clauses
+                (yield (let () . body))
+                (values)))))]))
+    (values (make-for/stream #'for/fold/derived)
+            (make-for/stream #'for*/fold/derived))))

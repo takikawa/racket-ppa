@@ -17,7 +17,8 @@
          racket/splicing
          racket/stxparam
          syntax/location
-         "private/arrow.rkt"
+         "private/arrow-common.rkt"
+         "private/arrow-val-first.rkt"
          "private/base.rkt"
          "private/guts.rkt"
          "private/misc.rkt")

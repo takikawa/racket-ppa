@@ -695,7 +695,7 @@ enclosing module body or top-level sequence.
 
 @transform-time[] If the current expression being transformed is not
 within a @racket[module] form or within a top-level expansion, then
-the @exnraise[exn:fail:contract]. If @racket[stx] form does start with
+the @exnraise[exn:fail:contract]. If @racket[stx] form does not start with
 @racket[module] or @racket[module*], or if it starts with @racket[module*]
 in a top-level context, the @exnraise[exn:fail:contract].
 
@@ -1094,7 +1094,23 @@ former list).}
          require-transformer?]{
 
 Creates a @tech{require transformer} using the given procedure as the
-transformer.}
+transformer.
+Often used in combination with @racket[expand-import].
+
+@examples[
+#:eval stx-eval
+(require (for-syntax racket/require-transform))
+
+(define-syntax printing
+  (make-require-transformer
+   (lambda (stx)
+     (syntax-case stx ()
+       [(_ path)
+        (printf "Importing: ~a~n" #'path)
+        (expand-import #'path)]))))
+
+(require (printing racket/match))
+]}
 
 
 @defthing[prop:require-transformer struct-type-property?]{

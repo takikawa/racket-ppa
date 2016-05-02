@@ -36,6 +36,40 @@
   (define (syntax-parameter-target sp)
     (syntax-parameter-ref sp 1))
 
+  ;; If it is a rename-transformer-parameter, then we need to get the
+  ;; parameter and not what it points to, otherwise, we can keep
+  ;; going.
+  (define (syntax-parameter-local-value id)
+    (let*-values
+        ([(rt* rt-target)
+          (syntax-local-value/immediate id (lambda () #f))]
+         [(rt) (if (syntax-parameter? rt*)
+                   rt*
+                   (or (and rt-target
+                            (syntax-local-value rt-target
+                                                (λ () rt-target)))
+                       rt*))]
+         [(sp) (if (set!-transformer? rt)
+                   (set!-transformer-procedure rt)
+                   rt)])
+      sp))
+
+  (define (syntax-parameter-local-value-pre id)
+    (define-values (rt* rt-target) (syntax-local-value/immediate id (λ () #f)))
+    (cond
+      [(not rt-target)
+       rt*]
+      [(syntax-parameter? rt*)
+       rt-target]
+      [(parameter-binding? rt*)
+       rt*]
+      [else
+       (syntax-parameter-local-value-pre rt-target)]))
+
+  (define (syntax-parameter-local-value-for-parameter target)
+    (or (syntax-parameter-local-value-pre (syntax-local-get-shadower target #t))
+        (syntax-parameter-local-value-pre target)))
+
   (define (target-value target)
     (syntax-local-value (syntax-local-get-shadower target #t)
                         (lambda ()
@@ -54,10 +88,10 @@
                   v)])
       (if (wrapped-renamer? v)
 	  (wrapped-renamer-renamer v)
-          v)))
+      v)))
 
   (define (syntax-parameter-target-parameter target)
-    (let ([v (target-value target)])
+    (let ([v (syntax-parameter-local-value-for-parameter target)])
       (parameter-binding-param v)))
 
   (define (convert-renamer must-be-renamer?-stx v)
@@ -115,6 +149,7 @@
              make-syntax-parameter
              rename-transformer-parameter?
              make-rename-transformer-parameter
+             syntax-parameter-local-value
              syntax-parameter-target
              syntax-parameter-target-value
              syntax-parameter-target-parameter))

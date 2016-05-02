@@ -13,37 +13,26 @@
       [(_ ([id val] ...) body ...)
        (let ([ids (syntax->list #'(id ...))])
 	 (with-syntax ([((gen-id must-be-renamer?) ...)
-			(map (lambda (id)
-			       (unless (identifier? id)
-				 (raise-syntax-error
-				  #f
-				  "not an identifier"
-				  stx
-				  id))
-			       (let*-values
-                    ;; If it is a rename-transformer-parameter, then
-                    ;; we need to get the parameter and not what it
-                    ;; points to, otherwise, we can keep going.
-                    ([(rt* rt-target)
-                      (syntax-local-value/immediate id (lambda () #f))]
-                     [(rt) (if (syntax-parameter? rt*)
-                               rt*
-                               (or rt-target rt*))]
-                     [(sp) (if (set!-transformer? rt)
-                               (set!-transformer-procedure rt)
-                               rt)])
-				 (unless (syntax-parameter? sp)
-				   (raise-syntax-error
-				    #f
-				    "not bound as a syntax parameter"
-				    stx
-				    id))
-				 (list
-                  (syntax-local-get-shadower
-                   (syntax-local-introduce (syntax-parameter-target sp))
-                   #t)
-                  (rename-transformer-parameter? sp))))
-			     ids)])
+                    (map (lambda (id)
+                           (unless (identifier? id)
+                             (raise-syntax-error
+                              #f
+                              "not an identifier"
+                              stx
+                              id))
+                           (let ([sp (syntax-parameter-local-value id)])
+                             (unless (syntax-parameter? sp)
+                               (raise-syntax-error
+                                #f
+                                "not bound as a syntax parameter"
+                                stx
+                                id))
+                             (list
+                              (syntax-local-get-shadower
+                               (syntax-local-introduce (syntax-parameter-target sp))
+                               #t)
+                              (rename-transformer-parameter? sp))))
+                         ids)])
 	   (let ([dup (check-duplicate-identifier ids)])
 	     (when dup
 	       (raise-syntax-error

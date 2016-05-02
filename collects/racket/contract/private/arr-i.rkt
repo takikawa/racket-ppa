@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require "arrow.rkt"
+(require "arrow-common.rkt"
          "prop.rkt"
          "guts.rkt"
          "opt.rkt"
@@ -25,7 +25,8 @@
                       [module-identifier-mapping-put! free-identifier-mapping-put!]
                       [module-identifier-mapping-for-each free-identifier-mapping-for-each])))
 
-(provide (rename-out [->i/m ->i]))
+(provide (rename-out [->i/m ->i])
+         (for-syntax ->i-internal)) ; for method version of ->i
 
 (define (build-??-args c-or-i-procedure ctc blame)
   (define arg-ctc-projs (map (λ (x) (get/build-late-neg-projection (->i-arg-contract x)))
@@ -480,31 +481,33 @@ evaluted left-to-right.)
 (define-for-syntax (args/vars->arg-checker result-checkers args rst vars this-param)
   (let ([opts? (ormap arg-optional? args)]
         [this-params (if this-param (list this-param) '())])
+
+    (define arg->var (make-hash))
+    (define kwd-args (filter arg-kwd args))
+    (define non-kwd-args (filter (λ (x) (not (arg-kwd x))) args))
+    
+    (for ([arg (in-list args)]
+          [var (in-vector vars)])
+      (hash-set! arg->var arg var))
+    
+    (define sorted-kwd/arg-pairs 
+      (sort
+       (map (λ (arg) (cons (arg-kwd arg) (hash-ref arg->var arg))) kwd-args)
+       (λ (x y) (keyword<? (syntax-e (car x)) (syntax-e (car y))))))
+    (define keyword-arguments (map cdr sorted-kwd/arg-pairs))
+    (define regular-arguments (map (λ (arg) (hash-ref arg->var arg)) non-kwd-args))
     (cond
       [(and opts? (ormap arg-kwd args))
-       (let* ([arg->var (make-hash)]
-              [kwd-args (filter arg-kwd args)]
-              [non-kwd-args (filter (λ (x) (not (arg-kwd x))) args)])
-         
-         (for ([arg (in-list args)]
-               [var (in-vector vars)])
-           (hash-set! arg->var arg var))
-         
-         (let ([sorted-kwd/arg-pairs 
-                (sort
-                 (map (λ (arg) (cons (arg-kwd arg) (hash-ref arg->var arg))) kwd-args)
-                 (λ (x y) (keyword<? (syntax-e (car x)) (syntax-e (car y)))))])
-           
-           ;; has both optional and keyword args
-           #`(keyword-return/no-unsupplied 
-              #,(if (null? result-checkers) #f (car result-checkers)) 
-              '#,(map car sorted-kwd/arg-pairs)
-              (list #,@(map cdr sorted-kwd/arg-pairs))
-              #,(if rst
-                    #'rest-args
-                    #''())
-              #,@this-params
-              #,@(map (λ (arg) (hash-ref arg->var arg)) non-kwd-args))))]
+       ;; has both optional and keyword args
+       #`(keyword-return/no-unsupplied 
+          #,(if (null? result-checkers) #f (car result-checkers)) 
+          '#,(map car sorted-kwd/arg-pairs)
+          (list #,@keyword-arguments)
+          #,(if rst
+                #'rest-args
+                #''())
+          #,@this-params
+          #,@regular-arguments)]
       [opts?
        ;; has optional args, but no keyword args
        #`(return/no-unsupplied #,(if (null? result-checkers) #f (car result-checkers))
@@ -516,27 +519,17 @@ evaluted left-to-right.)
                                       (all-but-last (vector->list vars))
                                       (vector->list vars)))] 
       [else
-       (let*-values ([(rev-regs rev-kwds)
-                      (for/fold ([regs null]
-                                 [kwds null])
-                        ([arg (in-list args)]
-                         [i (in-naturals)])
-                        (if (arg-kwd arg)
-                            (values regs (cons (vector-ref vars i) kwds))
-                            (values (cons (vector-ref vars i) regs) kwds)))]
-                     [(regular-arguments keyword-arguments)
-                      (values (reverse rev-regs) (reverse rev-kwds))])
-         (cond
-           [(and (null? keyword-arguments) rst)
-            #`(apply values #,@result-checkers #,@this-params #,@regular-arguments rest-args)]
-           [(null? keyword-arguments)
-            #`(values #,@result-checkers #,@this-params #,@regular-arguments)]
-           [rst
-            #`(apply values #,@result-checkers (list #,@keyword-arguments) 
-                     #,@this-params #,@regular-arguments rest-args)]
-           [else
-            #`(values #,@result-checkers (list #,@keyword-arguments) 
-                      #,@this-params #,@regular-arguments)]))])))
+       (cond
+         [(and (null? keyword-arguments) rst)
+          #`(apply values #,@result-checkers #,@this-params #,@regular-arguments rest-args)]
+         [(null? keyword-arguments)
+          #`(values #,@result-checkers #,@this-params #,@regular-arguments)]
+         [rst
+          #`(apply values #,@result-checkers (list #,@keyword-arguments) 
+                   #,@this-params #,@regular-arguments rest-args)]
+         [else
+          #`(values #,@result-checkers (list #,@keyword-arguments) 
+                    #,@this-params #,@regular-arguments)])])))
 
 (define (return/no-unsupplied res-checker rest-args . args)
   (if res-checker
@@ -811,7 +804,7 @@ evaluted left-to-right.)
       #`(case-lambda
           [#,(vector->list wrapper-ress)
            (with-contract-continuation-mark
-            blame
+            blame+neg-party
             #,(add-wrapper-let 
                (add-post-cond an-istx indy-arg-vars ordered-args indy-res-vars ordered-ress
                               #`(values #,@(vector->list wrapper-ress)))
@@ -849,7 +842,7 @@ evaluted left-to-right.)
            body))]
     [else stx]))
 
-(define-for-syntax (mk-wrapper-func/blame-id-info stx an-istx used-indy-vars)
+(define-for-syntax (mk-wrapper-func/blame-id-info stx an-istx used-indy-vars method?)
   
   (define-values (wrapper-proc-arglist
                   blame-ids args+rst
@@ -872,8 +865,7 @@ evaluted left-to-right.)
     (generate-temporaries (map arg/res-var ordered-ress)))
 
   
-  (define this-param (and (syntax-parameter-value #'making-a-method)
-                          (car (generate-temporaries '(this)))))
+  (define this-param (and method? (car (generate-temporaries '(this)))))
   
   (define wrapper-body
     (add-wrapper-let 
@@ -906,7 +898,8 @@ evaluted left-to-right.)
    (with-syntax ([arg-checker (or (syntax-local-infer-name stx) 'arg-checker)])
      #`(λ #,wrapper-proc-arglist
          (λ (val neg-party)
-           (chk val #,(and (syntax-parameter-value #'making-a-method) #t))
+           (define blame+neg-party (cons blame neg-party))
+           (chk val #,method?)
            (c-or-i-procedure
             val
             (let ([arg-checker
@@ -915,10 +908,12 @@ evaluted left-to-right.)
               (make-keyword-procedure
                (λ (kwds kwd-args . args)
                  (with-contract-continuation-mark
-                  blame (keyword-apply arg-checker kwds kwd-args args)))
+                  blame+neg-party
+                  (keyword-apply arg-checker kwds kwd-args args)))
                (λ args
                  (with-contract-continuation-mark
-                  blame (apply arg-checker args)))))
+                  blame+neg-party
+                  (apply arg-checker args)))))
             impersonator-prop:contracted ctc
             impersonator-prop:blame blame))))))
 
@@ -1031,7 +1026,7 @@ evaluted left-to-right.)
           arg-proj-vars indy-arg-proj-vars
           res-proj-vars indy-res-proj-vars))
 
-(define-for-syntax (mk-val-first-wrapper-func/blame-id-info an-istx used-indy-vars)
+(define-for-syntax (mk-val-first-wrapper-func/blame-id-info an-istx used-indy-vars method?)
   (define-values (wrapper-proc-arglist
                   blame-ids args+rst
                   ordered-args arg-indices
@@ -1053,8 +1048,7 @@ evaluted left-to-right.)
     (generate-temporaries (map arg/res-var ordered-ress)))
   
   
-  (define this-param (and (syntax-parameter-value #'making-a-method)
-                          (car (generate-temporaries '(this)))))
+  (define this-param (and method? (car (generate-temporaries '(this)))))
   
   #`(λ #,wrapper-proc-arglist
       (λ (f)
@@ -1095,7 +1089,7 @@ evaluted left-to-right.)
        (if (orig-ctc obj)
            obj
            (raise-predicate-blame-error-failure blame obj neg-party
-                                                (object-name orig-ctc)))]
+                                                (contract-name orig-ctc)))]
       [else
        (define ctc (if chaperone?
                        (coerce-chaperone-contract '->i orig-ctc)
@@ -1143,14 +1137,22 @@ evaluted left-to-right.)
     vars))
 
 (define-syntax (->i/m stx)
+  (syntax-case stx ()
+    [(_ . args)
+     (->i-internal (syntax/loc stx (->i . args)) #|method?|# #f)]))
+
+(define-for-syntax (->i-internal stx method?)
   (define an-istx (parse-->i stx))
   (define used-indy-vars (mk-used-indy-vars an-istx))
-  (define-values (blame-ids wrapper-func) (mk-wrapper-func/blame-id-info stx an-istx used-indy-vars))
-  (define val-first-wrapper-func (mk-val-first-wrapper-func/blame-id-info an-istx used-indy-vars))
+  (define-values (blame-ids wrapper-func) (mk-wrapper-func/blame-id-info stx an-istx used-indy-vars method?))
+  (define val-first-wrapper-func (mk-val-first-wrapper-func/blame-id-info an-istx used-indy-vars method?))
   (define args+rst (append (istx-args an-istx)
                            (if (istx-rst an-istx)
                                (list (istx-rst an-istx))
                                '())))
+  (define args+rst+results
+    (append (or (istx-ress an-istx) '())
+            args+rst))
   (define this->i (gensym 'this->i))
   (with-syntax ([(arg-exp-xs ...) 
                  (generate-temporaries 
@@ -1193,8 +1195,8 @@ evaluted left-to-right.)
                                          (istx-ress an-istx)))
                      '())])
     
-    (define (find-orig-vars arg arg/ress-to-look-in)
-      (for/list ([an-id (in-list (arg/res-vars arg))])
+    (define (find-orig-vars ids arg/ress-to-look-in)
+      (for/list ([an-id (in-list ids)])
         (define ans
           (for/or ([o-arg (in-list arg/ress-to-look-in)])
             (and (free-identifier=? an-id (arg/res-var o-arg))
@@ -1219,7 +1221,7 @@ evaluted left-to-right.)
               ;; all of the dependent argument contracts
               (list #,@(for/list ([arg (in-list args+rst)]
                                   #:when (arg/res-vars arg))
-                         (define orig-vars (find-orig-vars arg args+rst))
+                         (define orig-vars (find-orig-vars (arg/res-vars arg) args+rst))
                          (define ctc-stx
                            (syntax-property
                             (syntax-property 
@@ -1253,10 +1255,7 @@ evaluted left-to-right.)
                                                 (istx-ress an-istx))]
                                           #:when (arg/res-vars arg))
                                  (define orig-vars 
-                                   (find-orig-vars 
-                                    arg 
-                                    (append (istx-ress an-istx)
-                                            args+rst)))
+                                   (find-orig-vars (arg/res-vars arg) args+rst+results))
                                  (define arg-stx
                                    (syntax-property
                                     (syntax-property 
@@ -1289,12 +1288,16 @@ evaluted left-to-right.)
                                             (syntax->list #'(res-exp-xs ...)))))
                     #''())
               
-              #,(let ([func (λ (pre/post) #`(λ #,(pre/post-vars pre/post)
-                                              #,(pre/post-exp pre/post)))])
+              #,(let ([func (λ (pre/post vars-to-look-in)
+                              (define orig-vars (find-orig-vars (pre/post-vars pre/post)
+                                                                vars-to-look-in))
+                              #`(λ #,orig-vars
+                                  (void #,@(pre/post-vars pre/post))
+                                  #,(pre/post-exp pre/post)))])
                   #`(list #,@(for/list ([pre (in-list (istx-pre an-istx))])
-                               (func pre))
+                               (func pre args+rst))
                           #,@(for/list ([post (in-list (istx-post an-istx))])
-                               (func post))))
+                               (func post args+rst+results))))
               
               #,(length (filter values (map (λ (arg) (and (not (arg-kwd arg)) 
                                                           (not (arg-optional? arg))))
@@ -1312,7 +1315,7 @@ evaluted left-to-right.)
                                            (istx-args an-istx))) 
                        keyword<?)
               '#,(and (istx-rst an-istx) (arg/res-var (istx-rst an-istx)))
-              #,(and (syntax-parameter-value #'making-a-method) #t)
+              #,method?
               (quote-module-name)
               #,wrapper-func
               #,val-first-wrapper-func

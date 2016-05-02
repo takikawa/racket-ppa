@@ -673,7 +673,7 @@ static int branch_rec_FIXUP(void *p, struct NewGC *gc) {
 
 static int unclosed_proc_SIZE(void *p, struct NewGC *gc) {
 #ifndef GC_NO_SIZE_NEEDED_FROM_PROCS
-  gcBYTES_TO_WORDS(sizeof(Scheme_Closure_Data));
+  gcBYTES_TO_WORDS(sizeof(Scheme_Lambda));
 #else
   return 0;
 #endif
@@ -681,11 +681,11 @@ static int unclosed_proc_SIZE(void *p, struct NewGC *gc) {
 
 static int unclosed_proc_MARK(void *p, struct NewGC *gc) {
 #ifndef GC_NO_MARK_PROCEDURE_NEEDED
-  Scheme_Closure_Data *d = (Scheme_Closure_Data *)p;
+  Scheme_Lambda *d = (Scheme_Lambda *)p;
 
   gcMARK2(d->name, gc);
-  gcMARK2(d->code, gc);
-  gcMARK2(d->closure_map, gc);
+  gcMARK2(d->body, gc);
+  gcMARK2(d->closure_map, gc); /* covers `ir_info` */
   gcMARK2(d->tl_map, gc);
 #ifdef MZ_USE_JIT
   gcMARK2(d->u.native_code, gc);
@@ -696,18 +696,18 @@ static int unclosed_proc_MARK(void *p, struct NewGC *gc) {
   return 0;
 # else
   return
-  gcBYTES_TO_WORDS(sizeof(Scheme_Closure_Data));
+  gcBYTES_TO_WORDS(sizeof(Scheme_Lambda));
 # endif
 #endif
 }
 
 static int unclosed_proc_FIXUP(void *p, struct NewGC *gc) {
 #ifndef GC_NO_FIXUP_PROCEDURE_NEEDED
-  Scheme_Closure_Data *d = (Scheme_Closure_Data *)p;
+  Scheme_Lambda *d = (Scheme_Lambda *)p;
 
   gcFIXUP2(d->name, gc);
-  gcFIXUP2(d->code, gc);
-  gcFIXUP2(d->closure_map, gc);
+  gcFIXUP2(d->body, gc);
+  gcFIXUP2(d->closure_map, gc); /* covers `ir_info` */
   gcFIXUP2(d->tl_map, gc);
 #ifdef MZ_USE_JIT
   gcFIXUP2(d->u.native_code, gc);
@@ -718,7 +718,7 @@ static int unclosed_proc_FIXUP(void *p, struct NewGC *gc) {
   return 0;
 # else
   return
-  gcBYTES_TO_WORDS(sizeof(Scheme_Closure_Data));
+  gcBYTES_TO_WORDS(sizeof(Scheme_Lambda));
 # endif
 #endif
 }
@@ -947,57 +947,125 @@ static int with_cont_mark_FIXUP(void *p, struct NewGC *gc) {
 #define with_cont_mark_IS_CONST_SIZE 1
 
 
-static int comp_let_value_SIZE(void *p, struct NewGC *gc) {
+static int ir_local_SIZE(void *p, struct NewGC *gc) {
 #ifndef GC_NO_SIZE_NEEDED_FROM_PROCS
-  gcBYTES_TO_WORDS(sizeof(Scheme_Compiled_Let_Value));
+  gcBYTES_TO_WORDS(sizeof(Scheme_IR_Local));
 #else
   return 0;
 #endif
 }
 
-static int comp_let_value_MARK(void *p, struct NewGC *gc) {
+static int ir_local_MARK(void *p, struct NewGC *gc) {
 #ifndef GC_NO_MARK_PROCEDURE_NEEDED
-  Scheme_Compiled_Let_Value *c = (Scheme_Compiled_Let_Value *)p;
+  Scheme_IR_Local *var = (Scheme_IR_Local *)p;
 
-  gcMARK2(c->flags, gc);
+  gcMARK2(var->name, gc);
+  switch (var->mode) {
+  case SCHEME_VAR_MODE_LETREC_CHECK:
+    gcMARK2(var->letrec_check.frame, gc);
+    break;
+  case SCHEME_VAR_MODE_OPTIMIZE:
+    gcMARK2(var->optimize.known_val, gc);
+    gcMARK2(var->optimize.transitive_uses, gc);
+    break;
+  case SCHEME_VAR_MODE_RESOLVE:
+    gcMARK2(var->resolve.lifted, gc);
+    break;
+  default:
+    break;
+  }
+
+# ifdef GC_NO_SIZE_NEEDED_FROM_PROCS
+  return 0;
+# else
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_IR_Local));
+# endif
+#endif
+}
+
+static int ir_local_FIXUP(void *p, struct NewGC *gc) {
+#ifndef GC_NO_FIXUP_PROCEDURE_NEEDED
+  Scheme_IR_Local *var = (Scheme_IR_Local *)p;
+
+  gcFIXUP2(var->name, gc);
+  switch (var->mode) {
+  case SCHEME_VAR_MODE_LETREC_CHECK:
+    gcFIXUP2(var->letrec_check.frame, gc);
+    break;
+  case SCHEME_VAR_MODE_OPTIMIZE:
+    gcFIXUP2(var->optimize.known_val, gc);
+    gcFIXUP2(var->optimize.transitive_uses, gc);
+    break;
+  case SCHEME_VAR_MODE_RESOLVE:
+    gcFIXUP2(var->resolve.lifted, gc);
+    break;
+  default:
+    break;
+  }
+
+# ifdef GC_NO_SIZE_NEEDED_FROM_PROCS
+  return 0;
+# else
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_IR_Local));
+# endif
+#endif
+}
+
+#define ir_local_IS_ATOMIC 0
+#define ir_local_IS_CONST_SIZE 1
+
+
+static int ir_let_value_SIZE(void *p, struct NewGC *gc) {
+#ifndef GC_NO_SIZE_NEEDED_FROM_PROCS
+  gcBYTES_TO_WORDS(sizeof(Scheme_IR_Let_Value));
+#else
+  return 0;
+#endif
+}
+
+static int ir_let_value_MARK(void *p, struct NewGC *gc) {
+#ifndef GC_NO_MARK_PROCEDURE_NEEDED
+  Scheme_IR_Let_Value *c = (Scheme_IR_Let_Value *)p;
+
   gcMARK2(c->value, gc);
   gcMARK2(c->body, gc);
-  gcMARK2(c->names, gc);
+  gcMARK2(c->vars, gc);
 
 # ifdef GC_NO_SIZE_NEEDED_FROM_PROCS
   return 0;
 # else
   return
-  gcBYTES_TO_WORDS(sizeof(Scheme_Compiled_Let_Value));
+  gcBYTES_TO_WORDS(sizeof(Scheme_IR_Let_Value));
 # endif
 #endif
 }
 
-static int comp_let_value_FIXUP(void *p, struct NewGC *gc) {
+static int ir_let_value_FIXUP(void *p, struct NewGC *gc) {
 #ifndef GC_NO_FIXUP_PROCEDURE_NEEDED
-  Scheme_Compiled_Let_Value *c = (Scheme_Compiled_Let_Value *)p;
+  Scheme_IR_Let_Value *c = (Scheme_IR_Let_Value *)p;
 
-  gcFIXUP2(c->flags, gc);
   gcFIXUP2(c->value, gc);
   gcFIXUP2(c->body, gc);
-  gcFIXUP2(c->names, gc);
+  gcFIXUP2(c->vars, gc);
 
 # ifdef GC_NO_SIZE_NEEDED_FROM_PROCS
   return 0;
 # else
   return
-  gcBYTES_TO_WORDS(sizeof(Scheme_Compiled_Let_Value));
+  gcBYTES_TO_WORDS(sizeof(Scheme_IR_Let_Value));
 # endif
 #endif
 }
 
-#define comp_let_value_IS_ATOMIC 0
-#define comp_let_value_IS_CONST_SIZE 1
+#define ir_let_value_IS_ATOMIC 0
+#define ir_let_value_IS_CONST_SIZE 1
 
 
 static int let_header_SIZE(void *p, struct NewGC *gc) {
 #ifndef GC_NO_SIZE_NEEDED_FROM_PROCS
-  gcBYTES_TO_WORDS(sizeof(Scheme_Let_Header));
+  gcBYTES_TO_WORDS(sizeof(Scheme_IR_Let_Header));
 #else
   return 0;
 #endif
@@ -1005,7 +1073,7 @@ static int let_header_SIZE(void *p, struct NewGC *gc) {
 
 static int let_header_MARK(void *p, struct NewGC *gc) {
 #ifndef GC_NO_MARK_PROCEDURE_NEEDED
-  Scheme_Let_Header *h = (Scheme_Let_Header *)p;
+  Scheme_IR_Let_Header *h = (Scheme_IR_Let_Header *)p;
   
   gcMARK2(h->body, gc);
 
@@ -1013,14 +1081,14 @@ static int let_header_MARK(void *p, struct NewGC *gc) {
   return 0;
 # else
   return
-  gcBYTES_TO_WORDS(sizeof(Scheme_Let_Header));
+  gcBYTES_TO_WORDS(sizeof(Scheme_IR_Let_Header));
 # endif
 #endif
 }
 
 static int let_header_FIXUP(void *p, struct NewGC *gc) {
 #ifndef GC_NO_FIXUP_PROCEDURE_NEEDED
-  Scheme_Let_Header *h = (Scheme_Let_Header *)p;
+  Scheme_IR_Let_Header *h = (Scheme_IR_Let_Header *)p;
   
   gcFIXUP2(h->body, gc);
 
@@ -1028,7 +1096,7 @@ static int let_header_FIXUP(void *p, struct NewGC *gc) {
   return 0;
 # else
   return
-  gcBYTES_TO_WORDS(sizeof(Scheme_Let_Header));
+  gcBYTES_TO_WORDS(sizeof(Scheme_IR_Let_Header));
 # endif
 #endif
 }
@@ -1228,7 +1296,7 @@ static int scm_closure_SIZE(void *p, struct NewGC *gc) {
 #ifndef GC_NO_SIZE_NEEDED_FROM_PROCS
   Scheme_Closure *c = (Scheme_Closure *)p;
   int closure_size = (c->code 
-                      ? ((Scheme_Closure_Data *)GC_resolve2(c->code, gc))->closure_size
+                      ? ((Scheme_Lambda *)GC_resolve2(c->code, gc))->closure_size
                       : 0);
 
   gcBYTES_TO_WORDS((sizeof(Scheme_Closure)
@@ -1242,12 +1310,12 @@ static int scm_closure_MARK(void *p, struct NewGC *gc) {
 #ifndef GC_NO_MARK_PROCEDURE_NEEDED
   Scheme_Closure *c = (Scheme_Closure *)p;
   int closure_size = (c->code 
-                      ? ((Scheme_Closure_Data *)GC_resolve2(c->code, gc))->closure_size
+                      ? ((Scheme_Lambda *)GC_resolve2(c->code, gc))->closure_size
                       : 0);
 
 
   int i = closure_size;
-# define CLOSURE_DATA_TYPE Scheme_Closure_Data
+# define CLOSURE_DATA_TYPE Scheme_Lambda
 # include "mzclpf_decl.inc"
 
   gcMARK2(c->code, gc);
@@ -1274,7 +1342,7 @@ static int scm_closure_FIXUP(void *p, struct NewGC *gc) {
 #ifndef GC_NO_FIXUP_PROCEDURE_NEEDED
   Scheme_Closure *c = (Scheme_Closure *)p;
   int closure_size = (c->code 
-                      ? ((Scheme_Closure_Data *)GC_resolve2(c->code, gc))->closure_size
+                      ? ((Scheme_Lambda *)GC_resolve2(c->code, gc))->closure_size
                       : 0);
 
 
@@ -3770,6 +3838,7 @@ static int module_val_MARK(void *p, struct NewGC *gc) {
   gcMARK2(m->hints, gc);
   gcMARK2(m->ii_src, gc);
   gcMARK2(m->super_bxs_info, gc);
+  gcMARK2(m->sub_iidx_ptrs, gc);
 
   gcMARK2(m->comp_prefix, gc);
   gcMARK2(m->prefix, gc);
@@ -3830,6 +3899,7 @@ static int module_val_FIXUP(void *p, struct NewGC *gc) {
   gcFIXUP2(m->hints, gc);
   gcFIXUP2(m->ii_src, gc);
   gcFIXUP2(m->super_bxs_info, gc);
+  gcFIXUP2(m->sub_iidx_ptrs, gc);
 
   gcFIXUP2(m->comp_prefix, gc);
   gcFIXUP2(m->prefix, gc);

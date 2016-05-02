@@ -152,14 +152,16 @@
               ;; expressions:
               (quasisyntax/loc stx (#%expression #,stx)))))))
   
-  (struct provide/contract-transformer provide/contract-info (saved-id-table partially-applied-id)
+  (struct provide/contract-transformer provide/contract-info (saved-id-table partially-applied-id blame)
     #:property
     prop:set!-transformer
     (λ (self stx)
       (let ([partially-applied-id (provide/contract-transformer-partially-applied-id self)]
             [saved-id-table (provide/contract-transformer-saved-id-table self)]
-            [rename-id (provide/contract-info-rename-id self)])
-        (with-syntax ([partially-applied-id partially-applied-id])
+            [rename-id (provide/contract-info-rename-id self)]
+            [blame (provide/contract-transformer-blame self)])
+        (with-syntax ([partially-applied-id partially-applied-id]
+                      [blame blame])
           (if (eq? 'expression (syntax-local-context))
               ;; In an expression context:
               (let* ([key (syntax-local-lift-context)]
@@ -171,7 +173,9 @@
                            (syntax-local-introduce
                             (syntax-local-lift-expression
                              (add-lifted-property
-                              #'(partially-applied-id (quote-module-name)))))))])
+                              #'(with-contract-continuation-mark
+                                 (cons blame 'no-negative-party)
+                                 (partially-applied-id (quote-module-name))))))))])
                 (when key (hash-set! saved-id-table key lifted-ctcd-val))
                 (define (adjust-location new-stx)
                   (datum->syntax new-stx (syntax-e new-stx) stx new-stx))
@@ -195,13 +199,14 @@
               ;; expressions:
               (quasisyntax/loc stx (#%expression #,stx)))))))
 
-  (define (make-provide/contract-transformer rename-id cid id eid pos [pid #f])
+  (define (make-provide/contract-transformer rename-id cid id eid pos [pid #f] [blame #f])
     (if pid
-        (provide/contract-transformer rename-id cid id (make-hasheq) pid)
+        (provide/contract-transformer rename-id cid id (make-hasheq) pid blame)
         (begin
           ;; TODO: this needs to change!
           ;; syntax/parse uses this
           ;; this will just drop contracts for now.
+          ;; VS: is this still the case? this function is not exported anymore
           (λ (stx) 
             (syntax-case stx ()
               [(_ args ...)
@@ -274,24 +279,22 @@
                                                         contract-error-name
                                                         pos-module-source)
   (define-values (arrow? the-valid-app-shapes)
-    (syntax-case ctrct (->2 ->*2 ->i)
-      [(->2 . _) 
-       (and (->2-handled? ctrct)
-            (not (->2-arity-check-only->? ctrct)))
+    (syntax-case ctrct (-> ->* ->i)
+      [(-> . _) 
+       (not (->-arity-check-only->? ctrct))
        (values #t (->-valid-app-shapes ctrct))]
-      [(->*2 . _) 
-       (values (and (->*2-handled? ctrct)
-                    (not (->2*-arity-check-only->? ctrct)))
+      [(->* . _) 
+       (values (not (->*-arity-check-only->? ctrct))
                (->*-valid-app-shapes ctrct))]
       [(->i . _) (values #t (->i-valid-app-shapes ctrct))]
       [_ (values #f #f)]))
   (with-syntax ([id id]
-                [(partially-applied-id extra-neg-party-argument-fn contract-id) 
-                 (generate-temporaries (list 'idX 'idY 'idZ))]
+                [(partially-applied-id extra-neg-party-argument-fn contract-id blame-id) 
+                 (generate-temporaries (list 'idX 'idY 'idZ 'idB))]
                 [ctrct ctrct])
     (syntax-local-lift-module-end-declaration
      #`(begin 
-         (define partially-applied-id
+         (define-values (partially-applied-id blame-id)
            (do-partial-app contract-id
                            id
                            '#,name-for-blame
@@ -322,7 +325,8 @@
                    (quote-syntax #,id-rename)
                    (quote-syntax contract-id) (quote-syntax id)
                    #f #f
-                   (quote-syntax partially-applied-id)))))))
+                   (quote-syntax partially-applied-id)
+                   (quote-syntax blame-id)))))))
 
 (define-syntax (define-module-boundary-contract stx)
   (cond
@@ -375,7 +379,7 @@
                                                'define-module-boundary-contract
                                                pos-blame-party-expr))])]))
 
-;; ... -> (or/c #f (-> blame val))
+;; ... -> (values (or/c #f (-> neg-party val)) blame)
 (define (do-partial-app ctc val name pos-module-source source)
   (define p (parameterize ([warn-about-val-first? #f])
               ;; when we're building the val-first projection
@@ -388,14 +392,19 @@
                            (λ () (contract-name ctc))
                            pos-module-source
                            #f #t))
-  (define neg-accepter ((p blme) val))
-  
-  ;; we don't have the negative blame here, but we
-  ;; expect only positive failures from this; do the
-  ;; check and then toss the results.
-  (neg-accepter 'incomplete-blame-from-provide.rkt)
-  
-  neg-accepter)
+  (with-contract-continuation-mark
+   (cons blme 'no-negative-party) ; we don't know the negative party yet
+   ;; computing neg-accepter may involve some front-loaded checking. instrument
+   (define neg-accepter ((p blme) val))
+
+   ;; check as much as we can while knowing only the
+   ;; contracted value (e.g., function arity)
+   ;; we don't have the negative blame here, but we
+   ;; expect only positive failures from this; do the
+   ;; check and then toss the results.
+   (neg-accepter 'incomplete-blame-from-provide.rkt)
+
+   (values neg-accepter blme)))
 
 (define-for-syntax (true-provide/contract provide-stx just-check-errors? who)
   (syntax-case provide-stx ()
@@ -981,24 +990,24 @@
          (with-syntax ([(field-contract-ids ...) field-contract-ids]
                        [predicate-id predicate-id])
            (syntax/loc stx
-             (->2 field-contract-ids ...
-                  predicate-id))))
+             (-> field-contract-ids ...
+                 predicate-id))))
 
        ;; build-selector-contract : syntax syntax -> syntax
        ;; constructs the contract for a selector
        (define (build-selector-contract struct-name predicate-id field-contract-id)
          (with-syntax ([field-contract-id field-contract-id]
                        [predicate-id predicate-id])
-           (syntax (->2 predicate-id field-contract-id))))
+           (syntax (-> predicate-id field-contract-id))))
 
        ;; build-mutator-contract : syntax syntax -> syntax
        ;; constructs the contract for a selector
        (define (build-mutator-contract struct-name predicate-id field-contract-id)
          (with-syntax ([field-contract-id field-contract-id]
                        [predicate-id predicate-id])
-           (syntax (->2 predicate-id
-                        field-contract-id
-                        void?))))
+           (syntax (-> predicate-id
+                       field-contract-id
+                       void?))))
 
        ;; code-for-one-poly-id : syntax -> syntax
        (define (code-for-one-poly-id x x-gen poly)

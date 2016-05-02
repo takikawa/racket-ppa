@@ -278,6 +278,7 @@
   scheme_extension_table->scheme_free_immobile_box = scheme_free_immobile_box;
   scheme_extension_table->scheme_add_gc_callback = scheme_add_gc_callback;
   scheme_extension_table->scheme_remove_gc_callback = scheme_remove_gc_callback;
+  scheme_extension_table->scheme_register_type_gc_shape = scheme_register_type_gc_shape;
   scheme_extension_table->scheme_make_bucket_table = scheme_make_bucket_table;
   scheme_extension_table->scheme_add_to_table = scheme_add_to_table;
   scheme_extension_table->scheme_change_in_table = scheme_change_in_table;
@@ -286,6 +287,8 @@
   scheme_extension_table->scheme_bucket_table_equal = scheme_bucket_table_equal;
   scheme_extension_table->scheme_clone_bucket_table = scheme_clone_bucket_table;
   scheme_extension_table->scheme_clear_bucket_table = scheme_clear_bucket_table;
+  scheme_extension_table->scheme_bucket_table_index = scheme_bucket_table_index;
+  scheme_extension_table->scheme_bucket_table_next = scheme_bucket_table_next;
   scheme_extension_table->scheme_make_hash_table = scheme_make_hash_table;
   scheme_extension_table->scheme_make_hash_table_equal = scheme_make_hash_table_equal;
   scheme_extension_table->scheme_make_hash_table_eqv = scheme_make_hash_table_eqv;
@@ -299,6 +302,8 @@
   scheme_extension_table->scheme_is_hash_table_eqv = scheme_is_hash_table_eqv;
   scheme_extension_table->scheme_clone_hash_table = scheme_clone_hash_table;
   scheme_extension_table->scheme_clear_hash_table = scheme_clear_hash_table;
+  scheme_extension_table->scheme_hash_table_index = scheme_hash_table_index;
+  scheme_extension_table->scheme_hash_table_next = scheme_hash_table_next;
   scheme_extension_table->scheme_make_hash_tree = scheme_make_hash_tree;
   scheme_extension_table->scheme_make_hash_tree_set = scheme_make_hash_tree_set;
   scheme_extension_table->scheme_hash_tree_set = scheme_hash_tree_set;

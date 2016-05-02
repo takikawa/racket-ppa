@@ -783,7 +783,6 @@ or structure type.
          #:changed "6.1.1.8" @elem{Added optional @racket[struct-type]
                                    argument.}]}
 
-
 @defproc[(chaperone-vector [vec vector?]
                            [ref-proc (vector? exact-nonnegative-integer? any/c . -> . any/c)]
                            [set-proc (vector? exact-nonnegative-integer? any/c . -> . any/c)]

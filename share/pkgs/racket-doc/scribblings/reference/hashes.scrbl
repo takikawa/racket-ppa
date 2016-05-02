@@ -485,6 +485,26 @@ Returns the value for the element in @racket[hash] at index
 @racket[pos]. If @racket[pos] is not a valid index for
 @racket[hash], the @exnraise[exn:fail:contract].}
 
+@defproc[(hash-iterate-pair [hash hash?]
+                           [pos exact-nonnegative-integer?])
+         (cons any any)]{
+
+Returns a pair containing the key and value for the element 
+in @racket[hash] at index
+@racket[pos]. If @racket[pos] is not a valid index for
+@racket[hash], the @exnraise[exn:fail:contract].}
+
+@history[#:added "6.4.0.5"]
+
+@defproc[(hash-iterate-key+value [hash hash?]
+                           [pos exact-nonnegative-integer?])
+         (values any any)]{
+
+Returns the key and value for the element in @racket[hash] at index
+@racket[pos]. If @racket[pos] is not a valid index for
+@racket[hash], the @exnraise[exn:fail:contract].}
+
+@history[#:added "6.4.0.5"]
 
 @defproc[(hash-copy [hash hash?]) 
          (and/c hash? (not/c immutable?))]{
@@ -512,7 +532,16 @@ the returned number is the same.}
 Returns a @tech{fixnum}; for any two calls with @racket[equal?] values,
 the returned number is the same. A hash code is computed even when
 @racket[v] contains a cycle through pairs, vectors, boxes, and/or
-inspectable structure fields. See also @racket[gen:equal+hash].}
+inspectable structure fields. See also @racket[gen:equal+hash].
+
+For any @racket[v] that could be produced by @racket[read], if
+@racket[v2] is produced by @racket[read] for the same input
+characters, the @racket[(equal-hash-code v)] is the same as
+@racket[(equal-hash-code v2)] --- even if @racket[v] and @racket[v2]
+do not exist at the same time (and therefore could not be compared by
+calling @racket[equal?]).
+
+@history[#:changed "6.4.0.12" @elem{Strengthened guarantee for @racket[read]able values.}]}
 
 
 @defproc[(equal-secondary-hash-code [v any/c]) fixnum?]{

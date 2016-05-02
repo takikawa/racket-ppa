@@ -8,7 +8,9 @@
          "class-internal.rkt"
          "../contract/base.rkt"
          "../contract/combinator.rkt"
-         (only-in "../contract/private/arrow.rkt" making-a-method method-contract?))
+         (only-in "../contract/private/arrow-val-first.rkt" ->-internal ->*-internal)
+         (only-in "../contract/private/case-arrow.rkt" case->-internal)
+         (only-in "../contract/private/arr-d.rkt" ->d-internal))
 
 (provide make-class/c class/c-late-neg-proj
          blame-add-method-context blame-add-field-context blame-add-init-context
@@ -24,17 +26,29 @@
 
 ;; Shorthand contracts that treat the implicit object argument as if it were
 ;; contracted with any/c.
-(define-syntax-rule (->m . stx)
-  (syntax-parameterize ([making-a-method #t] [method-contract? #t]) (-> . stx)))
+(define-syntax (->m stx)
+  (syntax-case stx ()
+    [(_ . args)
+     (->-internal (syntax/loc stx (->m . args))
+                  #|method?|# #t)]))
 
-(define-syntax-rule (->*m . stx)
-  (syntax-parameterize ([making-a-method #t] [method-contract? #t]) (->* . stx)))
+(define-syntax (->*m stx)
+  (syntax-case stx ()
+    [(_ . args)
+     (->*-internal (syntax/loc stx (->*m . args))
+                   #|method?|# #t)]))
 
-(define-syntax-rule (case->m . stx)
-  (syntax-parameterize ([making-a-method #t] [method-contract? #t]) (case-> . stx)))
+(define-syntax (case->m stx)
+  (syntax-case stx ()
+    [(_ . args)
+     (case->-internal (syntax/loc stx (case->m . args))
+                      #|method?|# #t)]))
 
-(define-syntax-rule (->dm . stx)
-  (syntax-parameterize ([making-a-method #'this-param] [method-contract? #t]) (->d . stx)))
+(define-syntax (->dm stx)
+  (syntax-case stx ()
+    [(_ . args)
+     (->d-internal (syntax/loc stx (->dm . args))
+                   #|maybe-this-param|# #'#'this-param)]))
 
 (define (class/c-check-first-order ctc cls fail)
   (define opaque? (class/c-opaque? ctc))
@@ -164,21 +178,36 @@
     (define external-field-projections
       (for/list ([f (in-list (class/c-fields ctc))]
                  [c (in-list (class/c-field-contracts ctc))])
+        (define pos-blame (blame-add-field-context blame f #:swap? #f))
+        (define neg-blame (blame-add-field-context blame f #:swap? #t))
         (and c
              (let ([p-pos ((contract-late-neg-projection c)
-                           (blame-add-field-context blame f #:swap? #f))]
+                           pos-blame)]
                    [p-neg ((contract-late-neg-projection c)
-                           (blame-add-field-context blame f #:swap? #t))])
-               (cons p-pos p-neg)))))
+                           neg-blame)])
+               (cons (lambda (x pos-party)
+                       (define blame+pos-party (cons pos-blame pos-party))
+                       (with-contract-continuation-mark
+                        blame+pos-party
+                        (p-pos x pos-party)))
+                     (lambda (x neg-party)
+                       (define blame+neg-party (cons neg-blame neg-party))
+                       (with-contract-continuation-mark
+                        blame+neg-party
+                        (p-neg x neg-party))))))))
     
     ;; zip the inits and contracts together for ordered selection
     (define inits+contracts 
       (for/list ([init (in-list (class/c-inits ctc))]
                  [ctc (in-list (class/c-init-contracts ctc))])
-        (if ctc
-            (list init ((contract-late-neg-projection ctc) 
-                        (blame-add-init-context blame init)))
-            (list init #f))))
+        (cond [ctc
+               (define blame* (blame-add-init-context blame init))
+               (define neg-acceptor ((contract-late-neg-projection ctc) blame*))
+               (list init (lambda (x neg-party)
+                            (with-contract-continuation-mark
+                             (cons blame* neg-party)
+                             (neg-acceptor x neg-party))))]
+              [else (list init #f)])))
     
     (λ (cls neg-party)
       (class/c-check-first-order
@@ -411,7 +440,16 @@
              (let* ([blame-acceptor (contract-late-neg-projection c)]
                     [p-pos (blame-acceptor blame)]
                     [p-neg (blame-acceptor bswap)])
-               (cons p-pos p-neg)))))
+               (cons (lambda (x pos-party)
+                       (define blame+pos-party (cons blame pos-party))
+                       (with-contract-continuation-mark
+                        blame+pos-party
+                        (p-pos x pos-party)))
+                     (lambda (x neg-party)
+                       (define blame+neg-party (cons blame neg-party))
+                       (with-contract-continuation-mark
+                        blame+neg-party
+                        (p-neg x neg-party))))))))
     
     (define override-projections
       (for/list ([m (in-list (internal-class/c-overrides internal-ctc))]
@@ -1250,7 +1288,7 @@
                (get-impersonator-prop:instanceof/c-original-object val)
                (impersonate-struct 
                 val object-ref
-                (λ (o c) (car (get-impersonator-prop:instanceof/c-wrapped-classes o))))))
+                (λ (o c) (get-impersonator-prop:instanceof/c-wrapped-class o)))))
 	
 
          ;; this code is doing a fairly complicated dance to 
@@ -1280,12 +1318,12 @@
                  (if (has-impersonator-prop:instanceof/c-projs? val)
                      (get-impersonator-prop:instanceof/c-projs val)
                      '())))
-         
-         (define old-classes
-           (if (has-impersonator-prop:instanceof/c-wrapped-classes? val)
-               (get-impersonator-prop:instanceof/c-wrapped-classes val)
-               '()))
-         
+
+         (define (stronger? x y)
+           (and (contract? x) ; could instead get a `just-check-existence`
+                (contract? y)
+                (contract-stronger? x y)))
+
          (define-values (reverse-without-redundant-ctcs reverse-without-redundant-projs)
            (let loop ([prior-ctcs '()]
                       [prior-projs '()]
@@ -1297,37 +1335,21 @@
                [(null? next-ctcs) (values (cons this-ctc prior-ctcs)
                                           (cons this-proj prior-projs))]
                [else
-                (if (and (ormap (λ (x) (contract-stronger? x this-ctc)) prior-ctcs)
-                         (ormap (λ (x) (contract-stronger? this-ctc x)) next-ctcs))
+                (if (and (ormap (λ (x) (stronger? x this-ctc)) prior-ctcs)
+                         (ormap (λ (x) (stronger? this-ctc x)) next-ctcs))
                     (loop prior-ctcs prior-projs
                           (car next-ctcs) (cdr next-ctcs) (car next-projs) (cdr next-projs))
                     (loop (cons this-ctc prior-ctcs) (cons this-proj prior-projs)
                           (car next-ctcs) (cdr next-ctcs) (car next-projs) (cdr next-projs)))])))
-         
-         (define wrapped-classes 
-           (reverse
-            (let loop ([class (if (has-impersonator-prop:instanceof/c-wrapped-classes? val)
-                                  (car (reverse 
-                                        (get-impersonator-prop:instanceof/c-wrapped-classes val)))
-                                  (object-ref val))]
-                       [ctcs reverse-without-redundant-ctcs]
-                       [projs reverse-without-redundant-projs]
-                       
-                       [old-ctcs (reverse (cdr all-new-ctcs))]
-                       [old-classes (reverse old-classes)])
-              (cond
-                [(null? projs) (list class)]
-                [else
-                 (cons class
-                       (cond
-                         [(and (pair? old-ctcs) (eq? (car old-ctcs) (car ctcs)))
-                          (loop (car old-classes)
-                                (cdr ctcs)
-                                (cdr projs)
-                                (cdr old-ctcs)
-                                (cdr old-classes))]
-                         [else
-                          (loop ((car projs) class) (cdr ctcs) (cdr projs) '() '())]))]))))
+
+         (define unwrapped-class
+           (if (has-impersonator-prop:instanceof/c-unwrapped-class? val)
+               (get-impersonator-prop:instanceof/c-unwrapped-class val)
+               (object-ref val)))
+         (define wrapped-class
+           (for/fold ([class unwrapped-class])
+               ([proj (in-list reverse-without-redundant-projs)])
+             (proj class)))
          
          (impersonate-struct
           interposed-val object-ref
@@ -1339,7 +1361,8 @@
           impersonator-prop:instanceof/c-original-object interposed-val
           impersonator-prop:instanceof/c-ctcs (reverse reverse-without-redundant-ctcs)
           impersonator-prop:instanceof/c-projs (reverse reverse-without-redundant-projs)
-          impersonator-prop:instanceof/c-wrapped-classes wrapped-classes
+          impersonator-prop:instanceof/c-wrapped-class wrapped-class
+          impersonator-prop:instanceof/c-unwrapped-class unwrapped-class
           impersonator-prop:contracted ctc
           impersonator-prop:original-object original-obj)]))))
 
@@ -1353,15 +1376,20 @@
                 get-impersonator-prop:instanceof/c-projs)
   (make-impersonator-property 'impersonator-prop:instanceof/c-projs))
 
-(define-values (impersonator-prop:instanceof/c-wrapped-classes
-                has-impersonator-prop:instanceof/c-wrapped-classes?
-                get-impersonator-prop:instanceof/c-wrapped-classes)
-  (make-impersonator-property 'impersonator-prop:instanceof/c-wrapped-classes))
+(define-values (impersonator-prop:instanceof/c-unwrapped-class
+                has-impersonator-prop:instanceof/c-unwrapped-class?
+                get-impersonator-prop:instanceof/c-unwrapped-class)
+  (make-impersonator-property 'impersonator-prop:instanceof/c-unwrapped-class))
+
+(define-values (impersonator-prop:instanceof/c-wrapped-class
+                has-impersonator-prop:instanceof/c-wrapped-class?
+                get-impersonator-prop:instanceof/c-wrapped-class)
+  (make-impersonator-property 'impersonator-prop:instanceof/c-wrapped-class))
 
 ;; when an object has the original-object property, 
 ;; then we also know that value of this property is
 ;; an object whose object-ref has been redirected to
-;; use impersonator-prop:instanceof/c-wrapped-classes
+;; use impersonator-prop:instanceof/c-wrapped-class
 (define-values (impersonator-prop:instanceof/c-original-object
                 has-impersonator-prop:instanceof/c-original-object?
                 get-impersonator-prop:instanceof/c-original-object)
@@ -1649,6 +1677,15 @@
           (define prj (contract-late-neg-projection c))
           (define p-pos (prj (blame-add-field-context blame f #:swap? #f)))
           (define p-neg (prj (blame-add-field-context blame f #:swap? #t)))
-          (hash-set! field-ht f (field-info-extend-external fi p-pos p-neg neg-party)))))
+          (hash-set! field-ht f (field-info-extend-external fi
+                                                            (lambda args
+                                                              (with-contract-continuation-mark
+                                                               (cons blame neg-party)
+                                                               (apply p-pos args)))
+                                                            (lambda args
+                                                              (with-contract-continuation-mark
+                                                               (cons blame neg-party)
+                                                               (apply p-neg args)))
+                                                            neg-party)))))
     
     (copy-seals cls c)))

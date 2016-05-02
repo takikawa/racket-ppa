@@ -58,7 +58,7 @@ int scheme_mz_retain_it(mz_jit_state *jitter, void *v)
     jitter->retain_start[jitter->retained] = v;
 #ifdef JIT_PRECISE_GC
     /* We just change an array that is marked indirectly for GC
-       via a Scheme_Native_Closure_Data. Write to that record
+       via a Scheme_Native_Lambda. Write to that record
        so that a minor GC will trace it and therefore trace
        the reatined array: */
     if (jitter->retaining_data) {
@@ -180,7 +180,7 @@ void *scheme_generate_one(mz_jit_state *old_jitter,
 			  void *data,
 			  int gcable,
 			  void *save_ptr,
-			  Scheme_Native_Closure_Data *ndata)
+			  Scheme_Native_Lambda *ndata)
 /* The given generate() function is called at least twice: once to gather
    the size of the generated code (at a temporary location), and again
    to generate the final code at its final location. The size of the
@@ -502,7 +502,7 @@ void scheme_extra_pushed(mz_jit_state *jitter, int n)
   }
   v = (jitter->mappings[jitter->num_mappings]) >> 2;
   v += n;
-  jitter->mappings[jitter->num_mappings] = ((v << 2) | 0x1);
+  jitter->mappings[jitter->num_mappings] = (((unsigned)v << 2) | 0x1);
 }
 
 void scheme_mz_pushr_p_it(mz_jit_state *jitter, int reg) 
@@ -534,7 +534,7 @@ void scheme_extra_popped(mz_jit_state *jitter, int n)
   if (!v)
     --jitter->num_mappings;
   else
-    jitter->mappings[jitter->num_mappings] = ((v << 2) | 0x1);
+    jitter->mappings[jitter->num_mappings] = (((unsigned)v << 2) | 0x1);
 }
 
 void scheme_mz_popr_p_it(mz_jit_state *jitter, int reg, int discard) 
@@ -570,7 +570,7 @@ void scheme_mz_runstack_skipped(mz_jit_state *jitter, int n)
   v = (jitter->mappings[jitter->num_mappings]) >> 2;
   JIT_ASSERT(v <= 0);
   v -= n;
-  jitter->mappings[jitter->num_mappings] = ((v << 2) | 0x1);
+  jitter->mappings[jitter->num_mappings] = (((unsigned)v << 2) | 0x1);
   jitter->self_pos += n;
 }
 
@@ -589,7 +589,7 @@ void scheme_mz_runstack_unskipped(mz_jit_state *jitter, int n)
   if (!v)
     --jitter->num_mappings;
   else
-    jitter->mappings[jitter->num_mappings] = ((v << 2) | 0x1);
+    jitter->mappings[jitter->num_mappings] = (((unsigned)v << 2) | 0x1);
   jitter->self_pos -= n;
 }
 
@@ -603,7 +603,7 @@ void scheme_mz_runstack_pushed(mz_jit_state *jitter, int n)
       || (jitter->mappings[jitter->num_mappings] & 0x3)) {
     new_mapping(jitter);
   }
-  jitter->mappings[jitter->num_mappings] += (n << 2);
+  jitter->mappings[jitter->num_mappings] += ((unsigned)n << 2);
   jitter->need_set_rs = 1;
 }
 
@@ -614,7 +614,7 @@ void scheme_mz_runstack_closure_pushed(mz_jit_state *jitter, int a, int flags)
     jitter->max_depth = jitter->depth;
   jitter->self_pos += 1;
   new_mapping(jitter);
-  jitter->mappings[jitter->num_mappings] = (a << 4) | (flags << 2) | 0x2;
+  jitter->mappings[jitter->num_mappings] = ((unsigned)a << 4) | ((unsigned)flags << 2) | 0x2;
   jitter->need_set_rs = 1;
   /* closures are never popped; they go away due to returns or tail calls */
 }
@@ -627,7 +627,7 @@ void scheme_mz_runstack_flonum_pushed(mz_jit_state *jitter, int pos)
     jitter->max_depth = jitter->depth;
   jitter->self_pos += 1;
   new_mapping(jitter);
-  jitter->mappings[jitter->num_mappings] = (pos << 2) | 0x3;
+  jitter->mappings[jitter->num_mappings] = ((unsigned)pos << 2) | 0x3;
   jitter->need_set_rs = 1;
   /* flonums are never popped; they go away due to returns or tail calls */
 }
@@ -651,7 +651,7 @@ void scheme_mz_runstack_popped(mz_jit_state *jitter, int n)
   if (!v)
     --jitter->num_mappings;
   else
-    jitter->mappings[jitter->num_mappings] = (v << 2);
+    jitter->mappings[jitter->num_mappings] = ((unsigned)v << 2);
   jitter->need_set_rs = 1;
 }
 

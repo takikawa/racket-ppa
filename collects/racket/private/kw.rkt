@@ -2,7 +2,11 @@
   (#%require "define.rkt"
              "small-scheme.rkt"
              "more-scheme.rkt"
+             (only '#%unsafe
+                   unsafe-chaperone-procedure
+                   unsafe-impersonate-procedure)
              (for-syntax '#%kernel
+                         '#%unsafe
                          "procedure-alias.rkt"
                          "stx.rkt"
                          "small-scheme.rkt"
@@ -26,7 +30,9 @@
              new:procedure->method
              new:procedure-rename
              new:chaperone-procedure
+             (protect new:unsafe-chaperone-procedure)
              new:impersonate-procedure
+             (protect new:unsafe-impersonate-procedure)
              new:chaperone-procedure*
              new:impersonate-procedure*
              (for-syntax kw-expander? kw-expander-impl kw-expander-proc
@@ -634,7 +640,7 @@
                        (let ([#,core-id #,impl])
                          (let ([#,unpack-id #,kwimpl])
                            #,wrap))))))
-                 #`(#%expression #,stx)))])
+                 (quasisyntax/loc stx (#%expression #,stx))))])
       (values new-lambda new-lambda)))
   
   (define (missing-kw proc . args)
@@ -1529,11 +1535,23 @@
              (do-chaperone-procedure #f #f chaperone-procedure 'chaperone-procedure proc wrap-proc props))])
       chaperone-procedure))
 
+  (define new:unsafe-chaperone-procedure
+    (let ([unsafe-chaperone-procedure
+           (lambda (proc wrap-proc . props)
+             (do-unsafe-chaperone-procedure unsafe-chaperone-procedure 'unsafe-chaperone-procedure proc wrap-proc props))])
+      unsafe-chaperone-procedure))
+
   (define new:impersonate-procedure
     (let ([impersonate-procedure
            (lambda (proc wrap-proc . props)
              (do-chaperone-procedure #t #f impersonate-procedure 'impersonate-procedure proc wrap-proc props))])
       impersonate-procedure))
+
+  (define new:unsafe-impersonate-procedure
+    (let ([unsafe-impersonate-procedure
+           (lambda (proc wrap-proc . props)
+             (do-unsafe-chaperone-procedure unsafe-impersonate-procedure 'unsafe-impersonate-procedure proc wrap-proc props))])
+      unsafe-impersonate-procedure))
 
   (define new:chaperone-procedure*
     (let ([chaperone-procedure*
@@ -1553,52 +1571,10 @@
       (if (or (not (keyword-procedure? n-proc))
               (not (procedure? wrap-proc))
               ;; if any bad prop, let `chaperone-procedure' complain
-              (let loop ([props props])
-                (cond
-                 [(null? props) #f]
-                 [(impersonator-property? (car props))
-                  (let ([props (cdr props)])
-                    (or (null? props)
-                        (loop (cdr props))))]
-                 [else #t])))
+              (bad-props? props))
           (apply chaperone-procedure proc wrap-proc props)
-          (let-values ([(a) (procedure-arity proc)]
-                       [(b) (procedure-arity wrap-proc)]
-                       [(d) (if self-arg? 1 0)]
-                       [(a-req a-allow) (procedure-keywords proc)]
-                       [(b-req b-allow) (procedure-keywords wrap-proc)])
-            (define (includes? a b)
-              (cond
-               [(number? b) (cond
-                             [(number? a) (= b (+ a d))]
-                             [(arity-at-least? a)
-                              (b . >= . (+ (arity-at-least-value a) d))]
-                             [else
-                              (ormap (lambda (a) (includes? a b)) a)])]
-               [(arity-at-least? b) (cond
-                                     [(number? a) #f]
-                                     [(arity-at-least? a)
-                                      ((arity-at-least-value b) . >= . (+ (arity-at-least-value a) d))]
-                                     [else (ormap (lambda (a) (includes? b a)) a)])]
-               [else (andmap (lambda (b) (includes? a b)) b)]))
-
-            (unless (includes? b a)
-              ;; Let core report error:
-              (apply chaperone-procedure proc wrap-proc props))
-            (unless (subset? b-req a-req)
-              (raise-arguments-error
-               name
-               "wrapper procedure requires more keywords than original procedure"
-               "wrapper procedure" wrap-proc
-               "original procedure" proc))
-            (unless (or (not b-allow)
-                        (and a-allow
-                             (subset? a-allow b-allow)))
-              (raise-arguments-error
-               name
-               "wrapper procedure does not accept all keywords of original procedure"
-               "wrapper procedure" wrap-proc
-               "original procedure" proc))
+          (begin
+            (chaperone-arity-match-checking self-arg? name proc wrap-proc props)
             (let*-values ([(kw-chaperone)
                            (let ([p (keyword-procedure-proc n-wrap-proc)])
                              ;; `extra-arg ...` will be `self-proc` if `self-arg?`:
@@ -1758,6 +1734,68 @@
                          ;; chaperone-struct insists on having at least one selector:
                          chap-accessor #f
                          props)))))))
+  
+  (define (do-unsafe-chaperone-procedure unsafe-chaperone-procedure name proc wrap-proc props)
+    (let ([n-proc (normalize-proc proc)]
+          [n-wrap-proc (normalize-proc wrap-proc)])
+      (if (or (not (keyword-procedure? n-proc))
+              (not (procedure? wrap-proc))
+              ;; if any bad prop, let `unsafe-chaperone-procedure' complain
+              (bad-props? props))
+          (apply unsafe-chaperone-procedure proc wrap-proc props)
+          (begin
+            (chaperone-arity-match-checking #f name proc wrap-proc props)
+            (apply unsafe-chaperone-procedure proc wrap-proc props)))))
+
+  (define (bad-props? props)
+    (let loop ([props props])
+      (cond
+        [(null? props) #f]
+        [(impersonator-property? (car props))
+         (let ([props (cdr props)])
+           (or (null? props)
+               (loop (cdr props))))]
+        [else #t])))
+
+  (define (chaperone-arity-match-checking self-arg? name proc wrap-proc props)
+    (let-values ([(a) (procedure-arity proc)]
+                 [(b) (procedure-arity wrap-proc)]
+                 [(d) (if self-arg? 1 0)]
+                 [(a-req a-allow) (procedure-keywords proc)]
+                 [(b-req b-allow) (procedure-keywords wrap-proc)])
+      (define (includes? a b)
+        (cond
+          [(number? b) (cond
+                         [(number? a) (= b (+ a d))]
+                         [(arity-at-least? a)
+                          (b . >= . (+ (arity-at-least-value a) d))]
+                         [else
+                          (ormap (lambda (a) (includes? a b)) a)])]
+          [(arity-at-least? b) (cond
+                                 [(number? a) #f]
+                                 [(arity-at-least? a)
+                                  ((arity-at-least-value b) . >= . (+ (arity-at-least-value a) d))]
+                                 [else (ormap (lambda (a) (includes? b a)) a)])]
+          [else (andmap (lambda (b) (includes? a b)) b)]))
+      
+      (unless (includes? b a)
+        ;; Let core report error:
+        (apply chaperone-procedure proc wrap-proc props))
+      (unless (subset? b-req a-req)
+        (raise-arguments-error
+         name
+         "wrapper procedure requires more keywords than original procedure"
+         "wrapper procedure" wrap-proc
+         "original procedure" proc))
+      (unless (or (not b-allow)
+                  (and a-allow
+                       (subset? a-allow b-allow)))
+        (raise-arguments-error
+         name
+         "wrapper procedure does not accept all keywords of original procedure"
+         "wrapper procedure" wrap-proc
+         "original procedure" proc))
+      (void)))
   
   (define (normalize-proc proc)
     ;; If `proc' gets keyword support through `new-prop:procedure',
