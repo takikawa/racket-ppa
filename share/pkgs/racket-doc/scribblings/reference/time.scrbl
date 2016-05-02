@@ -165,6 +165,9 @@ result is the result of  the last @racket[body].}
 @; ----------------------------------------------------------------------
 
 @section[#:tag "date-string"]{Date Utilities}
+@margin-note{For more date & time operations, see
+  @other-doc['(lib "gregor/scribblings/gregor.scrbl") #:indirect "Gregor: Date and Time"]
+  or @link["../srfi/srfi-19.html"]{srfi/19}}
 
 @note-lib-only[racket/date]
 
@@ -221,16 +224,16 @@ local time by default or UTC if @racket[local-time?] is
 error is signaled, otherwise an integer is returned.}
 
 
-@defproc[(date->julian/scalinger [date date?]) exact-integer?]{
+@defproc[(date->julian/scaliger [date date?]) exact-integer?]{
 
 Converts a date structure (up to 2099 BCE Gregorian) into a Julian
 date number. The returned value is not a strict Julian number, but
-rather Scalinger's version, which is off by one for easier
+rather Scaliger's version, which is off by one for easier
 calculations.}
 
 
-@defproc[(julian/scalinger->string [date-number exact-integer?])
+@defproc[(julian/scaliger->string [date-number exact-integer?])
          string?]{
 
-Converts a Julian number (Scalinger's off-by-one version) into a
+Converts a Julian number (Scaliger's off-by-one version) into a
 string.}

@@ -741,6 +741,7 @@
           (printf "#define GC_CAN_IGNORE /**/\n")
           (printf "#define XFORM_CAN_IGNORE /**/\n")
           (printf "#define __xform_nongcing__ /**/\n")
+          (printf "#define __xform_nongcing_nonaliasing__ /**/\n")
           ;; Another annotation to protect against GC conversion:
           (printf "#define HIDE_FROM_XFORM(x) x\n")
           (printf "#define XFORM_HIDE_EXPR(x) x\n")
@@ -755,6 +756,7 @@
           (printf "#define XFORM_START_SUSPEND /**/\n")
           (printf "#define XFORM_END_SUSPEND /**/\n")
           (printf "#define XFORM_SKIP_PROC /**/\n")
+          (printf "#define XFORM_ASSERT_NO_CONVERSION /**/\n")
           ;; For avoiding warnings:
           (printf "#define XFORM_OK_PLUS +\n")
           (printf "#define XFORM_OK_MINUS -\n")
@@ -898,12 +900,13 @@
                __get_errno_ptr ; QNX preprocesses errno to __get_errno_ptr
                __getreent ; Cygwin
 
-               strlen cos cosl sin sinl exp expl pow powl log logl sqrt sqrtl atan2 atan2l
-               isnan isinf fpclass _fpclass __fpclassify __fpclassifyf __fpclassifyl
-	       _isnan __isfinited __isnanl __isnan
+               strlen cos cosl sin sinl exp expl pow powl log logl sqrt sqrtl atan2 atan2l frexp
+               isnan isinf fpclass signbit _signbit _fpclass __fpclassify __fpclassifyf __fpclassifyl
+	       _isnan __isfinited __isnanl __isnan __signbit __signbitf __signbitd __signbitl
                __isinff __isinfl isnanf isinff __isinfd __isnanf __isnand __isinf
-               __inline_isnanl __inline_isnan
-               __builtin_popcount
+               __inline_isnanl __inline_isnan __inline_signbit __inline_signbitf __inline_signbitd __inline_signbitl
+               __builtin_popcount __builtin_clz __builtin_isnan __builtin_isinf __builtin_signbit
+               __builtin_signbitf __builtin_signbitd __builtin_signbitl __builtin_isinf_sign
                _Generic
                __inline_isinff __inline_isinfl __inline_isinfd __inline_isnanf __inline_isnand __inline_isinf
                floor floorl ceil ceill round roundl fmod fmodl modf modfl fabs fabsl __maskrune _errno __errno
@@ -958,7 +961,13 @@
 	(for-each (lambda (name)
 		    (hash-set! non-gcing-functions name #t))
 		  non-gcing-builtin-functions)
-        
+
+        ;; Non-aliasing function may take address of variables as arguments to fill
+        ;; them in, but they don't expose those addresses, so taking a variable's
+        ;; address for an argument doesn't make it live for the rest of the enclosing
+        ;; function.
+        (define non-aliasing-functions (make-hasheq))
+
         (define non-returning-functions
           ;; The following functions never return, so the wrappers
           ;; don't need to push any variables:
@@ -1121,8 +1130,9 @@
                 (set! struct-defs (list-ref l 6))
                 
                 (set! non-gcing-functions (hash-copy (list-ref l 7)))
+                (set! non-aliasing-functions (hash-copy (list-ref l 8)))
 
-                (set! gc-var-stack-mode (list-ref l 8))))))
+                (set! gc-var-stack-mode (list-ref l 9))))))
         
         ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ;; Pretty-printing output
@@ -1559,6 +1569,9 @@
              (let ([name (register-proto-information e)])
                (when (eq? (tok-n (car e)) '__xform_nongcing__)
 		 (hash-set! non-gcing-functions name #t))
+               (when (eq? (tok-n (car e)) '__xform_nongcing_nonaliasing__)
+		 (hash-set! non-gcing-functions name #t)
+		 (hash-set! non-aliasing-functions name #t))
 	       (when show-info?
                  (printf "/* PROTO ~a */\n" name))
                (if (or precompiling-header?
@@ -1593,6 +1606,9 @@
              (let ([name (register-proto-information e)])
                (when (eq? (tok-n (car e)) '__xform_nongcing__)
                  (hash-set! non-gcing-functions name #t))
+               (when (eq? (tok-n (car e)) '__xform_nongcing_nonaliasing__)
+                 (hash-set! non-gcing-functions name #t)
+                 (hash-set! non-aliasing-functions name #t))
                (if (skip-function? e)
                    e
                    (begin
@@ -1742,13 +1758,16 @@
         (define (simple-unused-def? e)
           (and (not precompiling-header?)
                (andmap (lambda (x) (and (symbol? (tok-n x))
-                                        (not (eq? '|,| (tok-n x)))))
+                                   (not (eq? '|,| (tok-n x)))))
                        e)
                (= 1 (hash-ref used-symbols
-                                    (let loop ([e e])
-                                      (if (null? (cddr e))
-                                          (tok-n (car e))
-                                          (loop (cdr e))))))))
+			      (let loop ([e e])
+				(if (or (null? (cddr e))
+					(and (pair? (cdr e))
+					     (eq? '= (tok-n (cadr e)))
+					     (= (length e) 4)))
+				    (tok-n (car e))
+				    (loop (cdr e))))))))
         
         ;; See `simple-unused-def?'. The `struct' case is more
         ;; complex, because multiple names might be assigned
@@ -1781,7 +1800,7 @@
         (define (class-decl? e)
           (memq (tok-n (car e)) '(class)))
         
-        ; ;Recognize a function (as opposed to a prototype):
+        ;; Recognize a function (as opposed to a prototype):
         (define (function? e)
           (let ([l (length e)])
             (and (> l 2)
@@ -1794,6 +1813,7 @@
                           (let ([v (list-ref e (sub1 ll))])
                             (or (parens? v)
                                 (eq? (tok-n v) 'XFORM_SKIP_PROC)
+                                (eq? (tok-n v) 'XFORM_ASSERT_NO_CONVERSION)
                                 ;; `const' can appear between the arg parens
                                 ;;  and the function body; this happens in the
                                 ;;  OS X headers
@@ -1865,7 +1885,8 @@
                              (if (pair? t)
                                  (if (or (memq (tok-n (car t)) '(extern static virtual __stdcall __cdecl 
                                                                         inline _inline __inline __inline__
-                                                                        __xform_nongcing__))
+                                                                        __xform_nongcing__
+                                                                        __xform_nongcing_nonaliasing__))
                                          (equal? "C" (tok-n (car t))))
                                      (loop (cdr t))
                                      (cons (car t) (loop (cdr t))))
@@ -2403,6 +2424,9 @@
                                         (if (eq? semi (tok-n v))
                                             (values (list-ref e (sub1 len)) (sub1 len))
                                             (values v len)))]
+                        [(assert-no-conversion?)
+                         (eq? (tok-n (list-ref e (sub1 len)))
+                              'XFORM_ASSERT_NO_CONVERSION)]
                         [(body-e) (seq->list (seq-in body-v))]
                         [(class-name function-name func-pos) 
                          (let loop ([e e][p 0])
@@ -2417,7 +2441,9 @@
                         [(args-e) (seq->list (seq-in (list-ref e (if (and func-pos
                                                                           (eq? class-name function-name))
                                                                      (add1 func-pos)
-                                                                     (sub1 len)))))]
+                                                                     (if assert-no-conversion?
+                                                                         (- len 2)
+                                                                         (sub1 len))))))]
                         [(arg-vars all-arg-vars) 
                          (let-values ([(arg-pragmas arg-decls) (body->lines (append
                                                                              args-e
@@ -2540,11 +2566,12 @@
                                             e
                                             (lambda (name class-name type args static?)
                                               type)))])
-		 (if (hash-ref non-gcing-functions name (lambda () #f))
+		 (if (hash-ref non-gcing-functions name #f)
 		     (when saw-gcing-call
-		       (log-error "[GCING] ~a in ~a: Function ~a declared __xform_nongcing__, but includes a function call."
+		       (log-error "[GCING] ~a in ~a: Function ~a declared __xform_nongcing__, but includes a function call at ~s."
 				  (tok-line saw-gcing-call) (tok-file saw-gcing-call)
-				  name))
+				  name
+                                  (tok-n saw-gcing-call)))
 		     (unless saw-gcing-call
 		       '
 		       (eprintf "[SUGGEST] Consider declaring ~a as __xform_nongcing__.\n"
@@ -2566,8 +2593,13 @@
                       (cons
                        (make-note 'note #f #f "/* No conversion */")
                        orig-body-e))
-                     (list->seq body-e))))))))
-        
+                     (begin
+                       (when assert-no-conversion?
+                         (log-error "[CONVERSION] ~a in ~a: Function ~a declared XFORM_ASSERT_NO_CONVERSION, but requires conversion."
+                                    (tok-line (car e)) (tok-file (car e))
+                                    name))
+                       (list->seq body-e)))))))))
+
         (define (convert-class-vars body-e arg-vars c++-class new-vars-box)
           (when c++-class
             (let-values ([(pragmas el) (body->lines body-e #f)])
@@ -3580,7 +3612,7 @@
 						   (list->seq (append func (list args))))
 						  ;; Call with pointer pushes
 						  (begin
-						    (set! saw-gcing-call (car e-))
+						    (set! saw-gcing-call (car func))
 						    (make-call
 						     "func call"
 						     #f #f
@@ -3901,6 +3933,21 @@
                null]
               [(pragma? (car e))
                (loop (cdr e))]
+              [(and (pair? (cdr e))
+                    (parens? (cadr e))
+                    (hash-ref non-aliasing-functions (tok-n (car e)) #f))
+               ;; A call to a non-aliasing function: drop immediate '&'s on args:
+               (define (drop-&s now? e)
+                 (cond
+                  [(null? e) null]
+                  [(and now? (eq? '& (tok-n (car e))))
+                   (drop-&s #f (cdr e))]
+                  [(eq? '|,| (tok-n (car e)))
+                   (cons (car e) (drop-&s #t (cdr e)))]
+                  [else
+                   (cons (car e) (drop-&s #f (cdr e)))]))
+               (append (loop (drop-&s #t (seq->list (seq-in (cadr e)))))
+                       (loop (cddr e)))]
               [(eq? '& (tok-n (car e)))
                (if (null? (cdr e))
                    null
@@ -4119,6 +4166,7 @@
                     (marshall non-pointer-types)
                     (marshall struct-defs)
 		    non-gcing-functions
+		    non-aliasing-functions
                     (list 'quote gc-var-stack-mode))])
               (with-output-to-file (change-suffix file-out #".zo")
                 (lambda ()

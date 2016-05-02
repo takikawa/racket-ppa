@@ -1,6 +1,6 @@
 #lang scribble/manual
 
-@(require scribble/eval
+@(require scribble/example
           (for-label (only-meta-in 0 [except-in typed/racket for])))
 
 @(define eval (make-base-eval))
@@ -42,6 +42,17 @@ behavior and may even crash Typed Racket.
   any contracts that correspond to the specified types. This means that uses of the
   exports in other modules may circumvent the type system's invariants.
 
+  Additionally, importing an identififer that is exported with
+  @racket[unsafe-provide] into another typed module, and then
+  re-exporting it with @racket[provide] will not cause contracts to be
+  generated.
+
+  Uses of the provided identifiers in other typed modules are not
+  affected by @racket[unsafe-provide]---in these situations it behaves
+  identically to @racket[provide]. Furthermore, other typed modules
+  that @emph{use} a binding that is in an @racket[unsafe-provide] will
+  still have contracts generated as usual.
+
   @examples[#:eval eval
     (module t typed/racket/base
       (require typed/racket/unsafe)
@@ -55,7 +66,7 @@ behavior and may even crash Typed Racket.
       (code:comment "bad call that's unchecked")
       (f "foo"))
 
-    (require 'u)
+    (eval:error (require 'u))
   ]
 
   @history[#:added "1.3"]

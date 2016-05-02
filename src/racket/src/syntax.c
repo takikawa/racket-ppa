@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2015 PLT Design Inc.
+  Copyright (c) 2004-2016 PLT Design Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -47,14 +47,16 @@ ROSYM static Scheme_Object *fallbacks_symbol;
 
 READ_ONLY Scheme_Object *scheme_syntax_p_proc;
 
-READ_ONLY Scheme_Hash_Tree *empty_hash_tree;
-READ_ONLY Scheme_Scope_Table *empty_scope_table;
-READ_ONLY Scheme_Scope_Table *empty_propagate_table;
-READ_ONLY Scheme_Scope_Set *empty_scope_set;
+READ_ONLY static Scheme_Hash_Tree *empty_hash_tree;
+READ_ONLY static Scheme_Scope_Table *empty_scope_table;
+READ_ONLY static Scheme_Scope_Table *empty_propagate_table;
+READ_ONLY static Scheme_Scope_Set *empty_scope_set;
 
 ROSYM Scheme_Object *scheme_paren_shape_symbol;
 
 READ_ONLY Scheme_Hash_Tree *scheme_source_stx_props;
+READ_ONLY Scheme_Object *scheme_paren_shape_preserve_square;
+READ_ONLY Scheme_Object *scheme_paren_shape_preserve_curly;
 READ_ONLY static Scheme_Hash_Tree *square_stx_props;
 READ_ONLY static Scheme_Hash_Tree *curly_stx_props;
 
@@ -119,6 +121,7 @@ static Scheme_Object *syntax_tainted_p(int argc, Scheme_Object **argv);
 
 static Scheme_Object *syntax_original_p(int argc, Scheme_Object **argv);
 static Scheme_Object *syntax_property(int argc, Scheme_Object **argv);
+static Scheme_Object *syntax_property_preserved_p(int argc, Scheme_Object **argv);
 static Scheme_Object *syntax_property_keys(int argc, Scheme_Object **argv);
 static Scheme_Object *syntax_track_origin(int argc, Scheme_Object **argv);
 
@@ -154,7 +157,8 @@ static void register_traversers(void);
 XFORM_NONGCING static int is_armed(Scheme_Object *v);
 static Scheme_Object *add_taint_to_stx(Scheme_Object *o, int *mutate);
 
-static void unmarshal_module_context_additions(Scheme_Stx *stx, Scheme_Object *vec, Scheme_Scope_Set *scopes, Scheme_Object *replace_at);
+static void unmarshal_module_context_additions(Scheme_Stx *stx, Scheme_Object *shifts,
+                                               Scheme_Object *vec, Scheme_Scope_Set *scopes, Scheme_Object *replace_at);
 
 static Scheme_Object *make_unmarshal_info(Scheme_Object *phase, Scheme_Object *prefix, Scheme_Object *excepts);
 XFORM_NONGCING static Scheme_Object *extract_unmarshal_phase(Scheme_Object *unmarshal_info);
@@ -194,6 +198,8 @@ static void init_binding_cache(void);
 XFORM_NONGCING static void clear_binding_cache(void);
 XFORM_NONGCING static void clear_binding_cache_for(Scheme_Object *sym);
 XFORM_NONGCING static void clear_binding_cache_stx(Scheme_Stx *stx);
+
+static Scheme_Object *make_preserved_property_value(Scheme_Object *v);
 
 #define CONS scheme_make_pair
 #define ICONS scheme_make_pair
@@ -327,7 +333,8 @@ void scheme_init_stx(Scheme_Env *env)
   GLOBAL_FOLDING_PRIM("syntax->list"   , syntax_to_list, 1, 1, 1, env);
 
   GLOBAL_IMMED_PRIM("syntax-original?"                 , syntax_original_p         , 1, 1, env);
-  GLOBAL_IMMED_PRIM("syntax-property"                  , syntax_property           , 2, 3, env);
+  GLOBAL_IMMED_PRIM("syntax-property"                  , syntax_property           , 2, 4, env);
+  GLOBAL_IMMED_PRIM("syntax-property-preserved?"       , syntax_property_preserved_p, 2, 2, env);
   GLOBAL_IMMED_PRIM("syntax-property-symbol-keys"      , syntax_property_keys      , 1, 1, env);
 
   GLOBAL_IMMED_PRIM("syntax-track-origin"              , syntax_track_origin       , 3, 3, env);
@@ -417,12 +424,18 @@ void scheme_init_stx(Scheme_Env *env)
   REGISTER_SO(scheme_paren_shape_symbol);
   scheme_paren_shape_symbol = scheme_intern_symbol("paren-shape");
 
+  REGISTER_SO(scheme_paren_shape_preserve_square);
+  scheme_paren_shape_preserve_square = make_preserved_property_value(scheme_make_ascii_character('['));
+
+  REGISTER_SO(scheme_paren_shape_preserve_curly);
+  scheme_paren_shape_preserve_curly = make_preserved_property_value(scheme_make_ascii_character('{'));
+
   REGISTER_SO(scheme_source_stx_props);
   REGISTER_SO(square_stx_props);
   REGISTER_SO(curly_stx_props);
   scheme_source_stx_props = scheme_hash_tree_set(empty_hash_tree, source_symbol, scheme_true);
-  square_stx_props = scheme_hash_tree_set(empty_hash_tree, scheme_paren_shape_symbol, scheme_make_char('['));
-  curly_stx_props = scheme_hash_tree_set(empty_hash_tree, scheme_paren_shape_symbol, scheme_make_char('{'));
+  square_stx_props = scheme_hash_tree_set(empty_hash_tree, scheme_paren_shape_symbol, scheme_paren_shape_preserve_square);
+  curly_stx_props = scheme_hash_tree_set(empty_hash_tree, scheme_paren_shape_symbol, scheme_paren_shape_preserve_curly);
 }
 
 void scheme_init_stx_places(int initial_main_os_thread) {
@@ -518,6 +531,38 @@ Scheme_Object *scheme_make_stx_w_offset(Scheme_Object *val,
   return scheme_make_stx(val, srcloc, props);
 }
 
+static Scheme_Object *make_preserved_property_value(Scheme_Object *v)
+{
+  Scheme_Object *p;
+  
+  p = scheme_alloc_small_object();
+  p->type = scheme_syntax_property_preserve_type;
+  SCHEME_PTR_VAL(p) = v;
+  
+  return p;
+}
+
+static Scheme_Object *merge_property_value(Scheme_Object *e1, Scheme_Object *e2)
+{
+  int preserve = 0;
+  
+  if (SAME_TYPE(SCHEME_TYPE(e1), scheme_syntax_property_preserve_type)) {
+    preserve = 1;
+    e1 = SCHEME_PTR_VAL(e1);
+  }
+  if (SAME_TYPE(SCHEME_TYPE(e2), scheme_syntax_property_preserve_type)) {
+    preserve = 1;
+    e2 = SCHEME_PTR_VAL(e2);
+  }
+
+  e1 = ICONS(e1, e2);
+
+  if (preserve)
+    e1 = make_preserved_property_value(e1);
+  
+  return e1;
+}
+
 Scheme_Object *scheme_stx_track(Scheme_Object *naya, 
 				Scheme_Object *old,
 				Scheme_Object *origin)
@@ -554,7 +599,7 @@ Scheme_Object *scheme_stx_track(Scheme_Object *naya,
 
   e1 = scheme_hash_tree_get(oe, origin_symbol);
   if (e1 && origin)
-    oe = scheme_hash_tree_set(oe, origin_symbol, ICONS(origin, e1));
+    oe = scheme_hash_tree_set(oe, origin_symbol, merge_property_value(origin, e1));
   else if (origin)
     oe = scheme_hash_tree_set(oe, origin_symbol, ICONS(origin, scheme_null));
     
@@ -568,7 +613,7 @@ Scheme_Object *scheme_stx_track(Scheme_Object *naya,
       scheme_hash_tree_index(ne, i, &key, &val);
       e1 = scheme_hash_tree_get(oe, key);
       if (e1)
-        oe = scheme_hash_tree_set(oe, key, ICONS(val, e1));
+        oe = scheme_hash_tree_set(oe, key, merge_property_value(val, e1));
       else
         oe = scheme_hash_tree_set(oe, key, val);
       i = scheme_hash_tree_next(ne, i);
@@ -580,7 +625,7 @@ Scheme_Object *scheme_stx_track(Scheme_Object *naya,
       scheme_hash_tree_index(oe, i, &key, &val);
       e1 = scheme_hash_tree_get(ne, key);
       if (e1)
-        ne = scheme_hash_tree_set(ne, key, ICONS(e1, val));
+        ne = scheme_hash_tree_set(ne, key, merge_property_value(e1, val));
       else
         ne = scheme_hash_tree_set(ne, key, val);
       i = scheme_hash_tree_next(oe, i);
@@ -2654,7 +2699,7 @@ static Scheme_Object *replace_matching_scopes(Scheme_Object *l, Scheme_Scope_Set
 
   p = SCHEME_CDR(p);
   while (c--) {
-    p = scheme_make_pair(SCHEME_CAR(l), p);
+    p = scheme_make_mutable_pair(SCHEME_CAR(l), p);
     l = SCHEME_CDR(l);
   }
 
@@ -3491,7 +3536,7 @@ char *scheme_stx_describe_context(Scheme_Object *stx, Scheme_Object *phase, int 
     return "";
 }
 
-static void add_scopes_mapped_names(Scheme_Scope_Set *scopes, Scheme_Hash_Table *mapped)
+static void add_scopes_mapped_names(Scheme_Scope_Set *scopes, Scheme_Object *shifts, Scheme_Hash_Table *mapped)
 {
   int retry;
   Scheme_Hash_Tree *ht;
@@ -3554,7 +3599,7 @@ static void add_scopes_mapped_names(Scheme_Scope_Set *scopes, Scheme_Hash_Table 
             pes = SCHEME_BINDING_VAL(SCHEME_CAR(l));
             if (PES_UNMARSHAL_DESCP(pes)) {
               if (SCHEME_TRUEP(SCHEME_VEC_ELS(pes)[0])) {
-                unmarshal_module_context_additions(NULL, pes, binding_scopes, l);
+                unmarshal_module_context_additions(NULL, shifts, pes, binding_scopes, l);
                 retry = 1;
               }
             } else {
@@ -3651,7 +3696,7 @@ static Scheme_Object *do_stx_lookup(Scheme_Stx *stx, Scheme_Scope_Set *scopes,
                   /* Need unmarshal --- but only if the scope set is relevant */
                   if (scope_subset(binding_scopes, scopes)) {
                     /* unmarshal and note that we must restart */
-                    unmarshal_module_context_additions(stx, pes, binding_scopes, l);
+                    unmarshal_module_context_additions(stx, NULL, pes, binding_scopes, l);
                     invalid = 1;
                     /* Shouldn't encounter this on a second pass: */
                     STX_ASSERT(!check_subset);
@@ -4289,7 +4334,9 @@ Scheme_Object *scheme_module_context_inspector(Scheme_Object *mc)
 
 void scheme_module_context_add_mapped_symbols(Scheme_Object *mc, Scheme_Hash_Table *mapped)
 {
-  add_scopes_mapped_names(scheme_module_context_scopes(mc), mapped);
+  add_scopes_mapped_names(scheme_module_context_scopes(mc),
+                          SCHEME_VEC_ELS(mc)[3], /* list of shifts */
+                          mapped);
 }
 
 Scheme_Object *scheme_module_context_at_phase(Scheme_Object *mc, Scheme_Object *phase)
@@ -4750,7 +4797,8 @@ static Scheme_Object *unmarshal_key_adjust(Scheme_Object *sym, Scheme_Object *pe
   return sym;
 }
 
-static void unmarshal_module_context_additions(Scheme_Stx *stx, Scheme_Object *vec, Scheme_Scope_Set *scopes, Scheme_Object *replace_at)
+static void unmarshal_module_context_additions(Scheme_Stx *stx, Scheme_Object *shifts,
+                                               Scheme_Object *vec, Scheme_Scope_Set *scopes, Scheme_Object *replace_at)
 {
   Scheme_Object *req_modidx, *modidx, *unmarshal_info, *context, *src_phase, *pt_phase, *bind_phase;
   Scheme_Object *insp, *req_insp;
@@ -4760,14 +4808,10 @@ static void unmarshal_module_context_additions(Scheme_Stx *stx, Scheme_Object *v
   insp = SCHEME_VEC_ELS(vec)[3];
   req_insp = insp;
 
-  if (stx) {
+  if (stx)
     modidx = apply_modidx_shifts(stx->shifts, req_modidx, &insp, &export_registry);
-  } else {
-    modidx = req_modidx;
-    export_registry = NULL;
-    insp = scheme_false;
-    req_insp = scheme_false;
-  }
+  else
+    modidx = apply_modidx_shifts(shifts, req_modidx, &insp, &export_registry);
 
   src_phase = SCHEME_VEC_ELS(vec)[1];
   unmarshal_info = SCHEME_VEC_ELS(vec)[2];
@@ -5858,6 +5902,18 @@ static void sort_number_array(Scheme_Object **a, intptr_t count)
   my_qsort(a, count, sizeof(Scheme_Object *), compare_nums);
 }
 
+static int compare_vars_at_resolve(const void *_a, const void *_b)
+{
+  Scheme_IR_Local *a = *(Scheme_IR_Local **)_a;
+  Scheme_IR_Local *b = *(Scheme_IR_Local **)_b;
+  return a->resolve.lex_depth - b->resolve.lex_depth;
+}
+
+void scheme_sort_resolve_ir_local_array(Scheme_IR_Local **a, intptr_t count)
+{
+  my_qsort(a, count, sizeof(Scheme_IR_Local *), compare_vars_at_resolve);
+}
+
 static Scheme_Object *drop_export_registries(Scheme_Object *shifts)
 {
   Scheme_Object *l, *a, *vec, *p, *first = scheme_null, *last = NULL;
@@ -6346,11 +6402,12 @@ static Scheme_Object *srcloc_path_to_string(Scheme_Object *p)
 
 static Scheme_Object *convert_srcloc(Scheme_Stx_Srcloc *srcloc, Scheme_Hash_Tree *props, Scheme_Marshal_Tables *mt)
 {
-  Scheme_Object *vec, *paren, *src, *dir;
+  Scheme_Object *vec, *paren, *src, *dir, *preserved_properties;
 
   if (props) {
     paren = scheme_hash_tree_get(props, scheme_paren_shape_symbol);
-    if (paren && !SCHEME_CHARP(paren))
+    if (paren && !(SAME_TYPE(SCHEME_TYPE(paren), scheme_syntax_property_preserve_type)
+                   && SCHEME_CHARP(SCHEME_PTR_VAL(paren))))
       paren = NULL;
   } else
     paren = NULL;
@@ -6387,14 +6444,49 @@ static Scheme_Object *convert_srcloc(Scheme_Stx_Srcloc *srcloc, Scheme_Hash_Tree
     }
   }
 
-  vec = scheme_make_vector((paren ? 6 : 5), NULL);
+  preserved_properties = scheme_null;
+  if (props) {
+    Scheme_Object *key, *val, **a = NULL;
+    intptr_t i, count = 0;
+
+    i = scheme_hash_tree_next(props, -1);
+    while (i != -1) {
+      scheme_hash_tree_index(props, i, &key, &val);
+      if (SAME_TYPE(SCHEME_TYPE(val), scheme_syntax_property_preserve_type)) {
+        if (!paren || !SAME_OBJ(key, scheme_paren_shape_symbol)) {
+          if (!a)
+            a = MALLOC_N(Scheme_Object *, props->count);
+          a[count++] = key;
+        }
+      }
+      i = scheme_hash_tree_next(props, i);
+    }
+
+    if (count) {
+      /* Sort to make list deterministic */
+      sort_symbol_array(a, count);
+      for (i = count; i--; ) {
+        val = scheme_hash_tree_get(props, a[i]);
+        preserved_properties = CONS(CONS(a[i], SCHEME_PTR_VAL(val)), preserved_properties);
+      }
+    }
+  }
+
+  vec = scheme_make_vector(((paren || !SCHEME_NULLP(preserved_properties))
+                            ? (SCHEME_NULLP(preserved_properties)
+                               ? 6
+                               : 7)
+                            : 5),
+                           NULL);
   SCHEME_VEC_ELS(vec)[0] = src;
   SCHEME_VEC_ELS(vec)[1] = scheme_make_integer(srcloc->line);
   SCHEME_VEC_ELS(vec)[2] = scheme_make_integer(srcloc->col);
   SCHEME_VEC_ELS(vec)[3] = scheme_make_integer(srcloc->pos);
   SCHEME_VEC_ELS(vec)[4] = scheme_make_integer(srcloc->span);
-  if (paren)
-    SCHEME_VEC_ELS(vec)[5] = paren;
+  if (paren || !SCHEME_NULLP(preserved_properties))
+    SCHEME_VEC_ELS(vec)[5] = (paren ? SCHEME_PTR_VAL(paren) : scheme_false);
+  if (!SCHEME_NULLP(preserved_properties))
+    SCHEME_VEC_ELS(vec)[6] = preserved_properties;
 
   return intern_one(vec, mt->intern_map);
 }
@@ -6405,7 +6497,8 @@ static void unconvert_srcloc(Scheme_Object *srcloc_vec, Scheme_Stx *dest)
   
   if (!SCHEME_VECTORP(srcloc_vec)
       || ((SCHEME_VEC_SIZE(srcloc_vec) != 5)
-          && (SCHEME_VEC_SIZE(srcloc_vec) != 6)))
+          && (SCHEME_VEC_SIZE(srcloc_vec) != 6)
+          && (SCHEME_VEC_SIZE(srcloc_vec) != 7)))
     return;
 
   srcloc = MALLOC_ONE_RT(Scheme_Stx_Srcloc);
@@ -6426,6 +6519,24 @@ static void unconvert_srcloc(Scheme_Object *srcloc_vec, Scheme_Stx *dest)
       dest->props = square_stx_props;
     else if (SCHEME_CHAR_VAL(SCHEME_VEC_ELS(srcloc_vec)[5]) == '{')
       dest->props = curly_stx_props;
+  }
+
+  if (SCHEME_VEC_SIZE(srcloc_vec) > 6) {
+    /* Restore preserved properties */
+    Scheme_Object *l = SCHEME_VEC_ELS(srcloc_vec)[6], *p;
+    Scheme_Hash_Tree *props;
+    while (SCHEME_PAIRP(l)) {
+      p = SCHEME_CAR(l);
+      if (SCHEME_PAIRP(p)
+          && SCHEME_SYMBOLP(SCHEME_CAR(p))
+          && !SCHEME_SYM_WEIRDP(SCHEME_CAR(p))) {
+        props = scheme_hash_tree_set(dest->props,
+                                     SCHEME_CAR(p),
+                                     make_preserved_property_value(SCHEME_CDR(p)));
+        dest->props = props;
+      }
+      l = SCHEME_CDR(l);
+    }
   }
 }
 
@@ -6721,6 +6832,8 @@ Scheme_Scope_Set *list_to_scope_set(Scheme_Object *l, Scheme_Unmarshal_Tables *u
   Scheme_Scope_Set *scopes = NULL;
   Scheme_Object *r = scheme_null, *scope;
 
+  if (scheme_proper_list_length(l) < 0) return_NULL;
+
   while (!SCHEME_NULLP(l)) {
     if (!SCHEME_PAIRP(l)) return_NULL;
     scopes = (Scheme_Scope_Set *)scheme_hash_get_either(ut->rns, ut->current_rns, l);
@@ -6811,6 +6924,8 @@ Scheme_Object *unmarshal_multi_scopes(Scheme_Object *multi_scopes,
     l = mm_l;
     if (SCHEME_FALLBACKP(l))
       l = SCHEME_FALLBACK_FIRST(l);
+
+    if (scheme_proper_list_length(l) < 0) return_NULL;
 
     l_first = scheme_null;
     l_last = NULL;
@@ -7815,9 +7930,12 @@ static Scheme_Object *syntax_original_p(int argc, Scheme_Object **argv)
   return scheme_true;
 }
 
-Scheme_Object *scheme_stx_property(Scheme_Object *_stx,
-				   Scheme_Object *key,
-				   Scheme_Object *val)
+Scheme_Object *scheme_stx_property2(Scheme_Object *_stx,
+                                    Scheme_Object *key,
+                                    Scheme_Object *val,
+                                    int preserve)
+/* `val` can be scheme_syntax_property_preserve_type already to
+   make it preserved, but preserve must be 0 in that case */
 {
   Scheme_Stx *stx;
   Scheme_Hash_Tree *props;
@@ -7829,6 +7947,10 @@ Scheme_Object *scheme_stx_property(Scheme_Object *_stx,
     props = empty_hash_tree;
 
   if (val) {
+    if (preserve) {
+      MZ_ASSERT(!SAME_TYPE(SCHEME_TYPE(val), scheme_syntax_property_preserve_type));
+      val = make_preserved_property_value(val);
+    }
     props = scheme_hash_tree_set(props, key, val);
     stx = (Scheme_Stx *)clone_stx((Scheme_Object *)stx, NULL);
     stx->props = props;
@@ -7837,19 +7959,60 @@ Scheme_Object *scheme_stx_property(Scheme_Object *_stx,
     val = scheme_hash_tree_get(props, key);
     if (!val)
       return scheme_false;
+    else if (SAME_TYPE(SCHEME_TYPE(val), scheme_syntax_property_preserve_type))
+      return SCHEME_PTR_VAL(val);
     else
       return val;
   }
 }
+
+Scheme_Object *scheme_stx_property(Scheme_Object *_stx,
+                                   Scheme_Object *key,
+                                   Scheme_Object *val)
+{
+  return scheme_stx_property2(_stx, key, val, 0);
+}
+
 
 static Scheme_Object *syntax_property(int argc, Scheme_Object **argv)
 {
   if (!SCHEME_STXP(argv[0]))
     scheme_wrong_contract("syntax-property", "syntax?", 0, argc, argv);
 
-  return scheme_stx_property(argv[0],
-			     argv[1],
-			     (argc > 2) ? argv[2] : NULL);
+  if ((argc > 3) && SCHEME_TRUEP(argv[3])) {
+    if (!SCHEME_SYMBOLP(argv[1]) || SCHEME_SYM_WEIRDP(argv[1]))
+      scheme_contract_error("syntax-property",
+                            "expected an interned symbol key for a preserved property"
+                            "given", 1, argv[1],
+                            NULL);
+  }
+  
+  return scheme_stx_property2(argv[0],
+                              argv[1],
+                              (argc > 2) ? argv[2] : NULL,
+                              ((argc > 3)
+                               ? SCHEME_TRUEP(argv[3])
+                               : SAME_OBJ(argv[1], scheme_paren_shape_symbol)));
+}
+
+static Scheme_Object *syntax_property_preserved_p(int argc, Scheme_Object **argv)
+{
+  Scheme_Stx *stx;
+  Scheme_Object *v;
+
+  if (!SCHEME_STXP(argv[0]))
+    scheme_wrong_contract("syntax-property-preserved?", "syntax?", 0, argc, argv);
+  if (!SCHEME_SYMBOLP(argv[1]) || SCHEME_SYM_WEIRDP(argv[1]))
+    scheme_wrong_contract("syntax-property-preserved?", "(and/c symbol? symbol-interned?)", 1, argc, argv);
+
+  stx = (Scheme_Stx *)argv[0];
+  if (!stx->props)
+    return scheme_false;
+
+  v = scheme_hash_tree_get(stx->props, argv[1]);
+  if (!v || !SAME_TYPE(SCHEME_TYPE(v), scheme_syntax_property_preserve_type))
+    return scheme_false;
+  return scheme_true;
 }
 
 static Scheme_Object *syntax_property_keys(int argc, Scheme_Object **argv)
@@ -8002,12 +8165,10 @@ Scheme_Object *scheme_syntax_make_transfer_intro(int argc, Scheme_Object **argv)
   } else
     m2 = NULL;
 
-  if (!m2) {
+  if (!m2 && !SCHEME_FALSEP(src)) {
     src = scheme_stx_lookup_w_nominal(argv[1], phase, 1,
                                       NULL, NULL, &m2,
                                       NULL, NULL, NULL, NULL, NULL);
-    if (SCHEME_FALSEP(src))
-      m2 = NULL;
   }
 
   if (m2) {

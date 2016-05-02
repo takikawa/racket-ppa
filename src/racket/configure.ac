@@ -143,7 +143,9 @@ else
   case "$host_os" in
   darwin*)
     enable_quartz=yes
-    enable_origtree=yes
+    if test "${enable_origtree}" != "no" ; then
+      enable_origtree=yes
+    fi
     if test "${prefix}" != "NONE" ; then
       if test "${enable_macprefix}" != "yes" ; then
         echo "ERROR: --prefix not allowed for a Mac OS X build, unless either"
@@ -223,6 +225,7 @@ if test "${unixstyle}" = "no" ; then
   fi
   bindir='${prefix}/bin'
   libpltdir='${prefix}/lib'
+  libpltdir_rel='lib'
   sharepltdir='${prefix}/share'
   etcpltdir='${prefix}/etc'
   includepltdir='${prefix}/include'
@@ -232,6 +235,8 @@ if test "${unixstyle}" = "no" ; then
   appsdir='${prefix}/share/applications'
   COLLECTS_PATH="../collects"
   CONFIG_PATH="../etc"
+  GR_APP_COLLECTS_PATH="../../../../collects"
+  GR_APP_CONFIG_PATH="../../../../etc"
   INSTALL_ORIG_TREE=yes
 else
   if test "${prefix}" = "NONE" ; then
@@ -239,12 +244,20 @@ else
     prefix="${ac_default_prefix}"
   fi
   libpltdir="${libdir}/"'${PACKAGE}'
+  libpltdir_rel=""
+  if test "${libpltdir}" = '${exec_prefix}/lib/${PACKAGE}' ; then
+    if test "${bindir}" = '${exec_prefix}/bin' ; then
+      libpltdir_rel="lib/"'${PACKAGE}'
+    fi
+  fi
   sharepltdir="${datadir}/"'${PACKAGE}'
   etcpltdir="${sysconfdir}/"'${PACKAGE}'
   includepltdir="${includedir}/"'${PACKAGE}'
   MAKE_COPYTREE=copytree
   COLLECTS_PATH='${collectsdir}'
   CONFIG_PATH='${etcpltdir}'
+  GR_APP_COLLECTS_PATH="${COLLECTS_PATH}"
+  GR_APP_CONFIG_PATH="${CONFIG_PATH}"
   INSTALL_ORIG_TREE=no
 fi
 
@@ -873,6 +886,11 @@ case "$host_os" in
     PREFLAGS="$PREFLAGS -DOS_X -D_DARWIN_UNLIMITED_SELECT"
     try_kqueue_syscall=yes
 
+    # Although select() generally works as well as poll() on OS X,
+    # getdtablesize() appears not to be constant within a process,
+    # and that breaks static allocation of fd_sets
+    try_poll_syscall=yes
+
     # ".a" is typically not useful, since we always build a ".dylib":
     if test "${enable_libs}" == "" ; then
       INSTALL_LIBS_ENABLE=no-install
@@ -923,9 +941,13 @@ case "$host_os" in
         FRAMEWORK_REL_INSTALL=no
         FRAMEWORK_PREFIX=''
       else
-        FRAMEWORK_INSTALL_DIR='${libdir}'
+        FRAMEWORK_INSTALL_DIR='${libpltdir}'
         FRAMEWORK_REL_INSTALL=yes
-        FRAMEWORK_PREFIX='$(FRAMEWORK_REL_PREFIX)'
+        if test "${libpltdir_rel}" = "" ; then
+          FRAMEWORK_PREFIX='$(FRAMEWORK_ABS_PREFIX)'
+        else
+          FRAMEWORK_PREFIX='$(FRAMEWORK_REL_PREFIX)'
+        fi
       fi
     else
       PREFLAGS="$PREFLAGS -DXONX "
@@ -1276,6 +1298,18 @@ if test "${has_builtin_popcount}" = "yes" ; then
    AC_DEFINE(MZ_HAS_BUILTIN_POPCOUNT,1,[Has __builtin_popcount])
 fi
 
+[ msg="for __builtin_clz" ]
+AC_MSG_CHECKING($msg)
+AC_LINK_IFELSE([AC_LANG_SOURCE([
+    int main(int argc, char **argv) {
+      unsigned int i = argc;
+      return __builtin_clz(i);
+    }])], has_builtin_clz=yes, has_builtin_clz=no)
+AC_MSG_RESULT($has_builtin_clz)
+if test "${has_builtin_clz}" = "yes" ; then
+   AC_DEFINE(MZ_HAS_BUILTIN_CLZ,1,[Has __builtin_clz])
+fi
+
 if test "${enable_backtrace}" = "yes" ; then
   GC2OPTIONS="$GC2OPTIONS -DMZ_GC_BACKTRACE"
 fi
@@ -1473,6 +1507,10 @@ if test "${enable_extflonum}" = "default" ; then
   if test "${use_extflonums}" = "no" ; then
     AC_DEFINE(MZ_NO_EXTFLONUMS,1,[Extflonums disabled])
   fi
+fi
+
+if test "${enable_extflonum}" = "yes" ; then
+  AC_DEFINE(MZ_INSIST_EXTFLONUMS)
 fi
 
 ############## libffi ################
@@ -1796,14 +1834,17 @@ AC_SUBST(LTA)
 AC_SUBST(collectsdir)
 AC_SUBST(appsdir)
 AC_SUBST(libpltdir)
+AC_SUBST(libpltdir_rel)
 AC_SUBST(sharepltdir)
 AC_SUBST(etcpltdir)
 AC_SUBST(includepltdir)
 AC_SUBST(docdir)
 AC_SUBST(COLLECTS_PATH)
 AC_SUBST(GUI_COLLECTS_PATH)
+AC_SUBST(GR_APP_COLLECTS_PATH)
 AC_SUBST(CONFIG_PATH)
 AC_SUBST(GUI_CONFIG_PATH)
+AC_SUBST(GR_APP_CONFIG_PATH)
 
 AC_SUBST(MMM)
 AC_SUBST(MMM_INSTALLED)

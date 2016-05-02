@@ -77,9 +77,13 @@
 
 (application:current-app-name (string-constant drscheme))
 
-(preferences:set-default 'drracket:tried-materialize-user-docs
-                         (not (equal? (system-type) 'macosx))
-                         boolean?)
+(preferences:set-default 'drracket:coverage-show-overview-bar #t boolean?)
+
+(preferences:set-default 'drracket:define-popup-hidden-prefixes '() (listof string?))
+
+(preferences:set-default 'drracket:materialized-user-docs-versions
+                         (if (equal? (system-type) 'macosx) '() #f)
+                         (or/c #f (listof string?)))
 
 (preferences:set-default 'drracket:open-module-path-last-used "" string?)
 
@@ -355,7 +359,13 @@
 
      (make-check-box 'drracket:module-language-first-line-special?
                      (string-constant ml-always-show-#lang-line)
-                     editor-panel)))
+                     editor-panel)
+
+     (make-check-box 'drracket:coverage-show-overview-bar
+                     (string-constant test-coverage-summary)
+                     editor-panel)
+     
+     ))
   
   (preferences:add-to-editor-checkbox-panel
    (λ (editor-panel)
@@ -424,8 +434,9 @@
                                        (λ (t a b) (send t tabify-selection a b)))
 (drracket:language:register-capability 'drscheme:autocomplete-words (listof string?) '())
 (drracket:language:register-capability 'drscheme:define-popup
-                                       (or/c (cons/c string? string?) 
-                                             (list/c string? string? string?)
+                                       (or/c (list/c string? string? string?)
+                                             (non-empty-listof (list/c string? string? string?))
+                                             (cons/c string? string?)
                                              #f)
                                        (list "(define" "(define ...)" "δ"))
 

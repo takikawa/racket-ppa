@@ -131,10 +131,6 @@
           :contract-first-order
           :contract-first-order-passes?
           :contract-stronger?
-          :eq-contract-val
-          :eq-contract?
-          :equal-contract-val
-          :equal-contract?
           :has-contract?
           :impersonator-prop:contracted
           :prop:contracted
@@ -167,8 +163,6 @@
           :build-flat-contract-property
           :chaperone-contract-property?
           :contract-property?
-          :contract-struct-exercise
-          :contract-struct-generate
           :flat-contract-property?
           :make-chaperone-contract
           :make-contract
@@ -192,15 +186,16 @@
 
 (require racket/contract/combinator)
 ;; exports from racket/contract/combinator as of 5.3.5
-(provide blame-add-unknown-context blame-context blame-contract blame-fmt->-string blame-negative
+;; except some cleanup that tried to happen in late 2015
+(provide blame-add-unknown-context blame-context blame-contract blame-negative
          blame-original? blame-positive blame-replace-negative blame-source blame-swap blame-swapped?
          blame-update blame-value blame? build-chaperone-contract-property build-compound-type-name 
          build-contract-property build-flat-contract-property chaperone-contract-property? 
          coerce-chaperone-contract coerce-chaperone-contracts coerce-contract coerce-contract/f
          coerce-contracts coerce-flat-contract coerce-flat-contracts contract-first-order
-         contract-first-order-passes? contract-property? contract-stronger? contract-struct-exercise
-         contract-struct-generate current-blame-format eq-contract-val eq-contract? equal-contract-val
-         equal-contract? exn:fail:contract:blame-object exn:fail:contract:blame? 
+         contract-first-order-passes? contract-property? contract-stronger?
+         current-blame-format
+         exn:fail:contract:blame-object exn:fail:contract:blame? 
          flat-contract-property? impersonator-prop:contracted make-chaperone-contract make-contract
          make-exn:fail:contract:blame make-flat-contract prop:chaperone-contract prop:contract
          prop:contracted prop:flat-contract prop:opt-chaperone-contract

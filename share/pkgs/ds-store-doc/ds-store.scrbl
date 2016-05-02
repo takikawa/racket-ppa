@@ -11,7 +11,7 @@ information about folder and icons as viewed and manipulated in
 Finder. One common reason to manipulate @filepath{.DS_Store} files
 is to create a nice-looking disk image for a Mac OS X installer.
 
-@filepath{.DS_Store} reading nd writing is based on a
+@filepath{.DS_Store} reading and writing is based on a
 reverse-engineered description of the file format @cite["DS_Store"].
 
 @section[#:tag "ds-store-api"]{@filepath{.DS_Store} Files and Entries}

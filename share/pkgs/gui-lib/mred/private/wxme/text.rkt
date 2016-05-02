@@ -452,7 +452,9 @@
       (when (and (not (send event moving?))
                  (not (send event entering?))
                  (not (send event leaving?)))
-        (end-streaks '(except-key-sequence cursor delayed)))
+        (end-streaks '(except-key-sequence cursor delayed))
+        ;; Request incremental mode to improve interactivity:
+        (collect-garbage 'incremental))
       (let-values ([(dc x y scrollx scrolly)
                     ;; first, find clicked-on snip:
                     (let ([x (send event get-x)]
@@ -464,17 +466,16 @@
                         ;; FIXME: old code returned if !dc
                         (values dc (+ x scrollx) (+ y scrolly) scrollx scrolly)))])
           (let ([snip
-                 (let-boxes ([onit? #f]
-                             [how-close 0.0]
+                 (let-boxes ([how-close 0.0]
                              [now 0])
-                     (set-box! now (find-position x y #f onit? how-close))
-                   ;; FIXME: the following refinement of `onit?' seems pointless
-                   (let ([onit? (and onit?
-                                     (not (zero? how-close))
-                                     ((abs how-close) . > . between-threshold))])
-                     (if onit?
-                         ;; we're in the snip's horizontal region...
-                         (let ([snip (do-find-snip now 'after)])
+                       (set-box! now (find-position x y #f #f how-close))
+                     (let* ([snip (do-find-snip now 'after)]
+                            [onit? (or (and (not (zero? how-close))
+                                            ((abs how-close) . > . between-threshold))
+                                       (has-flag? (snip->flags snip)
+                                                  HANDLES-BETWEEN-EVENTS))])
+                       (if onit?
+                           ;; we're in the snip's horizontal region...
                            ;; ... but maybe the mouse is above or below it.
                            (let-boxes ([top 0.0]
                                        [bottom 0.0]
@@ -484,8 +485,8 @@
                                  (get-snip-location snip dummy bottom #t))
                              (if (or (top . > . y) (y . > . bottom))
                                  #f
-                                 snip)))
-                         #f)))])
+                                 snip))
+                           #f)))])
             (when (send event button-down?)
               (set-caret-owner snip))
             (when (and prev-mouse-snip
@@ -601,7 +602,9 @@
                        (not (eq? 'control code))
                        (not (eq? 'menu code))
                        (not (equal? code #\nul)))
-              (hide-cursor))
+              (hide-cursor)
+              ;; Request incremental mode to improve interactivity:
+              (collect-garbage 'incremental))
             (on-local-char event)))))
 
   (def/override (on-default-char [key-event% event])

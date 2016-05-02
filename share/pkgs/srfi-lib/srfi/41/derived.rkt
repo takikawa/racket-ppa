@@ -98,12 +98,11 @@
   (error 'stream-concat "non-stream argument")
   (stream-concat strms)))
 
-(define stream-constant
- (stream-lambda objs
+(define (stream-constant . objs)
   (cond ((null? objs) stream-null)
-        ((null? (cdr objs)) (stream-cons (car objs) (stream-constant (car objs))))
-        (else (stream-cons (car objs)
-                           (apply stream-constant (append (cdr objs) (list (car objs)))))))))
+        ((null? (cdr objs)) (stream-let loop () (stream-cons (car objs) (loop))))
+        (else (let ((strm (list->stream objs)))
+                (stream-let loop () (stream-append strm (loop)))))))
 
 (define (stream-drop n strm)
  (define stream-drop

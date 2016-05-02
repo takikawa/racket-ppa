@@ -170,7 +170,14 @@ See also @racket[make-custom-hash].}
 
 Like @racket[make-hash], @racket[make-hasheq], and
 @racket[make-hasheqv], but creates a mutable hash table that holds
-keys weakly.}
+keys weakly.
+
+Beware that values in the table are retained normally. If a value in
+the table refers back to its key, then the table will retain the value
+and therefore the key; the mapping will never be removed from the
+table even if the key becomes otherwise inaccessible. To avoid that
+problem, instead of mapping the key to the value, map the key to an
+@tech{ephemeron} that pairs the key and value.}
 
 @deftogether[(
 @defproc[(make-immutable-hash [assocs (listof pair?) null])
@@ -478,6 +485,26 @@ Returns the value for the element in @racket[hash] at index
 @racket[pos]. If @racket[pos] is not a valid index for
 @racket[hash], the @exnraise[exn:fail:contract].}
 
+@defproc[(hash-iterate-pair [hash hash?]
+                           [pos exact-nonnegative-integer?])
+         (cons any any)]{
+
+Returns a pair containing the key and value for the element 
+in @racket[hash] at index
+@racket[pos]. If @racket[pos] is not a valid index for
+@racket[hash], the @exnraise[exn:fail:contract].}
+
+@history[#:added "6.4.0.5"]
+
+@defproc[(hash-iterate-key+value [hash hash?]
+                           [pos exact-nonnegative-integer?])
+         (values any any)]{
+
+Returns the key and value for the element in @racket[hash] at index
+@racket[pos]. If @racket[pos] is not a valid index for
+@racket[hash], the @exnraise[exn:fail:contract].}
+
+@history[#:added "6.4.0.5"]
 
 @defproc[(hash-copy [hash hash?]) 
          (and/c hash? (not/c immutable?))]{
@@ -505,7 +532,16 @@ the returned number is the same.}
 Returns a @tech{fixnum}; for any two calls with @racket[equal?] values,
 the returned number is the same. A hash code is computed even when
 @racket[v] contains a cycle through pairs, vectors, boxes, and/or
-inspectable structure fields. See also @racket[gen:equal+hash].}
+inspectable structure fields. See also @racket[gen:equal+hash].
+
+For any @racket[v] that could be produced by @racket[read], if
+@racket[v2] is produced by @racket[read] for the same input
+characters, the @racket[(equal-hash-code v)] is the same as
+@racket[(equal-hash-code v2)] --- even if @racket[v] and @racket[v2]
+do not exist at the same time (and therefore could not be compared by
+calling @racket[equal?]).
+
+@history[#:changed "6.4.0.12" @elem{Strengthened guarantee for @racket[read]able values.}]}
 
 
 @defproc[(equal-secondary-hash-code [v any/c]) fixnum?]{
@@ -539,7 +575,7 @@ key @racket[k] and value @racket[v], if a mapping from @racket[k] to some value
 @racket[v0] already exists, it is replaced with a mapping from @racket[k] to
 @racket[(combine/key k v0 v)].
 
-@defexamples[
+@examples[
 #:eval the-eval
 (hash-union (make-immutable-hash '([1 . one]))
             (make-immutable-hash '([2 . two]))
@@ -567,7 +603,7 @@ key @racket[k] and value @racket[v], if a mapping from @racket[k] to some value
 @racket[v0] already exists, it is replaced with a mapping from @racket[k] to
 @racket[(combine/key k v0 v)].
 
-@defexamples[
+@examples[
 #:eval the-eval
 (define h (make-hash))
 h

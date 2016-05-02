@@ -10,6 +10,7 @@
          ps-add-unvector
          ps-add-unpstruct
          ps-add-opaque
+         (struct-out post)
 
          ps-pop-opaque
          ps-context-syntax
@@ -52,10 +53,10 @@ A FailFunction = (FailureSet -> Answer)
 Progress (PS) is a non-empty list of Progress Frames (PF).
 
 A Progress Frame (PF) is one of
-  - stx     ;; "Base" frame
+  - stx     ;; "Base" frame, or ~parse/#:with term
   - 'car    ;; car of pair; also vector->list, unbox, struct->list, etc
   - nat     ;; Represents that many repeated cdrs
-  - 'post
+  - #s(post group index) ;; late/post-traversal check, only comparable w/in group
   - 'opaque
 
 The error-reporting context (ie, syntax-parse #:context arg) is always
@@ -76,6 +77,7 @@ Interpretation: later frames are applied first.
       means ( car of ( cdr once of stx ) )
       NOT apply car, then apply cdr once, then stop
 |#
+(define-struct post (group index) #:prefab)
 
 (define (ps-empty stx ctx)
   (if (eq? stx ctx)
@@ -91,8 +93,8 @@ Interpretation: later frames are applied first.
          (cons (+ times n) (cdr parent))]
         [_
          (cons times parent)])))
-(define (ps-add-post parent)
-  (cons 'post parent))
+(define (ps-add-post parent [group #f] [index 0])
+  (cons (post group index) parent))
 (define (ps-add-stx parent stx)
   (cons stx parent))
 (define (ps-add-unbox parent)
@@ -140,32 +142,44 @@ Interpretation: later frames are applied first.
 ;; == Expectations ==
 
 #|
+There are multiple types that use the same structures, optimized for
+different purposes.
+
+-- During parsing, the goal is to minimize/consolidate allocations.
+
 An ExpectStack (during parsing) is one of
-  - (make-expect:thing Progress string boolean string/#f ExpectStack)
-  * (make-expect:message string ExpectStack)
-  * (make-expect:atom atom ExpectStack)
-  * (make-expect:literal identifier ExpectStack)
-  * (make-expect:proper-pair FirstDesc ExpectStack)
+  - (expect:thing Progress String Boolean String/#f ExpectStack)
+  * (expect:message String ExpectStack)
+  * (expect:atom Datum ExpectStack)
+  * (expect:literal Identifier ExpectStack)
+  * (expect:proper-pair FirstDesc ExpectStack)
 
-The *-marked variants can only occur at the top of the stack.
+The *-marked variants can only occur at the top of the stack (ie, not
+in the next field of another Expect). The top of the stack contains
+the most specific information.
 
-Goal during parsing is to minimize/consolidate allocations.
+-- During reporting, the goal is ease of manipulation.
 
-During reporting, the representation changes somewhat:
+An ExpectList (during reporting) is (listof Expect).
 
-An ExpectStack (during reporting) is (listof Expect)
 An Expect is one of
-  - (expect:thing (cons syntax nat) string #t string/#f _)
-  * (expect:message string _)
-  * (expect:atom atom _)
-  * (expect:literal identifier _)
-  * (expect:proper-pair string/#f _)
-  - (expect:disj (non-empty-listof Expect) _)
+  - (expect:thing #f String #t String/#f StxIdx)
+  * (expect:message String StxIdx)
+  * (expect:atom Datum StxIdx)
+  * (expect:literal Identifier StxIdx)
+  * (expect:proper-pair FirstDesc StxIdx)
+  * (expect:disj (NEListof Expect) StxIdx)
+  - '...
 
-That is, next link always ignored (replace with #f for sake of equal? cmp)
-and expect:thing term represented as syntax with index.
+A StxIdx is (cons Syntax Nat)
 
-Goal during reporting is ease of manipulation.
+That is, the next link is replaced with the syntax+index of the term
+being complained about. An expect:thing's progress is replaced with #f.
+
+An expect:disj never contains a '... or another expect:disj.
+
+We write ExpectList when the most specific information comes first and
+RExpectList when the most specific information comes last.
 |#
 (struct expect:thing (term description transparent? role next) #:prefab)
 (struct expect:message (message next) #:prefab)

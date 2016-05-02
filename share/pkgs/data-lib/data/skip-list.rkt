@@ -3,6 +3,7 @@
          racket/contract/base
          racket/dict
          racket/generic
+         "private/skip-list.rkt"
          "order.rkt")
 ;; owned by ryanc
 
@@ -10,193 +11,26 @@
 reference
   Skip Lists: A Probabilistic Alternative to Balanced Trees
   by William Pugh
-
-I take the "fix the dice" approach to avoiding level jumps.
-Levels are indexed starting at 1, as in the paper.
 |#
 
-#|
-(require (rename-in racket/unsafe/ops
-                    [unsafe-vector-length vector-length]
-                    [unsafe-vector-ref vector-ref]
-                    [unsafe-vector-set! vector-set!]))
-|#
+(define none (gensym 'none))
 
-(define PROBABILITY-FACTOR 4)
-(define MAX-LEVEL 16)
-
-(define DATA-SLOTS 2)
-
-;; An Item is
-;;  - (vector key data Item/#f Item/#f ...)
-
-;; The Level of an Item is the number of next links it has (at least 1).
-;; The head is an Item with key and data #f (never examined)
-;; The end of the list is represented by #f
-
-(define (item? x) (vector? x))
-(define (item-level item)
-  (- (vector-length item) DATA-SLOTS))
-
-(define (item-key item)
-  (vector-ref item 0))
-(define (item-data item)
-  (vector-ref item 1))
-(define (item-next item level)
-  (vector-ref item (+ (+ level DATA-SLOTS) -1)))
-
-(define (set-item-key! item key)
-  (vector-set! item 0 key))
-(define (set-item-data! item data)
-  (vector-set! item 1 data))
-(define (set-item-next! item level next)
-  (vector-set! item (+ (+ level DATA-SLOTS) -1) next))
-
-(define (resize-item item level)
-  (define new-size (+ DATA-SLOTS level))
-  (define new-item (make-vector new-size #f))
-  (vector-copy! new-item 0 item 0 (min (vector-length item) new-size))
-  new-item)
-
-;; search : Item Nat Key Cmp Cmp -> Item/#f
-;; Returns item(R) s.t. key(R) =? key
-(define (search head level key =? <?)
-  (let* ([closest (closest head level key <?)]
-         [item (item-next closest 1)])
-    (and (item? item)
-         (=? key (item-key item))
-         item)))
-
-;; closest : Item Nat Key Cmp Cmp -> Item
-;; Returns greatest item R s.t. key(R) <? key.
-;; Pre: level(item) >= level, key(item) <? key OR item = head
-(define (closest item level key <?)
-  (if (zero? level)
-      item
-      (closest (advance item level key <?) (sub1 level) key <?)))
-
-;; advance : Item Nat Key Cmp -> Item
-;; Returns greatest item R s.t. key(R) <? key and level(R) >= level.
-;; Pre: level(item) >= level, key(item) <? key OR item = head
-(define (advance item level key <?)
-  (let ([next (item-next item level)])
-    (if (and next (<? (item-key next) key))
-        (advance next level key <?)
-        item)))
-
-;; pick-random-level : Nat -> Nat
-;; Returns number in [1, max] (with exp. prob. dist.)
-(define (pick-random-level max)
-  (let loop ([level 1])
-    (if (and (< level max) (zero? (random PROBABILITY-FACTOR)))
-        (loop (add1 level))
-        level)))
-
-;; update/insert : ... -> Item/#f
-;; Updates skip-list so that key |-> data
-;; Returns #f to indicate update (existing item changed);
-;; returns item to indicate insertion (context's links need updating)
-;; Pre: level(item) >= level, key(item) <? key OR item = head
-(define (update/insert item level key data =? <? max-level)
-  (cond [(positive? level)
-         (let* ([item (advance item level key <?)]
-                [result (update/insert item (sub1 level)
-                                       key data =? <? max-level)])
-           (when (and result (>= (item-level result) level))
-             (let ([link (item-next item level)])
-               (set-item-next! item level result)
-               (set-item-next! result level link)))
-           result)]
-        [else
-         (let ([next (item-next item 1)])
-           (cond [(and next (=? (item-key next) key))
-                  ;; Update!
-                  (set-item-data! next data)
-                  #f]
-                 [else
-                  ;; Insert!
-                  (let ([new-item
-                         (make-vector (+ DATA-SLOTS (pick-random-level max-level)) #f)])
-                    (set-item-key! new-item key)
-                    (set-item-data! new-item data)
-                    new-item)]))]))
-
-;; delete : ... -> Item/#f
-;; Returns item to indicate deletion (context's links need updating);
-;; returns #f if not found.
-;; Pre: level(item) >= level; key(item) <? key OR item = head
-(define (delete item level key =? <?)
-  (cond [(positive? level)
-         (let* ([item (advance item level key <?)]
-                [result (delete item (sub1 level) key =? <?)])
-           (when (and result (eq? (item-next item level) result))
-             (let ([link (item-next result level)])
-               (set-item-next! item level link)
-               (set-item-next! result level #f)))
-           result)]
-        [else
-         (let ([next (item-next item 1)])
-           (cond [(and next (=? (item-key next) key))
-                  ;; Delete!
-                  next]
-                 [else
-                  ;; Not found!
-                  #f]))]))
-
-;; delete-range : ... -> void
-;; Pre: level(*-item) >= level; key(*-item) <? *-key OR *-item = head
-(define (delete-range f-item t-item level f-key t-key <? contract!?)
-  (cond [(positive? level)
-         (let* ([f-item (advance f-item level f-key <?)]
-                [t-item (advance t-item level t-key <?)]
-                ;; t-item greatest s.t. key(t-item) <? t-key (at level)
-                [t-item* (item-next t-item level)]) ;; key(t-item*) >=? t-key
-           (set-item-next! f-item level t-item*)
-           (delete-range f-item t-item (sub1 level) f-key t-key <? contract!?))]
-        [else
-         ;; f-item is greatest s.t. key(item) <? f-key
-         ;; so f-item is greatest s.t. key(item) <? t-key,
-         ;; because deleted [f-key, t-key)
-         (when contract!?
-           (let ([delta (- t-key f-key)])
-             (let loop ([item (item-next f-item 1)])
-               (when item
-                 ;; key(item) >=? t-key
-                 (set-item-key! item (- (item-key item) delta))
-                 (loop (item-next item 1))))))]))
-
-;; expand! : ... -> void
-(define (expand! item level from to <?)
-  (let ([delta (- to from)]
-        [item (closest item level from <?)])
-    ;; item greatest s.t. key(item) <? from
-    (let loop ([item (item-next item 1)])
-      (when item
-        ;; key(item) >=? from
-        (set-item-key! item (+ (item-key item) delta))
-        (loop (item-next item 1))))))
-
-
-;; Skip list
-
-(define (skip-list-ref s key [default (skip-list-error key)])
+(define (skip-list-ref s key [default none])
   (define head (skip-list-head s))
-  (define result
-    (search head (item-level head) key (skip-list-=? s) (skip-list-<? s)))
+  (define cmp (skip-list-cmp s))
+  (define result (search head (item-level head) key cmp))
   (cond [result (item-data result)]
+        [(eq? default none)
+         (error 'skip-list-ref "no mapping found for key\n  key: ~e" key)]
         [(procedure? default) (default)]
         [else default]))
 
-(define ((skip-list-error x))
-  (error 'skip-list-ref "no mapping found for: ~e" x))
-
 (define (skip-list-set! s key data)
   (define head (skip-list-head s))
-  (define =? (skip-list-=? s))
-  (define <? (skip-list-<? s))
-  (define max-level (max MAX-LEVEL (add1 (item-level head))))
+  (define cmp (skip-list-cmp s))
+  (define max-level (min MAX-LEVEL (add1 (item-level head))))
   (define result ;; new Item or #f
-    (update/insert head (item-level head) key data =? <? max-level))
+    (update/insert head (item-level head) key data cmp max-level))
   (when result
     (when (skip-list-num-entries s)
       (set-skip-list-num-entries! s (add1 (skip-list-count s))))
@@ -207,119 +41,156 @@ Levels are indexed starting at 1, as in the paper.
 
 (define (skip-list-remove! s key)
   (define head (skip-list-head s))
-  (define =? (skip-list-=? s))
-  (define <? (skip-list-<? s))
-  (define deleted
-    (delete head (item-level head) key =? <?))
-  (when (and deleted (skip-list-num-entries s))
-    (set-skip-list-num-entries! s (sub1 (skip-list-count s))))
+  (define cmp (skip-list-cmp s))
+  (define deleted (delete! head (item-level head) key cmp))
+  (when deleted
+    (set-skip-list-timestamp! s (add1 (skip-list-timestamp s)))
+    (when (skip-list-num-entries s)
+      (set-skip-list-num-entries! s (sub1 (skip-list-num-entries s)))))
   (unless (or (item? (item-next head (item-level head)))
               (= 1 (item-level head)))
     ;; Trim head
+    ;; FIXME: trim head less often?
     (let ([new-head (resize-item head (sub1 (item-level head)))])
       (set-skip-list-head! s new-head))))
 
 (define (skip-list-remove-range! s from to)
   (match s
-    [(skip-list head count =? <?)
-     (delete-range head head (item-level head) from to <? #f)
-     (set-skip-list-num-entries! s #f)]))
+    [(skip-list head count timestamp cmp)
+     (define deleted
+       (delete-range! head head (item-level head) from to cmp #f))
+     (when deleted
+       (set-skip-list-timestamp! s (add1 timestamp))
+       (set-skip-list-num-entries! s #f))]))
 
 (define (skip-list-contract! s from to)
   (match s
-    [(adjustable-skip-list head count =? <?)
-     (delete-range head head (item-level head) from to <? #t)
-     (set-skip-list-num-entries! s #f)]))
+    [(adjustable-skip-list head count timestamp cmp)
+     (define deleted
+       (delete-range! head head (item-level head) from to cmp #t))
+     (when deleted
+       (set-skip-list-timestamp! s (add1 timestamp))
+       (set-skip-list-num-entries! s #f))]))
 
 (define (skip-list-expand! s from to)
   (match s
-    [(adjustable-skip-list head count =? <?)
-     (expand! head (item-level head) from to <?)]))
+    [(adjustable-skip-list head count timestamp cmp)
+     (expand/right-gravity! head (item-level head) from (- to from))
+     (set-skip-list-timestamp! s (add1 timestamp))]))
 
 ;; Dict methods
 
 (define (skip-list-count s)
-  (let ([n (skip-list-num-entries s)])
-    (or n
-        (let loop ([n 0] [item (item-next (skip-list-head s) 1)])
-          (cond [item (loop (add1 n) (item-next item 1))]
-                [else
-                 (set-skip-list-num-entries! s n)
-                 n])))))
+  (or (skip-list-num-entries s)
+      (let loop ([n 0] [item (item-next (skip-list-head s) 1)])
+        (cond [item (loop (add1 n) (item-next item 1))]
+              [else
+               (set-skip-list-num-entries! s n)
+               n]))))
 
-(struct skip-list-iter (s item))
+(struct skip-list-iter (s item [timestamp #:mutable]))
 
-(define (check-iter who s iter)
+;; check-iter : symbol skip-list iter boolean -> boolean
+;; If ok returns #t; if deleted returns #f if allow-deleted?, else raises error.
+(define (check-iter who s iter allow-deleted?)
   (unless (skip-list-iter? iter)
-    (raise-type-error who "skip-list-iter" iter))
-  (unless (eq? (skip-list-iter-s iter) s)
-    (raise-mismatch-error who "skip-list-iter does not match skip-list" iter)))
+    (raise-argument-error who "skip-list-iter?" iter))
+  (unless (eq? s (skip-list-iter-s iter))
+    (error who "iterator does not belong to given skip-list"))
+  (or (= (skip-list-timestamp s) (skip-list-iter-timestamp iter))
+      (let ([head (skip-list-head s)]
+            [item (skip-list-iter-item iter)])
+        (let-values ([(item status) (repair head (item-level head) item)])
+          (cond [(eq? status 'valid)
+                 (set-skip-list-iter-timestamp! iter (skip-list-timestamp s))
+                 #t]
+                [allow-deleted?
+                 #f]
+                [else
+                 (error who "iterator invalidated by deletion")])))))
 
 (define (skip-list-iterate-first s)
   (let ([next (item-next (skip-list-head s) 1)])
-    (and next (skip-list-iter s next))))
+    (and next (skip-list-iter s next (skip-list-timestamp s)))))
 
 (define (skip-list-iterate-next s iter)
-  (check-iter 'skip-list-iterate-next s iter)
-  (let ([next (item-next (skip-list-iter-item iter) 1)])
-    (and next (skip-list-iter s next))))
+  (check-iter 'skip-list-iterate-next s iter #t)
+  (cond [(= (skip-list-timestamp s) (skip-list-iter-timestamp iter))
+         (let ([next (item-next (skip-list-iter-item iter) 1)])
+           (and next (skip-list-iter s next (skip-list-timestamp s))))]
+        [else
+         (let ([head (skip-list-head s)]
+               [item (skip-list-iter-item iter)])
+           (let-values ([(item status) (repair head (item-level head) item)])
+             (case status
+               ((valid)
+                (let ([next (item-next item 1)])
+                  (and next (skip-list-iter s next (skip-list-timestamp s)))))
+               ((deleted)
+                (and item (skip-list-iter s item (skip-list-timestamp s))))
+               ((failed)
+                (error 'skip-list-iterate-next
+                       "internal error: iterator invalidated by deletion")))))]))
 
 (define (skip-list-iterate-key s iter)
-  (check-iter 'skip-list-iterate-key s iter)
+  (check-iter 'skip-list-iterate-key s iter #f)
   (item-key (skip-list-iter-item iter)))
 
 (define (skip-list-iterate-value s iter)
-  (check-iter 'skip-list-iterate-key s iter)
+  (check-iter 'skip-list-iterate-value s iter #f)
   (item-data (skip-list-iter-item iter)))
+
+(define (skip-list-iter-valid? iter)
+  (check-iter 'skip-list-iter-valid? (skip-list-iter-s iter) iter #t))
 
 ;; Extensions
 
 ;; Returns greatest/rightmost item s.t. key(item) < key
 (define (skip-list-iterate-greatest/<? s key)
   (let* ([head (skip-list-head s)]
-         [<? (skip-list-<? s)]
-         [item (closest head (item-level head) key <?)])
-    (and (not (eq? item head)) (skip-list-iter s item))))
+         [cmp (skip-list-cmp s)]
+         [item (closest head (item-level head) key cmp)])
+    (and (not (eq? item head))
+         (skip-list-iter s item (skip-list-timestamp s)))))
 
 ;; Returns greatest/rightmost item s.t. key(item) <= key
 (define (skip-list-iterate-greatest/<=? s key)
   (let* ([head (skip-list-head s)]
-         [<? (skip-list-<? s)]
-         [=? (skip-list-=? s)]
-         [item< (closest head (item-level head) key <?)]
+         [cmp (skip-list-cmp s)]
+         [item< (closest head (item-level head) key cmp)]
          [item1 (item-next item< 1)])
-    (cond [(and item1 (=? (item-key item1) key))
-           (skip-list-iter s item1)]
+    (cond [(and item1 (=? cmp (item-key item1) key))
+           (skip-list-iter s item1 (skip-list-timestamp s))]
           [(eq? item< head)
            #f]
           [else
-           (skip-list-iter s item<)])))
+           (skip-list-iter s item< (skip-list-timestamp s))])))
 
 ;; Returns least/leftmost item s.t. key(item) > key
 (define (skip-list-iterate-least/>? s key)
   (let* ([head (skip-list-head s)]
-         [<? (skip-list-<? s)]
-         [item< (closest head (item-level head) key <?)]
+         [cmp (skip-list-cmp s)]
+         [item< (closest head (item-level head) key cmp)]
          ;; If head, nudge forward one so comparisons are valid.
          [item< (if (eq? item< head) (item-next item< 1) item<)])
     (let loop ([item item<])
       (and item
-           (if (<? key (item-key item))
-               (skip-list-iter s item)
+           (if (<? cmp key (item-key item))
+               (skip-list-iter s item (skip-list-timestamp s))
                (loop (item-next item 1)))))))
 
 ;; Returns least/leftmost item s.t. key(item) >= key
 (define (skip-list-iterate-least/>=? s key)
   (let* ([head (skip-list-head s)]
-         [<? (skip-list-<? s)]
-         [item (closest head (item-level head) key <?)]
+         [cmp (skip-list-cmp s)]
+         [item (closest head (item-level head) key cmp)]
          [item (item-next item 1)])
-    (and item (skip-list-iter s item))))
+    (and item (skip-list-iter s item (skip-list-timestamp s)))))
 
 (define (skip-list-iterate-least s)
   (let* ([head (skip-list-head s)]
          [item (item-next head 1)])
-    (and item (skip-list-iter s item))))
+    (and item (skip-list-iter s item (skip-list-timestamp s)))))
 
 (define (skip-list-iterate-greatest s)
   (let* ([head (skip-list-head s)]
@@ -327,8 +198,8 @@ Levels are indexed starting at 1, as in the paper.
                         ;; replace standard comparison with "always <",
                         ;; so closest yields max item
                         'unused
-                        (lambda (x y) #t))])
-    (and item (skip-list-iter s item))))
+                        (lambda (x y) '<))])
+    (and item (skip-list-iter s item (skip-list-timestamp s)))))
 
 (define (skip-list->list s)
   (let loop ([item (item-next (skip-list-head s) 1)])
@@ -351,7 +222,8 @@ Levels are indexed starting at 1, as in the paper.
                     skip-list-iterate-key
                     skip-list-iterate-value))
 
-(struct skip-list ([head #:mutable] [num-entries #:mutable] =? <?)
+(struct skip-list ([head #:mutable] [num-entries #:mutable] [timestamp #:mutable] cmp)
+        ;; cmp is either procedure or #f (numeric order); see private/skip-list
         #:property prop:dict/contract
         (list dict-methods
               (vector-immutable any/c any/c skip-list-iter?
@@ -404,22 +276,20 @@ Levels are indexed starting at 1, as in the paper.
                         #:key-contract [key-contract any/c]
                         #:value-contract [value-contract any/c])
   (let ([key-contract (and/c* (order-domain-contract ord) key-contract)]
-        [=? (order-=? ord)]
-        [<? (order-<? ord)])
+        [cmp (order-comparator ord)])
     (cond [(and (eq? key-contract any/c) (eq? value-contract any/c))
-           (skip-list (vector 'head 'head #f) 0 =? <?)]
+           (skip-list (vector 'head 'head #f) 0 0 cmp)]
           [else
-           (skip-list* (vector 'head 'head #f) 0 =? <?
+           (skip-list* (vector 'head 'head #f) 0 0 cmp
                        key-contract value-contract)])))
 
 (define (make-adjustable-skip-list #:key-contract [key-contract any/c]
                                    #:value-contract [value-contract any/c])
   (cond [(and (eq? key-contract any/c) (eq? value-contract any/c))
-         (adjustable-skip-list (vector 'head 'head #f) 0 = <)]
+         (adjustable-skip-list (vector 'head 'head #f) 0 0 #f)]
         [else
-         (adjustable-skip-list* (vector 'head 'head #f) 0 = <
+         (adjustable-skip-list* (vector 'head 'head #f) 0 0 #f
                                 key-contract value-contract)]))
-
 
 (define (key-c s)
   (cond [(skip-list*? s) (skip-list*-key-c s)]
@@ -437,6 +307,34 @@ Levels are indexed starting at 1, as in the paper.
         [else (and/c x y)]))
 
 ;; ============================================================
+
+#|
+(module+ no-contracts
+  (provide make-skip-list
+           make-adjustable-skip-list
+           skip-list?
+           adjustable-skip-list?
+           skip-list-ref
+           skip-list-set!
+           skip-list-remove!
+           skip-list-count
+           skip-list-remove-range!
+           skip-list-contract!
+           skip-list-expand!
+           skip-list-iterate-first
+           skip-list-iterate-next
+           skip-list-iterate-key
+           skip-list-iterate-value
+           skip-list-iterate-greatest/<=?
+           skip-list-iterate-greatest/<?
+           skip-list-iterate-least/>=?
+           skip-list-iterate-least/>?
+           skip-list-iterate-least
+           skip-list-iterate-greatest
+           skip-list-iter?
+           skip-list-iter-valid?
+           skip-list->list))
+|#
 
 (provide/contract
  [make-skip-list
@@ -498,6 +396,8 @@ Levels are indexed starting at 1, as in the paper.
 
  [skip-list-iter?
   (-> any/c any)]
+ [skip-list-iter-valid?
+  (-> skip-list-iter? boolean?)]
 
  [skip-list->list
   (-> skip-list? list?)])

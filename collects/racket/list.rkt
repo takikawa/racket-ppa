@@ -45,6 +45,8 @@
          append-map
          filter-not
          shuffle
+         combinations
+         in-combinations
          permutations
          in-permutations
          argmin
@@ -587,6 +589,55 @@
     (unless (= j i) (vector-set! a i (vector-ref a j)))
     (vector-set! a j x))
   (vector->list a))
+
+(define (combinations l [k #f])
+  (for/list ([x (in-combinations l k)]) x))
+
+;; Generate combinations of the list `l`.
+;; - If `k` is a natural number, generate all combinations of size `k`.
+;; - If `k` is #f, generate all combinations of any size (powerset of `l`).
+(define (in-combinations l [k #f])
+  (unless (list? l)
+    (raise-argument-error 'in-combinations "list?" 0 l))
+  (when (and k (not (exact-nonnegative-integer? k)))
+    (raise-argument-error 'in-combinations "exact-nonnegative-integer?" 1 k))
+  (define v (list->vector l))
+  (define N (vector-length v))
+  (define N-1 (- N 1))
+  (define (vector-ref/bits v b)
+    (for/fold ([acc '()])
+              ([i (in-range N-1 -1 -1)])
+      (if (bitwise-bit-set? b i)
+        (cons (vector-ref v i) acc)
+        acc)))
+  (define-values (first last incr)
+    (cond
+     [(not k)
+      ;; Enumerate all binary numbers [1..2**N].
+      (values 0 (- (expt 2 N) 1) add1)]
+     [(< N k)
+      ;; Nothing to produce
+      (values 1 0 values)]
+     [else
+      ;; Enumerate numbers with `k` ones, smallest to largest
+      (define first (- (expt 2 k) 1))
+      (define gospers-hack ;; https://en.wikipedia.org/wiki/Combinatorial_number_system#Applications
+        (if (zero? first)
+          add1
+          (lambda (n)
+            (let* ([u (bitwise-and n (- n))]
+                   [v (+ u n)])
+              (+ v (arithmetic-shift (quotient (bitwise-xor v n) u) -2))))))
+      (values first (arithmetic-shift first (- N k)) gospers-hack)]))
+  (define gen-next
+    (let ([curr-box (box first)])
+      (lambda ()
+        (let ([curr (unbox curr-box)])
+          (and (<= curr last)
+               (begin0
+                 (vector-ref/bits v curr)
+                 (set-box! curr-box (incr curr))))))))
+  (in-producer gen-next #f))
 
 ;; This implements an algorithm known as "Ord-Smith".  (It is described in a
 ;; paper called "Permutation Generation Methods" by Robert Sedgewlck, listed as

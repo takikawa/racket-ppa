@@ -2,7 +2,7 @@
 
 @begin[(require "../utils.rkt"
                 "numeric-tower-pict.rkt"
-                scribble/eval
+                scribble/example
                 racket/sandbox)
        (require (for-label (only-meta-in 0 [except-in typed/racket for])
                            racket/async-channel))]
@@ -372,7 +372,10 @@ corresponding to @racket[trest], where @racket[bound]
 @defidform[FlVector]{An @rtech{flvector}.
   @ex[(flvector 1.0 2.0 3.0)]}
 @defidform[ExtFlVector]{An @rtech{extflvector}.
-  @ex[(extflvector 1.0t0 2.0t0 3.0t0)]}
+  @ex[(eval:alts (extflvector 1.0t0 2.0t0 3.0t0)
+                 (eval:result @racketresultfont{#<extflvector>}
+                              "- : ExtFlVector"
+                              ""))]}
 @defidform[FxVector]{An @rtech{fxvector}.
   @ex[(fxvector 1 2 3)]}
 
@@ -399,8 +402,11 @@ corresponding to @racket[trest], where @racket[bound]
 @ex[(lambda: ([x : Any]) (if (hash? x) x (error "not a hash table!")))]
 }
 
-@defform[(Setof t)]{is the type of a @rtech{set} of @racket[t].
+@defform[(Setof t)]{is the type of a @rtech{hash set} of
+@racket[t]. This includes custom hash sets, but not mutable hash set
+or sets that are implemented using @racket[gen:set].
 @ex[(set 0 1 2 3)]
+@ex[(seteq 0 1 2 3)]
 }
 
 @defform[(Channelof t)]{A @rtech{channel} on which only @racket[t]s can be sent.
@@ -722,7 +728,7 @@ functions and continuation mark functions.
   @ex[
     (: my-list Procedure)
     (define my-list list)
-    (my-list "zwiebelkuchen" "socca")
+    (eval:error (my-list "zwiebelkuchen" "socca"))
   ]
 }
 

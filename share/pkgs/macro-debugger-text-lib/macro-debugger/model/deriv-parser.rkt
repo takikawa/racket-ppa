@@ -153,7 +153,9 @@
       ($3 $1 $2)]
      [(visit Resolves tag (? EE/k))
       (let ([next ($4 $3 $2)])
-        (make tagrule $1 (wderiv-e2 next) $3 next))])
+        (make tagrule $1 (wderiv-e2 next) $3 next))]
+     [(visit opaque)
+      (make p:stop $1 $2 null #f)])
 
     (EE/k
      (#:args e1 rs)

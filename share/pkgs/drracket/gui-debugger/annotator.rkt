@@ -351,6 +351,11 @@
                                    (traverse (cdr lst)))))])
                (quasisyntax/loc expr (begin #,@(traverse (syntax->list #'bodies)))))]
             
+
+            [(begin0 body)
+             (quasisyntax/loc expr
+               (begin0 #,(annotate #'body bound-vars #t module-name)))]
+
             [(begin0 . bodies)
              (quasisyntax/loc expr (begin0 #,@(map (lambda (expr)
                                                      (annotate expr bound-vars #f module-name ))
@@ -372,6 +377,8 @@
             [(quote _) expr]
             
             [(quote-syntax _) expr]
+
+            [(quote-syntax _ #:local) expr]
             
             [(with-continuation-mark key mark body)
              (quasisyntax/loc expr (with-continuation-mark key

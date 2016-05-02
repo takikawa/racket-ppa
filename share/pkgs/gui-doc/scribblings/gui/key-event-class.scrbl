@@ -74,9 +74,11 @@ On Mac OS X, if a Control-key press is combined with a mouse button
            boolean?]{
 
 Returns @racket[#t] if a Control plus Meta event should be treated as
-an AltGr event on Windows: the Control key was the left one and the
-Alt key was the right one (typed that way on a keyboard with a right
-Alt key, or produced by a single AltGr key).
+an AltGr event on Windows. By default, AltGr treatment applies if the
+Control key was the left one and the Alt key (as Meta) was the right one---typed
+that way on a keyboard with a right Alt key, or produced by a single
+AltGr key. See also @racket[any-control+alt-is-altgr], which controls
+whether other Control plus Alt combinations are treated as AltGr.
 
 @history[#:added "1.2"]}
 
@@ -357,11 +359,11 @@ On Mac OS X, if a control-key press is combined with a mouse button
 
 }
 
-@defmethod[(control+meta-is-altgr [down? any/c])
+@defmethod[(set-control+meta-is-altgr [down? any/c])
            void?]{
 
 Sets whether a Control plus Meta combination on Windows should be
-treated as an AltGr combinations. See @racket[get-control+meta-is-altgr].
+treated as an AltGr combinations. See @method[key-event% get-control+meta-is-altgr].
 
 @history[#:added "1.2"]}
 

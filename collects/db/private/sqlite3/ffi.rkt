@@ -1,15 +1,18 @@
 #lang racket/base
-(require (for-syntax racket/base)
+(require (for-syntax racket/base
+                     setup/cross-system)
          racket/runtime-path
          ffi/unsafe
-         ffi/unsafe/define)
+         ffi/unsafe/define
+         setup/cross-system)
 (require "ffi-constants.rkt")
 (provide (all-from-out "ffi-constants.rkt")
          (protect-out (all-defined-out)))
 
 ;; raco distribute should include Racket's sqlite3 if present
 (define-runtime-path sqlite-so
-  (case (system-type)
+  #:runtime?-id runtime?
+  (case (if runtime? (system-type) (cross-system-type))
     [(windows) '(so "sqlite3")]
     [else '(so "libsqlite3" ("0" #f))]))
 
@@ -157,7 +160,14 @@
   (_fun _sqlite3_statement -> _int))
 
 (define-sqlite sqlite3_clear_bindings
-  (_fun _sqlite3_statement -> _int))
+  (_fun _sqlite3_statement -> _int)
+  #:fail (lambda ()
+           ;; Old versions of SQLite don't have sqlite3_clear_bindings().
+           ;; With this fallback, some SQLite internal parameter
+           ;; buffers won't get cleared at the end of statement
+           ;; execution; they'll get cleared when the statement is
+           ;; next executed or when the statement is closed instead.
+           (lambda (stmt) 0)))
 
 ;; ----------------------------------------
 

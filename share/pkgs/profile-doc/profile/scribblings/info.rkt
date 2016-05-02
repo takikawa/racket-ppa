@@ -1,3 +1,3 @@
 #lang info
 
-(define scribblings '(("profile.scrbl" () (tool-library))))
+(define scribblings '(("profile.scrbl" () ("Performance Tools"))))

@@ -2382,11 +2382,12 @@
     (define/public-final (search-string-changed) (search-parameters-changed))
     (define/private (search-parameters-changed)
       (let ([str (send find-edit get-text)])
-        (send text-to-search set-searching-state
-              (if (equal? str "") #f str)
-              case-sensitive-search?
-              replace-visible?
-              #t)))
+        (when text-to-search
+          (send text-to-search set-searching-state
+                (if (equal? str "") #f str)
+                case-sensitive-search?
+                replace-visible?
+                #t))))
     
     (define/public (search-hidden?) hidden?)
     
@@ -2418,6 +2419,10 @@
         (when focus?
           (send find-edit set-position 0 (send find-edit last-position))
           (send (send find-edit get-canvas) focus))
+        (let ([c (send find-edit get-canvas)])
+          (when (and c (send c get-line-count))
+            ;; try to update the canvas so that the font size is correctly accounted for
+            (send c set-editor (send c get-editor))))
         (send find-edit end-edit-sequence)))
     
     (define/public (unhide-search-and-toggle-focus #:new-search-string-from-selection? [new-search-string-from-selection? #f])

@@ -191,7 +191,6 @@ THREAD_LOCAL_DECL(MZ_MARK_POS_TYPE scheme_current_cont_mark_pos);
 THREAD_LOCAL_DECL(int scheme_semaphore_fd_kqueue);
 
 THREAD_LOCAL_DECL(static Scheme_Custodian *main_custodian);
-THREAD_LOCAL_DECL(static Scheme_Custodian *last_custodian);
 THREAD_LOCAL_DECL(static Scheme_Hash_Table *limited_custodians = NULL);
 READ_ONLY static Scheme_Object *initial_inspector;
 
@@ -223,7 +222,7 @@ THREAD_LOCAL_DECL(static double end_this_gc_real_time);
 static void get_ready_for_GC(void);
 static void done_with_GC(void);
 #ifdef MZ_PRECISE_GC
-static void inform_GC(int master_gc, int major_gc, intptr_t pre_used, intptr_t post_used,
+static void inform_GC(int master_gc, int major_gc, int inc_gc, intptr_t pre_used, intptr_t post_used,
                       intptr_t pre_admin, intptr_t post_admin, intptr_t post_child_places_used);
 #endif
 
@@ -243,7 +242,7 @@ THREAD_LOCAL_DECL(struct Scheme_GC_Pre_Post_Callback_Desc *gc_prepost_callback_d
 
 ROSYM static Scheme_Object *read_symbol, *write_symbol, *execute_symbol, *delete_symbol, *exists_symbol;
 ROSYM static Scheme_Object *client_symbol, *server_symbol;
-ROSYM static Scheme_Object *major_symbol, *minor_symbol;
+ROSYM static Scheme_Object *major_symbol, *minor_symbol, *incremental_symbol;
 
 THREAD_LOCAL_DECL(static int do_atomic = 0);
 THREAD_LOCAL_DECL(static int missed_context_switch = 0);
@@ -335,8 +334,6 @@ static void register_traversers(void);
 static Scheme_Object *custodian_require_mem(int argc, Scheme_Object *args[]);
 static Scheme_Object *custodian_limit_mem(int argc, Scheme_Object *args[]);
 static Scheme_Object *custodian_can_mem(int argc, Scheme_Object *args[]);
-static Scheme_Object *new_tracking_fun(int argc, Scheme_Object *args[]);
-static Scheme_Object *union_tracking_val(int argc, Scheme_Object *args[]);
 
 static Scheme_Object *collect_garbage(int argc, Scheme_Object *args[]);
 static Scheme_Object *current_memory_use(int argc, Scheme_Object *args[]);
@@ -391,7 +388,6 @@ static Scheme_Object *parameter_p(int argc, Scheme_Object *args[]);
 static Scheme_Object *parameter_procedure_eq(int argc, Scheme_Object *args[]);
 static Scheme_Object *make_parameter(int argc, Scheme_Object *args[]);
 static Scheme_Object *make_derived_parameter(int argc, Scheme_Object *args[]);
-static Scheme_Object *extend_parameterization(int argc, Scheme_Object *args[]);
 static Scheme_Object *parameterization_p(int argc, Scheme_Object *args[]);
 static Scheme_Object *reparameterize(int argc, Scheme_Object **argv);
 
@@ -524,8 +520,10 @@ void scheme_init_thread(Scheme_Env *env)
 
   REGISTER_SO(major_symbol);
   REGISTER_SO(minor_symbol);
+  REGISTER_SO(incremental_symbol);
   major_symbol = scheme_intern_symbol("major");
   minor_symbol = scheme_intern_symbol("minor");
+  incremental_symbol  = scheme_intern_symbol("incremental");
 
   GLOBAL_PRIM_W_ARITY("dump-memory-stats"            , scheme_dump_gc_stats, 0, -1, env);
   GLOBAL_PRIM_W_ARITY("vector-set-performance-stats!", current_stats       , 1, 2, env);
@@ -635,27 +633,7 @@ void scheme_init_thread_places(void) {
   REGISTER_SO(gc_prepost_callback_descs);
   REGISTER_SO(place_local_misc_table);
   REGISTER_SO(gc_info_prefab);
-  REGISTER_SO(initial_config);
   gc_info_prefab = scheme_lookup_prefab_type(scheme_intern_symbol("gc-info"), 10);
-}
-
-void scheme_init_memtrace(Scheme_Env *env)
-{
-  Scheme_Object *v;
-  Scheme_Env *newenv;
-
-  v = scheme_intern_symbol("#%memtrace");
-  newenv = scheme_primitive_module(v, env);
-    
-  v = scheme_make_symbol("memory-trace-continuation-mark");
-  scheme_add_global("memory-trace-continuation-mark", v , newenv);
-  v = scheme_make_prim_w_arity(new_tracking_fun, 
-                              "new-memtrace-tracking-function", 1, 1);
-  scheme_add_global("new-memtrace-tracking-function", v, newenv);
-  v = scheme_make_prim_w_arity(union_tracking_val, 
-                               "unioned-memtrace-tracking-value", 1, 1);
-  scheme_add_global("unioned-memtrace-tracking-value", v, newenv);
-  scheme_finish_primitive_module(newenv);
 }
 
 void scheme_init_inspector() {
@@ -706,7 +684,7 @@ void scheme_init_paramz(Scheme_Env *env)
   scheme_add_global_constant("parameterization-key" , scheme_parameterization_key, newenv);
   scheme_add_global_constant("break-enabled-key"    , scheme_break_enabled_key   , newenv);
 
-  GLOBAL_PRIM_W_ARITY("extend-parameterization" , extend_parameterization , 1, -1, newenv);
+  GLOBAL_PRIM_W_ARITY("extend-parameterization" , scheme_extend_parameterization , 1, -1, newenv);
   GLOBAL_PRIM_W_ARITY("check-for-break"         , check_break_now         , 0,  0, newenv);
   GLOBAL_PRIM_W_ARITY("reparameterize"          , reparameterize          , 1,  1, newenv);
   GLOBAL_PRIM_W_ARITY("make-custodian-from-main", make_custodian_from_main, 0,  0, newenv);
@@ -723,9 +701,13 @@ static Scheme_Object *collect_garbage(int argc, Scheme_Object *argv[])
     scheme_collect_garbage_minor();
   } else if ((argc < 1) || SAME_OBJ(major_symbol, argv[0])) {
     scheme_collect_garbage();
+  } else if ((argc < 1) || SAME_OBJ(incremental_symbol, argv[0])) {
+#ifdef MZ_PRECISE_GC
+    GC_request_incremental_mode();
+#endif
   } else {
     scheme_wrong_contract("collect-garbage", 
-                          "(or/c 'major 'minor)", 
+                          "(or/c 'major 'minor 'incremental)", 
                           0, argc, argv);
   }
 
@@ -912,28 +894,6 @@ static Scheme_Object *custodian_can_mem(int argc, Scheme_Object *args[])
 #endif
 }
 
-static Scheme_Object *new_tracking_fun(int argc, Scheme_Object *args[])
-{
-  int retval = 0;
-
-#ifdef MZ_PRECISE_GC
-  retval = GC_mtrace_new_id(args[0]);
-#endif
-
-  return scheme_make_integer(retval);
-}
-
-static Scheme_Object *union_tracking_val(int argc, Scheme_Object *args[])
-{
-  int retval = 0;
-
-#ifdef MZ_PRECISE_GC
-  retval = GC_mtrace_union_current_with(SCHEME_INT_VAL(args[0]));
-#endif
-
-  return scheme_make_integer(retval);
-}
-
 static void ensure_custodian_space(Scheme_Custodian *m, int k)
 {
   int i;
@@ -1079,8 +1039,6 @@ static void adjust_custodian_family(void *mgr, void *skip_move)
     /* Remove from global list: */
     if (CUSTODIAN_FAM(r->global_next))
       CUSTODIAN_FAM(CUSTODIAN_FAM(r->global_next)->global_prev) = CUSTODIAN_FAM(r->global_prev);
-    else
-      last_custodian = CUSTODIAN_FAM(r->global_prev);
     CUSTODIAN_FAM(CUSTODIAN_FAM(r->global_prev)->global_next) = CUSTODIAN_FAM(r->global_next);
     
     /* Add children to parent's list: */
@@ -1154,8 +1112,6 @@ void insert_custodian(Scheme_Custodian *m, Scheme_Custodian *parent)
     CUSTODIAN_FAM(parent->global_next) = m;
     if (next)
       CUSTODIAN_FAM(next->global_prev) = m;
-    else
-      last_custodian = m;
   } else {
     CUSTODIAN_FAM(m->global_next) = NULL;
     CUSTODIAN_FAM(m->global_prev) = NULL;
@@ -2659,10 +2615,7 @@ void *scheme_register_process_global(const char *key, void *val)
   Proc_Global_Rec *pg;
   intptr_t len;
 
-#if defined(MZ_USE_MZRT)
-  if (process_global_lock)
-    mzrt_mutex_lock(process_global_lock);
-#endif
+  scheme_process_global_lock();
 
   for (pg = process_globals; pg; pg = pg->next) {
     if (!strcmp(pg->key, key)) {
@@ -2682,10 +2635,7 @@ void *scheme_register_process_global(const char *key, void *val)
     process_globals = pg;
   }
 
-#if defined(MZ_USE_MZRT)
-  if (process_global_lock)
-    mzrt_mutex_unlock(process_global_lock);
-#endif
+  scheme_process_global_unlock();
 
   return old_val;
 }
@@ -2694,6 +2644,22 @@ void scheme_init_process_globals(void)
 {
 #if defined(MZ_USE_MZRT)
   mzrt_mutex_create(&process_global_lock);
+#endif
+}
+
+void scheme_process_global_lock(void)
+{
+#if defined(MZ_USE_MZRT)
+  if (process_global_lock)
+    mzrt_mutex_lock(process_global_lock);
+#endif
+}
+
+void scheme_process_global_unlock(void)
+{
+#if defined(MZ_USE_MZRT)
+  if (process_global_lock)
+    mzrt_mutex_unlock(process_global_lock);
 #endif
 }
 
@@ -2763,8 +2729,8 @@ static void do_swap_thread()
       Scheme_Closure_Func f;
       for (l = thread_swap_callbacks; SCHEME_RPAIRP(l); l = SCHEME_CDR(l)) {
 	o = SCHEME_CAR(l);
-	f = SCHEME_CLOS_FUNC(o);
-	o = SCHEME_CLOS_DATA(o);
+	f = SCHEME_RAW_CLOS_FUNC(o);
+	o = SCHEME_RAW_CLOS_DATA(o);
 	f(o);
       }
     }
@@ -2802,8 +2768,8 @@ static void do_swap_thread()
       Scheme_Closure_Func f;
       for (l = thread_swap_out_callbacks; SCHEME_RPAIRP(l); l = SCHEME_CDR(l)) {
 	o = SCHEME_CAR(l);
-	f = SCHEME_CLOS_FUNC(o);
-	o = SCHEME_CLOS_DATA(o);
+	f = SCHEME_RAW_CLOS_FUNC(o);
+	o = SCHEME_RAW_CLOS_DATA(o);
 	f(o);
       }
     }
@@ -3099,8 +3065,8 @@ static void start_child(Scheme_Thread * volatile child,
       Scheme_Closure_Func f;
       for (l = thread_swap_callbacks; SCHEME_RPAIRP(l); l = SCHEME_CDR(l)) {
 	o = SCHEME_CAR(l);
-	f = SCHEME_CLOS_FUNC(o);
-	o = SCHEME_CLOS_DATA(o);
+	f = SCHEME_RAW_CLOS_FUNC(o);
+	o = SCHEME_RAW_CLOS_DATA(o);
 	f(o);
       }
     }
@@ -7627,7 +7593,7 @@ static Scheme_Object *parameterization_p(int argc, Scheme_Object **argv)
                               && ((((Scheme_Primitive_Proc *)v)->pp.flags & SCHEME_PRIM_OTHER_TYPE_MASK) \
                                   == SCHEME_PRIM_TYPE_PARAMETER))
 
-static Scheme_Object *extend_parameterization(int argc, Scheme_Object *argv[])
+Scheme_Object *scheme_extend_parameterization(int argc, Scheme_Object *argv[])
 {
   Scheme_Object *key, *a[2], *param;
   Scheme_Config *c;
@@ -7713,13 +7679,16 @@ static Scheme_Object *reparameterize(int argc, Scheme_Object **argv)
   return (Scheme_Object *)naya;
 }
 
-static Scheme_Object *parameter_p(int argc, Scheme_Object **argv)
+int scheme_is_parameter(Scheme_Object *v)
 {
-  Scheme_Object *v = argv[0];
-
   if (SCHEME_CHAPERONEP(v)) v = SCHEME_CHAPERONE_VAL(v);
 
-  return (SCHEME_PARAMETERP(v)
+  return SCHEME_PARAMETERP(v);
+}
+
+static Scheme_Object *parameter_p(int argc, Scheme_Object **argv)
+{
+  return (scheme_is_parameter(argv[0])
 	  ? scheme_true
 	  : scheme_false);
 }
@@ -7971,18 +7940,20 @@ static void make_initial_config(Scheme_Thread *p)
   init_param(cells, paramz, MZCONFIG_CURLY_BRACES_ARE_PARENS, (scheme_curly_braces_are_parens
 							      ? scheme_true : scheme_false));
 
+  init_param(cells, paramz, MZCONFIG_SQUARE_BRACKETS_ARE_TAGGED, scheme_false);
+  init_param(cells, paramz, MZCONFIG_CURLY_BRACES_ARE_TAGGED, scheme_false);
+  init_param(cells, paramz, MZCONFIG_READ_CDOT, scheme_false);
+  
   init_param(cells, paramz, MZCONFIG_ERROR_PRINT_WIDTH, scheme_make_integer(256));
   init_param(cells, paramz, MZCONFIG_ERROR_PRINT_CONTEXT_LENGTH, scheme_make_integer(16));
   init_param(cells, paramz, MZCONFIG_ERROR_PRINT_SRCLOC, scheme_true);
 
   REGISTER_SO(main_custodian);
-  REGISTER_SO(last_custodian);
   REGISTER_SO(limited_custodians);
   main_custodian = scheme_make_custodian(NULL);
 #ifdef MZ_PRECISE_GC
   GC_register_root_custodian(main_custodian);
 #endif
-  last_custodian = main_custodian;
   init_param(cells, paramz, MZCONFIG_CUSTODIAN, (Scheme_Object *)main_custodian);
 
   REGISTER_SO(initial_plumber);
@@ -8130,6 +8101,7 @@ static void make_initial_config(Scheme_Thread *p)
     }
   }
 
+  REGISTER_SO(initial_config);
   initial_config = config;
 }
 
@@ -8313,8 +8285,10 @@ static Scheme_Object *make_phantom_bytes(int argc, Scheme_Object *argv[])
   pb->size = SCHEME_INT_VAL(argv[0]);
 
 # ifdef MZ_PRECISE_GC
-  if (!GC_allocate_phantom_bytes(pb, pb->size))
+  if (!GC_allocate_phantom_bytes(pb, pb->size)) {
+    pb->size = 0;
     scheme_raise_out_of_memory("make-phantom-bytes", NULL);
+  }
 # endif
 
   return (Scheme_Object *)pb;
@@ -8324,6 +8298,9 @@ static Scheme_Object *set_phantom_bytes(int argc, Scheme_Object *argv[])
 {
   Scheme_Phantom_Bytes *pb;
   intptr_t amt;
+# ifdef MZ_PRECISE_GC
+  intptr_t old_size;
+# endif
 
   if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_phantom_bytes_type))
     scheme_wrong_contract("set-phantom-bytes!", "phantom-bytes?", 0, argc, argv);
@@ -8334,11 +8311,17 @@ static Scheme_Object *set_phantom_bytes(int argc, Scheme_Object *argv[])
   amt = SCHEME_INT_VAL(argv[1]);
 
 # ifdef MZ_PRECISE_GC
-  if (!GC_allocate_phantom_bytes(pb, amt - pb->size))
-    scheme_raise_out_of_memory("make-phantom-bytes", NULL);
-# endif
+  old_size = pb->size;
+#endif
 
   pb->size = amt;
+
+# ifdef MZ_PRECISE_GC
+  if (!GC_allocate_phantom_bytes(pb, amt - old_size)) {
+    pb->size = old_size;
+    scheme_raise_out_of_memory("make-phantom-bytes", NULL);
+  }
+# endif
 
   return scheme_void;
 }
@@ -8975,10 +8958,11 @@ static void prepare_thread_for_GC(Scheme_Object *t)
           rs_end = saved->runstack_size;
         }
 
-        scheme_set_runstack_limits(saved->runstack_start,
-                                   saved->runstack_size,
-                                   saved->runstack_offset,
-                                   rs_end);
+        if (saved->runstack_start)
+          scheme_set_runstack_limits(saved->runstack_start,
+                                     saved->runstack_size,
+                                     saved->runstack_offset,
+                                     rs_end);
       }
     }
 
@@ -9240,7 +9224,7 @@ static char *gc_num(char *nums, intptr_t v)
 END_XFORM_SKIP;
 #endif
 
-static void inform_GC(int master_gc, int major_gc, 
+static void inform_GC(int master_gc, int major_gc, int inc_gc,
                       intptr_t pre_used, intptr_t post_used,
                       intptr_t pre_admin, intptr_t post_admin,
                       intptr_t post_child_places_used)
@@ -9270,7 +9254,9 @@ static void inform_GC(int master_gc, int major_gc,
     vec = scheme_false;
     if (!master_gc && gc_info_prefab) {
       vec = scheme_make_vector(11, scheme_false);
-      SCHEME_VEC_ELS(vec)[1] = (major_gc ? scheme_true : scheme_false);
+      SCHEME_VEC_ELS(vec)[1] = (major_gc
+                                ? major_symbol
+                                : (inc_gc ? incremental_symbol : minor_symbol));
       SCHEME_VEC_ELS(vec)[2] = scheme_make_integer(pre_used);
       SCHEME_VEC_ELS(vec)[3] = scheme_make_integer(pre_admin);
       SCHEME_VEC_ELS(vec)[4] = scheme_make_integer(scheme_code_page_total);
@@ -9299,7 +9285,7 @@ static void inform_GC(int master_gc, int major_gc,
 #ifdef MZ_USE_PLACES
             scheme_current_place_id,
 #endif
-            (master_gc ? "MST" : (major_gc ? "MAJ" : "min")),
+            (master_gc ? "MST" : (major_gc ? "MAJ" : (inc_gc ? "mIn" : "min"))),
             gc_num(nums, pre_used), gc_num(nums, pre_admin - pre_used),
             gc_num(nums, scheme_code_page_total),
             gc_num(nums, delta), ((admin_delta < 0) ? "" : "+"),  gc_num(nums, admin_delta),

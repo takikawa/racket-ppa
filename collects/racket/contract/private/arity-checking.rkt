@@ -1,6 +1,7 @@
 #lang racket/base
 (require "blame.rkt"
-         "kwd-info-struct.rkt")
+         "kwd-info-struct.rkt"
+         "list.rkt")
 
 (provide do-arity-checking
          
@@ -12,72 +13,82 @@
                            ->stct-doms
                            ->stct-rest
                            ->stct-min-arity
-                           ->stct-kwd-infos)
+                           ->stct-kwd-infos
+                           method?)
+  (define proc/meth (if method? "a method" "a procedure"))
   (let/ec k
     (unless (procedure? val)
-      (maybe-err 
-       k blame
+      (k
        (λ (neg-party)
          (raise-blame-error blame #:missing-party neg-party val
-                            '(expected: "a procedure" given: "~e")
+                            `(expected: ,proc/meth
+                                        given: "~e")
                             val))))
      (define-values (actual-mandatory-kwds actual-optional-kwds) (procedure-keywords val))
      (define arity (if (list? (procedure-arity val))
                        (procedure-arity val)
                        (list (procedure-arity val))))
-     (define expected-number-of-non-keyword-args (length ->stct-doms))
-     (define matching-arity?
-       (and (for/or ([a (in-list arity)])
-              (or (equal? expected-number-of-non-keyword-args a)
-                  (and (arity-at-least? a)
-                       (>= expected-number-of-non-keyword-args (arity-at-least-value a)))))
-            (if ->stct-rest
-                (let ([lst (car (reverse arity))])
-                  (and (arity-at-least? lst)
-                       (<= (arity-at-least-value lst) ->stct-min-arity)))
-                #t)))
-     (unless matching-arity?
-       (maybe-err
-        k blame
-        (λ (neg-party)
-          (raise-blame-error blame #:missing-party neg-party val
-                             '(expected: 
-                               "a procedure that accepts ~a non-keyword argument~a~a"
-                               given: "~e"
-                               "\n  ~a")
-                             expected-number-of-non-keyword-args
-                             (if (= expected-number-of-non-keyword-args 1) "" "s")
-                             (if ->stct-rest
-                                 " and arbitrarily many more"
-                                 "")
-                             val
-                             (arity-as-string val)))))
     
+     (define exra-required-args (if (ellipsis-rest-arg-ctc? ->stct-rest)
+                                    (length (*list-ctc-suffix ->stct-rest))
+                                    0))
+
+     ;; the function must be ok for *all* the arities the contract says are ok
+     (for/and ([base-number-of-non-keyword-args (in-range ->stct-min-arity (add1 (length ->stct-doms)))])
+       (define expected-number-of-non-keyword-args (+ base-number-of-non-keyword-args exra-required-args))
+       (define matching-arity?
+         (and (for/or ([a (in-list arity)])
+                (or (and (equal? expected-number-of-non-keyword-args a))
+                    (and (arity-at-least? a)
+                         (>= expected-number-of-non-keyword-args (arity-at-least-value a)))))
+              (if ->stct-rest
+                  (let ([lst (car (reverse arity))])
+                    (and (arity-at-least? lst)
+                         (<= (arity-at-least-value lst) (+ exra-required-args ->stct-min-arity))))
+                  #t)))
+       (unless matching-arity?
+         (k
+          (λ (neg-party)
+            (define expected-number-of-non-keyword-args*
+              ((if method? sub1 values) expected-number-of-non-keyword-args))
+            (raise-blame-error blame #:missing-party neg-party val
+                               `(expected:
+                                 ,(string-append "a "
+                                                 proc/meth
+                                                 " that accepts ~a non-keyword argument~a~a")
+                                 given: "~e"
+                                 "\n  ~a")
+                               expected-number-of-non-keyword-args*
+                               (if (= expected-number-of-non-keyword-args* 1) "" "s")
+                               (if ->stct-rest
+                                   " and arbitrarily many more"
+                                   "")
+                               val
+                               (arity-as-string val))))))
+
     (define (should-have-supplied kwd)
-      (maybe-err
-       k blame
+      (k
        (λ (neg-party)
          (raise-blame-error blame #:missing-party neg-party val
-                            '(expected: 
-                              "a procedure that accepts the ~a keyword argument"
+                            `(expected: 
+                              ,(string-append proc/meth " that accepts the ~a keyword argument")
                               given: "~e"
                               "\n  ~a")
                             kwd
                             val
-                            (arity-as-string val)))))
+                            (arity-as-string val method?)))))
     
     (define (should-not-have-supplied kwd)
-      (maybe-err
-       k blame
+      (k
        (λ (neg-party)
          (raise-blame-error blame #:missing-party neg-party val
-                            '(expected: 
-                              "a procedure that does not require the ~a keyword argument"
+                            `(expected: 
+                              ,(string-append proc/meth " that does not require the ~a keyword argument")
                               given: "~e"
                               "\n  ~a")
                             kwd
                             val
-                            (arity-as-string val)))))
+                            (arity-as-string val method?)))))
     
     (when actual-optional-kwds ;; when all kwds are okay, no checking required
       (let loop ([mandatory-kwds actual-mandatory-kwds]
@@ -107,18 +118,17 @@
              [(equal? kwd (kwd-info-kwd kwd-info))
               (when (and (not (kwd-info-mandatory? kwd-info))
                          mandatory?)
-                (maybe-err
-                 k blame
+                (k
                  (λ (neg-party)
                    (raise-blame-error 
                     blame #:missing-party neg-party val
-                    '(expected:
-                      "a procedure that optionally accepts the keyword ~a (this one is mandatory)"
+                    `(expected:
+                      ,(string-append proc/meth " that optionally accepts the keyword ~a (this one is mandatory)")
                       given: "~e"
                       "\n  ~a")
                     val
                     kwd
-                    (arity-as-string val)))))
+                    (arity-as-string val method?)))))
               (loop new-mandatory-kwds new-all-kwds (cdr kwd-infos))]
              [(keyword<? kwd (kwd-info-kwd kwd-info))
               (when mandatory?
@@ -130,14 +140,15 @@
     #f))
 
 
-(define (arity-as-string v)
+(define (arity-as-string v [method? #f])
   (define prefix (if (object-name v)
                      (format "~a accepts: " (object-name v))
                      (format "accepts: ")))
-  (string-append prefix (raw-arity-as-string v)))
+  (string-append prefix (raw-arity-as-string v method?)))
 
-(define (raw-arity-as-string v)
+(define (raw-arity-as-string v [method? #f])
   (define ar (procedure-arity v))
+  (define adjust (if method? sub1 values))
   (define (plural n) (if (= n 1) "" "s"))
   (define-values (man-kwds all-kwds) (procedure-keywords v))
   (define opt-kwds (if all-kwds (remove* man-kwds all-kwds) #f))
@@ -145,9 +156,11 @@
   (define normal-args
     (cond
       [(null? ar) "no arguments"]
-      [(number? ar) (format "~a ~aargument~a" ar normal-str (plural ar))]
+      [(number? ar)
+       (define ar* (adjust ar))
+       (format "~a ~aargument~a" ar* normal-str (plural ar*))]
       [(arity-at-least? ar) (format "~a or arbitrarily many more ~aarguments"
-                                    (arity-at-least-value ar)
+                                    (adjust (arity-at-least-value ar))
                                     normal-str)]
       [else
        (define comma
@@ -165,12 +178,12 @@
                [(arity-at-least? v)
                 (list
                  (format "~a, or arbitrarily many more ~aarguments" 
-                         (arity-at-least-value v)
+                         (arity-at-least-value (adjust v))
                          normal-str))]
                [else
-                (list (format "or ~a ~aarguments" v normal-str))])]
+                (list (format "or ~a ~aarguments" (adjust v) normal-str))])]
             [else 
-             (cons (format "~a~a " (car ar) comma)
+             (cons (format "~a~a " (adjust (car ar)) comma)
                    (loop (cdr ar)))])))]))
   (cond
     [(and (null? man-kwds) (null? opt-kwds)) 
@@ -224,7 +237,3 @@
            (cons (format "~a, " (car kwds))
                  (loop (cdr kwds)))])))]))
 
-(define (maybe-err k blame neg-accepter)
-  (if (blame-original? blame)
-      (neg-accepter #f)
-      (k neg-accepter)))

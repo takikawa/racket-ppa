@@ -6,13 +6,9 @@
          (prefix-in c: (contract-req))
          (rep type-rep filter-rep object-rep)
          (utils tc-utils)
-         (env init-envs))
+         (env init-envs env-utils))
 
 (define struct-fn-table (make-free-id-table))
-(define struct-constructor-table (make-free-id-table))
-
-(define (add-struct-constructor! id) (dict-set! struct-constructor-table id #t))
-(define (struct-constructor? id) (dict-ref struct-constructor-table id #f))
 
 (define (add-struct-fn! id pe mut?) (dict-set! struct-fn-table id (list pe mut?)))
 
@@ -33,7 +29,7 @@
   (parameterize ([current-print-convert-hook converter]
                  [show-sharing #f])
     (define/with-syntax (adds ...)      
-      (for/list ([(k v) (in-dict struct-fn-table)]
+      (for/list ([(k v) (in-sorted-dict struct-fn-table id<)]
                  #:when (bound-in-this-module k))
         (match v
           [(list pe mut?)
@@ -42,8 +38,6 @@
 
 (provide/cond-contract
  [add-struct-fn! (identifier? StructPE? boolean? . c:-> . c:any/c)]
- [add-struct-constructor! (identifier? . c:-> . c:any)]
- [struct-constructor? (identifier? . c:-> . boolean?)]
  [struct-accessor? (identifier? . c:-> . (c:or/c #f StructPE?))]
  [struct-mutator? (identifier? . c:-> . (c:or/c #f StructPE?))]
  [struct-fn-idx (identifier? . c:-> . exact-integer?)]

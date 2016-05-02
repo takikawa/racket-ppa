@@ -1,13 +1,16 @@
 #lang racket/base
 (require racket/runtime-path 
-         (for-syntax racket/base))
+         setup/cross-system
+         (for-syntax racket/base
+                     setup/cross-system))
 (provide 
  (protect-out (all-defined-out)))
 
 (define-runtime-module-path-index platform-lib
+  #:runtime?-id runtime?
   (let ([gtk-lib
          '(lib "mred/private/wx/gtk/platform.rkt")])
-    (case (system-type)
+    (case (if runtime? (system-type) (cross-system-type))
       [(windows) (if (getenv "PLT_WIN_GTK")
                      gtk-lib
                      '(lib "mred/private/wx/win32/platform.rkt"))]
@@ -72,6 +75,7 @@
                 get-color-from-user
                 special-option-key
                 special-control-key
+                any-control+alt-is-altgr
                 get-highlight-background-color
                 get-highlight-text-color
                 make-screen-bitmap

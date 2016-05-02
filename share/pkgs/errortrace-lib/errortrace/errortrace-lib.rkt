@@ -8,7 +8,7 @@
          "private/utils.rkt"
          racket/contract/base
          racket/unit
-         (for-template racket/base)
+         (for-template racket/base "errortrace-key.rkt")
          (for-syntax racket/base))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

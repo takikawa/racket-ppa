@@ -1,6 +1,6 @@
  /*
   Racket
-  Copyright (c) 2004-2015 PLT Design Inc.
+  Copyright (c) 2004-2016 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -82,6 +82,9 @@ ROSYM static Scheme_Object *syntax_symbol;
 ROSYM static Scheme_Object *unsyntax_symbol;
 ROSYM static Scheme_Object *unsyntax_splicing_symbol;
 ROSYM static Scheme_Object *quasisyntax_symbol;
+ROSYM static Scheme_Object *brackets_symbol;
+ROSYM static Scheme_Object *braces_symbol;
+ROSYM static Scheme_Object *dot_symbol;
 ROSYM static Scheme_Object *terminating_macro_symbol;
 ROSYM static Scheme_Object *non_terminating_macro_symbol;
 ROSYM static Scheme_Object *dispatch_macro_symbol;
@@ -93,6 +96,9 @@ ROSYM static Scheme_Object *tainted_uninterned_symbol;
 static Scheme_Object *read_case_sensitive(int, Scheme_Object *[]);
 static Scheme_Object *read_bracket_as_paren(int, Scheme_Object *[]);
 static Scheme_Object *read_brace_as_paren(int, Scheme_Object *[]);
+static Scheme_Object *read_bracket_with_tag(int, Scheme_Object *[]);
+static Scheme_Object *read_brace_with_tag(int, Scheme_Object *[]);
+static Scheme_Object *read_cdot(int, Scheme_Object *[]);
 static Scheme_Object *read_accept_graph(int, Scheme_Object *[]);
 static Scheme_Object *read_accept_compiled(int, Scheme_Object *[]);
 static Scheme_Object *read_accept_box(int, Scheme_Object *[]);
@@ -171,6 +177,9 @@ typedef struct ReadParams {
   char case_sensitive;
   char square_brackets_are_parens;
   char curly_braces_are_parens;
+  char square_brackets_are_tagged;
+  char curly_braces_are_tagged;
+  char read_cdot;
   char read_decimal_inexact;
   char can_read_dot;
   char can_read_infix_dot;
@@ -311,7 +320,8 @@ static int next_is_delim(Scheme_Object *port,
 static int skip_whitespace_comments(Scheme_Object *port, Scheme_Object *stxsrc,
 				    Scheme_Hash_Table **ht,
 				    Scheme_Object *indentation,
-				    ReadParams *params, Readtable *table);
+				    ReadParams *params, Readtable *table,
+                                    Scheme_Object **prefetched);
 
 static Scheme_Object *readtable_call(int w_char, int ch, Scheme_Object *proc, ReadParams *params,
 				     Scheme_Object *port, Scheme_Object *src, intptr_t line, intptr_t col, intptr_t pos,
@@ -414,6 +424,10 @@ void scheme_init_read(Scheme_Env *env)
   REGISTER_SO(unsyntax_splicing_symbol);
   REGISTER_SO(quasisyntax_symbol);
 
+  REGISTER_SO(brackets_symbol);
+  REGISTER_SO(braces_symbol);
+  REGISTER_SO(dot_symbol);
+
   REGISTER_SO(unresolved_uninterned_symbol);
   REGISTER_SO(tainted_uninterned_symbol);
   REGISTER_SO(terminating_macro_symbol);
@@ -429,6 +443,10 @@ void scheme_init_read(Scheme_Env *env)
   unsyntax_symbol               = scheme_intern_symbol("unsyntax");
   unsyntax_splicing_symbol      = scheme_intern_symbol("unsyntax-splicing");
   quasisyntax_symbol            = scheme_intern_symbol("quasisyntax");
+
+  brackets_symbol               = scheme_intern_symbol("#%brackets");
+  braces_symbol                 = scheme_intern_symbol("#%braces");
+  dot_symbol                    = scheme_intern_symbol("#%dot");
 
   unresolved_uninterned_symbol = scheme_make_symbol("unresolved");
   tainted_uninterned_symbol    = scheme_make_symbol("tainted");
@@ -448,6 +466,7 @@ void scheme_init_read(Scheme_Env *env)
     }
     builtin_fast[';']  = READTABLE_TERMINATING;
     builtin_fast['\''] = READTABLE_TERMINATING;
+    builtin_fast['`']  = READTABLE_TERMINATING;
     builtin_fast[',']  = READTABLE_TERMINATING;
     builtin_fast['"']  = READTABLE_TERMINATING;
     builtin_fast['|']  = READTABLE_MULTIPLE_ESCAPE;
@@ -514,6 +533,9 @@ void scheme_init_read(Scheme_Env *env)
   GLOBAL_PARAMETER("read-case-sensitive",           read_case_sensitive,    MZCONFIG_CASE_SENS,                   env);
   GLOBAL_PARAMETER("read-square-bracket-as-paren",  read_bracket_as_paren,  MZCONFIG_SQUARE_BRACKETS_ARE_PARENS,  env);
   GLOBAL_PARAMETER("read-curly-brace-as-paren",     read_brace_as_paren,    MZCONFIG_CURLY_BRACES_ARE_PARENS,     env);
+  GLOBAL_PARAMETER("read-square-bracket-with-tag",  read_bracket_with_tag,  MZCONFIG_SQUARE_BRACKETS_ARE_TAGGED,  env);
+  GLOBAL_PARAMETER("read-curly-brace-with-tag",     read_brace_with_tag,    MZCONFIG_CURLY_BRACES_ARE_TAGGED,     env);
+  GLOBAL_PARAMETER("read-cdot",                     read_cdot,              MZCONFIG_READ_CDOT,                   env);
   GLOBAL_PARAMETER("read-accept-graph",             read_accept_graph,      MZCONFIG_CAN_READ_GRAPH,              env);
   GLOBAL_PARAMETER("read-accept-compiled",          read_accept_compiled,   MZCONFIG_CAN_READ_COMPILED,           env);
   GLOBAL_PARAMETER("read-accept-box",               read_accept_box,        MZCONFIG_CAN_READ_BOX,                env);
@@ -603,6 +625,24 @@ static Scheme_Object *
 read_brace_as_paren(int argc, Scheme_Object *argv[])
 {
   DO_CHAR_PARAM("read-curly-brace-as-paren", MZCONFIG_CURLY_BRACES_ARE_PARENS);
+}
+
+static Scheme_Object *
+read_bracket_with_tag(int argc, Scheme_Object *argv[])
+{
+  DO_CHAR_PARAM("read-square-bracket-with-tag", MZCONFIG_SQUARE_BRACKETS_ARE_TAGGED);
+}
+
+static Scheme_Object *
+read_brace_with_tag(int argc, Scheme_Object *argv[])
+{
+  DO_CHAR_PARAM("read-curly-brace-with-tag", MZCONFIG_CURLY_BRACES_ARE_TAGGED);
+}
+
+static Scheme_Object *
+read_cdot(int argc, Scheme_Object *argv[])
+{
+  DO_CHAR_PARAM("read-cdot", MZCONFIG_READ_CDOT);
 }
 
 static Scheme_Object *
@@ -790,6 +830,15 @@ read_delay_load(int argc, Scheme_Object *argv[])
 
 #ifdef DO_STACK_CHECK
 
+static Scheme_Object *read_inner_inner_inner(Scheme_Object *port,
+				       Scheme_Object *stxsrc,
+				       Scheme_Hash_Table **ht,
+				       Scheme_Object *indentation,
+				       ReadParams *params,
+				       int comment_mode,
+				       int pre_char,
+				       Readtable *init_readtable,
+                                       int get_info);
 static Scheme_Object *read_inner_inner(Scheme_Object *port,
 				       Scheme_Object *stxsrc,
 				       Scheme_Hash_Table **ht,
@@ -817,7 +866,7 @@ static void set_need_copy(Scheme_Hash_Table **ht)
   scheme_hash_set(*ht, tainted_uninterned_symbol, scheme_true);
 }
 
-static Scheme_Object *read_inner_inner_k(void)
+static Scheme_Object *read_inner_inner_inner_k(void)
 {
   Scheme_Thread *p = scheme_current_thread;
   Scheme_Object *o = (Scheme_Object *)p->ku.k.p1;
@@ -833,7 +882,7 @@ static Scheme_Object *read_inner_inner_k(void)
   p->ku.k.p4 = NULL;
   p->ku.k.p5 = NULL;
 
-  return read_inner_inner(o, stxsrc, ht, indentation, params, p->ku.k.i1, p->ku.k.i2,
+  return read_inner_inner_inner(o, stxsrc, ht, indentation, params, p->ku.k.i1, p->ku.k.i2,
                           table, p->ku.k.i3);
 }
 #endif
@@ -874,14 +923,17 @@ static int read_vector_length(Scheme_Object *port, Readtable *table, int *ch, mz
     }
 
     if (!(*overflow)) {
-      intptr_t old_len;
+      uintptr_t old_len;
+      uintptr_t new_len;
 
       if (*vector_length < 0)
         *vector_length = 0;
 
       old_len = *vector_length;
-      *vector_length = ((*vector_length) * 10) + ((*ch) - 48);
-      if ((*vector_length < 0)|| ((*vector_length / 10) != old_len)) {
+      new_len = *vector_length;
+      new_len = ((new_len) * 10) + ((*ch) - 48);
+      *vector_length = new_len;
+      if ((*vector_length < 0) || ((new_len / 10) != old_len)) {
         *overflow = 1;
       }
     }
@@ -893,6 +945,11 @@ static int read_vector_length(Scheme_Object *port, Readtable *table, int *ch, mz
     *vector_length = -2;
   vecbuf[j] = 0;
   tagbuf[i] = 0;
+
+  if (!j) {
+    vecbuf[j] = '0';
+    vecbuf[0] = 0;
+  }
 
   return readtable_effective_char(table, (*ch));
 }
@@ -922,7 +979,7 @@ read_plus_minus_period_leading_number(Scheme_Object *port, Scheme_Object *stxsrc
 
 
 static Scheme_Object *
-read_inner_inner(Scheme_Object *port, Scheme_Object *stxsrc, Scheme_Hash_Table **ht,
+read_inner_inner_inner(Scheme_Object *port, Scheme_Object *stxsrc, Scheme_Hash_Table **ht,
 		 Scheme_Object *indentation, ReadParams *params,
 		 int comment_mode, int pre_char, Readtable *table,
                  int get_info)
@@ -958,7 +1015,7 @@ read_inner_inner(Scheme_Object *port, Scheme_Object *stxsrc, Scheme_Hash_Table *
       p->ku.k.i1 = comment_mode;
       p->ku.k.i2 = pre_char;
       p->ku.k.i3 = get_info;
-      return scheme_handle_stack_overflow(read_inner_inner_k);
+      return scheme_handle_stack_overflow(read_inner_inner_inner_k);
     }
   }
 #endif
@@ -1060,13 +1117,13 @@ read_inner_inner(Scheme_Object *port, Scheme_Object *stxsrc, Scheme_Hash_Table *
     case '(':
       return read_list(port, stxsrc, line, col, pos, ch, ')', mz_shape_cons, 0, ht, indentation, params, table);
     case '[':
-      if (!params->square_brackets_are_parens) {
+      if (!params->square_brackets_are_parens && !params->square_brackets_are_tagged) {
 	scheme_read_err(port, stxsrc, line, col, pos, 1, 0, indentation, "read: illegal use of open square bracket");
 	return NULL;
       } else
 	return read_list(port, stxsrc, line, col, pos, ch, ']', mz_shape_cons, 0, ht, indentation, params, table);
     case '{':
-      if (!params->curly_braces_are_parens) {
+      if (!params->curly_braces_are_parens && !params->curly_braces_are_tagged) {
 	scheme_read_err(port, stxsrc, line, col, pos, 1, 0, indentation, "read: illegal use of open curly brace");
 	return NULL;
       } else
@@ -1847,7 +1904,7 @@ read_inner_inner(Scheme_Object *port, Scheme_Object *stxsrc, Scheme_Hash_Table *
 
 	      if (!ph) {
 		scheme_read_err(port, stxsrc, line, col, pos, SPAN(port, pos), 0, indentation,
-				"read: no #%ld= preceding #%ld#",
+				"read: no #%d= preceding #%d#",
 				vector_length, vector_length);
 		return scheme_void;
 	      }
@@ -1874,7 +1931,7 @@ read_inner_inner(Scheme_Object *port, Scheme_Object *stxsrc, Scheme_Hash_Table *
 	      if (*ht) {
 		if (scheme_hash_get(*ht, scheme_make_integer(vector_length))) {
 		  scheme_read_err(port, stxsrc, line, col, pos, SPAN(port, pos), 0, indentation,
-				  "read: multiple #%ld= tags",
+				  "read: multiple #%d= tags",
 				  vector_length);
 		  return NULL;
 		}
@@ -1961,6 +2018,54 @@ read_inner_inner(Scheme_Object *port, Scheme_Object *stxsrc, Scheme_Hash_Table *
 }
 
 static Scheme_Object *
+read_inner_inner(Scheme_Object *port, Scheme_Object *stxsrc, Scheme_Hash_Table **ht,
+		 Scheme_Object *indentation, ReadParams *params,
+		 int comment_mode, int pre_char, Readtable *table,
+         int get_info)
+{
+  intptr_t rline = 0, rcol = 0, rpos = 0;
+  intptr_t dline = 0, dcol = 0, dpos = 0;
+  Scheme_Object *ret;
+  int read_cdot, next, found_dot;
+
+  read_cdot = params->read_cdot;
+  
+  scheme_tell_all(port, &rline, &rcol, &rpos);
+  ret = read_inner_inner_inner(port, stxsrc, ht, indentation, params, comment_mode, pre_char, table, get_info);
+
+  if (!read_cdot) { return ret; }
+
+  found_dot = 0;
+  while ( 1 ) {    
+    next = scheme_peekc_special_ok(port);
+    if ( next == EOF ) { break; }
+    if ( (table && readtable_kind(table, next, params) & READTABLE_WHITESPACE)
+         || (!table && scheme_isspace(next)) ) {
+      scheme_getc_special_ok(port); continue; }
+    if ( (table && readtable_effective_char(table, next) == '.')
+         || (!table && next == '.') ) {
+      scheme_getc_special_ok(port); found_dot = 1; break; }
+    break;
+  }
+
+  if ( found_dot ) {
+    Scheme_Object *dot, *next;
+    scheme_tell_all(port, &dline, &dcol, &dpos);
+    dot = dot_symbol;
+    if (stxsrc) {
+      dot = scheme_make_stx_w_offset(dot, dline, dcol, dpos, SPAN(port,dpos), stxsrc, STX_SRCTAG);
+    }
+    next = read_inner_inner(port, stxsrc, ht, indentation, params, comment_mode, pre_char, table, get_info);
+    ret = scheme_make_pair( dot, scheme_make_pair( ret, scheme_make_pair( next, scheme_null ) ) );
+    if (stxsrc) {
+      ret = scheme_make_stx_w_offset(ret, rline, rcol, rpos, SPAN(port,rpos), stxsrc, STX_SRCTAG);
+    }
+  }
+  
+  return ret;
+}
+
+static Scheme_Object *
 read_inner(Scheme_Object *port, Scheme_Object *stxsrc, Scheme_Hash_Table **ht,
 	   Scheme_Object *indentation, ReadParams *params,
 	   int comment_mode)
@@ -1974,6 +2079,7 @@ static Scheme_Object *resolve_references(Scheme_Object *obj,
 					 Scheme_Object *top,
                                          Scheme_Hash_Table *dht,
                                          Scheme_Hash_Table *tht,
+                                         Scheme_Hash_Table *self_contained_ht,
                                          int clone,
                                          int tail_depth);
 
@@ -1984,7 +2090,8 @@ static Scheme_Object *resolve_k(void)
   Scheme_Object *port = (Scheme_Object *)p->ku.k.p2;
   Scheme_Object *top = (Scheme_Object *)p->ku.k.p5;
   Scheme_Hash_Table *dht = (Scheme_Hash_Table *)p->ku.k.p3;
-  Scheme_Hash_Table *tht = (Scheme_Hash_Table *)p->ku.k.p4;
+  Scheme_Hash_Table *tht = (Scheme_Hash_Table *)SCHEME_CAR((Scheme_Object *)p->ku.k.p4);
+  Scheme_Hash_Table *self_contained_ht = (Scheme_Hash_Table *)SCHEME_CDR((Scheme_Object *)p->ku.k.p4);
 
   p->ku.k.p1 = NULL;
   p->ku.k.p2 = NULL;
@@ -1992,7 +2099,7 @@ static Scheme_Object *resolve_k(void)
   p->ku.k.p4 = NULL;
   p->ku.k.p5 = NULL;
 
-  return resolve_references(o, port, top, dht, tht, p->ku.k.i1, p->ku.k.i2);
+  return resolve_references(o, port, top, dht, tht, self_contained_ht, p->ku.k.i1, p->ku.k.i2);
 }
 #endif
 
@@ -2001,6 +2108,7 @@ static Scheme_Object *resolve_references(Scheme_Object *obj,
 					 Scheme_Object *top,
 					 Scheme_Hash_Table *dht,
 					 Scheme_Hash_Table *tht,
+                                         Scheme_Hash_Table *self_contained_ht,
                                          int clone,
                                          int tail_depth)
 {
@@ -2015,7 +2123,9 @@ static Scheme_Object *resolve_references(Scheme_Object *obj,
       p->ku.k.p2 = (void *)port;
       p->ku.k.p5 = (void *)top;
       p->ku.k.p3 = (void *)dht;
-      p->ku.k.p4 = (void *)tht;
+      result = scheme_make_pair((Scheme_Object *)tht,
+                                (Scheme_Object *)self_contained_ht);
+      p->ku.k.p4 = (void *)result;
       p->ku.k.i1 = clone;
       p->ku.k.i2 = tail_depth;
       return scheme_handle_stack_overflow(resolve_k);
@@ -2044,6 +2154,10 @@ static Scheme_Object *resolve_references(Scheme_Object *obj,
     }
   }
 
+  if (self_contained_ht
+      && scheme_hash_get(self_contained_ht, obj))
+    return obj;
+
   result = scheme_hash_get(dht, obj);
   if (result) {
     if (SCHEME_PAIRP(result)) {
@@ -2063,12 +2177,14 @@ static Scheme_Object *resolve_references(Scheme_Object *obj,
       result = scheme_make_pair(scheme_false, scheme_false);
     scheme_hash_set(dht, obj, result);
 
-    rr = resolve_references(SCHEME_CAR(obj), port, top, dht, tht, clone, tail_depth + 1);
+    rr = resolve_references(SCHEME_CAR(obj), port, top, dht, tht, self_contained_ht,
+                            clone, tail_depth + 1);
     SCHEME_CAR(result) = rr;
 
     scheme_hash_set(tht, result, scheme_make_integer(tail_depth));
 
-    rr = resolve_references(SCHEME_CDR(obj), port, top, dht, tht, clone, tail_depth);
+    rr = resolve_references(SCHEME_CDR(obj), port, top, dht, tht, self_contained_ht,
+                            clone, tail_depth);
     SCHEME_CDR(result) = rr;
 
     scheme_hash_set(tht, result, NULL);
@@ -2090,7 +2206,8 @@ static Scheme_Object *resolve_references(Scheme_Object *obj,
     }
     scheme_hash_set(dht, obj, result);
 
-    rr = resolve_references(SCHEME_BOX_VAL(obj), port, top, dht, tht, clone, tail_depth + 1);
+    rr = resolve_references(SCHEME_BOX_VAL(obj), port, top, dht, tht, self_contained_ht,
+                            clone, tail_depth + 1);
     SCHEME_BOX_VAL(result) = rr;
 
     if (clone
@@ -2122,7 +2239,8 @@ static Scheme_Object *resolve_references(Scheme_Object *obj,
 	rr = prev_rr;
       } else {
 	prev_v = SCHEME_VEC_ELS(obj)[i];
-	rr = resolve_references(prev_v, port, top, dht, tht, clone, tail_depth + 1);
+	rr = resolve_references(prev_v, port, top, dht, tht, self_contained_ht,
+                                clone, tail_depth + 1);
         if (!SAME_OBJ(prev_v, rr))
           diff = 1;
 	prev_rr = rr;
@@ -2175,7 +2293,8 @@ static Scheme_Object *resolve_references(Scheme_Object *obj,
     result = (Scheme_Object *)t;
     scheme_hash_set(dht, obj, result);
 
-    lst = resolve_references(lst, port, top, dht, tht, clone, tail_depth + 1);
+    lst = resolve_references(lst, port, top, dht, tht, self_contained_ht,
+                             clone, tail_depth + 1);
 
     for (; SCHEME_PAIRP(lst); lst = SCHEME_CDR(lst)) {
       a = SCHEME_CAR(lst);
@@ -2207,7 +2326,8 @@ static Scheme_Object *resolve_references(Scheme_Object *obj,
     }
 
     orig_l = l;
-    l = resolve_references(l, port, top, dht, tht, clone, tail_depth + 1);
+    l = resolve_references(l, port, top, dht, tht, self_contained_ht,
+                           clone, tail_depth + 1);
 
     if (SAME_OBJ(l, orig_l)) {
       result = obj;
@@ -2242,7 +2362,8 @@ static Scheme_Object *resolve_references(Scheme_Object *obj,
       diff = 0;
       for (i = 0; i < c; i++) {
         prev_v = ((Scheme_Structure *)result)->slots[i];
-	v = resolve_references(prev_v, port, top, dht, tht, clone, tail_depth + 1);
+	v = resolve_references(prev_v, port, top, dht, tht, self_contained_ht,
+                               clone, tail_depth + 1);
         if (!SAME_OBJ(prev_v, v))
           diff = 1;
         ((Scheme_Structure *)result)->slots[i] = v;
@@ -2315,6 +2436,12 @@ _internal_read(Scheme_Object *port, Scheme_Object *stxsrc, int crc, int cant_fai
   params.square_brackets_are_parens = SCHEME_TRUEP(v);
   v = scheme_get_param(config, MZCONFIG_CURLY_BRACES_ARE_PARENS);
   params.curly_braces_are_parens = SCHEME_TRUEP(v);
+  v = scheme_get_param(config, MZCONFIG_SQUARE_BRACKETS_ARE_TAGGED);
+  params.square_brackets_are_tagged = SCHEME_TRUEP(v);
+  v = scheme_get_param(config, MZCONFIG_CURLY_BRACES_ARE_TAGGED);
+  params.curly_braces_are_tagged = SCHEME_TRUEP(v);
+  v = scheme_get_param(config, MZCONFIG_READ_CDOT);
+  params.read_cdot = SCHEME_TRUEP(v);
   v = scheme_get_param(config, MZCONFIG_READ_DECIMAL_INEXACT);
   params.read_decimal_inexact = SCHEME_TRUEP(v);
   v = scheme_get_param(config, MZCONFIG_CAN_READ_QUASI);
@@ -2380,12 +2507,12 @@ _internal_read(Scheme_Object *port, Scheme_Object *stxsrc, int crc, int cant_fai
       tht = scheme_make_hash_table(SCHEME_hash_ptr);
 
       if (v)
-	v = resolve_references(v, port, NULL, dht, tht, clone, 0);
+	v = resolve_references(v, port, NULL, dht, tht, NULL, clone, 0);
 
       /* In case some placeholders were introduced by #;: */
       v2 = scheme_hash_get(*ht, unresolved_uninterned_symbol);
       if (v2)
-	resolve_references(v2, port, NULL, dht, tht, clone, 0);
+	resolve_references(v2, port, NULL, dht, tht, NULL, clone, 0);
 
       if (!v)
 	*ht = NULL;
@@ -2474,6 +2601,7 @@ Scheme_Object *scheme_resolve_placeholders(Scheme_Object *obj)
   return resolve_references(obj, NULL, obj, 
                             scheme_make_hash_table(SCHEME_hash_ptr),
                             scheme_make_hash_table(SCHEME_hash_ptr),
+                            NULL,
                             1, 0);
 }
 
@@ -2482,6 +2610,12 @@ Scheme_Object *scheme_resolve_placeholders(Scheme_Object *obj)
 /*========================================================================*/
 
 static Scheme_Object *attach_shape_property(Scheme_Object *list, 
+					    Scheme_Object *stxsrc, 
+					    ReadParams *params, 
+					    int closer);
+
+static Scheme_Object *attach_shape_tag(Scheme_Object *list,
+                        intptr_t line, intptr_t col, intptr_t pos, intptr_t span,
 					    Scheme_Object *stxsrc, 
 					    ReadParams *params, 
 					    int closer);
@@ -2632,8 +2766,8 @@ read_list(Scheme_Object *port,
 {
   Scheme_Object *list = NULL, *last = NULL, *car, *cdr, *pair, *infixed = NULL, *prefetched = NULL;
   int ch = 0, got_ch_already = 0, effective_ch;
-  int brackets = params->square_brackets_are_parens;
-  int braces = params->curly_braces_are_parens;
+  int brackets = params->square_brackets_are_parens || params->square_brackets_are_tagged;
+  int braces = params->curly_braces_are_parens || params->curly_braces_are_tagged;
   intptr_t start, startcol, startline, dotpos, dotcol, dotline, dot2pos, dot2line, dot2col, init_span;
 
   scheme_tell_all(port, &startline, &startcol, &start);
@@ -2662,7 +2796,7 @@ read_list(Scheme_Object *port,
     else if (got_ch_already)
       got_ch_already = 0;
     else
-      ch = skip_whitespace_comments(port, stxsrc, ht, indentation, params, table);
+      ch = skip_whitespace_comments(port, stxsrc, ht, indentation, params, table, NULL);
 
     if ((ch == EOF) && (closer != EOF)) {
       char *suggestion = "";
@@ -2699,6 +2833,7 @@ read_list(Scheme_Object *port,
       }
       if (!list) list = scheme_null;
       pop_indentation(indentation);
+      list = attach_shape_tag(list, line, col, pos, SPAN(port, pos), stxsrc, params, closer);
       list = (stxsrc
 	      ? scheme_make_stx_w_offset(list, line, col, pos, SPAN(port, pos), stxsrc, STX_SRCTAG)
 	      : list);
@@ -2754,9 +2889,11 @@ read_list(Scheme_Object *port,
         switch (shape) {
           case mz_shape_fl_vec:
             car = read_flonum(port, NULL, ht, indentation, params, RETURN_FOR_SPECIAL_COMMENT);
+            MZ_ASSERT(SCHEME_DBLP(car));
             break;
           case mz_shape_fx_vec:
             car = read_fixnum(port, NULL, ht, indentation, params, RETURN_FOR_SPECIAL_COMMENT);
+            MZ_ASSERT(SCHEME_INTP(car));
             break;
           default:
 	    car = read_inner(port, stxsrc, ht, indentation, params, RETURN_FOR_SPECIAL_COMMENT);
@@ -2770,7 +2907,7 @@ read_list(Scheme_Object *port,
 
   retry_before_dot:
 
-    ch = skip_whitespace_comments(port, stxsrc, ht, indentation, params, table);
+    ch = skip_whitespace_comments(port, stxsrc, ht, indentation, params, table, NULL);
     effective_ch = readtable_effective_char(table, ch);
     if (effective_ch == closer) {
       if (shape == mz_shape_hash_elem) {
@@ -2793,6 +2930,7 @@ read_list(Scheme_Object *port,
       }
 
       pop_indentation(indentation);
+      list = attach_shape_tag(list, line, col, pos, SPAN(port, pos), stxsrc, params, closer);
       list = (stxsrc
 	      ? scheme_make_stx_w_offset(list, line, col, pos, SPAN(port, pos), stxsrc, STX_SRCTAG)
 	      : list);
@@ -2819,7 +2957,7 @@ read_list(Scheme_Object *port,
 
       /* can't be eof, due to check above: */
       cdr = read_inner(port, stxsrc, ht, indentation, params, 0);
-      ch = skip_whitespace_comments(port, stxsrc, ht, indentation, params, table);
+      ch = skip_whitespace_comments(port, stxsrc, ht, indentation, params, table, &prefetched);
       effective_ch = readtable_effective_char(table, ch);
       if ((effective_ch != closer) || (shape == mz_shape_vec_plus_infix)) {
 	if (params->can_read_infix_dot 
@@ -2848,14 +2986,15 @@ read_list(Scheme_Object *port,
 	  last = pair;
 
 	  /* Make sure there's not a closing paren immediately after the dot: */
-	  ch = skip_whitespace_comments(port, stxsrc, ht, indentation, params, table);
+	  ch = skip_whitespace_comments(port, stxsrc, ht, indentation, params, table, &prefetched);
           effective_ch = readtable_effective_char(table, ch);
 	  if ((effective_ch == closer) || (ch == EOF)) {
 	    scheme_read_err(port, stxsrc, dotline, dotcol, dotpos, 1, (ch == EOF) ? EOF : 0, indentation,
 			    "read: illegal use of `%c'", ch);
 	    return NULL;
 	  }
-	  got_ch_already = 1;
+          if (!prefetched)
+            got_ch_already = 1;
 	} else {
 	  scheme_read_err(port, stxsrc, dotline, dotcol, dotpos, 1, (ch == EOF) ? EOF : 0, indentation,
 			  "read: illegal use of `%c'",
@@ -2873,6 +3012,7 @@ read_list(Scheme_Object *port,
 	/* Assert: infixed is NULL (otherwise we raised an exception above) */
 
 	pop_indentation(indentation);
+      list = attach_shape_tag(list, line, col, pos, SPAN(port, pos), stxsrc, params, closer);
         list = (stxsrc
 		? scheme_make_stx_w_offset(list, line, col, pos, SPAN(port, pos), stxsrc, STX_SRCTAG)
 		: list);
@@ -2880,14 +3020,25 @@ read_list(Scheme_Object *port,
 	return list;
       }
     } else {
-      if ((ch == SCHEME_SPECIAL) 
-          || (table && (ch != EOF) && (shape != mz_shape_hash_list))) {
+      if ((ch == SCHEME_SPECIAL)
+          || (table
+              && (ch != EOF)
+              && (shape != mz_shape_hash_list)
+              && (shape != mz_shape_fl_vec)
+              && (shape != mz_shape_fx_vec))) {
 	/* We have to try the read, because it might be a comment. */
 	scheme_ungetc(ch, port);
 	prefetched = read_inner(port, stxsrc, ht, indentation, params, 
                                 RETURN_FOR_SPECIAL_COMMENT);
 	if (!prefetched)
 	  goto retry_before_dot;
+        if ((shape == mz_shape_fl_vec) && !SCHEME_DBLP(prefetched)) {
+          scheme_read_err(port, stxsrc, startline, startcol, start, SPAN(port, start), ch, indentation,
+                          "read: stream produced a non-flonum for flvector");
+        } else if ((shape == mz_shape_fx_vec) && !SCHEME_INTP(prefetched)) {
+          scheme_read_err(port, stxsrc, startline, startcol, start, SPAN(port, start), ch, indentation,
+                          "read: stream produced a non-fixnum for fxvector");
+        }
       } else {
 	got_ch_already = 1;
       }
@@ -2917,10 +3068,35 @@ static Scheme_Object *attach_shape_property(Scheme_Object *list,
   if ((closer != ')') && stxsrc) {
     Scheme_Object *opener;
     opener = ((closer == '}') 
-	      ? scheme_make_ascii_character('{')
-	      : scheme_make_ascii_character('['));
+	      ? scheme_paren_shape_preserve_curly
+	      : scheme_paren_shape_preserve_square);
     return scheme_stx_property(list, scheme_paren_shape_symbol, opener);
   }
+  return list;
+}
+
+static Scheme_Object *attach_shape_tag(Scheme_Object *list,
+                        intptr_t line, intptr_t col, intptr_t pos, intptr_t span,
+					    Scheme_Object *stxsrc, 
+					    ReadParams *params, 
+					    int closer)
+{
+  Scheme_Object *tag;
+  tag = NULL;
+  
+  if (params->square_brackets_are_tagged && closer == ']') {
+    tag = brackets_symbol;
+  } else if (params->curly_braces_are_tagged && closer == '}') {
+    tag = braces_symbol;
+  }
+  
+  if (tag) {
+    if (stxsrc) {
+      tag = scheme_make_stx_w_offset(tag, line, col, pos, span, stxsrc, STX_SRCTAG);
+    }
+    list = scheme_make_pair(tag, list);
+  }
+  
   return list;
 }
 
@@ -3119,21 +3295,23 @@ read_string(int is_byte, Scheme_Object *port,
       case 'U':
 	if (!is_byte) {
 	  int maxc = ((ch == 'u') ? 4 : 8);
-          char initial[8];
+          char initial[9];
 	  ch = scheme_getc_special_ok(port);
 	  if (NOT_EOF_OR_SPECIAL(ch) && scheme_isxdigit(ch)) {
 	    int count = 1;
+            initial[0] = ch;
 	    n = ch<='9' ? ch-'0' : (scheme_toupper(ch)-'A'+10);
 	    while (count < maxc) {
 	      ch = scheme_peekc_special_ok(port);
 	      if (NOT_EOF_OR_SPECIAL(ch) && scheme_isxdigit(ch)) {
                 initial[count] = ch;
-		n = n*16 + (ch<='9' ? ch-'0' : (scheme_toupper(ch)-'A'+10));
+		n = ((unsigned)n<<4) + (ch<='9' ? ch-'0' : (scheme_toupper(ch)-'A'+10));
 		scheme_getc(port); /* must be ch */
 		count++;
 	      } else
 		break;
 	    }
+            initial[count] = 0;
             if ((maxc == 4) && ((n >= 0xD800) && (n <= 0xDBFF))) {
               /* Allow a surrogate-pair-like encoding, as long as
                  the next part is "\uD..." */
@@ -3178,7 +3356,6 @@ read_string(int is_byte, Scheme_Object *port,
                 else if (NOT_EOF_OR_SPECIAL(ch))
                   snd[sndp++] = ch;
                 snd[sndp] = 0;
-                initial[4] = 0;
                 if (err_ok)
                   scheme_read_err(port, stxsrc, line, col, pos, SPAN(port, pos), ch, indentation,
                                   "read: bad or incomplete surrogate-style encoding at `\\u%s%5'",
@@ -3491,6 +3668,7 @@ read_number_or_symbol(int init_ch, int skip_rt, Scheme_Object *port,
   intptr_t rq_pos = 0, rq_col = 0, rq_line = 0;
   int case_sens = params->case_sensitive;
   int decimal_inexact = params->read_decimal_inexact;
+  int read_cdot = params->read_cdot;
   Scheme_Object *o;
   int delim_ok;
   int ungetc_ok;
@@ -3539,8 +3717,10 @@ read_number_or_symbol(int init_ch, int skip_rt, Scheme_Object *port,
 	     || (!table 
 		 && !scheme_isspace(ch) 
 		 && (((ch < 128) && (delim[ch] & delim_ok))
-		     || ((ch >= 128) && far_char_ok)))
-	     || table)) {
+		     || ((ch >= 128) && far_char_ok))
+         && !(!is_float && !is_not_float && !radix_set && read_cdot && ch == '.'))
+	     || (table
+         && !(!is_float && !is_not_float && !radix_set && read_cdot && readtable_effective_char(table, ch) == '.')))) {
     if (table) {
       int v;
       v = readtable_kind(table, ch, params);
@@ -3870,7 +4050,7 @@ read_character(Scheme_Object *port,
       ch = scheme_peekc_special_ok(port);
       if (NOT_EOF_OR_SPECIAL(ch) && scheme_isxdigit(ch)) {
 	nbuf[count] = ch;
-	n = n*16 + (ch<='9' ? ch-'0' : (scheme_toupper(ch)-'A'+10));
+	n = ((unsigned)n<<4) + (ch<='9' ? ch-'0' : (scheme_toupper(ch)-'A'+10));
 	scheme_getc(port); /* must be ch */
 	count++;
       } else
@@ -4111,9 +4291,12 @@ Scheme_Object *scheme_read_intern(Scheme_Object *o)
 static int
 skip_whitespace_comments(Scheme_Object *port, Scheme_Object *stxsrc,
 			 Scheme_Hash_Table **ht, Scheme_Object *indentation,
-                         ReadParams *params, Readtable *table)
+                         ReadParams *params, Readtable *table,
+                         Scheme_Object **_prefetched)
+/* If `_prefetched` is non_NULL, then a SCHEME_SPECIAL result means that
+   the special value has already been read, and it wasn't a comment. */
 {
-  int ch;
+  int ch, effective_ch;
   int blockc_1, blockc_2;
 
   blockc_1 = '#';
@@ -4126,21 +4309,23 @@ skip_whitespace_comments(Scheme_Object *port, Scheme_Object *stxsrc,
       if (!(readtable_kind(table, ch, params) & READTABLE_WHITESPACE))
 	break;
     }
-    return ch;
   } else {
     while ((ch = scheme_getc_special_ok(port), NOT_EOF_OR_SPECIAL(ch) && scheme_isspace(ch))) {}
   }
 
-  if (ch == ';') {
+  effective_ch = readtable_effective_char(table, ch);
+  if (effective_ch == ';') {
     do {
       ch = scheme_getc_special_ok(port);
-      if (ch == SCHEME_SPECIAL)
+      effective_ch = readtable_effective_char(table, ch);
+      if (effective_ch == SCHEME_SPECIAL)
 	scheme_get_ready_read_special(port, stxsrc, ht);
-    } while (!is_line_comment_end(ch) && ch != EOF);
+    } while (!is_line_comment_end(effective_ch) && (effective_ch != EOF));
     goto start_over;
   }
 
-  if (ch == blockc_1 && (scheme_peekc_special_ok(port) == blockc_2)) {
+  if ((effective_ch == blockc_1)
+      && (readtable_effective_char(table, scheme_peekc_special_ok(port)) == blockc_2)) {
     int depth = 0;
     int ch2 = 0;
     intptr_t col, pos, line;
@@ -4150,27 +4335,29 @@ skip_whitespace_comments(Scheme_Object *port, Scheme_Object *stxsrc,
     (void)scheme_getc(port); /* re-read '|' */
     do {
       ch = scheme_getc_special_ok(port);
-
-      if (ch == EOF)
+      effective_ch = readtable_effective_char(table, ch);
+ 
+      if (effective_ch == EOF)
 	scheme_read_err(port, stxsrc, line, col, pos, MINSPAN(port, pos, 2), EOF, indentation,
 			"read: end of file in #| comment");
-      else if (ch == SCHEME_SPECIAL)
+      else if (effective_ch == SCHEME_SPECIAL)
 	scheme_get_ready_read_special(port, stxsrc, ht);
 
-      if ((ch2 == blockc_2) && (ch == blockc_1)) {
+      if ((ch2 == blockc_2) && (effective_ch == blockc_1)) {
 	if (!(depth--))
 	  goto start_over;
-	ch = 0; /* So we don't count '#' toward an opening "#|" */
+	effective_ch = 0; /* So we don't count '#' toward an opening "#|" */
       } else if ((ch2 == blockc_1) && (ch == blockc_2)) {
 	depth++;
-	ch = 0; /* So we don't count '|' toward a closing "|#" */
+	effective_ch = 0; /* So we don't count '|' toward a closing "|#" */
       }
-      ch2 = ch;
+      ch2 = effective_ch;
     } while (1);
 
     goto start_over;
   }
-  if (ch == '#' && (scheme_peekc_special_ok(port) == ';')) {
+  if ((effective_ch == '#')
+      && (readtable_effective_char(table, scheme_peekc_special_ok(port)) == ';')) {
     Scheme_Object *skipped;
     intptr_t col, pos, line;
 
@@ -4193,6 +4380,20 @@ skip_whitespace_comments(Scheme_Object *port, Scheme_Object *stxsrc,
 	v = scheme_null;
       v = scheme_make_pair(skipped, v);
       scheme_hash_set(*ht, unresolved_uninterned_symbol, v);
+    }
+
+    goto start_over;
+  }
+
+  if ((ch == SCHEME_SPECIAL) && _prefetched) {
+    Scheme_Object *v;
+    intptr_t col, pos, line;
+
+    scheme_tell_all(port, &line, &col, &pos);
+    v = scheme_get_special(port, stxsrc, line, col, pos, 0, ht);
+    if (!scheme_special_comment_value(v)) {
+      *_prefetched = v;
+      return SCHEME_SPECIAL;
     }
 
     goto start_over;
@@ -4307,6 +4508,7 @@ typedef struct Scheme_Load_Delay {
   uintptr_t symtab_size;
   Scheme_Object **symtab;
   intptr_t *shared_offsets;
+  Scheme_Hash_Table *symtab_entries; /* `symtab` content to be skipped by resolve_references */
   Scheme_Object *relto;
   Scheme_Unmarshal_Tables *ut;
   struct CPort *current_rp;
@@ -4336,6 +4538,7 @@ typedef struct CPort {
   Scheme_Object *symtab_refs;
   Scheme_Unmarshal_Tables *ut;
   Scheme_Object **symtab;
+  Scheme_Hash_Table *symtab_entries;
   Scheme_Object *magic_sym, *magic_val;
   Scheme_Object *relto;
   intptr_t *shared_offsets;
@@ -4546,6 +4749,9 @@ static Scheme_Object *read_escape_from_string(char *s, intptr_t len,
   params.case_sensitive = scheme_case_sensitive;
   params.square_brackets_are_parens = 1;
   params.curly_braces_are_parens = 1;
+  params.square_brackets_are_tagged = 0;
+  params.curly_braces_are_tagged = 0;
+  params.read_cdot = 0;
   params.read_decimal_inexact = 1;
   params.can_read_dot = 1;
   params.can_read_infix_dot = 1;
@@ -4584,6 +4790,20 @@ static Scheme_Object *read_compact_escape(CPort *port)
   return read_escape_from_string(s, len, port->relto, port->ht);
 }
 
+static void record_symtab_self_contained(Scheme_Hash_Table *symtab_entries, Scheme_Object *v)
+{
+  if (SCHEME_PAIRP(v)
+      || SCHEME_BOXP(v)
+      || SCHEME_VECTORP(v)
+      || SCHEME_HASHTRP(v)
+      || SCHEME_STRUCTP(v)) {
+    /* Register `v` as a value that is shared through the symbol table,
+       so that later calls to resolve_references() can avoid re-traversing
+       the value. (Otherwise, bytecode reading can become quadratic-time.) */
+    scheme_hash_set(symtab_entries, v, scheme_true);
+  }
+}
+
 static Scheme_Object *resolve_symtab_refs(Scheme_Object *v, CPort *port)
 {
   Scheme_Object *l;
@@ -4596,7 +4816,8 @@ static Scheme_Object *resolve_symtab_refs(Scheme_Object *v, CPort *port)
     
     v = resolve_references(v, port->orig_port, NULL,
                            scheme_make_hash_table(SCHEME_hash_ptr), 
-                           scheme_make_hash_table(SCHEME_hash_ptr), 
+                           scheme_make_hash_table(SCHEME_hash_ptr),
+                           port->symtab_entries,
                            0, 0);
     
     l = SCHEME_CDR(v);
@@ -4604,9 +4825,10 @@ static Scheme_Object *resolve_symtab_refs(Scheme_Object *v, CPort *port)
     l = port->symtab_refs;
 
   for (; !SCHEME_NULLP(l); l = SCHEME_CDR(l)) {
-    if (v)
+    if (v) {
       port->symtab[SCHEME_INT_VAL(SCHEME_CAR(SCHEME_CAR(l)))] = SCHEME_CDR(SCHEME_CAR(l));
-    else {
+      record_symtab_self_contained(port->symtab_entries, SCHEME_CDR(SCHEME_CAR(l)));
+    } else {
       /* interrupted; discard partial constructions */
       port->symtab[SCHEME_INT_VAL(SCHEME_CAR(SCHEME_CAR(l)))] = NULL;
     }
@@ -4854,7 +5076,8 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
           *port->ht = NULL;
           v = resolve_references(v, port->orig_port, NULL,
                                  scheme_make_hash_table(SCHEME_hash_ptr), 
-                                 scheme_make_hash_table(SCHEME_hash_ptr), 
+                                 scheme_make_hash_table(SCHEME_hash_ptr),
+                                 port->symtab_entries,
                                  0, 0);
         }
 
@@ -4981,7 +5204,7 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
             if (SCHEME_FALSEP(path))
               return scheme_make_modidx(scheme_false, scheme_false, scheme_false);
             else
-              return scheme_get_submodule_empty_self_modidx(path);
+              return scheme_get_submodule_empty_self_modidx(path, 0);
           } else
             return scheme_make_modidx(path, base, scheme_false);
 	}
@@ -5340,8 +5563,9 @@ static Scheme_Object *read_compact_quote(CPort *port, int embedded)
 
   if (*q_ht)
     v = resolve_references(v, port->orig_port, NULL,
-                           scheme_make_hash_table(SCHEME_hash_ptr), 
-                           scheme_make_hash_table(SCHEME_hash_ptr), 
+                           scheme_make_hash_table(SCHEME_hash_ptr),
+                           scheme_make_hash_table(SCHEME_hash_ptr),
+                           port->symtab_entries,
                            0, 0);
 
   return v;
@@ -5393,7 +5617,7 @@ static void install_byecode_hash_code(CPort *rp, char *hash_code)
   int i;
 
   for (i = 0; i < 20; i++) {
-    l ^= ((mzlonglong)(hash_code[i]) << ((i % 8) * 8));
+    l ^= ((umzlonglong)(hash_code[i]) << ((i % 8) * 8));
   }
 
   /* Make sure the hash code leaves lots of room for
@@ -5447,7 +5671,7 @@ Scheme_Object *scheme_string_to_submodule_path(char *_s, intptr_t len)
 {
   unsigned char *s = (unsigned char *)_s;
   char *e, buffer[32];
-  intptr_t pos = 0, l;
+  uintptr_t pos = 0, l;
   Scheme_Object *first = NULL, *last = NULL, *pr;
 
   while (pos < len) {
@@ -5676,6 +5900,14 @@ static Scheme_Object *read_compiled(Scheme_Object *port,
       rp->ht = local_ht;
       rp->symtab = symtab;
       rp->unsafe_ok = params->can_read_unsafe;
+
+      {
+        Scheme_Hash_Table *se_ht;
+        se_ht = scheme_make_hash_table(SCHEME_hash_ptr);
+        rp->symtab_entries = se_ht;
+        if (delay_info)
+          delay_info->symtab_entries = se_ht;
+      }
 
       config = scheme_current_config();
 
@@ -5964,6 +6196,7 @@ Scheme_Object *scheme_load_delayed_code(int _which, Scheme_Load_Delay *_delay_in
   rp->ut = delay_info->ut;
   rp->unsafe_ok = delay_info->unsafe_ok;
   rp->bytecode_hash = delay_info->bytecode_hash;
+  rp->symtab_entries = delay_info->symtab_entries;
   if (delay_info->ut)
     delay_info->ut->rp = rp;
 
@@ -6019,11 +6252,13 @@ Scheme_Object *scheme_load_delayed_code(int _which, Scheme_Load_Delay *_delay_in
     if (*ht) {
       v = resolve_references(v, port, NULL,
                              scheme_make_hash_table(SCHEME_hash_ptr), 
-                             scheme_make_hash_table(SCHEME_hash_ptr), 
+                             scheme_make_hash_table(SCHEME_hash_ptr),
+                             delay_info->symtab_entries,
                              0, 0);
     }
 
     delay_info->symtab[which] = v;
+    record_symtab_self_contained(delay_info->symtab_entries, v);
         
     return v;
   } else {
@@ -6204,7 +6439,8 @@ static Scheme_Object *readtable_call(int w_char, int ch, Scheme_Object *proc, Re
         /* resolve references from recursive `read': */
         v = resolve_references(v, port, NULL,
                                scheme_make_hash_table(SCHEME_hash_ptr), 
-                               scheme_make_hash_table(SCHEME_hash_ptr), 
+                               scheme_make_hash_table(SCHEME_hash_ptr),
+                               NULL,
                                1, 0);
       }
 
@@ -6303,7 +6539,7 @@ static void check_proc_either_arity(const char *who, int a1, int a2, int which, 
 {
   if (!scheme_check_proc_arity(NULL, a1, which, argc, argv)
       && !scheme_check_proc_arity(NULL, a2, which, argc, argv)) {
-    char buffer[60];
+    char buffer[256];
     sprintf(buffer, "(or (procedure-arity-includes/c %d) (procedure-arity-includes/c %d))", a1, a2);
     scheme_wrong_contract(who, buffer, which, argc, argv);
   }

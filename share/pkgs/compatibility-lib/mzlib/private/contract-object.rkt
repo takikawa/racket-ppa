@@ -287,7 +287,7 @@
                    #:projection
                    (lambda (blame)
                      (lambda (val)
-                       (make-wrapper-object ctc val blame
+                       (make-wrapper-object ctc val blame #f
                                             (list 'method-name ...) (list method-ctc-var ...)
                                             (list 'field-name ...) (list field-ctc-var ...))))
                    #:first-order

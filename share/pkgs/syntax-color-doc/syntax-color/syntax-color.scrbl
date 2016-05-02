@@ -230,7 +230,7 @@ Like @racket[racket-lexer], but for Racket extended with Scribble's
 Like @racket[scribble-lexer], but starting in ``text'' mode instead of
 Racket mode.}
 
-@defproc[(make-scribble-lexer [#:command-char at char? #\@])
+@defproc[(make-scribble-lexer [#:command-char at (and/c char? (not/c (or/c #\] #\[))) #\@])
          lexer/c]{
 
 Produces a lexer like @racket[scribble-lexer], but using
@@ -239,7 +239,7 @@ Produces a lexer like @racket[scribble-lexer], but using
 @history[#:added "1.1"]}
 
 
-@defproc[(make-scribble-inside-lexer [#:command-char at char? #\@])
+@defproc[(make-scribble-inside-lexer [#:command-char at (and/c char? (not/c (or/c #\] #\[))) #\@])
          lexer/c]{
 
 Produces a lexer function like @racket[scribble-inside-lexer], but using

@@ -387,7 +387,7 @@ definition
 
 At the same time, @racket[define-cbr] needs to define @racket[do-f]
 using the body of @racket[f], this second part is slightly more
-complex, so we defer most it to a @racket[define-for-cbr] helper
+complex, so we defer most of it to a @racket[define-for-cbr] helper
 module, which lets us write @racket[define-cbr] easily enough:
 
 
@@ -453,11 +453,11 @@ Step-by-step, expansion proceeds as follows:
 @racketblock[
 (define-for-cbr do-f (a b)
   () (swap a b))
-=> (define-for-cbr do-f (b)
+(unsyntax @tt{=>}) (define-for-cbr do-f (b)
      ([a get_1 put_1]) (swap a b))
-=> (define-for-cbr do-f ()
+(unsyntax @tt{=>}) (define-for-cbr do-f ()
      ([a get_1 put_1] [b get_2 put_2]) (swap a b))
-=> (define (do-f get_1 get_2 put_1 put_2)
+(unsyntax @tt{=>}) (define (do-f get_1 get_2 put_1 put_2)
      (define-get/put-id a get_1 put_1)
      (define-get/put-id b get_2 put_2)
      (swap a b))

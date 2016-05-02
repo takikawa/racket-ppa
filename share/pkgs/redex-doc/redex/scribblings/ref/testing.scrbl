@@ -1,5 +1,5 @@
 #lang scribble/manual
-@(require "common.rkt" scribble/eval
+@(require "common.rkt" scribble/example
           (for-label racket/base
                      (except-in racket/gui make-color)
                      racket/pretty
@@ -10,8 +10,7 @@
                               vc-append hbl-append vl-append)
                      redex))
 
-@(define redex-eval (make-base-eval))
-@(interaction-eval #:eval redex-eval (require redex/reduction-semantics))
+@(define redex-eval (make-base-eval '(require redex/reduction-semantics)))
 
 @title{Testing}
 
@@ -163,7 +162,7 @@ prints the test results for the next round of tests.
   of the equivalence predicates
   for @racket[test-equal], @racket[test-->], and @racket[test-->>].
   
-  It defaults to @racket[equal?].
+  It defaults to @racket[(lambda (lhs rhs) (alpha-equivalent? (default-language) lhs rhs))].
 }
 
 @defform/subs[(make-coverage subject)
@@ -624,7 +623,7 @@ See also @racket[check-reduction-relation] and @racket[check-metafunction].
           (positive? (term number)))
         #:prepare (λ (n)
                     (printf "preparing ~s; " n)
-                    (add1 (abs n)))
+                    (add1 (abs (real-part n))))
         #:attempts 3)
                      
        (define-language L

@@ -9,7 +9,8 @@
          "params.rkt"
          "install.rkt"
          "repo-path.rkt"
-         "dirs.rkt")
+         "dirs.rkt"
+         "print.rkt")
 
 (provide pkg-migrate)
 
@@ -23,10 +24,15 @@
                      #:use-cache? [use-cache? #t]
                      #:dep-behavior [dep-behavior #f]
                      #:strip [strip-mode #f]
-                     #:force-strip? [force-strip? #f])
+                     #:force-strip? [force-strip? #f]
+                     #:dry-run? [dry-run? #f])
   (define from-db
-    (parameterize ([current-pkg-scope-version from-version])
-      (installed-pkg-table #:scope 'user)))
+    ((if (equal? (current-pkg-scope-version) from-version)
+         (lambda (f) (f))
+         call-with-separate-lock)
+     (lambda ()
+       (parameterize ([current-pkg-scope-version from-version])
+         (installed-pkg-table #:scope 'user)))))
   (define installed-dir
     (parameterize ([current-pkg-scope 'user])
       (pkg-installed-dir)))
@@ -77,6 +83,7 @@
                     #:quiet? quiet? 
                     #:from-command-line? from-command-line?
                     #:strip strip-mode
-                    #:force-strip? force-strip?)
+                    #:force-strip? force-strip?
+                    #:dry-run? dry-run?)
        (unless quiet?
-         (printf "Packages migrated\n")))))
+         (printf "Packages migrated~a\n" (dry-run-explain dry-run?))))))

@@ -1,5 +1,6 @@
 (module code racket/base
   (require pict/private/pict
+           pict/convert
            (prefix-in r: racket/base)
            mzlib/class
            mzlib/list
@@ -149,7 +150,10 @@
 	   (syntax-case stx ()
 	     [(_ expr) #`(typeset-code #,(cvt #'expr))]
 	     [(_ expr (... ...))
-	      #`(typeset-code #,(cvt #'(code:line expr (... ...))))])))]
+	      #`(typeset-code #,(cvt
+                                 ;; Avoid a syntax location for the synthesized `code:line` wrapper,
+                                 ;; otherwise the `expr`s will be arranged relative to it:
+                                 (datum->syntax #f (cons 'code:line #'(expr (... ...))))))])))]
       [(_ code typeset-code) #'(define-code code typeset-code unsyntax)]))
   
   (define-signature code^
@@ -541,9 +545,12 @@
                     (apply htl-append 
                            (color-semi-p)
                            (map (lambda (s)
-                                  (if (pict? (syntax-e s))
-                                      (syntax-e s)
-                                      (maybe-colorize (tt (syntax-e s)) (current-comment-color))))
+                                  (define datum (syntax-e s))
+                                  (if (pict-convertible? datum)
+                                      datum
+                                      (if (string? datum)
+                                          (maybe-colorize (tt datum) (current-comment-color))
+                                          (raise-argument-error 'code:comment "string?" datum))))
                                 (syntax->list #'(s ...))))])
                ;; Ungraceful handling of ungraceful closes by adding a line
                ;; --- better than sticking them to the right of the comment, at least
@@ -557,6 +564,7 @@
                                ((syntax-position i) . > . pos)
                                (syntax-position i)))])
                (and pos 
+                    (syntax-position #'a)
                     ((syntax-position #'a) . > . (syntax-position #'b))
                     ((syntax-position #'a) . < . (syntax-position #'c))))
              ;; position of `a' is after `b', while everything else is in
@@ -711,7 +719,7 @@
                                     closes
                                     mode))]
             [else
-	     (add-close (if (pict? (syntax-e stx))
+	     (add-close (if (pict-convertible? (syntax-e stx))
 			    (syntax-e stx)
 			    (mode-colorize mode 'literal
 					   (tt (format "~s" (syntax-e stx)))))

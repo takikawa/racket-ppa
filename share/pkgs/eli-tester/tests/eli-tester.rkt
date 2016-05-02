@@ -6,15 +6,18 @@
 (define-syntax (safe stx)
   (syntax-case stx ()
     [(_ expr)
-     ;; catch syntax errors while expanding, turn them into runtime errors
-     (with-handlers ([exn:fail:syntax? (lambda (e) #`(list 'error #,(exn-message e) #f))])
-       (define-values (_ opaque)
-         (syntax-local-expand-expression
-          #'(with-handlers
-                ([(lambda (_) #t)
-                  (lambda (e) (list 'error (and (exn? e) (exn-message e)) e))])
-              (cons 'values (call-with-values (lambda () expr) list)))))
-       opaque)]))
+     ;; catch syntax errors while expanding, turn them into runtime errors;
+     ;; disable source location in error messages during expansion of `expr`,
+     ;; because syntax errors get captured in compiled test modules
+     (parameterize ([error-print-source-location #f])
+      (with-handlers ([exn:fail:syntax? (lambda (e) #`(list 'error #,(exn-message e) #f))])
+        (define-values (_ opaque)
+          (syntax-local-expand-expression
+           #'(with-handlers
+                 ([(lambda (_) #t)
+                   (lambda (e) (list 'error (and (exn? e) (exn-message e)) e))])
+               (cons 'values (call-with-values (lambda () expr) list)))))
+        opaque))]))
 
 (define show
   (match-lambda

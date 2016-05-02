@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2015 PLT Design Inc.
+  Copyright (c) 2004-2016 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
   All rights reserved.
 
@@ -464,6 +464,7 @@ MZ_EXTERN void scheme_gc_ptr_ok(void *p);
 MZ_EXTERN void scheme_collect_garbage(void);
 MZ_EXTERN void scheme_collect_garbage_minor(void);
 MZ_EXTERN void scheme_enable_garbage_collection(int on);
+MZ_EXTERN void scheme_incremental_garbage_collection(int on);
 
 #ifdef MZ_PRECISE_GC
 # ifndef USE_THREAD_LOCAL
@@ -483,6 +484,8 @@ MZ_EXTERN void scheme_free_immobile_box(void **b);
 MZ_EXTERN Scheme_Object *scheme_add_gc_callback(Scheme_Object *pre, Scheme_Object *post);
 MZ_EXTERN void scheme_remove_gc_callback(Scheme_Object *key);
 
+MZ_EXTERN void scheme_register_type_gc_shape(Scheme_Type type, intptr_t *shape_str);
+
 /*========================================================================*/
 /*                             hash tables                                */
 /*========================================================================*/
@@ -495,6 +498,8 @@ MZ_EXTERN Scheme_Bucket *scheme_bucket_from_table(Scheme_Bucket_Table *table, co
 MZ_EXTERN int scheme_bucket_table_equal(Scheme_Bucket_Table *t1, Scheme_Bucket_Table *t2);
 MZ_EXTERN Scheme_Bucket_Table *scheme_clone_bucket_table(Scheme_Bucket_Table *bt);
 MZ_EXTERN void scheme_clear_bucket_table(Scheme_Bucket_Table *bt);
+XFORM_NONGCING_NONALIASING MZ_EXTERN int scheme_bucket_table_index(Scheme_Bucket_Table *hash, mzlonglong pos, Scheme_Object **_key, Scheme_Object **_val);
+XFORM_NONGCING Scheme_Object *scheme_bucket_table_next(Scheme_Bucket_Table *hash, mzlonglong start);
 
 MZ_EXTERN Scheme_Hash_Table *scheme_make_hash_table(int type);
 MZ_EXTERN Scheme_Hash_Table *scheme_make_hash_table_equal();
@@ -509,6 +514,8 @@ MZ_EXTERN int scheme_is_hash_table_equal(Scheme_Object *o);
 MZ_EXTERN int scheme_is_hash_table_eqv(Scheme_Object *o);
 MZ_EXTERN Scheme_Hash_Table *scheme_clone_hash_table(Scheme_Hash_Table *ht);
 MZ_EXTERN void scheme_clear_hash_table(Scheme_Hash_Table *ht);
+XFORM_NONGCING_NONALIASING MZ_EXTERN int scheme_hash_table_index(Scheme_Hash_Table *hash, mzlonglong pos, Scheme_Object **_key, Scheme_Object **_val);
+XFORM_NONGCING MZ_EXTERN Scheme_Object *scheme_hash_table_next(Scheme_Hash_Table *hash, mzlonglong start);
 
 MZ_EXTERN Scheme_Hash_Tree *scheme_make_hash_tree(int kind);
 MZ_EXTERN Scheme_Hash_Tree *scheme_make_hash_tree_set(int kind);
@@ -516,7 +523,7 @@ MZ_EXTERN Scheme_Hash_Tree *scheme_hash_tree_set(Scheme_Hash_Tree *tree, Scheme_
 MZ_EXTERN Scheme_Object *scheme_hash_tree_get(Scheme_Hash_Tree *tree, Scheme_Object *key);
 XFORM_NONGCING MZ_EXTERN Scheme_Object *scheme_eq_hash_tree_get(Scheme_Hash_Tree *tree, Scheme_Object *key);
 XFORM_NONGCING MZ_EXTERN mzlonglong scheme_hash_tree_next(Scheme_Hash_Tree *tree, mzlonglong pos);
-XFORM_NONGCING MZ_EXTERN int scheme_hash_tree_index(Scheme_Hash_Tree *tree, mzlonglong pos, Scheme_Object **_key, Scheme_Object **_val);
+XFORM_NONGCING_NONALIASING MZ_EXTERN int scheme_hash_tree_index(Scheme_Hash_Tree *tree, mzlonglong pos, Scheme_Object **_key, Scheme_Object **_val);
 MZ_EXTERN int scheme_hash_tree_equal(Scheme_Hash_Tree *t1, Scheme_Hash_Tree *t2);
 MZ_EXTERN int scheme_is_hash_tree_equal(Scheme_Object *o);
 MZ_EXTERN int scheme_is_hash_tree_eqv(Scheme_Object *o);

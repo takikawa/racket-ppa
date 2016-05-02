@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2015 PLT Design Inc.
+  Copyright (c) 2004-2016 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -85,8 +85,8 @@ static Scheme_Object *read_local_unbox(Scheme_Object *obj);
 static Scheme_Object *write_resolve_prefix(Scheme_Object *obj);
 static Scheme_Object *read_resolve_prefix(Scheme_Object *obj);
 
-static Scheme_Object *write_compiled_closure(Scheme_Object *obj);
-static Scheme_Object *read_compiled_closure(Scheme_Object *obj);
+static Scheme_Object *write_lambda(Scheme_Object *obj);
+static Scheme_Object *read_lambda(Scheme_Object *obj);
 
 static Scheme_Object *write_module(Scheme_Object *obj);
 static Scheme_Object *read_module(Scheme_Object *obj);
@@ -94,6 +94,7 @@ static Scheme_Object *read_top_level_require(Scheme_Object *obj);
 static Scheme_Object *write_top_level_require(Scheme_Object *obj);
 
 static Scheme_Object *ht_to_vector(Scheme_Object *ht, int delay);
+static Scheme_Object *closure_marshal_name(Scheme_Object *name);
 
 void scheme_init_marshal(Scheme_Env *env) 
 {
@@ -149,10 +150,8 @@ void scheme_init_marshal(Scheme_Env *env)
   scheme_install_type_writer(scheme_compilation_top_type, write_top);
   scheme_install_type_reader(scheme_compilation_top_type, read_top);
 
-  scheme_install_type_writer(scheme_unclosed_procedure_type,
-			     write_compiled_closure);
-  scheme_install_type_reader(scheme_unclosed_procedure_type,
-			     read_compiled_closure);
+  scheme_install_type_writer(scheme_lambda_type, write_lambda);
+  scheme_install_type_reader(scheme_lambda_type, read_lambda);
 
   scheme_install_type_writer(scheme_toplevel_type, write_toplevel);
   scheme_install_type_reader(scheme_toplevel_type, read_toplevel);
@@ -338,6 +337,7 @@ static Scheme_Object *read_top(Scheme_Object *obj)
   top->iso.so.type = scheme_compilation_top_type;
   if (!SCHEME_PAIRP(obj)) return NULL;
   top->max_let_depth = SCHEME_INT_VAL(SCHEME_CAR(obj));
+  if (top->max_let_depth < 0) return NULL; /* Should this check for a max as well? */
   obj = SCHEME_CDR(obj);
   if (!SCHEME_PAIRP(obj)) return NULL;
   top->binding_namess = SCHEME_CAR(obj); /* checking is in scheme_install_binding_names() */
@@ -364,7 +364,7 @@ static Scheme_Object *write_case_lambda(Scheme_Object *obj)
     l = cons(cl->array[i], l);
   }
   
-  return cons((cl->name ? cl->name : scheme_null),
+  return cons(closure_marshal_name(cl->name),
 	      l);
 }
 
@@ -395,7 +395,7 @@ static Scheme_Object *read_case_lambda(Scheme_Object *obj)
     a = SCHEME_CAR(s);
     cl->array[i] = a;
     if (!SCHEME_PROCP(a)) {
-      if (!SAME_TYPE(SCHEME_TYPE(a), scheme_unclosed_procedure_type))
+      if (!SAME_TYPE(SCHEME_TYPE(a), scheme_lambda_type))
         return NULL;
       all_closed = 0;
     }
@@ -461,7 +461,7 @@ static Scheme_Object *read_begin_for_syntax(Scheme_Object *obj)
 
 static Scheme_Object *write_begin_for_syntax(Scheme_Object *obj)
 {
-  return write_define_values(obj);
+  return scheme_clone_vector(obj, 0, 0);
 }
 
 static Scheme_Object *read_set_bang(Scheme_Object *obj)
@@ -647,17 +647,17 @@ static Scheme_Object *write_sequence(Scheme_Object *obj)
 
 static Scheme_Object *read_sequence(Scheme_Object *obj)
 {
-  return scheme_make_sequence_compilation(obj, 1);
+  return scheme_make_sequence_compilation(obj, 1, 1);
 }
 
 static Scheme_Object *read_sequence_save_first(Scheme_Object *obj)
 {
-  return scheme_make_sequence_compilation(obj, -2);
+  return scheme_make_sequence_compilation(obj, -2, 1);
 }
 
 static Scheme_Object *read_sequence_splice(Scheme_Object *obj)
 {
-  obj = scheme_make_sequence_compilation(obj, 1);
+  obj = scheme_make_sequence_compilation(obj, 1, 1);
   if (!obj) return NULL;
 
   if (SAME_TYPE(SCHEME_TYPE(obj), scheme_sequence_type))
@@ -746,7 +746,7 @@ static Scheme_Object *read_quote_syntax(Scheme_Object *obj)
 static int not_relative_path(Scheme_Object *p, Scheme_Hash_Table *cache)
 {
   Scheme_Object *dir, *rel_p;
-  
+
   dir = scheme_get_param(scheme_current_config(),
                          MZCONFIG_WRITE_DIRECTORY);
   if (SCHEME_TRUEP(dir)) {
@@ -758,17 +758,9 @@ static int not_relative_path(Scheme_Object *p, Scheme_Hash_Table *cache)
   return 0;
 }
 
-static Scheme_Object *write_compiled_closure(Scheme_Object *obj)
+static Scheme_Object *closure_marshal_name(Scheme_Object *name)
 {
-  Scheme_Closure_Data *data;
-  Scheme_Object *name, *l, *code, *ds, *tl_map;
-  int svec_size, pos;
-  Scheme_Marshal_Tables *mt;
-
-  data = (Scheme_Closure_Data *)obj;
-
-  if (data->name) {
-    name = data->name;
+  if (name) {
     if (SCHEME_VECTORP(name)) {
       /* We can only save marshalable src names, which includes
 	 paths, symbols, and strings: */
@@ -785,24 +777,37 @@ static Scheme_Object *write_compiled_closure(Scheme_Object *obj)
 	name = SCHEME_VEC_ELS(name)[0];
       }
     }
-  } else {
+  } else
     name = scheme_null;
-  }
+
+  return name;
+}
+
+static Scheme_Object *write_lambda(Scheme_Object *obj)
+{
+  Scheme_Lambda *data;
+  Scheme_Object *name, *l, *code, *ds, *tl_map;
+  int svec_size, pos;
+  Scheme_Marshal_Tables *mt;
+
+  data = (Scheme_Lambda *)obj;
+
+  name = closure_marshal_name(data->name);
 
   svec_size = data->closure_size;
-  if (SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_HAS_TYPED_ARGS) {
-    svec_size += ((CLOS_TYPE_BITS_PER_ARG * (data->num_params + data->closure_size)) + BITS_PER_MZSHORT - 1) / BITS_PER_MZSHORT;
+  if (SCHEME_LAMBDA_FLAGS(data) & LAMBDA_HAS_TYPED_ARGS) {
+    svec_size += scheme_boxmap_size(data->num_params + data->closure_size);
     {
       int k, mv;
       for (k = data->num_params + data->closure_size; --k; ) {
         mv = scheme_boxmap_get(data->closure_map, k, data->closure_size);
-        if (mv > (CLOS_TYPE_TYPE_OFFSET + SCHEME_MAX_LOCAL_TYPE))
+        if (mv > (LAMBDA_TYPE_TYPE_OFFSET + SCHEME_MAX_LOCAL_TYPE))
           scheme_signal_error("internal error: inconsistent closure/argument type");
       }
     }
   }
 
-  if (SCHEME_RPAIRP(data->code)) {
+  if (SCHEME_RPAIRP(data->body)) {
     /* This can happen if loaded bytecode is printed out and the procedure
        body has never been needed before.
        It's also possible in non-JIT mode if an empty closure is embedded 
@@ -813,7 +818,7 @@ static Scheme_Object *write_compiled_closure(Scheme_Object *obj)
   /* If the body is simple enough, write it directly.
      Otherwise, create a delay indirection so that the body
      is loaded on demand. */
-  code = data->code;
+  code = data->body;
   switch (SCHEME_TYPE(code)) {
   case scheme_toplevel_type:
   case scheme_local_type:
@@ -861,10 +866,10 @@ static Scheme_Object *write_compiled_closure(Scheme_Object *obj)
           ds = mt->cdata_map[pos];
           if (ds) {
             ds = SCHEME_PTR_VAL(ds);
-            if (SAME_OBJ(data->code, ds))
+            if (SAME_OBJ(data->body, ds))
               break;
             if (SAME_TYPE(scheme_quote_compilation_type, SCHEME_TYPE(ds)))
-              if (SAME_OBJ(data->code, SCHEME_PTR_VAL(ds)))
+              if (SAME_OBJ(data->body, SCHEME_PTR_VAL(ds)))
                 break;
           }
           pos += 256;
@@ -879,7 +884,7 @@ static Scheme_Object *write_compiled_closure(Scheme_Object *obj)
         if (mt->pass)
           scheme_signal_error("broken closure-data table\n");
 
-        code = scheme_protect_quote(data->code);
+        code = scheme_protect_quote(data->body);
 
         ds = scheme_alloc_small_object();
         ds->type = scheme_delay_syntax_type;
@@ -920,11 +925,11 @@ static Scheme_Object *write_compiled_closure(Scheme_Object *obj)
                                data->closure_map),
            ds);
 
-  if (SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_HAS_TYPED_ARGS)
+  if (SCHEME_LAMBDA_FLAGS(data) & LAMBDA_HAS_TYPED_ARGS)
     l = CONS(scheme_make_integer(data->closure_size),
              l);
 
-  return CONS(scheme_make_integer(SCHEME_CLOSURE_DATA_FLAGS(data) & 0x7F),
+  return CONS(scheme_make_integer(SCHEME_LAMBDA_FLAGS(data) & 0x7F),
 	      CONS(scheme_make_integer(data->num_params),
 		   CONS(scheme_make_integer(data->max_let_depth),
                         CONS(tl_map,
@@ -932,22 +937,22 @@ static Scheme_Object *write_compiled_closure(Scheme_Object *obj)
                                   l)))));
 }
 
-static Scheme_Object *read_compiled_closure(Scheme_Object *obj)
+static Scheme_Object *read_lambda(Scheme_Object *obj)
 {
-  Scheme_Closure_Data *data;
+  Scheme_Lambda *data;
   Scheme_Object *v, *tl_map;
 
 #define BAD_CC "bad compiled closure"
 #define X_SCHEME_ASSERT(x, y)
 
-  data  = (Scheme_Closure_Data *)scheme_malloc_tagged(sizeof(Scheme_Closure_Data));
+  data  = (Scheme_Lambda *)scheme_malloc_tagged(sizeof(Scheme_Lambda));
 
-  data->iso.so.type = scheme_unclosed_procedure_type;
+  data->iso.so.type = scheme_lambda_type;
 
   if (!SCHEME_PAIRP(obj)) return NULL;
   v = SCHEME_CAR(obj);
   obj = SCHEME_CDR(obj);
-  SCHEME_CLOSURE_DATA_FLAGS(data) = (short)(SCHEME_INT_VAL(v));
+  SCHEME_LAMBDA_FLAGS(data) = (short)(SCHEME_INT_VAL(v));
 
   if (!SCHEME_PAIRP(obj)) return NULL;
   v = SCHEME_CAR(obj);
@@ -976,11 +981,11 @@ static Scheme_Object *read_compiled_closure(Scheme_Object *obj)
       for (i = 0; i < len/2; i++) {
         v1 = SCHEME_INT_VAL(SCHEME_VEC_ELS(tl_map)[2*i]);
         v2 = SCHEME_INT_VAL(SCHEME_VEC_ELS(tl_map)[(2*i) + 1]);
-        v2 = (v2 << 16) | v1;
+        v2 = ((unsigned int)v2 << 16) | v1;
         n[i+1] = v2;
       }
       if ((len == 2) && (!(n[1] & 0x80000000)))
-        data->tl_map = (void *)(intptr_t)((n[1] << 1) | 0x1);
+        data->tl_map = (void *)(intptr_t)(((uintptr_t)n[1] << 1) | 0x1);
       else
         data->tl_map = n;
     } else
@@ -998,7 +1003,7 @@ static Scheme_Object *read_compiled_closure(Scheme_Object *obj)
   obj = SCHEME_CDR(obj);
 
   /* v is an svector or an integer... */
-  if (SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_HAS_TYPED_ARGS) {
+  if (SCHEME_LAMBDA_FLAGS(data) & LAMBDA_HAS_TYPED_ARGS) {
     if (!SCHEME_INTP(v)) return NULL;
     data->closure_size = SCHEME_INT_VAL(v);
     
@@ -1007,12 +1012,17 @@ static Scheme_Object *read_compiled_closure(Scheme_Object *obj)
     obj = SCHEME_CDR(obj);
   }
 
-  data->code = obj;
+  data->body = obj;
 
   if (!SAME_TYPE(scheme_svector_type, SCHEME_TYPE(v))) return NULL;
 
-  if (!(SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_HAS_TYPED_ARGS))
+  if (!(SCHEME_LAMBDA_FLAGS(data) & LAMBDA_HAS_TYPED_ARGS))
     data->closure_size = SCHEME_SVEC_LEN(v);
+
+  if ((SCHEME_LAMBDA_FLAGS(data) & LAMBDA_HAS_TYPED_ARGS))
+    if (data->closure_size + scheme_boxmap_size(data->closure_size + data->num_params) != SCHEME_SVEC_LEN(v))
+      return NULL;
+
   data->closure_map = SCHEME_SVEC_VEC(v);
 
   /* If the closure is empty, create the closure now */

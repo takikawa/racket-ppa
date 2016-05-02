@@ -20,8 +20,8 @@ intervals of exact integers to values. An interval-map is queried at a
 discrete point, and the result of the query is the value mapped to the
 interval containing the point.
 
-Internally, interval-maps use a splay-tree
-(@racketmodname[data/splay-tree]) of intervals for efficient query and
+Internally, interval-maps use a skip-list
+(@racketmodname[data/skip-list]) of intervals for efficient query and
 update, including efficient contraction and expansion of intervals.
 
 Interval-maps implement the dictionary (@racketmodname[racket/dict])
@@ -29,23 +29,36 @@ interface to a limited extent. Only @racket[dict-ref] and the
 iteration-based methods (@racket[dict-iterate-first],
 @racket[dict-map], etc) are supported. For the iteration-based
 methods, the mapping's keys are considered the pairs of the start and
-end positions of the mapping's intervals.
+end positions of the mapping's (half-open) intervals.
 
 @examples[#:eval the-eval
 (define r (make-interval-map))
 (interval-map-set! r 1 5 'apple)
 (interval-map-set! r 6 10 'pear)
 (interval-map-set! r 3 7 'banana)
-(dict-map r list)
+r
+(interval-map-ref r 1 #f)
+(interval-map-ref r 3 #f)
+(interval-map-ref r 10 #f)
 ]
 
 Operations on interval-maps are not thread-safe.
 
-@defproc[(make-interval-map [#:key-contract key-contract contract? any/c]
+@defproc[(make-interval-map [contents
+                             (listof (cons/c (cons/c exact-integer? exact-integer?) any/c))
+                             null]
+                            [#:key-contract key-contract contract? any/c]
                             [#:value-contract value-contract contract? any/c])
          interval-map?]{
 
-Makes a new empty interval-map.
+Makes a new interval-map initialized with @racket[_contents], which has the form
+@racketblock[(list (cons (cons _start _end) _value) ...)]
+
+@examples[#:eval the-eval
+(define r (make-interval-map '(((0 . 5) . apple) ((5 . 10) . banana))))
+(interval-map-ref r 2)
+(interval-map-ref r 5)
+]
 }
 
 @defproc[(interval-map? [v any/c])
@@ -123,7 +136,7 @@ If @racket[start] is not less than @racket[end], an exception is raised.
          void?]{
 
 Expands @racket[interval-map]'s domain by introducing a gap
-[@racket[start], @racket[end]) and increasing intervals initially after
+[@racket[start], @racket[end]) and increasing intervals starting at or after
 @racket[start] by @racket[(- end start)].
 
 If @racket[start] is not less than @racket[end], an exception is raised.

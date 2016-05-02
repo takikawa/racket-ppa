@@ -7,7 +7,7 @@
          pict
          wxme)
 
-(provide snipclass
+(provide snip-class
          reader
          pict-snip%)
 
@@ -48,17 +48,18 @@
     
     (inherit set-snipclass)
     (super-new)
-    (set-snipclass snipclass)))
+    (set-snipclass snip-class)))
 
-(define snipclass 
+(provide snip-class)
+(define snip-class
   (new (class snip-class%
          (define/override (read f)
            (raw-data->snip (send f get-unterminated-bytes)))
          (super-new))))
-(send snipclass set-classname (~s '((lib "snip.rkt" "pict") (lib "snip-wxme.rkt" "pict"))))
-(send snipclass set-version 1)
+(send snip-class set-classname (~s '((lib "snip.rkt" "pict") (lib "snip-wxme.rkt" "pict"))))
+(send snip-class set-version 1)
 (define (set-box/f! b v) (when (box? b) (set-box! b v)))
-(send (get-the-snip-class-list) add snipclass)
+(send (get-the-snip-class-list) add snip-class)
 
 (define reader
   (class* object% (snip-reader<%>)

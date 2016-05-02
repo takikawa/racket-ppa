@@ -1,7 +1,8 @@
 (module marks scheme/base
 
   (require mzlib/list
-	   mzlib/contract
+           racket/undefined
+	   racket/contract
            (prefix-in mz: mzscheme))
 
   (define-struct full-mark-struct (module-name source label bindings values))
@@ -87,7 +88,7 @@
   ; : identifier -> identifier
   (define (make-mark-binding-stx id)
     #`(case-lambda
-        [() #,id]
+        [() #,id] ; Note: `id` might be undefined; caller must catch exceptions
         [(v) (set! #,id v)]))
   
   (define (mark-bindings mark)
@@ -99,7 +100,8 @@
     (full-mark-struct-label (mark)))
   
   (define (mark-binding-value mark-binding)
-    ((cadr mark-binding)))
+    (with-handlers ([exn:fail:contract:variable? (λ (x) undefined)])
+      ((cadr mark-binding))))
   
   (define (mark-binding-binding mark-binding)
     (car mark-binding))

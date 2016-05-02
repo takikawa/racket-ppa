@@ -183,7 +183,7 @@ The design of a world program demands that you come up with a data
 @defform/subs[#:id big-bang
               #:literals
               (on-tick to-draw on-draw on-key on-pad on-release on-mouse on-receive stop-when
-              check-with register record? display-mode state name port)
+              check-with register record? close-on-stop display-mode state name port)
               (big-bang state-expr clause ...)
               ([clause
                  (on-tick tick-expr)
@@ -198,6 +198,7 @@ The design of a world program demands that you come up with a data
                  (stop-when stop-expr) (stop-when stop-expr last-scene-expr)
                  (check-with world?-expr)
                  (record? r-expr)
+                 (close-on-stop cos-expr)
                  (display-mode d-expr)
                  (state expr)
                  (on-receive rec-expr)
@@ -676,8 +677,9 @@ All @tech{MouseEvent}s are represented via strings:
 @defform[(stop-when last-world?)
          #:contracts
          ([last-world? (-> (unsyntax @tech{WorldState}) boolean?)])]{
- tells DrRacket to call the @racket[last-world?] function whenever the canvas is
- drawn. If this call produces @racket[#true], the world program is shut
+ tells DrRacket to call the @racket[last-world?] function at the start of
+ the world program and after any other world-producing callback.
+ If this call produces @racket[#true], the world program is shut
  down. Specifically, the  clock is stopped; no more
  tick events, @tech{KeyEvent}s, or @tech{MouseEvent}s are forwarded to
  the respective handlers. The @racket[big-bang] expression returns this
@@ -690,8 +692,9 @@ All @tech{MouseEvent}s are represented via strings:
          ([last-world? (-> (unsyntax @tech{WorldState}) boolean?)]
           [last-picture (-> (unsyntax @tech{WorldState}) scene?)])]{
 @note-scene
- tells DrRacket to call the @racket[last-world?] function whenever the canvas is
- drawn. If this call produces @racket[#true], the world program is shut
+ tells DrRacket to call the @racket[last-world?] function at the start of
+ the world program and after any other world-producing callback.
+ If this call produces @racket[#true], the world program is shut
  down after displaying the world one last time, this time using the image
  rendered with @racket[last-picture]. Specifically, the  clock is stopped; no more
  tick events, @tech{KeyEvent}s, or @tech{MouseEvent}s are forwarded to
@@ -706,7 +709,9 @@ All @tech{MouseEvent}s are represented via strings:
 DrRacket that the world program should shut down. That is, any
 handler may return @racket[(stop-with w)] provided @racket[w] is a
 @tech[#:tag-prefixes '("world")]{HandlerResult}. If it does, the state of the world becomes @racket[w]
-and @racket[big-bang] will close down all event handling.}
+and @racket[big-bang] will close down all event handling. Similarly,
+if the initial state of the world is @racket[(stop-with w)], event handling
+is immediately closed down.}
 
 }
 
@@ -734,6 +739,20 @@ and @racket[big-bang] will close down all event handling.}
  choice.  If @racket[r-expr] evaluates to the name of an existing
  directory/folder (in the local directory/folder), the directory is used to
  deposit the images.
+}}
+
+@item{
+
+@defform[#:literals (close-on-stop)
+         (close-on-stop cos-expr)
+         #:contracts
+         ([cos-expr (or/c boolean? natural-number/c)])]{
+ tells DrRacket whether to close the @racket[big-bang] window 
+ @emph{after} the expression is evaluated. If @racket[cos-expr] is
+ @racket[#false], which is the default, the window remains open. 
+ If @racket[cos-expr] is @racket[#true], the window closes immediately. 
+ Finally, if @racket[cos-expr] is a natural number, the window closes
+ @racket[cos-expr] seconds after the end of the evaluation.
 }}
 
 @item{

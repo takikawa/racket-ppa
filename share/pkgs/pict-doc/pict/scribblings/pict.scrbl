@@ -245,7 +245,14 @@ The @racket[style] argument must be one of the following:
  @item{@racket[(cons 'italic style)]}
  @item{@racket[(cons 'subscript style)]}
  @item{@racket[(cons 'superscript style)]}
- @item{@racket[(cons 'caps style)]}
+
+@item{@racket[(cons 'large-script style)] --- makes subscripts and
+      superscripts larger, which is more suitable for small text sizes
+      as might appear in print
+
+      @history[#:added "1.5"]}
+
+@item{@racket[(cons 'caps style)]}
 
  @item{@racket[(cons 'combine style)] --- allows kerning and ligatures
       (the default, unless the @racket['modern] family is specified)}
@@ -297,7 +304,7 @@ Straight lines, centered within their @tech{bounding box}es.
 ]}
 
 
-@defproc[(frame [pict pict?]
+@defproc[(frame [pict pict-convertible?]
                 [#:segment seg-length (or/c #f real?) #f]
                 [#:color color (or/c #f string? (is-a?/c color<%>)) #f]
                 [#:line-width width (or/c #f real?) #f])
@@ -475,11 +482,11 @@ The @racket[size] is used for the arrowhead size. Even though
 @racket[pip-line] creates no arrowheads, it accepts the @racket[size]
 argument for consistency with the other functions.}
 
-@defproc*[([(pin-line [pict pict?]
+@defproc*[([(pin-line [pict pict-convertible?]
                       [src pict-path?]
-                      [find-src (pict? pict-path? . -> . (values real? real?))]
+                      [find-src (pict-convertible? pict-path? . -> . (values real? real?))]
                       [dest pict-path?]
-                      [find-dest (pict? pict-path? . -> . (values real? real?))]
+                      [find-dest (pict-convertible? pict-path? . -> . (values real? real?))]
                       [#:start-angle start-angle (or/c real? #f) #f]
                       [#:end-angle end-angle (or/c real? #f) #f]
                       [#:start-pull start-pull real? 1/4]
@@ -497,11 +504,11 @@ argument for consistency with the other functions.}
                       [#:x-adjust-label x-adjust-label real? 0]
                       [#:y-adjust-label y-adjust-label real? 0])
             pict?]
-           [(pin-arrow-line [arrow-size real?] [pict pict?]
+           [(pin-arrow-line [arrow-size real?] [pict pict-convertible?]
                       [src pict-path?]
-                      [find-src (pict? pict-path? . -> . (values real? real?))]
+                      [find-src (pict-convertible? pict-path? . -> . (values real? real?))]
                       [dest pict-path?]
-                      [find-dest (pict? pict-path? . -> . (values real? real?))]
+                      [find-dest (pict-convertible? pict-path? . -> . (values real? real?))]
                       [#:start-angle start-angle (or/c real? #f) #f]
                       [#:end-angle end-angle (or/c real? #f) #f]
                       [#:start-pull start-pull real? 1/4]
@@ -521,11 +528,11 @@ argument for consistency with the other functions.}
                       [#:solid? solid? any/c #t]
 		      [#:hide-arrowhead? hide-arrowhead? any/c #f])
             pict?]
-           [(pin-arrows-line [arrow-size real?] [pict pict?]
+           [(pin-arrows-line [arrow-size real?] [pict pict-convertible?]
                       [src pict-path?]
-                      [find-src (pict? pict-path? . -> . (values real? real?))]
+                      [find-src (pict-convertible? pict-path? . -> . (values real? real?))]
                       [dest pict-path?]
-                      [find-dest (pict? pict-path? . -> . (values real? real?))]
+                      [find-dest (pict-convertible? pict-path? . -> . (values real? real?))]
                       [#:start-angle start-angle (or/c real? #f) #f]
                       [#:end-angle end-angle (or/c real? #f) #f]
                       [#:start-pull start-pull real? 1/4]
@@ -538,7 +545,7 @@ argument for consistency with the other functions.}
                                                'xor-dot 'xor-long-dash 'xor-short-dash 
                                                'xor-dot-dash)]
                       [#:under? under? any/c #f]
-                      [#:label label pict? (blank)]
+                      [#:label label pict-convertible? (blank)]
                       [#:x-adjust-label x-adjust-label real? 0]
                       [#:y-adjust-label y-adjust-label real? 0]
                       [#:solid? solid? any/c #t]
@@ -621,14 +628,14 @@ bitmap.}
 
 @section{Pict Combiners}
 
-@defproc*[([(vl-append [d real? 0.0] [pict pict?] ...) pict?]
-           [(vc-append [d real? 0.0] [pict pict?] ...) pict?]
-           [(vr-append [d real? 0.0] [pict pict?] ...) pict?]
-           [(ht-append [d real? 0.0] [pict pict?] ...) pict?]
-           [(htl-append [d real? 0.0] [pict pict?] ...) pict?]
-           [(hc-append [d real? 0.0] [pict pict?] ...) pict?]
-           [(hbl-append [d real? 0.0] [pict pict?] ...) pict?]
-           [(hb-append [d real? 0.0] [pict pict?] ...) pict?])]{
+@defproc*[([(vl-append [d real? 0.0] [pict pict-convertible?] ...) pict?]
+           [(vc-append [d real? 0.0] [pict pict-convertible?] ...) pict?]
+           [(vr-append [d real? 0.0] [pict pict-convertible?] ...) pict?]
+           [(ht-append [d real? 0.0] [pict pict-convertible?] ...) pict?]
+           [(htl-append [d real? 0.0] [pict pict-convertible?] ...) pict?]
+           [(hc-append [d real? 0.0] [pict pict-convertible?] ...) pict?]
+           [(hbl-append [d real? 0.0] [pict pict-convertible?] ...) pict?]
+           [(hb-append [d real? 0.0] [pict pict-convertible?] ...) pict?])]{
 
 Creates a new pict as a column (for @racket[v...-append]) or row (for
 @racket[h...-append]) of other picts. The optional @racket[d] argument
@@ -664,21 +671,21 @@ supplied @racket[pict].
   (drop picts 4)
 ]}
 
-@defproc*[([(lt-superimpose [pict pict?] ...) pict?]
-           [(ltl-superimpose [pict pict?] ...) pict?]
-           [(lc-superimpose [pict pict?] ...) pict?]
-           [(lbl-superimpose [pict pict?] ...) pict?]
-           [(lb-superimpose [pict pict?] ...) pict?]
-           [(ct-superimpose [pict pict?] ...) pict?]
-           [(ctl-superimpose [pict pict?] ...) pict?]
-           [(cc-superimpose [pict pict?] ...) pict?]
-           [(cbl-superimpose [pict pict?] ...) pict?]
-           [(cb-superimpose [pict pict?] ...) pict?]
-           [(rt-superimpose [pict pict?] ...) pict?]
-           [(rtl-superimpose [pict pict?] ...) pict?]
-           [(rc-superimpose [pict pict?] ...) pict?]
-           [(rbl-superimpose [pict pict?] ...) pict?]
-           [(rb-superimpose [pict pict?] ...) pict?])]{
+@defproc*[([(lt-superimpose [pict pict-convertible?] ...) pict?]
+           [(ltl-superimpose [pict pict-convertible?] ...) pict?]
+           [(lc-superimpose [pict pict-convertible?] ...) pict?]
+           [(lbl-superimpose [pict pict-convertible?] ...) pict?]
+           [(lb-superimpose [pict pict-convertible?] ...) pict?]
+           [(ct-superimpose [pict pict-convertible?] ...) pict?]
+           [(ctl-superimpose [pict pict-convertible?] ...) pict?]
+           [(cc-superimpose [pict pict-convertible?] ...) pict?]
+           [(cbl-superimpose [pict pict-convertible?] ...) pict?]
+           [(cb-superimpose [pict pict-convertible?] ...) pict?]
+           [(rt-superimpose [pict pict-convertible?] ...) pict?]
+           [(rtl-superimpose [pict pict-convertible?] ...) pict?]
+           [(rc-superimpose [pict pict-convertible?] ...) pict?]
+           [(rbl-superimpose [pict pict-convertible?] ...) pict?]
+           [(rb-superimpose [pict pict-convertible?] ...) pict?])]{
 
 Creates a new picture by superimposing a set of pictures. The name
 prefixes are alignment indicators: horizontal alignment then vertical
@@ -717,12 +724,12 @@ comparing the last-element bottom-right corners.
 ]}
 
 
-@defproc*[([(pin-over [base pict?] [dx real?] [dy real?] [pict pict?])
+@defproc*[([(pin-over [base pict-convertible?] [dx real?] [dy real?] [pict pict-convertible?])
             pict?]
-           [(pin-over [base pict?]
+           [(pin-over [base pict-convertible?]
                       [find-pict pict-path?]
-                      [find (pict? pict-path? . -> . (values real? real?))]
-                      [pict pict?])
+                      [find (pict-convertible? pict-path? . -> . (values real? real?))]
+                      [pict pict-convertible?])
             pict?])]{
 
 Creates a pict with the same @tech{bounding box}, ascent, and descent as
@@ -731,27 +738,52 @@ and @racket[dy] arguments specify how far right and down the second
 pict's corner is from the first pict's corner.  Alternately, the
 @racket[find-pict] and @racket[find] arguments find a point in
 @racket[base] for @racket[find-pict]; the @racket[find] procedure
-should be something like @racket[lt-find].}
+should be something like @racket[lt-find].
+
+@examples[#:eval ss-eval
+  (pin-over (colorize (filled-rectangle 70 40) "chocolate")
+            10 10
+            (colorize (filled-rectangle 30 30) "orange"))
+  (define top (colorize (filled-rectangle 70 40) "royalblue"))
+  (pin-over (vc-append top (colorize (filled-rectangle 70 40) "firebrick"))
+            top
+            cb-find
+            (colorize (disk 20) "white"))
+]}
 
 
-@defproc*[([(pin-under [base pict?] [dx real?] [dy real?] [pict pict?])
+@defproc*[([(pin-under [base pict-convertible?] [dx real?] [dy real?] [pict pict-convertible?])
             pict?]
-           [(pin-under [base pict?] 
-                       [find-pict pict?]
-                       [find (pict? pict? . -> . (values real? real?))]
-                       [pict pict?])
+           [(pin-under [base pict-convertible?] 
+                       [find-pict pict-convertible?]
+                       [find (pict-convertible? pict-path? . -> . (values real? real?))]
+                       [pict pict-convertible?])
             pict?])]{
 
 Like @racket[pin-over], but @racket[pict] is drawn before
-@racket[base] in the resulting combination.}
+@racket[base] in the resulting combination.
+
+@examples[#:eval ss-eval
+  (define txt
+    (colorize (text "P I C T S" null 25) "chocolate"))
+  (define rect
+    (colorize
+     (filled-rectangle (pict-width txt) (* 0.3 (pict-height txt)))
+     "lemonchiffon"))
+  (pin-under txt
+             0
+             (- (/ (pict-height txt) 2)
+                (/ (pict-height rect) 2))
+             rect)
+]}
 
 
 @defproc[(table [ncols exact-positive-integer?]
-                [picts (non-empty-listof pict?)]
-                [col-aligns (or/c (list*of (->* () #:rest (listof pict?) pict?))
-                                  (listof (->* () #:rest (listof pict?) pict?)))]
-                [row-aligns (or/c (list*of (->* () #:rest (listof pict?) pict?))
-                                  (listof (->* () #:rest (listof pict?) pict?)))]
+                [picts (non-empty-listof pict-convertible?)]
+                [col-aligns (or/c (list*of (->* () #:rest (listof pict-convertible?) pict-convertible?))
+                                  (listof (->* () #:rest (listof pict-convertible?) pict-convertible?)))]
+                [row-aligns (or/c (list*of (->* () #:rest (listof pict-convertible?) pict-convertible?))
+                                  (listof (->* () #:rest (listof pict-convertible?) pict-convertible?)))]
                 [col-seps (or/c (list*of real?) (listof real?))]
                 [row-seps (or/c (list*of real?) (listof real?))])
          pict?]{
@@ -802,8 +834,8 @@ horizontal or vertical placement of each cell in the column or row.
 
 @section{Pict Drawing Adjusters}
 
-@defproc*[([(scale [pict pict?] [factor real?]) pict?]
-           [(scale [pict pict?] [w-factor real?] [h-factor real?]) pict?])]{
+@defproc*[([(scale [pict pict-convertible?] [factor real?]) pict?]
+           [(scale [pict pict-convertible?] [w-factor real?] [h-factor real?]) pict?])]{
 
 Scales a pict drawing, as well as its @tech{bounding box}, by multiplying
 it current size by @racket[factor] (if two arguments are supplied)
@@ -815,16 +847,16 @@ scale while drawing the original @racket[pict].
 
 @examples[#:eval
           ss-eval
-          (filled-rectangle 80 40)
-          (scale (filled-rectangle 40 20) 2)
-          (scale (filled-rectangle 20 20) 4 2)]
+          (filled-rectangle 40 40)
+          (scale (filled-rectangle 40 40) 1.5)
+          (scale (filled-rectangle 40 40) 2 1.5)]
 
 }
 
-@defproc*[([(scale-to-fit [pict pict?] [size-pict pict?]
+@defproc*[([(scale-to-fit [pict pict-convertible?] [size-pict pict-convertible?]
                           [#:mode mode (or/c 'preserve 'inset 'distort) 'preserve])
                           pict?]
-           [(scale-to-fit [pict pict?] [width real?] [height real?]
+           [(scale-to-fit [pict pict-convertible?] [width real?] [height real?]
                           [#:mode mode (or/c 'preserve 'inset 'distort) 'preserve])
                           pict?])]{
   Scales @racket[pict] so that it fits within the bounding box of
@@ -842,11 +874,20 @@ scale while drawing the original @racket[pict].
          If @racket[mode] is @racket['distort], the width and height are scaled
          separately.
 
+@examples[#:eval
+          ss-eval
+          (define rect (colorize (filled-rectangle 40 40) "olive"))
+          rect
+          (scale-to-fit rect (disk 60))
+          (scale-to-fit rect 70 30 #:mode 'preserve)
+          (scale-to-fit rect 70 30 #:mode 'inset)
+          (scale-to-fit rect 70 30 #:mode 'distort)]
+
 @history[#:changed "1.4" @elem{Added @racket[#:mode] argument.}]{}
 }
 
 
-@defproc[(rotate [pict pict?] [theta real?]) pict?]{
+@defproc[(rotate [pict pict-convertible?] [theta real?]) pict?]{
 
 Rotates a pict's drawing by @racket[theta] radians counter-clockwise.
 
@@ -855,35 +896,63 @@ corners of @racket[pict] (which inflates the area of the bounding
 box, unless @racket[theta] is a multiple of half of @racket[pi]). The
 ascent and descent lines of the result's bounding box are the
 horizontal lines that bisect the rotated original lines; if the ascent
-line drops below the descent line, the two lines are flipped.}
+line drops below the descent line, the two lines are flipped.
+
+@examples[#:eval ss-eval
+          (rotate (colorize (filled-rectangle 30 30)
+                            "chartreuse")
+                  (/ pi 3))]
+}
 
 
-@defproc[(ghost [pict pict?]) pict?]{
+@defproc[(ghost [pict pict-convertible?]) pict?]{
 
 Creates a container picture that doesn't draw the child picture,
-but uses the child's size.}
+but uses the child's size.
+
+@examples[#:eval ss-eval
+          (frame (hc-append (ghost (filled-rectangle 30 30))
+                            (colorize (disk 30) "turquoise")))]
+}
 
 
-@defproc[(linewidth [w (or/c real? #f)] [pict pict?]) pict?]{
+@defproc[(linewidth [w (or/c real? #f)] [pict pict-convertible?]) pict?]{
 
 Selects a specific pen width for drawing, which applies to pen drawing
 for @racket[pict] that does not already use a specific pen width.
 A @racket[#f] value for @racket[w] makes the pen transparent (in contrast
-to a zero value, which means ``as thin as possible for the target device'').}
+to a zero value, which means ``as thin as possible for the target device'').
+
+@examples[#:eval ss-eval
+          (linewidth 3 (hline 40 1))
+          (linewidth 5 (hline 40 1))]
+}
 
 
 @defproc[(linestyle [style (one-of/c 'transparent 'solid 'xor 'hilite 
                                      'dot 'long-dash 'short-dash 'dot-dash 
                                      'xor-dot 'xor-long-dash 'xor-short-dash 
                                      'xor-dot-dash)]
-                    [pict pict?])
+                    [pict pict-convertible?])
          pict?]{
 
 Selects a specific pen style for drawing, which applies to pen drawing
-for @racket[pict] that does not already use a specific pen style.}
+for @racket[pict] that does not already use a specific pen style.
+
+@examples[#:eval ss-eval
+          (define styles
+            '(transparent solid xor hilite dot long-dash short-dash
+              dot-dash xor-dot xor-long-dash xor-short-dash xor-dot-dash))
+          (apply ht-append
+                 10
+                 (for/list ([style (in-list styles)])
+                   (vc-append 5
+                     (text (symbol->string style))
+                     (linewidth 3 (linestyle style (hline 40 1))))))
+]}
 
 
-@defproc[(colorize [pict pict?]
+@defproc[(colorize [pict pict-convertible?]
                    [color (or/c string? (is-a?/c color%)
                                 (list/c byte? byte? byte?))])
          pict?]{
@@ -891,42 +960,85 @@ for @racket[pict] that does not already use a specific pen style.}
 Selects a specific color drawing, which applies to drawing in
 @racket[pict] that does not already use a specific color. The
 @racket[black-and-white] parameter causes all non-white colors to be
-converted to black.}
+converted to black.
 
-@defproc[(cellophane [pict pict?] [opacity (real-in 0 1)])
+@examples[#:eval ss-eval
+  (colorize (disk 40) "lavender")
+  (colorize (filled-rectangle 40 40)
+            (list #xff #x99 #x55))
+  (colorize (arrow 40 0)
+            (make-color 170 180 120))
+]}
+
+@defproc[(cellophane [pict pict-convertible?] [opacity (real-in 0 1)])
          pict?]{
 
 Makes the given @racket[pict] semi-transparent, where an opacity of
 @racket[0] is fully transparent, and an opacity of @racket[1] is fully
 opaque.  See @method[dc<%> set-alpha] for information about the
-contexts and cases when semi-transparent drawing works.}
+contexts and cases when semi-transparent drawing works.
 
-@defproc[(clip [pict pict?]) pict]{
+@examples[#:eval ss-eval
+  (cc-superimpose (filled-rectangle 70 45 #:color "darkcyan")
+                  (cellophane (disk 40) 0.2))
+  (cc-superimpose (filled-rectangle 70 45 #:color "darkcyan")
+                  (cellophane (disk 40) 0.8))
+]}
 
-Clips a pict's drawing to its @tech{bounding box}.}
+@defproc[(clip [pict pict-convertible?]) pict]{
+
+Clips a pict's drawing to its @tech{bounding box}.
+
+@examples[#:eval ss-eval
+  (define shape
+    (inset (colorize (filled-rectangle 40 40) "thistle") -10))
+  shape
+  (clip shape)
+]}
 
 
-@defproc*[([(inset/clip [pict pict?] [amt real?]) pict?]
-           [(inset/clip [pict pict?] [h-amt real?] [v-amt real?]) pict?]
-           [(inset/clip [pict pict?] [l-amt real?] [t-amt real?] 
+@defproc*[([(inset/clip [pict pict-convertible?] [amt real?]) pict?]
+           [(inset/clip [pict pict-convertible?] [h-amt real?] [v-amt real?]) pict?]
+           [(inset/clip [pict pict-convertible?] [l-amt real?] [t-amt real?] 
                         [r-amt real?] [b-amt real?]) pict?])]{
 
 Insets and clips the pict's drawing to its @tech{bounding
-box}. Usually, the inset amounts are negative.}
+box}. Usually, the inset amounts are negative.
+
+@examples[#:eval ss-eval
+  (filled-rectangle 40 40 #:color "forestgreen")
+  (inset/clip (filled-rectangle 40 40 #:color "forestgreen") -10)
+  (inset/clip (filled-rectangle 40 40 #:color "forestgreen")
+              -10 -5)
+  (inset/clip (filled-rectangle 40 40 #:color "forestgreen")
+              -2 -4 -8 -16)
+]}
 
 
 @defform*[[(scale/improve-new-text pict-expr scale-expr)
            (scale/improve-new-text pict-expr x-scale-expr y-scale-expr)]]{
 
 Like the @racket[scale] procedure, but also sets
-@racket[current-expected-text-scale] while evaluating @racket[pict-expr].}
+@racket[current-expected-text-scale] while evaluating @racket[pict-expr].
+
+@examples[#:eval ss-eval
+  (text "Hello World" null 25)
+  (scale/improve-new-text (text "Hello World" null 25) 2)
+  (scale (text "Hello World" null 25) 2)
+]}
 
 @defboolparam[black-and-white on?]{
 
 A parameter that determines whether @racket[colorize] uses color or
-black-and-white colors.}
+black-and-white colors.
 
-@defproc[(freeze [pict pict?]) pict?]{
+@examples[#:eval ss-eval
+  (colorize (disk 40) "seagreen")
+  (parameterize ([black-and-white #t])
+    (colorize (disk 40) "seagreen"))
+]}
+
+@defproc[(freeze [pict pict-convertible?]) pict?]{
  Creates a bitmap with the same size as @racket[pict], draws
  @racket[pict] into the bitmap, and then returns a pict that
  draws with the bitmap.
@@ -935,64 +1047,125 @@ black-and-white colors.}
  the pict and also of cropping it to its bounding box. Any
  sub-picts of @racket[pict] remain intact within the new
  pict.
-}
+
+@examples[#:eval ss-eval
+  (define txt
+    (colorize (text "Freeze!" null 25) "deepskyblue"))
+  (scale txt 2.5)
+  (scale (freeze txt) 2.5)
+]}
 
 
 @; ------------------------------------------------------------------------
 
 @section{Bounding Box Adjusters}
 
-@defproc*[([(inset [pict pict?] [amt real?]) pict?]
-           [(inset [pict pict?] [h-amt real?] [v-amt real?]) pict?]
-           [(inset [pict pict?] [l-amt real?] [t-amt real?] 
+@defproc*[([(inset [pict pict-convertible?] [amt real?]) pict?]
+           [(inset [pict pict-convertible?] [h-amt real?] [v-amt real?]) pict?]
+           [(inset [pict pict-convertible?] [l-amt real?] [t-amt real?] 
                    [r-amt real?] [b-amt real?]) pict?])]{
 
 Extends @racket[pict]'s @tech{bounding box} by adding the given amounts
-to the corresponding sides; ascent and descent are extended, too.}
+to the corresponding sides; ascent and descent are extended, too.
+
+@examples[#:eval ss-eval
+  (pict-width (disk 40))
+  (pict-width (inset (disk 40) -10))
+]}
 
 
-@defproc[(clip-descent [pict pict?]) pict?]{
+@defproc[(clip-descent [pict pict-convertible?]) pict?]{
 
-Truncates @racket[pict]'s @tech{bounding box} by removing the descent part.}
+Truncates @racket[pict]'s @tech{bounding box} by removing the descent part.
 
+@examples[#:eval ss-eval
+  (frame (text "gjy" null 50))
+  (frame (clip-descent (text "gjy" null 50)))
+]}
 
-@defproc[(lift-above-baseline [pict pict?] [amt real?]) pict?]{
+@defproc[(clip-ascent [pict pict-convertible?]) pict?]{
+
+Truncates @racket[pict]'s @tech{bounding box} by removing the ascent part.
+
+@examples[#:eval ss-eval
+  (frame (text "gjy" null 50))
+  (frame (clip-ascent (text "gjy" null 50)))
+]}
+
+@defproc[(lift-above-baseline [pict pict-convertible?] [amt real?]) pict?]{
 
 Lifts @racket[pict] relative to its baseline, extending the
-@tech{bounding box} height if necessary.}
+@tech{bounding box} height if necessary.
 
-@defproc[(drop-below-ascent [pict pict?] [amt real?]) pict?]{
+@examples[#:eval ss-eval
+  (frame (hbl-append (text "ijijij" null 50)
+                     (text "abc" null 50)))
+  (frame (hbl-append (lift-above-baseline (text "ijijij" null 50) 20)
+                     (text "abc" null 50)))
+]}
+
+@defproc[(drop-below-ascent [pict pict-convertible?] [amt real?]) pict?]{
 
 Drops @racket[pict] relative to its ascent line, extending the
-@tech{bounding box} height if necessary.}
+@tech{bounding box} height if necessary.
 
-@defproc[(baseless [pict pict?]) pict?]{
+@examples[#:eval ss-eval
+  (define txt (text "ijgy" null 50))
+  (frame (hbl-append txt (text "abc" null 50)))
+  (frame (hbl-append (drop-below-ascent txt 20)
+                     (text "abc" null 50)))
+]}
 
-Makes the descent @racket[0] and the ascent the same as the height.}
+@defproc[(baseless [pict pict-convertible?]) pict?]{
 
-@defproc[(refocus [pict pict?] [sub-pict pict?]) pict?]{
+Makes the descent @racket[0] and the ascent the same as the height.
+
+@examples[#:eval ss-eval
+  (frame (hbl-append (text "gjy" null 50)
+                     (text "abc" null 50)))
+  (frame (hbl-append (baseless (text "gjy" null 50))
+                     (text "abc" null 50)))
+]}
+
+@defproc[(refocus [pict pict-convertible?] [sub-pict pict-convertible?]) pict?]{
 
 Assuming that @racket[sub-pict] can be found within @racket[pict],
 shifts the overall bounding box to that of @racket[sub-pict] (but
 preserving all the drawing of @racket[pict]). The last element, as
 reported by @racket[pict-last] is also set to @racket[(or (pict-last
-sub-pict) sub-pict)].}
+sub-pict) sub-pict)].
+
+@examples[#:eval ss-eval
+  (define p1 (filled-rectangle 50 50 #:color "darkkhaki"))
+  (define p2 (filled-rectangle 30 30 #:color "sienna"))
+  (define combined (cc-superimpose p1 p2))
+  combined
+  (refocus combined p2)
+]}
 
 
-@defproc[(panorama [pict pict?]) pict?]{
+@defproc[(panorama [pict pict-convertible?]) pict?]{
 
 Shifts the given pict's @tech{bounding box} to enclose the bounding boxes of
-all sub-picts (even @racket[launder]ed picts).}
+all sub-picts (even @racket[launder]ed picts).
+
+@examples[#:eval ss-eval
+  (define p1 (filled-rectangle 50 50 #:color "maroon"))
+  (define p2 (disk 30 #:color "tomato"))
+  (define combined (cc-superimpose p1 p2))
+  (refocus combined p2)
+  (panorama (refocus combined p2))
+]}
 
 
-@defproc[(use-last [pict pict?] [sub-pict pict-path?]) pict?]{
+@defproc[(use-last [pict pict-convertible?] [sub-pict pict-path?]) pict?]{
 
 Returns a pict like @racket[pict], but with the last element (as
 reported by @racket[pict-last]) set to @racket[sub-pict]. The
 @racket[sub-pict] must exist as a sub-pict (or path of sub-picts)
 within @racket[pict].}
 
-@defproc[(use-last* [pict pict?] [sub-pict pict-path?]) pict?]{
+@defproc[(use-last* [pict pict-convertible?] [sub-pict pict-convertible?]) pict?]{
 
 Propagates the last element of @racket[sub-pict] to @racket[pict].
 
@@ -1006,21 +1179,21 @@ element of @racket[sub-pict] is used as the new last element for
 
 @section{Pict Finders}
 
-@defproc*[([(lt-find [pict pict?] [find pict-path?]) (values real? real?)]
-           [(ltl-find [pict pict?] [find pict-path?]) (values real? real?)]
-           [(lc-find [pict pict?] [find pict-path?]) (values real? real?)]
-           [(lbl-find [pict pict?] [find pict-path?]) (values real? real?)]
-           [(lb-find [pict pict?] [find pict-path?]) (values real? real?)]
-           [(ct-find [pict pict?] [find pict-path?]) (values real? real?)]
-           [(ctl-find [pict pict?] [find pict-path?]) (values real? real?)]
-           [(cc-find [pict pict?] [find pict-path?]) (values real? real?)]
-           [(cbl-find [pict pict?] [find pict-path?]) (values real? real?)]
-           [(cb-find [pict pict?] [find pict-path?]) (values real? real?)]
-           [(rt-find [pict pict?] [find pict-path?]) (values real? real?)]
-           [(rtl-find [pict pict?] [find pict-path?]) (values real? real?)]
-           [(rc-find [pict pict?] [find pict-path?]) (values real? real?)]
-           [(rbl-find [pict pict?] [find pict-path?]) (values real? real?)]
-           [(rb-find [pict pict?] [find pict-path?]) (values real? real?)])]{
+@defproc*[([(lt-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
+           [(ltl-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
+           [(lc-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
+           [(lbl-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
+           [(lb-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
+           [(ct-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
+           [(ctl-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
+           [(cc-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
+           [(cbl-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
+           [(cb-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
+           [(rt-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
+           [(rtl-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
+           [(rc-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
+           [(rbl-find [pict pict-convertible?] [find pict-path?]) (values real? real?)]
+           [(rb-find [pict pict-convertible?] [find pict-path?]) (values real? real?)])]{
 
 Locates a pict designated by @racket[find] is within @racket[pict]. If
 @racket[find] is a pict, then the @racket[pict] must have been created
@@ -1028,21 +1201,53 @@ as some combination involving @racket[find].
 
 If @racket[find] is a list, then the first element of @racket[find]
 must be within @racket[pict], the second element of @racket[find] must
-be within the second element, and so on.}
+be within the second element, and so on.
+
+@examples[#:eval ss-eval
+  (define p1 (disk 60))
+  (define p2 (rectangle 60 60))
+  (define p3 (hc-append p1 p2))
+  (define p4 (hc-append p3 (arrow 60 0)))
+  (lt-find p4 p1)
+  (cb-find p4 p2)
+  (rb-find p3 p1)
+  (lt-find p4 (list p1))
+  (lt-find p4 (list p2 p1))
+  (lt-find p4 (list p2))
+  (lt-find p4 (list p3 p2))
+  (pin-over p4 p2 lt-find
+            (colorize (text "lt-find") "darkgreen"))
+  (panorama
+   (pin-over p4 p2 rb-find
+             (colorize (text "rb-find") "darkgreen")))
+]}
 
 @defproc[(pict-path? [v any/c]) boolean?]{
 
-Returns @racket[#t] if @racket[v] is a @racket[pict] or a non-empty
-list of @racket[pict]s.}
+Returns @racket[#t] if @racket[v] is a @racket[pict-convertible?] or a non-empty
+list of @racket[pict-convertible?]s.
+
+@examples[#:eval ss-eval
+  (pict-path? null)
+  (pict-path? (disk 30))
+  (pict-path? (list (disk 30) (rectangle 10 10)))
+]}
 
 
-@defproc[(launder [pict pict?]) pict?]{
+@defproc[(launder [pict pict-convertible?]) pict?]{
 
 Creates a pict that has the same drawing and @tech{bounding box} of
 @racket[pict], but which hides all of its sub-picts so that they
 cannot be found with functions like @racket[lt-find]. If @racket[pict]
 has a last-line pict, then the laundered pict has a fresh last-line
-pict with the same shape and location.}
+pict with the same shape and location.
+
+@examples[#:eval ss-eval
+  (define p1 (disk 60))
+  (define p2 (rectangle 60 60))
+  (define p3 (hc-append p1 p2))
+  (lt-find (launder p4) p3)
+]}
 
 @; ------------------------------------------------------------------------
 
@@ -1072,11 +1277,16 @@ pict with the same shape and location.}
 
 @section{Miscellaneous}
 
-@defproc[(hyperlinkize [pict pict?])
+@defproc[(hyperlinkize [pict pict-convertible?])
          pict?]{
 
 Adds an underline and blue color. The @racket[pict]'s height and
-descent are extended.}
+descent are extended.
+
+@examples[#:eval ss-eval
+  (hyperlinkize (text "Help me I'm trapped in this documentation"
+                      null 15))
+]}
 
 
 @defproc[(scale-color [factor real?]
@@ -1086,7 +1296,13 @@ descent are extended.}
 Scales a color, making it brighter or darker. If the factor is less
 than 1, the color is darkened by multiplying the RGB components by the
 factor. If the factor is greater than 1, the color is lightened by
-dividing the gap between the RGB components and 255 by the factor.}
+dividing the gap between the RGB components and 255 by the factor.
+
+@examples[#:eval ss-eval
+  (disk 30 #:color "royalblue")
+  (disk 30 #:color (scale-color 0.5 "royalblue"))
+  (disk 30 #:color (scale-color 1.5 "royalblue"))
+]}
 
 @defproc[(color-series [dc (is-a?/c dc<%>)]
                        [max-step exact-nonnegative-integer?]
@@ -1135,7 +1351,7 @@ a small amount of drawing outside the pict's @tech{bounding box}.
 @history[#:added "1.2"]}
 
 
-@defproc[(draw-pict [pict pict?]
+@defproc[(draw-pict [pict pict-convertible?]
                     [dc (is-a?/c dc<%>)]
                     [x real?]
                     [y real?])
@@ -1145,7 +1361,7 @@ Draws @racket[pict] to @racket[dc], with its top-left corner at offset
  (@racket[x], @racket[y]).}
 
 
-@defproc[(pict->bitmap [pict pict?] 
+@defproc[(pict->bitmap [pict pict-convertible?] 
                        [smoothing (or/c 'unsmoothed 'smoothed 'aligned) 'aligned])
          (is-a?/c bitmap%)]{
 
@@ -1156,7 +1372,7 @@ When drawing the pict into the bitmap using the smoothing mode @racket[smoothing
 (see @method[set-smoothing dc<%>] for more information on smoothing modes).
 }
 
-@defproc[(pict->argb-pixels [pict pict?]
+@defproc[(pict->argb-pixels [pict pict-convertible?]
                             [smoothing (or/c 'unsmoothed 'smoothed 'aligned) 'aligned])
          bytes?]{
 Returns the @racket[bytes?] with the pixels corresponding the bitmap that @racket[pict->bitmap]
@@ -1192,7 +1408,7 @@ returns. Each pixel has four bytes in the result: the alpha, red, green, and blu
 @history[#:added "1.1"]
 }
 
-@defproc[(make-pict-drawer [pict pict?])
+@defproc[(make-pict-drawer [pict pict-convertible?])
          ((is-a?/c dc<%>) real? real? . -> . void?)]{
 
 Generates a pict-drawer procedure for multiple renderings of
@@ -1200,7 +1416,7 @@ Generates a pict-drawer procedure for multiple renderings of
 repeated calls to @racket[draw-pict].}
 
 
-@defproc[(show-pict [pict pict?]
+@defproc[(show-pict [pict pict-convertible?]
                     [w (or/c #f exact-nonnegative-integer?) #f] 
                     [h (or/c #f exact-nonnegative-integer?) #f] 
                     [#:frame-x frame-x (or/c (integer-in -10000 10000) #f)] 
@@ -1231,7 +1447,9 @@ form sets this parameter while also scaling the resulting pict.}
 @racketmodname[pict/convert] library defines a protocol for
 values to convert themselves to @tech{picts}. The protocol
 is used by DrRacket's interactions window, for example, to render
-values that it prints.}
+values that it prints. Anything that is @racket[pict-convertible?]
+can be used wherever a @racket[pict] can be used. These values will
+be automatically converted to a pict when needed.}
 
 @defthing[prop:pict-convertible struct-type-property?]{
 
@@ -1259,7 +1477,7 @@ to picts, but others are not).
 @defproc[(pict-convertible? [v any/c]) boolean?]{
 Returns @racket[#t] if @racket[v] supports the conversion protocol
 (by being a struct with the @racket[prop:pict-convertible] property)
-and @racket[#f] otherwise.
+and @racket[#f] otherwise. This function returns @racket[true] for @racket[pict?]s.
 }
 
 @defproc[(pict-convert [v pict-convertible?]) pict?]{

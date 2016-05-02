@@ -31,9 +31,9 @@
 
     (define button-panel (new vertical-panel% 
                               [parent choices-panel] 
-                              [stretchable-height #f]
+                              [stretchable-height #t]
                               [stretchable-width #f]
-                              [alignment '(center center)]))
+                              [alignment '(left center)]))
 
     (define migrate-from-button (new button%
                                      [parent button-panel]
@@ -43,9 +43,17 @@
                                                   (string-constant install-pkg-abort-migrate)
                                                   (lambda ()
                                                     (pkg-migrate-command
+                                                     #:dry-run (send dry-run-cb get-value)
                                                      (send versions get-string-selection)))))]
                                      [style '(border)]))
+    
+    (define dry-run-cb (new check-box% 
+                            [label  (string-constant install-pkg-dry-run?)]
+                            [parent button-panel]))
 
+    (void (new vertical-pane%
+               [parent button-panel]))
+    
     (define remove-button (new button%
                                [parent button-panel]
                                [label (string-constant install-pkg-remove)]
@@ -54,15 +62,15 @@
                                             (send versions get-string-selection)))]))
 
     (define (remove-package-info vers)
-      (when (= 1 (message-box/custom (format (string-constant install-pkg-packages-for) vers)
-                                     (format
-                                      (string-constant install-pkg-really-remove-installation)
-                                      vers)
-                                     (string-constant install-pkg-remove)
-                                     (string-constant install-pkg-do-not-remove)
-                                     #f
-                                     (get-top-level-window)
-                                     '(caution default=1)))
+      (when (equal? 1 (message-box/custom (format (string-constant install-pkg-packages-for) vers)
+                                          (format
+                                           (string-constant install-pkg-really-remove-installation)
+                                           vers)
+                                          (string-constant install-pkg-remove)
+                                          (string-constant install-pkg-do-not-remove)
+                                          #f
+                                          (get-top-level-window)
+                                          '(caution default=1)))
         (delete-directory/files (build-path (find-system-path 'addon-dir) vers "pkgs"))
         (update-list!)
         (adjust-all)))

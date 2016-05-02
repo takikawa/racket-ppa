@@ -322,26 +322,31 @@ Plays a sound file. If @racket[async?] is false, the function does not
  The result is @racket[#t] if the sound plays successfully, @racket[#f]
  otherwise.
 
-On Windows, only @filepath{.wav} files are supported.
+On Windows, MCI is used to play sounds, so file formats such as
+ @filepath{.wav} and @filepath{.mp3} should be supported.
 
-On Unix, the function invokes an external sound-playing program;
-  looking for a few known programs (@exec{aplay}, @exec{play},
-  @exec{esdplay}, @exec{sndfile-play}, @exec{audioplay}). In addition, a
+On Mac OS X, Quicktime is used to play sounds; most sound
+ formats (@filepath{.wav}, @filepath{.aiff}, @filepath{.mp3}) are supported in recent versions of
+ Quicktime. To play @filepath{.wav} files, Quicktime 3.0 (compatible
+ with OS 7.5 and up) is required.
+
+On Unix, the function invokes an external sound-playing program---looking
+  by default for a few known programs (@exec{aplay}, @exec{play},
+  @exec{esdplay}, @exec{sndfile-play}, @exec{audioplay}). A
   play command can be defined through the @ResourceFirst{playcmd}
   preference (see @|mrprefsdiscuss|). The preference can hold a
   program name, or a format string containing a single @litchar{~a}
   where the filename should be substituted---and used as a shell
   command.  (Don't use @litchar{~s}, since the string that is used
   with the format string will be properly quoted and wrapped in double
-  quotes.)  A plain command name is usually better since execution is
+  quotes.)  A plain command name is usually better, since execution is
   faster.  The command's output is discarded, unless it returns an
-  error code---in this case the last part of the error output is
+  error code, in which case the last part of the error output is
   shown.
 
-On Mac OS X, Quicktime is used to play sounds; most sound
- formats (.wav, .aiff, .mp3) are supported in recent versions of
- Quicktime. In order to play .wav files, Quicktime 3.0 (compatible
- with OS 7.5 and up) is required.}
+@history[#:changed "1.22" @elem{On Windows, added support for multiple
+                                sounds at once and file format such as
+                                @filepath{.mp3}.}]}
 
 
 @defproc[(position-integer? [v any/c]) boolean?]{

@@ -263,6 +263,7 @@
 #define scheme_collect_garbage (scheme_extension_table->scheme_collect_garbage)
 #define scheme_collect_garbage_minor (scheme_extension_table->scheme_collect_garbage_minor)
 #define scheme_enable_garbage_collection (scheme_extension_table->scheme_enable_garbage_collection)
+#define scheme_incremental_garbage_collection (scheme_extension_table->scheme_incremental_garbage_collection)
 #ifdef MZ_PRECISE_GC
 # ifndef USE_THREAD_LOCAL
 #define GC_variable_stack (scheme_extension_table->GC_variable_stack)
@@ -277,6 +278,7 @@
 #define scheme_free_immobile_box (scheme_extension_table->scheme_free_immobile_box)
 #define scheme_add_gc_callback (scheme_extension_table->scheme_add_gc_callback)
 #define scheme_remove_gc_callback (scheme_extension_table->scheme_remove_gc_callback)
+#define scheme_register_type_gc_shape (scheme_extension_table->scheme_register_type_gc_shape)
 #define scheme_make_bucket_table (scheme_extension_table->scheme_make_bucket_table)
 #define scheme_add_to_table (scheme_extension_table->scheme_add_to_table)
 #define scheme_change_in_table (scheme_extension_table->scheme_change_in_table)
@@ -285,6 +287,8 @@
 #define scheme_bucket_table_equal (scheme_extension_table->scheme_bucket_table_equal)
 #define scheme_clone_bucket_table (scheme_extension_table->scheme_clone_bucket_table)
 #define scheme_clear_bucket_table (scheme_extension_table->scheme_clear_bucket_table)
+#define scheme_bucket_table_index (scheme_extension_table->scheme_bucket_table_index)
+#define scheme_bucket_table_next (scheme_extension_table->scheme_bucket_table_next)
 #define scheme_make_hash_table (scheme_extension_table->scheme_make_hash_table)
 #define scheme_make_hash_table_equal (scheme_extension_table->scheme_make_hash_table_equal)
 #define scheme_make_hash_table_eqv (scheme_extension_table->scheme_make_hash_table_eqv)
@@ -298,6 +302,8 @@
 #define scheme_is_hash_table_eqv (scheme_extension_table->scheme_is_hash_table_eqv)
 #define scheme_clone_hash_table (scheme_extension_table->scheme_clone_hash_table)
 #define scheme_clear_hash_table (scheme_extension_table->scheme_clear_hash_table)
+#define scheme_hash_table_index (scheme_extension_table->scheme_hash_table_index)
+#define scheme_hash_table_next (scheme_extension_table->scheme_hash_table_next)
 #define scheme_make_hash_tree (scheme_extension_table->scheme_make_hash_tree)
 #define scheme_make_hash_tree_set (scheme_extension_table->scheme_make_hash_tree_set)
 #define scheme_hash_tree_set (scheme_extension_table->scheme_hash_tree_set)

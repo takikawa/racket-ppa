@@ -26,12 +26,8 @@
 #endif /* WINDOWS_DYNAMIC_LOAD */
 
 #if !defined(WINDOWS_DYNAMIC_LOAD) || defined(__MINGW32__)
-# if SIZEOF_CHAR == 1
    typedef   signed char Tsint8;
    typedef unsigned char Tuint8;
-# else
-#  error "configuration error, please contact PLT (int8)"
-# endif
 
 # if SIZEOF_SHORT == 2
    typedef   signed short Tsint16;
@@ -2628,6 +2624,7 @@ static Scheme_Object *eternal_sym;
 static Scheme_Object *interior_sym;
 static Scheme_Object *atomic_interior_sym;
 static Scheme_Object *raw_sym;
+static Scheme_Object *tagged_sym;
 static Scheme_Object *fail_ok_sym;
 
 /* (malloc num type cpointer mode) -> pointer */
@@ -2636,8 +2633,8 @@ static Scheme_Object *fail_ok_sym;
  * - type: malloc the size of this type (or num instances of it),
  * - cpointer: a source pointer to copy contents from,
  * - mode: a symbol for different allocation functions to use - one of
- *   'nonatomic, 'atomic, 'stubborn, 'uncollectable, 'eternal, 'raw (the last
- *   one is for using the real malloc)
+ *   'nonatomic, 'atomic, 'stubborn, 'uncollectable, 'eternal, 'tagged,
+ *   or 'raw (the last one is for using the real malloc)
  * - if an additional 'fail-ok flag is given, then scheme_malloc_fail_ok is
  *   used with the chosen malloc function
  * The arguments can be specified in any order at all since they are all
@@ -2687,7 +2684,8 @@ static Scheme_Object *foreign_malloc(int argc, Scheme_Object *argv[])
                             "(or/c (and/c exact-nonnegative-integer? fixnum?)\n"
                             "      ctype?\n"
                             "      (or/c 'nonatomic 'stubborn 'uncollectable\n"
-                            "             'eternal 'interior 'atomic-interior 'raw)\n"
+                            "             'eternal 'interior 'atomic-interior\n"
+                            "             'tagged 'raw)\n"
                             "      'fail-on\n"
                             "      (and/c cpointer? (not/c #f)))",
                             i, argc, argv);
@@ -2707,6 +2705,7 @@ static Scheme_Object *foreign_malloc(int argc, Scheme_Object *argv[])
   else if (SAME_OBJ(mode, interior_sym))      mf = scheme_malloc_atomic_allow_interior;
   else if (SAME_OBJ(mode, atomic_interior_sym)) mf = scheme_malloc_atomic_allow_interior;
   else if (SAME_OBJ(mode, raw_sym))           mf = malloc;
+  else if (SAME_OBJ(mode, tagged_sym))        mf = scheme_malloc_tagged;
   else {
     scheme_signal_error(MYNAME": bad allocation mode: %V", mode);
     return NULL; /* hush the compiler */
@@ -3380,7 +3379,7 @@ static void release_ffi_lock(void *lock)
 
 #define MAX_QUICK_ARGS 16
 
-typedef void(*VoidFun)();
+typedef void(*VoidFun)(void);
 
 #ifdef MZ_USE_PLACES
 
@@ -4244,6 +4243,11 @@ static Scheme_Object *foreign_ffi_callback(int argc, Scheme_Object *argv[])
 
 /*****************************************************************************/
 
+#ifdef WINDOWS_DYNAMIC_LOAD
+typedef int *(*get_errno_ptr_t)(void);
+static get_errno_ptr_t get_errno_ptr;
+#endif /* WINDOWS_DYNAMIC_LOAD */
+
 static void save_errno_values(int kind)
 {
   Scheme_Thread *p = scheme_current_thread;
@@ -4257,6 +4261,27 @@ static void save_errno_values(int kind)
     return;
   }
 
+# ifdef WINDOWS_DYNAMIC_LOAD
+  /* Depending on how Racket is compiled and linked, `errno` might
+     not corresponds to the one from "MSVCRT.dll", which is likely
+     to be the one that foreign code uses. Go get that one via
+     _errno(), which returns a pointer to the current thread's
+     `errno`. */
+  if (!get_errno_ptr) {
+    HMODULE hm;
+    hm = LoadLibrary("msvcrt.dll");
+    if (hm) {
+      get_errno_ptr = (get_errno_ptr_t)GetProcAddress(hm, "_errno");
+    }
+  }
+
+  if (get_errno_ptr) {
+    GC_CAN_IGNORE int *errno_ptr;
+    errno_ptr = get_errno_ptr();
+    errno = *errno_ptr;
+  }
+# endif /* WINDOWS_DYNAMIC_LOAD */
+
   p->saved_errno = errno;
 }
 
@@ -4264,7 +4289,16 @@ static void save_errno_values(int kind)
 static Scheme_Object *foreign_saved_errno(int argc, Scheme_Object *argv[])
 {
   Scheme_Thread *p = scheme_current_thread;
-  return scheme_make_integer_value(p->saved_errno);
+  if (argc == 0) {
+    return scheme_make_integer_value(p->saved_errno);
+  } else {
+    intptr_t v;
+    if (!scheme_get_int_val(argv[0], &v)) {
+      wrong_intptr(MYNAME, 0, argc, argv);
+    }
+    p->saved_errno = v;
+    return scheme_void;
+  }
 }
 #undef MYNAME
 
@@ -4375,6 +4409,8 @@ void scheme_init_foreign_globals()
   atomic_interior_sym = scheme_intern_symbol("atomic-interior");
   MZ_REGISTER_STATIC(raw_sym);
   raw_sym = scheme_intern_symbol("raw");
+  MZ_REGISTER_STATIC(tagged_sym);
+  tagged_sym = scheme_intern_symbol("tagged");
   MZ_REGISTER_STATIC(fail_ok_sym);
   fail_ok_sym = scheme_intern_symbol("fail-ok");
   MZ_REGISTER_STATIC(abs_sym);
@@ -4526,7 +4562,7 @@ void scheme_init_foreign(Scheme_Env *env)
   scheme_add_global_constant("ffi-callback",
     scheme_make_noncm_prim(foreign_ffi_callback, "ffi-callback", 3, 6), menv);
   scheme_add_global_constant("saved-errno",
-    scheme_make_immed_prim(foreign_saved_errno, "saved-errno", 0, 0), menv);
+    scheme_make_immed_prim(foreign_saved_errno, "saved-errno", 0, 1), menv);
   scheme_add_global_constant("lookup-errno",
     scheme_make_immed_prim(foreign_lookup_errno, "lookup-errno", 1, 1), menv);
   scheme_add_global_constant("make-stubborn-will-executor",
@@ -4897,7 +4933,7 @@ void scheme_init_foreign(Scheme_Env *env)
   scheme_add_global_constant("ffi-callback",
    scheme_make_noncm_prim((Scheme_Prim *)unimplemented, "ffi-callback", 3, 6), menv);
   scheme_add_global_constant("saved-errno",
-   scheme_make_immed_prim((Scheme_Prim *)unimplemented, "saved-errno", 0, 0), menv);
+   scheme_make_immed_prim((Scheme_Prim *)unimplemented, "saved-errno", 0, 1), menv);
   scheme_add_global_constant("lookup-errno",
    scheme_make_immed_prim((Scheme_Prim *)unimplemented, "lookup-errno", 1, 1), menv);
   scheme_add_global_constant("make-stubborn-will-executor",

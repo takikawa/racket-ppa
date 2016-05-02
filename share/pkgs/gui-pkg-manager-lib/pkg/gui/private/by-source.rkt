@@ -10,6 +10,7 @@
          racket/list
          framework
          net/url
+         setup/setup
 	 "common.rkt")
 
 (provide by-source-panel%)
@@ -28,11 +29,14 @@
 (define sc-install-pkg-inferred-as (string-constant install-pkg-inferred-as))
 (define sc-install-pkg-force? (string-constant install-pkg-force?))
 (define sc-install-pkg-replace? (string-constant install-pkg-replace?))
+(define sc-install-pkg-dry-run? (string-constant install-pkg-dry-run?))
 (define sc-install-pkg-command-line (string-constant install-pkg-command-line))
 
 (define sc-install-pkg-action-label (string-constant install-pkg-action-label))
 (define sc-install-pkg-install (string-constant install-pkg-install))
 (define sc-install-pkg-update (string-constant install-pkg-update))
+(define sc-install-pkg-setup (string-constant install-pkg-setup))
+(define sc-install-pkg-setup-long (string-constant install-pkg-setup-long))
 (define sc-action-inferred-to-be-update (string-constant install-pkg-action-inferred-to-be-update))
 (define sc-action-inferred-to-be-install (string-constant install-pkg-action-inferred-to-be-install))
 
@@ -169,19 +173,23 @@
     (define ok-button
       (new button%
            [label (pick-wider normal-control-font
-			      sc-install-pkg-install
-			      sc-install-pkg-update)]
+                              (pick-wider normal-control-font
+                                          sc-install-pkg-install
+                                          sc-install-pkg-update)
+                              sc-install-pkg-setup)]
            [parent button-panel]
            [style '(border)]
            [callback (lambda (b e)
                        (define res (compute-cmd-line))
                        (define action (case (cmdline-which res)
                                         [(install) pkg-install-command]
-                                        [(update) pkg-update-command]))
+                                        [(update) pkg-update-command]
+                                        [(setup) pkg-setup-command]))
                        (in-terminal
                         (case (cmdline-which res)
                           [(install) (string-constant install-pkg-abort-install)]
-                          [(update) (string-constant install-pkg-abort-update)])
+                          [(update) (string-constant install-pkg-abort-update)]
+                          [(setup) (string-constant install-pkg-abort-setup)])
                         (lambda ()
                           (keyword-apply action
                                          #:batch #t
@@ -215,6 +223,11 @@
     ;; Make the panel height the same whether we show the message or field:
     (let-values ([(w h) (send name-panel get-graphical-min-size)])
       (send name-panel min-height h))
+    
+    (define dry-run-cb (new check-box% 
+                              [label sc-install-pkg-dry-run?]
+                              [parent name-panel]
+                              [callback (λ (a b) (adjust-all))]))
 
     (define type-panel (new horizontal-panel% 
                             [parent details-panel]
@@ -251,7 +264,8 @@
                                [callback (λ (x y) (adjust-all))]
                                [choices (list sc-install-pkg-infer
                                               sc-install-pkg-install
-                                              sc-install-pkg-update)]))
+                                              sc-install-pkg-update
+                                              sc-install-pkg-setup-long)]))
     (define inferred-action-msg-parent (new horizontal-panel% 
                                             [parent details-panel]
                                             [stretchable-height #f]
@@ -393,7 +407,8 @@
           [else 
            'install])]
         [(1) 'install]
-        [(2) 'update]))
+        [(2) 'update]
+        [(3) 'setup]))
 
     (define/private (infer-package-name?)
       (= 0 (send name-choice get-selection)))
@@ -418,14 +433,19 @@
       (adjust-browse)
       (adjust-scope)
       (adjust-deps)
+      (adjust-dry-run)
       (adjust-ok))
+    
+    (define/private (adjust-dry-run)
+      (send dry-run-cb show (not (equal? 'setup (get-current-action)))))
 
     (define/private (adjust-name)
       (define infer? (infer-package-name?))
       (send name-panel change-children
             (lambda (l)
               (list name-choice
-                    (if infer? name-message name-field))))
+                    (if infer? name-message name-field)
+                    dry-run-cb)))
       (when infer?
         (define name (get-name))
         (send name-message set-label (gui-utils:trim-string name 200))
@@ -448,7 +468,8 @@
     (define/private (adjust-ok)
       (send ok-button set-label (case (get-current-action)
                                   [(install) sc-install-pkg-install]
-                                  [(update) sc-install-pkg-update]))
+                                  [(update) sc-install-pkg-update]
+                                  [(setup) sc-install-pkg-setup]))
       (send ok-button enable (compute-cmd-line)))
 
     (define/private (adjust-browse)
@@ -552,19 +573,23 @@
                   (if (eq? (system-type) 'windows)
                       "raco.exe"
                       "raco")
-                  " pkg "
+                  (if (eq? 'setup (cmdline-which cmd-line))
+                      " "
+                      " pkg ")
                   (format "~a " (cmdline-which cmd-line))
-                  (apply 
-                   string-append
-                   (add-between
-                    (map (λ (kwd kwd-arg)
-                           (define flag (~a "--" (keyword->string kwd)))
-                           (if (boolean? kwd-arg)
-                               flag
-                               (~a flag " " (~s kwd-arg))))
-                         (cmdline-kwds cmd-line)
-                         (cmdline-kwd-args cmd-line))
-                    " "))
+                  (if (null? (cmdline-kwds cmd-line))
+                      ""
+                      (apply 
+                       string-append
+                       (add-between
+                        (map (λ (kwd kwd-arg)
+                               (define flag (~a "--" (keyword->string kwd)))
+                               (if (boolean? kwd-arg)
+                                   flag
+                                   (~a flag " " (~s kwd-arg))))
+                             (cmdline-kwds cmd-line)
+                             (cmdline-kwd-args cmd-line))
+                        " ")))
                   (apply string-append
                          (map (λ (x) (format " ~a" (possibly-quote-string x)))
                               (cmdline-args cmd-line))))
@@ -574,13 +599,21 @@
     (struct cmdline (which kwds kwd-args args) #:transparent)
     (define/private (compute-cmd-line)
       (define action (get-current-action))
+      (define dry-run? (send dry-run-cb get-value))
       (define update-by-name? (and (eq? 'update action)
                                    (not (send overwrite-cb get-value))))
       (define the-pkg (if update-by-name?
                           (get-name)
                           (send tf get-value)))
       (cond
-        [(equal? the-pkg "") #f]
+        [(and (not (equal? action 'setup))
+              (equal? the-pkg ""))
+         #f]
+        [(and (equal? action 'setup)
+              (not (equal? the-pkg ""))
+              (infer-package-name?)
+              (not (package-source->name the-pkg (selected-type))))
+         #f]
         [else
          (define kwds '()) 
          (define kwd-args '())
@@ -594,28 +627,47 @@
                            [else
                             (define-values (ks2 as2) (loop (cdr ks) (cdr as)))
                             (values (cons (car ks) ks2) (cons (car as) as2))]))))
-         (when (and (send cb is-enabled?) (send cb get-value))
-           (add-kwd-arg '#:force #t))
-         (when (and (not update-by-name?)
-                    (selected-type))
-           (add-kwd-arg '#:type (selected-type)))
-         (when (and (not update-by-name?)
-                    (eq? 'dir (or (selected-type) (get-inferred-actual-type))))
-           (if (send link-dir-checkbox get-value)
-               (add-kwd-arg '#:link #t)
-               (add-kwd-arg '#:copy #t)))
-         (let ([scope (selected-scope)])
-           (unless (and (equal? scope (default-pkg-scope))
-                        ;; Don't let `update' infer a scope itself:
-                        (not (eq? action 'update)))
-             (add-kwd-arg '#:scope scope)))
-         (add-kwd-arg '#:deps (get-deps-selected-type))
-         (when (get-deps-auto-update)
-           (add-kwd-arg '#:update-deps #t))
-         (unless (or update-by-name?
-                     (infer-package-name?))
-           (add-kwd-arg '#:name (get-name)))
-         (cmdline action kwds kwd-args (list the-pkg))]))
+         (case action
+           [(setup)
+            (add-kwd-arg '#:pkgs #t)
+            (add-kwd-arg '#:tidy #t)
+            (add-kwd-arg '#:doc-index #t)
+            (unless (equal? (selected-scope) 'installation)
+              (add-kwd-arg '#:avoid-main #t))]
+           [else
+            (when (and (send cb is-enabled?) (send cb get-value))
+              (add-kwd-arg '#:force #t))
+            (when (and (not update-by-name?)
+                       (selected-type))
+              (add-kwd-arg '#:type (selected-type)))
+            (when (and (not update-by-name?)
+                       (eq? 'dir (or (selected-type) (get-inferred-actual-type))))
+              (if (send link-dir-checkbox get-value)
+                  (add-kwd-arg '#:link #t)
+                  (add-kwd-arg '#:copy #t)))
+            (let ([scope (selected-scope)])
+              (unless (and (equal? scope (default-pkg-scope))
+                           ;; Don't let `update' infer a scope itself:
+                           (not (eq? action 'update)))
+                (add-kwd-arg '#:scope scope)))
+            (add-kwd-arg '#:deps (get-deps-selected-type))
+            (when (get-deps-auto-update)
+              (add-kwd-arg '#:update-deps #t))
+            (unless (or update-by-name?
+                        (infer-package-name?))
+              (add-kwd-arg '#:name (get-name)))
+            (when dry-run?
+              (add-kwd-arg '#:dry-run #t))])
+         (define args
+           (case action
+             [(setup)
+              (cond
+               [(not (infer-package-name?)) (list (get-name))]
+               [(equal? the-pkg "") null]
+               [else
+                (list (package-source->name the-pkg (selected-type)))])]
+             [else (list the-pkg)]))
+         (cmdline action kwds kwd-args args)]))
 
     (define/override (on-superwindow-show on?)
       (when on?
@@ -623,3 +675,15 @@
         (adjust-all)))
 
     (adjust-all)))
+
+(define (pkg-setup-command #:pkgs pkgs?
+                           #:tidy tidy?
+                           #:doc-index doc-index?
+                           #:avoid-main [avoid-main? #f]
+                           #:batch batch?
+                           . pkgs)
+  (setup #:make-user? avoid-main?
+         #:avoid-main? avoid-main?
+         #:pkgs pkgs
+         #:tidy? tidy?
+         #:make-doc-index? doc-index?))

@@ -20,6 +20,7 @@
          string-constants
          lang/debugger-language-interface
          images/compile-time
+         framework
          (for-syntax racket/base
                      racket/class
                      racket/draw
@@ -187,56 +188,68 @@
         (define mouse-over-pos #f)
         (super-instantiate ())
         
+        (define ignore-modification? #f)
+        (define/augment (begin-metadata-changes)
+          (inner (void) begin-metadata-changes)
+          (set! ignore-modification? #t))
+        (define/augment (end-metadata-changes)
+          (inner (void) end-metadata-changes)
+          (set! ignore-modification? #f))
+        
         (define/augment (on-delete start len)
-          (begin-edit-sequence)
-          (let ([breakpoints (send (get-tab) get-breakpoints)]
-                [shifts empty])
-            (hash-for-each
-             breakpoints
-             (lambda (pos status)
-               (cond
-                 ; deletion after breakpoint: no effect
-                 [(<= pos start)]
-                 ; deletion of breakpoint: remove from table
-                 [(and (< start pos)
-                       (<= pos (+ start len)))
-                  (hash-remove! breakpoints pos)]
-                 ; deletion before breakpoint: shift breakpoint
-                 [(> pos (+ start len))
-                  (hash-remove! breakpoints pos)
-                  (set! shifts (cons (cons (- pos len) status) shifts))])))
-            (for-each (lambda (p) (hash-set! breakpoints (car p) (cdr p)))
-                      shifts))
+          (unless ignore-modification?
+            (begin-edit-sequence)
+            (let ([breakpoints (send (get-tab) get-breakpoints)]
+                  [shifts empty])
+              (hash-for-each
+               breakpoints
+               (lambda (pos status)
+                 (cond
+                   ; deletion after breakpoint: no effect
+                   [(<= pos start)]
+                   ; deletion of breakpoint: remove from table
+                   [(and (< start pos)
+                         (<= pos (+ start len)))
+                    (hash-remove! breakpoints pos)]
+                   ; deletion before breakpoint: shift breakpoint
+                   [(> pos (+ start len))
+                    (hash-remove! breakpoints pos)
+                    (set! shifts (cons (cons (- pos len) status) shifts))])))
+              (for-each (lambda (p) (hash-set! breakpoints (car p) (cdr p)))
+                        shifts)))
           (inner (void) on-delete start len))
         
         (define/augment (after-delete start len)
           (inner (void) after-delete start len)
-          (when (send (get-tab) debug?)
-            (send (get-tab) hide-debug))
-          (end-edit-sequence))
+          (unless ignore-modification?
+            (when (send (get-tab) debug?)
+              (send (get-tab) hide-debug))
+            (end-edit-sequence)))
         
         (define/augment (on-insert start len)
-          (begin-edit-sequence)
-          (let ([breakpoints (send (get-tab) get-breakpoints)]
-                [shifts empty])
-            (hash-for-each
-             breakpoints
-             (lambda (pos status)
-               (when (< start pos)
-                 ;; text inserted before this breakpoint, so shift
-                 ;; the breakpoint forward by <len> positions
-                 (hash-remove! breakpoints pos)
-                 (set! shifts (cons (cons (+ pos len) status) shifts)))))
-            ;; update the breakpoint locations
-            (for-each (lambda (p) (hash-set! breakpoints (car p) (cdr p)))
-                      shifts))
-          (inner (void) on-insert start len))
+          (inner (void) on-insert start len)
+          (unless ignore-modification?
+            (begin-edit-sequence)
+            (let ([breakpoints (send (get-tab) get-breakpoints)]
+                  [shifts empty])
+              (hash-for-each
+               breakpoints
+               (lambda (pos status)
+                 (when (< start pos)
+                   ;; text inserted before this breakpoint, so shift
+                   ;; the breakpoint forward by <len> positions
+                   (hash-remove! breakpoints pos)
+                   (set! shifts (cons (cons (+ pos len) status) shifts)))))
+              ;; update the breakpoint locations
+              (for-each (lambda (p) (hash-set! breakpoints (car p) (cdr p)))
+                        shifts))))
         
         (define/augment (after-insert start len)
           (inner (void) after-insert start len)
-          (when (send (get-tab) debug?)
-            (send (get-tab) hide-debug))
-          (end-edit-sequence))
+          (unless ignore-modification?
+            (when (send (get-tab) debug?)
+              (send (get-tab) hide-debug))
+            (end-edit-sequence)))
         
         ;; lookup id in the given set of stack frames;
         ;; if that fails, try the top-level environment
@@ -1018,12 +1031,14 @@
                                         "??")
                                     " => "
                                     (if (= 2 (length status))
-                                        (render (cadr status))
+                                        (or (render (cadr status)) "??")
                                         (string-append
                                          "(values"
                                          (let loop ([vals (rest status)])
                                            (cond
-                                             [(cons? vals) (string-append " " (render (first vals))
+                                             [(cons? vals) (string-append " "
+                                                                          (or (render (first vals))
+                                                                              "??")
                                                                           (loop (rest vals)))]
                                              [else ")"])))))))]
                             [""]))
@@ -1340,10 +1355,10 @@
                              [else (void)]))))))
           (set! variables-text (new text% [auto-wrap #f]))
           (let ([stack-frames-panel (make-object vertical-panel% stack-view-panel)])
-            (new message% [parent stack-frames-panel] [label "Stack"])
+            (new editor:font-size-message% [parent stack-frames-panel] [message "Stack"])
             (new editor-canvas% [parent stack-frames-panel] [editor stack-frames] [style '(auto-hscroll)]))
           (let ([variables-panel (make-object vertical-panel% stack-view-panel)])
-            (new message% [parent variables-panel] [label "Variables"])
+            (new editor:font-size-message% [parent variables-panel] [message "Variables"])
             (new editor-canvas% [parent variables-panel] [editor variables-text] [style '(auto-hscroll)]))
           ;; parent of panel with debug buttons
           (set! debug-parent-panel

@@ -6,18 +6,19 @@
          racket/draw
          racket/future
          racket/math
-         pict)
+         pict
+         "convert.rkt")
 
 (define nneg-real/c (and/c real? (not/c negative?)))
 
 (provide/contract
  [blur
-  (->* (pict? nneg-real/c)
+  (->* (pict-convertible? nneg-real/c)
        (nneg-real/c
         #:pre-inset? any/c)
        pict?)]
  [shadow
-  (->* (pict? nneg-real/c)
+  (->* (pict-convertible? nneg-real/c)
        (real? real?
         #:color (or/c #f string? (is-a?/c color%))
         #:shadow-color (or/c #f string? (is-a?/c color%)))
@@ -35,18 +36,21 @@
         #:blur (and/c real? (not/c negative?))
         #:margin real?
         #:sep real?)
-       #:rest (listof pict?)
+       #:rest (listof pict-convertible?)
        pict?)])
 
 ;; ----
 
 (define (blur p hbr [vbr hbr]
               #:pre-inset? [pre-inset? #t])
-  (let* ([p
+  (let* ([p*
           (cond [pre-inset? (inset p hbr vbr)]
                 [else p])]
-         [blurred (*blur p hbr vbr)])
-    (cond [pre-inset? (inset blurred (- hbr) (- vbr))]
+         [blurred (*blur p* hbr vbr)])
+    (cond [pre-inset?
+           (struct-copy pict (inset blurred (- hbr) (- vbr))
+                        [ascent  (pict-ascent p)]
+                        [descent (pict-descent p)])]
           [else blurred])))
 
 (define (shadow p br [dx 0] [dy dx]

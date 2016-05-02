@@ -27,11 +27,15 @@
          
          make-language-id
          language-id-nts
+         language-id-binding-table
          language-id-nt-identifiers
          language-id-nt-hole-map
          pattern-symbols
          
-         build-disappeared-use)
+         build-disappeared-use
+
+         from-smiley-number
+         to-smiley-number)
 
 (define-values (struct-type make-term-fn term-fn? term-fn-get term-fn-set!) 
   (make-struct-type 'term-fn #f 1 0))
@@ -64,7 +68,7 @@
     (raise-syntax-error #f "not allowed in an expression context" stx)))
 
 (define-values (language-id make-language-id language-id? language-id-get language-id-set) 
-  (make-struct-type 'language-id #f 4 0 #f '() #f 0))
+  (make-struct-type 'language-id #f 5 0 #f '() #f 0))
 
 (define (language-id-nts stx id) (language-id-getter stx id 1))
 (define (language-id-getter stx id n)
@@ -77,6 +81,7 @@
     (language-id-get (set!-transformer-procedure val) n)))
 (define (language-id-nt-identifiers stx id) (language-id-getter stx id 2))
 (define (language-id-nt-hole-map stx id) (language-id-getter stx id 3))
+(define (language-id-binding-table stx id) (language-id-getter stx id 4))
 
 (define pattern-symbols '(any number natural integer real string variable 
                               variable-not-otherwise-mentioned hole symbol))
@@ -119,3 +124,35 @@
         #f])]
     [else
      #f]))
+
+
+(define (to-smiley-number n)
+  (define candidate
+    (let loop ([n n]
+               [chars '()])
+      (cond
+        [(zero? n) (apply string chars)]
+        [(odd? n) (loop (/ (- n 1) 2) (cons #\☹ chars))]
+        [else (loop (/ n 2) (cons #\☺ chars))])))
+  (cond
+    [(equal? candidate "") "☺"]
+    [else candidate]))
+
+(define (from-smiley-number str)
+  (for/fold ([acc 0])
+            ([c (in-string str)])
+    (+ (case c [(#\☺) 0] [(#\☹) 1])
+       (* 2 acc))))
+
+(module+ test
+  (require rackunit)
+  (check-equal? (to-smiley-number 0) "☺")
+  (check-equal? (to-smiley-number 1) "☹")
+  (check-equal? (to-smiley-number 2) "☹☺")
+  (check-equal? (to-smiley-number 3) "☹☹")
+  (check-equal? (to-smiley-number 18) "☹☺☺☹☺")
+  
+  (for ([x (in-range 1000)])
+    (check-equal? x (from-smiley-number (to-smiley-number x))))
+  
+  (check-equal? (from-smiley-number "☺☺☺☺☺☺☹☺☺☹☺") 18))

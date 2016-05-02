@@ -16,7 +16,8 @@
          (prefix-in simplified-chinese: "private/simplified-chinese-string-constants.rkt")
          (prefix-in russian: "private/russian-string-constants.rkt")
          (prefix-in ukrainian: "private/ukrainian-string-constants.rkt")
-         (prefix-in korean: "private/korean-string-constants.rkt"))
+         (prefix-in korean: "private/korean-string-constants.rkt")
+         (prefix-in bulgarian: "private/bulgarian-string-constants.rkt"))
 
 (provide string-constant string-constants 
          this-language all-languages set-language-pref)
@@ -48,7 +49,8 @@
     (simplified-chinese  #rx"^zh_CN"      #rx"Chinese_China")
     (russian             #rx"^ru_"        #rx"^Russian_")
     (ukrainian           #rx"^uk_"        #rx"^Ukrainian_")
-    (korean              #rx"^ko_"        #rx"^Korean_")))
+    (korean              #rx"^ko_"        #rx"^Korean_")
+    (bulgarian           #rx"^bg_"        #rx"^Bulgarian_")))
 
 ;; default-language : -> symbol
 ;; uses `table' and system-language+contry to find what language to start with
@@ -80,7 +82,8 @@
    (make-sc 'simplified-chinese  simplified-chinese:string-constants  #f)
    (make-sc 'russian             russian:string-constants             #f)
    (make-sc 'ukrainian           ukrainian:string-constants           #f)
-   (make-sc 'korean              korean:string-constants              #f)))
+   (make-sc 'korean              korean:string-constants              #f)
+   (make-sc 'bulgarian           bulgarian:string-constants           #f)))
 
 (define first-string-constant-set (car available-string-constant-sets))
 

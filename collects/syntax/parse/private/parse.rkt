@@ -477,10 +477,11 @@ Conventions:
 
 (define-syntax (first-desc:matrix stx)
   (syntax-case stx ()
-    [(fdm (#s(pk (pat1 . pats) k)))
+    [(fdm (#s(pk1 (pat1 . pats) k)))
      #'(first-desc:S pat1)]
-    [(fdm (pk ...))
-     ;; FIXME
+    [(fdm (#s(pk/same pat1 pks)))
+     #'(first-desc:S pat1)]
+    [(fdm (pk ...)) ;; FIXME
      #'#f]))
 
 ;; ----
@@ -731,8 +732,8 @@ Conventions:
             (parse:S y cy pattern pr* es k))]
        [#s(action:do _ (stmt ...))
         #'(let () (no-shadow stmt) ... (#%expression k))]
-       [#s(action:post _ pattern)
-        #'(let ([pr* (ps-add-post pr)])
+       [#s(action:post _ pattern group index)
+        #'(let ([pr* (ps-add-post pr 'group 'index)])
             (parse:A x cx pattern pr* es k))])]))
 
 ;; (bind/sides clauses k) : expr[Ans]

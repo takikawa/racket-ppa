@@ -3,38 +3,45 @@
 (require racket/contract/base
          racket/promise
          racket/dict
-         data/splay-tree)
+         racket/struct
+         data/skip-list)
+
+(define not-given (gensym 'not-given))
 
 ;; Interval-maps support only half-open exact-integer intervals.
 
-;; An interval-map is (interval-map adj-splay-tree)
-;; splay-tree maps Start => (cons End-Start Value)
+;; An interval-map is (interval-map skip-list)
+;; dict maps Start => (cons End-Start Value)
 ;; Invariant: intervals are disjoint (but the end of one interval
 ;; can be the same as the start of the next, since half-open).
 
-(define (interval-map-ref im key [default (interval-map-error key)])
+(define (interval-map-ref im key [default not-given])
+  (define (not-found)
+    (cond [(eq? default not-given)
+           (error 'interval-map-ref "no mapping found\n  key: ~e" key)]
+          [(procedure? default) (default)]
+          [else default]))
   (let* ([s (interval-map-s im)]
-         [istart (splay-tree-iterate-greatest/<=? s key)])
+         [istart (skip-list-iterate-greatest/<=? s key)])
     (cond [istart
-           (let ([istartkey (splay-tree-iterate-key s istart)]
-                 [istartvalue (splay-tree-iterate-value s istart)])
+           (let ([istartkey (skip-list-iterate-key s istart)]
+                 [istartvalue (skip-list-iterate-value s istart)])
              (if (< (- key istartkey) (car istartvalue))
                  (cdr istartvalue)
-                 (if (procedure? default) (default) default)))]
-          [else
-           (if (procedure? default) (default) default)])))
-
-(define ((interval-map-error x))
-  (error 'interval-map-ref "no mapping found for: ~e" x))
+                 (not-found)))]
+          [else (not-found)])))
 
 ;; (POST x) =
 ;;   (if (start <= x < end)
 ;;       (updater (PRE x default))
 ;;       (PRE x))
-(define (interval-map-update*! im start end updater
-                               [default (error-for 'interval-map-update*!)])
+(define (interval-map-update*! im start end updater [default not-given])
   (define updated-defaultp
-    (delay (updater (if (procedure? default) (default) default))))
+    (delay (updater
+            (cond [(eq? default not-given)
+                   (error 'interval-map-update*! "no mapping found")]
+                  [(procedure? default) (default)]
+                  [else default]))))
   (let ([s (interval-map-s im)])
     (check-interval start end 'interval-map-update*!
                     "im" im "start" start "end" end "updater" updater)
@@ -43,24 +50,24 @@
     ;; Interval ix needs updating iff start <= key(ix) < end
     ;; (Also need to insert missing intervals)
     ;; Main loop:
-    (let loop ([start start] [ix (splay-tree-iterate-least/>=? s start)])
-      (let ([ixstart (and ix (splay-tree-iterate-key s ix))])
+    (let loop ([start start] [ix (skip-list-iterate-least/>=? s start)])
+      (let ([ixstart (and ix (skip-list-iterate-key s ix))])
         (cond [(and ix (< ixstart end))
                ;; First do leading gap, [ start, key(ix) )
                (when (< start ixstart)
-                 (splay-tree-set! s start
+                 (skip-list-set! s start
                                  (cons (- ixstart start)
                                        (force updated-defaultp))))
                ;; Then interval, [ ixstart, end(ix) )
-               (let ([ixvalue (splay-tree-iterate-value s ix)])
-                 (splay-tree-set! s ixstart
-                                  (cons (car ixvalue)
-                                        (updater (cdr ixvalue))))
-                 (loop (+ ixstart (car ixvalue)) (splay-tree-iterate-next s ix)))]
+               (let ([ixvalue (skip-list-iterate-value s ix)])
+                 (skip-list-set! s ixstart
+                                 (cons (car ixvalue)
+                                       (updater (cdr ixvalue))))
+                 (loop (+ ixstart (car ixvalue)) (skip-list-iterate-next s ix)))]
               [else
                ;; Do gap, [ start, end )
                (when (< start end)
-                 (splay-tree-set! s start
+                 (skip-list-set! s start
                                  (cons (- end start)
                                        (force updated-defaultp))))])))))
 
@@ -68,9 +75,6 @@
   (check-interval start end 'interval-map-cons*!
                   "im" im "start" start "end" end "obj" obj)
   (interval-map-update*! im start end (lambda (old) (cons obj old)) default))
-
-(define ((error-for who))
-  (error who "no mapping found"))
 
 ;; (POST x) = (if (start <= x < end) value (PRE x))
 (define (interval-map-set! im start end value)
@@ -83,42 +87,59 @@
   (let ([s (interval-map-s im)])
     (check-interval start end 'interval-map-remove!
                     "im" im "start" start "end" end)
-    (let ([start (norm s start 0)]
-          [end (norm s end 1)])
+    (let ([start (norm s start)]
+          [end (norm s end)])
       (when (and start end) ;; ie, s not empty
         (split! s start)
         (split! s end)
-        (splay-tree-remove-range! s start end)))))
+        (skip-list-remove-range! s start end)))))
 
 (define (interval-map-contract! im from to)
   (check-interval from to 'interval-map-contract!
                   "im" im "from" from "to" to)
   (interval-map-remove! im from to)
   (let* ([s (interval-map-s im)])
-    (splay-tree-contract! s from to)))
+    (skip-list-contract! s from to)
+    (when #t
+      (coalesce! s from))))
 
 (define (interval-map-expand! im from to)
   (check-interval from to 'interval-map-expand!
                   "im" im "from" from "to" to)
   (let* ([s (interval-map-s im)])
     (split! s from)
-    (splay-tree-expand! s from to)))
+    (skip-list-expand! s from to)))
 
-(define (norm s pos adjust)
+(define (norm s pos)
   (cond [(= pos -inf.0)
-         (let ([iter (splay-tree-iterate-least s)])
-           (and iter (splay-tree-iterate-key s iter)))]
+         (let ([iter (skip-list-iterate-least s)])
+           (and iter (skip-list-iterate-key s iter)))]
         [(= pos +inf.0)
-         (let ([iter (splay-tree-iterate-greatest s)])
+         (let ([iter (skip-list-iterate-greatest s)])
            ;; add 1 to *include* max (recall, half-open intervals)
-           (and iter (+ 1 (splay-tree-iterate-key s iter))))]
+           (and iter (+ 1 (skip-list-iterate-key s iter))))]
         [else pos]))
+
+(define (coalesce! s x)
+  ;; Coalesce [a, x) -> v; [x, c) -> v into [a, c) -> v
+  (define ia (skip-list-iterate-greatest/<? s x))
+  (define ib (and ia (skip-list-iterate-next s ia)))
+  (when (and ia ib)
+    (define a (skip-list-iterate-key s ia))
+    (define b (skip-list-iterate-key s ib))
+    (define va (skip-list-iterate-value s ia))
+    (define vb (skip-list-iterate-value s ib))
+    (when (and (= x (+ a (car va)))
+               (= x b)
+               (eq? (cdr va) (cdr vb)))
+      (skip-list-remove! s x)
+      (skip-list-set! s a (cons (+ (car va) (car vb)) (cdr va))))))
 
 ;; split! 
 ;; Ensures that if an interval contains x, it starts at x
 (define (split! s x)
-  (let* ([ix (splay-tree-iterate-greatest/<? s x)]
-         [ixstart (and ix (splay-tree-iterate-key s ix))])
+  (let* ([ix (skip-list-iterate-greatest/<? s x)]
+         [ixstart (and ix (skip-list-iterate-key s ix))])
     ;; (ix = #f) or (key(ix) < x)
     (cond [(eq? ix #f)
            ;; x <= all existing intervals; that is, either
@@ -127,12 +148,12 @@
            ;; Either way, nothing to split.
            (void)]
           [else
-           (let* ([ixvalue (splay-tree-iterate-value s ix)]
+           (let* ([ixvalue (skip-list-iterate-value s ix)]
                   [ixrun (car ixvalue)])
              (cond [(< x (+ ixstart ixrun))
                     ;; Split; adjust ix to end at x, insert [x, ixend)
-                    (splay-tree-set! s ixstart (cons (- x ixstart) (cdr ixvalue)))
-                    (splay-tree-set! s x (cons (- (+ ixstart ixrun) x) (cdr ixvalue)))]
+                    (skip-list-set! s ixstart (cons (- x ixstart) (cdr ixvalue)))
+                    (skip-list-set! s x (cons (- (+ ixstart ixrun) x) (cdr ixvalue)))]
                    [else
                     ;; x not in ix
                     (void)]))])))
@@ -152,12 +173,12 @@
 (struct interval-map-iter (si))
 
 (define (interval-map-iterate-first im)
-  (cond [(splay-tree-iterate-first (interval-map-s im))
+  (cond [(skip-list-iterate-first (interval-map-s im))
          => interval-map-iter]
         [else #f]))
 
 (define (interval-map-iterate-next im iter)
-  (cond [(splay-tree-iterate-next (interval-map-s im)
+  (cond [(skip-list-iterate-next (interval-map-s im)
                                  (interval-map-iter-si iter))
          => interval-map-iter]
         [else #f]))
@@ -165,13 +186,13 @@
 (define (interval-map-iterate-key im iter)
   (let ([s (interval-map-s im)]
         [is (interval-map-iter-si iter)])
-    (let ([key (splay-tree-iterate-key s is)])
-      (cons key (+ key (car (splay-tree-iterate-value s is)))))))
+    (let ([key (skip-list-iterate-key s is)])
+      (cons key (+ key (car (skip-list-iterate-value s is)))))))
 
 (define (interval-map-iterate-value im iter)
   (let ([s (interval-map-s im)]
         [is (interval-map-iter-si iter)])
-    (cdr (splay-tree-iterate-value s is))))
+    (cdr (skip-list-iterate-value s is))))
 
 ;; ============================================================
 
@@ -193,17 +214,26 @@
 ;; follow the dict interface!
 
 (struct interval-map (s)
-        #:property prop:dict dict-methods)
+        #:property prop:dict dict-methods
+        #:property prop:custom-write
+        (make-constructor-style-printer
+         (lambda (im) 'make-interval-map)
+         (lambda (im) (list (dict-map im cons)))))
 
 (struct interval-map* interval-map (key-c value-c)
         #:property prop:dict dict-methods)
 
 (define (make-interval-map #:key-contract [key-contract any/c]
-                           #:value-contract [value-contract any/c])
-  (cond [(and (eq? key-contract any/c) (eq? value-contract any/c))
-         (interval-map (make-adjustable-splay-tree))]
-        [else
-         (interval-map* (make-adjustable-splay-tree) key-contract value-contract)]))
+                           #:value-contract [value-contract any/c]
+                           [contents null])
+  (define im
+    (cond [(and (eq? key-contract any/c) (eq? value-contract any/c))
+           (interval-map (make-adjustable-skip-list))]
+          [else
+           (interval-map* (make-adjustable-skip-list) key-contract value-contract)]))
+  (for ([entry (in-list contents)])
+    (interval-map-set! im (car (car entry)) (cdr (car entry)) (cdr entry)))
+  im)
 
 ;; ============================================================
 
@@ -220,7 +250,8 @@
 (provide/contract
  [make-interval-map
   (->* ()
-       (#:key-contract contract? #:value-contract contract?)
+       ((listof (cons/c (cons/c exact-integer? exact-integer?) any/c))
+        #:key-contract contract? #:value-contract contract?)
        interval-map?)]
  [interval-map?
   (-> any/c boolean?)]

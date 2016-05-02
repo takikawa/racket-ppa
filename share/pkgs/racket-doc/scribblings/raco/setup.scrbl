@@ -366,8 +366,8 @@ Optional @filepath{info.rkt} fields trigger additional actions by
           (list src-string flags category name out-k)
           (list src-string flags category name out-k order-n)]
      [flags (list mode-symbol ...)]
-     [category (list category-symbol)
-               (list category-symbol sort-number)]
+     [category (list category-string-or-symbol)
+               (list category-string-or-symbol sort-number)]
      [name string
            #f]
    ]
@@ -452,9 +452,13 @@ Optional @filepath{info.rkt} fields trigger additional actions by
     ]
 
     The @racket[_category] list specifies how to show the document in
-    the root table of contents. The list must start with a symbol,
-    usually one of the following categories, which are ordered as
-    below in the root documentation page:
+    the root table of contents. The list must start with a category,
+    which determines where the manual appears in the root
+    documentation page. A category is either a string or a symbol. If
+    it is a string, then the string is the category label on the root
+    page. If it is a symbol, then a default category label is
+    used. The available symbols and the order of categories on the
+    root documentation page is as below:
 
    @itemize[
 
@@ -483,6 +487,8 @@ Optional @filepath{info.rkt} fields trigger additional actions by
      @item{@racket['interop] : Documentation for interoperability
            tools and libraries.}
 
+     @item{All string categories as ordered by @racket[string<=?].}
+     
      @item{@racket['library] : Documentation for libraries; this
            category is the default and used for unrecognized category
            symbols.}
@@ -536,7 +542,10 @@ Optional @filepath{info.rkt} fields trigger additional actions by
    source file need not be present. Moving documentation into place
    may require no movement at all, depending on the way that the
    enclosing collection is installed, but movement includes adding a
-   @filepath{synced.rktd} file to represent the installation.}
+   @filepath{synced.rktd} file to represent the installation.
+
+   @history[#:changed "6.4" @elem{Allow a category to be a string
+                                 instead of a symbol.}]}
 
  @item{@as-index{@racketidfont{release-note-files}} : @racket[(listof (cons/c string? (cons/c string? list?)))] ---
    A list of release-notes text files to link from the main documentation pages.

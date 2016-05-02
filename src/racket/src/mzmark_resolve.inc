@@ -15,12 +15,8 @@ static int mark_resolve_info_MARK(void *p, struct NewGC *gc) {
   gcMARK2(i->prefix, gc);
   gcMARK2(i->stx_map, gc);
   gcMARK2(i->tl_map, gc);
-  gcMARK2(i->old_pos, gc);
-  gcMARK2(i->new_pos, gc);
-  gcMARK2(i->old_stx_pos, gc);
-  gcMARK2(i->flags, gc);
+  gcMARK2(i->redirects, gc);
   gcMARK2(i->lifts, gc);
-  gcMARK2(i->lifted, gc);
   gcMARK2(i->next, gc);
 
 # ifdef GC_NO_SIZE_NEEDED_FROM_PROCS
@@ -39,12 +35,8 @@ static int mark_resolve_info_FIXUP(void *p, struct NewGC *gc) {
   gcFIXUP2(i->prefix, gc);
   gcFIXUP2(i->stx_map, gc);
   gcFIXUP2(i->tl_map, gc);
-  gcFIXUP2(i->old_pos, gc);
-  gcFIXUP2(i->new_pos, gc);
-  gcFIXUP2(i->old_stx_pos, gc);
-  gcFIXUP2(i->flags, gc);
+  gcFIXUP2(i->redirects, gc);
   gcFIXUP2(i->lifts, gc);
-  gcFIXUP2(i->lifted, gc);
   gcFIXUP2(i->next, gc);
 
 # ifdef GC_NO_SIZE_NEEDED_FROM_PROCS
@@ -72,16 +64,19 @@ static int mark_unresolve_info_MARK(void *p, struct NewGC *gc) {
 #ifndef GC_NO_MARK_PROCEDURE_NEEDED
   Unresolve_Info *i = (Unresolve_Info *)p;
   
-  gcMARK2(i->flags, gc);
-  gcMARK2(i->depths, gc);
+  gcMARK2(i->vars, gc);
   gcMARK2(i->prefix, gc);
-  gcMARK2(i->closures, gc);
   gcMARK2(i->closures, gc);
   gcMARK2(i->module, gc);
   gcMARK2(i->comp_prefix, gc);
+  gcMARK2(i->new_toplevels, gc);
+  gcMARK2(i->from_modidx, gc);
+  gcMARK2(i->to_modidx, gc);
+  gcMARK2(i->opt_env, gc);
+  gcMARK2(i->opt_insp, gc);
+  gcMARK2(i->inline_variants, gc);
   gcMARK2(i->toplevels, gc);
   gcMARK2(i->definitions, gc);
-  gcMARK2(i->ref_args, gc);
   gcMARK2(i->ref_lifts, gc);
 
 # ifdef GC_NO_SIZE_NEEDED_FROM_PROCS
@@ -97,16 +92,19 @@ static int mark_unresolve_info_FIXUP(void *p, struct NewGC *gc) {
 #ifndef GC_NO_FIXUP_PROCEDURE_NEEDED
   Unresolve_Info *i = (Unresolve_Info *)p;
   
-  gcFIXUP2(i->flags, gc);
-  gcFIXUP2(i->depths, gc);
+  gcFIXUP2(i->vars, gc);
   gcFIXUP2(i->prefix, gc);
-  gcFIXUP2(i->closures, gc);
   gcFIXUP2(i->closures, gc);
   gcFIXUP2(i->module, gc);
   gcFIXUP2(i->comp_prefix, gc);
+  gcFIXUP2(i->new_toplevels, gc);
+  gcFIXUP2(i->from_modidx, gc);
+  gcFIXUP2(i->to_modidx, gc);
+  gcFIXUP2(i->opt_env, gc);
+  gcFIXUP2(i->opt_insp, gc);
+  gcFIXUP2(i->inline_variants, gc);
   gcFIXUP2(i->toplevels, gc);
   gcFIXUP2(i->definitions, gc);
-  gcFIXUP2(i->ref_args, gc);
   gcFIXUP2(i->ref_lifts, gc);
 
 # ifdef GC_NO_SIZE_NEEDED_FROM_PROCS

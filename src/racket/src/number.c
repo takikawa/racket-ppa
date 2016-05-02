@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2015 PLT Design Inc.
+  Copyright (c) 2004-2016 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -61,6 +61,8 @@
 READ_ONLY Scheme_Object *scheme_fixnum_p_proc;
 READ_ONLY Scheme_Object *scheme_flonum_p_proc;
 READ_ONLY Scheme_Object *scheme_extflonum_p_proc;
+READ_ONLY Scheme_Object *scheme_real_p_proc;
+READ_ONLY Scheme_Object *scheme_number_p_proc;
 
 /* locals */
 static Scheme_Object *number_p (int argc, Scheme_Object *argv[]);
@@ -226,6 +228,7 @@ static Scheme_Object *exact_to_extfl(int argc, Scheme_Object *argv[]);
 #endif
 
 /* globals */
+READ_ONLY Scheme_Object *scheme_unsafe_fxnot_proc;
 READ_ONLY Scheme_Object *scheme_unsafe_fxand_proc;
 READ_ONLY Scheme_Object *scheme_unsafe_fxior_proc;
 READ_ONLY Scheme_Object *scheme_unsafe_fxxor_proc;
@@ -471,7 +474,9 @@ scheme_init_number (Scheme_Env *env)
 #endif
 #endif
 
+  REGISTER_SO(scheme_number_p_proc);
   p = scheme_make_folding_prim(number_p, "number?", 1, 1, 1);
+  scheme_number_p_proc = p;
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
                                                             | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant("number?", p, env);
@@ -480,11 +485,12 @@ scheme_init_number (Scheme_Env *env)
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant("complex?", p, env);
 
+  REGISTER_SO(scheme_real_p_proc);
   p = scheme_make_folding_prim(real_p, "real?", 1, 1, 1);
+  scheme_real_p_proc = p;
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
                                                             | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant("real?", p, env);
-
   
   p = scheme_make_folding_prim(rational_p, "rational?", 1, 1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_OMITABLE);
@@ -1327,6 +1333,8 @@ void scheme_init_unsafe_number(Scheme_Env *env)
                                                             | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL
                                                             | SCHEME_PRIM_PRODUCES_FIXNUM);
   scheme_add_global_constant("unsafe-fxnot", p, env);
+  REGISTER_SO(scheme_unsafe_fxnot_proc);
+  scheme_unsafe_fxnot_proc = p;
 
   p = scheme_make_folding_prim(unsafe_fx_lshift, "unsafe-fxlshift", 2, 2, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED
@@ -1560,6 +1568,24 @@ void scheme_init_extfl_unsafe_number(Scheme_Env *env)
   scheme_add_global_constant("unsafe-f80vector-set!", p, env);
 }
 
+#ifdef _MSC_VER
+/* Something about loading "longdouble.dll" can interfere with
+   fmod() so that it fails on a first call, but works on subsequent
+   calls. The issue doesn't seem to be as simple as the floating-point
+   control state, it seems to affect mainly MSVC 2008 builds, only
+   the 3m build, etc. Using a non-static variable ensures that the
+   compiler doesn't optimize away the call to fmod(). */
+double scheme_longdouble_fixup_hack = 4;
+void scheme_init_longdouble_fixup(void)
+{
+  scheme_longdouble_fixup_hack = fmod(scheme_longdouble_fixup_hack, 2.0);
+}
+#else
+void scheme_init_longdouble_fixup(void)
+{
+}
+#endif
+
 Scheme_Object *
 scheme_make_integer_value(intptr_t i)
 {
@@ -1661,7 +1687,7 @@ scheme_make_integer_value_from_long_halves(uintptr_t lowhalf,
 #else
   mzlonglong v;
 
-  v = (mzlonglong)lowhalf | ((mzlonglong)hihalf << 32);
+  v = (mzlonglong)lowhalf | ((umzlonglong)hihalf << 32);
 
   return scheme_make_integer_value_from_long_long(v);
 #endif
@@ -1749,7 +1775,11 @@ double scheme_real_to_double(Scheme_Object *r)
 
 XFORM_NONGCING static MZ_INLINE int minus_zero_p(double d)
 {
+#ifdef MZ_IS_NEG_ZERO
+  return MZ_IS_NEG_ZERO(d);
+#else
   return (1 / d) < 0;
+#endif
 }
 
 int scheme_minus_zero_p(double d)
@@ -3243,7 +3273,7 @@ static Scheme_Object *fixnum_expt(intptr_t x, intptr_t y)
   intptr_t orig_y = y;
 
   if ((x == 2) && (y <= MAX_SHIFT_TRY))
-    return scheme_make_integer((intptr_t)1 << y);
+    return scheme_make_integer((uintptr_t)1 << y);
   else {
     intptr_t result = 1;
     int neg_result = (x < 0) && (y & 0x1);
@@ -3617,17 +3647,41 @@ scheme_expt(int argc, Scheme_Object *argv[])
           }
 	}
       }
-    } else if ((d < 0.0) && (d > -1.0)) {
+    } else if (SCHEME_BIGNUMP(e) && SCHEME_BIGPOS(e)) {
       /* If `e` is a positive bignum, then the result should be zero,
          but we won't get that result if conversion produces infinity */
-      if (SCHEME_BIGNUMP(e) && SCHEME_BIGPOS(e)) {
+      double e_dbl;
 #ifdef MZ_USE_SINGLE_FLOATS
-        int sgl = !SCHEME_DBLP(n);
+      int sgl = !SCHEME_DBLP(n);
 #endif
+      if ((d < 0.0) && (d > -1.0)) {
         if (SCHEME_FALSEP(scheme_odd_p(1, &e)))
           return SELECT_EXPT_PRECISION(scheme_zerof, scheme_zerod);
         else
           return SELECT_EXPT_PRECISION(scheme_nzerof, scheme_nzerod);
+      }
+      /* If d is negative, and `e` is a large enough bignum which would
+         be converted to infinity, this would return a complex NaN.
+         Instead, we want to return (positive of negative) infinity.
+         See discussion in Github issue 1148. */
+#ifdef MZ_USE_SINGLE_FLOATS
+      if (sgl) {
+        /* Need to go through singles to get right overflow behavior. */
+        e_dbl = (double)(scheme_bignum_to_float(e));
+      } else {
+        e_dbl = scheme_bignum_to_double(e);
+      }
+#else
+      e_dbl = scheme_bignum_to_double(e);
+#endif
+      if ((d < 0.0) && MZ_IS_POS_INFINITY(e_dbl)) {
+        if (SCHEME_TRUEP(scheme_odd_p(1, &e))) {
+          return SELECT_EXPT_PRECISION(scheme_single_minus_inf_object,
+                                       scheme_minus_inf_object);
+        } else {
+          return SELECT_EXPT_PRECISION(scheme_single_inf_object,
+                                       scheme_inf_object);
+        }
       }
     }
 
@@ -3804,6 +3858,21 @@ static Scheme_Object *magnitude(int argc, Scheme_Object *argv[])
       a[0] = i;
       return scheme_exact_to_inexact(1, a);
     }
+#ifdef MZ_USE_SINGLE_FLOATS
+    if (SCHEME_FLTP(i)) {
+      float f;
+      f = SCHEME_FLT_VAL(i);
+      if (MZ_IS_POS_INFINITY((double) f)) {
+        if (SCHEME_FLTP(r)) { /* `r` is either a single-precision float or exact 0 */
+          f = SCHEME_FLT_VAL(r);
+          if (MZ_IS_NAN((double) f)) {
+            return scheme_single_nan_object;
+          }
+          return scheme_single_inf_object;
+        }
+      }
+    }
+#endif
     if (SCHEME_FLOATP(i)) {
       double d;
       d = SCHEME_FLOAT_VAL(i);
@@ -3951,6 +4020,22 @@ scheme_exact_to_inexact (int argc, Scheme_Object *argv[])
   ESCAPED_BEFORE_HERE;
 }
 
+XFORM_NONGCING static int double_fits_fixnum(double d)
+/* returns TRUE if the number definitely fits in an intptr_t
+   and might fit in a fixnum */
+{
+  int exp;
+  
+  if (MZ_IS_NAN(d)
+      || MZ_IS_POS_INFINITY(d)
+      || MZ_IS_NEG_INFINITY(d))
+    return 0;
+
+  (void)frexp(d, &exp);
+
+  return (exp < (8 * sizeof(intptr_t)) - 1);
+}
+
 Scheme_Object *
 scheme_inexact_to_exact (int argc, Scheme_Object *argv[])
 {
@@ -3962,9 +4047,12 @@ scheme_inexact_to_exact (int argc, Scheme_Object *argv[])
   t = _SCHEME_TYPE(o);
   if (t == scheme_double_type) {
     double d = SCHEME_DBL_VAL(o);
+    Scheme_Object *i;
 
     /* Try simple case: */
-    Scheme_Object *i = scheme_make_integer((intptr_t)d);
+    i = (double_fits_fixnum(d)
+         ? scheme_make_integer((intptr_t)d)
+         : scheme_make_integer(0));
     if ((double)SCHEME_INT_VAL(i) == d) {
 #ifdef NAN_EQUALS_ANYTHING
       if (!MZ_IS_NAN(d))
@@ -3977,9 +4065,12 @@ scheme_inexact_to_exact (int argc, Scheme_Object *argv[])
 #ifdef MZ_USE_SINGLE_FLOATS
   if (t == scheme_float_type) {
     float d = SCHEME_FLT_VAL(o);
+    Scheme_Object *i;
 
     /* Try simple case: */
-    Scheme_Object *i = scheme_make_integer((intptr_t)d);
+    i = (double_fits_fixnum(d)
+         ? scheme_make_integer((intptr_t)d)
+         : scheme_make_integer(0));
     if ((double)SCHEME_INT_VAL(i) == d) {
 # ifdef NAN_EQUALS_ANYTHING
       if (!MZ_IS_NAN(d))
@@ -4166,7 +4257,7 @@ scheme_bitwise_shift(int argc, Scheme_Object *argv[])
       } else if (shift <= MAX_SHIFT_TRY) {
 	intptr_t n;
 	
-	n = i << shift;
+	n = (uintptr_t)i << shift;
 	if ((n > 0) && (SCHEME_INT_VAL(scheme_make_integer(n)) >> shift == i))
 	  return scheme_make_integer(n);
       }
@@ -4200,7 +4291,7 @@ static Scheme_Object *bitwise_bit_set_p (int argc, Scheme_Object *argv[])
     }
     if (SCHEME_INTP(so)) {
       if (v < (sizeof(intptr_t) * 8))
-        return ((((intptr_t)1 << v) & SCHEME_INT_VAL(so)) ? scheme_true : scheme_false);
+        return ((((uintptr_t)1 << v) & SCHEME_INT_VAL(so)) ? scheme_true : scheme_false);
       else
         return ((SCHEME_INT_VAL(so) < 0) ? scheme_true : scheme_false);
     } else {
@@ -4410,7 +4501,7 @@ integer_length(int argc, Scheme_Object *argv[])
 
     /* if base is large enough that our later steps risk overflow
        then perform all the arithmetic using bignums. */
-    if (base >= (((intptr_t)1 << (MAX_SHIFT_TRY - 4))-1)) {
+    if (base >= (((uintptr_t)1 << (MAX_SHIFT_TRY - 4))-1)) {
       /* bignum path */
       Scheme_Object *result;
       result = scheme_bin_mult(scheme_make_integer_value(base),
@@ -5152,11 +5243,13 @@ static Scheme_Object *fl_to_fx (int argc, Scheme_Object *argv[])
     scheme_wrong_contract("fl->fx", "(and/c flonum? integer?)", 0, argc, argv);
 
   d = SCHEME_DBL_VAL(argv[0]);
-  v = (intptr_t)d;
-  if ((double)v == d) {
-    o = scheme_make_integer_value(v);
-    if (SCHEME_INTP(o))
-      return o;
+  if (double_fits_fixnum(d)) {
+    v = (intptr_t)d;
+    if ((double)v == d) {
+      o = scheme_make_integer_value(v);
+      if (SCHEME_INTP(o))
+        return o;
+    }
   }
 
   scheme_contract_error("fl->fx", "no fixnum representation", 
@@ -5289,21 +5382,21 @@ SAFE_EXTFL(log)
 SAFE_BIN_EXTFL(expt)
 
 
-#define UNSAFE_FX(name, op, fold)                            \
+#define UNSAFE_FX(name, op, fold, type)                           \
  static Scheme_Object *name(int argc, Scheme_Object *argv[]) \
  {                                                           \
    intptr_t v;                                                   \
    if (scheme_current_thread->constant_folding) return fold(argc, argv);     \
-   v = SCHEME_INT_VAL(argv[0]) op SCHEME_INT_VAL(argv[1]);   \
+   v = (type)SCHEME_INT_VAL(argv[0]) op SCHEME_INT_VAL(argv[1]);            \
    return scheme_make_integer(v);                            \
  }
 
-UNSAFE_FX(unsafe_fx_and, &, scheme_bitwise_and)
-UNSAFE_FX(unsafe_fx_or, |, bitwise_or)
-UNSAFE_FX(unsafe_fx_xor, ^, bitwise_xor)
-UNSAFE_FX(unsafe_fx_lshift, <<, scheme_bitwise_shift)
+UNSAFE_FX(unsafe_fx_and, &, scheme_bitwise_and, intptr_t)
+UNSAFE_FX(unsafe_fx_or, |, bitwise_or, intptr_t)
+UNSAFE_FX(unsafe_fx_xor, ^, bitwise_xor, intptr_t)
+UNSAFE_FX(unsafe_fx_lshift, <<, scheme_bitwise_shift, uintptr_t)
 
-UNSAFE_FX(unsafe_fx_rshift, >>, neg_bitwise_shift)
+UNSAFE_FX(unsafe_fx_rshift, >>, neg_bitwise_shift, intptr_t)
 
 static Scheme_Object *unsafe_fx_not (int argc, Scheme_Object *argv[])
 {

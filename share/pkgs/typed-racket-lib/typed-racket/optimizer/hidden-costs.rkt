@@ -4,7 +4,7 @@
          (for-template racket/base)
          "../utils/utils.rkt"
          (optimizer utils logging)
-         (types abbrev struct-table))
+         (types abbrev numeric-tower struct-table))
 
 (provide hidden-cost-log-expr)
 
@@ -45,18 +45,6 @@
     #:do [(log-optimization-info "hidden parameter (random)" #'op)]
     #:with opt (syntax/loc this-syntax (op args.opt ...)))
 
-  ;; Log calls to struct constructors, so that OC can report those used in
-  ;; hot loops.
-  ;; Note: Sometimes constructors are wrapped in `#%expression', need to watch
-  ;;  for that too.
-  (pattern (#%plain-app (~and op-part (~or op:id (#%expression op:id)))
-                        args:opt-expr ...)
-    #:when (let ([constructor-for (syntax-property #'op 'constructor-for)])
-             (or (and constructor-for (struct-constructor? constructor-for))
-                 (struct-constructor? #'op)))
-    #:do [(log-optimization-info "struct constructor" #'op)]
-    #:with opt (syntax/loc this-syntax (op-part args.opt ...)))
-
   ;; regexp-match (or other regexp operation) with non-regexp pattern argument
   ;; (i.e. string or bytes)
   (pattern (#%plain-app op:regexp-function pattern-arg:opt-expr
@@ -64,4 +52,12 @@
     #:when (not (or (subtypeof? #'pattern-arg -Regexp)
                     (subtypeof? #'pattern-arg -Byte-Regexp)))
     #:do [(log-optimization-info "non-regexp pattern" #'pattern-arg)]
-    #:with opt (syntax/loc this-syntax (op pattern-arg.opt args.opt ...))))
+    #:with opt (syntax/loc this-syntax (op pattern-arg.opt args.opt ...)))
+
+  ;; vectors of floats can be replaced with flvectors in most cases
+  ;; need to deconstruct to not infinite loop
+  (pattern (#%plain-app es ...)
+    #:when (subtypeof? this-syntax (-vec -Flonum))
+    #:with (es*:opt-expr ...) #'(es ...)
+    #:do [(log-optimization-info "vector of floats" this-syntax)]
+    #:with opt (syntax/loc this-syntax (es*.opt ...))))

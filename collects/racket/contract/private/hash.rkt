@@ -4,8 +4,7 @@
          syntax/location
          "guts.rkt"
          "blame.rkt"
-         "prop.rkt"
-         "misc.rkt")
+         "prop.rkt")
 
 (provide (rename-out [wrap-hash/c hash/c])
          hash/dc)
@@ -169,14 +168,14 @@
      (cond
        [(and (equal? this-immutable #t)
              (equal? that-immutable #t))
-        (and (contract-stronger? this-dom that-dom)
-             (contract-stronger? this-rng that-rng))]
+        (and (contract-struct-stronger? this-dom that-dom)
+             (contract-struct-stronger? this-rng that-rng))]
        [(or (equal? that-immutable 'dont-care)
             (equal? this-immutable that-immutable))
-        (and (contract-stronger? this-dom that-dom)
-             (contract-stronger? that-dom this-dom)
-             (contract-stronger? this-rng that-rng)
-             (contract-stronger? that-rng this-rng))]
+        (and (contract-struct-stronger? this-dom that-dom)
+             (contract-struct-stronger? that-dom this-dom)
+             (contract-struct-stronger? this-rng that-rng)
+             (contract-struct-stronger? that-rng this-rng))]
        [else #f])]
     [else #f]))
 
@@ -194,9 +193,9 @@
      (define immutable (base-hash/c-immutable ctc))
      (define flat? (flat-hash/c? ctc))
      (λ (blame)
-       (define dom-proj ((contract-projection (base-hash/c-dom ctc))
+       (define dom-proj ((get/build-late-neg-projection (base-hash/c-dom ctc))
                          (blame-add-key-context blame #f)))
-       (define rng-proj ((contract-projection (base-hash/c-rng ctc))
+       (define rng-proj ((get/build-late-neg-projection (base-hash/c-rng ctc))
                          (blame-add-value-context blame #f)))
        (λ (val neg-party)
          (cond
@@ -204,8 +203,8 @@
             val]
            [else
             (for ([(k v) (in-hash val)])
-              (dom-proj k)
-              (rng-proj v))
+              (dom-proj k neg-party)
+              (rng-proj v neg-party))
             val]))))))
 
 (define (ho-projection chaperone-or-impersonate-hash)
@@ -235,6 +234,7 @@
 (define (handle-the-hash val neg-party
                          pos-dom-proj neg-dom-proj mk-pos-rng-proj mk-neg-rng-proj
                          chaperone-or-impersonate-hash ctc blame)
+  (define blame+neg-party (cons blame neg-party))
   (if (immutable? val) 
       (for/fold ([h val]) ([(k v) (in-hash val)])
         (hash-set h
@@ -243,16 +243,26 @@
       (chaperone-or-impersonate-hash
        val
        (λ (h k)
-         (values (neg-dom-proj k neg-party)
+         (values (with-contract-continuation-mark
+                  blame+neg-party
+                  (neg-dom-proj k neg-party))
                  (λ (h k v)
-                   ((mk-pos-rng-proj k) v neg-party))))
+                   (with-contract-continuation-mark
+                    blame+neg-party
+                    ((mk-pos-rng-proj k) v neg-party)))))
        (λ (h k v)
-         (values (neg-dom-proj k neg-party)
-                 ((mk-neg-rng-proj k) v neg-party)))
+         (with-contract-continuation-mark
+          blame+neg-party
+          (values (neg-dom-proj k neg-party)
+                  ((mk-neg-rng-proj k) v neg-party))))
        (λ (h k)
-         (neg-dom-proj k neg-party))
+         (with-contract-continuation-mark
+          blame+neg-party
+          (neg-dom-proj k neg-party)))
        (λ (h k)
-         (pos-dom-proj k neg-party))
+         (with-contract-continuation-mark
+          blame+neg-party
+          (pos-dom-proj k neg-party)))
        impersonator-prop:contracted ctc
        impersonator-prop:blame blame)))
 

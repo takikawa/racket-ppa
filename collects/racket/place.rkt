@@ -10,6 +10,8 @@
          racket/place/private/th-place
          racket/place/private/prop
          racket/private/streams
+         racket/match
+         racket/runtime-path
 
 
          (for-syntax racket/base
@@ -185,7 +187,7 @@
   (syntax-case stx ()
     [(who ch body1 body ...)
      (if (eq? (syntax-local-context) 'module-begin)
-         ;; when a `place' form is the only thing in a module mody:
+         ;; when a `place' form is the only thing in a module body:
          #`(begin #,stx)
          ;; normal case:
          (let ()
@@ -199,10 +201,14 @@
                (string->symbol
                 (format "place-body-~a" place-body-counter))))
            (with-syntax ([internal-def-name
-                          (syntax-local-lift-module #`(module* #,module-name-stx #f
-                                                        (provide main)
-                                                        (define (main ch)
-                                                          body1 body ...)))]
+                          (syntax-local-lift-module
+                           #`(module* #,module-name-stx #f
+                               (provide main)
+                               (define (main ch)
+                                 body1 body ...)
+                               ;; The existence of this submodule makes the
+                               ;; enclosing submodule preserved by `raco exe`:
+                               (module declare-preserve-for-embedding '#%kernel)))]
                          [in _in]
                          [out _out]
                          [err _err]
@@ -233,12 +239,17 @@
   (when (and (symbol? name)
              (not (module-predefined? `(quote ,name))))
      (error who "the enclosing module's resolved name is not a path or predefined"))
-  (start-place-func who `(submod ,(if (symbol? name) `(quote ,name) name) ,submod-name) 'main in out err))
+  (define submod-ref
+    (match name
+      [(? symbol?) `(submod (quote ,name) ,submod-name)]
+      [(? path?) `(submod ,name ,submod-name)]
+      [`(,p ,s ...) `(submod ,(if (symbol? p) `(quote ,p) p) ,@s ,submod-name)]))
+  (start-place-func who submod-ref 'main in out err))
 
 (define-syntax (place/context stx)
   (syntax-parse stx
     [(_ ch:id body:expr ...)
-     (define b #'(let () body ...))
+     (define b #'(lambda (ch) body ...))
      (define/with-syntax b* (local-expand b 'expression null))
      (define/with-syntax (fvs ...) (free-vars #'b*))
      (define/with-syntax (i ...) (for/list ([(v i) (in-indexed (syntax->list #'(fvs ...)))]) i))
@@ -246,7 +257,7 @@
      #'(let ()
          (define p (place ch (let* ([v (place-channel-get ch)]
                                     [fvs (vector-ref v i)] ...)
-                               b*)))
+                               (b* ch))))
          (define vec (vector fvs ...))
          (for ([e (in-vector vec)]
                [n (in-list (syntax->list (quote-syntax (fvs ...))))])

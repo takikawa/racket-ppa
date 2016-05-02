@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2015 PLT Design Inc.
+  Copyright (c) 2004-2016 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -4291,9 +4291,17 @@ static Scheme_Object *rename_file(int argc, Scheme_Object **argv)
 # define MOVE_ERRNO_FORMAT "%E"
 # else
   if (!exists_ok && (scheme_file_exists(dest) || scheme_directory_exists(dest))) {
-    exists_ok = -1;
-    errno = EEXIST;
-    goto failed;
+    /* We use a specialized error message here, because it's not
+       a system error (e.g., setting `errno` to `EEXIST` would
+       be a lie). */
+    scheme_raise_exn((exists_ok < 0) ? MZEXN_FAIL_FILESYSTEM_EXISTS : MZEXN_FAIL_FILESYSTEM, 
+                     "rename-file-or-directory: cannot rename file or directory;\n"
+                     " the destination path already exists\n"
+                     "  source path: %q\n"
+                     "  dest path: %q",
+                     filename_for_error(argv[0]),
+                     filename_for_error(argv[1]));
+    return NULL;
   }
   
   while (1) {
@@ -4305,9 +4313,6 @@ static Scheme_Object *rename_file(int argc, Scheme_Object **argv)
 # define MOVE_ERRNO_FORMAT "%e"
 # endif
 
-#ifndef DOS_FILE_SYSTEM
-failed:
-#endif
   scheme_raise_exn((exists_ok < 0) ? MZEXN_FAIL_FILESYSTEM_EXISTS : MZEXN_FAIL_FILESYSTEM, 
 		   "rename-file-or-directory: cannot rename file or directory\n"
                    "  source path: %q\n"
@@ -4612,7 +4617,7 @@ static Scheme_Object *do_resolve_path(int argc, Scheme_Object *argv[], int guard
       return scheme_make_sized_path(buffer, len, 1);
   }
 
-  if (!expanded)
+  if (!expanded && SCHEME_PATHP(argv[0]))
     return argv[0];
   else
     return scheme_make_sized_path(filename, strlen(filename), 1);
@@ -5693,7 +5698,7 @@ Scheme_Object *scheme_extract_relative_to(Scheme_Object *obj, Scheme_Object *dir
 
     while (!SCHEME_NULLP(be)) {
       if (cache) {
-        obj = scheme_make_pair(up_symbol, scheme_null);
+        obj = scheme_make_pair(up_symbol, obj);
       } else {
         a[0] = up_symbol;
         a[1] = obj;

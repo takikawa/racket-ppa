@@ -3,9 +3,9 @@
 ;; Graphviz support
 ;; inspired by redex/private/dot.rkt (can't use directly because it uses GUI)
 
-(require racket/system "utils.rkt")
+(require racket/match racket/system)
 
-(provide render-dot)
+(provide with-output-to-dot)
 
 ;; these paths are explicitly checked (when find-executable-path
 ;; fails) because starting drracket from the finder (or the dock)
@@ -28,6 +28,13 @@
                  (and (file-exists? candidate) candidate))
                dot-paths))))
 
-(define (render-dot input-file)
-  (when (and dot (not (dry-run?)))
-    (system (format "~a -Tpdf -O ~a" (path->string dot) input-file))))
+(define-syntax-rule (with-output-to-dot output-file body ...)
+  (cond
+   [dot
+    (match-define (list from-dot to-dot pid from-dot-err _)
+      (process* dot "-Tpdf" (format "-o~a" output-file)))
+    (parameterize ([current-output-port to-dot])
+      body ...)
+    (close-output-port to-dot)]
+   [else
+    (error 'contract-profile "graphviz installation not found")]))

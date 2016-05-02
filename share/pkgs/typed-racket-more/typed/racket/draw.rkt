@@ -116,6 +116,7 @@
  [make-brush
   (->key #:color (Un -String (-inst -Color%)) #f
          #:style -Brush-Style #f
+         #:stipple (-opt (-inst (parse-type #'Bitmap%))) #f
          #:gradient (Un (-val #f)
                         (-inst (parse-type #'Linear-Gradient%))
                         (-inst (parse-type #'Radial-Gradient%)))
@@ -139,7 +140,7 @@
          #:weight -Font-Weight #f
          #:underlined? Univ #f
          #:smoothing -Font-Smoothing #f
-         #:size-in-pizels? Univ #f
+         #:size-in-pixels? Univ #f
          #:hinting -Font-Hinting #f
          (-inst (parse-type #'Font%)))]
  [make-monochrome-bitmap

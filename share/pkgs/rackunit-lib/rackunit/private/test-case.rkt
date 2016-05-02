@@ -1,7 +1,9 @@
 #lang racket/base
 (require (for-syntax racket/base)
          racket/contract/base
+         rackunit/log
          "format.rkt"
+         "base.rkt"
          "check.rkt")
 
 (provide current-test-name
@@ -48,11 +50,17 @@
      (syntax/loc stx
        ((current-test-case-around)
         (lambda ()
+          (with-handlers ([(λ (e)
+                             (and (exn:fail? e)
+                                  (not (exn:test? e))))
+                           (λ (e)
+                             (test-log! #f)
+                             (raise e))])
           (parameterize
               ([current-check-handler raise]
                [current-check-around  check-around])
             (void)
-            expr ...))))]
+            expr ...)))))]
     [_
      (raise-syntax-error
       #f
@@ -64,11 +72,14 @@
     [(_ name expr ...)
      (quasisyntax/loc stx
        (parameterize
-           ([current-test-name 
-             (contract string? name 
-                       '#,(syntax-source-module #'name #t)
-                       '#,(syntax-source-module #'test-case #t))])
+           ([current-test-name
+             (ensure-string name (quote-syntax #,(datum->syntax #f 'loc #'name)))])
          (test-begin expr ...)))]))
+
+(define (ensure-string name src-stx)
+  (contract string? name
+            (syntax-source src-stx)
+            (syntax-source-module #'test-case #t)))
 
 (define-syntax before
   (syntax-rules ()

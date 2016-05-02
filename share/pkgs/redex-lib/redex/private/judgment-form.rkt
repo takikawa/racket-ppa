@@ -12,7 +12,9 @@
          "rewrite-side-conditions.rkt"
          (only-in "pat-unify.rkt"
                   unsupported-pat-err-name
-                  unsupported-pat-err))
+                  unsupported-pat-err)
+         (only-in "lang-struct.rkt" mtch-bindings default-language)
+         (only-in "binding-forms.rkt" binding-forms-opened?))
 
 (require
  (for-syntax "rewrite-side-conditions.rkt"
@@ -49,7 +51,7 @@
 (define-struct metafunc-extra-where (lhs rhs))
 (define-struct metafunc-extra-fresh (vars))
 
-(define-struct runtime-judgment-form (name proc mode cache)
+(define-struct runtime-judgment-form (name proc mode cache lang)
   #:methods gen:custom-write
   [(define (write-proc tuple port mode)
      (display "#<judgment-form>" port))])
@@ -167,7 +169,7 @@
           (with-syntax ([(syncheck-exp side-conditions-rewritten (names ...) (names/ellipses ...))
                          (rewrite-side-conditions/check-errs
                           ct-lang
-                          'reduction-relation
+                          orig-name
                           #t
                           #'x)]
                         [lang-stx rt-lang])
@@ -237,6 +239,7 @@
                (values #'more #t)]
               [_ (values #'after #f)]))
           (define judgment-form (lookup-judgment-form-id #'form-name))
+          (check-judgment-arity stx premise)
           (define mode (judgment-form-mode judgment-form))
           (define judgment-proc (judgment-form-proc judgment-form))
           (define-values (input-template output-pre-pattern)
@@ -263,7 +266,8 @@
                 (quasisyntax/loc premise
                   (call-judgment-form 'form-name #,judgment-proc '#,mode #,input
                                       #,(if jf-results-id #''() #f)
-                                      #,(judgment-form-cache judgment-form))))
+                                      #,(judgment-form-cache judgment-form) 
+                                      #,ct-lang)))
               (if under-ellipsis?
                   #`(repeated-premise-outputs #,input (λ (x) #,(make-traced #'x)))
                   (make-traced input))))
@@ -337,7 +341,8 @@
            (equal? (runtime-judgment-form-mode jf) '(O I)))))
 
 (define not-in-cache (gensym))
-(define (call-judgment-form form-name form-proc mode input derivation-init pair-of-boxed-caches)
+(define (call-judgment-form form-name form-proc mode input derivation-init
+                            pair-of-boxed-caches ct-lang)
   (define boxed-cache (if (include-entire-derivation)
                           (car pair-of-boxed-caches)
                           (cdr pair-of-boxed-caches)))
@@ -351,14 +356,17 @@
                            (not (eq? cache-value not-in-cache)))))
   (define p-a-e (print-as-expression))
   (define (form-proc/cache recur input derivation-init)
-    (parameterize ([print-as-expression p-a-e])
+    (parameterize ([default-language ct-lang]
+                   [print-as-expression p-a-e]
+                   [binding-forms-opened? (if (caching-enabled?) (box #f) #f)])
       (cond
         [(caching-enabled?)
          (define candidate (hash-ref cache input not-in-cache))
          (cond
            [(equal? candidate not-in-cache)
             (define computed-ans (form-proc recur input derivation-init))
-            (hash-set! cache input computed-ans)
+            (unless (unbox (binding-forms-opened?))
+              (hash-set! cache input computed-ans))
             computed-ans]
            [else
             candidate])]
@@ -691,7 +699,8 @@
             (runtime-judgment-form '#,judgment-form-name
                                    judgment-form-runtime-proc
                                    '#,(cdr (syntax->datum mode))
-                                   jf-cache)))))
+                                   jf-cache
+                                   #,lang)))))
   (syntax-property
    (values ;prune-syntax
     (if (eq? 'top-level (syntax-local-context))
@@ -867,11 +876,18 @@
                        (if (jf-is-relation? #'jdg-name)
                            #`(λ (input)
                                (not (null? body-stx)))
-                           #`(λ (input)
-                               (call-with-values 
-                                (λ () (apply values input))
-                                (λ (binding ...)
-                                  (not (null? body-stx))))))))]))
+                           (let ([mode-as-lst (syntax->list #'mode)])
+                             #`(λ (input)
+                                 (check-length input
+                                               '#,(car mode-as-lst)
+                                               #,(- (length mode-as-lst) 1))
+                                 (let-values ([(binding ...) (apply values input)])
+                                   (not (null? body-stx))))))))]))
+
+(define (check-length input name input-size)
+  (unless (= (length input) input-size)
+    (error name "judgment form expects ~a inputs, got ~a"
+           input-size (length input))))
 
 (define-syntax (judgment-holds/derivation stx)
   (syntax-case stx ()
@@ -1643,7 +1659,9 @@
                                                 (map (λ (f-id)
                                                        (with-syntax ([f-id f-id])
                                                          (if (judgment-form-id? #'f-id)
-                                                             #'(error 'generate-term "generation disabled for relations in term positions")
+                                                             #'(error 'generate-term 
+                                                                      "generation disabled for relations in term positions: ~a"
+                                                                      (syntax->datum #'f-id))
                                                              #'(metafunc-proc-gen-clauses f-id))))
                                                      (syntax->list fs)))
                                               (syntax->list #'((f ...) ...)))])

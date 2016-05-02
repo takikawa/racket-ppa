@@ -1,5 +1,5 @@
 #lang scribble/manual
-@(require "common.rkt" scribble/eval
+@(require "common.rkt" scribble/example
           (for-label racket/base
                      (except-in racket/gui make-color)
                      racket/pretty
@@ -10,8 +10,7 @@
                               vc-append hbl-append vl-append)
                      redex))
 
-@(define redex-eval (make-base-eval))
-@(interaction-eval #:eval redex-eval (require redex/reduction-semantics))
+@(define redex-eval (make-base-eval '(require redex/reduction-semantics)))
 
 @title{Reduction Relations}
 
@@ -135,7 +134,9 @@ Each @racket[shortcut] clause defines arrow names in terms of
 @racket[base-arrow-name] and earlier @racket[shortcut] definitions.
 The left- and right-hand sides of a @racket[shortcut] definition 
 are identifiers, not @|pattern|s and @|tterm|s. These identifiers
-need not correspond to non-terminals in @racket[language].
+need not correspond to non-terminals in @racket[language] and if
+they do, that correspondence is ignored (more precisely, the
+shortcut is @emph{not} restricted only to terms matching the non-terminal).
 
 For example, this expression
 
@@ -224,7 +225,7 @@ list of terms that the term reduces to.
 @defproc[(apply-reduction-relation/tag-with-names
           [r (or/c reduction-relation? IO-judgment-form?)]
           [t any/c])
-         (listof (list/c (union false/c string?) any/c))]{
+         (listof (list/c (or/c #f string?) any/c))]{
 
 Like @racket[apply-reduction-relation], but the result indicates the
 names of the reductions that were used.

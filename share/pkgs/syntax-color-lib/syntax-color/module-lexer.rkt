@@ -65,7 +65,7 @@ to delegate to the scheme-lexer (in the 'no-lang-line mode).
                     (filter
                      char?
                      (for/list ([i (in-range (file-position in) (file-position p))])
-                       (read-char name-p)))))
+                       (read-char-or-special name-p)))))
           
            ;; sync ports
            (for ([i (in-range (file-position in) (file-position p))])

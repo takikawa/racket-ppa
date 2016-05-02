@@ -173,8 +173,15 @@
 #  define MZ_TRY_EXTFLONUMS
 #  define ASM_DBLPREC_CONTROL_87
 # endif
-# if defined(__powerpc__)
+# if defined(__powerpc__) && !defined(__powerpc64__)
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "ppc-"SPLS_LINUX
+# endif
+# if defined(__powerpc64__)
+#  if defined(__LITTLE_ENDIAN__)
+#   define SCHEME_PLATFORM_LIBRARY_SUBPATH "ppc64le-"SPLS_LINUX
+#  else
+#   define SCHEME_PLATFORM_LIBRARY_SUBPATH "ppc64-"SPLS_LINUX
+#  endif
 # endif
 # if defined(__mc68000__)
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "m68k-"SPLS_LINUX
@@ -247,7 +254,7 @@
 # define MZ_JIT_USE_MPROTECT
 # define MZ_USE_DWARF_LIBUNWIND
 #endif
-#if defined(__powerpc__)
+#if defined(__powerpc__) && !defined(__powerpc64__)
 # define MZ_USE_JIT_PPC
 #endif
 # if defined(__arm__)
@@ -672,6 +679,7 @@
          /* With VC 7, ATAN2_DOESNT... wasn't needed, and
             POW_HANDLES_INF_CORRECTLY worked, too. */
 # define SIN_COS_NEED_DEOPTIMIZE
+# define AVOID_INT_TO_FLOAT_TRUNCATION
 #endif
 #ifdef __BORLANDC__
 # define NAN_EQUALS_ANYTHING
@@ -847,7 +855,7 @@
 
 # define USE_MAP_ANON
 
-# define USE_CARBON_FP_PREDS
+# define USE_IEEE_FP_PREDS
 # define TRIG_ZERO_NEEDS_SIGN_CHECK
 
 # define USE_DYNAMIC_FDSET_SIZE
@@ -1273,6 +1281,11 @@
 
  /* FLOATING_POINT_IS_NOT_IEEE disables inexact->exact conversion via
     parsing of IEEE-format bits. */
+
+ /* AVOID_INT_TO_FLOAT_TRUNCATION indicates that conversion from an
+    integer to a floating point type does not round-to-nearest when
+    precision is lost, even when the FP rounding mode is
+    round-to-nearest */
 
  /* USE_SINGLE_FLOATS turns on support for single-precision
     floating point numbers. Otherwise, floating point numbers

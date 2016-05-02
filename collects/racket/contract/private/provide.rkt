@@ -26,14 +26,10 @@
                                 [make-module-identifier-mapping make-free-identifier-mapping]
                                 [module-identifier-mapping-get free-identifier-mapping-get]
                                 [module-identifier-mapping-put! free-identifier-mapping-put!]))
-         "arrow.rkt"
          "arrow-val-first.rkt"
          "base.rkt"
          "guts.rkt"
-         "misc.rkt"
          "exists.rkt"
-         "opt.rkt"
-         "prop.rkt"
          "blame.rkt"
          syntax/location
          syntax/srcloc)
@@ -66,18 +62,12 @@
 
   ;; keys for syntax property used below
   (define rename-id-key (gensym 'contract:rename-id))
-  (define lifted-key    (gensym 'contract:lifted))
   (define neg-party-key (gensym 'contract:neg-party))
 
   ;; identifier? identifier? -> identifier?
   ;; add a property that tells clients what the exported id was
   (define (add-rename-id rename-id partial-id)
     (syntax-property partial-id rename-id-key rename-id))
-
-  ;; syntax? -> syntax?
-  ;; tells clients that the expression is a lifted application
-  (define (add-lifted-property stx)
-    (syntax-property stx lifted-key #t))
 
   ;; identifier? -> identifier?
   ;; tells clients that the application of this id has an extra inserted argument
@@ -119,7 +109,8 @@
                           ;; No: lift the neg name creation
                           (syntax-local-introduce 
                            (syntax-local-lift-expression
-                            #'(quote-module-name))))])
+                            (add-lifted-property
+                             #'(quote-module-name)))))])
                 (when key (hash-set! global-saved-id-table key lifted-neg-party))
                 ;; Expand to a use of the lifted expression:
                 (define (adjust-location new-stx)
@@ -161,14 +152,16 @@
               ;; expressions:
               (quasisyntax/loc stx (#%expression #,stx)))))))
   
-  (struct provide/contract-transformer provide/contract-info (saved-id-table partially-applied-id)
+  (struct provide/contract-transformer provide/contract-info (saved-id-table partially-applied-id blame)
     #:property
     prop:set!-transformer
     (λ (self stx)
       (let ([partially-applied-id (provide/contract-transformer-partially-applied-id self)]
             [saved-id-table (provide/contract-transformer-saved-id-table self)]
-            [rename-id (provide/contract-info-rename-id self)])
-        (with-syntax ([partially-applied-id partially-applied-id])
+            [rename-id (provide/contract-info-rename-id self)]
+            [blame (provide/contract-transformer-blame self)])
+        (with-syntax ([partially-applied-id partially-applied-id]
+                      [blame blame])
           (if (eq? 'expression (syntax-local-context))
               ;; In an expression context:
               (let* ([key (syntax-local-lift-context)]
@@ -180,7 +173,9 @@
                            (syntax-local-introduce
                             (syntax-local-lift-expression
                              (add-lifted-property
-                              #'(partially-applied-id (quote-module-name)))))))])
+                              #'(with-contract-continuation-mark
+                                 (cons blame 'no-negative-party)
+                                 (partially-applied-id (quote-module-name))))))))])
                 (when key (hash-set! saved-id-table key lifted-ctcd-val))
                 (define (adjust-location new-stx)
                   (datum->syntax new-stx (syntax-e new-stx) stx new-stx))
@@ -204,13 +199,14 @@
               ;; expressions:
               (quasisyntax/loc stx (#%expression #,stx)))))))
 
-  (define (make-provide/contract-transformer rename-id cid id eid pos [pid #f])
+  (define (make-provide/contract-transformer rename-id cid id eid pos [pid #f] [blame #f])
     (if pid
-        (provide/contract-transformer rename-id cid id (make-hasheq) pid)
+        (provide/contract-transformer rename-id cid id (make-hasheq) pid blame)
         (begin
           ;; TODO: this needs to change!
           ;; syntax/parse uses this
           ;; this will just drop contracts for now.
+          ;; VS: is this still the case? this function is not exported anymore
           (λ (stx) 
             (syntax-case stx ()
               [(_ args ...)
@@ -249,7 +245,7 @@
           (if (and user-rename-id
                    (syntax-source user-rename-id))
               user-rename-id
-              #'ex-id)))
+              ex-id)))
     (with-syntax ([code
                    (syntax-property
                     (quasisyntax/loc stx
@@ -272,12 +268,7 @@
 ;; syntax -> syntax
 ;; returns an expression that evaluates to the source location of the argument
 (define-for-syntax (stx->srcloc-expr srcloc-stx)
-  #`(vector
-     '#,(syntax-source srcloc-stx)
-     #,(syntax-line srcloc-stx)
-     #,(syntax-column srcloc-stx)
-     #,(syntax-position srcloc-stx)
-     #,(syntax-span srcloc-stx)))
+  #`(quote-srcloc #,srcloc-stx))
 
 (define-for-syntax (internal-function-to-be-figured-out ctrct
                                                         id 
@@ -288,22 +279,22 @@
                                                         contract-error-name
                                                         pos-module-source)
   (define-values (arrow? the-valid-app-shapes)
-    (syntax-case ctrct (->2 ->*2 ->i)
-      [(->2 . _) 
-       (->2-handled? ctrct)
+    (syntax-case ctrct (-> ->* ->i)
+      [(-> . _) 
+       (not (->-arity-check-only->? ctrct))
        (values #t (->-valid-app-shapes ctrct))]
-      [(->*2 . _) 
-       (values (->*2-handled? ctrct)
+      [(->* . _) 
+       (values (not (->*-arity-check-only->? ctrct))
                (->*-valid-app-shapes ctrct))]
       [(->i . _) (values #t (->i-valid-app-shapes ctrct))]
       [_ (values #f #f)]))
   (with-syntax ([id id]
-                [(partially-applied-id extra-neg-party-argument-fn contract-id) 
-                 (generate-temporaries (list 'idX 'idY 'idZ))]
+                [(partially-applied-id extra-neg-party-argument-fn contract-id blame-id) 
+                 (generate-temporaries (list 'idX 'idY 'idZ 'idB))]
                 [ctrct ctrct])
     (syntax-local-lift-module-end-declaration
      #`(begin 
-         (define partially-applied-id
+         (define-values (partially-applied-id blame-id)
            (do-partial-app contract-id
                            id
                            '#,name-for-blame
@@ -334,7 +325,8 @@
                    (quote-syntax #,id-rename)
                    (quote-syntax contract-id) (quote-syntax id)
                    #f #f
-                   (quote-syntax partially-applied-id)))))))
+                   (quote-syntax partially-applied-id)
+                   (quote-syntax blame-id)))))))
 
 (define-syntax (define-module-boundary-contract stx)
   (cond
@@ -387,38 +379,32 @@
                                                'define-module-boundary-contract
                                                pos-blame-party-expr))])]))
 
-;; ... -> (or/c #f (-> blame val))
+;; ... -> (values (or/c #f (-> neg-party val)) blame)
 (define (do-partial-app ctc val name pos-module-source source)
-  (define p (contract-struct-val-first-projection ctc))
+  (define p (parameterize ([warn-about-val-first? #f])
+              ;; when we're building the val-first projection
+              ;; here we might be needing the plus1 arity
+              ;; function (which will be on the val first's result)
+              ;; so this is a legtimate use. don't warn.
+              (get/build-val-first-projection ctc)))
   (define blme (make-blame (build-source-location source)
                            name
                            (λ () (contract-name ctc))
                            pos-module-source
                            #f #t))
-  
-  (cond
-    [p
-     (define neg-accepter ((p blme) val))
-     
-     ;; we don't have the negative blame here, but we
-     ;; expect only positive failures from this; do the
-     ;; check and then toss the results.
-     (neg-accepter 'incomplete-blame-from-provide.rkt)
-     
-     neg-accepter]
-    [else
-     (define proj (contract-struct-projection ctc))
-     
-     ;; we don't have the negative blame here, but we
-     ;; expect only positive failures from this; do the
-     ;; check and then toss the results.
-     ((proj blme) val)
-     
-     (procedure-rename
-      (λ (neg-party)
-        (define complete-blame (blame-add-missing-party blme neg-party))
-        ((proj complete-blame) val))
-      (string->symbol (format "provide.rkt:neg-party-fn:~s" (contract-name ctc))))]))
+  (with-contract-continuation-mark
+   (cons blme 'no-negative-party) ; we don't know the negative party yet
+   ;; computing neg-accepter may involve some front-loaded checking. instrument
+   (define neg-accepter ((p blme) val))
+
+   ;; check as much as we can while knowing only the
+   ;; contracted value (e.g., function arity)
+   ;; we don't have the negative blame here, but we
+   ;; expect only positive failures from this; do the
+   ;; check and then toss the results.
+   (neg-accepter 'incomplete-blame-from-provide.rkt)
+
+   (values neg-accepter blme)))
 
 (define-for-syntax (true-provide/contract provide-stx just-check-errors? who)
   (syntax-case provide-stx ()
@@ -935,9 +921,11 @@
                        ;; directly here in the expansion makes this very expensive at compile time
                        ;; when there are a lot of provide/contract clause using structs
                        (define -struct:struct-name
-                         (make-pc-struct-type 'struct-name
+                         (make-pc-struct-type #,pos-module-source-id
+                                              'struct-name
                                               struct-name-srcloc
                                               struct:struct-name
+                                              '(#,@field-names)
                                               field-contract-ids ...))
                        (provide (rename-out [-struct:struct-name struct:struct-name]))))))))))
 
@@ -1002,24 +990,24 @@
          (with-syntax ([(field-contract-ids ...) field-contract-ids]
                        [predicate-id predicate-id])
            (syntax/loc stx
-             (->2 field-contract-ids ...
-                  predicate-id))))
+             (-> field-contract-ids ...
+                 predicate-id))))
 
        ;; build-selector-contract : syntax syntax -> syntax
        ;; constructs the contract for a selector
        (define (build-selector-contract struct-name predicate-id field-contract-id)
          (with-syntax ([field-contract-id field-contract-id]
                        [predicate-id predicate-id])
-           (syntax (->2 predicate-id field-contract-id))))
+           (syntax (-> predicate-id field-contract-id))))
 
        ;; build-mutator-contract : syntax syntax -> syntax
        ;; constructs the contract for a selector
        (define (build-mutator-contract struct-name predicate-id field-contract-id)
          (with-syntax ([field-contract-id field-contract-id]
                        [predicate-id predicate-id])
-           (syntax (->2 predicate-id
-                        field-contract-id
-                        void?))))
+           (syntax (-> predicate-id
+                       field-contract-id
+                       void?))))
 
        ;; code-for-one-poly-id : syntax -> syntax
        (define (code-for-one-poly-id x x-gen poly)
@@ -1140,9 +1128,18 @@
 (define-syntax (provide/contract-for-contract-out stx)
   (provide/contract-for-whom stx 'contract-out))
 
-(define (make-pc-struct-type struct-name srcloc struct:struct-name . ctcs)
+(define (make-pc-struct-type pos-module-source struct-name srcloc struct-type field-names . ctcs)
+  (define blame
+    (make-blame (build-source-location srcloc) struct-type (λ () `(substruct-of ,struct-name))
+                pos-module-source #f #t))
+  (define late-neg-acceptors
+    (for/list ([ctc (in-list ctcs)]
+               [field-name (in-list field-names)])
+      ((get/build-late-neg-projection ctc)
+       (blame-add-context blame
+                          (format "the ~a field of" field-name)))))
   (chaperone-struct-type
-   struct:struct-name
+   struct-type
    (λ (a b c d e f g h) (values a b c d e f g h))
    (λ (x) x)
    (λ args
@@ -1156,12 +1153,7 @@
             null]
            [else (cons (car args) (loop (cdr args)))])))
      (apply values
-            (map (λ (ctc val)
-                   (contract ctc
-                             val
-                             'not-enough-info-for-blame
-                             'not-enough-info-for-blame
-                             name
-                             srcloc))
-                 ctcs
+            (map (λ (late-neg-acceptors val)
+                   (late-neg-acceptors val 'not-enough-info-for-blame))
+                 late-neg-acceptors
                  vals)))))

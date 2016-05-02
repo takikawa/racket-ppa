@@ -274,11 +274,22 @@
   (define info-ns (make-base-namespace))
   (define getinfo (make-getinfo info-ns))
 
+  (define info-failures (make-hash))
+  (define (getinfo/log-failure path)
+    (with-handlers ([exn:fail? (lambda (exn)
+                                 (if (hash-ref info-failures path #f)
+                                     #f
+                                     (begin
+                                       (hash-set! info-failures path #t)
+                                       (handle-error path "load of info.rkt" exn "" "" "error")
+                                       #f)))])
+      (getinfo path)))
+
   (define (make-cc* collection parent path omit-root info-root 
                     info-path info-path-mode shadowing-policy 
                     main?)
     (define info
-      (or (with-handlers ([exn:fail? (warning-handler #f)]) (getinfo path))
+      (or (getinfo/log-failure path)
           (lambda (flag mk-default) (mk-default))))
     (define name
       (call-info
@@ -293,18 +304,16 @@
       (setup-printf "WARNING"
                     "ignoring `compile-subcollections' entry in info ~a"
                     path-name))
-    ;; this check is also done in compiler/compiler, in compile-directory
-    (and (not (eq? 'all (omitted-paths path getinfo omit-root)))
-         (make-cc collection path
-                  (if name
-                      (format "~a (~a)" path-name name)
-                      path-name)
-                  info
-                  parent
-                  omit-root
-                  info-root info-path info-path-mode
-                  shadowing-policy
-                  main?)))
+    (make-cc collection path
+             (if name
+                 (format "~a (~a)" path-name name)
+                 path-name)
+             info
+             parent
+             omit-root
+             info-root info-path info-path-mode
+             shadowing-policy
+             main?))
 
   (define ((warning-handler v) exn)
     (setup-printf "WARNING" "~a" (exn->string exn))
@@ -497,7 +506,7 @@
       ;; note: omit can be 'all, if this happens then this collection
       ;; should not have been included, but we might jump in if a
       ;; command-line argument specified a coll/subcoll
-      (define omit (omitted-paths ccp getinfo (cc-omit-root cc)))
+      (define omit (omitted-paths ccp getinfo/log-failure (cc-omit-root cc)))
       (define subs (if (eq? 'all omit)
                      '()
                      (filter (lambda (p)
@@ -525,11 +534,14 @@
       ;; note: omit can be 'all, if this happens then this collection
       ;; should not have been included, but we might jump in if a
       ;; command-line argument specified a coll/subcoll
-      (define omit (append
-                    (if make-docs?
-                        null
-                        (list (string->path "scribblings")))
-                    (omitted-paths ccp getinfo (cc-omit-root cc))))
+      (define omit (let ([omit (omitted-paths ccp getinfo/log-failure (cc-omit-root cc))])
+                     (if (eq? omit 'all)
+                         'all
+                         (append
+                          (if make-docs?
+                              null
+                              (list (string->path "scribblings")))
+                          omit))))
       (define-values [dirs files]
         (if (eq? 'all omit)
             (values null null)
@@ -542,12 +554,20 @@
       (define srcs
         (append
          (filter has-module-suffix? files)
-         (if make-docs?
-           (filter (lambda (p) (not (member p omit)))
-                   (map (lambda (s) (if (string? s) (string->path s) s))
-                        (map car (call-info info 'scribblings
-                                            (lambda () null) (lambda (x) #f)))))
-           null)
+         (if (and make-docs?
+                  (not (eq? omit 'all)))
+             (filter (lambda (p) (not (member p omit)))
+                     (map (lambda (s) (if (string? s) (string->path s) s))
+                          (map car 
+                               (let ([v (call-info info 'scribblings (lambda () null) void)])
+                                 ;; Ignore ill-formed 'scribblings entries at this level:
+                                 (if (list? v)
+                                     (for/list ([i (in-list v)]
+                                                #:when (and (pair? i)
+                                                            (string? (car i))))
+                                       i)
+                                     null)))))
+             null)
          (map (lambda (s) (if (string? s) (string->path s) s))
               (call-info info 'compile-include-files (lambda () null) void))))
       (list cc srcs children-ccs))
@@ -589,7 +609,7 @@
                nothing-else-to-do?
                (not (make-tidy)))
       (setup-printf #f "nothing to do")
-      (exit 1))
+      (exit 0))
     (define (cc->name cc)
       (string-join (map path->string (cc-collection cc)) "/"))
     (define (cc->cc+name+id cc)
@@ -663,9 +683,9 @@
                ;; let `collection-path' complain about the name, if that's the problem:
                (with-handlers ([exn? (compose1 raise-user-error exn-message)])
                  (apply collection-path elems))
-               ;; otherwise, it's probably a collection with nothing to compile
+               ;; otherwise, it's probably a collection with nothing to compile;
                ;; spell the name
-               (setup-printf "WARNING"
+               (setup-printf "warning"
                              "nothing to compile in a given collection path: \"~a\""
                              (string-join sc "/")))
              ccs)
@@ -1166,7 +1186,7 @@
                                              ;; relative path => no root needed for checking omits:
                                              #f)])
                                     (and (directory-exists? dir)
-                                         (not (eq? 'all (omitted-paths dir getinfo omit-root)))))
+                                         (not (eq? 'all (omitted-paths dir getinfo/log-failure omit-root)))))
                                   (or (file-exists? (build-path dir "info.rkt"))
                                       (file-exists? (build-path dir "info.ss"))))
                              (hash-set! t a (list b c d e))

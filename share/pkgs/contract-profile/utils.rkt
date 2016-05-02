@@ -20,19 +20,6 @@
   (for/sum ([s (in-list samples)])
     (cadr s)))
 
-(define output-file-prefix "tmp-contract-profile-")
-
-
-;; for testing. don't generate output files
-(define dry-run? (make-parameter #f))
-
-(define-syntax-rule (with-output-to-report-file file body ...)
-  (if (dry-run?)
-      (parameterize ([current-output-port (open-output-nowhere)])
-        body ...)
-      (with-output-to-file file
-        #:exists 'replace
-        (lambda () body ...))))
 
 ;; for debugging
 (define (format-blame b)
@@ -152,7 +139,10 @@
     (for/hash ([p srcs]
                [e extracted])
       (values p (hash-ref shortened e (lambda () p)))))
-  (lambda (p)
+  (lambda (arg)
+    (define p (if (and (blame? arg) (blame-swapped? arg))
+                (blame-swap arg)
+                arg))
     (define target (hash-ref table p #f))
     (if target
         (struct-copy srcloc

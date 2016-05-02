@@ -21,6 +21,7 @@
 (define OWNED #x2000)
 (define CAN-DISOWN #x4000)
 (define HANDLES-ALL-MOUSE-EVENTS #x8000)
+(define HANDLES-BETWEEN-EVENTS #x10000)
 
 (define-syntax-rule (has-flag? flags flag)
   (not (zero? (bitwise-and flags flag))))
@@ -63,7 +64,8 @@
           HEIGHT-DEPENDS-ON-Y 
           WIDTH-DEPENDS-ON-Y 
           HEIGHT-DEPENDS-ON-X
-          HANDLES-ALL-MOUSE-EVENTS)))
+          HANDLES-ALL-MOUSE-EVENTS
+          HANDLES-BETWEEN-EVENTS)))
 
 (define (symbols->flags symbols)
   (let-syntax ([syms
@@ -92,4 +94,5 @@
           HEIGHT-DEPENDS-ON-Y 
           WIDTH-DEPENDS-ON-Y 
           HEIGHT-DEPENDS-ON-X
-          HANDLES-ALL-MOUSE-EVENTS)))
+          HANDLES-ALL-MOUSE-EVENTS
+          HANDLES-BETWEEN-EVENTS)))

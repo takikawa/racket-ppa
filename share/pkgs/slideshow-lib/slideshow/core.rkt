@@ -167,6 +167,9 @@
 
       (define (set-spotlight-style! #:size [size #f] #:color [color #f])
         (viewer:set-spotlight-style! #:size size #:color color))
+      
+      (define (set-allow-new-slides-after-close! on?)
+        (viewer:set-allow-new-slides-after-close! on?))
 
       (define (pict->pre-render-pict p)
         (viewer:pict->pre-render-pict p))
@@ -992,6 +995,19 @@
 	    p))
 
       ;; ----------------------------------------
+      
+      (define (transform-rectangle dc x y w h)
+        (define mx (send dc get-initial-matrix))
+        (define-values (sx sy) (send dc get-scale))
+        (define-values (dx dy) (send dc get-origin))
+        (define r (send dc get-rotation))
+        (define p (new dc-path%))
+        (send p rectangle x y w h)
+        (send p rotate r)
+        (send p scale sx sy)
+        (send p translate dx dy)
+        (send p transform mx)
+        (send p get-bounding-box))
 
       (define clickback
 	(lambda (pict thunk [show-click? #t])
@@ -1002,15 +1018,11 @@
 	     `((place 
 		0 0
 		,(dc (lambda (dc x y)
-		       (let-values ([(sx sy) (send dc get-scale)]
-				    [(dx dy) (send dc get-origin)])
-			 (viewer:add-click-region!
-			  (make-click-region (+ (* x sx) dx)
-					     (+ (* y sy) dy)
-					     (+ (* (+ x w) sx) dx)
-					     (+ (* (+ y h) sy) dy)
-					     thunk
-					     show-click?))))
+                       (define-values (bx by bw bh) (transform-rectangle dc x y w h))
+                       (viewer:add-click-region!
+                        (make-click-region bx by (+ bx bw) (+ by bh)
+                                           thunk
+                                           show-click?)))
 		     w h
 		     (pict-ascent pict)
 		     (pict-descent pict))))))))
@@ -1024,14 +1036,10 @@
 	     `((place 
 		0 0
 		,(dc (lambda (dc x y)
-		       (let-values ([(sx sy) (send dc get-scale)]
-				    [(dx dy) (send dc get-origin)])
-			 (viewer:add-interactive!
-			  (make-interact (+ (* x sx) dx)
-                                         (+ (* y sy) dy)
-                                         (+ (* (+ x w) sx) dx)
-                                         (+ (* (+ y h) sy) dy)
-                                         window-proc))))
+                       (define-values (bx by bw bh) (transform-rectangle dc x y w h))
+                       (viewer:add-interactive!
+                        (make-interact bx by (+ bx bw) (+ by bh)
+                                       window-proc)))
 		     w h
 		     (pict-ascent pict)
 		     (pict-descent pict))))))))

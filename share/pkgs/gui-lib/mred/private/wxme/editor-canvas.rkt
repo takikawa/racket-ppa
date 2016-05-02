@@ -170,6 +170,10 @@
            begin-refresh-sequence
            end-refresh-sequence)
 
+  (define scroll-via-copy? #f)
+  (define/public (set-scroll-via-copy v) (set! scroll-via-copy? (and v #t)))
+  (define/public (get-scroll-via-copy) scroll-via-copy?)
+
   (define blink-timer #f)
   (define noloop? #f)
 
@@ -306,14 +310,14 @@
            (maybe-reset-size))))))
 
   (define/private (maybe-reset-size)
-    (begin-refresh-sequence)
     (let-boxes ([w 0]
                 [h 0])
         (get-size w h)
       (unless (and (= w lastwidth)
                    (= h lastheight))
-        (reset-size)))
-    (end-refresh-sequence))
+        (begin-refresh-sequence)
+        (reset-size)
+        (end-refresh-sequence))))
 
   (define/private (reset-size)
     (reset-visual #f)
@@ -460,6 +464,7 @@
       (case (and (positive? wheel-amt)
                  code)
         [(wheel-up wheel-down)
+         (collect-garbage 'incremental)
          (when (and allow-y-scroll?
                     (not fake-y-scroll?))
            (let-boxes ([x 0]
@@ -474,6 +479,7 @@
                            0)])
                (do-scroll x y #t x old-y))))]
         [(wheel-left wheel-right)
+         (collect-garbage 'incremental)
          (when (and allow-x-scroll?
                     (not fake-x-scroll?))
            (let-boxes ([x 0]
@@ -628,12 +634,14 @@
         (when clear?
           (let ([bg (get-canvas-background)])
             (when bg
-              (let ([adc (get-dc)])
+              (let* ([dx (box 0)]
+                     [dy (box 0)]
+                     [adc (get-dc-and-offset dx dy)])
                 (let ([b (send adc get-brush)]
                       [p (send adc get-pen)])
                   (send adc set-brush bg 'solid)
                   (send adc set-pen bg 1 'transparent)
-                  (send adc draw-rectangle localx localy fw fh)
+                  (send adc draw-rectangle (- localx (unbox dx)) (- localy (unbox dy)) fw fh)
                   (send adc set-brush b)
                   (send adc set-pen p))))))
         (let ([x (box 0)]
@@ -940,11 +948,13 @@
                     retval)))))))
 
   (define/private (do-scroll x y refresh? old-x old-y)
+    (define ed (get-editor))
     (let ([savenoloop? noloop?])
       (set! noloop? #t)
       
       (maybe-reset-size)
-
+      (define on-scroll-to-called? #f)
+      
       (define change?
         (or
          ;; Set x
@@ -954,6 +964,14 @@
                 (and (not (= x old-x))
                      (begin
                        (when (not fake-x-scroll?)
+                         (when scroll-via-copy?
+                           (set! on-scroll-to-called? #t)
+                           (begin-refresh-sequence)
+                           (when scroll-via-copy?
+                             (when ed
+                               (call-as-primary-owner
+                                (λ ()
+                                  (send ed on-scroll-to))))))
                          (set-scroll-pos 'horizontal x))
                        #t))))
          ;; Set y
@@ -963,49 +981,77 @@
                 (and (not (= y old-y))
                      (begin
                        (when (not fake-y-scroll?)
+                         (unless on-scroll-to-called?
+                           (when scroll-via-copy?
+                             (set! on-scroll-to-called? #t)
+                             (begin-refresh-sequence)
+                             (when ed
+                               (call-as-primary-owner
+                                (λ ()
+                                  (send ed on-scroll-to))))))
                          (set-scroll-pos 'vertical y))
                        #t))))))
       
       (set! noloop? savenoloop?)
 
       (when (and change? refresh?)
-        (if (and #f ;; special scrolling disabled: not faster with Cocoa, broken for Windows
+        (if (and scroll-via-copy?
                  (not need-refresh?)
                  (not lazy-refresh?)
                  (get-canvas-background)
                  (= x old-x)) ; could handle horizontal scrolling in the future
             (let-boxes ([fx 0]
-                        [old-fy 0]
-                        [new-fy 0])
-                (begin
-                  (convert-scroll-to-location x y fx new-fy)
-                  (convert-scroll-to-location old-x old-y #f old-fy))
+                        [old-fy* 0]
+                        [new-fy* 0])
+                (let ([x (min x scroll-width)]
+                      [y (min y scroll-height)])
+                  (convert-scroll-to-location x y fx new-fy*)
+                  (convert-scroll-to-location old-x old-y #f old-fy*))
+              (define new-fy (floor new-fy*))
+              (define old-fy (floor old-fy*))
               (let-boxes ([vx 0][vy 0][vw 0][vh 0])
                   (get-view vx vy vw vh) ; editor coords
                 (cond
                  [(and (new-fy . < . old-fy)
-                       (old-fy . < . (+ new-fy vh)))
+                       (old-fy . < . (+ new-fy vh))
+                       (integer? (send (get-dc) get-backing-scale)))
                   (let ([dc (get-dc)])
+                    (unless on-scroll-to-called?
+                      (begin-refresh-sequence))
                     (send dc copy
                           xmargin ymargin
                           vw (- (+ new-fy vh) old-fy)
                           xmargin (+ ymargin (- old-fy new-fy)))
-                    (redraw xmargin ymargin 
+                    (redraw vx vy
                             vw (- old-fy new-fy)
-                            #t))]
+                            #t)
+                    (unless on-scroll-to-called?
+                      (end-refresh-sequence)))]
                  [(and (old-fy . < . new-fy)
-                       (new-fy . < . (+ old-fy vh)))
+                       (new-fy . < . (+ old-fy vh))
+                       (integer? (send (get-dc) get-backing-scale)))
                   (let ([dc (get-dc)])
+                    (unless on-scroll-to-called?
+                      (begin-refresh-sequence))
                     (send dc copy
                           xmargin (+ ymargin (- new-fy old-fy))
                           vw (- (+ old-fy vh) new-fy)
                           xmargin ymargin)
                     (let ([d (- (+ old-fy vh) new-fy)])
-                      (redraw xmargin (+ ymargin d)
+                      (redraw vx (+ vy d)
                               vw (- vh d)
-                              #t)))]
+                              #t))
+                    (unless on-scroll-to-called?
+                      (end-refresh-sequence)))]
                  [else (repaint)])))
-            (repaint)))))
+            (repaint)))
+
+      (when on-scroll-to-called?
+        (when ed
+          (call-as-primary-owner
+           (λ ()
+             (send ed after-scroll-to))))
+        (end-refresh-sequence))))
 
   (define/override (set-scrollbars x y x2 y2 x3 y3 x4 y4 ?) (void))
 

@@ -2,6 +2,7 @@
 (require racket/gui/base
          racket/contract
          racket/class
+         (for-syntax racket/base)
          (prefix-in r: racket/base)
          framework)
 (provide ellipsis-snip%)
@@ -9,22 +10,70 @@
 (define ellipsis-snip%
   (class snip%
     (init-field extra [insertion-done? #f])
+    (define str-snip (make-object string-snip% "..."))
     (inherit get-style)
-    (define str "...")
-    (define/override (get-extent dc x y wb hb db sb lb rb)
-      (set-box/f! lb 0)
-      (set-box/f! rb 0)
-      (define-values (w h d a) (send dc get-text-extent str (send (get-style) get-font)))
-      (set-box/f! wb w)
-      (set-box/f! hb h)
-      (set-box/f! db d)
-      (set-box/f! sb a))
-    (define/override (draw dc x y left top right bottom dx dy draw-caret)
-      (send dc draw-text str x y))
+
+    (define-syntax (forward stx)
+      (syntax-case stx ()
+        [(_ (def (id formals ...))
+            (before ...)
+            (after ...))
+         (with-syntax ([(call-ids ...)
+                        (for/list ([formal (in-list (syntax->list #'(formals ...)))])
+                          (syntax-case formal ()
+                            [(id default-value) (identifier? #'id) #'id]
+                            [id (identifier? #'id) #'id]))])
+           #'(def (id formals ...)
+               (sync-style)
+               before ...
+               (send str-snip id call-ids ...)
+               after ...))]))
+    (define/private (sync-style)
+      (send str-snip set-style (get-style)))
     
+    (forward (define/override (get-extent dc x y wb hb db sb lb rb)) () ())
+    (forward (define/override (draw dc x y left top right bottom dx dy draw-caret))
+             {(unless insertion-done?
+                (when inside?
+                  (define pen (send dc get-pen))
+                  (define brush (send dc get-brush))
+                  (define wb (box 0.0))
+                  (define hb (box 0.0))
+                  (get-extent dc (- x dx) (- y dy) wb hb #f #f #f #f)
+                  (send dc set-brush "pink" 'solid)
+                  (send dc set-pen "black" 1 'transparent)
+                  (send dc draw-rectangle x y (unbox wb) (unbox hb))
+                  (send dc set-brush "red" 'solid)
+                  (send dc draw-rectangle
+                        x
+                        (+ y (unbox hb) -1)
+                        (unbox wb)
+                        1)
+                  (send dc set-pen pen)
+                  (send dc set-brush brush)))}
+             {})
+    (forward (define/override (partial-offset dc x y len)) () ())
+    (forward (define/override (split position first second)) () ())
+    (forward (define/override (size-cache-invalid)) () ())
+
+    (define inside? #f)
+    (define/private (update-inside _inside?)
+      (unless (equal? inside? _inside?)
+        (set! inside? _inside?)
+        (define admin (get-admin))
+        (when admin
+          (define wb (box 0.0))
+          (define hb (box 0.0))
+          (define dc (send admin get-dc))
+          (when dc
+            (get-extent dc 0 0 wb hb #f #f #f #f)
+            (send admin needs-update this 0 0 (unbox wb) (unbox hb))))))
+          
     (define/override (on-goodbye-event dc x y editorx editory event)
+      (update-inside #f)
       (handle-event dc x y editorx editory event #t))
     (define/override (on-event dc x y editorx editory event)
+      (update-inside #t)
       (handle-event dc x y editorx editory event #f))
     (define/private (handle-event dc x y editorx editory event goodbye?)
       (unless insertion-done?
@@ -40,13 +89,14 @@
           (send ed set-cursor the-cursor-to-use))))
     
     (define/private (do-insertion)
+      (update-inside #f)
       (define admin (get-admin))
       (define ed (send admin get-editor))
       (when (is-a? ed text:ports<%>)
         (define pos (send ed get-snip-position this))
         (when pos
           (send ed begin-edit-sequence)
-          (define insertion-pos (+ pos 2))
+          (define insertion-pos (+ pos (send str-snip get-count) 1))
           (let loop ([strs extra])
             (cond
               [(null? strs) (void)]
@@ -65,9 +115,10 @@
       (define b (get-output-bytes bp))
       (send f put (bytes-length b) b))
     (super-new)
-    (inherit set-flags get-flags get-admin set-snipclass)
-    (set-flags (cons 'handles-all-mouse-events (get-flags)))
-    (set-snipclass snipclass)))
+    (inherit set-flags get-flags get-admin set-snipclass set-count)
+    (set-flags (list* 'handles-between-events 'handles-all-mouse-events (get-flags)))
+    (set-snipclass snipclass)
+    (set-count (send str-snip get-count))))
 
 (define arrow-cursor (make-object cursor% 'arrow))
 
