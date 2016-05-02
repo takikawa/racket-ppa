@@ -1,5 +1,0 @@
-?package(racket):needs="x11" \
-        section="Applications/Programming" title="DrRacket" \
-        command="/usr/bin/drracket" \
-        hints="Development Environment" \
-        icon="/usr/share/racket/pkgs/icons/mini-plt.xpm"

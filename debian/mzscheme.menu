@@ -1,4 +1,0 @@
-?package(plt-scheme):needs="text" \
-	section="Applications/Programming" title="MzScheme" \
-	hints="Scheme Environment" \
-  	command="/usr/bin/mzscheme"
