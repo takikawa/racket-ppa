@@ -1,10 +1,11 @@
 [Desktop Entry]
 Name=DrRacket
-Comment=IDE for Racket
-Exec=drracket
+GenericName=IDE for Racket
+Comment=DrRacket is an interactive, integrated, graphical programming environment for the Racket programming languages.
 Terminal=false
 Type=Application
-Categories=Development;
+Categories=Development;Education;
+Exec=drracket -singleInstance %F
 Icon=plt
 StartupNotify=true
 MimeType=text/x-scheme;
