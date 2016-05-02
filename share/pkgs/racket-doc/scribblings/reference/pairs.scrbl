@@ -249,7 +249,8 @@ merely start with a chain of at least @racket[(add1 pos)] pairs.
   (list-ref (list 'a 'b 'c) 0)
   (list-ref (list 'a 'b 'c) 1)
   (list-ref (list 'a 'b 'c) 2)
-  (list-ref (cons 1 2) 0)]}
+  (list-ref (cons 1 2) 0)
+  (eval:error (list-ref (cons 1 2) 1))]}
 
 
 @defproc[(list-tail [lst any/c] [pos exact-nonnegative-integer?])
@@ -264,8 +265,9 @@ must merely start with a chain of at least @racket[pos] pairs.
 
 @mz-examples[
   (list-tail (list 1 2 3 4) 2)
-  (list-ref (cons 1 2) 1)
-  (list-ref 'not-a-pair 0)]}
+  (list-tail (cons 1 2) 1)
+  (eval:error (list-tail (cons 1 2) 2))
+  (list-tail 'not-a-pair 0)]}
 
 
 @defproc*[([(append [lst list?] ...) list?]
@@ -342,7 +344,7 @@ If the @racket[lst]s are empty, then @racket[#t] is returned.
 
 @mz-examples[
   (andmap positive? '(1 2 3))
-  (andmap positive? '(1 2 a))
+  (eval:error (andmap positive? '(1 2 a)))
   (andmap positive? '(1 -2 a))
   (andmap + '(1 2 3) '(4 5 6))]}
 
@@ -711,8 +713,8 @@ Like @racket[assoc], but finds an element using the predicate
 
 @note-lib[racket/list]
 @(define list-eval (make-base-eval))
-@(interaction-eval #:eval list-eval
-                   (require racket/list (only-in racket/function negate)))
+@examples[#:hidden #:eval list-eval
+          (require racket/list (only-in racket/function negate))]
 
 
 @defthing[empty null?]{
@@ -1250,7 +1252,32 @@ returns @racket[#f].
 Returns a list with all elements from @racket[lst], randomly shuffled.
 
 @mz-examples[#:eval list-eval
+  (shuffle '(1 2 3 4 5 6))
+  (shuffle '(1 2 3 4 5 6))
   (shuffle '(1 2 3 4 5 6))]}
+
+
+@defproc*[([(combinations [lst list?]) list?]
+           [(combinations [lst list?] [size exact-nonnegative-integer?]) list?])]{
+@margin-note{Wikipedia @hyperlink["https://en.wikipedia.org/wiki/Combination"]{combinations}}
+Return a list of all combinations of elements in the input list
+(aka the @index["powerset"]{powerset} of @racket[lst]).
+If @racket[size] is given, limit results to combinations of @racket[size] elements.
+
+@mz-examples[#:eval list-eval
+  (combinations '(1 2 3))
+  (combinations '(1 2 3) 2)]}
+
+
+@defproc*[([(in-combinations [lst list?]) list?]
+           [(in-combinations [lst list?] [size exact-nonnegative-integer?]) sequence?])]{
+@index["in-powerset"]{Returns} a sequence of all combinations of elements in the input list,
+ or all combinations of length @racket[size] if @racket[size] is given.
+Builds combinations one-by-one instead of all at once.
+
+@mz-examples[#:eval list-eval
+  (time (begin (combinations (range 15)) (void)))
+  (time (begin (in-combinations (range 15)) (void)))]}
 
 
 @defproc[(permutations [lst list?])
@@ -1329,7 +1356,7 @@ Computes the n-ary cartesian product of the given lists.
 Returns a list that is like @racket[lst], omitting the first element of @racket[lst]
 for which @racket[pred] produces a true value.
 
-@defexamples[
+@examples[
 #:eval list-eval
 (remf negative? '(1 -2 3 4 -5))
 ]
@@ -1342,7 +1369,7 @@ for which @racket[pred] produces a true value.
 Like @racket[remf], but removes all the elements for which @racket[pred]
 produces a true value.
 
-@defexamples[
+@examples[
 #:eval list-eval
 (remf* negative? '(1 -2 3 4 -5))
 ]

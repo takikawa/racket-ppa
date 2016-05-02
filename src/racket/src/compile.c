@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2015 PLT Design Inc.
+  Copyright (c) 2004-2016 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -4819,6 +4819,7 @@ compile_expand_expr(Scheme_Object *form, Scheme_Comp_Env *env,
       form = scheme_stx_track(SCHEME_PTR1_VAL(var), form, NULL);
       if (!rec[drec].comp) {
         /* Already fully expanded. */
+        SCHEME_EXPAND_OBSERVE_OPAQUE_EXPR(env->observer, form);
         return form;
       }
     } else {

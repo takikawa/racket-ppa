@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2015 PLT Design Inc.
+  Copyright (c) 2004-2016 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -1145,6 +1145,9 @@ static void module_validate(Scheme_Object *data, Mz_CPort *port,
     scheme_ill_formed_code(port);
 
   if (m->phaseless && m->prefix->num_stxes)
+    scheme_ill_formed_code(port);
+
+  if (m->max_let_depth < 0)
     scheme_ill_formed_code(port);
 
   validate_toplevel(m->dummy, port, stack, tls, depth, delta, 

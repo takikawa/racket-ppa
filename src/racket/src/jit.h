@@ -152,8 +152,10 @@ END_XFORM_ARITH;
 # define SCHEME_FLOAT_TYPE scheme_double_type
 #endif
 
+/* These flags are set post-JIT: */
 #define NATIVE_PRESERVES_MARKS 0x1
 #define NATIVE_IS_SINGLE_RESULT 0x2
+/* Pre-JIT flags are in "schpriv.h" */
 
 #if defined(MZ_PRECISE_GC) && !defined(USE_COMPACT_3M_GC)
 # define CAN_INLINE_ALLOC
@@ -201,12 +203,7 @@ END_XFORM_ARITH;
 
 #include "jitfpu.h"
 
-#if 0
-static void assert_failure(int where) { printf("JIT assert failed %d\n", where); }
-#define JIT_ASSERT(v) if (!(v)) assert_failure(__LINE__);
-#else
-#define JIT_ASSERT(v) /* */
-#endif
+#define JIT_ASSERT(v) MZ_ASSERT(v)
 
 /* Tracking statistics: */
 #if 0
@@ -716,15 +713,16 @@ static void *top4;
 #define mz_popr_p(x) scheme_mz_popr_p_it(jitter, x, 0)
 #define mz_popr_x() scheme_mz_popr_p_it(jitter, JIT_R1, 1)
 
-#if 0
+#define CHECK_RUNSTACK_REGISTER_UPDATE 0
+
+#if CHECK_RUNSTACK_REGISTER_UPDATE
 /* Debugging: at each _finish(), double-check that the runstack register has been
    copied into scheme_current_runstack. This code assumes that mz_finishr() is not
    used with JIT_R0.  Failure is "reported" by going into an immediate loop, but
    check_location is set to the source line number to help indicate where the
    problem originated. */
 static void *top;
-int check_location;
-# define CONFIRM_RUNSTACK() (jit_movi_l(JIT_R0, __LINE__), jit_sti_l(&check_location, JIT_R0), \
+# define CONFIRM_RUNSTACK() (jit_movi_l(JIT_R0, __LINE__), \
                              mz_tl_ldi_p(JIT_R0, tl_MZ_RUNSTACK), top = (_jit.x.pc), jit_bner_p(top, JIT_RUNSTACK, JIT_R0))
 #else
 # define CONFIRM_RUNSTACK() 0
@@ -733,6 +731,7 @@ int check_location;
 #define mz_prepare(x) jit_prepare(x)
 #define mz_finish(x) ((void)CONFIRM_RUNSTACK(), jit_finish(x))
 #define mz_finishr(x) ((void)CONFIRM_RUNSTACK(), jit_finishr(x))
+#define mz_finish_unsynced_runstack(x) jit_finish(x)
 
 #define mz_nonrs_finish(x) jit_finish(x)
 
@@ -1313,11 +1312,7 @@ static void emit_indentation(mz_jit_state *jitter)
 /*                             jitstate                               */
 /**********************************************************************/
 
-#if defined(SIXTY_FOUR_BIT_INTEGERS) || defined(MZ_USE_JIT_PPC)
-# define JIT_BUFFER_PAD_SIZE 200
-#else
-# define JIT_BUFFER_PAD_SIZE 100
-#endif
+#define JIT_BUFFER_PAD_SIZE 200
 
 #define PAST_LIMIT() ((uintptr_t)jit_get_raw_ip() > (uintptr_t)jitter->limit)
 #define CHECK_LIMIT() if (PAST_LIMIT()) return past_limit(jitter, __FILE__, __LINE__);
@@ -1364,6 +1359,8 @@ long_double *scheme_mz_retain_long_double(mz_jit_state *jitter, long_double d);
 int scheme_mz_remap_it(mz_jit_state *jitter, int i);
 void scheme_mz_pushr_p_it(mz_jit_state *jitter, int reg);
 void scheme_mz_popr_p_it(mz_jit_state *jitter, int reg, int discard);
+void scheme_extra_pushed(mz_jit_state *jitter, int n);
+void scheme_extra_popped(mz_jit_state *jitter, int n);
 void scheme_mz_need_space(mz_jit_state *jitter, int need_extra);
 int scheme_stack_safety(mz_jit_state *jitter, int cnt, int offset);
 #ifdef USE_FLONUM_UNBOXING
@@ -1480,7 +1477,7 @@ typedef struct jit_direct_arg jit_direct_arg;
 void *scheme_generate_shared_call(int num_rands, mz_jit_state *old_jitter, int multi_ok, int result_ignored, 
                                   int is_tail, int direct_prim, int direct_native, int nontail_self, int unboxed_args);
 void scheme_ensure_retry_available(mz_jit_state *jitter, int multi_ok, int result_ignored);
-int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_rands, 
+int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_rands, int num_pushes,
 			mz_jit_state *jitter, int is_tail, int multi_ok, int ignored_result,
                         int no_call);
 int scheme_generate_tail_call(mz_jit_state *jitter, int num_rands, int direct_native, int need_set_rs, 
@@ -1589,7 +1586,8 @@ int scheme_jit_check_closure_extflonum_bit(Scheme_Closure_Data *data, int pos, i
 #endif
 
 Scheme_Object *scheme_extract_global(Scheme_Object *o, Scheme_Native_Closure *nc, int local_only);
-Scheme_Object *scheme_extract_closure_local(Scheme_Object *obj, mz_jit_state *jitter, int extra_push);
+Scheme_Object *scheme_extract_closure_local(Scheme_Object *obj, mz_jit_state *jitter, int extra_push, int get_constant);
+Scheme_Object *scheme_specialize_to_constant(Scheme_Object *obj, mz_jit_state *jitter, int extra_push);
 
 void scheme_jit_register_traversers(void);
 #ifdef MZ_USE_LWC

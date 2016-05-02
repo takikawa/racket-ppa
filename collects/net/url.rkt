@@ -4,6 +4,7 @@
          racket/contract/base
          racket/list
          racket/match
+         racket/promise
          (prefix-in hc: "http-client.rkt")
          (only-in "url-connect.rkt" current-https-protocol)
          "uri-codec.rkt"
@@ -23,27 +24,92 @@
 ;;   "impure" = they have text waiting
 ;;   "pure" = the MIME headers have been read
 
-(define current-proxy-servers
-  (make-parameter null
-                  (lambda (v)
-                    (unless (and (list? v)
-                                 (andmap (lambda (v)
-                                           (and (list? v)
-                                                (= 3 (length v))
-                                                (equal? (car v) "http")
-                                                (string? (car v))
-                                                (exact-integer? (caddr v))
-                                                (<= 1 (caddr v) 65535)))
-                                         v))
-                      (raise-type-error
-                       'current-proxy-servers
-                       "list of list of scheme, string, and exact integer in [1,65535]"
+(define proxiable-url-schemes '("http"))
+
+(define (env->c-p-s-entries envars)
+  (if (null? envars)
+      null
+      (match (getenv (car envars))
+        [#f (env->c-p-s-entries (cdr envars))]
+        ["" null]
+        [(app string->url
+              (url (and scheme "http") #f (? string? host) (? integer? port)
+                   _ (list) (list) #f))
+         (list (list scheme host port))]
+        [(app string->url
+              (url (and scheme "http") _ (? string? host) (? integer? port)
+                   _ _ _ _))
+         (log-net/url-error "~s contains somewhat invalid proxy URL format" (car envars))
+         (list (list scheme host port))]
+        [inv (log-net/url-error "~s contained invalid proxy URL format: ~s"
+                                (car envars) inv)
+             null])))
+
+(define current-proxy-servers-promise
+  (make-parameter (delay/sync (env->c-p-s-entries '("plt_http_proxy" "http_proxy")))))
+
+(define (proxy-servers-guard v)
+  (unless (and (list? v)
+               (andmap (lambda (v)
+                         (and (list? v)
+                              (= 3 (length v))
+                              (equal? (car v) "http")
+                              (string? (car v))
+                              (exact-integer? (caddr v))
+                              (<= 1 (caddr v) 65535)))
                        v))
-                    (map (lambda (v)
-                           (list (string->immutable-string (car v))
-                                 (string->immutable-string (cadr v))
-                                 (caddr v)))
-                         v))))
+    (raise-type-error
+     'current-proxy-servers
+     "list of list of scheme, string, and exact integer in [1,65535]"
+     v))
+  (map (lambda (v)
+         (list (string->immutable-string (car v))
+               (string->immutable-string (cadr v))
+               (caddr v)))
+       v))
+
+(define current-proxy-servers
+  (make-derived-parameter current-proxy-servers-promise
+                          proxy-servers-guard
+                          force))
+
+(define (env->n-p-s-entries envars)
+  (if (null? envars)
+      null
+      (match (getenv (car envars))
+        [#f (env->n-p-s-entries (cdr envars))]
+        ["" null]
+        [hostnames (string-split hostnames ",")])))
+  
+(define current-no-proxy-servers-promise
+  (make-parameter (delay/sync (no-proxy-servers-guard (env->n-p-s-entries '("plt_no_proxy" "no_proxy"))))))
+
+(define (no-proxy-servers-guard v)
+  (unless (and (list? v)
+               (andmap (lambda (v)
+                         (or (string? v)
+                             (regexp? v)))
+                       v))
+    (raise-type-error 'current-no-proxy-servers
+                      "list of string or regexp"
+                      v))
+  (map (match-lambda
+         [(? regexp? re) re]
+         [(regexp "^(\\..*)$" (list _ m))
+          (regexp (string-append ".*" (regexp-quote m)))]
+         [(? string? s) (regexp (string-append "^"(regexp-quote s)"$"))])
+       v))
+
+(define current-no-proxy-servers
+  (make-derived-parameter current-no-proxy-servers-promise
+                          no-proxy-servers-guard
+                          force))
+
+(define (proxy-server-for url-schm (dest-host-name #f))
+  (let ((rv (assoc url-schm (current-proxy-servers))))
+    (cond [(not dest-host-name) rv]
+          [(memf (lambda (np) (regexp-match np dest-host-name)) (current-no-proxy-servers)) #f]
+          [else rv])))
 
 (define (url-error fmt . args)
   (raise (make-url-exception
@@ -58,6 +124,7 @@
     (cond [(not scheme) 80]
           [(string=? scheme "http") 80]
           [(string=? scheme "https") 443]
+          [(string=? scheme "git") 9418]
           [else (url-error "URL scheme ~s not supported" scheme)])))
 
 ;; make-ports : url -> hc
@@ -76,23 +143,24 @@
 ;;                               -> hc
 (define (http://getpost-impure-port get? url post-data strings
                                     make-ports 1.1?)
-  (define proxy (assoc (url-scheme url) (current-proxy-servers)))
+  (define proxy (proxy-server-for (url-scheme url) (url-host url)))
   (define hc (make-ports url proxy))
   (define access-string
-    (url->string
-     (if proxy
-       url
-       ;; RFCs 1945 and 2616 say:
-       ;;   Note that the absolute path cannot be empty; if none is present in
-       ;;   the original URI, it must be given as "/" (the server root).
-       (let-values ([(abs? path)
-                     (if (null? (url-path url))
-                       (values #t (list (make-path/param "" '())))
-                       (values (url-path-absolute? url) (url-path url)))])
-         (make-url #f #f #f #f abs? path (url-query url) (url-fragment url))))))
+    (ensure-non-empty
+     (url->string
+      (if proxy
+          url
+          ;; RFCs 1945 and 2616 say:
+          ;;   Note that the absolute path cannot be empty; if none is present in
+          ;;   the original URI, it must be given as "/" (the server root).
+          (let-values ([(abs? path)
+                        (if (null? (url-path url))
+                            (values #t (list (make-path/param "" '())))
+                            (values (url-path-absolute? url) (url-path url)))])
+            (make-url #f #f #f #f abs? path (url-query url) (url-fragment url)))))))
 
   (hc:http-conn-send! hc access-string
-                      #:method (if get? "GET" "POST")
+                      #:method (if get? #"GET" #"POST")
                       #:headers strings
                       #:content-decode '()
                       #:data post-data)
@@ -111,16 +179,19 @@
     (cond [(not scheme)
            (schemeless-url url)]
           [(or (string=? scheme "http") (string=? scheme "https"))
-           (define hc (http://getpost-impure-port get? url post-data strings make-ports #f))
-           (http-conn-impure-port hc)]
+           (define hc
+             (http://getpost-impure-port get? url post-data strings make-ports #f))
+           (http-conn-impure-port hc
+                                  #:method (if get? "GET" "POST"))]
           [(string=? scheme "file")
            (url-error "There are no impure file: ports")]
           [else (url-error "Scheme ~a unsupported" scheme)])))
 
-(define (http-conn-impure-port hc)
+(define (http-conn-impure-port hc
+                               #:method [method-bss #"GET"])
   (define-values (in out) (make-pipe 4096))
   (define-values (status headers response-port)
-    (hc:http-conn-recv! hc #:close? #t #:content-decode '()))
+    (hc:http-conn-recv! hc #:method method-bss #:close? #t #:content-decode '()))
   (fprintf out "~a\r\n" status)
   (for ([h (in-list headers)])
     (fprintf out "~a\r\n" h))
@@ -155,7 +226,8 @@
                  (http://getpost-impure-port
                   get? url post-data strings
                   make-ports #f)
-                  #:content-decode '()
+                 #:method (if get? #"GET" #"POST")
+                 #:content-decode '()
                  #:close? #t))
               response-port]
              [else
@@ -187,7 +259,7 @@
                                     make-ports)
                                   (and conn #t)))
     (define-values (status headers response-port)
-      (hc:http-conn-recv! hc #:close? (not conn) #:content-decode '()))
+      (hc:http-conn-recv! hc #:method #"GET" #:close? (not conn) #:content-decode '()))
 
     (define new-url
       (ormap (λ (h)
@@ -321,22 +393,30 @@
                    [(get) "GET"] [(post) "POST"] [(head) "HEAD"]
                    [(put) "PUT"] [(delete) "DELETE"] [(options) "OPTIONS"] 
                    [else (url-error "unsupported method: ~a" method)])]
-         [proxy (assoc (url-scheme url) (current-proxy-servers))]
+         [proxy (proxy-server-for (url-scheme url) (url-host url))]
          [hc (make-ports url proxy)]
-         [access-string (url->string
-                         (if proxy
-                           url
-                           (make-url #f #f #f #f
-                                     (url-path-absolute? url)
-                                     (url-path url)
-                                     (url-query url)
-                                     (url-fragment url))))])
+         [access-string
+          (ensure-non-empty
+           (url->string
+            (if proxy
+                url
+                (make-url #f #f #f #f
+                          (url-path-absolute? url)
+                          (url-path url)
+                          (url-query url)
+                          (url-fragment url)))))])
     (hc:http-conn-send! hc access-string
                         #:method method
                         #:headers strings
                         #:content-decode '()
                         #:data data)
-    (http-conn-impure-port hc)))
+    (http-conn-impure-port hc
+                           #:method method)))
+
+(define (ensure-non-empty s)
+  (if (string=? "" s)
+      "/"
+      s))
 
 (provide (all-from-out "url-string.rkt"))
 
@@ -374,7 +454,12 @@
                              (listof string?)
                              any)))
  (current-proxy-servers
-  (parameter/c (or/c false/c (listof (list/c string? string? number?))))))
+  (parameter/c (or/c false/c (listof (list/c string? string? number?)))))
+ (current-no-proxy-servers
+  (parameter/c (or/c false/c (listof (or/c string? regexp?)))))
+ (proxy-server-for (->* (string?) ((or/c false/c string?))
+                        (or/c false/c (list/c string? string? number?))))
+ (proxiable-url-schemes (listof string?)))
 
 (define (http-sendrecv/url u
                            #:method [method-bss #"GET"]
@@ -394,12 +479,13 @@
     (error 'http-sendrecv/url "Host required: ~e" u))
   (hc:http-sendrecv
    (url-host u)
-   (url->string
-    (make-url #f #f #f #f
-              (url-path-absolute? u)
-              (url-path u)
-              (url-query u)
-              (url-fragment u)))
+   (ensure-non-empty
+    (url->string
+     (make-url #f #f #f #f
+               (url-path-absolute? u)
+               (url-path u)
+               (url-query u)
+               (url-fragment u))))
    #:ssl?
    (if (equal? "https" (url-scheme u))
      (current-https-protocol)

@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2015 PLT Design Inc.
+  Copyright (c) 2004-2016 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -92,6 +92,7 @@ static Scheme_Object *variable_base_phase(int, Scheme_Object *[]);
 static Scheme_Object *variable_inspector(int, Scheme_Object *[]);
 static Scheme_Object *variable_const_p(int, Scheme_Object *[]);
 static Scheme_Object *now_transforming(int argc, Scheme_Object *argv[]);
+static Scheme_Object *now_transforming_with_lifts(int argc, Scheme_Object *argv[]);
 static Scheme_Object *now_transforming_module(int argc, Scheme_Object *argv[]);
 static Scheme_Object *local_exp_time_value(int argc, Scheme_Object *argv[]);
 static Scheme_Object *local_exp_time_value_one(int argc, Scheme_Object *argv[]);
@@ -102,6 +103,7 @@ static Scheme_Object *local_make_intdef_context(int argc, Scheme_Object *argv[])
 static Scheme_Object *intdef_context_seal(int argc, Scheme_Object *argv[]);
 static Scheme_Object *intdef_context_intro(int argc, Scheme_Object *argv[]);
 static Scheme_Object *intdef_context_p(int argc, Scheme_Object *argv[]);
+static Scheme_Object *intdef_context_ids(int argc, Scheme_Object *argv[]);
 static Scheme_Object *id_intdef_remove(int argc, Scheme_Object *argv[]);
 static Scheme_Object *local_introduce(int argc, Scheme_Object *argv[]);
 static Scheme_Object *local_get_shadower(int argc, Scheme_Object *argv[]);
@@ -654,6 +656,10 @@ void scheme_place_instance_destroy(int force)
   else
     scheme_run_atexit_closers_on_all(force_more_closed_after);
 
+#ifdef WINDOWS_PROCESSES
+  scheme_release_process_job_object();
+#endif
+
   scheme_release_file_descriptor();
 
   scheme_end_futures_per_place();
@@ -771,6 +777,7 @@ static void make_kernel_env(void)
   scheme_add_global_constant("variable-reference-constant?", scheme_varref_const_p_proc, env);
 
   GLOBAL_PRIM_W_ARITY("syntax-transforming?", now_transforming, 0, 0, env);
+  GLOBAL_PRIM_W_ARITY("syntax-transforming-with-lifts?", now_transforming_with_lifts, 0, 0, env);
   GLOBAL_PRIM_W_ARITY("syntax-transforming-module-expression?", now_transforming_module, 0, 0, env);
   GLOBAL_PRIM_W_ARITY("syntax-local-value", local_exp_time_value, 1, 3, env);
   GLOBAL_PRIM_W_ARITY("syntax-local-value/immediate", local_exp_time_value_one, 1, 3, env);
@@ -781,6 +788,7 @@ static void make_kernel_env(void)
   GLOBAL_PRIM_W_ARITY("internal-definition-context-seal", intdef_context_seal, 1, 1, env);
   GLOBAL_PRIM_W_ARITY("internal-definition-context-introduce", intdef_context_intro, 2, 3, env);
   GLOBAL_PRIM_W_ARITY("internal-definition-context?", intdef_context_p, 1, 1, env);
+  GLOBAL_PRIM_W_ARITY("internal-definition-context-binding-identifiers", intdef_context_ids, 1, 1, env);
   GLOBAL_PRIM_W_ARITY("identifier-remove-from-definition-context", id_intdef_remove, 2, 2, env);
   GLOBAL_PRIM_W_ARITY("syntax-local-get-shadower", local_get_shadower, 1, 2, env);
   GLOBAL_PRIM_W_ARITY("syntax-local-introduce", local_introduce, 1, 1, env);
@@ -2241,6 +2249,24 @@ now_transforming(int argc, Scheme_Object *argv[])
 }
 
 static Scheme_Object *
+now_transforming_with_lifts(int argc, Scheme_Object *argv[])
+{
+  Scheme_Comp_Env *env = scheme_current_thread->current_local_env;
+
+  while (env && !env->lifts) {
+    env = env->next;
+  }
+
+  if (env)
+    if (SCHEME_FALSEP(SCHEME_VEC_ELS(env->lifts)[0]))
+      env = NULL;
+
+  return (env
+          ? scheme_true
+          : scheme_false);
+}
+
+static Scheme_Object *
 now_transforming_module(int argc, Scheme_Object *argv[])
 {
   if (scheme_get_module_lift_env(scheme_current_thread->current_local_env))
@@ -2562,6 +2588,16 @@ id_intdef_remove(int argc, Scheme_Object *argv[])
   }
   
   return res;
+}
+
+static Scheme_Object *intdef_context_ids(int argc, Scheme_Object *argv[])
+{
+  if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_intdef_context_type))
+    scheme_wrong_contract("internal-definition-context-binding-identifiers",
+                          "internal-definition-context?", 
+                          0, argc, argv);
+  
+  return scheme_intdef_bind_identifiers(argv[0]);
 }
 
 static Scheme_Object *

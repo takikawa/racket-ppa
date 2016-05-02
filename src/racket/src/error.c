@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2015 PLT Design Inc.
+  Copyright (c) 2004-2016 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -2175,7 +2175,7 @@ void scheme_read_err(Scheme_Object *port,
 
     if (port) {
       Scheme_Object *pn;
-      pn = SCHEME_IPORT_NAME(port);
+      pn = scheme_input_port_record(port)->name;
       if (SCHEME_PATHP(pn)) {
 	pn = scheme_remove_current_directory_prefix(pn);
 	fn = SCHEME_PATH_VAL(pn);

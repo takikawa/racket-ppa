@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2015 PLT Design Inc.
+  Copyright (c) 2004-2016 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
   All rights reserved.
 
@@ -183,6 +183,7 @@ THREAD_LOCAL_DECL(extern intptr_t scheme_total_gc_time);
 THREAD_LOCAL_DECL(extern int scheme_cont_capture_count);
 THREAD_LOCAL_DECL(extern int scheme_continuation_application_count);
 THREAD_LOCAL_DECL(extern struct Scheme_Prefix *scheme_prefix_finalize);
+THREAD_LOCAL_DECL(extern struct Scheme_Prefix *scheme_inc_prefix_finalize);
 
 int scheme_num_types(void);
 
@@ -416,6 +417,7 @@ void scheme_init_exn_config(void);
 #endif
 #ifdef WINDOWS_PROCESSES
 void scheme_init_thread_memory(void);
+void scheme_release_process_job_object(void);
 #endif
 void scheme_init_module_resolver(void);
 
@@ -454,6 +456,7 @@ extern Scheme_Object *scheme_apply_proc;
 extern Scheme_Object *scheme_values_func;
 extern Scheme_Object *scheme_procedure_p_proc;
 extern Scheme_Object *scheme_procedure_arity_includes_proc;
+extern Scheme_Object *scheme_procedure_specialize_proc;
 extern Scheme_Object *scheme_void_proc;
 extern Scheme_Object *scheme_void_p_proc;
 extern Scheme_Object *scheme_syntax_p_proc;
@@ -593,6 +596,22 @@ Scheme_Object *scheme_hash_table_iterate_start(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_hash_table_iterate_next(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_hash_table_iterate_value(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_hash_table_iterate_key(int argc, Scheme_Object *argv[]);
+
+Scheme_Object *scheme_hash_get_w_key_wraps(Scheme_Hash_Table *table, Scheme_Object *key,
+                                           Scheme_Object *key_wraps);
+void scheme_hash_set_w_key_wraps(Scheme_Hash_Table *table, Scheme_Object *key, Scheme_Object *val,
+                                 Scheme_Object *key_wraps);
+Scheme_Bucket *scheme_bucket_or_null_from_table_w_key_wraps(Scheme_Bucket_Table *table,
+                                                            const char *key, int add,
+                                                            Scheme_Object *key_wraps);
+void scheme_add_to_table_w_key_wraps(Scheme_Bucket_Table *table, const char *key, void *val, 
+                                     int constant, Scheme_Object *key_wraps);
+void *scheme_lookup_in_table_w_key_wraps(Scheme_Bucket_Table *table, const char *key,
+                                         Scheme_Object *key_wraps);
+Scheme_Object *scheme_hash_tree_get_w_key_wraps(Scheme_Hash_Tree *tree, Scheme_Object *key,
+                                                Scheme_Object *key_wraps);
+Scheme_Hash_Tree *scheme_hash_tree_set_w_key_wraps(Scheme_Hash_Tree *tree, Scheme_Object *key, Scheme_Object *val,
+                                                   Scheme_Object *key_wraps);
 
 /*========================================================================*/
 /*                    thread state and maintenance                        */
@@ -754,6 +773,7 @@ struct Scheme_Custodian {
   int gc_owner_set;
   Scheme_Object *cust_boxes;
   int num_cust_boxes, checked_cust_boxes;
+  int really_doing_accounting;
 #endif
 };
 
@@ -829,6 +849,9 @@ struct Scheme_Config {
 extern Scheme_Object *scheme_parameterization_key;
 extern Scheme_Object *scheme_exn_handler_key;
 extern Scheme_Object *scheme_break_enabled_key;
+
+Scheme_Object *scheme_extend_parameterization(int argc, Scheme_Object *args[]);
+XFORM_NONGCING int scheme_is_parameter(Scheme_Object *o);
 
 extern void scheme_flatten_config(Scheme_Config *c);
 
@@ -1495,6 +1518,8 @@ typedef struct {
   Scheme_Object *body;
 } Scheme_With_Continuation_Mark;
 
+#define HIGH_BIT_TO_DISABLE_HASHING 0x2000
+
 typedef struct Scheme_Local {
   Scheme_Inclhash_Object iso; /* keyex used for flags and type info (and can't be hashed) */
   mzshort position;
@@ -1513,8 +1538,8 @@ typedef struct Scheme_Local {
 #define SCHEME_LOCAL_OTHER_CLEARS  2
 #define SCHEME_LOCAL_TYPE_OFFSET   2
 
-#define SCHEME_GET_LOCAL_FLAGS(obj)  SCHEME_LOCAL_FLAGS(obj)
-#define SCHEME_GET_LOCAL_TYPE(obj)  ((SCHEME_LOCAL_FLAGS(obj) > 2) ? (SCHEME_LOCAL_FLAGS(obj) - 2) : 0)
+#define SCHEME_GET_LOCAL_FLAGS(obj)  (SCHEME_LOCAL_FLAGS(obj) & ~HIGH_BIT_TO_DISABLE_HASHING)
+#define SCHEME_GET_LOCAL_TYPE(obj)  ((SCHEME_GET_LOCAL_FLAGS(obj) > 2) ? (SCHEME_GET_LOCAL_FLAGS(obj) - 2) : 0)
 
 typedef struct Scheme_Toplevel {
   Scheme_Inclhash_Object iso; /* keyex used for flags (and can't be hashed) */
@@ -2471,7 +2496,7 @@ long_double scheme_long_double_expt(long_double x, long_double y);
    by any closure, when the prefix is accessed only by closures. */
 typedef struct Scheme_Prefix
 {
-  Scheme_Object so; /* scheme_prefix_type */
+  Scheme_Inclhash_Object iso; /* scheme_prefix_type; 0x1 => incremental-mode fixup chain */
   int num_slots, num_toplevels, num_stxes;
 #ifdef MZ_PRECISE_GC
   struct Scheme_Prefix *next_final; /* for special GC handling */
@@ -2483,6 +2508,8 @@ typedef struct Scheme_Prefix
   Scheme_Object *a[mzFLEX_ARRAY_DECL]; /* array of objects */
   /* followed by an array of `int's for tl_map uses */
 } Scheme_Prefix;
+
+#define SCHEME_PREFIX_FLAGS(obj) MZ_OPT_HASH_KEY(&(obj)->iso)
 
 #define PREFIX_TO_USE_BITS(pf) \
   (int *)((char *)pf + sizeof(Scheme_Prefix) + ((pf->num_slots - mzFLEX_DELTA) * sizeof(Scheme_Object *)))
@@ -2704,9 +2731,14 @@ typedef struct Scheme_Closure_Data
   Scheme_Inclhash_Object iso; /* keyex used for flags */
   mzshort num_params; /* includes collecting arg if has_rest */
   mzshort max_let_depth;
-  mzshort closure_size;
-  mzshort *closure_map; /* actually a Closure_Info* until resolved; if CLOS_HAS_TYPED_ARGS, 
-                           followed by bit array with CLOS_TYPE_BITS_PER_ARG bits per args then per closed-over */
+  mzshort closure_size; /* the number of closed-over variables */
+  mzshort *closure_map; /* actually a Closure_Info* until resolved;
+                           contains closure_size elements mapping closed-over var to stack positions.
+
+                           If CLOS_HAS_TYPED_ARGS, that array is followed by bit array with
+                           CLOS_TYPE_BITS_PER_ARG bits per args then per closed-over
+
+                           total size = closure_size + (closure_size + num_params) * CLOS_TYPE_BITS_PER_ARG */
   Scheme_Object *code;
   Scheme_Object *name; /* name or (vector name src line col pos span generated?) */
   void *tl_map; /* fixnum or bit array (as array of `int's) indicating which globals+lifts in prefix are used */
@@ -2727,6 +2759,7 @@ typedef struct Scheme_Closure_Data
 
 XFORM_NONGCING void scheme_boxmap_set(mzshort *boxmap, int j, int bit, int delta);
 XFORM_NONGCING int scheme_boxmap_get(mzshort *boxmap, int j, int delta);
+XFORM_NONGCING int scheme_boxmap_size(int n);
 
 int scheme_has_method_property(Scheme_Object *code);
 
@@ -2769,9 +2802,14 @@ typedef struct Scheme_Native_Closure_Data {
   /* Thumb code is off by one, need real start for GC */
   void *retain_code;
 #endif
+  void *eq_key; /* for `procedure-closure-contents-eq?` */
 } Scheme_Native_Closure_Data;
 
 #define SCHEME_NATIVE_CLOSURE_DATA_FLAGS(obj) MZ_OPT_HASH_KEY(&(obj)->iso)
+
+/* This flag is set pre-JIT: */
+#define NATIVE_SPECIALIZED 0x1
+/* Other flags are in "jit.h" */
 
 typedef struct {
   Scheme_Object so;
@@ -2968,6 +3006,8 @@ Scheme_Native_Closure_Data *scheme_generate_case_lambda(Scheme_Case_Lambda *cl);
 
 void scheme_delay_load_closure(Scheme_Closure_Data *data);
 
+Scheme_Object *scheme_intdef_bind_identifiers(Scheme_Object *intdef);
+  
 #define scheme_add_good_binding(i,v,f) (f->values[i] = v)
 
 Scheme_Object *scheme_compiled_void(void);
@@ -3702,7 +3742,7 @@ Scheme_Object *scheme_modidx_shift(Scheme_Object *modidx,
 				   Scheme_Object *shift_to_modidx);
 
 Scheme_Object *scheme_modidx_submodule(Scheme_Object *modidx);
-Scheme_Object *scheme_get_submodule_empty_self_modidx(Scheme_Object *submodule_path);
+Scheme_Object *scheme_get_submodule_empty_self_modidx(Scheme_Object *submodule_path, int can_cache);
 
 #define SCHEME_RMPP(o) (SAME_TYPE(SCHEME_TYPE((o)), scheme_resolved_module_path_type))
 #define SCHEME_MODNAMEP(obj)  (SAME_TYPE(SCHEME_TYPE(obj), scheme_resolved_module_path_type))

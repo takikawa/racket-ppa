@@ -170,7 +170,14 @@ See also @racket[make-custom-hash].}
 
 Like @racket[make-hash], @racket[make-hasheq], and
 @racket[make-hasheqv], but creates a mutable hash table that holds
-keys weakly.}
+keys weakly.
+
+Beware that values in the table are retained normally. If a value in
+the table refers back to its key, then the table will retain the value
+and therefore the key; the mapping will never be removed from the
+table even if the key becomes otherwise inaccessible. To avoid that
+problem, instead of mapping the key to the value, map the key to an
+@tech{ephemeron} that pairs the key and value.}
 
 @deftogether[(
 @defproc[(make-immutable-hash [assocs (listof pair?) null])
@@ -539,7 +546,7 @@ key @racket[k] and value @racket[v], if a mapping from @racket[k] to some value
 @racket[v0] already exists, it is replaced with a mapping from @racket[k] to
 @racket[(combine/key k v0 v)].
 
-@defexamples[
+@examples[
 #:eval the-eval
 (hash-union (make-immutable-hash '([1 . one]))
             (make-immutable-hash '([2 . two]))
@@ -567,7 +574,7 @@ key @racket[k] and value @racket[v], if a mapping from @racket[k] to some value
 @racket[v0] already exists, it is replaced with a mapping from @racket[k] to
 @racket[(combine/key k v0 v)].
 
-@defexamples[
+@examples[
 #:eval the-eval
 (define h (make-hash))
 h

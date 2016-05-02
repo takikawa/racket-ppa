@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2015 PLT Design Inc.
+  Copyright (c) 2004-2016 PLT Design Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -154,7 +154,8 @@ static void register_traversers(void);
 XFORM_NONGCING static int is_armed(Scheme_Object *v);
 static Scheme_Object *add_taint_to_stx(Scheme_Object *o, int *mutate);
 
-static void unmarshal_module_context_additions(Scheme_Stx *stx, Scheme_Object *vec, Scheme_Scope_Set *scopes, Scheme_Object *replace_at);
+static void unmarshal_module_context_additions(Scheme_Stx *stx, Scheme_Object *shifts,
+                                               Scheme_Object *vec, Scheme_Scope_Set *scopes, Scheme_Object *replace_at);
 
 static Scheme_Object *make_unmarshal_info(Scheme_Object *phase, Scheme_Object *prefix, Scheme_Object *excepts);
 XFORM_NONGCING static Scheme_Object *extract_unmarshal_phase(Scheme_Object *unmarshal_info);
@@ -2654,7 +2655,7 @@ static Scheme_Object *replace_matching_scopes(Scheme_Object *l, Scheme_Scope_Set
 
   p = SCHEME_CDR(p);
   while (c--) {
-    p = scheme_make_pair(SCHEME_CAR(l), p);
+    p = scheme_make_mutable_pair(SCHEME_CAR(l), p);
     l = SCHEME_CDR(l);
   }
 
@@ -3491,7 +3492,7 @@ char *scheme_stx_describe_context(Scheme_Object *stx, Scheme_Object *phase, int 
     return "";
 }
 
-static void add_scopes_mapped_names(Scheme_Scope_Set *scopes, Scheme_Hash_Table *mapped)
+static void add_scopes_mapped_names(Scheme_Scope_Set *scopes, Scheme_Object *shifts, Scheme_Hash_Table *mapped)
 {
   int retry;
   Scheme_Hash_Tree *ht;
@@ -3554,7 +3555,7 @@ static void add_scopes_mapped_names(Scheme_Scope_Set *scopes, Scheme_Hash_Table 
             pes = SCHEME_BINDING_VAL(SCHEME_CAR(l));
             if (PES_UNMARSHAL_DESCP(pes)) {
               if (SCHEME_TRUEP(SCHEME_VEC_ELS(pes)[0])) {
-                unmarshal_module_context_additions(NULL, pes, binding_scopes, l);
+                unmarshal_module_context_additions(NULL, shifts, pes, binding_scopes, l);
                 retry = 1;
               }
             } else {
@@ -3651,7 +3652,7 @@ static Scheme_Object *do_stx_lookup(Scheme_Stx *stx, Scheme_Scope_Set *scopes,
                   /* Need unmarshal --- but only if the scope set is relevant */
                   if (scope_subset(binding_scopes, scopes)) {
                     /* unmarshal and note that we must restart */
-                    unmarshal_module_context_additions(stx, pes, binding_scopes, l);
+                    unmarshal_module_context_additions(stx, NULL, pes, binding_scopes, l);
                     invalid = 1;
                     /* Shouldn't encounter this on a second pass: */
                     STX_ASSERT(!check_subset);
@@ -4289,7 +4290,9 @@ Scheme_Object *scheme_module_context_inspector(Scheme_Object *mc)
 
 void scheme_module_context_add_mapped_symbols(Scheme_Object *mc, Scheme_Hash_Table *mapped)
 {
-  add_scopes_mapped_names(scheme_module_context_scopes(mc), mapped);
+  add_scopes_mapped_names(scheme_module_context_scopes(mc),
+                          SCHEME_VEC_ELS(mc)[3], /* list of shifts */
+                          mapped);
 }
 
 Scheme_Object *scheme_module_context_at_phase(Scheme_Object *mc, Scheme_Object *phase)
@@ -4750,7 +4753,8 @@ static Scheme_Object *unmarshal_key_adjust(Scheme_Object *sym, Scheme_Object *pe
   return sym;
 }
 
-static void unmarshal_module_context_additions(Scheme_Stx *stx, Scheme_Object *vec, Scheme_Scope_Set *scopes, Scheme_Object *replace_at)
+static void unmarshal_module_context_additions(Scheme_Stx *stx, Scheme_Object *shifts,
+                                               Scheme_Object *vec, Scheme_Scope_Set *scopes, Scheme_Object *replace_at)
 {
   Scheme_Object *req_modidx, *modidx, *unmarshal_info, *context, *src_phase, *pt_phase, *bind_phase;
   Scheme_Object *insp, *req_insp;
@@ -4760,14 +4764,10 @@ static void unmarshal_module_context_additions(Scheme_Stx *stx, Scheme_Object *v
   insp = SCHEME_VEC_ELS(vec)[3];
   req_insp = insp;
 
-  if (stx) {
+  if (stx)
     modidx = apply_modidx_shifts(stx->shifts, req_modidx, &insp, &export_registry);
-  } else {
-    modidx = req_modidx;
-    export_registry = NULL;
-    insp = scheme_false;
-    req_insp = scheme_false;
-  }
+  else
+    modidx = apply_modidx_shifts(shifts, req_modidx, &insp, &export_registry);
 
   src_phase = SCHEME_VEC_ELS(vec)[1];
   unmarshal_info = SCHEME_VEC_ELS(vec)[2];
@@ -6721,6 +6721,8 @@ Scheme_Scope_Set *list_to_scope_set(Scheme_Object *l, Scheme_Unmarshal_Tables *u
   Scheme_Scope_Set *scopes = NULL;
   Scheme_Object *r = scheme_null, *scope;
 
+  if (scheme_proper_list_length(l) < 0) return_NULL;
+
   while (!SCHEME_NULLP(l)) {
     if (!SCHEME_PAIRP(l)) return_NULL;
     scopes = (Scheme_Scope_Set *)scheme_hash_get_either(ut->rns, ut->current_rns, l);
@@ -6811,6 +6813,8 @@ Scheme_Object *unmarshal_multi_scopes(Scheme_Object *multi_scopes,
     l = mm_l;
     if (SCHEME_FALLBACKP(l))
       l = SCHEME_FALLBACK_FIRST(l);
+
+    if (scheme_proper_list_length(l) < 0) return_NULL;
 
     l_first = scheme_null;
     l_last = NULL;
@@ -8002,12 +8006,10 @@ Scheme_Object *scheme_syntax_make_transfer_intro(int argc, Scheme_Object **argv)
   } else
     m2 = NULL;
 
-  if (!m2) {
+  if (!m2 && !SCHEME_FALSEP(src)) {
     src = scheme_stx_lookup_w_nominal(argv[1], phase, 1,
                                       NULL, NULL, &m2,
                                       NULL, NULL, NULL, NULL, NULL);
-    if (SCHEME_FALSEP(src))
-      m2 = NULL;
   }
 
   if (m2) {

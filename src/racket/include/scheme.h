@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2015 PLT Design Inc.
+  Copyright (c) 2004-2016 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
   All rights reserved.
 
@@ -93,6 +93,9 @@ typedef struct {
 typedef long double mz_long_double;
 # endif
 #else
+# ifdef MZ_INSIST_EXTFLONUMS
+#  error "cannot support extflonums; you may need to adjust compiler options"
+# endif
 typedef double mz_long_double;
 #endif
 
@@ -1345,6 +1348,7 @@ enum {
   MZCONFIG_CAN_READ_READER,
   MZCONFIG_CAN_READ_LANG,
   MZCONFIG_READ_DECIMAL_INEXACT,
+  MZCONFIG_READ_CDOT,
   
   MZCONFIG_PRINT_GRAPH,
   MZCONFIG_PRINT_STRUCT,
@@ -1362,6 +1366,8 @@ enum {
   MZCONFIG_CASE_SENS,
   MZCONFIG_SQUARE_BRACKETS_ARE_PARENS,
   MZCONFIG_CURLY_BRACES_ARE_PARENS,
+  MZCONFIG_SQUARE_BRACKETS_ARE_TAGGED,
+  MZCONFIG_CURLY_BRACES_ARE_TAGGED,
 
   MZCONFIG_ERROR_PRINT_WIDTH,
   MZCONFIG_ERROR_PRINT_CONTEXT_LENGTH,
@@ -1541,10 +1547,6 @@ struct Scheme_Output_Port
   Scheme_Object *print_handler;
   struct Scheme_Input_Port *input_half;
 };
-
-#define SCHEME_INPORT_VAL(obj) (((Scheme_Input_Port *)(obj))->port_data)
-#define SCHEME_OUTPORT_VAL(obj) (((Scheme_Output_Port *)(obj))->port_data)
-#define SCHEME_IPORT_NAME(obj) (((Scheme_Input_Port *)obj)->name)
 
 #define SCHEME_SPECIAL (-2)
 #define SCHEME_UNLESS_READY (-3)
@@ -1947,6 +1949,9 @@ MZ_EXTERN void scheme_set_addon_dir(Scheme_Object *p);
 MZ_EXTERN void scheme_set_command_line_arguments(Scheme_Object *vec);
 MZ_EXTERN void scheme_set_compiled_file_paths(Scheme_Object *list);
 MZ_EXTERN void scheme_set_compiled_file_roots(Scheme_Object *list);
+#ifdef DOS_FILE_SYSTEM
+MZ_EXTERN void scheme_set_dll_path(wchar_t *s);
+#endif
 
 MZ_EXTERN void scheme_init_collection_paths(Scheme_Env *global_env, Scheme_Object *extra_dirs);
 MZ_EXTERN void scheme_init_collection_paths_post(Scheme_Env *global_env, Scheme_Object *extra_dirs, Scheme_Object *extra_post_dirs);

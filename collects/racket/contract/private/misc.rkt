@@ -32,7 +32,7 @@
          parameter/c
          procedure-arity-includes/c
          
-         any/c
+         any/c  any/c?
          any
          none/c
          make-none/c
@@ -43,21 +43,10 @@
          channel/c
          evt/c
 
-         chaperone-contract?
-         impersonator-contract?
-         flat-contract?
-         contract?
-         
          flat-contract
          flat-contract-predicate
          flat-named-contract
          
-         contract-projection
-         contract-val-first-projection  ;; might return #f (if none)
-         contract-late-neg-projection   ;; might return #f (if none)
-         get/build-val-first-projection ;; builds one if necc., using contract-projection
-         get/build-late-neg-projection
-         contract-name
          n->th
          
          blame-add-car-context
@@ -67,7 +56,9 @@
          random-any/c
 
          rename-contract
-         if/c)
+         if/c
+
+         pairwise-stronger-contracts?)
 
 (define-syntax (flat-murec-contract stx)
   (syntax-case stx  ()
@@ -107,17 +98,6 @@
   (let ([tests (map contract-first-order (base-and/c-ctcs ctc))])
     (λ (x) (for/and ([test (in-list tests)]) (test x)))))
 
-(define (and-proj ctc)
-  (let ([mk-pos-projs (map contract-projection (base-and/c-ctcs ctc))])
-    (lambda (blame)
-      (define projs 
-        (for/list ([c (in-list mk-pos-projs)]
-                   [n (in-naturals 1)])
-          (c (blame-add-context blame (format "the ~a conjunct of" (n->th n))))))
-      (for/fold ([proj (car projs)])
-        ([p (in-list (cdr projs))])
-        (λ (v) (p (proj v)))))))
-
 (define (late-neg-and-proj ctc)
   (define mk-pos-projs (map get/build-late-neg-projection (base-and/c-ctcs ctc)))
   (λ (blame)
@@ -133,22 +113,6 @@
           [else
            (loop (cdr projs)
                  ((car projs) val neg-party))])))))
-
-(define (first-order-and-proj ctc)
-  (λ (blame)
-    (λ (val)
-      (let loop ([predicates (first-order-and/c-predicates ctc)]
-                 [ctcs (base-and/c-ctcs ctc)])
-        (cond
-          [(null? predicates) val]
-          [else
-           (cond
-             [((car predicates) val)
-              (loop (cdr predicates) (cdr ctcs))]
-             [else
-              (define ctc1-proj (contract-projection (car ctcs)))
-              (define new-blame (blame-add-context blame "an and/c case of"))
-              ((ctc1-proj new-blame) val)])])))))
 
 (define (first-order-late-neg-and-proj ctc)
   (define predicates (first-order-and/c-predicates ctc))
@@ -170,12 +134,8 @@
 
 (define (and-stronger? this that)
   (and (base-and/c? that)
-       (let ([this-ctcs (base-and/c-ctcs this)]
-             [that-ctcs (base-and/c-ctcs that)])
-         (and (= (length this-ctcs) (length that-ctcs))
-              (andmap contract-stronger?
-                      this-ctcs
-                      that-ctcs)))))
+       (pairwise-stronger-contracts? (base-and/c-ctcs this)
+                                     (base-and/c-ctcs that))))
 
 (define (and/c-generate? ctc)
   (cond
@@ -244,21 +204,22 @@
 (define (and/c-check-nonneg ctc pred)
   (define sub-contracts (base-and/c-ctcs ctc))
   (cond
-    [(are-stronger-contracts? (list pred (not/c negative?))
-                              sub-contracts)
+    [(pairwise-stronger-contracts?
+      (list (coerce-contract 'and/c-check-nonneg pred) (not/c negative?))
+      sub-contracts)
      (define go (hash-ref predicate-generator-table pred))
      (λ (fuel)
        (λ ()
          (abs (go fuel))))]
     [else #f]))
 
-(define (are-stronger-contracts? c1s c2s)
+(define (pairwise-stronger-contracts? c1s c2s)
   (let loop ([c1s c1s]
              [c2s c2s])
     (cond
       [(and (null? c1s) (null? c2s)) #t]
       [(and (pair? c1s) (pair? c2s))
-       (and (contract-stronger? (car c1s) (car c2s))
+       (and (contract-struct-stronger? (car c1s) (car c2s))
             (loop (cdr c1s) (cdr c2s)))]
       [else #f])))
 
@@ -267,7 +228,6 @@
   #:property prop:custom-write custom-write-property-proc
   #:property prop:flat-contract
   (build-flat-contract-property
-   #:projection first-order-and-proj
    #:late-neg-projection first-order-late-neg-and-proj
    #:name and-name
    #:first-order and-first-order
@@ -276,19 +236,16 @@
 (define-struct (chaperone-and/c base-and/c) ()
   #:property prop:custom-write custom-write-property-proc
   #:property prop:chaperone-contract
-  (parameterize ([skip-projection-wrapper? #t])
-    (build-chaperone-contract-property
-     #:projection and-proj
-     #:late-neg-projection late-neg-and-proj
-     #:name and-name
-     #:first-order and-first-order
-     #:stronger and-stronger?
-     #:generate and/c-generate?)))
+  (build-chaperone-contract-property
+   #:late-neg-projection late-neg-and-proj
+   #:name and-name
+   #:first-order and-first-order
+   #:stronger and-stronger?
+   #:generate and/c-generate?))
 (define-struct (impersonator-and/c base-and/c) ()
   #:property prop:custom-write custom-write-property-proc
   #:property prop:contract
   (build-contract-property
-   #:projection and-proj
    #:late-neg-projection late-neg-and-proj
    #:name and-name
    #:first-order and-first-order
@@ -307,7 +264,7 @@
      (identifier? #'x)
      #'real-and/c]))
 
-(define/subexpression-pos-prop (real-and/c . raw-fs)
+(define/subexpression-pos-prop/name real-and/c-name (real-and/c . raw-fs)
   (let ([contracts (coerce-contracts 'and/c raw-fs)])
     (cond
       [(null? contracts) any/c]
@@ -449,20 +406,21 @@
   (build-flat-contract-property
    #:name (λ (c) `(,name ,(</>-ctc-x c)))
    #:first-order (λ (ctc) (define x (</>-ctc-x ctc)) (λ (y) (and (real? y) (</> y x))))
-   #:projection (λ (ctc)
-                  (define x (</>-ctc-x ctc))
-                  (λ (blame)
-                    (λ (val)
-                      (if (and (real? val) (</> val x))
-                          val
-                          (raise-blame-error
-                           blame val
-                           '(expected:
-                             "a number strictly ~a than ~v"
-                             given: "~v")
-                           less/greater
-                           x
-                           val)))))
+   #:late-neg-projection
+   (λ (ctc)
+     (define x (</>-ctc-x ctc))
+     (λ (blame)
+       (λ (val neg-party)
+         (if (and (real? val) (</> val x))
+             val
+             (raise-blame-error
+              blame val #:missing-party neg-party
+              '(expected:
+                "a number strictly ~a than ~v"
+                given: "~v")
+              less/greater
+              x
+              val)))))
    #:generate
    (λ (ctc)
      (define x (</>-ctc-x ctc))
@@ -617,20 +575,20 @@
             [(pe-listof-ctc? this) (pe-listof-ctc? that)]
             [(im-listof-ctc? this) (im-listof-ctc? that)]
             [else #t])
-          (contract-stronger? this-elem that-elem))]
+          (contract-struct-stronger? this-elem that-elem))]
     [(the-cons/c? that)
      (define hd-ctc (the-cons/c-hd-ctc that))
      (define tl-ctc (the-cons/c-tl-ctc that))
      (and (ne-listof-ctc? this)
-          (contract-stronger? this-elem hd-ctc)
-          (contract-stronger? (ne->pe-ctc this) tl-ctc))]
+          (contract-struct-stronger? this-elem hd-ctc)
+          (contract-struct-stronger? (ne->pe-ctc this) tl-ctc))]
     [else #f]))
            
 (define (raise-listof-blame-error blame val empty-ok? neg-party)
   (raise-blame-error blame #:missing-party neg-party val
                      '(expected: "~s" given: "~e")
                      (if empty-ok?
-                         "list?"
+                         'list?
                          (format "~s" `(and/c list? pair?)))
                      val))
 
@@ -670,47 +628,6 @@
                  (loop (cdr v)))]
            [else
             (elem-fo? v)])))]))
-
-(define (listof-projection ctc)
-  (define elem-proj (contract-projection (listof-ctc-elem-c ctc)))
-  (define pred? (if (pe-listof-ctc? ctc)
-                    list?
-                    non-empty-list?))
-  (λ (blame)
-    (define elem-proj+blame (elem-proj (blame-add-listof-context blame)))
-    (cond
-      [(flat-listof-ctc? ctc)
-       (if (im-listof-ctc? ctc)
-           (λ (val)
-             (let loop ([val val])
-               (cond
-                 [(pair? val)
-                  (elem-proj+blame (car val))
-                  (loop (cdr val))]
-                 [else
-                  (elem-proj+blame val)]))
-             val)
-           (λ (val)
-             (if (pred? val)
-                 (begin
-                   (for ([x (in-list val)])
-                     (elem-proj+blame x))
-                   val)
-                 (raise-listof-blame-error blame val (pe-listof-ctc? ctc) #f))))]
-      [else
-       (if (im-listof-ctc? ctc)
-           (λ (val) 
-             (let loop ([val val])
-               (cond
-                 [(pair? val)
-                  (cons (elem-proj+blame (car val))
-                        (loop (cdr val)))]
-                 [else (elem-proj+blame val)])))
-           (λ (val)
-             (if (pred? val)
-                 (for/list ([x (in-list val)])
-                   (elem-proj+blame x))
-                 (raise-listof-blame-error blame val (pe-listof-ctc? ctc) #f))))])))
 
 (define (listof-late-neg-projection ctc)
   (define elem-proj (get/build-late-neg-projection (listof-ctc-elem-c ctc)))
@@ -759,7 +676,6 @@
   (build-flat-contract-property
    #:name list-name
    #:first-order list-fo-check
-   #:projection listof-projection
    #:late-neg-projection listof-late-neg-projection
    #:generate listof-generate
    #:exercise listof-exercise
@@ -769,7 +685,6 @@
   (build-chaperone-contract-property
    #:name list-name
    #:first-order list-fo-check
-   #:projection listof-projection
    #:late-neg-projection listof-late-neg-projection
    #:generate listof-generate
    #:exercise listof-exercise
@@ -779,7 +694,6 @@
   (build-contract-property
    #:name list-name
    #:first-order list-fo-check
-   #:projection listof-projection
    #:late-neg-projection listof-late-neg-projection
    #:generate listof-generate
    #:exercise listof-exercise
@@ -874,7 +788,6 @@
 (define (blame-add-car-context blame) (blame-add-context blame "the car of"))
 (define (blame-add-cdr-context blame) (blame-add-context blame "the cdr of"))
 
-
 (define ((cons/c-late-neg-ho-check combine) ctc)
   (define ctc-car (the-cons/c-hd-ctc ctc))
   (define ctc-cdr (the-cons/c-tl-ctc ctc))
@@ -889,19 +802,6 @@
       (combine v
                (car-p (car v) neg-party)
                (cdr-p (cdr v) neg-party)))))
-
-(define ((cons/c-ho-check combine) ctc)
-  (define ctc-car (the-cons/c-hd-ctc ctc))
-  (define ctc-cdr (the-cons/c-tl-ctc ctc))
-  (define car-proj (contract-projection ctc-car))
-  (define cdr-proj (contract-projection ctc-cdr))
-  (λ (blame)
-    (let ([car-p (car-proj (blame-add-car-context blame))]
-          [cdr-p (cdr-proj (blame-add-cdr-context blame))])
-      (λ (v)
-        (unless (pair? v)
-          (raise-not-cons-blame-error blame v))
-        (combine v (car-p (car v)) (cdr-p (cdr v)))))))
 
 (define (cons/c-first-order ctc)
   (define ctc-car (the-cons/c-hd-ctc ctc))
@@ -927,16 +827,16 @@
     [(the-cons/c? that)
      (define that-hd (the-cons/c-hd-ctc that))
      (define that-tl (the-cons/c-tl-ctc that))
-     (and (contract-stronger? this-hd that-hd)
-          (contract-stronger? this-tl that-tl))]
+     (and (contract-struct-stronger? this-hd that-hd)
+          (contract-struct-stronger? this-tl that-tl))]
     [(ne-listof-ctc? that)
      (define elem-ctc (listof-ctc-elem-c that))
-     (and (contract-stronger? this-hd elem-ctc)
-          (contract-stronger? this-tl (ne->pe-ctc that)))]
+     (and (contract-struct-stronger? this-hd elem-ctc)
+          (contract-struct-stronger? this-tl (ne->pe-ctc that)))]
     [(pe-listof-ctc? that)
      (define elem-ctc (listof-ctc-elem-c that))
-     (and (contract-stronger? this-hd elem-ctc)
-          (contract-stronger? this-tl that))]
+     (and (contract-struct-stronger? this-hd elem-ctc)
+          (contract-struct-stronger? this-tl that))]
     [else #f]))
 
 
@@ -959,7 +859,6 @@
   #:property prop:flat-contract
   (build-flat-contract-property
    #:late-neg-projection (cons/c-late-neg-ho-check (λ (v a d) v))
-   #:projection (cons/c-ho-check (λ (v a d) v))
    #:name cons/c-name
    #:first-order cons/c-first-order
    #:stronger cons/c-stronger?
@@ -968,21 +867,18 @@
 (define-struct (chaperone-cons/c the-cons/c) ()
   #:property prop:custom-write custom-write-property-proc
   #:property prop:chaperone-contract
-  (parameterize ([skip-projection-wrapper? #t])
-    (build-chaperone-contract-property
-     #:late-neg-projection (cons/c-late-neg-ho-check (λ (v a d) (cons a d)))
-     #:projection (cons/c-ho-check (λ (v a d) (cons a d)))
-     #:name cons/c-name
-     #:first-order cons/c-first-order
-     #:stronger cons/c-stronger?
-     #:generate cons/c-generate
-     #:list-contract? cons/c-list-contract?)))
+  (build-chaperone-contract-property
+   #:late-neg-projection (cons/c-late-neg-ho-check (λ (v a d) (cons a d)))
+   #:name cons/c-name
+   #:first-order cons/c-first-order
+   #:stronger cons/c-stronger?
+   #:generate cons/c-generate
+   #:list-contract? cons/c-list-contract?))
 (define-struct (impersonator-cons/c the-cons/c) ()
   #:property prop:custom-write custom-write-property-proc
   #:property prop:contract
   (build-contract-property
    #:late-neg-projection (cons/c-late-neg-ho-check (λ (v a d) (cons a d)))
-   #:projection (cons/c-ho-check (λ (v a d) (cons a d)))
    #:name cons/c-name
    #:first-order cons/c-first-order
    #:stronger cons/c-stronger?
@@ -1212,18 +1108,15 @@
 (define (list/c-stronger this that)
   (cond
     [(generic-list/c? that)
-     (and (= (length (generic-list/c-args this))
-             (length (generic-list/c-args that)))
-          (for/and ([this-s (in-list (generic-list/c-args this))]
-                    [that-s (in-list (generic-list/c-args this))])
-            (contract-stronger? this-s that-s)))]
+     (pairwise-stronger-contracts? (generic-list/c-args this)
+                                   (generic-list/c-args that))]
     [(listof-ctc? that)
      (define that-elem-ctc (listof-ctc-elem-c that))
      (define this-elem-ctcs (generic-list/c-args this))
      (and (or (pair? this-elem-ctcs)
               (pe-listof-ctc? that))
           (for/and ([this-s (in-list this-elem-ctcs)])
-            (contract-stronger? this-s that-elem-ctc)))]
+            (contract-struct-stronger? this-s that-elem-ctc)))]
     [else #f]))
 
 (struct generic-list/c (args))
@@ -1265,37 +1158,7 @@
                                val
                                '(expected "a list" given: "~e") 
                                val)]))))
-   #:projection
-   (lambda (c)
-     (lambda (blame)
-       (lambda (x)
-         (unless (list? x)
-           (raise-blame-error blame x '(expected "a list" given: "~e") x))
-         (let* ([args (generic-list/c-args c)]
-                [expected (length args)]
-                [actual (length x)])
-           (expected-a-list-of-len x actual expected blame)
-           (for ([arg/c (in-list args)] [v (in-list x)] [i (in-naturals 1)])
-             (((contract-projection arg/c) 
-               (add-list-context blame i))
-              v))
-           x))))
    #:list-contract? (λ (c) #t)))
-
-(define (list/c-chaperone/other-projection c)
-  (define args (map contract-projection (generic-list/c-args c)))
-  (define expected (length args))
-  (λ (blame)
-    (define projs (for/list ([arg/c (in-list args)]
-                             [i (in-naturals 1)])
-                    (arg/c (add-list-context blame i))))
-    (λ (x)
-      (unless (list? x) (expected-a-list x blame))
-      (define actual (length x))
-      (expected-a-list-of-len x actual expected blame #:missing-party #f)
-      (for/list ([item (in-list x)]
-                 [proj (in-list projs)])
-        (proj item)))))
 
 (define (expected-a-list x blame #:missing-party [missing-party #f])
   (raise-blame-error blame #:missing-party missing-party
@@ -1355,16 +1218,14 @@
 (struct chaperone-list/c generic-list/c ()
   #:property prop:custom-write custom-write-property-proc
   #:property prop:chaperone-contract
-  (parameterize ([skip-projection-wrapper? #t])
-    (build-chaperone-contract-property
-     #:name list/c-name-proc
-     #:first-order list/c-first-order
-     #:generate list/c-generate
-     #:exercise list/c-exercise
-     #:stronger list/c-stronger
-     #:projection list/c-chaperone/other-projection
-     #:late-neg-projection list/c-chaperone/other-late-neg-projection
-     #:list-contract? (λ (c) #t))))
+  (build-chaperone-contract-property
+   #:name list/c-name-proc
+   #:first-order list/c-first-order
+   #:generate list/c-generate
+   #:exercise list/c-exercise
+   #:stronger list/c-stronger
+   #:late-neg-projection list/c-chaperone/other-late-neg-projection
+   #:list-contract? (λ (c) #t)))
 
 (struct higher-order-list/c generic-list/c ()
   #:property prop:custom-write custom-write-property-proc
@@ -1375,7 +1236,6 @@
    #:generate list/c-generate
    #:exercise list/c-exercise
    #:stronger list/c-stronger
-   #:projection list/c-chaperone/other-projection
    #:late-neg-projection list/c-chaperone/other-late-neg-projection
    #:list-contract? (λ (c) #t)))
 
@@ -1386,8 +1246,8 @@
    #:name (λ (ctc) (build-compound-type-name 'syntax/c (syntax-ctc-ctc ctc)))
    #:stronger (λ (this that)
                 (and (syntax-ctc? that)
-                     (contract-stronger? (syntax-ctc-ctc this)
-                                         (syntax-ctc-ctc that))))
+                     (contract-struct-stronger? (syntax-ctc-ctc this)
+                                                (syntax-ctc-ctc that))))
    #:first-order (λ (ctc) 
                    (define ? (flat-contract-predicate (syntax-ctc-ctc ctc)))
                    (λ (v)
@@ -1435,8 +1295,8 @@
 
 (define (promise-ctc-stronger? this that)
   (and (promise-base-ctc? that)
-       (contract-stronger? (promise-base-ctc-ctc this)
-                           (promise-base-ctc-ctc that))))
+       (contract-struct-stronger? (promise-base-ctc-ctc this)
+                                  (promise-base-ctc-ctc that))))
 
 (struct promise-base-ctc (ctc))
 (struct chaperone-promise-ctc promise-base-ctc ()
@@ -1476,28 +1336,6 @@
   #:omit-define-syntaxes
   #:property prop:contract
   (build-contract-property
-   #:projection
-   (λ (ctc)
-      (let* ([in-proc (contract-projection (parameter/c-in ctc))]
-             [out-proc (contract-projection (parameter/c-out ctc))])
-        (λ (blame)
-          (define blame/c (blame-add-context blame "the parameter of"))
-          (define (add-profiling f)
-            (λ (x)
-              (with-continuation-mark contract-continuation-mark-key
-                (cons blame #f)
-                (f x))))
-          (define partial-neg-contract (add-profiling (in-proc (blame-swap blame/c))))
-          (define partial-pos-contract (add-profiling (out-proc blame/c)))
-          (λ (val)
-            (cond
-              [(parameter? val)
-               (make-derived-parameter 
-                val 
-                partial-neg-contract
-                partial-pos-contract)]
-              [else
-               (raise-blame-error blame val '(expected "a parameter"))])))))
    #:late-neg-projection
    (λ (ctc)
      (define in-proc (get/build-late-neg-projection (parameter/c-in ctc)))
@@ -1511,9 +1349,9 @@
            [(parameter? val)
             (define (add-profiling f)
               (λ (x)
-                (with-continuation-mark contract-continuation-mark-key
-                  (cons blame/c neg-party)
-                  (f x neg-party))))
+                (with-contract-continuation-mark
+                 (cons blame/c neg-party)
+                 (f x neg-party))))
             (make-derived-parameter
              val
              (add-profiling in-proj)
@@ -1538,10 +1376,10 @@
    #:stronger
    (λ (this that)
       (and (parameter/c? that)
-           (and (contract-stronger? (parameter/c-out this)
-                                    (parameter/c-out that))
-                (contract-stronger? (parameter/c-in that)
-                                    (parameter/c-in this)))))))
+           (and (contract-struct-stronger? (parameter/c-out this)
+                                           (parameter/c-out that))
+                (contract-struct-stronger? (parameter/c-in that)
+                                           (parameter/c-in this)))))))
 
 (define-struct procedure-arity-includes/c (n)
   #:property prop:custom-write custom-write-property-proc
@@ -1565,12 +1403,9 @@
                           n))
   (make-procedure-arity-includes/c n))
 
-(define (get-any-projection c) any-projection)
-(define (any-projection b) any-function)
-(define (any-function x) x)
-
 (define (get-any? c) any?)
 (define (any? x) #t)
+(define any/c-blame->neg-party-fn (λ (blame) any/c-neg-party-fn))
 (define any/c-neg-party-fn (λ (val neg-party) val))
 
 (define (random-any/c env fuel)
@@ -1608,10 +1443,10 @@
 (define-struct any/c ()
   #:property prop:custom-write custom-write-property-proc
   #:omit-define-syntaxes
+  #:property prop:any/c #f
   #:property prop:flat-contract
   (build-flat-contract-property
-   #:projection get-any-projection
-   #:late-neg-projection (λ (ctc) (λ (blame) any/c-neg-party-fn))
+   #:late-neg-projection (λ (ctc) any/c-blame->neg-party-fn)
    #:stronger (λ (this that) (any/c? that))
    #:name (λ (ctc) 'any/c)
    #:generate (λ (ctc) 
@@ -1624,16 +1459,6 @@
 
 (define-syntax (any stx)
   (raise-syntax-error 'any "use of 'any' outside the range of an arrow contract" stx))
-
-(define (none-curried-proj ctc)
-  (λ (blame)
-    (λ (val) 
-      (raise-blame-error
-       blame
-       val
-       '("~s accepts no values" given: "~e")
-       (none/c-name ctc)
-       val))))
 
 (define (((none-curried-late-neg-proj ctc) blame) val neg-party)
   (raise-blame-error
@@ -1648,7 +1473,6 @@
   #:omit-define-syntaxes
   #:property prop:flat-contract
   (build-flat-contract-property
-   #:projection none-curried-proj
    #:late-neg-projection none-curried-late-neg-proj
    #:stronger (λ (this that) #t)
    #:name (λ (ctc) (none/c-name ctc))
@@ -1682,42 +1506,6 @@
                  (list '#:call/cc) (base-prompt-tag/c-call/ccs ctc))))
 
 ;; build a projection for prompt tags
-(define ((prompt-tag/c-proj chaperone?) ctc)
-  (define proxy (if chaperone? chaperone-prompt-tag impersonate-prompt-tag))
-  (define proc-proxy (if chaperone? chaperone-procedure impersonate-procedure))
-  (define ho-projs
-    (map contract-projection (base-prompt-tag/c-ctcs ctc)))
-  (define call/cc-projs
-    (map contract-projection (base-prompt-tag/c-call/ccs ctc)))
-  (λ (blame)
-    (define (make-proj projs swap?)
-      (λ vs
-         (define vs2 (for/list ([proj projs] [v vs])
-                       ((proj (if swap? (blame-swap blame) blame)) v)))
-         (apply values vs2)))
-    ;; prompt/abort projections
-    (define proj1 (make-proj ho-projs #f))
-    (define proj2 (make-proj ho-projs #t))
-    ;; call/cc projections
-    (define call/cc-guard (make-proj call/cc-projs #f))
-    (define call/cc-proxy
-      (λ (f)
-        (proc-proxy
-         f
-         (λ args
-           (apply values (make-proj call/cc-projs #t) args)))))
-    ;; now do the actual wrapping
-    (λ (val)
-      (unless (contract-first-order-passes? ctc val)
-        (raise-blame-error
-         blame val
-         '(expected: "~s" given: "~e")
-         (contract-name ctc)
-         val))
-      (proxy val proj1 proj2 call/cc-guard call/cc-proxy
-             impersonator-prop:contracted ctc
-             impersonator-prop:blame blame))))
-
 (define ((prompt-tag/c-late-neg-proj chaperone?) ctc)
   (define proxy (if chaperone? chaperone-prompt-tag impersonate-prompt-tag))
   (define proc-proxy (if chaperone? chaperone-procedure impersonate-procedure))
@@ -1766,10 +1554,10 @@
 
 (define (prompt-tag/c-stronger? this that)
   (and (base-prompt-tag/c? that)
-       (andmap (λ (this that) (contract-stronger? this that))
+       (andmap (λ (this that) (contract-struct-stronger? this that))
                (base-prompt-tag/c-ctcs this)
                (base-prompt-tag/c-ctcs that))
-       (andmap (λ (this that) (contract-stronger? this that))
+       (andmap (λ (this that) (contract-struct-stronger? this that))
                (base-prompt-tag/c-call/ccs this)
                (base-prompt-tag/c-call/ccs that))))
 
@@ -1781,7 +1569,6 @@
   #:property prop:chaperone-contract
   (build-chaperone-contract-property
    #:late-neg-projection (prompt-tag/c-late-neg-proj #t)
-   #:projection (prompt-tag/c-proj #t)
    #:first-order (λ (ctc) continuation-prompt-tag?)
    #:stronger prompt-tag/c-stronger?
    #:name prompt-tag/c-name))
@@ -1791,7 +1578,6 @@
   #:property prop:contract
   (build-contract-property
    #:late-neg-projection (prompt-tag/c-late-neg-proj #f)
-   #:projection (prompt-tag/c-proj #f)
    #:first-order (λ (ctc) continuation-prompt-tag?)
    #:stronger prompt-tag/c-stronger?
    #:name prompt-tag/c-name))
@@ -1809,23 +1595,6 @@
   (build-compound-type-name
    'continuation-mark-key/c
    (base-continuation-mark-key/c-ctc ctc)))
-
-(define ((continuation-mark-key/c-proj proxy) ctc)
-  (define ho-proj
-    (contract-projection (base-continuation-mark-key/c-ctc ctc)))
-  (λ (blame)
-    (define proj1 (ho-proj blame))
-    (define proj2 (ho-proj (blame-swap blame)))
-    (λ (val)
-      (unless (contract-first-order-passes? ctc val)
-        (raise-blame-error
-         blame val
-         '(expected: "~s" given: "~e")
-         (contract-name ctc)
-         val))
-      (proxy val proj1 proj2
-             impersonator-prop:contracted ctc
-             impersonator-prop:blame blame))))
 
 (define ((continuation-mark-key/c-late-neg-proj proxy) ctc)
   (define ho-proj
@@ -1853,7 +1622,7 @@
 
 (define (continuation-mark-key/c-stronger? this that)
   (and (base-continuation-mark-key/c? that)
-       (contract-stronger?
+       (contract-struct-stronger?
         (base-continuation-mark-key/c-ctc this)
         (base-continuation-mark-key/c-ctc that))))
 
@@ -1866,7 +1635,6 @@
   #:property prop:chaperone-contract
   (build-chaperone-contract-property
    #:late-neg-projection (continuation-mark-key/c-late-neg-proj chaperone-continuation-mark-key)
-   #:projection (continuation-mark-key/c-proj chaperone-continuation-mark-key)
    #:first-order (λ (ctc) continuation-mark-key?)
    #:stronger continuation-mark-key/c-stronger?
    #:name continuation-mark-key/c-name))
@@ -1878,7 +1646,6 @@
   #:property prop:contract
   (build-contract-property
    #:late-neg-projection (continuation-mark-key/c-late-neg-proj impersonate-continuation-mark-key)
-   #:projection (continuation-mark-key/c-proj impersonate-continuation-mark-key)
    #:first-order (λ (ctc) continuation-mark-key?)
    #:stronger continuation-mark-key/c-stronger?
    #:name continuation-mark-key/c-name))
@@ -1913,10 +1680,10 @@
          ((proj blame) val))))
     (define (generator evt)
       (values evt (checker evt)))
-    (λ (val)
+    (λ (val neg-party)
       (unless (contract-first-order-passes? evt-ctc val)
         (raise-blame-error
-         blame val
+         blame val #:missing-party neg-party
          '(expected: "~s" given: "~e")
          (contract-name evt-ctc)
          val))
@@ -1936,15 +1703,13 @@
 (define (evt/c-stronger? this that)
   (define this-ctcs (chaperone-evt/c-ctcs this))
   (define that-ctcs (chaperone-evt/c-ctcs that))
-  (and (= (length this-ctcs) (that-ctcs))
-       (for/and ([this this-ctcs] [that that-ctcs])
-         (contract-stronger? this that))))
+  (pairwise-stronger-contracts? this-ctcs that-ctcs))
 
 ;; ctcs - Listof<Contract>
 (define-struct chaperone-evt/c (ctcs)
   #:property prop:chaperone-contract
   (build-chaperone-contract-property
-   #:projection evt/c-proj
+   #:late-neg-projection evt/c-proj
    #:first-order evt/c-first-order
    #:stronger evt/c-stronger?
    #:name evt/c-name))
@@ -1961,23 +1726,6 @@
   (build-compound-type-name
    'channel/c
    (base-channel/c-ctc ctc)))
-
-(define ((channel/c-proj proxy) ctc)
-  (define ho-proj
-    (contract-projection (base-channel/c-ctc ctc)))
-  (λ (blame)
-    (define proj1 (λ (ch) (values ch (λ (v) ((ho-proj blame) v)))))
-    (define proj2 (λ (ch v) ((ho-proj (blame-swap blame)) v)))
-    (λ (val)
-      (unless (contract-first-order-passes? ctc val)
-        (raise-blame-error
-         blame val
-         '(expected: "~s" given: "~e")
-         (contract-name ctc)
-         val))
-      (proxy val proj1 proj2
-             impersonator-prop:contracted ctc
-             impersonator-prop:blame blame))))
 
 (define ((channel/c-late-neg-proj proxy) ctc)
   (define ho-proj
@@ -2006,7 +1754,7 @@
 
 (define (channel/c-stronger? this that)
   (and (base-channel/c? that)
-       (contract-stronger?
+       (contract-struct-stronger?
         (base-channel/c-ctc this)
         (base-channel/c-ctc that))))
 
@@ -2018,7 +1766,6 @@
   #:property prop:chaperone-contract
   (build-chaperone-contract-property
    #:late-neg-projection (channel/c-late-neg-proj chaperone-channel)
-   #:projection (channel/c-proj chaperone-channel)
    #:first-order channel/c-first-order
    #:stronger channel/c-stronger?
    #:name channel/c-name))
@@ -2029,7 +1776,6 @@
   #:property prop:contract
   (build-contract-property
    #:late-neg-projection (channel/c-late-neg-proj impersonate-channel)
-   #:projection (channel/c-proj impersonate-channel)
    #:first-order channel/c-first-order
    #:stronger channel/c-stronger?
    #:name channel/c-name))
@@ -2038,58 +1784,6 @@
 (define (flat-contract-predicate x)
   (contract-struct-first-order
    (coerce-flat-contract 'flat-contract-predicate x)))
-
-(define (flat-contract? x) 
-  (let ([c (coerce-contract/f x)])
-    (and c
-         (flat-contract-struct? c))))
-
-(define (chaperone-contract? x)
-  (let ([c (coerce-contract/f x)])
-    (and c
-         (or (chaperone-contract-struct? c)
-             (and (prop:opt-chaperone-contract? c)
-                  ((prop:opt-chaperone-contract-get-test c) c))))))
-
-(define (impersonator-contract? x)
-  (let ([c (coerce-contract/f x)])
-    (and c
-         (not (flat-contract-struct? c))
-         (not (chaperone-contract-struct? c)))))
-
-(define (contract-name ctc)
-  (contract-struct-name
-   (coerce-contract 'contract-name ctc)))
-
-(define (contract? x) (and (coerce-contract/f x) #t))
-(define (contract-projection ctc)
-  (contract-struct-projection
-   (coerce-contract 'contract-projection ctc)))
-(define (contract-val-first-projection ctc)
-  (contract-struct-val-first-projection
-   (coerce-contract 'contract-projection ctc)))
-(define (contract-late-neg-projection ctc)
-  (contract-struct-late-neg-projection
-   (coerce-contract 'contract-projection ctc)))
-
-(define (get/build-val-first-projection ctc)
-  (or (contract-struct-val-first-projection ctc)
-      (let ([p (contract-projection ctc)])
-        (λ (blme)
-          (procedure-rename
-           (λ (val)
-             (λ (neg-party)
-               ((p (blame-add-missing-party blme neg-party)) val)))
-           (string->symbol (format "val-first: ~s" (contract-name ctc))))))))
-
-(define (get/build-late-neg-projection ctc)
-  (or (contract-struct-late-neg-projection ctc)
-      (let ([p (contract-projection ctc)])
-        (λ (blme)
-          (procedure-rename
-           (λ (val neg-party)
-             ((p (blame-add-missing-party blme neg-party)) val))
-           (string->symbol (format "late-neg: ~s" (contract-name ctc))))))))
 
 (define (flat-contract predicate) (coerce-flat-contract 'flat-contract predicate))
 (define (flat-named-contract name pre-contract [generate #f])
@@ -2169,51 +1863,73 @@
         (flat-named-contract name (flat-contract-predicate ctc))
         (let* ([make-contract (if (chaperone-contract? ctc) make-chaperone-contract make-contract)])
           (define (stronger? this other)
-            (contract-stronger? ctc other))
+            (contract-struct-stronger? ctc other))
           (make-contract #:name name
-                         #:projection (contract-projection ctc)
+                         #:late-neg-projection (get/build-late-neg-projection ctc)
                          #:first-order (contract-first-order ctc)
                          #:stronger stronger?
                          #:list-contract? (list-contract? ctc))))))
 
-;; (if/c predicate then/c else/c) applies then/c to satisfying
-;;   predicate, else/c to those that don't.
 (define (if/c predicate then/c else/c)
-  #|
-  Naive version:
-    (or/c (and/c predicate then/c)
-          (and/c (not/c predicate) else/c))
-  But that applies predicate twice.
-  |#
   (unless (procedure? predicate)
     (raise-type-error 'if/c "procedure?" predicate))
-  (unless (contract? then/c)
-    (raise-type-error 'if/c "contract?" then/c))
-  (unless (contract? else/c)
-    (raise-type-error 'if/c "contract?" else/c))
-  (let ([then-ctc (coerce-contract 'if/c then/c)]
-        [else-ctc (coerce-contract 'if/c else/c)])
-    (define name (build-compound-type-name 'if/c predicate then-ctc else-ctc))
-    ;; Special case: if both flat contracts, make a flat contract.
-    (if (and (flat-contract? then-ctc)
-             (flat-contract? else-ctc))
-        ;; flat contract
-        (let ([then-pred (flat-contract-predicate then-ctc)]
-              [else-pred (flat-contract-predicate else-ctc)])
-          (define (pred x)
-            (if (predicate x) (then-pred x) (else-pred x)))
-          (flat-named-contract name pred))
-        ;; ho contract
-        (let ([then-proj (contract-projection then-ctc)]
-              [then-fo (contract-first-order then-ctc)]
-              [else-proj (contract-projection else-ctc)]
-              [else-fo (contract-first-order else-ctc)])
-          (define ((proj blame) x)
-            (if (predicate x)
-                ((then-proj blame) x)
-                ((else-proj blame) x)))
-          (make-contract
-           #:name name
-           #:projection proj
-           #:first-order
-           (lambda (x) (if (predicate x) (then-fo x) (else-fo x))))))))
+  (unless (procedure-arity-includes? predicate 1)
+    (raise-type-error 'if/c "procedure that accepts 1 argument" predicate))
+  (define then-ctc (coerce-contract 'if/c then/c))
+  (define else-ctc (coerce-contract 'if/c else/c))
+  (cond
+    [(and (flat-contract? then-ctc)
+          (flat-contract? else-ctc))
+     (define then-pred (flat-contract-predicate then-ctc))
+     (define else-pred (flat-contract-predicate else-ctc))
+     (define name `(if/c ,(object-name predicate)
+                         ,(contract-name then-pred)
+                         ,(contract-name else-pred)))
+     (define (pred x)
+       (if (predicate x) (then-pred x) (else-pred x)))
+     (flat-named-contract name pred)]
+    [(and (chaperone-contract? then-ctc)
+          (chaperone-contract? else-ctc))
+     (chaperone-if/c predicate then-ctc else-ctc)]
+    [else
+     (impersonator-if/c predicate then-ctc else-ctc)]))
+
+(define (if/c-first-order ctc)
+  (define predicate (base-if/c-predicate ctc))
+  (define thn (contract-first-order (base-if/c-thn ctc)))
+  (define els (contract-first-order (base-if/c-els ctc)))
+  (λ (x) (if (predicate x) (thn x) (els x))))
+
+(define (if/c-name ctc)
+  (define predicate (base-if/c-predicate ctc))
+  (define thn (contract-name (base-if/c-thn ctc)))
+  (define els (contract-name (base-if/c-els ctc)))
+  `(if/c ,(object-name predicate) ,thn ,els))
+
+(define (if/c-late-neg-proj ctc)
+  (define predicate (base-if/c-predicate ctc))
+  (define thn (get/build-late-neg-projection (base-if/c-thn ctc)))
+  (define els (get/build-late-neg-projection (base-if/c-els ctc)))
+  (λ (blame)
+    (define thn-proj (thn blame))
+    (define els-proj (els blame))
+    (λ (val neg-party)
+      (if (predicate val)
+          (thn-proj val neg-party)
+          (els-proj val neg-party)))))
+
+(define-struct base-if/c (predicate thn els)
+  #:property prop:custom-write custom-write-property-proc)
+(define-struct (chaperone-if/c base-if/c) ()
+  #:property prop:chaperone-contract
+  (build-chaperone-contract-property
+   #:late-neg-projection if/c-late-neg-proj
+   #:first-order if/c-first-order
+   #:name if/c-name))
+
+(define-struct (impersonator-if/c base-if/c) ()
+  #:property prop:contract
+  (build-contract-property
+   #:late-neg-projection if/c-late-neg-proj
+   #:first-order if/c-first-order
+   #:name if/c-name))

@@ -202,6 +202,7 @@ typedef struct Thread_Local_Variables {
   struct Scheme_Custodian *new_port_cust_;
 #if (defined(__WIN32__) || defined(WIN32) || defined(_WIN32))
   void *scheme_break_semaphore_;
+  void *process_job_object_;
 #else
   int external_event_fd_;
   int put_external_event_fd_;
@@ -267,7 +268,6 @@ typedef struct Thread_Local_Variables {
   intptr_t scheme_current_cont_mark_stack_;
   intptr_t scheme_current_cont_mark_pos_;
   struct Scheme_Custodian *main_custodian_;
-  struct Scheme_Custodian *last_custodian_;
   struct Scheme_Hash_Table *limited_custodians_;
   struct Scheme_Plumber *initial_plumber_;
   struct Scheme_Config *initial_config_;
@@ -364,6 +364,7 @@ typedef struct Thread_Local_Variables {
   struct Scheme_Bucket_Table *scheme_module_code_cache_;
   struct Scheme_Object *group_member_cache_;
   struct Scheme_Prefix *scheme_prefix_finalize_;
+  struct Scheme_Prefix *scheme_inc_prefix_finalize_;
   struct Scheme_Hash_Table *loaded_extensions_;
   struct Scheme_Hash_Table *fullpath_loaded_extensions_;
   Scheme_Sleep_Proc scheme_place_sleep_;
@@ -598,6 +599,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define locked_fd_process_map XOA (scheme_get_thread_local_variables()->locked_fd_process_map_)
 #define new_port_cust XOA (scheme_get_thread_local_variables()->new_port_cust_)
 #define scheme_break_semaphore XOA (scheme_get_thread_local_variables()->scheme_break_semaphore_)
+#define process_job_object XOA (scheme_get_thread_local_variables()->process_job_object_)
 #define external_event_fd XOA (scheme_get_thread_local_variables()->external_event_fd_)
 #define put_external_event_fd XOA (scheme_get_thread_local_variables()->put_external_event_fd_)
 #define read_string_byte_buffer XOA (scheme_get_thread_local_variables()->read_string_byte_buffer_)
@@ -758,6 +760,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define scheme_module_code_cache XOA (scheme_get_thread_local_variables()->scheme_module_code_cache_)
 #define group_member_cache XOA (scheme_get_thread_local_variables()->group_member_cache_)
 #define scheme_prefix_finalize XOA (scheme_get_thread_local_variables()->scheme_prefix_finalize_)
+#define scheme_inc_prefix_finalize XOA (scheme_get_thread_local_variables()->scheme_inc_prefix_finalize_)
 #define loaded_extensions XOA (scheme_get_thread_local_variables()->loaded_extensions_)
 #define fullpath_loaded_extensions XOA (scheme_get_thread_local_variables()->fullpath_loaded_extensions_)
 #define scheme_place_sleep XOA (scheme_get_thread_local_variables()->scheme_place_sleep_)

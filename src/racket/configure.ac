@@ -873,6 +873,11 @@ case "$host_os" in
     PREFLAGS="$PREFLAGS -DOS_X -D_DARWIN_UNLIMITED_SELECT"
     try_kqueue_syscall=yes
 
+    # Although select() generally works as well as poll() on OS X,
+    # getdtablesize() appears not to be constant within a process,
+    # and that breaks static allocation of fd_sets
+    try_poll_syscall=yes
+
     # ".a" is typically not useful, since we always build a ".dylib":
     if test "${enable_libs}" == "" ; then
       INSTALL_LIBS_ENABLE=no-install
@@ -1276,6 +1281,18 @@ if test "${has_builtin_popcount}" = "yes" ; then
    AC_DEFINE(MZ_HAS_BUILTIN_POPCOUNT,1,[Has __builtin_popcount])
 fi
 
+[ msg="for __builtin_clz" ]
+AC_MSG_CHECKING($msg)
+AC_LINK_IFELSE([AC_LANG_SOURCE([
+    int main(int argc, char **argv) {
+      unsigned int i = argc;
+      return __builtin_clz(i);
+    }])], has_builtin_clz=yes, has_builtin_clz=no)
+AC_MSG_RESULT($has_builtin_clz)
+if test "${has_builtin_clz}" = "yes" ; then
+   AC_DEFINE(MZ_HAS_BUILTIN_CLZ,1,[Has __builtin_clz])
+fi
+
 if test "${enable_backtrace}" = "yes" ; then
   GC2OPTIONS="$GC2OPTIONS -DMZ_GC_BACKTRACE"
 fi
@@ -1473,6 +1490,10 @@ if test "${enable_extflonum}" = "default" ; then
   if test "${use_extflonums}" = "no" ; then
     AC_DEFINE(MZ_NO_EXTFLONUMS,1,[Extflonums disabled])
   fi
+fi
+
+if test "${enable_extflonum}" = "yes" ; then
+  AC_DEFINE(MZ_INSIST_EXTFLONUMS)
 fi
 
 ############## libffi ################

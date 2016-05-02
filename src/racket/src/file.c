@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2015 PLT Design Inc.
+  Copyright (c) 2004-2016 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -5693,7 +5693,7 @@ Scheme_Object *scheme_extract_relative_to(Scheme_Object *obj, Scheme_Object *dir
 
     while (!SCHEME_NULLP(be)) {
       if (cache) {
-        obj = scheme_make_pair(up_symbol, scheme_null);
+        obj = scheme_make_pair(up_symbol, obj);
       } else {
         a[0] = up_symbol;
         a[1] = obj;

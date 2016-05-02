@@ -5,10 +5,11 @@
                      racket/require-syntax
                      racket/provide-transform
                      racket/provide-syntax
-                     racket/keyword-transform))
+                     racket/keyword-transform
+                     syntax/intdef))
 
 @(define stx-eval (make-base-eval))
-@(interaction-eval #:eval stx-eval (require (for-syntax racket/base)))
+@examples[#:hidden #:eval stx-eval (require (for-syntax racket/base))]
 
 @(define (transform-time) @t{This procedure must be called during the
 dynamic extent of a @tech{syntax transformer} application by the
@@ -197,10 +198,12 @@ the target identifier is extracted from the structure instance; if the
 field value is not an identifier, then an identifier @racketidfont{?}
 with an empty context is used, instead.
 
-If the property value is a procedure that takes one argument, then the procedure
-is called to obtain the identifier that the rename transformer will use
-as a target identifier. If the procedure returns any value that is not
-an identifier, the @racket[exn:fail:contract] exception is raised.
+If the property value is a procedure that takes one argument, then the
+procedure is called to obtain the identifier that the rename
+transformer will use as a target identifier. The returned identifier
+should probably have the @racket['not-free-identifier=?] syntax
+property. If the procedure returns any value that is not an
+identifier, the @racket[exn:fail:contract] exception is raised.
 
 @examples[#:eval stx-eval #:escape UNSYNTAX
   (code:comment "Example of a procedure argument for prop:rename-transformer")
@@ -297,6 +300,13 @@ should contain only the generated value; if the internal-definition
 context is meant to splice into an immediately enclosing context, then
 when @racket[syntax-local-context] produces a list, @racket[cons] the
 generated value onto that list.
+
+When expressions are expanded via @racket[local-expand] with an
+internal-definition context @racket[intdef-ctx], and when the expanded
+expressions are incorporated into an overall form @racket[_new-stx],
+then typically @racket[internal-definition-context-track] should be
+applied to @racket[intdef-ctx] and @racket[_new-stx] to provide
+expansion history to external tools.
 
 @transform-time[]
 
@@ -456,6 +466,18 @@ match the number of identifiers, otherwise the
 @transform-time[]}
 
 
+@defproc[(internal-definition-context-binding-identifiers
+          [intdef-ctx internal-definition-context?])
+         (listof identifier?)]{
+
+Returns a list of all binding identifiers registered for
+@racket[intdef-ctx] through @racket[syntax-local-bind-syntaxes]. Each
+identifier in the returned list includes the @tech{internal-definition
+context}'s @tech{scope}.
+
+@history[#:added "6.3.0.4"]}
+
+
 @defproc[(internal-definition-context-introduce [intdef-ctx internal-definition-context?]
                                                 [stx syntax?]
                                                 [mode (or/c 'flip 'add 'remove) 'flip])
@@ -487,6 +509,8 @@ provided for backward compatibility; the more general
 @racket[internal-definition-context-introduce] function is preferred.
 
 @history[#:changed "6.3" @elem{Simplified the operation to @tech{scope} removal.}]}
+
+
 
 
 @defthing[prop:expansion-contexts struct-type-property?]{
@@ -570,7 +594,7 @@ if not @racket[#f]. If @racket[failure-thunk] is @racket[false], the
 @examples[#:eval stx-eval
   (define-syntax (transformer-2 stx)
     (syntax-local-value #'something-else (λ () (error "no binding"))))
-  (transformer-2)
+  (eval:error (transformer-2))
 ]
 @examples[#:eval stx-eval
   (define-syntax nachos #'(printf "nachos~n"))
@@ -629,7 +653,9 @@ Other syntactic forms can capture lifts by using
 @racket[local-expand/capture-lifts] or
 @racket[local-transformer-expand/capture-lifts].
 
-@transform-time[]}
+@transform-time[] In addition, this procedure can be called only when
+a lift target is available, as indicated by
+@racket[syntax-transforming-with-lifts?].}
 
 @defproc[(syntax-local-lift-values-expression [n exact-nonnegative-integer?] [stx syntax?])
          (listof identifier?)]{
@@ -701,7 +727,7 @@ then the @exnraise[exn:fail:contract].}
 Lifts a @racket[#%require] form corresponding to
 @racket[raw-require-spec] (either as a @tech{syntax object} or datum)
 to the top-level or to the top of the module currently being expanded
- or to an enclosing @racket[begin-for-syntax]..
+ or to an enclosing @racket[begin-for-syntax].
 
 The resulting syntax object is the same as @racket[stx], except that a
 fresh @tech{scope} is added. The same @tech{scope} is
@@ -855,6 +881,21 @@ transformer} application by the expander and while a module is being
 @tech{visit}ed, @racket[#f] otherwise.}
 
 
+@defproc[(syntax-transforming-with-lifts?) boolean?]{
+
+Returns @racket[#t] if @racket[(syntax-transforming?)] produces
+@racket[#t] and a target context is available for lifting expressions
+(via @racket[syntax-local-lift-expression]), @racket[#f] otherwise.
+
+For example, during an immedate macro expansion triggered by
+@racket[local-expand], as opposed to
+@racket[local-expand/capture-lifts], @racket[(syntax-transforming?)]
+produces @racket[#t] while @racket[(syntax-transforming-with-lifts?)]
+produces @racket[#f].
+
+@history[#:added "6.3.0.9"]}
+
+
 @defproc[(syntax-transforming-module-expression?) boolean?]{
 
 Returns @racket[#t] during the dynamic extent of a @tech{syntax
@@ -916,7 +957,7 @@ and different result procedures use distinct scopes.
                                added the optional operation argument
                                in the result procedure.}]}
 
-@defproc[(make-syntax-delta-introducer [ext-stx syntax?] 
+@defproc[(make-syntax-delta-introducer [ext-stx identifier?] 
                                        [base-stx (or/c syntax? #f)]
                                        [phase-level (or/c #f exact-integer?)
                                                     (syntax-local-phase-level)])
@@ -925,8 +966,10 @@ and different result procedures use distinct scopes.
 Produces a procedure that behaves like the result of
 @racket[make-syntax-introducer], but using the @tech{scopes} of
 @racket[ext-stx] that are not shared with @racket[base-stx].
+A @racket[#f] value for @racket[base-stx] is equivalent to a syntax
+object with no @tech{scopes}.
 
-This procedure is potentially useful when @racket[_m-id] has a
+This procedure is potentially useful when some @racket[_m-id] has a
 transformer binding that records some @racket[_orig-id], and a use of
 @racket[_m-id] introduces a binding of @racket[_orig-id]. In that
 case, the @tech{scopes} one the use of @racket[_m-id] added since the
@@ -976,7 +1019,7 @@ identifiers.  Each list of identifiers includes all bindings imported
 (into the module being expanded) using the module path
 @racket[mod-path], or all modules if @racket[mod-path] is
 @racket[#f]. The association list includes all identifiers imported
-with a @racket[phase-level] shift, of all shifts if
+with a @racket[phase-level] shift, or all shifts if
 @racket[phase-level] is @racket[#t].
 
 When an identifier is renamed on import, the result association list

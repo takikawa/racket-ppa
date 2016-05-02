@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2006-2015 PLT Design Inc.
+  Copyright (c) 2006-2016 PLT Design Inc.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -66,6 +66,7 @@ static Scheme_Object *clear_runstack(Scheme_Object **rs, intptr_t amt, Scheme_Ob
 static jit_insn *generate_proc_struct_retry(mz_jit_state *jitter, int num_rands, GC_CAN_IGNORE jit_insn *refagain)
 {
   GC_CAN_IGNORE jit_insn *ref2, *refz1, *refz2, *refz3, *refz4, *refz5;
+  GC_CAN_IGNORE jit_insn *refz6, *refz7, *refz8, *ref9, *ref10;;
 
   ref2 = jit_bnei_i(jit_forward(), JIT_R1, scheme_proc_struct_type);
   jit_ldxi_p(JIT_R1, JIT_V1, &((Scheme_Structure *)0x0)->stype);
@@ -93,7 +94,7 @@ static jit_insn *generate_proc_struct_retry(mz_jit_state *jitter, int num_rands,
   jit_movi_i(JIT_R0, num_rands);
   jit_pusharg_i(JIT_R0); /* argc */
   jit_pusharg_p(JIT_R1); /* closure */
-  (void)mz_finish(scheme_native_arity_check);
+  (void)mz_finish_unsynced_runstack(scheme_native_arity_check);
   CHECK_LIMIT();
   jit_retval(JIT_R0);
   refz5 = jit_beqi_i(jit_forward(), JIT_R0, 0);
@@ -109,11 +110,38 @@ static jit_insn *generate_proc_struct_retry(mz_jit_state *jitter, int num_rands,
   (void)jit_jmpi(refagain);
   CHECK_LIMIT();
 
+  mz_patch_branch(ref2);
+  /* check for a procedure impersonator that just keeps properties */
+  ref2 = jit_bnei_i(jit_forward(), JIT_R1, scheme_proc_chaperone_type);
+  jit_ldxi_p(JIT_R1, JIT_V1, &((Scheme_Chaperone *)0x0)->redirects);
+  refz6 = mz_bnei_t(jit_forward(), JIT_R1, scheme_vector_type, JIT_R2);
+  (void)jit_ldxi_l(JIT_R2, JIT_R1, &SCHEME_VEC_SIZE(0x0));
+  refz7 = jit_bmci_i(jit_forward(), JIT_R2, 0x1);
+  (void)jit_ldxi_l(JIT_R2, JIT_R1, &(SCHEME_VEC_ELS(0x0)[0]));
+  refz8 = jit_bnei_p(jit_forward(), JIT_R2, scheme_false);
+  /* Can extract the impersonated function and use it directly */
+  /* If the vector is immutable, we need to provide the self proc,
+     if it's not provided already. The self proc is supplied through
+     a side channel in the thread record. */
+  jit_ldxi_s(JIT_R2, JIT_R1, &MZ_OPT_HASH_KEY((Scheme_Inclhash_Object *)(0x0)));
+  ref9 = jit_bmci_i(jit_forward(), JIT_R2, 0x1);
+  (void)mz_tl_ldi_p(JIT_R2, tl_scheme_current_thread);
+  jit_ldxi_l(JIT_R1, JIT_R2, &((Scheme_Thread *)0x0)->self_for_proc_chaperone);
+  ref10 = jit_bnei_p(jit_forward(), JIT_R1, NULL);
+  jit_stxi_l(&((Scheme_Thread *)0x0)->self_for_proc_chaperone, JIT_R2, JIT_V1);
+  mz_patch_branch(ref10);
+  mz_patch_branch(ref9);
+  jit_ldxi_p(JIT_V1, JIT_V1, &((Scheme_Chaperone *)0x0)->prev);
+  (void)jit_jmpi(refagain);
+
   mz_patch_branch(refz1);
   mz_patch_branch(refz2);
   mz_patch_branch(refz3);
   mz_patch_branch(refz4);
   mz_patch_branch(refz5);
+  mz_patch_branch(refz6);
+  mz_patch_branch(refz7);
+  mz_patch_branch(refz8);
 
   return ref2;
 }
@@ -347,9 +375,11 @@ int scheme_generate_tail_call(mz_jit_state *jitter, int num_rands, int direct_na
      must be >= 0 */
 {
   int i, r2_has_runstack = 0;
-  GC_CAN_IGNORE jit_insn *refagain, *ref, *ref2, *ref4, *ref5;
+  GC_CAN_IGNORE jit_insn *top_refagain, *refagain, *ref, *ref2, *ref4, *ref5;
 
   __START_SHORT_JUMPS__(num_rands < 100);
+
+  top_refagain = jit_get_ip();
 
   /* First, try fast direct jump to native code: */
   if (!direct_native) {
@@ -474,7 +504,7 @@ int scheme_generate_tail_call(mz_jit_state *jitter, int num_rands, int direct_na
     /* Handle simple applicable struct: */
     mz_patch_branch(ref2);
     /* uses JIT_R1: */
-    ref2 = generate_proc_struct_retry(jitter, num_rands, refagain);
+    ref2 = generate_proc_struct_retry(jitter, num_rands, top_refagain);
     CHECK_LIMIT();
   }
 
@@ -767,7 +797,7 @@ int scheme_generate_non_tail_call(mz_jit_state *jitter, int num_rands, int direc
       if num_rands != -3, need to pop runstack before returning.
      If num_rands == -1 or -3, skip prolog. */
   GC_CAN_IGNORE jit_insn *ref, *ref2, *ref4, *ref5, *ref6, *ref7, *ref8, *ref9;
-  GC_CAN_IGNORE jit_insn *ref10, *refagain;
+  GC_CAN_IGNORE jit_insn *ref10, *refagain, *top_refagain;
   GC_CAN_IGNORE jit_insn *refrts USED_ONLY_FOR_FUTURES;
 #ifndef FUEL_AUTODECEREMENTS
   GC_CAN_IGNORE jit_insn *ref11;
@@ -784,6 +814,8 @@ int scheme_generate_non_tail_call(mz_jit_state *jitter, int num_rands, int direc
       reftop = jit_get_ip();
     }
   }
+
+  top_refagain = jit_get_ip();
 
   /* Check for inlined native type */
   if (!direct_native) {
@@ -1029,7 +1061,7 @@ int scheme_generate_non_tail_call(mz_jit_state *jitter, int num_rands, int direc
     if (!is_inlined && (num_rands >= 0)) {
       mz_patch_branch(ref2);
       /* uses JIT_R1 */
-      ref2 = generate_proc_struct_retry(jitter, num_rands, refagain);
+      ref2 = generate_proc_struct_retry(jitter, num_rands, top_refagain);
       CHECK_LIMIT();
     }
   } else {
@@ -1709,13 +1741,14 @@ static int generate_call_path_with_unboxes(mz_jit_state *jitter, int direct_flos
 
   /* Reset V1 to rator for slow path: */
   scheme_generate(rator, jitter, 0, 0, 0, JIT_V1, NULL, NULL);
+  CHECK_LIMIT();
   mz_rs_sync();
   
   return 1;
 }
 #endif
 
-int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_rands, 
+int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_rands, int num_pushes,
 			mz_jit_state *jitter, int is_tail, int multi_ok, int result_ignored, 
                         int no_call)
 /* de-sync'd ok 
@@ -1740,6 +1773,8 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
 
   rator = (alt_rands ? alt_rands[0] : app->args[0]);
 
+  rator = scheme_specialize_to_constant(rator, jitter, num_pushes);
+
   if (no_call == 2) {
     direct_prim = 1;
   } else if (SCHEME_PRIMP(rator)) {
@@ -1761,6 +1796,13 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
   } else {
     Scheme_Type t;
     t = SCHEME_TYPE(rator);
+
+    if (t == scheme_case_closure_type) {
+      /* Turn it into a JITted empty case closure: */
+      rator = scheme_unclose_case_lambda(rator, 1);
+      t = SCHEME_TYPE(rator);
+    }
+
     if ((t == scheme_local_type) && scheme_ok_to_delay_local(rator)) {
       /* We can re-order evaluation of the rator. */
       reorder_ok = 1;
@@ -1768,7 +1810,7 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
       /* Call to known native, or even known self? */
       {
 	int pos, flags;
-	pos = SCHEME_LOCAL_POS(rator) - num_rands;
+	pos = SCHEME_LOCAL_POS(rator) - num_pushes;
 	if (scheme_mz_is_closure(jitter, pos, num_rands, &flags)) {
 	  direct_native = 1;
 	  if ((pos == jitter->self_pos)
@@ -1806,6 +1848,9 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
           }
         }
       }
+    } else if (SAME_TYPE(t, scheme_native_closure_type)) {
+      direct_native = can_direct_native(rator, num_rands, &extract_case);
+      reorder_ok = 1;
     } else if (SAME_TYPE(t, scheme_closure_type)) {
       Scheme_Closure_Data *data;
       data = ((Scheme_Closure *)rator)->code;
@@ -1895,7 +1940,7 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
        locations that will be filled with argument values; that
        is, check how many arguments are already in place for
        the call. */
-    mz_runstack_skipped(jitter, num_rands);
+    mz_runstack_skipped(jitter, num_pushes);
     for (i = 0; i < num_rands; i++) {
       v = (alt_rands ? alt_rands[i+1] : app->args[i+1]);
       if (SAME_TYPE(SCHEME_TYPE(v), scheme_local_type)
@@ -1909,11 +1954,14 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
       } else
         break;
     }
-    mz_runstack_unskipped(jitter, num_rands);
+    mz_runstack_unskipped(jitter, num_pushes);
     if (args_already_in_place) {
       direct_native = 2;
-      mz_runstack_skipped(jitter, args_already_in_place);
+      if (num_pushes)
+        mz_runstack_skipped(jitter, args_already_in_place);
       num_rands -= args_already_in_place;
+      if (num_pushes)
+        num_pushes -= args_already_in_place;
     }
     LOG_IT((" [args in place: %d]\n", args_already_in_place));
   }
@@ -1926,7 +1974,7 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
 
   if (num_rands) {
     if (inline_direct_args) {
-      mz_runstack_skipped(jitter, num_rands);
+      mz_runstack_skipped(jitter, num_pushes);
     } else if (!direct_prim || (num_rands > 1) || (no_call == 2)) {
       int skip_end = 0;
       if (direct_self && is_tail && !no_call && (num_rands > 0)) {
@@ -1936,13 +1984,17 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
       if (num_rands - skip_end > 0) {
         mz_rs_dec(num_rands-skip_end);
         CHECK_RUNSTACK_OVERFLOW();
-        mz_runstack_pushed(jitter, num_rands-skip_end);
+        if (num_pushes)
+          mz_runstack_pushed(jitter, num_pushes-skip_end);
+        else
+          scheme_extra_pushed(jitter, num_rands-skip_end);
       }
       need_safety = num_rands-skip_end;
-      if (skip_end)
+      if (skip_end && num_pushes)
         mz_runstack_skipped(jitter, skip_end);
     } else {
-      mz_runstack_skipped(jitter, 1);
+      if (num_pushes)
+        mz_runstack_skipped(jitter, 1);
     }
   }
 
@@ -2103,7 +2155,8 @@ int scheme_generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
     if (!no_call) {
       (void)jit_movi_p(JIT_V1, ((Scheme_Primitive_Proc *)rator)->prim_val);
       if (num_rands == 1) {
-        mz_runstack_unskipped(jitter, 1);
+        if (num_pushes)
+          mz_runstack_unskipped(jitter, 1);
       } else {
         mz_rs_sync();
         JIT_UPDATE_THREAD_RSPTR_IF_NEEDED();

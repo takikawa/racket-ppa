@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2015 PLT Design Inc.
+  Copyright (c) 2004-2016 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -263,7 +263,7 @@ void
 scheme_debug_print (Scheme_Object *obj)
 {
   scheme_write(obj, scheme_orig_stdout_port);
-  fflush (stdout);
+  scheme_flush_output(scheme_orig_stdout_port);
 }
 
 static void *print_to_port_k(void)

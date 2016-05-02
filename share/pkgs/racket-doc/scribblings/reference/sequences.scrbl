@@ -26,7 +26,7 @@ vice-versa.
 @(define sequence-evaluator
    (let ([evaluator (make-base-eval)])
      (evaluator '(require racket/generic racket/list racket/stream racket/sequence
-                          racket/contract))
+                          racket/contract racket/dict))
      evaluator))
 
 @guideintro["sequences"]{sequences}
@@ -152,7 +152,7 @@ each element in the sequence.
   Returns @racket[#t] if @racket[v] can be used as a @tech{sequence},
   @racket[#f] otherwise.
 
-@interaction[#:eval sequence-evaluator
+@examples[#:eval sequence-evaluator
   (sequence? 42)
   (sequence? '(a b c))
   (sequence? "word")
@@ -169,12 +169,12 @@ each element in the sequence.
   @racket[step] is non-negative, or less or equal to @racket[end] if
   @racket[step] is negative.  @speed[in-range "number"]
 
-  Example: gaussian sum
-  @interaction[#:eval sequence-evaluator
+  
+  @examples[#:label "Example: gaussian sum" #:eval sequence-evaluator
     (for/sum ([x (in-range 10)]) x)]
 
-  Example: sum of even numbers
-  @interaction[#:eval sequence-evaluator
+  
+  @examples[#:label "Example: sum of even numbers" #:eval sequence-evaluator
     (for/sum ([x (in-range 0 100 2)]) x)]
 }
 
@@ -184,7 +184,7 @@ each element in the sequence.
   integers starting with @racket[start], where each element is one
   more than the preceding element.  @speed[in-naturals "integer"]
 
-  @interaction[#:eval sequence-evaluator
+  @examples[#:eval sequence-evaluator
     (for/list ([k (in-naturals)]
                [x (in-range 10)])
       (list k x))]
@@ -197,7 +197,7 @@ each element in the sequence.
   @info-on-seq["pairs" "lists"]
   @speed[in-list "list"]
 
-  @interaction[#:eval sequence-evaluator
+  @examples[#:eval sequence-evaluator
     (for/list ([x (in-list '(3 1 4))])
       `(,x ,(* x x)))]
 }
@@ -207,7 +207,7 @@ each element in the sequence.
   @info-on-seq["mpairs" "mutable lists"]
   @speed[in-mlist "mutable list"]
 
-  @interaction[#:eval sequence-evaluator
+  @examples[#:eval sequence-evaluator
     (for/list ([x (in-mlist (mcons "RACKET" (mcons "LANG" '())))])
       (string-length x))]
 }
@@ -242,7 +242,7 @@ each element in the sequence.
 
   @speed[in-vector "vector"]
 
-  @interaction[#:eval sequence-evaluator
+  @examples[#:eval sequence-evaluator
     (define (histogram vector-of-words)
       (define a-hash (make-hash))
       (for ([word (in-vector vector-of-words)])
@@ -266,7 +266,7 @@ each element in the sequence.
 
   @speed[in-string "string"]
 
-  @interaction[#:eval sequence-evaluator
+  @examples[#:eval sequence-evaluator
     (define (line-count str)
       (for/sum ([ch (in-string str)])
         (if (char=? #\newline ch) 1 0)))
@@ -288,7 +288,7 @@ each element in the sequence.
 
   @speed[in-bytes "byte string"]
 
-  @interaction[#:eval sequence-evaluator
+  @examples[#:eval sequence-evaluator
     (define (has-eof? bs)
       (for/or ([ch (in-bytes bs)])
         (= ch 0)))
@@ -383,6 +383,48 @@ each element in the sequence.
   To generate a sequence that includes only the immediate
   content of a directory, use the result of @racket[directory-list] as
   a sequence.
+
+@examples[
+    (code:comment @#,t{Given a directory tree:})
+    (code:comment @#,t{})
+    (code:comment @#,t{ /example})
+    (code:comment @#,t{ ├── a})
+    (code:comment @#,t{ │   ├── alpha})
+    (code:comment @#,t{ │   └── apple})
+    (code:comment @#,t{ ├── b})
+    (code:comment @#,t{ │   └── beta})
+    (code:comment @#,t{ └── c})
+    (code:comment @#,t{})
+    (eval:alts
+      (parameterize ([current-directory "/example"])
+        (for ([p (in-directory)])
+          (printf "~a\n" p)))
+      (for ([p (in-list '("a"
+                          "a/alpha"
+                          "a/apple"
+                          "b"
+                          "b/beta"
+                          "c"))])
+        (printf "~a\n" p)))
+    (eval:alts
+      (for ([p (in-directory "/example")])
+        (printf "~a\n" p))
+      (for ([p (in-list '("/example/a"
+                          "/example/a/alpha"
+                          "/example/a/apple"
+                          "/example/b"
+                          "/example/b/beta"
+                          "/example/c"))])
+        (printf "~a\n" p)))
+    (eval:alts
+      (let ([f (lambda (path) (regexp-match? #rx"/example/b.*" path))])
+        (for ([p (in-directory "/example" f)])
+          (printf "~a\n" p)))
+      (for ([p (in-list '("/example/a"
+                          "/example/b"
+                          "/example/b/beta"
+                          "/example/c"))])
+        (printf "~a\n" p)))]
 
 @history[#:changed "6.0.0.1" @elem{Added @racket[use-dir?] argument.}]}
 
@@ -755,27 +797,30 @@ for instance, a wrapped list is not guaranteed to satisfy @racket[list?].
 
 If @racket[min-count] is a number, the stream is required to have at least that many elements in it.
 
-@defexamples[
+@examples[
 #:eval sequence-evaluator
 (define/contract predicates
   (sequence/c (-> any/c boolean?))
   (in-list (list integer?
                  string->symbol)))
-(for ([P predicates])
-  (printf "~s\n" (P "cat")))
+(eval:error
+ (for ([P predicates])
+   (printf "~s\n" (P "cat"))))
 (define/contract numbers&strings
   (sequence/c number? string?)
   (in-dict (list (cons 1 "one")
                  (cons 2 "two")
                  (cons 3 'three))))
-(for ([(N S) numbers&strings])
-  (printf "~s: ~a\n" N S))
+(eval:error
+ (for ([(N S) numbers&strings])
+   (printf "~s: ~a\n" N S)))
 (define/contract a-sequence
   (sequence/c #:min-count 2 char?)
   "x")
-(for ([x a-sequence]
-      [i (in-naturals)])
-  (printf "~a is ~a\n" i x))
+(eval:error
+ (for ([x a-sequence]
+       [i (in-naturals)])
+   (printf "~a is ~a\n" i x)))
 ]
 
 }
@@ -1160,11 +1205,12 @@ values from the generator.
   literal, exact, non-negative integer.
   
   @examples[#:eval generator-eval
-    (let ([g (in-generator
-              (let loop ([n 3])
-                (unless (zero? n) (yield n (add1 n)) (loop (sub1 n)))))])
-      (let-values ([(not-empty? next) (sequence-generate g)])
-        (let loop () (when (not-empty?) (next) (loop))) 'done))
+    (eval:error
+     (let ([g (in-generator
+               (let loop ([n 3])
+                 (unless (zero? n) (yield n (add1 n)) (loop (sub1 n)))))])
+       (let-values ([(not-empty? next) (sequence-generate g)])
+         (let loop () (when (not-empty?) (next) (loop))) 'done)))
     (let ([g (in-generator #:arity 2
               (let loop ([n 3])
                 (unless (zero? n) (yield n (add1 n)) (loop (sub1 n)))))])
@@ -1174,7 +1220,7 @@ values from the generator.
   To use an existing generator as a sequence, use @racket[in-producer]
   with a stop-value known for the generator:
 
-  @interaction[#:eval generator-eval
+  @examples[#:label #f #:eval generator-eval
     (define abc-generator (generator ()
                            (for ([x '(a b c)])
                               (yield x))))

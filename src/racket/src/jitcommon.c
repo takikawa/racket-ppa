@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2006-2015 PLT Design Inc.
+  Copyright (c) 2006-2016 PLT Design Inc.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -3967,6 +3967,7 @@ static int more_common1(mz_jit_state *jitter, void *_data)
       /* -3 here means "don't pop the arguments"; need regular argument
          handling via `reftop` for tail calls */
       scheme_generate_non_tail_call(jitter, -3, 0, 1, multi_ok, 0, 0, 1, 0, 0, reftop);
+      CHECK_LIMIT();
 
       scheme_jit_register_sub_func(jitter, code, scheme_false);
     }

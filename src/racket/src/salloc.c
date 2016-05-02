@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2015 PLT Design Inc.
+  Copyright (c) 2004-2016 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -1655,6 +1655,13 @@ void scheme_enable_garbage_collection(int on)
     --GC_dont_gc;
   else
     GC_dont_gc++;
+#endif
+}
+
+void scheme_incremental_garbage_collection(int on)
+{
+#ifdef MZ_PRECISE_GC
+  GC_set_incremental_mode(on);
 #endif
 }
 

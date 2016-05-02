@@ -106,8 +106,6 @@ static void (*console_printf)(char *str, ...);
 # define PRINTF console_printf
 #endif
 
-MZ_EXTERN void scheme_set_dll_path(wchar_t *s);
-
 static void record_dll_path(void)
 {
   if (_dlldir[_dlldir_offset] != '<') {
@@ -1543,6 +1541,24 @@ static int run_from_cmd_line(int argc, char *_argv[],
   }
   if (getenv("PLTDISABLEGC")) {
     scheme_enable_garbage_collection(0);
+  }
+  {
+    char *s;
+    s = getenv("PLT_INCREMENTAL_GC");
+    if (s) {
+      if ((s[0] == '0') || (s[0] == 'n') || (s[0] == 'N'))
+        scheme_incremental_garbage_collection(0);
+      else if ((s[0] == '1') || (s[0] == 'y') || (s[0] == 'Y'))
+        scheme_incremental_garbage_collection(1);
+      else {
+         PRINTF("%s: unrecognized value for PLT_INCREMENTAL_GC;\n"
+                " a value that starts \"1\", \"y\", or \"Y\" permanently enables incremental mode,\n"
+                " and a value that starts \"0\", \"n\", or \"N\" disables incremental mode,\n"
+                " and the default enables incremental mode as requested via `collect-garbage'\n"
+                "  unrecognized value: %s\n",
+                prog, s);
+      }
+    }
   }
 #endif
 

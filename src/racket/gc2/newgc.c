@@ -79,7 +79,7 @@ enum {
   SIZE_CLASS_SMALL_PAGE      = 0, /* can be a nursery page */
   SIZE_CLASS_MED_PAGE        = 1,
   SIZE_CLASS_BIG_PAGE        = 2,
-  SIZE_CLASS_BIG_PAGE_MARKED = 3,
+  SIZE_CLASS_BIG_PAGE_MARKED = 3
 };
 
 enum {
@@ -102,7 +102,8 @@ enum {
   AGE_GEN_0    = 0,
   AGE_GEN_HALF = 1,
   AGE_GEN_1    = 2,
-  AGE_VACATED  = 3
+  AGE_VACATED  = 3, /* used for pages to be removed */
+  AGE_GEN_INC  = 4  /* used for naming a finalizer set */
 };
 
 static const char *type_name[PAGE_TYPES] = {
@@ -178,6 +179,7 @@ inline static int page_mmu_type(mpage *page);
 inline static int page_mmu_protectable(mpage *page);
 static void free_mpage(mpage *page);
 static void gen_half_free_mpage(NewGC *gc, mpage *work);
+static int inc_marked_gen1(NewGC *gc, void *p);
 
 #if defined(MZ_USE_PLACES) && defined(GC_DEBUG_PAGES)
 static FILE* gcdebugOUT(NewGC *gc) {
@@ -237,16 +239,44 @@ MAYBE_UNUSED static void GCVERBOSEprintf(NewGC *gc, const char *fmt, ...) {
 #define GEN0_MAX_SIZE (32 * 1024 * 1024)
 #define GEN0_PAGE_SIZE (1 * 1024 * 1024)
 
+/* Run a full collection when the current memory use is more than
+   FULL_COLLECTION_SIZE_RATIO times the memory use after the previous
+   full collection. */
+#define FULL_COLLECTION_SIZE_RATIO 2
+
+/* Extra factor allowed before forcing a non-incremental full collection
+   when incremental model is started: */
+#define INCREMENTAL_EXTRA_SIZE_RATIO 2
+
+/* Avoid incremental GC if the heap seems to be getting too fragmented: */
+#define HIGH_FRAGMENTATION_RATIO 2
+
 /* Whether to use a little aging, moving gen-0 objects to a
-   gen-1/2 space; by default, enabled when memory use is high
-   enough:  */
-#define AGE_GEN_0_TO_GEN_HALF(gc) ((gc)->memory_in_use > (GEN0_MAX_SIZE * 8))
+   gen-1/2 space:  */
+#define AGE_GEN_0_TO_GEN_HALF(gc) ((gc)->started_incremental)
+
+/* Incremental mode */
+static int always_collect_incremental_on_minor = 0;
+static int never_collect_incremental_on_minor = 0;
+#define INCREMENTAL_COLLECT_FUEL_PER_100M (4 * 1024)
+#define INCREMENTAL_REPAIR_FUEL_PER_100M  32
+
+/* Shrink the nursery in incremental mode, so that we more frequently
+   work on a major collection. Tune this parameter in combination with
+   the fuel parameters above. */
+#define GEN0_INCREMENTAL_MAX_DIVISOR 4
+
+/* Factor to shrink incremental-mode fuel when a GC is triggered by
+   (collect-garbage 'minor): */
+#define INCREMENTAL_MINOR_REQUEST_DIVISOR 1
 
 /* Conservatively force a major GC after a certain number
    of minor GCs. It should be ok to set this value
    arbitraily high. An earlier value of 100, meanwhile,
    seems to have been excessively conservative. */
 #define FORCE_MAJOR_AFTER_COUNT 1000
+
+#define AS_100M(c) ((c / (1024 * 1024 * 100)) + 1)
 
 /* This is the log base 2 of the size of one word, given in bytes */
 #ifdef SIXTY_FOUR_BIT_INTEGERS
@@ -296,6 +326,12 @@ GC_collect_end_callback_Proc GC_set_collect_end_callback(GC_collect_end_callback
 void GC_set_collect_inform_callback(GC_collect_inform_callback_Proc func) {
   NewGC *gc = GC_get_GC();
   gc->GC_collect_inform_callback = func;
+}
+
+void GC_set_treat_as_incremental_mark(short tag, GC_Treat_As_Incremental_Mark_Proc func) {
+  NewGC *gc = GC_get_GC();
+  gc->treat_as_incremental_mark_hook = func;
+  gc->treat_as_incremental_mark_tag = tag;
 }
 
 void GC_set_post_propagate_hook(GC_Post_Propagate_Hook_Proc func) {
@@ -977,6 +1013,12 @@ static void collect_now(NewGC *gc, int major, int nomajor)
     int again;
     do {
       if (!gc->dont_master_gc_until_child_registers && master_wants_to_collect()) {
+        if (gc->started_incremental) {
+          /* incremental state doesn't support references to the master
+             space, so finish up the one in progress so the next one starts
+             fresh */
+          garbage_collect(gc, 1, 0, 0, NULL);
+        }
         wait_until_master_in_progress(gc);
         gc->major_places_gc = 1;
         garbage_collect(gc, 1, 0, 0, NULL); /* waits until all are done */
@@ -1325,7 +1367,9 @@ static int TAKE_SLOW_PATH()
 #endif
 
 inline static size_t gen0_size_in_use(NewGC *gc) {
-  return (gc->gen0.current_size + ((GC_gen0_alloc_page_ptr - NUM(gc->gen0.curr_alloc_page->addr)) - PREFIX_SIZE));
+  return (gc->gen0.current_size + (gc->gen0.curr_alloc_page
+                                   ? ((GC_gen0_alloc_page_ptr - NUM(gc->gen0.curr_alloc_page->addr)) - PREFIX_SIZE)
+                                   : 0));
 }
 
 #define BYTES_MULTIPLE_OF_WORD_TO_WORDS(sizeb) ((sizeb) >> gcLOG_WORD_SIZE)
@@ -1377,7 +1421,9 @@ inline static uintptr_t allocate_slowpath(NewGC *gc, size_t allocate_size, uintp
 #ifdef INSTRUMENT_PRIMITIVES 
       LOG_PRIM_START(((void*)garbage_collect));
 #endif
-      
+
+      gc->gen0.curr_alloc_page = NULL; /* so the memory use is not counted */
+
       collect_now(gc, 0, 0);
 
 #ifdef INSTRUMENT_PRIMITIVES 
@@ -1621,10 +1667,19 @@ uintptr_t add_no_overflow(uintptr_t a, uintptr_t b)
   return c;
 }
 
+uintptr_t subtract_no_underflow(uintptr_t a, uintptr_t b)
+{
+  if (a >= b)
+    return a-b;
+  else
+    return 0;
+}
+
 int GC_allocate_phantom_bytes(void *pb, intptr_t request_size_bytes)
 {
   NewGC *gc = GC_get_GC();
   mpage *page;
+  int inc_count;
 
 #ifdef NEWGC_BTC_ACCOUNT
   if (request_size_bytes > 0) {
@@ -1642,20 +1697,30 @@ int GC_allocate_phantom_bytes(void *pb, intptr_t request_size_bytes)
 
   page = pagemap_find_page(gc->page_maps, pb);
 
+  if (page->generation >= AGE_GEN_1)
+    inc_count = inc_marked_gen1(gc, pb);
+  else
+    inc_count = 0;
+
   if (request_size_bytes < 0) {
     request_size_bytes = -request_size_bytes;
-    if (!page || (page->generation < AGE_GEN_1)) {
-      if (gc->gen0_phantom_count > request_size_bytes)
-        gc->gen0_phantom_count -= request_size_bytes;
-    } else {
-      if (gc->memory_in_use > request_size_bytes)
-        gc->memory_in_use -= request_size_bytes;
+    if (!page || (page->generation < AGE_GEN_1))
+      gc->gen0_phantom_count = subtract_no_underflow(gc->gen0_phantom_count, request_size_bytes);
+    else {
+      gc->memory_in_use = subtract_no_underflow(gc->memory_in_use, request_size_bytes);
+      gc->phantom_count = subtract_no_underflow(gc->phantom_count, request_size_bytes);
+      if (inc_count)
+        gc->inc_phantom_count = subtract_no_underflow(gc->inc_phantom_count, request_size_bytes);
     }
   } else {
     if (!page || (page->generation < AGE_GEN_1))
       gc->gen0_phantom_count = add_no_overflow(gc->gen0_phantom_count, request_size_bytes);
-    else
+    else {
       gc->memory_in_use = add_no_overflow(gc->memory_in_use, request_size_bytes);
+      gc->phantom_count = add_no_overflow(gc->phantom_count, request_size_bytes);
+      if (inc_count)
+        gc->inc_phantom_count = add_no_overflow(gc->inc_phantom_count, request_size_bytes);
+    }
   }
 
   /* If we've allocated enough phantom bytes, then force a GC */
@@ -1961,11 +2026,15 @@ inline static void master_set_max_size(NewGC *gc)
 inline static void reset_nursery(NewGC *gc)
 {
   uintptr_t new_gen0_size;
-  
+
   new_gen0_size = NUM((GEN0_SIZE_FACTOR * (float)gc->memory_in_use) + GEN0_SIZE_ADDITION);
   if ((new_gen0_size > GEN0_MAX_SIZE)
       || (gc->memory_in_use > GEN0_MAX_SIZE)) /* => overflow */
     new_gen0_size = GEN0_MAX_SIZE;
+
+  if (gc->started_incremental
+      && (new_gen0_size > (GEN0_MAX_SIZE / GEN0_INCREMENTAL_MAX_DIVISOR)))
+    new_gen0_size = GEN0_MAX_SIZE / GEN0_INCREMENTAL_MAX_DIVISOR;
 
   resize_gen0(gc, new_gen0_size);
 }
@@ -1993,45 +2062,95 @@ inline static void clean_gen_half(NewGC *gc)
 }
 
 
-inline static mpage *pagemap_find_page_for_marking(NewGC *gc, const void *p) {
+inline static mpage *pagemap_find_page_for_marking(NewGC *gc, const void *p, int get_gen1) {
   mpage *page;
   page = pagemap_find_page(gc->page_maps, p);
-  if (page && !gc->gc_full && (page->generation >= AGE_GEN_1)) return NULL;
+  if (page && !get_gen1 && (page->generation >= AGE_GEN_1)) return NULL;
   return page;
 }
 
-/* This procedure fundamentally returns true if a pointer is marked, and
-   false if it isn't. This function assumes that you're talking, at this
-   point, purely about the mark field of the object. It ignores things like
-   the object not being one of our GC heap objects, being in a higher gen
-   than we're collecting, not being a pointer at all, etc. */
 inline static int marked(NewGC *gc, const void *p)
 {
   mpage *page;
 
+  GC_ASSERT(!gc->check_gen1 || gc->gc_full || gc->inc_gen1);
+
   if(!p) return 0;
-  if(!(page = pagemap_find_page_for_marking(gc, p))) return 1;
+  if(!(page = pagemap_find_page_for_marking(gc, p, gc->check_gen1))) return 1;
   switch(page->size_class) {
-    case SIZE_CLASS_BIG_PAGE_MARKED:
-      return 1;
     case SIZE_CLASS_SMALL_PAGE:
-      if (page->generation >= AGE_GEN_1) {
-        if((NUM(page->addr) + page->scan_boundary) > NUM(p)) 
+      if ((page->generation >= AGE_GEN_1) && !gc->inc_gen1) {
+        GC_ASSERT(!gc->finished_incremental);
+        if ((NUM(page->addr) + page->scan_boundary) > NUM(p))
           return 1;
       }
       /* else FALLTHROUGH */
     case SIZE_CLASS_MED_PAGE: /* FALLTHROUGH */
-    case SIZE_CLASS_BIG_PAGE:
-      return OBJPTR_TO_OBJHEAD(p)->mark;
+      if (page->non_dead_as_mark) {
+        /* Shouldn't reference a dead object! */
+        GC_ASSERT(!OBJPTR_TO_OBJHEAD(p)->dead);
+        return 1;
+      } else
+        return OBJPTR_TO_OBJHEAD(p)->mark;
       break;
+    case SIZE_CLASS_BIG_PAGE:
+      return 0;
+    case SIZE_CLASS_BIG_PAGE_MARKED:
+      return 1;
     default:
       fprintf(stderr, "ABORTING! INVALID SIZE_CLASS %i\n", page->size_class);
       abort();
   }
 }
 
+/* Used outside of GC when an incremental GC might be in progress */
+static int inc_marked_gen1(NewGC *gc, void *p)
+{
+  if (gc->started_incremental) {
+    int r;
+    GC_ASSERT(!gc->check_gen1);
+    GC_ASSERT(!gc->inc_gen1);
+    gc->check_gen1 = 1;
+    gc->inc_gen1 = 1;
+    r = marked(gc, p);
+    gc->check_gen1 = 0;
+    gc->inc_gen1 = 0;
+    return r;
+  } else
+    return 0;
+}
+
+static int is_in_generation_half(NewGC *gc, const void *p)
+{
+  mpage *page;
+  if (gc->gc_full) /* generation half is never used for a full GC */
+    return 0;
+  page = pagemap_find_page_for_marking(gc, p, 1);
+  if (!page) return 0;
+  GC_ASSERT((page->generation == AGE_GEN_1)
+            || (page->generation == AGE_GEN_HALF));
+  return page->generation == AGE_GEN_HALF;
+}
+
 int GC_is_marked2(const void *p, struct NewGC *gc) {
   return marked(gc, p);
+}
+
+int GC_current_mode(struct NewGC *gc)
+{
+  if (gc->during_backpointer)
+    return GC_CURRENT_MODE_BACKPOINTER_REMARK;
+  else if (gc->doing_memory_accounting)
+    return GC_CURRENT_MODE_ACCOUNTING;
+  else if (gc->gc_full)
+    return GC_CURRENT_MODE_MAJOR;
+  else if (gc->inc_gen1) {
+    if (gc->fnl_gen1)
+      return GC_CURRENT_MODE_INCREMENTAL_FINAL;
+    else
+      return GC_CURRENT_MODE_INCREMENTAL;
+  } else
+    return GC_CURRENT_MODE_MINOR;
 }
 
 /*****************************************************************************/
@@ -2367,53 +2486,56 @@ static int is_finalizable_page(NewGC *gc, void *p)
   return !!pagemap_find_page(gc->page_maps, p);
 }
 
-static int is_in_gen_half(void *p, NewGC *gc)
-{
-  mpage *page;
-  
-  if (gc->gc_full)
-    return 0;
-
-  page = pagemap_find_page(gc->page_maps, p);
-
-  return (page && (page->generation == AGE_GEN_HALF));
-}
-
 #include "fnls.c"
 
-inline static void mark_finalizer_structs(NewGC *gc)
+inline static void mark_finalizer_structs(NewGC *gc, int lvl)
 {
   Fnl *fnl;
 
-  set_backtrace_source(gc, &gc->gen0_finalizers, BT_ROOT);
-  gcMARK2(gc->gen0_finalizers, gc);
-  for(fnl = gc->gen0_finalizers; fnl; fnl = fnl->next) { 
+  set_backtrace_source(gc, &gc->finalizers[lvl], BT_ROOT);
+  gcMARK2(gc->finalizers[lvl], gc);
+  for(fnl = gc->finalizers[lvl]; fnl; fnl = fnl->next) { 
     set_backtrace_source(gc, fnl, BT_FINALIZER);
     gcMARK2(fnl->data, gc);
-    set_backtrace_source(gc, &gc->gen0_finalizers, BT_ROOT);
+    set_backtrace_source(gc, &gc->finalizers[lvl], BT_ROOT);
     gcMARK2(fnl->next, gc);
   }
-  
-  set_backtrace_source(gc, &gc->run_queue, BT_ROOT);
-  gcMARK2(gc->run_queue, gc);
-  for(fnl = gc->run_queue; fnl; fnl = fnl->next) {
-    set_backtrace_source(gc, fnl, BT_FINALIZER);
-    gcMARK2(fnl->data, gc);
-    gcMARK2(fnl->p, gc);
-    set_backtrace_source(gc, &gc->gen0_finalizers, BT_ROOT);
-    gcMARK2(fnl->next, gc);
+
+  if (lvl == FNL_LEVEL_GEN_0) {
+    set_backtrace_source(gc, &gc->run_queue, BT_ROOT);
+    gcMARK2(gc->run_queue, gc);
+    for(fnl = gc->run_queue; fnl; fnl = fnl->next) {
+      set_backtrace_source(gc, fnl, BT_FINALIZER);
+      gcMARK2(fnl->data, gc);
+      gcMARK2(fnl->p, gc);
+      set_backtrace_source(gc, &gc->run_queue, BT_ROOT);
+      gcMARK2(fnl->next, gc);
+    }
+
+    set_backtrace_source(gc, &gc->inc_run_queue, BT_ROOT);
+    gcMARK2(gc->inc_run_queue, gc);
+    for(fnl = gc->inc_run_queue; fnl; fnl = fnl->next) {
+      set_backtrace_source(gc, fnl, BT_FINALIZER);
+      gcMARK2(fnl->data, gc);
+      gcMARK2(fnl->p, gc);
+      set_backtrace_source(gc, &gc->inc_run_queue, BT_ROOT);
+      gcMARK2(fnl->next, gc);
+    }
   }
-}  
+}
 
 inline static void repair_finalizer_structs(NewGC *gc)
 {
   Fnl *fnl;
 
   /* repair the base parts of the list */
-  gcFIXUP2(gc->gen0_finalizers, gc);
+  gcFIXUP2(gc->finalizers[FNL_LEVEL_GEN_0], gc);
   gcFIXUP2(gc->run_queue, gc);
+  gcFIXUP2(gc->last_in_queue, gc);
+  gcFIXUP2(gc->inc_run_queue, gc);
+  gcFIXUP2(gc->inc_last_in_queue, gc);
   /* then repair the stuff inside them */
-  for(fnl = gc->gen0_finalizers; fnl; fnl = fnl->next) {
+  for(fnl = gc->finalizers[FNL_LEVEL_GEN_0]; fnl; fnl = fnl->next) {
     gcFIXUP2(fnl->data, gc);
     gcFIXUP2(fnl->p, gc);
     gcFIXUP2(fnl->next, gc);
@@ -2424,36 +2546,80 @@ inline static void repair_finalizer_structs(NewGC *gc)
     gcFIXUP2(fnl->p, gc);
     gcFIXUP2(fnl->next, gc);
   }
+  for(fnl = gc->inc_run_queue; fnl; fnl = fnl->next) {
+    gcFIXUP2(fnl->data, gc);
+    gcFIXUP2(fnl->p, gc);
+    gcFIXUP2(fnl->next, gc);
+  }
 }
 
-inline static void check_finalizers(NewGC *gc, int level)
+static void merge_run_queues(NewGC *gc)
 {
-  Fnl *work = GC_resolve2(gc->gen0_finalizers, gc);
+  if (gc->inc_run_queue) {
+    gc->inc_last_in_queue->next = gc->run_queue;
+    gc->run_queue = gc->inc_run_queue;
+    if (!gc->last_in_queue)
+      gc->last_in_queue = gc->inc_last_in_queue;
+    gc->inc_run_queue = NULL;
+    gc->inc_last_in_queue = NULL;
+  }
+}
+
+inline static int check_finalizers(NewGC *gc, int level, int old_gen, int fuel)
+{
+  int lvl = (old_gen
+             ? (FNL_LEVEL_GEN_1 + level - 1)
+             : FNL_LEVEL_GEN_0);
+  Fnl *work = GC_resolve2(gc->finalizers[lvl], gc);
   Fnl *prev = NULL;
+
+  if (!fuel) return 0;
 
   GCDEBUG((DEBUGOUTF, "CFNL: Checking level %i finalizers\n", level));
   while(work) {
+    if (!fuel) {
+      GC_ASSERT(old_gen);
+      return 0;
+    }
+    if (fuel > 0) {
+      fuel -= 4;
+      if (fuel < 0) fuel = 0;
+    }
+    
     if((work->eager_level == level) && !marked(gc, work->p)) {
-      struct finalizer *next = GC_resolve2(work->next, gc);
+      struct finalizer *next;
 
       GCDEBUG((DEBUGOUTF, 
                "CFNL: Level %i finalizer %p on %p queued for finalization.\n",
                work->eager_level, work, work->p));
       set_backtrace_source(gc, work, BT_FINALIZER);
       gcMARK2(work->p, gc);
-      if (prev)
-        prev->next = next;
-      else
-        gc->gen0_finalizers = next;
-      if (next)
-        next->prev = work->prev;
-      work->prev = NULL; /* queue is singly-linked */
-      work->left = NULL;
-      work->right = NULL;
-      if (gc->last_in_queue)
-        gc->last_in_queue = gc->last_in_queue->next = work;
-      else
-        gc->run_queue = gc->last_in_queue = work;
+      if (old_gen) {
+        remove_finalizer(work, lvl, gc);
+        next = gc->finalizers[lvl];
+
+        if (gc->inc_last_in_queue)
+          gc->inc_last_in_queue = gc->inc_last_in_queue->next = work;
+        else
+          gc->inc_run_queue = gc->inc_last_in_queue = work;
+      } else {
+        next = GC_resolve2(work->next, gc);
+        if (prev)
+          prev->next = next;
+        else
+          gc->finalizers[lvl] = next;
+        if (next)
+          next->prev = work->prev;
+        work->prev = NULL; /* queue is singly-linked */
+        work->left = NULL;
+        work->right = NULL;
+
+        if (gc->last_in_queue)
+          gc->last_in_queue = gc->last_in_queue->next = work;
+        else
+          gc->run_queue = gc->last_in_queue = work;
+      }
+
       work->next = NULL;
       --gc->num_fnls;
 
@@ -2463,18 +2629,30 @@ inline static void check_finalizers(NewGC *gc, int level)
       GCDEBUG((DEBUGOUTF, "CFNL: Not finalizing %p (level %i on %p): %p / %i\n",
                work, work->eager_level, work->p, pagemap_find_page(gc->page_maps, work->p),
                marked(work->p)));
-      p = GC_resolve2(work->p, gc);
-      if (p != work->p)
-        work->p = p;
-      prev = work; 
-      work = GC_resolve2(work->next, gc); 
+      if (old_gen) {
+        /* Move to next set of finalizers */
+        GC_ASSERT(lvl < FNL_LEVEL_INC_3);
+        remove_finalizer(work, lvl, gc);
+        add_finalizer(work, lvl+1, gc);
+        work = gc->finalizers[lvl];
+      } else {
+        p = GC_resolve2(work->p, gc);
+        if (p != work->p)
+          work->p = p;
+        prev = work; 
+        work = GC_resolve2(work->next, gc);
+      }
     }
   }
+
+  return fuel;
 }
 
 /*****************************************************************************/
 /* weak boxes and arrays                                                     */
 /*****************************************************************************/
+
+static void check_incremental_unprotect(NewGC *gc, mpage *page);
 
 #define is_marked(gc, p) marked(gc, p)
 #define weak_box_resolve(p) GC_resolve(p)
@@ -2500,7 +2678,24 @@ static int mark_phantom(void *p, struct NewGC *gc)
 {
   Phantom_Bytes *pb = (Phantom_Bytes *)p;
 
-  gc->phantom_count = add_no_overflow(gc->phantom_count, pb->count);
+  if (!gc->during_backpointer) {
+    if (gc->doing_memory_accounting)
+      gc->acct_phantom_count = add_no_overflow(gc->acct_phantom_count, pb->count);
+    else if (gc->inc_gen1)
+      gc->inc_phantom_count = add_no_overflow(gc->inc_phantom_count, pb->count);
+    else {
+      mpage *page = ((gc->use_gen_half && !gc->inc_gen1)
+                     ? pagemap_find_page(gc->page_maps, pb)
+                     : NULL);
+      if (page && (page->generation == AGE_GEN_HALF)) {
+        gc->gen0_phantom_count = add_no_overflow(gc->gen0_phantom_count, pb->count);
+      } else {
+        gc->phantom_count = add_no_overflow(gc->phantom_count, pb->count);
+        if (gc->started_incremental && !gc->gc_full)
+          gc->inc_phantom_count = add_no_overflow(gc->inc_phantom_count, pb->count);
+      }
+    }
+  }
 
   return gcBYTES_TO_WORDS(sizeof(Phantom_Bytes));
 }
@@ -2518,8 +2713,8 @@ static int fixup_phantom(void *p, struct NewGC *gc)
    the standard C stack because we'll blow it; propagation makes for a *very*
    deep stack. So we use this instead. */
 
-#define MARK_STACK_START(ms) ((void **)(void *)&ms[1])
-#define MARK_STACK_END(ms) ((void **)((char *)ms + STACK_PART_SIZE))
+#define MARK_STACK_START(ms) ((void **)(void *)&(ms)[1])
+#define MARK_STACK_END(ms) ((void **)((char *)(ms) + STACK_PART_SIZE))
 
 inline static MarkSegment* mark_stack_create_frame() {
   MarkSegment *mark_frame = (MarkSegment*)ofm_malloc(STACK_PART_SIZE);
@@ -2536,7 +2731,32 @@ inline static void mark_stack_initialize(NewGC *gc) {
   }
 }
 
-static void push_ptr(NewGC *gc, void *ptr)
+static void push_ptr_at(void *ptr, MarkSegment **_mark_stack)
+{
+  MarkSegment *mark_stack = *_mark_stack;
+    
+  /* This happens during propagation if we go past the end of this MarkSegment*/
+  if(mark_stack->top == MARK_STACK_END(mark_stack)) {
+    /* test to see if we already have another stack page ready */
+    if(mark_stack->next) {
+      /* we do, so just use it */
+      mark_stack = mark_stack->next;
+      mark_stack->top = MARK_STACK_START(mark_stack);
+      *_mark_stack = mark_stack;
+    } else {
+      /* we don't, so we need to allocate one */
+      mark_stack->next = mark_stack_create_frame();
+      mark_stack->next->prev = mark_stack;
+      mark_stack = mark_stack->next;
+      *_mark_stack = mark_stack;
+    }
+  }
+
+  /* at this point, we're guaranteed to be good to push pointers */
+  *(mark_stack->top++) = ptr;
+}
+
+static void push_ptr(NewGC *gc, void *ptr, int inc_gen1)
 {
 #if 0
   /* detect a bad pointer when it's pushed, instead of when it's popped: */
@@ -2567,32 +2787,35 @@ static void push_ptr(NewGC *gc, void *ptr)
     }
   }
 #endif
-  
-  /* This happens during propagation if we go past the end of this MarkSegment*/
-  if(gc->mark_stack->top == MARK_STACK_END(gc->mark_stack)) {
-    /* test to see if we already have another stack page ready */
-    if(gc->mark_stack->next) {
-      /* we do, so just use it */
-      gc->mark_stack = gc->mark_stack->next;
-      gc->mark_stack->top = MARK_STACK_START(gc->mark_stack);
-    } else {
-      /* we don't, so we need to allocate one */
-      gc->mark_stack->next = mark_stack_create_frame();
-      gc->mark_stack->next->prev = gc->mark_stack;
-      gc->mark_stack = gc->mark_stack->next;
-    }
-  }
 
-  /* at this point, we're guaranteed to be good to push pointers */
-  *(gc->mark_stack->top++) = ptr;
+  GC_ASSERT(inc_gen1 || !gc->inc_gen1 || gc->doing_memory_accounting);
+  GC_ASSERT(!inc_gen1 || !gc->all_marked_incremental);
+
+  push_ptr_at(ptr, inc_gen1 ? &gc->inc_mark_stack : &gc->mark_stack);
 }
 
-inline static int pop_ptr(NewGC *gc, void **ptr)
+static int mark_stack_is_empty(MarkSegment *mark_stack)
 {
-  if(gc->mark_stack->top == MARK_STACK_START(gc->mark_stack)) {
-    if(gc->mark_stack->prev) {
+  if (!mark_stack)
+    return 1;
+  else if (mark_stack->top == MARK_STACK_START(mark_stack)) {
+    if (mark_stack->prev)
+      return 0;
+    else
+      return 1;
+  } else
+    return 0;
+}
+
+inline static int pop_ptr_at(void **ptr, MarkSegment **_mark_stack)
+{
+  MarkSegment *mark_stack = *_mark_stack;
+  
+  if(mark_stack->top == MARK_STACK_START(mark_stack)) {
+    if(mark_stack->prev) {
       /* if there is a previous page, go to it */
-      gc->mark_stack = gc->mark_stack->prev;
+      mark_stack = mark_stack->prev;
+      *_mark_stack = mark_stack;
     } else {
       /* if there isn't a previous page, then we've hit the bottom of the stack */
       return 0;
@@ -2600,8 +2823,13 @@ inline static int pop_ptr(NewGC *gc, void **ptr)
   }
 
   /* if we get here, we're guaranteed to have data */
-  *ptr = *(--gc->mark_stack->top);
+  *ptr = *(--mark_stack->top);
   return 1;
+}
+
+inline static int pop_ptr(NewGC *gc, void **ptr, int inc_gen1)
+{
+  return pop_ptr_at(ptr, inc_gen1 ? &gc->inc_mark_stack : &gc->mark_stack);
 }
 
 void GC_mark_no_recur(struct NewGC *gc, int enable)
@@ -2615,15 +2843,49 @@ void GC_mark_no_recur(struct NewGC *gc, int enable)
 void GC_retract_only_mark_stack_entry(void *pf, struct NewGC *gc)
 {
   void *p2;
-  if (!pop_ptr(gc, &p2))
+  if (!pop_ptr(gc, &p2, gc->inc_gen1))
     p2 = NULL;
   if (REMOVE_BIG_PAGE_PTR_TAG(p2) != pf) {
     printf("internal error: cannot retract intended pointer: %p != %p\n", p2, pf);
     abort();
   }
-  if (pop_ptr(gc, &p2)) {
+  if (pop_ptr(gc, &p2, gc->inc_gen1)) {
     printf("internal error: mark stack contained pointer other than retracted\n");
     abort();
+  }
+}
+
+static void merge_incremental_mark_stack(NewGC *gc)
+{
+  if(gc->inc_mark_stack) {
+    MarkSegment *inc_mark_stack = gc->inc_mark_stack, *mark_stack = gc->mark_stack;
+    
+    while (inc_mark_stack->next)
+      inc_mark_stack = inc_mark_stack->next;
+    while (mark_stack->prev) mark_stack = mark_stack->prev;
+
+    while (inc_mark_stack
+           && (inc_mark_stack->top == MARK_STACK_START(inc_mark_stack))) {
+      MarkSegment *m = inc_mark_stack;
+      inc_mark_stack = m->prev;
+      if (inc_mark_stack)
+        inc_mark_stack->next = NULL;
+      ofm_free(m, STACK_PART_SIZE);
+    }
+
+    if (inc_mark_stack) {
+      mark_stack->prev = inc_mark_stack;
+      inc_mark_stack->next = mark_stack;
+    }
+
+    gc->inc_mark_stack = NULL;
+  }
+}
+
+static void incremental_mark_stack_initialize(NewGC *gc) {
+  if(!gc->inc_mark_stack) {
+    gc->inc_mark_stack = mark_stack_create_frame();
+    gc->inc_mark_stack->prev = NULL;
   }
 }
 
@@ -2652,20 +2914,29 @@ inline static void clear_stack_pages(NewGC *gc)
   }
 }
 
-inline static void free_all_stack_pages(NewGC *gc)
+static void free_stack_pages_at(MarkSegment *mark_stack)
 {
-  if(gc->mark_stack) {
+  if (mark_stack) {
     MarkSegment *temp;
 
     /* go to the head of the list */
-    for(; gc->mark_stack->prev; gc->mark_stack = gc->mark_stack->prev) {}
+    for (; mark_stack->prev; mark_stack = mark_stack->prev) {}
     /* then go through and clear them out */
-    for(; gc->mark_stack; gc->mark_stack = temp) {
-      temp = gc->mark_stack->next;
-      ofm_free(gc->mark_stack, STACK_PART_SIZE);
+    for (; mark_stack; mark_stack = temp) {
+      temp = mark_stack->next;
+      ofm_free(mark_stack, STACK_PART_SIZE);
     }
   }
+ }
+
+inline static void free_all_stack_pages(NewGC *gc)
+{
+  free_stack_pages_at(gc->mark_stack);
+  gc->mark_stack = NULL;
+  free_stack_pages_at(gc->inc_mark_stack);
+  gc->inc_mark_stack = NULL;
 }
+
 inline static void reset_pointer_stack(NewGC *gc)
 {
   /* go to the head of the list */
@@ -2674,16 +2945,81 @@ inline static void reset_pointer_stack(NewGC *gc)
   gc->mark_stack->top = MARK_STACK_START(gc->mark_stack);
 }
 
-static inline void propagate_marks_worker(NewGC *gc, void *p);
+size_t align_round_up(size_t amt)
+{
+  while (amt & CHECK_ALIGN_MASK)
+    amt++;
+  return amt;
+}
+
+void *GC_malloc_for_incremental(size_t amt)
+{
+  NewGC *gc = GC_get_GC();
+  void *p;
+
+  amt = align_round_up(amt);
+  
+  if (!gc->inc_space || ((gc->inc_space->size - gc->inc_space->pos) < amt)) {
+    size_t sz, pos;
+    pos = align_round_up(sizeof(Inc_Admin_Page));
+    sz = amt + pos;
+    if (sz < 1024)
+      sz = 1024;
+    
+    p = ofm_malloc(sz);
+    
+    ((Inc_Admin_Page *)p)->next = gc->inc_space;
+    gc->inc_space = (Inc_Admin_Page *)p;
+    gc->inc_space->size = sz;
+    gc->inc_space->pos = pos;
+  }
+
+  p = (char *)(gc->inc_space) + gc->inc_space->pos;
+
+  gc->inc_space->pos += amt;
+
+  return p;
+}
+
+static void free_incremental_admin_pages(NewGC *gc)
+{
+  Inc_Admin_Page *p, *next;
+  
+  for (p = gc->inc_space; p; p = next) {
+    next = p->next;
+    ofm_free(p, p->size);
+  }
+
+  gc->inc_space = NULL;
+}
 
 /*****************************************************************************/
 /* MEMORY ACCOUNTING                                                         */
 /*****************************************************************************/
 
+static inline void propagate_marks_worker(NewGC *gc, void *pp, int inc_gen1);
+
 #ifdef NEWGC_BTC_ACCOUNT
 # include "mem_account.c"
-#else
-# define clean_up_thread_list() /* */
+
+static void BTC_clean_up_gen1(NewGC *gc)
+{
+  if (gc->started_incremental && !gc->gc_full) {
+    /* Need to check marked() for old generation, too */
+    GC_ASSERT(!gc->check_gen1);
+    GC_ASSERT(!gc->inc_gen1);
+    gc->check_gen1 = 1;
+    gc->inc_gen1 = 1;
+  }
+
+  BTC_clean_up(gc);
+
+  if (gc->started_incremental && !gc->gc_full) {
+    gc->check_gen1 = 0;
+    gc->inc_gen1 = 0;
+  }
+}
+
 #endif
 
 void GC_register_root_custodian(void *c)
@@ -2788,6 +3124,20 @@ static int designate_modified_gc(NewGC *gc, void *p)
   mpage *page = pagemap_find_page(gc->page_maps, p);
 
   if (gc->no_further_modifications) {
+    if (page && (page->generation >= AGE_GEN_1) && page->mprotected
+        /* Some marking functions, like the one for weak boxes,
+           update the record, so it's ok to make the page writable. */
+        && (gc->inc_gen1
+            /* Finalization in incremental mode can touch otherwise
+               pages that are otherwise unmodified in the current pass: */
+            || gc->fnl_gen1
+            /* Memory accounting can also modify otherwise unadjusted
+               pages after incremental mode: */
+            || (gc->doing_memory_accounting && gc->finished_incremental))) {
+      check_incremental_unprotect(gc, page);
+      gc->unprotected_page = 1; /* for using fuel */
+      return 1;
+    }
     GCPRINT(GCOUTF, "Seg fault (internal error during gc) at %p\n", p);
     return 0;
   }
@@ -2834,11 +3184,11 @@ void GC_allow_master_gc_check() {
 static void NewGCMasterInfo_initialize() {
   int i;
   MASTERGCINFO = ofm_malloc_zero(sizeof(NewGCMasterInfo));
-  MASTERGCINFO->size = 32;
+  MASTERGCINFO->size = 4;
   MASTERGCINFO->alive = 0;
   MASTERGCINFO->ready = 0;
   MASTERGCINFO->signal_fds = (void **)ofm_malloc(sizeof(void*) * MASTERGCINFO->size);
-  for (i=0; i < 32; i++ ) {
+  for (i=0; i < MASTERGCINFO->size; i++ ) {
     MASTERGCINFO->signal_fds[i] = (void *)REAPED_SLOT_AVAILABLE;
   }
   mzrt_rwlock_create(&MASTERGCINFO->cangc);
@@ -3007,13 +3357,14 @@ static intptr_t NewGCMasterInfo_find_free_id() {
     void **new_signal_fds;
 
     size = MASTERGCINFO->size * 2;
-    MASTERGCINFO->alive++;
     new_signal_fds = ofm_malloc(sizeof(void*) * size);
     memcpy(new_signal_fds, MASTERGCINFO->signal_fds, sizeof(void*) * MASTERGCINFO->size);
 
     for (i = MASTERGCINFO->size; i < size; i++ ) {
       new_signal_fds[i] = (void *)REAPED_SLOT_AVAILABLE;
     }
+
+    ofm_free(MASTERGCINFO->signal_fds, sizeof(void*) * MASTERGCINFO->size);
 
     MASTERGCINFO->signal_fds = new_signal_fds;
     MASTERGCINFO->size = size;
@@ -3150,6 +3501,8 @@ static NewGC *init_type_tags_worker(NewGC *inheritgc, NewGC *parentgc,
   GC_add_roots(&gc->park_fsave, (char *)&gc->park_fsave + sizeof(gc->park_fsave) + 1);
   GC_add_roots(&gc->park_isave, (char *)&gc->park_isave + sizeof(gc->park_isave) + 1);
 
+  gc->weak_incremental_done = WEAK_INCREMENTAL_DONE_1;
+
   return gc;
 }
 
@@ -3210,7 +3563,6 @@ void GC_destruct_child_gc() {
 
   free_child_gc();
 }
-
 
 static inline void save_globals_to_gc(NewGC *gc) {
   gc->saved_GC_variable_stack       = GC_variable_stack;
@@ -3312,6 +3664,24 @@ void GC_gcollect_minor(void)
   collect_now(gc, 0, 1);
 }
 
+void GC_request_incremental_mode(void)
+{
+  if (!never_collect_incremental_on_minor) {
+    NewGC *gc = GC_get_GC();
+
+    /* The request will expire gradually, so that an extra major GC will
+       be triggered if incremental mode hasn't been requested recently
+       enough: */
+    gc->incremental_requested = 8;
+  }
+}
+
+void GC_set_incremental_mode(int on)
+{
+  always_collect_incremental_on_minor = (on > 0);
+  never_collect_incremental_on_minor = !on;
+}
+
 void GC_enable_collection(int on)
 {
   NewGC *gc = GC_get_GC();
@@ -3359,6 +3729,7 @@ intptr_t GC_get_memory_use(void *o)
   }
 #endif
   amt = add_no_overflow(gen0_size_in_use(gc), gc->memory_in_use);
+  amt = add_no_overflow(amt, gc->gen0_phantom_count);
 #ifdef MZ_USE_PLACES
   mzrt_mutex_lock(gc->child_total_lock);
   amt = add_no_overflow(amt, gc->child_gc_total);
@@ -3371,6 +3742,50 @@ intptr_t GC_get_memory_use(void *o)
 /*****************************************************************************/
 /* Garbage collection proper ... and all the mess therein                    */
 /*****************************************************************************/
+
+static void check_incremental_unprotect(NewGC *gc, mpage *page)
+{
+  /* must be due to incremental GC */
+  GC_ASSERT(!gc->gc_full || gc->finished_incremental);
+
+  if (page->mprotected) {
+    page->mprotected = 0;
+    mmu_write_unprotect_page(gc->mmu, page->addr, real_page_size(page), page_mmu_type(page), &page->mmu_src_block);
+    page->reprotect_next = gc->reprotect_next;
+    gc->reprotect_next = page;
+    page->reprotect = 1;
+  }
+}
+
+static void page_newly_marked_on(NewGC *gc, mpage *page, int is_a_master_page, int inc_gen1)
+{
+  if (inc_gen1) {
+    GC_ASSERT(!page->inc_marked_on);
+    /* If this page isn't already marked as old, it must be a medium page whose
+       generation will be updated in the clean-up phase */
+    GC_ASSERT((page->generation >= AGE_GEN_1) || (page->size_class == SIZE_CLASS_MED_PAGE));
+    GC_ASSERT(!gc->finished_incremental || (!gc->accounted_incremental && gc->really_doing_accounting));
+    GC_ASSERT(!page->non_dead_as_mark);
+    page->inc_marked_on = 1;
+    page->inc_modified_next = gc->inc_modified_next;
+    gc->inc_modified_next = page;
+    if (!gc->inc_repair_next)
+      gc->inc_repair_next = page;
+  } else {
+    GC_ASSERT(!page->marked_on);
+    page->marked_on = 1;
+    if (!is_a_master_page && !page->marked_from) {
+      page->modified_next = gc->modified_next;
+      gc->modified_next = page;
+    }
+  }
+}
+
+static void page_marked_on(NewGC *gc, mpage *page, int is_a_master_page, int inc_gen1)
+{
+  if (inc_gen1 ? !page->inc_marked_on : !page->marked_on)
+    page_newly_marked_on(gc, page, is_a_master_page, inc_gen1);
+}
 
 static void promote_marked_gen0_big_page(NewGC *gc, mpage *page) {
   page->generation = AGE_GEN_1;
@@ -3397,11 +3812,11 @@ static void promote_marked_gen0_big_page(NewGC *gc, mpage *page) {
 #endif
 }
 
-static void mark_recur_or_push_ptr(struct NewGC *gc, void *p, int is_a_master_page)
+static void mark_recur_or_push_ptr(struct NewGC *gc, void *p, int is_a_master_page, int inc_gen1)
 {
   objhead *ohead = OBJPTR_TO_OBJHEAD(p);
 
-  if ((gc->mark_depth < MAX_RECUR_MARK_DEPTH) && !is_a_master_page) {
+  if ((gc->mark_depth < MAX_RECUR_MARK_DEPTH) && !is_a_master_page && !inc_gen1) {
     switch (ohead->type) {
     case PAGE_TAGGED:
       {
@@ -3431,7 +3846,7 @@ static void mark_recur_or_push_ptr(struct NewGC *gc, void *p, int is_a_master_pa
     }
   }
 
-  push_ptr(gc, p);
+  push_ptr(gc, p, inc_gen1);
 }
 
 /* This is the first mark routine. It's a bit complicated. */
@@ -3446,7 +3861,7 @@ void GC_mark2(void *pp, struct NewGC *gc)
     return;
   }
 
-  if(!(page = pagemap_find_page_for_marking(gc, p))) {
+  if(!(page = pagemap_find_page_for_marking(gc, p, gc->mark_gen1))) {
 #ifdef MZ_USE_PLACES
     if (gc->major_places_gc && (page = pagemap_find_page(MASTERGC->page_maps, p))) {
       is_a_master_page = 1;
@@ -3472,7 +3887,9 @@ void GC_mark2(void *pp, struct NewGC *gc)
   }
 #endif
 
-  GC_ASSERT(!page->marked_from);
+  GC_ASSERT(!page->marked_from
+            || (gc->mark_gen1 && !gc->gc_full)
+            || (gc->gc_full && gc->during_backpointer));
 
   /* MED OR BIG PAGE */
   if (page->size_class) {
@@ -3480,6 +3897,7 @@ void GC_mark2(void *pp, struct NewGC *gc)
     if (page->size_class > SIZE_CLASS_MED_PAGE) {
       /* This is a bigpage. The first thing we do is see if its been marked
          previously */
+      int inc_gen1;
       if (page->size_class != SIZE_CLASS_BIG_PAGE) {
         GCDEBUG((DEBUGOUTF, "Not marking %p on big %p (already marked)\n", p, page));
         RELEASE_PAGE_LOCK(is_a_master_page, page);
@@ -3488,42 +3906,65 @@ void GC_mark2(void *pp, struct NewGC *gc)
       /* in this case, it has not. So we want to mark it, first off. */
       page->size_class = SIZE_CLASS_BIG_PAGE_MARKED;
 
-      /* if this is in the nursery, we want to move it out of the nursery */
-      if((page->generation == AGE_GEN_0) && !is_a_master_page)
-        promote_marked_gen0_big_page(gc, page);
+      GC_ASSERT((page->generation < AGE_GEN_1)
+                || is_a_master_page
+                || (!gc->all_marked_incremental && !gc->finished_incremental));
 
-      GC_ASSERT(!page->marked_on);
-      page->marked_on = 1;
-      if (!is_a_master_page) {
-        page->modified_next = gc->modified_next;
-        gc->modified_next = page;
-      }
+      /* if this is in the nursery, we want to move it out of the nursery */
+      if((page->generation == AGE_GEN_0) && !is_a_master_page) {
+        GC_ASSERT(!gc->inc_gen1);
+        promote_marked_gen0_big_page(gc, page);
+        inc_gen1 = 0;
+      } else if (gc->gc_full || is_a_master_page)
+        inc_gen1 = 0;
+      else
+        inc_gen1 = 1;
+
+      page_newly_marked_on(gc, page, is_a_master_page, inc_gen1);
 
       record_backtrace(gc, page, BIG_PAGE_TO_OBJECT(page));
       GCDEBUG((DEBUGOUTF, "Marking %p on big page %p\n", p, page));
       /* Finally, we want to add this to our mark queue, so we can 
          propagate its pointers */
-      push_ptr(gc, TAG_AS_BIG_PAGE_PTR(p));
+      push_ptr(gc, TAG_AS_BIG_PAGE_PTR(p), inc_gen1);
     } else {
       /* A medium page. */
       objhead *info = MED_OBJHEAD(p, page->obj_size);
+      int inc_gen1;
       if (info->mark) {
         GCDEBUG((DEBUGOUTF,"Not marking %p (already marked)\n", p));
+        GC_ASSERT(!page->non_dead_as_mark);
         RELEASE_PAGE_LOCK(is_a_master_page, page);
         return;
       }
-      info->mark = 1;
-      if (!page->marked_on) {
-        page->marked_on = 1;
-        if (!is_a_master_page) {
-          page->modified_next = gc->modified_next;
-          gc->modified_next = page;
+      if (page->non_dead_as_mark) {
+        GC_ASSERT(gc->mark_gen1);
+        GC_ASSERT(page->generation >= AGE_GEN_1);
+        GC_ASSERT(!info->dead);
+        RELEASE_PAGE_LOCK(is_a_master_page, page);
+        return;
+      }
+      GC_ASSERT((page->generation < AGE_GEN_1)
+                || is_a_master_page
+                || (!gc->all_marked_incremental && !gc->finished_incremental));
+      if ((page->generation == AGE_GEN_0) || gc->gc_full) {
+        GC_ASSERT(!gc->inc_gen1);
+        inc_gen1 = 0;
+      } else {
+        if (is_a_master_page)
+          inc_gen1 = 0;
+        else {
+          GC_ASSERT(!gc->all_marked_incremental && !gc->finished_incremental);
+          inc_gen1 = 1;
+          check_incremental_unprotect(gc, page);
         }
       }
+      info->mark = 1;
+      page_marked_on(gc, page, is_a_master_page, inc_gen1);
       p = OBJHEAD_TO_OBJPTR(info);
       backtrace_new_page_if_needed(gc, page);
       record_backtrace(gc, page, p);
-      mark_recur_or_push_ptr(gc, p, is_a_master_page);
+      mark_recur_or_push_ptr(gc, p, is_a_master_page, inc_gen1);
     }
   } 
   /* SMALL_PAGE from gen0 or gen1 */
@@ -3532,36 +3973,52 @@ void GC_mark2(void *pp, struct NewGC *gc)
 
     if(ohead->mark) {
       GCDEBUG((DEBUGOUTF,"Not marking %p (already marked)\n", p));
+      GC_ASSERT(!page->non_dead_as_mark);
       RELEASE_PAGE_LOCK(is_a_master_page, page);
       if (ohead->moved)
         *(void **)pp = *(void **)p;
       return;
     }
 
+    GC_ASSERT((page->generation < AGE_GEN_1)
+              || is_a_master_page
+              || (!gc->all_marked_incremental && !gc->finished_incremental));
+
     /* what we do next depends on whether this is a gen0, gen_half, or gen1 
        object */
     if (page->generation >= AGE_GEN_1) {
       /* this is a generation 1 object. This means we are not going
-         to move it, we don't have to check to see if it's an atomic
+         to move it now, we don't have to check to see if it's an atomic
          object masquerading as a tagged object, etc. So all we do
          is add the pointer to the mark queue and note on the page
-         that we marked something on it*/
+         that we marked something on it */
+      int inc_gen1;
+      if (page->non_dead_as_mark) {
+        GC_ASSERT(gc->mark_gen1);
+        GC_ASSERT(page->generation >= AGE_GEN_1);
+        GC_ASSERT(!ohead->dead);
+        GC_ASSERT(!ohead->moved);
+        RELEASE_PAGE_LOCK(is_a_master_page, page);
+        return;
+      }
       if ((NUM(page->addr) + page->scan_boundary) <= NUM(p)) {
+        GC_ASSERT(!gc->inc_gen1);
         GCDEBUG((DEBUGOUTF, "Marking %p (leaving alone)\n", p));
-        ohead->mark = 1;
-        if (!page->marked_on) {
-          page->marked_on = 1;
-          if (!is_a_master_page) {
-            page->modified_next = gc->modified_next;
-            gc->modified_next = page;
-          }
-        }
-        page->live_size += ohead->size;
-        record_backtrace(gc, page, p);
-        mark_recur_or_push_ptr(gc, p, is_a_master_page);
+        inc_gen1 = 0;
       } else {
         GCDEBUG((DEBUGOUTF, "Not marking %p (it's old; %p / %i)\n", p, page, page->scan_boundary));
+        if (is_a_master_page) {
+          inc_gen1 = 0;
+        } else {
+          GC_ASSERT(!gc->all_marked_incremental && !gc->finished_incremental);
+          check_incremental_unprotect(gc, page);
+          inc_gen1 = 1;
+        }
       }
+      ohead->mark = 1;
+      page_marked_on(gc, page, is_a_master_page, inc_gen1);
+      record_backtrace(gc, page, p);
+      mark_recur_or_push_ptr(gc, p, is_a_master_page, inc_gen1);
     } else {
       /* this is a generation 0 or 1/2 object. This means that we do have
          to do all of the above. Fun, fun, fun. */
@@ -3570,6 +4027,8 @@ void GC_mark2(void *pp, struct NewGC *gc)
       size_t size;
       objhead *newplace;
       int new_type;
+
+      GC_ASSERT(!gc->inc_gen1);
 
       /* first check to see if this is an atomic object masquerading
          as a tagged object; if it is, then convert it */
@@ -3594,13 +4053,15 @@ void GC_mark2(void *pp, struct NewGC *gc)
         }
         newplace = PTR(NUM(work->addr) + work->size);
         work->size += size;
+        work->live_size += gcBYTES_TO_WORDS(size);
         new_type = 1; /* i.e., in gen 1/2 */
       } else {
         /* now set us up for the search for where to put this thing in gen 1 */
         work = gc->gen1_pages[type];
 
         /* search for a page with the space to spare */
-        if (work && ((work->size + size) >= APAGE_SIZE))
+        if (work && (((work->size + size) >= APAGE_SIZE)
+                     || work->non_dead_as_mark))
           work = NULL;
 
         /* now either fetch where we're going to put this object or make
@@ -3609,7 +4070,7 @@ void GC_mark2(void *pp, struct NewGC *gc)
           if (!work->marked_on) {
             work->marked_on = 1;
             if (!work->marked_from) {
-              gc->memory_in_use -= work->size;
+              gc->memory_in_use -= gcWORDS_TO_BYTES(work->live_size);
               work->modified_next = gc->modified_next;
               gc->modified_next = work;
             }
@@ -3645,9 +4106,12 @@ void GC_mark2(void *pp, struct NewGC *gc)
 
         /* update the size */
         work->size += size;
+        work->live_size += gcBYTES_TO_WORDS(size);
         work->has_new = 1;
         new_type = 0; /* i.e., not in gen 1/2 */
       }
+
+      gc->copy_count += size;
 
       /* transfer the object */
       ohead->mark = 1; /* mark is copied to newplace, too */
@@ -3676,7 +4140,7 @@ void GC_mark2(void *pp, struct NewGC *gc)
         GCDEBUG((DEBUGOUTF,"Marking %p (moved to %p on page %p)\n", p, newp, work));
         *(void**)p = newp;
         *(void **)pp = newp;
-        mark_recur_or_push_ptr(gc, newp, is_a_master_page);
+        mark_recur_or_push_ptr(gc, newp, is_a_master_page, 0);
       }
     }
   }
@@ -3689,37 +4153,8 @@ void GC_mark(void *pp)
   GC_mark2(pp, GC_get_GC());
 }
 
-/* this is the second mark routine. It's not quite as complicated. */
-/* this is what actually does mark propagation */
-static inline void propagate_marks_worker(NewGC *gc, void *pp)
+static inline void mark_traverse_object(NewGC *gc, void **start, void **end, int alloc_type)
 {
-  void **start, **end;
-  int alloc_type;
-  void *p;
-
-  /* we can assume a lot here -- like it's a valid pointer with a page --
-     because we vet bad cases out in GC_mark, above */
-  if (IS_BIG_PAGE_PTR(pp)) {
-    mpage *page;
-    p = REMOVE_BIG_PAGE_PTR_TAG(pp);
-    page = pagemap_find_page(gc->page_maps, p);
-#ifdef MZ_USE_PLACES
-    if (!page && gc->major_places_gc) {
-      page = pagemap_find_page(MASTERGC->page_maps, p);
-    }
-#endif
-    start = PPTR(BIG_PAGE_TO_OBJECT(page));
-    alloc_type = page->page_type;
-    end = PAGE_END_VSS(page);
-  } else {
-    objhead *info;
-    p = pp;
-    info = OBJPTR_TO_OBJHEAD(p);
-    start = p;
-    alloc_type = info->type;
-    end = PPTR(info) + info->size;
-  }
-
   set_backtrace_source(gc, start, alloc_type);
 
   switch(alloc_type) {
@@ -3751,21 +4186,108 @@ static inline void propagate_marks_worker(NewGC *gc, void *pp)
   }
 }
 
-static void propagate_marks(NewGC *gc) 
+/* this is the second mark routine. It's not quite as complicated. */
+/* this is what actually does mark propagation */
+static inline void propagate_marks_worker(NewGC *gc, void *pp, int inc_gen1)
 {
+  void **start, **end;
+  int alloc_type;
   void *p;
 
-  while(pop_ptr(gc, &p)) {
-    GCDEBUG((DEBUGOUTF, "Popped pointer %p\n", p));
-    propagate_marks_worker(gc, p);
+  /* we can assume a lot here -- like it's a valid pointer with a page --
+     because we vet bad cases out in GC_mark, above */
+  if (IS_BIG_PAGE_PTR(pp)) {
+    mpage *page;
+    p = REMOVE_BIG_PAGE_PTR_TAG(pp);
+    page = pagemap_find_page(gc->page_maps, p);
+#ifdef MZ_USE_PLACES
+    if (!page && gc->major_places_gc) {
+      page = pagemap_find_page(MASTERGC->page_maps, p);
+    }
+#endif
+    start = PPTR(BIG_PAGE_TO_OBJECT(page));
+    alloc_type = page->page_type;
+    end = PAGE_END_VSS(page);
+    GC_ASSERT(inc_gen1 || !page->mprotected || gc->doing_memory_accounting);
+  } else {
+    objhead *info;
+    p = pp;
+    info = OBJPTR_TO_OBJHEAD(p);
+    start = p;
+    alloc_type = info->type;
+    end = PPTR(info) + info->size;
   }
+
+  gc->traverse_count += (end - start);
+
+  mark_traverse_object(gc, start, end, alloc_type);
+}
+
+static void propagate_marks(NewGC *gc)
+{
+  void *p;
+  int prop_count = 0;
+
+  while(pop_ptr(gc, &p, 0)) {
+    prop_count++;
+    GCDEBUG((DEBUGOUTF, "Popped pointer %p\n", p));
+    propagate_marks_worker(gc, p, 0);
+  }
+
+  gc->prop_count += prop_count;
 }
 
 static void propagate_marks_plus_ephemerons(NewGC *gc) 
 {
   do {
     propagate_marks(gc);
-  } while (mark_ready_ephemerons(gc));
+  } while (mark_ready_ephemerons(gc, 0));
+}
+
+static int propagate_incremental_marks(NewGC *gc, int do_emph, int fuel)
+{
+  int save_inc, save_check, init_fuel = fuel;
+
+  if (!fuel) return 0;
+  if (!gc->inc_mark_stack) return fuel;
+
+  GC_ASSERT(gc->mark_gen1);
+    
+  save_inc = gc->inc_gen1;
+  save_check = gc->check_gen1;
+  
+  gc->inc_gen1 = 1;
+  gc->check_gen1 = 1;
+
+  do {
+    void *p;
+    while (fuel && pop_ptr(gc, &p, 1)) {
+      GCDEBUG((DEBUGOUTF, "Popped incremental pointer %p\n", p));
+      gc->copy_count = 0;
+      gc->traverse_count = 0;
+
+      propagate_marks_worker(gc, p, 1);
+
+      if (fuel > 0) {
+        fuel--;
+        fuel -= (gc->copy_count >> 2);
+        fuel -= (gc->traverse_count >> 2);
+        if (gc->unprotected_page) {
+          gc->unprotected_page = 0;
+          fuel -= 100;
+        }
+        if (fuel < 0)
+          fuel = 0;
+      }
+    }
+  } while (do_emph && fuel && mark_ready_ephemerons(gc, 1));
+
+  gc->inc_prop_count += (init_fuel - fuel);
+
+  gc->inc_gen1 = save_inc;
+  gc->check_gen1 = save_check;
+
+  return fuel;
 }
 
 #ifdef MZ_USE_PLACES
@@ -3786,7 +4308,7 @@ static void promote_marked_gen0_big_pages(NewGC *gc)
 
 void *GC_resolve2(void *p, NewGC *gc)
 {
-  mpage *page = pagemap_find_page_for_marking(gc, p);
+  mpage *page = pagemap_find_page_for_marking(gc, p, gc->check_gen1);
   objhead *info;
 
   if (!page || (page->size_class > SIZE_CLASS_SMALL_PAGE))
@@ -3809,6 +4331,11 @@ void *GC_fixup_self(void *p)
   return p;
 }
 
+#define CHECK_NO_MISSED_FIXUPS 0
+#if CHECK_NO_MISSED_FIXUPS
+static int disallow_fixups;
+#endif
+
 void GC_fixup2(void *pp, struct NewGC *gc)
 {
   mpage *page;
@@ -3817,7 +4344,7 @@ void GC_fixup2(void *pp, struct NewGC *gc)
   if (!p || (NUM(p) & 0x1))
     return;
 
-  page = pagemap_find_page_for_marking(gc, p);
+  page = pagemap_find_page_for_marking(gc, p, gc->check_gen1);
 
   if (page) {
     objhead *info;
@@ -3825,9 +4352,13 @@ void GC_fixup2(void *pp, struct NewGC *gc)
     if (page->size_class > SIZE_CLASS_SMALL_PAGE) return;
 
     info = OBJPTR_TO_OBJHEAD(p);
-    /* assert: info->moved => info->mark */
-    /*         !gc->gc_full => info->moved */
+    GC_ASSERT(!info->dead);
     if (info->moved) {
+#if CHECK_NO_MISSED_FIXUPS
+      GC_ASSERT(!disallow_fixups);
+#endif
+      GC_ASSERT(!OBJPTR_TO_OBJHEAD(*(void **)p)->dead);
+      GC_ASSERT(!OBJPTR_TO_OBJHEAD(*(void **)p)->moved);
       *(void**)pp = *(void**)p;
     } else {
       GCDEBUG((DEBUGOUTF, "Not repairing %p from %p (not moved)\n",p,pp));
@@ -3853,10 +4384,14 @@ int GC_is_on_allocated_page(void *p)
   return !!pagemap_find_page(gc->page_maps, p);
 }
 
-
 int GC_is_partial(struct NewGC *gc)
 {
-  return !gc->gc_full || gc->doing_memory_accounting;
+  return (!gc->gc_full && !gc->fnl_gen1) || gc->doing_memory_accounting;
+}
+
+int GC_started_incremental(struct NewGC *gc)
+{
+  return gc->started_incremental;
 }
 
 /*****************************************************************************/
@@ -4145,7 +4680,7 @@ void *GC_next_tagged_start(void *p)
 /* garbage collection                                                        */
 /*****************************************************************************/
 
-static void reset_gen1_pages_live_and_scan_boundaries(NewGC *gc)
+static void reset_gen1_pages_scan_boundaries_and_writable(NewGC *gc)
 {
   mpage *work;
   int i;
@@ -4161,7 +4696,6 @@ static void reset_gen1_pages_live_and_scan_boundaries(NewGC *gc)
           mmu_queue_write_unprotect_range(gc->mmu, work->addr, real_page_size(work), page_mmu_type(work), &work->mmu_src_block);
         }
       }
-      work->live_size = 0;
       work->scan_boundary = PREFIX_SIZE;
     }
   }
@@ -4180,6 +4714,19 @@ static void reset_gen1_pages_live_and_scan_boundaries(NewGC *gc)
   mmu_flush_write_unprotect_ranges(gc->mmu);
 }
 
+static inline void mark_traverse_object_no_gen1(NewGC *gc, void **start, void **end, int alloc_type)
+{
+  if (gc->mark_gen1) {
+    /* In incremental mode, for a backpointer traversal of an unmarked
+       object, don't mark referenced old-generation objects; do that
+       only when the old-generation object is marked (if ever). */
+    gc->mark_gen1 = 0;
+    mark_traverse_object(gc, start, end, alloc_type);
+    gc->mark_gen1 = 1;
+  } else
+    mark_traverse_object(gc, start, end, alloc_type);
+}
+
 static void mark_backpointers(NewGC *gc)
 {
   /* For a minor collection, we need to mark any pointers that point
@@ -4192,73 +4739,139 @@ static void mark_backpointers(NewGC *gc)
 
      When a generation-1 page is added to the `modified_next` chain,
      it's old size is deducted from `memory_is_use`, and its size will
-     be added back during the repair pahse. */
+     be added back during the repair pahse.
 
-  if (!gc->gc_full) {
-    mpage *work;
-    int traversed = 0;
+     For a major collection, we still to to traverse back-pointered
+     pages if any major-collection work was performed incrementally.
+     In that case, we use a special marking mode that indicates for
+     re-marking an object that has already been marked for a full
+     GC. */
 
-    for (work = gc->modified_next; work; work = work->modified_next) {
-      GC_ASSERT(work->back_pointers);
+  mpage *work, *orig_modified_next;
+  int traversed = 0;
 
-      if (work->mprotected) {
-        /* expected only if QUEUED_MPROTECT_INFECTS_XXX && AGE_GEN_0_TO_GEN_HALF(gc) */
-        work->mprotected = 0;
-        mmu_write_unprotect_page(gc->mmu, work->addr, real_page_size(work), page_mmu_type(work), &work->mmu_src_block);
-      }
+  if (gc->gc_full && !gc->started_incremental) {
+    /* no need to traverse backpointers, because we're going to
+       traverse the whole heap */
+    gc->modified_next = NULL;
+    return;
+  }
 
-      work->marked_from = 1;
+  GC_mark_no_recur(gc, 1);
+  gc->during_backpointer = 1;
 
-      if (work->size_class == SIZE_CLASS_BIG_PAGE) {
-        /* must be a big page */
-        work->size_class = SIZE_CLASS_BIG_PAGE_MARKED;
-        push_ptr(gc, TAG_AS_BIG_PAGE_PTR(BIG_PAGE_TO_OBJECT(work)));
-        gc->memory_in_use -= work->size;
-      } else if (work->size_class == SIZE_CLASS_SMALL_PAGE) {
-        /* small page */
-        void **start = PAGE_START_VSS(work);
-        void **end = PAGE_END_VSS(work);
+  /* Set `marked_from` on all pages so that we don't try to
+     re-add them to the `modified_next` chain while marking: */
+  for (work = gc->modified_next; work; work = work->modified_next) {
+    GC_ASSERT(work->back_pointers);
+    GC_ASSERT(!work->marked_from);
+    work->marked_from = 1;
+  }
 
-        GC_ASSERT(work->page_type != PAGE_ATOMIC);
+  orig_modified_next = gc->modified_next;
+  if (gc->gc_full)
+    gc->modified_next = NULL;
+  
+  for (work = orig_modified_next; work; work = work->modified_next) {
+    GC_ASSERT(work->back_pointers);
+    GC_ASSERT(work->marked_from);
 
-        while (start < end) {
-          objhead *info = (objhead *)start;
-          if (!info->dead) {
-            info->mark = 1;
-            push_ptr(gc, OBJHEAD_TO_OBJPTR(start));
-          }
-          start += info->size;
-        }
-        work->scan_boundary = PREFIX_SIZE;
-        gc->memory_in_use -= work->size;
-      } else {
-        /* medium page */
-        void **start = PPTR(NUM(work->addr) + PREFIX_SIZE);
-        void **end = PPTR(NUM(work->addr) + APAGE_SIZE - work->obj_size);
-
-        GC_ASSERT(work->size_class == SIZE_CLASS_MED_PAGE);
-
-        while (start <= end) {
-          objhead *info = (objhead *)start;
-          if (!info->dead) {
-            info->mark = 1;
-            push_ptr(gc, OBJHEAD_TO_OBJPTR(info));
-          }
-          start += info->size;
-        }
-
-        gc->memory_in_use -= work->live_size;
-      }
-
-      traversed++;
+    if (work->mprotected) {
+      /* expected only if QUEUED_MPROTECT_INFECTS_XXX && AGE_GEN_0_TO_GEN_HALF(gc) */
+      work->mprotected = 0;
+      mmu_write_unprotect_page(gc->mmu, work->addr, real_page_size(work), page_mmu_type(work), &work->mmu_src_block);
     }
 
-    gc->minor_old_traversed += traversed;
-    gc->minor_old_skipped += (gc->num_gen1_pages - traversed);
-  } else {
-    /* reset modified chain, since we assume no kept pages up front */
-    gc->modified_next = NULL;
+    if (work->size_class >= SIZE_CLASS_BIG_PAGE) {
+      /* must be a big page */
+      if (work->size_class == SIZE_CLASS_BIG_PAGE_MARKED)
+        mark_traverse_object(gc, PPTR(BIG_PAGE_TO_OBJECT(work)), PAGE_END_VSS(work), work->page_type);
+      else if (!gc->gc_full && !gc->all_marked_incremental)
+        mark_traverse_object_no_gen1(gc, PPTR(BIG_PAGE_TO_OBJECT(work)), PAGE_END_VSS(work), work->page_type);
+      gc->memory_in_use -= work->size;
+    } else if (work->size_class == SIZE_CLASS_SMALL_PAGE) {
+      /* small page */
+      void **start = PAGE_START_VSS(work);
+      void **end = (gc->gc_full
+                    ? PAGE_END_VSS(work)
+                    : (void**)((char *)work->addr + work->scan_boundary));
+
+      GC_ASSERT(work->page_type != PAGE_ATOMIC);
+      
+      while (start < end) {
+        objhead *info = (objhead *)start;
+        if (!info->dead) {
+          if (info->mark || work->non_dead_as_mark)
+            mark_traverse_object(gc, PPTR(OBJHEAD_TO_OBJPTR(start)), PPTR(info) + info->size, info->type);
+          else if ((!gc->gc_full && !gc->all_marked_incremental)
+                   /* Totally ad hoc; supports closure prefixes */
+                   || ((info->type == PAGE_TAGGED)
+                       && gc->treat_as_incremental_mark_hook
+                       && (gc->treat_as_incremental_mark_tag == *(short *)OBJHEAD_TO_OBJPTR(start))
+                       && gc->treat_as_incremental_mark_hook(OBJHEAD_TO_OBJPTR(start))))
+            mark_traverse_object_no_gen1(gc, PPTR(OBJHEAD_TO_OBJPTR(start)), PPTR(info) + info->size, info->type);
+        }
+        start += info->size;
+      }
+      gc->memory_in_use -= gcWORDS_TO_BYTES(work->live_size);
+    } else {
+      /* medium page */
+      void **start = PPTR(NUM(work->addr) + PREFIX_SIZE);
+      void **end = PPTR(NUM(work->addr) + APAGE_SIZE - work->obj_size);
+
+      GC_ASSERT(work->size_class == SIZE_CLASS_MED_PAGE);
+
+      while (start <= end) {
+        objhead *info = (objhead *)start;
+        if (!info->dead) {
+          if (info->mark || work->non_dead_as_mark)
+            mark_traverse_object(gc, PPTR(OBJHEAD_TO_OBJPTR(start)), PPTR(info) + info->size, info->type);
+          else if (!gc->gc_full && !gc->all_marked_incremental)
+            mark_traverse_object_no_gen1(gc, PPTR(OBJHEAD_TO_OBJPTR(start)), PPTR(info) + info->size, info->type);
+        }
+        start += info->size;
+      }
+
+      gc->memory_in_use -= gcWORDS_TO_BYTES(work->live_size);
+    }
+
+    traversed++;
   }
+
+  if (gc->gc_full) {
+    /* move any marked_on backpointer page to new modified_next chain: */
+    mpage *next;
+    for (work = orig_modified_next; work; work = next) {
+      GC_ASSERT(work->back_pointers);
+      GC_ASSERT(work->marked_from);
+      next = work->modified_next;
+      if (work->marked_on) {
+        work->modified_next = gc->modified_next;
+        gc->modified_next = work;
+      }
+      work->marked_from = 0;
+    }
+    
+    /* Move incremental modified pages to the `modified_next` chain: */
+    for (work = gc->inc_modified_next; work; work = work->inc_modified_next) {
+      GC_ASSERT(work->inc_marked_on);
+      work->inc_marked_on = 0;
+      if (!work->marked_on) {
+        work->marked_on = 1;
+        work->modified_next = gc->modified_next;
+        gc->modified_next = work;
+      }
+    }
+    
+    gc->inc_modified_next = NULL;
+    gc->inc_repair_next = NULL;
+  }
+
+  gc->during_backpointer = 0;
+  GC_mark_no_recur(gc, 0);
+
+  gc->minor_old_traversed += traversed;
+  gc->minor_old_skipped += (gc->num_gen1_pages - traversed);
 }
 
 mpage *allocate_compact_target(NewGC *gc, mpage *work)
@@ -4309,7 +4922,11 @@ inline static void do_heap_compact(NewGC *gc)
 {
   int i, compact_count = 0, noncompact_count = 0;
   int tic_tock = gc->num_major_collects % 2;
-  
+
+  /* Cannot compact old generation if we've finished marking: */
+  if (gc->all_marked_incremental)
+    return;
+
   mmu_prep_for_compaction(gc->mmu);
 
   for(i = 0; i < PAGE_BIG; i++) {
@@ -4346,10 +4963,13 @@ inline static void do_heap_compact(NewGC *gc)
           avail = gcBYTES_TO_WORDS(APAGE_SIZE - npage->size);
           newplace = PPTR(NUM(npage->addr) + npage->size);
 
+          GC_ASSERT(!work->non_dead_as_mark);
+
           while (start < end) {
             objhead *info = (objhead *)start;
 
             if (info->mark) {
+              GC_ASSERT(!info->moved);
               while (avail <= info->size) {
                 npage->size = NUM(newplace) - NUM(npage->addr);
                 do {
@@ -4405,58 +5025,6 @@ inline static void do_heap_compact(NewGC *gc)
       }
     }
   }
-}
-
-static int repair_mixed_page(NewGC *gc, mpage *page, void **end, int need_fixup)
-{
-  void **start = PPTR(NUM(page->addr) + PREFIX_SIZE);
-  Fixup2_Proc *fixup_table = gc->fixup_table;
-  int non_dead = 0;
-
-  while (start <= end) {
-    objhead *info = (objhead *)start;
-    if (info->mark) {
-      if (need_fixup) {
-        switch(info->type) {
-        case PAGE_ARRAY:
-          {
-            void **tempend = PPTR(info) + info->size, **tmpstart;
-            tmpstart = OBJHEAD_TO_OBJPTR(start);
-            while (tmpstart < tempend) gcFIXUP2(*tmpstart++, gc);
-          }
-          break;
-        case PAGE_TAGGED:
-          {
-            void *obj_start = OBJHEAD_TO_OBJPTR(start);
-            unsigned short tag = *(unsigned short *)obj_start;
-            ASSERT_TAG(tag);
-            fixup_table[tag](obj_start, gc);
-          }
-          break;
-        case PAGE_ATOMIC:
-          break;
-        case PAGE_PAIR: 
-          {
-            Scheme_Object *p = (Scheme_Object *)OBJHEAD_TO_OBJPTR(start);
-            gcFIXUP2(SCHEME_CAR(p), gc);
-            gcFIXUP2(SCHEME_CDR(p), gc);
-          }
-          break;
-        default:
-          printf("Unhandled info->type %i\n", info->type);
-          abort();
-        }
-      }
-      start += info->size;
-      info->mark = 0;
-      non_dead++;
-    } else {
-      info->dead = 1;
-      start += info->size;
-    }
-  }
-
-  return non_dead;
 }
 
 static void chain_marked_on(NewGC *gc)
@@ -4536,12 +5104,77 @@ static void chain_marked_on_check(NewGC *gc)
 static void chain_marked_on_check(NewGC *gc) { }
 #endif
 
+static int unmark_range(void **start, void **end)
+{
+  int live_size = 0;
+  
+  while(start < end) {
+    objhead *info = (objhead *)start;
+    
+    if (info->mark) {
+      GC_ASSERT(!info->dead);
+      info->mark = 0;
+      live_size += info->size;
+    } else
+      info->dead = 1;
+
+    start += info->size;
+  }
+
+  return live_size;
+}
+
+static void repair_mixed_page(NewGC *gc, mpage *page, void **end)
+{
+  void **start = PPTR(NUM(page->addr) + PREFIX_SIZE);
+  Fixup2_Proc *fixup_table = gc->fixup_table;
+
+  while (start <= end) {
+    objhead *info = (objhead *)start;
+    if (!info->dead) {
+      switch(info->type) {
+      case PAGE_ARRAY:
+        {
+          void **tempend = PPTR(info) + info->size, **tmpstart;
+          tmpstart = OBJHEAD_TO_OBJPTR(start);
+          while (tmpstart < tempend) gcFIXUP2(*tmpstart++, gc);
+        }
+        break;
+      case PAGE_TAGGED:
+        {
+          void *obj_start = OBJHEAD_TO_OBJPTR(start);
+          unsigned short tag = *(unsigned short *)obj_start;
+          ASSERT_TAG(tag);
+          fixup_table[tag](obj_start, gc);
+        }
+        break;
+      case PAGE_ATOMIC:
+        break;
+      case PAGE_PAIR: 
+        {
+          Scheme_Object *p = (Scheme_Object *)OBJHEAD_TO_OBJPTR(start);
+          gcFIXUP2(SCHEME_CAR(p), gc);
+          gcFIXUP2(SCHEME_CDR(p), gc);
+        }
+        break;
+      default:
+        printf("Unhandled info->type %i\n", info->type);
+        abort();
+      }
+    }
+    start += info->size;
+  }
+}
+
 static void repair_heap(NewGC *gc)
+/* Set `dead` bit if not `mark`, otherwise clean `mark`. After this
+   pass, objects are live if `dead` is not set.
+   Then, not dead => fixup pointers. */
 {
   uintptr_t memory_in_use;
   mpage *page, *next;
   Fixup2_Proc *fixup_table = gc->fixup_table;
-  int need_fixup;
+  int need_fixup, minor_for_incremental;
 
   /* These pages are guaranteed not to be protected, because
      they've been marked on or marked from.
@@ -4552,12 +5185,11 @@ static void repair_heap(NewGC *gc)
   page = gc->modified_next;
   gc->modified_next = NULL;
 
-  gc->reprotect_next = NULL;
-  
   memory_in_use = gc->memory_in_use;
 
   need_fixup = gc->need_fixup;
-  
+  minor_for_incremental = !gc->gc_full && gc->started_incremental;
+
   for (; page; page = next) {
     GC_ASSERT(page->marked_on || page->marked_from);
     next = page->modified_next;
@@ -4567,18 +5199,27 @@ static void repair_heap(NewGC *gc)
       page->has_new = 0;
       if (gc->gc_full)
         page->marked_on = 1;
-      else
+      else {
+        if (minor_for_incremental && page->marked_on)
+          page_marked_on(gc, page, 0, 1);
         page->marked_on = 0;
+      }
       page->marked_from = 0;
       gc->back_pointers = 0;
       if (page->size_class >= SIZE_CLASS_BIG_PAGE) {
-        void **start = PPTR(BIG_PAGE_TO_OBJECT(page));
-        void **end = PAGE_END_VSS(page);
+        /* ------ big page ------ */
+        if (minor_for_incremental) {
+          /* leave mark */
+        } else
+          page->size_class = SIZE_CLASS_BIG_PAGE; /* remove the mark, if any */
 
-        GCDEBUG((DEBUGOUTF, "Cleaning objs on page %p, starting with %p\n",
-                 page, start));
-        page->size_class = SIZE_CLASS_BIG_PAGE; /* remove the mark */
         if (need_fixup) {
+          void **start = PPTR(BIG_PAGE_TO_OBJECT(page));
+          void **end = PAGE_END_VSS(page);
+            
+          GCDEBUG((DEBUGOUTF, "Cleaning objs on page %p, starting with %p\n",
+                   page, start));
+          
           switch(page->page_type) {
           case PAGE_TAGGED: 
             fixup_table[*(unsigned short*)start](start, gc); 
@@ -4599,86 +5240,177 @@ static void repair_heap(NewGC *gc)
 
         memory_in_use += page->size;
       } else if (page->size_class == SIZE_CLASS_SMALL_PAGE) {
-        void **start = PPTR(NUM(page->addr) + page->scan_boundary);
-        void **end = PAGE_END_VSS(page);
+        int need_unmark = 0, need_fixup_now = need_fixup;
+        /* ------ small page ------ */
+        if (minor_for_incremental) {
+          /* leave marks as-is */
+        } else {
+          int live_size;
+          GCDEBUG((DEBUGOUTF, "Unmarking objs on page %p, starting with %p\n",
+                   page, start));
+          /* Although it's more complicated, it's worth fusing the unmark
+             and operations passes to avoid traversing the page twice. */
+          if (!need_fixup
+              || (page->page_type == PAGE_ATOMIC)
+              || (page->scan_boundary != PREFIX_SIZE)) {
+            if (!page->non_dead_as_mark) {
+              live_size = unmark_range(PPTR(NUM(page->addr) + page->scan_boundary),
+                                       PAGE_END_VSS(page));
+              if (page->scan_boundary == PREFIX_SIZE)
+                page->live_size = live_size;
+            }
+          } else {
+            need_unmark = !page->non_dead_as_mark;
+            if (!need_unmark && !page->back_pointers)
+              need_fixup_now = 0;
+          }
+          page->non_dead_as_mark = 0;
+        }
 
-        GCDEBUG((DEBUGOUTF, "Cleaning objs on page %p, starting with %p\n",
-                 page, start));
-        switch(page->page_type) {
-        case PAGE_TAGGED: 
-          while(start < end) {
-            objhead *info = (objhead *)start;
+        if (need_fixup_now) {
+          /* fixup should walk the full page: */
+          void **start = PPTR(NUM(page->addr) + PREFIX_SIZE);
+          void **end = PAGE_END_VSS(page);
+          int live_size = 0;
+          GCDEBUG((DEBUGOUTF, "Cleaning objs on page %p, starting with %p\n",
+                   page, start));
+          switch(page->page_type) {
+          case PAGE_TAGGED:
+            while(start < end) {
+              objhead *info = (objhead *)start;
+              int fixup;
 
-            if(info->mark) {
-              void *obj_start = OBJHEAD_TO_OBJPTR(start);
-              unsigned short tag = *(unsigned short *)obj_start;
-              ASSERT_TAG(tag);
-              info->mark = 0;
-              if (need_fixup)
+              if (need_unmark) {
+                if (info->mark) {
+                  info->mark = 0;
+                  live_size += info->size;
+                  fixup = 1;
+                } else {
+                  info->dead = 1;
+                  fixup = 0;
+                }
+              } else
+                fixup = !info->dead;
+
+              if (fixup) {
+                void *obj_start = OBJHEAD_TO_OBJPTR(start);
+                unsigned short tag = *(unsigned short *)obj_start;
+                ASSERT_TAG(tag);
                 fixup_table[tag](obj_start, gc);
-            } else
-              info->dead = 1;
-            start += info->size;
-          }
-          break;
-        case PAGE_ATOMIC:
-          while(start < end) {
-            objhead *info = (objhead *)start;
-            if(info->mark)
-              info->mark = 0;
-            else
-              info->dead = 1;
-            start += info->size;
-          }
-          break;
-        case PAGE_ARRAY: 
-          while(start < end) {
-            objhead *info = (objhead *)start;
-            size_t size = info->size;
-            if(info->mark) {
-              void **tempend = PPTR(info) + info->size;
-              if (need_fixup) {
+              }
+              start += info->size;
+            }
+            break;
+          case PAGE_ATOMIC:
+            break;
+          case PAGE_ARRAY: 
+            while(start < end) {
+              objhead *info = (objhead *)start;
+              size_t size = info->size;
+              int fixup;
+
+              if (need_unmark) {
+                if (info->mark) {
+                  info->mark = 0;
+                  live_size += size;
+                  fixup = 1;
+                } else {
+                  info->dead = 1;
+                  fixup = 0;
+                }
+              } else
+                fixup = !info->dead;
+
+              if (fixup) {
+                void **tempend = PPTR(info) + info->size;
                 start = OBJHEAD_TO_OBJPTR(start);
                 while(start < tempend) gcFIXUP2(*start++, gc);
-              } else
-                start = tempend;
-              info->mark = 0;
-            } else { 
-              info->dead = 1;
-              start += size;
+              } else { 
+                start += size;
+              }
             }
-          }
-          break;
-        case PAGE_PAIR:
-          while(start < end) {
-            objhead *info = (objhead *)start;
-            if(info->mark) {
-              if (need_fixup) {
+            break;
+          case PAGE_PAIR:
+            while(start < end) {
+              objhead *info = (objhead *)start;
+              int fixup;
+
+              if (need_unmark) {
+                if (info->mark) {
+                  info->mark = 0;
+                  live_size += (PAIR_SIZE_IN_BYTES >> LOG_WORD_SIZE);
+                  fixup = 1;
+                } else {
+                  info->dead = 1;
+                  fixup = 0;
+                }
+              } else
+                fixup = !info->dead;
+
+              if (fixup) {
                 Scheme_Object *p = (Scheme_Object *)OBJHEAD_TO_OBJPTR(start);
                 gcFIXUP2(SCHEME_CAR(p), gc);
                 gcFIXUP2(SCHEME_CDR(p), gc);
               }
-              info->mark = 0;
-            } else
-              info->dead = 1;
-            start += PAIR_SIZE_IN_BYTES >> LOG_WORD_SIZE;
+              start += PAIR_SIZE_IN_BYTES >> LOG_WORD_SIZE;
+            }
+            break;
           }
-          break;
+
+          if (need_unmark && (page->page_type != PAGE_ATOMIC))
+            page->live_size = live_size;
         }
 
+        /* everything on this page is now old-generation: */
         page->scan_boundary = page->size;
-        memory_in_use += page->size;
+
+        memory_in_use += gcWORDS_TO_BYTES(page->live_size);
       } else {
-        int non_dead;
+        /* ------ medium page ------ */
+        int need_fixup_now = need_fixup;
         GC_ASSERT(page->size_class == SIZE_CLASS_MED_PAGE);
-        non_dead = repair_mixed_page(gc, page, PPTR(NUM(page->addr) + APAGE_SIZE - page->obj_size), need_fixup);
-        page->live_size = (page->obj_size * non_dead);
-        memory_in_use += page->live_size;
+
+        if (minor_for_incremental) {
+          if (page->generation == AGE_GEN_0) {
+            /* Don't clear `mark` flags, but do set `dead` flags,
+               so that the page will be treated correctly by
+               mark_backpointers. */
+            void **start = PPTR(NUM(page->addr) + PREFIX_SIZE);
+            void **end = PPTR(NUM(page->addr) + APAGE_SIZE - page->obj_size);
+            int live_count = 0;
+            while(start < end) {
+              objhead *info = (objhead *)start;
+              if (!info->mark)
+                info->dead = 1;
+              else
+                live_count++;
+              start += info->size;
+            }
+            page->live_size = live_count * gcBYTES_TO_WORDS(page->obj_size);
+          }
+        } else {
+          if ((page->generation == AGE_GEN_0) || gc->gc_full) {
+            if (!page->non_dead_as_mark) {
+              int live_size;
+              live_size = unmark_range(PPTR(NUM(page->addr) + PREFIX_SIZE),
+                                       PPTR(NUM(page->addr) + APAGE_SIZE - page->obj_size));
+              page->live_size = live_size;
+            } else {
+              need_fixup_now = page->back_pointers;
+              page->non_dead_as_mark = 0;
+            }
+          }
+        }
+        
+        if (need_fixup_now)
+          repair_mixed_page(gc, page, PPTR(NUM(page->addr) + APAGE_SIZE - page->obj_size));
+
+        memory_in_use += gcWORDS_TO_BYTES(page->live_size);
         page->med_search_start = PREFIX_SIZE; /* start next block search at the beginning */
         if (page->generation == AGE_GEN_0) {
           /* Tell the clean-up phase to keep this one (needed even for a minor GC): */
           page->marked_on = 1;
-          GC_ASSERT(non_dead); /* otherwise, wouldn't have marked_on */
+          GC_ASSERT(page->live_size); /* otherwise, wouldn't have marked_on */
         }
       }
 
@@ -4690,22 +5422,174 @@ static void repair_heap(NewGC *gc)
         page->back_pointers = 0;
 
       if ((page->page_type != PAGE_ATOMIC) && (page->page_type != PAGE_MED_ATOMIC)) {
-        page->reprotect_next = gc->reprotect_next;
-        gc->reprotect_next = page;
+        if (page->reprotect) {
+          /* must have been set for incremental, but also used for new gen1 objects
+             moved from gen0 */
+          GC_ASSERT(!gc->gc_full || gc->finished_incremental);
+          GC_ASSERT(gc->mark_gen1);
+        } else {
+          if (page->mprotected) {
+            /* This only happens for a full collection to wrap up a
+               finished incremental collection; the page wasn't
+               touched at al in the wrap-up */
+            GC_ASSERT(gc->gc_full && gc->finished_incremental);
+          } else {
+            page->reprotect_next = gc->reprotect_next;
+            gc->reprotect_next = page;
+            page->reprotect = 1;
+          }
+        }
       }
     }
   }
 
   /* All gen-half pages count as modified: */
-  for (page = gc->gen_half.pages; page; page = page->next) {
-    GC_ASSERT(page->generation == AGE_GEN_HALF);
-    (void)repair_mixed_page(gc, page, PPTR(NUM(page->addr) + page->size - 1), need_fixup);
+  if (need_fixup) {
+    for (page = gc->gen_half.pages; page; page = page->next) {
+      GC_ASSERT(page->generation == AGE_GEN_HALF);
+      unmark_range(PPTR(NUM(page->addr) + PREFIX_SIZE),
+                   PPTR(NUM(page->addr) + page->size - 1));
+      repair_mixed_page(gc, page, PPTR(NUM(page->addr) + page->size - 1));
+    }
   }
 
+  /* This calculation will be ignored for a full GC: */
   memory_in_use += gen_half_size_in_use(gc);
   memory_in_use = add_no_overflow(memory_in_use, gc->phantom_count);
   gc->memory_in_use = memory_in_use;
+
+#if CHECK_NO_MISSED_FIXUPS
+  /* Double-check that no fixups apply to live objects at this point */
+  if (need_fixup) {
+    int i;
+
+    disallow_fixups++;
+    
+    for (i = 0; i < PAGE_BIG; i++) {
+      if (i != PAGE_ATOMIC) {
+        for (page = gc->gen1_pages[i]; page; page = page->next) {
+          if ((page->generation != AGE_VACATED)
+              && (page->marked_on || page->inc_marked_on))
+            repair_mixed_page(gc, page, PAGE_END_VSS(page)-1);
+        }
+      }
+    }
+  
+    for (page = gc->gen1_pages[PAGE_BIG]; page; page = page->next) {
+      if (page->marked_on || page->inc_marked_on) {
+        void **start = PPTR(BIG_PAGE_TO_OBJECT(page));
+        void **end = PAGE_END_VSS(page);
+        switch(page->page_type) {
+        case PAGE_TAGGED: 
+          fixup_table[*(unsigned short*)start](start, gc); 
+          break;
+        case PAGE_ATOMIC: break;
+        case PAGE_ARRAY: 
+          while(start < end) gcFIXUP2(*(start++), gc); 
+          break;
+        case PAGE_PAIR:
+          GC_ASSERT(0);
+          break;
+        }
+      }
+    }
+  
+    for (i = 0; i < NUM_MED_PAGE_SIZES; i++) {
+      for (page = gc->med_pages[MED_PAGE_NONATOMIC_INDEX][i]; page; page = page->next) {
+        if (page->marked_on || page->inc_marked_on)
+          repair_mixed_page(gc, page, PPTR(NUM(page->addr) + page->size - 1));
+      }
+    }
+
+    --disallow_fixups;
+  }
+#endif
 }
+
+static void incremental_repair_pages(NewGC *gc, int fuel)
+{
+  mpage *page;
+  int retry = 1;
+
+#if 0
+  /* Make sure `gc->inc_repair_next` is a tail of `gc->inc_modified_next` */
+  for (page = gc->inc_modified_next; page != gc->inc_repair_next; page = page->inc_modified_next) {
+  }
+  GC_ASSERT(page == gc->inc_repair_next);
+#endif
+
+  /* If gc->finished_incremental already, then we must be in the
+     process of accounting incrementally */
+  GC_ASSERT(!gc->finished_incremental || !gc->inc_repair_next || gc->really_doing_accounting);
+
+  while ((fuel || gc->finished_incremental) && gc->inc_repair_next) {
+    page = gc->inc_repair_next;
+    gc->inc_repair_next = page->inc_modified_next;
+    if (!gc->inc_repair_next)
+      gc->inc_repair_next = gc->inc_modified_next;
+    /* If this page isn't already marked as old, it must be a medium page whose
+       generation will be updated in the clean-up phase */
+    GC_ASSERT((page->generation >= AGE_GEN_1) || (page->size_class == SIZE_CLASS_MED_PAGE));
+    if (page->generation == AGE_VACATED) {
+      /* skip */
+    } else if (page->size_class >= SIZE_CLASS_BIG_PAGE) {
+      /* skip */
+    } else {
+      if (page->non_dead_as_mark) {
+        /* hit already-repaired tail; no more to repair here */
+        if (retry) {
+          retry = 0;
+          gc->inc_repair_next = gc->inc_modified_next;
+        } else
+          gc->inc_repair_next = NULL;
+      } else {
+        int live_size;
+        check_incremental_unprotect(gc, page);
+        if (page->size_class == SIZE_CLASS_SMALL_PAGE) {
+          GC_ASSERT(page->scan_boundary == page->size);
+          live_size = unmark_range(PPTR(NUM(page->addr) + PREFIX_SIZE),
+                                   PAGE_END_VSS(page));
+        } else {
+          GC_ASSERT(page->size_class == SIZE_CLASS_MED_PAGE);
+          live_size = unmark_range(PPTR(NUM(page->addr) + PREFIX_SIZE),
+                                   PPTR(NUM(page->addr) + APAGE_SIZE - page->obj_size));
+        }
+        gc->memory_in_use -= gcWORDS_TO_BYTES(page->live_size);
+        page->live_size = live_size;
+        gc->memory_in_use += gcWORDS_TO_BYTES(live_size);
+        page->non_dead_as_mark = 1;
+        --fuel;
+      }
+    }
+  }
+}
+
+#if 0
+static void check_finished_incremental(NewGC *gc)
+{
+  mpage *work;
+  int i, ty;
+
+  /* Marking all objects, so make all pages writeable and set the scan
+     boundary on small pages to the beginning of the page. */
+
+  for(i = 0; i < PAGE_BIG; i++) {
+    for(work = gc->gen1_pages[i]; work; work = work->next) {
+      GC_ASSERT(!work->inc_marked_on || work->non_dead_as_mark);
+    }
+  }
+
+  for (ty = 0; ty < MED_PAGE_TYPES; ty++) {
+    for (i = 0; i < NUM_MED_PAGE_SIZES; i++) {
+      for (work = gc->med_pages[ty][i]; work; work = work->next) {
+        GC_ASSERT(!work->inc_marked_on || work->non_dead_as_mark);
+      }
+    }
+  }
+}
+#else
+static void check_finished_incremental(NewGC *gc) { }
+#endif
 
 static inline void cleanup_vacated_pages(NewGC *gc) {
   mpage *pages = gc->release_pages;
@@ -4764,6 +5648,15 @@ inline static void gen0_free_big_pages(NewGC *gc) {
   gc->gen0.big_pages = NULL; 
 }
 
+static void check_mprotected_for_finished_incremental(NewGC *gc, mpage *work)
+{
+  if (work->mprotected) {
+    GC_ASSERT(gc->gc_full && gc->finished_incremental);
+    work->mprotected = 0;
+    mmu_write_unprotect_page(gc->mmu, work->addr, real_page_size(work), page_mmu_type(work), &work->mmu_src_block);
+  }
+}
+
 static void clean_up_heap(NewGC *gc)
 {
   int i, ty;
@@ -4783,12 +5676,16 @@ static void clean_up_heap(NewGC *gc)
           if(prev) prev->next = next; else gc->gen1_pages[i] = next;
           if(next) work->next->prev = prev;
           GCVERBOSEPAGE(gc, "Cleaning up BIGPAGE", work);
+          check_mprotected_for_finished_incremental(gc, work);
           gen1_free_mpage(pagemap, work);
           --gc->num_gen1_pages;
         } else {
           GCVERBOSEPAGE(gc, "clean_up_heap BIG PAGE ALIVE", work);
           work->marked_on = 0;
-          memory_in_use += work->size;
+          if (work->size_class == SIZE_CLASS_SMALL_PAGE)
+            memory_in_use += gcWORDS_TO_BYTES(work->live_size);
+          else
+            memory_in_use += work->size;
           prev = work; 
         }
         work = next;
@@ -4797,7 +5694,7 @@ static void clean_up_heap(NewGC *gc)
   }
 
   /* For medium pages, generation-0 pages will appear first in each
-     list, so for a mnior GC, we can stop whenever we find a
+     list, so for a minor GC, we can stop whenever we find a
      generation-1 page */
   for (ty = 0; ty < MED_PAGE_TYPES; ty++) {
     for (i = 0; i < NUM_MED_PAGE_SIZES; i++) {
@@ -4808,7 +5705,7 @@ static void clean_up_heap(NewGC *gc)
         next = work->next;
         if (work->marked_on) {
           work->marked_on = 0;
-          memory_in_use += work->live_size;
+          memory_in_use += gcWORDS_TO_BYTES(work->live_size);
           work->generation = AGE_GEN_1;
           prev = work;
         } else if (gc->gc_full || (work->generation == AGE_GEN_0)) {
@@ -4817,6 +5714,7 @@ static void clean_up_heap(NewGC *gc)
           if(prev) prev->next = next; else gc->med_pages[ty][i] = next;
           if(next) work->next->prev = prev;
           GCVERBOSEPAGE(gc, "Cleaning up MED NO MARKEDON", work);
+          check_mprotected_for_finished_incremental(gc, work);
           gen1_free_mpage(pagemap, work);
           --gc->num_gen1_pages;
         } else {
@@ -4824,7 +5722,11 @@ static void clean_up_heap(NewGC *gc)
           next = NULL;
         }
       }
-      gc->med_freelist_pages[ty][i] = prev;
+      if (gc->all_marked_incremental && !gc->gc_full) {
+        /* no more allocation on old pages */
+        gc->med_freelist_pages[ty][i] = NULL;
+      } else
+        gc->med_freelist_pages[ty][i] = prev;
     }
   }
 
@@ -4869,6 +5771,12 @@ static void unprotect_old_pages(NewGC *gc)
   }
 
   mmu_flush_write_unprotect_ranges(mmu);
+
+  /* Clear out ignored list of reprotects */
+  for (page = gc->reprotect_next; page; page = page->reprotect_next) {
+    page->reprotect = 0;
+  }
+  gc->reprotect_next = NULL;
 }
 #endif
 
@@ -4888,8 +5796,10 @@ static void protect_old_pages(NewGC *gc)
         for (page = gc->gen1_pages[i]; page; page = page->next) {
           GC_ASSERT(page->generation != AGE_VACATED);
           if (page->page_type != PAGE_ATOMIC) {
-            if (!page->mprotected)
+            if (!page->mprotected) {
               count++;
+              GC_ASSERT(page->reprotect);
+            }
           }
         }
       }
@@ -4897,8 +5807,10 @@ static void protect_old_pages(NewGC *gc)
 
     for (i = 0; i < NUM_MED_PAGE_SIZES; i++) {
       for (page = gc->med_pages[MED_PAGE_NONATOMIC_INDEX][i]; page; page = page->next) {
-        if (!page->mprotected)
+        if (!page->mprotected) {
           count++;
+          GC_ASSERT(page->reprotect);
+        }
       }
     }
 
@@ -4915,6 +5827,7 @@ static void protect_old_pages(NewGC *gc)
     GC_ASSERT(page->page_type != PAGE_ATOMIC);
     GC_ASSERT(page->page_type != PAGE_MED_ATOMIC);
     GC_ASSERT(page->generation != AGE_VACATED);
+    page->reprotect = 0;
     if (!page->back_pointers) {
       page->mprotected = 1;
       mmu_queue_write_protect_range(mmu, page->addr, real_page_size(page), page_mmu_type(page), &page->mmu_src_block);
@@ -4929,8 +5842,92 @@ static void protect_old_pages(NewGC *gc)
     }
   }
 
+  gc->reprotect_next = NULL;
+
   mmu_flush_write_protect_ranges(mmu);
 }
+
+#if 0
+static void check_marks_cleared_range(void **start, void **end)
+{
+  while(start < end) {
+    objhead *info = (objhead *)start;
+
+    GC_ASSERT(!info->mark);
+
+    start += info->size;
+  } 
+}
+
+static void check_marks_cleared(NewGC *gc)
+{
+  mpage *page;
+  int i, ty;
+
+  for (i = 0; i < PAGE_BIG; i++) {
+    for (page = gc->gen1_pages[i]; page; page = page->next) {
+      GC_ASSERT(page->size == page->scan_boundary);
+      check_marks_cleared_range(PAGE_START_VSS(page), PAGE_END_VSS(page));
+    }
+  }
+
+  for (page = gc->gen1_pages[PAGE_BIG]; page; page = page->next) {
+    GC_ASSERT(page->size_class == SIZE_CLASS_BIG_PAGE);
+  }
+
+  for (ty = 0; ty < MED_PAGE_TYPES; ty++) {
+    for (i = 0; i < NUM_MED_PAGE_SIZES; i++) {
+      for (page = gc->med_pages[ty][i]; page; page = page->next) {
+        check_marks_cleared_range(PAGE_START_VSS(page), PAGE_END_VSS(page));
+      }
+    }
+  }
+}
+#else
+static void check_marks_cleared(NewGC *gc) { }
+#endif
+
+#if 0
+static int get_live_size_range(void **start, void **end)
+{
+  int live_size = 0;
+  
+  while(start < end) {
+    objhead *info = (objhead *)start;
+
+    if (!info->dead)
+      live_size += info->size;
+
+    start += info->size;
+  }
+
+  return live_size;
+}
+
+static void check_live_sizes(NewGC *gc)
+{
+  mpage *page;
+  int i, ty;
+
+  for (i = 0; i < PAGE_BIG; i++) {
+    for (page = gc->gen1_pages[i]; page; page = page->next) {
+      GC_ASSERT(page->size == page->scan_boundary);
+      GC_ASSERT(page->live_size == get_live_size_range(PAGE_START_VSS(page), PAGE_END_VSS(page)));
+    }
+  }
+
+  for (ty = 0; ty < MED_PAGE_TYPES; ty++) {
+    for (i = 0; i < NUM_MED_PAGE_SIZES; i++) {
+      for (page = gc->med_pages[ty][i]; page; page = page->next) {
+        GC_ASSERT(page->live_size == get_live_size_range(PAGE_START_VSS(page),
+                                                         PPTR(NUM(page->addr) + APAGE_SIZE - page->obj_size)));
+      }
+    }
+  }
+}
+#else
+static void check_live_sizes(NewGC *gc) { }
+#endif
 
 static void park_for_inform_callback(NewGC *gc)
 {
@@ -4957,59 +5954,202 @@ static void unpark_for_inform_callback(NewGC *gc)
 
 #if 0
 extern double scheme_get_inexact_milliseconds(void);
-# define TIME_DECLS() double start, task_start
-# define TIME_INIT() start = task_start = scheme_get_inexact_milliseconds(); fprintf(stderr, "GC (%d):\n", gc->gc_full)
-# define TIME_STEP(task) fprintf(stderr, "  %s: %lf\n", task, scheme_get_inexact_milliseconds() - task_start); \
-  task_start = scheme_get_inexact_milliseconds()
-# define TIME_DONE() fprintf(stderr, " Total: %lf\n", scheme_get_inexact_milliseconds() - start)
+# define SHOW_TIME_NOW gc->gc_full
+# define TIME_DECLS() double start, task_start, *_task_start = &task_start
+# define TIME_INIT() start = task_start = scheme_get_inexact_milliseconds(); if (SHOW_TIME_NOW) fprintf(stderr, "GC (%d):\n", gc->gc_full)
+# define TIME_STEP(task) if (SHOW_TIME_NOW) fprintf(stderr, "  %s: %lf\n", task, scheme_get_inexact_milliseconds() - (*_task_start)); \
+  (*_task_start) = scheme_get_inexact_milliseconds()
+# define TIME_DONE() if (SHOW_TIME_NOW) fprintf(stderr, " Total: %lf\n", scheme_get_inexact_milliseconds() - start)
+# define TIME_FORMAL_ARGS , double start, double *_task_start
+# define TIME_ARGS , start, _task_start
 #else
 # define TIME_DECLS() /**/
 # define TIME_INIT() /**/
 # define TIME_STEP(task) /**/
 # define TIME_DONE() /**/
+# define TIME_FORMAL_ARGS /**/
+# define TIME_ARGS /**/
 #endif
 
-/* Full GCs trigger finalization. Finalization releases data
-   in the old generation. So one more full GC is needed to
-   really clean up. The full_needed_for_finalization flag triggers 
-   the second full GC. */
+static int mark_and_finalize_all(NewGC *gc, int old_gen, int no_full TIME_FORMAL_ARGS)
+{
+  int fuel = (old_gen
+              ? (no_full
+                 ? INCREMENTAL_COLLECT_FUEL_PER_100M / INCREMENTAL_MINOR_REQUEST_DIVISOR
+                 : (INCREMENTAL_COLLECT_FUEL_PER_100M * AS_100M(gc->memory_in_use)) / 2)
+              : -1);
+  int reset_gen1;
+
+  /* Propagate marks */
+  if (!old_gen)
+    propagate_marks_plus_ephemerons(gc);
+  else
+    fuel = propagate_incremental_marks(gc, 1, fuel);
+
+  /* check finalizers at level 1 */
+  fuel = check_finalizers(gc, 1, old_gen, fuel);
+
+  if (!old_gen)
+    propagate_marks_plus_ephemerons(gc);
+  else
+    fuel = propagate_incremental_marks(gc, 1, fuel);
+
+  TIME_STEP("marked");
+
+  if (old_gen || (gc->gc_full && gc->finished_incremental)) {
+    GC_ASSERT(!gc->fnl_gen1);
+    gc->fnl_gen1 = 1;
+    reset_gen1 = 1;
+  } else
+    reset_gen1 = 0;
+
+  if (gc->gc_full)
+    (void)zero_weak_boxes(gc, 0, 0, 1, 1, -1);
+  fuel = zero_weak_boxes(gc, 0, 0, old_gen, !old_gen, fuel);
+
+  if (gc->gc_full)
+    (void)zero_weak_arrays(gc, 0, 1, 1, -1);
+  fuel = zero_weak_arrays(gc, 0, old_gen, !old_gen, fuel);
+
+  if (gc->gc_full)
+    zero_remaining_ephemerons(gc, 1);
+  if (fuel)
+    zero_remaining_ephemerons(gc, old_gen);
+
+  TIME_STEP("zeroed");
+  
+  fuel = check_finalizers(gc, 2, old_gen, fuel);
+    
+  if (!old_gen)
+    propagate_marks(gc);
+  else
+    fuel = propagate_incremental_marks(gc, 0, fuel);
+
+  if (gc->gc_full)
+    (void)zero_weak_boxes(gc, 1, 0, 1, 1, -1);
+  fuel = zero_weak_boxes(gc, 1, 0, old_gen, !old_gen, fuel);
+
+  fuel = check_finalizers(gc, 3, old_gen, fuel);
+
+  if (!old_gen)
+    propagate_marks(gc);
+  else
+    fuel = propagate_incremental_marks(gc, 0, fuel);
+
+  if (fuel && gc->GC_post_propagate_hook)
+    gc->GC_post_propagate_hook(gc);
+  
+  if (fuel) {
+    /* for any new ones that appeared: */
+    (void)zero_weak_boxes(gc, 0, 1, old_gen, 0, -1);
+    (void)zero_weak_boxes(gc, 1, 1, old_gen, 0, -1);
+    (void)zero_weak_arrays(gc, 1, old_gen, 0, -1);
+    zero_remaining_ephemerons(gc, old_gen);
+
+    GC_ASSERT(!gc->weak_arrays);
+    GC_ASSERT(!gc->bp_weak_arrays);
+    GC_ASSERT(!gc->weak_boxes[0]);
+    GC_ASSERT(!gc->weak_boxes[1]);
+    GC_ASSERT(!gc->bp_weak_boxes[0]);
+    GC_ASSERT(!gc->bp_weak_boxes[1]);
+    GC_ASSERT(!gc->ephemerons);
+    GC_ASSERT(!gc->bp_ephemerons);
+    if (gc->gc_full) {
+      GC_ASSERT(!gc->inc_weak_arrays);
+      GC_ASSERT(!gc->inc_weak_boxes[0]);
+      GC_ASSERT(!gc->inc_weak_boxes[1]);
+      GC_ASSERT(!gc->inc_ephemerons);
+    }
+  }
+
+  if (reset_gen1)
+    gc->fnl_gen1 = 0;
+
+  TIME_STEP("finalized");
+
+  return !fuel;
+}
+
+static int mark_and_finalize_all_incremental(NewGC *gc, int no_full TIME_FORMAL_ARGS)
+{
+  int save_inc, save_check, more_to_do;
+
+  GC_ASSERT(gc->mark_gen1);
+
+  save_inc = gc->inc_gen1;
+  save_check = gc->check_gen1;
+
+  gc->inc_gen1 = 1;
+  gc->check_gen1 = 1;
+  
+  more_to_do = mark_and_finalize_all(gc, 1, no_full TIME_ARGS);
+
+  gc->inc_gen1 = save_inc;
+  gc->check_gen1 = save_check;
+
+  return more_to_do;
+}
 
 static void garbage_collect(NewGC *gc, int force_full, int no_full, int switching_master, Log_Master_Info *lmi)
 {
   uintptr_t old_mem_use;
   uintptr_t old_gen0;
   uintptr_t old_mem_allocated;
-
   int next_gc_full;
+  int do_incremental = 0, had_started_incremental, check_inc_repair;
 
   old_mem_use = gc->memory_in_use; /* includes gc->phantom_count */
-  old_gen0    = gc->gen0.current_size + gc->gen0_phantom_count;
+  old_gen0    = gen0_size_in_use(gc) + gc->gen0_phantom_count;
   old_mem_allocated = mmu_memory_allocated(gc->mmu) + gc->phantom_count + gc->gen0_phantom_count;
 
   TIME_DECLS();
 
   dump_page_map(gc, "pre");
 
+  GC_ASSERT(!gc->all_marked_incremental || gc->started_incremental);
+  GC_ASSERT(!gc->all_marked_incremental || mark_stack_is_empty(gc->inc_mark_stack));
+  GC_ASSERT(!gc->finished_incremental || (gc->all_marked_incremental && !gc->inc_repair_next));
+  GC_ASSERT(!gc->accounted_incremental || gc->finished_incremental);
+
   /* determine if this should be a full collection or not */
-  gc->gc_full = force_full || !gc->generations_available 
-    || (gc->since_last_full > FORCE_MAJOR_AFTER_COUNT) || (gc->memory_in_use > (2 * gc->last_full_mem_use));
-#if 0
-  printf("Collection %li (full = %i): %i / %i / %i / %i  %ld\n", number_of_gc_runs, 
-      gc->gc_full, force_full, !generations_available,
-      (gc->since_last_full > FORCE_MAJOR_AFTER_COUNT), (gc->memory_in_use > (2 * gc->last_full_mem_use)),
-      gc->last_full_mem_use);
-#endif
+  gc->gc_full = (force_full
+                 || !gc->generations_available
+                 /* Force a full GC when current memory use has grown
+                    to a given ratio of memory use after the last GC. 
+                    This approach makes total memory use roughly a constant
+                    fraction of the actual use by live data: */
+                 || (gc->memory_in_use > (FULL_COLLECTION_SIZE_RATIO
+                                          * gc->last_full_mem_use
+                                          * (gc->incremental_requested
+                                             ? INCREMENTAL_EXTRA_SIZE_RATIO
+                                             : 1)))
+                 /* Just in case, for a full GC every so often, unless
+                    incremental mode has been enabled: */
+                 || ((gc->since_last_full > FORCE_MAJOR_AFTER_COUNT)
+                     && !gc->started_incremental)
+                 /* Finalization triggers an extra full in case it releases
+                    a lot of additional memory: */
+                 || (gc->full_needed_again
+                     && !gc->incremental_requested
+                     && !gc->started_incremental)
+                 /* In incremental mode, GC earlier if we've done everything
+                    that we can do incrementally. */
+                 || gc->accounted_incremental);
 
-  if (gc->gc_full && no_full) {
+  if (gc->gc_full && no_full)
     return;
-  }
 
-  next_gc_full = gc->gc_full;
+  /* Switch from incremental to not, schedule another
+     full GC for next time: */
+  next_gc_full = (gc->gc_full
+                  && gc->started_incremental
+                  && !gc->incremental_requested
+                  && !always_collect_incremental_on_minor
+                  && !gc->full_needed_again);
 
-  if (gc->full_needed_for_finalization) {
-    gc->full_needed_for_finalization= 0;
-    gc->gc_full = 1;
-  }
+  if (gc->full_needed_again && gc->gc_full)
+    gc->full_needed_again = 0;
+
 #ifdef GC_DEBUG_PAGES
   if (gc->gc_full == 1) {
     GCVERBOSEprintf(gc, "GC_FULL gc: %p MASTER: %p\n", gc, MASTERGC);
@@ -5018,6 +6158,8 @@ static void garbage_collect(NewGC *gc, int force_full, int no_full, int switchin
   gc->number_of_gc_runs++; 
   INIT_DEBUG_FILE(); DUMP_HEAP();
 
+  gc->prop_count = 0;
+
   /* we don't want the low-level allocator freaking because we've gone past
      half the available memory */
   gc->in_unsafe_allocation_mode = 1;
@@ -5025,15 +6167,32 @@ static void garbage_collect(NewGC *gc, int force_full, int no_full, int switchin
 
   gc->use_gen_half = !gc->gc_full && AGE_GEN_0_TO_GEN_HALF(gc);
 
-  if (gc->gc_full)
-    gc->phantom_count = 0;
-  else if (gc->memory_in_use > gc->phantom_count) {
+  if (gc->gc_full) {
+    gc->phantom_count = gc->inc_phantom_count;
+    gc->inc_phantom_count = 0;
+  } else if (gc->memory_in_use > gc->phantom_count) {
     /* added back in repair_heap(), after any adjustments from gen0 phantom bytes */
     gc->memory_in_use -= gc->phantom_count;
   }
   gc->gen0_phantom_count = 0;
 
   gc->need_fixup = 0;
+
+  do_incremental = (!gc->gc_full
+                    && (gc->incremental_requested
+                        || always_collect_incremental_on_minor)
+                    && !gc->high_fragmentation);
+  if (!postmaster_and_place_gc(gc))
+    do_incremental = 0;
+  
+  if (do_incremental)
+    gc->started_incremental = 1;
+
+  if (gc->incremental_requested)
+    --gc->incremental_requested;
+  
+  gc->mark_gen1 = (gc->gc_full || gc->started_incremental) && !gc->all_marked_incremental;
+  gc->check_gen1 = gc->gc_full && !gc->all_marked_incremental;
 
   TIME_INIT();
 
@@ -5046,9 +6205,17 @@ static void garbage_collect(NewGC *gc, int force_full, int no_full, int switchin
   gc->no_further_modifications = 1;
 
   if (gc->gc_full)
-    reset_gen1_pages_live_and_scan_boundaries(gc);
+    merge_incremental_mark_stack(gc);
+  else if (gc->mark_gen1)
+    incremental_mark_stack_initialize(gc);
 
-  if (gc->gc_full)
+  if (gc->finished_incremental)
+    check_finished_incremental(gc);
+
+  if (gc->gc_full && !gc->finished_incremental)
+    reset_gen1_pages_scan_boundaries_and_writable(gc);
+
+  if (gc->gc_full && !gc->finished_incremental)
     merge_finalizer_trees(gc);
 
   move_gen_half_pages_to_old(gc);
@@ -5065,7 +6232,7 @@ static void garbage_collect(NewGC *gc, int force_full, int no_full, int switchin
   /* mark and repair the roots for collection */
   mark_backpointers(gc);
   TIME_STEP("backpointered");
-  mark_finalizer_structs(gc);
+  mark_finalizer_structs(gc, FNL_LEVEL_GEN_0);
   TIME_STEP("pre-rooted");
   mark_roots(gc);
   mark_immobiles(gc);
@@ -5076,52 +6243,38 @@ static void garbage_collect(NewGC *gc, int force_full, int no_full, int switchin
   if (postmaster_and_master_gc(gc))
     promote_marked_gen0_big_pages(gc);
 #endif
-
   TIME_STEP("stacked");
 
   /* now propagate/repair the marks we got from these roots, and do the
      finalizer passes */
+  (void)mark_and_finalize_all(gc, 0, no_full TIME_ARGS);
 
-  propagate_marks_plus_ephemerons(gc);
-
-  check_finalizers(gc, 1);
-  propagate_marks_plus_ephemerons(gc);
-
-  TIME_STEP("marked");
-
-  zero_weak_boxes(gc, 0, 0); 
-  zero_weak_arrays(gc, 0);
-  zero_remaining_ephemerons(gc);
-
-#ifndef NEWGC_BTC_ACCOUNT
-  /* we need to clear out the stack pages. If we're doing memory accounting,
-     though, we might as well leave them up for now and let the accounting
-     system clear them later. Better then freeing them, at least. If we're
-     not doing accounting, though, there is no "later" where they'll get
-     removed */
-  clear_stack_pages(gc);  
-#endif
-
-  TIME_STEP("zeroed");
-
-  check_finalizers(gc, 2);
-  propagate_marks(gc);
-  zero_weak_boxes(gc, 1, 0);
-
-  check_finalizers(gc, 3);
-  propagate_marks(gc);
-
-  if (gc->GC_post_propagate_hook)
-    gc->GC_post_propagate_hook(gc);
-
-  /* for any new ones that appeared: */
-  zero_weak_boxes(gc, 0, 1); 
-  zero_weak_boxes(gc, 1, 1);
-  zero_weak_arrays(gc, 1);
-  zero_remaining_ephemerons(gc);
-
-  TIME_STEP("finalized2");
-
+  if (gc->started_incremental) {
+    if (!gc->all_marked_incremental) {
+      mark_finalizer_structs(gc, FNL_LEVEL_GEN_1);
+      if (!mark_stack_is_empty(gc->inc_mark_stack)) {
+        int fuel = (no_full
+                    ? INCREMENTAL_COLLECT_FUEL_PER_100M / INCREMENTAL_MINOR_REQUEST_DIVISOR
+                    : INCREMENTAL_COLLECT_FUEL_PER_100M * AS_100M(gc->memory_in_use));
+        (void)propagate_incremental_marks(gc, 1, fuel);
+        TIME_STEP("incremented");
+      } else {
+        /* We ran out of incremental marking work, so
+           perform major-GC finalization */
+        if (mark_and_finalize_all_incremental(gc, no_full TIME_ARGS)) {
+          /* More finalizaton work to do */
+        } else {
+          BTC_clean_up_gen1(gc);
+          /* Switch to incrementally reparing pages */
+          gc->all_marked_incremental = 1;
+        }
+      }
+      check_inc_repair = 0;
+    } else
+      check_inc_repair = 1;
+  } else
+    check_inc_repair = 0;
+  
 #if MZ_GC_BACKTRACE
   if (0) 
 #endif
@@ -5149,10 +6302,23 @@ static void garbage_collect(NewGC *gc, int force_full, int no_full, int switchin
     chain_marked_on(gc);
   else if (gc->gc_full)
     chain_marked_on_check(gc);
+  
   repair_heap(gc);
   TIME_STEP("repaired");
+  if (check_inc_repair) {
+    int fuel = (no_full
+                ? INCREMENTAL_REPAIR_FUEL_PER_100M / INCREMENTAL_MINOR_REQUEST_DIVISOR
+                : INCREMENTAL_REPAIR_FUEL_PER_100M * AS_100M(gc->memory_in_use));
+    GC_ASSERT(gc->all_marked_incremental);
+    incremental_repair_pages(gc, fuel);
+    TIME_STEP("inc-repaired");
+    if (!gc->inc_repair_next)
+      gc->finished_incremental = 1;
+  }
+
   clean_up_heap(gc);
   TIME_STEP("cleaned heap");
+
   clean_gen_half(gc);
 #ifdef MZ_USE_PLACES
   if (postmaster_and_master_gc(gc) && !switching_master) {
@@ -5163,10 +6329,18 @@ static void garbage_collect(NewGC *gc, int force_full, int no_full, int switchin
     reset_nursery(gc);
   TIME_STEP("reset nursurey");
 #ifdef NEWGC_BTC_ACCOUNT
-  if (gc->gc_full && postmaster_and_place_gc(gc))
-    BTC_do_accounting(gc);
+  if ((gc->gc_full || (gc->finished_incremental && !gc->accounted_incremental))
+      && postmaster_and_place_gc(gc)) {
+    BTC_do_accounting(gc, no_full);
+    if (!gc->gc_full && mark_stack_is_empty(gc->acct_mark_stack))
+      gc->accounted_incremental = 1;
+  }
+#else
+  if (gc->finished_incremental)
+    gc->accounted_incremental = 1;
 #endif
   TIME_STEP("accounted");
+
   if (gc->generations_available) {
 #ifdef MZ_USE_PLACES
     if (postmaster_and_master_gc(gc) || switching_master)
@@ -5176,9 +6350,21 @@ static void garbage_collect(NewGC *gc, int force_full, int no_full, int switchin
       protect_old_pages(gc);
   }
   TIME_STEP("protect");
-  if (gc->gc_full)
+
+  if (gc->gc_full) {
     mmu_flush_freed_pages(gc->mmu);
+    gc->high_fragmentation = (mmu_memory_allocated_and_used(gc->mmu)
+                              > (HIGH_FRAGMENTATION_RATIO
+                                 * (gc->memory_in_use + gen_half_size_in_use(gc) + GEN0_MAX_SIZE)));
+  }
   reset_finalizer_tree(gc);
+
+  if (gc->gc_full || !gc->started_incremental)
+    check_marks_cleared(gc);
+  if (gc->gc_full)
+    check_live_sizes(gc);
+
+  clear_stack_pages(gc);
 
   TIME_STEP("reset");
 
@@ -5186,6 +6372,18 @@ static void garbage_collect(NewGC *gc, int force_full, int no_full, int switchin
   gc->in_unsafe_allocation_mode = 0;
 
   gc->no_further_modifications = 0;
+
+  if (gc->gc_full) {
+    free_incremental_admin_pages(gc);
+    if (gc->started_incremental) {
+      /* Flip `weak_incremental_done`, so we can detect
+         whether a weak reference is handled on a given pass. */
+      if (gc->weak_incremental_done == WEAK_INCREMENTAL_DONE_1)
+        gc->weak_incremental_done = WEAK_INCREMENTAL_DONE_2;
+      else
+        gc->weak_incremental_done = WEAK_INCREMENTAL_DONE_1;
+    }
+  }
 
   check_excessive_free_pages(gc);
 
@@ -5204,8 +6402,16 @@ static void garbage_collect(NewGC *gc, int force_full, int no_full, int switchin
     else 
       gc->since_last_full += 10;
   }
-  if(gc->gc_full)
+  had_started_incremental = gc->started_incremental;
+  if (gc->gc_full) {
     gc->last_full_mem_use = gc->memory_in_use;
+    gc->started_incremental = 0;
+    gc->all_marked_incremental = 0;
+    gc->finished_incremental = 0;
+    gc->accounted_incremental = 0;
+    gc->inc_prop_count = 0;
+    gc->incremental_requested = 0; /* request expires completely after a full GC */
+  }
 
   /* inform the system (if it wants us to) that we're done with collection */
   if (gc->GC_collect_end_callback)
@@ -5216,9 +6422,16 @@ static void garbage_collect(NewGC *gc, int force_full, int no_full, int switchin
     is_master = (gc == MASTERGC);
 #endif
     park_for_inform_callback(gc);
-    gc->GC_collect_inform_callback(is_master, gc->gc_full, 
-                                   old_mem_use + old_gen0, gc->memory_in_use, 
-                                   old_mem_allocated, mmu_memory_allocated(gc->mmu)+gc->phantom_count,
+    gc->GC_collect_inform_callback(is_master, gc->gc_full, had_started_incremental,
+                                   /* original memory use: */
+                                   old_mem_use + old_gen0,
+                                   /* new memory use; gen0_phantom_count can be non-zero due to
+                                      phantom-bytes record in generation 1/2: */
+                                   gc->memory_in_use + gc->gen0_phantom_count,
+                                   /* original memory use, including adminstrative structures: */
+                                   old_mem_allocated,
+                                   /* new memory use with adminstrative structures: */
+                                   mmu_memory_allocated(gc->mmu)+gc->phantom_count+gc->gen0_phantom_count,
                                    gc->child_gc_total);
     unpark_for_inform_callback(gc);
   }
@@ -5240,8 +6453,8 @@ static void garbage_collect(NewGC *gc, int force_full, int no_full, int switchin
 
   dump_page_map(gc, "post");
 
-  if (!gc->run_queue)
-    next_gc_full = 0;
+  if (gc->gc_full)
+    merge_run_queues(gc);
 
   /* Run any queued finalizers, EXCEPT in the case where this
      collection was triggered during the execution of a finalizer.
@@ -5278,13 +6491,12 @@ static void garbage_collect(NewGC *gc, int force_full, int no_full, int switchin
     gc->park[1] = gc->park_fsave[1];
     gc->park_fsave[0] = NULL;
     gc->park_fsave[1] = NULL;
-  } else
-    next_gc_full = 0;
+  }
 
   DUMP_HEAP(); CLOSE_DEBUG_FILE();
 
   if (next_gc_full)
-    gc->full_needed_for_finalization = 1;
+    gc->full_needed_again = 1;
 
 #ifdef MZ_USE_PLACES
   if (postmaster_and_place_gc(gc)) {
@@ -5295,7 +6507,7 @@ static void garbage_collect(NewGC *gc, int force_full, int no_full, int switchin
       if (sub_lmi.ran) {
         if (gc->GC_collect_inform_callback) {
           park_for_inform_callback(gc);
-          gc->GC_collect_inform_callback(1, sub_lmi.full,
+          gc->GC_collect_inform_callback(1, sub_lmi.full, 0,
                                          sub_lmi.pre_used, sub_lmi.post_used,
                                          sub_lmi.pre_admin, sub_lmi.post_admin,
                                          0);
@@ -5420,6 +6632,7 @@ static void free_gc(NewGC *gc)
 
   free_page_maps(gc->page_maps);
   free_all_stack_pages(gc);
+  free_incremental_admin_pages(gc);
 
   mmu_flush_freed_pages(gc->mmu);
   mmu_free(gc->mmu);

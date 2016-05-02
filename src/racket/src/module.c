@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2015 PLT Design Inc.
+  Copyright (c) 2004-2016 PLT Design Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -125,6 +125,7 @@ typedef struct Module_Begin_Expand_State {
   Scheme_Hash_Table *modidx_cache;
   Scheme_Object *redef_modname;
   Scheme_Object *end_statementss; /* list of lists */
+  Scheme_Object *modsrc; /* source for top-level module */
 } Module_Begin_Expand_State;
 
 static Scheme_Object *do_module_begin_at_phase(Scheme_Object *form, Scheme_Comp_Env *env, 
@@ -1127,8 +1128,6 @@ static Scheme_Object *_dynamic_require(int argc, Scheme_Object *argv[],
   }
 
   base_phase = env->phase;
-
-  scheme_prepare_compile_env(env);
 
   m = module_load(modname, env, errname);
   srcm = m;
@@ -3717,7 +3716,7 @@ static Scheme_Object *module_path_index_join(int argc, Scheme_Object *argv[])
                               "second argument", 1, argv[1],
                               "third argument", 1, argv[2],
                               NULL);
-      return scheme_get_submodule_empty_self_modidx(argv[2]);
+      return scheme_get_submodule_empty_self_modidx(argv[2], 0);
     }
   }
 
@@ -4025,31 +4024,49 @@ static Scheme_Object *resolved_module_path_to_modidx(Scheme_Object *rmp)
   return scheme_make_modidx(path, scheme_false, rmp);
 }
 
-Scheme_Object *scheme_get_submodule_empty_self_modidx(Scheme_Object *submodule_path)
+Scheme_Object *scheme_get_submodule_empty_self_modidx(Scheme_Object *submodule_path, int can_cache)
 {
   Scheme_Bucket *b;
+  Scheme_Object *modidx;
 
-  if (SCHEME_NULLP(submodule_path))
-    return empty_self_modidx;
+  if (SCHEME_NULLP(submodule_path)) {
+    if (can_cache)
+      return empty_self_modidx;
+    return scheme_make_modidx(scheme_false, scheme_false, empty_self_modname);
+  }
 
   if (!submodule_empty_modidx_table) {
     REGISTER_SO(submodule_empty_modidx_table);
     submodule_empty_modidx_table = scheme_make_weak_equal_table();
   }
 
-  scheme_start_atomic();
-  b = scheme_bucket_from_table(submodule_empty_modidx_table, (const char *)submodule_path);
-  if (!b->val) {
-    submodule_path = make_resolved_module_path_obj(scheme_make_pair(scheme_resolved_module_path_value(empty_self_modname),
-                                                                    submodule_path));
-    submodule_path = scheme_make_modidx(scheme_false, 
-                                        scheme_false,
-                                        submodule_path);
-    b->val = submodule_path;
+  if (can_cache) {
+    scheme_start_atomic();
+    b = scheme_bucket_from_table(submodule_empty_modidx_table, (const char *)submodule_path);
+    if (b->val)
+      modidx = scheme_ephemeron_value(b->val);
+    else
+      modidx = NULL;
+  } else {
+    b = NULL;
+    modidx = NULL;
   }
-  scheme_end_atomic_no_swap();
 
-  return b->val;
+  if (!modidx) {
+    modidx = make_resolved_module_path_obj(scheme_make_pair(scheme_resolved_module_path_value(empty_self_modname),
+                                                            submodule_path));
+    modidx = scheme_make_modidx(scheme_false, scheme_false, modidx);
+    if (b) {
+      modidx = scheme_make_ephemeron(submodule_path, modidx);
+      b->val = modidx;
+      modidx = scheme_ephemeron_value(modidx);
+    }
+  }
+
+  if (can_cache)
+    scheme_end_atomic_no_swap();
+
+  return modidx;
 }
 
 static Scheme_Object *_module_resolve_k(void);
@@ -4933,9 +4950,11 @@ static void lock_registry(Scheme_Env *env)
 static void unlock_registry(Scheme_Env *env)
 {
   Scheme_Object *lock;
-  lock = scheme_hash_get(env->module_registry->loaded, scheme_false);
-  scheme_post_sema(SCHEME_CAR(lock));
-  scheme_hash_set(env->module_registry->loaded, scheme_false, NULL);
+  if (env) {
+    lock = scheme_hash_get(env->module_registry->loaded, scheme_false);
+    scheme_post_sema(SCHEME_CAR(lock));
+    scheme_hash_set(env->module_registry->loaded, scheme_false, NULL);
+  }
 }
 
 XFORM_NONGCING static intptr_t make_key(int base_phase, int eval_exp, int eval_run)
@@ -5743,7 +5762,7 @@ static void start_module(Scheme_Module *m, Scheme_Env *env, int restart,
 static void do_prepare_compile_env(Scheme_Env *env, int base_phase, int pos)
 {
   Scheme_Object *v, *prev;
-  Scheme_Env *menv;
+  Scheme_Env *menv, *uenv;
   int need_lock;
 
   need_lock = wait_registry(env);
@@ -5764,14 +5783,17 @@ static void do_prepare_compile_env(Scheme_Env *env, int base_phase, int pos)
     }
     v = prev;
 
-    if (need_lock)
+    if (need_lock) {
       lock_registry(env);
+      uenv = env;
+    } else
+      uenv = NULL;
 
     while (SCHEME_NAMESPACEP(v)) {
       menv = (Scheme_Env *)v;
       v = menv->available_next[pos];
       menv->available_next[pos] = NULL;
-      BEGIN_ESCAPEABLE(unlock_registry, env);
+      BEGIN_ESCAPEABLE(unlock_registry, uenv);
       start_module(menv->module, menv->instance_env, 0,
                    NULL, 1, 0, base_phase,
                    scheme_null, 1);
@@ -7096,7 +7118,10 @@ static Scheme_Object *do_module(Scheme_Object *form, Scheme_Comp_Env *env,
   rmp = SCHEME_STX_VAL(nm);
   rmp = scheme_intern_resolved_module_path(rmp);
   m->modname = rmp;
-  m->modsrc = rmp;
+  if (super_bxs)
+    m->modsrc = super_bxs->modsrc;
+  else
+    m->modsrc = rmp;
 
   if (!SCHEME_NULLP(submodule_ancestry))
     submodule_path = scheme_append(submodule_path, scheme_make_pair(SCHEME_STX_VAL(nm), scheme_null));
@@ -7318,7 +7343,7 @@ static Scheme_Object *do_module(Scheme_Object *form, Scheme_Comp_Env *env,
 
   fm = scheme_stx_property(fm, module_name_symbol, scheme_resolved_module_path_value(rmp));
 
-  this_empty_self_modidx = scheme_get_submodule_empty_self_modidx(submodule_path);
+  this_empty_self_modidx = scheme_get_submodule_empty_self_modidx(submodule_path, 1);
 
   /* phase shift to replace self_modidx of previous expansion: */
   fm = scheme_stx_shift(fm, NULL, this_empty_self_modidx, self_modidx, NULL,
@@ -7974,17 +7999,17 @@ static Scheme_Object *shift_require_phase(Scheme_Object *e, Scheme_Object *phase
   Scheme_Object *l, *a;
 
   l = e;
-  if (SCHEME_STXP(l)) l = SCHEME_STX_VAL(l);
+  if (SCHEME_STXP(l)) l = scheme_stx_content(l);
   if (SCHEME_PAIRP(l)) {
     a = SCHEME_CAR(l);
-    if (SCHEME_STXP(a)) a = SCHEME_STX_VAL(a);
+    if (SCHEME_STXP(a)) a = scheme_stx_content(a);
 
     if (can_just_meta && SAME_OBJ(a, just_meta_symbol)) {
       /* Shift any `for-meta` within `just-meta`: */
       l = SCHEME_CDR(l);
       if (scheme_proper_list_length(l) >= 1) {
         a = SCHEME_CAR(l);
-        if (SCHEME_STXP(a)) a = SCHEME_STX_VAL(a);
+        if (SCHEME_STXP(a)) a = scheme_stx_content(a);
         if (SCHEME_FALSEP(a) || SCHEME_INTP(a) || SCHEME_BIGNUMP(a)) {
           e = scheme_null;
           for (l = SCHEME_CDR(l); SCHEME_PAIRP(l); l = SCHEME_CDR(l)) {
@@ -8002,7 +8027,7 @@ static Scheme_Object *shift_require_phase(Scheme_Object *e, Scheme_Object *phase
       l = SCHEME_CDR(l);
       if (SCHEME_PAIRP(l)) {
         a = SCHEME_CAR(l);
-        if (SCHEME_STXP(a)) a = SCHEME_STX_VAL(a);
+        if (SCHEME_STXP(a)) a = scheme_stx_content(a);
         if (SCHEME_FALSEP(a)) {
           return e;
         } else if (SCHEME_INTP(a) || SCHEME_BIGNUMP(a)) {
@@ -8223,6 +8248,7 @@ static Scheme_Object *do_module_begin(Scheme_Object *orig_form, Scheme_Comp_Env 
   bxs->modidx_cache = modidx_cache;
   bxs->redef_modname = redef_modname;
   bxs->end_statementss = scheme_null;
+  bxs->modsrc = env->genv->module->modsrc;
 
   if (env->genv->module->super_bxs_info) {
     /* initialize imports that are available for export from the enclosing module's
@@ -8747,7 +8773,7 @@ static Scheme_Object *do_module_begin_at_phase(Scheme_Object *form, Scheme_Comp_
     return fm;
   }
 #endif
-  
+
   if (*bxs->_num_phases < phase + 1)
     *bxs->_num_phases = phase + 1;
 
@@ -9337,6 +9363,7 @@ static Scheme_Object *do_module_begin_at_phase(Scheme_Object *form, Scheme_Comp_
 	  /************ module[*] *************/
           /* check outer syntax & name, then expand pre-module or remember for post-module pass */
           int k;
+
           e = handle_submodule_form(who,
                                     e, env, phase,
                                     rn_set, observer,
@@ -10369,39 +10396,28 @@ static Scheme_Object **compute_indirects(Scheme_Env *genv,
 {
   int i, count, j, start, end;
   Scheme_Bucket **bs, *b;
-  Scheme_Object **exsns = pt->provide_src_names, **exis;
+  Scheme_Object **exsns = pt->provide_src_names, **exss = pt->provide_srcs, **exis;
   int exicount;
   Scheme_Bucket_Table *t;
 
   if (vars) {
     start = 0;
     end = pt->num_provides; /* check both vars & syntax, in case of rename transformer */
+    t = genv->toplevel;
   } else {
     start = pt->num_var_provides;
     end = pt->num_provides;
-  }
-
-  if (vars)
-    t = genv->toplevel;
-  else
     t = genv->syntax;
-    
-
-  if (!t)
-    count = 0;
-  else {
-    bs = t->buckets;
-    for (count = 0, i = t->size; i--; ) {
-      b = bs[i];
-      if (b && b->val)
-        count++;
-    }
   }
+
+  count = (t ? t->count : 0);
 
   if (!count) {
     *_count = 0;
     return NULL;
   }
+
+  bs = t->buckets;
   
   exis = MALLOC_N(Scheme_Object *, count);
 
@@ -10414,7 +10430,8 @@ static Scheme_Object **compute_indirects(Scheme_Env *genv,
       
       /* If the name is directly provided, no need for indirect... */
       for (j = start; j < end; j++) {
-        if (SAME_OBJ(name, exsns[j]))
+        if (SAME_OBJ(name, exsns[j])
+            && SCHEME_FALSEP(exss[j]))
           break;
       }
 
@@ -12584,12 +12601,14 @@ static Scheme_Object *check_require_form(Scheme_Env *env, Scheme_Object *form)
 }
 
 static Scheme_Object *
-do_require_execute(Scheme_Env *env, Scheme_Object *form)
+do_require_execute(Scheme_Env *env, Scheme_Object *form, int to_context)
 {
   Scheme_Object *modidx;
 
-  /* Use the current top-level context: */
-  form = scheme_stx_from_generic_to_module_context(form, env->stx_context);
+  if (to_context) {
+    /* Use the current top-level context: */
+    form = scheme_stx_from_generic_to_module_context(form, env->stx_context);
+  }
 
   /* Check for collisions again, in case there's a difference between
      compile and run times: */
@@ -12611,7 +12630,8 @@ Scheme_Object *
 scheme_top_level_require_execute(Scheme_Object *data)
 {
   do_require_execute(scheme_environment_from_dummy(SCHEME_PTR1_VAL(data)),
-                     SCHEME_PTR2_VAL(data));
+                     SCHEME_PTR2_VAL(data),
+                     1);
   return scheme_void;
 }
 
@@ -12677,7 +12697,7 @@ Scheme_Object *scheme_toplevel_require_for_expand(Scheme_Object *module_path,
 
   form = scheme_revert_use_site_scopes(form, cenv);
 
-  do_require_execute(cenv->genv, form);
+  do_require_execute(cenv->genv, form, 0);
 
   return form;
 }

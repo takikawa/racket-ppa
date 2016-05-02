@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2015 PLT Design Inc.
+  Copyright (c) 2004-2016 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -3617,17 +3617,41 @@ scheme_expt(int argc, Scheme_Object *argv[])
           }
 	}
       }
-    } else if ((d < 0.0) && (d > -1.0)) {
+    } else if (SCHEME_BIGNUMP(e) && SCHEME_BIGPOS(e)) {
       /* If `e` is a positive bignum, then the result should be zero,
          but we won't get that result if conversion produces infinity */
-      if (SCHEME_BIGNUMP(e) && SCHEME_BIGPOS(e)) {
+      double e_dbl;
 #ifdef MZ_USE_SINGLE_FLOATS
-        int sgl = !SCHEME_DBLP(n);
+      int sgl = !SCHEME_DBLP(n);
 #endif
+      if ((d < 0.0) && (d > -1.0)) {
         if (SCHEME_FALSEP(scheme_odd_p(1, &e)))
           return SELECT_EXPT_PRECISION(scheme_zerof, scheme_zerod);
         else
           return SELECT_EXPT_PRECISION(scheme_nzerof, scheme_nzerod);
+      }
+      /* If d is negative, and `e` is a large enough bignum which would
+         be converted to infinity, this would return a complex NaN.
+         Instead, we want to return (positive of negative) infinity.
+         See discussion in Github issue 1148. */
+#ifdef MZ_USE_SINGLE_FLOATS
+      if (sgl) {
+        /* Need to go through singles to get right overflow behavior. */
+        e_dbl = (double)(scheme_bignum_to_float(e));
+      } else {
+        e_dbl = scheme_bignum_to_double(e);
+      }
+#else
+      e_dbl = scheme_bignum_to_double(e);
+#endif
+      if ((d < 0.0) && MZ_IS_POS_INFINITY(e_dbl)) {
+        if (SCHEME_TRUEP(scheme_odd_p(1, &e))) {
+          return SELECT_EXPT_PRECISION(scheme_single_minus_inf_object,
+                                       scheme_minus_inf_object);
+        } else {
+          return SELECT_EXPT_PRECISION(scheme_single_inf_object,
+                                       scheme_inf_object);
+        }
       }
     }
 
@@ -3804,6 +3828,21 @@ static Scheme_Object *magnitude(int argc, Scheme_Object *argv[])
       a[0] = i;
       return scheme_exact_to_inexact(1, a);
     }
+#ifdef MZ_USE_SINGLE_FLOATS
+    if (SCHEME_FLTP(i)) {
+      float f;
+      f = SCHEME_FLT_VAL(i);
+      if (MZ_IS_POS_INFINITY((double) f)) {
+        if (SCHEME_FLTP(r)) { /* `r` is either a single-precision float or exact 0 */
+          f = SCHEME_FLT_VAL(r);
+          if (MZ_IS_NAN((double) f)) {
+            return scheme_single_nan_object;
+          }
+          return scheme_single_inf_object;
+        }
+      }
+    }
+#endif
     if (SCHEME_FLOATP(i)) {
       double d;
       d = SCHEME_FLOAT_VAL(i);

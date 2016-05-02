@@ -125,13 +125,27 @@
                               =>
                               (lambda (ps)
                                 (unless (= (length ps) (length acc))
-                                  (raise-syntax-error
-                                   'match
-                                   (format "~a structure ~a: expected ~a but got ~a"
-                                           "wrong number for fields for"
-                                           (syntax->datum struct-name) (length acc)
-                                           (length ps))
-                                   stx pats))
+                                  (when (< (length acc) (length ps))
+                                    (raise-syntax-error
+                                     'match
+                                     (format "~a structure ~a: expected ~a but got ~a"
+                                             "excess number of fields for"
+                                             (syntax->datum struct-name) (length acc)
+                                             (length ps))
+                                     stx pats))
+                                  (when (> (length acc) (length ps))
+                                     (raise-syntax-error
+                                       'match
+                                       (format "~a structure ~a: expected ~a but got ~a; ~a ~a"
+                                               "insufficient number of fields for"
+                                               (syntax->datum struct-name) (length acc)
+                                               (length ps)
+                                               "missing fields"
+                                               (list-tail
+                                                 (for/list [(i (in-list acc))]
+                                                           (symbol->string (syntax->datum i)))
+                                                 (length ps)))
+                                       stx pats)))
                                 (map parse ps))]
                              [else (raise-syntax-error
                                     'match

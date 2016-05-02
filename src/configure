@@ -4792,6 +4792,11 @@ fi
     PREFLAGS="$PREFLAGS -DOS_X -D_DARWIN_UNLIMITED_SELECT"
     try_kqueue_syscall=yes
 
+    # Although select() generally works as well as poll() on OS X,
+    # getdtablesize() appears not to be constant within a process,
+    # and that breaks static allocation of fd_sets
+    try_poll_syscall=yes
+
     # ".a" is typically not useful, since we always build a ".dylib":
     if test "${enable_libs}" == "" ; then
       INSTALL_LIBS_ENABLE=no-install
@@ -5795,6 +5800,32 @@ $as_echo "#define MZ_HAS_BUILTIN_POPCOUNT 1" >>confdefs.h
 
 fi
 
+ msg="for __builtin_clz"
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking $msg" >&5
+$as_echo_n "checking $msg... " >&6; }
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+    int main(int argc, char **argv) {
+      unsigned int i = argc;
+      return __builtin_clz(i);
+    }
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  has_builtin_clz=yes
+else
+  has_builtin_clz=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $has_builtin_clz" >&5
+$as_echo "$has_builtin_clz" >&6; }
+if test "${has_builtin_clz}" = "yes" ; then
+
+$as_echo "#define MZ_HAS_BUILTIN_CLZ 1" >>confdefs.h
+
+fi
+
 if test "${enable_backtrace}" = "yes" ; then
   GC2OPTIONS="$GC2OPTIONS -DMZ_GC_BACKTRACE"
 fi
@@ -6581,6 +6612,11 @@ $as_echo "$use_extflonums" >&6; }
 $as_echo "#define MZ_NO_EXTFLONUMS 1" >>confdefs.h
 
   fi
+fi
+
+if test "${enable_extflonum}" = "yes" ; then
+  $as_echo "#define MZ_INSIST_EXTFLONUMS 1" >>confdefs.h
+
 fi
 
 ############## libffi ################
