@@ -571,6 +571,7 @@ static Scheme_Env *place_instance_init(void *stack_base, int initial_main_os_thr
   scheme_init_error_config();
 
 /* BEGIN PRIMITIVE MODULES */
+  scheme_init_linklet(env);
 #ifndef NO_TCP_SUPPORT
   scheme_init_network(env);
 #endif
@@ -2147,7 +2148,7 @@ static Scheme_Object *variable_phase(int argc, Scheme_Object *argv[])
 
 static Scheme_Object *variable_base_phase(int argc, Scheme_Object *argv[])
 {
-  return do_variable_namespace("variable-reference->phase", 3, argc, argv);
+  return do_variable_namespace("variable-reference->base-phase", 3, argc, argv);
 }
 
 static Scheme_Object *variable_inspector(int argc, Scheme_Object *argv[])
@@ -2256,9 +2257,7 @@ now_transforming_with_lifts(int argc, Scheme_Object *argv[])
 {
   Scheme_Comp_Env *env = scheme_current_thread->current_local_env;
 
-  while (env && !env->lifts) {
-    env = env->next;
-  }
+  env = scheme_get_env_for_lifts(env);
 
   if (env)
     if (SCHEME_FALSEP(SCHEME_VEC_ELS(env->lifts)[0]))

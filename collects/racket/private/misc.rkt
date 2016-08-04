@@ -3,8 +3,9 @@
 ;; #%misc : file utilities, etc. - remaining functions
 
 (module misc '#%kernel
-  (#%require '#%utils ; built into racket
-             "small-scheme.rkt" "define.rkt"
+  (#%require "small-scheme.rkt" "define.rkt" "path.rkt" "old-path.rkt"
+             "path-list.rkt" "executable-path.rkt" "collect.rkt"
+             "reading-param.rkt" "load.rkt"
              (for-syntax '#%kernel "qq-and-or.rkt" "stx.rkt" "stxcase-scheme.rkt" "stxcase.rkt"))
   
   ;; -------------------------------------------------------------------------
@@ -245,7 +246,9 @@
 
   (#%provide define-syntax-rule
              rationalize 
-             path-string? path-replace-suffix path-add-suffix 
+             path-string?
+             path-replace-suffix path-add-suffix
+             path-replace-extension path-add-extension
              normal-case-path reroot-path
              read-eval-print-loop
              load/cd

@@ -12,7 +12,15 @@
                        #:threads [threads? #f]
                        #:render  [renderer text:render]
                        #:periodic-renderer [periodic-renderer #f]
-                       #:use-errortrace? [et? #f])
+                       #:use-errortrace? [et? #f]
+                       #:order [order 'topological])
+  (unless (member order '(topological self total))
+    (raise-argument-error
+      'profile-thunk "(or/c 'topological 'self 'total)" order))
+  (define (call-renderer renderer profile)
+    (if (procedure-arity-includes? renderer 2)
+        (renderer profile order)
+        (renderer profile)))
   (define cust (and threads? (make-custodian (current-custodian))))
   (define sampler (create-sampler (if threads?
                                     (list cust (current-thread))
@@ -25,7 +33,7 @@
                [renderer (cadr periodic-renderer)])
            (define (loop)
              (sleep delay)
-             (renderer (analyze-samples (sampler 'get-snapshots)))
+             (call-renderer renderer (analyze-samples (sampler 'get-snapshots)))
              (loop))
            (thread loop))))
   (define (run) (for/last ([i (in-range rpt)]) (thunk)))
@@ -38,7 +46,7 @@
                 (run)))
     (when periodic-thread (kill-thread periodic-thread))
     (sampler 'stop)
-    (renderer (analyze-samples (sampler 'get-snapshots)))))
+    (call-renderer renderer (analyze-samples (sampler 'get-snapshots)))))
 
 (define-syntax (profile stx)
   (syntax-case stx ()

@@ -541,9 +541,18 @@ returned by @racket[e], protected by a contract ensuring that it has type
 
 @ex[(cast 3 Integer)
 (eval:error (cast 3 String))
-(cast (lambda: ([x : Any]) x) (String -> String))
+(cast (lambda ([x : Any]) x) (String -> String))
+((cast (lambda ([x : Any]) x) (String -> String)) "hello")
 ]
-}
+
+The value is actually protected with two contracts. The second contract checks
+the new type, but the first contract is put there to enforce the old type, to
+protect higher-order uses of the value.
+
+@ex[
+((cast (lambda ([s : String]) s) (Any -> Any)) "hello")
+(eval:error ((cast (lambda ([s : String]) s) (Any -> Any)) 5))
+]}
 
 @defform*[[(inst e t ...)
            (inst e t ... t ooo bound)]]{
@@ -691,7 +700,6 @@ but provides additional annotations to assist the typechecker.
   prompt tag. If the wrapped value is used in untyped code, a contract error
   will be raised.
 
-  @;{
   @ex[
     (module typed typed/racket
       (provide do-abort)
@@ -708,8 +716,8 @@ but provides additional annotations to assist the typechecker.
         (default-continuation-prompt-tag)
         (code:comment "the function cannot be passed an argument")
         (λ (f) (f 3))))
-    (require 'untyped)
-  ]}
+    (eval:error (require 'untyped))
+  ]
 }
 
 @defform[(#%module-begin form ...)]{

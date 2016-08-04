@@ -71,6 +71,7 @@
     (rename-let-values . "Rename bound variables")
     (rename-letrec-values . "Rename bound variables")
     (rename-lsv       . "Rename bound variables")
+    (rename-block     . "Introduce scope for internal definition context")
     (lsv-remove-syntax . "Remove syntax bindings")
 
     (resolve-variable . "Resolve variable (remove extra marks)")

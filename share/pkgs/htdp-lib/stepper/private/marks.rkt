@@ -4,8 +4,8 @@
          racket/contract
          "my-macros.rkt"
          "shared.rkt"
-         "syntax-property.rkt"
-         #;(file "/Users/clements/clements/scheme-scraps/eli-debug.ss"))
+         "shared-typed.rkt"
+         "syntax-property.rkt")
 
 (define-struct full-mark-struct (source label bindings values))
 

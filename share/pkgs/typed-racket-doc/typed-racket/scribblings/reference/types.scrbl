@@ -568,29 +568,33 @@ functions and continuation mark functions.
 @section{Other Type Constructors}
 
 @defform*/subs[#:id -> #:literals (|@| * ... ! and or implies car cdr)
-               [(-> dom ... rng optional-filter)
+               [(-> dom ... rng opt-proposition)
                 (-> dom ... rest * rng)
                 (-> dom ... rest ooo bound rng)
 
-                (dom ... -> rng optional-filter)
+                (dom ... -> rng opt-proposition)
                 (dom ... rest * -> rng)
                 (dom ... rest ooo bound -> rng)]
                ([ooo #,(racket ...)]
                 [dom type
                      mandatory-kw
-                     optional-kw]
+                     opt-kw]
                 [mandatory-kw (code:line keyword type)]
-                [optional-kw [keyword type]]
-                [optional-filter (code:line)
+                [opt-kw [keyword type]]
+                [opt-proposition (code:line)
                                  (code:line : type)
-                                 (code:line : pos-filter neg-filter object)]
-                [pos-filter (code:line)
-                            (code:line #:+ proposition ...)]
-                [neg-filter (code:line)
-                            (code:line #:- proposition ...)]
+                                 (code:line : pos-proposition
+				              neg-proposition
+					      object)]
+                [pos-proposition (code:line)
+                                 (code:line #:+ proposition ...)]
+                [neg-proposition (code:line)
+                                 (code:line #:- proposition ...)]
                 [object (code:line)
                         (code:line #:object index)]
-                [proposition type
+                [proposition Top
+		             Bot
+			     type
                              (! type)
                              (type |@| path-elem ... index)
                              (! type |@| path-elem ... index)
@@ -604,15 +608,15 @@ functions and continuation mark functions.
   The type of functions from the (possibly-empty)
   sequence @racket[dom ....] to the @racket[rng] type.
 
-  @ex[(λ: ([x : Number]) x)
-      (λ: () 'hello)]
+  @ex[(λ ([x : Number]) x)
+      (λ () 'hello)]
 
   The second form specifies a uniform rest argument of type @racket[rest], and the
   third form specifies a non-uniform rest argument of type
   @racket[rest] with bound @racket[bound]. The bound refers to the type variable
   that is in scope within the rest argument type.
 
-  @ex[(λ: ([x : Number] . [y : String *]) (length y))
+  @ex[(λ ([x : Number] . [y : String *]) (length y))
       ormap]
 
   In the third form, the @racket[...] introduced by @racket[ooo] is literal,
@@ -629,20 +633,24 @@ functions and continuation mark functions.
       (is-zero? 2 #:equality =)
       (is-zero? 2 #:equality eq? #:zero 2.0)]
 
-  When @racket[optional-filter] is provided, it specifies the @emph{filter} for the
-  function type (for an introduction to filters, see @tr-guide-secref["filters-and-predicates"]).
-  For almost all use cases, only the simplest form of filters, with a single type after a
+  When @racket[opt-proposition] is provided, it specifies the
+  @emph{proposition} for the function type (for an introduction to
+  propositions in Typed Racket, see
+  @tr-guide-secref["propositions-and-predicates"]).  For almost all use
+  cases, only the simplest form of propositions, with a single type after a
   @racket[:], are necessary:
 
   @ex[string?]
 
-  The filter specifies that when @racket[(string? x)] evaluates to a true value for
-  a conditional branch, the variable @racket[x] in that branch can be assumed to have
-  type @racket[String]. Likewise, if the expression evaluates to @racket[#f] in a branch,
-  the variable @emph{does not} have type @racket[String].
+  The proposition specifies that when @racket[(string? x)] evaluates to a
+  true value for a conditional branch, the variable @racket[x] in that
+  branch can be assumed to have type @racket[String]. Likewise, if the
+  expression evaluates to @racket[#f] in a branch, the variable
+  @emph{does not} have type @racket[String].
 
-  In some cases, asymmetric type information is useful in filters. For example, the
-  @racket[filter] function's first argument is specified with only a positive filter:
+  In some cases, asymmetric type information is useful in the
+  propositions. For example, the @racket[filter] function's first
+  argument is specified with only a positive proposition:
 
   @ex[filter]
 
@@ -653,7 +661,7 @@ functions and continuation mark functions.
   Conversely, @racket[#:-] specifies that a function provides information for the
   false branch of a conditional.
 
-  The other filter proposition cases are rarely needed, but the grammar documents them
+  The other proposition cases are rarely needed, but the grammar documents them
   for completeness. They correspond to logical operations on the propositions.
 
   The type of functions can also be specified with an @emph{infix} @racket[->]
@@ -695,7 +703,7 @@ functions and continuation mark functions.
 
   @ex[(: +all (->* (Integer) #:rest Integer (Listof Integer)))
       (define (+all inc . rst)
-        (map (λ: ([x : Integer]) (+ x inc)) rst))
+        (map (λ ([x : Integer]) (+ x inc)) rst))
       (+all 20 1 2 3)]
 
   Both the mandatory and optional argument lists may contain keywords paired
@@ -710,9 +718,9 @@ functions and continuation mark functions.
 
 @deftogether[(
 @defidform[Top]
-@defidform[Bot])]{ These are filters that can be used with @racket[->].
-  @racket[Top] is the filter with no information.
-  @racket[Bot] is the filter which means the result cannot happen.
+@defidform[Bot])]{ These are propositions that can be used with @racket[->].
+  @racket[Top] is the propositions with no information.
+  @racket[Bot] is the propositions which means the result cannot happen.
 }
 
 
@@ -734,7 +742,11 @@ functions and continuation mark functions.
 
 
 @defform[(U t ...)]{is the union of the types @racket[t ...].
- @ex[(λ: ([x : Real])(if (> 0 x) "yes" 'no))]}
+ @ex[(λ ([x : Real]) (if (> 0 x) "yes" 'no))]}
+
+@defform[(∩ t ...)]{is the intersection of the types @racket[t ...].
+ @ex[((λ #:forall (A) ([x : (∩ Symbol A)]) x) 'foo)]}
+
 @defform[(case-> fun-ty ...)]{is a function that behaves like all of
   the @racket[fun-ty]s, considered in order from first to last.  The @racket[fun-ty]s must all be function
   types constructed with @racket[->].

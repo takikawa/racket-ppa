@@ -52,13 +52,13 @@ constraints.
 various operations listed in this section of the manual, and various
 ordinary Racket values that double as contracts, including
 @itemize[
-@item{@tech{symbols}, @tech{booleans}, @tech{characters}, @tech{keywords}, and
+@item{@tech{symbols}, @tech{booleans}, @tech{keywords}, and
 @racket[null], which are treated as contracts that recognize
 themselves, using @racket[eq?], }
 
-@item{@tech{strings}, @tech{byte strings}, @racket[+nan.0], and
-       @racket[+nan.f], which are treated as contracts
-that recognize themselves using @racket[equal?], }
+@item{@tech{strings}, @tech{byte strings}, @tech{characters}, 
+      @racket[+nan.0], and @racket[+nan.f], which are treated
+      as contracts that recognize themselves using @racket[equal?], }
 
 @item{@tech{numbers} (except @racket[+nan.0] and
        @racket[+nan.f]), which are treated as contracts
@@ -125,6 +125,30 @@ and how they can be used to implement contracts.
 
 @section[#:tag "data-structure-contracts"]{Data-structure Contracts}
 @declare-exporting-ctc[racket/contract/base]
+
+@defproc[(flat-contract-with-reason [get-reason (-> any/c (or/c boolean? (-> blame? any)))])
+         flat-contract?]{
+  Provides a way to use flat contracts that, when a contract fails,
+  provide more information about the failure.
+
+  If @racket[get-reason] returns a boolean, then that boolean value is
+  treated as the predicate in a @tech{flat contract}. If it returns
+  a procedure, then it is treated similarly to returning @racket[#f],
+  except the result procedure is called to actually signal the contract
+  violation. 
+
+ @racketblock[(flat-contract-with-reason
+               (λ (val)
+                 (cond
+                   [(even? val) #t]
+                   [else
+                    (λ (blame)
+                      (define more-information ...do-some-complex-computation-here...)
+                      (raise-blame-error blame val
+                                         '(expected: "an even number" given: "~e"
+                                                     "and, here is more help: ~s")
+                                         val more-information))])))]
+}
 
 @defproc[(flat-named-contract [name any/c]
                               [flat-contract flat-contract?]
@@ -250,7 +274,53 @@ If all of the arguments are procedures or @tech{flat contracts},
 the result is a @tech{flat contract}.
 
 The contract produced by @racket[and/c] tests any value by applying
-the contracts in order, from left to right.}
+the contracts in order, from left to right.
+
+This means that @racket[and/c] can be used to guard predicates that are not
+total in contracts. For example, this contract is well-behaved, correctly
+blaming the definition of @racket[whoops-not-a-number] for not being
+a number:
+
+ @examples[#:eval (contract-eval) #:once
+           (eval:error
+            (define/contract whoops-not-a-number
+              (and/c real? even?)
+              "four"))]
+ but if the arguments to @racket[and/c] are reversed, then the contract itself raises
+ an error:
+ @examples[#:eval (contract-eval) #:once
+           (eval:error
+            (define/contract whoops-not-a-number
+              (and/c even? real?)
+              "four"))]
+
+ If more than one of the contracts are not @tech{flat contracts},
+ then the order in which the higher-order parts of the contract are tested
+ can be counter-intuitive. As an example, consider this function that
+ uses @racket[and/c] in a higher-order manner with contracts that
+ always succeed, but that print when they are called, in order for us
+ to see the order in which they are called.
+
+ @examples[#:eval (contract-eval) #:once
+           (define ((show-me n) x)
+             (printf "show-me ~a\n" n)
+             #t)
+           
+           (define/contract identity-with-complex-printing-contract
+             (and/c (-> (show-me 4) (show-me 5))
+                    (-> (show-me 3) (show-me 6))
+                    (-> (show-me 2) (show-me 7))
+                    (-> (show-me 1) (show-me 8)))
+             (λ (x) x))
+           
+           (identity-with-complex-printing-contract 101)]
+
+ The checking order is just like the usual ordering when a contract
+ is double-wrapped. The contract that is first put on has its domain checked
+ second but its range checked first and we see a similar pattern here in
+ this example, because @racket[and/c] simply applies the contracts in order.
+
+}
 
 
 @defproc[(not/c [flat-contract flat-contract?]) flat-contract?]{
@@ -2025,9 +2095,10 @@ accepted by the third argument to @racket[datum->syntax].
          flat-contract?]
 )]{
 
-These functions build simple higher-order contracts, @tech{chaperone contracts}, and @tech{flat contracts},
-respectively.  They both take the same set of three optional arguments: a name,
-a first-order predicate, and a blame-tracking projection.
+These functions build simple higher-order contracts, @tech{chaperone contracts},
+and @tech{flat contracts}, respectively.  They both take the same set of three
+optional arguments: a name, a first-order predicate, and a blame-tracking projection.
+For @racket[make-flat-contract], see also @racket[flat-contract-with-reason].
 
 The @racket[name] argument is any value to be rendered using @racket[display] to
 describe the contract when a violation occurs.  The default name for simple
@@ -2035,9 +2106,8 @@ higher-order contracts is @racketresult[anonymous-contract], for
 @tech{chaperone contracts} is @racketresult[anonymous-chaperone-contract], and for
 @tech{flat contracts} is @racketresult[anonymous-flat-contract].
 
-The first-order predicate @racket[test] can be used to determine which values
-the contract applies to; this must be the set of values for which the
-contract fails immediately without any higher-order wrapping.  This test is used
+The first-order predicate @racket[test] is used to determine which values
+the contract applies to.  This test is used
 by @racket[contract-first-order-passes?], and indirectly by @racket[or/c]
 and @racket[from-or/c] to determine which higher-order contract to wrap a
 value with when there are multiple higher-order contracts to choose from.
@@ -2071,7 +2141,12 @@ At least one of the @racket[late-neg-proj], @racket[proj],
 The projection arguments (@racket[late-neg-proj], @racket[proj], and
  @racket[val-first-proj]) must be in sync with the @racket[test] argument.
  In particular, if the test argument returns @racket[#f] for some value,
- then the projections must raise a blame error for that value.
+ then the projections must raise a blame error for that value and if the
+ test argument returns @racket[#t] for some value, then the projection must
+ not signal any blame for this value, unless there are higher-order interactions
+ later. In other words, for @tech{flat contracts}, the @racket[test] and
+ @racket[projection] arguments must check the same predicate (which is
+ why thee default projection uses the @racket[test] argument directly).
 
 Projections for @tech{chaperone contracts} must produce a value that passes
 @racket[chaperone-of?] when compared with the original, uncontracted value.

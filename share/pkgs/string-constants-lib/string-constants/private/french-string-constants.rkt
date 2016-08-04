@@ -1833,7 +1833,7 @@
   (install-pkg-dialog-title "Installation de paquetage")
   (install-pkg-source-label "Source du paquetage")
   (install-pkg-package-name "Nom du paquetage")
-  (install-pkg-package-source-desc "Une source de paquetage est un nom de paquetage, un fichier, un répertoire, un URL, ou une référence vers Github")
+  (install-pkg-package-source-desc "Une source de paquetage est un nom de paquetage, un fichier, un répertoire, un URL, ou une référence vers GitHub")
   (install-pkg-infer "Inférer")
   (install-pkg-use "Utiliser") ; as opposed to "Infer", label for text box
   (install-pkg-type-label "Type de source de paquetage")
@@ -1842,7 +1842,7 @@
   (install-pkg-dir-url "Répertoire distant")
   (install-pkg-file-url "Fichier distant")
   (install-pkg-git "Entrepôt Git")
-  (install-pkg-github "Github")
+  (install-pkg-github "GitHub")
   (install-pkg-name "Nom (consultation du résolveur)")
   (install-pkg-inferred-as "Le type inféré est ~a") ; ~a gets install-pkg-{file,dir,...}
   (install-pkg-link-dirs "Lien vers un répertoire local")

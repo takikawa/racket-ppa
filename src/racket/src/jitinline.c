@@ -28,12 +28,21 @@
 #include "jit.h"
 
 static Scheme_Object *extract_one_cc_mark_to_tag(Scheme_Object *, Scheme_Object *, Scheme_Object *);
+static Scheme_Object *equal_as_bool(Scheme_Object *a, Scheme_Object *b);
 
 #define JITINLINE_TS_PROCS
 #ifndef CAN_INLINE_ALLOC
 # define JIT_BOX_TS_PROCS
 #endif
 #include "jit_ts.c"
+
+static Scheme_Object *equal_as_bool(Scheme_Object *a, Scheme_Object *b)
+{
+  if (scheme_equal(a, b))
+    return scheme_true;
+  else
+    return scheme_false;
+}
 
 #ifdef MZ_USE_FUTURES
 static Scheme_Object *ts_scheme_make_fsemaphore(int argc, Scheme_Object **argv) 
@@ -363,6 +372,96 @@ static int generate_inlined_type_test(mz_jit_state *jitter, Scheme_App2_Rec *app
     }
     (void)jit_movi_p(dest, scheme_false);
     mz_patch_ucbranch(ref2);
+  }
+
+  __END_SHORT_JUMPS__(branch_short);
+
+  return 1;
+}
+
+static int generate_inlined_immutable_test(mz_jit_state *jitter, Scheme_App2_Rec *app,
+                                           Branch_Info *for_branch, int branch_short,
+                                           int dest)
+{
+  GC_CAN_IGNORE jit_insn *ref, *ref2, *ref3, *ref4, *ref5;
+  GC_CAN_IGNORE jit_insn *ref6, *ref7, *ref8, *ref9;
+
+  LOG_IT(("inlined %s\n", ((Scheme_Primitive_Proc *)app->rator)->name));
+
+  mz_runstack_skipped(jitter, 1);
+
+  scheme_generate_non_tail(app->rand, jitter, 0, 1, 0);
+  CHECK_LIMIT();
+
+  mz_runstack_unskipped(jitter, 1);
+
+  mz_rs_sync();
+
+  __START_SHORT_JUMPS__(branch_short);
+
+  /* Note that we distrurb R0 in the case of a chaperone, so don't try
+     to save its status for a branch. */
+
+  if (for_branch) {
+    scheme_prepare_branch_jump(jitter, for_branch);
+    CHECK_LIMIT();
+  }
+
+  ref = jit_bmsi_ul(jit_forward(), JIT_R0, 0x1);
+  jit_ldxi_s(JIT_R1, JIT_R0, &((Scheme_Object *)0x0)->type);
+  __START_INNER_TINY__(branch_short);
+  ref3 = jit_bnei_i(jit_forward(), JIT_R1, scheme_chaperone_type);
+  jit_ldxi_p(JIT_R0, JIT_R0, (intptr_t)&((Scheme_Chaperone *)0x0)->val);
+  jit_ldxi_s(JIT_R1, JIT_R0, &((Scheme_Object *)0x0)->type);
+  mz_patch_branch(ref3);
+  __END_INNER_TINY__(branch_short);
+  CHECK_LIMIT();
+
+  /* check for immutable hash: */
+  __START_INNER_TINY__(branch_short);
+  ref3 = jit_blti_i(jit_forward(), JIT_R1, scheme_hash_tree_type);
+  __END_INNER_TINY__(branch_short);
+  ref4 = jit_blei_i(jit_forward(), JIT_R1, scheme_hash_tree_indirection_type);
+  __START_INNER_TINY__(branch_short);
+  mz_patch_branch(ref3);
+  __END_INNER_TINY__(branch_short);
+  
+  ref5 = jit_beqi_i(jit_forward(), JIT_R1, scheme_vector_type);
+  ref6 = jit_beqi_i(jit_forward(), JIT_R1, scheme_char_string_type);
+  ref7 = jit_beqi_i(jit_forward(), JIT_R1, scheme_byte_string_type);
+  ref8 = jit_bnei_i(jit_forward(), JIT_R1, scheme_box_type);
+  CHECK_LIMIT();
+    
+  /* still need to check for "immutable" flag */
+  mz_patch_branch(ref5);
+  mz_patch_branch(ref6);
+  mz_patch_branch(ref7);
+  jit_ldxi_s(JIT_R2, JIT_R0, &MZ_OPT_HASH_KEY((Scheme_Inclhash_Object *)0x0));
+  ref9 = jit_bmci_ul(jit_forward(), JIT_R2, 0x1);
+
+  /* is immutable if we get here */
+  mz_patch_branch(ref4);
+  
+  if (for_branch) {
+    scheme_add_branch_false(for_branch, ref);
+    scheme_add_branch_false(for_branch, ref8);
+    scheme_add_branch_false(for_branch, ref9);
+
+    scheme_branch_for_true(jitter, for_branch);
+  } else {
+    (void)jit_movi_p(dest, scheme_true);
+    __START_INNER_TINY__(branch_short);
+    ref2 = jit_jmpi(jit_forward());
+    __END_INNER_TINY__(branch_short);
+  
+    mz_patch_branch(ref);
+    mz_patch_branch(ref8);
+    mz_patch_branch(ref9);
+
+    (void)jit_movi_p(dest, scheme_false);
+    __START_INNER_TINY__(branch_short);
+    mz_patch_ucbranch(ref2);
+    __END_INNER_TINY__(branch_short);
   }
 
   __END_SHORT_JUMPS__(branch_short);
@@ -1082,6 +1181,9 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
     return 1;
   } else if (IS_NAMED_PRIM(rator, "odd?")) {
     scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 0, CMP_ODDP, 0, for_branch, branch_short, 0, 0, NULL, dest);
+    return 1;
+  } else if (IS_NAMED_PRIM(rator, "immutable?")) {
+    generate_inlined_immutable_test(jitter, app, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "list?")
              || IS_NAMED_PRIM(rator, "list-pair?")) {
@@ -2630,7 +2732,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
     
     return 1;
   }  else if (IS_NAMED_PRIM(rator, "equal?")) {
-    GC_CAN_IGNORE jit_insn *ref_f, *ref_d;
+    GC_CAN_IGNORE jit_insn *ref_f;
     GC_CAN_IGNORE jit_insn *refr USED_ONLY_FOR_FUTURES;
 
     scheme_generate_two_args(app->rand1, app->rand2, jitter, 0, 2);
@@ -2642,7 +2744,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
     jit_prepare(2);
     jit_pusharg_p(JIT_R0);
     jit_pusharg_p(JIT_R1);
-    mz_finish_prim_lwe(ts_scheme_equal, refr);
+    mz_finish_prim_lwe(ts_equal_as_bool, refr);
     jit_retval(dest);
     CHECK_LIMIT();
 
@@ -2653,19 +2755,10 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
       CHECK_LIMIT();
     }
     
-    ref_f = jit_beqi_i(jit_forward(), JIT_R0, 0);
-
     if (for_branch) {
+      ref_f = jit_beqi_p(jit_forward(), dest, scheme_false);
       scheme_add_branch_false(for_branch, ref_f);
       scheme_branch_for_true(jitter, for_branch);
-    } else {
-      (void)jit_movi_p(dest, scheme_true);
-      ref_d = jit_jmpi(jit_forward());
-      
-      mz_patch_branch(ref_f);
-      (void)jit_movi_p(dest, scheme_false);
-
-      mz_patch_ucbranch(ref_d);
     }
 
     __END_SHORT_JUMPS__(branch_short);

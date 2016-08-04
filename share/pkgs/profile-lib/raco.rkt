@@ -3,7 +3,8 @@
 (require racket/cmdline
          raco/command-name
          errortrace/errortrace-lib
-         "main.rkt" "raco-utils.rkt")
+         "main.rkt" "raco-utils.rkt"
+         (prefix-in text: "render-text.rkt"))
 
 ;; raco profile
 ;; profile the main submodule (if there is one), or the top-level module
@@ -12,6 +13,7 @@
 (define iterations #f)
 (define threads? #f)
 (define use-errortrace? #f)
+(define order 'topological)
 (define file
   (command-line #:program (short-program+command-name)
                 #:once-each
@@ -33,6 +35,16 @@
                 [("--use-errortrace")
                  "Use errortrace mode"
                  (set! use-errortrace? #t)]
+                #:once-any
+                [("--topological")
+                 "Order functions topologically (the default)"
+                 (set! order 'topological)]
+                [("--self")
+                 "Order functions by self time"
+                 (set! order 'self)]
+                [("--total")
+                 "Order functions by total time"
+                 (set! order 'total)]
                 #:args (filename)
                 filename))
 
@@ -49,20 +61,24 @@
          (profile-thunk t
                         #:delay delay
                         #:repeat iterations
+                        #:order order
                         #:threads threads?
                         #:use-errortrace? use-errortrace?)]
         [delay
           (profile-thunk t
                          #:delay delay
+                         #:order order
                          #:threads threads?
                          #:use-errortrace? use-errortrace?)]
         [iterations
          (profile-thunk t
                         #:repeat iterations
+                        #:order order
                         #:threads threads?
                         #:use-errortrace? use-errortrace?)]
         [else
          (profile-thunk t
+                        #:order order
                         #:threads threads?
                         #:use-errortrace? use-errortrace?)]))
 

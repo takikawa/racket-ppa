@@ -368,7 +368,7 @@ static void check_excessive_free_pages(NewGC *gc) {
      We choose 4 instead of 2 for "excessive" because a block cache (when
      available) has a fill factor of 2, and flushing will not reduce that. */
   if (mmu_memory_allocated(gc->mmu) > ((gc->used_pages << (LOG_APAGE_SIZE + 2)))) {
-    mmu_flush_freed_pages(gc->mmu);
+    mmu_flush_freed_pages(gc->mmu, 1);
   }
 }
 
@@ -3223,11 +3223,17 @@ static void promote_marked_gen0_big_page(NewGC *gc, mpage *page) {
 #endif
 }
 
+#ifdef MZ_GC_BACKTRACE
+# define BACKTRACE_DISABLES_RECUR 1
+#else
+# define BACKTRACE_DISABLES_RECUR 0
+#endif
+
 static void mark_recur_or_push_ptr(struct NewGC *gc, void *p, int is_a_master_page, int inc_gen1)
 {
   objhead *ohead = OBJPTR_TO_OBJHEAD(p);
 
-  if ((gc->mark_depth < MAX_RECUR_MARK_DEPTH) && !is_a_master_page && !inc_gen1) {
+  if ((gc->mark_depth < MAX_RECUR_MARK_DEPTH) && !is_a_master_page && !inc_gen1 && !BACKTRACE_DISABLES_RECUR) {
     switch (ohead->type) {
     case PAGE_TAGGED:
       {
@@ -5343,7 +5349,13 @@ static void garbage_collect(NewGC *gc, int force_full, int no_full,
                      && !gc->started_incremental)
                  /* In incremental mode, GC earlier if we've done everything
                     that we can do incrementally. */
-                 || gc->accounted_incremental);
+                 || gc->accounted_incremental
+                 /* Give up on incremental mode if fragmentation is
+                    getting out of hand: */
+                 || (gc->started_incremental
+                     && (gc->memory_in_use > GEN0_MAX_SIZE)
+                     && (mmu_memory_allocated_and_used(gc->mmu)
+                         > (HIGH_FRAGMENTATION_RATIO * gc->memory_in_use))));
 
   if (gc->gc_full && no_full)
     return;
@@ -5590,11 +5602,12 @@ static void garbage_collect(NewGC *gc, int force_full, int no_full,
   TIME_STEP("protect");
 
   if (gc->gc_full) {
-    mmu_flush_freed_pages(gc->mmu);
+    mmu_flush_freed_pages(gc->mmu, 0);
     gc->high_fragmentation = (mmu_memory_allocated_and_used(gc->mmu)
                               > (HIGH_FRAGMENTATION_RATIO
                                  * (gc->memory_in_use + gen_half_size_in_use(gc) + GEN0_MAX_SIZE)));
   }
+  TIME_STEP("flush");
   reset_finalizer_tree(gc);
 
   if (gc->gc_full || !gc->started_incremental)
@@ -5821,7 +5834,7 @@ static void free_gc(NewGC *gc)
   free_all_stack_pages(gc);
   free_incremental_admin_pages(gc);
 
-  mmu_flush_freed_pages(gc->mmu);
+  mmu_flush_freed_pages(gc->mmu, 1);
   mmu_free(gc->mmu);
 
   ofm_free(gc->mark_table, gc->number_of_tags * sizeof(Mark2_Proc));
@@ -5877,6 +5890,8 @@ static void *trace_pointer_start(mpage *page, void *p) {
 # define TRACE_PAGE_ATOMIC PAGE_ATOMIC
 # define TRACE_PAGE_PAIR PAGE_PAIR
 # define TRACE_PAGE_MALLOCFREE PAGE_TYPES
+# define TRACE_PAGE_MED_ATOMIC PAGE_MED_ATOMIC
+# define TRACE_PAGE_MED_NONATOMIC PAGE_MED_NONATOMIC
 # define TRACE_PAGE_BAD PAGE_TYPES
 # define trace_page_is_big(page) ((page)->size_class >= SIZE_CLASS_BIG_PAGE)
 # define trace_backpointer get_backtrace

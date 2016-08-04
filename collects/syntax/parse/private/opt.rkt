@@ -118,7 +118,7 @@
 ;; pattern->partitioner : pattern -> (values (pattern -> boolean) ((listof pk1) -> PK))
 (define (pattern->partitioner pat1)
   (match pat1
-    [(pat:pair attrs proper? head tail)
+    [(pat:pair proper? head tail)
      (values (lambda (p) (and (pat:pair? p) (eq? (pat:pair-proper? p) proper?)))
              (lambda (rows)
                (when DEBUG-OPT-SUCCEED
@@ -158,7 +158,7 @@
 ;; unfold-and : pattern (listof pattern) -> (values pattern (listof pattern))
 (define (unfold-and p onto)
   (match p
-    [(pat:and _as subpatterns)
+    [(pat:and subpatterns)
      ;; pat:and is worth unfolding if first subpattern is not pat:action
      ;; if first subpattern is also pat:and, keep unfolding
      (let* ([first-sub (car subpatterns)]
@@ -175,53 +175,56 @@
   ;;  - if p can succeed multiple times, then factoring changes success order
   ;;  - if p can cut, then factoring changes which choice points are discarded (too few)
   (match p
-    [(pat:any _as) #t]
-    [(pat:var _as _n _p _argu _na _ac commit? _r)
+    [(pat:any) #t]
+    [(pat:svar _n) #t]
+    [(pat:var/p _n _p _argu _na _ac commit? _r)
      ;; commit? implies delimit-cut
      commit?]
     [(? pat:integrated?) #t]
-    [(pat:literal _as _lit _ip _lp) #t]
-    [(pat:datum _as _datum) #t]
-    [(pat:action _as _act _pat) #f]
-    [(pat:head _as head tail)
+    [(pat:literal _lit _ip _lp) #t]
+    [(pat:datum _datum) #t]
+    [(pat:action _act _pat) #f]
+    [(pat:head head tail)
      (and (pattern-factorable? head)
           (pattern-factorable? tail))]
-    [(pat:dots _as heads tail)
+    [(pat:dots heads tail)
      ;; Conservative approximation for common case: one head pattern
      ;; In general, check if heads don't overlap, don't overlap with tail.
      (and (= (length heads) 1)
           (let ([head (car heads)])
             (and (pattern-factorable? head)))
-          (equal? tail (create-pat:datum '())))]
-    [(pat:and _as patterns)
+          (equal? tail (pat:datum '())))]
+    [(pat:and patterns)
      (andmap pattern-factorable? patterns)]
-    [(pat:or _as patterns) #f]
-    [(pat:not _as pattern) #f] ;; FIXME: ?
-    [(pat:pair _as _p? head tail)
+    [(pat:or patterns) #f]
+    [(pat:not pattern) #f] ;; FIXME: ?
+    [(pat:pair _p? head tail)
      (and (pattern-factorable? head)
           (pattern-factorable? tail))]
-    [(pat:vector _as pattern)
+    [(pat:vector pattern)
      (pattern-factorable? pattern)]
-    [(pat:box _as pattern)
+    [(pat:box pattern)
      (pattern-factorable? pattern)]
-    [(pat:pstruct _as key pattern)
+    [(pat:pstruct key pattern)
      (pattern-factorable? pattern)]
-    [(pat:describe _as pattern _desc _trans _role)
+    [(pat:describe pattern _desc _trans _role)
      (pattern-factorable? pattern)]
-    [(pat:delimit _as pattern)
+    [(pat:delimit pattern)
      (pattern-factorable? pattern)]
-    [(pat:commit _as pattern) #t]
+    [(pat:commit pattern) #t]
     [(? pat:reflect?) #f]
-    [(pat:post _as pattern)
+    [(pat:ord pattern _ _)
+     (pattern-factorable? pattern)]
+    [(pat:post pattern)
      (pattern-factorable? pattern)]
     ;; ----
-    [(hpat:var _as _name _parser _argu _na _ac commit? _role)
+    [(hpat:var/p _name _parser _argu _na _ac commit? _role)
      commit?]
-    [(hpat:seq _as inner)
+    [(hpat:seq inner)
      (pattern-factorable? inner)]
-    [(hpat:commit _as inner) #t]
+    [(hpat:commit inner) #t]
     ;; ----
-    [(ehpat _as head repc)
+    [(ehpat head repc)
      (and (equal? repc #f)
           (pattern-factorable? head))]
     ;; ----
@@ -236,16 +239,18 @@
 (define (pattern-equal? a b)
   (define result
     (cond [(and (pat:any? a) (pat:any? b)) #t]
-          [(and (pat:var? a) (pat:var? b))
-           (and (free-id/f-equal? (pat:var-parser a) (pat:var-parser b))
-                (equal-iattrs? (pat:var-attrs a) (pat:var-attrs b))
-                (equal-argu? (pat:var-argu a) (pat:var-argu b))
-                (expr-equal? (pat:var-role a) (pat:var-role b)))]
+          [(and (pat:svar? a) (pat:svar? b))
+           (bound-identifier=? (pat:svar-name a) (pat:svar-name b))]
+          [(and (pat:var/p? a) (pat:var/p? b))
+           (and (free-id/f-equal? (pat:var/p-parser a) (pat:var/p-parser b))
+                (bound-id/f-equal? (pat:var/p-name a) (pat:var/p-name b))
+                (equal-iattrs? (pat:var/p-nested-attrs a) (pat:var/p-nested-attrs b))
+                (equal-argu? (pat:var/p-argu a) (pat:var/p-argu b))
+                (expr-equal? (pat:var/p-role a) (pat:var/p-role b)))]
           [(and (pat:integrated? a) (pat:integrated? b))
-           (and (free-identifier=? (pat:integrated-predicate a)
+           (and (bound-id/f-equal? (pat:integrated-name a) (pat:integrated-name b))
+                (free-identifier=? (pat:integrated-predicate a)
                                    (pat:integrated-predicate b))
-                (equal-iattrs? (pat:integrated-attrs a)
-                               (pat:integrated-attrs b))
                 (expr-equal? (pat:integrated-role a) (pat:integrated-role b)))]
           [(and (pat:literal? a) (pat:literal? b))
            ;; literals are hard to compare, so compare gensyms attached to
@@ -287,14 +292,19 @@
           [(and (pat:commit? a) (pat:commit? b))
            (pattern-equal? (pat:commit-pattern a) (pat:commit-pattern b))]
           [(and (pat:reflect? a) (pat:reflect? b)) #f] ;; FIXME: ?
+          [(and (pat:ord? a) (pat:ord? b))
+           (and (pattern-equal? (pat:ord-pattern a) (pat:ord-pattern b))
+                (equal? (pat:ord-group a) (pat:ord-group b))
+                (equal? (pat:ord-index a) (pat:ord-index b)))]
           [(and (pat:post? a) (pat:post? b))
            (pattern-equal? (pat:post-pattern a) (pat:post-pattern b))]
           ;; ---
-          [(and (hpat:var? a) (hpat:var? b))
-           (and (free-id/f-equal? (hpat:var-parser a) (hpat:var-parser b))
-                (equal-iattrs? (hpat:var-attrs a) (hpat:var-attrs b))
-                (equal-argu? (hpat:var-argu a) (hpat:var-argu b))
-                (expr-equal? (hpat:var-role a) (hpat:var-role b)))]
+          [(and (hpat:var/p? a) (hpat:var/p? b))
+           (and (free-id/f-equal? (hpat:var/p-parser a) (hpat:var/p-parser b))
+                (bound-id/f-equal? (hpat:var/p-name a) (hpat:var/p-name b))
+                (equal-iattrs? (hpat:var/p-nested-attrs a) (hpat:var/p-nested-attrs b))
+                (equal-argu? (hpat:var/p-argu a) (hpat:var/p-argu b))
+                (expr-equal? (hpat:var/p-role a) (hpat:var/p-role b)))]
           [(and (hpat:seq? a) (hpat:seq? b))
            (pattern-equal? (hpat:seq-inner a) (hpat:seq-inner b))]
           ;; ---
@@ -366,10 +376,17 @@
            (identifier? b)
            (free-identifier=? a b))))
 
+(define (bound-id/f-equal? a b)
+  (or (and (eq? a #f)
+           (eq? b #f))
+      (and (identifier? a)
+           (identifier? b)
+           (bound-identifier=? a b))))
+
 (define (make-and-pattern subs)
-  (cond [(null? subs) (create-pat:any)] ;; shouldn't happen
+  (cond [(null? subs) (pat:any)] ;; shouldn't happen
         [(null? (cdr subs)) (car subs)]
-        [else (create-pat:and subs)]))
+        [else (pat:and subs)]))
 
 (define (*append a b) (if (null? b) a (append a b)))
 
@@ -399,7 +416,9 @@
     [(pat:any _as) '_]
     [(pat:integrated _as name pred desc _)
      (format-symbol "~a:~a" (or name '_) desc)]
-    [(pat:var _as name parser _ _ _ _ _)
+    [(pat:svar _as name)
+     (syntax-e name)]
+    [(pat:var/p _as name parser _ _ _ _ _)
      (cond [(and parser (regexp-match #rx"^parse-(.*)$" (symbol->string (syntax-e parser))))
             => (lambda (m)
                  (format-symbol "~a:~a" (or name '_) (cadr m)))]

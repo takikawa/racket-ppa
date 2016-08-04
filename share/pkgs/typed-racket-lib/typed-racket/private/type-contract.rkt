@@ -5,7 +5,7 @@
 (require
  "../utils/utils.rkt"
  syntax/parse
- (rep type-rep filter-rep object-rep)
+ (rep type-rep prop-rep object-rep)
  (utils tc-utils)
  (env type-name-env row-constraint-env)
  (rep rep-utils)
@@ -14,10 +14,11 @@
  (private parse-type syntax-properties)
  racket/match racket/syntax racket/list
  racket/format
- racket/dict
+ racket/dict racket/set
  syntax/flatten-begin
  (only-in (types abbrev) -Bottom -Boolean)
- (static-contracts instantiate optimize structures combinators)
+ (static-contracts instantiate optimize structures combinators constraints)
+ (only-in (submod typed-racket/static-contracts/instantiate internals) compute-constraints)
  ;; TODO make this from contract-req
  (prefix-in c: racket/contract)
  (contract-req)
@@ -39,14 +40,26 @@
 ;; submod for testing
 (module* test-exports #f (provide type->contract))
 
+;; has-contrat-def-property? : Syntax -> Boolean
+(define (has-contract-def-property? stx)
+  (syntax-parse stx
+    #:literal-sets (kernel-literals)
+    [(define-values (_) e)
+     (and (contract-def-property #'e)
+          #t)]
+    [_ #f]))
+
 (struct contract-def (type flat? maker? typed-side) #:prefab)
 
+;; get-contract-def-property : Syntax -> (U False Contract-Def)
 ;; Checks if the given syntax needs to be fixed up for contract generation
 ;; and if yes it returns the information stored in the property
 (define (get-contract-def-property stx)
   (syntax-parse stx
     #:literal-sets (kernel-literals)
-    [(define-values (_) e) (contract-def-property #'e)]
+    [(define-values (_) e)
+     (and (contract-def-property #'e)
+          ((contract-def-property #'e)))]
     [_ #f]))
 
 ;; type->contract-fail : Syntax Type #:ctc-str String
@@ -123,7 +136,7 @@
            [else
             (match-define (list defs ctc) result)
             (define maybe-inline-val
-              (should-inline-contract? ctc cache))
+              (should-inline-contract?/cache ctc cache))
             #`(begin #,@defs
                      #,@(if maybe-inline-val
                             null
@@ -141,18 +154,11 @@
 ;; Syntax (Dict Static-Contract (Cons Id Syntax)) -> (Option Syntax)
 ;; A helper for generate-contract-def/provide that helps inline contract
 ;; expressions when needed to cooperate with the contract system's optimizations
-(define (should-inline-contract? ctc-stx cache)
+(define (should-inline-contract?/cache ctc-stx cache)
   (and (identifier? ctc-stx)
        (let ([match? (assoc ctc-stx (hash-values cache) free-identifier=?)])
          (and match?
-              (or
-               ;; no need to generate an extra def for things that are already identifiers
-               (identifier? match?)
-               ;; ->* are handled specially by the contract system
-               (let ([sexp (syntax-e (cdr match?))])
-                 (and (pair? sexp)
-                      (or (free-identifier=? (car sexp) #'->)
-                          (free-identifier=? (car sexp) #'->*)))))
+              (should-inline-contract? (cdr match?))
               (cdr match?)))))
 
 ;; The below requires are needed since they provide identifiers that
@@ -185,7 +191,7 @@
   (define sc-cache (make-hash))
   (with-new-name-tables
    (for/list ((e (in-list forms)))
-     (if (not (get-contract-def-property e))
+     (if (not (has-contract-def-property? e))
          e
          (begin (set-box! include-extra-requires? #t)
                 (generate-contract-def e ctc-cache sc-cache))))))
@@ -210,6 +216,13 @@
            #,@(change-provide-fixups (flatten-all-begins #'(begin forms ...))
                                      ctc-cache sc-cache)))]
        [_ form]))))
+
+;; get-max-contract-kind
+;; static-contract -> (or/c 'flat 'chaperone 'impersonator)
+;; recurse into a contract finding the max
+;; kind (e.g. flat < chaperone < impersonator)
+(define (get-max-contract-kind sc)
+  (kind-max-max (contract-restrict-value (compute-constraints sc 'impersonator))))
 
 ;; To avoid misspellings
 (define impersonator-sym 'impersonator)
@@ -332,7 +345,7 @@
 
       (define (only-untyped sc)
         (if (from-typed? typed-side)
-            (fail #:reason "contract generation not supported for this type")
+            (and/sc sc any-wrap/sc)
             sc))
       (cached-match sc-cache type typed-side
         ;; Applications of implicit recursive type aliases
@@ -385,6 +398,21 @@
          (if numeric-sc
              (apply or/sc numeric-sc (map t->sc non-numeric))
              (apply or/sc (map t->sc elems)))]
+        [(Intersection: ts)
+         (define-values (chaperones/impersonators others)
+           (for/fold ([cs/is null] [others null])
+                     ([elem (in-immutable-set ts)])
+             (define c (t->sc elem))
+             (if (equal? flat-sym (get-max-contract-kind c))
+                 (values cs/is (cons c others))
+                 (values (cons c cs/is) others))))
+         (cond
+           [(> (length chaperones/impersonators) 1)
+            (fail #:reason (~a "Intersection type contract contains"
+                               " more than 1 non-flat contract: "
+                               type))]
+           [else
+            (apply and/sc (append others chaperones/impersonators))])]
         [(and t (Function: arrs))
          #:when (any->bool? arrs)
          ;; Avoid putting (-> any T) contracts on struct predicates (where Boolean <: T)
@@ -590,7 +618,14 @@
         [(Syntax: t)
          (syntax/sc (t->sc t))]
         [(Value: v)
-         (flat/sc #`(flat-named-contract '#,v (lambda (x) (equal? x '#,v))) v)]
+         (if (and (c:flat-contract? v)
+                  ;; numbers used as contracts compare with =, but TR
+                  ;; requires an equal? check
+                  (not (number? v))
+                  ;; regexps don't match themselves when used as contracts
+                  (not (regexp? v)))
+             (flat/sc #`(quote #,v))
+             (flat/sc #`(flat-named-contract '#,v (lambda (x) (equal? x '#,v))) v))]
         [(Param: in out) 
          (parameter/sc (t->sc in) (t->sc out))]
         [(Hashtable: k v)
@@ -613,17 +648,21 @@
   ;; and call the given thunk or raise an error
   (define (handle-range arr convert-arr)
     (match arr
-      ;; functions with no filters or objects
-      [(arr: dom (Values: (list (Result: rngs (FilterSet: (Top:) (Top:)) (Empty:)) ...)) rst drst kws)
+      ;; functions with no props or objects
+      [(arr: dom (Values: (list (Result: rngs
+                                         (PropSet: (TrueProp:)
+                                                   (TrueProp:))
+                                         (Empty:)) ...))
+             rst drst kws)
        (convert-arr)]
       ;; Functions that don't return
       [(arr: dom (Values: (list (Result: (== -Bottom) _ _) ...)) rst drst kws)
        (convert-arr)]
-      ;; functions with filters or objects
+      ;; functions with props or objects
       [(arr: dom (Values: (list (Result: rngs _ _) ...)) rst drst kws)
        (if (from-untyped? typed-side)
            (fail #:reason (~a "cannot generate contract for function type"
-                              " with filters or objects."))
+                              " with props or objects."))
            (convert-arr))]
       [(arr: dom (? ValuesDots?) rst drst kws)
        (fail #:reason (~a "cannot generate contract for function type"
@@ -797,7 +836,7 @@
   (let/ec escape
     (let loop ([type type])
       (type-case
-       (#:Type loop #:Filter (sub-f loop) #:Object (sub-o loop))
+       (#:Type loop #:Prop (sub-f loop) #:Object (sub-o loop))
        type
        [#:App arg _ _
         (match arg

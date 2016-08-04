@@ -92,7 +92,7 @@ See match-a-pattern.rkt for more details
 
 ;; compile-language : language-pict-info[see pict.rkt] (listof nt) (listof (uf-set/c symbol?))
 ;; (listof (list rewritten-pattern bspec)) -> compiled-lang
-(define (compile-language pict-info lang nt-map binding-info)
+(define (compile-language pict-info lang binding-info aliases)
   (let* ([clang-ht (make-hasheq)]
          [clang-list-ht (make-hasheq)]
          [across-ht (make-hasheq)]
@@ -109,7 +109,7 @@ See match-a-pattern.rkt for more details
                                     cache binding-forms-absent-cache bind-names-cache
                                     pict-info
                                     literals
-                                    nt-map
+                                    aliases
                                     collapsible-nts
                                     'uninitialized-ambiguity-info
                                     `() ;; internal patterns don't need freshening
@@ -255,7 +255,7 @@ See match-a-pattern.rkt for more details
                (hash-set! ht pat #t)))))])))
 
 ;; prefix-nts : string pat -> pat
-(define (prefix-nts prefix pat)
+(define (prefix-nts prefix pat aliases)
   (let loop ([pat pat])
     (match-a-pattern pat
       [`any pat]
@@ -270,7 +270,12 @@ See match-a-pattern.rkt for more details
       [`(variable-prefix ,s) pat]
       [`variable-not-otherwise-mentioned pat]
       [`hole pat]
-      [`(nt ,id) `(nt ,(string->symbol (string-append prefix (symbol->string id))))]
+      [`(nt ,id)
+       (define prefixed-nt (if prefix
+                               (string->symbol (string-append prefix (symbol->string id)))
+                               id))
+       (define new-nt (hash-ref aliases prefixed-nt prefixed-nt))
+       `(nt ,new-nt)]
       [`(name ,name ,pat) `(name , name ,(loop pat))]
       [`(mismatch-name ,name ,pat) `(mismatch-name ,name ,(loop pat))]
       [`(in-hole ,p1 ,p2) `(in-hole ,(loop p1) ,(loop p2))]
@@ -1753,7 +1758,15 @@ See match-a-pattern.rkt for more details
            (let ([mth (call-nt-proc/bindings (car rhss) term hole-info lang-α-equal?)])
              (cond
                [mth
-                (loop (cdr rhss) (append mth ans))]
+                (loop (cdr rhss)
+                      (let loop ([mth mth])
+                        (cond
+                          [(null? mth) ans]
+                          [else (cons (let ([mtch (car mth)])
+                                        (make-mtch empty-bindings
+                                                   (mtch-context mtch)
+                                                   (mtch-hole mtch)))
+                                      (loop (cdr mth)))])))]
                [else 
                 (loop (cdr rhss) ans)]))]))
       
@@ -2035,8 +2048,9 @@ See match-a-pattern.rkt for more details
  (set-cache-size! (-> (and/c integer? positive?) void?))
  (cache-size (and/c integer? positive?))
  
- (compile-language (-> any/c (listof nt?) (hash/c symbol? uf-set?)
+ (compile-language (-> any/c (listof nt?)
                        any/c #;(listof (list/c compiled-pattern? bspec?))
+                       (listof symbol?)
                        compiled-lang?)))
 (provide compiled-pattern? 
          print-stats)

@@ -7,48 +7,35 @@
          modules-for-test
          trace-modules)
 
-;; loadlib : module-path symbol -> Deriv
-(define (loadlib mod)
-  (trace-module mod))
+(define verbose (make-parameter #f))
+(define (vprintf fmt . args) (when (verbose) (apply printf fmt args)))
 
-(define (test-libs name mods)
+(define (test-libs name mods #:reductions? [reductions? #f])
   (test-suite name
-    (test-suite "Trace & Parse"
-      (for ([m mods]) (test-lib/deriv m)))
-    #|
-    (test-suite "Reductions"
-      (for ([m mods]) (test-lib/hide m hide-none-policy)))
-    (test-suite "Standard hiding"
-      (for ([m mods]) (test-lib/hide m standard-policy)))
-    |#))
+    (for ([m mods])
+      (test-lib m #:reductions? reductions?))))
 
-(define (test-lib/deriv m)
+(define (test-lib m #:reductions? [reductions? #f])
   (test-case (format "~s" m)
-    (let ([deriv (loadlib m)])
+    (vprintf "tracing ~s ... " m)
+    (let ([deriv (trace-module m)])
       (check-pred deriv? deriv "Not a deriv")
-      (check-pred ok-node? deriv "Expansion error"))))
-
-(define (test-lib/hide m policy)
-  (test-case (format "~s" m)
-    (let ([deriv (loadlib m)])
-      (check-steps deriv policy))))
+      (check-pred ok-node? deriv "Expansion error")
+      (when reductions?
+        (vprintf "stepping ... ")
+        (check-steps deriv hide-none-policy)))
+    (vprintf "ok\n")))
 
 (define (check-steps deriv policy)
   (define-values (steps binders uses stx exn)
     (parameterize ((macro-policy policy)) (reductions+ deriv)))
   (check-pred syntax? stx)
   (check-eq? exn #f)
-  (check-true (list? steps) "Expected list for steps")
-  #|(check-reduction-sequence steps)|#)
+  (check-pred list? steps "Expected list for steps")
+  (check-pred reduction-sequence? steps))
 
-(define (check-reduction-sequence steps)
-  ;; FIXME: add remarkstep
-  (cond [(null? steps) (void)]
-        [(and (pair? steps) (step? (car steps)))
-         (check-reduction-sequence (cdr steps))]
-        [(and (pair? steps) (misstep? (car steps)))
-         (check-eq? (cdr steps) '() "Stuff after misstep")]
-        [else (fail "Bad reduction sequence")]))
+(define (reduction-sequence? steps)
+  (andmap protostep? steps))
 
 ;; ----
 
@@ -121,3 +108,9 @@
 
 (define collects-tests
   (test-libs "Trace collections" modules-for-test))
+
+(module+ test
+  (require rackunit/text-ui)
+  (parameterize ((verbose #t))
+    (run-tests
+     (test-libs "Trace and step collections" modules-for-test #:reductions? #t))))

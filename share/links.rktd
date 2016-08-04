@@ -176,6 +176,7 @@
  (root "pkgs/xrepl-doc")
  ("ds-store" "pkgs/ds-store-lib")
  ("ds-store" "pkgs/ds-store-doc")
+ (root "pkgs/testing-util-lib")
  (root "pkgs/scribble-text-lib")
  (root "pkgs/scribble-html-lib")
  (root "pkgs/zo-lib")

@@ -562,23 +562,18 @@
     ;; Blocks
     ;; EB Answer = BlockDerivation
     (EB
-     [(enter-block (? BlockPass1) block->list (? EL))
-      (make bderiv $1 (and $4 (wlderiv-es2 $4))
-            $2 'list $4)]
-     [(enter-block BlockPass1 block->letrec (? EE))
-      (make bderiv $1 (and $4 (list (wderiv-e2 $4)))
-            $2 'letrec $4)])
+     [(enter-block renames-block (? BlockPass1) block->list (? EL))
+      (make bderiv $1 (and $5 (wlderiv-es2 $5))
+            $2 $3 'list $5)]
+     [(enter-block renames-block BlockPass1 block->letrec (? EE))
+      (make bderiv $1 (and $5 (list (wderiv-e2 $5)))
+            $2 $3 'letrec $5)])
 
     ;; BlockPass1 Answer = (list-of BRule)
     (BlockPass1
-     [(renames-block (? BlockPass1*))
-      (map (install-renames-block $1) $2)])
-
-    ;; BlockPass1 Answer = (list-of BRule)
-    (BlockPass1*
      (#:skipped null)
      [() null]
-     [((? BRule) (? BlockPass1*))
+     [((? BRule) (? BlockPass1))
       (cons $1 $2)])
 
     ;; BRule Answer = BRule
@@ -586,14 +581,14 @@
      [(next !!)
       (make b:error $2)]
      [(next (? CheckImmediateMacro))
-      (make b:expr '... $2)]
+      (make b:expr $2)]
      [(next CheckImmediateMacro prim-begin ! splice !)
-      (make b:splice '... $2 $4 $5 $6)]
+      (make b:splice $2 $4 $5 $6)]
      [(next CheckImmediateMacro prim-define-values ! rename-one !)
-      (make b:defvals '... $2 $4 $5 $6)]
+      (make b:defvals $2 $4 $5 $6)]
      [(next CheckImmediateMacro
             prim-define-syntaxes ! rename-one ! (? PrepareEnv) (? BindSyntaxes))
-      (make b:defstx '... $2 $4 $5 $6 $7 $8)])
+      (make b:defstx $2 $4 $5 $6 $7 $8)])
 
     ;; BindSyntaxes Answer = Derivation
     (BindSyntaxes
@@ -623,18 +618,3 @@
      [(next (? EE) (? EL*)) (cons $2 $3)])
 
     )))
-
-;; Used to move a `renames` block that is provided once into each of
-;; a list of brules, since the old expander provided the renames for
-;; each brule
-(define ((install-renames-block renames) b)
-  (cond
-   [(b:expr? b)
-    (struct-copy b:expr b [renames #:parent brule renames])]
-   [(b:splice? b)
-    (struct-copy b:splice b [renames #:parent brule renames])]
-   [(b:defvals? b)
-    (struct-copy b:defvals b [renames #:parent brule renames])]
-   [(b:defstx? b)
-    (struct-copy b:defstx b [renames #:parent brule renames])]
-   [else (error 'internal "unrecognized brule: ~e" b)]))

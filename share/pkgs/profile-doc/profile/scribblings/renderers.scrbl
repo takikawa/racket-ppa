@@ -23,6 +23,7 @@ function that consumes a @racket[profile] instance.  See the
 
 @defproc[(render
           [profile-data profile?]
+          [order (or/c 'topological 'self 'total) 'topological]
           [#:truncate-source truncate-source exact-nonnegative-integer? 50]
           [#:hide-self hide-self% (between/c 0 1) 1/100]
           [#:hide-subs hide-subs% (between/c 0 1) 2/100])
@@ -32,7 +33,7 @@ Prints the given @racket[profile] results as a textual table.
 
 The printout begins with general information about the profile,
 followed by a table with an entry for each node in the call graph.
-The entries are displayed in a topological order (roughly, since the
+The entries are displayed in a topological order by default (roughly, since the
 graph can have cycles).  This means that it is usually easy to find
 the callers and callees of a function in its close environment.
 
@@ -105,6 +106,13 @@ The function has a few keyword arguments to customize its output:
   conditions is to avoid having ``dangling references'' to hidden
   nodes.}
 
+@item{The @racket[order] argument determines the order in which entries
+  appear in the output. If @racket[order] is @racket['topological] (the default),
+  entries are sorted topologically, grouping callers and callees close together.
+  If @racket[order] is @racket['self], entries are sorted by how often
+  they appear at the top of a stack snapshot. If @racket[order] is @racket['total],
+  entries are sorted by how often they appear anywhere in a stack snapshot.}
+
 ]}
 
 
@@ -115,6 +123,7 @@ The function has a few keyword arguments to customize its output:
 
 @defproc[(render
           [profile-data profile?]
+          [order (or/c 'topological 'self 'total) 'topological]
           [#:hide-self hide-self% (between/c 0 1) 1/100]
           [#:hide-subs hide-subs% (between/c 0 1) 2/100])
          void?]{
@@ -128,4 +137,4 @@ of the Graphviz tools to render.  Nodes are colored according to their
 `self' percentages, and edges.
 
 The keyword arguments control hiding nodes in the same way as with the
-textual renderer.}
+textual renderer. The @racket[order] argument is ignored.}

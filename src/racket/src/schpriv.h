@@ -399,7 +399,8 @@ void scheme_init_futures(Scheme_Env *env);
 void scheme_init_futures_once();
 void scheme_init_futures_per_place();
 void scheme_end_futures_per_place();
-
+void scheme_init_linklet(Scheme_Env *env);
+ 
 void scheme_init_print_buffers_places(void);
 void scheme_init_string_places(void);
 void scheme_init_thread_places(void);
@@ -3170,6 +3171,7 @@ Scheme_Object *scheme_frame_get_require_lifts(Scheme_Comp_Env *env);
 Scheme_Object *scheme_frame_get_provide_lifts(Scheme_Comp_Env *env);
 Scheme_Object *scheme_generate_lifts_key(void);
 Scheme_Object *scheme_top_level_lifts_key(Scheme_Comp_Env *env);
+Scheme_Comp_Env *scheme_get_env_for_lifts(Scheme_Comp_Env *env);
 
 Scheme_Object *scheme_toplevel_require_for_expand(Scheme_Object *module_path, 
                                                   intptr_t phase,
@@ -3484,7 +3486,8 @@ typedef struct {
   int normal_ops, indexed_ops, num_gets, num_sets;
 } Simple_Stuct_Type_Info;
 
-Scheme_Object *scheme_is_simple_make_struct_type(Scheme_Object *app, int vals, int resolved, 
+Scheme_Object *scheme_is_simple_make_struct_type(Scheme_Object *app, int vals, int resolved,
+                                                 int must_always_succeed,
                                                  int check_auto, int *_auto_e_depth, 
                                                  Simple_Stuct_Type_Info *_stinfo,
                                                  Scheme_Hash_Table *top_level_consts, 
@@ -4447,6 +4450,7 @@ Scheme_Hash_Tree *scheme_make_hash_tree_placeholder(int kind);
 void scheme_hash_tree_tie_placeholder(Scheme_Hash_Tree *t, Scheme_Hash_Tree *base);
 XFORM_NONGCING Scheme_Hash_Tree *scheme_hash_tree_resolve_placeholder(Scheme_Hash_Tree *t);
 int scheme_hash_tree_kind(Scheme_Hash_Tree *t);
+int scheme_hash_tree_subset_of(Scheme_Hash_Tree *t1, Scheme_Hash_Tree *t2);
 XFORM_NONGCING int scheme_eq_hash_tree_subset_of(Scheme_Hash_Tree *t1, Scheme_Hash_Tree *t2);
 XFORM_NONGCING int scheme_eq_hash_tree_subset_match_of(Scheme_Hash_Tree *t1, Scheme_Hash_Tree *t2);
 intptr_t scheme_hash_tree_key_hash(Scheme_Hash_Tree *t1);

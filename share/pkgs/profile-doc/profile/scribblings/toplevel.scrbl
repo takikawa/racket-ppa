@@ -30,12 +30,15 @@ intended as a convenient tool for profiling code.
           [#:delay   delay      (>=/c 0.0)        0.05]
           [#:repeat  iterations exact-nonnegative-integer? 1]
           [#:threads threads?   any/c                      #f]
-          [#:render  renderer   (profile? . -> . any/c)    text:render]
+          [#:render  renderer   (-> profile? (or/c 'topological 'self 'total) any/c)    text:render]
           [#:periodic-renderer periodic-renderer
            (or/c #f (list/c (>=/c 0.0)
-                            (profile? . -> . any/c)))
+                            (-> profile?
+                                (or/c 'topological 'self 'total)
+                                any/c)))
            #f]
-          [#:use-errortrace? use-errortrace? any/c #f])
+          [#:use-errortrace? use-errortrace? any/c #f]
+          [#:order order (or/c 'topological 'self 'total) 'topological])
          any/c]{
 
 Executes the given @racket[thunk] and collect profiling data during
@@ -88,6 +91,12 @@ Keyword arguments can customize the profiling:
   using @racket[errortrace-compile-handler], and the profiled program must be
   run using @commandline{racket -l errortrace -t program.rkt} Removing compiled
   files (with extension @tt{.zo}) is sufficient to enable this.}
+
+@item{The @racket[order] value is passed to the @racket[renderer] to control the
+  order of its output. By default, entries in the profile are sorted
+  topologically, but they can also be sorted by the time an entry is on top of
+  the stack (@racket['self]) or appears anywhere on the stack (@racket['total]).
+  Some renderers may ignore this option.}
 ]}
 
 @defform[(profile expr keyword-arguments ...)]{

@@ -523,12 +523,13 @@ modules can define the name. That is, a @deftech{module-level
 variable} is like a @tech{top-level variable} from the perspective of
 evaluation.
 
-One difference between a module and a top-level definition is that a
-module can be declared without instantiating its module-level
-definitions. Evaluation of a @racket[require] @deftech{instantiates}
-(i.e., triggers the @deftech{instantiation} of) a declared module,
-which creates variables that correspond to its module-level
-definitions.
+One difference between a module and a top-level definition
+is that a module can be @deftech[#:key "declare"]{declared}
+without instantiating its module-level definitions.
+Evaluation of a @racket[require] @deftech{instantiates}
+(i.e., triggers the @deftech{instantiation} of) a declared
+module, which creates variables that correspond to its
+module-level definitions.
 
 For example, given the module declaration
 
@@ -819,7 +820,7 @@ with @racket[module*] conceptually follows its enclosing module, so
 can @racket[require] from its enclosing module, but the enclosing
 module cannot @racket[require] the submodule. Unless a submodule
 imports from its enclosing module or vice-versa, then @tech{visits} or
-@tech{instantiations} of the two modules are independent, and thier
+@tech{instantiations} of the two modules are independent, and their
 implementations may even be loaded from bytecode at different times.
 
 A submodule declared with @racket[module] can import any preceding

@@ -174,13 +174,13 @@
               [(macosx) (and mred? (not (script-variant? variant)))]))])
     (if (string=? "" s)
       path
-      (path-replace-suffix
+      (path-replace-extension
        path
        (string->bytes/utf-8
         (if (and (eq? 'windows (cross-system-type))
-                 (regexp-match #rx#"[.]exe$" (path->bytes path)))
-          (format "~a.exe" s)
-          s))))))
+                 (path-has-extension? path #".exe"))
+            (format "~a.exe" s)
+            s))))))
 
 (define (string-append/spaces f flags)
   (string-append* (append-map (lambda (x) (list (f x) " ")) flags)))
@@ -364,6 +364,9 @@
                          (format "~a~a.app/Contents/MacOS/~a~a"
                                  (cdr m) (variant-suffix variant #t)
                                  (cdr m) (variant-suffix variant #t))))]
+         [alt-exe-is-gracket? (and alt-exe
+                                   (let ([m (assq 'exe-is-gracket aux)])
+                                     (and m (cdr m))))]
          [x-flags? (and (eq? kind 'mred)
                         (eq? (cross-system-type) 'unix)
                         (not (script-variant? variant)))]
@@ -373,6 +376,7 @@
                       flags))]
          [post-flags (cond
                       [x-flags? (skip-x-flags flags)]
+                      [alt-exe-is-gracket? flags]
                       [alt-exe null]
                       [else flags])]
          [pre-flags (cond
@@ -389,9 +393,12 @@
                   "# This script was created by make-"
                   (symbol->string kind)"-launcher\n")]
          [use-librktdir? (if alt-exe
-                             (let ([m (assq 'exe-is-gracket aux)])
-                               (and m (cdr m)))
+                             alt-exe-is-gracket?
                              (eq? kind 'mred))]
+         [addon? (let ([im (assoc 'install-mode aux)])
+                   (and im (eq? (cdr im) 'addon-tethered)))]
+         [config? (let ([im (assoc 'install-mode aux)])
+                    (and im (eq? (cdr im) 'config-tethered)))]
          [dir-finder
           (let ([bindir (if alt-exe
                             (let ([m (assq 'exe-is-gracket aux)])
@@ -399,8 +406,16 @@
                                   (find-lib-dir)
                                   (let ([p (path-only dest)])
                                     (if (eq? 'macosx (cross-system-type))
-                                        (let* ([cdir (find-console-bin-dir)]
-                                               [gdir (find-gui-bin-dir)]
+                                        (let* ([cdir (or (and addon?
+                                                              (find-addon-tethered-console-bin-dir))
+                                                         (and config?
+                                                              (find-config-tethered-console-bin-dir))
+                                                         (find-console-bin-dir))]
+                                               [gdir (or (and addon?
+                                                              (find-addon-tethered-gui-bin-dir))
+                                                         (and config?
+                                                              (find-config-tethered-gui-bin-dir))
+                                                         (find-gui-bin-dir))]
                                                [rel (find-relative-path cdir gdir)])
                                           (cond
                                            [(relative-path? rel)
@@ -500,8 +515,8 @@
   (define dir (if user?
                   (find-user-apps-dir)
                   (find-apps-dir)))
-  (path-replace-suffix (build-path dir (file-name-from-path dest))
-                       #".desktop"))
+  (path-replace-extension (build-path dir (file-name-from-path dest))
+                          #".desktop"))
 
 (define (installed-desktop-path->icon-path dest user? extension)
   ;; We put icons files in "share" so that `setup/unixstyle-install'
@@ -517,7 +532,7 @@
   (build-path (if user?
                   (find-user-share-dir)
                   (find-share-dir))
-              (path-replace-suffix
+              (path-replace-extension
                (file-name-from-path dest)
                (bytes-append
                 #"-exe-icon."
@@ -729,18 +744,33 @@
     [(macos)   make-macos-launcher]
     [(macosx)  make-macosx-launcher]))
 
-(define (make-gracket-launcher flags dest [aux null])
-  ((get-maker) 'mred (current-launcher-variant) flags dest aux))
-(define (make-mred-launcher flags dest [aux null])
-  ((get-maker) 'mred (current-launcher-variant) (list* "-I" "scheme/gui/init" flags) dest aux))
+(define (make-gracket-launcher flags dest [aux null] #:tether-mode [tether-mode 'addon])
+  ((get-maker) 'mred (current-launcher-variant) (add-tether tether-mode flags) dest aux))
+(define (make-mred-launcher flags dest [aux null] #:tether-mode [tether-mode 'addon])
+  (let ([flags (list* "-I" "scheme/gui/init" (add-tether tether-mode flags))])
+    ((get-maker) 'mred (current-launcher-variant) flags dest aux)))
 
-(define (make-racket-launcher flags dest [aux null])
-  ((get-maker) 'mzscheme (current-launcher-variant) flags dest aux))
-(define (make-mzscheme-launcher flags dest [aux null])
-  ((get-maker) 'mzscheme (current-launcher-variant) (list* "-I" "scheme/init" flags) dest aux))
+(define (make-racket-launcher flags dest [aux null] #:tether-mode [tether-mode 'addon])
+  ((get-maker) 'mzscheme (current-launcher-variant) (add-tether tether-mode flags) dest aux))
+(define (make-mzscheme-launcher flags dest [aux null] #:tether-mode [tether-mode 'addon])
+  (let ([flags (list* "-I" "scheme/init" (add-tether tether-mode flags))])
+    ((get-maker) 'mzscheme (current-launcher-variant) flags dest aux)))
+
+(define (add-tether tether-mode flags)
+  (cond
+   [(not tether-mode) flags]
+   [(and (not (eq? tether-mode 'config))
+         (find-addon-tethered-console-bin-dir))
+    (list* "-G" (path->string (find-config-dir))
+           "-A" (path->string (find-system-path 'addon-dir))
+           flags)]
+   [(find-config-tethered-console-bin-dir)
+    (list* "-G" (path->string (find-config-dir))
+           flags)]
+   [else flags]))
 
 (define (strip-suffix s)
-  (path-replace-suffix s #""))
+  (path-replace-extension s #""))
 
 (define (extract-aux-from-path path)
   (define path-bytes (path->bytes (if (string? path)
@@ -849,7 +879,7 @@
 (define (build-aux-from-path aux-root)
   (let ([aux-root (if (string? aux-root) (string->path aux-root) aux-root)])
     (define (try suffix)
-      (let ([p (path-replace-suffix aux-root suffix)])
+      (let ([p (path-replace-extension aux-root suffix)])
         (if (file-exists? p)
             (extract-aux-from-path p)
             null)))
@@ -894,7 +924,7 @@
      (string-append (if mred? file (unix-sfx file mred?)) ".exe")]
     [else file]))
 
-(define (program-launcher-path name mred? user?)
+(define (program-launcher-path name mred? user? tethered?)
   (let* ([variant (current-launcher-variant)]
          [mac-script? (and (eq? (cross-system-type) 'macosx)
                            (script-variant? variant))])
@@ -902,36 +932,48 @@
               (build-path
                (if (or mac-script? (not mred?))
                    (if user?
-                       (find-user-console-bin-dir)
-                       (find-console-bin-dir))
+                       (or (and tethered?
+                                (find-addon-tethered-console-bin-dir))
+                           (find-user-console-bin-dir))
+                       (or (and tethered?
+                                (find-config-tethered-console-bin-dir))
+                           (find-console-bin-dir)))
                    (if user?
-                       (find-user-gui-bin-dir)
-                       (find-gui-bin-dir)))
+                       (or (and tethered?
+                                (find-addon-tethered-gui-bin-dir))
+                           (find-user-gui-bin-dir))
+                       (or (and tethered?
+                                (find-config-tethered-gui-bin-dir))
+                           (find-gui-bin-dir))))
                ((if mac-script? unix-sfx sfx) name mred?))
               variant
               mred?)])
       (if (and (eq? (cross-system-type) 'macosx)
                (not (script-variant? variant)))
-          (path-replace-suffix p #".app")
+          (path-replace-extension p #".app")
           p))))
 
-(define (gracket-program-launcher-path name #:user? [user? #f])
-  (program-launcher-path name #t user?))
-(define (mred-program-launcher-path name #:user? [user? #f])
-  (gracket-program-launcher-path name #:user? user?))
+(define (gracket-program-launcher-path name #:user? [user? #f] #:tethered? [tethered? #f])
+  (program-launcher-path name #t user? tethered?))
+(define (mred-program-launcher-path name #:user? [user? #f] #:tethered? [tethered? #f])
+  (gracket-program-launcher-path name #:user? user? #:tethered? tethered?))
 
-(define (racket-program-launcher-path name #:user? [user? #f])
+(define (racket-program-launcher-path name #:user? [user? #f] #:tethered? [tethered? #f])
   (case (cross-system-type)
     [(macosx)
      (add-file-suffix (build-path (if user?
-                                      (find-user-console-bin-dir)
-                                      (find-console-bin-dir))
+                                      (or (and tethered?
+                                               (find-addon-tethered-console-bin-dir))
+                                          (find-user-console-bin-dir))
+                                      (or (and tethered?
+                                               (find-config-tethered-console-bin-dir))
+                                          (find-console-bin-dir)))
                                   (unix-sfx name #f))
                       (current-launcher-variant)
                       #f)]
-    [else (program-launcher-path name #f user?)]))
-(define (mzscheme-program-launcher-path name #:user? [user? #f])
-  (racket-program-launcher-path name #:user? user?))
+    [else (program-launcher-path name #f user? tethered?)]))
+(define (mzscheme-program-launcher-path name #:user? [user? #f] #:tethered? [tethered? #f])
+  (racket-program-launcher-path name #:user? user? #:tethered? tethered?))
 
 (define (gracket-launcher-is-directory?)
   #f)

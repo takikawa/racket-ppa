@@ -103,7 +103,7 @@
  (cs-open-file "~a öffnen")
  (cs-rename-var "~a umbenennen")
  (cs-rename-id "Bezeichner umbenennen")
- (cs-rename-var-to "~a umbenennen nach:")
+ (cs-rename-var-to "„~a“ umbenennen nach:")
  (cs-name-duplication-error "Der neugewählte Name, ~s, ist hier schon gebunden.")
  (cs-rename-anyway "Trotzdem umbenennen")
  (cs-status-init "Syntaxprüfung: Umgebung für den User-Code initialisieren")
@@ -112,13 +112,13 @@
  (cs-status-expanding-expression "Syntaxprüfung: Ausdruck expandieren")
  (cs-status-loading-docs-index "Syntaxprüfung: Dokumentations-Index laden")
  (cs-syncheck-running "Syntaprüfung läuft")
- (cs-mouse-over-import "Bindung ~s importiert aus ~s")
+ (cs-mouse-over-import "Bindung „~s“ importiert aus ~s")
 
- (cs-view-docs "Dokumentation für ~a anschauen")
+ (cs-view-docs "Dokumentation für „~a“ anschauen")
  (cs-view-docs-from "~a aus ~a")  ;; a completed version of the line above (cs-view-docs) is put into the first ~a and a list of modules (separated by commas) is put into the second ~a. Use check syntax and right-click on a documented variable (eg, 'require') to see this in use
   
  (cs-lexical-variable "lexikalische Variable")
- (cs-set!d-variable "geset!zte Variable")
+ (cs-set!d-variable "mutierte Variable")
  (cs-imported-variable "importierte Variable")
  (cs-unused-require "unbenutztes require")
  (cs-free-variable "freie Variable")
@@ -132,6 +132,13 @@
  (cs-contract-their-obligation "Vertrag: Obligation des Klientenmoduls")
  (cs-contract-both-obligation "Vertrag: Obligation sowohl dieses Moduls als auch des Klientenmoduls")
  (cs-contract-unk-obligation "Vertrag: Oblikation unbekannt")
+
+ ;; require prefix functionality
+ (cs-add-prefix-for-require "Präfix für require hinzufügen")
+ (cs-prefix-require-title "Präfix für Require")
+ (cs-prefix-require "Präfix wählen für alle importierten Variablen")
+ (cs-all-binders-are-prefixed "Alle require-Formen scheinen schon einen Präfix zu haben; stattdessen umbenennen")
+ (cs-the-binder-is-prefixed "Die require-Form scheint schon einen Präfix zu haben; stattdessen umbenennen")
 
  ;; mode sub-menu in the "view" menu
  (cs-check-syntax-mode "Syntax-Check-Modus")
@@ -765,6 +772,7 @@
  (move-current-tab-left "Tab nach &links bewegen")
  (tab-i "Tab ~a: ~a") ;; menu item in the windows menu under mac os x. first ~a is filled with a number between 1 and 9; second one is the filename of the tab
  (tab-i/no-name "Tab ~a")
+ (last-tab "Letzter Tab: ~a")
   
  (view-menu-label "&Anzeigen")
  (show-overview "&Programm-Umriss einblenden") 
@@ -1723,7 +1731,7 @@
   (install-pkg-dialog-title "Paket installieren")
   (install-pkg-source-label "Paket-Quelle")
   (install-pkg-package-name "Paket-Name")
-  (install-pkg-package-source-desc "Eine Paket-Quelle ist ein Paket-Name, eine Datei, ein Verzeichnis, eine URL oder ein Verweis auf Github")
+  (install-pkg-package-source-desc "Eine Paket-Quelle ist ein Paket-Name, eine Datei, ein Verzeichnis, eine URL oder ein Verweis auf GitHub")
   (install-pkg-infer "Inferieren")
   (install-pkg-use "Benutzen") ; as opposed to "Infer", label for text box
   (install-pkg-type-label "Typ Paket-Quelle")
@@ -1732,7 +1740,7 @@
   (install-pkg-dir-url "Verzeichnis woanders")
   (install-pkg-file-url "Datei woanders")
   (install-pkg-git "Git-Repositorium")
-  (install-pkg-github "Github")
+  (install-pkg-github "GitHub")
   (install-pkg-name "Name (frage Auflöser)")
   (install-pkg-inferred-as "Typ inferiert als ~a") ; ~a gets install-pkg-{file,dir,…}
   (install-pkg-link-dirs "Lokales Verzeichnis als Link")

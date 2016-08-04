@@ -60,6 +60,7 @@ static Scheme_Object *module_compiled_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *module_compiled_name(int argc, Scheme_Object *argv[]);
 static Scheme_Object *module_compiled_imports(int argc, Scheme_Object *argv[]);
 static Scheme_Object *module_compiled_exports(int argc, Scheme_Object *argv[]);
+static Scheme_Object *module_compiled_indirect_exports(int argc, Scheme_Object *argv[]);
 static Scheme_Object *module_compiled_lang_info(int argc, Scheme_Object *argv[]);
 static Scheme_Object *module_compiled_submodules(int argc, Scheme_Object *argv[]);
 static Scheme_Object *module_compiled_phaseless_p(int argc, Scheme_Object *argv[]);
@@ -67,6 +68,7 @@ static Scheme_Object *module_to_namespace(int argc, Scheme_Object *argv[]);
 static Scheme_Object *module_to_lang_info(int argc, Scheme_Object *argv[]);
 static Scheme_Object *module_to_imports(int argc, Scheme_Object *argv[]);
 static Scheme_Object *module_to_exports(int argc, Scheme_Object *argv[]);
+static Scheme_Object *module_to_indirect_exports(int argc, Scheme_Object *argv[]);
 static Scheme_Object *module_is_declared(int argc, Scheme_Object *argv[]);
 static Scheme_Object *module_is_predefined(int argc, Scheme_Object *argv[]);
 
@@ -476,6 +478,7 @@ void scheme_init_module(Scheme_Env *env)
   GLOBAL_PRIM_W_ARITY("module-compiled-name",             module_compiled_name,       1, 2, env);
   GLOBAL_PRIM_W_ARITY("module-compiled-imports",          module_compiled_imports,    1, 1, env);
   GLOBAL_PRIM_W_ARITY2("module-compiled-exports",         module_compiled_exports,    1, 1, 2, 2, env);
+  GLOBAL_PRIM_W_ARITY2("module-compiled-indirect-exports",module_compiled_indirect_exports, 1, 1, 2, 2, env);
   GLOBAL_PRIM_W_ARITY("module-compiled-language-info",    module_compiled_lang_info,  1, 1, env);
   GLOBAL_PRIM_W_ARITY("module-compiled-submodules",       module_compiled_submodules, 2, 3, env);
   GLOBAL_PRIM_W_ARITY("module-compiled-cross-phase-persistent?", module_compiled_phaseless_p, 1, 1, env);
@@ -492,6 +495,7 @@ void scheme_init_module(Scheme_Env *env)
   GLOBAL_PRIM_W_ARITY("module->language-info",            module_to_lang_info,        1, 2, env);
   GLOBAL_PRIM_W_ARITY("module->imports",                  module_to_imports,          1, 1, env);
   GLOBAL_PRIM_W_ARITY2("module->exports",                 module_to_exports,          1, 1, 2, 2, env);
+  GLOBAL_PRIM_W_ARITY2("module->indirect-exports",        module_to_indirect_exports, 1, 1, 2, 2, env);
   GLOBAL_PRIM_W_ARITY("module-declared?",                 module_is_declared,         1, 2, env);
   GLOBAL_PRIM_W_ARITY("module-predefined?",               module_is_predefined,       1, 1, env);
   GLOBAL_PRIM_W_ARITY("module-path?",                     is_module_path,             1, 1, env);
@@ -941,6 +945,89 @@ static Scheme_Module *registry_get_loaded(Scheme_Env *env, Scheme_Object *name)
 }
 
 /**********************************************************************/
+/*                      linklets and instances                        */
+/**********************************************************************/
+
+/* A minimal linklet API to support bootstrapping. */
+
+static Scheme_Object *primitive_table(int argc, Scheme_Object *argv[]);
+
+void scheme_init_linklet(Scheme_Env *env)
+{
+  Scheme_Env *newenv;
+  Scheme_Object *modname;
+
+  modname = scheme_intern_symbol("#%linklet");
+  newenv = scheme_primitive_module(modname, env);
+
+  GLOBAL_PRIM_W_ARITY("primitive-table", primitive_table, 1, 2, newenv);
+  
+  scheme_finish_primitive_module(newenv);
+  scheme_protect_primitive_provide(newenv, NULL);
+}
+
+static Scheme_Object *primitive_table(int argc, Scheme_Object *argv[])
+{
+  Scheme_Env *env, *menv;
+  Scheme_Object *name;
+  Scheme_Hash_Tree *ht;
+
+  if (!SCHEME_SYMBOLP(argv[0]))
+    scheme_wrong_contract("primitive-table", "symbol?", 0, argc, argv);
+  if ((argc > 1) && !SCHEME_HASHTRP(argv[1]))
+    scheme_wrong_contract("primitive-table", "(and/c hash? immutable?)", 1, argc, argv);
+
+  name = scheme_intern_resolved_module_path(argv[0]);
+
+  env = scheme_get_env(NULL);
+  menv = get_special_modenv(name);
+  if (!menv)
+    menv = (Scheme_Env *)scheme_hash_get(MODCHAIN_TABLE(env->modchain), name);
+  
+  if (!menv) {
+    if (argc > 1) {
+      Scheme_Object *k, *v;
+      mzlonglong pos;
+
+      menv = scheme_primitive_module(argv[0], env);
+
+      ht = (Scheme_Hash_Tree *)argv[1];
+      pos = scheme_hash_tree_next(ht, -1);
+      while (pos != -1) {
+        scheme_hash_tree_index(ht, pos, &k, &v);
+        if (SCHEME_SYMBOLP(k)) {
+          scheme_add_global_symbol(k, v, menv);
+        }
+        pos = scheme_hash_tree_next(ht, pos);
+      }
+    
+      scheme_finish_primitive_module(menv);
+      
+      start_module(menv->module, env, 0, name, 0, 1, 0, scheme_null, 0);
+    } else
+      return scheme_false;
+  }
+
+  if (argc < 2) {
+    Scheme_Bucket **bs, *b;
+    intptr_t i;
+
+    ht = scheme_make_hash_tree(0);
+
+    bs = menv->toplevel->buckets;
+    for (i = menv->toplevel->size; i--; ) {
+      b = bs[i];
+      if (b && b->val) {
+        ht = scheme_hash_tree_set(ht, (Scheme_Object *)b->key, b->val);
+      }
+    }
+
+    return (Scheme_Object *)ht;
+  } else
+    return scheme_void;
+}
+
+/**********************************************************************/
 /*                             parameters                             */
 /**********************************************************************/
 
@@ -1087,6 +1174,7 @@ static Scheme_Object *_dynamic_require(int argc, Scheme_Object *argv[],
   Scheme_Module *m, *srcm;
   Scheme_Env *menv, *lookup_env = NULL;
   int i, count, protected = 0, check_protected_at_source = 0;
+
   const char *errname;
   intptr_t base_phase;
 
@@ -1182,37 +1270,44 @@ static Scheme_Object *_dynamic_require(int argc, Scheme_Object *argv[],
                                                  srcm->self_modidx);
                   srcmname = scheme_module_resolve(srcmname, 1);
                   srcname = srcm->me->rt->provide_src_names[i];
-
-                  srcm2 = module_load(srcmname, env, errname);
-
-                  for (j = srcm2->me->rt->num_var_provides; j--; ) {
-                    if (SCHEME_FALSEP(srcm2->me->rt->provide_srcs[j])
-                        && SAME_OBJ(srcname, srcm2->me->rt->provide_src_names[j])) {
-                      /* simple re-export applies: */
-                      srcm = srcm2;
-                      count = srcm->me->rt->num_provides;
-                      name = srcm2->me->rt->provides[j];
-                      i = j;
-                      break;
-                    }
+                  if (srcm->me->rt->provide_src_phases
+                      && (srcm->me->rt->provide_src_phases[i] != 0)) {
+                    /* shortcut only checks phase 0, so use the long way */
+                    srcmname = NULL;
                   }
-                  if (j < 0) {
-                    /* Try indirect: */
-                    Scheme_Module_Export_Info *exp_info = srcm2->exp_infos[0];
-                    for (j = exp_info->num_indirect_provides; j--; ) {
-                      if (SAME_OBJ(srcname, exp_info->indirect_provides[j])) {
+
+                  if (srcmname) {
+                    srcm2 = module_load(srcmname, env, errname);
+
+                    for (j = srcm2->me->rt->num_var_provides; j--; ) {
+                      if (SCHEME_FALSEP(srcm2->me->rt->provide_srcs[j])
+                          && SAME_OBJ(srcname, srcm2->me->rt->provide_src_names[j])) {
+                        /* simple re-export applies: */
                         srcm = srcm2;
-                        name = srcname;
                         count = srcm->me->rt->num_provides;
-                        i = count;
-                        position = j;
-                        indirect_ok = 1;
+                        name = srcm2->me->rt->provides[j];
+                        i = j;
                         break;
                       }
                     }
                     if (j < 0) {
-                      /* simple re-exporting doesn't work */
-                      srcmname = NULL;
+                      /* Try indirect: */
+                      Scheme_Module_Export_Info *exp_info = srcm2->exp_infos[0];
+                      for (j = exp_info->num_indirect_provides; j--; ) {
+                        if (SAME_OBJ(srcname, exp_info->indirect_provides[j])) {
+                          srcm = srcm2;
+                          name = srcname;
+                          count = srcm->me->rt->num_provides;
+                          i = count;
+                          position = j;
+                          indirect_ok = 1;
+                          break;
+                        }
+                      }
+                      if (j < 0) {
+                        /* simple re-exporting doesn't work */
+                        srcmname = NULL;
+                      }
                     }
                   }
                 }
@@ -1269,12 +1364,14 @@ static Scheme_Object *_dynamic_require(int argc, Scheme_Object *argv[],
 	if (srcm->exp_infos[0]->provide_protects)
 	  protected = srcm->exp_infos[0]->provide_protects[i];
 	srcmname = (srcm->me->rt->provide_srcs ? srcm->me->rt->provide_srcs[i] : scheme_false);
-	if (SCHEME_FALSEP(srcmname))
+	if (SCHEME_FALSEP(srcmname)) {
 	  srcmname = srcm->modname;
-	else {
+	} else {
 	  srcmname = scheme_modidx_shift(srcmname, srcm->me->src_modidx, srcm->self_modidx);
 	  srcmname = scheme_module_resolve(srcmname, 1);
           check_protected_at_source = 1;
+          if (srcm->me->rt->provide_src_phases)
+            mod_phase += srcm->me->rt->provide_src_phases[i];
 	}
 	srcname = srcm->me->rt->provide_src_names[i];
       }
@@ -3419,6 +3516,29 @@ static Scheme_Object *extract_compiled_exports(Scheme_Module *m)
   return scheme_values(2, a);
 }
 
+static Scheme_Object *extract_compiled_indirect_exports(Scheme_Module *m)
+{
+  int k, i;
+  Scheme_Object *l, *a;
+  Scheme_Module_Export_Info *ei;
+
+  l = scheme_null;
+
+  for (k = m->num_phases; k--; ) {
+    ei = m->exp_infos[k];
+    if (ei && ei->num_indirect_provides) {
+      a = scheme_null;
+      for (i = ei->num_indirect_provides; i--; ) {
+        a = scheme_make_pair(ei->indirect_provides[i], a);
+      }
+      a = scheme_make_pair(scheme_make_integer(k), a);
+      l = scheme_make_pair(a, l);
+    }
+  }
+
+  return l;
+}
+
 static Scheme_Object *module_to_imports(int argc, Scheme_Object *argv[])
 {
   Scheme_Module *m;
@@ -3435,6 +3555,15 @@ static Scheme_Object *module_to_exports(int argc, Scheme_Object *argv[])
   m = module_to_("module->exports", argc, argv, 0);
 
   return extract_compiled_exports(m);
+}
+
+static Scheme_Object *module_to_indirect_exports(int argc, Scheme_Object *argv[])
+{
+  Scheme_Module *m;
+
+  m = module_to_("module->indirect_exports", argc, argv, 0);
+
+  return extract_compiled_indirect_exports(m);
 }
 
 static Scheme_Object *module_compiled_p(int argc, Scheme_Object *argv[])
@@ -3573,6 +3702,18 @@ static Scheme_Object *module_compiled_exports(int argc, Scheme_Object *argv[])
     return extract_compiled_exports(m);
 
   scheme_wrong_contract("module-compiled-exports", "compiled-module-expression?", 0, argc, argv);
+  return NULL;
+}
+
+static Scheme_Object *module_compiled_indirect_exports(int argc, Scheme_Object *argv[])
+{
+  Scheme_Module *m;
+  m = scheme_extract_compiled_module(argv[0]);
+
+  if (m)
+    return extract_compiled_indirect_exports(m);
+
+  scheme_wrong_contract("module-compiled-indirect-exports", "compiled-module-expression?", 0, argc, argv);
   return NULL;
 }
 
@@ -4454,7 +4595,7 @@ static void setup_accessible_table(Scheme_Module *m)
                           if (!checked_st) {
                             is_st = !!scheme_is_simple_make_struct_type(SCHEME_VEC_ELS(form)[0],
                                                                         SCHEME_VEC_SIZE(form)-1,
-                                                                        1, 1, NULL, &stinfo,
+                                                                        1, 0, 1, NULL, &stinfo,
                                                                         NULL, NULL, NULL, 0,
                                                                         m->prefix->toplevels, ht,
                                                                         5);
@@ -4499,7 +4640,7 @@ Scheme_Env *scheme_module_access(Scheme_Object *name, Scheme_Env *env, intptr_t 
     while (ph && chain) {
       chain = (SCHEME_VEC_ELS(chain))[2];
       if (SCHEME_FALSEP(chain))
-	return NULL;
+        return NULL;
       ph--;
     }
 
@@ -4509,7 +4650,7 @@ Scheme_Env *scheme_module_access(Scheme_Object *name, Scheme_Env *env, intptr_t 
     }
 
     menv = (Scheme_Env *)scheme_hash_get(MODCHAIN_TABLE(chain), name);
-    
+
     while ((ph < rev_mod_phase) && menv) {
       menv = menv->exp_env;
       ph++;
@@ -7557,6 +7698,10 @@ static Scheme_Object *do_module(Scheme_Object *form, Scheme_Comp_Env *env,
 			       SCHEME_CAR(hints));
       hints = SCHEME_CDR(hints);
       fm = scheme_stx_property(fm, 
+			       scheme_intern_symbol("module-indirect-for-meta-provides"),
+			       SCHEME_CAR(hints));
+      hints = SCHEME_CDR(hints);
+      fm = scheme_stx_property(fm, 
 			       scheme_intern_symbol("module-kernel-reprovide-hint"),
 			       SCHEME_CAR(hints));
       fm = scheme_stx_property(fm, 
@@ -8492,6 +8637,7 @@ static Scheme_Object *do_module_begin(Scheme_Object *orig_form, Scheme_Comp_Env 
          'module-variable-provides = '(item ...)
          'module-syntax-provides = '(item ...)
 	 'module-indirect-provides = '(id ...)
+	 'module-indirect-for-meta-provides = '((phase id ...) ...)
          'module-kernel-reprovide-hint = 'kernel-reexport
 
       item = name
@@ -8501,7 +8647,7 @@ static Scheme_Object *do_module_begin(Scheme_Object *orig_form, Scheme_Comp_Env 
                      | #t
                      | exclusion-id
     */
-    int j;
+    int j, k;
     Scheme_Object *e, *a, *result;
 
     result = scheme_null;
@@ -8509,13 +8655,27 @@ static Scheme_Object *do_module_begin(Scheme_Object *orig_form, Scheme_Comp_Env 
     /* kernel re-export info (now always #f): */
     result = scheme_make_pair(scheme_false, result);
 
+    /* Indirect provides for phases other than 0 */
+    e = scheme_null;
+    for (k = num_phases; k--; ) {
+      if (exp_infos[k]->num_indirect_provides) {
+        a = scheme_null;
+        for (j = exp_infos[k]->num_indirect_provides; j--; ) {
+          a = scheme_make_pair(exp_infos[k]->indirect_provides[j], a);
+        }
+        a = scheme_make_pair(scheme_make_integer(k), a);
+        e = scheme_make_pair(a, e);
+      }
+    }
+    result = scheme_make_pair(e, result);
+
     /* Indirect provides */ 
     a = scheme_null;
-    for (j = 0; j < exp_infos[0]->num_indirect_provides; j++) {
+    for (j = exp_infos[0]->num_indirect_provides; j--; ) {
       a = scheme_make_pair(exp_infos[0]->indirect_provides[j], a);
     }
     result = scheme_make_pair(a, result);
-    
+
     /* add syntax and value exports: */
     for (j = 0; j < 2; j++) {
       int top, i;
@@ -8697,7 +8857,7 @@ static Scheme_Object *do_module_begin(Scheme_Object *orig_form, Scheme_Comp_Env 
 static Scheme_Object *get_higher_phase_lifts(Module_Begin_Expand_State *bxs,
                                              Scheme_Object *begin_for_syntax_stx)
 {
-  Scheme_Object *p, *e, *fm = scheme_null;
+  Scheme_Object *p, *e, *fm = scheme_null, *bfs;
 
   if (SCHEME_PAIRP(bxs->end_statementss)) {
     /* No other ends, so start shitfing higher-phase ends into `b-f-s': */
@@ -8710,9 +8870,11 @@ static Scheme_Object *get_higher_phase_lifts(Module_Begin_Expand_State *bxs,
       /* wrap `depth' `begin-for-syntaxes' around SCHEME_CAR(p): */
       int di;
       e = scheme_reverse(SCHEME_CAR(p));
-      e = scheme_make_pair(begin_for_syntax_stx, e);
+      bfs = scheme_datum_to_syntax(SCHEME_STX_VAL(begin_for_syntax_stx), scheme_false, sys_wraps_phase(depth-1), 0, 0);
+      e = scheme_make_pair(bfs, e);
       for (di = 1; di < depth; di++) {
-        e = scheme_make_pair(begin_for_syntax_stx, scheme_make_pair(e, scheme_null));
+        bfs = scheme_datum_to_syntax(SCHEME_STX_VAL(begin_for_syntax_stx), scheme_false, sys_wraps_phase(depth-di-1), 0, 0);
+        e = scheme_make_pair(bfs, scheme_make_pair(e, scheme_null));
       }
       fm = scheme_make_pair(scheme_datum_to_syntax(e, scheme_false, scheme_false, 0, 0),
                             scheme_null);

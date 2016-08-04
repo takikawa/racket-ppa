@@ -441,18 +441,10 @@
         (define convert-table (get-convert-table))
         (cond
           [(not (port-writes-special? port)) (original-pretty-print-print-hook value display? port)]
+          ;; note: 'write' and 'display' have special handling in mrlib/interactive-value-port
+          ;; that is installed by framework/private/text into the ports
           [(is-a? value snip%)
-           (when (image-core:image? value)
-             ;; do this computation here so that any failures
-             ;; during drawing happen under the user's custodian
-             (image-core:compute-image-cache value))
-           (define str (format "~s" value))
-           (cond
-             [(or (regexp-match? #rx"plot-snip%" str)
-                  (regexp-match? #rx"pict3d%" str))
-              (write-special (send value copy) port)]
-             [else
-              (write-special (text:make-snip-special (send value copy)) port)])
+           (text:send-snip-to-port value port)
            1]
           [(pict:convertible? value)
            (write-special (mk-pict-snip value))]
@@ -466,6 +458,7 @@
           [(hash-ref convert-table value #f)
            =>
            (λ (backing-scale+bytes)
+             (hash-remove! convert-table value)
              (write-special
               (make-object image-snip%
                 (read-bitmap (open-input-bytes (cadr backing-scale+bytes))

@@ -60,7 +60,7 @@
 # define rOPRNGS(o) OPRNGS(o, regstr)
 # define NEXT_OP(scan) (scan + rNEXT(scan))
 
-static regexp *regcomp(char *, rxpos, int, int);
+static regexp *regcomp(char *, rxpos, int, int, Scheme_Object*);
 /* static int regexec(regexp *, char *, int, int, rxpos *, rxpos * ...); */
 
 /*
@@ -84,6 +84,10 @@ THREAD_LOCAL_DECL(static rxpos regcode) ;    /* Code-emit pointer, if less than 
 THREAD_LOCAL_DECL(static rxpos regcodesize);
 THREAD_LOCAL_DECL(static rxpos regcodemax);
 THREAD_LOCAL_DECL(static intptr_t regmaxlookback);
+
+THREAD_LOCAL_DECL(static const char *regerrorwho);
+THREAD_LOCAL_DECL(static Scheme_Object *regerrorproc); /* error handler for regexp construction */
+THREAD_LOCAL_DECL(static Scheme_Object *regerrorval);  /* result of error handler for failed regexp construction */
 
 /* caches to avoid gc */
 THREAD_LOCAL_DECL(static intptr_t rx_buffer_size);
@@ -126,8 +130,20 @@ READ_ONLY static Scheme_Object *empty_byte_string;
 static void
 regerror(char *s)
 {
-  scheme_raise_exn(MZEXN_FAIL_CONTRACT,
-		   "regexp: %s", s);
+  if (!regerrorval) {
+    if (SCHEME_FALSEP(regerrorproc)) {
+      const char *who = regerrorwho;
+      regerrorwho = NULL;
+      scheme_raise_exn(MZEXN_FAIL_CONTRACT,
+                       "%s: %s",
+                       (who ? who : "regexp"),
+                       s);
+    } else {
+      Scheme_Object *a[1];
+      a[0] = scheme_make_utf8_string(s);
+      regerrorval = scheme_apply_multi(regerrorproc, 1, a);
+    }
+  }
 }
 
 THREAD_LOCAL_DECL(const char *failure_msg_for_read);
@@ -158,7 +174,7 @@ regcomperror(char *s)
  * of the structure of the compiled regexp.
  */
 static regexp *
-regcomp(char *expstr, rxpos exp, int explen, int pcre)
+regcomp(char *expstr, rxpos exp, int explen, int pcre, Scheme_Object *handler)
 {
   regexp *r;
   rxpos scan, next;
@@ -180,8 +196,12 @@ regcomp(char *expstr, rxpos exp, int explen, int pcre)
   regmaxbackposn = 0;
   regbackknown = NULL;
   regbackdepends = NULL;
+  regerrorproc = handler;
+  regerrorval = NULL;
   regc(MAGIC);
   if (reg(0, &flags, 0, 0, PARSE_CASE_SENS | PARSE_SINGLE_LINE | (pcre ? PARSE_PCRE : 0)) == 0) {
+    if (regerrorval)
+      return NULL;
     FAIL("unknown regexp failure");
   }
   
@@ -1685,12 +1705,12 @@ static char *regrange(int parse_flags, char *map)
 	map['-'] = 1;
       } else {
 	if (!can_range) {
-	  FAIL("misplaced hypen within square brackets in pattern");
+	  FAIL("misplaced hyphen within square brackets in pattern");
 	} else {
 	  xclass = UCHAR(regparsestr[regparse-2])+1;
 	  classend = UCHAR(regparsestr[regparse]);
 	  if (classend == '-') {
-	    FAIL("misplaced hypen within square brackets in pattern");
+	    FAIL("misplaced hyphen within square brackets in pattern");
 	  }
 	  if ((classend == '\\') && (parse_flags & PARSE_PCRE)) {
 	    if (regparse+1 == regparse_end) {
@@ -1700,7 +1720,7 @@ static char *regrange(int parse_flags, char *map)
 	    classend = UCHAR(regparsestr[regparse]);
 	    if (((classend >= 'a') && (classend <= 'z'))
 		|| ((classend >= 'A') && (classend <= 'Z'))) {
-	      FAIL("misplaced hypen within square brackets in pattern");
+	      FAIL("misplaced hyphen within square brackets in pattern");
 	    }
 	  }
 	  if (xclass > classend+1)
@@ -1948,7 +1968,7 @@ regranges(int parse_flags, int at_start)
 	}
       }
       for (c++; c < 256; c++) {
-	if (!accum_map[c] == on) {
+	if ((!accum_map[c]) == on) {
 	  re = c - 1;
 	  break;
 	}
@@ -4584,7 +4604,7 @@ static int translate(unsigned char *s, int len, char **result, int pcre)
 	      && (!pcre || ((us[p] != '\\') && (us[p+2] != '\\')))) {
 	    int beg = us[p], end = us[p+2];
 	    if (end == '-') {
-	      FAIL("misplaced hypen within square brackets in pattern");
+	      FAIL("misplaced hyphen within square brackets in pattern");
 	    }
 	    if (end < beg) {
 	      /* Bad regexp */
@@ -4714,7 +4734,7 @@ static int translate(unsigned char *s, int len, char **result, int pcre)
             p++;
 	  } else {
 	    if (((p + 1) < ulen) && (us[p] == '-')) {
-	      FAIL("misplaced hypen within square brackets in pattern");
+	      FAIL("misplaced hyphen within square brackets in pattern");
 	      return 0;
 	    }
 	    simple_on[us[p]] = 1;
@@ -5035,18 +5055,26 @@ int scheme_is_pregexp(Scheme_Object *o)
 static Scheme_Object *do_make_regexp(const char *who, int is_byte, int pcre, int argc, Scheme_Object *argv[])
 {
   Scheme_Object *re, *bs;
+  Scheme_Object *handler;
   char *s;
   int slen;
 
   if (is_byte) {
     if (!SCHEME_BYTE_STRINGP(argv[0]))
-      scheme_wrong_contract(who, "byte?", 0, argc, argv);
+      scheme_wrong_contract(who, "bytes?", 0, argc, argv);
     bs = argv[0];
   } else {
     if (!SCHEME_CHAR_STRINGP(argv[0]))
       scheme_wrong_contract(who, "string?", 0, argc, argv);
     bs = scheme_char_string_to_byte_string(argv[0]);
   }
+
+  if (argc >= 2) {
+    if (!scheme_check_proc_arity2(who, 1, 1, argc, argv, 1))
+      scheme_wrong_contract(who, "(or/c #f (string? -> any))", 1, argc, argv);
+    handler = argv[1];
+  } else
+    handler = scheme_false;
 
   s = SCHEME_BYTE_STR_VAL(bs);
   slen = SCHEME_BYTE_STRTAG_VAL(bs);
@@ -5068,7 +5096,14 @@ static Scheme_Object *do_make_regexp(const char *who, int is_byte, int pcre, int
 #endif
   }
 
-  re = (Scheme_Object *)regcomp(s, 0, slen, pcre);
+  regerrorwho = who;
+  re = (Scheme_Object *)regcomp(s, 0, slen, pcre, handler);
+  regerrorwho = NULL;
+  
+  /* passed a handler and regexp compilation failed */
+  if (!re) {
+    return regerrorval;
+  }
 
   if (!is_byte)
     ((regexp *)re)->flags |= REGEXP_IS_UTF8;
@@ -5993,10 +6028,10 @@ void scheme_regexp_initialize(Scheme_Env *env)
   REGISTER_SO(empty_byte_string);
   empty_byte_string = scheme_alloc_byte_string(0, 0);
 
-  GLOBAL_PRIM_W_ARITY("byte-regexp",                           make_regexp,             1, 1, env);
-  GLOBAL_PRIM_W_ARITY("regexp",                                make_utf8_regexp,        1, 1, env);
-  GLOBAL_PRIM_W_ARITY("byte-pregexp",                          make_pregexp,            1, 1, env);
-  GLOBAL_PRIM_W_ARITY("pregexp",                               make_utf8_pregexp,       1, 1, env);
+  GLOBAL_PRIM_W_ARITY("byte-regexp",                           make_regexp,             1, 2, env);
+  GLOBAL_PRIM_W_ARITY("regexp",                                make_utf8_regexp,        1, 2, env);
+  GLOBAL_PRIM_W_ARITY("byte-pregexp",                          make_pregexp,            1, 2, env);
+  GLOBAL_PRIM_W_ARITY("pregexp",                               make_utf8_pregexp,       1, 2, env);
   GLOBAL_PRIM_W_ARITY("regexp-match",                          compare,                 2, 6, env);
   GLOBAL_PRIM_W_ARITY("regexp-match/end",                      compare_end,             2, 7, env);
   GLOBAL_PRIM_W_ARITY("regexp-match-positions",                positions,               2, 6, env);
@@ -6025,4 +6060,6 @@ void scheme_init_regexp_places()
   REGISTER_SO(regstr);
   REGISTER_SO(regbackknown);
   REGISTER_SO(regbackdepends);
+  REGISTER_SO(regerrorproc);
+  REGISTER_SO(regerrorval);
 }

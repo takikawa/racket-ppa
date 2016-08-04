@@ -645,10 +645,8 @@
           [(-#%app -chaperone-procedure expr . rst)
            (and (free-identifier=? (syntax -#%app)
                                    (quote-syntax #%plain-app))
-                (or (free-identifier=? (syntax -chaperone-procedure)
-                                       (quote-syntax chaperone-procedure))
-                    (free-identifier=? (syntax -chaperone-procedure)
-                                       (quote-syntax chaperone-procedure))))
+                (free-identifier=? (syntax -chaperone-procedure)
+                                   (quote-syntax chaperone-procedure)))
            (with-syntax ([expr (loop #'expr #t name locals)])
              (syntax-track-origin
               (rearm
@@ -2461,9 +2459,7 @@ last few projections.
                                                               (lambda (obj) 
                                                                 ((class-serializer c) obj))
                                                               deserialize-id
-                                                              (and (not inspector)
-                                                                   (not (interface-extension? i externalizable<%>))
-                                                                   (eq? #t (class-serializer super)))
+                                                              (not (interface-extension? i externalizable<%>))
                                                               (or (current-load-relative-directory) 
                                                                   (current-directory)))))
                                                       null))

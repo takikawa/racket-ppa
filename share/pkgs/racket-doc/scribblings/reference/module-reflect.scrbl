@@ -1,6 +1,7 @@
 #lang scribble/doc
 @(require "mz.rkt"
-          (for-label compiler/embed))
+          (for-label compiler/embed
+                     syntax/modresolve))
 
 @title{Module Names and Loading}
 
@@ -284,7 +285,9 @@ name resolver} (see @racket[current-module-name-resolver]). Depending
 on the kind of module paths encapsulated by @racket[mpi], the computed
 resolved name can depend on the value of
 @racket[current-load-relative-directory] or
-@racket[current-directory].}
+@racket[current-directory].
+
+See @racket[resolve-module-path-index].}
 
 
 @defproc[(module-path-index-split [mpi module-path-index?])
@@ -321,7 +324,7 @@ result is always @racket[#f] if either result of
          module-path-index?]{
 
 Combines @racket[path], @racket[base], and @racket[submod] to create a
-new @tech{module path index}. The @racket[path] argument can
+new @tech{module path index}. The @racket[path] argument can be
 @racket[#f] only if @racket[base] is also @racket[#f]. The
 @racket[submod] argument can be a list only when @racket[path] and
 @racket[base] are both @racket[#f].}
@@ -359,7 +362,7 @@ the module starting with the top-level module's declared name.}
 Takes a module declaration in compiled form and either gets the
 module's @tech{submodules} (when @racket[submodules] is not provided) or
 returns a revised module declaration with the given
-@racket[submodules]. The @racket[pre-module?] argument determines
+@racket[submodules]. The @racket[non-star?] argument determines
 whether the result or new submodule list corresponds to
 @racket[module] declarations (when @racket[non-star?] is true)
 or @racket[module*] declarations (when @racket[non-star?] is @racket[#f]).}
@@ -419,6 +422,20 @@ explicitly the import, the import @tech{phase level} shift (where
 @racket[#f] corresponds to a @racket[for-label] import), the import
 name of the re-exported binding, and the @tech{phase level} of the
 import.}
+
+
+
+@defproc[(module-compiled-indirect-exports [compiled-module-code compiled-module-expression?])
+         (listof (cons/c exact-integer? (listof symbol?)))]{
+
+Returns an association list mapping @tech{phase level} values to
+symbols that represent variables within the module. These definitions
+are not directly accessible from source, but they are accessible from
+bytecode, and the order of the symbols in each list corresponds to an
+order for bytecode access.
+
+@history[#:added "6.5.0.5"]}
+
 
 @defproc[(module-compiled-language-info [compiled-module-code compiled-module-expression?])
          (or/c #f (vector/c module-path? symbol? any/c))]{
@@ -556,14 +573,19 @@ because the root module does not exist.}
 Returns information intended to reflect the ``language'' of the
 implementation of @racket[mod]. If @racket[mod] is a 
 @tech{resolved module path} or @racket[load?] is @racket[#f], the
-module named by @racket[mod] must be declared (but not necessarily
+module named by @racket[mod] must be @tech{declare}d (but not necessarily
 @tech{instantiate}d or @tech{visit}ed) in the current namespace;
 otherwise, @racket[mod] may be loaded (as for @racket[dynamic-require]
 and other functions). The information returned by
 @racket[module->language-info] is the same as would have been returned
 by @racket[module-compiled-language-info] applied to the module's
-implementation as compiled code.}
+implementation as compiled code.
 
+A module can be @tech{declare}d by using @racket[dynamic-require].
+
+@examples[#:eval mod-eval
+          (dynamic-require 'racket/dict (void))
+          (module->language-info 'racket/dict)]}
 
 @defproc[(module->imports
           [mod (or/c module-path? module-path-index?
@@ -571,9 +593,19 @@ implementation as compiled code.}
          (listof (cons/c (or/c exact-integer? #f) 
                          (listof module-path-index?)))]{
 
-Like @racket[module-compiled-imports], but produces the imports of
-@racket[mod], which must be declared (but not necessarily
-@tech{instantiate}d or @tech{visit}ed) in the current namespace.}
+ Like @racket[module-compiled-imports], but produces the
+ imports of @racket[mod], which must be @tech{declare}d (but
+ not necessarily @tech{instantiate}d or @tech{visit}ed) in
+ the current namespace. See @racket[module->language-info] for
+ an example of declaring an existing module.
+ 
+@examples[#:eval mod-eval
+          (module banana racket/base
+            (require (only-in racket/math pi))
+            (provide peel)
+            (define peel pi)
+            (define bush (* 2 pi)))
+          (module->imports ''banana)]}
 
 
 @defproc[(module->exports
@@ -581,9 +613,39 @@ Like @racket[module-compiled-imports], but produces the imports of
          (values (listof (cons/c (or/c exact-integer? #f) list?))
                  (listof (cons/c (or/c exact-integer? #f) list?)))]{
 
-Like @racket[module-compiled-exports], but produces the exports of
-@racket[mod], which must be declared (but not necessarily
-@tech{instantiate}d or @tech{visit}ed) in the current namespace.}
+ Like @racket[module-compiled-exports], but produces the
+ exports of @racket[mod], which must be @tech{declare}d (but
+ not necessarily @tech{instantiate}d or @tech{visit}ed) in
+ the current namespace. See @racket[module->language-info] for
+ an example of declaring an existing module.
+ 
+@examples[#:eval mod-eval
+          (module banana racket/base
+            (require (only-in racket/math pi))
+            (provide peel)
+            (define peel pi)
+            (define bush (* 2 pi)))
+          (module->exports ''banana)]}
+
+@defproc[(module->indirect-exports
+          [mod (or/c module-path? resolved-module-path?)])
+         (listof (cons/c exact-integer? (listof symbol?)))]{
+
+ Like @racket[module-compiled-indirect-exports], but produces the
+ exports of @racket[mod], which must be @tech{declare}d (but
+ not necessarily @tech{instantiate}d or @tech{visit}ed) in
+ the current namespace. See @racket[module->language-info] for
+ an example of declaring an existing module.
+
+@examples[#:eval mod-eval
+          (module banana racket/base
+            (require (only-in racket/math pi))
+            (provide peel)
+            (define peel pi)
+            (define bush (* 2 pi)))
+          (module->indirect-exports ''banana)]
+
+@history[#:added "6.5.0.5"]}
 
 @defproc[(module-predefined?
           [mod (or/c module-path? resolved-module-path?)])

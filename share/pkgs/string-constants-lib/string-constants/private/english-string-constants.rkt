@@ -203,7 +203,7 @@ please adhere to these guidelines:
  (cs-open-file "Open ~a")
  (cs-rename-var "Rename ~a")
  (cs-rename-id "Rename Identifier")
- (cs-rename-var-to "Rename ~a to:")
+ (cs-rename-var-to "Rename “~a” to:")
  (cs-name-duplication-error "The new name you have chosen, ~s, conflicts with an already established name in this scope.")
  (cs-rename-anyway "Rename Anyway")
  (cs-status-init "Check Syntax: Initializing environment for user code")
@@ -212,14 +212,14 @@ please adhere to these guidelines:
  (cs-status-expanding-expression "Check Syntax: expanding expression")
  (cs-status-loading-docs-index "Check Syntax: loading documentation index")
  (cs-syncheck-running "Check Syntax Running")
- (cs-mouse-over-import "binding ~s imported from ~s")
- (cs-view-docs "View documentation for ~a")
+ (cs-mouse-over-import "binding “~s” imported from “~s”")
+ (cs-view-docs "View documentation for “~a”")
  (cs-view-docs-from "~a from ~a")  ;; a completed version of the line above
   ;; (cs-view-docs) is put into the first ~a and a list of modules (separated by commas) 
   ;; is put into the second ~a. Use check syntax and right-click on a documented variable (eg, 'require') to see this in use
   
  (cs-lexical-variable "lexical variable")
- (cs-set!d-variable "set!’d variable")
+ (cs-set!d-variable "mutated variable")
  (cs-imported-variable "imported variable")
  (cs-unused-require "unused require")
  (cs-free-variable "free variable")
@@ -233,6 +233,13 @@ please adhere to these guidelines:
   (cs-contract-their-obligation "Contract: clients modules' obligation")
   (cs-contract-both-obligation "Contract: both this module and client modules' obligation")
   (cs-contract-unk-obligation "Contract: unknown obligation")
+
+  ;; require prefix functionality
+  (cs-add-prefix-for-require "Add prefix for require")
+  (cs-prefix-require-title "Prefix Require")
+  (cs-prefix-require "Choose a prefix to add to each imported variable")
+  (cs-all-binders-are-prefixed "All of the requires already appear to have a prefix; try to rename it instead")
+  (cs-the-binder-is-prefixed "The require appears to already have a prefix; try to rename it instead")
   
   ;; mode sub-menu in the "view" menu
   (cs-check-syntax-mode "Check Syntax Mode")
@@ -878,6 +885,7 @@ please adhere to these guidelines:
   ;; menu item in the windows menu under mac os x. first ~a is filled with a number between 1 and 9; second one is the filename of the tab
   (tab-i "Tab ~a: ~a")
   (tab-i/no-name "Tab ~a")
+  (last-tab "Last Tab: ~a")
 
  (view-menu-label "&View")
  (show-overview "Show &Program Contour") 
@@ -1846,7 +1854,7 @@ please adhere to these guidelines:
   (install-pkg-dialog-title "Install Package")
   (install-pkg-source-label "Package Source")
   (install-pkg-package-name "Package Name")
-  (install-pkg-package-source-desc "A package source is a package name, file, directory, URL, or Github reference")
+  (install-pkg-package-source-desc "A package source is a package name, file, directory, URL, or GitHub reference")
   (install-pkg-infer "Infer")
   (install-pkg-use "Use") ; as opposed to "Infer", label for text box
   (install-pkg-type-label "Package Source Type")
@@ -1855,7 +1863,7 @@ please adhere to these guidelines:
   (install-pkg-dir-url "Remote Directory")
   (install-pkg-file-url "Remote File")
   (install-pkg-git "Git Repository")
-  (install-pkg-github "Github")
+  (install-pkg-github "GitHub")
   (install-pkg-name "Name (consulting resolver)")
   (install-pkg-inferred-as "Type inferred to be ~a") ; ~a gets install-pkg-{file,dir,...}
   (install-pkg-link-dirs "Local directory as link")

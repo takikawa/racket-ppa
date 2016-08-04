@@ -11,7 +11,7 @@
          (except-in
           (combine-in
            (utils tc-utils)
-           (rep free-variance type-rep filter-rep object-rep rep-utils)
+           (rep free-variance type-rep prop-rep object-rep rep-utils)
            (types utils abbrev numeric-tower union subtype resolve
                   substitute generalize prefab)
            (env index-env tvar-env))
@@ -19,7 +19,7 @@
          "constraint-structs.rkt"
          "signatures.rkt" "fail.rkt"
          "promote-demote.rkt"
-         racket/match
+         racket/match racket/set
          mzlib/etc
          (contract-req)
          (for-syntax
@@ -224,23 +224,23 @@
       (substitute (make-F var) v ty*))))
 
 
-(define/cond-contract (cgen/filter context s t)
-  (context? Filter? Filter? . -> . (or/c #f cset?))
+(define/cond-contract (cgen/prop context s t)
+  (context? Prop? Prop? . -> . (or/c #f cset?))
   (match* (s t)
     [(e e) (empty-cset/context context)]
-    [(e (Top:)) (empty-cset/context context)]
+    [(e (TrueProp:)) (empty-cset/context context)]
     ;; FIXME - is there something to be said about the logical ones?
-    [((TypeFilter: s p) (TypeFilter: t p)) (cgen/inv context s t)]
-    [((NotTypeFilter: s p) (NotTypeFilter: t p)) (cgen/inv context s t)]
+    [((TypeProp: o s) (TypeProp: o t)) (cgen/inv context s t)]
+    [((NotTypeProp: o s) (NotTypeProp: o t)) (cgen/inv context s t)]
     [(_ _) #f]))
 
-;; s and t must be *latent* filter sets
-(define/cond-contract (cgen/filter-set context s t)
-  (context? FilterSet? FilterSet? . -> . (or/c #f cset?))
+;; s and t must be *latent* prop sets
+(define/cond-contract (cgen/prop-set context s t)
+  (context? PropSet? PropSet? . -> . (or/c #f cset?))
   (match* (s t)
     [(e e) (empty-cset/context context)]
-    [((FilterSet: s+ s-) (FilterSet: t+ t-))
-     (% cset-meet (cgen/filter context s+ t+) (cgen/filter context s- t-))]
+    [((PropSet: p+ p-) (PropSet: q+ q-))
+     (% cset-meet (cgen/prop context p+ q+) (cgen/prop context p- q-))]
     [(_ _) #f]))
 
 (define/cond-contract (cgen/object context s t)
@@ -320,7 +320,7 @@
           (% move-dotted-rest-to-dmap (cgen (context-add-var context dbound) s-dty t-dty) dbound dbound*)))]
     [((seq ss (dotted-end s-dty dbound))
       (seq ts (dotted-end t-dty dbound*)))
-     #:when (inferable-index? context dbound*)
+     #:return-unless (inferable-index? context dbound*) #f
      #:return-unless (= (length ss) (length ts)) #f
      (% cset-meet
         (cgen/list context ss ts)
@@ -439,26 +439,26 @@
           ;; CG-Top
           [(_ (Univ:)) empty]
           ;; AnyValues
-          [((AnyValues: s-f) (AnyValues: t-f))
-           (cgen/filter context s-f t-f)]
+          [((AnyValues: p) (AnyValues: q))
+           (cgen/prop context p q)]
 
-          [((or (Values: (list (Result: _ fs _) ...))
-                (ValuesDots: (list (Result: _ fs _) ...) _ _))
-            (AnyValues: t-f))
+          [((or (Values: (list (Result: _ psets _) ...))
+                (ValuesDots: (list (Result: _ psets _) ...) _ _))
+            (AnyValues: q))
            (cset-join
              (filter identity
-               (for/list ([f (in-list fs)])
-                 (match f
-                   [(FilterSet: f+ f-)
-                    (% cset-meet (cgen/filter context f+ t-f) (cgen/filter context f- t-f))]))))]
+               (for/list ([pset (in-list psets)])
+                 (match pset
+                   [(PropSet: p+ p-)
+                    (% cset-meet (cgen/prop context p+ q) (cgen/prop context p- q))]))))]
 
           ;; check all non Type/c first so that calling subtype is safe
 
           ;; check each element
-          [((Result: s f-s o-s)
-            (Result: t f-t o-t))
+          [((Result: s pset-s o-s)
+            (Result: t pset-t o-t))
            (% cset-meet (cg s t)
-                        (cgen/filter-set context f-s f-t)
+                        (cgen/prop-set context pset-s pset-t)
                         (cgen/object context o-s o-t))]
 
           ;; Values just delegate to cgen/seq, except special handling for -Bottom.
@@ -525,6 +525,19 @@
           [((? Mu? s) t) (cg (unfold s) t)]
           [(s (? Mu? t)) (cg s (unfold t))]
 
+          ;; find *an* element of elems which can be made a subtype of T
+          [((Intersection: ts) T)
+           (cset-join
+            (for*/list ([t (in-immutable-set ts)]
+                        [v (in-value (cg t T))]
+                        #:when v)
+              v))]
+          
+          ;; constrain S to be below *each* element of elems, and then combine the constraints
+          [(S (Intersection: ts))
+           (define cs (for/list/fail ([ts (in-immutable-set ts)]) (cg S ts)))
+           (and cs (cset-meet* (cons empty cs)))]
+          
           ;; constrain *each* element of es to be below T, and then combine the constraints
           [((Union: es) T)
            (define cs (for/list/fail ([e (in-list es)]) (cg e T)))
