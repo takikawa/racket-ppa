@@ -579,4 +579,63 @@ module path and the module paths of its immediate dependents.
 ]
 }
 
+
+@section{Macro Profiler}
+
+The Macro Profiler shows what macros contribute most to the
+@emph{expanded code size} of programs. Use the Macro Profiler when
+your program has compiled files that are larger than expected. (The
+Macro Profiler does not report expansion time, but expansion time is
+generally proportional to code size.)
+
+@commandline{
+raco macro-profiler @emph{module-path ...}
+}
+
+The Macro Profiler works by expanding the files using the Macro
+Debugger and recording the difference in term sizes for each macro
+expansion step. The size of a term is computed by counting its pairs,
+atoms, etc.
+
+Consider the following partial macro expansion:
+
+@racketblock[
+(m (n x)) ⇒ (o (p y) (n x)) ⇒ (f (p y) (n x) z) ⇒ (f y (n x) z)
+]
+
+The @emph{direct} cost of @racket[m] is 6---the size of the new term
+@racket[(p y)] plus one for the additional pair to include it in the
+@racket[o] arguments. Likewise, the direct cost of @racket[o] is
+2. The direct cost of @racket[p] is -4, because the macro's result is
+smaller than its use.
+
+The @emph{total} cost of a macro consists of its direct cost
+@emph{plus} the costs of any macros in the code introduced by
+@racket[m], but @emph{not} including the costs from macro arguments
+like @racket[(n x)]. So the total cost of @racket[m] is 6 + 2 - 4 = 4,
+because the @racket[o] and @racket[p] terms were introduced by
+@racket[m]. In contrast, the total cost of @racket[o] is just 2, the
+same as the direct cost.
+
+Here are some known limitations:
+@itemlist[
+
+@item{Term size is an imperfect proxy for compiled code size. For
+example, a macro might generate a large expression that it knows the
+compiler will turn into a small expression via constant propagation
+and dead code elimination (see the ``Macro-Writer's Bill of
+Rights''). The profiler will overestimate the code-size cost of such a
+macro.}
+
+@item{The Macro Profiler uses scopes to determine what terms were
+introduced by a macro, so it can be confused by certain kinds of
+hygiene-breaking macros.}
+
+@item{The profiler calculates the costs of @racket[local-expand]
+assuming that is used only on macro arguments, and that the result is
+used in the macro's result. Macros that violate this assumption will
+have correspondingly incorrect profile costs.}
+
+]
+
 @close-eval[the-eval]

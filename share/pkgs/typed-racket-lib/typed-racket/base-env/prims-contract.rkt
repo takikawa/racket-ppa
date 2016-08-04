@@ -19,7 +19,7 @@
 
 (provide require/opaque-type require-typed-struct-legacy require-typed-struct
          require/typed-legacy require/typed require/typed/provide
-         require-typed-struct/provide cast make-predicate define-predicate
+         require-typed-struct/provide core-cast make-predicate define-predicate
          require-typed-signature)
 
 (module forms racket/base
@@ -31,7 +31,7 @@
                     require-typed-struct-legacy
                     require-typed-struct
                     require/typed-legacy require/typed require/typed/provide
-                    require-typed-struct/provide cast make-predicate define-predicate)]))
+                    require-typed-struct/provide core-cast make-predicate define-predicate)]))
   (define-syntax (def stx)
     (syntax-case stx ()
       [(_ id ...)
@@ -43,7 +43,16 @@
         require-typed-struct-legacy
         require-typed-struct
         require/typed-legacy require/typed require/typed/provide
-        require-typed-struct/provide cast make-predicate define-predicate))
+        require-typed-struct/provide make-predicate define-predicate)
+
+  ;; Expand `cast` to a `core-cast` with an extra `#%expression` in order
+  ;; to prevent the contract generation pass from executing too early
+  ;; (i.e., before the `cast` typechecks)
+  (define-syntax (-core-cast stx) (core-cast stx))
+  (define-syntax (cast stx)
+    (syntax-case stx ()
+      [(_ e ty) (quasisyntax/loc stx (#%expression #,(syntax/loc stx (-core-cast e ty))))]))
+  (provide cast))
 
 ;; unsafe operations go in this submodule
 (module* unsafe #f
@@ -75,10 +84,13 @@
          (for-template "../utils/any-wrap.rkt")
          "../utils/tc-utils.rkt"
          "../private/syntax-properties.rkt"
+         "../private/cast-table.rkt"
+         "../private/type-contract.rkt"
          "../typecheck/internal-forms.rkt"
          ;; struct-extraction is actually used at both of these phases
          "../utils/struct-extraction.rkt"
-         (for-syntax "../utils/struct-extraction.rkt")
+         (for-syntax "../utils/struct-extraction.rkt"
+                     "type-name-error.rkt")
          (only-in "../utils/utils.rkt" syntax-length)
          (for-template racket/base "ann-inst.rkt"))
 
@@ -250,9 +262,27 @@
 ;;  make-predicate
 ;;  cast
 
-;; Helper to construct syntax for contract definitions
+;; Helpers to construct syntax for contract definitions
+;; make-contract-def-rhs : Type-Stx Boolean Boolean -> Syntax
 (define (make-contract-def-rhs type flat? maker?)
-  (contract-def-property #'#f `#s(contract-def ,type ,flat? ,maker? untyped)))
+  (define contract-def `#s(contract-def ,type ,flat? ,maker? untyped))
+  (contract-def-property #'#f (λ () contract-def)))
+
+;; make-contract-def-rhs/from-typed : Id Boolean Boolean -> Syntax
+(define (make-contract-def-rhs/from-typed id flat? maker?)
+  (contract-def-property
+   #'#f
+   ;; This function should only be called after the type-checking pass has finished.
+   ;; By then `tc/#%expression` will have recognized the `casted-expr` property and
+   ;; will have added the casted expression's original type to the cast-table, so
+   ;; that `(cast-table-ref id)` can get that type here.
+   (λ ()
+     (define type-stx
+       (or (cast-table-ref id)
+           (int-err (string-append
+                     "contract-def-property: thunk called too early\n"
+                     "  This should only be called after the type-checking pass has finished."))))
+     `#s(contract-def ,type-stx ,flat? ,maker? typed))))
 
 
 (define (define-predicate stx)
@@ -285,21 +315,21 @@
      #`(#,(external-check-property #'#%expression check-valid-type)
         #,(ignore-some/expr #`(flat-contract-predicate #,name) #'(Any -> Boolean : ty)))]))
 
-
-(define (cast stx)
+;; wrapped above in the `forms` submodule
+(define (core-cast stx)
   (syntax-parse stx
     [(_ v:expr ty:expr)
-     (define (apply-contract ctc-expr)
+     (define (apply-contract v ctc-expr pos neg)
        #`(#%expression
           #,(ignore-some/expr
-             #`(let-values (((val) #,(with-type* #'v #'Any)))
+             #`(let-values (((val) #,(with-type* v #'Any)))
                  #,(syntax-property
                     (quasisyntax/loc stx
                       (contract
                        #,ctc-expr
                        val
-                       'cast
-                       'typed-world
+                       '#,pos
+                       '#,neg
                        val
                        (quote-srcloc #,stx)))
                     'feature-profile:TR-dynamic-check #t))
@@ -308,18 +338,32 @@
      (cond [(not (unbox typed-context?)) ; no-check, don't check
             #'v]
            [else
-            (define ctc (syntax-local-lift-expression
-                         (make-contract-def-rhs #'ty #f #f)))
+            (define new-ty-ctc (syntax-local-lift-expression
+                                (make-contract-def-rhs #'ty #f #f)))
+            (define existing-ty-id new-ty-ctc)
+            (define existing-ty-ctc (syntax-local-lift-expression
+                                     (make-contract-def-rhs/from-typed existing-ty-id #f #f)))
+            (define (store-existing-type existing-type)
+              (check-no-free-vars existing-type #'v)
+              (cast-table-set! existing-ty-id (datum->syntax #f existing-type #'v)))
             (define (check-valid-type _)
               (define type (parse-type #'ty))
+              (check-no-free-vars type #'ty))
+            (define (check-no-free-vars type stx)
               (define vars (fv type))
               ;; If there was an error don't create another one
               (unless (or (Error? type) (null? vars))
                 (tc-error/delayed
+                 #:stx stx
                  "Type ~a could not be converted to a contract because it contains free variables."
                  type)))
             #`(#,(external-check-property #'#%expression check-valid-type)
-               #,(apply-contract ctc))])]))
+               #,(apply-contract
+                  (apply-contract
+                   #`(#,(casted-expr-property #'#%expression store-existing-type)
+                      v)
+                   existing-ty-ctc 'typed-world 'cast)
+                  new-ty-ctc 'cast 'typed-world))])]))
 
 
 
@@ -332,9 +376,9 @@
        #`(begin #,stx (begin))]
     [(_ ty:id pred:id lib (~optional ne:name-exists-kw) ...)
      (with-syntax ([hidden (generate-temporary #'pred)])
-       (define pred-cnt
-         (syntax-local-lift-expression
-          (make-contract-def-rhs #'(-> Any Boolean) #f #f)))
+       ;; this is needed because this expands to the contract directly without
+       ;; going through the normal `make-contract-def-rhs` function.
+       (set-box! include-extra-requires? #t)
        (quasisyntax/loc stx
          (begin
            ;; register the identifier for the top-level (see require/typed)
@@ -345,7 +389,10 @@
            #,(if (attribute ne)
                  (internal (syntax/loc stx (define-type-alias-internal ty (Opaque pred))))
                  (syntax/loc stx (define-type-alias ty (Opaque pred))))
-           #,(ignore #`(require/contract pred hidden #,pred-cnt lib)))))]))
+           #,(ignore #'(define pred-cnt
+                         (or/c struct-predicate-procedure?/c
+                               (any-wrap-warning/c . c-> . boolean?))))
+           #,(ignore #'(require/contract pred hidden pred-cnt lib)))))]))
 
 
 
@@ -493,17 +540,7 @@
                                #'(begin))
 
                          #,(if (not (free-identifier=? #'nm #'type))
-                               #'(define-syntax type
-                                   (lambda (stx)
-                                     (raise-syntax-error
-                                      'type-check
-                                      (format "type name ~a used out of context in ~a"
-                                              (syntax->datum (if (stx-pair? stx)
-                                                                 (stx-car stx)
-                                                                 stx))
-                                              (syntax->datum stx))
-                                      stx
-                                      (and (stx-pair? stx) (stx-car stx)))))
+                               #'(define-syntax type type-name-error)
                                #'(begin))
 
                          #,@(if (attribute unsafe.unsafe?)

@@ -8,4 +8,8 @@
     ("show-dependencies"
      (submod macro-debugger/analysis/show-dependencies main)
      "show module dependencies"
+     #f)
+    ("macro-profiler"
+     (submod macro-debugger/analysis/profile main)
+     "profile macro expansion (code size)"
      #f)))

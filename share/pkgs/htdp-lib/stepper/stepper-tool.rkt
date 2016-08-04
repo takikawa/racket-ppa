@@ -10,6 +10,7 @@
          racket/match
          string-constants
          lang/stepper-language-interface
+         (only-in racket/list last)
          (prefix-in x: "private/mred-extensions.rkt")
          "private/shared.rkt"
          "private/xml-sig.rkt"
@@ -78,15 +79,29 @@
                             (log-stepper-debug "print-convert returned writable: ~v\n" value)
                             value]
                            [else
-                            (let ([ans (let ([os-port (open-output-string)])
-                                         (print value os-port)
-                                         (when (boolean? val)
-                                           (log-stepper-debug "string printed by print: ~v\n" (get-output-string os-port)))
-                                         ;; this 'read' is somewhat scary. I'd like to
-                                         ;; get rid of this:
-                                         (read (open-input-string (get-output-string os-port))))])
-                              (log-stepper-debug "print-convert returned string that read mapped to: ~s\n" ans)
-                              ans)])]
+                            ;; apparently some values should be written and some should be printed.
+                            ;; Since we formulate a single value to send to the output, this is hard
+                            ;; for us.
+                            ;; A cheap hack is to print the value and then read it again.
+                            ;; Unfortunately, this fails on images. To layer a second hack on
+                            ;; the first one, we intercept this failure and just return the
+                            ;; value.
+                            (with-handlers ([exn:fail:read?
+                                             (λ (exn)
+                                               (log-stepper-debug
+                                                "read fail, print convert returning: ~s\n"
+                                                value)
+                                               value)])
+                              (define result-value
+                                (let ([os-port (open-output-string)])
+                                  (print value os-port)
+                                  (when (boolean? val)
+                                    (log-stepper-debug "string printed by print: ~v\n" (get-output-string os-port)))
+                                  ;; this 'read' is somewhat scary. I'd like to
+                                  ;; get rid of this:
+                                  (read (open-input-string (get-output-string os-port)))))
+                              (log-stepper-debug "print-convert returned string that read mapped to: ~s\n" result-value)
+                              result-value)])]
                     [(list value)
                      (log-stepper-debug "render-to-sexp: value returned from convert-value: ~v\n" value)
                      value]))))))
@@ -339,8 +354,7 @@
     ;; open a new stepper window, start it running
     (define (create-new-stepper)
       (let* ([language-level
-              (extract-language-level (get-defs))]
-             [language-level-name (language-level->name language-level)])
+              (extract-language-level (get-defs))])
         (if (or (stepper-works-for? language-level)
                 (is-a? language-level drracket:module-language:module-language<%>))
             (parameterize ([current-directory (or (get-directory) (current-directory))])
@@ -353,7 +367,7 @@
             (message-box
              (string-constant stepper-name)
              (format (string-constant stepper-language-level-message)
-                     language-level-name)))))
+                     (last (send language-level get-language-position)))))))
 
     (define/override (enable-evaluation)
       (super enable-evaluation)

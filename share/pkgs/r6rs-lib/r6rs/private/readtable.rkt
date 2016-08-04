@@ -475,10 +475,9 @@
                                  16)])
                          (unless (or (<= 0 v #xD7FF)
                                      (<= #xE000 v #x10FFFF))
-                           (let ([str (bytes->string/utf-8 thing)])
-                             (raise-read-error
-                              (format "out of range escape: `\\x~a;'" (cadr m))
-                              src line col pos (and pos (string-length str)))))
+                           (raise-read-error
+                            (format "out of range escape: `\\x~a;'" (caddr m))
+                            src line col pos (and pos (string-length thing))))
                          (string->bytes/utf-8 (string (integer->char v))))
                        (loop (cadddr m))))
                 t)))))]

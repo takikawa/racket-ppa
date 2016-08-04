@@ -544,8 +544,9 @@
 ;; Block  : BlockDerivation -> RST
 (define (Block bd)
   (match/count bd
-    [(Wrap bderiv (es1 es2 pass1 trans pass2))
+    [(Wrap bderiv (es1 es2 renames pass1 trans pass2))
      (R [#:pattern ?block]
+        [#:rename ?block (cdr renames) 'rename-block]
         [#:pass1]
         [BlockPass ?block pass1]
         [#:pass2]
@@ -574,9 +575,9 @@
      (R)]
     [(cons (Wrap b:error (exn)) rest)
      (R [! exn])]
-    [(cons (Wrap b:splice (renames head ?1 tail ?2)) rest)
-     (R [#:pattern (?first . ?rest)]
-        [#:rename/no-step ?first (car renames) (cdr renames)]
+    [(cons (Wrap b:splice (head ?1 tail ?2)) rest)
+     (R [#:pattern ?forms]
+        [#:pattern (?first . ?rest)]
         [#:pass1]
         [Expr ?first head]
         [! ?1]
@@ -587,16 +588,15 @@
         [#:left-foot (list begin-form)]
         [#:set-syntax (append (stx->list (stx-cdr begin-form)) rest-forms)]
         [#:step 'splice-block (stx->list (stx-cdr begin-form))]
-        [#:rename ?forms tail]
+        ;; [#:rename ?forms tail]
         [! ?2]
         [#:pattern ?forms]
         [BlockPass ?forms rest])]
 
     ;; FIXME: are these pass1/2 necessary?
 
-    [(cons (Wrap b:defvals (renames head ?1 rename ?2)) rest)
+    [(cons (Wrap b:defvals (head ?1 rename ?2)) rest)
      (R [#:pattern (?first . ?rest)]
-        [#:rename/no-step ?first (car renames) (cdr renames)]
         [#:pass1]
         [Expr ?first head]
         [! ?1]
@@ -607,9 +607,8 @@
         [#:pass2]
         [#:pattern (?first . ?rest)]
         [BlockPass ?rest rest])]
-    [(cons (Wrap b:defstx (renames head ?1 rename ?2 prep bindrhs)) rest)
+    [(cons (Wrap b:defstx (head ?1 rename ?2 prep bindrhs)) rest)
      (R [#:pattern (?first . ?rest)]
-        [#:rename/no-step ?first (car renames) (cdr renames)]
         [#:pass1]
         [Expr ?first head]
         [! ?1]
@@ -624,9 +623,8 @@
         [BindSyntaxes ?rhs bindrhs]
         [#:pattern (?first . ?rest)]
         [BlockPass ?rest rest])]
-    [(cons (Wrap b:expr (renames head)) rest)
+    [(cons (Wrap b:expr (head)) rest)
      (R [#:pattern (?first . ?rest)]
-        [#:rename/no-step ?first (car renames) (cdr renames)]
         [Expr ?first head]
         [BlockPass ?rest rest])]
     ))

@@ -213,7 +213,7 @@
 ;; typecheck the expressions of a module-top-level form
 ;; no side-effects
 ;; syntax? -> (or/c 'no-type tc-results/c)
-(define (tc-toplevel/pass2 form [expected (tc-any-results -top)])
+(define (tc-toplevel/pass2 form [expected (tc-any-results -tt)])
   
   (do-time (format "pass2 ~a line ~a"
                    (if #t
@@ -466,13 +466,7 @@
                          typed-racket/env/global-env typed-racket/env/type-alias-env
                          typed-racket/types/struct-table typed-racket/types/abbrev
                          (rename-in racket/private/sort [sort raw-sort]))
-                #,(env-init-code)
-                #,(talias-env-init-code)
-                #,(tname-env-init-code)
-                #,(tvariance-env-init-code)
-                #,(mvar-env-init-code mvar-env)
-                #,(signature-env-init-code)
-                #,(make-struct-table-code)
+                #,@(make-env-init-codes)
                 #,@(for/list ([a (in-list aliases)])
                      (match-define (list from to) a)
                      #`(add-alias (quote-syntax #,from) (quote-syntax #,to))))))

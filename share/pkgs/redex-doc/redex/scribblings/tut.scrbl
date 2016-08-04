@@ -156,7 +156,7 @@ to see if the @racket[e] non-terminal (from @racket[L])
 matches the object-language expression @racket[(λ (x) x)].
 
 To do this, first click the @onscreen{Run} button in DrRacket's
-toolbar and then enter the following expression after the prompt
+toolbar and then enter the following expression after the prompt.
 For the remainder of this tutorial, expressions prefixed with a
 @tt{>} are intended to be run in the interactions window (lower pane), 
 and expressions without the @tt{>} prefix belong in the definitions 
@@ -279,7 +279,7 @@ that are equidistant from the ends of the sequence. For example,
 if matching the sequence @racket[(1 2 3 4 5)], there would be two
 matches, one for the pair @racket[1] & @racket[5] and another for
 the pair @racket[2] & @racket[4]. Your match should include the
-the bindings @racket[e_left] and @racket[e_right] that extract these
+bindings @racket[e_left] and @racket[e_right] that extract these
 pairs (one element of the pair bound to @racket[e_left] and the other
 to @racket[e_right]). Test your pattern with @racket[redex-match].
 
@@ -296,7 +296,9 @@ to @racket[e_right]). Test your pattern with @racket[redex-match].
 To support a type system for our language, we need 
 to define type environments, which we do by extending
 the language @racket[L] with a new non-terminal 
-@racket[Γ], that we use to represent environments.
+@racket[Γ], that we use to represent environments; and
+by letting the middle dot @tt{·}---not to be confused with a
+regular dot @tt{.}---represent the empty environment.
 
 @examples[#:no-result #:eval amb-eval
           (define-extended-language L+Γ L
@@ -368,7 +370,7 @@ has the type @racket[t_3].
 Similarly, the other clauses give the typing
 rules for all of the other forms in the language.
 
-Most of the rules use use @racket[types], or give base types to atomic
+Most of the rules use @racket[types], or give base types to atomic
 expressions, but the fifth rule is worth a special look. It says that
 if a variable type checks in some environment, then it also type
 checks in an extended environment, provided that the environment extension

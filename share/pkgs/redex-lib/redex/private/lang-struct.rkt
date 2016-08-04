@@ -1,6 +1,6 @@
 #lang racket/base
 (require racket/promise)
-(provide (struct-out nt)
+(provide (struct-out nt) make-multi-name-nt
          (struct-out rhs)
          (struct-out bind)
          (struct-out mismatch-bind)
@@ -52,6 +52,9 @@
     (define the-not-hole (hole 'the-not-hole))
     (values the-hole the-not-hole hole?)))
 
+(define (make-multi-name-nt names rhs)
+  (make-nt (sort names symbol<?) rhs))
+
 ;; bindings = (make-bindings (listof rib))
 ;; rib = (make-bind sym sexp)
 ;; if a rib has a pair, the first element of the pair should be treated as a prefix on the identifier
@@ -101,7 +104,6 @@
 ;;                       hash[sexp[pattern] -o> (cons compiled-pattern boolean)]
 ;;                       pict-builder
 ;;                       (listof symbol)
-;;                       (listof (listof symbol)) -- keeps track of `primary' non-terminals
 ;;                       hash[sym -o> pattern]
 ;;                       (listof (list compiled-pattern bspec))
 ;;                       (hash/c symbol? enum?)) ;; see enum.rkt
@@ -109,7 +111,7 @@
 (define-struct compiled-lang (lang delayed-cclang ht list-ht raw-across-ht raw-across-list-ht
                                    has-hole-or-hide-hole-ht cache binding-forms-absent-cache
                                    bind-names-cache pict-builder
-                                   literals nt-map collapsible-nts
+                                   literals aliases collapsible-nts
                                    ambiguity-cache binding-table enum-table))
 
 (define (compiled-lang-cclang x) (force (compiled-lang-delayed-cclang x)))

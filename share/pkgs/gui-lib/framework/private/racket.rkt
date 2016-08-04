@@ -564,11 +564,15 @@
                 tab-char?))
     (define/pubment (compute-amount-to-indent pos)
       (inner (compute-racket-amount-to-indent pos) compute-amount-to-indent pos))
-    (define/public-final (compute-racket-amount-to-indent pos)
+    (define/public-final (compute-racket-amount-to-indent pos [_get-head-sexp-type (λ (x) #f)])
       (cond
         [(is-stopped?) #f]
         [else
-         (define tabify-prefs (preferences:get 'framework:tabify))
+         (define get-head-sexp-type
+           (let ([tabify-prefs (preferences:get 'framework:tabify)])
+             (λ (text)
+               (or (_get-head-sexp-type text)
+                   (get-head-sexp-type-from-prefs text tabify-prefs)))))
          (define last-pos (last-position))
          (define para (position-paragraph pos))
          (define is-tabbable?
@@ -627,8 +631,7 @@
                 (let ([text (get-text contains id-end)])
                   (cond
                     [(member (classify-position contains) '(keyword symbol))
-                     (or (get-keyword-type text tabify-prefs)
-                         'other)]
+                     (get-head-sexp-type text)]
                     [else
                      'other]))))
          (define (procedure-indent)
@@ -694,17 +697,23 @@
               ;; So far, the S-exp containing "pos" was all on
               ;;  one line (possibly not counting the opening paren),
               ;;  so indent to follow the first S-exp's end
-              ;;  unless there are just two sexps and the second is an ellipsis.
-              ;;  in that case, we just ignore the ellipsis
+              ;;  unless
+              ;;    - there are just two sexps earlier and the second is an ellipsis.
+              ;;      in that case, we just ignore the ellipsis or
+              ;;    - the sexp we are indenting is a bunch of hypens;
+              ;;      in that case, we match the opening paren
               (define id-end (get-forward-sexp contains))
               (define name-length
                 (if id-end
                     (- id-end contains)
                     0))
               (cond
-                [(first-sexp-is-keyword? contains)
+                [(or (first-sexp-is-keyword? contains)
+                     (sexp-is-all-hyphens? contains))
                  (visual-offset contains)]
                 [(second-sexp-is-ellipsis? contains)
+                 (visual-offset contains)]
+                [(sexp-is-all-hyphens? pos)
                  (visual-offset contains)]
                 [(not (find-up-sexp pos))
                  (visual-offset contains)]
@@ -724,6 +733,21 @@
                       (loop next-to-last next-to-last-para)
                       (visual-offset last))))]))
          amt-to-indent]))
+
+    ;; returns #t if `pos` is in a symbol (or keyword) that consists entirely
+    ;; of hyphens and has at least three hyphens; returns #f otherwise
+    (define/private (sexp-is-all-hyphens? pos)
+      (define fst-end (get-forward-sexp pos))
+      (and fst-end
+           (let ([fst-start (get-backward-sexp fst-end)])
+             (and fst-start
+                  (memq (classify-position fst-start) '(symbol keyword))
+                  (>= (- fst-end fst-start) 3)
+                  (let loop ([i fst-start])
+                    (cond
+                      [(< i fst-end)
+                       (and (equal? #\- (get-character i)) (loop (+ i 1)))]
+                      [else #t]))))))
     
     ;; returns #t if `contains' is at a position on a line with an sexp, an ellipsis and nothing else.
     ;; otherwise, returns #f
@@ -1345,7 +1369,7 @@
       (cond
         [(and (eq? type 'symbol)
               (string? lexeme)
-              (get-keyword-type lexeme tabify-pref))
+              (get-head-sexp-type-from-prefs lexeme tabify-pref))
          (values lexeme 'keyword paren start end backup-delta new-mode)]
         [else
          (values lexeme type paren start end backup-delta new-mode)]))
@@ -1364,9 +1388,9 @@
                           (|[| |]|)
                           (|{| |}|))))))
 
-;; get-keyword-type : string (list ht regexp regexp regexp)
-;;                 -> (or/c #f 'lambda 'define 'begin 'for/fold)
-(define (get-keyword-type text pref)
+;; get-head-sexp-type-from-prefs : string (list ht regexp regexp regexp)
+;;                              -> (or/c #f 'lambda 'define 'begin 'for/fold)
+(define (get-head-sexp-type-from-prefs text pref)
   (define ht (car pref))
   (define beg-reg (list-ref pref 1))
   (define def-reg (list-ref pref 2))

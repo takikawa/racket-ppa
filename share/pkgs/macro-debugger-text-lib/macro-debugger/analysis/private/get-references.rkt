@@ -182,17 +182,17 @@
        (void)]
       [(lderiv _ _ ?1 derivs)
        (recur derivs)]
-      [(bderiv _ _ pass1 trans pass2)
+      [(bderiv _ _ _ pass1 trans pass2)
        (recur pass1 pass2)]
       [(b:error ?1)
        (void)]
-      [(b:expr _ head)
+      [(b:expr head)
        (recur head)]
-      [(b:splice _ head ?1 tail ?2)
+      [(b:splice head ?1 tail ?2)
        (recur head)]
-      [(b:defvals _ head ?1 rename ?2)
+      [(b:defvals head ?1 rename ?2)
        (recur head)]
-      [(b:defstx _ head ?1 rename ?2 prep bindrhs)
+      [(b:defstx head ?1 rename ?2 prep bindrhs)
        (recur head prep bindrhs)]
       [(bind-syntaxes rhs locals)
        (recur/phase-up rhs)

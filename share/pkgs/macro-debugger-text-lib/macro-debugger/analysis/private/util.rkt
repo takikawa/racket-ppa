@@ -46,9 +46,10 @@
          here-mpi?
          mpi->key
          mpi->list
+         mpi->module-path
          mpi-list->module-path)
 
-;; get-module-derivation : module-path -> (values compiled Deriv)
+;; get-module-code/trace : module-path -> (values compiled Deriv)
 (define (get-module-code/trace modpath)
   (let-values ([(path subs)
                 (match (resolve-module-path modpath #f)
@@ -84,40 +85,53 @@
         [else
          (list x)]))
 
+(define (mpi-list->mpi mpi-list)
+  (let loop ([mpi #f] [mpi-list mpi-list])
+    (cond [mpi
+           (let-values ([(mod base) (module-path-index-split mpi)])
+             (cond [mod (module-path-index-join mod (loop base mpi-list))]
+                   [else (loop #f mpi-list)]))]
+          [(pair? mpi-list)
+           (loop (car mpi-list) (cdr mpi-list))]
+          [else #f])))
+
+;; collapse-mpi : ModulePathIndex -> ModulePath
+(define (collapse-mpi mpi)
+  (let loop ([mpi mpi])
+    (cond [mpi
+           (let-values ([(mod base) (module-path-index-split mpi)])
+             (cond [mod
+                    (collapse-module-path mod (lambda () (loop base)))]
+                   [else (build-path 'same)]))]
+          [else (build-path 'same)])))
+
+;; simplify-module-path : ModulePath -> ModulePath
+(define (simplify-module-path mp)
+  (let simplify ([collapsed mp])
+    (match collapsed
+      [(list* 'submod base subs)
+       (list* 'submod (simplify base) subs)]
+      [(list 'lib str)
+       (cond [(regexp-match? #rx"\\.rkt$" str)
+              (let* ([no-suffix (path->string (path-replace-suffix str ""))]
+                     [no-main
+                      (cond [(regexp-match #rx"^([^/]+)/main$" no-suffix)
+                             => cadr]
+                            [else no-suffix])])
+                (string->symbol no-main))]
+             [else collapsed])]
+      [(? path?)
+       (path->string (simplify-path collapsed #f))] ;; to get rid of "./" at beginning
+      [_ collapsed])))
+
 (define (mpi-list->module-path mpi-list)
-  (let* ([mpi*
-          (let loop ([mpi #f] [mpi-list mpi-list])
-            (cond [mpi
-                   (let-values ([(mod base) (module-path-index-split mpi)])
-                     (cond [mod (module-path-index-join mod (loop base mpi-list))]
-                           [else (loop #f mpi-list)]))]
-                  [(pair? mpi-list)
-                   (loop (car mpi-list) (cdr mpi-list))]
-                  [else #f]))]
-         [collapsed
-          (let loop ([mpi mpi*])
-            (cond [mpi 
-                   (let-values ([(mod base) (module-path-index-split mpi)])
-                     (cond [mod
-                            (collapse-module-path mod (lambda () (loop base)))]
-                           [else (build-path 'same)]))]
-                  [else (build-path 'same)]))])
-    (let simplify ([collapsed collapsed])
-      (match collapsed
-        [(list* 'submod base subs)
-         (list* 'submod (simplify base) subs)]
-        [(list 'lib str)
-         (cond [(regexp-match? #rx"\\.rkt$" str)
-                (let* ([no-suffix (path->string (path-replace-suffix str ""))]
-                       [no-main
-                        (cond [(regexp-match #rx"^([^/]+)/main$" no-suffix)
-                               => cadr]
-                              [else no-suffix])])
-                  (string->symbol no-main))]
-               [else collapsed])]
-        [(? path?)
-         (path->string (simplify-path collapsed #f))] ;; to get rid of "./" at beginning
-        [_ collapsed]))))
+  (let* ([mpi* (mpi-list->mpi mpi-list)]
+         [collapsed (collapse-mpi mpi*)])
+    (simplify-module-path collapsed)))
+
+(define (mpi->module-path mpi)
+  (cond [(here-mpi? mpi) "this module"]
+        [else (simplify-module-path (collapse-module-path-index mpi))]))
 
 ;; --------
 

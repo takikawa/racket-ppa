@@ -5,6 +5,7 @@
 (require "analyzer.rkt" "utils.rkt")
 
 (define (render profile
+                [order 'topological]
                 #:hide-self [hide-self% 1/100]
                 #:hide-subs [hide-subs% 2/100])
   (define *-node (profile-*-node profile))

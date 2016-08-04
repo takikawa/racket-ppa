@@ -45,31 +45,27 @@
         (lift 'a)
         [#:steps (remark local-lift 'a (#rx"^lifted"))
                  (macro (#%expression #rx"^lifted"))
-                 (tag-top (#%expression (#%top . #rx"^lifted")))
                  (capture-lifts (begin (define-values (#rx"^lifted") 'a)
-                                       (#%expression
-                                        (#%top . #rx"^lifted"))))]
+                                       (#%expression #rx"^lifted")))]
         #:no-hidden-steps)
   (test "lift with id"
         (lift (id 'a))
         [#:steps (remark local-lift (id 'a) (#rx"^lifted"))
                  (macro (#%expression #rx"^lifted"))
-                 (tag-top (#%expression (#%top . #rx"^lifted")))
                  (capture-lifts (begin (define-values (#rx"^lifted") (id 'a))
-                                       (#%expression (#%top . #rx"^lifted"))))
+                                       (#%expression #rx"^lifted")))
                  (macro (begin (define-values (#rx"^lifted") 'a)
-                               (#%expression (#%top . #rx"^lifted"))))]
+                               (#%expression #rx"^lifted")))]
         #:no-hidden-steps)
 
   (test "lift with Tid"
         (lift (Tid 'a))
         [#:steps (remark local-lift (Tid 'a) (#rx"^lifted"))
                  (macro (#%expression #rx"^lifted"))
-                 (tag-top (#%expression (#%top . #rx"^lifted")))
                  (capture-lifts (begin (define-values (#rx"^lifted") (Tid 'a))
-                                       (#%expression (#%top . #rx"^lifted"))))
+                                       (#%expression #rx"^lifted")))
                  (macro (begin (define-values (#rx"^lifted") 'a)
-                               (#%expression (#%top . #rx"^lifted"))))]
+                               (#%expression #rx"^lifted")))]
         ;; FIXME:
         ;;  maybe don't show lifts, but do find (Tid 'a), show in orig ctx
         ;;  but maybe not a good idea
@@ -81,9 +77,8 @@
         (Tlift 'a)
         [#:steps (remark local-lift 'a (#rx"^lifted"))
                  (macro (#%expression #rx"^lifted"))
-                 (tag-top (#%expression (#%top . #rx"^lifted")))
                  (capture-lifts (begin (define-values (#rx"^lifted") 'a)
-                                       (#%expression (#%top . #rx"^lifted"))))]
+                                       (#%expression #rx"^lifted")))]
         [#:hidden-steps (remark local-lift 'a (#rx"^lifted"))
                         (macro (#%expression #rx"^lifted"))
                         (capture-lifts (begin (define-values (#rx"^lifted") 'a)
@@ -93,11 +88,10 @@
         (Tlift (id 'a))
         [#:steps (remark local-lift (id 'a) (#rx"^lifted"))
                  (macro (#%expression #rx"^lifted"))
-                 (tag-top (#%expression (#%top . #rx"^lifted")))
                  (capture-lifts (begin (define-values (#rx"^lifted") (id 'a))
-                                       (#%expression (#%top . #rx"^lifted"))))
+                                       (#%expression #rx"^lifted")))
                  (macro (begin (define-values (#rx"^lifted") 'a)
-                               (#%expression (#%top . #rx"^lifted"))))]
+                               (#%expression #rx"^lifted")))]
         [#:hidden-steps (remark local-lift (id 'a) (#rx"^lifted"))
                         (macro (#%expression #rx"^lifted"))
                         (capture-lifts (begin (define-values (#rx"^lifted") (id 'a))
@@ -107,11 +101,10 @@
         (Tlift (Tid 'a))
         [#:steps (remark local-lift (Tid 'a) (#rx"^lifted"))
                  (macro (#%expression #rx"^lifted"))
-                 (tag-top (#%expression (#%top . #rx"^lifted")))
                  (capture-lifts (begin (define-values (#rx"^lifted") (Tid 'a))
-                                       (#%expression (#%top . #rx"^lifted"))))
+                                       (#%expression #rx"^lifted")))
                  (macro (begin (define-values (#rx"^lifted") 'a)
-                               (#%expression (#%top . #rx"^lifted"))))]
+                               (#%expression #rx"^lifted")))]
         [#:steps (remark local-lift (Tid 'a) (#rx"^lifted"))
                  (macro (#%expression #rx"^lifted"))
                  (capture-lifts (begin (define-values (#rx"^lifted") (Tid 'a))

@@ -372,6 +372,11 @@ the @racket[stacktrace@] unit, its import signature
 Imports @racket[stacktrace-imports^] and exports @racket[stacktrace^].}
 
 
+@defthing[stacktrace/annotator@ unit?]{
+
+Imports @racket[stacktrace/annotator-imports^] and exports @racket[stacktrace^].}
+
+
 @defsignature[stacktrace^ ()]{
 
 @deftogether[(
@@ -488,6 +493,58 @@ Note that @racketin[register-profile-start] and
 @racketin[register-profile-done] can be called in a nested manner; in
 this case, the result of @racketin[register-profile-start] should be
 @racket[#f].}
+
+}
+
+
+@defsignature[stacktrace/annotator-imports^ ()]{
+
+Like @racket[stacktrace^], but providing more control over the annotation function for test
+cases. The only difference between the two signatures is @racket[test-coverage-enabled],
+@racket[initialize-test-coverage-point], and @racket[test-covered] are replaced by
+@racket[test-coverage-point].
+
+@defproc[(test-coverage-point (body syntax?)
+                              (expr syntax?)
+                              (phase exact-integer?))
+        syntax?]{
+
+Initializes the test coverage point for @racket[expr] and returns the syntax that will cover
+it. @racket[body] is the body that should be run after the coverage for @racket[expr] has been
+recorded as covered. @racket[body] and @racket[expr] may not be the same. For example @racket[expr]
+may not have appeared in an expression position. @racket[phase] is the phase level at which
+@racket[expr] appeared. }
+
+@defproc[(with-mark [source-stx any/c]
+                    [dest-stx any/c]
+                    [phase nonnegative-exact-integer?])
+         any/c]{
+Same as in @racket[stacktrace-imports^].}
+
+@defthing[profile-key any/c]{
+
+Same as in @racket[stacktrace-imports^].}
+
+@defboolparam[profiling-enabled on?]{
+
+Same as in @racket[stacktrace-imports^].}
+
+@defproc[(initialize-profile-point (key any/c) 
+                                   (name (or/c syntax? false/c))
+                                   (stx any/c))
+         void?]{
+
+Same as in @racket[stacktrace-imports^].}
+
+@defproc[(register-profile-start (key any/c)) (or/c number? false/c)]{
+
+Same as in @racket[stacktrace-imports^].}
+
+@defproc[(register-profile-done (key any/c)
+                                (start (or/c number? false/c)))
+                                void?]{
+
+Same as @racket[stacktrace-imports^].}
 
 }
 

@@ -106,42 +106,46 @@
 (define (check-steps expected actual)
   (check-pred list? actual)
   (check-pred reduction-sequence? actual)
-  (with-check-info (;;['actual-sequence-raw actual]
-                    ['actual-sequence
-                     (for/list ([thing actual])
-                       (cond [(misstep? thing)
-                              'error]
-                             [(remarkstep? thing)
-                              (list* 'remark
-                                     (protostep-type thing)
-                                     (map syntax->datum (filter syntax? (remarkstep-contents thing))))]
-                             [else
-                              (list* (protostep-type thing)
-                                     (syntax->datum (step-term2 thing))
-                                     (map syntax->datum
-                                          (map bigframe-term (state-lctx (protostep-s1 thing)))))]))]
+  (with-check-info (['actual-sequence (map step->sexpr actual)]
                     ['expected-sequence expected])
-    (compare-step-sequences actual expected)))
+    (compare-step-sequences (filter interesting-step? actual) expected)))
+
+(define (step->sexpr thing)
+  (cond [(misstep? thing)
+         'error]
+        [(remarkstep? thing)
+         (list* 'remark
+                (protostep-type thing)
+                (map syntax->datum (filter syntax? (remarkstep-contents thing))))]
+        [else
+         (list* (protostep-type thing)
+                (syntax->datum (step-term2 thing))
+                (map syntax->datum
+                     (map bigframe-term (state-lctx (protostep-s1 thing)))))]))
+
+(define (interesting-step? st)
+  (not (memq (protostep-type st) '(resolve-variable rename-block))))
 
 (define (reduction-sequence? rs)
   (andmap protostep? rs))
 
-(define (compare-step-sequences actual expected)
+(define (compare-step-sequences actual expected [prev-details '(_)])
   (cond [(and (pair? expected) (pair? actual))
-         (begin (compare-steps (car actual) (car expected))
-                (compare-step-sequences (cdr actual) (cdr expected)))]
+         (let ([details (compare-steps (car actual) (car expected) prev-details)])
+           (compare-step-sequences (cdr actual) (cdr expected) details))]
         [(pair? expected)
          (fail (format "missing expected steps:\n~s" expected))]
         [(pair? actual)
          (fail (format "too many steps:\n~a"
-                       (apply append
+                       (apply string-append
                               (for/list ([step actual])
                                 (format "~s: ~s\n"
                                         (protostep-type step)
                                         (stx->datum (step-term2 step)))))))]
         [else 'ok]))
 
-(define (compare-steps actual expected)
+(define (compare-steps actual expected [prev-details #f])
+  ;; on success, returns (e-form e-locals ...)
   (match expected
     ['error
      (check-pred misstep? actual)]
@@ -164,13 +168,19 @@
        (for ([lctx-term lctx-terms] [e-local e-locals])
          (check-equal-syntax? (syntax->datum lctx-term)
                               e-local
-                              "Context frame")))]))
+                              "Context frame")))
+     (cdr expected)]
+    [(? symbol? e-tag)
+     (if prev-details
+         (compare-steps actual (cons e-tag prev-details))
+         (error 'compare-steps "INTERNAL ERROR: no prev. details for abbrev. step: ~e" expected))]))
 
 (define-binary-check (check-equal-syntax? a e)
   (equal-syntax? a e))
 
 (define (equal-syntax? a e)
-  (cond [(and (pair? a) (pair? e))
+  (cond [(eq? e '_) #t]
+        [(and (pair? a) (pair? e))
          (and (equal-syntax? (car a) (car e))
               (equal-syntax? (cdr a) (cdr e)))]
         [(and (symbol? a) (symbol? e))

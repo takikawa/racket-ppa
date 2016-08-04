@@ -15,12 +15,14 @@
            #:error-step)
    (testKE (#%require . x)
            #:error-step)
+   #|
    (testKE (#%require 5)
            #:error-step)
    (testKE (#%require (prefix mzlib/list))
            #:error-step)
    (testKE (#%require (prefix 5 mzlib/list))
-           #:error-step)]
+           #:error-step)
+   |#]
   [#:suite
    "Definitions"
    (testKE (define-values x 'a)

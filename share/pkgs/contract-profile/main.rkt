@@ -16,7 +16,10 @@
   (define total-time (car samples*))
   ;; reverse is there to sort samples in forward time, which get-times
   ;; needs.
-  (define samples    (get-times (map cdr (reverse (cdr samples*)))))
+  (define samples
+    (for/list ([s (in-list (get-times (map cdr (reverse (cdr samples*)))))])
+      ;; don't want fractions for printing
+      (cons (real->double-flonum (car s)) (cdr s))))
   (define contract-samples
     (for/list ([c-s (in-list contract-samples*)])
       ;; In some cases, blame information is missing a party, in which.

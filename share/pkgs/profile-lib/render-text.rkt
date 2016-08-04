@@ -41,9 +41,13 @@
          [else (error 'internal-error "poof")])))))
 
 (define (render profile
+                [order 'topological]
                 #:truncate-source [truncate-source 50]
                 #:hide-self       [hide-self% 1/100]
                 #:hide-subs       [hide-subs% 2/100])
+  (unless (member order '(topological self total))
+    (raise-argument-error 'render "(or/c 'topological 'self 'total)" order))
+  (define key (if (eq? order 'total) node-total node-self))
   (define (show . xs)
     (let loop ([x xs])
       (cond [(or (not x) (null? x) (void? x)) (void)]
@@ -58,7 +62,10 @@
   (define threads+times (profile-thread-times  profile))
   (define *-node        (profile-*-node profile))
   (define hidden        (get-hidden profile hide-self% hide-subs%))
-  (define nodes         (remq* hidden (profile-nodes profile)))
+  (define nodes         (let ([incnodes (remq* hidden (profile-nodes profile))])
+                          (if (eq? order 'topological)
+                              incnodes
+                              (sort incnodes > #:key key))))
   (define node->
     (let ([t (make-hasheq)])
       (for ([node (in-list nodes)] [idx (in-naturals 1)])

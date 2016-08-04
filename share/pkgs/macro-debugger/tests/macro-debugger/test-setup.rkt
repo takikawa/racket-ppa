@@ -70,15 +70,15 @@
      (define-syntax wrong
        (lambda (stx)
          (raise-syntax-error #f "macro blows up here!" stx)))
-     (define-syntax Tid
-       (syntax-rules ()
-         [(Tid e) e]))
-     (define-syntax Tlist
-       (syntax-rules ()
-         [(Tlist e) (list e)]))
-     (define-syntax Tlet
-       (syntax-rules ()
-         [(Tlet x e b) ((lambda (x) b) e)]))
+     (define-syntax (Tid stx)
+       (syntax-case stx ()
+         [(Tid e) #'e]))
+     (define-syntax (Tlist stx)
+       (syntax-case stx ()
+         [(Tlist e) #'(list e)]))
+     (define-syntax (Tlet stx)
+       (syntax-case stx ()
+         [(Tlet x e b) #'((lambda (x) b) e)]))
      (define-syntax (Tleid stx)
        (syntax-case stx ()
          [(Tleid e)
@@ -89,18 +89,19 @@
          [(Tlift e)
           (with-syntax ([v (syntax-local-lift-expression #'e)])
             #'(#%expression v))]))
-     (define-syntax myor
-       (syntax-rules ()
+     (define-syntax (myor stx)
+       (syntax-case stx ()
          [(myor x)
-          x]
+          #'x]
          [(myor x y ...)
-          (let ((t x))
-            (if t t (myor y ...)))]))
+          #'(let ((t x))
+              (if t t (myor y ...)))]))
      (define-syntax the-current-output-port
-       (make-set!-transformer 
-        (syntax-rules (set!)
-          [(set! the-current-output-port op)
-           (#%plain-app current-output-port op)])))))
+       (make-set!-transformer
+        (lambda (stx)
+          (syntax-case stx (set!)
+            [(set! the-current-output-port op)
+             #'(#%plain-app current-output-port op)]))))))
 
 (define kernel-namespace (make-base-empty-namespace))
 (parameterize ((current-namespace kernel-namespace))

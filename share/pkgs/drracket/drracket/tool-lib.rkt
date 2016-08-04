@@ -1319,7 +1319,14 @@ all of the names in the tools library, for use defining keybindings
  
  (proc-doc
   drracket:get/extend:extend-definitions-text
-  (->i ([mixin (make-mixin-contract drracket:unit:definitions-text<%>)])
+  (->i ([mixin (make-mixin-contract drracket:unit:definitions-text<%>
+                                    editor:standard-style-list<%>
+                                    editor:info<%>
+                                    racket:text<%>
+                                    text:all-string-snips<%>
+                                    text:file<%>
+                                    text:info<%>
+                                    text:wide-snip<%>)])
        ([before boolean?]
         #:name-for-changes [name-for-changes (or/c #f symbol?)])
        [result void?])
@@ -1330,7 +1337,14 @@ all of the names in the tools library, for use defining keybindings
  
  (proc-doc
   drracket:get/extend:get-definitions-text
-  (-> (implementation?/c drracket:unit:definitions-text<%>))
+  (-> (and/c (implementation?/c drracket:unit:definitions-text<%>)
+             (implementation?/c editor:standard-style-list<%>)
+             (implementation?/c editor:info<%>)
+             (implementation?/c racket:text<%>)
+             (implementation?/c text:all-string-snips<%>)
+             (implementation?/c text:file<%>)
+             (implementation?/c text:info<%>)
+             (implementation?/c text:wide-snip<%>)))
   
   @{Like @racket[drracket:get/extend:get-unit-frame], except
          for the text that is used in the top window of DrRacket frames.})

@@ -143,9 +143,11 @@ the path.
 @history[#:changed "6.3.0.1" @elem{Changed handling of @litchar{file:}
                                    URLs when the value of
                                    @racket[file-url-path-convention-type]
-                                   is @racket['windows].}]
-@history[#:changed "6.4.0.7" @elem{Use more specific regexp for 
-                                   input contract.}]}
+                                   is @racket['windows].}
+         #:changed "6.4.0.7" @elem{Use more specific regexp for 
+                                   input contract.}
+         #:changed "6.5.0.3" @elem{Support a host as an IPv6 literal address
+                                   as written in @litchar{[}...@litchar{]}.}]}
 
 
 @defproc[(combine-url/relative [base url?] [relative string?]) url?]{
@@ -169,7 +171,8 @@ scheme @racket["http"].}
 
 Generates a string corresponding to the contents of a @racket[url]
 struct.  For a @racket["file:"] URL, the URL must not be relative, and
-the result always starts @litchar{file://}.
+the result always starts @litchar{file://}. For a URL with a host,
+user, or port, its path must be either absolute or empty.
 
 The @racket[url->string] procedure uses
 @racket[alist->form-urlencoded] when formatting the query, so it is
@@ -178,7 +181,10 @@ determining the association separator. The default is to separate
 associations with a @litchar{&}.
 
 The encoding of path segments and fragment is sensitive to the
-@racket[current-url-encode-mode] parameter.}
+@racket[current-url-encode-mode] parameter.
+
+@history[#:changed "6.5.0.3" @elem{Support a host as an IPv6 literals addresses
+                                   by writing the address in @litchar{[}...@litchar{]}.}]}
 
 
 @defproc[(path->url [path (or/c path-string? path-for-some-system?)])

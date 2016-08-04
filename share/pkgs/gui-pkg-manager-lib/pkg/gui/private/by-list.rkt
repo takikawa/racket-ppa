@@ -236,24 +236,24 @@
       (define db-catalogs (db:get-catalogs))
       (unless (equal? (list->set db-catalogs)
                       (list->set user-catalogs))
-        (when (= 1 (message-box/custom "Package Catalogs"
-                                       (~a
-                                        (string-constant install-pkg-update-catalogs?)
-                                        "\n\n"
-                                        (string-constant install-pkg-currently-configured-are) ":\n"
-                                        (apply ~a
-                                               (for/list ([url user-catalogs])
-                                                 (~a "  " url "\n")))
-                                        "\n"
-                                        (string-constant install-pkg-database-recorded-are) ":\n"
-                                        (apply ~a
-                                               (for/list ([url db-catalogs])
-                                                 (~a "  " url "\n"))))
-                                       (string-constant install-pkg-update-catalogs)
-                                       (string-constant install-pkg-do-not-update-catalogs)
-                                       #f
-                                       (get-top-level-window)
-                                       '(caution default=1)))
+        (when (equal? 1 (message-box/custom "Package Catalogs"
+                                            (~a
+                                             (string-constant install-pkg-update-catalogs?)
+                                             "\n\n"
+                                             (string-constant install-pkg-currently-configured-are) ":\n"
+                                             (apply ~a
+                                                    (for/list ([url user-catalogs])
+                                                      (~a "  " url "\n")))
+                                             "\n"
+                                             (string-constant install-pkg-database-recorded-are) ":\n"
+                                             (apply ~a
+                                                    (for/list ([url db-catalogs])
+                                                      (~a "  " url "\n"))))
+                                            (string-constant install-pkg-update-catalogs)
+                                            (string-constant install-pkg-do-not-update-catalogs)
+                                            #f
+                                            (get-top-level-window)
+                                            '(caution default=1)))
           (db:set-catalogs! user-catalogs)
           (update-db-package-list))))
 

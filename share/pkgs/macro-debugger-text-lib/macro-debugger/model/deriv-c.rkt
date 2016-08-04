@@ -135,18 +135,18 @@
 (define-struct (lderiv node) (?1 derivs) #:transparent)
 
 ;; A BDeriv is
-;;   (make-bderiv <Node(Stxs)> (list-of BRule) (U 'list 'letrec) LDeriv/Deriv)
+;;   (make-bderiv <Node(Stxs)> BlockRenames (list-of BRule) (U 'list 'letrec) LDeriv/Deriv)
 ;;   pass2 is Deriv if 'letrec, LDeriv if 'list
-(define-struct (bderiv node) (pass1 trans pass2) #:transparent)
+(define-struct (bderiv node) (renames pass1 trans pass2) #:transparent)
 
 ;; A BRule is one of
 ;;   (make-b:error exn)
-;;   (make-b:expr BlockRenames Deriv)
-;;   (make-b:splice BlockRenames Deriv ?exn Stxs ?exn)
-;;   (make-b:defvals BlockRenames Deriv ?exn Stx ?exn)
-;;   (make-b:defstx BlockRenames Deriv ?exn Stx ?exn PrepareExpEnv BindSyntaxes)
-(define-struct b:error (?1) #:transparent)
-(define-struct brule (renames) #:transparent)
+;;   (make-b:expr Deriv)
+;;   (make-b:splice Deriv ?exn Stxs ?exn)
+;;   (make-b:defvals Deriv ?exn Stx ?exn)
+;;   (make-b:defstx Deriv ?exn Stx ?exn PrepareExpEnv BindSyntaxes)
+(define-struct brule () #:transparent)
+(define-struct (b:error brule) (?1) #:transparent)
 (define-struct (b:expr brule) (head) #:transparent)
 (define-struct (b:splice brule) (head ?1 tail ?2) #:transparent)
 (define-struct (b:defvals brule) (head ?1 rename ?2) #:transparent)

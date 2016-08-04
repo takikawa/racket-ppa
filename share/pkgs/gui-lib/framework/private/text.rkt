@@ -12,6 +12,7 @@
          "autocomplete.rkt"
          mred/mred-sig
          mrlib/interactive-value-port
+         (prefix-in image-core: mrlib/image-core)
          racket/list
          "logging-timer.rkt"
          "coroutine.rkt"
@@ -2270,7 +2271,9 @@
       [the-snipclass
        (define base (new editor-stream-out-bytes-base%))
        (define stream (make-object editor-stream-out% base))
+       (write-editor-global-header stream)
        (send snip write stream)
+       (write-editor-global-footer stream)
        (snip-special snip
                      (send the-snipclass get-classname)
                      (send base get-bytes))]
@@ -2284,7 +2287,10 @@
        (define base (make-object editor-stream-in-bytes-base%
                       (snip-special-bytes snip-special)))
        (define es (make-object editor-stream-in% base))
-       (or (send snipclass read es)
+       (read-editor-global-header es)
+       (define the-snip (send snipclass read es))
+       (read-editor-global-footer es)
+       (or the-snip
            (snip-special-snip snip-special))]
       [else
        (snip-special-snip snip-special)]))
@@ -2639,7 +2645,7 @@
     (define/private (do-insertion txts showing-input?)
       (define locked? (is-locked?))
       (define sf? (get-styles-fixed))
-      (begin-edit-sequence)
+      (begin-edit-sequence #f)
       (lock #f)
       (set-styles-fixed #f)
       (set! allow-edits? #t)
@@ -2861,8 +2867,8 @@
                  ;; don't want to set the port-print-handler here; 
                  ;; instead drracket sets the global-port-print-handler
                  ;; to catch fractions and the like
-                 (set-interactive-write-handler port)
-                 (set-interactive-display-handler port))])
+                 (set-interactive-write-handler port #:snip-handler send-snip-to-port)
+                 (set-interactive-display-handler port #:snip-handler send-snip-to-port))])
           (install-handlers out-port)
           (install-handlers err-port)
           (install-handlers value-port))))
@@ -3000,6 +3006,30 @@
       (start-text-input-port (lambda () (on-box-peek))))
     (define in-port (make-in-port-with-a-name (get-port-name)))
     (define in-box-port (make-in-box-port-with-a-name (get-port-name)))))
+
+(define (send-snip-to-port value port)
+  (cond
+    [(image-core:image? value)
+     ;; do this computation here so that any failures
+     ;; during drawing happen under the user's custodian
+     (image-core:compute-image-cache value)
+
+     ;; once that is done, we trust the value not to run
+     ;; any code that the user wrote, so just send it over
+     (write-special value port)]
+    [else
+     (define str (format "~s" value))
+     (cond
+       ;; special case these snips as they don't work properly
+       ;; without this and we aren't ready to break them yet
+       ;; and image-core:image? should be safe-- there is no user
+       ;; code in those images to fail
+       [(or (regexp-match? #rx"plot-snip%" str)
+            (regexp-match? #rx"pict3d%" str))
+        (write-special (send value copy) port)]
+       [else
+        (write-special (make-snip-special (send value copy)) port)])])
+  (void))
 
 (define input-box<%>
   (interface ((class->interface text%))

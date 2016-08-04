@@ -12,7 +12,7 @@
          racket/function
 
          (prefix-in c: (contract-req))
-         (rename-in (rep type-rep filter-rep object-rep)
+         (rename-in (rep type-rep prop-rep object-rep)
                     [make-Base make-Base*])
          (types union numeric-tower prefab)
          ;; Using this form so all-from-out works
@@ -79,6 +79,10 @@
 (define (-opt t) (Un (-val #f) t))
 
 (define (-ne-lst t) (-pair t (-lst t)))
+
+;; For casted-exprs in unreachable code, to fill in the cast table.
+;; TODO: This contract normally gets optimized away. Is there away to stop that?
+(define -Dead-Code (make-Base 'Dead-Code #'(make-none/c 'dead-code/c) (λ (v) #f)))
 
 ;; Convenient constructor for Values
 ;; (wraps arg types with Result)
@@ -187,6 +191,7 @@
 (define Syntax-Sexp (-Sexpof Any-Syntax))
 (define Ident (-Syntax -Symbol))
 (define -HT make-Hashtable)
+(define/decl -StructTypeTop (make-StructTypeTop))
 (define/decl -BoxTop (make-BoxTop))
 (define/decl -Weak-BoxTop (make-Weak-BoxTop))
 (define/decl -ChannelTop (make-ChannelTop))
@@ -197,6 +202,8 @@
 (define/decl -Thread-CellTop (make-ThreadCellTop))
 (define/decl -Prompt-TagTop (make-Prompt-TagTop))
 (define/decl -Continuation-Mark-KeyTop (make-Continuation-Mark-KeyTop))
+(define/decl -ClassTop (make-ClassTop))
+(define/decl -UnitTop (make-UnitTop))
 (define/decl -Port (Un -Output-Port -Input-Port))
 (define/decl -SomeSystemPath (Un -Path -OtherSystemPath))
 (define/decl -Pathlike (Un -String -Path))
@@ -250,6 +257,7 @@
 (define/decl -cdr (make-CdrPE))
 (define/decl -syntax-e (make-SyntaxPE))
 (define/decl -force (make-ForcePE))
+(define/decl -field (make-FieldPE))
 
 ;; Type alias names
 (define (-struct-name name)
@@ -262,23 +270,23 @@
 ;; Function type constructors
 (define/decl top-func (make-Function (list)))
 
-(define (asym-pred dom rng filter)
-  (make-Function (list (make-arr* (list dom) rng #:filters filter))))
+(define (asym-pred dom rng prop)
+  (make-Function (list (make-arr* (list dom) rng #:props prop))))
 
 (define/cond-contract make-pred-ty
   (c:case-> (c:-> Type/c Type/c)
             (c:-> (c:listof Type/c) Type/c Type/c Type/c)
             (c:-> (c:listof Type/c) Type/c Type/c Object? Type/c))
   (case-lambda
-    [(in out t p)
-     (->* in out : (-FS (-filter t p) (-not-filter t p)))]
+    [(in out t o)
+     (->* in out : (-PS (-is-type o t) (-not-type o t)))]
     [(in out t)
      (make-pred-ty in out t (make-Path null (list 0 0)))]
     [(t)
      (make-pred-ty (list Univ) -Boolean t (make-Path null (list 0 0)))]))
 
-(define/decl -true-filter (-FS -top -bot))
-(define/decl -false-filter (-FS -bot -top))
+(define/decl -true-propset (-PS -tt -ff))
+(define/decl -false-propset (-PS -ff -tt))
 
 (define (opt-fn args opt-args result #:rest [rest #f] #:kws [kws null])
   (apply cl->* (for/list ([i (in-range (add1 (length opt-args)))])
