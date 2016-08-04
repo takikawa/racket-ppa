@@ -3,6 +3,7 @@
          racket/contract
          racket/format
          racket/string
+         racket/path
          net/url)
 
 (provide
@@ -45,9 +46,9 @@
   (validate-name
    (and name+ext
         (path->string
-         (if (regexp-match #rx#"[.]tar[.]gz$" name+ext)
-             (path-replace-suffix (path-replace-suffix name+ext #"") #"")
-             (path-replace-suffix name+ext #""))))
+         (if (path-has-extension? name+ext #".tar.gz")
+             (path-replace-extension (path-replace-extension name+ext #"") #"")
+             (path-replace-extension name+ext #""))))
    complain
    #t))
 
@@ -102,7 +103,7 @@
         (and (cor (path-string? s)
                   (complain "ill-formed path"))
              (cor (regexp-match rx:archive s)
-                  (complain "path does not end with a recognized archive suffix"))
+                  (complain "path does not end with a recognized archive extension"))
              (let ()
                (define-values (base name+ext dir?) (if (path-string? s)
                                                        (split-path s)
@@ -153,7 +154,9 @@
             (eq? type 'file-url)
             (eq? type 'dir-url))
         (regexp-match? #rx"^(https?|github|git)://" s))
-    (define url (with-handlers ([exn:fail? (lambda (exn) #f)])
+    (define url (with-handlers ([exn:fail? (lambda (exn)
+                                             (complain "cannot parse URL")
+                                             #f)])
                   (string->url s)))
     (define-values (name name-type)
       (if url
@@ -231,7 +234,7 @@
                 (and (cor (pair? p)
                           (complain "URL path is empty"))
                      (cor (string-and-regexp-match? rx:archive (path/param-path (last p)))
-                          (complain "URL does not end with a recognized archive suffix"))
+                          (complain "URL does not end with a recognized archive extension"))
                      (extract-archive-name (last-non-empty p) complain-name)))
               (values name 'file-url)]
              [(if type
@@ -265,18 +268,23 @@
    [(and (not type)
          (regexp-match #rx"^file://" s))
     => (lambda (m)
-         (define u (string->url s))
+         (define u (with-handlers ([exn:fail? (lambda (exn)
+                                                (complain "cannot parse URL")
+                                                #f)])
+                     (string->url s)))
          (define query-type
-           (for/or ([q (in-list (url-query u))])
-             (and (eq? (car q) 'type)
-                  (cond
-                   [(equal? (cdr q) "link") 'link]
-                   [(equal? (cdr q) "static-link") 'static-link]
-                   [(equal? (cdr q) "file") 'file]
-                   [(equal? (cdr q) "dir") 'dir]
-                   [else
-                    (complain "URL contains an unrecognized `type' query")
-                    'error]))))
+           (if u
+               (for/or ([q (in-list (url-query u))])
+                 (and (eq? (car q) 'type)
+                      (cond
+                       [(equal? (cdr q) "link") 'link]
+                       [(equal? (cdr q) "static-link") 'static-link]
+                       [(equal? (cdr q) "file") 'file]
+                       [(equal? (cdr q) "dir") 'dir]
+                       [else
+                        (complain "URL contains an unrecognized `type' query")
+                        'error])))
+               'error))
          (if (eq? query-type 'error)
              (values #f 'dir)
              ;; Note that we're ignoring other query & fragment parts, if any:

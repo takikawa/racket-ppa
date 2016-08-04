@@ -623,7 +623,7 @@ int scheme_omittable_expr(Scheme_Object *o, int vals, int fuel, int flags,
   {
     Scheme_Object *auto_e;
     int auto_e_depth;
-    auto_e = scheme_is_simple_make_struct_type(o, vals, flags, 0, &auto_e_depth, 
+    auto_e = scheme_is_simple_make_struct_type(o, vals, flags, 1, 0, &auto_e_depth, 
                                                NULL,
                                                (opt_info ? opt_info->top_level_consts : NULL),
                                                NULL, NULL, 0, NULL, NULL,
@@ -641,6 +641,8 @@ static Scheme_Object *ensure_single_value(Scheme_Object *e)
 /* Wrap `e` so that it either produces a single value or fails */
 {
   Scheme_App2_Rec *app2;
+  if (single_valued_noncm_expression(e, 5))
+    return e;
 
   app2 = MALLOC_ONE_TAGGED(Scheme_App2_Rec);
   app2->iso.so.type = scheme_application2_type;
@@ -659,21 +661,17 @@ static Scheme_Object *do_make_discarding_sequence(Scheme_Object *e1, Scheme_Obje
    result is `e2` --- except that `e2` is ignored, too, if
    `ignored`. */
 {
-  int e2_omit;
-
-  e2_omit = scheme_omittable_expr(e2, 1, 5, 0, info, NULL);
-
-  if (!e2_omit && !single_valued_noncm_expression(e2, 5))
-    e2 = ensure_single_value(e2);
+  if (ignored)
+    e2 = optimize_ignored(e2, info, 1, 0, 5);
+    
+  e2 = ensure_single_value(e2);
   
   if (scheme_omittable_expr(e1, 1, 5, 0, info, NULL))
     return e2;
-  else if (single_valued_noncm_expression(e1, 5))
-    e1 = optimize_ignored(e1, info, 1, 0, 5);
-  else
-    e1 = ensure_single_value(optimize_ignored(e1, info, 1, 0, 5));
+    
+  e1 = ensure_single_value(optimize_ignored(e1, info, 1, 0, 5));
 
-  if (e2_omit && ignored)
+  if (ignored && scheme_omittable_expr(e2, 1, 5, 0, info, NULL))
     return e1;
 
   /* use `begin` instead of `begin0` if we can swap the order: */
@@ -713,27 +711,16 @@ static Scheme_Object *make_discarding_app_sequence(Scheme_App_Rec *appr, int res
    arguments are evaluated.*/
 {
   int i;
-  Scheme_Object *e, *l = scheme_null;
+  Scheme_Object *l = scheme_null;
 
   result_pos = result_pos + 1;
   if (result)
     l = scheme_make_pair(result, l);
 
   for (i = appr->num_args; i; i--) {
+    Scheme_Object *e;
     e = appr->args[i];
-    if (scheme_omittable_expr(e, 1, 5, 0, info, NULL)) {
-      /* drop if not result pos */
-    } else if (single_valued_noncm_expression(e, 5)) {
-      if (i != result_pos) {
-        l = scheme_make_pair(optimize_ignored(e, info, 1, 0, 5), l);
-      }
-    } else if (i == result_pos) {
-      e = ensure_single_value(e);
-    } else if (i != result_pos) {
-      e = ensure_single_value(optimize_ignored(e, info, 1, 0, 5));
-      l = scheme_make_pair(e, l);
-    }
-
+    e = ensure_single_value(e);
     if (i == result_pos) {
       if (SCHEME_NULLP(l)) {
         l = scheme_make_pair(e, scheme_null);
@@ -741,6 +728,10 @@ static Scheme_Object *make_discarding_app_sequence(Scheme_App_Rec *appr, int res
         l = scheme_make_sequence_compilation(scheme_make_pair(e, l), -1, 0);
         l = scheme_make_pair(l, scheme_null);
       }
+    } else {
+      e = optimize_ignored(e, info, 1, 1, 5);
+      if (e)
+        l = scheme_make_pair(e, l);
     }
   }
 
@@ -803,10 +794,9 @@ static Scheme_Object *optimize_ignored(Scheme_Object *e, Optimize_Info *info,
             && (SCHEME_INTP(app->rand1) 
                 && (SCHEME_INT_VAL(app->rand1) >= 0))
                 && IN_FIXNUM_RANGE_ON_ALL_PLATFORMS(SCHEME_INT_VAL(app->rand1))) {
-          if (single_valued_noncm_expression(app->rand2, 5))
-            return optimize_ignored(app->rand2, info, 1, maybe_omittable, 5);
-          else
-            return ensure_single_value(optimize_ignored(app->rand2, info, 1, 0, 5));
+          Scheme_Object *val;
+          val = ensure_single_value(app->rand2);
+          return optimize_ignored(val, info, 1, maybe_omittable, 5);
         }
       }
       break;
@@ -837,8 +827,7 @@ static Scheme_Object *make_discarding_first_sequence(Scheme_Object *e1, Scheme_O
   e1 = optimize_ignored(e1, info, 1, 1, 5);
   if (!e1)
     return e2;
-  if (!single_valued_noncm_expression(e1, 5))
-    e1 = ensure_single_value(e1);
+  e1 = ensure_single_value(e1);
   return make_sequence_2(e1, e2);
 }
 
@@ -1181,8 +1170,55 @@ static int is_constant_super(Scheme_Object *arg,
   return 0;
 }
 
+static int is_simple_property_list(Scheme_Object *a, int resolved)
+/* Does `a` produce a property list with no effect on the constructor? */
+{
+  Scheme_Object *arg;
+  int i, count;
+  
+  if (SAME_TYPE(SCHEME_TYPE(a), scheme_application_type))
+    count = ((Scheme_App_Rec *)a)->num_args;
+  else if (SAME_TYPE(SCHEME_TYPE(a), scheme_application2_type))
+    count = 1;
+  else if (SAME_TYPE(SCHEME_TYPE(a), scheme_application3_type))
+    count = 2;
+  else
+    return 0;
+
+  for (i = 0; i < count; i++) {
+    if (SAME_TYPE(SCHEME_TYPE(a), scheme_application_type))
+      arg = ((Scheme_App_Rec *)a)->args[i+1];
+    else if (SAME_TYPE(SCHEME_TYPE(a), scheme_application2_type))
+      arg = ((Scheme_App2_Rec *)a)->rator;
+    else {
+      if (i == 0)
+        arg = ((Scheme_App3_Rec *)a)->rand1;
+      else
+        arg = ((Scheme_App3_Rec *)a)->rand2;
+    }
+
+    if (SAME_TYPE(SCHEME_TYPE(arg), scheme_application3_type)) {
+      Scheme_App3_Rec *a3 = (Scheme_App3_Rec *)arg;
+
+      if (!SAME_OBJ(a3->rator, scheme_cons_proc))
+        return 0;
+      if (SAME_TYPE(SCHEME_TYPE(a3->rand1), scheme_struct_property_type)
+          /* `prop:chaperone-unsafe-undefined` affects the constructor */
+          && !SAME_OBJ(a3->rand1, scheme_chaperone_undefined_property)) {
+        if (!scheme_omittable_expr(a3->rand2, 1, 3, (resolved ? OMITTABLE_RESOLVED : 0), NULL, NULL))
+          return 0;
+      } else
+        return 0;
+    } else
+      return 0;
+  }
+  
+  return 1;
+}
+
+
 Scheme_Object *scheme_is_simple_make_struct_type(Scheme_Object *e, int vals, int resolved, 
-                                                 int check_auto, 
+                                                 int must_always_succeed, int check_auto, 
                                                  GC_CAN_IGNORE int *_auto_e_depth, 
                                                  Simple_Stuct_Type_Info *_stinfo,
                                                  Scheme_Hash_Table *top_level_consts, 
@@ -1190,8 +1226,10 @@ Scheme_Object *scheme_is_simple_make_struct_type(Scheme_Object *e, int vals, int
                                                  Scheme_Object **runstack, int rs_delta,
                                                  Scheme_Object **symbols, Scheme_Hash_Table *symbol_table,
                                                  int fuel)
-/* Checks whether it's a `make-struct-type' call that certainly succeeds 
-   (i.e., no exception) --- pending a check of the auto-value argument if !check_auto.
+/* Checks whether it's a `make-struct-type' call --- that, if `must_always_succeed` is 
+   true, certainly succeeds (i.e., no exception) --- pending a check of the auto-value
+   argument if !check_auto. The resulting constructor must always succeed (i.e., no
+   guards) and not involve chaperones (i.e., no `prop:chaperone-unsafe-undefined`).
    The result is the auto-value argument or scheme_true if it's simple, NULL if not. 
    The first result is a struct type, the second a constructor, and the thrd a predicate;
    the rest are an unspecified mixture of selectors and mutators. */
@@ -1226,8 +1264,11 @@ Scheme_Object *scheme_is_simple_make_struct_type(Scheme_Object *e, int vals, int
                 || !check_auto
                 || scheme_omittable_expr(app->args[5], 1, 3, (resolved ? OMITTABLE_RESOLVED : 0), NULL, NULL))
             && ((app->num_args < 6)
-                /* no properties: */
-                || SCHEME_NULLP(app->args[6]))
+                /* no properties... */
+                || SCHEME_NULLP(app->args[6])
+                /* ... or properties that don't affect the constructor ... */
+                || (!must_always_succeed
+                    && is_simple_property_list(app->args[6], resolved)))
             && ((app->num_args < 7)
                 /* inspector: */
                 || SCHEME_FALSEP(app->args[7])
@@ -1283,7 +1324,8 @@ Scheme_Object *scheme_is_simple_make_struct_type(Scheme_Object *e, int vals, int
           Scheme_Object *auto_e;
           Simple_Stuct_Type_Info stinfo;
           if (!_stinfo) _stinfo = &stinfo;
-          auto_e = scheme_is_simple_make_struct_type(lv->value, 5, resolved, check_auto, 
+          auto_e = scheme_is_simple_make_struct_type(lv->value, 5, resolved,
+                                                     must_always_succeed, check_auto, 
                                                      _auto_e_depth, _stinfo, 
                                                      top_level_consts, top_level_table, 
                                                      runstack, rs_delta,
@@ -1314,7 +1356,8 @@ Scheme_Object *scheme_is_simple_make_struct_type(Scheme_Object *e, int vals, int
             Scheme_Object *auto_e;
             Simple_Stuct_Type_Info stinfo;
             if (!_stinfo) _stinfo = &stinfo;
-            auto_e = scheme_is_simple_make_struct_type(e2, 5, resolved, check_auto,
+            auto_e = scheme_is_simple_make_struct_type(e2, 5, resolved,
+                                                       must_always_succeed, check_auto,
                                                        _auto_e_depth, _stinfo,
                                                        top_level_consts, top_level_table,
                                                        runstack, rs_delta + lvd->count,
@@ -1648,21 +1691,22 @@ int scheme_ir_duplicate_ok(Scheme_Object *fb, int cross_module)
 /* Is the constant a value that we can "copy" in the code? */
 {
   return (SCHEME_VOIDP(fb)
-	  || SAME_OBJ(fb, scheme_true)
-	  || SCHEME_FALSEP(fb)
-	  || (SCHEME_SYMBOLP(fb) 
+          || SAME_OBJ(fb, scheme_true)
+          || SCHEME_FALSEP(fb)
+          || (SCHEME_SYMBOLP(fb) 
               && (!cross_module || (!SCHEME_SYM_WEIRDP(fb)
                                     && (SCHEME_SYM_LEN(fb) < STR_INLINE_LIMIT))))
-	  || (SCHEME_KEYWORDP(fb)
+          || (SCHEME_KEYWORDP(fb)
               && (!cross_module || (SCHEME_KEYWORD_LEN(fb) < STR_INLINE_LIMIT)))
-	  || SCHEME_EOFP(fb)
-	  || SCHEME_INTP(fb)
-	  || SCHEME_NULLP(fb)
-	  || (!cross_module && SAME_TYPE(SCHEME_TYPE(fb), scheme_ir_local_type))
+          || SCHEME_EOFP(fb)
+          || SCHEME_INTP(fb)
+          || SCHEME_NULLP(fb)
+          || (!cross_module && SAME_TYPE(SCHEME_TYPE(fb), scheme_ir_toplevel_type))
+          || (!cross_module && SAME_TYPE(SCHEME_TYPE(fb), scheme_ir_local_type))
           || SCHEME_PRIMP(fb)
           /* Values that are hashed by the printer and/or interned on 
              read to avoid duplication: */
-	  || SCHEME_CHARP(fb)
+          || SCHEME_CHARP(fb)
           || (SCHEME_CHAR_STRINGP(fb) 
               && (!cross_module || (SCHEME_CHAR_STRLEN_VAL(fb) < STR_INLINE_LIMIT)))
           || (SCHEME_BYTE_STRINGP(fb)
@@ -3027,8 +3071,7 @@ static Scheme_Object *optimize_application(Scheme_Object *o, Optimize_Info *info
         e = app->args[j];
         e = optimize_ignored(e, info, 1, 1, 5);
         if (e) {
-          if (!single_valued_noncm_expression(e, 5))
-            e = ensure_single_value(e);
+          e = ensure_single_value(e);
           l = scheme_make_pair(e, l);
         }
       }
@@ -3585,14 +3628,26 @@ static Scheme_Object *finish_optimize_application2(Scheme_App2_Rec *app, Optimiz
     case scheme_application2_type:
       {
         Scheme_App2_Rec *app2 = (Scheme_App2_Rec *)rand;
-        if (SAME_OBJ(scheme_list_proc, app2->rator)) {
-          if (IS_NAMED_PRIM(rator, "car")) {
+        if (IS_NAMED_PRIM(rator, "car")
+            || IS_NAMED_PRIM(rator, "unsafe-car")) {
+          if (SAME_OBJ(scheme_list_proc, app2->rator)) {
             /* (car (list X)) */
-            alt = make_discarding_sequence(scheme_void, app2->rand, info);
+            alt = ensure_single_value(app2->rand);
             return replace_tail_inside(alt, inside, app->rand);
-          } else if (IS_NAMED_PRIM(rator, "cdr")) {
+          }
+        } else if (IS_NAMED_PRIM(rator, "cdr")
+                   || IS_NAMED_PRIM(rator, "unsafe-cdr")) {
+          if (SAME_OBJ(scheme_list_proc, app2->rator)) {
             /* (cdr (list X)) */
             alt = make_discarding_sequence(app2->rand, scheme_null, info);
+            return replace_tail_inside(alt, inside, app->rand);
+          }
+        } else if (IS_NAMED_PRIM(rator, "unbox")
+                   || IS_NAMED_PRIM(rator, "unsafe-unbox")
+                   || IS_NAMED_PRIM(rator, "unsafe-unbox*")) {
+          if (SAME_OBJ(scheme_box_proc, app2->rator)) {
+            /* (unbox (box X)) */
+            alt = ensure_single_value(app2->rand);
             return replace_tail_inside(alt, inside, app->rand);
           }
         }
@@ -3601,7 +3656,8 @@ static Scheme_Object *finish_optimize_application2(Scheme_App2_Rec *app, Optimiz
     case scheme_application3_type:
       {
         Scheme_App3_Rec *app3 = (Scheme_App3_Rec *)rand;
-        if (IS_NAMED_PRIM(rator, "car")) {
+        if (IS_NAMED_PRIM(rator, "car")
+            || IS_NAMED_PRIM(rator, "unsafe-car")) {
           if (SAME_OBJ(scheme_cons_proc, app3->rator)
               || SAME_OBJ(scheme_unsafe_cons_list_proc, app3->rator)
               || SAME_OBJ(scheme_list_proc, app3->rator)
@@ -3610,7 +3666,8 @@ static Scheme_Object *finish_optimize_application2(Scheme_App2_Rec *app, Optimiz
             alt = make_discarding_reverse_sequence(app3->rand2, app3->rand1, info);
             return replace_tail_inside(alt, inside, app->rand);
           }
-        } else if (IS_NAMED_PRIM(rator, "cdr")) {
+        } else if (IS_NAMED_PRIM(rator, "cdr")
+                   || IS_NAMED_PRIM(rator, "unsafe-cdr")) {
           if (SAME_OBJ(scheme_cons_proc, app3->rator)
               || SAME_OBJ(scheme_unsafe_cons_list_proc, app3->rator)
               || SAME_OBJ(scheme_list_star_proc, app3->rator)) {
@@ -3637,7 +3694,8 @@ static Scheme_Object *finish_optimize_application2(Scheme_App2_Rec *app, Optimiz
       {
         Scheme_App_Rec *appr = (Scheme_App_Rec *)rand;
         Scheme_Object *r = appr->args[0];
-        if (IS_NAMED_PRIM(rator, "car")) {
+        if (IS_NAMED_PRIM(rator, "car")
+            || IS_NAMED_PRIM(rator, "unsafe-car")) {
           if ((appr->args > 0)
               && (SAME_OBJ(scheme_list_proc, r)
                   || SAME_OBJ(scheme_list_star_proc, r))) {
@@ -3645,7 +3703,8 @@ static Scheme_Object *finish_optimize_application2(Scheme_App2_Rec *app, Optimiz
             alt = make_discarding_app_sequence(appr, 0, NULL, info);
             return replace_tail_inside(alt, inside, app->rand);
           }
-        } else if (IS_NAMED_PRIM(rator, "cdr")) {
+        } else if (IS_NAMED_PRIM(rator, "cdr")
+                   || IS_NAMED_PRIM(rator, "unsafe-cdr")) {
           /* (cdr ({list|list*} X Y ...)) */
           if ((appr->args > 0)
               && (SAME_OBJ(scheme_list_proc, r)
@@ -3724,12 +3783,18 @@ static Scheme_Object *finish_optimize_application2(Scheme_App2_Rec *app, Optimiz
       check_known_variant(info, app_o, rator, rand, "fxnot", scheme_fixnum_p_proc, scheme_unsafe_fxnot_proc, scheme_real_p_proc);
 
       check_known(info, app_o, rator, rand, "car", scheme_pair_p_proc, scheme_unsafe_car_proc);
+      check_known(info, app_o, rator, rand, "unsafe-car", scheme_pair_p_proc, NULL);
       check_known(info, app_o, rator, rand, "cdr", scheme_pair_p_proc, scheme_unsafe_cdr_proc);
+      check_known(info, app_o, rator, rand, "unsafe-cdr", scheme_pair_p_proc, NULL);
       check_known(info, app_o, rator, rand, "mcar", scheme_mpair_p_proc, scheme_unsafe_mcar_proc);
+      check_known(info, app_o, rator, rand, "unsafe-mcar", scheme_mpair_p_proc, NULL);
       check_known(info, app_o, rator, rand, "mcdr", scheme_mpair_p_proc, scheme_unsafe_mcdr_proc);
+      check_known(info, app_o, rator, rand, "unsafe-mcdr", scheme_mpair_p_proc, NULL);
       check_known(info, app_o, rator, rand, "bytes-length", scheme_byte_string_p_proc, scheme_unsafe_bytes_len_proc);
       /* It's not clear that these are useful, since a chaperone check is needed anyway: */
       check_known(info, app_o, rator, rand, "unbox", scheme_box_p_proc, scheme_unsafe_unbox_proc);
+      check_known(info, app_o, rator, rand, "unsafe-unbox", scheme_box_p_proc, NULL);
+      check_known(info, app_o, rator, rand, "unsafe-unbox*", scheme_box_p_proc, NULL);
       check_known(info, app_o, rator, rand, "vector-length", scheme_vector_p_proc, scheme_unsafe_vector_length_proc);
 
       if (SCHEME_PRIM_PROC_OPT_FLAGS(rator) & SCHEME_PRIM_WANTS_REAL)
@@ -5761,9 +5826,6 @@ int scheme_is_liftable(Scheme_Object *o, Scheme_Hash_Tree *exclude_vars, int fue
 int scheme_ir_propagate_ok(Scheme_Object *value, Optimize_Info *info)
 /* Can we constant-propagate the expression `value`? */
 {
-  if (scheme_ir_duplicate_ok(value, 0))
-    return 1;
-
   if (SAME_TYPE(SCHEME_TYPE(value), scheme_ir_lambda_type)) {
     int sz;
     sz = lambda_body_size_plus_info((Scheme_Lambda *)value, 1, info, NULL);
@@ -5819,7 +5881,13 @@ int scheme_ir_propagate_ok(Scheme_Object *value, Optimize_Info *info)
       if (value)
         return 1;
     }
+    return 0;
   }
+
+  /* Test this after the specific cases, 
+     because it recognizes locals and toplevels. */
+  if (scheme_ir_duplicate_ok(value, 0))
+    return 1;
 
   return 0;
 }
@@ -6387,8 +6455,7 @@ static Scheme_Object *optimize_lets(Scheme_Object *form, Optimize_Info *info, in
     irlv = (Scheme_IR_Let_Value *)head->body;
     if (SAME_OBJ((Scheme_Object *)irlv->vars[0], irlv->body)) {
       body = irlv->value;
-      if (!single_valued_noncm_expression(body, 5))
-        body = ensure_single_value(body);
+      body = ensure_single_value(body);
       return scheme_optimize_expr(body, info, context);
     }
   }
@@ -7121,8 +7188,7 @@ static Scheme_Object *optimize_lets(Scheme_Object *form, Optimize_Info *info, in
         /* Special case for (let ([x E]) x) and (let ([x <error>]) #f) */
         found_escapes = 0; /* Perhaps the error is moved to the body. */
         body = pre_body->value;
-        if (!single_valued_noncm_expression(body, 5))
-          body = ensure_single_value(body);
+        body = ensure_single_value(body);
       }
 
       if (head->num_clauses == 1)
@@ -7153,8 +7219,7 @@ static Scheme_Object *optimize_lets(Scheme_Object *form, Optimize_Info *info, in
         seq->count = 2;
 
         rhs = pre_body->value;
-        if (!single_valued_noncm_expression(rhs, 5))
-          rhs = ensure_single_value(rhs);
+        rhs = ensure_single_value(rhs);
         seq->array[0] = rhs;
 
         head->count--;
@@ -7824,7 +7889,7 @@ module_optimize(Scheme_Object *data, Optimize_Info *info, int context)
             cnst = 1;
             sproc = 1;
           }
-        } else if (scheme_is_simple_make_struct_type(e, n, 0, 1, NULL, 
+        } else if (scheme_is_simple_make_struct_type(e, n, 0, 0, 1, NULL, 
                                                      &stinfo,
                                                      info->top_level_consts, 
                                                      NULL, NULL, 0, NULL, NULL,
@@ -8305,7 +8370,7 @@ Scheme_Object *scheme_optimize_expr(Scheme_Object *expr, Optimize_Info *info, in
 
 	/* We can't inline, but mark the top level as a constant,
 	   so we can direct-jump and avoid null checks in JITed code: */
-	expr = scheme_toplevel_to_flagged_toplevel(expr, SCHEME_TOPLEVEL_CONST);
+        expr = scheme_toplevel_to_flagged_toplevel(expr, SCHEME_TOPLEVEL_CONST);
       } else {
 	/* false is mapped to a table of non-constant ready values: */
 	c = scheme_hash_get(info->top_level_consts, scheme_false);

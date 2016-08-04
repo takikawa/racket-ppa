@@ -1,5 +1,6 @@
 #lang racket/base
 (require racket/contract/base
+         racket/path
          "private/modhelp.rkt")
 
 (define (force-relto relto dir? #:path? [path? #t])
@@ -34,11 +35,9 @@
           [else (values (and path? (current-directory)) submod)])))
 
 (define (path-ss->rkt p)
-  (let-values ([(base name dir?) (split-path p)])
-    (if (and (path? name)
-             (regexp-match #rx"[.]ss$" (path->bytes name)))
-        (path-replace-suffix p #".rkt")
-        p)))
+  (if (path-has-extension? p #".ss")
+      (path-replace-extension p #".rkt")
+      p))
 
 (define (combine-submod v p)
   (if (null? p)
@@ -56,7 +55,7 @@
           (loop (cdr accum) (cdr p)))]
      [else (loop (cons (car p) accum) (cdr p))])))
 
-(define (resolve-module-path s relto)
+(define (resolve-module-path s [relto #f])
   ;; relto should be a complete path, #f, or procedure that returns a
   ;; complete path
   (define (get-dir) (force-relto relto #t))
@@ -107,7 +106,7 @@
                                (if (equal? (cadr s) "..") (cdr s) (cddr s))))]
         [else #f]))
 
-(define (resolve-module-path-index mpi relto)
+(define (resolve-module-path-index mpi [relto #f])
   ;; relto must be a complete path
   (let-values ([(path base) (module-path-index-split mpi)])
     (if path
@@ -119,7 +118,7 @@
                                                  (append submod sm)
                                                  (or sm submod)))))))
 
-(define (resolve-possible-module-path-index base relto)
+(define (resolve-possible-module-path-index base [relto #f])
   (cond [(module-path-index? base)
          (resolve-module-path-index base relto)]
         [(and (resolved-module-path? base)
@@ -136,13 +135,13 @@
   (or/c rel-to-path-string/c (-> rel-to-path-string/c) false/c))
 
 (provide/contract
- [resolve-module-path (module-path?
-                       rel-to-path-string/thunk/#f
-                       . -> . (or/c path? symbol? 
-                                    (cons/c 'submod (cons/c (or/c path? symbol?) 
-                                                            (listof symbol?)))))]
- [resolve-module-path-index ((or/c symbol? module-path-index?)
-                             rel-to-path-string/thunk/#f
-                             . -> . (or/c path? symbol? 
-                                          (cons/c 'submod (cons/c (or/c path? symbol?)
-                                                                  (listof symbol?)))))])
+ [resolve-module-path (->* (module-path?)
+                           (rel-to-path-string/thunk/#f)
+                           (or/c path? symbol? 
+                                 (cons/c 'submod (cons/c (or/c path? symbol?) 
+                                                         (listof symbol?)))))]
+ [resolve-module-path-index (->* ((or/c symbol? module-path-index?))
+                                 (rel-to-path-string/thunk/#f)
+                                 (or/c path? symbol? 
+                                       (cons/c 'submod (cons/c (or/c path? symbol?)
+                                                               (listof symbol?)))))])

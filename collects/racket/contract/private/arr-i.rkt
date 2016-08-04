@@ -7,7 +7,6 @@
          "misc.rkt"
          "blame.rkt"
          "generate.rkt"
-         "arrow-higher-order.rkt"
          syntax/location
          racket/private/performance-hint
          (for-syntax racket/base
@@ -915,7 +914,7 @@ evaluted left-to-right.)
                   blame+neg-party
                   (apply arg-checker args)))))
             impersonator-prop:contracted ctc
-            impersonator-prop:blame blame))))))
+            impersonator-prop:blame (blame-add-missing-party blame neg-party)))))))
 
 (define-for-syntax (arg/res-to-indy-var indy-arg-vars ordered-args indy-res-vars ordered-ress var)
   (define (try vars ordered)

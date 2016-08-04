@@ -144,10 +144,14 @@
        #:stronger-ribs stronger-ribs
        #:chaperone chaperone?
        #:no-negative-blame? no-negative-blame
-       #:name (or name-from-hos 
+       #:name (or name-from-hos
                   (if (= (length names) 1)
                       (car names)
-                      #`(list 'or/c #,@names))))))
+                      #`(let ([names (list #,@names)])
+                          (if (or (equal? names '(#f #t))
+                                  (equal? names '(#t #f)))
+                              'boolean?
+                              (cons 'or/c names))))))))
   
   (syntax-case stx (or/c)
     [(or/c p ...)
@@ -603,7 +607,8 @@
                         (null? b)))
                  (chaperone-procedure val exact-proc
                                       impersonator-prop:application-mark 
-                                      (cons opt->/c-cm-key cont-mark-value))
+                                      (cons opt->/c-cm-key cont-mark-value)
+                                      impersonator-prop:blame blame)
                  (handle-non-exact-procedure val dom-len blame exact-proc))))
        (append lifts-doms lifts-rngs)
        (append superlifts-doms superlifts-rngs)
@@ -674,7 +679,8 @@
                 (case-lambda
                   [(dom-arg ...)  (values next-dom ...)]
                   [args
-                   (bad-number-of-arguments blame val args dom-len)]))))
+                   (bad-number-of-arguments blame val args dom-len)])
+                impersonator-prop:blame blame)))
          (if all-anys?
              #`(if (procedure-arity-exactly/no-kwds val #,(length doms))
                    val

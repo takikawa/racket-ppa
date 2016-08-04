@@ -280,7 +280,8 @@ form. See also @racket[module-compiled-language-info],
 @racket[module->language-info], and
 @racketmodname[racket/language-info].
 
-See also @secref["module-eval-model"] and @secref["mod-parse"].
+See also @secref["module-eval-model"], @secref["mod-parse"], and
+@secref["modinfo"].
 
 @examples[#:eval (syntax-eval) #:once
 (module duck racket/base
@@ -1235,10 +1236,10 @@ quoted @racket[raw-module-spec].}
 
 @defform/subs[(#%provide raw-provide-spec ...)
               ([raw-provide-spec phaseless-spec
-                                 (#,(racketidfont "for-meta") phase-level phaseless-spec)
-                                 (#,(racketidfont "for-syntax") phaseless-spec)
-                                 (#,(racketidfont "for-label") phaseless-spec)
-                                 (#,(racketidfont "protect") raw-provide-spec)]
+                                 (#,(racketidfont "for-meta") phase-level phaseless-spec ...)
+                                 (#,(racketidfont "for-syntax") phaseless-spec ...)
+                                 (#,(racketidfont "for-label") phaseless-spec ...)
+                                 (#,(racketidfont "protect") raw-provide-spec ...)]
                [phase-level exact-integer
                             #f]
                [phaseless-spec id 

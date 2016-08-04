@@ -98,7 +98,12 @@ structures that are produced by @racket[zo-parse] and consumed by
   granted access capabilities through that inspector.}
 
 @defstruct+[(global-bucket zo) ([name symbol?])]{
-  Represents a top-level variable, and used only in a @racket[prefix].}
+ Represents a top-level variable, and used only in a 
+ @racket[prefix]. Because modules cannot require top-level
+ variables, these will only appear in the top level 
+ @racket[prefix]. Additionally, symbols in the top-level
+ prefix are an alias for @racket[global-bucket] structs,
+ making them redundant.}
 
 @defstruct+[(module-variable zo)
             ([modidx module-path-index?]
@@ -268,8 +273,10 @@ binding, constructor, etc.}
 
   The @racket[max-let-depth] field indicates the maximum stack depth
   created by @racket[body] forms (not counting the @racket[prefix]
-  array).  The @racket[dummy] variable is used to access to the
-  top-level namespace.
+  array).
+  
+  The @racket[dummy] variable is used to access to the top-level
+  namespace.
 
   The @racket[lang-info] value specifies an optional module path that
   provides information about the module's implementation language.
@@ -587,7 +594,7 @@ binding, constructor, etc.}
 
 @defstruct+[(with-immed-mark expr)
             ([key (or/c expr? seq? any/c)]
-             [val (or/c expr? seq? any/c)]
+             [def-val (or/c expr? seq? any/c)]
              [body (or/c expr? seq? any/c)])]{
 
   Represents a @racket[(call-with-immediate-continuation-mark key

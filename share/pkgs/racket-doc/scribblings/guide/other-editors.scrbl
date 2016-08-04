@@ -55,7 +55,7 @@ popular among Racketeers as well.
        name @tt{geiser}.}
 
  @item{Emacs ships with a major mode for Scheme, @tt{scheme-mode},
-       that while not as featureful as the above options, but works
+       that while not as featureful as the above options, works
        reasonably well for editing Racket code. However, this mode
        does not provide support for Racket-specific forms.}
 
@@ -166,7 +166,7 @@ set expandtab
 You can enable indentation for Racket by setting both the @tt{lisp} and
 @tt{autoindent} options in Vim. However, the indentation is limited and not as
 complete as what you can get in Emacs. You can also use Dorai Sitaram's
-@hyperlink["http://evalwhen.com/scmindent/index.html"]{scmindent} for
+@hyperlink["https://github.com/ds26gte/scmindent"]{scmindent} for
 better indentation of Racket code. The instructions on how to
 use the indenter are available on the website.
 

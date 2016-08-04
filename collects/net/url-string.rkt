@@ -52,13 +52,23 @@
       (raise-mismatch-error 'url->string
                             "cannot convert relative file URL to a string: "
                             url))
+    (when (and (or user host port)
+               (pair? path)
+               (not (url-path-absolute? url)))
+      (raise-mismatch-error 'url->string
+                            "cannot convert relative URL with authority to a string: "
+                            url))
     (sa*
      (append
       (if scheme (sa scheme ":") null)
       (if (or user host port)
         (sa "//"
             (if user (sa (uri-userinfo-encode user) "@") null)
-            (if host host null)
+            (if host
+                (if (regexp-match? rx:ipv6-hex host)
+                    (sa "[" host "]")
+                    host)
+                null)
             (if port (sa ":" (number->string port)) null))
         (if (equal? "file" scheme) ; always need "//" for "file" URLs
           '("//")
@@ -156,13 +166,19 @@
   (let ([url (string->url string)])
     (cond [(url-scheme url) url]
           [(string=? string "")
-           (url-error "Can't resolve empty string as URL")]
+           (url-error "can't resolve empty string as URL")]
           [else (set-url-scheme! url
                                  (if (char=? (string-ref string 0) #\/) "file" "http"))
                 url])))
 
+;; Approximation to IPv6 literal addresses, to be recognized
+;; in "[...]" when decoding and put back in "[...]" when encoding;
+;; having at least one ":" distinguishes from other address forms:
+(define ipv6-hex "[0-9a-fA-F:]*:[0-9a-fA-F:]*")
+(define rx:ipv6-hex (regexp (string-append "^" ipv6-hex "$")))
+
 ;; URL parsing regexp
-;; this is following the regexp in Appendix B of rfc 3986, except for using
+;; this is roughly following the regexp in Appendix B of rfc 3986, except for using
 ;; `*' instead of `+' for the scheme part (it is checked later anyway, and
 ;; we don't want to parse it as a path element), and the user@host:port is
 ;; parsed here.
@@ -176,17 +192,22 @@
            "(?:"              ; | / user-at-opt
            "([^/?#@]*)"       ; | | #2 = user-opt
            "@)?"              ; | \
-           "([^/?#:]*)?"      ; | #3 = host-opt
+           "(?:"              ;
+           "(?:\\["           ; | / #3 = ipv6-host-opt
+           "(" ipv6-hex ")"   ; | | hex-addresses
+           "\\])|"            ; | \
+           "([^/?#:]*)"       ; | #4 = host-opt
+           ")?"               ;
            "(?::"             ; | / colon-port-opt
-           "([0-9]*)"         ; | | #4 = port-opt
+           "([0-9]*)"         ; | | #5 = port-opt
            ")?"               ; | \
            ")?"               ; \
-           "([^?#]*)"         ; #5 = path
+           "([^?#]*)"         ; #6 = path
            "(?:\\?"           ; / question-query-opt
-           "([^#]*)"          ; | #6 = query-opt
+           "([^#]*)"          ; | #7 = query-opt
            ")?"               ; \
            "(?:#"             ; / hash-fragment-opt
-           "(.*)"             ; | #7 = fragment-opt
+           "(.*)"             ; | #8 = fragment-opt
            ")?"               ; \
            "$")))
 
@@ -194,10 +215,10 @@
 ;; Original version by Neil Van Dyke
 (define (string->url str)
   (apply
-   (lambda (scheme user host port path query fragment)
+   (lambda (scheme user ipv6host host port path query fragment)
      (when (and scheme (not (regexp-match? #rx"^[a-zA-Z][a-zA-Z0-9+.-]*$"
                                            scheme)))
-       (url-error "Invalid URL string; bad scheme ~e: ~e" scheme str))
+       (url-error "invalid URL string; bad scheme\n  scheme: ~e\n  in: ~e" scheme str))
      ;; Windows => "file://xxx:/...." specifies a "xxx:/..." path
      (let ([win-file? (and (or (equal? "" port) (not port))
                            (equal? "file" (and scheme (string-downcase scheme)))
@@ -214,19 +235,28 @@
        (define win-file-url (and win-file?
                                  (path->url (bytes->path (string->bytes/utf-8 path) 'windows))))
        (let* ([scheme   (and scheme (string-downcase scheme))]
-              [host     (if win-file-url
-                            (url-host win-file-url)
-                            (and host (string-downcase host)))]
+              [host     (cond  [win-file-url (url-host win-file-url)]
+                               [ipv6host (and ipv6host (string-downcase ipv6host))]
+                               [else (and host (string-downcase host))])]
               [user     (uri-decode/maybe user)]
               [port     (and port (string->number port))]
               [abs?     (or (equal? "file" scheme)
                             (regexp-match? #rx"^/" path))]
+              [use-abs? (or abs?
+                            ;; If an authority part is provided, the (empty) path must be
+                            ;; absolute, even if it isn't written with a "/":
+                            (and (or host user port) #t))]
               [path     (if win-file?
                             (url-path win-file-url)
                             (separate-path-strings path))]
               [query    (if query (form-urlencoded->alist query) '())]
               [fragment (uri-decode/maybe fragment)])
-         (make-url scheme user host port abs? path query fragment))))
+         (when (and (not abs?) (pair? path) host)
+           (url-error (string-append "invalid URL string;\n"
+                                     " host provided with non-absolute path (i.e., missing a slash)\n"
+                                     "  in: ~e")
+                      str))
+         (make-url scheme user host port use-abs? path query fragment))))
    (cdr (regexp-match url-regexp str))))
 
 (define (uri-decode/maybe f) (friendly-decode/maybe f uri-decode))
@@ -261,7 +291,7 @@
 (define (combine-path-strings absolute? path/params)
   (cond [(null? path/params) null]
         [else (let ([p (add-between (map join-params path/params) "/")])
-                (if absolute? (cons "/" p) p))]))
+                (if (and absolute? (pair? p)) (cons "/" p) p))]))
 
 (define (join-params s)
   (if (null? (path/param-param s))

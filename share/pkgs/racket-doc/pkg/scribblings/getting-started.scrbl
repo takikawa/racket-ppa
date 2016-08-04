@@ -399,7 +399,7 @@ GitHub-based @tech{package source}.
 
 Other Git repository services@margin-note*{Support for services other
 than GitHub requires Racket version 6.1.1.1 or later.} can work
-just as well as GitHub---including Gitorious or BitBucket---as long as
+just as well as GitHub---including GitLab or BitBucket---as long as
 the server supports either the HTTP(S) protocol or the
 native Git protocol (but use a @exec{git://} path for the latter).
 
@@ -561,7 +561,7 @@ In your @racket[info.rkt], you should:
 ]
 
 Finally, when listing your package on
-@url{https://pkgs.racket-lang-org}, you should supply a GitHub source
+@url{https://pkgs.racket-lang.org}, you should supply a GitHub source
 using the URL format
 @tt{github://github.com/@nonterm{user}/@nonterm{repo}/@nonterm{rev}@optional{/@nonterm{path}}} (not
 the @tt{git://} or @exec{http://} format).

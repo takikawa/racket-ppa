@@ -938,7 +938,21 @@ A @tech{custom function type} that is a marker for expressions that
 should not be sent to the foreign function.  Use this to bind local
 values in a computation that is part of an ffi wrapper interface, or
 to specify wrapper arguments that are not sent to the foreign function
-(e.g., an argument that is used for processing the foreign output).}
+(e.g., an argument that is used for processing the foreign output).
+
+Examples:
+
+@racketblock[
+(_fun _? (code:comment "not sent to foreign function")
+      _int -> _int)
+(_fun [init : _?] (code:comment "init is used for pre-processing")
+      [boxed : (_box _int) = (box init)]
+      -> _void)
+(_fun [offset : _?] (code:comment "offset is used for post-processing")
+      -> [res : _int]
+      -> (+ res offset))
+]
+}
 
 
 @defform/subs[#:literals (i o io)
@@ -991,12 +1005,21 @@ integer pointer, and use the value that is placed there as a second
 return value.}
 
 
-@defidform[_box]{
+@defform[(_box type)]{
 
 A @tech{custom function type} similar to a @racket[(_ptr io _type)]
 argument, where the input is expected to be a box holding an
 appropriate value, which is unboxed on entry and modified accordingly
-on exit.}
+on exit.
+
+Example:
+
+@racketblock[
+(_fun (_box _int) -> _void)
+(_fun [boxed : (_box _int) = (box 0)]
+      -> [res : _int]
+      -> (values res (unbox boxed)))
+]}
 
 @defform/subs[(_list mode type maybe-len)
               ([mode i o io]
@@ -1009,12 +1032,50 @@ that it is used for converting lists to/from C vectors.  The optional
 the post code, and in the pre code of an output mode to allocate the
 block.  (If the length is 0, then NULL is passed in and an empty list is
 returned.)  In either case, it can refer to a previous binding for the
-length of the list which the C function will most likely require.}
+length of the list which the C function will most likely require.
+
+For example, the following type corresponds to a function that takes
+a vector argument of type @tt{*float} (from a Racket list input)
+and a length argument of type @tt{int} for the vector:
+
+@racketblock[
+(_fun [vec : (_list i _float)]
+      (code:comment "this argument is implicitly provided")
+      [_int = (length vec)]
+      -> _void)
+]
+
+In this next example, the type specifies a function that provides
+output through a given output vector (represented as a list on the
+Racket side) and through a boolean return value. The FFI-bound
+function will take an integer argument and
+return two values, the vector and the boolean.
+
+@racketblock[
+(_fun [len : _int]
+      [vec : (_list o _float len)]
+      -> [res : _bool]
+      -> (values vec res))
+]}
 
 @defform[(_vector mode type maybe-len)]{
 
 A @tech{custom function type} like @racket[_list], except that it uses
-Racket vectors instead of lists.}
+Racket vectors instead of lists.
+
+Examples:
+
+@racketblock[
+(_fun [vec : (_vector i _float)]
+      [_int = (length vec)]
+      -> _void)
+(_fun [len : _int]
+      [vec : (_vector o _float len)]
+      -> [res : _bool]
+      -> (values vec res))
+]
+
+See @racket[_list] for more explanation about the examples.}
 
 
 @defform*[#:id _bytes
@@ -1375,7 +1436,14 @@ representation.
 Supply multiple @racket[count]s for a multidimensional array. Since C
 uses row-major order for arrays, @racket[(_array _t _n _m)] is
 equivalent to @racket[(_array (_array _t _m) _n)], which is different
-from an array of pointers to arrays.}
+from an array of pointers to arrays.
+
+When a value is used as an instance of an array type (e.g., as passed
+to a foreign function), checking ensures that the given value is an
+array of at least the expected length and whose elements have the same
+representation according to @racket[ctype->layout]; the array can have
+additional elements, and it can have a different element type as long
+as that type matches the layout of the expected type.}
 
 
 @defproc[(array? [v any/c]) boolean?]{
@@ -1510,6 +1578,13 @@ Takes a list of symbols and generates an enumeration type.  The
 enumeration maps between a symbol in the given @racket[symbols] list and
 corresponding integers, counting from @racket[0].
 
+To call a foreign function that takes an enum as a parameter simply provide
+the symbol of the desiered enum as an argument.
+
+@racketblock[
+ (code:comment "example sdl call")
+ (sdl-create-window "title" ... 'SDL_WINDOW_OPENGL)]
+
 The list @racket[symbols] can also set the values of symbols by
 putting @racket['=] and an exact integer after the symbol.  For
 example, the list @racket['(x y = 10 z)] maps @racket['x] to
@@ -1538,6 +1613,14 @@ Similar to @racket[_enum], but the resulting mapping translates a list
 of symbols to a number and back, using @racket[bitwise-ior] on the
 values of individual symbols, where A single symbol is equivalent to a
 list containing just the symbol.
+
+In other words, to call a foreign function that uses bitmask parameters simply call the
+procedure with the list of wanted flags.
+
+@racketblock[
+ (code:comment "example call from curl_global_init in curl.h")
+ (curl-global-init '(CURL_GLOBAL_SSL CURL_GLOBAL_WIN32))]
+
 
 When a symbol does not have a given value (via @racket['=] after the
 symbol in @racket[symbols]), its value is the next power of 2 greater
