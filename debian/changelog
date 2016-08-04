@@ -1,3 +1,9 @@
+racket (6.6-1) unstable; urgency=medium
+
+  * New upstream release
+
+ -- David Bremner <bremner@debian.org>  Thu, 04 Aug 2016 22:48:01 +0900
+
 racket (6.5-1) unstable; urgency=medium
 
   * New upstream release
