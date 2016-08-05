@@ -1,8 +1,10 @@
 racket (6.6-1) unstable; urgency=medium
 
   * New upstream release
+  * Bug fix: "FTBFS with openssl 1.1.0", thanks to Kurt Roeckx (Closes:
+    #828526).
 
- -- David Bremner <bremner@debian.org>  Thu, 04 Aug 2016 22:48:01 +0900
+ -- David Bremner <bremner@debian.org>  Fri, 05 Aug 2016 09:04:20 +0900
 
 racket (6.5-1) unstable; urgency=medium
 
