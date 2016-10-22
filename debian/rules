@@ -34,6 +34,10 @@ DEB_DH_INSTALL_ARGS_racket-common := -X${RACKET_ARCH} -X$(MZDYN) -X/tests/
 DEB_DH_INSTALL_ARGS_racket-doc := -Xrelease
 DEB_DH_COMPRESS_ARGS := -X.sxref -X.sqlite
 
+# don't compress rkt source files since some are needed for
+# docs such as the quick.scrbl example and blueboxes.rktd files
+DEB_COMPRESS_EXCLUDE_ALL := .scrbl .rkt .rktd
+
 DEB_DH_BUILDDEB_ARGS := -- -Zxz
 
 # do not strip mzscheme, as this causes it to stop working
