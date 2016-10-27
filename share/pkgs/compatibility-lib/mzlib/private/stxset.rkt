@@ -90,7 +90,8 @@
                      dup)))
                 ;; Check that declared are defined ---------
                 (for-each (lambda (id)
-                            (unless (check-duplicate-identifier (cons id val-ids))
+                            (unless (check-duplicate-identifier
+                                     (cons (syntax-local-identifier-as-binding id) val-ids))
                               (raise-syntax-error
                                #f
                                "expected identifier is not defined"

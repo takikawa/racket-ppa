@@ -716,7 +716,7 @@ packages intended to run in PLT Scheme versions in the 3xx series). A
 single package (and a single version of a package) may be included in
 multiple repositories with the same PLaneT version number.}]
 
-In addition, PLaneT uses the setup-plt installer to install packages
+In addition, PLaneT uses the @exec{raco setup} installer to install packages
 on client machines, so most fields it looks for can be included with
 their usual effects. In particular, adding a @indexed-racket['name]
 field indicates that the Racket files in the package should be

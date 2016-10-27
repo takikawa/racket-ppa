@@ -956,6 +956,12 @@ enum {
   SCHEME_hash_late_weak_ptr
 };
 
+enum {
+  SCHEME_hashtr_eq,
+  SCHEME_hashtr_equal,
+  SCHEME_hashtr_eqv
+};
+
 typedef struct Scheme_Env Scheme_Env;
 
 #define SCHEME_VAR_BUCKET(obj) ((Scheme_Bucket *)(obj))
@@ -1401,6 +1407,7 @@ enum {
   MZCONFIG_USE_COMPILED_ROOTS,
   MZCONFIG_USE_USER_PATHS,
   MZCONFIG_USE_LINK_PATHS,
+  MZCONFIG_USE_COMPILED_FILE_CHECK,
 
   MZCONFIG_LOAD_DIRECTORY,
   MZCONFIG_WRITE_DIRECTORY,
@@ -1536,6 +1543,8 @@ struct Scheme_Input_Port
 #endif
 };
 
+#define SCHEME_INPORT_VAL(i) (((Scheme_Input_Port *)i)->port_data)
+
 struct Scheme_Output_Port
 {
   struct Scheme_Port p;
@@ -1558,6 +1567,8 @@ struct Scheme_Output_Port
   Scheme_Object *print_handler;
   struct Scheme_Input_Port *input_half;
 };
+
+#define SCHEME_OUTPORT_VAL(o) (((Scheme_Output_Port *)o)->port_data)
 
 #define SCHEME_SPECIAL (-2)
 #define SCHEME_UNLESS_READY (-3)
@@ -1899,6 +1910,10 @@ MZ_EXTERN void scheme_set_logging(int syslog_level, int stderr_level);
 MZ_EXTERN void scheme_set_logging_spec(Scheme_Object *syslog_level, Scheme_Object *stderr_level);
 
 MZ_EXTERN int scheme_get_allow_set_undefined();
+
+MZ_EXTERN void scheme_set_compiled_file_check(int);
+#define SCHEME_COMPILED_FILE_CHECK_MODIFY_SECONDS 0  
+#define SCHEME_COMPILED_FILE_CHECK_EXISTS         1
 
 #ifdef MZ_CAN_ACCESS_THREAD_LOCAL_DIRECTLY
 THREAD_LOCAL_DECL(MZ_EXTERN Scheme_Thread *scheme_current_thread);

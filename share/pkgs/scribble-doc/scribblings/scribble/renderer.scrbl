@@ -396,6 +396,16 @@ are own their own pages. A value of @racket[0] is treated the same as
 
 Specializes a @racket[render<%>] class for generating Latex input.}}
 
+@defparam[extra-character-conversions convs (-> char? (or/c string? #f))]{
+Function that maps (special) characters to strings corresponding to the Latex
+code that should be used to render them. This function should return false for
+any character it does not know how to handle.
+
+Scribble already converts many special characters to the proper Latex
+commands. This parameter should be used in case you need characters it does not
+support yet.
+}
+
 @; ----------------------------------------
 
 @section{PDF Renderer}

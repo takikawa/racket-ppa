@@ -6,7 +6,7 @@
          racket/set
          racket/undefined
          (only-in racket/async-channel async-channel?)
-         (only-in ffi/unsafe cpointer-predicate-procedure? ctype?)
+         (only-in ffi/unsafe cpointer-predicate-procedure?)
          (only-in racket/future future? fsemaphore?)
          (only-in racket/pretty pretty-print-style-table?)
          (only-in racket/udp udp?)
@@ -29,6 +29,10 @@
       (semaphore? e) (fsemaphore? e)
       (thread-group? e)
       (udp? e)
+      ;; Base since they can only store strings
+      ;; Bounded polymorphism would again make these not flat,
+      ;; but would be unsound since the external OS can change them
+      (environment-variables? e)
       ;; Base values because you can only store flonums/fixnums in these
       ;; and not any higher-order values. This isn't sound if we ever
       ;; introduce bounded polymorphism for Flvector/Fxvector.
@@ -221,14 +225,11 @@
    #:first-order (lambda (x) #t)
    #:late-neg-projection (late-neg-projection #:on-opaque on-opaque)))
 
-(define any-wrap-error/c
+(define any-wrap/c
   (make-any-wrap/c #:on-opaque on-opaque-error))
 
 (define any-wrap-warning/c
   (make-any-wrap/c #:on-opaque on-opaque-display-warning))
-
-;; This will change to `any-wrap-error/c` in a future release.
-(define any-wrap/c any-wrap-warning/c)
 
 ;; struct?/inspector : (-> Inspector (-> Any Boolean))
 (define ((struct?/inspector inspector) v)
@@ -247,7 +248,7 @@
 
 ;; display-any-wrap/c-opaque-warning : (-> Any Blame Neg-Party Void)
 (define (display-any-wrap/c-opaque-warning v blame neg-party)
-  (log-error
+  (displayln
    ((current-blame-format)
     (blame-add-missing-party blame neg-party)
     v
@@ -256,14 +257,14 @@
       "any-wrap/c: Unable to protect opaque value passed as `Any`\n"
       "  value: ~e\n"
       "  This warning will become an error in a future release.\n")
-     v))))
+     v))
+   (current-error-port)))
 
 ;; Contract for "safe" struct predicate procedures.
 ;; We can trust that these obey the type (-> Any Boolean).
 (define (struct-predicate-procedure?/c x)
   (and (or (struct-predicate-procedure? x)
-           (cpointer-predicate-procedure? x)
-           (eq? x ctype?))
+           (cpointer-predicate-procedure? x))
        (not (impersonator? x))))
 
 (provide any-wrap/c any-wrap-warning/c struct-predicate-procedure?/c)

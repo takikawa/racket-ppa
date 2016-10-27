@@ -61,7 +61,7 @@
                              stx
                              id))
        (define (accumulate exports forms)
-         (define intro (make-syntax-introducer))
+         (define intro (make-syntax-introducer #t))
          #`(drive-top-level
             (accumulate-package #,id #,(intro id) #,(intro id) #f #,stx
                                 #,exports
@@ -102,7 +102,7 @@
           (let* ([star? (or (free-identifier=? #'def #'-define*-values)
                             (free-identifier=? #'def #'-define*-syntaxes))]
                  [next-intro (if star?
-                                 (make-syntax-introducer)
+                                 (make-syntax-introducer #t)
                                  (lambda (s) s))]
                  [exp-form
                   (with-syntax ([(new-def-id ...) (if star?

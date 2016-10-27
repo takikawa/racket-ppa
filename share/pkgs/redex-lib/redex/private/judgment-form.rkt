@@ -7,21 +7,19 @@
          "search.rkt"
          "lang-struct.rkt"
          "binding-forms.rkt"
+         "struct.rkt"
          racket/trace
          racket/list
          racket/stxparam
          racket/dict
-         "term-fn.rkt"
-         "rewrite-side-conditions.rkt"
          (only-in "pat-unify.rkt"
                   unsupported-pat-err-name
                   unsupported-pat-err)
          (only-in "lang-struct.rkt" mtch-bindings default-language)
-         (only-in "binding-forms.rkt" binding-forms-opened?))
+         (only-in "binding-forms.rkt" binding-forms-opened? α-equal?))
 
 (require
  (for-syntax "rewrite-side-conditions.rkt"
-             "term.rkt"
              "term-fn.rkt"
              "loc-wrapper-ct.rkt"
              racket/stxparam-exptime
@@ -31,9 +29,6 @@
              racket/list
              syntax/parse
              syntax/stx))
-
-(require
- (for-template "term.rkt"))
 
 (struct derivation (term name subs) 
   #:transparent
@@ -149,6 +144,14 @@
       [w/ellipses names/ellipses])
      (hash-set extended (syntax-e name) w/ellipses))))
 
+(define (alpha-equivalent? lang lhs rhs)
+  (unless (compiled-lang? lang)
+    (raise-argument-error 'alpha-equivalent?
+                          "compiled-lang?"
+                          0
+                          lang lhs rhs))
+  (α-equal? (compiled-lang-binding-table lang) match-pattern lhs rhs))
+
 ;; the withs, freshs, and side-conditions come in backwards order
 ;; rt-lang is an identifier that will be bound to a (runtime) language,
 ;;   not necc bound via define-language. 
@@ -169,7 +172,7 @@
                            names w/ellipses))])
        (syntax-case stx (fresh judgment-holds)
          [() body]
-         [((-where x e) y ...)
+         [((-where pat-stx e) y ...)
           (where-keyword? #'-where)
           (let ()
             (with-syntax ([(syncheck-exp side-conditions-rewritten (names ...) (names/ellipses ...))
@@ -177,7 +180,7 @@
                             ct-lang
                             orig-name
                             #t
-                            #'x)]
+                            #'pat-stx)]
                           [lang-stx rt-lang])
               (define-values (binding-constraints temporaries env+)
                 (generate-binding-constraints (syntax->list #'(names ...))
@@ -190,22 +193,35 @@
                 (define rest-body (loop #'(y ...) #`(list x ... #,to-not-be-in) env+))
                 (set! patterns-to-compile (cons #'`side-conditions-rewritten patterns-to-compile))
                 (set! compiled-pattern-identifiers (cons #'pat-id compiled-pattern-identifiers))
+                (define proc-stx
+                  #`(λ (bindings)
+                      (let ([x (lookup-binding bindings 'names)] ...)
+                        (and binding-constraints ...
+                             #,(bind-pattern-names orig-name
+                                                   #'(names/ellipses ...)
+                                                   #'(x ...)
+                                                   rest-body)))))
                 #`(begin
                     syncheck-exp
-                    (#,(case where-mode
-                         [(flatten)
-                          #'combine-where-results/flatten]
-                         [(predicate)
-                          #'combine-where-results/predicate]
-                         [else (error 'unknown-where-mode "~s" where-mode)])
-                     (match-pattern pat-id (term e #:lang #,ct-lang))
-                     (λ (bindings)
-                       (let ([x (lookup-binding bindings 'names)] ...)
-                         (and binding-constraints ...
-                              #,(bind-pattern-names orig-name
-                                                    #'(names/ellipses ...)
-                                                    #'(x ...)
-                                                    rest-body)))))))))]
+                    #,(if (where/error? #'-where)
+                          (quasisyntax/loc #'pat-stx
+                            (combine-where/error-results
+                             pat-id
+                             (term e #:lang #,ct-lang)
+                             '#,orig-name #,rt-lang
+                             #,proc-stx))
+                          #`(#,(case where-mode
+                                 [(flatten)
+                                  #'combine-where-results/flatten]
+                                 [(predicate)
+                                  #'combine-where-results/predicate]
+                                 [else (error 'unknown-where-mode "~s" where-mode)])
+                             pat-id
+                             (term e #:lang #,ct-lang)
+                             #,@(if (where/error? #'-where)
+                                    (list #`'orig-name "file.rkt" 12345 12 rt-lang)
+                                    (list))
+                             #,proc-stx))))))]
          [((-side-condition s ...) y ...)
           (side-condition-keyword? #'-side-condition)
           (if side-condition-unquoted?
@@ -328,15 +344,27 @@
               outputs))
         outputs)))
 
-(define (combine-where-results/flatten mtchs result)
+(define (combine-where-results/flatten pat term result)
+  (define mtchs (match-pattern pat term))
   (and mtchs
-       (for/fold ([r '()]) ([m mtchs])
+       (for/fold ([r '()]) ([m (in-list mtchs)])
          (let ([s (result (mtch-bindings m))])
            (if s (append s r) r)))))
+(define (combine-where/error-results pat term who lang result)
+  (define mtchs (match-pattern pat term))
+  (unless mtchs (error who "where/error did not match"))
+  (define fst (result (mtch-bindings (car mtchs))))
+  (for ([m (in-list (cdr mtchs))])
+    (define nxt (result (mtch-bindings m)))
+    (unless (alpha-equivalent? lang fst nxt)
+      (error who
+             "where/error matched multiple ways, but did not return alpha-equivalent? results")))
+  fst)
 
-(define (combine-where-results/predicate mtchs result)
+(define (combine-where-results/predicate pat term result)
+  (define mtchs (match-pattern pat term))
   (and mtchs 
-       (for/or ([mtch mtchs])
+       (for/or ([mtch (in-list mtchs)])
          (result (mtch-bindings mtch)))))
 
 (define (repeated-premise-outputs inputs premise)
@@ -345,7 +373,8 @@
       (let ([output (premise (car inputs))])
         (if (null? output)
             '()
-            (for*/list ([o output] [os (repeated-premise-outputs (cdr inputs) premise)])
+            (for*/list ([o (in-list output)]
+                        [os (in-list (repeated-premise-outputs (cdr inputs) premise))])
               (cons o os))))))
 
 (define (IO-judgment-form? jf)
@@ -368,7 +397,7 @@
                          (let ([cache-value (hash-ref cache input not-in-cache)])
                            (not (eq? cache-value not-in-cache)))))
   (define p-a-e (print-as-expression))
-  (define (form-proc/cache recur input derivation-init)
+  (define (form-proc/cache recur input derivation-init pair-of-boxed-caches)
     (parameterize ([default-language ct-lang]
                    [print-as-expression p-a-e]
                    [binding-forms-opened? (if (caching-enabled?) (box #f) #f)])
@@ -377,13 +406,13 @@
          (define candidate (hash-ref cache input not-in-cache))
          (cond
            [(equal? candidate not-in-cache)
-            (define computed-ans (form-proc recur input derivation-init))
+            (define computed-ans (form-proc recur input derivation-init pair-of-boxed-caches))
             (unless (unbox (binding-forms-opened?))
               (hash-set! cache input computed-ans))
             computed-ans]
            [else
             candidate])]
-        [else (form-proc recur input derivation-init)])))
+        [else (form-proc recur input derivation-init pair-of-boxed-caches)])))
   (define dwoos
     (if (or (eq? 'all traced) (memq form-name traced))
         (let ([outputs #f])
@@ -391,7 +420,7 @@
             (for/fold ([s '()]) ([m mode])
               (case m [(I) s] [(O) (cons '_ s)])))
           (define (wrapped . _)
-            (set! outputs (form-proc/cache form-proc/cache input derivation-init))
+            (set! outputs (form-proc/cache form-proc/cache input derivation-init pair-of-boxed-caches))
             (for/list ([output (in-list outputs)])
               (cons form-name (assemble mode input (derivation-with-output-only-output output)))))
           (define otr (current-trace-print-results))
@@ -411,7 +440,7 @@
                               result-tracer)])
             (apply trace-call form-name wrapped (assemble mode input spacers)))
           outputs)
-        (form-proc/cache form-proc/cache input derivation-init)))
+        (form-proc/cache form-proc/cache input derivation-init pair-of-boxed-caches)))
   
   (define without-exact-duplicates-vec (apply vector (remove-duplicates dwoos)))
   (define ht (make-α-hash (compiled-lang-binding-table ct-lang) match-pattern))
@@ -1018,7 +1047,8 @@
                (parameterize ([judgment-form-pending-expansion
                                (cons name
                                      (struct-copy judgment-form (lookup-judgment-form-id name)
-                                                  [proc #'recur]))])
+                                                  [proc #'recur]
+                                                  [cache #'recur-cache]))])
                  (bind-withs syn-error-name '() lang nts lang
                              (syntax->list #'prems) 
                              'flatten #`(list (derivation-with-output-only (term (#,@output-pats) #:lang #,lang)
@@ -1080,12 +1110,12 @@
               #`(λ (lang)
                   (let (clause-proc-binding ... ...)
                     (let ([prev (orig-mk lang)])
-                      (λ (recur input init-jf-derivation-id)
-                        (append (prev recur input init-jf-derivation-id)
+                      (λ (recur input init-jf-derivation-id recur-cache)
+                        (append (prev recur input init-jf-derivation-id recur-cache)
                                 clause-proc-body-backwards ...))))))
             #`(λ (lang)
                 (let (clause-proc-binding ... ...)
-                  (λ (recur input init-jf-derivation-id)
+                  (λ (recur input init-jf-derivation-id recur-cache)
                     (append clause-proc-body-backwards ...)))))))))
 
 (define (combine-judgment-rhses compiled-lhs input rhs check-output)
@@ -1277,7 +1307,7 @@
                (syntax-case next (or)
                  [or (to-lw/proc lst)]
                  [else
-                  (syntax-case lst (unquote side-condition where or)
+                  (syntax-case lst (unquote side-condition or)
                     [(form-name . _)
                      (judgment-form-id? #'form-name)
                      #`(make-metafunc-extra-side-cond #,(to-lw/proc lst))]
@@ -1297,7 +1327,8 @@
                                              (syntax->list #'pat)))])
                        #`(make-metafunc-extra-fresh
                           (list ids ...)))]
-                    [(where pat exp)
+                    [(-where pat exp)
+                     (where-keyword? #'-where)
                      #`(make-metafunc-extra-where
                         #,(to-lw/proc #'pat) #,(to-lw/proc #'exp))]
                     [(side-condition x)
@@ -1598,7 +1629,11 @@
 (define-for-syntax (where-keyword? id)
   (and (identifier? id)
        (or (free-identifier=? id #'where)
-           (free-identifier=? id #'where/hidden))))
+           (free-identifier=? id #'where/hidden)
+           (where/error? id))))
+(define-for-syntax (where/error? id)
+  (and (identifier? id)
+       (free-identifier=? id #'where/error)))
 (define-for-syntax (side-condition-keyword? id)
   (and (identifier? id)
        (or (free-identifier=? id #'side-condition)
@@ -1772,9 +1807,9 @@
          build-derivations
          generate-lws
          IO-judgment-form?
-         judgment-form?
          call-judgment-form
          include-jf-rulename
+         alpha-equivalent?
          (struct-out derivation-subs-acc)
          (struct-out runtime-judgment-form)
          (struct-out derivation)

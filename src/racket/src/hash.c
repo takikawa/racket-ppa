@@ -246,6 +246,8 @@ Scheme_Hash_Table *scheme_make_hash_table(int type)
 {
   Scheme_Hash_Table *table;
 
+  DEBUG_COUNT_ALLOCATION(scheme_make_integer(scheme_hash_table_type));
+
   table = MALLOC_ONE_TAGGED(Scheme_Hash_Table);
 
   table->size = 0;
@@ -640,6 +642,8 @@ Scheme_Hash_Table *scheme_clone_hash_table(Scheme_Hash_Table *ht)
   Scheme_Hash_Table *table;
   Scheme_Object **ba;
 
+  DEBUG_COUNT_ALLOCATION(scheme_make_integer(scheme_hash_table_type));
+
   table = MALLOC_ONE_TAGGED(Scheme_Hash_Table);
   memcpy(table, ht, sizeof(Scheme_Hash_Table));
   MZ_OPT_HASH_KEY(&(table->iso)) = 0;
@@ -722,6 +726,8 @@ scheme_make_bucket_table (intptr_t size, int type)
 {
   Scheme_Bucket_Table *table;
   size_t asize;
+
+  DEBUG_COUNT_ALLOCATION(scheme_make_integer(scheme_bucket_table_type));
 
   table = MALLOC_ONE_TAGGED(Scheme_Bucket_Table);
 
@@ -1119,6 +1125,8 @@ Scheme_Bucket_Table *scheme_clone_bucket_table(Scheme_Bucket_Table *bt)
   Scheme_Bucket_Table *table;
   size_t asize;
 
+  DEBUG_COUNT_ALLOCATION(scheme_make_integer(scheme_bucket_table_type));
+
   table = MALLOC_ONE_TAGGED(Scheme_Bucket_Table);
   table->so.type = scheme_bucket_table_type;
   table->size = bt->size;
@@ -1368,9 +1376,14 @@ XFORM_NONGCING static uintptr_t fast_equal_hash_key(Scheme_Object *o, uintptr_t 
 
  top:
   t = SCHEME_TYPE(o);
-  k += t;
   
   switch(t) {
+  case scheme_true_type:
+    return k + PTR_TO_LONG(o);
+    break;
+  case scheme_false_type:
+    return k + PTR_TO_LONG(o);
+    break;
   case scheme_integer_type:
     {
       uintptr_t iv = to_unsigned_hash(SCHEME_INT_VAL(o));
@@ -1484,7 +1497,7 @@ XFORM_NONGCING static uintptr_t fast_equal_hash_key(Scheme_Object *o, uintptr_t 
 # else
   case scheme_keyword_type:
   case scheme_symbol_type:
-    return PTR_TO_LONG(o);
+    return k + PTR_TO_LONG(o);
 # endif
   default:
     {
@@ -1889,7 +1902,7 @@ intptr_t scheme_equal_hash_key(Scheme_Object *o)
   uintptr_t k;
   int done = 1;
 
-  k = fast_equal_hash_key(o, 0, &done);
+  k = fast_equal_hash_key(o, SCHEME_TYPE(o), &done);
   if (done)
     return to_signed_hash(k);
   else
@@ -1917,6 +1930,10 @@ XFORM_NONGCING static uintptr_t fast_equal_hash_key2(Scheme_Object *o, int *_don
   *_done = 1;
 
   switch(t) {
+  case scheme_true_type:
+    return 1;
+  case scheme_false_type:
+    return 2;
   case scheme_integer_type:
     return t - SCHEME_INT_VAL(o);
 #ifdef MZ_USE_SINGLE_FLOATS
@@ -2553,6 +2570,7 @@ XFORM_NONGCING static Scheme_Hash_Tree *hamt_assoc(Scheme_Hash_Tree *ht, uintptr
 static Scheme_Hash_Tree *hamt_alloc(int kind, int popcount)
 /* be sure to set `bitmap` field before a GC becomes possible */
 {
+  DEBUG_COUNT_ALLOCATION(scheme_make_integer(scheme_hash_tree_type));
   return (Scheme_Hash_Tree *)scheme_malloc_small_tagged(HASH_TREE_RECORD_SIZE(kind, popcount));
 }
 
@@ -3136,11 +3154,11 @@ Scheme_Hash_Tree *scheme_make_hash_tree(int eql_kind)
 Scheme_Hash_Tree *scheme_make_hash_tree_of_type(Scheme_Type stype)
 {
   if (stype == scheme_eq_hash_tree_type)
-    return scheme_make_hash_tree(0);
+    return scheme_make_hash_tree(SCHEME_hashtr_eq);
   else if (stype == scheme_hash_tree_type)
-    return scheme_make_hash_tree(1);
+    return scheme_make_hash_tree(SCHEME_hashtr_equal);
   else
-    return scheme_make_hash_tree(2);
+    return scheme_make_hash_tree(SCHEME_hashtr_eqv);
 }
 
 Scheme_Hash_Tree *scheme_make_hash_tree_placeholder(int eql_kind)
@@ -3202,6 +3220,9 @@ Scheme_Object *scheme_hash_tree_get_w_key_wraps(Scheme_Hash_Tree *tree, Scheme_O
   int stype, pos;
 
   tree = resolve_placeholder(tree);
+  if (!tree->count)
+    return NULL;
+
   stype = SCHEME_TYPE(tree);
   
   if (stype == scheme_eq_hash_tree_type)

@@ -39,6 +39,7 @@ READ_ONLY Scheme_Object *scheme_impersonator_of_property;
 READ_ONLY Scheme_Object *scheme_make_struct_type_proc;
 READ_ONLY Scheme_Object *scheme_make_struct_field_accessor_proc;
 READ_ONLY Scheme_Object *scheme_make_struct_field_mutator_proc;
+READ_ONLY Scheme_Object *scheme_make_struct_type_property_proc;
 READ_ONLY Scheme_Object *scheme_struct_type_p_proc;
 READ_ONLY Scheme_Object *scheme_current_inspector_proc;
 READ_ONLY Scheme_Object *scheme_make_inspector_proc;
@@ -557,11 +558,13 @@ scheme_init_struct (Scheme_Env *env)
                              scheme_make_struct_type_proc,
                              env);
 
-  scheme_add_global_constant("make-struct-type-property", 
-                             scheme_make_prim_w_arity2(make_struct_type_property,
-                                                       "make-struct-type-property",
-                                                       1, 4,
-                                                       3, 3),
+  REGISTER_SO(scheme_make_struct_type_property_proc);
+  scheme_make_struct_type_property_proc = scheme_make_prim_w_arity2(make_struct_type_property,
+                                                                    "make-struct-type-property",
+                                                                    1, 4,
+                                                                    3, 3);
+  scheme_add_global_constant("make-struct-type-property",
+                             scheme_make_struct_type_property_proc,
                              env);
 
   REGISTER_SO(scheme_make_struct_field_accessor_proc);
@@ -1882,7 +1885,7 @@ int scheme_is_rename_transformer(Scheme_Object *o)
 int scheme_is_binding_rename_transformer(Scheme_Object *o)
 {
   if (scheme_is_rename_transformer(o)) {
-    o = scheme_rename_transformer_id(o);
+    o = scheme_rename_transformer_id(o, NULL);
     o = scheme_stx_property(o, not_free_id_symbol, NULL);
     if (o && SCHEME_TRUEP(o))
       return 0;
@@ -1895,7 +1898,7 @@ static int is_stx_id(Scheme_Object *o) { return (SCHEME_STXP(o) && SCHEME_SYMBOL
 
 static int is_stx_id_or_proc_1(Scheme_Object *o) { return (is_stx_id(o) || is_proc_1(o)); }
 
-Scheme_Object *scheme_rename_transformer_id(Scheme_Object *o)
+Scheme_Object *scheme_rename_transformer_id(Scheme_Object *o, Scheme_Comp_Env *comp_env)
 {
   Scheme_Object *a[1];
 
@@ -1908,7 +1911,18 @@ Scheme_Object *scheme_rename_transformer_id(Scheme_Object *o)
       a[0] = o;
       /* apply a continuation barrier here to prevent a capture in
        * the property access */
-      v = scheme_apply(v, 1, a);
+      if (comp_env && (scheme_current_thread->current_local_env != comp_env)) {
+        /* Getting identifier during an expansion context */
+        Scheme_Dynamic_State dyn_state;
+        Scheme_Env *genv = comp_env->genv;
+        scheme_set_dynamic_state(&dyn_state, comp_env, NULL, NULL, scheme_false,
+                                 genv, (genv->module
+                                        ? (genv->link_midx ? genv->link_midx : genv->module->me->src_modidx)
+                                        : NULL));
+        v = scheme_apply_with_dynamic_state(v, 1, a, &dyn_state);
+      } else {
+        v = scheme_apply(v, 1, a);
+      }
       if (!is_stx_id(v)) {
         scheme_contract_error("prop:rename-transformer",
                               "contract violation for given value",
@@ -2540,6 +2554,8 @@ scheme_make_struct_instance(Scheme_Object *_stype, int argc, Scheme_Object **arg
 
   stype = (Scheme_Struct_Type *)_stype;
 
+  DEBUG_COUNT_ALLOCATION((Scheme_Object *)stype);
+
   c = stype->num_slots;
   inst = (Scheme_Structure *)
     scheme_malloc_tagged(sizeof(Scheme_Structure) 
@@ -2588,6 +2604,8 @@ Scheme_Object *scheme_make_blank_prefab_struct_instance(Scheme_Struct_Type *styp
   Scheme_Structure *inst;
   int c;
 
+  DEBUG_COUNT_ALLOCATION((Scheme_Object *)stype);
+
   c = stype->num_slots;
   inst = (Scheme_Structure *)
     scheme_malloc_tagged(sizeof(Scheme_Structure) 
@@ -2621,6 +2639,8 @@ Scheme_Object *scheme_make_prefab_struct_instance(Scheme_Struct_Type *stype,
 {
   Scheme_Structure *inst;
   int i, c;
+
+  DEBUG_COUNT_ALLOCATION((Scheme_Object *)stype);
 
   c = stype->num_slots;
   inst = (Scheme_Structure *)
@@ -2678,6 +2698,8 @@ make_simple_struct_instance(int argc, Scheme_Object **args, Scheme_Object *prim)
   Scheme_Structure *inst;
   Scheme_Struct_Type *stype = (Scheme_Struct_Type *)SCHEME_PRIM_CLOSURE_ELS(prim)[0];
   int i, c;
+
+  DEBUG_COUNT_ALLOCATION((Scheme_Object *)stype);
 
   c = stype->num_slots;
   inst = (Scheme_Structure *)
@@ -3555,7 +3577,8 @@ int scheme_decode_struct_shape(Scheme_Object *expected, intptr_t *_v)
   if (!expected || !SCHEME_SYMBOLP(expected))
     return 0;
 
-  if (SCHEME_SYM_VAL(expected)[0] != 's')
+  if ((SCHEME_SYM_VAL(expected)[0] != 's')
+      || (SCHEME_SYM_LEN(expected)  < 6))
     return 0;
   
   for (i = 6, v = 0; SCHEME_SYM_VAL(expected)[i]; i++) {
@@ -3596,16 +3619,64 @@ int scheme_check_structure_shape(Scheme_Object *e, Scheme_Object *expected)
     return (v == STRUCT_PROC_SHAPE_PRED);
   } else if (i == SCHEME_PRIM_STRUCT_TYPE_INDEXED_SETTER) {
     st = (Scheme_Struct_Type *)SCHEME_PRIM_CLOSURE_ELS(e)[0];
-    return (v == ((st->num_slots << STRUCT_PROC_SHAPE_SHIFT) 
+    return (v == ((st->num_slots << STRUCT_PROC_SHAPE_SHIFT)
                   | STRUCT_PROC_SHAPE_SETTER));
   } else if (i == SCHEME_PRIM_STRUCT_TYPE_INDEXED_GETTER) {
+    int pos = SCHEME_INT_VAL(SCHEME_PRIM_CLOSURE_ELS(e)[1]);
     st = (Scheme_Struct_Type *)SCHEME_PRIM_CLOSURE_ELS(e)[0];
-    return (v == ((st->num_slots << STRUCT_PROC_SHAPE_SHIFT) 
+    return (v == ((pos << STRUCT_PROC_SHAPE_SHIFT) 
                   | STRUCT_PROC_SHAPE_GETTER));
   } else if ((i == SCHEME_PRIM_STRUCT_TYPE_INDEXLESS_SETTER)
              || (i == SCHEME_PRIM_STRUCT_TYPE_BROKEN_INDEXED_SETTER)
              || (i == SCHEME_PRIM_STRUCT_TYPE_INDEXLESS_GETTER))
     return (v == STRUCT_PROC_SHAPE_OTHER);
+
+  return 0;
+}
+
+int scheme_decode_struct_prop_shape(Scheme_Object *expected, intptr_t *_v)
+{
+  intptr_t v;
+  int i;
+
+  if (!expected || !SCHEME_SYMBOLP(expected))
+    return 0;
+
+  if ((SCHEME_SYM_VAL(expected)[0] != 'p')
+      || (SCHEME_SYM_LEN(expected)  < 4))
+    return 0;
+  
+  for (i = 4, v = 0; SCHEME_SYM_VAL(expected)[i]; i++) {
+    v = (v * 10) + (SCHEME_SYM_VAL(expected)[i] - '0');
+  }
+
+  *_v = v;
+  
+  return 1;
+}
+
+int scheme_check_structure_property_shape(Scheme_Object *e, Scheme_Object *expected)
+{
+  intptr_t _v, v;
+  int i;
+
+  if (!scheme_decode_struct_prop_shape(expected, &_v))
+    return 0;
+  v = _v;
+
+  if (SAME_TYPE(SCHEME_TYPE(e), scheme_struct_property_type)) {
+    if (((Scheme_Struct_Property *)e)->guard)
+      return (v == STRUCT_PROP_PROC_SHAPE_GUARDED_PROP);
+    return ((v == STRUCT_PROP_PROC_SHAPE_PROP)
+            || (v == STRUCT_PROP_PROC_SHAPE_GUARDED_PROP));
+  } else if (!SCHEME_PRIMP(e))
+    return 0;
+
+  i = (((Scheme_Primitive_Proc *)e)->pp.flags & SCHEME_PRIM_OTHER_TYPE_MASK);
+  if (i == SCHEME_PRIM_STRUCT_TYPE_STRUCT_PROP_PRED)
+    return (v == STRUCT_PROP_PROC_SHAPE_PRED);
+  else if (i == SCHEME_PRIM_TYPE_STRUCT_PROP_GETTER)
+    return (v == STRUCT_PROP_PROC_SHAPE_GETTER);
 
   return 0;
 }
@@ -6169,7 +6240,7 @@ static Scheme_Object *do_chaperone_struct(const char *name, int is_impersonator,
           } else {
             if (!scheme_inspector_sees_part(argv[0], inspector, field_pos)) {
               if (!setter_positions)
-                setter_positions = scheme_make_hash_tree(0);
+                setter_positions = scheme_make_hash_tree(SCHEME_hashtr_eq);
               setter_positions = scheme_hash_tree_set(setter_positions, scheme_make_integer(field_pos), scheme_true);
             }
           }
@@ -6233,12 +6304,12 @@ static Scheme_Object *do_chaperone_struct(const char *name, int is_impersonator,
     if (prop) {
       if (SCHEME_TRUEP(proc)) {
         if (!red_props)
-          red_props = scheme_make_hash_tree(0);
+          red_props = scheme_make_hash_tree(SCHEME_hashtr_eq);
         red_props = scheme_hash_tree_set(red_props, prop, proc);
         has_redirect = 1;
       } else {
         if (!empty_red_props)
-          empty_red_props = scheme_make_hash_tree(0);
+          empty_red_props = scheme_make_hash_tree(SCHEME_hashtr_eq);
         empty_red_props = scheme_hash_tree_set(empty_red_props, prop, proc);
       }
     } else if (st) {
@@ -6437,7 +6508,7 @@ Scheme_Hash_Tree *scheme_parse_chaperone_props(const char *who, int start_at, in
                             NULL);
 
     if (!ht)
-      ht = scheme_make_hash_tree(0);
+      ht = scheme_make_hash_tree(SCHEME_hashtr_eq);
     ht = scheme_hash_tree_set(ht, v, argv[start_at + 1]);
 
     start_at += 2;

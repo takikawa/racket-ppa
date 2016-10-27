@@ -35,7 +35,9 @@ READ_ONLY Scheme_Object *scheme_vector_ref_proc;
 READ_ONLY Scheme_Object *scheme_vector_set_proc;
 READ_ONLY Scheme_Object *scheme_list_to_vector_proc;
 READ_ONLY Scheme_Object *scheme_unsafe_vector_length_proc;
-READ_ONLY Scheme_Object *scheme_unsafe_bytes_len_proc;
+READ_ONLY Scheme_Object *scheme_unsafe_string_length_proc;
+READ_ONLY Scheme_Object *scheme_unsafe_byte_string_length_proc;
+READ_ONLY Scheme_Object *scheme_unsafe_struct_ref_proc;
 
 /* locals */
 static Scheme_Object *vector_p (int argc, Scheme_Object *argv[]);
@@ -211,7 +213,9 @@ scheme_init_unsafe_vector (Scheme_Env *env)
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_NARY_INLINED);
   scheme_add_global_constant("unsafe-vector*-set!", p, env);  
 
+  REGISTER_SO(scheme_unsafe_struct_ref_proc);
   p = scheme_make_immed_prim(unsafe_struct_ref, "unsafe-struct-ref", 2, 2);
+  scheme_unsafe_struct_ref_proc = p;
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED
                                                             | SCHEME_PRIM_IS_UNSAFE_OMITABLE
                                                             | SCHEME_PRIM_IS_OMITABLE);
@@ -231,11 +235,13 @@ scheme_init_unsafe_vector (Scheme_Env *env)
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_NARY_INLINED);
   scheme_add_global_constant("unsafe-struct*-set!", p, env);  
 
+  REGISTER_SO(scheme_unsafe_string_length_proc);
   p = scheme_make_immed_prim(unsafe_string_len, "unsafe-string-length", 1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
                                                             | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL
                                                             | SCHEME_PRIM_PRODUCES_FIXNUM);
   scheme_add_global_constant("unsafe-string-length", p, env);
+  scheme_unsafe_string_length_proc = p;
 
   p = scheme_make_immed_prim(unsafe_string_ref, "unsafe-string-ref", 2, 2);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED
@@ -247,13 +253,13 @@ scheme_init_unsafe_vector (Scheme_Env *env)
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_NARY_INLINED);
   scheme_add_global_constant("unsafe-string-set!", p, env);
 
-  REGISTER_SO(scheme_unsafe_bytes_len_proc);
+  REGISTER_SO(scheme_unsafe_byte_string_length_proc);
   p = scheme_make_immed_prim(unsafe_bytes_len, "unsafe-bytes-length", 1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
                                                             | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL
                                                             | SCHEME_PRIM_PRODUCES_FIXNUM);
   scheme_add_global_constant("unsafe-bytes-length", p, env);
-  scheme_unsafe_bytes_len_proc = p;
+  scheme_unsafe_byte_string_length_proc = p;
 
   p = scheme_make_immed_prim(unsafe_bytes_ref, "unsafe-bytes-ref", 2, 2);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED
@@ -280,6 +286,8 @@ scheme_make_vector (intptr_t size, Scheme_Object *fill)
     vec = scheme_make_integer(size);
     scheme_wrong_contract("make-vector", "exact-nonnegative-integer?", -1, 0, &vec);
   }
+
+  DEBUG_COUNT_ALLOCATION(scheme_make_integer(scheme_vector_type));
 
   if (size < 1024) {
     vec = (Scheme_Object *)scheme_malloc_tagged(VECTOR_BYTES(size));

@@ -139,8 +139,9 @@
                                         #'()))))
 
   (define-syntax-class (struct-clause legacy)
-    #:attributes (nm type (body 1) (constructor-parts 1))
+    #:attributes (nm type (body 1) (constructor-parts 1) (tvar 1))
     (pattern [(~or (~datum struct) #:struct)
+              (~optional (~seq (tvar ...)) #:defaults ([(tvar 1) '()]))
               nm:opt-parent (body ...)
               (~var opts (struct-opts legacy #'nm.nm))]
              #:with (constructor-parts ...) #'opts.ctor-value
@@ -162,9 +163,10 @@
   (define-syntax-class (clause legacy unsafe? lib)
    #:attributes (spec)
    (pattern oc:opaque-clause #:attr spec
-     #`(require/opaque-type oc.ty oc.pred #,lib . oc.opt))
+     #`(require/opaque-type oc.ty oc.pred #,lib #,@(if unsafe? #'(unsafe-kw) #'()) . oc.opt))
    (pattern (~var strc (struct-clause legacy)) #:attr spec
-     #`(require-typed-struct strc.nm (strc.body ...) strc.constructor-parts ...
+     #`(require-typed-struct strc.nm (strc.tvar ...)
+                             (strc.body ...) strc.constructor-parts ...
                              #:type-name strc.type
                              #,@(if unsafe? #'(unsafe-kw) #'())
                              #,lib))
@@ -292,11 +294,12 @@
          ;; We want the value bound to name to have a nice object name. Using the built in mechanism
          ;; of define has better performance than procedure-rename.
          #,(ignore
-             #'(define name
-                 (let ([pred (make-predicate ty)])
-                   (lambda (x) (pred x)))))
+            (syntax/loc stx
+              (define name
+                (let ([pred (make-predicate ty)])
+                  (lambda (x) (pred x))))))
          ;; not a require, this is just the unchecked declaration syntax
-         #,(internal #'(require/typed-internal name (Any -> Boolean : ty))))]))
+         #,(internal (syntax/loc stx (require/typed-internal name (Any -> Boolean : ty)))))]))
 
 
 (define (make-predicate stx)
@@ -330,7 +333,7 @@
                        val
                        '#,pos
                        '#,neg
-                       val
+                       #f
                        (quote-srcloc #,stx)))
                     'feature-profile:TR-dynamic-check #t))
              #'ty)))
@@ -368,13 +371,15 @@
 
 
 (define (require/opaque-type stx)
+  (define-syntax-class unsafe-id
+    (pattern (~literal unsafe-kw)))
   (define-syntax-class name-exists-kw
     (pattern #:name-exists))
   (syntax-parse stx
     [_ #:when (eq? 'module-begin (syntax-local-context))
        ;; it would be inconvenient to find the correct #%module-begin here, so we rely on splicing
        #`(begin #,stx (begin))]
-    [(_ ty:id pred:id lib (~optional ne:name-exists-kw) ...)
+    [(_ ty:id pred:id lib (~optional unsafe:unsafe-id) (~optional ne:name-exists-kw) ...)
      (with-syntax ([hidden (generate-temporary #'pred)])
        ;; this is needed because this expands to the contract directly without
        ;; going through the normal `make-contract-def-rhs` function.
@@ -389,9 +394,11 @@
            #,(if (attribute ne)
                  (internal (syntax/loc stx (define-type-alias-internal ty (Opaque pred))))
                  (syntax/loc stx (define-type-alias ty (Opaque pred))))
-           #,(ignore #'(define pred-cnt
-                         (or/c struct-predicate-procedure?/c
-                               (any-wrap-warning/c . c-> . boolean?))))
+           #,(if (attribute unsafe)
+                 (ignore #'(define pred-cnt any/c)) ; unsafe- shouldn't generate contracts
+                 (ignore #'(define pred-cnt
+                             (or/c struct-predicate-procedure?/c
+                                   (any-wrap-warning/c . c-> . boolean?)))))
            #,(ignore #'(require/contract pred hidden pred-cnt lib)))))]))
 
 
@@ -444,6 +451,7 @@
   (define ((rts legacy) stx)
     (syntax-parse stx #:literals (:)
       [(_ name:opt-parent
+          (~optional (~seq (tvar:id ...)) #:defaults ([(tvar 1) '()]))
           ([fld : ty] ...)
           (~var input-maker (constructor-term legacy #'name.nm))
           (~optional (~seq #:type-name type:id) #:defaults ([type #'name.nm]))
@@ -468,7 +476,17 @@
                       [real-maker (if (syntax-e #'id-is-ctor?) #'internal-maker #'maker-name)]
                       [extra-maker (and (attribute input-maker.extra)
                                         (not (bound-identifier=? #'make-name #'nm))
-                                        #'maker-name)])
+                                        #'maker-name)]
+                      ;; the type for a polymorphic use of the struct name
+                      [poly-type #`(type tvar ...)]
+                      ;; the struct type to use for the constructor/selectors
+                      [self-type (if (null? (syntax->list #'(tvar ...)))
+                                     #'type
+                                     #'poly-type)])
+                     (when (and (not (attribute unsafe.unsafe?))
+                                (pair? (syntax->list #'(tvar ...))))
+                       (tc-error/stx stx "polymorphic structs are not supported"))
+
                      (define (maybe-add-quote-syntax stx)
                        (if (and stx (syntax-e stx)) #`(quote-syntax #,stx) stx))
 
@@ -524,7 +542,7 @@
                                   (make-struct-info-self-ctor #'internal-maker si)
                                   si))
 
-                         (dtsi* () spec type ([fld : ty] ...) #:maker maker-name #:type-only)
+                         (dtsi* (tvar ...) spec type ([fld : ty] ...) #:maker maker-name #:type-only)
                          #,(ignore #'(require/contract pred hidden (or/c struct-predicate-procedure?/c (c-> any-wrap/c boolean?)) lib))
                          #,(internal #'(require/typed-internal hidden (Any -> Boolean : type)))
                          (require/typed #:internal (maker-name real-maker) type lib
@@ -544,8 +562,8 @@
                                #'(begin))
 
                          #,@(if (attribute unsafe.unsafe?)
-                                #'((require/typed #:internal sel (type -> ty) lib unsafe-kw) ...)
-                                #'((require/typed lib [sel (type -> ty)]) ...)))))]))
+                                #'((require/typed #:internal sel (All (tvar ...) (self-type -> ty)) lib unsafe-kw) ...)
+                                #'((require/typed lib [sel (All (tvar ...) (self-type -> ty))]) ...)))))]))
 
   (values (rts #t) (rts #f))))
 

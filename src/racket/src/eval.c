@@ -2031,11 +2031,17 @@ define_execute_with_dynamic_state(Scheme_Object *vec, int delta, int defmacro,
 
       if (dm_env)
         is_st = 0;
+      else if (scheme_is_simple_make_struct_type(vals_expr, g, CHECK_STRUCT_TYPE_RESOLVED, 
+                                                 NULL, NULL, NULL, NULL,
+                                                 NULL, NULL, MZ_RUNSTACK, 0, 
+                                                 NULL, NULL, NULL, 5))
+        is_st = 1;
+      else if (scheme_is_simple_make_struct_type_property(vals_expr, g, CHECK_STRUCT_TYPE_RESOLVED, 
+                                                          NULL, NULL, NULL, NULL, MZ_RUNSTACK, 0, 
+                                                          NULL, NULL, 5))
+        is_st = 1;
       else
-        is_st = !!scheme_is_simple_make_struct_type(vals_expr, g, 1, 0, 1, 
-                                                    NULL, NULL,
-                                                    NULL, NULL, MZ_RUNSTACK, 0, 
-                                                    NULL, NULL, 5);
+        is_st = 0;
       
       for (i = 0; i < g; i++) {
         var = SCHEME_VEC_ELS(vec)[i+delta];
@@ -2244,6 +2250,8 @@ scheme_case_lambda_execute(Scheme_Object *expr)
   Scheme_Case_Lambda *seqin, *seqout;
   int i, cnt;
   Scheme_Thread *p = scheme_current_thread;
+
+  DEBUG_COUNT_ALLOCATION(expr);
 
   seqin = (Scheme_Case_Lambda *)expr;
 
@@ -2496,6 +2504,8 @@ scheme_make_closure(Scheme_Thread *p, Scheme_Object *code, int close)
   GC_CAN_IGNORE mzshort *map;
   int i;
 
+  DEBUG_COUNT_ALLOCATION(code);
+
   data = (Scheme_Lambda *)code;
   
 #ifdef MZ_USE_JIT
@@ -2591,7 +2601,8 @@ void scheme_delay_load_closure(Scheme_Lambda *data)
                               SCHEME_INT_VAL(SCHEME_VEC_ELS(vinfo)[6]),
                               (SCHEME_TRUEP(SCHEME_VEC_ELS(vinfo)[7])
                                ? (Scheme_Hash_Tree *)SCHEME_VEC_ELS(vinfo)[7]
-                               : NULL));
+                               : NULL),
+                              (Scheme_Hash_Table **)SCHEME_VEC_ELS(vinfo)[11]);
     }
   }
 }

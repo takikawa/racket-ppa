@@ -88,7 +88,7 @@ the transformer's input. The @tech{rearm}ing process
  @item{If the result has no @racket['taint-mode] property value, but
           its datum is a pair, and if the syntax object corresponding
           to the @racket[car] of the pair is an identifier bound to
-          @racket[begin], @racket[module], or
+          @racket[begin], @racket[begin-for-syntax], or
           @racket[#%plain-module-begin], then dye packs are propagated
           as if the syntax object had the @racket['transparent]
           property value.}
@@ -129,9 +129,9 @@ inspector that depends on the current dynamic context:
 
 @itemlist[
 
- @item{when applying a syntax transformer is being applied, the
-       declaration-time code inspector of the module in which a syntax
-       transformer was bound;}
+ @item{when a syntax transformer is being applied, the declaration-time
+       code inspector of the module in which a syntax transformer was
+       bound;}
 
  @item{when a module is being visited, the module's declaration-time
        code inspector;}

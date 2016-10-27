@@ -6,11 +6,9 @@
          "reduction-semantics.rkt"
          "lang-struct.rkt"
          "struct.rkt"
-         "term.rkt"
          "matcher.rkt"
          "judgment-form.rkt"
          "search.rkt"
-         "term-fn.rkt"
          "pat-unify.rkt"
          racket/contract
          racket/match
@@ -18,7 +16,6 @@
          (for-syntax racket/base
                      racket/set
                      syntax/stx
-                     setup/path-to-relative
                      "rewrite-side-conditions.rkt"
                      "term-fn.rkt"
                      "keyword-macros.rkt")
@@ -57,7 +54,7 @@
      (with-syntax ([loc (if (and (path? (syntax-source stx))
                                  (syntax-line stx))
                             (format "~a:~a"
-                                    (path->relative-string/library (syntax-source stx)) 
+                                    (path->presentable-string (syntax-source stx)) 
                                     (syntax-line stx))
                             #f)])
        #`(λ (err? msg)

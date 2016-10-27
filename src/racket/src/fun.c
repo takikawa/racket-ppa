@@ -1924,7 +1924,7 @@ scheme_apply_macro(Scheme_Object *name, Scheme_Env *menv,
   if (scheme_is_rename_transformer(rator)) {
     Scheme_Object *scope;
    
-    rator = scheme_rename_transformer_id(rator);
+    rator = scheme_rename_transformer_id(rator, env);
     /* rator is now an identifier */
 
     /* and it's introduced by this expression: */
@@ -2568,11 +2568,16 @@ Scheme_Object *scheme_get_or_check_procedure_shape(Scheme_Object *e, Scheme_Obje
   Scheme_Object *p;
 
   if (expected 
-      && SCHEME_SYMBOLP(expected) 
-      && SCHEME_SYM_VAL(expected)[0] == 's') {
-    return (scheme_check_structure_shape(e, expected)
-            ? expected
-            : NULL);
+      && SCHEME_SYMBOLP(expected)) {
+    if (SCHEME_SYM_VAL(expected)[0] == 's') {
+      return (scheme_check_structure_shape(e, expected)
+              ? expected
+              : NULL);
+    } else if (SCHEME_SYM_VAL(expected)[0] == 'p') {
+      return (scheme_check_structure_property_shape(e, expected)
+              ? expected
+              : NULL);
+    }
   }
 
   if (SAME_TYPE(SCHEME_TYPE(e), scheme_inline_variant_type))

@@ -463,7 +463,7 @@ The recognized @tech{style properties} are as follows:
         be set separately for parts that start different HTML pages,
         otherwise it is effectively inherited by sub-parts; the
         default is @racket["scribble-racket-lang.org"], but
-        @exec{setup-plt} installs @racket["doc-racket-lang.org"] as the
+        @exec{raco setup} installs @racket["doc-racket-lang.org"] as the
         @tt{id} for any document that it builds.}
 
  @item{@racket[attributes] structure --- Provides additional HTML
@@ -1772,7 +1772,7 @@ The @racket[path] field can be a result of
 Used as a @tech{style property} on the main @racket[part] of a document
 to set a default prefix file, style file, and extra files (see
 @secref["config-style"]).  The defaults are used by the
-@exec{scribble} command-line tool for and @DFlag{latex} or @DFlag{pdf}
+@exec{scribble} command-line tool for @DFlag{latex} or @DFlag{pdf}
 mode if none are supplied via @DFlag{prefix} and @DFlag{style} (where
 @racket[extra-files] are used only when @racket[prefix] is used). A
 byte-string value is used directly like file content, and a path can

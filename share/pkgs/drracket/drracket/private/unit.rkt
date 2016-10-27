@@ -100,7 +100,9 @@
 
 (define-local-member-name
   update-kill-button-label
-  does-break-kill?)
+  does-break-kill?
+  get-panel-percentages-and-orientation
+  set-panel-percentages-and-orientation)
 
 (define-unit unit@
   (import [prefix help-desk: drracket:help-desk^]
@@ -547,7 +549,8 @@
                       (text:normalize-paste-mixin
                        (text:column-guide-mixin
                         (text:all-string-snips-mixin
-                         text:info%)))))))))))))])
+                         (text:ascii-art-enlarge-boxes-mixin
+                          text:info%))))))))))))))])
        ((get-program-editor-mixin)
         (class* definitions-super% (drracket:unit:definitions-text<%>)
           (inherit get-top-level-window is-locked? lock while-unlocked
@@ -928,33 +931,6 @@
           (inherit set-max-undo-history)
           (set-max-undo-history 'forever)))))
   
-  ;; is-lang-line? : string -> boolean
-  ;; given the first line in the editor, this returns #t if it is a #lang line.
-  (define (is-lang-line? l)
-    (let ([m (regexp-match #rx"^#(!|(lang ))([-+_/a-zA-Z0-9]+)(.|$)" l)])
-      (and m
-           (let ([lang-name (list-ref m 3)]
-                 [last-char (list-ref m 4)])
-             (and (not (char=? #\/ (string-ref lang-name 0)))
-                  (not (char=? #\/ (string-ref lang-name (- (string-length lang-name) 1))))
-                  (or (string=? "" last-char)
-                      (char-whitespace? (string-ref last-char 0))))))))
-  
-  ;; test cases for is-lang-line?
-  #;
-  (printf "~s\n"
-          (list (is-lang-line? "#lang x")
-                (is-lang-line? "#lang racket")
-                (is-lang-line? "#lang racket ")
-                (not (is-lang-line? "#lang racketα"))
-                (not (is-lang-line? "#lang racket/ "))
-                (not (is-lang-line? "#lang /racket "))
-                (is-lang-line? "#lang rac/ket ")
-                (is-lang-line? "#lang r6rs")
-                (is-lang-line? "#!r6rs")
-                (is-lang-line? "#!r6rs ")
-                (not (is-lang-line? "#!/bin/sh"))))
-  
   (define (get-module-language/settings)
     (let* ([module-language
             (and (preferences:get 'drracket:switch-to-module-language-automatically?)
@@ -1204,12 +1180,12 @@
       (inherit get-percentages popup-menu 
                set-orientation get-vertical?)
       (define/augment (after-percentage-change)
-        (let ([percentages (get-percentages)])
-          (when (and (= 1
-                        (length (send unit-frame get-definitions-canvases))
-                        (length (send unit-frame get-interactions-canvases)))
-                     (= 2 (length percentages)))
-            (preferences:set 'drracket:unit-window-size-percentage (car percentages))))
+        (define percentages (get-percentages))
+        (when (and (= 1
+                      (length (send unit-frame get-definitions-canvases))
+                      (length (send unit-frame get-interactions-canvases)))
+                   (= 2 (length percentages)))
+          (preferences:set 'drracket:unit-window-size-percentage (car percentages)))
         (inner (void) after-percentage-change))
       (define/override (right-click-in-gap evt before after)
         (define menu (new popup-menu%))
@@ -1277,6 +1253,15 @@
       (define last-touched (current-inexact-milliseconds))
       (define/public-final (touched) (set! last-touched (current-inexact-milliseconds)))
       (define/public-final (get-last-touched) last-touched)
+
+      (define panel-percentages #f)
+      (define panel-orientation #f)
+      (define/public (set-panel-percentages-and-orientation p o)
+        (set! panel-percentages p)
+        (set! panel-orientation o))
+      (define/public (get-panel-percentages-and-orientation)
+        (values panel-percentages panel-orientation))
+
       
       ;; current-execute-warning is a snapshot of the needs-execution-message
       ;; that is taken each time repl submission happens, and it gets reset
@@ -3039,7 +3024,17 @@
             (send tab update-log)
             (send tab update-planet-status)
             (send tab update-execute-warning-gui)
+
+            (send old-tab set-panel-percentages-and-orientation
+                  (send resizable-panel get-percentages)
+                  (not (send resizable-panel get-vertical?)))
             (restore-visible-tab-regions)
+            (define-values (panel-percentages panel-orientation)
+              (send tab get-panel-percentages-and-orientation))
+            (when panel-percentages
+              (send resizable-panel set-percentages panel-percentages)
+              (send resizable-panel set-orientation panel-orientation))
+
             (for-each (λ (defs-canvas) (send defs-canvas refresh))
                       definitions-canvases)
             (for-each (λ (ints-canvas) (send ints-canvas refresh))
@@ -3085,9 +3080,9 @@
         (begin-container-sequence)
         (define-values (new-tabs-rev new-labels-rev)
           (for/fold ([new-tabs '()]
-                     [new-labels '()]
-                     )([new-i (in-naturals)]
-                       [old-i tab-order])
+                     [new-labels '()])
+                    ([new-i (in-naturals)]
+                     [old-i tab-order])
             (define t (list-ref tabs old-i))
             (send t set-i new-i)
             (values (cons t new-tabs)
@@ -3223,11 +3218,11 @@
           (update-shown)
           (reflow-container) ;; without this one, the percentages in the
                              ;; resizable-panel are not up to date with the children
-          (fix-up-canvas-numbers definitions-text vd #f)
-          (fix-up-canvas-numbers interactions-text vi #t)
+          (when ds? (fix-up-canvas-numbers definitions-text vd #f))
+          (when is? (fix-up-canvas-numbers interactions-text vi #t))
           (reflow-container)
-          (set-visible-regions definitions-text vd)
-          (set-visible-regions interactions-text vi)))
+          (when ds? (set-visible-regions definitions-text vd))
+          (when is? (set-visible-regions interactions-text vi))))
       
       (define/private (pathname-equal? p1 p2)
         (with-handlers ([exn:fail? (λ (x) #f)])
@@ -5516,6 +5511,19 @@
      (format (string-constant module-browser-in-file) str-to-use)]
     [else (string-constant module-browser-no-file)]))
 
+
+;; is-lang-line? : string -> boolean
+;; given the first line in the editor, this returns #t if it is a #lang line.
+(define (is-lang-line? l)
+  (let ([m (regexp-match #rx"^#(!|(lang ))([-+_/a-zA-Z0-9]+)(.|$)" l)])
+    (and m
+         (let ([lang-name (list-ref m 3)]
+               [last-char (list-ref m 4)])
+           (and (not (char=? #\/ (string-ref lang-name 0)))
+                (not (char=? #\/ (string-ref lang-name (- (string-length lang-name) 1))))
+                (or (string=? "" last-char)
+                    (char-whitespace? (string-ref last-char 0))))))))
+
 (module+ test
   (require rackunit)
   (check-equal? (compute-label-string (string->path "x"))
@@ -5529,4 +5537,17 @@
       (parameterize ([error-escape-handler k])
         (check-true (string? 
                      (compute-label-string 
-                      (string->path (make-string i #\x)))))))))
+                      (string->path (make-string i #\x))))))))
+
+
+  (check-true (is-lang-line? "#lang x"))
+  (check-true (is-lang-line? "#lang racket"))
+  (check-true (is-lang-line? "#lang racket "))
+  (check-false (is-lang-line? "#lang racketα"))
+  (check-false (is-lang-line? "#lang racket/ "))
+  (check-false (is-lang-line? "#lang /racket "))
+  (check-true (is-lang-line? "#lang rac/ket "))
+  (check-true (is-lang-line? "#lang r6rs"))
+  (check-true (is-lang-line? "#!r6rs"))
+  (check-true (is-lang-line? "#!r6rs "))
+  (check-false (is-lang-line? "#!/bin/sh")))

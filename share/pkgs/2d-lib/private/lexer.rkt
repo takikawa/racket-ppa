@@ -39,24 +39,18 @@ todo:
        ;; 'val' -- it isn't necessary for correct operation, but
        ;; helps find bugs earlier
        (define (check-char i c2)
-         ;; here we want to check to make sure we're in sync, but:
-         
-         ;; 1) some lexers don't return strings (or return strings
-         ;;    of the wrong sizes); these will be non-strings here
-         (when (string? val)
-           ;; 2) whitespace is not always right
-           ;;    (the ones outside the table, 
-           ;;    specifically, are always just spaces)
-           (unless (eq? tok 'white-space)
-             
-             ;; 3) sometimes we get specials in the port
-             (when (char? c2)
-
-               (define c1 (string-ref val i))
-               (unless (equal? c1 c2)
-                 (error '2d/lexer.rkt "expected a ~s, got ~s while feeding token ~s" 
-                        c1 c2 
-                        (car (2d-lexer-state-pending-tokens a-2d-lexer-state))))))))
+         ;; here we want to check to make sure we're in sync, but
+         ;; we cannot count on the lexers to return the same strings
+         ;; as we saw in the port in general. So, instead we check only
+         ;; when the token is a parenthesis and the characters are
+         ;; the double-barred chars (since we made that token)
+         (when (and (equal? tok 'parenthesis)
+                    (regexp-match? all-double-barred-chars-regexp val))
+           (define c1 (string-ref val i))
+           (unless (equal? c1 c2)
+             (error '2d/lexer.rkt "expected a ~s, got ~s while feeding token ~s" 
+                    c1 c2 
+                    (car (2d-lexer-state-pending-tokens a-2d-lexer-state))))))
        
        ;; actually read the characters in
        (define last-i (- end start))
@@ -114,6 +108,9 @@ todo:
 (define double-barred-chars-regexp
   (regexp
    (format "[~a]" (apply string double-barred-chars))))
+(define all-double-barred-chars-regexp
+  (regexp
+   (format "^[~a]*$" (apply string double-barred-chars))))
 
 (define (call-chained-lexer uniform-chained-lexer port offset a-2d-lexer-state)
   (define-values (a b c d e f new-mode) 
@@ -234,46 +231,43 @@ todo:
                        [else
                         ;; drop replace specials with spaces
                         (cons #\space (loop (- n 1)))])]))))
-             (cond
-               
-               [else
+
+             ;; pull the newline out of peek-port2
+             (for ([x (in-range (string-length eol-string))]) (read-char-or-special peek-port2))
                 
-                ;; pull the newline out of peek-port2
-                (for ([x (in-range (string-length eol-string))]) (read-char-or-special peek-port2))
-                
-                (define before-token (list (pull-chars error-pos)
-                                           'no-color
-                                           #f
-                                           (+ base-position 1)
-                                           (+ base-position 1 error-pos)))
-                (define end-of-table-approx
-                  (let ([peek-port3 (peeking-input-port peek-port2)])
-                    (port-count-lines! peek-port3)
-                    (define (read-line/check-double-barred)
-                      (let loop ([found-double-barred? #f])
-                        (define c (read-char-or-special peek-port3))
-                        (cond
-                          [(or (equal? c #\n) (eof-object? c))
-                           found-double-barred?]
-                          [else (loop (or found-double-barred?
-                                          (member c double-barred-chars)))])))
-                    (let loop ()
-                      (define found-double-barred? (read-line/check-double-barred))
-                      (cond
-                        [found-double-barred?
-                         (loop)]
-                        [else
-                         (define-values (line col pos) (port-next-location peek-port3))
-                         pos]))))
-                (define after-token
-                  (list (pull-chars (- end-of-table-approx 1))
-                        'error
-                        #f
-                        (+ base-position 1 error-pos)
-                        (+ base-position 1 error-pos end-of-table-approx -1)))
-                (if (zero? error-pos)
-                    (list newline-token after-token)
-                    (list newline-token before-token after-token))])]
+             (define before-token (list (pull-chars error-pos)
+                                        'no-color
+                                        #f
+                                        (+ base-position 1)
+                                        (+ base-position 1 error-pos)))
+             (define end-of-table-approx
+               (let ([peek-port3 (peeking-input-port peek-port2)])
+                 (port-count-lines! peek-port3)
+                 (define (read-line/check-double-barred)
+                   (let loop ([found-double-barred? #f])
+                     (define c (read-char-or-special peek-port3))
+                     (cond
+                       [(or (equal? c #\n) (eof-object? c))
+                        found-double-barred?]
+                       [else (loop (or found-double-barred?
+                                       (member c double-barred-chars)))])))
+                 (let loop ()
+                   (define found-double-barred? (read-line/check-double-barred))
+                   (cond
+                     [found-double-barred?
+                      (loop)]
+                     [else
+                      (define-values (line col pos) (port-next-location peek-port3))
+                      pos]))))
+             (define after-token
+               (list (pull-chars (- end-of-table-approx 1))
+                     'error
+                     #f
+                     (+ base-position 1 error-pos)
+                     (+ base-position 1 error-pos end-of-table-approx -1)))
+             (if (zero? error-pos)
+                 (list newline-token after-token)
+                 (list newline-token before-token after-token))]
             [else
              
              (define lhses (close-cell-graph cell-connections 

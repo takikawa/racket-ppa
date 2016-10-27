@@ -177,7 +177,7 @@
            #:repeat? Univ #f
            -String)]
 
-[non-empty-string? (make-pred-ty -String)]
+[non-empty-string? (asym-pred Univ -Boolean (-PS (-is-type 0 -String) -tt))]
 [string-contains? (-> -String -String -Boolean)]
 [string-prefix? (-> -String -String -Boolean)]
 [string-suffix? (-> -String -String -Boolean)]
@@ -190,6 +190,7 @@
               #:max-width (Un -Nat (-val +inf.0)) #f
               #:min-width -Nat #f
               #:limit-marker -String #f
+              #:limit-prefix? -Boolean #f
               #:align (one-of/c 'left 'center 'right) #f
               #:pad-string -String #f
               #:left-pad-string -String #f
@@ -202,6 +203,7 @@
               #:max-width (Un -Nat (-val +inf.0)) #f
               #:min-width -Nat #f
               #:limit-marker -String #f
+              #:limit-prefix? -Boolean #f
               #:align (one-of/c 'left 'center 'right) #f
               #:pad-string -String #f
               #:left-pad-string -String #f
@@ -214,6 +216,7 @@
               #:max-width (Un -Nat (-val +inf.0)) #f
               #:min-width -Nat #f
               #:limit-marker -String #f
+              #:limit-prefix? -Boolean #f
               #:align (one-of/c 'left 'center 'right) #f
               #:pad-string -String #f
               #:left-pad-string -String #f
@@ -226,6 +229,7 @@
               #:max-width (Un -Nat (-val +inf.0)) #f
               #:min-width -Nat #f
               #:limit-marker -String #f
+              #:limit-prefix? -Boolean #f
               #:align (one-of/c 'left 'center 'right) #f
               #:pad-string -String #f
               #:left-pad-string -String #f
@@ -253,6 +257,7 @@
                #:max-width (Un -Nat (-val +inf.0)) #f
                #:min-width -Nat #f
                #:limit-marker -String #f
+               #:limit-prefix? -Boolean #f
                #:align (one-of/c 'left 'center 'right) #f
                #:pad-string -String #f
                #:left-pad-string -String #f
@@ -265,6 +270,7 @@
                #:max-width (Un -Nat (-val +inf.0)) #f
                #:min-width -Nat #f
                #:limit-marker -String #f
+               #:limit-prefix? -Boolean #f
                #:align (one-of/c 'left 'center 'right) #f
                #:pad-string -String #f
                #:left-pad-string -String #f
@@ -277,6 +283,7 @@
                #:max-width (Un -Nat (-val +inf.0)) #f
                #:min-width -Nat #f
                #:limit-marker -String #f
+               #:limit-prefix? -Boolean #f
                #:align (one-of/c 'left 'center 'right) #f
                #:pad-string -String #f
                #:left-pad-string -String #f
@@ -1872,24 +1879,23 @@
 
 ;; Section 13.1.9
 [make-input-port
- (->opt Univ
-        (Un (-> -Bytes (Un -Nat (-val eof) top-func (-evt Univ)))
-            -Input-Port)
-        (Un (-> -Bytes -Nat (-opt (-evt Univ))
-                (Un -Nat (-val eof) top-func (-evt Univ) (-val #f)))
-            -Input-Port
-            (-val #f))
-        (-> Univ)
-        [(-opt (-> (-evt Univ)))
-         (-opt (-> -PosInt (-evt Univ) (-evt Univ) Univ))
-         (-opt (-> (-values (list (-opt -Integer)
-                                  (-opt -Integer)
-                                  (-opt -Integer)))))
-         (-> Univ)
-         (Un -Integer -Port (-val #f) (-> (-opt -Integer)))
-         (-opt (cl->* (-> (one-of/c 'block 'none) Univ)
-                      (-> (-opt (one-of/c 'block 'none)))))]
-        -Input-Port)]
+ (let ([specials-func (-> (-opt -Integer) (-opt -Integer) (-opt -Integer) (-opt -Integer) Univ)])
+   (->opt Univ
+          (Un (-> -Bytes (Un -Nat (-val eof) specials-func (-evt Univ)))
+              -Input-Port)
+          (Un (-> -Bytes -Nat (-opt (-evt Univ))
+                  (Un -Nat (-val eof) specials-func (-evt Univ) (-val #f)))
+              -Input-Port
+              (-val #f))
+          (-> Univ)
+          [(-opt (-> (-evt Univ)))
+           (-opt (-> -PosInt (-evt Univ) (-evt Univ) Univ))
+           (-opt (-> (-values (list (-opt -Integer) (-opt -Integer) (-opt -Integer)))))
+           (-> Univ)
+           (Un -Integer -Port (-val #f) (-> (-opt -Integer)))
+           (-opt (cl->* (-> (one-of/c 'block 'none) Univ)
+                        (-> (-opt (one-of/c 'block 'none)))))]
+          -Input-Port))]
 [make-output-port
  (->opt Univ
         (-evt Univ)
@@ -1957,9 +1963,22 @@
 ;; Section 13.1.10.2
 [input-port-append  (->* (list Univ) -Input-Port -Input-Port)]
 
-;TODO write the type for this
-;It is fairly complicated and require events
-;make-input-port/read-to-peek
+[make-input-port/read-to-peek
+ (let ([specials-func (-> (-opt -Integer) (-opt -Integer) (-opt -Integer) (-opt -Integer) Univ)])
+   (->opt Univ
+          (-> -Bytes (Un -Nat (-val eof) specials-func (-evt -Zero)))
+          (Un (-> -Bytes -Nat (-> -Bytes -Nat (Un -Nat (-val eof) specials-func (-evt -Zero) (-val #f)))
+                  (Un -Nat (-val eof) specials-func (-evt -Zero) (-val #f)))
+              (-val #f))
+          (-> Univ)
+          [(-opt (-> (-values (list (-opt -Integer) (-opt -Integer) (-opt -Integer)))))
+           (-> Univ)
+           -Integer
+           (-opt (cl->* (-> (one-of/c 'block 'none) Univ)
+                        (-> (-opt (one-of/c 'block 'none)))))
+           Univ
+           (-opt (-> (Un -Nat (-val eof) top-func (-evt -Zero)) Univ))]
+          -Input-Port))]
 
 [make-limited-input-port (->opt -Input-Port -Nat [Univ] -Input-Port)]
 [make-pipe-with-specials (->opt [-Nat Univ Univ] (-values (list -Input-Port -Output-Port)))]
@@ -2524,9 +2543,9 @@
 [build-path/convention-type
   ((list -PathConventionType -SomeSystemPathlike*) -SomeSystemPathlike* . ->* . -SomeSystemPath)]
 
-[absolute-path? (-> -SomeSystemPath B)]
-[relative-path? (-> -SomeSystemPath B)]
-[complete-path? (-> -SomeSystemPath B)]
+[absolute-path? (-> -SomeSystemPathlike B)]
+[relative-path? (-> -SomeSystemPathlike B)]
+[complete-path? (-> -SomeSystemPathlike B)]
 
 [path->complete-path
  (cl->* (-> -Pathlike -Path)
@@ -2590,6 +2609,8 @@
 [explode-path (-SomeSystemPathlike . -> . (-lst (Un -SomeSystemPath (one-of/c 'up 'same))))]
 [simple-form-path (-Pathlike . -> . -Path)]
 [normalize-path (cl->* (-Pathlike [-Pathlike] . ->opt . -Path))]
+[path-get-extension (-SomeSystemPathlike . -> . (-opt -Bytes))]
+[path-has-extension? (-SomeSystemPathlike (Un -String -Bytes) . -> . (-opt -Bytes))]
 [filename-extension (-SomeSystemPathlike . -> . (-opt -Bytes))]
 [file-name-from-path (-Pathlike . -> . (-opt -Path))]
 [path-only (-SomeSystemPathlike . -> . (-opt -Path))]
@@ -2642,6 +2663,10 @@
 [filesystem-root-list (-> (-lst -Path))]
 
 ;; Section 15.2.4
+[filesystem-change-evt? (asym-pred Univ B (-PS (-is-type 0 (-mu x (-evt x))) -tt))]
+[filesystem-change-evt-cancel (-> (-mu x (-evt x)) -Void)]
+[filesystem-change-evt (-poly (a) (cl->* (-> -Pathlike (-mu x (-evt x)))
+                                         (-> -Pathlike (-> a) (Un (-mu x (-evt x)) a))))]
 
 ;; Section 15.2.5 (racket/file)
 [copy-directory/files (->key -Pathlike -Pathlike
@@ -2931,12 +2956,12 @@
 [logger-name (-> -Logger (-opt Sym))]
 [current-logger (-Param -Logger -Logger)]
 
-[log-message (cl->* (-> -Logger -Log-Level -String Univ -Void)
-                    (-> -Logger -Log-Level (Un (-val #f) -Symbol) -String Univ -Void))]
+[log-message (cl->* (->opt -Logger -Log-Level -String Univ [Univ] -Void)
+                    (->opt -Logger -Log-Level (Un (-val #f) -Symbol) -String Univ [Univ] -Void))]
 [log-level? (->opt -Logger -Log-Level [(-opt -Symbol)] B)]
 
 [log-receiver? (make-pred-ty -Log-Receiver)]
-[make-log-receiver (-> -Logger -Log-Level -Log-Receiver)]
+[make-log-receiver (->opt -Logger -Log-Level [(-opt -Symbol)] -Log-Receiver)]
 
 ;; Section 15.5.4 (Additional Logging Functions, racket/logging)
 [log-level/c (make-pred-ty (one-of/c 'none 'fatal 'error 'warning 'info 'debug))]
@@ -2964,6 +2989,14 @@
  (->opt [(Un (-val #f) (-val 'subprocesses) -Thread)] -Fixnum)]
 
 ;; Section 15.7
+[environment-variables? (make-pred-ty -Environment-Variables)]
+[current-environment-variables (-Param -Environment-Variables)]
+[bytes-environment-variable-name? (asym-pred Univ B (-PS (-is-type 0 -Bytes) -tt))]
+[make-environment-variables (->* null -Bytes -Environment-Variables)]
+[environment-variables-ref (-> -Environment-Variables -Bytes (-opt -Bytes))]
+[environment-variables-set! (->opt -Environment-Variables -Bytes (-opt -Bytes) [(-> Univ)] Univ)]
+[environment-variables-names (-> -Environment-Variables  (-lst -Bytes))]
+[string-environment-variable-name? (asym-pred Univ B (-PS (-is-type 0 -) -tt))]
 [getenv (-> -String (Un -String (-val #f)))]
 [putenv (-> -String -String B)]
 
@@ -3137,6 +3170,8 @@
   (cl->*
    (->optkey -Pathlike [(-> -Input-Port (Un))] #:mode (one-of/c 'binary 'text) #f (-lst Univ))
    (->optkey -Pathlike [(-> -Input-Port a)] #:mode (one-of/c 'binary 'text) #f (-lst a)))))
+[call-with-atomic-output-file
+ (-poly (a) (->opt -Pathlike (-> -Output-Port -Path a) [(-opt -Security-Guard)] a))]
 (get-preference
  (let ((use-lock-type Univ)
        (timeout-lock-there-type (-opt (-> -Path Univ)))

@@ -38,6 +38,7 @@
 	 lang/private/tp-dialog
 	 (lib "test-display.scm" "test-engine")
 	 deinprogramm/signature/signature
+         lang/htdp-langs-interface
 	 )
 
 
@@ -601,7 +602,10 @@
              (void)])))
       
       (define simple-deinprogramm-language%
-        (class* drscheme:language:simple-module-based-language% (deinprogramm-language<%>)
+        ;; htdp-language<%> interface is here to make
+        ;; the "Racket | Disable Tests" menu item
+        ;; work for these languages
+        (class* drscheme:language:simple-module-based-language% (deinprogramm-language<%> htdp-language<%>)
           (init-field sharing-printing
                       abbreviate-cons-as-list
                       allow-sharing?
@@ -935,6 +939,7 @@
               (init-field stepper:supported)
               (define/override (stepper:supported?) stepper:supported)
               (define/override (stepper:show-inexactness?) #f)
+	      (define/override (stepper:print-boolean-long-form?) #f)
               (define/override (stepper:show-consumed-and/or-clauses?) #f)
               (define/override (stepper:render-to-sexp val settings language-level)
                 (parameterize ([pc:current-print-convert-hook (make-print-convert-hook settings)])

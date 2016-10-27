@@ -112,7 +112,9 @@
  (cs-status-expanding-expression "Syntaxprüfung: Ausdruck expandieren")
  (cs-status-loading-docs-index "Syntaxprüfung: Dokumentations-Index laden")
  (cs-syncheck-running "Syntaprüfung läuft")
- (cs-mouse-over-import "Bindung „~s“ importiert aus ~s")
+ (cs-mouse-over-import "Bindung „~s“ importiert aus „~s“")
+ (cs-mouse-over-import/library-only "importiert aus „~s“")
+ 
 
  (cs-view-docs "Dokumentation für „~a“ anschauen")
  (cs-view-docs-from "~a aus ~a")  ;; a completed version of the line above (cs-view-docs) is put into the first ~a and a list of modules (separated by commas) is put into the second ~a. Use check syntax and right-click on a documented variable (eg, 'require') to see this in use
@@ -428,7 +430,7 @@
  (display-line-numbers "Zeilennummern in Puffern anzeigen, keine Puffer-Indizes")
  (show-line-and-column-numbers "Zeilen- && Spaltennummern anzeigen") ; used for popup menu; right click on line/column box in bottom of drs window
  (show-character-offsets "Zeichen-Offsets anzeigen") ; used for popup menu; right click on line/column box in bottom of drs window
- (enable-keybindings-in-menus "Tastenbelegung für Menüs")
+ (enable-keybindings-in-menus "Tastenbelegung für Menüs (überschreibt Emacs-Belegungen)")
  (printing-mode "Druckmodus")
  (print-using-platform-specific-mode "Plattformspezifisches Drucken")
  (print-to-ps "Drucken in PostScript-Datei")
@@ -1530,8 +1532,10 @@
   (test-engine-dock-report "Testresultate andocken")
  (test-engine-undock-report "Testresultate abdocken")
   ;;Following two appear in Racket (Java, etc) menu, cause Tests to be Run automatically or not
-  (test-engine-enable-tests "Test aktivieren")
+  (test-engine-enable-tests "Tests aktivieren")
   (test-engine-disable-tests "Tests deaktivieren")
+  (test-engine-enable-disable-tests-only-in-teaching-languages
+   "Der Menüpunkt „Tests aktivieren/deaktivieren“ ist speziell für die HtDP- und DMdA-Lehrsprachen.  Der Abschnitt „Show Details“ des Dialogs „Sprache auswählen“ kontrolliert die Submodule, die in der Racket-Sprache laufen.")
   
   (test-engine-ran-1-test "1 Test gelaufen.")
   (test-engine-ran-1-check "1 Check gelaufen.")

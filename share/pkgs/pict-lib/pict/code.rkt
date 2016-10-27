@@ -9,7 +9,7 @@
          racket/match
          racket/string
          syntax-color/lexer-contract
-         syntax-color/racket-lexer
+         syntax-color/module-lexer
          "convert.rkt"
          (for-syntax racket/base
                      syntax/to-string
@@ -170,31 +170,14 @@
 ;;------------------------------------------------
 ;; codeblock-pict
 
-(define (tokenize/color s)
-  (define lang
-    (read-language (open-input-string s)
-                   (lambda () (raise-argument-error
-                               'codeblock-pict
-                               "string containing program with #lang"
-                               s))))
-  (define pre-lexer
-    (or (lang 'color-lexer #f)
-        ;; #lang racket doesn't have a color lexer, so fall back to
-        ;; the Racket lexer if we don't find one.
-        racket-lexer))
-  (define lexer ; based on framework/private/color
-    (if (procedure-arity-includes? pre-lexer 3)
-        pre-lexer ; new interface, we're good
-        (lambda (in offset mode) ; old interface, need an adapter
-          (let-values ([(lexeme type data new-token-start new-token-end)
-                        (pre-lexer in)])
-            (values lexeme type data new-token-start new-token-end 0 #f)))))
-  (define port (open-input-string s)) ; reopen, to start from the beginning
+(define (tokenize/color -s)
+  (define s (string-replace -s "\r\n" "\n")) ; module-lexer does not like \r\n
+  (define port (open-input-string s))
   (port-count-lines! port)
   (let loop ([acc            #f]
              [rev-tokens+classes '()])
     (define-values (_1 token-class _3 start end _6 next-acc)
-      (lexer port 0 acc))
+      (module-lexer port 0 acc))
     (cond
      [(equal? token-class 'eof)
       (reverse rev-tokens+classes)]
@@ -230,14 +213,10 @@
       [(string) literal-color]
       [(constant) literal-color]
       [(hash-colon-keyword) keyword-color]
-      [else base-color])) ; 'other, or others
-  (define (lang-token->pict t)
-    (match-define `(,token . ,color) t)
-    (hbl-append (colorize (tt "#lang") keyword-color)
-                (colorize (tt (substring token 5)) id-color)))
+      [else "black"])) ; 'other, or others. to align with DrRacket
   (define (token->pict t)
-    (match-define `(,token . ,color) t)
-    (colorize (tt token) (token-class->color color)))
+    (match-define `(,token . ,type) t)
+    (colorize (tt token) (token-class->color type)))
   (define (not-newline? x) (not (equal? (car x) "\n")))
   (define lines
     (let loop ([ts ts])
@@ -252,15 +231,15 @@
               (loop (if (pair? rest) ; there is a newline to skip
                         (cdr rest)
                         rest)))])))
-  (define first-line (car lines))
+  (define first-line (first lines))
+  (define (format-line l) (apply hbl-append (map token->pict l)))
   (apply vl-append
          ;; FIXME: #lang can span lines
          ;;   (codeblock has same issue)
          (if keep-lang-line?
-             (apply hbl-append (lang-token->pict (car first-line)) (map token->pict (cdr first-line)))
+             (format-line first-line)
              (blank))
-         (for/list ([line (in-list (cdr lines))])
-           (apply hbl-append (map token->pict line)))))
+         (map format-line (rest lines))))
 
 (define (codeblock-pict s #:keep-lang-line? [keep-lang-line? #t])
   (tokens->pict (tokenize/color s) #:keep-lang-line? keep-lang-line?))

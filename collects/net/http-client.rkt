@@ -63,7 +63,15 @@
   (define ssl-version (if (boolean? ssl?) 'auto ssl?))
 
   (define-values (from to)
-    (cond [ssl?
+    (cond [(list? ssl?)
+           ;; At this point, we have a tunneled socket to the remote host/port: we do not need to
+           ;; address it; ignore host-bs, only use port for conn-port-usual?
+           (match-define (list ssl-ctx? (? input-port? t:from) (? output-port? t:to) abandon-p) ssl?)
+           (set-http-conn-abandon-p! hc abandon-p)
+           (set-http-conn-port-usual?! hc (or (and ssl-ctx? (= 443 port))
+                                              (and (not ssl-ctx?) (= 80 port))))
+           (values t:from t:to)]
+          [ssl?
            (set-http-conn-port-usual?! hc (= 443 port))
            (cond
              [(osx-old-openssl?)
@@ -237,6 +245,57 @@
   (http-conn-open! hc host-bs #:ssl? ssl? #:port port)
   hc)
 
+(define (http-conn-CONNECT-tunnel proxy-host proxy-port target-host target-port #:ssl? [ssl? #f])
+  (define hc (http-conn-open proxy-host #:port proxy-port #:ssl? #f))
+  (define connect-string (format "~a:~a" target-host target-port))
+  ; (log-net/url-info "http-conn-CONNECT-tunnel tunnel to ~s for ~s" connect-string (url->string url))
+  (http-conn-send! hc #:method "CONNECT" connect-string #:headers
+                   (list (format "Host: ~a" connect-string)
+                         "Proxy-Connection: Keep-Alive"
+                         "Connection: Keep-Alive"))
+
+  (let ((tunnel-status (http-conn-status! hc))
+        (tunnel-headers (http-conn-headers! hc)))
+    (unless (regexp-match "^HTTP[^ ]* +2" tunnel-status)
+      (error 'make-ports "HTTP CONNECT failed: ~a" tunnel-status)))
+
+  ;; SSL secure the ports
+  (match-define (http-conn _ _ _ t:to t:from _) hc)
+  (cond [(not ssl?) ; it's just a tunnel... no ssl
+         (define abandon-p (lambda (p) ((http-conn-abandon-p hc) p)))
+         (values ssl? t:from t:to abandon-p)]
+
+        [else ; ssl
+          (define ssl-version (if (boolean? ssl?) 'auto ssl?))
+          (set-http-conn-port-usual?! hc (= 443 target-port))
+          ;; choose between win32 or non-win32 openssl here, then keep code common afterwards
+          (define-values (p->ssl-ps ssl-abndn-p)
+            (if (or ssl-available? (not win32-ssl-available?))
+              (values ports->ssl-ports ssl-abandon-port)
+              (values ports->win32-ssl-ports win32-ssl-abandon-port)))
+
+          (define clt-ctx
+            (match ssl-version
+                   [(? ssl-client-context? ctx) ctx]
+                   [(? symbol? protocol) (ssl-make-client-context protocol)]))
+
+          (define-values (r:from r:to) (p->ssl-ps t:from t:to
+                                                  #:mode 'connect
+                                                  #:context clt-ctx
+                                                  #:close-original? #t
+                                                  #:hostname target-host))
+
+          ;; The user of the tunnel relies on ports->ssl-ports' #:close-original? to close/abandon the
+          ;; underlying ports of the tunnel itself. Therefore the abandon-p sent back to caller is the
+          ;; ssl-abandon of the wrapped ports.
+          (define abandon-p ssl-abndn-p)
+          (values clt-ctx r:from r:to abandon-p)]))
+
+(define (head? method-bss)
+  (or (equal? method-bss #"HEAD")
+      (equal? method-bss "HEAD")
+      (equal? method-bss 'HEAD)))
+
 (define (http-conn-recv! hc
                          #:method [method-bss #"GET"]
                          #:content-decode [decodes '(gzip)]
@@ -248,13 +307,9 @@
         (regexp-member #rx#"^(?i:Connection: +close)$" headers)))
   (when close?
     (http-conn-abandon! hc))
-  (define head?
-    (or (equal? method-bss #"HEAD")
-        (equal? method-bss "HEAD")
-        (equal? method-bss 'HEAD)))
   (define-values (raw-response-port wait-for-close?)
     (cond
-      [head? (values (open-input-bytes #"") #f)]
+      [(head? method-bss) (values (open-input-bytes #"") #f)]
       [(regexp-member #rx#"^(?i:Transfer-Encoding: +chunked)$" headers)
        (values (http-conn-response-port/chunked! hc #:close? #t)
                #t)]
@@ -273,7 +328,7 @@
        (values (http-conn-response-port/rest! hc) #t)]))
   (define decoded-response-port
     (cond
-      [head? raw-response-port]
+      [(head? method-bss) raw-response-port]
       [(and (memq 'gzip decodes)
             (regexp-member #rx#"^(?i:Content-Encoding: +gzip)$" headers)
             (not (eof-object? (peek-byte raw-response-port))))
@@ -323,19 +378,30 @@
                        #:data [data #f]
                        #:content-decode [decodes '(gzip)])
   (define hc (http-conn-open host-bs #:ssl? ssl? #:port port))
-  (http-conn-sendrecv! hc url-bs
-                       #:version version-bs
-                       #:method method-bss
-                       #:headers headers-bs
-                       #:data data
-                       #:content-decode decodes
-                       #:close? #t))
+  (begin0 (http-conn-sendrecv! hc url-bs
+                               #:version version-bs
+                               #:method method-bss
+                               #:headers headers-bs
+                               #:data data
+                               #:content-decode decodes
+                               #:close? #t)
+    (when (head? method-bss)
+      (http-conn-close! hc))))
 
 (define data-procedure/c
   (-> (-> (or/c bytes? string?) void?) any))
 
+(define base-ssl?/c
+  (or/c boolean? ssl-client-context? symbol?))
+
+(define base-ssl?-tnl/c
+  (or/c base-ssl?/c (list/c base-ssl?/c input-port? output-port? (-> port? void?))))
+
 (provide
  data-procedure/c
+ base-ssl?/c
+ base-ssl?-tnl/c
+
  (contract-out
   [http-conn?
    (-> any/c
@@ -348,7 +414,7 @@
    (-> http-conn?)]
   [http-conn-open!
    (->* (http-conn? (or/c bytes? string?))
-        (#:ssl? (or/c boolean? ssl-client-context? symbol?)
+        (#:ssl? base-ssl?-tnl/c
                 #:port (between/c 1 65535))
         void?)]
   [http-conn-close!
@@ -368,9 +434,16 @@
   ;; Derived
   [http-conn-open
    (->* ((or/c bytes? string?))
-        (#:ssl? (or/c boolean? ssl-client-context? symbol?)
+        (#:ssl? base-ssl?-tnl/c
                 #:port (between/c 1 65535))
         http-conn?)]
+  [http-conn-CONNECT-tunnel
+    (->* ((or/c bytes? string?)
+          (between/c 1 65535)
+          (or/c bytes? string?)
+          (between/c 1 65535))
+         (#:ssl? base-ssl?/c)
+         (values base-ssl?/c input-port? output-port? (-> port? void?)))]
   [http-conn-recv!
    (->* (http-conn-live?)
         (#:content-decode (listof symbol?)
@@ -388,7 +461,7 @@
         (values bytes? (listof bytes?) input-port?))]
   [http-sendrecv
    (->* ((or/c bytes? string?) (or/c bytes? string?))
-        (#:ssl? (or/c boolean? ssl-client-context? symbol?)
+        (#:ssl? base-ssl?-tnl/c
                 #:port (between/c 1 65535)
                 #:version (or/c bytes? string?)
                 #:method (or/c bytes? string? symbol?)

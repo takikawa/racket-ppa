@@ -627,7 +627,8 @@
        [(? (lambda (s) (and (scope? s) (eq? (scope-name s) 'root))))
         (out-byte CPT_ROOT_SCOPE out)]
        [(struct module-variable (modidx sym pos phase constantness))
-        (define (to-sym n) (string->symbol (format "struct~a" n)))
+        (define (to-sym #:prefix [prefix "struct"] n)
+          (string->symbol (format "~a~a" prefix n)))
         (out-byte CPT_MODULE_VAR out)
         (out-anything modidx out)
         (out-anything sym out)
@@ -653,17 +654,26 @@
                                          (if (function-shape-preserves-marks? constantness) 1 0))]))]
                        [(struct-type-shape? constantness)
                         (to-sym (arithmetic-shift (struct-type-shape-field-count constantness)
-                                                  4))]
+                                                  3))]
                        [(constructor-shape? constantness)
                         (to-sym (bitwise-ior 1 (arithmetic-shift (constructor-shape-arity constantness)
-                                                                 4)))]
+                                                                 3)))]
                        [(predicate-shape? constantness) (to-sym 2)]
                        [(accessor-shape? constantness)
                         (to-sym (bitwise-ior 3 (arithmetic-shift (accessor-shape-field-count constantness)
-                                                                 4)))]
+                                                                 3)))]
                        [(mutator-shape? constantness)
                         (to-sym (bitwise-ior 4 (arithmetic-shift (mutator-shape-field-count constantness)
-                                                                 4)))]
+                                                                 3)))]
+                       [(struct-type-property-shape? constantness)
+                        (to-sym #:prefix "prop" 
+                                (if (struct-type-property-shape-has-guard? constantness)
+                                    1
+                                    0))]
+                       [(property-predicate-shape? constantness)
+                        (to-sym #:prefix "prop" 2)]
+                       [(property-accessor-shape? constantness)
+                        (to-sym #:prefix "prop" 3)]
                        [(struct-other-shape? constantness)
                         (to-sym 5)]
                        [else #f])
@@ -1187,7 +1197,7 @@
                                         (append
                                          (vector->list closure-map)
                                          (let* ([v (make-vector (ceiling 
-                                                                 (/ (* BITS_PER_ARG (+ num-params (vector-length closure-map)))
+                                                                 (/ (* BITS_PER_ARG (+ num-all-params (vector-length closure-map)))
                                                                     BITS_PER_MZSHORT)))]
                                                 [set-bit! (lambda (i bit)
                                                             (let ([pos (quotient (* BITS_PER_ARG i) BITS_PER_MZSHORT)])

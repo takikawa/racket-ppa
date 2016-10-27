@@ -462,10 +462,9 @@
                             (add1 phase))
                            (add1 phase))]
                  ;; cover at THIS phase, since thats where its bound
-                 [with-coverage (cover-names #'(name ...) marked phase)])
-            (rearm
-             expr
-             (rebuild disarmed-expr (list (cons #'rhs with-coverage)))))]
+                 [rebuilt (rebuild disarmed-expr (list (cons #'rhs marked)))]
+                 [with-coverage (cover-names #'(name ...) rebuilt phase)])
+            (rearm expr with-coverage))]
          
          [(begin-for-syntax . exprs)
           top?

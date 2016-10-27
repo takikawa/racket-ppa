@@ -1327,13 +1327,18 @@
       
       (inherit get-top-level-window)
       (define/augment (after-many-evals)
-        (when test-coverage-info
+        (when (and test-coverage-info
+                   (not (drracket:rep:module-language-initial-run)))
           (send (get-context) show-test-coverage-annotations
                 test-coverage-info
                 test-coverage-on-style
                 test-coverage-off-style
                 ask-about-reset?))
         (inner (void) after-many-evals))
+
+      (define/augment (on-execute rout)
+        (inner (void) on-execute rout)
+        (set-test-coverage-info #f))
       
       (super-new)))
   

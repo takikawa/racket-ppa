@@ -213,6 +213,7 @@ please adhere to these guidelines:
  (cs-status-loading-docs-index "Check Syntax: loading documentation index")
  (cs-syncheck-running "Check Syntax Running")
  (cs-mouse-over-import "binding “~s” imported from “~s”")
+ (cs-mouse-over-import/library-only "imported from “~s”")
  (cs-view-docs "View documentation for “~a”")
  (cs-view-docs-from "~a from ~a")  ;; a completed version of the line above
   ;; (cs-view-docs) is put into the first ~a and a list of modules (separated by commas) 
@@ -541,7 +542,7 @@ please adhere to these guidelines:
  (display-line-numbers "Display line numbers in buffer; not character offsets")
  (show-line-and-column-numbers "Show Line && Column Numbers") ; used for popup menu; right click on line/column box in bottom of drs window
  (show-character-offsets "Show Character Offsets") ; used for popup menu; right click on line/column box in bottom of drs window
- (enable-keybindings-in-menus "Enable keybindings in menus")
+ (enable-keybindings-in-menus "Enable keybindings in menus (overrides Emacs keybindings)")
  (printing-mode "Printing Mode")
  (print-using-platform-specific-mode "Platform-specific printing")
  (print-to-ps "Print to PostScript File")
@@ -1654,6 +1655,8 @@ please adhere to these guidelines:
   ;;Following two appear in Racket (Java, etc) menu, cause Tests to be Run automatically or not
   (test-engine-enable-tests "Enable Tests")
   (test-engine-disable-tests "Disable Tests")
+  (test-engine-enable-disable-tests-only-in-teaching-languages
+   "The Enable/Disable Tests menu item is used only to disable and enable the HtDP and DMdA teaching languages support for testing. See the “Show Details” section of the language dialog for controlling the submodules that are run in The Racket Language.")
 
   (test-engine-ran-1-test "Ran 1 test.")
   (test-engine-ran-1-check "Ran 1 check.")

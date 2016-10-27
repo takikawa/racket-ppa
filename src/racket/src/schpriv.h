@@ -387,6 +387,7 @@ void scheme_init_parameterization();
 void scheme_init_getenv(void);
 void scheme_init_inspector(void);
 void scheme_init_compenv_symbol(void);
+void scheme_init_param_symbol(void);
 void scheme_init_longdouble_fixup(void);
 
 #ifndef DONT_USE_FOREIGN
@@ -527,6 +528,7 @@ extern Scheme_Object *scheme_vector_ref_proc;
 extern Scheme_Object *scheme_vector_set_proc;
 extern Scheme_Object *scheme_list_to_vector_proc;
 extern Scheme_Object *scheme_unsafe_vector_length_proc;
+extern Scheme_Object *scheme_unsafe_struct_ref_proc;
 extern Scheme_Object *scheme_hash_ref_proc;
 extern Scheme_Object *scheme_box_p_proc;
 extern Scheme_Object *scheme_box_proc;
@@ -536,6 +538,7 @@ extern Scheme_Object *scheme_call_with_immed_mark_proc;
 extern Scheme_Object *scheme_make_struct_type_proc;
 extern Scheme_Object *scheme_make_struct_field_accessor_proc;
 extern Scheme_Object *scheme_make_struct_field_mutator_proc;
+extern Scheme_Object *scheme_make_struct_type_property_proc;
 extern Scheme_Object *scheme_struct_to_vector_proc;
 extern Scheme_Object *scheme_struct_type_p_proc;
 extern Scheme_Object *scheme_current_inspector_proc;
@@ -547,8 +550,10 @@ extern Scheme_Object *scheme_unsafe_fxior_proc;
 extern Scheme_Object *scheme_unsafe_fxxor_proc;
 extern Scheme_Object *scheme_unsafe_fxrshift_proc;
 
+extern Scheme_Object *scheme_string_p_proc;
+extern Scheme_Object *scheme_unsafe_string_length_proc;
 extern Scheme_Object *scheme_byte_string_p_proc;
-extern Scheme_Object *scheme_unsafe_bytes_len_proc;
+extern Scheme_Object *scheme_unsafe_byte_string_length_proc;
 
 extern Scheme_Object *scheme_unsafe_real_add1_proc;
 extern Scheme_Object *scheme_unsafe_real_sub1_proc;
@@ -1533,6 +1538,10 @@ typedef struct Scheme_IR_Local
   unsigned int optimize_outside_binding : 1;
   /* Records an anlaysis during the resolve pass: */
   unsigned int resolve_omittable : 1;
+  /* Records whether the variable is mutated and used before
+     the body of its binding, so that itmust be allocated at latest
+     after it's RHS expression is evaluated: */
+  unsigned int must_allocate_immediately : 1;
   /* The type desired by use positions for unboxing purposes;
      set by the optimizer: */
   unsigned int arg_type : SCHEME_MAX_LOCAL_TYPE_BITS;
@@ -2140,6 +2149,7 @@ Scheme_Object *scheme_all_current_continuation_marks(void);
 
 void scheme_about_to_move_C_stack(void);
 
+Scheme_Object *scheme_apply_with_dynamic_state(Scheme_Object *rator, int num_rands, Scheme_Object **rands, Scheme_Dynamic_State *dyn_state);
 Scheme_Object *scheme_apply_multi_with_dynamic_state(Scheme_Object *rator, int num_rands, Scheme_Object **rands, Scheme_Dynamic_State *dyn_state);
 
 Scheme_Object *scheme_jump_to_continuation(Scheme_Object *obj, int num_rands, Scheme_Object **rands, 
@@ -3475,6 +3485,8 @@ int scheme_omittable_expr(Scheme_Object *o, int vals, int fuel, int flags,
 #define OMITTABLE_RESOLVED          0x1
 #define OMITTABLE_KEEP_VARS         0x2
 #define OMITTABLE_KEEP_MUTABLE_VARS 0x4
+#define OMITTABLE_IGNORE_APPN_OMIT  0x8
+#define OMITTABLE_IGNORE_MAKE_STRUCT_TYPE 0x10
 
 int scheme_might_invoke_call_cc(Scheme_Object *value);
 int scheme_is_liftable(Scheme_Object *o, Scheme_Hash_Tree *exclude_vars, int fuel, int as_rator, int or_escape);
@@ -3482,23 +3494,40 @@ int scheme_is_functional_nonfailing_primitive(Scheme_Object *rator, int num_args
 
 typedef struct {
   int uses_super;
-  int field_count, init_field_count;
-  int normal_ops, indexed_ops, num_gets, num_sets;
+  int super_field_count; /* total fields (must == constructor-supplied fields) in superstruct */
+  int field_count;       /* total fields in this struct */
+  int init_field_count;  /* number of fields supplied to the constructor; usually == field_count */
+  int normal_ops;  /* are selectors and predicates in the usual order? */
+  int indexed_ops; /* do selectors have the index built in (as opposed to taking an index argument)? */
+  int num_gets, num_sets;
 } Simple_Stuct_Type_Info;
 
-Scheme_Object *scheme_is_simple_make_struct_type(Scheme_Object *app, int vals, int resolved,
-                                                 int must_always_succeed,
-                                                 int check_auto, int *_auto_e_depth, 
+Scheme_Object *scheme_is_simple_make_struct_type(Scheme_Object *app, int vals, int flags,
+                                                 int *_auto_e_depth, 
                                                  Simple_Stuct_Type_Info *_stinfo,
+                                                 Scheme_Object **_parent_identity,
                                                  Scheme_Hash_Table *top_level_consts, 
+                                                 Scheme_Hash_Table *inline_variants,
                                                  Scheme_Hash_Table *top_level_table,
                                                  Scheme_Object **runstack, int rs_delta,
                                                  Scheme_Object **symbols, Scheme_Hash_Table *symbol_table,
+                                                 Scheme_Object **_name,
                                                  int fuel);
+int scheme_is_simple_make_struct_type_property(Scheme_Object *app, int vals, int flags,
+                                               int *_has_guard,
+                                               Scheme_Hash_Table *top_level_consts, 
+                                               Scheme_Hash_Table *inline_variants,
+                                               Scheme_Hash_Table *top_level_table,
+                                               Scheme_Object **runstack, int rs_delta,
+                                               Scheme_Object **symbols, Scheme_Hash_Table *symbol_table,
+                                               int fuel);
+#define CHECK_STRUCT_TYPE_RESOLVED         0x1
+#define CHECK_STRUCT_TYPE_ALWAYS_SUCCEED   0x2
+#define CHECK_STRUCT_TYPE_DELAY_AUTO_CHECK 0x4
 
 Scheme_Object *scheme_intern_struct_proc_shape(int shape);
 intptr_t scheme_get_struct_proc_shape(int k, Simple_Stuct_Type_Info *sinfo);
-Scheme_Object *scheme_make_struct_proc_shape(intptr_t k);
+Scheme_Object *scheme_make_struct_proc_shape(intptr_t k, Scheme_Object *identity);
 #define STRUCT_PROC_SHAPE_STRUCT  0
 #define STRUCT_PROC_SHAPE_CONSTR  1
 #define STRUCT_PROC_SHAPE_PRED    2
@@ -3507,11 +3536,29 @@ Scheme_Object *scheme_make_struct_proc_shape(intptr_t k);
 #define STRUCT_PROC_SHAPE_OTHER   5
 #define STRUCT_PROC_SHAPE_MASK    0xF
 #define STRUCT_PROC_SHAPE_SHIFT   4
-#define SCHEME_PROC_SHAPE_MODE(obj) (((Scheme_Small_Object *)(obj))->u.int_val)
+
+typedef struct Scheme_Struct_Proc_Shape {
+  Scheme_Object so;
+  intptr_t mode;
+  Scheme_Object *identity; /* sequence of pairs that identity the struct type */
+} Scheme_Struct_Proc_Shape;
+#define SCHEME_PROC_SHAPE_MODE(obj)     ((Scheme_Struct_Proc_Shape *)obj)->mode
+#define SCHEME_PROC_SHAPE_IDENTITY(obj) ((Scheme_Struct_Proc_Shape *)obj)->identity
+
+Scheme_Object *scheme_intern_struct_prop_proc_shape(int shape);
+intptr_t scheme_get_struct_property_proc_shape(int k, int has_guard);
+Scheme_Object *scheme_make_struct_property_proc_shape(intptr_t k);
+#define STRUCT_PROP_PROC_SHAPE_PROP          0
+#define STRUCT_PROP_PROC_SHAPE_GUARDED_PROP  1
+#define STRUCT_PROP_PROC_SHAPE_PRED          2
+#define STRUCT_PROP_PROC_SHAPE_GETTER        3
+#define SCHEME_PROP_PROC_SHAPE_MODE(obj) ((Scheme_Small_Object *)obj)->u.int_val
 
 Scheme_Object *scheme_get_or_check_procedure_shape(Scheme_Object *e, Scheme_Object *expected);
 int scheme_check_structure_shape(Scheme_Object *e, Scheme_Object *expected);
 int scheme_decode_struct_shape(Scheme_Object *shape, intptr_t *_v);
+int scheme_check_structure_property_shape(Scheme_Object *e, Scheme_Object *expected);
+int scheme_decode_struct_prop_shape(Scheme_Object *shape, intptr_t *_v);
 int scheme_closure_preserves_marks(Scheme_Object *p);
 int scheme_native_closure_preserves_marks(Scheme_Object *p);
 int scheme_native_closure_is_single_result(Scheme_Object *rator);
@@ -3566,7 +3613,8 @@ void scheme_validate_closure(Mz_CPort *port, Scheme_Object *expr,
                              char *closure_stack, Validate_TLS tls,
                              int num_toplevels, int num_stxes, int num_lifts, void *tl_use_map,
                              mzshort *tl_state, mzshort tl_timestamp,
-                             int self_pos_in_closure, Scheme_Hash_Tree *procs);
+                             int self_pos_in_closure, Scheme_Hash_Tree *procs,
+                             Scheme_Hash_Table **_st_ht);
 
 #define TRACK_ILL_FORMED_CATCH_LINES 1
 #if TRACK_ILL_FORMED_CATCH_LINES
@@ -3634,7 +3682,7 @@ Scheme_Object *scheme_make_marshal_shared(Scheme_Object *v);
 
 int scheme_is_rename_transformer(Scheme_Object *o);
 int scheme_is_binding_rename_transformer(Scheme_Object *o);
-Scheme_Object *scheme_rename_transformer_id(Scheme_Object *o);
+Scheme_Object *scheme_rename_transformer_id(Scheme_Object *o, Scheme_Comp_Env *env);
 int scheme_is_set_transformer(Scheme_Object *o);
 Scheme_Object *scheme_set_transformer_proc(Scheme_Object *o);
 
@@ -4369,6 +4417,18 @@ void scheme_count_class(Scheme_Object *o, intptr_t *s, intptr_t *e, Scheme_Hash_
 void scheme_count_class_data(Scheme_Object *o, intptr_t *s, intptr_t *e, Scheme_Hash_Table *ht);
 void scheme_count_generic(Scheme_Object *o, intptr_t *s, intptr_t *e, Scheme_Hash_Table *ht);
 #endif
+#endif
+
+/* See "salloc.c": */
+#ifndef RECORD_ALLOCATION_COUNTS
+# define RECORD_ALLOCATION_COUNTS 0
+#endif
+
+#if RECORD_ALLOCATION_COUNTS
+extern void scheme_record_allocation(Scheme_Object *key);
+# define DEBUG_COUNT_ALLOCATION(x) scheme_record_allocation(x);
+#else 
+# define DEBUG_COUNT_ALLOCATION(x) /* empty */
 #endif
 
 /*========================================================================*/

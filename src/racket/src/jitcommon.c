@@ -182,6 +182,21 @@ static void chaperone_set_mark()
   MZ_RUNSTACK[1] = SCHEME_CHAPERONE_VAL(MZ_RUNSTACK[1]);
 }
 
+static Scheme_Object *unsafe_struct_refs(Scheme_Object **rs, int offset, int count)
+{
+  int i;
+  Scheme_Object *v, *s = rs[0];
+
+  for (i = 0; i < count; i++) {
+    v = scheme_struct_ref(s, offset + i);
+    if (i == count-1)
+      return v;
+    rs[i] = v;
+  }
+
+  return NULL;
+}
+
 #define JITCOMMON_TS_PROCS
 #include "jit_ts.c"
 
@@ -454,8 +469,9 @@ static int common1(mz_jit_state *jitter, void *_data)
 
 static int common1b(mz_jit_state *jitter, void *_data)
 {
-  int i;
+  int i, j;
   GC_CAN_IGNORE jit_insn *ref, *ref2;
+  void *ip;
 
   /* *** bad_set_{car,cdr}_code and make_[fl]rectangular_code *** */
   /* Bad argument is in R0, other is in R1 */
@@ -629,29 +645,40 @@ static int common1b(mz_jit_state *jitter, void *_data)
   CHECK_LIMIT();
   scheme_jit_register_sub_func(jitter, sjc.bad_bytes_length_code, scheme_false);
 
-  /* *** bad_string_eq_2_code *** */
+  /* *** bad_[string/bytes]_[rev_]eq_2_code *** */
   /* R0 and R1 are arguments */
-  sjc.bad_string_eq_2_code = jit_get_ip();
-  mz_prolog(JIT_R2);
-  JIT_UPDATE_THREAD_RSPTR();
-  jit_prepare(2);
-  jit_pusharg_p(JIT_R1);
-  jit_pusharg_p(JIT_R0);
-  (void)mz_finish_lwe(ts_scheme_string_eq_2, ref);
-  CHECK_LIMIT();
-  scheme_jit_register_sub_func(jitter, sjc.bad_string_eq_2_code, scheme_false);
-
-  /* *** bad_bytes_eq_2_code *** */
-  /* R0 and R1 are arguments */
-  sjc.bad_bytes_eq_2_code = jit_get_ip();
-  mz_prolog(JIT_R2);
-  JIT_UPDATE_THREAD_RSPTR();
-  jit_prepare(2);
-  jit_pusharg_p(JIT_R1);
-  jit_pusharg_p(JIT_R0);
-  (void)mz_finish_lwe(ts_scheme_byte_string_eq_2, ref);
-  CHECK_LIMIT();
-  scheme_jit_register_sub_func(jitter, sjc.bad_bytes_eq_2_code, scheme_false);
+  for (i = 0; i < 2; i++) {
+    for (j = 0; j < 2; j++) {
+      ip = jit_get_ip();
+      if (i) {
+        if (j)
+          sjc.bad_bytes_rev_eq_2_code = ip;
+        else
+          sjc.bad_bytes_eq_2_code = ip;
+      } else {
+        if (j)
+          sjc.bad_string_rev_eq_2_code = ip;
+        else
+          sjc.bad_string_eq_2_code = ip;
+      }
+      mz_prolog(JIT_R2);
+      JIT_UPDATE_THREAD_RSPTR();
+      jit_prepare(2);
+      if (j) {
+        jit_pusharg_p(JIT_R1);
+        jit_pusharg_p(JIT_R0);
+      } else {
+        jit_pusharg_p(JIT_R0);
+        jit_pusharg_p(JIT_R1);
+      }
+      if (i)
+        (void)mz_finish_lwe(ts_scheme_byte_string_eq_2, ref);
+      else
+        (void)mz_finish_lwe(ts_scheme_string_eq_2, ref);
+      CHECK_LIMIT();
+      scheme_jit_register_sub_func(jitter, ip, scheme_false);
+    }
+  }
 
   return 1;
 }
@@ -1818,6 +1845,29 @@ static int common4(mz_jit_state *jitter, void *_data)
     } else
       (void)mz_finish_lwe(ts_scheme_struct_set, ref);
     CHECK_LIMIT();
+    jit_retval(JIT_R0);
+    mz_epilog(JIT_R2);
+
+    scheme_jit_register_sub_func(jitter, code, scheme_false);
+  }
+
+  /* *** struct_raw_refs_code *** */
+  /* R1 points into the runstack, *R1 is struct, R0 is
+     count >= 2, and V1 is a starting slot in the structure */
+  {
+    void *code;
+
+    code = jit_get_ip();
+    
+    sjc.struct_raw_refs_code = code;
+
+    mz_prolog(JIT_R2);
+    JIT_UPDATE_THREAD_RSPTR();
+    jit_prepare(3);
+    jit_pusharg_p(JIT_R0);
+    jit_pusharg_p(JIT_V1);
+    jit_pusharg_p(JIT_R1);
+    (void)mz_finish_lwe(ts_unsafe_struct_refs, ref);
     jit_retval(JIT_R0);
     mz_epilog(JIT_R2);
 

@@ -582,6 +582,8 @@ module path and the module paths of its immediate dependents.
 
 @section{Macro Profiler}
 
+@section-index["raco macro-profiler"]
+
 The Macro Profiler shows what macros contribute most to the
 @emph{expanded code size} of programs. Use the Macro Profiler when
 your program has compiled files that are larger than expected. (The

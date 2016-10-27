@@ -838,8 +838,7 @@
                   (define raw-module-path (phaseless-spec->raw-module-path req-stx))
                   (add-mouse-over var
                                   (format
-                                   (string-constant cs-mouse-over-import)
-                                   (syntax-e var)
+                                   (string-constant cs-mouse-over-import/library-only)
                                    req-path))
                   ;; connect the require to the identifier
                   (connect-syntaxes (if (syntax-source raw-module-path)
@@ -847,7 +846,9 @@
                                         req-stx)
                                     var actual? all-binders
                                     #:to-start prefix-length
-                                    #:to-width (- (syntax-span var) prefix-length)
+                                    #:to-width (if (syntax-span var)
+                                                   (- (syntax-span var) prefix-length)
+                                                   0)
                                     phase-level
                                     connections
                                     (if (is-module-lang-require? module-lang-requires req-stx)

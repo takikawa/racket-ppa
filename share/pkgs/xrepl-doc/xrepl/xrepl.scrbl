@@ -3,6 +3,7 @@
           scribble/decode (only-in scribble/core)
           (for-label racket readline racket/help racket/enter
                      racket/trace profile
+                     xrepl/xrepl
                      macro-debugger/stepper-text
                      macro-debugger/analysis/check-requires))
 
@@ -478,17 +479,29 @@ a different instantiation of a module.
 @; ---------------------------------------------------------------------
 @section{Hacking XREPL}
 
+@defmodule[xrepl/xrepl]
+
 XREPL is mainly a convenience tool, and as such you might want to hack
-it to better suit your needs.  Currently, there is no convenient way to
+it to better suit your needs.  Currently, there is little convenient way to
 customize and extend it, but this will be added in the future.
 
-Meanwhile, if you're interested in tweaking XREPL, the @cmd[enter]
-command can be used as usual to go into its implementation.  For
-example --- change an XREPL parameter:
+@defparam[toplevel-prefix prefix string?
+          #:value "-"]{
+Sets the prefix for when not in a module. When in a module (using @cmd[enter]),
+this prefix is not displayed.
+}
+
+@subsection{Unstable and potentially unsafe modifications}
+
+If you're interested in tweaking XREPL beyond the public
+@racketmodname[xrepl/xrepl] interface, the @cmd[enter]
+command can be used as usual to go into its implementation. The commands
+in there are unstable and likely to change, but can still be modified for
+convenience. For example --- change an XREPL parameter:
 @verbatim[#:indent 4]{
     -> ,en xrepl/xrepl
     xrepl/xrepl> ,e
-    xrepl/xrepl> (saved-values-char #\~)
+    xrepl/xrepl> (saved-values-patterns '(#\~))
     xrepl/xrepl> ,top
     -> 123
     123

@@ -1,6 +1,5 @@
 #lang racket/base
 (require (for-template racket/base
-                       racket/stxparam
                        syntax/parse/private/keywords
                        syntax/parse/private/residual ;; keep abs. path
                        syntax/parse/private/runtime)
@@ -18,8 +17,7 @@
          "rep-data.rkt"
          "rep-patterns.rkt"
          syntax/parse/private/residual-ct ;; keep abs. path
-         "kws.rkt"
-         "pattern-expander-prop.rkt")
+         "kws.rkt")
 
 ;; Error reporting
 ;; All entry points should have explicit, mandatory #:context arg
@@ -166,7 +164,7 @@
    (lambda ()
      (parameterize ((current-syntax-context ctx))
        (define-values (rest description transp? attributes auto-nested? colon-notation?
-                            decls defs options)
+                            decls defs commit? delimit-cut?)
          (parse-rhs/part1 stx splicing? (and expected-attrs #t)))
        (define variants
          (parameterize ((stxclass-lookup-config
@@ -178,9 +176,9 @@
        (let ([sattrs
               (or attributes
                   (intersect-sattrss (map variant-attrs variants)))])
-         (make rhs stx sattrs transp? description variants 
+         (make rhs sattrs transp? description variants
                (append (get-txlifts-as-definitions) defs)
-               options #f))))))
+               commit? delimit-cut?))))))
 
 (define (parse-rhs/part1 stx splicing? strict?)
   (define-values (chunks rest)
@@ -201,7 +199,7 @@
   (define attributes (options-select-value chunks '#:attributes #:default #f))
   (define-values (decls defs) (get-decls+defs chunks strict?))
   (values rest description transparent? attributes auto-nested? colon-notation?
-          decls defs (options commit? delimit-cut?)))
+          decls defs commit? delimit-cut?))
 
 ;; ----
 
@@ -285,7 +283,8 @@
                 (with-syntax ([parser (generate-temporary class)])
                   (values (make den:parser #'parser
                                 (stxclass-attrs sc) (stxclass/h? sc)
-                                (stxclass-commit? sc) (stxclass-delimit-cut? sc))
+                                (stxclass-commit? sc) (stxclass-delimit-cut? sc)
+                                (stxclass-desc sc))
                           (list #`(define-values (parser)
                                     (curried-stxclass-parser #,class #,argu)))))))]
            [(regexp? name)
@@ -296,7 +295,7 @@
               (values (make den:delayed #'parser class)
                       (list #`(define-values (parser)
                                 (curried-stxclass-parser #,class #,argu)))))])]
-    [(den:parser _p _a _sp _c _dc?)
+    [(den:parser _p _a _sp _c _dc? _desc)
      (values entry null)]
     [(den:delayed _p _c)
      (values entry null)]))
@@ -398,8 +397,7 @@
   (check-pattern
    (cond [(pair? sides)
           (define actions-pattern
-            (create-post-pattern
-             (create-action:and (ord-and-patterns sides (gensym*)))))
+            (create-action:and (ord-and-patterns sides (gensym*))))
           (define and-patterns
             (ord-and-patterns (list pattern (pat:action actions-pattern (pat:any)))
                               (gensym*)))
@@ -423,6 +421,13 @@
 ;; parse-head-pattern : stx DeclEnv -> HeadPattern
 (define (parse-head-pattern stx decls)
   (parse-*-pattern stx decls #t #f))
+
+;; parse-action-pattern : Stx DeclEnv -> ActionPattern
+(define (parse-action-pattern stx decls)
+  (define p (parse-*-pattern stx decls #f #t))
+  (unless (action-pattern? p)
+    (wrong-syntax stx "expected action pattern"))
+  p)
 
 (define ((make-not-shadowed? decls) id)
   ;; Returns #f if id is in literals/datum-literals list.
@@ -460,26 +465,14 @@
      (and (identifier? #'id)
           (not-shadowed? #'id)
           (pattern-expander? (syntax-local-value #'id (λ () #f))))
-     (let* ([proc (pattern-expander-proc (syntax-local-value #'id))]
-            [introducer (make-syntax-introducer)]
-            [mstx (introducer (syntax-local-introduce stx))]
-            [mresult (parameterize ([current-syntax-parse-pattern-introducer introducer])
-                       (proc mstx))]
-            [result (syntax-local-introduce (introducer mresult))])
-       (disappeared! #'id)
-       (recur result))]
+     (begin (disappeared! #'id)
+            (recur (expand-pattern (syntax-local-value #'id) stx)))]
     [(id . rst)
      (and (identifier? #'id)
           (not-shadowed? #'id)
           (pattern-expander? (syntax-local-value #'id (λ () #f))))
-     (let* ([proc (pattern-expander-proc (syntax-local-value #'id))]
-            [introducer (make-syntax-introducer)]
-            [mstx (introducer (syntax-local-introduce stx))]
-            [mresult (parameterize ([current-syntax-parse-pattern-introducer introducer])
-                       (proc mstx))]
-            [result (syntax-local-introduce (introducer mresult))])
-       (disappeared! #'id)
-       (recur result))]
+     (begin (disappeared! #'id)
+            (recur (expand-pattern (syntax-local-value #'id) stx)))]
     [wildcard
      (and (wildcard? #'wildcard)
           (not-shadowed? #'wildcard))
@@ -593,8 +586,7 @@
               (pat:action headp tailp)]
              [(head-pattern? headp)
               (pat:head headp tailp)]
-             [else
-              (pat:pair (proper-list-pattern? tailp #t) headp tailp)]))]
+             [else (pat:pair headp tailp)]))]
     [#(a ...)
      (let ([lp (parse-single-pattern (syntax/loc stx (a ...)) decls)])
        (pat:vector lp))]
@@ -610,6 +602,16 @@
        (let ([lp (parse-single-pattern (datum->syntax #f contents #'s) decls)])
          (pat:pstruct key lp)))])))
 
+;; expand-pattern : pattern-expander Syntax -> Syntax
+(define (expand-pattern pe stx)
+  (let* ([proc (pattern-expander-proc pe)]
+         [introducer (make-syntax-introducer)]
+         [mstx (introducer (syntax-local-introduce stx))]
+         [mresult (parameterize ([current-syntax-parse-pattern-introducer introducer])
+                    (proc mstx))]
+         [result (syntax-local-introduce (introducer mresult))])
+    result))
+
 ;; parse-ellipsis-head-pattern : stx DeclEnv -> (listof EllipsisHeadPattern)
 (define (parse-ellipsis-head-pattern stx decls)
   (for/list ([ehpat+hstx (in-list (parse*-ellipsis-head-pattern stx decls #t))])
@@ -619,8 +621,22 @@
 ;;                             -> (listof (list EllipsisHeadPattern stx/eh-alternative))
 (define (parse*-ellipsis-head-pattern stx decls allow-or?
                                       #:context [ctx (current-syntax-context)])
+  (define (recur stx) (parse*-ellipsis-head-pattern stx decls allow-or? #:context ctx))
+  (define not-shadowed? (make-not-shadowed? decls))
   (syntax-case* stx (~eh-var ~or ~between ~optional ~once)
                 (make-not-shadowed-id=? decls)
+    [id
+     (and (identifier? #'id)
+          (not-shadowed? #'id)
+          (pattern-expander? (syntax-local-value #'id (lambda () #f))))
+     (begin (disappeared! #'id)
+            (recur (expand-pattern (syntax-local-value #'id) stx)))]
+    [(id . rst)
+     (and (identifier? #'id)
+          (not-shadowed? #'id)
+          (pattern-expander? (syntax-local-value #'id (lambda () #f))))
+     (begin (disappeared! #'id)
+            (recur (expand-pattern (syntax-local-value #'id) stx)))]
     [(~eh-var name eh-alt-set-id)
      (disappeared! stx)
      (let ()
@@ -630,7 +646,7 @@
          (let* ([iattrs (id-pattern-attrs (eh-alternative-attrs alt) prefix)]
                 [attr-count (length iattrs)])
            (list (create-ehpat
-                  (hpat:var/p #f (eh-alternative-parser alt) no-arguments iattrs attr-count #f #f)
+                  (hpat:var/p #f (eh-alternative-parser alt) no-arguments iattrs attr-count #f #f #f)
                   (eh-alternative-repc alt)
                   #f)
                  (replace-eh-alternative-attrs
@@ -704,14 +720,14 @@
      (error 'parse-pat:id
             "(internal error) decls had leftover stxclass entry: ~s"
             entry)]
-    [(den:parser parser attrs splicing? commit? delimit-cut?)
+    [(den:parser parser attrs splicing? commit? delimit-cut? desc)
      (check-no-delimit-cut-in-not id delimit-cut?)
      (cond [splicing?
             (unless allow-head?
               (wrong-syntax id "splicing syntax class not allowed here"))
-            (parse-pat:id/h id parser no-arguments attrs commit? "." #f)]
+            (parse-pat:id/h id parser no-arguments attrs commit? "." #f desc)]
            [else
-            (parse-pat:id/s id parser no-arguments attrs commit? "." #f)])]
+            (parse-pat:id/s id parser no-arguments attrs commit? "." #f desc)])]
     [(den:delayed parser class)
      (let ([sc (get-stxclass class)])
        (parse-pat:var/sc id allow-head? id sc no-arguments "." #f parser))]))
@@ -759,9 +775,9 @@
   ;; if parser* not #f, overrides sc parser
   (check-no-delimit-cut-in-not stx (stxclass-delimit-cut? sc))
   (cond [(and (stxclass/s? sc)
-              (stxclass-integrate sc)
+              (stxclass-inline sc)
               (equal? argu no-arguments))
-         (parse-pat:id/s/integrate name (stxclass-integrate sc) role)]
+         (parse-pat:id/s/integrate name (stxclass-inline sc) (stxclass-desc sc) role)]
         [(stxclass/s? sc)
          (parse-pat:id/s name
                          (or parser* (stxclass-parser sc))
@@ -769,7 +785,8 @@
                          (stxclass-attrs sc)
                          (stxclass-commit? sc)
                          pfx
-                         role)]
+                         role
+                         (stxclass-desc sc))]
         [(stxclass/h? sc)
          (unless allow-head?
            (wrong-syntax stx "splicing syntax class not allowed here"))
@@ -779,23 +796,22 @@
                          (stxclass-attrs sc)
                          (stxclass-commit? sc)
                          pfx
-                         role)]))
+                         role
+                         (stxclass-desc sc))]))
 
-(define (parse-pat:id/s name parser argu attrs commit? pfx role)
+(define (parse-pat:id/s name parser argu attrs commit? pfx role desc)
   (define prefix (name->prefix name pfx))
   (define bind (name->bind name))
-  (pat:var/p bind parser argu (id-pattern-attrs attrs prefix) (length attrs) commit? role))
+  (pat:var/p bind parser argu (id-pattern-attrs attrs prefix) (length attrs) commit? role desc))
 
-(define (parse-pat:id/s/integrate name integrate role)
+(define (parse-pat:id/s/integrate name predicate description role)
   (define bind (name->bind name))
-  (let ([predicate (integrate-predicate integrate)]
-        [description (integrate-description integrate)])
-    (pat:integrated bind predicate description role)))
+  (pat:integrated bind predicate description role))
 
-(define (parse-pat:id/h name parser argu attrs commit? pfx role)
+(define (parse-pat:id/h name parser argu attrs commit? pfx role desc)
   (define prefix (name->prefix name pfx))
   (define bind (name->bind name))
-  (hpat:var/p bind parser argu (id-pattern-attrs attrs prefix) (length attrs) commit? role))
+  (hpat:var/p bind parser argu (id-pattern-attrs attrs prefix) (length attrs) commit? role desc))
 
 (define (name->prefix id pfx)
   (cond [(wildcard? id) #f]
@@ -969,7 +985,7 @@
 
 (define (parse-hpat:seq stx list-stx decls)
   (define pattern (parse-single-pattern list-stx decls))
-  (unless (proper-list-pattern? pattern #t)
+  (unless (proper-list-pattern? pattern)
     (wrong-syntax stx "expected proper list pattern"))
   (hpat:seq pattern))
 
@@ -1203,23 +1219,29 @@
     [(cons (list '#:role role-stx _) rest)
      (wrong-syntax role-stx "#:role can only appear immediately after #:declare clause")]
     [(cons (list '#:fail-when fw-stx when-expr msg-expr) rest)
-     (cons (action:fail when-expr msg-expr)
+     (cons (create-post-pattern (action:fail when-expr msg-expr))
            (parse-pattern-sides rest decls))]
     [(cons (list '#:fail-unless fu-stx unless-expr msg-expr) rest)
-     (cons (action:fail #`(not #,unless-expr) msg-expr)
+     (cons (create-post-pattern (action:fail #`(not #,unless-expr) msg-expr))
            (parse-pattern-sides rest decls))]
     [(cons (list '#:when w-stx unless-expr) rest)
-     (cons (action:fail #`(not #,unless-expr) #'#f)
+     (cons (create-post-pattern (action:fail #`(not #,unless-expr) #'#f))
            (parse-pattern-sides rest decls))]
     [(cons (list '#:with with-stx pattern expr) rest)
      (let-values ([(decls2 rest) (grab-decls rest decls)])
        (let-values ([(decls2a defs) (decls-create-defs decls2)])
-         (cons (create-action:and
-                (list (action:do defs)
-                      (action:parse (parse-whole-pattern pattern decls2a #:kind 'with) expr)))
-               (parse-pattern-sides rest decls))))]
+         (list* (action:do defs)
+                (create-post-pattern
+                 (action:parse (parse-whole-pattern pattern decls2a #:kind 'with) expr))
+                (parse-pattern-sides rest decls))))]
     [(cons (list '#:attr attr-stx a expr) rest)
-     (cons (action:bind a expr)
+     (cons (action:bind a expr) ;; no POST wrapper, cannot fail
+           (parse-pattern-sides rest decls))]
+    [(cons (list '#:post post-stx pattern) rest)
+     (cons (create-post-pattern (parse-action-pattern pattern decls))
+           (parse-pattern-sides rest decls))]
+    [(cons (list '#:and and-stx pattern) rest)
+     (cons (parse-action-pattern pattern decls) ;; no POST wrapper
            (parse-pattern-sides rest decls))]
     [(cons (list '#:do do-stx stmts) rest)
      (cons (action:do stmts)
@@ -1586,6 +1608,8 @@
         (list '#:when check-expression)
         (list '#:with check-expression check-expression)
         (list '#:attr check-attr-arity check-expression)
+        (list '#:and check-expression)
+        (list '#:post check-expression)
         (list '#:do check-stmt-list)))
 
 ;; fail-directive-table

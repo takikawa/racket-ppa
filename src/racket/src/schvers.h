@@ -13,10 +13,10 @@
    consistently.)
 */
 
-#define MZSCHEME_VERSION "6.6"
+#define MZSCHEME_VERSION "6.7"
 
 #define MZSCHEME_VERSION_X 6
-#define MZSCHEME_VERSION_Y 6
+#define MZSCHEME_VERSION_Y 7
 #define MZSCHEME_VERSION_Z 0
 #define MZSCHEME_VERSION_W 0
 
