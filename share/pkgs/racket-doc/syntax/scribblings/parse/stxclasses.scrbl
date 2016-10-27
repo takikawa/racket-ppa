@@ -27,6 +27,7 @@ structures can share syntax class definitions.
           #:grammar
           ([stxclass-option
             (code:line #:attributes (attr-arity-decl ...))
+            (code:line #:auto-nested-attributes)
             (code:line #:description description-expr)
             (code:line #:opaque)
             (code:line #:commit)
@@ -69,6 +70,20 @@ set of all @tech{pattern variables} occurring in every variant of the
 syntax class. Pattern variables that occur at different ellipsis
 depths are not included, nor are nested attributes from
 @tech{annotated pattern variables}.
+}
+
+@specsubform[#:auto-nested-attributes]{
+
+@bold{Deprecated.} This option cannot be combined with @racket[#:attributes].
+
+Declares the attributes of the syntax class as the set of all
+@tech{pattern variables} and nested attributes from @tech{annotated
+pattern variables} occurring in every variant of the syntax
+class. Only syntax classes defined strictly before the enclosing
+syntax class are used to compute the nested attributes; pattern
+variables annotated with not-yet-defined syntax classes contribute no
+nested attributes for export. Note that with this option, reordering
+syntax-class definitions may change the attributes they export.
 }
 
 @specsubform[(code:line #:description description-expr)
@@ -178,6 +193,8 @@ follows:
 
 @racketgrammar[pattern-directive
                (code:line #:declare pattern-id stxclass maybe-role)
+               (code:line #:post action-pattern)
+               (code:line #:and action-pattern)
                (code:line #:with syntax-pattern expr)
                (code:line #:attr attr-arity-decl expr)
                (code:line #:fail-when condition-expr message-expr)
@@ -224,6 +241,27 @@ pattern may be declared.
 ]
 }
 
+@specsubform[(code:line #:post action-pattern)]{
+
+Executes the given @tech{@Apattern} as a ``post-traversal check''
+after matching the main pattern. That is, the following are
+equivalent:
+@racketblock[
+_main-pattern #:post action-pattern
+_main-pattern #:and (~post action-pattern)
+(~and _main-pattern (~post action-pattern))
+]
+}
+
+@specsubform[(code:line #:and action-pattern)]{
+
+Like @racket[#:post] except that no @racket[~post] wrapper is
+added. That is, the following are equivalent:
+@racketblock[
+_main-pattern #:and action-pattern
+(~and _main-pattern action-pattern)
+]}
+
 @specsubform[(code:line #:with syntax-pattern stx-expr)]{
 
 Evaluates the @racket[stx-expr] in the context of all previous
@@ -239,6 +277,8 @@ implicitly converted to a syntax object. If the the conversion would
 produce @deftech{3D syntax}---that is, syntax that contains unwritable
 values such as procedures, non-prefab structures, etc---then an
 exception is raised instead.
+
+Equivalent to @racket[#:post (~parse syntax-pattern stx-expr)].
 }
 
 @specsubform[(code:line #:attr attr-arity-decl expr)]{
@@ -247,6 +287,8 @@ Evaluates the @racket[expr] in the context of all previous attribute
 bindings and binds it to the given attribute. The value of
 @racket[expr] need not be, or even contain, syntax---see
 @racket[attribute] for details.
+
+Equivalent to @racket[#:and (~bind attr-arity-decl expr)].
 }
 
 @specsubform[(code:line #:fail-when condition-expr message-expr)
@@ -261,12 +303,16 @@ object, it is indicated as the cause of the error.
 If the @racket[message-expr] produces a string it is used as the
 failure message; otherwise the failure is reported in terms of the
 enclosing descriptions.
+
+Equivalent to @racket[#:post (~fail #:when condition-expr message-expr)].
 }
 
 @specsubform[(code:line #:fail-unless condition-expr message-expr)
              #:contracts ([message-expr (or/c string? #f)])]{
 
 Like @racket[#:fail-when] with the condition negated.
+
+Equivalent to @racket[#:post (~fail #:unless condition-expr message-expr)].
 }
 
 @specsubform[(code:line #:when condition-expr)]{
@@ -275,6 +321,8 @@ Evaluates the @racket[condition-expr] in the context of all previous
 attribute bindings. If the value is @racket[#f], the matching process
 backtracks. In other words, @racket[#:when] is like
 @racket[#:fail-unless] without the message argument.
+
+Equivalent to @racket[#:post (~fail #:unless condition-expr #f)].
 }
 
 @specsubform[(code:line #:do [def-or-expr ...])]{
@@ -287,6 +335,8 @@ the expressions of subsequent patterns and clauses.
 There is currently no way to bind attributes using a @racket[#:do]
 block. It is an error to shadow an attribute binding with a definition
 in a @racket[#:do] block.
+
+Equivalent to @racket[#:and (~do def-or-expr ...)].
 }
 
 
@@ -423,5 +473,24 @@ Returns the value associated with the @tech{attribute} named
 @racket[attr-id]. If @racket[attr-id] is not bound as an attribute, an
 error is raised.
 }
+
+@defidform[this-syntax]{
+
+When used as an expression within a syntax-class definition or
+@racket[syntax-parse] expression, evaluates to the syntax object or
+@tech[#:doc '(lib "scribblings/reference/reference.scrbl")]{syntax
+pair} being matched.
+
+@examples[#:eval the-eval
+(define-syntax-class one (pattern _ #:attr s this-syntax))
+(syntax-parse #'(1 2 3) [(1 o:one _) (attribute o.s)])
+(syntax-parse #'(1 2 3) [(1 . o:one) (attribute o.s)])
+(define-splicing-syntax-class two (pattern (~seq _ _) #:attr s this-syntax))
+(syntax-parse #'(1 2 3) [(t:two 3) (attribute t.s)])
+(syntax-parse #'(1 2 3) [(1 t:two) (attribute t.s)])
+]}
+
+Raises an error when used as an expression outside of a syntax-class
+definition or @racket[syntax-parse] expression.
 
 @(close-eval the-eval)

@@ -1012,7 +1012,7 @@ static Scheme_Object *primitive_table(int argc, Scheme_Object *argv[])
     Scheme_Bucket **bs, *b;
     intptr_t i;
 
-    ht = scheme_make_hash_tree(0);
+    ht = scheme_make_hash_tree(SCHEME_hashtr_eq);
 
     bs = menv->toplevel->buckets;
     for (i = menv->toplevel->size; i--; ) {
@@ -1280,7 +1280,8 @@ static Scheme_Object *_dynamic_require(int argc, Scheme_Object *argv[],
                     srcm2 = module_load(srcmname, env, errname);
 
                     for (j = srcm2->me->rt->num_var_provides; j--; ) {
-                      if (SCHEME_FALSEP(srcm2->me->rt->provide_srcs[j])
+                      if ((!srcm2->me->rt->provide_srcs
+                           || SCHEME_FALSEP(srcm2->me->rt->provide_srcs[j]))
                           && SAME_OBJ(srcname, srcm2->me->rt->provide_src_names[j])) {
                         /* simple re-export applies: */
                         srcm = srcm2;
@@ -4558,8 +4559,10 @@ static void setup_accessible_table(Scheme_Module *m)
           for (i = 0; i < cnt; i++) {
             form = SCHEME_VEC_ELS(m->bodies[0])[i];
             if (SAME_TYPE(SCHEME_TYPE(form), scheme_define_values_type)) {
-              int checked_st = 0, is_st = 0;
+              int checked_st = 0, is_st_prop = 0, has_guard = 0;
+              Scheme_Object *is_st = NULL;
               Simple_Stuct_Type_Info stinfo;
+              Scheme_Object *parent_identity;
               for (k = SCHEME_VEC_SIZE(form); k-- > 1; ) {
                 tl = SCHEME_VEC_ELS(form)[k];
                 if (SCHEME_TOPLEVEL_FLAGS(tl) & SCHEME_TOPLEVEL_SEAL) {
@@ -4593,19 +4596,43 @@ static void setup_accessible_table(Scheme_Module *m)
                           }
                         } else {
                           if (!checked_st) {
-                            is_st = !!scheme_is_simple_make_struct_type(SCHEME_VEC_ELS(form)[0],
-                                                                        SCHEME_VEC_SIZE(form)-1,
-                                                                        1, 0, 1, NULL, &stinfo,
-                                                                        NULL, NULL, NULL, 0,
-                                                                        m->prefix->toplevels, ht,
-                                                                        5);
+                            if (scheme_is_simple_make_struct_type(SCHEME_VEC_ELS(form)[0],
+                                                                  SCHEME_VEC_SIZE(form)-1,
+                                                                  CHECK_STRUCT_TYPE_RESOLVED,
+                                                                  NULL, &stinfo, &parent_identity,
+                                                                  NULL, NULL, NULL, NULL, 0,
+                                                                  m->prefix->toplevels, ht,
+                                                                  &is_st,
+                                                                  5)) {
+                              is_st = scheme_make_pair(is_st, parent_identity);
+                            } else {
+                              is_st = NULL;
+                              if (scheme_is_simple_make_struct_type_property(SCHEME_VEC_ELS(form)[0],
+                                                                             SCHEME_VEC_SIZE(form)-1,
+                                                                             CHECK_STRUCT_TYPE_RESOLVED,
+                                                                             &has_guard,
+                                                                             NULL, NULL, NULL, NULL, 0,
+                                                                             m->prefix->toplevels, ht,
+                                                                             5))
+                                is_st_prop = 1;
+                            }
                             checked_st = 1;
                           }
                           if (is_st) {
                             intptr_t shape;
                             shape = scheme_get_struct_proc_shape(k-1, &stinfo);
+                            /* Vector of size 3 => struct shape */
                             v = scheme_make_vector(3, v);
                             SCHEME_VEC_ELS(v)[1] = scheme_make_integer(shape);
+                            SCHEME_VEC_ELS(v)[2] = is_st;
+                          } else if (is_st_prop) {
+                            intptr_t shape;
+                            shape = scheme_get_struct_property_proc_shape(k-1, has_guard);
+                            /* Vector of size 4 => struct property shape */
+                            v = scheme_make_vector(4, v);
+                            SCHEME_VEC_ELS(v)[1] = scheme_make_integer(shape);
+                            SCHEME_VEC_ELS(v)[2] = scheme_false;
+                            SCHEME_VEC_ELS(v)[3] = scheme_false;
                           }
                         }
                         scheme_hash_set(ht, tl, v);
@@ -4835,11 +4862,23 @@ static Scheme_Object *check_accessible_in_module(Scheme_Module *module, intptr_t
           if (SCHEME_VEC_SIZE(pos) == 2) {
             if (_is_constant)
               get_procedure_shape(SCHEME_VEC_ELS(pos)[1], _is_constant);
-          } else {
+          } else if (SCHEME_VEC_SIZE(pos) == 3) {
+            /* vector of size 3 => struct proc */
             if (_is_constant) {
               Scheme_Object *ps;
-              
-              ps = scheme_make_struct_proc_shape(SCHEME_INT_VAL(SCHEME_VEC_ELS(pos)[1]));
+
+              ps = scheme_make_struct_proc_shape(SCHEME_INT_VAL(SCHEME_VEC_ELS(pos)[1]),
+                                                 SCHEME_VEC_ELS(pos)[2]);
+
+              *_is_constant = ps;
+            }
+          } else {
+            MZ_ASSERT(SCHEME_VEC_SIZE(pos) == 4);
+            /* vector of size 4 => struct property proc */
+            if (_is_constant) {
+              Scheme_Object *ps;
+
+              ps = scheme_make_struct_property_proc_shape(SCHEME_INT_VAL(SCHEME_VEC_ELS(pos)[1]));
 
               *_is_constant = ps;
             }
@@ -5187,7 +5226,7 @@ static Scheme_Object *add_start(Scheme_Object *v, int base_phase, int eval_exp, 
   Scheme_Bucket *b;
 
   if (!ht)
-    ht = scheme_make_hash_tree(0);
+    ht = scheme_make_hash_tree(SCHEME_hashtr_eq);
 
   key = make_key(base_phase, eval_exp, eval_run);
 
@@ -6654,7 +6693,7 @@ static void eval_exptime(Scheme_Object *names, int count,
           if (SCHEME_TRUEP(ids_for_rename_trans)
               && scheme_is_binding_rename_transformer(values[i])) {
             scheme_add_binding_copy(SCHEME_CAR(ids_for_rename_trans),
-                                    scheme_rename_transformer_id(values[i]),
+                                    scheme_rename_transformer_id(values[i], NULL),
                                     scheme_make_integer(at_phase-1));
           }
           scheme_add_to_table(syntax, (const char *)name, macro, 0);
@@ -6675,7 +6714,7 @@ static void eval_exptime(Scheme_Object *names, int count,
       if (SCHEME_TRUEP(ids_for_rename_trans)
           && scheme_is_binding_rename_transformer(vals)) {
         scheme_add_binding_copy(SCHEME_CAR(ids_for_rename_trans),
-                                scheme_rename_transformer_id(vals),
+                                scheme_rename_transformer_id(vals, NULL),
                                 scheme_make_integer(at_phase-1));
       }
       scheme_add_to_table(syntax, (const char *)name, macro, 0);
@@ -7810,7 +7849,7 @@ Scheme_Object *scheme_prune_bindings_table(Scheme_Object *binding_names, Scheme_
   Scheme_Object *k, *val, *base_stx;
   Scheme_Hash_Tree *ht;
 
-  ht = scheme_make_hash_tree(0);
+  ht = scheme_make_hash_tree(SCHEME_hashtr_eq);
 
   base_stx = scheme_stx_add_module_context(scheme_datum_to_syntax(scheme_false, scheme_false, scheme_false, 0, 0),
                                            scheme_module_context_at_phase(scheme_stx_to_module_context(rn_stx),
@@ -7944,9 +7983,10 @@ static void check_require_name(Scheme_Object *id, Scheme_Object *self_modidx,
     Scheme_Object *srcs;
     char *fromsrc = NULL, *fromsrc_colon = "", *phase_expl;
     intptr_t fromsrclen = 0;
-    
+
     if (same_resolved_modidx(SCHEME_VEC_ELS(vec)[1], modidx)
-	&& SAME_OBJ(SCHEME_VEC_ELS(vec)[2], exname)) {
+	&& SAME_OBJ(SCHEME_VEC_ELS(vec)[2], exname)
+        && SAME_OBJ(SCHEME_VEC_ELS(vec)[8], scheme_make_integer(exet))) {
       /* already required, same source; add redundant nominal (for re-provides),
          and also add source phase for re-provides. */
       nml = scheme_make_pair(nominal_modidx, SCHEME_VEC_ELS(vec)[0]);
@@ -8470,7 +8510,7 @@ static Scheme_Object *do_module_begin(Scheme_Object *orig_form, Scheme_Comp_Env 
 
   all_provided = scheme_make_hash_table_eqv();
   all_reprovided = scheme_make_hash_table_eqv();
-  all_defs = scheme_make_hash_tree(2);
+  all_defs = scheme_make_hash_tree(SCHEME_hashtr_eqv);
   all_defs_out = scheme_make_hash_table_eqv();
 
   rn_set = env->genv->stx_context;
@@ -12281,7 +12321,7 @@ void add_single_require(Scheme_Module_Exports *me, /* from module */
         
         if (exns) {
           Scheme_Object *l, *a;
-          excepts = scheme_make_hash_tree(0);
+          excepts = scheme_make_hash_tree(SCHEME_hashtr_eq);
           for (l = exns; SCHEME_STX_PAIRP(l); l = SCHEME_STX_CDR(l)) {
             a = SCHEME_STX_CAR(l);
             if (SCHEME_STXP(a)) 

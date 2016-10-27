@@ -232,7 +232,7 @@ identifier, the @racket[exn:fail:contract] exception is raised.
 
 @defproc[(local-expand [stx any/c]
                        [context-v (or/c 'expression 'top-level 'module 'module-begin list?)]
-                       [stop-ids (or/c (listof identifier?) #f)]
+                       [stop-ids (or/c (listof identifier?) empty #f)]
                        [intdef-ctx (or/c internal-definition-context? 
                                          (and/c pair? 
                                                 (listof internal-definition-context?))
@@ -261,10 +261,17 @@ in a sub-expression, expansions stops for the sub-expression. If
 @racket[stop-ids], then application and
 literal data expressions without the respective explicit form are not
 wrapped with the explicit form, and @racket[#%top] wrappers are
-never added (even with an empty @racket[stop-ids] list). If @racket[stop-ids] is @racket[#f]
+never added (even with an empty @racket[stop-ids] list).
+
+If @racket[stop-ids] is an empty list, then @racket[stx] is expanded
+recursively (i.e., expansion proceeds to sub-expressions).
+
+If @racket[stop-ids] is @racket[#f]
 instead of a list, then @racket[stx] is expanded only as long as the
 outermost form of @racket[stx] is a macro (i.e., expansion does not
-proceed to sub-expressions). A fully expanded form can include the
+proceed to sub-expressions).
+
+A fully expanded form can include the
 bindings listed in @secref["fully-expanded"] plus the
 @racket[letrec-syntaxes+values] form and @racket[#%expression]
 in any expression position.
@@ -562,7 +569,7 @@ the binding creates a binding alias that effectively routes around the
 @history[#:added "6.3"]}
 
 
-@defproc[(syntax-local-value [id-stx syntax?]
+@defproc[(syntax-local-value [id-stx identifier?]
                              [failure-thunk (or/c (-> any) #f)
                                             #f]
                              [intdef-ctx (or/c internal-definition-context?
@@ -570,12 +577,12 @@ the binding creates a binding alias that effectively routes around the
                                          #f])
          any]{
 
-Returns the @tech{transformer} binding value of @racket[id-stx] in
-either the context associated with @racket[intdef-ctx] (if not
-@racket[#f]) or the context of the expression being expanded (if
-@racket[intdef-ctx] is @racket[#f]).  If @racket[intdef-ctx] is
-provided, it must be an extension of the context of the expression
-being expanded.
+Returns the @tech{transformer} binding value of the identifier
+@racket[id-stx] in either the context associated with
+@racket[intdef-ctx] (if not @racket[#f]) or the context of the
+expression being expanded (if @racket[intdef-ctx] is @racket[#f]). If
+@racket[intdef-ctx] is provided, it must be an extension of the
+context of the expression being expanded.
 
 If @racket[id-stx] is bound to a @tech{rename transformer} created
 with @racket[make-rename-transformer], @racket[syntax-local-value]
@@ -968,9 +975,26 @@ and different result procedures use distinct scopes.
          ((syntax?) ((or/c 'flip 'add 'remove)) . ->* . syntax?)]{
 
 Produces a procedure that behaves like the result of
-@racket[make-syntax-introducer], but using the @tech{scopes} of
-@racket[ext-stx] that are not shared with @racket[base-stx], and with
-a default action of @racket['remove].
+@racket[make-syntax-introducer], but using a set of @tech{scopes} from
+@racket[ext-stx] and with a default action of @racket['add].
+
+@itemlist[
+
+ @item{If the scopes of @racket[base-stx] are a subset of the scopes
+       of @racket[ext-stx], then the result of
+       @racket[make-syntax-delta-introducer] adds, removes, or flips
+       scopes that are in the set for @racket[ext-stx] and not in the
+       set for @racket[base-stx].}
+
+ @item{If the scopes of @racket[base-stx] are not a subset of the
+       scopes of @racket[ext-stx], but if it has a binding, then the
+       set of scopes associated with the binding id subtracted from
+       the set of scopes for @racket[ext-stx], and the result of
+       @racket[make-syntax-delta-introducer] adds, removes, or flips
+       that difference.}
+
+]
+
 A @racket[#f] value for @racket[base-stx] is equivalent to a syntax
 object with no @tech{scopes}.
 
@@ -1012,8 +1036,9 @@ level as reported by @racket[syntax-local-phase-level].}
 @defproc[(syntax-local-module-required-identifiers
           [mod-path (or/c module-path? #f)]
           [phase-level (or/c exact-integer? #f #t)])
-         (listof (cons/c (or/c exact-integer? #f)
-                         (listof identifier?)))]{
+         (or/c (listof (cons/c (or/c exact-integer? #f)
+                               (listof identifier?)))
+               #f)]{
 
 Can be called only while
 @racket[syntax-local-transforming-module-provides?] returns
@@ -1025,7 +1050,9 @@ identifiers.  Each list of identifiers includes all bindings imported
 @racket[mod-path], or all modules if @racket[mod-path] is
 @racket[#f]. The association list includes all identifiers imported
 with a @racket[phase-level] shift, or all shifts if
-@racket[phase-level] is @racket[#t].
+@racket[phase-level] is @racket[#t]. If @racket[phase-level] is
+not @racket[#t], the result can be @racket[#f] if no identifiers
+are exported at that phase.
 
 When an identifier is renamed on import, the result association list
 includes the identifier by its internal name. Use
@@ -1080,7 +1107,7 @@ import sources.
 See also @racket[define-require-syntax], which supports macro-style
 @racket[require] transformers.
 
-@defproc[(expand-import [stx syntax?])
+@defproc[(expand-import [require-spec syntax?])
          (values (listof import?)
                  (listof import-source?))]{
 
@@ -1280,7 +1307,7 @@ See also @racket[define-provide-syntax], which supports macro-style
 @tech{provide transformers}.
 
 
-@defproc[(expand-export [stx syntax?] [modes (listof (or/c exact-integer? #f))])
+@defproc[(expand-export [provide-spec syntax?] [modes (listof (or/c exact-integer? #f))])
          (listof export?)]{
 
 Expands the given @racket[_provide-spec] to a list of exports. The
@@ -1291,7 +1318,7 @@ form, unless the @racket[modes] list specifies otherwise. Normally,
 @racket[modes] is either empty or contains a single element.}
 
 
-@defproc[(pre-expand-export [stx syntax?] [modes (listof (or/c exact-integer? #f))])
+@defproc[(pre-expand-export [provide-spec syntax?] [modes (listof (or/c exact-integer? #f))])
          syntax?]{
 
 Expands the given @racket[_provide-spec] at the level of @tech{provide
@@ -1311,7 +1338,9 @@ pre-transformers}. The @racket[modes] argument is the same as for
 Creates a @tech{provide transformer} (i.e., a structure with the
 @racket[prop:provide-transformer] property) using the given procedure
 as the transformer. If a @racket[pre-proc] is provided, then the result is also a
-@tech{provide pre-transformer}.}
+@tech{provide pre-transformer}.
+Often used in combination with @racket[expand-export] and/or
+@racket[pre-expand-export].}
 
 
 @defproc[(make-provide-pre-transformer [pre-proc (syntax? (listof (or/c exact-integer? #f))
@@ -1319,7 +1348,33 @@ as the transformer. If a @racket[pre-proc] is provided, then the result is also 
          provide-pre-transformer?]{
 
 Like @racket[make-provide-transformer], but for a value that is a
-@tech{provide pre-transformer}, only.}
+@tech{provide pre-transformer}, only.
+Often used in combination with @racket[pre-expand-export].
+
+@examples[
+#:eval stx-eval
+(module m racket
+  (require
+    (for-syntax racket/provide-transform syntax/parse syntax/stx))
+
+  (define-syntax wrapped-out
+    (make-provide-pre-transformer
+     (lambda (stx modes)
+       (syntax-parse stx
+         [(_ f ...)
+          #:with (wrapped-f ...)
+                 (stx-map
+                  syntax-local-lift-expression
+                  #'((lambda args
+                       (printf "applying ~a, args: ~a\n" 'f args)
+                       (apply f args)) ...))
+          (pre-expand-export
+           #'(rename-out [wrapped-f f] ...) modes)]))))
+
+  (provide (wrapped-out + -)))
+(require 'm)
+(- 1 (+ 2 3))
+]}
 
 
 @defthing[prop:provide-transformer struct-type-property?]{
