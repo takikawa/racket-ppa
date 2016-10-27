@@ -1,99 +1,116 @@
-#lang scheme/base
+#lang racket/base
 (require racket/contract/base
          racket/class
-         scheme/gui/base)
+         racket/gui/base)
 
-(provide/contract
- [find-string-embedded
-  (->* ((is-a?/c text%)
-        string?)
-       ((symbols 'forward 'backward)
-        (or/c (symbols 'start) number?)
-        (or/c (symbols 'eof) number?)
-        boolean?
-        boolean?
-        boolean?)
-      (values (is-a?/c editor<%>)
-              (or/c false/c number?)))])
+(provide
+ (contract-out
+  [find-string-embedded
+   (->* ((is-a?/c text%)
+         string?)
+        ((or/c 'forward 'backward)
+         (or/c 'start number?)
+         (or/c 'eof number?)
+         boolean?
+         boolean?
+         boolean?)
+        (values (is-a?/c editor<%>)
+                (or/c #f number?)))]))
 
-(define find-string-embedded
-  (lambda (edit
-           str
-           [direction 'forward]
-           [start 'start]
-           [end 'eof]
-           [get-start #t]
-           [case-sensitive? #t]
-           [pop-out? #f])
-    (let/ec k
-      (let* ([start (if (eq? start 'start) 
-                        (send edit get-start-position)
-                        start)]
-             [end (if (eq? 'eof end)
-                      (if (eq? direction 'forward)
-                          (send edit last-position)
-                          0)
-                      end)]
-             [flat (send edit find-string str direction
-                         start end get-start
-                         case-sensitive?)]
-             [pop-out
-              (λ ()
-                (let ([admin (send edit get-admin)])
-                  (if (is-a? admin editor-snip-editor-admin<%>)
-                      (let* ([snip (send admin get-snip)]
-                             [edit-above (send (send snip get-admin) get-editor)]
-                             [pos (send edit-above get-snip-position snip)]
-                             [pop-out-pos (if (eq? direction 'forward) (add1 pos) pos)])
-                        (find-string-embedded
-                         edit-above
-                         str
-                         direction 
-                         pop-out-pos
-                         (if (eq? direction 'forward) 'eof 0)
-                         get-start
-                         case-sensitive?
-                         pop-out?))
-                      (values edit #f))))])
-        (let loop ([current-snip (send edit find-snip start
-                                       (if (eq? direction 'forward)
-                                           'after-or-none
-                                           'before-or-none))])
-          (let ([next-loop
-                 (λ ()
-                   (if (eq? direction 'forward)
-                       (loop (send current-snip next))
-                       (loop (send current-snip previous))))])
-            (cond
-              [(or (not current-snip)
-                   (and flat
-                        (let* ([start (send edit get-snip-position current-snip)]
-                               [end (+ start (send current-snip get-count))])
-                          (if (eq? direction 'forward)
-                              (and (<= start flat)
-                                   (< flat end))
-                              (and (< start flat)
-                                   (<= flat end))))))
-               (if (and (not flat) pop-out?)
-                   (pop-out)
-                   (values edit flat))]
-              [(is-a? current-snip editor-snip%)
-               (let-values ([(embedded embedded-pos)
-                             (let ([media (send current-snip get-editor)])
-                               (if (and media
-                                        (is-a? media text%))
-                                   (begin
-                                     (find-string-embedded 
-                                      media 
-                                      str
-                                      direction
-                                      (if (eq? 'forward direction)
-                                          0
-                                          (send media last-position))
-                                      'eof
-                                      get-start case-sensitive?))
-                                   (values #f #f)))])
-                 (if (not embedded-pos)
-                     (next-loop)
-                     (values embedded embedded-pos)))]
-              [else (next-loop)])))))))
+(define (find-string-embedded a-text
+                              str
+                              [direction 'forward]
+                              [start 'start]
+                              [end 'eof]
+                              [get-start #t]
+                              [case-sensitive? #t]
+                              [pop-out? #f])
+  (let/ec k
+    (let loop ([a-text a-text]
+               [start start]
+               [end end])
+      (define found (send a-text find-string-embedded str direction start end get-start case-sensitive?))
+      (define (done)
+        (cond
+          [(not found)
+           (k a-text found)]
+          [else
+           (let loop ([a-text a-text]
+                      [found found])
+             (cond
+               [(number? found)
+                (k a-text found)]
+               [else (loop (car found) (cdr found))]))]))
+      (when found (done))
+      (unless pop-out? (done))
+      (define a-text-admin (send a-text get-admin))
+      (unless (is-a? a-text-admin editor-snip-editor-admin<%>) (done))
+      (define editor-snip (send a-text-admin get-snip))
+      (define editor-snip-admin (send editor-snip get-admin))
+      (unless editor-snip-admin (done))
+      (define enclosing-text (send editor-snip-admin get-editor))
+      (unless (is-a? enclosing-text text%) (done))
+      (loop enclosing-text
+            (+ (send enclosing-text get-snip-position editor-snip)
+               (send editor-snip get-count))
+            'eof))))
+
+(module+ test
+  (require rackunit)
+
+  (define abcX (new text%))
+  (send abcX insert "abcX")
+
+  (define abc/abcX/abcQ (new text%))
+  (send abc/abcX/abcQ insert "abc")
+  (send abc/abcX/abcQ insert (new editor-snip% [editor abcX]))
+  (send abc/abcX/abcQ insert "abcQ")
+
+  (define abc//abc/abcX/abcQ//abcZ (new text%))
+  (send abc//abc/abcX/abcQ//abcZ insert "abc")
+  (send abc//abc/abcX/abcQ//abcZ insert (new editor-snip% [editor abc/abcX/abcQ]))
+  (send abc//abc/abcX/abcQ//abcZ insert "abcZ")
+  
+  (let ()
+    (define-values (ta pos) (find-string-embedded abcX "b" 'forward 0))
+    (check-equal? ta abcX)
+    (check-equal? pos 1))
+
+  (let ()
+    (define-values (ta pos) (find-string-embedded abcX "c" 'forward 0))
+    (check-equal? ta abcX)
+    (check-equal? pos 2))
+
+  (let ()
+    (define-values (ta pos) (find-string-embedded abcX "d" 'forward 2))
+    (check-equal? pos #f))
+
+  (let ()
+    (define-values (ta pos) (find-string-embedded abc/abcX/abcQ "b" 'forward 0))
+    (check-equal? ta ta)
+    (check-equal? pos 1))
+
+  (let ()
+    (define-values (ta pos) (find-string-embedded abc/abcX/abcQ "b" 'forward 2))
+    (check-equal? ta abcX)
+    (check-equal? pos 1))
+
+  (let ()
+    (define-values (ta pos) (find-string-embedded abc//abc/abcX/abcQ//abcZ "X" 'forward 0))
+    (check-equal? ta abcX)
+    (check-equal? pos 3))
+
+  (let ()
+    (define-values (ta pos) (find-string-embedded abcX "Q" 'forward 0 'eof #t #t #t))
+    (check-equal? ta abc/abcX/abcQ)
+    (check-equal? pos 7))
+
+  (let ()
+    (define-values (ta pos) (find-string-embedded abcX "Z" 'forward 0 'eof #t #t #t))
+    (check-equal? ta abc//abc/abcX/abcQ//abcZ)
+    (check-equal? pos 7))
+
+  (let ()
+    (define-values (ta pos) (find-string-embedded abcX "c" 'forward 4 'eof #t #t #t))
+    (check-equal? ta abc/abcX/abcQ)
+    (check-equal? pos 6)))

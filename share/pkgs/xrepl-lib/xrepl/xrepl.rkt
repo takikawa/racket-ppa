@@ -3,7 +3,11 @@
 ;; ----------------------------------------------------------------------------
 ;; customization
 
-(define toplevel-prefix       (make-parameter "-")) ; when not in a module
+(define toplevel-prefix
+  (make-parameter "-"  (λ (x)
+                         (unless (string? x)
+                           (raise-argument-error 'toplevel-prefix "string?" x))
+                         x))) ; when not in a module
 (define saved-values-number   (make-parameter 5))
 (define saved-values-patterns (make-parameter '("^" "$~a")))
 ;; TODO: when there's a few more of these, make them come from the prefs
@@ -1575,7 +1579,7 @@
 ;; ----------------------------------------------------------------------------
 ;; set up the xrepl environment
 
-(provide setup-xrepl-environment)
+(provide setup-xrepl-environment toplevel-prefix)
 (define (setup-xrepl-environment)
   (define (tweak param maker) (param (maker (param))))
   (tweak error-display-handler make-xrepl-display-handler)

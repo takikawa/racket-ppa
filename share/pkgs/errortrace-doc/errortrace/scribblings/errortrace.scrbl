@@ -42,6 +42,9 @@ Then,
                Racket interactively, include the @Flag{i} flag
                before @Flag{l}:
                @commandline{racket -i -l errortrace}}
+
+         @item{To instrument the contents of a collection or package, compile
+               it with: @commandline{raco setup --mode errortrace ...}}
          ]
 
 After starting @racketmodname[errortrace] in one of these ways, when an
@@ -73,7 +76,7 @@ of Errortrace-specific @filepath{.zo} files.
   loaded as compiled byte code (i.e., from a @filepath{.zo} file) or
   native code (i.e., from a @filepath{.dll}, @filepath{.so} or 
   @filepath{.dylib} file). You can use the @DFlag{mode errortrace} flag
-  to @exec{setup-plt} to create @filepath{.zo} files with
+  to @exec{raco setup} to create @filepath{.zo} files with
   Errortrace information.
 
 Explicitly requiring @racketmodname[errortrace] within a module is
@@ -414,7 +417,7 @@ hardwired to return @racket[null]. }
 
 @defproc[(with-mark [source-stx any/c]
                     [dest-stx any/c]
-                    [phase nonnegative-exact-integer?]) 
+                    [phase exact-nonnegative-integer?]) 
          any/c]{
 
 Called by @racketout[annotate] and @racketout[annotate-top] to wrap
@@ -517,7 +520,7 @@ may not have appeared in an expression position. @racket[phase] is the phase lev
 
 @defproc[(with-mark [source-stx any/c]
                     [dest-stx any/c]
-                    [phase nonnegative-exact-integer?])
+                    [phase exact-nonnegative-integer?])
          any/c]{
 Same as in @racket[stacktrace-imports^].}
 

@@ -85,6 +85,7 @@
   (bug-report-field-environment "环境")
   (bug-report-field-docs-installed "已安装文档")
   (bug-report-field-collections "Collections")
+  (bug-report-field-links "链接")  ;; from 'raco link'
   (bug-report-field-human-language "自然语言")
   (bug-report-field-memory-use "内存使用")
   (bug-report-field-version "版本")
@@ -116,9 +117,12 @@
   (cs-foreground-color "前景色")
   (cs-background-color "背景色")
   (cs-tack/untack-arrow "附加/取消箭头")
+  (cs-tack-crossing-arrows "附加交叉的箭头")
   (cs-jump-to-next-bound-occurrence "跳至下一个被绑定出现")
+  (cs-jump-to-previous-bound-occurrence "跳至上一个被绑定出现")
   (cs-jump-to-binding "跳至绑定出现")
   (cs-jump-to-definition "跳至定义")
+  (cs-open-defining-file "打开定义文件")
   (cs-error-message "出错信息")
   (cs-open-file "打开~a")
   (cs-rename-var "重命名~a")
@@ -131,7 +135,9 @@
   (cs-status-eval-compile-time "检查语法：编译程序")
   (cs-status-expanding-expression "检查语法：展开表达式")
   (cs-status-loading-docs-index "检查语法：加载文档索引")
-  (cs-mouse-over-import "绑定~s由~s导入")  
+  (cs-syncheck-running "正在检查语法")
+  (cs-mouse-over-import "绑定~s由~s导入")
+  (cs-mouse-over-import/library-only "由~s导入")
   (cs-view-docs "察看~a的文档")
   (cs-view-docs-from "~a（来自~a）")  ;; a completed version of the line above
   ;; (cs-view-docs) is put into the first ~a and a list of modules (separated by commas) 
@@ -153,6 +159,12 @@
   (cs-contract-both-obligation "Contract：本module和客户module的共同义务")
   (cs-contract-unk-obligation "Contract：义务未知")
   
+  ;; require prefix functionality
+  (cs-add-prefix-for-require "为require添加前缀")
+  (cs-prefix-require-title "Require前缀")
+  (cs-prefix-require "为import得来的变量选择前缀")
+  (cs-all-binders-are-prefixed "所有require都已经有前缀了；试试改变前缀名")
+  (cs-the-binder-is-prefixed "该require已经有前缀了；试试改变前缀名")
   
   ;; mode sub-menu in the "view" menu
   (cs-check-syntax-mode "检查语法模式")
@@ -168,6 +180,7 @@
   (online-expansion-running "语法检查后台运行中")
   (online-expansion-only-raw-text-files-supported "仅支持纯文本文件")
   (online-expansion-abnormal-termination "语法检查后台异常退出")
+  (online-expansion-abnormal-termination-out-of-memory "语法检查后台异常退出(内存不足)")
   (online-expansion-finished-successfully "语法检查后台成功运行")
   
   (jump-to-error "跳至错误")
@@ -189,6 +202,7 @@
   (online-expansion-error-margin "在一侧显示")
   ; the label of a preference in the (string-constant online-expansion) section
   (show-arrows-on-mouseover "鼠标悬停时显示绑定及尾位置箭头")
+  (show-blueboxes "显示蓝盒子、箭头和半圆")
   ;;; info bar at botttom of drscheme frame
   (collect-button-label "垃圾收集")
   (read-only "只读")
@@ -197,6 +211,10 @@
   (running "运行中")
   (not-running "静止中")
   
+  (install-package-button "安装~a") ;; button label: ~a is filled with the name of a pkg
+  (update-catalog "更新目录") ;; button label; shown when there is a missing module, but no matching package
+  (updating-catalog-from "从~a更新……") ;; message label; used as a status message when updating the pkg catalog
+
   ;;; misc
   (welcome-to-something "欢迎来到~a")
   
@@ -256,6 +274,7 @@
   (scheme-mode-color-comment "注释")
   (scheme-mode-color-string "字符串")
   (scheme-mode-color-constant "常量")
+  (scheme-mode-color-text "文本")
   (scheme-mode-color-parenthesis "括号")
   (scheme-mode-color-hash-colon-keyword "#:关键词")
   (scheme-mode-color-error "错误")
@@ -379,6 +398,8 @@
   (install-plt-file-tab "文件")
   (install-plt-filename "文件名：")
   (install-plt-url "URL：")
+  ; an error message from a primitive operation is appended to the end of this message.
+  (install-plt-error-downloading "下载的.plt文件时出错。\n\n细节:\n")
   (install-plt-error-header "检查下载的.plt文件时出错。请检查URL并重试。")
   
   ;; install plt file when opened in drscheme strings
@@ -427,6 +448,7 @@
   (warnings-prefs-panel-label "警告")
   (editor-prefs-panel-label "编辑")
   (general-prefs-panel-label "常规")
+  (editor-general-prefs-panel-label "常规编辑")
   (highlight-parens "加亮显示匹配的括号")
   (fixup-open-brackets "自动调整开中括号")
   (fixup-close-parens "自动调整闭括号")
@@ -448,6 +470,8 @@
   (print-to-ps "打印至PostScript文件")
   (print-to-pdf "打印至PDF文件")
   (command-as-meta "将command键当作meta") ;; macos/macos x only
+  (any-control+alt-is-altgr "将Control-Alt组合当作AltGr") ; Windows only
+  (alt-as-meta "将alt键当作meta")
   (reuse-existing-frames "在打开新文件时，使用现有的视窗")
   (default-fonts "默认字体")
   (paren-match-color "高亮显示括号所使用的颜色") ; in prefs dialog
@@ -462,6 +486,10 @@
   (show-line-numbers-in-definitions "在定义视窗中显示全部行号")
   ;; the constant above shows up in the popup menu item in the bottom of
   ;; the drracket window; controls the line numbers on each line in the definitions; used in a checkable menu item
+  (reflow-paragraph-maximum-width "重新分行时最大宽度")
+  (maximum-char-width-guide-pref-check-box "最大字符宽度提示")
+  (hide-column-width-guide "对有~a列的文件，隐藏列宽提示")
+  (show-column-width-guide "在~a列显示列宽提示") ;; filled with a number > 2
   (limit-interactions-size "限制交互视窗的大小")
   (background-color "背景颜色")
   (default-text-color "默认颜色") ;; used for configuring colors, but doesn't need the word "color"
@@ -469,14 +497,18 @@
   (revert-to-defaults "恢复默认")
   (undo-changes "不做修改并退出") ;; used in the preferences dialog to undo preference changes
   
-  (black-on-white-color-scheme "白底黑字") ;; these two appear in the color preferences dialog on butttons
+  (color-schemes "配色方案") ;; the label in the preferences dialog for the color scheme panel
+  (classic-color-scheme "经典") ;; formerly called 'black on white'
+  (modern-color-scheme "现代")   ;; an attempt to be more color-blind friendly
   (white-on-black-color-scheme "黑底白字") ;; clicking the buttons changes the color schemes to some defaults that've been set up.
+  ; drracket additions to the color scheme dialog; two buttons
+  (design-your-own-color-schemes "自定义配色方案") ; pointer to (english-only) docs
+  (style-and-color-names "风格和颜色名称")
   
   (add-spacing-between-lines "在行间额外填充一个像素")
   
   ; title of the color choosing dialog
   
-  ; should have entire alphabet
   (font-example-string "简体中文 by 朱崇恺")
   
   (change-font-button-label "更改")
@@ -498,10 +530,19 @@
   (font-smoothing-some "部分")
   (font-smoothing-all "全部")
   (font-smoothing-default "使用系统默认值")
+  (font-weight-label "字体粗细")
+  (font-weight-light "细体")
+  (font-weight-normal "普通")
+  (font-weight-bold "粗体")
+
   (select-font-name "选择字体")
   (example-text "示例文本：")
   (only-warn-once "当定义视窗和交互视窗不同步时，仅警告一次")
   
+  ; font size menu items in the 'view' menu; the ~a is filled with a number (font size)
+  (increase-font-size "加大字体（至~a号）")
+  (decrease-font-size "缩小字体（至~a号）")
+
   ; warning message when lockfile is around
   (waiting-for-pref-lock "等待首选项设置文件解锁……")
   (pref-lock-not-gone
@@ -590,16 +631,16 @@
   (must-specify-a-filename "你必须指定文件名")
   (file-does-not-exist "文件“~a”不存在。")
   (ask-because-file-exists "文件“~a”已存在。是否替换？")
-  (dne-or-cycle "文件“~a”中包含不存在的目录或循环")
+  (dne-or-cycle "文件“~a”中包含不存在的目录或循环。")
   (get-file "获取文件")
   (put-file "放置文件")
   (full-pathname "完整路径")
-  (show-dot-files "由点号开始显示文件名和目录名。")
+  (show-dot-files "显示由点号开始的文件和目录名。")
   (up-directory-button-label "上层目录")
   (add-button-label "添加") ;;; for multi-file selection
   (add-all-button-label "全部添加") ;;; for multi-file selection
   (remove-button-label "移除") ;;; for multi-file selection
-  (file-wrong-form "该文件名格式不正确")
+  (file-wrong-form "该文件名格式不正确。")
   (select-files "选择文件")
   (select-file "选择文件")
   (dir-dne "该目录不存在。")
@@ -678,7 +719,8 @@
   
   (paste-info "将剪贴版中个内容复制到当前位置")
   (paste-menu-item "粘贴(&P)")
-  
+  (paste-and-indent-menu-item "粘贴并对齐")
+ 
   (clear-info "删除当前选中的对象")
   (clear-menu-item-windows "删除(&D)")
   
@@ -689,11 +731,11 @@
   (find-from-selection-menu-item "查找当前选中")
   (find-info "在主视窗和查找栏之间切换光标位置")
   
-  (find-again-info "跳至该文本的下一个出现")
-  (find-again-menu-item "查找下一个")
+  (find-next-info "跳至搜寻窗口中文本的下一个出现")
+  (find-next-menu-item "查找下一个")
   
-  (find-again-backwards-info "跳至该文本的前一个出现")
-  (find-again-backwards-menu-item "查找上一个")
+  (find-previous-info "跳至搜寻窗口中文本的上一个出现")
+  (find-previous-menu-item "查找上一个")
   
   (show-replace-menu-item "显示替换")
   (hide-replace-menu-item "隐藏替换")
@@ -748,7 +790,8 @@
   (insert-lambda "插入λ")
   
   (wrap-text-item "自动换行")
-  
+
+  ;; windows menu
   (windows-menu-label "视窗(&W)")
   (tabs-menu-label "标签(&T)") ;; this is the name of the menu under linux & windows
   (minimize "最小化") ;; minimize and zoom are only used under mac os x
@@ -758,9 +801,12 @@
   (most-recent-window "最近的视窗")
   (next-tab "下一个标签")
   (prev-tab "前一个标签")
+  (move-current-tab-right "标签右移(&R)")
+  (move-current-tab-left "标签左移(&L)")
   ;; menu item in the windows menu under mac os x. first ~a is filled with a number between 1 and 9; second one is the filename of the tab
   (tab-i "标签~a：~a")
   (tab-i/no-name "标签~a")
+  (last-tab "最后一个标签：~a")
   
   (view-menu-label "视图(&V)")
   (show-overview "显示程序轮廓(&P)") 
@@ -774,7 +820,7 @@
   
   ;; open here's new menu item
   (create-new-window-or-clear-current
-   "您是想打开一个新视窗，还是清空当前视窗？")
+   "您想打开新视窗，还是清空当前视窗？")
   (clear-current "清空当前")
   (new-window "新视窗")
   
@@ -846,7 +892,6 @@
   (invalid-tool-spec "Collection ~a中info.rkt的tool定义不正确。需要一个字符串或者一个非空表，实得：~e")
   (error-invoking-tool-title "调用tool ~s出错；~s")
   (error-loading-tool-title "载入tool ~s出错\n~a") ;; ~s filled with a path, ~a filled with an error message from an exn
-  
   (tool-tool-names-same-length
    "在~s的info.rkt文件中，‘tool-names’和‘tools’应该是等长的表，实得~e和~e")
   (tool-tool-icons-same-length
@@ -854,7 +899,7 @@
   (tool-tool-urls-same-length
    "在~s的info.rkt文件中，‘tool-urls’和“tools’应该是等长的表，实得~e和~e")
   (error-getting-info-tool
-   "载入~s的info.rkt出错")
+   "载入~s的info.rkt文件出错")
   (tool-error-phase1 "tool ~s第一阶段出错；~s")
   (tool-error-phase2 "tool ~s第二阶段出错；~s")
   
@@ -865,6 +910,7 @@
   (sort-by-position "按文件中的位置排序")
   (no-definitions-found "<<没有定义>>")
   (jump-to-defn "跳至~a的定义")
+  (define-menu-configure "配置") ;; label of a submenu that configures the (define ...) popup menu
   
   (recent-items-sort-by-age "按时间排序")
   (recent-items-sort-by-name "按名称排序")
@@ -918,7 +964,8 @@
   (force-quit-menu-item-help-string "使用custodian-shutdown-all退出当前计算")
   (limit-memory-menu-item-label "限制内存使用…")
   (limit-memory-msg-1 "内存限制会在下一次运行时生效，")
-  (limit-memory-msg-2 "内存限制最低值为八兆字节。")   (limit-memory-unlimited "无限制")
+  (limit-memory-msg-2 "内存限制最低值为八兆字节。")
+  (limit-memory-unlimited "无限制")
   (limit-memory-limited "限制")
   (limit-memory-megabytes "兆字节(MB)")
   ; the next two constants are used together in the limit memory dialog; they are inserted
@@ -967,6 +1014,7 @@
   (executable-base "基于")
   (filename "文件名：")
   (create "创建")
+  (files-for-icons-etc "图标等文件")
   (please-specify-a-filename "请指定文件名。")
   (~a-must-end-with-~a
    "~a文件名\n\n  ~a\n\n不合法。文件名必须以\".~a\"结尾。")
@@ -989,7 +1037,8 @@
   ;;; buttons
   (execute-button-label "运行") 
   (save-button-label "保存")
-  (break-button-label "停止")
+  (break-button-label "中断")
+  (break-button-kill-label "停止")
   
   ;;; search help desk popup menu
   (search-help-desk-for "在帮助台中搜索“~a”")
@@ -1032,7 +1081,12 @@
   (teachpack-pre-installed/2htdp "自带的HtDP/2e教学包")
   (teachpack-user-installed "用户安装的教学包")
   (add-teachpack-to-list... "添加教学包…")
-  (teachpack-already-installed "已经存在一个名为'~a'的教学包。是否覆盖？")
+  ; first and second ~a are teachpack names, third is a symbol identifing an export
+  (teachpack-conflict
+   "警告：已安装的教学包~a和~a冲突（都export ~a）")
+   ;; a button label; the two ~a are filled with teachpack names
+  (remove-and-add-teachpack "移除~a，加载~a")
+  (teachpack-already-installed "已经存在一个名为“~a”的教学包。是否覆盖？")
   ; ~a is filled with a list of language names. Each name is separated by a newline and is indented two spaces (no commas, no 'and')
   (teachpacks-only-in-languages "教学包菜单仅在下列语言中有效：~a\n\n在其他语言中，使用“require”。")
   
@@ -1046,6 +1100,9 @@
   (quasiquote-printing-style "Quasiquote")
   (write-printing-style "write")
   (print-printing-style "print")
+  (true-false-empty-style-label "常量方式")
+  (true-false-empty-style-read "#true #false '()")
+  (true-false-empty-style-ids "true false empty")
   (sharing-printing-label "显示内存共享")
   (use-pretty-printer-label "print多个对象时自动换行")
   (input-syntax "输入语法")
@@ -1067,8 +1124,9 @@
   (decimal-notation-for-rationals "使用十进制表示有理数")
   (enforce-primitives-group-box-label "初始绑定")
   (enforce-primitives-check-box-label "不允许改变初始绑定")
-  (automatically-compile "填充“compiled”目录（加载更快）")
+  (automatically-compile "生成“compiled”目录（加载会更快）")
   (preserve-stacktrace-information "保留堆栈跟踪信息（禁用某些优化）")
+  (enforce-module-constants-checkbox-label "强制常量定义（激活内联优化）")
   (expression-level-stacktrace "表达式级堆栈跟踪")
   (function-level-stacktrace "函数级堆栈跟踪")
   (submodules-to-run "运行子module")
@@ -1115,6 +1173,13 @@
   (module-language-name "由源代码来确定语言")
   (module-language-one-line-summary "由#lang行来确定实际使用的语言")
   (module-language-auto-text "自动加入#lang行") ;; shows up in the details section of the module language
+  ;; the next four string constants show up in the REPL in DrRacket in the "Racket Language",
+  ;; which is also the "Determine language from source" language. They are put right after the name
+  ;; of the language from the "#lang" line at the beginning of the source file
+  (module-language-repl-no-annotations "")
+  (module-language-repl-debug-annotations ",带调试")
+  (module-language-repl-debug/profile-annotations ",带调试和性能分析")
+  (module-language-repl-test-annotations "，带测试覆盖率")
   
   ;; for the upper portion of the language dialog
   (the-racket-language "Racket语言")
@@ -1123,7 +1188,7 @@
   ;; the next two string constants appear in the
   ;; language dialog with a list
   ;; of example languages appearing between them
-  (racket-language-discussion "你的程序将从#lang开始，从而指定想用的方言。例如：\n")
+  (racket-language-discussion "你的程序将从#lang开始，由此指定想用的方言。例如：\n")
   (racket-language-discussion-end "\n……诸如此类")
   
   ;; the next three string constants are put into a message-box dialog
@@ -1200,16 +1265,20 @@
   (profiling-show-profile "显示性能分析")
   (profiling-hide-profile "隐藏性能分析")
   (profiling-unknown-src "《未知》")
-  (profiling-no-information-available "没有可用的性能分析信息。请确定在语言设置中启用了性能分析，并且运行了当前程序。")
+  (profiling-no-information-available
+   "没有可用的性能分析信息。请确定在语言设置中启用了性能分析，并已运行了当前程序。")
   (profiling-clear? "改变定义视窗的内容将导致性能分析信息失效。是否继续？")
   
   ;; test coverage
-  (test-coverage-clear? "改变定义视窗将导致测试覆盖信息失效。是否继续？")
-  (test-coverage-clear-and-do-not-ask-again "是，并且不再询问")
-  (test-coverage-ask? "询问清除测试覆盖")
+  (test-coverage-clear? "改变定义视窗将导致测试覆盖率信息失效。是否继续？")
+  (test-coverage-clear-and-do-not-ask-again "是，并不再询问")
+  (test-coverage-ask? "询问是否清除测试覆盖率")
+  (test-coverage-entirely-covered "所有表达式都已覆盖")
+  (test-coverage-next-time-check-box "下次显示？")
+  (test-coverage-summary "显示测试覆盖率结果报告")
   
-  (test-coverage-on "覆盖的测试")
-  (test-coverage-off "未覆盖的测试")
+  (test-coverage-on "测试已覆盖")
+  (test-coverage-off "测试未覆盖")
   
   ;; tracing
   (tracing-enable-tracing "启用跟踪")
@@ -1369,11 +1438,12 @@
   
   (stepper-no-earlier-application-step "前向无调用步骤。")
   (stepper-no-later-application-step "无调用步骤。")
+  (stepper-complete "所有定义都已执行完毕。")
   
   (stepper-no-earlier-step "前向无步骤。")
   (stepper-no-later-step "无步骤。")
   
-  (stepper-no-selected-step "选中区域中没有步骤。可能这些是注释？")
+  (stepper-no-selected-step "选中区域里没有步骤。可能这些是注释？")
   
   (stepper-no-last-step "最后步骤暂未生成。")
   
@@ -1414,7 +1484,7 @@
   (ml-cp-raise "上移")
   (ml-cp-lower "下移")
   
-  (ml-always-show-#lang-line "在Module语言中，始终显示#langhang")
+  (ml-always-show-#lang-line "在Module语言中，始终显示#lang行")
   
   ;; Strings for Profj removed as ProfessorJ is no longer actively developed as part of DrScheme
   
@@ -1428,26 +1498,28 @@
   ;;Following two appear in Racket (Java, etc) menu, cause Tests to be Run automatically or not
   (test-engine-enable-tests "启用测试")
   (test-engine-disable-tests "停用测试")
+  (test-engine-enable-disable-tests-only-in-teaching-languages
+   "启用/停用测试菜单项只控制HtDP和DMdA教学语言中的测试。要控制Racket语言中的子module，参阅语言选择对话框中“显示详情”部分。")
   
-  (test-engine-ran-1-test "运行了1个test。")
-  (test-engine-ran-1-check "运行了1个check。")
+  (test-engine-ran-1-test "运行了1个测试。")
+  (test-engine-ran-1-check "运行了1个检查。")
   ;; ditto, only plural
-  (test-engine-ran-n-tests "运行了~a个test。")
-  (test-engine-ran-n-checks "运行了~a个check。")
-  (test-engine-1-test-passed "Test通过！")
-  (test-engine-1-check-passed "Check通过！")
-  (test-engine-both-tests-passed "全部test通过！")
-  (test-engine-both-checks-passed "全部check通过！")
-  (test-engine-all-tests-passed "全部test通过！")
-  (test-engine-all-checks-passed "全部check通过！")
-  (test-engine-all-n-tests-passed "所有~a个test通过！")
-  (test-engine-all-n-checks-passed "所有~a个check通过！")
-  (test-engine-0-tests-passed "0个test通过。")
-  (test-engine-0-checks-passed "0个check通过。")
-  (test-engine-m-of-n-tests-failed "~a个test失败（共~a个test）。")
-  (test-engine-m-of-n-checks-failed "~a个check失败（共~a个check）。")
+  (test-engine-ran-n-tests "运行了~a个测试。")
+  (test-engine-ran-n-checks "运行了~a个检查。")
+  (test-engine-1-test-passed "测试通过！")
+  (test-engine-1-check-passed "检查通过！")
+  (test-engine-both-tests-passed "全部测试通过！")
+  (test-engine-both-checks-passed "全部检查通过！")
+  (test-engine-all-tests-passed "全部测试通过！")
+  (test-engine-all-checks-passed "全部检查通过！")
+  (test-engine-all-n-tests-passed "所有~a个测试通过！")
+  (test-engine-all-n-checks-passed "所有~a个检查通过！")
+  (test-engine-0-tests-passed "0个测试通过。")
+  (test-engine-0-checks-passed "0个检查通过。")
+  (test-engine-m-of-n-tests-failed "~a个测试失败（共~a个测试）。")
+  (test-engine-m-of-n-checks-failed "~a个检查失败（共~a个检查）。")
   (test-engine-must-be-tested "程序必须要测试！")
-  (test-engine-is-unchecked "程序还没有check！")
+  (test-engine-is-unchecked "程序还没有检查！")
   (test-engine-tests-disabled "测试未启用。")
   (test-engine-should-be-tested "程序需要测试。")
   (test-engine-at-line-column "于行~a，列~a")
@@ -1540,7 +1612,8 @@
   
   ;; GUI Tool
   (gui-tool-heading "GUI工具")
-  (gui-tool-before-clicking-message "在点击工具图标之前，请先使用“特殊符号”菜单中的“插入GUI”命令插入一个GUI根对象，或先选中另一个GUI。")
+  (gui-tool-before-clicking-message
+   "在点击工具图标之前，请先使用“特殊符号”菜单中的“插入GUI”命令插入一个GUI根对象，或先选中另一个GUI。")
   (gui-tool-show-gui-toolbar "显示GUI工具栏")
   (gui-tool-hide-gui-toolbar "隐藏GUI工具栏")
   (gui-tool-insert-gui "插入GUI")
@@ -1587,6 +1660,7 @@
   ;; menu item in the 'edit' menu; applies to editors with programs in them
   ;; (technically, editors that implement color:text<%>)
   (spell-check-string-constants "对字符串常量进行拼写检查")
+  (spell-check-scribble-text "对文本进行拼写检查（Scribble中{}中的文本）")
   (spelling-dictionaries "拼写检查字典") ; (sub)menu whose items are the different possible dictionaries
   (default-spelling-dictionary "默认字典") ; first item in menu from previous line
   (misspelled-text-color "拼写错误文本的颜色") ;; in the preferences dialog  
@@ -1594,4 +1668,32 @@
   ; puts the path to the spell program in the ~a and then the error message
   ; is put following this string (with a blank line in between)
   (spell-program-wrote-to-stderr-on-startup "拼写程序（~a）给出错误信息：")
+  (spell-skip-to-next-misspelled-word "跳至下一个拼错的单词") ;; menu item
+  (spell-suggest-corrections "建议拼写更正…") ;; menu item
+  (spell-correction-suggestions "拼写纠错建议") ;; dialog title
+  (spell-choose-replacement-word "选择替代词") ;; label in dialog
+
+  ;; GUI for installing a pkg package; available via File|Install Package...
+  (install-pkg-menu-item... "安装Package…")
+  (install-pkg-dialog-title "安装Package")
+  (pkg-manager-menu-item "Package管理…")
+  
+  ;; open a file via a collection path (new "Open" menu item in DrRacket)
+  (open-require-path "打开Require路径…")
+  (enter-subcollection "进入子collection") ; button in new dialog
+  (path-to-racket-binary "二进制文件的路径")
+  (use-a-different-racket "使用另一个racket")
+
+  ;; adding racket/bin to the path; only under mac os x
+  ; first ~a is filled with either the empty string or an error message from elsewhere
+  ;  (bracketed by some newlines to separate it out)
+  ; second ~a is filled with /etc/paths.d/racket (or some other path like it in the future)
+  ; third ~a is filled with the path to the bin directory of the current drracket
+  (adding-racket/bin-to-path-failed 
+   "尝试在命令行添加racket支持失败。~a具体来说，无法在“~a”中创建内容“~a”。")
+  ; first and third ~a are filled with /etc/paths.d/racket (or some other path like it in the future)
+  ; and the second one is filled with the path to the bin directory that was put into that file.
+  (added-racket/bin-to-path
+   "现在可以在命令行使用racket和其附带的工具了。\n\n已为所有用户配置默认PATH，添加~a指向~a。如果需要，可以通过删除~a恢复此设置。")
+  (add-racket/bin-to-path "配置Racket命令行…") ;; menu item label
   )

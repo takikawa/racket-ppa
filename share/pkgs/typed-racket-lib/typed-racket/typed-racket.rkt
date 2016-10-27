@@ -16,7 +16,6 @@
          with-type
          (for-syntax do-standard-inits))
 
-
 (define-syntax-rule (drivers [name sym] ...)
   (begin
     (begin-for-syntax

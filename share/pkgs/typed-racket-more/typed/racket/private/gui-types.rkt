@@ -68,7 +68,7 @@
     (->* [Real Real Exact-Nonnegative-Integer Exact-Nonnegative-Integer Bytes]
          [Any Any #:unscaled? Any]
          Void)]
-   [get-backing-scale (-> Nonnegative-Real)]
+   [get-backing-scale (-> Positive-Real)]
    [get-depth (-> Exact-Nonnegative-Integer)]
    [get-handle (-> Any)]
    [get-height (-> Exact-Positive-Integer)]
@@ -1072,7 +1072,7 @@
                [min-height (Option Natural) #:optional]
                [stretchable-width Any #:optional]
                [stretchable-height Any #:optional])
-         [get-value (-> Natural)]
+         [get-value (-> Fixnum)]
          [set-value (Integer -> Void)]))
 
 (define-type Choice%

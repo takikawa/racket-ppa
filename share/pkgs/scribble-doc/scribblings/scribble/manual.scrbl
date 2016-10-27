@@ -1949,6 +1949,28 @@ produced by @racket[content-expr] should normally start with a capital
 letter and end with a period, but it can be a sentence fragment such
 as ``Added a @racket[#:changed] form.''
 
+Examples:
+@codeblock[#:keep-lang-line? #f]|{
+#lang scribble/manual
+@defthing[tasty-burrito burrito?]{
+  Compatible with the API of a sandwich, but not legally a
+  sandwich in Massachusetts.
+
+  @history[#:added "1.0"
+           #:changed "1.1" "Refactored tortilla."
+           #:changed "1.2" @elem{Now includes @emph{guacamole}.}]
+}
+}|
+@doc-render-examples[
+  @defthing[tasty-burrito burrito?]{
+    Compatible with the API of a sandwich, but not legally a
+    sandwich in Massachusetts.
+
+    @history[#:added "1.0"
+             #:changed "1.1" "Refactored tortilla."
+             #:changed "1.2" @elem{Now includes @emph{guacamole}.}]
+}]
+
 @history[#:added "1.1"]}
 
 @; ------------------------------------------------------------------------
@@ -2049,10 +2071,15 @@ rendered document.}
 Indicates that the index entry corresponds to a module definition via
 @racket[defmodule] and company.}
 
-@defstruct[(language-index-desc module-path-index-desc) ()]{
-
+@deftogether[(
+@defstruct[(language-index-desc module-path-index-desc) ()]{}
+@defstruct[(reader-index-desc module-path-index-desc) ()]{}
+)]{
 Indicates that the index entry corresponds to a module definition via
-@racket[defmodulelang], etc.}
+@racket[defmodule] with the @racket[#:lang] or @racket[#:reader] option.
+For example, a module definition via @racket[defmodulelang] has a
+@racket[language-index-desc] index entry and a module definition via
+@racket[defmodulereader] has a @racket[reader-index-desc] index entry.}
 
 @defstruct[exported-index-desc ([name symbol?]
                                [from-libs (listof module-path?)])]{

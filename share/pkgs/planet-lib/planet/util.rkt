@@ -108,7 +108,7 @@
 (define unlink-all remove-all-linkage!)
 
 ;; to remove:
-;;   -- setup-plt -c the package
+;;   -- raco setup -c the package
 ;;   -- remove relevant infodomain cache entries
 ;;   -- delete files from cache directory
 ;;   -- remove any existing linkage for package

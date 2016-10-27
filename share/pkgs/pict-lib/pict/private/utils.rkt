@@ -71,7 +71,7 @@
    [scale (case-> (-> pict-convertible? number? number? pict?)
                   (-> pict-convertible? number? pict?))]
    [scale-to-fit (->* (pict-convertible? (or/c number? pict-convertible?))
-                      (number? #:mode (or/c 'preserve 'inset 'distort))
+                      (number? #:mode (or/c 'preserve 'inset 'preserve/max 'inset/max 'distort))
                       pict?)]
    [rotate (case-> (-> pict-convertible? number? pict?))]
    [pin-line (->* (pict-convertible?
@@ -383,40 +383,75 @@
                        color border-color border-width
                        #:draw-border? draw-border?))
 
-  (define cloud
-    (case-lambda
-     [(w h) (cloud w h "gray")]
-     [(w h color)
-      (dc
-       (lambda (dc x y)
-	 (let ([b (send dc get-brush)]
-	       [p (send dc get-pen)])
-	   (send dc set-pen (send the-pen-list
-				  find-or-create-pen
-				  "white" 0 'transparent))
-	   (send dc set-brush (send the-brush-list
-				    find-or-create-brush
-				    color
-				    'solid))
-	   (send dc draw-ellipse
-		 x (+ y (* 1/4 h))
-		 (* 1/2 w) (* 1/2 h))
-	   (send dc draw-ellipse
-		 (+ x (* 1/5 w)) y
-		 (* 3/5 w) (add1 (* 2/5 h)))
-	   (send dc draw-ellipse
-		 (+ x (* 1/5 w)) (+ y (* 1/3 h))
-		 (* 3/5 w) (* 2/3 h))
-	   (send dc draw-ellipse
-		 (+ x (* 3/5 w)) (+ y (* 1/4 h))
-		 (* 2/5 w) (* 1/3 h))
-	   (send dc draw-ellipse
-		 (+ x (* 3/5 w)) (+ y (* 1/2 h))
-		 (* 2/5 w) (* 1/3 h))
+  (define (cloud w h [color "gray"]
+                 #:style [style null])
+    (dc
+     (lambda (dc x y)
+       (let ([b (send dc get-brush)]
+             [p (send dc get-pen)])
+         (send dc set-pen (send the-pen-list
+                                find-or-create-pen
+                                "white" 0 'transparent))
+         (send dc set-brush (send the-brush-list
+                                  find-or-create-brush
+                                  color
+                                  'solid))
+         (send dc draw-ellipse
+               x (+ y (* 1/4 h))
+               (* 1/2 w) (* 1/2 h))
+         (if (memq 'wide style)
+             (begin
+               (send dc draw-ellipse
+                     (+ x (* 1/5 w)) y
+                     (* 3/10 w) (add1 (* 2/5 h)))
+               (send dc draw-ellipse
+                     (+ x (* 2/5 w)) y
+                     (* 3/10 w) (add1 (* 22/50 h)))
+               (send dc draw-ellipse
+                     (+ x (* 1/5 w)) (+ y (* 1/3 h))
+                     (* 1/3 w) (* 2/3 h))
+               (send dc draw-ellipse
+                     (+ x (* 2/5 w)) (+ y (* 1/3 h))
+                     (* 3/10 w) (* 2/3 h)))
+             (begin
+               (send dc draw-ellipse
+                     (+ x (* 1/5 w)) y
+                     (* 3/5 w) (add1 (* 2/5 h)))
+               (send dc draw-ellipse
+                     (+ x (* 1/5 w)) (+ y (* 1/3 h))
+                     (* 3/5 w) (* 2/3 h))))
+         (send dc draw-ellipse
+               (+ x (* 3/5 w)) (+ y (* 1/4 h))
+               (* 2/5 w) (* 1/3 h))
+         (send dc draw-ellipse
+               (+ x (* 3/5 w)) (+ y (* 1/2 h))
+               (* 2/5 w) (* 1/3 h))
 
-	   (send dc set-brush b)
-	   (send dc set-pen p)))
-       w h)]))
+         (when (or (memq 'square style)
+                   (memq 'nw style))
+           (send dc draw-ellipse
+               x y
+               (* 2/5 w) (* 1/2 h)))
+         (when (or (memq 'square style)
+                   (memq 'sw style))
+           (send dc draw-ellipse
+               x (+ y (* 1/2 h))
+               (* 1/3 w) (* 1/2 h)))
+         
+         (when (or (memq 'square style)
+                   (memq 'ne style))
+           (send dc draw-ellipse
+               (+ x (* 3/5 w)) y
+               (* 2/5 w) (* 2/5 h)))
+         (when (or (memq 'square style)
+                   (memq 'se style))
+           (send dc draw-ellipse
+               (+ x (* 3/5 w)) (+ y (* 2/3 h))
+               (* 2/5 w) (* 1/3 h)))
+         
+         (send dc set-brush b)
+         (send dc set-pen p)))
+     w h))
   
   (define (thermometer #:height-% [height-% 1]
                        #:color-% [color-% height-%]
@@ -1095,7 +1130,7 @@
   
   ;; arg spec is not great. started as a case-lambda, then grew a keyword arg
   (define (scale-to-fit main-pict w-or-size-pict [h-or-false #f]
-                        #:mode [mode 'preserve]) ; or: 'inset 'distort
+                        #:mode [mode 'preserve]) ; or: 'inset 'distort 'preserve/max 'inset/max
     (cond [(not h-or-false) ; scale to the size of another pict
            (define size-pict w-or-size-pict)
            (unless (pict-convertible? size-pict)
@@ -1116,12 +1151,16 @@
                ((preserve inset)
                 (let ([factor (min wfactor0 hfactor0)])
                   (values factor factor)))
+               [(preserve/max inset/max)
+                (define factor (max wfactor0 hfactor0))
+                (values factor factor)]
                ((distort)
                 (values wfactor0 hfactor0))))
            (define scaled-pict (scale main-pict wfactor hfactor))
            (case mode
-             ((inset)
-              (cc-superimpose (blank w h) scaled-pict))
+             [(inset inset/max)
+              (define b (blank w h))
+              (refocus (cc-superimpose b scaled-pict) b)]
              (else
               scaled-pict))]))
   

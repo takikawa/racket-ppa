@@ -13,22 +13,9 @@
          defined-check
          not-expression-context
          
-         metafunc-proc-clause-names
-         metafunc-proc-pict-info
-         metafunc-proc-lang
-         metafunc-proc-multi-arg?
-         metafunc-proc-name
-         metafunc-proc-in-dom?
-         metafunc-proc-dom-pat
-         metafunc-proc-cases
-         metafunc-proc-gen-clauses
-         metafunc-proc?
-         make-metafunc-proc
-         
          make-language-id
          language-id-nts
          language-id-nt-aliases
-         language-id-binding-table
          language-id-nt-identifiers
          language-id-nt-hole-map
          pattern-symbols
@@ -68,8 +55,8 @@
   (when (eq? (syntax-local-context) 'expression)
     (raise-syntax-error #f "not allowed in an expression context" stx)))
 
-(define-values (language-id make-language-id language-id? language-id-get language-id-set) 
-  (make-struct-type 'language-id #f 6 0 #f '() #f 0))
+(define-values (language-id make-language-id language-id? language-id-get language-id-set)
+  (make-struct-type 'language-id #f 5 0 #f '() #f 0))
 
 (define (language-id-nts stx id) (language-id-getter stx id 1))
 (define (language-id-getter stx id n)
@@ -83,27 +70,9 @@
 (define (language-id-nt-aliases stx id) (language-id-getter stx id 2))
 (define (language-id-nt-identifiers stx id) (language-id-getter stx id 3))
 (define (language-id-nt-hole-map stx id) (language-id-getter stx id 4))
-(define (language-id-binding-table stx id) (language-id-getter stx id 5))
 
 (define pattern-symbols '(any number natural integer real string variable 
                               variable-not-otherwise-mentioned hole symbol))
-
-(define-values (struct:metafunc-proc
-                make-metafunc-proc
-                metafunc-proc?
-                metafunc-proc-ref
-                metafunc-proc-set!)
-  (make-struct-type 'metafunc-proc #f 10 0 #f null (current-inspector) 0))
-(define metafunc-proc-clause-names (make-struct-field-accessor metafunc-proc-ref 1))
-(define metafunc-proc-pict-info (make-struct-field-accessor metafunc-proc-ref 2))
-(define metafunc-proc-lang (make-struct-field-accessor metafunc-proc-ref 3))
-(define metafunc-proc-multi-arg? (make-struct-field-accessor metafunc-proc-ref 4))
-(define metafunc-proc-name (make-struct-field-accessor metafunc-proc-ref 5))
-(define metafunc-proc-in-dom? (make-struct-field-accessor metafunc-proc-ref 6))
-(define metafunc-proc-dom-pat (make-struct-field-accessor metafunc-proc-ref 7))
-(define metafunc-proc-cases (make-struct-field-accessor metafunc-proc-ref 8))
-(define metafunc-proc-gen-clauses (make-struct-field-accessor metafunc-proc-ref 9))
-
 
 (define (build-disappeared-use id-stx-table nt id-stx)
   (cond

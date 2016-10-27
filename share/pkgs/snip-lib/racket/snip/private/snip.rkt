@@ -740,8 +740,13 @@
                                    0
                                    (list-ref tabs (- n 1)))])
                      (let ([tabspace (* tabspace mult)])
+                       (define padding
+                         (if media
+                             (let-values ([(l t r b) (send media get-padding)]) l)
+                             0))
+                       (define ex-minus-padding (- ex padding))
                        (+ base (- (->long tabspace)
-                                  (modulo (->long (- ex base))
+                                  (modulo (->long (- ex-minus-padding base))
                                           (->long tabspace))))))
                    (let ([v (list-ref tabs i)])
                      (if ((* mult v) . > . ex)
