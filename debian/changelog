@@ -1,8 +1,9 @@
-racket (6.7-1) UNRELEASED; urgency=medium
+racket (6.7-1) unstable; urgency=medium
 
   * New upstream release
+  * Exclude some source files from compression (fix for https://github.com/racket/scribble/issues/57)
 
- -- David Bremner <bremner@debian.org>  Thu, 27 Oct 2016 08:56:11 -0300
+ -- David Bremner <bremner@debian.org>  Sat, 29 Oct 2016 09:14:40 -0300
 
 racket (6.6-1) unstable; urgency=medium
 
