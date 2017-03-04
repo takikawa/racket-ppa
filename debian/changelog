@@ -1,3 +1,11 @@
+racket (6.7-2) unstable; urgency=medium
+
+  * Patch libcrypto.rkt to look for openssl 1.1, recommend libssl1.1. Bug
+    fix: "Raco fails without libssl-dev", thanks to Martin Tang (Closes:
+    #836346).
+
+ -- David Bremner <bremner@debian.org>  Sun, 05 Mar 2017 08:55:03 -0400
+
 racket (6.7-1) unstable; urgency=medium
 
   * New upstream release
