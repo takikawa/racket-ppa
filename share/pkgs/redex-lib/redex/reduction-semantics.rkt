@@ -73,6 +73,8 @@
          substitute)
 
 (provide redex-check
+         redex-enum
+         redex-index
          generate-term
          check-metafunction
          check-reduction-relation

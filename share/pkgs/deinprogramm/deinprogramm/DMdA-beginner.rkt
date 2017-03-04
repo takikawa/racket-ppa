@@ -5,6 +5,7 @@
 	 require lib planet provide
          define lambda cond if else and or
          define-record-procedures define-record-procedures-parametric
+	 match
          .. ... .... ..... ......
 	 check-expect check-within check-error check-member-of check-range
 	 check-property for-all ==> expect expect-within expect-member-of expect-range

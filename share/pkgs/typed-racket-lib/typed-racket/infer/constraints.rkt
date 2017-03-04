@@ -1,11 +1,11 @@
 #lang racket/unit
 
 (require "../utils/utils.rkt"
-	 (types abbrev union subtype)
+	 (types abbrev subtype)
 	 racket/dict
-         "fail.rkt" "signatures.rkt" "constraint-structs.rkt"
-         racket/match
-         racket/list)
+     "fail.rkt" "signatures.rkt" "constraint-structs.rkt"
+     racket/match
+     racket/list)
 
 (import intersect^ dmap^)
 (export constraints^)
@@ -26,7 +26,8 @@
 (define (insert cs var S T)
   (match cs
     [(struct cset (maps))
-     (make-cset (for/list ([(map dmap) (in-dict maps)])
+     (make-cset (for/list ([map-entry (in-list maps)])
+                  (match-define (cons map dmap) map-entry)
                   (cons (hash-set map var (make-c S T))
                         dmap)))]))
 

@@ -51,6 +51,8 @@
 
               gdk_screen_get_default
 
+              gtk_get_minor_version
+
               ;; for declaring derived structures:
               _GtkObject
 
@@ -199,6 +201,9 @@
                  (g_slist_free gl)))))
 
 (define-gdk gdk_screen_get_default (_fun -> _GdkScreen))
+
+(define-gtk gtk_get_minor_version (_fun -> _uint)
+  #:fail (lambda () (lambda () 0)))
 
 (define (mnemonic-string orig-s)
   (string-join

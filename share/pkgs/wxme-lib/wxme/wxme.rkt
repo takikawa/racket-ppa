@@ -469,26 +469,32 @@
                      [dx (read-inexact who port vers "image-snip x-offset")]
                      [dy (read-inexact who port vers "image-snip y-offset")]
                      [relative (read-integer who port vers "image-snip relative?")])
-                 (let ([data
-                        (and (and (equal? filename #"")
-                                  (cvers . > . 1)
-                                  (not (zero? type)))
-                             ;; inlined image
-                             (apply
-                              bytes-append
-                              (let ([len (read-fixed-integer who port vers "image-snip image length")])
-                                (let loop ([i 0])
-                                  (if (= i len)
-                                      null
-                                      (cons
-                                       (read-raw-string who port vers "image-snip image content")
-                                       (loop (add1 i))))))))])
+                 (let-values ([(backing-scale data)
+                               (if (and (equal? filename #"")
+                                        (cvers . > . 1)
+                                        (not (zero? type)))
+                                   ;; inlined image
+                                   (let ([len (read-fixed-integer who port vers "image-snip image length")])
+                                     (values
+                                      (if (= type 4)
+                                          (read-inexact who port vers "backing scale")
+                                          1.0)
+                                      (apply
+                                       bytes-append
+                                       (let loop ([i 0])
+                                         (if (= i len)
+                                             null
+                                             (cons
+                                              (read-raw-string who port vers "image-snip image content")
+                                              (loop (add1 i))))))))
+                                   (values 1.0 #f))])
                    (if (header-plain-text? header)
                        #"."
                        (make-object image%
                          (if data #f filename)
                          data w h dx dy
-                         relative (int->img-type type))))))]
+                         relative (int->img-type type)
+                         backing-scale)))))]
             [else
              (if (header-skip-content? header)
                  #f

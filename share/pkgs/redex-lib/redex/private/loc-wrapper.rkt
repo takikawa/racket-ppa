@@ -23,9 +23,9 @@
              (column pnum)
              (column-span pnum)
              (unq? boolean?)
-             (metafunction? boolean?)))
- [build-lw (-> any/c pnum pnum pnum pnum lw?)])
+             (metafunction? boolean?))))
 
 (provide to-lw
          to-lw/uq
-         curly-quotes-for-strings)
+         curly-quotes-for-strings
+         build-lw)

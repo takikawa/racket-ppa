@@ -116,8 +116,17 @@
 		  (g_free f))))))
    default))
 (define (get-control-font-size)
-  (get-control-font (lambda (m) (string->number (cadr m)))
-		    10))
+  (define s (get-control-font (lambda (m) (string->number (cadr m)))
+                              10))
+  (cond
+   [(and gtk3?
+         ((gtk_get_minor_version) . >= . 22))
+    ;; As of version 3.22, a size in points ends up rounded
+    ;; to an integral absolute size for 96 DPI; see also
+    ;; `install-control-font`
+    (* (round (* s (/ 96.0 72.0))) (/ 72.0 96.0))]
+   [else s]))
+
 (define (get-control-font-face)
   (get-control-font (lambda (m) (car m))
 		    "Sans"))
@@ -147,9 +156,10 @@
 
 (define/top (make-screen-bitmap [exact-positive-integer? w]
                                 [exact-positive-integer? h])
-  (if (eq? 'unix (system-type))
+  (if (and (eq? 'unix (system-type))
+           (not wayland?))
       (make-object x11-bitmap% w h #f)
-      (make-object bitmap% w h #f #t)))
+      (make-object bitmap% w h #f #t (display-bitmap-resolution 0 (lambda () 1.0)))))
 
 (define/top (make-gl-bitmap [exact-positive-integer? w]
                             [exact-positive-integer? h]

@@ -35,6 +35,8 @@ interactions window. Given the definition of @racket[square] as in the
 figure above, typing @racket[(square 2)] in the interactions window
 produces the result @racket[4].
 
+The blue quarter circle in the upper right corner provides access
+to the summary information from the documentation.
 The @deftech{status line} at the bottom of DrRacket's window provides
 information about the current line and position of the editing caret,
 whether the current file can be modified, and whether DrRacket is
@@ -54,10 +56,10 @@ name}. Clicking the button opens a menu that shows the file's full
 pathname. Selecting one of the menu entries produces an open-file
 dialog starting in the corresponding directory.
 
-Below the filename button is a @as-index{@onscreen{(define ...)}
+Beside the filename button is a @as-index{@onscreen{(define ...)}
 button} for a pop-up menu of names that are defined in the definitions
-window. Selecting an item from the menu moves the blinking caret to
-the corresponding definition.
+window. Selecting an item from the menu moves the insertion point (blinking
+caret) to the corresponding definition.
 
 The @as-index{@onscreen{Save} button} appears whenever the definitions
 window is modified. Clicking the button saves the contents of the
@@ -115,7 +117,7 @@ annotations:
        the context the macro is used in.
 
        @index['("alpha renaming")]{Additionally}, right-clicking (or
-       Control-clicking on Mac OS X) on a variable activates a
+       Control-clicking on Mac OS) on a variable activates a
        pop-up menu that lets you jump from binding location to bound
        location and vice versa, @as-index{@"\u03B1"-rename} the
        variable, or tack the arrows so they do not disappear.}
@@ -127,7 +129,7 @@ annotations:
        expression.}
 
   @item{@bold{Require Annotations:} Right-clicking (or
-        Control-clicking on Mac OS X) on the argument to
+        Control-clicking on Mac OS) on the argument to
         @racket[require] activates a pop-up menu that lets you open the
         file that contains the @racket[require]d module.
 
@@ -146,15 +148,15 @@ annotations:
 Check Syntax also runs automatically as you edit your program,
 and the bottom, rightmost corner of the DrRacket window
 shows its status. A red dot means that something has gone wrong;
-move your mouse over the dot to find out what is wrong. Mismatched parentheses indicates
-that the buffer's parens are also mismatched; mouse over the parens for details.
+move your mouse over the dot to find out what is wrong.
 
 When nothing goes wrong, the colors indicate the stages processing of the program:
 blue (expanding), purple (computing check syntax information), orchid (updating the
 editor with the check syntax information), and green (finished).
 
-Also, right-clicking in that area yields a menu that lets you disable
-(or re-enable) automatic Check Syntax.
+Also, right-clicking (or control clicking) in that area
+yields a menu that lets you disable (or re-enable) automatic
+Check Syntax.
 
 The @as-index{@onscreen{Run} button} evaluates the program in the
 @tech{definitions window} and resets the @tech{interactions window}.
@@ -332,7 +334,7 @@ separate tabs} causes DrRacket to open files in new tabs in the
 frontmost window, rather than opening a new window for the file.
 
 The key bindings Control-Pageup and Control-Pagedown move between
-tabs. On Mac OS X, Command-Left-Square-Bracket and Command-Right-Square-Bracket also
+tabs. On Mac OS, Command-Left-Square-Bracket and Command-Right-Square-Bracket also
 move between tabs.
 
 @; ----------------------------------------------------------------------
@@ -418,7 +420,7 @@ expressions and results. For example, evaluating
 
 in the interactions window produces a special box for entering input:
 
-@centerline{@image[#:scale 0.6 "io.png"]}
+@centerline{@image[#:scale 0.7 "io.png"]}
 
 Type a number into the box and hit Enter, and that number becomes the
 result of the @racket[(read)] expression. Once text is submitted for
@@ -570,7 +572,7 @@ XML boxes have two modes for handling whitespace. In one mode, all
 whitespace is left intact in the resulting xexpr.  In the other mode,
 any tag that only contains nested XML expressions and whitespace has
 the whitespace removed. You can toggle between these modes by
-right-clicking or Control-clicking (Mac OS X) on the top portion of
+right-clicking or Control-clicking (Mac OS) on the top portion of
 the XML box.
 
 In addition to containing XML text, XML boxes can also
@@ -582,7 +584,7 @@ box and the splicing Racket box. The standard Racket box
 inserts its value into the containing xexpr. The contents of
 the splice box must evaluate to a list and the elements of
 the list are ``flattened'' into the containing xexpr.
-Right-clicking or control-clicking (Mac OS X) on the top of a Racket
+Right-clicking or control-clicking (Mac OS) on the top of a Racket
 box opens a menu to toggle the box between a Racket box and
 a Racket splice box.
 
@@ -653,7 +655,7 @@ additional actions:
 @itemize[
 
     @item{Hovering the mouse cursor over a parenthesis may reveal a
-pink circle.  If so, right-clicking or control-clicking (Mac OS X)
+pink circle.  If so, right-clicking or control-clicking (Mac OS)
 will open a menu with options to @onscreen{Pause at this point} or
 @onscreen{Continue to this point}.  The former sets an ordinary
 breakpoint at that location; the latter sets a one-time breakpoint and
@@ -673,7 +675,7 @@ window.  These breakpoints are not forgotten, and clicking
 @italic{not} persist across restarts of DrRacket.}
 
     @item{If execution is paused at the start of an expression, then
-right-clicking or control-clicking (Mac OS X) on the green triangle
+right-clicking or control-clicking (Mac OS) on the green triangle
 opens a menu with the option to @onscreen{Skip expression...}.
 Selecting this opens a text box in which to enter a value for the
 expression.  The expression is skipped, with the entered value
@@ -681,7 +683,7 @@ substituted for it.}
 
     @item{If execution is paused at the end of an expression, then the
 expression and its value are displayed to the left of the button bar.
-Right-clicking or control-clicking (Mac OS X) on the green triangle
+Right-clicking or control-clicking (Mac OS) on the green triangle
 opens a menu with options to @onscreen{Print return value to console}
 and @onscreen{Change return value...}.  The former displays the return
 value in the interactions window; the latter opens a text box in which
@@ -689,7 +691,7 @@ to enter a substitute value.}
 
     @item{Hovering the mouse cursor over a bound variable displays the
 variable's name and value to the right of the button bar.
-Right-clicking or control-clicking (Mac OS X) opens a menu with
+Right-clicking or control-clicking (Mac OS) opens a menu with
 options to @onscreen{Print value of <var> to console} or
 @onscreen{(set! <var> ...)}.  The former displays the variable's value
 in the interactions window; the latter opens a text box in which to
@@ -710,13 +712,13 @@ The bottom of the pane shows the lexical variables in the selected
 stack frame.
 
 The following screenshot illustrates several aspects of the debugger
-interface.  The red circle before the @racket[if] is a breakpoint,
-and the green triangle at the end of the @racket[(fact (sub1 n))] is where
+interface.  The red circle in the body of @racket[for/sum] is a breakpoint,
+and the green triangle at the end of the @racket[(+ i n)] is where
 execution is currently paused.  The expression's return value is
-displayed at the left of the button bar, and the value of @racket[n]
-is displayed in the stack view pane.
+displayed at the left of the button bar, and the value of @racket[i]
+and other variables are displayed in the stack view pane.
 
-@centerline{@image[#:scale 0.5 "debugger1.png"]}
+@centerline{@image[#:scale 0.7 "debugger1.png"]}
 
 @subsection{Debugging Multiple Files}
 
@@ -922,7 +924,7 @@ determined by its suffix:
        16x16, 32x32, or 48x48 images from the @filepath{.ico} file are
        used.}
 
- @item{On Mac OS X, supply an @filepath{.icns} file for an icon.  You
+ @item{On Mac OS, supply an @filepath{.icns} file for an icon.  You
        can set the application's creator with an @filepath{.creator}
        file (whose first four bytes are used), and you can set
        documents for the application through a @filepath{.utiexports}

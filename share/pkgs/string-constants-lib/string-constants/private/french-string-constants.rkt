@@ -1094,7 +1094,7 @@
   (~a-must-end-with-~a
    "Le nom de fichier ~a\n\n  ~a\n\nest illégal. Le nom de fichier doit se terminer par « .~a ».")
   (macosx-executables-must-end-with-app
-   "Le nom de fichier\n\n  ~a\n\nest illégal. Sous MacOS X, un exécutable doit être un répertoire dont le nom se termine par .app.")
+   "Le nom de fichier\n\n  ~a\n\nest illégal. Sous Mac OS, un exécutable doit être un répertoire dont le nom se termine par .app.")
   (warning-directory-will-be-replaced
    "ATTENTION : le répertoire :\n\n  ~a\n\nva être remplacé. Voulez-vous continuer ?")
 

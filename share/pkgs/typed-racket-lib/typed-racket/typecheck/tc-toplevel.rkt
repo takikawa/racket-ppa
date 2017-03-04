@@ -2,10 +2,10 @@
 
 (require (rename-in "../utils/utils.rkt" [infer r:infer])
          racket/syntax syntax/parse syntax/stx syntax/id-table
-         racket/list racket/dict racket/match racket/sequence
+         racket/list racket/match racket/sequence
          (prefix-in c: (contract-req))
-         (rep type-rep)
-         (types utils abbrev type-table struct-table)
+         (rep core-rep type-rep values-rep)
+         (types utils abbrev type-table struct-table resolve)
          (private parse-type type-annotation syntax-properties type-contract)
          (env global-env init-envs type-name-env type-alias-env
               lexical-env env-req mvar-env scoped-tvar-env
@@ -101,7 +101,7 @@
               [mk-ty (match struct-type
                        [(Poly-names: ns body)
                         (make-Poly ns
-                          ((map fld-t (Struct-flds body)) #f . ->* . (make-App t (map make-F ns) #f)))]
+                          ((map fld-t (Struct-flds body)) #f . ->* . (make-App t (map make-F ns))))]
                        [else
                         ((map fld-t (Struct-flds struct-type)) #f . ->* . t)])])
          (register-type #'r.name mk-ty)
@@ -150,7 +150,7 @@
          [(v:typed-id^ ...)
           (define top-level? (eq? (syntax-local-context) 'top-level))
           (for ([var (in-list vars)])
-            (when (dict-has-key? unann-defs var)
+            (when (free-id-table-ref unann-defs var #f)
               (free-id-table-remove! unann-defs var))
             (finish-register-type var top-level?))
           (stx-map make-def-binding #'(v ...) (attribute v.type))]
@@ -349,9 +349,10 @@
   ;; Add the struct names to the type table, but not with a type
   (let ((names (map name-of-struct struct-defs))
         (type-vars (map type-vars-of-struct struct-defs)))
-    (for ([name names])
+    (for ([name (in-list names)]
+          [tvars (in-list type-vars)])
       (register-resolved-type-alias
-       name (make-Name name 0 #t)))
+       name (make-Name name (length tvars) #t)))
     (for-each register-type-name names)
     (for-each add-constant-variance! names type-vars))
   (do-time "after adding type names")
@@ -397,14 +398,18 @@
           [(plain-stx-binding? def) other-def]
           [(plain-stx-binding? other-def) def]
           [else (int-err "Two conflicting definitions: ~a ~a" def other-def)]))
-      (dict-update h (binding-name def) merge-def-bindings #f)))
+      (free-id-table-update h (binding-name def) merge-def-bindings #f)))
   (do-time "computed def-tbl")
+  ;; check that all parsed apps are sensible
+  (check-registered-apps!)
   ;; typecheck the expressions and the rhss of defintions
   ;(displayln "Starting pass2")
   (for-each tc-toplevel/pass2 forms)
   (do-time "Finished pass2")
   ;; check that declarations correspond to definitions
+  ;; and that any additional parsed apps are sensible
   (check-all-registered-types)
+  (check-registered-apps!)
   ;; log messages to check-syntax to show extra types / arrows before failures
   (log-message online-check-syntax-logger
                'info
@@ -425,10 +430,10 @@
            (let loop ([f f])
              (syntax-parse f
                [i:id
-                (values (dict-update h #'i (lambda (tail) (cons #'i tail)) '())
+                (values (free-id-table-update h #'i (lambda (tail) (cons #'i tail)) '())
                         extra)]
                [((~datum rename) in out)
-                (values (dict-update h #'in (lambda (tail) (cons #'out tail)) '())
+                (values (free-id-table-update h #'in (lambda (tail) (cons #'out tail)) '())
                         extra)]
                [((~datum for-meta) 0 fm)
                 (values (loop #'fm) extra)]

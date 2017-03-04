@@ -172,6 +172,7 @@ expression.
 @scribble-examples|==={
   @foo{(+ 1 2) -> @(+ 1 2)!}
   @foo{A @"string" escape}
+  @"@"
 }===|
 
 Note that an escaped Racket string is merged with the surrounding text

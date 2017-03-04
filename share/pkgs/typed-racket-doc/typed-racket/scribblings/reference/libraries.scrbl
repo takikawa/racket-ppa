@@ -175,6 +175,7 @@ and the @racket[URL] and @racket[Path/Param] types from
 @defmodule/incl[typed/racket/date]
 @defmodule/incl[typed/racket/draw]
 @defmodule/incl[typed/racket/gui]
+@defmodule/incl[typed/racket/gui/no-check]
 @defmodule/incl[typed/racket/random @history[#:added "1.5"]]
 @defmodule/incl[typed/racket/sandbox]
 @defmodule/incl[typed/racket/snip]
@@ -221,6 +222,7 @@ written in Typed Racket or have adapter modules that are typed:
 @defmodule/also[images/flomap]
 @defmodule/incl[typed/images/logos]
 @defmodule/incl[typed/images/icons]
+@defmodule/incl[typed/images/compile-time]
 
 @section{Porting Untyped Modules to Typed Racket}
 

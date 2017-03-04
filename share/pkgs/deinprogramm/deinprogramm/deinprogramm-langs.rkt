@@ -1063,8 +1063,8 @@
       
       ;; with-mark : syntax syntax exact-nonnegative-integer -> syntax
       ;; a member of stacktrace-imports^
-      ;; guarantees that the continuation marks associated with teaching-languages-continuation-mark-key are
-      ;; members of the debug-source type
+      ;; guarantees that the continuation marks associated with
+      ;; teaching-languages-continuation-mark-key are members of the debug-source type
       (define (with-mark source-stx expr phase)
         (let ([source (syntax-source source-stx)]
               [line (syntax-line source-stx)]
@@ -1076,11 +1076,18 @@
                    (number? span))
               (with-syntax ([expr expr]
                             [mark (list source line col start-position span)]
-                            [teaching-languages-continuation-mark-key teaching-languages-continuation-mark-key])
-                #`(with-continuation-mark 'teaching-languages-continuation-mark-key
-                    'mark
+                            [teaching-languages-continuation-mark-key 
+                             teaching-languages-continuation-mark-key]
+                            [wcm (syntax-shift-phase-level #'with-continuation-mark 
+                                                           (- phase base-phase))]
+                            [quot (syntax-shift-phase-level #'quote (- phase base-phase))])
+                #`(wcm (quot teaching-languages-continuation-mark-key)
+                    (quot mark)
                     expr))
               expr)))
+
+      (define base-phase
+        (variable-reference->module-base-phase (#%variable-reference)))
       
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ;;

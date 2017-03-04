@@ -52,11 +52,8 @@
 
     (define steps-position #f)
 
-    (define/private (status msg)
-      (send stepper change-status msg))
     (define-syntax-rule (with-status msg . body)
-      (begin (send stepper change-status msg)
-             (begin0 (let () . body))))
+      (begin . body))
 
     (super-new)
 

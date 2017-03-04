@@ -30,7 +30,10 @@
          pkg/gui
          framework/private/logging-timer
          (submod "frame.rkt" install-pkg)
-         (for-syntax racket/base))
+         (for-syntax racket/base)
+         (prefix-in 2: (combine-in 2htdp/image
+                                   (only-in mrlib/image-core
+                                            render-image))))
 
 (struct exn-info (str src-vecs exn-stack missing-mods) #:prefab)
 
@@ -38,16 +41,28 @@
 (module oc-status-structs racket/base
   ;; the online compilation state for individual tabs
   ;; oc-state is either:
-  ;;   (clean (or/c symbol? #f)
-  ;;          (or/c (non-empty-listof 
-  ;;                 (exn-info string? 
-  ;;                           (listof (vector number? number?))
-  ;;                           (listof string?)
-  ;;                           (or/c #f module-path?)))
-  ;;                #f))
-  ;;   (dirty boolean?)
-  ;;   (running symbol? string?)
-  (struct clean (error-type error-messages+locs) #:transparent)
+  #; 
+  (clean (or/c symbol? #f)
+         (or/c (non-empty-listof
+                (exn-info string?
+                          (listof (vector number? number?))
+                          (listof string?)
+                          (or/c #f module-path?)))
+               #f)
+         ;; the vector is the results of `transform-module` from
+         ;; eval-helpers-and-pref-init.rkt in the case that online
+         ;; expansion was able to compile the file (except
+         ;; that instead of a syntax object, we have the bytes
+         ;; for a compiled object). The `module-path?` is
+         ;; probably never a `path?`.
+         (or/c (vector/c bytes? symbol? module-path?)
+               #f))
+  #;
+  (dirty boolean?)
+  #;
+  (running symbol? string?)
+
+  (struct clean (error-type error-messages+locs compiled-code) #:transparent)
   (struct dirty (timer-pending?) #:transparent)
   (struct running (sym str) #:transparent)
   
@@ -92,7 +107,7 @@
   (import [prefix drracket:language-configuration: drracket:language-configuration/internal^]
           [prefix drracket:language: drracket:language/int^]
           [prefix drracket:unit: drracket:unit^]
-          [prefix drracket:rep: drracket:rep^]
+          [prefix drracket:rep: drracket:rep/int^]
           [prefix drracket:init: drracket:init^]
           [prefix drracket:module-language-tools: drracket:module-language-tools/int^]
           [prefix drracket:modes: drracket:modes^]
@@ -421,43 +436,58 @@
                                             (module-path-index-join
                                              path
                                              #f))))
+
         (define-values (name lang module-expr)
-          (let ([expr
-                 ;; just reading the definitions might be a syntax error,
-                 ;; possibly due to bad language (eg, no foo/lang/reader)
-                 (with-handlers ([exn:fail? (λ (e)
-                    ;; [Eli] FIXME: use `read-language' on `port' after calling
-                    ;; `file-position' to reset it to the beginning (need to
-                    ;; make sure that it's always a seekable port), then see
-                    ;; the position that we're left at, re-read that part of
-                    ;; the port (a second reset), construct a string holding
-                    ;; the #lang, and read from it an empty module, and extract
-                    ;; the base module from it (ask Matthew about this).
-                                              (raise-hopeless-exception e))])
-                   (super-thunk))])
-            (when (eof-object? expr)
-              (raise-hopeless-syntax-error (string-append
-                                            "There must be a valid module in the\n"
-                                            "definitions window.  Try starting your program with\n"
-                                            "\n"
-                                            "  #lang racket\n"
-                                            "or\n"
-                                            "  #lang htdp/bsl\n"
-                                            "\n"
-                                            "and clicking ‘Run’.")))
-            (let ([more (super-thunk)])
-              (unless (eof-object? more)
-                (raise-hopeless-syntax-error
-                 "there can only be one expression in the definitions window"
-                 more)))
-            (transform-module path expr raise-hopeless-syntax-error)))
-        (define modspec (or path `',(syntax-e name)))
+          (cond
+            [(drracket:rep:current-pre-compiled-transform-module-results)
+             =>
+             (λ (transform-module-results)
+               (define compiled-expression
+                 (parameterize ([read-accept-compiled #t])
+                   (read (open-input-bytes (vector-ref transform-module-results 2)))))
+               (values
+                (vector-ref transform-module-results 0)
+                (vector-ref transform-module-results 1)
+                (with-syntax ([x compiled-expression]) #'x)))]
+            [else
+             (define expr
+               ;; just reading the definitions might be a syntax error,
+               ;; possibly due to bad language (eg, no foo/lang/reader)
+               (with-handlers ([exn:fail?
+                                (λ (e)
+                                  ;; [Eli] FIXME: use `read-language' on `port' after calling
+                                  ;; `file-position' to reset it to the beginning (need to
+                                  ;; make sure that it's always a seekable port), then see
+                                  ;; the position that we're left at, re-read that part of
+                                  ;; the port (a second reset), construct a string holding
+                                  ;; the #lang, and read from it an empty module, and extract
+                                  ;; the base module from it (ask Matthew about this).
+                                  (raise-hopeless-exception e))])
+                 (super-thunk)))
+             (when (eof-object? expr)
+               (raise-hopeless-syntax-error (string-append
+                                             "There must be a valid module in the\n"
+                                             "definitions window.  Try starting your program with\n"
+                                             "\n"
+                                             "  #lang racket\n"
+                                             "or\n"
+                                             "  #lang htdp/bsl\n"
+                                             "\n"
+                                             "and clicking ‘Run’.")))
+             (let ([more (super-thunk)])
+               (unless (eof-object? more)
+                 (raise-hopeless-syntax-error
+                  "there can only be one expression in the definitions window"
+                  more)))
+             (transform-module path expr raise-hopeless-syntax-error)]))
+
+        (define modspec (or path `',name))
         (define (check-interactive-language)
           (unless (memq '#%top-interaction (namespace-mapped-symbols))
             (raise-hopeless-exception
              #f ; no error message, just a suffix
              (format "~s does not support a REPL (no #%top-interaction)"
-                     (syntax->datum lang)))))
+                     lang))))
         ;; We're about to send the module expression to drracket now, the rest
         ;; of the setup is done in `front-end/finished-complete-program' below,
         ;; so use `repl-init-thunk' to store an appropriate continuation for
@@ -1043,8 +1073,13 @@
         (inner (void) on-close))
       
       ;; (or/c clean? dirty? running?)
-      (define running-status (clean #f #f))
+      (define running-status (clean #f #f #f))
       (define our-turn? #f)
+
+      (define/public (get-pre-compiled-transform-module-results)
+        (and (preferences:get 'drracket:online-compilation-default-on)
+             (clean? running-status)
+             (clean-compiled-code running-status)))
       
       (define/public (set-oc-status s) 
         (unless (equal? running-status s)
@@ -1061,7 +1096,7 @@
         (send (get-defs) begin-edit-sequence #f #f)
         (send (get-defs) clear-old-error)
         (when (clean? running-status)
-          (match-define (clean error-type error-messages+locs) running-status)
+          (match-define (clean error-type error-messages+locs compiled-code) running-status)
           (when error-messages+locs
             (define pref-key
               (case error-type
@@ -1114,7 +1149,10 @@
       
       (define/public (update-little-dot)
         (when (eq? this (send (get-frame) get-current-tab))
-          (send (get-frame) frame-show-bkg-running (get-colors) (get-label))))
+          (define star?
+            (and (clean? running-status)
+                 (clean-compiled-code running-status)))
+          (send (get-frame) frame-show-bkg-running (get-colors) (get-label) #:star? star?)))
       
       (define/private (get-colors)
         (cond
@@ -1173,7 +1211,7 @@
         (when (or (set-member? dep-paths path)
                   (set-member? error-dep-paths path))
           (oc-set-dirty this)))
-      
+
       (super-new)))
   
   (define module-language-online-expand-text-mixin
@@ -1595,6 +1633,7 @@
       
       ;; colors : (or/c #f (listof string?))
       (define colors #f)
+      (define star? #f)
       (define tooltip-labels #f)
       (define/public (get-online-expansion-colors) colors)
       
@@ -1628,7 +1667,15 @@
               (new button% 
                    [parent expand-error-button-parent-panel]
                    [stretchable-width #t]
-                   [label sc-jump-to-error]
+                   [label (string-append
+                           sc-jump-to-error
+                           (case (car (get-default-shortcut-prefix))
+                             [(cmd)
+                              (if (equal? (system-type) 'macosx)
+                                  " (⌘.)"
+                                  "")]
+                             [(control) " (Ctrl+.)"]
+                             [else ""]))]
                    [font small-control-font]
                    [callback (λ (b evt) (send (send (get-current-tab) get-defs) expand-error-next))]))
         (set! expand-error-multiple-child
@@ -1748,12 +1795,15 @@
         (oc-new-active)
         (super on-activate active?))
       
-      (define/public (frame-show-bkg-running new-colors labels)
+      (define/public (frame-show-bkg-running new-colors labels #:star? [_new-star? #f])
+        (define new-star? (and _new-star? #t))
         (unless (equal? tooltip-labels labels)
           (set! tooltip-labels labels)
           (update-tooltip))
-        (unless (equal? new-colors colors)
+        (unless (and (equal? new-colors colors)
+                     (equal? new-star? star?))
           (set! colors new-colors)
+          (set! star? new-star?)
           (send running-canvas refresh)))
      
       (define tooltip-frame #f)
@@ -1789,51 +1839,65 @@
         (when tooltip-frame
           (send tooltip-frame show #f)))
 
-      (define parens-mismatch-str "())")
       (define ball-size 10)
-      (define parens-mismatch-font
-        (send the-font-list find-or-create-font
-              (send small-control-font get-point-size)
-              (send small-control-font get-face)
-              (send small-control-font get-family)
-              (send small-control-font get-style)
-              'bold
-              (send small-control-font get-underlined)
-              (send small-control-font get-smoothing)
-              (send small-control-font get-size-in-pixels)))
               
       (define running-canvas
         (let ([tlw this])
           (new (class canvas%
                  (inherit get-dc popup-menu refresh get-client-size)
+                 (define star-table (make-hash))
+                 (define/private (get-star color)
+                   (cond
+                     [(hash-ref star-table color #f) => values]
+                     [else
+                      (define i (2:star-polygon 6 9 4 "solid" color))
+                      (define bmp (make-bitmap (2:image-width i) (2:image-height i)))
+                      (define bdc (make-object bitmap-dc% bmp))
+                      (2:render-image i bdc 0 0)
+                      (send bdc set-bitmap #f)
+                      (hash-set! star-table color bmp)
+                      bmp]))
                  (define/override (on-paint)
                    (let ([dc (get-dc)])
-                     (define colors-to-draw
+                     (define-values (colors-to-draw star?-to-draw)
                        (cond
-                         [(not (in-module-language tlw)) #f]
+                         [(not (in-module-language tlw)) (values #f #f)]
                          [(preferences:get 'drracket:online-compilation-default-on)
-                          colors]
-                         [else (list "red")]))
+                          (values colors star?)]
+                         [else (values (list "red") #f)]))
                      (when colors-to-draw
-                       (send dc set-smoothing 'aligned)
-                       (send dc set-pen "black" 1 'transparent)
-                       (send dc set-text-foreground "darkred")
-                       (send dc set-font parens-mismatch-font)
-                       (define-values (tw th td ta) (send dc get-text-extent parens-mismatch-str))
-                       (define-values (cw ch) (get-client-size))
                        (when (list? colors-to-draw)
+                         (define-values (cw ch) (get-client-size))
                          (define len (length colors-to-draw))
+                         (send dc set-smoothing 'aligned)
+                         (send dc set-pen "black" 1 'transparent)
+                         (define old-clip (send dc get-clipping-region))
+                         (define clipping-diameter (if star? (max cw ch) ball-size))
                          (for ([color (in-list colors-to-draw)]
                                [i (in-naturals)])
-                           (if color
-                               (send dc set-brush color 'solid)
-                               (send dc set-brush "black" 'transparent))
-                           (send dc draw-arc 
-                                 (- (/ cw 2) (/ ball-size 2))
-                                 (- (/ ch 2) (/ ball-size 2))
-                                 ball-size ball-size
+                           (define region (new region% [dc dc]))
+                           (send region set-arc
+                                 (- (/ cw 2) (/ clipping-diameter 2))
+                                 (- (/ ch 2) (/ clipping-diameter 2))
+                                 clipping-diameter clipping-diameter
                                  (+ (* pi 1/2) (* 2 pi (/ i len)))
-                                 (+ (* pi 1/2) (* 2 pi (/ (+ i 1) len)))))))))
+                                 (+ (* pi 1/2) (* 2 pi (/ (+ i 1) len))))
+                           (send dc set-clipping-region region)
+                           (cond
+                             [star?
+                              (when color
+                                (define the-star (get-star color))
+                                (send dc draw-bitmap the-star
+                                      (/ (- cw (send the-star get-width)) 2)
+                                      (/ (- ch (send the-star get-height)) 2)
+                                      'solid
+                                      (send the-color-database find-color color)))]
+                             [else
+                              (if color
+                                  (send dc set-brush color 'solid)
+                                  (send dc set-brush "black" 'transparent))
+                              (send dc draw-rectangle 0 0 cw ch)])
+                           (send dc set-clipping-region old-clip))))))
                  (define cb-proc (λ (sym new-val)
                                    (set! colors #f)
                                    (refresh)))
@@ -1866,10 +1930,8 @@
                  
                  (inherit min-width min-height)
                  (let ([dc (get-dc)])
-                   (send dc set-font parens-mismatch-font)
-                   (define-values (w h d a) (send dc get-text-extent parens-mismatch-str))
-                   (min-width (ceiling (inexact->exact (max w ball-size))))
-                   (min-height (ceiling (inexact->exact (max h ball-size)))))))))))
+                   (min-width ball-size)
+                   (min-height ball-size))))))))
   
   (define error-message%
     (class canvas%
@@ -2098,11 +2160,11 @@
       [(eq? tab running-tab)
        (line-of-interest)
        (stop-place-running)
-       (send tab set-oc-status (clean #f #f))]
+       (send tab set-oc-status (clean #f #f #f))]
       [(eq? tab dirty/pending-tab)
        (line-of-interest)
        (send oc-timer stop)
-       (send tab set-oc-status (clean #f #f))]
+       (send tab set-oc-status (clean #f #f #f))]
       [else
        (line-of-interest)
        (void)])
@@ -2207,7 +2269,8 @@
                       (list (exn-info sc-only-raw-text-files-supported
                                       (list (vector (+ filename/loc 1) 1))
                                       '()
-                                      #f))))
+                                      #f))
+                      #f))
          (oc-maybe-start-something)])))
 
   (define/oc-log (oc-finished res)    
@@ -2235,7 +2298,7 @@
                    (send running-tab get-defs)
                    val)]))))
          
-         (send running-tab set-oc-status (clean #f #f))
+         (send running-tab set-oc-status (clean #f #f (vector-ref res 3)))
          (send running-tab set-dep-paths (list->set (vector-ref res 2)) #f)]
         [else
          (line-of-interest)
@@ -2246,7 +2309,8 @@
                                               sc-abnormal-termination-out-of-memory
                                               sc-abnormal-termination)
                                           '() '() #f))
-                          (vector-ref res 1))))
+                          (vector-ref res 1))
+                      #f))
          (send running-tab set-dep-paths (list->set (vector-ref res 2)) #t)])
       (oc-maybe-start-something)))
   
@@ -2873,7 +2937,7 @@
        (define p (peek-char-or-special port))
        (cond
          [(eof-object? p) (void)]
-         [(char-whitespace? p)
+         [(and (char? p) (char-whitespace? p))
           (read-char-or-special port)
           (loop)]
          [else (void)])])))

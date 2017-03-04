@@ -584,6 +584,9 @@ please adhere to these guidelines:
   (style-and-color-names "Style && Color Names")
   
   (add-spacing-between-lines "Add one pixel of extra space between lines")
+
+  (editor-x-selection-mode "Explicitly require a copy operation before a paste / Do not automatically copy the selection")
+
   
  ; title of the color choosing dialog
 
@@ -1105,7 +1108,7 @@ please adhere to these guidelines:
  (~a-must-end-with-~a
   "The ~a filename\n\n  ~a\n\nis illegal. The filename must end with “.~a”.")
  (macosx-executables-must-end-with-app
-  "The filename\n\n  ~a\n\nis illegal. Under MacOS X, an executable must be a directory whose name ends with .app.")
+  "The filename\n\n  ~a\n\nis illegal. Under Mac OS, an executable must be a directory whose name ends with .app.")
  (warning-directory-will-be-replaced
   "WARNING: the directory:\n\n  ~a\n\nwill be replaced. Proceed?")
  
@@ -1267,6 +1270,10 @@ please adhere to these guidelines:
   (module-language-repl-debug-annotations ", with debugging")
   (module-language-repl-debug/profile-annotations ", with debugging and profiling")
   (module-language-repl-test-annotations ", with test coverage")
+
+  (module-language-#lang-error-more-information "More Information")
+  (module-language-#lang-flush-cache "Reload")
+  (module-language-#lang-flush-cache-menu-item "Reload #lang Extensions")
 
   ;; for the upper portion of the language dialog
   (the-racket-language "The Racket Language")

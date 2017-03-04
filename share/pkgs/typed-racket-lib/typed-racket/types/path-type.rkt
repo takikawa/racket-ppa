@@ -3,16 +3,16 @@
 (require "../utils/utils.rkt"
          racket/match racket/set
          (contract-req)
-         (rep object-rep type-rep)
+         (rep object-rep type-rep values-rep)
          (utils tc-utils)
          (typecheck renamer)
-         (types subtype resolve union)
+         (types subtype resolve)
          (except-in (types utils abbrev kw-types) -> ->* one-of/c))
 
 (require-for-cond-contract (rep rep-utils))
 
 (provide/cond-contract
- [path-type ((listof PathElem?) Type/c . -> . Type/c)])
+ [path-type ((listof PathElem?) Type? . -> . (or/c Type? #f))])
 
 
 ;; returns the result of following a path into a type
@@ -24,48 +24,63 @@
 ;; It is intentionally reset each time we decrease the
 ;; paths size on a recursive call, and maintained/extended
 ;; when the path does not decrease on a recursive call.
-(define (path-type path t [resolved (set)])
-  (match* (t path)
-    ;; empty path
-    [(t (list)) t]
-    
-    ;; pair ops
-    [((Pair: t s) (list rst ... (CarPE:)))
-     (path-type rst t)]
-    [((Pair: t s) (list rst ... (CdrPE:)))
-     (path-type rst s)]
+(define (path-type path t)
+  (let path-type ([path (reverse path)]
+                  [t t]
+                  [resolved (hash)])
+    (match* (t path)
+      ;; empty path
+      [(t (list)) t]
 
-    ;; syntax ops
-    [((Syntax: t) (list rst ... (SyntaxPE:)))
-     (path-type rst t)]
+      ;; -- non-empty path beyond here --
+      
+      ;; pair ops
+      [((Pair: t s) (cons (CarPE:) rst))
+       (path-type rst t (hash))]
+      [((Pair: t s) (cons (CdrPE:) rst))
+       (path-type rst s (hash))]
 
-    ;; promise op
-    [((Promise: t) (list rst ... (ForcePE:)))
-     (path-type rst t)]
+      ;; syntax ops
+      [((Syntax: t) (cons (SyntaxPE:) rst))
+       (path-type rst t (hash))]
 
-    ;; struct ops
-    [((Struct: nm par flds proc poly pred)
-      (list rst ... (StructPE: (? (λ (s) (subtype t s)) s) idx)))
-     (match-let ([(fld: ft _ _) (list-ref flds idx)])
-       (path-type rst ft))]
-    
-    [((Union: ts) _)
-     (apply Un (map (λ (t) (path-type path t resolved)) ts))]
-    
-    ;; paths into polymorphic types
-    [((Poly: _ body-t) _) (path-type path body-t resolved)]
-    [((PolyDots: _ body-t) _) (path-type path body-t resolved)]
-    [((PolyRow: _ _ body-t) _) (path-type path body-t resolved)]
-    
-    ;; for private fields in classes
-    [((Function: (list (arr: doms (Values: (list (Result: rng _ _))) _ _ _)))
-      (list rst ... (FieldPE:)))
-     (path-type rst rng)]
+      ;; promise op
+      [((Promise: t) (cons (ForcePE:) rst))
+       (path-type rst t (hash))]
 
-    ;; types which need resolving
-    [((? needs-resolving?) _) #:when (not (set-member? resolved t))
-     (path-type path (resolve-once t) (set-add resolved t))]
-    
-    ;; type/path mismatch =(
-    [(_ _) Err]))
+      ;; struct ops
+      [((Struct: nm par flds proc poly pred) (cons (StructPE: struct-ty idx) rst))
+       #:when  (subtype t struct-ty)
+       (match-let ([(fld: ft _ _) (list-ref flds idx)])
+         (path-type rst ft (hash)))]
+
+      [((Intersection: ts) _)
+       (apply -unsafe-intersect (for*/list ([t (in-list ts)]
+                                            [t (in-value (path-type path t resolved))]
+                                            #:when t)
+                                  t))]
+      [((Union: _ ts) _)
+       ;; drop base types, since they are incompatible w/ a path element
+       (Union-fmap (λ (t) (or (path-type path t resolved) -Bottom)) -Bottom ts)]
+
+      ;; paths into polymorphic types
+      ;; TODO can this expose unbound type indices... probably. It should be
+      ;; shielded with a check for type indexes/variables/whatever.
+      [((Poly: _ body-t) _) (path-type path body-t resolved)]
+      [((PolyDots: _ body-t) _) (path-type path body-t resolved)]
+      [((PolyRow: _ _ body-t) _) (path-type path body-t resolved)]
+      [((Distinction: _ _ t) _) (path-type path t resolved)]
+
+      ;; for private fields in classes
+      [((Function: (list (arr: doms (Values: (list (Result: rng _ _))) _ _ _)))
+        (cons (FieldPE:) rst))
+       (path-type rst rng (hash))]
+
+      ;; types which need resolving
+      [((? resolvable?) _) #:when (not (hash-ref resolved t #f))
+       (path-type path (resolve-once t) (hash-set resolved t #t))]
+
+      ;; type/path mismatch =(
+      [(_ _) #f])))
+
 

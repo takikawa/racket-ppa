@@ -2,7 +2,7 @@
 
 (require "../utils/utils.rkt"
          "env-utils.rkt"
-         syntax/id-table racket/dict
+         syntax/id-table
          (utils tc-utils)
          (typecheck renamer)
          racket/match)
@@ -11,7 +11,8 @@
          lookup-type-alias
          resolve-type-aliases
          register-resolved-type-alias
-         type-alias-env-map)
+         type-alias-env-map
+         type-alias-env-for-each)
 
 (define-struct alias-def () #:inspector #f)
 (define-struct (unresolved alias-def) (stx [in-process #:mutable]) #:inspector #f)
@@ -56,7 +57,7 @@
      t]))
 
 (define (resolve-type-aliases parse-type)
-  (for ([id (in-dict-keys the-mapping)])
+  (for ([id (in-list (free-id-table-keys the-mapping))])
     (resolve-type-alias id parse-type)))
 
 ;; map over the-mapping, producing a list
@@ -64,4 +65,9 @@
 (define (type-alias-env-map f)  
   (for/list ([(id t) (in-sorted-dict the-mapping id<)]
              #:when (resolved? t))
+    (f id (resolved-ty t))))
+
+(define (type-alias-env-for-each f)  
+  (for ([(id t) (in-sorted-dict the-mapping id<)]
+        #:when (resolved? t))
     (f id (resolved-ty t))))

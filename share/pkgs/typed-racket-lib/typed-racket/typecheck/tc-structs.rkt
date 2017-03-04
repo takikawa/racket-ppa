@@ -159,19 +159,19 @@
 
   ;; the base-type, with free type variables
   (define name-type
-    (make-Name (struct-names-type-name names) 0 #t))
+    (make-Name (struct-names-type-name names) (length tvars) #t))
   (define poly-base
     (if (null? tvars)
         name-type
-        (make-App name-type (map make-F tvars) #f)))
+        (make-App name-type (map make-F tvars))))
 
   ;; is this structure covariant in *all* arguments?
   (define (covariant-for? fields mutable)
     (for*/and ([var (in-list tvars)]
                [t (in-list fields)])
-      (let ([variance (hash-ref (free-vars-hash (free-vars* t)) var Constant)])
-        (or (eq? variance Constant)
-            (and (not mutable) (eq? variance Covariant))))))
+      (let ([variance (hash-ref (free-vars-hash (free-vars* t)) var variance:const)])
+        (or (variance:const? variance)
+            (and (not mutable) (variance:co? variance))))))
   (define covariant?
     (and (covariant-for? self-fields mutable)
          (covariant-for? parent-fields parent-mutable)))
@@ -350,7 +350,7 @@
 ;; FIXME - figure out how to make this lots lazier
 (define/cond-contract (tc/builtin-struct nm parent fld-names tys kernel-maker)
      (c:-> identifier? (c:or/c #f identifier?) (c:listof identifier?)
-           (c:listof Type/c) (c:or/c #f identifier?)
+           (c:listof Type?) (c:or/c #f identifier?)
            c:any/c)
   (define parent-type
     (and parent (resolve-name (make-Name parent 0 #t))))

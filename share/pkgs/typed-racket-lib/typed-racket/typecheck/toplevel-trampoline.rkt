@@ -38,7 +38,7 @@
                        syntax/kerncase
                        syntax/parse
                        syntax/stx
-                       (rep type-rep)
+                       (rep type-rep values-rep)
                        (optimizer optimizer)
                        (types utils abbrev printer generalize)
                        (typecheck tc-toplevel possible-domains)
@@ -135,7 +135,7 @@
            ;; has no meaningful type to print
            ['no-type #f]
            ;; don't print results of type void
-           [(tc-result1: (== -Void type-equal?)) #f]
+           [(tc-result1: (== -Void)) #f]
            ;; don't print results of unknown type
            [(tc-any-results: f) #f]
            [(tc-result1: t f o)
@@ -146,7 +146,7 @@
             (define tc (cleanup-type t))
             (define tg (generalize tc))
             (format "- : ~a~a~a\n"
-                    (pretty-format-type tg #:indent 4)
+                    (pretty-format-rep tg #:indent 4)
                     (cond [(equal? tc tg) ""]
                           [else (format " [more precisely: ~a]" tc)])
                     (cond [(equal? tc t) ""]
@@ -157,14 +157,14 @@
             (define tcs (map cleanup-type t))
             (define tgs (map generalize tcs))
             (define tgs-val (make-Values (map -result tgs)))
-            (define formatted (pretty-format-type tgs-val #:indent 4))
+            (define formatted (pretty-format-rep tgs-val #:indent 4))
             (define indented? (regexp-match? #rx"\n" formatted))
             (format "- : ~a~a~a\n"
                     formatted
                     (cond [(andmap equal? tgs tcs) ""]
                           [indented?
                            (format "\n[more precisely: ~a]"
-                                   (pretty-format-type (make-Values (map -result tcs))
+                                   (pretty-format-rep (make-Values (map -result tcs))
                                                        #:indent 17))]
                           [else (format " [more precisely: ~a]" (cons 'Values tcs))])
                     ;; did any get pruned?

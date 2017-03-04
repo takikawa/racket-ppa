@@ -1019,7 +1019,7 @@
   (~a-must-end-with-~a
    "~a文件名\n\n  ~a\n\n不合法。文件名必须以\".~a\"结尾。")
   (macosx-executables-must-end-with-app
-   "~a文件名\n\n  ~a\n\n不合法。在MacOS X中，文件名必须以.app结尾。")
+   "~a文件名\n\n  ~a\n\n不合法。在Mac OS中，文件名必须以.app结尾。")
   (warning-directory-will-be-replaced
    "警告：目录：\n\n  ~a\n\n将会被重置。继续操作？")
   

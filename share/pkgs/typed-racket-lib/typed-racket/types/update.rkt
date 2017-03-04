@@ -4,9 +4,9 @@
 (require racket/match racket/list
          (contract-req)
          (infer-in infer)
-         (rep type-rep prop-rep object-rep rep-utils)
+         (rep core-rep type-rep prop-rep object-rep values-rep rep-utils)
          (utils tc-utils)
-         (types resolve subtype remove union)
+         (types resolve subtype subtract)
          (rename-in (types abbrev)
                     [-> -->]
                     [->* -->*]
@@ -22,35 +22,28 @@
 ;; path-elems : which fields we're traversing to update,
 ;;   in *syntactic order* (e.g. (car (cdr x)) -> '(car cdr))  
 (define/cond-contract (update t new-t pos? path-elems)
-  (Type/c Type/c boolean? (listof PathElem?) . -> . Type/c)
-  ;; build-type: build a type while propogating bottom
-  (define (build constructor . args)
-    (if (memf Bottom? args) -Bottom (apply constructor args)))
+  (Type? Type? boolean? (listof PathElem?) . -> . Type?)
   ;; update's inner recursive loop
   ;; puts path in *accessed* order
   ;; (i.e. (car (cdr x)) --> (list cdr car))
   (let update
     ([t t] [path (reverse path-elems)])
     (match path
-      ;; path is empty (base case)
-      [(list) (cond
-                [pos? (intersect (resolve t) new-t)]
-                [else (remove (resolve t) new-t)])]
       ;; path is non-empty
       ;; (i.e. there is some field access we'll try and traverse)
       [(cons path-elem rst)
        (match* ((resolve t) path-elem)
          ;; pair ops
          [((Pair: t s) (CarPE:))
-          (build -pair (update t rst) s)]
+          (rebuild -pair (update t rst) s)]
          [((Pair: t s) (CdrPE:))
-          (build -pair t (update s rst))]
+          (rebuild -pair t (update s rst))]
          ;; syntax ops
          [((Syntax: t) (SyntaxPE:))
-          (build -Syntax (update t rst))]
+          (rebuild -Syntax (update t rst))]
          ;; promise op
          [((Promise: t) (ForcePE:))
-          (build -Promise (update t rst))]
+          (rebuild -Promise (update t rst))]
          
          ;; struct ops
          [((Struct: nm par flds proc poly pred)
@@ -85,11 +78,25 @@
           (make-Function
            (list (make-arr* doms (update rng rst))))]
          
-         [((Union: ts) _)
-          (apply Un (map (λ (t) (update t path)) ts))]
+         [((Union: _ ts) _)
+          ;; Note: if there is a path element, then all Base types are
+          ;; incompatible with the type and we can therefore drop the
+          ;; bases from the union
+          (Union-fmap (λ (t) (update t path)) -Bottom ts)]
+
+         [((Intersection: ts) _)
+          (for/fold ([t Univ])
+                    ([elem (in-list ts)])
+            (intersect t (update elem path)))]
          
          [(_ _)
-          ;; This likely comes up with (-lst t) and we need to improve the system to make sure this case
-          ;; dosen't happen
-          ;;(int-err "update along ill-typed path: ~a ~a ~a" t t* lo)
-          t])])))
+          (match path-elem
+            [(CarPE:) (intersect t (-pair (update Univ rst) Univ))]
+            [(CdrPE:) (intersect t (-pair Univ (update Univ rst)))]
+            [(SyntaxPE:) (intersect t (-syntax-e (update Univ rst)))]
+            [(ForcePE:) (intersect t (-force (update Univ rst)))]
+            [_ t])])]
+      ;; path is empty (base case)
+      [_ (cond
+           [pos? (intersect (resolve t) new-t)]
+           [else (subtract (resolve t) new-t)])])))

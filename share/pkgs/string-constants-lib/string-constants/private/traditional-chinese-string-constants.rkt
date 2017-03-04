@@ -955,7 +955,7 @@
   (~a-must-end-with-~a
    "~a文件名\n\n  ~a\n\n不合法。文件名必須以\".~a\"結尾。")
   (macosx-executables-must-end-with-app
-   "~a文件名\n\n  ~a\n\n不合法。在MacOS X中，文件名必須以.app結尾。")
+   "~a文件名\n\n  ~a\n\n不合法。在Mac OS中，文件名必須以.app結尾。")
   (warning-directory-will-be-replaced
    "警告：目錄：\n\n  ~a\n\n將會被重置。繼續操作？")
   

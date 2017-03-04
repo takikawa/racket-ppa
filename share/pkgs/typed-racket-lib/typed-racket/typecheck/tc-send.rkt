@@ -20,10 +20,10 @@
                  method-var method
                  arg-vars args
                  [expected #f])
-  ;; do-check : Type/c -> tc-results/c
+  ;; do-check : Type? -> tc-results/c
   (define (do-check rcvr-type)
     (match rcvr-type
-      [(Instance: (? needs-resolving? type))
+      [(Instance: (? resolvable? type))
        (do-check (make-Instance (resolve type)))]
       [(and obj (Instance: (Class: _ _ _ methods _ _)))
        (match (tc-expr/t method)
@@ -41,10 +41,8 @@
          [_ (int-err "non-symbol methods not supported by Typed Racket: ~a"
                      rcvr-type)])]
       ;; union of objects, check pointwise and union the results
-      [(Union: (list (and objs (Instance: _)) ...))
-       (merge-tc-results
-        (for/list ([obj (in-list objs)])
-          (do-check obj)))]
+      [(Union: (? Bottom?) objs) #:when (andmap Instance? objs)
+       (merge-tc-results (map do-check objs))]
       [_ (tc-error/expr/fields
           "send: type mismatch"
           "expected" "an object"
@@ -64,14 +62,18 @@
     #:literal-sets (kernel-literals)
     #:literals (list)
     [(#%plain-app meth obj arg ...)
-     (with-lexical-env/extend-types vars types
+     (with-extended-lexical-env
+       [#:identifiers vars
+        #:types types]
        (tc-expr/check (syntax/loc app-stx (#%plain-app meth arg ...))
                       expected))]
     [(let-values ([(arg-var) arg] ...)
        (~and outer-loc (#%plain-app (~and inner-loc (#%plain-app cpce s-kp meth kpe kws num))
                                     kws2 kw-args
                                     obj pos-arg ...)))
-     (with-lexical-env/extend-types vars types
+     (with-extended-lexical-env
+       [#:identifiers vars
+        #:types types]
        (tc-expr/check
         (with-syntax* ([inner-app (syntax/loc app-stx (#%plain-app cpce s-kp meth kpe kws num))]
                        [outer-app (syntax/loc app-stx

@@ -11,41 +11,14 @@
 @author[@author+email["Eli Barzilay" "eli@barzilay.org"]]
 
 @defmodule[xrepl]{
-  Loading the @racketmodname[xrepl] library enables XREPL, which extends
-  the @exec{racket} @tech[#:doc GUIDE]{REPL} significantly, turning it
-  into a more useful tool for interactive exploration and development.
-  Additions include ``meta commands,'' using readline, keeping past
-  evaluation results, and more.}
+  XREPL extends the @exec{racket} @tech[#:doc GUIDE]{REPL} significantly,
+  turning it into a more useful tool for interactive exploration and
+  development. Additions include ``meta commands,'' using readline, keeping
+  past evaluation results, and more.
 
-@; ---------------------------------------------------------------------
-@section{Installing XREPL}
-
-To use XREPL, start @exec{racket} and enter @racket[(require xrepl)].
-You will know that it works when the prompt changes to a @litchar{->},
-and, if you're working on a capable terminal, you will now have readline
-editing.  You can also start @exec{racket} and ask for XREPL to be
-loaded using command-line arguments:
-@commandline{racket -il xrepl}
-
-If you want to enable XREPL automatically, add this expression to your
-Racket initialization file.
-@margin-note*{To load XREPL conditionally (e.g., not in older Racket
-  versions), you can use @racket[(dynamic-require 'xrepl #f)].  This
-  is a plain expression that can be placed inside @racket[when] and
-  elsewhere.}
-An easy way to do the necessary editing is to enter @cmd[install!],
-which will inspect and edit your initialization file (it will describe
-the change and ask for your permission).  Alternatively, you can edit
-the file directly: on Unix, it is @filepath{~/.racketrc}, and for
-other platforms evaluate @racket[(find-system-path 'init-file)] to see
-where it is.
-
-XREPL will set up a readline-based reader, so you do not need to load
-that yourself.  If your initialization file was previously set to load
-readline via @racket[install-readline!], the @cmd[install!] command
-will (notify you and) remove it.  If you added it yourself, consider
-removing it.  (This is not strictly needed, but XREPL is slightly
-better at detecting when to use readline.)
+  XREPL is enabled by default in the Racket REPL when the
+  @racketfont{xrepl-lib} package is installed.
+  }
 
 @; ---------------------------------------------------------------------
 @section{Meta REPL Commands}
@@ -431,6 +404,9 @@ available.
   Convenient utility command to install XREPL in your Racket
   initialization file.  This is done carefully, you will be notified of
   potential issues, and asked to authorize changes.
+
+  @history[#:changed "6.7" @string-append{XREPL is enabled by default in the
+  Racket REPL, which makes installation unnecessary.}]
 }
 
 @; ---------------------------------------------------------------------

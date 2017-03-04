@@ -42,7 +42,7 @@ the 2htdp/universe libraries (in executables)
   (class image-snip%
     (init filename)
     (init-accessible data w h dx dy)
-    (init [relative 1] [type 'unknown])
+    (init [relative 1] [type 'unknown] [backing-scale 1.0])
     ;; the call to super-make-object is intended to mimic the way that racket/snip/private/snip.rkt
     ;; creates an image-snip% object in the image-snip-class% class's read method
     (let ([data (get-data)])
@@ -56,7 +56,8 @@ the 2htdp/universe libraries (in executables)
                #f))
        (if data 'unknown/alpha type)
        (positive? relative) 
-       (and data #t)))
+       (and data #t)
+       backing-scale))
     (inherit resize set-offset)
     (resize (get-w) (get-h))
     (set-offset (get-dx) (get-dy))))

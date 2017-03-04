@@ -3,8 +3,8 @@
 ;; This module provides functions for parsing types written by the user
 
 (require (rename-in "../utils/utils.rkt" [infer infer-in])
-         (except-in (rep type-rep object-rep) make-arr)
-         (rename-in (types abbrev union utils prop-ops resolve
+         (except-in (rep core-rep type-rep object-rep) make-arr)
+         (rename-in (types abbrev utils prop-ops resolve
                            classes prefab signatures)
                     [make-arr* make-arr])
          (only-in (infer-in infer) intersect)
@@ -31,14 +31,14 @@
            (only-in "../base-env/case-lambda.rkt" case-lambda)))
 
 (provide/cond-contract ;; Parse the given syntax as a type
-                       [parse-type (syntax? . c:-> . Type/c)]
+                       [parse-type (syntax? . c:-> . Type?)]
                        ;; Parse the given identifier using the lexical
                        ;; context of the given syntax object
-                       [parse-type/id (syntax? c:any/c . c:-> . Type/c)]
+                       [parse-type/id (syntax? c:any/c . c:-> . Type?)]
                        [parse-tc-results (syntax? . c:-> . tc-results/c)]
                        [parse-literal-alls (syntax? . c:-> . (c:listof (c:or/c (c:listof identifier?) (c:list/c (c:listof identifier?) identifier?))))]
                        ;; Parse a row, which is only allowed in row-inst
-                       [parse-row (syntax? . c:-> . Type/c)])
+                       [parse-row (syntax? . c:-> . Row?)])
 
 (provide star ddd/bound
          current-referenced-aliases
@@ -99,6 +99,7 @@
 (define-literal-syntax-class #:for-label case->^ (case-> case-lambda))
 (define-literal-syntax-class #:for-label Rec)
 (define-literal-syntax-class #:for-label U)
+(define-literal-syntax-class #:for-label Union)
 (define-literal-syntax-class #:for-label All)
 (define-literal-syntax-class #:for-label Opaque)
 (define-literal-syntax-class #:for-label Parameter)
@@ -114,6 +115,7 @@
 (define-literal-syntax-class #:for-label Distinction)
 (define-literal-syntax-class #:for-label Sequenceof)
 (define-literal-syntax-class #:for-label ∩)
+(define-literal-syntax-class #:for-label Intersection)
 
 ;; (Syntax -> Type) -> Syntax Any -> Syntax
 ;; See `parse-type/id`. This is a curried generalization.
@@ -236,9 +238,9 @@
 (define-syntax-class path-elem
   #:description "path element"
   (pattern :car^
-           #:attr pe (make-CarPE))
+           #:attr pe -car)
   (pattern :cdr^
-           #:attr pe (make-CdrPE)))
+           #:attr pe -cdr))
 
 
 (define-syntax-class @
@@ -340,7 +342,7 @@
     (syntax-parse
         stx
       [t
-       #:declare t (3d Type/c?)
+       #:declare t (3d Type?)
        (attribute t.datum)]
       [(fst . rst)
        #:fail-unless (not (syntax->list #'rst)) #f
@@ -408,9 +410,9 @@
                       "Unit types must import and export distinct signatures"))
        (define (init-depend-error)
          (parse-error
-            #:stx stx
-            #:delayed? #f
-            "Unit type initialization dependencies must be a subset of imports"))
+          #:stx stx
+          #:delayed? #f
+          "Unit type initialization dependencies must be a subset of imports"))
        (define imports
          (check-imports/exports (stx-map id->sig #'(import ...)) import/export-error))
        (define exports
@@ -448,30 +450,31 @@
        (let* ([var (syntax-e #'x)]
               [tvar (make-F var)])
          (extend-tvars (list var)
-           (let ([t* (parse-type #'t)])
-             ;; is t in a productive position?
-             (define productive
-               (let loop ((ty t*))
-                 (match ty
-                  [(Union: elems) (andmap loop elems)]
-                  [(F: _) (not (equal? ty tvar))]
-                  [(App: rator rands stx)
-                   (loop (resolve-app rator rands stx))]
-                  [(Mu: _ body) (loop body)]
-                  [(Poly: names body) (loop body)]
-                  [(PolyDots: names body) (loop body)]
-                  [(PolyRow: _ _ body) (loop body)]
-                  [else #t])))
-             (unless productive
-               (parse-error
-                #:stx stx
-                "recursive types are not allowed directly inside their definition"))
-             (if (memq var (fv t*))
-                 (make-Mu var t*)
-                 t*))))]
-      [(:U^ ts ...)
+                       (let ([t* (parse-type #'t)])
+                         ;; is t in a productive position?
+                         (define productive
+                           (let loop ([ty t*])
+                             (match ty
+                               [(Union: _ elems) (andmap loop elems)]
+                               [(Intersection: elems) (andmap loop elems)]
+                               [(F: _) (not (equal? ty tvar))]
+                               [(App: rator rands)
+                                (loop (resolve-app rator rands stx))]
+                               [(Mu: _ body) (loop body)]
+                               [(Poly: names body) (loop body)]
+                               [(PolyDots: names body) (loop body)]
+                               [(PolyRow: _ _ body) (loop body)]
+                               [else #t])))
+                         (unless productive
+                           (parse-error
+                            #:stx stx
+                            "recursive types are not allowed directly inside their definition"))
+                         (if (memq var (fv t*))
+                             (make-Mu var t*)
+                             t*))))]
+      [((~or :U^ :Union^) ts ...)
        (apply Un (parse-types #'(ts ...)))]
-      [(:∩^ ts ...)
+      [((~or :∩^ :Intersection^) ts ...)
        (for/fold ([ty Univ])
                  ([t (in-list (parse-types #'(ts ...)))])
          (intersect ty t))]
@@ -549,9 +552,9 @@
                             (extend-tvars (list var) (parse-type #'rest))
                             var)))))]
       #| ;; has to be below the previous one
-     [(dom:expr ... :->^ rng)
+      [(dom:expr ... :->^ rng)
       (->* (parse-types #'(dom ...))
-           (parse-values-type #'rng))]     |#
+      (parse-values-type #'rng))]     |#
       ;; use expr to rule out keywords
       [(~or (:->^ dom:non-keyword-ty ... kws:keyword-tys ... rng)
             (dom:non-keyword-ty ... kws:keyword-tys ... :->^ rng))
@@ -566,9 +569,9 @@
                    #:kws (map force (attribute kws.Keyword)))))))]
       ;; This case needs to be at the end because it uses cut points to give good error messages.
       [(~or (:->^ ~! dom:non-keyword-ty ... rng:expr
-             :colon^ (~var latent (full-latent (syntax->list #'(dom ...)))))
+                  :colon^ (~var latent (full-latent (syntax->list #'(dom ...)))))
             (dom:non-keyword-ty ... :->^ rng:expr
-             ~! :colon^ (~var latent (full-latent (syntax->list #'(dom ...))))))
+                                ~! :colon^ (~var latent (full-latent (syntax->list #'(dom ...))))))
        ;; use parse-type instead of parse-values-type because we need to add the props from the pred-ty
        (with-arity (length (syntax->list #'(dom ...)))
          (->* (parse-types #'(dom ...))
@@ -625,11 +628,14 @@
        (parse-error "bad syntax in ->")]
       [(id arg args ...)
        (let loop
-         ([rator (parse-type #'id)]
-          [args (parse-types #'(arg args ...))])
+           ([rator (parse-type #'id)]
+            [args (parse-types #'(arg args ...))])
          (resolve-app-check-error rator args stx)
          (match rator
-           [(? Name?) (make-App rator args stx)]
+           [(? Name?)
+            (define app (make-App rator args))
+            (register-app-for-checking! app stx)
+            app]
            [(Poly: _ _) (instantiate-poly rator args)]
            [(Mu: _ _) (loop (unfold rator) args)]
            [(Error:) Err]
@@ -904,8 +910,7 @@
                                         (unbox class-box)))
             ;; Ok to return Error here, since this type will
             ;; get reparsed in another pass
-            (make-Error)
-            ])]))
+            Err])]))
 
 ;; get-parent-inits : (U Type #f) -> Inits
 ;; Extract the init arguments out of a parent class type

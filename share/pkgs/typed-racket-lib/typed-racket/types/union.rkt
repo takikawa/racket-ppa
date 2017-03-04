@@ -7,58 +7,38 @@
          racket/match
          racket/list)
 
+(provide normalize-type
+         Un
+         union)
 
-(provide/cond-contract
- [Un (() #:rest (c:listof Type/c) . c:->* . Type/c)])
+;; t1 ∪ t2
+;; But excludes duplicate info w.r.t. subtyping
+;; can be useful in a few places, but avoid using
+;; in hot code when Un (or similar) will suffice.
+(define (union t1 t2)
+  (cond
+    [(subtype t1 t2) t2]
+    [(subtype t2 t1) t1]
+    [else (Un t1 t2)]))
 
-;; List[Type] -> Type
-;; Argument types should not overlap or be union types
-(define (make-union* types)
-  (match types
-    [(list t) t]
-    [_ (make-Union types)]))
+;; t is a Type (not a union type)
+;; b is a hset[Type] (non overlapping, non Union-types)
+;; The output is a non overlapping hset of non Union types.
+(define (merge t ts)
+  (let ([t (normalize-type t)])
+    (define t* (apply Un ts))
+    (cond
+      [(subtype t* t) (list t)]
+      [(subtype t t*) ts]
+      [else (cons t (filter-not (λ (ts-elem) (subtype ts-elem t)) ts))])))
 
-;; a is a Type (not a union type)
-;; b is a List[Type] (non overlapping, non Union-types)
-;; The output is a non overlapping list of non Union types.
-;; The overlapping constraint is lifted if we are in the midst of subtyping. This is because during
-;; subtyping calls to subtype are expensive.
-(define (merge a b)
-  (define b* (make-union* b))
-  (match* (a b)
-    ;; If a union element is a Name application, then it should not
-    ;; be checked for subtyping since that can cause infinite
-    ;; loops if this is called during type instantiation.
-    [((App: (? Name? rator) rands stx) _)
-     ;; However, we should check if it's a well-formed application
-     ;; so that bad applications are rejected early.
-     (resolve-app-check-error rator rands stx)
-     (cons a b)]
-    [(_ _) #:when (currently-subtyping?) (cons a b)]
-    [((? (λ _ (subtype a b*))) _) b]
-    [((? (λ _ (subtype b* a))) _) (list a)]
-    [(_ _) (cons a (filter-not (λ (b-elem) (subtype b-elem a)) b))]))
-
-;; Type -> List[Type]
-(define (flat t)
+;; Recursively reduce unions so that they do not contain
+;; reduntant information w.r.t. subtyping. We used to maintain
+;; this properly throughout typechecking, but this was costly.
+;; Not we only do it as we are generating contracts, since we
+;; don't want to do redundant runtime checks, etc.
+(define (normalize-type t)
   (match t
-    [(Union: es) es]
-    [_ (list t)]))
-
-;; Union constructor
-;; Normalizes representation by sorting types.
-;; Type * -> Type
-;; The input types can overlap and be union types
-(define Un-cache (make-weak-hash))
-(define Un
-  (case-lambda 
-    [() -Bottom]
-    [(t) t]
-    [args 
-     (cond [(hash-ref Un-cache args #f)]
-           [else
-            (define ts (foldr merge '()
-                              (remove-dups (sort (append-map flat args) type<?))))
-            (define type (make-union* ts))
-            (hash-set! Un-cache args type)
-            type])]))
+    [(? BaseUnion?) t]
+    [(Union-all-flat: ts) (apply Un (foldl merge '() ts))]
+    [_ (Rep-fmap t normalize-type)]))

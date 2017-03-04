@@ -9,7 +9,9 @@
 (require (for-syntax scheme/base)
 	 (for-syntax racket/list)
 	 (for-syntax syntax/boundmap)
-	 (for-syntax syntax/kerncase))
+	 (for-syntax syntax/id-table)
+	 (for-syntax syntax/kerncase)
+	 (for-syntax racket/struct-info))
 
 (define-syntax (print-results stx)
   (syntax-case stx ()
@@ -39,7 +41,7 @@
     ;; a signature declaration. Syntax: (: id signature)
     (define extract-signatures
       (lambda (lostx) 
-	(let* ((table (make-bound-identifier-mapping))
+	(let* ((table (make-free-id-table)) ; bound doesn't work as we need to match signature declarations and definitions
 	       (non-signatures
 		(filter-map (lambda (maybe)
 			      (syntax-case maybe (:)
@@ -49,7 +51,7 @@
 				((: ?id ?sig)
 				 (begin
 				   (cond
-				    ((bound-identifier-mapping-get table #'?id (lambda () #f))
+				    ((free-id-table-ref table #'?id #f)
 				     => (lambda (old-sig-stx)
 					  (unless (equal? (syntax->datum old-sig-stx)
 							  (syntax->datum #'?sig))
@@ -57,7 +59,11 @@
 								"Zweite Signaturdeklaration für denselben Namen."
 								maybe))))
 				    (else
-				     (bound-identifier-mapping-put! table #'?id #'?sig)))
+				     (let ((si (syntax-local-value #'?id (lambda () #f))))
+				       (if (and (struct-info? si)
+						(procedure? si)) ; record constructor, just a macro
+					   (free-id-table-set! table (si #'?id) #'?sig)
+					   (free-id-table-set! table #'?id #'?sig)))))
 				   #f))
 				((: ?id)
 				 (raise-syntax-error #f "Bei dieser Signaturdeklaration fehlt die Signatur" maybe))
@@ -79,12 +85,12 @@
 
 	(cond
 	 ((null? exprs)
-	  (bound-identifier-mapping-for-each signature-table
-					     (lambda (id thing)
-					       (when thing
-						 (if (identifier-binding id)
-						     (raise-syntax-error #f "Zu einer eingebauten Form kann keine Signatur deklariert werden" id)
-						     (raise-syntax-error #f "Zu dieser Signatur gibt es keine Definition" id)))))
+	  ; check for orphaned signatures
+	  (free-id-table-for-each signature-table
+				  (lambda (id thing)
+				    (if (identifier-binding id)
+					(raise-syntax-error #f "Zu einer eingebauten Form kann keine Signatur deklariert werden" id)
+					(raise-syntax-error #f "Zu dieser Signatur gibt es keine Definition" id))))
 	  #'(begin))
 	 (else
 	  (let ((expanded (car exprs)))
@@ -94,14 +100,13 @@
 	       (with-syntax (((?enforced ...)
 			      (map (lambda (id)
 				     (cond
-				      ((bound-identifier-mapping-get signature-table id (lambda () #f))
+				      ((free-id-table-ref signature-table id #f)
 				       => (lambda (sig)
-					    (bound-identifier-mapping-put! signature-table id #f) ; check for orphaned signatures
+					    (free-id-table-remove! signature-table id) ; enables the check for orphaned signatures
 					    (with-syntax ((?id id)
 							  (?sig sig))
 					      #'(?id (signature ?sig)))))
-				      (else
-				       id)))
+				      (else id)))
 				   (syntax->list #'(?id ...))))
 			     (?rest (loop (cdr exprs))))
 		 (with-syntax ((?defn

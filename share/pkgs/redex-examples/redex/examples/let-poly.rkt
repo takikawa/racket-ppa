@@ -132,9 +132,9 @@ bring that type back, recurring on the continuation.
    (tc-up τ (1 Γ M κ) σ_ans)]
   
   [(where x ,(variable-not-in (term (τ_1 τ_2 κ)) 'α1-))
-   (where G (unify τ_2 (τ_1 → x)))
-   (tc-up (apply-subst-τ G x)
-          (apply-subst-κ G κ)
+   (unify τ_2 (τ_1 → x) Gx)
+   (tc-up (apply-subst-τ Gx x)
+          (apply-subst-κ Gx κ)
           σ_ans)
    --------------------------------------------------- "app r"
    (tc-up τ_1 (2 τ_2 κ) σ_ans)]
@@ -164,85 +164,84 @@ bring that type back, recurring on the continuation.
   [(lookup-Γ (x σ Γ) y) (lookup-Γ Γ y)]
   [(lookup-Γ · x) #f])
 
-(define-metafunction stlc
-  unify : τ τ -> Gx or ⊥
-  [(unify τ σ) (uh (τ σ ·) ·)])
-
 #|
 
 Algorithm copied from Chapter 8 in _Handbook of Automated Reasoning_:
 Unification Theory by Franz Baader and Wayne Synder
 http://www.cs.bu.edu/~snyder/publications/UnifChapter.pdf
 
-The 'uh' function iterates over a set of equations applying the
-rules from the paper, building up the result substitution in G_r.
+The 'uh' judgment form iterates over a set of equations applying the
+rules from the paper, building up the result substitution in Gx.
 
 |#
 
-(define-metafunction stlc
-  uh : G Gx -> Gx or ⊥
+(define-judgment-form stlc
+  #:mode (unify I I O)
+
+  [(uh (τ σ ·) Gx)
+   ----------------
+   (unify τ σ Gx)])
+
+(define-judgment-form stlc
+  #:mode (uh I O)
+  #:contract (uh G Gx)
+
+  [--------- "bottomed out"
+   (uh · ·)]
   
-  [(uh · Gx) Gx]
-  
-  ;; orient
-  [(uh (int      x G) Gx) (uh (x int G) Gx)]
-  [(uh ((σ → τ)  x G) Gx) (uh (x (σ → τ) G) Gx)]
-  [(uh ((list τ) x G) Gx) (uh (x (list τ) G) Gx)]
-  [(uh ((ref τ)  x G) Gx) (uh (x (ref τ) G) Gx)]
-
-  ;; trivial (other cases are covered by decomposition rule)
-  [(uh (x x G) Gx) (uh G Gx)]
-  
-  ;; decomposition
-  [(uh ((τ_1 → τ_2) (σ_1 → σ_2) G) Gx) (uh (τ_1 σ_1 (τ_2 σ_2 G)) Gx)]
-  [(uh ((list τ)    (list σ)    G) Gx) (uh (τ σ G)               Gx)]
-  [(uh ((ref τ)     (ref σ)     G) Gx) (uh (τ σ G)               Gx)]
-  [(uh (int         int         G) Gx) (uh G                     Gx)]
-  
-  ;; symbol clash
-  [(uh (int (σ → τ) G) Gx) ⊥]
-  [(uh (int (list τ) G) Gx) ⊥]
-  [(uh (int (ref τ) G) Gx) ⊥]
-
-  [(uh ((σ → τ) int G) Gx) ⊥]
-  [(uh ((σ → τ) (list τ) G) Gx) ⊥]
-  [(uh ((σ → τ) (ref τ) G) Gx) ⊥]
-
-  [(uh ((list τ) int G) Gx) ⊥]
-  [(uh ((list τ) (σ → τ) G) Gx) ⊥]
-  [(uh ((list τ) (ref τ) G) Gx) ⊥]
-
-  [(uh ((ref τ) int G) Gx) ⊥]
-  [(uh ((ref τ) (σ → τ) G) Gx) ⊥]
-  [(uh ((ref τ) (list τ) G) Gx) ⊥]
-
-  ;; occurs check for one x
-  [(uh (x x G) Gx) ⊥]
-
-  ;; variable elimination for x & some no-variable cases
-  [(uh (x y G) Gx)
-   (uh (eliminate-G x y G) (x y (eliminate-G x y Gx)))]
   [(uh (x int G) Gx)
-   (uh (eliminate-G x int G) (x int (eliminate-G x int Gx)))]
-  [(uh (x (list int) G) Gx)
-   (uh (eliminate-G x (list int) G) (x (list int) (eliminate-G x (list int) Gx)))]
-  [(uh (x (ref int) G) Gx)
-   (uh (eliminate-G x (ref int) G) (x (ref int) (eliminate-G x (ref int) Gx)))]
-  [(uh (x (int → int) G) Gx)
-   (uh (eliminate-G x (int → int) G) (x (int → int) (eliminate-G x (int → int) Gx)))]
+   ------------------ "orient int"
+   (uh (int x G) Gx)]
 
-  ;; general occurs check
-  [(uh (x τ G) Gx) ⊥ (where #t (in-vars-τ? x τ))]
-  
-  ;; general variable elimination
-  [(uh (x τ G) Gx)
-   (uh (eliminate-G x τ G) (x τ (eliminate-G x τ Gx)))])
+  [(uh (x (σ → τ) G) Gx)
+   ----------------------- "orient →"
+   (uh ((σ → τ) x G) Gx)]
+
+  [(uh (x (list τ) G) Gx)
+   ----------------------- "orient list"
+   (uh ((list τ) x G) Gx)]
+
+  [(uh (x (ref τ) G) Gx)
+   ----------------------- "orient ref"
+   (uh ((ref τ) x G) Gx)]
+
+  [(uh (τ_1 σ_1 (τ_2 σ_2 G)) Gx)
+   ------------------------------------ "decomposition →"
+   (uh ((τ_1 → τ_2) (σ_1 → σ_2) G) Gx)]
+
+  [(uh (τ σ G) Gx)
+   ------------------------------ "decomposition list"
+   (uh ((list τ) (list σ) G) Gx)]
+
+  [(uh (τ σ G) Gx)
+   ---------------------------- "decomposition ref"
+   (uh ((ref τ) (ref σ) G) Gx)]
+
+  [(uh G Gx)
+   -------------------- "decomposition int"
+   (uh (int int G) Gx)]
+
+  [(var-not-in-τ x τ)
+   (uh (eliminate-G x τ G) Gx)
+   (where Gx_eliminated (eliminate-Gx x τ Gx))
+   (where τ_subst (apply-subst-τ Gx τ))
+   ---------------------------------------------------- "variable elim"
+   (uh (x τ G)
+        (x τ_subst Gx_eliminated))])
 
 (define-metafunction stlc
   eliminate-G : x τ G -> G
   [(eliminate-G x τ ·) ·]
   [(eliminate-G x τ (σ_1 σ_2 G))
    ((eliminate-τ x τ σ_1) (eliminate-τ x τ σ_2) (eliminate-G x τ G))])
+
+(define-metafunction stlc
+  eliminate-Gx : x τ Gx -> Gx
+  [(eliminate-Gx x τ ·) ·]
+  [(eliminate-Gx x τ (y σ Gx))
+   ;; we can just put `y` in the result because the variable elim
+   ;; rule guarantees that `y` is never the same as `x`
+   (y (eliminate-τ x τ σ) (eliminate-Gx x τ Gx))])
 
 (define-metafunction stlc
   eliminate-τ : x τ σ -> σ
@@ -253,19 +252,32 @@ rules from the paper, building up the result substitution in G_r.
   [(eliminate-τ x τ x) τ]
   [(eliminate-τ x τ y) y])
 
-(define-metafunction stlc
-  ∨ : boolean boolean -> boolean
-  [(∨ #f #f) #f]
-  [(∨ boolean_1 boolean_2) #t])
+(define-judgment-form stlc
+  #:mode (var-not-in-τ I I)
+  #:contract (var-not-in-τ x τ)
+  [(where #true (different x y))
+   -----------------------------
+   (var-not-in-τ x y)]
+
+  [--------------------
+   (var-not-in-τ x int)]
+
+  [(var-not-in-τ x τ)
+   ------------------------
+   (var-not-in-τ x (ref τ))]
+
+  [(var-not-in-τ x τ)
+   -------------------------
+   (var-not-in-τ x (list τ))]
+
+  [(var-not-in-τ x τ)
+   (var-not-in-τ x σ)
+   ------------------------
+   (var-not-in-τ x (τ → σ))])
 
 (define-metafunction stlc
-  in-vars-τ? : x τ -> boolean
-  [(in-vars-τ? x (τ_1 → τ_2)) (∨ (in-vars-τ? x τ_1) (in-vars-τ? x τ_2))]
-  [(in-vars-τ? x (list τ)) (in-vars-τ? x τ)]
-  [(in-vars-τ? x (ref τ)) (in-vars-τ? x τ)]
-  [(in-vars-τ? x int) #f]
-  [(in-vars-τ? x x) #t]
-  [(in-vars-τ? x y) #f])
+  [(different x x) #false]
+  [(different x y) #true])
 
 (define-metafunction stlc
   apply-subst-τ : Gx τ -> τ
@@ -379,15 +391,6 @@ Capture avoiding substitution
    ((replace M x x_new) (replace N x x_new))]
   [(replace M x x_new)
    M])
-
-#;
-(define-metafunction stlc
-  [(replace (any_1 ...) x_1 x_new)
-   ((replace any_1 x_1 x_new) ...)]
-  [(replace x_1 x_1 x_new)
-   x_new]
-  [(replace any_1 x_1 x_new)
-   any_1])
 
 (define-metafunction stlc
   lookup-Σ : Σ x -> v
@@ -613,35 +616,30 @@ http://en.wikipedia.org/wiki/Topological_sorting#Algorithms
                                 (term (let ((|| +)) ||)))
               #t)
   
-  (test-equal (term (unify x int))
-              (term (x int ·)))
-  (test-equal (term (unify int x))
-              (term (x int ·)))
-  (test-equal (term (unify int (list int)))
-              (term ⊥))
-  (test-equal (term (unify int int))
-              (term ·))
-  (test-equal (term (unify (list int) (list int)))
-              (term ·))
-  (test-equal (term (unify (int → x) (y → (list int))))
-              (term (x (list int) (y int ·))))
-  (test-equal (term (unify (int → x) (x → (list int))))
-              (term ⊥))
-  (test-equal (term (unify (x   → (y          → x))
-                           (int → ((list int) → y))))
-              (term ⊥))
-  (test-equal (term (unify (x   → (y          → x))
-                           (int → ((list int) → z))))
-              (term (z int (y (list int) (x int ·)))))
-  (test-equal (term (unify (x   → (y          → z))
-                           (int → ((list int) → x))))
-              (term (z int (y (list int) (x int ·)))))
-  (test-equal (term (unify (x   → (y   → z))
-                           (y   → (z   → int))))
-              (term (z int (y int (x int ·)))))
-  (test-equal (term (unify x (x → y)))
-              (term ⊥))
-  
+  (test-judgment-holds (unify x int (x int ·)))
+  (test-judgment-holds (unify int x (x int ·)))
+  (test-equal (judgment-holds (unify int (list int) Gx)) #f)
+  (test-judgment-holds (unify int int ·))
+  (test-judgment-holds (unify (list int) (list int) ·))
+  (test-judgment-holds (unify (int → x)
+                               (y → (list int))
+                               (y int (x (list int) ·))))
+  (test-equal (judgment-holds (unify (int → x) (x → (list int)) Gx)) #f)
+  (test-equal (judgment-holds (unify (x   → (y          → x))
+                                      (int → ((list int) → y))
+                                      Gx))
+              #f)
+  (test-judgment-holds (unify (x   → (y          → x))
+                               (int → ((list int) → z))
+                               (x int (y (list int) (z int ·)))))
+  (test-judgment-holds (unify (x   → (y          → z))
+                               (int → ((list int) → x))
+                               (x int (y (list int) (z int ·)))))
+  (test-judgment-holds (unify (x   → (y   → z))
+                               (y   → (z   → int))
+                               (x int (y int (z int ·)))))
+  (test-equal (judgment-holds (unify x (x → y) Gx)) #f)
+
   (test-equal (judgment-holds (typeof 5 τ) τ)
               (list (term int)))
   (test-equal (judgment-holds (typeof nil τ) τ)

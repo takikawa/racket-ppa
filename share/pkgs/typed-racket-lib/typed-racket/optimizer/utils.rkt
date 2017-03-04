@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require racket/match racket/sequence
-         racket/dict syntax/id-table racket/syntax syntax/stx
+         syntax/id-table racket/syntax syntax/stx
          syntax/parse
          syntax/parse/experimental/specialize
          racket/promise
@@ -10,7 +10,7 @@
          (only-in (utils literal-syntax-class)
            [define-literal-syntax-class define-literal-syntax-class*])
          (for-template racket/base)
-         (types type-table utils subtype)
+         (types type-table utils subtype match-expanders)
          (rep type-rep))
 
 (provide *show-optimized-code*
@@ -41,13 +41,13 @@
 ;; similar, but with type equality
 (define (isoftype? s t)
   (match (type-of s)
-         [(tc-result1: (== t type-equal?)) #t] [_ #f]))
+         [(tc-result1: (== t)) #t] [_ #f]))
 
 ;; generates a table matching safe to unsafe promitives
 (define (mk-unsafe-tbl generic safe-pattern unsafe-pattern)
   (for/fold ([h (make-immutable-free-id-table)]) ([g (in-list generic)])
     (let ([f (format-id g safe-pattern g)] [u (format-id g unsafe-pattern g)])
-      (dict-set (dict-set h g u) f u))))
+      (free-id-table-set (free-id-table-set h g u) f u))))
 
 ;; unlike their safe counterparts, unsafe binary operators can only take 2 arguments
 ;; this works on operations that are (A A -> A)
@@ -130,10 +130,11 @@
     #:with opt this-syntax)
   (pattern (~and e :opt-expr)
     #:when (match (type-of #'e)
-             [(tc-result1: (Value: _)) #t]
+             [(tc-result1: (Val-able: _))
+              #t]
              [_ #f])
     #:attr val (match (type-of #'e)
-                 [(tc-result1: (Value: v)) v]
+                 [(tc-result1: (Val-able: v)) v]
                  [_ #f])))
 
 (define-syntax-class kernel-expression

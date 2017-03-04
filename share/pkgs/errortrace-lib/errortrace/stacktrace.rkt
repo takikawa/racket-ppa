@@ -12,6 +12,7 @@
 
 (provide stacktrace@ stacktrace^ stacktrace-imports^
          stacktrace/annotator-imports^ stacktrace/annotator@
+         stacktrace-filter^ stacktrace/annotator/filter@ stacktrace/filter@
          original-stx expanded-stx)
 
 (define-signature stacktrace-imports^
@@ -38,6 +39,9 @@
    register-profile-start
    register-profile-done))
 
+(define-signature stacktrace-filter^
+  (should-annotate?))
+
 ;; The intentionally-undocumented format of bindings introduced by `make-st-mark` is:
 ;; (cons syntax? (cons syntax? srcloc-list))
 
@@ -57,38 +61,9 @@
 (define base-phase
   (variable-reference->module-base-phase (#%variable-reference)))
 
-(define-unit stacktrace@
-  (import stacktrace-imports^)
-  (export stacktrace^)
-         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-  ;; Test case coverage instrumenter
- 
-  ;; The next procedure is called by `annotate' and `annotate-top' to wrap
-  ;; expressions with test suite coverage information.  Returning the
-  ;; first argument means no tests coverage information is collected.
- 
-  ;; test-coverage-point : syntax syntax phase -> syntax
-  ;; sets a test coverage point for a single expression
-  (define (test-coverage-point body expr phase)
-    (if (and (test-coverage-enabled)
-             (zero? phase) 
-             (syntax-position expr))
-      (begin (initialize-test-coverage-point expr)
-             (let ([thunk (test-covered expr)])
-               (cond [(procedure? thunk)
-                      (with-syntax ([body body] [thunk thunk])
-                        #'(begin (#%plain-app thunk) body))]
-                     [(syntax? thunk)
-                      (with-syntax ([body body] [thunk thunk])
-                        #'(begin thunk body))]
-                     [else body])))
-      body))
-
-
-  (define-values/invoke-unit/infer stacktrace/annotator@))
-
-(define-unit stacktrace/annotator@
-  (import stacktrace/annotator-imports^)
+(define-unit stacktrace/annotator/filter@
+  (import stacktrace/annotator-imports^
+          stacktrace-filter^)
   (export stacktrace^)
 
   (define (short-version v depth)
@@ -120,7 +95,7 @@
       (error 'make-st-mark
              "expected syntax object as argument, got ~e" stx))
     (cond
-      [(syntax-source stx)
+      [(should-annotate? stx phase)
        ;; this horrible indirection is needed because the errortrace
        ;; unit is invoked only once but annotate-top might be called
        ;; many times with diferent values for original-stx and
@@ -257,6 +232,12 @@
              (syntax (bgn e expr))
              ;; application; exploit guaranteed left-to-right evaluation
              (insert-at-tail* se sexpr phase))]
+
+        [(#%expression e)
+         (rearm
+          sexpr
+          (rebuild sexpr
+                   (list (cons #'e (insert-at-tail se (syntax e) phase)))))]
         
         [_else
          (error 'errortrace
@@ -679,3 +660,75 @@
   (define (annotate-named name expr phase)
     (parameterize ([current-recover-table (make-hash)])
       (no-cache-annotate-named name expr phase))))
+
+;; --------------------------------------------------
+
+(define-unit test-coverage-point@
+  (import (prefix in: stacktrace-imports^)
+          stacktrace-filter^)
+  (export stacktrace/annotator-imports^)
+  
+  (define with-mark in:with-mark)
+  (define profile-key in:profile-key)
+  (define profiling-enabled in:profiling-enabled)
+  (define initialize-profile-point in:initialize-profile-point)
+  (define register-profile-start in:register-profile-start)
+  (define register-profile-done in:register-profile-done)
+  
+  ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+  ;; Test case coverage instrumenter
+ 
+  ;; The next procedure is called by `annotate' and `annotate-top' to wrap
+  ;; expressions with test suite coverage information.  Returning the
+  ;; first argument means no tests coverage information is collected.
+ 
+  ;; test-coverage-point : syntax syntax phase -> syntax
+  ;; sets a test coverage point for a single expression
+  (define (test-coverage-point body expr phase)
+    (if (and (in:test-coverage-enabled)
+             (zero? phase) 
+             (should-annotate? expr phase))
+      (begin (in:initialize-test-coverage-point expr)
+             (let ([thunk (in:test-covered expr)])
+               (cond [(procedure? thunk)
+                      (with-syntax ([body body] [thunk thunk])
+                        #'(begin (#%plain-app thunk) body))]
+                     [(syntax? thunk)
+                      (with-syntax ([body body] [thunk thunk])
+                        #'(begin thunk body))]
+                     [else body])))
+      body)))
+
+;; --------------------------------------------------
+
+(define-unit annotate-if-source@
+  (import)
+  (export stacktrace-filter^)
+  (define (should-annotate? s phase)
+    (syntax-source s)))
+
+;; --------------------------------------------------
+
+(define-compound-unit stacktrace/annotator@
+  (import (in : stacktrace/annotator-imports^))
+  (export out)
+  (link [((annotate-if-source : stacktrace-filter^)) annotate-if-source@]
+        [((out : stacktrace^)) stacktrace/annotator/filter@ in annotate-if-source]))
+
+;; --------------------------------------------------
+  
+(define-compound-unit stacktrace/filter@
+  (import (in : stacktrace-imports^)
+          (filter : stacktrace-filter^))
+  (export out)
+  (link [((coverage-point : stacktrace/annotator-imports^)) test-coverage-point@ in filter]
+        [((out : stacktrace^)) stacktrace/annotator/filter@ coverage-point filter]))
+
+;; --------------------------------------------------
+  
+(define-compound-unit stacktrace@
+  (import (in : stacktrace-imports^))
+  (export out)
+  (link [((annotate-if-source : stacktrace-filter^)) annotate-if-source@]
+        [((coverage-point : stacktrace/annotator-imports^)) test-coverage-point@ in annotate-if-source]
+        [((out : stacktrace^)) stacktrace/annotator/filter@ coverage-point annotate-if-source]))

@@ -12,7 +12,10 @@
 	 (except-in deinprogramm/signature/signature-syntax property))
 
 (require (for-syntax scheme/base)
-	 (for-syntax stepper/private/syntax-property))
+	 (for-syntax stepper/private/syntax-property)
+	 (for-syntax syntax/parse)
+	 (for-syntax racket/struct-info)
+	 syntax/parse)
 
 (require deinprogramm/define-record-procedures)
 
@@ -38,6 +41,8 @@
 	 unspecific
 	 any
 	 property)
+
+(provide match)
 
 (define-syntax provide/rename
   (syntax-rules ()
@@ -360,7 +365,7 @@
   (read (-> any)
 	"Externe Repräsentation eines Werts in der REPL einlesen und den zugehörigen Wert liefern")))
 
-(define (make-pair f r)
+(define (real-make-pair f r)
   (when (and (not (null? r))
 	     (not (pair? r)))
     (raise
@@ -369,6 +374,25 @@
        (format "Zweites Argument zu make-pair ist keine Liste, sondern ~e" r))
       (current-continuation-marks))))
   (cons f r))
+
+(define-syntax make-pair
+  (let ()
+    ;; make it work with match
+    (define-struct pair-info ()
+      #:super struct:struct-info
+      #:property
+      prop:procedure
+      (lambda (_ stx)
+	(syntax-case stx ()
+	  ((self . args) (syntax/loc stx (real-make-pair . args)))
+	  (else (syntax/loc stx real-make-pair)))))
+    (make-pair-info (lambda ()
+		      (list #f
+			    #'real-make-pair
+			    #'pair?
+			    (list #'cdr #'car)
+			    '(#f #f)
+			    #f)))))
 
 (define (first l)
   (when (not (pair? l))
@@ -1120,3 +1144,130 @@
 					(or (boolean? x)
 					    (property? x))))))
 
+
+(define-syntax (match stx)
+  (syntax-parse stx
+    ((_ ?case:expr (?pattern0 ?body0:expr) (?pattern ?body:expr) ...)
+     (let ()
+       (define (pattern-variables pat)
+	 (syntax-case pat (empty make-pair list quote)
+	   (empty '())
+	   (?var (identifier? #'?var)
+	     (if (eq? (syntax->datum #'?var) '_)
+		 '()
+		 (list #'?var)))
+	   (?lit (let ((d (syntax->datum #'?lit)))
+		   (or (string? d) (number? d) (boolean? d)))
+		 '())
+	   ('?lit '())
+	   ((make-pair ?pat1 ?pat2)
+	    (append (pattern-variables #'?pat1) (pattern-variables #'?pat2)))
+	   ((list) '())
+	   ((list ?pat0 ?pat ...)
+	    (apply append (map pattern-variables (syntax->list #'(?pat0 ?pat ...)))))
+	   ((?const ?pat ...)
+	    (apply append (map pattern-variables (syntax->list #'(?pat ...)))))))
+       (define (check pat)
+	 (let loop ((vars (pattern-variables pat)))
+	   (when (pair? vars)
+	     (let ((var (car vars)))
+	       (when (memf (lambda (other-var)
+			     (free-identifier=? var other-var))
+			   (cdr vars))
+		 (raise-syntax-error #f "Variable in match-Zweig kommt doppelt vor"
+				     var))
+	       (loop (cdr vars))))))
+       (for-each check (syntax->list #'(?pattern0 ?pattern ...)))
+       #'(let* ((val ?case)
+		(nomatch (lambda () (match val (?pattern ?body) ...))))
+	   (match-helper val ?pattern0 ?body0 (nomatch)))))
+    ((_ ?case:expr)
+     (syntax/loc stx (error 'match "keiner der Zweige passte")))))
+
+
+(define (list-length=? lis n)
+  (cond
+   ((zero? n) (null? lis))
+   ((null? lis) #f)
+   (else
+    (list-length=? (cdr lis) (- n 1)))))
+
+(define-syntax (match-helper stx)
+  (syntax-case stx ()
+    ((_ ?id ?pattern0 ?body0 ?nomatch)
+     (syntax-case #'?pattern0 (empty make-pair list quote)
+       (empty
+	#'(if (null? ?id)
+	      ?body0
+	      ?nomatch))
+       (?var (identifier? #'?var)
+	     (if (eq? (syntax->datum #'?var) '_) ; _ is magic
+		 #'?body0
+		 #'(let ((?var ?id))
+		     ?body0)))
+       (?lit (let ((d (syntax->datum #'?lit)))
+	       (or (string? d) (number? d) (boolean? d)))
+	     #'(if (equal? ?id ?lit)
+		   ?body0
+		   ?nomatch))
+       ('?lit
+	#'(if (equal? ?id '?lit)
+	      ?body0
+	      ?nomatch))
+       ((make-pair ?pat1 ?pat2)
+	#'(if (pair? ?id)
+	      (let ((f (first ?id))
+		    (r (rest ?id)))
+		(match-helper f ?pat1
+			      (match-helper r ?pat2 ?body0 ?nomatch)
+			      ?nomatch))
+	      ?nomatch))
+       ((list)
+	#'(if (null? ?id)
+	      ?body0
+	      ?nomatch))
+       ((list ?pat0 ?pat ...)
+	(let* ((pats (syntax->list #'(?pat0 ?pat ...)))
+	       (cars (generate-temporaries pats))
+	       (cdrs (generate-temporaries pats)))
+	#`(if (and (pair? ?id)
+		   (list-length=? ?id #,(length pats)))
+	      #,(let recur ((ccdr #'?id)
+			    (pats pats)
+			    (cars cars) (cdrs cdrs))
+		  (if (null? pats)
+		      #'?body0
+		      #`(let ((#,(car cars) (car #,ccdr))
+			      (#,(car cdrs) (cdr #,ccdr)))
+			  (match-helper #,(car cars) #,(car pats)
+					#,(recur (car cdrs) (cdr pats) (cdr cars) (cdr cdrs))
+					?nomatch))))
+	      ?nomatch)))
+       ((?const ?pat ...)
+	(identifier? #'?const)
+	(let* ((fail (lambda ()
+		       (raise-syntax-error #f "Operator in match muss ein Record-Konstruktor sein"
+					   #'?const)))
+	       (v (syntax-local-value #'?const fail)))
+	  (unless (struct-info? v)
+	    (fail))
+
+	  (apply
+	   (lambda (_ _cons pred rev-selectors _mutators ?)
+	     (let* ((pats (syntax->list #'(?pat ...)))
+		    (selectors (reverse rev-selectors))
+		    (field-ids (generate-temporaries pats)))
+	       (unless (= (length rev-selectors) (length pats))
+		 (raise-syntax-error #f "Die Anzahl der Felder im match stimmt nicht" stx))
+	       #`(if (#,pred ?id)
+		     #,(let recur ((pats pats)
+				   (selectors selectors)
+				   (field-ids field-ids))
+			 (if (null? pats)
+			     #'?body0
+			     #`(let ((#,(car field-ids) (#,(car selectors) ?id)))
+				 (match-helper #,(car field-ids) #,(car pats)
+					       #,(recur (cdr pats) (cdr selectors) (cdr field-ids))
+					       ?nomatch))))
+		     ?nomatch)))
+	   (extract-struct-info v))))))))

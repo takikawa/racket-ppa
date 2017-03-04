@@ -12,7 +12,6 @@
          macro-debugger/model/deriv
          macro-debugger/model/deriv-util
          "cursor.rkt"
-         "gui-util.rkt"
          "../syntax-browser/util.rkt"
          framework/notify
          images/compile-time
@@ -198,11 +197,6 @@
            (stepper this)
            (config config)))
 
-    (define status-area
-      (new status-area%
-           (parent superarea)
-           (stop-callback (lambda _ (stop-processing)))))
-
     (send/i sbc sb:controller<%> listen-selected-syntax
             (lambda (stx) (send/i macro-hiding-prefs hiding-prefs<%> set-syntax stx)))
     (send/i sbc sb:controller<%> listen-primary-partition
@@ -308,9 +302,6 @@
                   (list navigator extra-navigator)
                   (list navigator)))))
 
-    (define/public (change-status msg)
-      (send status-area set-status msg))
-
     ;; Navigation
     (define/public-final (navigate-to-start)
       (send/i (focused-term) term-record<%> navigate-to-start)
@@ -342,7 +333,6 @@
     ;; enable/disable-buttons : -> void
     (define/private (enable/disable-buttons [? #t])
       (define term (and ? (focused-term)))
-      ;; (message-box "alert" (format "enable/disable: ~s" ?))
       (send area enable ?)
       (send (send frame get-menu-bar) enable ?)
       (send nav:start enable (and ? term (send/i term term-record<%> has-prev?)))
@@ -351,63 +341,13 @@
       (send nav:end enable (and ? term (send/i term term-record<%> has-next?)))
       (send nav:text enable (and ? term #t))
       (send nav:up enable (and ? (cursor:has-prev? terms)))
-      (send nav:down enable (and ? (cursor:has-next? terms)))
-      (send status-area enable-stop (not ?)))
-
-    ;; Async update & refresh
-
-    (define update-thread #f)
-
-    (define ASYNC-DELAY 500) ;; milliseconds
-
-    (define/private (call-with-update-thread thunk)
-      (send status-area set-visible #f)
-      (let* ([lock (make-semaphore 1)] ;; mutex for status variable
-             [status #f] ;; mutable: one of #f, 'done, 'async
-             [thd
-              (parameterize-break #f
-                (thread (lambda ()
-                          (with-handlers ([exn:break?
-                                           (lambda (e)
-                                             (change-status "Interrupted")
-                                             (void))])
-                            (parameterize-break #t
-                              (thunk)
-                              (change-status #f)))
-                          (semaphore-wait lock)
-                          (case status
-                            ((async)
-                             (set! update-thread #f)
-                             (with-eventspace
-                              (enable/disable-buttons #t)))
-                            (else
-                             (set! status 'done)))
-                          (semaphore-post lock))))])
-        (sync thd (alarm-evt (+ (current-inexact-milliseconds) ASYNC-DELAY)))
-        (semaphore-wait lock)
-        (case status
-          ((done)
-           ;; Thread finished; enable/disable skipped, so do it now to update.
-           (enable/disable-buttons #t))
-          (else
-           (set! update-thread thd)
-           (send status-area set-visible #t)
-           (enable/disable-buttons #f)
-           (set! status 'async)))
-        (semaphore-post lock)))
-
-    (define-syntax-rule (with-update-thread . body)
-      (call-with-update-thread (lambda () . body)))
-
-    (define/private (stop-processing)
-      (let ([t update-thread])
-        (when t (break-thread t))))
+      (send nav:down enable (and ? (cursor:has-next? terms))))
 
     ;; Update
 
     ;; update/preserve-lines-view : -> void
     (define/public (update/preserve-lines-view)
-      (with-update-thread
+      (begin
        (define text (send/i sbview sb:syntax-browser<%> get-text))
        (define start-box (box 0))
        (define end-box (box 0))
@@ -421,7 +361,7 @@
 
     ;; update/preserve-view : -> void
     (define/public (update/preserve-view)
-      (with-update-thread
+      (begin
        (define text (send/i sbview sb:syntax-browser<%> get-text))
        (define start-box (box 0))
        (define end-box (box 0))
@@ -432,7 +372,7 @@
     ;; update : -> void
     ;; Updates the terms in the syntax browser to the current step
     (define/private (update)
-      (with-update-thread
+      (begin
        (update*)))
 
     (define/private (update*)
@@ -476,7 +416,7 @@
             (send text last-position)
             'start)
       (update-nav-index)
-      (change-status #f))
+      (enable/disable-buttons #t))
 
     ;; --
 
@@ -501,7 +441,7 @@
 
     ;; refresh : -> void
     (define/public (refresh)
-      (with-update-thread
+      (begin
        (when (focused-term)
          (send/i (focused-term) term-record<%> on-get-focus))
        (send nav:step-count set-label "")

@@ -3,12 +3,10 @@
 (require racket/gui/base
          racket/class
          racket/cmdline
-         racket/list
          framework/private/bday
          framework/splash
          racket/runtime-path
-         racket/file
-	 (for-syntax racket/base)
+         (for-syntax racket/base)
          "frame-icon.rkt"
          "eb.rkt")
 
@@ -40,7 +38,6 @@
   heart.png
   texas-plt-bw.gif
   PLT-pumpkin.png
-  PLT-206-larval.png
   PLT-206-mars.jpg)
 
 ;; updates the command-line-arguments with only the files
@@ -86,17 +83,15 @@
 ;; magic strings and their associated images.  There should not be a string
 ;; in this list that is a prefix of another.
 (define magic-images
-  (list #;(magic-img "larval" PLT-206-larval.png)
-        (magic-img "mars"   PLT-206-mars.jpg)))
+  (list (magic-img "mars" PLT-206-mars.jpg)))
 
 (define (load-magic-images)
   (set! load-magic-images void) ; run only once
-  (for-each (λ (magic-image)
-              (unless (magic-image-bitmap magic-image)
-                (set-magic-image-bitmap!
-                 magic-image
-                 (icons-bitmap (magic-image-filename magic-image)))))
-            magic-images))
+  (for ([magic-image (in-list magic-images)])
+    (unless (magic-image-bitmap magic-image)
+      (set-magic-image-bitmap!
+       magic-image
+       (icons-bitmap (magic-image-filename magic-image))))))
 
 (define longest-magic-string
   (apply max (map (λ (s) (length (magic-image-chars s))) magic-images)))
@@ -115,32 +110,98 @@
 (define (add-key-code new-code)
   (set! key-codes (cons new-code key-codes))
   (when ((length key-codes) . > . longest-magic-string)
-    (set! key-codes (take key-codes longest-magic-string))))
+    (set! key-codes
+          (for/list ([key-code (in-list key-codes)]
+                     [_ (in-range longest-magic-string)])
+            key-code))))
+
+(define magic-to-draw #f)
 
 (define (drracket-splash-char-observer evt)
-  (let ([ch (send evt get-key-code)])
-    (when (and (eq? ch #\q)
-               (send evt get-control-down))
-      (exit))
-    (when (and the-splash-bitmap (char? ch))
-      ;; as soon as something is typed, load the bitmaps
-      (load-magic-images)
-      (add-key-code ch)
-      (let ([match (find-magic-image)])
-        (when match
-          (set! key-codes null)
-          (set-splash-bitmap
-           (if (eq? special-state match)
-               (begin (set! special-state #f) the-splash-bitmap)
-               (begin (set! special-state match)
-                      (magic-image-bitmap match))))
-          (refresh-splash))))))
+  (define ch (send evt get-key-code))
+  (when (and (eq? ch #\q)
+             (send evt get-control-down))
+    (exit))
+  (when (char? ch)
+    ;; as soon as something is typed, load the bitmaps
+    (load-magic-images)
+    (add-key-code ch)
+    (define match (find-magic-image))
+    (when match
+      (set! key-codes null)
+      (cond
+        [the-splash-bitmap
+         (set-splash-bitmap
+          (if (eq? special-state match)
+              (begin (set! special-state #f) the-splash-bitmap)
+              (begin (set! special-state match)
+                     (magic-image-bitmap match))))]
+        [else
+         (set! magic-to-draw
+               (if magic-to-draw
+                   #f
+                   match))
+         (refresh-splash)]))))
 
 (when (eb-bday?) (install-eb))
 
-(define weekend-bitmap-spec (collection-file-path plt-logo-red-shiny.png "icons" #:fail (λ (x) plt-logo-red-shiny.png)))
-(define normal-bitmap-spec (collection-file-path plt-logo-red-diffuse.png "icons" #:fail (λ (x) plt-logo-red-diffuse.png)))
+(define (draw-magic dc width height)
+  (define-values (sw sh) (send dc get-scale))
+  (define bmp (magic-image-bitmap magic-to-draw))
+  (define bw (send bmp get-width))
+  (define bh (send bmp get-height))
+  (send dc set-scale (* sw (/ width bw)) (* sh (/ height bh)))
+  (send dc clear)
+  (send dc draw-bitmap bmp 0 0)
+  (send dc set-scale sw sh))
+
+(define (draw-mb-flat dc current max width height)
+  (cond
+    [magic-to-draw (draw-magic dc width height)]
+    [else
+     (define smoothing (send dc get-smoothing))
+     (define pen (send dc get-pen))
+     (define brush (send dc get-brush))
+     (define-values (sx sy) (send dc get-scale))
+     (send dc clear)
+     (send dc set-scale mb-scale-factor mb-scale-factor)
+     (send dc set-smoothing 'smoothed)
+     (send dc set-pen "black" 1 'transparent)
+     (mb-main-drawing dc)
+     (send dc set-pen pen)
+     (send dc set-brush brush)
+     (send dc set-smoothing smoothing)
+     (send dc set-scale sx sy)]))
+
+(define (draw-mb-flat-weekend dc current max width height)
+  (cond
+    [magic-to-draw (draw-magic dc width height)]
+    [else
+     (define smoothing (send dc get-smoothing))
+     (define pen (send dc get-pen))
+     (define brush (send dc get-brush))
+     (define transformation (send dc get-transformation))
+     (send dc clear)
+     (send dc set-scale mb-scale-factor mb-scale-factor)
+     (send dc set-smoothing 'smoothed)
+     (send dc set-pen "black" 1 'transparent)
+     (send dc translate (/ mb-plain-width 2) (/ mb-plain-height 2))
+     (define f (/ current max))
+     (define spot
+       (cond
+         [(<= f 1/2) (* f 2)]
+         [else (- 1 (* (- f 1/2) 2))]))
+     (send dc rotate (* spot 2 3.1415926535))
+     (send dc translate (/ mb-plain-width -2) (/ mb-plain-height -2))
+     (mb-main-drawing dc)
+     (send dc set-pen pen)
+     (send dc set-brush brush)
+     (send dc set-smoothing smoothing)
+     (send dc set-transformation transformation)]))
+
+(define weekend-bitmap-spec (vector draw-mb-flat-weekend mb-flat-width mb-flat-height))
 (define valentines-days-spec (collection-file-path heart.png "icons" #:fail (λ (x) heart.png)))
+(define normal-bitmap-spec (vector draw-mb-flat mb-flat-width mb-flat-height))
 
 (define the-bitmap-spec
   (cond
@@ -162,7 +223,12 @@
      (collection-file-path texas-plt-bw.gif "icons")]
     [halloween?
      (collection-file-path PLT-pumpkin.png "icons")]
+    ;; don't use the weekend spinning because drawing
+    ;; the splash screen repeatedly adds about 40%
+    ;; to the startup time (at least on my machine)
+    #;
     [(weekend-date? startup-date)
+     (set-splash-progress-bar?! #f)
      weekend-bitmap-spec]
     [else normal-bitmap-spec]))
 
@@ -174,14 +240,13 @@
                                (read-bitmap/no-crash the-bitmap-spec)))
 (set-splash-char-observer drracket-splash-char-observer)
 
+;; this code changes the icon based on the date but
+;; there is only one icon for now, so just disable it.
+#;
 (when (eq? (system-type) 'macosx)
   (define initial-state (icon-state startup-date))
-  (define weekend-bitmap (if (equal? the-bitmap-spec weekend-bitmap-spec)
-                             the-splash-bitmap
-                             #f))
-  (define weekday-bitmap (if (equal? the-bitmap-spec normal-bitmap-spec)
-                             the-splash-bitmap
-                             #f))
+  (define weekend-bitmap #f)
+  (define weekday-bitmap #f)
   (define valentines-bitmap (if (equal? the-bitmap-spec valentines-days-spec)
                                 the-splash-bitmap
                                 #f))
@@ -192,10 +257,18 @@
        (unless valentines-bitmap (set! valentines-bitmap (read-bitmap/no-crash valentines-days-spec)))
        (set-doc-tile-bitmap valentines-bitmap)]
       [(weekend)
-       (unless weekend-bitmap (set! weekend-bitmap (read-bitmap/no-crash weekend-bitmap-spec)))
+       (unless weekend-bitmap
+         (set! weekend-bitmap
+               (read-bitmap/no-crash
+                (collection-file-path plt-logo-red-shiny.png
+                                      "icons" #:fail (λ (x) plt-logo-red-shiny.png)))))
        (set-doc-tile-bitmap weekend-bitmap)]
       [(normal) 
-       (unless weekday-bitmap (set! weekday-bitmap (read-bitmap/no-crash normal-bitmap-spec)))
+       (unless weekday-bitmap
+         (set! weekday-bitmap
+               (read-bitmap/no-crash
+                (collection-file-path plt-logo-red-diffuse.png
+                                      "icons" #:fail (λ (x) plt-logo-red-diffuse.png)))))
        (set-doc-tile-bitmap weekday-bitmap)]))
   (set-icon initial-state)
   (void

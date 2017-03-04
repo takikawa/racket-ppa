@@ -146,8 +146,8 @@ If you cannot, as with the Macro Stepper, send a thinner icon as the @racket[alt
 The backing scale of DrRacket icons.
 
 A backing scale of 2 means that the icon bitmap internally has two
-pixels per drawing unit, so it it renders well a double resolution,
-such as Retina display mode for Mac OS X.
+pixels per drawing unit, so it renders well at double resolution,
+such as Retina display mode for Mac OS.
 
 @history[#:added "1.1"]}
 

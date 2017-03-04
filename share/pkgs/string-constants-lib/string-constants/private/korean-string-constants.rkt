@@ -844,7 +844,7 @@
  (~a-must-end-with-~a
   "파일이름 ~a\n\n  ~a\n\n은(는) 잘못되었습니다. 파일이름은 반드시 \".~a\".로 끝나야 합니다")
  (macosx-executables-must-end-with-app
-  "파일이름\n\n  ~a\n\n은(는) 잘못되었습니다. MacOS X 에서, 실행파일은 반드시 .app으로 끝나는 디렉토리 내에 있어야 합니다.")
+  "파일이름\n\n  ~a\n\n은(는) 잘못되었습니다. Mac OS 에서, 실행파일은 반드시 .app으로 끝나는 디렉토리 내에 있어야 합니다.")
  (warning-directory-will-be-replaced
   "경고: 디렉토리:\n\n  ~a\n\n가 덮어씌워집니다. 계속하시겠습니까?")
  

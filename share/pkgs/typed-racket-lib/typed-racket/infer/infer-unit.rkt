@@ -11,21 +11,20 @@
          (except-in
           (combine-in
            (utils tc-utils)
-           (rep free-variance type-rep prop-rep object-rep rep-utils)
-           (types utils abbrev numeric-tower union subtype resolve
+           (rep free-variance type-rep prop-rep object-rep
+                values-rep rep-utils type-mask)
+           (types utils abbrev numeric-tower subtype resolve
                   substitute generalize prefab)
            (env index-env tvar-env))
           make-env -> ->* one-of/c)
          "constraint-structs.rkt"
          "signatures.rkt" "fail.rkt"
          "promote-demote.rkt"
-         racket/match racket/set
-         mzlib/etc
+         racket/match
          (contract-req)
          (for-syntax
            racket/base
            syntax/parse)
-         racket/dict
          racket/hash racket/list)
 
 (import dmap^ constraints^)
@@ -40,8 +39,7 @@
 
 ;; Type Type -> Pair<Seq, Seq>
 ;; construct a pair for the set of seen type pairs
-(define (seen-before s t)
-  (cons (Type-seq s) (Type-seq t)))
+(define seen-before cons)
 
 ;; Context, contains which type variables and indices to infer and which cannot be mentioned in
 ;; constraints.
@@ -87,27 +85,24 @@
 ;; Add the type pair to the set of seen type pairs
 (define/cond-contract (remember s t A)
   ((or/c AnyValues? Values/c ValuesDots?) (or/c AnyValues? Values/c ValuesDots?)
-   (listof (cons/c exact-nonnegative-integer?
-                   exact-nonnegative-integer?))
+   (listof (cons/c Rep? Rep?))
    . -> .
-   (listof (cons/c exact-nonnegative-integer?
-                   exact-nonnegative-integer?)))
+   (listof (cons/c Rep? Rep?)))
  (cons (seen-before s t) A))
 
 ;; Type Type -> Boolean
 ;; Check if a given type pair have been seen before
 (define/cond-contract (seen? s t cs)
   ((or/c AnyValues? Values/c ValuesDots?) (or/c AnyValues? Values/c ValuesDots?)
-   (listof (cons/c exact-nonnegative-integer?
-                   exact-nonnegative-integer?))
+   (listof (cons/c Rep? Rep?))
    . -> . any/c)
  (member (seen-before s t) cs))
 
 ;; (CMap DMap -> Pair<CMap, DMap>) CSet -> CSet
 ;; Map a function over a constraint set
 (define (map/cset f cset)
-  (% make-cset (for/list/fail ([(cmap dmap) (in-dict (cset-maps cset))])
-                 (f cmap dmap))))
+  (% make-cset (for/list/fail ([cmap/dmap (in-list (cset-maps cset))])
+                 (f (car cmap/dmap) (cdr cmap/dmap)))))
 
 ;; Symbol DCon -> DMap
 ;; Construct a dmap containing only a single mapping
@@ -191,14 +186,15 @@
 
 (define (List->end v)
   (match v
-    [(== -Null type-equal?) (null-end)]
+    [(== -Null) (null-end)]
     [(Listof: t) (uniform-end t)]
     [(ListDots: t dbound) (dotted-end t dbound)]
     [_ #f]))
 
 (define (List->seq v)
   (match v
-    [(List: ts #:tail (app List->end end)) (and end (seq ts end))]))
+    [(List: ts #:tail (app List->end end)) (and end (seq ts end))]
+    [_ #f]))
 
 
 (define-match-expander ValuesSeq:
@@ -212,7 +208,7 @@
       [(_ seq) #'(app List->seq (? values seq))])))
 
 
-;; generate-dbound-prefix: Symbol Type/c Natural (U Symbol #f) -> (Values (Listof Symbol) (Listof Type/c))
+;; generate-dbound-prefix: Symbol Type? Natural (U Symbol #f) -> (Values (Listof Symbol) (Listof Type?))
 ;; Substitutes n fresh new variables, replaces dotted occurences of v in t with the variables (and
 ;; maybe new-end), and then for each variable substitutes it in for regular occurences of v.
 (define (generate-dbound-prefix v ty n new-end)
@@ -224,11 +220,12 @@
       (substitute (make-F var) v ty*))))
 
 
-(define/cond-contract (cgen/prop context s t)
+(define/cond-contract (cgen/prop context p q)
   (context? Prop? Prop? . -> . (or/c #f cset?))
-  (match* (s t)
-    [(e e) (empty-cset/context context)]
-    [(e (TrueProp:)) (empty-cset/context context)]
+  (match* (p q)
+    [(p p) (empty-cset/context context)]
+    [(p (TrueProp:)) (empty-cset/context context)]
+    [((FalseProp:) q) (empty-cset/context context)]
     ;; FIXME - is there something to be said about the logical ones?
     [((TypeProp: o s) (TypeProp: o t)) (cgen/inv context s t)]
     [((NotTypeProp: o s) (NotTypeProp: o t)) (cgen/inv context s t)]
@@ -244,7 +241,7 @@
     [(_ _) #f]))
 
 (define/cond-contract (cgen/object context s t)
-  (context? Object? Object? . -> . (or/c #f cset?))
+  (context? OptObject? OptObject? . -> . (or/c #f cset?))
   (match* (s t)
     [(e e) (empty-cset/context context)]
     [(e (Empty:)) (empty-cset/context context)]
@@ -371,7 +368,6 @@
 
 (define/cond-contract (cgen/arr context s-arr t-arr)
   (context? arr? arr? . -> . (or/c #f cset?))
-
   (match* (s-arr t-arr)
     [((arr: ss s s-rest s-drest s-kws) (arr: ts t t-rest t-drest t-kws))
      (define (rest->end rest drest)
@@ -401,7 +397,6 @@
 (define (cgen/inv context s t)
   (% cset-meet (cgen context s t) (cgen context t s)))
 
-
 ;; context : the context of what to infer/not infer
 ;; S : a type to be the subtype of T
 ;; T : a type
@@ -413,10 +408,10 @@
    . -> . (or/c #F cset?))
   ;; useful quick loop
   (define/cond-contract (cg S T)
-   (Type/c Type/c . -> . (or/c #f cset?))
+   (Type? Type? . -> . (or/c #f cset?))
    (cgen context S T))
   (define/cond-contract (cg/inv S T)
-   (Type/c Type/c . -> . (or/c #f cset?))
+   (Type? Type? . -> . (or/c #f cset?))
    (cgen/inv context S T))
   ;; this places no constraints on any variables
   (define empty (empty-cset/context context))
@@ -427,335 +422,353 @@
   ;;          subtyping doesn't need to use it quite as much
   (define cs (current-seen))
   ;; if we've been around this loop before, we're done (for rec types)
-  (if (seen? S T cs)
-      empty
-      (parameterize (;; remember S and T, and obtain everything we've seen from the context
-                     ;; we can't make this an argument since we may call back and forth with
-                     ;; subtyping, for example
-                     [current-seen (remember S T cs)])
-        (match*/early (S T)
-          ;; if they're equal, no constraints are necessary (CG-Refl)
-          [(a b) #:when (type-equal? a b) empty]
-          ;; CG-Top
-          [(_ (Univ:)) empty]
-          ;; AnyValues
-          [((AnyValues: p) (AnyValues: q))
-           (cgen/prop context p q)]
+  (cond
+    [(equal? S T) empty] ;; (CG-Refl)
+    [(Univ? T) empty] ;; CG-Top
+    [(seen? S T cs) empty]
+    [else
+     (parameterize (;; remember S and T, and obtain everything we've seen from the context
+                    ;; we can't make this an argument since we may call back and forth with
+                    ;; subtyping, for example
+                    [current-seen (remember S T cs)])
+       (match*/early
+        (S T)
+        ;; AnyValues
+        [((AnyValues: p) (AnyValues: q))
+         (cgen/prop context p q)]
 
-          [((or (Values: (list (Result: _ psets _) ...))
-                (ValuesDots: (list (Result: _ psets _) ...) _ _))
-            (AnyValues: q))
-           (cset-join
-             (filter identity
-               (for/list ([pset (in-list psets)])
-                 (match pset
-                   [(PropSet: p+ p-)
-                    (% cset-meet (cgen/prop context p+ q) (cgen/prop context p- q))]))))]
+        [((or (Values: (list (Result: _ psets _) ...))
+              (ValuesDots: (list (Result: _ psets _) ...) _ _))
+          (AnyValues: q))
+         (cset-join
+          (for*/list ([pset (in-list psets)]
+                      [cs (in-value (% cset-meet
+                                       (cgen/prop context (PropSet-thn pset) q)
+                                       (cgen/prop context (PropSet-els pset) q)))]
+                      #:when cs)
+            cs))]
 
-          ;; check all non Type/c first so that calling subtype is safe
+        ;; check all non Type? first so that calling subtype is safe
 
-          ;; check each element
-          [((Result: s pset-s o-s)
-            (Result: t pset-t o-t))
-           (% cset-meet (cg s t)
-                        (cgen/prop-set context pset-s pset-t)
-                        (cgen/object context o-s o-t))]
+        ;; check each element
+        [((Result: s pset-s o-s)
+          (Result: t pset-t o-t))
+         (% cset-meet (cg s t)
+            (cgen/prop-set context pset-s pset-t)
+            (cgen/object context o-s o-t))]
 
-          ;; Values just delegate to cgen/seq, except special handling for -Bottom.
-          ;; A single -Bottom in a Values means that there is no value returned and so any other
-          ;; Values or ValuesDots should be above it.
-          [((ValuesSeq: s-seq) (ValuesSeq: t-seq))
-           ;; Check for a substition that S is below (ret -Bottom).
-           (define bottom-case
-             (match S
-               [(Values: (list (Result: s f-s o-s)))
-                (cgen context s -Bottom)]
-               [else #f]))
-           (define regular-case
-             (cgen/seq context s-seq t-seq))
-           ;; If we want the OR of the csets that the two cases return.
-           (cset-join
-             (filter values
-               (list bottom-case regular-case)))]
-
-          ;; they're subtypes. easy.
-          [(a b) 
-           #:when (subtype a b)
-           empty]
-
-          ;; Lists delegate to sequences
-          [((ListSeq: s-seq) (ListSeq: t-seq))
-           (cgen/seq context s-seq t-seq)]
-
-          ;; refinements are erased to their bound
-          [((Refinement: S _) T)
-           (cg S T)]
-
-          ;; variables that are in X and should be constrained
-          ;; all other variables are compatible only with themselves
-          [((F: (? (inferable-var? context) v)) T)
-           #:return-when
-           (match T
-             ;; fail when v* is an index variable
-             [(F: v*) (and (bound-index? v*) (not (bound-tvar? v*)))]
-             [_ #f])
-           #f
-           ;; constrain v to be below T (but don't mention bounds)
-           (singleton (Un) v (var-demote T (context-bounds context)))]
-
-          [(S (F: (? (inferable-var? context) v)))
-           #:return-when
+        ;; Values just delegate to cgen/seq, except special handling for -Bottom.
+        ;; A single -Bottom in a Values means that there is no value returned and so any other
+        ;; Values or ValuesDots should be above it.
+        [((ValuesSeq: s-seq) (ValuesSeq: t-seq))
+         ;; Check for a substition that S is below (ret -Bottom).
+         (define bottom-case
            (match S
-             [(F: v*) (and (bound-index? v*) (not (bound-tvar? v*)))]
-             [_ #f])
-           #f
-           ;; constrain v to be above S (but don't mention bounds)
-           (singleton (var-promote S (context-bounds context)) v Univ)]
+             [(Values: (list (Result: s f-s o-s)))
+              (cgen context s -Bottom)]
+             [else #f]))
+         (define regular-case
+           (cgen/seq context s-seq t-seq))
+         ;; If we want the OR of the csets that the two cases return.
+         (cset-join
+          (filter values
+                  (list bottom-case regular-case)))]
 
-          ;; recursive names should get resolved as they're seen
-          [(s (? Name? t))
-           (cg s (resolve-once t))]
-          [((? Name? s) t)
-           (cg (resolve-once s) t)]
+        ;; they're subtypes. easy.
+        [(a b) #:when (cond
+                        [(Type? a) (subtype a b)]
+                        [(Result? a) (subresult a b)]
+                        [else (subval a b)])
+         empty]
 
-          ;; constrain b1 to be below T, but don't mention the new vars
-          [((Poly: v1 b1) T) (cgen (context-add context #:bounds v1) b1 T)]
+        ;; Lists delegate to sequences
+        [((ListSeq: s-seq) (ListSeq: t-seq))
+         (cgen/seq context s-seq t-seq)]
 
-          ;; Mu's just get unfolded
-          [((? Mu? s) t) (cg (unfold s) t)]
-          [(s (? Mu? t)) (cg s (unfold t))]
+        ;; refinements are erased to their bound
+        [((Refinement: S _) T)
+         (cg S T)]
 
-          ;; find *an* element of elems which can be made a subtype of T
-          [((Intersection: ts) T)
-           (cset-join
-            (for*/list ([t (in-immutable-set ts)]
-                        [v (in-value (cg t T))]
-                        #:when v)
-              v))]
-          
-          ;; constrain S to be below *each* element of elems, and then combine the constraints
-          [(S (Intersection: ts))
-           (define cs (for/list/fail ([ts (in-immutable-set ts)]) (cg S ts)))
-           (and cs (cset-meet* (cons empty cs)))]
-          
-          ;; constrain *each* element of es to be below T, and then combine the constraints
-          [((Union: es) T)
-           (define cs (for/list/fail ([e (in-list es)]) (cg e T)))
-           (and cs (cset-meet* (cons empty cs)))]
+        ;; variables that are in X and should be constrained
+        ;; all other variables are compatible only with themselves
+        [((F: (? (inferable-var? context) v)) T)
+         #:return-when
+         (match T
+           ;; fail when v* is an index variable
+           [(F: v*) (and (bound-index? v*) (not (bound-tvar? v*)))]
+           [_ #f])
+         #f
+         ;; constrain v to be below T (but don't mention bounds)
+         (singleton -Bottom v (var-demote T (context-bounds context)))]
 
-          ;; find *an* element of es which can be made to be a supertype of S
-          ;; FIXME: we're using multiple csets here, but I don't think it makes a difference
-          ;; not using multiple csets will break for: ???
-          [(S (Union: es))
-           (cset-join
-            (for*/list ([e (in-list es)]
-                        [v (in-value (cg S e))]
-                        #:when v)
-              v))]
+        [(S (F: (? (inferable-var? context) v)))
+         #:return-when
+         (match S
+           [(F: v*) (and (bound-index? v*) (not (bound-tvar? v*)))]
+           [_ #f])
+         #f
+         ;; constrain v to be above S (but don't mention bounds)
+         (singleton (var-promote S (context-bounds context)) v Univ)]
 
-          ;; from define-new-subtype
-          [((Distinction: nm1 id1 S) (app resolve (Distinction: nm2 id2 T)))
-           #:when (and (equal? nm1 nm2) (equal? id1 id2))
-           (cg S T)]
-          [((Distinction: _ _ S) T)
-           (cg S T)]
+        ;; recursive names should get resolved as they're seen
+        [(s (? Name? t))
+         (cg s (resolve-once t))]
+        [((? Name? s) t)
+         (cg (resolve-once s) t)]
 
-          ;; two structs with the same name
-          ;; just check pairwise on the fields
-          [((Struct: nm _ flds proc _ _) (Struct: nm* _ flds* proc* _ _))
-           #:when (free-identifier=? nm nm*)
-           (let ([proc-c
-                  (cond [(and proc proc*)
-                         (cg proc proc*)]
-                        [proc* #f]
-                        [else empty])])
-             (% cset-meet proc-c (cgen/flds context flds flds*)))]
+        ;; constrain b1 to be below T, but don't mention the new vars
+        [((Poly: v1 b1) T) (cgen (context-add context #:bounds v1) b1 T)]
 
-          ;; two prefab structs with the same key
-          [((Prefab: k ss) (Prefab: k* ts))
-           #:when (and (prefab-key-subtype? k k*)
-                       (>= (length ss) (length ts)))
-           (% cset-meet*
-              (for/list/fail ([s (in-list ss)]
-                              [t (in-list ts)]
-                              [mut? (in-list (prefab-key->field-mutability k*))])
-                (if mut?
-                    (cgen/inv context s t)
-                    (cgen context s t))))]
+        ;; Mu's just get unfolded
+        [((? Mu? s) t) (cg (unfold s) t)]
+        [(s (? Mu? t)) (cg s (unfold t))]
 
-          ;; two struct names, need to resolve b/c one could be a parent
-          [((Name: n _ #t) (Name: n* _ #t))
-           (if (free-identifier=? n n*)
-               empty ;; just succeed now
-               (% cg (resolve-once S) (resolve-once T)))]
-          ;; pairs are pointwise
-          [((Pair: a b) (Pair: a* b*))
-           (% cset-meet (cg a a*) (cg b b*))]
-          ;; sequences are covariant
-          [((Sequence: ts) (Sequence: ts*))
-           (cgen/list context ts ts*)]
-          [((Listof: t) (Sequence: (list t*)))
-           (cg t t*)]
-          [((Pair: t1 t2) (Sequence: (list t*)))
-           (% cset-meet (cg t1 t*) (cg t2 (-lst t*)))]
-          [((MListof: t) (Sequence: (list t*)))
-           (cg t t*)]
-          ;; To check that mutable pair is a sequence we check that the cdr is
-          ;; both an mutable list and a sequence
-          [((MPair: t1 t2) (Sequence: (list t*)))
-           (% cset-meet (cg t1 t*) (cg t2 T) (cg t2 (Un -Null (make-MPairTop))))]
-          [((List: ts) (Sequence: (list t*)))
-           (% cset-meet* (for/list/fail ([t (in-list ts)])
-                           (cg t t*)))]
-          [((HeterogeneousVector: ts) (HeterogeneousVector: ts*))
-           (% cset-meet (cgen/list context ts ts*) (cgen/list context ts* ts))]
-          [((HeterogeneousVector: ts) (Vector: s))
-           (define ts* (map (λ _ s) ts)) ;; invariant, everything has to match
-           (% cset-meet (cgen/list context ts ts*) (cgen/list context ts* ts))]
-          [((HeterogeneousVector: ts) (Sequence: (list t*)))
-           (% cset-meet* (for/list/fail ([t (in-list ts)])
-                           (cg t t*)))]
-          [((Vector: t) (Sequence: (list t*)))
-           (cg t t*)]
-          [((Base: 'String _ _ _) (Sequence: (list t*)))
-           (cg -Char t*)]
-          [((Base: 'Bytes _ _ _) (Sequence: (list t*)))
-           (cg -Nat t*)]
-          [((Base: 'Input-Port _ _ _) (Sequence: (list t*)))
-           (cg -Nat t*)]
-          [((Value: (? exact-nonnegative-integer? n)) (Sequence: (list t*)))
-           (define possibilities
-             (list
-               (list byte? -Byte)
-               (list portable-index? -Index)
-               (list portable-fixnum? -NonNegFixnum)
-               (list values -Nat)))
-           (define type
-             (for/or ([pred-type (in-list possibilities)])
-               (match pred-type
-                 ((list pred? type)
-                  (and (pred? n) type)))))
-           (cg type t*)]
-          [((Base: _ _ _ #t) (Sequence: (list t*)))
-           (define type
-             (for/or ([t (in-list (list -Byte -Index -NonNegFixnum -Nat))])
-               (and (subtype S t) t)))
-           (% cg type t*)]
-          [((Hashtable: k v) (Sequence: (list k* v*)))
-           (cgen/list context (list k v) (list k* v*))]
-          [((Set: t) (Sequence: (list t*)))
-           (cg t t*)]
+        ;; find *an* element of elems which can be made a subtype of T
+        [((Intersection: ts) T)
+         (cset-join
+          (for*/list ([t (in-list ts)]
+                      [v (in-value (cg t T))]
+                      #:when v)
+            v))]
+        
+        ;; constrain S to be below *each* element of elems, and then combine the constraints
+        [(S (Intersection: ts))
+         (define cs (for/list/fail ([ts (in-list ts)]) (cg S ts)))
+         (and cs (cset-meet* (cons empty cs)))]
+        
+        ;; constrain *each* element of es to be below T, and then combine the constraints
+        [((BaseUnion-bases: es) T)
+         (define cs (for/list/fail ([e (in-list es)]) (cg e T)))
+         (and cs (cset-meet* (cons empty cs)))]
+        [((Union-all: es) T)
+         (define cs (for/list/fail ([e (in-list es)]) (cg e T)))
+         (and cs (cset-meet* (cons empty cs)))]
+
+        [(_ (Bottom:)) no-cset]
+        
+        ;; find *an* element of es which can be made to be a supertype of S
+        ;; FIXME: we're using multiple csets here, but I don't think it makes a difference
+        ;; not using multiple csets will break for: ???
+        [(S (Union-all: es))
+         (cset-join
+          (for*/list ([e (in-list es)]
+                      [v (in-value (cg S e))]
+                      #:when v)
+            v))]
+        
+        ;; from define-new-subtype
+        [((Distinction: nm1 id1 S) (app resolve (Distinction: nm2 id2 T)))
+         #:when (and (equal? nm1 nm2) (equal? id1 id2))
+         (cg S T)]
+        [((Distinction: _ _ S) T)
+         (cg S T)]
+
+        ;; two structs with the same name
+        ;; just check pairwise on the fields
+        [((Struct: nm _ flds proc _ _) (Struct: nm* _ flds* proc* _ _))
+         #:when (free-identifier=? nm nm*)
+         (let ([proc-c
+                (cond [(and proc proc*)
+                       (cg proc proc*)]
+                      [proc* #f]
+                      [else empty])])
+           (% cset-meet proc-c (cgen/flds context flds flds*)))]
+
+        ;; two prefab structs with the same key
+        [((Prefab: k ss) (Prefab: k* ts))
+         #:when (and (prefab-key-subtype? k k*)
+                     (>= (length ss) (length ts)))
+         (% cset-meet*
+            (for/list/fail ([s (in-list ss)]
+                            [t (in-list ts)]
+                            [mut? (in-list (prefab-key->field-mutability k*))])
+                           (if mut?
+                               (cgen/inv context s t)
+                               (cgen context s t))))]
+
+        ;; two struct names, need to resolve b/c one could be a parent
+        [((Name: n _ #t) (Name: n* _ #t))
+         (if (free-identifier=? n n*)
+             empty ;; just succeed now
+             (% cg (resolve-once S) (resolve-once T)))]
+        ;; pairs are pointwise
+        [((Pair: a b) (Pair: a* b*))
+         (% cset-meet (cg a a*) (cg b b*))]
+        ;; sequences are covariant
+        [((Sequence: ts) (Sequence: ts*))
+         (cgen/list context ts ts*)]
+        [((Listof: t) (Sequence: (list t*)))
+         (cg t t*)]
+        [((Pair: t1 t2) (Sequence: (list t*)))
+         (% cset-meet (cg t1 t*) (cg t2 (-lst t*)))]
+        [((MListof: t) (Sequence: (list t*)))
+         (cg t t*)]
+        ;; To check that mutable pair is a sequence we check that the cdr is
+        ;; both an mutable list and a sequence
+        [((MPair: t1 t2) (Sequence: (list t*)))
+         (% cset-meet (cg t1 t*) (cg t2 T) (cg t2 (Un -Null -MPairTop)))]
+        [((List: ts) (Sequence: (list t*)))
+         (% cset-meet* (for/list/fail ([t (in-list ts)])
+                                      (cg t t*)))]
+        [((HeterogeneousVector: ts) (HeterogeneousVector: ts*))
+         (% cset-meet (cgen/list context ts ts*) (cgen/list context ts* ts))]
+        [((HeterogeneousVector: ts) (Vector: s))
+         (define ts* (map (λ _ s) ts)) ;; invariant, everything has to match
+         (% cset-meet (cgen/list context ts ts*) (cgen/list context ts* ts))]
+        [((HeterogeneousVector: ts) (Sequence: (list t*)))
+         (% cset-meet* (for/list/fail ([t (in-list ts)])
+                                      (cg t t*)))]
+        [((Vector: t) (Sequence: (list t*)))
+         (cg t t*)]
+        [((? Base:String?) (Sequence: (list t*)))
+         (cg -Char t*)]
+        [((? Base:Bytes?) (Sequence: (list t*)))
+         (cg -Nat t*)]
+        [((? Base:Input-Port?) (Sequence: (list t*)))
+         (cg -Nat t*)]
+        [((Value: (? exact-nonnegative-integer? n)) (Sequence: (list t*)))
+         (define possibilities
+           (list
+            (list byte? -Byte)
+            (list portable-index? -Index)
+            (list portable-fixnum? -NonNegFixnum)
+            (list values -Nat)))
+         (define type
+           (for/or ([pred-type (in-list possibilities)])
+             (match pred-type
+               [(list pred? type)
+                (and (pred? n) type)])))
+         (cg type t*)]
+        ;; numeric? == #true
+        [((Base-bits: #t _) (Sequence: (list t*)))
+         (define type
+           (for/or ([t (in-list (list -Byte -Index -NonNegFixnum -Nat))])
+             (and (subtype S t) t)))
+         (% cg type t*)]
+        [((Hashtable: k v) (Sequence: (list k* v*)))
+         (cgen/list context (list k v) (list k* v*))]
+        [((Set: t) (Sequence: (list t*)))
+         (cg t t*)]
 
 
-          ;; resolve applications
-          [((App: _ _ _) _)
-           (% cg (resolve-once S) T)]
-          [(_ (App: _ _ _))
-           (% cg S (resolve-once T))]
+        ;; resolve applications
+        [((App: _ _) _)
+         (% cg (resolve-once S) T)]
+        [(_ (App: _ _))
+         (% cg S (resolve-once T))]
 
-          ;; If the struct names don't match, try the parent of S
-          ;; Needs to be done after App and Mu in case T is actually the current struct
-          ;; but not currently visible
-          [((Struct: nm (? Type? parent) _ _ _ _) other)
-           (cg parent other)]
+        ;; If the struct names don't match, try the parent of S
+        ;; Needs to be done after App and Mu in case T is actually the current struct
+        ;; but not currently visible
+        [((Struct: nm (? Type? parent) _ _ _ _) other)
+         (cg parent other)]
 
-          ;; Invariant here because struct types aren't subtypes just because the
-          ;; structs are (since you can make a constructor from the type).
-          [((StructType: s) (StructType: t))
-           (cg/inv s t)]
+        ;; Invariant here because struct types aren't subtypes just because the
+        ;; structs are (since you can make a constructor from the type).
+        [((StructType: s) (StructType: t))
+         (cg/inv s t)]
 
-          ;; vectors are invariant - generate constraints *both* ways
-          [((Vector: e) (Vector: e*))
-           (cg/inv e e*)]
-          ;; boxes are invariant - generate constraints *both* ways
-          [((Box: e) (Box: e*))
-           (cg/inv e e*)]
-          [((Weak-Box: e) (Weak-Box: e*))
-           (cg/inv e e*)]
-          [((MPair: s t) (MPair: s* t*))
-           (% cset-meet (cg/inv s s*) (cg/inv t t*))]
-          [((Channel: e) (Channel: e*))
-           (cg/inv e e*)]
-          [((Async-Channel: e) (Async-Channel: e*))
-           (cg/inv e e*)]
-          [((ThreadCell: e) (ThreadCell: e*))
-           (cg/inv e e*)]
-          [((Continuation-Mark-Keyof: e) (Continuation-Mark-Keyof: e*))
-           (cg/inv e e*)]
-          [((Prompt-Tagof: s t) (Prompt-Tagof: s* t*))
-           (% cset-meet (cg/inv s s*) (cg/inv t t*))]
-          [((Promise: e) (Promise: e*))
-           (cg e e*)]
-          [((Ephemeron: e) (Ephemeron: e*))
-           (cg e e*)]
-          [((CustodianBox: e) (CustodianBox: e*))
-           (cg e e*)]
-          [((Set: a) (Set: a*))
-           (cg a a*)]
-          [((Evt: a) (Evt: a*))
-           (cg a a*)]
-          [((Base: 'Semaphore _ _ _) (Evt: t))
-           (cg S t)]
-          [((Base: 'Output-Port _ _ _) (Evt: t))
-           (cg S t)]
-          [((Base: 'Input-Port _ _ _) (Evt: t))
-           (cg S t)]
-          [((Base: 'TCP-Listener _ _ _) (Evt: t))
-           (cg S t)]
-          [((Base: 'Thread _ _ _) (Evt: t))
-           (cg S t)]
-          [((Base: 'Subprocess _ _ _) (Evt: t))
-           (cg S t)]
-          [((Base: 'Will-Executor _ _ _) (Evt: t))
-           (cg S t)]
-          [((Base: 'LogReceiver _ _ _) (Evt: t ))
-           (cg (make-HeterogeneousVector
-                   (list -Symbol -String Univ
-                         (Un (-val #f) -Symbol)))
-               t)]
-          [((Base: 'Place _ _ _) (Evt: t))
-           (cg Univ t)]
-          [((Base: 'Base-Place-Channel _ _ _) (Evt: t))
-           (cg Univ t)]
-          [((CustodianBox: t) (Evt: t*)) (cg S t*)]
-          [((Channel: t) (Evt: t*)) (cg t t*)]
-          [((Async-Channel: t) (Evt: t*)) (cg t t*)]
-          ;; we assume all HTs are mutable at the moment
-          [((Hashtable: s1 s2) (Hashtable: t1 t2))
-           ;; for mutable hash tables, both are invariant
-           (% cset-meet (cg/inv s1 t1) (cg/inv s2 t2))]
-          ;; syntax is covariant
-          [((Syntax: s1) (Syntax: s2))
-           (cg s1 s2)]
-          ;; futures are covariant
-          [((Future: s1) (Future: s2))
-           (cg s1 s2)]
-          ;; parameters are just like one-arg functions
-          [((Param: in1 out1) (Param: in2 out2))
-           (% cset-meet (cg in2 in1) (cg out1 out2))]
-          [((Function: (list s-arr ...))
-            (Function: (list t-arr ...)))
-           (% cset-meet*
-            (for/list/fail ([t-arr (in-list t-arr)])
-              ;; for each element of t-arr, we need to get at least one element of s-arr that works
-              (let ([results (for*/list ([s-arr (in-list s-arr)]
-                                         [v (in-value (cgen/arr context s-arr t-arr))]
-                                         #:when v)
-                               v)])
-                ;; ensure that something produces a constraint set
-                (and (not (null? results))
-                     (cset-join results)))))]
-          [(_ _)
-           ;; nothing worked, and we fail
-           #f]))))
+        ;; vectors are invariant - generate constraints *both* ways
+        [((Vector: e) (Vector: e*))
+         (cg/inv e e*)]
+        ;; boxes are invariant - generate constraints *both* ways
+        [((Box: e) (Box: e*))
+         (cg/inv e e*)]
+        [((Weak-Box: e) (Weak-Box: e*))
+         (cg/inv e e*)]
+        [((MPair: s t) (MPair: s* t*))
+         (% cset-meet (cg/inv s s*) (cg/inv t t*))]
+        [((Channel: e) (Channel: e*))
+         (cg/inv e e*)]
+        [((Async-Channel: e) (Async-Channel: e*))
+         (cg/inv e e*)]
+        [((ThreadCell: e) (ThreadCell: e*))
+         (cg/inv e e*)]
+        [((Continuation-Mark-Keyof: e) (Continuation-Mark-Keyof: e*))
+         (cg/inv e e*)]
+        [((Prompt-Tagof: s t) (Prompt-Tagof: s* t*))
+         (% cset-meet (cg/inv s s*) (cg/inv t t*))]
+        [((Promise: e) (Promise: e*))
+         (cg e e*)]
+        [((Ephemeron: e) (Ephemeron: e*))
+         (cg e e*)]
+        [((CustodianBox: e) (CustodianBox: e*))
+         (cg e e*)]
+        [((Set: a) (Set: a*))
+         (cg a a*)]
+        [((Evt: a) (Evt: a*))
+         (cg a a*)]
+        [((? Base:Semaphore?) (Evt: t))
+         (cg S t)]
+        [((? Base:Output-Port?) (Evt: t))
+         (cg S t)]
+        [((? Base:Input-Port?) (Evt: t))
+         (cg S t)]
+        [((? Base:TCP-Listener?) (Evt: t))
+         (cg S t)]
+        [((? Base:Thread?) (Evt: t))
+         (cg S t)]
+        [((? Base:Subprocess?) (Evt: t))
+         (cg S t)]
+        [((? Base:Will-Executor?) (Evt: t))
+         (cg S t)]
+        [((? Base:Log-Receiver?) (Evt: t ))
+         (cg (make-HeterogeneousVector
+              (list -Symbol -String Univ
+                    (Un (-val #f) -Symbol)))
+             t)]
+        [((? Base:Place?) (Evt: t))
+         (cg Univ t)]
+        [((? Base:Base-Place-Channel?) (Evt: t))
+         (cg Univ t)]
+        [((CustodianBox: t) (Evt: t*)) (cg S t*)]
+        [((Channel: t) (Evt: t*)) (cg t t*)]
+        [((Async-Channel: t) (Evt: t*)) (cg t t*)]
+        ;; we assume all HTs are mutable at the moment
+        [((Hashtable: s1 s2) (Hashtable: t1 t2))
+         ;; for mutable hash tables, both are invariant
+         (% cset-meet (cg/inv s1 t1) (cg/inv s2 t2))]
+        ;; syntax is covariant
+        [((Syntax: s1) (Syntax: s2))
+         (cg s1 s2)]
+        ;; futures are covariant
+        [((Future: s1) (Future: s2))
+         (cg s1 s2)]
+        ;; parameters are just like one-arg functions
+        [((Param: in1 out1) (Param: in2 out2))
+         (% cset-meet (cg in2 in1) (cg out1 out2))]
+        [((Function: (list s-arr ...))
+          (Function: (list t-arr ...)))
+         (% cset-meet*
+            (for/list/fail
+             ([t-arr (in-list t-arr)])
+             ;; for each element of t-arr, we need to get at least one element of s-arr that works
+             (let ([results (for*/list ([s-arr (in-list s-arr)]
+                                        [v (in-value (cgen/arr context s-arr t-arr))]
+                                        #:when v)
+                              v)])
+               ;; ensure that something produces a constraint set
+               (and (not (null? results))
+                    (cset-join results)))))]
+        [(_ _)
+         ;; nothing worked, and we fail
+         #f]))]))
 
-;; C : cset? - set of constraints found by the inference engine
-;; X : (listof symbol?) - type variables that must have entries
-;; Y : (listof symbol?) - index variables that must have entries
-;; R : Type/c - result type into which we will be substituting
-(define/cond-contract (subst-gen C X Y R)
-  (cset? (listof symbol?) (listof symbol?) (or/c Values/c AnyValues? ValuesDots?)
-         . -> . (or/c #f substitution/c))
+;; C : set of constraints found by the inference engine
+;; X : type variables that must have entries
+;; Y : index variables that must have entries
+;; R : result type into which we will be substituting
+;; multiple-substitutions? : should we return one substitution (#f), or
+;; all the substitutions that were possible? (#t)
+;; NOTE: multiple substitutions are rare -- at the time of adding this
+;; parameter this feature is only used by the tc-app/list.
+;; NOTE: if multiple substitutions is #t, a list is returned,
+;; otherwise a single substitution (not in a list) is returned.
+(define/cond-contract (substs-gen C X Y R multiple-substitutions?)
+  (cset? (listof symbol?) (listof symbol?) (or/c Values/c AnyValues? ValuesDots?) boolean?
+         . -> . (or/c substitution/c
+                      (cons/c substitution/c
+                              (listof substitution/c))))
   (define var-hash (free-vars-hash (free-vars* R)))
   (define idx-hash (free-vars-hash (free-idxs* R)))
   ;; c : Constaint
@@ -763,15 +776,14 @@
   (define (constraint->type v variance)
     (match v
       [(c S T)
-       (evcase variance
-               [Constant S]
-               [Covariant S]
-               [Contravariant T]
-               [Invariant
-                (let ([gS (generalize S)])
-                  (if (subtype gS T)
-                      gS
-                      S))])]))
+       (match variance
+         [(? variance:const?) S]
+         [(? variance:co?) S]
+         [(? variance:contra?) T]
+         [(? variance:inv?) (let ([gS (generalize S)])
+                             (if (subtype gS T)
+                                 gS
+                                 S))])]))
 
   ;; Since we don't add entries to the empty cset for index variables (since there is no
   ;; widest constraint, due to dcon-exacts), we must add substitutions here if no constraint
@@ -781,46 +793,50 @@
     (hash-union
      (for/hash ([v (in-list Y)]
                 #:unless (hash-has-key? S v))
-       (let ([var (hash-ref idx-hash v Constant)])
+       (let ([var (hash-ref idx-hash v variance:const)])
          (values v
-                 (evcase var
-                         [Constant (i-subst null)]
-                         [Covariant (i-subst null)]
-                         [Contravariant (i-subst/starred null Univ)]
-                         ;; TODO figure out if there is a better subst here
-                         [Invariant (i-subst null)]))))
+                 (match var
+                   [(? variance:const?) (i-subst null)]
+                   [(? variance:co?) (i-subst null)]
+                   [(? variance:contra?) (i-subst/starred null Univ)]
+                   ;; TODO figure out if there is a better subst here
+                   [(? variance:inv) (i-subst null)]))))
      S))
-  (match (car (cset-maps C))
-    [(cons cmap (dmap dm))
-     (let* ([subst (hash-union
-                    (for/hash ([(k dc) (in-hash dm)])
-                      (define (c->t c) (constraint->type c (hash-ref idx-hash k Constant)))
-                      (values
-                       k
-                       (match dc
-                         [(dcon fixed #f)
-                          (i-subst (map c->t fixed))]
-                         [(or (dcon fixed rest) (dcon-exact fixed rest))
-                          (i-subst/starred
-                           (map c->t fixed)
-                           (c->t rest))]
-                         [(dcon-dotted fixed dc dbound)
-                          (i-subst/dotted
-                           (map c->t fixed)
-                           (c->t dc)
-                           dbound)])))
-                    (for/hash ([(k v) (in-hash cmap)])
-                      (values k (t-subst (constraint->type v (hash-ref var-hash k Constant))))))]
-            [subst (for/fold ([subst subst]) ([v (in-list X)])
-                     (let ([entry (hash-ref subst v #f)])
-                       ;; Make sure we got a subst entry for a type var
-                       ;; (i.e. just a type to substitute)
-                       ;; If we don't have one, there are no constraints on this variable
-                       (if (and entry (t-subst? entry))
-                           subst
-                           (hash-set subst v (t-subst Univ)))))])
-       ;; verify that we got all the important variables
-       (extend-idxs subst))]))
+  (define (build-subst m)
+    (match m
+      [(cons cmap (dmap dm))
+       (let* ([subst (hash-union
+                      (for/hash ([(k dc) (in-hash dm)])
+                        (define (c->t c) (constraint->type c (hash-ref idx-hash k variance:const)))
+                        (values
+                         k
+                         (match dc
+                           [(dcon fixed #f)
+                            (i-subst (map c->t fixed))]
+                           [(or (dcon fixed rest) (dcon-exact fixed rest))
+                            (i-subst/starred
+                             (map c->t fixed)
+                             (c->t rest))]
+                           [(dcon-dotted fixed dc dbound)
+                            (i-subst/dotted
+                             (map c->t fixed)
+                             (c->t dc)
+                             dbound)])))
+                      (for/hash ([(k v) (in-hash cmap)])
+                        (values k (t-subst (constraint->type v (hash-ref var-hash k variance:const))))))]
+              [subst (for/fold ([subst subst]) ([v (in-list X)])
+                       (let ([entry (hash-ref subst v #f)])
+                         ;; Make sure we got a subst entry for a type var
+                         ;; (i.e. just a type to substitute)
+                         ;; If we don't have one, there are no constraints on this variable
+                         (if (and entry (t-subst? entry))
+                             subst
+                             (hash-set subst v (t-subst Univ)))))])
+         ;; verify that we got all the important variables
+         (extend-idxs subst))]))
+  (if multiple-substitutions?
+      (map build-subst (cset-maps C))
+      (build-subst (car (cset-maps C)))))
 
 ;; context : the context of what to infer/not infer
 ;; S : a list of types to be the subtypes of T
@@ -852,20 +868,26 @@
 ;; just return a boolean result
 (define infer
  (let ()
-  (define/cond-contract (infer X Y S T R [expected #f])
-    (((listof symbol?) (listof symbol?) (listof Type/c) (listof Type/c)
-      (or/c #f Values/c ValuesDots?))
-     ((or/c #f Values/c AnyValues? ValuesDots?))
-     . ->* . (or/c boolean? substitution/c))
-    (define ctx (context null X Y ))
-    (define expected-cset
-      (if expected
-          (cgen ctx R expected)
-          (empty-cset '() '())))
-    (and expected-cset
-         (let* ([cs (cgen/list ctx S T #:expected-cset expected-cset)]
-                [cs* (% cset-meet cs expected-cset)])
-           (and cs* (if R (subst-gen cs* X Y R) #t)))))
+   (define/cond-contract (infer X Y S T R [expected #f] #:multiple? [multiple-substitutions? #f])
+     (((listof symbol?) (listof symbol?) (listof Type?) (listof Type?)
+       (or/c #f Values/c ValuesDots?))
+      ((or/c #f Values/c AnyValues? ValuesDots?)
+       #:multiple? boolean?)
+      . ->* . (or/c boolean?
+                    substitution/c
+                    (cons/c substitution/c
+                            (listof substitution/c))))
+     (define ctx (context null X Y ))
+     (define expected-cset
+       (if expected
+           (cgen ctx R expected)
+           (empty-cset '() '())))
+     (and expected-cset
+          (let* ([cs (cgen/list ctx S T #:expected-cset expected-cset)]
+                 [cs* (% cset-meet cs expected-cset)])
+            (and cs* (cond
+                       [R (substs-gen cs* X Y R multiple-substitutions?)]
+                       [else #t])))))
   ;(trace infer)
   infer)) ;to export a variable binding and not syntax
 
@@ -900,11 +922,12 @@
    #:return-unless cs #f
    (define m (cset-meet cs expected-cset))
    #:return-unless m #f
-   (subst-gen m X (list dotted-var) R)))
+   (substs-gen m X (list dotted-var) R #f)))
 
 
-;(trace subst-gen)
+;(trace substs-gen)
 ;(trace cgen)
 ;(trace cgen/list)
 ;(trace cgen/arr)
 ;(trace cgen/seq)
+

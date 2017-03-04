@@ -1,7 +1,7 @@
 
 (module pconvert mzscheme
   
-  (require (only racket/base sort for for/vector for/list in-vector in-naturals)
+  (require (only racket/base sort for for/vector for/list for/or in-vector in-naturals)
            compatibility/mlist
 	   "pconvert-prop.rkt"
            racket/class
@@ -572,9 +572,12 @@
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   (define member*
     (lambda (a l)
-      (cond [(or (not (pair? l)) (null? l)) #f]
-            [(eq? a (car l)) #t]
-            [else (or (member* a (car l)) (member* a (cdr l)))])))
+      (let loop ([l l])
+        (cond [(pair? l) (or (loop (car l)) (loop (cdr l)))]
+              [(symbol? l) (equal? a l)]
+              [(box? l) (loop (unbox l))]
+              [(vector? l) (for/or ([i (in-vector l)]) (loop i))]
+              [else #f]))))
   
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;; takes an expression and completely converts it to show sharing

@@ -364,7 +364,7 @@ corresponding to @racket[trest], where @racket[bound]
 }
 
 @defform[(Vectorof t)]{Homogenous @rtech{vectors} of @racket[t]}
-@defform[(Vector t ...)]{is the type of the list with one element, in order,
+@defform[(Vector t ...)]{is the type of the vector with one element, in order,
   for each type provided to the @racket[Vector] type constructor.
 
   @ex[(vector 1 2 3)
@@ -820,6 +820,8 @@ this top type.
         #s((salad food 1) "quinoa" "EVOO" salad))]
 }
 
+@defalias[Union U]
+@defalias[Intersection ∩]
 @defalias[→ ->]
 @defalias[case→ case->]
 @defalias[∀ All]

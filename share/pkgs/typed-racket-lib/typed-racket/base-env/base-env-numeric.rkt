@@ -3,7 +3,7 @@
 (begin
   (require
    (for-syntax racket/base racket/syntax syntax/parse)
-   (only-in (rep type-rep) Type/c? make-Values)
+   (only-in (rep type-rep values-rep) Type? make-Values)
    racket/list racket/math racket/flonum racket/extflonum racket/unsafe/ops racket/sequence racket/match
    (for-template racket/flonum racket/extflonum racket/fixnum racket/math racket/unsafe/ops racket/base
                  (only-in "../types/numeric-predicates.rkt" index?))
@@ -1189,7 +1189,7 @@
              (commutative-case -PosIndex -Index)
              (commutative-case -PosFixnum -Fixnum)
              (commutative-case -NonNegFixnum -Fixnum)
-             (map varop (list -NegFixnum -NonPosFixnum -PosFixnum -NonNegFixnum -Fixnum))
+             (map varop (list -Index -NegFixnum -NonPosFixnum -PosFixnum -NonNegFixnum -Fixnum))
              (commutative-case -PosInt -Int)
              (commutative-case -Nat -Int)
              (map varop (list -NegInt -NonPosInt -PosInt -Nat -Int))
