@@ -21,7 +21,8 @@
 ;; - Debian and Ubuntu use a few fixed library versions even though
 ;;   actual OpenSSL version changes:
 ;;   - Debian squeeze: lib{crypto,ssl}.so.0.9.8
-;;   - Debian {wheezy, jessie, stretch, sid}: lib{crypto,ssl}.so.1.0.0
+;;   - Debian {wheezy, jessie}: lib{crypto,ssl}.so.1.0.0
+;;   - Debian {stretch, sid}: lib{crypto,ssl}.so.1.1, lib{crypto,ssl}.so.1.0.2
 ;;   - Ubuntu {14.04, 14.10, 15.04}: lib{crypto,ssl}.so.1.0.0
 ;;   - Debian and Ubuntu also provide versionless library in pkg "libssl-dev"
 ;; - Fedora provides libraries suffixed with actual versions (eg
@@ -41,9 +42,11 @@
 
     ;; Compatibility-based version / SONAME
     "10"     ;; Fedora
-    "1.0.0"  ;; Debian, Ubuntu
+    "1.1"    ;; Newer Debian
+    "1.0.0"  ;; Older Debian, Ubuntu
 
     ;; Other specific known versions
+    "1.0.2"
     "1.0.1k" "1.0.1j" "1.0.1g" "1.0.1e"
     "1.0" "1.0.0" "1.0.0e" "1.0.0d" "1.0.0c" "1.0.0b" "1.0.0a"
     "0.9.8e" "0.9.8b" "0.9.8" "0.9.7"))
