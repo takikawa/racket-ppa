@@ -1,3 +1,9 @@
+racket (6.8-1) experimental; urgency=medium
+
+  * New upstream version
+
+ -- David Bremner <bremner@debian.org>  Sat, 04 Mar 2017 08:18:51 -0400
+
 racket (6.7-1) unstable; urgency=medium
 
   * New upstream release
