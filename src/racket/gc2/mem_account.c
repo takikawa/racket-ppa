@@ -38,6 +38,8 @@ inline static void BTC_register_new_thread(void *t, void *c)
 }
 
 inline static void BTC_register_thread(void *t, void *c)
+/* Might be called in a future thread to change to a custodian that
+   has a set number */
 {
   NewGC *gc = GC_get_GC();
   GC_Thread_Info *work;
@@ -136,7 +138,8 @@ inline static int create_blank_owner_set(NewGC *gc)
   gc->owner_table_size = curr_size;
 
   naya = (OTEntry **)ofm_malloc(curr_size * sizeof(OTEntry*));
-  memcpy(naya, owner_table, old_size*sizeof(OTEntry*));
+  if (old_size)
+    memcpy(naya, owner_table, old_size*sizeof(OTEntry*));
   gc->owner_table = owner_table = naya;
   bzero(((char*)owner_table) + (sizeof(OTEntry*) * old_size),
         (curr_size - old_size) * sizeof(OTEntry*));
@@ -144,7 +147,7 @@ inline static int create_blank_owner_set(NewGC *gc)
   return create_blank_owner_set(gc);
 }
 
-inline static int custodian_to_owner_set(NewGC *gc,Scheme_Custodian *cust)
+inline static int custodian_to_owner_set(NewGC *gc, Scheme_Custodian *cust)
 {
   int i;
 
@@ -877,11 +880,16 @@ int BTC_single_allocation_limit(NewGC *gc, size_t sizeb)
  * GC_out_of_memory protects any user-requested allocation whose size
  * is independent of any existing object, then we can enforce the limit. */
 {
-  Scheme_Thread *p = scheme_current_thread;
-  if (p)
-    return (custodian_single_time_limit(gc, thread_get_owner(p)) < sizeb);
-  else
-    return (gc->place_memory_limit < sizeb);
+  if (gc->alternate_accounting_custodian) {
+    int set = custodian_to_owner_set(gc, gc->alternate_accounting_custodian);
+    return (custodian_single_time_limit(gc, set) < sizeb);
+  } else {
+    Scheme_Thread *p = scheme_current_thread;
+    if (p)
+      return (custodian_single_time_limit(gc, thread_get_owner(p)) < sizeb);
+    else
+      return (gc->place_memory_limit < sizeb);
+  }
 }
 
 static uintptr_t BTC_get_account_hook(void *c1)

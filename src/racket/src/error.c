@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2016 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -87,9 +87,20 @@ ROSYM static Scheme_Object *def_exe_yield_proc;
 READ_ONLY Scheme_Object *scheme_def_exit_proc;
 READ_ONLY Scheme_Object *scheme_raise_arity_error_proc;
 
-
 #ifdef MEMORY_COUNTING_ON
 intptr_t scheme_misc_count;
+#endif
+
+#ifdef MZ_USE_MZRT
+static mzrt_mutex *glib_log_queue_lock;
+typedef struct glib_log_queue_entry {
+  const char *log_domain;
+  int log_level;
+  const char *message;
+  struct glib_log_queue_entry *next;
+} glib_log_queue_entry;
+static glib_log_queue_entry *glib_log_queue;
+static void *glib_log_signal_handle;
 #endif
 
 /* locals */
@@ -3142,6 +3153,13 @@ void scheme_write_proc_context(Scheme_Object *port, int print_width,
   }
 }
 
+static void write_context_repeats(int repeats, Scheme_Object *port)
+{
+  char buf[64];
+  sprintf(buf, "[repeats %d more time%s]", repeats, (repeats == 1) ? "" : "s");
+  scheme_write_byte_string(buf, strlen(buf), port);
+}
+
 static Scheme_Object *
 def_error_display_proc(int argc, Scheme_Object *argv[])
 {
@@ -3158,8 +3176,8 @@ def_error_display_proc(int argc, Scheme_Object *argv[])
   s = scheme_char_string_to_byte_string(argv[0]);
 
   scheme_write_byte_string(SCHEME_BYTE_STR_VAL(s),
-			   SCHEME_BYTE_STRTAG_VAL(s),
-			   port);
+                           SCHEME_BYTE_STRTAG_VAL(s),
+                           port);
 
   /* Print context, if available */
   if (SCHEME_CHAPERONE_STRUCTP(argv[1])
@@ -3175,49 +3193,104 @@ def_error_display_proc(int argc, Scheme_Object *argv[])
       max_cnt = 0x7FFFFFFF;
 
     if (max_cnt) {
-      int orig_max_cnt = max_cnt;
+      Scheme_Object *prev_name;
+      int orig_max_cnt = max_cnt, repeats;
       w = scheme_get_param(config, MZCONFIG_ERROR_PRINT_WIDTH);
       if (SCHEME_INTP(w))
-	print_width = SCHEME_INT_VAL(w);
+        print_width = SCHEME_INT_VAL(w);
       else
-	print_width = 0x7FFFFFFF;
+        print_width = 0x7FFFFFFF;
+
+      /* Print srcloc(s) if present */
+      l = scheme_struct_type_property_ref(scheme_source_property, argv[1]);
+      if (l)
+        l = _scheme_apply(l, 1, &(argv[1]));
+
+
+      if (l && !SCHEME_NULLP(l)) {
+        /* Some exns include srcloc in the msg, so skip the first srcloc of those when needed */
+        if (SCHEME_TRUEP(scheme_get_param(scheme_current_config(), MZCONFIG_ERROR_PRINT_SRCLOC))
+            && (scheme_is_struct_instance(exn_table[MZEXN_FAIL_READ].type, argv[1])
+                || scheme_is_struct_instance(exn_table[MZEXN_FAIL_SYNTAX].type, argv[1])
+                || scheme_is_struct_instance(exn_table[MZEXN_FAIL_CONTRACT_VARIABLE].type, argv[1])))
+          l = SCHEME_CDR(l);
+
+        if (!SCHEME_NULLP(l))
+          scheme_write_byte_string("\n  location...:", 15, port);
+
+        while (!SCHEME_NULLP(l)) {
+          scheme_write_byte_string("\n   ", 4, port);
+          w = SCHEME_CAR(l);
+          w = srcloc_to_string(1, &w);
+          scheme_display_w_max(w, port, print_width);
+          l = SCHEME_CDR(l);
+        }
+      }
+
+      prev_name = NULL;
+      repeats = 0;
+
       l = scheme_get_stack_trace(scheme_struct_ref(argv[1], 1));
       while (!SCHEME_NULLP(l)) {
-	if (!max_cnt) {
-	  scheme_write_byte_string("\n   ...", 7, port);
-	  break;
-	} else {
-	  Scheme_Object *name, *loc;
-	  
-	  if (max_cnt == orig_max_cnt) {
-	    /* Starting label: */
-	    scheme_write_byte_string("\n  context...:\n", 15, port);
-	  } else
-            scheme_write_byte_string("\n", 1, port);
+        if (!max_cnt) {
+          scheme_write_byte_string("\n   ...", 7, port);
+          break;
+        } else {
+          Scheme_Object *name, *loc;
 
-	  name = SCHEME_CAR(l);
-	  loc = SCHEME_CDR(name);
-	  name = SCHEME_CAR(name);
-
-          scheme_write_byte_string("   ", 3, port);
-
-          if (SCHEME_TRUEP(loc)) {
-            Scheme_Structure *sloc = (Scheme_Structure *)loc;
-            scheme_write_proc_context(port, print_width, 
-                                      name, 
-                                      sloc->slots[0], sloc->slots[1],
-                                      sloc->slots[2], sloc->slots[3],
-                                      0);
+          name = SCHEME_CAR(l);
+          if (prev_name && scheme_equal(name, prev_name)) {
+            repeats++;
           } else {
-            scheme_write_proc_context(port, print_width, 
-                                      name, 
-                                      NULL, NULL, NULL, NULL, 
-                                      0);
+            if (max_cnt == orig_max_cnt) {
+              /* Starting label: */
+              scheme_write_byte_string("\n  context...:\n", 15, port);
+            } else {
+              scheme_write_byte_string("\n", 1, port);
+            }
+
+            if (repeats) {
+              scheme_write_byte_string("   ", 3, port);
+              write_context_repeats(repeats, port);
+              repeats = 0;
+              --max_cnt;
+              if (max_cnt)
+                scheme_write_byte_string("\n", 1, port);
+            }
+
+            prev_name = name;
+
+            if (max_cnt) {
+              loc = SCHEME_CDR(name);
+              name = SCHEME_CAR(name);
+
+              scheme_write_byte_string("   ", 3, port);
+
+              if (SCHEME_TRUEP(loc)) {
+                Scheme_Structure *sloc = (Scheme_Structure *)loc;
+                scheme_write_proc_context(port, print_width, 
+                                          name, 
+                                          sloc->slots[0], sloc->slots[1],
+                                          sloc->slots[2], sloc->slots[3],
+                                          0);
+              } else {
+                scheme_write_proc_context(port, print_width, 
+                                          name, 
+                                          NULL, NULL, NULL, NULL, 
+                                          0);
+              }
+              --max_cnt;
+            }
           }
 
-	  l = SCHEME_CDR(l);
-	  --max_cnt;
-	}
+          l = SCHEME_CDR(l);
+        }
+      }
+
+      if (repeats) {
+        scheme_write_byte_string("\n", 1, port);
+        scheme_write_byte_string("   ", 3, port);
+        write_context_repeats(repeats, port);
       }
     }
   }
@@ -3888,14 +3961,11 @@ void scheme_log_warning(char *buffer)
   scheme_log_message(scheme_main_logger, SCHEME_LOG_WARNING, buffer, strlen(buffer), scheme_false);
 }
 
-void scheme_glib_log_message(const char *log_domain,
+static void glib_log_message(const char *log_domain,
                              int log_level,
                              const char *message,
                              void *user_data)
-/* This handler is suitable for use as a glib logging handler.
-   Although a handler can be implemented with the FFI,
-   we build one into Racket to avoid potential problems of
-   handlers getting GCed or retaining a namespace. */
+/* in the main thread for some place */
 {
 #define mzG_LOG_LEVEL_ERROR    (1 << 2)
 #define mzG_LOG_LEVEL_CRITICAL (1 << 3)
@@ -3930,6 +4000,97 @@ void scheme_glib_log_message(const char *log_domain,
   
   scheme_log_message(scheme_main_logger, level, together, len2, scheme_false);
 }
+
+void scheme_glib_log_message(const char *log_domain,
+                             int log_level,
+                             const char *message,
+                             void *user_data)
+  XFORM_SKIP_PROC
+/* This handler is suitable for use as a glib logging handler.
+   Although a handler can be implemented with the FFI,
+   we build one into Racket to avoid potential problems of
+   handlers getting GCed or retaining a namespace. */
+{
+  if (scheme_is_place_main_os_thread())
+    glib_log_message(log_domain, log_level, message, user_data);
+  else {
+    /* We're in an unknown thread. Queue the message for the main Racket place's thread. */
+#ifdef MZ_USE_MZRT
+    glib_log_queue_entry *e = malloc(sizeof(glib_log_queue_entry));
+    e->log_domain = strdup(log_domain);
+    e->log_level = log_level;
+    e->message = strdup(message);
+    
+    mzrt_mutex_lock(glib_log_queue_lock);
+    e->next = glib_log_queue;
+    glib_log_queue = e;
+    mzrt_mutex_unlock(glib_log_queue_lock);
+
+    scheme_signal_received_at(glib_log_signal_handle);
+#else
+    /* We shouldn't get here, but just in case: */
+    fprintf(stderr, "%s: %s\n", log_domain, message);
+#endif
+  }
+}
+
+/* For use by testing, suitable for use with pthread_create, logs a
+   warning for ";"-separated messages in `str` */
+void *scheme_glib_log_message_test(char *str)
+  XFORM_SKIP_PROC
+{
+  int i;
+  for (i = 0; str[i]; i++) {
+    if (str[i] == ';') {
+      str[i] = 0;
+      scheme_glib_log_message("test", mzG_LOG_LEVEL_WARNING, str, NULL);
+      str[i] = ';';
+      str = str + i + 1;
+      i = 0;
+    }
+  }
+  scheme_glib_log_message("test", mzG_LOG_LEVEL_WARNING, str, NULL);
+  return NULL;
+}
+
+#ifdef MZ_USE_MZRT
+void scheme_init_glib_log_queue(void)
+{
+  mzrt_mutex_create(&glib_log_queue_lock);
+  glib_log_signal_handle = scheme_get_signal_handle();
+}
+
+void scheme_check_glib_log_messages(void)
+{
+  if (scheme_current_place_id == 0) {
+    glib_log_queue_entry *e, *prev = NULL, *next;
+    
+    mzrt_mutex_lock(glib_log_queue_lock);
+    e = glib_log_queue;
+    glib_log_queue = NULL;
+    mzrt_mutex_unlock(glib_log_queue_lock);
+
+    if (e) {
+      /* Reverse list */
+      while (e->next) {
+        next = e->next;
+        e->next = prev;
+        prev = e;
+        e = next;
+      }
+      e->next = prev;
+
+      /* Process messages */
+      for (; e; e = e->next) {
+        glib_log_message(e->log_domain, e->log_level, e->message, NULL);
+      }
+
+      /* In case a thread is blocked waiting for a log event */
+      scheme_signal_received_at(glib_log_signal_handle);
+    }
+  }
+}
+#endif
 
 static int extract_level(const char *who, int none_ok, int which, int argc, Scheme_Object **argv)
 {

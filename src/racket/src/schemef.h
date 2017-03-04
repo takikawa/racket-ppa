@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2016 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
   All rights reserved.
 
@@ -231,6 +231,7 @@ MZ_EXTERN void scheme_log_name_pfx_message(Scheme_Logger *logger, int level, Sch
 MZ_EXTERN void scheme_log_abort(char *buffer);
 MZ_EXTERN void scheme_log_warning(char *buffer);
 MZ_EXTERN void scheme_glib_log_message(const char *log_domain, int log_level, const char *message, void *user_data);
+MZ_EXTERN void *scheme_glib_log_message_test(char *str);
 MZ_EXTERN void scheme_out_of_memory_abort();
 
 MZ_EXTERN void scheme_wrong_count(const char *name, int minc, int maxc,

@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2016 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -2544,6 +2544,8 @@ static Scheme_Object **apply_guards(Scheme_Struct_Type *stype, int argc, Scheme_
   return args;
 }
 
+#define STRUCT_BYTES(c) (sizeof(Scheme_Structure) + (((c) - mzFLEX_DELTA) * sizeof(Scheme_Object *)))
+
 Scheme_Object *
 scheme_make_struct_instance(Scheme_Object *_stype, int argc, Scheme_Object **args)
 {
@@ -2554,12 +2556,9 @@ scheme_make_struct_instance(Scheme_Object *_stype, int argc, Scheme_Object **arg
 
   stype = (Scheme_Struct_Type *)_stype;
 
-  DEBUG_COUNT_ALLOCATION((Scheme_Object *)stype);
-
   c = stype->num_slots;
   inst = (Scheme_Structure *)
-    scheme_malloc_tagged(sizeof(Scheme_Structure) 
-			 + ((c - mzFLEX_DELTA) * sizeof(Scheme_Object *)));
+    scheme_malloc_tagged(STRUCT_BYTES(c));
   
   inst->so.type = (stype->proc_attr ? scheme_proc_struct_type : scheme_structure_type);
   inst->stype = stype;
@@ -2604,12 +2603,9 @@ Scheme_Object *scheme_make_blank_prefab_struct_instance(Scheme_Struct_Type *styp
   Scheme_Structure *inst;
   int c;
 
-  DEBUG_COUNT_ALLOCATION((Scheme_Object *)stype);
-
   c = stype->num_slots;
   inst = (Scheme_Structure *)
-    scheme_malloc_tagged(sizeof(Scheme_Structure) 
-			 + ((c - mzFLEX_DELTA) * sizeof(Scheme_Object *)));
+    scheme_malloc_tagged(STRUCT_BYTES(c));
   
   inst->so.type = scheme_structure_type;
   inst->stype = stype;
@@ -2623,7 +2619,7 @@ Scheme_Object *scheme_make_serialized_struct_instance(Scheme_Object *prefab_key,
   Scheme_Serialized_Structure *inst;
 
   inst = (Scheme_Serialized_Structure *)
-    scheme_malloc_tagged(sizeof(Scheme_Serialized_Structure) 
+    scheme_malloc_tagged(sizeof(Scheme_Serialized_Structure)
 			 + ((num_slots - mzFLEX_DELTA) * sizeof(Scheme_Object *)));
   
   inst->so.type = scheme_serialized_structure_type;
@@ -2640,12 +2636,9 @@ Scheme_Object *scheme_make_prefab_struct_instance(Scheme_Struct_Type *stype,
   Scheme_Structure *inst;
   int i, c;
 
-  DEBUG_COUNT_ALLOCATION((Scheme_Object *)stype);
-
   c = stype->num_slots;
   inst = (Scheme_Structure *)
-    scheme_malloc_tagged(sizeof(Scheme_Structure) 
-			 + ((c - mzFLEX_DELTA) * sizeof(Scheme_Object *)));
+    scheme_malloc_tagged(STRUCT_BYTES(c));
   
   inst->so.type = scheme_structure_type;
   inst->stype = stype;
@@ -2670,8 +2663,7 @@ Scheme_Object *scheme_clone_prefab_struct_instance(Scheme_Structure *s)
     chaperone = NULL;
 
   c = s->stype->num_slots;
-  sz = (sizeof(Scheme_Structure) 
-        + ((c - mzFLEX_DELTA) * sizeof(Scheme_Object *)));
+  sz = STRUCT_BYTES(c);
   inst = (Scheme_Structure *)scheme_malloc_tagged(sz);
   memcpy(inst, s, sz);
 
@@ -2699,12 +2691,9 @@ make_simple_struct_instance(int argc, Scheme_Object **args, Scheme_Object *prim)
   Scheme_Struct_Type *stype = (Scheme_Struct_Type *)SCHEME_PRIM_CLOSURE_ELS(prim)[0];
   int i, c;
 
-  DEBUG_COUNT_ALLOCATION((Scheme_Object *)stype);
-
   c = stype->num_slots;
   inst = (Scheme_Structure *)
-    scheme_malloc_tagged(sizeof(Scheme_Structure) 
-			 + ((c - mzFLEX_DELTA) * sizeof(Scheme_Object *)));
+    scheme_malloc_tagged(STRUCT_BYTES(c));
   
   inst->so.type = scheme_structure_type;
   inst->stype = stype;
@@ -4697,11 +4686,13 @@ static Scheme_Object *make_name(const char *pre, const char *tn, int ltn,
   
   memcpy(name, pre, lp);
   total = lp;
-  memcpy(name + total, (ltn < 0) ? SCHEME_SYM_VAL((Scheme_Object *)tn) : tn, xltn);
+  if (xltn)
+    memcpy(name + total, (ltn < 0) ? SCHEME_SYM_VAL((Scheme_Object *)tn) : tn, xltn);
   total += xltn;
   memcpy(name + total, post1, lp1);
   total += lp1;
-  memcpy(name + total, (lfn < 0) ? SCHEME_SYM_VAL((Scheme_Object *)fn) : fn, xlfn);
+  if (xlfn)
+    memcpy(name + total, (lfn < 0) ? SCHEME_SYM_VAL((Scheme_Object *)fn) : fn, xlfn);
   total += xlfn;
   memcpy(name + total, post2, lp2);
   total += lp2;
@@ -5092,7 +5083,8 @@ static Scheme_Object *_make_struct_type(Scheme_Object *base,
       }
       
       pa = MALLOC_N(Scheme_Object *, i + num_props);
-      memcpy(pa, struct_type->props, sizeof(Scheme_Object *) * i);
+      if (i)
+        memcpy(pa, struct_type->props, sizeof(Scheme_Object *) * i);
 
       num_props = i;
 

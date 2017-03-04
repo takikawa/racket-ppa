@@ -161,7 +161,7 @@ embeds the module @racket[m] from the file @filepath{m.rkt}, without
 prefixing the name of the module; the @racket[literal-sexpr] argument
 to go with the above might be @racket['(require m)]. When submodules
 are available and included, the submodule is given a name by
-symbol-appending the @racket[write] form of submodule path to the
+symbol-appending the @racket[write] form of the submodule path to the
 enclosing module's name.
 
 Modules are normally compiled before they are embedded into the target
@@ -184,7 +184,7 @@ currently supported keys are as follows:
 
 @itemize[
 
-  @item{@racket['icns] (Mac OS X) : An icon file path (suffix
+  @item{@racket['icns] (Mac OS) : An icon file path (suffix
         @filepath{.icns}) to use for the executable's desktop icon.}
 
   @item{@racket['ico] (Windows) : An icon file path (suffix
@@ -194,10 +194,10 @@ currently supported keys are as follows:
         executable are replaced with icons from the file,
         instead of setting only certain sizes and depths.}]}
 
-  @item{@racket['creator] (Mac OS X) : Provides a 4-character string
+  @item{@racket['creator] (Mac OS) : Provides a 4-character string
         to use as the application signature.}
 
-  @item{@racket['file-types] (Mac OS X) : Provides a list of
+  @item{@racket['file-types] (Mac OS) : Provides a list of
         association lists, one for each type of file handled by the
         application; each association is a two-element list, where the
         first (key) element is a string recognized by Finder, and the
@@ -205,7 +205,7 @@ currently supported keys are as follows:
         @racketmodname[xml/plist]). See @filepath{drracket.filetypes}
         in the @filepath{drracket} collection for an example.}
 
-  @item{@racket['uti-exports] (Mac OS X) : Provides a list of
+  @item{@racket['uti-exports] (Mac OS) : Provides a list of
         association lists, one for each @as-index{Uniform Type
         Identifier} (UTI) exported by the executable; each association
         is a two-element list, where the first (key) element is a
@@ -214,7 +214,7 @@ currently supported keys are as follows:
         @filepath{drracket.utiexports} in the @filepath{drracket}
         collection for an example.}
 
-  @item{@racket['resource-files] (Mac OS X) : extra files to copy into
+  @item{@racket['resource-files] (Mac OS) : extra files to copy into
         the @filepath{Resources} directory of the generated
         executable.}
 
@@ -230,10 +230,10 @@ currently supported keys are as follows:
         where the configuration directory is consulted for information
         about collection link files).}
 
-  @item{@racket['framework-root] (Mac OS X) : A string to prefix the
+  @item{@racket['framework-root] (Mac OS) : A string to prefix the
         executable's path to the Racket and GRacket frameworks
         (including a separating slash); note that when the prefix
-        starts @filepath{@"@"executable_path/} works for a
+        start @filepath{@"@"executable_path/} works for a
         Racket-based application, the corresponding prefix start for
         a GRacket-based application is
         @filepath{@"@"executable_path/../../../}; if @racket[#f] is
@@ -264,7 +264,7 @@ currently supported keys are as follows:
         brings the other instance to the front; @racket[#f] means that
         multiple instances are expected.}
 
-  @item{@racket['forget-exe?] (Windows, Mac OS X) : A boolean;
+  @item{@racket['forget-exe?] (Windows, Mac OS) : A boolean;
         @racket[#t] for a launcher (see @racket[launcher?] below) does
         not preserve the original executable name for
         @racket[(find-system-path 'exec-file)]; the main consequence
@@ -276,7 +276,7 @@ currently supported keys are as follows:
         executable, instead of a wrapper binary that execs the
         original; the default is @racket[#f].}
 
-  @item{@racket['relative?] (Unix, Windows, Mac OS X) : A boolean;
+  @item{@racket['relative?] (Unix, Windows, Mac OS) : A boolean;
         @racket[#t] means that, to the degree that the generated
         executable must refer to another, it can use a relative path
         (so the executables can be moved together, but not
@@ -297,7 +297,7 @@ created executable maintains its built-in (relative) path to the main
 @racket[(find-system-path 'collects-dir)] when the executable is
 run---plus a potential list of other directories for finding library
 collections---which are used to initialize the
-@racket[current-library-collection-paths] list in combination with
+@racket[current-library-collection-paths] list in combination with the
 @envvar{PLTCOLLECTS} environment variable.  Otherwise, the argument
 specifies a replacement; it must be either a path, string, or
 list of paths and strings. In the last case, the first path
@@ -313,9 +313,9 @@ is initialized to an empty list, and
 use of @tech[#:doc reference-doc]{collection links files}.
 
 If the @racket[#:launcher?] argument is @racket[#t], then
-@racket[lid-list] should be null, @racket[literal-files] should be
+@racket[mod-list] should be null, @racket[literal-files] should be
 null, @racket[literal-sexp] should be @racket[#f], and the platform
-should be Windows or Mac OS X. The embedding executable is created in
+should be Windows or Mac OS. The embedding executable is created in
 such a way that @racket[(find-system-path 'exec-file)] produces the
 source Racket or GRacket path instead of the embedding executable (but
 the result of @racket[(find-system-path 'run-file)] is still the
@@ -426,7 +426,7 @@ currently @racket[#f] for all platforms.}
 
 Indicates whether Racket/GRacket executables for the current platform
 actually correspond to directories. The result is @racket[#t] on
-Mac OS X when @racket[mred?] is @racket[#t], @racket[#f] otherwise.}
+Mac OS when @racket[mred?] is @racket[#t], @racket[#f] otherwise.}
 
 
 @defproc[(embedding-executable-put-file-extension+style+filters [mred? any/c])
@@ -439,7 +439,7 @@ Returns three values suitable for use as the @racket[extension],
 respectively.
 
 If Racket/GRacket launchers for the current platform were directories
-form the user's perspective, the @racket[style] result is suitable for
+from the user's perspective, the @racket[style] result is suitable for
 use with @racket[get-directory], and the @racket[extension] result may
 be a string indicating a required extension for the directory name. }
 

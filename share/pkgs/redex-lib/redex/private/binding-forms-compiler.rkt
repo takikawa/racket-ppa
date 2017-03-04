@@ -274,13 +274,13 @@
        (match (assoc (first (car names-and-depths)) pattern-names)
          [#f (raise-syntax-error 
               (syntax-e form-name)
-              (format "Undefined name imported or exported: ~a" (first (car names-and-depths)))
+              (format "undefined name imported or exported: ~a" (first (car names-and-depths)))
               surface-bspec)]
          [`(,_ ,pattern-depth)
           (if (> pattern-depth (second (car names-and-depths)))
               (raise-syntax-error 
                (syntax-e form-name)
-               (format "Name ~a occurs at ellipsis depth ~a, but is referred to at ellipsis depth ~a"
+               (format "name ~a occurs at ellipsis depth ~a, but is referred to at ellipsis depth ~a"
                        (first (car names-and-depths))
                        pattern-depth
                        (second (car names-and-depths)))

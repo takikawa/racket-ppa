@@ -118,7 +118,7 @@
        (if (null? new-arities)
            (domain-mismatches
             (car (syntax-e form)) (cdr (syntax-e form))
-            arities doms rests drests rngs
+            (make-Function arities) doms rests drests rngs
             (stx-map tc-expr pos-args)
             #f #f #:expected expected
             #:msg-thunk
@@ -133,7 +133,7 @@
   (match t
     [(Pair: (Value: (? keyword? k)) b)
      (cons k (type->list b))]
-    [(Value: '()) null]
+    [(? Base:Null?) null]
     [_ (int-err "bad value in type->list: ~a" t)]))
 
 

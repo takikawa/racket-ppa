@@ -2,7 +2,7 @@
 
 (require "../utils/utils.rkt"
          "renamer.rkt"
-         racket/sequence syntax/id-table racket/dict racket/syntax
+         racket/sequence syntax/id-table racket/syntax
          racket/struct-info racket/match syntax/parse
          (only-in (private type-contract) include-extra-requires?)
          (private syntax-properties)
@@ -73,11 +73,11 @@
     (define new-id (freshen-id internal-id))
     (cond
       ;; if it's already done, do nothing
-      [(dict-ref mapping internal-id
-                 ;; if it wasn't there, put it in, and skip this case
-                 (λ () (dict-set! mapping internal-id new-id) #f))
+      [(free-id-table-ref mapping internal-id
+                          ;; if it wasn't there, put it in, and skip this case
+                          (λ () (free-id-table-set! mapping internal-id new-id) #f))
        => mk-ignored-quad]
-      [(dict-ref defs internal-id #f)
+      [(free-id-table-ref defs internal-id #f)
        =>
        (match-lambda
          [(def-binding _ ty)
@@ -89,7 +89,7 @@
       ;; otherwise, not defined in this module, not our problem
       [else (mk-ignored-quad internal-id)]))
 
-  ;; mk-struct-syntax-quad : identifier? identifier? struct-info? Type/c -> quad/c
+  ;; mk-struct-syntax-quad : identifier? identifier? struct-info? Type? -> quad/c
   ;; This handles `(provide s)` where `s` was defined with `(struct s ...)`. 
   (define (mk-struct-syntax-quad internal-id new-id si constr-type)
     (define type-is-constructor? #t) ;Conservative estimate (provide/contract does the same)

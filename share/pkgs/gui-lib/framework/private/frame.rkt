@@ -2370,7 +2370,11 @@
     (define/override (edit-menu:create-find-case-sensitive?) #t)
 
     (define/override (edit-menu:replace-all-callback menu evt) (replace-all) #t)
-    (define/override (edit-menu:replace-all-on-demand item) (send item enable (not hidden?)))
+    (define/override (edit-menu:replace-all-on-demand item)
+      (send item enable (and find-edit
+                             (not (string=? (send find-edit get-text) ""))
+                             (not hidden?)
+                             replace-visible?)))
     (define/override (edit-menu:create-replace-all?) #t)
 
     (define/override make-root-area-container
@@ -2538,9 +2542,14 @@
                     (hash-set! ht found-txt #t)
                     (send found-txt begin-edit-sequence))
                   (let ([start (- found-pos (send find-edit last-position))])
+                    (define revision-before (send found-txt get-revision-number))
                     (send found-txt delete start found-pos)
-                    (copy-over replace-edit 0 (send replace-edit last-position) found-txt start)
-                    (loop found-txt (+ start (send replace-edit last-position)))))))
+                    (define revision-after (send found-txt get-revision-number))
+                    (unless (= revision-before revision-after)
+                      (copy-over replace-edit 0 (send replace-edit last-position) found-txt start))
+                    (loop found-txt (if (= revision-before revision-after)
+                                        found-pos
+                                        (+ start (send replace-edit last-position))))))))
             (hash-for-each ht (λ (txt _) (send txt end-edit-sequence)))))))
                              
     (define/private (pop-all-the-way-out txt)

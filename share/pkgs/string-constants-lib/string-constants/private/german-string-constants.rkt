@@ -475,6 +475,8 @@
 
  (add-spacing-between-lines "Ein Pixel Extra-Platz zwischen den Zeilen")
 
+ (editor-x-selection-mode "Einfügen nur nach explizitem Kopieren / Selektion nicht automatisch kopieren")
+
  ; title of the color choosing dialog
 
  ; should have entire alphabet
@@ -988,7 +990,7 @@
  (~a-must-end-with-~a
   "Der Dateiname auf „.~a“\n\n  ~a\n\nist nicht zulässig. Der Dateiname muss auf „.~a“ enden.")
  (macosx-executables-must-end-with-app
-  "Der Dateiname auf „.~a“\n\n  ~a\n\nist nicht zulässig. Unter Mac OS X muss der Dateiname auf „.app“ enden.")
+  "Der Dateiname auf „.~a“\n\n  ~a\n\nist nicht zulässig. Unter Mac OS muss der Dateiname auf „.app“ enden.")
  (warning-directory-will-be-replaced
   "WARNUNG: Das Verzeichnis:\n\n  ~a\n\nsoll überschrieben werden. Weitermachen?")
  
@@ -1153,6 +1155,10 @@
  (module-language-repl-debug-annotations ", mit Debugging")
  (module-language-repl-debug/profile-annotations ", mit Debugging und Profiling")
  (module-language-repl-test-annotations ", mit Testabdeckung")
+
+ (module-language-#lang-error-more-information "Mehr Information")
+ (module-language-#lang-flush-cache "Neu laden")
+ (module-language-#lang-flush-cache-menu-item "#lang-Erweiterungen neu laden")
 
  ;; for the upper portion of the language dialog
  (the-racket-language "Die Sprache Racket")

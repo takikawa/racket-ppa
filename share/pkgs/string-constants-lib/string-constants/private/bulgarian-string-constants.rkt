@@ -1,6 +1,6 @@
-;; Bulgarian translation of Racket string constants file
+;; Bulgarian translation of Racket string constants file, version: 1.15
 ;; This file is distributed under the same terms as Racket
-;; Copyright on translation: Alexander Shopov <ash@kambanaria.org>, 2015
+;; Copyright on translation: Alexander Shopov <ash@kambanaria.org>, 2015, 2016, 2017.
 
 (module bulgarian-string-constants "string-constant-lang.rkt"
  ;;; when translating this constant, substitute name of actual language for `English'
@@ -29,8 +29,8 @@
  (warning "Предупреждение")
  (error "Грешка")
  (close "Затваряне") ;; as in, close an open window or tab. must match close-menu-item
-                 ;; in the sense that, when the &s have been stripped from
-                 ;; close-menu-item, it must be the same string as this.
+                     ;; in the sense that, when the &s have been stripped from
+                     ;; close-menu-item, it must be the same string as this.
  (close-window "Затваряне на прозореца")
  (stop "Спиране")
  (&stop "&Спиране") ;; for use in button and menu item labels, with short cut.
@@ -87,7 +87,7 @@
  (new-bug-report "Нов доклад за грешка") ;; button label the user sees when there are saved bug reports, but the user asks to save another one.
  (close-and-save "Затваряне и запазване") ;; button on the bottom of the bug report form
  (saved-unsubmitted-bug-reports "Запазени, неподадени доклади за грешка:")
-  ;; the above string constant is next to previous line in same dialog, followed by list of bug report subjects (as buttons)
+ ;; the above string constant is next to previous line in same dialog, followed by list of bug report subjects (as buttons)
  (error-sending-bug-report "Грешка при изпращане на доклада за грешка")
  (error-sending-bug-report-expln
   "Възникна грешка при изпращането на този доклад."
@@ -127,10 +127,11 @@
  (cs-status-loading-docs-index "Проверка на синтаксиса: зареждане на индекса на документацията")
  (cs-syncheck-running "Изпълнява се проверка на синтаксиса")
  (cs-mouse-over-import "Присвояването „~s“ е внесено от „~s“")
+ (cs-mouse-over-import/library-only "внесено от „~s“")
  (cs-view-docs "Преглед на документацията на „~a“")
  (cs-view-docs-from "~a от „~a“")  ;; a completed version of the line above
-  ;; (cs-view-docs) is put into the first ~a and a list of modules (separated by commas)
-  ;; is put into the second ~a. Use check syntax and right-click on a documented variable (eg, 'require') to see this in use
+ ;; (cs-view-docs) is put into the first ~a and a list of modules (separated by commas)
+ ;; is put into the second ~a. Use check syntax and right-click on a documented variable (eg, 'require') to see this in use
 
  (cs-lexical-variable "лексикална променлива")
  (cs-set!d-variable "променлива с нова стойност")
@@ -138,32 +139,32 @@
  (cs-unused-require "неизползвана директива „require“")
  (cs-free-variable "свободна променлива")
 
-  (cs-binder-count "~a поя̀ви като присвоена променлива")
-  (cs-zero-varrefs "липсват поя̀ви като присвоена променлива")
-  (cs-one-varref "1 поява като присвоена променлива")
-  (cs-n-varrefs "~a поя̀ви като присвоена променлива") ;; expected to have one ~a formatter that will accept a number
+ (cs-binder-count "~a поя̀ви като присвоена променлива")
+ (cs-zero-varrefs "липсват поя̀ви като присвоена променлива")
+ (cs-one-varref "1 поява като присвоена променлива")
+ (cs-n-varrefs "~a поя̀ви като присвоена променлива") ;; expected to have one ~a formatter that will accept a number
 
-  (cs-contract-my-obligation "Договор: задължение на този модул")
-  (cs-contract-their-obligation "Договор: задължение на клиентските модули")
-  (cs-contract-both-obligation "Договор: задължение и на модула, и на клиентските модули")
-  (cs-contract-unk-obligation "Договор: непознато задължение")
+ (cs-contract-my-obligation "Договор: задължение на този модул")
+ (cs-contract-their-obligation "Договор: задължение на клиентските модули")
+ (cs-contract-both-obligation "Договор: задължение и на модула, и на клиентските модули")
+ (cs-contract-unk-obligation "Договор: непознато задължение")
 
-  ;; require prefix functionality
-  (cs-add-prefix-for-require "Добавяне на префикс за изисканите внасяния")
-  (cs-prefix-require-title "Префикс за изисканите внасяния")
-  (cs-prefix-require "Избор на префикс за внесените променливи")
-  (cs-all-binders-are-prefixed "Всички изисквания за внасяне вече имат префикс, пробвайте да го преименувате")
-  (cs-the-binder-is-prefixed "Изискването за внасяне вече има префикс, пробвайте да го преименувате")
+ ;; require prefix functionality
+ (cs-add-prefix-for-require "Добавяне на префикс за изисканите внасяния")
+ (cs-prefix-require-title "Префикс за изисканите внасяния")
+ (cs-prefix-require "Избор на префикс за внесените променливи")
+ (cs-all-binders-are-prefixed "Всички изисквания за внасяне вече имат префикс, пробвайте да го преименувате")
+ (cs-the-binder-is-prefixed "Изискването за внасяне вече има префикс, пробвайте да го преименувате")
  
-  ;; mode sub-menu in the "view" menu
-  (cs-check-syntax-mode "Режим на проверка на синтаксиса")
-  (cs-mode-menu-show-my-obligations "Задължения на модула")
-  (cs-mode-menu-show-client-obligations "Задължения на клиентите")
-  (cs-mode-menu-show-syntax "Синтактични категории")
+ ;; mode sub-menu in the "view" menu
+ (cs-check-syntax-mode "Режим на проверка на синтаксиса")
+ (cs-mode-menu-show-my-obligations "Задължения на модула")
+ (cs-mode-menu-show-client-obligations "Задължения на клиентите")
+ (cs-mode-menu-show-syntax "Синтактични категории")
 
-  ;; the documentation blue boxes in the upper-right corner of the drracket window
-  (sc-read-more... "още…")
-  (sc-f2-to-un/lock "F2: заключване/отключване")
+ ;; the documentation blue boxes in the upper-right corner of the drracket window
+ (sc-read-more... "още…")
+ (sc-f2-to-un/lock "F2: заключване/отключване")
 
  ;; the online check syntax status messages (mouse over the bottom right of drracket's window to see the messages during online expansion's various phases)
  (online-expansion-running "Заместване на заден фон")
@@ -194,15 +195,15 @@
  (show-blueboxes "Сини кутии и полуокръжности на стрелките към тях")
  ;;; info bar at botttom of drscheme frame
  (collect-button-label "Боклук")
-  (read-only "Само за четене")
+ (read-only "Само за четене")
  (auto-extend-selection "Автоматично избиране")
  (overwrite "Заместване")
  (running "изпълнение")
  (not-running "нищо не се изпълнява")
 
-  (install-package-button "Инсталиране на „~a“") ;; button label: ~a is filled with the name of a pkg
-  (update-catalog "Обновяване на каталога") ;; button label; shown when there is a missing module, but no matching package
-  (updating-catalog-from "Обновяване от „~a“…") ;; message label; used as a status message when updating the pkg catalog
+ (install-package-button "Инсталиране на „~a“") ;; button label: ~a is filled with the name of a pkg
+ (update-catalog "Обновяване на каталога") ;; button label; shown when there is a missing module, but no matching package
+ (updating-catalog-from "Обновяване от „~a“…") ;; message label; used as a status message when updating the pkg catalog
 
  ;;; misc
  (welcome-to-something "Добре дошли в „~a“")
@@ -221,14 +222,14 @@
   "Файлът няма име, защото още не е запазван.")
  (cannot-open-because-dne "„~a“ не съществува и не може да се отвори.")
 
-  (needs-execute-language-changed
+ (needs-execute-language-changed
    "ПРЕДУПРЕЖДЕНИЕ: Езикът е сменен. Натиснете „Изпълнение“.")
-  (needs-execute-teachpack-changed
+ (needs-execute-teachpack-changed
    "ПРЕДУПРЕЖДЕНИЕ: Учебният модул е сменен. Натиснете „Изпълнение“.")
-  (needs-execute-defns-edited
+ (needs-execute-defns-edited
    "ПРЕДУПРЕЖДЕНИЕ: Промѐни в прозореца с дефиниции. Натиснете „Изпълнение“.")
 
-  (editor-changed-since-srcloc-recorded
+ (editor-changed-since-srcloc-recorded
    "Има промѐни в редактора след запазването на последното местоположение в изходния код. Оцветената област може да не отговаря на правилното местоположение в изходния код.")
 
  (file-is-not-saved "Файлът „~a“ не е запазен.")
@@ -245,11 +246,11 @@
  (erase-log-directory-contents "Да се изтрие ли всичко в директорията за журнали „~a“?")
  (error-erasing-log-directory "Грешка при изтриването на съдържанието на директорията за журнали.\n\n~a\n")
 
-  ;; menu items connected to the logger -- also in a button in the planet status line in the drs frame
-  (show-log "Показване на &журнала")
-  (hide-log "Скриване на &журнала")
-  (logger-scroll-on-output "Придвижване при извеждане") ; a checkbox in the logger pane
-  (log-messages "Журнал на съобщенията") ;; label for the drracket logging gui panel
+ ;; menu items connected to the logger -- also in a button in the planet status line in the drs frame
+ (show-log "Показване на &журнала")
+ (hide-log "Скриване на &журнала")
+ (logger-scroll-on-output "Придвижване при извеждане") ; a checkbox in the logger pane
+ (log-messages "Журнал на съобщенията") ;; label for the drracket logging gui panel
 
  ;; modes
  (mode-submenu-label "Режими")
@@ -271,14 +272,14 @@
  (syntax-coloring-choose-color "Изберете цвят за „~a“")
  (preferences-colors "Цветове") ;; used in the preferences dialog
 
-  ;; parenthesis color scheme string constants
-  (parenthesis-color-scheme "Цветова схема за скобите") ;; label for the choice% menu in the preferences dialog
-  (paren-color-basic-grey "Основно сиво")
-  (paren-color-shades-of-gray "Степени на сивото")
-  (paren-color-shades-of-blue "Нюанси на синьото")
-  (paren-color-spring "Пролет")
-  (paren-color-fall "Есен")
-  (paren-color-winter "Зима")
+ ;; parenthesis color scheme string constants
+ (parenthesis-color-scheme "Цветова схема за скобите") ;; label for the choice% menu in the preferences dialog
+ (paren-color-basic-grey "Основно сиво")
+ (paren-color-shades-of-gray "Степени на сивото")
+ (paren-color-shades-of-blue "Нюанси на синьото")
+ (paren-color-spring "Пролет")
+ (paren-color-fall "Есен")
+ (paren-color-winter "Зима")
 
 
  (url: "Адрес:")
@@ -324,31 +325,31 @@
  (plt:hd:help-on-help-details
   "Можете да видите как да ползвате „Помощ“-та от връзката „Help Desk“ от началната страница за помощ в Интернет."
   " (За да отворите въпросната начална страница, натиснете бутона „Начална страница“ в горната част на прозореца за помощта.)")
-  (reload "Презареждане") ;; refresh the page in a web browser
-  (plt:hd:ask-about-separate-browser
+ (reload "Презареждане") ;; refresh the page in a web browser
+ (plt:hd:ask-about-separate-browser
    "Искате да отворите съдържание от световната мрежа."
    " Къде искате то да се визуализира — в браузъра за помощта или в отдѐлен браузър?")
-  (plt:hd:homebrew-browser "Браузър за помощта") ;; choice for the above string (in a button)
-  (plt:hd:separate-browser "Отдѐлен браузър") ;; other choice for the above string (also in a button)
-  (plt:hd:external-link-in-help "Външен адрес в помощта")
-  (plt:hd:use-homebrew-browser "Използване на браузъра за помощта за външни адреси")
-  (plt:hd:new-help-desk "Нов прозорец за помощ")
+ (plt:hd:homebrew-browser "Браузър за помощта") ;; choice for the above string (in a button)
+ (plt:hd:separate-browser "Отдѐлен браузър") ;; other choice for the above string (also in a button)
+ (plt:hd:external-link-in-help "Външен адрес в помощта")
+ (plt:hd:use-homebrew-browser "Използване на браузъра за помощта за външни адреси")
+ (plt:hd:new-help-desk "Нов прозорец за помощ")
 
-  ;; in the Help Desk language dialog, title on the right.
-  (plt:hd:manual-search-ordering "Посока на търсене")
+ ;; in the Help Desk language dialog, title on the right.
+ (plt:hd:manual-search-ordering "Посока на търсене")
 
-  ;; in the help-desk standalone font preference dialog, on a check box
-  (use-drscheme-font-size "Използване на стандартния шрифт на DrRacket")
+ ;; in the help-desk standalone font preference dialog, on a check box
+ (use-drscheme-font-size "Използване на стандартния шрифт на DrRacket")
 
-  ;; in the preferences dialog in drscheme there is example text for help desk font size.
-  ;; clicking the links in that text produces a dialog with this message
-  (help-desk-this-is-just-example-text
+ ;; in the preferences dialog in drscheme there is example text for help desk font size.
+ ;; clicking the links in that text produces a dialog with this message
+ (help-desk-this-is-just-example-text
    "Това е примерен текст, за да изберете подходящ шрифт и размер. Отворете „Ръководство“-то от менюто „Помощ“, за да отворите връзките.")
 
-  ;; this appears in the bottom part of the frame the first time the user hits `f1'
-  ;; (assuming nothing else has loaded the documentation index first)
-  ;; see also: cs-status-loading-docs-index
-  (help-desk-loading-documentation-index "Помощ: индексът с документацията се зарежда")
+ ;; this appears in the bottom part of the frame the first time the user hits `f1'
+ ;; (assuming nothing else has loaded the documentation index first)
+ ;; see also: cs-status-loading-docs-index
+ (help-desk-loading-documentation-index "Помощ: индексът с документацията се зарежда")
 
  ;; Help desk htty proxy
  (http-proxy "Сървър-посредник за HTTP")
@@ -412,7 +413,7 @@
  (no "Не")
 
  ;; saving image (right click on an image to see the text)
-  (save-image "Запазване на изображение…")
+ (save-image "Запазване на изображение…")
 
  ;;; preferences
  (preferences "Настройки")
@@ -422,7 +423,7 @@
 
  (error-reading-preferences "Грешка при прочитането на настройките")
  (error-reading-preferences-explanation "Файлът с настройките е заключен, затова настройката „~a“ не може да се прочете")
-  ;; in the above, ~a is filled with the name of the preference (a symbol)
+ ;; in the above, ~a is filled with the name of the preference (a symbol)
  (dont-ask-again-until-drracket-restarted "Без нови питания (докато не стартирате DrRacket отново)")
  ; difference between the above and below is one comes with a question (steal the lock or not) and the other with just a notation saying "the file is locked"
  (dont-notify-again-until-drracket-restarted "Без нови известия (докато не стартирате DrRacket отново)")
@@ -433,9 +434,9 @@
  (prefs-file-still-locked "Файлът с настройките е заключен (заключващият файл „~a“ е налице). Настройката не може да се запази.")
  (prefs-file-locked-nothing-doing
   "Файлът с настройките е заключен (чрез файла „~s“). Настройката не може да се запази.")
-  ;; the  ~s is filled with the lockfile; this string is (currently) used only on windows where lockfiles are less friendly (and there is no steal fallback)
+ ;; the  ~s is filled with the lockfile; this string is (currently) used only on windows where lockfiles are less friendly (and there is no steal fallback)
 
-  (scheme-prefs-panel-label "Racket")
+ (scheme-prefs-panel-label "Racket")
  (warnings-prefs-panel-label "Предупреждения")
  (editor-prefs-panel-label "Редактиране")
  (general-prefs-panel-label "Общи")
@@ -455,7 +456,7 @@
  (display-line-numbers "Показване на редовете, а не отместването в знаци")
  (show-line-and-column-numbers "Показване на &номерата на редовете и колоните") ; used for popup menu; right click on line/column box in bottom of drs window
  (show-character-offsets "Показване на отместването в знаци") ; used for popup menu; right click on line/column box in bottom of drs window
- (enable-keybindings-in-menus "Показване на клавишните комбинации в менютата")
+ (enable-keybindings-in-menus "Показване на клавишните комбинации в менютата (с приоритет над клавишните комбинации на Emacs)")
  (printing-mode "Режим на печат")
  (print-using-platform-specific-mode "Платформенозависим печат")
  (print-to-ps "Отпечатване на файл във формат PostScript")
@@ -488,15 +489,17 @@
  (revert-to-defaults "Стандартни стойности на настройките")
  (undo-changes "Отмяна на промените и затваряне") ;; used in the preferences dialog to undo preference changes
 
-  (color-schemes "Цветови схеми") ;; the label in the preferences dialog for the color scheme panel
-  (classic-color-scheme "Класическа") ;; formerly called 'black on white'
-  (modern-color-scheme "Модерна")   ;; an attempt to be more color-blind friendly
-  (white-on-black-color-scheme "Бяло на черно") ;; clicking the buttons changes the color schemes to some defaults that've been set up.
-  ; drracket additions to the color scheme dialog; two buttons
-  (design-your-own-color-schemes "Собствена цветова схема") ; pointer to (english-only) docs
-  (style-and-color-names "&Имена на стилове и цветове")
+ (color-schemes "Цветови схеми") ;; the label in the preferences dialog for the color scheme panel
+ (classic-color-scheme "Класическа") ;; formerly called 'black on white'
+ (modern-color-scheme "Модерна")   ;; an attempt to be more color-blind friendly
+ (white-on-black-color-scheme "Бяло на черно") ;; clicking the buttons changes the color schemes to some defaults that've been set up.
+ ; drracket additions to the color scheme dialog; two buttons
+ (design-your-own-color-schemes "Собствена цветова схема") ; pointer to (english-only) docs
+ (style-and-color-names "&Имена на стилове и цветове")
 
-  (add-spacing-between-lines " Добавяне по пиксел между редовете")
+ (add-spacing-between-lines " Добавяне по пиксел между редовете")
+
+ (editor-x-selection-mode "Изрично копиране преди поставяне, без автоматично копиране на избраното")
 
  ; title of the color choosing dialog
 
@@ -560,29 +563,29 @@
  (add-keyword "➕")
  (remove-keyword "➖")
 
-  ; repl color preferences
-  (repl-colors "REPL")
-  (repl-out-color "Извеждане")
-  (repl-value-color "Стойности")
-  (repl-error-color "Грешки")
+ ; repl color preferences
+ (repl-colors "REPL")
+ (repl-out-color "Извеждане")
+ (repl-value-color "Стойности")
+ (repl-error-color "Грешки")
 
-  ;;; find/replace
-  (search-next "Следващо")
-  (search-previous "Предишно")
-  (search-match "Съвпадение")  ;;; this one and the next one are singular/plural variants of each other
-  (search-matches "Съвпадения")
-  (search-replace "Замяна")
-  (search-skip "Пропускане")
-  (search-show-replace "Показване на замяната")
-  (search-hide-replace "Скриване на замяната")
-  (find-case-sensitive "Разлика главни/малки")  ;; the check box in both the docked & undocked search
-  (find-anchor-based "Търсене по котви")
+ ;;; find/replace
+ (search-next "Следващо")
+ (search-previous "Предишно")
+ (search-match "Съвпадение")  ;;; this one and the next one are singular/plural variants of each other
+ (search-matches "Съвпадения")
+ (search-replace "Замяна")
+ (search-skip "Пропускане")
+ (search-show-replace "Показване на замяната")
+ (search-hide-replace "Скриване на замяната")
+ (find-case-sensitive "Разлика главни/малки")  ;; the check box in both the docked & undocked search
+ (find-anchor-based "Търсене по котви")
 
-  ;; these string constants used to be used by searching,
-  ;; but aren't anymore. They are still used by other tools, tho.
-  (hide "Търсене")
-  (dock "Скачане")
-  (undock "Отделяне")
+ ;; these string constants used to be used by searching,
+ ;; but aren't anymore. They are still used by other tools, tho.
+ (hide "Търсене")
+ (dock "Скачане")
+ (undock "Отделяне")
 
  ;;; multi-file-search
  (mfs-multi-file-search-menu-item "Търсене във &файлове…")
@@ -720,9 +723,9 @@
  (select-all-info "Избиране на целия документ")
  (select-all-menu-item "Избор на &всичко")
 
-  (find-menu-item "Търсене") ;; menu item
-  (find-from-selection-menu-item "Търсене на &избраното")
-  (find-info "Преместване на фокуса на клавиатурата между прозореца и лентата за търсене")
+ (find-menu-item "Търсене") ;; menu item
+ (find-from-selection-menu-item "Търсене на &избраното")
+ (find-info "Преместване на фокуса на клавиатурата между прозореца и лентата за търсене")
 
  (find-next-info "Към следващата поява на търсеното")
  (find-next-menu-item "Следваща")
@@ -730,26 +733,26 @@
  (find-previous-info "Към предишната поява на търсеното")
  (find-previous-menu-item "Предишна")
 
-  (show-replace-menu-item "Показване на лентата за замяна")
-  (hide-replace-menu-item "Скриване на лентата за замяна")
-  (show/hide-replace-info "Превключване на показването на лентата за замяна")
+ (show-replace-menu-item "Показване на лентата за замяна")
+ (hide-replace-menu-item "Скриване на лентата за замяна")
+ (show/hide-replace-info "Превключване на показването на лентата за замяна")
 
-  (replace-menu-item "Замяна")
-  (replace-info "Замяна на намерените, отбелязани с тъмни овали")
+ (replace-menu-item "Замяна")
+ (replace-info "Замяна на намерените, отбелязани с тъмни овали")
 
-  (replace-all-info "Замяна на всички появи на търсения низ")
-  (replace-all-menu-item "Замяна на всички")
+ (replace-all-info "Замяна на всички появи на търсения низ")
+ (replace-all-menu-item "Замяна на всички")
 
-  (find-case-sensitive-info "Превключване между различаване на главни и малки букви и третирането им като еднакви")
-  (find-case-sensitive-menu-item "Разлика главни/малки")
+ (find-case-sensitive-info "Превключване между различаване на главни и малки букви и третирането им като еднакви")
+ (find-case-sensitive-menu-item "Разлика главни/малки")
 
-  (complete-word "Дописване на дума") ; the complete word menu item in the edit menu
-  (no-completions "… няма подходящо дописване") ; shows up in the completions menu when there are no completions (in italics)
+ (complete-word "Дописване на дума") ; the complete word menu item in the edit menu
+ (no-completions "… няма подходящо дописване") ; shows up in the completions menu when there are no completions (in italics)
 
-  (overwrite-mode "Вмъкване/замяна")
-  (enable-overwrite-mode-keybindings "Клавишна комбинация за превключване на режима за вмъкване или замяна при писане")
+ (overwrite-mode "Вмъкване/замяна")
+ (enable-overwrite-mode-keybindings "Клавишна комбинация за превключване на режима за вмъкване или замяна при писане")
 
-  (enable-automatic-parens "Автоматични скоби") ; should "and square brackets and quotes" appear here?
+ (enable-automatic-parens "Автоматични скоби") ; should "and square brackets and quotes" appear here?
 
  (preferences-info "Задаване на настройките")
  (preferences-menu-item "Настройки…")
@@ -785,7 +788,7 @@
 
  (wrap-text-item "Пренасяне на текста")
 
-  ;; windows menu
+ ;; windows menu
  (windows-menu-label "&Прозорци")
  (tabs-menu-label "&Подпрозорци") ;; this is the name of the menu under linux & windows
  (minimize "Минимизиране") ;; minimize and zoom are only used under mac os x
@@ -793,14 +796,14 @@
  (bring-frame-to-front "Прозорецът да е отгоре")       ;;; title of dialog
  (bring-frame-to-front... "Прозорецът да е отгоре…") ;;; corresponding title of menu item
  (most-recent-window "Последен прозорец")
-  (next-tab "Следващ подпрозорец")
-  (prev-tab "Предишен подпрозорец")
-  (move-current-tab-right "Преместване на&дясно")
-  (move-current-tab-left "Преместване на&ляво")
-  ;; menu item in the windows menu under mac os x. first ~a is filled with a number between 1 and 9; second one is the filename of the tab
-  (tab-i "Подпрозорец № ~a: ~a")
-  (tab-i/no-name "Подпрозорец № ~a")
-  (last-tab "Последен подпрозорец № ~a")
+ (next-tab "Следващ подпрозорец")
+ (prev-tab "Предишен подпрозорец")
+ (move-current-tab-right "Преместване на&дясно")
+ (move-current-tab-left "Преместване на&ляво")
+ ;; menu item in the windows menu under mac os x. first ~a is filled with a number between 1 and 9; second one is the filename of the tab
+ (tab-i "Подпрозорец № ~a: ~a")
+ (tab-i/no-name "Подпрозорец № ~a")
+ (last-tab "Последен подпрозорец № ~a")
 
  (view-menu-label "&Изглед")
  (show-overview "Показване на &обзора")
@@ -808,7 +811,7 @@
  (show-module-browser "Показване на &модулите")
  (hide-module-browser "Скриване на &модулите")
 
-  (help-menu-label "Помо&щ")
+ (help-menu-label "Помо&щ")
  (about-info "Информация за програмата и създателите ѝ")
  (about-menu-item "Относно…")
 
@@ -818,10 +821,10 @@
  (clear-current "Изчистване на текущия")
  (new-window "Нов прозорец")
 
-  ;; popup menu when right-clicking in the gap between
-  ;; the definitions and interactions window
-  (change-to-vertical-alignment "Вертикална подредба")
-  (change-to-horizontal-alignment "Хоризонтална подредба")
+ ;; popup menu when right-clicking in the gap between
+ ;; the definitions and interactions window
+ (change-to-vertical-alignment "Вертикална подредба")
+ (change-to-horizontal-alignment "Хоризонтална подредба")
 
  ;;; exiting and quitting ``are you sure'' dialog
  ;;; exit is used on windows, quit on macos, in English. Other
@@ -830,10 +833,10 @@
  (quit "Спиране на програмата")
  (are-you-sure-exit "Сигурни ли сте, че искате програмата да спре?")
  (are-you-sure-quit "Сигурни ли сте, че искате програмата да спре?")
-  ; these next two are only used in the quit/exit dialog
-  ; on the button whose semantics is "dismiss this dialog".
-  ; they are there to provide more flexibility for translations
-  ; in English, they are just cancel.
+ ; these next two are only used in the quit/exit dialog
+ ; on the button whose semantics is "dismiss this dialog".
+ ; they are there to provide more flexibility for translations
+ ; in English, they are just cancel.
  (dont-exit "Отмяна")
  (dont-quit "Отмяна")
 
@@ -845,32 +848,32 @@
  (autosave-recover "Възстановяване")
  (autosave-unknown-filename "«непознат»")
 
-  ;; these are labels in a dialog that drscheme displays
-  ;; if you have leftover autosave files. to see the dialog,
-  ;; start up drscheme and modify (but don't save) a file
-  ;; (also, do this with an unsaved file). Wait for the autosave
-  ;; files to appear (typically 5 minutes). Kill DrRacket
-  ;; and restart it. You'll see the dialog
-  (autosave-autosave-label: "Автоматично запазен файл:")
-  (autosave-original-label: "Първоначален файл:")
-  (autosave-autosave-label "Автоматично запазен файл")
-  (autosave-original-label "Първоначален файл")
-  (autosave-compare-files "Сравняване на автоматично запазени файлове")
+ ;; these are labels in a dialog that drscheme displays
+ ;; if you have leftover autosave files. to see the dialog,
+ ;; start up drscheme and modify (but don't save) a file
+ ;; (also, do this with an unsaved file). Wait for the autosave
+ ;; files to appear (typically 5 minutes). Kill DrRacket
+ ;; and restart it. You'll see the dialog
+ (autosave-autosave-label: "Автоматично запазен файл:")
+ (autosave-original-label: "Първоначален файл:")
+ (autosave-autosave-label "Автоматично запазен файл")
+ (autosave-original-label "Първоначален файл")
+ (autosave-compare-files "Сравняване на автоматично запазени файлове")
 
-  (autosave-show-autosave "Автоматично запазен файл") ;; title of a window showing the autosave file
+ (autosave-show-autosave "Автоматично запазен файл") ;; title of a window showing the autosave file
 
-  (autosave-explanation "DrRacket откри автоматично запазени файлове, в които може да има незапазени данни.")
+ (autosave-explanation "DrRacket откри автоматично запазени файлове, в които може да има незапазени данни.")
 
-  (autosave-recovered! "Възстановен!") ;; status of an autosave file
-  (autosave-deleted "Изтрит")       ;; status of an autosave file
+ (autosave-recovered! "Възстановен!") ;; status of an autosave file
+ (autosave-deleted "Изтрит")       ;; status of an autosave file
 
-  (autosave-error-deleting "Грешка при изтриването на „~a“\n\n~a") ;; first is a filename, second is an error message from mz.
-  (autosave-delete-button "Изтриване")
-  (autosave-delete-title "Изтриване")  ;; title of a dialog asking for deletion confirmation
-  (autosave-done "Готово")
+ (autosave-error-deleting "Грешка при изтриването на „~a“\n\n~a") ;; first is a filename, second is an error message from mz.
+ (autosave-delete-button "Изтриване")
+ (autosave-delete-title "Изтриване")  ;; title of a dialog asking for deletion confirmation
+ (autosave-done "Готово")
 
-  ;; appears in the file dialog
-  (autosave-restore-to-where? "Избор на място за автоматично запазване на файлове.")
+ ;; appears in the file dialog
+ (autosave-restore-to-where? "Избор на място за автоматично запазване на файлове.")
 
 
  ;;; file modified warning
@@ -987,7 +990,7 @@
  (create-executable-title "Създаване на изпълним файл")
  (drracket-creates-executables-only-in-some-languages
   "Създаването на изпълним файл се поддържа в DrRacket, само когато е"
-  " избран някой от езиците за преподаване („DMdA“ или „HtDP“) в прозореца"
+  " избран някой от езиците за преподаване („HtDP“ или „DMdA“) в прозореца"
   " за избор на език, или когато сте избрали „Racket“ в същия прозорец и"
   " директивата „#lang“ в началото на програмата ви указва език.\n\nВижте"
   " дали програмата за команден ред „raco“ няма да ви свърши работа.")
@@ -1018,7 +1021,7 @@
  (~a-must-end-with-~a
   "Името на файла от вид „~a“~a\n\n  ~a\n\nе неправилно. То трябва да завършва с „.~a“.")
  (macosx-executables-must-end-with-app
-  "Името на файла\n\n  ~a\n\nе неправилно. Под MacOS X то трябва да е директория, чието име завършва на „.app“.")
+  "Името на файла\n\n  ~a\n\nе неправилно. Под Mac OS то трябва да е директория, чието име завършва на „.app“.")
  (warning-directory-will-be-replaced
   "ПРЕДУПРЕЖДЕНИЕ: директорията:\n\n  ~a\n\nще бъде заменена. Да се продължи ли?")
 
@@ -1073,21 +1076,21 @@
  (drscheme-teachpack-message-title "Учебен модул на DrRacket")
  (already-added-teachpack "Учебният модул „~a“ вече е добавен")
 
-  ; ~a is filled with the teachpack's name; the message appears in the teachpack selection dialog when a user installs a new teachpack
-  (compiling-teachpack "Компилиране на учебния модул „~a“…")
-  (teachpack-pre-installed "Предварително инсталирани учебни модули")
-  (teachpack-pre-installed/htdp "Предварително инсталирани учебни модули на HtDP")
-  (teachpack-pre-installed/2htdp "Предварително инсталирани учебни модули на HtDP/2e")
-  (teachpack-user-installed "Учебни модули, инсталирани от потребителя")
-  (add-teachpack-to-list... "Добавяне на учебен модул към списъка…")
-  ; first and second ~a are teachpack names, third is a symbol identifing an export
-  (teachpack-conflict
+ ; ~a is filled with the teachpack's name; the message appears in the teachpack selection dialog when a user installs a new teachpack
+ (compiling-teachpack "Компилиране на учебния модул „~a“…")
+ (teachpack-pre-installed "Предварително инсталирани учебни модули")
+ (teachpack-pre-installed/htdp "Предварително инсталирани учебни модули на „HtDP“")
+ (teachpack-pre-installed/2htdp "Предварително инсталирани учебни модули на „HtDP/2e“")
+ (teachpack-user-installed "Учебни модули, инсталирани от потребителя")
+ (add-teachpack-to-list... "Добавяне на учебен модул към списъка…")
+ ; first and second ~a are teachpack names, third is a symbol identifing an export
+ (teachpack-conflict
    "ПРЕДУПРЕЖДЕНИЕ: инсталираният вече учебен модул „~a“ е в конфликт с „~a“ (и в двата има публичен символ „~a“)")
-   ;; a button label; the two ~a are filled with teachpack names
-  (remove-and-add-teachpack "Премахване на „~a“ и добавяне на „~a“")
-  (teachpack-already-installed "Вече е инсталиран учебен модул „~a“. Да бъде ли презаписан?")
-  ; ~a is filled with a list of language names. Each name is separated by a newline and is indented two spaces (no commas, no 'and')
-  (teachpacks-only-in-languages "Менюто за учебни модули е налично само за следните езици: ~a\n\nПри друг език — използвайте „require“.")
+ ;;; a button label; the two ~a are filled with teachpack names
+ (remove-and-add-teachpack "Премахване на „~a“ и добавяне на „~a“")
+ (teachpack-already-installed "Вече е инсталиран учебен модул „~a“. Да бъде ли презаписан?")
+ ; ~a is filled with a list of language names. Each name is separated by a newline and is indented two spaces (no commas, no 'and')
+ (teachpacks-only-in-languages "Менюто за учебни модули е налично само за следните езици: ~a\n\nПри друг език — използвайте „require“.")
 
 
  ;;; Language dialog
@@ -1108,8 +1111,8 @@
  (input-syntax "Синтаксис на входа")
  (dynamic-properties "Динамични свойства")
  (output-syntax "Синтаксис на изхода")
-  (teachpacks "Учебни модули") ;; label in the language dialog for the teaching languages
-  (teachpacks-none "«няма»") ;; shows up under the previous string, when there are no teachpacks
+ (teachpacks "Учебни модули") ;; label in the language dialog for the teaching languages
+ (teachpacks-none "«няма»") ;; shows up under the previous string, when there are no teachpacks
  (no-debugging-or-profiling "Без трасиране и профилиране")
  (debugging "Трасиране")
  (debugging-and-profiling "Трасиране и профилиране")
@@ -1134,12 +1137,12 @@
  (add-submodule-title "Добавяне на подмодул") ;; title of dialog opened by above menu item
 
 
-  ; used in the bottom left of the drscheme frame
-  ; used the popup menu from the just above; greyed out and only
-  ; visible when some languages are in the history
-  (recent-languages "Скоро ползвани езици:")
-  ; shows up in bottom-left programming language menu popup, when no langs are recorded
-  (no-recently-chosen-languages "никой език не е ползван")
+ ; used in the bottom left of the drscheme frame
+ ; used the popup menu from the just above; greyed out and only
+ ; visible when some languages are in the history
+ (recent-languages "Скоро ползвани езици:")
+ ; shows up in bottom-left programming language menu popup, when no langs are recorded
+ (no-recently-chosen-languages "никой език не е ползван")
 
  ;; startup wizard screen language selection section
  (please-select-a-language "Изберете език")
@@ -1158,7 +1161,7 @@
  (advanced-one-line-summary "Междинно ниво плюс λ-изрази и промяна")
  (how-to-design-programs "Как да проектираме програми") ;; should agree with MIT Press on this one...
  (pretty-big-scheme "Доста пълно ниво")
- (pretty-big-scheme-one-line-summary "Добавени са синтаксиса и функциите от езиците в HtDP (Как да проектираме програми), mzscheme и mred/mred")
+ (pretty-big-scheme-one-line-summary "Добавени са синтаксиса и функциите от езиците в „HtDP“ (Как да проектираме програми), mzscheme и mred/mred")
  (r5rs-language-name "R5RS")
  (r5rs-one-line-summary "R5RS без добавки")
  (expander "Заместване")
@@ -1166,70 +1169,75 @@
  (legacy-languages "Остарели езици")
  (teaching-languages "Езици за обучение")
  (experimental-languages "Експериментални езици")
-  (initial-language-category "Първоначален език")
-  (no-language-chosen "Не е избран език")
+ (initial-language-category "Първоначален език")
+ (no-language-chosen "Не е избран език")
  (other-languages "Други езици")
 
-  (module-language-name "Определяне на езика от изходния код")
+ (module-language-name "Определяне на езика от изходния код")
  (module-language-one-line-summary "Редът започващ с „#lang“ определя езика")
-  (module-language-auto-text "Автоматичен ред с „#lang“") ;; shows up in the details section of the module language
-  ;; the next four string constants show up in the REPL in DrRacket in the "Racket Language",
-  ;; which is also the "Determine language from source" language. They are put right after the name
-  ;; of the language from the "#lang" line at the beginning of the source file
-  (module-language-repl-no-annotations "")
-  (module-language-repl-debug-annotations ", с трасиране")
-  (module-language-repl-debug/profile-annotations ", с трасиране и профилиране")
-  (module-language-repl-test-annotations ", с покритие на тестовете")
-  ;; for the upper portion of the language dialog
-  (the-racket-language "Езикът „Racket“")
-  (choose-a-language "Избор на език")
+ (module-language-auto-text "Автоматичен ред с „#lang“") ;; shows up in the details section of the module language
+ ;; the next four string constants show up in the REPL in DrRacket in the "Racket Language",
+ ;; which is also the "Determine language from source" language. They are put right after the name
+ ;; of the language from the "#lang" line at the beginning of the source file
+ (module-language-repl-no-annotations "")
+ (module-language-repl-debug-annotations ", с трасиране")
+ (module-language-repl-debug/profile-annotations ", с трасиране и профилиране")
+ (module-language-repl-test-annotations ", с покритие на тестовете")
 
-  ;; the next two string constants appear in the
-  ;; language dialog with a list
-  ;; of example languages appearing between them
-  (racket-language-discussion "Директива „#lang“ за диалекта. Напр.:\n")
-  (racket-language-discussion-end "… и мн. др.")
+ (module-language-#lang-error-more-information "Още информация")
+ (module-language-#lang-flush-cache "Презареждане")
+ (module-language-#lang-flush-cache-menu-item "Презареждане на разширение „#lang“")
 
-  ;; the next three string constants are put into a message-box dialog
-  ;; that appears when the user clicks on the example #lang languages
-  ;; in the language dialog. The first one always appears and then either
-  ;; the second or the third appears. The second one has the clicked
-  ;; on #lang line placed into the ~a, and third one has the
-  ;; current #lang line in the first ~a and the clicked on in the second one.
-  ;; The two comments are separated by a blank line.
-  (racket-dialect-in-buffer-message
+;; for the upper portion of the language dialog
+ (the-racket-language "Езикът „Racket“")
+ (choose-a-language "Избор на език")
+
+ ;; the next two string constants appear in the
+ ;; language dialog with a list
+ ;; of example languages appearing between them
+ (racket-language-discussion "Директива „#lang“ за диалекта. Напр.:\n")
+ (racket-language-discussion-end "… и мн. др.")
+
+ ;; the next three string constants are put into a message-box dialog
+ ;; that appears when the user clicks on the example #lang languages
+ ;; in the language dialog. The first one always appears and then either
+ ;; the second or the third appears. The second one has the clicked
+ ;; on #lang line placed into the ~a, and third one has the
+ ;; current #lang line in the first ~a and the clicked on in the second one.
+ ;; The two comments are separated by a blank line.
+ (racket-dialect-in-buffer-message
    "Диалектите на „Racket“ най-често се избират чрез директно редактиране на буфера, а не чрез този диалогов прозорец.")
-  (racket-dialect-add-new-#lang-line "Да се добави ли „~a“ в началото на прозореца с дефиниции?")
-  (racket-dialect-replace-#lang-line "Директивата в буфера е „~a“. Да се замени ли с „~a“?")
-  (racket-dialect-already-same-#lang-line "Директивата в буфера вече е „~a“ и можете да започнете да програмирате.")
+ (racket-dialect-add-new-#lang-line "Да се добави ли „~a“ в началото на прозореца с дефиниции?")
+ (racket-dialect-replace-#lang-line "Директивата в буфера е „~a“. Да се замени ли с „~a“?")
+ (racket-dialect-already-same-#lang-line "Директивата в буфера вече е „~a“ и можете да започнете да програмирате.")
 
-  ;; in the dialog containing the above strings, one of these is a button that appears
-  (add-#lang-line "Добавяне на директива „#lang“")
-  (replace-#lang-line "Замяна на директива „#lang“")
+ ;; in the dialog containing the above strings, one of these is a button that appears
+ (add-#lang-line "Добавяне на директива „#lang“")
+ (replace-#lang-line "Замяна на директива „#lang“")
 
-  ;; for the 'new drracket user' dialog
-  (use-language-in-source "Да се ползва езикът, указан в буфера")
+ ;; for the 'new drracket user' dialog
+ (use-language-in-source "Да се ползва езикът, указан в буфера")
 
-  ;;; from the `not a language language' used initially in drscheme.
-  (must-choose-language "DrRacket не може да изпълни програми, без да посочите програмен език.")
+ ;;; from the `not a language language' used initially in drscheme.
+ (must-choose-language "DrRacket не може да изпълни програми, без да посочите програмен език.")
 
-  ; next two appear before and after the name of a text book (which will be in italics)
-  (using-a-textbook-before "Ще ползвате ли ")
-  (using-a-textbook-after "?")
+ ; next two appear before and after the name of a text book (which will be in italics)
+ (using-a-textbook-before "Ще ползвате ли ")
+ (using-a-textbook-after "?")
 
-  ; next two are before and after a language
-  (start-with-before "Ще започнете ли с")
-  (start-with-after "?")
+ ; next two are before and after a language
+ (start-with-before "Ще започнете ли с")
+ (start-with-after "?")
 
-  (seasoned-plt-schemer? "Обигран потребител на PLT Schemer?")
-  (racketeer? "Дали сте заклет почитател на Racket?")
-  (looking-for-standard-scheme? "Трябва ли ви стандартен Scheme?")
+ (seasoned-plt-schemer? "Обигран потребител на PLT Schemer?")
+ (racketeer? "Дали сте заклет почитател на Racket?")
+ (looking-for-standard-scheme? "Трябва ли ви стандартен Scheme?")
 
-  ; the three string constants are concatenated together and the middle
-  ; one is hyperlinked to the dialog that suggests various languages
-  (get-guidance-before "Или изберете елемента „Избор на език…“ от менюто „Език“, или ")
-  (get-guidance-during "приемете напътствия")
-  (get-guidance-after ".")
+ ; the three string constants are concatenated together and the middle
+ ; one is hyperlinked to the dialog that suggests various languages
+ (get-guidance-before "Или изберете елемента „Избор на език…“ от менюто „Език“, или ")
+ (get-guidance-during "приемете напътствия")
+ (get-guidance-after ".")
 
  ;;; debug language
  (unknown-debug-frame "[неизвестно]")
@@ -1290,20 +1298,20 @@
  (evaluation-terminated-explanation
   "Нишката за изчисления не работи. Чак при следващото изпълнение изчисленията ще започнат отново.")
 
-  ; The next three constants show up in the same dialog as the above evaluation-terminated string
-  ; constants.
-  ; The first two show up only when the user calls 'exit' (possibly with a status code).
-  ; The third shows up when the program runs out of memory.
-  (exited-successfully "Успешно изпълнение.")
-  (exited-with-error-code "Изпълнението завърши с код за грешка ~a.") ;; ~a is filled in with a number between 1 and 255
-  (program-ran-out-of-memory "Привърши паметта за програмата.")
+ ; The next three constants show up in the same dialog as the above evaluation-terminated string
+ ; constants.
+ ; The first two show up only when the user calls 'exit' (possibly with a status code).
+ ; The third shows up when the program runs out of memory.
+ (exited-successfully "Успешно изпълнение.")
+ (exited-with-error-code "Изпълнението завърши с код за грешка ~a.") ;; ~a is filled in with a number between 1 and 255
+ (program-ran-out-of-memory "Привърши паметта за програмата.")
 
-  (show-evaluation-terminated-dialog "Показване на прозореца за „Прекъснато изчисление“")
-  (evaluation-terminated-ask "Показване на този прозорец отново")
+ (show-evaluation-terminated-dialog "Показване на прозореца за „Прекъснато изчисление“")
+ (evaluation-terminated-ask "Показване на този прозорец отново")
 
-  (last-stack-frame "показване на последния кадър от стека")
-  (last-stack-frames "показване на предишните ~a кадъра от стека")
-  (next-stack-frames "показване на следващите ~a кадъра от стека")
+ (last-stack-frame "показване на последния кадър от стека")
+ (last-stack-frames "показване на предишните ~a кадъра от стека")
+ (next-stack-frames "показване на следващите ~a кадъра от стека")
 
  ;;; welcoming message in repl
  (language "Език")
@@ -1358,7 +1366,7 @@
  (module-browser-show-planet-paths/short "Следване на изисканото от PLaneT") ;; check box label in show module browser pane in drscheme window.
  (module-browser-refresh "Обновяване") ;; button label in show module browser pane in drscheme window.
  (module-browser-highlight "Оцветяване") ;; used to search in the graph; the label on a text-field% object
-  (module-browser-only-in-plt-and-module-langs
+ (module-browser-only-in-plt-and-module-langs
    "Прегледът на модулите може да се използва само с програми ползващи модули.")
  (module-browser-name-length "Дължина на имената")
  (module-browser-name-short "Кратки")
@@ -1458,417 +1466,419 @@
  ;; warnings about closing a drscheme frame when the program
  ;; might still be doing something interesting
  (program-is-still-running "Програмата от прозореца с дефиниции все още работи. Затваряне въпреки това")
-  (program-has-open-windows "Програмата от прозореца с дефиниции все още има отворени прозорци. Затваряне на прозореца въпреки това?")
+ (program-has-open-windows "Програмата от прозореца с дефиниции все още има отворени прозорци. Затваряне на прозореца въпреки това?")
 
-  ;; ml-command-line-arguments is for the command line arguments
-  ;; label in the module language details in the language dialog.
-  (ml-command-line-arguments "Аргументите подадени на командния ред, като вектор от низове, във формат на „read“")
+ ;; ml-command-line-arguments is for the command line arguments
+ ;; label in the module language details in the language dialog.
+ (ml-command-line-arguments "Аргументите подадени на командния ред, като вектор от низове, във формат на „read“")
 
-  ;; ml-cp names are all for the module language collection path
-  ;; configuration. See the details portion of the language dialog
-  ;; for the module language (at the bottom).
-  (ml-cp-default-collection-path "«стандартни пътища към колекции»")
+ ;; ml-cp names are all for the module language collection path
+ ;; configuration. See the details portion of the language dialog
+ ;; for the module language (at the bottom).
+ (ml-cp-default-collection-path "«стандартни пътища към колекции»")
 
-  ;; in std get-directory
-  (ml-cp-choose-a-collection-path "Избор на път към колекции")
+ ;; in std get-directory
+ (ml-cp-choose-a-collection-path "Избор на път към колекции")
 
-  ;; err msg when adding default twice
-  (ml-cp-default-already-present
+ ;; err msg when adding default twice
+ (ml-cp-default-already-present
    "Стандартните пътища към колекции вече са налице")
 
-  ;; title of this section of the dialog (possibly the word
-  ;; `Collection' should not be translated)
-  (ml-cp-collection-paths "Пътища за колекции")
+ ;; title of this section of the dialog (possibly the word
+ ;; `Collection' should not be translated)
+ (ml-cp-collection-paths "Пътища за колекции")
 
-  ;; button labels
-  ;;  The package manager uses these, too
-  (ml-cp-add "Добавяне")
-  (ml-cp-add-default "Добавяне на стандартни")
-  (ml-cp-remove "Премахване")
-  (ml-cp-raise "Нагоре")
-  (ml-cp-lower "Надолу")
+ ;; button labels
+ ;;  The package manager uses these, too
+ (ml-cp-add "Добавяне")
+ (ml-cp-add-default "Добавяне на стандартни")
+ (ml-cp-remove "Премахване")
+ (ml-cp-raise "Нагоре")
+ (ml-cp-lower "Надолу")
 
-  (ml-always-show-#lang-line "Редът с директивата „#lang“ винаги да се показва в езика за модули")
+ (ml-always-show-#lang-line "Редът с директивата „#lang“ винаги да се показва в езика за модули")
 
-  ;; Profj
-  (profj-java "Java")
-  (profj-java-mode "Режим за Java")
-  (profj-java-coverage "Покриване на Java") ;; shows up in the preferences dialog under 'Color'
+ ;; Profj
+ (profj-java "Java")
+ (profj-java-mode "Режим за Java")
+ (profj-java-coverage "Покриване на Java") ;; shows up in the preferences dialog under 'Color'
 
-  (profj-beginner-lang "Начално")
-  (profj-beginner-lang-one-line-summary "Език подобен на Java за начинаещи")
-  (profj-full-lang "Пълно")
-  (profj-full-lang-one-line-summary "Java 1.0 (и някои елементи от 1.1)")
-  (profj-advanced-lang "За напреднали")
-  (profj-advanced-lang-one-line-summary "Език подобен на Java за напреднали")
-  (profj-intermediate-lang "Междинно")
-  (profj-intermediate-lang-one-line-summary "Език подобен на Java за междинно ниво")
-  (profj-intermediate-access-lang "Междинно с достъп")
-  (profj-intermediate-access-lang-one-line-summary "Език подобен на Java с указване на достъп за междинно ниво")
-  (profj-dynamic-lang "Динамична Java")
-  (profj-dynamic-lang-one-summary "Java с динамични типове")
+ (profj-beginner-lang "Начално")
+ (profj-beginner-lang-one-line-summary "Език подобен на Java за начинаещи")
+ (profj-full-lang "Пълно")
+ (profj-full-lang-one-line-summary "Java 1.0 (и някои елементи от 1.1)")
+ (profj-advanced-lang "За напреднали")
+ (profj-advanced-lang-one-line-summary "Език подобен на Java за напреднали")
+ (profj-intermediate-lang "Междинно")
+ (profj-intermediate-lang-one-line-summary "Език подобен на Java за междинно ниво")
+ (profj-intermediate-access-lang "Междинно с достъп")
+ (profj-intermediate-access-lang-one-line-summary "Език подобен на Java с указване на достъп за междинно ниво")
+ (profj-dynamic-lang "Динамична Java")
+ (profj-dynamic-lang-one-summary "Java с динамични типове")
 
-  (profj-java-mode-color-heading "Редактиране на цветовете") ; Heading for preference to choose editing colors
-  (profj-java-mode-color-keyword "ключова дума")
-  (profj-java-mode-color-string "низ")
-  (profj-java-mode-color-literal "литерал")
-  (profj-java-mode-color-comment "коментар")
-  (profj-java-mode-color-error "грешка")
-  (profj-java-mode-color-identifier "идентификатор")
-  (profj-java-mode-color-prim-type "примитив") ; Example text for built-in Java types
-  (profj-java-mode-color-default "стандартно")
+ (profj-java-mode-color-heading "Редактиране на цветовете") ; Heading for preference to choose editing colors
+ (profj-java-mode-color-keyword "ключова дума")
+ (profj-java-mode-color-string "низ")
+ (profj-java-mode-color-literal "литерал")
+ (profj-java-mode-color-comment "коментар")
+ (profj-java-mode-color-error "грешка")
+ (profj-java-mode-color-identifier "идентификатор")
+ (profj-java-mode-color-prim-type "примитив") ; Example text for built-in Java types
+ (profj-java-mode-color-default "стандартно")
 
-  (profj-coverage-color-heading "Цветове за покриване") ; Heading for preference to choose coverage colors
-  (profj-coverage-color-covered "покрит израз")
+ (profj-coverage-color-heading "Цветове за покриване") ; Heading for preference to choose coverage colors
+ (profj-coverage-color-covered "покрит израз")
 
-  (profj-language-config-display-preferences "Настройки на извеждането") ; Heading for preferences controlling printing
-  (profj-language-config-display-style "Стил на извеждането")
-  (profj-language-config-display-field "Клас и полета")
-  (profj-language-config-class "Клас")
-  (profj-language-config-display-array "Да се извежда ли цялото съдържание на масивите?")
-  (profj-language-config-testing-preferences "Мостра на настройките") ; Heading for preferences controlling test behavior
-  ;(profj-language-config-testing-enable "Да се изведат ли резултатите от тестовете при „Изпълнение“?") ; Run should be the word found on the Run button
-  (profj-language-config-testing-coverage "Да се събира ли информация за покриването от тестовете?")
-  (profj-language-config-support-test-language "Да се поддържа ли разширеният език за тестване?")
-  (profj-language-config-testing-check "Разрешаване на проверяващи изрази?") ; check should not be translated
-  (profj-language-config-classpath "Пътища на класовете")
-  (profj-language-config-choose-classpath-directory "Избор на директория за добавяне към пътищата с класове")
-  (profj-language-config-classpath-display "Текущи") ;Button label to print the current classpath
+ (profj-language-config-display-preferences "Настройки на извеждането") ; Heading for preferences controlling printing
+ (profj-language-config-display-style "Стил на извеждането")
+ (profj-language-config-display-field "Клас и полета")
+ (profj-language-config-class "Клас")
+ (profj-language-config-display-array "Да се извежда ли цялото съдържание на масивите?")
+ (profj-language-config-testing-preferences "Мостра на настройките") ; Heading for preferences controlling test behavior
+ ;(profj-language-config-testing-enable "Да се изведат ли резултатите от тестовете при „Изпълнение“?") ; Run should be the word found on the Run button
+ (profj-language-config-testing-coverage "Да се събира ли информация за покриването от тестовете?")
+ (profj-language-config-support-test-language "Да се поддържа ли разширеният език за тестване?")
+ (profj-language-config-testing-check "Разрешаване на проверяващи изрази?") ; check should not be translated
+ (profj-language-config-classpath "Пътища на класовете")
+ (profj-language-config-choose-classpath-directory "Избор на директория за добавяне към пътищата с класове")
+ (profj-language-config-classpath-display "Текущи") ;Button label to print the current classpath
 
-  (profj-test-name-close-to-example "Името на класа̀ „~a“ съдържа дума приличаща на „Example“.")
-  (profj-test-name-example-miscapitalized "Името на класа̀ „~a“ съдържа знаци с неправилен регистър.")
+ (profj-test-name-close-to-example "Името на класа̀ „~a“ съдържа дума приличаща на „Example“.")
+ (profj-test-name-example-miscapitalized "Името на класа̀ „~a“ съдържа знаци с неправилен регистър.")
 
-   ;; Close testing window and do not run test cases any more
-  ;(profj-test-results-close-and-disable "Close and Disable Testing")
-  ;; Hide docked testing window and do not run test cases any more
-  ;(profj-test-results-hide-and-disable "Hide and Disable Testing")
-  ;Renamed below
-  ;(profj-test-results-window-title "Test Results")
+ ;;; Close testing window and do not run test cases any more
+ ;(profj-test-results-close-and-disable "Close and Disable Testing")
+ ;; Hide docked testing window and do not run test cases any more
+ ;(profj-test-results-hide-and-disable "Hide and Disable Testing")
+ ;Renamed below
+ ;(profj-test-results-window-title "Test Results")
 
-  (profj-unsupported "Не се поддържа")
-  (profj-executables-unsupported "За съжаление в момента не се поддържат изпълними файлове от Java")
+ (profj-unsupported "Не се поддържа")
+ (profj-executables-unsupported "За съжаление в момента не се поддържат изпълними файлове от Java")
 
-  (profj-convert-to-text-comment "Да е текстов коментар")
-  (profj-convert-to-comment "Да е коментар")
+ (profj-convert-to-text-comment "Да е текстов коментар")
+ (profj-convert-to-comment "Да е коментар")
 
-  (profj-executing-main "изпълняване на метода „main“")
+ (profj-executing-main "изпълняване на метода „main“")
 
-  (profj-insert-java-comment-box "Вмъкване на кутия-коментар за Java")
-  (profj-insert-java-interactions-box "Вмъкване на кутия-скицник за Java")
+ (profj-insert-java-comment-box "Вмъкване на кутия-коментар за Java")
+ (profj-insert-java-interactions-box "Вмъкване на кутия-скицник за Java")
 
-  ;;The Test engine tool
-  ;;
-  (test-engine-window-title "Резултати от тестовете")
-  ;;Following two appear in View menu, attach and free test report window from DrRacket frame
-  (test-engine-dock-report "Прикачане на прозореца с резултатите от тестовете")
-  (test-engine-undock-report "Отделяне на прозореца с резултатите от тестовете")
-  ;;Following two appear in Racket (Java, etc) menu, cause Tests to be Run automatically or not
-  (test-engine-enable-tests "Включване на тестовете")
-  (test-engine-disable-tests "Изключване на тестовете")
+ ;;The Test engine tool
+ ;;
+ (test-engine-window-title "Резултати от тестовете")
+ ;;Following two appear in View menu, attach and free test report window from DrRacket frame
+ (test-engine-dock-report "Прикачане на прозореца с резултатите от тестовете")
+ (test-engine-undock-report "Отделяне на прозореца с резултатите от тестовете")
+ ;;Following two appear in Racket (Java, etc) menu, cause Tests to be Run automatically or not
+ (test-engine-enable-tests "Включване на тестовете")
+ (test-engine-disable-tests "Изключване на тестовете")
+ (test-engine-enable-disable-tests-only-in-teaching-languages
+   "Менюто за включване/изключване на тестовете се отнася само до езиците за обучение — „HtDP“ и „DMdA“. Вижте раздела с подробностите от прозореца за езици, с който се определят модулите, които да се изпълнят в езика Racket.")
 
-  (test-engine-ran-1-test "1 тест изпълнен.")
-  (test-engine-ran-1-check "1 проверка изпълнена.")
-  ;; ditto, only plural
-  (test-engine-ran-n-tests "~a теста изпълнени.")
-  (test-engine-ran-n-checks "~a проверки изпълнени.")
-  (test-engine-1-test-passed "Тестът мина успешно!")
-  (test-engine-1-check-passed "Проверката мина успешно!")
-  (test-engine-both-tests-passed "Двата теста минаха успешно!")
-  (test-engine-both-checks-passed "Двете проверки минаха успешно!")
-  (test-engine-all-tests-passed "Всички тестове минаха успешно!")
-  (test-engine-all-checks-passed "Всички проверки минаха успешно!")
-  (test-engine-all-n-tests-passed "Всички ~a теста минаха успешно!")
-  (test-engine-all-n-checks-passed "Всички ~a проверки минаха успешно!")
-  (test-engine-0-tests-passed "0 теста минаха успешно.")
-  (test-engine-0-checks-passed "0 проверки минаха успешно.")
-  (test-engine-m-of-n-tests-failed "~a от общо ~a теста се провалиха.")
-  (test-engine-m-of-n-checks-failed "~a от общо ~a проверки се провалиха.")
-  (test-engine-must-be-tested "Програмата трябва да се тества!")
-  (test-engine-is-unchecked "Програмата не е проверена!")
-  (test-engine-tests-disabled "Тестовете са изключени.")
-  (test-engine-should-be-tested "Програмата трябва да се тества.")
-  (test-engine-at-line-column "ред: ~a, колона: ~a")
-  (test-engine-in-at-line-column "в: ~a, ред: ~a, колона: ~a")
-  ; as in "column (unknown)"
-  (test-engine-unknown "(неизвестна)")
-  (test-engine-trace-error "Грешка при трасиране")
+ (test-engine-ran-1-test "1 тест изпълнен.")
+ (test-engine-ran-1-check "1 проверка изпълнена.")
+ ;; ditto, only plural
+ (test-engine-ran-n-tests "~a теста изпълнени.")
+ (test-engine-ran-n-checks "~a проверки изпълнени.")
+ (test-engine-1-test-passed "Тестът мина успешно!")
+ (test-engine-1-check-passed "Проверката мина успешно!")
+ (test-engine-both-tests-passed "Двата теста минаха успешно!")
+ (test-engine-both-checks-passed "Двете проверки минаха успешно!")
+ (test-engine-all-tests-passed "Всички тестове минаха успешно!")
+ (test-engine-all-checks-passed "Всички проверки минаха успешно!")
+ (test-engine-all-n-tests-passed "Всички ~a теста минаха успешно!")
+ (test-engine-all-n-checks-passed "Всички ~a проверки минаха успешно!")
+ (test-engine-0-tests-passed "0 теста минаха успешно.")
+ (test-engine-0-checks-passed "0 проверки минаха успешно.")
+ (test-engine-m-of-n-tests-failed "~a от общо ~a теста се провалиха.")
+ (test-engine-m-of-n-checks-failed "~a от общо ~a проверки се провалиха.")
+ (test-engine-must-be-tested "Програмата трябва да се тества!")
+ (test-engine-is-unchecked "Програмата не е проверена!")
+ (test-engine-tests-disabled "Тестовете са изключени.")
+ (test-engine-should-be-tested "Програмата трябва да се тества.")
+ (test-engine-at-line-column "ред: ~a, колона: ~a")
+ (test-engine-in-at-line-column "в: ~a, ред: ~a, колона: ~a")
+ ; as in "column (unknown)"
+ (test-engine-unknown "(неизвестна)")
+ (test-engine-trace-error "Грешка при трасиране")
 
-  ; The ~F is special marker for the offending values, which may be
-  ; printed specially in DrRacket.
-  (test-engine-check-encountered-error
+ ; The ~F is special marker for the offending values, which may be
+ ; printed specially in DrRacket.
+ (test-engine-check-encountered-error
    "check-expect получи грешката „~F“ вместо очакваната стойност ~n   :: ~a")
-  (test-engine-actual-value-differs-error
+ (test-engine-actual-value-differs-error
    "Получената стойност „~F“ се различава от очакваната „~F“.")
-  (test-engine-actual-value-not-within-error
+ (test-engine-actual-value-not-within-error
    "Получената стойност „~F“ се различава с повече от „~v“ от очакваната „~F“.")
-  (test-engine-encountered-error-error
+ (test-engine-encountered-error-error
    "check-error получи грешка „~a“, която е различна от очакваната.~n   :: ~a")
-  (test-engine-expected-error-error
+ (test-engine-expected-error-error
    "check-error получи стойността „~F“ вместо очакваната грешка.~n ~a")
-  (test-engine-expected-an-error-error
+ (test-engine-expected-an-error-error
    "check-error получи стойността „~F“, вместо грешка.")
-  ;; members are appended to the message
-  (test-engine-not-mem-error "Получената стойност „~F“ липсва в ")
-  (test-engine-not-range-error "Получената стойност „~F“ не е в затворения интервал [~F;~F].")
+ ;; members are appended to the message
+ (test-engine-not-mem-error "Получената стойност „~F“ липсва в ")
+ (test-engine-not-range-error "Получената стойност „~F“ не е в затворения интервал [~F;~F].")
 
-  ;; followed by list of variable bindings
-  (test-engine-property-fail-error "Свойството няма да се удовлетвори от")
-  (test-engine-property-error-error "check-property получи следната грешка~n:: ~a")
+ ;; followed by list of variable bindings
+ (test-engine-property-fail-error "Свойството няма да се удовлетвори от")
+ (test-engine-property-error-error "check-property получи следната грешка~n:: ~a")
 
-  (signature-enable-checks "С проверка на сигнатурите")
-  (signature-disable-checks "Без проверка на сигнатурите")
+ (signature-enable-checks "С проверка на сигнатурите")
+ (signature-disable-checks "Без проверка на сигнатурите")
 
-  ; section header
-  (test-engine-check-failures "Неуспешни проверки:")
-  ; section header
-  (test-engine-signature-violations "Несъответствия в сигнатурите:")
+ ; section header
+ (test-engine-check-failures "Неуспешни проверки:")
+ ; section header
+ (test-engine-signature-violations "Несъответствия в сигнатурите:")
 
-  ; part of one phrase "signature <at line ...> to blame: procedure <...>
-  (test-engine-signature "сигнатура")
-  (test-engine-to-blame "проблемът е в: процедурата")
+ ; part of one phrase "signature <at line ...> to blame: procedure <...>
+ (test-engine-signature "сигнатура")
+ (test-engine-to-blame "проблемът е в: процедурата")
 
-  (test-engine-no-signature-violations "Няма несъответствия в сигнатурите.")
-  (test-engine-1-signature-violation "1 несъответствие в сигнатурите.")
-  (test-engine-n-signature-violations "~a несъответствия в сигнатурите.")
+ (test-engine-no-signature-violations "Няма несъответствия в сигнатурите.")
+ (test-engine-1-signature-violation "1 несъответствие в сигнатурите.")
+ (test-engine-n-signature-violations "~a несъответствия в сигнатурите.")
 
-  ; as in got <value>, signature <at ...>
-  (test-engine-got "получено")
+ ; as in got <value>, signature <at ...>
+ (test-engine-got "получено")
 
-  (profjWizward-insert-java-class "Вмъкване на клас на Java")
-  (profjWizard-insert-java-union "Вмъкване на обединение на Java")
+ (profjWizward-insert-java-class "Вмъкване на клас на Java")
+ (profjWizard-insert-java-union "Вмъкване на обединение на Java")
 
-  ;; The Test Suite Tool
-  ;; Errors
-  (test-case-empty-error "Празен тест")
-  (test-case-too-many-expressions-error "Прекалено много изрази в тестов клас.")
-  ;; DrRacket window menu items
-  (test-case-insert "Вмъкване на тест")
-  (test-case-disable-all "Изключване на всички тестове")
-  (test-case-enable-all "Включване на всички тестове")
+ ;; The Test Suite Tool
+ ;; Errors
+ (test-case-empty-error "Празен тест")
+ (test-case-too-many-expressions-error "Прекалено много изрази в тестов клас.")
+ ;; DrRacket window menu items
+ (test-case-insert "Вмъкване на тест")
+ (test-case-disable-all "Изключване на всички тестове")
+ (test-case-enable-all "Включване на всички тестове")
 
-  ;; NOTE: The following string constants are labels of the test-case fields. The width
-  ;;       of the field is determined by the length of the longest of the following three words.
-  ;;       if the words are too long the test case will take up too much horizontal room and
-  ;;       not look very good.
-  ;; This string is the label of the expression that is being tested in a test case.
-  (test-case-to-test "Тест")
-  ;; This string is the label of the expression that is the expected value of the to-test expression.
-  (test-case-expected "Трябва да е")
-  ;; This string is the label of the actual result of the to test expression.
-  (test-case-actual "В момента е")
-  (test-case-predicate "Предикат")
-  (test-case-should-raise "Трябва да хвърли")
-  ;; The label of a field of the test-case that describes the expected error message of a test case
-  (test-case-error-message "Съобщение за грешка")
+ ;; NOTE: The following string constants are labels of the test-case fields. The width
+ ;;       of the field is determined by the length of the longest of the following three words.
+ ;;       if the words are too long the test case will take up too much horizontal room and
+ ;;       not look very good.
+ ;; This string is the label of the expression that is being tested in a test case.
+ (test-case-to-test "Тест")
+ ;; This string is the label of the expression that is the expected value of the to-test expression.
+ (test-case-expected "Трябва да е")
+ ;; This string is the label of the actual result of the to test expression.
+ (test-case-actual "В момента е")
+ (test-case-predicate "Предикат")
+ (test-case-should-raise "Трябва да хвърли")
+ ;; The label of a field of the test-case that describes the expected error message of a test case
+ (test-case-error-message "Съобщение за грешка")
 
-  (test-case-menu-title "Тест")
-  (test-case-switch-to-error-box "Към кутията за грешка")
-  (test-case-switch-to-nonerror-box "Към кутията без грешка")
-  (test-case-collapse "Свиване на текста")
-  (test-case-show-actual "Показване на текущата стойност")
-  (test-case-enable "Включване на теста")
-  (test-case-show-predicate "Показване на предиката")
-  (test-case-show-error-message "Показване на съобщението за грешка")
-  (test-case-convert-to-text "Преобразуване към текст")
+ (test-case-menu-title "Тест")
+ (test-case-switch-to-error-box "Към кутията за грешка")
+ (test-case-switch-to-nonerror-box "Към кутията без грешка")
+ (test-case-collapse "Свиване на текста")
+ (test-case-show-actual "Показване на текущата стойност")
+ (test-case-enable "Включване на теста")
+ (test-case-show-predicate "Показване на предиката")
+ (test-case-show-error-message "Показване на съобщението за грешка")
+ (test-case-convert-to-text "Преобразуване към текст")
 
-  ;; Profj Boxes
-  (profjBoxes-empty-error "Празен скицник")
-  (profjBoxes-too-many-expressions-error "Прекалено много изрази в кутия")
-  (profjBoxes-interactions-label "Скицник")
-  (profjBoxes-bad-java-id-error "Неправилен идентификатор на Java")
-  (profjBoxes-examples-label "Примери")
-  (profjBoxes-add-new-example-button "Добавяне на нов пример")
-  (profjBoxes-type "Тип")
-  ;; The Java identifier of an example of data
-  (profjBoxes-name "Име")
-  (profjBoxes-value "Стойност")
-  (profjBoxes-insert-java-examples "Вмъкване на примери на Java")
-  (profjBoxes-insert-java-interactions "Вмъкване на скицник на Java")
+ ;; Profj Boxes
+ (profjBoxes-empty-error "Празен скицник")
+ (profjBoxes-too-many-expressions-error "Прекалено много изрази в кутия")
+ (profjBoxes-interactions-label "Скицник")
+ (profjBoxes-bad-java-id-error "Неправилен идентификатор на Java")
+ (profjBoxes-examples-label "Примери")
+ (profjBoxes-add-new-example-button "Добавяне на нов пример")
+ (profjBoxes-type "Тип")
+ ;; The Java identifier of an example of data
+ (profjBoxes-name "Име")
+ (profjBoxes-value "Стойност")
+ (profjBoxes-insert-java-examples "Вмъкване на примери на Java")
+ (profjBoxes-insert-java-interactions "Вмъкване на скицник на Java")
 
-  ;; Slideshow
-  (slideshow-hide-picts "Показване на изображенията")
-  (slideshow-show-picts "Показване на изображенията")
-  (slideshow-cannot-show-picts "Изображенията не могат да се покажат. Изпълнете програмата, за да се установят размерите.")
-  (slideshow-insert-pict-box "Вмъкване на кутия за изображение")
+ ;; Slideshow
+ (slideshow-hide-picts "Показване на изображенията")
+ (slideshow-show-picts "Показване на изображенията")
+ (slideshow-cannot-show-picts "Изображенията не могат да се покажат. Изпълнете програмата, за да се установят размерите.")
+ (slideshow-insert-pict-box "Вмъкване на кутия за изображение")
 
-  ;; GUI Tool
-  (gui-tool-heading "Графичен интерфейс")
-  (gui-tool-before-clicking-message
+ ;; GUI Tool
+ (gui-tool-heading "Графичен интерфейс")
+ (gui-tool-before-clicking-message
    "Изберете „Вмъкване на графичен интерфейс“ от менюто „Специални“ или посочете съществуващ,"
    " преди да натиснете икона от лентата с инструменти.") ;; fuzzy - menu Special unknown
-  (gui-tool-show-gui-toolbar "Показване на лентата с инструменти за графичен интерфейс")
-  (gui-tool-hide-gui-toolbar "Скриване на лентата с инструменти за графичен интерфейс")
-  (gui-tool-insert-gui "Вмъкване на графичен интерфейс")
+ (gui-tool-show-gui-toolbar "Показване на лентата с инструменти за графичен интерфейс")
+ (gui-tool-hide-gui-toolbar "Скриване на лентата с инструменти за графичен интерфейс")
+ (gui-tool-insert-gui "Вмъкване на графичен интерфейс")
 
-  ;; contract violation tracking
+ ;; contract violation tracking
 
-  ; tooltip for new planet icon in drscheme window (must have a planet violation logged to see it)
-  (show-planet-contract-violations "Извеждане на нарушенията на договорите на PLaneT")
+ ; tooltip for new planet icon in drscheme window (must have a planet violation logged to see it)
+ (show-planet-contract-violations "Извеждане на нарушенията на договорите на PLaneT")
 
-  ; buttons in the dialog that lists the recorded bug reports
-  (bug-track-report "Нов доклад за грешка")
-  (bug-track-forget "Забравяне")
-  (bug-track-forget-all "Забравяне на всичко")
+ ; buttons in the dialog that lists the recorded bug reports
+ (bug-track-report "Нов доклад за грешка")
+ (bug-track-forget "Забравяне")
+ (bug-track-forget-all "Забравяне на всичко")
 
-  ;; planet status messages in the bottom of the drscheme window; the ~a is filled with the name of the package
-  (planet-downloading "PLaneT: Изтегляне на „~a“…")
-  (planet-installing "PLaneT: Инсталиране на „~a“…")
-  (planet-finished "PLaneT: Приключиха действията по „~a“.")
-  (planet-docs-building "PLaneT: Генериране на документацията (стартиране от „~a“)…")
-  (planet-no-status "PLaneT") ;; this can happen when there is status shown in a different and then the user switches to a tab where planet hasn't been used
+ ;; planet status messages in the bottom of the drscheme window; the ~a is filled with the name of the package
+ (planet-downloading "PLaneT: Изтегляне на „~a“…")
+ (planet-installing "PLaneT: Инсталиране на „~a“…")
+ (planet-finished "PLaneT: Приключиха действията по „~a“.")
+ (planet-docs-building "PLaneT: Генериране на документацията (стартиране от „~a“)…")
+ (planet-no-status "PLaneT") ;; this can happen when there is status shown in a different and then the user switches to a tab where planet hasn't been used
 
-  (bug-report-field-pkg "Информация от пакетната система")
+ (bug-report-field-pkg "Информация от пакетната система")
 
-  ;; string normalization. To see this, paste some text with a ligature into DrRacket
-  ;; the first three strings are in the dialog that appears. The last one is in the preferences dialog
-  (normalize "нормализиране")
-  (leave-alone "Както е въведено")
-  (normalize-string-info "Поставеният низ съдържа ненормализирани лигатури или знаци. Да се нормализират ли?")
-  (normalize-string-preference "Нормализиране на поставените низове")
-  (ask-about-normalizing-strings "Питане за нормализиране на низовете")
+ ;; string normalization. To see this, paste some text with a ligature into DrRacket
+ ;; the first three strings are in the dialog that appears. The last one is in the preferences dialog
+ (normalize "нормализиране")
+ (leave-alone "Както е въведено")
+ (normalize-string-info "Поставеният низ съдържа ненормализирани лигатури или знаци. Да се нормализират ли?")
+ (normalize-string-preference "Нормализиране на поставените низове")
+ (ask-about-normalizing-strings "Питане за нормализиране на низовете")
 
-  (always-use-platform-specific-linefeed-convention "Край на ред според операционната система")
+ (always-use-platform-specific-linefeed-convention "Край на ред според операционната система")
 
-  ;; optimization coach
-  (hide-optimization-coach "Скриване на помощника за оптимизации")
-  (show-optimization-coach "Помощник за оптимизации")
+ ;; optimization coach
+ (hide-optimization-coach "Скриване на помощника за оптимизации")
+ (show-optimization-coach "Помощник за оптимизации")
 
-  ;; labels used (in a big font) in the background of the definitions and interactions windows
-  (definitions-window-label "дефиниции")
-  (interactions-window-label "скицник")
-  (hide-defs/ints-label "Скриване на етикетите за дефиниции/скицник") ;; popup menu
-  (show-defs/ints-label "Показване на етикетите за дефиниции/скицник") ;; preferences checkbox
+ ;; labels used (in a big font) in the background of the definitions and interactions windows
+ (definitions-window-label "дефиниции")
+ (interactions-window-label "скицник")
+ (hide-defs/ints-label "Скриване на етикетите за дефиниции/скицник") ;; popup menu
+ (show-defs/ints-label "Показване на етикетите за дефиниции/скицник") ;; preferences checkbox
 
-  ;; menu item in the 'edit' menu; applies to editors with programs in them
-  ;; (technically, editors that implement color:text<%>)
-  (spell-check-string-constants "Проверка на правописа на низовите константи")
-  (spell-check-scribble-text "Проверка на правописа (между „{“ и „}“ в Scribble)")
-  (spelling-dictionaries "Правописни речници") ; (sub)menu whose items are the different possible dictionaries
-  (default-spelling-dictionary "Стандартен речник") ; first item in menu from previous line
-  (misspelled-text-color "Сгрешен текст") ;; in the preferences dialog
-  (cannot-find-ispell-or-aspell-path "Изпълнимите файлове „aspell“ и „ispell“ липсват")
-  ; puts the path to the spell program in the ~a and then the error message
-  ; is put following this string (with a blank line in between)
-  (spell-program-wrote-to-stderr-on-startup "Програмата за правописа „~a“ изведе грешка:")
-  (spell-skip-to-next-misspelled-word "Към следващата сгрешена дума") ;; menu item
-  (spell-suggest-corrections "Предложения за корекция…") ;; menu item
-  (spell-correction-suggestions "Предложения за корекция") ;; dialog title
-  (spell-choose-replacement-word "Избор на друга дума") ;; label in dialog
+ ;; menu item in the 'edit' menu; applies to editors with programs in them
+ ;; (technically, editors that implement color:text<%>)
+ (spell-check-string-constants "Проверка на правописа на низовите константи")
+ (spell-check-scribble-text "Проверка на правописа (между „{“ и „}“ в Scribble)")
+ (spelling-dictionaries "Правописни речници") ; (sub)menu whose items are the different possible dictionaries
+ (default-spelling-dictionary "Стандартен речник") ; first item in menu from previous line
+ (misspelled-text-color "Сгрешен текст") ;; in the preferences dialog
+ (cannot-find-ispell-or-aspell-path "Изпълнимите файлове „aspell“ и „ispell“ липсват")
+ ; puts the path to the spell program in the ~a and then the error message
+ ; is put following this string (with a blank line in between)
+ (spell-program-wrote-to-stderr-on-startup "Програмата за правописа „~a“ изведе грешка:")
+ (spell-skip-to-next-misspelled-word "Към следващата сгрешена дума") ;; menu item
+ (spell-suggest-corrections "Предложения за корекция…") ;; menu item
+ (spell-correction-suggestions "Предложения за корекция") ;; dialog title
+ (spell-choose-replacement-word "Избор на друга дума") ;; label in dialog
 
-  ;; GUI for installing a pkg package; available via File|Install Package...
-  (install-pkg-install-by-source "Отгатване")         ; tab label
-  (install-pkg-install-from-list "Има го в каталога") ; tab label
-  (install-pkg-install-installed "Текущо инсталирани")    ; tab label
-  (install-pkg-migrate-from "Копиране от версия")           ; tab label
-  (install-pkg-settings "Настройки")                        ; tab label
-  (install-pkg-menu-item... "Инсталиране на пакет…")
-  (install-pkg-dialog-title "Инсталиране на пакет")
-  (install-pkg-source-label "Източник на пакет")
-  (install-pkg-package-name "Име на пакет")
-  (install-pkg-package-source-desc "Източникът на пакета е име, файл, директория, адрес в Интернет или връзка към GitHub")
-  (install-pkg-infer "Отгатване")
-  (install-pkg-use "Използване") ; as opposed to "Infer", label for text box
-  (install-pkg-type-label "Вид източник на пакет")
-  (install-pkg-file "Файл")
-  (install-pkg-dir "Директория")
-  (install-pkg-dir-url "Изтриване на директория")
-  (install-pkg-file-url "Изтриване на файл")
-  (install-pkg-git "Хранилище на Git")
-  (install-pkg-github "GitHub")
-  (install-pkg-name "Име (проверка в системата за имена)")
-  (install-pkg-inferred-as "Отгатнатият вид е „~a“") ; ~a gets install-pkg-{file,dir,...}
-  (install-pkg-link-dirs "Локална директория като връзка")
-  (install-pkg-file-or-dir? "Избор на файл или директория")
-  (install-pkg-force? "Пренебрегване на конфликтите")
-  (install-pkg-replace? "Обновленията могат да заменят текущите инсталации")
-  (install-pkg-dry-run? "Симулация на инсталация (без промени)")
-  (install-pkg-command-line "Еквивалентна команда на командния ред:")
-  (install-pkg-error-installing-title "Грешка при инсталирането на пакет")
-  (install-pkg-action-label "Избор на действие")
-  (install-pkg-install "Инсталиране")
-  (install-pkg-update "Обновяване")
-  (install-pkg-setup "Настройки") ; for button
-  (install-pkg-setup-long "Настройки на инсталацията") ; for menu
-  (install-pkg-remove "Деинсталиране")
-  (install-pkg-do-not-remove "Да не се деинсталира")
-  (install-pkg-action-inferred-to-be-update "Отгатнатото действие е „Обновяване“")
-  (install-pkg-action-inferred-to-be-install "Отгатнатото действие е „Инсталиране“")
-  (install-pkg-default "Стандартно")
-  (install-pkg-scope-label "Обхват на пакета")
-  (install-pkg-default-scope-label "Стандартен обхват на пакет") ; for picking the scope to be default
-  (install-pkg-installation "Конкретна инсталация на Racket")
-  (install-pkg-user "Конкретен потребител и версия на Racket")
-  (install-pkg-set-as-default "Да е стандартно")
-  (install-pkg-scope-is "Обхват на пакета „~a“") ; ~a gets install-pkg-{installation,user,shared}
-  (install-pkg-select-package-directory "Избора на директория на пакета")
-  (install-pkg-select-package-file "Избор на пакетен файл")
-  (install-pkg-update-package-list "Обновяване на списъка с пакети")
-  (install-pkg-stop-update "Спиране на обновяването")
-  (install-pkg-filter "Филтриране")
-  (install-pkg-update-catalogs? "Да се приведе ли базата да отговаря на настроените каталози?")
-  (install-pkg-currently-configured-are "Следните каталози са настроени в момента:")
-  (install-pkg-database-recorded-are "Следните каталози са записани в базата:")
-  (install-pkg-update-catalogs "Обновяване")
-  (install-pkg-do-not-update-catalogs "Без обновяване")
-  (install-pkg-really-remove? "Сигурни ли сте, че искате да деинсталирате следните пакети?")
-  (install-pkg-promote "Повишаване от автоматично инсталиране")
-  (install-pkg-demote "Понижаване до автоматично инсталиране")
-  (install-pkg-abort-install "Преустановяване на инсталирането")
-  (install-pkg-abort-update "Преустановяване на обновяването")
-  (install-pkg-abort-remove "Преустановяване на деинсталирането")
-  (install-pkg-abort-demote "Преустановяване на понижаването")
-  (install-pkg-abort-promote "Преустановяване на повишаването")
-  (install-pkg-abort-migrate "Преустановяване на мигрирането")
-  (install-pkg-abort-setup "Преустановяване на настройките")
-  (install-pkg-abort-generic-action "Преустановяване на действието")
-  (install-pkg-close-terminal-output "Затваряне на изхода")
-  (install-pkg-show-all-options "Показване на всички опции")
-  (install-pkg-migrate-available-installations "Налични инсталации")
-  (pkg-manager-menu-item "Управление на пакети…")
-  ;; where ~a gets an installation name:
-  (install-pkg-packages-for "Пакети за „~a“")
-  (install-pkg-really-remove-installation "Сигурни ли сте, че искате да изтриете всички пакети и информация в „~a“?")
+ ;; GUI for installing a pkg package; available via File|Install Package...
+ (install-pkg-install-by-source "Отгатване")         ; tab label
+ (install-pkg-install-from-list "Има го в каталога") ; tab label
+ (install-pkg-install-installed "Текущо инсталирани")    ; tab label
+ (install-pkg-migrate-from "Копиране от версия")           ; tab label
+ (install-pkg-settings "Настройки")                        ; tab label
+ (install-pkg-menu-item... "Инсталиране на пакет…")
+ (install-pkg-dialog-title "Инсталиране на пакет")
+ (install-pkg-source-label "Източник на пакет")
+ (install-pkg-package-name "Име на пакет")
+ (install-pkg-package-source-desc "Източникът на пакета е име, файл, директория, адрес в Интернет или връзка към GitHub")
+ (install-pkg-infer "Отгатване")
+ (install-pkg-use "Използване") ; as opposed to "Infer", label for text box
+ (install-pkg-type-label "Вид източник на пакет")
+ (install-pkg-file "Файл")
+ (install-pkg-dir "Директория")
+ (install-pkg-dir-url "Изтриване на директория")
+ (install-pkg-file-url "Изтриване на файл")
+ (install-pkg-git "Хранилище на Git")
+ (install-pkg-github "GitHub")
+ (install-pkg-name "Име (проверка в системата за имена)")
+ (install-pkg-inferred-as "Отгатнатият вид е „~a“") ; ~a gets install-pkg-{file,dir,...}
+ (install-pkg-link-dirs "Локална директория като връзка")
+ (install-pkg-file-or-dir? "Избор на файл или директория")
+ (install-pkg-force? "Пренебрегване на конфликтите")
+ (install-pkg-replace? "Обновленията могат да заменят текущите инсталации")
+ (install-pkg-dry-run? "Симулация на инсталация (без промени)")
+ (install-pkg-command-line "Еквивалентна команда на командния ред:")
+ (install-pkg-error-installing-title "Грешка при инсталирането на пакет")
+ (install-pkg-action-label "Избор на действие")
+ (install-pkg-install "Инсталиране")
+ (install-pkg-update "Обновяване")
+ (install-pkg-setup "Настройки") ; for button
+ (install-pkg-setup-long "Настройки на инсталацията") ; for menu
+ (install-pkg-remove "Деинсталиране")
+ (install-pkg-do-not-remove "Да не се деинсталира")
+ (install-pkg-action-inferred-to-be-update "Отгатнатото действие е „Обновяване“")
+ (install-pkg-action-inferred-to-be-install "Отгатнатото действие е „Инсталиране“")
+ (install-pkg-default "Стандартно")
+ (install-pkg-scope-label "Обхват на пакета")
+ (install-pkg-default-scope-label "Стандартен обхват на пакет") ; for picking the scope to be default
+ (install-pkg-installation "Конкретна инсталация на Racket")
+ (install-pkg-user "Конкретен потребител и версия на Racket")
+ (install-pkg-set-as-default "Да е стандартно")
+ (install-pkg-scope-is "Обхват на пакета „~a“") ; ~a gets install-pkg-{installation,user,shared}
+ (install-pkg-select-package-directory "Избора на директория на пакета")
+ (install-pkg-select-package-file "Избор на пакетен файл")
+ (install-pkg-update-package-list "Обновяване на списъка с пакети")
+ (install-pkg-stop-update "Спиране на обновяването")
+ (install-pkg-filter "Филтриране")
+ (install-pkg-update-catalogs? "Да се приведе ли базата да отговаря на настроените каталози?")
+ (install-pkg-currently-configured-are "Следните каталози са настроени в момента:")
+ (install-pkg-database-recorded-are "Следните каталози са записани в базата:")
+ (install-pkg-update-catalogs "Обновяване")
+ (install-pkg-do-not-update-catalogs "Без обновяване")
+ (install-pkg-really-remove? "Сигурни ли сте, че искате да деинсталирате следните пакети?")
+ (install-pkg-promote "Повишаване от автоматично инсталиране")
+ (install-pkg-demote "Понижаване до автоматично инсталиране")
+ (install-pkg-abort-install "Преустановяване на инсталирането")
+ (install-pkg-abort-update "Преустановяване на обновяването")
+ (install-pkg-abort-remove "Преустановяване на деинсталирането")
+ (install-pkg-abort-demote "Преустановяване на понижаването")
+ (install-pkg-abort-promote "Преустановяване на повишаването")
+ (install-pkg-abort-migrate "Преустановяване на мигрирането")
+ (install-pkg-abort-setup "Преустановяване на настройките")
+ (install-pkg-abort-generic-action "Преустановяване на действието")
+ (install-pkg-close-terminal-output "Затваряне на изхода")
+ (install-pkg-show-all-options "Показване на всички опции")
+ (install-pkg-migrate-available-installations "Налични инсталации")
+ (pkg-manager-menu-item "Управление на пакети…")
+ ;; where ~a gets an installation name:
+ (install-pkg-packages-for "Пакети за „~a“")
+ (install-pkg-really-remove-installation "Сигурни ли сте, че искате да изтриете всички пакети и информация в „~a“?")
 
-  (install-pkg-abort-set-scope "Преустановяване на промяната на обхвата")
+ (install-pkg-abort-set-scope "Преустановяване на промяната на обхвата")
 
-  (install-pkg-dependencies-fail "Спиране: отмяна на инсталацията/обновяването, ако има неудовлетворени зависимости")
-  (install-pkg-dependencies-force "Форсиране: инсталиране, независимо липсващи или несъвпадащи по версия зависимости")
-  (install-pkg-dependencies-search-ask "Питане: питане при всяка липсваща зависимост (не се поддържа в графичен режим)")
-  (install-pkg-dependencies-search-auto "Автоматично: автоматично инсталиране на липсващите зависимости и версии")
-  (install-pkg-dependencies-search-auto+update "Автоматично и обновяване: обновяване на всички възможни зависимости")
+ (install-pkg-dependencies-fail "Спиране: отмяна на инсталацията/обновяването, ако има неудовлетворени зависимости")
+ (install-pkg-dependencies-force "Форсиране: инсталиране, независимо липсващи или несъвпадащи по версия зависимости")
+ (install-pkg-dependencies-search-ask "Питане: питане при всяка липсваща зависимост (не се поддържа в графичен режим)")
+ (install-pkg-dependencies-search-auto "Автоматично: автоматично инсталиране на липсващите зависимости и версии")
+ (install-pkg-dependencies-search-auto+update "Автоматично и обновяване: обновяване на всички възможни зависимости")
 
-  (install-pkg-dependencies-mode "Режим на зависимостите")
+ (install-pkg-dependencies-mode "Режим на зависимостите")
 
-  (install-pkg-dependencies-search-ask-not-supported-in-gui
+ (install-pkg-dependencies-search-ask-not-supported-in-gui
    "Режимът с „Питане“ не се поддържа от графичния инсталатор.")
-  ;; "~a" is pre-":" part of `install-pkg-dependencies-fail' or `install-pkg-dependencies-search-auto':
-  (install-pkg-deps-is "Стандартният режим на удовлетворяване на зависимостите е „~a“")
+ ;; "~a" is pre-":" part of `install-pkg-dependencies-fail' or `install-pkg-dependencies-search-auto':
+ (install-pkg-deps-is "Стандартният режим на удовлетворяване на зависимостите е „~a“")
 
-  (install-pkg-package-catalogs "Пакетни каталози") ; label for a list box
-  (install-pkg-add-package-catalog "Добавяне на пакетен каталог")
+ (install-pkg-package-catalogs "Пакетни каталози") ; label for a list box
+ (install-pkg-add-package-catalog "Добавяне на пакетен каталог")
 
-  (install-pkg-not-rentrant "Не може едновременно да инсталирате и да обновявате —"
+ (install-pkg-not-rentrant "Не може едновременно да инсталирате и да обновявате —"
                             " или спрете действието, или го изчакайте.")
 
-  ;; open a file via a collection path (new "Open" menu item in DrRacket)
-  (open-require-path "Отваряне на път с необходими файлове…")
-  (enter-subcollection "Към подколекция") ; button in new dialog
-  (path-to-racket-binary "Път към изпълним файл")
-  (use-a-different-racket "Различна команда „racket“")
+ ;; open a file via a collection path (new "Open" menu item in DrRacket)
+ (open-require-path "Отваряне на път с необходими файлове…")
+ (enter-subcollection "Към подколекция") ; button in new dialog
+ (path-to-racket-binary "Път към изпълним файл")
+ (use-a-different-racket "Различна команда „racket“")
 
-  ;; adding racket/bin to the path; only under mac os x
-  ; first ~a is filled with either the empty string or an error message from elsewhere
-  ;  (bracketed by some newlines to separate it out)
-  ; second ~a is filled with /etc/paths.d/racket (or some other path like it in the future)
-  ; third ~a is filled with the path to the bin directory of the current drracket
-  (adding-racket/bin-to-path-failed
+ ;; adding racket/bin to the path; only under mac os x
+ ; first ~a is filled with either the empty string or an error message from elsewhere
+ ;  (bracketed by some newlines to separate it out)
+ ; second ~a is filled with /etc/paths.d/racket (or some other path like it in the future)
+ ; third ~a is filled with the path to the bin directory of the current drracket
+ (adding-racket/bin-to-path-failed
    "Неуспешно добавяне на поддръжката за „racket“ към командния ред.~aПо-специално — не може да се създаде файл „~a“ със съдържание — „~a“.")
-  ; first and third ~a are filled with /etc/paths.d/racket (or some other path like it in the future)
-  ; and the second one is filled with the path to the bin directory that was put into that file.
-  (added-racket/bin-to-path
+ ; first and third ~a are filled with /etc/paths.d/racket (or some other path like it in the future)
+ ; and the second one is filled with the path to the bin directory that was put into that file.
+ (added-racket/bin-to-path
    "Вече можете да използвате „racket“ и инструментите от командния"
    " ред.\n\nПроменливата на средата „PATH“ е настроена за всички потребители"
    " чрез\nдобавяне на връзката „~a“,\nкоято сочи към „~a“.\nЗа да"
    " отмените действието, изтрийте „~a“.")
-  (add-racket/bin-to-path "Настройване на командния ред за Racket…") ;; menu item label
-  )
+ (add-racket/bin-to-path "Настройване на командния ред за Racket…") ;; menu item label
+)

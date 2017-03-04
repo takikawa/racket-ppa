@@ -259,9 +259,6 @@
 #endif
 # if defined(__arm__)
 # define MZ_USE_JIT_ARM
-# ifndef __ANDROID__
-#  define MZ_USE_DWARF_LIBUNWIND
-# endif
 #endif
 
 #endif
@@ -475,6 +472,9 @@
 #  define FLUSH_SPARC_REGISTER_WINDOWS
 # elif defined(__arm__)
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "arm-freebsd"
+# elif defined(__powerpc__)
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "ppc-freebsd"
+#  define MZ_USE_JIT_PPC
 # else
 #  error Unported platform.
 # endif

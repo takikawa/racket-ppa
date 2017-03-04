@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2016 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -464,8 +464,6 @@ Scheme_Object *scheme_make_stx(Scheme_Object *val,
 			       Scheme_Hash_Tree *props)
 {
   Scheme_Stx *stx;
-
-  DEBUG_COUNT_ALLOCATION(scheme_make_integer(scheme_stx_type));
 
   stx = MALLOC_ONE_TAGGED(Scheme_Stx);
   stx->iso.so.type = scheme_stx_type;
@@ -1741,6 +1739,11 @@ Scheme_Object *scheme_make_shift(Scheme_Object *phase_delta,
     return NULL;
 }
 
+static int non_source_shift(Scheme_Object *vec)
+{
+  return SCHEME_BOXP(SCHEME_VEC_ELS(vec)[0]);
+}
+
 void scheme_clear_shift_cache(void)
 {
   int i;
@@ -1769,6 +1772,45 @@ Scheme_Object *scheme_stx_shift(Scheme_Object *stx,
     stx = scheme_stx_add_shift(stx, s);
 
   return stx;
+}
+
+static Scheme_Object *shifts_to_non_source(Scheme_Object *shifts) {
+  Scheme_Object *l, *p, *last, *first, *vec, *vec2;
+  int i;
+
+  for (l = shifts; !SCHEME_NULLP(l); l = SCHEME_CDR(l)) {
+    if (!non_source_shift(SCHEME_CAR(l)))
+      break;
+  }
+
+  if (SCHEME_NULLP(l))
+    return shifts;
+
+  last = NULL;
+  first = NULL;
+
+  for (l = shifts; !SCHEME_NULLP(l); l = SCHEME_CDR(l)) {
+    vec = SCHEME_CAR(l);
+    if (!non_source_shift(vec)) {
+      i = SCHEME_VEC_SIZE(vec);
+      vec2 = scheme_make_vector(i, NULL);
+      while (i--) {
+        SCHEME_VEC_ELS(vec2)[i] = SCHEME_VEC_ELS(vec)[i];
+      }
+      vec = vec2;
+      vec2 = scheme_box(SCHEME_VEC_ELS(vec)[0]);
+      SCHEME_VEC_ELS(vec)[0] = vec2;
+    }
+
+    p = scheme_make_pair(vec, scheme_null);
+    if (!first)
+      first = p;
+    else
+      SCHEME_CDR(last) = p;
+    last = p;
+  }
+
+  return first;
 }
 
 static Scheme_Object *apply_modidx_shifts(Scheme_Object *shifts, Scheme_Object *modidx,
@@ -1811,6 +1853,9 @@ static Scheme_Object *apply_modidx_shifts(Scheme_Object *shifts, Scheme_Object *
     src = SCHEME_VEC_ELS(vec)[0];
     dest = SCHEME_VEC_ELS(vec)[1];
 
+    if (SCHEME_BOXP(src))
+      src = SCHEME_BOX_VAL(src);
+    
     modidx = scheme_modidx_shift(modidx, src, dest);
 
     if (SCHEME_VEC_SIZE(vec) > 2) {
@@ -4883,6 +4928,7 @@ Scheme_Object *scheme_stx_to_module_context(Scheme_Object *_stx)
   shifts = stx->shifts;
   if (SCHEME_VECTORP(shifts))
     shifts = SCHEME_VEC_ELS(shifts)[0];
+  shifts = shifts_to_non_source(shifts);
 
   phase = scheme_make_integer(0);
 
@@ -5138,10 +5184,10 @@ Scheme_Object *scheme_stx_source_module(Scheme_Object *stx, int resolve, int sou
     l = SCHEME_VEC_ELS(l)[0];
 
   l = scheme_reverse(l);
-  
+
   while (!SCHEME_NULLP(l)) {
     a = SCHEME_CAR(l);
-    if (SCHEME_VECTORP(a)) {
+    if (SCHEME_VECTORP(a) && !non_source_shift(a)) {
       src = SCHEME_VEC_ELS(a)[1];
 
       if (SCHEME_MODIDXP(src)) {
@@ -6594,38 +6640,6 @@ static Scheme_Object *convert_srcloc(Scheme_Stx_Srcloc *srcloc, Scheme_Hash_Tree
   } else
     paren = NULL;
 
-  if ((!srcloc || (SCHEME_FALSEP(srcloc->src)
-                   && (srcloc->line < 0)
-                   && (srcloc->col < 0)
-                   && (srcloc->pos < 0)))
-      && !paren)
-    return scheme_false;
-
-  if (!srcloc)
-    srcloc = empty_srcloc;
-
-  src = srcloc->src;
-  if (SCHEME_PATHP(src)) {
-    /* To make paths portable and to avoid full paths, check whether the
-       path can be made relative (in which case it is turned into a list
-       of byte strings). If not, convert to a string using only the
-       last couple of path elements. */
-    dir = scheme_get_param(scheme_current_config(),
-                           MZCONFIG_WRITE_DIRECTORY);
-    if (SCHEME_TRUEP(dir))
-      src = scheme_extract_relative_to(src, dir, mt->path_cache);
-    if (SCHEME_PATHP(src)) {
-      src = scheme_hash_get(mt->path_cache, scheme_box(srcloc->src));
-      if (!src) {
-        src = srcloc_path_to_string(srcloc->src);
-        scheme_hash_set(mt->path_cache, scheme_box(srcloc->src), src);
-      }
-    } else {
-      /* use the path directly and let the printer make it relative */
-      src = srcloc->src;
-    }
-  }
-
   preserved_properties = scheme_null;
   if (props) {
     Scheme_Object *key, *val, **a = NULL;
@@ -6652,6 +6666,39 @@ static Scheme_Object *convert_srcloc(Scheme_Stx_Srcloc *srcloc, Scheme_Hash_Tree
         val = convert_prop_val(SCHEME_PTR_VAL(val), mt, NULL, empty_hash_tree);
         preserved_properties = CONS(CONS(a[i], val), preserved_properties);
       }
+    }
+  }
+
+  if ((!srcloc || (SCHEME_FALSEP(srcloc->src)
+                   && (srcloc->line < 0)
+                   && (srcloc->col < 0)
+                   && (srcloc->pos < 0)))
+      && !paren
+      && SCHEME_NULLP(preserved_properties))
+    return scheme_false;
+
+  if (!srcloc)
+    srcloc = empty_srcloc;
+
+  src = srcloc->src;
+  if (SCHEME_PATHP(src)) {
+    /* To make paths portable and to avoid full paths, check whether the
+       path can be made relative (in which case it is turned into a list
+       of byte strings). If not, convert to a string using only the
+       last couple of path elements. */
+    dir = scheme_get_param(scheme_current_config(),
+                           MZCONFIG_WRITE_DIRECTORY);
+    if (SCHEME_TRUEP(dir))
+      src = scheme_extract_relative_to(src, dir, mt->path_cache);
+    if (SCHEME_PATHP(src)) {
+      src = scheme_hash_get(mt->path_cache, scheme_box(srcloc->src));
+      if (!src) {
+        src = srcloc_path_to_string(srcloc->src);
+        scheme_hash_set(mt->path_cache, scheme_box(srcloc->src), src);
+      }
+    } else {
+      /* use the path directly and let the printer make it relative */
+      src = srcloc->src;
     }
   }
 
@@ -8076,20 +8123,26 @@ static Scheme_Object *syntax_tainted_p(int argc, Scheme_Object **argv)
 
 static Scheme_Object *syntax_original_p(int argc, Scheme_Object **argv)
 {
-  Scheme_Stx *stx;
-  Scheme_Object *key, *val;
-  intptr_t i;
-
   if (!SCHEME_STXP(argv[0]))
     scheme_wrong_contract("syntax-original?", "syntax?", 0, argc, argv);
 
-  stx = (Scheme_Stx *)argv[0];
+  if (scheme_syntax_is_original(argv[0]))
+    return scheme_true;
+  else
+    return scheme_false;
+}
+
+int scheme_syntax_is_original(Scheme_Object *_stx)
+{
+  Scheme_Stx *stx = (Scheme_Stx *)_stx;
+  Scheme_Object *key, *val;
+  intptr_t i;
 
   if (stx->props) {
     if (!scheme_hash_tree_get(stx->props, source_symbol))
-      return scheme_false;
+      return 0;
   } else
-    return scheme_false;
+    return 0;
 
   /* Look for any non-original scope: */
   i = scope_set_next(stx->scopes->simple_scopes, -1);
@@ -8097,12 +8150,27 @@ static Scheme_Object *syntax_original_p(int argc, Scheme_Object **argv)
     scope_set_index(stx->scopes->simple_scopes, i, &key, &val);
 
     if (SCHEME_SCOPE_KIND(key) == SCHEME_STX_MACRO_SCOPE)
-      return scheme_false;
+      return 0;
     
     i = scope_set_next(stx->scopes->simple_scopes, i);
   }
 
-  return scheme_true;
+  return 1;
+}
+
+Scheme_Object *scheme_syntax_remove_original(Scheme_Object *_stx)
+{
+  Scheme_Stx *stx = (Scheme_Stx *)_stx;
+  Scheme_Hash_Tree *props = stx->props;
+
+  if (!props)
+    return (Scheme_Object *)stx;
+
+  props = scheme_hash_tree_set(props, source_symbol, NULL);
+  stx = (Scheme_Stx *)clone_stx((Scheme_Object *)stx, NULL);
+  stx->props = props;
+  
+  return (Scheme_Object *)stx;
 }
 
 Scheme_Object *scheme_stx_property2(Scheme_Object *_stx,

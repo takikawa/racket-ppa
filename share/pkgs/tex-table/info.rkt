@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.7"))) (define deps (quote ("base"))) (define collection "mrlib") (define pkg-desc "Table of TeX-style abbreviations") (define pkg-authors (quote (robby)))))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.8"))) (define deps (quote ("base"))) (define collection "mrlib") (define pkg-desc "Table of TeX-style abbreviations") (define pkg-authors (quote (robby)))))

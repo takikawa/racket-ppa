@@ -5,12 +5,13 @@
                      racket/pretty
                      racket/contract
                      mrlib/graph
+                     data/enumerate
                      (except-in 2htdp/image make-pen text)
                      (only-in pict pict? text dc-for-text-size text-style/c
                               vc-append hbl-append vl-append)
                      redex))
 
-@(define redex-eval (make-base-eval '(require redex/reduction-semantics)))
+@(define redex-eval (make-base-eval '(require redex/reduction-semantics data/enumerate)))
 
 @title{Testing}
 
@@ -71,6 +72,11 @@ until one of the terms fails to satisfy the predicate (i.e., the
 predicate returns @racket[#f]). If that happens, then the test fails
 and a message is printed with the term that failed to satisfy the
 predicate.
+
+The procedure supplied after @racket[#:equiv] is always
+passed the result of reducing the expression as its first
+argument and (one of) the expected result(s) as its second
+argument.
 
 This test uses
 @racket[apply-reduction-relation*], so it does not terminate
@@ -389,6 +395,8 @@ Generates terms in a number of different ways:
                  (one where the @racket[x] comes from the first ellipses and one from the second)
                  but those two different ways produce the same term and so the enumerator
                  incorrectly produces @racket[(x x)].
+
+                 See also @racket[redex-enum].
                  
                  }
            @item{@racket[from-judgment-form]: Randomly picks a term that satisfies
@@ -469,6 +477,66 @@ repeating as necessary. The optional keyword argument @racket[retries-expr]
 @racket[generate-term] is unable to produce a satisfying term after 
 @racket[retries-expr] attempts, it raises an exception recognized by
 @racket[exn:fail:redex:generation-failure?].
+}
+
+@defform[(redex-enum language @#,ttpattern)]{
+
+ Constructs an
+ @tech[#:doc '(lib "data/scribblings/data.scrbl")]{
+  enumeration} that produces terms that match the given
+ pattern, or @racket[#f] if it cannot build an
+ enumeration (which happens if the given pattern contains
+ side-conditions).
+
+ It constructs a @tech[#:doc '(lib "data/scribblings/data.scrbl")]{two-way enumeration}
+ only in some cases. The pattern must be unambiguous and there are other technical
+ shortcomings of the implementation as well that cause the result
+ to be a @tech[#:doc '(lib "data/scribblings/data.scrbl")]{one-way enumeration} in
+ some situations.
+
+ @examples[#:eval redex-eval
+           (define-language L
+             (e ::= (e e) x (λ (x) e))
+             (x ::= variable-not-otherwise-mentioned))
+           (eval:check (from-nat (redex-enum L e) 3886654839907963757723234276487685940)
+                       '(λ (f) (f (f (f x)))))
+           (from-nat (redex-enum L e) 3886654839907963757723234276487685942)
+           (from-nat (redex-enum L e) 3886654839907963757723234276487685945)
+           (to-nat (redex-enum L e)
+                   (term (λ (f) ((λ (x) (f (x x)))
+                                 (λ (x) (f (x x)))))))]
+}
+
+@defform[(redex-index language @#,ttpattern @#,tttterm)]{
+ Computes the index for an occurrence of the given term
+ in the enumerator corresponding to the given pattern or
+ returns @racket[#f] if there is no enumerator.
+
+ This is useful when the pattern is ambiguous as you might still
+ learn of an index that corresponds to the term even though
+ the enumeration that @racket[redex-enum] produces is a
+ @tech[#:doc '(lib "data/scribblings/data.scrbl")]{one-way enumeration}.
+
+ @examples[#:eval redex-eval
+           (define-language L
+             (e ::= (e e) x (λ (x) e))
+             (x ::= variable-not-otherwise-mentioned))
+
+           (redex-index L e
+                        (term (λ (f) ((λ (x) (f (x x)))
+                                      (λ (x) (f (x x)))))))
+
+           (define-language L
+             (code:comment "e is an ambiguous non-terminal")
+             (code:comment "because there are multiple ways to")
+             (code:comment "parse (cons (λ (x) x) (λ (x) x))")
+             (e ::= (e e) x (cons e e) v)
+             (v ::= (cons v v) (λ (x) e))
+             (x ::= variable-not-otherwise-mentioned))
+
+           (redex-index L e
+                        (term ((λ (x) (x x))
+                               (λ (x) (x x)))))]
 }
 
 @defform/subs[(redex-check template property-expr kw-arg ...)

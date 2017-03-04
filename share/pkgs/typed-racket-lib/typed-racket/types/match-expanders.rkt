@@ -1,58 +1,111 @@
 #lang racket/base
 
-
-(require "../utils/utils.rkt")
-
-(require (rep type-rep rep-utils)
+(require "../utils/utils.rkt"
+         (rep type-rep values-rep rep-utils)
          racket/match
-         (types resolve)
-         (contract-req)
+         syntax/parse/define
          racket/set
+         (types resolve base-abbrev)
          (for-syntax racket/base syntax/parse))
 
 (provide Listof: List: MListof: AnyPoly: AnyPoly-names: Function/arrs:
-         PredicateProp:)
+         SimpleListof: SimpleMListof:
+         PredicateProp:
+         Val-able:)
 
+
+;; some types used to be represented by a Value rep,
+;; but are now represented by a Base rep. This function
+;; helps us recover the singleton values for those types.
+(define (Base->val? b)
+  (match b
+    [(== -Null) (box-immutable '())]
+    [(== -Void) (box-immutable (void))]
+    [(== -True) (box-immutable #t)]
+    [(== -False) (box-immutable #f)]
+    [(== -Zero) (box-immutable 0)]
+    [(== -One) (box-immutable 1)]
+    [_ #f]))
+
+(define-match-expander Val-able:
+  (lambda (stx)
+    (syntax-parse stx
+      [(_ pat)
+       (syntax/loc stx
+         (or (Value: pat)
+             (app Base->val? (box pat))))])))
 
 (define-match-expander Listof:
   (lambda (stx)
     (syntax-parse stx
-      [(_ elem-pat (~optional var-pat #:defaults ([var-pat #'var])))
-       ;; Note: in practice it's unlikely that the second pattern will ever come up
-       ;;       because the sequence number for '() will be low and the union will
-       ;;       be sorted by sequence number. As a paranoid precaution, however,
-       ;;       we will match against both patterns here.
-       (syntax/loc stx (or (Mu: var-pat (Union: (list (Value: '()) (Pair: elem-pat (F: var-pat)))))
-                           (Mu: var-pat (Union: (list (Pair: elem-pat (F: var-pat)) (Value: '()))))))])))
+      [(_ elem-pat)
+       (syntax/loc stx
+         (app Listof? (? Type? elem-pat)))])))
+
+(define-match-expander SimpleListof:
+  (lambda (stx)
+    (syntax-parse stx
+      [(_ elem-pat)
+       (syntax/loc stx
+         (app (λ (t) (Listof? t #t)) (? Type? elem-pat)))])))
+
+
+(define-simple-macro (make-Listof-pred listof-pred?:id pair-matcher:id)
+  (define (listof-pred? t [simple? #f])
+    (match t
+      [(Mu-unsafe:
+        (Union: (== -Null)
+                (list (pair-matcher elem-t (B: 0)))))
+       (define elem-t* (instantiate-raw-type t elem-t))
+       (cond
+         [simple? (and (equal? elem-t elem-t*) elem-t)]
+         [else elem-t*])]
+      [(Union: (== -Null) (list (pair-matcher hd-t tl-t)))
+       (cond
+         [(listof-pred? tl-t)
+          => (λ (lst-t) (and (equal? hd-t lst-t) hd-t))]
+         [else #f])]
+      [_ #f])))
+
+(make-Listof-pred Listof? Pair:)
+(make-Listof-pred MListof? MPair:)
+
+
 
 (define-match-expander List:
   (lambda (stx)
     (syntax-parse stx
       [(_ elem-pats)
-       #'(? Type? (app untuple (? values elem-pats) (Value: '())))]
+       #'(? Type? (app untuple (? values elem-pats) (== -Null)))]
       [(_ elem-pats #:tail tail-pat)
        #'(? Type? (app untuple (? values elem-pats) tail-pat))])))
-
-;; Type/c -> (or/c (values/c #f #f) (values/c (listof Type/c) Type/c)))
-;; Returns the prefix of types that are consed on to the last type (a non finite-pair type).
-;; The last type may contain pairs if it is a list type.
-(define (untuple t)
-  (let loop ((t t) (seen (set)))
-    (if (not (set-member? seen (Type-seq t)))
-        (match (resolve t)
-          [(Pair: a b)
-           (define-values (elems tail) (loop b (set-add seen (Type-seq t))))
-           (values (cons a elems) tail)]
-          [_ (values null t)])
-        (values null t))))
 
 (define-match-expander MListof:
   (lambda (stx)
     (syntax-parse stx
-      [(_ elem-pat (~optional var-pat #:defaults ([var-pat #'var])))
-       ;; see note above
-       #'(or (Mu: var-pat (Union: (list (Value: '()) (MPair: elem-pat (F: var-pat)))))
-             (Mu: var-pat (Union: (list (MPair: elem-pat (F: var-pat)) (Value: '())))))])))
+      [(_ elem-pat)
+       (syntax/loc stx (app MListof? (? Type? elem-pat)))])))
+
+(define-match-expander SimpleMListof:
+  (lambda (stx)
+    (syntax-parse stx
+      [(_ elem-pat)
+       (syntax/loc stx (app (λ (t) (MListof? t #t)) (? Type? elem-pat)))])))
+
+
+;; Type? -> (or/c (values/c #f #f) (values/c (listof Type?) Type?)))
+;; Returns the prefix of types that are consed on to the last type (a non finite-pair type).
+;; The last type may contain pairs if it is a list type.
+(define (untuple t)
+  (let loop ([t t]
+             [seen (set)])
+    (if (not (set-member? seen t))
+        (match (resolve t)
+          [(Pair: a b)
+           (define-values (elems tail) (loop b (set-add seen t)))
+           (values (cons a elems) tail)]
+          [_ (values null t)])
+        (values null t))))
 
 (define (unpoly t)
   (match t

@@ -23,3 +23,26 @@
   (-> syntax? void?)]
  [expand-module/step
   (-> module-path? void?)])
+
+(module+ main
+  (require racket/cmdline
+           raco/command-name)
+  (define mode 'auto)
+  (command-line
+   #:program (short-program+command-name)
+   #:once-any
+   [("-f" "--file") "Interpret arguments as file-paths"
+    (set! mode 'file)]
+   [("-m" "--module-path") "Interpret arguments as module-paths"
+    (set! mode 'module-path)]
+   #:args (module-to-expand)
+   (let ()
+     (define (->modpath x)
+       (case mode
+         [(auto)
+          (if (file-exists? x)
+              `(file ,x)
+              (read (open-input-string x)))]
+         [(file) `(file ,x)]
+         [else (read (open-input-string x))]))
+     (expand-module/step (->modpath module-to-expand)))))

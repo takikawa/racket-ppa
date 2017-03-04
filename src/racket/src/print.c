@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2016 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -651,7 +651,7 @@ static int check_cycles(Scheme_Object *obj, int for_write, Scheme_Hash_Table *ht
     /* got here => printable */
     Scheme_Hash_Table *t;
     Scheme_Object **keys, **vals, *val, *key;
-    int i;
+    int i, size;
 
     if (SCHEME_NP_CHAPERONEP(obj))
       t = (Scheme_Hash_Table *)SCHEME_CHAPERONE_VAL(obj);
@@ -660,8 +660,9 @@ static int check_cycles(Scheme_Object *obj, int for_write, Scheme_Hash_Table *ht
 
     keys = t->keys;
     vals = t->vals;
+    size = t->size;
     res = 0;
-    for (i = 0; i < t->size; i++) {
+    for (i = 0; i < size; i++) {
       if (vals[i]) {
         key = keys[i];
         if (!SAME_OBJ((Scheme_Object *)t, obj))
@@ -928,7 +929,7 @@ static void setup_graph_table(Scheme_Object *obj, int for_write, Scheme_Hash_Tab
   } else if (pp && SCHEME_CHAPERONE_HASHTPx(obj)) { /* got here => printable */
     Scheme_Hash_Table *t;
     Scheme_Object **keys, **vals, *val, *key;
-    int i;
+    int i, size;
 
     if (SCHEME_NP_CHAPERONEP(obj))
       t = (Scheme_Hash_Table *)SCHEME_CHAPERONE_VAL(obj);
@@ -937,7 +938,8 @@ static void setup_graph_table(Scheme_Object *obj, int for_write, Scheme_Hash_Tab
 
     keys = t->keys;
     vals = t->vals;
-    for (i = 0; i < t->size; i++) {
+    size = t->size;
+    for (i = 0; i < size; i++) {
       if (vals[i]) {
         key = keys[i];
         if (!SAME_OBJ((Scheme_Object *)t, obj))
@@ -1235,7 +1237,8 @@ static void print_this_string(PrintParams *pp, const char *str, int offset, int 
     memcpy(pp->print_buffer, oldstr, pp->print_position);
   }
 
-  memcpy(pp->print_buffer + pp->print_position, str + offset, len);
+  if (len)
+    memcpy(pp->print_buffer + pp->print_position, str + offset, len);
   pp->print_position += len;
   pp->print_offset += len;
 
@@ -2359,7 +2362,7 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
       Scheme_Hash_Table *t;
       Scheme_Hash_Tree *tr;
       Scheme_Object **keys, **vals, *val, *key, *orig, **sorted_keys;
-      intptr_t i, size, count;
+      intptr_t i, size, count, vals_size;
       int did_one = 0;
       mzlonglong pos;
 
@@ -2416,10 +2419,12 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
         keys = t->keys;
         vals = t->vals;
         size = t->size;
+        vals_size = size;
         count = t->count;
       } else {
         keys = NULL;
         vals = NULL;
+        vals_size = 0;
         size = tr->count;
         count = size;
       }
@@ -2450,7 +2455,7 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
             if (!SAME_OBJ(obj, orig))
               val = scheme_chaperone_hash_traversal_get(orig, key, &key);
           } else {
-            if (i < t->size) {
+            if (i < vals_size) {
               val = vals[i];
               key = keys[i];
               if (!SAME_OBJ(obj, orig))
@@ -4144,7 +4149,8 @@ void scheme_set_type_printer(Scheme_Type stype, Scheme_Type_Printer printer)
     Scheme_Type_Printer *naya;
     naya = MALLOC_N(Scheme_Type_Printer, stype + 10);
     memset(naya, 0, sizeof(Scheme_Type_Printer) * (stype + 10));
-    memcpy(naya, printers, sizeof(Scheme_Type_Printer) * printers_count);
+    if (printers_count)
+      memcpy(naya, printers, sizeof(Scheme_Type_Printer) * printers_count);
     printers_count = stype + 10;
     printers = naya;
   }

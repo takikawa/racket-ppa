@@ -289,7 +289,7 @@ todo:
                (define ht (make-hash))
                (for ([e (in-list excepts)])
                  (hash-set! ht e #t))
-               (define (an-excepted-value? x) (hash-ref ht #f))
+               (define (an-excepted-value? x) (hash-ref ht x #f))
                an-excepted-value?]))
           (and/c (not/c an-excepted-value/c)
                  orig-ctc)]
@@ -1083,7 +1083,7 @@ todo:
                     (recursive-contract
                      (enum-contract
                       (force promise/e))
-                     #:flat)])
+                     #:flat #:extra-delay)])
                thunk/e-ctc)
              (let ([thunk/e-ctc (recursive-contract
                                  (enum-contract

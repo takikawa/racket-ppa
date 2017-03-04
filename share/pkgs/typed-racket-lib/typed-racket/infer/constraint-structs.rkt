@@ -6,7 +6,7 @@
 
 ;; S, T types
 ;; represents S <: X <: T (see "Local Type Inference" pg. 12)
-(define-struct/cond-contract c ([S Type/c] [T Type/c]) #:transparent)
+(define-struct/cond-contract c ([S Type?] [T Type?]) #:transparent)
 
 ;; fixed : Listof[c]
 ;; rest : option[c]
@@ -37,11 +37,14 @@
 ;; don't want to rule them out too early
 (define-struct/cond-contract cset ([maps (listof (cons/c (hash/c symbol? c? #:immutable #t) dmap?))]) #:transparent)
 
+(define no-cset (make-cset '()))
+
 (provide-for-cond-contract dcon/c)
 (provide
-  (struct-out cset)
-  (struct-out dmap)
-  (struct-out dcon)
-  (struct-out dcon-dotted)
-  (struct-out dcon-exact)
-  (struct-out c))
+ no-cset
+ (struct-out cset)
+ (struct-out dmap)
+ (struct-out dcon)
+ (struct-out dcon-dotted)
+ (struct-out dcon-exact)
+ (struct-out c))

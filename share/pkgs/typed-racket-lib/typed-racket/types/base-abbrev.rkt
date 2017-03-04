@@ -6,7 +6,10 @@
 ;; extends it with more types and type abbreviations.
 
 (require "../utils/utils.rkt"
-         (rep type-rep prop-rep object-rep rep-utils)
+         "../rep/type-rep.rkt"
+         "../rep/base-types.rkt"
+         "../rep/numeric-base-types.rkt"
+         (rep prop-rep object-rep values-rep rep-utils)
          (env mvar-env)
          racket/match racket/list (prefix-in c: (contract-req))
          (for-syntax racket/base syntax/parse racket/list)
@@ -14,46 +17,34 @@
          (for-template racket/base))
 
 (provide (all-defined-out)
+         -is-type
+         -not-type
+         -id-path
+         (all-from-out "../rep/type-rep.rkt"
+                       "../rep/base-types.rkt"
+                       "../rep/numeric-base-types.rkt")
          (rename-out [make-Listof -lst]
                      [make-MListof -mlst]))
 
-;; This table maps types (or really, the sequence number of the type)
-;; to identifiers that are those types. This allows us to avoid
-;; reconstructing the type when using it from its marshaled
-;; representation.  The table is referenced in env/init-env.rkt
-;;
-;; For example, instead of marshalling a big union for `Integer`, we
-;; simply emit `-Integer`, which evaluates to the right type.
-(define predefined-type-table (make-hasheq))
-(define-syntax-rule (declare-predefined-type! id)
-  (hash-set! predefined-type-table (Rep-seq id) #'id))
-(provide predefined-type-table)
-(define-syntax-rule (define/decl id e)
-  (begin (define id e)
-	 (declare-predefined-type! id)))
+(define-syntax (rebuild stx)
+  (syntax-case stx ()
+    [(_ mk args ...)
+     (with-syntax ([(t ...) (generate-temporaries #'(args ...))])
+       (syntax/loc stx
+         (let ([t args] ...)
+           (if (or (Bottom? t) ...)
+               -Bottom
+               (mk t ...)))))]))
 
-;; Top and error types
-(define/decl Univ (make-Univ))
-(define/decl -Bottom (make-Union null))
-(define/decl Err (make-Error))
 
-(define/decl -False (make-Value #f))
-(define/decl -True (make-Value #t))
+(define/decl -Boolean (Un -False -True))
 
 (define -val make-Value)
+(define/decl -Null (-val null))
 
 ;; Char type and List type (needed because of how sequences are checked in subtype)
-(define/decl -Char (make-Base 'Char #'char? char? #f))
-(define/decl -Null (-val null))
-(define (make-Listof elem) (-mu list-rec (simple-Un -Null (make-Pair elem list-rec))))
-(define (make-MListof elem) (-mu list-rec (simple-Un -Null (make-MPair elem list-rec))))
-
-;; Needed for evt checking in subtype.rkt
-(define/decl -Symbol (make-Base 'Symbol #'symbol? symbol? #f))
-(define/decl -String (make-Base 'String #'string? string? #f))
-
-;; Void is needed for Params
-(define/decl -Void (make-Base 'Void #'void? void? #f))
+(define (make-Listof elem) (-mu list-rec (Un -Null (make-Pair elem list-rec))))
+(define (make-MListof elem) (-mu list-rec (Un -Null (make-MPair elem list-rec))))
 
 ;; -Tuple Type is needed by substitute for ListDots
 (define -pair make-Pair)
@@ -63,32 +54,6 @@
   (-Tuple* l -Null))
 (define (-Tuple* l b)
   (foldr -pair b l))
-
-;; Simple union type constructor, does not check for overlaps
-;; Normalizes representation by sorting types.
-;; Type * -> Type
-;; The input types can be union types, but should not have a complicated
-;; overlap relationship.
-(define simple-Un
-  (let ()
-    ;; List[Type] -> Type
-    ;; Argument types should not overlap or be union types
-    (define (make-union* types)
-      (match types
-        [(list t) t]
-        [_ (make-Union types)]))
-
-    ;; Type -> List[Type]
-    (define (flat t)
-      (match t
-        [(Union: es) es]
-        [_ (list t)]))
-
-    (case-lambda
-      [() -Bottom]
-      [(t) t]
-      [args
-       (make-union* (remove-dups (sort (append-map flat args) type<?)))])))
 
 ;; Recursive types
 (define-syntax -v
@@ -103,7 +68,7 @@
 
 ;; Results
 (define/cond-contract (-result t [pset -tt-propset] [o -empty-obj])
-  (c:->* (Type/c) (PropSet? Object?) Result?)
+  (c:->* (Type?) (PropSet? OptObject?) Result?)
   (cond
     [(or (equal? t -Bottom) (equal? pset -ff-propset))
      (make-Result -Bottom -ff-propset o)]
@@ -111,21 +76,11 @@
      (make-Result t pset o)]))
 
 ;; Propositions
-(define/decl -tt (make-TrueProp))
-(define/decl -ff (make-FalseProp))
 (define/decl -tt-propset (make-PropSet -tt -tt))
 (define/decl -ff-propset (make-PropSet -ff -ff))
-(define/decl -empty-obj (make-Empty))
-(define (-id-path id)
-  (cond
-    [(identifier? id)
-     (if (is-var-mutated? id)
-         -empty-obj
-         (make-Path null id))]
-    [else
-     (make-Path null id)]))
+
 (define (-arg-path arg [depth 0])
-  (make-Path null (list depth arg)))
+  (make-Path null (cons depth arg)))
 (define (-acc-path path-elems o)
   (match o
     [(Empty:) -empty-obj]
@@ -134,41 +89,6 @@
 (define/cond-contract (-PS + -)
   (c:-> Prop? Prop? PropSet?)
   (make-PropSet + -))
-
-;; Abbreviation for props
-;; `i` can be an integer or name-ref/c for backwards compatibility
-;; FIXME: Make all callers pass in an object and remove backwards compatibility
-(define/cond-contract (-is-type i t)
-  (c:-> (c:or/c integer? name-ref/c Object?) Type/c Prop?)
-  (define o
-    (cond
-      [(Object? i) i]
-      [(integer? i) (make-Path null (list 0 i))]
-      [(list? i) (make-Path null i)]
-      [else (-id-path i)]))
-  (cond
-    [(Empty? o) -tt]
-    [(equal? Univ t) -tt]
-    [(equal? -Bottom t) -ff]
-    [else (make-TypeProp o t)]))
-
-
-;; Abbreviation for not props
-;; `i` can be an integer or name-ref/c for backwards compatibility
-;; FIXME: Make all callers pass in an object and remove backwards compatibility
-(define/cond-contract (-not-type i t)
-  (c:-> (c:or/c integer? name-ref/c Object?) Type/c Prop?)
-  (define o
-    (cond
-      [(Object? i) i]
-      [(integer? i) (make-Path null (list 0 i))]
-      [(list? i) (make-Path null i)]
-      [else (-id-path i)]))
-  (cond
-    [(Empty? o) -tt]
-    [(equal? -Bottom t) -tt]
-    [(equal? Univ t) -ff]
-    [else (make-NotTypeProp o t)]))
 
 
 ;; A Type that corresponds to the any contract for the
@@ -180,14 +100,14 @@
 (define/cond-contract (make-arr* dom rng
                                  #:rest [rest #f] #:drest [drest #f] #:kws [kws null]
                                  #:props [props -tt-propset] #:object [obj -empty-obj])
-  (c:->* ((c:listof Type/c) (c:or/c SomeValues/c Type/c))
-         (#:rest (c:or/c #f Type/c)
-          #:drest (c:or/c #f (c:cons/c Type/c symbol?))
+  (c:->* ((c:listof Type?) (c:or/c SomeValues? Type?))
+         (#:rest (c:or/c #f Type?)
+          #:drest (c:or/c #f (c:cons/c Type? symbol?))
           #:kws (c:listof Keyword?)
           #:props PropSet?
-          #:object Object?)
+          #:object OptObject?)
          arr?)
-  (make-arr dom (if (Type/c? rng)
+  (make-arr dom (if (Type? rng)
                     (make-Values (list (-result rng props obj)))
                     rng)
             rest drest (sort #:key Keyword-kw kws keyword<?)))
@@ -197,44 +117,55 @@
     (pattern x:id #:fail-unless (eq? ': (syntax-e #'x)) #f))
   (syntax-parse stx
     [(_ dom rng)
-     #'(make-Function (list (make-arr* dom rng)))]
+     (syntax/loc stx
+       (make-Function (list (make-arr* dom rng))))]
     [(_ dom rst rng)
-     #'(make-Function (list (make-arr* dom rng #:rest rst)))]
+     (syntax/loc stx
+       (make-Function (list (make-arr* dom rng #:rest rst))))]
     [(_ dom rng :c props)
-     #'(make-Function (list (make-arr* dom rng #:props props)))]
+     (syntax/loc stx
+       (make-Function (list (make-arr* dom rng #:props props))))]
     [(_ dom rng _:c props _:c object)
-     #'(make-Function (list (make-arr* dom rng #:props props #:object object)))]
+     (syntax/loc stx
+       (make-Function (list (make-arr* dom rng #:props props #:object object))))]
     [(_ dom rst rng _:c props)
-     #'(make-Function (list (make-arr* dom rng #:rest rst #:props props)))]
+     (syntax/loc stx
+       (make-Function (list (make-arr* dom rng #:rest rst #:props props))))]
     [(_ dom rst rng _:c props : object)
-     #'(make-Function (list (make-arr* dom rng #:rest rst #:props props #:object object)))]))
+     (syntax/loc stx
+       (make-Function (list (make-arr* dom rng #:rest rst #:props props #:object object))))]))
 
 (define-syntax (-> stx)
   (define-syntax-class c
     (pattern x:id #:fail-unless (eq? ': (syntax-e #'x)) #f))
   (syntax-parse stx
     [(_ dom ... rng _:c props _:c objects)
-     #'(->* (list dom ...) rng : props : objects)]
+     (syntax/loc stx
+       (->* (list dom ...) rng : props : objects))]
     [(_ dom ... rng :c props)
-     #'(->* (list dom ...) rng : props)]
+     (syntax/loc stx
+       (->* (list dom ...) rng : props))]
     [(_ dom ... rng)
-     #'(->* (list dom ...) rng)]))
+     (syntax/loc stx
+       (->* (list dom ...) rng))]))
 
-(define-syntax ->...
-  (syntax-rules (:)
-    [(_ dom rng)
-     (->* dom rng)]
+(define-syntax (->... stx)
+  (syntax-parse stx
+    [(_ dom rng) (syntax/loc stx (->* dom rng))]
     [(_ dom (dty dbound) rng)
-     (make-Function (list (make-arr* dom rng #:drest (cons dty 'dbound))))]
-    [(_ dom rng : props)
-     (->* dom rng : props)]
-    [(_ dom (dty dbound) rng : props)
-     (make-Function (list (make-arr* dom rng #:drest (cons dty 'dbound) #:props props)))]))
+     (syntax/loc stx
+       (make-Function (list (make-arr* dom rng #:drest (cons dty 'dbound)))))]
+    [(_ dom rng (~datum :) props)
+     (syntax/loc stx
+       (->* dom rng (~datum :) props))]
+    [(_ dom (dty dbound) rng (~datum :) props)
+     (syntax/loc stx
+       (make-Function (list (make-arr* dom rng #:drest (cons dty 'dbound) #:props props))))]))
 
 (define (simple-> doms rng)
   (->* doms rng))
 
-(define (->acc dom rng path #:var [var (list 0 0)])
+(define (->acc dom rng path #:var [var (cons 0 0)])
   (define obj (-acc-path path (-id-path var)))
   (make-Function
    (list (make-arr* dom rng
@@ -248,53 +179,57 @@
       [(Function: as) as]))
   (make-Function (apply append (map funty-arities args))))
 
-(define-syntax cl->
-  (syntax-parser
-   [(_ [(dom ...) rng] ...)
-    #'(cl->* (dom ... . -> . rng) ...)]))
+(define-syntax (cl-> stx)
+  (syntax-parse stx
+    [(_ [(dom ...) rng] ...)
+     (syntax/loc stx
+       (cl->* (dom ... . -> . rng) ...))]))
 
 (define-syntax (->key stx)
   (syntax-parse stx
-                [(_ ty:expr ... (~seq k:keyword kty:expr opt:boolean) ... rng)
-                 #'(make-Function
-                    (list
-                     (make-arr* (list ty ...)
-                                rng
-                                #:kws (sort #:key (match-lambda [(Keyword: kw _ _) kw])
-                                            (list (make-Keyword 'k kty opt) ...)
-                                            keyword<?))))]))
+    [(_ ty:expr ... (~seq k:keyword kty:expr opt:boolean) ... rng)
+     (syntax/loc stx
+       (make-Function
+        (list
+         (make-arr* (list ty ...)
+                    rng
+                    #:kws (sort #:key (match-lambda [(Keyword: kw _ _) kw])
+                                (list (make-Keyword 'k kty opt) ...)
+                                keyword<?)))))]))
 
 (define-syntax (->optkey stx)
   (syntax-parse stx
     [(_ ty:expr ... [oty:expr ...] #:rest rst:expr (~seq k:keyword kty:expr opt:boolean) ... rng)
      (let ([l (syntax->list #'(oty ...))])
        (with-syntax ([((extra ...) ...)
-		      (for/list ([i (in-range (add1 (length l)))])
-				(take l i))]
-		     [(rsts ...) (for/list ([i (in-range (add1 (length l)))]) #'rst)])
-		    #'(make-Function
-		       (list
-			(make-arr* (list ty ... extra ...)
-				   rng
-				   #:rest rsts
-				   #:kws (sort #:key (match-lambda [(Keyword: kw _ _) kw])
-					       (list (make-Keyword 'k kty opt) ...)
-					       keyword<?))
-			...))))]
+                      (for/list ([i (in-range (add1 (length l)))])
+                        (take l i))]
+                     [(rsts ...) (for/list ([i (in-range (add1 (length l)))]) #'rst)])
+         (syntax/loc stx
+           (make-Function
+            (list
+             (make-arr* (list ty ... extra ...)
+                        rng
+                        #:rest rsts
+                        #:kws (sort #:key (match-lambda [(Keyword: kw _ _) kw])
+                                    (list (make-Keyword 'k kty opt) ...)
+                                    keyword<?))
+             ...)))))]
     [(_ ty:expr ... [oty:expr ...] (~seq k:keyword kty:expr opt:boolean) ... rng)
      (let ([l (syntax->list #'(oty ...))])
        (with-syntax ([((extra ...) ...)
-		      (for/list ([i (in-range (add1 (length l)))])
-				(take l i))])
-		    #'(make-Function
-		       (list
-			(make-arr* (list ty ... extra ...)
-				   rng
-				   #:rest #f
-				   #:kws (sort #:key (match-lambda [(Keyword: kw _ _) kw])
-					       (list (make-Keyword 'k kty opt) ...)
-					       keyword<?))
-			...))))]))
+                      (for/list ([i (in-range (add1 (length l)))])
+                        (take l i))])
+         (syntax/loc stx
+           (make-Function
+            (list
+             (make-arr* (list ty ... extra ...)
+                        rng
+                        #:rest #f
+                        #:kws (sort #:key (match-lambda [(Keyword: kw _ _) kw])
+                                    (list (make-Keyword 'k kty opt) ...)
+                                    keyword<?))
+             ...)))))]))
 
 (define (make-arr-dots dom rng dty dbound)
   (make-arr* dom rng #:drest (cons dty dbound)))

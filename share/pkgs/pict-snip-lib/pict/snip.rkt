@@ -19,7 +19,7 @@
       (set-box/f! wb (pict-width pict))
       (set-box/f! hb (pict-height pict))
       (set-box/f! db (pict-descent pict))
-      (set-box/f! sb (pict-ascent pict))
+      (set-box/f! sb 0)
       (set-box/f! lb 0)
       (set-box/f! rb 0))
     (define/override (draw dc x y left top right bottom dx dy draw-caret)
@@ -58,7 +58,7 @@
          (super-new))))
 (send snip-class set-classname (~s '((lib "snip.rkt" "pict") (lib "snip-wxme.rkt" "pict"))))
 (send snip-class set-version 1)
-(define (set-box/f! b v) (when (box? b) (set-box! b v)))
+(define-syntax-rule (set-box/f! b-e v-e) (let ([b b-e]) (when (box? b) (set-box! b v-e))))
 (send (get-the-snip-class-list) add snip-class)
 
 (define reader

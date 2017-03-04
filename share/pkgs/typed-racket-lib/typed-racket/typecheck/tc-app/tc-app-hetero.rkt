@@ -4,9 +4,10 @@
          syntax/parse syntax/stx racket/match racket/sequence
          "signatures.rkt"
          "utils.rkt"
-         (types utils abbrev numeric-tower union resolve type-table generalize)
+         (types utils abbrev numeric-tower resolve type-table
+                generalize match-expanders)
          (typecheck signatures check-below)
-         (rep type-rep rep-utils)
+         (rep type-rep type-mask rep-utils)
          (for-label racket/unsafe/ops racket/base))
 
 (import tc-expr^ tc-app^ tc-literal^)
@@ -29,7 +30,7 @@
       (syntax-e #'i))]
    [_
     (match (tc-expr expr)
-     [(tc-result1: (Value: (? number? i))) i]
+     [(tc-result1: (Val-able: (? number? i))) i]
      [tc-results
        (check-below tc-results (ret -Integer))
        #f])]))
@@ -126,9 +127,9 @@
       ;; of the union that are vectors.  If there's only one of those,
       ;; we re-run this whole algorithm with that.  Otherwise, we treat
       ;; it like any other expected type.
-      [(tc-result1: (app resolve (Union: ts))) (=> continue)
+      [(tc-result1: (app resolve (Union: _ ts))) (=> continue)
        (define u-ts (for/list ([t (in-list ts)]
-                               #:when (eq? 'vector (Type-key t)))
+                               #:when (eq? mask:vector (mask t)))
                       t))
        (match u-ts
          [(list t0) (tc/app #'(#%plain-app . form) (ret t0))]

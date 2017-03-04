@@ -3,7 +3,8 @@
 ;; Static contracts for structural contracts.
 ;; Ex: list/sc, vectorof/sc
 
-(require "../structures.rkt"
+(require "../../utils/utils.rkt"
+         "../structures.rkt"
          "../constraints.rkt"
          racket/match
          (for-syntax racket/base racket/syntax syntax/stx syntax/parse)
@@ -74,7 +75,8 @@
                      (f a kind)))
              #:with ctc
                  #`(-> #,@(stx-map (lambda (_) #'static-contract?) #'(pos ...)) static-contract?)
-             #:with provides #'(provide (contract-out [name ctc]) matcher-name)]
+             #:with provides #'(begin (provide matcher-name)
+                                      (provide/cond-contract [name ctc]))]
     [pattern (name:id . rest:argument-description)
              #:with struct-name (generate-temporary #'name)
              #:with matcher-name (format-id #'name "~a:" #'name)
@@ -100,7 +102,8 @@
                      (f a 'rest.variance)))
              #:with ctc
                  #'(->* () #:rest (listof static-contract?) static-contract?)
-             #:with provides #'(provide (contract-out [name ctc]) matcher-name)]))
+             #:with provides #'(begin (provide matcher-name)
+                                      (provide/cond-contract [name ctc]))]))
 
 
 (define-syntax (combinator-struct stx)
@@ -108,32 +111,32 @@
     [(_ sc:static-combinator-form c:expr kind:contract-category-keyword)
      #'(begin
          (struct sc.struct-name combinator ()
-                 #:transparent
-                 #:methods gen:sc
-                   [(define sc-map sc.map)
-                    (define sc-traverse sc.traverse)
-                    (define (sc->contract v recur)
-                      (apply
-                        (sc.combinator2 (lambda (args) #`(c #,@args)))
-                        (map recur (combinator-args v))))
-                    (define (sc->constraints v recur)
-                      (merge-restricts* 'kind.category-stx (sc.->restricts v recur)))]
-                #:methods gen:equal+hash
-                  [(define (equal-proc a b recur)
-                     (and (recur (length (combinator-args a))
-                                 (length (combinator-args b)))
-                          (for/and ([sub-a (in-list (combinator-args a))]
-                                    [sub-b (in-list (combinator-args b))])
-                            (recur sub-a sub-b))))
-                   (define (hash-proc v recur)
-                     (+ (recur 'sc.name)
-                        (for/sum ((sub (in-list (combinator-args v))))
-                           (recur sub))))
-                   (define (hash2-proc v recur)
-                     (+ (recur 'sc.name)
-                        (for/sum ((sub (in-list (combinator-args v))))
-                           (recur sub))))]
-                 #:property prop:combinator-name (symbol->string 'sc.name))
+           #:transparent
+           #:methods gen:sc
+           [(define sc-map sc.map)
+            (define sc-traverse sc.traverse)
+            (define (sc->contract v recur)
+              (apply
+               (sc.combinator2 (lambda (args) #`(c #,@args)))
+               (map recur (combinator-args v))))
+            (define (sc->constraints v recur)
+              (merge-restricts* 'kind.category-stx (sc.->restricts v recur)))]
+           #:methods gen:equal+hash
+           [(define (equal-proc a b recur)
+              (and (eqv? (length (combinator-args a))
+                         (length (combinator-args b)))
+                   (for/and ([sub-a (in-list (combinator-args a))]
+                             [sub-b (in-list (combinator-args b))])
+                     (recur sub-a sub-b))))
+            (define (hash-proc v recur)
+              (for/fold ([hc (recur 'sc.name)])
+                        ([sub (in-list (combinator-args v))])
+                (bitwise-ior hc (recur sub))))
+            (define (hash2-proc v recur)
+              (for/fold ([hc (recur 'sc.name)])
+                        ([sub (in-list (combinator-args v))])
+                (bitwise-ior hc (recur sub))))]
+           #:property prop:combinator-name (symbol->string 'sc.name))
          sc.matcher
          sc.definition
          sc.provides)]))

@@ -366,8 +366,8 @@ Errortrace run-time support.}
 @defmodule[errortrace/stacktrace]{
 The errortrace collection also includes a
 @racketmodname[errortrace/stacktrace] library. It exports
-the @racket[stacktrace@] unit, its import signature
-@racket[stacktrace-imports^], and its export signature
+the @racket[stacktrace@] unit (plus a few generalized variants), its import signature
+@racket[stacktrace-imports^] (plus signatures for generalizations), and its export signature
 @racket[stacktrace^].}
 
 @defthing[stacktrace@ unit?]{
@@ -378,6 +378,20 @@ Imports @racket[stacktrace-imports^] and exports @racket[stacktrace^].}
 @defthing[stacktrace/annotator@ unit?]{
 
 Imports @racket[stacktrace/annotator-imports^] and exports @racket[stacktrace^].}
+
+
+@defthing[stacktrace/filter@ unit?]{
+
+Imports @racket[stacktrace-imports^] and @racket[stacktrace-filter^] and exports @racket[stacktrace^].
+
+@history[#:added "1.2"]}
+
+
+@defthing[stacktrace/annotator/filter@ unit?]{
+
+Imports @racket[stacktrace/annotator-imports^] and @racket[stacktrace-filter^] and exports @racket[stacktrace^].
+
+@history[#:added "1.2"]}
 
 
 @defsignature[stacktrace^ ()]{
@@ -550,6 +564,41 @@ Same as in @racket[stacktrace-imports^].}
 Same as @racket[stacktrace-imports^].}
 
 }
+
+
+@defsignature[stacktrace-filter^ ()]{
+
+The function defined for @racket[stacktrace-filter^] provides additional
+control over the expressions that are instrumented for debugging an
+profiling.
+
+@history[#:added "1.2"]
+
+@defproc[(should-annotate? [stx syntax?] [phase exact-nonnegative-integer?]) any/c]{
+
+Determines whether the @racketout[annotate] function from
+@racket[stacktrace/filter@] or @racket[stacktrace/annotator/filter@]
+adds debugging and/or test-coverage annotation to the immediate expression represented
+by @racket[stx]. Annotation is added only when
+@sigelem[stacktrace-filter^ should-annotate?] returns a true value, but
+subexpressions of @racket[stx] will be checked and potentially annotated
+independent of the result for @racket[stx].
+
+The default filter function used by @racket[stacktrace@] and
+@racket[stacktrace/annotator@] annotates an expression if it has a
+source location according to @racket[syntax-source].
+
+  When used via the @racketmodname[errortrace] meta-language
+  or when @racket[require]ing the @racketmodname[errortrace]
+  module or when using errortrace via the "Debugging" option
+  in DrRacket, the @racket[should-annotate?] function checks
+  to make sure that the syntax object has a source location
+  and has the
+  @tech[#:doc '(lib "scribblings/reference/reference.scrbl")]{
+   syntax property} @racket['errortrace:annotate].
+
+}}
+
 
 @section{Errortrace Key}
 @defmodule[errortrace/errortrace-key]

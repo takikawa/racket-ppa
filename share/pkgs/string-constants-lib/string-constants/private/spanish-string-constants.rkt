@@ -695,7 +695,7 @@
  ;(windows-executables-must-end-with-exe
  ; "El nombre de archivo \n\n  ~a\n\nes ilegal.  En Windows, los ejecutables deben tener terminación .exe.")
  ;(macosx-executables-must-end-with-app
- ; "El nombre de archivo\n\n  ~a\n\nes ilegal.  En MacOS X, los ejecutables deben tener terminación .app.")
+ ; "El nombre de archivo\n\n  ~a\n\nes ilegal.  En Mac OS, los ejecutables deben tener terminación .app.")
  (warning-directory-will-be-replaced
   "ADVERTENCIA: el directorio:\n\n  ~a\n\nserá reemplazado.  ¿Continuar?")
  

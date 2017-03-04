@@ -5,24 +5,44 @@
 ;;
 ;; See "Logical Types for Untyped Languages" pg.3
 
-(require "rep-utils.rkt" "free-variance.rkt" "prop-rep.rkt" "../utils/utils.rkt" (contract-req))
-(provide object-equal?)
+(require "../utils/utils.rkt"
+         racket/match
+         "rep-utils.rkt"
+         "core-rep.rkt"
+         "free-variance.rkt"
+         (env mvar-env)
+         (contract-req))
 
-(def-pathelem CarPE () [#:fold-rhs #:base])
-(def-pathelem CdrPE () [#:fold-rhs #:base])
-(def-pathelem SyntaxPE () [#:fold-rhs #:base])
-(def-pathelem ForcePE () [#:fold-rhs #:base])
-;; t is always a Name (can't put that into the contract b/c of circularity)
+(provide -id-path name-ref=?)
+
+(def-pathelem CarPE () [#:singleton -car])
+(def-pathelem CdrPE () [#:singleton -cdr])
+(def-pathelem SyntaxPE () [#:singleton -syntax-e])
+(def-pathelem ForcePE () [#:singleton -force])
+(def-pathelem FieldPE () [#:singleton -field])
+
 (def-pathelem StructPE ([t Type?] [idx natural-number/c])
-  [#:frees (λ (f) (f t))]
-  [#:fold-rhs (*StructPE (type-rec-id t) idx)])
-(def-pathelem FieldPE () [#:fold-rhs #:base])
+  [#:frees (f) (f t)]
+  [#:fmap (f) (make-StructPE (f t) idx)]
+  [#:for-each (f) (f t)])
 
-(def-object Empty () [#:fold-rhs #:base])
+(def-object Path ([elems (listof PathElem?)] [name name-ref/c])
+  [#:frees (f)  (combine-frees (map f elems))]
+  [#:fmap (f) (make-Path (map f elems) name)]
+  [#:for-each (f) (for-each f elems)]
+  [#:custom-constructor
+   (cond
+     [(identifier? name)
+      (if (is-var-mutated? name)
+          -empty-obj
+          (let ([name (normalize-id name)])
+            (intern-double-ref!
+             path-intern-table
+             name elems #:construct (make-Path elems name))))]
+     [else (intern-double-ref!
+            path-intern-table
+            name elems #:construct (make-Path elems name))])])
 
-(def-object Path ([p (listof PathElem?)] [v name-ref/c])
-  [#:intern (list (map Rep-seq p) (hash-name v))]
-  [#:frees (λ (f) (combine-frees (map f p)))]
-  [#:fold-rhs (*Path (map pathelem-rec-id p) v)])
+(define path-intern-table (make-weak-hash))
 
-(define (object-equal? o1 o2) (= (Rep-seq o1) (Rep-seq o2)))
+(define (-id-path name) (make-Path null name))

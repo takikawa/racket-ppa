@@ -14,8 +14,7 @@
                      math/base))
 
 @title{Enumerations}
-@defmodule[data/enumerate #:no-declare]
-@declare-exporting[data/enumerate data/enumerate/lib]
+@defmodule[data/enumerate/lib  #:link-target? #f #:no-declare]
 
 @(define the-eval (make-base-eval))
 @(the-eval '(require data/enumerate data/enumerate/lib
@@ -198,8 +197,20 @@ lambda calculus.
                      ((λ (x) (f (x x)))
                       (λ (x) (f (x x))))))]
 
+@section{Core Enumeration}
+@defmodule[data/enumerate]
 
-@section{Enumeration Properties}
+The @racketmodname[data/enumerate] library contains the core
+subset of the enumeration library; its exports are described
+in the sections
+@secref["sec:enum-prop"], @secref["sec:enum-query"],
+and @secref["sec:enum-construct"].
+
+There are more enumeration functions than
+just the core, provided by @racketmodname[data/enumerate/lib].
+
+@section[#:tag "sec:enum-prop"]{Enumeration Properties}
+@declare-exporting[data/enumerate data/enumerate/lib]
 
 In addition to the functions that form the bijection, an
 enumeration also has a contract, a count, and three boolean
@@ -253,7 +264,8 @@ printed, then the enumeration is not finite and is not one-way.
   Returns the @racket[contract?] that @racket[e] enumerates.
 }
 
-@section{Querying Enumerations}
+@section[#:tag "sec:enum-query"]{Querying Enumerations}
+@declare-exporting[data/enumerate data/enumerate/lib]
 
 The functions in this section exercise the enumeration,
 turning natural numbers back and forth to the values
@@ -302,7 +314,8 @@ that an enumeration enumerates.
               i)]
 }
 
-@section{Constructing Enumerations}
+@section[#:tag "sec:enum-construct"]{Constructing Enumerations}
+@declare-exporting[data/enumerate data/enumerate/lib]
 
 This section contains the fundamental operations for building
 enumerations.
@@ -577,13 +590,16 @@ An @tech{enumeration} of tuples of naturals with @racket[max] @racket[n] of leng
 
 
 @section{More Enumeration Operations}
-@defmodule[data/enumerate/lib]
+@defmodule[data/enumerate/lib #:no-declare]
 
-The @racket[data/enumerate/lib] extends @racket[data/enumerate] with a bunch of
-additional ways to build enumerations, some utility functions, and a bunch of pre-built
-enumerations.
+The @racketmodname[data/enumerate/lib] library extends the
+@racketmodname[data/enumerate] library with some higher-level
+enumerations and functions on enumerations. Its contents
+are described in the sections @secref["sec:enum-derived"],
+@secref["sec:enum-util"], and @secref["sec:enum-pre-built"].
 
-@subsection{More Enumeration Constructors}
+@section[#:tag "sec:enum-derived"]{Derived Enumeration Constructors}
+@declare-exporting[data/enumerate/lib]
 
 
 @defform*[[(cons/de [car-id car-enumeration-expr] 
@@ -1000,16 +1016,19 @@ as you go deeper into the sequence.
 
 @defproc[(hash-traverse/e [f (-> any/c enum?)]
                           [xs (hash/c any/c any/c)]
-                          [#:get-contract get-contract (-> any/c contract?)])
+                          [#:get-contract get-contract (-> any/c contract?)]
+                          [#:contract contract contract?])
          enum?]{
 
 Constructs an @tech{enumeration} that simultaneously enumerates each
 of the enumerations returned by @racket[f] applied to each value of
 @racket[xs].
 
-The @racket[get-contract] argument is applied to the keys in the
+If supplied, the @racket[get-contract] argument is applied to the keys in the
 hash and is expected to return the contract for the corresponding
-enumeration.
+enumeration. If the @racket[contract] argument is supplied, it is used
+directly as the contract for all of enumerations. One of the two arguments
+must be supplied.
 
 @examples[#:eval the-eval
 (define hash-traverse-1/e
@@ -1046,8 +1065,8 @@ is initialized to @racket['()].
 ]}
 
 
-@subsection{Enumeration Utility}
-
+@section[#:tag "sec:enum-util"]{Enumeration Utility}
+@declare-exporting[data/enumerate/lib]
 
 @defproc[(random-index [e enum?])
          exact-nonnegative-integer?]{
@@ -1068,7 +1087,8 @@ Returns a random index into @racket[e]. This works for
 ]}
 
 
-@subsection{Pre-built Enumerations}
+@section[#:tag "sec:enum-pre-built"]{Pre-built Enumerations}
+@declare-exporting[data/enumerate/lib]
 
 This section describes enumerations of some common Racket
 datatypes.

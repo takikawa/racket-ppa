@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2016 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -54,6 +54,8 @@
 # include <windows.h>
 #endif
 
+THREAD_LOCAL_DECL(uintptr_t scheme_os_thread_id);
+
 THREAD_LOCAL_DECL(static void **dgc_array);
 THREAD_LOCAL_DECL(static int *dgc_count);
 THREAD_LOCAL_DECL(static int dgc_size);
@@ -93,6 +95,10 @@ void **GC_variable_stack;
 #ifndef MZ_PRECISE_GC
 extern MZGC_DLLIMPORT void GC_register_late_disappearing_link(void **link, void *obj);
 extern MZGC_DLLIMPORT void GC_register_indirect_disappearing_link(void **link, void *obj);
+#endif
+
+#ifdef MZ_GC_BACKTRACE
+static void init_allocation_callback(void);
 #endif
 
 SHARED_OK static int use_registered_statics;
@@ -143,6 +149,9 @@ void scheme_set_stack_base(void *base, int no_auto_statics) XFORM_SKIP_PROC
   use_registered_statics = no_auto_statics;
 #if defined(MZ_PRECISE_GC)
   GC_report_out_of_memory = scheme_out_of_memory_abort;
+# ifdef MZ_GC_BACKTRACE
+  init_allocation_callback();
+# endif
 #endif
 }
 
@@ -312,6 +321,9 @@ int scheme_main_stack_setup(int no_auto_statics, Scheme_Nested_Main _main, void 
 {
   scheme_setup_thread_local_key_if_needed();
   scheme_init_os_thread();
+#ifdef MZ_USE_MZRT
+  scheme_init_glib_log_queue();
+#endif
   return do_main_stack_setup(no_auto_statics, _main, data);
 }
 
@@ -405,6 +417,9 @@ void scheme_init_os_thread_like(void *other) XFORM_SKIP_PROC
 void scheme_init_os_thread(void) XFORM_SKIP_PROC
 {
   scheme_init_os_thread_like(NULL);
+#ifdef MZ_USE_MZRT
+  scheme_os_thread_id = (uintptr_t)mz_proc_os_thread_self();
+#endif
 }
 
 void scheme_done_os_thread() XFORM_SKIP_PROC
@@ -417,6 +432,19 @@ void scheme_done_os_thread() XFORM_SKIP_PROC
   GC_detach_current_thread_exceptions_from_handler();
 # endif
 #endif
+}
+
+int scheme_is_place_main_os_thread() XFORM_SKIP_PROC
+{
+#if defined(IMPLEMENT_THREAD_LOCAL_VIA_PTHREADS) || defined(IMPLEMENT_THREAD_LOCAL_VIA_WIN_TLS)
+  if (!scheme_get_thread_local_variables())
+    return 0;
+#endif
+#ifdef MZ_USE_MZRT
+  if (scheme_os_thread_id != (uintptr_t)mz_proc_os_thread_self())
+    return 0;
+#endif
+  return 1;
 }
 
 /************************************************************************/
@@ -1962,6 +1990,24 @@ static int record_traced_and_print_new(void *p)
 
   return record_traced(p);
 }
+
+static void record_allocated_object(void *p, intptr_t size, int tagged, int atomic)
+{
+  if (tagged) {
+    Scheme_Type t = *(Scheme_Type *)p;
+    if (SAME_TYPE(t, scheme_structure_type)
+        || SAME_TYPE(t, scheme_proc_struct_type)) {
+      Scheme_Structure *s = (Scheme_Structure *)p;
+      s->stype->total_instance_count++;
+      s->stype->total_instance_sizes += size;
+    }
+  }
+}
+
+static void init_allocation_callback() {
+  GC_set_allocated_object_callback(record_allocated_object);
+}
+
 #endif
 
 #if MZ_PRECISE_GC
@@ -1973,9 +2019,10 @@ static void increment_found_counter(void *p)
 #endif
 
 #if MZ_PRECISE_GC_TRACE
-static void count_struct_instance(void *p) {
+static void count_struct_instance(void *p, int sz) {
   Scheme_Structure *s = (Scheme_Structure *)p;
-  s->stype->instance_count++;
+  s->stype->current_instance_count++;
+  s->stype->current_instance_sizes += sz;
 }
 #endif
 
@@ -2660,9 +2707,15 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
     scheme_console_printf("Begin Struct\n");
     while (SCHEME_PAIRP(cons_accum_result)) {
       Scheme_Struct_Type *stype = (Scheme_Struct_Type *)SCHEME_CAR(cons_accum_result);
-      if (stype->instance_count) {
-        scheme_console_printf(" %32.32s: %10" PRIdPTR "\n", SCHEME_SYM_VAL(stype->name), stype->instance_count);
-        stype->instance_count = 0;
+      if (stype->total_instance_count) {
+        scheme_console_printf(" %32.32s: %10" PRIdPTR " %10" PRIdPTR "   %10" PRIdPTR " %10" PRIdPTR "\n",
+                              SCHEME_SYM_VAL(stype->name),
+                              stype->current_instance_count,
+                              stype->current_instance_sizes,
+                              stype->total_instance_count,
+                              stype->total_instance_sizes);
+        stype->current_instance_count = 0;
+        stype->current_instance_sizes = 0;
       }
       cons_accum_result = SCHEME_CDR(cons_accum_result);
     }
@@ -2770,8 +2823,6 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
 
   return result;
 }
-
-
 
 #ifdef MEMORY_COUNTING_ON
 
@@ -3285,95 +3336,6 @@ intptr_t scheme_count_envbox(Scheme_Object *root, Scheme_Hash_Table *ht)
     return scheme_count_memory(SCHEME_ENVBOX_VAL(root), ht) + 4;
   else
     return 4;
-}
-
-#endif
-
-/**********************************************************************/
-
-#if RECORD_ALLOCATION_COUNTS
- 
-/* Allocation profiling --- prints allocated counts (not necessarily
-   still live) after every `NUM_ALLOCS_BEFORE_REPORT` structure and
-   closure allocations. Adjust that constant to match a test program.
-   Also, run with `racket -j` so that structure allocation is not
-   inlined, and don't use places. */
-
-#define NUM_ALLOCS_BEFORE_REPORT 100000
-
-static Scheme_Hash_Table *allocs;
-static int alloc_count;
-static int reporting;
-
-#include "../gc2/my_qsort.c"
-typedef struct alloc_count_result { int pos; int count; } alloc_count_result;
-
-static int smaller_alloc_count(const void *a, const void *b) {
-  return ((alloc_count_result*)a)->count - ((alloc_count_result*)b)->count;
-}
-
-void scheme_record_allocation(Scheme_Object *tag)
-{
-  Scheme_Object *c;
-  
-  if (reporting)
-    return;
-
-  alloc_count++;
-
-  if (!allocs) {
-    REGISTER_SO(allocs);
-    reporting++;
-    allocs = scheme_make_hash_table(SCHEME_hash_ptr);
-    --reporting;
-  }
-
-  c = scheme_hash_get(allocs, tag);
-  if (!c) c = scheme_make_integer(0);
-  scheme_hash_set(allocs, tag, scheme_make_integer(SCHEME_INT_VAL(c)+1));
-    
-  if (alloc_count == NUM_ALLOCS_BEFORE_REPORT) {
-    alloc_count_result *a;
-    int count = allocs->count;
-    int k = 0;
-    int i;
-    char *s;
-
-    reporting++;
-    
-    a = MALLOC_N_ATOMIC(alloc_count_result, count);
-    printf("\n");
-    for (i = allocs->size; i--; ) {
-      if (allocs->vals[i]) {
-        a[k].pos = i;
-        a[k].count = SCHEME_INT_VAL(allocs->vals[i]);
-        k++;
-      }
-    }
-    my_qsort(a, allocs->count, sizeof(alloc_count_result), smaller_alloc_count);
-    
-    for (i = 0; i < count; i++) {
-      tag = allocs->keys[a[i].pos];
-
-      if (SCHEME_INTP(tag)) {
-        s = scheme_get_type_name(SCHEME_INT_VAL(tag));
-      } else {
-        if (SAME_TYPE(SCHEME_TYPE(tag), scheme_lambda_type)
-            && ((Scheme_Lambda *)tag)->name)
-          tag = ((Scheme_Lambda*)tag)->name;
-        else if (SAME_TYPE(SCHEME_TYPE(tag), scheme_case_lambda_sequence_type)
-                 && ((Scheme_Case_Lambda *)tag)->name)
-          tag = ((Scheme_Case_Lambda*)tag)->name;
-      
-        s = scheme_write_to_string(tag, NULL);
-      }
-      
-      printf("%d %s\n", a[i].count, s);
-    }
-    
-    alloc_count = 0;
-    --reporting;
-  }
 }
 
 #endif

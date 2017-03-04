@@ -938,7 +938,7 @@ Whenever the system dispatches an event, the call to the handler is
  any captured continuation includes the invocation of the @tech{event
  dispatch handler}.
 
-For example, if a button callback raises an exception, than the abort
+For example, if a button callback raises an exception, then the abort
  performed by the default exception handler returns to the event-dispatch
  point, rather than terminating the program or escaping past an enclosing 
  @racket[(yield)]. If @racket[with-handlers] wraps a @racket[(yield)] that
@@ -1006,7 +1006,7 @@ sequence.
 
 @section[#:tag "display-resolution"]{Screen Resolution and Text Scaling}
 
-On Mac OS X, screen sizes are described to users in terms of drawing
+On Mac OS, screen sizes are described to users in terms of drawing
 units. A Retina display provides two pixels per drawing unit, while
 drawing units are used consistently for window sizes, child window
 positions, and canvas drawing. A ``point'' for font sizing is

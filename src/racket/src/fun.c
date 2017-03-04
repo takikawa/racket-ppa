@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2016 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -1889,7 +1889,16 @@ cert_with_specials(Scheme_Object *code,
     if (SCHEME_PAIRP(code))
       return v;
 
-    return scheme_datum_to_syntax(v, code, scheme_false, 0, 1);
+    v = scheme_datum_to_syntax(v, code, scheme_false, 0, 1);
+
+    if (scheme_syntax_is_original(v)
+        && !scheme_syntax_is_original(code)) {
+      /* Since we copied properties without scopes, we need to
+         explicitly remove originalness */
+      v = scheme_syntax_remove_original(v);
+    }
+
+    return v;
   } else if (SCHEME_STX_NULLP(code))
     return code;
 
@@ -5308,7 +5317,8 @@ static Scheme_Meta_Continuation *clone_meta_cont(Scheme_Meta_Continuation *mc,
       } else {
         Scheme_Cont_Mark *cp;
         cp = MALLOC_N(Scheme_Cont_Mark, naya->cont_mark_total);
-        memcpy(cp, mc->cont_mark_stack_copied, naya->cont_mark_total * sizeof(Scheme_Cont_Mark));
+        if (naya->cont_mark_total)
+          memcpy(cp, mc->cont_mark_stack_copied, naya->cont_mark_total * sizeof(Scheme_Cont_Mark));
         clear_cm_copy_caches(cp, naya->cont_mark_total);
         naya->cont_mark_stack_copied = cp;
         naya->cm_caches = 0;
@@ -9874,6 +9884,8 @@ static int is_day_before(SYSTEMTIME *a, SYSTEMTIME *b)
 
   if (a->wDay < doc)
     return 1;
+  if (a->wDay > doc)
+    return 0;
 
   dtxCOMP(wHour);
   dtxCOMP(wMinute);

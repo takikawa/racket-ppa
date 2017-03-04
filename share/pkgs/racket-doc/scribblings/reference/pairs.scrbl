@@ -898,6 +898,48 @@ The element at the specified index is @racket[value].
 @history[#:added "6.3"]{}
 }
 
+@defproc[(index-of [lst list?] [v any/c]
+                   [is-equal? (any/c any/c . -> . any/c) equal?])
+         (or/c exact-nonnegative-integer? #f)]{
+Like @racket[member], but returns the index of the first element found
+instead of the tail of the list.
+                          
+@mz-examples[#:eval list-eval
+  (index-of '(1 2 3 4) 3)]
+
+@history[#:added "6.7.0.3"]}
+
+@defproc[(index-where [lst list?] [proc (any/c . -> . any/c)])
+         (or/c exact-nonnegative-integer? #f)]{
+Like @racket[index-of] but with the predicate-searching behavior of
+@racket[memf].
+
+@mz-examples[#:eval list-eval
+  (index-where '(1 2 3 4) even?)]
+
+@history[#:added "6.7.0.3"]}
+
+@defproc[(indexes-of [lst list?] [v any/c]
+                     [is-equal? (any/c any/c . -> . any/c) equal?])
+         (listof exact-nonnegative-integer?)]{
+Like @racket[index-of], but returns the a list of all the indexes
+where the element occurs in the list instead of just the first one.
+                          
+@mz-examples[#:eval list-eval
+  (indexes-of '(1 2 1 2 1) 2)]
+
+@history[#:added "6.7.0.3"]}
+
+@defproc[(indexes-where [lst list?] [proc (any/c . -> . any/c)])
+         (listof exact-nonnegative-integer?)]{
+Like @racket[indexes-of] but with the predicate-searching behavior of
+@racket[index-where].
+
+@mz-examples[#:eval list-eval
+  (indexes-where '(1 2 3 4) even?)]
+
+@history[#:added "6.7.0.3"]}
+
 @defproc[(take [lst any/c] [pos exact-nonnegative-integer?])
          list?]{
 
@@ -1222,12 +1264,19 @@ predecessor until @racket[end] (excluded) is reached.  If no starting
 point is provided, @racket[0] is used. If no @racket[step] argument is
 provided, @racket[1] is used.
 
+Like @racket[in-range], a @racket[range] application can provide better
+performance when it appears directly in a @racket[for] clause.
+
 @mz-examples[#:eval list-eval
   (range 10)
   (range 10 20)
   (range 20 40 2)
   (range 20 10 -1)
-  (range 10 15 1.5)]}
+  (range 10 15 1.5)]
+
+@history[#:changed "6.7.0.4"
+         @elem{Adjusted to cooperate with @racket[for] in the same
+               way that @racket[in-range] does.}]}
 
 
 @defproc[(append-map [proc procedure?] [lst list?] ...+)

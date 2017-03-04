@@ -1,56 +1,95 @@
 #lang racket/base
 
-(require "../utils/utils.rkt" "rep-utils.rkt" "free-variance.rkt")
+(require "../utils/utils.rkt"
+         (contract-req)
+         "rep-utils.rkt"
+         "free-variance.rkt"
+         "core-rep.rkt"
+         "object-rep.rkt"
+         racket/match
+         racket/lazy-require
+         (only-in racket/unsafe/ops unsafe-fx<=))
 
-(provide hash-name prop-equal?)
+(lazy-require
+ ["../types/prop-ops.rkt" (-and -or)])
 
-(begin-for-cond-contract
-  (require racket/contract/base racket/lazy-require)
-  (lazy-require ["type-rep.rkt" (Type/c Univ? Bottom?)]
-                ["object-rep.rkt" (Path?)]))
-
-(provide-for-cond-contract name-ref/c)
+(provide -is-type
+         -not-type)
 
 
-;; A Name-Ref is any value that represents an object.
-;; As an identifier, it represents a free variable in the environment
-;; As a list, it represents a De Bruijn indexed bound variable
-(define-for-cond-contract name-ref/c
-  (or/c identifier? (list/c integer? integer?)))
-(define (hash-name v) (if (identifier? v) (hash-id v) (list v)))
+(def-prop TypeProp ([obj Object?] [type (and/c Type? (not/c Univ?) (not/c Bottom?))])
+  [#:frees (f) (combine-frees (list (f obj) (f type)))]
+  [#:fmap (f) (make-TypeProp (f obj) (f type))]
+  [#:for-each (f) (begin (f obj) (f type))]
+  [#:custom-constructor
+   (cond
+     [(Empty? obj) -tt]
+     [(Univ? type) -tt]
+     [(Bottom? type) -ff]
+     [else
+      (intern-double-ref!
+       tprop-intern-table
+       obj type #:construct (make-TypeProp obj type))])])
 
-(define-for-cond-contract ((length>=/c len) l)
-  (and (list? l)
-       (>= (length l) len)))
+(define tprop-intern-table (make-weak-hash))
 
-;; the trivially "true" proposition
-(def-prop TrueProp () [#:fold-rhs #:base])
-;; the absurd, "false" proposition
-(def-prop FalseProp () [#:fold-rhs #:base])
+;; Abbreviation for props
+;; `i` can be an integer or name-ref/c for backwards compatibility
+;; FIXME: Make all callers pass in an object and remove backwards compatibility
+(define/cond-contract (-is-type i t)
+  (-> (or/c integer? name-ref/c OptObject?) Type? Prop?)
+  (define o
+    (cond
+      [(OptObject? i) i]
+      [(exact-integer? i) (make-Path null (cons 0 i))]
+      [(pair? i) (make-Path null i)]
+      [else (-id-path i)]))
+  (make-TypeProp o t))
 
-(def-prop TypeProp ([p Path?] [t (and/c Type/c (not/c Univ?) (not/c Bottom?))])
-  [#:intern (list (Rep-seq t) (Rep-seq p))]
-  [#:frees (λ (f) (combine-frees (map f (list t p))))]
-  [#:fold-rhs (*TypeProp (object-rec-id p) (type-rec-id t))])
+(def-prop NotTypeProp ([obj Object?] [type (and/c Type? (not/c Univ?) (not/c Bottom?))])
+  [#:frees (f) (combine-frees (list (f obj) (f type)))]
+  [#:fmap (f) (-not-type (f obj) (f type))]
+  [#:for-each (f) (begin (f obj) (f type))]
+  [#:custom-constructor
+   (cond
+     [(Empty? obj) -tt]
+     [(Univ? type) -ff]
+     [(Bottom? type) -tt]
+     [else
+      (intern-double-ref!
+       ntprop-intern-table
+       obj type #:construct (make-NotTypeProp obj type))])])
 
-(def-prop NotTypeProp ([p Path?] [t (and/c Type/c (not/c Univ?) (not/c Bottom?))])
-  [#:intern (list (Rep-seq t) (Rep-seq p))]
-  [#:frees (λ (f) (combine-frees (map f (list t p))))]
-  [#:fold-rhs (*NotTypeProp (object-rec-id p) (type-rec-id t))])
+(define ntprop-intern-table (make-weak-hash))
 
-(def-prop OrProp ([fs (and/c (length>=/c 2)
-                           (listof (or/c TypeProp? NotTypeProp?)))])
-  [#:intern (map Rep-seq fs)]
-  [#:fold-rhs (*OrProp (map prop-rec-id fs))]
-  [#:frees (λ (f) (combine-frees (map f fs)))])
+;; Abbreviation for not props
+;; `i` can be an integer or name-ref/c for backwards compatibility
+;; FIXME: Make all callers pass in an object and remove backwards compatibility
+(define/cond-contract (-not-type i t)
+  (-> (or/c integer? name-ref/c OptObject?) Type? Prop?)
+  (define o
+    (cond
+      [(OptObject? i) i]
+      [(exact-integer? i) (make-Path null (cons 0 i))]
+      [(pair? i) (make-Path null i)]
+      [else (-id-path i)]))
+  (make-NotTypeProp o t))
 
-(def-prop AndProp ([fs (and/c (length>=/c 2)
-                          (listof (or/c OrProp? TypeProp? NotTypeProp?)))])
-  [#:intern (map Rep-seq fs)]
-  [#:fold-rhs (*AndProp (map prop-rec-id fs))]
-  [#:frees (λ (f) (combine-frees (map f fs)))])
+(def-prop OrProp ([ps (listof (or/c TypeProp? NotTypeProp?))])
+  [#:frees (f) (combine-frees (map f ps))]
+  [#:fmap (f) (apply -or (map f ps))]
+  [#:for-each (f) (for-each f ps)]
+  [#:custom-constructor
+   (let ([ps (sort ps (λ (p q) (unsafe-fx<= (eq-hash-code p)
+                                            (eq-hash-code q))))])
+     (intern-single-ref!
+      orprop-intern-table
+      ps
+      #:construct (make-OrProp ps)))])
 
-(def-prop PropSet ([thn Prop?] [els Prop?])
-  [#:fold-rhs (*PropSet (prop-rec-id thn) (prop-rec-id els))])
+(define orprop-intern-table (make-weak-hash))
 
-(define (prop-equal? a b) (= (Rep-seq a) (Rep-seq b)))
+(def-prop AndProp ([ps (listof (or/c OrProp? TypeProp? NotTypeProp?))])
+  [#:frees (f) (combine-frees (map f ps))]
+  [#:fmap (f) (apply -and (map f ps))]
+  [#:for-each (f) (for-each f ps)])

@@ -8,9 +8,9 @@
 (define the-error "mix up types in the function case")
 
 (define-rewrite bug3
-  (where G (unify τ_2 (τ_1 → x)))
+  (unify τ_2 (τ_1 → x) Gx)
   ==> 
-  (where G (unify τ_1 (τ_2 → x)))
+  (unify τ_1 (τ_2 → x) Gx)
   #:context (define-judgment-form)
   #:once-only)
 
@@ -19,5 +19,7 @@
 (include/rewrite "generators.rkt" generators bug-mod-rw)
 
 (define small-counter-example (term (1 cons)))
+(define enum-small-counter-example (term (let ((a (λ a a))) a)))
 
 (test small-counter-example)
+(test enum-small-counter-example)

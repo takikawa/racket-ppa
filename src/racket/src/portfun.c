@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2016 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -665,7 +665,8 @@ string_write_bytes(Scheme_Output_Port *port,
     memcpy(is->string, old, is->index);
   }
 
-  memcpy(is->string + is->index, str + d, len);
+  if (len)
+    memcpy(is->string + is->index, str + d, len);
   is->index += len;
 
   return len;

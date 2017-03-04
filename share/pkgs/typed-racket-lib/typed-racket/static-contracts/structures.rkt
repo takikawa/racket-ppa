@@ -2,31 +2,14 @@
 
 ;; Internal structures for representing a static contract.
 
-(require racket/match racket/list racket/generic 
-         racket/contract
+(require "../utils/utils.rkt"
+         (contract-req)
+         racket/match racket/list racket/generic 
          "kinds.rkt" "constraints.rkt")
 
-(provide
-  (contract-out
-    (struct recursive-sc ([names (listof identifier?)]
-                          [values (listof static-contract?)]
-                          [body static-contract?]))
-    (struct recursive-sc-use ([name identifier?]))
-    (struct combinator ([args sequence?]))
-    (struct static-contract ())
-    [sc-map
-     (static-contract? (static-contract? variance/c . -> . static-contract?) . -> . static-contract?)]
-    [sc-traverse (static-contract? (static-contract? variance/c . -> . any/c) . -> . void?)]
-    [sc->contract (static-contract? (static-contract? . -> . syntax?) . -> . syntax?)]
-    [sc->constraints
-     (static-contract? (static-contract? . -> . contract-restrict?) . -> . contract-restrict?)]
-    [sc-terminal-kind (static-contract? . -> . (or/c #f contract-kind?))]
-    [sc? predicate/c])
+(provide prop:combinator-name gen:sc)
 
-  prop:combinator-name
-  gen:sc)
-
-(define variance/c (or/c 'covariant 'contravariant 'invariant))
+(define-for-cond-contract variance/c (or/c 'covariant 'contravariant 'invariant))
 
 (define (recursive-sc-write-proc v port mode)
   (match-define (recursive-sc names vals body) v)
@@ -48,8 +31,8 @@
     (display ")" port))
   (when (cons? names)
     (recur-pair (first names) (first vals))
-    (for ((name (rest names))
-          (val (rest vals)))
+    (for ([name (in-list (rest names))]
+          [val (in-list (rest vals))])
          (display " " port)
          (recur-pair name val)))
   (display ") " port)
@@ -73,7 +56,7 @@
         (values "#<" ">")))
   (display open port)
   (fprintf port name)
-  (for ((arg args))
+  (for ([arg args])
        (display " " port)
        (recur arg port))
   (display close port))
@@ -162,3 +145,20 @@
         #:transparent
         #:property prop:combinator-name "combinator/sc"
         #:methods gen:custom-write [(define write-proc combinator-write-proc)])
+
+
+(provide/cond-contract
+ (struct recursive-sc ([names (listof identifier?)]
+                       [values (listof static-contract?)]
+                       [body static-contract?]))
+ (struct recursive-sc-use ([name identifier?]))
+ (struct combinator ([args sequence?]))
+ (struct static-contract ())
+ [sc-map
+  (static-contract? (static-contract? variance/c . -> . static-contract?) . -> . static-contract?)]
+ [sc-traverse (static-contract? (static-contract? variance/c . -> . any/c) . -> . void?)]
+ [sc->contract (static-contract? (static-contract? . -> . syntax?) . -> . syntax?)]
+ [sc->constraints
+  (static-contract? (static-contract? . -> . contract-restrict?) . -> . contract-restrict?)]
+ [sc-terminal-kind (static-contract? . -> . (or/c #f contract-kind?))]
+ [sc? predicate/c])

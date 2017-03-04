@@ -55,6 +55,8 @@
               widget-allocation
               widget-parent
 
+	      avoid-preferred-size-warning
+
               the-accelerator-group
               gtk_window_add_accel_group
               gtk_menu_set_accel_group
@@ -101,6 +103,14 @@
   #:fail (lambda () #f))
 (define-gtk gtk_widget_get_scale_factor (_fun _GtkWidget -> _int)
   #:fail (lambda () (lambda (gtk) 1)))
+
+(define (avoid-preferred-size-warning gtk)
+  ;; If we don't ask for a widget's size in the right way,
+  ;; GTK3 may report a warning; this query avoids the
+  ;; warning.
+  (when gtk3?
+    (define req (make-GtkRequisition 0 0))
+    (gtk_widget_get_preferred_size gtk req #f)))
 
 (define-gdk gdk_keyboard_grab (_fun _GdkWindow _gboolean _int -> _void))
 (define-gdk gdk_keyboard_ungrab (_fun _int -> _void))
@@ -249,6 +259,9 @@
   (lambda (gtk event)
     (do-key-event gtk event #f #t)))
 
+(define scroll-accum-x 0)
+(define scroll-accum-y 0)
+
 (define (do-key-event gtk event down? scroll?)
   (let ([wx (gtk->wx gtk)])
     (and
@@ -279,12 +292,22 @@
                                [(= dir GDK_SCROLL_RIGHT) 'wheel-right]
                                [(= dir GDK_SCROLL_SMOOTH)
                                 (define-values (dx dy) (gdk_event_get_scroll_deltas event))
+                                (set! scroll-accum-x (+ scroll-accum-x dx))
+                                (set! scroll-accum-y (+ scroll-accum-y dy))
                                 (cond
-                                 [(positive? dy) 'wheel-down]
-                                 [(negative? dy) 'wheel-up]
-                                 [(positive? dx) 'wheel-right]
-                                 [(negative? dx) 'wheel-left]
-                                 [else #f])]
+                                  [(>= scroll-accum-y 1)
+                                   (set! scroll-accum-y (sub1 scroll-accum-y))
+                                   'wheel-down]
+                                  [(<= scroll-accum-y -1)
+                                   (set! scroll-accum-y (add1 scroll-accum-y))
+                                   'wheel-up]
+                                  [(>= scroll-accum-x 1)
+                                   (set! scroll-accum-x (sub1 scroll-accum-x))
+                                   'wheel-right]
+                                  [(<= scroll-accum-x -1)
+                                   (set! scroll-accum-x (add1 scroll-accum-x))
+                                   'wheel-left]
+                                  [else #f])]
                                [else #f]))]
                            [(and (string? im-str)
                                  (= 1 (string-length im-str)))
@@ -903,7 +926,7 @@
 	    ;; windows; that means we have to be extra careful that
 	    ;; the underlying window doesn't change while a freeze is
 	    ;; in effect; the `reset-child-freezes` helps with that.
-            (unless (and transparentish? gtk3?)
+            (unless (or (and transparentish? gtk3?) wayland?)
               (gdk_window_ensure_native win))
             (begin
               (gdk_window_freeze_updates win)

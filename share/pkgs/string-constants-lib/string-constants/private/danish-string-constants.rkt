@@ -826,7 +826,7 @@ please adhere to these guidelines:
   (~a-must-end-with-~a
       "Filnavnet ~a\n\n  ~a\n\ner ikke tilladt. Filnavnet må ende med \".~a\".")
   (macosx-executables-must-end-with-app
-      "Filnavnet\n\n  ~a\n\ner ikke gyldigt. Under MacOS X skal en kørbar fil være en mappe, hvis navn slutter med .app.")
+      "Filnavnet\n\n  ~a\n\ner ikke gyldigt. Under Mac OS skal en kørbar fil være en mappe, hvis navn slutter med .app.")
   (warning-directory-will-be-replaced
    "ADVARSEL: mappen:\n\n  ~a\n\nvil blive erstattet. Fortsæt?")
   

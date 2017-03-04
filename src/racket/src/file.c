@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2016 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -4300,7 +4300,7 @@ static Scheme_Object *rename_file(int argc, Scheme_Object **argv)
     /* We use a specialized error message here, because it's not
        a system error (e.g., setting `errno` to `EEXIST` would
        be a lie). */
-    scheme_raise_exn((exists_ok < 0) ? MZEXN_FAIL_FILESYSTEM_EXISTS : MZEXN_FAIL_FILESYSTEM, 
+    scheme_raise_exn(MZEXN_FAIL_FILESYSTEM_EXISTS,
                      "rename-file-or-directory: cannot rename file or directory;\n"
                      " the destination path already exists\n"
                      "  source path: %q\n"
@@ -6158,7 +6158,7 @@ static Scheme_Object *file_or_dir_permissions(int argc, Scheme_Object *argv[])
          X, at least, such a failure seems to mean that the file is
          not writable. (We assume it's not a directory-access issue,
          since the read test succeeded.) */
-      if (ok && (errno != EACCES) && (errno != EPERM))
+      if (ok && (errno != EACCES) && (errno != EPERM) && (errno != EROFS))
 	l = NULL;
       else {
 	do {

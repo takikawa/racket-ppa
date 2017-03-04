@@ -807,7 +807,7 @@ please adhere to these guidelines:
  ;(windows-executables-must-end-with-exe
  ; "The filename\n\n  ~a\n\nis illegal. Under Windows, executables must end with .exe.")
  ;(macosx-executables-must-end-with-app
- ; "The filename\n\n  ~a\n\nis illegal. Under MacOS X, an executable must be a directory whose name ends with .app.")
+ ; "The filename\n\n  ~a\n\nis illegal. Under Mac OS, an executable must be a directory whose name ends with .app.")
  (warning-directory-will-be-replaced
   "WARNING: the directory:\n\n  ~a\n\nwill be replaced. Proceed?")
  

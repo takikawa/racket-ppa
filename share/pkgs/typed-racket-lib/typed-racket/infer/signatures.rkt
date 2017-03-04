@@ -2,7 +2,7 @@
 (require "../utils/utils.rkt"
          racket/unit (contract-req)
          (utils unit-utils)
-         (rep type-rep))
+         (rep type-rep values-rep))
 
 (require-for-cond-contract (infer constraint-structs))
 
@@ -16,12 +16,13 @@
    [cond-contracted cset-meet* ((listof cset?) . -> . (or/c #f cset?))]
    [cond-contracted no-constraint c?]
    [cond-contracted empty-cset ((listof symbol?) (listof symbol?) . -> . cset?)]
-   [cond-contracted insert (cset? symbol? Type/c Type/c . -> . cset?)]
+   [cond-contracted insert (cset? symbol? Type? Type? . -> . cset?)]
    [cond-contracted cset-join ((listof cset?) . -> . cset?)]
    [cond-contracted c-meet ((c? c?) (symbol?) . ->* . (or/c #f c?))]))
 
 (define-signature intersect^
-  ([cond-contracted intersect (Type/c Type/c . -> . Type/c)]))
+  ([cond-contracted intersect (Type? Type? . -> . Type?)]
+   [cond-contracted restrict (Type? Type? . -> . Type?)]))
 
 (define-signature infer^
   ([cond-contracted infer ((;; variables from the forall
@@ -29,24 +30,26 @@
                             ;; indexes from the forall
                             (listof symbol?)
                             ;; actual argument types from call site
-                            (listof Type/c)
+                            (listof Type?)
                             ;; domain
-                            (listof Type/c)
+                            (listof Type?)
                             ;; range
                             (or/c #f Values/c ValuesDots?))
                            ;; optional expected type
-                           ((or/c #f Values/c AnyValues? ValuesDots?))
+                           ((or/c #f Values/c AnyValues? ValuesDots?)
+                            ;; optional multiple substitutions?
+                            #:multiple? boolean?)
                            . ->* . any)]
    [cond-contracted infer/vararg ((;; variables from the forall
                                    (listof symbol?)
                                    ;; indexes from the forall
                                    (listof symbol?)
                                    ;; actual argument types from call site
-                                   (listof Type/c)
+                                   (listof Type?)
                                    ;; domain
-                                   (listof Type/c)
+                                   (listof Type?)
                                    ;; rest
-                                   (or/c #f Type/c)
+                                   (or/c #f Type?)
                                    ;; range
                                    (or/c #f Values/c ValuesDots?))
                                   ;; [optional] expected type

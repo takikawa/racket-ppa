@@ -14,10 +14,9 @@
   @margin-note{
     @not-on-the-web{This is an installation-specific listing.}
     Running @exec{raco docs}
-    (or @exec{Racket Documentation} on Windows or Mac OS X)
+    (or @exec{Racket Documentation} on Windows or Mac OS)
     may open a different page with local and user-specific
     documentation, including documentation for installed packages.
-
     @elem[#:style path-info-style]{Searching or following a
      ``top'' link will use go to a different starting point that
      includes user-specific information.

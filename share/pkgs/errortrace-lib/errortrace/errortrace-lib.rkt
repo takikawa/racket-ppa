@@ -263,7 +263,60 @@
                  expr))))
         expr)))
 
-(define-values/invoke-unit/infer stacktrace@)
+(define (should-annotate? s phase)
+  (and (syntax-source s)
+       (syntax-property s 'errortrace:annotate)))
+
+;; Add the 'errortrace:annotate property every in an original syntax
+;; object, so that we can recognize pieces from the original program
+;; after expansion:
+(define (add-annotate-property s)
+  (cond
+   [(syntax? s)
+    (define new-s (syntax-rearm 
+                   (let ([s (disarm s)])
+                     (datum->syntax s
+                                    (add-annotate-property (syntax-e s))
+                                    s
+                                    s))
+                   s))
+    ;; We could check for "original" syntax here, because partial expansion
+    ;; of top-level forms happens before the compile handler gets
+    ;; control. As a compromise for programs that may use errortrace
+    ;; with `eval` and S-expressions or non-`syntax-original?` arrangements, we add
+    ;; the property everywhere:
+    (if #t ; (syntax-original? s)
+        (syntax-property new-s
+                         'errortrace:annotate #t
+                         ;; preserve the property in bytecode:
+                         #t)
+        new-s)]
+   [(pair? s)
+    (cons (add-annotate-property (car s))
+          (add-annotate-property (cdr s)))]
+   [(vector? s)
+    (for/vector #:length (vector-length s) ([e (in-vector s)])
+                (add-annotate-property e))]
+   [(box? s) (box (add-annotate-property (unbox s)))]
+   [(prefab-struct-key s)
+    => (lambda (k)
+         (apply make-prefab-struct
+                k
+                (add-annotate-property (cdr (vector->list (struct->vector s))))))]
+   [(and (hash? s) (immutable? s))
+    (cond
+     [(hash-eq? s)
+      (for/hasheq ([(k v) (in-hash s)])
+        (values k (add-annotate-property v)))]
+     [(hash-eqv? s)
+      (for/hasheqv ([(k v) (in-hash s)])
+        (values k (add-annotate-property v)))]
+     [else
+      (for/hash ([(k v) (in-hash s)])
+        (values k (add-annotate-property v)))])]
+   [else s]))
+
+(define-values/invoke-unit/infer stacktrace/filter@)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Execute counts
@@ -443,7 +496,7 @@
 (define errortrace-annotate
   (lambda (top-e)
     (define (normal e)
-      (define expanded-e (expand-syntax e))
+      (define expanded-e (expand-syntax (add-annotate-property e)))
       (parameterize ([original-stx e]
                      [expanded-stx expanded-e])
         (annotate-top expanded-e (namespace-base-phase))))

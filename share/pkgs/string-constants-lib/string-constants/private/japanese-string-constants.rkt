@@ -910,7 +910,7 @@ please adhere to these guidelines:
  (~a-must-end-with-~a
   "~a のファイル名\n\n  ~a\n\n は不正です。ファイル名の末尾は \".~a\" でなければなりません。")
  (macosx-executables-must-end-with-app
-  "ファイル名\n\n  ~a\n\n は不正です。MacOS X では実行ファイルは末尾が .app のディレクトリでなければなりません。")
+  "ファイル名\n\n  ~a\n\n は不正です。Mac OS では実行ファイルは末尾が .app のディレクトリでなければなりません。")
  (warning-directory-will-be-replaced
   "警告: ディレクトリ:\n\n  ~a\n\n を置換します。よろしいですか？")
 

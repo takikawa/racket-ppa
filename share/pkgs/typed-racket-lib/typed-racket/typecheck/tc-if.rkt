@@ -1,13 +1,10 @@
 #lang racket/unit
-(require "../utils/utils.rkt"
-         (rep prop-rep)
-         (types abbrev utils prop-ops)
+(require "../utils/utils.rkt" racket/match
+         (rep core-rep prop-rep)
+         (types utils prop-ops)
          (utils tc-utils)
          (typecheck signatures tc-envops tc-metafunctions)
-         (types type-table)
-         (private syntax-properties)
-         racket/match
-         syntax/parse)
+         (types type-table))
 
 ;; if typechecking
 (import tc-expr^)
@@ -15,48 +12,26 @@
 
 (define (tc/if-twoarm tst thn els [expected #f])
   (match (single-value tst)
-    [(tc-result1: _ (PropSet: fs+ fs-) _)
-     (define expected* (and expected (erase-props expected)))
-     (define results-t
-       (with-lexical-env/extend-props (list fs+)
-         #:unreachable (begin
-                         (handle-unreachable-casted-exprs thn)
-                         (warn-unreachable thn))
+    [(tc-result1: _ (PropSet: p+ p-) _)
+     (define thn-res
+       (with-lexical-env+props (list p+)
+         #:expected expected
+         #:unreachable (warn-unreachable thn)
          (test-position-add-true tst)
-         (tc-expr/check thn expected*)))
-     (define results-u
-       (with-lexical-env/extend-props (list fs-)
-         #:unreachable (begin
-                         (handle-unreachable-casted-exprs els)
-                         (warn-unreachable els))
+         (tc-expr/check thn expected)))
+     (define els-res
+       (with-lexical-env+props (list p-)
+         #:expected expected
+         #:unreachable (warn-unreachable els)
          (test-position-add-false tst)
-         (tc-expr/check els expected*)))
+         (tc-expr/check els expected)))
 
-     (merge-tc-results (list results-t results-u))]))
-
-;; handle-unreachable-casted-exprs : Any -> Void
-;; Traverses stx looking for casted-expr properties. For each one, it
-;; calls the function stored in the property, which fills an entry in
-;; the cast table with the -Dead-Code type. This is so that the
-;; contract-generation pass doesn't throw an internal error.
-(define (handle-unreachable-casted-exprs stx)
-  (syntax-parse stx
-    [(exp:casted-expr^ e)
-     ;; fill in this entry in the cast table with the -Dead-Code type
-     ((attribute exp.value) -Dead-Code)
-     (void)]
-    [stx
-     (define e (syntax-e #'stx))
-     (cond
-       [(pair? e) (handle-unreachable-casted-exprs (car e))
-                  (handle-unreachable-casted-exprs (cdr e))]
-       [(box? e) (handle-unreachable-casted-exprs (unbox e))]
-       [(vector? e) (for ([e (in-vector e)])
-                      (handle-unreachable-casted-exprs e))]
-       [(hash? e) (for ([(k v) (in-hash e)])
-                    (handle-unreachable-casted-exprs k)
-                    (handle-unreachable-casted-exprs v))]
-       [(struct? e) (for ([e (in-vector (struct->vector e))])
-                      (handle-unreachable-casted-exprs e))]
-       [else (void)])]))
-
+     (match expected
+       ;; if there was not any expected results, then merge the 'then'
+       ;; and 'else' results so we propogate the correct info upwards
+       [(or #f (tc-any-results: #f))
+        (merge-tc-results (list thn-res els-res))]
+       ;; otherwise, the subcomponents have already been checked and
+       ;; we just return the expected result 'fixed' to replace any
+       ;; missing fields (i.e. #f props or objects)
+       [_ (fix-results expected)])]))

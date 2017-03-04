@@ -390,7 +390,15 @@
      ["#<<"
       (get-here-string (position-offset start-pos) input-port)]
      [(special)
-      (ret "" 'no-color #f start-pos end-pos 'datum)]
+      (cond
+        [(or (number? lexeme) (boolean? lexeme))
+         (ret lexeme 'constant #f start-pos end-pos 'datum)]
+        [(string? lexeme)
+         (ret lexeme 'string #f start-pos end-pos 'datum)]
+        [(keyword? lexeme)
+         (ret lexeme 'hash-colon-keyword #f start-pos end-pos 'datum)]
+        [else
+         (ret "" 'no-color #f start-pos end-pos 'datum)])]
      [(special-comment)
       (ret "" 'comment #f start-pos end-pos 'continue)]
      [(eof) (values lexeme 'eof #f #f #f #f)]
