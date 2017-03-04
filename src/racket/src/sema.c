@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2016 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -848,7 +848,7 @@ int scheme_wait_semas_chs(int n, Scheme_Object **o, int just_try, Syncing *synci
 	    if (ws[i]->in_line)
 	      get_outof_line(semas[i], ws[i]);
 	  }
-	  
+
 	  scheme_thread_block(0); /* ok if it returns multiple times */ 
 	  scheme_current_thread->ran_some = 1;
 	  /* [but why would it return multiple times?! there must have been a reason...] */
@@ -910,8 +910,11 @@ int scheme_wait_semas_chs(int n, Scheme_Object **o, int just_try, Syncing *synci
 	    if (semas[i]->value) {
 	      if ((semas[i]->value > 0) && (!syncing || !syncing->reposts || !syncing->reposts[i]))
 		--semas[i]->value;
-              if (syncing && syncing->accepts && syncing->accepts[i])
-                scheme_accept_sync(syncing, i);
+              if (syncing) {
+                syncing->result = i + 1;
+                if (syncing->accepts && syncing->accepts[i])
+                  scheme_accept_sync(syncing, i);
+              }
 	      break;
 	    }
 	  }  else if (semas[i]->so.type == scheme_never_evt_type) {

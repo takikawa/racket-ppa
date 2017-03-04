@@ -1126,7 +1126,7 @@ members.}
 A type constructor that builds a struct type using
 @racket[make-cstruct-type] function and wraps it in a type that
 marshals a struct as a list of its components.  Note that space for
-structs must to be allocated using @racket[malloc] with @racket[malloc-mode]; the converter for a
+structs must be allocated using @racket[malloc] with @racket[malloc-mode]; the converter for a
 @racket[_list-struct] type immediately allocates and uses a list from
 the allocated space, so it is inefficient. Use @racket[define-cstruct]
 below for a more efficient approach.
@@ -1604,7 +1604,7 @@ Extracts the pointer for a union's storage.
 
 @section{Enumerations and Masks}
 
-Although the constructors below are describes as procedures, they are
+Although the constructors below are described as procedures, they are
 implemented as syntax, so that error messages can report a type name
 where the syntactic context implies one.
 

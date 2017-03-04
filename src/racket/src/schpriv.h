@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2016 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
   All rights reserved.
 
@@ -81,7 +81,8 @@
 #define SCHEME_PRIM_IS_NARY_INLINED        (1 << 2)
 /* indicates that a primitive call can be dropped if it's result is not used;
    although the function never raises an exception, it should not be reordered
-   past a test that might be a guard: */
+   past a test that might be a guard or past an expression that might
+   have a side effect: */
 #define SCHEME_PRIM_IS_UNSAFE_OMITABLE     (1 << 3)
 /* indicates that a primitive call can be dropped if it's result is not used,
    because it has no side-effect and never raises an exception: */
@@ -483,11 +484,16 @@ void scheme_do_add_global_symbol(Scheme_Env *env, Scheme_Object *sym,
 void *scheme_get_os_thread_like();
 void scheme_init_os_thread_like(void *);
 void scheme_done_os_thread();
+int scheme_is_place_main_os_thread();
 
 /*========================================================================*/
 /*                                constants                               */
 /*========================================================================*/
 
+extern Scheme_Object *scheme_symbol_p_proc;
+extern Scheme_Object *scheme_keyword_p_proc;
+extern Scheme_Object *scheme_char_p_proc;
+extern Scheme_Object *scheme_interned_char_p_proc;
 extern Scheme_Object *scheme_fixnum_p_proc;
 extern Scheme_Object *scheme_flonum_p_proc;
 extern Scheme_Object *scheme_extflonum_p_proc;
@@ -587,6 +593,8 @@ extern Scheme_Object *scheme_lambda_syntax;
 extern Scheme_Object *scheme_begin_syntax;
 
 extern Scheme_Object *scheme_not_proc;
+extern Scheme_Object *scheme_true_object_p_proc;
+extern Scheme_Object *scheme_boolean_p_proc;
 extern Scheme_Object *scheme_eq_proc;
 extern Scheme_Object *scheme_eqv_proc;
 extern Scheme_Object *scheme_equal_proc;
@@ -1054,7 +1062,10 @@ typedef struct Scheme_Struct_Type {
   Scheme_Object *guard;
 
 #if defined(MZ_GC_BACKTRACE) && defined(MZ_PRECISE_GC)
-  intptr_t instance_count;
+  intptr_t current_instance_count;
+  intptr_t current_instance_sizes;
+  intptr_t total_instance_count;
+  intptr_t total_instance_sizes;
 #endif
 
   struct Scheme_Struct_Type *parent_types[mzFLEX_ARRAY_DECL];
@@ -1271,6 +1282,9 @@ Scheme_Object *scheme_stx_track(Scheme_Object *naya,
 				Scheme_Object *origin);
 
 int scheme_stx_has_empty_wraps(Scheme_Object *stx, Scheme_Object *phase);
+
+int scheme_syntax_is_original(Scheme_Object *_stx);
+Scheme_Object *scheme_syntax_remove_original(Scheme_Object *_stx);
 
 XFORM_NONGCING Scheme_Object *scheme_stx_root_scope();
 Scheme_Object *scheme_new_scope(int kind);
@@ -3285,11 +3299,6 @@ Scheme_Object *scheme_optimize_expr(Scheme_Object *, Optimize_Info *, int contex
 #define scheme_optimize_result_context(c) (c & (~(OPT_CONTEXT_TYPE_MASK | OPT_CONTEXT_NO_SINGLE | OPT_CONTEXT_SINGLED)))
 #define scheme_optimize_tail_context(c)   scheme_optimize_result_context(c) 
 
-Scheme_Object *scheme_optimize_apply_values(Scheme_Object *f, Scheme_Object *e, 
-                                            Optimize_Info *info,
-                                            int e_single_result,
-                                            int context);
-
 int scheme_ir_duplicate_ok(Scheme_Object *o, int cross_mod);
 int scheme_ir_propagate_ok(Scheme_Object *o, Optimize_Info *info);
 int scheme_is_statically_proc(Scheme_Object *value, Optimize_Info *info, int flags);
@@ -3304,7 +3313,7 @@ Scheme_Object *scheme_unresolve(Scheme_Object *, int argv, int *_has_cases,
                                 Scheme_Object *from_modidx, Scheme_Object *to_modidx);
 Scheme_Object *scheme_unresolve_top(Scheme_Object *, Comp_Prefix **, int comp_flags);
 
-int scheme_check_leaf_rator(Scheme_Object *le, int *_flags);
+int scheme_check_leaf_rator(Scheme_Object *le);
 
 int scheme_is_ir_lambda(Scheme_Object *o, int can_be_closed, int can_be_liftable);
 
@@ -3568,7 +3577,6 @@ int scheme_get_eval_type(Scheme_Object *obj);
 Scheme_Object *scheme_make_application(Scheme_Object *v, Optimize_Info *info);
 Scheme_Object *scheme_try_apply(Scheme_Object *f, Scheme_Object *args, Optimize_Info *info);
 int scheme_is_foldable_prim(Scheme_Object *f);
-int scheme_eq_testable_constant(Scheme_Object *v);
 
 Scheme_Object *scheme_get_stop_expander(void);
 
@@ -4169,6 +4177,11 @@ void scheme_write_proc_context(Scheme_Object *port, int print_width,
                                Scheme_Object *col, Scheme_Object *pos,
                                int generated);
 
+#ifdef MZ_USE_MZRT
+void scheme_init_glib_log_queue(void);
+void scheme_check_glib_log_messages(void);
+#endif
+
 /*========================================================================*/
 /*                         filesystem utilities                           */
 /*========================================================================*/
@@ -4419,18 +4432,6 @@ void scheme_count_generic(Scheme_Object *o, intptr_t *s, intptr_t *e, Scheme_Has
 #endif
 #endif
 
-/* See "salloc.c": */
-#ifndef RECORD_ALLOCATION_COUNTS
-# define RECORD_ALLOCATION_COUNTS 0
-#endif
-
-#if RECORD_ALLOCATION_COUNTS
-extern void scheme_record_allocation(Scheme_Object *key);
-# define DEBUG_COUNT_ALLOCATION(x) scheme_record_allocation(x);
-#else 
-# define DEBUG_COUNT_ALLOCATION(x) /* empty */
-#endif
-
 /*========================================================================*/
 /*                           miscellaneous                                */
 /*========================================================================*/
@@ -4479,6 +4480,7 @@ Scheme_Object *scheme_checked_make_flrectangular (int argc, Scheme_Object *argv[
 Scheme_Object *scheme_procedure_arity_includes(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_checked_char_to_integer (int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_checked_integer_to_char (int argc, Scheme_Object *argv[]);
+Scheme_Object *scheme_checked_make_vector (int argc, Scheme_Object *argv[]);
 
 Scheme_Object *scheme_check_not_undefined (int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_check_assign_not_undefined (int argc, Scheme_Object *argv[]);

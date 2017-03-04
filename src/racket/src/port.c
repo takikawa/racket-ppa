@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2016 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -8450,7 +8450,10 @@ make_fd_output_port(intptr_t fd, Scheme_Object *name, int regfile, int win_textm
 
 #ifdef WINDOWS_FILE_HANDLES
   /* Character devices can't block output, right? */
-  if (is_fd_terminal(fop->fd))
+  if (!regfile && is_fd_terminal(fop->fd))
+    regfile = 1;
+  /* It's important to not use pipe code for flushing to file handles: */
+  if (!regfile && (GetFileType((HANDLE)fop->fd) == FILE_TYPE_DISK))
     regfile = 1;
   /* The work thread is created on demand in fd_flush. */
 #endif
@@ -10917,12 +10920,14 @@ void scheme_signal_received_at(void *h)
 {
 #if defined(FILES_HAVE_FDS)
   int put_ext_event_fd = *(int *)h;
+  int saved_errno = errno;
   if (put_ext_event_fd) {
     int v;
     do {
       v = write(put_ext_event_fd, "!", 1);
     } while ((v == -1) && (errno == EINTR));
   }
+  errno = saved_errno;
 #endif
 #if defined(WINDOWS_PROCESSES) || defined(WINDOWS_FILE_HANDLES)
   ReleaseSemaphore(*(OS_SEMAPHORE_TYPE *)h, 1, NULL);

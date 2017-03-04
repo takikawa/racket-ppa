@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2016 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -340,6 +340,27 @@ static Scheme_Object *resolve_application2(Scheme_Object *o, Resolve_Info *orig_
   return (Scheme_Object *)app;
 }
 
+int eq_testable_constant(Scheme_Object *v)
+{
+  if (SCHEME_SYMBOLP(v)
+      || SCHEME_KEYWORDP(v)
+      || SCHEME_FALSEP(v)
+      || SAME_OBJ(v, scheme_true)
+      || SCHEME_NULLP(v)
+      || SCHEME_VOIDP(v)
+      || SCHEME_EOFP(v))
+    return 1;
+
+  if (SCHEME_CHARP(v) && (SCHEME_CHAR_VAL(v) < 256))
+    return 1;
+
+  if (SCHEME_INTP(v) 
+      && IN_FIXNUM_RANGE_ON_ALL_PLATFORMS(SCHEME_INT_VAL(v)))
+    return 1;
+
+  return 0;
+}
+
 static void set_app3_eval_type(Scheme_App3_Rec *app)
 /* set flags used for a shortcut in the interpreter */
 {
@@ -425,8 +446,8 @@ static Scheme_Object *resolve_application3(Scheme_Object *o, Resolve_Info *orig_
      optimization layer, and we keep it just in case.*/
   if ((SAME_OBJ(app->rator, scheme_equal_proc)
        || SAME_OBJ(app->rator, scheme_eqv_proc))
-      && (scheme_eq_testable_constant(app->rand1)
-         || scheme_eq_testable_constant(app->rand2))) {
+      && (eq_testable_constant(app->rand1)
+          || eq_testable_constant(app->rand2))) {
     app->rator = scheme_eq_proc;
   }
 
@@ -491,7 +512,7 @@ static Scheme_Object *look_for_letv_change(Scheme_Sequence *s)
     v = s->array[i];
     if (SAME_TYPE(SCHEME_TYPE(v), scheme_let_value_type)) {
       Scheme_Let_Value *lv = (Scheme_Let_Value *)v;
-      if (scheme_omittable_expr(lv->body, 1, -1, 0, NULL, NULL)) {
+      if (scheme_omittable_expr(lv->body, 1, -1, OMITTABLE_RESOLVED, NULL, NULL)) {
 	int esize = s->count - (i + 1);
 	int nsize = i + 1;
 	Scheme_Object *nv, *ev;
@@ -3096,7 +3117,7 @@ static Scheme_Object *unresolve_lambda(Scheme_Lambda *rlam, Unresolve_Info *ui)
 
 static void check_nonleaf_rator(Scheme_Object *rator, Unresolve_Info *ui)
 {
-  if (!scheme_check_leaf_rator(rator, NULL))
+  if (!scheme_check_leaf_rator(rator))
     ui->has_non_leaf = 1;
 }
 

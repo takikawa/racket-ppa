@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2016 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -3237,6 +3237,7 @@ void scheme_prep_namespace_rename(Scheme_Env *menv)
         }
 	
 	rns = scheme_module_context_to_stx(rns, NULL);
+
 	m->rn_stx = rns;
       } else if (SCHEME_PAIRP(m->rn_stx)) {
 	/* Delayed shift: */
@@ -3246,7 +3247,7 @@ void scheme_prep_namespace_rename(Scheme_Env *menv)
 	midx = SCHEME_CDR(m->rn_stx);
 
         rn_stx = scheme_stx_force_delayed(rn_stx);
-        
+
         rn_stx = scheme_stx_shift(rn_stx, scheme_make_integer(0), midx, m->self_modidx,
                                   NULL, m->prefix->src_insp_desc, menv->access_insp);
 
@@ -3257,7 +3258,11 @@ void scheme_prep_namespace_rename(Scheme_Env *menv)
         m->rn_stx = rn_stx;
       }
 
-      rns = scheme_stx_to_module_context(m->rn_stx);
+      rns = m->rn_stx;
+      if (menv->phase)
+        rns = scheme_stx_shift(rns, scheme_make_integer(menv->phase), NULL, NULL, NULL, NULL, NULL);
+
+      rns = scheme_stx_to_module_context(rns);
       menv->stx_context = rns;
 
       menv->rename_set_ready = 1;
@@ -6857,7 +6862,7 @@ static Scheme_Object *do_module_execute(Scheme_Object *data, Scheme_Env *genv,
     }
 
     m->modname = prefix;
-    
+
     if (m->self_modidx) {
       if (!SCHEME_SYMBOLP(m->self_modidx)) {
 	Scheme_Modidx *midx = (Scheme_Modidx *)m->self_modidx;
@@ -7601,6 +7606,12 @@ static Scheme_Object *do_module(Scheme_Object *form, Scheme_Comp_Env *env,
   /* phase shift to replace self_modidx of previous expansion: */
   fm = scheme_stx_shift(fm, NULL, this_empty_self_modidx, self_modidx, NULL,
                         m->insp, m->insp);
+  if (m->ii_src) {
+    /* shift the initial import to record the chain for rn_stx */
+    ii = scheme_stx_shift(m->ii_src, NULL, this_empty_self_modidx, self_modidx, NULL,
+                          m->insp, m->insp);
+    m->ii_src = ii;
+  }
 
   fm = scheme_stx_add_module_frame_context(fm, rn_set);
 
@@ -8772,7 +8783,7 @@ static Scheme_Object *do_module_begin(Scheme_Object *orig_form, Scheme_Comp_Env 
       }
     }
 
-    if (*all_simple_bindings && env->genv->module->rn_stx) {
+    if (*all_simple_bindings && env->genv->module->rn_stx && rec[drec].comp) {
       /* We will be able to reconstruct binding for `module->namespace`: */
       env->genv->module->rn_stx = scheme_true;
     } else {
@@ -12111,6 +12122,7 @@ void add_single_require(Scheme_Module_Exports *me, /* from module */
     if (all_simple
         && *all_simple
         && rn_stx
+        && SCHEME_STXP(rn_stx)
         && !scheme_stx_equal_module_context(scope_src, rn_stx))
       *all_simple = 0;
   }

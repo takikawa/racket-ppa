@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2014 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -178,8 +178,10 @@ THREAD_LOCAL_DECL(int scheme_did_gc_count);
 THREAD_LOCAL_DECL(static intptr_t process_time_at_swap);
 
 THREAD_LOCAL_DECL(static intptr_t max_gc_pre_used_bytes);
-THREAD_LOCAL_DECL(static intptr_t num_major_garbage_collections);
-THREAD_LOCAL_DECL(static intptr_t num_minor_garbage_collections);
+#ifdef MZ_PRECISE_GC
+THREAD_LOCAL_DECL(static int num_major_garbage_collections);
+THREAD_LOCAL_DECL(static int num_minor_garbage_collections);
+#endif
 
 SHARED_OK static int init_load_on_demand = 1;
 SHARED_OK static int compiled_file_check = SCHEME_COMPILED_FILE_CHECK_MODIFY_SECONDS;
@@ -1720,7 +1722,8 @@ static Scheme_Object *make_custodian_box(int argc, Scheme_Object *argv[])
       cust_box_alloc = 2 * cust_box_alloc;
     }
     cbs = (Scheme_Custodian_Box **)scheme_malloc_atomic(cust_box_alloc * sizeof(Scheme_Custodian_Box *));
-    memcpy(cbs, cust_boxes, cust_box_count * sizeof(Scheme_Custodian_Box *));
+    if (cust_box_count)
+      memcpy(cbs, cust_boxes, cust_box_count * sizeof(Scheme_Custodian_Box *));
     cust_boxes = cbs;
   }
   cust_boxes[cust_box_count++] = cb;
@@ -5032,6 +5035,10 @@ void scheme_thread_block(float sleep_time)
   if (!do_atomic)
     scheme_check_foreign_work();
 #endif
+#if defined(MZ_USE_MZRT)
+  if (!do_atomic)
+    scheme_check_glib_log_messages();
+#endif
 
   skip_sleep = 0;
   if (check_fd_semaphores()) {
@@ -6284,7 +6291,8 @@ void scheme_add_evt_worker(Evt ***evt_array,
     if (new_size < _scheme_last_type_)
       new_size = _scheme_last_type_;
     nevts = MALLOC_N(Evt*, new_size);
-    memcpy(nevts, (*evt_array), (*evt_size) * sizeof(Evt*));
+    if (*evt_size)
+      memcpy(nevts, (*evt_array), (*evt_size) * sizeof(Evt*));
     (*evt_array) = nevts;
     (*evt_size) = new_size;
   }

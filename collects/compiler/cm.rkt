@@ -573,7 +573,7 @@
                             (when ok-to-compile?
                               (log-compile-event path 'start-compile)
                               (when zo-exists? (try-delete-file zo-name #f))
-                              (trace-printf (format "compiling ~a" actual-path))
+                              (trace-printf "compiling ~a" actual-path)
                               (parameterize ([depth (+ (depth) 1)])
                                 (with-handlers
                                     ([exn:get-module-code?
@@ -621,7 +621,8 @@
 
 (define (different-source-sha1-and-dep-recorded path deps)
   (define src-hash (get-source-sha1 path))
-  (define recorded-hash (caadr deps))
+  (define recorded-hash (and (pair? (cadr deps))
+                             (caadr deps)))
   (if (equal? src-hash recorded-hash)
       #f
       (list src-hash recorded-hash)))

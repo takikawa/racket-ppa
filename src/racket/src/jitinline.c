@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2006-2016 PLT Design Inc.
+  Copyright (c) 2006-2017 PLT Design Inc.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -379,6 +379,72 @@ static int generate_inlined_type_test(mz_jit_state *jitter, Scheme_App2_Rec *app
   return 1;
 }
 
+static int generate_inlined_interned_char_test(mz_jit_state *jitter, Scheme_App2_Rec *app,
+                                            Branch_Info *for_branch, int branch_short,
+                                            int dest)
+{
+  GC_CAN_IGNORE jit_insn *ref1, *ref2, *ref3;
+  int reg_valid;
+
+  LOG_IT(("inlined interned-char?\n"));
+
+  mz_runstack_skipped(jitter, 1);
+
+  scheme_generate_non_tail(app->rand, jitter, 0, 1, 0);
+  CHECK_LIMIT();
+
+  mz_runstack_unskipped(jitter, 1);
+
+  mz_rs_sync();
+
+  __START_SHORT_JUMPS__(branch_short);
+
+  reg_valid = 0;
+  if (for_branch) {
+    reg_valid = mz_CURRENT_REG_STATUS_VALID();
+    scheme_prepare_branch_jump(jitter, for_branch);
+    CHECK_LIMIT();
+  }
+
+  /* Test that it's not a fixnum */
+  ref1 = jit_bmsi_ul(jit_forward(), JIT_R0, 0x1);
+  /* Test that it's a char */
+#ifdef jit_bxnei_s
+  ref2 = jit_bxnei_s(jit_forward(), JIT_R0, scheme_char_type);
+#else
+  jit_ldxi_s(JIT_R1, JIT_R0, &((Scheme_Object *)0x0)->type);
+  ref2 = jit_bnei_i(jit_forward(), JIT_R1, scheme_char_type);
+#endif
+  /* Test that it's < 256 */
+  jit_ldxi_s(JIT_R1, JIT_R0, &SCHEME_CHAR_VAL(0x0));
+  ref3 = jit_blti_i(jit_forward(), JIT_R1, 256);
+
+  if (for_branch) {
+    scheme_add_branch_false(for_branch, ref1);
+    scheme_add_branch_false(for_branch, ref2);
+    scheme_add_branch_false(for_branch, ref3);
+
+    /* Note that the test didn't disturb R0: */
+    mz_SET_R0_STATUS_VALID(reg_valid);
+
+    scheme_branch_for_true(jitter, for_branch);
+    CHECK_LIMIT();
+  } else {
+    GC_CAN_IGNORE jit_insn *ref_ucfinish;
+    (void)jit_movi_p(dest, scheme_true);
+    ref_ucfinish = jit_jmpi(jit_forward());
+    mz_patch_branch(ref1);
+    mz_patch_branch(ref2);
+    mz_patch_branch(ref3);
+    (void)jit_movi_p(dest, scheme_false);
+    mz_patch_ucbranch(ref_ucfinish);
+  }
+
+  __END_SHORT_JUMPS__(branch_short);
+
+  return 1;
+}
+
 static int generate_inlined_immutable_test(mz_jit_state *jitter, Scheme_App2_Rec *app,
                                            Branch_Info *for_branch, int branch_short,
                                            int dest)
@@ -705,6 +771,49 @@ static Scheme_Object *alloc_structure(Scheme_Object *_stype, int argc)
   }
   
   return (Scheme_Object *)inst;
+}
+
+static Scheme_Object *checked_make_vector(int argc)
+  XFORM_SKIP_PROC
+/* Arguments on runstack */
+{
+#ifdef MZ_USE_FUTURES
+  Scheme_Object *vec, *val, *c = MZ_RUNSTACK[0];
+
+  if (SCHEME_INTP(c)
+      && (SCHEME_INT_VAL(c) >= 0)
+      /* Upper bound ensures that we don't have to deal with overflow: */
+      && (SCHEME_INT_VAL(c) < 0x1000000)) {
+    /* In a future thread, we can try to call scheme_malloc_tagged() directory,
+       but it might fail and return NULL */
+    intptr_t count = SCHEME_INT_VAL(c), i, size;
+    size = (sizeof(Scheme_Vector)
+            + ((count - mzFLEX_DELTA) * sizeof(Scheme_Object *)));
+    if ((count < 1024) || scheme_use_rtcall)
+      vec = scheme_malloc_tagged(size);
+    else
+      vec = scheme_malloc_fail_ok(scheme_malloc_tagged, size);
+    if (vec) {
+      vec->type = scheme_vector_type;
+      SCHEME_VEC_SIZE(vec) = count;
+    } else {
+      /* Must be in a future thread */
+      vec = scheme_rtcall_allocate_vector(count);
+      if (!vec) {
+        /* Unusual failure --- maybe "out of memory" */
+        return ts_scheme_checked_make_vector(argc, MZ_RUNSTACK);
+      }
+    }
+
+    val = ((argc > 1) ? MZ_RUNSTACK[1] : scheme_make_integer(0));
+    for (i = 0; i < count; i++) {
+      SCHEME_VEC_ELS(vec)[i] = val;
+    }
+
+    return vec;
+  } else
+#endif
+    return ts_scheme_checked_make_vector(argc, MZ_RUNSTACK);
 }
 
 Scheme_Structure *scheme_jit_allocate_structure(int argc, Scheme_Struct_Type *stype)
@@ -1042,6 +1151,10 @@ static int generate_inlined_constant_varref_test(mz_jit_state *jitter, Scheme_Ob
 static int generate_vector_alloc(mz_jit_state *jitter, Scheme_Object *rator,
                                  Scheme_App_Rec *app, Scheme_App2_Rec *app2, Scheme_App3_Rec *app3,
                                  int dest);
+static int generate_make_vector_alloc(mz_jit_state *jitter,
+                                      Scheme_Object *rator,
+                                      Scheme_Object *rand1, Scheme_Object *rand2,
+                                      int dest);
 
 int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, int is_tail, int multi_ok, 
 				  Branch_Info *for_branch, int branch_short, int result_ignored,
@@ -1089,6 +1202,9 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
   if (IS_NAMED_PRIM(rator, "not")) {
     generate_inlined_constant_test(jitter, app, scheme_false, NULL, for_branch, branch_short, dest);
     return 1;
+  } else if (IS_NAMED_PRIM(rator, "true-object?")) {
+    generate_inlined_constant_test(jitter, app, scheme_true, NULL, for_branch, branch_short, dest);
+    return 1;
   } else if (IS_NAMED_PRIM(rator, "null?")) {
     generate_inlined_constant_test(jitter, app, scheme_null, NULL, for_branch, branch_short, dest);
     return 1;
@@ -1112,6 +1228,9 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
     return 1;
   } else if (IS_NAMED_PRIM(rator, "char?")) {
     generate_inlined_type_test(jitter, app, scheme_char_type, scheme_char_type, 0, for_branch, branch_short, dest);
+    return 1;
+  } else if (IS_NAMED_PRIM(rator, "interned-char?")) {
+    generate_inlined_interned_char_test(jitter, app, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "boolean?")) {
     generate_inlined_constant_test(jitter, app, scheme_false, scheme_true, for_branch, branch_short, dest);
@@ -1991,6 +2110,8 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
     } else if (IS_NAMED_PRIM(rator, "vector-immutable")
                || IS_NAMED_PRIM(rator, "vector")) {
       return generate_vector_alloc(jitter, rator, NULL, app, NULL, dest);
+    } else if (IS_NAMED_PRIM(rator, "make-vector")) {
+      return generate_make_vector_alloc(jitter, rator, app->rand, NULL, dest);
     } else if (IS_NAMED_PRIM(rator, "list*")
                || IS_NAMED_PRIM(rator, "values")) {
       /* on a single argument, `list*' or `values' is identity */
@@ -3844,6 +3965,8 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
     } else if (IS_NAMED_PRIM(rator, "vector-immutable")
                || IS_NAMED_PRIM(rator, "vector")) {
       return generate_vector_alloc(jitter, rator, NULL, NULL, app, dest);
+    } else if (IS_NAMED_PRIM(rator, "make-vector")) {
+      return generate_make_vector_alloc(jitter, rator, app->rand1, app->rand2, dest);
     } else if (IS_NAMED_PRIM(rator, "make-rectangular")) {
       GC_CAN_IGNORE jit_insn *ref, *ref2, *ref3, *ref4, *refslow, *refdone;
 
@@ -5200,6 +5323,38 @@ static int generate_vector_alloc(mz_jit_state *jitter, Scheme_Object *rator,
       mz_runstack_popped(jitter, c);
     }
   }
+
+  return 1;
+}
+
+int generate_make_vector_alloc(mz_jit_state *jitter,
+                               Scheme_Object *rator,
+                               Scheme_Object *rand1, Scheme_Object *rand2,
+                               int dest)
+/* de-sync'd ok */
+{
+  GC_CAN_IGNORE jit_insn *refrts USED_ONLY_FOR_FUTURES;
+  Scheme_Object *args[3];
+  int argc = (rand2 ? 2 : 1);
+
+  args[0] = rator;
+  args[1] = rand1;
+  args[2] = rand2;
+
+  scheme_generate_app(NULL, args, argc, argc, jitter, 0, 0, 0, 2);
+
+  mz_rs_sync();
+  JIT_UPDATE_THREAD_RSPTR_IF_NEEDED();
+
+  jit_movi_i(JIT_R1, argc);
+
+  jit_prepare(1);
+  jit_pusharg_i(JIT_R1);
+  (void)mz_finish_lwe(checked_make_vector, refrts);
+  jit_retval(dest);
+
+  jit_addi_l(JIT_RUNSTACK, JIT_RUNSTACK, WORDS_TO_BYTES(argc));
+  mz_runstack_popped(jitter, argc);
 
   return 1;
 }

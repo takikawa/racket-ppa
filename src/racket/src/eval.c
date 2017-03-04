@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2016 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -1125,7 +1125,8 @@ void scheme_new_mark_segment(Scheme_Thread *p)
   seg = scheme_malloc_allow_interior(sizeof(Scheme_Cont_Mark) * SCHEME_MARK_SEGMENT_SIZE);
   segs[c] = seg;
 
-  memcpy(segs, p->cont_mark_stack_segments, c * sizeof(Scheme_Cont_Mark *));
+  if (c)
+    memcpy(segs, p->cont_mark_stack_segments, c * sizeof(Scheme_Cont_Mark *));
   
   p->cont_mark_seg_count++;
   p->cont_mark_stack_segments = segs;
@@ -2251,8 +2252,6 @@ scheme_case_lambda_execute(Scheme_Object *expr)
   int i, cnt;
   Scheme_Thread *p = scheme_current_thread;
 
-  DEBUG_COUNT_ALLOCATION(expr);
-
   seqin = (Scheme_Case_Lambda *)expr;
 
 #ifdef MZ_USE_JIT
@@ -2504,10 +2503,8 @@ scheme_make_closure(Scheme_Thread *p, Scheme_Object *code, int close)
   GC_CAN_IGNORE mzshort *map;
   int i;
 
-  DEBUG_COUNT_ALLOCATION(code);
-
   data = (Scheme_Lambda *)code;
-  
+
 #ifdef MZ_USE_JIT
   if (data->u.native_code
       /* If the union points to a another Scheme_Lambda*, then it's not actually
@@ -2657,7 +2654,8 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
   Scheme_Type type;
   Scheme_Object *v;
   GC_CAN_IGNORE Scheme_Object *tmpv; /* safe-for-space relies on GC_CAN_IGNORE */
-  GC_MAYBE_IGNORE_INTERIOR Scheme_Object **old_runstack;
+  GC_CAN_IGNORE Scheme_Object **tmprands; /* safe-for-space relies on GC_CAN_IGNORE */
+  GC_MAYBE_IGNORE_INTERIOR Scheme_Object **old_runstack, **runstack_base;
   GC_MAYBE_IGNORE_INTERIOR MZ_MARK_STACK_TYPE old_cont_mark_stack;
 #if USE_LOCAL_RUNSTACK
   GC_MAYBE_IGNORE_INTERIOR Scheme_Object **runstack;
@@ -2723,6 +2721,17 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 
   MZ_CONT_MARK_POS += 2;
   old_runstack = RUNSTACK;
+  if (num_rands >= 0) {
+    /* If we have a call with arguments at runstack, then we're
+       allowed to recycle the argument part of the runstack. In fact,
+       space safety may relies on reusing that space to clear argument
+       values. */
+    if (rands == RUNSTACK)
+      runstack_base = RUNSTACK + num_rands;
+    else
+      runstack_base = RUNSTACK;
+  } else
+    runstack_base = RUNSTACK;
   old_cont_mark_stack = MZ_CONT_MARK_STACK;
 
   if (num_rands >= 0) {
@@ -2791,8 +2800,9 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
       }
 
       f = prim->prim_val;
-
-      v = f(num_rands, rands, (Scheme_Object *)prim);
+      tmprands = rands;
+      rands = NULL; /* safe for space, since tmprands is ignored by the GC */
+      v = f(num_rands, tmprands, (Scheme_Object *)prim);
 
       DEBUG_CHECK_TYPE(v);
     } else if (type == scheme_closure_type) {
@@ -2804,7 +2814,7 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 
       data = SCHEME_CLOSURE_CODE(obj);
 
-      if ((RUNSTACK - RUNSTACK_START) < data->max_let_depth) {
+      if ((runstack_base - RUNSTACK_START) < data->max_let_depth) {
         rands = evacuate_runstack(num_rands, rands, RUNSTACK);
 
 	if (rands == p->tail_buffer) {
@@ -2843,7 +2853,7 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 
 	  n = num_params - has_rest;
 	  
-	  RUNSTACK = old_runstack - num_params;
+	  RUNSTACK = runstack_base - num_params;
 	  CHECK_RUNSTACK(p, RUNSTACK);
 	  RUNSTACK_CHANGED();
 
@@ -2904,7 +2914,7 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 	    return NULL; /* Doesn't get here */
 	  }
 	
-          stack = RUNSTACK = old_runstack - num_params;
+          stack = RUNSTACK = runstack_base - num_params;
           CHECK_RUNSTACK(p, RUNSTACK);
           RUNSTACK_CHANGED();
           
@@ -2928,7 +2938,7 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 	    return NULL; /* Doesn't get here */
 	  }
 	}
-	RUNSTACK = old_runstack;
+	RUNSTACK = runstack_base;
 	RUNSTACK_CHANGED();
       }
       
@@ -3046,8 +3056,11 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
       }
 
       tmpv = obj;
-      obj = NULL; /* save for space, since tmpv is ignored by the GC */
-      v = data->start_code(tmpv, num_rands, rands EXTRA_NATIVE_ARGUMENT);
+      obj = NULL; /* safe for space, since tmpv is ignored by the GC */
+      tmprands = rands;
+      if (rands != old_runstack)
+        rands = NULL; /* safe for space, since tmprands is ignored by the GC */
+      v = data->start_code(tmpv, num_rands, tmprands EXTRA_NATIVE_ARGUMENT);
 
       if (v == SCHEME_TAIL_CALL_WAITING) {
         /* [TC-SFS]; see schnapp.inc */
@@ -3153,7 +3166,9 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
             /* Chaperone is for function arguments */
             VACATE_TAIL_BUFFER_USE_RUNSTACK();
             UPDATE_THREAD_RSPTR();
-            v = scheme_apply_chaperone(scheme_make_raw_pair(obj, orig_obj), num_rands, rands, NULL, 0);
+            tmprands = rands;
+            rands = NULL; /* safe for space, since tmprands is ignored by the GC */
+            v = scheme_apply_chaperone(scheme_make_raw_pair(obj, orig_obj), num_rands, tmprands, NULL, 0);
             
             if (SAME_OBJ(v, SCHEME_TAIL_CALL_WAITING)) {
               /* Need to stay in this loop, because a tail-call result must
@@ -3165,7 +3180,7 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
               rands = p->ku.apply.tail_rands;
               p->ku.apply.tail_rator = NULL;
               p->ku.apply.tail_rands = NULL;
-              RUNSTACK = old_runstack;
+              RUNSTACK = runstack_base;
               RUNSTACK_CHANGED();
             } else {
               break;
@@ -3182,7 +3197,9 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
         /* Chaperone is for function arguments */
         VACATE_TAIL_BUFFER_USE_RUNSTACK();
         UPDATE_THREAD_RSPTR();
-        v = scheme_apply_chaperone(obj, num_rands, rands, NULL, 0);
+        tmprands = rands;
+        rands = NULL; /* safe for space, since tmprands is ignored by the GC */
+        v = scheme_apply_chaperone(obj, num_rands, tmprands, NULL, 0);
       }
     } else if (type == scheme_closed_prim_type) {
       GC_CAN_IGNORE Scheme_Closed_Primitive_Proc *prim;
@@ -3202,8 +3219,11 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 			     0);
 	return NULL; /* Shouldn't get here */
       }
-      
-      v = prim->prim_val(prim->data, num_rands, rands);
+
+      tmprands = rands;
+      if (rands != old_runstack)
+        rands = NULL; /* safe for space, since tmprands is ignored by the GC */
+      v = prim->prim_val(prim->data, num_rands, tmprands);
 
       if (v == SCHEME_TAIL_CALL_WAITING) {
         /* [TC-SFS]; see schnapp.inc */
@@ -3934,7 +3954,7 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
     rands = p->ku.apply.tail_rands;
     p->ku.apply.tail_rator = NULL;
     p->ku.apply.tail_rands = NULL;
-    RUNSTACK = old_runstack;
+    RUNSTACK = runstack_base;
     RUNSTACK_CHANGED();
     goto apply_top;
   }
@@ -3958,6 +3978,13 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 
  returnv_never_multi:
 
+  /* If resetting RUNSTACK to old_runstack makes the stack larger, we
+     need to clear extra slots to avoid making an old value on the
+     runstack suddenly live again */
+  while ((uintptr_t)RUNSTACK > (uintptr_t)old_runstack) {
+    RUNSTACK--;
+    *RUNSTACK = NULL;
+  }
   MZ_RUNSTACK = old_runstack;
   MZ_CONT_MARK_STACK = old_cont_mark_stack;
   MZ_CONT_MARK_POS -= 2;

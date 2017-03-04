@@ -118,9 +118,11 @@
 (define (between/c-first-order ctc)
   (define n (between/c-s-low ctc))
   (define m (between/c-s-high ctc))
-  (λ (x) 
-    (and (real? x)
-         (<= n x m))))
+  (cond
+    [(and (= n -inf.0) (= m +inf.0))
+     real?]
+    [else
+     (λ (x) (and (real? x) (<= n x m)))]))
 
 (define ((between/c-generate ctc) fuel)
   (define n (between/c-s-low ctc))
@@ -176,18 +178,20 @@
    (λ (ctc)
      (define n (between/c-s-low ctc))
      (define m (between/c-s-high ctc))
-     (define name (if (real-in-s? ctc) 'real-in 'between/c))
+     (define name (if (renamed-between/c? ctc) (renamed-between/c-name ctc) 'between/c))
      (cond
        [(and (= n -inf.0) (= m +inf.0))
-        `(,name ,n ,m)]
-       [(= n -inf.0) `(<=/c ,m)]
-       [(= m +inf.0) `(>=/c ,n)]
+        (if (renamed-between/c? ctc)
+            (renamed-between/c-name ctc)
+            'real?)]
+       [(= n -inf.0) (if (= m 0) `(and/c real? (not/c positive?)) `(<=/c ,m))]
+       [(= m +inf.0) (if (= n 0) `(and/c real? (not/c negative?)) `(>=/c ,n))]
        [(= n m) `(=/c ,n)]
        [else `(,name ,n ,m)]))
    #:stronger between/c-stronger
    #:first-order between/c-first-order
    #:generate between/c-generate))
-(define-struct (real-in-s between/c-s) ())
+(define-struct (renamed-between/c between/c-s) (name))
 
 (define (maybe-neg n) (rand-choice [1/2 n] [else (- n)]))
 
@@ -214,7 +218,12 @@
 
 (define (make-</c->/c-contract-property name </> -/+ less/greater)
   (build-flat-contract-property
-   #:name (λ (c) `(,name ,(</>-ctc-x c)))
+   #:name (λ (c)
+            (cond
+              [(= (</>-ctc-x c) 0)
+               `(and/c real? ,(if (equal? name '>/c) 'positive? 'negative?))]
+              [else
+               `(,name ,(</>-ctc-x c))]))
    #:first-order (λ (ctc) (define x (</>-ctc-x ctc)) (λ (y) (and (real? y) (</> y x))))
    #:late-neg-projection
    (λ (ctc)
@@ -286,13 +295,19 @@
                           1
                           arg1 arg2)))
 
+(set-some-basic-misc-contracts! (between/c -inf.0 +inf.0)
+                                renamed-between/c
+                                between/c-s?
+                                between/c-s-low
+                                between/c-s-high)
+
 (define (char-in a b)
   (check-two-args 'char-in a b char? char?)
   (char-in/c a b))
 
 (define/final-prop (real-in start end)
   (check-two-args 'real-in start end real? real?)
-  (make-real-in-s start end))
+  (make-renamed-between/c start end 'real-in))
 
 (define/final-prop (not/c f)
   (let* ([ctc (coerce-flat-contract 'not/c f)]
@@ -349,7 +364,9 @@
                 (values (λ (val) (with-contract-continuation-mark
                                   blame+neg-party
                                   (p-app val neg-party)))
-                        promise)))))
+                        promise))))
+           impersonator-prop:contracted ctc
+           impersonator-prop:blame blame)
           (raise-blame-error
            blame #:missing-party neg-party
            val
@@ -764,7 +781,10 @@
          '(expected: "~s" given: "~e")
          (contract-name evt-ctc)
          val))
-      (chaperone-evt val (generator (cons blame neg-party))))))
+      (chaperone-evt val
+                     (generator (cons blame neg-party))
+                     impersonator-prop:contracted evt-ctc
+                     impersonator-prop:blame (blame-add-missing-party blame neg-party)))))
 
 ;; evt/c-first-order : Contract -> Any -> Boolean
 ;; First order check for evt/c
