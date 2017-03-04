@@ -1,8 +1,12 @@
 racket (6.8-1) experimental; urgency=medium
 
   * New upstream version
+  * Patch libcrypto.rkt to look for openssl 1.1, recommend libssl1.1. Bug
+    fix: "Raco fails without libssl-dev", thanks to Martin Tang (Closes:
+    #836346).
+  * Cherry pick fix for type-masks to fix compilation on 32bit arches.
 
- -- David Bremner <bremner@debian.org>  Sat, 04 Mar 2017 08:18:51 -0400
+ -- David Bremner <bremner@debian.org>  Sat, 04 Mar 2017 11:54:04 -0400
 
 racket (6.7-1) unstable; urgency=medium
 
