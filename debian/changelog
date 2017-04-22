@@ -1,3 +1,11 @@
+racket (6.7-3) unstable; urgency=medium
+
+  * Disable parallel building on 32bit architectures. Racket's parallel
+    build currently uses OS threads, so unbounded parallelism hits per
+    process address space limitations. (Closes: #860670).
+
+ -- David Bremner <bremner@debian.org>  Sat, 22 Apr 2017 14:26:26 -0300
+
 racket (6.7-2) unstable; urgency=medium
 
   * Patch libcrypto.rkt to look for openssl 1.1, recommend libssl1.1. Bug
