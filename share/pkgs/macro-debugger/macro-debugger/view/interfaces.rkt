@@ -62,7 +62,8 @@
 
 
 (define-interface term-record<%> ()
-  (get-raw-deriv
+  (get-events
+   get-raw-deriv
    get-deriv-hidden?
    get-step-index
    get-step-count

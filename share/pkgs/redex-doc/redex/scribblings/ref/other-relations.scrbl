@@ -44,11 +44,14 @@
                                    (where/error pat @#,tttterm)
                                    (judgment-holds 
                                     (judgment-form-id pat/term ...))
+                                   (judgment-holds
+                                    (relation-id @#,tttterm ...))
                                    (clause-name name)
                                    (code:line or @#,tttterm)])]{
 
-The @racket[define-metafunction] form builds a function on
-terms according to the pattern and right-hand-side
+A @deftech{metafunction} is a function on terms.
+The @racket[define-metafunction] form builds a metafunction
+according to the pattern and right-hand-side
 expressions. The first argument indicates the language used
 to resolve non-terminals in the pattern expressions. Each of
 the rhs-expressions is implicitly wrapped in @|tttterm|. 
@@ -90,7 +93,7 @@ except the match guards the clause. The @racket[where/error]
 extra is like @racket[where], except that the pattern must match.
 
 The @racket[judgment-holds] clause is like @racket[side-condition]
-and @racket[where], except the given judgment must hold for the
+and @racket[where], except the given judgment or relation must hold for the
 clause to be taken.
 
 The @racket[clause-name] is used only when typesetting. See
@@ -196,7 +199,9 @@ legitimate inputs according to @racket[metafunction-name]'s contract,
 and @racket[#f] otherwise.
 }
 
-@defform/subs[#:literals (I O where where/hidden where/error side-condition side-condition/hidden etc.)
+@defform/subs[#:literals (I O where where/hidden where/error
+                            side-condition side-condition/hidden
+                            etc.)
              (define-judgment-form language
                mode-spec
                contract-spec
@@ -219,6 +224,7 @@ and @racket[#f] otherwise.
                      rule-name]]
               [conclusion (form-id pat/term ...)]
               [premise (code:line (judgment-form-id pat/term ...) maybe-ellipsis)
+                       (code:line (relation-id pat/term ...) maybe-ellipsis)
                        (where @#,ttpattern @#,tttterm)
                        (where/hidden @#,ttpattern @#,tttterm)
                        (where/error @#,ttpattern @#,tttterm)
@@ -226,7 +232,7 @@ and @racket[#f] otherwise.
                        (side-condition/hidden @#,tttterm)]
               [rule-name (code:line)
                          string
-                         non-ellipsis-non-hypens-var]
+                         non-ellipsis-non-dashes-var]
               [pat/term @#,ttpattern
                         @#,tttterm]
               [maybe-ellipsis (code:line)
@@ -241,10 +247,14 @@ without ``guessing'' values for any of their pattern variables. Redex checks thi
 property using the mandatory @racket[mode-spec] declaration, which partitions positions
 into inputs @racket[I] and outputs @racket[O]. Output positions in conclusions
 and input positions in premises must be @|tttterm|s; input positions in conclusions and 
-output positions in premises must be @|ttpattern|s. When the optional @racket[contract-spec] 
+output positions in premises must be @|ttpattern|s.
+The @racket[rule-name]s are used by @racket[build-derivations]
+and by @racket[render-judgment-form].
+
+When the optional @racket[contract-spec]
 declaration is present, Redex dynamically checks that the terms flowing through
 these positions match the provided patterns, raising an exception recognized by 
-@racket[exn:fail:redex] if not. The term in the optional @racket[invariant-spec] is
+@racket[exn:fail:redex?] if not. The term in the optional @racket[invariant-spec] is
 evaluated after the output positions have been computed and the contract has matched
 successfully, with variables from the contract bound; a result of @racket[#f] is
 considered to be a contract violation and an exception is raised.
@@ -285,11 +295,11 @@ to compute all pairs with a given sum.
            (define-judgment-form nats
              #:mode (sumr O O I)
              #:contract (sumr n n n)
-             [------------
+             [------------ sumr-z
               (sumr z n n)]
              
              [(sumr n_1 n_2 n_3)
-              --------------------------
+              -------------------------- sumr-s
               (sumr (s n_1) n_2 (s n_3))])
            (judgment-holds (sumr n_1 n_2 (s (s z))) (n_1 n_2))]
 
@@ -400,7 +410,10 @@ demonstrates three use cases.
 These files can be found via DrRacket's @onscreen{File|Open Require Path...} menu item.
 Type @litchar{redex/examples/d/} into the dialog and then
 choose one of the names listed above. Or, evaluate the expression
-@racketblock[(collection-file-path #,(list "\"" @bold{«filename.rkt»} "\"") "redex" "examples" "define-judgment-form")]
+ @racketblock[(collection-file-path #,(bold "«filename.rkt»")
+                                    "redex"
+                                    "examples"
+                                    "define-judgment-form")]
 replacing @bold{«filename.rkt»} with one of the names listed above.
 }
 
@@ -418,13 +431,18 @@ replacing @bold{«filename.rkt»} with one of the names listed above.
  must be the same.
 }
                              
-@defform*/subs[((judgment-holds judgment)
-                (judgment-holds judgment @#,tttterm))
-               ([judgment (judgment-form-id pat/term ...)])]{
-In its first form, checks whether @racket[judgment] holds for any assignment of
-the pattern variables in @racket[judgment-id]'s output positions. In its second
+@defform*/subs[((judgment-holds judgment-or-relation)
+                (judgment-holds judgment-or-relation @#,tttterm))
+               ([judgment-or-relation
+                 (judgment-form-id pat/term ...)
+                 (relation-id pat/term ...)])]{
+In its first form, checks whether @racket[judgment-or-relation] holds for any assignment of
+the pattern variables in @racket[judgment-for-id]'s output positions (or just that it holds
+ in the case that a relation from @racket[define-relation] is used). In its second
 form, produces a list of terms by instantiating the supplied term template with
-each satisfying assignment of pattern variables.
+each satisfying assignment of pattern variables. In the second case, if a relation
+is supplied, there are no pattern variables, so the result is either a list with
+one element or the empty list.
 
  @examples[#:label #f #:eval redex-eval
            (judgment-holds (sum (s (s z)) (s z) n))
@@ -432,9 +450,9 @@ each satisfying assignment of pattern variables.
  See @racket[define-judgment-form] for more examples.
 }
 
-@defform[(build-derivations judgment)]{
+@defform[(build-derivations judgment-or-relation)]{
   Constructs all of the @racket[derivation] trees
-  for @racket[judgment]. 
+  for @racket[judgment-or-relation].
   
 @examples[
 #:eval redex-eval
@@ -471,8 +489,7 @@ is an error elsewhere.
                                   (code:line form-id ⊂ @#,ttpattern x ... x @#,ttpattern)
                                   (code:line form-id ⊆ @#,ttpattern × ... × @#,ttpattern)])]{
 Similar to @racket[define-judgment-form] but suitable only when every position
-is an input. There is no associated form corresponding to 
-@racket[judgment-holds]; querying the result uses the same syntax as 
+is an input. Querying the result uses @racket[judgment-holds] or the same syntax as 
 metafunction application.
 
 The contract specification for a relation restricts the patterns that can
@@ -495,9 +512,9 @@ the argument contracts.
           (subtype τ_2 σ_2)]
          [(subtype τ τ)])
 
-       (term (subtype int num))
-       (term (subtype (int → int) (num → num)))
-       (term (subtype (num → int) (num → num)))]
+       (judgment-holds (subtype int num))
+       (judgment-holds (subtype (int → int) (num → num)))
+       (judgment-holds (subtype (num → int) (num → num)))]
 }
 
 @defproc[(judgment-form? [v any/c]) boolean?]{

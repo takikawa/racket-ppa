@@ -67,10 +67,17 @@
               #f)
           #t))
     (set! plai-all-test-results (cons result plai-all-test-results))
+    (define pf (if error? eprintf printf))
     (when print?
-      (if (abridged-test-output)
-          (apply (if error? eprintf printf) "(~s ~v ~v)\n" result)
-          (apply (if error? eprintf printf) "(~s ~s ~v ~v ~s)\n" result)))
+      (cond [(abridged-test-output)
+             (apply pf "(~s ~v ~v)\n" result)]
+            [else
+             (match-define `(,kind ,expr ,given ,expected ,line) result)
+             (if (eq? (first result) 'exception)
+                 (pf "~s ~s ~a\n  expected: ~a\n~a\n\n"
+                     kind expr line expected given)
+                 (pf "~s ~s ~a\n  expected: ~v\n  given: ~v\n\n"
+                     kind expr line expected given))]))
     (when (and halt-on-errors? error?)
       (raise (make-exn:test (string->immutable-string (format "test failed: ~s" result))
                             (current-continuation-marks))))))
@@ -142,7 +149,7 @@
 (define (equal~? x y)
   (or (parameterize ([current-inspector (test-inspector)])
         (equal? x y))
-      (and (number? x) (number? y)
+      (and (real? x) (real? y)
            (or (inexact? x) (inexact? y))
            ; If one of them is inexact, we do the math.
            (< (abs (- x y)) (test-inexact-epsilon)))))

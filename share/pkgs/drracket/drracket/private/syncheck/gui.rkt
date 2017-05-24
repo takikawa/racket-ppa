@@ -430,6 +430,10 @@ If the namespace does not, they are colored the unbound color.
             ;;                             -o> (setof (list text number number))]
             ;; this is a private field
             (define bindings-table (make-hash))
+
+            ;; unused-require-table : hash-table[(list text number number) -o> #t]
+            ;; this table records if a given require appears to be unused
+            (define unused-require-table (make-hash))
             
             ;; add-to-bindings-table : text number number text number number -> boolean
             ;; results indicates if the binding was added to the table. It is added, unless
@@ -598,7 +602,8 @@ If the namespace does not, they are colored the unbound color.
               (set! arrow-records (make-hasheq))
               (set! bindings-table (make-hash))
               (set! cleanup-texts '())
-              (set! definition-targets (make-hash)))
+              (set! definition-targets (make-hash))
+              (set! unused-require-table (make-hash)))
             
             (define/public (syncheck:arrows-visible?)
               (or arrow-records cursor-pos cursor-text cursor-eles cursor-tooltip))
@@ -738,6 +743,31 @@ If the namespace does not, they are colored the unbound color.
                                 (find-arrows (- (send text get-start-position) 1))))))
                 (when arrows
                   (tack/untack-callback arrows))))
+
+            (define (find-preceding-ws-pos edit pos)
+              (let loop ([token-type (send edit classify-position (sub1 pos))]
+                         [current-pos pos])
+                (cond
+                  [(eq? token-type 'white-space)
+                   (define-values (ws-start ws-end)
+                     (send edit get-token-range (sub1 current-pos)))
+                   (loop (send edit classify-position (sub1 ws-start)) ws-start)]
+                  [(and (eq? token-type 'comment)
+                        (char=? (send edit get-character current-pos) #\newline))
+                   (add1 current-pos)]
+                  [else current-pos])))
+
+            (define/public (remove-unused-requires txt pos)
+              (define unused-reqs
+                (sort (hash-keys unused-require-table) > #:key cadr))
+              (begin-edit-sequence)
+              (for ([req (in-list unused-reqs)])
+                (match-define (list edit start end) req)
+                (define prev-token-end (find-preceding-ws-pos edit start))
+                (send edit delete prev-token-end end)
+                (send edit tabify prev-token-end))
+              (hash-clear! unused-require-table)
+              (end-edit-sequence))
 
             (define/public (add-prefix-for-require txt pos)
               (define binding-identifiers (position->binding-arrows txt pos pos #t))
@@ -982,6 +1012,11 @@ If the namespace does not, they are colored the unbound color.
                                                                     req-pos-left
                                                                     req-pos-right)
               (hash-set! prefix-table (list req-text req-pos-left req-pos-right) #t))
+
+            (define/public (syncheck:add-unused-require req-text
+                                                        req-pos-left
+                                                        req-pos-right)
+              (hash-set! unused-require-table (list req-text req-pos-left req-pos-right) #t))
             
             ;; syncheck:add-mouse-over-status : text pos-left pos-right string -> void
             (define/public (syncheck:add-mouse-over-status text pos-left pos-right str)
@@ -1039,44 +1074,13 @@ If the namespace does not, they are colored the unbound color.
                   (when any-tacked?
                     (invalidate-bitmap-cache/padding)))))
             
-            (define view-corner-hash (make-weak-hasheq))
-            
-            (define/private (get-last-view-corner admin)
-              (hash-ref view-corner-hash admin (λ () (cons #f #f))))
-            
-            (define/private (set-last-view-corner! admin corner)
-              (hash-set! view-corner-hash admin corner))
-            
-            (define/private (get-view-corner admin)
-              (define new-x (box #f))
-              (define new-y (box #f))
-              (send admin get-view new-x new-y #f #f)
-              (cons (unbox new-x) (unbox new-y)))
-            
-            (define/private (update-view-corner admin)
-              (define old-corner (get-last-view-corner admin))
-              (define new-corner (get-view-corner admin))
-              (define scrolled? (not (equal? old-corner new-corner)))
-              (set-last-view-corner! admin new-corner)
-              scrolled?)
-            
             (define/override (on-paint before dc left top right bottom dx dy draw-caret)
               (when (and arrow-records (not before))
                 (define admin (get-admin))
-                ;; update the known editor location for the upper-left corner
-                (define scrolled? (update-view-corner admin))
                 ;; when painting on the canvas the mouse is over...
-                (when (eq? mouse-admin admin)
+                (when (or (not mouse-admin) (object=? mouse-admin admin))
                   (define update-tooltip-frame-and-matching-identifiers?
                     (cond
-                      ;; turn off arrows immediately if scrolling
-                      [scrolled? (set! cursor-tooltip #f)
-                                 (set! cursor-pos #f)
-                                 (set! cursor-text #f)
-                                 (set! cursor-eles #f)
-                                 (update-docs-background #f)
-                                 (start-arrow-draw-cooldown syncheck-scroll-arrow-cooldown)
-                                 #t]
                       ;; try to update the tooltips if they're wrong
                       [(eq? cursor-tooltip 'out-of-sync)
                        (set! cursor-tooltip (get-tooltip cursor-eles))
@@ -1390,6 +1394,10 @@ If the namespace does not, they are colored the unbound color.
                        [label "Add Require Prefix"]
                        [parent menu]
                        [callback (λ (item evt) (add-prefix-for-require text pos))])
+                  (new menu-item%
+                       [label "Remove Unused Requires"]
+                       [parent menu]
+                       [callback (λ (item evt) (remove-unused-requires text pos))])
                   (for ([f (in-list add-menus)])
                     (f menu))
                   
@@ -2108,7 +2116,9 @@ If the namespace does not, they are colored the unbound color.
              (send defs-text syncheck:add-id-set to-be-renamed/poss/fixed name-dup?)]
             [`#(syncheck:add-prefixed-require-reference ,id-pos-left ,id-pos-right)
              (send defs-text syncheck:add-prefixed-require-reference
-                   defs-text id-pos-left id-pos-right)]))
+                   defs-text id-pos-left id-pos-right)]
+            [`#(syncheck:add-unused-require ,req-pos-left ,req-pos-right)
+             (send defs-text syncheck:add-unused-require defs-text req-pos-left req-pos-right)]))
         
         (define/private (build-name-dup? name-dup-pc name-dup-id known-dead-place-channels)
           (define (name-dup? name) 
@@ -2201,17 +2211,6 @@ If the namespace does not, they are colored the unbound color.
               (send report-error-parent-panel set-percentages 
                     (list p (- 1 p))))
             (send report-error-parent-panel start-recording-prefs)))
-        
-        (define rest-panel 'uninitialized-root)
-        (define super-root 'uninitialized-super-root)
-        (define/override (make-root-area-container % parent)
-          (let* ([s-root (super make-root-area-container
-                                vertical-panel%
-                                parent)]
-                 [r-root (make-object % s-root)])
-            (set! super-root s-root)
-            (set! rest-panel r-root)
-            r-root))
                 
         (inherit open-status-line close-status-line update-status-line ensure-rep-hidden)
         ;; syncheck:button-callback : (case-> (-> void) ((union #f syntax) -> void)

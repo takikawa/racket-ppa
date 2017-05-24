@@ -38,6 +38,7 @@
        (cond [(syntax-local-value stx (λ () #f)) => p?]
              [else #f])))
 
+;; mode: (or/c #f (listof (or/c 'I 'O))  -- #f means the judgment form is actually a relation
 (define-struct judgment-form (name mode proc mk-proc lang lws rule-names 
                                    gen-clauses mk-gen-clauses term-proc relation?
                                    cache transformer)
@@ -73,7 +74,7 @@
 (define (language-id-nt-identifiers stx id) (language-id-getter stx id 3))
 (define (language-id-nt-hole-map stx id) (language-id-getter stx id 4))
 
-(define pattern-symbols '(any number natural integer real string variable 
+(define pattern-symbols '(any number natural integer real string boolean variable
                               variable-not-otherwise-mentioned hole symbol))
 
 (define (build-disappeared-use id-stx-table nt id-stx)

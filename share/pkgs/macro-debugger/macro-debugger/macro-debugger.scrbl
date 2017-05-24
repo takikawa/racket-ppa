@@ -63,6 +63,22 @@ single module declaration, and opens a macro stepper frame for
 stepping through the expansion.
 }
 
+@defproc[(macro-stepper-repl [new-repl? any/c #f]
+                             [#:eval? eval? any/c #t])
+         void?]{
+
+Creates a macro stepper frame and starts a read-eval-print loop that
+shows the expansion of every expression entered into the repl. If
+@racket[new-repl?] is true, a new repl is created by calling
+@racket[(read-eval-print-loop)]; otherwise, the current repl is
+reused. If @racket[eval?] is true, then expressions are evaluated
+after expansion; otherwise only the compile-time parts are evaluated.
+
+The repl is implemented by installing a custom @tech[#:doc '(lib
+"scribblings/reference/reference.scrbl")]{evaluation handler} that
+chains to the original handler to do evaluation.
+}
+
 @section{Macro Expansion Tools}
 
 @defmodule[macro-debugger/expand]

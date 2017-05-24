@@ -360,10 +360,34 @@ one of them.}
 @defproc[(real-in [n real?] [m real?]) flat-contract?]{
 An alias for @racket[between/c].}
 
-@defproc[(integer-in [j exact-integer?] [k exact-integer?]) flat-contract?]{
+@defproc[(integer-in [j (or/c exact-integer? #f)] [k (or/c exact-integer? #f)]) flat-contract?]{
 
 Returns a @tech{flat contract} that requires the input to be an exact integer
-between @racket[j] and @racket[k], inclusive.}
+between @racket[j] and @racket[k], inclusive. If either @racket[j] or @racket[k]
+is @racket[#f], then the range is unbounded on that end.
+
+@examples[#:eval (contract-eval) #:once
+          (define/contract two-digit-number
+            (integer-in 10 99)
+            23)
+
+          (eval:error
+           (define/contract not-a-two-digit-number
+             (integer-in 10 99)
+             124))
+
+          (define/contract negative-number
+            (integer-in #f -1)
+            -4)
+
+          (eval:error
+           (define/contract not-a-negative-number
+             (integer-in #f -1)
+             4))]
+
+@history[#:changed "6.8.0.2" @elem{Allow @racket[j] and @racket[k] to be @racket[#f]}]
+
+}
 
 @defproc[(char-in [a char?] [b char?]) flat-contract?]{
 
@@ -450,7 +474,7 @@ in which case the result is the original vector.
 
 @history[#:changed "6.3.0.5" @list{Changed flat vector contracts to not copy
            immutable vectors.}
-         #:changed "6.7.0.3" @list{Added the @racket[#:eager] option.}]}
+         #:changed "6.7.0.3" @list{Added the @racket[#:eager] option.}]
 
 
 @defproc[(vector-immutableof [c contract?]) contract?]{
@@ -2636,16 +2660,6 @@ returns @racket[#f] but @racket[value-blame] returns @racket[#f].
                       (or/c (-> (or/c contract-random-generate-fail? c))
                             #f))]))
            (λ (c) (λ (fuel) #f))]
-          [#:exercise
-           exercise
-           (->i ([c contract?])
-                ([result
-                  (c)
-                  (-> (and/c positive? real?)
-                      (values
-                       (-> c void?)
-                       (listof contract?)))]))
-           (λ (c) (λ (fuel) (values void '())))]
           [#:list-contract? is-list-contract? (-> contract? boolean?) (λ (c) #f)])
          flat-contract-property?]
 @defproc[(build-chaperone-contract-property
@@ -2802,15 +2816,18 @@ compared with the original, uncontracted value.
 
 A @deftech{flat contract property} specifies the behavior of a structure when
 used as a @tech{flat contract}.  It is specified using
-@racket[build-flat-contract-property], and accepts exactly the same set of
-arguments as @racket[build-contract-property].  The only difference is that the
-projection accessor is expected not to wrap its argument in a higher-order
-fashion, analogous to the constraint on projections in
-@racket[make-flat-contract].
+@racket[build-flat-contract-property], and accepts similar
+arguments as @racket[build-contract-property].  The differences are:
+@itemlist[
+@item{the projection accessor is expected not to wrap its argument in a
+      higher-order fashion, analogous to the constraint on projections in
+      @racket[make-flat-contract];}
+@item{the @racket[#:exercise] keyword argument is omitted because it is not
+      relevant for flat contracts.}]
 
 @history[#:changed "6.0.1.13" @list{Added the @racket[#:list-contract?] argument.}
-         #:changed "6.1.1.4" 
-         @list{Allow @racket[generate] to return @racket[contract-random-generate-fail]}]
+         #:changed "6.1.1.4"
+         @list{Allow @racket[generate] to return @racket[contract-random-generate-fail].}]
 }
 
 @deftogether[(

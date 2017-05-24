@@ -114,11 +114,11 @@
    initialize-prefs-panel
    big-defs/ints-label<%>
    
-   change-lang-surrogate-mixin
-   default-surrogate%
    modes<%>
    modes-mixin
-   drracket-determined-width))
+   drracket-determined-width
+
+   error-message%))
 
 (define-signature drracket:module-language-tools-cm^
   (frame-mixin
@@ -126,6 +126,7 @@
    definitions-text-mixin))
 (define-signature drracket:module-language-tools^ extends drracket:module-language-tools-cm^
   (add-opt-out-toolbar-button
+   add-opt-in-toolbar-button
    add-online-expansion-handler
    add-online-expansion-monitor
    register-online-expansion-pref

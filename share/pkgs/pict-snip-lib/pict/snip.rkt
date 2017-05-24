@@ -5,14 +5,20 @@
          racket/format
          (prefix-in racket: racket/base)
          pict
+         pict/convert
          wxme)
 
 (provide snip-class
          reader
          pict-snip%)
 
+(define convert<%>
+  (interface* ()
+              ([prop:pict-convertible
+                (lambda (o) (send o get-pict))])))
+
 (define pict-snip%
-  (class snip%
+  (class* snip% (convert<%>)
     (init-field pict)
     (define drawer (make-pict-drawer pict))
     (define/override (get-extent dc x y wb hb db sb lb rb)

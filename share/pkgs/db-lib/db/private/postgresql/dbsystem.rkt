@@ -2,6 +2,8 @@
 (require racket/class
          racket/list
          racket/match
+         racket/string
+         file/sha1
          (prefix-in srfi: srfi/19)
          json
          db/private/generic/interfaces
@@ -171,6 +173,8 @@
   (604  polygon      0   1  recv-polygon      send-polygon)
   (718  circle       0   1  recv-circle       send-circle)
 
+  (2950 uuid              0 1 recv-uuid send-uuid)
+  
   (3904 int4range    9.2 1  (recv-range 23)   (send-range 23))
   (3926 int8range    9.2 1  (recv-range 20)   (send-range 20))
   (3906 numrange     9.2 1  (recv-range 1700) (send-range 1700))
@@ -215,6 +219,8 @@
   (1231 decimal-array     0   1  recv-array (send-array 1700))
   (1270 timetz-array      0   1  recv-array (send-array 1266))
 
+  (2951 uuid-array       0 1 recv-array (send-array 2950))
+  
   (3905 int4range-array   9.2 1  recv-array (send-array 3904))
   (3927 int8range-array   9.2 1  recv-array (send-array 3926))
   (3907 numrange-array    9.2 1  recv-array (send-array 3906))
@@ -253,8 +259,6 @@
   (2279 trigger           #f 0 #f #f)
   (2281 internal          #f 0 #f #f)
   (2282 opaque            #f 0 #f #f)
-  (2950 uuid              #f 0 #f #f)
-  (2951 uuid-array        #f 0 #f #f)
   (3614 tsvector          #f 0 #f #f)
   (3515 tsquery           #f 0 #f #f)
   (3642 gtsvector         #f 0 #f #f)
@@ -333,6 +337,16 @@ jsonb = version:byte byte*
 
 (define (recv-bytea buf start end)
   (subbytes buf start end))
+
+(define (recv-uuid buf start end)
+  (let* ([the-bytes (recv-bytea buf start end)]
+         [no-dashes (bytes->hex-string the-bytes)])
+    (string-append
+     (substring no-dashes 0 8)  "-"
+     (substring no-dashes 8 12) "-"
+     (substring no-dashes 12 16) "-"
+     (substring no-dashes 16 20) "-"
+     (substring no-dashes 20 32))))
 
 (define (recv-string buf start end)
   (bytes->string/utf-8 buf #f start end))
@@ -576,6 +590,10 @@ jsonb = version:byte byte*
 (define (send-string f x)
   (unless (string? x) (send-error f "string" x #:contract 'string?))
   (string->bytes/utf-8 x))
+
+(define (send-uuid f x)
+  (unless (uuid? x) (send-error f "uuid" x #:contract 'uuid?))
+  (hex-string->bytes (string-replace x "-" "")))
 
 (define (send-int2 f n)
   (unless (int16? n) (send-error f "int2" n #:contract 'int16?))

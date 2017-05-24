@@ -5,7 +5,8 @@
                      racket/fixnum
                      racket/unsafe/ops
                      racket/require
-                     racket/random))
+                     racket/random
+                     racket/list))
 
 @(define math-eval (make-base-eval))
 @examples[#:hidden #:eval math-eval (require racket/math)]
@@ -352,7 +353,7 @@ If @racket[m] is exact @racket[0], the
 
 Returns the largest of the @racket[x]s, or @racket[+nan.0] if any
  @racket[x] is @racket[+nan.0].  If any @racket[x] is inexact, the
- result is coerced to inexact.
+ result is coerced to inexact.  See also @racket[argmax].
 
 @mz-examples[(max 1 3 2) (max 1 3 2.0)]}
 
@@ -361,7 +362,7 @@ Returns the largest of the @racket[x]s, or @racket[+nan.0] if any
 
 Returns the smallest of the @racket[x]s, or @racket[+nan.0] if any
  @racket[x] is @racket[+nan.0].  If any @racket[x] is inexact, the
- result is coerced to inexact.
+ result is coerced to inexact.  See also @racket[argmin].
 
 @mz-examples[(min 1 3 2) (min 1 3 2.0)]}
 
@@ -787,7 +788,7 @@ but it is faster and runs in constant time when @racket[n] is positive.
 @defproc[(bitwise-bit-field [n exact-integer?] 
                             [start exact-nonnegative-integer?] 
                             [end (and/c exact-nonnegative-integer?
-                                        (start . <= . end))])
+                                        (>=/c start))])
          exact-integer?]{
 
 Extracts the bits between position @racket[start] and @racket[(- end 1)] (inclusive)
@@ -842,8 +843,8 @@ both in binary and as integers.
                     [rand-gen pseudo-random-generator?
                                (current-pseudo-random-generator)])
             exact-nonnegative-integer?]
-           [(random [min (integer-in 1 4294967087)]
-                    [max (integer-in 1 4294967087)]
+           [(random [min exact-integer?]
+                    [max (integer-in (+ 1 min) (+ 4294967087 min))]
                     [rand-gen pseudo-random-generator?
                               (current-pseudo-random-generator)])
             exact-nonnegative-integer?]
@@ -1007,20 +1008,43 @@ evaluates the entire sequence.
 @mz-examples[(number->string 3.0) (number->string 255 8)]}
 
 
-@defproc[(string->number [s string?] [radix (integer-in 2 16) 10])
-         (or/c number? #f)]{
+@defproc[(string->number [s string?]
+                         [radix (integer-in 2 16) 10]
+                         [convert-mode (or/c 'number-or-false 'read) 'number-or-false]
+                         [decimal-mode (or/c 'decimal-as-inexact 'decimal-as-exact)
+                                       (if (read-decimal-as-inexact)
+                                           'decimal-as-inexact
+                                           'decimal-as-exact)])
+         (or/c number? #f string? extflonum?)]{
 
 Reads and returns a number datum from @racket[s] (see
-@secref["parse-number"]), returning @racket[#f] if @racket[s] does not
-parse exactly as a number datum (with no whitespace). The optional
-@racket[radix] argument specifies the default base for the number,
-which can be overridden by @litchar{#b}, @litchar{#o}, @litchar{#d}, or
-@litchar{#x} in the string. The @racket[read-decimal-as-inexact]
-parameter affects @racket[string->number] in the same as way as @racket[read].
+@secref["parse-number"]). The optional @racket[radix] argument
+specifies the default base for the number, which can be overridden by
+@litchar{#b}, @litchar{#o}, @litchar{#d}, or @litchar{#x} in the
+string.
 
-@mz-examples[(string->number "3.0+2.5i") (string->number "hello")
-          (string->number "111" 7)  (string->number "#b111" 7)]
-}
+If @racket[convert-mode] is @racket['number-or-false], the result is
+@racket[#f] if @racket[s] does not parse exactly as a number datum
+(with no whitespace). If @racket[convert-mode] is @racket['read], the
+result can be an @tech{extflonum}, and it can be a string that
+contains an error message if @racket[read] of @racket[s] would report
+a reader exception (but the result can still be @racket[#f] if
+@racket[read] would report a symbol).
+
+The @racket[decimal-mode] argument controls number parsing the same
+way that the @racket[read-decimal-as-inexact] parameter affects
+@racket[read].
+
+@mz-examples[(string->number "3.0+2.5i")
+             (string->number "hello")
+             (string->number "111" 7)
+             (string->number "#b111" 7)
+             (string->number "#e+inf.0" 10 'read)
+             (string->number "10.3" 10 'read 'decimal-as-exact)]
+
+@history[#:changed "6.8.0.2" @elem{Added the @racket[convert-mode] and
+                                   @racket[decimal-mode] arguments.}]}
+
 
 @defproc[(real->decimal-string [n real?] [decimal-digits exact-nonnegative-integer? 2])
          string?]{
@@ -1257,7 +1281,31 @@ Returns @racket[#t] if @racket[x] is @racket[eqv?] to @racket[+nan.0] or @racket
 
 @defproc[(infinite? [x real?]) boolean?]{
 
-Returns @racket[#t] if @racket[z] is @racket[+inf.0], @racket[-inf.0], @racket[+inf.f], @racket[-inf.f]; otherwise @racket[#f].}
+Returns @racket[#t] if @racket[x] is @racket[+inf.0], @racket[-inf.0], @racket[+inf.f], @racket[-inf.f]; otherwise @racket[#f].}
+
+@defproc[(positive-integer? [x any/c]) boolean?]{
+ Like @racket[exact-positive-integer?], but also returns
+ @racket[#t] for positive @racket[inexact?] integers.
+ @history[#:added "6.8.0.2"]}
+
+@defproc[(negative-integer? [x any/c]) boolean?]{
+ Like @racket[exact-negative-integer?], but also returns
+ @racket[#t] for negative @racket[inexact?] integers.
+ @history[#:added "6.8.0.2"]}
+
+@defproc[(nonpositive-integer? [x any/c]) boolean?]{
+ Like @racket[exact-nonpositive-integer?], but also returns
+ @racket[#t] for non-positive @racket[inexact?] integers.
+ @history[#:added "6.8.0.2"]}
+
+@defproc[(nonnegative-integer? [x any/c]) boolean?]{
+ Like @racket[exact-nonnegative-integer?], but also returns
+ @racket[#t] for non-negative @racket[inexact?] integers.
+ @history[#:added "6.8.0.2"]}
+
+@defproc[(natural? [x any/c]) boolean?]{
+ An alias for @racket[exact-nonnegative-integer?].
+ @history[#:added "6.8.0.2"]}
 
 @; ----------------------------------------------------------------------
 @close-eval[math-eval]

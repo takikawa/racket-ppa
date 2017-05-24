@@ -37,6 +37,24 @@ to delegate to the scheme-lexer (in the 'no-lang-line mode).
      (set-port-next-location-from in lexer-port)
      (define-values (lexeme type data new-token-start new-token-end) (racket-lexer lexer-port))
      (cond
+       [(equal? type 'sexp-comment)
+        (define position-before-read (file-position lexer-port))
+        (define read-succeeded?
+          (with-handlers ([exn:fail:read? (λ (x) #f)])
+            (read lexer-port)
+            #t))
+        (cond
+          [read-succeeded?
+           (define lexer-end (file-position lexer-port))
+           ;; sync ports
+           (for/list ([i (in-range (file-position in) (file-position lexer-port))])
+             (read-byte-or-special in))
+           (define after-read-end (+ new-token-end (- lexer-end position-before-read)))
+           (values lexeme type data new-token-start after-read-end 0 'before-lang-line)]
+          [else
+           (copy-port in (open-output-nowhere))
+           (define end (file-position in))
+           (values "#;" 'error #f new-token-start (+ end 1) 0 'before-lang-line)])]
        [(or (eq? type 'comment) (eq? type 'white-space))
         (define lexer-end (file-position lexer-port))
         ;; sync ports

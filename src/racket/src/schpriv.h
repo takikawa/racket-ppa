@@ -1583,6 +1583,9 @@ typedef struct Scheme_IR_Local
     struct {
       /* Constant- and copy-propagation information: */
       Scheme_Object *known_val;
+      /* Whether `known_val` must be cleared when the variable's
+         only use is duplicated: */
+      int clear_known_on_multi_use;
       /* Number of `lambda` wrappers, which is relevant for
          accumulating closures, etc.: */
       int lambda_depth;
@@ -3300,7 +3303,6 @@ Scheme_Object *scheme_optimize_expr(Scheme_Object *, Optimize_Info *, int contex
 #define scheme_optimize_tail_context(c)   scheme_optimize_result_context(c) 
 
 int scheme_ir_duplicate_ok(Scheme_Object *o, int cross_mod);
-int scheme_ir_propagate_ok(Scheme_Object *o, Optimize_Info *info);
 int scheme_is_statically_proc(Scheme_Object *value, Optimize_Info *info, int flags);
 XFORM_NONGCING int scheme_predicate_to_local_type(Scheme_Object *pred);
 Scheme_Object *scheme_make_noninline_proc(Scheme_Object *e);
@@ -4054,6 +4056,11 @@ void scheme_read_err(Scheme_Object *port,
 		     intptr_t line, intptr_t column, intptr_t pos, intptr_t span,
 		     int is_eof, Scheme_Object *indentation,
 		     const char *detail, ...);
+Scheme_Object *scheme_numr_err(Scheme_Object *complain,
+                               Scheme_Object *stxsrc,
+                               intptr_t line, intptr_t column, intptr_t pos, intptr_t span,
+                               Scheme_Object *indentation,
+                               const char *detail, ...);
 char *scheme_extract_indentation_suggestions(Scheme_Object *indentation);
 
 void scheme_wrong_syntax(const char *where,
@@ -4142,6 +4149,7 @@ Scheme_Object *scheme_special_comment_value(Scheme_Object *o);
 
 Scheme_Object *scheme_get_stack_trace(Scheme_Object *mark_set);
 
+XFORM_NONGCING int scheme_fast_check_arity(Scheme_Object *v, int a);
 Scheme_Object *scheme_get_or_check_arity(Scheme_Object *p, intptr_t a);
 int scheme_native_arity_check(Scheme_Object *closure, int argc);
 Scheme_Object *scheme_get_native_arity(Scheme_Object *closure, int mode);

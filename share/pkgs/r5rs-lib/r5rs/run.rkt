@@ -29,7 +29,7 @@
       ;; Load .pltr5rsrc
       (let-values ([(base name dir?) (split-path (find-system-path 'init-file))])
         (let ([f (build-path base (bytes->path-element
-                                   (regexp-replace #rx#"mzscheme"
+                                   (regexp-replace #rx#"racket"
                                                    (path-element->bytes name)
                                                    #"pltr5rs")))])
           (when (file-exists? f)

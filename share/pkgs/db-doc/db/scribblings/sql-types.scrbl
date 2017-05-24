@@ -69,6 +69,7 @@ along with their corresponding Racket representations.
   @racket['decimal]       @& @tt{numeric}            @& @racket[rational?] or @racket[+nan.0] @//
   @racket['character]     @& @tt{bpchar}             @& @racket[string?] @//
   @racket['varchar]       @& @tt{varchar}            @& @racket[string?] @//
+  @racket['uuid]          @& @tt{uuid}               @& @racket[uuid?] @//
   @racket['text]          @& @tt{text}               @& @racket[string?] @//
   @racket['bytea]         @& @tt{bytea}              @& @racket[bytes?] @//
   @racket['date]          @& @tt{date}               @& @racket[sql-date?] @//
@@ -168,6 +169,8 @@ left-hand side.
 PostgreSQL defines many other types, such as network addresses and row
 types. These are currently not supported, but support may be added in
 future versions of this library.
+
+@history[#:changed "1.1" @elem{Added support for the @racket['uuid] type.}]
 
 
 @subsection[#:tag "mysql-types"]{MySQL Types}

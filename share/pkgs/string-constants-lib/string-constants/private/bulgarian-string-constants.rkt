@@ -1,4 +1,4 @@
-;; Bulgarian translation of Racket string constants file, version: 1.15
+;; Bulgarian translation of Racket string constants file, version: 1.16
 ;; This file is distributed under the same terms as Racket
 ;; Copyright on translation: Alexander Shopov <ash@kambanaria.org>, 2015, 2016, 2017.
 
@@ -174,6 +174,7 @@
  (online-expansion-finished-successfully "Заместването на заден фон завърши успешно")
 
  (jump-to-error "Към грешка")
+ (copy-error-message "Копиране на съобщението за грешка")
  (online-expansion-is-disabled "Заместването на заден фон е изключено")
  ; these next two show up in the bar along the bottom of the drracket window
  (online-expansion-pending "Заместване на заден фон…")

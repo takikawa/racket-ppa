@@ -1,6 +1,6 @@
 #lang scribble/doc
 @(require scribble/manual scribble/extract)
-@(require (for-label framework racket/gui))
+@(require (for-label framework racket/gui racket/contract/base))
 @title{Text}
 
 @definterface[text:basic<%> (editor:basic<%> text%)]{
@@ -139,24 +139,43 @@
   }
 
   @defmethod[(move/copy-to-edit [dest-text (is-a?/c text%)]
-                                [start exact-integer?]
-                                [end exact-integer?]
-                                [dest-pos exact-integer?]
+                                [start natural?]
+                                [end (and/c natural? (>=/c start))]
+                                [dest-pos natural?]
                                 [#:try-to-move? try-to-move? boolean? #t])
              void?]{
-    This moves or copies text and snips to another edit.
+    This moves or copies text and snips to @racket[dest-text].
 
-    Moves or copies from the edit starting at @racket[start] and ending at
+    Moves or copies from @racket[this] starting at @racket[start] and ending at
     @racket[end]. It puts the copied text and snips in @racket[dest-text]
-    starting at location @racket[dest-pos].
+    starting at location @racket[dest-pos]. If @racket[start] and @racket[end]
+    are equal then nothing is moved or copied.
 
-    If @racket[try-to-move] is @racket[#t], then the snips are removed;
-    and if it is @racket[#f], then they are copied.
+    If @racket[try-to-move?] is @racket[#t], then the snips are removed;
+    and if it is @racket[#f], then they are copied. If @racket[try-to-move?] is
+    @racket[#t] and @racket[dest-pos] is between @racket[start] and @racket[end]
+    then @racket[this] is unchanged.
     
-    If a snip refused to be moved, it will be copied and deleted from the editor,
+    If a snip refuses to be moved, it will be copied and deleted from the editor,
     otherwise it will be moved. A snip may refuse to be moved by returning
     @racket[#f] from @method[snip% release-from-owner].
   }
+ @defmethod[(move-to [dest-text (is-a?/c text%)]
+                     [start natural?]
+                     [end (and/c natural? (>=/c start))]
+                     [dest-pos natural?])
+            void?]{
+    Like @method[text:basic<%> move/copy-to-edit] when the @racket[#:try-to-move?]
+    argument is @racket[#t].
+ }
+ @defmethod[(copy-to [dest-text (is-a?/c text%)]
+                     [start natural?]
+                     [end (and/c natural? (>=/c start))]
+                     [dest-pos natural?])
+            void?]{
+    Like @method[text:basic<%> move/copy-to-edit] when the @racket[#:try-to-move?]
+    argument is @racket[#f].
+ }
 
   @defmethod*[(((initial-autowrap-bitmap) (or/c #f (is-a?/c bitmap%))))]{
     The result of this method is used as the initial autowrap bitmap. Override
@@ -576,22 +595,40 @@
     Returns the number of hits for the search in the buffer before the
     insertion point and the total number of hits. Both are based on the count
     found last time that a search completed.
+
+  A search initiated by some earlier change to the editor or
+  to the string to search for may make the results of this
+  method obsolete. To force those changes to complete (and
+  thus get an accurate result from this method) call
+  @method[text:searching<%> finish-pending-search-work].
+
   }
 
   @defmethod[(get-replace-search-hit) (or/c number? #f)]{
     Returns the position of the nearest search hit that comes after the
     insertion point.
-  }
+
+  A search initiated by some earlier change to the editor or
+  to the string to search for may make the results of this
+  method obsolete. To force those changes to complete (and
+  thus get an accurate result from this method) call
+  @method[text:searching<%> finish-pending-search-work].
+}
 
   @defmethod[(set-replace-start [pos (or/c number? #f)]) void?]{
     This method is ignored. (The next replacement start is now
     tracked via the @method[text% after-set-position] method.)
   }
 
-  @defmethod[(finish-pending-search-work) void?]{
-    Finishes any pending work in computing and
-    drawing the search bubbles.
-  }
+ @defmethod[(finish-pending-search-work) void?]{
+  Finishes any pending work in computing and drawing the
+  search bubbles.
+
+  Call this method to ensure that the results from any of
+  @method[text:searching<%> get-search-hit-count],
+  @method[text:searching<%> get-replace-search-hit], or
+  @method[text:searching<%> get-search-bubbles] are correct.
+ }
 
   @defmethod[(get-search-bubbles)
              (listof (list/c (cons/c number? number?)
@@ -602,6 +639,12 @@
     the outermost list corresponds to a single bubble. The pair of numbers is
     the range of the bubble and the symbol is the color of the
     bubble.
+
+  A search initiated by some earlier change to the editor or
+  to the string to search for may make the results of this
+  method obsolete. To force those changes to complete (and
+  thus get an accurate result from this method) call
+  @method[text:searching<%> finish-pending-search-work].
 
     This method is intended for use in test suites.
   }
@@ -1414,7 +1457,7 @@
   }
 }
 
-@defmixin[text:line-numbers-mixin (text%) (text:line-numbers<%>)]{
+@defmixin[text:line-numbers-mixin (text% editor:standard-style-list<%>) (text:line-numbers<%>)]{
 
   @defmethod*[#:mode override (((on-paint) void?))]{
     Draws the line numbers.
