@@ -5,10 +5,16 @@
 #lang racket/base
 
 (require "unsafe/ops.rkt"
-         "performance-hint.rkt")
+         "performance-hint.rkt"
+         "private/math-predicates.rkt")
 
 (provide pi pi.f
          nan? infinite?
+         positive-integer?
+         negative-integer?
+         nonpositive-integer?
+         nonnegative-integer?
+         natural?
          sqr
          sgn conjugate
          sinh cosh tanh
@@ -20,15 +26,6 @@
 (define pi.f (atan 0.0f0 -1.0f0))
 
 (begin-encourage-inline
-
-  ;; real predicates
-  (define (nan? x)
-    (unless (real? x) (raise-argument-error 'nan? "real?" x))
-    (or (eqv? x +nan.0) (eqv? x +nan.f)))
-
-  (define (infinite? x)
-    (unless (real? x) (raise-argument-error 'infinite? "real?" x))
-    (or (= x +inf.0) (= x -inf.0)))
 
   ;; z^2
   (define (sqr z)
