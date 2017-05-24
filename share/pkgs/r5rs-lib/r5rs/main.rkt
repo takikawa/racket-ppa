@@ -547,7 +547,9 @@
                                       define-syntax let-syntax letrec-syntax
                                       => else
                                       #%app #%datum #%top #%top-interaction
-                                      #%require #%provide #%expression))
+                                      #%require #%provide #%expression
+                                      ;; for syntax:
+                                      syntax-rules))
             (begin
               (namespace-require 'r5rs) ; for syntax
               (namespace-require/copy 'r5rs))))

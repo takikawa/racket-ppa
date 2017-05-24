@@ -260,6 +260,7 @@ please adhere to these guidelines:
  (online-expansion-finished-successfully "Background expansion finished successfully")
   
  (jump-to-error "Jump to Error")
+ (copy-error-message "Copy Error Message")
  (online-expansion-is-disabled "Background expansion is disabled")
  ; these next two show up in the bar along the bottom of the drracket window
  (online-expansion-pending "Background expansion pending…")

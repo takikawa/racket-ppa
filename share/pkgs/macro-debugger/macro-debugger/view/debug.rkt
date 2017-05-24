@@ -7,18 +7,6 @@
          "view.rkt")
 (provide debug-file)
 
-(define (widget-mixin %)
-  (class %
-    (define/override (top-interaction-kw? x)
-      (eq? (syntax-e x) '#%top-interaction))
-    (super-new)))
-
-(define stepper-frame%
-  (class macro-stepper-frame%
-    (define/override (get-macro-stepper-widget%)
-      (widget-mixin (super get-macro-stepper-widget%)))
-    (super-new)))
-
 (define (make-stepper)
   (define director (new macro-stepper-director%))
   (send director new-stepper))

@@ -50,7 +50,8 @@
   (define (analyze/quote-syntax qs-stx)
     (let ([phases (for/list ([offset '(0 1 -1 2 -2)]) (+ (phase) offset))]
           [stx (syntax-case qs-stx ()
-                 [(_quote-syntax x) #'x])])
+                 [(_quote-syntax x) #'x]
+                 [(_quote-syntax x #:local) #'x])])
       (define (add*! id)
         (add-refs! (for/list ([p (in-list phases)])
                      (ref p id 'quote-syntax (identifier-binding id p)))))

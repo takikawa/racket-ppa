@@ -4051,7 +4051,7 @@ static void increment_clocks_for_application(Optimize_Info *info,
 static Scheme_Object *finish_optimize_application(Scheme_App_Rec *app, Optimize_Info *info, int context)
 {
   Scheme_Object *le;
-  Scheme_Object *rator =  app->args[0], *rator_for_flags;
+  Scheme_Object *rator =  app->args[0];
   int all_vals = 1, i, flags, rator_flags;
 
   for (i = app->num_args; i--; ) {
@@ -4290,7 +4290,7 @@ static Scheme_Object *optimize_application2(Scheme_Object *o, Optimize_Info *inf
 static Scheme_Object *finish_optimize_application2(Scheme_App2_Rec *app, Optimize_Info *info, int context)
 {
   int flags, rator_flags;
-  Scheme_Object *rator =  app->rator, *rator_for_flags;
+  Scheme_Object *rator =  app->rator;
   Scheme_Object *rand, *inside = NULL, *alt;
 
   info->size += 1;
@@ -4711,7 +4711,7 @@ static Scheme_Object *optimize_application3(Scheme_Object *o, Optimize_Info *inf
 static Scheme_Object *finish_optimize_application3(Scheme_App3_Rec *app, Optimize_Info *info, int context)
 {
   int flags, rator_flags;
-  Scheme_Object *le, *rator_for_flags;
+  Scheme_Object *le;
   int all_vals = 1;
 
   info->size += 1;

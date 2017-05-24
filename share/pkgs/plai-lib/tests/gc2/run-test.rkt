@@ -52,10 +52,22 @@
  (capture-output (test-mutator (build-path here "other-mutators" "printing.rkt")))
  =>
  #<<END
-(good lst '(1 2 3) '(1 2 3) "at line 6")
-(good (length (quote (hello goodbye))) 2 2 "at line 13")
-(good (heap-loc head) 63 63 "at line 18")
-(bad (heap-loc head) 63 48 "at line 19")
+good lst at line 6
+  expected: '(1 2 3)
+  given: '(1 2 3)
+
+good (length (quote (hello goodbye))) at line 13
+  expected: 2
+  given: 2
+
+good (heap-loc head) at line 18
+  expected: 63
+  given: 63
+
+bad (heap-loc head) at line 19
+  expected: 48
+  given: 63
+
 
 END
  

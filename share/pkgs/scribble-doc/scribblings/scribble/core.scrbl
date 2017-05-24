@@ -118,10 +118,10 @@ A @deftech{block} is either a @techlink{table}, an
 
              @itemize[
 
-             @item{An @deftech{content} can be a string, one of a few
+             @item{A @deftech{content} can be a string, one of a few
                    symbols, an instance of @racket[element] (possibly
                    @racket[link-element], etc.), a @racket[multiarg-element], a
-                   a @techlink{traverse element}, @techlink{part-relative element}, a
+                   @techlink{traverse element}, a @techlink{part-relative element}, a
                    @techlink{delayed element}, or a list of content.
 
                    @itemize[
@@ -729,6 +729,8 @@ The following @tech{style properties} are currently recognized:
  @item{@racket[alt-tag] structure --- Generates the indicated HTML tag
        instead of @tt{<blockquote>}.}
 
+ @item{@racket['pretitle] --- For Latex, raises the contents
+   of the flow to above the title.}
 ]}
 
 
@@ -1115,7 +1117,7 @@ reverse order):
        any number or lists element, while @racket[""] is used in place
        of all non-empty strings.}
 
-]}
+]
 
 @history[#:changed "6.4" @elem{Added @racket[(list/c string? string?)]
                                number items for
@@ -1349,7 +1351,7 @@ Returns the width in characters of the given @tech{block}.}
 @defproc[(part-number-item? [v any/c]) boolean]{
 
 Return @racket[#t] if @racket[v] is @racket[#f], an exact non-negative
-integer, a string, or a list containing two strings. See @racket[part]
+integer, a string, or a list containing two strings. See @racket[collected-info]
 for information on how different representations are used for numbering.
 
 @history[#:added "6.4"]}
@@ -1397,6 +1399,15 @@ identity is based on a @racket[generated-tag]. The result of
 @racket[numberer-step] is the rendered form of the current section
 number plus an updated hash table with an incremented value for the
 @tech{numberer}.
+
+Typically, the rendered form of a section number (produced by
+@racket[numberer-step]) is a list containing two strings. The first
+string is the part's immediate number, which can be combined with a
+prefix for enclosing parts' numbers. The second string is a separator
+that is placed after the part's number and before a subsection's
+number for each subsection. If @racket[numberer-step] produces a plain
+string for the rendered number, then it is not added as a prefix to
+subsection numbers. See also @racket[collected-info].
 
 @history[#:added "6.4"]}
 
@@ -1799,3 +1810,20 @@ See also @racketmodname[scribble/latex-prefix].}
 
 Used as a @tech{style property} on an @racket[element] to add extra
 arguments to the element's command in Latex output.}
+
+@defstruct[command-optional ([arguments (listof string?)])]{
+                                                  
+ Used as a @tech{style property} on a @racket[element] to add
+ a optional arguments to the element's command in Latex output.
+
+ @history[#:added "1.20"]
+}
+
+@defstruct[short-title ([text (or/c string? #f)])]{
+                                                  
+ Used as a @tech{style property} on a @racket[title-decl].
+ Attaches a short title to the title for a @racket[part] if
+ the Latex class file uses a short title.
+
+ @history[#:added "1.20"]
+}

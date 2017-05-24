@@ -17,14 +17,17 @@
 
 (provide term term-let define-term
          hole in-hole
+         #%mf-apply
          term-let/error-name term-let-fn term-define-fn
          (for-syntax term-rewrite
+                     term-fn-id?
                      term-temp->pat
                      currently-expanding-term-fn
                      judgment-form-id?))
 
 (define-syntax (hole stx) (raise-syntax-error 'hole "used outside of term" stx))
 (define-syntax (in-hole stx) (raise-syntax-error 'in-hole "used outside of term" stx))
+(define-syntax (#%mf-apply stx) (raise-syntax-error 'mf-apply "used outside of term" stx))
 
 (define (with-syntax* stx)
   (syntax-case stx ()
@@ -177,14 +180,25 @@
                       (sub1 args-depth))))))))
   
   (define (rewrite/max-depth stx depth ellipsis-allowed? continuing-an-application?)
-    (syntax-case stx (unquote unquote-splicing in-hole hole)
+    (syntax-case stx (unquote unquote-splicing in-hole hole #%mf-apply)
+      [(#%mf-apply metafunc-name arg ...)
+       ;; Assert that `metafunc-name` refers to a term-fn, then loop.
+       (if (and (identifier? (syntax metafunc-name))
+                (if names
+                    (not (memq (syntax->datum #'metafunc-name) names))
+                    #t)
+                (term-fn-id? (syntax metafunc-name)))
+           (rewrite/max-depth (syntax/loc stx (metafunc-name arg ...)) depth ellipsis-allowed? continuing-an-application?)
+           (raise-syntax-error 'term "expected a previously defined metafunction" stx (syntax metafunc-name)))]
+      [(#%mf-apply . x)
+       (raise-syntax-error 'term "malformed mf-apply" arg-stx stx)]
       [(metafunc-name arg ...)
        (and (not continuing-an-application?)
             (identifier? (syntax metafunc-name))
             (if names
                 (not (memq (syntax->datum #'metafunc-name) names))
                 #t)
-            (term-fn? (syntax-local-value (syntax metafunc-name) (λ () #f))))
+            (term-fn-id? (syntax metafunc-name)))
        (let ([f (term-fn-get-id (syntax-local-value/record (syntax metafunc-name) (λ (x) #t)))])
          (free-identifier-mapping-put! applied-metafunctions 
                                        (datum->syntax f (syntax-e f) #'metafunc-name)
@@ -197,8 +211,8 @@
                 (not (memq (syntax->datum #'jf-name) names))
                 #t)
             (judgment-form-id? #'jf-name))
-       (begin
-         (unless (not (memq 'O (judgment-form-mode (syntax-local-value #'jf-name))))
+       (let ([mode (judgment-form-mode (syntax-local-value #'jf-name))])
+         (when (and mode (memq 'O mode))
            (raise-syntax-error 'term 
                                "judgment forms with output mode (\"O\") positions disallowed"
                                arg-stx stx))
@@ -208,7 +222,7 @@
             (if names
                 (not (memq (syntax->datum #'f) names))
                 #t)
-            (term-fn? (syntax-local-value (syntax f) (λ () #f))))
+            (term-fn-id? (syntax f)))
        (raise-syntax-error 'term "metafunction must be in an application" arg-stx stx)]
       [x
        (and (identifier? #'x)
@@ -575,3 +589,12 @@
                    #'(begin
                        (define term-val (term t))
                        (define-syntax x (defined-term #'term-val))))]))
+
+;; term-fn-id? : identifier? -> boolean?
+;; Return #t when given an identifier whose transformer binding is a term function,
+;;  and #f otherwise
+(define-for-syntax term-fn-id?
+  (let ([fail-thunk (λ () #f)])
+    (λ (stx)
+      (let ([v (syntax-local-value stx fail-thunk)])
+        (and v (term-fn? v))))))

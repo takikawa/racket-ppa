@@ -18,8 +18,7 @@
          images/gui
          (for-syntax racket/base
                      images/icons/arrow images/icons/control images/logos
-                     images/icons/style)
-         (only-in mzscheme [#%top-interaction mz-top-interaction]))
+                     images/icons/style))
 (provide macro-stepper-widget%
          macro-stepper-widget/process-mixin)
 
@@ -87,9 +86,9 @@
     ;; current-step-index : notify of number/#f
     (notify:define-notify current-step-index (new notify:notify-box% (value #f)))
 
-    ;; add-deriv : Deriv -> void
-    (define/public (add-deriv d)
-      (let ([trec (new term-record% (stepper this) (raw-deriv d))])
+    ;; add-deriv : Deriv [(Listof Event)]-> void
+    (define/public (add-deriv d [events #f])
+      (let ([trec (new term-record% (stepper this) (raw-deriv d) (events events))])
         (add trec)))
 
     ;; add-trace : (list-of event) -> void
@@ -122,7 +121,9 @@
       (let ([term (focused-term)])
         (when term
           (let ([new-stepper (send/i director director<%> new-stepper '(no-new-traces))])
-            (send/i new-stepper widget<%> add-deriv (send/i term term-record<%> get-raw-deriv))
+            (send/i new-stepper widget<%> add-deriv
+                    (send/i term term-record<%> get-raw-deriv)
+                    (send/i term term-record<%> get-events))
             (void)))))
 
     ;; duplicate-stepper : -> void
@@ -130,7 +131,8 @@
       (let ([new-stepper (send/i director director<%> new-stepper)])
         (for ([term (cursor->list terms)])
           (send/i new-stepper widget<%> add-deriv
-                 (send/i term term-record<%> get-raw-deriv)))))
+                  (send/i term term-record<%> get-raw-deriv)
+                  (send/i term term-record<%> get-events)))))
 
     (define/public (get-config) config)
     (define/public (get-controller) sbc)
@@ -460,7 +462,9 @@
 
     ;; Derivation pre-processing
 
-    (define/public (get-preprocess-deriv) (lambda (d) d))
+    ;; get-preprocess-deriv : -> (Deriv -> Deriv/#f)
+    (define/public (get-preprocess-deriv)
+      (send director get-preprocess-deriv))
 
     ;; Initialization
 
@@ -469,51 +473,5 @@
     (show-extra-navigation (send/i config config<%> get-extra-navigation?))
     ))
 
-(define (macro-stepper-widget/process-mixin %)
-  (class %
-    (super-new)
-    (define/override (get-preprocess-deriv)
-      (lambda (d) (get-original-part d)))
-
-    ;; get-original-part : Deriv -> Deriv/#f
-    ;; Strip off mzscheme's #%top-interaction
-    ;; Careful: the #%top-interaction node may be inside of a lift-deriv
-    (define/private (get-original-part deriv)
-      (let ([deriv* (adjust-deriv/lift deriv)])
-        deriv*))
-
-    ;; adjust-deriv/lift : Deriv -> Deriv/#f
-    (define/private (adjust-deriv/lift deriv)
-      (match deriv
-        [(Wrap lift-deriv (e1 e2 first lifted-stx second))
-         (let ([first (adjust-deriv/lift first)])
-           (and first
-                (let ([e1 (wderiv-e1 first)])
-                  (make-lift-deriv e1 e2 first lifted-stx second))))]
-        [(Wrap ecte (e1 e2 '() first second locals2))
-         ;; Only adjust if no locals...
-         (let ([first (adjust-deriv/lift first)])
-           (and first
-                (let ([e1 (wderiv-e1 first)])
-                  (make ecte e1 e2 '() first second locals2))))]
-        [else (adjust-deriv/top deriv)]))
-
-    ;; adjust-deriv/top : Derivation -> Derivation
-    (define/private (adjust-deriv/top deriv)
-      (if (or (not (base? deriv))
-              (syntax-original? (wderiv-e1 deriv))
-              (p:module? deriv))
-          deriv
-          ;; It's not original...
-          ;; Strip out mzscheme's top-interactions
-          ;; Keep anything that is a non-mzscheme top-interaction
-          (cond [(for/or ([x (base-resolves deriv)]) (top-interaction-kw? x))
-                 ;; Just mzscheme's top-interaction; strip it out
-                 (adjust-deriv/top (mrule-next deriv))]
-                [else deriv])))
-
-    (define/public (top-interaction-kw? x)
-      (or (free-identifier=? x #'#%top-interaction)
-          (free-identifier=? x #'mz-top-interaction)))
-
-    ))
+;; Obsolete: for backwards compatibility w/ old DrRacket tool only
+(define macro-stepper-widget/process-mixin (lambda (%) %))

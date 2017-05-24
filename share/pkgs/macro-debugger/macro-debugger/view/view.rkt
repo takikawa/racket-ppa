@@ -5,8 +5,10 @@
          racket/class/iop
          "interfaces.rkt"
          "frame.rkt"
+         "process-deriv.rkt"
          "prefs.rkt")
 (provide macro-stepper-director%
+         macro-stepper-director/process%
          macro-stepper-frame%)
 
 (define macro-stepper-director%
@@ -52,7 +54,16 @@
            (config (new macro-stepper-config/prefs%))
            (director this)))
 
+    (define/public (get-preprocess-deriv)
+      values)
+
     (super-new)))
+
+(define macro-stepper-director/process%
+  (class macro-stepper-director%
+    (super-new)
+    (define/override (get-preprocess-deriv)
+      strip-top-interaction)))
 
 (define macro-stepper-frame%
   (macro-stepper-frame-mixin

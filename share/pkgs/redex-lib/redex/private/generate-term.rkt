@@ -122,7 +122,10 @@
     [(form lang #:satisfying (jform-id . pats) property . kw-args)
      (unless (set-empty? bad-kws)
        (raise-syntax-error 'redex-check (format "~s cannot be used with #:satisfying" (car (set->list bad-kws))) stx))
-     (redex-check/jf stx #'form #'lang #'jform-id #'pats #'property #'kw-args)]
+     (syntax-property
+      (redex-check/jf stx #'form #'lang #'jform-id #'pats #'property #'kw-args)
+      'disappeared-use
+      (syntax-local-introduce #'jform-id))]
     [(form lang #:satisfying . rest)
      (raise-syntax-error 'redex-check "#:satisfying expected judgment form or metafunction syntax followed by a property" stx #'rest)]
     [(form lang pat #:enum biggest-e property . kw-args)
@@ -148,7 +151,7 @@
   (define clauses (judgment-form-gen-clauses j-f))
   (define relation? (judgment-form-relation? j-f))
   (define args-stx (if relation?
-                       (syntax/loc #'args #`(#,pats))
+                       (quasisyntax/loc #'args (#,pats))
                        pats))
   (with-syntax* ([(syncheck-exp pattern (names ...) (names/ellipses ...))
                   (rewrite-side-conditions/check-errs lang 'redex-check #t args-stx)]

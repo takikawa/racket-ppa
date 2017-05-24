@@ -11,6 +11,7 @@
                      (only-in plai/main
                               type-case define-type error
                               test test/pred test/exn test/regexp
+                              equal~?
                               abridged-test-output
                               plai-catch-test-exn
                               halt-on-errors print-only-errors
@@ -126,7 +127,7 @@ PLAI Scheme provides the following syntactic forms for testing.
 @defform/subs[(test result-expr expected-expr)()]{
 
 If @racket[_result-expr] and @racket[_expected-expr] evaluate to the same
-value, @racket[_result-value], the test prints the following expression:
+value @racket[_result-value] according to @racket[equal~?], the test prints the following expression:
 
 @racketresultfont{(good result-expr result-value expected-value location)}.
 
@@ -198,6 +199,17 @@ The evaluation of @racket[_error-message-regexp] is considered
 @racket[_expected-value] for the purposes of test reporting.
 }
 
+
+@subsubsection{Test Equality}
+
+@defproc[(equal~? [v1 any/c] [v2 any/c]) boolean?]{
+
+The same as @racket[equal?], except that if @racket[v1] and
+@racket[v2] are inexact real numbers, then the result
+is @racket[#t] if the difference between the number is
+less than @racket[(test-inexact-epsilon)].}
+
+
 @subsubsection{Test Flags}
 
 @defproc[(abridged-test-output (abridge? boolean? false)) void?]{
@@ -230,7 +242,7 @@ By default, the results of all tests are printed.
 
 @defproc[(test-inexact-epsilon (epsilon number?)) void?]{
 
-When testing inexact values for equality, @racket[test] permits them to differ
+When testing immediate inexact values for equality, @racket[test] permits them to differ
 by @racket[_epsilon].  The default value of @racket[_epsilon] is @racket[0.01].
 
 }
