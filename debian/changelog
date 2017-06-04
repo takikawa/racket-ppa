@@ -1,8 +1,9 @@
-racket (6.9-1) UNRELEASED; urgency=medium
+racket (6.9-1) experimental; urgency=medium
 
   * New upstream release
+  * Remove patch to libcrypto.rkt, now upstream
 
- -- David Bremner <bremner@debian.org>  Wed, 24 May 2017 16:11:40 -0300
+ -- David Bremner <bremner@debian.org>  Sun, 04 Jun 2017 17:06:39 -0300
 
 racket (6.8-1) experimental; urgency=medium
 
