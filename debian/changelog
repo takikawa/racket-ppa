@@ -1,3 +1,9 @@
+racket (6.9-2) unstable; urgency=medium
+
+  * rebuild for unstable
+
+ -- David Bremner <bremner@debian.org>  Thu, 29 Jun 2017 20:27:37 -0300
+
 racket (6.9-1) experimental; urgency=medium
 
   * New upstream release
