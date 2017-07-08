@@ -21,6 +21,22 @@ racket (6.8-1) experimental; urgency=medium
 
  -- David Bremner <bremner@debian.org>  Sat, 04 Mar 2017 11:54:04 -0400
 
+racket (6.7-3) unstable; urgency=medium
+
+  * Disable parallel building on 32bit architectures. Racket's parallel
+    build currently uses OS threads, so unbounded parallelism hits per
+    process address space limitations. (Closes: #860670).
+
+ -- David Bremner <bremner@debian.org>  Sat, 22 Apr 2017 14:26:26 -0300
+
+racket (6.7-2) unstable; urgency=medium
+
+  * Patch libcrypto.rkt to look for openssl 1.1, recommend libssl1.1. Bug
+    fix: "Raco fails without libssl-dev", thanks to Martin Tang (Closes:
+    #836346).
+
+ -- David Bremner <bremner@debian.org>  Sun, 05 Mar 2017 08:55:03 -0400
+
 racket (6.7-1) unstable; urgency=medium
 
   * New upstream release
