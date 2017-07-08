@@ -1,3 +1,9 @@
+racket (6.9-3) UNRELEASED; urgency=medium
+
+  * fix changelog for 6.9-1; wrong patch was discussed
+
+ -- David Bremner <bremner@debian.org>  Sat, 08 Jul 2017 06:50:53 -0300
+
 racket (6.9-2) unstable; urgency=medium
 
   * rebuild for unstable
@@ -7,7 +13,7 @@ racket (6.9-2) unstable; urgency=medium
 racket (6.9-1) experimental; urgency=medium
 
   * New upstream release
-  * Remove patch to libcrypto.rkt, now upstream
+  * Remove type-masks patch, now upstream
 
  -- David Bremner <bremner@debian.org>  Sun, 04 Jun 2017 17:06:39 -0300
 
