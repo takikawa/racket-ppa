@@ -78,7 +78,7 @@ positions are initialized with the given @racket[b]s.
 
 @defproc[(bytes-ref [bstr bytes?] [k exact-nonnegative-integer?])
  byte?]{  Returns the character at position @racket[k] in @racket[bstr].
- The first position in the bytes cooresponds to @racket[0], so the
+ The first position in the bytes corresponds to @racket[0], so the
  position @racket[k] must be less than the length of the bytes,
  otherwise the @exnraise[exn:fail:contract].
 
@@ -88,7 +88,7 @@ positions are initialized with the given @racket[b]s.
 @defproc[(bytes-set! [bstr (and/c bytes? (not/c immutable?))] [k
  exact-nonnegative-integer?] [b byte?]) void?]{  Changes the
  character position @racket[k] in @racket[bstr] to @racket[b].  The first
- position in the byte string cooresponds to @racket[0], so the position
+ position in the byte string corresponds to @racket[0], so the position
  @racket[k] must be less than the length of the bytes, otherwise the
  @exnraise[exn:fail:contract].
 
@@ -362,7 +362,7 @@ For communication among @tech{places}, the new byte string is allocated in the
                           [err-char (or/c #f char?) #f]
                           [start exact-nonnegative-integer? 0]
                           [end exact-nonnegative-integer? (bytes-length bstr)])
-         char?]{
+         (or/c char? #f)]{
  Returns the @racket[skip]th character in the UTF-8 decoding of
  @racket[bstr]'s substring from @racket[start] to @racket[end], but without
  actually generating the other decoded characters. If the substring is
@@ -386,7 +386,7 @@ For communication among @tech{places}, the new byte string is allocated in the
                             [err-char (or/c #f char?) #f]
                             [start exact-nonnegative-integer? 0]
                             [end exact-nonnegative-integer? (bytes-length bstr)])
-         exact-nonnegative-integer?]{
+         (or/c exact-nonnegative-integer? #f)]{
  Returns the offset in bytes into @racket[bstr] at which the @racket[skip]th
  character's encoding starts in the UTF-8 decoding of @racket[bstr]'s
  substring from @racket[start] to @racket[end] (but without actually

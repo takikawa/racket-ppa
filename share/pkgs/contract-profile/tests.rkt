@@ -11,7 +11,7 @@
   (define res
     (with-output-to-string
       (lambda ()
-        (check-true (contract-profile #:module-graph-file #f
+        (check-true (contract-profile #:module-graph-view-file #f
                                       #:boundary-view-file #f
                                       #:boundary-view-key-file #f
                                       #t)))))
@@ -23,7 +23,7 @@
            (lambda ()
              (check-false
                (contract-profile-thunk
-                 #:module-graph-file #f
+                 #:module-graph-view-file #f
                  #:boundary-view-file #f
                  #:boundary-view-key-file #f
                  (lambda () (string? 4))))))])

@@ -560,8 +560,14 @@
               (error
                key-tag
                "focused window is not a text-field% and does not have on-char, ~e" window)])]
-          [(send (car l) on-subwindow-char window event) #f]
-          [else (loop (cdr l))])))
+          [else
+           (define ancestor (car l))
+           (cond
+             [(and (is-a? ancestor window<%>)
+                   (send ancestor on-subwindow-char window event))
+              #f]
+             [else
+              (loop (cdr l))])])))
 
 ;; Make full key-event% object.
 ;; Shift is determined implicitly from key-code.
@@ -848,7 +854,9 @@
                 ([old-window  (get-focused-window)]
                  [leave   (make-object mouse-event% 'leave)]
                  [enter   (make-object mouse-event% 'enter)]
-                 [root    (car (ancestor-list new-window #t))])
+                 [root    (for/or ([ancestor (ancestor-list new-window #t)])
+                            (and (is-a? ancestor window<%>)
+                                 ancestor))])
               (send leave  set-x 0)   (send leave  set-y 0)
               (send enter  set-x 0)   (send enter  set-y 0)
               

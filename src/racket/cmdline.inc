@@ -855,6 +855,49 @@ static Scheme_Object *get_arg_log_level(char *prog, char *real_switch, const cha
   return get_log_level(prog, real_switch, NULL, what, argv[1]);
 }
 
+static Scheme_Object *adjust_collects_path(Scheme_Object *collects_path, int *_skip_coll_dirs)
+{
+  /* Setup path for "collects" collection directory: */
+  if (!collects_path) {
+    if (!scheme_coldir[_coldir_offset])
+      collects_path = scheme_make_false();
+    else
+      collects_path = scheme_make_path(scheme_coldir XFORM_OK_PLUS _coldir_offset);
+  } else if (!SAME_OBJ(collects_path, scheme_make_false()))
+    collects_path = scheme_path_to_complete_path(collects_path, NULL);
+
+  if (SAME_OBJ(collects_path, scheme_make_false())) {
+    /* empty list of directories => don't set collection dirs
+       and don't use collection links files */
+    if (_skip_coll_dirs) {
+      *_skip_coll_dirs = 1;
+      scheme_set_ignore_link_paths(1);
+    }
+    collects_path = scheme_make_path(".");
+  }
+
+  return collects_path;
+}
+
+static Scheme_Object *adjust_config_path(Scheme_Object *config_path)
+{
+  if (!config_path) {
+    char *s;
+    s = getenv("PLTCONFIGDIR");
+    if (s) {
+      s = scheme_expand_filename(s, -1, NULL, NULL, 0);
+      if (s) config_path = scheme_make_path(s);
+    }
+  }
+
+  if (!config_path)
+    config_path = scheme_make_path(scheme_configdir XFORM_OK_PLUS _configdir_offset);
+  else
+    config_path = scheme_path_to_complete_path(config_path, NULL);
+
+  return config_path;
+}
+
 #ifdef USE_OSKIT_CONSOLE
 /* Hack to disable normal input mode: */
 int osk_not_console = 0;
@@ -894,10 +937,9 @@ static int run_from_cmd_line(int argc, char *_argv[],
   int skip_coll_dirs = 0;
   Scheme_Object *collects_path = NULL, *collects_extra = NULL, *addon_dir = NULL;
   Scheme_Object *config_path = NULL;
+  Scheme_Object *host_collects_path = NULL, *host_config_path = NULL;
   char *compiled_paths = NULL;
-#ifndef NO_FILE_SYSTEM_UTILS
   Scheme_Object *collects_paths_l, *collects_paths_r;
-#endif
 #ifndef DONT_PARSE_COMMAND_LINE
   char **evals_and_loads, *real_switch = NULL, specific_switch[2];
   int *eval_kind, num_enl;
@@ -923,6 +965,7 @@ static int run_from_cmd_line(int argc, char *_argv[],
   int was_config_flag = 0, saw_nc_flag = 0;
   int no_compiled = 0;
   int init_ns = 0, no_init_ns = 0;
+  int cross_compile = 0;
   Scheme_Object *syslog_level = NULL, *stderr_level = NULL;
   FinishArgs *fa;
   FinishArgsAtoms *fa_a;
@@ -1177,6 +1220,8 @@ static int run_from_cmd_line(int argc, char *_argv[],
       argv[0] = "-A";
     else if (!strcmp("--config", argv[0]))
       argv[0] = "-G";
+    else if (!strcmp("--cross", argv[0]))
+      argv[0] = "-C";
 # ifdef CMDLINE_STDIO_FLAG
     else if (!strcmp("--stdio", argv[0]))
       argv[0] = "-z";
@@ -1260,6 +1305,15 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	  --argc;
 	  addon_dir = check_make_path(prog, real_switch, argv[0]);
           was_config_flag = 1;
+            break;
+        case 'C':
+          if (!cross_compile) {
+            cross_compile = 1;
+            scheme_set_cross_compile_mode(1);
+            was_config_flag = 1;
+            host_config_path = config_path;
+            host_collects_path = collects_path;
+          }
 	  break;
 	case 'U':
 	  scheme_set_ignore_user_paths(1);
@@ -1527,23 +1581,11 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	)
 #endif
       PRINTF("%s", BANNER);
-#ifdef RACKET_CMD_LINE  
-# ifdef DOS_FILE_SYSTEM
-#  if !defined(FILES_HAVE_FDS)
-#   if !defined(WINDOWS_FILE_HANDLES)
-    PRINTF("Warning: read-eval-print-loop or read on a stream port may block threads.\n");
-#   endif
-#  endif
-# endif
-#endif
 
-#if defined(USE_FD_PORTS) || defined(WINDOWS_FILE_HANDLES)
    CMDLINE_FFLUSH(stdout);
-#endif
   }
 #endif /* DONT_PARSE_COMMAND_LINE */
 
-#ifdef GETENV_FUNCTION
   if (!syslog_level) {
     char *s;
     s = getenv("PLTSYSLOG");
@@ -1595,43 +1637,24 @@ static int run_from_cmd_line(int argc, char *_argv[],
       }
     }
   }
-#endif
 
   scheme_set_logging_spec(syslog_level, stderr_level);
-  
-#ifndef NO_FILE_SYSTEM_UTILS
-  /* Setup path for "collects" collection directory: */
-  if (!collects_path) {
-    if (!scheme_coldir[_coldir_offset])
-      collects_path = scheme_make_false();
-    else
-      collects_path = scheme_make_path(scheme_coldir XFORM_OK_PLUS _coldir_offset);
-  } else if (!SAME_OBJ(collects_path, scheme_make_false()))
-    collects_path = scheme_path_to_complete_path(collects_path, NULL);
-  if (SAME_OBJ(collects_path, scheme_make_false())) {
-    /* empty list of directories => don't set collection dirs
-       and don't use collection links files */
-    skip_coll_dirs = 1;
-    scheme_set_ignore_link_paths(1);
-    collects_path = scheme_make_path(".");
-  }
+
+  collects_path = adjust_collects_path(collects_path, &skip_coll_dirs);
   scheme_set_collects_path(collects_path);
 
-# ifdef GETENV_FUNCTION
-  if (!config_path) {
-    char *s;
-    s = getenv("PLTCONFIGDIR");
-    if (s) {
-      s = scheme_expand_filename(s, -1, NULL, NULL, 0);
-      if (s) config_path = scheme_make_path(s);
-    }
+  if (cross_compile) {
+    host_collects_path = adjust_collects_path(host_collects_path, NULL);
+    scheme_set_host_collects_path(host_collects_path);
   }
-# endif
-  if (!config_path)
-    config_path = scheme_make_path(scheme_configdir XFORM_OK_PLUS _configdir_offset);   
-  else
-    config_path = scheme_path_to_complete_path(config_path, NULL);
+
+  config_path = adjust_config_path(config_path);
   scheme_set_config_path(config_path);
+
+  if (cross_compile) {
+    host_config_path = adjust_config_path(host_config_path);
+    scheme_set_host_config_path(host_config_path);
+  }
 
   /* Make list of additional collection paths: */
   if (collects_extra)
@@ -1653,7 +1676,6 @@ static int run_from_cmd_line(int argc, char *_argv[],
     }
     collects_paths_l = reverse_path_list(collects_paths_l, 0);
   }
-#endif
 
   sch_argv = create_cmdline_args_vector(argc, argv);
   scheme_set_command_line_arguments(sch_argv);
@@ -1670,18 +1692,12 @@ static int run_from_cmd_line(int argc, char *_argv[],
   if (no_compiled)
     scheme_set_compiled_file_paths(scheme_make_null());
 
-#ifndef NO_FILE_SYSTEM_UTILS
   /* Setup compiled-file search path: */
-# ifdef GETENV_FUNCTION
   if (!compiled_paths) {
     compiled_paths = getenv("PLTCOMPILEDROOTS");
   }
-# endif
-#endif /* NO_FILE_SYSTEM_UTILS */
 
-#ifndef NO_FILE_SYSTEM_UTILS
   /* Setup path for "addon" directory: */
-# ifdef GETENV_FUNCTION
   if (!addon_dir) {
     char *s;
     s = getenv("PLTADDONDIR");
@@ -1690,22 +1706,18 @@ static int run_from_cmd_line(int argc, char *_argv[],
       if (s) addon_dir = scheme_make_path(s);
     }
   }
-# endif
   if (addon_dir) {
     addon_dir = scheme_path_to_complete_path(addon_dir, NULL);
     scheme_set_addon_dir(addon_dir);
   }
-#endif /* NO_FILE_SYSTEM_UTILS */
 
   /* Creates the main kernel environment */
   global_env = mk_basic_env();
 
-#ifndef NO_FILE_SYSTEM_UTILS
   if (!skip_coll_dirs)
     scheme_init_collection_paths_post(global_env, collects_paths_l, collects_paths_r);
   if (compiled_paths)
     scheme_init_compiled_roots(global_env, compiled_paths);
-#endif
 
   scheme_seal_parameters();
 
@@ -1789,8 +1801,9 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	 "  -S <dir>, --search <dir> : More collects at <dir> (after main collects)\n"
 	 "  -G <dir>, --config <dir> : Main configuration directory at <dir>\n"
 	 "  -A <dir>, --addon <dir> : Addon directory at <dir>\n"
-         "  -R <paths>, --compiled <paths> : Set compiled-file search roots to <paths>\n"
 	 "  -U, --no-user-path : Ignore user-specific collects, etc.\n"
+         "  -R <paths>, --compiled <paths> : Set compiled-file search roots to <paths>\n"
+	 "  -C, --cross : Cross-build mode; save current collects and config as host\n"
 	 "  -N <file>, --name <file> : Sets `(find-system-path 'run-file)' to <file>\n"
 # ifdef CMDLINE_STDIO_FLAG
          "  -J <name>, ---wm-class <name> : Set WM_CLASS class to <name> (Unix)\n"

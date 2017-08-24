@@ -6,6 +6,7 @@
          racket/contract
          racket/place
          framework
+         framework/private/srcloc-panel
          racket/unit
          racket/class
          racket/gui/base
@@ -147,10 +148,10 @@
 
       (define/override (make-root-area-container cls parent)
         (set! hash-lang-error-parent-panel
-              (super make-root-area-container vertical-panel% parent))
+              (super make-root-area-container vertical-pane% parent))
         (define root (make-object cls hash-lang-error-parent-panel))
         (set! hash-lang-error-panel
-              (new horizontal-panel%
+              (new-horizontal-panel%
                    [stretchable-height #f]
                    [parent hash-lang-error-parent-panel]))
 
@@ -335,7 +336,15 @@
         (for ([key+proc (in-list (call-read-language the-irl 'drracket:keystrokes '()))])
           (define key (list-ref key+proc 0))
           (define proc (list-ref key+proc 1))
-          (define name (~a (object-name proc)))
+          (define name
+            (let loop ([counter #f])
+              (define name (if counter
+                               (~a (object-name proc) counter)
+                               (~a (object-name proc))))
+              (cond
+                [(send lang-keymap is-function-added? name)
+                 (loop (+ (or counter 0) 1))]
+                [else name])))
           (send lang-keymap add-function name proc)
           (send lang-keymap map-function key name))
         (send (get-keymap) chain-to-keymap lang-keymap #t)

@@ -51,7 +51,7 @@ Keyword arguments can customize the profiling:
   periodically collect stack snapshots (using
   @racket[continuation-mark-set->context]).  To determine the
   frequency of these collections, the sampler thread sleeps
-  @racket[delay] seconds between collections.  Note that this is will
+  @racket[delay] seconds between collections.  Note that this will
   be close, but not identical to, the frequency in which data is
   actually sampled.  (The @racket[delay] value is passed on to
   @racket[create-sampler], which creates the sampler thread.)}

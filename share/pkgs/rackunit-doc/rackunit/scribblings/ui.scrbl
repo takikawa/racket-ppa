@@ -1,5 +1,7 @@
 #lang scribble/doc
-@(require "base.rkt")
+@require["base.rkt" racket/runtime-path]
+@define-runtime-path[screenshot]{rackunit-screen-shot.png}
+
 
 @title[#:tag  "ui"]{User Interfaces}
 
@@ -47,6 +49,29 @@ GUI is updated as tests complete.
 
 When @racket[wait?] is true, @racket[test/gui] does not return until
 the test runner window has been closed.
+
+ Given the following program, the RackUnit GUI will look as shown below:
+
+ @racketblock[
+ #,(hash-lang) racket
+ (require rackunit rackunit/gui)
+ (test/gui
+  (test-suite
+   "all tests"
+   (test-suite
+    "math tests"
+    (test-case "addition" (check-equal? (+ 1 1) 2))
+    (test-case "subtraction" (check-equal? (- 0 0) 0))
+    (test-case "multiplication" (check-equal? (* 2 2) 5)))
+   (test-suite
+    "string tests"
+    (test-case "append" (check-equal? (string-append "a" "b") "ab"))
+    (test-case "ref" (check-equal? (string-ref "abc" 1) #\b)))))]
+
+ @image[screenshot]{Screenshot of the RackUnit
+  window. It features a tree representing the nested test suites (with test
+  cases as leaves) on the left pane, and information about the selected test
+  failure in the right pane.}
 }
 
 @defproc[(make-gui-runner)

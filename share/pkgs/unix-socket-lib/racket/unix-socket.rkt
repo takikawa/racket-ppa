@@ -189,23 +189,27 @@
 ;; ============================================================
 ;; Listen & Accept
 
-;; A Listener is (unix-socket-listener Nat/#f (U #f (Custodian-Boxof Cust-Reg/#f)) Semaphore)
-;; Invariant: fd is #f <=> reg-box is #f <=> sema is ready
-;; If fd is #f or reg-box contains #f, then listener is considered closed.
-(struct unix-socket-listener (fd reg-box sema)
+;; A Listener is (unix-socket-listener Nat/#f Cust-Reg/#f Semaphore)
+;; States:
+;;   OPEN:   (unix-socket-listener Nat Cust-Reg Semaphore[0])
+;;   CLOSED: (unix-socket-listener #f #f Semaphore[1])
+;; Only transition allowed is OPEN to CLOSED, must happen atomically.
+(struct unix-socket-listener (fd reg sema)
   #:mutable
-  #:property prop:evt (lambda (self)
-                        ;; ready when fd is readable OR if custodian is closed OR listener is closed
-                        (call-as-atomic
-                         (lambda ()
-                           (define fd (unix-socket-listener-fd self))
-                           (define reg-box (unix-socket-listener-reg-box self))
-                           (define sema (unix-socket-listener-sema self))
-                           (wrap-evt
-                            (choice-evt (if fd (scheme_fd_to_semaphore fd MZFD_CREATE_READ #t) never-evt)
-                                        (or reg-box never-evt)
-                                        (semaphore-peek-evt sema))
-                            (lambda (evt) self))))))
+  #:property prop:evt
+  (lambda (self)
+    ;; ready when fd is readable OR listener is closed
+    (call-as-atomic
+     (lambda ()
+       (wrap-evt
+        (choice-evt
+         ;; ready when fd is readable
+         (cond [(unix-socket-listener-fd self)
+                => (lambda (fd) (scheme_fd_to_semaphore fd MZFD_CREATE_READ #t))]
+               [else never-evt])
+         ;; or when listener is closed
+         (semaphore-peek-evt (unix-socket-listener-sema self)))
+        (lambda (evt) self))))))
 
 ;; unix-socket-listen : Path/String [Nat] -> Unix-Socket-Listener
 (define (unix-socket-listen path [backlog 4])
@@ -222,24 +226,25 @@
        (close/unregister socket-fd reg)
        (error 'unix-socket-listen "failed to listen\n  path: ~e~a"
               path (errno-error-lines (saved-errno))))
-     (unix-socket-listener socket-fd
-                           (make-custodian-box (current-custodian) reg)
-                           (make-semaphore 0)))))
+     (define listener (unix-socket-listener socket-fd #f (make-semaphore 0)))
+     (set-unix-socket-listener-reg! listener
+       (register-custodian-shutdown listener do-close-listener))
+     (unregister-custodian-shutdown socket-fd reg)
+     listener)))
 
 ;; unix-socket-close-listener : Listener -> Void
 (define (unix-socket-close-listener l)
-  (call-as-atomic
-   (lambda ()
-     (define fd (unix-socket-listener-fd l))
-     (define sema (unix-socket-listener-sema l))
-     (define reg-box (unix-socket-listener-reg-box l))
-     (define reg (and reg-box (custodian-box-value reg-box)))
-     (when fd
-       (set-unix-socket-listener-fd! l #f)
-       (set-unix-socket-listener-reg-box! l #f)
-       (close/unregister fd reg)
-       (semaphore-post sema))
-     (void))))
+  (call-as-atomic (lambda () (do-close-listener l #t))))
+
+(define (do-close-listener l [unregister? #f])
+  (define fd (unix-socket-listener-fd l))
+  (define reg (unix-socket-listener-reg l))
+  (when fd
+    (set-unix-socket-listener-fd! l #f)
+    (set-unix-socket-listener-reg! l #f)
+    (when unregister? (unregister-custodian-shutdown l reg))
+    (close/unregister fd)
+    (semaphore-post (unix-socket-listener-sema l))))
 
 ;; unix-socket-accept : Unix-Socket-Listener -> (values Input-Port Output-Port)
 (define (unix-socket-accept l)
@@ -265,7 +270,5 @@
 
 (define (listener-fd/check-open who l)
   (define fd (unix-socket-listener-fd l))
-  (define reg-box (unix-socket-listener-reg-box l))
-  (unless (and fd reg-box (custodian-box-value reg-box))
-    (error who "unix socket listener is closed"))
+  (unless fd (error who "unix socket listener is closed"))
   fd)

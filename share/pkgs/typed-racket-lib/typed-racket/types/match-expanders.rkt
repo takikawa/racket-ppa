@@ -8,11 +8,30 @@
          (types resolve base-abbrev)
          (for-syntax racket/base syntax/parse))
 
-(provide Listof: List: MListof: AnyPoly: AnyPoly-names: Function/arrs:
+(provide Listof: List: MListof: AnyPoly: AnyPoly-names:
+         HashTableTop:
          SimpleListof: SimpleMListof:
          PredicateProp:
-         Val-able:)
+         Val-able:
+         Is-a:)
 
+
+;; matches types that are exactly the pattern,
+;; or that are an intersection type of some kind where
+;; exactly 1 of the types in the intersection is of the type
+(define-match-expander Is-a:
+  (lambda (stx)
+    (syntax-parse stx
+      [(_ pat)
+       (syntax/loc stx
+         (or pat
+             (Intersection: (or (list pat)
+                                (app (λ (ts) (filter (match-lambda
+                                                       [pat #t]
+                                                       [_ #f])
+                                                     ts))
+                                     (list pat)))
+                            _)))])))
 
 ;; some types used to be represented by a Value rep,
 ;; but are now represented by a Base rep. This function
@@ -27,15 +46,14 @@
     [(== -One) (box-immutable 1)]
     [_ #f]))
 
+;; matches types that correspond to singleton values
 (define-match-expander Val-able:
   (lambda (stx)
     (syntax-parse stx
       [(_ pat)
        (syntax/loc stx
-         (or (Value: pat)
-             (app Base->val? (box pat))
-             (Intersection: (list (or (Value: pat)
-                                      (app Base->val? (box pat)))) _)))])))
+         (Is-a: (or (Value: pat)
+                    (app Base->val? (box pat)))))])))
 
 (define-match-expander Listof:
   (lambda (stx)
@@ -58,7 +76,7 @@
       [(Mu-unsafe:
         (Union: (== -Null)
                 (list (pair-matcher elem-t (B: 0)))))
-       (define elem-t* (instantiate-raw-type t elem-t))
+       (define elem-t* (instantiate-type elem-t t))
        (cond
          [simple? (and (equal? elem-t elem-t*) elem-t)]
          [else elem-t*])]
@@ -144,11 +162,6 @@
       [(_ vars dotted-vars body)
        #'(app unpoly-names vars dotted-vars body)])))
 
-(define-match-expander Function/arrs:
-  (lambda (stx)
-    (syntax-parse stx
-      [(_ doms rngs rests drests kws (~optional (~seq #:arrs arrs) #:defaults ([arrs #'_])))
-       #'(Function: (and arrs (list (arr: doms rngs rests drests kws) (... ...))))])))
 
 ;; A match expander for matching the prop on a predicate. This assumes a standard
 ;; predicate type of the shape (-> Any Any : SomeType)
@@ -156,4 +169,15 @@
   (λ (stx)
     (syntax-parse stx
       [(_ ps)
-       #'(Function: (list (arr: (list _) (Values: (list (Result: _ ps _))) _ _ _)))])))
+       #'(Fun: (list (Arrow: (list _)
+                             _
+                             _
+                             (Values: (list (Result: _ ps _))))))])))
+
+(define-match-expander HashTableTop:
+  (lambda (stx)
+    (syntax-parse stx
+     [(_) #'(Union-all: (list-no-order (Immutable-HashTable: Univ Univ)
+                                       Mutable-HashTableTop:
+                                       Weak-HashTableTop:))])))
+
