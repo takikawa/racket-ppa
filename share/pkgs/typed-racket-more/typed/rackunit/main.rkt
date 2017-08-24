@@ -66,8 +66,6 @@
 
 (require/typed rackunit/log
   [test-log! (Any -> Any)])
-(require/typed rackunit/private/check
-  [check-around (All (A) ((-> A) -> A))])
 
 ; 3.2.1
 (require-typed-struct check-info
@@ -107,9 +105,7 @@
                            (λ ([e : exn:fail])
                              (test-log! #f)
                              (raise e))])
-          (parameterize
-              ([current-check-handler raise]
-               [current-check-around  check-around])
+          (parameterize ([current-check-handler raise])
             (void)
             expr ...)))))]
     [_
@@ -138,10 +134,7 @@
 (require/opaque-type TestCase test-case? rackunit)
 (provide TestCase test-case?)
 
-(require/typed
- rackunit/private/monad
- [#:opaque monad monad?])
-(define-type Seed (U #f monad (Object)))
+(define-type Seed Any)
 
 (define-type test-suite-handler-down
   (rackunit-test-suite (Option String) (Thunk Any) (Thunk Any) Seed -> Seed))

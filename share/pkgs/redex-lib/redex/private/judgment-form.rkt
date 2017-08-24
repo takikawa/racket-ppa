@@ -128,7 +128,7 @@
 (require 'mode-utils
          (for-syntax 'mode-utils))
 
-(define-for-syntax (generate-binding-constraints names names/ellipses bindings syn-err-name)
+(define-for-syntax (generate-binding-constraints lang names names/ellipses bindings syn-err-name)
   (define (id/depth stx)
     (syntax-case stx ()
       [(s (... ...))
@@ -146,7 +146,7 @@
                  (let ([b-id/depth (id/depth b)]
                        [n-id/depth (id/depth w/e)])
                    (if (= (id/depth-depth b-id/depth) (id/depth-depth n-id/depth))
-                       (cons #`(equal? #,x (term #,b)) cs)
+                       (cons #`(alpha-equivalent? #,lang #,x (term #,b)) cs)
                        (raise-ellipsis-depth-error
                         syn-err-name
                         (id/depth-id n-id/depth) (id/depth-depth n-id/depth)
@@ -158,13 +158,21 @@
       [w/ellipses names/ellipses])
      (hash-set extended (syntax-e name) w/ellipses))))
 
-(define (alpha-equivalent? lang lhs rhs)
-  (unless (compiled-lang? lang)
-    (raise-argument-error 'alpha-equivalent?
-                          "compiled-lang?"
-                          0
-                          lang lhs rhs))
-  (α-equal? (compiled-lang-binding-table lang) match-pattern lhs rhs))
+(define alpha-equivalent?
+  (case-lambda
+    [(lang lhs rhs)
+     (unless (compiled-lang? lang)
+       (raise-argument-error 'alpha-equivalent?
+                             "compiled-lang?"
+                             0
+                             lang lhs rhs))
+     (α-equal? (compiled-lang-binding-table lang) match-pattern lhs rhs)]
+    [(lhs rhs)
+     (define l (default-language))
+     (unless l
+       (error 'alpha-equivalent?
+              "contract violation\n  expected default-language to be  a language\n  got: #f"))
+     (alpha-equivalent? l lhs rhs)]))
 
 ;; the withs, freshs, and side-conditions come in backwards order
 ;; rt-lang is an identifier that will be bound to a (runtime) language,
@@ -197,7 +205,8 @@
                             #'pat-stx)]
                           [lang-stx rt-lang])
               (define-values (binding-constraints temporaries env+)
-                (generate-binding-constraints (syntax->list #'(names ...))
+                (generate-binding-constraints rt-lang
+                                              (syntax->list #'(names ...))
                                               (syntax->list #'(names/ellipses ...))
                                               env
                                               orig-name))
@@ -297,7 +306,7 @@
                         (syntax->list #'names)
                         (syntax->list #'names/ellipses))))
             (define-values (binding-constraints temporaries env+)
-              (generate-binding-constraints output-names output-names/ellipses env orig-name))
+              (generate-binding-constraints rt-lang output-names output-names/ellipses env orig-name))
             (define rest-body
               (loop rest-clauses #`(list (term #,output-pattern) #,to-not-be-in) env+))
             (define call
@@ -1469,22 +1478,6 @@
             (with-syntax ([(syncheck ctc-pat (names ...) (names/ellipses ...))
                            (rewrite-side-conditions/check-errs #'lang syn-err-name #f ctc-stx)])
               (values #'syncheck #'ctc-pat))]))
-       (define-values (syncheck-exprs contracts)
-         (syntax-case #'ctcs ()
-           [#f (values '() #f)]
-           [(p ...)
-            (let loop ([pats (syntax->list #'(p ...))]
-                       [ctcs '()]
-                       [syncheck-exps '()])
-              (cond
-                [(null? pats) (values syncheck-exps (reverse ctcs))]
-                [else
-                 (define pat (car pats))
-                 (with-syntax ([(syncheck-exp pat (names ...) (names/ellipses ...)) 
-                                (rewrite-side-conditions/check-errs #'lang syn-err-name #f pat)])
-                   (loop (cdr pats)
-                         (cons #'pat ctcs)
-                         (cons #'syncheck-exp syncheck-exps)))]))]))
        (define proc-stx (do-compile-judgment-form-proc #'judgment-form-name
                                                        #'mode-arg
                                                        clauses

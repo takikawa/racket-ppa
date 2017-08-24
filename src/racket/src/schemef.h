@@ -172,6 +172,7 @@ MZ_EXTERN Scheme_Object *scheme_add_flush(Scheme_Plumber *p, Scheme_Object *proc
 MZ_EXTERN void scheme_remove_flush(Scheme_Object *h);
 
 MZ_EXTERN void scheme_add_atexit_closer(Scheme_Exit_Closer_Func f);
+MZ_EXTERN int scheme_atexit(void (*func)(void));
 
 MZ_EXTERN void scheme_add_evt(Scheme_Type type,
 				   Scheme_Ready_Fun ready,
@@ -204,7 +205,7 @@ MZ_EXTERN void scheme_pop_break_enable(Scheme_Cont_Frame_Data *cframe, int post_
 MZ_EXTERN Scheme_Object *scheme_abort_continuation_no_dws(Scheme_Object *pt, Scheme_Object *v);
 MZ_EXTERN Scheme_Object *scheme_call_with_composable_no_dws(Scheme_Object *proc, Scheme_Object *pt);
 
-MZ_EXTERN Scheme_On_Atomic_Timeout_Proc scheme_set_on_atomic_timeout(Scheme_On_Atomic_Timeout_Proc p);
+MZ_EXTERN Scheme_On_Atomic_Timeout_Proc scheme_set_on_atomic_timeout(Scheme_On_Atomic_Timeout_Proc p, void *data);
 
 /*========================================================================*/
 /*                              error handling                            */
@@ -973,11 +974,6 @@ MZ_EXTERN Scheme_Object *scheme_make_sized_path(char *chars, intptr_t len, int c
 MZ_EXTERN Scheme_Object *scheme_make_sized_offset_path(char *chars, intptr_t d, intptr_t len, int copy);
 MZ_EXTERN Scheme_Object *scheme_make_sized_offset_kind_path(char *chars, intptr_t d, intptr_t len, int copy, int kind);
 MZ_EXTERN Scheme_Object *scheme_make_path_without_copying(char *chars);
-
-#ifdef MACINTOSH_EVENTS
-MZ_EXTERN char *scheme_mac_spec_to_path(mzFSSpec *spec);
-MZ_EXTERN int scheme_mac_path_to_spec(const char *filename, mzFSSpec *spec);
-#endif
 
 MZ_EXTERN void *scheme_alloc_fdset_array(int count, int permanent);
 MZ_EXTERN void *scheme_init_fdset_array(void *fdarray, int count);

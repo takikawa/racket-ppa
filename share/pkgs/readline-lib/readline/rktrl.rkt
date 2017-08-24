@@ -40,7 +40,7 @@
      (when lib
        (set! old-libedit #t))
      lib)
-   (ffi-lib "libedit" '("3" "2" "0.0.43" "0.0.53" ""))))
+   (ffi-lib "libedit" '("3" "2" "0.0.43" "0.0.53" "0" ""))))
 
 (define make-byte-string ; helper for the two types below
   (get-ffi-obj "scheme_make_byte_string" #f (_fun _pointer -> _scheme)))

@@ -274,7 +274,7 @@ metafunctions and renders them together, lining up all of the
 clauses together.
 
 Parameters that affect rendering include
-@racket[metafunction-pict-style], @racket[linebreaks], and
+@racket[metafunction-pict-style], @racket[linebreaks], @racket[sc-linebreaks], and
 @racket[metafunction-cases].
 
 If the metafunctions have contracts, they are typeset as the first
@@ -637,10 +637,23 @@ It's default value is @racket[default-white-square-bracket]. See also
   are rendered on two lines and which are rendered on one.
   
   If its value is a list, the length of the list must match
-  the number of cases plus one if there is a contract. 
+  the number of cases plus one if there is a contract that is rendered.
   Each boolean indicates if that case has a linebreak or not.
   
   This parameter's value influences the @racket['left/right] styles only.
+}
+
+@defparam[sc-linebreaks breaks (or/c #f (listof boolean?))]{
+  This parameter controls which cases in the metafunction
+  have the side-conditions rendered on the next line
+  instead of the same line as the right-hand side of the metafunction clause.
+  
+  Its value must have the same shape as the value of the @racket[linebreaks]
+  parameter.
+  
+  This parameter's value influences the @racket['left-right/beside-side-conditions] style only.
+
+  @history[#:added "1.6"]
 }
 
 @defparam[metafunction-cases
@@ -671,6 +684,13 @@ case, only the numbers are used).
    it is a list, then only the selected clauses appear (numbers
    count from @racket[0], and strings and symbols correspond to the labels
    in a judgment form).
+}
+
+@defparam[judgment-form-show-rule-names show-rule-names? boolean?]{
+  Determines if the names of the cases are shown beside the
+ rules in a rendered judgment form. Defaults to @racket[#t].
+
+ @history[#:added "1.5"]
 }
 
 @deftogether[[

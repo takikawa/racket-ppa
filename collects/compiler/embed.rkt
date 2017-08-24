@@ -271,12 +271,13 @@
           #:exists 'truncate
           (lambda (port)
             (write-plist new-plist port)))))
-    (call-with-output-file (build-path dest 
-                                       "Contents" 
-                                       "PkgInfo")
-      #:exists 'truncate
-      (lambda (port)
-        (fprintf port "APPL~a" creator)))
+    (let* ([pkginfo-path (build-path dest "Contents" "PkgInfo")]
+           [old-perms (ensure-writable pkginfo-path)])
+      (call-with-output-file pkginfo-path
+        #:exists 'truncate
+        (lambda (port)
+          (fprintf port "APPL~a" creator)))
+      (done-writable pkginfo-path old-perms))
     (when resource-files
       (for-each (lambda (p)
                   (let-values ([(base name dir?) (split-path p)])
@@ -569,8 +570,7 @@
                                          code
                                          (module-compiled-name code (last (module-compiled-name code))))]
                        [extract-submods (lambda (l)
-                                          (if (or (null? use-submods)
-                                                  use-source?)
+                                          (if use-source?
                                               null
                                               (for/list ([m (in-list l)]
                                                          #:when (or (member (last (module-compiled-name m)) use-submods)
@@ -1508,7 +1508,7 @@
                 (if (cdr m)
                     (update-dll-dir dest (cdr m))
                     ;; adjust relative path, since exe directory can change:
-		    (update-dll-dir dest (find-relative-path* dest (find-dll-dir))))
+		    (update-dll-dir dest (find-relative-path* dest (find-cross-dll-dir))))
                 ;; Check whether we need an absolute path to DLLs:
                 (let ([dir (get-current-dll-dir dest)])
                   (when (relative-path? dir)
@@ -1599,7 +1599,7 @@
 				  (list (if relative?
 					    (relativize exe dest-exe values)
 					    exe)
-					(let ([dir (find-dll-dir)])
+					(let ([dir (find-cross-dll-dir)])
 					  (if dir
 					      (if relative?
 						  (relativize dir dest-exe values)

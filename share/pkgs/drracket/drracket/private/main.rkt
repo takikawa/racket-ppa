@@ -9,6 +9,7 @@
          "local-member-names.rkt"
          mred
          framework
+         framework/private/srcloc-panel
          racket/list
          racket/path
          racket/file
@@ -21,7 +22,9 @@
          scribble/tag
          setup/xref
          scribble/xref
-         net/url)
+         net/url
+         racket/place
+         racket/future)
 
 (import [prefix drracket:app: drracket:app^]
         [prefix drracket:unit: drracket:unit^]
@@ -277,7 +280,7 @@
 (color-prefs:add-color-scheme-preferences-panel
  #:extras
  (λ (parent)
-   (define hp (new horizontal-panel% 
+   (define hp (new-horizontal-panel% 
                    [alignment '(center center)]
                    [parent parent]
                    [stretchable-height #f]))
@@ -379,7 +382,7 @@
      
      ;; come back to this one.
      #;
-     (letrec ([hp (new horizontal-panel% 
+     (letrec ([hp (new-horizontal-panel% 
                        (parent editor-panel)
                        (alignment '(left top))
                        (stretchable-height #f))]
@@ -567,7 +570,9 @@
                   lang
                   (or settings (send lang default-settings)))))))))
 
-  (preferences:set-default 'drracket:online-compilation-default-on #t boolean?)
+  (preferences:set-default 'drracket:online-compilation-default-on
+                           (and (place-enabled?) ((processor-count) . > . 1))
+                           boolean?)
   (preferences:set-default 'drracket:online-expansion:read-in-defs-errors 
                            'margin
                            (or/c 'margin 'gold))

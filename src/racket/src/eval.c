@@ -162,12 +162,6 @@
 #ifdef WINDOWS_FIND_STACK_BOUNDS
 #include <windows.h>
 #endif
-#ifdef BEOS_FIND_STACK_BOUNDS
-# include <be/kernel/OS.h>
-#endif
-#ifdef OSKIT_FIXED_STACK_BOUNDS
-# include <oskit/machine/base_stack.h>
-#endif
 #include "schmach.h"
 #ifdef MACOS_STACK_LIMIT
 #include <Memory.h>
@@ -699,18 +693,6 @@ void scheme_init_stack_check()
       SysGetStackInfo(Ptr &s, &e);
       scheme_stack_boundary = (uintptr_t)e + STACK_SAFETY_MARGIN;
     }
-# endif
-
-# ifdef BEOS_FIND_STACK_BOUNDS
-    {
-      thread_info info;
-      get_thread_info(find_thread(NULL), &info);
-      scheme_stack_boundary = (uintptr_t)info.stack_base + STACK_SAFETY_MARGIN;
-    }
-# endif
-
-# ifdef OSKIT_FIXED_STACK_BOUNDS
-    scheme_stack_boundary = (uintptr_t)base_stack_start + STACK_SAFETY_MARGIN;
 # endif
 
 # ifdef UNIX_FIND_STACK_BOUNDS
@@ -1472,7 +1454,7 @@ static Scheme_Dynamic_Wind *intersect_dw(Scheme_Dynamic_Wind *a, Scheme_Dynamic_
 {
   int alen = 0, blen = 0;
   int a_has_tag = 0, a_prompt_delta = 0, b_prompt_delta = 0;
-  Scheme_Dynamic_Wind *dw;
+  Scheme_Dynamic_Wind *dw, *match_a, *match_b;
 
   for (dw = a; dw && (dw->prompt_tag != prompt_tag); dw = dw->prev) {
   }
@@ -1504,18 +1486,32 @@ static Scheme_Dynamic_Wind *intersect_dw(Scheme_Dynamic_Wind *a, Scheme_Dynamic_
   }
 
   /* At this point, we have chains that are the same length. */
+  match_a = NULL;
+  match_b = NULL;
   while (blen) {
     if (SAME_OBJ(a->id ? a->id : (Scheme_Object *)a, 
-                 b->id ? b->id : (Scheme_Object *)b))
-      break;
+                 b->id ? b->id : (Scheme_Object *)b)) {
+      if (!match_a) {
+        match_a = a;
+        match_b = b;
+      }
+    } else {
+      match_a = NULL;
+      match_b = NULL;
+    }
     a = a->prev;
     b = b->prev;
     blen--;
   }
 
-  *_common_depth = (b ? b->depth : -1);
+  if (!match_a) {
+    match_a = a;
+    match_b = b;
+  }
 
-  return a;
+  *_common_depth = (match_b ? match_b->depth : -1);
+
+  return match_a;
 }
 
 static Scheme_Prompt *lookup_cont_prompt(Scheme_Cont *c, 
@@ -3088,8 +3084,7 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
                       the chaperone may guard access to the function as a field inside
                       the struct. We'll need to keep track of the original object
                       as we unwrap to discover procedure chaperones. */
-                   && (SCHEME_VECTORP(((Scheme_Chaperone *)obj)->redirects))
-                   && !(SCHEME_VEC_SIZE(((Scheme_Chaperone *)obj)->redirects) & 1))
+		   && SCHEME_REDIRECTS_STRUCTP(((Scheme_Chaperone *) obj)->redirects))
                /* A raw pair is from scheme_apply_chaperone(), propagating the
                   original object for an applicable structure. */
                || (type == scheme_raw_pair_type)) {
@@ -3154,8 +3149,7 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 
           goto apply_top;
         } else {
-          if (SCHEME_VECTORP(((Scheme_Chaperone *)obj)->redirects)
-              && !(SCHEME_VEC_SIZE(((Scheme_Chaperone *)obj)->redirects) & 1))
+          if (SCHEME_REDIRECTS_STRUCTP(((Scheme_Chaperone *)obj)->redirects))
             obj = ((Scheme_Chaperone *)obj)->prev;
           else if (SAME_TYPE(SCHEME_TYPE(((Scheme_Chaperone *)obj)->redirects), scheme_nack_guard_evt_type))
             /* Chaperone is for evt, not function arguments */
