@@ -1,3 +1,9 @@
+racket (6.10-1~zesty1~ppa1) zesty; urgency=medium
+
+  * PPA release
+
+ -- Asumu Takikawa <asumu@racket-lang.org>  Thu, 24 Aug 2017 12:51:00 -0800
+
 racket (6.9-2) unstable; urgency=medium
 
   * rebuild for unstable
