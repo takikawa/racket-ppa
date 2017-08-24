@@ -6,6 +6,6 @@ Terminal=false
 Type=Application
 Categories=Development;Education;
 Exec=drracket -singleInstance %F
-Icon=plt
+Icon=racket-logo
 StartupNotify=true
 MimeType=text/x-scheme;
