@@ -189,7 +189,11 @@
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(define mz-inc "/I ../../racket/include /I .. ")
+(define mz-inc
+  (string-append "/I../../racket/include "
+		 "/I../../rktio "
+		 "/I../librktio "
+		 "/I.. "))
 
 (try "precomp.c" (list* "../../racket/src/schvers.h"
 			common-deps)
@@ -324,7 +328,8 @@
    "xsrc/mzsj86.obj"
    "xsrc/foreign.obj"
    (find-build-file "libracket" "gmp.obj")
-   (find-build-file "racket" "libffi.lib")
+   (find-build-file "libffi" "libffi.lib")
+   (find-build-file "librktio" "librktio.lib")
    (append
     (let ([f (and win64?
 		  (find-build-file "libracket" "mzsj86w64.obj"))])
@@ -401,7 +406,8 @@
 
 (system- (format "~a /MT /O2 /DMZ_PRECISE_GC /I../../racket/include /I.. /c ../../racket/dynsrc/mzdyn.c /Fomzdyn3m.obj"
 		 cl.exe))
-(system- "lib.exe -def:../../racket/dynsrc/mzdyn.def -out:mzdyn3m.lib")
+(system- (format "lib.exe -machine:~a -def:../../racket/dynsrc/mzdyn.def -out:mzdyn3m.lib"
+		 (if win64? "x64" "X86")))
 
 (define (copy-file/diff src dest)
   (unless (and (file-exists? dest)

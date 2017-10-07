@@ -1,0 +1,34 @@
+;; This file was created by make-log-based-eval
+((begin
+   (require contract-profile
+            racket/contract
+            (only-in racket/file file->string)
+            racket/list))
+ ((3) 0 () 0 () () (c values c (void)))
+ #""
+ #"")
+((define/contract
+  (sum* numbers)
+  (-> (listof integer?) integer?)
+  (for/fold ((total 0)) ((n (in-list numbers))) (+ total n)))
+ ((3) 0 () 0 () () (c values c (void)))
+ #""
+ #"")
+((contract-profile (sum* (range (expt 10 7))))
+ ((3) 0 () 0 () () (q values 49999995000000))
+ #"Running time is 20.68% contracts\n529/2555 ms\n\n(-> (listof integer?) integer?)                                  528.5 ms\n#<blame>::-1                                                    \n    sum*                                                         528.5 ms\n\n"
+ #"")
+((define/contract
+  (vector-max* vec-of-numbers)
+  (-> (vectorof list?) integer?)
+  (for/fold
+   ((total 0))
+   ((numbers (in-vector vec-of-numbers)))
+   (+ total (sum* numbers))))
+ ((3) 0 () 0 () () (c values c (void)))
+ #""
+ #"")
+((contract-profile (vector-max* (make-vector 10 (range (expt 10 7)))))
+ ((3) 0 () 0 () () (q values 499999950000000))
+ #"Running time is 93.25% contracts\n4453/4775 ms\n\n(-> (vectorof (listof any/c)) integer?)                          2055.5 ms\n#<blame>::-1                                                    \n    vector-max*                                                  2055.5 ms\n\n(-> (listof integer?) integer?)                                  2397 ms\n#<blame>::-1                                                    \n    sum*                                                         2397 ms\n\n"
+ #"")

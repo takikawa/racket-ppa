@@ -13,6 +13,17 @@ LaTeX style defaults to use the @hyperlink[acmart-url]{@tt{acmart}}
 class for typesetting publications for the Association of Computing
 Machinery.}
 
+@bold{Note:} a @racketmodname[scribble/acmart] document must include a
+@racket[title] and @racket[author].
+
+Example:
+
+@verbatim[#:indent 2]|{
+  #lang scribble/acmart
+  @title{Surreal Numbers}
+  @author{Ursula N. Owens}
+}|
+
 @deftogether[(
 @defidform[manuscript]
 @defidform[acmsmall]
@@ -106,24 +117,24 @@ Specifies a subtitle.}
 }
 
 @deftogether[(
-@defproc[(acmJournal [journal pre-content?] ...) content?]
-@defproc[(acmConference [name pre-content?] [date pre-content?] [venue pre-content?]) content?]
-@defproc[(acmVolume [content pre-content?] ...) content?]
-@defproc[(acmNumber [content pre-content?] ...) content?]
-@defproc[(acmArticle [content pre-content?] ...) content?]
-@defproc[(acmYear [content pre-content?] ...) content?]
-@defproc[(acmMonth [content pre-content?] ...) content?]
-@defproc[(acmArticleSeq [content pre-content?] ...) content?]
-@defproc[(acmPrice [content pre-content?] ...) content?]
-@defproc[(acmISBN [content pre-content?] ...) content?]
-@defproc[(acmDOI [content pre-content?] ...) content?]
+@defproc[(acmJournal [journal pre-content?] ...) block?]
+@defproc[(acmConference [name pre-content?] [date pre-content?] [venue pre-content?]) block?]
+@defproc[(acmVolume [content pre-content?] ...) block?]
+@defproc[(acmNumber [content pre-content?] ...) block?]
+@defproc[(acmArticle [content pre-content?] ...) block?]
+@defproc[(acmYear [content pre-content?] ...) block?]
+@defproc[(acmMonth [content pre-content?] ...) block?]
+@defproc[(acmArticleSeq [content pre-content?] ...) block?]
+@defproc[(acmPrice [content pre-content?] ...) block?]
+@defproc[(acmISBN [content pre-content?] ...) block?]
+@defproc[(acmDOI [content pre-content?] ...) block?]
 )]{
 
 Declares information that is collected into the front-matter region of the paper.}
 
 @deftogether[(
-@defproc[(acmBadgeL [#:url url string? #f] [graphics string?]) content?]
-@defproc[(acmBadgeR [#:url url string? #f] [graphics string?]) content?]
+@defproc[(acmBadgeL [#:url url string? #f] [graphics string?]) block?]
+@defproc[(acmBadgeR [#:url url string? #f] [graphics string?]) block?]
 )]{
 
 Display a special badge, such as an artifact evaluation badge, on the
@@ -146,7 +157,7 @@ screen version of the image links to the badge authority.
 
 @defproc[(affiliation
           [#:position position (or/c pre-content? #f) #f]
-          [#:institution institution (or/c pre-content? institution? #f) #f]
+          [#:institution institution (listof (or/c pre-content? institution?)) '()]
           [#:street-address street-address (or/c pre-content? #f) #f]
           [#:city city (or/c pre-content? #f) #f]
           [#:state state (or/c pre-content? #f) #f]

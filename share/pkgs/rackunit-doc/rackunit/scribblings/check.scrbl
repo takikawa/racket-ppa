@@ -120,13 +120,13 @@ that checks are conceptually functions.
 For example, the following checks succeed:
 
 @interaction[#:eval rackunit-eval
-  (check-exn 
-   exn:fail? 
+  (check-exn
+   exn:fail?
    (lambda ()
      (raise (make-exn:fail "Hi there"
                            (current-continuation-marks)))))
-  (check-exn 
-   exn:fail? 
+  (check-exn
+   exn:fail?
    (lambda ()
      (error 'hi "there")))
 ]
@@ -266,10 +266,39 @@ the check.  Additional information can be stored by using
 the @racket[with-check-info*] function, and the
 @racket[with-check-info] macro.
 
-@defstruct[check-info ([name symbol?] [value any])]{
+@defstruct[check-info ([name symbol?] [value any]) #:transparent]{
+ A check-info structure stores information associated with the context of the
+ execution of a check. The @racket[value] is written in a check failure message
+ using @racket[write] unless it is a @racket[string-info] value or a
+ @racket[nested-info] value.
+ @history[#:changed "1.6" "Changed from opaque to transparent"]}
 
-A check-info structure stores information associated
-with the context of execution of a check.}
+@defstruct*[string-info ([value string?]) #:transparent]{
+ A special wrapper around a string for use as a @racket[check-info] value. When
+ displayed in a check failure message, @racket[value] is displayed without
+ quotes. Used to print messages in check infos instead of writing values.
+ @(interaction
+   #:eval rackunit-eval
+   (define-check (string-info-check)
+     (with-check-info (['value "hello world"]
+                       ['message (string-info "hello world")])
+       (fail-check)))
+   (string-info-check))
+ @history[#:added "1.2"]}
+
+@defstruct*[nested-info ([values (listof check-info?)]) #:transparent]{
+ A special wrapper around a list of infos for use as a @racket[check-info]
+ value. A check info whose value is a nested info is displayed as an indented
+ subsequence of infos. Nested infos can be placed inside nested infos, yielding
+ greater indentation.
+ @(interaction
+   #:eval rackunit-eval
+   (define-check (nested-info-check)
+     (define infos
+       (list (make-check-info 'foo "foo") (make-check-info 'bar "bar")))
+     (with-check-info (['nested (nested-info infos)]) (fail-check)))
+   (nested-info-check))
+ @history[#:added "1.7"]}
 
 The are several predefined functions that create check
 information structures with predefined names.  This avoids
@@ -277,7 +306,7 @@ misspelling errors:
 
 @defproc*[([(make-check-name (name string?)) check-info?]
            [(make-check-params (params (listof any))) check-info?]
-           [(make-check-location (loc (list/c any (or/c number? #f) (or/c number? #f) 
+           [(make-check-location (loc (list/c any (or/c number? #f) (or/c number? #f)
                                                   (or/c number? #f) (or/c number? #f))))
             check-info?]
            [(make-check-expression (msg any)) check-info?]
@@ -375,7 +404,7 @@ We can use these checks in the usual way:
 
 @interaction[#:eval rackunit-eval
   (check-odd? 3)
-  (check-odd? 2) 
+  (check-odd? 2)
 ]
 
 @defform*[[(define-binary-check (name pred actual expected))
@@ -416,18 +445,13 @@ tests a number if within 0.01 of the expected value:
 
 The @racket[define-check] macro acts in exactly the same way
 as @racket[define-simple-check], except the check only fails
-if the macro @racket[fail-check] is called in the body of
-the check.  This allows more flexible checks, and in
-particular more flexible reporting options.}
+if @racket[fail-check] is called in the body of the check.
+This allows more flexible checks, and in particular more flexible
+reporting options.}
 
-@defform*[[(fail-check)
-           (fail-check message-expr)]]{
-
-The @racket[fail-check] macro raises an @racket[exn:test:check] with
-the contents of the check information stack. The optional message
-is used as the exception's message.
-
-}
-
+@defproc[(fail-check [message string?]) void?]{
+Raises an @racket[exn:test:check] with the contents of the check
+information stack. The optional message is used as the exception's
+message.}
 
 @close-eval[rackunit-eval]

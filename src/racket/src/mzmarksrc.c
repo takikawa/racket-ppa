@@ -1293,6 +1293,7 @@ mark_comp_env {
   gcMARK2(e->insp, gc);
   gcMARK2(e->prefix, gc);
   gcMARK2(e->next, gc);
+  gcMARK2(e->use_scopes_next, gc);
   gcMARK2(e->scopes, gc);
   gcMARK2(e->value_name, gc);
   gcMARK2(e->observer, gc);
@@ -1730,52 +1731,23 @@ mark_output_file {
   gcBYTES_TO_WORDS(sizeof(Scheme_Output_File));
 }
 
-#ifdef MZ_FDS
 mark_input_fd {
  mark:
   Scheme_FD *fd = (Scheme_FD *)p;
 
   gcMARK2(fd->buffer, gc);
-  gcMARK2(fd->refcount, gc);
+  /* fd->refcount is malloc()ed */
   gcMARK2(fd->flush_handle, gc);
+  gcMARK2(fd->bufwidths, gc);
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_FD));
 }
-#endif
-
-#if defined(UNIX_PROCESSES) && !(defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC))
-mark_system_child {
- mark:
-  System_Child *sc = (System_Child *)p;
-
-  gcMARK2(sc->next, gc);
-
- size:
-  gcBYTES_TO_WORDS(sizeof(System_Child));
-}
-#endif
-
-#ifdef USE_OSKIT_CONSOLE
-mark_oskit_console_input {
- mark:
-  osk_console_input *c = (osk_console_input *)p;
-    
-  gcMARK2(c->buffer, gc);
-  gcMARK2(c->next, gc);
-
- size:
-  gcBYTES_TO_WORDS(sizeof(osk_console_input));
-}
-#endif
 
 mark_subprocess {
  mark:
-#ifndef WINDOWS_PROCESSES
   Scheme_Subprocess *sp = (Scheme_Subprocess *)p;
-  gcMARK2(sp->handle, gc);
   gcMARK2(sp->mref, gc);
-#endif
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Subprocess));
 }
@@ -1793,7 +1765,6 @@ mark_read_write_evt {
 mark_filesystem_change_evt {
  mark:
   Scheme_Filesystem_Change_Evt *fc = (Scheme_Filesystem_Change_Evt *)p;
-  gcMARK2(fc->sema, gc);
   gcMARK2(fc->mref, gc);
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Filesystem_Change_Evt));
@@ -1847,16 +1818,12 @@ END print;
 
 START network;
 
-#ifdef USE_TCP
 mark_listener {
   listener_t *l = (listener_t *)p;
 
  mark:
 
   gcMARK2(l->mref, gc);
-# ifdef HAVE_POLL_SYSCALL
-  gcMARK2(l->pfd, gc);
-# endif
 
  size:
   gcBYTES_TO_WORDS(sizeof(listener_t) + ((l->count - mzFLEX_DELTA) * sizeof(tcp_t)));
@@ -1873,7 +1840,6 @@ mark_tcp {
   gcBYTES_TO_WORDS(sizeof(Scheme_Tcp));
 }
 
-# ifdef UDP_IS_SUPPORTED
 mark_udp {
  mark:
   Scheme_UDP *udp = (Scheme_UDP *)p;
@@ -1891,14 +1857,10 @@ mark_udp_evt {
 
   gcMARK2(uw->udp, gc);
   gcMARK2(uw->str, gc);
-  gcMARK2(uw->dest_addrs, gc);
-  gcMARK2(uw->dest_addr_lens, gc);
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_UDP_Evt));
 }
-# endif
-#endif
 
 END network;
 

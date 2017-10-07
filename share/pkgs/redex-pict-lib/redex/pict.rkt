@@ -91,7 +91,8 @@
  [non-terminal-style (parameter/c text-style/c)]
  [non-terminal-subscript-style (parameter/c text-style/c)]
  [non-terminal-superscript-style (parameter/c text-style/c)]
- [linebreaks (parameter/c (or/c false/c (listof boolean?)))]
+ [linebreaks (parameter/c (or/c #f (listof boolean?)))]
+ [sc-linebreaks (parameter/c (or/c #f (listof boolean?)))]
  [curly-quotes-for-strings (parameter/c boolean?)]
  [white-bracket-sizing (parameter/c
                         (-> string? number? (values number? number? number? number?)))]
@@ -109,6 +110,7 @@
   (parameter/c (or/c #f (listof (or/c exact-nonnegative-integer? symbol? string?))))]
  [judgment-form-cases
   (parameter/c (or/c #f (non-empty-listof (or/c exact-nonnegative-integer? symbol? string?))))]
+ [judgment-form-show-rule-names (parameter/c boolean?)]
  [metafunction-pict-style 
   (parameter/c (symbols 'left-right
                         'left-right/vertical-side-conditions

@@ -164,14 +164,18 @@
      (define brush (send dc get-brush))
      (define-values (sx sy) (send dc get-scale))
      (send dc clear)
-     (send dc set-scale mb-scale-factor mb-scale-factor)
+     (define border .05) ;; percentage border in the splash around the bitmap
+     (define-values (ox oy) (send dc get-origin))
+     (send dc set-origin (* border mb-flat-width) (* border mb-flat-height))
+     (send dc set-scale (* (- 1 (* 2 border)) mb-scale-factor) (* (- 1 (* 2 border)) mb-scale-factor))
      (send dc set-smoothing 'smoothed)
      (send dc set-pen "black" 1 'transparent)
      (mb-main-drawing dc)
      (send dc set-pen pen)
      (send dc set-brush brush)
      (send dc set-smoothing smoothing)
-     (send dc set-scale sx sy)]))
+     (send dc set-scale sx sy)
+     (send dc set-origin ox oy)]))
 
 (define (draw-mb-flat-weekend dc current max width height)
   (cond
@@ -310,3 +314,16 @@
 (dynamic-require 'drracket/tool-lib #f)
 (shutdown-splash)
 (close-splash)
+
+(when (getenv "PLTDRPANELDEBUG")
+(let loop ()
+  (queue-callback
+   (λ ()
+     (define w (get-top-level-focus-window))
+     (cond
+       [w
+        (printf "~s\n" w)
+        ((dynamic-require 'framework/private/srcloc-panel 'show-srclocs) w)]
+       [else
+        (loop)]))
+   #f)))

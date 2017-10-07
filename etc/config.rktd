@@ -1,1 +1,1 @@
-#hash((build-stamp . "") (catalogs . ("https://download.racket-lang.org/releases/6.9/catalog/" #f)) (doc-search-url . "https://download.racket-lang.org/docs/6.9/html/local-redirect/index.html"))
+#hash((build-stamp . "") (catalogs . ("https://download.racket-lang.org/releases/6.10.1/catalog/" #f)) (doc-search-url . "https://download.racket-lang.org/releases/6.10.1/doc/local-redirect/index.html"))

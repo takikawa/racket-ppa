@@ -54,15 +54,19 @@
     (if row? do-row-inst do-normal-inst))
   (define (error-case number)
     (tc-error/expr
-      "Cannot instantiate expression that produces ~a values"
-      number))
+     "Cannot instantiate expression that produces ~a values"
+     number))
   (match tc-res
-    [(tc-results: tys fs os)
-     (match tys
-      [(list ty)
-       (ret (list (inst-type ty inst)) fs os)]
-      [_ (error-case (if (null? tys) 0 "multiple"))])]
-    [_ (error-case "multiple")]))
+    [(tc-results: (list (tc-result: t ps o)) #f)
+     ;; we erase 'o' -- if they bothered to put an instantiation,
+     ;; odds are this is not something where 'o' matters, and leaving
+     ;; 'o' can cause complications (see TR gh issue 561) -- maybe there's
+     ;; a better way? this seems totally fine for now
+     (ret (inst-type t inst) ps -empty-obj)]
+    [_ (error-case (if (and (tc-results? tc-res)
+                            (null? (tc-results-ts tc-res)))
+                       0
+                       "multiple"))]))
 
 
 ;; do-normal-inst : Type Syntax -> Type
