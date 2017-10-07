@@ -495,6 +495,12 @@
 
 
   (define-syntax-rule (mk-undefined id) undefined)
+
+  (define-syntax-rule (configured-module-begin . body)
+    (#%plain-module-begin
+     (module configure-runtime racket/base
+       (require r5rs/init))
+     . body))
     
   (provide unquote unquote-splicing 
 	   (rename-out [r5rs:quote quote]
@@ -517,7 +523,7 @@
 
 	   ;; We have to include the following Racket-isms to do anything,
 	   ;; but they're not legal R5RS names, anyway.
-           (rename-out [#%plain-module-begin #%module-begin])
+           (rename-out [configured-module-begin #%module-begin])
 	   #%app #%datum #%top #%top-interaction 
            #%require #%provide #%expression)
   

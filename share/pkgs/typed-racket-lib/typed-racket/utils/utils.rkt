@@ -27,14 +27,19 @@ at least theoretically.
  filter-multiple
  syntax-length
  in-pair
- in-sequence-forever
+ in-list/rest
+ list-ref/default
  match*/no-order
  bind
  genid
  gen-pretty-id
  local-tr-identifier?
  mark-id-as-normalized
- normalized-id?)
+ normalized-id?
+ assoc-ref
+ assoc-set
+ assoc-remove
+ in-assoc)
 
 (define optimize? (make-parameter #t))
 (define with-linear-integer-arithmetic? (make-parameter #f))
@@ -257,17 +262,6 @@ at least theoretically.
   (let ((list (syntax->list stx)))
     (and list (length list))))
 
-(define (in-sequence-forever seq val)
-  (make-do-sequence
-   (λ ()
-     (let-values ([(more? gen) (sequence-generate seq)])
-       (values (λ (e) (if (more?) (gen) val))
-               (λ (_) #t)
-               #t
-               (λ (_) #t)
-               (λ _ #t)
-               (λ _ #t))))))
-
 (define-syntax (match*/no-order stx)
   (define (parse-clauses clauses)
     (syntax-parse clauses
@@ -344,3 +338,137 @@ at least theoretically.
               (syntax-source-module id)))))
 
 (require 'local-ids)
+
+
+;; in-list/rest
+;; (in-list/rest l v)
+;;
+;; iterates through the elements of the
+;; list 'l' until they are exhausted, at which
+;; point 'v' is used for each subsequent iteration
+
+(define (in-list/rest-proc l rest)
+  (in-sequences l (in-cycle (in-value rest))))
+
+(define-sequence-syntax in-list/rest
+  (λ () #'in-list/rest-proc)
+  (λ (stx)
+    (syntax-case stx ()
+      [[(val) (_ list-exp rest-exp)]
+       #'[(val)
+          (:do-in
+           ;; ([(outer-id ...) outer-expr] ...)
+           ([(l) list-exp]
+            [(r) rest-exp])
+           ;; outer-check
+           #t
+           ;; ([loop-id loop-expr] ...)
+           ([pos l])
+           ;; pos-guard
+           #t
+           ;; ([(inner-id ...) inner-expr] ...)
+           ([(val pos) (if (pair? pos)
+                           (values (car pos) (cdr pos))
+                           (values r '()))])
+           ;; pre-guard
+           #t
+           ;; post-guard
+           #t
+           ;; (loop-arg ...)
+           (pos))]]
+      [[xs (_ dd-exp)]
+       (list? (syntax->datum #'xs))
+       (raise-syntax-error 'in-list/rest
+                           (format "expected an identifier, given ~a"
+                                   (syntax->list #'xs))
+                           #'xs)]
+      [blah (raise-syntax-error 'in-list/rest "invalid usage" #'blah)])))
+
+;; quick in-list/rest sanity checks
+(module+ test
+  (unless (equal? (for/list ([_ (in-range 0)]
+                             [val (in-list/rest (list 1 2) #f)])
+                    val)
+                  (list))
+    (error 'in-list/rest "broken!"))
+  (unless (equal? (for/list ([_ (in-range 2)]
+                             [val (in-list/rest (list 1 2) #f)])
+                    val)
+                  (list 1 2))
+    (error 'in-list/rest "broken!"))
+  (unless (equal? (for/list ([_ (in-range 4)]
+                             [val (in-list/rest (list 1 2) #f)])
+                    val)
+                  (list 1 2 #f #f))
+    (error 'in-list/rest "broken!")))
+
+
+(define (list-ref/default xs idx default)
+  (cond
+    [(pair? xs)
+     (if (eqv? 0 idx)
+         (car xs)
+         (list-ref/default (cdr xs) (sub1 idx) default))]
+    [else default]))
+
+(define assoc-ref
+  (let ([no-arg (gensym)])
+    (λ (d key [default no-arg])
+      (cond
+        [(assoc key d) => cdr]
+        [(eq? default no-arg)
+         (raise-mismatch-error 'assoc-ref
+                               (format "no value for key: ~e in: " key)
+                               d)]
+        [(procedure? default) (default)]
+        [else default]))))
+
+(define (assoc-set d key val)
+  (let loop ([xd d])
+    (cond
+      [(null? xd) (list (cons key val))]
+      [else
+       (let ([a (car xd)])
+         (if (equal? (car a) key)
+             (cons (cons key val) (cdr xd))
+             (cons a (loop (cdr xd)))))])))
+
+(define (assoc-remove d key)
+  (let loop ([xd d])
+    (cond
+      [(null? xd) null]
+      [else
+       (let ([a (car xd)])
+         (if (equal? (car a) key)
+             (cdr xd)
+             (cons a (loop (cdr xd)))))])))
+
+(define (in-assoc-proc l)
+  (in-parallel (map car l) (map cdr l)))
+
+(define-sequence-syntax in-assoc
+  (λ () #'in-list/rest-proc)
+  (λ (stx)
+    (syntax-case stx ()
+      [[(key val) (_ assoc-exp)]
+       #'[(val)
+          (:do-in
+           ;; ([(outer-id ...) outer-expr] ...)
+           ([(l) assoc-exp])
+           ;; outer-check
+           #t
+           ;; ([loop-id loop-expr] ...)
+           ([pos l])
+           ;; pos-guard
+           #t
+           ;; ([(inner-id ...) inner-expr] ...)
+           ([(key val pos) (if (pair? pos)
+                               (values (caar pos) (cdar pos) (cdr pos))
+                               (values #f #f #f))])
+           ;; pre-guard
+           pos
+           ;; post-guard
+           #t
+           ;; (loop-arg ...)
+           (pos))]]
+      [blah (raise-syntax-error 'in-assoc "invalid usage" #'blah)])))

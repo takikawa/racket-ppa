@@ -48,38 +48,47 @@
                 #:args (filename)
                 filename))
 
-(parameterize ([current-compile
-                (if use-errortrace?
-                    (make-errortrace-compile-handler)
-                    (current-compile))])
-  (define (t)
-    (collect-garbage)
-    (collect-garbage)
-    (collect-garbage)
-    (dynamic-require (module-to-profile file) #f))
-  (cond [(and delay iterations)
-         (profile-thunk t
-                        #:delay delay
-                        #:repeat iterations
-                        #:order order
-                        #:threads threads?
-                        #:use-errortrace? use-errortrace?)]
-        [delay
-          (profile-thunk t
-                         #:delay delay
-                         #:order order
-                         #:threads threads?
-                         #:use-errortrace? use-errortrace?)]
-        [iterations
-         (profile-thunk t
-                        #:repeat iterations
-                        #:order order
-                        #:threads threads?
-                        #:use-errortrace? use-errortrace?)]
-        [else
-         (profile-thunk t
-                        #:order order
-                        #:threads threads?
-                        #:use-errortrace? use-errortrace?)]))
+(define (t)
+  ;; use a fresh namespace every time, to play nice with --repeat
+  ;; otherwise, the 2nd+ `dynamic-require`s are no-ops
+  (parameterize* ([current-namespace       (make-base-empty-namespace)]
+                  ;; need to run `make-errortrace-compile-handler` in the
+                  ;; proper namespace
+                  [current-compile         (if use-errortrace?
+                                               (make-errortrace-compile-handler)
+                                               (current-compile))]
+                  [use-compiled-file-paths (if use-errortrace?
+                                               (cons (build-path "compiled" "errortrace")
+                                                     (use-compiled-file-paths))
+                                               (use-compiled-file-paths))])
+    (dynamic-require (module-to-profile file) #f)))
+
+(collect-garbage)
+(collect-garbage)
+(collect-garbage)
+(cond [(and delay iterations)
+       (profile-thunk t
+                      #:delay delay
+                      #:repeat iterations
+                      #:order order
+                      #:threads threads?
+                      #:use-errortrace? use-errortrace?)]
+      [delay
+        (profile-thunk t
+                       #:delay delay
+                       #:order order
+                       #:threads threads?
+                       #:use-errortrace? use-errortrace?)]
+      [iterations
+       (profile-thunk t
+                      #:repeat iterations
+                      #:order order
+                      #:threads threads?
+                      #:use-errortrace? use-errortrace?)]
+      [else
+       (profile-thunk t
+                      #:order order
+                      #:threads threads?
+                      #:use-errortrace? use-errortrace?)])
 
 (module test racket/base) ; don't run for testing

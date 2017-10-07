@@ -509,24 +509,30 @@
        (if (eq? (syntax-e #'name) 'errortrace-key)
            top-e
            (let ([expanded-e (normal top-e)])
-             (initialize-test-coverage)
-             (add-test-coverage-init-code
-              (transform-all-modules 
-               expanded-e
-               (lambda (top-e mod-id)
-                 (syntax-case top-e ()
-                   [(mod name init-import mb)
-                    (syntax-case (disarm #'mb) (#%plain-module-begin)
-                      [(#%plain-module-begin body ...)
-                       (let ([meta-depth ((count-meta-levels 0) #'(begin body ...))])
-                         (copy-props
-                          top-e
-                          #`(#,mod-id name init-import
-                                      #,(syntax-rearm
-                                         #`(#%plain-module-begin
-                                            #,(generate-key-imports meta-depth)
-                                            body ...)
-                                         #'mb))))])]))))))]
+             (cond
+              [(has-cross-phase-declare?
+                (syntax-case expanded-e ()
+                  [(mod name init-import mb) #'mb]))
+               expanded-e]
+              [else
+               (initialize-test-coverage)
+               (add-test-coverage-init-code
+                (transform-all-modules 
+                 expanded-e
+                 (lambda (top-e mod-id)
+                   (syntax-case top-e ()
+                     [(mod name init-import mb)
+                      (syntax-case (disarm #'mb) (#%plain-module-begin)
+                        [(#%plain-module-begin body ...)
+                         (let ([meta-depth ((count-meta-levels 0) #'(begin body ...))])
+                           (copy-props
+                            top-e
+                            #`(#,mod-id name init-import
+                                        #,(syntax-rearm
+                                           #`(#%plain-module-begin
+                                              #,(generate-key-imports meta-depth)
+                                              body ...)
+                                           #'mb))))])]))))])))]
       [_else
        (let ([e (normal top-e)])
          (let ([meta-depth ((count-meta-levels 0) e)])
@@ -538,6 +544,17 @@
            #`(begin
                #,(generate-key-imports meta-depth)
                #,e)))])))
+
+(define (has-cross-phase-declare? e)
+  (for/or ([a (in-list (or (syntax->list e) '()))])
+    (syntax-case* a (#%declare begin) (lambda (a b)
+                                        (free-identifier=? a b 0 (namespace-base-phase)))
+      [(#%declare kw ...)
+       (for/or ([kw (in-list (syntax->list #'(kw ...)))])
+         (eq? (syntax-e kw) '#:cross-phase-persistent))]
+      [(begin . e)
+       (has-cross-phase-declare? #'e)]
+      [_ #f])))
 
 (define-namespace-anchor orig-namespace)
                       

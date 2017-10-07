@@ -231,7 +231,7 @@ A parameter to enable or disable all code coloring. The default is
 
 @defboolparam[code-colorize-quote-enabled on?]{
 
-A parameter to control whether under a @racket[quote] is colorized as
+A parameter to control whether the datum under a @racket[quote] is colorized as
 a literal (as in this documentation). The default is @racket[#t].}
 
 
@@ -272,7 +272,7 @@ If a @racket[_datum] contains @racket[(escape-id _expr)]---perhaps as
 the @racket[_expr] is evaluated and the result datum is spliced in
 place of the @racket[escape-id] form in @racket[_datum]. If the result
 is not a syntax object, it is given the source location of the
-@racket[escape-id] form. A pict value intected this way as a
+@racket[escape-id] form. A pict value injected this way as a
 @racket[_datum] is rendered as itself.
 
 If a @racket[_datum] contains @racket[(transform-id _datum ...)] or

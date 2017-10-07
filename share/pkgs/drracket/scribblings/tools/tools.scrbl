@@ -3,6 +3,7 @@
    (require scribble/manual
             "common.rkt"
             scribble/racket
+            (for-label racket/syntax)
             (for-syntax racket/base
                         "example-src.rkt"))
    
@@ -577,8 +578,8 @@ additional arrows to the program text. These properties are
 intended for use when a macro discards or manufactures identifiers that,
 from the programmers perspective, should be binding each other.
 
-For example, here is a macro that discards its arguments, but
-adds properties to the result syntax object so the arguments
+For example, here is program with a macro that discards its arguments, but
+adds properties to the result syntax object so that the two occurrences of @racket[_a]
 are treated as a binding/bound pair by Check Syntax.
 
 @racketblock[
@@ -590,9 +591,17 @@ are treated as a binding/bound pair by Check Syntax.
         (syntax-property
          #'1
          'disappeared-use (list (syntax-local-introduce #'id1)))
-        'disappeared-binding (list (syntax-local-introduce #'id2)))]))]
+        'disappeared-binding (list (syntax-local-introduce #'id2)))]))
 
-See also @racket[current-recorded-disappeared-uses].
+  (m a a)]
+
+Check Syntax draws arrows only between identifiers that are
+@racket[free-identifier=?]. They must be
+@racket[syntax-original?] or have the
+@racket[syntax-property]
+@indexed-racket['original-for-check-syntax] set to
+@racket[#t]. See also
+@racket[current-recorded-disappeared-uses].
 
 Another approach for situations where identifiers are discarded by a
 macro is to introduce a @racket[let] expression that doesn't contribute
@@ -738,7 +747,7 @@ on @racket[_big] in the center of the identifiers; the @racket[.5 0] and the
 center for @racket[_generator].
 
 Also, for backwards compatibility, if the vector has only six elements, those
-elements must be everything except the @racket[(real 0 1)] elements listed above and,
+elements must be everything except the @racket[(real-in 0 1)] elements listed above and,
 in that case, all four numbers are all taken to be @racket[0.5].
 
 The value of the @racket['mouse-over-tooltips] property is expected to be 
@@ -773,10 +782,6 @@ For example, here's a macro that shows the span of itself in a tooltip on mouseo
                (syntax-span stx))))]))
 
 (char-span (+ 1 2))}
-
-Finally, Check Syntax draws arrows only between identifiers that are @racket[syntax-original?]
-or that have the @racket[syntax-property] @indexed-racket['original-for-check-syntax]
-set to @racket[#t].
 
 @history[#:changed "1.3" @list{
           Looks for @racket['sub-range-binders]

@@ -270,13 +270,11 @@
   (let ([x (here-source)]) (if (path? x) x no-path)))
 (define (here-mod-or-eof)
   (let ([x (here-source)])
-    (if (not x)
-      eof
-      (datum->syntax #f
-        (cond [(symbol? x) `',x]
-              [(path? x)   (let ([s (path->string x)])
-                             (if (absolute-path? x) `(file ,s) s))]
-              [else (error 'here-mod-or-eof "internal error: ~s" x)])))))
+    (cond [(not x) eof]
+          [(symbol? x) `',x]
+          [(path? x)   (let ([s (path->string x)])
+                         (if (absolute-path? x) `(file ,s) s))]
+          [else (error 'here-mod-or-eof "internal error: ~s" x)])))
 
 (define (getarg kind [flag 'req] #:default [dflt #f])
   (unless (memq flag '(req opt list list+))
