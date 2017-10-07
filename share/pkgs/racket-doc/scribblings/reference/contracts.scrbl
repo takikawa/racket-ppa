@@ -9,10 +9,8 @@
        (the-eval '(require racket/contract racket/contract/parametric racket/list))
        the-eval)))
 
-@(define blame-object
-   @tech[#:doc '(lib "scribblings/guide/guide.scrbl")]{blame object})
-@(define blame-objects
-   @tech[#:doc '(lib "scribblings/guide/guide.scrbl")]{blame objects})
+@(define blame-object @tech{blame object})
+@(define blame-objects @tech{blame objects})
 
 @title[#:tag "contracts" #:style 'toc]{Contracts}
 
@@ -126,7 +124,8 @@ and how they can be used to implement contracts.
 @section[#:tag "data-structure-contracts"]{Data-structure Contracts}
 @declare-exporting-ctc[racket/contract/base]
 
-@defproc[(flat-contract-with-explanation [get-explanation (-> any/c (or/c boolean? (-> blame? any)))])
+@defproc[(flat-contract-with-explanation [get-explanation (-> any/c (or/c boolean? (-> blame? any)))]
+                                         [#:name name any/c (object-name get-explanation)])
          flat-contract?]{
   Provides a way to use flat contracts that, when a contract fails,
   provide more information about the failure.
@@ -135,7 +134,10 @@ and how they can be used to implement contracts.
   treated as the predicate in a @tech{flat contract}. If it returns
   a procedure, then it is treated similarly to returning @racket[#f],
   except the result procedure is called to actually signal the contract
-  violation. 
+  violation.
+
+  The @racket[name] argument is used as the name of the contract; it defaults
+  to the name of the @racket[get-explanation] function.
 
  @racketblock[(flat-contract-with-explanation
                (λ (val)
@@ -464,7 +466,7 @@ If the @racket[eager] argument is @racket[#t], then immutable vectors are
 checked eagerly when @racket[c] is a @tech{flat contract}. If the
 @racket[eager] argument is a number @racket[n], then immutable vectors are checked
 eagerly when @racket[c] is a @tech{flat contract} and the length of the vector
-is less than or equal to @racket[n].}.
+is less than or equal to @racket[n].}
 
 When a higher-order @racket[vectorof] contract is applied to a vector, the result
 is not @racket[eq?] to the input.  The result will be a copy for immutable vectors
@@ -2182,14 +2184,15 @@ The default test accepts any value. The predicate should be influenced by
 the value of @racket[(contract-first-order-okay-to-give-up?)] (see it's documentation
 for more explanation).
 
-The @racket[late-neg-proj] defines the behavior of applying the contract. If it is
-supplied, it accepts a blame object that does not have a value for
- the @racket[blame-negative] field. Then it must return a function that accepts
- both the value that is getting the contract and the name of the blame party, in
- that order. The result must either be the value (perhaps suitably wrapped
- with a @tech{chaperone} or @tech{impersonator} to enforce the contract), or
- signal a contract violation using @racket[raise-blame-error]. The default is
- @racket[#f].
+The @racket[late-neg-proj] argument defines the behavior of applying
+ the contract via a @deftech{late neg projection}. If it is supplied, this
+ argument accepts a @tech{blame object} that is missing one party (see also
+ @racket[blame-missing-party?]).  Then it must return a function that accepts
+ both the value that is getting the contract and the name of the missing blame
+ party, in that order. The result must either be the value (perhaps suitably
+ wrapped with a @tech{chaperone} or @tech{impersonator} to enforce the
+ contract), or signal a contract violation using @racket[raise-blame-error].
+ The default is @racket[#f].
  
 The projection @racket[proj] and @racket[val-first-proj] are older mechanisms for
  defining the behavior of applying the contract.  The @racket[proj] argument
@@ -2318,7 +2321,7 @@ contracts.  The error messages assume that the function named by
 }
 
 @defproc[(get/build-val-first-projection [c contract?])
-         (-> contract? blame? (-> any/c (-> any/c any/c)))]{
+         (-> blame? (-> any/c (-> any/c any/c)))]{
   Returns the @racket[_val-first] projection for @racket[c].
               
   See @racket[make-contract] for more details.
@@ -2327,7 +2330,7 @@ contracts.  The error messages assume that the function named by
 }
 
 @defproc[(get/build-late-neg-projection [c contract?])
-         (-> contract? blame? (-> any/c any/c any/c))]{
+         (-> blame? (-> any/c any/c any/c))]{
  Returns the @racket[_late-neg] projection for @racket[c].
               
  If @racket[c] does not have a @racket[_late-neg] contract,
@@ -2360,21 +2363,24 @@ For the costs from checking your new combinator to be included, you should wrap
 any deferred, higher-order checks with this form. First-order checks are
 recognized automatically and do not require this form.
 
-If your combinator's projections operate on complete blame objects (i.e., no
-missing blame parties), the blame object should be the first argument to this
+If your combinator's projections operate on complete @tech{blame objects} (i.e., no
+missing blame parties), the @tech{blame object} should be the first argument to this
 form. Otherwise (e.g., in the case of @racket[_late-neg] projections), a pair
-of the blame object and the negative party should be used instead.
+of the @tech{blame object} and the missing party should be used instead.
 
 @history[#:added "6.4.0.4"]
 }
 
 @subsection{Blame Objects}
 
+This section describes @deftech{blame objects} and operations on them.
+
 @defproc[(blame? [v any/c]) boolean?]{
  This predicate recognizes @|blame-objects|.
 }
 
 @defproc[(raise-blame-error [b blame?]
+                            [#:missing-party missing-party #f]
                             [v any/c]
                             [fmt (or/c string?
                                        (listof (or/c string?
@@ -2386,7 +2392,12 @@ of the blame object and the negative party should be used instead.
 Signals a contract violation.  The first argument, @racket[b], records the
 current blame information, including positive and negative parties, the name of
 the contract, the name of the value, and the source location of the contract
-application.  The second argument, @racket[v], is the value that failed to
+application. The @racket[#:missing-party] argument supplies one of the blame
+parties. It should be non-@racket[#f] when the @racket[b] object was created
+without supplying a negative party. See @racket[blame-add-missing-party] and
+the description of the @racket[_late-neg-proj] argument of @racket[make-contract].
+
+The second positional argument, @racket[v], is the value that failed to
 satisfy the contract.
 
 The remaining arguments are a format string,
@@ -2514,7 +2525,7 @@ the other; both are provided for convenience and clarity.
 @defproc[(blame-add-missing-party [b (and/c blame? blame-missing-party?)]
                                   [missing-party any/c])
          (and/c blame? (not/c blame-missing-party?))]{
- Produces a new blame object like @racket[b], except that the missing
+ Produces a new @tech{blame object} like @racket[b], except that the missing
  party is replaced with @racket[missing-party].
 }
 
@@ -2613,8 +2624,8 @@ The value is expected to be the blame record for the contract on the value or
 a @racket[cons]-pair of a blame record with a missing party and the missing
 party. The @racket[value-blame] function reassembles the arguments of the pair
 into a complete blame record using @racket[blame-add-missing-party]. If
-the value has one of the properties, but the value is not a blame object
-or a pair whose @racket[car] position is a blame object, then @racket[has-blame?]
+the value has one of the properties, but the value is not a @tech{blame object}
+or a pair whose @racket[car] position is a @tech{blame object}, then @racket[has-blame?]
 returns @racket[#f] but @racket[value-blame] returns @racket[#f].
 }
 
@@ -3074,7 +3085,7 @@ Produces the name used to describe the contract in error messages.
   the contract checking, mostly used to create a meaningful error message if
   a contract violation is detected. The resulting function's first argument
   is the value that should have the contract and its second argument is
-  a ``missing party'' from the blame object, to be passed to @racket[raise-contract-error].
+  a missing party for the @tech{blame object}, to be passed to @racket[raise-contract-error].
 
   If possible, use this function instead of @racket[contract-val-first-projection] or
   @racket[contract-projection].
