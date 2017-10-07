@@ -1,9 +1,10 @@
-racket (6.10.1-1) UNRELEASED; urgency=medium
+racket (6.10.1-1) unstable; urgency=medium
 
   * New upstream release    
   * fix changelog for 6.9-1; wrong patch was discussed
+  * Assert compliance with policy 4.1.1; no changes.
 
- -- David Bremner <bremner@debian.org>  Sat, 07 Oct 2017 14:45:41 -0300
+ -- David Bremner <bremner@debian.org>  Sat, 07 Oct 2017 15:42:21 -0300
 
 racket (6.9-2) unstable; urgency=medium
 
