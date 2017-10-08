@@ -23,6 +23,11 @@ Licence: Lgpl 2.1+
     that you must release the source code for the modified software.  See
     doc/release-notes/COPYING.LIB for more information.
 
+Files: debian/*
+Copyright: © 2000-2017 Brent Fulgham, David Bremner, Ari Pollock, James Vega
+Licence: LGPL 2.1+
+	 Licensed under the same terms as upstream.
+
 Files: src/racket/src/gmp/*
 Copyright: © 1992, 1993, 1994, 1996  Free Software Foundation, Inc.
 License: LGPL2.1+
