@@ -1,6 +1,7 @@
 #lang racket/base
 (require (for-syntax racket/base
                      racket/lazy-require
+                     racket/syntax
                      syntax/parse/private/residual-ct) ;; keep abs.path
          racket/contract/base
          racket/contract/combinator
@@ -11,8 +12,7 @@
 (begin-for-syntax
  (lazy-require
   [syntax/parse/private/rep-data ;; keep abs. path
-   (get-stxclass
-    stxclass-delimit-cut?)]))
+   (get-stxclass)]))
 ;; FIXME: workaround for phase>0 bug in racket/runtime-path (and thus lazy-require)
 ;; Without this, dependencies don't get collected.
 (require racket/runtime-path (for-meta 2 '#%kernel))
@@ -22,20 +22,21 @@
   (if (eq? (syntax-local-context) 'expression)
       (syntax-case stx ()
         [(rsc sc)
-         (let* ([stxclass (get-stxclass #'sc)]
-                [splicing? (stxclass-splicing? stxclass)])
-           (unless (stxclass-delimit-cut? stxclass)
-             (raise-syntax-error #f "cannot reify syntax class with #:no-delimit-cut option"
-                                 stx #'sc))
-           (with-syntax ([name (stxclass-name stxclass)]
-                         [parser (stxclass-parser stxclass)]
-                         [arity (stxclass-arity stxclass)]
-                         [(#s(attr aname adepth _) ...) (stxclass-attrs stxclass)]
-                         [ctor
-                          (if splicing?
-                              #'reified-splicing-syntax-class
-                              #'reified-syntax-class)])
-             #'(ctor 'name parser 'arity '((aname adepth) ...))))])
+         (with-disappeared-uses
+          (let* ([stxclass (get-stxclass #'sc)]
+                 [splicing? (stxclass-splicing? stxclass)])
+            (unless (scopts-delimit-cut? (stxclass-opts stxclass))
+              (raise-syntax-error #f "cannot reify syntax class with #:no-delimit-cut option"
+                                  stx #'sc))
+            (with-syntax ([name (stxclass-name stxclass)]
+                          [parser (stxclass-parser stxclass)]
+                          [arity (stxclass-arity stxclass)]
+                          [(#s(attr aname adepth _) ...) (stxclass-attrs stxclass)]
+                          [ctor
+                           (if splicing?
+                               #'reified-splicing-syntax-class
+                               #'reified-syntax-class)])
+              #'(ctor 'name parser 'arity '((aname adepth) ...)))))])
       #`(#%expression #,stx)))
 
 (define (reified-syntax-class-arity r)
@@ -72,9 +73,9 @@
                        (arity minpos* maxpos* minkws* maxkws*))])]
                  [curried-parser
                   (make-keyword-procedure
-                   (lambda (kws2 kwargs2 x cx pr es fh cp success . rest2)
+                   (lambda (kws2 kwargs2 x cx pr es fh cp rl success . rest2)
                      (let-values ([(kws kwargs) (merge2 kws1 kws2 kwargs1 kwargs2)])
-                       (keyword-apply parser kws kwargs x cx pr es fh cp success
+                       (keyword-apply parser kws kwargs x cx pr es fh cp rl success
                                       (append rest1 rest2)))))]
                  [ctor
                   (cond [(reified-syntax-class? r)
@@ -125,20 +126,20 @@
                               (#:<kw> any/c ...)
                               #:rest list?
                               (or/c reified-syntax-class? reified-splicing-syntax-class/c))
-                 #:projection
+                 #:late-neg-projection
                  (lambda (blame)
                    (let ([check-reified
-                          ((contract-projection
+                          ((contract-late-neg-projection
                             (or/c reified-syntax-class? reified-splicing-syntax-class?))
                            (blame-swap blame))])
-                     (lambda (f)
+                     (lambda (f neg-party)
                        (if (and (procedure? f)
                                 (procedure-arity-includes? f 1))
                            (make-keyword-procedure
                             (lambda (kws kwargs r . args)
-                              (keyword-apply f kws kwargs (check-reified r) args)))
+                              (keyword-apply f kws kwargs (check-reified r neg-party) args)))
                            (raise-blame-error
-                            blame
+                            blame #:missing-party neg-party
                             f
                             "expected a procedure of at least one argument, given ~e"
                             f)))))

@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -92,44 +92,75 @@ void scheme_init_numarith(Scheme_Env *env)
   Scheme_Object *p;
 
   p = scheme_make_folding_prim(scheme_add1, "add1", 1, 1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
+                                                            | SCHEME_PRIM_WANTS_NUMBER
+                                                            | SCHEME_PRIM_OMITTABLE_ON_GOOD_ARGS
+                                                            | SCHEME_PRIM_PRODUCES_NUMBER
+                                                            | SCHEME_PRIM_CLOSED_ON_REALS);
   scheme_add_global_constant("add1", p, env);
 
   p = scheme_make_folding_prim(scheme_sub1, "sub1", 1, 1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
+                                                            | SCHEME_PRIM_WANTS_NUMBER
+                                                            | SCHEME_PRIM_OMITTABLE_ON_GOOD_ARGS
+                                                            | SCHEME_PRIM_PRODUCES_NUMBER
+                                                            | SCHEME_PRIM_CLOSED_ON_REALS);
   scheme_add_global_constant("sub1", p, env);
 
   p = scheme_make_folding_prim(plus, "+", 0, -1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED
-                                                            | SCHEME_PRIM_IS_NARY_INLINED);
+                                                            | SCHEME_PRIM_IS_NARY_INLINED
+                                                            | SCHEME_PRIM_WANTS_NUMBER
+                                                            | SCHEME_PRIM_OMITTABLE_ON_GOOD_ARGS
+                                                            | SCHEME_PRIM_PRODUCES_NUMBER
+                                                            | SCHEME_PRIM_CLOSED_ON_REALS);
   scheme_add_global_constant("+", p, env);
 
   p = scheme_make_folding_prim(minus, "-", 1, -1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED
                                                             | SCHEME_PRIM_IS_UNARY_INLINED
-                                                            | SCHEME_PRIM_IS_NARY_INLINED);
+                                                            | SCHEME_PRIM_IS_NARY_INLINED
+                                                            | SCHEME_PRIM_WANTS_NUMBER
+                                                            | SCHEME_PRIM_OMITTABLE_ON_GOOD_ARGS
+                                                            | SCHEME_PRIM_PRODUCES_NUMBER
+                                                            | SCHEME_PRIM_CLOSED_ON_REALS);
   scheme_add_global_constant("-", p, env);
 
   p = scheme_make_folding_prim(mult, "*", 0, -1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED
-                                                            | SCHEME_PRIM_IS_NARY_INLINED);
+                                                            | SCHEME_PRIM_IS_NARY_INLINED
+                                                            | SCHEME_PRIM_WANTS_NUMBER
+                                                            | SCHEME_PRIM_OMITTABLE_ON_GOOD_ARGS
+                                                            | SCHEME_PRIM_PRODUCES_NUMBER
+                                                            | SCHEME_PRIM_CLOSED_ON_REALS);
   scheme_add_global_constant("*", p, env);
 
   p = scheme_make_folding_prim(div_prim, "/", 1, -1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED
-                                                            | SCHEME_PRIM_IS_NARY_INLINED);
+                                                            | SCHEME_PRIM_IS_NARY_INLINED
+                                                            | SCHEME_PRIM_WANTS_NUMBER
+                                                            | SCHEME_PRIM_PRODUCES_NUMBER
+                                                            | SCHEME_PRIM_CLOSED_ON_REALS);
   scheme_add_global_constant("/", p, env);
 
   p = scheme_make_folding_prim(scheme_abs, "abs", 1, 1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
+                                                            | SCHEME_PRIM_WANTS_NUMBER
+                                                            | SCHEME_PRIM_OMITTABLE_ON_GOOD_ARGS
+                                                            | SCHEME_PRIM_PRODUCES_NUMBER
+                                                            | SCHEME_PRIM_CLOSED_ON_REALS);
   scheme_add_global_constant("abs", p, env);
   
   p = scheme_make_folding_prim(quotient, "quotient", 2, 2, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED
+                                                            | SCHEME_PRIM_WANTS_REAL
+                                                            | SCHEME_PRIM_PRODUCES_REAL);
   scheme_add_global_constant("quotient", p, env);
 
   p = scheme_make_folding_prim(rem_prim, "remainder", 2, 2, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED
+                                                            | SCHEME_PRIM_WANTS_REAL
+                                                            | SCHEME_PRIM_PRODUCES_REAL);
   scheme_add_global_constant("remainder", p, env);
 
   scheme_add_global_constant("quotient/remainder", 
@@ -140,7 +171,9 @@ void scheme_init_numarith(Scheme_Env *env)
 			     env);
 
   p = scheme_make_folding_prim(scheme_modulo, "modulo", 2, 2, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED
+                                                            | SCHEME_PRIM_WANTS_REAL
+                                                            | SCHEME_PRIM_PRODUCES_REAL);
   scheme_add_global_constant("modulo", p, env);
 }
 
@@ -592,12 +625,12 @@ static Scheme_Object *ADD(intptr_t a, intptr_t b)
   intptr_t r;
   Scheme_Object *o;
 
-  r = a + b;
+  r = (uintptr_t)a + (uintptr_t)b;
 
   o = scheme_make_integer(r);
   r = SCHEME_INT_VAL(o);
 
-  if (b == r - a)
+  if (b == (uintptr_t)r - (uintptr_t)a)
     return o;
   else
     return ADD_slow(a, b);
@@ -615,12 +648,12 @@ static Scheme_Object *SUBTRACT(intptr_t a, intptr_t b)
   intptr_t r;
   Scheme_Object *o;
 
-  r = a - b;
+  r = (uintptr_t)a - (uintptr_t)b;
 
   o = scheme_make_integer(r);
   r = SCHEME_INT_VAL(o);
 
-  if (a == r + b)
+  if (a == (uintptr_t)r + (uintptr_t)b)
     return o;
   else
     return SUBTRACT_slow(a, b);
@@ -634,12 +667,15 @@ static Scheme_Object *MULTIPLY(intptr_t a, intptr_t b)
   if (!b)
     return zeroi;
 
-  r = a * b;
+  r = (uintptr_t)a * (uintptr_t)b;
 
   o = scheme_make_integer(r);
   r = SCHEME_INT_VAL(o);
 
-  if (a == r / b)
+  /* if b == -1, division could overflow; otherwise, division is defined */
+  if ((b == -1)
+      ? (a == (uintptr_t)r * (uintptr_t)-1)
+      : (a == r / b))
     return o;
   else {
     Small_Bignum sa, sb;
@@ -1058,7 +1094,7 @@ rem_mod (int argc, Scheme_Object *argv[], char *name, int first_sign)
     /* Easier if we can assume 'r' is positive: */
     if (SCHEME_INTP(r)) {
       if (SCHEME_INT_VAL(r) < 0)
-	r = scheme_make_integer(-SCHEME_INT_VAL(r));
+	r = scheme_make_integer_value(-SCHEME_INT_VAL(r));
     } else if (!SCHEME_BIGPOS(r))
       r = scheme_bignum_negate(r);
 
@@ -1082,9 +1118,9 @@ rem_mod (int argc, Scheme_Object *argv[], char *name, int first_sign)
     
     if (negate) {
       if (SCHEME_INTP(r))
-	r = scheme_make_integer(-SCHEME_INT_VAL(r));
+	r = scheme_make_integer_value(-SCHEME_INT_VAL(r));
       else
-	r = scheme_bignum_negate(r);
+	r = scheme_bignum_normalize(scheme_bignum_negate(r));
     }
   }
 
@@ -1103,19 +1139,37 @@ scheme_modulo(int argc, Scheme_Object *argv[])
   return rem_mod(argc, argv, "modulo", 0);
 }
 
+static Scheme_Object *
+do_quotient_remainder(const Scheme_Object *n1, const Scheme_Object *n2, Scheme_Object **_rem)
+{
+  Scheme_Object *rem = NULL, *quot, *a[2];
+
+  quot = do_bin_quotient("quotient/remainder", n1, n2, &rem);
+  if (!rem) {
+    a[0] = (Scheme_Object *)n1;
+    a[1] = (Scheme_Object *)n2;
+    rem = rem_mod(2, a, "remainder", 1);
+  }
+  *_rem = rem;
+
+  return quot;
+}
 
 Scheme_Object *
 quotient_remainder(int argc, Scheme_Object *argv[])
 {
-  Scheme_Object *rem = NULL, *quot, *a[2];
+  Scheme_Object *rem, *quot, *a[2];
 
-  quot = do_bin_quotient("quotient/remainder", argv[0], argv[1], &rem);
-  if (!rem) {
-    rem = rem_mod(argc, argv, "remainder", 1);
-  }
+  quot = do_quotient_remainder(argv[0], argv[1], &rem);
   a[0] = quot;
   a[1] = rem;
   return scheme_values(2, a);
+}
+
+Scheme_Object *scheme_bin_quotient_remainder(const Scheme_Object *n1, const Scheme_Object *n2,
+                                             Scheme_Object **_rem)
+{
+  return do_quotient_remainder(n1, n2, _rem);
 }
 
 /************************************************************************/

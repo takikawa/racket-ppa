@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.10.1"))) (define collection (quote multi)) (define version "1.1") (define deps (quote (("base" #:version "6.4.0.9")))) (define pkg-authors (quote (ryanc)))))

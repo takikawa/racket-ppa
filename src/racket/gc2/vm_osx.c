@@ -124,6 +124,10 @@ static void unregister_mach_thread() {
 # define ARCH_thread_state_t ppc_thread_state_t
 # define ARCH_THREAD_STATE PPC_THREAD_STATE
 # define ARCH_THREAD_STATE_COUNT PPC_THREAD_STATE_COUNT
+#elif defined(__arm__) || defined(__arm64__)
+# define ARCH_thread_state_t arm_thread_state_t
+# define ARCH_THREAD_STATE ARM_THREAD_STATE
+# define ARCH_THREAD_STATE_COUNT ARM_THREAD_STATE_COUNT
 #elif defined(__x86_64__)
 # define ARCH_thread_state_t x86_thread_state64_t
 # define ARCH_THREAD_STATE x86_THREAD_STATE64
@@ -181,6 +185,8 @@ static void *os_alloc_pages(size_t len)
 
   retval = vm_allocate(task_self, (vm_address_t*)&r, len, TRUE);
   if(retval != KERN_SUCCESS) {
+    if (retval == KERN_NO_SPACE)
+      return NULL;
     GCPRINT(GCOUTF, "Couldn't allocate memory: %s\n", mach_error_string(retval));
     abort();
   }
@@ -213,6 +219,7 @@ static void os_protect_pages(void *p, size_t len, int writeable)
   if(retval != KERN_SUCCESS) {
     GCPRINT(GCOUTF, "WARNING: couldn't protect %li bytes of page %p%s\n",
 	   len, p, mach_error_string(retval));
+    abort();
   }
 }
 
@@ -356,6 +363,10 @@ void exception_thread(void *shared_thread_state)
     /* block until we get an exception message */
     retval = mach_msg(message, MACH_RCV_MSG, 0, sizeof(mach_exc_msg_t), 
 		      exc_port, MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL);
+    if(retval != KERN_SUCCESS) {
+      GCPRINT(GCOUTF, "Message receive failed: %s\n", mach_error_string(retval));
+      abort();
+    }
     /* forward off the handling of this message */
     if(!exc_server(message, reply)) {
       GCPRINT(GCOUTF, "INTERNAL ERROR: exc_server() didn't like something\n");
@@ -364,6 +375,10 @@ void exception_thread(void *shared_thread_state)
     /* send the message back out to the thread */
     retval = mach_msg(reply, MACH_SEND_MSG, sizeof(mach_reply_msg_t), 0, 
 		      MACH_PORT_NULL, MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL);
+    if(retval != KERN_SUCCESS) {
+      GCPRINT(GCOUTF, "Message send failed: %s\n", mach_error_string(retval));
+      abort();
+    }
   }
 }
 

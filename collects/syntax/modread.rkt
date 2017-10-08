@@ -1,4 +1,4 @@
-(module modread mzscheme
+(module modread racket/base
   (require racket/contract/base)
   
   (provide with-module-reading-parameterization)
@@ -6,21 +6,12 @@
    [check-module-form ((or/c syntax? eof-object?) (or/c symbol? list?) (or/c string? path? false/c) . -> . any)])
 
   (define (with-module-reading-parameterization thunk)
-    (parameterize ([read-case-sensitive #t]
-                   [read-square-bracket-as-paren #t]
-                   [read-curly-brace-as-paren #t]
-                   [read-accept-box #t]
-                   [read-accept-compiled #t]
-                   [read-accept-bar-quote #t]
-                   [read-accept-graph #t]
-                   [read-decimal-as-inexact #t]
-                   [read-accept-dot #t]
-                   [read-accept-infix-dot #t]
-                   [read-accept-quasiquote #t]
-                   [read-accept-reader #t]
-                   [read-accept-lang #t]
-                   [current-readtable #f])
-      (thunk)))
+    (call-with-default-reading-parameterization
+     (lambda ()
+       (parameterize ([read-accept-reader #t]
+                      [read-accept-lang #t]
+                      [read-accept-compiled #t])
+         (thunk)))))
 
   (define (raise-wrong-module-name filename expected-name name)
     (error 'load-handler
@@ -53,7 +44,7 @@
                (unless (eq? (syntax-e #'nm) expected-module)
                  (raise-wrong-module-name filename expected-module
                                           (syntax-e #'nm))))
-             (datum->syntax-object exp
+             (datum->syntax exp
                                    (cons (namespace-module-identifier)
                                          (cdr (syntax-e exp)))
                                    exp

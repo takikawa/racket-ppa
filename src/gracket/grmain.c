@@ -3,7 +3,7 @@
  * Purpose:     GRacket main file, including a hodge-podge of global stuff
  * Author:      Matthew Flatt
  * Created:     1995
- * Copyright:   (c) 2004-2013 PLT Design Inc.
+ * Copyright:   (c) 2004-2014 PLT Design Inc.
  * Copyright:   (c) 1995-2000, Matthew Flatt
  */
 
@@ -20,7 +20,6 @@ static void pre_filter_cmdline_arguments(int *argc, char ***argv);
 #endif
 
 struct Scheme_Env;
-static char *get_gr_init_filename(struct Scheme_Env *env);
 
 #ifdef wx_xt
 # define PRE_FILTER_CMDLINE_ARGUMENTS
@@ -35,7 +34,9 @@ static void pre_filter_cmdline_arguments(int *argc, char ***argv);
 #define UNIX_INIT_FILENAME "~/.gracketrc"
 #define WINDOWS_INIT_FILENAME "%%HOMEDIRVE%%\\%%HOMEPATH%%\\gracketrc.rktl"
 #define MACOS9_INIT_FILENAME "PREFERENCES:gracketrc.rktl"
-#define GET_INIT_FILENAME get_gr_init_filename
+#define INIT_FILENAME_CONF_SYM "gui-interactive-file"
+#define DEFAULT_INIT_MODULE "racket/gui/interactive"
+#define USER_INIT_MODULE "gui-interactive.rkt"
 #if WIN32
 # define NEED_CONSOLE_PRINTF
 # define DEFER_EXPLICIT_EXIT
@@ -50,30 +51,18 @@ static void pre_filter_cmdline_arguments(int *argc, char ***argv);
 #define INITIAL_NAMESPACE_MODULE "racket/gui/init"
 #define GRAPHICAL_REPL
 
+#if WIN32
+# define DLL_RELATIVE_PATH L"."
+# ifndef INITIAL_COLLECTS_DIRECTORY
+#  define INITIAL_COLLECTS_DIRECTORY "../collects"
+# endif
+#endif
+
+#ifndef INITIAL_CONFIG_DIRECTORY
+# define INITIAL_CONFIG_DIRECTORY "../etc"
+#endif
+
 # include "../racket/main.c"
-
-static char *get_gr_init_filename(Scheme_Env *env)
-{
-  char *s, *s2;
-  int len, i;
-
-  s = get_init_filename(env);
-  if (s) {
-    len = strlen(s);
-    for (i = len - 8; i; i--) {
-      if (!strncmp(s XFORM_OK_PLUS i, "racketrc", 8)) {
-        s2 = (char *)malloc(len + 2);
-        memcpy(s2, s, i);
-        memcpy(s2 + i + 1, s + i, len - i + 1);
-        s2[i] = 'g';
-        s = s2;
-        break;
-      }
-    }
-  }
-
-  return s;
-}
 
 /***********************************************************************/
 /*                        Win32 handling                               */
@@ -104,7 +93,7 @@ static void init_console_in()
   if (!console_in) {
     console_in = GetStdHandle(STD_INPUT_HANDLE);
     MZ_REGISTER_STATIC(console_inport);
-    console_inport = scheme_make_fd_input_port((int)console_in, scheme_intern_symbol("stdin"), 0, 0);
+    console_inport = scheme_make_fd_input_port((intptr_t)console_in, scheme_intern_symbol("stdin"), 0, 0);
   }
 }
 

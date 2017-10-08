@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -25,115 +25,24 @@
 
 #include "schpriv.h"
 #include "schvers.h"
+#include "schrktio.h"
 #include <string.h>
 #include <ctype.h>
-#ifndef DONT_USE_LOCALE
-# include <locale.h>
-# ifdef MZ_NO_ICONV
-#  define USE_ICONV_DLL
-# endif
-# ifndef USE_ICONV_DLL
-#  include <iconv.h>
-#  include <langinfo.h>
-# endif
-# include <wchar.h>
-# include <wctype.h>
+#ifdef NO_ERRNO_GLOBAL
+# define errno -1
+#else
 # include <errno.h>
-# ifdef MACOS_UNICODE_SUPPORT
-#  include <CoreFoundation/CFString.h>
-#  include <CoreFoundation/CFLocale.h>
-# endif
-# ifdef WINDOWS_UNICODE_SUPPORT
-#  include <windows.h>
-# endif
 #endif
 
 #ifndef SCHEME_PLATFORM_LIBRARY_SUBPATH
 # include "schsys.h"
 #endif
 
-#include "schustr.inc"
-
-#ifdef USE_ICONV_DLL
-typedef intptr_t iconv_t;
-typedef int *(*errno_proc_t)();
-typedef size_t (*iconv_proc_t)(iconv_t cd,
-			       char **inbuf, size_t *inbytesleft,
-			       char **outbuf, size_t *outbytesleft);
-typedef iconv_t (*iconv_open_proc_t)(const char *tocode, const char *fromcode);
-typedef void (*iconv_close_proc_t)(iconv_t cd);
-typedef char *(*locale_charset_proc_t)();
-static errno_proc_t iconv_errno;
-static iconv_proc_t iconv;
-static iconv_open_proc_t iconv_open;
-static iconv_close_proc_t iconv_close;
-static locale_charset_proc_t locale_charset; /* Not used, currently */
-#define mzCHK_PROC(x) x
-static int get_iconv_errno(void)
-{
-  int *a;
-  a = iconv_errno();
-  return *a;
-}
-# undef HAVE_CODESET
-# define HAVE_CODESET 1
-# define CODESET 0
-# define ICONV_errno get_iconv_errno()
-static int iconv_ready = 0;
-static void init_iconv()
-{
-# ifdef MZ_NO_ICONV
-# else
-  HMODULE m;
-  m = LoadLibraryW(scheme_get_dll_path(L"iconv.dll"));
-  if (!m)
-    m = LoadLibraryW(scheme_get_dll_path(L"libiconv.dll"));
-  if (!m)
-    m = LoadLibraryW(scheme_get_dll_path(L"libiconv-2.dll"));
-  if (!m)
-    m = LoadLibrary("iconv.dll");
-  if (!m)
-    m = LoadLibrary("libiconv.dll");
-  if (!m)
-    m = LoadLibrary("libiconv-2.dll");
-  if (m) {
-    iconv = (iconv_proc_t)GetProcAddress(m, "libiconv");
-    iconv_open = (iconv_open_proc_t)GetProcAddress(m, "libiconv_open");
-    iconv_close = (iconv_close_proc_t)GetProcAddress(m, "libiconv_close");
-    locale_charset = (locale_charset_proc_t)GetProcAddress(m, "locale_charset");
-    /* Make sure we have all of them or none: */
-    if (!iconv || !iconv_open || !iconv_close) {
-      iconv = NULL;
-      iconv_open = NULL;
-      iconv_close = NULL;
-    }
-  }
-  if (iconv) {
-    iconv_errno = (errno_proc_t)GetProcAddress(m, "_errno");
-    if (!iconv_errno) {
-      /* The iconv.dll distributed with Racket links to msvcrt.dll.
-	 It's a slighly dangerous assumption that whatever iconv we
-	 found also uses msvcrt.dll. */
-      m = LoadLibrary("msvcrt.dll");
-      if (m) {
-	iconv_errno = (errno_proc_t)GetProcAddress(m, "_errno");
-	if (!iconv_errno) {
-	  iconv = NULL;
-	  iconv_open = NULL;
-	  iconv_close = NULL;
-	}
-      }
-    }
-  }
-# endif
-  iconv_ready = 1;
-}
-#else
-# define ICONV_errno errno
-# define iconv_ready 1
-# define mzCHK_PROC(x) 1
-static void init_iconv() { }
+#ifndef SPLS_SUFFIX
+# define SPLS_SUFFIX ""
 #endif
+
+#include "schustr.inc"
 
 #ifdef MACOS_UNICODE_SUPPORT
 # define mzLOCALE_IS_UTF_8(s) (!s || !(*s))
@@ -142,7 +51,7 @@ static void init_iconv() { }
 # define mzLOCALE_IS_UTF_8(s) (!s || !(*s))
 #endif
 #ifndef mzLOCALE_IS_UTF_8
-# define mzLOCALE_IS_UTF_8(s) !mzCHK_PROC(iconv_open)
+# define mzLOCALE_IS_UTF_8(s) (!(rktio_convert_properties(scheme_rktio) & RKTIO_CONVERTER_SUPPORTED))
 #endif
 
 #define mzICONV_KIND 0
@@ -154,75 +63,12 @@ typedef struct Scheme_Converter {
   Scheme_Object so;
   short closed;
   short kind;
-  iconv_t cd;
+  rktio_converter_t *cd;
   int permissive;
   Scheme_Custodian_Reference *mref;
 } Scheme_Converter;
 
 /* locals */
-
-/* These two locale variables are only valid when reset_locale()
-   is called after continuation marks (and hence parameterization)
-   may have changed. Similarly, setlocale() is only up-to-date
-   when reset_locale() has been called. */
-THREAD_LOCAL_DECL(static int locale_on);
-THREAD_LOCAL_DECL(static void *current_locale_name_ptr);
-static void reset_locale(void);
-
-#define current_locale_name ((const mzchar *)current_locale_name_ptr)
-
-#ifdef USE_ICONV_DLL
-static char *nl_langinfo(int which)
-{
-  int i;
-
-  reset_locale();
-  if (!current_locale_name)
-    current_locale_name_ptr = "\0\0\0\0";
-
-  if ((current_locale_name[0] == 'C')
-      && !current_locale_name[1])
-    return "US-ASCII";
-
-  for (i = 0; current_locale_name[i]; i++) {
-    if (current_locale_name[i] == '.') {
-      if (current_locale_name[i + 1]) {
-	int len, j = 0;
-	char *enc;
-	i++;
-	len = scheme_char_strlen(current_locale_name) - i;
-	enc = (char *)scheme_malloc_atomic(len + 1);
-	while (current_locale_name[i]) {
-	  if (current_locale_name[i] > 127)
-	    return "UTF-8";
-	  enc[j++] = current_locale_name[i++];
-	}
-	enc[j] = 0;
-	return enc;
-      }
-    }
-  }
-
-  return "UTF-8";
-}
-#endif
-
-#ifdef DONT_USE_LOCALE
-# define mz_iconv_nl_langinfo() ""
-#else
-static char *mz_iconv_nl_langinfo(){
-  char *s;
-# if HAVE_CODESET
-  s = nl_langinfo(CODESET);
-# else
-  s = NULL;
-# endif
-  if (!s)
-    return "";
-  else
-    return s;
-}
-#endif
 
 static Scheme_Object *make_string (int argc, Scheme_Object *argv[]);
 static Scheme_Object *string (int argc, Scheme_Object *argv[]);
@@ -301,8 +147,13 @@ static Scheme_Object *sch_printf(int argc, Scheme_Object *argv[]);
 static Scheme_Object *sch_eprintf(int argc, Scheme_Object *argv[]);
 static Scheme_Object *sch_fprintf(int argc, Scheme_Object *argv[]);
 static Scheme_Object *banner(int argc, Scheme_Object *argv[]);
+static Scheme_Object *env_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *sch_getenv(int argc, Scheme_Object *argv[]);
+static Scheme_Object *sch_getenv_names(int argc, Scheme_Object *argv[]);
 static Scheme_Object *sch_putenv(int argc, Scheme_Object *argv[]);
+static Scheme_Object *env_copy(int argc, Scheme_Object *argv[]);
+static Scheme_Object *env_make(int argc, Scheme_Object *argv[]);
+static Scheme_Object *current_environment_variables(int argc, Scheme_Object *argv[]);
 static Scheme_Object *system_type(int argc, Scheme_Object *argv[]);
 static Scheme_Object *system_library_subpath(int argc, Scheme_Object *argv[]);
 static Scheme_Object *cmdline_args(int argc, Scheme_Object *argv[]);
@@ -315,6 +166,8 @@ static Scheme_Object *byte_string_close_converter(int argc, Scheme_Object *argv[
 static Scheme_Object *byte_string_convert(int argc, Scheme_Object *argv[]);
 static Scheme_Object *byte_string_convert_end(int argc, Scheme_Object *argv[]);
 static Scheme_Object *byte_converter_p(int argc, Scheme_Object *argv[]);
+
+static Scheme_Object *path_lt (int argc, Scheme_Object *argv[]);
 
 #ifdef MZ_PRECISE_GC
 static void register_traversers(void);
@@ -341,20 +194,40 @@ static char *string_to_from_locale(int to_bytes,
 #define portable_isspace(x) (((x) < 128) && isspace(x))
 
 ROSYM static Scheme_Object *sys_symbol;
-ROSYM static Scheme_Object *link_symbol, *machine_symbol, *gc_symbol;
+ROSYM static Scheme_Object *link_symbol, *machine_symbol, *vm_symbol, *gc_symbol;
 ROSYM static Scheme_Object *so_suffix_symbol, *so_mode_symbol, *word_symbol;
-ROSYM static Scheme_Object *os_symbol;
+ROSYM static Scheme_Object *os_symbol, *fs_change_symbol, *cross_symbol;
+ROSYM static Scheme_Object *racket_symbol, *cgc_symbol, *_3m_symbol;
+ROSYM static Scheme_Object *force_symbol, *infer_symbol;
 ROSYM static Scheme_Object *platform_3m_path, *platform_cgc_path;
 READ_ONLY static Scheme_Object *zero_length_char_string;
 READ_ONLY static Scheme_Object *zero_length_byte_string;
-
-SHARED_OK static Scheme_Hash_Table *putenv_str_table;
 
 SHARED_OK static char *embedding_banner;
 SHARED_OK static Scheme_Object *vers_str;
 SHARED_OK static Scheme_Object *banner_str;
 
+THREAD_LOCAL_DECL(static Scheme_Object *fs_change_props);
+
 READ_ONLY static Scheme_Object *complete_symbol, *continues_symbol, *aborts_symbol, *error_symbol;
+
+READ_ONLY Scheme_Object *scheme_string_p_proc;
+READ_ONLY Scheme_Object *scheme_byte_string_p_proc;
+
+READ_ONLY static int cross_compile_mode;
+
+/* These two locale variables are only valid when reset_locale()
+   is called after continuation marks (and hence parameterization)
+   may have changed. Similarly, setlocale() is only up-to-date
+   when reset_locale() has been called. */
+THREAD_LOCAL_DECL(static int locale_on);
+THREAD_LOCAL_DECL(static void *current_locale_name_ptr);
+static void reset_locale(void);
+
+#define current_locale_name ((const mzchar *)current_locale_name_ptr)
+
+static const mzchar empty_char_string[1] = { 0 };
+static const mzchar xes_char_string[2] = { 0x78787878, 0 };
 
 void
 scheme_init_string (Scheme_Env *env)
@@ -367,17 +240,35 @@ scheme_init_string (Scheme_Env *env)
   REGISTER_SO(link_symbol);
   REGISTER_SO(machine_symbol);
   REGISTER_SO(gc_symbol);
+  REGISTER_SO(vm_symbol);
   REGISTER_SO(so_suffix_symbol);
   REGISTER_SO(so_mode_symbol);
   REGISTER_SO(word_symbol);
   REGISTER_SO(os_symbol);
+  REGISTER_SO(fs_change_symbol);
+  REGISTER_SO(cross_symbol);
   link_symbol = scheme_intern_symbol("link");
   machine_symbol = scheme_intern_symbol("machine");
+  vm_symbol = scheme_intern_symbol("vm");
   gc_symbol = scheme_intern_symbol("gc");
   so_suffix_symbol = scheme_intern_symbol("so-suffix");
   so_mode_symbol = scheme_intern_symbol("so-mode");
   word_symbol = scheme_intern_symbol("word");
   os_symbol = scheme_intern_symbol("os");
+  fs_change_symbol = scheme_intern_symbol("fs-change");
+  cross_symbol = scheme_intern_symbol("cross");
+
+  REGISTER_SO(racket_symbol);
+  REGISTER_SO(cgc_symbol);
+  REGISTER_SO(_3m_symbol);
+  racket_symbol = scheme_intern_symbol("racket");
+  cgc_symbol = scheme_intern_symbol("cgc");
+  _3m_symbol = scheme_intern_symbol("3m");
+
+  REGISTER_SO(force_symbol);
+  REGISTER_SO(infer_symbol);
+  force_symbol = scheme_intern_symbol("force");
+  infer_symbol = scheme_intern_symbol("infer");
 
   REGISTER_SO(zero_length_char_string);
   REGISTER_SO(zero_length_byte_string);
@@ -405,10 +296,8 @@ scheme_init_string (Scheme_Env *env)
 #endif
   REGISTER_SO(platform_3m_path);
   REGISTER_SO(platform_cgc_path);
-  platform_cgc_path = scheme_make_path(SCHEME_PLATFORM_LIBRARY_SUBPATH);
-  platform_3m_path = scheme_make_path(SCHEME_PLATFORM_LIBRARY_SUBPATH MZ3M_SUBDIR);
-
-  REGISTER_SO(putenv_str_table);
+  platform_cgc_path = scheme_make_path(SCHEME_PLATFORM_LIBRARY_SUBPATH SPLS_SUFFIX);
+  platform_3m_path = scheme_make_path(SCHEME_PLATFORM_LIBRARY_SUBPATH SPLS_SUFFIX MZ3M_SUBDIR);
 
   REGISTER_SO(embedding_banner);
   REGISTER_SO(vers_str);
@@ -419,10 +308,12 @@ scheme_init_string (Scheme_Env *env)
   banner_str = scheme_make_utf8_string(scheme_banner());
   SCHEME_SET_CHAR_STRING_IMMUTABLE(banner_str);
 
+  REGISTER_SO(scheme_string_p_proc);
   p = scheme_make_folding_prim(string_p, "string?", 1, 1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
                                                             | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant("string?", p, env);
+  scheme_string_p_proc = p;
 
   scheme_add_global_constant("make-string",
 			     scheme_make_immed_prim(make_string,
@@ -436,7 +327,8 @@ scheme_init_string (Scheme_Env *env)
 			     env);
   
   p = scheme_make_folding_prim(string_length, "string-length", 1, 1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_PRODUCES_FIXNUM);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
+                                                            |SCHEME_PRIM_PRODUCES_FIXNUM);
   scheme_add_global_constant("string-length", p,
 			     env);
 
@@ -449,11 +341,10 @@ scheme_init_string (Scheme_Env *env)
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_NARY_INLINED);
   scheme_add_global_constant("string-set!", p, env);
 
-  scheme_add_global_constant("string=?",
-			     scheme_make_immed_prim(string_eq,
-						    "string=?",
-						    2, -1),
-			     env);
+  p = scheme_make_immed_prim(string_eq, "string=?", 2, -1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED);
+  scheme_add_global_constant("string=?", p, env);
+
   scheme_add_global_constant("string-locale=?",
 			     scheme_make_immed_prim(string_locale_eq,
 						    "string-locale=?",
@@ -694,10 +585,12 @@ scheme_init_string (Scheme_Env *env)
 						      1, 1, 1),
 			     env);
 
+  REGISTER_SO(scheme_byte_string_p_proc);
   p = scheme_make_folding_prim(byte_string_p, "bytes?", 1, 1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_NARY_INLINED
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
                                                             | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant("bytes?", p, env);
+  scheme_byte_string_p_proc = p;
 
   scheme_add_global_constant("make-bytes",
 			     scheme_make_immed_prim(make_byte_string,
@@ -714,7 +607,8 @@ scheme_init_string (Scheme_Env *env)
   GLOBAL_PRIM_W_ARITY("shared-bytes", shared_byte_string, 0, -1, env);
 
   p = scheme_make_folding_prim(byte_string_length, "bytes-length", 1, 1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_PRODUCES_FIXNUM);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
+                                                            |SCHEME_PRIM_PRODUCES_FIXNUM);
   scheme_add_global_constant("bytes-length", p, env);
 
   p = scheme_make_immed_prim(scheme_checked_byte_string_ref, "bytes-ref", 2, 2);
@@ -726,11 +620,10 @@ scheme_init_string (Scheme_Env *env)
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_NARY_INLINED);
   scheme_add_global_constant("bytes-set!", p, env);
 
-  scheme_add_global_constant("bytes=?",
-			     scheme_make_immed_prim(byte_string_eq,
-						    "bytes=?",
-						    2, -1),
-			     env);
+  p = scheme_make_immed_prim(byte_string_eq, "bytes=?", 2, -1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED);
+  scheme_add_global_constant("bytes=?", p, env);
+
   scheme_add_global_constant("bytes<?",
 			     scheme_make_immed_prim(byte_string_lt,
 						    "bytes<?",
@@ -849,15 +742,48 @@ scheme_init_string (Scheme_Env *env)
 						    0, 0),
 			     env);
 
-  scheme_add_global_constant("getenv",
+  /* Environment variables */
+
+  scheme_add_global_constant("environment-variables?",
+			     scheme_make_folding_prim(env_p,
+                                                      "environment-variables?",
+                                                      1, 1, 1),
+			     env);
+
+  scheme_add_global_constant("current-environment-variables",
+			     scheme_register_parameter(current_environment_variables,
+						       "current-environment-variables",
+						       MZCONFIG_CURRENT_ENV_VARS),
+			     env);  
+
+  scheme_add_global_constant("environment-variables-ref",
 			     scheme_make_immed_prim(sch_getenv,
-						    "getenv",
+						    "environment-variables-ref",
+						    2, 2),
+			     env);
+
+  scheme_add_global_constant("environment-variables-set!",
+			     scheme_make_prim_w_arity(sch_putenv,
+                                                      "environment-variables-set!",
+                                                      3, 4),
+			     env);
+
+  scheme_add_global_constant("environment-variables-names",
+			     scheme_make_immed_prim(sch_getenv_names,
+						    "environment-variables-names",
 						    1, 1),
 			     env);
-  scheme_add_global_constant("putenv",
-			     scheme_make_immed_prim(sch_putenv,
-						    "putenv",
-						    2, 2),
+
+  scheme_add_global_constant("environment-variables-copy",
+			     scheme_make_immed_prim(env_copy,
+						    "environment-variables-copy",
+						    1, 1),
+			     env);
+
+  scheme_add_global_constant("make-environment-variables",
+			     scheme_make_immed_prim(env_make,
+						    "make-environment-variables",
+						    0, -1),
 			     env);
 
   /* Don't make these folding, since they're platform-specific: */
@@ -879,6 +805,13 @@ scheme_init_string (Scheme_Env *env)
 						       MZCONFIG_CMDLINE_ARGS),
 			     env);
 
+
+  scheme_add_global_constant("path<?",
+			     scheme_make_immed_prim(path_lt,
+						    "path<?",
+						    2, -1),
+			     env);
+
 #ifdef MZ_PRECISE_GC
   register_traversers();
 #endif
@@ -886,7 +819,32 @@ scheme_init_string (Scheme_Env *env)
 
 void scheme_init_string_places(void) {
   REGISTER_SO(current_locale_name_ptr);
-  current_locale_name_ptr = "xxxx\0\0\0\0";
+  current_locale_name_ptr = (void *)xes_char_string;
+
+  REGISTER_SO(fs_change_props);
+  {
+    int supported, scalable, low_latency, file_level;
+    Scheme_Object *s;
+    scheme_fs_change_properties(&supported, &scalable, &low_latency, &file_level);
+    fs_change_props = scheme_make_vector(4, scheme_false);
+    if (supported) {
+      s = scheme_intern_symbol("supported");
+      SCHEME_VEC_ELS(fs_change_props)[0] = s;
+    }
+    if (scalable) {
+      s = scheme_intern_symbol("scalable");
+      SCHEME_VEC_ELS(fs_change_props)[1] = s;
+    }
+    if (low_latency) {
+      s = scheme_intern_symbol("low-latency");
+      SCHEME_VEC_ELS(fs_change_props)[2] = s;
+    }
+    if (file_level) {
+      s = scheme_intern_symbol("file-level");
+      SCHEME_VEC_ELS(fs_change_props)[3] = s;
+    }
+    SCHEME_SET_IMMUTABLE(fs_change_props);
+  }
 }
 
 /**********************************************************************/
@@ -908,7 +866,7 @@ Scheme_Object *scheme_make_sized_offset_utf8_string(char *chars, intptr_t d, int
                        NULL, 0 /* not UTF-16 */, 0xFFFD);
     us[ulen] = 0;
   } else {
-    us = (mzchar *)"\0\0\0";
+    us = (mzchar *)empty_char_string;
     ulen = 0;
   }
   return scheme_make_sized_offset_char_string(us, 0, ulen, 0);
@@ -942,6 +900,14 @@ Scheme_Object *
 scheme_make_locale_string(const char *chars)
 {
   return scheme_byte_string_to_char_string_locale(scheme_make_byte_string((char *)chars));
+}
+
+Scheme_Object *scheme_append_strings(Scheme_Object *s1, Scheme_Object *s2)
+{
+  Scheme_Object *a[2];
+  a[0] = s1;
+  a[1] = s2;
+  return string_append(2, a);
 }
 
 /**********************************************************************/
@@ -980,7 +946,7 @@ void scheme_get_substring_indices(const char *name, Scheme_Object *str,
   intptr_t start, finish;
 
   if (SCHEME_CHAPERONE_VECTORP(str))
-    len = SCHEME_VEC_SIZE(str);
+    len = SCHEME_CHAPERONE_VEC_SIZE(str);
   else if (SCHEME_CHAR_STRINGP(str))
     len = SCHEME_CHAR_STRTAG_VAL(str);
   else
@@ -1100,6 +1066,14 @@ GEN_STRING_COMP(string_locale_ci_eq, "string-locale-ci=?", mz_char_strcmp_ci, ==
 GEN_STRING_COMP(string_locale_ci_lt, "string-locale-ci<?", mz_char_strcmp_ci, <, 1, 0)
 GEN_STRING_COMP(string_locale_ci_gt, "string-locale-ci>?", mz_char_strcmp_ci, >, 1, 0)
 
+Scheme_Object *scheme_string_eq_2(Scheme_Object *str1, Scheme_Object *str2)
+{
+  Scheme_Object *a[2];
+  a[0] = str1;
+  a[1] = str2;       
+  return string_eq(2, a);
+}
+
 /**********************************************************************/
 /*                         byte strings                               */
 /**********************************************************************/
@@ -1139,15 +1113,15 @@ byte_p(int argc, Scheme_Object *argv[])
 
 /* comparisons */
 
-#define GEN_BYTE_STRING_COMP(name, scheme_name, comp, op) \
+#define GEN_BYTE_STRING_PATH_COMP(name, scheme_name, comp, op, PRED, contract)     \
 static Scheme_Object * name (int argc, Scheme_Object *argv[]) \
 {  char *s, *prev; int i, sl, pl; int falz = 0;\
-   if (!SCHEME_BYTE_STRINGP(argv[0])) \
-    scheme_wrong_contract(scheme_name, "bytes?", 0, argc, argv); \
+  if (!PRED(argv[0])) \
+    scheme_wrong_contract(scheme_name, contract, 0, argc, argv); \
    prev = SCHEME_BYTE_STR_VAL(argv[0]); pl = SCHEME_BYTE_STRTAG_VAL(argv[0]); \
    for (i = 1; i < argc; i++) { \
-     if (!SCHEME_BYTE_STRINGP(argv[i])) \
-      scheme_wrong_contract(scheme_name, "bytes?", i, argc, argv); \
+     if (!PRED(argv[i])) \
+      scheme_wrong_contract(scheme_name, contract, i, argc, argv); \
      s = SCHEME_BYTE_STR_VAL(argv[i]); sl = SCHEME_BYTE_STRTAG_VAL(argv[i]); \
      if (!falz) if (!(comp(scheme_name, \
                            (unsigned char *)prev, pl, \
@@ -1157,9 +1131,22 @@ static Scheme_Object * name (int argc, Scheme_Object *argv[]) \
   return falz ? scheme_false : scheme_true; \
 }
 
+#define GEN_BYTE_STRING_COMP(name, scheme_name, comp, op) \
+  GEN_BYTE_STRING_PATH_COMP(name, scheme_name, comp, op, SCHEME_BYTE_STRINGP, "bytes?") \
+
 GEN_BYTE_STRING_COMP(byte_string_eq, "bytes=?", mz_strcmp, ==)
 GEN_BYTE_STRING_COMP(byte_string_lt, "bytes<?", mz_strcmp, <)
 GEN_BYTE_STRING_COMP(byte_string_gt, "bytes>?", mz_strcmp, >)
+
+GEN_BYTE_STRING_PATH_COMP(path_lt, "path<?", mz_strcmp, <, SCHEME_PATHP, "path?")
+
+Scheme_Object *scheme_byte_string_eq_2(Scheme_Object *str1, Scheme_Object *str2)
+{
+  Scheme_Object *a[2];
+  a[0] = str1;
+  a[1] = str2;       
+  return byte_string_eq(2, a);
+}
 
 /**********************************************************************/
 /*                   byte string <-> char string                      */
@@ -1219,9 +1206,9 @@ do_byte_string_to_char_string_locale(const char *who,
   intptr_t olen;
 
   reset_locale();
-  if (!iconv_ready) init_iconv();
 
-  if (mzLOCALE_IS_UTF_8(current_locale_name) || !locale_on || !mzCHK_PROC(iconv_open))
+  if (mzLOCALE_IS_UTF_8(current_locale_name) || !locale_on
+      || !(rktio_convert_properties(scheme_rktio) & RKTIO_CONVERTER_SUPPORTED))
     return do_byte_string_to_char_string(who, bstr, istart, ifinish, perm, 1);
 
   if (istart < ifinish) {
@@ -1351,9 +1338,9 @@ do_char_string_to_byte_string_locale(const char *who,
   intptr_t olen;
 
   reset_locale();
-  if (!iconv_ready) init_iconv();
 
-  if (mzLOCALE_IS_UTF_8(current_locale_name) || !locale_on || !mzCHK_PROC(iconv_open))
+  if (mzLOCALE_IS_UTF_8(current_locale_name) || !locale_on
+      || !(rktio_convert_properties(scheme_rktio) & RKTIO_CONVERTER_SUPPORTED))
     return do_char_string_to_byte_string(cstr, istart, ifinish, 1);
 
   if (istart < ifinish) {
@@ -2001,9 +1988,9 @@ char *scheme_version(void)
 # define VERSION_SUFFIX ""
 #else
 # ifdef USE_SENORA_GC
-#  define VERSION_SUFFIX " [cgc~]"
-# else
 #  define VERSION_SUFFIX " [cgc]"
+# else
+#  define VERSION_SUFFIX " [cgc/b]"
 # endif
 #endif
 
@@ -2052,281 +2039,326 @@ int scheme_any_string_has_null(Scheme_Object *o)
 /* Environment Variables                                               */
 /***********************************************************************/
 
-#if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
-static char* clone_str_with_gc(const char* buffer) {
-  int length;
-  char *newbuffer;
-  length = strlen(buffer);
-  newbuffer = scheme_malloc_atomic(length+1);
-  memcpy(newbuffer, buffer, length+1);
-  return newbuffer;
-}
-#endif
+#define SCHEME_ENVVARS_TABLE(ev) ((Scheme_Hash_Tree *)SCHEME_PTR_VAL(ev))
 
-static void create_putenv_str_table_if_needed() {
-  if (!putenv_str_table) {
-    putenv_str_table = scheme_make_hash_table(SCHEME_hash_string);
-  }
+Scheme_Object *scheme_make_environment_variables(Scheme_Hash_Tree *ht)
+{
+  Scheme_Object *ev;
+
+  ev = scheme_alloc_small_object();
+  ev->type = scheme_environment_variables_type;
+  SCHEME_PTR_VAL(ev) = (Scheme_Object *)ht;
+
+  return ev;
 }
 
-#ifndef DOS_FILE_SYSTEM
-static void putenv_str_table_put_name(Scheme_Object *name, Scheme_Object *value) {
-#if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
-  void *original_gc;
-  Scheme_Object *name_copy;
-  original_gc = GC_switch_to_master_gc();
-  scheme_start_atomic();
-
-  name_copy = (Scheme_Object *) clone_str_with_gc((const char *) name);
-  create_putenv_str_table_if_needed();
-  scheme_hash_set(putenv_str_table, name_copy, value);
-
-  scheme_end_atomic_no_swap();
-  GC_switch_back_from_master(original_gc);
-#else
-  create_putenv_str_table_if_needed();
-  scheme_hash_set(putenv_str_table, name, value);
-#endif
+static Scheme_Object *env_p(int argc, Scheme_Object *argv[])
+{
+  return (SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_environment_variables_type)
+          ? scheme_true
+          : scheme_false);
 }
-#endif
 
-#ifndef GETENV_FUNCTION
-static void putenv_str_table_put_name_value(Scheme_Object *name, Scheme_Object *value) {
-#if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
-  void *original_gc;
-  Scheme_Object *name_copy;
-  Scheme_Object *value_copy;
-  original_gc = GC_switch_to_master_gc();
-  scheme_start_atomic();
+static Scheme_Object *current_environment_variables(int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *v;
 
-  name_copy = (Scheme_Object *) clone_str_with_gc((const char *) name);
-  value_copy = (Scheme_Object *) clone_str_with_gc((const char *) value);
-  create_putenv_str_table_if_needed();
-  scheme_hash_set(putenv_str_table, name_copy, value_copy);
+  v = scheme_param_config2("current-environment-variables",
+                           scheme_make_integer(MZCONFIG_CURRENT_ENV_VARS),
+                           argc, argv,
+                           -1, env_p, "environment-variables?", 0);
 
-  scheme_end_atomic_no_swap();
-  GC_switch_back_from_master(original_gc);
-#else
-  create_putenv_str_table_if_needed();
-  scheme_hash_set(putenv_str_table, name, value);
-#endif
+  return v;
 }
-#endif
-
-#if !defined(GETENV_FUNCTION) || defined(MZ_PRECISE_GC)
-static Scheme_Object *putenv_str_table_get(Scheme_Object *name) {
-#if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
-  void *original_gc;
-  Scheme_Object *value; 
-  original_gc = GC_switch_to_master_gc();
-  scheme_start_atomic();
-
-  create_putenv_str_table_if_needed();
-  value = scheme_hash_get(putenv_str_table, name);
-
-  scheme_end_atomic_no_swap();
-  GC_switch_back_from_master(original_gc);
-  return value;
-#else
-  create_putenv_str_table_if_needed();
-  return scheme_hash_get(putenv_str_table, name);
-#endif
-}
-#endif
-
 
 static int sch_bool_getenv(const char* name);
 
-void
-scheme_init_getenv(void)
+void scheme_init_getenv(void)
 {
-#ifndef GETENV_FUNCTION
-  FILE *f = fopen("Environment", "r");
-  if (f) {
-    Scheme_Object *p = scheme_make_file_input_port(f);
-    mz_jmp_buf *savebuf, newbuf;
-    savebuf = scheme_current_thread->error_buf;
-    scheme_current_thread->error_buf = &newbuf;
-    if (!scheme_setjmp(newbuf)) {
-      while (1) {
-        Scheme_Object *v = scheme_read(p);
-        if (SCHEME_EOFP(v))
-          break;
-
-        if (SCHEME_PAIRP(v) && SCHEME_PAIRP(SCHEME_CDR(v))
-            && SCHEME_NULLP(SCHEME_CDR(SCHEME_CDR(v)))) {
-          Scheme_Object *key = SCHEME_CAR(v);
-          Scheme_Object *val = SCHEME_CADR(v);
-          if (SCHEME_STRINGP(key) && SCHEME_STRINGP(val)) {
-            Scheme_Object *a[2];
-            a[0] = key;
-            a[1] = val;
-            sch_putenv(2, a);
-            v = NULL;
-          }
-        }
-
-        if (v)
-          scheme_signal_error("bad environment specification: %V", v);
-      }
-    }
-    scheme_current_thread->error_buf = savebuf;
-    scheme_close_input_port(p);
-  }
-#endif
   if (sch_bool_getenv("PLTNOMZJIT")) {
       scheme_set_startup_use_jit(0);
   }
 }
 
-#ifdef DOS_FILE_SYSTEM
-# include <windows.h>
-static char *dos_win_getenv(const char *name) {
-  int value_size;
-  value_size = GetEnvironmentVariable(name, NULL, 0);
-  if (value_size) {
-    char *value;
-    int got;
-    value = scheme_malloc_atomic(value_size);
-    got = GetEnvironmentVariable(name, value, value_size);
-    if (got < value_size)
-      value[got] = 0;
-    return value;
-  }
-  return NULL;
+static int sch_bool_getenv(const char* name)
+{
+  if (rktio_getenv(scheme_rktio, name))
+    return 1;
+  else
+    return 0;
 }
-#endif
 
-static int sch_bool_getenv(const char* name) {
-  int rc = 0;
-#ifdef GETENV_FUNCTION
-# ifdef DOS_FILE_SYSTEM
-  if (GetEnvironmentVariable(name, NULL, 0)) rc = 1;
-# else
-  if (getenv(name)) rc = 1;
-# endif
-#else
-  if (putenv_str_table_get(name))  rc = 1;
-#endif
-  return rc;
+int byte_string_ok_name(Scheme_Object *o)
+{
+  const char *s = SCHEME_BYTE_STR_VAL(o);
+  int i = SCHEME_BYTE_STRTAG_VAL(o);
+
+  while (i--) {
+    if (!s[i])
+      return 0;
+  }
+
+  return rktio_is_ok_envvar_name(scheme_rktio, s);
+    
+  return 1;
+}
+
+static Scheme_Object *normalize_env_case(Scheme_Object *bs)
+{
+  if (rktio_are_envvar_names_case_insensitive(scheme_rktio)) {
+    bs = scheme_byte_string_to_char_string(bs);
+    bs = string_locale_downcase(1, &bs);
+    bs = scheme_char_string_to_byte_string(bs);
+  }
+  return bs;
+}
+
+char *scheme_getenv(char *name)
+{
+  char *s;
+  s = rktio_getenv(scheme_rktio, name);
+  if (s)
+    return scheme_strdup_and_free(s);
+  else
+    return NULL;
 }
 
 static Scheme_Object *sch_getenv(int argc, Scheme_Object *argv[])
 {
   char *name;
   char *value;
-  Scheme_Object *bs;
+  Scheme_Object *bs, *ev, *val;
+  Scheme_Hash_Tree *ht;
 
-  if (!SCHEME_CHAR_STRINGP(argv[0]) || scheme_any_string_has_null(argv[0]))
-    scheme_wrong_contract("getenv", CHAR_STRING_W_NO_NULLS, 0, argc, argv);
+  if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_environment_variables_type))
+    scheme_wrong_contract("environment-variables-ref", "environment-variables?", 0, argc, argv);
 
-  bs = scheme_char_string_to_byte_string_locale(argv[0]);
-  name = SCHEME_BYTE_STR_VAL(bs);
+  bs = argv[1];
+  if (!SCHEME_BYTE_STRINGP(bs)
+      || !byte_string_ok_name(bs))
+    scheme_wrong_contract("environment-variables-ref", "bytes-environment-variable-name?", 1, argc, argv);
 
-#ifdef GETENV_FUNCTION
-# ifdef DOS_FILE_SYSTEM
-  value = dos_win_getenv(name);
-# else
-  value = getenv(name);
-# endif
-#else
-  {
-    Scheme_Object *hash_value;
-    hash_value = putenv_str_table_get(name); 
-    return hash_value ? hash_value : scheme_false;
+  ev = argv[0];
+  ht = SCHEME_ENVVARS_TABLE(ev);
+
+  if (!ht) {
+    name = SCHEME_BYTE_STR_VAL(bs);
+
+    value = rktio_getenv(scheme_rktio, name);
+    if (value) {
+      val = scheme_make_byte_string(value);
+      free(value);
+    } else
+    val = scheme_false;
+
+    return val;
+  } else {
+    bs = normalize_env_case(bs);
+    val = scheme_hash_tree_get(ht, bs);
+    return val ? val : scheme_false;
   }
-#endif
-
-  return value ? scheme_make_locale_string(value) : scheme_false;
 }
-
-#ifndef DOS_FILE_SYSTEM
-static int sch_unix_putenv(const char *var, const char *val, const intptr_t varlen, const intptr_t vallen) {
-  char *buffer;
-  intptr_t total_length;
-  total_length = varlen + vallen + 2;
-
-#ifdef MZ_PRECISE_GC
-  /* Can't put moveable string into array. */
-  buffer = malloc(total_length);
-#else
-  buffer = (char *)scheme_malloc_atomic(total_length);
-#endif
-  memcpy(buffer, var, varlen);
-  buffer[varlen] = '=';
-  memcpy(buffer + varlen + 1, val, vallen + 1);
-
-#ifdef MZ_PRECISE_GC
-  {
-    /* Free old, if in table: */
-    char *oldbuffer;
-    oldbuffer = (char *)putenv_str_table_get((Scheme_Object *)var);
-    if (oldbuffer)
-      free(oldbuffer);
-  }
-#endif
-
-  /* if precise the buffer needs to be remembered so it can be freed */
-  /* if not precise the buffer needs to be rooted so it doesn't get collected prematurely */
-  putenv_str_table_put_name((Scheme_Object *)var, (Scheme_Object *)buffer);
-  return putenv(buffer);
-} 
-#endif
 
 static Scheme_Object *sch_putenv(int argc, Scheme_Object *argv[])
 {
-  Scheme_Object *varbs;
-  Scheme_Object *valbs;
+  Scheme_Object *varbs, *valbs, *ev;
+  Scheme_Hash_Tree *ht;
   char *var;
   char *val;
-  int rc = 0;
 
-  if (!SCHEME_CHAR_STRINGP(argv[0]) || scheme_any_string_has_null(argv[0]))
-    scheme_wrong_contract("putenv", CHAR_STRING_W_NO_NULLS, 0, argc, argv);
-  if (!SCHEME_CHAR_STRINGP(argv[1]) || scheme_any_string_has_null(argv[1]))
-    scheme_wrong_contract("putenv", CHAR_STRING_W_NO_NULLS, 1, argc, argv);
+  if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_environment_variables_type))
+    scheme_wrong_contract("environment-variables-set!", "environment-variables?", 0, argc, argv);
+  
+  varbs = argv[1];
+  if (!SCHEME_BYTE_STRINGP(varbs)
+      || !byte_string_ok_name(varbs))
+    scheme_wrong_contract("environment-variables-set!", "bytes-environment-variable-name?", 1, argc, argv);
 
-  varbs = scheme_char_string_to_byte_string_locale(argv[0]);
-  var = SCHEME_BYTE_STR_VAL(varbs);
+  valbs = argv[2];
+  if (!SCHEME_FALSEP(valbs)
+      && (!SCHEME_BYTE_STRINGP(valbs)
+          || scheme_byte_string_has_null(valbs)))
+    scheme_wrong_contract("environment-variables-set!", "(or/c bytes-no-nuls? #f)", 2, argc, argv);
+  if (argc > 3)
+    scheme_check_proc_arity("environment-variables-set!", 0, 3, argc, argv);
 
-  valbs = scheme_char_string_to_byte_string_locale(argv[1]);
-  val = SCHEME_BYTE_STR_VAL(valbs);
+  ev = argv[0];
+  ht = SCHEME_ENVVARS_TABLE(ev);
 
-#ifdef GETENV_FUNCTION
-# ifdef DOS_FILE_SYSTEM
-  rc = !SetEnvironmentVariable(var, val);
-# else
-  rc = sch_unix_putenv(var, val, SCHEME_BYTE_STRLEN_VAL(varbs), SCHEME_BYTE_STRLEN_VAL(valbs));
-# endif
-#else
-  putenv_str_table_put_name_value(argv[0], argv[1]);
-#endif
-  return rc ? scheme_false : scheme_true;
+  if (ht) {
+    varbs = normalize_env_case(varbs);
+
+    if (SCHEME_FALSEP(valbs)) {
+      ht = scheme_hash_tree_set(ht, varbs, NULL);
+    } else {
+      varbs = byte_string_to_immutable(1, &varbs);
+      valbs = byte_string_to_immutable(1, &valbs);
+      ht = scheme_hash_tree_set(ht, varbs, valbs);
+    }
+
+    SCHEME_PTR_VAL(ev) = (Scheme_Object *)ht;
+
+    return scheme_void;
+  } else {
+    var = SCHEME_BYTE_STR_VAL(varbs);
+
+    if (SCHEME_FALSEP(valbs)) {
+      val = NULL;
+    } else {
+      val = SCHEME_BYTE_STR_VAL(valbs);
+    }
+
+    if (!rktio_setenv(scheme_rktio, var, val)) {
+      if (argc > 3)
+        return _scheme_tail_apply(argv[3], 0, NULL);
+      else {
+        scheme_raise_exn(MZEXN_FAIL,
+                         "environment-variables-set!: change failed\n"
+                         "  system error: %E");
+      }
+    }
+
+    return scheme_void;
+  }
+}
+
+static Scheme_Object *env_copy(int argc, Scheme_Object *argv[])
+{
+  Scheme_Hash_Tree *ht;
+
+  if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_environment_variables_type))
+    scheme_wrong_contract("environment-variables-copy", "environment-variables?", 0, argc, argv);
+
+  ht = SCHEME_ENVVARS_TABLE(argv[0]);
+  if (ht)
+    return scheme_make_environment_variables(ht);
+  
+  /* copy system environment variables into a hash table: */
+  ht = scheme_make_hash_tree(SCHEME_hashtr_equal);
+
+  {
+    intptr_t i;
+    rktio_envvars_t *envvars;
+    Scheme_Object *var, *val;
+
+    envvars = rktio_envvars(scheme_rktio);
+    for (i = rktio_envvars_count(scheme_rktio, envvars); i--; ) {
+      var = scheme_make_immutable_sized_byte_string(rktio_envvars_name_ref(scheme_rktio, envvars, i), -1, 1);
+      val = scheme_make_immutable_sized_byte_string(rktio_envvars_value_ref(scheme_rktio, envvars, i), -1, 1);
+      var = normalize_env_case(var);
+      ht = scheme_hash_tree_set(ht, var, val);
+    }
+
+    rktio_envvars_free(scheme_rktio, envvars);
+  }
+
+  return scheme_make_environment_variables(ht);
+}
+
+static Scheme_Object *env_make(int argc, Scheme_Object *argv[])
+{
+  Scheme_Hash_Tree *ht;
+  Scheme_Object *varbs, *valbs;
+  int i;
+
+  ht = scheme_make_hash_tree(SCHEME_hashtr_equal);
+
+  for (i = 0; i < argc; i += 2) {
+    varbs = argv[i];
+    if (!SCHEME_BYTE_STRINGP(varbs)
+        || !byte_string_ok_name(varbs))
+      scheme_wrong_contract("make-environment-variables", "bytes-environment-variable-name?", i, argc, argv);
+
+    if (i+1 >= argc) {
+      scheme_contract_error("make-environment-variables",
+                            "key does not have a value (i.e., an odd number of arguments were provided)",
+                            "key", 1, argv[i],
+                            NULL);
+      return NULL;
+    }
+
+    valbs = argv[i+1];
+    if (!SCHEME_FALSEP(valbs)
+        && (!SCHEME_BYTE_STRINGP(valbs)
+            || scheme_byte_string_has_null(valbs)))
+      scheme_wrong_contract("make-environment-variables", "(or/c bytes-no-nuls? #f)", i+1, argc, argv);
+
+    varbs = normalize_env_case(varbs);
+
+    varbs = byte_string_to_immutable(1, &varbs);
+    valbs = byte_string_to_immutable(1, &valbs);
+    ht = scheme_hash_tree_set(ht, varbs, valbs);
+  }
+
+  return scheme_make_environment_variables(ht);
+}
+
+static Scheme_Object *sch_getenv_names(int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *ev, *r = scheme_null, *key, *val;
+  Scheme_Hash_Tree *ht;
+  mzlonglong i;
+
+  ev = argv[0];
+  if (!SAME_TYPE(SCHEME_TYPE(ev), scheme_environment_variables_type))
+    scheme_wrong_contract("environment-variables-names", "environment-variables?", 0, argc, argv);
+
+  ht = SCHEME_ENVVARS_TABLE(ev);
+  if (!ht) {
+    ev = env_copy(1, argv);
+    ht = SCHEME_ENVVARS_TABLE(ev);
+  }
+
+  for (i = scheme_hash_tree_next(ht, -1); i != -1; i = scheme_hash_tree_next(ht, i)) {
+    scheme_hash_tree_index(ht, i, &key, &val);
+    r = scheme_make_pair(key, r);
+  }
+
+  return r;
+}
+
+rktio_envvars_t *scheme_environment_variables_to_envvars(Scheme_Object *ev)
+{
+  Scheme_Hash_Tree *ht = SCHEME_ENVVARS_TABLE(ev);
+  rktio_envvars_t *envvars;
+  mzlonglong i;
+  Scheme_Object *key, *val;
+
+  if (!ht)
+    return NULL;
+
+  envvars = rktio_empty_envvars(scheme_rktio);
+  
+  for (i = scheme_hash_tree_next(ht, -1); i != -1; i = scheme_hash_tree_next(ht, i)) {
+    scheme_hash_tree_index(ht, i, &key, &val);
+    
+    rktio_envvars_set(scheme_rktio,
+                      envvars,
+                      SCHEME_BYTE_STR_VAL(key),
+                      SCHEME_BYTE_STR_VAL(val));
+  }
+  
+  return envvars;
 }
 
 /***********************************************************************/
 /* End Environment Variables                                           */
 /***********************************************************************/
 
+void scheme_set_cross_compile_mode(int v)
+{
+  cross_compile_mode = v;
+}
+
 static void machine_details(char *s);
+
+#include "systype.inc"
 
 static Scheme_Object *system_type(int argc, Scheme_Object *argv[])
 {
   if (argc) {
     if (SAME_OBJ(argv[0], link_symbol)) {
-#if defined(OS_X) && !defined(XONX)
-      return scheme_intern_symbol("framework");
-#else
-# ifdef DOS_FILE_SYSTEM
-      return scheme_intern_symbol("dll");
-# else
-#  ifdef MZ_USES_SHARED_LIB
-      return scheme_intern_symbol("shared");
-#  else
-      return scheme_intern_symbol("static");
-#  endif
-# endif
-#endif
+      return scheme_intern_symbol(MZ_SYSTEM_TYPE_LINK);
     }
 
     if (SAME_OBJ(argv[0], machine_symbol)) {
@@ -2339,34 +2371,22 @@ static Scheme_Object *system_type(int argc, Scheme_Object *argv[])
 
     if (SAME_OBJ(argv[0], gc_symbol)) {
 #ifdef MZ_PRECISE_GC
-      return scheme_intern_symbol("3m");
+      return _3m_symbol;
 #else
-      return scheme_intern_symbol("cgc");
+      return cgc_symbol;
 #endif
+    }
+
+    if (SAME_OBJ(argv[0], vm_symbol)) {
+      return racket_symbol;
     }
 
     if (SAME_OBJ(argv[0], so_suffix_symbol)) {
-#ifdef DOS_FILE_SYSTEM
-      return scheme_make_byte_string(".dll");
-#else
-# ifdef OS_X
-      return scheme_make_byte_string(".dylib");
-# else
-#  ifdef USE_CYGWIN_SO_SUFFIX
-      return scheme_make_byte_string(".dll");
-#  else
-      return scheme_make_byte_string(".so");
-#  endif
-# endif
-#endif
+      return scheme_make_byte_string(MZ_SYSTEM_TYPE_SO_SUFFIX);
     }
 
     if (SAME_OBJ(argv[0], so_mode_symbol)) {
-#ifdef USE_DLOPEN_GLOBAL_BY_DEFAULT
-      return scheme_intern_symbol("global");
-#else
-      return scheme_intern_symbol("local");
-#endif
+      return scheme_intern_symbol(MZ_SYSTEM_TYPE_SO_MODE);
     }
 
 
@@ -2374,8 +2394,16 @@ static Scheme_Object *system_type(int argc, Scheme_Object *argv[])
       return scheme_make_integer(sizeof(void*)*8);
     }
 
+    if (SAME_OBJ(argv[0], fs_change_symbol)) {
+      return fs_change_props;
+    }
+
+    if (SAME_OBJ(argv[0], cross_symbol)) {
+      return (cross_compile_mode ? force_symbol : infer_symbol);
+    }
+
     if (!SAME_OBJ(argv[0], os_symbol)) {
-      scheme_wrong_contract("system-type", "(or/c 'os 'word 'link 'machine 'gc 'so-suffix 'so-mode 'word)", 0, argc, argv);
+      scheme_wrong_contract("system-type", "(or/c 'os 'word 'link 'machine 'vm 'gc 'so-suffix 'so-mode 'word 'fs-change 'cross)", 0, argc, argv);
       return NULL;
     }
   }
@@ -2386,17 +2414,13 @@ static Scheme_Object *system_type(int argc, Scheme_Object *argv[])
 static Scheme_Object *system_library_subpath(int argc, Scheme_Object *argv[])
 {
   if (argc > 0) {
-    Scheme_Object *sym;
-
     if (SCHEME_FALSEP(argv[0]))
       return platform_cgc_path;
     
-    sym = scheme_intern_symbol("cgc");
-    if (SAME_OBJ(sym, argv[0]))
+    if (SAME_OBJ(cgc_symbol, argv[0]))
       return platform_cgc_path;
 
-    sym = scheme_intern_symbol("3m");
-    if (SAME_OBJ(sym, argv[0]))
+    if (SAME_OBJ(_3m_symbol, argv[0]))
       return platform_3m_path;
 
     scheme_wrong_contract("system-library-subpath", "(or/c 'cgc '3m #f)", 0, argc, argv);
@@ -2412,7 +2436,7 @@ static Scheme_Object *system_library_subpath(int argc, Scheme_Object *argv[])
 
 const char *scheme_system_library_subpath()
 {
-  return SCHEME_PLATFORM_LIBRARY_SUBPATH;
+  return SCHEME_PLATFORM_LIBRARY_SUBPATH SPLS_SUFFIX;
 }
 
 /* Our own strncpy - which would be really stupid, except the one for
@@ -2435,23 +2459,22 @@ static Scheme_Object *ok_cmdline(int argc, Scheme_Object **argv)
 {
   if (SCHEME_CHAPERONE_VECTORP(argv[0])) {
     Scheme_Object *vec = argv[0], *vec2, *str;
-    int i, size = SCHEME_VEC_SIZE(vec);
-
+    int i, size = SCHEME_CHAPERONE_VEC_SIZE(vec);
 
     if (!size)
       return vec;
-
-    for (i = 0; i < size; i++) {
-      if (!SCHEME_CHAR_STRINGP(SCHEME_VEC_ELS(vec)[i]))
-	return NULL;
-    }
 
     /* Make sure vector and strings are immutable: */
     vec2 = scheme_make_vector(size, NULL);
     if (size)
       SCHEME_SET_VECTOR_IMMUTABLE(vec2);
     for (i = 0; i < size; i++) {
-      str = SCHEME_VEC_ELS(vec)[i];
+      if (SCHEME_VECTORP(vec))
+        str = SCHEME_VEC_ELS(vec)[i];
+      else
+        str = scheme_chaperone_vector_ref(vec, i);
+      if (!SCHEME_CHAR_STRINGP(str))
+        return NULL;
       if (!SCHEME_IMMUTABLE_CHAR_STRINGP(str)) {
 	str = scheme_make_sized_char_string(SCHEME_CHAR_STR_VAL(str), SCHEME_CHAR_STRLEN_VAL(str), 0);
 	SCHEME_SET_CHAR_STRING_IMMUTABLE(str);
@@ -2467,10 +2490,10 @@ static Scheme_Object *ok_cmdline(int argc, Scheme_Object **argv)
 
 static Scheme_Object *cmdline_args(int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("current-command-line-arguments",
-			     scheme_make_integer(MZCONFIG_CMDLINE_ARGS),
-			     argc, argv,
-			     -1, ok_cmdline, "vector of strings", 1);
+  return scheme_param_config2("current-command-line-arguments",
+                              scheme_make_integer(MZCONFIG_CMDLINE_ARGS),
+                              argc, argv,
+                              -1, ok_cmdline, "(vectorof string?)", 1);
 }
 
 /**********************************************************************/
@@ -2498,111 +2521,44 @@ static Scheme_Object *current_locale(int argc, Scheme_Object *argv[])
 {
   Scheme_Object *v;
 
-  v = scheme_param_config("current-locale",
-			  scheme_make_integer(MZCONFIG_LOCALE),
-			  argc, argv,
-			  -1, ok_locale, "#f or string", 1);
+  v = scheme_param_config2("current-locale",
+                           scheme_make_integer(MZCONFIG_LOCALE),
+                           argc, argv,
+                           -1, ok_locale, "(or/c #f string?)", 1);
 
   return v;
 }
 
 static Scheme_Object *locale_string_encoding(int argc, Scheme_Object *argv[])
 {
+  char *enc;
+  Scheme_Object *s;
+  
   reset_locale();
   if (mzLOCALE_IS_UTF_8(current_locale_name) || !locale_on)
     return scheme_make_utf8_string("UTF-8");
-  
-#if HAVE_CODESET
-  return scheme_make_utf8_string(nl_langinfo(CODESET));
-#else
-  /* nl_langinfo doesn't work, so just make up something */
-  return scheme_make_utf8_string("UTF-8");
-#endif
+
+  enc = rktio_locale_encoding(scheme_rktio);
+  s = scheme_make_utf8_string(enc);
+  free(enc);
+
+  return s;
 }
 
 static Scheme_Object *system_language_country(int argc, Scheme_Object *argv[])
 {
-#ifdef MACOS_UNICODE_SUPPORT
-  /* Mac OS X */
-  CFLocaleRef l;
-  CFStringRef s;
-  int len;
-  char *r;
+  char *lc;
+  Scheme_Object *s;
 
-  l = CFLocaleCopyCurrent();
-  s = CFLocaleGetIdentifier(l);
+  lc = rktio_system_language_country(scheme_rktio);
+  s = scheme_make_utf8_string(lc);
+  free(lc);
 
-  len = CFStringGetLength(s);
-  r = (char *)scheme_malloc_atomic(len * 6 + 1);
-  CFStringGetCString(s, r, len * 6 + 1, kCFStringEncodingUTF8);
-
-  CFRelease(l);
-
-  return scheme_make_sized_utf8_string(r, 5);
-#else
-# ifdef WINDOWS_UNICODE_SUPPORT
-  /* Windows */
-  LCID l;
-  int llen, clen;
-  char *lang, *country, *s;
-  l = GetUserDefaultLCID();
-
-  llen = GetLocaleInfo(l, LOCALE_SENGLANGUAGE, NULL, 0);
-  lang = (char *)scheme_malloc_atomic(llen);
-  GetLocaleInfo(l, LOCALE_SENGLANGUAGE, lang, llen);
-  if (llen)
-    llen -= 1; /* drop nul terminator */
-
-  clen = GetLocaleInfo(l, LOCALE_SENGCOUNTRY, NULL, 0);
-  country = (char *)scheme_malloc_atomic(clen);
-  GetLocaleInfo(l, LOCALE_SENGCOUNTRY, country, clen);
-  if (clen)
-    clen -= 1; /* drop nul terminator */
-
-  s = (char *)scheme_malloc_atomic(clen + llen + 1);
-  memcpy(s, lang, llen);
-  memcpy(s + 1 + llen, country, clen);
-  s[llen] = '_';
-  
-  return scheme_make_sized_utf8_string(s, llen + 1 + clen);
-# else
-  /* Unix */
-  char *s;
-  
-  s = getenv("LC_ALL");
-  if (!s)
-    s = getenv("LC_CTYPE");
-  if (!s)
-    s = getenv("LANG");
-  
-  if (s) {
-    /* Check that the environment variable has the form
-       xx_XX[.ENC] */
-    if ((s[0] >= 'a') && (s[0] <= 'z')
-	&& (s[1] >= 'a') && (s[1] <= 'z')
-	&& (s[2] == '_')
-	&& (s[3] >= 'A') && (s[3] <= 'Z')
-	&& (s[4] >= 'A') && (s[4] <= 'Z')
-	&& (!s[5] || s[5] == '.')) {
-      /* Good */
-    } else
-      s = NULL;
-  }
-  
-  if (!s)
-    s = "en_US";
-  
-  return scheme_make_sized_utf8_string(s, 5);
-# endif
-#endif
+  return s;
 }
 
-#ifndef DONT_USE_LOCALE
-
-#define ICONV_ARG_CAST /* empty */
-
-static char *do_convert(iconv_t cd,
-			/* if cd == -1 and either from_e or to_e can be NULL, then
+static char *do_convert(rktio_converter_t *cd,
+			/* if !cd and either from_e or to_e can be NULL, then
 			   reset_locale() must have been called */
 			const char *from_e, const char *to_e,
 			/* 1 => UCS-4 -> UTF-8; 2 => UTF-8 -> UCS-4; 0 => other */
@@ -2629,7 +2585,7 @@ static char *do_convert(iconv_t cd,
 			int *status)
 {
   int dip, dop, close_it = 0, mz_utf8 = 0;
-  size_t il, ol, r;
+  intptr_t il, ol, r;
   GC_CAN_IGNORE char *ip, *op;
 
   /* Defaults: */
@@ -2638,22 +2594,28 @@ static char *do_convert(iconv_t cd,
     *oilen = 0;
   *oolen = 0;
 
-  if (cd == (iconv_t)-1) {
-    if (!iconv_ready) init_iconv();
-    if (mzCHK_PROC(iconv_open)) {
-      if (!from_e)
-	from_e = mz_iconv_nl_langinfo();
-      if (!to_e)
-	to_e = mz_iconv_nl_langinfo();
-      cd = iconv_open(to_e, from_e);
+  if (!cd) {
+    if (rktio_convert_properties(scheme_rktio) & RKTIO_CONVERTER_SUPPORTED) {
+      char *tmp_from_e = NULL, *tmp_to_e = NULL;
+      if (!from_e) {
+	tmp_from_e = rktio_locale_encoding(scheme_rktio);
+        from_e = tmp_from_e;
+      }
+      if (!to_e) {
+	tmp_to_e = rktio_locale_encoding(scheme_rktio);
+        to_e = tmp_to_e;
+      }
+      cd = rktio_converter_open(scheme_rktio, to_e, from_e);
       close_it = 1;
+      if (tmp_from_e) free(tmp_from_e);
+      if (tmp_to_e) free(tmp_to_e);
     } else if (to_from_utf8) {
       /* Assume UTF-8 */
       mz_utf8 = 1;
     }
   }
 
-  if ((cd == (iconv_t)-1) && !mz_utf8) {
+  if (!cd && !mz_utf8) {
     if (out) {
       while (extra--) {
 	out[extra] = 0;
@@ -2724,9 +2686,9 @@ static char *do_convert(iconv_t cd,
 
 	if ((r == -1) || (r == -2)) {
 	  r = (size_t)-1;
-	  icerr = EILSEQ;
+	  icerr = RKTIO_ERROR_CONVERT_BAD_SEQUENCE;
 	} else if (r == -3) {
-	  icerr = E2BIG;
+	  icerr = RKTIO_ERROR_CONVERT_NOT_ENOUGH_SPACE;
 	  r = (size_t)-1;
 	} else
 	  icerr = 0;
@@ -2734,11 +2696,11 @@ static char *do_convert(iconv_t cd,
     } else  {
       ip = in XFORM_OK_PLUS id + dip;
       op = out XFORM_OK_PLUS od + dop;
-      r = iconv(cd, ICONV_ARG_CAST &ip, &il, &op, &ol);
+      r = rktio_convert(scheme_rktio, cd, &ip, &il, &op, &ol);
       dip = ip - (in XFORM_OK_PLUS id);
       dop = op - (out XFORM_OK_PLUS od);
       ip = op = NULL;
-      icerr = ICONV_errno;
+      icerr = rktio_get_last_error(scheme_rktio);
     }
 
     /* Record how many chars processed, now */
@@ -2747,8 +2709,8 @@ static char *do_convert(iconv_t cd,
     *oolen = dop;
 
     /* Got all the chars? */
-    if (r == (size_t)-1) {
-      if (icerr == E2BIG) {
+    if (r == RKTIO_CONVERT_ERROR) {
+      if (icerr == RKTIO_ERROR_CONVERT_NOT_ENOUGH_SPACE) {
 	if (grow) {
 	  /* Double the string size and try again */
 	  char *naya;
@@ -2761,7 +2723,7 @@ static char *do_convert(iconv_t cd,
 	} else {
 	  *status = 1;
 	  if (close_it)
-	    iconv_close(cd);
+	    rktio_converter_close(scheme_rktio, cd);
 	  while (extra--) {
 	    out[od + dop + extra] = 0;
 	  }
@@ -2769,10 +2731,10 @@ static char *do_convert(iconv_t cd,
 	}
       } else {
 	/* Either EINVAL (premature end) or EILSEQ (bad sequence) */
-	if (icerr == EILSEQ)
+	if (icerr == RKTIO_ERROR_CONVERT_BAD_SEQUENCE)
 	  *status = -2;
 	if (close_it)
-	  iconv_close(cd);
+	  rktio_converter_close(scheme_rktio, cd);
 	while (extra--) {
 	  out[od + dop + extra] = 0;
 	}
@@ -2790,7 +2752,7 @@ static char *do_convert(iconv_t cd,
       } else {
 	*status = 0;
 	if (close_it)
-	  iconv_close(cd);
+          rktio_converter_close(scheme_rktio, cd);
 	while (extra--) {
 	  out[od + dop + extra] = 0;
 	}
@@ -2810,18 +2772,19 @@ static char *string_to_from_locale(int to_bytes,
 	reset_locale() has been called */
 {
   Scheme_Object *parts = scheme_null, *one;
-  char *c;
+  char *c, *le;
   intptr_t clen, used;
   int status;
-  iconv_t cd;
+  rktio_converter_t *cd;
 
-  if (!iconv_ready) init_iconv();
-
+  le = rktio_locale_encoding(scheme_rktio);
   if (to_bytes)
-    cd = iconv_open(mz_iconv_nl_langinfo(), MZ_UCS4_NAME);
+    cd = rktio_converter_open(scheme_rktio, le, MZ_UCS4_NAME);
   else
-    cd = iconv_open(MZ_UCS4_NAME, mz_iconv_nl_langinfo());
-  if (cd == (iconv_t)-1) {
+    cd = rktio_converter_open(scheme_rktio, MZ_UCS4_NAME, le);
+  free(le);
+  
+  if (!cd) {
     *no_cvt = 1;
     return NULL;
   }
@@ -2840,7 +2803,7 @@ static char *string_to_from_locale(int to_bytes,
       used >>= 2;
 
     if ((perm < 0) && (used < len)) {
-      iconv_close(cd);
+      rktio_converter_close(scheme_rktio, cd);
       return NULL;
     }
 
@@ -2855,7 +2818,7 @@ static char *string_to_from_locale(int to_bytes,
 	*olen = (clen >> 2);
 	((mzchar *)c)[*olen] = 0;
       }
-      iconv_close(cd);
+      rktio_converter_close(scheme_rktio, cd);
       return c;
     }
 
@@ -2887,7 +2850,7 @@ static char *string_to_from_locale(int to_bytes,
     }
   }
 
-  iconv_close(cd);
+  rktio_converter_close(scheme_rktio, cd);
 
   if (to_bytes) {
     parts = append_all_byte_strings_backwards(parts);
@@ -2910,106 +2873,20 @@ static char *locale_recase(int to_up,
 			   intptr_t *oolen)
      /* Assumes that reset_locale() has been called */
 {
-#ifdef NO_MBTOWC_FUNCTIONS
-  /* No wide-char functions...
-     The C library's toupper and tolower is supposed to be
-     locale-sensitive. It can't be right for characters that are
-     encoded in multiple bytes, but probably it will do the right
-     thing in common cases. */
-  int i;
-
-  /* First, copy "in" to "out" */
-  if (iilen + 1 >= iolen) {
-    out = (char *)scheme_malloc_atomic(iilen + 1);
-    od = 0;
-  }
-  memcpy(out + od, in + id, iilen);
-  out[od + iilen] = 0;
-  *oolen = iilen;
-
-  /* Re-case chars in "out" */
-  for (i = 0; i < iilen; i++) {
-    char t;
-    t = (to_up) ? toupper(out[od+i]) : tolower(out[od+i]);
-    out[od+i] = t;
-  }
-
-  return out;
-#else
-  /* To change the case, convert the string to multibyte, re-case the
-     multibyte, then convert back. */
-# define MZ_WC_BUF_SIZE 32
-  GC_CAN_IGNORE mbstate_t state;
-  size_t wl, ml;
-  wchar_t *wc, *ws, wcbuf[MZ_WC_BUF_SIZE], cwc;
-  const char *s;
-  unsigned int j;
-  /* The "n" versions are apparently not too standard: */
-# define mz_mbsnrtowcs(t, f, fl, tl, s) mbsrtowcs(t, f, tl, s)
-# define mz_wcsnrtombs(t, f, fl, tl, s) wcsrtombs(t, f, tl, s)
-
-  /* ----- to wide char ---- */
-
-  /* Get length */
-  memset(&state, 0, sizeof(mbstate_t));
-  s = in XFORM_OK_PLUS id;
-  wl = mz_mbsnrtowcs(NULL, &s, iilen, 0, &state);
-  s = NULL;
-
-  /* Allocate space */
-  if (wl < MZ_WC_BUF_SIZE) {
-    wc = wcbuf;
+  char *s, *s2;
+  intptr_t len;
+  s = rktio_locale_recase(scheme_rktio, to_up, in XFORM_OK_PLUS id);
+  len = strlen(s);
+  if ((len+1) < iolen) {
+    memcpy(out XFORM_OK_PLUS od, s, len+1);
+    s2 = out;
   } else {
-    wc = (wchar_t *)scheme_malloc_atomic(sizeof(wchar_t) * (wl + 1));
+    s2 = scheme_malloc_atomic(len+1);
+    memcpy(s2, s, len+1);
   }
-
-  /* Convert */
-  memset(&state, 0, sizeof(mbstate_t));
-  s = in XFORM_OK_PLUS id;
-  (void)mz_mbsnrtowcs(wc, &s, iilen, wl + 1, &state);
-  s = NULL;
-
-  wc[wl] = 0; /* just in case */
-
-  /* ---- re-case ---- */
-
-  if (to_up) {
-    for (j = 0; j < wl; j++) {
-      cwc = towupper(wc[j]);
-      wc[j] = cwc;
-    }
-  } else {
-    for (j = 0; j < wl; j++) {
-      cwc = towlower(wc[j]);
-      wc[j] = cwc;
-    }
-  }
-
-  /* ---- back to multibyte ---- */
-
-  /* Measure */
-  memset(&state, 0, sizeof(mbstate_t));
-  ws = wc;
-  ml = mz_wcsnrtombs(NULL, (const wchar_t **)&ws, wl, 0, &state);
-  ws = NULL;
-
-  /* Allocate space */
-  *oolen = ml;
-  if (ml + 1 >= (unsigned int)iolen) {
-    out = (char *)scheme_malloc_atomic(ml + 1);
-    od = 0;
-  }
-
-  /* Convert */
-  memset(&state, 0, sizeof(mbstate_t));
-  ws = wc;
-  (void)mz_wcsnrtombs(out + od, (const wchar_t **)&ws, wl, ml + 1, &state);
-  ws = NULL;
-
-  out[od + ml] = 0;
-
-  return out;
-#endif
+  free(s);
+  *oolen = len;
+  return s2;
 }
 
 int mz_locale_strcoll(char *s1, int d1, int l1, char *s2, int d2, int l2, int cvt_case)
@@ -3044,13 +2921,13 @@ int mz_locale_strcoll(char *s1, int d1, int l1, char *s2, int d2, int l2, int cv
     l1 = origl1;
     l2 = origl2;
     while (1) {
-      c1 = do_convert((iconv_t)-1, MZ_UCS4_NAME, NULL, 1,
+      c1 = do_convert(NULL, MZ_UCS4_NAME, NULL, 1,
 		      s1, d1 * 4, 4 * l1,
 		      buf1, 0, MZ_SC_BUF_SIZE - 1,
 		      1 /* grow */, 0, 1 /* terminator size */,
 		      &used1, &clen1,
 		      &status);
-      c2 = do_convert((iconv_t)-1, MZ_UCS4_NAME, NULL, 1,
+      c2 = do_convert(NULL, MZ_UCS4_NAME, NULL, 1,
 		      s2, d2 * 4, 4 * l2,
 		      buf2, 0, MZ_SC_BUF_SIZE - 1,
 		      1 /* grow */, 0, 1 /* terminator size */,
@@ -3110,7 +2987,7 @@ int mz_locale_strcoll(char *s1, int d1, int l1, char *s2, int d2, int l2, int cv
     }
 
     /* Collate, finally. */
-    status = strcoll(c1, c2);
+    status = rktio_locale_strcoll(scheme_rktio, c1, c2);
 
     /* If one is bigger than the other, we're done. */
     if (status)
@@ -3149,43 +3026,14 @@ int mz_locale_strcoll(char *s1, int d1, int l1, char *s2, int d2, int l2, int cv
   }
 }
 
-#ifdef MACOS_UNICODE_SUPPORT
 int mz_native_strcoll(char *s1, int d1, int l1, char *s2, int d2, int l2, int cvt_case)
      /* The s1 and s2 arguments are actually UTF-16. */
 {
-  CFStringRef str1, str2;
-  CFComparisonResult r;
-
-  str1 = CFStringCreateWithBytes(NULL, (unsigned char *)s1 XFORM_OK_PLUS (d1 * 2), (l1 * 2), 
-				 kCFStringEncodingUnicode, FALSE);
-  str2 = CFStringCreateWithBytes(NULL, (unsigned char *)s2 XFORM_OK_PLUS (d2 * 2), (l2 * 2), 
-				 kCFStringEncodingUnicode, FALSE);
-
-  r = CFStringCompare(str1, str2, (kCFCompareLocalized
-				   | (cvt_case ? kCFCompareCaseInsensitive : 0)));
-
-  CFRelease(str1);
-  CFRelease(str2);
-
-  return (int)r;
+  return rktio_strcoll_utf16(scheme_rktio,
+                             (rktio_char16_t *)s1 XFORM_OK_PLUS d1, l1,
+                             (rktio_char16_t *)s2 XFORM_OK_PLUS d2, l2,
+                             cvt_case);
 }
-#endif
-
-#ifdef WINDOWS_UNICODE_SUPPORT
-int mz_native_strcoll(char *s1, int d1, int l1, char *s2, int d2, int l2, int cvt_case)
-     /* The s1 and s2 arguments are actually UTF-16. */
-{
-  int r;
-
-  r = CompareStringW(LOCALE_USER_DEFAULT,
-		     ((cvt_case ? NORM_IGNORECASE : 0)
-		      | NORM_IGNOREKANATYPE
-		      | NORM_IGNOREWIDTH),
-		     (wchar_t *)s1 + d1, l1, (wchar_t *)s2 + d2, l2);
-
-  return r - 2;
-}
-#endif
 
 typedef int (*strcoll_proc)(char *s1, int d1, int l1, char *s2, int d2, int l2, int cvt_case);
 
@@ -3195,12 +3043,12 @@ int do_locale_comp(const char *who, const mzchar *us1, intptr_t ul1, const mzcha
   int v, endres, utf16 = 0;
   GC_CAN_IGNORE strcoll_proc mz_strcoll = mz_locale_strcoll;
 
-#if defined(MACOS_UNICODE_SUPPORT) || defined(WINDOWS_UNICODE_SUPPORT)
-  if (current_locale_name && !*current_locale_name) {
+  if (current_locale_name
+      && !*current_locale_name
+      && (rktio_convert_properties(scheme_rktio) & RKTIO_CONVERT_STRCOLL_UTF16)) {
     utf16 = 1;
     mz_strcoll = mz_native_strcoll;
   }
-#endif
 
   if (utf16) {
     us1 = (mzchar *)scheme_ucs4_to_utf16(us1, 0, ul1, NULL, 0, &ul1, 1);
@@ -3261,7 +3109,6 @@ int do_locale_comp(const char *who, const mzchar *us1, intptr_t ul1, const mzcha
   return endres;
 }
 
-
 mzchar *do_locale_recase(int to_up, mzchar *in, int delta, int len, intptr_t *olen)
 {
   Scheme_Object *parts = scheme_null;
@@ -3271,7 +3118,7 @@ mzchar *do_locale_recase(int to_up, mzchar *in, int delta, int len, intptr_t *ol
 
   while (len) {
     /* We might have conversion errors... */
-    c = do_convert((iconv_t)-1, MZ_UCS4_NAME, NULL, 1,
+    c = do_convert(NULL, MZ_UCS4_NAME, NULL, 1,
 		   (char *)in, 4 * delta, 4 * len,
 		   buf, 0, MZ_SC_BUF_SIZE - 1,
 		   1 /* grow */, 0, 1 /* terminator size */,
@@ -3288,7 +3135,7 @@ mzchar *do_locale_recase(int to_up, mzchar *in, int delta, int len, intptr_t *ol
     if (!c)
       clen = 0;
 
-    c = do_convert((iconv_t)-1, NULL, MZ_UCS4_NAME, 2,
+    c = do_convert(NULL, NULL, MZ_UCS4_NAME, 2,
 		   c, 0, clen,
 		   NULL, 0, 0,
 		   1 /* grow */, 0, sizeof(mzchar) /* terminator size */,
@@ -3322,59 +3169,22 @@ mzchar *do_locale_recase(int to_up, mzchar *in, int delta, int len, intptr_t *ol
   return SCHEME_CHAR_STR_VAL(parts);
 }
 
-#ifdef MACOS_UNICODE_SUPPORT
 mzchar *do_native_recase(int to_up, mzchar *in, int delta, int len, intptr_t *olen)
-     /* The in argument is actually UTF-16. */
+/* The in argument is actually UTF-16. */
 {
-  CFMutableStringRef mstr;
-  CFStringRef str;
-  GC_CAN_IGNORE CFRange rng;
-  char *result;
+  rktio_char16_t *s, *s2;
+  intptr_t ol;
 
-  str = CFStringCreateWithBytes(NULL, ((unsigned char *)in) XFORM_OK_PLUS (delta * 2), (len * 2), 
-				kCFStringEncodingUnicode, FALSE);
-  mstr = CFStringCreateMutableCopy(NULL, 0, str);
-  CFRelease(str);
+  s = rktio_recase_utf16(scheme_rktio, to_up, (rktio_char16_t *)in XFORM_OK_PLUS delta, len, &ol);
 
-  if (to_up)
-    CFStringUppercase(mstr, NULL);
-  else
-    CFStringLowercase(mstr, NULL);
+  s2 = scheme_malloc_atomic(sizeof(rktio_char16_t) * (ol+1));
+  memcpy(s2, s, sizeof(rktio_char16_t) * (ol+1));
+  free(s);
+  
+  *olen = ol;
 
-  len = CFStringGetLength(mstr);
-  *olen = len;
-
-  result = (char *)scheme_malloc_atomic((len + 1) * 2);
-
-  rng = CFRangeMake(0, len);
-  CFStringGetCharacters(mstr, rng, (UniChar *)result);
-  CFRelease(mstr);
-
-  ((UniChar *)result)[len] = 0;
-
-  return (mzchar *)result;
+  return (mzchar *)s2;
 }
-#endif
-
-#ifdef WINDOWS_UNICODE_SUPPORT
-mzchar *do_native_recase(int to_up, mzchar *in, int delta, int len, intptr_t *olen)
-     /* The in argument is actually UTF-16. */
-{
-  char *result;
-
-  result = (char *)scheme_malloc_atomic((len + 1) * 2);
-  memcpy(result, ((char *)in) + (2 * delta), len * 2);
-  ((wchar_t*)result)[len] = 0;
-
-  if (to_up)
-    CharUpperBuffW((wchar_t *)result, len);
-  else
-    CharLowerBuffW((wchar_t *)result, len);
-
-  *olen = len;
-  return (mzchar *)result;
-}
-#endif
 
 typedef mzchar *(*recase_proc)(int to_up, mzchar *in, int delta, int len, intptr_t *olen);
 
@@ -3388,19 +3198,19 @@ static Scheme_Object *mz_recase(const char *who, int to_up, mzchar *us, intptr_t
 
   reset_locale();
 
-#if defined(MACOS_UNICODE_SUPPORT) || defined(WINDOWS_UNICODE_SUPPORT)
-  if (current_locale_name && !*current_locale_name) {
+  if (current_locale_name
+      && !*current_locale_name
+      && (rktio_convert_properties(scheme_rktio) & RKTIO_CONVERT_RECASE_UTF16)) {
     utf16 = 1;
     mz_do_recase = do_native_recase;
   }
-#endif
 
   if (utf16) {
     us = (mzchar *)scheme_ucs4_to_utf16(us, 0, ulen, NULL, 0, &ulen, 1);
     ((short *)us)[ulen] = 0;
   }
 
-  /* If there are nulls in the string, then we have to make multiple
+  /* If there are nuls in the string, then we have to make multiple
      calls to mz_do_recase */
   i = 0;
   while (1) {
@@ -3441,8 +3251,6 @@ static Scheme_Object *mz_recase(const char *who, int to_up, mzchar *us, intptr_t
 
   return append_all_strings_backwards(parts);
 }
-
-#endif
 
 static Scheme_Object *
 unicode_recase(const char *who, int to_up, int argc, Scheme_Object *argv[])
@@ -3486,47 +3294,31 @@ static void reset_locale(void)
 
   if (locale_on) {
     name = SCHEME_CHAR_STR_VAL(v);
-#ifndef DONT_USE_LOCALE
     if ((current_locale_name != name)
         && (!current_locale_name
             || mz_char_strcmp("result-locale",
                               current_locale_name, scheme_char_strlen(current_locale_name),
                               name, SCHEME_CHAR_STRLEN_VAL(v),
                               0, 1))) {
-      /* We only need CTYPE and COLLATE; two calls seem to be much
-	 faster than one call with ALL */
       char *n, buf[32];
 
       n = scheme_utf8_encode_to_buffer(name, SCHEME_CHAR_STRLEN_VAL(v), buf, 32);
 
-      if (!setlocale(LC_CTYPE, n))
-	setlocale(LC_CTYPE, "C");
-      if (!setlocale(LC_COLLATE, n))
-	setlocale(LC_COLLATE, "C");
+      rktio_set_locale(scheme_rktio, n);
     }
-#endif
+
     current_locale_name_ptr = (void *)name;
   }
 }
 
 char *scheme_push_c_numeric_locale()
 {
-#ifndef DONT_USE_LOCALE
-  GC_CAN_IGNORE char *prev;
-  prev = setlocale(LC_NUMERIC, NULL);
-  if (!strcmp(prev, "C"))
-    return NULL;
-  else
-    return setlocale(LC_NUMERIC, "C");
-#endif  
+  return rktio_push_c_numeric_locale(scheme_rktio);
 }
 
 void scheme_pop_c_numeric_locale(char *prev)
 {
-#ifndef DONT_USE_LOCALE
-  if (prev)
-    setlocale(LC_NUMERIC, prev);
-#endif  
+  rktio_pop_c_numeric_locale(scheme_rktio, prev);
 }
 
 static int find_special_casing(int ch)
@@ -3736,38 +3528,68 @@ static Scheme_Object *string_foldcase (int argc, Scheme_Object *argv[])
 #define MZ_JAMO_SYLLABLE_START           0xAC00
 #define MZ_JAMO_SYLLABLE_END             (MZ_JAMO_SYLLABLE_START + 11171)
 
-static mzchar get_composition(mzchar a, mzchar b)
+XFORM_NONGCING static mzchar get_composition(mzchar a, mzchar b)
 {
-  uintptr_t key = (a << 16) | b;
-  int pos = (COMPOSE_TABLE_SIZE >> 1), new_pos;
-  int below_len = pos;
-  int above_len = (COMPOSE_TABLE_SIZE - pos - 1);
-  
-  if (a > 0xFFFF) return 0;
+  if ((a > 0xFFFF) || (b > 0xFFFF)) {
+    /* Look in long-composes table. */
+    mzlonglong key = ((((mzlonglong)a & 0x1F0000) << 21)
+                      | (((mzlonglong)a & 0xFFFF) << 16)
+                      | (((mzlonglong)b & 0x1F0000) << 16)
+                      | ((mzlonglong)b & 0xFFFF));
+    int pos = (LONG_COMPOSE_TABLE_SIZE >> 1), new_pos;
+    int below_len = pos;
+    int above_len = (LONG_COMPOSE_TABLE_SIZE - pos - 1);
 
-  /* Binary search: */
-  while (key != utable_compose_pairs[pos]) {
-    if (key > utable_compose_pairs[pos]) {
-      if (!above_len)
-	return 0;
-      new_pos = pos + (above_len >> 1) + 1;
-      below_len = (new_pos - pos - 1);
-      above_len = (above_len - below_len - 1);
-      pos = new_pos;
-    } else if (key < utable_compose_pairs[pos]) {
-      if (!below_len)
-	return 0;
-      new_pos = pos - ((below_len >> 1) + 1);
-      above_len = (pos - new_pos - 1);
-      below_len = (below_len - above_len - 1);
-      pos = new_pos;
+    /* Binary search: */
+    while (key != utable_canon_compose_long_pairs[pos]) {
+      if (key > utable_canon_compose_long_pairs[pos]) {
+        if (!above_len)
+          return 0;
+        new_pos = pos + (above_len >> 1) + 1;
+        below_len = (new_pos - pos - 1);
+        above_len = (above_len - below_len - 1);
+        pos = new_pos;
+      } else if (key < utable_canon_compose_long_pairs[pos]) {
+        if (!below_len)
+          return 0;
+        new_pos = pos - ((below_len >> 1) + 1);
+        above_len = (pos - new_pos - 1);
+        below_len = (below_len - above_len - 1);
+        pos = new_pos;
+      }
     }
-  }
+    
+    return utable_canon_compose_long_result[pos];
+  } else {
+    uintptr_t key = (a << 16) | b;
+    int pos = (COMPOSE_TABLE_SIZE >> 1), new_pos;
+    int below_len = pos;
+    int above_len = (COMPOSE_TABLE_SIZE - pos - 1);
 
-  return utable_compose_result[pos];
+    /* Binary search: */
+    while (key != utable_compose_pairs[pos]) {
+      if (key > utable_compose_pairs[pos]) {
+        if (!above_len)
+          return 0;
+        new_pos = pos + (above_len >> 1) + 1;
+        below_len = (new_pos - pos - 1);
+        above_len = (above_len - below_len - 1);
+        pos = new_pos;
+      } else if (key < utable_compose_pairs[pos]) {
+        if (!below_len)
+          return 0;
+        new_pos = pos - ((below_len >> 1) + 1);
+        above_len = (pos - new_pos - 1);
+        below_len = (below_len - above_len - 1);
+        pos = new_pos;
+      }
+    }
+    
+    return utable_compose_result[pos];
+  }
 }
 
-mzchar get_canon_decomposition(mzchar key, mzchar *b)
+XFORM_NONGCING mzchar get_canon_decomposition(mzchar key, mzchar *b)
 {
   int pos = (DECOMPOSE_TABLE_SIZE >> 1), new_pos;
   int below_len = pos;
@@ -3805,7 +3627,7 @@ mzchar get_canon_decomposition(mzchar key, mzchar *b)
   }
 }
 
-int get_kompat_decomposition(mzchar key, unsigned short **chars)
+XFORM_NONGCING int get_kompat_decomposition(mzchar key, unsigned short **chars)
 {
   int pos = (KOMPAT_DECOMPOSE_TABLE_SIZE >> 1), new_pos;
   int below_len = pos;
@@ -4015,7 +3837,7 @@ static Scheme_Object *normalize_d(Scheme_Object *o, int kompat)
       }
       if (!klen)
 	s2[j++] = tmp;
-      memcpy(s2 + j, s2 + len + delta - snds, snds * sizeof(mzchar));
+      memmove(s2 + j, s2 + len + delta - snds, snds * sizeof(mzchar));
       j += snds;
     } else if ((s[i] >= MZ_JAMO_SYLLABLE_START)
 	       && (s[i] <= MZ_JAMO_SYLLABLE_END)) {
@@ -4182,6 +4004,8 @@ static Scheme_Object *string_normalize_kd (int argc, Scheme_Object *argv[])
 intptr_t scheme_char_strlen(const mzchar *s)
 {
   intptr_t i;
+  if ((intptr_t)s & 0x3)
+    abort();
   for (i = 0; s[i]; i++) {
   }
   return i;
@@ -4195,14 +4019,12 @@ static int mz_char_strcmp(const char *who, const mzchar *str1, intptr_t l1, cons
   if (size_shortcut && (l1 != l2))
     return 1;
 
-#ifndef DONT_USE_LOCALE
   if (use_locale) {
     reset_locale();
     if (locale_on) {
       return do_locale_comp(who, str1, l1, str2, l2, 0);
     }
   }
-#endif
 
   if (l1 > l2) {
     l1 = l2;
@@ -4237,14 +4059,12 @@ static int mz_char_strcmp_ci(const char *who, const mzchar *str1, intptr_t l1, c
   if (size_shortcut && (l1 != l2))
     return 1;
 
-#ifndef DONT_USE_LOCALE
   if (use_locale) {
     reset_locale();
     if (locale_on) {
       return do_locale_comp(who, str1, l1, str2, l2, 1);
     }
   }
-#endif
 
   p1 = sp1 = 0;
   p2 = sp2 = 0;
@@ -4335,8 +4155,8 @@ static void close_converter(Scheme_Object *o, void *data)
   if (!c->closed) {
     c->closed = 1;
     if (c->kind == mzICONV_KIND) {
-      iconv_close(c->cd);
-      c->cd = (iconv_t)-1;
+      rktio_converter_close(scheme_rktio, c->cd);
+      c->cd = NULL;
     }
     if (c->mref) {
       scheme_remove_managed(c->mref, (Scheme_Object *)c);
@@ -4348,13 +4168,11 @@ static void close_converter(Scheme_Object *o, void *data)
 Scheme_Object *scheme_open_converter(const char *from_e, const char *to_e)
 {
   Scheme_Converter *c;
-  iconv_t cd;
+  rktio_converter_t *cd;
   int kind;
   int permissive;
   int need_regis = 1;
   Scheme_Custodian_Reference *mref;
-
-  if (!iconv_ready) init_iconv();
 
   if (!*to_e || !*from_e)
     reset_locale();
@@ -4370,7 +4188,7 @@ Scheme_Object *scheme_open_converter(const char *from_e, const char *to_e)
       permissive = 0xFFFD;
     else
       permissive = 0;
-    cd = (iconv_t)-1;
+    cd = NULL;
     need_regis = (*to_e && *from_e);
   } else if ((!strcmp(from_e, "platform-UTF-8")
 	      || !strcmp(from_e, "platform-UTF-8-permissive"))
@@ -4380,30 +4198,37 @@ Scheme_Object *scheme_open_converter(const char *from_e, const char *to_e)
       permissive = 0xFFFD;
     else
       permissive = 0;
-    cd = (iconv_t)-1;
+    cd = NULL;
     need_regis = 0;
   } else if (!strcmp(from_e, "platform-UTF-16")
 	     && !strcmp(to_e, "platform-UTF-8")) {
     kind = mzUTF16_TO_UTF8_KIND;
     permissive = 0;
-    cd = (iconv_t)-1;
+    cd = NULL;
     need_regis = 0;
   } else {
-    if (!iconv_ready) init_iconv();
+    char *tmp_from_e = NULL, *tmp_to_e = NULL;
 
-    if (!mzCHK_PROC(iconv_open))
+    if (!(rktio_convert_properties(scheme_rktio) & RKTIO_CONVERTER_SUPPORTED))
       return scheme_false;
 
     if (!*from_e || !*to_e)
       reset_locale();
 
-    if (!*from_e)
-      from_e = mz_iconv_nl_langinfo();
-    if (!*to_e)
-      to_e = mz_iconv_nl_langinfo();
-    cd = iconv_open(to_e, from_e);
+    if (!*from_e) {
+      tmp_from_e = rktio_locale_encoding(scheme_rktio);
+      from_e = tmp_from_e;
+    }
+    if (!*to_e) {
+      tmp_to_e = rktio_locale_encoding(scheme_rktio);
+      to_e = tmp_to_e;
+    }
+    cd = rktio_converter_open(scheme_rktio, to_e, from_e);
 
-    if (cd == (iconv_t)-1)
+    if (tmp_from_e) free(tmp_from_e);
+    if (tmp_to_e) free(tmp_to_e);
+    
+    if (!cd)
       return scheme_false;
 
     kind = mzICONV_KIND;
@@ -4472,7 +4297,7 @@ static Scheme_Object *convert_one(const char *who, int opos, int argc, Scheme_Ob
     scheme_get_substring_indices(who, argv[1], argc, argv, 2, 3, &istart, &ifinish);
   } else {
     istart = 0;
-    ifinish = 4; /* This is really a guess about how much space we need for a shift terminator */
+    ifinish = 0;
   }
 
   if (argc > opos) {
@@ -5042,6 +4867,17 @@ static intptr_t utf8_decode_x(const unsigned char *s, intptr_t start, intptr_t e
       failmode = -1;
       i = end - 1; /* to ensure that failmode is returned */
     } else if (permissive) {
+# ifdef WINDOWS_UNICODE_SUPPORT
+      if (pending_surrogate) {
+        /* Unpaired surrogate before permissive replacements */
+        if (utf16 && (j < dend)) {
+          if (us)
+            ((unsigned short *)us)[j] = pending_surrogate;
+          j++;
+        }
+        pending_surrogate = 0;
+      }
+#endif
       for (i = oki; i < end; i++) {
 	if (j < dend) {
 	  if (us) {
@@ -5062,8 +4898,18 @@ static intptr_t utf8_decode_x(const unsigned char *s, intptr_t start, intptr_t e
   }
 
 # ifdef WINDOWS_UNICODE_SUPPORT
-  if (pending_surrogate)
-    oki -= 3;
+  if (pending_surrogate) {
+    if (!might_continue) {
+      /* Accept unpaired surrogate at end of input */
+      if (j < dend) {
+        if (us)
+          ((unsigned short *)us)[j] = pending_surrogate;
+        j++;
+      }
+    } else {
+      oki -= 3;
+    }
+  }
 #endif
 
   if (ipos)
@@ -5090,6 +4936,14 @@ intptr_t scheme_utf8_decode(const unsigned char *s, intptr_t start, intptr_t end
 {
   return utf8_decode_x(s, start, end, us, dstart, dend,
 		       ipos, NULL, utf16, utf16, NULL, 0, permissive);
+}
+
+intptr_t scheme_utf8_decode_offset_prefix(const unsigned char *s, intptr_t start, intptr_t end,
+                                          unsigned int *us, intptr_t dstart, intptr_t dend,
+                                          intptr_t *ipos, char utf16, int permissive)
+{
+  return utf8_decode_x(s, start, end, us, dstart, dend,
+		       ipos, NULL, utf16, utf16, NULL, 1, permissive);
 }
 
 intptr_t scheme_utf8_decode_as_prefix(const unsigned char *s, intptr_t start, intptr_t end,
@@ -5457,63 +5311,6 @@ mzchar *scheme_utf16_to_ucs4(const unsigned short *text, intptr_t start, intptr_
 /*                     machine type details                           */
 /**********************************************************************/
 
-/**************************** MacOS ***********************************/
-
-#if defined(MACINTOSH_EVENTS) && !defined(OS_X)
-# include <Gestalt.h>
-extern intptr_t scheme_this_ip(void);
-static void machine_details(char *s)
-{
-   OSErr err;
-   intptr_t lng;
-   char sysvers[30];
-   char machine_name[256];
-
-   err = Gestalt(gestaltSystemVersion, &lng);
-   if (err != noErr) {
-     strcpy(sysvers, "<unknown system>");
-   } else {
-     int i;
-     sprintf(sysvers, "%X.%X",
-	     (lng >> 8) & 0xff,
-	     lng & 0xff);
-     /* remove trailing zeros, put dot before something else */
-     i = strlen(sysvers);
-     if (i > 1) {
-       if (sysvers[i-1] != '.') {
-	 if (sysvers[i-1] == '0') {
-	   sysvers[i-1] = 0;
-	   i--;
-	 } else {
-	   sysvers[i] = sysvers[i-1];
-	   sysvers[i-1] = '.';
-	   i++;
-	   sysvers[i] = 0;
-	 }
-       }
-     }
-   }
-
-   err = Gestalt(gestaltMachineType, &lng);
-   if (err != noErr) {
-     strcpy(machine_name, "<unknown machine>");
-   } else {
-   	 Str255 machine_name_pascal;
-
-   	 GetIndString(machine_name_pascal, kMachineNameStrID, lng);
-	 CopyPascalStringToC(machine_name_pascal, machine_name);
-   }
-
-   lng = scheme_this_ip();
-
-   sprintf(s, "%s %s %d.%d.%d.%d", sysvers, machine_name,
-	   ((unsigned char *)&lng)[0],
-	   ((unsigned char *)&lng)[1],
-	   ((unsigned char *)&lng)[2],
-	   ((unsigned char *)&lng)[3]);
-}
-#endif
-
 /*************************** Windows **********************************/
 
 #ifdef DOS_FILE_SYSTEM
@@ -5554,18 +5351,9 @@ void machine_details(char *buff)
 }
 #endif
 
-/***************************** OSKit **********************************/
-
-#ifdef USE_OSKIT_CONSOLE
-void machine_details(char *buff)
-{
-  strcpy(buff, "OSKit");
-}
-#endif
-
 /***************************** Unix ***********************************/
 
-#if (!defined(MACINTOSH_EVENTS) || defined(OS_X)) && !defined(DOS_FILE_SYSTEM) && !defined(USE_OSKIT_CONSOLE)
+#if !defined(DOS_FILE_SYSTEM)
 READ_ONLY static char *uname_locations[] = { "/bin/uname",
 				   "/usr/bin/uname",
 				   /* The above should cover everything, but
@@ -5604,6 +5392,19 @@ void machine_details(char *buff)
 {
   Scheme_Object *subprocess_proc;
   int i;
+  Scheme_Config *config;
+  Scheme_Security_Guard *sg;
+  Scheme_Cont_Frame_Data cframe;
+ 
+  /* Use the root security guard so we can test for and run
+     executables. */
+  config = scheme_current_config();
+  sg = (Scheme_Security_Guard *)scheme_get_param(config, MZCONFIG_SECURITY_GUARD);
+  while (sg->parent) { sg = sg->parent; }
+  config = scheme_extend_config(config, MZCONFIG_SECURITY_GUARD, (Scheme_Object *)sg);
+
+  scheme_push_continuation_frame(&cframe);
+  scheme_install_config(config);
 
   subprocess_proc = scheme_builtin_value("subprocess");
 
@@ -5633,12 +5434,16 @@ void machine_details(char *buff)
 	  buff[--c] = 0;
 	}
 
+        scheme_pop_continuation_frame(&cframe);
+
 	return;
       }
     }
   }
 
   strcpy(buff, "<unknown machine>");
+
+  scheme_pop_continuation_frame(&cframe);
 }
 #endif
 

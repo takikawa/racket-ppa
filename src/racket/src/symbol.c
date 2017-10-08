@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -41,7 +41,7 @@
 #endif
 
 #ifndef MZ_PRECISE_GC
-extern MZ_DLLIMPORT void (*GC_custom_finalize)(void);
+extern MZGC_DLLIMPORT void (*GC_custom_finalize)(void);
 #endif
 #ifndef USE_SENORA_GC
 extern int GC_is_marked(void *);
@@ -65,7 +65,11 @@ THREAD_LOCAL_DECL(static int gensym_counter);
 
 void scheme_set_case_sensitive(int v) { scheme_case_sensitive =  v; }
 
+READ_ONLY Scheme_Object *scheme_symbol_p_proc;
+READ_ONLY Scheme_Object *scheme_keyword_p_proc;
+
 /* locals */
+static Scheme_Object *symbol_lt (int argc, Scheme_Object *argv[]);
 static Scheme_Object *symbol_p_prim (int argc, Scheme_Object *argv[]);
 static Scheme_Object *symbol_unreadable_p_prim (int argc, Scheme_Object *argv[]);
 static Scheme_Object *symbol_interned_p_prim (int argc, Scheme_Object *argv[]);
@@ -95,12 +99,13 @@ typedef uintptr_t hash_v_t;
 
 static Scheme_Object *rehash_symbol_bucket(Scheme_Hash_Table *table,
                                            GC_CAN_IGNORE const char *key, uintptr_t length,
-                                           Scheme_Object *naya);
+                                           Scheme_Object *naya, int sym_type);
 
 /* Special hashing for symbols: */
 static Scheme_Object *symbol_bucket(Scheme_Hash_Table *table,
 				    GC_CAN_IGNORE const char *key, uintptr_t length,
-				    Scheme_Object *naya)
+				    Scheme_Object *naya, int sym_type)
+  XFORM_ASSERT_NO_CONVERSION
 {
   hash_v_t h, h2;
   uintptr_t mask;
@@ -115,7 +120,7 @@ static Scheme_Object *symbol_bucket(Scheme_Hash_Table *table,
   {
     uintptr_t i;
     i = 0;
-    h = HASH_SEED;
+    h = HASH_SEED + sym_type;
     h2 = 0;
 
     while (i < length) {
@@ -126,6 +131,11 @@ static Scheme_Object *symbol_bucket(Scheme_Hash_Table *table,
     /* post hash mixing helps for short symbols */
     h ^= (h << 5) + (h >> 2) + 0xA0A0;
     h ^= (h << 5) + (h >> 2) + 0x0505;
+
+    if (naya) {
+      /* record hash code (or some fragment of it) for `equal?` hashing: */
+      scheme_install_symbol_hash_code(naya, h);
+    }
 
     h = h & mask;
     h2 = h2 & mask;
@@ -154,7 +164,7 @@ static Scheme_Object *symbol_bucket(Scheme_Hash_Table *table,
     return NULL;
 
   if (table->count * FILL_FACTOR >= table->size) {
-    return rehash_symbol_bucket(table, key, length, naya);
+    return rehash_symbol_bucket(table, key, length, naya, sym_type);
   }
 
   table->keys[WEAK_ARRAY_HEADSIZE + h] = naya;
@@ -166,7 +176,7 @@ static Scheme_Object *symbol_bucket(Scheme_Hash_Table *table,
 
 static Scheme_Object *rehash_symbol_bucket(Scheme_Hash_Table *table,
                                            GC_CAN_IGNORE const char *key, uintptr_t length,
-                                           Scheme_Object *naya)
+                                           Scheme_Object *naya, int sym_type)
 {
   int i, oldsize = table->size, newsize, lostc;
   size_t asize;
@@ -206,13 +216,13 @@ static Scheme_Object *rehash_symbol_bucket(Scheme_Hash_Table *table,
   for (i = 0; i < oldsize; i++) {
     cb = old[WEAK_ARRAY_HEADSIZE + i] ;
     if (cb && (cb != SYMTAB_LOST_CELL))
-      symbol_bucket(table, SCHEME_SYM_VAL(cb), SCHEME_SYM_LEN(cb), cb);
+      symbol_bucket(table, SCHEME_SYM_VAL(cb), SCHEME_SYM_LEN(cb), cb, sym_type);
   }
 
   /* Restore GC-misaligned key: */
   key = SCHEME_SYM_VAL(naya);
 
-  return symbol_bucket(table, key, length, naya);
+  return symbol_bucket(table, key, length, naya, sym_type);
 }
 
 #ifndef MZ_PRECISE_GC
@@ -323,9 +333,11 @@ scheme_init_symbol (Scheme_Env *env)
 {
   Scheme_Object *p;
 
+  REGISTER_SO(scheme_symbol_p_proc);
   p = scheme_make_folding_prim(symbol_p_prim, "symbol?", 1, 1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
                                                             | SCHEME_PRIM_IS_OMITABLE);
+  scheme_symbol_p_proc = p;
   scheme_add_global_constant("symbol?", p, env);
 
   p = scheme_make_folding_prim(symbol_unreadable_p_prim, "symbol-unreadable?", 1, 1, 1);
@@ -333,12 +345,20 @@ scheme_init_symbol (Scheme_Env *env)
   
   p = scheme_make_folding_prim(symbol_interned_p_prim, "symbol-interned?", 1, 1, 1);
   scheme_add_global_constant("symbol-interned?", p, env);
-  
+
+  GLOBAL_FOLDING_PRIM("symbol<?",                 symbol_lt,                       2, -1, 1, env);  
   GLOBAL_IMMED_PRIM("string->symbol",             string_to_symbol_prim,            1, 1, env);
   GLOBAL_IMMED_PRIM("string->uninterned-symbol",  string_to_uninterned_symbol_prim, 1, 1, env);
   GLOBAL_IMMED_PRIM("string->unreadable-symbol",  string_to_unreadable_symbol_prim, 1, 1, env);
   GLOBAL_IMMED_PRIM("symbol->string",             symbol_to_string_prim,            1, 1, env);
-  GLOBAL_FOLDING_PRIM("keyword?",                 keyword_p_prim,                   1, 1, 1, env);
+
+  REGISTER_SO(scheme_keyword_p_proc);
+  p = scheme_make_folding_prim(keyword_p_prim, "keyword?", 1, 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
+                                                            | SCHEME_PRIM_IS_OMITABLE);
+  scheme_keyword_p_proc = p;
+  scheme_add_global_constant("keyword?", p, env);
+
   GLOBAL_FOLDING_PRIM("keyword<?",                keyword_lt,                       2, -1, 1, env);
   GLOBAL_IMMED_PRIM("string->keyword",            string_to_keyword_prim,           1, 1, env);
   GLOBAL_IMMED_PRIM("keyword->string",            keyword_to_string_prim,           1, 1, env);
@@ -348,6 +368,17 @@ scheme_init_symbol (Scheme_Env *env)
 uintptr_t scheme_get_max_symbol_length() {
   /* x86, x86_64, and powerpc support aligned_atomic_loads_and_stores */
   return scheme_max_symbol_length;
+}
+
+void scheme_ensure_max_symbol_length(uintptr_t len)
+{
+#ifdef MZ_USE_PLACES
+  mzrt_ensure_max_cas(&scheme_max_symbol_length, len);
+#else
+  if (len > scheme_max_symbol_length) {
+    scheme_max_symbol_length = len;
+  }
+#endif
 }
 
 
@@ -364,15 +395,9 @@ make_a_symbol(const char *name, uintptr_t len, int kind)
   memcpy(sym->s, name, len);
   sym->s[len] = 0;
 
-#ifdef MZ_USE_PLACES
-  mzrt_ensure_max_cas(&scheme_max_symbol_length, len);
-#else
-  if ( len > scheme_max_symbol_length ) {
-    scheme_max_symbol_length = len;
-  }
-#endif
+  scheme_ensure_max_symbol_length(len);
 
-  return (Scheme_Object *) sym;
+  return (Scheme_Object *)sym;
 }
 
 Scheme_Object *
@@ -439,11 +464,11 @@ intern_exact_symbol_in_table_worker(enum_symbol_table_type type, int kind, const
 
 #if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
   if (place_local_table) {
-    sym = symbol_bucket(place_local_table, name, len, NULL);
+    sym = symbol_bucket(place_local_table, name, len, NULL, type);
   }
 #endif
   if (!sym && table) {
-    sym = symbol_bucket(table, name, len, NULL);
+    sym = symbol_bucket(table, name, len, NULL, type);
   }
   if (!sym) {
     /* create symbol in symbol table unless a place local symbol table has been created */
@@ -462,7 +487,7 @@ intern_exact_symbol_in_table_worker(enum_symbol_table_type type, int kind, const
     /* we must return the result of this symbol bucket call because another
      * thread could have inserted the same symbol between the first
      * symbol_bucket call above and this one */
-    sym = symbol_bucket(create_table, name, len, newsymbol);
+    sym = symbol_bucket(create_table, name, len, newsymbol, type);
   }
 
   return sym;
@@ -686,7 +711,7 @@ const char *scheme_symbol_name_and_size(Scheme_Object *sym, uintptr_t *length, i
       mzchar cbuf[100], *cs, *cresult;
       intptr_t clen;
       int p = 0;
-      uintptr_t i = 0;
+      intptr_t i = 0;
       intptr_t rlen;
 
       dz = 0;
@@ -842,19 +867,20 @@ keyword_p_prim (int argc, Scheme_Object *argv[])
   return SCHEME_KEYWORDP(argv[0]) ? scheme_true : scheme_false;
 }
 
-static Scheme_Object *keyword_lt (int argc, Scheme_Object *argv[])
+static Scheme_Object *symkey_lt (const char *who, Scheme_Type ty, const char *contract,
+                                  int argc, Scheme_Object *argv[])
 {
   Scheme_Object *prev = argv[0], *kw;
   GC_CAN_IGNORE unsigned char *a, *b;
   int i, al, bl, t;
 
-  if (!SCHEME_KEYWORDP(prev))
-    scheme_wrong_contract("keyword<?", "keyword?", 0, argc, argv);
+  if (!SAME_TYPE(SCHEME_TYPE(prev), ty))
+    scheme_wrong_contract(who, contract, 0, argc, argv);
 
   for (i = 1; i < argc; i++) {
     kw = argv[i];
-    if (!SCHEME_KEYWORDP(kw))
-      scheme_wrong_contract("keyword<?", "keyword?", i, argc, argv);
+    if (!SAME_TYPE(SCHEME_TYPE(kw), ty))
+      scheme_wrong_contract(who, contract, i, argc, argv);
 
     a = (unsigned char *)SCHEME_SYM_VAL(prev);
     al = SCHEME_SYM_LEN(prev);
@@ -879,8 +905,8 @@ static Scheme_Object *keyword_lt (int argc, Scheme_Object *argv[])
     if (al >= bl) {
       /* Check remaining types */
       for (i++; i < argc; i++) {
-        if (!SCHEME_KEYWORDP(argv[i]))
-          scheme_wrong_contract("keyword<?", "keyword?", i, argc, argv);
+        if (!SAME_TYPE(SCHEME_TYPE(argv[i]), ty))
+          scheme_wrong_contract(who, contract, i, argc, argv);
       }
       return scheme_false;
     }
@@ -889,6 +915,16 @@ static Scheme_Object *keyword_lt (int argc, Scheme_Object *argv[])
   }
 
   return scheme_true;
+}
+
+static Scheme_Object *keyword_lt (int argc, Scheme_Object *argv[])
+{
+  return symkey_lt("keyword<?", scheme_keyword_type, "keyword?", argc, argv);
+}
+
+static Scheme_Object *symbol_lt (int argc, Scheme_Object *argv[])
+{
+  return symkey_lt("symbol<?", scheme_symbol_type, "symbol?", argc, argv);
 }
 
 static Scheme_Object *
@@ -915,6 +951,7 @@ static Scheme_Object *gensym(int argc, Scheme_Object *argv[])
 {
   char buffer[100], *str;
   Scheme_Object *r;
+  Scheme_Thread *p;
 
   if (argc)
     r = argv[0];
@@ -924,6 +961,18 @@ static Scheme_Object *gensym(int argc, Scheme_Object *argv[])
   if (r && !SCHEME_SYMBOLP(r) && !SCHEME_CHAR_STRINGP(r))
     scheme_wrong_contract("gensym", "(or/c symbol? string?)", 0, argc, argv);
 
+  if (!r) {
+    /* Generate a name using an enclosing module name during compilation, if available */
+    p = scheme_current_thread;
+    if (p->current_local_env && p->current_local_env->genv->module) {
+      r = SCHEME_PTR_VAL(p->current_local_env->genv->module->modname);
+      if (SCHEME_PAIRP(r))
+        r = SCHEME_CAR(r);
+      if (!SCHEME_SYMBOLP(r))
+        r = NULL;
+    }
+  }
+  
   if (r) {
     char buf[64];
     if (SCHEME_CHAR_STRINGP(r)) {
@@ -940,6 +989,13 @@ static Scheme_Object *gensym(int argc, Scheme_Object *argv[])
   r = scheme_make_symbol(buffer);
 
   return r;
+}
+
+Scheme_Object *scheme_gensym(Scheme_Object *base)
+{
+  Scheme_Object *a[1];
+  a[0] = base;
+  return gensym(1, a);
 }
 
 Scheme_Object *scheme_symbol_append(Scheme_Object *s1, Scheme_Object *s2)

@@ -3,7 +3,7 @@
          racket/contract/base
          syntax/private/id-table
          racket/syntax
-         unstable/struct)
+         "make.rkt")
 
 #|
 An IAttr is (make-attr identifier number boolean)
@@ -48,9 +48,6 @@ of signatures easier for reified syntax-classes.
  [reorder-iattrs
   (-> (listof sattr?) (listof iattr?)
       (listof iattr?))]
- [rename-attr
-  (-> iattr? identifier?
-      iattr?)]
 
  ;; SAttr operations
  [iattr->sattr
@@ -89,13 +86,16 @@ of signatures easier for reified syntax-classes.
   (define count-t (make-bound-id-table))
   (define attr-t (make-bound-id-table))
   (define list-count (length attrss))
+  (define attr-keys null)
   (for* ([attrs (in-list attrss)] [attr (in-list attrs)])
     (define name (attr-name attr))
     (define prev (bound-id-table-ref attr-t name #f))
+    (unless prev (set! attr-keys (cons name attr-keys)))
     (bound-id-table-set! attr-t name (join-attrs attr prev))
     (let ([pc (bound-id-table-ref count-t name 0)])
       (bound-id-table-set! count-t name (add1 pc))))
-  (for/list ([a (in-list (bound-id-table-map attr-t (lambda (_ v) v)))])
+  (for/list ([k (in-list attr-keys)])
+    (define a (bound-id-table-ref attr-t k))
     (if (= (bound-id-table-ref count-t (attr-name a)) list-count)
         a
         (attr-make-uncertain a))))
@@ -132,9 +132,6 @@ of signatures easier for reified syntax-classes.
   (sort as string<?
         #:key (lambda (a) (symbol->string (attr-name a)))
         #:cache-keys? #t))
-
-(define (rename-attr a name)
-  (make attr name (attr-depth a) (attr-syntax? a)))
 
 ;; intersect-sattrss : (listof (listof SAttr)) -> (listof SAttr)
 ;; FIXME: rely on sorted inputs, simplify algorithm and avoid second sort?

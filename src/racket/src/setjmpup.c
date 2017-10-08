@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -47,10 +47,10 @@ HOOK_SHARED_OK void (*scheme_set_external_stack_val)(void *);
    stack copy to account for pointers to the interior of collectable
    objects. */     
 
-extern MZ_DLLIMPORT void GC_push_all_stack(void *, void *);
-extern MZ_DLLIMPORT void GC_flush_mark_stack(void);
-extern MZ_DLLIMPORT void (*GC_push_last_roots)(void);
-extern MZ_DLLIMPORT void (*GC_push_last_roots_again)(void);
+extern MZGC_DLLIMPORT void GC_push_all_stack(void *, void *);
+extern MZGC_DLLIMPORT void GC_flush_mark_stack(void);
+extern MZGC_DLLIMPORT void (*GC_push_last_roots)(void);
+extern MZGC_DLLIMPORT void (*GC_push_last_roots_again)(void);
 /* GC_push_last_roots_again is called after marking eager
    finalizations (once at each stage). We rely on the fact that no
    copied stack will be referenced by (or affected the ordering of)
@@ -60,8 +60,8 @@ extern MZ_DLLIMPORT void (*GC_push_last_roots_again)(void);
 # define GC_is_marked(p) GC_base(p)
 # define GC_did_mark_stack_overflow() 0
 #else
-extern MZ_DLLIMPORT int GC_is_marked(void *);
-extern MZ_DLLIMPORT int GC_did_mark_stack_overflow(void);
+extern MZGC_DLLIMPORT int GC_is_marked(void *);
+extern MZGC_DLLIMPORT int GC_did_mark_stack_overflow(void);
 #endif
 
 #define get_copy(s_c) (((CopiedStack *)s_c)->_stack_copy)
@@ -410,10 +410,22 @@ static intptr_t find_same(char *p, char *low, intptr_t max_size)
     cnt++;
   }
 #else
-  while (max_size--) {
-    if (p[max_size] != low[max_size])
-      break;
-    cnt++;
+  if (!((intptr_t)p & (sizeof(intptr_t)-1))
+      && !((intptr_t)low & (sizeof(intptr_t)-1))) {
+    /* common case of aligned addresses: compare `intptr_t`s at a time */
+    max_size /= sizeof(intptr_t);
+    while (max_size--) {
+      if (((intptr_t *)p)[max_size] != ((intptr_t *)low)[max_size])
+        break;
+      cnt += sizeof(intptr_t);
+    }
+  } else {
+    /* general case: compare bytes */
+    while (max_size--) {
+      if (p[max_size] != low[max_size])
+        break;
+      cnt++;
+    }
   }
 #endif
 
@@ -661,11 +673,12 @@ void scheme_reset_jmpup_buf(Scheme_Jumpup_Buf *b)
    is fragile, because it's not well defined whether the compiler
    will generate frame-pointer setup; use mzsj86g.S, instead. */
 
-#ifdef __MINGW32__
-# if __OPTIMIZE__ > 0
-#  define NEED_STACK_FRAME_SETUP
-# endif
+#if (__OPTIMIZE__ > 0) || defined(MZ_XFORM)
+# define NEED_STACK_FRAME_SETUP
 #endif
+
+MZ_DO_NOT_INLINE(int scheme_mz_setjmp(mz_pre_jmp_buf b));
+MZ_DO_NOT_INLINE(void scheme_mz_longjmp(mz_pre_jmp_buf b, int v));
 
 int scheme_mz_setjmp(mz_pre_jmp_buf b)
 {
@@ -715,4 +728,36 @@ void scheme_mz_longjmp(mz_pre_jmp_buf b, int v)
 #endif
 }
 
+#endif
+
+
+#ifndef USE_MZ_SETJMP_INDIRECT
+Scheme_Setjmp_Proc scheme_get_mz_setjmp(void)
+{
+  scheme_log_abort("internal error: setjmp was indirect?");
+  abort();
+  return NULL;
+}
+#endif
+
+#if defined(USE_MZ_SETJMP_INDIRECT) && defined(__MINGW32__)
+extern int _scheme_mz_setjmp(mz_pre_jmp_buf b);
+extern void _scheme_mz_longjmp(mz_pre_jmp_buf b, int v);
+
+Scheme_Setjmp_Proc scheme_get_mz_setjmp(void)
+{
+  return _scheme_mz_setjmp;
+}
+
+void scheme_mz_longjmp(mz_pre_jmp_buf b, int v)
+{
+  _scheme_mz_longjmp(b, v);
+}
+
+int scheme_mz_setjmp(mz_pre_jmp_buf b)
+{
+  scheme_log_abort("internal error: setjmp wasn't indirect");
+  abort();
+  return 0;
+}
 #endif

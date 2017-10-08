@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.10.1"))) (define collection (quote multi)) (define deps (quote ("base"))) (define pkg-desc "Libraries for handling zo files") (define pkg-authors (quote (mflatt))) (define version "1.2")))

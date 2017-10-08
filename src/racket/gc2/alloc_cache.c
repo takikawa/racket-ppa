@@ -5,12 +5,14 @@
       static void *alloc_cache_alloc_page(AllocCacheBlock *blockfree,  size_t len, size_t alignment, int dirty_ok, intptr_t *size_diff)
    Requires (defined earlier):
       my_qsort --- possibly from my_qsort.c
-      static void os_vm_free_pages(void *p, size_t len);
-      static void *os_vm_alloc_pages(size_t len);
+      static void os_free_pages(void *p, size_t len);
+      static void *os_alloc_pages(size_t len);
+      static void *ofm_malloc_zero(size_t len);
+      APAGE_SIZE (for cache heuristic)
 */
 
 /* Controls how often freed pages are actually returned to OS: */
-#define BLOCKFREE_UNMAP_AGE 3
+#define BLOCKFREE_UNMAP_AGE FREE_UNMAP_AGE
 
 /* Controls size of the cache */
 #define BLOCKFREE_CACHE_SIZE 96
@@ -18,19 +20,28 @@
 /* Controls how many extra pages are requested from OS at a time: */
 #define CACHE_SEED_PAGES 16
 
+typedef struct AllocCacheBlock {
+  char *start;
+  intptr_t len;
+  short age;
+  short zeroed;
+} AllocCacheBlock;
+
 static AllocCacheBlock *alloc_cache_create() {
   return ofm_malloc_zero(sizeof(AllocCacheBlock) * BLOCKFREE_CACHE_SIZE); 
 }
 
+#ifndef NO_ALLOC_CACHE_FREE
 static intptr_t alloc_cache_free_all_pages(AllocCacheBlock *blockfree);
 static intptr_t alloc_cache_free(AllocCacheBlock *ac) {
   if (ac) {
     intptr_t s = alloc_cache_free_all_pages(ac);
-    free(ac);
+    ofm_free(ac, sizeof(AllocCacheBlock) * BLOCKFREE_CACHE_SIZE);
     return s;
   }
   return 0;
 }
+#endif
 
 static int alloc_cache_block_compare(const void *a, const void *b)
 {
@@ -45,8 +56,16 @@ static void alloc_cache_collapse_pages(AllocCacheBlock *blockfree)
   int i;
   int j;
 
-  /* sort by AllocCacheBlock->start */
-  my_qsort(blockfree, BLOCKFREE_CACHE_SIZE, sizeof(AllocCacheBlock), alloc_cache_block_compare);
+  /* Sorted already? */
+  for (i = 1; i < BLOCKFREE_CACHE_SIZE; i++) {
+    if (blockfree[i-1].start > blockfree[i].start)
+      break;
+  }
+
+  if (i < BLOCKFREE_CACHE_SIZE) {
+    /* sort by AllocCacheBlock->start */
+    my_qsort(blockfree, BLOCKFREE_CACHE_SIZE, sizeof(AllocCacheBlock), alloc_cache_block_compare);
+  }
 
   /* collapse adjacent: */
   j = 0;
@@ -152,7 +171,7 @@ static intptr_t alloc_cache_free_page(AllocCacheBlock *blockfree, char *p, size_
   return (originated_here ? -len : 0);
 }
 
-static intptr_t alloc_cache_flush_freed_pages(AllocCacheBlock *blockfree)
+static intptr_t alloc_cache_flush_freed_pages(AllocCacheBlock *blockfree, int force)
 {
   int i;
   intptr_t freed = 0;
@@ -160,7 +179,7 @@ static intptr_t alloc_cache_flush_freed_pages(AllocCacheBlock *blockfree)
 
   for (i = 0; i < BLOCKFREE_CACHE_SIZE; i++) {
     if (blockfree[i].start) {
-      if (blockfree[i].age == BLOCKFREE_UNMAP_AGE) {
+      if (force || (blockfree[i].age == BLOCKFREE_UNMAP_AGE)) {
         os_free_pages(blockfree[i].start, blockfree[i].len);
         freed -= blockfree[i].len;
         blockfree[i].start = NULL;
@@ -172,6 +191,19 @@ static intptr_t alloc_cache_flush_freed_pages(AllocCacheBlock *blockfree)
   return freed;
 }
 
+static int alloc_cache_is_full(AllocCacheBlock *blockfree)
+{
+  int i;
+
+  for (i = 0; i < BLOCKFREE_CACHE_SIZE; i++) {
+    if (!blockfree[i].start)
+      return 0;
+  }
+
+  return 1;
+}
+
+#ifndef NO_ALLOC_CACHE_FREE
 static intptr_t alloc_cache_free_all_pages(AllocCacheBlock *blockfree)
 {
   int i;
@@ -188,6 +220,7 @@ static intptr_t alloc_cache_free_all_pages(AllocCacheBlock *blockfree)
   }
   return freed;
 }
+#endif
 
 /* Instead of immediately freeing pages with munmap---only to mmap
    them again---we cache BLOCKFREE_CACHE_SIZE freed pages. A page is
@@ -207,9 +240,15 @@ static void *alloc_cache_alloc_page(AllocCacheBlock *blockfree,  size_t len, siz
   r = alloc_cache_find_pages(blockfree, len, alignment, dirty_ok);
   if(!r) {
     /* attempt to allocate from OS */
-    size_t extra = (alignment ? (alignment + CACHE_SEED_PAGES * APAGE_SIZE) : 0);
+    size_t extra;
+
+    if (alloc_cache_is_full(blockfree))
+      extra = alignment;
+    else
+      extra = (alignment ? (alignment + CACHE_SEED_PAGES * APAGE_SIZE) : 0);
+
     r = os_alloc_pages(len + extra);
-    if(r == (void *)-1) { return NULL; }
+    if(!r) { return NULL; }
 
     if (alignment) {
       /* We allocated too large so we can choose the alignment. */

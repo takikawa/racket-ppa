@@ -19,6 +19,49 @@ extern MZ_DLLIMPORT int GC_is_marked(void *);
 #define NODE_HEADER_SIZE 3
 #define NODE_STARTS_OFFSET 1
 #define NODE_GCABLE_OFFSET 2
+#define NODE_MODIFIED_OFFSET 2
+
+/* Represent a node in the tree as an array of
+   NODE_HEADER_SIZE + KEY_COUNT pointers.
+
+   The first pointer is always NULL, so that the node can be
+   recognized as a node (as opposed to a Racket value) when referenced
+   by other nodes.
+
+   The second "pointer" is used as an array of bits, where each bit
+   indicates whether the corresponding pointer is the start of a
+   mapped range. The bits are shfted up by 1 and the low bit is always
+   set to 1, so that the GC doesn't think it's a pointer.
+
+   The third "pointer" is similar to the first, but it represents the
+   GC status of the reference for CGC, and the bit is only used at a
+   range start. For precise GC, this "pointer" is used to indicate
+   when the array has changed and should be scanned for being
+   completely empty; it's ok for that flag to be approximate due to
+   a GC happening while arrays are being modified.
+
+   Then there are KEY_COUNT "key" pointers for the content of the
+   node.  Note that KEY_COUNT is smaller than the number of bits
+   available in the header's second and third "pointer"s.
+
+   In a leaf node, every "key" corresponds to an address. In a node
+   that references leaf nodes, every "key" corresponds to KEY_SIZE
+   addresses. So, at the root, the first key corresonds to address 0,
+   the second key corresponds to address (1 << (32-LOG_KEY_SIZE)) on a
+   32-bit platform, and so on.
+
+   To make the tree more compact, when all of the pointers in a node
+   would be the same non-node value, then the node itself can be
+   replaced with the non-node value. (That's why we need to be able to
+   distinguish node references from Scheme-object references.) Of
+   course, "leaf node" above means nodes that would be leaves without
+   this compaction. 
+
+   When PLT_DUMP_JIT_RANGES is defined for compilation and as an
+   environment variable at run time, then an exit hook prints the
+   ranges of JIT-generated code. Furthermore, for 3m, defining
+   PLT_DUMP_JIT_RANGES at compilation time disables GC of
+   JIT-generated code. */
 
 THREAD_LOCAL_DECL(static void **codetab_tree);
 THREAD_LOCAL_DECL(static int during_set);
@@ -28,6 +71,11 @@ static void **shared_codetab_tree;
    and the fact that kentries are only added (never removed)
    to skip the lock. */
 static mzrt_mutex *shared_codetab_lock;
+#endif
+
+#ifdef PLT_DUMP_JIT_RANGES
+static int dump_registered = 0;
+static void dump_symbol_ranges();
 #endif
 
 static int do_clear_symbols(void **t, uintptr_t start, int offset, uintptr_t addr, int clearing);
@@ -98,6 +146,14 @@ void scheme_jit_add_symbol(uintptr_t start, uintptr_t end, void *value, int gc_a
   int offset = (JIT_WORD_SIZE * 8), split_offset = 0;
   void **the_tree, **t1, **t2, **split_t, *val1, *val2;
 
+#ifdef PLT_DUMP_JIT_RANGES
+  if (!dump_registered) {
+    dump_registered = 1;
+    if (getenv("PLT_DUMP_JIT_RANGES"))
+      atexit(dump_symbol_ranges);
+  }
+#endif
+
 #ifdef MZ_USE_PLACES
   if (!gc_able) {
     if (!shared_codetab_lock) {
@@ -125,6 +181,11 @@ void scheme_jit_add_symbol(uintptr_t start, uintptr_t end, void *value, int gc_a
   t1 = t2 = the_tree;
   split_t = NULL;
   while (offset) {
+#ifdef MZ_PRECISE_GC
+    /* mark as modified */
+    t1[NODE_MODIFIED_OFFSET] = (void *)0x1;
+    t2[NODE_MODIFIED_OFFSET] = (void *)0x1;
+#endif
     offset -= LOG_KEY_SIZE;
 
     k1 = ((start >> offset) & KEY_MASK) + NODE_HEADER_SIZE;
@@ -173,10 +234,6 @@ void scheme_jit_add_symbol(uintptr_t start, uintptr_t end, void *value, int gc_a
   /* GCABLE flag indicates whether to check for GC later */
   if (gc_able)
     ((uintptr_t *)t1)[NODE_GCABLE_OFFSET] |= m;
-#else
-  /* GCABLE flag indicates whether it's been GCed: */
-  if (!value)
-    ((uintptr_t *)t1)[NODE_GCABLE_OFFSET] |= m;
 #endif
 
   /* Fill in start and end: */
@@ -217,15 +274,6 @@ void scheme_jit_add_symbol(uintptr_t start, uintptr_t end, void *value, int gc_a
 
   --during_set;
 
-#ifdef MZ_PRECISE_GC
-  if (!value) {
-    /* Prune empty branches in the tree. Only do this if this
-       object is mapped deeply enough in the tree, otherwise
-       we end up scanning the whole tree. */
-    do_clear_symbols(the_tree, start, 0, 0, 0);
-  }
-#endif
-
 #ifdef MZ_USE_PLACES
   if (!gc_able) {
     mzrt_mutex_unlock(shared_codetab_lock);      
@@ -233,8 +281,9 @@ void scheme_jit_add_symbol(uintptr_t start, uintptr_t end, void *value, int gc_a
 #endif
 }
 
+#ifndef MZ_PRECISE_GC
+
 static int do_clear_symbols(void **t, uintptr_t start, int offset, uintptr_t addr, int clearing)
-  /* If MZ_PRECISE_GC, then offset and addr are not used. */
 {
   int i, m, j;
   void *val, **subt;
@@ -247,34 +296,19 @@ static int do_clear_symbols(void **t, uintptr_t start, int offset, uintptr_t add
     if (((uintptr_t *)t)[NODE_STARTS_OFFSET] & m) {
       clearing = 0;
       if (((uintptr_t *)t)[NODE_GCABLE_OFFSET] & m) {
-	/* GCable pointer starts here */
-#ifndef MZ_PRECISE_GC
-	/* Conservative GC: GCable flag means use GC_is_marked */
+	/* GCable flag means use GC_is_marked */
 	void *p = (void *)(addr + ((uintptr_t)i << offset));
 	if (!GC_is_marked(p))
 	  clearing = 1;
-#else
-	/* Precise GC: GCable flag means it's gone */
-	clearing = 1;
-#endif
 	if (clearing) {
 	  /* Collected... */
 	  ((uintptr_t *)t)[NODE_STARTS_OFFSET] -= m;
 	  ((uintptr_t *)t)[NODE_GCABLE_OFFSET] -= m;
 	}
-      } else {
-#ifdef MZ_PRECISE_GC
-	return 0;
-#endif
       }
     }
 
-#ifdef MZ_PRECISE_GC
-    if (!clearing)
-      val = NULL;
-    else
-#endif
-      val = t[i + NODE_HEADER_SIZE];
+    val = t[i + NODE_HEADER_SIZE];
 
     if (val) {
       if (!*(Scheme_Type *)val) {
@@ -293,12 +327,6 @@ static int do_clear_symbols(void **t, uintptr_t start, int offset, uintptr_t add
 	    t[i + NODE_HEADER_SIZE] = NULL;
 	  }
 	}
-#ifdef MZ_PRECISE_GC
-	if (!clearing) {
-	  /* Finished clearing the one item, so return. */
-	  return 0;
-	}
-#endif
       } else if (clearing)
 	t[i + NODE_HEADER_SIZE] = NULL;
     }
@@ -307,13 +335,109 @@ static int do_clear_symbols(void **t, uintptr_t start, int offset, uintptr_t add
   return clearing;
 }
 
-#ifndef MZ_PRECISE_GC
-
 static void clear_symbols_for_collected()
 {
   if (codetab_tree) {
     do_clear_symbols(codetab_tree, 0, (JIT_WORD_SIZE * 8) - LOG_KEY_SIZE, 0, 0); 
   }
+}
+
+#else
+
+static void check_clear_symbols(void **t)
+{
+  int i, j;
+  void *val, **subt;
+
+#ifdef MZ_PRECISE_GC
+# if 0
+  if (((uintptr_t *)t)[NODE_GCABLE_OFFSET] != 0x1)
+    printf("Found GCed\n");
+# endif
+#endif
+
+  if (!t[NODE_MODIFIED_OFFSET])
+    return;
+  t[NODE_MODIFIED_OFFSET] = NULL;
+
+  for (i = 0; i < KEY_COUNT; i++) {
+    val = t[i + NODE_HEADER_SIZE];
+
+    if (val) {
+      if (!*(Scheme_Type *)val) {
+	subt = (void **)val;
+	check_clear_symbols(subt);
+        /* If the branch is empty, then drop it. */
+        for (j = 0; j < KEY_COUNT; j++) {
+          if (subt[j + NODE_HEADER_SIZE])
+            break;
+        }
+        if (j == KEY_COUNT) {
+          t[i+NODE_HEADER_SIZE] = NULL;
+        }
+      }
+    }
+  }
+}
+
+static void clear_symbols_for_collected()
+{
+  if (!during_set && codetab_tree)
+    check_clear_symbols(codetab_tree);
+}
+
+#endif
+
+#ifdef PLT_DUMP_JIT_RANGES
+
+static void *dump_symbol_range(void **t, int offset, uintptr_t base, void *val)
+{
+  int i, m;
+  void *p;
+
+  offset -= LOG_KEY_SIZE;
+
+  for (i = 0; i < KEY_COUNT; i++) {
+    p = t[i + NODE_HEADER_SIZE];
+    if (p) {
+      if (*(Scheme_Type *)p) {
+        int is_start;
+
+        m = (1 << (i + 1));
+        is_start = (((uintptr_t *)t)[NODE_STARTS_OFFSET] & m);
+
+        if (val && ((p != val) || is_start)) {
+          printf("%" PRIxPTR "\n", base + (((uintptr_t)i - 1) << offset)); /* end range */
+          val = NULL;
+        }
+
+        if (is_start) {
+          /* start new range */
+          val = p;
+          printf("%" PRIxPTR "-", base + ((uintptr_t)i << offset));
+          if (find_symbol(base + ((uintptr_t)i << offset)) != val)
+            printf("[oops]");
+        }
+      } else {
+        val = dump_symbol_range((void **)p, offset, base + ((uintptr_t)i << offset), val);
+      }
+    } else if (val) {
+      printf("%" PRIxPTR "\n", base + (((uintptr_t)i - 1) << offset)); /* end range */
+      val = NULL;
+    }
+  }
+
+  return val;
+}
+
+static void dump_symbol_ranges()
+{
+  (void)dump_symbol_range(codetab_tree, JIT_WORD_SIZE * 8, 0, NULL);
+
+#ifdef MZ_USE_PLACES
+  if (shared_codetab_tree)
+    (void)dump_symbol_range(shared_codetab_tree, JIT_WORD_SIZE * 8, 0, NULL);
+#endif
 }
 
 #endif

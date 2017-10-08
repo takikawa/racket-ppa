@@ -54,7 +54,7 @@
    used if the block codes up smaller that way (usually for quite small
    chunks), otherwise the dynamic method is used.  In the latter case, the
    codes are customized to the probabilities in the current block, and so
-   can code it much better than the pre-determined fixed codes.
+<   can code it much better than the pre-determined fixed codes.
  
    The Huffman codes themselves are decoded using a mutli-level table
    lookup, in order to maximize the speed of decoding plus the speed of
@@ -208,6 +208,12 @@
   (define-const BMAX 16) ; /* maximum bit length of any code (16 for explode) */
   (define-const N_MAX 288) ; /* maximum number of codes in any set */
 
+(define (read-byte/not-eof in)
+  (define b (read-byte in))
+  (when (eof-object? b)
+    (error 'inflate "unexpected end-of-file\n  stream: ~e" in))
+  b)
+
 (define (inflate input-port output-port)
 
   (define slide (make-bytes WSIZE))
@@ -255,9 +261,9 @@
 |#
 
   ;; We can't read the bytes outright, because we may
-  ;; look ahead. Assume that we need no more than 32 bytes
+  ;; look ahead. Assume that we need no more than 8 bytes
   ;; look ahead, and peek in 4096-byte blocks.
-  (define MAX-LOOKAHEAD 32)
+  (define MAX-LOOKAHEAD 8)
   (define BUFFER-SIZE 4096)
   (define buffer (make-bytes BUFFER-SIZE))
   (define buf-max 0) ; number of bytes in buffer
@@ -273,13 +279,21 @@
     (if (= buf-pos buf-max)
         (begin
           (when (positive? buf-max)
-            (read-bytes! buffer input-port 0 (- buf-max MAX-LOOKAHEAD))
-            ; (bytes-copy! buffer 0 buffer (- buf-max MAX-LOOKAHEAD) buf-max) 
-            (set! buf-pos MAX-LOOKAHEAD))
+            ;; Read consumed bytes, except for the last MAX-LOOKAHEAD bytes,
+            ;; which we might unwind:
+            (read-bytes! buffer input-port 0 (max 0 (- buf-max MAX-LOOKAHEAD)))
+            ;; Even though we won't actually use bytes that we "unwind",
+            ;; setting `buf-pos' to the number of unwound bytes lets us
+            ;; keep track of how much to not actually read at the end.
+            (set! buf-pos (min MAX-LOOKAHEAD buf-max)))
+          ;; Peek (not read) some available bytes:
           (let ([got (peek-bytes-avail! buffer buf-pos #f input-port buf-pos BUFFER-SIZE)])
             (if (eof-object? got)
-                (begin (bytes-set! buffer buf-pos 255)
-                       (set! buf-max (add1 buf-pos)))
+                ;; Treat an EOF as a -1 "byte":
+                (begin
+                  (bytes-set! buffer buf-pos 255)
+                  (set! buf-max (add1 buf-pos)))
+                ;; Got normal bytes:
                 (set! buf-max (+ buf-pos got))))
           (READBITS n))
         (let ([v (bytes-ref buffer buf-pos)])
@@ -842,7 +856,7 @@
 		    (set! bk (- bk 8))
 		    (set! buf-pos (sub1 buf-pos))
 		    (loop)))
-                (read-bytes! buffer input-port 0 buf-pos)
+                (read-bytes! buffer input-port 0 buf-pos) ; read consumed bytes
 		(flush-output wp)
 		#t = (void)))
 	  #f))))
@@ -856,14 +870,14 @@
 		   (arithmetic-shift d 24))]))
   
   (define (do-gunzip in out name-filter)
-    (let ([header1 (read-byte in)]
-	  [header2 (read-byte in)])
+    (let ([header1 (read-byte/not-eof in)]
+	  [header2 (read-byte/not-eof in)])
       (unless (and (= header1 #o037) (= header2 #o213))
 	(error 'gnu-unzip "bad header")))
-    (let ([compression-type (read-byte in)])
+    (let ([compression-type (read-byte/not-eof in)])
       (unless (= compression-type #o010)
 	(error 'gnu-unzip "unknown compression type")))
-    (let* ([flags (read-byte in)]
+    (let* ([flags (read-byte/not-eof in)]
 	   [ascii? (positive? (bitwise-and flags #b1))]
 	   [continuation? (positive? (bitwise-and flags #b10))]
 	   [has-extra-field? (positive? (bitwise-and flags #b100))]
@@ -874,23 +888,23 @@
 	(error 'gnu-unzip "cannot unzip encrypted file"))
       (when continuation?
 	(error 'gnu-unzip "cannot handle multi-part files"))
-      (let ([unix-mod-time (make-small-endian (read-byte in) (read-byte in)
-					      (read-byte in) (read-byte in))]
-	    [extra-flags (read-byte in)]
-	    [source-os (read-byte in)])
+      (let ([unix-mod-time (make-small-endian (read-byte/not-eof in) (read-byte/not-eof in)
+					      (read-byte/not-eof in) (read-byte/not-eof in))]
+	    [extra-flags (read-byte/not-eof in)]
+	    [source-os (read-byte/not-eof in)])
 	(when continuation?
-	  (let ([part-number (make-small-endian (read-byte in) (read-byte in))])
+	  (let ([part-number (make-small-endian (read-byte/not-eof in) (read-byte/not-eof in))])
 	    'ok))
 	(when has-extra-field?
-	  (let ([len (make-small-endian (read-byte in) (read-byte in))])
+	  (let ([len (make-small-endian (read-byte/not-eof in) (read-byte/not-eof in))])
 	    (let loop ([len len])
 	      (unless (zero? len)
-		(read-byte in)
+		(read-byte/not-eof in)
 		(loop (sub1 len))))))
 	(let* ([read-null-term-string
 		(lambda ()
 		  (let loop ([s null])
-		    (let ([r (read-byte in)])
+		    (let ([r (read-byte/not-eof in)])
 		      (if (zero? r)
 			  (list->bytes (reverse s))
 			  (loop (cons r s))))))]
@@ -900,7 +914,7 @@
 	  (when encrypted?
 	    (let loop ([n 12])
 	      (unless (zero? n)
-		(read-byte in)
+		(read-byte/not-eof in)
 		(loop (sub1 n)))))
 	  
 	  (let-values ([(out close?) (if out

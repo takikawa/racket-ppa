@@ -5,6 +5,8 @@
   
 (provide (all-defined-out))
 
+(define bind-at #f)
+
 (define error-syntax (make-parameter #f))
 (define raise-stx-err
   (case-lambda
@@ -29,17 +31,20 @@
 ;; check-tagged : (syntax-object -> X) -> syntax-object -> (cons (or symbol #f) X)
 (define (check-tagged check)
   (λ (o)
-    (syntax-case o (tag)
-      ((tag . s)
-       (syntax-case #'s ()
-         ((sym spec) 
-          (begin
-            (unless (symbol? (syntax-e #'sym))
-              (raise-stx-err "tag must be a symbol" #'sym))
-            (cons (syntax-e #'sym) (check #'spec))))
-         (_ (raise-stx-err "expected (tag <identifier> <syntax>)" #'s))))
-      (_ 
-       (cons #f (check o))))))
+    (let loop ([o o])
+      (syntax-case o (bind-at tag)
+        ((bind-at bind o)
+         (loop #'o))
+        ((tag . s)
+         (syntax-case #'s ()
+           ((sym spec) 
+            (begin
+              (unless (symbol? (syntax-e #'sym))
+                (raise-stx-err "tag must be a symbol" #'sym))
+              (cons (syntax-e #'sym) (check #'spec))))
+           (_ (raise-stx-err "expected (tag <identifier> <syntax>)" #'s))))
+        (_ 
+         (cons #f (check o)))))))
 
 ;; check-tagged-:-clause : syntax-object -> (cons identifier identifier)
 ;; ensures that clause matches (a : b) or (a : (tag t b))
@@ -56,8 +61,8 @@
 
 (define check-tagged-id (check-tagged check-id))
 
-;; check-spec-syntax : syntax-object boolean (syntax-object -> boolean) ->
-;; ensures that s matches spec.
+;; check-spec-syntax : syntax-object boolean (syntax-object -> boolean) -> prim-spec?
+;; ensures that s matches spec, returns the core prim-spec (which is usually an identifier)
 ;; tag-spec ::= spec
 ;;            | (tag symbol spec)
 ;; spec ::= prim-spec
@@ -69,12 +74,16 @@
   ((check-tagged (λ (s) (check-spec-syntax s import? prim-spec?))) s))
 
 (define (check-spec-syntax s import? prim-spec?)
-  (unless (prim-spec? s)
+  (cond
+   [(prim-spec? s) s]
+   [else
     (let ((ie (if import? 'import 'export)))
       (unless (stx-pair? s)
         (raise-stx-err (format "bad ~a spec" ie) s))
       (checked-syntax->list s)
-      (syntax-case s (prefix rename)
+      (syntax-case s (prefix rename bind-at)
+        ((bind-at any spec)
+         (check-spec-syntax #'spec import? prim-spec?))
         ((key . x)
          (or (free-identifier=? #'key #'only)
              (free-identifier=? #'key #'except))
@@ -124,7 +133,7 @@
             (syntax->list #'(clause ...)))
            (check-spec-syntax #'sub-s import? prim-spec?)))
         ((k . x)
-         (raise-stx-err (format "bad ~a-spec keyword" ie) #'k))))))
+         (raise-stx-err (format "bad ~a-spec keyword" ie) #'k))))]))
 
 ;; check-unit-syntax : syntax-object -> syntax-object
 ;; ensures that stx matches ((import i ...) (export e ...) b ...)

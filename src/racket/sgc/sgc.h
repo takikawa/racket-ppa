@@ -7,8 +7,9 @@ extern "C" {
 
 #define GC_PTR void*
 
-#ifdef WIN32
-# ifdef SGC_EXPORTS
+#if defined(WIN32) || defined(__CYGWIN32__)
+# if (defined(SGC_EXPORTS) || (defined(__CYGWIN32__) && !defined(MZ_USES_SHARED_LIB)) \
+      || defined(__MINGW32_DELAY_LOAD__))
 #  define SGC_EXTERN __declspec(dllexport)
 # else
 #  define SGC_EXTERN __declspec(dllimport)
@@ -19,8 +20,8 @@ extern "C" {
 
 SGC_EXTERN void GC_add_roots(void *start, void *end);
 
-SGC_EXTERN void (*GC_start_collect_callback)(void);
-SGC_EXTERN void (*GC_end_collect_callback)(void);
+SGC_EXTERN void (*GC_collect_start_callback)(void);
+SGC_EXTERN void (*GC_collect_end_callback)(void);
 SGC_EXTERN void (*GC_custom_finalize)(void);
 SGC_EXTERN void (*GC_out_of_memory)(void);
 
@@ -34,7 +35,8 @@ SGC_EXTERN void *GC_base(void *);
 
 SGC_EXTERN void GC_dump(void);
 
-SGC_EXTERN long GC_get_memory_use();
+SGC_EXTERN size_t GC_get_memory_use();
+SGC_EXTERN size_t GC_get_total_bytes();
 
 SGC_EXTERN void GC_end_stubborn_change(void *);
 
@@ -45,6 +47,7 @@ SGC_EXTERN void *GC_malloc_atomic(size_t size_in_bytes);
 SGC_EXTERN void *GC_malloc_stubborn(size_t size_in_bytes);
 SGC_EXTERN void *GC_malloc_uncollectable(size_t size_in_bytes);
 SGC_EXTERN void *GC_malloc_atomic_uncollectable(size_t size_in_bytes);
+SGC_EXTERN void *GC_malloc_code(size_t size_in_bytes);
 
 typedef void (*GC_collect_start_callback_Proc)(void);
 typedef void (*GC_collect_end_callback_Proc)(void);

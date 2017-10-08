@@ -1,8 +1,8 @@
-(module to-string mzscheme
-  (require mzlib/contract
+(module to-string racket/base
+  (require racket/contract/base
            syntax/stx)
   
-  (require mzlib/list)
+  (require racket/list)
 
   (define (syntax->string c)
     (let* ([s (open-output-string)]
@@ -14,7 +14,7 @@
         (let ([c (syntax-column c)]
               [l (syntax-line c)])
           (when (and l (l . > . line))
-            (newline)
+            (for-each (λ (_) (newline)) (range (- l line)))
             (set! line l)
             (init-line!))
           (when c
@@ -55,10 +55,14 @@
                  ((loop init-line!) i))]
               [(pair? (syntax-e c))
                (advance c init-line!)
-               (printf "(")
+               (define c-paren-shape (syntax-property c 'paren-shape))
+               (printf "~a" (or c-paren-shape #\())
                (set! col (+ col 1))
                (map (loop init-line!) (syntax->list c))
-               (printf ")")
+               (printf (case c-paren-shape
+                         [(#\[) "]"]
+                         [(#\{) "}"]
+                         [else ")"]))
                (set! col (+ col 1))]
               [(vector? (syntax-e c))
                (advance c init-line!)

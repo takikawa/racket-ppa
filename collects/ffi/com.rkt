@@ -14,7 +14,7 @@
          com-release
          com-object-type com-type? com-type=?
 
-         com-methods com-method-type com-invoke com-omit
+         com-methods com-method-type com-invoke com-omit com-omit?
          com-get-properties com-get-property-type com-get-property
          com-get-property*
          com-set-properties com-set-property-type com-set-property!
@@ -23,6 +23,9 @@
          com-register-event-callback
          com-unregister-event-callback
          com-make-event-executor com-event-executor?
+
+         com-enumeration-to-list
+         com-enumerate-to-list
 
          com-object-get-iunknown com-iunknown?
          com-object-get-idispatch com-idispatch?

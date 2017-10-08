@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2006-2013 PLT Design Inc.
+  Copyright (c) 2006-2017 PLT Design Inc.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -28,12 +28,21 @@
 #include "jit.h"
 
 static Scheme_Object *extract_one_cc_mark_to_tag(Scheme_Object *, Scheme_Object *, Scheme_Object *);
+static Scheme_Object *equal_as_bool(Scheme_Object *a, Scheme_Object *b);
 
 #define JITINLINE_TS_PROCS
 #ifndef CAN_INLINE_ALLOC
 # define JIT_BOX_TS_PROCS
 #endif
 #include "jit_ts.c"
+
+static Scheme_Object *equal_as_bool(Scheme_Object *a, Scheme_Object *b)
+{
+  if (scheme_equal(a, b))
+    return scheme_true;
+  else
+    return scheme_false;
+}
 
 #ifdef MZ_USE_FUTURES
 static Scheme_Object *ts_scheme_make_fsemaphore(int argc, Scheme_Object **argv) 
@@ -47,6 +56,14 @@ static Scheme_Object *ts_scheme_make_fsemaphore(int argc, Scheme_Object **argv)
 }
 #else
 # define ts_scheme_make_fsemaphore scheme_make_fsemaphore
+#endif
+
+#ifdef CAN_INLINE_ALLOC
+# ifdef JIT_USE_FP_OPS
+static void call_flrandom(Scheme_Object *rs) {
+  scheme_jit_save_fp = scheme_double_random(rs);
+}
+# endif
 #endif
 
 static Scheme_Object *extract_one_cc_mark_to_tag(Scheme_Object *mark_set, 
@@ -76,9 +93,10 @@ static Scheme_Object *cont_mark_set_first_try_fast(Scheme_Object *cms, Scheme_Ob
   Scheme_Object *nullableCms;
   Scheme_Object *prompt_tag; 
  
-  prompt_tag = SCHEME_PTR_VAL(scheme_default_prompt_tag);
   if (key == scheme_parameterization_key || key == scheme_break_enabled_key) 
     prompt_tag = NULL;
+  else
+    prompt_tag = SCHEME_PTR_VAL(scheme_default_prompt_tag);
 
   nullableCms = SCHEME_FALSEP(cms) ? NULL : cms;
   
@@ -165,11 +183,12 @@ static int inlineable_struct_prim(Scheme_Object *o, mz_jit_state *jitter, int ex
       return check_val_struct_prim(p, arity);
     } else if (SAME_TYPE(SCHEME_TYPE(o), scheme_local_type)) {
       Scheme_Object *p;
-      p = scheme_extract_closure_local(o, jitter, extra_push);
+      p = scheme_extract_closure_local(o, jitter, extra_push, 0);
       return check_val_struct_prim(p, arity);
     }
   }
-  return 0;
+
+  return check_val_struct_prim(o, 1);
 }
 
 int scheme_inlined_unary_prim(Scheme_Object *o, Scheme_Object *_app, mz_jit_state *jitter)
@@ -204,7 +223,7 @@ int scheme_inlined_nary_prim(Scheme_Object *o, Scheme_Object *_app, mz_jit_state
 
 static int generate_inlined_constant_test(mz_jit_state *jitter, Scheme_App2_Rec *app,
 					  Scheme_Object *cnst, Scheme_Object *cnst2, 
-					  Branch_Info *for_branch, int branch_short, int need_sync,
+					  Branch_Info *for_branch, int branch_short,
                                           int dest)
 /* de-sync'd ok */
 {
@@ -219,7 +238,7 @@ static int generate_inlined_constant_test(mz_jit_state *jitter, Scheme_App2_Rec 
 
   mz_runstack_unskipped(jitter, 1);
 
-  if (need_sync) mz_rs_sync();
+  mz_rs_sync();
 
   __START_SHORT_JUMPS__(branch_short);
 
@@ -229,11 +248,11 @@ static int generate_inlined_constant_test(mz_jit_state *jitter, Scheme_App2_Rec 
   }
 
   if (cnst2) {
-    ref2 = mz_beqi_p(jit_forward(), JIT_R0, cnst);
-    ref = mz_bnei_p(jit_forward(), JIT_R0, cnst2);
+    ref2 = jit_beqi_p(jit_forward(), JIT_R0, cnst);
+    ref = jit_bnei_p(jit_forward(), JIT_R0, cnst2);
     mz_patch_branch(ref2);
   } else {
-    ref = mz_bnei_p(jit_forward(), JIT_R0, cnst);
+    ref = jit_bnei_p(jit_forward(), JIT_R0, cnst);
   }
 
   if (for_branch) {
@@ -255,7 +274,7 @@ static int generate_inlined_constant_test(mz_jit_state *jitter, Scheme_App2_Rec 
 
 static int generate_inlined_type_test(mz_jit_state *jitter, Scheme_App2_Rec *app,
 				      Scheme_Type lo_ty, Scheme_Type hi_ty, int can_chaperone,
-				      Branch_Info *for_branch, int branch_short, int need_sync,
+				      Branch_Info *for_branch, int branch_short,
                                       int dest)
 {
   GC_CAN_IGNORE jit_insn *ref, *ref2, *ref3, *ref4, *ref5;
@@ -272,7 +291,7 @@ static int generate_inlined_type_test(mz_jit_state *jitter, Scheme_App2_Rec *app
 
   mz_runstack_unskipped(jitter, 1);
 
-  if (need_sync) mz_rs_sync();
+  mz_rs_sync();
 
   __START_SHORT_JUMPS__(branch_short);
 
@@ -308,11 +327,11 @@ static int generate_inlined_type_test(mz_jit_state *jitter, Scheme_App2_Rec *app
       __END_INNER_TINY__(branch_short);
     }
     if (lo_ty == hi_ty) {
-      ref3 = jit_bnei_p(jit_forward(), JIT_R1, lo_ty);
+      ref3 = jit_bnei_i(jit_forward(), JIT_R1, lo_ty);
       ref4 = NULL;
     } else {
-      ref3 = jit_blti_p(jit_forward(), JIT_R1, lo_ty);
-      ref4 = jit_bgti_p(jit_forward(), JIT_R1, hi_ty);
+      ref3 = jit_blti_i(jit_forward(), JIT_R1, lo_ty);
+      ref4 = jit_bgti_i(jit_forward(), JIT_R1, hi_ty);
     }
     if (can_chaperone < 0) {
       /* Make sure it's not a impersonator */
@@ -360,8 +379,167 @@ static int generate_inlined_type_test(mz_jit_state *jitter, Scheme_App2_Rec *app
   return 1;
 }
 
+static int generate_inlined_interned_char_test(mz_jit_state *jitter, Scheme_App2_Rec *app,
+                                            Branch_Info *for_branch, int branch_short,
+                                            int dest)
+{
+  GC_CAN_IGNORE jit_insn *ref1, *ref2, *ref3;
+  int reg_valid;
+
+  LOG_IT(("inlined interned-char?\n"));
+
+  mz_runstack_skipped(jitter, 1);
+
+  scheme_generate_non_tail(app->rand, jitter, 0, 1, 0);
+  CHECK_LIMIT();
+
+  mz_runstack_unskipped(jitter, 1);
+
+  mz_rs_sync();
+
+  __START_SHORT_JUMPS__(branch_short);
+
+  reg_valid = 0;
+  if (for_branch) {
+    reg_valid = mz_CURRENT_REG_STATUS_VALID();
+    scheme_prepare_branch_jump(jitter, for_branch);
+    CHECK_LIMIT();
+  }
+
+  /* Test that it's not a fixnum */
+  ref1 = jit_bmsi_ul(jit_forward(), JIT_R0, 0x1);
+  /* Test that it's a char */
+#ifdef jit_bxnei_s
+  ref2 = jit_bxnei_s(jit_forward(), JIT_R0, scheme_char_type);
+#else
+  jit_ldxi_s(JIT_R1, JIT_R0, &((Scheme_Object *)0x0)->type);
+  ref2 = jit_bnei_i(jit_forward(), JIT_R1, scheme_char_type);
+#endif
+  /* Test that it's < 256 */
+  jit_ldxi_s(JIT_R1, JIT_R0, &SCHEME_CHAR_VAL(0x0));
+  ref3 = jit_blti_i(jit_forward(), JIT_R1, 256);
+
+  if (for_branch) {
+    scheme_add_branch_false(for_branch, ref1);
+    scheme_add_branch_false(for_branch, ref2);
+    scheme_add_branch_false(for_branch, ref3);
+
+    /* Note that the test didn't disturb R0: */
+    mz_SET_R0_STATUS_VALID(reg_valid);
+
+    scheme_branch_for_true(jitter, for_branch);
+    CHECK_LIMIT();
+  } else {
+    GC_CAN_IGNORE jit_insn *ref_ucfinish;
+    (void)jit_movi_p(dest, scheme_true);
+    ref_ucfinish = jit_jmpi(jit_forward());
+    mz_patch_branch(ref1);
+    mz_patch_branch(ref2);
+    mz_patch_branch(ref3);
+    (void)jit_movi_p(dest, scheme_false);
+    mz_patch_ucbranch(ref_ucfinish);
+  }
+
+  __END_SHORT_JUMPS__(branch_short);
+
+  return 1;
+}
+
+static int generate_inlined_immutable_test(mz_jit_state *jitter, Scheme_App2_Rec *app,
+                                           Branch_Info *for_branch, int branch_short,
+                                           int dest)
+{
+  GC_CAN_IGNORE jit_insn *ref, *ref2, *ref3, *ref4, *ref5;
+  GC_CAN_IGNORE jit_insn *ref6, *ref7, *ref8, *ref9;
+
+  LOG_IT(("inlined %s\n", ((Scheme_Primitive_Proc *)app->rator)->name));
+
+  mz_runstack_skipped(jitter, 1);
+
+  scheme_generate_non_tail(app->rand, jitter, 0, 1, 0);
+  CHECK_LIMIT();
+
+  mz_runstack_unskipped(jitter, 1);
+
+  mz_rs_sync();
+
+  __START_SHORT_JUMPS__(branch_short);
+
+  /* Note that we distrurb R0 in the case of a chaperone, so don't try
+     to save its status for a branch. */
+
+  if (for_branch) {
+    scheme_prepare_branch_jump(jitter, for_branch);
+    CHECK_LIMIT();
+  }
+
+  ref = jit_bmsi_ul(jit_forward(), JIT_R0, 0x1);
+  jit_ldxi_s(JIT_R1, JIT_R0, &((Scheme_Object *)0x0)->type);
+  __START_INNER_TINY__(branch_short);
+  ref3 = jit_bnei_i(jit_forward(), JIT_R1, scheme_chaperone_type);
+  jit_ldxi_p(JIT_R0, JIT_R0, (intptr_t)&((Scheme_Chaperone *)0x0)->val);
+  jit_ldxi_s(JIT_R1, JIT_R0, &((Scheme_Object *)0x0)->type);
+  mz_patch_branch(ref3);
+  __END_INNER_TINY__(branch_short);
+  CHECK_LIMIT();
+
+  /* check for immutable hash: */
+  __START_INNER_TINY__(branch_short);
+  ref3 = jit_blti_i(jit_forward(), JIT_R1, scheme_hash_tree_type);
+  __END_INNER_TINY__(branch_short);
+  ref4 = jit_blei_i(jit_forward(), JIT_R1, scheme_hash_tree_indirection_type);
+  __START_INNER_TINY__(branch_short);
+  mz_patch_branch(ref3);
+  __END_INNER_TINY__(branch_short);
+  
+  ref5 = jit_beqi_i(jit_forward(), JIT_R1, scheme_vector_type);
+  ref6 = jit_beqi_i(jit_forward(), JIT_R1, scheme_char_string_type);
+  ref7 = jit_beqi_i(jit_forward(), JIT_R1, scheme_byte_string_type);
+  ref8 = jit_bnei_i(jit_forward(), JIT_R1, scheme_box_type);
+  CHECK_LIMIT();
+    
+  /* still need to check for "immutable" flag */
+  mz_patch_branch(ref5);
+  mz_patch_branch(ref6);
+  mz_patch_branch(ref7);
+  jit_ldxi_s(JIT_R2, JIT_R0, &MZ_OPT_HASH_KEY((Scheme_Inclhash_Object *)0x0));
+  ref9 = jit_bmci_ul(jit_forward(), JIT_R2, 0x1);
+
+  /* is immutable if we get here */
+  mz_patch_branch(ref4);
+  
+  if (for_branch) {
+    scheme_add_branch_false(for_branch, ref);
+    scheme_add_branch_false(for_branch, ref8);
+    scheme_add_branch_false(for_branch, ref9);
+
+    scheme_branch_for_true(jitter, for_branch);
+  } else {
+    (void)jit_movi_p(dest, scheme_true);
+    __START_INNER_TINY__(branch_short);
+    ref2 = jit_jmpi(jit_forward());
+    __END_INNER_TINY__(branch_short);
+  
+    mz_patch_branch(ref);
+    mz_patch_branch(ref8);
+    mz_patch_branch(ref9);
+
+    (void)jit_movi_p(dest, scheme_false);
+    __START_INNER_TINY__(branch_short);
+    mz_patch_ucbranch(ref2);
+    __END_INNER_TINY__(branch_short);
+  }
+
+  __END_SHORT_JUMPS__(branch_short);
+
+  return 1;
+}
+
 static Scheme_Object *extract_struct_constant(mz_jit_state *jitter, Scheme_Object *rator)
 {
+  if (SCHEME_PROCP(rator))
+    return rator;
+
   if (SAME_TYPE(SCHEME_TYPE(rator), scheme_toplevel_type)
       && (SCHEME_TOPLEVEL_FLAGS(rator) & SCHEME_TOPLEVEL_FLAGS_MASK) >= SCHEME_TOPLEVEL_CONST) {
     rator = scheme_extract_global(rator, jitter->nc, 0);
@@ -392,7 +570,7 @@ static int generate_inlined_struct_op(int kind, mz_jit_state *jitter,
     args[0] = rator;
     args[1] = rand;
     args[2] = rand2;
-    scheme_generate_app(NULL, args, 2, jitter, 0, 0, 0, 1); /* sync'd below */
+    scheme_generate_app(NULL, args, 2, 2, jitter, 0, 0, 0, 1); /* sync'd below */
     CHECK_LIMIT();
     jit_movr_p(JIT_R0, JIT_V1);
     mz_rs_ldr(JIT_R1);
@@ -412,7 +590,9 @@ static int generate_inlined_struct_op(int kind, mz_jit_state *jitter,
     if (inline_rator && (kind != INLINE_STRUCT_PROC_PRED)) {
       __START_SHORT_JUMPS__(1);
       ref = jit_bmci_ul(jit_forward(), JIT_R1, 0x1);
-      refslow = _jit.x.pc;
+      if (kind == INLINE_STRUCT_PROC_SET)
+        scheme_save_struct_temp(jitter, JIT_V1); /* undone immediately, but needed for fall-through */
+      refslow = jit_get_ip();
       if (kind == INLINE_STRUCT_PROC_SET)
         scheme_restore_struct_temp(jitter, JIT_V1);
       __END_SHORT_JUMPS__(1);
@@ -498,9 +678,11 @@ static int generate_inlined_struct_op(int kind, mz_jit_state *jitter,
   }
 
   if (inline_rator) {
-    int pos, tpos, jkind;
+    int pos, tpos, jkind, authentic;
 
     tpos = ((Scheme_Struct_Type *)((Scheme_Primitive_Closure *)inline_rator)->val[0])->name_pos;
+    authentic = ((Scheme_Struct_Type *)((Scheme_Primitive_Closure *)inline_rator)->val[0])->authentic;
+
     if (kind == INLINE_STRUCT_PROC_PRED) {
       pos = 0;
     } else {
@@ -510,7 +692,7 @@ static int generate_inlined_struct_op(int kind, mz_jit_state *jitter,
     if (ref) {
       __START_SHORT_JUMPS__(1);
       ref2 = jit_jmpi(jit_forward());
-      mz_patch_ucbranch(ref);
+      mz_patch_branch(ref);
       __END_SHORT_JUMPS__(1);
     } else
       ref2 = NULL;
@@ -528,7 +710,8 @@ static int generate_inlined_struct_op(int kind, mz_jit_state *jitter,
                               for_branch, branch_short,
                               result_ignored,
                               0, 0,
-                              tpos, pos, 
+                              tpos, pos,
+                              authentic,
                               0, refslow, refslow, NULL, NULL);
     CHECK_LIMIT();
 
@@ -593,6 +776,49 @@ static Scheme_Object *alloc_structure(Scheme_Object *_stype, int argc)
   return (Scheme_Object *)inst;
 }
 
+static Scheme_Object *checked_make_vector(int argc)
+  XFORM_SKIP_PROC
+/* Arguments on runstack */
+{
+#ifdef MZ_USE_FUTURES
+  Scheme_Object *vec, *val, *c = MZ_RUNSTACK[0];
+
+  if (SCHEME_INTP(c)
+      && (SCHEME_INT_VAL(c) >= 0)
+      /* Upper bound ensures that we don't have to deal with overflow: */
+      && (SCHEME_INT_VAL(c) < 0x1000000)) {
+    /* In a future thread, we can try to call scheme_malloc_tagged() directory,
+       but it might fail and return NULL */
+    intptr_t count = SCHEME_INT_VAL(c), i, size;
+    size = (sizeof(Scheme_Vector)
+            + ((count - mzFLEX_DELTA) * sizeof(Scheme_Object *)));
+    if ((count < 1024) || scheme_use_rtcall)
+      vec = scheme_malloc_tagged(size);
+    else
+      vec = scheme_malloc_fail_ok(scheme_malloc_tagged, size);
+    if (vec) {
+      vec->type = scheme_vector_type;
+      SCHEME_VEC_SIZE(vec) = count;
+    } else {
+      /* Must be in a future thread */
+      vec = scheme_rtcall_allocate_vector(count);
+      if (!vec) {
+        /* Unusual failure --- maybe "out of memory" */
+        return ts_scheme_checked_make_vector(argc, MZ_RUNSTACK);
+      }
+    }
+
+    val = ((argc > 1) ? MZ_RUNSTACK[1] : scheme_make_integer(0));
+    for (i = 0; i < count; i++) {
+      SCHEME_VEC_ELS(vec)[i] = val;
+    }
+
+    return vec;
+  } else
+#endif
+    return ts_scheme_checked_make_vector(argc, MZ_RUNSTACK);
+}
+
 Scheme_Structure *scheme_jit_allocate_structure(int argc, Scheme_Struct_Type *stype)
 {
   Scheme_Structure *inst;
@@ -612,7 +838,7 @@ static int generate_inlined_nary_struct_op(int kind, mz_jit_state *jitter,
 /* de-sync'd ok; for branch, sync'd before */
 {
   /* generate code to evaluate the arguments */
-  scheme_generate_app(app, NULL, app->num_args, jitter, 0, 0, 0, 1);
+  scheme_generate_app(app, NULL, app->num_args, app->num_args, jitter, 0, 0, 0, 1);
   CHECK_LIMIT();
   mz_rs_sync();
 
@@ -640,7 +866,8 @@ int scheme_generate_struct_alloc(mz_jit_state *jitter, int num_args,
    For nary case, args on are on runstack.
    If num_args is -1, nary and R1 has the count.*/
 {
-  GC_CAN_IGNORE jit_insn *ref, *refslow, *refrts, *refdone;
+  GC_CAN_IGNORE jit_insn *ref, *refslow, *refdone;
+  GC_CAN_IGNORE jit_insn *refrts USED_ONLY_FOR_FUTURES;
   int always_slow = 0;
 
 #ifndef CAN_INLINE_ALLOC
@@ -662,7 +889,7 @@ int scheme_generate_struct_alloc(mz_jit_state *jitter, int num_args,
 
   /* Slow path: non-struct-prop proc, or argument type is
      bad for a getter. */
-  refslow = _jit.x.pc;
+  refslow = jit_get_ip();
   if (inline_slow) {
     if (num_args == 1) {
       jit_subi_p(JIT_RUNSTACK, JIT_RUNSTACK, WORDS_TO_BYTES(1));
@@ -867,7 +1094,7 @@ static int is_cXr_prim(const char *name)
 }
 
 static int generate_inlined_constant_varref_test(mz_jit_state *jitter, Scheme_Object *obj,
-                                                 Branch_Info *for_branch, int branch_short, int need_sync,
+                                                 Branch_Info *for_branch, int branch_short,
                                                  int dest)
 {
   GC_CAN_IGNORE jit_insn *ref1, *ref2;
@@ -892,7 +1119,7 @@ static int generate_inlined_constant_varref_test(mz_jit_state *jitter, Scheme_Ob
   
   mz_runstack_unskipped(jitter, 1);
 
-  if (need_sync) mz_rs_sync();
+  mz_rs_sync();
 
   __START_SHORT_JUMPS__(branch_short);
   
@@ -927,13 +1154,19 @@ static int generate_inlined_constant_varref_test(mz_jit_state *jitter, Scheme_Ob
 static int generate_vector_alloc(mz_jit_state *jitter, Scheme_Object *rator,
                                  Scheme_App_Rec *app, Scheme_App2_Rec *app2, Scheme_App3_Rec *app3,
                                  int dest);
+static int generate_make_vector_alloc(mz_jit_state *jitter,
+                                      Scheme_Object *rator,
+                                      Scheme_Object *rand1, Scheme_Object *rand2,
+                                      int dest);
 
 int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, int is_tail, int multi_ok, 
-				  Branch_Info *for_branch, int branch_short, int need_sync, int result_ignored,
+				  Branch_Info *for_branch, int branch_short, int result_ignored,
                                   int dest)
 /* de-sync's, unless branch */
 {
   Scheme_Object *rator = app->rator;
+
+  rator = scheme_specialize_to_constant(rator, jitter, 1);
 
   {
     int k;
@@ -957,7 +1190,7 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
 
   if (SAME_OBJ(rator, scheme_varref_const_p_proc)
       && SAME_TYPE(SCHEME_TYPE(app->rand), scheme_varref_form_type)) {
-    generate_inlined_constant_varref_test(jitter, app->rand, for_branch, branch_short, need_sync, dest);
+    generate_inlined_constant_varref_test(jitter, app->rand, for_branch, branch_short, dest);
     return 1;
   }
 
@@ -970,82 +1203,91 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
   scheme_direct_call_count++;
 
   if (IS_NAMED_PRIM(rator, "not")) {
-    generate_inlined_constant_test(jitter, app, scheme_false, NULL, for_branch, branch_short, need_sync, dest);
+    generate_inlined_constant_test(jitter, app, scheme_false, NULL, for_branch, branch_short, dest);
+    return 1;
+  } else if (IS_NAMED_PRIM(rator, "true-object?")) {
+    generate_inlined_constant_test(jitter, app, scheme_true, NULL, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "null?")) {
-    generate_inlined_constant_test(jitter, app, scheme_null, NULL, for_branch, branch_short, need_sync, dest);
+    generate_inlined_constant_test(jitter, app, scheme_null, NULL, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "void?")) {
-    generate_inlined_constant_test(jitter, app, scheme_void, NULL, for_branch, branch_short, need_sync, dest);
+    generate_inlined_constant_test(jitter, app, scheme_void, NULL, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "pair?")) {
-    generate_inlined_type_test(jitter, app, scheme_pair_type, scheme_pair_type, 0, for_branch, branch_short, need_sync, dest);
+    generate_inlined_type_test(jitter, app, scheme_pair_type, scheme_pair_type, 0, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "mpair?")) {
-    generate_inlined_type_test(jitter, app, scheme_mutable_pair_type, scheme_mutable_pair_type, 0, for_branch, branch_short, need_sync, dest);
+    generate_inlined_type_test(jitter, app, scheme_mutable_pair_type, scheme_mutable_pair_type, 0, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "symbol?")) {
-    generate_inlined_type_test(jitter, app, scheme_symbol_type, scheme_symbol_type, 0, for_branch, branch_short, need_sync, dest);
+    generate_inlined_type_test(jitter, app, scheme_symbol_type, scheme_symbol_type, 0, for_branch, branch_short, dest);
+    return 1;
+   } else if (IS_NAMED_PRIM(rator, "keyword?")) {
+    generate_inlined_type_test(jitter, app, scheme_keyword_type, scheme_keyword_type, 0, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "syntax?")) {
-    generate_inlined_type_test(jitter, app, scheme_stx_type, scheme_stx_type, 0, for_branch, branch_short, need_sync, dest);
+    generate_inlined_type_test(jitter, app, scheme_stx_type, scheme_stx_type, 0, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "char?")) {
-    generate_inlined_type_test(jitter, app, scheme_char_type, scheme_char_type, 0, for_branch, branch_short, need_sync, dest);
+    generate_inlined_type_test(jitter, app, scheme_char_type, scheme_char_type, 0, for_branch, branch_short, dest);
+    return 1;
+  } else if (IS_NAMED_PRIM(rator, "interned-char?")) {
+    generate_inlined_interned_char_test(jitter, app, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "boolean?")) {
-    generate_inlined_constant_test(jitter, app, scheme_false, scheme_true, for_branch, branch_short, need_sync, dest);
+    generate_inlined_constant_test(jitter, app, scheme_false, scheme_true, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "number?")) {
-    generate_inlined_type_test(jitter, app, scheme_integer_type, scheme_complex_type, 0, for_branch, branch_short, need_sync, dest);
+    generate_inlined_type_test(jitter, app, scheme_integer_type, scheme_complex_type, 0, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "real?")) {
-    generate_inlined_type_test(jitter, app, scheme_integer_type, scheme_double_type, 0, for_branch, branch_short, need_sync, dest);
+    generate_inlined_type_test(jitter, app, scheme_integer_type, scheme_double_type, 0, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "exact-integer?")) {
-    generate_inlined_type_test(jitter, app, scheme_integer_type, scheme_bignum_type, 0, for_branch, branch_short, need_sync, dest);
+    generate_inlined_type_test(jitter, app, scheme_integer_type, scheme_bignum_type, 0, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "fixnum?")) {
-    generate_inlined_type_test(jitter, app, scheme_integer_type, scheme_integer_type, 0, for_branch, branch_short, need_sync, dest);
+    generate_inlined_type_test(jitter, app, scheme_integer_type, scheme_integer_type, 0, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "inexact-real?")) {
-    generate_inlined_type_test(jitter, app, SCHEME_FLOAT_TYPE, scheme_double_type, 0, for_branch, branch_short, need_sync, dest);
+    generate_inlined_type_test(jitter, app, SCHEME_FLOAT_TYPE, scheme_double_type, 0, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "flonum?")) {
-    generate_inlined_type_test(jitter, app, scheme_double_type, scheme_double_type, 0, for_branch, branch_short, need_sync, dest);
+    generate_inlined_type_test(jitter, app, scheme_double_type, scheme_double_type, 0, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "extflonum?")) {
-    generate_inlined_type_test(jitter, app, scheme_long_double_type, scheme_long_double_type, 0, for_branch, branch_short, need_sync, dest);
+    generate_inlined_type_test(jitter, app, scheme_long_double_type, scheme_long_double_type, 0, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "single-flonum?")) {
-    generate_inlined_type_test(jitter, app, SCHEME_FLOAT_TYPE, SCHEME_FLOAT_TYPE, 0, for_branch, branch_short, need_sync, dest);
+    generate_inlined_type_test(jitter, app, SCHEME_FLOAT_TYPE, SCHEME_FLOAT_TYPE, 0, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "procedure?")) {
-    generate_inlined_type_test(jitter, app, scheme_prim_type, scheme_proc_chaperone_type, 1, for_branch, branch_short, need_sync, dest);
+    generate_inlined_type_test(jitter, app, scheme_prim_type, scheme_proc_chaperone_type, 1, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "chaperone?")) {
-    generate_inlined_type_test(jitter, app, scheme_proc_chaperone_type, scheme_chaperone_type, -1, for_branch, branch_short, need_sync, dest);
+    generate_inlined_type_test(jitter, app, scheme_proc_chaperone_type, scheme_chaperone_type, -1, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "impersonator?")) {
-    generate_inlined_type_test(jitter, app, scheme_proc_chaperone_type, scheme_chaperone_type, 0, for_branch, branch_short, need_sync, dest);
+    generate_inlined_type_test(jitter, app, scheme_proc_chaperone_type, scheme_chaperone_type, 0, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "vector?")) {
-    generate_inlined_type_test(jitter, app, scheme_vector_type, scheme_vector_type, 1, for_branch, branch_short, need_sync, dest);
+    generate_inlined_type_test(jitter, app, scheme_vector_type, scheme_vector_type, 1, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "box?")) {
-    generate_inlined_type_test(jitter, app, scheme_box_type, scheme_box_type, 1, for_branch, branch_short, need_sync, dest);
+    generate_inlined_type_test(jitter, app, scheme_box_type, scheme_box_type, 1, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "string?")) {
-    generate_inlined_type_test(jitter, app, scheme_char_string_type, scheme_char_string_type, 0, for_branch, branch_short, need_sync, dest);
+    generate_inlined_type_test(jitter, app, scheme_char_string_type, scheme_char_string_type, 0, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "bytes?")) {
-    generate_inlined_type_test(jitter, app, scheme_byte_string_type, scheme_byte_string_type, 0, for_branch, branch_short, need_sync, dest);
+    generate_inlined_type_test(jitter, app, scheme_byte_string_type, scheme_byte_string_type, 0, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "path?")) {
-    generate_inlined_type_test(jitter, app, SCHEME_PLATFORM_PATH_KIND, SCHEME_PLATFORM_PATH_KIND, 0, for_branch, branch_short, need_sync, dest);
+    generate_inlined_type_test(jitter, app, SCHEME_PLATFORM_PATH_KIND, SCHEME_PLATFORM_PATH_KIND, 0, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "eof-object?")) {
-    generate_inlined_constant_test(jitter, app, scheme_eof, NULL, for_branch, branch_short, need_sync, dest);
+    generate_inlined_constant_test(jitter, app, scheme_eof, NULL, for_branch, branch_short, dest);
     return 1;
   } else if (IS_NAMED_PRIM(rator, "zero?")) {
     scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 0, CMP_EQUAL, 0, for_branch, branch_short, 0, 0, NULL, dest);
@@ -1062,8 +1304,16 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
   } else if (IS_NAMED_PRIM(rator, "odd?")) {
     scheme_generate_arith(jitter, rator, app->rand, NULL, 1, 0, CMP_ODDP, 0, for_branch, branch_short, 0, 0, NULL, dest);
     return 1;
-  } else if (IS_NAMED_PRIM(rator, "list?")) {
+  } else if (IS_NAMED_PRIM(rator, "immutable?")) {
+    generate_inlined_immutable_test(jitter, app, for_branch, branch_short, dest);
+    return 1;
+  } else if (IS_NAMED_PRIM(rator, "list?")
+             || IS_NAMED_PRIM(rator, "list-pair?")) {
+    int for_list_pair = 0;
     GC_CAN_IGNORE jit_insn *ref0, *ref1, *ref3, *ref4, *ref6;
+
+    if (IS_NAMED_PRIM(rator, "list-pair?"))
+      for_list_pair = 1;
 
     mz_runstack_skipped(jitter, 1);
     
@@ -1072,7 +1322,7 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
 
     mz_runstack_unskipped(jitter, 1);
 
-    if (need_sync) mz_rs_sync();
+    mz_rs_sync();
 
     __START_SHORT_JUMPS__(branch_short);
 
@@ -1083,8 +1333,9 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
 
     ref1 = jit_bmsi_ul(jit_forward(), JIT_R0, 0x1);
     jit_ldxi_s(JIT_R1, JIT_R0, &((Scheme_Object *)0x0)->type);
-    ref3 = jit_beqi_p(jit_forward(), JIT_R1, scheme_null_type);
-    ref4 = jit_bnei_p(jit_forward(), JIT_R1, scheme_pair_type);
+    /* The difference between list? and list-pair? is only for null. */
+    ref3 = jit_beqi_i(jit_forward(), JIT_R1, scheme_null_type);
+    ref4 = jit_bnei_i(jit_forward(), JIT_R1, scheme_pair_type);
     CHECK_LIMIT();
 
     /* We have a pair. Optimistically check for PAIR_IS_LIST: */
@@ -1095,11 +1346,14 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
       ref0 = jit_patchable_movi_p(JIT_V1, jit_forward());
       (void)jit_calli(sjc.list_p_branch_code);
 
-      mz_patch_branch(ref3);
+      if (!for_list_pair)
+        mz_patch_branch(ref3);
       mz_patch_branch(ref6);
 
       scheme_add_branch_false_movi(for_branch, ref0);
       scheme_add_branch_false(for_branch, ref1);
+      if (for_list_pair)
+        scheme_add_branch_false(for_branch, ref3);
       scheme_add_branch_false(for_branch, ref4);
       scheme_branch_for_true(jitter, for_branch);
     } else {
@@ -1111,10 +1365,13 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
 
       mz_patch_branch(ref1);
       mz_patch_branch(ref4);
+      if (for_list_pair)
+        mz_patch_branch(ref3);
       (void)jit_movi_p(dest, scheme_false);
       ref1 = jit_jmpi(jit_forward());
       
-      mz_patch_branch(ref3);
+      if (!for_list_pair)
+        mz_patch_branch(ref3);
       mz_patch_branch(ref6);
       (void)jit_movi_p(dest, scheme_true);
 
@@ -1139,7 +1396,7 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
 
     mz_runstack_unskipped(jitter, 1);
 
-    if (need_sync) mz_rs_sync();
+    mz_rs_sync();
 
     if (for_branch) {
       scheme_prepare_branch_jump(jitter, for_branch);
@@ -1225,7 +1482,7 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
         if (!sjc.skip_checks) {
           if (!i) {
             ref = jit_bmci_ul(jit_forward(), JIT_R0, 0x1);
-            reffail = _jit.x.pc;
+            reffail = jit_get_ip();
             __END_TINY_JUMPS__(1);
             if (steps == 1) {
               if (name[1] == 'a') {
@@ -1290,7 +1547,7 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
       __START_TINY_JUMPS__(1);
 
       ref = jit_bmci_ul(jit_forward(), JIT_R0, 0x1);
-      reffail = _jit.x.pc;
+      reffail = jit_get_ip();
       __END_TINY_JUMPS__(1);
       if (name[2] == 'a') {
         (void)jit_calli(sjc.bad_mcar_code);
@@ -1357,7 +1614,7 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
                                      || IS_NAMED_PRIM(rator, "unsafe-extflvector-length"))) {
       GC_CAN_IGNORE jit_insn *reffail, *ref;
       int unsafe = 0, for_fl = 0, for_fx = 0, can_chaperone = 0;
-      int extfl = 0;
+      int extfl USED_ONLY_IF_LONG_DOUBLE = 0;
 
       if (IS_NAMED_PRIM(rator, "unsafe-vector*-length")
           || IS_NAMED_PRIM(rator, "unsafe-fxvector-length")) {
@@ -1399,7 +1656,7 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
         ref = jit_bmci_ul(jit_forward(), JIT_R0, 0x1);
         __END_TINY_JUMPS__(1);
         
-        reffail = _jit.x.pc;
+        reffail = jit_get_ip();
         if (for_fl) {
           MZ_FPUSEL_STMT(extfl,
                          (void)jit_calli(sjc.bad_extflvector_length_code),
@@ -1442,8 +1699,22 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
       jit_fixnum_l(dest, JIT_R0);
             
       return 1;
-    } else if (IS_NAMED_PRIM(rator, "unsafe-string-length")
+    } else if (IS_NAMED_PRIM(rator, "string-length")
+               || IS_NAMED_PRIM(rator, "bytes-length")
+               || IS_NAMED_PRIM(rator, "unsafe-string-length")
                || IS_NAMED_PRIM(rator, "unsafe-bytes-length")) {
+      GC_CAN_IGNORE jit_insn *reffail, *ref;
+      int unsafe = 0, for_string = 0;
+
+      if (IS_NAMED_PRIM(rator, "unsafe-string-length")
+          || IS_NAMED_PRIM(rator, "unsafe-bytes-length")) {
+        unsafe = 1;
+      }
+      if (IS_NAMED_PRIM(rator, "string-length")
+          || IS_NAMED_PRIM(rator, "unsafe-string-length")) {
+        for_string = 1;
+      }
+      
       LOG_IT(("inlined string-length\n"));
 
       mz_runstack_skipped(jitter, 1);
@@ -1453,7 +1724,30 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
 
       mz_runstack_unskipped(jitter, 1);
 
-      if (IS_NAMED_PRIM(rator, "unsafe-string-length"))
+      if (!unsafe) {
+        mz_rs_sync_fail_branch();
+
+        __START_TINY_JUMPS__(1);
+        ref = jit_bmci_ul(jit_forward(), JIT_R0, 0x1);
+        __END_TINY_JUMPS__(1);
+
+        reffail = jit_get_ip();
+        if (for_string)
+          (void)jit_calli(sjc.bad_string_length_code);
+        else
+          (void)jit_calli(sjc.bad_bytes_length_code);
+
+        __START_TINY_JUMPS__(1);
+         mz_patch_branch(ref);
+        if (for_string)
+          (void)mz_bnei_t(reffail, JIT_R0, scheme_char_string_type, JIT_R1);
+        else
+          (void)mz_bnei_t(reffail, JIT_R0, scheme_byte_string_type, JIT_R1);
+        __END_TINY_JUMPS__(1);
+      }
+      CHECK_LIMIT();
+
+      if (for_string)
         (void)jit_ldxi_l(JIT_R0, JIT_R0, &SCHEME_CHAR_STRLEN_VAL(0x0));
       else
         (void)jit_ldxi_l(JIT_R0, JIT_R0, &SCHEME_BYTE_STRLEN_VAL(0x0));
@@ -1478,7 +1772,7 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
       ref = jit_bmci_ul(jit_forward(), JIT_R0, 0x1);
       __END_TINY_JUMPS__(1);
 
-      reffail = _jit.x.pc;
+      reffail = jit_get_ip();
       (void)jit_calli(sjc.unbox_code);
       jit_movr_p(dest, JIT_R0);
 
@@ -1581,7 +1875,7 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
       __START_TINY_JUMPS__(1);
 
       ref = jit_bmci_ul(jit_forward(), JIT_R0, 0x1);
-      reffail = _jit.x.pc;
+      reffail = jit_get_ip();
       __END_TINY_JUMPS__(1);
       if (name[0] == 'i') {
         (void)jit_calli(sjc.imag_part_code);
@@ -1660,6 +1954,40 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
         scheme_generate_unboxing(jitter, dest);
       
       return 1;
+#ifdef CAN_INLINE_ALLOC
+# ifdef JIT_USE_FP_OPS
+    } else if (IS_NAMED_PRIM(rator, "unsafe-flrandom")) {
+      mz_jit_unbox_state ubs;
+
+      LOG_IT(("inlined unsafe-flrandom\n"));
+      
+      mz_runstack_skipped(jitter, 1);
+
+      scheme_mz_unbox_save(jitter, &ubs);
+
+      scheme_generate_non_tail(app->rand, jitter, 0, 1, 0);
+      CHECK_LIMIT();
+
+      scheme_mz_unbox_restore(jitter, &ubs);
+
+      mz_runstack_unskipped(jitter, 1);
+
+      mz_prepare(1);
+      jit_pusharg_p(JIT_R0);
+      (void)mz_finish(call_flrandom);
+      (void)mz_tl_ldi_d_fppush(JIT_FPR0, tl_scheme_jit_save_fp, JIT_R2);
+      CHECK_LIMIT();
+      
+      if (jitter->unbox) {
+        jitter->unbox_depth++;
+      } else {
+        scheme_generate_alloc_double(jitter, 0, dest);
+        CHECK_LIMIT();
+      }
+      
+      return 1;
+# endif
+#endif
     } else if (IS_NAMED_PRIM(rator, "add1")) {
       scheme_generate_arith(jitter, rator, app->rand, NULL, 1, ARITH_ADD, 0, 1, NULL, 1, 0, 0, NULL, dest);
       return 1;
@@ -1785,6 +2113,8 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
     } else if (IS_NAMED_PRIM(rator, "vector-immutable")
                || IS_NAMED_PRIM(rator, "vector")) {
       return generate_vector_alloc(jitter, rator, NULL, app, NULL, dest);
+    } else if (IS_NAMED_PRIM(rator, "make-vector")) {
+      return generate_make_vector_alloc(jitter, rator, app->rand, NULL, dest);
     } else if (IS_NAMED_PRIM(rator, "list*")
                || IS_NAMED_PRIM(rator, "values")) {
       /* on a single argument, `list*' or `values' is identity */
@@ -1823,7 +2153,7 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
       mz_prepare(1);
       jit_pusharg_p(JIT_R0);
       {
-        GC_CAN_IGNORE jit_insn *refr;
+        GC_CAN_IGNORE jit_insn *refr USED_ONLY_FOR_FUTURES;
         (void)mz_finish_lwe(ts_scheme_box, refr);
       }
       jit_retval(dest);
@@ -1843,11 +2173,10 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
       __START_TINY_JUMPS__(1);
 
       ref = jit_bmci_ul(jit_forward(), JIT_R0, 0x1);
-      reffail = _jit.x.pc;
+      reffail = jit_get_ip();
       __END_TINY_JUMPS__(1);
       (void)jit_calli(sjc.bad_char_to_integer_code);
       __START_TINY_JUMPS__(1);
-      jit_movr_p(dest, JIT_R0);
       mz_patch_branch(ref);
       (void)mz_bnei_t(reffail, JIT_R0, scheme_char_type, JIT_R1);
       __END_TINY_JUMPS__(1);
@@ -1871,15 +2200,15 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
       __START_TINY_JUMPS__(1);
 
       ref = jit_bmsi_ul(jit_forward(), JIT_R0, 0x1);
-      refslow = _jit.x.pc;
+      refslow = jit_get_ip();
       __END_TINY_JUMPS__(1);
       (void)jit_calli(sjc.slow_integer_to_char_code);
       __START_TINY_JUMPS__(1);
       jit_movr_p(dest, JIT_R0);
       refdone = jit_jmpi(jit_forward());
       mz_patch_branch(ref);
-      (void)jit_blti_l(refslow, JIT_R0, scheme_make_integer(0));
-      (void)jit_bgti_l(refslow, JIT_R0, scheme_make_integer(255));
+      (void)jit_blti_p(refslow, JIT_R0, scheme_make_integer(0));
+      (void)jit_bgti_p(refslow, JIT_R0, scheme_make_integer(255));
 
       jit_rshi_l(JIT_R0, JIT_R0, 1);
       jit_lshi_l(JIT_R2, JIT_R0, JIT_LOG_WORD_SIZE);
@@ -1891,11 +2220,44 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
       __END_TINY_JUMPS__(1);
       
       return 1;
+    } else if (IS_NAMED_PRIM(rator, "cpointer-tag")) {
+      GC_CAN_IGNORE jit_insn *ref, *refslow, *refdone;
+
+      mz_runstack_skipped(jitter, 1);
+      scheme_generate_non_tail(app->rand, jitter, 0, 1, 0);
+      CHECK_LIMIT();
+      mz_runstack_unskipped(jitter, 1);
+
+      mz_rs_sync();
+
+      __START_TINY_JUMPS__(1);
+
+      ref = jit_bmci_ul(jit_forward(), JIT_R0, 0x1);
+      refslow = jit_get_ip();
+      __END_TINY_JUMPS__(1);
+      (void)jit_calli(sjc.slow_cpointer_tag_code);
+      __START_TINY_JUMPS__(1);
+      jit_movr_p(dest, JIT_R0);
+      refdone = jit_jmpi(jit_forward());
+      mz_patch_branch(ref);
+      (void)mz_bnei_t(refslow, JIT_R0, scheme_cpointer_type, JIT_R1);
+      CHECK_LIMIT();
+
+      jit_ldxi_p(dest, JIT_R0, (intptr_t)&SCHEME_CPTR_TYPE((Scheme_Object *)0x0));
+      ref = jit_bnei_p(jit_forward(), dest, NULL);
+      (void)jit_movi_p(dest, scheme_false);
+      mz_patch_branch(ref);
+      CHECK_LIMIT();
+
+      mz_patch_ucbranch(refdone);
+      __END_TINY_JUMPS__(1);
+      
+      return 1;
     } else if (IS_NAMED_PRIM(rator, "future?")) { 
-      generate_inlined_type_test(jitter, app, scheme_future_type, scheme_future_type, 1, for_branch, branch_short, need_sync, dest);
+      generate_inlined_type_test(jitter, app, scheme_future_type, scheme_future_type, 1, for_branch, branch_short, dest);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "fsemaphore?")) { 
-      generate_inlined_type_test(jitter, app, scheme_fsemaphore_type, scheme_fsemaphore_type, 1, for_branch, branch_short, need_sync, dest);
+      generate_inlined_type_test(jitter, app, scheme_fsemaphore_type, scheme_fsemaphore_type, 1, for_branch, branch_short, dest);
       return 1;
     } else if (IS_NAMED_PRIM(rator, "future")
                || IS_NAMED_PRIM(rator, "touch")
@@ -1906,7 +2268,7 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
                || IS_NAMED_PRIM(rator, "fsemaphore-try-wait?")) {
       /* Inline calls to future functions that specially support
          running in the future thread: */
-      GC_CAN_IGNORE jit_insn *refr;
+      GC_CAN_IGNORE jit_insn *refr USED_ONLY_FOR_FUTURES;
 
       mz_runstack_skipped(jitter, 1);
       scheme_generate_non_tail(app->rand, jitter, 0, 1, 0);
@@ -1967,9 +2329,12 @@ int scheme_generate_two_args(Scheme_Object *rand1, Scheme_Object *rand2, mz_jit_
 /* de-sync's rs.
    Results go into R0 and R1. If !order_matters, and if only the
    second is simple, then the arguments will be in reverse order. 
-   Return is 1 if thr arguments are in order, -1 if reversed. */
+   Return is 1 if the arguments are in order, -1 if reversed. */
 {
   int simple1, simple2, direction = 1;
+
+  rand1 = scheme_specialize_to_constant(rand1, jitter, skipped);
+  rand2 = scheme_specialize_to_constant(rand2, jitter, skipped);
   
   simple1 = scheme_is_relatively_constant_and_avoids_r1(rand1, rand2);
   simple2 = scheme_is_relatively_constant_and_avoids_r1(rand2, rand1);
@@ -1983,7 +2348,7 @@ int scheme_generate_two_args(Scheme_Object *rand1, Scheme_Object *rand2, mz_jit_
 
       jit_movr_p(JIT_R1, JIT_R0);
 
-      scheme_generate(rand2, jitter, 0, 0, 0, JIT_R0, NULL); /* no sync... */
+      scheme_generate(rand2, jitter, 0, 0, 0, JIT_R0, NULL, NULL); /* no sync... */
       CHECK_LIMIT();
 
       if (order_matters) {
@@ -2012,35 +2377,48 @@ int scheme_generate_two_args(Scheme_Object *rand1, Scheme_Object *rand2, mz_jit_
 
       mz_rs_dec(1);
       CHECK_RUNSTACK_OVERFLOW();
-      mz_runstack_pushed(jitter, 1);
-      mz_rs_str(JIT_R0);
-      mz_runstack_skipped(jitter, skipped-1);
+      if (skipped) {
+        mz_runstack_pushed(jitter, 1);
+        mz_rs_str(JIT_R0);
+        mz_runstack_skipped(jitter, skipped-1);
+      } else {
+        mz_pushr_p(JIT_R0);
+      }
 
       scheme_generate_non_tail(rand2, jitter, 0, 1, 0); /* no sync... */
       CHECK_LIMIT();
 
       if (order_matters) {
         jit_movr_p(JIT_R1, JIT_R0);
-        mz_rs_ldr(JIT_R0);
+        if (!skipped)
+          mz_popr_p(JIT_R0);
+        else
+          mz_rs_ldr(JIT_R0);
       } else {
-        mz_rs_ldr(JIT_R1);
+        if (!skipped)
+          mz_popr_p(JIT_R1);
+        else
+          mz_rs_ldr(JIT_R1);
         direction = -1;
       }
 
-      mz_runstack_unskipped(jitter, skipped-1);
-      mz_rs_inc(1);
-      mz_runstack_popped(jitter, 1);
+      if (skipped) {
+        mz_runstack_unskipped(jitter, skipped-1);
+        mz_rs_inc(1);
+        mz_runstack_popped(jitter, 1);
+      }
     }
   } else {
     mz_runstack_skipped(jitter, skipped);
 
     if (simple2 && !order_matters && already_in_register(rand1, jitter)) {
-      scheme_generate(rand1, jitter, 0, 0, 0, JIT_R1, NULL); /* no sync... */
-      scheme_generate(rand2, jitter, 0, 0, 0, JIT_R0, NULL); /* no sync... */
+      scheme_generate(rand1, jitter, 0, 0, 0, JIT_R1, NULL, NULL); /* no sync... */
+      CHECK_LIMIT();
+      scheme_generate(rand2, jitter, 0, 0, 0, JIT_R0, NULL, NULL); /* no sync... */
       direction = -1;
     } else {
       if (simple2) {
-        scheme_generate(rand2, jitter, 0, 0, 0, JIT_R1, NULL); /* no sync... */
+        scheme_generate(rand2, jitter, 0, 0, 0, JIT_R1, NULL, NULL); /* no sync... */
         CHECK_LIMIT();
       } else {
         scheme_generate_non_tail(rand2, jitter, 0, 1, 0); /* no sync... */
@@ -2048,7 +2426,7 @@ int scheme_generate_two_args(Scheme_Object *rand1, Scheme_Object *rand2, mz_jit_
         jit_movr_p(JIT_R1, JIT_R0);
       }
 
-      scheme_generate(rand1, jitter, 0, 0, 0, JIT_R0, NULL); /* no sync... */
+      scheme_generate(rand1, jitter, 0, 0, 0, JIT_R0, NULL, NULL); /* no sync... */
     }
     CHECK_LIMIT();
 
@@ -2080,7 +2458,7 @@ static int generate_binary_char(mz_jit_state *jitter, Scheme_App3_Rec *app,
   if (!SCHEME_CHARP(r1)) {
     GC_CAN_IGNORE jit_insn *pref;
     pref = jit_bmci_ul(jit_forward(), JIT_R0, 0x1);
-    reffail = _jit.x.pc;
+    reffail = jit_get_ip();
     (void)jit_movi_p(JIT_R2, ((Scheme_Primitive_Proc *)rator)->prim_val);
     __END_SHORT_JUMPS__(branch_short);
     if (direction > 0) {
@@ -2100,7 +2478,7 @@ static int generate_binary_char(mz_jit_state *jitter, Scheme_App3_Rec *app,
     if (!reffail) {
       GC_CAN_IGNORE jit_insn *pref;
       pref = jit_bmci_ul(jit_forward(), JIT_R1, 0x1);
-      reffail = _jit.x.pc;
+      reffail = jit_get_ip();
       (void)jit_movi_p(JIT_R2, ((Scheme_Primitive_Proc *)rator)->prim_val);
       __END_SHORT_JUMPS__(branch_short);
       if (direction > 0) {
@@ -2127,8 +2505,8 @@ static int generate_binary_char(mz_jit_state *jitter, Scheme_App3_Rec *app,
 
   if (!direct) {
     /* Extract character value */
-    jit_ldxi_i(JIT_R0, JIT_R0, (int)&SCHEME_CHAR_VAL((Scheme_Object *)0x0));
-    jit_ldxi_i(JIT_R1, JIT_R1, (int)&SCHEME_CHAR_VAL((Scheme_Object *)0x0));
+    jit_ldxi_i(JIT_R0, JIT_R0, (intptr_t)&SCHEME_CHAR_VAL((Scheme_Object *)0x0));
+    jit_ldxi_i(JIT_R1, JIT_R1, (intptr_t)&SCHEME_CHAR_VAL((Scheme_Object *)0x0));
     ref = jit_bner_i(jit_forward(), JIT_R0, JIT_R1);
   } else {
     ref = jit_bner_p(jit_forward(), JIT_R0, JIT_R1);
@@ -2177,7 +2555,7 @@ static int generate_vector_op(mz_jit_state *jitter, int set, int int_ready, int 
     }
     __END_TINY_JUMPS__(1);
 
-    reffail = _jit.x.pc;
+    reffail = jit_get_ip();
     if (int_ready) {
       jit_fixnum_l(JIT_R1, JIT_R1);
     }
@@ -2222,21 +2600,21 @@ static int generate_vector_op(mz_jit_state *jitter, int set, int int_ready, int 
         (void)jit_bmci_ul(reffail, JIT_R2, 0x1);
       if (for_fx) {
         (void)mz_bnei_t(reffail, JIT_R0, scheme_fxvector_type, JIT_R2);
-        jit_ldxi_l(JIT_R2, JIT_R0, (int)&SCHEME_FXVEC_SIZE(0x0));
+        jit_ldxi_l(JIT_R2, JIT_R0, (intptr_t)&SCHEME_FXVEC_SIZE(0x0));
       } else if (!for_fl) {
         (void)mz_bnei_t(reffail, JIT_R0, scheme_vector_type, JIT_R2);
         if (check_mutable) {
           jit_ldxi_s(JIT_R2, JIT_R0, &MZ_OPT_HASH_KEY((Scheme_Inclhash_Object *)0x0));
           (void)jit_bmsi_ul(reffail, JIT_R2, 0x1);
         }
-        jit_ldxi_l(JIT_R2, JIT_R0, (int)&SCHEME_VEC_SIZE(0x0));
+        jit_ldxi_l(JIT_R2, JIT_R0, (intptr_t)&SCHEME_VEC_SIZE(0x0));
       } else {
         MZ_FPUSEL_STMT(extfl,
                        (void)mz_bnei_t(reffail, JIT_R0, scheme_extflvector_type, JIT_R2),
                        (void)mz_bnei_t(reffail, JIT_R0, scheme_flvector_type, JIT_R2));
         MZ_FPUSEL_STMT(extfl,
-                       jit_ldxi_l(JIT_R2, JIT_R0, (int)&SCHEME_EXTFLVEC_SIZE(0x0)),
-                       jit_ldxi_l(JIT_R2, JIT_R0, (int)&SCHEME_FLVEC_SIZE(0x0)));
+                       jit_ldxi_l(JIT_R2, JIT_R0, (intptr_t)&SCHEME_EXTFLVEC_SIZE(0x0)),
+                       jit_ldxi_l(JIT_R2, JIT_R0, (intptr_t)&SCHEME_FLVEC_SIZE(0x0)));
       }
       if (!int_ready) {
         jit_rshi_ul(JIT_V1, JIT_R1, 1);
@@ -2301,7 +2679,7 @@ static int generate_vector_op(mz_jit_state *jitter, int set, int int_ready, int 
     if (!for_fl) {
       jit_ldxr_p(dest, JIT_R0, JIT_V1);
     } else {
-      int fpr0;
+      int fpr0 USED_ONLY_SOMETIMES;
       fpr0 = JIT_FPUSEL_FPR_0(extfl, jitter->unbox_depth);
       jit_FPSEL_ldxr_xd_fppush(extfl, fpr0, JIT_R0, JIT_V1);
       if (unbox_flonum)
@@ -2333,7 +2711,7 @@ static int allocate_rectangular(mz_jit_state *jitter, int dest)
   jit_pusharg_p(JIT_R1);
   jit_pusharg_p(JIT_R0);
   {
-    GC_CAN_IGNORE jit_insn *refr;
+    GC_CAN_IGNORE jit_insn *refr USED_ONLY_FOR_FUTURES;
     (void)mz_finish_lwe(ts_scheme_make_complex, refr);
   }
   jit_retval(dest);
@@ -2343,11 +2721,25 @@ static int allocate_rectangular(mz_jit_state *jitter, int dest)
 }
 
 int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, int is_tail, int multi_ok, 
-				   Branch_Info *for_branch, int branch_short, int need_sync, int result_ignored,
+				   Branch_Info *for_branch, int branch_short, int result_ignored,
                                    int dest)
 /* de-sync's; for branch, sync'd before  */
 {
   Scheme_Object *rator = app->rator;
+
+  rator = scheme_specialize_to_constant(rator, jitter, 2);
+
+  if (SCHEME_PRIMP(rator) && IS_NAMED_PRIM(rator, "ptr-ref")) {
+    Scheme_App_Rec *app2;
+    mz_rs_sync();
+    app2 = scheme_malloc_application(3);
+    app2->args[0] = app->rator;
+    app2->args[1] = app->rand1;
+    app2->args[2] = app->rand2;
+    return scheme_generate_inlined_nary(jitter, app2, is_tail, multi_ok,
+                                        for_branch, branch_short, result_ignored,
+                                        dest);
+  }
 
   if (!for_branch) {
     int k;
@@ -2390,7 +2782,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
 
       scheme_generate_non_tail(a2, jitter, 0, 1, 0);
       CHECK_LIMIT();
-      if (need_sync) mz_rs_sync();
+      mz_rs_sync();
       
       mz_runstack_unskipped(jitter, 2);
 
@@ -2413,7 +2805,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
            didn't disturb R0: */
         if (for_branch) mz_SET_R0_STATUS_VALID(reg_status);
       } else {
-	ref = mz_bnei_p(jit_forward(), JIT_R0, a1);
+	ref = jit_bnei_p(jit_forward(), JIT_R0, a1);
         /* In case true is a fall-through, note that the test 
            didn't disturb R0 or R1: */
         if (for_branch) mz_SET_REG_STATUS_VALID(reg_status);
@@ -2437,7 +2829,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
       scheme_generate_two_args(a2, a1, jitter, 0, 2);
       CHECK_LIMIT();
 
-      if (need_sync) mz_rs_sync();
+      mz_rs_sync();
 
       __START_SHORT_JUMPS__(branch_short);
 
@@ -2464,7 +2856,8 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
     
     return 1;
   }  else if (IS_NAMED_PRIM(rator, "equal?")) {
-    GC_CAN_IGNORE jit_insn *ref_f, *ref_d, *refr;
+    GC_CAN_IGNORE jit_insn *ref_f;
+    GC_CAN_IGNORE jit_insn *refr USED_ONLY_FOR_FUTURES;
 
     scheme_generate_two_args(app->rand1, app->rand2, jitter, 0, 2);
     CHECK_LIMIT();
@@ -2475,7 +2868,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
     jit_prepare(2);
     jit_pusharg_p(JIT_R0);
     jit_pusharg_p(JIT_R1);
-    mz_finish_prim_lwe(ts_scheme_equal, refr);
+    mz_finish_prim_lwe(ts_equal_as_bool, refr);
     jit_retval(dest);
     CHECK_LIMIT();
 
@@ -2486,19 +2879,10 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
       CHECK_LIMIT();
     }
     
-    ref_f = jit_beqi_p(jit_forward(), JIT_R0, 0);
-
     if (for_branch) {
+      ref_f = jit_beqi_p(jit_forward(), dest, scheme_false);
       scheme_add_branch_false(for_branch, ref_f);
       scheme_branch_for_true(jitter, for_branch);
-    } else {
-      (void)jit_movi_p(dest, scheme_true);
-      ref_d = jit_jmpi(jit_forward());
-      
-      mz_patch_branch(ref_f);
-      (void)jit_movi_p(dest, scheme_false);
-
-      mz_patch_ucbranch(ref_d);
     }
 
     __END_SHORT_JUMPS__(branch_short);
@@ -2511,7 +2895,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
     scheme_generate_two_args(app->rand1, app->rand2, jitter, 0, 2);
     CHECK_LIMIT();
 
-    if (need_sync) mz_rs_sync();
+    mz_rs_sync();
 
     __START_SHORT_JUMPS__(branch_short);
     
@@ -2573,6 +2957,205 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
     }
 
     __END_SHORT_JUMPS__(branch_short);
+
+    return 1;
+  } else if (IS_NAMED_PRIM(rator, "string=?")
+             || IS_NAMED_PRIM(rator, "bytes=?")) {
+    GC_CAN_IGNORE jit_insn *ref_fx1 = NULL, *ref_fx2 = NULL, *ref_fail1 = NULL, *ref_fail2 = NULL;
+    GC_CAN_IGNORE jit_insn *ref_ucnofail;
+    GC_CAN_IGNORE jit_insn *ref_false1, *ref_false2 = NULL;
+    GC_CAN_IGNORE jit_insn *ref_true1 = NULL, *ref_true2, *ref_ucfinish;
+    GC_CAN_IGNORE jit_insn *ref_loop;
+    Scheme_Object *rand1, *rand2;
+    int is_str1, is_str2, len = 0, direction = 0;
+    int string, string_type;
+    void *sjc_bad_code, *sjc_bad_rev_code;
+    intptr_t string_len_val, string_val;
+
+    if ((IS_NAMED_PRIM(rator, "string=?"))) {
+      string = 1;
+      string_type = scheme_char_string_type;
+      sjc_bad_code = sjc.bad_string_eq_2_code;
+      sjc_bad_rev_code = sjc.bad_string_rev_eq_2_code;
+      string_len_val = (intptr_t)&SCHEME_CHAR_STRLEN_VAL(0x0);
+      string_val = (intptr_t)&SCHEME_CHAR_STR_VAL(0x0);
+    } else { /* IS_NAMED_PRIM(rator, "bytes=?") */
+      string = 0;
+      string_type = scheme_byte_string_type;
+      sjc_bad_code = sjc.bad_bytes_eq_2_code;
+      sjc_bad_rev_code = sjc.bad_bytes_rev_eq_2_code;
+      string_len_val = (intptr_t)&SCHEME_BYTE_STRLEN_VAL(0x0);
+      string_val = (intptr_t)&SCHEME_BYTE_STR_VAL(0x0);
+    }
+
+    direction = scheme_generate_two_args(app->rand1, app->rand2, jitter, 0, 2);
+    CHECK_LIMIT();
+
+    mz_rs_sync();
+    
+    if (direction == -1) {
+      rand1 = app->rand2;
+      rand2 = app->rand1;
+    } else {
+      rand1 = app->rand1;
+      rand2 = app->rand2;
+    }
+
+    is_str1 = (SAME_TYPE(SCHEME_TYPE(rand1), string_type));
+    is_str2 = (SAME_TYPE(SCHEME_TYPE(rand2), string_type));
+    if (string) {
+      if (is_str1) {
+        len = SCHEME_CHAR_STRLEN_VAL(rand1);
+      } else if (is_str2) {
+        len = SCHEME_CHAR_STRLEN_VAL(rand2);
+      }
+    } else {
+      if (is_str1) {
+        len = SCHEME_BYTE_STRLEN_VAL(rand1);
+      } else if (is_str2) {
+        len = SCHEME_BYTE_STRLEN_VAL(rand2);
+      }
+    }
+
+
+    if (for_branch) {
+      __START_SHORT_JUMPS__(branch_short);
+      scheme_prepare_branch_jump(jitter, for_branch);
+      CHECK_LIMIT();
+      __END_SHORT_JUMPS__(branch_short);
+    }
+
+    __START_TINY_JUMPS__(1);
+    /* fail if either is not a string */
+    if (!is_str1) {
+      ref_fx1 = jit_bmsi_ul(jit_forward(), JIT_R0, 0x1);
+      jit_ldxi_s(JIT_R2, JIT_R0, &((Scheme_Object *)0x0)->type);
+      ref_fail1 = jit_bnei_i(jit_forward(), JIT_R2, string_type);
+    }
+    if (!is_str2) {
+      ref_fx2 = jit_bmsi_ul(jit_forward(), JIT_R1, 0x1);
+      jit_ldxi_s(JIT_V1, JIT_R1, &((Scheme_Object *)0x0)->type);
+      ref_fail2 = jit_bnei_i(jit_forward(), JIT_V1, string_type);
+    }
+    ref_ucnofail = jit_jmpi(jit_forward());
+    CHECK_LIMIT();
+
+    /* fail */  
+    if (!is_str1) {
+      mz_patch_branch(ref_fx1);
+      mz_patch_branch(ref_fail1);
+    }
+    if (!is_str2) {
+      mz_patch_branch(ref_fx2);
+      mz_patch_branch(ref_fail2);
+    }
+    __END_TINY_JUMPS__(1);
+
+    if (direction == 1)
+      (void)jit_calli(sjc_bad_code);
+    else
+      (void)jit_calli(sjc_bad_rev_code);
+    CHECK_LIMIT();
+
+    /* main */
+    __START_TINY_JUMPS__(1);
+    mz_patch_ucbranch(ref_ucnofail);
+    __END_TINY_JUMPS__(1);
+
+    if (result_ignored)
+      return 1;
+
+    /* false if they have different length */
+    __START_TINY_OR_SHORT_JUMPS__(!for_branch, branch_short);
+    if (is_str1) {
+      jit_ldxi_l(JIT_R2, JIT_R1, string_len_val);
+      ref_false1 = jit_bnei_l(jit_forward(), JIT_R2, len);
+    } else if (is_str2) {
+      jit_ldxi_l(JIT_R2, JIT_R0, string_len_val);
+      ref_false1 = jit_bnei_l(jit_forward(), JIT_R2, len);
+    } else {
+      jit_ldxi_l(JIT_R2, JIT_R0, string_len_val);
+      jit_ldxi_l(JIT_V1, JIT_R1, string_len_val);
+      ref_false1 = jit_bner_l(jit_forward(), JIT_R2, JIT_V1);
+    }
+    __END_TINY_OR_SHORT_JUMPS__(!for_branch, branch_short);
+
+    if ((!is_str1 && !is_str2) || len) {
+      __START_TINY_JUMPS__(1);
+      /* true if both have length zero or are eq?*/
+      if (!len)
+        ref_true1 = jit_beqi_l(jit_forward(), JIT_R2, 0);
+      ref_true2 = jit_beqr_p(jit_forward(), JIT_R0, JIT_R1);
+
+      /* initialize loop*/
+      jit_ldxi_p(JIT_R0, JIT_R0, string_val);
+      jit_ldxi_p(JIT_R1, JIT_R1, string_val);
+      CHECK_LIMIT();
+
+      /* main loop*/
+      if (string) {
+        ref_loop = jit_get_ip();
+        mz_set_local_p(JIT_R0, JIT_LOCAL3);
+        jit_ldr_i(JIT_R0, JIT_R0);
+        jit_ldr_i(JIT_V1, JIT_R1);
+        __END_TINY_JUMPS__(1);
+        __START_TINY_OR_SHORT_JUMPS__(!for_branch, branch_short);
+        ref_false2 = jit_bner_i(jit_forward(), JIT_R0, JIT_V1);
+        __END_TINY_OR_SHORT_JUMPS__(!for_branch, branch_short);
+        __START_TINY_JUMPS__(1);
+        mz_get_local_p(JIT_R0, JIT_LOCAL3);
+        jit_addi_p(JIT_R0, JIT_R0, 1 << LOG_MZCHAR_SIZE);
+        jit_addi_p(JIT_R1, JIT_R1, 1 << LOG_MZCHAR_SIZE);
+        jit_subi_l(JIT_R2, JIT_R2, 1);
+        (void)jit_bnei_l(ref_loop, JIT_R2, 0);
+      } else {
+        ref_loop = jit_get_ip();
+        mz_set_local_p(JIT_R0, JIT_LOCAL3);
+        jit_ldr_c(JIT_R0, JIT_R0);
+        jit_ldr_c(JIT_V1, JIT_R1);
+        __END_TINY_JUMPS__(1);
+        __START_TINY_OR_SHORT_JUMPS__(!for_branch, branch_short);
+        jit_extr_c_i(JIT_R0, JIT_R0);
+        jit_extr_c_i(JIT_V1, JIT_V1);
+        ref_false2 = jit_bner_i(jit_forward(), JIT_R0, JIT_V1);
+        __END_TINY_OR_SHORT_JUMPS__(!for_branch, branch_short);
+        __START_TINY_JUMPS__(1);
+        mz_get_local_p(JIT_R0, JIT_LOCAL3);
+        jit_addi_p(JIT_R0, JIT_R0, 1);
+        jit_addi_p(JIT_R1, JIT_R1, 1);
+        jit_subi_l(JIT_R2, JIT_R2, 1);
+        (void)jit_bnei_l(ref_loop, JIT_R2, 0);
+      }
+      CHECK_LIMIT();
+
+      /* true */
+      if (ref_true1)
+        mz_patch_branch(ref_true1);
+      mz_patch_branch(ref_true2);
+      __END_TINY_JUMPS__(1);
+    }
+
+    if (for_branch) {
+      __START_SHORT_JUMPS__(branch_short);
+      scheme_add_branch_false(for_branch, ref_false1);
+      if (ref_false2)
+        scheme_add_branch_false(for_branch, ref_false2);
+      scheme_branch_for_true(jitter, for_branch);
+      __END_SHORT_JUMPS__(branch_short);
+    } else {
+      __START_TINY_JUMPS__(1);
+      jit_movi_p(dest, scheme_true);
+      ref_ucfinish = jit_jmpi(jit_forward());
+      /* false */
+      mz_patch_branch(ref_false1);
+      if (ref_false2)
+        mz_patch_branch(ref_false2);
+      jit_movi_p(dest, scheme_false);
+      /* finish */
+      mz_patch_ucbranch(ref_ucfinish);
+      __END_TINY_JUMPS__(1);
+    }
+    CHECK_LIMIT();
 
     return 1;
   } else if (IS_NAMED_PRIM(rator, "=")) {
@@ -2900,7 +3483,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
 	       || IS_NAMED_PRIM(rator, "fxvector-ref")
 	       || IS_NAMED_PRIM(rator, "unsafe-fxvector-ref")) {
       int simple;
-      int which, unsafe = 0, base_offset = ((int)&SCHEME_VEC_ELS(0x0));
+      int which, unsafe = 0, base_offset = (int)(intptr_t)&SCHEME_VEC_ELS(0x0);
       mz_jit_unbox_state ubs;
       int can_chaperone = 1, for_struct = 0, for_fx = 0;
       int extfl = 0;
@@ -2936,18 +3519,18 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
         if (MZ_LONG_DOUBLE_AND(IS_NAMED_PRIM(rator, "extflvector-ref")))
           extfl = 1;
         MZ_FPUSEL_STMT(extfl,
-                       base_offset = ((int)&SCHEME_EXTFLVEC_ELS(0x0)),
-                       base_offset = ((int)&SCHEME_FLVEC_ELS(0x0)));
+                       base_offset = (int)(intptr_t)&SCHEME_EXTFLVEC_ELS(0x0),
+		       base_offset = (int)(intptr_t)&SCHEME_FLVEC_ELS(0x0));
       } else if (IS_NAMED_PRIM(rator, "unsafe-struct*-ref")) {
 	which = 0;
         unsafe = 1;
-        base_offset = ((int)&((Scheme_Structure *)0x0)->slots);
+        base_offset = (int)(intptr_t)&((Scheme_Structure *)0x0)->slots;
         can_chaperone = 0;
         for_struct = 1;
       } else if (IS_NAMED_PRIM(rator, "unsafe-struct-ref")) {
 	which = 0;
         unsafe = 1;
-        base_offset = ((int)&((Scheme_Structure *)0x0)->slots);
+        base_offset = (int)(intptr_t)&((Scheme_Structure *)0x0)->slots;
         for_struct = 1;
       } else if (IS_NAMED_PRIM(rator, "string-ref"))
 	which = 1;
@@ -3004,7 +3587,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
 	} else {
           if (unsafe) {
             jit_rshi_ul(JIT_R1, JIT_R1, 1);
-            jit_ldxi_p(JIT_R0, JIT_R0, &SCHEME_CHAR_STR_VAL((Scheme_Object *)0x0));
+            jit_ldxi_p(JIT_R0, JIT_R0, &SCHEME_BYTE_STR_VAL((Scheme_Object *)0x0));
             jit_ldxr_c(JIT_R0, JIT_R0, JIT_R1);
             jit_extr_uc_ul(JIT_R0, JIT_R0);
             jit_fixnum_l(dest, JIT_R0);
@@ -3027,7 +3610,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
       
 	offset = SCHEME_INT_VAL(app->rand2);
         if (!unsafe || can_chaperone)
-          (void)jit_movi_p(JIT_R1, offset);
+          (void)jit_movi_l(JIT_R1, offset);
 	if (!which)
 	  offset = base_offset + WORDS_TO_BYTES(offset);
 	else if (which == 3)
@@ -3064,7 +3647,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
           }
 	} else {
           if (unsafe) {
-            jit_ldxi_p(JIT_R0, JIT_R0, &SCHEME_CHAR_STR_VAL((Scheme_Object *)0x0));
+            jit_ldxi_p(JIT_R0, JIT_R0, &SCHEME_BYTE_STR_VAL((Scheme_Object *)0x0));
             jit_ldxr_c(JIT_R0, JIT_R0, JIT_V1);
             jit_extr_uc_ul(JIT_R0, JIT_R0);
             jit_fixnum_l(dest, JIT_R0);
@@ -3084,7 +3667,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
                || IS_NAMED_PRIM(rator, "unsafe-flvector-ref")
                || MZ_LONG_DOUBLE_AND(IS_NAMED_PRIM(rator, "unsafe-extflvector-ref")
                                      || IS_NAMED_PRIM(rator, "unsafe-f80vector-ref"))) {
-      int fpr0;
+      int fpr0 USED_ONLY_SOMETIMES;
       int is_f64;
       int extfl;
       mz_jit_unbox_state ubs;
@@ -3096,6 +3679,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
 
       scheme_mz_unbox_save(jitter, &ubs); /* no unboxing of vector and index arguments */
       scheme_generate_two_args(app->rand1, app->rand2, jitter, 1, 2);
+      CHECK_LIMIT();
       scheme_mz_unbox_restore(jitter, &ubs);
       CHECK_LIMIT();
 
@@ -3109,8 +3693,8 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
                      jit_lshi_ul(JIT_R1, JIT_R1, JIT_LOG_DOUBLE_SIZE));
       if (!is_f64) {
         MZ_FPUSEL_STMT(extfl,
-                       jit_addi_ul(JIT_R1, JIT_R1, (int)(&SCHEME_EXTFLVEC_ELS(0x0))),
-                       jit_addi_ul(JIT_R1, JIT_R1, (int)(&SCHEME_FLVEC_ELS(0x0))));
+                       jit_addi_ul(JIT_R1, JIT_R1, (intptr_t)(&SCHEME_EXTFLVEC_ELS(0x0))),
+                       jit_addi_ul(JIT_R1, JIT_R1, (intptr_t)(&SCHEME_FLVEC_ELS(0x0))));
       }
 
       if (jitter->unbox)
@@ -3138,6 +3722,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
       is_u = IS_NAMED_PRIM(rator, "unsafe-u16vector-ref");
       
       scheme_generate_two_args(app->rand1, app->rand2, jitter, 1, 2);
+      CHECK_LIMIT();
 
       jit_ldxi_p(JIT_R0, JIT_R0, (intptr_t)&(((Scheme_Structure *)0x0)->slots[0]));
       jit_ldxi_p(JIT_R0, JIT_R0, (intptr_t)&SCHEME_CPTR_VAL(0x0));
@@ -3154,6 +3739,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
     } else if (IS_NAMED_PRIM(rator, "list-ref")
                || IS_NAMED_PRIM(rator, "list-tail")) {
       scheme_generate_two_args(app->rand1, app->rand2, jitter, 1, 2);
+      CHECK_LIMIT();
 
       mz_rs_sync();
       if (IS_NAMED_PRIM(rator, "list-ref"))
@@ -3188,6 +3774,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
       }
 
       scheme_generate_two_args(app->rand1, app->rand2, jitter, 1, 2);
+      CHECK_LIMIT();
 
       if (IS_NAMED_PRIM(rator, "unsafe-list-ref"))
         (void)jit_calli(sjc.list_ref_code);
@@ -3211,7 +3798,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
 
       __START_TINY_JUMPS__(1);
       ref = jit_bmci_ul(jit_forward(), JIT_R0, 0x1);
-      reffail = _jit.x.pc;
+      reffail = jit_get_ip();
       __END_TINY_JUMPS__(1);
       if (set_mcar)
         (void)jit_calli(sjc.bad_set_mcar_code);
@@ -3271,7 +3858,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
       ref = mz_beqi_t(jit_forward(), JIT_R0, scheme_box_type, JIT_R2);
       if (ref3)
         mz_patch_branch(ref3);
-      reffail = _jit.x.pc;
+      reffail = jit_get_ip();
       (void)jit_calli(sjc.set_box_code);
       ref2 = jit_jmpi(jit_forward());
       mz_patch_branch(ref);
@@ -3348,7 +3935,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
       jit_pusharg_p(JIT_R1);
       jit_pusharg_p(JIT_R0);
       {
-        GC_CAN_IGNORE jit_insn *refr;
+        GC_CAN_IGNORE jit_insn *refr USED_ONLY_FOR_FUTURES;
         (void)mz_finish_lwe(ts_scheme_make_mutable_pair, refr);
       }
       jit_retval(dest);
@@ -3381,6 +3968,8 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
     } else if (IS_NAMED_PRIM(rator, "vector-immutable")
                || IS_NAMED_PRIM(rator, "vector")) {
       return generate_vector_alloc(jitter, rator, NULL, NULL, app, dest);
+    } else if (IS_NAMED_PRIM(rator, "make-vector")) {
+      return generate_make_vector_alloc(jitter, rator, app->rand1, app->rand2, dest);
     } else if (IS_NAMED_PRIM(rator, "make-rectangular")) {
       GC_CAN_IGNORE jit_insn *ref, *ref2, *ref3, *ref4, *refslow, *refdone;
 
@@ -3398,7 +3987,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
       jit_ldxi_s(JIT_R2, JIT_R0, &((Scheme_Object *)0x0)->type);
       ref2 = jit_bgei_i(jit_forward(), JIT_R2, scheme_bignum_type);
       /* (slow path) */
-      refslow = _jit.x.pc;
+      refslow = jit_get_ip();
       (void)jit_calli(sjc.make_rectangular_code);
       jit_retval(dest);
       CHECK_LIMIT();
@@ -3408,7 +3997,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
       (void)jit_bgei_i(refslow, JIT_R2, scheme_complex_type);
       /* set V1 if inexact */
       ref3 = jit_blti_i(jit_forward(), JIT_R2, scheme_float_type);
-      jit_movi_i(JIT_V1, 1);
+      jit_movi_i(JIT_V1, JIT_R2);
       mz_patch_branch(ref3);
       mz_patch_branch(ref);
       CHECK_LIMIT();
@@ -3420,6 +4009,9 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
       (void)jit_bgei_i(refslow, JIT_R2, scheme_complex_type);
       ref3 = jit_blti_i(jit_forward(), JIT_R2, scheme_float_type);
       (void)jit_bnei_i(refslow, JIT_V1, 1); /* need to coerce other to inexact */
+      /* we have two inexacts, but maybe float vs. double */
+      (void)jit_bner_i(refslow, JIT_V1, JIT_R2);
+      /* jump to fast path for inexacts... */
       ref4 = jit_jmpi(jit_forward());
       mz_patch_branch(ref3);
       mz_patch_branch(ref);
@@ -3449,7 +4041,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
 
       __START_TINY_JUMPS__(1);
       ref = jit_bmci_ul(jit_forward(), JIT_R0, 0x1);
-      refslow = _jit.x.pc;
+      refslow = jit_get_ip();
       (void)jit_calli(sjc.bad_make_flrectangular_code);
       mz_patch_branch(ref);
       (void)mz_bnei_t(refslow, JIT_R0, scheme_double_type, JIT_R2);
@@ -3481,6 +4073,47 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
       jit_movr_p(dest, JIT_R0);
 
       return 1;
+    } else if (IS_NAMED_PRIM(rator, "check-not-unsafe-undefined")
+               || IS_NAMED_PRIM(rator, "check-not-unsafe-undefined/assign")) {
+      if (SCHEME_SYMBOLP(app->rand2)) {
+        GC_CAN_IGNORE jit_insn *ref;
+
+        LOG_IT(("inlined check-not-unsafe-undefined\n"));
+
+        mz_runstack_skipped(jitter, 2);
+        scheme_generate_non_tail(app->rand1, jitter, 0, 1, 0); /* no sync... */
+        mz_runstack_unskipped(jitter, 2);
+        CHECK_LIMIT();
+
+        mz_rs_sync_fail_branch();
+
+        __START_TINY_JUMPS__(1);
+        ref = jit_bnei_p(jit_forward(), JIT_R0, scheme_undefined);
+        __END_TINY_JUMPS__(1);
+
+        scheme_mz_load_retained(jitter, JIT_R1, app->rand2);
+        if (IS_NAMED_PRIM(rator, "check-not-unsafe-undefined"))
+          (void)jit_calli(sjc.call_check_not_defined_code);
+        else
+          (void)jit_calli(sjc.call_check_assign_not_defined_code);
+        /* never returns */
+
+        __START_TINY_JUMPS__(1);
+        mz_patch_branch(ref);
+        __END_TINY_JUMPS__(1);
+        CHECK_LIMIT();
+      } else {
+        scheme_generate_two_args(app->rand1, app->rand2, jitter, 1, 2);
+        CHECK_LIMIT();
+
+        mz_rs_sync();
+
+        (void)jit_calli(sjc.call_check_not_defined_code);
+      }
+
+      jit_movr_p(dest, JIT_R0);
+
+      return 1;
     } else if (IS_NAMED_PRIM(rator, "values")) {
       Scheme_Object *args[3];
 
@@ -3490,7 +4123,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
       args[1] = app->rand1;
       args[2] = app->rand2;
 
-      scheme_generate_app(NULL, args, 2, jitter, 0, 0, 0, 2);
+      scheme_generate_app(NULL, args, 2, 2, jitter, 0, 0, 0, 2);
 
       CHECK_LIMIT();
       mz_rs_sync();
@@ -3504,7 +4137,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
 
       return 1;
     } else if (IS_NAMED_PRIM(rator, "continuation-mark-set-first")) {
-      GC_CAN_IGNORE jit_insn *refr;
+      GC_CAN_IGNORE jit_insn *refr USED_ONLY_FOR_FUTURES;
 
       LOG_IT(("inlined continuation-mark-set-first\n"));
 
@@ -3522,6 +4155,35 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
       jit_retval(dest);
       CHECK_LIMIT();
 
+      return 1;
+    } else if (IS_NAMED_PRIM(rator, "set-cpointer-tag!")) {
+      GC_CAN_IGNORE jit_insn *ref, *refslow, *refdone;
+      
+      LOG_IT(("inlined set-cpointer-tag!\n"));
+
+      scheme_generate_two_args(app->rand1, app->rand2, jitter, 1, 2);
+      CHECK_LIMIT();
+
+      __START_TINY_JUMPS__(1);
+
+      ref = jit_bmci_ul(jit_forward(), JIT_R0, 0x1);
+      refslow = jit_get_ip();
+      __END_TINY_JUMPS__(1);
+      (void)jit_calli(sjc.slow_set_cpointer_tag_code);
+      __START_TINY_JUMPS__(1);
+      refdone = jit_jmpi(jit_forward());
+      mz_patch_branch(ref);
+      (void)mz_bnei_t(refslow, JIT_R0, scheme_cpointer_type, JIT_R2);
+      CHECK_LIMIT();
+
+      jit_stxi_p((intptr_t)&SCHEME_CPTR_TYPE((Scheme_Object *)0x0), JIT_R0, JIT_R1);
+
+      mz_patch_ucbranch(refdone);
+      __END_TINY_JUMPS__(1);
+
+      if (!result_ignored)
+        (void)jit_movi_p(dest, scheme_void);
+      
       return 1;
     }
   }
@@ -3542,7 +4204,9 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
 /* de-sync's; for branch, sync'd before */
 {
   Scheme_Object *rator = app->args[0];
- 
+
+  rator = scheme_specialize_to_constant(rator, jitter, app->num_args);
+
   if (!for_branch) {
     int k;
     k = inlineable_struct_prim(rator, jitter, app->num_args, app->num_args);
@@ -3597,7 +4261,7 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
     }
 
     /* generate code to evaluate the arguments */
-    scheme_generate_app(app, NULL, 3, jitter, 0, 0, 0, 2);
+    scheme_generate_app(app, NULL, 3, 3, jitter, 0, 0, 0, 2);
     CHECK_LIMIT();
     mz_rs_sync();
 
@@ -3607,7 +4271,7 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
       __START_TINY_JUMPS__(1);
       /* Fail if this isn't a pointer (0x1 is the integer tag) */
       ref = jit_bmci_ul(jit_forward(), JIT_R1, 0x1);
-      reffail = _jit.x.pc;
+      reffail = jit_get_ip();
       __END_TINY_JUMPS__(1);
 
       (void)jit_calli(sjc.box_cas_fail_code);
@@ -3646,7 +4310,10 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
 #ifdef MZ_USE_FUTURES
     if (scheme_is_multithreaded(0)) {
       jit_lock_cmpxchgr_l(JIT_R1, JIT_V1); /* implicitly uses JIT_R0 */
-      reffalse = (JNEm(jit_forward(), 0,0,0), _jit.x.pc);
+      if (result_ignored)
+        reffalse = NULL;
+      else
+        reffalse = (JNEm(jit_forward(), 0,0,0), jit_get_ip());
     } else
 #endif
       {
@@ -3661,13 +4328,17 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
       scheme_add_branch_false(for_branch, reffalse);
       __END_SHORT_JUMPS__(branch_short);
     } else {
-      (void)jit_movi_p(dest, scheme_true);
-      reftrue = jit_jmpi(jit_forward());
+      if (!result_ignored) {
+        (void)jit_movi_p(dest, scheme_true);
+        reftrue = jit_jmpi(jit_forward());
         
-      mz_patch_branch(reffalse);
-      (void)jit_movi_p(dest, scheme_false);
+        mz_patch_branch(reffalse);
+        (void)jit_movi_p(dest, scheme_false);
+
+        mz_patch_branch(reftrue);
+      } else if (reffalse)
+        mz_patch_branch(reffalse);
         
-      mz_patch_branch(reftrue);
       __END_TINY_JUMPS__(1);
     }
 
@@ -3689,7 +4360,7 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
 	|| IS_NAMED_PRIM(rator, "unsafe-s16vector-set!")
 	|| IS_NAMED_PRIM(rator, "unsafe-u16vector-set!")) {
       int simple, constval, can_delay_vec, can_delay_index;
-      int which, unsafe = 0, base_offset = ((int)&SCHEME_VEC_ELS(0x0));
+      int which, unsafe = 0, base_offset = (int)(intptr_t)&SCHEME_VEC_ELS(0x0);
       int pushed, flonum_arg;
       int can_chaperone = 1, for_struct = 0, for_fx = 0, check_mutable = 0;
       int extfl = 0;
@@ -3718,21 +4389,21 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
         unsafe = 1;
       } else if (IS_NAMED_PRIM(rator, "flvector-set!")) {
 	which = 3;
-        base_offset = ((int)&SCHEME_FLVEC_ELS(0x0));
+        base_offset = (int)(intptr_t)&SCHEME_FLVEC_ELS(0x0);
       } else if (MZ_LONG_DOUBLE_AND(IS_NAMED_PRIM(rator, "extflvector-set!"))) {
         extfl = 1;
 	which = 3;
-        base_offset = MZ_FPUSEL(extfl, ((int)&SCHEME_EXTFLVEC_ELS(0x0)), 0);
+        base_offset = MZ_FPUSEL(extfl, (intptr_t)&SCHEME_EXTFLVEC_ELS(0x0), 0);
       } else if (IS_NAMED_PRIM(rator, "unsafe-struct*-set!")) {
         which = 0;
         unsafe = 1;
-        base_offset = ((int)&((Scheme_Structure *)0x0)->slots);
+        base_offset = (int)(intptr_t)&((Scheme_Structure *)0x0)->slots;
         can_chaperone = 0;
         for_struct = 1;
       } else if (IS_NAMED_PRIM(rator, "unsafe-struct-set!")) {
         which = 0;
         unsafe = 1;
-        base_offset = ((int)&((Scheme_Structure *)0x0)->slots);
+        base_offset = (int)(intptr_t)&((Scheme_Structure *)0x0)->slots;
         for_struct = 1;
       } else if (IS_NAMED_PRIM(rator, "string-set!"))
 	which = 1;
@@ -3764,7 +4435,7 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
 
       simple = (SCHEME_INTP(app->args[2])
 		&& (SCHEME_INT_VAL(app->args[2]) >= 0));
-      if (simple || scheme_can_delay_and_avoids_r1(app->args[2]))
+      if (simple || scheme_can_delay_and_avoids_r1_r2(app->args[2]))
         can_delay_index = 1;
       else
         can_delay_index = 0;
@@ -3842,9 +4513,10 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
         MZ_FPUSEL_STMT_ONLY(extfl, --jitter->unbox_extflonum);
       } else {
         if (constval)
-          scheme_generate(app->args[3], jitter, 0, 0, 0, JIT_R2, NULL); /* sync'd below */
+          scheme_generate(app->args[3], jitter, 0, 0, 0, JIT_R2, NULL, NULL); /* sync'd below */
         else {
           scheme_generate_non_tail(app->args[3], jitter, 0, 1, 0); /* sync'd below */
+          CHECK_LIMIT();
           jit_movr_p(JIT_R2, JIT_R0);
         }
       }
@@ -3855,7 +4527,7 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
          Need to get vec into R0, non-simple index into R1, value into R2. */
 
       if (can_delay_vec) {
-        scheme_generate(app->args[1], jitter, 0, 0, 0, JIT_R0, NULL); /* sync'd below */
+        scheme_generate(app->args[1], jitter, 0, 0, 0, JIT_R0, NULL, NULL); /* sync'd below */
         CHECK_LIMIT();
       } else if (can_delay_index && constval) {
         jit_movr_p(JIT_R0, JIT_V1);
@@ -3865,7 +4537,7 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
 
       if (!simple) {
         if (can_delay_index) {
-          scheme_generate(app->args[2], jitter, 0, 0, 0, JIT_R1, NULL); /* sync'd below */
+          scheme_generate(app->args[2], jitter, 0, 0, 0, JIT_R1, NULL, NULL); /* sync'd below */
           CHECK_LIMIT();
         } else if (!constval) {
           if (can_delay_vec)
@@ -3944,7 +4616,7 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
       } else {
 	intptr_t offset;
 	offset = SCHEME_INT_VAL(app->args[2]);
-	(void)jit_movi_p(JIT_R1, offset);
+	(void)jit_movi_l(JIT_R1, offset);
 	if (!which)
 	  offset = base_offset + WORDS_TO_BYTES(offset);
 	else if (which == 3)
@@ -3998,7 +4670,7 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
           }
 	} else {
           if (unsafe) {
-            jit_ldxi_p(JIT_R0, JIT_R0, &SCHEME_CHAR_STR_VAL((Scheme_Object *)0x0));
+            jit_ldxi_p(JIT_R0, JIT_R0, &SCHEME_BYTE_STR_VAL((Scheme_Object *)0x0));
             jit_rshi_ul(JIT_R2, JIT_R2, 1);
             jit_stxr_c(JIT_V1, JIT_R0, JIT_R2);
             if (!result_ignored)
@@ -4040,7 +4712,8 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
       } else {
         got_two = 1;
         mz_runstack_skipped(jitter, 1);
-        scheme_generate_app(app, NULL, 2, jitter, 0, 0, 0, 2);
+        scheme_generate_app(app, NULL, 2, 2, jitter, 0, 0, 0, 2);
+        CHECK_LIMIT();
       }
 
       if (scheme_can_unbox_inline(app->args[3], 5, JIT_FPUSEL_FPR_NUM(extfl)-1, 1, extfl))
@@ -4059,9 +4732,9 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
       CHECK_LIMIT();
       
       if (!got_two) {
-        scheme_generate(app->args[2], jitter, 0, 0, 0, JIT_R1, NULL);
+        scheme_generate(app->args[2], jitter, 0, 0, 0, JIT_R1, NULL, NULL);
         CHECK_LIMIT();
-        scheme_generate(app->args[1], jitter, 0, 0, 0, JIT_R0, NULL);
+        scheme_generate(app->args[1], jitter, 0, 0, 0, JIT_R0, NULL, NULL);
         mz_runstack_unskipped(jitter, 3);
       } else {
         mz_rs_ldr(JIT_R0);
@@ -4082,8 +4755,8 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
                      jit_lshi_ul(JIT_R1, JIT_R1, JIT_LOG_DOUBLE_SIZE));
       if (!is_f64) {
         MZ_FPUSEL_STMT(extfl,
-                       jit_addi_ul(JIT_R1, JIT_R1, (int)(&SCHEME_EXTFLVEC_ELS(0x0))),
-                       jit_addi_ul(JIT_R1, JIT_R1, (int)(&SCHEME_FLVEC_ELS(0x0))));
+                       jit_addi_ul(JIT_R1, JIT_R1, (intptr_t)(&SCHEME_EXTFLVEC_ELS(0x0))),
+                       jit_addi_ul(JIT_R1, JIT_R1, (intptr_t)(&SCHEME_FLVEC_ELS(0x0))));
       }
       MZ_FPUSEL_STMT(extfl,
                      jit_fpu_stxr_ld_fppop(JIT_R1, JIT_R0, JIT_FPU_FPR0),
@@ -4105,7 +4778,7 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
       star = IS_NAMED_PRIM(rator, "list*");
 
       if (c)
-        scheme_generate_app(app, NULL, c, jitter, 0, 0, 0, 2);
+        scheme_generate_app(app, NULL, c, c, jitter, 0, 0, 0, 2);
       CHECK_LIMIT();
       mz_rs_sync();
 
@@ -4144,7 +4817,7 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
         jit_pusharg_l(JIT_R0);
         jit_pusharg_p(JIT_RUNSTACK);
         {
-          GC_CAN_IGNORE jit_insn *refr;
+          GC_CAN_IGNORE jit_insn *refr USED_ONLY_FOR_FUTURES;
           if (star)
             (void)mz_finish_lwe(ts_scheme_jit_make_list_star, refr);
           else
@@ -4166,7 +4839,7 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
       if (!multi_ok) return 0;
 
       if (c) {
-        scheme_generate_app(app, NULL, c, jitter, 0, 0, 0, 2);
+        scheme_generate_app(app, NULL, c, c, jitter, 0, 0, 0, 2);
         CHECK_LIMIT();
         mz_rs_sync();
 
@@ -4178,8 +4851,8 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
         mz_runstack_popped(jitter, c);
       } else {
         mz_tl_ldi_p(JIT_R2, tl_scheme_current_thread);
-        jit_stixi_l(((int)&((Scheme_Thread *)0x0)->ku.multiple.count), JIT_R2, 0);
-        jit_stixi_p(((int)&((Scheme_Thread *)0x0)->ku.multiple.array), JIT_R2, NULL);
+        jit_stixi_l(&((Scheme_Thread *)0x0)->ku.multiple.count, JIT_R2, 0);
+        jit_stixi_p(&((Scheme_Thread *)0x0)->ku.multiple.array, JIT_R2, NULL);
         (void)jit_movi_p(dest, SCHEME_MULTIPLE_VALUES);
       }
 
@@ -4203,7 +4876,7 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
     } else if (IS_NAMED_PRIM(rator, "max")) {
       return scheme_generate_nary_arith(jitter, app, ARITH_MAX, 0, NULL, 1, dest);
     } else if (IS_NAMED_PRIM(rator, "checked-procedure-check-and-extract")) {
-      scheme_generate_app(app, NULL, 5, jitter, 0, 0, 0, 2);  /* sync'd below */
+      scheme_generate_app(app, NULL, 5, 5, jitter, 0, 0, 0, 2);  /* sync'd below */
       CHECK_LIMIT();
       mz_rs_sync();
 
@@ -4213,6 +4886,297 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
 
       mz_rs_inc(5);
       mz_runstack_popped(jitter, 5);
+
+      return 1;
+    } else if (IS_NAMED_PRIM(rator, "ptr-ref")
+               || IS_NAMED_PRIM(rator, "ptr-set!")) {
+      int n = app->num_args, is_ref, step_shift = 0, want_int_min = 0, want_int_max = 0;
+      int abs_offset;
+      Scheme_Type want_type;
+      Scheme_Object *ctype;
+      GC_CAN_IGNORE jit_insn *refslow, *reffast = NULL;
+
+      is_ref = IS_NAMED_PRIM(rator, "ptr-ref");
+      abs_offset = (n == (is_ref ? 4 : 5));
+           
+      scheme_generate_app(app, NULL, n, n, jitter, 0, 0, 0, 2);  /* sync'd below */
+      CHECK_LIMIT();
+      mz_rs_sync();
+
+      ctype = app->args[2];
+
+      if (abs_offset
+          && (!SCHEME_SYMBOLP(app->args[3])
+              || SCHEME_SYM_WEIRDP(app->args[3])
+              || strcmp("abs", SCHEME_SYM_VAL(app->args[3])))) {
+        want_type = 0;
+      } else if (ctype == scheme_pointer_ctype) {
+        if (is_ref) {
+          want_type = 0;
+        } else {
+          want_type = scheme_cpointer_type;
+          step_shift = JIT_LOG_WORD_SIZE;
+        }
+      } else if (ctype == scheme_double_ctype) {
+        want_type = scheme_double_type;
+        step_shift = 3;
+#ifndef CAN_INLINE_ALLOC
+        if (is_ref) want_type = 0;
+#endif
+      } else if (ctype == scheme_float_ctype) {
+        want_type = scheme_double_type;
+        step_shift = 2;
+#ifndef CAN_INLINE_ALLOC
+        if (is_ref) want_type = 0;
+#endif
+      } else if ((ctype == scheme_int8_ctype)
+                 || (ctype == scheme_uint8_ctype)) {
+        want_type = scheme_integer_type;
+        step_shift = 0;
+        if (app->args[2] == scheme_int8_ctype) {
+          want_int_min = -128;
+          want_int_max = 127;
+        } else {
+          want_int_max = 255;
+        }
+      } else if ((ctype == scheme_int16_ctype)
+                 || (ctype == scheme_uint16_ctype)) {
+        want_type = scheme_integer_type;
+        step_shift = 1;
+        if (app->args[2] == scheme_int16_ctype) {
+          want_int_min = -32768;
+          want_int_max = 32767;
+        } else {
+          want_int_max = 65535;
+        }
+      } else if ((ctype == scheme_int32_ctype)
+                 || (ctype == scheme_uint32_ctype)) {
+        want_type = scheme_integer_type;
+        step_shift = 2;
+#ifdef SIXTY_FOUR_BIT_INTEGERS
+      } else if ((ctype == scheme_int64_ctype)
+                 || (ctype == scheme_uint64_ctype)) {
+        want_type = scheme_integer_type;
+        step_shift = 3;
+#endif
+      } else
+        want_type = 0;
+
+      __START_SHORT_JUMPS__(1);
+              
+      if (want_type) {
+        mz_rs_ldr(JIT_R0);
+        reffast = jit_bmci_ul(jit_forward(), JIT_R0, 0x1);
+      }
+
+      refslow = jit_get_ip();
+      jit_movi_i(JIT_R0, n);
+      if (is_ref) {
+        (void)jit_calli(sjc.slow_ptr_ref_code);
+        jit_movr_p(dest, JIT_R0);
+      } else
+        (void)jit_calli(sjc.slow_ptr_set_code);
+      CHECK_LIMIT();
+      
+      if (want_type) {
+        GC_CAN_IGNORE jit_insn *refdone, *refok;
+        refdone = jit_jmpi(jit_forward());
+        mz_patch_branch(reffast);
+
+        /* JIT_V1 will contain an offset
+           JIT_R0 will contain the pointer
+           In set mode, JIT_R1 will contain the new value */
+
+        if ((n == (is_ref ? 3 : 4)) || (n == (is_ref ? 4 : 5))) {
+          mz_rs_ldxi(JIT_V1, n - (is_ref ? 1 : 2));
+          (void)jit_bmci_ul(refslow, JIT_V1, 0x1);
+          jit_rshi_l(JIT_V1, JIT_V1, 1);
+          if (!abs_offset) {
+            jit_lshi_l(JIT_V1, JIT_V1, step_shift);
+          }
+        } else {
+          jit_movi_ul(JIT_V1, 0);
+        }
+        
+        (void)mz_bnei_t(refslow, JIT_R0, scheme_cpointer_type, JIT_R2);
+        jit_ldxi_s(JIT_R2, JIT_R0, (intptr_t)&SCHEME_CPTR_FLAGS((Scheme_Chaperone *)0x0));
+        refok = jit_bmci_ul(jit_forward(), JIT_R2, 0x2);
+        jit_ldxi_l(JIT_R2, JIT_R0, (intptr_t)&((Scheme_Offset_Cptr *)0x0)->offset);
+        jit_addr_l(JIT_V1, JIT_V1, JIT_R2);
+        mz_patch_branch(refok);
+        jit_ldxi_p(JIT_R0, JIT_R0, (intptr_t)&((Scheme_Cptr *)0x0)->val);
+        jit_addr_p(JIT_R0, JIT_R0, JIT_V1);
+        CHECK_LIMIT();
+
+        /* At this point, JIT_V1 is folded into JIT_R0 */
+
+        if (!is_ref) {
+          mz_rs_ldxi(JIT_R1, n-1);
+          if (want_type == scheme_integer_type) {
+            (void)jit_bmci_ul(refslow, JIT_R1, 0x1);
+            jit_rshi_l(JIT_R1, JIT_R1, 1);
+            if (want_int_max) {
+              (void)jit_blti_l(refslow, JIT_R1, want_int_min);
+              (void)jit_bgti_l(refslow, JIT_R1, want_int_max);
+            } else {
+#ifdef SIXTY_FOUR_BIT_INTEGERS
+              if (((ctype == scheme_int32_ctype)
+                   || (ctype == scheme_uint32_ctype))) {
+                jit_rshi_ul(JIT_R2, JIT_R1, 32);
+                jit_extr_i_l(JIT_R2, JIT_R2);
+                (void)jit_bgti_l(refslow, JIT_R2, 0);
+                (void)jit_blti_l(refslow, JIT_R2, -1);
+              } else if (ctype == scheme_uint64_ctype) {
+                (void)jit_blti_l(refslow, JIT_R1, 0);
+              }
+#endif
+            }
+          } else {
+            (void)jit_bmsi_ul(refslow, JIT_R1, 0x1);
+            (void)mz_bnei_t(refslow, JIT_R1, want_type, JIT_R2);
+          }
+        }
+        
+        if (ctype == scheme_pointer_ctype) {
+          if (is_ref) {
+            scheme_signal_error("internal error: _pointer reference not implemented");
+          } else {
+            jit_movi_l(JIT_V1, 0);
+            jit_ldxi_s(JIT_R2, JIT_R1, (intptr_t)&SCHEME_CPTR_FLAGS((Scheme_Chaperone *)0x0));
+            refok = jit_bmci_ul(jit_forward(), JIT_R2, 0x2);
+            jit_ldxi_l(JIT_V1, JIT_R1, (intptr_t)&((Scheme_Offset_Cptr *)0x0)->offset);
+            mz_patch_branch(refok);
+            jit_ldxi_p(JIT_R1, JIT_R1, (intptr_t)&((Scheme_Cptr *)0x0)->val);
+            jit_addr_p(JIT_R1, JIT_R1, JIT_V1);
+            jit_str_p(JIT_R0, JIT_R1);
+          }
+        } else if (ctype == scheme_double_ctype) {
+          if (is_ref) {
+            jit_ldr_d_fppush(JIT_FPR0, JIT_R0);
+            CHECK_LIMIT();
+            __END_SHORT_JUMPS__(1);
+            scheme_generate_alloc_double(jitter, 0, dest);
+            __START_SHORT_JUMPS__(1);
+            CHECK_LIMIT();
+          } else {
+            jit_ldxi_d_fppush(JIT_FPR0, JIT_R1, &((Scheme_Double *)0x0)->double_val);
+            jit_str_d_fppop(JIT_R0, JIT_FPR0);
+          }
+        } else if (ctype == scheme_float_ctype) {
+          if (is_ref) {
+            jit_ldr_f_fppush(JIT_FPR0, JIT_R0);
+            jit_extr_f_d(JIT_FPR0, JIT_FPR0);
+            CHECK_LIMIT();
+            __END_SHORT_JUMPS__(1);
+            scheme_generate_alloc_double(jitter, 0, dest);
+            __START_SHORT_JUMPS__(1);
+            CHECK_LIMIT();
+          } else {
+            jit_ldxi_d_fppush(JIT_FPR0, JIT_R1, &((Scheme_Double *)0x0)->double_val);
+            jit_extr_d_f(JIT_FPR0, JIT_FPR0);
+            jit_str_f_fppop(JIT_R0, JIT_FPR0);
+          }
+        } else if (ctype == scheme_int8_ctype) {
+          if (is_ref) {
+            jit_ldr_c(JIT_R1, JIT_R0);
+            jit_extr_c_l(JIT_R1, JIT_R1);
+            jit_fixnum_l(dest, JIT_R1);
+          } else {
+            jit_str_c(JIT_R0, JIT_R1);
+          }
+        } else if (ctype == scheme_uint8_ctype) {
+          if (is_ref) {
+            jit_ldr_uc(JIT_R1, JIT_R0);
+            jit_extr_uc_l(JIT_R1, JIT_R1);
+            jit_fixnum_l(dest, JIT_R1);
+          } else {
+            jit_str_uc(JIT_R0, JIT_R1);
+          }
+        } else if (ctype == scheme_int16_ctype) {
+          if (is_ref) {
+            jit_ldr_s(JIT_R1, JIT_R0);
+            jit_extr_s_l(JIT_R1, JIT_R1);
+            jit_fixnum_l(dest, JIT_R1);
+          } else {
+            jit_str_s(JIT_R0, JIT_R1);
+          }
+        } else if (ctype == scheme_uint16_ctype) {
+          if (is_ref) {
+            jit_ldr_us(JIT_R1, JIT_R0);
+            jit_extr_us_l(JIT_R1, JIT_R1);
+            jit_fixnum_l(dest, JIT_R1);
+          } else {
+            jit_str_us(JIT_R0, JIT_R1);
+          }
+        } else if (ctype == scheme_int32_ctype) {
+          if (is_ref) {
+            jit_ldr_i(JIT_R1, JIT_R0);
+#ifdef SIXTY_FOUR_BIT_INTEGERS
+            jit_extr_i_l(JIT_R1, JIT_R1);
+            jit_fixnum_l(dest, JIT_R1);
+#else
+            jit_fixnum_l(JIT_R0, JIT_R1);
+            jit_lshi_l(JIT_R2, JIT_R0, 1);
+            (void)jit_bner_l(refslow, JIT_R1, JIT_R2);
+            jit_movr_p(dest, JIT_R0);
+#endif
+          } else {
+            jit_str_i(JIT_R0, JIT_R1);
+          }
+        } else if (ctype == scheme_uint32_ctype) {
+          if (is_ref) {
+            jit_ldr_i(JIT_R1, JIT_R0);
+#ifdef SIXTY_FOUR_BIT_INTEGERS
+            jit_extr_ui_l(JIT_R1, JIT_R1);
+            jit_fixnum_l(dest, JIT_R1);
+#else
+            (void)jit_blti_l(refslow, JIT_R1, 0);
+            jit_fixnum_l(JIT_R0, JIT_R1);
+            jit_lshi_l(JIT_R2, JIT_R0, 1);
+            (void)jit_bner_l(refslow, JIT_R1, JIT_R2);
+            jit_movr_p(dest, JIT_R0);
+#endif
+          } else {
+            jit_str_ui(JIT_R0, JIT_R1);
+          }
+#ifdef SIXTY_FOUR_BIT_INTEGERS
+        } else if (ctype == scheme_int64_ctype) {
+          if (is_ref) {
+            jit_ldr_l(JIT_R1, JIT_R0);
+            jit_fixnum_l(JIT_R0, JIT_R1);
+            jit_lshi_l(JIT_R2, JIT_R0, 1);
+            (void)jit_bner_l(refslow, JIT_R1, JIT_R2);
+            jit_movr_p(dest, JIT_R0);
+          } else {
+            jit_str_l(JIT_R0, JIT_R1);
+          }
+        } else if (ctype == scheme_uint64_ctype) {
+          if (is_ref) {
+            jit_ldr_l(JIT_R1, JIT_R0);
+            (void)jit_blti_l(refslow, JIT_R1, 0);
+            jit_fixnum_l(JIT_R0, JIT_R1);
+            jit_lshi_l(JIT_R2, JIT_R0, 1);
+            (void)jit_bner_l(refslow, JIT_R1, JIT_R2);
+            jit_movr_p(dest, JIT_R0);
+          } else {
+            jit_str_ul(JIT_R0, JIT_R1);
+          }
+#endif
+        } else {
+          scheme_signal_error("internal error: unhandled ctype");
+        }
+
+        CHECK_LIMIT();
+        mz_patch_ucbranch(refdone);
+      }
+      
+      __END_SHORT_JUMPS__(1);
+
+      mz_rs_inc(n); /* no sync */
+      mz_runstack_popped(jitter, n);
+
+      if (!is_ref && !result_ignored)
+        (void)jit_movi_p(dest, scheme_void);
 
       return 1;
     }
@@ -4257,7 +5221,7 @@ int scheme_generate_cons_alloc(mz_jit_state *jitter, int rev, int inline_retry, 
     jit_pusharg_p(JIT_R0);
   }
   {
-    GC_CAN_IGNORE jit_insn *refr;
+    GC_CAN_IGNORE jit_insn *refr USED_ONLY_FOR_FUTURES;
     (void)mz_finish_lwe(ts_scheme_make_pair, refr);
   }
   jit_retval(dest);
@@ -4287,7 +5251,7 @@ static int generate_vector_alloc(mz_jit_state *jitter, Scheme_Object *rator,
   } else {
     c = app->num_args;
     if (c)
-      scheme_generate_app(app, NULL, c, jitter, 0, 0, 0, 2);  /* sync'd below */
+      scheme_generate_app(app, NULL, c, c, jitter, 0, 0, 0, 2);  /* sync'd below */
   }
   CHECK_LIMIT();
 
@@ -4315,7 +5279,7 @@ static int generate_vector_alloc(mz_jit_state *jitter, Scheme_Object *rator,
 #else
   {
     /* Non-inlined */
-    GC_CAN_IGNORE jit_insn *refr;
+    GC_CAN_IGNORE jit_insn *refr USED_ONLY_FOR_FUTURES;
     JIT_UPDATE_THREAD_RSPTR_IF_NEEDED();
     if (c == 1) {
       mz_prepare(1);
@@ -4366,17 +5330,49 @@ static int generate_vector_alloc(mz_jit_state *jitter, Scheme_Object *rator,
   return 1;
 }
 
+int generate_make_vector_alloc(mz_jit_state *jitter,
+                               Scheme_Object *rator,
+                               Scheme_Object *rand1, Scheme_Object *rand2,
+                               int dest)
+/* de-sync'd ok */
+{
+  GC_CAN_IGNORE jit_insn *refrts USED_ONLY_FOR_FUTURES;
+  Scheme_Object *args[3];
+  int argc = (rand2 ? 2 : 1);
+
+  args[0] = rator;
+  args[1] = rand1;
+  args[2] = rand2;
+
+  scheme_generate_app(NULL, args, argc, argc, jitter, 0, 0, 0, 2);
+
+  mz_rs_sync();
+  JIT_UPDATE_THREAD_RSPTR_IF_NEEDED();
+
+  jit_movi_i(JIT_R1, argc);
+
+  jit_prepare(1);
+  jit_pusharg_i(JIT_R1);
+  (void)mz_finish_lwe(checked_make_vector, refrts);
+  jit_retval(dest);
+
+  jit_addi_l(JIT_RUNSTACK, JIT_RUNSTACK, WORDS_TO_BYTES(argc));
+  mz_runstack_popped(jitter, argc);
+
+  return 1;
+}
+
 int scheme_generate_inlined_test(mz_jit_state *jitter, Scheme_Object *obj, int branch_short, 
-                                 Branch_Info *for_branch, int need_sync)
+                                 Branch_Info *for_branch)
 /* de-sync'd ok; syncs before jump */
 {
   switch (SCHEME_TYPE(obj)) {
   case scheme_application_type:
     return scheme_generate_inlined_nary(jitter, (Scheme_App_Rec *)obj, 0, 0, for_branch, branch_short, 0, JIT_R0);
   case scheme_application2_type:
-    return scheme_generate_inlined_unary(jitter, (Scheme_App2_Rec *)obj, 0, 0, for_branch, branch_short, need_sync, 0, JIT_R0);
+    return scheme_generate_inlined_unary(jitter, (Scheme_App2_Rec *)obj, 0, 0, for_branch, branch_short, 0, JIT_R0);
   case scheme_application3_type:
-    return scheme_generate_inlined_binary(jitter, (Scheme_App3_Rec *)obj, 0, 0, for_branch, branch_short, need_sync, 0, JIT_R0);
+    return scheme_generate_inlined_binary(jitter, (Scheme_App3_Rec *)obj, 0, 0, for_branch, branch_short, 0, JIT_R0);
   }
 
   return 0;

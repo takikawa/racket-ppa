@@ -1,6 +1,6 @@
 #lang racket/base
 (require (for-syntax racket/base
-                     racket/set
+                     "dset.rkt"
                      racket/syntax
                      syntax/parse/private/minimatch
                      racket/private/stx ;; syntax/stx
@@ -42,6 +42,7 @@ A HeadTemplate (H) is one of:
 
 (begin-for-syntax
  (define (do-template ctx tstx quasi? loc-id)
+   (with-disappeared-uses
    (parameterize ((current-syntax-context ctx)
                   (quasi (and quasi? (box null))))
      (let*-values ([(guide deps props-guide) (parse-template tstx loc-id)]
@@ -74,7 +75,7 @@ A HeadTemplate (H) is one of:
                        (substitute (quote-syntax t)
                                    'props-guide
                                    'guide
-                                   vars-vector)))])))))))
+                                   vars-vector)))]))))))))
 
 (define-syntax (template stx)
   (syntax-case stx ()
@@ -229,19 +230,19 @@ instead of integers and integer vectors.
                   (if loc-id
                       (let* ([loc-sm (make-syntax-mapping 0 loc-id)]
                              [loc-pvar (pvar loc-sm #f #f)])
-                        (values (set-union drivers (set loc-pvar))
+                        (values (dset-add drivers loc-pvar)
                                 (relocate-guide pre-guide loc-pvar)))
                       (values drivers pre-guide))])
-     (let* ([main-env (set->env drivers (hash))]
+     (let* ([main-env (dset->env drivers (hash))]
             [guide (guide-resolve-env pre-guide main-env)])
        (values guide
                (index-hash->vector main-env)
                props-guide))))
 
- ;; set->env : (setof env-entry) -> hash[env-entry => nat]
- (define (set->env drivers init-env)
+ ;; dset->env : (dsetof env-entry) -> hash[env-entry => nat]
+ (define (dset->env drivers init-env)
    (for/fold ([env init-env])
-       ([pvar (in-set drivers)]
+       ([pvar (in-list (dset->list drivers))]
         [n (in-naturals (+ 1 (hash-count init-env)))])
      (hash-set env pvar n)))
 
@@ -265,7 +266,7 @@ instead of integers and integer vectors.
         (let-values ([(sub-loop-env r-uptos)
                       (for/fold ([env (hash)] [r-uptos null])
                           ([new-hdrivers (in-list new-hdrivers/level)])
-                        (let ([new-env (set->env new-hdrivers env)])
+                        (let ([new-env (dset->env new-hdrivers env)])
                           (values new-env (cons (hash-count new-env) r-uptos))))])
           (let ([sub-loop-vector (index-hash->vector sub-loop-env get-index)])
             (vector 'dots
@@ -278,18 +279,10 @@ instead of integers and integer vectors.
         (vector 'app (loop head loop-env) (loop tail loop-env))]
        [(vector 'escaped g1)
         (vector 'escaped (loop g1 loop-env))]
-       [(vector 'orelse g1 drivers1 g2)
-        (vector 'orelse
-                (loop g1 loop-env)
-                (for/vector ([ee (in-set drivers1)])
-                  (get-index ee))
-                (loop g2 loop-env))]
-       [(vector 'orelse-h g1 drivers1 g2)
-        (vector 'orelse-h
-                (loop g1 loop-env)
-                (for/vector ([ee (in-set drivers1)])
-                  (get-index ee))
-                (loop g2 loop-env))]
+       [(vector 'orelse g1 g2)
+        (vector 'orelse (loop g1 loop-env) (loop g2 loop-env))]
+       [(vector 'orelse-h g1 g2)
+        (vector 'orelse-h (loop g1 loop-env) (loop g2 loop-env))]
        [(vector 'metafun mf g1)
         (vector 'metafun
                 (get-index mf)
@@ -304,11 +297,8 @@ instead of integers and integer vectors.
         (vector 'copy-props (loop g1 loop-env) keys)]
        [(vector 'set-props g1 props-alist)
         (vector 'set-props (loop g1 loop-env) props-alist)]
-       [(vector 'app-opt g1 drivers1)
-        (vector 'app-opt
-                (loop g1 loop-env)
-                (for/vector ([ee (in-set drivers1)])
-                  (get-index ee)))]
+       [(vector 'app-opt g1)
+        (vector 'app-opt (loop g1 loop-env))]
        [(vector 'splice g1)
         (vector 'splice (loop g1 loop-env))]
        [(vector 'unsyntax var)
@@ -361,13 +351,13 @@ instead of integers and integer vectors.
           [(vector 'unsyntax-splicing _) g]
           [_ (error/no-relocate)])]
        ;; ----
-       [(vector 'orelse g1 drivers1 g2)
+       [(vector 'orelse g1 g2)
         (error/no-relocate)]
-       [(vector 'orelse-h g1 drivers1 g2)
+       [(vector 'orelse-h g1 g2)
         (error/no-relocate)]
        [(vector 'metafun mf g1)
         (error/no-relocate)]
-       [(vector 'app-opt g1 drivers1)
+       [(vector 'app-opt g1)
         (error/no-relocate)]
        [(vector 'splice g1)
         (error/no-relocate)]
@@ -413,11 +403,13 @@ instead of integers and integer vectors.
        (char? v)
        (keyword? v)
        (regexp? v)
+       (byte-regexp? v)
        (and (box? v) (quotable? (unbox v)))
        (and (symbol? v) (symbol-interned? v))
        (and (pair? v) (quotable? (car v)) (quotable? (cdr v)))
        (and (vector? v) (andmap quotable? (vector->list v)))
-       (and (prefab-struct-key v) (andmap quotable? (struct->vector v)))))
+       (and (hash? v) (andmap quotable? (hash->list v)))
+       (and (prefab-struct-key v) (andmap quotable? (cdr (vector->list (struct->vector v)))))))
 
  (define (cons-guide g1 g2)
    (if (and (eq? g1 '_) (eq? g2 '_)) '_ (cons g1 g2)))
@@ -425,7 +417,7 @@ instead of integers and integer vectors.
  (define (list-guide . gs)
    (foldr cons-guide '_ gs))
 
- ;; parse-t : stx nat boolean -> (values (setof env-entry) pre-guide props-guide)
+ ;; parse-t : stx nat boolean -> (values (dsetof env-entry) pre-guide props-guide)
  (define (parse-t t depth esc?)
    (syntax-case t (?? ?@ unsyntax quasitemplate)
      [id
@@ -441,18 +433,18 @@ instead of integers and integer vectors.
             [else
              (let ([pvar (lookup #'id depth)])
                (cond [(pvar? pvar)
-                      (values (set pvar) pvar '_)]
+                      (values (dset pvar) pvar '_)]
                      [(template-metafunction? pvar)
                       (wrong-syntax t "illegal use of syntax metafunction")]
                      [else
-                      (wrap-props #'id (set) '_ '_)]))])]
+                      (wrap-props #'id (dset) '_ '_)]))])]
      [(mf . template)
       (and (not esc?)
            (identifier? #'mf)
            (template-metafunction? (lookup #'mf #f)))
       (let-values ([(mf) (lookup #'mf #f)]
                    [(drivers guide props-guide) (parse-t #'template depth esc?)])
-        (values (set-union (set mf) drivers)
+        (values (dset-add drivers mf)
                 (vector 'metafun mf guide)
                 (cons-guide '_ props-guide)))]
      [(unsyntax t1)
@@ -463,7 +455,7 @@ instead of integers and integer vectors.
                  (set-box! qval (cons (cons #'tmp t) (unbox qval)))
                  (let* ([fake-sm (make-syntax-mapping 0 #'tmp)]
                         [fake-pvar (pvar fake-sm #f #f)])
-                   (values (set fake-pvar) (vector 'unsyntax fake-pvar) '_)))]
+                   (values (dset fake-pvar) (vector 'unsyntax fake-pvar) '_)))]
               [else
                (parameterize ((quasi (car qval)))
                  (let-values ([(drivers guide props-guide) (parse-t #'t1 depth esc?)])
@@ -490,8 +482,8 @@ instead of integers and integer vectors.
       (not esc?)
       (let-values ([(drivers1 guide1 props-guide1) (parse-t #'t1 depth esc?)]
                    [(drivers2 guide2 props-guide2) (parse-t #'t2 depth esc?)])
-        (values (set-union drivers1 drivers2)
-                (vector 'orelse guide1 (set-filter drivers1 pvar?) guide2)
+        (values (dset-union drivers1 drivers2)
+                (vector 'orelse guide1 guide2)
                 (list-guide '_ props-guide1 props-guide2)))]
      [(head DOTS . tail)
       (and (not esc?)
@@ -507,26 +499,26 @@ instead of integers and integer vectors.
                       (parse-h #'head (+ depth nesting) esc?)]
                      [(tdrivers tguide tprops-guide)
                       (parse-t tail depth esc?)])
-          (when (set-empty? hdrivers)
+          (when (dset-empty? hdrivers)
             (wrong-syntax #'head "no pattern variables before ellipsis in template"))
-          (when (set-empty? (set-filter hdrivers (pvar/dd<=? depth)))
+          (when (dset-empty? (dset-filter hdrivers (pvar/dd<=? depth)))
             ;; FIXME: improve error message?
             (let ([bad-dots
                    ;; select the nestingth (last) ellipsis as the bad one
                    (stx-car (stx-drop nesting t))])
               (wrong-syntax bad-dots "too many ellipses in template")))
           (wrap-props t
-                      (set-union hdrivers tdrivers)
+                      (dset-union hdrivers tdrivers)
                       ;; pre-guide hdrivers is (listof (setof pvar))
                       ;; set of pvars new to each level
                       (let* ([hdrivers/level
                               (for/list ([i (in-range nesting)])
-                                (set-filter hdrivers (pvar/dd<=? (+ depth i))))]
+                                (dset-filter hdrivers (pvar/dd<=? (+ depth i))))]
                              [new-hdrivers/level
-                              (let loop ([raw hdrivers/level] [last (set)])
+                              (let loop ([raw hdrivers/level] [last (dset)])
                                 (cond [(null? raw) null]
                                       [else
-                                       (cons (set-subtract (car raw) last)
+                                       (cons (dset-subtract (car raw) last)
                                              (loop (cdr raw) (car raw)))]))])
                         (vector 'dots hguide new-hdrivers/level nesting #f tguide))
                       (cons-guide hprops-guide (cons-guide '_ tprops-guide)))))]
@@ -536,7 +528,7 @@ instead of integers and integer vectors.
                    [(tdrivers tguide tprops-guide)
                     (parse-t #'tail depth esc?)])
         (wrap-props t
-                    (set-union hdrivers tdrivers)
+                    (dset-union hdrivers tdrivers)
                     (cond [(and (eq? hguide '_) (eq? tguide '_)) '_]
                           [hsplice? (vector 'app hguide tguide)]
                           [else (cons hguide tguide)])
@@ -562,9 +554,9 @@ instead of integers and integer vectors.
                     (if (eq? guide '_) '_ (vector 'box guide))
                     (if (eq? props-guide '_) '_ (vector 'box props-guide))))]
      [const
-      (wrap-props t (set) '_ '_)]))
+      (wrap-props t (dset) '_ '_)]))
 
- ;; parse-h : stx nat boolean -> (values (setof env-entry) boolean pre-head-guide props-guide)
+ ;; parse-h : stx nat boolean -> (values (dsetof env-entry) boolean pre-head-guide props-guide)
  (define (parse-h h depth esc?)
    (syntax-case h (?? ?@ unsyntax-splicing)
      [(?? t)
@@ -572,16 +564,16 @@ instead of integers and integer vectors.
       (let-values ([(drivers splice? guide props-guide)
                     (parse-h #'t depth esc?)])
         (values drivers #t
-                (vector 'app-opt guide (set-filter drivers pvar?))
+                (vector 'app-opt guide)
                 (list-guide '_ props-guide)))]
      [(?? t1 t2)
       (not esc?)
       (let-values ([(drivers1 splice?1 guide1 props-guide1) (parse-h #'t1 depth esc?)]
                    [(drivers2 splice?2 guide2 props-guide2) (parse-h #'t2 depth esc?)])
-        (values (set-union drivers1 drivers2)
+        (values (dset-union drivers1 drivers2)
                 (or splice?1 splice?2)
                 (vector (if (or splice?1 splice?2) 'orelse-h 'orelse)
-                        guide1 (set-filter drivers1 pvar?) guide2)
+                        guide1 guide2)
                 (list-guide '_ props-guide1 props-guide2)))]
      [(?@ . t)
       (not esc?)
@@ -595,7 +587,7 @@ instead of integers and integer vectors.
                  (set-box! qval (cons (cons #'tmp h) (unbox qval)))
                  (let* ([fake-sm (make-syntax-mapping 0 #'tmp)]
                         [fake-pvar (pvar fake-sm #f #f)])
-                   (values (set fake-pvar) #t (vector 'unsyntax-splicing fake-pvar) '_)))]
+                   (values (dset fake-pvar) #t (vector 'unsyntax-splicing fake-pvar) '_)))]
               [else
                (parameterize ((quasi (car qval)))
                  (let*-values ([(drivers guide props-guide) (parse-t #'t1 depth esc?)]
@@ -609,12 +601,9 @@ instead of integers and integer vectors.
       (let-values ([(drivers guide props-guide) (parse-t #'t depth esc?)])
         (values drivers #f guide props-guide))]))
 
- ;; Note: always creates equal?-based set.
- (define (set-filter s pred?)
-   (for/set ([el (in-set s)] #:when (pred? el)) el))
-
  (define (lookup id depth)
-   (let ([v (syntax-local-value id (lambda () #f))])
+   (let ([v (syntax-local-value/record id (lambda (v) (or (syntax-pattern-variable? v)
+                                                          (template-metafunction? v))))])
      (cond [(syntax-pattern-variable? v)
             (let* ([pvar-depth (syntax-mapping-depth v)]
                    [attr (syntax-local-value (syntax-mapping-valvar v) (lambda () #f))]

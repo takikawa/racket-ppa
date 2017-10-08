@@ -1,14 +1,26 @@
 #lang racket/base
-(require ffi/unsafe
-         ffi/unsafe/define)
+(require (for-syntax racket/base
+                     setup/cross-system)
+         racket/runtime-path
+         racket/string
+         ffi/unsafe
+         ffi/unsafe/define
+         setup/cross-system)
 (require "ffi-constants.rkt")
 (provide (all-from-out "ffi-constants.rkt")
          (protect-out (all-defined-out)))
 
+;; raco distribute should include Racket's sqlite3 if present
+(define-runtime-path sqlite-so
+  #:runtime?-id runtime?
+  (case (if runtime? (system-type) (cross-system-type))
+    [(windows) '(so "sqlite3")]
+    [else '(so "libsqlite3" ("0" #f))]))
+
 (define sqlite-lib
   (case (system-type)
-    [(windows) (ffi-lib "sqlite3.dll" #:fail (lambda () #f))]
-    [else (ffi-lib "libsqlite3" '("0" #f) #:fail (lambda () #f))]))
+    [(windows) (ffi-lib sqlite-so #:fail (lambda () #f))]
+    [else (ffi-lib sqlite-so '("0" #f) #:fail (lambda () #f))]))
 
 (define-ffi-definer define-sqlite
   sqlite-lib
@@ -48,8 +60,8 @@
 
 ;; -- Stmt --
 
-(define (copy-buffer buffer)
-  (let* ([buffer (string->bytes/utf-8 buffer)]
+(define (trim-and-copy-buffer buffer)
+  (let* ([buffer (string->bytes/utf-8 (string-trim #:left? #f buffer))]
          [n (bytes-length buffer)]
          [rawcopy (malloc (add1 n) 'atomic-interior)]
          [copy (make-sized-byte-string rawcopy n)])
@@ -57,26 +69,32 @@
     (ptr-set! rawcopy _byte n 0)
     copy))
 
+(define (points-to-end? tail sql-buffer)
+  (ptr-equal? tail
+              (ptr-add sql-buffer (bytes-length sql-buffer))))
+
 (define-sqlite sqlite3_prepare
   (_fun (db sql) ::
         (db : _sqlite3_database)
-        (sql-buffer : _bytes = (copy-buffer sql))
+        (sql-buffer : _bytes = (trim-and-copy-buffer sql))
         ((bytes-length sql-buffer) : _int)
         (statement : (_ptr o _sqlite3_statement/null))
-        (tail : (_ptr o _bytes)) ;; points into sql-buffer (atomic-interior)
+        (tail : (_ptr o _gcpointer)) ;; points into sql-buffer (atomic-interior)
         -> (result : _int)
-        -> (values result statement (and tail (positive? (bytes-length tail))))))
+        -> (values result statement (and tail
+                                         (not (points-to-end? tail sql-buffer))))))
 
 (define-sqlite sqlite3_prepare_v2
   (_fun (db sql) ::
         (db : _sqlite3_database)
-        (sql-buffer : _bytes = (copy-buffer sql))
+        (sql-buffer : _bytes = (trim-and-copy-buffer sql))
         ((bytes-length sql-buffer) : _int)
         ;; bad prepare statements set statement to NULL, with no error reported
         (statement : (_ptr o _sqlite3_statement/null))
-        (tail : (_ptr o _bytes)) ;; points into sql-buffer (atomic-interior)
+        (tail : (_ptr o _gcpointer)) ;; points into sql-buffer (atomic-interior)
         -> (result : _int)
-        -> (values result statement (and tail (positive? (bytes-length tail)))))
+        -> (values result statement (and tail
+                                         (not (points-to-end? tail sql-buffer)))))
   #:fail (lambda () sqlite3_prepare))
 
 (define-sqlite sqlite3_finalize
@@ -106,6 +124,11 @@
   (_fun _sqlite3_database -> _int))
 (define-sqlite sqlite3_errmsg
   (_fun _sqlite3_database -> _string))
+
+(define-sqlite sqlite3_extended_result_codes
+  (_fun _sqlite3_database _bool -> _int)
+  ;; Ok if it's unavailable:
+  #:fail (lambda () (lambda (db on?) 0)))
 
 ;; ----------------------------------------
 
@@ -138,7 +161,14 @@
   (_fun _sqlite3_statement -> _int))
 
 (define-sqlite sqlite3_clear_bindings
-  (_fun _sqlite3_statement -> _int))
+  (_fun _sqlite3_statement -> _int)
+  #:fail (lambda ()
+           ;; Old versions of SQLite don't have sqlite3_clear_bindings().
+           ;; With this fallback, some SQLite internal parameter
+           ;; buffers won't get cleared at the end of statement
+           ;; execution; they'll get cleared when the statement is
+           ;; next executed or when the statement is closed instead.
+           (lambda (stmt) 0)))
 
 ;; ----------------------------------------
 
@@ -170,10 +200,6 @@
   (_fun _sqlite3_database
         -> _bool))
 
-(define-sqlite sqlite3_next_stmt
-  (_fun _sqlite3_database _sqlite3_statement/null
-        -> _sqlite3_statement/null))
-
 (define-sqlite sqlite3_sql
   (_fun _sqlite3_statement
         -> _string))
@@ -189,64 +215,3 @@
 (define-sqlite sqlite3_last_insert_rowid
   (_fun _sqlite3_database
         -> _int64))
-
-;; ----------------------------------------
-
-#|
-(require (rename-in racket/contract [-> c->]))
-
-(define status? exact-nonnegative-integer?)
-
-;; Contracts
-(provide/contract
- [status?
-  (c-> any/c boolean?)]
- [sqlite3_open_v2
-  (c-> bytes? exact-nonnegative-integer?
-       (values sqlite3_database? status?))]
- [sqlite3_close
-  (c-> sqlite3_database? status?)]
- [sqlite3_prepare_v2
-  (c-> sqlite3_database? string?
-       (values status? (or/c sqlite3_statement? false/c) string?))]
- [sqlite3_errmsg
-  (c-> sqlite3_database? string?)]
- [sqlite3_step
-  (c-> sqlite3_statement? status?)]
- [sqlite3_bind_parameter_count
-  (c-> sqlite3_statement? exact-nonnegative-integer?)]
- [sqlite3_bind_int64
-  (c-> sqlite3_statement? exact-nonnegative-integer? integer? status?)]
- [sqlite3_bind_double
-  (c-> sqlite3_statement? exact-nonnegative-integer? number? status?)]
- [sqlite3_bind_text
-  (c-> sqlite3_statement? exact-nonnegative-integer? string? status?)]
- [sqlite3_bind_null
-  (c-> sqlite3_statement? exact-nonnegative-integer? status?)]
- [sqlite3_bind_blob
-  (c-> sqlite3_statement? exact-nonnegative-integer? bytes? status?)]
- [sqlite3_column_count
-  (c-> sqlite3_statement? exact-nonnegative-integer?)]
- [sqlite3_column_name
-  (c-> sqlite3_statement? exact-nonnegative-integer? string?)]
- [sqlite3_column_type
-  (c-> sqlite3_statement? exact-nonnegative-integer? exact-nonnegative-integer?)]
- [sqlite3_column_decltype
-  (c-> sqlite3_statement? exact-nonnegative-integer? (or/c string? false/c))]
- [sqlite3_column_blob
-  (c-> sqlite3_statement? exact-nonnegative-integer? bytes?)]
- [sqlite3_column_text
-  (c-> sqlite3_statement? exact-nonnegative-integer? string?)]
- [sqlite3_column_int64
-  (c-> sqlite3_statement? exact-nonnegative-integer? integer?)]
- [sqlite3_column_double
-  (c-> sqlite3_statement? exact-nonnegative-integer? number?)]
- [sqlite3_reset
-  (c-> sqlite3_statement? status?)]
- [sqlite3_clear_bindings
-  (c-> sqlite3_statement? status?)]
- [sqlite3_finalize
-  (c-> sqlite3_statement? status?)]
- [sqlite3_get_autocommit
-  (c-> sqlite3_database? boolean?)])
-|#

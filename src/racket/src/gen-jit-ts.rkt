@@ -1,5 +1,5 @@
-#lang at-exp scheme/base
-(require scheme/string)
+#lang at-exp racket/base
+(require racket/string)
 
 (define (char->type c)
   (case c
@@ -7,7 +7,7 @@
     [(#\t) "const Scheme_Object*"]
     [(#\S) "Scheme_Object**"]
     [(#\b) "Scheme_Bucket*"]
-    [(#\n) "Scheme_Native_Closure_Data*"]
+    [(#\n) "Scheme_Native_Lambda*"]
     [(#\m) "MZ_MARK_STACK_TYPE"]
     [(#\p) "void*"]
     [(#\i) "int"]
@@ -153,7 +153,7 @@
    })
    (newline))
 
-(define proto-counter 11)
+(define proto-counter 20)
 
 (define (gen-protos t)
   (define-values (arg-types result-type) (parse-type t))
@@ -191,13 +191,15 @@
     s_v
     iSi_s
     siS_v
+    Sii_s
     z_p
     si_s
     sis_v
     ss_i
     iSp_v
     sss_s
-    _v))
+    _v
+    iS_v))
 
 (with-output-to-file "jit_ts_def.c"
   #:exists 'replace

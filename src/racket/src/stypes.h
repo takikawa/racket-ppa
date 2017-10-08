@@ -1,7 +1,7 @@
 
 enum {
 
-  /* compiled object types: (internal) */
+  /* Compiled bytecode elements: */
   scheme_toplevel_type,                 /* 0 */
   scheme_local_type,                    /* 1 */
   scheme_local_unbox_type,              /* 2 */
@@ -10,7 +10,7 @@ enum {
   scheme_application3_type,             /* 5 */
   scheme_sequence_type,                 /* 6 */
   scheme_branch_type,                   /* 7 */
-  scheme_unclosed_procedure_type,       /* 8 */
+  scheme_lambda_type,                   /* 8 */
   scheme_let_value_type,                /* 9 */
   scheme_let_void_type,                 /* 10 */
   scheme_letrec_type,                   /* 11 */
@@ -28,262 +28,291 @@ enum {
   scheme_require_form_type,             /* 22 */
   scheme_varref_form_type,              /* 23 */
   scheme_apply_values_type,             /* 24 */
-  scheme_case_lambda_sequence_type,     /* 25 */
-  scheme_module_type,                   /* 26 */
-  scheme_inline_variant_type,           /* 27 */
+  scheme_with_immed_mark_type,          /* 25 */
+  scheme_case_lambda_sequence_type,     /* 26 */
+  scheme_module_type,                   /* 27 */
+  scheme_inline_variant_type,           /* 28 */
 
-  _scheme_values_types_, /* All following types are values */
+  _scheme_values_types_,                /* 29 */
+  /* All following types are values at run time */
   
-  /* intermediate compiled: */
-  scheme_compiled_unclosed_procedure_type,/* 29 */
-  scheme_compiled_let_value_type,       /* 30 */
-  scheme_compiled_let_void_type,        /* 31 */
-  scheme_compiled_toplevel_type,        /* 32 */
-  scheme_compiled_quote_syntax_type,    /* 33 */
+  /* Replacements for some of the above as the
+     compiler's intermediate representation for
+     optimization: */
+  scheme_ir_local_type,                 /* 30 */
+  scheme_ir_lambda_type,                /* 31 */
+  scheme_ir_let_value_type,             /* 32 */
+  scheme_ir_let_header_type,            /* 33 */
+  scheme_ir_toplevel_type,              /* 34 */
+  scheme_ir_quote_syntax_type,          /* 35 */
 
   scheme_quote_compilation_type, /* used while writing, only */
 
-  /* Registered in prefix table: */
-  scheme_variable_type,                 /* 35 */
+  /* Generated in the compiler front-end, but
+     registered in the prefix table instead of
+     used directly as an "expression": */
+  scheme_variable_type,                 /* 37 */
   scheme_module_variable_type, /* link replaces with scheme_variable_type */
 
-  _scheme_compiled_values_types_,       /* 37 */
+  _scheme_ir_values_types_,             /* 39 */
+  /* All of the following are literal values from the
+     perspective of the compiler */
 
   /* procedure types */
-  scheme_prim_type,                     /* 38 */
-  scheme_closed_prim_type,              /* 39 */
-  scheme_closure_type,                  /* 40 */
-  scheme_case_closure_type,             /* 41 */
-  scheme_cont_type,                     /* 42 */
-  scheme_escaping_cont_type,            /* 43 */
-  scheme_proc_struct_type,              /* 44 */
-  scheme_native_closure_type,           /* 45 */
-  scheme_proc_chaperone_type,           /* 46 */
+  scheme_prim_type,                     /* 40 */
+  scheme_closed_prim_type,              /* 41 */
+  scheme_closure_type,                  /* 42 */
+  scheme_case_closure_type,             /* 43 */
+  scheme_cont_type,                     /* 44 */
+  scheme_escaping_cont_type,            /* 45 */
+  scheme_proc_struct_type,              /* 46 */
+  scheme_native_closure_type,           /* 47 */
+  scheme_proc_chaperone_type,           /* 48 */
 
-  scheme_chaperone_type,                /* 47 */
+  scheme_chaperone_type,                /* 49 */
 
   /* structure type (plus one above for procs) */
-  scheme_structure_type,                /* 48 */
+  scheme_structure_type,                /* 50 */
 
   /* number types (must be together) */
-  scheme_integer_type,                  /* 49 */
-  scheme_bignum_type,                   /* 50 */
-  scheme_rational_type,                 /* 51 */
-  scheme_float_type,                    /* 52 */
-  scheme_double_type,                   /* 53 */
-  scheme_complex_type,                  /* 54 */
+  scheme_integer_type,                  /* 51 */
+  scheme_bignum_type,                   /* 52 */
+  scheme_rational_type,                 /* 53 */
+  scheme_float_type,                    /* 54 */
+  scheme_double_type,                   /* 55 */
+  scheme_complex_type,                  /* 56 */
 
   /* other eqv?-able values (must be with numbers) */
-  scheme_char_type,                     /* 55 */
+  scheme_char_type,                     /* 57 */
 
   /* other values */
-  scheme_long_double_type,              /* 56 */
-  scheme_char_string_type,              /* 57 */
-  scheme_byte_string_type,              /* 58 */
-  scheme_unix_path_type,                /* 59 */
-  scheme_windows_path_type,             /* 60 */
-  scheme_symbol_type,                   /* 61 */
-  scheme_keyword_type,                  /* 62 */
-  scheme_null_type,                     /* 63 */
-  scheme_pair_type,                     /* 64 */
-  scheme_mutable_pair_type,             /* 65 */
-  scheme_vector_type,                   /* 66 */
-  scheme_inspector_type,                /* 67 */
-  scheme_input_port_type,               /* 68 */
-  scheme_output_port_type,              /* 69 */
-  scheme_eof_type,                      /* 70 */
-  scheme_true_type,                     /* 71 */
-  scheme_false_type,                    /* 72 */
-  scheme_void_type,                     /* 73 */
-  scheme_syntax_compiler_type,          /* 74 */
-  scheme_macro_type,                    /* 75 */
-  scheme_box_type,                      /* 76 */
-  scheme_thread_type,                   /* 77 */
-  scheme_stx_offset_type,               /* 78 */
-  scheme_cont_mark_set_type,            /* 79 */
-  scheme_sema_type,                     /* 80 */
-  scheme_hash_table_type,               /* 81 */
-  scheme_hash_tree_type,                /* 82 */
-  scheme_cpointer_type,                 /* 83 */
-  scheme_prefix_type,                   /* 84 */
-  scheme_weak_box_type,                 /* 85 */
-  scheme_ephemeron_type,                /* 86 */
-  scheme_struct_type_type,              /* 87 */
-  scheme_module_index_type,             /* 88 */
-  scheme_set_macro_type,                /* 89 */
-  scheme_listener_type,                 /* 90 */
-  scheme_namespace_type,                /* 91 */
-  scheme_config_type,                   /* 92 */
-  scheme_stx_type,                      /* 93 */
-  scheme_will_executor_type,            /* 94 */
-  scheme_custodian_type,                /* 95 */
-  scheme_random_state_type,             /* 96 */
-  scheme_regexp_type,                   /* 97 */
-  scheme_bucket_type,                   /* 98 */
-  scheme_bucket_table_type,             /* 99 */
-  scheme_subprocess_type,               /* 100 */
-  scheme_compilation_top_type,          /* 101 */
-  scheme_wrap_chunk_type,               /* 102 */
-  scheme_eval_waiting_type,             /* 103 */
-  scheme_tail_call_waiting_type,        /* 104 */
-  scheme_undefined_type,                /* 105 */
-  scheme_struct_property_type,          /* 106 */
-  scheme_chaperone_property_type,       /* 107 */
-  scheme_multiple_values_type,          /* 108 */
-  scheme_placeholder_type,              /* 109 */
-  scheme_table_placeholder_type,        /* 110 */
-  scheme_rename_table_type,             /* 111 */
-  scheme_rename_table_set_type,         /* 112 */
-  scheme_svector_type,                  /* 113 */
-  scheme_resolve_prefix_type,           /* 114 */
-  scheme_security_guard_type,           /* 115 */
-  scheme_indent_type,                   /* 116 */
-  scheme_udp_type,                      /* 117 */
-  scheme_udp_evt_type,                  /* 118 */
-  scheme_tcp_accept_evt_type,           /* 119 */
-  scheme_id_macro_type,                 /* 120 */
-  scheme_evt_set_type,                  /* 121 */
-  scheme_wrap_evt_type,                 /* 122 */
-  scheme_handle_evt_type,               /* 123 */
-  scheme_nack_guard_evt_type,           /* 124 */
-  scheme_semaphore_repost_type,         /* 125 */
-  scheme_channel_type,                  /* 126 */
-  scheme_channel_put_type,              /* 127 */
-  scheme_thread_resume_type,            /* 128 */
-  scheme_thread_suspend_type,           /* 129 */
-  scheme_thread_dead_type,              /* 130 */
-  scheme_poll_evt_type,                 /* 131 */
-  scheme_nack_evt_type,                 /* 132 */
-  scheme_module_registry_type,          /* 133 */
-  scheme_thread_set_type,               /* 134 */
-  scheme_string_converter_type,         /* 135 */
-  scheme_alarm_type,                    /* 136 */
-  scheme_thread_recv_evt_type,          /* 137 */
-  scheme_thread_cell_type,              /* 138 */
-  scheme_channel_syncer_type,           /* 139 */
-  scheme_special_comment_type,          /* 140 */
-  scheme_write_evt_type,                /* 141 */
-  scheme_always_evt_type,               /* 142 */
-  scheme_never_evt_type,                /* 143 */
-  scheme_progress_evt_type,             /* 144 */
-  scheme_place_dead_type,               /* 145 */
-  scheme_already_comp_type,             /* 146 */
-  scheme_readtable_type,                /* 147 */
-  scheme_intdef_context_type,           /* 148 */
-  scheme_lexical_rib_type,              /* 149 */
-  scheme_thread_cell_values_type,       /* 150 */
-  scheme_global_ref_type,               /* 151 */
-  scheme_cont_mark_chain_type,          /* 152 */
-  scheme_raw_pair_type,                 /* 153 */
-  scheme_prompt_type,                   /* 154 */
-  scheme_prompt_tag_type,               /* 155 */
-  scheme_continuation_mark_key_type,    /* 156 */
-  scheme_expanded_syntax_type,          /* 157 */
-  scheme_delay_syntax_type,             /* 158 */
-  scheme_cust_box_type,                 /* 159 */
-  scheme_resolved_module_path_type,     /* 160 */
-  scheme_module_phase_exports_type,     /* 161 */
-  scheme_logger_type,                   /* 162 */
-  scheme_log_reader_type,               /* 163 */
-  scheme_free_id_info_type,             /* 164 */
-  scheme_rib_delimiter_type,            /* 165 */
-  scheme_noninline_proc_type,           /* 166 */
-  scheme_prune_context_type,            /* 167 */
-  scheme_future_type,                   /* 168 */
-  scheme_flvector_type,                 /* 169 */
-  scheme_extflvector_type,              /* 170 */
-  scheme_fxvector_type,                 /* 171 */
-  scheme_place_type,                    /* 172 */
-  scheme_place_object_type,             /* 173 */
-  scheme_place_async_channel_type,      /* 174 */
-  scheme_place_bi_channel_type,         /* 175 */
-  scheme_once_used_type,                /* 176 */
-  scheme_serialized_symbol_type,        /* 177 */
-  scheme_serialized_structure_type,     /* 178 */
-  scheme_fsemaphore_type,               /* 179 */
-  scheme_serialized_tcp_fd_type,        /* 180 */
-  scheme_serialized_file_fd_type,       /* 181 */
-  scheme_port_closed_evt_type,          /* 182 */
-  scheme_proc_shape_type,               /* 183 */
-  scheme_struct_proc_shape_type,        /* 184 */
-  scheme_phantom_bytes_type,            /* 185 */
+  scheme_long_double_type,              /* 58 */
+  scheme_char_string_type,              /* 59 */
+  scheme_byte_string_type,              /* 60 */
+  scheme_unix_path_type,                /* 61 */
+  scheme_windows_path_type,             /* 62 */
+  scheme_symbol_type,                   /* 63 */
+  scheme_keyword_type,                  /* 64 */
+  scheme_null_type,                     /* 65 */
+  scheme_pair_type,                     /* 66 */
+  scheme_mutable_pair_type,             /* 67 */
+  scheme_vector_type,                   /* 68 */
+  scheme_inspector_type,                /* 69 */
+  scheme_input_port_type,               /* 70 */
+  scheme_output_port_type,              /* 71 */
+  scheme_eof_type,                      /* 72 */
+  scheme_true_type,                     /* 73 */
+  scheme_false_type,                    /* 74 */
+  scheme_void_type,                     /* 75 */
+  scheme_primitive_syntax_type,         /* 76 */
+  scheme_macro_type,                    /* 77 */
+  scheme_box_type,                      /* 78 */
+  scheme_thread_type,                   /* 79 */
+  scheme_scope_type,                    /* 80 */
+  scheme_stx_offset_type,               /* 81 */
+  scheme_cont_mark_set_type,            /* 82 */
+  scheme_sema_type,                     /* 83 */
+  scheme_hash_table_type,               /* 84 */
+  scheme_hash_tree_type,                /* 85 */
+  scheme_eq_hash_tree_type,             /* 86 */
+  scheme_eqv_hash_tree_type,            /* 87 */
+  scheme_hash_tree_subtree_type,        /* 88 */
+  scheme_hash_tree_collision_type,      /* 89 */
+  scheme_hash_tree_indirection_type,    /* 90 */
+  scheme_cpointer_type,                 /* 91 */
+  scheme_prefix_type,                   /* 92 */
+  scheme_weak_box_type,                 /* 93 */
+  scheme_ephemeron_type,                /* 94 */
+  scheme_struct_type_type,              /* 95 */
+  scheme_module_index_type,             /* 96 */
+  scheme_set_macro_type,                /* 97 */
+  scheme_listener_type,                 /* 98 */
+  scheme_namespace_type,                /* 99 */
+  scheme_config_type,                   /* 100 */
+  scheme_stx_type,                      /* 101 */
+  scheme_will_executor_type,            /* 102 */
+  scheme_custodian_type,                /* 103 */
+  scheme_random_state_type,             /* 104 */
+  scheme_regexp_type,                   /* 105 */
+  scheme_bucket_type,                   /* 106 */
+  scheme_bucket_table_type,             /* 107 */
+  scheme_subprocess_type,               /* 108 */
+  scheme_compilation_top_type,          /* 109 */
+  scheme_wrap_chunk_type,               /* 110 */
+  scheme_eval_waiting_type,             /* 111 */
+  scheme_tail_call_waiting_type,        /* 112 */
+  scheme_undefined_type,                /* 113 */
+  scheme_struct_property_type,          /* 114 */
+  scheme_chaperone_property_type,       /* 115 */
+  scheme_multiple_values_type,          /* 116 */
+  scheme_placeholder_type,              /* 117 */
+  scheme_table_placeholder_type,        /* 118 */
+  scheme_scope_table_type,              /* 119 */
+  scheme_propagate_table_type,          /* 120 */
+  scheme_svector_type,                  /* 121 */
+  scheme_resolve_prefix_type,           /* 122 */
+  scheme_security_guard_type,           /* 123 */
+  scheme_indent_type,                   /* 124 */
+  scheme_udp_type,                      /* 125 */
+  scheme_udp_evt_type,                  /* 126 */
+  scheme_tcp_accept_evt_type,           /* 127 */
+  scheme_id_macro_type,                 /* 128 */
+  scheme_evt_set_type,                  /* 129 */
+  scheme_wrap_evt_type,                 /* 130 */
+  scheme_handle_evt_type,               /* 131 */
+  scheme_replace_evt_type,              /* 132 */
+  scheme_active_replace_evt_type,       /* 133 */
+  scheme_nack_guard_evt_type,           /* 134 */
+  scheme_semaphore_repost_type,         /* 135 */
+  scheme_channel_type,                  /* 136 */
+  scheme_channel_put_type,              /* 137 */
+  scheme_thread_resume_type,            /* 138 */
+  scheme_thread_suspend_type,           /* 139 */
+  scheme_thread_dead_type,              /* 140 */
+  scheme_poll_evt_type,                 /* 141 */
+  scheme_nack_evt_type,                 /* 142 */
+  scheme_module_registry_type,          /* 143 */
+  scheme_thread_set_type,               /* 144 */
+  scheme_string_converter_type,         /* 145 */
+  scheme_alarm_type,                    /* 146 */
+  scheme_thread_recv_evt_type,          /* 147 */
+  scheme_thread_cell_type,              /* 148 */
+  scheme_channel_syncer_type,           /* 149 */
+  scheme_special_comment_type,          /* 150 */
+  scheme_write_evt_type,                /* 151 */
+  scheme_always_evt_type,               /* 152 */
+  scheme_never_evt_type,                /* 153 */
+  scheme_progress_evt_type,             /* 154 */
+  scheme_place_dead_type,               /* 155 */
+  scheme_already_comp_type,             /* 156 */
+  scheme_readtable_type,                /* 157 */
+  scheme_intdef_context_type,           /* 158 */
+  scheme_lexical_rib_type,              /* 159 */
+  scheme_thread_cell_values_type,       /* 160 */
+  scheme_global_ref_type,               /* 161 */
+  scheme_cont_mark_chain_type,          /* 162 */
+  scheme_raw_pair_type,                 /* 163 */
+  scheme_prompt_type,                   /* 164 */
+  scheme_prompt_tag_type,               /* 165 */
+  scheme_continuation_mark_key_type,    /* 166 */
+  scheme_expanded_syntax_type,          /* 167 */
+  scheme_delay_syntax_type,             /* 168 */
+  scheme_cust_box_type,                 /* 169 */
+  scheme_resolved_module_path_type,     /* 170 */
+  scheme_module_phase_exports_type,     /* 171 */
+  scheme_logger_type,                   /* 172 */
+  scheme_log_reader_type,               /* 173 */
+  scheme_marshal_share_type,            /* 174 */
+  scheme_rib_delimiter_type,            /* 175 */
+  scheme_noninline_proc_type,           /* 176 */
+  scheme_prune_context_type,            /* 177 */
+  scheme_future_type,                   /* 178 */
+  scheme_flvector_type,                 /* 179 */
+  scheme_extflvector_type,              /* 180 */
+  scheme_fxvector_type,                 /* 181 */
+  scheme_place_type,                    /* 182 */
+  scheme_place_object_type,             /* 183 */
+  scheme_place_async_channel_type,      /* 184 */
+  scheme_place_bi_channel_type,         /* 185 */
+  scheme_once_used_type,                /* 186 */
+  scheme_serialized_symbol_type,        /* 187 */
+  scheme_serialized_keyword_type,       /* 188 */
+  scheme_serialized_structure_type,     /* 189 */
+  scheme_fsemaphore_type,               /* 190 */
+  scheme_serialized_tcp_fd_type,        /* 191 */
+  scheme_serialized_file_fd_type,       /* 192 */
+  scheme_port_closed_evt_type,          /* 193 */
+  scheme_proc_shape_type,               /* 194 */
+  scheme_struct_proc_shape_type,        /* 195 */
+  scheme_struct_prop_proc_shape_type,   /* 196 */
+  scheme_phantom_bytes_type,            /* 197 */
+  scheme_environment_variables_type,    /* 198 */
+  scheme_filesystem_change_evt_type,    /* 199 */
+  scheme_ctype_type,                    /* 200 */
+  scheme_plumber_type,                  /* 201 */
+  scheme_plumber_handle_type,           /* 202 */
+  scheme_deferred_expr_type,            /* 203 */
+  scheme_will_be_lambda_type,           /* 204 */
+  scheme_syntax_property_preserve_type, /* 205 */
                                         
 #ifdef MZTAG_REQUIRED                            
-  _scheme_last_normal_type_,            /* 186 */
+  _scheme_last_normal_type_,            /* 206 */
+
+  /* The remaining tags exist for GC tracing (in non-conservative
+     mode), but they are not needed for run-time tag tests */
                                                  
-  scheme_rt_weak_array,                 /* 187 */
+  scheme_rt_weak_array,                 /* 207 */
                                         
-  scheme_rt_comp_env,                   /* 188 */
-  scheme_rt_constant_binding,           /* 189 */
-  scheme_rt_resolve_info,               /* 190 */
-  scheme_rt_unresolve_info,             /* 191 */
-  scheme_rt_optimize_info,              /* 192 */
-  scheme_rt_compile_info,               /* 193 */
-  scheme_rt_cont_mark,                  /* 194 */
-  scheme_rt_saved_stack,                /* 195 */
-  scheme_rt_reply_item,                 /* 196 */
-  scheme_rt_closure_info,               /* 197 */
-  scheme_rt_overflow,                   /* 198 */
-  scheme_rt_overflow_jmp,               /* 199 */
-  scheme_rt_meta_cont,                  /* 200 */
-  scheme_rt_dyn_wind_cell,              /* 201 */
-  scheme_rt_dyn_wind_info,              /* 202 */
-  scheme_rt_dyn_wind,                   /* 203 */
-  scheme_rt_dup_check,                  /* 204 */
-  scheme_rt_thread_memory,              /* 205 */
-  scheme_rt_input_file,                 /* 206 */
-  scheme_rt_input_fd,                   /* 207 */
-  scheme_rt_oskit_console_input,        /* 208 */
-  scheme_rt_tested_input_file,          /* 209 */
-  scheme_rt_tested_output_file,         /* 210 */
-  scheme_rt_indexed_string,             /* 211 */
-  scheme_rt_output_file,                /* 212 */
-  scheme_rt_load_handler_data,          /* 213 */
-  scheme_rt_pipe,                       /* 214 */
-  scheme_rt_beos_process,               /* 215 */
-  scheme_rt_system_child,               /* 216 */
-  scheme_rt_tcp,                        /* 217 */
-  scheme_rt_write_data,                 /* 218 */
-  scheme_rt_tcp_select_info,            /* 219 */
-  scheme_rt_param_data,                 /* 220 */
-  scheme_rt_will,                       /* 221 */
-  scheme_rt_linker_name,                /* 222 */
-  scheme_rt_param_map,                  /* 223 */
-  scheme_rt_finalization,               /* 224 */
-  scheme_rt_finalizations,              /* 225 */
-  scheme_rt_cpp_object,                 /* 226 */
-  scheme_rt_cpp_array_object,           /* 227 */
-  scheme_rt_stack_object,               /* 228 */
-  scheme_rt_preallocated_object,        /* 229 */
-  scheme_thread_hop_type,               /* 230 */
-  scheme_rt_srcloc,                     /* 231 */
-  scheme_rt_evt,                        /* 232 */
-  scheme_rt_syncing,                    /* 233 */
-  scheme_rt_comp_prefix,                /* 234 */
-  scheme_rt_user_input,                 /* 235 */
-  scheme_rt_user_output,                /* 236 */
-  scheme_rt_compact_port,               /* 237 */
-  scheme_rt_read_special_dw,            /* 238 */
-  scheme_rt_regwork,                    /* 239 */
-  scheme_rt_rx_lazy_string,             /* 240 */
-  scheme_rt_buf_holder,                 /* 241 */
-  scheme_rt_parameterization,           /* 242 */
-  scheme_rt_print_params,               /* 243 */
-  scheme_rt_read_params,                /* 244 */
-  scheme_rt_native_code,                /* 245 */
-  scheme_rt_native_code_plus_case,      /* 246 */
-  scheme_rt_jitter_data,                /* 247 */
-  scheme_rt_module_exports,             /* 248 */
-  scheme_rt_delay_load_info,            /* 249 */
-  scheme_rt_marshal_info,               /* 250 */
-  scheme_rt_unmarshal_info,             /* 251 */
-  scheme_rt_runstack,                   /* 252 */
-  scheme_rt_sfs_info,                   /* 253 */
-  scheme_rt_validate_clearing,          /* 254 */
-  scheme_rt_avl_node,                   /* 255 */
-  scheme_rt_lightweight_cont,           /* 256 */
-  scheme_rt_export_info,                /* 257 */
-  scheme_rt_cont_jmp,                   /* 258 */
+  scheme_rt_comp_env,                   /* 208 */
+  scheme_rt_constant_binding,           /* 209 */
+  scheme_rt_resolve_info,               /* 210 */
+  scheme_rt_unresolve_info,             /* 211 */
+  scheme_rt_optimize_info,              /* 212 */
+  scheme_rt_cont_mark,                  /* 213 */
+  scheme_rt_saved_stack,                /* 214 */
+  scheme_rt_reply_item,                 /* 215 */
+  scheme_rt_ir_lambda_info,             /* 216 */
+  scheme_rt_overflow,                   /* 217 */
+  scheme_rt_overflow_jmp,               /* 218 */
+  scheme_rt_meta_cont,                  /* 219 */
+  scheme_rt_dyn_wind_cell,              /* 220 */
+  scheme_rt_dyn_wind_info,              /* 221 */
+  scheme_rt_dyn_wind,                   /* 222 */
+  scheme_rt_dup_check,                  /* 223 */
+  scheme_rt_thread_memory,              /* 224 */
+  scheme_rt_input_file,                 /* 225 */
+  scheme_rt_input_fd,                   /* 226 */
+  scheme_rt_oskit_console_input,        /* 227 */
+  scheme_rt_tested_input_file,          /* 228 */
+  scheme_rt_tested_output_file,         /* 229 */
+  scheme_rt_indexed_string,             /* 230 */
+  scheme_rt_output_file,                /* 231 */
+  scheme_rt_load_handler_data,          /* 232 */
+  scheme_rt_pipe,                       /* 233 */
+  scheme_rt_beos_process,               /* 234 */
+  scheme_rt_system_child,               /* 235 */
+  scheme_rt_tcp,                        /* 236 */
+  scheme_rt_write_data,                 /* 237 */
+  scheme_rt_tcp_select_info,            /* 238 */
+  scheme_rt_param_data,                 /* 239 */
+  scheme_rt_will,                       /* 240 */
+  scheme_rt_linker_name,                /* 241 */
+  scheme_rt_param_map,                  /* 242 */
+  scheme_rt_finalization,               /* 243 */
+  scheme_rt_finalizations,              /* 244 */
+  scheme_rt_cpp_object,                 /* 245 */
+  scheme_rt_cpp_array_object,           /* 246 */
+  scheme_rt_stack_object,               /* 247 */
+  scheme_rt_preallocated_object,        /* 248 */
+  scheme_thread_hop_type,               /* 249 */
+  scheme_rt_srcloc,                     /* 250 */
+  scheme_rt_evt,                        /* 251 */
+  scheme_rt_syncing,                    /* 252 */
+  scheme_rt_comp_prefix,                /* 253 */
+  scheme_rt_user_input,                 /* 254 */
+  scheme_rt_user_output,                /* 255 */
+  scheme_rt_compact_port,               /* 256 */
+  scheme_rt_read_special_dw,            /* 257 */
+  scheme_rt_regwork,                    /* 258 */
+  scheme_rt_rx_lazy_string,             /* 259 */
+  scheme_rt_buf_holder,                 /* 260 */
+  scheme_rt_parameterization,           /* 261 */
+  scheme_rt_print_params,               /* 262 */
+  scheme_rt_read_params,                /* 263 */
+  scheme_rt_native_code,                /* 264 */
+  scheme_rt_native_code_plus_case,      /* 265 */
+  scheme_rt_jitter_data,                /* 266 */
+  scheme_rt_module_exports,             /* 267 */
+  scheme_rt_delay_load_info,            /* 268 */
+  scheme_rt_marshal_info,               /* 269 */
+  scheme_rt_unmarshal_info,             /* 270 */
+  scheme_rt_runstack,                   /* 271 */
+  scheme_rt_sfs_info,                   /* 272 */
+  scheme_rt_validate_clearing,          /* 273 */
+  scheme_rt_lightweight_cont,           /* 274 */
+  scheme_rt_export_info,                /* 275 */
+  scheme_rt_cont_jmp,                   /* 276 */
+  scheme_rt_letrec_check_frame,         /* 277 */
 #endif
 
   _scheme_last_type_

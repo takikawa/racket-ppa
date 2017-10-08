@@ -8,14 +8,15 @@
 ;; No-contract version.
 
 (define-struct id-table (hash phase))
-;; where hash maps symbol => (listof (cons identifier value))
+;; where hash maps symbol => (nonempty-listof (cons identifier value))
 ;;       phase is a phase-level (integer or #f)
 
 (define (make-id-table-hash-code identifier->symbol)
   (lambda (d hash-code)
-    (+ (hash-code (id-table-phase d))
-       (for/sum (((k v) (in-dict d)))
-         (* (hash-code (identifier->symbol k)) (hash-code v))))))
+    (let ([phase (id-table-phase d)])
+      (+ (hash-code phase)
+         (for/sum (((k v) (in-dict d)))
+           (* (hash-code (identifier->symbol k phase)) (hash-code v)))))))
 
 (define (make-id-table-equal? idtbl-count idtbl-ref)
   (lambda (left right equal?)
@@ -135,6 +136,48 @@ The {key,value}-{in-out} functions should all return a chaperone of their argume
          (hash-remove (id-table-hash d) sym))
      phase)))
 
+(define (id-table-set*! who d identifier->symbol identifier=? . rst)
+  (let loop ([rst rst])
+    (cond [(null? rst) (void)]
+          [else
+           (id-table-set!
+            who d
+            (car rst) (cadr rst)
+            identifier->symbol identifier=?)
+           (loop (cddr rst))])))
+
+(define (id-table-set*/constructor who d constructor identifier->symbol identifier=? . rst)
+  (let loop ([d d] [rst rst])
+    (if (null? rst)
+        d
+        (loop (id-table-set/constructor
+               who d
+               (car rst) (cadr rst)
+               constructor identifier->symbol identifier=?)
+              (cddr rst)))))
+
+(define missing (gensym 'missing))
+(define (id-table-ref! who d id default identifier->symbol identifier=?)
+  (define entry (id-table-ref who d id missing identifier->symbol identifier=?))
+  (cond [(eq? entry missing)
+         (let ([called-default (if (procedure? default) (default) default)])
+           (id-table-set! who d id called-default identifier->symbol identifier=?)
+           called-default)]
+        [else entry]))
+
+(define (id-table-update/constructor who d id updater default constructor identifier->symbol identifier=?)
+  (define entry
+    (id-table-ref who d id default identifier->symbol identifier=?))
+  (id-table-set/constructor
+   who d id
+   (updater entry)
+   constructor identifier->symbol identifier=?))
+
+(define (id-table-update! who d id updater default identifier->symbol identifier=?)
+  (define entry
+    (id-table-ref who d id default identifier->symbol identifier=?))
+  (id-table-set! who d id (updater entry) identifier->symbol identifier=?))
+
 (define (id-table-count d)
   (for/sum ([(k v) (in-hash (id-table-hash d))])
      (length v)))
@@ -213,6 +256,110 @@ Notes (FIXME?):
 
 ;; ========
 
+(define (id-table-keys who d)
+  (let do-keys ([pos (id-table-iterate-first d)])
+    (if (not pos)
+        null
+        (cons (id-table-iterate-key who d pos)
+              (do-keys (id-table-iterate-next who d pos))))))
+
+(define (id-table-values who d identifier->symbol identifier=?)
+  (let do-values ([pos (id-table-iterate-first d)])
+    (if (not pos)
+        null
+        (cons (id-table-iterate-value who d pos identifier->symbol identifier=?)
+              (do-values (id-table-iterate-next who d pos))))))
+
+;; rebase-for-loop
+;;
+;; if the bucket of an id-table is altered between
+;; for-loop iterations within that bucket, this function
+;; attempts to reorient in the new bucket
+;; returns (key val idx cur-hd next-bucket)
+(define (rebase-for-loop h idx cur-hd id)
+  ;; hash entry has changed to cur-hd, so find id in cur-hd
+  (let loop ([bucket cur-hd])
+    (cond [(null? bucket)
+           (let ([idx (hash-iterate-next h idx)])
+             (if (not idx)
+                 ;; we ran out of things to iterate over, we're done!
+                 (values #f #f #f #f #f)
+                 (let* ([bucket (hash-iterate-value h idx)]
+                        [key (caar bucket)] ;; NOTE: hash buckets must never be completely empty!
+                        [val (cdar bucket)])
+                   (values key val idx bucket (cdr bucket)))))]
+          [(eq? (caar bucket) id) ;; relies on id staying same; see alist-set
+           (values id (cdar bucket) idx cur-hd (cdr bucket))]
+          [else (loop (cdr bucket))])))
+
+(begin-for-syntax
+  ;; make-in-table-transformer : Indentifier Indentifier -> Syntax -> Syntax/#f
+  (define ((make-in-table-transformer in-tbl-id pred?-id) stx)
+    (with-syntax ([in-tbl in-tbl-id]
+                  [pred? pred?-id]
+                  [pred?-str (format "~a" (syntax-e pred?-id))])
+      (syntax-case stx ()
+        [[(key val) (_ table)]
+         #'[(key val)
+            (:do-in
+             ;; outer-id bindings
+             ([(h) (id-table-hash (let ([t table])
+                                    (unless (pred? t)
+                                      (raise-argument-error 'in-tbl pred?-str t))
+                                    t))]
+              [(init-idx) (hash-iterate-first (id-table-hash table))])
+             #true ;; outer-check
+             ;; loop-id's and initial values
+             ([idx init-idx]
+              ;; we keep track of the root of the current bucket
+              ;; so we can detect if this entry in the hash table
+              ;; was mutated between iterations
+              [hd (and init-idx (hash-iterate-value h init-idx))]
+              [bucket (and init-idx (hash-iterate-value h init-idx))])
+             ;; pos-guard
+             idx
+             ;; inner-ids
+             ([(key val idx cur-hd next-bucket)
+               (cond
+                 ;; we need to go to the next hash index
+                 [(null? bucket)
+                  (let ([idx (hash-iterate-next h idx)])
+                    (if (not idx)
+                        (values #f #f #f #f #f)
+                        (let* ([hd (hash-iterate-value h idx)])
+                          (values (caar hd) (cdar hd) idx hd (cdr hd)))))]
+                 [else
+                  ;; check if our bucket changed since out last iteration in it
+                  (let ([hd* (hash-iterate-value h idx)])
+                    (cond [(eq? hd hd*)
+                           ;; no change, just go to the next entry in this bucket
+                           (let* ([next-bucket (cdr bucket)])
+                             (values (caar bucket) (cdar bucket) idx hd next-bucket))]
+                          [else
+                           ;; things have been swapped up! resituate ourselves
+                           (rebase-for-loop h idx hd* (caar bucket))]))])])
+             key ;; pre-guard (key is #f if we suddenly ran out of key/vals due to mutation
+             #true ;; post-guard
+             ;; recursive call args
+             [idx hd next-bucket])]]
+        [_ #f]))))
+
+
+(define (in-id-table-do-seq who d identifier->symbol identifier=?)
+  (make-do-sequence
+   (λ ()
+     (values
+      (λ (pos)
+        (values
+         (id-table-iterate-key who d pos)
+         (id-table-iterate-value who d pos identifier->symbol identifier=?)))
+      (λ (pos) (id-table-iterate-next who d pos))
+      (id-table-iterate-first d)
+      values
+      #f #f))))
+
+;; ========
+
 (define (alist-set identifier=? phase l0 id v)
   ;; To minimize allocation
   ;;   - add new pairs to front
@@ -282,9 +429,12 @@ Notes (FIXME?):
           idtbl-set! idtbl-set
           idtbl-remove! idtbl-remove
           idtbl-set/constructor idtbl-remove/constructor
+          idtbl-set* idtbl-set*/constructor idtbl-set*! idtbl-ref!
+          idtbl-update idtbl-update/constructor idtbl-update!
           idtbl-count
           idtbl-iterate-first idtbl-iterate-next
           idtbl-iterate-key idtbl-iterate-value
+          idtbl-keys idtbl-values in-idtbl
           idtbl-map idtbl-for-each
           idtbl-mutable-methods idtbl-immutable-methods))
        #'(begin
@@ -316,12 +466,22 @@ Notes (FIXME?):
              (id-table-remove/constructor 'idtbl-remove d id constructor identifier->symbol identifier=?))
            (define (idtbl-remove d id)
              (idtbl-remove/constructor d id immutable-idtbl))
+           (define (idtbl-set*/constructor d constructor . rst)
+             (apply id-table-set*/constructor 'idtbl-set* d constructor identifier->symbol identifier=? rst))
+           (define (idtbl-set*! d . rst)
+             (apply id-table-set*! 'idtbl-set*! d identifier->symbol identifier=? rst))
+           (define (idtbl-ref! d id default)
+             (id-table-ref! 'idtbl-ref! d id default identifier->symbol identifier=?))
+           (define (idtbl-update/constructor d id updater constructor [default not-given])
+             (id-table-update/constructor 'idtbl-update d id updater default constructor identifier->symbol identifier=?))
+           (define (idtbl-update! d id updater [default not-given])
+             (id-table-update! 'idtbl-update! d id updater default identifier->symbol identifier=?))
            (define (idtbl-count d)
              (id-table-count d))
            (define (idtbl-for-each d p)
-             (dict-for-each d p))
+             (for ([(id val) (in-idtbl d)]) (p id val)))
            (define (idtbl-map d f)
-             (dict-map d f))
+             (for/list ([(id val) (in-idtbl d)]) (f id val)))
            (define (idtbl-iterate-first d)
              (id-table-iterate-first d))
            (define (idtbl-iterate-next d pos)
@@ -330,6 +490,17 @@ Notes (FIXME?):
              (id-table-iterate-key 'idtbl-iterate-key d pos))
            (define (idtbl-iterate-value d pos)
              (id-table-iterate-value 'idtbl-iterate-value d pos identifier->symbol identifier=?))
+           (define (idtbl-keys d)
+             (id-table-keys 'idtbl-keys d))
+           (define (idtbl-values d)
+             (id-table-values 'idtbl-values d identifier->symbol identifier=?))
+           (define (in-idtbl* d)
+             (if (idtbl? d)
+                 (in-id-table-do-seq 'in-idtbl d identifier->symbol identifier=?)
+                 (raise-argument-error 'in-idtbl (format "~a" 'idtbl?) d)))
+           (define-sequence-syntax in-idtbl
+             (lambda () #'in-idtbl*)
+             (make-in-table-transformer #'in-idtbl #'idtbl?))
 
            (define idtbl-mutable-methods
              (vector-immutable idtbl-ref
@@ -380,6 +551,9 @@ Notes (FIXME?):
                     idtbl-set
                     idtbl-remove!
                     idtbl-remove
+                    idtbl-set*!
+                    idtbl-ref!
+                    idtbl-update!
                     idtbl-count
                     idtbl-iterate-first
                     idtbl-iterate-next
@@ -387,10 +561,15 @@ Notes (FIXME?):
                     idtbl-iterate-value
                     idtbl-map
                     idtbl-for-each
+                    idtbl-keys
+                    idtbl-values
+                    in-idtbl
 
                     ;; just for use/extension by syntax/id-table
                     idtbl-set/constructor
+                    idtbl-set*/constructor
                     idtbl-remove/constructor
+                    idtbl-update/constructor
                     idtbl-mutable-methods
                     mutable-idtbl
                     immutable-idtbl)))]))
@@ -402,10 +581,7 @@ Notes (FIXME?):
            bound-identifier=?)
 
 (define (free-identifier->symbol id phase)
-  (let ([binding (identifier-binding id phase)])
-    (if (pair? binding)
-        (cadr binding)
-        (syntax-e id))))
+  (identifier-binding-symbol id phase))
 
 (make-code free-id-table
            free-identifier->symbol

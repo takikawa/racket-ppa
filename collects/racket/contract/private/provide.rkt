@@ -1,15 +1,23 @@
 #lang racket/base
 
 (provide provide/contract
+         provide/contract-for-contract-out
+         define-module-boundary-contract
          (protect-out (for-syntax true-provide/contract
-                                  make-provide/contract-transformer
-                                  provide/contract-transformer?
-                                  replace-provide/contract-transformer-positive-blame)))
+                                  ;make-provide/contract-transformer
+                                  provide/contract-info?
+                                  provide/contract-info-contract-id
+                                  provide/contract-info-original-id
+                                  contract-rename-id-property
+                                  contract-lifted-property
+                                  contract-neg-party-property)))
 
 (require (for-syntax racket/base
                      racket/list
                      racket/struct-info
                      setup/path-to-relative
+                     "application-arity-checking.rkt"
+                     "arr-i-parse.rkt"
                      (prefix-in a: "helpers.rkt")
                      (rename-in syntax/private/boundmap
                                 ;; the private version of the library
@@ -18,18 +26,13 @@
                                 [make-module-identifier-mapping make-free-identifier-mapping]
                                 [module-identifier-mapping-get free-identifier-mapping-get]
                                 [module-identifier-mapping-put! free-identifier-mapping-put!]))
-         "arrow.rkt"
+         "arrow-val-first.rkt"
          "base.rkt"
          "guts.rkt"
-         "misc.rkt"
          "exists.rkt"
+         "blame.rkt"
          syntax/location
          syntax/srcloc)
-
-(define-syntax (verify-contract stx)
-  (syntax-case stx ()
-    [(_ name x) (a:known-good-contract? #'x) #'x]
-    [(_ name x) #'(coerce-contract name x)]))
 
 (define-for-syntax (self-ctor-transformer orig stx)
   (with-syntax ([orig orig])
@@ -52,81 +55,383 @@
 
 (begin-for-syntax
 
- (struct provide/contract-transformer (contract-id id external-id pos-module-source saved-id-table)
-         #:property
-         prop:set!-transformer
-         (lambda (self stx)
-           (let ([contract-id (provide/contract-transformer-contract-id self)]
-                 [id (provide/contract-transformer-id self)]
-                 [external-id (provide/contract-transformer-external-id self)]
-                 [pos-module-source (provide/contract-transformer-pos-module-source self)]
-                 [saved-id-table (provide/contract-transformer-saved-id-table self)])
-             (if (eq? 'expression (syntax-local-context))
-                 ;; In an expression context:
-                 (let* ([key (syntax-local-lift-context)]
-                        ;; Already lifted in this lifting context?
-                        [lifted-id
-                         (or (hash-ref saved-id-table key #f)
-                             ;; No: lift the contract creation:
-                             (with-syntax ([contract-id contract-id]
-                                           [id id]
-                                           [external-id external-id]
-                                           [pos-module-source pos-module-source]
-                                           [loc-id (identifier-prune-to-source-module id)])
-                               (let ([srcloc-code
-                                      ;; If id has no source location, use the external-id's.
-                                      ;; Otherwise, constructor contracts have no useful
-                                      ;; source location information. This may not be the best
-                                      ;; solution. We may want to look deeper into this.
-                                      (with-syntax ([location-id (if (syntax-source #'id)
-                                                                     #'id
-                                                                     #'external-id)])
-                                        (with-syntax
-                                            ([src
-                                              (or (and (path-string? (syntax-source #'location-id))
-                                                       (path->relative-string/library
-                                                        (syntax-source #'location-id) #f))
-                                                  (syntax-source #'location-id))]
-                                             [line (syntax-line     #'location-id)]
-                                             [col  (syntax-column   #'location-id)]
-                                             [pos  (syntax-position #'location-id)]
-                                             [span (syntax-span     #'location-id)])
-                                          #'(make-srcloc 'src 'line 'col 'pos 'span)))])
-                                 (syntax-local-introduce
-                                  (syntax-local-lift-expression
-                                   #`(contract contract-id
-                                               id
-                                               pos-module-source
-                                               (quote-module-name)
-                                               'external-id
-                                               #,srcloc-code))))))])
-                   (when key (hash-set! saved-id-table key lifted-id))
-                   ;; Expand to a use of the lifted expression:
-                   (with-syntax ([saved-id (syntax-local-introduce lifted-id)])
-                     (syntax-case stx (set!)
-                       [name (identifier? #'name) #'saved-id]
-                       [(set! id arg)
-                        (raise-syntax-error
-                         'contract/out
-                         "cannot set! a contract/out variable"
-                         stx #'id)]
-                       [(name . more)
-                        (with-syntax ([app (datum->syntax stx '#%app)])
-                          (syntax/loc stx (app saved-id . more)))])))
-                 ;; In case of partial expansion for module-level and internal-defn
-                 ;; contexts, delay expansion until it's a good time to lift
-                 ;; expressions:
-                 (quasisyntax/loc stx (#%expression #,stx))))))
+  ;; rename-id : identifier? : the name the lifted expression is bound to
+  ;; contract-id : identifier? : the name of the contract expression
+  ;; original-id : identifier? : the identifier being contracted
+  (struct provide/contract-info (rename-id contract-id original-id))
 
- (define (make-provide/contract-transformer cid id eid pos)
-   (provide/contract-transformer cid id eid pos (make-hasheq)))
+  ;; keys for syntax property used below
+  (define rename-id-key (gensym 'contract:rename-id))
+  (define neg-party-key (gensym 'contract:neg-party))
 
- (define (replace-provide/contract-transformer-positive-blame self new-pos)
-   (let ([contract-id (provide/contract-transformer-contract-id self)]
-         [id (provide/contract-transformer-id self)]
-         [external-id (provide/contract-transformer-external-id self)])
-     (provide/contract-transformer contract-id id external-id new-pos (make-hasheq)))))
+  ;; identifier? identifier? -> identifier?
+  ;; add a property that tells clients what the exported id was
+  (define (add-rename-id rename-id partial-id)
+    (syntax-property partial-id rename-id-key rename-id))
 
+  ;; identifier? -> identifier?
+  ;; tells clients that the application of this id has an extra inserted argument
+  (define (add-neg-party stx)
+    (syntax-property stx neg-party-key #t))
+
+  ;; getter functions for syntax properties keyed by symbols above
+  (define (contract-rename-id-property stx)
+    (syntax-property stx rename-id-key))
+  (define (contract-lifted-property stx)
+    (syntax-property stx lifted-key))
+  (define (contract-neg-party-property stx)
+    (syntax-property stx neg-party-key))
+
+  (define global-saved-id-table (make-hasheq))
+
+  (struct provide/contract-arrow-transformer provide/contract-info
+    (saved-ho-id-table
+     partially-applied-id
+     extra-neg-party-argument-fn
+     valid-argument-lists)
+    #:property
+    prop:set!-transformer
+    (λ (self stx)
+      (let ([partially-applied-id (provide/contract-arrow-transformer-partially-applied-id self)]
+            [saved-ho-id-table (provide/contract-arrow-transformer-saved-ho-id-table self)]
+            [extra-neg-party-argument-fn 
+             (provide/contract-arrow-transformer-extra-neg-party-argument-fn self)]
+            [valid-arg-lists (provide/contract-arrow-transformer-valid-argument-lists self)]
+            [rename-id (provide/contract-info-rename-id self)])
+        (with-syntax ([partially-applied-id partially-applied-id]
+                      [extra-neg-party-argument-fn extra-neg-party-argument-fn])
+          (if (eq? 'expression (syntax-local-context))
+              ;; In an expression context:
+              (let* ([key (syntax-local-lift-context)]
+                     ;; Already lifted in this lifting context?
+                     [lifted-neg-party
+                      (or (hash-ref global-saved-id-table key #f)
+                          ;; No: lift the neg name creation
+                          (syntax-local-introduce 
+                           (syntax-local-lift-expression
+                            (add-lifted-property
+                             #'(quote-module-name)))))])
+                (when key (hash-set! global-saved-id-table key lifted-neg-party))
+                ;; Expand to a use of the lifted expression:
+                (define (adjust-location new-stx)
+                  (datum->syntax new-stx (syntax-e new-stx) stx new-stx))
+                (define (gen-slow-path-code)
+                  (define lifted-ctc-val
+                    (or (hash-ref saved-ho-id-table key #f)
+                        ;; No: lift the neg name creation
+                        (with-syntax ([lifted-neg-party (syntax-local-introduce lifted-neg-party)])
+                          (syntax-local-introduce 
+                           (add-rename-id rename-id
+                            (syntax-local-lift-expression
+                             (add-lifted-property
+                              #'(partially-applied-id lifted-neg-party))))))))
+                  (when key (hash-set! saved-ho-id-table key lifted-ctc-val))
+                  (adjust-location (syntax-local-introduce lifted-ctc-val)))
+                (syntax-case stx (set!)
+                  [name 
+                   (identifier? #'name)
+                   (gen-slow-path-code)]
+                  [(set! id arg)
+                   (raise-syntax-error
+                    'contract/out
+                    "cannot set! a contract/out variable"
+                    stx #'id)]
+                  [(name more ...)
+                   (with-syntax ([app (datum->syntax stx '#%app)])
+                     (if (valid-argument-list? stx valid-arg-lists)
+                         (with-syntax ([lifted-neg-party (syntax-local-introduce lifted-neg-party)])
+                           (adjust-location
+                            #`(app #,(add-neg-party (add-rename-id
+                                                     rename-id
+                                                     #'extra-neg-party-argument-fn))
+                                   lifted-neg-party
+                                   more ...)))
+                         (adjust-location
+                          #`(app #,(gen-slow-path-code) more ...))))]))
+              ;; In case of partial expansion for module-level and internal-defn
+              ;; contexts, delay expansion until it's a good time to lift
+              ;; expressions:
+              (quasisyntax/loc stx (#%expression #,stx)))))))
+  
+  (struct provide/contract-transformer provide/contract-info (saved-id-table partially-applied-id blame)
+    #:property
+    prop:set!-transformer
+    (λ (self stx)
+      (let ([partially-applied-id (provide/contract-transformer-partially-applied-id self)]
+            [saved-id-table (provide/contract-transformer-saved-id-table self)]
+            [rename-id (provide/contract-info-rename-id self)]
+            [blame (provide/contract-transformer-blame self)])
+        (with-syntax ([partially-applied-id partially-applied-id]
+                      [blame blame])
+          (if (eq? 'expression (syntax-local-context))
+              ;; In an expression context:
+              (let* ([key (syntax-local-lift-context)]
+                     ;; Already lifted in this lifting context?
+                     [lifted-ctcd-val
+                      (or (hash-ref saved-id-table key #f)
+                          ;; No: lift the neg name creation
+                          (add-rename-id rename-id
+                           (syntax-local-introduce
+                            (syntax-local-lift-expression
+                             (add-lifted-property
+                              #'(with-contract-continuation-mark
+                                 (cons blame 'no-negative-party)
+                                 (partially-applied-id (quote-module-name))))))))])
+                (when key (hash-set! saved-id-table key lifted-ctcd-val))
+                (define (adjust-location new-stx)
+                  (datum->syntax new-stx (syntax-e new-stx) stx new-stx))
+                ;; Expand to a use of the lifted expression:
+                (with-syntax ([lifted-ctcd-val (syntax-local-introduce lifted-ctcd-val)])
+                  (syntax-case stx (set!)
+                    [name 
+                     (identifier? #'name)
+                     (adjust-location #'lifted-ctcd-val)]
+                    [(set! id arg)
+                     (raise-syntax-error
+                      'contract/out
+                      "cannot set! a contract/out variable"
+                      stx #'id)]
+                    [(name more ...)
+                     (with-syntax ([app (datum->syntax stx '#%app)])
+                       (adjust-location 
+                        #'(app lifted-ctcd-val more ...)))])))
+              ;; In case of partial expansion for module-level and internal-defn
+              ;; contexts, delay expansion until it's a good time to lift
+              ;; expressions:
+              (quasisyntax/loc stx (#%expression #,stx)))))))
+
+  (define (make-provide/contract-transformer rename-id cid id eid pos [pid #f] [blame #f])
+    (if pid
+        (provide/contract-transformer rename-id cid id (make-hasheq) pid blame)
+        (begin
+          ;; TODO: this needs to change!
+          ;; syntax/parse uses this
+          ;; this will just drop contracts for now.
+          ;; VS: is this still the case? this function is not exported anymore
+          (λ (stx) 
+            (syntax-case stx ()
+              [(_ args ...)
+               (with-syntax ([app (datum->syntax stx '#%app)])
+                 #`(app #,id args ...))]
+              [x (identifier? #'x) id])))))
+  
+  (define (make-provide/contract-arrow-transformer rename-id contract-id id pai enpfn val)
+    (provide/contract-arrow-transformer rename-id
+                                        contract-id id
+                                        (make-hasheq)
+                                        pai enpfn val)))
+
+
+;; tl-code-for-one-id/new-name : syntax syntax syntax (union syntax #f) -> (values syntax syntax)
+;; given the syntax for an identifier and a contract,
+;; builds a begin expression for the entire contract and provide
+;; the first syntax object is used for source locations
+(define-for-syntax (tl-code-for-one-id/new-name id-for-one-id
+                                                stx id reflect-id ctrct/no-prop user-rename-id
+                                                pos-module-source
+                                                mangle-for-maker?
+                                                provide?)
+  (define ex-id (or reflect-id id))
+  (define id-rename (id-for-one-id user-rename-id reflect-id id mangle-for-maker?))
+  (with-syntax ([ctrct (syntax-property 
+                        (syntax-property
+                         ctrct/no-prop
+                         'racket/contract:contract-on-boundary
+                         (gensym 'provide/contract-boundary))
+                        'inferred-name ex-id)]
+                [external-name (or user-rename-id id)])
+    (define srcloc-id 
+      (if (syntax-source id)
+          id
+          (if (and user-rename-id
+                   (syntax-source user-rename-id))
+              user-rename-id
+              ex-id)))
+    (with-syntax ([code
+                   (syntax-property
+                    (quasisyntax/loc stx
+                      (begin #,(internal-function-to-be-figured-out #'ctrct
+                                                                    id
+                                                                    (or reflect-id id)
+                                                                    (or user-rename-id 
+                                                                        id)
+                                                                    id-rename
+                                                                    (stx->srcloc-expr srcloc-id)
+                                                                    'provide/contract
+                                                                    pos-module-source)
+                             #,@(if provide?
+                                    (list #`(provide (rename-out [#,id-rename external-name])))
+                                    null)))
+                    'provide/contract-original-contract
+                    (vector #'external-name #'ctrct))])
+      #`(code #,id-rename))))
+
+;; syntax -> syntax
+;; returns an expression that evaluates to the source location of the argument
+(define-for-syntax (stx->srcloc-expr srcloc-stx)
+  #`(quote-srcloc #,srcloc-stx))
+
+(define-for-syntax (internal-function-to-be-figured-out ctrct
+                                                        id 
+                                                        ex-id
+                                                        name-for-blame
+                                                        id-rename
+                                                        srcloc-expr
+                                                        contract-error-name
+                                                        pos-module-source)
+  (define-values (arrow? the-valid-app-shapes)
+    (syntax-case ctrct (-> ->* ->i)
+      [(-> . _) 
+       (not (->-arity-check-only->? ctrct))
+       (values #t (->-valid-app-shapes ctrct))]
+      [(->* . _)
+       (cond
+         [(->*-arity-check-only->? ctrct) (values #f #f)]
+         [else
+          (define shapes (->*-valid-app-shapes ctrct))
+          (if shapes
+              (values #t shapes)
+              (values #f #f))])]
+      [(->i . _) (values #t (->i-valid-app-shapes ctrct))]
+      [_ (values #f #f)]))
+  (with-syntax ([id id]
+                [(partially-applied-id extra-neg-party-argument-fn contract-id blame-id) 
+                 (generate-temporaries (list 'idX 'idY 'idZ 'idB))]
+                [ctrct ctrct])
+    (syntax-local-lift-module-end-declaration
+     #`(begin 
+         (define-values (partially-applied-id blame-id)
+           (do-partial-app contract-id
+                           id
+                           '#,name-for-blame
+                           #,pos-module-source
+                           #,srcloc-expr))
+         #,@(if arrow?
+                (list #`(define extra-neg-party-argument-fn 
+                          (wrapped-extra-arg-arrow-extra-neg-party-argument
+                           partially-applied-id)))
+                (list))))
+
+    #`(begin
+        (define contract-id
+          ;; let is here to give the right name.
+          (let ([#,ex-id #,(if arrow?
+                               #'ctrct
+                               #`(coerce-contract '#,contract-error-name ctrct))
+                         #;(opt/c ctrct #:error-name #,contract-error-name)])
+            #,ex-id))
+        
+        (define-syntax #,id-rename
+          #,(if arrow?
+                #`(make-provide/contract-arrow-transformer 
+                   (quote-syntax #,id-rename)
+                   (quote-syntax contract-id) (quote-syntax id)
+                   (quote-syntax partially-applied-id)
+                   (quote-syntax extra-neg-party-argument-fn)
+                   #,the-valid-app-shapes)
+                #`(make-provide/contract-transformer
+                   (quote-syntax #,id-rename)
+                   (quote-syntax contract-id) (quote-syntax id)
+                   #f #f
+                   (quote-syntax partially-applied-id)
+                   (quote-syntax blame-id)))))))
+
+(define-syntax (define-module-boundary-contract stx)
+  (cond
+    [(equal? (syntax-local-context) 'module-begin)
+     #`(begin #,stx)]
+    [else
+     (syntax-case stx ()
+       [(_ new-id orig-id ctrct kwd-args ...)
+        (begin
+          (unless (equal? (syntax-local-context) 'module)
+            (raise-syntax-error #f "only valid in a top-level module context" stx))
+          (unless (identifier? #'new-id)
+            (raise-syntax-error #f "expected an identifier" stx #'new-id))
+          (unless (identifier? #'orig-id)
+            (raise-syntax-error #f "expected an identifier" stx #'orig-id))
+          (define-values (pos-blame-party-expr srcloc-expr name-for-blame)
+            (let loop ([kwd-args (syntax->list #'(kwd-args ...))]
+                       [pos-blame-party-expr #'(quote-module-path)]
+                       [srcloc-expr #f]
+                       [name-for-blame #f])
+              (cond
+                [(null? kwd-args) (values pos-blame-party-expr
+                                          (or srcloc-expr (stx->srcloc-expr stx))
+                                          (or name-for-blame #'new-id))]
+                [else
+                 (define kwd (car kwd-args))
+                 (cond 
+                   [(equal? (syntax-e kwd) '#:pos-source)
+                    (when (null? (cdr kwd-args))
+                      (raise-syntax-error #f "expected a keyword argument to follow #:pos-source"
+                                          stx))
+                    (loop (cddr kwd-args)
+                          (cadr kwd-args)
+                          srcloc-expr
+                          name-for-blame)]
+                   [(equal? (syntax-e kwd) '#:srcloc)
+                    (when (null? (cdr kwd-args))
+                      (raise-syntax-error #f "expected a keyword argument to follow #:srcloc"
+                                          stx))
+                    (loop (cddr kwd-args)
+                          pos-blame-party-expr
+                          (cadr kwd-args)
+                          name-for-blame)]
+                   [(equal? (syntax-e kwd) '#:name-for-blame)
+                    (when (null? (cdr kwd-args))
+                      (raise-syntax-error #f "expected a keyword argument to follow #:name-for-blame"
+                                          stx))
+                    (define name-for-blame (cadr kwd-args))
+                    (unless (identifier? name-for-blame)
+                      (raise-syntax-error #f "expected an identifier to follow #:name-for-blame"
+                                          stx
+                                          name-for-blame))
+                    (loop (cddr kwd-args)
+                          pos-blame-party-expr
+                          srcloc-expr
+                          name-for-blame)]
+                   [else
+                    (raise-syntax-error
+                     #f
+                     "expected one of the keywords #:pos-source, #:srcloc, or #:name-for-blame"
+                     stx
+                     (car kwd-args))])])))
+          (internal-function-to-be-figured-out #'ctrct
+                                               #'orig-id
+                                               #'orig-id
+                                               name-for-blame
+                                               #'new-id
+                                               srcloc-expr
+                                               'define-module-boundary-contract
+                                               pos-blame-party-expr))])]))
+
+;; ... -> (values (or/c #f (-> neg-party val)) blame)
+(define (do-partial-app ctc val name pos-module-source source)
+  (define p (parameterize ([warn-about-val-first? #f])
+              ;; when we're building the val-first projection
+              ;; here we might be needing the plus1 arity
+              ;; function (which will be on the val first's result)
+              ;; so this is a legtimate use. don't warn.
+              (get/build-val-first-projection ctc)))
+  (define blme (make-blame (build-source-location source)
+                           name
+                           (λ () (contract-name ctc))
+                           pos-module-source
+                           #f #t))
+  (with-contract-continuation-mark
+   (cons blme 'no-negative-party) ; we don't know the negative party yet
+   ;; computing neg-accepter may involve some front-loaded checking. instrument
+   (define neg-accepter ((p blme) val))
+
+   ;; check as much as we can while knowing only the
+   ;; contracted value (e.g., function arity)
+   ;; we don't have the negative blame here, but we
+   ;; expect only positive failures from this; do the
+   ;; check and then toss the results.
+   (neg-accepter 'incomplete-blame-from-provide.rkt)
+
+   (values neg-accepter blme)))
 
 (define-for-syntax (true-provide/contract provide-stx just-check-errors? who)
   (syntax-case provide-stx ()
@@ -176,19 +481,22 @@
               ;; compare raw identifiers for `struct' and `rename' just like provide does
               (syntax-case* clause (struct rename) (λ (x y) (eq? (syntax-e x) (syntax-e y)))
                 [exists
-		 (or (eq? '#:exists (syntax-e #'exists)) (eq? '#:∃ (syntax-e #'exists))
+                 (or (eq? '#:exists (syntax-e #'exists)) (eq? '#:∃ (syntax-e #'exists))
                      (eq? '#:forall (syntax-e #'exists)) (eq? '#:∀ (syntax-e #'exists)))
                  (cond
                    [(null? (cdr clauses))
-                    (raise-syntax-error who
-                                        (format "expected either a single variable or a sequence of variables to follow ~a, but found nothing"
-						(syntax-e #'exists))
-                                        provide-stx
-                                        clause)]
+                    (raise-syntax-error 
+                     who
+                     (format (string-append
+                              "expected either a single variable or a sequence of variables"
+                              " to follow ~a, but found nothing")
+                             (syntax-e #'exists))
+                     provide-stx
+                     clause)]
                    [else
                     (syntax-case (cadr clauses) ()
-		      [x
-		       (identifier? #'x)
+                      [x
+                       (identifier? #'x)
                        (if just-check-errors?
                            (loop (cddr clauses) exists-binders)
                            (with-syntax ([(x-gen) (generate-temporaries #'(x))])
@@ -209,15 +517,18 @@
                                                       [x-gens (syntax->list #'(x-gen ...))])
                                              (cond
                                                [(null? xs) binders]
-                                               [else (loop (add-a-binder (car xs) (car x-gens) binders)
-                                                           (cdr xs)
-                                                           (cdr x-gens))]))))))]
+                                               [else 
+                                                (loop (add-a-binder (car xs) (car x-gens) binders)
+                                                      (cdr xs)
+                                                      (cdr x-gens))]))))))]
                       [else
-                       (raise-syntax-error who
-					   (format "expected either a single variable or a sequence of variables to follow ~a"
-						   (syntax-e #'exists))
-                                           provide-stx
-                                           (cadr clauses))])])]
+                       (raise-syntax-error 
+                        who
+                        (format (string-append "expected either a single variable or a sequence"
+                                               " of variables to follow ~a")
+                                (syntax-e #'exists))
+                        provide-stx
+                        (cadr clauses))])])]
                 [(rename this-name new-name contract)
                  (and (identifier? (syntax this-name))
                       (identifier? (syntax new-name)))
@@ -244,18 +555,27 @@
                                      (syntax this-name))]
                 [(rename . _)
                  (raise-syntax-error who "malformed rename clause" provide-stx clause)]
-                [(struct struct-name ((field-name contract) ...))
+                [(struct struct-name ((field-name contract) ...) options ...)
                  (and (well-formed-struct-name? (syntax struct-name))
                       (andmap identifier? (syntax->list (syntax (field-name ...)))))
-                 (begin
+                 (let ()
+                   (for ([option (in-list (syntax->list #'(options ...)))])
+                     (unless (member (syntax-e option) '(#:omit-constructor))
+                       (raise-syntax-error who
+                                           "malformed struct option" 
+                                           provide-stx
+                                           option)))
                    (add-to-dups-table #'struct-name)
+                   (define omit-constructor? 
+                     (member '#:omit-constructor (map syntax-e (syntax->list #'(options ...)))))
                    (if just-check-errors?
                        (loop (cdr clauses) exists-binders)
                        (let ([sc (build-struct-code provide-stx
                                                     (syntax struct-name)
                                                     (syntax->list (syntax (field-name ...)))
                                                     (map (λ (x) (add-exists-binders x exists-binders))
-                                                         (syntax->list (syntax (contract ...)))))])
+                                                         (syntax->list (syntax (contract ...))))
+                                                    omit-constructor?)])
                          (cons sc (loop (cdr clauses) exists-binders)))))]
                 [(struct name)
                  (identifier? (syntax name))
@@ -265,30 +585,30 @@
                                      clause)]
                 [(struct name . rest)
                  (not (well-formed-struct-name? (syntax name)))
-                 (raise-syntax-error who
-                                     "name must be an identifier or two identifiers with parens around them"
-                                     provide-stx
-                                     (syntax name))]
-                [(struct name (fields ...))
-                 (for-each (λ (field)
-                             (syntax-case field ()
-                               [(x y)
-                                (identifier? (syntax x))
-                                (void)]
-                               [(x y)
-                                (raise-syntax-error who
-                                                    "malformed struct field, expected identifier"
-                                                    provide-stx
-                                                    (syntax x))]
-                               [else
-                                (raise-syntax-error who
-                                                    "malformed struct field"
-                                                    provide-stx
-                                                    field)]))
-                           (syntax->list (syntax (fields ...))))
-
-                 ;; if we didn't find a bad field something is wrong!
-                 (raise-syntax-error who "internal error.1" provide-stx clause)]
+                 (raise-syntax-error
+                  who
+                  "name must be an identifier or two identifiers with parens around them"
+                  provide-stx
+                  (syntax name))]
+                [(struct name (fields ...) options ...)
+                 (let ()
+                   (for ([field [in-list (syntax->list (syntax (fields ...)))]])
+                     (syntax-case field ()
+                       [(x y)
+                        (identifier? (syntax x))
+                        (void)]
+                       [(x y)
+                        (raise-syntax-error who
+                                            "malformed struct field, expected identifier"
+                                            provide-stx
+                                            (syntax x))]
+                       [else
+                        (raise-syntax-error who
+                                            "malformed struct field"
+                                            provide-stx
+                                            field)]))
+                   ;; if we didn't find a bad field something is wrong!
+                   (raise-syntax-error who "internal error.1" provide-stx clause))]
                 [(struct name . fields)
                  (raise-syntax-error who
                                      "malformed struct fields"
@@ -330,7 +650,8 @@
        ;; build-struct-code : syntax syntax (listof syntax) (listof syntax) -> syntax
        ;; constructs the code for a struct clause
        ;; first arg is the original syntax object, for source locations
-       (define (build-struct-code stx struct-name-position field-names field-contracts)
+       (define (build-struct-code stx struct-name-position field-names field-contracts 
+                                  omit-constructor?)
          (let* ([struct-name (syntax-case struct-name-position ()
                                [(a b) (syntax a)]
                                [else struct-name-position])]
@@ -339,7 +660,8 @@
                             [else #t])]
 
 
-                [all-parent-struct-count/names (get-field-counts/struct-names struct-name provide-stx)]
+                [all-parent-struct-count/names 
+                 (get-field-counts/struct-names struct-name provide-stx)]
                 [parent-struct-count (if (null? all-parent-struct-count/names)
                                          #f
                                          (let ([pp (cdr all-parent-struct-count/names)])
@@ -352,8 +674,10 @@
                 [predicate-id (list-ref the-struct-info 2)]
                 [selector-ids (reverse (list-ref the-struct-info 3))]
                 [type-is-only-constructor? (free-identifier=? constructor-id struct-name)]
-                [type-is-constructor? #t] ; I think there's no way to detect when the struct-name binding isn't a constructor
-                [chaperone-constructor-id (and constructor-id (car (generate-temporaries (list constructor-id))))]
+                ; I think there's no way to detect when the struct-name binding isn't a constructor
+                [type-is-constructor? #t] 
+                [chaperone-constructor-id 
+                 (and constructor-id (car (generate-temporaries (list constructor-id))))]
                 [is-id-ok?
                  (λ (id i)
                    (if (or (not parent-struct-count)
@@ -362,21 +686,19 @@
                        #t))]
                 [mutator-ids (reverse (list-ref the-struct-info 4))] ;; (listof (union #f identifier))
                 [field-contract-ids (map (λ (field-name field-contract)
-                                           (if (a:known-good-contract? field-contract)
-                                               field-contract
-                                               (a:mangle-id provide-stx
-                                                            "provide/contract-field-contract"
-                                                            field-name
-                                                            struct-name)))
+                                           (a:mangle-id "provide/contract-field-contract"
+                                                        field-name
+                                                        struct-name))
                                          field-names
                                          field-contracts)]
                 [struct:struct-name
-                 (datum->syntax
-                  struct-name
-                  (string->symbol
-                   (string-append
-                    "struct:"
-                    (symbol->string (syntax-e struct-name)))))]
+                 (or (list-ref the-struct-info 0)
+                     (datum->syntax
+                      struct-name
+                      (string->symbol
+                       (string-append
+                        "struct:"
+                        (symbol->string (syntax-e struct-name))))))]
 
                 [-struct:struct-name
                  (datum->syntax
@@ -436,7 +758,8 @@
                         [name (car names)]
                         [counts (cdr relative-counts)]
                         [names (cdr names)]
-                        [selector-strs (reverse (map (λ (x) (format "~a" (syntax-e x))) selector-ids))]
+                        [selector-strs (reverse (map (λ (x) (format "~a" (syntax-e x))) 
+                                                     selector-ids))]
                         [field-names (reverse field-names)])
                (cond
                  [(or (null? selector-strs) (null? field-names))
@@ -485,94 +808,112 @@
                           (reverse
                            (filter
                             (λ (x) x)
-                            (map/count (λ (selector-id index)
-                                         (if (is-new-id? index)
-                                             #f
-                                             (let ([in-map (free-identifier-mapping-get struct-id-mapping selector-id (λ () #f))])
-                                               (or in-map
-                                                   selector-id))))
-                                       selector-ids)))]
+                            (for/list ([selector-id (in-list selector-ids)]
+                                       [index (in-naturals)])
+                              (if (is-new-id? index)
+                                  #f
+                                  (let ([in-map (free-identifier-mapping-get struct-id-mapping
+                                                                             selector-id
+                                                                             (λ () #f))])
+                                    (or in-map
+                                        selector-id))))))]
                          [(mutator-codes/mutator-new-names ...)
                           (map/count (λ (mutator-id field-contract-id index)
                                        (if (and mutator-id (is-new-id? index))
-                                           (code-for-one-id/new-name stx
-                                                                     mutator-id #f
-                                                                     (build-mutator-contract struct-name
-                                                                                             predicate-id
-                                                                                             field-contract-id)
-                                                                     #f)
+                                           (code-for-one-id/new-name 
+                                            stx
+                                            mutator-id #f
+                                            (build-mutator-contract struct-name
+                                                                    predicate-id
+                                                                    field-contract-id)
+                                            #f)
                                            #f))
                                      mutator-ids
                                      field-contract-ids)]
                          [(predicate-code predicate-new-name)
                           (code-for-one-id/new-name stx predicate-id #f (syntax predicate/c) #f)]
                          [(constructor-code constructor-new-name)
-                          (code-for-one-id/new-name
-                           stx
-                           chaperone-constructor-id struct-name
-                           (build-constructor-contract stx
-                                                       field-contract-ids
-                                                       predicate-id)
-                           constructor-id
-                           #t
-                           (not type-is-only-constructor?))]
+                          (if omit-constructor?
+                              #'((void) (void))
+                              (code-for-one-id/new-name
+                               stx
+                               chaperone-constructor-id struct-name
+                               (build-constructor-contract stx
+                                                           field-contract-ids
+                                                           predicate-id)
+                               constructor-id
+                               #t
+                               (not type-is-only-constructor?)))]
 
                          [(field-contract-id-definitions ...)
-                          (filter values (map (λ (field-contract-id field-contract)
-                                                (if (a:known-good-contract? field-contract)
-                                                    #f
-                                                    (with-syntax ([field-contract-id field-contract-id]
-                                                                  [field-contract field-contract])
-                                                      #'(define field-contract-id (verify-contract 'provide/contract field-contract)))))
-                                              field-contract-ids
-                                              field-contracts))]
+                          (filter values
+                                  (map (λ (field-contract-id field-contract)
+                                         (with-syntax ([field-contract-id field-contract-id]
+                                                       [field-contract field-contract])
+                                           #'(define field-contract-id 
+                                               (coerce-contract 'provide/contract field-contract)
+                                               #;
+                                               (opt/c field-contract #:error-name provide/contract))))
+                                       field-contract-ids
+                                       field-contracts))]
                          [(field-contracts ...) field-contracts]
                          [(field-contract-ids ...) field-contract-ids])
 
              (with-syntax ([((mutator-codes mutator-new-names) ...)
                             (filter syntax-e (syntax->list #'(mutator-codes/mutator-new-names ...)))])
-               (with-syntax ([(rev-selector-new-names ...) (reverse (syntax->list (syntax (selector-new-names ...))))]
-                             [(rev-mutator-new-names ...) (reverse (syntax->list (syntax (mutator-new-names ...))))])
+               (with-syntax ([(rev-selector-new-names ...)
+                              (reverse (syntax->list (syntax (selector-new-names ...))))]
+                             [(rev-mutator-new-names ...)
+                              (reverse (syntax->list (syntax (mutator-new-names ...))))])
                  (with-syntax ([struct-code
                                 (with-syntax ([id-rename
-                                               (or (free-identifier-mapping-get struct-id-mapping struct-name (λ () #f))
-                                                   (error 'contract/provide.rkt "internal error.2: ~s" struct-name))]
+                                               (or (free-identifier-mapping-get struct-id-mapping
+                                                                                struct-name
+                                                                                (λ () #f))
+                                                   (error 'contract/provide.rkt
+                                                          "internal error.2: ~s"
+                                                          struct-name))]
                                               [struct-name struct-name]
                                               [-struct:struct-name -struct:struct-name]
-                                              [super-id (if (boolean? super-id)
-                                                            super-id
-                                                            (with-syntax ([the-super-id
-                                                                           (or (free-identifier-mapping-get struct-id-mapping
-                                                                                                            super-id
-                                                                                                            (λ () #f))
-                                                                               super-id)])
-                                                              (syntax (quote-syntax the-super-id))))]
+                                              [super-id 
+                                               (if (boolean? super-id)
+                                                   super-id
+                                                   (with-syntax ([the-super-id
+                                                                  (or (free-identifier-mapping-get
+                                                                       struct-id-mapping
+                                                                       super-id
+                                                                       (λ () #f))
+                                                                      super-id)])
+                                                     (syntax (quote-syntax the-super-id))))]
                                               [(mutator-id-info ...)
-                                               (map (λ (x)
-                                                      (syntax-case x ()
-                                                        [(a b) #'(quote-syntax b)]
-                                                        [else #f]))
-                                                    (syntax->list #'(mutator-codes/mutator-new-names ...)))]
+                                               (for/list ([x (in-list
+                                                              (syntax->list
+                                                               #'(mutator-codes/mutator-new-names
+                                                                  ...)))])
+                                                 (syntax-case x ()
+                                                   [(a b) #'(quote-syntax b)]
+                                                   [else #f]))]
                                               [(exported-selector-ids ...) (reverse selector-ids)])
+                                  (define proc
+                                    #`(λ ()
+                                        (list (quote-syntax -struct:struct-name)
+                                              #,(if type-is-only-constructor?
+                                                    #'(quote-syntax id-rename)
+                                                    #'(quote-syntax constructor-new-name))
+                                              (quote-syntax predicate-new-name)
+                                              (list (quote-syntax rev-selector-new-names) ...
+                                                    (quote-syntax rev-selector-old-names) ...)
+                                              (list mutator-id-info ...)
+                                              super-id)))
                                   #`(begin
                                       (provide (rename-out [id-rename struct-name]))
                                       (define-syntax id-rename
-                                        #,(let ([proc
-                                                 #`(lambda ()
-                                                     (list (quote-syntax -struct:struct-name)
-                                                           #,(if type-is-only-constructor?
-                                                                 #'(quote-syntax id-rename)
-                                                                 #'(quote-syntax constructor-new-name))
-                                                           (quote-syntax predicate-new-name)
-                                                           (list (quote-syntax rev-selector-new-names) ...
-                                                                 (quote-syntax rev-selector-old-names) ...)
-                                                           (list mutator-id-info ...)
-                                                           super-id))])
-                                            (if type-is-constructor?
-                                                #`(make-applicable-struct-info #,proc
-                                                                               (lambda ()
-                                                                                 (quote-syntax constructor-new-name)))
-                                                #`(make-struct-info #,proc))))))]
+                                        #,(if (and type-is-constructor? (not omit-constructor?))
+                                              #`(make-applicable-struct-info 
+                                                 #,proc
+                                                 (lambda ()
+                                                   (quote-syntax constructor-new-name)))
+                                              #`(make-struct-info #,proc)))))]
                                [struct:struct-name struct:struct-name]
                                [-struct:struct-name -struct:struct-name]
                                [struct-name struct-name]
@@ -592,20 +933,26 @@
                        selector-codes ...
                        mutator-codes ...
                        predicate-code
-                       (define (#,chaperone-constructor-id constructor-args ...)
-                         (chaperone-struct (#,constructor-id constructor-args ...)
-                                           struct-info
-                                           (λ (struct-type skipped?)
-                                             (values -struct:struct-name skipped?))))
+                       (define #,chaperone-constructor-id
+                         (let ([struct-name
+                                (λ (constructor-args ...)
+                                  (chaperone-struct (#,constructor-id constructor-args ...)
+                                                    struct:struct-name
+                                                    struct-info
+                                                    (λ (struct-type skipped?)
+                                                      (values -struct:struct-name skipped?))))])
+                           struct-name))
                        constructor-code
 
                        ;; expanding out the body of the `make-pc-struct-type' function
                        ;; directly here in the expansion makes this very expensive at compile time
                        ;; when there are a lot of provide/contract clause using structs
                        (define -struct:struct-name
-                         (make-pc-struct-type 'struct-name
+                         (make-pc-struct-type #,pos-module-source-id
+                                              'struct-name
                                               struct-name-srcloc
                                               struct:struct-name
+                                              '(#,@field-names)
                                               field-contract-ids ...))
                        (provide (rename-out [-struct:struct-name struct:struct-name]))))))))))
 
@@ -630,9 +977,10 @@
                               (+ i 1)))])))
 
        ;; get-field-counts/struct-names : syntax syntax -> (listof (cons number symbol))
-       ;; returns a list of numbers corresponding to the numbers of fields for each of the parent structs
+       ;; returns a list of numbers corresponding to the numbers of fields for each parent struct
        (define (get-field-counts/struct-names struct-name provide-stx)
-         (let loop ([parent-info-id struct-name])
+         (let loop ([parent-info-id struct-name]
+                    [orig-struct? #t])
            (let ([parent-info
                   (and (identifier? parent-info-id)
                        (a:lookup-struct-info parent-info-id provide-stx))])
@@ -646,21 +994,23 @@
                           (not (last fields)))
                      (raise-syntax-error
                       who
-                      "cannot determine the number of fields in super struct"
+                      (format "cannot determine the number of fields in ~astruct"
+                              (if orig-struct? "" "parent "))
                       provide-stx
                       struct-name)]
                     [else
                      (cons (cons (length fields) (predicate->struct-name provide-stx predicate))
-                           (loop (list-ref parent-info 5)))]))]))))
+                           (loop (list-ref parent-info 5) #f))]))]))))
 
        (define (predicate->struct-name orig-stx stx)
          (and stx
               (let ([m (regexp-match #rx"^(.*)[?]$" (format "~a" (syntax-e stx)))])
                 (cond
                   [m (cadr m)]
-                  [else (raise-syntax-error who
-                                            "unable to cope with a struct supertype whose predicate doesn't end with `?'"
-                                            orig-stx)]))))
+                  [else (raise-syntax-error 
+                         who
+                         "unable to cope with a struct supertype whose predicate doesn't end with `?'"
+                         orig-stx)]))))
 
        ;; build-constructor-contract : syntax (listof syntax) syntax -> syntax
        (define (build-constructor-contract stx field-contract-ids predicate-id)
@@ -712,76 +1062,23 @@
          ((if mangle-for-maker?
               a:mangle-id-for-maker
               a:mangle-id)
-          provide-stx
           "provide/contract-id"
           (or user-rename-id reflect-id id)))
+       
+       (define pos-module-source-id
+         ;; Avoid context on this identifier, since it will be defined
+         ;; in another module, and the definition may have to pull
+         ;; along all context to support `module->namespace`:
+         (datum->syntax #f 'pos-module-source))
 
-       ;; code-for-one-id/new-name : syntax syntax syntax (union syntax #f) -> (values syntax syntax)
-       ;; given the syntax for an identifier and a contract,
-       ;; builds a begin expression for the entire contract and provide
-       ;; the first syntax object is used for source locations
        (define (code-for-one-id/new-name stx id reflect-id ctrct/no-prop user-rename-id
                                          [mangle-for-maker? #f]
-                                         [provide? #t])
-         (let ([no-need-to-check-ctrct? (a:known-good-contract? ctrct/no-prop)]
-               [ex-id (or reflect-id id)]
-               [ctrct (syntax-property ctrct/no-prop
-                                       'racket/contract:contract-on-boundary
-                                       (gensym 'provide/contract-boundary))])
-           (with-syntax ([id-rename (id-for-one-id user-rename-id reflect-id id mangle-for-maker?)]
-                         [contract-id (if no-need-to-check-ctrct?
-                                          ctrct
-                                          (a:mangle-id provide-stx
-                                                       "provide/contract-contract-id"
-                                                       (or user-rename-id ex-id)))]
-                         [pos-stx (datum->syntax id 'here)]
-                         [id id]
-                         [ex-id ex-id]
-                         [ctrct (syntax-property ctrct 'inferred-name ex-id)]
-                         [external-name (or user-rename-id id)]
-                         [reflect-external-name (or user-rename-id ex-id)])
-             (with-syntax ([extra-test
-                            (syntax-case #'ctrct (->)
-                              [(-> dom ... arg)
-                               #`(and (procedure? id)
-                                      (procedure-arity-includes? id #,(length (syntax->list #'(dom ...)))))]
-                              [_ #f])])
-               (with-syntax ([code
-                              (syntax-property
-                               (quasisyntax/loc stx
-                                 (begin
-
-                                   #,@(if no-need-to-check-ctrct?
-                                          (list)
-                                          (list #'(define contract-id
-                                                    (let ([ex-id ctrct]) ;; let is here to give the right name.
-                                                      (verify-contract 'provide/contract ex-id)))))
-                                   (define-syntax id-rename
-                                     (make-provide/contract-transformer (quote-syntax contract-id)
-                                                                        (a:update-loc
-                                                                         (quote-syntax id)
-                                                                         (vector
-                                                                          '#,(syntax-source #'id)
-                                                                          #,(syntax-line #'id)
-                                                                          #,(syntax-column #'id)
-                                                                          #,(syntax-position #'id)
-                                                                          #,(syntax-span #'id)))
-                                                                        (quote-syntax reflect-external-name)
-                                                                        (quote-syntax pos-module-source)))
-
-                                   #,@(if provide?
-                                          (list #`(provide (rename-out [id-rename external-name])))
-                                          null)))
-                               'provide/contract-original-contract
-                               (vector #'external-name #'ctrct))])
-
-                 (syntax-local-lift-module-end-declaration
-                  #`(begin
-                      (unless extra-test
-                        (contract contract-id id pos-module-source 'ignored 'id
-                                  (quote-srcloc id)))
-                      (void)))
-                 (syntax (code id-rename)))))))
+                                         [provide? #t]) 
+         (tl-code-for-one-id/new-name id-for-one-id
+                                      stx id reflect-id ctrct/no-prop user-rename-id
+                                      pos-module-source-id
+                                      mangle-for-maker?
+                                      provide?))
 
        (define p/c-clauses (syntax->list (syntax (p/c-ele ...))))
        (define struct-id-mapping (make-free-identifier-mapping))
@@ -797,8 +1094,7 @@
            (free-identifier-mapping-put!
             struct-id-mapping
             a
-            (a:mangle-id provide-stx
-                         "provide/contract-struct-expandsion-info-id"
+            (a:mangle-id "provide/contract-struct-expandsion-info-id"
                          a))
            (define parent-selectors
              (if parent
@@ -806,9 +1102,12 @@
                                                    3)])
                    (length parent-selectors))
                  0))
-           (when (< parent-selectors (length flds)) ;; this test will fail when the syntax is bad; we catch syntax errors elsewhere
+           ;; this test will fail when the syntax is bad; we catch syntax errors elsewhere
+           (when (< parent-selectors (length flds))
              (for ([f (in-list (list-tail flds parent-selectors))])
-               (define selector-id (datum->syntax a (string->symbol (format "~a-~a" (syntax-e a) (syntax-e f)))))
+               (define selector-id (datum->syntax 
+                                    a 
+                                    (string->symbol (format "~a-~a" (syntax-e a) (syntax-e f)))))
                (free-identifier-mapping-put!
                 struct-id-mapping
                 selector-id
@@ -821,37 +1120,53 @@
          [else
           (for ([clause (in-list p/c-clauses)])
             (syntax-case* clause (struct) (λ (x y) (eq? (syntax-e x) (syntax-e y)))
-              [(struct a ((fld ctc) ...))
+              [(struct a ((fld ctc) ...) options ...)
                (identifier? #'a)
                (add-struct-clause-to-struct-id-mapping #'a #f #'(fld ...))]
-              [(struct (a b) ((fld ctc) ...))
+              [(struct (a b) ((fld ctc) ...) options ...)
                (add-struct-clause-to-struct-id-mapping #'a #'b #'(fld ...))]
               [_ (void)]))
-          (with-syntax ([(bodies ...) (code-for-each-clause p/c-clauses)])
+          (with-syntax ([(bodies ...) (code-for-each-clause p/c-clauses)]
+                        [pos-module-source-id pos-module-source-id])
             (syntax
              (begin
-               (define pos-module-source (quote-module-name))
+               (define pos-module-source-id (quote-module-name))
                bodies ...)))]))]))
 
-(define-syntax (provide/contract stx)
+
+(define-for-syntax (provide/contract-for-whom stx who)
   (define s-l-c (syntax-local-context))
   (case s-l-c
    [(module-begin)
     #`(begin ;; force us into the 'module' local context
              #,stx)]
    [(module) ;; the good case
-    (true-provide/contract stx #f 'provide/contract)]
+    (true-provide/contract stx #f who)]
    [else ;; expression or internal definition
-    (raise-syntax-error 'provide/contract
+    (raise-syntax-error who
                         (format "not allowed in a ~a context"
                                 (if (pair? s-l-c)
                                     "internal definition"
                                     s-l-c))
                         stx)]))
 
-(define (make-pc-struct-type struct-name srcloc struct:struct-name . ctcs)
+(define-syntax (provide/contract stx) 
+  (provide/contract-for-whom stx 'provide/contract))
+(define-syntax (provide/contract-for-contract-out stx)
+  (provide/contract-for-whom stx 'contract-out))
+
+(define (make-pc-struct-type pos-module-source struct-name srcloc struct-type field-names . ctcs)
+  (define blame
+    (make-blame (build-source-location srcloc) struct-type (λ () `(substruct-of ,struct-name))
+                pos-module-source #f #t))
+  (define late-neg-acceptors
+    (for/list ([ctc (in-list ctcs)]
+               [field-name (in-list field-names)])
+      ((get/build-late-neg-projection ctc)
+       (blame-add-context blame
+                          (format "the ~a field of" field-name)))))
   (chaperone-struct-type
-   struct:struct-name
+   struct-type
    (λ (a b c d e f g h) (values a b c d e f g h))
    (λ (x) x)
    (λ args
@@ -865,12 +1180,7 @@
             null]
            [else (cons (car args) (loop (cdr args)))])))
      (apply values
-            (map (λ (ctc val)
-                   (contract ctc
-                             val
-                             'not-enough-info-for-blame
-                             'not-enough-info-for-blame
-                             name
-                             srcloc))
-                 ctcs
+            (map (λ (late-neg-acceptors val)
+                   (late-neg-acceptors val 'not-enough-info-for-blame))
+                 late-neg-acceptors
                  vals)))))

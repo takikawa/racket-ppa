@@ -1,12 +1,14 @@
 #ifndef MZ_LONGDOUBLE_H
 #define MZ_LONGDOUBLE_H
 
-#if defined(_MSC_VER)
-# define MZ_LONG_DOUBLE_API_IS_EXTERNAL
-#endif
+/* Functions like `extfl->floating-point-bytes` assume that the
+   content of a `long double' occupies the first 10 bytes: */
+#define LONG_DOUBLE_BYTE_LEN 10
 
-#if defined(__MINGW32__) && defined(MZ_LONG_DOUBLE)
-# define LONG_DOUBLE_STRING_OP_API_IS_EXTERNAL
+#ifndef MZ_LONG_DOUBLE_API_IS_EXTERNAL
+# if defined(__MINGW32__) && defined(MZ_LONG_DOUBLE)
+#  define LONG_DOUBLE_STRING_OP_API_IS_EXTERNAL
+# endif
 #endif
 
 #if defined(MZ_LONG_DOUBLE_API_IS_EXTERNAL)           \
@@ -57,6 +59,7 @@ XFORM_NONGCING LDBL_DLL_API void set_long_double(long_double a, long_double b);
 XFORM_NONGCING LDBL_DLL_API long_double long_double_from_int(int a);
 XFORM_NONGCING LDBL_DLL_API long_double long_double_from_float(float a);
 XFORM_NONGCING LDBL_DLL_API long_double long_double_from_double(double a);
+XFORM_NONGCING LDBL_DLL_API long_double long_double_from_intptr(intptr_t a);
 XFORM_NONGCING LDBL_DLL_API long_double long_double_from_uintptr(uintptr_t a);
 
 XFORM_NONGCING LDBL_DLL_API double double_from_long_double(long_double a);
@@ -142,6 +145,7 @@ XFORM_NONGCING int long_double_available();
 # define long_double_from_int(a) ((long double)(a))
 # define long_double_from_float(a) ((long double)(a))
 # define long_double_from_double(a) ((long double)(a))
+# define long_double_from_intptr(a) ((long double)(a))
 # define long_double_from_uintptr(a) ((long double)(a))
 
 # define double_from_long_double(a) (a)

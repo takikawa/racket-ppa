@@ -9,7 +9,7 @@
    S = Scheme_Object**
    v = void 
    b = Scheme_Bucket*
-   n = Scheme_Native_Closure_Data* 
+   n = Scheme_Native_Lambda* 
    p = void*, CGC only
    z = size_t
    m = MZ_MARK_STACK_TYPE */
@@ -29,7 +29,6 @@ define_ts_n_s(scheme_make_native_case_closure, FSRC_OTHER)
 # ifndef CAN_INLINE_ALLOC
 define_ts_s_s(scheme_make_envunbox, FSRC_OTHER)
 # endif
-define_ts_iSi_s(scheme_build_list_offset, FSRC_OTHER)
 #endif
 
 #ifdef JITARITH_TS_PROCS
@@ -48,7 +47,7 @@ define_ts_s_v(raise_bad_call_with_values, FSRC_MARKS)
 define_ts_s_s(call_with_values_from_multiple_result_multi, FSRC_MARKS)
 define_ts_s_s(call_with_values_from_multiple_result, FSRC_MARKS)
 define_ts_S_s(apply_checked_fail, FSRC_MARKS)
-define_ts_Sl_s(scheme_delayed_rename, FSRC_OTHER)
+define_ts_Sl_s(scheme_delayed_shift, FSRC_OTHER)
 define_ts_b_v(scheme_unbound_global, FSRC_MARKS)
 define_ts_ss_v(scheme_set_box, FSRC_MARKS)
 define_ts_iS_s(scheme_checked_car, FSRC_MARKS)
@@ -90,9 +89,14 @@ define_ts_s_s(scheme_flvector_length, FSRC_MARKS)
 define_ts_s_s(scheme_extflvector_length, FSRC_MARKS)
 #endif
 define_ts_s_s(scheme_fxvector_length, FSRC_MARKS)
+define_ts_s_s(scheme_string_length, FSRC_MARKS)
+define_ts_s_s(scheme_byte_string_length, FSRC_MARKS)
+define_ts_ss_s(scheme_string_eq_2, FSRC_MARKS)
+define_ts_ss_s(scheme_byte_string_eq_2, FSRC_MARKS)
 define_ts_s_s(scheme_unbox, FSRC_MARKS)
 define_ts_si_s(scheme_struct_ref, FSRC_MARKS)
 define_ts_sis_v(scheme_struct_set, FSRC_MARKS)
+define_ts_Sii_s(unsafe_struct_refs, FSRC_MARKS)
 define_ts_iS_s(scheme_extract_checked_procedure, FSRC_MARKS)
 define_ts_iS_s(scheme_procedure_arity_includes, FSRC_MARKS)
 define_ts_ssi_s(vector_check_chaperone_of, FSRC_MARKS)
@@ -102,8 +106,18 @@ define_ts_iSs_s(scheme_struct_getter, FSRC_MARKS)
 define_ts_iSs_s(scheme_struct_setter, FSRC_MARKS)
 define_ts_iS_s(scheme_box_cas, FSRC_MARKS)
 define_ts__v(chaperone_set_mark, FSRC_MARKS)
+define_ts_ss_s(scheme_chaperone_get_immediate_cc_mark, FSRC_MARKS)
 define_ts_iS_s(scheme_checked_char_to_integer, FSRC_MARKS)
 define_ts_iS_s(scheme_checked_integer_to_char, FSRC_MARKS)
+# ifndef CAN_INLINE_ALLOC
+define_ts_iSi_s(scheme_build_list_offset, FSRC_OTHER)
+# endif
+define_ts_iS_s(scheme_check_not_undefined, FSRC_MARKS)
+define_ts_iS_s(scheme_check_assign_not_undefined, FSRC_MARKS)
+define_ts_iS_s(scheme_foreign_ptr_ref, FSRC_MARKS)
+define_ts_iS_v(scheme_foreign_ptr_set, FSRC_MARKS)
+define_ts_s_s(scheme_cpointer_tag, FSRC_MARKS)
+define_ts_ss_v(scheme_set_cpointer_tag, FSRC_MARKS)
 #endif
 
 #ifdef JITCALL_TS_PROCS
@@ -125,8 +139,9 @@ define_ts_ss_s(scheme_jit_make_two_element_vector, FSRC_OTHER)
 define_ts_l_s(scheme_jit_make_ivector, FSRC_OTHER)
 define_ts_l_s(scheme_jit_make_vector, FSRC_OTHER)
 # endif
-define_ts_ss_i(scheme_equal, FSRC_MARKS)
+define_ts_ss_s(equal_as_bool, FSRC_MARKS)
 define_ts_sss_s(extract_one_cc_mark_to_tag, FSRC_MARKS)
+define_ts_iS_s(scheme_checked_make_vector, FSRC_MARKS)
 #endif
 
 #ifdef JIT_APPLY_TS_PROCS
@@ -171,7 +186,7 @@ define_ts_s_s(scheme_box, FSRC_OTHER)
 # define ts_lexical_binding_wrong_return_arity lexical_binding_wrong_return_arity
 # define ts_call_wrong_return_arity call_wrong_return_arity
 # define ts_scheme_unbound_global scheme_unbound_global
-# define ts_scheme_delayed_rename scheme_delayed_rename
+# define ts_scheme_delayed_shift scheme_delayed_shift
 # define ts_scheme_checked_car scheme_checked_car
 # define ts_scheme_checked_cdr scheme_checked_cdr
 # define ts_scheme_checked_caar scheme_checked_caar
@@ -195,16 +210,23 @@ define_ts_s_s(scheme_box, FSRC_OTHER)
 # define ts_scheme_set_box scheme_set_box
 # define ts_scheme_box_cas scheme_box_cas
 # define ts_chaperone_set_mark chaperone_set_mark
+# define ts_scheme_chaperone_get_immediate_cc_mark scheme_chaperone_get_immediate_cc_mark
 # define ts_scheme_vector_length scheme_vector_length
 # define ts_scheme_flvector_length scheme_flvector_length
 #ifdef MZ_LONG_DOUBLE
 # define ts_scheme_extflvector_length scheme_extflvector_length
 #endif
 # define ts_scheme_fxvector_length scheme_fxvector_length
+# define ts_scheme_string_length scheme_string_length
+# define ts_scheme_byte_string_length scheme_byte_string_length
 # define ts_scheme_struct_ref scheme_struct_ref
 # define ts_scheme_struct_set scheme_struct_set
-# define ts_scheme_equal scheme_equal
+# define ts_unsafe_struct_refs unsafe_struct_refs
+# define ts_equal_as_bool equal_as_bool
+# define ts_scheme_string_eq_2 scheme_string_eq_2
+# define ts_scheme_byte_string_eq_2 scheme_byte_string_eq_2
 # define ts_extract_one_cc_mark_to_tag extract_one_cc_mark_to_tag
+# define ts_scheme_checked_make_vector scheme_checked_make_vector
 # define ts_tail_call_with_values_from_multiple_result tail_call_with_values_from_multiple_result
 # define ts_raise_bad_call_with_values raise_bad_call_with_values
 # define ts_call_with_values_from_multiple_result_multi call_with_values_from_multiple_result_multi
@@ -236,4 +258,10 @@ define_ts_s_s(scheme_box, FSRC_OTHER)
 # define ts_scheme_struct_setter scheme_struct_setter
 # define ts_scheme_checked_char_to_integer scheme_checked_char_to_integer
 # define ts_scheme_checked_integer_to_char scheme_checked_integer_to_char
+# define ts_scheme_check_not_undefined scheme_check_not_undefined
+# define ts_scheme_check_assign_not_undefined scheme_check_assign_not_undefined
+# define ts_scheme_foreign_ptr_ref scheme_foreign_ptr_ref
+# define ts_scheme_foreign_ptr_set scheme_foreign_ptr_set
+# define ts_scheme_cpointer_tag scheme_cpointer_tag
+# define ts_scheme_set_cpointer_tag scheme_set_cpointer_tag
 #endif

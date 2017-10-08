@@ -8,7 +8,7 @@
                      syntax/parse/pre
                      syntax/parse/private/residual-ct ;; keep abs. path
                      "../private/kws.rkt"
-                     unstable/wrapc))
+                     syntax/contract))
 (provide provide-syntax-class/contract
          syntax-class/c
          splicing-syntax-class/c)
@@ -61,7 +61,7 @@
                (join-sep (map kw->string maxkws*) "," "and")
                (join-sep (map kw->string maxkws) "," "and")))
         (with-syntax ([scname scname]
-                      [#s(stxclass name arity attrs parser splicing? options integrate)
+                      [#s(stxclass name arity attrs parser splicing? opts inline)
                        stxclass]
                       [#s(ctcrec (mpc ...) (mkw ...) (mkwc ...)
                                  (opc ...) (okw ...) (okwc ...))
@@ -91,12 +91,8 @@
                        `(,(if 'splicing? 'splicing-syntax-class/c 'syntax-class/c)
                          [,(contract-name mpc-id) ... mkw-name-part ... ...]
                          [okw-name-part ... ...]))))
-                  (define-syntax contracted-parser
-                    (make-provide/contract-transformer
-                     (quote-syntax parser-contract)
-                     (quote-syntax parser)
-                     (quote-syntax scname)
-                     (quote-syntax #,pos-module-source)))
+                  (define-module-boundary-contract contracted-parser
+                    parser parser-contract #:pos-source #,pos-module-source)
                   (define-syntax contracted-scname
                     (make-stxclass 
                      (quote-syntax name)
@@ -104,8 +100,7 @@
                      'attrs
                      (quote-syntax contracted-parser)
                      'splicing?
-                     'options
-                     #f)) ;; must disable integration
+                     'opts #f)) ;; must disable inlining
                   (provide (rename-out [contracted-scname scname])))))))])))
 
 (define-syntax (provide-syntax-class/contract stx)
@@ -138,11 +133,12 @@
     [(_ [scname c:stxclass-ctc] ...)
      #:declare scname (static stxclass? "syntax class")
      (parameterize ((current-syntax-context stx))
-       #`(begin (define pos-module-source (quote-module-name))
-                #,@(for/list ([scname (in-list (syntax->list #'(scname ...)))]
-                              [stxclass (in-list (attribute scname.value))]
-                              [rec (in-list (attribute c.rec))])
-                     (do-one-contract stx scname stxclass rec #'pos-module-source))))]))
+       (with-disappeared-uses
+        #`(begin (define pos-module-source (quote-module-name))
+                 #,@(for/list ([scname (in-list (syntax->list #'(scname ...)))]
+                               [stxclass (in-list (attribute scname.value))]
+                               [rec (in-list (attribute c.rec))])
+                      (do-one-contract stx scname stxclass rec #'pos-module-source)))))]))
 
 ;; Copied from unstable/contract,
 ;; which requires racket/contract, not racket/contract/base
@@ -154,7 +150,7 @@
     (if (flat-contract? ctc)
         (flat-named-contract name (flat-contract-predicate ctc))
         (let* ([ctc-fo (contract-first-order ctc)]
-               [proj (contract-projection ctc)])
+               [late-neg-proj (contract-late-neg-projection ctc)])
           (make-contract #:name name
-                           #:projection proj
+                         #:late-neg-projection late-neg-proj
                            #:first-order ctc-fo)))))

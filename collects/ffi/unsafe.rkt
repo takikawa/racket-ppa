@@ -1,8 +1,9 @@
 #lang racket/base
 
 ;; Foreign Racket interface
-(require '#%foreign setup/dirs racket/unsafe/ops
-         (for-syntax racket/base racket/list syntax/stx
+(require '#%foreign setup/dirs racket/unsafe/ops racket/private/for
+         (only-in '#%unsafe unsafe-thread-at-root)
+         (for-syntax racket/base racket/list syntax/stx racket/syntax
                      racket/struct-info))
 
 (provide ctype-sizeof ctype-alignof compiler-sizeof
@@ -16,7 +17,7 @@
          _void _int8 _uint8 _int16 _uint16 _int32 _uint32 _int64 _uint64
          _fixint _ufixint _fixnum _ufixnum
          _float _double _longdouble _double*
-         _bool _pointer _gcpointer _scheme (rename-out [_scheme _racket]) _fpointer function-ptr
+         _bool _stdbool _pointer _gcpointer _scheme (rename-out [_scheme _racket]) _fpointer function-ptr
          memcpy memmove memset
          malloc-immobile-cell free-immobile-cell
          make-late-weak-box make-late-weak-hasheq)
@@ -67,29 +68,33 @@
     [else (error 'foreign "internal error: bad compiler size for `~s'"
                  c-type)]))
 
-;; _short etc is a convenient name for whatever is the compiler's `short'
-;; (_short is signed)
+;; _short etc is a convenient name for the compiler's `short',
+;; which is always a 16-bit value for Racket:
 (provide _short _ushort _sshort)
-(define-values (_short _ushort _sshort) (sizeof->3ints 'short))
+(define _short _int16)
+(define _ushort _uint16)
+(define _sshort _short)
 
-;; _int etc is a convenient name for whatever is the compiler's `int'
-;; (_int is signed)
+;; _int etc is a convenient name for whatever is the compiler's `int',
+;; which is always a 32-byte value for Racket:
 (provide _int _uint _sint)
-(define-values (_int _uint _sint) (sizeof->3ints 'int))
+(define _int _int32)
+(define _uint _uint32)
+(define _sint _int)
 
-;; _long etc is a convenient name for whatever is the compiler's `long'
-;; (_long is signed)
+;; _long etc is a convenient name for whatever is the compiler's `long',
+;; which varies among platforms:
 (provide _long _ulong _slong)
 (define-values (_long _ulong _slong) (sizeof->3ints 'long))
 
 ;; _llong etc is a convenient name for whatever is the compiler's `long long'
-;; (_llong is signed)
+;; which varies among platforms:
 (provide _llong _ullong _sllong)
 (define-values (_llong _ullong _sllong) (sizeof->3ints '(long long)))
 
 ;; _intptr etc is a convenient name for whatever is the integer
-;; equivalent of the compiler's pointer (see `intptr_t') (_intptr is
-;; signed)
+;; equivalent of the compiler's pointer (see `intptr_t'),
+;; which varies among platforms:
 (provide _intptr _uintptr _sintptr)
 (define-values (_intptr _uintptr _sintptr) (sizeof->3ints '(void *)))
 
@@ -104,7 +109,9 @@
 
 (define lib-suffix (bytes->string/latin-1 (subbytes (system-type 'so-suffix) 1)))
 (define lib-suffix-re (regexp (string-append "\\." lib-suffix "$")))
-(define suffix-before-version? (not (equal? lib-suffix "dylib")))
+(define suffix-before-version? (and (not (equal? lib-suffix "dylib"))
+                                    (not (equal? lib-suffix "dll"))))
+(define version-sep (if (equal? lib-suffix "dll") "-" "."))
 
 (provide (protect-out (rename-out [get-ffi-lib ffi-lib]))
          ffi-lib? ffi-lib-name)
@@ -129,7 +136,8 @@
     (let* ([versions (if (list? version/s) version/s (list version/s))]
 	   [versions (map (lambda (v)
 			    (if (or (not v) (zero? (string-length v)))
-				"" (string-append "." v)))
+				""
+                                (string-append version-sep v)))
 			  versions)]
 	   [fullpath (lambda (p) (path->complete-path (cleanse-path p)))]
 	   [absolute? (absolute-path? name)]
@@ -348,7 +356,7 @@
          [else (set! keys (cons (cons key val) keys))]))
      (let loop ([t (disarm orig)])
        (define (next rest . args) (apply setkey! args) (loop rest))
-       (define (rearm e) (syntax-rearm e orig))
+       (define (rearm e) (syntax-rearm e orig #t))
        (syntax-case* t
            (type: expr: bind: 1st-arg: prev-arg: pre: post: keywords: =>)
            id=?
@@ -449,13 +457,14 @@
                       #:keep        [keep    #t]
                       #:atomic?     [atomic? #f]
                       #:in-original-place? [orig-place? #f]
+                      #:lock-name   [lock-name #f]
                       #:async-apply [async-apply #f]
                       #:save-errno  [errno   #f])
-  (_cprocedure* itypes otype abi wrapper keep atomic? orig-place? async-apply errno))
+  (_cprocedure* itypes otype abi wrapper keep atomic? orig-place? async-apply errno lock-name))
 
 ;; for internal use
 (define held-callbacks (make-weak-hasheq))
-(define (_cprocedure* itypes otype abi wrapper keep atomic? orig-place? async-apply errno)
+(define (_cprocedure* itypes otype abi wrapper keep atomic? orig-place? async-apply errno lock-name)
   (define-syntax-rule (make-it wrap)
     (make-ctype _fpointer
       (lambda (x)
@@ -468,7 +477,7 @@
                                   (if (or (null? x) (pair? x)) (cons cb x) cb)))]
                      [(procedure? keep) (keep cb)])
                cb)))
-      (lambda (x) (and x (wrap (ffi-call x itypes otype abi errno orig-place?))))))
+      (lambda (x) (and x (wrap (ffi-call x itypes otype abi errno orig-place? lock-name))))))
   (if wrapper (make-it wrapper) (make-it begin)))
 
 ;; Syntax for the special _fun type:
@@ -491,8 +500,10 @@
 
 (provide _fun)
 (define-for-syntax _fun-keywords
-  `([#:abi ,#'#f] [#:keep ,#'#t] [#:atomic? ,#'#f] [#:in-original-place? ,#'#f] 
-    [#:async-apply ,#'#f] [#:save-errno ,#'#f]))
+  `([#:abi ,#'#f] [#:keep ,#'#t] [#:atomic? ,#'#f]
+    [#:in-original-place? ,#'#f] [#:lock-name ,#'#f]
+    [#:async-apply ,#'#f] [#:save-errno ,#'#f]
+    [#:retry #f]))
 (define-syntax (_fun stx)
   (define (err msg . sub) (apply raise-syntax-error '_fun msg stx sub))
   (define xs     #f)
@@ -525,7 +536,7 @@
                        sub)]
                  [(assq k _fun-keywords) (set! ks (cons (cons k v) ks))]
                  [else (err "unknown keyword" sub)]))))))
-  (define ((t-n-e clause) type name expr)
+  (define ((t-n-e clause) type name expr #:name-ok? [name-ok? #t])
     (let ([keys (custom-type->keys type err)])
       (define (getkey key) (cond [(assq key keys) => cdr] [else #f]))
       (define (arg x . no-expr?) ;; can mutate `name'
@@ -536,7 +547,7 @@
         ;; disappear from the inputs.
         (unless use-expr?
           (if (and (pair? no-expr?) (car no-expr?) expr)
-            (err "got an expression for a custom type that do not use it"
+            (err "got an expression for a custom type that does not use it"
                  clause)
             (set! expr (void))))
         (when use-expr?
@@ -555,6 +566,14 @@
                    (err "got a custom type that wants prev arg too early"
                         clause)))])
         x)
+      (unless (or name-ok?
+                  expr
+                  (and keys (or (getkey 'expr)
+                                (getkey 'pre))))
+        (err (string-append
+              "unnamed argument (without an expression) is not allowed when "
+              "argument names are provided before `::'")
+             clause))
       (when keys
         (set! type (getkey 'type))
         (cond [(and (not expr) (getkey 'expr)) => (lambda (x) (set! expr x))])
@@ -619,7 +638,7 @@
                      [(name : type)        (t-n-e #'type #'name #f)]
                      [(type = expr)        (t-n-e #'type temp   #'expr)]
                      [(name : type = expr) (t-n-e #'type #'name #'expr)]
-                     [type                 (t-n-e #'type temp   #f)])))
+                     [type                 (t-n-e #'type temp   #f #:name-ok? (not input-names))])))
                inputs
                (generate-temporaries (map (lambda (x) 'tmp) inputs))))
     ;; when processing the output type, only the post code matters
@@ -646,7 +665,8 @@
                              #,(kwd-ref '#:atomic?)
                              #,(kwd-ref '#:in-original-place?)
                              #,(kwd-ref '#:async-apply)
-                             #,(kwd-ref '#:save-errno)))])
+                             #,(kwd-ref '#:save-errno)
+                             #,(kwd-ref '#:lock-name)))])
       (if (or (caddr output) input-names (ormap caddr inputs)
               (ormap (lambda (x) (not (car x))) inputs)
               (pair? bind) (pair? pre) (pair? post))
@@ -665,22 +685,43 @@
                             inputs)]
                [ffi-args
                 (filter-map (lambda (x) (and (car x) (cadr x))) inputs)]
+               [retry-spec
+                (let ([r (kwd-ref '#:retry)])
+                  (when r
+                    (syntax-case r ()
+                      [(retry-id [arg-id arg-val] ...)
+                       (and (identifier? #'retry-id)
+                            (andmap identifier? (syntax->list #'(arg-id ...))))
+                       (let ([dup (check-duplicate-identifier (syntax->list #'(arg-id ...)))])
+                         (when dup
+                           (err "duplicate identifier in retry specification" dup))
+                         r)]
+                      [_
+                       (err "ill-formed retry specification" r)]))
+                  r)]
+               [add-retry
+                (lambda (body)
+                  (if retry-spec
+                      #`(let #,(car (syntax-e retry-spec)) #,(cdr (syntax-e retry-spec))
+                          #,body)
+                      body))]
                ;; the actual wrapper body
                [body (quasisyntax/loc stx
                        (lambda #,input-names
-                         (let* (#,@args
-                                #,@bind
-                                #,@pre)
-                           #,(if (or output-expr
-                                     (cadr output))
-                                 (let ([res (or (cadr output)
-                                                (car (generate-temporaries #'(ret))))])
-                                   #`(let* ([#,res (ffi #,@ffi-args)]
-                                            #,@post)
-                                       #,(or output-expr res)))
-                                 #`(begin0
-                                    (ffi #,@ffi-args)
-                                    (let* (#,@post) (void)))))))]
+                         #,(add-retry
+                            #`(let* (#,@args
+                                     #,@bind
+                                     #,@pre)
+                                #,(if (or output-expr
+                                          (cadr output))
+                                      (let ([res (or (cadr output)
+                                                     (car (generate-temporaries #'(ret))))])
+                                        #`(let* ([#,res (ffi #,@ffi-args)]
+                                                 #,@post)
+                                            #,(or output-expr res)))
+                                      #`(begin0
+                                         (ffi #,@ffi-args)
+                                         (let* (#,@post) (void))))))))]
                ;; if there is a string 'ffi-name property, use it as a name
                [body (let ([n (cond [(syntax-property stx 'ffi-name)
                                      => syntax->datum]
@@ -783,9 +824,13 @@
 ;; ----------------------------------------------------------------------------
 ;; Utility types
 
-;; Call this with a name (symbol) and a list of symbols, where a symbol can be
+;; Call this with a name (symbol or #f) and a list of symbols, where a symbol can be
 ;; followed by a '= and an integer to have a similar effect of C's enum.
-(define (_enum name symbols [basetype _ufixint] #:unknown [unknown _enum])
+(define ((_enum name) symbols [basetype _ufixint] #:unknown [unknown _enum])
+  (unless (list? symbols)
+    (raise-argument-error '_enum "list?" symbols))
+  (when (and (procedure? unknown) (not (procedure-arity-includes? unknown 1)))
+    (raise-argument-error '_enum "(if/c procedure? (procedure-arity-includes/c 1) any/c)" unknown))
   (define sym->int '())
   (define int->sym '())
   (define s->c
@@ -799,8 +844,19 @@
                                       (pair? (cddr symbols)))
                                (values (caddr symbols) (cdddr symbols))
                                (values i (cdr symbols)))])
-        (set! sym->int (cons (cons (car symbols) i) sym->int))
-        (set! int->sym (cons (cons i (car symbols)) int->sym))
+        (define sym (car symbols))
+        (unless (symbol? sym)
+          (raise-arguments-error '_enum "key is not a symbol"
+                                 "symbols" symbols
+                                 "key" sym
+                                 "value" i))
+        (unless (exact-integer? i)
+          (raise-arguments-error '_enum "value is not an integer"
+                                 "symbols" symbols
+                                 "key" sym
+                                 "value" i))
+        (set! sym->int (cons (cons sym i) sym->int))
+        (set! int->sym (cons (cons i sym) int->sym))
         (loop (add1 i) rest))))
   (make-ctype basetype
     (lambda (x)
@@ -821,30 +877,32 @@
 (define-syntax (_enum* stx)
   (syntax-case stx ()
     [(_ x ...)
-     (with-syntax ([name (syntax-local-name)]) #'(_enum 'name x ...))]
-    [id (identifier? #'id) #'_enum]))
+     (with-syntax ([name (syntax-local-name)]) #'((_enum 'name) x ...))]
+    [id (identifier? #'id) #'(_enum #f)]))
 
 ;; Call this with a name (symbol) and a list of (symbol int) or symbols like
 ;; the above with '= -- but the numbers have to be specified in some way.  The
 ;; generated type will convert a list of these symbols into the logical-or of
 ;; their values and back.
-(define (_bitmask name orig-symbols->integers . base?)
+(define (_bitmask name orig-s->i . base?)
   (define basetype (if (pair? base?) (car base?) _uint))
   (define s->c
     (if name (string->symbol (format "bitmask:~a->int" name)) 'bitmask->int))
   (define symbols->integers
-    (let loop ([s->i orig-symbols->integers])
+    (let loop ([s->i orig-s->i] [last 0])
       (cond
        [(null? s->i)
         null]
        [(and (pair? (cdr s->i)) (eq? '= (cadr s->i)) (pair? (cddr s->i)))
         (cons (list (car s->i) (caddr s->i))
-              (loop (cdddr s->i)))]
+              (loop (cdddr s->i) (integer-length (caddr s->i))))]
        [(and (pair? (car s->i)) (pair? (cdar s->i)) (null? (cddar s->i))
              (symbol? (caar s->i)) (integer? (cadar s->i)))
-        (cons (car s->i) (loop (cdr s->i)))]
+        (cons (car s->i) (loop (cdr s->i) (integer-length (cadar s->i))))]
+       [(symbol? (car s->i))
+        (cons (list (car s->i) (arithmetic-shift 1 last)) (loop (cdr s->i) (add1 last)))]
        [else
-        (error '_bitmask "bad spec in ~e" orig-symbols->integers)])))
+        (error '_bitmask "bad spec in ~e" orig-s->i)])))
   (make-ctype basetype
     (lambda (symbols)
       (if (null? symbols) ; probably common
@@ -989,8 +1047,12 @@
 (provide (rename-out [_bytes* _bytes]))
 (define-fun-syntax _bytes*
   (syntax-id-rules (o)
-    [(_ o n) (type: _pointer
-              pre:  (make-sized-byte-string (malloc n) n)
+    [(_ o n) (type: _gcpointer
+              pre:  (let ([bstr (make-sized-byte-string (malloc (add1 n)) n)])
+                      ;; Ensure a null terminator, so that the result is
+                      ;; compatible with `_bytes`:
+                      (ptr-set! bstr _byte n 0)
+                      bstr)
               ;; post is needed when this is used as a function output type
               post: (x => (make-sized-byte-string x n)))]
     [(_ . xs) (_bytes . xs)]
@@ -998,14 +1060,30 @@
 
 ;; (_array <type> <len> ...+)
 (provide _array
-         array? array-length array-ptr
-         (protect-out array-ref array-set!))
+         array? array-length array-ptr array-type
+         (protect-out array-ref array-set!)
+         (rename-out [*in-array in-array]))
 
 (define _array
   (case-lambda
    [(t n)
     (make-ctype (make-array-type t n)
-                (lambda (v) (array-ptr v))
+                (lambda (v)
+                  (unless (array? v)
+                    (raise-argument-error '_array "array?" v))
+                  (unless (or (eq? (array-type v) t) ; common case
+                              ;; For the more general case, we'd like to make sure the
+                              ;; types match, but the ctype API isn't reflective enough;
+                              ;; we approximate by checking representations:
+                              (equal? (ctype->layout (array-type v)) (ctype->layout t)))
+                    (raise-arguments-error '_array "array element type is incompatible"
+                                           "expected element representation" (ctype->layout t)
+                                           "given value's element representation" (ctype->layout (array-type v))))
+                  (unless ((array-length v) . >= . n)
+                    (raise-arguments-error '_array "array length does not match"
+                                           "expected minimum length" n
+                                           "given value's length" (array-length v)))
+                  (array-ptr v))
                 (lambda (v) (make-array v t n)))]
    [(t n . ns)
     (_array (apply _array t ns) n)]))
@@ -1038,6 +1116,22 @@
         (if (null? is)
             (array-set! a i v)
             (loop (array-ref a (car is)) (cdr is)))))]))
+
+;; (in-aray array [start stop step])
+;; in-vector like sequence over array
+(define-:vector-like-gen :array-gen array-ref)
+
+(define-in-vector-like in-array
+  "array" array? array-length :array-gen)
+
+(define-sequence-syntax *in-array
+  (lambda () #'in-array)
+  (make-in-vector-like 'in-array
+                       "array"
+                       #'array?
+                       #'array-length
+                       #'in-array
+                       #'array-ref))
 
 ;; (_array/list <type> <len> ...+)
 ;; Like _list, but for arrays instead of pointers at the C level.
@@ -1243,9 +1337,31 @@
 
 (define (ctype-coretype c)
   (let loop ([c (ctype-basetype c)])
-    (if (symbol? c)
-        c
-        (loop (ctype-basetype c)))))
+    (cond
+     [(symbol? c) c]
+     [(vector? c) 'array]
+     [(list? c) 'struct]
+     [else
+      (loop (ctype-basetype c))])))
+
+;; a way to recognize predicates for cpointer types
+;; similar to `struct-predicate-procedure?`
+(struct cpointer-pred (f)
+  #:property prop:procedure 0)
+
+(define-syntax (define-cpointer-pred stx)
+  (syntax-case stx ()
+    [(_ id tag)
+     (syntax/loc stx
+       (define id
+         (cpointer-pred
+          ;; make sure it has the right inferred name
+          (let ([id (lambda (x) (and (cpointer? x) (cpointer-has-tag? x tag)))])
+            id))))]))
+
+(define cpointer-predicate-procedure? (procedure-rename cpointer-pred? 'cpointer-predicate-procedure?))
+
+(provide cpointer-predicate-procedure?)
 
 ;; A macro version of the above two functions, using the defined name for a tag
 ;; string, and defining a predicate too.  The name should look like `_foo', the
@@ -1256,9 +1372,12 @@
 (provide define-cpointer-type)
 (define-syntax (define-cpointer-type stx)
   (syntax-case stx ()
-    [(_ _TYPE) #'(define-cpointer-type _TYPE #f #f #f)]
-    [(_ _TYPE ptr-type) #'(define-cpointer-type _TYPE ptr-type #f #f)]
-    [(_ _TYPE ptr-type scheme->c c->scheme)
+    [(_ _TYPE) #'(define-cpointer-type _TYPE #f #f #f #:tag #f)]
+    [(_ _TYPE #:tag the-tag) #'(define-cpointer-type _TYPE #f #f #f #:tag the-tag)]
+    [(_ _TYPE ptr-type) #'(define-cpointer-type _TYPE ptr-type #f #f #:tag #f)]
+    [(_ _TYPE ptr-type #:tag the-tag) #'(define-cpointer-type _TYPE ptr-type #f #f #:tag the-tag)]
+    [(_ _TYPE ptr-type scheme->c c->scheme) #'(define-cpointer-type _TYPE ptr-type scheme->c c->scheme #:tag #f)]
+    [(_ _TYPE ptr-type scheme->c c->scheme #:tag the-tag)
      (and (identifier? #'_TYPE)
           (regexp-match #rx"^_.+" (symbol->string (syntax-e #'_TYPE))))
      (let ([name (cadr (regexp-match #rx"^_(.+)$"
@@ -1270,38 +1389,43 @@
                      [TYPE?      (id name "?")]
                      [TYPE-tag   (id name "-tag")]
                      [_TYPE/null (id "_" name "/null")])
-         #'(define-values (_TYPE _TYPE/null TYPE? TYPE-tag)
-             (let ([TYPE-tag 'TYPE])
-               (values (_cpointer      TYPE-tag ptr-type scheme->c c->scheme)
-                       (_cpointer/null TYPE-tag ptr-type scheme->c c->scheme)
-                       (lambda (x)
-                         (and (cpointer? x) (cpointer-has-tag? x TYPE-tag)))
-                       TYPE-tag)))))]))
+         #'(begin
+             (define TYPE-tag (or the-tag 'TYPE))
+             (define _TYPE
+               (_cpointer      TYPE-tag ptr-type scheme->c c->scheme))
+             (define _TYPE/null
+               (_cpointer/null TYPE-tag ptr-type scheme->c c->scheme))
+             (define-cpointer-pred TYPE? TYPE-tag))))]))
 
 ;; ----------------------------------------------------------------------------
 ;; Struct wrappers
 
-(define (compute-offsets types alignment)
+(define (compute-offsets types alignment declared)
   (let ([alignment (if (memq alignment '(#f 1 2 4 8 16))
                        alignment
                        #f)])
-    (let loop ([ts types] [cur 0] [r '()])
+    (let loop ([ts types] [ds declared] [cur 0] [r '()])
       (if (null? ts)
           (reverse r)
           (let* ([algn (if alignment 
                            (min alignment (ctype-alignof (car ts)))
                            (ctype-alignof (car ts)))]
-                 [pos  (+ cur (modulo (- (modulo cur algn)) algn))])
+                 [pos (or (car ds)
+                          (+ cur (modulo (- (modulo cur algn)) algn)))])
             (loop (cdr ts)
+                  (cdr ds)
                   (+ pos (ctype-sizeof (car ts)))
                   (cons pos r)))))))
 
 ;; Simple structs: call this with a list of types, and get a type that marshals
 ;; C structs to/from Scheme lists.
-(define* (_list-struct #:alignment [alignment #f] . types)
-  (let ([stype   (make-cstruct-type types #f alignment)]
-        [offsets (compute-offsets types alignment)]
-        [len     (length types)])
+(define* (_list-struct #:alignment [alignment #f]
+                       #:malloc-mode [malloc-mode 'atomic]
+                       type . types)
+  (let* ([types   (cons type types)]
+         [stype   (make-cstruct-type types #f alignment)]
+         [offsets (compute-offsets types alignment (map (lambda (x) #f) types))]
+         [len     (length types)])
     (make-ctype stype
       (lambda (vals)
         (unless (list? vals)
@@ -1311,7 +1435,7 @@
                                  "expected length" len
                                  "list length" (length vals)
                                  "list" vals))
-        (let ([block (malloc stype)])
+        (let ([block (malloc stype malloc-mode)])
           (for-each (lambda (type ofs val) (ptr-set! block type 'abs ofs val))
                     types offsets vals)
           block))
@@ -1338,9 +1462,14 @@
 ;; type.
 (provide define-cstruct)
 (define-syntax (define-cstruct stx)
-  (define (make-syntax _TYPE-stx has-super? slot-names-stx slot-types-stx 
-                       alignment-stx property-stxes property-binding-stxes
-                       no-equal?)
+  (define (make-syntax
+           _TYPE-stx has-super? slot-names-stx slot-types-stx slot-offsets-stx
+           alignment-stx malloc-mode-stx property-stxes property-binding-stxes
+           no-equal? define-unsafe?)
+    (define change-unsafe-ids
+      (if define-unsafe?
+          (λ (x) x)
+          generate-temporaries))
     (define name
       (cadr (regexp-match #rx"^_(.+)$" (symbol->string (syntax-e _TYPE-stx)))))
     (define slot-names (map (lambda (x) (symbol->string (syntax-e x)))
@@ -1364,6 +1493,7 @@
          [struct-string        (format "~a?" name)]
          [(slot ...)           slot-names-stx]
          [(slot-type ...)      slot-types-stx]
+         [(slot-offset ...)    slot-offsets-stx]
          [TYPE                 (id name)]
          [cpointer:TYPE        (id "cpointer:"name)]
          [struct:cpointer:TYPE (if (null? property-stxes)
@@ -1386,11 +1516,16 @@
          [TYPE->list*          (id name"->list*")]
          [TYPE-tag             (id name"-tag")]
          [(stype ...)          (ids (lambda (s) `(,name"-",s"-type")))]
+         [(unsafe-TYPE-SLOT ...)
+          (change-unsafe-ids (ids (lambda (s) `("unsafe-",name"-",s))))]
+         [(unsafe-set-TYPE-SLOT! ...)
+          (change-unsafe-ids (ids (lambda (s) `("unsafe-set-",name"-",s"!"))))]
          [(TYPE-SLOT ...)      (ids (lambda (s) `(,name"-",s)))]
          [(set-TYPE-SLOT! ...) (ids (lambda (s) `("set-",name"-",s"!")))]
-         [(offset ...) (generate-temporaries
-                               (ids (lambda (s) `(,s"-offset"))))]
-         [alignment            alignment-stx])
+         [(offset ...)
+          (change-unsafe-ids (ids (lambda (s) `(,name"-",s"-offset"))))]
+         [alignment            alignment-stx]
+         [malloc-mode          (or malloc-mode-stx #'(quote atomic))])
       (with-syntax ([get-super-info
                      ;; the 1st-type might be a pointer to this type
                      (if (or (safe-id=? 1st-type #'_TYPE-pointer/null)
@@ -1404,42 +1539,39 @@
                                                              [add-equality-property (if no-equal?
                                                                                         #'values
                                                                                         #'add-equality-property)])
-                                                 #'(define-values (make-wrap-TYPE struct:cpointer:TYPE)
-                                                     (let ()
-                                                       (define-values (struct:cpointer:TYPE
-                                                                       cpointer:TYPE
-                                                                       ?
-                                                                       ref
-                                                                       set)
-                                                         (make-struct-type 'cpointer:TYPE
-                                                                           struct:cpointer:super
-                                                                           (if struct:cpointer:super
-                                                                               0
-                                                                               1)
-                                                                           0 #f
-                                                                           (add-equality-property
-                                                                            (append
-                                                                             (if struct:cpointer:super
-                                                                                 null
-                                                                                 (list
-                                                                                  (cons prop:cpointer 0)))
-                                                                             (list prop ...)))
-                                                                           (current-inspector)
-                                                                           #f
-                                                                           (if struct:cpointer:super
-                                                                               null
-                                                                               '(0))))
-                                                       (values cpointer:TYPE struct:cpointer:TYPE)))))]
+                                                 #'(define-values (struct:cpointer:TYPE
+                                                                   make-wrap-TYPE
+                                                                   _?
+                                                                   _ref
+                                                                   _set)
+                                                     (make-struct-type 'cpointer:TYPE
+                                                                       struct:cpointer:super
+                                                                       (if struct:cpointer:super
+                                                                           0
+                                                                           1)
+                                                                       0 #f
+                                                                       (add-equality-property
+                                                                        (append
+                                                                         (if struct:cpointer:super
+                                                                             null
+                                                                             (list
+                                                                              (cons prop:cpointer 0)))
+                                                                         (list prop ...)))
+                                                                       (current-inspector)
+                                                                       #f
+                                                                       (if struct:cpointer:super
+                                                                           null
+                                                                           '(0))))))]
                     [define-wrap-type (if (null? property-stxes)
-                                          #'(define (wrap-TYPE-type t)
-                                              (super-wrap-type-type t))
+                                          #'(define wrap-TYPE-type
+                                              (procedure-rename super-wrap-type-type 'wrap-TYPE-type))
                                           #'(define (wrap-TYPE-type t)
                                               (make-ctype t
-                                                          values
+                                                          (λ (x) x)
                                                           (lambda (p)
                                                             (and p
                                                                  (make-wrap-TYPE p))))))]
-                    [(property-binding ...) property-binding-stxes]
+                    [([(property-binding-ids ...) . property-binding-form] ...) property-binding-stxes]
                     [(maybe-struct:TYPE ...) (if (null? property-stxes)
                                                  null
                                                  (list #'struct:cpointer:TYPE))])
@@ -1453,189 +1585,235 @@
                        (reverse (list (quote-syntax TYPE-SLOT) ...))
                        (reverse (list (quote-syntax set-TYPE-SLOT!) ...))
                        #t))))
-            (define-values (_TYPE _TYPE-pointer _TYPE-pointer/null TYPE? TYPE-tag
-                                  make-TYPE TYPE-SLOT ... set-TYPE-SLOT! ...
-                                  list->TYPE list*->TYPE TYPE->list TYPE->list*
-                                  maybe-struct:TYPE ...)
-              (let-values ([(super-pointer super-tags super-types super-offsets
-                                           super->list* list*->super
-                                           struct:cpointer:super super-wrap-type-type)
-                            get-super-info]
-                           property-binding ...)
-                (define-cpointer-type _TYPE super-pointer)
-                define-wrap-type
-                ;; these make it possible to use recursive pointer definitions
-                (define _TYPE-pointer      (wrap-TYPE-type _TYPE))
-                (define _TYPE-pointer/null (wrap-TYPE-type _TYPE/null))
-                (define-values (stype ...)  (values slot-type ...))
-                (define types (list stype ...))
-                (define alignment-v alignment)
-                (define offsets (compute-offsets types alignment-v))
-                (define-values (offset ...) (apply values offsets))
-                (define all-tags (cons TYPE-tag super-tags))
-                (define _TYPE*
-                  ;; c->scheme adjusts all tags
-                  (let* ([cst (make-cstruct-type types #f alignment-v)]
-                         [t (_cpointer TYPE-tag cst)]
-                         [c->s (ctype-c->scheme t)])
-                    (wrap-TYPE-type
-                     (make-ctype cst (ctype-scheme->c t)
-                                 ;; hack: modify & reuse the procedure made by _cpointer
-                                 (lambda (p)
-                                   (if p (set-cpointer-tag! p all-tags) (c->s p))
-                                   p)))))
-                (define-values (all-types all-offsets)
-                  (if (and has-super? super-types super-offsets)
-                      (values (append super-types   (cdr types))
-                              (append super-offsets (cdr offsets)))
-                      (values types offsets)))
-                (define (TYPE-SLOT x)
-                  (unless (TYPE? x)
-                    (raise-argument-error 'TYPE-SLOT struct-string x))
-                  (ptr-ref x stype 'abs offset))
-                ...
-                (define (set-TYPE-SLOT! x slot)
-                  (unless (TYPE? x)
-                    (raise-argument-error 'set-TYPE-SLOT! struct-string 0 x slot))
-                  (ptr-set! x stype 'abs offset slot))
-                ...
-                (define make-TYPE
-                  (if (and has-super? super-types super-offsets)
-                      ;; init using all slots
-                      (lambda vals
-                        (if (= (length vals) (length all-types))
-                            (let ([block (make-wrap-TYPE (malloc _TYPE*))])
-                              (set-cpointer-tag! block all-tags)
-                              (for-each (lambda (type ofs value)
-                                          (ptr-set! block type 'abs ofs value))
-                                        all-types all-offsets vals)
-                              block)
-                            (error '_TYPE "expecting ~s values, got ~s: ~e"
-                                   (length all-types) (length vals) vals)))
-                      ;; normal initializer
-                      (lambda (slot ...)
-                        (let ([block (make-wrap-TYPE (malloc _TYPE*))])
+            (define-values (super-pointer super-tags super-types super-offsets
+                                          super->list* list*->super
+                                          struct:cpointer:super super-wrap-type-type)
+              get-super-info)
+            (define-values (property-binding-ids ...) . property-binding-form) ...
+            (define-cpointer-type _^TYPE super-pointer #:tag 'TYPE)
+            define-wrap-type
+            ;; these make it possible to use recursive pointer definitions
+            (define _TYPE-pointer      (wrap-TYPE-type _^TYPE))
+            (define _TYPE-pointer/null (wrap-TYPE-type _^TYPE/null))
+            (define-values (stype ...)  (values slot-type ...))
+            (define types (list stype ...))
+            (define alignment-v alignment)
+            (define offsets (compute-offsets types alignment-v (list slot-offset ...)))
+            (define-values (offset ...) (apply values offsets))
+            (define all-tags (cons ^TYPE-tag super-tags))
+            (define _TYPE
+              ;; c->scheme adjusts all tags
+              (let* ([cst (make-cstruct-type types #f alignment-v)]
+                     [t (_cpointer ^TYPE-tag cst)]
+                     [c->s (ctype-c->scheme t)])
+                (wrap-TYPE-type
+                 (make-ctype cst (ctype-scheme->c t)
+                             ;; hack: modify & reuse the procedure made by _cpointer
+                             (lambda (p)
+                               (if p (set-cpointer-tag! p all-tags) (c->s p))
+                               p)))))
+            (define-values (all-types all-offsets)
+              (if (and has-super? super-types super-offsets)
+                  (values (append super-types   (cdr types))
+                          (append super-offsets (cdr offsets)))
+                  (values types offsets)))
+            
+            (begin
+              (define (unsafe-TYPE-SLOT x)
+                (ptr-ref x stype 'abs offset))
+              (define (TYPE-SLOT x)
+                (unless (^TYPE? x)
+                  (raise-argument-error 'TYPE-SLOT struct-string x))
+                (unsafe-TYPE-SLOT x)))
+            ...
+            (begin
+              (define (unsafe-set-TYPE-SLOT! x slot)
+                (ptr-set! x stype 'abs offset slot))
+              (define (set-TYPE-SLOT! x slot)
+                (unless (^TYPE? x)
+                  (raise-argument-error 'set-TYPE-SLOT! struct-string 0 x slot))
+                (unsafe-set-TYPE-SLOT! x slot)))
+            ...
+            (define make-TYPE
+              (if (and has-super? super-types super-offsets)
+                  ;; init using all slots
+                  (lambda vals
+                    (if (= (length vals) (length all-types))
+                        (let ([block (make-wrap-TYPE (malloc _TYPE malloc-mode))])
                           (set-cpointer-tag! block all-tags)
-                          (ptr-set! block stype 'abs offset slot)
-                          ...
-                          block))))
-                define-wrapper-struct
-                (define (list->TYPE vals) (apply make-TYPE vals))
-                (define (list*->TYPE vals)
-                  (cond
-                   [(TYPE? vals) vals]
-                   [(= (length vals) (length all-types))
-                    (let ([block (malloc _TYPE*)])
+                          (for-each (lambda (type ofs value)
+                                      (ptr-set! block type 'abs ofs value))
+                                    all-types all-offsets vals)
+                          block)
+                        (error '_TYPE "expecting ~s values, got ~s: ~e"
+                               (length all-types) (length vals) vals)))
+                  ;; normal initializer
+                  (lambda (slot ...)
+                    (let ([block (make-wrap-TYPE (malloc _TYPE malloc-mode))])
                       (set-cpointer-tag! block all-tags)
-                      (for-each
-                       (lambda (type ofs value)
-                         (let-values
-                             ([(ptr tags types offsets T->list* list*->T struct:T wrap)
-                               (cstruct-info
-                                type
-                                (lambda () (values #f '() #f #f #f #f #f values)))])
-                           (ptr-set! block type 'abs ofs
-                                     (if list*->T (list*->T value) value))))
-                       all-types all-offsets vals)
-                      block)]
-                   [else (error '_TYPE "expecting ~s values, got ~s: ~e"
-                                (length all-types) (length vals) vals)]))
-                (define (TYPE->list x)
-                  (unless (TYPE? x)
-                    (raise-argument-error 'TYPE-list struct-string x))
-                  (map (lambda (type ofs) (ptr-ref x type 'abs ofs))
-                       all-types all-offsets))
-                (define (TYPE->list* x)
-                  (unless (TYPE? x)
-                    (raise-argument-error 'TYPE-list struct-string x))
-                  (map (lambda (type ofs)
-                         (let-values
-                             ([(v) (ptr-ref x type 'abs ofs)]
-                              [(ptr tags types offsets T->list* list*->T struct:T wrap)
-                               (cstruct-info
-                                type
-                                (lambda () (values #f '() #f #f #f #f #f values)))])
-                           (if T->list* (T->list* v) v)))
-                       all-types all-offsets))
-                (cstruct-info
-                 _TYPE* 'set!
-                 _TYPE all-tags all-types all-offsets TYPE->list* list*->TYPE
-                 struct:cpointer:TYPE wrap-TYPE-type)
-                (values _TYPE* _TYPE-pointer _TYPE-pointer/null TYPE? TYPE-tag
-                        make-TYPE TYPE-SLOT ... set-TYPE-SLOT! ...
-                        list->TYPE list*->TYPE TYPE->list TYPE->list*
-                        maybe-struct:TYPE ...)))))))
+                      (ptr-set! block stype 'abs offset slot)
+                      ...
+                      block))))
+            define-wrapper-struct
+            (define (list->TYPE vals) (apply make-TYPE vals))
+            (define (list*->TYPE vals)
+              (cond
+                [(^TYPE? vals) vals]
+                [(= (length vals) (length all-types))
+                 (let ([block (malloc _TYPE malloc-mode)])
+                   (set-cpointer-tag! block all-tags)
+                   (for-each
+                    (lambda (type ofs value)
+                      (let-values
+                          ([(ptr tags types offsets T->list* list*->T struct:T wrap)
+                            (cstruct-info
+                             type
+                             (lambda () (values #f '() #f #f #f #f #f values)))])
+                        (ptr-set! block type 'abs ofs
+                                  (if list*->T (list*->T value) value))))
+                    all-types all-offsets vals)
+                   block)]
+                [else (error '_TYPE "expecting ~s values, got ~s: ~e"
+                             (length all-types) (length vals) vals)]))
+            (define (TYPE->list x)
+              (unless (^TYPE? x)
+                (raise-argument-error 'TYPE-list struct-string x))
+              (map (lambda (type ofs) (ptr-ref x type 'abs ofs))
+                   all-types all-offsets))
+            (define (TYPE->list* x)
+              (unless (^TYPE? x)
+                (raise-argument-error 'TYPE-list struct-string x))
+              (map (lambda (type ofs)
+                     (let-values
+                         ([(v) (ptr-ref x type 'abs ofs)]
+                          [(ptr tags types offsets T->list* list*->T struct:T wrap)
+                           (cstruct-info
+                            type
+                            (lambda () (values #f '() #f #f #f #f #f values)))])
+                       (if T->list* (T->list* v) v)))
+                   all-types all-offsets))
+            (cstruct-info
+             _TYPE 'set!
+             _^TYPE all-tags all-types all-offsets TYPE->list* list*->TYPE
+             struct:cpointer:TYPE wrap-TYPE-type)
+            (define TYPE? ^TYPE? #;(procedure-rename  'TYPE?))
+            (define TYPE-tag ^TYPE-tag)))))
   (define (err what . xs)
     (apply raise-syntax-error #f
            (if (list? what) (apply string-append what) what)
            stx xs))
   (syntax-case stx ()
-    [(_ type ([slot slot-type] ...) . more)
+    [(_ type (slot-def ...) . more)
+     (or (stx-pair? #'type)
+         (stx-pair? #'(slot-def ...)))
      (let-values ([(_TYPE _SUPER)
                    (syntax-case #'type ()
                      [(t s) (values #'t #'s)]
                      [_ (values #'type #f)])]
-                  [(alignment properties property-bindings no-equal?)
+                  [(alignment malloc-mode
+                              properties property-bindings
+                              no-equal? define-unsafe?)
                    (let loop ([more #'more] 
                               [alignment #f]
+                              [malloc-mode #f]
                               [properties null] 
                               [property-bindings null] 
-                              [no-equal? #f])
+                              [no-equal? #f]
+                              [define-unsafe? #f])
                      (define (head) (syntax-case more () [(x . _) #'x]))
                      (syntax-case more ()
-                       [() (values alignment (reverse properties) (reverse property-bindings) no-equal?)]
+                       [() (values alignment
+                                   malloc-mode 
+                                   (reverse properties)
+                                   (reverse property-bindings)
+                                   no-equal?
+                                   define-unsafe?)]
                        [(#:alignment) (err "missing expression for #:alignment" (head))]
                        [(#:alignment a . rest) 
                         (not alignment)
-                        (loop #'rest #'a properties property-bindings no-equal?)]
+                        (loop #'rest
+                              #'a malloc-mode
+                              properties property-bindings
+                              no-equal? define-unsafe?)]
                        [(#:alignment a . rest) 
                         (err "multiple specifications of #:alignment" (head))]
-                       [(#:property) (err "missing property expression for #:property" (head))]
-                       [(#:property prop) (err "missing value expression for #:property" (head))]
+                       [(#:malloc-mode)
+                        (err "missing expression for #:malloc-mode" (head))]
+                       [(#:malloc-mode m . rest) 
+                        (not malloc-mode)
+                        (loop #'rest
+                              alignment #'m
+                              properties property-bindings
+                              no-equal? define-unsafe?)]
+                       [(#:malloc-mode m . rest) 
+                        (err "multiple specifications of #:malloc-mode" (head))]
+                       [(#:property)
+                        (err "missing property expression for #:property" (head))]
+                       [(#:property prop)
+                        (err "missing value expression for #:property" (head))]
                        [(#:property prop val . rest)
                         (let ()
                           (define prop-id (car (generate-temporaries '(prop))))
                           (define val-id (car (generate-temporaries '(prop-val))))
                           (loop #'rest 
-                                alignment 
+                                alignment malloc-mode
                                 (list* #`(cons #,prop-id #,val-id) properties)
                                 (list* (list (list val-id) #'val) 
                                        (list (list prop-id) #'(check-is-property prop))
                                        property-bindings)
-                                no-equal?))]
+                                no-equal? define-unsafe?))]
                        [(#:no-equal . rest)
                         (if no-equal?
                             (err "multiple specifications of #:no-equal" (head))
-                            (loop #'rest alignment properties property-bindings #t))]
-                       [(x . _) (err (if (keyword? (syntax-e #'x))
-                                         "unknown keyword" "unexpected form")
-                                     #'x)]
+                            (loop #'rest
+                                  alignment malloc-mode
+                                  properties property-bindings
+                                  #t define-unsafe?))]
+                       [(#:define-unsafe . rest)
+                        (if define-unsafe?
+                            (err "multiple specifications of #:define-unsafe" (head))
+                            (loop #'rest
+                                  alignment malloc-mode
+                                  properties property-bindings
+                                  no-equal? #t))]
+                       [(x . _)
+                        (err (if (keyword? (syntax-e #'x))
+                                 "unknown keyword" "unexpected form")
+                             #'x)]
                        [else (err "bad syntax")]))])
        (unless (identifier? _TYPE)
-         (err "bad type, expecting a _name identifier or (_name super-ctype)"
+         (err "expecting a `_name' identifier or `(_name _super-name)'"
               _TYPE))
        (unless (regexp-match? #rx"^_." (symbol->string (syntax-e _TYPE)))
          (err "cstruct name must begin with a `_'" _TYPE))
-       (for ([s (in-list (syntax->list #'(slot ...)))])
-         (unless (identifier? s)
-           (err "bad field name, expecting an identifier identifier" s)))
-       (if _SUPER
-         (make-syntax _TYPE #t
-                      #`(#,(datum->syntax _TYPE 'super _TYPE) slot ...)
-                      #`(#,_SUPER slot-type ...)
-                      alignment
-                      properties
-                      property-bindings
-                      no-equal?)
-         (make-syntax _TYPE #f #'(slot ...) #`(slot-type ...) 
-                      alignment properties property-bindings no-equal?)))]
-    ;; specific errors for bad slot specs, leave the rest for a generic error
-    [(_ type (bad ...) . more)
-     (err "bad slot specification, expecting [name ctype]"
-          (ormap (lambda (s) (syntax-case s () [[n ct] #t] [_ s]))
-                 (syntax->list #'(bad ...))))]
+       
+       (with-syntax ([(#(slot slot-type slot-offset) ...) 
+                      (for/list ([slot-def (in-list (syntax->list #'(slot-def ...)))])
+                        (define (check-slot name type offset)
+                          (unless (identifier? name)
+                            (err "bad field name, expecting an identifier" name))
+                          (vector name type offset))
+                        (syntax-case slot-def ()
+                          [(slot slot-type) (check-slot #'slot #'slot-type #f)]
+                          [(slot slot-type #:offset slot-offset) (check-slot #'slot #'slot-type #'slot-offset)]
+                          [_ (err "bad field specification, expecting `[name ctype]' or `[name ctype #:offset offset]'" #'slot-def)]))])
+         (if _SUPER
+             (make-syntax _TYPE #t
+                          #`(#,(datum->syntax _TYPE 'super _TYPE) slot ...)
+                          #`(#,_SUPER slot-type ...)
+                          #'(0 slot-offset ...)
+                          alignment malloc-mode
+                          properties property-bindings
+                          no-equal? define-unsafe?)
+             (make-syntax _TYPE #f #'(slot ...) #`(slot-type ...) #`(slot-offset ...)
+                          alignment malloc-mode
+                          properties property-bindings
+                          no-equal? define-unsafe?))))]
+    [(_ type () . more)
+     (identifier? #'type)
+     (err "must have either a supertype or at least one field")]
     [(_ type bad . more)
-     (err "bad slot specification, expecting a sequence of [name ctype]"
+     (err "bad field specification, expecting a sequence of `[name ctype]'"
           #'bad)]))
 
 ;; Add `prop:equal+hash' to use pointer equality
@@ -1774,39 +1952,25 @@
         ;; We need to make a thread that runs in a privildged custodian and
         ;; that doesn't retain the current namespace --- either directly
         ;; or indirectly through some parameter setting in the current thread.
-        (let ([priviledged-custodian ((get-ffi-obj 'scheme_make_custodian #f (_fun _pointer -> _scheme)) #f)]
-              [no-cells ((get-ffi-obj 'scheme_empty_cell_table #f (_fun -> _gcpointer)))]
-              [min-config ((get-ffi-obj 'scheme_minimal_config #f (_fun -> _gcpointer)))]
-              [thread/details (get-ffi-obj 'scheme_thread_w_details #f (_fun _scheme 
-                                                                             _gcpointer ; config
-                                                                             _gcpointer ; cells
-                                                                             _pointer ; break_cell
-                                                                             _scheme ; custodian
-                                                                             _int ; suspend-to-kill?
-                                                                             -> _scheme))]
-              [logger (current-logger)]
+        (let ([logger (current-logger)]
               [cweh #f]) ; <- avoids a reference to a module-level binding
           (set! cweh call-with-exception-handler)
           (set! killer-thread
-                (thread/details (lambda ()
-                                  (let retry-loop ()
-                                    (call-with-continuation-prompt
-                                     (lambda ()
-                                       (cweh
-                                        (lambda (exn)
-                                          (log-message logger
-                                                       'error
-                                                       (if (exn? exn)
-                                                           (exn-message exn)
-                                                           (format "~s" exn))
-                                                       #f)
-                                          (abort-current-continuation void))
-                                        (lambda ()
-                                          (let loop () (will-execute killer-executor) (loop))))))
-                                    (retry-loop)))
-                                min-config
-                                no-cells
-                                #f ; default break cell
-                                priviledged-custodian
-                                0))))
+                (unsafe-thread-at-root
+                 (lambda ()
+                   (let retry-loop ()
+                     (call-with-continuation-prompt
+                      (lambda ()
+                        (cweh
+                         (lambda (exn)
+                           (log-message logger
+                                        'error
+                                        (if (exn? exn)
+                                            (exn-message exn)
+                                            (format "~s" exn))
+                                        #f)
+                           (abort-current-continuation void))
+                         (lambda ()
+                           (let loop () (will-execute killer-executor) (loop))))))
+                     (retry-loop)))))))
       (will-register killer-executor obj finalizer))))

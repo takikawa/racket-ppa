@@ -1,29 +1,18 @@
 #lang racket/base
 
-(require racket/contract/base)
+(require racket/contract/base
+         racket/contract/combinator
+         racket/generic)
 
 ;; This library implements buffered channels with
 ;; and optional buffer limit (so that puts block
 ;; if the buffer is full).
 
-;; We make a fancy structure just so an async-channel
-;; can be supplied directly to `sync'.
-;; The alternative is to use `define-struct' and supply
-;; a `async-channel-get-evt' procedure.
-(define-values (struct:ac make-ac async-channel? ac-ref ac-set!)
-  (make-struct-type 'async-channel #f 5 0 #f 
-                    (list (cons prop:evt 
-                                ;; This is the guard that is called when
-                                ;;  we use an async-channel as an event
-                                ;;  (to get).
-                                (lambda (ac)
-                                  (async-channel-get-guard ac))))
-                    (current-inspector) #f))
-(define ac-enqueue-ch (make-struct-field-accessor ac-ref 0))
-(define ac-dequeue-ch (make-struct-field-accessor ac-ref 1))
-(define ac-empty-ch (make-struct-field-accessor ac-ref 2))
-(define ac-full-ch (make-struct-field-accessor ac-ref 3))
-(define ac-thread (make-struct-field-accessor ac-ref 4))
+(define-generics async-channel-type
+  (async-channel-get async-channel-type)
+  (async-channel-try-get async-channel-type)
+  (async-channel-put async-channel-type v)
+  (async-channel-put-evt async-channel-type v))
 
 ;; Make ----------------------------------------
 
@@ -99,15 +88,15 @@
          (poll->ch (ac-dequeue-ch ac) (ac-empty-ch ac))
          (ac-dequeue-ch ac)))))
 
-(define (async-channel-get ac)
+(define (-async-channel-get ac)
   (sync ac))
 
-(define (async-channel-try-get ac)
+(define (-async-channel-try-get ac)
   (sync/timeout 0 ac))
 
 ;; Put ----------------------------------------
 
-(define (async-channel-put-evt ac v)
+(define (-async-channel-put-evt ac v)
   (letrec ([p (wrap-evt
                (guard-evt
                 (lambda ()
@@ -123,7 +112,7 @@
                (lambda (ignored) p))])
     p))
 
-(define (async-channel-put ac v)
+(define (-async-channel-put ac v)
   (thread-resume (ac-thread ac) (current-thread))
   (sync (channel-put-evt (ac-enqueue-ch ac) v))
   (void))
@@ -147,9 +136,128 @@
    ;;  a never-ready waitable:
    not-ready))
 
+;; Struct definition -------------------------------------
+;; needs to be down here because the generic methods need
+;; to be defined
+
+(struct ac (enqueue-ch dequeue-ch empty-ch full-ch thread)
+  #:property prop:evt (lambda (ac)
+                        (async-channel-get-guard ac))
+  #:methods gen:async-channel-type
+  [(define async-channel-get -async-channel-get)
+   (define async-channel-try-get -async-channel-try-get)
+   (define async-channel-put -async-channel-put)
+   (define async-channel-put-evt -async-channel-put-evt)]
+  #:reflection-name 'async-channel
+  #:constructor-name make-ac)
+(define async-channel? ac?)
+
+;; Impersonators and Chaperones ---------------------------
+
+(define (impersonate-async-channel ac get-proc put-proc . props)
+  (impersonate-generics
+   gen:async-channel-type
+   ; there's no impersonate-evt...?
+   (apply chaperone-evt
+          ac (λ (evt) (values evt (λ (v) (get-proc v))))
+          props)
+   [async-channel-put
+    (λ (async-channel-put)
+      (chaperone-procedure async-channel-put
+                           (λ (ac v) (values ac (put-proc v)))))]
+   [async-channel-put-evt
+    (λ (async-channel-put-evt)
+      (chaperone-procedure async-channel-put-evt
+                           (λ (ac v) (values ac (put-proc v)))))]))
+
+(define (chaperone-async-channel ac get-proc put-proc . props)
+  (chaperone-generics
+   gen:async-channel-type
+   (apply chaperone-evt
+          ac (λ (evt) (values evt (λ (v) (get-proc v))))
+          props)
+   [async-channel-put
+    (λ (async-channel-put)
+      (chaperone-procedure async-channel-put
+                           (λ (ac v) (values ac (put-proc v)))))]
+   [async-channel-put-evt
+    (λ (async-channel-put-evt)
+      (chaperone-procedure async-channel-put-evt
+                           (λ (ac v) (values ac (put-proc v)))))]))
+
+;; Contracts -----------------------------------------------
+
+(define (async-channel/c-name ctc)
+  (define elem-name (contract-name (base-async-channel/c-content ctc)))
+  (apply build-compound-type-name
+         'async-channel/c
+         elem-name
+         '()))
+
+(define (add-async-channel-context blame)
+  (blame-add-context blame "a value passed through"))
+
+(define (check-async-channel/c ctc val blame neg-party)
+  (unless (async-channel? val)
+    (raise-blame-error blame val #:missing-party neg-party
+                       '(expected "an async channel" given: "~e") val)))
+
+(define ((async-channel/c-first-order ctc) val)
+  (async-channel? val))
+
+(define (async-channel/c-stronger? a b)
+  (contract-stronger? (base-async-channel/c-content a) (base-async-channel/c-content b)))
+
+(define ((late-neg-projection impersonate/chaperone-async-channel) ctc)
+  (define elem-ctc (base-async-channel/c-content ctc))
+  (define lnp (contract-late-neg-projection elem-ctc))
+  (λ (blame)
+    (define pos-elem-proj (lnp blame))
+    (define neg-elem-proj (lnp (blame-swap blame)))
+    (λ (val neg-party)
+      (define blame+neg-party (cons blame neg-party))
+      (check-async-channel/c ctc val blame neg-party)
+      (impersonate/chaperone-async-channel val
+                                           (λ (v)
+                                             (with-contract-continuation-mark
+                                              blame+neg-party
+                                              (pos-elem-proj v neg-party)))
+                                           (λ (v)
+                                             (with-contract-continuation-mark
+                                              blame+neg-party
+                                              (neg-elem-proj v neg-party)))
+                                           impersonator-prop:contracted ctc
+                                           impersonator-prop:blame blame))))
+
+(struct base-async-channel/c (content))
+
+(struct chaperone-async-channel/c base-async-channel/c ()
+  #:property prop:custom-write custom-write-property-proc
+  #:property prop:chaperone-contract
+  (build-chaperone-contract-property
+   #:name async-channel/c-name
+   #:first-order async-channel/c-first-order
+   #:stronger async-channel/c-stronger?
+   #:late-neg-projection (late-neg-projection chaperone-async-channel)))
+
+(struct impersonator-async-channel/c base-async-channel/c ()
+  #:property prop:custom-write custom-write-property-proc
+  #:property prop:contract
+  (build-contract-property
+   #:name async-channel/c-name
+   #:first-order async-channel/c-first-order
+   #:stronger async-channel/c-stronger?
+   #:late-neg-projection (late-neg-projection impersonate-async-channel)))
+
+(define (async-channel/c elem)
+  (define ctc (coerce-contract 'async-channel/c elem))
+  (if (chaperone-contract? ctc)
+      (chaperone-async-channel/c ctc)
+      (impersonator-async-channel/c ctc)))
+
 ;; Provides ----------------------------------------
 
-(provide async-channel?)
+(provide async-channel? async-channel/c)
 (provide/contract (make-async-channel (case->
                                        (-> async-channel?)
                                        ((or/c false/c (lambda (x)
@@ -160,4 +268,14 @@
                   (async-channel-get (async-channel? . -> . any/c))
                   (async-channel-try-get (async-channel? . -> . any/c))
                   (async-channel-put (async-channel? any/c . -> . any/c))
-                  (async-channel-put-evt (async-channel? any/c . -> . evt?)))
+                  (async-channel-put-evt (async-channel? any/c . -> . evt?))
+                  (impersonate-async-channel ((async-channel?
+                                               (any/c . -> . any/c)
+                                               (any/c . -> . any/c))
+                                              #:rest (listof any/c)
+                                              . ->* . (and/c chaperone? async-channel?)))
+                  (chaperone-async-channel ((async-channel?
+                                             (any/c . -> . any/c)
+                                             (any/c . -> . any/c))
+                                            #:rest (listof any/c)
+                                            . ->* . (and/c chaperone? async-channel?))))

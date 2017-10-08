@@ -30,6 +30,9 @@
          _HRESULT _LCID
 
          windows-error
+         current-hfun-retry-count
+         current-hfun-retry-delay
+         HRESULT-retry?
 
          IID_NULL IID_IUnknown
          _IUnknown _IUnknown-pointer _IUnknown_vt
@@ -51,7 +54,7 @@
          com-release
          com-object-type com-type? com-type=?
 
-         com-methods com-method-type com-invoke com-omit
+         com-methods com-method-type com-invoke com-omit com-omit?
          com-get-properties com-get-property-type com-get-property
          com-get-property*
          com-set-properties com-set-property-type com-set-property!
@@ -60,6 +63,9 @@
          com-make-event-executor com-event-executor?
          com-register-event-callback
          com-unregister-event-callback
+
+         com-enumeration-to-list
+         com-enumerate-to-list
 
          com-object-get-iunknown com-iunknown?
          com-object-get-idispatch com-idispatch?
@@ -98,15 +104,15 @@
 (define-ole CLSIDFromProgID (_hfun _string/utf-16 _pointer 
                                    -> CLSIDFromProgID (void)))
 
-(define-ole ProgIDFromCLSID (_fun _GUID-pointer (p : (_ptr o _pointer))
-                                  -> (r : _HRESULT)
-                                  -> (cond
-                                      [(zero? r)
-                                       (begin0
-                                        (cast p _pointer _string/utf-16)
-                                        (CoTaskMemFree p))]
-                                      [(= REGDB_E_CLASSNOTREG r) #f]
-                                      [else (windows-error "ProgIDFromCLSID: failed" r)])))
+(define-ole ProgIDFromCLSID (_hfun _GUID-pointer (p : (_ptr o _pointer))
+                                   -> ProgIDFromCLSID
+                                   #:allow [r (= REGDB_E_CLASSNOTREG r)]
+                                   (cond
+                                    [(= REGDB_E_CLASSNOTREG r) #f]
+                                    [else
+                                     (begin0
+                                      (cast p _pointer _string/utf-16)
+                                      (CoTaskMemFree p))])))
 
 (define (progid->clsid progid)
   (unless (string? progid) (raise-type-error 'progid->clsid "string" progid))
@@ -278,12 +284,12 @@
 (define-cstruct _IUnknown ([vt _pointer]))
 
 (define-cstruct _IUnknown_vt
-  ([QueryInterface (_mfun _REFIID (p : (_ptr o _pointer))
-                          -> (r : _HRESULT)
-                          -> (cond
-                              [(= r E_NOINTERFACE) #f]
-                              [(positive? r) (windows-error "QueryInterface: failed" r)]
-                              [else p]))]
+  ([QueryInterface (_hmfun _REFIID (p : (_ptr o _pointer))
+                           -> QueryInterface
+                           #:allow [r (= r E_NOINTERFACE)]
+                           (cond
+                            [(= r E_NOINTERFACE) #f]
+                            [else p]))]
    [AddRef (_mfun -> _ULONG)]
    [Release (_mfun -> _ULONG)]))
 
@@ -326,17 +332,20 @@
    [GetTypeInfo (_hmfun _UINT _LCID (p : (_ptr o _pointer))
                         -> GetTypeInfo (cast p _pointer _ITypeInfo-pointer))
                 #:release-with-function Release]
-   [GetIDsOfNames (_mfun _REFIID (_ptr i _string/utf-16)
-                         (_UINT = 1) _LCID
-                         (p : (_ptr o _DISPID))
-                         -> (r : _HRESULT)
-                         -> (values r p))]
-   [Invoke (_mfun _DISPID _REFIID _LCID _WORD
-                  _DISPPARAMS-pointer/null
-                  _VARIANT-pointer/null
-                  _pointer ; to _EXCEPINFO
-                  _pointer ; to _UINT
-                  -> _HRESULT)]))
+   [GetIDsOfNames (_hmfun _REFIID (_ptr i _string/utf-16)
+                          (_UINT = 1) _LCID
+                          (p : (_ptr o _DISPID))
+                          -> GetIDsOfNames
+                          #:allow [r (not (HRESULT-retry? r))]
+                          (values r p))]
+   [Invoke (_hmfun _DISPID _REFIID _LCID _WORD
+                   _DISPPARAMS-pointer/null
+                   _VARIANT-pointer/null
+                   _pointer ; to _EXCEPINFO
+                   _pointer ; to _UINT
+                   -> Invoke
+                   #:allow [r (not (HRESULT-retry? r))]
+                   r)]))
 
 (define error-index-ptr (malloc 'atomic-interior _UINT))
 
@@ -911,7 +920,7 @@
       accum2
       (for/fold ([accum accum2]) ([i (in-range (TYPEATTR-cVars type-attr))])
         (define var-desc (GetVarDesc type-info i))
-        (let-values ([(name count) (GetNames type-info (FUNCDESC-memid var-desc))])
+        (let-values ([(name count) (GetNames type-info (VARDESC-memid var-desc))])
           (begin0
            (cons name accum)
            (ReleaseVarDesc type-info var-desc))))))
@@ -1398,10 +1407,10 @@
 
 (define-oleaut VariantInit (_wfun _VARIANT-pointer -> _void))
 
-(define com-omit 
+(define-values (com-omit com-omit?)
   (let ()
     (struct com-omit ())
-    (com-omit)))
+    (values (com-omit) com-omit?)))
 
 (define CY-factor 10000)
 
@@ -1447,13 +1456,18 @@
                 (define s (make-SYSTEMTIME 0 0 0 0 0 0 0 0))
                 (unless (not (zero? (VariantTimeToSystemTime d s)))
                   (error 'date "error converting date from COM date"))
-                (seconds->date
-                 (find-seconds (SYSTEMTIME-wSecond s)
-                               (SYSTEMTIME-wMinute s)
-                               (SYSTEMTIME-wHour s)
-                               (SYSTEMTIME-wDay s)
-                               (SYSTEMTIME-wMonth s)
-                               (SYSTEMTIME-wYear s))))))
+                (date* (SYSTEMTIME-wSecond s)
+                       (SYSTEMTIME-wMinute s)
+                       (SYSTEMTIME-wHour s)
+                       (SYSTEMTIME-wDay s)
+                       (SYSTEMTIME-wMonth s)
+                       (SYSTEMTIME-wYear s)
+                       (SYSTEMTIME-wDayOfWeek s)
+                       0
+                       #f
+                       0
+                       (* 1000 (SYSTEMTIME-wMilliseconds s))
+                       "UTC"))))
 
 (define _currency
   (make-ctype _CY
@@ -1461,11 +1475,17 @@
                 (* s CY-factor))
               (lambda (s)
                 (/ s CY-factor))))
-              
+
+(define _bool16
+  (make-ctype _uint16
+	      (lambda (s)
+		(if s #xFFFF #x0000))
+	      (lambda (s)
+		(positive? s))))
 
 (define (unsigned-int? v n)
   (and (exact-integer? v)
-       (positive? v)
+       (not (negative? v))
        (zero? (arithmetic-shift v (- n)))))
 
 (define (signed-int? v n)
@@ -1712,13 +1732,14 @@
                 (let loop ([dims dims] [level 1] [index null])
                   (define lb (SafeArrayGetLBound sa level))
                   (for/vector ([i (in-range (car dims))])
-                    (if (null? (cdr dims))
-                        (let ([var (make-a-VARIANT)])
-                          (set-VARIANT-vt! var vt)
-                          (SafeArrayGetElement sa (reverse (cons i index)) 
-                                               (extract-variant-pointer var #t))
-                          (variant-to-scheme var #:mode mode))
-                        (loop (cdr dims) (add1 level) (cons i index))))))))
+                    (let ([i (+ i lb)])
+                      (if (null? (cdr dims))
+                          (let ([var (make-a-VARIANT)])
+                            (set-VARIANT-vt! var vt)
+                            (SafeArrayGetElement sa (reverse (cons i index)) 
+                                                 (extract-variant-pointer var #t))
+                            (variant-to-scheme var #:mode mode))
+                          (loop (cdr dims) (add1 level) (cons i index)))))))))
 
 (define (_IUnknown-pointer-or-com-object mode)
   (make-ctype 
@@ -1761,7 +1782,7 @@
       [(string) (_system-string/utf-16 mode)]
       [(currency) _currency]
       [(date) _date]
-      [(boolean) _bool]
+      [(boolean) _bool16]
       [(scode) _SCODE]
       [(iunknown) (_IUnknown-pointer-or-com-object mode)]
       [(com-object) (_com-object mode)]
@@ -2266,16 +2287,66 @@
 (define (com-idispatch? v) (and (IDispatch? v) #t))
 
 ;; ----------------------------------------
+;; Enumerations
+
+(define IID_IEnumVARIANT
+  (string->guid "{00020404-0000-0000-c000-000000000046}"))
+
+(define-com-interface (_IEnumVARIANT _IUnknown)
+  ([Next (_hmfun (_ulong = 1)
+                 (els : (_ptr o _VARIANT))
+                 (got : (_ptr o _ulong))
+		 -> Next
+                 #:allow [r (= r 1)] ; 1 => no more elements
+                 (if (and (= r 0) (= got 1))
+                     els
+                     #f))]
+   ;; ... more methods ...
+   ))
+
+(define (com-enumeration-to-list obj)
+  (define i
+    (QueryInterface (com-object-get-iunknown obj)
+		    IID_IEnumVARIANT
+		    _IEnumVARIANT-pointer))
+  (begin0
+   (let loop ()
+     (define els (Next i))
+     (if (not els)
+         null
+         (cons (variant-to-scheme els)
+               (loop))))
+   (Release i)))
+
+(define (com-enumerate-to-list obj)
+  (com-enumeration-to-list (com-get-property obj "_NewEnum")))
+
+;; ----------------------------------------
 ;; Initialize
 
-(define-ole CoInitialize (_wfun (_pointer = #f) -> (r : _HRESULT)
-                                -> (cond
-                                    [(= r 0) (void)] ; ok
-                                    [(= r 1) (void)] ; already initialized
-                                    [else (windows-error (format "~a: failed" 'CoInitialize) r)])))
+(define-ole CoInitialize (_hfun (_pointer = #f)
+                                -> CoInitialize
+                                #:allow [r (= r 1)] ; 1 => already initialized
+                                (void)))
 
 (define inited? #f)
 (define (init!)
   (unless inited?
     (CoInitialize)
     (set! inited? #t)))
+
+;; ----------------------------------------
+;; Basic tests
+
+(module+ test
+  (define-syntax-rule (check-true e)
+    (unless e
+      (error "test failed" 'e)))
+  (check-true (unsigned-int? 0 32))
+  (check-true (not (unsigned-int? -1 32)))
+  (check-true (unsigned-int? (sub1 (expt 2 32)) 32))
+  (check-true (not (unsigned-int? (expt 2 32) 32)))
+  (check-true (not (unsigned-int? (sub1 (expt 2 33)) 32)))
+  (check-true (signed-int? 0 32))
+  (check-true (signed-int? -1 32))
+  (check-true (not (signed-int? (sub1 (expt 2 32)) 32))))

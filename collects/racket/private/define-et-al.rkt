@@ -4,7 +4,7 @@
 
 (module define-et-al '#%kernel
   (#%require (for-syntax '#%kernel "stx.rkt" "qq-and-or.rkt" 
-                         "cond.rkt"))
+                         "member.rkt" "cond.rkt"))
   
   ;; No error checking here, because these macros merely help
   ;;  us write macros before the real define and define-syntax
@@ -70,6 +70,8 @@
 	     #f
 	     "bad syntax"
 	     x)))))
+
+  (define-values (call/ec) call-with-escape-continuation)
 
   (-define-syntax let/ec 
     (lambda (code)
@@ -198,4 +200,4 @@
 					 (syntax-local-introduce super-id))
 			result))))))))))
 
-  (#%provide -define -define-syntax when unless let/ec -define-struct))
+  (#%provide -define -define-syntax when unless call/ec let/ec -define-struct))

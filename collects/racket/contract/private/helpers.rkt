@@ -7,7 +7,9 @@
          add-name-prop
          all-but-last
          known-good-contract?
-         update-loc)
+         known-good-contracts
+         update-loc
+         gen-id)
 
 (require setup/main-collects
          racket/struct-info
@@ -38,10 +40,10 @@
      (syntax-property stx 'inferred-name name)]
     [else stx]))
 
-;; mangle-id : syntax string syntax ... -> syntax
+;; mangle-id : string syntax ... -> syntax
 ;; constructs a mangled name of an identifier from an identifier
 ;; the name isn't fresh, so `id' combined with `ids' must already be unique.
-(define (mangle-id main-stx prefix id . ids)
+(define (mangle-id prefix id . ids)
   (datum->syntax
    #f
    (string->symbol
@@ -57,7 +59,7 @@
           (format "-~a" (syntax->datum id)))
         ids)))))))
 
-(define (mangle-id-for-maker main-stx prefix id . ids)
+(define (mangle-id-for-maker prefix id . ids)
   (let ([id-w/out-make (regexp-replace #rx"^make-" (format "~a" (syntax->datum id)) "")])
     (datum->syntax
      #f
@@ -164,6 +166,8 @@
 #|
 
 ;; the code below builds the known-good-syms-ht
+;; it should contain only predicates or else 
+;; opt/c will misbehave
 
 (define cm
   (parameterize ([read-accept-compiled #t])
@@ -366,5 +370,12 @@
 (define (known-good-contract? id)
   (define r-id (syntax-e id))
   (and (symbol? r-id)
-       (hash-ref known-good-syms-ht (syntax-e id) #t)
+       (hash-ref known-good-syms-ht r-id #f)
        (free-identifier=? id (datum->syntax #'here r-id))))
+
+(define (known-good-contracts)
+  (for/list ([k (in-list (sort (hash-keys known-good-syms-ht) symbol<?))])
+    (datum->syntax #'here k)))
+
+(define (gen-id sym)
+  (car (generate-temporaries (list sym))))

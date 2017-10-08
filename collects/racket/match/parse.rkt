@@ -1,10 +1,11 @@
 #lang racket/base
 
 (require racket/struct-info
+         racket/syntax
          "patterns.rkt"
          "parse-helper.rkt"
          "parse-quasi.rkt"
-         (for-template (only-in "runtime.rkt" matchable?)
+         (for-template (only-in "runtime.rkt" matchable? mlist? mlist->list)
                        racket/base))
 
 (provide parse)
@@ -16,6 +17,13 @@
 
 (define orig-insp (variable-reference->module-declaration-inspector
                    (#%variable-reference)))
+
+(define (literal-pat? p)
+  (syntax-case p ()
+    [(_quote e)
+     (eq? 'quote (syntax-e #'_quote))
+     (parse-literal (syntax-e #'e))]
+    [_ (parse-literal (syntax-e p))]))
 
 ;; parse : syntax -> Pat
 ;; compile stx into a pattern, using the new syntax
@@ -29,8 +37,7 @@
                 (lambda (x y) (eq? (syntax-e x) (syntax-e y)))
     [(expander args ...)
      (and (identifier? #'expander)
-          (match-expander? (syntax-local-value #'expander
-                                               (lambda () #f))))
+          (syntax-local-value/record #'expander match-expander?))
      (match-expander-transform
       rearm+parse #'expander disarmed-stx match-expander-proc
       "This expander only works with the legacy match syntax")]
@@ -38,7 +45,7 @@
      (identifier? #'v)
      (Var (rearm #'v))]
     [(and p ...)
-     (And (map rearm+parse (syntax->list #'(p ...))))]
+     (OrderedAnd (map rearm+parse (syntax->list #'(p ...))))]
     [(or)
      (Not (Dummy stx))]
     [(or p ps ...)
@@ -48,7 +55,7 @@
     [(not p ...)
      ;; nots are conjunctions of negations
      (let ([ps (map (compose Not rearm+parse) (syntax->list #'(p ...)))])
-       (And ps))]
+       (OrderedAnd ps))]
     [(regexp r)
      (trans-match #'matchable?
                   (rearm #'(lambda (e) (regexp-match r e)))
@@ -88,6 +95,13 @@
      (raise-syntax-error
       'match "dot dot k can only appear at the end of hash-table patterns" stx
       (ormap (lambda (e) (and (ddk? e) e)) (syntax->list #'(p ...))))]
+    [(hash-table (k v) ...)
+     (andmap (λ (p) (and (literal-pat? p) (not (identifier? p)))) (syntax->list #'(k ...)))
+     (let ([keys (map Exact-v (map literal-pat? (syntax->list #'(k ...))))])
+       (trans-match*
+        (cons #'hash? (for/list ([k (in-list keys)]) (λ (e) #`(hash-has-key? #,e '#,k))))
+        (for/list ([k (in-list keys)]) (λ (e) #`(hash-ref #,e '#,k)))
+        (map parse (syntax->list #'(v ...)))))]
     [(hash-table p ...)
      (trans-match #'hash?
                   #'(lambda (e) (hash-map e list))
@@ -101,12 +115,11 @@
      (ddk? #'dd)
      (let* ([count (ddk? #'dd)]
             [min (if (number? count) count #f)]
-            [max (if (number? count) count #f)]
             [ps (syntax->list #'(p ...))])
        (GSeq (cons (list (rearm+parse #'lp))
                         (for/list ([p ps]) (list (parse p))))
                   (cons min (map (lambda _ 1) ps))
-                  (cons max (map (lambda _ 1) ps))
+                  (cons #f (map (lambda _ 1) ps))
                   ;; vars in lp are lists, vars elsewhere are not
                   (cons #f (map (lambda _ #t) ps))
                   (Null (Dummy (syntax/loc stx _)))
@@ -136,10 +149,10 @@
      (raise-syntax-error 'match "incorrect use of ... in pattern" stx #'..)]
     [(list p .. . rest)
      (ddk? #'..)
-     (dd-parse rearm+parse #'p #'.. (syntax/loc stx (list . rest)))]
+     (dd-parse rearm+parse #'p #'.. (syntax/loc stx (list . rest)) #'list?)]
     [(mlist p .. . rest)
      (ddk? #'..)
-     (dd-parse rearm+parse #'p #'.. (syntax/loc stx (list . rest)) #:mutable #t)]
+     (dd-parse rearm+parse #'p #'.. (syntax/loc stx (list . rest)) #'mlist? #:to-list #'mlist->list #:mutable #t)]
     [(list e es ...)
      (Pair (rearm+parse #'e) (rearm+parse (syntax/loc stx (list es ...))))]
     [(mlist e es ...)
@@ -150,7 +163,7 @@
      (rearm+parse #'e)]
     [(list-rest p dd . rest)
      (ddk? #'dd)
-     (dd-parse rearm+parse #'p #'dd (syntax/loc stx (list-rest . rest)))]
+     (dd-parse rearm+parse #'p #'dd (syntax/loc stx (list-rest . rest)) #'list?)]
     [(list-rest e . es)
      (Pair (rearm+parse #'e) (rearm+parse (syntax/loc #'es (list-rest . es))))]
     [(cons e1 e2) (Pair (rearm+parse #'e1) (rearm+parse #'e2))]
@@ -163,11 +176,11 @@
     [(? p q1 qs ...)
      (OrderedAnd 
       (list (Pred (rearm #'p))
-            (And (map rearm+parse (syntax->list #'(q1 qs ...))))))]
+            (OrderedAnd (map rearm+parse (syntax->list #'(q1 qs ...))))))]
     [(? p)
      (Pred (rearm #'p))]
-    [(app f p)
-     (App #'f (rearm+parse #'p))]
+    [(app f ps ...) ;; only make a list for more than one pattern
+     (App #'f (map rearm+parse (syntax->list #'(ps ...))))]
     [(quasiquote p)
      (parse-quasi #'p rearm+parse)]
     [(quasiquote . _)

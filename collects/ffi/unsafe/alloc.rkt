@@ -7,6 +7,13 @@
 
 (define allocated (make-late-weak-hasheq))
 
+;; A way to show all still-unfinalized values on exit:
+#;
+(plumber-add-flush! (current-plumber)
+                    (lambda (v)
+                      (for ([(k v) (in-hash allocated)])
+                        (printf "~s\n" k))))
+
 (define (deallocate v)
   ;; Called as a finalizer, we we assume that the
   ;; enclosing thread will not be interrupted.
@@ -18,46 +25,40 @@
 
 (define ((allocator d) proc)
   (rename
-   (lambda args
-     (dynamic-wind
-         start-atomic
-         (lambda ()
-           (let ([v (apply proc args)])
-             (when v
-               (hash-set! allocated v (list d))
-               (register-finalizer v deallocate))
-             v))
-         end-atomic))
-   proc))
+    (lambda args
+      (call-as-atomic
+        (lambda ()
+          (let ([v (apply proc args)])
+            (when v
+              (hash-set! allocated v (list d))
+              (register-finalizer v deallocate))
+            v))))
+    proc))
 
 (define ((deallocator [get-arg car]) proc)
   (rename
-   (lambda args
-     (dynamic-wind
-         start-atomic
-         (lambda ()
-           (apply proc args)
-           (let ([v (get-arg args)])
-             (let ([ds (hash-ref allocated v #f)])
-               (when ds
-                 (if (null? (cdr ds))
-                     (hash-remove! allocated v)
-                     (hash-set! allocated v (cdr ds)))))))
-         end-atomic))
+    (lambda args
+      (call-as-atomic
+        (lambda ()
+         (apply proc args)
+         (let ([v (get-arg args)])
+           (let ([ds (hash-ref allocated v #f)])
+             (when ds
+               (if (null? (cdr ds))
+                   (hash-remove! allocated v)
+                   (hash-set! allocated v (cdr ds)))))))))
    proc))
 
 (define ((retainer d [get-arg car]) proc)
   (rename
    (lambda args
-     (dynamic-wind
-         start-atomic
-         (lambda ()
-	   (begin0
-	    (apply proc args)
-	    (let ([v (get-arg args)])
-	      (let ([ds (hash-ref allocated v null)])
-		(hash-set! allocated v (cons d ds))))))
-         end-atomic))
+     (call-as-atomic
+       (lambda ()
+         (begin0
+           (apply proc args)
+           (let ([v (get-arg args)])
+             (let ([ds (hash-ref allocated v null)])
+               (hash-set! allocated v (cons d ds))))))))
    proc))
 
 (define (rename new orig)

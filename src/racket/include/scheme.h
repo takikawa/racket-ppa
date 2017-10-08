@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
   All rights reserved.
 
@@ -49,22 +49,20 @@
 #ifdef MZ_PRECISE_GC
 # define MUST_REGISTER_GLOBALS
 # define MZTAG_REQUIRED
-# undef UNIX_IMAGE_DUMPS
 /* In case SGC is used to build PRECISE_GC: */
 # undef USE_SENORA_GC
 #endif
 
 #ifdef USE_SENORA_GC
 # define MUST_REGISTER_GLOBALS
-# undef UNIX_IMAGE_DUMPS
 #endif
 
 #ifdef USE_SINGLE_FLOATS
 # define MZ_USE_SINGLE_FLOATS
 #endif
 
-/* gcc defines __SSE_MATH__ when SSE floating point is enabled: */
-#ifdef __SSE_MATH__
+/* gcc defines __SSE2_MATH__ when SSE2 floating point is enabled: */
+#ifdef __SSE2_MATH__
 # define C_COMPILER_USES_SSE 1
 #endif
 
@@ -84,7 +82,7 @@
 #endif
 
 #ifdef MZ_LONG_DOUBLE
-# if defined(_MSC_VER)
+# ifdef MZ_LONG_DOUBLE_API_IS_EXTERNAL
 #  define BYTES_RESERVED_FOR_LONG_DOUBLE 16
 typedef struct {
   char bytes[BYTES_RESERVED_FOR_LONG_DOUBLE];
@@ -93,6 +91,9 @@ typedef struct {
 typedef long double mz_long_double;
 # endif
 #else
+# ifdef MZ_INSIST_EXTFLONUMS
+#  error "cannot support extflonums; you may need to adjust compiler options"
+# endif
 typedef double mz_long_double;
 #endif
 
@@ -174,9 +175,19 @@ typedef long FILE;
 #endif
 
 #ifdef MZ_XFORM
+/* A non-GCing function will never trigger a garbage collection.
+   The xform tool checks this declaration, and it uses this hint
+   to avoid registering variables unnecessarily. */
 # define XFORM_NONGCING __xform_nongcing__
+/* A non-GCing, non-aliasing function is non-GCing, and it may take
+   arguments that are addresses of local variables, but it doesn't
+   leak those addresses; it only filles them in. The xform tool only
+   checks the non-GCing part of this declaration, but uses both
+   facets of the hint. */
+# define XFORM_NONGCING_NONALIASING __xform_nongcing_nonaliasing__
 #else
 # define XFORM_NONGCING /* empty */
+# define XFORM_NONGCING_NONALIASING /* empty */
 #endif
 
 #ifdef MZ_XFORM
@@ -200,14 +211,8 @@ typedef jmpbuf jmp_buf[1];
 
 #define GC_MIGHT_USE_REGISTERED_STATICS
 
-#ifdef MACINTOSH_EVENTS
-/* We avoid #including the Carbon headers because we only
-   need a few abstract struct types: */
-typedef struct FSSpec mzFSSpec;
-#endif
-
 #ifndef MZ_DONT_USE_JIT
-# if defined(MZ_USE_JIT_PPC) || defined(MZ_USE_JIT_I386) || defined(MZ_USE_JIT_X86_64)
+# if defined(MZ_USE_JIT_PPC) || defined(MZ_USE_JIT_I386) || defined(MZ_USE_JIT_X86_64) || defined(MZ_USE_JIT_ARM)
 #  define MZ_USE_JIT
 # endif
 #endif
@@ -224,6 +229,7 @@ typedef struct FSSpec mzFSSpec;
 #ifdef MZ_PRECISE_GC
 # ifndef MZ_XFORM
 #  define XFORM_SKIP_PROC /* empty */
+#  define XFORM_ASSERT_NO_CONVERSION /* empty */
 #  define XFORM_CAN_IGNORE /**/
 # endif
 #else
@@ -233,6 +239,7 @@ typedef struct FSSpec mzFSSpec;
 # define XFORM_START_SUSPEND /**/
 # define XFORM_END_SUSPEND /**/
 # define XFORM_SKIP_PROC /**/
+#  define XFORM_ASSERT_NO_CONVERSION /**/
 # define XFORM_START_TRUST_ARITH /**/
 # define XFORM_END_TRUST_ARITH /**/
 # define XFORM_CAN_IGNORE /**/
@@ -244,10 +251,17 @@ typedef struct FSSpec mzFSSpec;
    uses __extension__. This breaks the 3m xform. */
 #if defined(MZ_XFORM) && defined(strcpy)
 START_XFORM_SKIP;
+# ifdef __clang__
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wunused-function"
+# endif
 static inline void _mzstrcpy(char *a, const char *b)
 {
   strcpy(a, b);
 }
+# ifdef __clang__
+#  pragma clang diagnostic pop
+# endif
 END_XFORM_SKIP;
 # undef strcpy
 # define strcpy _mzstrcpy
@@ -504,7 +518,7 @@ typedef intptr_t (*Scheme_Secondary_Hash_Proc)(Scheme_Object *obj, void *cycle_d
 #define SCHEME_PAIRP(obj)    SAME_TYPE(SCHEME_TYPE(obj), scheme_pair_type)
 #define SCHEME_MPAIRP(obj)    SAME_TYPE(SCHEME_TYPE(obj), scheme_mutable_pair_type)
 #define SCHEME_MUTABLE_PAIRP(obj)    SCHEME_MPAIRP(obj)
-#define SCHEME_LISTP(obj)    (SCHEME_NULLP(obj) || SCHEME_PAIRP(obj))
+#define SCHEME_LISTP(obj)    scheme_is_list(obj)
 
 #define SCHEME_RPAIRP(obj)    SAME_TYPE(SCHEME_TYPE(obj), scheme_raw_pair_type)
 
@@ -517,7 +531,7 @@ typedef intptr_t (*Scheme_Secondary_Hash_Proc)(Scheme_Object *obj, void *cycle_d
 
 #define SCHEME_BUCKTP(obj) SAME_TYPE(SCHEME_TYPE(obj),scheme_bucket_table_type)
 #define SCHEME_HASHTP(obj) SAME_TYPE(SCHEME_TYPE(obj),scheme_hash_table_type)
-#define SCHEME_HASHTRP(obj) SAME_TYPE(SCHEME_TYPE(obj),scheme_hash_tree_type)
+#define SCHEME_HASHTRP(obj) ((SCHEME_TYPE(obj) >= scheme_hash_tree_type) && (SCHEME_TYPE(obj) <= scheme_hash_tree_indirection_type))
 
 #define SCHEME_VECTORP(obj)  SAME_TYPE(SCHEME_TYPE(obj), scheme_vector_type)
 #define SCHEME_MUTABLE_VECTORP(obj)  (SCHEME_VECTORP(obj) && SCHEME_MUTABLEP(obj))
@@ -538,6 +552,7 @@ typedef intptr_t (*Scheme_Secondary_Hash_Proc)(Scheme_Object *obj, void *cycle_d
 
 #define SCHEME_THREADP(obj)   SAME_TYPE(SCHEME_TYPE(obj), scheme_thread_type)
 #define SCHEME_CUSTODIANP(obj)   SAME_TYPE(SCHEME_TYPE(obj), scheme_custodian_type)
+#define SCHEME_PLUMBERP(obj)   SAME_TYPE(SCHEME_TYPE(obj), scheme_plumber_type)
 #define SCHEME_SEMAP(obj)   SAME_TYPE(SCHEME_TYPE(obj), scheme_sema_type)
 #define SCHEME_CHANNELP(obj)   SAME_TYPE(SCHEME_TYPE(obj), scheme_channel_type)
 #define SCHEME_CHANNEL_PUTP(obj)   SAME_TYPE(SCHEME_TYPE(obj), scheme_channel_put_type)
@@ -689,7 +704,7 @@ typedef struct Scheme_Offset_Cptr
 /*               fast basic Scheme constructor macros                     */
 /*========================================================================*/
 
-#define scheme_make_integer(i)    LONG_TO_OBJ ((OBJ_TO_LONG(i) << 1) | 0x1)
+#define scheme_make_integer(i)    LONG_TO_OBJ ((((uintptr_t)OBJ_TO_LONG(i)) << 1) | 0x1)
 #define scheme_make_character(ch) ((((mzchar)ch) < 256) ? scheme_char_constants[(unsigned char)(ch)] : scheme_make_char(ch))
 #define scheme_make_ascii_character(ch) scheme_char_constants[(unsigned char)(ch)]
 
@@ -734,10 +749,9 @@ typedef struct Scheme_Offset_Cptr
 #define SCHEME_PRIM_IS_MULTI_RESULT 8
 #define SCHEME_PRIM_IS_CLOSURE 16
 #define SCHEME_PRIM_OTHER_TYPE_MASK (32 | 64 | 128 | 256)
-#define SCHEME_PRIM_IS_METHOD 512
 
-#define SCHEME_PRIM_OPT_INDEX_SIZE 6
-#define SCHEME_PRIM_OPT_INDEX_SHIFT 10
+#define SCHEME_PRIM_OPT_INDEX_SIZE 7
+#define SCHEME_PRIM_OPT_INDEX_SHIFT 9
 #define SCHEME_PRIM_OPT_INDEX_MASK ((1 << SCHEME_PRIM_OPT_INDEX_SIZE) - 1)
 
 /* Values with SCHEME_PRIM_OPT_MASK, earlier implies later: */
@@ -754,16 +768,11 @@ typedef struct Scheme_Offset_Cptr
 #define SCHEME_PRIM_STRUCT_TYPE_BROKEN_INDEXED_SETTER   (32 | 128)
 #define SCHEME_PRIM_TYPE_PARAMETER               64
 #define SCHEME_PRIM_TYPE_STRUCT_PROP_GETTER      (64 | 128)
-#define SCHEME_PRIM_SOMETIMES_INLINED            (64 | 256)
-#define SCHEME_PRIM_STRUCT_TYPE_STRUCT_PROP_PRED        (64 | 128 | 256)
+#define SCHEME_PRIM_STRUCT_TYPE_STRUCT_PROP_PRED (64 | 128 | 256)
 #define SCHEME_PRIM_STRUCT_TYPE_INDEXED_GETTER   32
 #define SCHEME_PRIM_STRUCT_TYPE_PRED             (32 | 64)
 
 #define SCHEME_PRIM_PROC_FLAGS(x) (((Scheme_Prim_Proc_Header *)x)->flags)
-
-#define SCHEME_PRIM_IS_SOMETIMES_INLINED(rator) \
-  (((SCHEME_PRIM_PROC_FLAGS(rator) & SCHEME_PRIM_OTHER_TYPE_MASK) == SCHEME_PRIM_SOMETIMES_INLINED) \
-   || (SCHEME_PRIM_PROC_FLAGS(rator) & (SCHEME_PRIM_IS_UNARY_INLINED | SCHEME_PRIM_IS_BINARY_INLINED)))
 
 typedef struct Scheme_Object *(Scheme_Prim)(int argc, Scheme_Object *argv[]);
 
@@ -877,7 +886,7 @@ typedef struct {
 /* ------------------------------------------------- */
 
 #define SCHEME_PROCP(obj)  (!SCHEME_INTP(obj) && ((_SCHEME_TYPE(obj) >= scheme_prim_type) && (_SCHEME_TYPE(obj) <= scheme_proc_chaperone_type)))
-#define SCHEME_SYNTAXP(obj)  SAME_TYPE(SCHEME_TYPE(obj), scheme_syntax_compiler_type)
+#define SCHEME_SYNTAXP(obj)  SAME_TYPE(SCHEME_TYPE(obj), scheme_primitive_syntax_type)
 #define SCHEME_PRIMP(obj)    SAME_TYPE(SCHEME_TYPE(obj), scheme_prim_type)
 #define SCHEME_CLSD_PRIMP(obj)    SAME_TYPE(SCHEME_TYPE(obj), scheme_closed_prim_type)
 #define SCHEME_CONTP(obj)    SAME_TYPE(SCHEME_TYPE(obj), scheme_cont_type)
@@ -889,8 +898,8 @@ typedef struct {
 #define SCHEME_PRIM(obj)     (((Scheme_Primitive_Proc *)(obj))->prim_val)
 #define SCHEME_CLSD_PRIM(obj) (((Scheme_Closed_Primitive_Proc *)(obj))->prim_val)
 #define SCHEME_CLSD_PRIM_DATA(obj) (((Scheme_Closed_Primitive_Proc *)(obj))->data)
-#define SCHEME_CLOS_FUNC(obj) ((Scheme_Closure_Func)SCHEME_CAR(obj))
-#define SCHEME_CLOS_DATA(obj) SCHEME_CDR(obj)
+#define SCHEME_RAW_CLOS_FUNC(obj) ((Scheme_Closure_Func)SCHEME_CAR(obj))
+#define SCHEME_RAW_CLOS_DATA(obj) SCHEME_CDR(obj)
 
 /*========================================================================*/
 /*                      hash tables and environments                      */
@@ -898,7 +907,7 @@ typedef struct {
 
 typedef struct Scheme_Hash_Table
 {
-  Scheme_Inclhash_Object iso; /* 0x1 flag => marshal as #t (hack for stxobj bytecode) */
+  Scheme_Inclhash_Object iso; /* 0x1 flag => print as opaque (e.g., exports table); 0x2 => misc (e.g., top-level multi_scopes) */
   intptr_t size; /* power of 2 */
   intptr_t count;
   Scheme_Object **keys;
@@ -935,9 +944,14 @@ typedef struct Scheme_Bucket_Table
 enum {
   SCHEME_hash_string,
   SCHEME_hash_ptr,
-  SCHEME_hash_bound_id,
   SCHEME_hash_weak_ptr,
   SCHEME_hash_late_weak_ptr
+};
+
+enum {
+  SCHEME_hashtr_eq,
+  SCHEME_hashtr_equal,
+  SCHEME_hashtr_eqv
 };
 
 typedef struct Scheme_Env Scheme_Env;
@@ -949,7 +963,12 @@ typedef struct Scheme_Env Scheme_Env;
 /*========================================================================*/
 
 #ifdef USE_MZ_SETJMP
+# if defined(_WIN64)
+#  define USE_MZ_SETJMP_INDIRECT
+typedef intptr_t mz_pre_jmp_buf[31];
+# else
 typedef intptr_t mz_pre_jmp_buf[8];
+# endif
 #else
 # define mz_pre_jmp_buf jmp_buf
 #endif
@@ -1000,6 +1019,23 @@ typedef struct Scheme_Continuation_Jump_State {
   char is_kill, is_escape, skip_dws;
 } Scheme_Continuation_Jump_State;
 
+#ifdef USE_MZ_SETJMP_INDIRECT
+/* Needed to avoid a direct reference to scheme_mz_setjmp,
+   which might be implemented in assembly and incompatible
+   with delayloading: */
+typedef int (*Scheme_Setjmp_Proc)(mz_pre_jmp_buf);
+# ifndef MZ_XFORM
+#  define scheme_call_mz_setjmp(s) ((scheme_get_mz_setjmp())(s))
+# else
+#  define scheme_call_mz_setjmp(s) scheme_mz_setjmp_post_xform(s)
+# endif
+#else
+# ifdef USE_MZ_SETJMP
+#  define scheme_call_mz_setjmp(s) scheme_mz_setjmp(s)
+# endif
+typedef int (*Scheme_Setjmp_Proc)(void*);
+#endif
+
 /* A mark position is in odd number, so that it can be
    viewed as a pointer (i.e., a fixnum): */
 #define MZ_MARK_POS_TYPE intptr_t
@@ -1037,6 +1073,7 @@ typedef struct Scheme_Custodian *Scheme_Custodian_Reference;
 typedef struct Scheme_Custodian Scheme_Custodian;
 typedef Scheme_Bucket_Table Scheme_Thread_Cell_Table;
 typedef struct Scheme_Config Scheme_Config;
+typedef struct Scheme_Plumber Scheme_Plumber;
 
 typedef int (*Scheme_Ready_Fun)(Scheme_Object *o);
 typedef void (*Scheme_Needs_Wakeup_Fun)(Scheme_Object *, void *);
@@ -1116,6 +1153,7 @@ typedef struct Scheme_Thread {
   Scheme_Object *resumed_box;   /* contains pointer to thread when it's resumed */
   Scheme_Object *dead_box;      /* contains non-zero when the thread is dead */
   Scheme_Object *running_box;   /* contains pointer to thread when it's running */
+  Scheme_Object *sync_box;      /* semaphore used for NACK events */
 
   struct Scheme_Thread *gc_prep_chain;
 
@@ -1137,7 +1175,8 @@ typedef struct Scheme_Thread {
   struct Scheme_Overflow *overflow;
 
   struct Scheme_Comp_Env *current_local_env;
-  Scheme_Object *current_local_mark;
+  Scheme_Object *current_local_scope;
+  Scheme_Object *current_local_use_scope;
   Scheme_Object *current_local_name;
   Scheme_Object *current_local_modidx;
   Scheme_Env *current_local_menv;
@@ -1182,11 +1221,12 @@ typedef struct Scheme_Thread {
     } k;
   } ku;
 
+  /* To pass the current procedure from one chaperone
+     layer to the next: */
+  Scheme_Object *self_for_proc_chaperone;
+
   short suspend_break;
   short external_break;
-
-  Scheme_Simple_Object *list_stack;
-  int list_stack_pos;
 
   /* Racket client can use: */
   void (*on_kill)(struct Scheme_Thread *p);
@@ -1225,6 +1265,7 @@ typedef struct Scheme_Thread {
 #ifdef MZ_PRECISE_GC
   struct GC_Thread_Info *gc_info; /* managed by the GC */
   void *place_channel_msg_in_flight;
+  void *place_channel_msg_chain_in_flight;
 #endif
 
 } Scheme_Thread;
@@ -1316,6 +1357,7 @@ enum {
   MZCONFIG_CAN_READ_READER,
   MZCONFIG_CAN_READ_LANG,
   MZCONFIG_READ_DECIMAL_INEXACT,
+  MZCONFIG_READ_CDOT,
   
   MZCONFIG_PRINT_GRAPH,
   MZCONFIG_PRINT_STRUCT,
@@ -1333,6 +1375,8 @@ enum {
   MZCONFIG_CASE_SENS,
   MZCONFIG_SQUARE_BRACKETS_ARE_PARENS,
   MZCONFIG_CURLY_BRACES_ARE_PARENS,
+  MZCONFIG_SQUARE_BRACKETS_ARE_TAGGED,
+  MZCONFIG_CURLY_BRACES_ARE_TAGGED,
 
   MZCONFIG_ERROR_PRINT_WIDTH,
   MZCONFIG_ERROR_PRINT_CONTEXT_LENGTH,
@@ -1349,28 +1393,36 @@ enum {
   MZCONFIG_CUSTODIAN,
   MZCONFIG_INSPECTOR,
   MZCONFIG_CODE_INSPECTOR,
+  MZCONFIG_PLUMBER,
 
   MZCONFIG_USE_COMPILED_KIND,
   MZCONFIG_USE_COMPILED_ROOTS,
   MZCONFIG_USE_USER_PATHS,
   MZCONFIG_USE_LINK_PATHS,
+  MZCONFIG_USE_COMPILED_FILE_CHECK,
 
   MZCONFIG_LOAD_DIRECTORY,
   MZCONFIG_WRITE_DIRECTORY,
 
   MZCONFIG_COLLECTION_PATHS,
+  MZCONFIG_COLLECTION_LINKS,
 
   MZCONFIG_PORT_PRINT_HANDLER,
 
   MZCONFIG_LOAD_EXTENSION_HANDLER,
 
   MZCONFIG_CURRENT_DIRECTORY,
+  MZCONFIG_CURRENT_ENV_VARS,
+  MZCONFIG_FORCE_DELETE_PERMS,
+
+  MZCONFIG_CURRENT_USER_DIRECTORY,
 
   MZCONFIG_RANDOM_STATE,
 
   MZCONFIG_CURRENT_MODULE_RESOLVER,
   MZCONFIG_CURRENT_MODULE_NAME,
   MZCONFIG_CURRENT_MODULE_SRC,
+  MZCONFIG_CURRENT_MODULE_LOAD_PATH,
 
   MZCONFIG_ERROR_PRINT_SRCLOC,
 
@@ -1478,7 +1530,12 @@ struct Scheme_Input_Port
   Scheme_Object *special, *ungotten_special;
   Scheme_Object *unless, *unless_cache;
   struct Scheme_Output_Port *output_half;
+#ifdef WINDOWS_FILE_HANDLES
+  char *bufwidths; /* to track CRLF => LF conversions in the buffer */
+#endif
 };
+
+#define SCHEME_INPORT_VAL(i) (((Scheme_Input_Port *)i)->port_data)
 
 struct Scheme_Output_Port
 {
@@ -1503,9 +1560,7 @@ struct Scheme_Output_Port
   struct Scheme_Input_Port *input_half;
 };
 
-#define SCHEME_INPORT_VAL(obj) (((Scheme_Input_Port *)(obj))->port_data)
-#define SCHEME_OUTPORT_VAL(obj) (((Scheme_Output_Port *)(obj))->port_data)
-#define SCHEME_IPORT_NAME(obj) (((Scheme_Input_Port *)obj)->name)
+#define SCHEME_OUTPORT_VAL(o) (((Scheme_Output_Port *)o)->port_data)
 
 #define SCHEME_SPECIAL (-2)
 #define SCHEME_UNLESS_READY (-3)
@@ -1667,20 +1722,20 @@ MZ_EXTERN Scheme_Object *scheme_eval_waiting;
 #ifndef USE_MZ_SETJMP
 # ifdef USE_UNDERSCORE_SETJMP
 #  define scheme_mz_longjmp(b, v) _longjmp(b, v)
-#  define scheme_mz_setjmp(b) _setjmp(b)
+#  define scheme_call_mz_setjmp(b) _setjmp(b)
 # else
 #  define scheme_mz_longjmp(b, v) longjmp(b, v)
-#  define scheme_mz_setjmp(b) setjmp(b)
+#  define scheme_call_mz_setjmp(b) setjmp(b)
 # endif
 #endif
 
 #ifdef MZ_USE_JIT
 MZ_EXTERN void scheme_jit_longjmp(mz_jit_jmp_buf b, int v);
 MZ_EXTERN void scheme_jit_setjmp_prepare(mz_jit_jmp_buf b);
-# define scheme_jit_setjmp(b) (scheme_jit_setjmp_prepare(b), scheme_mz_setjmp((b)->jb))
+# define scheme_jit_setjmp(b) (scheme_jit_setjmp_prepare(b), scheme_call_mz_setjmp((b)->jb))
 #else
 # define scheme_jit_longjmp(b, v) scheme_mz_longjmp(b, v) 
-# define scheme_jit_setjmp(b) scheme_mz_setjmp(b) 
+# define scheme_jit_setjmp(b) scheme_call_mz_setjmp(b)
 #endif
 
 #ifdef MZ_PRECISE_GC
@@ -1807,6 +1862,10 @@ extern void *scheme_malloc_envunbox(size_t);
 # define MZ_GC_UNREG()                   /* empty */
 #endif
 
+#define SCHEME_GC_SHAPE_TERM       0
+#define SCHEME_GC_SHAPE_PTR_OFFSET 1
+#define SCHEME_GC_SHAPE_ADD_SIZE   2
+
 /*========================================================================*/
 /*                   embedding configuration and hooks                    */
 /*========================================================================*/
@@ -1839,10 +1898,15 @@ MZ_EXTERN void scheme_set_startup_use_jit(int);
 MZ_EXTERN void scheme_set_startup_load_on_demand(int);
 MZ_EXTERN void scheme_set_ignore_user_paths(int);
 MZ_EXTERN void scheme_set_ignore_link_paths(int);
+MZ_EXTERN void scheme_set_cross_compile_mode(int);
 MZ_EXTERN void scheme_set_logging(int syslog_level, int stderr_level);
 MZ_EXTERN void scheme_set_logging_spec(Scheme_Object *syslog_level, Scheme_Object *stderr_level);
 
 MZ_EXTERN int scheme_get_allow_set_undefined();
+
+MZ_EXTERN void scheme_set_compiled_file_check(int);
+#define SCHEME_COMPILED_FILE_CHECK_MODIFY_SECONDS 0  
+#define SCHEME_COMPILED_FILE_CHECK_EXISTS         1
 
 #ifdef MZ_CAN_ACCESS_THREAD_LOCAL_DIRECTLY
 THREAD_LOCAL_DECL(MZ_EXTERN Scheme_Thread *scheme_current_thread);
@@ -1860,8 +1924,8 @@ MZ_EXTERN void scheme_register_embedded_load(intptr_t len, const char *s);
 typedef void (*Scheme_Exit_Proc)(int v);
 MZ_EXTERN Scheme_Exit_Proc scheme_exit;
 MZ_EXTERN void scheme_set_exit(Scheme_Exit_Proc p);
-typedef void (*Scheme_At_Exit_Callback_Proc)();
-typedef void (*Scheme_At_Exit_Proc)(Scheme_At_Exit_Callback_Proc);
+typedef void (*Scheme_At_Exit_Callback_Proc)(void);
+typedef int (*Scheme_At_Exit_Proc)(Scheme_At_Exit_Callback_Proc);
 MZ_EXTERN void scheme_set_atexit(Scheme_At_Exit_Proc p);
 typedef void (*scheme_console_printf_t)(char *str, ...);
 MZ_EXTERN scheme_console_printf_t scheme_console_printf;
@@ -1884,9 +1948,6 @@ MZ_EXTERN void (*scheme_suspend_main_thread)(void);
 int scheme_set_in_main_thread(void);
 void scheme_restore_nonmain_thread(void);
 #endif
-#ifdef MAC_FILE_SYSTEM
-extern long scheme_creator_id;
-#endif
 
 typedef Scheme_Object *(*Scheme_Stdio_Maker_Proc)(void);
 MZ_EXTERN Scheme_Object *(*scheme_make_stdin)(void);
@@ -1902,12 +1963,17 @@ MZ_EXTERN void scheme_set_banner(char *s);
 MZ_EXTERN Scheme_Object *scheme_set_exec_cmd(char *s);
 MZ_EXTERN Scheme_Object *scheme_set_run_cmd(char *s);
 MZ_EXTERN void scheme_set_collects_path(Scheme_Object *p);
+MZ_EXTERN void scheme_set_config_path(Scheme_Object *p);
+MZ_EXTERN void scheme_set_host_collects_path(Scheme_Object *p);
+MZ_EXTERN void scheme_set_host_config_path(Scheme_Object *p);
 MZ_EXTERN void scheme_set_original_dir(Scheme_Object *d);
 MZ_EXTERN void scheme_set_addon_dir(Scheme_Object *p);
-MZ_EXTERN void scheme_set_links_file(Scheme_Object *p);
 MZ_EXTERN void scheme_set_command_line_arguments(Scheme_Object *vec);
 MZ_EXTERN void scheme_set_compiled_file_paths(Scheme_Object *list);
 MZ_EXTERN void scheme_set_compiled_file_roots(Scheme_Object *list);
+#ifdef DOS_FILE_SYSTEM
+MZ_EXTERN void scheme_set_dll_path(wchar_t *s);
+#endif
 
 MZ_EXTERN void scheme_init_collection_paths(Scheme_Env *global_env, Scheme_Object *extra_dirs);
 MZ_EXTERN void scheme_init_collection_paths_post(Scheme_Env *global_env, Scheme_Object *extra_dirs, Scheme_Object *extra_post_dirs);
@@ -1943,9 +2009,7 @@ MZ_EXTERN int scheme_main_stack_setup(int no_auto_statics, Scheme_Nested_Main _m
 typedef int (*Scheme_Env_Main)(Scheme_Env *env, int argc, char **argv);
 MZ_EXTERN int scheme_main_setup(int no_auto_statics, Scheme_Env_Main _main, int argc, char **argv);
 
-#ifdef IMPLEMENT_THREAD_LOCAL_VIA_WIN_TLS
 MZ_EXTERN void scheme_register_tls_space(void *tls_space, int _tls_index);
-#endif
 
 MZ_EXTERN void scheme_register_static(void *ptr, intptr_t size);
 #if defined(MUST_REGISTER_GLOBALS) || defined(GC_MIGHT_USE_REGISTERED_STATICS)
@@ -1960,8 +2024,13 @@ MZ_EXTERN int scheme_new_param(void);
 MZ_EXTERN Scheme_Object *scheme_param_config(char *name, Scheme_Object *pos,
 					     int argc, Scheme_Object **argv,
 					     int arity,
-					     Scheme_Prim *check, char *expected,
+					     Scheme_Prim *check, char *expected_type,
 					     int isbool);
+MZ_EXTERN Scheme_Object *scheme_param_config2(char *name, Scheme_Object *pos,
+                                              int argc, Scheme_Object **argv,
+                                              int arity,
+                                              Scheme_Prim *check, char *expected_contract,
+                                              int isbool);
 MZ_EXTERN Scheme_Object *scheme_register_parameter(Scheme_Prim *function, char *name, int which);
 
 #endif /* SCHEME_DIRECT_EMBEDDED */
@@ -2055,39 +2124,17 @@ extern Scheme_Extension_Table *scheme_extension_table;
 #define SCHEME_STRUCT_GEN_SET 0x40
 #define SCHEME_STRUCT_EXPTIME 0x80
 #define SCHEME_STRUCT_NO_MAKE_PREFIX 0x100
+#define SCHEME_STRUCT_NAMES_ARE_STRINGS 0x200
 
 /*========================================================================*/
 /*                           file descriptors                             */
 /*========================================================================*/
 
-#if defined(DETECT_WIN32_CONSOLE_STDIN) || defined(WINDOWS_PROCESSES)
-# ifndef NO_STDIO_THREADS
-#  define USE_FAR_MZ_FDCALLS
-# endif
-#endif
-#ifdef USE_DYNAMIC_FDSET_SIZE
-# define USE_FAR_MZ_FDCALLS
-#endif
-#ifdef USE_BEOS_PORT_THREADS
-# define USE_FAR_MZ_FDCALLS
-#endif
-#ifdef HAVE_POLL_SYSCALL
-# define USE_FAR_MZ_FDCALLS
-#endif
-
-#ifdef USE_FAR_MZ_FDCALLS
 # define MZ_GET_FDSET(p, n) scheme_get_fdset(p, n)
 # define MZ_FD_ZERO(p) scheme_fdzero(p)
 # define MZ_FD_SET(n, p) scheme_fdset(p, n)
 # define MZ_FD_CLR(n, p) scheme_fdclr(p, n)
 # define MZ_FD_ISSET(n, p) scheme_fdisset(p, n)
-#else
-# define MZ_GET_FDSET(p, n) ((void *)(((fd_set *)p) + n))
-# define MZ_FD_ZERO(p) FD_ZERO((fd_set *)(p))
-# define MZ_FD_SET(n, p) FD_SET(n, (fd_set *)(p))
-# define MZ_FD_CLR(n, p) FD_CLR(n, (fd_set *)(p))
-# define MZ_FD_ISSET(n, p) FD_ISSET(n, (fd_set *)(p))
-#endif
 
 /* For scheme_fd_to_semaphore(): */
 #define MZFD_CREATE_READ  1

@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -29,6 +29,7 @@ READ_ONLY Scheme_Object *scheme_arity_at_least;
 READ_ONLY Scheme_Object *scheme_date;
 READ_ONLY Scheme_Object *scheme_make_arity_at_least;
 READ_ONLY Scheme_Object *scheme_source_property;
+READ_ONLY Scheme_Object *scheme_module_path_property;
 READ_ONLY Scheme_Object *scheme_input_port_property;
 READ_ONLY Scheme_Object *scheme_output_port_property;
 READ_ONLY Scheme_Object *scheme_cpointer_property;
@@ -38,6 +39,7 @@ READ_ONLY Scheme_Object *scheme_impersonator_of_property;
 READ_ONLY Scheme_Object *scheme_make_struct_type_proc;
 READ_ONLY Scheme_Object *scheme_make_struct_field_accessor_proc;
 READ_ONLY Scheme_Object *scheme_make_struct_field_mutator_proc;
+READ_ONLY Scheme_Object *scheme_make_struct_type_property_proc;
 READ_ONLY Scheme_Object *scheme_struct_type_p_proc;
 READ_ONLY Scheme_Object *scheme_current_inspector_proc;
 READ_ONLY Scheme_Object *scheme_make_inspector_proc;
@@ -46,6 +48,9 @@ READ_ONLY Scheme_Object *scheme_display_symbol;
 READ_ONLY Scheme_Object *scheme_write_special_symbol;
 READ_ONLY Scheme_Object *scheme_app_mark_impersonator_property;
 READ_ONLY Scheme_Object *scheme_liberal_def_ctx_type;;
+READ_ONLY Scheme_Object *scheme_object_name_property;
+READ_ONLY Scheme_Object *scheme_struct_to_vector_proc;
+READ_ONLY Scheme_Object *scheme_authentic_property;
 
 READ_ONLY static Scheme_Object *location_struct;
 READ_ONLY static Scheme_Object *write_property;
@@ -55,6 +60,7 @@ READ_ONLY static Scheme_Object *proc_property;
 READ_ONLY static Scheme_Object *method_property;
 READ_ONLY static Scheme_Object *rename_transformer_property;
 READ_ONLY static Scheme_Object *set_transformer_property;
+READ_ONLY static Scheme_Object *expansion_contexts_property;
 READ_ONLY static Scheme_Object *not_free_id_symbol;
 READ_ONLY static Scheme_Object *scheme_checked_proc_property;
 READ_ONLY static Scheme_Object *struct_info_proc;
@@ -83,9 +89,18 @@ typedef struct {
   Scheme_Object *maker;
 } Nack_Guard_Evt;
 
+typedef struct {
+  Scheme_Object so;
+  int done;
+  Syncing *syncing;
+  Scheme_Object *wrapper;
+  Scheme_Object *orig;
+} Active_Replace_Evt;
+
 static Scheme_Object *make_inspector(int argc, Scheme_Object *argv[]);
 static Scheme_Object *make_sibling_inspector(int argc, Scheme_Object *argv[]);
 static Scheme_Object *inspector_p(int argc, Scheme_Object *argv[]);
+static Scheme_Object *inspector_superior_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *current_inspector(int argc, Scheme_Object *argv[]);
 static Scheme_Object *current_code_inspector(int argc, Scheme_Object *argv[]);
 
@@ -96,6 +111,7 @@ static Scheme_Object *make_struct_type_property_from_c(int argc, Scheme_Object *
 static Scheme_Object *struct_type_property_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *chaperone_property_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *check_evt_property_value_ok(int argc, Scheme_Object *argv[]);
+static Scheme_Object *check_object_name_property_value_ok(int argc, Scheme_Object *argv[]);
 static Scheme_Object *check_equal_property_value_ok(int argc, Scheme_Object *argv[]);
 static Scheme_Object *check_impersonator_of_property_value_ok(int argc, Scheme_Object *argv[]);
 static Scheme_Object *check_write_property_value_ok(int argc, Scheme_Object *argv[]);
@@ -105,6 +121,7 @@ static Scheme_Object *check_output_port_property_value_ok(int argc, Scheme_Objec
 static Scheme_Object *check_cpointer_property_value_ok(int argc, Scheme_Object *argv[]);
 static Scheme_Object *check_rename_transformer_property_value_ok(int argc, Scheme_Object *argv[]);
 static Scheme_Object *check_set_transformer_property_value_ok(int argc, Scheme_Object *argv[]);
+static Scheme_Object *check_expansion_contexts_property_value_ok(int argc, Scheme_Object *argv[]);
 static Scheme_Object *check_checked_proc_property_value_ok(int argc, Scheme_Object *argv[]);
 
 static Scheme_Object *unary_acc(int argc, Scheme_Object **argv, Scheme_Object *self);
@@ -116,6 +133,7 @@ static Scheme_Object *make_struct_field_mutator(int argc, Scheme_Object *argv[])
 
 static Scheme_Object *nack_evt(int argc, Scheme_Object *argv[]);
 static Scheme_Object *handle_evt(int argc, Scheme_Object *argv[]);
+static Scheme_Object *replace_evt(int argc, Scheme_Object *argv[]);
 static Scheme_Object *chaperone_evt(int argc, Scheme_Object *argv[]);
 static Scheme_Object *handle_evt_p(int argc, Scheme_Object *argv[]);
 
@@ -156,6 +174,9 @@ static int wrapped_evt_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo);
 static int nack_guard_evt_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo);
 static int nack_evt_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo);
 static int poll_evt_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo);
+static int replace_evt_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo);
+static int active_replace_evt_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo);
+static void active_replace_evt_needs_wakeup(Scheme_Object *s, void *fds);
 
 static int chaperone_evt_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo);
 static int is_chaperone_evt(Scheme_Object *o);
@@ -172,6 +193,10 @@ static Scheme_Object *check_location_fields(int argc, Scheme_Object **argv);
 static Scheme_Object *check_exn_source_property_value_ok(int argc, Scheme_Object *argv[]);
 static Scheme_Object *exn_source_p(int argc, Scheme_Object **argv);
 static Scheme_Object *exn_source_get(int argc, Scheme_Object **argv);
+
+static Scheme_Object *check_exn_module_path_property_value_ok(int argc, Scheme_Object *argv[]);
+static Scheme_Object *exn_module_path_p(int argc, Scheme_Object **argv);
+static Scheme_Object *exn_module_path_get(int argc, Scheme_Object **argv);
 
 static Scheme_Object *procedure_extract_target(int argc, Scheme_Object **argv);
 static Scheme_Struct_Type *hash_prefab(Scheme_Struct_Type *type);
@@ -202,10 +227,10 @@ static Scheme_Object *make_prefab_key(Scheme_Struct_Type *type);
 
 #define BUILTIN_STRUCT_FLAGS (SCHEME_STRUCT_NO_SET | SCHEME_STRUCT_EXPTIME | SCHEME_STRUCT_NO_MAKE_PREFIX)
 
-#define TYPE_NAME(base, blen) make_name("struct:", base, blen, "", NULL, 0, "", 1)
-#define CSTR_NAME(base, blen) make_name("", base, blen, "", NULL, 0, "", 1)
-#define CSTR_MAKE_NAME(base, blen) make_name("make-", base, blen, "", NULL, 0, "", 1)
-#define PRED_NAME(base, blen) make_name("", base, blen, "?", NULL, 0, "", 1)
+#define TYPE_NAME(base, blen, sym) make_name("struct:", base, blen, "", NULL, 0, "", sym)
+#define CSTR_NAME(base, blen, sym) make_name("", base, blen, "", NULL, 0, "", sym)
+#define CSTR_MAKE_NAME(base, blen, sym) make_name("make-", base, blen, "", NULL, 0, "", sym)
+#define PRED_NAME(base, blen, sym) make_name("", base, blen, "?", NULL, 0, "", sym)
 #define GET_NAME(base, blen, field, flen, sym) make_name("", base, blen, "-", field, flen, "", sym)
 #define SET_NAME(base, blen, field, flen, sym) make_name("set-", base, blen, "-", field, flen, "!", sym)
 #define GENGET_NAME(base, blen, sym) make_name("", base, blen, "-ref", NULL, 0, "", sym)
@@ -218,7 +243,7 @@ static Scheme_Object *make_prefab_key(Scheme_Struct_Type *type);
 
 static char *pred_name_string(Scheme_Object *sym)
 {
-  return scheme_symbol_val(PRED_NAME(scheme_symbol_val(sym), SCHEME_SYM_LEN(sym)));
+  return (char *)PRED_NAME(scheme_symbol_val(sym), SCHEME_SYM_LEN(sym), 0);
 }
 
 void
@@ -227,11 +252,9 @@ scheme_init_struct (Scheme_Env *env)
   Scheme_Object **as_names;
   Scheme_Object **as_values;
   int as_count;
-#ifdef TIME_SYNTAX
   Scheme_Object **ts_names;
   Scheme_Object **ts_values;
   int ts_count;
-#endif
   Scheme_Object **loc_names;
   Scheme_Object **loc_values;
   int loc_count;
@@ -239,12 +262,10 @@ scheme_init_struct (Scheme_Env *env)
   Scheme_Object *guard;
 
   READ_ONLY static const char *arity_fields[1] = { "value" };
-#ifdef TIME_SYNTAX
   READ_ONLY static const char *date_fields[10] = { "second", "minute", "hour",
                                                    "day", "month", "year",
                                                    "week-day", "year-day", "dst?", "time-zone-offset" };
   READ_ONLY static const char *date_star_fields[2] = { "nanosecond", "time-zone-name" };
-#endif
   READ_ONLY static const char *location_fields[10] = { "source", "line", "column", "position", "span" };
   
 #ifdef MZ_PRECISE_GC
@@ -268,7 +289,6 @@ scheme_init_struct (Scheme_Env *env)
 			       env);
   }
 
-#ifdef TIME_SYNTAX
   /* Add date structure: */
   REGISTER_SO(scheme_date);
   scheme_date = scheme_make_struct_type_from_string("date", NULL, 10, NULL,
@@ -300,8 +320,6 @@ scheme_init_struct (Scheme_Env *env)
 			       env);
   }
   
-
-#endif
 
   /* Add location structure: */
   REGISTER_SO(location_struct);
@@ -371,21 +389,22 @@ scheme_init_struct (Scheme_Env *env)
     evt_property = scheme_make_struct_type_property_w_guard(scheme_intern_symbol("evt"),
                                                             guard);
     scheme_add_global_constant("prop:evt", evt_property, env);
-
-    scheme_add_evt(scheme_structure_type,
-		   (Scheme_Ready_Fun)evt_struct_is_ready,
-		   NULL,
-		   is_evt_struct, 1);
-    scheme_add_evt(scheme_proc_struct_type,
-		   (Scheme_Ready_Fun)evt_struct_is_ready,
-		   NULL,
-		   is_evt_struct, 1);
   }
 
   {
     REGISTER_SO(proc_property);
     proc_property = scheme_make_struct_type_property(scheme_intern_symbol("procedure"));
     scheme_add_global_constant("prop:procedure", proc_property, env);
+  }
+
+  {
+    REGISTER_SO(scheme_object_name_property);
+    guard = scheme_make_prim_w_arity(check_object_name_property_value_ok,
+				     "guard-for-prop:object-name",
+				     2, 2);
+    scheme_object_name_property = scheme_make_struct_type_property_w_guard(scheme_intern_symbol("object-name"),
+                                                                           guard);
+    scheme_add_global_constant("prop:object-name", scheme_object_name_property, env);
   }
 
   {
@@ -410,7 +429,7 @@ scheme_init_struct (Scheme_Env *env)
 				     2, 2);
     REGISTER_SO(scheme_impersonator_of_property);
     scheme_impersonator_of_property = scheme_make_struct_type_property_w_guard(scheme_intern_symbol("impersonator-of"),
-                                                                        guard);
+                                                                               guard);
     scheme_add_global_constant("prop:impersonator-of", scheme_impersonator_of_property, env);
   }
 
@@ -451,7 +470,7 @@ scheme_init_struct (Scheme_Env *env)
 				     "guard-for-prop:rename-transformer",
 				     2, 2);
     rename_transformer_property = scheme_make_struct_type_property_w_guard(scheme_intern_symbol("rename-transformer"),
-                                                                          guard);
+                                                                           guard);
     
     scheme_add_global_constant("prop:rename-transformer", rename_transformer_property, env);
   }
@@ -468,6 +487,18 @@ scheme_init_struct (Scheme_Env *env)
     scheme_add_global_constant("prop:set!-transformer", set_transformer_property, env);
   }
 
+  {
+    REGISTER_SO(expansion_contexts_property);
+
+    guard = scheme_make_prim_w_arity(check_expansion_contexts_property_value_ok,
+				     "guard-for-prop:expansion-contexts",
+				     2, 2);
+    expansion_contexts_property = scheme_make_struct_type_property_w_guard(scheme_intern_symbol("expansion-contexts"),
+                                                                           guard);
+    
+    scheme_add_global_constant("prop:expansion-contexts", expansion_contexts_property, env);
+  }
+
 
   {
     guard = scheme_make_prim_w_arity(check_checked_proc_property_value_ok,
@@ -475,7 +506,7 @@ scheme_init_struct (Scheme_Env *env)
 				     2, 2);
     REGISTER_SO(scheme_checked_proc_property);
     scheme_checked_proc_property = scheme_make_struct_type_property_w_guard(scheme_intern_symbol("checked-procedure"),
-                                                                             guard);
+                                                                            guard);
     scheme_add_global_constant("prop:checked-procedure", scheme_checked_proc_property, env);
   }
 
@@ -506,6 +537,12 @@ scheme_init_struct (Scheme_Env *env)
     scheme_add_global_constant("prop:method-arity-error", method_property, env);
   }
 
+  {
+    REGISTER_SO(scheme_authentic_property);
+    scheme_authentic_property = scheme_make_struct_type_property(scheme_intern_symbol("authentic"));
+    scheme_add_global_constant("prop:authentic", scheme_authentic_property, env);
+  }
+
   REGISTER_SO(not_free_id_symbol);
   not_free_id_symbol = scheme_intern_symbol("not-free-identifier=?");
 
@@ -515,30 +552,6 @@ scheme_init_struct (Scheme_Env *env)
   scheme_recur_symbol = scheme_intern_symbol("recur");
   scheme_display_symbol = scheme_intern_symbol("display");
   scheme_write_special_symbol = scheme_intern_symbol("write-special");
-
-  scheme_add_evt(scheme_wrap_evt_type,
-		 (Scheme_Ready_Fun)wrapped_evt_is_ready,
-		 NULL, NULL, 1);
-  scheme_add_evt(scheme_handle_evt_type,
-		 (Scheme_Ready_Fun)wrapped_evt_is_ready,
-		 NULL, NULL, 1);
-  scheme_add_evt(scheme_chaperone_type,
-		 (Scheme_Ready_Fun)chaperone_evt_is_ready,
-		 NULL, 
-                 is_chaperone_evt, 1);
-  scheme_add_evt(scheme_proc_chaperone_type,
-		 (Scheme_Ready_Fun)chaperone_evt_is_ready,
-		 NULL, 
-                 is_chaperone_evt, 1);
-  scheme_add_evt(scheme_nack_guard_evt_type,
-		 (Scheme_Ready_Fun)nack_guard_evt_is_ready,
-		 NULL, NULL, 1);
-  scheme_add_evt(scheme_nack_evt_type,
-		 (Scheme_Ready_Fun)nack_evt_is_ready,
-		 NULL, NULL, 1);
-  scheme_add_evt(scheme_poll_evt_type,
-		 (Scheme_Ready_Fun)poll_evt_is_ready,
-		 NULL, NULL, 1);
 
   /*** basic interface ****/
 
@@ -550,14 +563,16 @@ scheme_init_struct (Scheme_Env *env)
 
   scheme_add_global_constant("make-struct-type", 
                              scheme_make_struct_type_proc,
-			    env);
+                             env);
 
-  scheme_add_global_constant("make-struct-type-property", 
-			    scheme_make_prim_w_arity2(make_struct_type_property,
-						      "make-struct-type-property",
-						      1, 4,
-						      3, 3),
-			    env);
+  REGISTER_SO(scheme_make_struct_type_property_proc);
+  scheme_make_struct_type_property_proc = scheme_make_prim_w_arity2(make_struct_type_property,
+                                                                    "make-struct-type-property",
+                                                                    1, 4,
+                                                                    3, 3);
+  scheme_add_global_constant("make-struct-type-property",
+                             scheme_make_struct_type_property_proc,
+                             env);
 
   REGISTER_SO(scheme_make_struct_field_accessor_proc);
   scheme_make_struct_field_accessor_proc = scheme_make_prim_w_arity(make_struct_field_accessor,
@@ -583,6 +598,11 @@ scheme_init_struct (Scheme_Env *env)
   scheme_add_global_constant("handle-evt",
 			     scheme_make_prim_w_arity(handle_evt,
 						      "handle-evt",
+						      2, 2),
+			     env);
+  scheme_add_global_constant("replace-evt",
+			     scheme_make_prim_w_arity(replace_evt,
+						      "replace-evt",
 						      2, 2),
 			     env);
   scheme_add_global_constant("chaperone-evt",
@@ -620,14 +640,14 @@ scheme_init_struct (Scheme_Env *env)
 
   scheme_add_global_constant("struct-type-property?",
 			     scheme_make_folding_prim(struct_type_property_p,
-						     "struct-type-property?",
-						     1, 1, 1),
-			    env);
+                                                      "struct-type-property?",
+                                                      1, 1, 1),
+                             env);
   scheme_add_global_constant("procedure-struct-type?",
 			     scheme_make_folding_prim(proc_struct_type_p,
-						     "procedure-struct-type?",
-						     1, 1, 1),
-			    env);
+                                                      "procedure-struct-type?",
+                                                      1, 1, 1),
+                             env);
   scheme_add_global_constant("procedure-extract-target",
                              scheme_make_prim_w_arity(procedure_extract_target,
                                                       "procedure-extract-target",
@@ -658,15 +678,17 @@ scheme_init_struct (Scheme_Env *env)
 						      "struct-type-make-constructor",
 						      1, 2),
 			     env);
-  scheme_add_global_constant("struct->vector",
-			     scheme_make_prim_w_arity(struct_to_vector,
-						      "struct->vector",
-						      1, 2),
-			     env);
+
+  REGISTER_SO(scheme_struct_to_vector_proc);
+  scheme_struct_to_vector_proc = scheme_make_noncm_prim(struct_to_vector,
+                                                        "struct->vector",
+                                                        1, 2);
+  scheme_add_global_constant("struct->vector", scheme_struct_to_vector_proc, env);
+
   scheme_add_global_constant("prefab-struct-key",
-			     scheme_make_prim_w_arity(prefab_struct_key,
-						      "prefab-struct-key",
-						      1, 1),
+			     scheme_make_immed_prim(prefab_struct_key,
+                                                    "prefab-struct-key",
+                                                    1, 1),
 			     env);
   scheme_add_global_constant("make-prefab-struct",
 			     scheme_make_prim_w_arity(make_prefab_struct,
@@ -686,52 +708,57 @@ scheme_init_struct (Scheme_Env *env)
   /*** Predicates ****/
 
   scheme_add_global_constant("struct-mutator-procedure?",
-			     scheme_make_prim_w_arity(struct_setter_p,
-						      "struct-mutator-procedure?",
-						      1, 1),
-			    env);
+			     scheme_make_immed_prim(struct_setter_p,
+                                                    "struct-mutator-procedure?",
+                                                    1, 1),
+                             env);
   scheme_add_global_constant("struct-accessor-procedure?",
-			     scheme_make_prim_w_arity(struct_getter_p,
-						      "struct-accessor-procedure?",
-						      1, 1),
-			    env);
+			     scheme_make_immed_prim(struct_getter_p,
+                                                    "struct-accessor-procedure?",
+                                                    1, 1),
+                             env);
   scheme_add_global_constant("struct-predicate-procedure?",
-			     scheme_make_prim_w_arity(struct_pred_p,
-						      "struct-predicate-procedure?",
-						      1, 1),
+			     scheme_make_immed_prim(struct_pred_p,
+                                                    "struct-predicate-procedure?",
+                                                    1, 1),
 			     env);
   scheme_add_global_constant("struct-constructor-procedure?",
-			     scheme_make_prim_w_arity(struct_constr_p,
-						      "struct-constructor-procedure?",
-						      1, 1),
+			     scheme_make_immed_prim(struct_constr_p,
+                                                    "struct-constructor-procedure?",
+                                                    1, 1),
 			     env);
   scheme_add_global_constant("struct-type-property-accessor-procedure?",
-			     scheme_make_prim_w_arity(struct_prop_getter_p,
-						      "struct-type-property-accessor-procedure?",
-						      1, 1),
+			     scheme_make_immed_prim(struct_prop_getter_p,
+                                                    "struct-type-property-accessor-procedure?",
+                                                    1, 1),
 			     env);
   scheme_add_global_constant("impersonator-property-accessor-procedure?",
-			     scheme_make_prim_w_arity(chaperone_prop_getter_p,
-						      "impersonator-property-accessor-procedure?",
-						      1, 1),
+			     scheme_make_immed_prim(chaperone_prop_getter_p,
+                                                    "impersonator-property-accessor-procedure?",
+                                                    1, 1),
 			     env);
   
   /*** Inspectors ****/
 
   REGISTER_SO(scheme_make_inspector_proc);
-  scheme_make_inspector_proc = scheme_make_prim_w_arity(make_inspector,
-                                                        "make-inspector",
-                                                        0, 1);
+  scheme_make_inspector_proc = scheme_make_immed_prim(make_inspector,
+                                                      "make-inspector",
+                                                      0, 1);
   scheme_add_global_constant("make-inspector", scheme_make_inspector_proc, env);
   scheme_add_global_constant("make-sibling-inspector",
-			     scheme_make_prim_w_arity(make_sibling_inspector,
-						      "make-sibling-inspector",
-						      0, 1),
+			     scheme_make_immed_prim(make_sibling_inspector,
+                                                    "make-sibling-inspector",
+                                                    0, 1),
 			     env);
   scheme_add_global_constant("inspector?",
-			     scheme_make_prim_w_arity(inspector_p,
+			     scheme_make_folding_prim(inspector_p,
 						      "inspector?",
-						      1, 1),
+						      1, 1, 1),
+			     env);
+  scheme_add_global_constant("inspector-superior?",
+			     scheme_make_folding_prim(inspector_superior_p,
+						      "inspector-superior?",
+						      2, 2, 1),
 			     env);
   
   REGISTER_SO(scheme_current_inspector_proc);
@@ -749,14 +776,14 @@ scheme_init_struct (Scheme_Env *env)
 
 
   scheme_add_global_constant("make-special-comment", 
-			     scheme_make_prim_w_arity(make_special_comment,
-						      "make-special-comment",
-						      1, 1),
+			     scheme_make_immed_prim(make_special_comment,
+                                                    "make-special-comment",
+                                                    1, 1),
 			     env);
   scheme_add_global_constant("special-comment-value", 
-			     scheme_make_prim_w_arity(special_comment_value,
-						      "special-comment-value",
-						      1, 1),
+			     scheme_make_immed_prim(special_comment_value,
+                                                    "special-comment-value",
+                                                    1, 1),
 			     env);
   scheme_add_global_constant("special-comment?", 
 			     scheme_make_folding_prim(special_comment_p,
@@ -788,6 +815,26 @@ scheme_init_struct (Scheme_Env *env)
   scheme_add_global_constant("exn:srclocs-accessor", 
 			     scheme_make_folding_prim(exn_source_get,
 						      "exn:srclocs-accessor",
+						      1, 1, 1),
+			     env);
+
+  REGISTER_SO(scheme_module_path_property);
+  {
+    guard = scheme_make_prim_w_arity(check_exn_module_path_property_value_ok,
+				     "guard-for-prop:exn:srclocs",
+				     2, 2);
+    scheme_module_path_property = scheme_make_struct_type_property_w_guard(scheme_intern_symbol("prop:exn:missing-module"),
+                                                                           guard);
+  }
+  scheme_add_global_constant("prop:exn:missing-module", scheme_module_path_property, env);
+  scheme_add_global_constant("exn:missing-module?",
+			     scheme_make_folding_prim(exn_module_path_p,
+						      "exn:missing-module?",
+						      1, 1, 1),
+			     env);
+  scheme_add_global_constant("exn:missing-module-accessor", 
+			     scheme_make_folding_prim(exn_module_path_get,
+						      "exn:missing-module-accessor",
 						      1, 1, 1),
 			     env);
 
@@ -834,6 +881,49 @@ scheme_init_struct (Scheme_Env *env)
                                scheme_app_mark_impersonator_property,
                                env);
   }
+}
+
+void scheme_init_struct_wait()
+{
+  scheme_add_evt(scheme_structure_type,
+                 (Scheme_Ready_Fun)evt_struct_is_ready,
+                 NULL,
+                 is_evt_struct, 1);
+  scheme_add_evt(scheme_proc_struct_type,
+                 (Scheme_Ready_Fun)evt_struct_is_ready,
+                 NULL,
+                 is_evt_struct, 1);
+
+  scheme_add_evt(scheme_wrap_evt_type,
+		 (Scheme_Ready_Fun)wrapped_evt_is_ready,
+		 NULL, NULL, 1);
+  scheme_add_evt(scheme_handle_evt_type,
+		 (Scheme_Ready_Fun)wrapped_evt_is_ready,
+		 NULL, NULL, 1);
+  scheme_add_evt(scheme_replace_evt_type,
+		 (Scheme_Ready_Fun)replace_evt_is_ready,
+		 NULL, NULL, 1);
+  scheme_add_evt(scheme_active_replace_evt_type,
+		 (Scheme_Ready_Fun)active_replace_evt_is_ready,
+		 active_replace_evt_needs_wakeup,
+		 NULL, 1);
+  scheme_add_evt(scheme_chaperone_type,
+		 (Scheme_Ready_Fun)chaperone_evt_is_ready,
+		 NULL, 
+                 is_chaperone_evt, 1);
+  scheme_add_evt(scheme_proc_chaperone_type,
+		 (Scheme_Ready_Fun)chaperone_evt_is_ready,
+		 NULL, 
+                 is_chaperone_evt, 1);
+  scheme_add_evt(scheme_nack_guard_evt_type,
+		 (Scheme_Ready_Fun)nack_guard_evt_is_ready,
+		 NULL, NULL, 1);
+  scheme_add_evt(scheme_nack_evt_type,
+		 (Scheme_Ready_Fun)nack_evt_is_ready,
+		 NULL, NULL, 1);
+  scheme_add_evt(scheme_poll_evt_type,
+		 (Scheme_Ready_Fun)poll_evt_is_ready,
+		 NULL, NULL, 1);
 }
 
 /*========================================================================*/
@@ -905,12 +995,26 @@ static Scheme_Object *inspector_p(int argc, Scheme_Object **argv)
 	  : scheme_false);
 }
 
+static Scheme_Object *inspector_superior_p(int argc, Scheme_Object *argv[])
+{
+  if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_inspector_type))
+      scheme_wrong_contract("inspector-superior?", "inspector?", 0, argc, argv);
+  if (!SAME_TYPE(SCHEME_TYPE(argv[1]), scheme_inspector_type))
+      scheme_wrong_contract("inspector-superior?", "inspector?", 1, argc, argv);
+
+  return ((!SAME_OBJ(argv[1], argv[0]) && scheme_is_subinspector(argv[1], argv[0]))
+          ? scheme_true
+          : scheme_false);
+}
+
 int scheme_is_subinspector(Scheme_Object *i, Scheme_Object *sup)
 {
   Scheme_Inspector *ins, *superior;
 
   if (SCHEME_FALSEP(i))
     return 1;
+  if (SCHEME_FALSEP(sup))
+    return 0;
 
   ins = (Scheme_Inspector *)i;
   superior = (Scheme_Inspector *)sup;
@@ -951,16 +1055,33 @@ static Scheme_Object *prop_pred(int argc, Scheme_Object **args, Scheme_Object *p
   Scheme_Chaperone *px;
 
   v = args[0];
-  if (SCHEME_CHAPERONEP(v)) {
-    /* Check for property at chaperone level: */
-    px = (Scheme_Chaperone *)v;
-    if (px->props)
-      v = scheme_hash_tree_get(px->props, prop);
-    else
-      v = NULL;
-    if (v)
-      return scheme_true;
-    v = px->val;
+
+  while (1) {
+    if (SCHEME_CHAPERONEP(v)) {
+      /* Check for property at chaperone level: */
+      px = (Scheme_Chaperone *)v;
+      if (px->props)
+        v = scheme_hash_tree_get(px->props, prop);
+      else
+        v = NULL;
+      if (v)
+        return scheme_true;
+      v = px->val;
+    }
+
+    if (SAME_TYPE(SCHEME_TYPE(prop), scheme_chaperone_property_type)) {
+      /* An impersonator property must be at the chaperone level, but can
+         be via `prop:impersonator-of`: */
+      Scheme_Object *procs;
+      procs = scheme_struct_type_property_ref(scheme_impersonator_of_property, v);
+      if (procs) {
+        v = scheme_apply_impersonator_of(0, procs, v);
+        if (!v)
+          return scheme_false;
+      } else
+        return scheme_false;
+    } else
+      break;
   }
 
   if (SCHEME_STRUCTP(v))
@@ -1013,7 +1134,8 @@ XFORM_NONGCING static Scheme_Object *do_prop_accessor(Scheme_Object *prop, Schem
   return NULL;
 }
 
-static Scheme_Object *do_chaperone_prop_accessor(const char *who, Scheme_Object *prop, Scheme_Object *arg);
+static Scheme_Object *do_chaperone_prop_accessor(const char *who, Scheme_Object *prop, 
+                                                 Scheme_Object *orig_arg, Scheme_Object *arg);
 
 static Scheme_Object *chaperone_prop_acc_k(void)
 {
@@ -1021,26 +1143,31 @@ static Scheme_Object *chaperone_prop_acc_k(void)
   Scheme_Object *o = (Scheme_Object *)p->ku.k.p1;
   Scheme_Object *arg = (Scheme_Object *)p->ku.k.p2;
   const char *who = (const char *)p->ku.k.p3;
+  Scheme_Object *orig_arg = (Scheme_Object *)p->ku.k.p4;
 
   p->ku.k.p1 = NULL;
   p->ku.k.p2 = NULL;
   p->ku.k.p3 = NULL;
+  p->ku.k.p4 = NULL;
 
-  return do_chaperone_prop_accessor(who, o, arg);
+  return do_chaperone_prop_accessor(who, o, orig_arg, arg);
 }
 
-static Scheme_Object *chaperone_prop_acc_overflow(const char *who, Scheme_Object *o, Scheme_Object *arg)
+static Scheme_Object *chaperone_prop_acc_overflow(const char *who, Scheme_Object *o,
+                                                  Scheme_Object *orig_arg, Scheme_Object *arg)
 {
   Scheme_Thread *p = scheme_current_thread;
 
   p->ku.k.p1 = (void *)o;
   p->ku.k.p2 = (void *)arg;
   p->ku.k.p3 = (void *)who;
+  p->ku.k.p4 = (void *)orig_arg;
 
   return scheme_handle_stack_overflow(chaperone_prop_acc_k);
 }
 
-static Scheme_Object *do_chaperone_prop_accessor(const char *who, Scheme_Object *prop, Scheme_Object *arg)
+static Scheme_Object *do_chaperone_prop_accessor(const char *who, Scheme_Object *prop,
+                                                 Scheme_Object *orig_arg,  Scheme_Object *arg)
 {
   while (1) {
     if (SCHEME_CHAPERONEP(arg)) {
@@ -1055,9 +1182,8 @@ static Scheme_Object *do_chaperone_prop_accessor(const char *who, Scheme_Object 
           return v;
       }
 
-      if (!SCHEME_VECTORP(px->redirects)
-          || (SCHEME_VEC_SIZE(px->redirects) & 1)
-          || SCHEME_FALSEP(SCHEME_VEC_ELS(px->redirects)[0]))
+      if (!SCHEME_REDIRECTS_STRUCTP(px->redirects)
+	  || SCHEME_FALSEP(SCHEME_VEC_ELS(px->redirects)[0]))
         arg = px->prev;
       else {
         ht = (Scheme_Hash_Tree *)SCHEME_VEC_ELS(px->redirects)[0];
@@ -1071,16 +1197,25 @@ static Scheme_Object *do_chaperone_prop_accessor(const char *who, Scheme_Object 
 #ifdef DO_STACK_CHECK
           {
 # include "mzstkchk.h"
-            return chaperone_prop_acc_overflow(who, prop, arg);
+            return chaperone_prop_acc_overflow(who, prop, orig_arg, arg);
           }
 #endif
           
           arg = px->prev;
-          orig = do_chaperone_prop_accessor(who, prop, arg);
+          if (SCHEME_PAIRP(red)) {
+            /* Operation used to chaperone the struct was itself chaperoned.
+               Use the chaperoned operation to get the result to chaperone
+               further. */
+            a[0] = arg;
+            orig = _scheme_apply(SCHEME_CAR(red), 1, a);
+            red = SCHEME_CDR(red);
+          } else {
+            orig = do_chaperone_prop_accessor(who, prop, orig_arg, arg);
+          }
 
           if (!orig) return NULL;
           
-          a[0] = arg;
+          a[0] = orig_arg;
           a[1] = orig;
           v = _scheme_apply(red, 2, a);
     
@@ -1092,7 +1227,21 @@ static Scheme_Object *do_chaperone_prop_accessor(const char *who, Scheme_Object 
         }
       }
     } else {
-      return do_prop_accessor(prop, arg);
+      if (SAME_TYPE(SCHEME_TYPE(prop), scheme_chaperone_property_type)) {
+        Scheme_Object *procs;
+        procs = scheme_struct_type_property_ref(scheme_impersonator_of_property, arg);
+        if (procs) {
+          arg = scheme_apply_impersonator_of(0, procs, arg);
+          if (!arg)
+            return NULL;
+          /* loop to try again */
+        } else {
+          /* an impersonator property lives at the impersonator/chaperone level, only: */
+          return NULL;
+        }
+      } else {
+        return do_prop_accessor(prop, arg);
+      }
     }
   }
 }
@@ -1102,8 +1251,10 @@ static Scheme_Object *prop_accessor(int argc, Scheme_Object **args, Scheme_Objec
   Scheme_Object *v;
 
   v = args[0];
-  if (SCHEME_CHAPERONEP(v))
-    v = do_chaperone_prop_accessor(((Scheme_Primitive_Proc *)prim)->name, SCHEME_PRIM_CLOSURE_ELS(prim)[0], v);
+  if (SCHEME_CHAPERONEP(v)
+      || SAME_TYPE(SCHEME_TYPE(SCHEME_PRIM_CLOSURE_ELS(prim)[0]), scheme_chaperone_property_type))
+    v = do_chaperone_prop_accessor(((Scheme_Primitive_Proc *)prim)->name, SCHEME_PRIM_CLOSURE_ELS(prim)[0],
+                                   v, v);
   else
     v = do_prop_accessor(SCHEME_PRIM_CLOSURE_ELS(prim)[0], v);
 
@@ -1255,7 +1406,7 @@ Scheme_Object *scheme_make_struct_type_property(Scheme_Object *name)
 Scheme_Object *scheme_chaperone_struct_type_property_ref(Scheme_Object *prop, Scheme_Object *s)
 {
   if (SCHEME_CHAPERONEP(s))
-    return do_chaperone_prop_accessor("impersonator-property-ref", prop, s);
+    return do_chaperone_prop_accessor("impersonator-property-ref", prop, s, s);
   else
     return do_prop_accessor(prop, s);
 }
@@ -1479,6 +1630,11 @@ static int evt_struct_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo)
 {
   Scheme_Object *v;
 
+  if (sinfo->false_positive_ok) {
+    sinfo->potentially_false_positive = 1;
+    return 1;
+  }
+
   v = scheme_struct_type_property_ref(evt_property, o);
 
   if (!v) {
@@ -1493,7 +1649,7 @@ static int evt_struct_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo)
   }
 
   if (SCHEME_INTP(v))
-    v = ((Scheme_Structure *)o)->slots[SCHEME_INT_VAL(v)];
+    v = scheme_struct_ref(o, SCHEME_INT_VAL(v));
 
   if (scheme_is_evt(v)) {
     scheme_set_sync_target(sinfo, v, NULL, NULL, 0, 1, NULL);
@@ -1501,11 +1657,6 @@ static int evt_struct_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo)
   }
 
   if (SCHEME_PROCP(v)) {
-    if (sinfo->false_positive_ok) {
-      sinfo->potentially_false_positive = 1;
-      return 1;
-    }
-
     if (scheme_check_proc_arity(NULL, 1, 0, 1, &v)) {
       Scheme_Object *f = v, *result, *a[1];
 
@@ -1544,6 +1695,28 @@ static int is_evt_struct(Scheme_Object *o)
     return 1;
   return 0;
 }
+
+
+/*========================================================================*/
+/*                            object-name structs                         */
+/*========================================================================*/
+/* This is here so it can use check_indirect_property_value_ok */
+
+static int is_proc_1(Scheme_Object *o) { return (SCHEME_PROCP(o) && scheme_check_proc_arity(NULL, 1, -1, 0, &o)); }
+static int is_proc_1_or_2(Scheme_Object *o) { return (SCHEME_PROCP(o) && (scheme_check_proc_arity(NULL, 1, -1, 0, &o)
+                                                                          || scheme_check_proc_arity(NULL, 2, -1, 0, &o))); }
+
+
+
+static Scheme_Object *check_object_name_property_value_ok(int argc, Scheme_Object *argv[])
+/* This is the guard for prop:object-name */
+{
+  return check_indirect_property_value_ok("guard-for-prop:object-name",
+                                          is_proc_1, 1,
+                                          "(or/c (any/c . -> . any) exact-nonnegative-integer?)",
+                                          argc, argv);
+}
+
 
 /*========================================================================*/
 /*                            port structs                                */
@@ -1718,7 +1891,7 @@ int scheme_is_rename_transformer(Scheme_Object *o)
 int scheme_is_binding_rename_transformer(Scheme_Object *o)
 {
   if (scheme_is_rename_transformer(o)) {
-    o = scheme_rename_transformer_id(o);
+    o = scheme_rename_transformer_id(o, NULL);
     o = scheme_stx_property(o, not_free_id_symbol, NULL);
     if (o && SCHEME_TRUEP(o))
       return 0;
@@ -1729,16 +1902,42 @@ int scheme_is_binding_rename_transformer(Scheme_Object *o)
 
 static int is_stx_id(Scheme_Object *o) { return (SCHEME_STXP(o) && SCHEME_SYMBOLP(SCHEME_STX_VAL(o))); }
 
-Scheme_Object *scheme_rename_transformer_id(Scheme_Object *o)
+static int is_stx_id_or_proc_1(Scheme_Object *o) { return (is_stx_id(o) || is_proc_1(o)); }
+
+Scheme_Object *scheme_rename_transformer_id(Scheme_Object *o, Scheme_Comp_Env *comp_env)
 {
+  Scheme_Object *a[1];
+
   if (SAME_TYPE(SCHEME_TYPE(o), scheme_id_macro_type))
     return SCHEME_PTR1_VAL(o);
   if (SCHEME_CHAPERONE_STRUCTP(o)) {
     Scheme_Object *v;
     v = scheme_struct_type_property_ref(rename_transformer_property, o);
-    if (SCHEME_BOXP(v)) v = SCHEME_BOX_VAL(v);
-    if (SCHEME_INTP(v)) {
-      v = ((Scheme_Structure *)o)->slots[SCHEME_INT_VAL(v)];
+    if (SCHEME_PROCP(v)) {
+      a[0] = o;
+      /* apply a continuation barrier here to prevent a capture in
+       * the property access */
+      if (comp_env && (scheme_current_thread->current_local_env != comp_env)) {
+        /* Getting identifier during an expansion context */
+        Scheme_Dynamic_State dyn_state;
+        Scheme_Env *genv = comp_env->genv;
+        scheme_set_dynamic_state(&dyn_state, comp_env, NULL, NULL, scheme_false,
+                                 genv, (genv->module
+                                        ? (genv->link_midx ? genv->link_midx : genv->module->me->src_modidx)
+                                        : NULL));
+        v = scheme_apply_with_dynamic_state(v, 1, a, &dyn_state);
+      } else {
+        v = scheme_apply(v, 1, a);
+      }
+      if (!is_stx_id(v)) {
+        scheme_contract_error("prop:rename-transformer",
+                              "contract violation for given value",
+                              "expected", 0, "identifier?",
+                              "given", 1, v,
+                              NULL);
+      }
+    } else if (SCHEME_INTP(v)) {
+      v = scheme_struct_ref(o, SCHEME_INT_VAL(v));
       if (!is_stx_id(v)) {
         v = scheme_datum_to_syntax(scheme_intern_symbol("?"), scheme_false, scheme_false, 0, 0);
       }
@@ -1751,8 +1950,8 @@ Scheme_Object *scheme_rename_transformer_id(Scheme_Object *o)
 static Scheme_Object *check_rename_transformer_property_value_ok(int argc, Scheme_Object *argv[])
 {
   return check_indirect_property_value_ok("guard-for-prop:rename-transformer", 
-                                          is_stx_id, 0,
-                                          "(or/c exact-nonnegative-integer? (boxof exact-nonnegative-integer?))",
+                                          is_stx_id_or_proc_1, 0,
+                                          "(or/c exact-nonnegative-integer? identifier? (-> any/c identifier?))",
                                           argc, argv);
 }
 
@@ -1765,10 +1964,6 @@ int scheme_is_set_transformer(Scheme_Object *o)
     return 1;
   return 0;
 }
-
-static int is_proc_1(Scheme_Object *o) { return (SCHEME_PROCP(o) && scheme_check_proc_arity(NULL, 1, -1, 0, &o)); } 
-static int is_proc_1_or_2(Scheme_Object *o) { return (SCHEME_PROCP(o) && (scheme_check_proc_arity(NULL, 1, -1, 0, &o)
-                                                                          || scheme_check_proc_arity(NULL, 2, -1, 0, &o))); }
 
 Scheme_Object *signal_bad_syntax(int argc, Scheme_Object **argv)
 {
@@ -1815,6 +2010,51 @@ static Scheme_Object *check_set_transformer_property_value_ok(int argc, Scheme_O
                                           is_proc_1_or_2, 0,
                                           "(or/c  (any/c . -> . any) (any/c any/c . -> . any) exact-nonnegative-integer?)",
                                           argc, argv);
+}
+
+/*========================================================================*/
+/*                        expansion-contexts property                     */
+/*========================================================================*/
+
+static Scheme_Object *check_expansion_contexts_property_value_ok(int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *v;
+  
+  v = argv[0];
+
+  while (SCHEME_PAIRP(v)) {
+    if (!scheme_is_expansion_context_symbol(SCHEME_CAR(v)))
+      break;
+    v = SCHEME_CDR(v);
+  }
+
+  if (SCHEME_NULLP(v))
+    return argv[0];
+
+  wrong_property_contract("guard-for-prop:expression-contexts",
+                          "(lisrof (or/c 'expression 'top-level 'module 'module-begin 'definition-context)",
+                          v);
+
+  return NULL;
+}
+
+int scheme_expansion_contexts_include(Scheme_Object *o, Scheme_Object *ctx)
+{
+  Scheme_Object *v;
+
+  if (SCHEME_CHAPERONE_STRUCTP(o)) {
+    v = scheme_chaperone_struct_type_property_ref(expansion_contexts_property, o);
+    if (v) {
+      while (!SCHEME_NULLP(v)) {
+        if (SAME_OBJ(SCHEME_CAR(v), ctx))
+          return 1;
+        v = SCHEME_CDR(v);
+      }
+      return 0;
+    }
+  }
+  
+  return 1;
 }
 
 /*========================================================================*/
@@ -1940,32 +2180,70 @@ int scheme_is_struct_instance(Scheme_Object *type, Scheme_Object *v)
   return STRUCT_TYPEP(stype, s);
 }
 
-static Scheme_Object *chaperone_struct_ref(const char *who, Scheme_Object *o, int i);
+static Scheme_Object *chaperone_struct_ref(const char *who, Scheme_Object *prim,
+                                           Scheme_Object *orig_o, Scheme_Object *o, int i);
 
 static Scheme_Object *chaperone_struct_ref_k(void)
 {
   Scheme_Thread *p = scheme_current_thread;
   Scheme_Object *o = (Scheme_Object *)p->ku.k.p1;
+  Scheme_Object *prim = (Scheme_Object *)p->ku.k.p3;
   const char *who = (const char *)p->ku.k.p2;
+  Scheme_Object *orig_o = (Scheme_Object *)p->ku.k.p4;
 
   p->ku.k.p1 = NULL;
   p->ku.k.p2 = NULL;
+  p->ku.k.p3 = NULL;
+  p->ku.k.p4 = NULL;
 
-  return chaperone_struct_ref(who, o, p->ku.k.i1);
+  return chaperone_struct_ref(who, prim, orig_o, o, p->ku.k.i1);
 }
 
-static Scheme_Object *chaperone_struct_ref_overflow(const char *who, Scheme_Object *o, int i)
+static Scheme_Object *chaperone_struct_ref_overflow(const char *who, Scheme_Object *prim, 
+                                                    Scheme_Object *orig_o, Scheme_Object *o, int i)
 {
   Scheme_Thread *p = scheme_current_thread;
 
   p->ku.k.p1 = (void *)o;
   p->ku.k.p2 = (void *)who;
+  p->ku.k.p3 = (void *)prim;
+  p->ku.k.p4 = (void *)orig_o;
   p->ku.k.i1 = i;
 
   return scheme_handle_stack_overflow(chaperone_struct_ref_k);
 }
 
-static Scheme_Object *chaperone_struct_ref(const char *who, Scheme_Object *o, int i)
+static void raise_undefined_error(const char *who, Scheme_Object *prim, Scheme_Object *val,
+                                  const char *short_error, const char *mode, int i)
+{
+  int len;
+  Scheme_Object *o;
+
+  o = scheme_struct_type_property_ref(scheme_chaperone_undefined_property, val);
+  len = (o ? scheme_proper_list_length(o) : 0);
+  if (i < len) {
+    for (i = len - i; --i; ) {
+      o = SCHEME_CDR(o);
+    }
+    o = SCHEME_CAR(o);
+    scheme_raise_exn(MZEXN_FAIL_CONTRACT_VARIABLE,
+                     o,
+                     "%S: %s;\n cannot %s field before initialization",
+                     o, short_error, mode);
+  } else {
+    if (prim)
+      who = extract_field_proc_name(prim);
+
+    scheme_raise_exn(MZEXN_FAIL_CONTRACT,
+                     "%s: %s;\n cannot %s field before initialization",
+                     who,
+                     short_error, mode);
+  }
+
+}
+
+static Scheme_Object *chaperone_struct_ref(const char *who, Scheme_Object *prim, 
+                                           Scheme_Object *orig_o, Scheme_Object *o, int i)
 {
   while (1) {
     if (!SCHEME_CHAPERONEP(o)) {
@@ -1974,26 +2252,55 @@ static Scheme_Object *chaperone_struct_ref(const char *who, Scheme_Object *o, in
       Scheme_Chaperone *px = (Scheme_Chaperone *)o;
       Scheme_Object *a[2], *red, *orig;
 
-      if (!SCHEME_VECTORP(px->redirects)
-          || (SCHEME_VEC_SIZE(px->redirects) & 1)
+      if (SCHEME_REDIRECTS_STRUCTP(px->redirects)
+          && SAME_OBJ(SCHEME_VEC_ELS(px->redirects)[1], scheme_undefined)) {
+        /* chaperone on every field: check that result is not undefined */
+        o = px->prev;
+        
+        if (!SCHEME_CHAPERONEP(o))
+          orig = ((Scheme_Structure *)o)->slots[i];
+        else
+          orig = chaperone_struct_ref(who, prim, orig_o, o, i);
+
+        if (SAME_OBJ(orig, scheme_undefined)) {
+          raise_undefined_error(who, prim, px->val, "undefined", "use", i);
+        }
+
+        return orig;
+      } else if (!SCHEME_REDIRECTS_STRUCTP(px->redirects)
           || SCHEME_FALSEP(SCHEME_VEC_ELS(px->redirects)[PRE_REDIRECTS + i])) {
         o = px->prev;
       } else {
 #ifdef DO_STACK_CHECK
         {
 # include "mzstkchk.h"
-          return chaperone_struct_ref_overflow(who, o, i);
+          return chaperone_struct_ref_overflow(who, prim, orig_o, o, i);
         }
 #endif
 
-        orig = chaperone_struct_ref(who, px->prev, i);
-
-        a[0] = px->prev;
-        a[1] = orig;
         red = SCHEME_VEC_ELS(px->redirects)[PRE_REDIRECTS + i];
-        if (SAME_TYPE(SCHEME_TYPE(red), scheme_native_closure_type))
+        if (SCHEME_PAIRP(red)) {
+          /* Operation used to chaperone the struct was itself chaperoned.
+             Use the chaperoned operation to get the result to chaperone
+             further. */
+          a[0] = px->prev;
+          orig = _scheme_apply(SCHEME_CAR(red), 1, a);
+          red = SCHEME_CDR(red);
+        } else
+          orig = chaperone_struct_ref(who, prim, orig_o, px->prev, i);
+
+        a[0] = orig_o;
+        a[1] = orig;
+        if (SAME_TYPE(SCHEME_TYPE(red), scheme_native_closure_type)) {
           o = _scheme_apply_native(red, 2, a);
-        else
+          if (o == SCHEME_MULTIPLE_VALUES) {
+            GC_CAN_IGNORE Scheme_Thread *p = scheme_current_thread;
+            scheme_wrong_return_arity(NULL, 1, p->ku.multiple.count, 
+                                      p->ku.multiple.array,
+                                      NULL);
+            return NULL;
+          }
+        } else
           o = _scheme_apply(red, 2, a);
         
         if (!(SCHEME_CHAPERONE_FLAGS(px) & SCHEME_CHAPERONE_IS_IMPERSONATOR))
@@ -2009,7 +2316,7 @@ static Scheme_Object *chaperone_struct_ref(const char *who, Scheme_Object *o, in
 Scheme_Object *scheme_struct_ref(Scheme_Object *sv, int pos)
 {
   if (SCHEME_CHAPERONEP(sv)) {
-    return chaperone_struct_ref("struct-ref", sv, pos);
+    return chaperone_struct_ref("struct-ref", NULL, sv, sv, pos);
   } else {
     Scheme_Structure *s = (Scheme_Structure *)sv;
     
@@ -2017,8 +2324,54 @@ Scheme_Object *scheme_struct_ref(Scheme_Object *sv, int pos)
   }
 }
 
-static void chaperone_struct_set(const char *who, Scheme_Object *o, int i, Scheme_Object *v)
+static void chaperone_struct_set(const char *who, Scheme_Object *prim,
+                                 Scheme_Object *o, int i, Scheme_Object *v);
+
+static Scheme_Object *chaperone_struct_set_k(void)
 {
+  Scheme_Thread *p = scheme_current_thread;
+  Scheme_Object *o = (Scheme_Object *)p->ku.k.p1;
+  Scheme_Object *prim = (Scheme_Object *)p->ku.k.p3;
+  const char *who = (const char *)p->ku.k.p2;
+  Scheme_Object *v = (Scheme_Object *)p->ku.k.p4;
+
+  p->ku.k.p1 = NULL;
+  p->ku.k.p2 = NULL;
+  p->ku.k.p3 = NULL;
+  p->ku.k.p4 = NULL;
+
+  chaperone_struct_set(who, prim, o, p->ku.k.i1, v);
+
+  return scheme_false;
+}
+
+static void chaperone_struct_set_overflow(const char *who, Scheme_Object *prim, 
+                                          Scheme_Object *o, int i, Scheme_Object *v)
+{
+  Scheme_Thread *p = scheme_current_thread;
+
+  p->ku.k.p1 = (void *)o;
+  p->ku.k.p2 = (void *)who;
+  p->ku.k.p3 = (void *)prim;
+  p->ku.k.p4 = (void *)v;
+  p->ku.k.i1 = i;
+
+  (void)scheme_handle_stack_overflow(chaperone_struct_set_k);
+}
+
+static void chaperone_struct_set(const char *who, Scheme_Object *prim,
+                                 Scheme_Object *o, int i, Scheme_Object *v)
+{
+  Scheme_Object *orig_o = o;
+
+#ifdef DO_STACK_CHECK
+# include "mzstkchk.h"
+  {
+    chaperone_struct_set_overflow(who, prim, o, i, v);
+    return;
+  }
+#endif
+
   while (1) {
     if (!SCHEME_CHAPERONEP(o)) {
       ((Scheme_Structure *)o)->slots[i] = v;
@@ -2029,22 +2382,57 @@ static void chaperone_struct_set(const char *who, Scheme_Object *o, int i, Schem
       int half;
 
       o = px->prev;
-      if (SCHEME_VECTORP(px->redirects)
-          && !(SCHEME_VEC_SIZE(px->redirects) & 1)) {
+      if (SCHEME_REDIRECTS_STRUCTP(px->redirects)
+          && !SAME_OBJ(SCHEME_VEC_ELS(px->redirects)[1], scheme_undefined)) {
         half = (SCHEME_VEC_SIZE(px->redirects) - PRE_REDIRECTS) >> 1;
         red = SCHEME_VEC_ELS(px->redirects)[PRE_REDIRECTS + half + i];
         if (SCHEME_TRUEP(red)) {
-          a[0] = o;
-          a[1] = v;
-          if (SAME_TYPE(SCHEME_TYPE(red), scheme_native_closure_type))
-            v = _scheme_apply_native(red, 2, a);
-          else
-            v = _scheme_apply(red, 2, a);
+          Scheme_Object *finish_setter = NULL;
 
+          a[0] = orig_o;
+          a[1] = v;
+
+          if (SCHEME_PAIRP(red)) {
+            finish_setter = SCHEME_CAR(red);
+            red = SCHEME_CDR(red);
+          }
+
+          if (SAME_TYPE(SCHEME_TYPE(red), scheme_native_closure_type)) {
+            v = _scheme_apply_native(red, 2, a);
+            if (v == SCHEME_MULTIPLE_VALUES) {
+              GC_CAN_IGNORE Scheme_Thread *p = scheme_current_thread;
+              scheme_wrong_return_arity(NULL, 1, p->ku.multiple.count, 
+                                        p->ku.multiple.array,
+                                        NULL);
+            }
+          } else
+            v = _scheme_apply(red, 2, a);
+          
           if (!(SCHEME_CHAPERONE_FLAGS(px) & SCHEME_CHAPERONE_IS_IMPERSONATOR))
             if (!SAME_OBJ(v, a[1]) && !scheme_chaperone_of(v, a[1]))
               scheme_wrong_chaperoned(who, "value", a[1], v);
+
+          if (finish_setter) {
+            /* Operation used to chaperone the struct was itself chaperoned.
+               Use the chaperoned operation to finish the assignment. */
+            a[0] = o;
+            a[1] = v;
+            (void)_scheme_apply_multi(finish_setter, 2, a);
+            return;
+          }
         } 
+      } else if (SCHEME_REDIRECTS_STRUCTP(px->redirects)
+                 && SAME_OBJ(SCHEME_VEC_ELS(px->redirects)[1], scheme_undefined)) {
+        /* chaperone on every field: check that current value is not undefined
+           --- unless check is disabled by a mark (bit it's faster to check
+           for `undefined` before checking the mark) */
+        if (SAME_OBJ(scheme_undefined, ((Scheme_Structure *)px->val)->slots[i])) {
+          Scheme_Object *m;
+          
+          m = scheme_extract_one_cc_mark(NULL, scheme_chaperone_undefined_property);
+          if (!m || !SAME_OBJ(m, scheme_undefined))
+            raise_undefined_error(who, prim, px->val, "assignment disallowed", "assign", i);
+        }
       }
     }
   }
@@ -2053,7 +2441,7 @@ static void chaperone_struct_set(const char *who, Scheme_Object *o, int i, Schem
 void scheme_struct_set(Scheme_Object *sv, int pos, Scheme_Object *v)
 {
   if (SCHEME_CHAPERONEP(sv)) {
-    chaperone_struct_set("struct-set", sv, pos, v);
+    chaperone_struct_set("struct-set!", NULL, sv, pos, v);
   } else {
     Scheme_Structure *s = (Scheme_Structure *)sv;  
     
@@ -2061,7 +2449,42 @@ void scheme_struct_set(Scheme_Object *sv, int pos, Scheme_Object *v)
   }
 }
 
-static Scheme_Object **apply_guards(Scheme_Struct_Type *stype, int argc, Scheme_Object **args)
+int scheme_is_noninterposing_chaperone(Scheme_Object *o)
+/* Checks whether the immediate impersonator layer for `o` is known to
+   interpose on no operations (i.e., it's for impersonator properties,
+   only) */
+{
+  Scheme_Chaperone *px = (Scheme_Chaperone *)o;  
+  int i;
+
+  if (!SCHEME_VECTORP(px->redirects))
+    return 0;
+
+  if (SCHEME_VEC_SIZE(px->redirects) & 1) {
+    /* procedure chaperone */
+    if (SCHEME_FALSEP(SCHEME_VEC_ELS(px->redirects)[1]))
+      return 1;
+    return 0;
+  }
+
+  if (SCHEME_VEC_SIZE(px->redirects) == 0) {
+    /* property-only vector chaperone */
+    return 1;
+  }
+
+  if (SCHEME_TRUEP(SCHEME_VEC_ELS(px->redirects)[0]))
+    return 0;
+
+  for (i = SCHEME_VEC_SIZE(px->redirects); i-- > PRE_REDIRECTS; ) {
+    if (!SCHEME_FALSEP(SCHEME_VEC_ELS(px->redirects)[i]))
+      return 0;
+  }
+
+  return 1;
+}
+
+static Scheme_Object **apply_guards(Scheme_Struct_Type *stype, int argc, Scheme_Object **args,
+                                    int *_chaperone_undefined)
 {
   Scheme_Object **guard_argv = NULL, *v, *prev_guards = NULL, *guard;
   int p, gcount;
@@ -2090,7 +2513,9 @@ static Scheme_Object **apply_guards(Scheme_Struct_Type *stype, int argc, Scheme_
             guard = scheme_false;
         }
 
-        if (!SCHEME_FALSEP(guard)) {
+        if (SAME_OBJ(guard, scheme_undefined))
+          *_chaperone_undefined = 1;
+        else if (!SCHEME_FALSEP(guard)) {
           gcount = stype->parent_types[p]->num_islots;
           guard_argv[argc] = guard_argv[gcount];
           guard_argv[gcount] = stype->name;
@@ -2126,25 +2551,27 @@ static Scheme_Object **apply_guards(Scheme_Struct_Type *stype, int argc, Scheme_
   return args;
 }
 
+#define STRUCT_BYTES(c) (sizeof(Scheme_Structure) + (((c) - mzFLEX_DELTA) * sizeof(Scheme_Object *)))
+
 Scheme_Object *
 scheme_make_struct_instance(Scheme_Object *_stype, int argc, Scheme_Object **args)
 {
   Scheme_Structure *inst;
   Scheme_Struct_Type *stype;
   int p, i, j, nis, ns, c;
+  int chaperone_undefined = 0;
 
   stype = (Scheme_Struct_Type *)_stype;
 
   c = stype->num_slots;
   inst = (Scheme_Structure *)
-    scheme_malloc_tagged(sizeof(Scheme_Structure) 
-			 + ((c - mzFLEX_DELTA) * sizeof(Scheme_Object *)));
+    scheme_malloc_tagged(STRUCT_BYTES(c));
   
   inst->so.type = (stype->proc_attr ? scheme_proc_struct_type : scheme_structure_type);
   inst->stype = stype;
 
   /* Apply guards, if any: */
-  args = apply_guards(stype, argc, args);
+  args = apply_guards(stype, argc, args, &chaperone_undefined);
   
   /* Fill in fields: */
   j = c;
@@ -2171,8 +2598,11 @@ scheme_make_struct_instance(Scheme_Object *_stype, int argc, Scheme_Object **arg
       inst->slots[--j] = args[--i];
     }
   }
-  
-  return (Scheme_Object *)inst;
+
+  if (chaperone_undefined)
+    return scheme_chaperone_not_undefined((Scheme_Object *)inst);
+  else
+    return (Scheme_Object *)inst;
 }
 
 Scheme_Object *scheme_make_blank_prefab_struct_instance(Scheme_Struct_Type *stype)
@@ -2182,8 +2612,7 @@ Scheme_Object *scheme_make_blank_prefab_struct_instance(Scheme_Struct_Type *styp
 
   c = stype->num_slots;
   inst = (Scheme_Structure *)
-    scheme_malloc_tagged(sizeof(Scheme_Structure) 
-			 + ((c - mzFLEX_DELTA) * sizeof(Scheme_Object *)));
+    scheme_malloc_tagged(STRUCT_BYTES(c));
   
   inst->so.type = scheme_structure_type;
   inst->stype = stype;
@@ -2197,7 +2626,7 @@ Scheme_Object *scheme_make_serialized_struct_instance(Scheme_Object *prefab_key,
   Scheme_Serialized_Structure *inst;
 
   inst = (Scheme_Serialized_Structure *)
-    scheme_malloc_tagged(sizeof(Scheme_Serialized_Structure) 
+    scheme_malloc_tagged(sizeof(Scheme_Serialized_Structure)
 			 + ((num_slots - mzFLEX_DELTA) * sizeof(Scheme_Object *)));
   
   inst->so.type = scheme_serialized_structure_type;
@@ -2216,8 +2645,7 @@ Scheme_Object *scheme_make_prefab_struct_instance(Scheme_Struct_Type *stype,
 
   c = stype->num_slots;
   inst = (Scheme_Structure *)
-    scheme_malloc_tagged(sizeof(Scheme_Structure) 
-			 + ((c - mzFLEX_DELTA) * sizeof(Scheme_Object *)));
+    scheme_malloc_tagged(STRUCT_BYTES(c));
   
   inst->so.type = scheme_structure_type;
   inst->stype = stype;
@@ -2242,8 +2670,7 @@ Scheme_Object *scheme_clone_prefab_struct_instance(Scheme_Structure *s)
     chaperone = NULL;
 
   c = s->stype->num_slots;
-  sz = (sizeof(Scheme_Structure) 
-        + ((c - mzFLEX_DELTA) * sizeof(Scheme_Object *)));
+  sz = STRUCT_BYTES(c);
   inst = (Scheme_Structure *)scheme_malloc_tagged(sz);
   memcpy(inst, s, sz);
 
@@ -2273,8 +2700,7 @@ make_simple_struct_instance(int argc, Scheme_Object **args, Scheme_Object *prim)
 
   c = stype->num_slots;
   inst = (Scheme_Structure *)
-    scheme_malloc_tagged(sizeof(Scheme_Structure) 
-			 + ((c - mzFLEX_DELTA) * sizeof(Scheme_Object *)));
+    scheme_malloc_tagged(STRUCT_BYTES(c));
   
   inst->so.type = scheme_structure_type;
   inst->stype = stype;
@@ -2396,7 +2822,7 @@ Scheme_Object *scheme_struct_getter(int argc, Scheme_Object **args, Scheme_Objec
   if (SAME_OBJ((Scheme_Object *)inst, args[0]))
     return inst->slots[pos];
   else
-    return scheme_struct_ref(args[0], pos);
+    return chaperone_struct_ref("struct-ref", prim, args[0], args[0], pos);
 }
 
 Scheme_Object *scheme_struct_setter(int argc, Scheme_Object **args, Scheme_Object *prim)
@@ -2452,7 +2878,7 @@ Scheme_Object *scheme_struct_setter(int argc, Scheme_Object **args, Scheme_Objec
   if (SAME_OBJ((Scheme_Object *)inst, args[0]))
     inst->slots[pos] = v;
   else
-    scheme_struct_set(args[0], pos, v);
+    chaperone_struct_set("struct-set!", prim, args[0], pos, v);
   
   return scheme_void;
 }
@@ -2565,10 +2991,9 @@ static Scheme_Object *struct_info_chaperone(Scheme_Object *o, Scheme_Object *si,
 
   while (SCHEME_CHAPERONEP(o)) {
     px = (Scheme_Chaperone *)o;
-    if (SCHEME_VECTORP(px->redirects)
-        && !(SCHEME_VEC_SIZE(px->redirects) & 1)) {
+    if (SCHEME_REDIRECTS_STRUCTP(px->redirects)) {
       proc = SCHEME_VEC_ELS(px->redirects)[1];
-      if (SCHEME_TRUEP(proc)) {
+      if (SCHEME_TRUEP(proc) && !SAME_OBJ(proc, scheme_undefined)) {
         if (SCHEME_CHAPERONE_FLAGS(px) & SCHEME_CHAPERONE_IS_IMPERSONATOR)
           proc = scheme_box(proc);
         procs = scheme_make_pair(proc, procs);
@@ -2747,6 +3172,7 @@ static Scheme_Object *struct_type_info(int argc, Scheme_Object *argv[])
 static Scheme_Object *struct_type_pred(int argc, Scheme_Object *argv[])
 {
   Scheme_Struct_Type *stype;
+  char *name;
 
   check_type_and_inspector("struct-type-make-predicate", 0, argc, argv);
   if (SCHEME_NP_CHAPERONEP(argv[0]))
@@ -2754,11 +3180,11 @@ static Scheme_Object *struct_type_pred(int argc, Scheme_Object *argv[])
   else
     stype = (Scheme_Struct_Type *)argv[0];
 
-  return make_struct_proc(stype, 
-			  scheme_symbol_val(PRED_NAME(scheme_symbol_val(stype->name),
-						      SCHEME_SYM_LEN(stype->name))),
-			  SCHEME_PRED,
-			  stype->num_slots);
+  name = (char *)PRED_NAME(scheme_symbol_val(stype->name),
+                           SCHEME_SYM_LEN(stype->name),
+                           0);
+
+  return make_struct_proc(stype, name, SCHEME_PRED, stype->num_slots);
 }
 
 static Scheme_Object *type_constr_chaperone(Scheme_Object *o, Scheme_Object *v)
@@ -2793,7 +3219,7 @@ static Scheme_Object *struct_type_constr(int argc, Scheme_Object *argv[])
     stype = (Scheme_Struct_Type *)argv[0];
 
   if ((argc < 2) || SCHEME_FALSEP(argv[1]))
-    v = CSTR_MAKE_NAME(scheme_symbol_val(stype->name), SCHEME_SYM_LEN(stype->name));
+    v = CSTR_MAKE_NAME(scheme_symbol_val(stype->name), SCHEME_SYM_LEN(stype->name), 1);
   else if (SCHEME_SYMBOLP(argv[1]))
     v = argv[1];
   else {
@@ -2855,7 +3281,7 @@ Scheme_Object *scheme_struct_to_vector(Scheme_Object *_s, Scheme_Object *unknown
   i = stype->num_slots;
   last_is_unknown = 0;
  
-  name = TYPE_NAME((char *)SCHEME_STRUCT_NAME_SYM(s), -1);
+  name = TYPE_NAME((char *)SCHEME_STRUCT_NAME_SYM(s), -1, 1);
 
   /* Precise GC >>> BEWARE <<<, array is not GC_aligned,
      and is therefore marked with GC_CAN_IGNORE. */
@@ -2882,8 +3308,12 @@ Scheme_Object *scheme_struct_to_vector(Scheme_Object *_s, Scheme_Object *unknown
         --i;
         if (SAME_OBJ((Scheme_Object *)s, _s))
           elem = s->slots[i];
-        else
+        else {
+          /* scheme_struct_ref() may trigger a GC; see "BEWARE" above */
+          array = NULL;
           elem = scheme_struct_ref(_s, i);
+          array = SCHEME_VEC_ELS(v);
+        }
 	array[1 + (--m)] = elem;
       }
     }
@@ -3146,7 +3576,8 @@ int scheme_decode_struct_shape(Scheme_Object *expected, intptr_t *_v)
   if (!expected || !SCHEME_SYMBOLP(expected))
     return 0;
 
-  if (SCHEME_SYM_VAL(expected)[0] != 's')
+  if ((SCHEME_SYM_VAL(expected)[0] != 's')
+      || (SCHEME_SYM_LEN(expected)  < 6))
     return 0;
   
   for (i = 6, v = 0; SCHEME_SYM_VAL(expected)[i]; i++) {
@@ -3172,8 +3603,9 @@ int scheme_check_structure_shape(Scheme_Object *e, Scheme_Object *expected)
     st = (Scheme_Struct_Type *)e;
     if (st->num_slots != st->num_islots)
       return (v == STRUCT_PROC_SHAPE_OTHER);
-    return (v == ((st->num_slots << STRUCT_PROC_SHAPE_SHIFT) 
-                  | STRUCT_PROC_SHAPE_STRUCT));
+    return (v == ((st->num_slots << STRUCT_PROC_SHAPE_SHIFT)
+                  | STRUCT_PROC_SHAPE_STRUCT
+                  | (st->authentic ? STRUCT_PROC_SHAPE_AUTHENTIC : 0)));
   } else if (!SCHEME_PRIMP(e))
     return 0;
 
@@ -3181,22 +3613,74 @@ int scheme_check_structure_shape(Scheme_Object *e, Scheme_Object *expected)
   if ((i == SCHEME_PRIM_STRUCT_TYPE_CONSTR)
       || (i == SCHEME_PRIM_STRUCT_TYPE_SIMPLE_CONSTR)) {
     st = (Scheme_Struct_Type *)SCHEME_PRIM_CLOSURE_ELS(e)[0];
-    return (v == ((st->num_islots << STRUCT_PROC_SHAPE_SHIFT) 
+    return (v == ((st->num_islots << STRUCT_PROC_SHAPE_SHIFT)
                   | STRUCT_PROC_SHAPE_CONSTR));
   } else if (i == SCHEME_PRIM_STRUCT_TYPE_PRED) {
-    return (v == STRUCT_PROC_SHAPE_PRED);
+    st = (Scheme_Struct_Type *)SCHEME_PRIM_CLOSURE_ELS(e)[0];
+    return (v == (STRUCT_PROC_SHAPE_PRED
+                  | (st->authentic ? STRUCT_PROC_SHAPE_AUTHENTIC : 0)));
   } else if (i == SCHEME_PRIM_STRUCT_TYPE_INDEXED_SETTER) {
     st = (Scheme_Struct_Type *)SCHEME_PRIM_CLOSURE_ELS(e)[0];
-    return (v == ((st->num_slots << STRUCT_PROC_SHAPE_SHIFT) 
-                  | STRUCT_PROC_SHAPE_SETTER));
+    return (v == ((st->num_slots << STRUCT_PROC_SHAPE_SHIFT)
+                  | STRUCT_PROC_SHAPE_SETTER
+                  | (st->authentic ? STRUCT_PROC_SHAPE_AUTHENTIC : 0)));
   } else if (i == SCHEME_PRIM_STRUCT_TYPE_INDEXED_GETTER) {
+    int pos = SCHEME_INT_VAL(SCHEME_PRIM_CLOSURE_ELS(e)[1]);
     st = (Scheme_Struct_Type *)SCHEME_PRIM_CLOSURE_ELS(e)[0];
-    return (v == ((st->num_slots << STRUCT_PROC_SHAPE_SHIFT) 
-                  | STRUCT_PROC_SHAPE_GETTER));
+    return (v == ((pos << STRUCT_PROC_SHAPE_SHIFT) 
+                  | STRUCT_PROC_SHAPE_GETTER
+                  | (st->authentic ? STRUCT_PROC_SHAPE_AUTHENTIC : 0)));
   } else if ((i == SCHEME_PRIM_STRUCT_TYPE_INDEXLESS_SETTER)
              || (i == SCHEME_PRIM_STRUCT_TYPE_BROKEN_INDEXED_SETTER)
              || (i == SCHEME_PRIM_STRUCT_TYPE_INDEXLESS_GETTER))
     return (v == STRUCT_PROC_SHAPE_OTHER);
+
+  return 0;
+}
+
+int scheme_decode_struct_prop_shape(Scheme_Object *expected, intptr_t *_v)
+{
+  intptr_t v;
+  int i;
+
+  if (!expected || !SCHEME_SYMBOLP(expected))
+    return 0;
+
+  if ((SCHEME_SYM_VAL(expected)[0] != 'p')
+      || (SCHEME_SYM_LEN(expected)  < 4))
+    return 0;
+  
+  for (i = 4, v = 0; SCHEME_SYM_VAL(expected)[i]; i++) {
+    v = (v * 10) + (SCHEME_SYM_VAL(expected)[i] - '0');
+  }
+
+  *_v = v;
+  
+  return 1;
+}
+
+int scheme_check_structure_property_shape(Scheme_Object *e, Scheme_Object *expected)
+{
+  intptr_t _v, v;
+  int i;
+
+  if (!scheme_decode_struct_prop_shape(expected, &_v))
+    return 0;
+  v = _v;
+
+  if (SAME_TYPE(SCHEME_TYPE(e), scheme_struct_property_type)) {
+    if (((Scheme_Struct_Property *)e)->guard)
+      return (v == STRUCT_PROP_PROC_SHAPE_GUARDED_PROP);
+    return ((v == STRUCT_PROP_PROC_SHAPE_PROP)
+            || (v == STRUCT_PROP_PROC_SHAPE_GUARDED_PROP));
+  } else if (!SCHEME_PRIMP(e))
+    return 0;
+
+  i = (((Scheme_Primitive_Proc *)e)->pp.flags & SCHEME_PRIM_OTHER_TYPE_MASK);
+  if (i == SCHEME_PRIM_STRUCT_TYPE_STRUCT_PROP_PRED)
+    return (v == STRUCT_PROP_PROC_SHAPE_PRED);
+  else if (i == SCHEME_PRIM_TYPE_STRUCT_PROP_GETTER)
+    return (v == STRUCT_PROP_PROC_SHAPE_GETTER);
 
   return 0;
 }
@@ -3279,18 +3763,18 @@ static Scheme_Object *make_struct_field_mutator(int argc, Scheme_Object *argv[])
 /*                           wraps and nacks                              */
 /*========================================================================*/
 
-static Scheme_Object *wrap_evt(const char *who, int wrap, int argc, Scheme_Object *argv[])
+static Scheme_Object *wrap_evt(const char *who, Scheme_Type ty, int argc, Scheme_Object *argv[])
 {
   Wrapped_Evt *ww;
 
-  if (!scheme_is_evt(argv[0]) || handle_evt_p(0, argv))
-    scheme_wrong_contract(who, "(and/c evt? (not/c handle-evt?))", 0, argc, argv);
+  if (!scheme_is_evt(argv[0]))
+    scheme_wrong_contract(who, "evt?", 0, argc, argv);
 
   if (!SCHEME_PROCP(argv[1]))
     scheme_wrong_contract(who, "procedure?", 1, argc, argv);
 
   ww = MALLOC_ONE_TAGGED(Wrapped_Evt);
-  ww->so.type = (wrap ? scheme_wrap_evt_type : scheme_handle_evt_type);
+  ww->so.type = ty;
   ww->evt = argv[0];
   ww->wrapper = argv[1];
 
@@ -3299,12 +3783,17 @@ static Scheme_Object *wrap_evt(const char *who, int wrap, int argc, Scheme_Objec
 
 Scheme_Object *scheme_wrap_evt(int argc, Scheme_Object *argv[])
 {
-  return wrap_evt("wrap-evt", 1, argc, argv);
+  return wrap_evt("wrap-evt", scheme_wrap_evt_type, argc, argv);
 }
 
 Scheme_Object *handle_evt(int argc, Scheme_Object *argv[])
 {
-  return wrap_evt("handle-evt", 0, argc, argv);
+  return wrap_evt("handle-evt", scheme_handle_evt_type, argc, argv);
+}
+
+Scheme_Object *replace_evt(int argc, Scheme_Object *argv[])
+{
+  return wrap_evt("replace-evt", scheme_replace_evt_type, argc, argv);
 }
 
 Scheme_Object *handle_evt_p(int argc, Scheme_Object *argv[])
@@ -3331,14 +3820,44 @@ Scheme_Object *handle_evt_p(int argc, Scheme_Object *argv[])
 static Scheme_Object *do_chaperone_result_guard_proc(int is_impersonator, void *data, int argc, Scheme_Object *argv[])
 {
   Scheme_Object *proc = (Scheme_Object *)data, *o, *a[1];
+  Scheme_Object **received_vals, **guard_argv;
+  int received_cnt, i;
 
-  a[0] = argv[0];
-  o = _scheme_apply(proc, 1, a);
-  
-  if (!is_impersonator)
-    if (!scheme_chaperone_of(o, a[0]))
-      scheme_wrong_chaperoned("evt result", "value", a[0], o);
-  
+  /* in case calling `proc` mutates argv */
+  guard_argv = MALLOC_N(Scheme_Object *, argc);
+  memcpy(guard_argv, argv, sizeof(Scheme_Object *) * argc);
+
+  o = _scheme_apply_multi(proc, argc, guard_argv);
+
+  if (SAME_OBJ(o, SCHEME_MULTIPLE_VALUES)) {
+    received_cnt = scheme_multiple_count;
+    received_vals = scheme_multiple_array;
+    scheme_detach_multple_array(received_vals);
+  } else {
+      a[0] = o;
+      received_vals = a;
+      received_cnt = 1;
+  }
+
+  if (received_cnt != argc) {
+    scheme_raise_exn(MZEXN_FAIL_CONTRACT_ARITY,
+                     "evt %s: returned wrong number of values\n"
+                     "  %s : %V\n"
+                     "  expected count: %d\n"
+                     "  returned count: %d\n",
+                     is_impersonator ? "impersonator" : "chaperone",
+                     is_impersonator ? "impersonator" : "chaperone",
+                     proc,
+                     argc, received_cnt);
+  }
+
+  if (!is_impersonator) {
+    for (i = 0; i < argc; i++) {
+      if (!scheme_chaperone_of(received_vals[i], argv[i]))
+        scheme_wrong_chaperoned("evt result", "value", argv[i], received_vals[i]);
+    }
+  }
+
   return o;
 }
 
@@ -3406,7 +3925,7 @@ static Scheme_Object *do_chaperone_guard_proc(int is_impersonator, void *data, i
                                        : chaperone_result_guard_proc),
                                       (void *)vals[1], 
                                       "evt-result-chaperone", 
-                                      1, 1);
+                                      1, -1);
   a[1] = o;
 
   return scheme_wrap_evt(1, a);
@@ -3422,7 +3941,7 @@ static Scheme_Object *impersonator_guard_proc(void *data, int argc, Scheme_Objec
   return do_chaperone_guard_proc(1, data, argc, argv);
 }
 
-static Scheme_Object *do_chaperone_evt(const char *name, int is_impersonator, int argc, Scheme_Object *argv[])
+Scheme_Object *scheme_do_chaperone_evt(const char *name, int is_impersonator, int argc, Scheme_Object *argv[])
 {
   Scheme_Chaperone *px;
   Scheme_Object *o, *val, *a[1];
@@ -3468,47 +3987,44 @@ static Scheme_Object *do_chaperone_evt(const char *name, int is_impersonator, in
 
 static Scheme_Object *chaperone_evt(int argc, Scheme_Object *argv[])
 {
-  return do_chaperone_evt("chaperone-evt", 0, argc, argv);
+  return scheme_do_chaperone_evt("chaperone-evt", 0, argc, argv);
 }
 
-static int chaperone_evt_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo)
+static int chaperone_evt_is_ready(Scheme_Object *obj, Scheme_Schedule_Info *sinfo)
 {
+  Scheme_Object *o = obj;
   Scheme_Chaperone *px;
+  int redirected = 0;
+
+  if (sinfo->false_positive_ok) {
+    /* Safer, though maybe unnecessarily conservative: */
+    sinfo->potentially_false_positive = 1;
+    return 1;
+  }
 
   while (SCHEME_CHAPERONEP(o)) {
     px = (Scheme_Chaperone *)o;
     if (SAME_TYPE(SCHEME_TYPE(px->redirects), scheme_nack_guard_evt_type)) {
       o = px->redirects;
+      redirected = 1;
       break;
     }
     o = px->prev;
+  }
+
+  if (!redirected && SCHEME_STRUCTP(o)) {
+    /* No chaperone was an `evt` chaperone. Don't discard
+       other chaperones, because they may be relevant for
+       structure properties. */
+    return evt_struct_is_ready(obj, sinfo);
   }
 
   scheme_set_sync_target(sinfo, o, NULL, NULL, 0, 1, NULL);
   return 0;
 }
 
-static Scheme_Object *is_chaperone_evt_k(void)
-{
-  Scheme_Thread *p = scheme_current_thread;
-  Scheme_Object *o = (Scheme_Object *)p->ku.k.p1;
-  int c;
-
-  p->ku.k.p1 = NULL;
-
-  c = is_chaperone_evt(o);
-
-  return scheme_make_integer(c);
-}
-
 static int is_chaperone_evt(Scheme_Object *o)
 {
-#include "mzstkchk.h"
-  {
-    scheme_current_thread->ku.k.p1 = (void *)o;
-    return SCHEME_INT_VAL(scheme_handle_stack_overflow(is_chaperone_evt_k));
-  }
-
   return scheme_is_evt(SCHEME_CHAPERONE_VAL(o));
 }
 
@@ -3576,7 +4092,7 @@ static int nack_guard_evt_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo
   nack = scheme_alloc_object();
   nack->type = scheme_nack_evt_type;
   SCHEME_PTR1_VAL(nack) = sema;
-  result = scheme_get_thread_dead(scheme_current_thread);
+  result = scheme_get_thread_sync(scheme_current_thread);
   SCHEME_PTR2_VAL(nack) = result;
 
   a[0] = nack;
@@ -3594,7 +4110,7 @@ static int nack_evt_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo)
   Scheme_Object *a[2], *wset;
 
   wset = SCHEME_PTR1_VAL(o);
-  /* Lazily construct a evt set: */
+  /* Lazily construct an evt set: */
   if (SCHEME_SEMAP(wset)) {
     a[0] = wset;
     a[1] = SCHEME_PTR2_VAL(o);
@@ -3628,6 +4144,163 @@ static int poll_evt_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo)
     return 1; /* Non-evt => ready */
 }
 
+static int replace_evt_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo)
+{
+  Active_Replace_Evt *a;
+  Syncing *s;
+  Scheme_Object *argv[1];
+
+  argv[0] = ((Wrapped_Evt *)o)->evt;
+  s = scheme_make_syncing(1, argv);
+
+  a = MALLOC_ONE_TAGGED(Active_Replace_Evt);
+  a->so.type = scheme_active_replace_evt_type;
+  a->done = 0;
+  a->wrapper = ((Wrapped_Evt *)o)->wrapper;
+  a->syncing = s;
+  a->orig = o;
+
+  scheme_set_sync_target(sinfo, (Scheme_Object *)a, NULL, NULL, 0, 1, NULL);
+  return 0;
+}
+
+static int active_replace_evt_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo)
+{
+  Active_Replace_Evt *a = (Active_Replace_Evt *)o;
+  int nested = 0;
+
+  if (!a->syncing)
+    return 0;
+
+  do {
+    if (a->syncing) {
+      /* Can't finish in a scheduler context: */
+      if (a->done && sinfo->false_positive_ok) {
+        sinfo->potentially_false_positive = 1;
+        if (nested)
+          sinfo->replace_chain = NULL;
+        return 1;
+      }
+
+      if (!a->done && sinfo->replace_chain && !nested) {
+        /* In a nested context; trampoline to avoid stack overflow.
+           If the trampolined check succeeds, then the context calling here will
+           not see it; we'll return a potentially-false-positive success,
+           and then check again in a way that bubbles results up. */
+        Scheme_Object *l;
+        l = scheme_make_pair((Scheme_Object *)a, sinfo->replace_chain);
+        sinfo->replace_chain = l;
+        return 0;
+      }
+
+      if (!a->done && !sinfo->replace_chain) {
+        /* In a non-nested scheduler context; We can receive trampolined syncs: */
+        sinfo->replace_chain = scheme_null;
+      }
+
+      if (a->done || scheme_syncing_ready(a->syncing, sinfo, 0)) {
+        sinfo->replace_chain = NULL;
+
+        if (sinfo->potentially_false_positive)
+          return 1;
+
+        a->done = 1;
+        if (sinfo->false_positive_ok) {
+          sinfo->potentially_false_positive = 1;
+          return 1;
+        } else if (nested) {
+          /* We're in a trampilined sync. Now that we've recorded success,
+             wait for the next round, and we won't trampoline then. This
+             waiting causes a quadratic bubbling effect for deeply nested
+             events, so uses of `replace-evt` shouldn't deeply nest! */
+          sinfo->spin = 1;
+          return 0;
+        } else {
+          /* Non-nested, non-scheduler context. */
+          Scheme_Object *v, *argv[1], **args;
+          Syncing *s = a->syncing;
+          int argc;
+
+          a->syncing = NULL;
+
+          v = scheme_syncing_result(s, 0);
+
+          if (SAME_OBJ(v, SCHEME_MULTIPLE_VALUES)) {
+            argc = scheme_multiple_count;
+            args = scheme_multiple_array;
+            scheme_detach_multple_array(args);
+          } else {
+            argv[0] = v;
+            args = argv;
+            argc = 1;
+          }
+
+          v = scheme_apply(a->wrapper, argc, args);
+
+          if (scheme_is_evt(v)) {
+            scheme_set_sync_target(sinfo, v, NULL, NULL, 0, 1, NULL);
+            return 0;
+          } else {
+            /* Non-event => ready */
+            scheme_set_sync_target(sinfo, a->orig, NULL, NULL, 0, 1, NULL);
+            return 1;
+          }
+        }
+      }
+    }
+
+    if (sinfo->replace_chain && !SCHEME_NULLP(sinfo->replace_chain)) {
+      /* Receive a trampoline */
+      a = (Active_Replace_Evt *)SCHEME_CAR(sinfo->replace_chain);
+      sinfo->replace_chain = SCHEME_CDR(sinfo->replace_chain);
+      nested = 1;
+    } else
+      a = NULL;
+  } while (a);
+
+  sinfo->replace_chain = NULL;
+
+  return 0;
+}
+
+static void active_replace_evt_needs_wakeup(Scheme_Object *o, void *fds)
+{
+  Active_Replace_Evt *a = (Active_Replace_Evt *)o;
+
+  if (a->syncing && !a->done)
+    scheme_syncing_needs_wakeup(a->syncing, fds);
+}
+
+Syncing *scheme_replace_evt_needs_wakeup(Scheme_Object *o)
+{
+  Active_Replace_Evt *a = (Active_Replace_Evt *)o;
+
+  if (a->syncing && !a->done)
+    return a->syncing;
+
+  return NULL;
+}
+
+Syncing *scheme_replace_evt_nack(Scheme_Object *o)
+{
+  Active_Replace_Evt *a = (Active_Replace_Evt *)o;
+  Syncing *s = NULL;
+
+  if (a->syncing) {
+    s = a->syncing;
+    a->syncing = NULL;
+  }
+
+  return s;
+}
+
+Syncing *scheme_replace_evt_get(Scheme_Object *o)
+{
+  Active_Replace_Evt *a = (Active_Replace_Evt *)o;
+
+  return a->syncing;
+}
+
 /*========================================================================*/
 /*                          struct op maker                               */
 /*========================================================================*/
@@ -3642,6 +4315,8 @@ Scheme_Object **scheme_make_struct_values(Scheme_Object *type,
 {
   Scheme_Struct_Type *struct_type;
   Scheme_Object **values;
+  Scheme_Object *vi;
+  char *nm;
   int slot_num, pos;
 
   struct_type = (Scheme_Struct_Type *)type;
@@ -3662,18 +4337,22 @@ Scheme_Object **scheme_make_struct_values(Scheme_Object *type,
   if (!(flags & SCHEME_STRUCT_NO_TYPE))
     values[pos++] = (Scheme_Object *)struct_type;
   if (!(flags & SCHEME_STRUCT_NO_CONSTR)) {
-    Scheme_Object *vi;
+    nm = ((flags & SCHEME_STRUCT_NAMES_ARE_STRINGS)
+          ? (char *)names[pos]
+          : scheme_symbol_val(names[pos]));
     vi = make_struct_proc(struct_type,
-			  scheme_symbol_val(names[pos]),
+                          nm,
 			  SCHEME_CONSTR, 
 			  struct_type->num_slots);
     values[pos] = vi;
     pos++;
   }
   if (!(flags & SCHEME_STRUCT_NO_PRED)) {
-    Scheme_Object *vi;
+    nm = ((flags & SCHEME_STRUCT_NAMES_ARE_STRINGS)
+          ? (char *)names[pos]
+          : scheme_symbol_val(names[pos]));
     vi = make_struct_proc(struct_type,
-			  scheme_symbol_val(names[pos]),
+                          nm,
 			  SCHEME_PRED,
 			  0);
     values[pos] = vi;
@@ -3690,9 +4369,11 @@ Scheme_Object **scheme_make_struct_values(Scheme_Object *type,
 	      : 0);
   while (pos < count) {
     if (!(flags & SCHEME_STRUCT_NO_GET)) {
-      Scheme_Object *vi;
+      nm = ((flags & SCHEME_STRUCT_NAMES_ARE_STRINGS)
+            ? (char *)names[pos]
+            : scheme_symbol_val(names[pos]));
       vi = make_struct_proc(struct_type,
-			    scheme_symbol_val(names[pos]),
+                            nm,
 			    SCHEME_GETTER,
 			    slot_num);
       values[pos] = vi;
@@ -3700,9 +4381,11 @@ Scheme_Object **scheme_make_struct_values(Scheme_Object *type,
     }
     
     if (!(flags & SCHEME_STRUCT_NO_SET)) {
-      Scheme_Object *vi;
+      nm = ((flags & SCHEME_STRUCT_NAMES_ARE_STRINGS)
+            ? (char *)names[pos]
+            : scheme_symbol_val(names[pos]));
       vi = make_struct_proc(struct_type,
-			    scheme_symbol_val(names[pos]),
+                            nm,
 			    SCHEME_SETTER,
 			    slot_num);
       values[pos] = vi;
@@ -3713,18 +4396,22 @@ Scheme_Object **scheme_make_struct_values(Scheme_Object *type,
   }
 
   if (flags & SCHEME_STRUCT_GEN_GET) {
-    Scheme_Object *vi;
+    nm = ((flags & SCHEME_STRUCT_NAMES_ARE_STRINGS)
+          ? (char *)names[pos]
+          : scheme_symbol_val(names[pos]));
     vi = make_struct_proc(struct_type,
-			  scheme_symbol_val(names[pos]),
+                          nm,
 			  SCHEME_GEN_GETTER,
 			  slot_num);
     values[pos] = vi;
     pos++;
   }
   if (flags & SCHEME_STRUCT_GEN_SET) {
-    Scheme_Object *vi;
+    nm = ((flags & SCHEME_STRUCT_NAMES_ARE_STRINGS)
+          ? (char *) names[pos]
+          : scheme_symbol_val(names[pos]));
     vi = make_struct_proc(struct_type,
-			  scheme_symbol_val(names[pos]),
+                          nm,
 			  SCHEME_GEN_SETTER,
 			  slot_num);
     values[pos] = vi;
@@ -3743,7 +4430,7 @@ static Scheme_Object **_make_struct_names(const char *base, int blen,
   Scheme_Object **names;
   const char *field_name;
   int count, fnlen;
-  int slot_num, pos;
+  int slot_num, pos, as_sym;
 
   count = 0;
 
@@ -3780,22 +4467,24 @@ static Scheme_Object **_make_struct_names(const char *base, int blen,
 
   pos = 0;
 
+  as_sym = ((flags & SCHEME_STRUCT_NAMES_ARE_STRINGS) ? 0 : 1);
+
   if (!(flags & SCHEME_STRUCT_NO_TYPE)) {
     Scheme_Object *nm;
-    nm = TYPE_NAME(base, blen);
+    nm = TYPE_NAME(base, blen, as_sym);
     names[pos++] = nm;
   }
   if (!(flags & SCHEME_STRUCT_NO_CONSTR)) {
     Scheme_Object *nm;
     if (flags & SCHEME_STRUCT_NO_MAKE_PREFIX)
-      nm = CSTR_NAME(base, blen);
+      nm = CSTR_NAME(base, blen, as_sym);
     else
-      nm = CSTR_MAKE_NAME(base, blen);
+      nm = CSTR_MAKE_NAME(base, blen, as_sym);
     names[pos++] = nm;
   }
   if (!(flags & SCHEME_STRUCT_NO_PRED)) {
     Scheme_Object *nm;
-    nm = PRED_NAME(base, blen);
+    nm = PRED_NAME(base, blen, as_sym);
     names[pos++] = nm;
   }
 
@@ -3814,12 +4503,12 @@ static Scheme_Object **_make_struct_names(const char *base, int blen,
 
       if (!(flags & SCHEME_STRUCT_NO_GET)) {
 	Scheme_Object *nm;
-	nm = GET_NAME(base, blen, field_name, fnlen, 1);
+	nm = GET_NAME(base, blen, field_name, fnlen, as_sym);
 	names[pos++] = nm;
       }
       if (!(flags & SCHEME_STRUCT_NO_SET)) {
 	Scheme_Object *nm;
-	nm = SET_NAME(base, blen, field_name, fnlen, 1);
+	nm = SET_NAME(base, blen, field_name, fnlen, as_sym);
 	names[pos++] = nm;
       }
     }
@@ -3827,18 +4516,18 @@ static Scheme_Object **_make_struct_names(const char *base, int blen,
 
   if (flags & SCHEME_STRUCT_GEN_GET) {
     Scheme_Object *nm;
-    nm = GENGET_NAME(base, blen, 1);
+    nm = GENGET_NAME(base, blen, as_sym);
     names[pos++] = nm;
   }
   if (flags & SCHEME_STRUCT_GEN_SET) {
     Scheme_Object *nm;
-    nm = GENSET_NAME(base, blen, 1);
+    nm = GENSET_NAME(base, blen, as_sym);
     names[pos++] = nm;
   }
 
   if (flags & SCHEME_STRUCT_EXPTIME) {
     Scheme_Object *nm;
-    nm = EXPTIME_NAME(base, blen, 1);
+    nm = EXPTIME_NAME(base, blen, as_sym);
     names[pos++] = nm;
   }
 
@@ -4012,11 +4701,13 @@ static Scheme_Object *make_name(const char *pre, const char *tn, int ltn,
   
   memcpy(name, pre, lp);
   total = lp;
-  memcpy(name + total, (ltn < 0) ? SCHEME_SYM_VAL((Scheme_Object *)tn) : tn, xltn);
+  if (xltn)
+    memcpy(name + total, (ltn < 0) ? SCHEME_SYM_VAL((Scheme_Object *)tn) : tn, xltn);
   total += xltn;
   memcpy(name + total, post1, lp1);
   total += lp1;
-  memcpy(name + total, (lfn < 0) ? SCHEME_SYM_VAL((Scheme_Object *)fn) : fn, xlfn);
+  if (xlfn)
+    memcpy(name + total, (lfn < 0) ? SCHEME_SYM_VAL((Scheme_Object *)fn) : fn, xlfn);
   total += xlfn;
   memcpy(name + total, post2, lp2);
   total += lp2;
@@ -4177,6 +4868,7 @@ Scheme_Struct_Type *scheme_make_prefab_struct_type_raw(Scheme_Object *base,
   struct_type->num_slots = num_fields + num_uninit_fields + (parent_type ? parent_type->num_slots : 0);
   struct_type->num_islots = num_fields + (parent_type ? parent_type->num_islots : 0);
   struct_type->name_pos = depth;
+  struct_type->authentic = 0;
   struct_type->inspector = scheme_false;
   struct_type->uninit_val = uninit_val;
   struct_type->props = NULL;
@@ -4218,7 +4910,7 @@ static Scheme_Object *_make_struct_type(Scheme_Object *base,
 					Scheme_Object *guard)
 {
   Scheme_Struct_Type *struct_type, *parent_type;
-  int j, depth, checked_proc = 0;
+  int j, depth, checked_proc = 0, chaperone_undefined = 0;
   
   if (parent && SCHEME_NP_CHAPERONEP(parent))
     parent_type = (Scheme_Struct_Type *)SCHEME_CHAPERONE_VAL(parent);
@@ -4354,11 +5046,17 @@ static Scheme_Object *_make_struct_type(Scheme_Object *base,
 
       /* Add new props: */
       for (l = props; SCHEME_PAIRP(l); ) {
+        int skip_supers = 0;
+
 	a = SCHEME_CAR(l);
 	prop = SCHEME_CAR(a);
 
         if (SAME_OBJ(prop, scheme_checked_proc_property))
           checked_proc = 1;
+        if (SAME_OBJ(prop, scheme_chaperone_undefined_property))
+          chaperone_undefined = 1;
+        if (SAME_OBJ(prop, scheme_authentic_property))
+          struct_type->authentic = 1;
 
         propv = guard_property(prop, SCHEME_CDR(a), struct_type);
         
@@ -4372,6 +5070,7 @@ static Scheme_Object *_make_struct_type(Scheme_Object *base,
             if (!scheme_hash_get(can_override, prop)) {
               if (!SAME_OBJ(oldv, propv))
                 break;
+              skip_supers = 1;
             }
             /* otherwise we override */
             scheme_hash_set(can_override, prop, NULL);
@@ -4379,7 +5078,8 @@ static Scheme_Object *_make_struct_type(Scheme_Object *base,
         }
         
         l = SCHEME_CDR(l);
-        l = append_super_props((Scheme_Struct_Property *)prop, propv, l);
+        if (!skip_supers)
+          l = append_super_props((Scheme_Struct_Property *)prop, propv, l);
         
         if (SAME_OBJ(prop, proc_property))
           proc_prop_set = propv;
@@ -4401,17 +5101,24 @@ static Scheme_Object *_make_struct_type(Scheme_Object *base,
       }
       
       pa = MALLOC_N(Scheme_Object *, i + num_props);
-      memcpy(pa, struct_type->props, sizeof(Scheme_Object *) * i);
+      if (i)
+        memcpy(pa, struct_type->props, sizeof(Scheme_Object *) * i);
 
       num_props = i;
 
       for (l = props; SCHEME_PAIRP(l); ) {
+        int skip_supers = 0;
+
 	a = SCHEME_CAR(l);
 
 	prop = SCHEME_CAR(a);
 
         if (SAME_OBJ(prop, scheme_checked_proc_property))
           checked_proc = 1;
+        if (SAME_OBJ(prop, scheme_chaperone_undefined_property))
+          chaperone_undefined = 1;
+        if (SAME_OBJ(prop, scheme_authentic_property))
+          struct_type->authentic = 1;
 
         propv = guard_property(prop, SCHEME_CDR(a), struct_type);
 
@@ -4429,7 +5136,8 @@ static Scheme_Object *_make_struct_type(Scheme_Object *base,
             /* already there */
             if (!scheme_hash_get(can_override, prop)) {
               if (!SAME_OBJ(propv, SCHEME_CDR(pa[j])))
-                break; 
+                break;
+              skip_supers = 1;
             }
             /* overriding it: */
             scheme_hash_set(can_override, prop, NULL);
@@ -4438,7 +5146,8 @@ static Scheme_Object *_make_struct_type(Scheme_Object *base,
         }
         
         l = SCHEME_CDR(l);
-        l = append_super_props((Scheme_Struct_Property *)prop, propv, l);
+        if (!skip_supers)
+          l = append_super_props((Scheme_Struct_Property *)prop, propv, l);
         
         if (SAME_OBJ(prop, proc_property))
           proc_prop_set = propv;
@@ -4463,7 +5172,21 @@ static Scheme_Object *_make_struct_type(Scheme_Object *base,
     }
   }
 
-
+  if (parent_type && (parent_type->authentic != struct_type->authentic)) {
+    if (parent_type->authentic)
+      scheme_contract_error("make-struct-type",
+                            "cannot make a non-authentic subtype of an authentic type",
+                            "type name", 1, struct_type->name,
+                            "authentic type", 1, parent,
+                            NULL);
+    else
+      scheme_contract_error("make-struct-type",
+                            "cannot make an authentic subtype of a non-authentic type",
+                            "type name", 1, struct_type->name,
+                            "non-authentic type", 1, parent,
+                            NULL);
+  }
+  
   if (guard) {
     if (!scheme_check_proc_arity(NULL, struct_type->num_islots + 1, -1, 0, &guard)) {
       scheme_contract_error("make-struct-type",
@@ -4475,6 +5198,8 @@ static Scheme_Object *_make_struct_type(Scheme_Object *base,
     }
     
     struct_type->guard = guard;
+  } else if (chaperone_undefined) {
+    struct_type->guard = scheme_undefined;
   }
 
   if (parent && SCHEME_NP_CHAPERONEP(parent)) {
@@ -4532,7 +5257,7 @@ Scheme_Object *scheme_make_struct_type_from_string(const char *base,
 						   Scheme_Object *guard,
 						   int immutable)
 {
-  Scheme_Object *basesym;
+  Scheme_Object *basesym, *r;
   char *immutable_array = NULL;
 
   if (immutable) {
@@ -4542,12 +5267,18 @@ Scheme_Object *scheme_make_struct_type_from_string(const char *base,
 
   basesym = scheme_intern_exact_symbol(base, strlen(base));
 
-  return _make_struct_type(basesym,
-			   parent, scheme_false, 
-			   num_fields, 0, 
-			   NULL, props,
-			   NULL, immutable_array,
-			   guard);
+  r = _make_struct_type(basesym,
+                        parent, scheme_false, 
+                        num_fields, 0, 
+                        NULL, props,
+                        NULL, immutable_array,
+                        guard);
+
+  if (scheme_starting_up)
+    /* Force allocation for a strcuture type that may be in the master GC: */
+    scheme_force_struct_type_info((Scheme_Struct_Type *)r);
+
+  return r;
 }
 
 static Scheme_Struct_Type *lookup_prefab(Scheme_Object *key) {
@@ -4795,12 +5526,16 @@ static Scheme_Object *make_struct_type(int argc, Scheme_Object **argv)
 
     names = scheme_make_struct_names(argv[0],
                                      NULL,
-                                     SCHEME_STRUCT_GEN_GET | SCHEME_STRUCT_GEN_SET, 
+                                     (SCHEME_STRUCT_GEN_GET | SCHEME_STRUCT_GEN_SET
+                                      | SCHEME_STRUCT_NAMES_ARE_STRINGS), 
                                      &i);
-    if (cstr_name)
-      names[1] = cstr_name;
+    if (cstr_name) {
+      a = (Scheme_Object *)scheme_symbol_val(cstr_name);
+      names[1] = a;
+    }
     r = scheme_make_struct_values((Scheme_Object *)type, names, i, 
-                                  SCHEME_STRUCT_GEN_GET | SCHEME_STRUCT_GEN_SET);
+                                  (SCHEME_STRUCT_GEN_GET | SCHEME_STRUCT_GEN_SET
+                                   | SCHEME_STRUCT_NAMES_ARE_STRINGS));
 
     return scheme_values(i, r);
   }
@@ -4872,18 +5607,26 @@ static Scheme_Object *make_prefab_key(Scheme_Struct_Type *type)
   return key;
 }
 
-static char *mutability_data_to_immutability_data(int icnt, Scheme_Object *mutables) {
-  char *immutable_array = NULL;
+static char *mutability_data_to_immutability_data(int icnt, int ucnt, Scheme_Object *mutables, int *_min_cnt)
+/* If `_min_cnt` is not NULL, then mutability positions can determine a minimum
+   argument count that is bigger than `icnt`. */
+{
+  char *immutable_array = NULL, *a2;
 
-  if (icnt > 0) {
-    immutable_array = (char *)scheme_malloc_atomic(icnt);
+  if (_min_cnt)
+    *_min_cnt = icnt + ucnt;
+  
+  if ((icnt > 0) || _min_cnt) {
+    int sz = icnt + ucnt + 1;
+    immutable_array = (char *)scheme_malloc_atomic(icnt + ucnt);
     memset(immutable_array, 1, icnt);
+    memset(immutable_array XFORM_OK_PLUS icnt, 0, ucnt);
 
     if (mutables) {
       int i;
       int len;
       len = SCHEME_VEC_SIZE(mutables);
-      if (len > icnt)
+      if ((len > icnt) && !_min_cnt)
         return NULL;
 
       for (i = 0; i < len; i++) {
@@ -4892,21 +5635,34 @@ static char *mutability_data_to_immutability_data(int icnt, Scheme_Object *mutab
         a = SCHEME_VEC_ELS(mutables)[i];
         if (!SCHEME_INTP(a)
             || (SCHEME_INT_VAL(a) < 0)
-            || (SCHEME_INT_VAL(a) >= icnt))
+            || ((SCHEME_INT_VAL(a) >= icnt)
+                && !_min_cnt))
           return NULL;
         a_val = SCHEME_INT_VAL(a);
+        if (_min_cnt && ((a_val+ucnt) >= *_min_cnt)) {
+          *_min_cnt = a_val+ucnt+1;
+        }
+        if (a_val >= sz) {
+          a2 = (char *)scheme_malloc_atomic(a_val * 2);
+          memset(a2, 1, a_val * 2);
+          memcpy(a2, immutable_array, sz);
+          sz = a_val * 2;
+          immutable_array = a2;
+        }
         immutable_array[a_val] = 0;
       }
     }
   }
+  
   return immutable_array;
 }
 
-Scheme_Struct_Type *scheme_lookup_prefab_type(Scheme_Object *key, int field_count)
+Scheme_Struct_Type *scheme_lookup_prefab_type(Scheme_Object *key, int min_field_count)
 {
   Scheme_Struct_Type *parent = NULL;
   Scheme_Object *a, *uninit_val, *mutables, *name;
-  int ucnt, icnt;
+  intptr_t ucnt, icnt;
+  int inferred_size = 0;
   char *immutable_array = NULL;
 
   if (SCHEME_SYMBOLP(key))
@@ -4915,9 +5671,8 @@ Scheme_Struct_Type *scheme_lookup_prefab_type(Scheme_Object *key, int field_coun
   if (scheme_proper_list_length(key) < 0)
     return NULL;
 
-  if (field_count > MAX_STRUCT_FIELD_COUNT)
-    field_count = MAX_STRUCT_FIELD_COUNT;
-
+  if (min_field_count > MAX_STRUCT_FIELD_COUNT)
+    min_field_count = MAX_STRUCT_FIELD_COUNT;
 
   {
     Scheme_Struct_Type *stype = NULL;
@@ -4964,11 +5719,12 @@ Scheme_Struct_Type *scheme_lookup_prefab_type(Scheme_Object *key, int field_coun
     if (!SCHEME_INTP(a)) {
       if (SCHEME_NULLP(SCHEME_CDR(key))) {
         /* For last one, size can be inferred */
-        icnt = field_count - ucnt - (parent
-                                     ? parent->num_slots
-                                     : 0);
+        icnt = min_field_count - ucnt - (parent
+                                         ? parent->num_slots
+                                         : 0);
         if (icnt < 0)
           icnt = 0;
+        inferred_size = 1;
       } else
         return NULL;
     } else {
@@ -4988,7 +5744,17 @@ Scheme_Struct_Type *scheme_lookup_prefab_type(Scheme_Object *key, int field_coun
       return NULL;
     name = a;
 
-    immutable_array = mutability_data_to_immutability_data(icnt + ucnt, mutables);
+    if (icnt || (mutables && SCHEME_VEC_SIZE(mutables))) {
+      int min_cnt;
+      immutable_array = mutability_data_to_immutability_data(icnt,
+                                                             ucnt,
+                                                             mutables,
+                                                             inferred_size ? &min_cnt : NULL);
+      if (!immutable_array)
+        return NULL;
+      if (inferred_size && (min_cnt > icnt + ucnt))
+        icnt = min_cnt - ucnt;
+    }
 
     if (parent && (icnt + parent->num_slots > MAX_STRUCT_FIELD_COUNT))
       return NULL;
@@ -5028,7 +5794,7 @@ Scheme_Object *scheme_extract_struct_procedure(Scheme_Object *obj, int num_rands
   if (SCHEME_INTP(a)) {
     *is_method = 0;
     if (!SAME_OBJ(plain_obj, obj)) {
-      proc = chaperone_struct_ref("struct-ref", obj, SCHEME_INT_VAL(a));
+      proc = chaperone_struct_ref("struct-ref", NULL, obj, obj, SCHEME_INT_VAL(a));
     } else {
       proc = ((Scheme_Structure *)obj)->slots[SCHEME_INT_VAL(a)];
     }
@@ -5126,7 +5892,11 @@ Scheme_Object *scheme_make_location(Scheme_Object *src,
 
 int scheme_is_location(Scheme_Object *o)
 {
-  return scheme_is_struct_instance(location_struct, o);
+  if (SCHEME_CHAPERONEP(o))
+    o = SCHEME_CHAPERONE_VAL(o);
+
+  return (SCHEME_STRUCTP(o)
+          && scheme_is_struct_instance(location_struct, o));
 }
 
 static Scheme_Object *check_location_fields(int argc, Scheme_Object **argv)
@@ -5298,6 +6068,34 @@ static Scheme_Object *check_exn_source_property_value_ok(int argc, Scheme_Object
 
 /**********************************************************************/
 
+static Scheme_Object *exn_module_path_p(int argc, Scheme_Object **argv)
+{
+  return (scheme_struct_type_property_ref(scheme_module_path_property, argv[0])
+	  ? scheme_true
+	  : scheme_false);
+}
+
+static Scheme_Object *exn_module_path_get(int argc, Scheme_Object **argv)
+{
+  Scheme_Object *v;
+
+  v = scheme_struct_type_property_ref(scheme_module_path_property, argv[0]);
+  if (!v)
+    scheme_wrong_contract("exn:missing-module-accessor", "exn:missing-module?", 0, argc, argv);
+  
+  return v;
+}
+
+static Scheme_Object *check_exn_module_path_property_value_ok(int argc, Scheme_Object *argv[])
+     /* This is the guard for prop:exn:srclocs */
+{
+  scheme_check_proc_arity("guard-for-prop:exn:missing-module", 1, 0, argc, argv);
+
+  return argv[0];
+}
+
+/**********************************************************************/
+
 static Scheme_Object *do_chaperone_struct(const char *name, int is_impersonator, int argc, Scheme_Object **argv)
 /* (chaperone-struct v mutator/selector redirect-proc ...) */
 {
@@ -5308,8 +6106,9 @@ static Scheme_Object *do_chaperone_struct(const char *name, int is_impersonator,
   Scheme_Object *a[1], *inspector, *getter_positions = scheme_null;
   int i, offset, arity, non_applicable_op, repeat_op;
   const char *kind;
-  Scheme_Hash_Tree *props = NULL, *red_props = NULL, *setter_positions = NULL;
+  Scheme_Hash_Tree *props = NULL, *red_props = NULL, *empty_red_props = NULL, *setter_positions = NULL;
   intptr_t field_pos;
+  int empty_si_chaperone = 0, *empty_redirects = NULL, has_redirect = 0, witnessed = 0;
 
   if (argc == 1) return argv[0];
 
@@ -5332,35 +6131,65 @@ static Scheme_Object *do_chaperone_struct(const char *name, int is_impersonator,
   else
     inspector = NULL;
 
-  for (i = 1; i < argc; i++) {
+  i = 1;
+
+  if ((i < argc) && (SCHEME_STRUCT_TYPEP(argv[i])
+                     || (SCHEME_NP_CHAPERONEP(argv[i])
+                         && SCHEME_STRUCT_TYPEP(SCHEME_CHAPERONE_VAL(argv[i]))))) {
+    if (!SCHEME_STRUCTP(val) || !scheme_is_struct_instance((SCHEME_NP_CHAPERONEP(argv[i])
+                                                            ? SCHEME_CHAPERONE_VAL(argv[i])
+                                                            : argv[i]),
+                                                           val)) {
+      scheme_contract_error(name,
+                            "given value is not an instance of the given structure type",
+                            "struct type", 1, argv[i],
+                            "value", 1, argv[0],
+                            NULL);
+      return NULL;
+    }
+    i++;
+    witnessed = 1;
+  }
+
+  for (; i < argc; i++) {
     proc = argv[i];
 
     if ((i > 1) && SAME_TYPE(SCHEME_TYPE(proc), scheme_chaperone_property_type)) {
       props = scheme_parse_chaperone_props(name, i, argc, argv);
       break;
     }
-    
 
     a[0] = proc;
     if (SCHEME_CHAPERONEP(proc)) proc = SCHEME_CHAPERONE_VAL(proc);
     if (SCHEME_TRUEP(struct_setter_p(1, a))) {
       kind = "mutator";
-      offset = stype->num_slots;
+      if (stype)
+        offset = stype->num_slots;
+      else
+        offset = 0;
+      witnessed = 1;
     } else if (SCHEME_TRUEP(struct_getter_p(1, a))) {
       kind = "accessor";
       offset = 0;
+      witnessed = 1;
     } else if (SCHEME_TRUEP(struct_prop_getter_p(1, a))) {
       kind = "struct-type property accessor";
       offset = -1;
+      witnessed = 1;
     } else if (!is_impersonator && SAME_OBJ(proc, struct_info_proc)) {
       kind = "struct-info";
       offset = -2;
     } else {
-      scheme_wrong_contract(name, 
-                            (is_impersonator
-                             ? "(or/c struct-accessor-procedure? struct-mutator-procedure?)"
-                             : ("(or/c struct-accessor-procedure? struct-mutator-procedure?"
-                                " struct-type-property-accessor-procedure? (one-of/c struct-info))")),
+#define CHAP_PROC_CONTRACT_STR(extra)                      \
+      ("(or/c " extra "struct-accessor-procedure?\n"      \
+       "      struct-mutator-procedure?\n"                 \
+       "      struct-type-property-accessor-procedure?\n"  \
+       "      (one-of/c struct-info))")
+      
+      scheme_wrong_contract(name,
+                            ((i == 1)
+                             ? CHAP_PROC_CONTRACT_STR("struct-type?\n      ")
+                             : CHAP_PROC_CONTRACT_STR("")),
                             i, argc, argv);
       return NULL;
     }
@@ -5369,7 +6198,7 @@ static Scheme_Object *do_chaperone_struct(const char *name, int is_impersonator,
     repeat_op = 0;
 
     if (offset == -2) {
-      if (SCHEME_TRUEP(si_chaperone))
+      if (SCHEME_TRUEP(si_chaperone) || empty_si_chaperone)
         scheme_contract_error(name,
                               "struct-info procedure supplied a second time",
                               "procedure", 1, a[0],
@@ -5391,13 +6220,13 @@ static Scheme_Object *do_chaperone_struct(const char *name, int is_impersonator,
                               "operation procedure", 1, a[0],
                               NULL);
 
-      if (!scheme_struct_type_property_ref(prop, argv[0]))
+      if (!scheme_struct_type_property_ref(prop, argv[0])) {
         non_applicable_op = 1;
-      else {
-        if (!red_props)
-          red_props = scheme_make_hash_tree(0);
-        
-        if (scheme_hash_tree_get(red_props, prop))
+        arity = 0;
+      } else {
+        if (red_props && scheme_hash_tree_get(red_props, prop))
+          repeat_op = 1;
+        if (empty_red_props && scheme_hash_tree_get(empty_red_props, prop))
           repeat_op = 1;
 
         arity = 2;
@@ -5411,6 +6240,8 @@ static Scheme_Object *do_chaperone_struct(const char *name, int is_impersonator,
         non_applicable_op = 1;
       else if (SCHEME_TRUEP(SCHEME_VEC_ELS(redirects)[PRE_REDIRECTS + offset + field_pos]))
         repeat_op = 1;
+      else if (empty_redirects && empty_redirects[offset + field_pos])
+        repeat_op = 1;
       else {
         if (is_impersonator) {
           intptr_t loc_field_pos;
@@ -5418,8 +6249,8 @@ static Scheme_Object *do_chaperone_struct(const char *name, int is_impersonator,
                                        ? st->parent_types[st->name_pos - 1]->num_slots 
                                        : 0);
           /* Must not be an immutable field. */
-          if (stype->immutables) {
-            if (stype->immutables[loc_field_pos])
+          if (st->immutables) {
+            if (st->immutables[loc_field_pos])
               scheme_contract_error(name,
                                     "cannot replace operation for an immutable field",
                                     "operation kind", 0, kind,
@@ -5437,7 +6268,7 @@ static Scheme_Object *do_chaperone_struct(const char *name, int is_impersonator,
           } else {
             if (!scheme_inspector_sees_part(argv[0], inspector, field_pos)) {
               if (!setter_positions)
-                setter_positions = scheme_make_hash_tree(0);
+                setter_positions = scheme_make_hash_tree(SCHEME_hashtr_eq);
               setter_positions = scheme_hash_tree_set(setter_positions, scheme_make_integer(field_pos), scheme_true);
             }
           }
@@ -5471,9 +6302,10 @@ static Scheme_Object *do_chaperone_struct(const char *name, int is_impersonator,
                             NULL);
 
     proc = argv[i];
-    if (!scheme_check_proc_arity(NULL, arity, i, argc, argv)) {
-      char buf[32];
-      sprintf(buf, "(procedure-arity-includes/c %d)", arity);
+    if (SCHEME_TRUEP(proc)
+        && !scheme_check_proc_arity(NULL, arity, i, argc, argv)) {
+      char buf[64];
+      sprintf(buf, "(or/c (procedure-arity-includes/c %d) #f)", arity);
       scheme_contract_error(name,
                             "operation's redirection procedure does not match the expected arity",
                             "given", 1, proc,
@@ -5483,12 +6315,49 @@ static Scheme_Object *do_chaperone_struct(const char *name, int is_impersonator,
                             NULL);
     }
 
-    if (prop)
-      red_props = scheme_hash_tree_set(red_props, prop, proc);
-    else if (st)
-      SCHEME_VEC_ELS(redirects)[PRE_REDIRECTS + offset + field_pos] = proc;
-    else
-      si_chaperone = proc;
+    /* If the operation to chaperone was itself a chaperone, we need to
+       preserve and use the chaperoned variant of the operation. */
+    if (SCHEME_CHAPERONEP(a[0]) && SCHEME_TRUEP(proc)) {
+      Scheme_Chaperone *ppx = (Scheme_Chaperone *)a[0];
+      if (!is_impersonator
+          && (SCHEME_CHAPERONE_FLAGS(ppx) & SCHEME_CHAPERONE_IS_IMPERSONATOR)) {
+        scheme_contract_error(name,
+                              "impersonated operation cannot be used to create a chaperone",
+                              "operation", 1, a[0],
+                              NULL);
+      }
+      proc = scheme_make_pair(a[0], proc);
+    }
+
+    if (prop) {
+      if (SCHEME_TRUEP(proc)) {
+        if (!red_props)
+          red_props = scheme_make_hash_tree(SCHEME_hashtr_eq);
+        red_props = scheme_hash_tree_set(red_props, prop, proc);
+        has_redirect = 1;
+      } else {
+        if (!empty_red_props)
+          empty_red_props = scheme_make_hash_tree(SCHEME_hashtr_eq);
+        empty_red_props = scheme_hash_tree_set(empty_red_props, prop, proc);
+      }
+    } else if (st) {
+      if (SCHEME_TRUEP(proc)) {
+        SCHEME_VEC_ELS(redirects)[PRE_REDIRECTS + offset + field_pos] = proc;
+        has_redirect = 1;
+      } else {
+        if (!empty_redirects) {
+          empty_redirects = MALLOC_N_ATOMIC(int, 2 * stype->num_slots);
+          memset(empty_redirects, 0, sizeof(int) * 2 * stype->num_slots);
+        }
+        empty_redirects[offset + field_pos] = 1;
+      }
+    } else {
+      if (SCHEME_TRUEP(proc)) {
+        si_chaperone = proc;
+        has_redirect = 1;
+      } else
+        empty_si_chaperone = 1;
+    }
   }
 
   if (is_impersonator) {
@@ -5508,6 +6377,31 @@ static Scheme_Object *do_chaperone_struct(const char *name, int is_impersonator,
       }
       getter_positions = SCHEME_CDR(getter_positions);
     }
+  }
+
+  if (!has_redirect && !props)
+    return argv[0];
+
+  if (!witnessed) {
+    scheme_contract_error(name,
+                          (is_impersonator
+                           ? "cannot impersonate value as a structure without a witness"
+                           : "cannot chaperone value as a structure without a witness"),
+                          "explanation", 0, ("a structure type, accessor, or mutator acts as a witness\n"
+                                             "   that the given value's representation can be chaperoned or impersonated"),
+                          "given value", 1, argv[0],
+                          NULL);
+    return NULL;
+  }
+
+  if (SCHEME_STRUCTP(val) && ((Scheme_Structure *)val)->stype->authentic) {
+    scheme_contract_error(name,
+                          (is_impersonator
+                           ? "cannot impersonate instance of an authentic structure type"
+                           : "cannot chaperone instance of an authentic structure type"),
+                          "given value", 1, val,
+                          NULL);
+    return NULL;
   }
   
   if (!redirects) {
@@ -5544,6 +6438,40 @@ static Scheme_Object *impersonate_struct(int argc, Scheme_Object **argv)
 {
   return do_chaperone_struct("impersonate-struct", 1, argc, argv);
 }
+
+
+Scheme_Object *scheme_chaperone_not_undefined (Scheme_Object *orig_val)
+{
+  Scheme_Chaperone *px;
+  Scheme_Object *val, *redirects;
+  Scheme_Hash_Tree *props;
+
+  val = orig_val;
+
+  if (SCHEME_CHAPERONEP(val)) {
+    props = ((Scheme_Chaperone *)val)->props;
+    val = SCHEME_CHAPERONE_VAL(val);
+  } else
+    props = NULL;
+
+  redirects = scheme_make_vector(PRE_REDIRECTS, scheme_false);
+
+  SCHEME_VEC_ELS(redirects)[0] = scheme_false;
+  SCHEME_VEC_ELS(redirects)[1] = scheme_undefined; /* special handing in struct_ref */
+
+  px = MALLOC_ONE_TAGGED(Scheme_Chaperone);
+  if (SCHEME_PROCP(val))
+    px->iso.so.type = scheme_proc_chaperone_type;
+  else
+    px->iso.so.type = scheme_chaperone_type;
+  px->val = val;
+  px->prev = orig_val;
+  px->props = props;
+  px->redirects = redirects;
+
+  return (Scheme_Object *)px;
+}
+
 
 static Scheme_Object *do_chaperone_struct_type(const char *name, int is_impersonator, int argc, Scheme_Object **argv)
 {
@@ -5618,7 +6546,7 @@ Scheme_Hash_Tree *scheme_parse_chaperone_props(const char *who, int start_at, in
                             NULL);
 
     if (!ht)
-      ht = scheme_make_hash_tree(0);
+      ht = scheme_make_hash_tree(SCHEME_hashtr_eq);
     ht = scheme_hash_tree_set(ht, v, argv[start_at + 1]);
 
     start_at += 2;
@@ -5650,6 +6578,8 @@ static void register_traversers(void)
   GC_REG_TRAV(scheme_handle_evt_type, mark_wrapped_evt);
   GC_REG_TRAV(scheme_nack_guard_evt_type, mark_nack_guard_evt);
   GC_REG_TRAV(scheme_poll_evt_type, mark_nack_guard_evt);
+  GC_REG_TRAV(scheme_replace_evt_type, mark_wrapped_evt);
+  GC_REG_TRAV(scheme_active_replace_evt_type, mark_active_replace_evt);
 
   GC_REG_TRAV(scheme_chaperone_type, mark_chaperone);
   GC_REG_TRAV(scheme_proc_chaperone_type, mark_chaperone);

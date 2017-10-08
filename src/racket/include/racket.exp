@@ -73,7 +73,11 @@ scheme_remove_managed
 scheme_close_managed
 scheme_schedule_custodian_close
 scheme_add_custodian_extractor
+scheme_flush_managed
+scheme_add_flush
+scheme_remove_flush
 scheme_add_atexit_closer
+scheme_atexit
 scheme_add_evt
 scheme_add_evt_through_sema
 scheme_is_evt
@@ -90,9 +94,6 @@ scheme_pop_kill_action
 scheme_set_can_break
 scheme_push_break_enable
 scheme_pop_break_enable
-scheme_with_stack_freeze
-scheme_frozen_run_some
-scheme_is_in_frozen_stack
 scheme_abort_continuation_no_dws
 scheme_call_with_composable_no_dws
 scheme_set_on_atomic_timeout
@@ -105,9 +106,11 @@ scheme_log
 scheme_log_w_data
 scheme_log_message
 scheme_log_name_message
+scheme_log_name_pfx_message
 scheme_log_abort
 scheme_log_warning
 scheme_glib_log_message
+scheme_glib_log_message_test
 scheme_out_of_memory_abort
 scheme_wrong_count
 scheme_wrong_count_m
@@ -234,7 +237,9 @@ scheme_remove_all_finalization
 scheme_dont_gc_ptr
 scheme_gc_ptr_ok
 scheme_collect_garbage
+scheme_collect_garbage_minor
 scheme_enable_garbage_collection
+scheme_incremental_garbage_collection
 GC_register_traversers
 GC_resolve
 GC_mark
@@ -244,6 +249,7 @@ scheme_malloc_immobile_box
 scheme_free_immobile_box
 scheme_add_gc_callback
 scheme_remove_gc_callback
+scheme_register_type_gc_shape
 scheme_make_bucket_table
 scheme_add_to_table
 scheme_change_in_table
@@ -251,6 +257,9 @@ scheme_lookup_in_table
 scheme_bucket_from_table
 scheme_bucket_table_equal
 scheme_clone_bucket_table
+scheme_clear_bucket_table
+scheme_bucket_table_index
+scheme_bucket_table_next
 scheme_make_hash_table
 scheme_make_hash_table_equal
 scheme_make_hash_table_eqv
@@ -263,6 +272,9 @@ scheme_hash_table_equal
 scheme_is_hash_table_equal
 scheme_is_hash_table_eqv
 scheme_clone_hash_table
+scheme_clear_hash_table
+scheme_hash_table_index
+scheme_hash_table_next
 scheme_make_hash_tree
 scheme_hash_tree_set
 scheme_hash_tree_get
@@ -349,6 +361,7 @@ scheme_make_offset_external_cptr
 scheme_is_cpointer
 scheme_get_proc_name
 scheme_utf8_decode
+scheme_utf8_decode_offset_prefix
 scheme_utf8_decode_as_prefix
 scheme_utf8_decode_all
 scheme_utf8_decode_prefix
@@ -363,6 +376,7 @@ scheme_ucs4_to_utf16
 scheme_utf16_to_ucs4
 scheme_open_converter
 scheme_close_converter
+scheme_getenv
 scheme_make_bignum
 scheme_make_bignum_from_unsigned
 scheme_make_bignum_from_long_long
@@ -544,6 +558,7 @@ scheme_install_macro
 scheme_save_initial_module_set
 scheme_primitive_module
 scheme_finish_primitive_module
+scheme_set_primitive_module_phaseless
 scheme_protect_primitive_provide
 scheme_make_modidx
 scheme_apply_for_syntax_in_env
@@ -623,6 +638,7 @@ scheme_get_seconds
 scheme_get_milliseconds
 scheme_get_inexact_milliseconds
 scheme_get_process_milliseconds
+scheme_get_process_children_milliseconds
 scheme_get_thread_milliseconds
 scheme_banner
 scheme_version
@@ -643,3 +659,5 @@ scheme_get_place_table
 scheme_register_process_global
 scheme_malloc_key
 scheme_free_key
+scheme_jit_find_code_end
+scheme_jit_now

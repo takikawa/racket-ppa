@@ -16,7 +16,6 @@
          racket/syntax
          racket/stxparam
          syntax/stx
-         unstable/struct
          syntax/parse/private/residual ;; keep abs. path
          syntax/parse/private/runtime  ;; keep abs.path 
          syntax/parse/private/runtime-reflect) ;; keep abs. path
@@ -35,6 +34,18 @@
          (for-syntax rhs->parser))
 
 (begin-for-syntax
+ ;; constant-desc : Syntax -> String/#f
+ (define (constant-desc stx)
+   (syntax-case stx (quote)
+     [(quote datum)
+      (let ([d (syntax-e #'datum)])
+        (and (string? d) d))]
+     [expr
+      (let ([d (syntax-e #'expr)])
+        (and (string? d)
+             (free-identifier=? #'#%datum (datum->syntax #'expr '#%datum))
+             d))]))
+
  (define (tx:define-*-syntax-class stx splicing?)
    (syntax-case stx ()
      [(_ header . rhss)
@@ -45,16 +56,19 @@
           (let ([the-rhs (parse-rhs #'rhss #f splicing? #:context stx)])
             (with-syntax ([name name]
                           [formals formals]
+                          [desc (cond [(rhs-description the-rhs) => constant-desc]
+                                      [else (symbol->string (syntax-e name))])]
                           [parser (generate-temporary (format-symbol "parse-~a" name))]
                           [arity arity]
                           [attrs (rhs-attrs the-rhs)]
-                          [options (rhs-options the-rhs)])
+                          [commit? (rhs-commit? the-rhs)]
+                          [delimit-cut? (rhs-delimit-cut? the-rhs)])
               #`(begin (define-syntax name
                          (stxclass 'name 'arity
                                    'attrs
                                    (quote-syntax parser)
                                    '#,splicing?
-                                   options
+                                   (scopts (length 'attrs) 'commit? 'delimit-cut? desc)
                                    #f))
                        (define-values (parser)
                          (parser/rhs name formals attrs rhss #,splicing? #,stx)))))))])))
@@ -73,13 +87,13 @@
                   (stxclass 'name no-arity '()
                             (quote-syntax parser)
                             #f
-                            '#s(options #t #t)
-                            (integrate (quote-syntax predicate) 'description)))
+                            (scopts 0 #t #t 'description)
+                            (quote-syntax predicate)))
                 (define (parser x cx pr es fh0 cp0 rl success)
                   (if (predicate x)
                       (success fh0)
                       (let ([es (es-add-thing pr 'description #t rl es)])
-                        (fh0 (failure pr es)))))))]))
+                        (fh0 (failure* pr es)))))))]))
 
 (define-syntax (parser/rhs stx)
   (syntax-case stx ()
@@ -90,23 +104,27 @@
           (parameterize ((current-syntax-context #'ctx))
             (parse-rhs #'rhss (syntax->datum #'relsattrs) (syntax-e #'splicing?)
                        #:context #'ctx)))
-        (rhs->parser #'name #'formals #'relsattrs the-rhs (syntax-e #'splicing?))))]))
+        (rhs->parser #'name #'formals #'relsattrs the-rhs (syntax-e #'splicing?) #'ctx)))]))
 
 (begin-for-syntax
- (define (rhs->parser name formals relsattrs the-rhs splicing?)
+ (define (rhs->parser name formals relsattrs the-rhs splicing? [ctx #f])
    (define-values (transparent? description variants defs commit? delimit-cut?)
      (match the-rhs
-       [(rhs _ _ transparent? description variants defs (options commit? delimit-cut?) _)
+       [(rhs _ transparent? description variants defs commit? delimit-cut?)
         (values transparent? description variants defs commit? delimit-cut?)]))
    (define vdefss (map variant-definitions variants))
    (define formals* (rewrite-formals formals #'x #'rl))
+   (define patterns (map variant-pattern variants))
+   (define no-fail?
+     (and (not splicing?) ;; FIXME: commit? needed?
+          (patterns-cannot-fail? patterns)))
+   (when no-fail? (log-syntax-parse-debug "(stxclass) cannot fail: ~e" ctx))
    (define body
-     (cond [(null? variants)
-            #'(fail (failure pr es))]
+     (cond [(null? patterns)
+            #'(fail (failure* pr es))]
            [splicing?
             (with-syntax ([(alternative ...)
-                           (for/list ([variant (in-list variants)])
-                             (define pattern (variant-pattern variant))
+                           (for/list ([pattern (in-list patterns)])
                              (with-syntax ([pattern pattern]
                                            [relsattrs relsattrs]
                                            [iattrs (pattern-attrs pattern)]
@@ -122,8 +140,7 @@
            [else
             (with-syntax ([matrix
                            (optimize-matrix
-                            (for/list ([variant (in-list variants)])
-                              (define pattern (variant-pattern variant))
+                            (for/list ([pattern (in-list patterns)])
                               (with-syntax ([iattrs (pattern-attrs pattern)]
                                             [relsattrs relsattrs]
                                             [commit? commit?])
@@ -147,7 +164,8 @@
                 (syntax-parameterize ((this-context-syntax
                                        (syntax-rules ()
                                          [(tbs) (ps-context-syntax pr)])))
-                  (let ([es (es-add-thing pr description 'transparent? rl es)]
+                  (let ([es (es-add-thing pr description 'transparent? rl
+                                          #,(if no-fail? #'#f #'es))]
                         [pr (if 'transparent? pr (ps-add-opaque pr))])
                     (with ([fail-handler fh0]
                            [cut-prompt cp0])
@@ -161,7 +179,8 @@
     [(syntax-parse stx-expr . clauses)
      (quasisyntax/loc stx
        (let ([x (datum->syntax #f stx-expr)])
-         (parse:clauses x clauses body-sequence #,((make-syntax-introducer) stx))))]))
+         (with ([this-syntax x])
+           (parse:clauses x clauses body-sequence #,((make-syntax-introducer) stx)))))]))
 
 (define-syntax (syntax-parser stx)
   (syntax-case stx ()
@@ -169,7 +188,8 @@
      (quasisyntax/loc stx
        (lambda (x)
          (let ([x (datum->syntax #f x)])
-           (parse:clauses x clauses body-sequence #,((make-syntax-introducer) stx)))))]))
+           (with ([this-syntax x])
+             (parse:clauses x clauses body-sequence #,((make-syntax-introducer) stx))))))]))
 
 (define-syntax (syntax-parser/template stx)
   (syntax-case stx ()
@@ -177,40 +197,42 @@
      (quasisyntax/loc stx
        (lambda (x)
          (let ([x (datum->syntax #f x)])
-           (parse:clauses x clauses one-template ctx))))]))
+           (with ([this-syntax x])
+             (parse:clauses x clauses one-template ctx)))))]))
 
 (define-syntax (define/syntax-parse stx)
   (syntax-case stx ()
     [(define/syntax-parse pattern . rest)
-     (let-values ([(rest pattern defs)
-                   (parse-pattern+sides #'pattern
-                                        #'rest
-                                        #:splicing? #f
-                                        #:decls (new-declenv null)
-                                        #:context stx)])
-       (let ([expr
-              (syntax-case rest ()
-                [( expr ) #'expr]
-                [_ (raise-syntax-error #f "bad syntax" stx)])]
-             [attrs (pattern-attrs pattern)])
-         (with-syntax ([(a ...) attrs]
-                       [(#s(attr name _ _) ...) attrs]
-                       [pattern pattern]
-                       [(def ...) defs]
-                       [expr expr])
-           #'(defattrs/unpack (a ...)
-               (let* ([x (datum->syntax #f expr)]
-                      [cx x]
-                      [pr (ps-empty x x)]
-                      [es #f]
-                      [fh0 (syntax-patterns-fail x)])
-                 (parameterize ((current-syntax-context x))
-                   def ...
-                   (#%expression
-                    (with ([fail-handler fh0]
-                           [cut-prompt fh0])
-                          (parse:S x cx pattern pr es
-                                   (list (attribute name) ...))))))))))]))
+     (with-disappeared-uses
+      (let-values ([(rest pattern defs)
+                    (parse-pattern+sides #'pattern
+                                         #'rest
+                                         #:splicing? #f
+                                         #:decls (new-declenv null)
+                                         #:context stx)])
+        (let ([expr
+               (syntax-case rest ()
+                 [( expr ) #'expr]
+                 [_ (raise-syntax-error #f "bad syntax" stx)])]
+              [attrs (pattern-attrs pattern)])
+          (with-syntax ([(a ...) attrs]
+                        [(#s(attr name _ _) ...) attrs]
+                        [pattern pattern]
+                        [(def ...) defs]
+                        [expr expr])
+            #'(defattrs/unpack (a ...)
+                (let* ([x (datum->syntax #f expr)]
+                       [cx x]
+                       [pr (ps-empty x x)]
+                       [es #f]
+                       [fh0 (syntax-patterns-fail x)])
+                  (parameterize ((current-syntax-context x))
+                    def ...
+                    (#%expression
+                     (with ([fail-handler fh0]
+                            [cut-prompt fh0])
+                           (parse:S x cx pattern pr es
+                                    (list (attribute name) ...)))))))))))]))
 
 ;; ============================================================
 
@@ -252,6 +274,7 @@ Some optimizations:
   - commit protocol for stxclasses (but not ~commit, no point)
   - avoid continue-vs-end choice point in (EH ... . ()) by eager pair check
   - integrable stxclasses, specialize ellipses of integrable stxclasses
+  - pattern lists that cannot fail set es=#f to disable ExpectStack allocation
 |#
 
 ;; ----
@@ -358,6 +381,10 @@ Conventions:
      (with-disappeared-uses
       (with-txlifts
        (lambda ()
+        (define who
+          (syntax-case #'ctx ()
+            [(m . _) (identifier? #'m) #'m]
+            [_ 'syntax-parse]))
         (define-values (chunks clauses-stx)
           (parse-keyword-options #'clauses parse-directive-table
                                  #:context #'ctx
@@ -392,20 +419,23 @@ Conventions:
                                                   #'ctx clause)]))
                         (else
                          (raise-syntax-error #f "internal error: unknown body mode" #'ctx #'body-mode)))])
-                 (values pattern body-expr defs2)))]))
+                 (values pattern body-expr defs2)))]
+            [_ (raise-syntax-error #f "expected clause" #'ctx clause)]))
         (unless (stx-list? clauses-stx)
           (raise-syntax-error #f "expected sequence of clauses" #'ctx))
         (define-values (patterns body-exprs defs2s)
           (for/lists (patterns body-exprs defs2s) ([clause (in-list (stx->list clauses-stx))])
             (for-clause clause)))
+        (define no-fail? (patterns-cannot-fail? patterns))
+        (when no-fail? (log-syntax-parse-debug "cannot fail: ~e" #'ctx))
         (with-syntax ([(def ...) (apply append (get-txlifts-as-definitions) defs defs2s)])
-          #`(let* ([ctx0 #,context]
-                   [pr (ps-empty x ctx0)]
-                   [es #f]
+          #`(let* ([ctx0 (normalize-context '#,who #,context x)]
+                   [pr (ps-empty x (cadr ctx0))]
+                   [es #,(if no-fail? #'#f #'#t)]
                    [cx x]
                    [fh0 (syntax-patterns-fail ctx0)])
               def ...
-              (parameterize ((current-syntax-context ctx0))
+              (parameterize ((current-syntax-context (cadr ctx0)))
                 (with ([fail-handler fh0]
                        [cut-prompt fh0])
                   #,(cond [(pair? patterns)
@@ -423,7 +453,7 @@ Conventions:
                              #`(try alternative ...))
                            |#]
                           [else
-                           #`(fail (failure pr es))]))))))))]))
+                           #`(fail (failure* pr es))]))))))))]))
 
 ;; ----
 
@@ -460,9 +490,19 @@ Conventions:
                    [tx (cdr datum)]
                    [tpr (ps-add-cdr pr)])
                (parse:matrix ((hx hcx hpr es) (tx tcx tpr es) . ins) inner))
-             (fail (failure pr es))))]
+             (let ([es* (if (null? datum) (es-add-proper-pair (first-desc:matrix inner) es) es)])
+               (fail (failure* pr es*)))))]
     [(parse:pk (in1 . ins) #s(pk/and inner))
      #'(parse:matrix (in1 in1 . ins) inner)]))
+
+(define-syntax (first-desc:matrix stx)
+  (syntax-case stx ()
+    [(fdm (#s(pk1 (pat1 . pats) k)))
+     #'(first-desc:S pat1)]
+    [(fdm (#s(pk/same pat1 pks)))
+     #'(first-desc:S pat1)]
+    [(fdm (pk ...)) ;; FIXME
+     #'#f]))
 
 ;; ----
 
@@ -477,12 +517,13 @@ Conventions:
                 [rest-cx cx]
                 [rest-pr pr])
             k)]
-       [#s(pat:any _attrs)
+       [#s(pat:any)
         #'k]
-       [#s(pat:var _attrs name #f _ () _ _ _)
+       [#s(pat:svar name)
         #'(let-attributes ([#s(attr name 0 #t) (datum->syntax cx x cx)])
             k)]
-       [#s(pat:var _attrs name parser argu (nested-a ...) attr-count commit? role)
+       [#s(pat:var/p name parser argu (nested-a ...) role
+                     #s(scopts attr-count commit? _delimit? _desc))
         (with-syntax ([(av ...) (generate-n-temporaries (syntax-e #'attr-count))]
                       [(name-attr ...)
                        (if (identifier? #'name)
@@ -510,7 +551,7 @@ Conventions:
                       (let-attributes (name-attr ...)
                         (let-attributes* ((nested-a ...) (av ...))
                           k))))))]
-       [#s(pat:reflect _attrs obj argu attr-decls name (nested-a ...))
+       [#s(pat:reflect obj argu attr-decls name (nested-a ...))
         (with-syntax ([(name-attr ...)
                        (if (identifier? #'name)
                            #'([#s(attr name 0 #t) (datum->syntax cx x cx)])
@@ -524,27 +565,31 @@ Conventions:
                                 (with ([fail-handler fh])
                                   k))))
                           argu))))]
-       [#s(pat:datum attrs datum)
-        #`(let ([d (if (syntax? x) (syntax-e x) x)])
-            (if (equal? d (quote datum))
-                k
-                (fail (failure pr (es-add-atom 'datum es)))))]
-       [#s(pat:literal attrs literal input-phase lit-phase)
+       [#s(pat:datum datum)
+        (with-syntax ([unwrap-x
+                       (if (atomic-datum-stx? #'datum)
+                           #'(if (syntax? x) (syntax-e x) x)
+                           #'(syntax->datum (datum->syntax #f x)))])
+          #`(let ([d unwrap-x])
+              (if (equal? d (quote datum))
+                  k
+                  (fail (failure* pr (es-add-atom 'datum es))))))]
+       [#s(pat:literal literal input-phase lit-phase)
         #`(if (and (identifier? x)
                    (free-identifier=? x (quote-syntax literal) input-phase lit-phase))
               k
-              (fail (failure pr (es-add-literal (quote-syntax literal) es))))]
-       [#s(pat:action attrs action subpattern)
+              (fail (failure* pr (es-add-literal (quote-syntax literal) es))))]
+       [#s(pat:action action subpattern)
         #'(parse:A x cx action pr es (parse:S x cx subpattern pr es k))]
-       [#s(pat:head attrs head tail)
+       [#s(pat:head head tail)
         #`(parse:H x cx rest-x rest-cx rest-pr head pr es
                    (parse:S rest-x rest-cx tail rest-pr es k))]
-       [#s(pat:dots attrs head tail)
+       [#s(pat:dots head tail)
         #`(parse:dots x cx head tail pr es k)]
-       [#s(pat:and attrs subpatterns)
+       [#s(pat:and subpatterns)
         (for/fold ([k #'k]) ([subpattern (in-list (reverse (syntax->list #'subpatterns)))])
           #`(parse:S x cx #,subpattern pr es #,k))]
-       [#s(pat:or (a ...) (subpattern ...))
+       [#s(pat:or (a ...) (subpattern ...) (subattrs ...))
         (with-syntax ([(#s(attr id _ _) ...) #'(a ...)])
           #`(let ([success
                    (lambda (fh id ...)
@@ -552,9 +597,9 @@ Conventions:
                        (with ([fail-handler fh])
                          k)))])
               (try (parse:S x cx subpattern pr es
-                            (disjunct subpattern success () (id ...)))
+                            (disjunct subattrs success () (id ...)))
                    ...)))]
-       [#s(pat:not () subpattern)
+       [#s(pat:not subpattern)
         #`(let* ([fh0 fail-handler]
                  [pr0 pr]
                  [es0 es]
@@ -566,12 +611,10 @@ Conventions:
             (with ([fail-handler fail-to-succeed]
                    [cut-prompt fail-to-succeed]) ;; to be safe
               (parse:S x cx subpattern pr es
-                       (fh0 (failure pr0 es0)))))]
-       [#s(pat:pair _attrs head tail)
-        #`(let-values ([(datum cx)
-                        (if (syntax? x)
-                            (values (syntax-e x) x)
-                            (values x cx))])
+                       (fh0 (failure* pr0 es0)))))]
+       [#s(pat:pair head tail)
+        #`(let ([datum (if (syntax? x) (syntax-e x) x)]
+                [cx (if (syntax? x) x cx)])  ;; FIXME: shadowing cx?!
             (if (pair? datum)
                 (let ([hx (car datum)]
                       [hcx (car datum)]
@@ -580,52 +623,56 @@ Conventions:
                       [tpr (ps-add-cdr pr)])
                   (parse:S hx hcx head hpr es
                            (parse:S tx cx tail tpr es k)))
-                (fail (failure pr es))))]
-       [#s(pat:vector _attrs subpattern)
+                (let ([es* (if (null? datum) (es-add-proper-pair (first-desc:S head) es) es)])
+                  (fail (failure* pr es*)))))]
+       [#s(pat:vector subpattern)
         #`(let ([datum (if (syntax? x) (syntax-e x) x)])
             (if (vector? datum)
                 (let ([datum (vector->list datum)]
                       [vcx (if (syntax? x) x cx)] ;; FIXME: (vector? datum) => (syntax? x) ???
                       [pr* (ps-add-unvector pr)])
                   (parse:S datum vcx subpattern pr* es k))
-                (fail (failure pr es))))]
-       [#s(pat:box _attrs subpattern)
+                (fail (failure* pr es))))]
+       [#s(pat:box subpattern)
         #`(let ([datum (if (syntax? x) (syntax-e x) x)])
             (if (box? datum)
                 (let ([datum (unbox datum)]
                       [bcx (if (syntax? x) x cx)] ;; FIXME: (box? datum) => (syntax? x) ???
                       [pr* (ps-add-unbox pr)])
                   (parse:S datum bcx subpattern pr* es k))
-                (fail (failure pr es))))]
-       [#s(pat:pstruct _attrs key subpattern)
+                (fail (failure* pr es))))]
+       [#s(pat:pstruct key subpattern)
         #`(let ([datum (if (syntax? x) (syntax-e x) x)])
             (if (let ([xkey (prefab-struct-key datum)])
                   (and xkey (equal? xkey 'key)))
-                (let ([datum (struct->list datum)]
+                (let ([datum (cdr (vector->list (struct->vector datum)))]
                       [scx (if (syntax? x) x cx)] ;; FIXME: (struct? datum) => (syntax? x) ???
                       [pr* (ps-add-unpstruct pr)])
                   (parse:S datum scx subpattern pr* es k))
-                (fail (failure pr es))))]
-       [#s(pat:describe attrs pattern description transparent? role)
+                (fail (failure* pr es))))]
+       [#s(pat:describe pattern description transparent? role)
         #`(let ([es* (es-add-thing pr description transparent? role es)]
                 [pr* (if 'transparent? pr (ps-add-opaque pr))])
             (parse:S x cx pattern pr* es* k))]
-       [#s(pat:delimit attrs pattern)
+       [#s(pat:delimit pattern)
         #`(let ([cp0 cut-prompt])
             (with ([cut-prompt fail-handler])
               (parse:S x cx pattern pr es (with ([cut-prompt cp0]) k))))]
-       [#s(pat:commit attrs pattern)
+       [#s(pat:commit pattern)
         #`(let ([fh0 fail-handler]
                 [cp0 cut-prompt])
             (with ([cut-prompt fh0])
               (parse:S x cx pattern pr es
                        (with ([cut-prompt cp0]
                               [fail-handler fh0])
-                         k))))]
-       [#s(pat:post attrs pattern)
+                             k))))]
+       [#s(pat:ord pattern group index)
+        #`(let ([pr* (ps-add pr '#s(ord group index))])
+            (parse:S x cx pattern pr* es k))]
+       [#s(pat:post pattern)
         #`(let ([pr* (ps-add-post pr)])
             (parse:S x cx pattern pr* es k))]
-       [#s(pat:integrated _attrs name predicate description role)
+       [#s(pat:integrated name predicate description role)
         (with-syntax ([(name-attr ...)
                        (if (identifier? #'name)
                            #'([#s(attr name 0 #t) x*])
@@ -634,29 +681,68 @@ Conventions:
               (if (predicate x*)
                   (let-attributes (name-attr ...) k)
                   (let ([es* (es-add-thing pr 'description #t role es)])
-                    (fail (failure pr es*))))))])]))
+                    (fail (failure* pr es*))))))])]))
 
-;; (disjunct ???-pattern success (pre:expr ...) (id:id ...)) : expr[Ans]
+;; (first-desc:S S-pattern) : expr[FirstDesc]
+(define-syntax (first-desc:S stx)
+  (syntax-case stx ()
+    [(fds p)
+     (syntax-case #'p ()
+       [#s(pat:any)
+        #''(any)]
+       [#s(pat:svar name)
+        #''(any)]
+       [#s(pat:var/p _ _ _ _ _ #s(scopts _ _ _ desc))
+        #'(quote desc)]
+       [#s(pat:datum d)
+        #''(datum d)]
+       [#s(pat:literal id _ip _lp)
+        #''(literal id)]
+       [#s(pat:describe _p desc _t? _role)
+        #`(quote #,(or (constant-desc #'desc) #'#f))]
+       [#s(pat:delimit pattern)
+        #'(first-desc:S pattern)]
+       [#s(pat:commit pattern)
+        #'(first-desc:S pattern)]
+       [#s(pat:ord pattern _ _)
+        #'(first-desc:S pattern)]
+       [#s(pat:post pattern)
+        #'(first-desc:S pattern)]
+       [#s(pat:integrated _name _pred description _role)
+        #''description]
+       [_ #'#f])]))
+
+;; (first-desc:H HeadPattern) : Expr
+(define-syntax (first-desc:H stx)
+  (syntax-case stx ()
+    [(fdh hpat)
+     (syntax-case #'hpat ()
+       [#s(hpat:var/p _ _ _ _ _ #s(scopts _ _ _ desc)) #'(quote desc)]
+       [#s(hpat:seq lp) #'(first-desc:L lp)]
+       [#s(hpat:describe _hp desc _t? _r)
+        #`(quote #,(or (constant-desc #'desc) #'#f))]
+       [#s(hpat:delimit hp) #'(first-desc:H hp)]
+       [#s(hpat:commit hp) #'(first-desc:H hp)]
+       [#s(hpat:ord hp _ _) #'(first-desc:H hp)]
+       [#s(hpat:post hp) #'(first-desc:H hp)]
+       [_ #'(first-desc:S hpat)])]))
+
+(define-syntax (first-desc:L stx)
+  (syntax-case stx ()
+    [(fdl lpat)
+     (syntax-case #'lpat ()
+       [#s(pat:pair sp lp) #'(first-desc:S sp)]
+       [_ #'#f])]))
+
+;; (disjunct (iattr ...) success (pre:expr ...) (id:id ...)) : expr[Ans]
 (define-syntax (disjunct stx)
   (syntax-case stx ()
-    [(disjunct pattern success (pre ...) (id ...))
-     (with-syntax ([(#s(attr sub-id _ _) ...) (pattern-attrs (wash #'pattern))])
-       (with-syntax ([(alt-sub-id ...) (generate-temporaries #'(sub-id ...))])
-         #`(let ([alt-sub-id (attribute sub-id)] ...)
-             (let ([id #f] ...)
-               (let ([sub-id alt-sub-id] ...)
-                 (success fail-handler pre ... id ...))))))]))
-
-;; (disjunct/sides clauses success (pre:expr ...) (id:id ...)) : expr[Ans]
-(define-syntax (disjunct/sides stx)
-  (syntax-case stx ()
-    [(disjunct/sides clauses success (pre ...) (id ...))
-     (with-syntax ([(#s(clause:attr #s(attr sub-id _ _) _) ...) #'clauses])
-       (with-syntax ([(alt-sub-id ...) (generate-temporaries #'(sub-id ...))])
-         #`(let ([alt-sub-id (attribute sub-id)] ...)
-             (let ([id #f] ...)
-               (let ([sub-id alt-sub-id] ...)
-                 (success fail-handler pre ... id ...))))))]))
+    [(disjunct (#s(attr sub-id _ _) ...) success (pre ...) (id ...))
+     (with-syntax ([(alt-sub-id ...) (generate-temporaries #'(sub-id ...))])
+       #`(let ([alt-sub-id (attribute sub-id)] ...)
+           (let ([id #f] ...)
+             (let ([sub-id alt-sub-id] ...)
+               (success fail-handler pre ... id ...)))))]))
 
 ;; (parse:A x cx A-pattern pr es k) : expr[Ans]
 ;; In k: attrs(A-pattern) are bound.
@@ -664,40 +750,33 @@ Conventions:
   (syntax-case stx ()
     [(parse:A x cx pattern0 pr es k)
      (syntax-case #'pattern0 ()
-       [#s(action:cut _)
+       [#s(action:and (action ...))
+        (for/fold ([k #'k]) ([action (in-list (reverse (syntax->list #'(action ...))))])
+          #`(parse:A x cx #,action pr es #,k))]
+       [#s(action:cut)
         #'(with ([fail-handler cut-prompt]) k)]
-       [#s(action:bind _ (side ...))
-        #'(bind/sides (side ...) k)]
-       [#s(action:fail _ condition message)
+       [#s(action:bind a expr)
+        #'(let-attributes ([a (wrap-user-code expr)]) k)]
+       [#s(action:fail condition message)
         #`(let ([c (wrap-user-code condition)])
             (if c
-                (let ([pr* (if (syntax? c)
-                               (ps-add-stx pr c)
-                               pr)]
+                (let ([pr* (if (syntax? c) (ps-add-stx pr c) pr)]
                       [es* (es-add-message message es)])
-                  (fail (failure pr* es*)))
+                  (fail (failure* pr* es*)))
                 k))]
-       [#s(action:parse _ pattern expr)
-        #`(let* ([y (datum->syntax #f (wrap-user-code expr) #f)]
+       [#s(action:parse pattern expr)
+        #`(let* ([y (datum->syntax/with-clause (wrap-user-code expr))]
                  [cy y]
                  [pr* (ps-add-stx pr y)])
             (parse:S y cy pattern pr* es k))]
-       [#s(action:do _ (stmt ...))
+       [#s(action:do (stmt ...))
         #'(let () (no-shadow stmt) ... (#%expression k))]
-       [#s(action:post _ pattern)
+       [#s(action:ord pattern group index)
+        #'(let ([pr* (ps-add pr '#s(ord group index))])
+            (parse:A x cx pattern pr* es k))]
+       [#s(action:post pattern)
         #'(let ([pr* (ps-add-post pr)])
             (parse:A x cx pattern pr* es k))])]))
-
-;; (bind/sides clauses k) : expr[Ans]
-;; In k: attrs(clauses) are bound.
-(define-syntax (bind/sides stx)
-  (syntax-case stx ()
-    [(_ (side ...) k)
-     (for/fold ([k #'k]) ([side (in-list (reverse (syntax->list #'(side ...))))])
-       (syntax-case side ()
-         [#s(clause:attr a expr)
-            #`(let-attributes ([a (wrap-user-code (check-list^depth a expr))])
-                #,k)]))]))
 
 (begin-for-syntax
  ;; convert-list-pattern : ListPattern id -> SinglePattern
@@ -705,20 +784,20 @@ Conventions:
  ;; to rest-var.
  (define (convert-list-pattern pattern end-pattern)
    (syntax-case pattern ()
-     [#s(pat:datum () ())
+     [#s(pat:datum ())
       end-pattern]
-     [#s(pat:action attrs action tail)
+     [#s(pat:action action tail)
       (with-syntax ([tail (convert-list-pattern #'tail end-pattern)])
-        #'#s(pat:action attrs action tail))]
-     [#s(pat:head attrs head tail)
+        #'#s(pat:action action tail))]
+     [#s(pat:head head tail)
       (with-syntax ([tail (convert-list-pattern #'tail end-pattern)])
-        #'#s(pat:head attrs head tail))]
-     [#s(pat:dots attrs head tail)
+        #'#s(pat:head head tail))]
+     [#s(pat:dots head tail)
       (with-syntax ([tail (convert-list-pattern #'tail end-pattern)])
-        #'#s(pat:dots attrs head tail))]
-     [#s(pat:pair attrs head-part tail-part)
+        #'#s(pat:dots head tail))]
+     [#s(pat:pair head-part tail-part)
       (with-syntax ([tail-part (convert-list-pattern #'tail-part end-pattern)])
-        #'#s(pat:pair attrs head-part tail-part))])))
+        #'#s(pat:pair head-part tail-part))])))
 
 ;; (parse:H x cx rest-x rest-cx rest-pr H-pattern pr es k)
 ;; In k: rest, rest-pr, attrs(H-pattern) are bound.
@@ -726,13 +805,14 @@ Conventions:
   (syntax-case stx ()
     [(parse:H x cx rest-x rest-cx rest-pr head pr es k)
      (syntax-case #'head ()
-       [#s(hpat:describe _ pattern description transparent? role)
+       [#s(hpat:describe pattern description transparent? role)
         #`(let ([es* (es-add-thing pr description transparent? role es)]
                 [pr* (if 'transparent? pr (ps-add-opaque pr))])
             (parse:H x cx rest-x rest-cx rest-pr pattern pr* es*
                      (let ([rest-pr (if 'transparent? rest-pr (ps-pop-opaque rest-pr))])
                        k)))]
-       [#s(hpat:var _attrs name parser argu (nested-a ...) attr-count commit? role)
+       [#s(hpat:var/p name parser argu (nested-a ...) role
+                      #s(scopts attr-count commit? _delimit? _desc))
         (with-syntax ([(av ...) (generate-n-temporaries (syntax-e #'attr-count))]
                       [(name-attr ...)
                        (if (identifier? #'name)
@@ -762,7 +842,7 @@ Conventions:
                       (let-attributes (name-attr ...)
                         (let-attributes* ((nested-a ...) (av ...))
                           k))))))]
-       [#s(hpat:reflect _attrs obj argu attr-decls name (nested-a ...))
+       [#s(hpat:reflect obj argu attr-decls name (nested-a ...))
         (with-syntax ([(name-attr ...)
                        (if (identifier? #'name)
                            #'([#s(attr name 0 #t)
@@ -777,12 +857,12 @@ Conventions:
                                  (with ([fail-handler fh])
                                    k))))
                           argu))))]
-       [#s(hpat:and (a ...) head single)
+       [#s(hpat:and head single)
         #`(let ([cx0 cx])
             (parse:H x cx rest-x rest-cx rest-pr head pr es
                      (let ([lst (stx-list-take x (ps-difference pr rest-pr))])
                        (parse:S lst cx0 single pr es k))))]
-       [#s(hpat:or (a ...) (subpattern ...))
+       [#s(hpat:or (a ...) (subpattern ...) (subattrs ...))
         (with-syntax ([(#s(attr id _ _) ...) #'(a ...)])
           #`(let ([success
                    (lambda (fh rest-x rest-cx rest-pr id ...)
@@ -790,53 +870,43 @@ Conventions:
                        (with ([fail-handler fh])
                          k)))])
               (try (parse:H x cx rest-x rest-cx rest-pr subpattern pr es
-                            (disjunct subpattern success
-                                      (rest-x rest-cx rest-pr) (id ...)))
+                            (disjunct subattrs success (rest-x rest-cx rest-pr) (id ...)))
                    ...)))]
-       [#s(hpat:seq attrs pattern)
+       [#s(hpat:seq pattern)
         (with-syntax ([pattern
                        (convert-list-pattern
                         #'pattern
                         #'#s(internal-rest-pattern rest-x rest-cx rest-pr))])
           #'(parse:S x cx pattern pr es k))]
-       [#s(hpat:optional (a ...) pattern defaults)
-        (with-syntax ([(#s(attr id _ _) ...) #'(a ...)])
-          #`(let ([success
-                   (lambda (fh rest-x rest-cx rest-pr id ...)
-                     (let-attributes ([a id] ...)
-                       (with ([fail-handler fh])
-                         k)))])
-              (try (parse:H x cx rest-x rest-cx rest-pr pattern pr es 
-                            (success fail-handler rest-x rest-cx rest-pr (attribute id) ...))
-                   (let ([rest-x x]
-                         [rest-cx cx]
-                         [rest-pr pr])
-                     (bind/sides defaults
-                       (disjunct/sides defaults success
-                                       (rest-x rest-cx rest-pr)
-                                       (id ...)))))))]
-       [#s(hpat:delimit _attrs pattern)
+       [#s(hpat:action action subpattern)
+        #'(parse:A x cx action pr es (parse:H x cx rest-x rest-cx rest-pr subpattern pr es k))]
+       [#s(hpat:delimit pattern)
         #'(let ([cp0 cut-prompt])
             (with ([cut-prompt fail-handler])
               (parse:H x cx rest-x rest-cx rest-pr pattern pr es
                        (with ([cut-prompt cp0]) k))))]
-       [#s(hpat:commit attrs pattern)
+       [#s(hpat:commit pattern)
         #`(let ([fh0 fail-handler]
                 [cp0 cut-prompt])
             (with ([cut-prompt fh0])
               (parse:H x cx rest-x rest-cx rest-pr pattern pr es
                        (with ([cut-prompt cp0]
                               [fail-handler fh0])
-                         k))))]
-       [#s(hpat:post _ pattern)
-        #'(let ([pr (ps-add-post pr)])
-            (parse:H x cx rest-x rest-cx rest-pr pattern pr es k))]
-       [#s(hpat:peek _ pattern)
+                             k))))]
+       [#s(hpat:ord pattern group index)
+        #`(let ([pr* (ps-add pr '#s(ord group index))])
+            (parse:H x cx rest-x rest-cx rest-pr pattern pr* es
+                     (let ([rest-pr (ps-pop-ord rest-pr)]) k)))]
+       [#s(hpat:post pattern)
+        #'(let ([pr* (ps-add-post pr)])
+            (parse:H x cx rest-x rest-cx rest-pr pattern pr* es
+                     (let ([rest-pr (ps-pop-post rest-pr)]) k)))]
+       [#s(hpat:peek pattern)
         #`(let ([saved-x x] [saved-cx cx] [saved-pr pr])
             (parse:H x cx dummy-x dummy-cx dummy-pr pattern pr es
                      (let ([rest-x saved-x] [rest-cx saved-cx] [rest-pr saved-pr])
                        k)))]
-       [#s(hpat:peek-not () subpattern)
+       [#s(hpat:peek-not subpattern)
         #`(let* ([fh0 fail-handler]
                  [pr0 pr]
                  [es0 es]
@@ -852,12 +922,12 @@ Conventions:
             (with ([fail-handler fail-to-succeed]
                    [cut-prompt fail-to-succeed]) ;; to be safe
               (parse:H x cx rest-x rest-cx rest-pr subpattern pr es
-                       (fh0 (failure pr0 es0)))))]
+                       (fh0 (failure* pr0 es0)))))]
        [_
-        (with-syntax ([attrs (pattern-attrs (wash #'head))])
-          #'(parse:S x cx
-                     #s(pat:pair attrs head #s(internal-rest-pattern rest-x rest-cx rest-pr))
-                     pr es k))])]))
+        #'(parse:S x cx
+                   ;; FIXME: consider proper-list-pattern? (yes is consistent with ~seq)
+                   #s(pat:pair head #s(internal-rest-pattern rest-x rest-cx rest-pr))
+                   pr es k)])]))
 
 ;; (parse:dots x cx EH-pattern S-pattern pr es k) : expr[Ans]
 ;; In k: attrs(EH-pattern, S-pattern) are bound.
@@ -865,19 +935,15 @@ Conventions:
   (syntax-case stx ()
     ;; == Specialized cases
     ;; -- (x ... . ())
-    [(parse:dots x cx (#s(ehpat (attr0)
-                                #s(pat:var _attrs name #f _ () _ _ _)
-                                #f))
-                 #s(pat:datum () ()) pr es k)
+    [(parse:dots x cx (#s(ehpat (attr0) #s(pat:svar name) #f #f))
+                 #s(pat:datum ()) pr es k)
      #'(let-values ([(status result) (predicate-ellipsis-parser x cx pr es void #f #f)])
          (case status
            ((ok) (let-attributes ([attr0 result]) k))
            (else (fail result))))]
     ;; -- (x:sc ... . ()) where sc is an integrable stxclass like id or expr
-    [(parse:dots x cx (#s(ehpat (attr0)
-                                #s(pat:integrated _attrs _name pred? desc role)
-                                #f))
-                 #s(pat:datum () ()) pr es k)
+    [(parse:dots x cx (#s(ehpat (attr0) #s(pat:integrated _name pred? desc role) #f #f))
+                 #s(pat:datum ()) pr es k)
      #'(let-values ([(status result) (predicate-ellipsis-parser x cx pr es pred? desc role)])
          (case status
            ((ok) (let-attributes ([attr0 result]) k))
@@ -887,13 +953,17 @@ Conventions:
     ;; Microbenchmark suggests this isn't a useful specialization
     ;; (probably try-or-pair/null-check already does the useful part)
     ;; == General case
-    [(parse:dots x cx (#s(ehpat head-attrs head head-repc) ...) tail pr es k)
+    [(parse:dots x cx (#s(ehpat head-attrs head head-repc check-null?) ...) tail pr es k)
      (let ()
        (define repcs (wash-list wash #'(head-repc ...)))
        (define rep-ids (for/list ([repc (in-list repcs)])
                          (and repc (generate-temporary 'rep))))
        (define rel-repcs (filter values repcs))
        (define rel-rep-ids (filter values rep-ids))
+       (define rel-heads (for/list ([head (in-list (syntax->list #'(head ...)))]
+                                    [repc (in-list repcs)]
+                                    #:when repc)
+                           head))
        (define aattrs
          (for/list ([head-attrs (in-list (syntax->list #'(head-attrs ...)))]
                     [repc (in-list repcs)]
@@ -903,16 +973,20 @@ Conventions:
        (define attrs (map car aattrs))
        (define attr-repcs (map cdr aattrs))
        (define ids (map attr-name attrs))
+       (define tail-pattern-is-null? (equal? (syntax->datum #'tail) '#s(pat:datum ())))
        (with-syntax ([(id ...) ids]
                      [(alt-id ...) (generate-temporaries ids)]
                      [reps rel-rep-ids]
                      [(head-rep ...) rep-ids]
                      [(rel-rep ...) rel-rep-ids]
                      [(rel-repc ...) rel-repcs]
+                     [(rel-head ...) rel-heads]
                      [(a ...) attrs]
                      [(attr-repc ...) attr-repcs]
-                     [tail-pattern-is-null?
-                      (equal? (syntax->datum #'tail) '#s(pat:datum () ()))])
+                     [do-pair/null?
+                      ;; FIXME: do pair/null check only if no nullable head patterns
+                      ;; (and tail-pattern-is-null? (andmap not (syntax->datum #'(nullable? ...))))
+                      tail-pattern-is-null?])
          (define/with-syntax alt-map #'((id . alt-id) ...))
          (define/with-syntax loop-k
            #'(dots-loop dx* dcx* loop-pr* fail-handler rel-rep ... alt-id ...))
@@ -920,13 +994,13 @@ Conventions:
              ;; dots-loop : stx progress rel-rep ... alt-id ... -> Ans
              (define (dots-loop dx dcx loop-pr fh rel-rep ... alt-id ...)
                (with ([fail-handler fh])
-                 (try-or-pair/null-check tail-pattern-is-null? dx dcx loop-pr es
-                   (try (parse:EH dx dcx loop-pr head-repc dx* dcx* loop-pr* alt-map head-rep
-                                  head es loop-k)
+                 (try-or-pair/null-check do-pair/null? dx dcx loop-pr es
+                   (try (parse:EH dx dcx loop-pr head-attrs check-null? head-repc dx* dcx* loop-pr* 
+                                  alt-map head-rep head es loop-k)
                         ...)
                    (cond [(< rel-rep (rep:min-number rel-repc))
-                          (let ([es (expectation-of-reps/too-few es rel-rep rel-repc)])
-                            (fail (failure loop-pr es)))]
+                          (let ([es (expectation-of-reps/too-few es rel-rep rel-repc rel-head)])
+                            (fail (failure* loop-pr es)))]
                          ...
                          [else
                           (let-attributes ([a (rep:finalize a attr-repc alt-id)] ...)
@@ -941,7 +1015,7 @@ Conventions:
     [(topc #t x cx pr es pair-alt null-alt)
      (cond [(stx-pair? x) pair-alt]
            [(stx-null? x) null-alt]
-           [else (fail (failure pr es))])]
+           [else (fail (failure* pr es))])]
     [(topc _ x cx pr es alt1 alt2)
      (try alt1 alt2)]))
 
@@ -949,10 +1023,10 @@ Conventions:
 ;; In k: x*, cx*, pr*, alts`attrs(H-pattern) are bound and rep is shadowed.
 (define-syntax (parse:EH stx)
   (syntax-case stx ()
-    [(parse:EH x cx pr repc x* cx* pr* alts rep head es k)
+    [(parse:EH x cx pr attrs check-null? repc x* cx* pr* alts rep head es k)
      (let ()
        (define/with-syntax k*
-         (let* ([main-attrs (wash-iattrs (pattern-attrs (wash #'head)))]
+         (let* ([main-attrs (wash-iattrs #'attrs)]
                 [ids (map attr-name main-attrs)]
                 [alt-ids
                  (let ([table (make-bound-id-table)])
@@ -961,17 +1035,18 @@ Conventions:
                        (bound-id-table-set! table (car entry) (cdr entry))))
                    (for/list ([id (in-list ids)]) (bound-id-table-ref table id)))])
            (with-syntax ([(id ...) ids]
-                         [(alt-id ...) alt-ids]
-                         [(alt-a ...) (map rename-attr main-attrs alt-ids)])
+                         [(alt-id ...) alt-ids])
              #`(let ([alt-id (rep:combine repc (attribute id) alt-id)] ...)
-                 k))))
+                 #,(if (syntax->datum #'check-null?)
+                       #'(if (zero? (ps-difference pr pr*)) (error/null-eh-match) k)
+                       #'k)))))
        (syntax-case #'repc ()
          [#f #`(parse:H x cx x* cx* pr* head pr es k*)]
          [_  #`(parse:H x cx x* cx* pr* head pr es
                         (if (< rep (rep:max-number repc))
                             (let ([rep (add1 rep)]) k*)
                             (let ([es* (expectation-of-reps/too-many es rep repc)])
-                              (fail (failure pr* es*)))))]))]))
+                              (fail (failure* pr* es*)))))]))]))
 
 ;; (rep:initial-value RepConstraint) : expr
 (define-syntax (rep:initial-value stx)
@@ -985,7 +1060,7 @@ Conventions:
   (syntax-case stx ()
     [(_ a #s(rep:optional _ _ defaults) v)
      (with-syntax ([#s(attr name _ _) #'a]
-                   [(#s(clause:attr da de) ...) #'defaults])
+                   [(#s(action:bind da de) ...) #'defaults])
        (let ([default
               (for/or ([da (in-list (syntax->list #'(da ...)))]
                        [de (in-list (syntax->list #'(de ...)))])
@@ -1022,12 +1097,18 @@ Conventions:
 
 (define-syntax expectation-of-reps/too-few
   (syntax-rules ()
-    [(_ es rep #s(rep:once name too-few-msg too-many-msg))
-     (es-add-message (or too-few-msg (name->too-few/once name)) es)]
-    [(_ es rep #s(rep:optional name too-many-msg _))
+    [(_ es rep #s(rep:once name too-few-msg too-many-msg) hpat)
+     (cond [(or too-few-msg (name->too-few/once name))
+            => (lambda (msg) (es-add-message msg es))]
+           [(first-desc:H hpat) => (lambda (fd) (es-add-proper-pair fd es))]
+           [else es])]
+    [(_ es rep #s(rep:optional name too-many-msg _) hpat)
      (error 'syntax-parse "INTERNAL ERROR: impossible (too-few)")]
-    [(_ es rep #s(rep:bounds min max name too-few-msg too-many-msg))
-     (es-add-message (or too-few-msg (name->too-few name)) es)]))
+    [(_ es rep #s(rep:bounds min max name too-few-msg too-many-msg) hpat)
+     (cond [(or too-few-msg (name->too-few name))
+            => (lambda (msg) (es-add-message msg es))]
+           [(first-desc:H hpat) => (lambda (fd) (es-add-proper-pair fd es))]
+           [else es])]))
 
 (define-syntax expectation-of-reps/too-many
   (syntax-rules ()
@@ -1082,23 +1163,26 @@ Conventions:
                        [(alt-expr ...)
                         (for/list ([alt (in-list eh-alts)])
                           (with-syntax ([repc-expr
-                                         (match (eh-alternative-repc alt)
-                                           ['#f
-                                            #'(quote #f)]
-                                           [(rep:once n u o)
-                                            #`(rep:once (quote-syntax #,n)
-                                                        (quote-syntax #,u)
-                                                        (quote-syntax #,o))]
-                                           [(rep:optional n o d)
-                                            #`(rep:optional (quote-syntax #,n)
-                                                            (quote-syntax #,o)
-                                                            (quote-syntax #,d))]
-                                           [(rep:bounds min max n u o)
-                                            #`(rep:bounds (quote #,min)
-                                                          (quote #,max)
-                                                          (quote-syntax #,n)
-                                                          (quote-syntax #,u)
-                                                          (quote-syntax #,o))])]
+                                         ;; repc structs are prefab; recreate using prefab
+                                         ;; quasiquote exprs to avoid moving constructors
+                                         ;; to residual module
+                                         (syntax-case (eh-alternative-repc alt) ()
+                                           [#f
+                                            #''#f]
+                                           [#s(rep:once n u o)
+                                            #'`#s(rep:once ,(quote-syntax n)
+                                                           ,(quote-syntax u)
+                                                           ,(quote-syntax o))]
+                                           [#s(rep:optional n o d)
+                                            #'`#s(rep:optional ,(quote-syntax n)
+                                                               ,(quote-syntax o)
+                                                               ,(quote-syntax d))]
+                                           [#s(rep:bounds min max n u o)
+                                            #'`#s(rep:bounds ,(quote min)
+                                                             ,(quote max)
+                                                             ,(quote-syntax n)
+                                                             ,(quote-syntax u)
+                                                             ,(quote-syntax o))])]
                                         [attrs-expr
                                          #`(quote #,(eh-alternative-attrs alt))]
                                         [parser-expr

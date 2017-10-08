@@ -1,4 +1,4 @@
-#lang scheme
+#lang racket
 (require syntax/strip-context)
 
 (provide (rename-out [module-begin #%module-begin]
@@ -21,7 +21,7 @@
 (define-namespace-anchor a)
 (define namespace (namespace-anchor->empty-namespace a))
 (parameterize ([current-namespace namespace])
-  (namespace-require 'scheme))
+  (namespace-require 'racket))
 
 (define (strip-context-and-eval e)
   (let ([ns (current-namespace)])

@@ -149,6 +149,13 @@
                                 #f))])
     (cast new _objc_class-pointer _Class)))
 
+(define (dispose-class-pair-the-hard-way c-id)
+  (define c (cast _Class _objc_class-pointer))
+  (define meta (cast  _pointer _objc_class-pointer))
+  (free (objc_class-name c))
+  (free (objc_class-isa c))
+  (free c))
+
 (define (add-ivar-the-hard-way class field-name field-name-type)
   (let* ([class (cast class _Class _objc_class-pointer)]
          [ivars (or (objc_class-ivars class)
@@ -218,6 +225,8 @@
 
 (define-objc objc_allocateClassPair (_fun _Class _string _long -> _Class)
   #:fail (lambda () #f))
+(define-objc objc_disposeClassPair (_fun _Class -> _void)
+  #:fail (lambda () #f))
 (define-objc objc_registerClassPair (_fun _Class -> _void)
   #:fail (lambda () #f))
 
@@ -225,6 +234,8 @@
   #:fail (lambda () #f))
 
 (define-objc object_getClass (_fun _id -> _Class)
+  #:fail (lambda () #f))
+(define-objc object_setClass (_fun _id _Class -> _void)
   #:fail (lambda () #f))
 
 (define-objc class_addMethod/raw (_fun _Class _SEL _fpointer _string -> _BOOL)
@@ -390,10 +401,11 @@
 (define-for-syntax method-sels (make-hash))
 
 (define-for-syntax (register-selector sym)
-  (or (hash-ref method-sels (cons (syntax-local-lift-context) sym) #f)
+  (define key (cons (syntax-local-lift-context) sym))
+  (or (hash-ref method-sels key #f)
       (let ([id (syntax-local-lift-expression
                  #`(sel_registerName #,(symbol->string sym)))])
-        (hash-set! method-sels sym id)
+        (hash-set! method-sels key id)
         id)))
 
 (provide selector)
@@ -566,7 +578,8 @@
 
 (provide define-objc-class
          define-objc-mixin
-         self super-tell)
+         self super-tell
+         objc-dispose-class)
 
 (define-for-syntax ((check-id stx what) id)
   (unless (identifier? id)
@@ -673,12 +686,19 @@
       (objc_allocateClassPair superclass-id id-str 0)
       (allocate-class-pair-the-hard-way superclass-id id-str)))
 
+(define (dispose-class-pair c-id)
+  (if objc_disposeClassPair
+      (objc_disposeClassPair c-id)
+      (dispose-class-pair-the-hard-way c-id)))
+
 (define (register-class-pair id)
   (if objc_registerClassPair
       (objc_registerClassPair id)
       (objc_addClass (cast id _Class _objc_class-pointer))))
 
 (define (add-protocol id proto)
+  (unless proto
+    (error 'add-protocol "NULL protocol"))
   (if class_addProtocol
       (class_addProtocol id proto)
       (add-protocol-the-hard-way id proto)))
@@ -687,6 +707,11 @@
   (if object_getClass
       (object_getClass id)
       (ptr-ref id _Class)))
+
+(define (object-set-class! id c-id)
+  (if object_setClass
+      (object_setClass id c-id)
+      (ptr-set! id _Class c-id)))
 
 (define (layout->string l)
   (case l
@@ -750,9 +775,9 @@
 (define-syntax (add-method stx)
   (syntax-case stx ()
     [(_ whole-stx cls superclass-id m)
-     (let ([stx #'whole-stx])
-       (syntax-case #'m ()
-         [(kind result-type (id arg ...) body0 body ...)
+     (let loop ([stx #'whole-stx] [m #'m])
+       (syntax-case m ()
+         [(kind #:async-apply async result-type (id arg ...) body0 body ...)
           (or (free-identifier=? #'kind #'+)
               (free-identifier=? #'kind #'-)
               (free-identifier=? #'kind #'+a)
@@ -786,11 +811,6 @@
                                          (super-tell #:type _void dealloc)))]
                                    [_ (error "oops")])
                                  '())]
-                            [(async ...)
-                             (if (eq? (syntax-e id) 'dealloc)
-                                 ;; so that objects can be destroyed in foreign threads:
-                                 #'(#:async-apply apply-directly)
-                                 #'())]
                             [in-cls (if in-class?
                                         #'(object-get-class cls)
                                         #'cls)]
@@ -801,16 +821,27 @@
                         [arg-id arg-type] ...)
                     (void (class_addMethod in-cls
                                            (sel_registerName id-str)
-                                           #,(syntax/loc #'m
+                                           #,(syntax/loc m
                                                (lambda (self-id cmd arg-id ...)
                                                  (syntax-parameterize ([self (make-id-stx #'self-id)]
                                                                        [super-class (make-id-stx #'superclass-id)]
                                                                        [super-tell do-super-tell])
                                                    body0 body ...
                                                    dealloc-body ...)))
-                                           (_fun #:atomic? atomic? #:keep save-method! async ...
+                                           (_fun #:atomic? atomic? 
+                                                 #:keep save-method! 
+                                                 #:async-apply async
                                                  _id _id arg-type ... -> rt)
                                            (generate-layout rt (list arg-id ...)))))))))]
+         [(kind result-type (id arg ...) body0 body ...)
+          (loop stx 
+                (with-syntax ([async
+                               (if (eq? (syntax-e #'id) 'dealloc)
+                                   ;; so that objects can be destroyed in foreign threads:
+                                   #'apply-directly
+                                   #'#f)])
+                  (syntax/loc m 
+                    (kind #:async-apply async result-type (id arg ...) body0 body ...))))]
          [else (raise-syntax-error #f
                                    "bad method form"
                                    stx
@@ -867,12 +898,33 @@
                  #'((make-objc_super self super-class))
                  #'(method/arg ...))]))
 
+(define (objc-dispose-class c)
+  (dispose-class-pair c))
+
 ;; --------------------------------------------------
 
-(provide objc-is-a?)
+(provide objc-is-a?
+         objc-subclass?
+         objc-get-class
+         objc-set-class!
+         objc-get-superclass)
+
+(define-objc class_getSuperclass (_fun _Class -> _Class))
 
 (define (objc-is-a? v c)
-  (ptr-equal? (object-get-class v) c))
+  (objc-subclass? (object-get-class v) c))
+
+(define (objc-subclass? vc c)
+  (or (ptr-equal? vc c)
+      (let ([pc (class_getSuperclass vc)])
+        (and pc
+             (objc-subclass? pc c)))))
+
+(define (objc-get-class v) (object-get-class v))
+(define (objc-set-class! v c) (object-set-class! v c))
+
+(define (objc-get-superclass c)
+  (class_getSuperclass c))
 
 ;; --------------------------------------------------
 
@@ -882,3 +934,36 @@
                       (set-objc_method-method_imp! 
                        (cast meth _Method _objc_method-pointer) 
                        (function-ptr imp _IMP)))))
+
+;; --------------------------------------------------
+
+(provide objc-block)
+
+(define-cstruct _block ([isa _pointer]
+                        [flags _int]
+                        [reserved _int]
+                        [invoke _fpointer]
+                        [descriptor _pointer])
+  #:malloc-mode 'atomic-interior)
+
+(define-cstruct _block-desc ([reserved _ulong]
+                             [size _ulong])
+  #:malloc-mode 'atomic-interior)
+
+(define-objc _NSConcreteGlobalBlock _pointer
+  #:fail (lambda () #f))
+
+(define (objc-block type proc #:keep keep)
+  (unless _NSConcreteGlobalBlock
+    (error 'objc-block "unsupported"))
+  
+  (define desc
+    (make-block-desc 0 (ctype-sizeof _block)))
+  (define blk
+    (make-block _NSConcreteGlobalBlock
+                (arithmetic-shift 3 28)
+                0
+                (cast proc type _fpointer)
+                desc))
+  (set-box! keep (list* blk desc (unbox keep)))
+  blk)

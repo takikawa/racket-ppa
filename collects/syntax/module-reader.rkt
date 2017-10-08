@@ -5,6 +5,7 @@
   (provide (rename-out [provide-module-reader #%module-begin]
                        [wrap wrap-read-all])
            make-meta-reader
+           lang-reader-module-paths
            (except-out (all-from-out racket/private/base) #%module-begin))
 
   (define ar? procedure-arity-includes?)
@@ -39,6 +40,7 @@
         [#:read-syntax         ~read-syntax         #'read-syntax]
         [#:wrapper1            ~wrapper1            #'#f]
         [#:wrapper2            ~wrapper2            #'#f]
+        [#:module-wrapper      ~module-wrapper      #'#f]
         [#:whole-body-readers? ~whole-body-readers? #'#f]
         [#:info                ~info                #'#f]
         [#:language-info       ~module-get-info     #'#f]
@@ -72,24 +74,32 @@
                           #,~read)]
                   [w1 #,~wrapper1]
                   [w2 #,~wrapper2]
+                  [mw #,~module-wrapper]
                   [whole? #,~whole-body-readers?]
                   [rd (lambda (in)
                         (wrap-internal (if (and (not stx?) (syntax? lang))
                                          (syntax->datum lang)
                                          lang)
                                        in read whole? w1 stx?
-                                       modpath src line col pos))]
-                  [r (cond [(not w2) (rd in)]
-                           [(ar? w2 3) (w2 in rd stx?)]
-                           [else (w2 in rd)])])
-             (if stx?
-                 (let ([prop #,(if (syntax-e ~module-get-info)
-                                   ~module-get-info
-                                   #'#f)])
-                   (if prop 
-                       (syntax-property r 'module-language prop)
-                       r))
-                 r)))
+                                       modpath src line col pos))])
+             ((or (and mw
+                       (if (procedure-arity-includes? mw 2)
+                           mw
+                           (lambda (thunk stx?) (mw thunk))))
+                  (lambda (thunk stx?) (thunk)))
+              (lambda ()
+                (let ([r (cond [(not w2) (rd in)]
+                               [(ar? w2 3) (w2 in rd stx?)]
+                               [else (w2 in rd)])])
+                  (if stx?
+                      (let ([prop #,(if (syntax-e ~module-get-info)
+                                        ~module-get-info
+                                        #'#f)])
+                        (if prop 
+                            (syntax-property r 'module-language prop)
+                            r))
+                      r)))
+              stx?)))
          (define read-properties (lang->read-properties #,~lang))
          (define (get-info in modpath line col pos)
            (get-info-getter (read-properties in modpath line col pos)))
@@ -188,20 +198,21 @@
            [body (wrap-module-begin body)]
            [all-loc (vector src line col pos
                             (let-values ([(l c p) (port-next-location port)])
-                              (and p pos (- p pos))))]
+                              (and p pos (max 0 (- p pos)))))]
            [p-name (object-name port)]
            [name (if (path? p-name)
                    (let-values ([(base name dir?) (split-path p-name)])
                      (string->symbol
-                      (path->string (path-replace-suffix name #""))))
+                      (path->string (path-replace-extension name #""))))
                    'anonymous-module)]
            [tag-src (lambda (v)
                       (if stx?
                         (datum->syntax
                          #f v (vector src line col pos
-                                      (and pos (- (or (syntax-position modpath)
-                                                      (add1 pos))
-                                                  pos))))
+                                      (and pos (max 0
+                                                    (- (or (syntax-position modpath)
+                                                           (add1 pos))
+                                                       pos)))))
                         v))]
            [r `(,(tag-src 'module) ,(tag-src name) ,lang ,body)])
       (if stx? (datum->syntax #f r all-loc) r)))
@@ -249,7 +260,7 @@
                              (datum->syntax #f
                                             guarded-spec
                                             (vector src spec-line spec-col spec-pos
-                                                    (- spec-end-pos spec-pos)))
+                                                    (max 0 (- spec-end-pos spec-pos))))
                              guarded-spec))
                         (loop (cdr specs))))
                   (bad spec #f))))))
@@ -286,4 +297,20 @@
       (read-fn inp 'read-syntax (list src) src mod line col pos
                convert-read-syntax))
 
-    (values -read -read-syntax -get-info)))
+    (values -read -read-syntax -get-info))
+
+  ;; lang-reader-module-paths : Byte-String -> (U False (Vectorof Module-Path))
+  ;; To be used as the third argument to make-meta-reader in lang-extensions
+  ;; like at-exp. On success, returns a vector of module paths, one of which
+  ;; should point to the reader module for the #lang bstr language.
+  (define (lang-reader-module-paths bstr)
+    (let* ([str (bytes->string/latin-1 bstr)]
+           [sym (string->symbol str)])
+      (and (module-path? sym)
+           (vector
+            ;; try submod first:
+            `(submod ,sym reader)
+            ;; fall back to /lang/reader:
+            (string->symbol (string-append str "/lang/reader"))))))
+
+  )

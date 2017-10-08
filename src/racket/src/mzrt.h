@@ -22,15 +22,20 @@ void mzrt_set_user_break_handler(void (*user_break_handler)(int));
 #if (defined(__WIN32__) || defined(WIN32) || defined(_WIN32))
 # include <winsock2.h>
 typedef HANDLE mzrt_thread_id;
+typedef DWORD mzrt_os_thread_id;
 #else
 #include <pthread.h>
 typedef pthread_t mzrt_thread_id;
+typedef pthread_t mzrt_os_thread_id;
 #endif
 
 
 typedef struct mz_proc_thread {
   mzrt_thread_id threadid;
   int refcount;
+#if (defined(__WIN32__) || defined(WIN32) || defined(_WIN32))
+  void *res;
+#endif
 } mz_proc_thread;
 
 
@@ -45,7 +50,7 @@ void mz_proc_thread_exit(void *rc);
 
 void mzrt_sleep(int seconds);
 
-mzrt_thread_id mz_proc_thread_self();
+mzrt_os_thread_id mz_proc_os_thread_self();
 mzrt_thread_id mz_proc_thread_id(mz_proc_thread* thread);
 
 /****************** THREAD RWLOCK ******************************************/
@@ -81,9 +86,17 @@ typedef struct mzrt_sema mzrt_sema; /* OPAQUE DEFINITION */
 int mzrt_sema_create(mzrt_sema **sema, int init);
 int mzrt_sema_post(mzrt_sema *sema);
 int mzrt_sema_wait(mzrt_sema *sema);
+int mzrt_sema_trywait(mzrt_sema *sema);
 int mzrt_sema_destroy(mzrt_sema *sema);
 
 /****************** Compare and Swap *******************************/
+
+#if defined(MZ_USE_PLACES) || defined(MZ_USE_FUTURES)
+
+#ifdef __clang__
+# pragma clang diagnostic push
+# pragma clang diagnostic ignored "-Wunused-function"
+#endif
 
 #define mz_CAS_T uintptr_t
 #ifdef SIXTY_FOUR_BIT_INTEGERS
@@ -121,6 +134,17 @@ static MZ_INLINE void mzrt_ensure_max_cas(uintptr_t *atomic_val, uintptr_t len) 
     }
   }
 }
+
+#ifdef __clang__
+# pragma clang diagnostic pop
+#endif
+
+/* end defined(MZ_USE_PLACES) || defined(MZ_USE_FUTURES) */
+#endif
+
+/****************************************************************/
+
+/* end MZ_USE_MZRT */
 #endif
 
 #endif

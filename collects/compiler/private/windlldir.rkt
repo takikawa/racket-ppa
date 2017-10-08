@@ -1,5 +1,5 @@
-(module windlldir mzscheme
-  (require mzlib/port
+(module windlldir racket/base
+  (require racket/port
            "winutf16.rkt")
 
   (provide update-dll-dir
@@ -25,7 +25,7 @@
             (file-position (current-output-port) (cdar m))
             (write-bytes path-bytes)
             (write-byte 0))
-          'update))))
+          #:exists 'update))))
       
   (define (get-current-dll-dir dest)
     (with-input-from-file dest

@@ -7,7 +7,9 @@ FUNC_NAME   (Scheme_Object *port,
 	     int opener, char closer,
 	     intptr_t requestLength, const mzchar *reqBuffer,
 	     Scheme_Hash_Table **ht,
-	     Scheme_Object *indentation, ReadParams *params, int allow_infix)
+	     Scheme_Object *indentation,
+             ReadParams *params, Readtable *table,
+             int allow_infix)
 /* requestLength == -1 => no request
    requestLength == -2 => overflow */
 {
@@ -22,7 +24,7 @@ FUNC_NAME   (Scheme_Object *port,
 
   lresult = read_list(port, stxsrc, line, col, pos, opener, closer, 
                       MZ_SHAPE,
-                      1, ht, indentation, params);
+                      1, ht, indentation, params, table);
 
   if (requestLength == -2) {
     scheme_raise_out_of_memory("read", "making %s of size %5", vtype_str, reqBuffer);
@@ -60,7 +62,7 @@ FUNC_NAME   (Scheme_Object *port,
     else {
       elm = ELM_MAKE_ZERO;
       if (stxsrc)
-	obj = scheme_make_stx_w_offset(obj, line, col, pos, SPAN(port, pos), stxsrc, STX_SRCTAG);
+	elm = ELM_STX(elm);
     }
 
     els = ELMS_SELECTOR(vec);
@@ -88,6 +90,7 @@ FUNC_NAME   (Scheme_Object *port,
 #undef ELMS_SELECTOR
 #undef ELM_SELECTOR
 #undef ELM_MAKE_ZERO
+#undef ELM_STX
 #undef VEC_SIZE
 
 /* vim: ft=c 

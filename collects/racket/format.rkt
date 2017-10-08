@@ -44,6 +44,7 @@
         #:max-width (or/c exact-nonnegative-integer? +inf.0)
         #:min-width exact-nonnegative-integer?
         #:limit-marker string?
+        #:limit-prefix? boolean?
         #:align align-mode/c
         #:pad-string padding/c
         #:left-pad-string padding/c
@@ -74,10 +75,15 @@
 
 (define (%limit #:limit limit
                 #:limit-marker limit-marker
+                #:limit-prefix? limit-prefix?
                 s)
-  (cond [(> (string-length s) limit)
-         (string-append (substring s 0 (- limit (string-length limit-marker)))
-                        limit-marker)]
+  (define len (string-length s))
+  (cond [(> len limit)
+         (if limit-prefix?
+           (string-append limit-marker
+                          (substring s (+ (- len limit) (string-length limit-marker))))
+           (string-append (substring s 0 (- limit (string-length limit-marker)))
+                          limit-marker))]
         [else s]))
 
 (define (%pad #:pad-to pad-to
@@ -90,11 +96,10 @@
                 [to-pad-length (max 0 (- pad-to s-length))])
            (let-values ([(left-pad-length right-pad-length)
                          (case align-mode
-                           ((left) (values 0 to-pad-length))
-                           ((right) (values to-pad-length 0))
-                           ((center)
-                            (values (floor (/ to-pad-length 2))
-                                    (ceiling (/ to-pad-length 2)))))])
+                           [(left) (values 0 to-pad-length)]
+                           [(right) (values to-pad-length 0)]
+                           [(center) (values (floor (/ to-pad-length 2))
+                                             (ceiling (/ to-pad-length 2)))])])
              (string-append
               (build-padding 'left left-padding left-pad-length)
               s
@@ -108,21 +113,22 @@
         [(and (string? padding) (= (string-length padding) 1))
          (make-string pad-length (string-ref padding 0))]
         [(string? padding)
-         (let* ([pattern padding]
-                [pattern-length (string-length pattern)]
-                [whole-copies (quotient pad-length pattern-length)]
-                [part-length (remainder pad-length pattern-length)]
-                [pattern-copies (for/list ([i (in-range whole-copies)]) pattern)])
-           (apply string-append
-                  ;; For left, start at start of string
-                  ;; For right, end at end of string.
-                  (case side
-                    ((left)
-                     (append pattern-copies
-                             (list (substring pattern 0 part-length))))
-                    ((right)
-                     (cons (substring pattern (- pattern-length part-length) pattern-length)
-                           pattern-copies)))))]))
+         (define pattern padding)
+         (define pattern-length (string-length pattern))
+         (define-values [whole-copies part-length]
+           (quotient/remainder pad-length pattern-length))
+         (define pattern-copies
+           (for/list ([i (in-range whole-copies)]) pattern))
+         (apply string-append
+                ;; For left, start at start of string
+                ;; For right, end at end of string.
+                (case side
+                  [(left)
+                   (append pattern-copies
+                           (list (substring pattern 0 part-length)))]
+                  [(right)
+                   (cons (substring pattern (- pattern-length part-length) pattern-length)
+                         pattern-copies)]))]))
 
 (define (do-checks who limit limit-marker width)
   (when (> width limit)
@@ -141,6 +147,7 @@
      (let ([who (λ (#:width            [width         #f]
                     #:max-width        [limit         (or width +inf.0)]
                     #:limit-marker     [limit-marker  default-limit-marker]
+                    #:limit-prefix?    [limit-prefix? #f]
                     #:min-width        [pad-to        (or width 0)]
                     #:align            [align         'left]
                     #:pad-string       [padding       " "]
@@ -150,6 +157,7 @@
                     . s)
                   (do-checks 'who limit limit-marker pad-to)
                   (%pad (%limit #:limit limit #:limit-marker limit-marker
+                                #:limit-prefix? limit-prefix?
                                 (if (and (pair? s) (null? (cdr s)))
                                   (fmt (car s))
                                   (apply string-append
@@ -188,7 +196,7 @@
             #:pad-string [digits-padding " "])
   (let ([notation (if (procedure? notation) (notation N) notation)])
     (case notation
-      ((exponential)
+      [(exponential)
        (catne N
               #:who 'catn
               #:sign sign-mode
@@ -196,15 +204,15 @@
               #:precision precision
               #:format-exponent exp-format-exponent
               #:pad-digits-to pad-digits-to
-              #:digits-padding digits-padding))
-      ((positional)
+              #:digits-padding digits-padding)]
+      [(positional)
        (catnp N
               #:who 'catn
               #:sign sign-mode
               #:base base
               #:precision precision
               #:pad-digits-to pad-digits-to
-              #:digits-padding digits-padding)))))
+              #:digits-padding digits-padding)])))
 
 (define (catnp N
                #:who [who 'catnp]
@@ -303,6 +311,15 @@
                 [else (values np N*)])))))
 
 (define (%exponential N-abs base upper? format-exponent significand-precision exactly?)
+  (cond [(zero? N-abs)
+         (string-append "0"
+                        (if exactly? "." "")
+                        (if exactly? (make-string significand-precision #\0) "")
+                        (exponent-part 0 format-exponent base))]
+        [else
+         (%exponential-nz N-abs base upper? format-exponent significand-precision exactly?)]))
+
+(define (%exponential-nz N-abs base upper? format-exponent significand-precision exactly?)
   (define-values (N* e-adjust actual-precision)
     (scale N-abs base significand-precision exactly?))
   ;; hack: from 1234 want "1.234"; convert to "1234", mutate to ".234" after saving "1"
@@ -312,19 +329,22 @@
     (string-set! digits 0 #\.)
     (string-append leading-digit
                    (if (or exactly? (positive? actual-precision)) digits "")
-                   (cond [(procedure? format-exponent)
-                          (format-exponent exponent)]
-                         [else
-                          (string-append
-                           (cond [(string? format-exponent) format-exponent]
-                                 [(= base 10) "e"]
-                                 [else (format "x~s^" base)])
-                           (if (negative? exponent) "-" "+")
-                           (%pad (number->string (abs exponent))
-                                 #:pad-to 2
-                                 #:align 'right
-                                 #:left-padding "0"
-                                 #:right-padding #f))]))))
+                   (exponent-part exponent format-exponent base))))
+
+(define (exponent-part exponent format-exponent base)
+  (cond [(procedure? format-exponent)
+         (format-exponent exponent)]
+        [else
+         (string-append
+          (cond [(string? format-exponent) format-exponent]
+                [(= base 10) "e"]
+                [else (format "*~s^" base)])
+          (if (negative? exponent) "-" "+")
+          (%pad (number->string (abs exponent))
+                #:pad-to 2
+                #:align 'right
+                #:left-padding "0"
+                #:right-padding #f))]))
 
 (define (scale N-abs base significand-precision exactly?)
   (if (zero? N-abs)
@@ -337,7 +357,7 @@
          [normalized-max (* base normalized-min)])
     (let*-values ([(N*0 e-adjust0)
                    (let ([e-est (- significand-precision
-                                   (inexact->exact (floor (/ (log N-abs) (log base)))))])
+                                   (estimate-order-of-magnitude N base))])
                      (values (* N (expt base e-est)) e-est))]
                   [(N* e-adjust)
                    (let loop ([N N*0] [e e-adjust0] [r #f])
@@ -363,6 +383,16 @@
                                  [else (values N p)]))))])
       (values N* e-adjust actual-precision))))
 
+;; estimate-order-of-magnitude : exact-positive-real integer>1 -> exact-integer
+(define (estimate-order-of-magnitude N base)
+  (inexact->exact
+   (floor
+    ;; log gives -inf.0 on exact numbers smaller than smallest positive flonum;
+    ;; so use difference of numerator/denominator logs, since log ok even on bignums
+    (/ (- (log (numerator N))
+          (log (denominator N)))
+       (log base)))))
+
 ;; ----
 
 (define (get-sign-parts N sign-mode)
@@ -372,11 +402,11 @@
         (values (car indicator) (cadr indicator))))
   (let ([indicator-table
          (case sign-mode
-           ((#f) '(""  ""  "-"))
-           ((+)  '("+" ""  "-"))
-           ((++) '("+" "+" "-"))
-           ((parens) '("" "" ("(" ")")))
-           (else sign-mode))])
+           [(#f) '(""  ""  "-")]
+           [(+)  '("+" ""  "-")]
+           [(++) '("+" "+" "-")]
+           [(parens) '("" "" ("(" ")"))]
+           [else sign-mode])])
     (cond [(or (negative? N) (eqv? -0.0 N))
            (get (caddr indicator-table))]
           [(zero? N)
@@ -393,11 +423,10 @@
         [(zero? N)
          (string #\0)]
         [else
-         (apply string
-                (let loop ([N N] [digits null])
-                  (cond [(zero? N) (reverse digits)]
-                        [else (let-values ([(q r) (quotient/remainder N base)])
-                                (loop q (cons (get-digit r upper?) digits)))])))]))
+         (let loop ([N N] [digits null])
+           (cond [(zero? N) (apply string digits)]
+                 [else (let-values ([(q r) (quotient/remainder N base)])
+                         (loop q (cons (get-digit r upper?) digits)))]))]))
 
 (define (number->fraction-string N base upper? precision)
   (let ([s (number->string* N base upper?)])

@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -24,6 +24,7 @@
 */
 
 #include "schpriv.h"
+#include "schrktio.h"
 #include <ctype.h>
 #ifdef DOS_FILE_SYSTEM
 # include <windows.h>
@@ -32,10 +33,6 @@
 # define errno -1
 #else
 # include <errno.h>
-#endif
-#ifdef USE_C_SYSLOG
-# include <syslog.h>
-# include <stdarg.h>
 #endif
 
 #define mzVA_ARG(x, y) HIDE_FROM_XFORM(va_arg(x, y))
@@ -60,6 +57,7 @@ SHARED_OK static Scheme_Object *init_stderr_level = scheme_make_integer(SCHEME_L
 THREAD_LOCAL_DECL(static Scheme_Logger *scheme_main_logger);
 THREAD_LOCAL_DECL(static Scheme_Logger *scheme_gc_logger);
 THREAD_LOCAL_DECL(static Scheme_Logger *scheme_future_logger);
+THREAD_LOCAL_DECL(static Scheme_Logger *scheme_place_logger);
 
 /* readonly globals */
 READ_ONLY const char *scheme_compile_stx_string = "compile";
@@ -86,9 +84,20 @@ ROSYM static Scheme_Object *def_exe_yield_proc;
 READ_ONLY Scheme_Object *scheme_def_exit_proc;
 READ_ONLY Scheme_Object *scheme_raise_arity_error_proc;
 
-
 #ifdef MEMORY_COUNTING_ON
 intptr_t scheme_misc_count;
+#endif
+
+#ifdef MZ_USE_MZRT
+static mzrt_mutex *glib_log_queue_lock;
+typedef struct glib_log_queue_entry {
+  const char *log_domain;
+  int log_level;
+  const char *message;
+  struct glib_log_queue_entry *next;
+} glib_log_queue_entry;
+static glib_log_queue_entry *glib_log_queue;
+static void *glib_log_signal_handle;
 #endif
 
 /* locals */
@@ -116,10 +125,13 @@ static Scheme_Object *emergency_error_display_proc(int, Scheme_Object *[]);
 static Scheme_Object *def_error_value_string_proc(int, Scheme_Object *[]);
 static Scheme_Object *def_exit_handler_proc(int, Scheme_Object *[]);
 static Scheme_Object *default_yield_handler(int, Scheme_Object *[]);
+static Scheme_Object *srcloc_to_string(int argc, Scheme_Object **argv);
 
 static Scheme_Object *log_message(int argc, Scheme_Object *argv[]);
 static Scheme_Object *log_level_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *log_max_level(int argc, Scheme_Object *argv[]);
+static Scheme_Object *log_all_levels(int argc, Scheme_Object *argv[]);
+static Scheme_Object *log_level_evt(int argc, Scheme_Object *argv[]);
 static Scheme_Object *make_logger(int argc, Scheme_Object *argv[]);
 static Scheme_Object *logger_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *current_logger(int argc, Scheme_Object *argv[]);
@@ -131,7 +143,7 @@ static int log_reader_get(Scheme_Object *ch, Scheme_Schedule_Info *sinfo);
 static Scheme_Object *do_raise(Scheme_Object *arg, int need_debug, int barrier);
 static Scheme_Object *nested_exn_handler(void *old_exn, int argc, Scheme_Object *argv[]);
 
-static void update_want_level(Scheme_Logger *logger);
+static void update_want_level(Scheme_Logger *logger, Scheme_Object *name);
 
 static Scheme_Object *check_arity_property_value_ok(int argc, Scheme_Object *argv[]);
 
@@ -241,7 +253,11 @@ Scheme_Config *scheme_init_error_escape_proc(Scheme_Config *config)
   %gd = long int
   %gx = long int
   %ld = intptr_t
+  %Id = intptr_t (for MSVC)
+  %I64d = intptr_t (for MingGW)
   %lx = intptr_t
+  %Ix = intptr_t (for MSVC)
+  %I64x = intptr_t (for MingGW)
   %o = int, octal
   %f = double
   %% = percent
@@ -257,10 +273,12 @@ Scheme_Config *scheme_init_error_escape_proc(Scheme_Config *config)
   %V = scheme_value
   %@ = list of scheme_value to write splice
   %D = scheme value to display
+  %W = scheme value to write
   %_ = skip pointer
   %- = skip int
 
   %L = line number as intptr_t, -1 means no line
+  %R = get error numebr and string from rktio
   %e = error number for strerror()
   %E = error number for platform-specific error string
   %Z = potential platform-specific error number; additional char*
@@ -274,7 +292,7 @@ Scheme_Config *scheme_init_error_escape_proc(Scheme_Config *config)
 */
 
 static intptr_t sch_vsprintf(char *s, intptr_t maxlen, const char *msg, va_list args, char **_s,
-                             Scheme_Object **_errno_val)
+                             Scheme_Object **_errno_val, int *_unsupported)
 /* NULL for s means allocate the buffer here (and return in (_s), but this function 
    doesn't allocate before extracting arguments from the stack. */
 {
@@ -310,6 +328,7 @@ static intptr_t sch_vsprintf(char *s, intptr_t maxlen, const char *msg, va_list 
 	ints[ip++] = mzVA_ARG(args, long);
 	break;
       case 'l':
+      case 'I':
 	ints[ip++] = mzVA_ARG(args, intptr_t);
 	break;
       case 'f':
@@ -336,6 +355,7 @@ static intptr_t sch_vsprintf(char *s, intptr_t maxlen, const char *msg, va_list 
       case 'V':
       case '@':
       case 'D':
+      case 'W':
       case 'T':
       case 'Q':
       case '_':
@@ -385,8 +405,8 @@ static intptr_t sch_vsprintf(char *s, intptr_t maxlen, const char *msg, va_list 
 	      tlen = 1;
 	    } else {
 	      mzchar mc;
+              mc = c;
 	      tlen = scheme_utf8_encode_all(&mc, 1, (unsigned char *)buf);
-	      c = (int)mc;
 	    }
 	    t = buf;
 	  }
@@ -416,11 +436,14 @@ static intptr_t sch_vsprintf(char *s, intptr_t maxlen, const char *msg, va_list 
 	    tlen = strlen(t);
 	  }
 	  break;
+	case 'I':
 	case 'l':
 	case 'g':
 	  {
 	    intptr_t d;
             int as_hex;
+            if ((type == 'I') && (msg[j] == '6') && (msg[j+1] == '4'))
+              j++;
             as_hex = (msg[j] == 'x');
 	    j++;
 	    d = ints[ip++];
@@ -455,6 +478,62 @@ static intptr_t sch_vsprintf(char *s, intptr_t maxlen, const char *msg, va_list 
 	    }
 	  }
 	  break;
+        case 'R':
+          {
+            intptr_t errid;
+            intptr_t errkind;
+            const char *es, *errkind_str;
+            intptr_t elen;
+            errkind = rktio_get_last_error_kind(scheme_rktio);
+            errid = rktio_get_last_error(scheme_rktio);
+            switch (errkind) {
+            case RKTIO_ERROR_KIND_WINDOWS:
+              errkind_str = "errid";
+              break;
+            case RKTIO_ERROR_KIND_POSIX:
+              errkind_str = "errno";
+              break;
+            case RKTIO_ERROR_KIND_GAI:
+              errkind_str = "gai_err";
+              break;
+            default:
+              errkind_str = "rktio_err";
+              break;
+            }
+            es = rktio_get_error_string(scheme_rktio, errkind, errid);
+            sprintf(buf, "; %s=%" PRIdPTR "", errkind_str, errid);
+            if (es) elen = strlen(es); else elen = 0;
+            tlen = strlen(buf);
+            t = (const char *)scheme_malloc_atomic(tlen+elen+1);
+            memcpy((char *)t, es, elen);
+            memcpy((char *)t+elen, buf, tlen+1);
+            tlen += elen;
+            if (_errno_val) {
+              Scheme_Object *err_kind;
+              switch (errkind) {
+              case RKTIO_ERROR_KIND_WINDOWS:
+                err_kind = windows_symbol;
+                break;
+              case RKTIO_ERROR_KIND_POSIX:
+                err_kind = posix_symbol;
+                break;
+              case RKTIO_ERROR_KIND_GAI:
+                err_kind = gai_symbol;
+                break;
+              default:
+                err_kind = NULL;
+              }
+              if (err_kind) {
+                err_kind = scheme_make_pair(scheme_make_integer_value(errid), err_kind);
+                *_errno_val = err_kind;
+              }
+            }
+	    if (_unsupported
+		&& (errid == RKTIO_ERROR_UNSUPPORTED)
+		&& (errkind == RKTIO_ERROR_KIND_RACKET))
+	      *_unsupported = 1;
+          }
+          break;
 	case 'e':
         case 'm':
 	case 'E':
@@ -464,6 +543,7 @@ static intptr_t sch_vsprintf(char *s, intptr_t maxlen, const char *msg, va_list 
 	  {
 	    int en, he, none = 0;
 	    char *es;
+            const char *errkind_str;
             Scheme_Object *err_kind = NULL;
             
 	    if (type == 'm') {
@@ -490,6 +570,7 @@ static intptr_t sch_vsprintf(char *s, intptr_t maxlen, const char *msg, va_list 
 	    if (he) {
 	      es = (char *)scheme_hostname_error(en);
               err_kind = gai_symbol;
+              errkind_str = "gai_err";
             }
 
 	    if ((en || es) && !none) {
@@ -520,17 +601,19 @@ static intptr_t sch_vsprintf(char *s, intptr_t maxlen, const char *msg, va_list 
 		      break;
 		  }
                   err_kind = windows_symbol;
+                  errkind_str = "win_err";
 		}
 	      }
 # endif
 	      if (!es) {
 		es = strerror(en);
                 err_kind = posix_symbol;
+                errkind_str = "errno";
               }
 #endif
 	      tlen = strlen(es) + 24;
 	      t = (const char *)scheme_malloc_atomic(tlen);
-	      sprintf((char *)t, "%s; errno=%d", es, en);
+	      sprintf((char *)t, "%s; %s=%d", es, errkind_str, en);
 	      tlen = strlen(t);
               if (_errno_val) {
                 err_kind = scheme_make_pair(scheme_make_integer_value(en), err_kind);
@@ -575,6 +658,15 @@ static intptr_t sch_vsprintf(char *s, intptr_t maxlen, const char *msg, va_list 
             intptr_t dlen;
 	    o = (Scheme_Object *)ptrs[pp++];
 	    t = scheme_display_to_string(o, &dlen);
+            tlen = dlen;
+	  }
+	  break;
+	case 'W':
+	  {
+	    Scheme_Object *o;
+            intptr_t dlen;
+	    o = (Scheme_Object *)ptrs[pp++];
+	    t = scheme_write_to_string(o, &dlen);
             tlen = dlen;
 	  }
 	  break;
@@ -634,6 +726,7 @@ static intptr_t sch_vsprintf(char *s, intptr_t maxlen, const char *msg, va_list 
 	  }
 	}
 
+
 	while (tlen && i < maxlen) {
 	  s[i++] = *t;
 	  t = t XFORM_OK_PLUS 1;
@@ -665,14 +758,27 @@ static intptr_t scheme_sprintf(char *s, intptr_t maxlen, const char *msg, ...)
   GC_CAN_IGNORE va_list args;
 
   HIDE_FROM_XFORM(va_start(args, msg));
-  len = sch_vsprintf(s, maxlen, msg, args, NULL, NULL);
+  len = sch_vsprintf(s, maxlen, msg, args, NULL, NULL, NULL);
   HIDE_FROM_XFORM(va_end(args));
 
   return len;
 }
 
+int scheme_last_error_is_racket(int errid)
+{
+  return ((rktio_get_last_error_kind(scheme_rktio) == RKTIO_ERROR_KIND_RACKET)
+          && (rktio_get_last_error(scheme_rktio) == errid));
+}
+
+#define ESCAPING_NONCM_PRIM(name, func, a1, a2, env) \
+  p = scheme_make_noncm_prim(func, name, a1, a2); \
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_ALWAYS_ESCAPES); \
+  scheme_add_global_constant(name, p, env);
+
 void scheme_init_error(Scheme_Env *env)
 {
+  Scheme_Object *p;
+
   if (!scheme_console_printf)
     scheme_console_printf = default_printf;
   if (!scheme_console_output)
@@ -681,15 +787,15 @@ void scheme_init_error(Scheme_Env *env)
   REGISTER_SO(scheme_raise_arity_error_proc);
 
   /* errors */
-  GLOBAL_NONCM_PRIM("error",                      error,                 1, -1, env);
-  GLOBAL_NONCM_PRIM("raise-user-error",           raise_user_error,      1, -1, env);
-  GLOBAL_NONCM_PRIM("raise-syntax-error",         raise_syntax_error,    2,  5, env);
-  GLOBAL_NONCM_PRIM("raise-type-error",           raise_type_error,      3, -1, env);
-  GLOBAL_NONCM_PRIM("raise-argument-error",       raise_argument_error,  3, -1, env);
-  GLOBAL_NONCM_PRIM("raise-result-error",         raise_result_error,    3, -1, env);
-  GLOBAL_NONCM_PRIM("raise-arguments-error",      raise_arguments_error, 2, -1, env);
-  GLOBAL_NONCM_PRIM("raise-mismatch-error",       raise_mismatch_error,  3, -1, env);
-  GLOBAL_NONCM_PRIM("raise-range-error",          raise_range_error,     7, 8, env);
+  ESCAPING_NONCM_PRIM("error",                      error,                 1, -1, env);
+  ESCAPING_NONCM_PRIM("raise-user-error",           raise_user_error,      1, -1, env);
+  ESCAPING_NONCM_PRIM("raise-syntax-error",         raise_syntax_error,    2,  5, env);
+  ESCAPING_NONCM_PRIM("raise-type-error",           raise_type_error,      3, -1, env);
+  ESCAPING_NONCM_PRIM("raise-argument-error",       raise_argument_error,  3, -1, env);
+  ESCAPING_NONCM_PRIM("raise-result-error",         raise_result_error,    3, -1, env);
+  ESCAPING_NONCM_PRIM("raise-arguments-error",      raise_arguments_error, 2, -1, env);
+  ESCAPING_NONCM_PRIM("raise-mismatch-error",       raise_mismatch_error,  3, -1, env);
+  ESCAPING_NONCM_PRIM("raise-range-error",          raise_range_error,     7, 8, env);
 
   scheme_raise_arity_error_proc =                  scheme_make_noncm_prim(raise_arity_error, "raise-arity-error", 2, -1);
   scheme_add_global_constant("raise-arity-error",  scheme_raise_arity_error_proc, env);
@@ -703,21 +809,24 @@ void scheme_init_error(Scheme_Env *env)
   GLOBAL_PARAMETER("error-print-context-length",  error_print_context_length, MZCONFIG_ERROR_PRINT_CONTEXT_LENGTH,  env);
   GLOBAL_PARAMETER("error-print-source-location", error_print_srcloc,         MZCONFIG_ERROR_PRINT_SRCLOC,          env);
 
-  /* logging */
   GLOBAL_NONCM_PRIM("exit",              scheme_do_exit,  0, 1, env);
-  GLOBAL_NONCM_PRIM("log-level?",        log_level_p,     2, 2, env);
-  GLOBAL_NONCM_PRIM("log-max-level",     log_max_level,   1, 1, env);
-  GLOBAL_NONCM_PRIM("make-logger",       make_logger,     0, 3, env);
+
+  /* logging */
+  GLOBAL_NONCM_PRIM("log-level?",        log_level_p,     2, 3, env);
+  GLOBAL_NONCM_PRIM("log-max-level",     log_max_level,   1, 2, env);
+  GLOBAL_NONCM_PRIM("log-all-levels",    log_all_levels,  1, 1, env);
+  GLOBAL_NONCM_PRIM("log-level-evt",     log_level_evt,   1, 1, env);
+  GLOBAL_NONCM_PRIM("make-logger",       make_logger,     0, -1, env);
   GLOBAL_NONCM_PRIM("make-log-receiver", make_log_reader, 2, -1, env);
 
-  GLOBAL_PRIM_W_ARITY("log-message",    log_message,   4, 5, env);
+  GLOBAL_PRIM_W_ARITY("log-message",    log_message,   4, 6, env);
   GLOBAL_FOLDING_PRIM("logger?",        logger_p,      1, 1, 1, env);
   GLOBAL_FOLDING_PRIM("logger-name",    logger_name,   1, 1, 1, env);
   GLOBAL_FOLDING_PRIM("log-receiver?",  log_reader_p,  1, 1, 1, env);
 
   GLOBAL_PARAMETER("current-logger",    current_logger, MZCONFIG_LOGGER, env);
 
-  scheme_add_evt(scheme_log_reader_type, (Scheme_Ready_Fun)log_reader_get, NULL, NULL, 1);
+  GLOBAL_NONCM_PRIM("srcloc->string",   srcloc_to_string, 1, 1, env);
 
   REGISTER_SO(scheme_def_exit_proc);
   REGISTER_SO(default_display_handler);
@@ -766,6 +875,11 @@ void scheme_init_error(Scheme_Env *env)
                                                 1, 1);
 }
 
+void scheme_init_logger_wait()
+{
+  scheme_add_evt(scheme_log_reader_type, (Scheme_Ready_Fun)log_reader_get, NULL, NULL, 1);
+}
+
 void scheme_init_logger()
 {
   REGISTER_SO(scheme_main_logger);
@@ -778,6 +892,9 @@ void scheme_init_logger()
 
   REGISTER_SO(scheme_future_logger);
   scheme_future_logger = scheme_make_logger(scheme_main_logger, scheme_intern_symbol("future"));
+
+  REGISTER_SO(scheme_place_logger);
+  scheme_place_logger = scheme_make_logger(scheme_main_logger, scheme_intern_symbol("place"));
 }
 
 Scheme_Logger *scheme_get_main_logger() {
@@ -790,6 +907,10 @@ Scheme_Logger *scheme_get_gc_logger() {
 
 Scheme_Logger *scheme_get_future_logger() {
   return scheme_future_logger;
+}
+
+Scheme_Logger *scheme_get_place_logger() {
+  return scheme_place_logger;
 }
 
 void scheme_init_error_config(void)
@@ -953,7 +1074,7 @@ scheme_signal_error (const char *msg, ...)
   intptr_t len;
 
   HIDE_FROM_XFORM(va_start(args, msg));
-  len = sch_vsprintf(NULL, 0, msg, args, &buffer, NULL);
+  len = sch_vsprintf(NULL, 0, msg, args, &buffer, NULL, NULL);
   HIDE_FROM_XFORM(va_end(args));
 
   if (scheme_current_thread->current_local_env) {
@@ -985,7 +1106,7 @@ void scheme_warning(char *msg, ...)
   intptr_t len;
 
   HIDE_FROM_XFORM(va_start(args, msg));
-  len = sch_vsprintf(NULL, 0, msg, args, &buffer, NULL);
+  len = sch_vsprintf(NULL, 0, msg, args, &buffer, NULL, NULL);
   HIDE_FROM_XFORM(va_end(args));
 
   buffer[len++] = '\n';
@@ -1003,13 +1124,13 @@ void scheme_log(Scheme_Logger *logger, int level, int flags,
   intptr_t len;
 
   if (logger) {
-    if (logger->local_timestamp == *logger->timestamp)
+    if (logger->local_timestamp == SCHEME_INT_VAL(logger->root_timestamp[0]))
       if (logger->want_level < level)
         return;
   }
 
   HIDE_FROM_XFORM(va_start(args, msg));
-  len = sch_vsprintf(NULL, 0, msg, args, &buffer, NULL);
+  len = sch_vsprintf(NULL, 0, msg, args, &buffer, NULL, NULL);
   HIDE_FROM_XFORM(va_end(args));
 
   buffer[len] = 0;
@@ -1026,13 +1147,13 @@ void scheme_log_w_data(Scheme_Logger *logger, int level, int flags,
   intptr_t len;
 
   if (logger) {
-    if (logger->local_timestamp == *logger->timestamp)
+    if (logger->local_timestamp == SCHEME_INT_VAL(logger->root_timestamp[0]))
       if (logger->want_level < level)
         return;
   }
 
   HIDE_FROM_XFORM(va_start(args, msg));
-  len = sch_vsprintf(NULL, 0, msg, args, &buffer, NULL);
+  len = sch_vsprintf(NULL, 0, msg, args, &buffer, NULL, NULL);
   HIDE_FROM_XFORM(va_end(args));
 
   buffer[len] = 0;
@@ -1048,8 +1169,8 @@ int scheme_log_level_p(Scheme_Logger *logger, int level)
     logger = (Scheme_Logger *)scheme_get_param(config, MZCONFIG_LOGGER);
   }
 
-  if (logger->local_timestamp < *logger->timestamp)
-    update_want_level(logger);
+  if (logger->local_timestamp < SCHEME_INT_VAL(logger->root_timestamp[0]))
+    update_want_level(logger, NULL);
 
   return (logger->want_level >= level);
 }
@@ -1177,7 +1298,10 @@ static char *make_arity_expect_string(const char *name, int namelen,
         v = (Scheme_Object *)name;
         if (SCHEME_CHAPERONEP(v))
           v = SCHEME_CHAPERONE_VAL(v);
-        v = scheme_extract_struct_procedure(v, -1, NULL, &is_method);
+        if (scheme_is_struct_instance(scheme_reduced_procedure_struct, v))
+          v = NULL; /* hide any wider type that a nested structure might report */
+        else
+          v = scheme_extract_struct_procedure(v, -1, NULL, &is_method);
         if (!v || is_method || !SCHEME_CHAPERONE_PROC_STRUCTP(v))
           break;
         name = (const char *)v;
@@ -1327,10 +1451,7 @@ void scheme_wrong_count_m(const char *name, int minc, int maxc,
 
   if (argv == p->tail_buffer) {
     /* See calls in scheme_do_eval: */
-    GC_CAN_IGNORE Scheme_Object **tb;
-    p->tail_buffer = NULL; /* so args aren't zeroed */
-    tb = MALLOC_N(Scheme_Object *, p->tail_buffer_size);
-    p->tail_buffer = tb;
+    scheme_realloc_tail_buffer(p);
   }
 
   /* minc = 1 -> name is really a case-lambda or native proc */
@@ -1338,12 +1459,12 @@ void scheme_wrong_count_m(const char *name, int minc, int maxc,
   if (minc == -1) {
     /* Extract arity, check for is_method in case-lambda, etc. */
     if (SAME_TYPE(SCHEME_TYPE((Scheme_Object *)name), scheme_closure_type)) {
-      Scheme_Closure_Data *data;
-      data = SCHEME_COMPILED_CLOS_CODE((Scheme_Object *)name);
+      Scheme_Lambda *data;
+      data = SCHEME_CLOSURE_CODE((Scheme_Object *)name);
       name = scheme_get_proc_name((Scheme_Object *)name, NULL, 1);
       
       minc = data->num_params;
-      if (SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_HAS_REST) {
+      if (SCHEME_LAMBDA_FLAGS(data) & LAMBDA_HAS_REST) {
         minc -= 1;
         maxc = -1;
       } else
@@ -1351,9 +1472,9 @@ void scheme_wrong_count_m(const char *name, int minc, int maxc,
     } else if (SAME_TYPE(SCHEME_TYPE((Scheme_Object *)name), scheme_case_closure_type)) {
       Scheme_Case_Lambda *cl = (Scheme_Case_Lambda *)name;
       if (cl->count) {
-	Scheme_Closure_Data *data;
-	data = (Scheme_Closure_Data *)SCHEME_COMPILED_CLOS_CODE(cl->array[0]);
-	if (SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_IS_METHOD)
+	Scheme_Lambda *data;
+	data = (Scheme_Lambda *)SCHEME_CLOSURE_CODE(cl->array[0]);
+	if (SCHEME_LAMBDA_FLAGS(data) & LAMBDA_IS_METHOD)
 	  is_method = 1;
       } else if (cl->name && SCHEME_BOXP(cl->name)) {
 	/* See note in schpriv.h about the IS_METHOD hack */
@@ -1490,11 +1611,11 @@ char *scheme_make_arity_expect_string(const char *map_name,
     mina = -1;
     maxa = 0;
   } else {
-    Scheme_Closure_Data *data;
+    Scheme_Lambda *data;
 
-    data = (Scheme_Closure_Data *)SCHEME_COMPILED_CLOS_CODE(proc);
+    data = (Scheme_Lambda *)SCHEME_CLOSURE_CODE(proc);
     mina = maxa = data->num_params;
-    if (SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_HAS_REST) {
+    if (SCHEME_LAMBDA_FLAGS(data) & LAMBDA_HAS_REST) {
       --mina;
       maxa = -1;
     }
@@ -1995,26 +2116,28 @@ void scheme_system_error(const char *name, const char *what, int errid)
                    name, what, errid);
 }
 
+void scheme_rktio_error(const char *name, const char *what)
+{
+  scheme_raise_exn(MZEXN_FAIL, 
+                   "%s: %s failed\n"
+                   "  system error: %R", 
+                   name, what);
+}
+
 #define MZERR_MAX_SRC_LEN 100
 
-static char *make_srcloc_string(Scheme_Stx_Srcloc *srcloc, intptr_t *len)
+static char *make_srcloc_string(Scheme_Object *src, intptr_t line, intptr_t col, intptr_t pos, intptr_t *len)
 {
-  intptr_t line, col;
-  Scheme_Object *src;
   char *srcstr, *result;
   intptr_t srclen, rlen;
 
-  if (!srcloc->src || (SCHEME_FALSEP(srcloc->src) && (srcloc->pos < 0))) {
+  if (!src || (SCHEME_FALSEP(src) && (pos < 0))) {
     if (len) *len = 0;
     return NULL;
   }
 
-  line = srcloc->line;
-  col = srcloc->col;
   if (col < 0)
-    col = srcloc->pos;
-
-  src = srcloc->src;
+    col = pos + 1;
 
   if (src && SCHEME_PATHP(src)) {
     /* Strip off prefix matching the current directory: */
@@ -2049,6 +2172,48 @@ static char *make_srcloc_string(Scheme_Stx_Srcloc *srcloc, intptr_t *len)
   return result;
 }
 
+static char *make_stx_srcloc_string(Scheme_Stx_Srcloc *srcloc, intptr_t *len)
+{
+  return make_srcloc_string(srcloc->src, srcloc->line, srcloc->col, srcloc->pos, len);
+}
+
+char *scheme_make_srcloc_string(Scheme_Object *stx, intptr_t *len)
+{
+  return make_stx_srcloc_string(((Scheme_Stx *)stx)->srcloc, len);
+}
+
+static intptr_t struct_number_ref(Scheme_Object *s, int pos)
+{
+  s = scheme_struct_ref(s, pos);
+  if (SCHEME_FALSEP(s))
+    return -1;
+  else
+    return SCHEME_INT_VAL(s);
+}
+
+Scheme_Object *srcloc_to_string(int argc, Scheme_Object **argv)
+{
+  Scheme_Object *src;
+  char *s;
+  intptr_t len, line, col, pos;
+  
+  if (!scheme_is_location(argv[0]))
+    scheme_wrong_contract("srcloc->string", "srcloc?", 0, argc, argv);
+
+  src = scheme_struct_ref(argv[0], 0);
+  if (SCHEME_FALSEP(src)) src = NULL;
+  line = struct_number_ref(argv[0], 1);
+  col = struct_number_ref(argv[0], 2);
+  pos = struct_number_ref(argv[0], 3);
+  
+  s = make_srcloc_string(src, line, (col >= 0 ? col+1 : -1), pos, &len);
+
+  if (s)
+    return scheme_make_sized_utf8_string(s, len);
+  else
+    return scheme_false;
+}
+
 void scheme_read_err(Scheme_Object *port,
 		     Scheme_Object *stxsrc,
 		     intptr_t line, intptr_t col, intptr_t pos, intptr_t span,
@@ -2062,7 +2227,7 @@ void scheme_read_err(Scheme_Object *port,
   Scheme_Object *loc;
 
   HIDE_FROM_XFORM(va_start(args, detail));
-  slen = sch_vsprintf(NULL, 0, detail, args, &s, NULL);
+  slen = sch_vsprintf(NULL, 0, detail, args, &s, NULL, NULL);
   HIDE_FROM_XFORM(va_end(args));
 
   ls = "";
@@ -2086,7 +2251,7 @@ void scheme_read_err(Scheme_Object *port,
     pos = ((Scheme_Stx *)xsrc)->srcloc->pos;
 
     if (show_loc)
-      fn = make_srcloc_string(((Scheme_Stx *)xsrc)->srcloc, &fnlen);
+      fn = make_stx_srcloc_string(((Scheme_Stx *)xsrc)->srcloc, &fnlen);
     else
       fn = NULL;
   } else
@@ -2102,7 +2267,7 @@ void scheme_read_err(Scheme_Object *port,
 
     if (port) {
       Scheme_Object *pn;
-      pn = SCHEME_IPORT_NAME(port);
+      pn = scheme_input_port_record(port)->name;
       if (SCHEME_PATHP(pn)) {
 	pn = scheme_remove_current_directory_prefix(pn);
 	fn = SCHEME_PATH_VAL(pn);
@@ -2147,6 +2312,31 @@ void scheme_read_err(Scheme_Object *port,
                    (*suggests ? "\n  possible cause: " : ""), suggests);
 }
 
+Scheme_Object *scheme_numr_err(Scheme_Object *complain,
+                               Scheme_Object *stxsrc,
+                               intptr_t line, intptr_t col, intptr_t pos, intptr_t span,
+                               Scheme_Object *indentation,
+                               const char *detail, ...)
+{
+  GC_CAN_IGNORE va_list args;
+  char *s;
+  intptr_t slen;
+
+  HIDE_FROM_XFORM(va_start(args, detail));
+  slen = sch_vsprintf(NULL, 0, detail, args, &s, NULL, NULL);
+  HIDE_FROM_XFORM(va_end(args));
+
+  if (SCHEME_FALSEP(complain))
+    return scheme_make_sized_utf8_string(s, slen);
+
+  scheme_read_err(complain,
+                  stxsrc,
+                  line, col, pos, span,
+                  0, indentation,
+                  "read: %s", s);
+  ESCAPED_BEFORE_HERE;
+}
+
 static void do_wrong_syntax(const char *where,
                             Scheme_Object *detail_form,
                             Scheme_Object *form,
@@ -2157,12 +2347,10 @@ static void do_wrong_syntax(const char *where,
   intptr_t len, vlen, dvlen, blen, plen;
   char *buffer;
   char *v, *dv, *p;
-  Scheme_Object *mod, *nomwho, *who;
+  Scheme_Object *who;
   int show_src;
 
   who = NULL;
-  nomwho = NULL;
-  mod = scheme_false;
 
   if (!s) {
     s = "bad syntax";
@@ -2176,14 +2364,10 @@ static void do_wrong_syntax(const char *where,
     where = NULL;
   } else if (where == scheme_application_stx_string) {
     who = scheme_intern_symbol("#%app");
-    nomwho = who;
-    mod = scheme_intern_symbol("racket");
   } else if ((where == scheme_set_stx_string)
 	     || (where == scheme_var_ref_string)
 	     || (where == scheme_begin_stx_string)) {
     who = scheme_intern_symbol(where);
-    nomwho = who;
-    mod = scheme_intern_symbol("racket");
     if (where == scheme_begin_stx_string)
       where = "begin (possibly implicit)";
   }
@@ -2198,27 +2382,18 @@ static void do_wrong_syntax(const char *where,
   if (form) {
     Scheme_Object *pform;
     if (SCHEME_STXP(form)) {
-      p = make_srcloc_string(((Scheme_Stx *)form)->srcloc, &plen);
+      p = make_stx_srcloc_string(((Scheme_Stx *)form)->srcloc, &plen);
       pform = scheme_syntax_to_datum(form, 0, NULL);
 
       /* Try to extract syntax name from syntax */
-      if (!nomwho && (SCHEME_SYMBOLP(SCHEME_STX_VAL(form)) || SCHEME_STX_PAIRP(form))) {
+      if (!who && (SCHEME_SYMBOLP(SCHEME_STX_VAL(form)) || SCHEME_STX_PAIRP(form))) {
 	Scheme_Object *first;
 	if (SCHEME_STX_PAIRP(form))
 	  first = SCHEME_STX_CAR(form);
 	else
 	  first = form;
-	if (SCHEME_SYMBOLP(SCHEME_STX_VAL(first))) {
-	  /* Get module and name at source: */
-	  int phase;
+	if (SCHEME_SYMBOLP(SCHEME_STX_VAL(first)))
 	  who = SCHEME_STX_VAL(first); /* printed name is local name */
-	  /* name in exception is nominal source: */
- 	  if (scheme_current_thread->current_local_env)
-	    phase = scheme_current_thread->current_local_env->genv->phase;
-	  else phase = 0;
-	  scheme_stx_module_name(0, &first, scheme_make_integer(phase), &mod, &nomwho, 
-                                 NULL, NULL, NULL, NULL, NULL, NULL, NULL);
-	}
       }
     } else {
       pform = form;
@@ -2242,7 +2417,7 @@ static void do_wrong_syntax(const char *where,
     Scheme_Object *pform;
     if (SCHEME_STXP(detail_form)) {
       if (((Scheme_Stx *)detail_form)->srcloc->line >= 0)
-	p = make_srcloc_string(((Scheme_Stx *)detail_form)->srcloc, &plen);
+	p = make_stx_srcloc_string(((Scheme_Stx *)detail_form)->srcloc, &plen);
       pform = scheme_syntax_to_datum(detail_form, 0, NULL);
       /* To go in exn record: */
       form = detail_form;
@@ -2273,8 +2448,6 @@ static void do_wrong_syntax(const char *where,
     else
       who = scheme_false;
   }
-  if (!nomwho)
-    nomwho = who;
 
   if (!where) {
     if (SCHEME_FALSEP(who))
@@ -2304,12 +2477,19 @@ static void do_wrong_syntax(const char *where,
 			    where,
                             s, slen,
 			    v, vlen);
-  } else
+  } else if (dv)
+      blen = scheme_sprintf(buffer, blen, 
+                            "%t%s%s: %t\n"
+                            "  at: %t",
+                            p, plen,
+                            p ? ": " : "",
+			    where,
+                            s, slen,
+			    dv, dvlen);
+  else
     blen = scheme_sprintf(buffer, blen, "%s: %t", 
                           where,
                           s, slen);
-
-  /* We don't actually use nomwho and mod, anymore. */
 
   if (SCHEME_FALSEP(form))
     form = extra_sources;
@@ -2339,7 +2519,7 @@ void scheme_wrong_syntax(const char *where,
     GC_CAN_IGNORE va_list args;
 
     HIDE_FROM_XFORM(va_start(args, detail));
-    slen = sch_vsprintf(NULL, 0, detail, args, &s, NULL);
+    slen = sch_vsprintf(NULL, 0, detail, args, &s, NULL, NULL);
     HIDE_FROM_XFORM(va_end(args));
   }
 
@@ -2356,7 +2536,7 @@ void scheme_unbound_syntax(const char *where,
   GC_CAN_IGNORE va_list args;
 
   HIDE_FROM_XFORM(va_start(args, detail));
-  slen = sch_vsprintf(NULL, 0, detail, args, &s, NULL);
+  slen = sch_vsprintf(NULL, 0, detail, args, &s, NULL, NULL);
   HIDE_FROM_XFORM(va_end(args));
 
   do_wrong_syntax(where, detail_form, form, s, slen, scheme_null, MZEXN_FAIL_SYNTAX_UNBOUND);
@@ -2378,7 +2558,7 @@ void scheme_wrong_syntax_with_more_sources(const char *where,
     GC_CAN_IGNORE va_list args;
 
     HIDE_FROM_XFORM(va_start(args, detail));
-    slen = sch_vsprintf(NULL, 0, detail, args, &s, NULL);
+    slen = sch_vsprintf(NULL, 0, detail, args, &s, NULL, NULL);
     HIDE_FROM_XFORM(va_end(args));
   }
 
@@ -2423,7 +2603,7 @@ void scheme_wrong_return_arity(const char *where,
     GC_CAN_IGNORE va_list args;
 
     HIDE_FROM_XFORM(va_start(args, detail));
-    slen = sch_vsprintf(NULL, 0, detail, args, &s, NULL);
+    slen = sch_vsprintf(NULL, 0, detail, args, &s, NULL, NULL);
     HIDE_FROM_XFORM(va_end(args));
   }
 
@@ -2482,7 +2662,7 @@ void scheme_raise_out_of_memory(const char *where, const char *msg, ...)
     GC_CAN_IGNORE va_list args;
 
     HIDE_FROM_XFORM(va_start(args, msg));
-    slen = sch_vsprintf(NULL, 0, msg, args, &s, NULL);
+    slen = sch_vsprintf(NULL, 0, msg, args, &s, NULL, NULL);
     HIDE_FROM_XFORM(va_end(args));
   }
 
@@ -2529,7 +2709,7 @@ void scheme_unbound_global(Scheme_Bucket *b)
 		     name,
 		     errmsg,
 		     name,
-		     home->module->modsrc,
+		     scheme_get_modsrc(home->module),
                      phase,
                      phase_note);
   } else {
@@ -2936,7 +3116,7 @@ static int is_arity_list(Scheme_Object *l)
   while (!SCHEME_NULLP(l)) {
     a = SCHEME_CAR(l);
     if (!scheme_nonneg_exact_p(a)
-        && !scheme_nonneg_exact_p(a))
+        && !is_arity_at_least(a))
       return 0;
     l = SCHEME_CDR(l);
   }
@@ -3006,10 +3186,10 @@ static Scheme_Object *good_print_width(int c, Scheme_Object **argv)
 
 static Scheme_Object *error_print_width(int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("error-print-width",
-			     scheme_make_integer(MZCONFIG_ERROR_PRINT_WIDTH),
-			     argc, argv,
-			     -1, good_print_width, "exact integer greater than three", 0);
+  return scheme_param_config2("error-print-width",
+                              scheme_make_integer(MZCONFIG_ERROR_PRINT_WIDTH),
+                              argc, argv,
+                              -1, good_print_width, "(and/c exact-integer? (>=/c 3))", 0);
 }
 
 static Scheme_Object *good_print_context_length(int c, Scheme_Object **argv)
@@ -3027,10 +3207,10 @@ static Scheme_Object *good_print_context_length(int c, Scheme_Object **argv)
 
 static Scheme_Object *error_print_context_length(int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("error-print-context-length",
-			     scheme_make_integer(MZCONFIG_ERROR_PRINT_CONTEXT_LENGTH),
-			     argc, argv,
-			     -1, good_print_context_length, "non-negative integer", 0);
+  return scheme_param_config2("error-print-context-length",
+                              scheme_make_integer(MZCONFIG_ERROR_PRINT_CONTEXT_LENGTH),
+                              argc, argv,
+                              -1, good_print_context_length, "exact-nonnegative-integer?", 0);
 }
 
 static Scheme_Object *error_print_srcloc(int argc, Scheme_Object *argv[])
@@ -3071,6 +3251,13 @@ void scheme_write_proc_context(Scheme_Object *port, int print_width,
   }
 }
 
+static void write_context_repeats(int repeats, Scheme_Object *port)
+{
+  char buf[64];
+  sprintf(buf, "[repeats %d more time%s]", repeats, (repeats == 1) ? "" : "s");
+  scheme_write_byte_string(buf, strlen(buf), port);
+}
+
 static Scheme_Object *
 def_error_display_proc(int argc, Scheme_Object *argv[])
 {
@@ -3087,8 +3274,8 @@ def_error_display_proc(int argc, Scheme_Object *argv[])
   s = scheme_char_string_to_byte_string(argv[0]);
 
   scheme_write_byte_string(SCHEME_BYTE_STR_VAL(s),
-			   SCHEME_BYTE_STRTAG_VAL(s),
-			   port);
+                           SCHEME_BYTE_STRTAG_VAL(s),
+                           port);
 
   /* Print context, if available */
   if (SCHEME_CHAPERONE_STRUCTP(argv[1])
@@ -3104,49 +3291,104 @@ def_error_display_proc(int argc, Scheme_Object *argv[])
       max_cnt = 0x7FFFFFFF;
 
     if (max_cnt) {
-      int orig_max_cnt = max_cnt;
+      Scheme_Object *prev_name;
+      int orig_max_cnt = max_cnt, repeats;
       w = scheme_get_param(config, MZCONFIG_ERROR_PRINT_WIDTH);
       if (SCHEME_INTP(w))
-	print_width = SCHEME_INT_VAL(w);
+        print_width = SCHEME_INT_VAL(w);
       else
-	print_width = 0x7FFFFFFF;
+        print_width = 0x7FFFFFFF;
+
+      /* Print srcloc(s) if present */
+      l = scheme_struct_type_property_ref(scheme_source_property, argv[1]);
+      if (l)
+        l = _scheme_apply(l, 1, &(argv[1]));
+
+
+      if (l && !SCHEME_NULLP(l)) {
+        /* Some exns include srcloc in the msg, so skip the first srcloc of those when needed */
+        if (SCHEME_TRUEP(scheme_get_param(scheme_current_config(), MZCONFIG_ERROR_PRINT_SRCLOC))
+            && (scheme_is_struct_instance(exn_table[MZEXN_FAIL_READ].type, argv[1])
+                || scheme_is_struct_instance(exn_table[MZEXN_FAIL_SYNTAX].type, argv[1])
+                || scheme_is_struct_instance(exn_table[MZEXN_FAIL_CONTRACT_VARIABLE].type, argv[1])))
+          l = SCHEME_CDR(l);
+
+        if (!SCHEME_NULLP(l))
+          scheme_write_byte_string("\n  location...:", 15, port);
+
+        while (!SCHEME_NULLP(l)) {
+          scheme_write_byte_string("\n   ", 4, port);
+          w = SCHEME_CAR(l);
+          w = srcloc_to_string(1, &w);
+          scheme_display_w_max(w, port, print_width);
+          l = SCHEME_CDR(l);
+        }
+      }
+
+      prev_name = NULL;
+      repeats = 0;
+
       l = scheme_get_stack_trace(scheme_struct_ref(argv[1], 1));
       while (!SCHEME_NULLP(l)) {
-	if (!max_cnt) {
-	  scheme_write_byte_string("...\n", 4, port);
-	  break;
-	} else {
-	  Scheme_Object *name, *loc;
-	  
-	  if (max_cnt == orig_max_cnt) {
-	    /* Starting label: */
-	    scheme_write_byte_string("\n  context...:\n", 15, port);
-	  } else
-            scheme_write_byte_string("\n", 1, port);
+        if (!max_cnt) {
+          scheme_write_byte_string("\n   ...", 7, port);
+          break;
+        } else {
+          Scheme_Object *name, *loc;
 
-	  name = SCHEME_CAR(l);
-	  loc = SCHEME_CDR(name);
-	  name = SCHEME_CAR(name);
-
-          scheme_write_byte_string("   ", 3, port);
-
-          if (SCHEME_TRUEP(loc)) {
-            Scheme_Structure *sloc = (Scheme_Structure *)loc;
-            scheme_write_proc_context(port, print_width, 
-                                      name, 
-                                      sloc->slots[0], sloc->slots[1],
-                                      sloc->slots[2], sloc->slots[3],
-                                      0);
+          name = SCHEME_CAR(l);
+          if (prev_name && scheme_equal(name, prev_name)) {
+            repeats++;
           } else {
-            scheme_write_proc_context(port, print_width, 
-                                      name, 
-                                      NULL, NULL, NULL, NULL, 
-                                      0);
+            if (max_cnt == orig_max_cnt) {
+              /* Starting label: */
+              scheme_write_byte_string("\n  context...:\n", 15, port);
+            } else {
+              scheme_write_byte_string("\n", 1, port);
+            }
+
+            if (repeats) {
+              scheme_write_byte_string("   ", 3, port);
+              write_context_repeats(repeats, port);
+              repeats = 0;
+              --max_cnt;
+              if (max_cnt)
+                scheme_write_byte_string("\n", 1, port);
+            }
+
+            prev_name = name;
+
+            if (max_cnt) {
+              loc = SCHEME_CDR(name);
+              name = SCHEME_CAR(name);
+
+              scheme_write_byte_string("   ", 3, port);
+
+              if (SCHEME_TRUEP(loc)) {
+                Scheme_Structure *sloc = (Scheme_Structure *)loc;
+                scheme_write_proc_context(port, print_width, 
+                                          name, 
+                                          sloc->slots[0], sloc->slots[1],
+                                          sloc->slots[2], sloc->slots[3],
+                                          0);
+              } else {
+                scheme_write_proc_context(port, print_width, 
+                                          name, 
+                                          NULL, NULL, NULL, NULL, 
+                                          0);
+              }
+              --max_cnt;
+            }
           }
 
-	  l = SCHEME_CDR(l);
-	  --max_cnt;
-	}
+          l = SCHEME_CDR(l);
+        }
+      }
+
+      if (repeats) {
+        scheme_write_byte_string("\n", 1, port);
+        scheme_write_byte_string("   ", 3, port);
+        write_context_repeats(repeats, port);
       }
     }
   }
@@ -3287,6 +3529,8 @@ def_exit_handler_proc(int argc, Scheme_Object *argv[])
   } else
     status = 0;
 
+  scheme_flush_managed(NULL, 0);
+
   if (scheme_exit)
     scheme_exit(status);
   else
@@ -3348,6 +3592,31 @@ static Scheme_Object *default_yield_handler(int argc, Scheme_Object **argv)
 
 /***********************************************************************/
 
+static Scheme_Object *level_number_to_symbol(int level)
+{
+  switch (level) {
+  case 0:
+    return scheme_false;
+    break;
+  case SCHEME_LOG_FATAL:
+    return fatal_symbol;
+    break;
+  case SCHEME_LOG_ERROR:
+    return error_symbol;
+    break;
+  case SCHEME_LOG_WARNING:
+    return warning_symbol;
+    break;
+  case SCHEME_LOG_INFO:
+    return info_symbol;
+    break;
+  case SCHEME_LOG_DEBUG:
+  default:
+    return debug_symbol;
+    break;
+  }
+}
+
 static int extract_spec_level(Scheme_Object *level_spec, Scheme_Object *name)
 {
   if (!level_spec) return 0;
@@ -3361,22 +3630,39 @@ static int extract_spec_level(Scheme_Object *level_spec, Scheme_Object *name)
   }
 }
 
-void update_want_level(Scheme_Logger *logger)
+static int extract_max_spec_level(Scheme_Object *level_spec, Scheme_Object *name)
 {
-  Scheme_Log_Reader *lr;
-  Scheme_Object *stack = NULL, *queue, *b, *prev;
-  Scheme_Logger *parent = logger;
-  int want_level, level;
+  int mx = 0, v;
 
-  while (parent) {
-    stack = scheme_make_raw_pair((Scheme_Object *)parent, stack);
-    parent = parent->parent;
+  if (name)
+    return extract_spec_level(level_spec, name);
+
+  if (level_spec)  {
+    while (1) {
+      if (SCHEME_INTP(level_spec)) {
+        v = SCHEME_INT_VAL(level_spec);
+        if (v > mx) mx = v;
+        break;
+      } else {
+        v = SCHEME_INT_VAL(SCHEME_CAR(level_spec));
+        if (v > mx) mx = v;
+        level_spec = SCHEME_CDR(SCHEME_CDR(level_spec));
+      }
+    }
   }
 
+  return mx;
+}
+
+void update_want_level(Scheme_Logger *logger, Scheme_Object *name)
+{
+  Scheme_Log_Reader *lr;
+  Scheme_Object *queue, *b, *prev;
+  Scheme_Logger *parent = logger;
+  int want_level, level, ceiling_level = SCHEME_LOG_DEBUG;
+
   want_level = 0;
-  while (stack) {
-    parent = (Scheme_Logger *)SCHEME_CAR(stack);
-    
+  while (parent) {
     queue = parent->readers;
     prev = NULL;
     while (queue) {
@@ -3384,9 +3670,13 @@ void update_want_level(Scheme_Logger *logger)
       b = SCHEME_CAR(b);
       lr = (Scheme_Log_Reader *)SCHEME_BOX_VAL(b);
       if (lr) {
-        level = extract_spec_level(lr->level, logger->name);
+        level = extract_max_spec_level(lr->level, name);
+        if (level > ceiling_level)
+          level = ceiling_level;
         if (level > want_level)
           want_level = level;
+        if (want_level >= ceiling_level)
+          break;
         prev = queue;
       } else {
         if (prev)
@@ -3397,59 +3687,145 @@ void update_want_level(Scheme_Logger *logger)
       queue = SCHEME_CDR(queue);
     }
 
-    level = extract_spec_level(parent->syslog_level, logger->name);
+    level = extract_max_spec_level(parent->syslog_level, name);
     if (level > want_level)
       want_level = level;
-    level = extract_spec_level(parent->stderr_level, logger->name);
+    level = extract_max_spec_level(parent->stderr_level, name);
     if (level > want_level)
       want_level = level;    
 
-    stack = SCHEME_CDR(stack);
+    if (parent->propagate_level)
+      level = extract_max_spec_level(parent->propagate_level, name);
+    else
+      level = SCHEME_LOG_DEBUG;
+    if (level <= ceiling_level)
+      ceiling_level = level;
+
+    if (want_level >= ceiling_level)
+      break;
+
+    parent = parent->parent;
   }
 
-  logger->want_level = want_level;
-  logger->local_timestamp = *logger->timestamp;
+  if (!name) {
+    logger->want_level = want_level;
+    logger->local_timestamp = SCHEME_INT_VAL(logger->root_timestamp[0]);
+  } else {
+#   define WANT_NAME_LEVEL_CACHE_SIZE 8
+    int i;
+
+    b = logger->want_name_level_cache;
+    if (!b) {
+      b = scheme_make_vector(3 * WANT_NAME_LEVEL_CACHE_SIZE, scheme_make_integer(-1));
+      logger->want_name_level_cache = b;
+    }
+
+    /* find a slot already matching this name? */
+    for (i = SCHEME_VEC_SIZE(b); (i -= 3) >= 0; ) {
+      if (SAME_OBJ(name, SCHEME_VEC_ELS(b)[i]))
+        break;
+    }
+    if (i == 0) abort();
+    if (i < 0) {
+      /* find an out-of-date slot? */
+      for (i = SCHEME_VEC_SIZE(b); (i -= 3) >= 0; ) {
+        if (SCHEME_INT_VAL(SCHEME_VEC_ELS(b)[i+1]) < SCHEME_INT_VAL(logger->root_timestamp[0]))
+          break;
+      }
+      if (i < 0) {
+        /* rotate cache */
+        i = 3 * (WANT_NAME_LEVEL_CACHE_SIZE - 1);
+        memmove(&(SCHEME_VEC_ELS(b)[0]), 
+                &(SCHEME_VEC_ELS(b)[3]), 
+                i * sizeof(Scheme_Object *));
+      }
+    }
+
+    SCHEME_VEC_ELS(b)[i] = name;
+    SCHEME_VEC_ELS(b)[i+1] = scheme_make_integer(SCHEME_INT_VAL(logger->root_timestamp[0]));
+    SCHEME_VEC_ELS(b)[i+2] = scheme_make_integer(want_level);
+  }
 }
 
-#ifdef USE_WINDOWS_EVENT_LOG
-static int event_procs_ready;
-typedef HANDLE (WINAPI *mzRegisterEventSourceProc)(LPCTSTR lpUNCServerName, LPCTSTR lpSourceName);
-typedef BOOL (WINAPI *mzReportEventProc)(HANDLE hEventLog, WORD wType, WORD wCategory, DWORD dwEventID,
-						                 PSID lpUserSid, WORD wNumStrings, DWORD dwDataSize, LPCTSTR* lpStrings,
-							             LPVOID lpRawData);
-static mzRegisterEventSourceProc mzRegisterEventSource;
-static mzReportEventProc mzReportEvent;
-#endif
+static int get_want_level(Scheme_Logger *logger, Scheme_Object *name)
+{
+  if (name && SCHEME_TRUEP(name)) {
+    while (1) {
+      if (logger->want_name_level_cache) {
+        int i;
+        for (i = SCHEME_VEC_SIZE(logger->want_name_level_cache); (i -= 3) >= 0; ) {
+          if (SAME_OBJ(name, SCHEME_VEC_ELS(logger->want_name_level_cache)[i])) {
+            if (SCHEME_INT_VAL(SCHEME_VEC_ELS(logger->want_name_level_cache)[i+1]) == SCHEME_INT_VAL(logger->root_timestamp[0])) {
+              return SCHEME_INT_VAL(SCHEME_VEC_ELS(logger->want_name_level_cache)[i+2]);
+            }
+          }
+        }
+      }
+      update_want_level(logger, name);
+    }
+  } else {
+    if (logger->local_timestamp < SCHEME_INT_VAL(logger->root_timestamp[0]))
+      update_want_level(logger, NULL);
 
+    return logger->want_level;
+  }
+}
 
+Scheme_Object *extract_all_levels(Scheme_Logger *logger)
+{
+  Scheme_Hash_Table *names;
+  Scheme_Log_Reader *lr;
+  Scheme_Object *queue, *b, *name, *result = scheme_null, *l;
+  int level, default_level;
+  Scheme_Logger *parent = logger;
 
-static Scheme_Object *make_log_message(int level, Scheme_Object *name, 
+  names = scheme_make_hash_table(SCHEME_hash_ptr);
+
+  default_level = get_want_level(logger, scheme_void);
+
+  while (parent) {
+    queue = parent->readers;
+    while (queue) {
+      b = SCHEME_CAR(queue);
+      b = SCHEME_CAR(b);
+      lr = (Scheme_Log_Reader *)SCHEME_BOX_VAL(b);
+      if (lr) {
+        for (l = lr->level; SCHEME_PAIRP(l); l = SCHEME_CDR(l)) {
+          l = SCHEME_CDR(l);
+          name = SCHEME_CAR(l);
+          if (!SCHEME_SYM_WEIRDP(name) && !scheme_hash_get(names, name)) {
+            level = get_want_level(logger, name);
+            scheme_hash_set(names, name, scheme_true);
+            if (level != default_level) {
+              result = scheme_make_pair(level_number_to_symbol(level), 
+                                        scheme_make_pair(name, result));
+            }
+          }
+          SCHEME_USE_FUEL(1);
+        }
+      }
+      queue = SCHEME_CDR(queue);
+    }
+    parent = parent->parent;
+    SCHEME_USE_FUEL(1);
+  }
+
+  result = scheme_make_pair(level_number_to_symbol(default_level),
+                            scheme_make_pair(scheme_false, result));
+
+  return result;
+}
+
+static Scheme_Object *make_log_message(int level, Scheme_Object *name, int prefix_msg,
                                        char *buffer, intptr_t len, Scheme_Object *data) {
   Scheme_Object *msg;
   Scheme_Object *v;
   
   msg = scheme_make_vector(4, NULL);
-  switch (level) {
-  case SCHEME_LOG_FATAL:
-    v = fatal_symbol;
-    break;
-  case SCHEME_LOG_ERROR:
-    v = error_symbol;
-    break;
-  case SCHEME_LOG_WARNING:
-    v = warning_symbol;
-    break;
-  case SCHEME_LOG_INFO:
-    v = info_symbol;
-    break;
-  case SCHEME_LOG_DEBUG:
-  default:
-    v = debug_symbol;
-    break;
-  }
+  v = level_number_to_symbol(level);
   SCHEME_VEC_ELS(msg)[0] = v;
           
-  if (name) {
+  if (name && prefix_msg) {
     /* Add logger name prefix: */
     intptr_t slen;
     char *cp;
@@ -3473,14 +3849,14 @@ static Scheme_Object *make_log_message(int level, Scheme_Object *name,
   return msg;
 }
 
-void scheme_log_name_message(Scheme_Logger *logger, int level, Scheme_Object *name, 
-                             char *buffer, intptr_t len, Scheme_Object *data)
+void scheme_log_name_pfx_message(Scheme_Logger *logger, int level, Scheme_Object *name,
+                                 char *buffer, intptr_t len, Scheme_Object *data,
+                                 int prefix_msg)
 {
   /* This function must avoid GC allocation when called with the
      configuration of scheme_log_abort(). */
   Scheme_Object *queue, *q, *msg = NULL, *b;
   Scheme_Log_Reader *lr;
-  Scheme_Logger *lo;
 
   if (!logger) {
     Scheme_Config *config;
@@ -3488,8 +3864,8 @@ void scheme_log_name_message(Scheme_Logger *logger, int level, Scheme_Object *na
     logger = (Scheme_Logger *)scheme_get_param(config, MZCONFIG_LOGGER);
   }
 
-  if (logger->local_timestamp < *logger->timestamp)
-    update_want_level(logger);
+  if (logger->local_timestamp < SCHEME_INT_VAL(logger->root_timestamp[0]))
+    update_want_level(logger, NULL);
 
   if (logger->want_level < level)
     return;
@@ -3497,114 +3873,37 @@ void scheme_log_name_message(Scheme_Logger *logger, int level, Scheme_Object *na
   if (!name)
     name = logger->name;
 
-  /* run notification callbacks: */
-  for (lo = logger; lo; lo = lo->parent) {
-    if (lo->callback) {
-      Scheme_Object *a[1];
-      if (!msg)
-        msg = make_log_message(level, name, buffer, len, data);
-
-      a[0] = msg;
-      scheme_apply_multi(lo->callback, 1, a);
-    }
-  }
-
   if (SCHEME_FALSEP(name))
     name = NULL;
 
   while (logger) {
     if (extract_spec_level(logger->syslog_level, name) >= level) {
-#ifdef USE_C_SYSLOG
       int pri;
+      Scheme_Object *cmd;
       switch (level) {
       case SCHEME_LOG_FATAL:
-        pri = LOG_CRIT;
+        pri = RKTIO_LOG_FATAL;
         break;
       case SCHEME_LOG_ERROR:
-        pri = LOG_ERR;
+        pri = RKTIO_LOG_ERROR;
         break;
       case SCHEME_LOG_WARNING:
-        pri = LOG_WARNING;
+        pri = RKTIO_LOG_WARNING;
         break;
       case SCHEME_LOG_INFO:
-        pri = LOG_INFO;
+        pri = RKTIO_LOG_INFO;
         break;
       case SCHEME_LOG_DEBUG:
       default:
-        pri = LOG_DEBUG;
+        pri = RKTIO_LOG_DEBUG;
         break;
       }
-      if (name)
-        syslog(pri, "%s: %s", SCHEME_SYM_VAL(name), buffer);
-      else
-        syslog(pri, "%s", buffer);
-#endif
-#ifdef USE_WINDOWS_EVENT_LOG
-      if (!event_procs_ready) {
-        HMODULE hm;
-        hm = LoadLibrary("advapi32.dll");
-        if (hm) {
-          mzRegisterEventSource = (mzRegisterEventSourceProc)GetProcAddress(hm, "RegisterEventSourceA");
-          mzReportEvent = (mzReportEventProc)GetProcAddress(hm, "ReportEventA");
-        }
-        event_procs_ready = 1;
-      }
-      if (mzRegisterEventSource) {
-        static HANDLE hEventLog;
-        WORD ty;
-        unsigned long sev;
-        LPCTSTR a[1];
-
-        if (!hEventLog) {
-          Scheme_Object *cmd;
-          cmd = scheme_get_run_cmd();
-          hEventLog = mzRegisterEventSource(NULL, SCHEME_PATH_VAL(cmd));
-        }
-
-        switch (level) {
-        case SCHEME_LOG_FATAL:
-          ty = EVENTLOG_ERROR_TYPE;
-          sev = 3;
-          break;
-        case SCHEME_LOG_ERROR:
-          ty = EVENTLOG_ERROR_TYPE;
-          sev = 3;
-          break;
-        case SCHEME_LOG_WARNING:
-          ty = EVENTLOG_WARNING_TYPE;
-          sev = 2;
-          break;
-        case SCHEME_LOG_INFO:
-          ty = EVENTLOG_INFORMATION_TYPE;
-          sev = 1;
-          break;
-        case SCHEME_LOG_DEBUG:
-        default:
-          ty = EVENTLOG_AUDIT_SUCCESS;
-          sev = 0;
-          break;
-        }
-        if (name) {
-          char *naya;
-          intptr_t slen;
-          slen = SCHEME_SYM_LEN(name);
-          naya = (char *)scheme_malloc_atomic(slen + 2 + len + 1);
-          memcpy(naya, SCHEME_SYM_VAL(name), slen);
-          memcpy(naya + slen, ": ", 2);
-          memcpy(naya + slen + 2, buffer, len);
-          naya[slen + 2 + len] = 0;
-          buffer = naya;
-          len += slen + 2;
-        }
-        a[0] = buffer;
-        mzReportEvent(hEventLog, ty, 1 /* category */,
-                      (sev << 30) | 2 /* message */,
-                      NULL, 
-                      1, 0,
-                      a, NULL);
-      }
-#endif
+      cmd = scheme_get_run_cmd();
+      rktio_syslog(scheme_rktio, pri,
+                   (name ? SCHEME_SYM_VAL(name) : NULL),
+                   buffer, SCHEME_PATH_VAL(cmd));
     }
+
     if (extract_spec_level(logger->stderr_level, name) >= level) {
       if (name) {
         intptr_t slen;
@@ -3624,7 +3923,7 @@ void scheme_log_name_message(Scheme_Logger *logger, int level, Scheme_Object *na
       if (lr) {
         if (extract_spec_level(lr->level, name) >= level) {
           if (!msg)
-            msg = make_log_message(level, name, buffer, len, data);
+            msg = make_log_message(level, name, prefix_msg, buffer, len, data);
           
           /* enqueue */
           q = scheme_make_raw_pair(msg, NULL);
@@ -3639,19 +3938,30 @@ void scheme_log_name_message(Scheme_Logger *logger, int level, Scheme_Object *na
       queue = SCHEME_CDR(queue);
     }
 
+    if (logger->parent && logger->propagate_level) {
+      if (extract_spec_level(logger->propagate_level, name) < level)
+        break;
+    }
+
     logger = logger->parent;
   }
 }
 
+void scheme_log_name_message(Scheme_Logger *logger, int level, Scheme_Object *name,
+                             char *buffer, intptr_t len, Scheme_Object *data)
+{
+  scheme_log_name_pfx_message(logger, level, name, buffer, len, data, 1);
+}
+
 void scheme_log_message(Scheme_Logger *logger, int level, char *buffer, intptr_t len, Scheme_Object *data)
 {
-  scheme_log_name_message(logger, level, NULL, buffer, len, data);
+  scheme_log_name_pfx_message(logger, level, NULL, buffer, len, data, 1);
 }
 
 void scheme_log_abort(char *buffer)
 {
   Scheme_Logger logger;
-  intptr_t ts;
+  Scheme_Object *ts[2];
 
   memset(&logger, 0, sizeof(logger));
 
@@ -3659,9 +3969,10 @@ void scheme_log_abort(char *buffer)
   logger.parent = NULL;
   logger.want_level = SCHEME_LOG_FATAL;
 
-  ts = 0;
-  logger.timestamp = &ts;
-  logger.local_timestamp = ts;
+  ts[0] = scheme_make_integer(0);
+  ts[1] = NULL;
+  logger.root_timestamp = ts;
+  logger.local_timestamp = 0;
   logger.syslog_level = init_syslog_level;
   logger.stderr_level = init_stderr_level;
 
@@ -3673,14 +3984,11 @@ void scheme_log_warning(char *buffer)
   scheme_log_message(scheme_main_logger, SCHEME_LOG_WARNING, buffer, strlen(buffer), scheme_false);
 }
 
-void scheme_glib_log_message(const char *log_domain,
+static void glib_log_message(const char *log_domain,
                              int log_level,
                              const char *message,
                              void *user_data)
-/* This handler is suitable for use as a glib logging handler.
-   Although a handler can be implemented with the FFI,
-   we build one into Racket to avoid potential problems of
-   handlers getting GCed or retaining a namespace. */
+/* in the main thread for some place */
 {
 #define mzG_LOG_LEVEL_ERROR    (1 << 2)
 #define mzG_LOG_LEVEL_CRITICAL (1 << 3)
@@ -3715,6 +4023,97 @@ void scheme_glib_log_message(const char *log_domain,
   
   scheme_log_message(scheme_main_logger, level, together, len2, scheme_false);
 }
+
+void scheme_glib_log_message(const char *log_domain,
+                             int log_level,
+                             const char *message,
+                             void *user_data)
+  XFORM_SKIP_PROC
+/* This handler is suitable for use as a glib logging handler.
+   Although a handler can be implemented with the FFI,
+   we build one into Racket to avoid potential problems of
+   handlers getting GCed or retaining a namespace. */
+{
+  if (scheme_is_place_main_os_thread())
+    glib_log_message(log_domain, log_level, message, user_data);
+  else {
+    /* We're in an unknown thread. Queue the message for the main Racket place's thread. */
+#ifdef MZ_USE_MZRT
+    glib_log_queue_entry *e = malloc(sizeof(glib_log_queue_entry));
+    e->log_domain = strdup(log_domain);
+    e->log_level = log_level;
+    e->message = strdup(message);
+    
+    mzrt_mutex_lock(glib_log_queue_lock);
+    e->next = glib_log_queue;
+    glib_log_queue = e;
+    mzrt_mutex_unlock(glib_log_queue_lock);
+
+    scheme_signal_received_at(glib_log_signal_handle);
+#else
+    /* We shouldn't get here, but just in case: */
+    fprintf(stderr, "%s: %s\n", log_domain, message);
+#endif
+  }
+}
+
+/* For use by testing, suitable for use with pthread_create, logs a
+   warning for ";"-separated messages in `str` */
+void *scheme_glib_log_message_test(char *str)
+  XFORM_SKIP_PROC
+{
+  int i;
+  for (i = 0; str[i]; i++) {
+    if (str[i] == ';') {
+      str[i] = 0;
+      scheme_glib_log_message("test", mzG_LOG_LEVEL_WARNING, str, NULL);
+      str[i] = ';';
+      str = str + i + 1;
+      i = 0;
+    }
+  }
+  scheme_glib_log_message("test", mzG_LOG_LEVEL_WARNING, str, NULL);
+  return NULL;
+}
+
+#ifdef MZ_USE_MZRT
+void scheme_init_glib_log_queue(void)
+{
+  mzrt_mutex_create(&glib_log_queue_lock);
+  glib_log_signal_handle = scheme_get_signal_handle();
+}
+
+void scheme_check_glib_log_messages(void)
+{
+  if (scheme_current_place_id == 0) {
+    glib_log_queue_entry *e, *prev = NULL, *next;
+    
+    mzrt_mutex_lock(glib_log_queue_lock);
+    e = glib_log_queue;
+    glib_log_queue = NULL;
+    mzrt_mutex_unlock(glib_log_queue_lock);
+
+    if (e) {
+      /* Reverse list */
+      while (e->next) {
+        next = e->next;
+        e->next = prev;
+        prev = e;
+        e = next;
+      }
+      e->next = prev;
+
+      /* Process messages */
+      for (; e; e = e->next) {
+        glib_log_message(e->log_domain, e->log_level, e->message, NULL);
+      }
+
+      /* In case a thread is blocked waiting for a log event */
+      scheme_signal_received_at(glib_log_signal_handle);
+    }
+  }
+}
+#endif
 
 static int extract_level(const char *who, int none_ok, int which, int argc, Scheme_Object **argv)
 {
@@ -3752,7 +4151,7 @@ log_message(int argc, Scheme_Object *argv[])
   Scheme_Logger *logger;
   Scheme_Object *bytes;
   Scheme_Object *name;
-  int level, pos;
+  int level, pos, pfx;
 
   if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_logger_type))
     scheme_wrong_contract("log-message", "logger?", 0, argc, argv);
@@ -3771,8 +4170,15 @@ log_message(int argc, Scheme_Object *argv[])
     scheme_wrong_contract("log-message", "string?", pos, argc, argv);
   bytes = scheme_char_string_to_byte_string(bytes);
   pos++;
+
+  if (argc >= (pos+1))
+    pfx = SCHEME_TRUEP(argv[pos+1]);
+  else
+    pfx = 1;
   
-  scheme_log_name_message(logger, level, name, SCHEME_BYTE_STR_VAL(bytes), SCHEME_BYTE_STRLEN_VAL(bytes), argv[pos]);
+  scheme_log_name_pfx_message(logger, level, name,
+                              SCHEME_BYTE_STR_VAL(bytes), SCHEME_BYTE_STRLEN_VAL(bytes), argv[pos],
+                              pfx);
 
   return scheme_void;
 }
@@ -3781,7 +4187,8 @@ static Scheme_Object *
 log_level_p(int argc, Scheme_Object *argv[])
 {
   Scheme_Logger *logger;
-  int level;
+  Scheme_Object *name = scheme_false;
+  int level, want_level;
 
   if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_logger_type))
     scheme_wrong_contract("log-level?", "logger?", 0, argc, argv);
@@ -3789,45 +4196,103 @@ log_level_p(int argc, Scheme_Object *argv[])
 
   level = extract_level("log-level?", 0, 1, argc, argv);
 
-  if (logger->local_timestamp < *logger->timestamp)
-    update_want_level(logger);
+  if (argc > 2) {
+    if (!SCHEME_FALSEP(argv[2]) && !SCHEME_SYMBOLP(argv[2]))
+      scheme_wrong_contract("log-level?", "(or/c f? #symbol)", 2, argc, argv);
+    name = argv[2];
+  }
 
-  return ((logger->want_level >= level) ? scheme_true : scheme_false);
+  want_level = get_want_level(logger, name);
+
+  return ((want_level >= level) ? scheme_true : scheme_false);
 }
 
 static Scheme_Object *
 log_max_level(int argc, Scheme_Object *argv[])
 {
   Scheme_Logger *logger;
+  Scheme_Object *name = scheme_false;
 
   if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_logger_type))
     scheme_wrong_contract("log-max-level", "logger?", 0, argc, argv);
   logger = (Scheme_Logger *)argv[0];
 
-  if (logger->local_timestamp < *logger->timestamp)
-    update_want_level(logger);
-
-  switch (logger->want_level) {
-  case 0:
-    return scheme_false;
-  case SCHEME_LOG_FATAL:
-    return fatal_symbol;
-  case SCHEME_LOG_ERROR:
-    return error_symbol;
-  case SCHEME_LOG_WARNING:
-    return warning_symbol;
-  case SCHEME_LOG_INFO:
-    return info_symbol;
-  default:
-  case SCHEME_LOG_DEBUG:
-    return debug_symbol;
+  if (argc > 1) {
+    if (!SCHEME_FALSEP(argv[1]) && !SCHEME_SYMBOLP(argv[1]))
+      scheme_wrong_contract("log-max-level", "(or/c f? #symbol)", 1, argc, argv);
+    name = argv[1];
   }
+  
+  return level_number_to_symbol(get_want_level(logger, name));
+}
+
+static Scheme_Object *
+log_all_levels(int argc, Scheme_Object *argv[])
+{
+  Scheme_Logger *logger;
+
+  if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_logger_type))
+    scheme_wrong_contract("log-all-levels", "logger?", 0, argc, argv);
+  logger = (Scheme_Logger *)argv[0];
+  
+  return extract_all_levels(logger);
+}
+
+static Scheme_Object *
+log_level_evt(int argc, Scheme_Object *argv[])
+{
+  Scheme_Logger *logger;
+  Scheme_Object *sema;
+
+  if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_logger_type))
+    scheme_wrong_contract("log-level-evt", "logger?", 0, argc, argv);
+  logger = (Scheme_Logger *)argv[0];
+
+  sema = logger->root_timestamp[1];
+  if (!sema) {
+    sema = scheme_make_sema(0);
+    logger->root_timestamp[1] = sema;
+  }
+    
+  return scheme_make_sema_repost(sema);
+}
+
+static Scheme_Object *get_levels_and_names(const char *who, int i, int argc, Scheme_Object **argv,
+                                           int default_lvl)
+{
+  int lvl;
+  Scheme_Object *level = scheme_null, *last = NULL;
+
+  for (; i < argc; i += 2) {
+    lvl = extract_level(who, 1, i, argc, argv);
+    if ((i+1) < argc) {
+      if (SCHEME_FALSEP(argv[i+1]))
+        default_lvl = lvl;
+      else {
+        if (!SCHEME_SYMBOLP(argv[i+1]))
+          scheme_wrong_contract(who, "(or/c symbol? #f)", i+1, argc, argv);
+        level = scheme_make_pair(argv[i+1], level);
+        if (!last) last = level;
+        level = scheme_make_pair(scheme_make_integer(lvl), level);
+      }
+    } else {
+      default_lvl = lvl;
+    }
+  }
+
+  if (last)
+    SCHEME_CDR(last) = scheme_make_integer(default_lvl);
+  else
+    level = scheme_make_integer(default_lvl);
+
+  return level;
 }
 
 static Scheme_Object *
 make_logger(int argc, Scheme_Object *argv[])
 {
   Scheme_Logger *parent, *logger;
+  Scheme_Object *propagate_level;
 
   if (argc) {
     if (!SCHEME_FALSEP(argv[0]) && !SCHEME_SYMBOLP(argv[0]))
@@ -3841,22 +4306,22 @@ make_logger(int argc, Scheme_Object *argv[])
           scheme_wrong_contract("make-logger", "(or/c logger? #f)", 1, argc, argv);
         parent = (Scheme_Logger *)argv[1];
       }
-
-      if (argc > 2)
-        (void)scheme_check_proc_arity2("make-logger", 1, 2, argc, argv, 1);
     } else
       parent = NULL;
   } else
     parent = NULL;
+
+  propagate_level = get_levels_and_names("make-logger", 2, argc, argv,
+                                         SCHEME_LOG_DEBUG);
 
   logger = scheme_make_logger(parent, 
                               (argc 
                                ? (SCHEME_FALSEP(argv[0]) ? NULL : argv[0])
                                : NULL));
 
-  if ((argc > 2) && SCHEME_TRUEP(argv[2]))
-    logger->callback = argv[2];
-  
+  if (parent)
+    logger->propagate_level = propagate_level;
+
   return (Scheme_Object *)logger;
 }
 
@@ -3868,12 +4333,12 @@ Scheme_Logger *scheme_make_logger(Scheme_Logger *parent, Scheme_Object *name)
   logger->so.type = scheme_logger_type;
   logger->parent = parent;
   if (parent) {
-    logger->timestamp = parent->timestamp;
+    logger->root_timestamp = parent->root_timestamp;
   } else {
-    intptr_t *timestamp;
-    timestamp = MALLOC_ONE_ATOMIC(intptr_t);
-    *timestamp = 1;
-    logger->timestamp = timestamp;
+    Scheme_Object **root_timestamp;
+    root_timestamp = MALLOC_N(Scheme_Object*, 2);
+    root_timestamp[0] = scheme_make_integer(1);
+    logger->root_timestamp = root_timestamp;
   }
   logger->name = name;
 
@@ -3891,10 +4356,10 @@ logger_p(int argc, Scheme_Object *argv[])
 static Scheme_Object *
 current_logger(int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("current-logger",
-			     scheme_make_integer(MZCONFIG_LOGGER),
-			     argc, argv,
-			     -1, logger_p, "logger", 0);
+  return scheme_param_config2("current-logger",
+                              scheme_make_integer(MZCONFIG_LOGGER),
+                              argc, argv,
+                              -1, logger_p, "logger?", 0);
 }
 
 static Scheme_Object *
@@ -3915,34 +4380,13 @@ make_log_reader(int argc, Scheme_Object *argv[])
   Scheme_Logger *logger;
   Scheme_Log_Reader *lr;
   Scheme_Object *sema, *q;
-  int default_lvl = 0, lvl, i;
-  Scheme_Object *level = scheme_null, *last = NULL;
+  Scheme_Object *level;
 
   if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_logger_type))
     scheme_wrong_contract("make-log-receiver", "logger?", 0, argc, argv);
   logger = (Scheme_Logger *)argv[0];
 
-  for (i = 1; i < argc; i += 2) {
-    lvl = extract_level("make-log-receiver", 1, i, argc, argv);
-    if ((i+1) < argc) {
-      if (SCHEME_FALSEP(argv[i+1]))
-        default_lvl = lvl;
-      else {
-        if (!SCHEME_SYMBOLP(argv[i+1]))
-          scheme_wrong_contract("make-log-receiver", "(or/c symbol? #f)", i+1, argc, argv);
-        level = scheme_make_pair(argv[i+1], level);
-        if (!last) last = level;
-        level = scheme_make_pair(scheme_make_integer(lvl), level);
-      }
-    } else {
-      default_lvl = lvl;
-    }
-  }
-
-  if (last)
-    SCHEME_CDR(last) = scheme_make_integer(default_lvl);
-  else
-    level = scheme_make_integer(default_lvl);
+  level = get_levels_and_names("make-log-receiver", 1, argc, argv, 0);
 
   lr = MALLOC_ONE_TAGGED(Scheme_Log_Reader);
   lr->so.type = scheme_log_reader_type;
@@ -3960,7 +4404,11 @@ make_log_reader(int argc, Scheme_Object *argv[])
                                             sema),
                            logger->readers);
   logger->readers = q;
-  *logger->timestamp += 1;
+  logger->root_timestamp[0] = scheme_make_integer(SCHEME_INT_VAL(logger->root_timestamp[0]) + 1);
+  if (logger->root_timestamp[1]) {
+    scheme_post_sema_all(logger->root_timestamp[1]);
+    logger->root_timestamp[1] = NULL;
+  }
 
   return (Scheme_Object *)lr;
 }
@@ -4005,9 +4453,11 @@ scheme_raise_exn(int id, ...)
   GC_CAN_IGNORE va_list args;
   intptr_t alen;
   char *msg;
-  int i, c;
+  int i, c, unsupported = 0;
   Scheme_Object *eargs[MZEXN_MAXARGS], *errno_val = NULL;
   char *buffer;
+
+  rktio_remap_last_error(scheme_rktio);
 
   /* Precise GC: Don't allocate before getting hidden args off stack */
   HIDE_FROM_XFORM(va_start(args, id));
@@ -4023,7 +4473,7 @@ scheme_raise_exn(int id, ...)
 
   msg = mzVA_ARG(args, char*);
 
-  alen = sch_vsprintf(NULL, 0, msg, args, &buffer, &errno_val);
+  alen = sch_vsprintf(NULL, 0, msg, args, &buffer, &errno_val, &unsupported);
   HIDE_FROM_XFORM(va_end(args));
 
 #ifndef NO_SCHEME_EXNS
@@ -4039,6 +4489,9 @@ scheme_raise_exn(int id, ...)
       eargs[2] = errno_val;
       c++;
     }
+  } else if (unsupported) {
+    if (id == MZEXN_FAIL)
+      id = MZEXN_FAIL_UNSUPPORTED;
   }
 
   do_raise(scheme_make_struct_instance(exn_table[id].type,
@@ -4365,6 +4818,24 @@ static Scheme_Object *errno_field_check(int argc, Scheme_Object **argv)
   return scheme_values (3, argv);
 }
 
+static Scheme_Object *module_path_field_check(int pos, int argc, Scheme_Object **argv)
+{
+  if (!scheme_is_module_path(argv[pos]))
+    scheme_wrong_field_contract(argv[pos+1], "(or/c #f module-path?)", argv[pos]);
+
+  return scheme_values (pos+1, argv);
+}
+
+static Scheme_Object *module_path_field_check_2(int argc, Scheme_Object **argv)
+{
+  return module_path_field_check(2, argc, argv);
+}
+
+static Scheme_Object *module_path_field_check_3(int argc, Scheme_Object **argv)
+{
+  return module_path_field_check(3, argc, argv);
+}
+
 static Scheme_Object *extract_syntax_locations(int argc, Scheme_Object **argv)
 {
   if (scheme_is_struct_instance(exn_table[MZEXN_FAIL_SYNTAX].type, argv[0])) {
@@ -4399,6 +4870,32 @@ static Scheme_Object *extract_read_locations(int argc, Scheme_Object **argv)
     return scheme_struct_ref(argv[0], 2);
   scheme_wrong_contract("exn:fail:read-locations-accessor", "exn:fail:read?", 0, argc, argv);
   return NULL;
+}
+
+static Scheme_Object *extract_module_path(int pos, int argc, Scheme_Object **argv,
+                                          int exn_kind, const 
+                                          char *accessor_name, const char *contract)
+{
+  if (scheme_is_struct_instance(exn_table[exn_kind].type, argv[0]))
+    return scheme_struct_ref(argv[0], pos);
+  scheme_wrong_contract(accessor_name, contract, 0, argc, argv);
+  return NULL;
+}
+
+static Scheme_Object *extract_module_path_2(int argc, Scheme_Object **argv)
+{
+  return extract_module_path(2, argc, argv,
+                             MZEXN_FAIL_FILESYSTEM_MISSING_MODULE,
+                             "exn:fail:filesystem:missing-module:path-accessor", 
+                             "exn:fail:filesystem:missing-module?");
+}
+
+static Scheme_Object *extract_module_path_3(int argc, Scheme_Object **argv)
+{
+  return extract_module_path(3, argc, argv,
+                             MZEXN_FAIL_SYNTAX_MISSING_MODULE,
+                             "exn:fail:syntax:missing-module:path-accessor", 
+                             "exn:fail:syntax:missing-module?");
 }
 
 void scheme_init_exn(Scheme_Env *env)

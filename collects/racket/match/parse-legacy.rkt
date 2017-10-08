@@ -40,20 +40,21 @@
      (make-Box (parse (unbox (syntax-e #'bx))))]
     [#(es ...)
      (ormap ddk? (syntax->list #'(es ...)))
-     (make-And (list (make-Pred #'vector?)
+     (make-OrderedAnd (list (make-Pred #'vector?)
                      (make-App #'vector->list
-                               (parse (syntax/loc stx (es ...))))))]
+                               (list (parse (syntax/loc stx (es ...)))))))]
     [#(es ...)
      (make-Vector (map parse (syntax->list #'(es ...))))]
     [($ s . pats)
      (parse-struct disarmed-stx parse #'s #'pats)]
     [(? p q1 qs ...)
-     (make-And (cons (make-Pred #'p)
-                     (map parse (syntax->list #'(q1 qs ...)))))]
+     (make-OrderedAnd (cons (make-Pred #'p)
+                            (list (make-And
+                                   (map parse (syntax->list #'(q1 qs ...)))))))]
     [(? p)
      (make-Pred (rearm #'p))]
     [(= f p)
-     (make-App #'f (parse #'p))]
+     (make-App #'f (list (parse #'p)))]
     [(quasiquote p)
      (parse-quasi #'p parse)]
     [(quote . rest)
@@ -64,7 +65,7 @@
      (raise-syntax-error 'match "incorrect use of ... in pattern" stx #'..)]
     [(p .. . rest)
      (ddk? #'..)
-     (dd-parse parse #'p #'.. #'rest)]
+     (dd-parse parse #'p #'.. #'rest #'list?)]
     [(e . es)
      (make-Pair (parse #'e) (parse (syntax/loc stx es)))]
     [x

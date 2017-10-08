@@ -1,2 +1,2 @@
-(module trusted-xforms mzscheme
-  (require mzlib/class))
+(module trusted-xforms racket/base
+  (require racket/class))

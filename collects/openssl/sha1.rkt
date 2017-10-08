@@ -7,7 +7,8 @@
 
 (provide sha1
          sha1-bytes
-         (rename-out [r:bytes->hex-string bytes->hex-string]))
+         (rename-out [r:bytes->hex-string bytes->hex-string])
+         (rename-out [r:hex-string->bytes hex-string->bytes]))
 
 (define _SHA_CTX-pointer _pointer)
 
@@ -22,6 +23,7 @@
        (get-ffi-obj 'SHA1_Final libcrypto (_fun _pointer _SHA_CTX-pointer -> _int) (lambda () #f))))
 
 (define (sha1-bytes in)
+  (unless (input-port? in) (raise-argument-error 'sha1-bytes "input-port?" in))
   (if SHA1_Init
       (let ([ctx (malloc 256)]
             [tmp (make-bytes 4096)]
@@ -37,4 +39,5 @@
       (r:sha1-bytes in)))
 
 (define (sha1 in)
+  (unless (input-port? in) (raise-argument-error 'sha1 "input-port?" in))
   (r:bytes->hex-string (sha1-bytes in)))

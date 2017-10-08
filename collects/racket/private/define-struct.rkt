@@ -3,8 +3,10 @@
 
 (module define-struct '#%kernel
   (#%require "small-scheme.rkt" "define.rkt" "../stxparam.rkt"
+             "generic-methods.rkt"
              (for-syntax '#%kernel "define.rkt"
                          "procedure-alias.rkt"
+                         "member.rkt"
                          "stx.rkt" "stxcase-scheme.rkt" "small-scheme.rkt" 
                          "stxloc.rkt" "qqstx.rkt"
                          "struct-info.rkt"))
@@ -13,7 +15,6 @@
              define-struct/derived
              struct-field-index
              struct-copy
-             define/generic
              (for-syntax
               (rename checked-struct-info-rec? checked-struct-info?)))
 
@@ -114,10 +115,6 @@
     (unless (symbol? what)
       (raise-argument-error name "symbol?" what))
     what)
-
-  (define-syntax-parameter define/generic
-    (lambda (stx)
-      (raise-syntax-error 'define/generic "only allowed inside methods" stx)))
 
   (define-syntax (define-struct* stx)
     (syntax-case stx ()
@@ -239,8 +236,11 @@
                            (#:mutable . #f)
                            (#:guard . #f)
                            (#:constructor-name . #f)
-                           (#:reflection-name . #f)
                            (#:only-constructor? . #f)
+                           (#:reflection-name . #f)
+                           (#:name . #f)
+                           (#:only-name? . #f)
+                           (#:authentic . #f)
                            (#:omit-define-values . #f)
                            (#:omit-define-syntaxes . #f))]
                  [nongen? #f])
@@ -286,61 +286,24 @@
                 nongen?)]
          [(eq? '#:methods (syntax-e (car p)))
           ;; #:methods gen:foo [(define (meth1 x ...) e ...) ...]
-          ;; `gen:foo' is bound to (prop:foo generic ...)
-          (define (build-method-table gen specs mthds) ; mthds is syntax
-            (with-syntax ([(generic ...)
-                           specs]
-                          [(mthd-generic ...)
-                           (map (λ (g) (datum->syntax mthds (syntax->datum g)))
-                                specs)])
-              (quasisyntax/loc gen
-                (let ([mthd-generic #f]
-                      ...)
-                  (syntax-parameterize
-                   ([define/generic
-                      (lambda (stx)
-                        (syntax-case stx (mthd-generic ...)
-                          [(_ new-name mthd-generic)
-                           (syntax/loc stx
-                             (define new-name generic))]
-                          ...
-                          [(_ new-name method-name)
-                           (raise-syntax-error 'define/generic
-                             (format "~.s not a method of ~.s"
-                                     (syntax->datum #'method-name)
-                                     '#,gen)
-                             stx
-                             #'method-name)]))])
-                   (let ()
-                     #,@mthds
-                     (vector mthd-generic ...)))))))
-          (define gen:foo (cadr p))
-          (define (bad-generics)
-            (raise-syntax-error #f
-                                "not a name for a generics group"
-                                gen:foo gen:foo))
-          (unless (and (identifier? gen:foo)
-                       ;; at the top-level, it's not possible to check
-                       ;; if this `gen:foo` is bound, so we give up on the
-                       ;; error message in that case
-                       (or (eq? (syntax-local-context) 'top-level)
-                           (identifier-binding gen:foo)))
-            (bad-generics))
-          (define gen:foo-val (syntax-local-value gen:foo))
-          (unless (and (list? gen:foo-val)
-                       (>= (length gen:foo-val) 1))
-            (bad-generics))
-          (define prop:foo    (car gen:foo-val))
-          (define meth-specs  (cdr gen:foo-val))
-          (unless (and (identifier? prop:foo)
-                       (list? meth-specs)
-                       (andmap identifier? meth-specs))
-            (bad-generics))
-          (define meths       (caddr p))
-          (loop (cons #'#:property
-                      (cons prop:foo
-                            (cons (build-method-table gen:foo meth-specs meths)
-                                  (cdddr p)))) ; post #:generics args
+          (check-exprs 2 p "argument")
+          (define gen-id (cadr p))
+          (define gen-defs (caddr p))
+          (define args (cdddr p))
+          (define gen-val
+            (and (identifier? gen-id)
+                 (syntax-local-value gen-id (lambda () #f))))
+          (unless (generic-info? gen-val)
+            (bad "the first argument to the"
+                 (car p)
+                 " is not a name for a generic interface"
+                 (cadr p)))
+          (loop (list* #'#:property
+                       (quasisyntax/loc gen-id
+                         (generic-property #,gen-id))
+                       (quasisyntax/loc gen-id
+                         (generic-method-table #,gen-id #,@gen-defs))
+                       args)
                 config
                 nongen?)]
          [(eq? '#:inspector (syntax-e (car p)))
@@ -357,17 +320,35 @@
           (loop (cdr p)
                 (extend-config config '#:inspector #'#f)
                 nongen?)]
+         [(eq? '#:authentic (syntax-e (car p)))
+          (when (lookup config '#:authentic)
+            (bad "multiple" "#:authentic" "s" (car p)))
+          (loop (cdr p)
+                (extend-config config '#:authentic #'#t)
+                nongen?)]
          [(or (eq? '#:constructor-name (syntax-e (car p)))
               (eq? '#:extra-constructor-name (syntax-e (car p))))
           (check-exprs 1 p "identifier")
           (when (lookup config '#:constructor-name)
             (bad "multiple" "#:constructor-name or #:extra-constructor-name" "s" (car p)))
           (unless (identifier? (cadr p))
-            (bad "need an identifier after" (car p) (cadr p)))
+            (bad "need an identifier after" (car p) "" (cadr p)))
           (loop (cddr p)
                 (extend-config (extend-config config '#:constructor-name (cadr p))
                                '#:only-constructor?
                                (eq? '#:constructor-name (syntax-e (car p))))
+                nongen?)]
+         [(or (eq? '#:name (syntax-e (car p)))
+              (eq? '#:extra-name (syntax-e (car p))))
+          (check-exprs 1 p "identifier")
+          (when (lookup config '#:name)
+            (bad "multiple" "#:name or #:extra-name" "s" (car p)))
+          (unless (identifier? (cadr p))
+            (bad "need an identifier after" (car p) "" (cadr p)))
+          (loop (cddr p)
+                (extend-config (extend-config config '#:name (cadr p))
+                               '#:only-name?
+                               (eq? '#:name (syntax-e (car p))))
                 nongen?)]
          [(eq? '#:reflection-name (syntax-e (car p)))
           (check-exprs 1 p "expression")
@@ -473,11 +454,17 @@
                         (loop (cdr fields) (cdr field-stxes) #f)]))])
                (let*-values ([(inspector super-expr props auto-val guard ctor-name ctor-only? 
                                          reflect-name-expr mutable?
-                                         omit-define-values? omit-define-syntaxes?)
+                                         omit-define-values? omit-define-syntaxes?
+                                         info-name name-only?)
                               (let ([config (parse-props #'fm (syntax->list #'(prop ...)) super-id)])
                                 (values (lookup config '#:inspector)
                                         (lookup config '#:super)
-                                        (lookup config '#:props)
+                                        (let ([l (lookup config '#:props)]
+                                              [a (lookup config '#:authentic)])
+                                          (if a
+                                              (cons (cons #'prop:authentic #'#t)
+                                                    l)
+                                              l))
                                         (lookup config '#:auto-value)
                                         (lookup config '#:guard)
                                         (lookup config '#:constructor-name)
@@ -485,9 +472,14 @@
                                         (lookup config '#:reflection-name)
                                         (lookup config '#:mutable)
                                         (lookup config '#:omit-define-values)
-                                        (lookup config '#:omit-define-syntaxes)))]
+                                        (lookup config '#:omit-define-syntaxes)
+                                        (lookup config '#:name)
+                                        (lookup config '#:only-name?)))]
                              [(self-ctor?)
-                              (and ctor-name (bound-identifier=? id ctor-name))]
+                              (and ctor-name (or (and (not name-only?)
+                                                      (bound-identifier=? id ctor-name))
+                                                 (and info-name
+                                                      (bound-identifier=? info-name ctor-name))))]
                              [(name-as-ctor?) (or self-ctor? (not ctor-only?))])
                  (when mutable?
                    (for-each (lambda (f f-stx)
@@ -511,19 +503,6 @@
                                     (build-name id ; (field-id f) 
                                                 id "-" (field-id f)))
                                   fields)]
-                       [sets (let loop ([fields fields])
-                               (cond
-                                [(null? fields) null]
-                                [(not (or mutable? (field-mutable? (car fields))))
-                                 (loop (cdr fields))]
-                                [else
-                                 (cons (build-name id ; (field-id (car fields))
-                                                   "set-"
-                                                   id
-                                                   "-"
-                                                   (field-id (car fields))
-                                                   "!")
-                                       (loop (cdr fields)))]))]
                        [super-struct: (if super-info
                                           (or (car super-info)
                                               (raise-syntax-error
@@ -541,7 +520,88 @@
                        [reflect-name-expr (if reflect-name-expr
                                               (quasisyntax (check-reflection-name 'fm #,reflect-name-expr))
                                               (quasisyntax '#,id))])
-                   (let ([run-time-defns
+                   
+                   (define struct-name-size (string-length (symbol->string (syntax-e id))))
+                   (define struct-name/locally-introduced (syntax-local-introduce id))
+                   (define struct-name-to-predicate-directive
+                     (vector (syntax-local-introduce ?)
+                             0
+                             struct-name-size
+                             struct-name/locally-introduced
+                             0
+                             struct-name-size))
+                   
+                   (define struct-name-to-old-style-maker-directive
+                     (if ctor-name
+                         #f
+                         (vector (syntax-local-introduce make-)
+                                 5
+                                 struct-name-size
+                                 struct-name/locally-introduced
+                                 0
+                                 struct-name-size)))
+                   
+                   (define (struct-name-to-selector/mutator-directive id-stx selector?)
+                     (vector (syntax-local-introduce id-stx)
+                             (if selector? 0 4)
+                             struct-name-size
+                             struct-name/locally-introduced
+                             0
+                             struct-name-size))
+                   (define (field-to-selector/mutator-directive field id-stx selector?)
+                     (define fld-size (string-length (symbol->string (syntax-e (field-id field)))))
+                     (vector (syntax-local-introduce id-stx)
+                             (+ (if selector? 1 5) struct-name-size)
+                             fld-size
+                             (syntax-local-introduce (field-id field))
+                             0
+                             fld-size))
+                   
+                   (define-values (sets field-to-mutator-directives)
+                     (let loop ([fields fields])
+                       (cond
+                         [(null? fields) (values null null)]
+                         [(not (or mutable? (field-mutable? (car fields))))
+                          (loop (cdr fields))]
+                         [else
+                          (define-values (other-sets other-directives)
+                            (loop (cdr fields)))
+                          (define this-set
+                            (build-name id ; (field-id (car fields))
+                                        "set-"
+                                        id
+                                        "-"
+                                        (field-id (car fields))
+                                        "!"))
+                          (values (cons this-set other-sets)
+                                  (cons (field-to-selector/mutator-directive (car fields)
+                                                                             this-set
+                                                                             #f)
+                                        other-directives))])))
+                   
+                   (define all-directives
+                     (append 
+                      (list struct-name-to-predicate-directive)
+                      (if struct-name-to-old-style-maker-directive
+                          (list struct-name-to-old-style-maker-directive)
+                          '())
+                      field-to-mutator-directives
+                      (map (λ (field sel)
+                             (field-to-selector/mutator-directive field sel #t))
+                           fields
+                           sels)
+                      (map (λ (sel)
+                             (struct-name-to-selector/mutator-directive
+                              sel
+                              #t))
+                           sels)
+                      (map (λ (mut)
+                             (struct-name-to-selector/mutator-directive
+                              mut
+                              #f))
+                           sets)))
+                   
+                   (let* ([run-time-defns
                           (lambda ()
                             (quasisyntax/loc stx
                               (define-values (#,struct: #,make- #,? #,@sels #,@sets)
@@ -592,7 +652,7 @@
                                                        (cons #`(make-struct-field-mutator -set! #,i '#,(field-id (car fields)))
                                                              (loop (add1 i) (cdr fields)))))))))))]
                          [compile-time-defns
-                          (lambda ()
+                          (lambda (body-only?)
                             (let* ([protect (lambda (sel)
                                               (and sel
                                                    (if (syntax-e sel)
@@ -612,59 +672,70 @@
                                                     #'make-self-ctor-struct-info
                                                     (if include-autos?
                                                         #'make-struct-auto-info
-                                                        #'make-struct-info)))])
-                              (quasisyntax/loc stx
-                                (define-syntaxes (#,id)
-                                  (#,mk-info
-                                   (lambda ()
-                                     (list
-                                      (quote-syntax #,(prune struct:))
-                                      (quote-syntax #,(prune (if (and ctor-name self-ctor?)
-                                                                 id
-                                                                 make-)))
-                                      (quote-syntax #,(prune ?))
-                                      (list
-                                       #,@(map protect (reverse sels))
-                                       #,@(if super-info
-                                              (map protect (list-ref super-info 3))
-                                              (if super-expr
-                                                  '(#f)
-                                                  null)))
-                                      (list
-                                       #,@(reverse
-                                           (let loop ([fields fields][sets sets])
-                                             (cond
-                                              [(null? fields) null]
-                                              [(not (or mutable? (field-mutable? (car fields))))
-                                               (cons #f (loop (cdr fields) sets))]
-                                              [else
-                                               (cons (protect (car sets))
-                                                     (loop (cdr fields) (cdr sets)))])))
-                                       #,@(if super-info
-                                              (map protect (list-ref super-info 4))
-                                              (if super-expr
-                                                  '(#f)
-                                                  null)))
-                                      #,(if super-id
-                                            (protect super-id)
-                                            (if super-expr
-                                                #f
-                                                #t))))
-                                   #,@(if include-autos?
-                                          (list #`(list (list #,@(map protect 
-                                                                      (list-tail sels (- (length sels) auto-count)))
-                                                              #,@(if super-autos
-                                                                     (map protect (car super-autos))
-                                                                     null))
-                                                        (list #,@(map protect
-                                                                      (list-tail sets (max 0 (- (length sets) auto-count))))
-                                                              #,@(if super-autos
-                                                                     (map protect (cadr super-autos))
-                                                                     null))))
-                                          null)
-                                   #,@(if name-as-ctor?
-                                          (list #`(lambda () (quote-syntax #,make-)))
-                                          null))))))])
+                                                        #'make-struct-info)))]
+                                   [define-syntax-body
+                                     #`(#,mk-info
+                                        (lambda ()
+                                          (list
+                                           (quote-syntax #,(prune struct:))
+                                           (quote-syntax #,(prune (if (and ctor-name self-ctor?)
+                                                                      id
+                                                                      make-)))
+                                           (quote-syntax #,(prune ?))
+                                           (list
+                                            #,@(map protect (reverse sels))
+                                            #,@(if super-info
+                                                   (map protect (list-ref super-info 3))
+                                                   (if super-expr
+                                                       '(#f)
+                                                       null)))
+                                           (list
+                                            #,@(reverse
+                                                (let loop ([fields fields][sets sets])
+                                                  (cond
+                                                    [(null? fields) null]
+                                                    [(not (or mutable? (field-mutable? (car fields))))
+                                                     (cons #f (loop (cdr fields) sets))]
+                                                    [else
+                                                     (cons (protect (car sets))
+                                                           (loop (cdr fields) (cdr sets)))])))
+                                            #,@(if super-info
+                                                   (map protect (list-ref super-info 4))
+                                                   (if super-expr
+                                                       '(#f)
+                                                       null)))
+                                           #,(if super-id
+                                                 (protect super-id)
+                                                 (if super-expr
+                                                     #f
+                                                     #t))))
+                                        #,@(if include-autos?
+                                               (list #`(list (list #,@(map protect 
+                                                                           (list-tail sels (- (length sels) auto-count)))
+                                                                   #,@(if super-autos
+                                                                          (map protect (car super-autos))
+                                                                          null))
+                                                             (list #,@(map protect
+                                                                           (list-tail sets (max 0 (- (length sets) auto-count))))
+                                                                   #,@(if super-autos
+                                                                          (map protect (cadr super-autos))
+                                                                          null))))
+                                               null)
+                                        #,@(if name-as-ctor?
+                                               (list #`(lambda () (quote-syntax #,make-)))
+                                               null))])
+                              (if body-only?
+                                  define-syntax-body
+                                  (quasisyntax/loc stx
+                                    (define-syntaxes (#,(if name-only? info-name id))
+                                      #,define-syntax-body)))))]
+                         [extra-compile-time-defs
+                          (lambda ()
+                            (cond
+                              [(and info-name (not name-only?))
+                               ; reuse existing value
+                               (list #`(define-syntaxes (#,info-name) (syntax-local-value #'#,id)))]
+                              [else null]))])
                      (let ([result
                             (cond
                              [(and (not omit-define-values?) (not omit-define-syntaxes?))
@@ -676,23 +747,32 @@
                                   ;; in the body of a property value that is a procedure)
                                   #`(begin 
                                       (define-syntaxes (#,struct: #,make- #,? #,@sels #,@sets) (values))
-                                      #,(compile-time-defns) 
+                                      #,(compile-time-defns #f)
+                                      #,@(extra-compile-time-defs)
                                       #,(run-time-defns))
                                   ;; Other contexts: order should't matter:
                                   #`(begin 
                                       #,(run-time-defns) 
-                                      #,(compile-time-defns)))]
+                                      #,(compile-time-defns #f)
+                                      #,@(extra-compile-time-defs)))]
                              [omit-define-syntaxes?
-                              (run-time-defns)]
+                              #`(begin
+                                  #,(run-time-defns)
+                                  #,@(extra-compile-time-defs))]
                              [omit-define-values?
-                              (compile-time-defns)]
+                              #`(begin
+                                  #,(compile-time-defns #f)
+                                  #,@(extra-compile-time-defs))]
                              [else #'(begin)])])
                        (syntax-protect
-                        (if super-id
-                            (syntax-property result 
-                                             'disappeared-use 
-                                             (syntax-local-introduce super-id))
-                            result))))))))))]
+                        (syntax-property
+                         (if super-id
+                             (syntax-property result 
+                                              'disappeared-use 
+                                              (syntax-local-introduce super-id))
+                             result)
+                         'sub-range-binders
+                          all-directives))))))))))]
       [(_ _ id . _)
        (not (or (identifier? #'id)
                 (and (syntax->list #'id)

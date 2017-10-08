@@ -15,12 +15,20 @@
          blame-update ;; used for option contract transfers
          blame-add-context
          blame-add-unknown-context
-         blame-context 
+         blame-context
+         
+         blame-add-missing-party
+         blame-missing-party?
+         blame-add-extra-field
          
          raise-blame-error
          current-blame-format
          (struct-out exn:fail:contract:blame)
-         blame-fmt->-string)
+         blame-fmt->-string
+
+         invariant-assertion-party)
+
+(define invariant-assertion-party (string->uninterned-symbol "invariant-assertion"))
 
 (define (blame=? a b equal?/recur)
   (and (equal?/recur (blame-source a) (blame-source b))
@@ -28,7 +36,11 @@
        (equal?/recur (blame-contract a) (blame-contract b))
        (equal?/recur (blame-positive a) (blame-positive b))
        (equal?/recur (blame-negative a) (blame-negative b))
-       (equal?/recur (blame-original? a) (blame-original? b))))
+       (equal?/recur (blame-original? a) (blame-original? b))
+       (equal?/recur (blame-context a) (blame-context b))
+       (equal?/recur (blame-top-known? a) (blame-top-known? b))
+       (equal?/recur (blame-important a) (blame-important b))
+       (equal?/recur (blame-missing-party? a) (blame-missing-party? b))))
 
 (define (blame-hash b hash/recur)
   (bitwise-xor (hash/recur (blame-source b))
@@ -36,10 +48,18 @@
                (hash/recur (blame-contract b))
                (hash/recur (blame-positive b))
                (hash/recur (blame-negative b))
-               (hash/recur (blame-original? b))))
+               (hash/recur (blame-original? b))
+               (hash/recur (blame-context b))
+               (hash/recur (blame-top-known? b))
+               (hash/recur (blame-important b))
+               (hash/recur (blame-missing-party? b))))
 
+;; missing-party? field is #t when the missing party
+;; is still missing and it is #f when the missing party
+;; has been filled in (or if it was filled in from the start)
 (define-struct blame
-  [source value build-name positive negative original? context top-known? important]
+  [source value build-name positive negative original? context top-known? important missing-party?
+          extra-fields]
   #:property prop:equal+hash
   (list blame=? blame-hash blame-hash))
 
@@ -47,36 +67,43 @@
   (let ([make-blame
          (lambda (source value build-name positive negative original?)
            (unless (srcloc? source)
-             (raise-type-error 'make-blame "source location (srcloc?)" 0
-               source value build-name positive negative original?))
-           (unless (procedure? build-name)
-             (raise-type-error 'make-blame "procedure" 2
-               source value build-name positive negative original?))
-           (unless (procedure-arity-includes? build-name 0)
-             (raise-type-error 'make-blame "procedure of 0 arguments" 2
-               source value build-name positive negative original?))
-           (make-blame 
-             source
-             value
-             build-name
-             (list positive)
-             (list negative)
-             original?
-             '()
-             #t 
-             #f))])
+             (raise-argument-error 'make-blame "srcloc?" 0
+                                   source value build-name positive negative original?))
+           (unless (and (procedure? build-name)
+                        (procedure-arity-includes? build-name 0))
+             (raise-argument-error 'make-blame "(-> any)" 2
+                                   source value build-name positive negative original?))
+           (unless positive
+             (raise-type-error 'make-blame "(not/c #f)" 3
+                               source value build-name positive negative original?))
+           (make-blame
+            source
+            value
+            build-name
+            (list positive)
+            (and negative (list negative))
+            original?
+            '()
+            #t 
+            #f
+            (not negative)
+            '()))])
     make-blame))
 
 ;; s : (or/c string? #f)
-(define (blame-add-context b s #:important [important #f] #:swap? [swap? #f])
+(define (blame-add-context b s #:important [name #f] #:swap? [swap? #f])
+  (define new-original? (if swap? (not (blame-original? b)) (blame-original? b)))
+  (define new-context (if s (cons s (blame-context b)) (blame-context b)))
   (struct-copy
    blame b
-   [original? (if swap? (not (blame-original? b)) (blame-original? b))]
+   [original? new-original?]
    [positive (if swap? (blame-negative b) (blame-positive b))]
    [negative (if swap? (blame-positive b) (blame-negative b))]
-   [important (or important (blame-important b))]
-   [context (if s (cons s (blame-context b)) (blame-context b))]
+   [important (if name (important name new-original?) (blame-important b))]
+   [context new-context]
    [top-known? #t]))
+
+(struct important (name sense-swapped?))
 
 (define (blame-add-unknown-context b)
   (define old (blame-context b))
@@ -105,23 +132,27 @@
 
 
 (define (blame-update blame-info extra-positive extra-negative)
-  (let ((pos (blame-positive blame-info))
-        (neg (blame-negative blame-info)))
-    (struct-copy 
-     blame 
-     blame-info
-     [positive (append (list extra-positive) pos)]
-     [negative (append (list extra-negative) neg)])))
+  (ensure-blame-known 'blame-update blame-info)
+  (struct-copy 
+   blame 
+   blame-info
+   [positive (cons extra-positive (blame-positive blame-info))]
+   [negative (cons extra-negative (blame-negative blame-info))]))
 
-(define (show-blame accessor)
-  (λ (blm)
-    (let ([info (accessor blm)])
-      (cond [(empty? (rest info)) (first info)]
-            [else info]))))
+(define (ensure-blame-known who blame)
+  (unless (and (blame-positive blame)
+               (blame-negative blame))
+    (error who "blame info is not known; positive ~s negative ~s"
+           (blame-positive blame)
+           (blame-negative blame))))
 
-(define show-blame-positive (show-blame blame-positive))
-
-(define show-blame-negative (show-blame blame-negative))
+(define (show-blame accessor blm)
+  (define info (accessor blm))
+  (cond [(not info) #f]
+        [(empty? (rest info)) (first info)]
+        [else info]))
+(define (show-blame-positive b) (show-blame blame-positive b))
+(define (show-blame-negative b) (show-blame blame-negative b))
 
 (define (blame-swapped? b)
   (not (blame-original? b)))
@@ -129,14 +160,62 @@
 (define-struct (exn:fail:contract:blame exn:fail:contract) [object]
   #:transparent)
 
-(define (raise-blame-error blame x fmt . args)
+(define (raise-blame-error raw-blame x #:missing-party [missing-party #f] fmt . args)
+  (unless (blame? raw-blame)
+    (apply
+     raise-argument-error
+     'raise-blame-error
+     "blame?" 0
+     raw-blame x fmt args))
+  (unless (or (string? fmt)
+              (and (list? fmt)
+                   (ormap (λ (x) (or (symbol? x) (string? x)))
+                          fmt)))
+    (apply
+     raise-argument-error
+     'raise-blame-error
+     (format "~s" '(or/c string? (list/c (or/c string? symbol?))))
+     2
+     raw-blame x fmt args))
+  
+  (define blame 
+    ;; if we're not going to blame the missing party,
+    ;; don't insist on it being there.
+    (cond
+      [(and (blame-original? raw-blame)
+            (not missing-party))
+       raw-blame]
+      [else
+       (blame-add-missing-party raw-blame missing-party)]))
+  
   (raise
    (make-exn:fail:contract:blame
-    ((current-blame-format) 
+    ((current-blame-format)
      blame x 
      (apply format (blame-fmt->-string blame fmt) args))
     (current-continuation-marks)
     blame)))
+
+(define (blame-add-missing-party b missing-party)
+  (define (check-and-fail)
+    (unless (blame-missing-party? b)
+      (error 'blame-add-missing-party "already have the party: ~s; trying to add ~s" 
+             (if (blame-swapped? b) (blame-positive b) (blame-negative b))
+             missing-party)))
+  (cond
+    [(not missing-party) b]
+    [(blame-swapped? b)
+     (check-and-fail)
+     (struct-copy blame b
+                  [positive (or (blame-positive b)
+                                (list missing-party))]
+                  [missing-party? #f])]
+    [else
+     (check-and-fail)
+     (struct-copy blame b
+                  [negative (or (blame-negative b)
+                                (list missing-party))]
+                  [missing-party? #f])]))
 
 (define (blame-fmt->-string blame fmt)
   (cond
@@ -153,23 +232,27 @@
           (define (add-indent s)
             (if (null? so-far)
                 s
-                (string-append "\n " s)))
+                (string-append "\n  " s)))
           (define nxt
             (cond
               [(eq? 'given: fst) (add-indent
-                                  (if (blame-original? blame)
+                                  (if (blame/important-original? blame)
                                       "produced:"
                                       "given:"))]
-              [(eq? 'given fst) (if (blame-original? blame)
+              [(eq? 'given fst) (if (blame/important-original? blame)
                                     "produced"
                                     "given")]
               [(eq? 'expected: fst) (add-indent
-                                     (if (blame-original? blame)
+                                     (if (blame/important-original? blame)
                                          "promised:"
                                          "expected:"))]
-              [(eq? 'expected fst) (if (blame-original? blame)
+              [(eq? 'expected fst) (if (blame/important-original? blame)
                                        "promised"
                                        "expected")]
+              [(eq? 'received: fst) (add-indent
+                                     (if (blame/important-original? blame)
+                                         "supplied:"
+                                         "received:"))]
               [else fst]))
           (define new-so-far
             (if (or last-ended-in-whitespace?
@@ -180,7 +263,20 @@
                 new-so-far
                 (regexp-match #rx" $" nxt))]))]))
 
+(define (blame/important-original? blme)
+  (define i (blame-important blme))
+  (cond
+    [i (equal? (important-sense-swapped? i) (blame-original? blme))]
+    [else (blame-original? blme)]))
+
 (define (default-blame-format blme x custom-message)
+  
+  (unless (blame-positive blme)
+    (raise-argument-error 'default-blame-format
+                          "a blame object with a non-#f positive field"
+                          0
+                          blme x custom-message))
+  
   (define source-message (source-location->string (blame-source blme)))
   
   (define context (blame-context blme))
@@ -190,73 +286,125 @@
                                    (for/list ([context (in-list context)]
                                               [n (in-naturals)])
                                      (format (if (zero? n)
-                                                 " in: ~a\n"
-                                                 "     ~a\n")
+                                                 "  in: ~a\n"
+                                                 "      ~a\n")
                                              context)))))
   (define contract-line (show/write (blame-contract blme) #:alone? #t))
   (define at-line (if (string=? source-message "")
                       #f
-                      (format " at: ~a" source-message)))
+                      (format "  at: ~a" source-message)))
+
+  (define blame-parties (blame-positive blme))
+  (define invariant-assertion-failure? (equal? blame-parties (list invariant-assertion-party)))
   
-  (define self-or-not (if (blame-original? blme)
-                          "broke its contract"
-                          "contract violation"))
+  (define self-or-not
+    (cond
+      [invariant-assertion-failure?
+       "assertion violation"]
+      [(blame/important-original? blme)
+       "broke its own contract"]
+      [else "contract violation"]))
   
   (define start-of-message
     (cond
       [(blame-important blme)
-       (format "~a: ~a" (blame-important blme) self-or-not)]
+       (format "~a: ~a" (important-name (blame-important blme)) self-or-not)]
       [(blame-value blme)
        (format "~a: ~a" (blame-value blme) self-or-not)]
       [else
-       (format "~a:" self-or-not)]))
+       (format "~a" self-or-not)]))
   
-  (define blame-parties (blame-positive blme))
   (define blaming-line
     (cond
+      [invariant-assertion-failure?
+       ;; cause the blaming-line to be skipped
+       '()]
       [(null? (cdr blame-parties))
-       (format " blaming: ~a" (convert-blame-singleton (car blame-parties)))]
+       (format "  blaming: ~a" (convert-blame-singleton (car blame-parties)))]
       [else
        (apply
         string-append 
-        " blaming multiple parties:"
+        "  blaming multiple parties:"
         (for/list ([party (in-list blame-parties)])
           (format "\n  ~a" (convert-blame-singleton party))))]))
+
+  (define assumption-line
+    (cond
+      [invariant-assertion-failure?
+       '()]
+      [else "   (assuming the contract is correct)"]))
+  
+  (define on-line
+    (and (blame-important blme)
+         (blame-value blme)
+         (format "  contract on: ~a" (blame-value blme))))
   
   (define from-line 
     (if (blame-original? blme)
         (let ([from-positive-message 
                (show/display
                 (from-info (blame-positive blme)))])
-          (format " contract from: ~a" from-positive-message))
+          (format "  contract from: ~a" from-positive-message))
         (let ([from-negative-message 
                (show/display
                 (from-info (blame-negative blme)))])
-          (format " contract from: ~a" from-negative-message))))
+          (format "  contract from: ~a" from-negative-message))))
+  
+  (define custom-message-appears-to-start-with-fields?
+    (regexp-match? #rx"^[^\n]*:" custom-message))
+
+  (define extra-fields (blame-extra-fields blme))
   
   (combine-lines
-   start-of-message
-   (format " ~a"  custom-message)
+   (if custom-message-appears-to-start-with-fields?
+       start-of-message
+       (string-append start-of-message ";"))
+   (format (if custom-message-appears-to-start-with-fields?
+               "  ~a"
+               " ~a")
+           custom-message)
+   extra-fields
    context-lines
    (if context-lines
        contract-line
        (string-append
-        " in:" 
+        "  in:"
         (substring contract-line 5 (string-length contract-line))))
    from-line
+   on-line
    blaming-line
+   assumption-line
    at-line))
 
-;; combine-lines : (->* #:rest (listof (or/c string? #f))) string?)
+(define (blame-add-extra-field b name field)
+  (unless (blame? b)
+    (raise-argument-error 'blame-add-extra-field
+                          "blame?"
+                          0 b name field))
+  (unless (string? name)
+    (raise-argument-error 'blame-add-extra-field
+                          "string?"
+                          1 b name field))
+  (unless (string? field)
+    (raise-argument-error 'blame-add-extra-field
+                          "string?"
+                          2 b name field))
+  (struct-copy
+   blame b
+   [extra-fields (cons (format "  ~a: ~a" name field)
+                       (blame-extra-fields b))]))
+  
+;; combine-lines : (-> (listof (or/c string? #f))) string?)
 ;; combines each of 'lines' into a single message, dropping #fs,
 ;; and otherwise guaranteeing that each string is on its own line,
-;; with no ending newline.
+;; with no ending newline. (Note that the argument contract is
+;; more restrictive than the function actually requires)
 (define (combine-lines . lines)
   (regexp-replace
    #rx"\n$"
    (apply 
     string-append
-    (for/list ([line (in-list lines)]
+    (for/list ([line (in-list (flatten lines))]
                #:when (string? line))
       (if (regexp-match #rx"\n$" line)
           line

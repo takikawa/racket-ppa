@@ -1,7 +1,8 @@
 #lang racket/base
 (require racket/class
+         racket/list
          racket/serialize
-         unstable/error)
+         racket/string)
 (provide connection<%>
          dbsystem<%>
          prepared-statement<%>
@@ -181,6 +182,7 @@ For SQLite, use symbol instead of SQLSTATE string.
 (provide error/internal
          error/internal*
          error/not-connected
+         error/disconnect-in-lock
          error/no-support
          error/need-password
          error/comm
@@ -199,23 +201,111 @@ For SQLite, use symbol instead of SQLSTATE string.
          error/want-cursor
          error/column-count
          error/row-count
-         error/statement-binding-args)
+         error/statement-binding-args
+         ;; other modules also define some error reporting
+         compose-error-message
+         error*)
+
+(define (error* who message
+                #:continued [continued-message null]
+                . field+detail-list)
+  (raise
+   (exn:fail
+    (compose* who message
+              continued-message
+              (field+detail-list->table 'error* field+detail-list null))
+    (current-continuation-marks))))
+
+;; compose-error-message : .... -> string
+(define (compose-error-message who message
+                               #:continued [continued-message null]
+                               . field+detail-list)
+  (define details
+    (field+detail-list->table 'compose-error-message field+detail-list null))
+  (compose* who message continued-message details))
+
+(define (compose* who message continued-message details)
+  (let* ([parts (apply append
+                       (for/list ([detail (in-list details)])
+                         (let* ([field+opts (car detail)]
+                                [field (if (pair? field+opts) (car field+opts) field+opts)]
+                                [options (if (pair? field+opts) (cdr field+opts) '())]
+                                [value (cdr detail)])
+                           (compose-detail* field options value))))]
+         [parts (let loop ([continued continued-message])
+                  (cond [(pair? continued) (list* "\n " (car continued) (loop (cdr continued)))]
+                        [(string? continued) (loop (list continued))]
+                        [(null? continued) parts]))]
+         [parts (list* message (if (null? continued-message) "" ";") parts)]
+         [parts (if who
+                    (list* (symbol->string who) ": " parts)
+                    parts)])
+    (apply string-append parts)))
+
+(define (compose-detail* field options value)
+  (let* ([value? (memq 'value options)]
+         [multi? (memq 'multi options)]
+         [maybe? (memq 'maybe options)]
+         [noindent? (memq 'noindent options)]
+         [convert-value0
+          (cond [value?
+                 (lambda (v) ((error-value->string-handler) v (error-print-width)))]
+                [else
+                 (lambda (v) (format "~a" v))])]
+         [convert-value
+          (if noindent?
+              (lambda (v indent) (list (convert-value0 v)))
+              (lambda (v indent)
+                (let* ([s (convert-value0 v)]
+                       [lines (string-split s #rx"[\n]" #:trim? #f)]
+                       [spacing
+                        (case indent
+                          ((3) "\n   ") ;; common case, make constant
+                          (else (string-append "\n" (make-string indent #\space))))])
+                  (add-between lines spacing))))])
+    (cond [(and (or maybe? multi? (not value?))
+                (not value))
+           null]
+          [(and maybe? multi?
+                (null? value))
+           null]
+          [multi?
+           (list* "\n  " field ": "
+                  (let value-loop ([value value])
+                    (cond [(pair? value)
+                           (list* "\n   "
+                                  (append (convert-value (car value) 3)
+                                          (value-loop (cdr value))))]
+                          [(null? value)
+                           null])))]
+          [else
+           (list* "\n  " field ": "
+                  (convert-value value (+ 4 (string-length field))))])))
+
+(define (field+detail-list->table who lst onto)
+  (cond [(null? lst) onto]
+        [else
+         (let ([field (car lst)]
+               [value (cadr lst)])
+           (cons (cons field value)
+                 (field+detail-list->table who (cddr lst) onto)))]))
+
 
 (define (error/internal fsym fmt . args)
-  (raise-misc-error fsym "internal error"
-                    #:continued (apply format fmt args)))
+  (error* fsym "internal error"
+          #:continued (apply format fmt args)))
 
 (define (error/internal* fsym msg . args)
-  (apply raise-misc-error fsym "internal error" #:continued msg args))
+  (apply error* fsym "internal error" #:continued msg args))
 
 ;; FIXME; clean up
 (define (error/comm fsym [when-occurred #f])
-  (raise-misc-error fsym "communication failure"
-                    "when" when-occurred))
+  (error* fsym "communication failure"
+          "when" when-occurred))
 
 (define (error/no-support fsym feature)
-  (raise-misc-error fsym "feature not supported"
-                    "feature" feature))
+  (error* fsym "feature not supported"
+          "feature" feature))
 
 (define (error/hopeless fsym)
   (error fsym "connection is permanently locked due to a terminated thread"))
@@ -223,11 +313,14 @@ For SQLite, use symbol instead of SQLSTATE string.
 (define (error/not-connected fsym)
   (error fsym "not connected"))
 
+(define (error/disconnect-in-lock fsym)
+  (error fsym "disconnected during operation;\n possibly due to custodian shutdown"))
+
 ;; ----
 
 (define (error/invalid-nested-isolation fsym isolation)
-  (raise-misc-error fsym "invalid isolation level for nested transaction"
-                    '("isolation level" value) isolation))
+  (error* fsym "invalid isolation level for nested transaction"
+          '("isolation level" value) isolation))
 
 (define (error/unbalanced-tx fsym mode saved-cwt?)
   (error fsym "~a-transaction without matching start-transaction~a"
@@ -238,24 +331,24 @@ For SQLite, use symbol instead of SQLSTATE string.
          (if saved-cwt? " (within extent of call-with-transaction)" "")))
 
 (define (error/tx-bad-stmt fsym stmt-type-string tx-state)
-  (raise-misc-error fsym "statement not allowed in current transaction state"
-                    "statement type" stmt-type-string
-                    "transaction state" tx-state))
+  (error* fsym "statement not allowed in current transaction state"
+          "statement type" stmt-type-string
+          "transaction state" tx-state))
 
 (define (error/nested-tx-option fsym option)
-  (raise-misc-error fsym "option not allowed for nested transaction"
-                    '("option" value) option))
+  (error* fsym "option not allowed for nested transaction"
+          '("option" value) option))
 
 (define (error/exn-in-rollback fsym e1 e2)
-  (raise-misc-error fsym "error during rollback"
-    #:continued "secondary error occurred during rollback triggered by primary error"
-    '("primary" value) (exn-message e1)
-    '("secondary" value) (exn-message e2)))
+  (error* fsym "error during rollback"
+          #:continued "secondary error occurred during rollback triggered by primary error"
+          '("primary" value) (exn-message e1)
+          '("secondary" value) (exn-message e2)))
 
 ;; ----
 
 (define (error/stmt-arity fsym expected given)
-  (raise-misc-error fsym "wrong number of parameters for query"
+  (error* fsym "wrong number of parameters for query"
                     ;; FIXME: add stmt, use error/stmt
                     "expected" expected
                     "given" given))
@@ -268,22 +361,22 @@ For SQLite, use symbol instead of SQLSTATE string.
 ;; ----
 
 (define (error/unsupported-type fsym typeid [type #f])
-  (raise-misc-error fsym "unsupported type"
-                    "type" type
-                    "typeid" typeid))
+  (error* fsym "unsupported type"
+          "type" type
+          "typeid" typeid))
 
 (define (error/no-convert fsym sys type param [note #f] #:contract [ctc #f])
-  (raise-misc-error fsym "cannot convert given value to SQL type"
-                    '("given" value) param
-                    "type" type
-                    "expected" (and ctc (format "~.s" ctc))
-                    "dialect" sys
-                    "note" note))
+  (error* fsym "cannot convert given value to SQL type"
+          '("given" value) param
+          "type" type
+          "expected" (and ctc (format "~.s" ctc))
+          "dialect" sys
+          "note" note))
 
 ;; ----
 
 (define (error/stmt fsym stmt message . args)
-  (apply raise-misc-error fsym message
+  (apply error* fsym message
          '("statement" value) (or (let loop ([stmt stmt])
                                     (cond [(string? stmt) stmt]
                                           [(statement-binding? stmt) (loop (statement-binding-pst stmt))]
@@ -317,7 +410,7 @@ For SQLite, use symbol instead of SQLSTATE string.
               "got" got-rows))
 
 (define (error/statement-binding-args fsym stmt args)
-  (raise-misc-error fsym
-                    "cannot execute statement-binding with additional inline arguments"
-                    '("statement" value) stmt
-                    '("arguments" value) args))
+  (error* fsym
+          "cannot execute statement-binding with additional inline arguments"
+          '("statement" value) stmt
+          '("arguments" value) args))

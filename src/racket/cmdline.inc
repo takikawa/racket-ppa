@@ -52,6 +52,37 @@ char * volatile scheme_coldir = "coLLECTs dIRECTORy:" /* <- this tag stays, so w
                        "****************************************************************";
 static int _coldir_offset = 19; /* Skip permanent tag */
 
+#ifndef INITIAL_CONFIG_DIRECTORY
+# ifdef DOS_FILE_SYSTEM
+#  define INITIAL_CONFIG_DIRECTORY "etc"
+# else
+#  define INITIAL_CONFIG_DIRECTORY "../etc"
+# endif
+#endif
+
+char * volatile scheme_configdir = "coNFIg dIRECTORy:" /* <- this tag stays, so we can find it again */
+                       INITIAL_CONFIG_DIRECTORY
+                       "\0"
+                       /* Pad with at least 1024 bytes: */
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************";
+static int _configdir_offset = 17; /* Skip permanent tag */
+
+
 #ifndef MZ_PRECISE_GC
 # define XFORM_OK_PLUS +
 #endif
@@ -63,17 +94,17 @@ static int _coldir_offset = 19; /* Skip permanent tag */
 #endif
 
 #ifdef DOS_FILE_SYSTEM
-# include <Windows.h>
+# include <windows.h>
 
-#define DLL_RELATIVE_PATH L"lib"
+#ifndef DLL_RELATIVE_PATH
+# define DLL_RELATIVE_PATH L"lib"
+#endif
 #include "delayed.inc"
 
 #ifdef NEED_CONSOLE_PRINTF
 static void (*console_printf)(char *str, ...);
 # define PRINTF console_printf
 #endif
-
-MZ_EXTERN void scheme_set_dll_path(wchar_t *s);
 
 static void record_dll_path(void)
 {
@@ -90,7 +121,7 @@ END_XFORM_SKIP;
 #ifdef OS_X
 static long get_segment_offset()
 {
-# ifdef __x86_64__
+# if defined(__x86_64__) || defined(__arm64__)
   const struct segment_command_64 *seg;
 # else
   const struct segment_command *seg;
@@ -100,6 +131,126 @@ static long get_segment_offset()
     return seg->fileoff;
   else
     return 0;
+}
+#endif
+
+#ifdef DOS_FILE_SYSTEM
+wchar_t *get_self_executable_path()
+{
+  wchar_t *path;
+  DWORD r, sz = 1024;
+
+  while (1) {
+    path = (wchar_t *)malloc(sz * sizeof(wchar_t));
+    r = GetModuleFileNameW(NULL, path, sz);
+    if ((r == sz)
+        && (GetLastError() == ERROR_INSUFFICIENT_BUFFER)) {
+      free(path);
+      sz = 2 * sz;
+    } else
+      break;
+  }
+
+  return path;
+}
+
+static DWORD find_by_id(HANDLE fd, DWORD rsrcs, DWORD pos, int id)
+{
+  DWORD got, val;
+  WORD name_count, id_count;
+  
+  SetFilePointer(fd, pos + 12, 0, FILE_BEGIN);
+  ReadFile(fd, &name_count, 2, &got, NULL);
+  ReadFile(fd, &id_count, 2, &got, NULL);
+
+  pos += 16 + (name_count * 8);
+  while (id_count--) {
+    ReadFile(fd, &val, 4, &got, NULL);
+    if (val == id) {
+      ReadFile(fd, &val, 4, &got, NULL);
+      return rsrcs + (val & 0x7FFFFFF);
+    } else {
+      ReadFile(fd, &val, 4, &got, NULL);
+    }
+  }
+
+  return 0;
+}
+
+static long get_segment_offset()
+{
+  /* Find the resource of type 257 */
+  wchar_t *path;
+  HANDLE fd;
+
+  path = get_self_executable_path();
+  fd = CreateFileW(path, GENERIC_READ,
+                   FILE_SHARE_READ | FILE_SHARE_WRITE,
+                   NULL,
+                   OPEN_EXISTING,
+                   0,
+                   NULL);
+  free(path);
+
+  if (fd == INVALID_HANDLE_VALUE)
+    return 0;
+  else {
+    DWORD val, got, sec_pos, virtual_addr, rsrcs, pos;
+    WORD num_sections, head_size;
+    char name[8];
+    
+    SetFilePointer(fd, 60, 0, FILE_BEGIN);
+    ReadFile(fd, &val, 4, &got, NULL);
+    SetFilePointer(fd, val+4+2, 0, FILE_BEGIN); /* Skip "PE\0\0" tag and machine */
+    ReadFile(fd, &num_sections, 2, &got, NULL);
+    SetFilePointer(fd, 12, 0, FILE_CURRENT); /* time stamp + symbol table */
+    ReadFile(fd, &head_size, 2, &got, NULL);
+
+    sec_pos = val+4+20+head_size;
+    while (num_sections--) {
+      SetFilePointer(fd, sec_pos, 0, FILE_BEGIN);
+      ReadFile(fd, &name, 8, &got, NULL);
+      if ((name[0] == '.')
+          && (name[1] == 'r')
+          && (name[2] == 's')
+          && (name[3] == 'r')
+          && (name[4] == 'c')
+          && (name[5] == 0)) {
+        SetFilePointer(fd, 4, 0, FILE_CURRENT); /* skip virtual size */
+        ReadFile(fd, &virtual_addr, 4, &got, NULL);
+        SetFilePointer(fd, 4, 0, FILE_CURRENT); /* skip file size */
+        ReadFile(fd, &rsrcs, 4, &got, NULL);
+        SetFilePointer(fd, rsrcs, 0, FILE_BEGIN);
+        
+        /* We're at the resource table; step through 3 layers */
+        pos = find_by_id(fd, rsrcs, rsrcs, 257);
+	if (pos) {
+	  pos = find_by_id(fd, rsrcs, pos, 1);
+	  if (pos) {
+	    pos = find_by_id(fd, rsrcs, pos, 1033);
+
+	    if (pos) {
+	      /* pos is the reource data entry */
+	      SetFilePointer(fd, pos, 0, FILE_BEGIN);
+	      ReadFile(fd, &val, 4, &got, NULL);
+	      pos = val - virtual_addr + rsrcs;
+
+	      CloseHandle(fd);
+
+	      return pos;
+	    }
+	  }
+	}
+
+	break;
+      }
+      sec_pos += 40;
+    }
+
+    /* something went wrong */
+    CloseHandle(fd);
+    return 0;
+  }
 }
 #endif
 
@@ -126,7 +277,7 @@ static int is_number_arg(const char *s)
   return 1;
 }
 
-#ifdef OS_X
+#if defined(OS_X) || defined(DOS_FILE_SYSTEM)
 char *add_to_str(const char *addr, long amt)
 {
   long addr_v;
@@ -142,7 +293,7 @@ static char *make_embedded_load(const char *start, const char *end)
   char *s;
   int slen, elen;
 
-#ifdef OS_X
+#if defined(OS_X) || defined(DOS_FILE_SYSTEM)
   {
     long fileoff;
     fileoff = get_segment_offset();
@@ -224,6 +375,44 @@ typedef void (*Repl_Proc)(Scheme_Env *, FinishArgs *f);
 static void configure_environment(Scheme_Object *mod)
 {
   Scheme_Object *mli, *dyreq, *a[3], *gi, *v, *vs;
+  Scheme_Object *submod, *cr, *mdp, *mpij;
+
+  cr = scheme_intern_symbol("configure-runtime");
+
+  /* Modern style: look for `runtime-configure' submodule to initialize
+     the configuration: */
+
+  submod = scheme_intern_symbol("submod");
+  cr = scheme_intern_symbol("configure-runtime");
+
+  if (SAME_TYPE(SCHEME_TYPE(mod), scheme_module_index_type)) {
+    mpij = scheme_builtin_value("module-path-index-join");
+    a[0] = scheme_make_pair(submod, 
+                            scheme_make_pair(scheme_make_utf8_string("."),
+                                             scheme_make_pair(cr, scheme_make_null())));
+    a[1] = mod;
+    submod = scheme_apply(mpij, 2, a);
+  } else if (SCHEME_PAIRP(mod) && SAME_OBJ(SCHEME_CAR(mod), submod))
+    submod = scheme_append(mod, scheme_make_pair(cr, scheme_make_null()));
+  else
+    submod = scheme_make_pair(submod, 
+                              scheme_make_pair(mod,
+                                               scheme_make_pair(cr, scheme_make_null())));
+  mdp = scheme_builtin_value("module-declared?");
+
+  a[0] = submod;
+  a[1] = scheme_make_true();
+  v = scheme_apply(mdp, 2, a);
+  if (!SAME_OBJ(scheme_make_false(), v)) {
+    dyreq = scheme_builtin_value("dynamic-require");
+
+    a[0] = submod;
+    a[1] = scheme_make_false();
+    (void)scheme_apply(dyreq, 2, a);
+  }
+
+  /* Old style: use `module->language-info' (after new style, for 
+     compatibility): */
 
   mli = scheme_builtin_value("module->language-info");
 
@@ -240,7 +429,7 @@ static void configure_environment(Scheme_Object *mod)
     a[0] = SCHEME_VEC_ELS(v)[2];
     gi = scheme_apply(gi, 1, a);
 
-    a[0] = scheme_intern_symbol("configure-runtime");
+    a[0] = cr;
     a[1] = scheme_make_null();
     vs = scheme_apply(gi, 2, a);
     a[0] = vs;
@@ -480,12 +669,25 @@ static int finish_cmd_line_run(FinishArgs *fa, Repl_Proc repl)
 
 #ifndef DONT_LOAD_INIT_FILE
   if (fa->a->use_repl && !fa->a->no_init_file) {
-    char *filename;
-    filename = GET_INIT_FILENAME(fa->global_env);
-    if (filename) {
-      filename = scheme_expand_filename(filename, -1, "startup", NULL, SCHEME_GUARD_FILE_EXISTS);
-      if (scheme_file_exists(filename))
-	scheme_load(filename);
+    Scheme_Object *a[2];
+    a[0] = get_init_filename(fa->global_env,
+                             INIT_FILENAME_CONF_SYM,
+                             DEFAULT_INIT_MODULE,
+                             USER_INIT_MODULE);
+    if (a[0]) {
+        mz_jmp_buf * volatile save, newbuf;
+        Scheme_Thread * volatile p;
+        p = scheme_get_current_thread();
+        save = p->error_buf;
+        p->error_buf = &newbuf;
+        if (!scheme_setjmp(newbuf)) {
+          a[1] = scheme_make_integer(0);
+          scheme_dynamic_require(2, a);
+        } else {
+          scheme_clear_escape();
+          exit_val = 1;
+        }
+        p->error_buf = save;
     }
   }
 #endif /* DONT_LOAD_INIT_FILE */
@@ -531,6 +733,9 @@ static int finish_cmd_line_run(FinishArgs *fa, Repl_Proc repl)
   }
 #endif
 
+  if (scheme_flush_managed(NULL, 1))
+    exit_val = 1;
+
   return exit_val;
 }
 
@@ -554,6 +759,8 @@ static Scheme_Object *reverse_path_list(Scheme_Object *l, int rel_to_cwd)
 # define GC_CAN_IGNORE /**/
 #endif
 
+#include <ctype.h>
+
 static Scheme_Object *get_log_level(char *prog, char *real_switch, const char *envvar, const char *what, GC_CAN_IGNORE char *str)
 {
   int k, len, default_lvl = -1;
@@ -563,6 +770,10 @@ static Scheme_Object *get_log_level(char *prog, char *real_switch, const char *e
   l =  scheme_make_null();
 
   while (1) {
+    while (*str && isspace(*((unsigned char *)str))) {
+      str++;
+    }
+
     if (!*str) {
       if (default_lvl == -1) default_lvl = 0;
       if (last)
@@ -590,21 +801,23 @@ static Scheme_Object *get_log_level(char *prog, char *real_switch, const char *e
     } else if (!strncmp(str, "debug", 5)) {
       k  = SCHEME_LOG_DEBUG;
       len = 5;
-    } else 
+    } else {
       k = -1;
+      len = 0;
+    }
 
     str += len;
 
     if (k != -1) {
       if (*str == '@') {
         str++;
-        for (s = str; *s && *s != ' '; s++) {
+        for (s = str; *s && !isspace(*((unsigned char *)s)); s++) {
         }
         l = scheme_make_pair(scheme_make_sized_byte_string(str, s - str, 1), l);
         if (!last) last = l;
         l = scheme_make_pair(scheme_make_integer(k), l);
         str = s;
-      } else if ((*str == ' ') || !*str) {
+      } else if (isspace(*((unsigned char *)str)) || !*str) {
         if (default_lvl == -1)
           default_lvl = k;
         else
@@ -618,7 +831,7 @@ static Scheme_Object *get_log_level(char *prog, char *real_switch, const char *e
       PRINTF("%s: %s <levels> %s%s%s must be one of the following\n"
              " <level>s:\n"
              "   none fatal error warning info debug\n"
-             " or up to one such <level> in space-separated sequence of\n"
+             " or up to one such <level> in whitespace-separated sequence of\n"
              "   <level>@<name>\n"
              " given: %s\n",
              prog, what, 
@@ -640,6 +853,49 @@ static Scheme_Object *get_arg_log_level(char *prog, char *real_switch, const cha
   }
 
   return get_log_level(prog, real_switch, NULL, what, argv[1]);
+}
+
+static Scheme_Object *adjust_collects_path(Scheme_Object *collects_path, int *_skip_coll_dirs)
+{
+  /* Setup path for "collects" collection directory: */
+  if (!collects_path) {
+    if (!scheme_coldir[_coldir_offset])
+      collects_path = scheme_make_false();
+    else
+      collects_path = scheme_make_path(scheme_coldir XFORM_OK_PLUS _coldir_offset);
+  } else if (!SAME_OBJ(collects_path, scheme_make_false()))
+    collects_path = scheme_path_to_complete_path(collects_path, NULL);
+
+  if (SAME_OBJ(collects_path, scheme_make_false())) {
+    /* empty list of directories => don't set collection dirs
+       and don't use collection links files */
+    if (_skip_coll_dirs) {
+      *_skip_coll_dirs = 1;
+      scheme_set_ignore_link_paths(1);
+    }
+    collects_path = scheme_make_path(".");
+  }
+
+  return collects_path;
+}
+
+static Scheme_Object *adjust_config_path(Scheme_Object *config_path)
+{
+  if (!config_path) {
+    char *s;
+    s = getenv("PLTCONFIGDIR");
+    if (s) {
+      s = scheme_expand_filename(s, -1, NULL, NULL, 0);
+      if (s) config_path = scheme_make_path(s);
+    }
+  }
+
+  if (!config_path)
+    config_path = scheme_make_path(scheme_configdir XFORM_OK_PLUS _configdir_offset);
+  else
+    config_path = scheme_path_to_complete_path(config_path, NULL);
+
+  return config_path;
 }
 
 #ifdef USE_OSKIT_CONSOLE
@@ -680,11 +936,10 @@ static int run_from_cmd_line(int argc, char *_argv[],
   Scheme_Object *sch_argv;
   int skip_coll_dirs = 0;
   Scheme_Object *collects_path = NULL, *collects_extra = NULL, *addon_dir = NULL;
+  Scheme_Object *config_path = NULL;
+  Scheme_Object *host_collects_path = NULL, *host_config_path = NULL;
   char *compiled_paths = NULL;
-  Scheme_Object *links_file = NULL;
-#ifndef NO_FILE_SYSTEM_UTILS
   Scheme_Object *collects_paths_l, *collects_paths_r;
-#endif
 #ifndef DONT_PARSE_COMMAND_LINE
   char **evals_and_loads, *real_switch = NULL, specific_switch[2];
   int *eval_kind, num_enl;
@@ -710,6 +965,7 @@ static int run_from_cmd_line(int argc, char *_argv[],
   int was_config_flag = 0, saw_nc_flag = 0;
   int no_compiled = 0;
   int init_ns = 0, no_init_ns = 0;
+  int cross_compile = 0;
   Scheme_Object *syslog_level = NULL, *stderr_level = NULL;
   FinishArgs *fa;
   FinishArgsAtoms *fa_a;
@@ -768,17 +1024,16 @@ static int run_from_cmd_line(int argc, char *_argv[],
 #ifdef DOS_FILE_SYSTEM
     if ((scheme_cmdline_exe_hack[0] == '?')
 	|| (scheme_cmdline_exe_hack[0] == '*')) {
-      /* This is how we make launchers in Windows.
-	 The cmdline is appended to the end of the binary.
-	 The long integer at scheme_cmdline_exe_hack[4] says
-	 where the old end was, and scheme_cmdline_exe_hack[8]
-	 says how long the cmdline string is. It might
-	 be relative to the executable. */
-      wchar_t *path;
+      /* This is how we make launchers in Windows. The cmdline is
+	 added as a resource of type 257. The long integer at
+	 scheme_cmdline_exe_hack[4] says where the command line starts
+	 with the source, and scheme_cmdline_exe_hack[8] says how long
+	 the cmdline string is. It might be relative to the
+	 executable. */
       HANDLE fd;
+      wchar_t *path;
 
-      path = (wchar_t *)malloc(1024 * sizeof(wchar_t));
-      GetModuleFileNameW(NULL, path, 1024);
+      path = get_self_executable_path();
       fd = CreateFileW(path, GENERIC_READ,
 		       FILE_SHARE_READ | FILE_SHARE_WRITE,
 		       NULL,
@@ -792,6 +1047,7 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	DWORD got;
 	start = *(long *)&scheme_cmdline_exe_hack[4];
 	len = *(long *)&scheme_cmdline_exe_hack[8];
+	start += get_segment_offset();
 	p = (unsigned char *)malloc(len);
 	SetFilePointer(fd, start, 0, FILE_BEGIN);
 	ReadFile(fd, p, len, &got, NULL);
@@ -840,9 +1096,10 @@ static int run_from_cmd_line(int argc, char *_argv[],
 		+ 4);
 	}
       }
+      free(path);
     }
 #endif
-#ifdef OS_X
+#if defined(OS_X)
     if (scheme_cmdline_exe_hack[0] == '?') {
       long fileoff, cmdoff, cmdlen;
       int fd;
@@ -935,6 +1192,8 @@ static int run_from_cmd_line(int argc, char *_argv[],
       argv[0] = "-c";
     else if (!strcmp("--no-lib", argv[0]))
       argv[0] = "-n";
+    else if (!strcmp("--no-user-path", argv[0]))
+      argv[0] = "-U";
     else if (!strcmp("--version", argv[0]))
       argv[0] = "-v";
     else if (!strcmp("--no-init-file", argv[0]))
@@ -959,7 +1218,9 @@ static int run_from_cmd_line(int argc, char *_argv[],
       argv[0] = "-R";
     else if (!strcmp("--addon", argv[0]))
       argv[0] = "-A";
-    else if (!strcmp("--links", argv[0]))
+    else if (!strcmp("--config", argv[0]))
+      argv[0] = "-G";
+    else if (!strcmp("--cross", argv[0]))
       argv[0] = "-C";
 # ifdef CMDLINE_STDIO_FLAG
     else if (!strcmp("--stdio", argv[0]))
@@ -1012,6 +1273,17 @@ static int run_from_cmd_line(int argc, char *_argv[],
             collects_path = check_make_path(prog, real_switch, argv[0]);
           was_config_flag = 1;
 	  break;
+	case 'G':
+	  if (argc < 2) {
+	    PRINTF("%s: missing path after %s switch\n", 
+		   prog, real_switch);
+	    goto show_need_help;
+	  }
+	  argv++;
+	  --argc;
+          config_path = check_make_path(prog, real_switch, argv[0]);
+          was_config_flag = 1;
+	  break;
         case 'R':
           if (argc < 2) {
 	    PRINTF("%s: missing path after %s switch\n", 
@@ -1033,17 +1305,15 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	  --argc;
 	  addon_dir = check_make_path(prog, real_switch, argv[0]);
           was_config_flag = 1;
-	  break;
-	case 'C':
-	  if (argc < 2) {
-	    PRINTF("%s: missing path after %s switch\n", 
-		   prog, real_switch);
-	    goto show_need_help;
-	  }
-	  argv++;
-	  --argc;
-	  links_file = check_make_path(prog, real_switch, argv[0]);
-          was_config_flag = 1;
+            break;
+        case 'C':
+          if (!cross_compile) {
+            cross_compile = 1;
+            scheme_set_cross_compile_mode(1);
+            was_config_flag = 1;
+            host_config_path = config_path;
+            host_collects_path = collects_path;
+          }
 	  break;
 	case 'U':
 	  scheme_set_ignore_user_paths(1);
@@ -1311,23 +1581,11 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	)
 #endif
       PRINTF("%s", BANNER);
-#ifdef RACKET_CMD_LINE  
-# ifdef DOS_FILE_SYSTEM
-#  if !defined(FILES_HAVE_FDS)
-#   if !defined(WINDOWS_FILE_HANDLES)
-    PRINTF("Warning: read-eval-print-loop or read on a stream port may block threads.\n");
-#   endif
-#  endif
-# endif
-#endif
 
-#if defined(USE_FD_PORTS) || defined(WINDOWS_FILE_HANDLES)
    CMDLINE_FFLUSH(stdout);
-#endif
   }
 #endif /* DONT_PARSE_COMMAND_LINE */
 
-#ifdef GETENV_FUNCTION
   if (!syslog_level) {
     char *s;
     s = getenv("PLTSYSLOG");
@@ -1345,27 +1603,58 @@ static int run_from_cmd_line(int argc, char *_argv[],
   if (getenv("PLTDISABLEGC")) {
     scheme_enable_garbage_collection(0);
   }
-#endif
+  {
+    char *s;
+    s = getenv("PLT_INCREMENTAL_GC");
+    if (s) {
+      if ((s[0] == '0') || (s[0] == 'n') || (s[0] == 'N'))
+        scheme_incremental_garbage_collection(0);
+      else if ((s[0] == '1') || (s[0] == 'y') || (s[0] == 'Y'))
+        scheme_incremental_garbage_collection(1);
+      else {
+        PRINTF("%s: unrecognized value for PLT_INCREMENTAL_GC;\n"
+                " a value that starts \"1\", \"y\", or \"Y\" permanently enables incremental mode,\n"
+                " and a value that starts \"0\", \"n\", or \"N\" disables incremental mode,\n"
+                " and the default enables incremental mode as requested via `collect-garbage'\n"
+                "  unrecognized value: %s\n",
+                prog, s);
+      }
+    }
+  }
+  {
+    char *s;
+    s = getenv("PLT_COMPILED_FILE_CHECK");
+    if (s) {
+      if (!strcmp(s, "modify-seconds"))
+        scheme_set_compiled_file_check(SCHEME_COMPILED_FILE_CHECK_MODIFY_SECONDS);
+      else if (!strcmp(s, "exists"))
+        scheme_set_compiled_file_check(SCHEME_COMPILED_FILE_CHECK_EXISTS);
+      else {
+        PRINTF("%s: unrecognized value for PLT_COMPILED_FILE_CHECK;\n"
+                " recognized values are \"modify-seconds\" and \"exists\"\n"
+                "  unrecognized value: %s\n",
+                prog, s);
+      }
+    }
+  }
 
   scheme_set_logging_spec(syslog_level, stderr_level);
-  
-#ifndef NO_FILE_SYSTEM_UTILS
-  /* Setup path for "collects" collection directory: */
-  if (!collects_path) {
-    if (!scheme_coldir[_coldir_offset])
-      collects_path = scheme_make_false();
-    else
-      collects_path = scheme_make_path(scheme_coldir XFORM_OK_PLUS _coldir_offset);
-  } else if (!SAME_OBJ(collects_path, scheme_make_false()))
-    collects_path = scheme_path_to_complete_path(collects_path, NULL);
-  if (SAME_OBJ(collects_path, scheme_make_false())) {
-    /* empty list of directories => don't set collection dirs
-       and don't use collection links files */
-    skip_coll_dirs = 1;
-    scheme_set_ignore_link_paths(1);
-    collects_path = scheme_make_path(".");
-  }
+
+  collects_path = adjust_collects_path(collects_path, &skip_coll_dirs);
   scheme_set_collects_path(collects_path);
+
+  if (cross_compile) {
+    host_collects_path = adjust_collects_path(host_collects_path, NULL);
+    scheme_set_host_collects_path(host_collects_path);
+  }
+
+  config_path = adjust_config_path(config_path);
+  scheme_set_config_path(config_path);
+
+  if (cross_compile) {
+    host_config_path = adjust_config_path(host_config_path);
+    scheme_set_host_config_path(host_config_path);
+  }
 
   /* Make list of additional collection paths: */
   if (collects_extra)
@@ -1387,7 +1676,6 @@ static int run_from_cmd_line(int argc, char *_argv[],
     }
     collects_paths_l = reverse_path_list(collects_paths_l, 0);
   }
-#endif
 
   sch_argv = create_cmdline_args_vector(argc, argv);
   scheme_set_command_line_arguments(sch_argv);
@@ -1404,18 +1692,12 @@ static int run_from_cmd_line(int argc, char *_argv[],
   if (no_compiled)
     scheme_set_compiled_file_paths(scheme_make_null());
 
-#ifndef NO_FILE_SYSTEM_UTILS
   /* Setup compiled-file search path: */
-# ifdef GETENV_FUNCTION
   if (!compiled_paths) {
     compiled_paths = getenv("PLTCOMPILEDROOTS");
   }
-# endif
-#endif /* NO_FILE_SYSTEM_UTILS */
 
-#ifndef NO_FILE_SYSTEM_UTILS
   /* Setup path for "addon" directory: */
-# ifdef GETENV_FUNCTION
   if (!addon_dir) {
     char *s;
     s = getenv("PLTADDONDIR");
@@ -1424,40 +1706,18 @@ static int run_from_cmd_line(int argc, char *_argv[],
       if (s) addon_dir = scheme_make_path(s);
     }
   }
-# endif
   if (addon_dir) {
     addon_dir = scheme_path_to_complete_path(addon_dir, NULL);
     scheme_set_addon_dir(addon_dir);
   }
-#endif /* NO_FILE_SYSTEM_UTILS */
-
-#ifndef NO_FILE_SYSTEM_UTILS
-  /* Setup path for "links" file: */
-# ifdef GETENV_FUNCTION
-  if (!links_file) {
-    char *s;
-    s = getenv("PLTLINKSFILE");
-    if (s) {
-      s = scheme_expand_filename(s, -1, NULL, NULL, 0);
-      if (s) links_file = scheme_make_path(s);
-    }
-  }
-# endif
-  if (links_file) {
-    links_file = scheme_path_to_complete_path(links_file, NULL);
-    scheme_set_links_file(links_file);
-  }
-#endif /* NO_FILE_SYSTEM_UTILS */
 
   /* Creates the main kernel environment */
   global_env = mk_basic_env();
 
-#ifndef NO_FILE_SYSTEM_UTILS
   if (!skip_coll_dirs)
     scheme_init_collection_paths_post(global_env, collects_paths_l, collects_paths_r);
   if (compiled_paths)
     scheme_init_compiled_roots(global_env, compiled_paths);
-#endif
 
   scheme_seal_parameters();
 
@@ -1539,10 +1799,11 @@ static int run_from_cmd_line(int argc, char *_argv[],
          "  -I <path> : Set <init-lib> to <path> (sets language)\n"
 	 "  -X <dir>, --collects <dir> : Main collects at <dir> (or \"\" disables all)\n"
 	 "  -S <dir>, --search <dir> : More collects at <dir> (after main collects)\n"
+	 "  -G <dir>, --config <dir> : Main configuration directory at <dir>\n"
 	 "  -A <dir>, --addon <dir> : Addon directory at <dir>\n"
-         "  -R <paths>, --compiled <paths> : Set compiled-file search roots to <paths>\n"
-	 "  -C <file>, --links <file> : User-specific collection links at <file>\n"
 	 "  -U, --no-user-path : Ignore user-specific collects, etc.\n"
+         "  -R <paths>, --compiled <paths> : Set compiled-file search roots to <paths>\n"
+	 "  -C, --cross : Cross-build mode; save current collects and config as host\n"
 	 "  -N <file>, --name <file> : Sets `(find-system-path 'run-file)' to <file>\n"
 # ifdef CMDLINE_STDIO_FLAG
          "  -J <name>, ---wm-class <name> : Set WM_CLASS class to <name> (Unix)\n"

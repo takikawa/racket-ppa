@@ -3,9 +3,10 @@
 ;; #%misc : file utilities, etc. - remaining functions
 
 (module misc '#%kernel
-  (#%require '#%utils ; built into racket
-             "small-scheme.rkt" "define.rkt"
-             (for-syntax '#%kernel "stx.rkt" "stxcase-scheme.rkt" "stxcase.rkt"))
+  (#%require "small-scheme.rkt" "define.rkt" "path.rkt" "old-path.rkt"
+             "path-list.rkt" "executable-path.rkt" "collect.rkt"
+             "reading-param.rkt" "load.rkt"
+             (for-syntax '#%kernel "qq-and-or.rkt" "stx.rkt" "stxcase-scheme.rkt" "stxcase.rkt"))
   
   ;; -------------------------------------------------------------------------
 
@@ -174,6 +175,15 @@
 
   (define (port? x) (or (input-port? x) (output-port? x)))
 
+  (define writeln
+    (case-lambda
+     [(v) (writeln v (current-output-port))]
+     [(v p) 
+      (unless (output-port? p)
+        (raise-argument-error 'writeln "output-port?" 1 v p))
+      (write v p)
+      (newline p)]))
+  
   (define displayln
     (case-lambda
      [(v) (displayln v (current-output-port))]
@@ -182,12 +192,63 @@
         (raise-argument-error 'displayln "output-port?" 1 v p))
       (display v p)
       (newline p)]))
+  
+  (define println
+    (case-lambda
+      [(v) (println v (current-output-port) 0)]
+      [(v p) (println v p 0)]
+      [(v p d)
+       (unless (output-port? p)
+         (raise-argument-error 'println "output-port?" 1 v p d))
+       (unless (and (number? d) (or (= 0 d) (= d 1)))
+         (raise-argument-error 'println "(or/c 0 1)" 2 v p d))
+       (print v p d)
+       (newline p)]))
+
+  ;; -------------------------------------------------------------------------
+
+  (define (string-no-nuls? s)
+    (and (string? s)
+         (not (regexp-match? #rx"\0" s))))
+
+  (define (bytes-environment-variable-name? s)
+    (and (bytes? s)
+         (if (eq? 'windows (system-type))
+             (regexp-match? #rx#"^[^\0=]+$" s)
+             (regexp-match? #rx#"^[^\0=]*$" s))))
+
+  (define (string-environment-variable-name? s)
+    (and (string? s)
+         (bytes-environment-variable-name?
+          (string->bytes/locale s (char->integer #\?)))))
+
+  (define (getenv s)
+    (unless (string-environment-variable-name? s)
+      (raise-argument-error 'getenv "string-environment-variable-name?" s))
+    (let ([v (environment-variables-ref (current-environment-variables)
+                                        (string->bytes/locale s (char->integer #\?)))])
+      (and v
+           (bytes->string/locale v #\?))))
+
+  (define (putenv s t)
+    (unless (string-no-nuls? s)
+      (raise-argument-error 'putenv "string-environment-variable-name?" 0 s t))
+    (unless (string-no-nuls? t)
+      (raise-argument-error 'putenv "string-no-nuls?" 1 s t))
+    (and
+     (environment-variables-set! (current-environment-variables)
+                                 (string->bytes/locale s (char->integer #\?))
+                                 (string->bytes/locale t (char->integer #\?))
+                                 (lambda () #f))
+     #t))
 
   ;; -------------------------------------------------------------------------
 
   (#%provide define-syntax-rule
              rationalize 
-             path-string? path-replace-suffix path-add-suffix 
+             path-string?
+             path-replace-suffix path-add-suffix
+             path-replace-extension path-add-extension
              normal-case-path reroot-path
              read-eval-print-loop
              load/cd
@@ -195,5 +256,10 @@
              path-list-string->path-list find-executable-path
              collection-path collection-file-path load/use-compiled
              guard-evt channel-get channel-try-get channel-put
-             port? displayln
-             find-library-collection-paths))
+             port? writeln displayln println
+             find-library-collection-paths
+             find-library-collection-links
+             bytes-environment-variable-name?
+             string-environment-variable-name?
+             getenv putenv
+             call-with-default-reading-parameterization))

@@ -1,12 +1,12 @@
-This is the source code distribution for Racket.  For license
-information, please see the file racket/doc/release-notes/COPYING.txt.
+This is the source code distribution for minimal Racket. For license
+information, please see the file "COPYING_LESSER.txt".
 
 Compiled binaries, documentation, and up-to-date information are
 available at http://racket-lang.org/; pre-compiled nightly builds are
 available at http://pre.racket-lang.org/installers/.
 
 The Racket and GRacket source code should compile and execute on
-Windows, Mac OS X, or any Unix/X platform (including Linux).
+Windows, Mac OS, or any Unix/X platform (including Linux).
 
 Per-platform instructions are below.
 
@@ -27,27 +27,17 @@ To compile with Microsoft Visual C, read the instructions in
 
 To compile with MinGW tools, follow the Unix instructions below; do not
 use `--enable-shared', because DLLs will be generated automatically.
-The result is a Windows-style build, but without MzCOM. If you are using
-a variant of MinGW without "libdelayimp.a", get the implementation of
-"delayimp.c" from MinGW-w64 and compile it to "libdelayimp.a". When
-compiling with MinGW-w64 for 64-bit mode, the `--enable-sgc' flag
-to `configure' is currently required.
+The result is a Windows-style build. If you are using a variant of
+MinGW without "libdelayimp.a", get the implementation of "delayimp.c"
+from MinGW-w64 and compile it to "libdelayimp.a".
 
-To compile with Cygwin tools, follow the Unix instructions below, and be
-sure to configure with `--enable-shared'.  The result is a Unix-style
-build, not a Windows-style build (e.g., Racket's `system-type' procedure
-returns 'unix, not 'windows, and `racket/gui' uses Gtk instead of
-Win32).
-
-Beware that MinGW/Cygwin builds different from the MSVC build when
-SSE-based floating-point math is enabled in the C compiler. In that
-case, Racket includes sets the floating-point mode to extended
-precision to support extflonums, and changing precision may affect
-other libraries. To avoid the floating-point mode change, disable
-extflonum support with `--disable-extflonum'.
+To compile with Cygwin tools, follow the Unix instructions below.  The
+result is a Unix-style build, not a Windows-style build (e.g.,
+Racket's `system-type' procedure returns 'unix, not 'windows, and
+`racket/gui' uses Gtk instead of Win32).
 
 ========================================================================
- Compiling for Mac OS X
+ Compiling for Mac OS
 ========================================================================
 
 First, install developer command-line tools from Apple. As of this
@@ -88,7 +78,7 @@ but note the following:
    directory structure on top of an existing Unix-style directory
    structure.)
 
- * Under Mac OS X 10.6 and later, to build Racket in 32-bit mode,
+ * Under Mac OS 10.6 and later, to build Racket in 32-bit mode,
    use `--disable-mac64'.
 
 ========================================================================
@@ -124,7 +114,10 @@ Detailed instructions:
     To run `racket/draw' and `racket/gui' programs, you will need
     Cairo, Pango, and GTk install.  These libraries are not
     distributed with Racket, and they are not needed for compilation,
-    except for building documentation that uses `racket/draw'.
+    except for building documentation that uses `racket/draw'. More
+    info about required libs is available at
+    http://docs.racket-lang.org/draw/libs.html and
+    http://docs.racket-lang.org/gui/libs.html.
 
     The content of the "foreign" subdirectory may require GNU `make'
     if no installed "libffi" is detected.  If the build fails with
@@ -227,11 +220,12 @@ Detailed instructions:
     can find the installation directories.  At this stage, in case you
     are packaging an installation instead of installing directly, you
     can redirect the installation by setting the "DESTDIR" environment
-    variable.  For example, `make DESTDIR=/tmp/racket-build install'
-    places the installation into "/tmp/racket-build" instead of the
-    location originally specified with `--prefix'.  The resulting
-    installation will not work, however, until it is moved to the
-    location originally specified with `--prefix'.
+    variable to an absolute path for the packaging area. For example,
+    `make DESTDIR=/tmp/racket-build install' places the installation
+    into "/tmp/racket-build" instead of the location originally
+    specified with `--prefix'.  The resulting installation will not
+    work, however, until it is moved to the location originally
+    specified with `--prefix'.
 
     Finally, the `make install' step compiles ".zo" bytecode files for
     installed Racket source, generates launcher programs like
@@ -253,7 +247,7 @@ Detailed instructions:
     "add-ons" directory, which you can most easily find by evaluating
       (find-system-path 'addon-dir)
     in Racket.  In addition, if you configure with `--enabled-shared',
-    you may accumlate many unused versions of the dynamic libraries in
+    you may accumulate many unused versions of the dynamic libraries in
     your installation target.
 
 After an "in-place" install without git, the "racket/src" directory is
@@ -270,20 +264,72 @@ file references within the installation are relative.
 
 Cross-compilation requires at least two flags to `configure':
 
- * `--host=OS', where OS is something like `i386-gnu-linux'
+ * `--host=OS', where OS is something like `i386-gnu-linux' to
+   indicate the target platform.
+
+   The `configure' script uses OS to find suitable compilation tools,
+   such as `OS-gcc' and `OS-strip'.
 
  * `--enable-racket=RACKET', where RACKET is a path to a Racket
-   executable for the version being compiled that runs on the build 
-   (i.e., you must compile on the build machine to cross-compile)
+   executable that runs on the build platform; the executable must be
+   the same version of Racket as being built for the target platform.
 
-The `--enable-racket' flag is needed because building and installing
-Racket requires running (an intermediate version of) Racket.
+   This flag is needed because building and installing Racket requires
+   running (an existing build of) Racket.
 
-You may also need to set CC_FOR_BUILD to a compiler for the host
-platform (for building binaries to execute during the build process).
-If the target machine's stack grows up, you may have to supply
-`--enable-stackup'; if the target machine is big-endian, you may have
-to supply `--enable-bigendian'.
+   Use "auto" for RACKET to indicates that one should be built
+   automatically for the current platform. In that case, `make`
+   will run `configure` again (with no arguments) in a "local"
+   subdirectory to create a build for the current platform.
+
+Some less commonly needed `configure' flags:
+
+ * `--enable-stackup', if the target platform's stack grows up.
+
+ * `--enable-bigendian', if target platform is big-endian.
+
+========================================================================
+ Cross-compiling for Android
+========================================================================
+
+As an example of cross-compiling, to compile for Android on ARM using
+the NDK, use (all on one line)
+
+  configure --host=arm-linux-androideabi 
+            --enable-sysroot="[ndk]/platforms/android-[N]/arch-arm"
+            --enable-racket=auto
+
+where [ndk] is the path to the installed NDK, [N] is a target version
+of Android (such as 14), and
+
+ [ndk]/toolchains/arm-linux-androideabi-[comp]/prebuilt/[platform]/bin
+
+is in your PATH (so that a suitable `gcc', `ar', etc., are found) for
+the [comp] of your choice and the [platform] used to compile.
+
+========================================================================
+ Cross-compiling for iOS
+========================================================================
+
+To compile the Racket runtime system as a Framework for iOS, use (all
+on one line)
+
+  configure --host=[arch]-apple-darwin
+            --enable-ios="[sdk]"
+            --enable-racket=racket
+
+where [arch] is one of
+
+ - armv7, armv7s, or aarch64: to run on iOS
+ - i386 or x86_64: to run on the simulator
+
+The [sdk] argument is a path to an iOS SDK, but if it is "iPhoneOS" or
+"iPhoneSimulator", then the corresponding SDK is located in the
+standard place within the XCode application. For example, "iPhoneOS"
+becomes the path (all on one line)
+
+  /Applications/Xcode.app/Contents/Developer/Platforms/
+    iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk
 
 ========================================================================
  CGC versus 3m
@@ -294,11 +340,12 @@ older, and it cooperates more easily with extensions written in C.  The
 3m variant is the default: it is more robust and usually provides better
 overall performance.
 
-The default build mode creates 3m binaries only.  To create CGC binaries
+The default build mode creates 3m binaries only (except for a CGC
+binary that is used to build the 3m binary).  To create CGC binaries
 in addition, run `make cgc' in addition to `make', or run `make both'.
-To install both variants, use `make install-both' instead of just `make
-install'.  Alternately, use just `make cgc' and `make install-cgc' to
-build and install just the CGC variants.
+To install both variants, use `make install-both' instead of just
+`make install'.  Alternately, use just `make cgc' and `make
+install-cgc' to build and install just the CGC variants.
 
 CGC variants are installed with a "cgc" suffix.  To swap the default
 build and install mode, supply `--enable-cgcdefault' to `configure'.  In
@@ -322,7 +369,7 @@ The paths are embedded in the binary immediately after a special
 list of paths must end with an additional NUL terminator, and the
 overall list must be less than 1024 bytes long.
 
-As an alternative to editing an exeuctable directly, the
+As an alternative to editing an executable directly, the
 `create-embedding-executable' procedure from `compiler/embed' can be
 used to change the embedded path.  For example, the following program
 clones the Racket executable to "/tmp/mz" and changes the embedded path
@@ -345,47 +392,44 @@ documentation for "config search paths" for more information.
  Porting to New Platforms
 ========================================================================
 
-At a mininum, to port Racket to a new platform, edit "racket/sconfig.h"
-to provide a platform-specific compilation information.  As distributed,
-"racket/sconfig.h" contains configurations for the following platforms:
-
-              Windows (x86, x86_64)
-              Mac OS X (PPC, x86, x86_64)
-              Linux (x86, x86_64, PPC, 68k)
-              Cygwin (x86)
-              Solaris (x86, Sparc)
-              FreeBSD (x86, x86_64)
-              OpenBSD (x86)
-              NetBSD (x86)
-
-If your platfrom is not supported by the Boehm garbage collector
-(distributed with Racket source), provide the `--enable-sgc' flag to
-`configure'.
+At a minimum, to port Racket to a new platform, edit "racket/sconfig.h"
+and "rktio/rktio_platform.h" to provide a platform-specific compilation
+information.
 
 ========================================================================
  Additional Compilation Notes
 ========================================================================
 
-Garbage Collector
+CGC Build Options
 -----------------
 
-The conservative garbage collector distributed with Racket (in the "gc"
-directory) has been modified slightly from Boehm's standard
-distribution.  Mostly, the change modify the way that object
-finalization is handled.
+As noted above in "CGC versus 3m", Racket builds a CGC variant in the
+process of creating the normal 3m variant. Within the CGC variant, two
+implementations are possible.
+
+By default, Racket CGC is implemented with SenoraGC (in the "sgc"
+directory), which is relativey portable. Provide `--disable-sgc` to
+instead use the Boehm GC (in the "gc" directory), which should perform
+better and was the default for Racket CGC through version 6.1.
+
+The variant of the Boehm GC that is included with Racket has been
+modified slightly from Boehm's standard distribution; mostly, the
+changes modify the way that object finalization is handled.
+
+[Currently, the Windows build still uses the Boehm GC by default.]
 
 Floating point, x87, SSE, Extflonums, and the JIT
 -------------------------------------------------
 
 Pre-processor tests in "sconfig.h" and "scheme.h" attempt to determine
 when the x87 floating-point processor needs to be configured for
-double-precision mode, when JIT can use SSE instructions, and when
-extflonums can be supported because both the JIT and C code use SSE
+double-precision mode, when JIT can use SSE2 instructions, and when
+extflonums can be supported because both the JIT and C code use SSE2
 for double-precision floating-point while `long double' is available
 for extflonums.
 
-In particular, "scheme.h" looks for __SSE_MATH__ to indicate that gcc
-is compiling floating-point operations as SSE, so be sure to include
+In particular, "scheme.h" looks for __SSE2_MATH__ to indicate that gcc
+is compiling floating-point operations as SSE2, so be sure to include
 flags like "-mfpmath=sse" or "-mfpmath=387" in CPPFLAGS, and not just
 CFLAGS. See related configuration options below.
 
@@ -396,17 +440,17 @@ double' as extended-precision floating point.
 Configuration Options
 ---------------------
 
-Athough `configure' flags control most options, some configrations
+Although `configure' flags control most options, some configurations
 options can be modified by setting flags in "racket/sconfig.h".
 
 Some CPP flags control default settings in "racket/sconfig.h":
 
- * MZ_{USE_,NO_}JIT_SSE - {en,dis}ables use of SSE floating point
+ * MZ_{USE_,NO_}JIT_SSE - {en,dis}ables use of SSE2 floating point
 
  * MZ_USE_DETERMINSTIC_FUEL - disables use of itimer or pthread for
    Racket thread scheduling.
 
- * C_COMPILER_USES_SSE - declares that the C compiler is using SSE
+ * C_COMPILER_USES_SSE - declares that the C compiler is using SSE2
    instructions to implement `double' floating-point operations.
 
 Modifying Racket
@@ -414,5 +458,5 @@ Modifying Racket
 
 If you modify Racket and change any primitive syntax or the collection
 of built-in identifiers, be sure to turn off USE_COMPILED_STARTUP in
-"schminc.h".  Otherwise, Racket won't start.  See "schminc.h" for
+"schminc.h"; otherwise, Racket won't start.  See "schminc.h" for
 details.

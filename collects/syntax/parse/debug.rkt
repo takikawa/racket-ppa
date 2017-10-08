@@ -5,12 +5,14 @@
                      "private/rep-data.rkt"
                      "private/rep.rkt"
                      "private/kws.rkt")
+         racket/list
+         racket/pretty
          "../parse.rkt"
-         syntax/parse/private/residual
+         (except-in syntax/parse/private/residual
+                    prop:pattern-expander syntax-local-syntax-parse-pattern-introduce)
          "private/runtime.rkt"
          "private/runtime-progress.rkt"
-         (except-in "private/runtime-report.rkt"
-                    syntax-patterns-fail)
+         "private/runtime-report.rkt"
          "private/kws.rkt")
 
 ;; No lazy loading for this module's dependencies.
@@ -22,27 +24,29 @@
 
          debug-rhs
          debug-pattern
-         debug-parse)
+         debug-parse
+         debug-syntax-parse!)
 
 (define-syntax (syntax-class-parse stx)
   (syntax-case stx ()
     [(_ s x arg ...)
      (parameterize ((current-syntax-context stx))
-       (let* ([argu (parse-argu (syntax->list #'(arg ...)) #:context stx)]
-              [stxclass
-               (get-stxclass/check-arity #'s stx
-                                         (length (arguments-pargs argu))
-                                         (arguments-kws argu))]
-              [attrs (stxclass-attrs stxclass)])
-         (with-syntax ([parser (stxclass-parser stxclass)]
-                       [argu argu]
-                       [(name ...) (map attr-name attrs)]
-                       [(depth ...) (map attr-depth attrs)])
-           #'(let ([fh (lambda (fs) fs)])
-               (app-argu parser x x (ps-empty x x) #f fh fh #f
-                         (lambda (fh . attr-values)
-                           (map vector '(name ...) '(depth ...) attr-values))
-                         argu)))))]))
+       (with-disappeared-uses
+        (let* ([argu (parse-argu (syntax->list #'(arg ...)) #:context stx)]
+               [stxclass
+                (get-stxclass/check-arity #'s stx
+                                          (length (arguments-pargs argu))
+                                          (arguments-kws argu))]
+               [attrs (stxclass-attrs stxclass)])
+          (with-syntax ([parser (stxclass-parser stxclass)]
+                        [argu argu]
+                        [(name ...) (map attr-name attrs)]
+                        [(depth ...) (map attr-depth attrs)])
+            #'(let ([fh (lambda (fs) fs)])
+                (app-argu parser x x (ps-empty x x) #f fh fh #f
+                          (lambda (fh . attr-values)
+                            (map vector '(name ...) '(depth ...) attr-values))
+                          argu))))))]))
 
 (define-syntaxes (syntax-class-attributes
                   syntax-class-arity
@@ -52,7 +56,8 @@
       (syntax-case stx ()
         [(_ s)
          (parameterize ((current-syntax-context stx))
-           (handler (get-stxclass #'s)))]))
+           (with-disappeared-uses
+            (handler (get-stxclass #'s))))]))
     (values (mk (lambda (s)
                   (let ([attrs (stxclass-attrs s)])
                     (with-syntax ([(a ...) (map attr-name attrs)]
@@ -88,16 +93,35 @@
   (let/ec escape
     (parameterize ((current-failure-handler
                     (lambda (_ fs)
+                      (define-values (raw-fs-sexpr maximal-fs-sexpr) (fs->sexprs fs))
                       (escape
                        `(parse-failure
                          #:raw-failures
-                         ,(failureset->sexpr fs)
+                         ,raw-fs-sexpr
                          #:maximal-failures
-                         ,(let ([selected (map (lambda (fs)
-                                                 (cons 'equivalence-class
-                                                       (map failure->sexpr fs)))
-                                               (maximal-failures fs))])
-                            (if (= (length selected) 1)
-                                (car selected)
-                                (cons 'union selected))))))))
+                         ,maximal-fs-sexpr)))))
       (syntax-parse x [p 'success] ...))))
+
+(define (fs->sexprs fs)
+  (let* ([raw-fs (map invert-failure (reverse (flatten fs)))]
+         [selected-groups (maximal-failures raw-fs)])
+    (values (failureset->sexpr raw-fs)
+            (let ([selected (map (lambda (fs)
+                                   (cons 'progress-class
+                                         (map failure->sexpr fs)))
+                                 selected-groups)])
+              (if (= (length selected) 1)
+                  (car selected)
+                  (cons 'union selected))))))
+
+(define (debug-syntax-parse!)
+  (define old-failure-handler (current-failure-handler))
+  (current-failure-handler
+   (lambda (ctx fs)
+     (define-values (raw-fs-sexpr maximal-fs-sexpr) (fs->sexprs fs))
+     (eprintf "*** syntax-parse debug info ***\n")
+     (eprintf "Raw failures:\n")
+     (pretty-write raw-fs-sexpr (current-error-port))
+     (eprintf "Maximal failures:\n")
+     (pretty-write maximal-fs-sexpr (current-error-port))
+     (old-failure-handler ctx fs))))

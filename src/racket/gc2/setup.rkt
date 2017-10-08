@@ -15,11 +15,12 @@
 (use-compiled-file-paths null)
 
 (unless (with-handlers ([exn:fail:filesystem? (lambda (x) #f)])
-	  (collection-path "mzlib"))
+	  (collection-path "racket"))
   (let ([p (build-path (current-load-relative-directory)
 		       'up
 		       'up
 		       'up
+                       "lib"
 		       "collects")])
     (printf "Setting collection path: ~s\n" p)
     (current-library-collection-paths 
@@ -37,7 +38,10 @@
     (unless (symbol? path)
       ;; Copy file to here. The filename is from the resolved module
       ;; path, so it is ".rkt" even if the source is ".ss".
-      (let* ([path (if (file-exists? path)
+      (let* ([path (if (pair? path)
+                       (cadr path) ; extra from submodule
+                       path)]
+             [path (if (file-exists? path)
                        path
                        (if (regexp-match? #rx#"[.]rkt$" (if (path? path)
                                                             (path->bytes path)
@@ -81,14 +85,8 @@
 ;; Readers:
 (map (lambda (r) (go r #f #f))
      '(s-exp/lang/reader
-       mzscheme/lang/reader
-       scheme/base/lang/reader
-       scheme/lang/reader
-       scheme/private/lang/reader
-       scheme/private/provider/lang/reader
        racket/base/lang/reader
-       racket/private/lang/reader
-       racket/lang/reader))
+       racket/runtime-config))
 
 (current-library-collection-paths 
  (list (build-path (current-directory) "xform-collects")))

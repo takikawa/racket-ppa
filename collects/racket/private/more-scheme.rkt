@@ -4,8 +4,10 @@
 
 (module more-scheme '#%kernel
   (#%require "small-scheme.rkt" "define.rkt" '#%paramz "case.rkt" "logger.rkt"
+             "member.rkt"
              (for-syntax '#%kernel "stx.rkt" "small-scheme.rkt" "stxcase-scheme.rkt" "qqstx.rkt"))
 
+  ;; For `old-case`:
   (define-syntax case-test
     (lambda (x)
       (syntax-case x ()
@@ -52,7 +54,7 @@
         #f
         "bad syntax (illegal use of `.')"
         x))))
-
+  
   ;; From Dybvig:
   (define-syntax do
     (lambda (orig-x)
@@ -296,6 +298,8 @@
 	    stx
 	    (let-values ([(temp ...) expr])
 	      (set! id temp) ...)))])))
+  
+  (define-values (call/cc) call-with-current-continuation)
 
   (define-syntax let/cc
     (lambda (stx)
@@ -381,8 +385,9 @@
   (#%provide case old-case do
              parameterize parameterize* current-parameterization call-with-parameterization
              parameterize-break current-break-parameterization call-with-break-parameterization
+             (rename break-paramz? break-parameterization?)
              with-handlers with-handlers* call-with-exception-handler
              set!-values
-             let/cc fluid-let time
+             let/cc call/cc fluid-let time
              log-fatal log-error log-warning log-info log-debug define-logger
              hash-ref! hash-has-key? hash-update hash-update!))

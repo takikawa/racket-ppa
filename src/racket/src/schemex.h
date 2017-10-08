@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
   All rights reserved.
 
@@ -22,6 +22,7 @@ int (*scheme_setjmpup_relative)(Scheme_Jumpup_Buf *b, void *base,
 void (*scheme_longjmpup)(Scheme_Jumpup_Buf *b);
 void (*scheme_reset_jmpup_buf)(Scheme_Jumpup_Buf *b);
 #ifdef USE_MZ_SETJMP
+Scheme_Setjmp_Proc (*scheme_get_mz_setjmp)(void);
 int (*scheme_mz_setjmp)(mz_pre_jmp_buf b);
 void (*scheme_mz_longjmp)(mz_pre_jmp_buf b, int v);
 #endif
@@ -118,7 +119,11 @@ void (*scheme_remove_managed)(Scheme_Custodian_Reference *m, Scheme_Object *o);
 void (*scheme_close_managed)(Scheme_Custodian *m);
 void (*scheme_schedule_custodian_close)(Scheme_Custodian *c);
 void (*scheme_add_custodian_extractor)(Scheme_Type t, Scheme_Custodian_Extractor e);
+int (*scheme_flush_managed)(Scheme_Plumber *p, int catch_errors);
+Scheme_Object *(*scheme_add_flush)(Scheme_Plumber *p, Scheme_Object *proc_or_port, int weak_flush);
+void (*scheme_remove_flush)(Scheme_Object *h);
 void (*scheme_add_atexit_closer)(Scheme_Exit_Closer_Func f);
+int (*scheme_atexit)(void (*func)(void));
 void (*scheme_add_evt)(Scheme_Type type,
 				   Scheme_Ready_Fun ready,
 				   Scheme_Needs_Wakeup_Fun wakeup,
@@ -141,12 +146,9 @@ void (*scheme_pop_kill_action)();
 void (*scheme_set_can_break)(int on);
 void (*scheme_push_break_enable)(Scheme_Cont_Frame_Data *cframe, int on, int pre_check);
 void (*scheme_pop_break_enable)(Scheme_Cont_Frame_Data *cframe, int post_check);
-int (*scheme_with_stack_freeze)(Scheme_Frozen_Stack_Proc wha_f, void *wha_data);
-int (*scheme_frozen_run_some)(Scheme_Frozen_Stack_Proc do_f, void *do_data, int run_msecs);
-int (*scheme_is_in_frozen_stack)();
-Scheme_Object *scheme_abort_continuation_no_dws;
-Scheme_Object *scheme_call_with_composable_no_dws;
-Scheme_On_Atomic_Timeout_Proc (*scheme_set_on_atomic_timeout)(Scheme_On_Atomic_Timeout_Proc p);
+Scheme_Object *(*scheme_abort_continuation_no_dws)(Scheme_Object *pt, Scheme_Object *v);
+Scheme_Object *(*scheme_call_with_composable_no_dws)(Scheme_Object *proc, Scheme_Object *pt);
+Scheme_On_Atomic_Timeout_Proc (*scheme_set_on_atomic_timeout)(Scheme_On_Atomic_Timeout_Proc p, void *data);
 /*========================================================================*/
 /*                              error handling                            */
 /*========================================================================*/
@@ -161,10 +163,15 @@ void (*scheme_log_w_data)(Scheme_Logger *logger, int level, int flags,
                                  Scheme_Object *data,
                                  const char *msg, ...);
 void (*scheme_log_message)(Scheme_Logger *logger, int level, char *buffer, intptr_t len, Scheme_Object *data);
-void (*scheme_log_name_message)(Scheme_Logger *logger, int level, Scheme_Object *name, char *buffer, intptr_t len, Scheme_Object *data);
+void (*scheme_log_name_message)(Scheme_Logger *logger, int level, Scheme_Object *name,
+                                       char *buffer, intptr_t len, Scheme_Object *data);
+void (*scheme_log_name_pfx_message)(Scheme_Logger *logger, int level, Scheme_Object *name,
+                                           char *buffer, intptr_t len, Scheme_Object *data,
+                                           int prefix_message);
 void (*scheme_log_abort)(char *buffer);
 void (*scheme_log_warning)(char *buffer);
 void (*scheme_glib_log_message)(const char *log_domain, int log_level, const char *message, void *user_data);
+void *(*scheme_glib_log_message_test)(char *str);
 void (*scheme_out_of_memory_abort)();
 void (*scheme_wrong_count)(const char *name, int minc, int maxc,
 				  int argc, Scheme_Object **argv);
@@ -315,7 +322,6 @@ void *(*GC_malloc_atomic)(size_t size_in_bytes);
 void *(*GC_malloc_one_tagged)(size_t size_in_bytes);
 void *(*GC_malloc_atomic_uncollectable)(size_t size_in_bytes);
 void *(*scheme_malloc_uncollectable)(size_t size_in_bytes);
-void *(*GC_malloc_array_tagged)(size_t size_in_bytes);
 void *(*GC_malloc_allow_interior)(size_t size_in_bytes);
 void *(*GC_malloc_atomic_allow_interior)(size_t size_in_bytes);
 void *(*GC_malloc_tagged_allow_interior)(size_t size_in_bytes);
@@ -357,7 +363,9 @@ void (*scheme_remove_all_finalization)(void *p);
 void (*scheme_dont_gc_ptr)(void *p);
 void (*scheme_gc_ptr_ok)(void *p);
 void (*scheme_collect_garbage)(void);
+void (*scheme_collect_garbage_minor)(void);
 void (*scheme_enable_garbage_collection)(int on);
+void (*scheme_incremental_garbage_collection)(int on);
 #ifdef MZ_PRECISE_GC
 # ifndef USE_THREAD_LOCAL
 void **GC_variable_stack;
@@ -365,7 +373,7 @@ void **GC_variable_stack;
 void (*GC_register_traversers)(short tag, Size_Proc size, Mark_Proc mark, Fixup_Proc fixup,
 				      int is_constant_size, int is_atomic);
 void *(*GC_resolve)(void *p);
-void (*GC_mark)(const void *p);
+void (*GC_mark)(void *p);
 void (*GC_fixup)(void *p);
 void *(*GC_fixup_self)(void *p);
 #endif
@@ -373,6 +381,7 @@ void **(*scheme_malloc_immobile_box)(void *p);
 void (*scheme_free_immobile_box)(void **b);
 Scheme_Object *(*scheme_add_gc_callback)(Scheme_Object *pre, Scheme_Object *post);
 void (*scheme_remove_gc_callback)(Scheme_Object *key);
+void (*scheme_register_type_gc_shape)(Scheme_Type type, intptr_t *shape_str);
 /*========================================================================*/
 /*                             hash tables                                */
 /*========================================================================*/
@@ -383,6 +392,9 @@ void *(*scheme_lookup_in_table)(Scheme_Bucket_Table *table, const char *key);
 Scheme_Bucket *(*scheme_bucket_from_table)(Scheme_Bucket_Table *table, const char *key);
 int (*scheme_bucket_table_equal)(Scheme_Bucket_Table *t1, Scheme_Bucket_Table *t2);
 Scheme_Bucket_Table *(*scheme_clone_bucket_table)(Scheme_Bucket_Table *bt);
+void (*scheme_clear_bucket_table)(Scheme_Bucket_Table *bt);
+int (*scheme_bucket_table_index)(Scheme_Bucket_Table *hash, mzlonglong pos, Scheme_Object **_key, Scheme_Object **_val);
+Scheme_Object *(*scheme_bucket_table_next)(Scheme_Bucket_Table *hash, mzlonglong start);
 Scheme_Hash_Table *(*scheme_make_hash_table)(int type);
 Scheme_Hash_Table *(*scheme_make_hash_table_equal)();
 Scheme_Hash_Table *(*scheme_make_hash_table_eqv)();
@@ -394,7 +406,10 @@ Scheme_Object *(*scheme_hash_get_atomic)(Scheme_Hash_Table *table, Scheme_Object
 int (*scheme_hash_table_equal)(Scheme_Hash_Table *t1, Scheme_Hash_Table *t2);
 int (*scheme_is_hash_table_equal)(Scheme_Object *o);
 int (*scheme_is_hash_table_eqv)(Scheme_Object *o);
-Scheme_Hash_Table *(*scheme_clone_hash_table)(Scheme_Hash_Table *bt);
+Scheme_Hash_Table *(*scheme_clone_hash_table)(Scheme_Hash_Table *ht);
+void (*scheme_clear_hash_table)(Scheme_Hash_Table *ht);
+int (*scheme_hash_table_index)(Scheme_Hash_Table *hash, mzlonglong pos, Scheme_Object **_key, Scheme_Object **_val);
+Scheme_Object *(*scheme_hash_table_next)(Scheme_Hash_Table *hash, mzlonglong start);
 Scheme_Hash_Tree *(*scheme_make_hash_tree)(int kind);
 Scheme_Hash_Tree *(*scheme_hash_tree_set)(Scheme_Hash_Tree *tree, Scheme_Object *key, Scheme_Object *val);
 Scheme_Object *(*scheme_hash_tree_get)(Scheme_Hash_Tree *tree, Scheme_Object *key);
@@ -532,6 +547,9 @@ const char *(*scheme_get_proc_name)(Scheme_Object *p, int *len, int for_error);
 intptr_t (*scheme_utf8_decode)(const unsigned char *s, intptr_t start, intptr_t end, 
 				      unsigned int *us, intptr_t dstart, intptr_t dend,
 				      intptr_t *ipos, char utf16, int permissive);
+intptr_t (*scheme_utf8_decode_offset_prefix)(const unsigned char *s, intptr_t start, intptr_t end, 
+                                                    unsigned int *us, intptr_t dstart, intptr_t dend,
+                                                    intptr_t *ipos, char utf16, int permissive);
 intptr_t (*scheme_utf8_decode_as_prefix)(const unsigned char *s, intptr_t start, intptr_t end, 
 						unsigned int *us, intptr_t dstart, intptr_t dend,
 						intptr_t *ipos, char utf16, int permissive);
@@ -561,6 +579,7 @@ mzchar *(*scheme_utf16_to_ucs4)(const unsigned short *text, intptr_t start, intp
 				       intptr_t *ulen, intptr_t term_size);
 Scheme_Object *(*scheme_open_converter)(const char *from_e, const char *to_e);
 void (*scheme_close_converter)(Scheme_Object *conv);
+char *(*scheme_getenv)(char *name);
 /*========================================================================*/
 /*                               bignums                                  */
 /*========================================================================*/
@@ -788,10 +807,6 @@ Scheme_Object *(*scheme_make_sized_path)(char *chars, intptr_t len, int copy);
 Scheme_Object *(*scheme_make_sized_offset_path)(char *chars, intptr_t d, intptr_t len, int copy);
 Scheme_Object *(*scheme_make_sized_offset_kind_path)(char *chars, intptr_t d, intptr_t len, int copy, int kind);
 Scheme_Object *(*scheme_make_path_without_copying)(char *chars);
-#ifdef MACINTOSH_EVENTS
-char *(*scheme_mac_spec_to_path)(mzFSSpec *spec);
-int (*scheme_mac_path_to_spec)(const char *filename, mzFSSpec *spec);
-#endif
 void *(*scheme_alloc_fdset_array)(int count, int permanent);
 void *(*scheme_init_fdset_array)(void *fdarray, int count);
 void *(*scheme_get_fdset)(void *fdarray, int pos);
@@ -843,6 +858,7 @@ void (*scheme_install_macro)(Scheme_Bucket *b, Scheme_Object *v);
 void (*scheme_save_initial_module_set)(Scheme_Env *env);
 Scheme_Env *(*scheme_primitive_module)(Scheme_Object *name, Scheme_Env *for_env);
 void (*scheme_finish_primitive_module)(Scheme_Env *env);
+void (*scheme_set_primitive_module_phaseless)(Scheme_Env *env, int phaseless);
 void (*scheme_protect_primitive_provide)(Scheme_Env *env, Scheme_Object *name);
 Scheme_Object *(*scheme_make_modidx)(Scheme_Object *path,
 				  Scheme_Object *base,
@@ -938,8 +954,7 @@ int (*scheme_is_list)(Scheme_Object *obj1);
 int (*scheme_list_length)(Scheme_Object *list);
 int (*scheme_proper_list_length)(Scheme_Object *list);
 Scheme_Object *(*scheme_alloc_list)(int size);
-Scheme_Object *(*scheme_map_1)(Scheme_Object *(*f)(Scheme_Object*),
-			    Scheme_Object *l);
+Scheme_Object *(*scheme_map_1)(Scheme_Object *(*f)(Scheme_Object*), Scheme_Object *l);
 Scheme_Object *(*scheme_car)(Scheme_Object *pair);
 Scheme_Object *(*scheme_cdr)(Scheme_Object *pair);
 Scheme_Object *(*scheme_cadr)(Scheme_Object *pair);
@@ -964,6 +979,7 @@ intptr_t (*scheme_get_seconds)(void);
 intptr_t (*scheme_get_milliseconds)(void);
 double (*scheme_get_inexact_milliseconds)(void);
 intptr_t (*scheme_get_process_milliseconds)(void);
+intptr_t (*scheme_get_process_children_milliseconds)(void);
 intptr_t (*scheme_get_thread_milliseconds)(Scheme_Object *thrd);
 char *(*scheme_banner)(void);
 char *(*scheme_version)(void);
@@ -987,6 +1003,8 @@ Scheme_Hash_Table *(*scheme_get_place_table)(void);
 void *(*scheme_register_process_global)(const char *key, void *val);
 Scheme_Object *(*scheme_malloc_key)(void);
 void (*scheme_free_key)(Scheme_Object *k);
+void *(*scheme_jit_find_code_end)(void *p);
+void (*scheme_jit_now)(Scheme_Object *f);
 #ifndef SCHEME_EX_INLINE
 } Scheme_Extension_Table;
 #endif

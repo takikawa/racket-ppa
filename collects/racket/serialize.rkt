@@ -2,7 +2,8 @@
 (module serialize racket/base
   (require "private/serialize.rkt"
            (for-syntax racket/base
-                       racket/struct-info))
+                       racket/struct-info)
+           racket/runtime-path)
 
   (provide (all-from-out "private/serialize.rkt")
            serializable-struct
@@ -33,10 +34,35 @@
        (let* ([id (if (identifier? #'id/sup)
                       #'id/sup
                       (car (syntax-e #'id/sup)))]
-              [super-info (if (identifier? #'id/sup)
-                              #f
-                              (extract-struct-info (syntax-local-value (cadr (syntax->list #'id/sup)))))]
+              [super-v (if (identifier? #'id/sup)
+                           #f
+                           (syntax-local-value (cadr (syntax->list #'id/sup))))]
+              [super-info (and super-v
+                               (extract-struct-info super-v))]
+              [super-auto-info (and (struct-auto-info? super-v)
+                                    (struct-auto-info-lists super-v))]
               [fields (syntax->list #'(field ...))]
+              [extract-field-name (lambda (field)
+                                    (cond
+                                     [(identifier? field) field]
+                                     [(pair? (syntax-e field))
+                                      (define id (car (syntax-e field)))
+                                      (if (identifier? id)
+                                          id
+                                          #'bad)]
+                                     [else #'bad]))]
+              [field-names (for/list ([field (in-list fields)])
+                             (extract-field-name field))]
+              [non-auto-field-names (for/list ([field (in-list fields)]
+                                               #:unless (let loop ([e field])
+                                                          (cond
+                                                           [(null? e) #f]
+                                                           [(syntax? e) (loop (syntax-e e))]
+                                                           [(pair? e)
+                                                            (or (eq? '#:auto (syntax-e (car e)))
+                                                                (loop (cdr e)))]
+                                                           [else #f])))
+                                      (extract-field-name field))]
               [given-maker (let loop ([props (syntax->list #'(prop ...))])
                              (cond
                               [(null? props) #f]
@@ -59,15 +85,7 @@
                                (string->symbol
                                 (format "~a-~a"
                                         (syntax-e id)
-                                        (syntax-e
-                                         (if (identifier? field)
-                                             field
-                                             (syntax-case field ()
-                                               [(id . _)
-                                                (if (identifier? #'id)
-                                                    #'id
-                                                    #'bad)]
-                                               [_ #'bad])))))))
+                                        (syntax-e (extract-field-name field))))))
                             fields)]
               [mutable? (ormap (lambda (x)
                                  (eq? '#:mutable (syntax-e x)))
@@ -111,6 +129,11 @@
               #'orig-stx
               (syntax-case #'id/sup ()
                 [(_ sup) #'sup]))))
+         (define can-handle-cycles?
+           ;;  Yes, as long as we have mutators here and for the superclass
+           (and (andmap values setters)
+                (or (not super-info)
+                    (andmap values (list-ref super-info 4)))))
          #`(begin
              ;; =============== struct with serialize property ================
              (define-struct/derived orig-stx
@@ -138,11 +161,7 @@
                 ;; The serializer id: --------------------
                 (quote-syntax #,deserialize-id)
                 ;; Can handle cycles? --------------------
-                ;;  Yes, as long as we have mutators for the
-                ;;  superclass.
-                #,(and (andmap values setters)
-                       (or (not super-info)
-                           (andmap values (list-ref super-info 4))))
+                '#,can-handle-cycles?
                 ;; Directory for last-ditch resolution --------------------
                 (or (current-load-relative-directory) 
                     (current-directory))))
@@ -150,7 +169,43 @@
              (define #,deserialize-id 
                (make-deserialize-info
                 ;; The maker: --------------------
-                #,maker
+                #,(let* ([n-fields (length field-names)]
+                         [n-non-auto-fields (length non-auto-field-names)]
+                         [super-field-names (if super-info
+                                                (generate-temporaries
+                                                 (list-ref super-info 3))
+                                                null)]
+                         [super-setters (if super-info
+                                            (list-ref super-info 4)
+                                            null)]
+                         [n-super-fields (length super-field-names)]
+                         [n-super-non-auto-fields (- n-super-fields
+                                                     (if super-auto-info
+                                                         (length (car super-auto-info))
+                                                         0))]
+                         [super-non-auto-field-names (let loop ([super-field-names super-field-names]
+                                                                [n n-super-non-auto-fields])
+                                                       (if (zero? n)
+                                                           null
+                                                           (cons (car super-field-names)
+                                                                 (loop (cdr super-field-names)
+                                                                       (sub1 n)))))])
+                    (if (and (= n-fields n-non-auto-fields)
+                             (= n-super-fields n-super-non-auto-fields))
+                        maker
+                        #`(lambda (#,@super-field-names #,@field-names)
+                            (let ([s (#,maker #,@super-non-auto-field-names #,@non-auto-field-names)])
+                              #,@(for/list ([field-name (in-list
+                                                         (append
+                                                          (list-tail super-field-names n-super-non-auto-fields)
+                                                          (list-tail field-names n-non-auto-fields)))]
+                                            [setter (in-list 
+                                                     (append
+                                                      (list-tail super-setters n-super-non-auto-fields)
+                                                      (list-tail setters n-non-auto-fields)))]
+                                            #:when setter)
+                                   #`(#,setter s #,field-name))
+                              s))))
                 ;; The shell function: --------------------
                 ;;  Returns an shell object plus
                 ;;  a function to update the shell (used for
@@ -167,22 +222,25 @@
                                     (map (lambda (x) #f)
                                          (list-ref super-info 3))
                                     null)
-                                (map (lambda (g)
+                                (map (lambda (f)
                                        #f)
-                                     getters)))])
+                                     non-auto-field-names)))])
                       (values
                        s0
                        (lambda (s)
-                         #,@(if super-info
-                                (map (lambda (set get)
-                                       #`(#,set s0 (#,get s)))
-                                     (list-ref super-info 4)
-                                     (list-ref super-info 3))
-                                null)
-                         #,@(map (lambda (getter setter)
-                                   #`(#,setter s0 (#,getter s)))
-                                 getters
-                                 setters)
+                         #,(if can-handle-cycles?
+                               #`(begin
+                                   #,@(if super-info
+                                          (map (lambda (set get)
+                                                 #`(#,set s0 (#,get s)))
+                                               (list-ref super-info 4)
+                                               (list-ref super-info 3))
+                                          null)
+                                   #,@(map (lambda (getter setter)
+                                             #`(#,setter s0 (#,getter s)))
+                                           getters
+                                           setters))
+                               #`(error "cannot mutate to complete a cycle"))
                          (void))))))))
              #,@(map (lambda (other-deserialize-id proc-expr cycle-proc-expr)
                        #`(define #,other-deserialize-id
@@ -191,16 +249,25 @@
                      (syntax->list #'(make-proc-expr ...))
                      (syntax->list #'(cycle-make-proc-expr ...)))
              ;; =============== provide ===============
-             #,@(map (lambda (deserialize-id)
-                       (if (eq? 'top-level (syntax-local-context))
-                           ;; Top level; in case deserializer-id-stx is macro-introduced,
-                           ;;  explicitly use namespace-set-variable-value!
-                           #`(namespace-set-variable-value! '#,deserialize-id
-                                                            #,deserialize-id)
-                           ;; In a module; provide:
-                           #`(provide #,deserialize-id)))
-                     (cons deserialize-id
-                           other-deserialize-ids))))]
+             ;; If we're in a module context, then provide through
+             ;; a submodule:
+             (#,@(if (eq? 'top-level (syntax-local-context))
+                     #'(begin)
+                     #'(module+ deserialize-info))
+              #,@(map (lambda (deserialize-id)
+                        (if (eq? 'top-level (syntax-local-context))
+                            ;; Top level; in case deserializer-id-stx is macro-introduced,
+                            ;;  explicitly use namespace-set-variable-value!
+                            #`(namespace-set-variable-value! '#,deserialize-id
+                                                             #,deserialize-id)
+                            ;; In a module; provide:
+                            #`(provide #,deserialize-id)))
+                      (cons deserialize-id
+                            other-deserialize-ids)))
+             ;; Make sure submodule is pulled along for run time:
+             #,@(if (eq? 'top-level (syntax-local-context))
+                    null
+                    #'((runtime-require (submod "." deserialize-info))))))]
       ;; -- More error cases ---
       ;; Check fields
       [(_ orig-stx id/sup vers fields . _rest)

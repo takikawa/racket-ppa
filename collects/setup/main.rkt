@@ -8,10 +8,16 @@
 ;; .zo file. Do not `require' this module from anywhere, not even 
 ;; `for-label', otherwise it could get a .zo anyway.
 
+;; Also, do not `require' any module that is compiled. That constraint
+;; essentially restrcts this module to `require's of '#%... modules.
+
 (module main '#%kernel
   (#%require '#%min-stx
+             '#%utils ; for find-main-collects
              ;; Need to make sure they're here:
              '#%builtin)
+
+  (module test '#%kernel)
 
   (when (file-stream-port? (current-output-port))
     (file-stream-buffer-mode (current-output-port) 'line))
@@ -54,21 +60,29 @@
 
   (define-values (flags) (filter-flags (vector->list (current-command-line-arguments))))
 
+  (define-values (member)
+    (lambda (a l)
+      (if (null? l)
+          #f
+          (if (equal? a (car l))
+              l
+              (member a (cdr l))))))
+
   ;; Checks whether a flag is present:
   (define-values (on?)
     (lambda (flag-name)
       (member flag-name flags)))
 
   (define-values (print-bootstrapping)
-    (lambda ()
-      (fprintf (current-output-port) "~a: bootstrapping from source...\n" short-name)))
+    (lambda (why)
+      (fprintf (current-output-port) "~a: bootstrapping from source...\n  (~a)\n"
+               short-name why)))
 
   (define-values (main-collects-relative->path)
     (let ([main-collects #f])
       (lambda (p)
-        ;; At this point, it's safe to try to load 'setup/private/main-collects
         (unless main-collects
-          (set! main-collects ((dynamic-require 'setup/private/main-collects 'find-main-collects))))
+          (set! main-collects (find-main-collects)))
         (if (and (pair? p)
                  (eq? 'collects (car p)))
             (apply build-path main-collects
@@ -84,7 +98,7 @@
       (when (or (on? "--clean")
                 (on? "-c"))
 	(use-compiled-file-paths null)
-	(print-bootstrapping))
+	(print-bootstrapping "command-line --clean or -c"))
   
       ;; Load the cm instance to be installed while loading Setup PLT.
       ;; This has to be dynamic, so we get a chance to turn off compiled
@@ -104,21 +118,22 @@
 		    ;;  tree, and there's always --clean to turn this
 		    ;;  off. If an .so file is used, we give up using
 		    ;;  compiled files.
-		    (let loop ([skip-zo? (null? (use-compiled-file-paths))])
-		      (when skip-zo?
-			(print-bootstrapping))
-		      ((call/ec 
+		    (let loop ([skip-zo/reason (and (null? (use-compiled-file-paths))
+                                                    "empty use-compiled-file-paths")])
+		      (when skip-zo/reason
+			(print-bootstrapping skip-zo/reason))
+		      ((call-with-escape-continuation
                         (lambda (escape)
 			 ;; Create a new namespace, and also install load handlers
 			 ;;  to check file dates, if necessary.
 			 (parameterize ([current-namespace (make-kernel-namespace)]
 					[use-compiled-file-paths 
-					 (if skip-zo?
+					 (if skip-zo/reason
 					     null
 					     (use-compiled-file-paths))]
 					[current-load 
 					 (let ([orig-load (current-load)])
-					   (if skip-zo?
+					   (if skip-zo/reason
 					       orig-load
 					       (lambda (path modname)
 						 (if (regexp-match? #rx#"[.]zo$" (path->bytes path))
@@ -131,34 +146,41 @@
                                                       ;; We do not currently support "external" dependencies
                                                       ;; (via cm-accomplice) during bootstrap.
                                                       (let ([deps (with-input-from-file 
-                                                                      (bytes->path (regexp-replace #"[.]zo$" (path->bytes path) #".dep"))
+                                                                      (path-replace-extension path #".dep")
                                                                     read)])
                                                         (for-each (lambda (dep)
-                                                                    (unless (and (pair? dep)
-                                                                                 (eq? (car dep) 'ext))
-                                                                      (dynamic-require (main-collects-relative->path dep) #f)))
+                                                                    (let ([dep
+                                                                           (if (and (pair? dep)
+                                                                                    (eq? (car dep) 'indirect))
+                                                                               (cdr dep)
+                                                                               dep)])
+                                                                      (unless (and (pair? dep)
+                                                                                   (eq? (car dep) 'ext))
+                                                                        (dynamic-require (main-collects-relative->path dep) #f))))
                                                                   (cddr deps))))
 						     ;; Not a .zo! Don't use .zo files at all...
 						     (escape (lambda ()
 							       ;; Try again without .zo
-							       (loop #t)))))))]
+							       (loop (format "loading non-.zo: ~a" path))))))))]
 					[current-load-extension 
-					 (if skip-zo?
+					 (if skip-zo/reason
 					     (current-load-extension)
 					     (lambda (path modname)
 					       (escape (lambda ()
 							 ;; Try again without .zo
-							 (loop #t)))))])
+							 (loop "loading an extension")))))])
 		           ;; Other things could go wrong, such as a version mismatch.
 		           ;; If something goes wrong, of course, give up on .zo files.
                            (parameterize ([uncaught-exception-handler
                                            (lambda (exn)
                                              (when (exn:break? exn) (exit 1))
-                                             (if skip-zo?
+                                             (if skip-zo/reason
                                                  (escape
                                                   (lambda () (raise exn)))
                                                  (escape
-                                                  (lambda () (loop #t)))))])
+                                                  (lambda () (loop (if (exn:fail? exn)
+                                                                       (regexp-replace* #rx"\n" (exn-message exn) "\n  ")
+                                                                       (format "uncaught exn: ~s" exn)))))))])
 			     ;; Here's the main dynamic load of "cm.rkt":
 			     (let ([mk
 				    (dynamic-require 'compiler/cm

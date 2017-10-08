@@ -1,6 +1,6 @@
-#lang scheme/base
+#lang racket/base
 
-(require (prefix-in planet: planet/config) scheme/path scheme/list)
+(require (prefix-in planet: planet/config) racket/path racket/list)
 
 ;; `library-roots' is an alist of root-path, and the number of levels
 ;; below that which indicates a "library".  This is hard-wired now to
@@ -16,7 +16,7 @@
     ,(cons (planet:CACHE-DIR) 4)
     ;; add planet links, each as a root (if there is a change in
     ;; the format, this will just ignore these paths, but these
-    ;; collections will throw an error in setup-plt)
+    ;; collections will throw an error in raco setup)
     ,@(with-handlers ([exn? (lambda (e)
                               (printf "WARNING: bad planet links at ~a:\n ~a"
                                       (planet:HARD-LINK-FILE) (exn-message e))

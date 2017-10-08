@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -34,6 +34,11 @@
 #include <math.h>
 #include <string.h>
 #include <ctype.h>
+
+static Scheme_Object *decimal_as_inexact_symbol;
+static Scheme_Object *decimal_as_exact_symbol;
+static Scheme_Object *read_symbol;
+static Scheme_Object *number_or_false_symbol;
 
 static Scheme_Object *number_to_string (int argc, Scheme_Object *argv[]);
 static Scheme_Object *string_to_number (int argc, Scheme_Object *argv[]);
@@ -93,82 +98,92 @@ SHARED_OK static Scheme_Object *num_limits[3];
 
 void scheme_init_numstr(Scheme_Env *env)
 {
+  REGISTER_SO(decimal_as_inexact_symbol);
+  REGISTER_SO(decimal_as_exact_symbol);
+  REGISTER_SO(read_symbol);
+  REGISTER_SO(number_or_false_symbol);
+
+  decimal_as_inexact_symbol = scheme_intern_symbol("decimal-as-inexact");
+  decimal_as_exact_symbol = scheme_intern_symbol("decimal-as-exact");
+  read_symbol = scheme_intern_symbol("read");
+  number_or_false_symbol = scheme_intern_symbol("number-or-false");
+
   scheme_add_global_constant("number->string", 
-			     scheme_make_prim_w_arity(number_to_string,
-						      "number->string",
-						      1, 2),
+			     scheme_make_immed_prim(number_to_string,
+                                                    "number->string",
+                                                    1, 2),
 			     env);
   scheme_add_global_constant("string->number", 
 			     scheme_make_folding_prim(string_to_number,
 						      "string->number", 
-						      1, 2, 1),
+						      1, 4, 1),
 			     env);
 
   scheme_add_global_constant("integer-bytes->integer", 
-			     scheme_make_prim_w_arity(bytes_to_integer,
-						      "integer-bytes->integer", 
-						      2, 5),
+			     scheme_make_immed_prim(bytes_to_integer,
+                                                    "integer-bytes->integer", 
+                                                    2, 5),
 			     env);
   scheme_add_global_constant("integer->integer-bytes", 
-			     scheme_make_prim_w_arity(integer_to_bytes,
-						      "integer->integer-bytes", 
-						      3, 6),
+			     scheme_make_immed_prim(integer_to_bytes,
+                                                    "integer->integer-bytes", 
+                                                    3, 6),
 			     env);
   scheme_add_global_constant("floating-point-bytes->real", 
-			     scheme_make_prim_w_arity(bytes_to_real,
-						      "floating-point-bytes->real",
-						      1, 4),
+			     scheme_make_immed_prim(bytes_to_real,
+                                                    "floating-point-bytes->real",
+                                                    1, 4),
 			     env);
   scheme_add_global_constant("real->floating-point-bytes",
-			     scheme_make_prim_w_arity(real_to_bytes,
-						      "real->floating-point-bytes",
-						      2, 5),
+			     scheme_make_immed_prim(real_to_bytes,
+                                                    "real->floating-point-bytes",
+                                                    2, 5),
 			     env);
   scheme_add_global_constant("system-big-endian?",
-			     scheme_make_prim_w_arity(system_big_endian_p,
-						      "system-big-endian?",
-						      0, 0),
+			     scheme_make_immed_prim(system_big_endian_p,
+                                                    "system-big-endian?",
+                                                    0, 0),
 			     env);
 
   scheme_add_global_constant("random", 
-			     scheme_make_prim_w_arity(sch_random,
-						      "random",
-						      0, 2),
+			     scheme_make_immed_prim(sch_random,
+                                                    "random",
+                                                    0, 2),
 			     env);
   scheme_add_global_constant("random-seed", 
-			     scheme_make_prim_w_arity(random_seed,
-						      "random-seed",
-						      1, 1),
+			     scheme_make_immed_prim(random_seed,
+                                                    "random-seed",
+                                                    1, 1),
 			     env);
   scheme_add_global_constant("make-pseudo-random-generator", 
-			     scheme_make_prim_w_arity(make_pseudo_random_generator,
-						      "make-pseudo-random-generator", 
-						      0, 0), 
+			     scheme_make_immed_prim(make_pseudo_random_generator,
+                                                    "make-pseudo-random-generator", 
+                                                    0, 0), 
 			     env);
   scheme_add_global_constant("vector->pseudo-random-generator",
-			     scheme_make_prim_w_arity(sch_pack,
-						      "vector->pseudo-random-generator", 
-						      1, 1), 
+			     scheme_make_immed_prim(sch_pack,
+                                                    "vector->pseudo-random-generator", 
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("vector->pseudo-random-generator!",
-			     scheme_make_prim_w_arity(sch_pack_bang,
-						      "vector->pseudo-random-generator!", 
-						      2, 2), 
+			     scheme_make_immed_prim(sch_pack_bang,
+                                                    "vector->pseudo-random-generator!", 
+                                                    2, 2), 
 			     env);
   scheme_add_global_constant("pseudo-random-generator->vector",
-			     scheme_make_prim_w_arity(sch_unpack,
-						      "pseudo-random-generator->vector", 
-						      1, 1), 
+			     scheme_make_immed_prim(sch_unpack,
+                                                    "pseudo-random-generator->vector", 
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("pseudo-random-generator-vector?",
-                             scheme_make_prim_w_arity(sch_check_pack,
-						      "pseudo-random-generator-vector?", 
-						      1, 1), 
+                             scheme_make_immed_prim(sch_check_pack,
+                                                    "pseudo-random-generator-vector?", 
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("pseudo-random-generator?", 
-			     scheme_make_prim_w_arity(pseudo_random_generator_p,
-						      "pseudo-random-generator?", 
-						      1, 1), 
+			     scheme_make_immed_prim(pseudo_random_generator_p,
+                                                    "pseudo-random-generator?", 
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("current-pseudo-random-generator", 
 			     scheme_register_parameter(current_pseudo_random_generator,
@@ -205,14 +220,14 @@ void scheme_init_numstr(Scheme_Env *env)
 void scheme_init_extfl_numstr(Scheme_Env *env)
 {
   scheme_add_global_constant("floating-point-bytes->extfl", 
-			     scheme_make_prim_w_arity(bytes_to_long_double,
-						      "floating-point-bytes->extfl",
-						      1, 4),
+			     scheme_make_immed_prim(bytes_to_long_double,
+                                                    "floating-point-bytes->extfl",
+                                                    1, 4),
 			     env);
   scheme_add_global_constant("extfl->floating-point-bytes",
-        		     scheme_make_prim_w_arity(long_double_to_bytes,
-        					      "extfl->floating-point-bytes",
-        					      1, 4),
+        		     scheme_make_immed_prim(long_double_to_bytes,
+                                                    "extfl->floating-point-bytes",
+                                                    1, 4),
         		     env);
 }
 
@@ -383,10 +398,10 @@ static Scheme_Object *read_special_number(const mzchar *str, int pos)
 END_XFORM_ARITH;
 # endif
 
-static double STRTOD(const char *orig_c, char **f, int extfl)
+static double STRTOD(const char *orig_c, char **f)
 {
   int neg = 0;
-  int found_dot = 0, is_infinity = 0, is_zero = 0;
+  int found_dot = 0, is_infinity = 0, is_zero = 0, is_nonzero = 0;
   const char *c = orig_c;
 
   *f = (char *)c;
@@ -410,7 +425,8 @@ static double STRTOD(const char *orig_c, char **f, int extfl)
     int ch = *c;
 
     if (isdigit(ch)) {
-      /* ok */
+      if (ch != '0')
+	is_nonzero = 1;
     } else if ((ch == 'e') || (ch == 'E')) {
       int e = 0, neg_exp = 0;
 
@@ -430,8 +446,8 @@ static double STRTOD(const char *orig_c, char **f, int extfl)
 	  return 0; /* not a digit - bad! */
 	else {
 	  e = (e * 10) + (ch - '0');
-	  if (e > CHECK_INF_EXP_THRESHOLD(extfl)) {
-	    if (neg_exp)
+	  if (e > CHECK_INF_EXP_THRESHOLD(0)) {
+	    if (neg_exp || !is_nonzero)
 	      is_zero  = 1;
 	    else
 	      is_infinity  = 1;
@@ -450,24 +466,6 @@ static double STRTOD(const char *orig_c, char **f, int extfl)
   
   *f = (char *)c;
 
-#ifdef MZ_LONG_DOUBLE
-  if (is_infinity) {
-    if (neg)
-      return scheme_long_minus_infinity_val;
-    else
-      return scheme_long_infinity_val;
-  }
-
-  if (is_zero) {
-    if (neg)
-      return scheme_long_floating_point_nzero;
-    else
-      return scheme_long_floating_point_zero;
-  }
-
-  /* It's OK if c is ok: */
-  return strtold(orig_c, NULL);
-#else
   if (is_infinity) {
     if (neg)
       return scheme_minus_infinity_val;
@@ -484,23 +482,36 @@ static double STRTOD(const char *orig_c, char **f, int extfl)
 
   /* It's OK if c is ok: */
   return strtod(orig_c, NULL);
-#endif
 }
 
 # ifdef MZ_XFORM_GC
 START_XFORM_ARITH;
 # endif
 #else
-# define STRTOD(x, y, extfl) strtod(x, y)
+# define STRTOD(x, y) strtod(x, y)
 #endif
 
-static Scheme_Object *CHECK_SINGLE(Scheme_Object *v, int s, int long_dbl)
+#ifdef MZ_LONG_DOUBLE
+# define CHECK_SINGLE(v, s, il, l, str, len, radix) do_CHECK_SINGLE(v, s, il, l, NULL, 0, 0)
+#else
+# define CHECK_SINGLE(v, s, il, l, str, len, radix) do_CHECK_SINGLE(v, s, il, NULL, str, len, radix)
+#endif
+
+static Scheme_Object *do_CHECK_SINGLE(Scheme_Object *v, int s, int long_dbl,
+                                      Scheme_Object *lv, const mzchar *str, intptr_t len, int radix)
 {
   if (SCHEME_DBLP(v)) {
 #ifdef MZ_USE_SINGLE_FLOATS
     if (s)
       return scheme_make_float((float)SCHEME_DBL_VAL(v));
 #endif
+    if (long_dbl) {
+#ifdef MZ_LONG_DOUBLE
+      return lv;
+#else
+      return wrap_as_long_double(scheme_utf8_encode_to_buffer(str, len, NULL, 0), radix);
+#endif
+    }
   }
 
   return v;
@@ -509,10 +520,10 @@ static Scheme_Object *CHECK_SINGLE(Scheme_Object *v, int s, int long_dbl)
 #define DISALLOW_EXTFLONUM(special, other)                      \
   if ((special && SCHEME_LONG_DBLP(special)) || (other && SCHEME_LONG_DBLP(other))) { \
     if (report)                                                         \
-      scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation, \
-                      "read: cannot combine extflonum into complex number: %u", \
-                      str, len);                                        \
-    return scheme_false;                                                \
+      return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation, \
+                             "cannot combine extflonum into complex number: %u", \
+                             str, len);                                        \
+    return scheme_false;                                                       \
   }
 
 Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
@@ -546,9 +557,9 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
     if (str[delta+1] != 'E' && str[delta+1] != 'e' && str[delta+1] != 'I' && str[delta+1] != 'i') {
       if (radix_set) {
 	if (complain)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			  "read: bad radix specification: %u",
-			  str, len);
+	  return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "bad radix specification: %u",
+                                 str, len);
 	else
 	  return scheme_false;
       }
@@ -556,9 +567,9 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
     } else {
       if (is_float || is_not_float) {
 	if (complain)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			  "read: bad exactness specification: %u", 
-			  str, len);
+	  return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "bad exactness specification: %u", 
+                                 str, len);
 	else
 	  return scheme_false;
       }
@@ -591,9 +602,9 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
       break;
     default:
       if (complain)
-	scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			"read: bad `#' indicator `%c': %u",
-			str[delta+1], str, len);
+	return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                               "bad `#' indicator `%c': %u",
+                               str[delta+1], str, len);
       return scheme_false;
     }
     delta += 2;
@@ -606,8 +617,8 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
 
   if (!(len - delta)) {
     if (report)
-      scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-		      "read: no digits");
+      return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                             "no digits");
     return scheme_false;
   }
 
@@ -619,9 +630,9 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
       if (!is_not_float)
 	return special;
       if (report)
-	scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			"read: no exact representation for %V",
-			special);
+	return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                               "no exact representation for %V",
+                               special);
       return scheme_false;
     }
   }
@@ -664,9 +675,9 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
 
       if (is_not_float) {
 	if (report)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			  "read: no exact representation for %V",
-			  special);
+	  return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "no exact representation for %V",
+                                 special);
 	return scheme_false;
       }
 
@@ -677,15 +688,18 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
 				 stxsrc, line, col, pos, span,
 				 indentation);
 
+      if (SCHEME_CHAR_STRINGP(other))
+        return other;
+
       DISALLOW_EXTFLONUM(special, other);
 
       if (dbz) {
 	if (div_by_zero)
 	  *div_by_zero = 1;
 	if (complain)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			  "read: division by zero: %u",
-			  str, len);
+	  return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "division by zero: %u",
+                                 str, len);
 	return scheme_false;
       }
 
@@ -704,9 +718,9 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
 
       if (is_not_float) {
 	if (report)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			  "read: no exact representation for %V",
-			  special);
+	  return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "no exact representation for %V",
+                                 special);
 	return scheme_false;
       }
 
@@ -757,13 +771,16 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
 
       if (s2[i])
 	other = scheme_false;
-      else
+      else {
 	other = scheme_read_number(s2, len - delta - 7,
 				   is_float, is_not_float, 1,
 				   radix, 1, 0,
 				   &dbz, test_only,
 				   stxsrc, line, col, pos, span,
 				   indentation);
+        if (SCHEME_CHAR_STRINGP(other))
+          return other;
+      }
 
       DISALLOW_EXTFLONUM(special, other);
 
@@ -771,9 +788,9 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
 	if (div_by_zero)
 	  *div_by_zero = 1;
 	if (complain)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			  "read: division by zero: %u", 
-			  str, len);
+	  return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "division by zero: %u", 
+                                 str, len);
 	return scheme_false;
       }
 
@@ -818,9 +835,9 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
     mzchar ch = str[i];
     if (!ch) {
       if (report)
-	scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			"read: embedded null character: %u",
-			str, len);
+	return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                               "embedded null character: %u",
+                               str, len);
       return scheme_false;
     } else if (isinexactmark(ch) && ((radix <= 10) || !isbaseNdigit(radix, ch))) {
       /* If a sign follows, don't count it */
@@ -829,41 +846,41 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
     } else if ((ch == '+') || (ch == '-')) {
       if ((has_sign > delta) || ((has_sign == delta) && (i == delta+1))) {
 	if (report)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			   "read: too many signs: %u", 
-			   str, len);
+	  return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "too many signs: %u", 
+                                 str, len);
 	return scheme_false;
       }
       has_sign = i;
     } else if (((ch == 'I') || (ch == 'i')) && (has_sign >= delta)) {
       if (has_at) {
 	if (report)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			  "read: cannot mix `@' and `i': %u", 
-			  str, len);
+	  return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "cannot mix `@' and `i': %u", 
+                                 str, len);
 	return scheme_false;
       }
       if (i + 1 < len) {
 	if (report)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			  "read: `i' must be at the end: %u", 
-			  str, len);
+	  return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "`i' must be at the end: %u", 
+                                 str, len);
 	return scheme_false;
       }
       has_i = i;
     } else if (ch == '@') {
       if (has_at) {
 	if (report)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			  "read: too many `@'s: %u", 
-			  str, len);
+	  return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "too many `@'s: %u", 
+                                 str, len);
 	return scheme_false;
       }
       if (i == delta) {
 	if (report)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			  "read: `@' cannot be at start: %u", 
-			  str, len);
+	  return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "`@' cannot be at start: %u", 
+                                 str, len);
 	return scheme_false;
       }
       has_at = i;
@@ -891,14 +908,16 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
     } else
       second = NULL;
 
-    if (first)
+    if (first) {
       n1 = scheme_read_number(first, has_sign - delta,
 			      is_float, is_not_float, decimal_means_float,
 			      radix, 1, next_complain,
 			      &fdbz, test_only,
 			      stxsrc, line, col, pos, span,
 			      indentation);
-    else
+      if (SCHEME_CHAR_STRINGP(n1))
+        return n1;
+    } else
       n1 = zeroi;
 
     if (SAME_OBJ(n1, scheme_false) && !fdbz)
@@ -910,14 +929,16 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
 	return scheme_false;
     }
     
-    if (second)
+    if (second) {
       n2 = scheme_read_number(second, has_i - has_sign,
 			      is_float, is_not_float, decimal_means_float,
 			      radix, 1, next_complain,
 			      &sdbz, test_only,
 			      stxsrc, line, col, pos, span,
 			      indentation);
-    else if (str[has_sign] == '-')
+      if (SCHEME_CHAR_STRINGP(n2))
+        return n2;
+    } else if (str[has_sign] == '-')
       n2 = scheme_make_integer(-1);
     else
       n2 = scheme_make_integer(1);
@@ -937,9 +958,9 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
       if (div_by_zero)
 	*div_by_zero = 1;
       if (complain)
-	scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			 "read: division by zero: %u", 
-			 str, len);
+	return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                               "division by zero: %u", 
+                               str, len);
       return scheme_false;
     }
 
@@ -984,6 +1005,8 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
 			    &fdbz, test_only,
 			    stxsrc, line, col, pos, span,
 			    indentation);
+    if (SCHEME_CHAR_STRINGP(n2))
+      return n2;
 
     if (!fdbz) {
       if (SCHEME_FALSEP(n2))
@@ -999,14 +1022,16 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
 				  stxsrc, line, col, pos, span,
 				  indentation);
 
-      if (!SCHEME_LONG_DBLP(n2))
+      if (!SCHEME_LONG_DBLP(n2)) {
         n2 = scheme_exact_to_inexact(1, &n2); /* uses default conversion: float or double */
 
-      d2 = SCHEME_FLOAT_VAL(n2);
-      
-      /* This +nan.0 test looks unnecessary  -- Matthew, 08/14/01 */
-      if (MZ_IS_NAN(d2))
-	return scheme_false;
+        d2 = SCHEME_FLOAT_VAL(n2);
+
+        /* This +nan.0 test looks unnecessary  -- Matthew, 08/14/01 */
+        if (MZ_IS_NAN(d2))
+          return scheme_false;
+      } else
+        d2 = 0.0; /* not used; will signal error later */
 
       n1 = scheme_read_number(first, has_at - delta, 
 			      is_float, is_not_float, decimal_means_float,
@@ -1015,6 +1040,9 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
 			      test_only,
 			      stxsrc, line, col, pos, span,
 			      indentation);
+
+      if (SCHEME_CHAR_STRINGP(n1))
+        return n1;
 
       /* Special case: magnitude is zero => zero */
       if (n1 == zeroi)
@@ -1033,9 +1061,9 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
       if (div_by_zero)
 	*div_by_zero = 1;
       if (complain)
-	scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			"read: division by zero in %u", 
-			str, len);
+	return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                               "division by zero in %u", 
+                               str, len);
       return scheme_false;
     }
 
@@ -1073,17 +1101,17 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
     if (ch == '.') {
       if (has_decimal) {
 	if (report)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			  "read: multiple decimal points: %u", 
-			  str, len);
+	  return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "multiple decimal points: %u", 
+                                 str, len);
 	return scheme_false;
       }
       if (has_slash) {
 	if (report)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			  "read: decimal points and fractions "
-			  "cannot be mixed: %u", 
-			  str, len);
+	  return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "decimal points and fractions "
+                                 "cannot be mixed: %u", 
+                                 str, len);
 	return scheme_false;
       }
       has_decimal = 1;
@@ -1091,9 +1119,9 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
 	       && ((radix <= 10) || !isbaseNdigit(radix, ch))) {
       if (i == delta) {
 	if (report)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			  "read: cannot begin with `%c' in %u", 
-			  ch, str, len);
+	  return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "cannot begin with `%c' in %u", 
+                                 ch, str, len);
 	return scheme_false;
       }
       has_expt = i;
@@ -1101,24 +1129,24 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
     } else if (ch == '/') {
       if (i == delta) {
 	if (report)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			  "read: cannot have slash at start: %u", 
-			  str, len);
+	  return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "cannot have slash at start: %u", 
+                                 str, len);
 	return scheme_false;
       }
       if (has_slash) {
 	if (report)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			  "read: multiple slashes: %u", 
-			  str, len);
+	  return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "multiple slashes: %u", 
+                                 str, len);
 	return scheme_false;
       }
       if (has_decimal) {
 	if (report)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			  "read: decimal points and fractions "
-			  "cannot be mixed: %u", 
-			  str, len);
+	  return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "decimal points and fractions "
+                                 "cannot be mixed: %u", 
+                                 str, len);
 	return scheme_false;
       }
       has_slash = i;
@@ -1127,17 +1155,17 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
     } else if ((ch == '-') || (ch == '+')) {
       if (has_slash || has_decimal || has_hash) {
 	if (report)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			  "read: misplaced sign: %u", 
-			  str, len);
+	  return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "misplaced sign: %u", 
+                                 str, len);
 	return scheme_false;
       }
     } else if (ch == '#') {
       if (!saw_digit_since_slash) {
 	if (report)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			  "read: misplaced hash: %u", 
-			  str, len);
+	  return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "misplaced hash: %u", 
+                                 str, len);
 	return scheme_false;
       }
       has_hash = 1;
@@ -1145,16 +1173,16 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
     } else if (!isAdigit(ch) && !((radix > 10) && isbaseNdigit(radix, ch))) {
       if (has_decimal) {
 	if (report)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			  "read: bad decimal number: %u", 
-			  str, len);
+	  return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "bad decimal number: %u", 
+                                 str, len);
 	return scheme_false;
       }
       if (has_hash) {
 	if (report)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			  "read: misplaced hash: %u", 
-			  str, len);
+	  return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "misplaced hash: %u", 
+                                 str, len);
 	return scheme_false;
       }
       break;
@@ -1164,9 +1192,9 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
 	saw_nonzero_digit = 1;
       if (has_hash_since_slash) {
 	if (report)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			  "read: misplaced hash: %u", 
-			  str, len);
+	  return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "misplaced hash: %u", 
+                                 str, len);
 	return scheme_false;
       }
     }
@@ -1215,9 +1243,9 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
 
     if (has_expt && !(str[has_expt + 1])) {
       if (report)
-	scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			"read: no digits after \"%c\": %u",
-			str[has_expt], str, len);
+	return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                               "no digits after \"%c\": %u",
+                               str[has_expt], str, len);
       return scheme_false;
     }
 
@@ -1248,24 +1276,24 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
         ld = long_double_from_string(ffl_buf, &ptr);
       else
 #endif
-        d = STRTOD(ffl_buf, &ptr, 0);
+        d = STRTOD(ffl_buf, &ptr);
 
       scheme_pop_c_numeric_locale(loc);
 
       if ((ptr XFORM_OK_MINUS ffl_buf) < (len - delta)) {
         if (report)
-          scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-                          "read: bad decimal number %u",
-                          str, len);
+          return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "bad decimal number %u",
+                                 str, len);
         return scheme_false;
       } 
     }
 
     if (is_long_double && is_float)  {
       if (report)
-        scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-                        "read: can convert extflonum to inexact: %u",
-                        str, len);
+        return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                               "cannot convert extflonum to inexact: %u",
+                               str, len);
       return scheme_false;
     }
 
@@ -1324,9 +1352,9 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
 
       if (!str[has_expt + 1]) {
 	if (report)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			  "read: no digits after \"%c\": %u",
-			  str[has_expt], str, len);
+	  return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "no digits after \"%c\": %u",
+                                 str[has_expt], str, len);
 	return scheme_false;
       }
 
@@ -1344,9 +1372,9 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
       exponent = scheme_read_bignum(substr, 0, radix);
       if (SCHEME_FALSEP(exponent)) {
 	if (report)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			  "read: bad exponent: %u", 
-			  str, len);
+	  return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "bad exponent: %u", 
+                                 str, len);
 	return scheme_false;
       }
     } else
@@ -1372,25 +1400,28 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
 				    stxsrc, line, col, pos, span,
 				    indentation);
 
+      if (SCHEME_CHAR_STRINGP(mantissa))
+        return mantissa;
+
       if (SCHEME_FALSEP(mantissa)) {
 	if (dbz) {
 	  if (div_by_zero)
 	    *div_by_zero = 1;
 	  if (complain)
-	    scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			    "read: division by zero: %u", 
-			    str, len);
+	    return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                   "division by zero: %u", 
+                                   str, len);
 	}
 	if (report)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			  "read: bad number: %u", 
-			  str, len);
+	  return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "bad number: %u", 
+                                 str, len);
 	return scheme_false;
       }
     } else {
       /* Mantissa is not a fraction. */
       mzchar *digits;
-      int extra_power = 0, dcp = 0, num_ok;
+      int extra_power = 0, dcp = 0, non_zero = 0, num_ok;
 
       digits = (mzchar *)scheme_malloc_atomic((has_expt - delta + 1) * sizeof(mzchar));
 
@@ -1399,7 +1430,11 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
 	digits[dcp++] = str[i++];
 
       for (; isAdigit(str[i]) || ((radix > 10) && isbaseNdigit(radix, str[i])); i++) {
+        if ((radix < 10) && ((str[i] - '0') >= radix))
+          break;
 	digits[dcp++] = str[i];
+        if (str[i] != '0')
+          non_zero = 1;
       }
 
       if (str[i] == '#') {
@@ -1409,13 +1444,17 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
 	num_ok = 0;
       } else
 	num_ok = 1;
-	
+
       if (str[i] == '.') {
 	i++;
 	if (num_ok)
 	  for (; isAdigit(str[i]) || ((radix > 10) && isbaseNdigit(radix, str[i])); i++) {
+            if ((radix < 10) && ((str[i] - '0') >= radix))
+              break;
 	    digits[dcp++] = str[i];
 	    extra_power++;
+            if (str[i] != '0')
+              non_zero = 1;
 	  }
 
 	for (; str[i] == '#'; i++) {
@@ -1428,36 +1467,50 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
 	  || !dcp || (dcp == 1 && !(isAdigit(digits[0])
 				    || ((radix > 10) && isbaseNdigit(radix, digits[0]))))) {
 	if (report)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			  "read: bad decimal number %u", 
-			  str, len);
+	  return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "bad decimal number %u", 
+                                 str, len);
 	return scheme_false;
       }
 
       if (is_long_double && is_float)  {
         if (report)
-          scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-                          "read: can convert extflonum to inexact: %u",
-                          str, len);
+          return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "cannot convert extflonum to inexact: %u",
+                                 str, len);
         return scheme_false;
       }
 
-      /* Reduce unnecessary mantissa-reading work for inexact results.
-         This is also necessary to make the range check on `exponent'
-         correct. */
-      if (result_is_float && (dcp > MAX_FLOATREAD_PRECISION_DIGITS(is_long_double))) {
-	extra_power -= (dcp - MAX_FLOATREAD_PRECISION_DIGITS(is_long_double));
-	dcp = MAX_FLOATREAD_PRECISION_DIGITS(is_long_double);
+      /* Zero mantissa => zero inexact result */
+      if (!non_zero && result_is_float) {
+        if (dcp && (digits[0] == '-'))
+          return CHECK_SINGLE(scheme_nzerod, sgl, is_long_double, scheme_nzerol, str, len, radix);
+        else
+          return CHECK_SINGLE(scheme_zerod, sgl, is_long_double, scheme_zerol, str, len, radix);
+      }
+
+      /* Reduce unnecessary mantissa-reading work for inexact results. */
+      if (result_is_float) {
+        Scheme_Object *max_useful;
+
+        max_useful = scheme_bin_plus(scheme_make_integer(MAX_FLOATREAD_PRECISION_DIGITS(is_long_double)),
+                                     exponent);
+        if (scheme_bin_lt(max_useful, scheme_make_integer(2))) {
+          /* will definitely underflow */
+          if (dcp > 2)
+            dcp = 2; /* leave room for a sign and a digit */
+        } else if (SCHEME_INTP(max_useful)) {
+          if (result_is_float && (dcp > SCHEME_INT_VAL(max_useful))) {
+            extra_power -= (dcp - SCHEME_INT_VAL(max_useful));
+            dcp = SCHEME_INT_VAL(max_useful);
+          }
+        }
       }
 
       digits[dcp] = 0;
       mantissa = scheme_read_bignum(digits, 0, radix);
       if (SCHEME_FALSEP(mantissa)) {
-	/* can get here with bad radix */
-	if (report)
-	  scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			   "read: bad number: %u", 
-			   str, len);
+        scheme_signal_error("internal error parsing mantissa: %s", digits);
 	return scheme_false;
       }
 
@@ -1468,14 +1521,14 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
       if (result_is_float) {
 	if (scheme_bin_gt(exponent, scheme_make_integer(CHECK_INF_EXP_THRESHOLD(is_long_double)))) {
 	  if (scheme_is_negative(mantissa))
-	    return CHECK_SINGLE(scheme_minus_inf_object, sgl, is_long_double);
+	    return CHECK_SINGLE(scheme_minus_inf_object, sgl, is_long_double, scheme_long_minus_inf_object, str, len, radix);
 	  else
-	    return CHECK_SINGLE(scheme_inf_object, sgl, is_long_double);
+	    return CHECK_SINGLE(scheme_inf_object, sgl, is_long_double, scheme_long_inf_object, str, len, radix);
 	} else if (scheme_bin_lt(exponent, scheme_make_integer(-CHECK_INF_EXP_THRESHOLD(is_long_double)))) {
 	  if (scheme_is_negative(mantissa))
-	    return CHECK_SINGLE(scheme_nzerod, sgl, is_long_double);
+	    return CHECK_SINGLE(scheme_nzerod, sgl, is_long_double, scheme_nzerol, str, len, radix);
 	  else
-	    return CHECK_SINGLE(scheme_zerod, sgl, is_long_double);
+	    return CHECK_SINGLE(scheme_zerod, sgl, is_long_double, scheme_zerol, str, len, radix);
 	}
       }
     }
@@ -1504,17 +1557,17 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
         n = wrap_as_long_double(scheme_utf8_encode_to_buffer(str, len, NULL, 0), radix);
 #endif
       } else {
-        n = CHECK_SINGLE(TO_DOUBLE(n), sgl, 0);
+        n = CHECK_SINGLE(TO_DOUBLE(n), sgl, 0, NULL, NULL, 0, 0);
       }
     } else {
       if (is_long_double) {
         if (report)
-          scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-                          "read: cannot convert extflonum to exact: %u",
-                          str, len);
+          return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                 "cannot convert extflonum to exact: %u",
+                                 str, len);
         return scheme_false;
       }
-      n = CHECK_SINGLE(n, sgl, 0);
+      n = CHECK_SINGLE(n, sgl, 0, NULL, NULL, 0, 0);
     }
 
     if (SCHEME_FLOATP(n) && str[delta] == '-') {
@@ -1543,12 +1596,17 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
     first[has_slash - delta] = 0;
 
     n1 = scheme_read_number(first, has_slash - delta,
-			    is_float, is_not_float, 1,
+                            /* recur without is_float to keep all precision */
+			    0, is_not_float, 1,
 			    radix, 1, next_complain,
 			    div_by_zero,
 			    test_only,
 			    stxsrc, line, col, pos, span,
 			    indentation);
+
+    if (SCHEME_CHAR_STRINGP(n1))
+      return n1;
+
     if (SAME_OBJ(n1, scheme_false))
       return scheme_false;
 
@@ -1567,7 +1625,8 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
 #endif
 
       n2 = scheme_read_number(substr, len - has_slash - 1,
-			      is_float, is_not_float, 1,
+                              /* recur without is_float to keep all precision */
+			      0, is_not_float, 1,
 			      radix, 1, next_complain,
 			      div_by_zero,
 			      test_only,
@@ -1575,14 +1634,17 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
 			      indentation);
     }
 
+    if (SCHEME_CHAR_STRINGP(n2))
+      return n2;
+
     if (SAME_OBJ(n2, scheme_false))
       return scheme_false;
 
     if (SCHEME_EXACT_REALP(n2) && scheme_is_zero(n2)) {
       if (complain)
-	scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			"read: division by zero: %u", 
-			str, len);
+	return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                               "division by zero: %u", 
+                               str, len);
       if (div_by_zero)
 	*div_by_zero = 1;
       return scheme_false;
@@ -1599,9 +1661,9 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
       if (SCHEME_FLOATP(n1)) {
 	if (!scheme_check_double(NULL, SCHEME_FLOAT_VAL(n1), NULL)) {
 	  if (complain)
-	    scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			    "read: no exact representation for %V", 
-			    n1);
+	    return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                                   "no exact representation for %V", 
+                                   n1);
 	  return scheme_false;
 	}
       }
@@ -1609,15 +1671,15 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
     } else if (is_float)
       n1 = TO_DOUBLE(n1);
 
-    return CHECK_SINGLE(n1, sgl, 0);
+    return CHECK_SINGLE(n1, sgl, 0, NULL, NULL, 0, 0);
   }
 
   o = scheme_read_bignum(str, delta, radix);
   if (SAME_OBJ(o, scheme_false)) {
     if (report)
-      scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-		      "read: bad number: %u", 
-		      str, len);
+      return scheme_numr_err(complain, stxsrc, line, col, pos, span, indentation,
+                             "bad number: %u", 
+                             str, len);
   } else if (is_float) {
     /* Special case: "#i-0" => -0. */
     if ((o == zeroi) && str[delta] == '-') {
@@ -1627,7 +1689,7 @@ Scheme_Object *scheme_read_number(const mzchar *str, intptr_t len,
       return scheme_nzerod;
     }
 
-    return CHECK_SINGLE(TO_DOUBLE(o), sgl, 0);
+    return CHECK_SINGLE(TO_DOUBLE(o), sgl, 0, NULL, NULL, 0, 0);
   }
 
   return o;
@@ -1700,7 +1762,7 @@ string_to_number (int argc, Scheme_Object *argv[])
   intptr_t len;
   mzchar *mzstr;
   int decimal_inexact, div_by_zero = 0;
-  Scheme_Object *v;
+  Scheme_Object *v, *reader_mode;
 
   if (!SCHEME_CHAR_STRINGP(argv[0]))
     scheme_wrong_contract("string->number", "string?", 0, argc, argv);
@@ -1718,19 +1780,42 @@ string_to_number (int argc, Scheme_Object *argv[])
   } else
     radix = 10;
 
-  decimal_inexact = SCHEME_TRUEP(scheme_get_param(scheme_current_config(), 
-						  MZCONFIG_READ_DECIMAL_INEXACT));
+  if (argc > 2) {
+    if (SAME_OBJ(argv[2], read_symbol))
+      reader_mode = scheme_false; /* false in place of port triggers a string return from scheme_read_number() */
+    else if (SAME_OBJ(argv[2], number_or_false_symbol))
+      reader_mode = NULL;
+    else {
+      scheme_wrong_contract("string->number", "(or/c 'read 'number-or-false)", 2, argc, argv);
+      ESCAPED_BEFORE_HERE;
+    }
+  } else
+    reader_mode = NULL;
+    
+  if (argc > 3) {
+    if (SAME_OBJ(argv[3], decimal_as_inexact_symbol))
+      decimal_inexact = 1;
+    else if (SAME_OBJ(argv[3], decimal_as_exact_symbol))
+      decimal_inexact = 0;
+    else {
+      scheme_wrong_contract("string->number", "(or/c 'decimal-as-inexact 'decimal-as-exact)", 3, argc, argv);
+      ESCAPED_BEFORE_HERE;
+    }
+  } else {
+    decimal_inexact = SCHEME_TRUEP(scheme_get_param(scheme_current_config(), 
+                                                    MZCONFIG_READ_DECIMAL_INEXACT));
+  }
 
   mzstr = SCHEME_CHAR_STR_VAL(argv[0]);
   len = SCHEME_CHAR_STRTAG_VAL(argv[0]);
 
   v = scheme_read_number(mzstr, len, 
 			 0, 0, decimal_inexact,
-			 radix, 0, NULL, &div_by_zero,
+			 radix, 0, reader_mode, &div_by_zero,
 			 0, NULL, 0, 0, 0, 0,
 			 NULL);
 
-  if (SCHEME_LONG_DBLP(v))
+  if (!reader_mode && SCHEME_LONG_DBLP(v))
     return scheme_false;
 
   return v;
@@ -2012,6 +2097,27 @@ int scheme_check_double(const char *where, double d, const char *dest)
   return 1;
 }
 
+#ifdef MZ_USE_SINGLE_FLOATS
+int scheme_check_float(const char *where, float f, const char *dest)
+{
+  if (MZ_IS_INFINITY(f)
+      || MZ_IS_NAN(f)) {
+    if (where) {
+      char buf[32];
+      sprintf(buf, "no %s representation", dest);
+      scheme_contract_error(where,
+                            buf,
+                            "number", 1, scheme_make_float(f),
+                            NULL);
+    }
+    return 0;
+  }
+
+  return 1;
+}
+#endif
+
+
 #ifdef MZ_LONG_DOUBLE
 int scheme_check_long_double(const char *where, long_double d, const char *dest)
 {
@@ -2035,6 +2141,130 @@ int scheme_check_long_double(const char *where, long_double d, const char *dest)
 /*========================================================================*/
 /*                      native representations                            */
 /*========================================================================*/
+
+Scheme_Object *scheme_bytes_to_integer(char *str, int slen, int sgned, int rshft, int mask)
+{
+  switch(slen) {
+  case 2:
+    if (sgned) {
+      short val;
+      memcpy(&val, str, sizeof(short));
+      return scheme_make_integer(val);
+    } else {
+      unsigned short val;
+      memcpy(&val, str, sizeof(unsigned short));
+      val >>= rshft;
+      if (mask < 16) { val &= (((unsigned short)1 << mask) - 1); }
+      return scheme_make_integer(val);
+    }
+    break;
+  case 4:
+    if (sgned) {
+      int val;
+      memcpy(&val, str, sizeof(int));
+      return scheme_make_integer_value(val);
+    } else {
+      unsigned int val;
+      memcpy(&val, str, sizeof(unsigned int));
+      val >>= rshft;
+      if (mask < 32) { val &= (((unsigned int)1 << mask) - 1); }
+      return scheme_make_integer_value_from_unsigned(val);
+    }
+    break;
+  default:
+#ifdef SIXTY_FOUR_BIT_INTEGERS
+    if (sgned) {
+      intptr_t val;
+      memcpy(&val, str, sizeof(intptr_t));
+      return scheme_make_integer_value(val);
+      }
+    else {
+      uintptr_t val;
+      memcpy(&val, str, sizeof(uintptr_t));
+      val >>= rshft;
+      if (mask < 64) { val &= (((uintptr_t)1 << mask) - 1); }
+      return scheme_make_integer_value_from_unsigned(val);
+      }
+    break;
+#else
+# ifndef NO_LONG_LONG_TYPE
+    {
+      if (sgned) {
+        mzlonglong lv;
+        memcpy(&lv, str, sizeof(mzlonglong));
+	return scheme_make_integer_value_from_long_long(lv);
+      } else {
+        umzlonglong lv;
+        memcpy(&lv, str, sizeof(umzlonglong));
+        lv >>= rshft;
+        if (mask < 64) { lv &= (((umzlonglong)1 << mask) - 1); }
+	return scheme_make_integer_value_from_unsigned_long_long(lv);
+      }
+      break;
+    }
+# else
+    {
+      Scheme_Object *h, *l, *a[2];
+      unsigned int val;
+
+#  if MZ_IS_BIG_ENDIAN
+      /* make little-endian at int level: */
+      {
+	int v;
+	v = ((int *)str)[0];
+	buf[0] = ((int *)str)[1];
+	buf[1] = v;
+	str = (char *)buf;
+      }
+#  endif
+
+      if (rshft >= 32) {
+        
+      }
+
+      if (sgned)
+	h = scheme_make_integer_value(((int *)str)[1]);
+      else {
+        memcpy(&val, str + sizeof(unsigned int), sizeof(unsigned int));
+        if (rshft >= 32) {
+          rshft -= 32;
+          val >>= rshft;
+          if (mask < 64) { val &= (((umzlonglong)1 << mask) - 1); }
+          return scheme_make_integer_value_from_unsigned(val);
+        } else {
+          h = scheme_make_integer_value_from_unsigned(val);
+        }
+      }
+      
+      memcpy(&val, str, sizeof(unsigned int));
+      val >>= rshft;
+      l = scheme_make_integer_value_from_unsigned(val);      
+
+      a[0] = h;
+      a[1] = scheme_make_integer(32-rshft);
+      h = scheme_bitwise_shift(2, a);
+
+      l = scheme_bin_plus(h, l);
+
+      if (mask < 64) {
+        a[0] = scheme_make_integer(1);
+        a[1] = scheme_make_integer(mask);
+        h = scheme_bitwise_shift(2, a);
+        h = scheme_bin_minus(h, scheme_make_integer(1));
+        a[0] = h;
+        a[1] = l;
+        l = scheme_bitwise_and(2, a);
+      }
+
+      return l;
+    }
+# endif
+#endif
+    break;
+  }
+
+  ESCAPED_BEFORE_HERE;
+}
 
 static Scheme_Object *bytes_to_integer (int argc, Scheme_Object *argv[])
 {
@@ -2086,86 +2316,7 @@ static Scheme_Object *bytes_to_integer (int argc, Scheme_Object *argv[])
     str = (char *)buf;
   }
 
-  switch(slen) {
-  case 2:
-    if (sgned) {
-      short val;
-      memcpy(&val, str, sizeof(short));
-      return scheme_make_integer(val);
-      }
-    else {
-      unsigned short val;
-      memcpy(&val, str, sizeof(unsigned short));
-      return scheme_make_integer(val);
-      }
-    break;
-  case 4:
-    if (sgned) {
-      int val;
-      memcpy(&val, str, sizeof(int));
-      return scheme_make_integer_value(val);
-      }
-    else {
-      unsigned int val;
-      memcpy(&val, str, sizeof(unsigned int));
-      return scheme_make_integer_value_from_unsigned(val);
-      }
-    break;
-  default:
-#ifdef SIXTY_FOUR_BIT_INTEGERS
-    if (sgned) {
-      intptr_t val;
-      memcpy(&val, str, sizeof(intptr_t));
-      return scheme_make_integer_value(val);
-      }
-    else {
-      uintptr_t val;
-      memcpy(&val, str, sizeof(uintptr_t));
-      return scheme_make_integer_value_from_unsigned(val);
-      }
-    break;
-#else
-# ifndef NO_LONG_LONG_TYPE
-    {
-      mzlonglong lv;
-      memcpy(&lv, str, sizeof(mzlonglong));
-      if (sgned)
-	return scheme_make_integer_value_from_long_long(lv);
-      else
-	return scheme_make_integer_value_from_unsigned_long_long((umzlonglong)lv);
-      break;
-    }
-# else
-    {
-      Scheme_Object *h, *l, *a[2];
-
-#  if MZ_IS_BIG_ENDIAN
-      /* make little-endian at int level: */
-      {
-	int v;
-	v = ((int *)str)[0];
-	buf[0] = ((int *)str)[1];
-	buf[1] = v;
-	str = (char *)buf;
-      }
-#  endif
-
-      if (sgned)
-	h = scheme_make_integer_value(((int *)str)[1]);
-      else
-	h = scheme_make_integer_value_from_unsigned(((unsigned int *)str)[1]);
-      l = scheme_make_integer_value_from_unsigned(((unsigned int *)str)[0]);
-      a[0] = h;
-      a[1] = scheme_make_integer(32);
-      h = scheme_bitwise_shift(2, a);
-      return scheme_bin_plus(h, l);
-    }
-# endif
-#endif
-    break;
-  }
-
-  /* throw an error here */
+  return scheme_bytes_to_integer(str, slen, sgned, 0, slen*8);
 }
 
 #define MZ_U8HI 0
@@ -2513,10 +2664,6 @@ static Scheme_Object *real_to_bytes (int argc, Scheme_Object *argv[])
   return s;
 }
 
-/* Assume that the content of a `long double' occupies the first 10
-   bytes: */
-#define LONG_DOUBLE_BYTE_LEN 10
-
 static Scheme_Object *bytes_to_long_double (int argc, Scheme_Object *argv[])
 {
 #ifdef MZ_LONG_DOUBLE
@@ -2712,12 +2859,21 @@ sch_random(int argc, Scheme_Object *argv[])
     Scheme_Object *o, *rand_state;
 
     o = argv[0];
+#ifdef SIXTY_FOUR_BIT_INTEGERS
+    if (SCHEME_INTP(o)) {
+      i = (uintptr_t)SCHEME_INT_VAL(o);
+      if (i > 4294967087UL)
+        i = 0;
+    } else
+      i = 0;
+#else
     if (scheme_get_unsigned_int_val(o,  &i)) {
       if (i > 4294967087UL)
 	i = 0;
     } else
       i = 0;
-    
+#endif
+
     if (!i) {
       scheme_wrong_contract("random", 
                             ((argc == 1)
@@ -2739,8 +2895,17 @@ sch_random(int argc, Scheme_Object *argv[])
 
     v = sch_int_rand(i, (Scheme_Random_State *)rand_state);
     
+#ifdef SIXTY_FOUR_BIT_INTEGERS
+    return scheme_make_integer(v);
+#else
     return scheme_make_integer_value_from_unsigned(v);
+#endif
   }
+}
+
+double scheme_double_random(Scheme_Object *rand_state)
+{
+  return sch_double_rand((Scheme_Random_State *)rand_state);
 }
 
 static Scheme_Object *
@@ -2814,18 +2979,18 @@ sch_unpack(int argc, Scheme_Object *argv[])
 
 static Scheme_Object *current_pseudo_random_generator(int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("current-pseudo-random-generator", 
-			     scheme_make_integer(MZCONFIG_RANDOM_STATE),
-			     argc, argv,
-			     -1, pseudo_random_generator_p, "pseudo-random-generator", 0);
+  return scheme_param_config2("current-pseudo-random-generator", 
+                              scheme_make_integer(MZCONFIG_RANDOM_STATE),
+                              argc, argv,
+                              -1, pseudo_random_generator_p, "pseudo-random-generator?", 0);
 }
 
 static Scheme_Object *current_sched_pseudo_random_generator(int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("current-evt-pseudo-random-generator", 
-			     scheme_make_integer(MZCONFIG_SCHEDULER_RANDOM_STATE),
-			     argc, argv,
-			     -1, pseudo_random_generator_p, "pseudo-random-generator", 0);
+  return scheme_param_config2("current-evt-pseudo-random-generator", 
+                              scheme_make_integer(MZCONFIG_SCHEDULER_RANDOM_STATE),
+                              argc, argv,
+                              -1, pseudo_random_generator_p, "pseudo-random-generator?", 0);
 }
 
 static Scheme_Object *make_pseudo_random_generator(int argc, Scheme_Object **argv)

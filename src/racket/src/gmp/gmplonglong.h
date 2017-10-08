@@ -1,7 +1,7 @@
 /* longlong.h -- definitions for mixed size 32/64 bit arithmetic.
 
-Copyright (C) 1991, 1992, 1993, 1994, 1996, 1997, 1999, 2000 Free Software
-Foundation, Inc.
+Copyright 1991, 1992, 1993, 1994, 1996, 1997, 1999, 2000, 2001, 2002, 2003,
+2004, 2005, 2007, 2008, 2009, 2011, 2012 Free Software Foundation, Inc.
 
 This file is free software; you can redistribute it and/or modify
 it under the terms of the GNU Lesser General Public License as published by
@@ -408,23 +408,23 @@ extern USItype __MPN(udiv_qrnnd) _PROTO ((USItype *, USItype, USItype, USItype))
 
 #if (defined (__i386__) || defined (__i486__)) && W_TYPE_SIZE == 32
 #define add_ssaaaa(sh, sl, ah, al, bh, bl) \
-  __asm__ ("addl %5,%1\n\tadcl %3,%0"					\
-	   : "=r" ((USItype)(sh)), "=&r" ((USItype)(sl))		\
-	   : "%0" ((USItype)(ah)), "g" ((USItype)(bh)),			\
+  __asm__ ("addl %5,%k1\n\tadcl %3,%k0"					\
+	   : "=r" (sh), "=&r" (sl)					\
+	   : "0"  ((USItype)(ah)), "g" ((USItype)(bh)),			\
 	     "%1" ((USItype)(al)), "g" ((USItype)(bl)))
 #define sub_ddmmss(sh, sl, ah, al, bh, bl) \
-  __asm__ ("subl %5,%1\n\tsbbl %3,%0"					\
-	   : "=r" ((USItype)(sh)), "=&r" ((USItype)(sl))		\
+  __asm__ ("subl %5,%k1\n\tsbbl %3,%k0"					\
+	   : "=r" (sh), "=&r" (sl)					\
 	   : "0" ((USItype)(ah)), "g" ((USItype)(bh)),			\
 	     "1" ((USItype)(al)), "g" ((USItype)(bl)))
 #define umul_ppmm(w1, w0, u, v) \
   __asm__ ("mull %3"							\
 	   : "=a" (w0), "=d" (w1)					\
 	   : "%0" ((USItype)(u)), "rm" ((USItype)(v)))
-#define udiv_qrnnd(q, r, n1, n0, d) \
-  __asm__ ("divl %4"							\
+#define udiv_qrnnd(q, r, n1, n0, dx) /* d renamed to dx avoiding "=d" */\
+  __asm__ ("divl %4"		     /* stringification in K&R C */	\
 	   : "=a" (q), "=d" (r)						\
-	   : "0" ((USItype)(n0)), "1" ((USItype)(n1)), "rm" ((USItype)(d)))
+	   : "0" ((USItype)(n0)), "1" ((USItype)(n1)), "rm" ((USItype)(dx)))
 #define count_leading_zeros(count, x) \
   do {									\
     USItype __cbtmp;							\
@@ -440,6 +440,42 @@ extern USItype __MPN(udiv_qrnnd) _PROTO ((USItype *, USItype, USItype, USItype))
 #define UDIV_TIME 40
 #endif
 #endif /* 80x86 */
+
+#if defined (__amd64__) && W_TYPE_SIZE == 64
+#define add_ssaaaa(sh, sl, ah, al, bh, bl) \
+  __asm__ ("addq %5,%q1\n\tadcq %3,%q0"					\
+	   : "=r" (sh), "=&r" (sl)					\
+	   : "0"  ((UDItype)(ah)), "rme" ((UDItype)(bh)),		\
+	     "%1" ((UDItype)(al)), "rme" ((UDItype)(bl)))
+#define sub_ddmmss(sh, sl, ah, al, bh, bl) \
+  __asm__ ("subq %5,%q1\n\tsbbq %3,%q0"					\
+	   : "=r" (sh), "=&r" (sl)					\
+	   : "0" ((UDItype)(ah)), "rme" ((UDItype)(bh)),		\
+	     "1" ((UDItype)(al)), "rme" ((UDItype)(bl)))
+#define umul_ppmm(w1, w0, u, v) \
+  __asm__ ("mulq %3"							\
+	   : "=a" (w0), "=d" (w1)					\
+	   : "%0" ((UDItype)(u)), "rm" ((UDItype)(v)))
+#define udiv_qrnnd(q, r, n1, n0, dx) /* d renamed to dx avoiding "=d" */\
+  __asm__ ("divq %4"		     /* stringification in K&R C */	\
+	   : "=a" (q), "=d" (r)						\
+	   : "0" ((UDItype)(n0)), "1" ((UDItype)(n1)), "rm" ((UDItype)(dx)))
+/* bsrq destination must be a 64-bit register, hence UDItype for __cbtmp. */
+#define count_leading_zeros(count, x)					\
+  do {									\
+    UDItype __cbtmp;							\
+    ASSERT ((x) != 0);							\
+    __asm__ ("bsrq %1,%0" : "=r" (__cbtmp) : "rm" ((UDItype)(x)));	\
+    (count) = __cbtmp ^ 63;						\
+  } while (0)
+/* bsfq destination must be a 64-bit register, "%q0" forces this in case
+   count is only an int. */
+#define count_trailing_zeros(count, x)					\
+  do {									\
+    ASSERT ((x) != 0);							\
+    __asm__ ("bsfq %1,%q0" : "=r" (count) : "rm" ((UDItype)(x)));	\
+  } while (0)
+#endif /* x86_64 */
 
 #if defined (__i860__) && W_TYPE_SIZE == 32
 #define rshift_rhlc(r,h,l,c) \

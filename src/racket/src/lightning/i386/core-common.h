@@ -30,7 +30,7 @@
  ***********************************************************************/
 
 
-#ifndef __lightning_core_common_h
+#ifndef __lightning_core_common_h_
 #define __lightning_core_common_h_
 
 /* jit_code: could be a union of many possible function 
@@ -72,10 +72,14 @@ static jit_state 			_jit;
 
 #define _jitl				_jit.jitl
 
-#define	jit_get_ip()			(_jit.x.code)
+#define	jit_get_ip()			(_jit.x.pc)
+#define	jit_get_raw_ip()                jit_get_ip()
 #define	jit_set_ip(ptr)			(_jit.x.pc = (ptr), jit_get_ip ())
 #define	jit_get_label()			(_jit.x.pc)
 #define	jit_forward()			(_jit.x.pc)
+
+#define jit_adjust_ip(x) x
+#define jit_unadjust_ip(x) x
 
 #define	jit_field(struc, f)		( ((intptr_t) (&((struc *) 8)->f) ) - 8)
 #define	jit_ptr_field(struc_p, f)	( ((intptr_t) (&((struc_p) 8)->f) ) - 8)
@@ -238,7 +242,11 @@ static jit_state 			_jit;
 #define jit_extr_s_l(d, rs)		(jit_lshi_l((d), (rs), 48), jit_rshi_l((d), (d), 48))
 #endif
 #ifndef jit_extr_i_l
-#define jit_extr_i_l(d, rs)		(jit_lshi_l((d), (rs), 32), jit_rshi_l((d), (d), 32))
+# if defined(JIT_X86_64)
+#  define jit_extr_i_l(d, rs)		(jit_lshi_l((d), (rs), 32), jit_rshi_l((d), (d), 32))
+# else
+#  define jit_extr_i_l(d, rs)		jit_movr_i(d, rs)
+# endif
 #endif
 #ifndef jit_extr_c_ul
 #define jit_extr_c_ul(d, rs)		jit_andi_l((d), (rs), 0xFF)
@@ -247,7 +255,11 @@ static jit_state 			_jit;
 #define jit_extr_s_ul(d, rs)		jit_andi_l((d), (rs), 0xFFFF)
 #endif
 #ifndef jit_extr_i_ul
-#define jit_extr_i_ul(d, rs)		jit_andi_l((d), (rs), 0xFFFFFFFFUL)
+# if defined(JIT_X86_64)
+#  define jit_extr_i_ul(d, rs)		jit_andi_l((d), (rs), 0xFFFFFFFFUL)
+# else
+#  define jit_extr_i_ul(d, rs)		jit_movr_i(d, rs)
+# endif
 #endif
 #endif
 
@@ -402,18 +414,18 @@ static jit_state 			_jit;
 #define jit_ner_p(d, s1, s2)		jit_ner_ul((d), (s1), (s2))
 #define jit_nei_p(d, rs, is)		jit_nei_ul((d), (rs), (is))
 
-#define jit_bltr_p(label, s1, s2)	jit_bltr_ul((label), (s1), (s2))
-#define jit_blti_p(label, rs, is)	jit_blti_ul((label), (rs), (is))
-#define jit_bler_p(label, s1, s2)	jit_bler_ul((label), (s1), (s2))
-#define jit_blei_p(label, rs, is)	jit_blei_ul((label), (rs), (is))
-#define jit_bgtr_p(label, s1, s2)	jit_bgtr_ul((label), (s1), (s2))
-#define jit_bgti_p(label, rs, is)	jit_bgti_ul((label), (rs), (is))
-#define jit_bger_p(label, s1, s2)	jit_bger_ul((label), (s1), (s2))
-#define jit_bgei_p(label, rs, is)	jit_bgei_ul((label), (rs), (is))
-#define jit_beqr_p(label, s1, s2)	jit_beqr_ul((label), (s1), (s2))
-#define jit_beqi_p(label, rs, is)	jit_beqi_ul((label), (rs), (is))
-#define jit_bner_p(label, s1, s2)	jit_bner_ul((label), (s1), (s2))
-#define jit_bnei_p(label, rs, is)	jit_bnei_ul((label), (rs), (is))
+#define jit_bltr_p(label, s1, s2)	jit_bltr_ul((label), (s1), (uintptr_t)(s2))
+#define jit_blti_p(label, rs, is)	jit_blti_ul((label), (rs), (uintptr_t)(is))
+#define jit_bler_p(label, s1, s2)	jit_bler_ul((label), (s1), (uintptr_t)(s2))
+#define jit_blei_p(label, rs, is)	jit_blei_ul((label), (rs), (uintptr_t)(is))
+#define jit_bgtr_p(label, s1, s2)	jit_bgtr_ul((label), (s1), (uintptr_t)(s2))
+#define jit_bgti_p(label, rs, is)	jit_bgti_ul((label), (rs), (uintptr_t)(is))
+#define jit_bger_p(label, s1, s2)	jit_bger_ul((label), (s1), (uintptr_t)(s2))
+#define jit_bgei_p(label, rs, is)	jit_bgei_ul((label), (rs), (uintptr_t)(is))
+#define jit_beqr_p(label, s1, s2)	jit_beqr_ul((label), (s1), (uintptr_t)(s2))
+#define jit_beqi_p(label, rs, is)	jit_beqi_ul((label), (rs), (uintptr_t)(is))
+#define jit_bner_p(label, s1, s2)	jit_bner_ul((label), (s1), (uintptr_t)(s2))
+#define jit_bnei_p(label, rs, is)	jit_bnei_ul((label), (rs), (uintptr_t)(is))
 
 #define jit_retval_ui(rd)		jit_retval_i((rd))
 #define jit_retval_uc(rd)		jit_retval_i((rd))

@@ -1,17 +1,16 @@
-(module trait mzscheme
-  (require mzlib/class
-           mzlib/list
-           mzlib/struct)
-  (require-for-syntax mzlib/list
+(module trait racket/base
+  (require racket/class
+           racket/list)
+  (require (for-syntax racket/list racket/base
                       syntax/stx
                       syntax/boundmap
                       syntax/kerncase
                       ;; This should be part of a public expand-time API
                       ;;  exported by the class system:
-                      (only "private/classidmap.rkt"
-                            generate-class-expand-context))
+                      (only-in "private/classidmap.rkt"
+                               generate-class-expand-context)))
   
-  (provide (rename :trait trait)
+  (provide (rename-out [:trait trait])
            trait?
            trait->mixin
            trait-sum 
@@ -149,45 +148,52 @@
             [else (let ([e (local-expand (car l)
                                          expand-context
                                          stop-forms)])
+                    (define (check-bindings ids)
+                      (for/list ([id (in-list ids)])
+                        (cond
+                         [(identifier? id) (syntax-local-identifier-as-binding id)]
+                         [else
+                          (syntax-case id ()
+                            [(a b)
+                             (and (identifier? #'a)
+                                  (identifier? #'b))
+                             (syntax/loc id (list (syntax-local-identifier-as-binding #'a)
+                                                  #'b))]
+                            [_
+                             (raise-syntax-error #f
+                                                 "bad syntax"
+                                                 e)])])))
                     (syntax-case e (begin define-values)
                       [(begin expr ...)
                        (loop (append
                               (syntax->list (syntax (expr ...)))
                               (cdr l)))]
-                      [(define-values (id) rhs)
-                       (cons e (loop (cdr l)))]
+                      [(dv (id) rhs)
+                       (free-identifier=? #'define-values #'dv)
+                       (cons (datum->syntax e
+                                            (list #'dv
+                                                  (list (syntax-local-identifier-as-binding #'id))
+                                                  #'rhs)
+                                            e
+                                            e)
+                             (loop (cdr l)))]
                       [(field (id expr) ...)
-                       (if (andmap (lambda (id)
-                                     (or (identifier? id)
-                                         (syntax-case id ()
-                                           [(a b)
-                                            (and (identifier? #'a)
-                                                 (identifier? #'b))]
-                                           [_else #f])))
-                                   (syntax->list #'(id ...)))
-                           (cons e (loop (cdr l)))
-                           (raise-syntax-error
-                            #f
-                            "bad syntax"
-                            e))]
-                      [(id . rest)
-                       (ormap (lambda (x) (module-identifier=? x #'id))
+                       (with-syntax ([(id ...) (check-bindings (syntax->list #'(id ...)))])
+                         (cons (syntax/loc e (field (id expr) ...))
+                               (loop (cdr l))))]
+                      [(form . rest)
+                       (ormap (lambda (x) (free-identifier=? x #'form))
                               (syntax->list
                                #'(public public-final pubment
                                          override override-final augment augment-final augride overment
                                          inherit inherit/super inherit/inner
                                          inherit-field)))
                        (let ([l2 (syntax->list #'rest)])
-                         (if (and l2
-                                  (andmap (lambda (i)
-                                            (or (identifier? i)
-                                                (syntax-case i ()
-                                                  [(a b)
-                                                   (and (identifier? #'a)
-                                                        (identifier? #'b))]
-                                                  [_else #f])))
-                                          l2))
-                             (cons e (loop (cdr l)))
+                         (if l2
+                             (cons (with-syntax ([(id ...) (check-bindings l2)])
+                                     (syntax/loc e
+                                       (form id ...)))
+                                   (loop (cdr l)))
                              (raise-syntax-error
                               #f
                               "bad syntax (inside trait)"
@@ -215,13 +221,13 @@
           [(null? l) (apply values results)]
           [else
            (let ([kw (stx-car (car l))])
-             (if (or (module-identifier=? kw #'define-values)
-                     (module-identifier=? kw #'field))
+             (if (or (free-identifier=? kw #'define-values)
+                     (free-identifier=? kw #'field))
                  (loop (cdr l) results)
                  (loop (cdr l)
                        (let iloop ([mapping keyword-mapping]
                                    [results results])
-                         (if (ormap (lambda (x) (module-identifier=? kw x))
+                         (if (ormap (lambda (x) (free-identifier=? kw x))
                                     (car mapping))
                              (cons (append (stx->list (stx-cdr (car l)))
                                            (car results))
@@ -245,7 +251,7 @@
         (for-each (lambda (clause)
                     (syntax-case clause (define-values field)
                       [(define-values (id) rhs)
-                       (bound-identifier-mapping-put! boundmap #'id #'rhs)]
+                       (bound-identifier-mapping-put! boundmap (syntax-local-identifier-as-binding #'id) #'rhs)]
                       [(field [id expr] ...)
                        (for-each (lambda (id expr)
                                    (bound-identifier-mapping-put! boundmap (internal-name id) expr))
@@ -259,9 +265,10 @@
       (bound-identifier=? (internal-name a) (internal-name b)))
 
     (define (internal-name decl)
-      (if (identifier? decl)
-          decl
-          (stx-car decl)))
+      (syntax-local-identifier-as-binding
+       (if (identifier? decl)
+           decl
+           (stx-car decl))))
 
     (define (external-name decl)
       (if (identifier? decl)
@@ -517,23 +524,23 @@
   
   (define (validate-trait who t)
     ;; Methods:
-    (let ([ht (make-hash-table)])
+    (let ([ht (make-hasheq)])
       ;; Build up table and check for duplicates:
       (for-each (lambda (m)
                   (let* ([name (method-name m)]
                          [key (member-name-key-hash-code name)])
-                    (let ([l (hash-table-get ht key null)])
+                    (let ([l (hash-ref ht key null)])
                       (when (ormap (lambda (n) (member-name-key=? (car n) name))
                                    l)
                         (raise-mismatch-error
                          who
                          "result would include multiple declarations of a method: " 
                          name))
-                      (hash-table-put! ht key (cons (cons name m) l)))))
+                      (hash-set! ht key (cons (cons name m) l)))))
                 (trait-methods t))
       ;; Check consistency of expectations and provisions:
       (let* ([find (lambda (name)
-                     (let ([l (hash-table-get ht (member-name-key-hash-code name) null)])
+                     (let ([l (hash-ref ht (member-name-key-hash-code name) null)])
                        (ormap (lambda (n) 
                                 (and (member-name-key=? (car n) name)
                                      (cdr n)))
@@ -566,19 +573,19 @@
                               (method-need-inner m)))
                   (trait-methods t))))
     ;; Fields:
-    (let ([ht (make-hash-table)])
+    (let ([ht (make-hasheq)])
       ;; Build up table and check for duplicates:
       (for-each (lambda (f)
                   (let* ([name (feeld-name f)]
                          [key (member-name-key-hash-code name)])
-                    (let ([l (hash-table-get ht key null)])
+                    (let ([l (hash-ref ht key null)])
                       (when (ormap (lambda (n) (member-name-key=? (car n) name))
                                    l)
                         (raise-mismatch-error
                          who
                          "result would include multiple declarations of a field: " 
                          name))
-                      (hash-table-put! ht key (cons (cons name f) l)))))
+                      (hash-set! ht key (cons (cons name f) l)))))
                 (trait-fields t)))
     ;; Return validated trait:
     t)
@@ -657,8 +664,8 @@
       (validate-trait
        'trait-alias
        (make-trait
-        (cons (copy-struct method m
-                           [method-name new-name])
+        (cons (struct-copy method m
+                           [name new-name])
               (trait-methods t))
         (trait-fields t)))))
 
@@ -673,11 +680,11 @@
        'trait-rename
        (make-trait
         (map (lambda (m)
-               (copy-struct method m
-                            [method-name (rename (method-name m))]
-                            [method-need-inherit (map rename (method-need-inherit m))]
-                            [method-need-super (map rename (method-need-super m))]
-                            [method-need-inner (map rename (method-need-inner m))]))
+               (struct-copy method m
+                            [name (rename (method-name m))]
+                            [need-inherit (map rename (method-need-inherit m))]
+                            [need-super (map rename (method-need-super m))]
+                            [need-inner (map rename (method-need-inner m))]))
              (trait-methods t))
         (trait-fields t)))))
 
@@ -692,12 +699,12 @@
        'trait-rename
        (make-trait
         (map (lambda (m)
-               (copy-struct method m
-                            [method-need-field (map rename (method-need-field m))]))
+               (struct-copy method m
+                            [need-field (map rename (method-need-field m))]))
              (trait-methods t))
         (map (lambda (f)
-               (copy-struct feeld f
-                            [feeld-name (rename (feeld-name f))]))
+               (struct-copy feeld f
+                            [name (rename (feeld-name f))]))
              (trait-fields t))))))
 
   (define-syntax define-trait-alias

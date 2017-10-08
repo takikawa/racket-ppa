@@ -1,5 +1,6 @@
 #lang racket/base
 (require syntax/parse/private/minimatch
+         racket/private/promise
          racket/private/stx) ;; syntax/stx
 (provide translate)
 
@@ -26,7 +27,7 @@ A Guide (G) is one of:
   - (vector 'dots HG (listof (vector-of VarRef)) nat (listof nat) G)
   - (vector 'app HG G)
   - (vector 'escaped G)
-  - (vector 'orelse G (vector-of integer) G)
+  - (vector 'orelse G G)
   - (vector 'metafun integer G)
   - (vector 'copy-props G (listof symbol))
   - (vector 'set-props G (listof (cons symbol any)))
@@ -35,8 +36,8 @@ A Guide (G) is one of:
 
 A HeadGuide (HG) is one of:
   - G
-  - (vector 'app-opt H (vector-of integer))
-  - (vector 'orelse-h H (vector-of integer) H)
+  - (vector 'app-opt H)
+  - (vector 'orelse-h H H)
   - (vector 'splice G)
   - (vector 'unsyntax-splicing VarRef)
 
@@ -47,11 +48,17 @@ An VarRef is one of
 
 (define (head-guide? x)
   (match x
-    [(vector 'app-opt g vars) #t]
+    [(vector 'app-opt g) #t]
     [(vector 'splice g) #t]
-    [(vector 'orelse-h g1 vars g2) #t]
+    [(vector 'orelse-h g1 g2) #t]
     [(vector 'unsyntax-splicing var) #t]
     [_ #f]))
+
+;; ============================================================
+
+;; Used to indicate absent pvar in template; ?? catches
+;; Note: not an exn, don't need continuation marks
+(struct absent-pvar (ctx v wanted-list?))
 
 ;; ============================================================
 
@@ -64,7 +71,10 @@ An VarRef is one of
     (lambda (env lenv)
       (unless (>= (vector-length env) env-length)
         (error 'template "internal error: environment too short"))
-      (f env lenv))))
+      (with-handlers ([absent-pvar?
+                       (lambda (ap)
+                         (err/not-syntax (absent-pvar-ctx ap) (absent-pvar-v ap)))])
+        (f env lenv)))))
 
 ;; lenv-mode is one of
 ;;  - 'one ;; lenv is single value; address as -1
@@ -128,7 +138,8 @@ An VarRef is one of
        (cond [(and (= lenv*-len 1) (= nesting 1) (not ghead-is-hg?)
                    (equal? ghead '-1))
               ;; Fast path for (pvar ... . T) template
-              ;;  - no list? or syntax? checks needed (because ghead is just raw varref)
+              ;;  - no list? or syntax? checks needed (because ghead is just raw varref,
+              ;;    no 'check' wrapper)
               ;;  - avoid trivial map, just append
               (let ([var-index (vector-ref henv 0)])
                 (lambda (env lenv)
@@ -143,7 +154,7 @@ An VarRef is one of
                      [var-index (vector-ref henv 0)])
                 (lambda (env lenv)
                   (restx stx
-                         (let ([lenv* (check-list stx (get var-index env lenv))])
+                         (let ([lenv* (check-list/depth stx (get var-index env lenv) 1)])
                            (let dotsloop ([lenv* lenv*])
                              (if (null? lenv*)
                                  (ftail env lenv)
@@ -166,33 +177,49 @@ An VarRef is one of
                   over ellipsis levels and 'dotsloop' recur over the contents of the pattern
                   variables' (listof^n syntax) values.
 
-                  Also, we reuse env vectors to reduce allocation. For continuation-safety
+                  Also, we reuse lenv vectors to reduce allocation. There is one aux lenv
+                  vector per nesting level, preallocated in aux-lenvs. For continuation-safety
                   we must install a continuation barrier around metafunction applications.
                   |#
-                  (define (nestloop lenv* nesting uptos)
+                  (define (nestloop lenv* nesting uptos aux-lenvs)
                     (cond [(zero? nesting)
                            (fhead env lenv*)]
                           [else
                            (let ([iters (check-lenv/get-iterations stx lenv*)])
-                             (let ([lenv** (make-vector lenv*-len)]
+                             (let ([lenv** (car aux-lenvs)]
+                                   [aux-lenvs** (cdr aux-lenvs)]
                                    [upto** (car uptos)]
                                    [uptos** (cdr uptos)])
                                (let dotsloop ([iters iters])
                                  (if (zero? iters)
                                      null
                                      (begin (vector-car/cdr! lenv** lenv* upto**)
-                                            (let ([row (nestloop lenv** (sub1 nesting) uptos**)])
+                                            (let ([row (nestloop lenv** (sub1 nesting) uptos** aux-lenvs**)])
                                               (cons row (dotsloop (sub1 iters)))))))))]))
-                  (let ([head-results
-                         ;; if ghead-is-hg?, is (listof^(nesting+1) stx) -- extra listof for loop-h
-                         ;; otherwise, is (listof^nesting stx)
-                         (nestloop (vector-map (lambda (index) (get index env lenv)) henv)
-                                   nesting uptos)]
-                        [tail-result (ftail env lenv)])
-                    (restx stx
-                           (nested-append head-results
-                                          (if ghead-is-hg? nesting (sub1 nesting))
-                                          tail-result)))))]))]
+                  (define initial-lenv*
+                    (vector-map (lambda (index) (get index env lenv)) henv))
+                  (define aux-lenvs
+                    (for/list ([depth (in-range nesting)]) (make-vector lenv*-len)))
+
+                  ;; Check initial-lenv* contains lists of right depths.
+                  ;; At each nesting depth, indexes [0,upto) of lenv* vary;
+                  ;; uptos is monotonic nondecreasing (every variable varies in inner
+                  ;; loop---this is always counterintuitive to me).
+                  (let checkloop ([depth nesting] [uptos uptos] [start 0])
+                    (when (pair? uptos)
+                      (for ([v (in-vector initial-lenv* start (car uptos))])
+                        (check-list/depth stx v depth))
+                      (checkloop (sub1 depth) (cdr uptos) (car uptos))))
+
+                  (define head-results
+                    ;; if ghead-is-hg?, is (listof^(nesting+1) stx) -- extra listof for loop-h
+                    ;; otherwise, is (listof^nesting stx)
+                    (nestloop initial-lenv* nesting uptos aux-lenvs))
+                  (define tail-result (ftail env lenv))
+                  (restx stx
+                         (nested-append head-results
+                                        (if ghead-is-hg? nesting (sub1 nesting))
+                                        tail-result))))]))]
 
     [(vector 'app ghead gtail)
      (let ([fhead (loop-h (stx-car stx) ghead)]
@@ -203,15 +230,14 @@ An VarRef is one of
     [(vector 'escaped g1)
      (loop (stx-cadr stx) g1)]
 
-    [(vector 'orelse g1 drivers1 g2)
+    [(vector 'orelse g1 g2)
      (let ([f1 (loop (stx-cadr stx) g1)]
            [f2 (loop (stx-caddr stx) g2)])
-       (for ([var (in-vector drivers1)])
-         (check-var var env-length lenv-mode))
        (lambda (env lenv)
-         (if (for/and ([index (in-vector drivers1)]) (get index env lenv))
-             (f1 env lenv)
-             (f2 env lenv))))]
+         (with-handlers ([absent-pvar?
+                          (lambda (_e)
+                            (f2 env lenv))])
+           (f1 env lenv))))]
 
     [(vector 'metafun index g1)
      (let ([f1 (loop (stx-cdr stx) g1)])
@@ -280,24 +306,20 @@ An VarRef is one of
 
   (match hg
 
-    [(vector 'app-opt hg1 drivers1)
+    [(vector 'app-opt hg1)
      (let ([f1 (loop-h (stx-cadr stx) hg1)])
-       (for ([var (in-vector drivers1)])
-         (check-var var env-length lenv-mode))
        (lambda (env lenv)
-         (if (for/and ([index (in-vector drivers1)]) (get index env lenv))
-             (f1 env lenv)
-             null)))]
+         (with-handlers ([absent-pvar? (lambda (_e) null)])
+           (f1 env lenv))))]
 
-    [(vector 'orelse-h hg1 drivers1 hg2)
+    [(vector 'orelse-h hg1 hg2)
      (let ([f1 (loop-h (stx-cadr stx) hg1)]
            [f2 (loop-h (stx-caddr stx) hg2)])
-       (for ([var (in-vector drivers1)])
-         (check-var var env-length lenv-mode))
        (lambda (env lenv)
-         (if (for/and ([index (in-vector drivers1)]) (get index env lenv))
-             (f1 env lenv)
-             (f2 env lenv))))]
+         (with-handlers ([absent-pvar?
+                          (lambda (_e)
+                            (f2 env lenv))])
+           (f1 env lenv))))]
 
     [(vector 'splice g1)
      (let ([f1 (loop (stx-cdr stx) g1)])
@@ -391,20 +413,43 @@ An VarRef is one of
                              (nested-append (cdr lst) nesting onto))]))
 
 (define (check-stx ctx v)
-  (if (syntax? v)
-      v
-      (error/not-stx ctx v)))
+  (let loop ([v v])
+    (cond [(syntax? v)
+           v]
+          [(promise? v)
+           (loop (force v))]
+          [(eq? v #f)
+           (raise (absent-pvar ctx v #f))]
+          [else (err/not-syntax ctx v)])))
 
-(define (check-list ctx v)
-  (if (list? v)
-      v
-      (error/not-list ctx v)))
+(define (check-list/depth ctx v0 depth0)
+  (let depthloop ([v v0] [depth depth0])
+    (cond [(zero? depth) v]
+          [(and (= depth 1) (list? v)) v]
+          [else
+           (let loop ([v v])
+             (cond [(null? v)
+                    null]
+                   [(pair? v)
+                    (let ([new-car (depthloop (car v) (sub1 depth))]
+                          [new-cdr (loop (cdr v))])
+                      ;; Don't copy unless necessary
+                      (if (and (eq? new-car (car v)) (eq? new-cdr (cdr v)))
+                          v
+                          (cons new-car new-cdr)))]
+                   [(promise? v)
+                    (loop (force v))]
+                   [(eq? v #f)
+                    (raise (absent-pvar ctx v0 #t))]
+                   [else
+                    (err/not-syntax ctx v0)]))])))
 
-(define (error/not-stx ctx v)
-  (raise-syntax-error 'template "pattern variable value is not syntax" ctx))
-
-(define (error/not-list ctx v)
-  (raise-syntax-error 'template "pattern variable value is not syntax list" ctx))
+;; Note: slightly different from error msg in syntax/parse/private/residual:
+;; here says "contains" instead of "is bound to", because might be within list
+(define (err/not-syntax ctx v)
+  (raise-syntax-error #f
+                      (format "attribute contains non-syntax value\n  value: ~e" v)
+                      ctx))
 
 (define (error/bad-index index)
   (error 'template "internal error: bad index: ~e" index))

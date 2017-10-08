@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -39,6 +39,8 @@ static Scheme_Object *make_channel(int n, Scheme_Object **p);
 static Scheme_Object *make_channel_put(int n, Scheme_Object **p);
 static Scheme_Object *channel_p(int n, Scheme_Object **p);
 static Scheme_Object *channel_put_p(int n, Scheme_Object **p);
+static Scheme_Object *chaperone_channel(int argc, Scheme_Object *argv[]);
+static Scheme_Object *impersonate_channel(int argc, Scheme_Object *argv[]);
 
 static Scheme_Object *thread_send(int n, Scheme_Object **p);
 static Scheme_Object *thread_receive(int n, Scheme_Object **p);
@@ -153,6 +155,16 @@ void scheme_init_sema(Scheme_Env *env)
 			     scheme_make_folding_prim(channel_put_p,
                                                       "channel-put-evt?",
                                                       1, 1, 1), 
+			     env);
+  scheme_add_global_constant("chaperone-channel",
+			     scheme_make_prim_w_arity(chaperone_channel,
+                                                      "chaperone-channel",
+                                                      3, -1),
+			     env);
+  scheme_add_global_constant("impersonate-channel",
+			     scheme_make_prim_w_arity(impersonate_channel,
+                                                      "impersonate-channel",
+                                                      3, -1),
 			     env);
 
   scheme_add_global_constant("thread-send", 
@@ -296,69 +308,79 @@ static Scheme_Object *semap(int n, Scheme_Object **p)
   return SCHEME_SEMAP(p[0]) ? scheme_true : scheme_false;
 }
 
+void did_post_sema(Scheme_Sema *t)
+{
+  while (t->first) {
+    Scheme_Channel_Syncer *w;
+    int consumed;
+
+    w = t->first;
+
+    t->first = w->next;
+    if (!w->next)
+      t->last = NULL;
+    else
+      t->first->prev = NULL;
+      
+    if ((!w->syncing || !w->syncing->result) && !pending_break(w->p)) {
+      if (w->syncing) {
+        w->syncing->result = w->syncing_i + 1;
+        if (w->syncing->disable_break)
+          w->syncing->disable_break->suspend_break++;
+        scheme_post_syncing_nacks(w->syncing);
+        if (!w->syncing->reposts || !w->syncing->reposts[w->syncing_i]) {
+          t->value -= 1;
+          consumed = 1;
+        } else
+          consumed = 0;
+        if (w->syncing->accepts && w->syncing->accepts[w->syncing_i])
+          scheme_accept_sync(w->syncing, w->syncing_i);
+      } else {
+        /* In this case, we will remove the syncer from line, but
+           someone else might grab the post. This is unfair, but it
+           can help improve throughput when multiple threads synchronize
+           on a lock. */
+        consumed = 1;
+      }
+      w->picked = 1;
+    } else
+      consumed = 0;
+
+    w->in_line = 0;
+    w->prev = NULL;
+    w->next = NULL;
+
+    if (w->picked) {
+      scheme_weak_resume_thread(w->p);
+      if (consumed)
+        break;
+    }
+    /* otherwise, loop to find one we can wake up */
+  }
+}
+
+static void sema_overflow()
+{
+  scheme_raise_exn(MZEXN_FAIL,
+		   "semaphore-post: the maximum post count has already been reached");
+}
+
 void scheme_post_sema(Scheme_Object *o)
 {
+  /* fast path is designed to avoid need for XFORM */
   Scheme_Sema *t = (Scheme_Sema *)o;
-  int v, consumed;
+  int v;
 
   if (t->value < 0) return;
 
-  v = t->value + 1;
+  v = (intptr_t)((uintptr_t)t->value + 1);
   if (v > t->value) {
     t->value = v;
 
-    while (t->first) {
-      Scheme_Channel_Syncer *w;
-
-      w = t->first;
-
-      t->first = w->next;
-      if (!w->next)
-	t->last = NULL;
-      else
-	t->first->prev = NULL;
-      
-      if ((!w->syncing || !w->syncing->result) && !pending_break(w->p)) {
-	if (w->syncing) {
-	  w->syncing->result = w->syncing_i + 1;
-	  if (w->syncing->disable_break)
-	    w->syncing->disable_break->suspend_break++;
-	  scheme_post_syncing_nacks(w->syncing);
-	  if (!w->syncing->reposts || !w->syncing->reposts[w->syncing_i]) {
-	    t->value -= 1;
-	    consumed = 1;
-	  } else
-	    consumed = 0;
-          if (w->syncing->accepts && w->syncing->accepts[w->syncing_i])
-            scheme_accept_sync(w->syncing, w->syncing_i);
-	} else {
-	  /* In this case, we will remove the syncer from line, but
-	     someone else might grab the post. This is unfair, but it
-	     can help improve throughput when multiple threads synchronize
-	     on a lock. */
-	  consumed = 1;
-	}
-	w->picked = 1;
-      } else
-	consumed = 0;
-
-      w->in_line = 0;
-      w->prev = NULL;
-      w->next = NULL;
-
-      if (w->picked) {
-	scheme_weak_resume_thread(w->p);
-	if (consumed)
-	  break;
-      }
-      /* otherwise, loop to find one we can wake up */
-    }
-
-    return;
-  }
-
-  scheme_raise_exn(MZEXN_FAIL,
-		   "semaphore-post: the maximum post count has already been reached");
+    if (t->first)
+      did_post_sema(t);
+  } else
+    sema_overflow();
 }
 
 void scheme_post_sema_all(Scheme_Object *o)
@@ -522,6 +544,11 @@ void scheme_get_outof_line(Scheme_Channel_Syncer *ch_w)
   get_outof_line((Scheme_Sema *)ch_w->obj, ch_w);
 }
 
+void scheme_get_back_into_line(Scheme_Channel_Syncer *ch_w)
+{
+  get_into_line((Scheme_Sema *)ch_w->obj, ch_w);
+}
+
 static int try_channel(Scheme_Sema *sema, Syncing *syncing, int pos, Scheme_Object **result)
 {
   if (SCHEME_CHANNELP(sema)) {
@@ -607,7 +634,7 @@ static int try_channel(Scheme_Sema *sema, Syncing *syncing, int pos, Scheme_Obje
   }
 }
 
-int scheme_try_plain_sema(Scheme_Object *o)
+XFORM_NONGCING int scheme_try_plain_sema(Scheme_Object *o)
 {
   Scheme_Sema *sema = (Scheme_Sema *)o;
 
@@ -821,7 +848,7 @@ int scheme_wait_semas_chs(int n, Scheme_Object **o, int just_try, Syncing *synci
 	    if (ws[i]->in_line)
 	      get_outof_line(semas[i], ws[i]);
 	  }
-	  
+
 	  scheme_thread_block(0); /* ok if it returns multiple times */ 
 	  scheme_current_thread->ran_some = 1;
 	  /* [but why would it return multiple times?! there must have been a reason...] */
@@ -883,8 +910,11 @@ int scheme_wait_semas_chs(int n, Scheme_Object **o, int just_try, Syncing *synci
 	    if (semas[i]->value) {
 	      if ((semas[i]->value > 0) && (!syncing || !syncing->reposts || !syncing->reposts[i]))
 		--semas[i]->value;
-              if (syncing && syncing->accepts && syncing->accepts[i])
-                scheme_accept_sync(syncing, i);
+              if (syncing) {
+                syncing->result = i + 1;
+                if (syncing->accepts && syncing->accepts[i])
+                  scheme_accept_sync(syncing, i);
+              }
 	      break;
 	    }
 	  }  else if (semas[i]->so.type == scheme_never_evt_type) {
@@ -932,13 +962,23 @@ int scheme_wait_semas_chs(int n, Scheme_Object **o, int just_try, Syncing *synci
   return v;
 }
 
-int scheme_wait_sema(Scheme_Object *o, int just_try)
+static int slow_wait_sema(Scheme_Object *o, int just_try)
 {
   Scheme_Object *a[1];
 
   a[0] = o;
-
+  
   return scheme_wait_semas_chs(1, a, just_try, NULL);
+}
+
+int scheme_wait_sema(Scheme_Object *o, int just_try)
+{
+  /* fast path is designed to avoid need for XFORM */
+  if (((just_try >= 0) || !scheme_current_thread->external_break)
+      && scheme_try_plain_sema(o))
+    return 1;
+
+  return slow_wait_sema(o, just_try);
 }
 
 static Scheme_Object *block_sema_p(int n, Scheme_Object **p)
@@ -1042,17 +1082,62 @@ int scheme_try_channel_put(Scheme_Object *ch, Scheme_Object *v)
     return 0;
 }
 
+Scheme_Object *chaperone_put(Scheme_Object *obj, Scheme_Object *orig)
+{
+  Scheme_Chaperone *px = (Scheme_Chaperone *)obj;
+  Scheme_Object *val = orig;
+  Scheme_Object *a[2];
+  Scheme_Object *redirect;
+
+  while (1) {
+    if (SCHEME_CHANNELP(px)) {
+      return val;
+    } else if (!(SAME_TYPE(SCHEME_TYPE(px->redirects), scheme_nack_guard_evt_type))) {
+      a[0] = px->prev;
+      a[1] = val;
+      redirect = px->redirects;
+      val = _scheme_apply(redirect, 2, a);
+
+      if (!(SCHEME_CHAPERONE_FLAGS(px) & SCHEME_CHAPERONE_IS_IMPERSONATOR))
+        if (!scheme_chaperone_of(val, orig))
+          scheme_wrong_chaperoned("channel-put", "result", orig, val);
+
+      px = (Scheme_Chaperone *)px->prev;
+    } else {
+      /* In this case, the `px` is actually an evt chaperone so we
+         don't want to handle it here since we're doing a "put" */
+      px = (Scheme_Chaperone *)px->prev;
+    }
+  }
+
+  return obj;
+}
+
 static Scheme_Object *make_channel_put(int argc, Scheme_Object **argv)
 {
-  if (!SCHEME_CHANNELP(argv[0]))
-    scheme_wrong_contract("channel-put-evt", "channel?", 0, argc, argv);
+  Scheme_Object *ch = argv[0];
+  Scheme_Object *val = argv[1];
+  Scheme_Object *chaperone = NULL;
 
-  return scheme_make_channel_put_evt(argv[0], argv[1]);
+  if (SCHEME_NP_CHAPERONEP(ch)
+      && SCHEME_CHANNELP(SCHEME_CHAPERONE_VAL(ch))) {
+    chaperone = ch;
+    ch = SCHEME_CHAPERONE_VAL(chaperone);
+  } else if (!SCHEME_CHANNELP(argv[0])) {
+    scheme_wrong_contract("channel-put-evt", "channel?", 0, argc, argv);
+  }
+
+  if (chaperone)
+    val = chaperone_put(chaperone, argv[1]);
+
+  return scheme_make_channel_put_evt(ch, val);
 }
 
 static Scheme_Object *channel_p(int n, Scheme_Object **p)
 {
-  return (SCHEME_CHANNELP(p[0])
+  return ((SCHEME_CHANNELP(p[0]) ||
+           (SCHEME_NP_CHAPERONEP(p[0])
+            && SCHEME_CHANNELP(SCHEME_CHAPERONE_VAL(p[0]))))
 	  ? scheme_true
 	  : scheme_false);
 }
@@ -1107,6 +1192,51 @@ int scheme_try_channel_get(Scheme_Object *ch)
     return 1;
   }
   return 0;
+}
+
+/* This chaperone only protects the "put" end of the channel because
+   chaperone-evt is sufficient to protect the "get" end. Thus, it first
+   wraps the object in an evt chaperone. */
+Scheme_Object *do_chaperone_channel(const char *name, int is_impersonator, int argc, Scheme_Object **argv)
+{
+  Scheme_Chaperone *px;
+  Scheme_Object *val = argv[0];
+  Scheme_Object *evt;
+  Scheme_Hash_Tree *props;
+
+  if (SCHEME_CHAPERONEP(val))
+    val = SCHEME_CHAPERONE_VAL(val);
+
+  if (!SCHEME_CHANNELP(val))
+    scheme_wrong_contract(name, "channel?", 0, argc, argv);
+  scheme_check_proc_arity(name, 1, 1, argc, argv);
+  scheme_check_proc_arity(name, 2, 2, argc, argv);
+
+  evt = scheme_do_chaperone_evt(name, is_impersonator, 2, argv);
+
+  props = scheme_parse_chaperone_props(name, 3, argc, argv);
+
+  px = MALLOC_ONE_TAGGED(Scheme_Chaperone);
+  px->iso.so.type = scheme_chaperone_type;
+  px->val = val;
+  px->prev = evt;
+  px->props = props;
+  px->redirects = argv[2];
+
+  if (is_impersonator)
+    SCHEME_CHAPERONE_FLAGS(px) |= SCHEME_CHAPERONE_IS_IMPERSONATOR;
+
+  return (Scheme_Object *)px;
+}
+
+static Scheme_Object *chaperone_channel(int argc, Scheme_Object **argv)
+{
+  return do_chaperone_channel("chaperone-channel", 0, argc, argv);
+}
+
+static Scheme_Object *impersonate_channel(int argc, Scheme_Object **argv)
+{
+  return do_chaperone_channel("impersonator-channel", 1, argc, argv);
 }
 
 /**********************************************************************/

@@ -1,61 +1,77 @@
-(module distribute scheme/base
-  (require scheme/file
-           scheme/path
+(module distribute racket/base
+  (require racket/file
+           racket/path
            setup/dirs
-           mzlib/list
+           racket/list
            setup/variant
+           setup/cross-system
+           pkg/path
+           setup/main-collects
            dynext/filename-version
            "private/macfw.rkt"
            "private/windlldir.rkt"
            "private/elf.rkt"
-           "private/collects-path.rkt")
+           "private/collects-path.rkt"
+           "private/write-perm.rkt")
 
   (provide assemble-distribution)
 
   (define (assemble-distribution dest-dir 
                                  orig-binaries
+                                 #:executables? [executables? #t]
+                                 #:relative-base [relative-base #f]
                                  #:collects-path [collects-path #f] ; relative to dest-dir
                                  #:copy-collects [copy-collects null])
-    (let* ([types (map get-binary-type orig-binaries)]
+    (let* ([types (if executables?
+                      (map get-binary-type orig-binaries)
+                      (map (lambda (v) #f) orig-binaries))]
 	   [_ (unless (directory-exists? dest-dir)
 		(make-directory dest-dir))]
 	   [sub-dirs (map (lambda (b type)
-			   (case (system-type)
-			     [(windows) #f]
-			     [(unix) "bin"]
-			     [(macosx) (if (memq type '(gracketcgc gracket3m))
-					   #f
-					   "bin")]))
-			  orig-binaries
+                            (and type
+                                 (case (cross-system-type)
+                                   [(windows) #f]
+                                   [(unix) "bin"]
+                                   [(macosx) (if (memq type '(gracketcgc gracket3m))
+                                                 #f
+                                                 "bin")])))
+                          orig-binaries
 			  types)]
 	   ;; Copy binaries into place:
 	   [binaries
 	    (map (lambda (b sub-dir type)
-		   (let ([dest-dir (if sub-dir
-				       (build-path dest-dir sub-dir)
-				       dest-dir)])
-		     (unless (directory-exists? dest-dir)
-		       (make-directory dest-dir))
-		     (let-values ([(base name dir?) (split-path b)])
-		       (let ([dest (build-path dest-dir name)])
-			 (if (and (memq type '(gracketcgc gracket3m))
-				  (eq? 'macosx (system-type)))
-			     (begin
-			       (copy-app b dest)
-			       (app-to-file dest))
-			     (begin
-			      (copy-file* b dest)
-			      dest))))))
+                   (if type
+                       (let ([dest-dir (if sub-dir
+                                           (build-path dest-dir sub-dir)
+                                           dest-dir)])
+                         (unless (directory-exists? dest-dir)
+                           (make-directory dest-dir))
+                         (let-values ([(base name dir?) (split-path b)])
+                           (let ([dest (build-path dest-dir name)])
+                             (if (and (memq type '(gracketcgc gracket3m))
+                                      (eq? 'macosx (cross-system-type)))
+                                 (begin
+                                   (copy-app b dest)
+                                   (app-to-file dest))
+                                 (begin
+                                   (copy-file* b dest)
+                                   dest)))))
+                       b))
 		 orig-binaries
 		 sub-dirs
 		 types)]
-	   [single-mac-app? (and (eq? 'macosx (system-type))
+           [old-permss (and executables?
+                            (eq? (system-type) 'unix)
+                            (for/list ([b (in-list binaries)])
+                              (ensure-writable b)))]
+	   [single-mac-app? (and executables?
+                                 (eq? 'macosx (cross-system-type))
 				 (= 1 (length types))
 				 (memq (car types) '(gracketcgc gracket3m)))])
       ;; Create directories for libs, collects, and extensions:
       (let-values ([(lib-dir collects-dir relative-collects-dir exts-dir relative-exts-dir)
 		    (if single-mac-app?
-			;; Special case: single Mac OS X GRacket app:
+			;; Special case: single Mac OS GRacket app:
 			(let-values ([(base name dir?)
 				      (split-path (car binaries))])
 			  (values
@@ -75,11 +91,12 @@
 			(let* ([specific-lib-dir
                                 (build-path "lib"
                                             "plt"
-                                            (if (null? binaries)
+                                            (if (or (not executables?)
+                                                    (null? binaries))
                                                 "generic"
                                                 (let-values ([(base name dir?) 
                                                               (split-path (car binaries))])
-                                                  (path-replace-suffix name #""))))]
+                                                  (path-replace-extension name #""))))]
                                [relative-collects-dir 
                                 (or collects-path
                                     (build-path specific-lib-dir
@@ -93,7 +110,7 @@
 	(make-directory* collects-dir)
 	(make-directory* exts-dir)
 	;; Copy libs into place
-	(install-libs lib-dir types)
+        (install-libs lib-dir types (not executables?))
 	;; Copy collections into place
 	(for-each (lambda (dir)
 		    (for-each (lambda (f)
@@ -103,13 +120,17 @@
 			      (directory-list dir)))
 		  copy-collects)
 	;; Patch binaries to find libs
-	(patch-binaries binaries types)
+        (when executables?
+          (patch-binaries binaries types))
         (let ([relative->binary-relative
                (lambda (sub-dir type relative-dir)
                  (cond
+                  [relative-base relative-base]
+                  [(not executables?)
+                   (build-path dest-dir relative-dir)]
                   [sub-dir
                    (build-path 'up relative-dir)]
-                  [(and (eq? 'macosx (system-type))
+                  [(and (eq? 'macosx (cross-system-type))
                         (memq type '(gracketcgc gracket3m))
                         (not single-mac-app?))
                    (build-path 'up 'up 'up relative-dir)]
@@ -117,10 +138,11 @@
                    relative-dir]))])
           ;; Patch binaries to find collects
           (for-each (lambda (b type sub-dir)
-                      (set-collects-path 
-                       b 
-                       (collects-path->bytes 
-                        (relative->binary-relative sub-dir type relative-collects-dir))))
+                      (when type
+                        (set-collects-path 
+                         b 
+                         (collects-path->bytes 
+                          (relative->binary-relative sub-dir type relative-collects-dir)))))
                     binaries types sub-dirs)
           (unless (null? binaries)
             ;; Copy over extensions and adjust embedded paths:
@@ -133,70 +155,76 @@
                                                    exts-dir 
                                                    relative-exts-dir
                                                    relative->binary-relative)
+            ;; Restore executable permissions:
+            (when old-permss
+              (map done-writable binaries old-permss))
             ;; Done!
             (void))))))
 
-  (define (install-libs lib-dir types)
-    (case (system-type)
+  (define (install-libs lib-dir types extras-only?)
+    (case (cross-system-type)
       [(windows)
        (let ([copy-dll (lambda (name)
-			 (copy-file* (search-dll (find-dll-dir) name)
+			 (copy-file* (search-dll (find-cross-dll-dir) name)
 				     (build-path lib-dir name)))]
 	     [versionize (lambda (template)
-			   (let ([f (search-dll (find-dll-dir)
+			   (let ([f (search-dll (find-cross-dll-dir)
 						(format template filename-version-part))])
 			     (if (file-exists? f)
 				 (format template filename-version-part)
 				 (format template "xxxxxxx"))))])
 	 (map copy-dll (list
-                        (if (equal? "win32\\x86_64" (path->string (system-library-subpath #f)))
-                            "libiconv-2.dll"
-                            "iconv.dll")
+                        "libiconv-2.dll"
                         "longdouble.dll"))
-	 (when (or (memq 'racketcgc types)
-		   (memq 'gracketcgc types))
-	   (map copy-dll
-		(list
-		 (versionize "libracket~a.dll")
-		 (versionize "libmzgc~a.dll"))))
-	 (when (or (memq 'racket3m types)
-		   (memq 'gracket3m types))
-	   (map copy-dll
-		(list
-		 (versionize "libracket3m~a.dll")))))]
+         (unless extras-only?
+           (when (or (memq 'racketcgc types)
+                     (memq 'gracketcgc types))
+             (map copy-dll
+                  (list
+                   (versionize "libracket~a.dll")
+                   (versionize "libmzgc~a.dll"))))
+           (when (or (memq 'racket3m types)
+                     (memq 'gracket3m types))
+             (map copy-dll
+                  (list
+                   (versionize "libracket3m~a.dll"))))))]
       [(macosx)
-       (when (or (memq 'racketcgc types)
-                 (memq 'gracketcgc types))
-	 (copy-framework "Racket" #f lib-dir))
-       (when (or (memq 'racket3m types)
-                 (memq 'gracket3m types))
-	 (copy-framework "Racket" #t lib-dir))]
+       (unless extras-only?
+         (when (or (memq 'racketcgc types)
+                   (memq 'gracketcgc types))
+           (copy-framework "Racket" #f lib-dir))
+         (when (or (memq 'racket3m types)
+                   (memq 'gracket3m types))
+           (copy-framework "Racket" #t lib-dir)))]
       [(unix)
-       (let ([lib-plt-dir (build-path lib-dir "plt")])
-	 (unless (directory-exists? lib-plt-dir)
-	   (make-directory lib-plt-dir))
-	 (let ([copy-bin
-		(lambda (name variant)
-		  (copy-file* (build-path (find-console-bin-dir) 
-                                          (format "~a~a" name (variant-suffix variant #f)))
-			      (build-path lib-plt-dir 
-					  (format "~a~a-~a" name variant (version)))))])
-	   (when (memq 'racketcgc types)
-	     (copy-bin "racket" 'cgc))
-	   (when (memq 'racket3m types)
-	     (copy-bin "racket" '3m))
-	   (when (memq 'gracketcgc types)
-	     (copy-bin "gracket" 'cgc))
-	   (when (memq 'gracket3m types)
-	     (copy-bin "gracket" '3m)))
-	 (when (shared-libraries?)
-	   (when (or (memq 'racketcgc types)
-		     (memq 'gracketcgc types))
-	     (copy-shared-lib "racket" lib-dir)
-	     (copy-shared-lib "mzgc" lib-dir))
-	   (when (or (memq 'racket3m types)
-		     (memq 'gracket3m types))
-	     (copy-shared-lib "racket3m" lib-dir))))]))
+       (unless extras-only?
+         (let ([lib-plt-dir (build-path lib-dir "plt")])
+           (unless (directory-exists? lib-plt-dir)
+             (make-directory lib-plt-dir))
+           (let ([copy-bin
+                  (lambda (name variant gr?)
+                    (copy-file* (build-path (if gr?
+                                                (find-lib-dir)
+                                                (find-console-bin-dir))
+                                            (format "~a~a" name (variant-suffix variant #f)))
+                                (build-path lib-plt-dir 
+                                            (format "~a~a-~a" name variant (version)))))])
+             (when (memq 'racketcgc types)
+               (copy-bin "racket" 'cgc #f))
+             (when (memq 'racket3m types)
+               (copy-bin "racket" '3m #f))
+             (when (memq 'gracketcgc types)
+               (copy-bin "gracket" 'cgc #t))
+             (when (memq 'gracket3m types)
+               (copy-bin "gracket" '3m #t)))
+           (when (shared-libraries?)
+             (when (or (memq 'racketcgc types)
+                       (memq 'gracketcgc types))
+               (copy-shared-lib "racket" lib-dir)
+               (copy-shared-lib "mzgc" lib-dir))
+             (when (or (memq 'racket3m types)
+                       (memq 'gracket3m types))
+               (copy-shared-lib "racket3m" lib-dir)))))]))
 
   (define (search-dll dll-dir dll)
     (if dll-dir
@@ -238,7 +266,7 @@
 	     (build-path lib-dir sub-dir "Resources")))))))
 
   (define (find-framework fw-name)
-    (let ([dll-dir (find-dll-dir)])
+    (let ([dll-dir (find-cross-dll-dir)])
       (or dll-dir
 	  (ormap (lambda (p)
 		   (let ([f (build-path p fw-name)])
@@ -255,7 +283,7 @@
 
   (define (copy-shared-lib name lib-dir)
     (unless avail-lib-files
-      (set! avail-lib-files (directory-list (find-dll-dir))))
+      (set! avail-lib-files (directory-list (find-cross-dll-dir))))
     (let* ([rx (byte-regexp (string->bytes/latin-1
 			     (format "lib~a-~a.*[.](?:so|dylib)$" name (version))))]
 	   [files (filter (lambda (f)
@@ -269,11 +297,11 @@
 	       "found multiple shared-library candidates for ~a: ~e"
 	       name
 	       files))
-      (copy-file* (build-path (find-dll-dir) (car files))
+      (copy-file* (build-path (find-cross-dll-dir) (car files))
 		  (build-path lib-dir (car files)))))
 
   (define (patch-binaries binaries types)
-    (case (system-type)
+    (case (cross-system-type)
       [(windows)
        (for-each (lambda (b)
 		   (update-dll-dir b "lib"))
@@ -472,6 +500,7 @@
   (define (copy-runtime-files-and-patch-binaries orig-binaries binaries types sub-dirs 
                                                  exts-dir relative-exts-dir
                                                  relative->binary-relative)
+    (define pkg-path-cache (make-hash))
     (let ([paths null])
       ;; Pass 1: collect all the paths
       (copy-and-patch-binaries #f #rx#"rUnTiMe-paths[)]"
@@ -483,7 +512,7 @@
                                ;; construct-dest:
                                (lambda (src)
                                  (when src
-                                   (set! paths (cons src paths)))
+                                   (set! paths (cons (normal-case-path src) paths)))
                                  "dummy")
                                ;; transform-entry
                                (lambda (new-path ext) ext)
@@ -492,7 +521,10 @@
                                exts-dir relative-exts-dir
                                relative->binary-relative)
       (unless (null? paths)
-        ;; Determine the shared path prefix:
+        ;; Determine the shared path prefix among paths within a package,
+        ;; "collects" directory, or other root. That way, relative path references
+        ;; can work, but we don't keep excessive path information from the
+        ;; build machine.
         (let* ([root-table (make-hash)]
                [root->path-element (lambda (root)
                                      (hash-ref root-table
@@ -501,27 +533,73 @@
                                                  (let ([v (format "r~a" (hash-count root-table))])
                                                    (hash-set! root-table root v)
                                                    v))))]
+               [alt-paths (map explode-path
+                               (map normal-case-path
+                                    (list* (find-system-path 'addon-dir)
+                                           (find-share-dir)
+                                           (append (get-cross-lib-search-dirs)
+                                                   (get-include-search-dirs)))))]
                [explode (lambda (src)
+                          ;; Sort the path into a root, and keep the root plus
+                          ;; the part of the path relative to that root:
+                          (define-values (pkg subpath)
+                            (path->pkg+subpath src #:cache pkg-path-cache))
+                          (define main
+                            (and (not pkg)
+                                 (path->main-collects-relative src)))
+                          (define other (and (not pkg)
+                                             (not (pair? main))
+                                             (let ([e (explode-path src)])
+                                               (for/or ([d (in-list alt-paths)]
+                                                        [i (in-naturals)])
+                                                 (define len (length d))
+                                                 (and ((length e) . > . len)
+                                                      (equal? d (take e len))
+                                                      (cons i len))))))
                           (reverse
-                           (let loop ([src src])
+                           (let loop ([src (cond
+                                            [pkg subpath]
+                                            [(pair? main)
+                                             (apply build-path
+                                                    (map bytes->path-element (cdr main)))]
+                                            [other (apply build-path
+                                                          (list-tail (explode-path src) (cdr other)))]
+                                            [else src])])
                              (let-values ([(base name dir?) (split-path src)])
-                               (if base
-                                   (cons name (loop base))
-                                   (list (root->path-element name)))))))]
+                               (cond
+                                [(path? base)
+                                 (cons name (loop base))]
+                                [(or pkg
+                                     (and (pair? main)
+                                          'collects)
+                                     (and other (car other)))
+                                 => (lambda (r)
+                                      (list name (root->path-element r)))]
+                                [else
+                                 (list (root->path-element name))])))))]
                ;; In reverse order, so we can pick off the paths
                ;;  in the second pass:
-               [exploded (reverse (map explode paths))]
-               [max-len (apply max 0 (map length exploded))]
-               [common-len (let loop ([cnt 0])
-                             (cond
-                               [((add1 cnt) . = . max-len) cnt]
-                               [(andmap (let ([i (list-ref (car exploded) cnt)])
-                                          (lambda (e)
-                                            (equal? (list-ref e cnt) i)))
-                                        exploded)
-                                (loop (add1 cnt))]
-                               [else cnt]))])
-
+               [exploded (reverse (let ([exploded (map explode paths)])
+                                    ;; For paths that share the same root,
+                                    ;; drop any common "prefix" after the root.
+                                    (define roots-common
+                                      (for/fold ([ht (hash)]) ([e (in-list exploded)])
+                                        (define l (hash-ref ht (car e) #f))
+                                        (hash-set ht (car e) 
+                                                  (if (not l)
+                                                      (cdr e)
+                                                      (let loop ([l l] [l2 (cdr e)])
+                                                        (cond
+                                                         [(or (null? l) (null? l2)) null]
+                                                         [(or (null? l) (null? l2)) null]
+                                                         [(equal? (car l) (car l2))
+                                                          (cons (car l) (loop (cdr l) (cdr l2)))]
+                                                         [else null]))))))
+                                    ;; Drop common parts out, but deefinitely keep the last
+                                    ;; element:
+                                    (for/list ([e (in-list exploded)])
+                                      (define l (hash-ref roots-common (car e) null))
+                                      (cons (car e) (list-tail (cdr e) (max 0 (sub1 (length l))))))))])
                
           ;; Pass 2: change all the paths
           (copy-and-patch-binaries #t #rx#"rUnTiMe-paths[)]"
@@ -533,7 +611,7 @@
                                    (lambda (src)
                                      (and src
                                           (begin0
-                                           (apply build-path (list-tail (car exploded) common-len))
+                                           (apply build-path (car exploded))
                                            (set! exploded (cdr exploded)))))
                                    ;; transform-entry
                                    (lambda (new-path ext)
@@ -547,7 +625,7 @@
   ;; Utilities
 
   (define (shared-libraries?)
-    (eq? 'shared (system-type 'link)))
+    (eq? 'shared (cross-system-type 'link)))
 
   (define (to-path s)
     (if (string? s)
@@ -562,7 +640,7 @@
 	(let ([m (regexp-match #rx#"bINARy tYPe:(e?)(.)(.)(.)" (current-input-port))])
 	  (if m
 	      (begin
-		(when (eq? 'unix (system-type))
+		(when (eq? 'unix (cross-system-type))
 		  (unless (equal? (cadr m) #"e")
 		    (error 'assemble-distribution
 			   "file is an original PLT executable, not a stub binary: ~e"
@@ -617,13 +695,13 @@
     (copy-directory/files src dest))
   
   (define (app-to-file b)
-    (if (and (eq? 'macosx (system-type))
+    (if (and (eq? 'macosx (cross-system-type))
 	     (regexp-match #rx#"[.][aA][pP][pP]$" 
 			   (path->bytes (if (string? b)
 					    (string->path b)
 					    b))))
 	(let ([no-app
 	       (let-values ([(base name dir?) (split-path b)])
-		 (path-replace-suffix name #""))])
+		 (path-replace-extension name #""))])
 	  (build-path b "Contents" "MacOS" no-app))
 	b)))

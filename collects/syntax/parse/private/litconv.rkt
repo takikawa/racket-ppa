@@ -4,13 +4,12 @@
                      "sc.rkt"
                      "lib.rkt"
                      "kws.rkt"
-                     racket/syntax
-                     syntax/private/keyword)
+                     racket/syntax)
          syntax/parse/private/residual-ct ;; keep abs. path
-         syntax/parse/private/residual    ;; keep abs. path
-         (only-in unstable/syntax phase-of-enclosing-module))
+         syntax/parse/private/residual)   ;; keep abs. path
 (begin-for-syntax
  (lazy-require
+  [syntax/private/keyword (options-select-value parse-keyword-options)]
   [syntax/parse/private/rep ;; keep abs. path
    (parse-kw-formals
     check-conventions-rules
@@ -18,7 +17,7 @@
     create-aux-def)]))
 ;; FIXME: workaround for phase>0 bug in racket/runtime-path (and thus lazy-require)
 ;; Without this, dependencies don't get collected.
-(require racket/runtime-path (for-meta 2 '#%kernel))
+(require racket/runtime-path racket/syntax (for-meta 2 '#%kernel))
 (define-runtime-module-path-index _unused_ 'syntax/parse/private/rep)
 
 (provide define-conventions
@@ -241,15 +240,21 @@ cause an error, so don't worry about that case.)
          (with-syntax ([((lit phase-var) ...)
                         (for/list ([lit (in-list lits)]
                                    #:when (lse:lit? lit))
-                          (list (lse:lit-external lit) (lse:lit-phase lit)))])
-           #'(make-literal-set-predicate (list (list (quote-syntax lit) phase-var) ...)))))]))
+                          (list (lse:lit-external lit) (lse:lit-phase lit)))]
+                       [(datum-lit ...)
+                        (for/list ([lit (in-list lits)]
+                                   #:when (lse:datum-lit? lit))
+                          (lse:datum-lit-external lit))])
+           #'(make-literal-set-predicate (list (list (quote-syntax lit) phase-var) ...)
+                                         '(datum-lit ...)))))]))
 
-(define (make-literal-set-predicate lits)
+(define (make-literal-set-predicate lits datum-lits)
   (lambda (x [phase (syntax-local-phase-level)])
-    (for/or ([lit (in-list lits)])
-      (let ([lit-id (car lit)]
-            [lit-phase (cadr lit)])
-        (free-identifier=? x lit-id phase lit-phase)))))
+    (or (for/or ([lit (in-list lits)])
+          (let ([lit-id (car lit)]
+                [lit-phase (cadr lit)])
+            (free-identifier=? x lit-id phase lit-phase)))
+        (and (memq (syntax-e x) datum-lits) #t))))
 
 ;; Literal sets
 
@@ -275,5 +280,5 @@ cause an error, so don't worry about that case.)
    #%top
    #%datum
    #%variable-reference
-   module #%provide #%require
+   module module* #%provide #%require #%declare
    #%plain-module-begin))

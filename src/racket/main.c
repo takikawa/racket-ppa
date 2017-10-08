@@ -1,7 +1,6 @@
-
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 1995-2000 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -32,7 +31,9 @@
    (except for the garbage collector, which is in `gc', `sgc', or
    `gc2', depending on which one you're using). */
 
-#define __MINGW32_DELAY_LOAD__ 1
+#ifdef __MINGW32__
+# define __MINGW32_DELAY_LOAD__ 1
+#endif
 #include "scheme.h"
 
 /*========================================================================*/
@@ -60,17 +61,14 @@ XFORM_GC_VARIABLE_STACK_THROUGH_DIRECT_FUNCTION;
 START_XFORM_SUSPEND;
 #endif
 
-#ifdef FILES_HAVE_FDS
-# include <sys/types.h>
+#include <sys/types.h>
+#ifndef DOS_FILE_SYSTEM
 # include <sys/time.h>
-# ifdef SELECT_INCLUDE
-#  include <sys/select.h>
-# endif
 #endif
 #ifndef NO_USER_BREAK_HANDLER
 # include <signal.h>
 #endif
-#ifdef UNISTD_INCLUDE
+#ifdef OS_X
 # include <unistd.h>
 #endif
 
@@ -96,9 +94,17 @@ extern BOOL WINAPI DllMain(HINSTANCE inst, ULONG reason, LPVOID reserved);
 /*========================================================================*/
 
 #ifndef DONT_LOAD_INIT_FILE
-static char *get_init_filename(Scheme_Env *env)
+/*
+ * Get the init filename for the system
+ * * First look to see if <addon-dir>/interactive.rkt exists
+ * * Otherwise check config file for location
+ */
+static Scheme_Object *get_init_filename(Scheme_Env *env,
+                                        char *init_filename_sym,
+                                        char *default_init_module,
+                                        char *user_init_module)
 {
-  Scheme_Object *f;
+  Scheme_Object *f, *a[2], *build_path;
   Scheme_Thread * volatile p;
   mz_jmp_buf * volatile save, newbuf;
 
@@ -106,21 +112,54 @@ static char *get_init_filename(Scheme_Env *env)
   save = p->error_buf;
   p->error_buf = &newbuf;
 
-  if (!scheme_setjmp(newbuf)) {
+  if(!scheme_setjmp(newbuf)) {
+    build_path = scheme_builtin_value("build-path");
+
+    /* First test to see if user init file exists */
     f = scheme_builtin_value("find-system-path");
-    if (f) {
-      Scheme_Object *a[1];
-
-      a[0] = scheme_intern_symbol("init-file");
-
-      f = _scheme_apply(f, 1, a);
-
-      if (SCHEME_PATHP(f)) {
-	p->error_buf = save;
-	return SCHEME_PATH_VAL(f);
+    a[0] = scheme_intern_symbol("addon-dir");
+    a[0] = _scheme_apply(f, 1, a);
+    a[1] = scheme_make_path(user_init_module);
+    f = _scheme_apply(build_path, 2, a);
+    if (SCHEME_PATHP(f)) {
+      char *filename;
+      filename = scheme_expand_filename(SCHEME_PATH_VAL(f), -1, "startup", NULL, SCHEME_GUARD_FILE_EXISTS);
+      if(scheme_file_exists(filename)) {
+        p->error_buf = save;
+        return scheme_make_path(filename);
       }
     }
+
+    /* Failed, next check config.rkt fo system init file */
+    f = scheme_builtin_value("find-main-config");
+    a[0] = _scheme_apply(f, 0, NULL);
+    a[1] = scheme_make_path("config.rktd");
+    f = _scheme_apply(build_path, 2, a);
+    if (SCHEME_PATHP(f)) {
+      char *filename;
+      filename = scheme_expand_filename(SCHEME_PATH_VAL(f), -1, "startup", NULL,
+                                        SCHEME_GUARD_FILE_EXISTS | SCHEME_GUARD_FILE_READ);
+      if(scheme_file_exists(filename)) {
+        Scheme_Object * port;
+        port = scheme_open_input_file(SCHEME_PATH_VAL(f), "get-init-filename");
+        f = scheme_read(port);
+        scheme_close_input_port(port);
+        if(SCHEME_HASHTRP(f)) {
+          f = scheme_hash_tree_get((Scheme_Hash_Tree *)f, scheme_intern_symbol(init_filename_sym));
+          if(f) {
+            p->error_buf = save;
+            return f;
+          }
+        }
+      }
+    }
+
+    /* Failed to load custom init file, load racket/interactive */
+    f = scheme_intern_symbol(default_init_module);
+    p->error_buf = save;
+    return f;
   }
+
   p->error_buf = save;
 
   return NULL;
@@ -135,7 +174,9 @@ extern Scheme_Object *scheme_initialize(Scheme_Env *env);
 # define UNIX_INIT_FILENAME "~/.racketrc"
 # define WINDOWS_INIT_FILENAME "%%HOMEDIRVE%%\\%%HOMEPATH%%\\racketrc.rktl"
 # define MACOS9_INIT_FILENAME "PREFERENCES:racketrc.rktl"
-# define GET_INIT_FILENAME get_init_filename
+# define INIT_FILENAME_CONF_SYM "interactive-file"
+# define DEFAULT_INIT_MODULE "racket/interactive"
+# define USER_INIT_MODULE "interactive.rkt"
 # define PRINTF printf
 # define PROGRAM "Racket"
 # define PROGRAM_LC "racket"
@@ -144,14 +185,10 @@ extern Scheme_Object *scheme_initialize(Scheme_Env *env);
 # define INITIAL_NAMESPACE_MODULE "racket/init"
 #endif
 
-#ifdef EXPAND_FILENAME_TILDE
-# define INIT_FILENAME UNIX_INIT_FILENAME
+#ifdef DOS_FILE_SYSTEM
+# define INIT_FILENAME WINDOWS_INIT_FILENAME
 #else
-# ifdef DOS_FILE_SYSTEM
-#  define INIT_FILENAME WINDOWS_INIT_FILENAME
-# else
-#  define INIT_FILENAME MACOS9_INIT_FILENAME
-# endif
+# define INIT_FILENAME UNIX_INIT_FILENAME
 #endif
 
 #define CMDLINE_FFLUSH fflush
@@ -162,7 +199,7 @@ extern Scheme_Object *scheme_initialize(Scheme_Env *env);
 /*                            OS process name                             */
 /*========================================================================*/
 
-#if defined(linux)
+#if defined(__linux__)
 # include <sys/prctl.h>
 # ifdef PR_SET_NAME
 #  define CAN_SET_OS_PROCESS_NAME 1
@@ -182,12 +219,6 @@ void set_os_process_name(char *sprog)
 /*========================================================================*/
 
 #include "cmdline.inc"
-
-/*========================================================================*/
-/*                             OSKit glue                                 */
-/*========================================================================*/
-
-#include "oskglue.inc"
 
 /*========================================================================*/
 /*                           ctl-C handler                                */
@@ -291,43 +322,25 @@ START_XFORM_SKIP;
 # include "parse_cmdl.inc"
 #endif
 
-#ifdef IMPLEMENT_THREAD_LOCAL_VIA_WIN_TLS
-extern intptr_t _tls_index;
-# ifdef __MINGW32__
-static __thread void *tls_space;
-# else
-static __declspec(thread) void *tls_space;
-# endif
+#ifdef DOS_FILE_SYSTEM
+# include "win_tls.inc"
 #endif
 
 #ifdef DOS_FILE_SYSTEM
 void load_delayed()
 {
+  (void)SetErrorMode(SEM_FAILCRITICALERRORS);
+
+# ifndef MZ_NO_LIBRACKET_DLL
   /* Order matters: load dependencies first */
-# ifndef MZ_PRECISE_GC
+#  ifndef MZ_PRECISE_GC
   load_delayed_dll(NULL, "libmzgcxxxxxxx.dll");
-# endif
+#  endif
   load_delayed_dll(NULL, "libracket" DLL_3M_SUFFIX "xxxxxxx.dll");
-  record_dll_path();
-# ifdef IMPLEMENT_THREAD_LOCAL_VIA_WIN_TLS
-#  ifdef __MINGW32__
-  {
-    /* gcc declares space for the thread-local variable in a way that
-       the OS can set up, but its doesn't actually map variables
-       through the OS-supplied mechanism. Just assume that the first
-       thread-local variable is ours. */
-    void **base;
-#  ifdef _WIN64
-    asm("mov %%gs:(0x58), %0;" :"=r"(base));
-#  else
-    asm("mov %%fs:(0x2C), %0;" :"=r"(base));
-#  endif
-    scheme_register_tls_space(*base, _tls_index);
-  }
-#  else
-  scheme_register_tls_space(&tls_space, _tls_index);
-#  endif
 # endif
+  record_dll_path();
+
+  register_win_tls();
 }
 #endif
 
@@ -398,10 +411,6 @@ static int main_after_stack(void *data)
 
   argc = ((Main_Args *)data)->argc;
   MAIN_argv = ((Main_Args *)data)->argv;
-
-#if defined(OSKIT) && !defined(OSKIT_TEST) && !KNIT
-  oskit_prepare(&argc, &argv);
-#endif
 
 #ifdef WINDOWS_UNICODE_MAIN
   {
@@ -493,14 +502,6 @@ static void do_scheme_rep(Scheme_Env *env, FinishArgs *fa)
       printf("\n");
   }
 }
-
-/*========================================================================*/
-/*                         win32 manifest                                 */
-/*========================================================================*/
-
-#if _MSC_VER >= 1400
-#pragma comment(linker,"/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
-#endif
 
 /*========================================================================*/
 /*                         junk for testing                               */

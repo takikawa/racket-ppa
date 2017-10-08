@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -31,6 +31,7 @@
 #include "schpriv.h"
 #include <string.h>
 #include "schgc.h"
+#include "schrktio.h"
 
 #ifdef DOS_FAR_POINTERS
 # include <alloc.h>
@@ -53,6 +54,10 @@
 #ifdef MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC
 # include <windows.h>
 #endif
+
+THREAD_LOCAL_DECL(rktio_t *scheme_rktio);
+
+THREAD_LOCAL_DECL(uintptr_t scheme_os_thread_id);
 
 THREAD_LOCAL_DECL(static void **dgc_array);
 THREAD_LOCAL_DECL(static int *dgc_count);
@@ -91,8 +96,12 @@ void **GC_variable_stack;
 #endif
 
 #ifndef MZ_PRECISE_GC
-extern MZ_DLLIMPORT void GC_register_late_disappearing_link(void **link, void *obj);
-extern MZ_DLLIMPORT void GC_register_indirect_disappearing_link(void **link, void *obj);
+extern MZGC_DLLIMPORT void GC_register_late_disappearing_link(void **link, void *obj);
+extern MZGC_DLLIMPORT void GC_register_indirect_disappearing_link(void **link, void *obj);
+#endif
+
+#ifdef MZ_GC_BACKTRACE
+static void init_allocation_callback(void);
 #endif
 
 SHARED_OK static int use_registered_statics;
@@ -102,17 +111,11 @@ SHARED_OK static int use_registered_statics;
 /************************************************************************/
 
 #if !defined(MZ_PRECISE_GC) && !defined(USE_SENORA_GC)
-extern MZ_DLLIMPORT void GC_init();
+extern MZGC_DLLIMPORT void GC_init();
 #endif
 
 void scheme_set_stack_base(void *base, int no_auto_statics) XFORM_SKIP_PROC
 {
-#if defined(MZ_PLACES_WAITPID)
-  /* Early, to maximize the chance that no threads have been
-     created that might later receive SIGCHLD */
-  scheme_places_block_child_signal();
-#endif
-
 #ifdef MZ_PRECISE_GC
   GC_init_type_tags(_scheme_last_type_, 
                     scheme_pair_type, scheme_mutable_pair_type, scheme_weak_box_type, 
@@ -143,6 +146,9 @@ void scheme_set_stack_base(void *base, int no_auto_statics) XFORM_SKIP_PROC
   use_registered_statics = no_auto_statics;
 #if defined(MZ_PRECISE_GC)
   GC_report_out_of_memory = scheme_out_of_memory_abort;
+# ifdef MZ_GC_BACKTRACE
+  init_allocation_callback();
+# endif
 #endif
 }
 
@@ -223,6 +229,11 @@ Thread_Local_Variables *scheme_external_get_thread_local_variables() XFORM_SKIP_
 {
   return scheme_get_thread_local_variables();
 }
+#else
+void scheme_register_tls_space(void *tls_space, int tls_index) XFORM_SKIP_PROC
+{
+  /* Nothing to do; provided for compatibility. */
+}
 #endif
 
 #ifdef IMPLEMENT_THREAD_LOCAL_EXTERNALLY_VIA_PROC
@@ -242,7 +253,7 @@ void scheme_setup_thread_local_key_if_needed() XFORM_SKIP_PROC
     abort();
   }
 # if defined(__APPLE__) && defined(__MACH__)
-  /* Darwin version 11 (Max OS X Lion) changes the offset from %gs
+  /* Darwin version 11 (Mac OS X Lion) changes the offset from %gs
      for thread-local storage. */
   {
     int name[2];
@@ -307,6 +318,10 @@ int scheme_main_stack_setup(int no_auto_statics, Scheme_Nested_Main _main, void 
 {
   scheme_setup_thread_local_key_if_needed();
   scheme_init_os_thread();
+  scheme_rktio = rktio_init();
+#ifdef MZ_USE_MZRT
+  scheme_init_glib_log_queue();
+#endif
   return do_main_stack_setup(no_auto_statics, _main, data);
 }
 
@@ -400,6 +415,9 @@ void scheme_init_os_thread_like(void *other) XFORM_SKIP_PROC
 void scheme_init_os_thread(void) XFORM_SKIP_PROC
 {
   scheme_init_os_thread_like(NULL);
+#ifdef MZ_USE_MZRT
+  scheme_os_thread_id = (uintptr_t)mz_proc_os_thread_self();
+#endif
 }
 
 void scheme_done_os_thread() XFORM_SKIP_PROC
@@ -412,6 +430,19 @@ void scheme_done_os_thread() XFORM_SKIP_PROC
   GC_detach_current_thread_exceptions_from_handler();
 # endif
 #endif
+}
+
+int scheme_is_place_main_os_thread() XFORM_SKIP_PROC
+{
+#if defined(IMPLEMENT_THREAD_LOCAL_VIA_PTHREADS) || defined(IMPLEMENT_THREAD_LOCAL_VIA_WIN_TLS)
+  if (!scheme_get_thread_local_variables())
+    return 0;
+#endif
+#ifdef MZ_USE_MZRT
+  if (scheme_os_thread_id != (uintptr_t)mz_proc_os_thread_self())
+    return 0;
+#endif
+  return 1;
 }
 
 /************************************************************************/
@@ -509,7 +540,7 @@ scheme_calloc (size_t num, size_t size)
   memset(space, 0, (num*size));
 #endif
 
-  return (space);
+  return space;
 }
 
 char *
@@ -520,7 +551,7 @@ scheme_strdup(const char *str)
 
   len = strlen(str) + 1;
   naya = (char *)scheme_malloc_atomic (len * sizeof (char));
-  memcpy (naya, str, len);
+  memcpy(naya, str, len);
 
   return naya;
 }
@@ -533,7 +564,22 @@ scheme_strdup_eternal(const char *str)
 
   len = strlen(str) + 1;
   naya = (char *)scheme_malloc_eternal(len * sizeof (char));
-  memcpy (naya, str, len);
+  memcpy(naya, str, len);
+
+  return naya;
+}
+
+char *
+scheme_strdup_and_free(const char *str)
+{
+  char *naya;
+  intptr_t len;
+
+  len = strlen(str) + 1;
+  naya = (char *)scheme_malloc_atomic (len * sizeof (char));
+  memcpy(naya, str, len);
+
+  free((void *)str);
 
   return naya;
 }
@@ -1271,9 +1317,13 @@ static uintptr_t jit_prev_page = 0, jit_prev_length = 0;
 void *scheme_malloc_gcable_code(intptr_t size)
 {
   void *p;
+
+#ifdef USE_SENORA_GC
+  p = GC_malloc_code(size);
+#else
   p = scheme_malloc(size);
   
-#if defined(MZ_CODE_ALLOC_USE_MPROTECT) || defined(MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC)
+# if defined(MZ_CODE_ALLOC_USE_MPROTECT) || defined(MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC)
   {
     /* [This chunk of code moved from our copy of GNU lightning to here.] */
     uintptr_t page, length, page_size;
@@ -1290,12 +1340,12 @@ void *scheme_malloc_gcable_code(intptr_t size)
        chunk of memory is used to compile multiple functions.  */
     if (!(page >= jit_prev_page && page + length <= jit_prev_page + jit_prev_length)) {
       
-# ifdef MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC
+#  ifdef MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC
       {
         DWORD old;
         VirtualProtect((void *)page, length, PAGE_EXECUTE_READWRITE, &old);
       }
-# else
+#  else
       {
         int r;
         r = mprotect ((void *) page, length, PROT_READ | PROT_WRITE | PROT_EXEC);
@@ -1303,7 +1353,7 @@ void *scheme_malloc_gcable_code(intptr_t size)
           scheme_log_abort("mprotect for generate-code page failed; aborting");
         }
       }
-# endif
+#  endif
 
       /* See if we can extend the previously mprotect'ed memory area towards
          higher addresses: the starting address remains the same as before.  */
@@ -1321,6 +1371,7 @@ void *scheme_malloc_gcable_code(intptr_t size)
         jit_prev_page = page, jit_prev_length = length;
     }
   }
+# endif
 #endif
 
   return p;
@@ -1628,6 +1679,14 @@ void scheme_collect_garbage(void)
   GC_gcollect();
 }
 
+void scheme_collect_garbage_minor(void)
+{
+#ifdef MZ_PRECISE_GC
+  GC_gcollect_minor();
+#else
+#endif
+}
+
 void scheme_enable_garbage_collection(int on)
 {
 #ifdef MZ_PRECISE_GC
@@ -1637,6 +1696,13 @@ void scheme_enable_garbage_collection(int on)
     --GC_dont_gc;
   else
     GC_dont_gc++;
+#endif
+}
+
+void scheme_incremental_garbage_collection(int on)
+{
+#ifdef MZ_PRECISE_GC
+  GC_set_incremental_mode(on);
 #endif
 }
 
@@ -1683,7 +1749,7 @@ void scheme_unused_intptr(intptr_t i) { }
 extern "C" 
 {
 # endif
-  extern MZ_DLLIMPORT void GC_dump(void);
+  extern MZGC_DLLIMPORT void GC_dump(void);
 # ifdef __cplusplus
 };
 # endif
@@ -1901,12 +1967,75 @@ static void cons_onto_list(void *p)
 {
   cons_accum_result = scheme_make_pair((Scheme_Object *)p, cons_accum_result);
 }
+
+static int print_all_traced(void *p) { return 1; }
+
+static int traced_buffer_counter, traced_buffer_size;
+static void **traced_buffer;
+
+static int record_traced(void *p)
+{
+  if (traced_buffer_counter == traced_buffer_size) {
+    void **b2;
+    int new_size = (traced_buffer_size
+                    ? (2 * traced_buffer_size)
+                    : 512);
+    if (!traced_buffer) REGISTER_SO(traced_buffer);
+    b2 = scheme_malloc(sizeof(void*) * new_size);
+    memcpy(b2, traced_buffer, sizeof(void*)*traced_buffer_size);
+    traced_buffer = b2;
+    traced_buffer_size = new_size;
+  }
+
+  traced_buffer[traced_buffer_counter++] = p;
+
+  return 1;
+}
+
+static int record_traced_and_print_new(void *p)
+{
+  int i;
+
+  for (i = 0; i < traced_buffer_counter; i++) {
+    if (p == traced_buffer[i])
+      return 0;
+  }
+
+  return record_traced(p);
+}
+
+static void record_allocated_object(void *p, intptr_t size, int tagged, int atomic)
+{
+  if (tagged) {
+    Scheme_Type t = *(Scheme_Type *)p;
+    if (SAME_TYPE(t, scheme_structure_type)
+        || SAME_TYPE(t, scheme_proc_struct_type)) {
+      Scheme_Structure *s = (Scheme_Structure *)p;
+      s->stype->total_instance_count++;
+      s->stype->total_instance_sizes += size;
+    }
+  }
+}
+
+static void init_allocation_callback() {
+  GC_set_allocated_object_callback(record_allocated_object);
+}
+
+#endif
+
+#if MZ_PRECISE_GC
+static int found_counter = 0;
+static void increment_found_counter(void *p)
+{
+  found_counter++;
+}
 #endif
 
 #if MZ_PRECISE_GC_TRACE
-static void count_struct_instance(void *p) {
+static void count_struct_instance(void *p, int sz) {
   Scheme_Structure *s = (Scheme_Structure *)p;
-  s->stype->instance_count++;
+  s->stype->current_instance_count++;
+  s->stype->current_instance_sizes += sz;
 }
 #endif
 
@@ -1954,7 +2083,7 @@ static void print_tagged_value(const char *prefix,
   scheme_check_print_is_obj = check_home;
 
   {
-    if (SCHEME_TYPE(v) > _scheme_compiled_values_types_) {
+    if (SCHEME_TYPE(v) > _scheme_ir_values_types_) {
       sprintf(hashstr, "{%" PRIdPTR "}", scheme_hash_key(v));
       hash_code = hashstr;
     }
@@ -2155,21 +2284,31 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
   void *initial_trace_root = NULL;
   int (*inital_root_skip)(void *, size_t) = NULL;
 #endif
-#if MZ_PRECISE_GC_TRACE
+#ifdef MZ_PRECISE_GC
+  int skip_summary = 0;
   int trace_for_tag = 0;
-  int flags = 0;
-  int path_length_limit = 10000;
+  int dump_flags = 0;
   GC_for_each_found_proc for_each_found = NULL;
+  GC_print_traced_filter_proc maybe_print_traced_filter = NULL;
+# else
+#  define skip_summary 0
+#  define dump_flags 0
+#  define trace_for_tag 0
+#  define for_each_found NULL
+#endif
+#if MZ_PRECISE_GC_TRACE
+  int path_length_limit = 10000;
   GC_for_each_struct_proc for_each_struct = NULL;
 #else
 # ifndef USE_TAGGED_ALLOCATION
-#  define flags 0
-#  define trace_for_tag 0
 #  define path_length_limit 10000
-#  define for_each_found NULL
 #  define for_each_struct NULL
 #  define print_tagged_value NULL
 # endif
+#endif
+
+#if defined(MZ_PRECISE_GC) && MZ_PRECISE_GC_TRACE
+  maybe_print_traced_filter = print_all_traced;
 #endif
 
 #if 0
@@ -2431,6 +2570,29 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
 
 #else
 
+# ifdef MZ_PRECISE_GC
+  if (c && SCHEME_SYMBOLP(p[0])) {
+    if (!strcmp("count", SCHEME_SYM_VAL(p[0]))
+        && (c == 2)
+        && SCHEME_SYMBOLP(p[1])) {
+      int i, maxpos;
+      maxpos = scheme_num_types();
+      for (i = 0; i < maxpos; i++) {
+        void *tn;
+        tn = scheme_get_type_name_or_null(i);
+        if (tn && !strcmp(tn, SCHEME_SYM_VAL(p[1]))) {
+          found_counter = 0;
+          for_each_found = increment_found_counter;
+          trace_for_tag = i;
+          dump_flags |= GC_DUMP_SUPPRESS_SUMMARY;
+          skip_summary = 1;
+          break;
+        }
+      }
+    }
+  }
+# endif
+
 # if MZ_PRECISE_GC_TRACE
   cons_accum_result = scheme_void;
   if (c && SCHEME_SYMBOLP(p[0])) {
@@ -2448,13 +2610,17 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
       tn = scheme_get_type_name_or_null(i);
       if (tn && !strcmp(tn, s)) {
 	trace_for_tag = i;
-	flags |= GC_DUMP_SHOW_TRACE;
+	dump_flags |= GC_DUMP_SHOW_TRACE;
+        if ((c > 1)
+            && SCHEME_SYMBOLP(p[1])
+            && !strcmp(SCHEME_SYM_VAL(p[1]), "new"))
+          maybe_print_traced_filter = record_traced_and_print_new;
 	break;
       }
     }
 
     if (!strcmp("fnl", s))
-      flags |= GC_DUMP_SHOW_FINALS;
+      dump_flags |= GC_DUMP_SHOW_FINALS;
 
     if (!strcmp("struct", s)) {
       for_each_struct = count_struct_instance;
@@ -2493,7 +2659,7 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
     }
   } else if (c && SCHEME_INTP(p[0])) {
     trace_for_tag = SCHEME_INT_VAL(p[0]);
-    flags |= GC_DUMP_SHOW_TRACE;
+    dump_flags |= GC_DUMP_SHOW_TRACE;
   } else if (c && SCHEME_THREADP(p[0])) {
     Scheme_Thread *t = (Scheme_Thread *)p[0];
     void **var_stack, *limit;
@@ -2528,18 +2694,19 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
   else if ((c > 1) && SCHEME_SYMBOLP(p[1]) && !strcmp("cons", SCHEME_SYM_VAL(p[1]))) {
     for_each_found = cons_onto_list;
     cons_accum_result = scheme_null;
-    flags -= (flags & GC_DUMP_SHOW_TRACE);
+    dump_flags -= (dump_flags & GC_DUMP_SHOW_TRACE);
   }
-  scheme_console_printf("Begin Dump\n");
-#else
-  scheme_console_printf("Begin Dump\n");
 #endif
 
+  if (!skip_summary)
+    scheme_console_printf("Begin Dump\n");
+
 # ifdef MZ_PRECISE_GC
-  GC_dump_with_traces(flags, 
+  GC_dump_with_traces(dump_flags,
 		      scheme_get_type_name_or_null,
 		      for_each_found,
 		      trace_for_tag, trace_for_tag,
+                      maybe_print_traced_filter,
 		      print_tagged_value,
 		      path_length_limit,
                       for_each_struct);
@@ -2553,9 +2720,15 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
     scheme_console_printf("Begin Struct\n");
     while (SCHEME_PAIRP(cons_accum_result)) {
       Scheme_Struct_Type *stype = (Scheme_Struct_Type *)SCHEME_CAR(cons_accum_result);
-      if (stype->instance_count) {
-        scheme_console_printf(" %32.32s: %10" PRIdPTR "\n", SCHEME_SYM_VAL(stype->name), stype->instance_count);
-        stype->instance_count = 0;
+      if (stype->total_instance_count) {
+        scheme_console_printf(" %32.32s: %10" PRIdPTR " %10" PRIdPTR "   %10" PRIdPTR " %10" PRIdPTR "\n",
+                              SCHEME_SYM_VAL(stype->name),
+                              stype->current_instance_count,
+                              stype->current_instance_sizes,
+                              stype->total_instance_count,
+                              stype->total_instance_sizes);
+        stype->current_instance_count = 0;
+        stype->current_instance_sizes = 0;
       }
       cons_accum_result = SCHEME_CDR(cons_accum_result);
     }
@@ -2623,34 +2796,46 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
   }
 #endif
 
+  if (!skip_summary) {
+#ifdef MZ_PRECISE_GC
+    scheme_console_printf("Begin Help\n");
+    scheme_console_printf(" (dump-memory-stats 'count sym) - return number of instances of type named by sym.\n");
+    scheme_console_printf("   Example: (dump-memory-stats 'count '<pair>)\n");
 # if MZ_PRECISE_GC_TRACE
-  scheme_console_printf("Begin Help\n");
-  scheme_console_printf(" (dump-memory-stats sym) - prints paths to instances of type named by sym.\n");
-  scheme_console_printf("   Example: (dump-memory-stats '<pair>)\n");
-  scheme_console_printf(" (dump-memory-stats 'struct) - show counts for specific structure types.\n");
-  scheme_console_printf(" (dump-memory-stats 'fnl) - prints not-yet-finalized objects.\n");
-  scheme_console_printf(" (dump-memory-stats num) - prints paths to objects with tag num.\n");
-  scheme_console_printf(" (dump-memory-stats -num) - prints paths to objects of size num.\n");
-  scheme_console_printf(" (dump-memory-stats sym/num len) - limits path to size len.\n");
-  scheme_console_printf(" (dump-memory-stats sym/num 'cons) - builds list instead of showing paths.\n");
-  scheme_console_printf(" (dump-memory-stats 'peek num v) - returns value if num is address of object, v otherwise.\n");
-  scheme_console_printf(" (dump-memory-stats 'next v) - next tagged object after v, #f if none; start with #f.\n");
-  scheme_console_printf(" (dump-memory-stats 'addr v) - returns the address of v.\n");
-  scheme_console_printf(" (dump-memory-stats thread) - shows information about the thread.\n");
-  scheme_console_printf("End Help\n");
+    scheme_console_printf(" (dump-memory-stats sym ['new]) - prints paths to instances of type named by sym.\n");
+    scheme_console_printf("   Example: (dump-memory-stats '<pair>)\n");
+    scheme_console_printf("   If 'new, all will be retrined, only new paths will be shown\n");
+    scheme_console_printf(" (dump-memory-stats 'struct) - show counts for specific structure types.\n");
+    scheme_console_printf(" (dump-memory-stats 'fnl) - prints not-yet-finalized objects.\n");
+    scheme_console_printf(" (dump-memory-stats num) - prints paths to objects with tag num.\n");
+    scheme_console_printf(" (dump-memory-stats -num) - prints paths to objects of size num.\n");
+    scheme_console_printf(" (dump-memory-stats sym/num len) - limits path to size len.\n");
+    scheme_console_printf(" (dump-memory-stats sym/num 'cons) - builds list instead of showing paths.\n");
+    scheme_console_printf(" (dump-memory-stats 'peek num v) - returns value if num is address of object, v otherwise.\n");
+    scheme_console_printf(" (dump-memory-stats 'next v) - next tagged object after v, #f if none; start with #f.\n");
+    scheme_console_printf(" (dump-memory-stats 'addr v) - returns the address of v.\n");
+    scheme_console_printf(" (dump-memory-stats thread) - shows information about the thread.\n");
+# endif
+    scheme_console_printf("End Help\n");
+#endif
 
-  result = cons_accum_result;
+    scheme_console_printf("End Dump\n");
+  }
+
+#ifdef MZ_PRECISE_GC
+  if (for_each_found == increment_found_counter)
+    result = scheme_make_integer(found_counter);
+# if MZ_PRECISE_GC_TRACE
+  else
+    result = cons_accum_result;
   cons_accum_result = scheme_void;
 # endif
-
-  scheme_console_printf("End Dump\n");
+#endif
 
   scheme_end_atomic();
 
   return result;
 }
-
-
 
 #ifdef MEMORY_COUNTING_ON
 
@@ -2792,16 +2977,16 @@ intptr_t scheme_count_memory(Scheme_Object *root, Scheme_Hash_Table *ht)
 #endif
     }
     break;
-  case scheme_unclosed_procedure_type:
-  case scheme_compiled_unclosed_procedure_type:
+  case scheme_lambda_type:
+  case scheme_ir_lambda_type:
     {
-      Scheme_Closure_Data *data = 
-	(Scheme_Closure_Data *)root;
+      Scheme_Lambda *data = 
+	(Scheme_Lambda *)root;
 
-      s = sizeof(Scheme_Closure_Data);
+      s = sizeof(Scheme_Lambda);
       s += data->closure_size * sizeof(mzshort);
 #if FORCE_KNOWN_SUBPARTS
-      e = COUNT(data->code);
+      e = COUNT(data->body);
 #endif
     }
     break;
@@ -2815,11 +3000,11 @@ intptr_t scheme_count_memory(Scheme_Object *root, Scheme_Hash_Table *ht)
 #endif
     }
     break;
-  case scheme_compiled_let_value_type:
+  case scheme_ir_let_value_type:
     {
-      Scheme_Compiled_Let_Value *let = (Scheme_Compiled_Let_Value *)root;
+      Scheme_IR_Let_Value *let = (Scheme_IR_Let_Value *)root;
 
-      s = sizeof(Scheme_Compiled_Let_Value);
+      s = sizeof(Scheme_IR_Let_Value);
 #if FORCE_KNOWN_SUBPARTS
       e = COUNT(let->value) + COUNT(let->body);
 #endif
@@ -2835,11 +3020,11 @@ intptr_t scheme_count_memory(Scheme_Object *root, Scheme_Hash_Table *ht)
 #endif
     }
     break;
-  case scheme_compiled_let_void_type:
+  case scheme_ir_let_header_type:
     {
-      Scheme_Let_Header *let = (Scheme_Let_Header *)root;
+      Scheme_IR_Let_Header *let = (Scheme_IR_Let_Header *)root;
 
-      s = sizeof(Scheme_Let_Header);
+      s = sizeof(Scheme_IR_Let_Header);
 #if FORCE_KNOWN_SUBPARTS
       e = COUNT(let->body);
 #endif
@@ -2911,7 +3096,7 @@ intptr_t scheme_count_memory(Scheme_Object *root, Scheme_Hash_Table *ht)
     break;
   case scheme_prim_type:
     {
-      if (((Scheme_Primitive_Proc *)root)->pp.flags & SCHEME_PRIM_IS_MULTI_RESULT)
+      if (SCHEME_PRIM_PROC_FLAGS(root) & SCHEME_PRIM_IS_MULTI_RESULT)
 	s = sizeof(Scheme_Prim_W_Result_Arity);
       else
 	s = sizeof(Scheme_Primitive_Proc);
@@ -2919,11 +3104,11 @@ intptr_t scheme_count_memory(Scheme_Object *root, Scheme_Hash_Table *ht)
     break;
   case scheme_closure_type:
     {
-      Scheme_Closure_Data *data;
+      Scheme_Lambda *data;
       Scheme_Object **vals;
       
-      data = SCHEME_COMPILED_CLOS_CODE(root);
-      vals = SCHEME_COMPILED_CLOS_ENV(root);
+      data = SCHEME_CLOSURE_CODE(root);
+      vals = SCHEME_CLOSURE_ENV(root);
 
       s += (data->closure_size * sizeof(Scheme_Object *));
 #if FORCE_KNOWN_SUBPARTS
@@ -2933,7 +3118,7 @@ intptr_t scheme_count_memory(Scheme_Object *root, Scheme_Hash_Table *ht)
     break;
   case scheme_closed_prim_type:
     {
-      if (((Scheme_Closed_Primitive_Proc *)root)->pp.flags & SCHEME_PRIM_IS_MULTI_RESULT)
+      if (SCHEME_PRIM_PROC_FLAGS(root) & SCHEME_PRIM_IS_MULTI_RESULT)
 	s = sizeof(Scheme_Closed_Prim_W_Result_Arity);
       else
 	s = sizeof(Scheme_Closed_Primitive_Proc);
@@ -2963,8 +3148,6 @@ intptr_t scheme_count_memory(Scheme_Object *root, Scheme_Hash_Table *ht)
   case scheme_void_type:
   case scheme_undefined_type:
     /* Only one */
-    break;
-  case scheme_syntax_compiler_type:
     break;
   case scheme_macro_type:
   case scheme_set_macro_type:

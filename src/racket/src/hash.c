@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -51,6 +51,22 @@ static void register_traversers(void);
 #define to_signed_hash(v) ((intptr_t)v)
 #define to_unsigned_hash(v) ((uintptr_t)v)
 
+#ifdef OBJHEAD_HAS_HASH_BITS
+/* In 3m mode, we only have 14 bits of hash code in the
+   Scheme_Object header. But the GC-level object header has some
+   leftover bits (currently 9, 11, 41, or 43, depending on the
+   platform), so use those, too. That only works for GCable
+   objects, so we use 1 of our 14 bits to indicate whether the
+   other bits are present. */
+# define GCABLE_OBJ_HASH_BIT 0x0004
+# define OBJ_HASH_USELESS_BITS 3
+#else
+# define GCABLE_OBJ_HASH_BIT 0
+# define OBJ_HASH_USELESS_BITS 2
+#endif
+#define OBJ_HASH_USEFUL_BITS (16 - OBJ_HASH_USELESS_BITS)
+#define OBJ_HASH_USEFUL_MASK ((1 << OBJ_HASH_USEFUL_BITS)-1)
+
 #ifdef MZ_PRECISE_GC
 /* keygen race conditions below are "ok", because keygen is randomness
    used to create a hashkey. Technically, a race condition allows
@@ -59,7 +75,7 @@ static void register_traversers(void);
    that only one thread at a time sets a hash code in a specific
    object, though, and watch out for a race with JIT-generated code
    running in a future and setting flags on pairs. */
-SHARED_OK static uintptr_t keygen;
+SHARED_OK static uintptr_t keygen = GCABLE_OBJ_HASH_BIT;
 
 XFORM_NONGCING static MZ_INLINE
 uintptr_t PTR_TO_LONG(Scheme_Object *o)
@@ -76,17 +92,11 @@ uintptr_t PTR_TO_LONG(Scheme_Object *o)
     uintptr_t local_keygen = keygen;
     v |= (short)local_keygen;
 #ifdef OBJHEAD_HAS_HASH_BITS
-    /* In 3m mode, we only have 14 bits of hash code in the
-       Scheme_Object header. But the GC-level object header has some
-       leftover bits (currently 9, 11, 41, or 43, depending on the
-       platform), so use those, too. That only works for GCable
-       objects, so we use 1 of our 14 bits to indicate whether the
-       other bit are present. */
     if (GC_is_allocated(o)) {
       OBJHEAD_HASH_BITS(o) = (local_keygen >> 16);
-      v |= 0x4000;
+      v |= GCABLE_OBJ_HASH_BIT;
     } else
-      v &= ~0x4000;
+      v &= ~GCABLE_OBJ_HASH_BIT;
 #endif
     if (!v) v = 0x1AD0;
 #ifdef MZ_USE_FUTURES
@@ -99,11 +109,11 @@ uintptr_t PTR_TO_LONG(Scheme_Object *o)
     } else
 #endif
       o->keyex = v;
-    keygen += 4;
+    keygen += (1 << OBJ_HASH_USELESS_BITS);
   }
 
 #ifdef OBJHEAD_HAS_HASH_BITS
-  if (v & 0x4000)
+  if (v & GCABLE_OBJ_HASH_BIT)
     bits = OBJHEAD_HASH_BITS(o);
   else
 #endif
@@ -112,11 +122,36 @@ uintptr_t PTR_TO_LONG(Scheme_Object *o)
   /* We need to drop the low two bits of `v', which
      are used for non-hashing purposes in some types. */
 
-  return (bits << 14) | ((v >> 2) & 0x3FFF);
+  return (bits << OBJ_HASH_USEFUL_BITS) | ((v >> OBJ_HASH_USELESS_BITS) & OBJ_HASH_USEFUL_MASK);
 }
 #else
 # define PTR_TO_LONG(p) ((uintptr_t)(p)>>2)
 #endif
+
+void scheme_install_symbol_hash_code(Scheme_Object *sym, uintptr_t h)
+{
+#ifdef MZ_PRECISE_GC
+  /* Record a hash code for the symbol as its `eq?` hash code ---
+     intended mainly to make `equal?` hashing depend only on the
+     symbol content */
+  short v;
+
+  v = sym->keyex;
+
+  if (!(v & 0xFFFC)) {
+    v |= (short)(h & ~0x7);
+#ifdef OBJHEAD_HAS_HASH_BITS
+    if (GC_is_allocated(sym)) {
+      OBJHEAD_HASH_BITS(sym) = (h >> 16);
+      v |= GCABLE_OBJ_HASH_BIT;
+    } else
+      v &= ~GCABLE_OBJ_HASH_BIT;
+#endif
+    if (!v) v = 0x1AD0;
+    sym->keyex = v;
+  }
+#endif
+}
 
 #define FILL_FACTOR 1.4
 
@@ -127,6 +162,10 @@ typedef int (*Hash_Compare_Proc)(void*, void*);
 typedef uintptr_t hash_v_t;
 
 #define MAX_HASH_DEPTH 128
+
+/* For detecting and debugging accidental dependencies on hash-table order,
+   it might be helpful to invert the order at the lowest level: */
+/* #define REVERSE_HASH_TABLE_ORDER 1 */
 
 /*========================================================================*/
 /*                         hashing functions                              */
@@ -150,30 +189,58 @@ static void string_hash_indices(void *_key, intptr_t *_h, intptr_t *_h2)
     *_h2 = to_signed_hash(h2);
 }
 
-static void id_hash_indices(void *_key, intptr_t *_h, intptr_t *_h2)
-{
-  Scheme_Object *key = (Scheme_Object *)_key;
-  uintptr_t lkey;
+/*========================================================================*/
+/*                         equality with wraps                            */
+/*========================================================================*/
 
-  if (SCHEME_STXP(key))
-    key = SCHEME_STX_VAL(key);
-    
-  lkey = PTR_TO_LONG((Scheme_Object *)key);
-  if (_h)
-    *_h = to_signed_hash(lkey);
-  if (_h2)
-    *_h2 = to_signed_hash(lkey >> 1);
+static Scheme_Object *apply_equal_key_wraps(Scheme_Object *key, Scheme_Object *key_wraps)
+{
+  if (key_wraps) {
+    GC_CAN_IGNORE const char *who = (const char *)SCHEME_CAR(key_wraps);
+    Scheme_Chaperone *px;
+    Scheme_Object *a[2], *red;
+
+    key_wraps = SCHEME_CDR(key_wraps);
+    while (!SCHEME_NULLP(key_wraps)) {
+      px = (Scheme_Chaperone *)SCHEME_CAR(key_wraps);
+
+      red = SCHEME_BOX_VAL(px->redirects);
+      red = SCHEME_VEC_ELS(red)[5];
+
+      a[0] = px->prev;
+      a[1] = key;
+      key = _scheme_apply(red, 2, a);
+
+      if (!(SCHEME_CHAPERONE_FLAGS(px) & SCHEME_CHAPERONE_IS_IMPERSONATOR)
+          &&  !scheme_chaperone_of(key, a[1])) {
+        scheme_wrong_chaperoned(who, "key", a[1], key);
+        return 0;
+      }
+
+      key_wraps = SCHEME_CDR(key_wraps);
+    }
+  }
+
+  return key;
 }
 
-static int not_stx_bound_eq(char *a, char *b)
+static int equal_w_key_wraps(Scheme_Object *ekey, Scheme_Object *tkey, Scheme_Object *key_wraps)
 {
-  return !scheme_stx_bound_eq((Scheme_Object *)a, (Scheme_Object *)b, 0);
+  if (key_wraps)
+    tkey = apply_equal_key_wraps(tkey, key_wraps);
+
+  return scheme_equal(ekey, tkey);
 }
 
 /*========================================================================*/
 /*                         normal hash table                              */
 /*========================================================================*/
 
+#ifdef REVERSE_HASH_TABLE_ORDER
+# define HASH_TO_ARRAY_INDEX(h, mask) ((mask) - (h))
+#else
+# define HASH_TO_ARRAY_INDEX(h, mask) (h)
+#endif
 
 Scheme_Hash_Table *scheme_make_hash_table(int type)
 {
@@ -189,17 +256,23 @@ Scheme_Hash_Table *scheme_make_hash_table(int type)
     table->make_hash_indices = string_hash_indices;
     table->compare = (Hash_Compare_Proc)strcmp;
   }
-  if (type == SCHEME_hash_bound_id) {
-    table->make_hash_indices = id_hash_indices;
-    table->compare = (Hash_Compare_Proc)not_stx_bound_eq;
-  }
 
   return table;
 }
 
-static Scheme_Object *do_hash(Scheme_Hash_Table *table, Scheme_Object *key, int set, Scheme_Object *val)
+void scheme_clear_hash_table(Scheme_Hash_Table *ht)
 {
-  Scheme_Object *tkey, **keys;
+  ht->size = 0;
+  ht->count = 0;
+  ht->keys = NULL;
+  ht->vals = NULL;
+  ht->mcount = 0;
+}
+
+static Scheme_Object *do_hash(Scheme_Hash_Table *table, Scheme_Object *key, int set, Scheme_Object *val,
+                              Scheme_Object *key_wraps)
+{
+  Scheme_Object *tkey, *ekey, **keys;
   intptr_t hx, h2x;
   hash_v_t h, h2, useme = 0;
   uintptr_t mask;
@@ -209,64 +282,105 @@ static Scheme_Object *do_hash(Scheme_Hash_Table *table, Scheme_Object *key, int 
   mask = table->size - 1;
 
   if (table->make_hash_indices) {
-    GC_CAN_IGNORE intptr_t *_h2x;
-    if (table->compare) {
+    if (table->compare == scheme_compare_equal) {
+      if (key_wraps)
+        ekey = apply_equal_key_wraps(key, key_wraps);
+      else
+        ekey = key;
       h2 = 0;
-      _h2x = NULL;
-    } else
-      _h2x = &h2x;
-    table->make_hash_indices((void *)key, &hx, _h2x);
-    h = to_unsigned_hash(hx) & mask;
-    if (_h2x)
-      h2 = (to_unsigned_hash(h2x) & mask) | 1;
+      hx = scheme_equal_hash_key(ekey);
+      h = to_unsigned_hash(hx) & mask;
+    } else {
+      GC_CAN_IGNORE intptr_t *_h2x;
+      if (table->compare) {
+        h2 = 0;
+        _h2x = NULL;
+      } else
+        _h2x = &h2x;
+      table->make_hash_indices((void *)key, &hx, _h2x);
+      h = to_unsigned_hash(hx) & mask;
+      if (_h2x)
+        h2 = (to_unsigned_hash(h2x) & mask) | 1;
+      ekey = NULL;
+    }
   } else {
     uintptr_t lkey;
     lkey = PTR_TO_LONG((Scheme_Object *)key);
     h = lkey & mask;
     h2 = ((lkey >> 1) & mask) | 1;
+    ekey = NULL;
   }
 
   keys = table->keys;
-  
+
   if (table->compare) {
-    scheme_hash_request_count++;
-    while ((tkey = keys[h])) {
-      if (SAME_PTR(tkey, GONE)) {
-	if (set > 1) {
-	  useme = h;
-	  set = 1;
-	}
-      } else if (!table->compare(tkey, (char *)key)) {
-	if (set) {
-	  table->vals[h] = val;
-	  if (!val) {
-	    keys[h] = GONE;
-	    --table->count;
-	  }
-	  return val;
-	} else
-	  return table->vals[h];
+    if (table->compare == scheme_compare_equal) {
+      /* Direct calls can be significantly faster than indirect */
+      scheme_hash_request_count++;
+      while ((tkey = keys[HASH_TO_ARRAY_INDEX(h, mask)])) {
+        if (SAME_PTR(tkey, GONE)) {
+          if (set > 1) {
+            useme = h;
+            set = 1;
+          }
+        } else if (equal_w_key_wraps(ekey, tkey, key_wraps)) {
+          if (set) {
+            table->vals[HASH_TO_ARRAY_INDEX(h, mask)] = val;
+            if (!val) {
+              keys[HASH_TO_ARRAY_INDEX(h, mask)] = GONE;
+              --table->count;
+            }
+            return val;
+          } else
+            return table->vals[HASH_TO_ARRAY_INDEX(h, mask)];
+        }
+        scheme_hash_iteration_count++;
+        if (!h2) {
+          h2x = scheme_equal_hash_key2(ekey);
+          h2 = (to_unsigned_hash(h2x) & (table->size - 1)) | 1;
+        }
+        h = (h + h2) & mask;
       }
-      scheme_hash_iteration_count++;
-      if (!h2) {
-        table->make_hash_indices((void *)key, NULL, &h2x);
-        h2 = (to_unsigned_hash(h2x) & (table->size - 1)) | 1;
+    } else {
+      scheme_hash_request_count++;
+      while ((tkey = keys[HASH_TO_ARRAY_INDEX(h, mask)])) {
+        if (SAME_PTR(tkey, GONE)) {
+          if (set > 1) {
+            useme = h;
+            set = 1;
+          }
+        } else if (!table->compare(tkey, (char *)key)) {
+          if (set) {
+            table->vals[HASH_TO_ARRAY_INDEX(h, mask)] = val;
+            if (!val) {
+              keys[HASH_TO_ARRAY_INDEX(h, mask)] = GONE;
+              --table->count;
+            }
+            return val;
+          } else
+            return table->vals[HASH_TO_ARRAY_INDEX(h, mask)];
+        }
+        scheme_hash_iteration_count++;
+        if (!h2) {
+          table->make_hash_indices((void *)key, NULL, &h2x);
+          h2 = (to_unsigned_hash(h2x) & (table->size - 1)) | 1;
+        }
+        h = (h + h2) & mask;
       }
-      h = (h + h2) & mask;
     }
   } else {
     scheme_hash_request_count++;
-    while ((tkey = keys[h])) {
+    while ((tkey = keys[HASH_TO_ARRAY_INDEX(h, mask)])) {
       if (SAME_PTR(tkey, key)) {
 	if (set) {
-	  table->vals[h] = val;
+	  table->vals[HASH_TO_ARRAY_INDEX(h, mask)] = val;
 	  if (!val) {
-	    keys[h] = GONE;
+	    keys[HASH_TO_ARRAY_INDEX(h, mask)] = GONE;
 	    --table->count;
 	  }
 	  return val;
 	} else
-	  return table->vals[h];
+	  return table->vals[HASH_TO_ARRAY_INDEX(h, mask)];
       } else if (SAME_PTR(tkey, GONE)) {
 	if (set > 1) {
 	  useme = h;
@@ -289,7 +403,10 @@ static Scheme_Object *do_hash(Scheme_Hash_Table *table, Scheme_Object *key, int 
     Scheme_Object **oldkeys = table->keys;
     Scheme_Object **oldvals = table->vals;
 
-    size = oldsize << 1;
+    if (table->count << 1 >= table->mcount)
+      size = oldsize << 1;
+    else
+      size = oldsize;
     table->size = size;
     
     {
@@ -304,7 +421,7 @@ static Scheme_Object *do_hash(Scheme_Hash_Table *table, Scheme_Object *key, int 
     table->mcount = 0;
     for (i = 0; i < oldsize; i++) {
       if (oldkeys[i] && !SAME_PTR(oldkeys[i], GONE))
-	do_hash(table, oldkeys[i], 2, oldvals[i]);
+	do_hash(table, oldkeys[i], 2, oldvals[i], key_wraps);
     }
 
     goto rehash_key;
@@ -313,8 +430,8 @@ static Scheme_Object *do_hash(Scheme_Hash_Table *table, Scheme_Object *key, int 
   }
 
   table->count++;
-  table->keys[h] = key;
-  table->vals[h] = val;
+  table->keys[HASH_TO_ARRAY_INDEX(h, mask)] = key;
+  table->vals[HASH_TO_ARRAY_INDEX(h, mask)] = val;
 
   return val;
 }
@@ -338,11 +455,11 @@ static Scheme_Object *do_hash_set(Scheme_Hash_Table *table, Scheme_Object *key, 
   keys = table->keys;
   
   scheme_hash_request_count++;
-  while ((tkey = keys[h])) {
+  while ((tkey = keys[HASH_TO_ARRAY_INDEX(h, mask)])) {
     if (SAME_PTR(tkey, key)) {
-      table->vals[h] = val;
+      table->vals[HASH_TO_ARRAY_INDEX(h, mask)] = val;
       if (!val) {
-	keys[h] = GONE;
+	keys[HASH_TO_ARRAY_INDEX(h, mask)] = GONE;
 	--table->count;
       }
       return val;
@@ -363,14 +480,14 @@ static Scheme_Object *do_hash_set(Scheme_Hash_Table *table, Scheme_Object *key, 
     h = useme;
   else if (table->mcount * FILL_FACTOR >= table->size) {
     /* Use slow path to grow table: */
-    return do_hash(table, key, 2, val);
+    return do_hash(table, key, 2, val, NULL);
   } else {
     table->mcount++;
   }
 
   table->count++;
-  table->keys[h] = key;
-  table->vals[h] = val;
+  table->keys[HASH_TO_ARRAY_INDEX(h, mask)] = key;
+  table->vals[HASH_TO_ARRAY_INDEX(h, mask)] = val;
 
   return val;
 }
@@ -393,9 +510,9 @@ XFORM_NONGCING static Scheme_Object *do_hash_get(Scheme_Hash_Table *table, Schem
   keys = table->keys;
   
   scheme_hash_request_count++;
-  while ((tkey = keys[h])) {
+  while ((tkey = keys[HASH_TO_ARRAY_INDEX(h, mask)])) {
     if (SAME_PTR(tkey, key)) {
-      return table->vals[h];
+      return table->vals[HASH_TO_ARRAY_INDEX(h, mask)];
     } 
     scheme_hash_iteration_count++;
     h = (h + h2) & mask;
@@ -404,7 +521,8 @@ XFORM_NONGCING static Scheme_Object *do_hash_get(Scheme_Hash_Table *table, Schem
   return NULL;
 }
 
-void scheme_hash_set(Scheme_Hash_Table *table, Scheme_Object *key, Scheme_Object *val)
+void scheme_hash_set_w_key_wraps(Scheme_Hash_Table *table, Scheme_Object *key, Scheme_Object *val,
+                                 Scheme_Object *key_wraps)
 {
   if (!table->vals) {
     Scheme_Object **ba;
@@ -418,19 +536,30 @@ void scheme_hash_set(Scheme_Hash_Table *table, Scheme_Object *key, Scheme_Object
   }
 
   if (table->make_hash_indices)
-    do_hash(table, key, 2, val);
+    do_hash(table, key, 2, val, key_wraps);
   else
     do_hash_set(table, key, val);
 }
 
-Scheme_Object *scheme_hash_get(Scheme_Hash_Table *table, Scheme_Object *key)
+void scheme_hash_set(Scheme_Hash_Table *table, Scheme_Object *key, Scheme_Object *val)
+{
+  scheme_hash_set_w_key_wraps(table, key, val, NULL);
+}
+
+Scheme_Object *scheme_hash_get_w_key_wraps(Scheme_Hash_Table *table, Scheme_Object *key,
+                                           Scheme_Object *key_wraps)
 {
   if (!table->vals)
     return NULL;
   else if (table->make_hash_indices)
-    return do_hash(table, key, 0, NULL);
+    return do_hash(table, key, 0, NULL, key_wraps);
   else
     return do_hash_get(table, key);
+}
+
+Scheme_Object *scheme_hash_get(Scheme_Hash_Table *table, Scheme_Object *key)
+{
+  return scheme_hash_get_w_key_wraps(table, key, NULL);
 }
 
 Scheme_Object *scheme_eq_hash_get(Scheme_Hash_Table *table, Scheme_Object *key)
@@ -463,9 +592,11 @@ void scheme_hash_set_atomic(Scheme_Hash_Table *table, Scheme_Object *key, Scheme
   scheme_end_atomic_no_swap();
 }
 
-int scheme_hash_table_equal_rec(Scheme_Hash_Table *t1, Scheme_Hash_Table *t2, void *eql)
+int scheme_hash_table_equal_rec(Scheme_Hash_Table *t1, Scheme_Object *orig_t1,
+                                Scheme_Hash_Table *t2, Scheme_Object *orig_t2,
+                                void *eql)
 {
-  Scheme_Object **vals, **keys, *v;
+  Scheme_Object **vals, **keys, *val1, *val2, *key;
   int i;
 
   if ((t1->count != t2->count)
@@ -477,10 +608,21 @@ int scheme_hash_table_equal_rec(Scheme_Hash_Table *t1, Scheme_Hash_Table *t2, vo
   vals = t1->vals;
   for (i = t1->size; i--; ) {
     if (vals[i]) {
-      v = scheme_hash_get(t2, keys[i]);
-      if (!v)
+      key = keys[i];
+
+      if (!SAME_OBJ((Scheme_Object *)t1, orig_t1))
+        val1 = scheme_chaperone_hash_traversal_get(orig_t1, key, &key);
+      else
+        val1 = vals[i];
+      
+      if (!SAME_OBJ((Scheme_Object *)t2, orig_t2))
+        val2 = scheme_chaperone_hash_get(orig_t2, key);
+      else
+        val2 = scheme_hash_get(t2, key);
+
+      if (!val2)
 	return 0;
-      if (!scheme_recur_equal(vals[i], v, eql))
+      if (!scheme_recur_equal(val1, val2, eql))
 	return 0;
     }
   }
@@ -540,6 +682,37 @@ void scheme_reset_hash_table(Scheme_Hash_Table *table, int *history)
   table->mcount = 0;
 }
 
+Scheme_Object *scheme_hash_table_next(Scheme_Hash_Table *hash,
+				      mzlonglong start)
+{
+    int i, sz = hash->size;
+    if (start >= 0) {
+      if ((start >= sz) || !hash->vals[start])
+        return NULL;
+    }
+    for (i = start + 1; i < sz; i++) {
+      if (hash->vals[i])
+        return scheme_make_integer(i);
+    }
+
+    return scheme_false;
+}
+
+int scheme_hash_table_index(Scheme_Hash_Table *hash, mzlonglong pos,
+			    Scheme_Object **_key, Scheme_Object **_val)
+{
+  if (pos < hash->size) {
+    if (hash->vals[pos]) {
+      *_key = hash->keys[pos];
+      if (_val)
+	*_val = hash->vals[pos];
+      return 1;
+    }
+  }
+  
+  return 0;
+}
+
 /*========================================================================*/
 /*                  old-style hash table, with buckets                    */
 /*========================================================================*/
@@ -578,40 +751,71 @@ scheme_make_bucket_table (intptr_t size, int type)
   return table;
 }
 
-Scheme_Bucket_Table *scheme_clone_bucket_table(Scheme_Bucket_Table *bt)
+void scheme_clear_bucket_table(Scheme_Bucket_Table *bt)
 {
-  Scheme_Bucket_Table *table;
-  size_t asize;
+  Scheme_Bucket **ba;
 
-  table = MALLOC_ONE_TAGGED(Scheme_Bucket_Table);
-  table->so.type = scheme_bucket_table_type;
-  table->size = bt->size;
-  table->count = bt->count;
-  table->weak = bt->weak;
-  table->with_home = 0;
-  table->make_hash_indices = bt->make_hash_indices;
-  table->compare = bt->compare;
-  if (bt->mutex) {
-    Scheme_Object *sema;
-    sema = scheme_make_sema(1);
-    table->mutex = sema;
-  }
-  {
-    Scheme_Bucket **ba;
-    asize = (size_t)table->size * sizeof(Scheme_Bucket *);
-    ba = (Scheme_Bucket **)scheme_malloc(asize);
-    table->buckets = ba;
-    memcpy(ba, bt->buckets, asize);
-  }
-
-  return table;
+  bt->count = 0;
+  bt->size = 4;
+  ba = (Scheme_Bucket **)scheme_malloc(bt->size * sizeof(Scheme_Bucket **));
+  bt->buckets = ba;
 }
 
 static Scheme_Bucket *
-get_bucket (Scheme_Bucket_Table *table, const char *key, int add, Scheme_Bucket *b)
+allocate_bucket (Scheme_Bucket_Table *table, const char *key, void *val)
+{
+  size_t bsize;
+  Scheme_Type type;
+  Scheme_Bucket *bucket;
+
+  if (table->with_home) {
+    bsize = sizeof(Scheme_Bucket_With_Home);
+    type = scheme_variable_type;
+  } else  {
+    bsize = sizeof(Scheme_Bucket);
+    type = scheme_bucket_type;
+  }
+
+  bucket = (Scheme_Bucket *)scheme_malloc_tagged(bsize);
+
+  bucket->so.type = type;
+
+  if (type == scheme_variable_type)
+    ((Scheme_Bucket_With_Flags *)bucket)->flags = GLOB_HAS_HOME_PTR;
+
+  if (table->weak) {
+#ifdef MZ_PRECISE_GC
+    void *kb;
+    kb = GC_malloc_weak_box((void *)key, (void **)bucket, (void **)&bucket->val - (void **)bucket, 
+                            (table->weak > 1));
+    bucket->key = (char *)kb;
+#else
+    char *kb;
+    kb = (char *)MALLOC_ONE_WEAK(void *);
+    bucket->key = kb;
+    *(void **)bucket->key = (void *)key;
+    if (table->weak > 1) {
+      scheme_late_weak_reference_indirect((void **)bucket->key, (void *)key);
+      scheme_late_weak_reference_indirect((void **)&bucket->val, (void *)key);
+    } else {
+      scheme_weak_reference_indirect((void **)bucket->key, (void *)key);
+      scheme_weak_reference_indirect((void **)&bucket->val, (void *)key);
+    }
+#endif
+  } else
+    bucket->key = (char *)key;
+  bucket->val = val;
+
+  return bucket;
+}
+
+static Scheme_Bucket *
+get_bucket (Scheme_Bucket_Table *table, const char *key, int add, Scheme_Bucket *b,
+            Scheme_Object *key_wraps)
 {
   intptr_t hx, h2x;
   hash_v_t h, h2;
+  void *ekey;
   Scheme_Bucket *bucket;
   Compare_Proc compare = table->compare;
   uintptr_t mask;
@@ -621,7 +825,11 @@ get_bucket (Scheme_Bucket_Table *table, const char *key, int add, Scheme_Bucket 
   mask = table->size - 1;
 
   if (table->make_hash_indices) {
-    table->make_hash_indices((void *)key, &hx, &h2x);
+    if (key_wraps)
+      ekey = apply_equal_key_wraps((Scheme_Object *)key, key_wraps);
+    else
+      ekey = (void *)key;
+    table->make_hash_indices(ekey, &hx, &h2x);
     h = to_unsigned_hash(hx) & mask;
     h2 = to_unsigned_hash(h2x) & mask;
   } else {
@@ -629,6 +837,7 @@ get_bucket (Scheme_Bucket_Table *table, const char *key, int add, Scheme_Bucket 
     lkey = PTR_TO_LONG((Scheme_Object *)key);
     h = lkey & mask;
     h2 = (lkey >> 1) & mask;
+    ekey = NULL;
   }
 
   h2 |= 0x1;
@@ -636,7 +845,7 @@ get_bucket (Scheme_Bucket_Table *table, const char *key, int add, Scheme_Bucket 
   if (table->weak) {
     int reuse_bucket = 0;
     scheme_hash_request_count++;
-    while ((bucket = table->buckets[h])) {
+    while ((bucket = table->buckets[HASH_TO_ARRAY_INDEX(h, mask)])) {
       if (bucket->key) {
 	void *hk = (void *)HT_EXTRACT_WEAK(bucket->key);
 	if (!hk) {
@@ -644,7 +853,10 @@ get_bucket (Scheme_Bucket_Table *table, const char *key, int add, Scheme_Bucket 
             reuse_bucket = h + 1;
 	} else if (SAME_PTR(hk, key))
 	  return bucket;
-	else if (compare && !compare((void *)hk, (void *)key))
+	else if (key_wraps) {
+          if (equal_w_key_wraps((Scheme_Object *)ekey, (Scheme_Object *)hk, key_wraps))
+            return bucket;
+        } else if (compare && !compare((void *)hk, ekey))
 	  return bucket;
       } else if (add)
 	break;
@@ -660,10 +872,13 @@ get_bucket (Scheme_Bucket_Table *table, const char *key, int add, Scheme_Bucket 
     }
   } else {
     scheme_hash_request_count++;
-    while ((bucket = table->buckets[h])) {
+    while ((bucket = table->buckets[HASH_TO_ARRAY_INDEX(h, mask)])) {
       if (SAME_PTR(bucket->key, key))
 	return bucket;
-      else if (compare && !compare((void *)bucket->key, (void *)key))
+      else if (key_wraps) {
+        if (equal_w_key_wraps((Scheme_Object *)ekey, (Scheme_Object *)bucket->key, key_wraps))
+          return bucket;
+      } else if (compare && !compare((void *)bucket->key, (void *)key))
 	return bucket;
       scheme_hash_iteration_count++;
       h = (h + h2) & mask;
@@ -696,6 +911,10 @@ get_bucket (Scheme_Bucket_Table *table, const char *key, int add, Scheme_Bucket 
       if (actual * FILL_FACTOR < table->count) {
 	/* Decrement size so that the table won't actually grow. */
 	table->size >>= 1;
+        if ((table->size > 64) && (2 * actual * FILL_FACTOR < table->count)) {
+          /* Allow the table to shrink */
+          table->size >>= 1;
+        }
       }
     }
 
@@ -712,64 +931,24 @@ get_bucket (Scheme_Bucket_Table *table, const char *key, int add, Scheme_Bucket 
     if (table->weak) {
       for (i = 0; i < oldsize; i++) {
 	if (old[i] && old[i]->key && HT_EXTRACT_WEAK(old[i]->key))
-	  get_bucket(table, (char *)HT_EXTRACT_WEAK(old[i]->key), 1, old[i]);
+	  get_bucket(table, (char *)HT_EXTRACT_WEAK(old[i]->key), 1, old[i], key_wraps);
       }
     } else {
       for (i = 0; i < oldsize; i++) {
 	if (old[i] && old[i]->key)
-	  get_bucket(table, old[i]->key, 1, old[i]);
+	  get_bucket(table, old[i]->key, 1, old[i], key_wraps);
       }
     }
 
     goto rehash_key;
   }
 
-  if (b) {
+  if (b)
     bucket = b;
-  } else {
-    size_t bsize;
-    Scheme_Type type;
+  else
+    bucket = allocate_bucket(table, key, NULL);
 
-    if (table->with_home) {
-      bsize = sizeof(Scheme_Bucket_With_Home);
-      type = scheme_variable_type;
-    } else  {
-      bsize = sizeof(Scheme_Bucket);
-      type = scheme_bucket_type;
-    }
-
-    bucket = (Scheme_Bucket *)scheme_malloc_tagged(bsize);
-
-    bucket->so.type = type;
-
-    if (type == scheme_variable_type)
-      ((Scheme_Bucket_With_Flags *)bucket)->flags = GLOB_HAS_HOME_PTR;
-
-    if (table->weak) {
-#ifdef MZ_PRECISE_GC
-      void *kb;
-      kb = GC_malloc_weak_box((void *)key, (void **)bucket, (void **)&bucket->val - (void **)bucket, 
-                              (table->weak > 1));
-      bucket->key = (char *)kb;
-#else
-      char *kb;
-      kb = (char *)MALLOC_ONE_WEAK(void *);
-      bucket->key = kb;
-      *(void **)bucket->key = (void *)key;
-      if (table->weak > 1) {
-        scheme_late_weak_reference_indirect((void **)bucket->key, (void *)key);
-        scheme_late_weak_reference_indirect((void **)&bucket->val, (void *)key);
-      } else {
-        scheme_weak_reference_indirect((void **)bucket->key, (void *)key);
-        scheme_weak_reference_indirect((void **)&bucket->val, (void *)key);
-      }
-#endif
-    } else
-      bucket->key = (char *)key;
-    bucket->val = NULL;
-  }
-
-  table->buckets[h] = bucket;
+  table->buckets[HASH_TO_ARRAY_INDEX(h, mask)] = bucket;
 
   table->count++;
 
@@ -777,28 +956,35 @@ get_bucket (Scheme_Bucket_Table *table, const char *key, int add, Scheme_Bucket 
 }
 
 Scheme_Bucket *
-scheme_bucket_or_null_from_table (Scheme_Bucket_Table *table, const char *key, int add)
+scheme_bucket_or_null_from_table_w_key_wraps (Scheme_Bucket_Table *table, const char *key, int add,
+                                              Scheme_Object *key_wraps)
 {
   Scheme_Bucket *b;
 
-  b = get_bucket(table, key, add, NULL);
+  b = get_bucket(table, key, add, NULL, key_wraps);
 
   return b;
 }
 
 Scheme_Bucket *
+scheme_bucket_or_null_from_table (Scheme_Bucket_Table *table, const char *key, int add)
+{
+  return scheme_bucket_or_null_from_table_w_key_wraps(table, key, add, NULL);
+}
+
+Scheme_Bucket *
 scheme_bucket_from_table (Scheme_Bucket_Table *table, const char *key)
 {
-  return scheme_bucket_or_null_from_table(table, key, 1);
+  return scheme_bucket_or_null_from_table_w_key_wraps(table, key, 1, NULL);
 }
 
 void 
-scheme_add_to_table (Scheme_Bucket_Table *table, const char *key, void *val, 
-		     int constant)
+scheme_add_to_table_w_key_wraps (Scheme_Bucket_Table *table, const char *key, void *val, 
+                                 int constant, Scheme_Object *key_wraps)
 {
   Scheme_Bucket *b;
 
-  b = get_bucket(table, key, 1, NULL);
+  b = get_bucket(table, key, 1, NULL, key_wraps);
 
   if (val)
     b->val = val;
@@ -806,17 +992,25 @@ scheme_add_to_table (Scheme_Bucket_Table *table, const char *key, void *val,
     ((Scheme_Bucket_With_Flags *)b)->flags |= GLOB_IS_CONST;
 }
 
+void 
+scheme_add_to_table (Scheme_Bucket_Table *table, const char *key, void *val, 
+		     int constant)
+{
+  scheme_add_to_table_w_key_wraps(table, key, val, constant, NULL);
+}
+
 void scheme_add_bucket_to_table(Scheme_Bucket_Table *table, Scheme_Bucket *b)
 {
-  get_bucket(table, table->weak ? (char *)HT_EXTRACT_WEAK(b->key) : b->key, 1, b);
+  get_bucket(table, table->weak ? (char *)HT_EXTRACT_WEAK(b->key) : b->key, 1, b, NULL);
 }
 
 void *
-scheme_lookup_in_table (Scheme_Bucket_Table *table, const char *key)
+scheme_lookup_in_table_w_key_wraps (Scheme_Bucket_Table *table, const char *key,
+                                    Scheme_Object *key_wraps)
 {
   Scheme_Bucket *bucket;
 
-  bucket = get_bucket(table, key, 0, NULL);
+  bucket = get_bucket(table, key, 0, NULL, key_wraps);
 
   if (bucket)
     return bucket->val;
@@ -824,22 +1018,29 @@ scheme_lookup_in_table (Scheme_Bucket_Table *table, const char *key)
     return NULL;
 }
 
+void *
+scheme_lookup_in_table (Scheme_Bucket_Table *table, const char *key)
+{
+  return scheme_lookup_in_table_w_key_wraps(table, key, NULL);
+}
+
 void
 scheme_change_in_table (Scheme_Bucket_Table *table, const char *key, void *naya)
 {
   Scheme_Bucket *bucket;
 
-  bucket = get_bucket(table, key, 0, NULL);
+  bucket = get_bucket(table, key, 0, NULL, NULL);
 
   if (bucket)
     bucket->val = naya;
 }
 
-int scheme_bucket_table_equal_rec(Scheme_Bucket_Table *t1, Scheme_Bucket_Table *t2, void *eql)
+int scheme_bucket_table_equal_rec(Scheme_Bucket_Table *t1, Scheme_Object *orig_t1,
+                                  Scheme_Bucket_Table *t2, Scheme_Object *orig_t2,
+                                  void *eql)
 {
   Scheme_Bucket **buckets, *bucket;
-  void *v;
-  const char *key;
+  Scheme_Object *key, *val1, *val2;
   int i, weak, checked = 0;
 
   /* We can't compare the count values, because they're merely
@@ -857,16 +1058,26 @@ int scheme_bucket_table_equal_rec(Scheme_Bucket_Table *t1, Scheme_Bucket_Table *
     bucket = buckets[i];
     if (bucket) {
       if (weak) {
-	key = (const char *)HT_EXTRACT_WEAK(bucket->key);
+	key = (Scheme_Object *)HT_EXTRACT_WEAK(bucket->key);
       } else {
-	key = bucket->key;
+	key = (Scheme_Object *)bucket->key;
       }
       if (key) {
+        if (!SAME_OBJ((Scheme_Object *)t1, orig_t1))
+          val1 = scheme_chaperone_hash_traversal_get(orig_t1, key, &key);
+        else
+          val1 = (Scheme_Object *)bucket->val;
+
 	checked++;
-	v = scheme_lookup_in_table(t2, key);
-	if (!v)
+      
+        if (!SAME_OBJ((Scheme_Object *)t2, orig_t2))
+          val2 = scheme_chaperone_hash_get(orig_t2, key);
+        else
+          val2 = (Scheme_Object *)scheme_lookup_in_table(t2, (const char *)key);
+
+	if (!val2)
 	  return 0;
-	if (!scheme_recur_equal((Scheme_Object *)bucket->val, (Scheme_Object *)v, eql))
+	if (!scheme_recur_equal(val1, val2, eql))
 	  return 0;
       }
     }
@@ -883,9 +1094,9 @@ int scheme_bucket_table_equal_rec(Scheme_Bucket_Table *t1, Scheme_Bucket_Table *
     bucket = buckets[i];
     if (bucket) {
       if (weak) {
-	key = (const char *)HT_EXTRACT_WEAK(bucket->key);
+	key = (Scheme_Object *)HT_EXTRACT_WEAK(bucket->key);
       } else {
-	key = bucket->key;
+	key = (Scheme_Object *)bucket->key;
       }
       if (key) {
 	if (!checked)
@@ -901,6 +1112,92 @@ int scheme_bucket_table_equal_rec(Scheme_Bucket_Table *t1, Scheme_Bucket_Table *
 int scheme_bucket_table_equal(Scheme_Bucket_Table *t1, Scheme_Bucket_Table *t2)
 {
   return scheme_equal((Scheme_Object *)t1, (Scheme_Object *)t2);
+}
+
+Scheme_Bucket_Table *scheme_clone_bucket_table(Scheme_Bucket_Table *bt)
+{
+  Scheme_Bucket_Table *table;
+  size_t asize;
+
+  table = MALLOC_ONE_TAGGED(Scheme_Bucket_Table);
+  table->so.type = scheme_bucket_table_type;
+  table->size = bt->size;
+  table->count = bt->count;
+  table->weak = bt->weak;
+  table->with_home = 0;
+  table->make_hash_indices = bt->make_hash_indices;
+  table->compare = bt->compare;
+  if (bt->mutex) {
+    Scheme_Object *sema;
+    sema = scheme_make_sema(1);
+    table->mutex = sema;
+  }
+  {
+    Scheme_Bucket **ba, *bucket;
+    int i;
+    asize = (size_t)table->size * sizeof(Scheme_Bucket *);
+    ba = (Scheme_Bucket **)scheme_malloc(asize);
+    table->buckets = ba;
+    memcpy(ba, bt->buckets, asize);
+    /* clone individual buckets */
+    for (i = table->size; i--; ) {
+      bucket = ba[i];
+      if (bucket) {
+        if (bucket->key) {
+          if (table->weak) {
+            void *hk = (void *)HT_EXTRACT_WEAK(bucket->key);
+            if (hk)
+              bucket = allocate_bucket(table, hk, bucket->val);
+          } else
+            bucket = allocate_bucket(table, bucket->key, bucket->val);
+          ba[i] = bucket;
+        }
+      }
+    }
+  }
+
+  return table;
+}
+
+Scheme_Object *scheme_bucket_table_next(Scheme_Bucket_Table *hash,
+					mzlonglong start)
+{
+  Scheme_Bucket *bucket;
+  int i, sz = hash->size;
+    
+  if (start >= 0) {
+    bucket = ((start < sz) ? hash->buckets[start] : NULL);
+    if (!bucket || !bucket->val || !bucket->key) 
+      return NULL;      
+  }
+  for (i = start + 1; i < sz; i++) {
+    bucket = hash->buckets[i];
+    if (bucket && bucket->val && bucket->key) {
+      return scheme_make_integer(i);
+    }
+  }
+
+  return scheme_false;
+}
+
+int scheme_bucket_table_index(Scheme_Bucket_Table *hash, mzlonglong pos, Scheme_Object **_key, Scheme_Object **_val)
+{
+  Scheme_Bucket *bucket;
+
+  if (pos < hash->size) {
+    bucket = hash->buckets[pos];
+    if (bucket && bucket->val && bucket->key) {
+      if (hash->weak)
+	*_key = (Scheme_Object *)HT_EXTRACT_WEAK(bucket->key);
+      else
+	*_key = (Scheme_Object *)bucket->key;
+      if (_val)
+	*_val = (Scheme_Object *)bucket->val;
+      return 1;
+    }
+  }
+  
+  return 0;
 }
 
 /*========================================================================*/
@@ -937,6 +1234,11 @@ typedef struct Hash_Info {
 
 static uintptr_t equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Info *hi);
 static uintptr_t equal_hash_key2(Scheme_Object *o, Hash_Info *hi);
+
+/* Based on Bob Jenkins's one-at-a-time hash function at
+   http://www.burtleburtle.net/bob/hash/doobs.html: */
+#define MZ_MIX(k) (k += (k << 10), k ^= (k >> 6))
+
 
 static Scheme_Object *hash_recur(int argc, Scheme_Object **argv, Scheme_Object *prim)
 {
@@ -994,109 +1296,86 @@ static uintptr_t overflow_equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Inf
 XFORM_NONGCING static uintptr_t dbl_hash_val(double d) 
   XFORM_SKIP_PROC
 {
-  int e;
-  
-  if (MZ_IS_NAN(d)) {
-    d = 0.0;
-    e = 1000;
-  } else if (MZ_IS_POS_INFINITY(d)) {
-    d = 0.5;
-    e = 1000;
-  } else if (MZ_IS_NEG_INFINITY(d)) {
-    d = -0.5;
-    e = 1000;
-  } else if (!d && scheme_minus_zero_p(d)) {
-    d = 0;
-    e = 1000;
-  } else {
-    /* frexp should not be used on inf or nan: */
-    d = frexp(d, &e);
-  }
+  const umzlonglong m = (umzlonglong)0x880355f21e6d1965;
+  umzlonglong h = (16 * m);
+  umzlonglong v;
 
-  return ((uintptr_t)(d * (1 << 30))) + e;
+  if (MZ_IS_NAN(d))
+    return 0;
+
+  MZ_ASSERT(sizeof(d) == sizeof(v));
+
+  memcpy(&v, &d, sizeof(umzlonglong));
+
+  /* based one https://code.google.com/archive/p/fast-hash/ */
+#define MZ_MIX_FOR_DBL(h) \
+  (h) ^= (h) >> 23;       \
+  (h) *= (umzlonglong)0x2127599bf4325c37; \
+  (h) ^= (h) >> 47;
+
+  MZ_MIX_FOR_DBL(v);
+  h ^= v;
+  h *= m;
+
+  MZ_MIX_FOR_DBL(h);
+  
+  return (uintptr_t)h;
 }
 
 XFORM_NONGCING static uintptr_t dbl_hash2_val(double d)  
   XFORM_SKIP_PROC
 {
-  int e;
-  
-  if (MZ_IS_NAN(d)
-      || MZ_IS_POS_INFINITY(d)
-      || MZ_IS_NEG_INFINITY(d)) {
-    e = 1;
-  } else {
-    /* frexp should not be used on inf or nan: */
-    d = frexp(d, &e);
-  }
-  return to_unsigned_hash(e);
+  return dbl_hash_val(d) >> (sizeof(uintptr_t) / 2);
 }
 
 #ifdef MZ_LONG_DOUBLE
 XFORM_NONGCING static uintptr_t long_dbl_hash_val(long_double d) 
   XFORM_SKIP_PROC
 {
-  int e;
-  
-  if (MZ_IS_LONG_NAN(d)) {
-    d = get_long_double_zero();
-    e = 1000;
-  } else if (MZ_IS_LONG_POS_INFINITY(d)) {
-    d = get_long_double_one_half();
-    e = 1000;
-  } else if (MZ_IS_LONG_NEG_INFINITY(d)) {
-    d = long_double_neg(get_long_double_one_half());
-    e = 1000;
-  } else if (long_double_eqv(d, get_long_double_zero()) && scheme_long_minus_zero_p(d)) {
-    d = get_long_double_zero();
-    e = 1000;
-  } else {
-    /* frexpl should not be used on inf or nan: */
-    d = long_double_frexp(d, &e);
+  char s[LONG_DOUBLE_BYTE_LEN];
+  int i;
+  uintptr_t k;
+
+  if (MZ_IS_LONG_NAN(d))
+    return 0;
+
+  /* Like `extfl->floating-point-bytes`, we assume that the
+     content of a `long double' occupies the first 10 bytes: */
+  memcpy(s, &d, LONG_DOUBLE_BYTE_LEN);
+
+  k = 0;
+  for (i = LONG_DOUBLE_BYTE_LEN; i--; ) {
+    k += s[i];
+    MZ_MIX(k);
   }
 
-  return uintptr_from_long_double(long_double_mult_i(d, 1<<30)) + e;
-  /*return ((uintptr_t)(d * (1 << 30))) + e;*/
+  return k;  
 }
 
 XFORM_NONGCING static uintptr_t long_dbl_hash2_val(long_double d)  
   XFORM_SKIP_PROC
 {
-  int e;
-  
-  if (MZ_IS_LONG_NAN(d)
-      || MZ_IS_LONG_POS_INFINITY(d)
-      || MZ_IS_LONG_NEG_INFINITY(d)) {
-    e = 1;
-  } else {
-    /* frexp should not be used on inf or nan: */
-    d = long_double_frexp(d, &e);
-  }
-  return to_unsigned_hash(e);
+  return long_dbl_hash_val(d) >> (sizeof(uintptr_t) / 2);
 }
 #endif
 
 #define OVERFLOW_HASH() overflow_equal_hash_key(o, k - t, hi)
 
-/* Based on Bob Jenkins's one-at-a-time hash function at
-   http://www.burtleburtle.net/bob/hash/doobs.html: */
-#define MZ_MIX(k) (k += (k << 10), k ^= (k >> 6))
-
-static uintptr_t equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Info *hi)
+XFORM_NONGCING static uintptr_t fast_equal_hash_key(Scheme_Object *o, uintptr_t k, int *_done)
+/* must cover eqv hash keys that are just eq hash keys */
 {
   Scheme_Type t;
 
  top:
-  if (SCHEME_CHAPERONEP(o))
-    o = ((Scheme_Chaperone *)o)->val;
-  
   t = SCHEME_TYPE(o);
-  k += t;
-
-  if (hi->depth > (MAX_HASH_DEPTH << 1))
-    return k;
   
   switch(t) {
+  case scheme_true_type:
+    return k + PTR_TO_LONG(o);
+    break;
+  case scheme_false_type:
+    return k + PTR_TO_LONG(o);
+    break;
   case scheme_integer_type:
     {
       uintptr_t iv = to_unsigned_hash(SCHEME_INT_VAL(o));
@@ -1105,6 +1384,9 @@ static uintptr_t equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Info *hi)
     }
 #ifdef MZ_USE_SINGLE_FLOATS
   case scheme_float_type:
+    {
+      return k + dbl_hash_val(SCHEME_FLT_VAL(o));
+    }
 #endif
   case scheme_double_type:
     {
@@ -1131,17 +1413,129 @@ static uintptr_t equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Info *hi)
     break;
   case scheme_rational_type:
     {
-      k += equal_hash_key(scheme_rational_numerator(o), 0, hi);
+      k += fast_equal_hash_key(scheme_rational_numerator(o), 0, _done);
       o = scheme_rational_denominator(o);
       break;
     }
   case scheme_complex_type:
     {
       Scheme_Complex *c = (Scheme_Complex *)o;
-      k += equal_hash_key(c->r, 0, hi);
+      k += fast_equal_hash_key(c->r, 0, _done);
       o = c->i;
       break;
     }
+  case scheme_cpointer_type:
+    {
+      k = (k << 3) + k;
+      k += (uintptr_t)((char *)SCHEME_CPTR_VAL(o) + SCHEME_CPTR_OFFSET(o));
+      return k;
+    }
+  case scheme_char_type:
+    return k + SCHEME_CHAR_VAL(o);
+  case scheme_byte_string_type:
+  case scheme_unix_path_type:
+  case scheme_windows_path_type:
+    {
+      int i = SCHEME_BYTE_STRLEN_VAL(o);
+      char *s = SCHEME_BYTE_STR_VAL(o);
+      
+      while (i--) {
+	k += s[i];
+        MZ_MIX(k);
+      }
+      
+      return k;
+    }
+  case scheme_char_string_type:
+    {
+      int i = SCHEME_CHAR_STRLEN_VAL(o);
+      mzchar *s = SCHEME_CHAR_STR_VAL(o);
+      
+      while (i--) {
+	k += s[i];
+        MZ_MIX(k);
+      }
+      
+      return k;
+    }
+  case scheme_regexp_type:
+    {
+      o = scheme_regexp_source(o);
+      break;
+    }
+# ifndef MZ_PRECISE_GC
+  case scheme_keyword_type:
+  case scheme_symbol_type:
+    {
+      Scheme_Symbol *s = (Scheme_Symbol *)o;
+      if (!(MZ_OPT_HASH_KEY(&s->iso) & 0x1)) {
+	/* Interned. Make key depend only on the content. */
+	if (!(MZ_OPT_HASH_KEY(&s->iso) & 0xFFFC)) {
+	  int i;
+          unsigned int h = 0;
+	  for (i = s->len; i--; ) {
+	    h += (h << 5) + h + (unsigned int)s->s[i];
+	  }
+	  h += (h << 2);
+	  if (!(((short)h) & 0xFFFC))
+	    h = 0x10;
+	  MZ_OPT_HASH_KEY(&s->iso) |= (((short)h) & 0xFFFC);
+	}
+	
+	return k + (MZ_OPT_HASH_KEY(&s->iso) & 0xFFFC);
+      } else
+	return k + PTR_TO_LONG(o);
+    }
+# else
+  case scheme_keyword_type:
+  case scheme_symbol_type:
+    return k + PTR_TO_LONG(o);
+# endif
+  default:
+    {
+      *_done = 0;
+      return 0;
+    }
+  }
+
+  MZ_MIX(k);
+  goto top;
+}
+
+static uintptr_t equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Info *hi)
+{
+  Scheme_Type t;
+  Scheme_Object *orig_obj;
+  int done;
+  uintptr_t k2;
+
+ top:
+  orig_obj = o;
+  if (SCHEME_CHAPERONEP(o))
+    o = ((Scheme_Chaperone *)o)->val;
+  
+  t = SCHEME_TYPE(o);
+  if (t == scheme_hash_tree_indirection_type) {
+    if (SAME_OBJ(o, orig_obj)) {
+      o = (Scheme_Object *)scheme_hash_tree_resolve_placeholder((Scheme_Hash_Tree *)o);
+      orig_obj = o;
+    } else {
+      o = (Scheme_Object *)scheme_hash_tree_resolve_placeholder((Scheme_Hash_Tree *)o);
+    }
+    t = SCHEME_TYPE(o);
+  }
+  
+  k += t;
+
+  if (hi->depth > (MAX_HASH_DEPTH << 1))
+    return k;
+
+  done = 1;
+  k2 = fast_equal_hash_key(o, k, &done);
+  if (done)
+    return k2;
+  
+  switch(t) {
   case scheme_pair_type:
     {
 #     include "mzhashchk.inc"
@@ -1163,17 +1557,12 @@ static uintptr_t equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Info *hi)
       o = SCHEME_CDR(o);
       break;
     }
-  case scheme_cpointer_type:
-    {
-      k = (k << 3) + k;
-      k += (uintptr_t)((char *)SCHEME_CPTR_VAL(o) + SCHEME_CPTR_OFFSET(o));
-      return k;
-    }
   case scheme_vector_type:
   case scheme_fxvector_type:
   case scheme_wrap_chunk_type:
     {
       int len = SCHEME_VEC_SIZE(o), i, val;
+      Scheme_Object *elem;
 #     include "mzhashchk.inc"
 
       if (!len)
@@ -1183,11 +1572,19 @@ static uintptr_t equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Info *hi)
       --len;
       for (i = 0; i < len; i++) {
 	SCHEME_USE_FUEL(1);
-	val = equal_hash_key(SCHEME_VEC_ELS(o)[i], 0, hi);
+        if (SAME_OBJ(o, orig_obj))
+          elem = SCHEME_VEC_ELS(o)[i];
+        else
+          elem = scheme_chaperone_vector_ref(orig_obj, i);
+	val = equal_hash_key(elem, 0, hi);
 	k = (k << 5) + k + val;
       }
       
-      o = SCHEME_VEC_ELS(o)[len];
+      if (SAME_OBJ(o, orig_obj))
+        o = SCHEME_VEC_ELS(o)[len];
+      else
+        o = scheme_chaperone_vector_ref(orig_obj, len);
+
       break;
     }
   case scheme_flvector_type:
@@ -1224,45 +1621,12 @@ static uintptr_t equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Info *hi)
       return k;
     }
 #endif
-  case scheme_char_type:
-    return k + SCHEME_CHAR_VAL(o);
-  case scheme_byte_string_type:
-  case scheme_unix_path_type:
-  case scheme_windows_path_type:
-    {
-      int i = SCHEME_BYTE_STRLEN_VAL(o);
-      char *s = SCHEME_BYTE_STR_VAL(o);
-      
-      while (i--) {
-	k += s[i];
-        MZ_MIX(k);
-      }
-      
-      return k;
-    }
-  case scheme_char_string_type:
-    {
-      int i = SCHEME_CHAR_STRLEN_VAL(o);
-      mzchar *s = SCHEME_CHAR_STR_VAL(o);
-      
-      while (i--) {
-	k += s[i];
-        MZ_MIX(k);
-      }
-      
-      return k;
-    }
-  case scheme_regexp_type:
-    {
-      o = scheme_regexp_source(o);
-      break;
-    }
   case scheme_structure_type:
   case scheme_proc_struct_type:
     {
       Scheme_Object *procs;
 
-      procs = scheme_struct_type_property_ref(scheme_equal_property, o);
+      procs = scheme_struct_type_property_ref(scheme_equal_property, orig_obj);
       if (procs) {
         Scheme_Object *a[2], *recur, *v;
         Hash_Info *hi2;
@@ -1284,7 +1648,7 @@ static uintptr_t equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Info *hi)
         }
         memcpy(hi2, hi, sizeof(Hash_Info));
 
-        a[0] = o;
+        a[0] = orig_obj;
         a[1] = recur;
         
         procs = SCHEME_VEC_ELS(procs)[2];
@@ -1316,33 +1680,47 @@ static uintptr_t equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Info *hi)
         if (!insp || scheme_inspector_sees_part(o, insp, -2)) {
           int i;
           Scheme_Structure *s1 = (Scheme_Structure *)o;
+          Scheme_Object *elem;
 	
 #         include "mzhashchk.inc"
 	
           hi->depth += 2;
 
+          /* Use structure-type names (especially for prefabs): */
+          for (i = s1->stype->name_pos+1; i--; ) {
+            k += equal_hash_key(s1->stype->parent_types[i]->name, 0, hi);
+            MZ_MIX(k);
+          }
+
           for (i = SCHEME_STRUCT_NUM_SLOTS(s1); i--; ) {
-            k += equal_hash_key(s1->slots[i], 0, hi);
+            if (SAME_OBJ(o, orig_obj))
+              elem = s1->slots[i];
+            else
+              elem = scheme_struct_ref(orig_obj, i);
+            k += equal_hash_key(elem, 0, hi);
             MZ_MIX(k);
           }
 	
           return k;
         } else
-          return k + (PTR_TO_LONG(o) >> 2);
+          return k + PTR_TO_LONG(o);
       }
     }
   case scheme_box_type:
     {
       SCHEME_USE_FUEL(1);
       k += 1;
-      o = SCHEME_BOX_VAL(o);
+      if (SAME_OBJ(o, orig_obj))
+        o = SCHEME_BOX_VAL(o);
+      else
+        o = scheme_unbox(orig_obj);
       hi->depth += 2;
       break;
     }
   case scheme_hash_table_type:
     {
       Scheme_Hash_Table *ht = (Scheme_Hash_Table *)o;
-      Scheme_Object **vals, **keys;
+      Scheme_Object **vals, **keys, *key, *val;
       int i;
       uintptr_t vk;
       intptr_t old_depth;
@@ -1357,9 +1735,14 @@ static uintptr_t equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Info *hi)
       vals = ht->vals;
       for (i = ht->size; i--; ) {
 	if (vals[i]) {
-          vk = equal_hash_key(keys[i], 0, hi);
+          key = keys[i];
+          if (SAME_OBJ(o, orig_obj))
+            val = vals[i];
+          else
+            val = scheme_chaperone_hash_traversal_get(orig_obj, key, &key);
+          vk = equal_hash_key(key, 0, hi);
           MZ_MIX(vk);
-	  vk += equal_hash_key(vals[i], 0, hi);
+	  vk += equal_hash_key(val, 0, hi);
           MZ_MIX(vk);
           k += vk;  /* can't mix k, because the key order shouldn't matter */
           hi->depth = old_depth; /* also needed to avoid order-sensitivity */
@@ -1369,6 +1752,9 @@ static uintptr_t equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Info *hi)
       return k;
     }
   case scheme_hash_tree_type:
+  case scheme_eq_hash_tree_type:
+  case scheme_eqv_hash_tree_type:
+  case scheme_hash_tree_indirection_type:
     {
       Scheme_Hash_Tree *ht = (Scheme_Hash_Tree *)o;
       Scheme_Object *ik, *iv;
@@ -1382,10 +1768,15 @@ static uintptr_t equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Info *hi)
       hi->depth += 2;
       old_depth = hi->depth;
 
+      /* hash tree holds pre-computed hashes for keys, so use those: */
+      vk = scheme_hash_tree_key_hash(ht);
+
       for (i = scheme_hash_tree_next(ht, -1); i != -1; i = scheme_hash_tree_next(ht, i)) {
         scheme_hash_tree_index(ht, i, &ik, &iv);
-        vk = equal_hash_key(ik, 0, hi);
-        MZ_MIX(vk);
+        if (!SAME_OBJ(o, orig_obj))
+          iv = scheme_chaperone_hash_traversal_get(orig_obj, ik, &ik);
+        /* vk = equal_hash_key(ik, 0, hi); */
+        /* MZ_MIX(vk); */
         vk += equal_hash_key(iv, 0, hi);
         MZ_MIX(vk);
         k += vk;  /* can't mix k, because the key order shouldn't matter */
@@ -1398,7 +1789,8 @@ static uintptr_t equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Info *hi)
     {
       Scheme_Bucket_Table *ht = (Scheme_Bucket_Table *)o;
       Scheme_Bucket **buckets, *bucket;
-      const char *key;
+      const char *_key;
+      Scheme_Object *key, *val;
       int i, weak;
       uintptr_t vk;
       intptr_t old_depth;
@@ -1415,15 +1807,19 @@ static uintptr_t equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Info *hi)
       for (i = ht->size; i--; ) {
 	bucket = buckets[i];
 	if (bucket) {
-	  if (weak) {
-	    key = (const char *)HT_EXTRACT_WEAK(bucket->key);
-	  } else {
-	    key = bucket->key;
-	  }
-	  if (key) {
-	    vk = equal_hash_key((Scheme_Object *)bucket->val, 0, hi);
+	  if (weak)
+	    _key = (const char *)HT_EXTRACT_WEAK(bucket->key);
+	  else
+	    _key = bucket->key;
+	  if (_key) {
+            key = (Scheme_Object *)_key;
+            if (SAME_OBJ(o, orig_obj))
+              val = (Scheme_Object *)bucket->val;
+            else
+              val = scheme_chaperone_hash_traversal_get(orig_obj, key, &key);
+	    vk = equal_hash_key(val, 0, hi);
             MZ_MIX(vk);
-	    vk += equal_hash_key((Scheme_Object *)key, 0, hi);
+	    vk += equal_hash_key(key, 0, hi);
             MZ_MIX(vk);
             k += vk; /* can't mix k, because the key order shouldn't matter */
             hi->depth = old_depth; /* also needed to avoid order-sensitivity */
@@ -1433,36 +1829,6 @@ static uintptr_t equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Info *hi)
       
       return k;
     }
-# ifndef MZ_PRECISE_GC
-  case scheme_keyword_type:
-  case scheme_symbol_type:
-    {
-      Scheme_Symbol *s = (Scheme_Symbol *)o;
-      if (!(MZ_OPT_HASH_KEY(&s->iso) & 0x1)) {
-	/* Interned. Make key depend only on the content. */
-	if (!(MZ_OPT_HASH_KEY(&s->iso) & 0xFFFC)) {
-	  int i, h = 0;
-	  for (i = s->len; i--; ) {
-	    h += (h << 5) + h + s->s[i];
-	  }
-	  h += (h << 2);
-	  if (!(((short)h) & 0xFFFC))
-	    h = 0x10;
-	  MZ_OPT_HASH_KEY(&s->iso) |= (((short)h) & 0xFFFC);
-	}
-	
-	return k + (MZ_OPT_HASH_KEY(&s->iso) & 0xFFFC);
-      } else
-	return k + (PTR_TO_LONG(o) >> 2);
-    }
-# endif
-  case scheme_resolved_module_path_type:
-    /* Needed for interning */
-    {
-      k += 7;
-      o = SCHEME_PTR_VAL(o);
-    }
-    break;
   case scheme_place_bi_channel_type:
     {
       k += 7;
@@ -1471,13 +1837,40 @@ static uintptr_t equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Info *hi)
       o = (Scheme_Object *)((Scheme_Place_Bi_Channel *)o)->link->sendch;
     }
     break;
-  default:    
+  case scheme_resolved_module_path_type:
+    /* Needed for interning */
+    {
+      k += 7;
+      o = SCHEME_PTR_VAL(o);
+    }
+    break;
+  case scheme_module_index_type:
+    {
+      Scheme_Modidx *midx = (Scheme_Modidx *)o;
+#     include "mzhashchk.inc"
+      hi->depth += 2;
+      k++;
+      k = (k << 3) + k;
+      k += equal_hash_key(midx->path, 0, hi);
+      o = midx->base;
+    }
+    break;
+  case scheme_scope_table_type:
+    {
+      Scheme_Scope_Table *mt = (Scheme_Scope_Table *)o;
+      hi->depth += 2;
+      k = (k << 3) + k;
+      k += equal_hash_key((Scheme_Object *)mt->simple_scopes, 0, hi);
+      o = mt->multi_scopes;
+    }
+    break;
+  default:
     {
       Scheme_Primary_Hash_Proc h1 = scheme_type_hash1s[t];
       if (h1)
         return h1(o, k, hi);
       else
-        return k + (PTR_TO_LONG(o) >> 2);
+        return k + PTR_TO_LONG(o);
     }
   }
 
@@ -1485,7 +1878,7 @@ static uintptr_t equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Info *hi)
   goto top;
 }
 
-intptr_t scheme_equal_hash_key(Scheme_Object *o)
+static intptr_t slow_equal_hash_key(Scheme_Object *o)
 {
   Hash_Info hi;
 
@@ -1494,6 +1887,18 @@ intptr_t scheme_equal_hash_key(Scheme_Object *o)
   hi.insp = NULL;
 
   return to_signed_hash(equal_hash_key(o, 0, &hi));
+}
+
+intptr_t scheme_equal_hash_key(Scheme_Object *o)
+{
+  uintptr_t k;
+  int done = 1;
+
+  k = fast_equal_hash_key(o, SCHEME_TYPE(o), &done);
+  if (done)
+    return to_signed_hash(k);
+  else
+    return slow_equal_hash_key(o);
 }
 
 intptr_t scheme_equal_hash_key2(Scheme_Object *o)
@@ -1507,20 +1912,56 @@ intptr_t scheme_equal_hash_key2(Scheme_Object *o)
   return to_signed_hash(equal_hash_key2(o, &hi));
 }
 
-intptr_t scheme_eqv_hash_key(Scheme_Object *o)
+XFORM_NONGCING static uintptr_t fast_equal_hash_key2(Scheme_Object *o, int *_done)
+/* must cover eqv hash keys that are just eq hash keys */
 {
-  if (!SCHEME_INTP(o) && (SCHEME_NUMBERP(o) || SCHEME_CHARP(o)))
-    return to_signed_hash(scheme_equal_hash_key(o));
-  else
-    return to_signed_hash(PTR_TO_LONG(o));
-}
+  Scheme_Type t;
 
-intptr_t scheme_eqv_hash_key2(Scheme_Object *o)
-{
-  if (!SCHEME_INTP(o) && (SCHEME_NUMBERP(o) || SCHEME_CHARP(o)))
-    return to_signed_hash(scheme_equal_hash_key2(o));
-  else
-    return to_signed_hash(PTR_TO_LONG(o) >> 1);
+  t = SCHEME_TYPE(o);
+
+  *_done = 1;
+
+  switch(t) {
+  case scheme_true_type:
+    return 1;
+  case scheme_false_type:
+    return 2;
+  case scheme_integer_type:
+    return t - SCHEME_INT_VAL(o);
+#ifdef MZ_USE_SINGLE_FLOATS
+  case scheme_float_type:
+    {
+      return dbl_hash2_val(SCHEME_FLT_VAL(o));
+    }
+#endif
+  case scheme_double_type:
+    {
+      return dbl_hash2_val(SCHEME_DBL_VAL(o));
+    }
+#ifdef MZ_LONG_DOUBLE
+  case scheme_long_double_type:
+    {
+      return long_dbl_hash2_val(SCHEME_LONG_DBL_VAL(o));
+    }
+#endif
+  case scheme_bignum_type:
+    return SCHEME_BIGDIG(o)[0];
+  case scheme_rational_type:
+    return fast_equal_hash_key2(scheme_rational_numerator(o), _done);
+  case scheme_complex_type:
+    {
+      uintptr_t v1, v2;
+      Scheme_Complex *c = (Scheme_Complex *)o;
+      v1 = fast_equal_hash_key2(c->r, _done);
+      v2 = fast_equal_hash_key2(c->i, _done);
+      return v1 + v2;
+    }
+  case scheme_char_type:
+    return t;
+  default:
+    *_done = 0;
+    return 0;
+  }
 }
 
 static Scheme_Object *hash2_recur(int argc, Scheme_Object **argv, Scheme_Object *prim)
@@ -1578,44 +2019,25 @@ static intptr_t overflow_equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
 static uintptr_t equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
 {
   Scheme_Type t;
+  Scheme_Object *orig_obj;
+  uintptr_t r;
+  int done;
 
  top:
+  orig_obj = o;
   if (SCHEME_CHAPERONEP(o))
     o = ((Scheme_Chaperone *)o)->val;
+
+  r = fast_equal_hash_key2(o, &done);
+  if (done)
+    return r;
 
   t = SCHEME_TYPE(o);
 
   if (hi->depth > (MAX_HASH_DEPTH << 1))
     return t;
-  
+
   switch(t) {
-  case scheme_integer_type:
-    return t - SCHEME_INT_VAL(o);
-#ifdef MZ_USE_SINGLE_FLOATS
-  case scheme_float_type:
-#endif
-  case scheme_double_type:
-    {
-      return dbl_hash2_val(SCHEME_FLOAT_VAL(o));
-    }
-#ifdef MZ_LONG_DOUBLE
-  case scheme_long_double_type:
-    {
-      return long_dbl_hash2_val(SCHEME_LONG_DBL_VAL(o));
-    }
-#endif
-  case scheme_bignum_type:
-    return SCHEME_BIGDIG(o)[0];
-  case scheme_rational_type:
-    return equal_hash_key2(scheme_rational_numerator(o), hi);
-  case scheme_complex_type:
-    {
-      uintptr_t v1, v2;
-      Scheme_Complex *c = (Scheme_Complex *)o;
-      v1 = equal_hash_key2(c->r, hi);
-      v2 = equal_hash_key2(c->i, hi);
-      return v1 + v2;
-    }
   case scheme_pair_type:
     {
       uintptr_t v1, v2;
@@ -1644,6 +2066,7 @@ static uintptr_t equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
     {
       int len = SCHEME_VEC_SIZE(o), i;
       uintptr_t k = 0;
+      Scheme_Object *elem;
 
 #     include "mzhashchk.inc"
 
@@ -1651,7 +2074,11 @@ static uintptr_t equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
 
       for (i = 0; i < len; i++) {
 	SCHEME_USE_FUEL(1);
-	k += equal_hash_key2(SCHEME_VEC_ELS(o)[i], hi);
+        if (SAME_OBJ(o, orig_obj))
+          elem = SCHEME_VEC_ELS(o)[i];
+        else
+          elem = scheme_chaperone_vector_ref(orig_obj, i);
+	k += equal_hash_key2(elem, hi);
       }
       
       return k;
@@ -1692,8 +2119,6 @@ static uintptr_t equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
       return k;
     }
 #endif
-  case scheme_char_type:
-    return t;
   case scheme_byte_string_type:
   case scheme_unix_path_type:
   case scheme_windows_path_type:
@@ -1728,7 +2153,7 @@ static uintptr_t equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
     {
       Scheme_Object *procs;
 
-      procs = scheme_struct_type_property_ref(scheme_equal_property, o);
+      procs = scheme_struct_type_property_ref(scheme_equal_property, orig_obj);
       if (procs) {
         Scheme_Object *a[2], *v, *recur;
         Hash_Info *hi2;
@@ -1750,7 +2175,7 @@ static uintptr_t equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
         }
         memcpy(hi2, hi, sizeof(Hash_Info));
         
-        a[0] = o;
+        a[0] = orig_obj;
         a[1] = recur;
         
         procs = SCHEME_VEC_ELS(procs)[3];
@@ -1783,13 +2208,18 @@ static uintptr_t equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
           int i;
           uintptr_t k = 0;
           Scheme_Structure *s1 = (Scheme_Structure *)o;
+          Scheme_Object *elem;
           
 #         include "mzhashchk.inc"
 	
           hi->depth += 2;
 
           for (i = SCHEME_STRUCT_NUM_SLOTS(s1); i--; ) {
-            k += equal_hash_key2(s1->slots[i], hi);
+            if (SAME_OBJ(o, orig_obj))
+              elem = s1->slots[i];
+            else
+              elem = scheme_struct_ref(orig_obj, i);
+            k += equal_hash_key2(elem, hi);
           }
           
           return k;
@@ -1798,13 +2228,16 @@ static uintptr_t equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
       }
     }
   case scheme_box_type:
-    o = SCHEME_BOX_VAL(o);
+    if (SAME_OBJ(o, orig_obj))
+      o = SCHEME_BOX_VAL(o);
+    else
+      o = scheme_unbox(orig_obj);
     hi->depth += 2;
     goto top;
   case scheme_hash_table_type:
     {
       Scheme_Hash_Table *ht = (Scheme_Hash_Table *)o;
-      Scheme_Object **vals, **keys;
+      Scheme_Object **vals, **keys, *key, *val;
       int i;
       uintptr_t k = 0;
       intptr_t old_depth;
@@ -1818,15 +2251,29 @@ static uintptr_t equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
       vals = ht->vals;
       for (i = ht->size; i--; ) {
 	if (vals[i]) {
-	  k += equal_hash_key2(keys[i], hi);
-	  k += equal_hash_key2(vals[i], hi);
+          key = keys[i];
+          if (SAME_OBJ(o, orig_obj))
+            val = vals[i];
+          else
+            val = scheme_chaperone_hash_traversal_get(orig_obj, key, &key);
+	  k += equal_hash_key2(key, hi);
+	  k += equal_hash_key2(val, hi);
           hi->depth = old_depth;
 	}
       }
       
       return k;
     }
-  case scheme_hash_tree_type:
+  case scheme_hash_tree_indirection_type:
+    if (!SAME_OBJ(o, orig_obj)) {
+      o = (Scheme_Object *)scheme_hash_tree_resolve_placeholder((Scheme_Hash_Tree *)o);
+    } else {
+      o = (Scheme_Object *)scheme_hash_tree_resolve_placeholder((Scheme_Hash_Tree *)o);
+      orig_obj = o;
+    }
+  case scheme_hash_tree_type: /* ^^^ fallthrough ^^^ */
+  case scheme_eq_hash_tree_type:
+  case scheme_eqv_hash_tree_type:
     {
       Scheme_Hash_Tree *ht = (Scheme_Hash_Tree *)o;
       Scheme_Object *iv, *ik;
@@ -1838,10 +2285,14 @@ static uintptr_t equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
 
       hi->depth += 2;
       old_depth = hi->depth;
+
+      /* hash tree holds pre-computed hashes for keys, so use those: */
+      k += scheme_hash_tree_key_hash(ht);
       
       for (i = scheme_hash_tree_next(ht, -1); i != -1; i = scheme_hash_tree_next(ht, i)) {
         scheme_hash_tree_index(ht, i, &ik, &iv);
-        k += equal_hash_key2(ik, hi);
+        if (!SAME_OBJ(o, orig_obj))
+          iv = scheme_chaperone_hash_traversal_get(orig_obj, ik, &ik);
         k += equal_hash_key2(iv, hi);
         hi->depth = old_depth;
       }
@@ -1852,7 +2303,8 @@ static uintptr_t equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
     {
       Scheme_Bucket_Table *ht = (Scheme_Bucket_Table *)o;
       Scheme_Bucket **buckets, *bucket;
-      const char *key;
+      const char *_key;
+      Scheme_Object *key, *val;
       int i, weak;
       uintptr_t k = 0;
       intptr_t old_depth;
@@ -1868,14 +2320,18 @@ static uintptr_t equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
       for (i = ht->size; i--; ) {
 	bucket = buckets[i];
 	if (bucket) {
-	  if (weak) {
-	    key = (const char *)HT_EXTRACT_WEAK(bucket->key);
-	  } else {
-	    key = bucket->key;
-	  }
-	  if (key) {
-	    k += equal_hash_key2((Scheme_Object *)bucket->val, hi);
-	    k += equal_hash_key2((Scheme_Object *)key, hi);
+	  if (weak)
+	    _key = (const char *)HT_EXTRACT_WEAK(bucket->key);
+	  else
+	    _key = bucket->key;
+	  if (_key) {
+            key = (Scheme_Object *)_key;
+            if (SAME_OBJ(o, orig_obj))
+              val = (Scheme_Object *)bucket->val;
+            else
+              val = scheme_chaperone_hash_traversal_get(orig_obj, key, &key);
+	    k += equal_hash_key2(val, hi);
+	    k += equal_hash_key2(key, hi);
             hi->depth = old_depth;
 	  }
 	}
@@ -1887,6 +2343,26 @@ static uintptr_t equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
     /* Needed for interning */
     o = SCHEME_PTR_VAL(o);
     goto top;
+  case scheme_module_index_type:
+    {
+      Scheme_Modidx *midx = (Scheme_Modidx *)o;
+      uintptr_t v1, v2;
+#     include "mzhashchk.inc"
+      hi->depth += 2;
+      v1 = equal_hash_key2(midx->path, hi);
+      v2 = equal_hash_key2(midx->base, hi);
+      return v1 + v2;
+    }
+  case scheme_scope_table_type:
+    {
+      Scheme_Scope_Table *mt = (Scheme_Scope_Table *)o;
+      uintptr_t k;
+      hi->depth += 2;
+      k = equal_hash_key2((Scheme_Object *)mt->simple_scopes, hi);
+      k += equal_hash_key2(mt->multi_scopes, hi);
+      return k;
+    }
+    break;
   case scheme_place_bi_channel_type:
     /* a bi channel has sendch and recvch, but
        sends are the same iff recvs are the same: */
@@ -1913,499 +2389,859 @@ intptr_t scheme_recur_equal_hash_key2(Scheme_Object *o, void *cycle_data)
   return to_signed_hash(equal_hash_key2(o, (Hash_Info *)cycle_data));
 }
 
+intptr_t scheme_eqv_hash_key(Scheme_Object *o)
+{
+  if (!SCHEME_INTP(o) && (SCHEME_NUMBERP(o) || SCHEME_CHARP(o))) {
+    int done;
+    return to_signed_hash(fast_equal_hash_key(o, 0, &done));
+  } else
+    return to_signed_hash(PTR_TO_LONG(o));
+}
+
+intptr_t scheme_eqv_hash_key2(Scheme_Object *o)
+{
+  if (!SCHEME_INTP(o) && (SCHEME_NUMBERP(o) || SCHEME_CHARP(o))) {
+    int done;
+    return to_signed_hash(fast_equal_hash_key2(o, &done));
+  } else
+    return to_signed_hash(PTR_TO_LONG(o) >> 1);
+}
+
 /*========================================================================*/
 /*                        functional hash tables                          */
 /*========================================================================*/
 
-typedef struct AVLNode {
-  MZTAG_IF_REQUIRED
-  char height;
-  uintptr_t code;
-  Scheme_Object *key; /* NULL => val is another tree for multiple key-value pairs */
-  Scheme_Object *val;
-  struct AVLNode *left;  
-  struct AVLNode *right;
-} AVLNode;
+/* Based on Phil Bagwell's "Ideal Hash Trees" (2000) */
 
-#if 0
-# define AVL_ASSERT(p) if (p) { } else { scheme_signal_error("hash-tree assert failure %d", __LINE__); }
-# define AVL_ASSERT_ONLY(x) x
+#define HASHTR_KIND_MULT(kind) (!kind ? 1 : ((kind == 1) ? 2 : 3))
+#define HASH_TREE_RECORD_SIZE(kind, popcount) (sizeof(Scheme_Hash_Tree)  \
+                                               + (((HASHTR_KIND_MULT(kind) * (popcount)) - mzFLEX_DELTA) \
+                                                  * sizeof(Scheme_Object*)))
+
+#define HASHTR_HAS_VAL  0x1
+#define HASHTR_HAS_CODE 0x2
+
+/* In a hash tree without HASHTR_HAS_VAL, all values are `#t`; we nodes without
+  HASHTR_HAS_VAL to nodes with it on demand, but we don't go the other way */
+#define NOT_IMPLICIT_VALUE(v) ((v) && !SAME_OBJ(v, scheme_true))
+
+#define HASHTR_SUBTREEP(o) SAME_TYPE(SCHEME_TYPE(o), scheme_hash_tree_subtree_type)
+#define HASHTR_COLLISIONP(o) SAME_TYPE(SCHEME_TYPE(o), scheme_hash_tree_collision_type)
+
+/* max log word size depends on `hash_tree_bitmap_t` */
+#define mzHAMT_LOG_WORD_SIZE 5
+#define mzHAMT_WORD_SIZE (1 << mzHAMT_LOG_WORD_SIZE)
+
+/* Reorder bits to make the HAMT more bushy in the case that sequential
+   hash code are added: */
+#define HAMT_REORDER(h) (((h) & (HIGH_PART | LOW_LOW_PARTS | (LOW_LOW_PARTS << PART_BIT_COUNT))) \
+                         | (((h) & HIGH_LOW_PARTS) << PART_BIT_COUNT)    \
+                         | (((h) & (HIGH_LOW_PARTS << PART_BIT_COUNT)) >> PART_BIT_COUNT))
+#define HIGH_PART (~((uintptr_t)0x0) - (uintptr_t)0xFFFFFFFF)
+#define LOW_LOW_PARTS ((uintptr_t)0x3333)
+#define HIGH_LOW_PARTS ((uintptr_t)0xCCCC)
+#define PART_BIT_COUNT 16
+
+XFORM_NONGCING static Scheme_Hash_Tree *resolve_placeholder(Scheme_Hash_Tree *ht)
+{
+  /* This is ugly, but to support cyclic tables, we need a
+     level of indirection */
+  if (SAME_TYPE(SCHEME_TYPE(ht), scheme_hash_tree_indirection_type))
+    return (Scheme_Hash_Tree *)ht->els[0];
+  else
+    return ht;
+}
+
+XFORM_NONGCING static int hamt_index(uintptr_t code, int shift)
+{
+  return (code >> shift) & ((1 << mzHAMT_LOG_WORD_SIZE) - 1);
+}
+
+XFORM_NONGCING static int hamt_popcount(hash_tree_bitmap_t x)
+{
+#if MZ_HAS_BUILTIN_POPCOUNT
+  return __builtin_popcount(x);
 #else
-# define AVL_ASSERT(p) /* empty */
-# define AVL_ASSERT_ONLY(x) /* empty */
+  /* http://bits.stephan-brumme.com/countBits.html */
+  /* count bits of each 2-bit chunk */
+  x  = x - ((x >> 1) & 0x55555555);
+  /* count bits of each 4-bit chunk */
+  x  = (x & 0x33333333) + ((x >> 2) & 0x33333333);
+  /* count bits of each 8-bit chunk */
+  x  = x + (x >> 4);
+  /* mask out junk */
+  x &= 0xF0F0F0F;
+  /* add all four 8-bit chunks */
+  return (x * 0x01010101) >> 24;
+#endif
+}
+
+XFORM_NONGCING static int hamt_popcount_below(hash_tree_bitmap_t bitmap, int index)
+{
+  return hamt_popcount(bitmap & (((hash_tree_bitmap_t)1 << index) - 1));
+}
+
+XFORM_NONGCING static hash_tree_bitmap_t hamt_bit(int index)
+{
+  return ((hash_tree_bitmap_t)1 << index);
+}
+
+XFORM_NONGCING Scheme_Object *_mzHAMT_VAL(Scheme_Hash_Tree *ht, int pos, int popcount)
+{
+  return ((SCHEME_HASHTR_FLAGS(ht) & HASHTR_HAS_VAL) ? (ht)->els[(popcount)+(pos)] : scheme_true);
+}
+
+XFORM_NONGCING uintptr_t mzHAMT_KEY_CODE(Scheme_Object *o)
+{
+  while (1) {
+    if (HASHTR_COLLISIONP(o))
+      o = ((Scheme_Hash_Tree *)o)->els[0];
+    else {
+      uintptr_t h;
+      h = PTR_TO_LONG(o);
+      return HAMT_REORDER(h);
+    }
+  }
+}
+
+XFORM_NONGCING uintptr_t _mzHAMT_CODE(Scheme_Hash_Tree *ht, int pos, int popcount)
+{
+  return ((SCHEME_HASHTR_FLAGS(ht) & HASHTR_HAS_CODE) ? (uintptr_t)(ht)->els[2*(popcount)+(pos)] : mzHAMT_KEY_CODE((ht)->els[pos]));
+}
+
+#define mzHAMT_VAL(ht, pos) _mzHAMT_VAL(ht, pos, hamt_popcount((ht)->bitmap))
+#define mzHAMT_CODE(ht, pos) _mzHAMT_CODE(ht, pos, hamt_popcount((ht)->bitmap))
+
+#define _mzHAMT_SET_VAL(ht, pos, val, popcount) (ht)->els[(popcount) + (pos)] = val
+#define _mzHAMT_SET_CODE(ht, pos, code, popcount) (ht)->els[2*(popcount) + (pos)] = (Scheme_Object *)code
+
+XFORM_NONGCING static void hamt_content_copy(Scheme_Hash_Tree *dest, Scheme_Hash_Tree *src,
+                                             int dest_popcount, int src_popcount,
+                                             intptr_t dest_start, intptr_t src_start,
+                                             intptr_t len)
+{
+  memcpy(dest->els+dest_start, src->els+src_start, len*sizeof(Scheme_Object*));
+  if (SCHEME_HASHTR_FLAGS(src) & HASHTR_HAS_VAL) {
+    memcpy(dest->els+dest_popcount+dest_start, src->els+src_popcount+src_start, len*sizeof(Scheme_Object*));
+    if (SCHEME_HASHTR_FLAGS(src) & HASHTR_HAS_CODE) {
+      memcpy(dest->els+2*dest_popcount+dest_start, src->els+2*src_popcount+src_start, len*sizeof(Scheme_Object*));
+    }
+  } else if (SCHEME_HASHTR_FLAGS(dest) & HASHTR_HAS_VAL) {
+    /* make source's implicit `#t` values explicit in dest */
+    while (len--) {
+      _mzHAMT_SET_VAL(dest, dest_start+len, scheme_true, dest_popcount);
+    }
+  }
+}
+
+XFORM_NONGCING static Scheme_Hash_Tree *hamt_assoc(Scheme_Hash_Tree *ht, uintptr_t code, int *_pos, int shift)
+{
+  int index, pos;
+
+  while (1) {
+    index = hamt_index(code, shift);
+    if (ht->bitmap & hamt_bit(index)) {
+      pos = hamt_popcount_below(ht->bitmap, index);
+      if (HASHTR_SUBTREEP(ht->els[pos])) {
+        ht = (Scheme_Hash_Tree *)ht->els[pos];
+        shift += mzHAMT_LOG_WORD_SIZE;
+      } else {
+        if (code == mzHAMT_CODE(ht, pos)) {
+          *_pos = pos;
+          return ht;
+        } else
+          return NULL;
+      }
+    } else
+      return NULL;
+  }
+  
+  return NULL;
+}
+
+static Scheme_Hash_Tree *hamt_alloc(int kind, int popcount)
+/* be sure to set `bitmap` field before a GC becomes possible */
+{
+  return (Scheme_Hash_Tree *)scheme_malloc_small_tagged(HASH_TREE_RECORD_SIZE(kind, popcount));
+}
+
+static Scheme_Hash_Tree *hamt_dup(Scheme_Hash_Tree *ht, int popcount, int need_value)
+{
+  Scheme_Hash_Tree *new_ht;
+  int kind;
+
+  kind = SCHEME_HASHTR_KIND(ht);
+  new_ht = hamt_alloc(kind | (need_value ? HASHTR_HAS_VAL : 0), popcount);
+  memcpy(new_ht, ht, HASH_TREE_RECORD_SIZE(kind, popcount));
+  
+  if (!(kind & HASHTR_HAS_VAL) && need_value) {
+    /* make original's implicit `#t` values explicit in the copy */
+    int i;
+    SCHEME_HASHTR_FLAGS(new_ht) |= HASHTR_HAS_VAL;
+    for (i = popcount; i--; ) {
+      _mzHAMT_SET_VAL(new_ht, i, scheme_true, popcount);
+    } 
+  }
+
+  return new_ht;
+}
+
+static Scheme_Hash_Tree *hamt_make1(Scheme_Hash_Tree *ht, int index)
+/* allocates a node that has a single entry, which is another node */
+{
+  Scheme_Hash_Tree *new_ht;
+  int kind;
+
+  kind = SCHEME_HASHTR_KIND(ht);
+  new_ht = hamt_alloc(kind, 1);
+  new_ht->iso.so.type = scheme_hash_tree_subtree_type;
+  SCHEME_HASHTR_FLAGS(new_ht) = kind;
+  new_ht->bitmap = hamt_bit(index);
+  new_ht->count = ht->count;
+  new_ht->els[0] = (Scheme_Object *)ht;
+
+  return new_ht;
+}
+
+static Scheme_Hash_Tree *hamt_make2(int kind, int shift,
+                                    uintptr_t code1, Scheme_Object *key1, Scheme_Object *val1,
+                                    uintptr_t code2, Scheme_Object *key2, Scheme_Object *val2)
+/* allocates a subtree (at the level indicated by `shift`) for two
+   values, pushing them down to further subtress as needed */
+{
+  int index1, index2, pos1, pos2;
+  Scheme_Hash_Tree *new_ht;
+
+  index1 = hamt_index(code1, shift);
+  index2 = hamt_index(code2, shift);
+  if (index1 == index2) {
+    /* since hash codes map to the same index at this level,
+       we need another level */
+    new_ht = hamt_make2(kind, shift + mzHAMT_LOG_WORD_SIZE,
+                        code1, key1, val1,
+                        code2, key2, val2);
+    return hamt_make1(new_ht, index1);
+  } else {
+    kind = kind | ((NOT_IMPLICIT_VALUE(val1) || NOT_IMPLICIT_VALUE(val2)) ? HASHTR_HAS_VAL : 0);
+    new_ht = hamt_alloc(kind, 2);
+    new_ht->iso.so.type = scheme_hash_tree_subtree_type;
+    SCHEME_HASHTR_FLAGS(new_ht) = kind;
+    new_ht->bitmap = (hamt_bit(index1) | hamt_bit(index2));
+    new_ht->count = 2;
+    if (HASHTR_COLLISIONP(key1))
+      new_ht->count += (((Scheme_Hash_Tree *)key1)->count - 1);
+    if (HASHTR_COLLISIONP(key2))
+      new_ht->count += (((Scheme_Hash_Tree *)key2)->count - 1);
+    if (index1 < index2) {
+      pos1 = 0;
+      pos2 = 1;
+    } else {
+      pos1 = 1;
+      pos2 = 0;
+    }
+    new_ht->els[pos1] = key1;
+    new_ht->els[pos2] = key2;
+    if (SCHEME_HASHTR_FLAGS(new_ht) & HASHTR_HAS_VAL) {
+      _mzHAMT_SET_VAL(new_ht, pos1, val1, 2);
+      _mzHAMT_SET_VAL(new_ht, pos2, val2, 2);
+      if (SCHEME_HASHTR_FLAGS(new_ht) & HASHTR_HAS_CODE) {
+        _mzHAMT_SET_CODE(new_ht, pos1, code1, 2);
+        _mzHAMT_SET_CODE(new_ht, pos2, code2, 2);
+      }
+    }
+    return new_ht;
+  }
+}
+
+static Scheme_Hash_Tree *hamt_set(Scheme_Hash_Tree *ht, uintptr_t code, int shift,
+                                  Scheme_Object *key, Scheme_Object *val, int inc)
+/* updates `ht` (at level `shift`) to replace or add the mapping for `code`,
+   adjusting the overall count by `inc` */
+{
+  int index, pos, popcount;
+  Scheme_Hash_Tree *new_ht;
+
+  index = hamt_index(code, shift);
+  pos = hamt_popcount_below(ht->bitmap, index);
+  popcount = hamt_popcount(ht->bitmap);
+  
+  if (ht->bitmap & hamt_bit(index)) {
+    /* Replacing: */
+    new_ht = hamt_dup(ht, popcount, NOT_IMPLICIT_VALUE(val));
+    if (HASHTR_SUBTREEP(ht->els[pos])) {
+      ht = (Scheme_Hash_Tree *)ht->els[pos];
+      ht = hamt_set(ht, code, shift + mzHAMT_LOG_WORD_SIZE, key, val, inc);
+      new_ht->els[pos] = (Scheme_Object *)ht;
+      new_ht->count += inc;
+    } else {
+      if (code == _mzHAMT_CODE(new_ht, pos, popcount)) {
+        new_ht->els[pos] = key;
+        if (SCHEME_HASHTR_FLAGS(new_ht) & HASHTR_HAS_VAL)
+          _mzHAMT_SET_VAL(new_ht, pos, val, popcount);
+        new_ht->count += inc;
+      } else {
+        /* make a new level */
+        ht = hamt_make2(SCHEME_HASHTR_KIND(new_ht), shift + mzHAMT_LOG_WORD_SIZE,
+                        _mzHAMT_CODE(new_ht, pos, popcount), new_ht->els[pos], _mzHAMT_VAL(new_ht, pos, popcount),
+                        code, key, val);
+        new_ht->els[pos] = (Scheme_Object *)ht;
+        if (SCHEME_HASHTR_FLAGS(new_ht) & HASHTR_HAS_VAL)
+          _mzHAMT_SET_VAL(new_ht, pos, NULL, popcount);
+        new_ht->count += inc;
+      }
+    }
+  } else {
+    int kind = SCHEME_HASHTR_KIND(ht) | (NOT_IMPLICIT_VALUE(val) ? HASHTR_HAS_VAL : 0);
+    new_ht = hamt_alloc(kind, popcount+1);
+    memcpy(new_ht, ht, HASH_TREE_RECORD_SIZE(SCHEME_HASHTR_KIND(ht), 0));
+    SCHEME_HASHTR_FLAGS(new_ht) |= kind;
+    hamt_content_copy(new_ht, ht, popcount+1, popcount, 0, 0, pos);
+    if (pos < popcount)
+      hamt_content_copy(new_ht, ht, popcount+1, popcount, pos+1, pos, popcount-pos);
+    new_ht->bitmap |= hamt_bit(index);
+    new_ht->count += inc;
+    new_ht->els[pos] = key;
+    if (SCHEME_HASHTR_FLAGS(new_ht) & HASHTR_HAS_VAL) {
+      _mzHAMT_SET_VAL(new_ht, pos, val, popcount+1);
+      if (SCHEME_HASHTR_FLAGS(new_ht) & HASHTR_HAS_CODE)
+        _mzHAMT_SET_CODE(new_ht, pos, code, popcount+1);
+    }
+  }
+  
+  return new_ht;
+}
+
+static Scheme_Hash_Tree *hamt_contract(Scheme_Hash_Tree *ht, int popcount, int index, int pos)
+/* return a node that's smaller by one by dropping the mapping at `pos` */
+{
+  Scheme_Hash_Tree *new_ht;
+
+  if (popcount == 1)
+    return NULL;
+
+  new_ht = hamt_alloc(SCHEME_HASHTR_KIND(ht), popcount-1);
+  memcpy(new_ht, ht, HASH_TREE_RECORD_SIZE(SCHEME_HASHTR_KIND(ht), 0));
+  hamt_content_copy(new_ht, ht, popcount-1, popcount, 0, 0, pos);
+  if (pos < popcount-1)
+    hamt_content_copy(new_ht, ht, popcount-1, popcount, pos, pos+1, popcount-pos-1);
+  new_ht->bitmap -= hamt_bit(index);
+  --new_ht->count;
+
+  return new_ht;
+}
+
+static Scheme_Hash_Tree *hamt_remove(Scheme_Hash_Tree *ht, uintptr_t code, int shift)
+/* remove the mapping for `code`, where `ht` is at the level indicated by `shift` */
+{
+  int index, pos, popcount;
+  Scheme_Hash_Tree *sub_ht;
+
+  index = hamt_index(code, shift);
+  if (ht->bitmap & hamt_bit(index)) {
+    pos = hamt_popcount_below(ht->bitmap, index);
+    popcount = hamt_popcount(ht->bitmap);
+    if (!HASHTR_SUBTREEP(ht->els[pos]))
+      return hamt_contract(ht, popcount, index, pos);
+    else {
+      sub_ht = hamt_remove((Scheme_Hash_Tree *)ht->els[pos], code, shift + mzHAMT_LOG_WORD_SIZE);
+      if (!SAME_OBJ((Scheme_Object *)sub_ht, ht->els[pos])) {
+        if (!sub_ht)
+          return hamt_contract(ht, popcount, index, pos);
+        ht = hamt_dup(ht, popcount, 0);
+        ht->count -= 1;
+        if (((sub_ht->count == 1) && !HASHTR_SUBTREEP(sub_ht->els[0]))
+            || (HASHTR_COLLISIONP(sub_ht->els[0])
+                && (sub_ht->count == ((Scheme_Hash_Tree *)sub_ht->els[0])->count))) {
+          /* drop extra layer that has 1 immediate entry */
+          ht->els[pos] = sub_ht->els[0];
+          if (!(SCHEME_HASHTR_FLAGS(ht) & HASHTR_HAS_VAL) && (SCHEME_HASHTR_FLAGS(sub_ht) & HASHTR_HAS_VAL))
+            ht = hamt_dup(ht, popcount, 1);
+          if (SCHEME_HASHTR_FLAGS(ht) & HASHTR_HAS_VAL) {
+            _mzHAMT_SET_VAL(ht, pos, _mzHAMT_VAL(sub_ht, 0, 1), popcount);
+            if (SCHEME_HASHTR_FLAGS(ht) & HASHTR_HAS_CODE)
+              _mzHAMT_SET_CODE(ht, pos, _mzHAMT_CODE(sub_ht, 0, 1), popcount);
+          }
+        } else
+          ht->els[pos] = (Scheme_Object *)sub_ht;
+        return ht;
+      } else
+        return ht;
+    }
+  } else
+    return ht;
+}
+
+/* this signature is different from other scheme_<hash type>_next fns */
+/* but is used else where, so leave as is */
+mzlonglong scheme_hash_tree_next(Scheme_Hash_Tree *tree, mzlonglong pos)
+{
+  mzlonglong i = pos+1;
+  if (i == tree->count)
+    return -1;
+  else
+    return i;
+}
+
+Scheme_Object *scheme_hash_tree_next_pos(Scheme_Hash_Tree *tree, mzlonglong pos)
+{
+  mzlonglong i = pos+1;
+  if (i == tree->count)
+    return scheme_false;
+  else
+    return scheme_make_integer_value_from_long_long(i);
+}
+
+#if REVERSE_HASH_TABLE_ORDER
+# define HAMT_TRAVERSE_INIT(popcount) ((popcount)-1)
+# define HAMT_TRAVERSE_NEXT(i) ((i)-1)
+#else
+# define HAMT_TRAVERSE_INIT(popcount) 0
+# define HAMT_TRAVERSE_NEXT(i) ((i)+1)
 #endif
 
-static AVLNode *make_avl(AVLNode *left,
-                         uintptr_t code, Scheme_Object *key, Scheme_Object *val,
-                         AVLNode *right)
+#define mzHAMT_MAX_INDEX_LEVEL 4 /* For the compressed form of the index */
+
+/* instead of returning a pos, these unsafe iteration ops */
+/* return a view into the tree consisting of a: */
+/*   - subtree */
+/*   - subtree index */
+/*   - stack of parent subtrees and indices */
+/* For small hashes, it uses a compressed representation as fixnums */
+/*   - (#h i0) --> (+ (<< 1 5) i0) */
+/*   - (#h i1 #h i0) --> (+ (<< 1 10) (<< i1 5) i0) */
+/*   - (#h i2 #h i1 #h i0) --> (+ (<< 1 15) (<< i2 10) (<< i1 5) i0) */
+/*   - ...  */
+/* This speeds up performance of immutable hash table iteration. */
+/* These unsafe ops currently do not support REVERSE_HASH_TABLE_ORDER */
+/* to avoid unneeded popcount computations */
+Scheme_Object *scheme_unsafe_hash_tree_start(Scheme_Hash_Tree *ht)
 {
-  AVLNode *avl;
+  Scheme_Object *stack = scheme_null;
+  int j, i, i_n[mzHAMT_MAX_INDEX_LEVEL], level;
+  Scheme_Hash_Tree *ht_n[mzHAMT_MAX_INDEX_LEVEL];
 
-  avl = MALLOC_ONE_TAGGED(AVLNode);
-  SET_REQUIRED_TAG(avl->type = scheme_rt_avl_node);
-  avl->code = code;
-  avl->key = key;
-  avl->val = val;
-  avl->left = left;
-  avl->right = right;
+  ht = resolve_placeholder(ht);
 
-  return avl;
+  if (!ht->count)
+    return scheme_false;
+
+  i = hamt_popcount(ht->bitmap)-1;
+  level = 0;
+  
+  while ((HASHTR_SUBTREEP(ht->els[i])
+          || HASHTR_COLLISIONP(ht->els[i]))) {
+    /* go down tree but save return point */
+    if (level == -1) {
+      stack = scheme_make_pair((Scheme_Object *)ht,
+                               scheme_make_pair(scheme_make_integer(i),
+                                                stack));
+    } else if (level < mzHAMT_MAX_INDEX_LEVEL) {
+      ht_n[level] = ht;
+      i_n[level] = i;
+      level++;
+    } else {
+      stack = scheme_null;
+      for (j = 0; j < mzHAMT_MAX_INDEX_LEVEL; j++) {
+        stack = scheme_make_pair((Scheme_Object *)ht_n[j],
+                                  scheme_make_pair(scheme_make_integer(i_n[j]),
+                                                   stack));
+      }
+      stack = scheme_make_pair((Scheme_Object *)ht,
+                               scheme_make_pair(scheme_make_integer(i),
+                                                stack));
+      level = -1;
+    }
+    ht = (Scheme_Hash_Tree *)ht->els[i];
+    i = hamt_popcount(ht->bitmap)-1;
+  }
+
+  if (level == -1) {
+    stack = scheme_make_pair((Scheme_Object *)ht,
+                             scheme_make_pair(scheme_make_integer(i),
+                                              stack));
+    return stack;
+  } else {
+    i = (1<<mzHAMT_LOG_WORD_SIZE) + i;
+    for (j = level-1; j >= 0 ; j--) {
+      i = (i<<mzHAMT_LOG_WORD_SIZE) + i_n[j];
+    }
+    return scheme_make_integer(i);
+  }
 }
 
-static AVLNode *avl_clone(AVLNode *avl)
+/* args is a (cons subtree (cons subtree-index stack-of-parents))
+   or the comppressed representation as a fixnum */
+XFORM_NONGCING void scheme_unsafe_hash_tree_subtree(Scheme_Object *obj, Scheme_Object *args,
+                                                    Scheme_Hash_Tree **_subtree, int *_i)
 {
-  AVLNode *naya;
-  naya = MALLOC_ONE_TAGGED(AVLNode);
-  memcpy(naya, avl, sizeof(AVLNode));
-  return naya;
-}
+  Scheme_Hash_Tree *subtree;
+  int i;
 
-XFORM_NONGCING static int get_height(AVLNode* t)
-{
-  if (t == NULL)
-    return 0;
-  else
-    return t->height;
-}
-
-XFORM_NONGCING static int get_balance(AVLNode* t)
-{
-  return get_height(t->left) - get_height(t->right);
-}
-
-XFORM_NONGCING static void fix_height(AVLNode* t)
-{
-  int h;
-  h = get_height(t->left);
-  if (get_height(t->right) > h)
-    h = get_height(t->right);
-  t->height = h + 1;
-}
-
-XFORM_NONGCING static AVLNode *avl_find(uintptr_t code, AVLNode *s)
-{
-  while (1) {
-    if (!s)
-      return NULL;
-    
-    if (s->code == code)
-      return s;
-    else if (s->code > code)
-      s = s->left;
+  if (SCHEME_PAIRP(args)) {
+    subtree = (Scheme_Hash_Tree *)SCHEME_CAR(args);
+    i = SCHEME_INT_VAL(SCHEME_CADR(args));
+  } else {
+    if (SCHEME_NP_CHAPERONEP(obj))
+      subtree = (Scheme_Hash_Tree *)SCHEME_CHAPERONE_VAL(obj);
     else
-      s = s->right;
-  }
-}
-
-static AVLNode *AVL_CHK(AVLNode *avl, uintptr_t code)
-{
-  AVL_ASSERT(avl_find(code, avl));
-  return avl;
-}
-  
-AVLNode* check_rotate_right(AVLNode* t)
-{
-  if (get_balance(t) == 2) {
-    /* need to rotate right */
-    AVLNode* left = t->left;
-    left = avl_clone(left);
-    if (get_balance(left) < 0) {
-      /* double right rotation */
-      AVLNode* left_right = left->right;
-      left_right = avl_clone(left_right);
-      left->right = left_right->left;
-      left_right->left = left;
-      fix_height(left);
-      left = left_right;
+      subtree = (Scheme_Hash_Tree *)obj;
+    subtree = resolve_placeholder(subtree);
+    i = SCHEME_INT_VAL(args);
+    while (i >= (1<<(2*mzHAMT_LOG_WORD_SIZE))) {
+      subtree = (Scheme_Hash_Tree *)subtree->els[i & ((1<<mzHAMT_LOG_WORD_SIZE)-1)];
+      i = i >> mzHAMT_LOG_WORD_SIZE;
     }
-    t = avl_clone(t);
-    t->left = left->right;
-    left->right = t;
-    fix_height(t);
-    fix_height(left);
-    return left;
-  }
-   
-  return t;
-}
-
-AVLNode* check_rotate_left(AVLNode* t)
-{
-  if (get_balance(t) == -2) {
-    /* need to rotate left */
-    AVLNode* right = t->right;
-    right = avl_clone(right);
-    if (get_balance(right) > 0) {
-      /* double left rotation */
-      AVLNode* right_left = right->left;
-      right_left = avl_clone(right_left);
-      right->left = right_left->right;
-      right_left->right = right;
-      fix_height(right);
-      right = right_left;
-    } else
-      right = avl_clone(right);
-    t = avl_clone(t);
-    t->right = right->left;
-    right->left = t;
-    fix_height(t);
-    fix_height(right);
-    return right;
+    i = i & ((1<<mzHAMT_LOG_WORD_SIZE)-1);
   }
   
-  return t;
+  *_subtree = subtree;
+  *_i =i;
 }
 
-static AVLNode *avl_ins(uintptr_t code, Scheme_Object *key, Scheme_Object *val, AVLNode *t)
+XFORM_NONGCING Scheme_Object *scheme_unsafe_hash_tree_access(Scheme_Hash_Tree *subtree, int i)
 {
-  if (t == NULL)
-    return AVL_CHK(make_avl(NULL, code, key, val, NULL), code);
-  else {
-    if (t->code > code) {
-      /* insert on left */
-      AVLNode *left;
-
-      left = avl_ins(code, key, val, t->left);
-      if (left == t->left)
-        return t;
-      
-      t = avl_clone(t);
-      t->left = left;
-      fix_height(t);
-      
-      return check_rotate_right(t);
-    } else if (t->code < code) {
-      /* insert on right */
-      AVLNode *right;
-      
-      right = avl_ins(code, key, val, t->right);
-      if (right == t->right)
-        return t;
-      
-      t = avl_clone(t);
-      t->right = right;
-      fix_height(t);
-      
-      return check_rotate_left(t);
-    } else
-      return t;
-  }
+  return _mzHAMT_VAL(subtree, i, hamt_popcount(subtree->bitmap));
 }
 
-static AVLNode* avl_del(AVLNode* t, uintptr_t code)
+/* args is a (cons subtree (cons subtree-index stack-of-parents))
+   or the comppressed representation as a fixnum */
+Scheme_Object *scheme_unsafe_hash_tree_next(Scheme_Hash_Tree *ht, Scheme_Object *args)
 {
-  if (t == NULL)
-    return NULL;
-  else {
-    if (code < t->code) {
-      /* delete on left */
-      AVLNode *new_left;
-      
-      new_left = avl_del(t->left, code);
-      if (new_left == t->left)
-        return t;
-      
-      t = avl_clone(t);
-      t->left = new_left;
-      fix_height(t);
-      return check_rotate_left(t);
-    } else if (code > t->code) {
-      /* delete on right */
-      AVLNode *new_right;
-      
-      new_right = avl_del(t->right, code);
-      if (new_right == t->right)
-        return t;
-      
-      t = avl_clone(t);
-      t->right = new_right;
-      fix_height(t);
-      return check_rotate_right(t);
-    } else {
-      if (!t->left)
-        return t->right;
-      else if (!t->right)
-        return t->left;
-      else {
-        AVLNode *lm, *new_left;
-        /* Get the max of the left: */
-        for (lm = t->left; lm->right != NULL; lm = lm->right) {
-        }
-        /* Delete it: */
-        new_left = avl_del(t->left, lm->code);
-        /* Use it in place of t: */
-        lm = avl_clone(lm);
-        lm->left = new_left;
-        lm->right = t->right;
-        fix_height(lm);
+  Scheme_Object *stack = scheme_null;
+  int j, i, i_n[mzHAMT_MAX_INDEX_LEVEL], level;
+  Scheme_Hash_Tree *ht_n[mzHAMT_MAX_INDEX_LEVEL];
 
-        if (get_balance(lm) == -2)
-          return check_rotate_left(lm);
-        else
-          return check_rotate_right(lm);
-      }
-    }
-  }
-}
-
-static AVLNode *avl_replace(AVLNode *s, AVLNode *orig, AVLNode *naya)
-{
-  AVLNode *next;
-
-  if (SAME_OBJ(s, orig))
-    return naya;
-
-  s = avl_clone(s);
-
-  if (s->code > orig->code) {
-    next = avl_replace(s->left, orig, naya);
-    s->left = next;
+  if (SCHEME_PAIRP(args)) {
+    ht = (Scheme_Hash_Tree *)SCHEME_CAR(args);
+    i = SCHEME_INT_VAL(SCHEME_CADR(args));
+    stack = SCHEME_CDDR(args);
+    level = -1; /* -1 = too big */
   } else {
-    next = avl_replace(s->right, orig, naya);
-    s->right = next;
+    ht = resolve_placeholder(ht);
+    i = SCHEME_INT_VAL(args);
+    level = 0;
+    while (i >= (1<<(2*mzHAMT_LOG_WORD_SIZE))) {
+      ht_n[level] = ht;
+      i_n[level] = i & ((1<<mzHAMT_LOG_WORD_SIZE)-1);
+      ht = (Scheme_Hash_Tree *)ht->els[i_n[level]];
+      i = i >> mzHAMT_LOG_WORD_SIZE;
+      level++;
+    }
+    i = i & ((1<<mzHAMT_LOG_WORD_SIZE)-1);
   }
 
-  return s;
-}
-
-Scheme_Hash_Tree *scheme_make_hash_tree(int kind)
-{
-  Scheme_Hash_Tree *tree;
-
-  tree = MALLOC_ONE_TAGGED(Scheme_Hash_Tree);
-
-  tree->count = 0;
-  
-  tree->iso.so.type = scheme_hash_tree_type;
-  SCHEME_HASHTR_FLAGS(tree) |= (kind & 0x3);
-
-  return tree;
-}
-
-static intptr_t search_nodes(AVLNode *n, Scheme_Object *key, int kind)
-/* O(N) search full tree to find a code for `key'; returns -1 if not found */
-{
-  intptr_t code;
-
-  if ((kind && ((kind == 1)
-                ? scheme_equal(n->key, key)
-                : scheme_eqv(n->key, key)))
-      || (!kind && SAME_OBJ(n->key, key)))
-    return n->code;
-
-  if (n->left) {
-    code = search_nodes(n->left, key, kind);
-    if (code >= 0) 
-      return code;
-  }
-
-  if (n->right)
-    return search_nodes(n->right, key, kind);
-  else
-    return -1;
-}
-
-XFORM_NONGCING static intptr_t search_nodes_eq(AVLNode *n, Scheme_Object *key)
-/* O(N) search full tree to find a code for `key'; returns -1 if not found */
-{
-  intptr_t code;
-
-  if (SAME_OBJ(n->key, key))
-    return n->code;
-
-  if (n->left) {
-    code = search_nodes_eq(n->left, key);
-    if (code >= 0) 
-      return code;
-  }
-
-  if (n->right)
-    return search_nodes_eq(n->right, key);
-  else
-    return -1;
-}
-
-XFORM_NONGCING static intptr_t fresh_code(AVLNode *root)
-/* O(n) search for an available code */
-{
-  int i = 0;
   while (1) {
-    if (!avl_find(i, root))
-      return i;
-    i++;
-  }
-}
-
-static void *hash_tree_set(Scheme_Hash_Tree *tree, Scheme_Object *key, Scheme_Object *val, intptr_t h,
-                           AVLNode *root, int kind)
-{
-  Scheme_Hash_Tree *tree2;
-  AVLNode *added;
-  int delta;
-
-  if (!val) {
-    /* Removing ... */
-    added = avl_find(h, root);
-    if (!added) {
-       /* nothing to remove */
-      return (tree ? (void *)tree : (void *)root);
-    }
-    if (added->key) {
-      if ((kind && ((kind == 1)
-                    ? scheme_equal(added->key, key)
-                    : scheme_eqv(added->key, key)))
-          || (!kind && SAME_OBJ(added->key, key))) {
-        /* remove single item */
-        root = avl_del(root, h);
-        
-        if (tree) {
-          tree2 = MALLOC_ONE_TAGGED(Scheme_Hash_Tree);
-          memcpy(tree2, tree, sizeof(Scheme_Hash_Tree));
-          
-          tree2->root = root;
-          --tree2->count;
-          
-          return tree2;
-        } else
-          return root;
+    if (!i) { /* pop up the tree */
+      if (level == -1) {
+        ht = (Scheme_Hash_Tree *)SCHEME_CAR(stack);
+        i = SCHEME_INT_VAL(SCHEME_CADR(stack));
+        stack = SCHEME_CDDR(stack);
+        if (SCHEME_NULLP(stack))
+          level = 0;
+      } else if (!level) {
+        return scheme_false;
       } else {
-        /* Nothing to remove */
-        return (tree ? (void *)tree : (void *)root);
+        level--;
+        ht = ht_n[level];
+        i = i_n[level];
       }
-    } else {
-      /* multiple mappings; remove it below */
-    }
-  } else {
-    /* Adding/setting: */
-    root = avl_ins(h, NULL, NULL, root);
-    added = avl_find(h, root);
-  }
-
-  delta = 0;
-  
-  if (added->val) {
-    if (!added->key) {
-      /* Have a subtree of keys and vals (with bogus "code"s). */
-      AVLNode *savl = (AVLNode *)added->val;
-      intptr_t code;
-      code = search_nodes(savl, key, kind);
-      if (code < 0) {
-        /* Not mapped already: */
-        if (!val) {
-          /* nothing to remove after all */
-          return (tree ? (void *)tree : (void *)root);
-        }
-        savl = (AVLNode *)hash_tree_set(NULL, key, val, fresh_code(savl), savl, kind);
-        val = (Scheme_Object *)savl;
-        key = NULL;
-        delta = 1;
-      } else {
-        /* Mapped already: */
-        savl = (AVLNode *)hash_tree_set(NULL, key, val, code, savl, kind);
-        if (val) {
-          /* Updated */
-          val = (Scheme_Object *)savl;
-          key = NULL;
+    } else { /* go to next node */
+      i--;
+      if (!(HASHTR_SUBTREEP(ht->els[i])
+            || HASHTR_COLLISIONP(ht->els[i]))) {
+        if (level == -1) {
+          stack = scheme_make_pair((Scheme_Object *)ht,
+                                   scheme_make_pair(scheme_make_integer(i),
+                                                    stack));
+          return stack;
         } else {
-          /* Removed */
-          delta = -1;
-          if (!savl->left && !savl->right) {
-            /* Removal reduced to a single mapping: */
-            val = savl->val;
-            key = savl->key;
-          } else {
-            val = (Scheme_Object *)savl;
-            key = NULL;
+          i = (1<<mzHAMT_LOG_WORD_SIZE) + i;
+          for (j = level-1; j >= 0 ; j--) {
+            i = (i<<mzHAMT_LOG_WORD_SIZE) + i_n[j];
           }
+          return scheme_make_integer(i);
         }
-      }
-    } else {
-      /* Currently have one value for this hash code */
-      int same;
-      if (kind) {
-        if (kind == 1)
-          same = scheme_equal(key, added->key);
-        else
-          same = scheme_eqv(key, added->key);
-      } else {
-        same = SAME_OBJ(key, added->key);
-      }
-      if (!same) {
-        /* Switch to sub-tree mode to hold mulitple keys for the
-           same code: */
-        static AVLNode *sn;
-
-        /* avoid intermediate allocations by constructing directly: */
-        sn = make_avl(NULL, 1, added->key, added->val, NULL);
-        sn = make_avl(NULL, 0, key, val, sn);
-
-        val = (Scheme_Object *)sn;
-        key = NULL;
-        delta = 1;
+      } else { /* go down tree but save return point */
+        if (level == -1) {
+          stack = scheme_make_pair((Scheme_Object *)ht,
+                                   scheme_make_pair(scheme_make_integer(i),
+                                                    stack));
+        } else if (level < mzHAMT_MAX_INDEX_LEVEL) {
+          ht_n[level] = ht;
+          i_n[level] = i;
+          level++;
+        } else {
+          stack = scheme_null;
+          for (j = 0; j < mzHAMT_MAX_INDEX_LEVEL; j++) {
+            stack = scheme_make_pair((Scheme_Object *)ht_n[j],
+                                     scheme_make_pair(scheme_make_integer(i_n[j]),
+                                                      stack));
+          }
+          stack = scheme_make_pair((Scheme_Object *)ht,
+                                   scheme_make_pair(scheme_make_integer(i),
+                                                    stack));
+          level = -1;
+        }
+        ht = (Scheme_Hash_Tree *)ht->els[i];
+        i = hamt_popcount(ht->bitmap);
       }
     }
-    root = avl_replace(root,
-                       added,
-                       make_avl(added->left,
-                                added->code, key, val,
-                                added->right));
-  } else {
-    added->key = key;
-    added->val = val;
-    delta = 1;
   }
-
-  if (tree) {
-    tree2 = MALLOC_ONE_TAGGED(Scheme_Hash_Tree);
-    memcpy(tree2, tree, sizeof(Scheme_Hash_Tree));
-    
-    if (delta)
-      tree2->count += delta;
-    tree2->root = root;
-    
-    return tree2;
-  } else
-    return root;
 }
 
-Scheme_Hash_Tree *scheme_hash_tree_set(Scheme_Hash_Tree *tree, Scheme_Object *key, Scheme_Object *val)
+XFORM_NONGCING static void hamt_at_index(Scheme_Hash_Tree *ht, mzlonglong pos,
+                                         Scheme_Object **_key, Scheme_Object **_val, uintptr_t *_code)
 {
-  uintptr_t h;
-  int kind = (SCHEME_HASHTR_FLAGS(tree) & 0x3);
+  int popcount, i;
+  Scheme_Hash_Tree *sub;
 
-  if (kind) {
-    if (kind == 1) {
-      h = to_unsigned_hash(scheme_equal_hash_key(key));
-    } else {
-      h = to_unsigned_hash(scheme_eqv_hash_key(key));
+  while (1) {
+    popcount = hamt_popcount(ht->bitmap);
+    i = HAMT_TRAVERSE_INIT(popcount);
+    while (1) {
+      if (HASHTR_SUBTREEP(ht->els[i])
+          || HASHTR_COLLISIONP(ht->els[i])) {
+        sub = (Scheme_Hash_Tree *)ht->els[i];
+        if (pos < sub->count) {
+          ht = sub;
+          break; /* to outer loop */
+        } else
+          pos -= sub->count;
+      } else {
+        if (!pos) {
+          *_key = ht->els[i];
+          if (_val)
+            *_val = _mzHAMT_VAL(ht, i, popcount);
+          if (_code)
+            *_code = _mzHAMT_CODE(ht, i, popcount);
+          return;
+        }
+        --pos;
+      }
+      i = HAMT_TRAVERSE_NEXT(i);
     }
-  } else {
-    h = PTR_TO_LONG((Scheme_Object *)key);
+  }
+}
+
+int scheme_hash_tree_index(Scheme_Hash_Tree *ht, mzlonglong pos, Scheme_Object **_key, Scheme_Object **_val)
+{
+  ht = resolve_placeholder(ht);
+
+  if (pos < ht->count) {
+    hamt_at_index(ht, pos, _key, _val, NULL);
+    return 1;
+  } else
+    return 0;
+}
+
+static Scheme_Object *hamt_linear_search(Scheme_Hash_Tree *tree, int stype, Scheme_Object *key,
+                                         GC_CAN_IGNORE int *_i, GC_CAN_IGNORE uintptr_t *_code,
+                                         Scheme_Object *key_wraps)
+/* in the case of hash collisions, we put the colliding elements in a
+   tree that uses integers as keys; we have to search through the tree
+   for keys, but the advatange of using a HAMT (instead of a list) is
+   in indexing (as part of the encloding tree) and update */
+{
+  int i;
+  Scheme_Object *found_key, *found_val;
+
+  for (i = 0; i < tree->count; i++) {
+    hamt_at_index(tree, i, &found_key, &found_val, _code);
+    if (stype == scheme_eq_hash_tree_type) {
+      if (SAME_OBJ(key, found_key)) {
+        if (_i) *_i = i;
+        return found_val;
+      }
+    } else if (stype == scheme_hash_tree_type) {
+      if (equal_w_key_wraps(key, found_key, key_wraps)) {
+        if (_i) *_i = i;
+        return found_val;
+      }
+    } else {
+      if (scheme_eqv(key, found_key)) {
+        if (_i) *_i = i;
+        return found_val;
+      }
+    }
   }
 
-  return (Scheme_Hash_Tree *)hash_tree_set(tree, key, val, h, tree->root, kind);
+  return NULL;
+}
+
+XFORM_NONGCING static Scheme_Object *hamt_eq_linear_search(Scheme_Hash_Tree *tree, Scheme_Object *key)
+/* specialized for `eq?`, where we know that comparison doesn't trigger a GC */
+{
+  int i;
+  Scheme_Object *found_key, *found_val;
+  uintptr_t found_code;
+
+  for (i = 0; i < tree->count; i++) {
+    hamt_at_index(tree, i, &found_key, &found_val, &found_code);
+    if (SAME_OBJ(key, found_key))
+      return found_val;
+  }
+
+  return NULL;
+}
+
+XFORM_NONGCING static uintptr_t hamt_find_free_code(Scheme_Hash_Tree *tree, int base, int shift)
+/* for selecting a key when adding to a hash-collision subtree */
+{
+  int i, mincount, minpos;
+  Scheme_Hash_Tree *subtree;
+  
+  for (i = 0; i < mzHAMT_WORD_SIZE; i++) {
+    if (!(tree->bitmap & ((unsigned)1 << i)))
+      return (i << shift) + base;
+  }
+
+  /* first layer is full; pick next layer */
+  mincount = -1;
+  minpos = mzHAMT_WORD_SIZE;
+  for (i = mzHAMT_WORD_SIZE; i--; ) {
+    if (!HASHTR_SUBTREEP(tree->els[i])) {
+      uintptr_t code = ((unsigned)i << shift) + base;
+      if (_mzHAMT_CODE(tree, i, mzHAMT_WORD_SIZE) == code)
+        return code + ((unsigned)1 << (shift + mzHAMT_LOG_WORD_SIZE));
+      else
+        return code;
+    } else {
+      subtree = (Scheme_Hash_Tree *)tree->els[i];
+      if ((mincount < 0)
+          || (subtree->count < mincount)) {
+        mincount = subtree->count;
+        minpos = i;
+      }
+    }
+  }
+
+  return hamt_find_free_code((Scheme_Hash_Tree *)tree->els[minpos],
+                             ((unsigned)minpos << shift) + base,
+                             shift + mzHAMT_LOG_WORD_SIZE);
+}
+
+static Scheme_Hash_Tree *make_hash_tree(int eql_kind, int popcount)
+{
+  Scheme_Hash_Tree *ht;
+  int kind = (eql_kind ? (HASHTR_HAS_CODE | HASHTR_HAS_VAL) : 0);
+
+  ht = hamt_alloc(kind, popcount);
+
+  ht->iso.so.type = (!eql_kind
+                     ? scheme_eq_hash_tree_type
+                     : ((eql_kind == 1)
+                        ? scheme_hash_tree_type
+                        : scheme_eqv_hash_tree_type));
+  SCHEME_HASHTR_FLAGS(ht) = kind;
+
+  return ht;
+}
+
+Scheme_Hash_Tree *scheme_make_hash_tree(int eql_kind)
+{
+  return make_hash_tree(eql_kind, 0);
+}
+
+Scheme_Hash_Tree *scheme_make_hash_tree_of_type(Scheme_Type stype)
+{
+  if (stype == scheme_eq_hash_tree_type)
+    return scheme_make_hash_tree(SCHEME_hashtr_eq);
+  else if (stype == scheme_hash_tree_type)
+    return scheme_make_hash_tree(SCHEME_hashtr_equal);
+  else
+    return scheme_make_hash_tree(SCHEME_hashtr_eqv);
+}
+
+Scheme_Hash_Tree *scheme_make_hash_tree_placeholder(int eql_kind)
+/* for cyclic immutable hash tables, we need an indirection to form
+   the cycle (since we don't know in advance how large the top record
+   needs to be) */
+{
+  Scheme_Hash_Tree *ht, *sub;
+
+  ht = make_hash_tree(eql_kind, 1);
+  ht->iso.so.type = scheme_hash_tree_indirection_type;
+  ht->count = 0;
+  ht->bitmap = 1;
+
+  sub = make_hash_tree(eql_kind, 0);
+  ht->els[0] = (Scheme_Object *)sub;
+
+  return ht;
+}
+
+void scheme_hash_tree_tie_placeholder(Scheme_Hash_Tree *t, Scheme_Hash_Tree *base)
+{
+  t->count = base->count;
+  t->els[0] = (Scheme_Object *)base;
+}
+
+Scheme_Hash_Tree *scheme_hash_tree_resolve_placeholder(Scheme_Hash_Tree *t)
+{
+  return resolve_placeholder(t);
 }
 
 Scheme_Object *scheme_eq_hash_tree_get(Scheme_Hash_Tree *tree, Scheme_Object *key)
 {
   uintptr_t h;
-  AVLNode *avl;
+  int pos;
 
   h = PTR_TO_LONG((Scheme_Object *)key);
+  h = HAMT_REORDER(h);
 
-  avl = avl_find(h, tree->root);
-  if (avl) {
-    if (!avl->key) {
-      /* Have tree */
-      AVLNode *savl = (AVLNode *)avl->val;
-      intptr_t code;
-      code = search_nodes_eq(savl, key);
-      if (code >= 0) {
-        avl = avl_find(code, savl);
-        return avl->val;
-      }
-    } else if (SAME_OBJ(avl->key, key))
-      return avl->val;
+  tree = hamt_assoc(resolve_placeholder(tree), h, &pos, 0);
+  if (!tree)
+    return NULL;
+
+  if (HASHTR_COLLISIONP(tree->els[pos])) {
+    /* hash collision; linear search in subtree */
+    return hamt_eq_linear_search((Scheme_Hash_Tree *)tree->els[pos], key);
+  } else {
+    if (SAME_OBJ(key, tree->els[pos]))
+      return mzHAMT_VAL(tree, pos);
+  }
+
+  return NULL;
+}
+
+Scheme_Object *scheme_hash_tree_get_w_key_wraps(Scheme_Hash_Tree *tree, Scheme_Object *key,
+                                                Scheme_Object *key_wraps)
+{
+  uintptr_t h;
+  int stype, pos;
+
+  tree = resolve_placeholder(tree);
+  if (!tree->count)
+    return NULL;
+
+  stype = SCHEME_TYPE(tree);
+  
+  if (stype == scheme_eq_hash_tree_type)
+    return scheme_eq_hash_tree_get(tree, key);
+  else if (stype == scheme_hash_tree_type) {
+    if (key_wraps)
+      key = apply_equal_key_wraps(key, key_wraps);
+    h = to_unsigned_hash(scheme_equal_hash_key(key));
+  } else
+    h = to_unsigned_hash(scheme_eqv_hash_key(key));
+  h = HAMT_REORDER(h);
+
+  tree = hamt_assoc(tree, h, &pos, 0);
+  if (!tree)
+    return NULL;
+
+  if (HASHTR_COLLISIONP(tree->els[pos])) {
+    /* hash collision; linear search in subtree */
+    uintptr_t code;
+    return hamt_linear_search((Scheme_Hash_Tree *)tree->els[pos], stype, key, NULL, &code, key_wraps);
+  } else {
+    if (stype == scheme_hash_tree_type) {
+      if (equal_w_key_wraps(key, tree->els[pos], key_wraps))
+        return mzHAMT_VAL(tree, pos);
+    } else {
+      if (scheme_eqv(key, tree->els[pos]))
+        return mzHAMT_VAL(tree, pos);
+    }
   }
 
   return NULL;
@@ -2413,147 +3249,241 @@ Scheme_Object *scheme_eq_hash_tree_get(Scheme_Hash_Tree *tree, Scheme_Object *ke
 
 Scheme_Object *scheme_hash_tree_get(Scheme_Hash_Tree *tree, Scheme_Object *key)
 {
-  uintptr_t h;
-  AVLNode *avl;
-  int kind = (SCHEME_HASHTR_FLAGS(tree) & 0x3);
+  return scheme_hash_tree_get_w_key_wraps(tree, key, NULL);
+}
 
-  if (kind) {
-    if (kind == 1)
-      h = to_unsigned_hash(scheme_equal_hash_key(key));
-    else
-      h = to_unsigned_hash(scheme_eqv_hash_key(key));
-  } else {
-    return scheme_eq_hash_tree_get(tree, key);
+Scheme_Hash_Tree *scheme_hash_tree_set_w_key_wraps(Scheme_Hash_Tree *tree, Scheme_Object *key, Scheme_Object *val,
+                                                   Scheme_Object *key_wraps)
+/* val == NULL => remove */
+{
+  uintptr_t h;
+  Scheme_Hash_Tree *in_tree;
+  Scheme_Object *ekey = key;
+  int stype, pos;
+
+  stype = SCHEME_TYPE(resolve_placeholder(tree));
+
+  if (stype == scheme_eq_hash_tree_type)
+    h = PTR_TO_LONG((Scheme_Object *)key);
+  else if (stype == scheme_hash_tree_type) {
+    if (key_wraps)
+      ekey = apply_equal_key_wraps(ekey, key_wraps);
+    h = to_unsigned_hash(scheme_equal_hash_key(ekey));
+  } else
+    h = to_unsigned_hash(scheme_eqv_hash_key(key));
+  h = HAMT_REORDER(h);
+  
+  in_tree = hamt_assoc(resolve_placeholder(tree), h, &pos, 0);
+  if (!in_tree) {
+    if (!val)
+      return tree;
+    else {
+      /* simple add */
+      tree = resolve_placeholder(tree);
+      return hamt_set(tree, h, 0, key, val, 1);
+    }
   }
 
-  avl = avl_find(h, tree->root);
-  if (avl) {
-    if (!avl->key) {
-      /* Have tree */
-      AVLNode *savl = (AVLNode *)avl->val;
-      intptr_t code;
-      code = search_nodes(savl, key, kind);
-      if (code >= 0) {
-        avl = avl_find(code, savl);
-        return avl->val;
+  if (HASHTR_COLLISIONP(in_tree->els[pos])) {
+    /* hash collision */
+    int i, inc;
+    uintptr_t code;
+    in_tree = (Scheme_Hash_Tree *)in_tree->els[pos];
+    if (hamt_linear_search(in_tree, stype, key, &i, &code, key_wraps)) {
+      /* key is part of the current collision */
+      if (!val) {
+        if (in_tree->count == 2) {
+          /* no more hash collision */
+          Scheme_Object *other_key, *other_val;
+          hamt_at_index(in_tree, 1-i, &other_key, &other_val, &code);
+          tree = resolve_placeholder(tree);
+          return hamt_set(tree, h, 0, other_key, other_val, -1);
+        } else {
+          /* less collision */
+          in_tree = hamt_remove(in_tree, code, 0);
+          inc = -1;
+        }
+      } else {
+        /* update collision */
+        in_tree = hamt_set(in_tree, code, 0, key, val, 0);
+        inc = 0;
       }
     } else {
-      if (kind == 1) {
-        if (scheme_equal(key, avl->key))
-          return avl->val;
-      } else {
-        if (scheme_eqv(key, avl->key))
-          return avl->val;
+      if (!val)
+        return tree;
+      else {
+        /* more collision */
+        code = hamt_find_free_code(in_tree, 0, 0);
+        in_tree = hamt_set(in_tree, code, 0, key, val, 1);
+        inc = 1;
       }
     }
-  }
-
-  return NULL;
-}
-
-XFORM_NONGCING mzlonglong path_next(AVLNode *avl, mzlonglong path)
-{
-  if (!avl)
-    return -1;
-  
-  if (!avl->key) {
-    /* subtree choice */
-    if (path & 0x1) {
-      /* in subtree or right */
-      if (!(path & 0x2)) {
-        /* haven't exhausted the subtree, yet: */
-        path >>= 2;
-        path = path_next((AVLNode *)avl->val, path);
-        if (path > 0)
-          return (path << 2) | 0x1;
-        path = 0x1; /* move on to right */
-      } else {
-        /* we have exhausted the subtree, and we're working on right */
-        path >>= 1;
-        /* assert: path & 0x1 */
-      }
-    }
-  }
-
-  if (path & 0x1) {
-    path = path_next(avl->right, path >> 1);
-    /* The result cannot be 0.
-       If the result is -1, then the following calculation preserves the -1.
-       If the result is positive, then we preserve the decision to go right here. */
-    if (avl->key)
-      return (path << 1) | 0x1;
+    /* install updated collision tree in main tree: */
+    tree = resolve_placeholder(tree);
+    return hamt_set(tree, h, 0, (Scheme_Object *)in_tree, NULL, inc);
+  } else {
+    int same;
+    
+    if (stype == scheme_eq_hash_tree_type)
+      same = SAME_OBJ(key, in_tree->els[pos]);
+    else if (stype == scheme_hash_tree_type)
+      same = equal_w_key_wraps(ekey, in_tree->els[pos], key_wraps);
     else
-      return (path << 2) | 0x3;
-  }
+      same = scheme_eqv(key, in_tree->els[pos]);
 
-  path = path_next(avl->left, path >> 1);
-  if (path > 0)
-    return path << 1;
-
-  /* start here */
-  if (avl->key)
-    return 0x1;
-  else {
-    /* start subtree */
-    path = path_next((AVLNode *)avl->val, 0);
-    return (path << 2) | 0x1;
-  }
-}
-
-XFORM_NONGCING int path_find(AVLNode *avl, mzlonglong path, Scheme_Object **_key, Scheme_Object **_val)
-{
-  if (!avl) return 0;
-
-  if (!avl->key) {
-    /* subtree choice */
-    if (path & 0x1) {
-      /* in subtree or right */
-      if (!(path & 0x2)) {
-        /* in subtree */
-        return path_find((AVLNode *)avl->val, path >> 2, _key, _val);
-      } else {
-        /* in right */
-        path >>= 1;
-        /* assert: path & 0x1 */
+    if (same) {
+      /* replace */
+      tree = resolve_placeholder(tree);
+      if (!val) {
+        int kind = SCHEME_HASHTR_KIND(tree);
+        tree = hamt_remove(tree, h, 0);
+        if (!tree) {
+          tree = hamt_alloc(kind, 0);
+          tree->iso.so.type = stype;
+          SCHEME_HASHTR_FLAGS(tree) = kind;
+          return tree;
+        } else
+          return tree;
+      } else
+        return hamt_set(tree, h, 0, key, val, 0);
+    } else {
+      /* add */
+      if (!val)
+        return tree;
+      else {
+        /* new hash collision */
+        in_tree = hamt_make2(SCHEME_HASHTR_KIND(in_tree) | HASHTR_HAS_VAL | HASHTR_HAS_CODE, 0,
+                             0, in_tree->els[pos], mzHAMT_VAL(in_tree, pos),
+                             1, key, val);
+        in_tree->iso.so.type = scheme_hash_tree_collision_type;
+        tree = resolve_placeholder(tree);
+        return hamt_set(tree, h, 0, (Scheme_Object *)in_tree, NULL, 1);
       }
     }
   }
+}
 
-  if (path & 0x1) {
-    if (path >> 1)
-      return path_find(avl->right, path >> 1, _key, _val);
-    else {
-      *_key = avl->key;
-      *_val = avl->val;
-      return 1;
+Scheme_Hash_Tree *scheme_hash_tree_set(Scheme_Hash_Tree *tree, Scheme_Object *key, Scheme_Object *val)
+{
+  return scheme_hash_tree_set_w_key_wraps(tree, key, val, NULL);
+}
+
+static int hamt_equal_entries(int stype, void *eql_data,
+                              Scheme_Object *k1, Scheme_Object *v1, 
+                              Scheme_Object *k2, Scheme_Object *v2)
+{
+  if (stype == scheme_eq_hash_tree_type) {
+    if (SAME_OBJ(k1, k2)) {
+      if (eql_data)
+        return scheme_recur_equal(v1, v2, eql_data);
+      else
+        return SAME_OBJ(v1, v2);
     }
-  } else
-    return path_find(avl->left, path >> 1, _key, _val);
+  } else if (stype == scheme_hash_tree_type) {
+    if (eql_data) {
+      if (scheme_recur_equal(k1, k2, eql_data))
+        return scheme_recur_equal(v1, v2, eql_data);
+    } else
+      return scheme_equal(k1, k2);
+  } else {
+    if (scheme_eqv(k1, k2)) {
+      if (eql_data)
+        return scheme_recur_equal(v1, v2, eql_data);
+      else
+        return 1;
+    }
+  }
+  return 0;
 }
 
-mzlonglong scheme_hash_tree_next(Scheme_Hash_Tree *tree, mzlonglong pos)
+#define HAMT_NONGCING /* empty */
+#define HAMT_SUBSET_OF hamt_subset_of
+#define HAMT_ELEMENT_OF hamt_element_of
+#define HAMT_ELEMENT_OF_COLLISION hamt_element_of_collision
+#define HAMT_EQUAL_ENTRIES hamt_equal_entries
+#define HAMT_IF_VAL(v, n) v
+#define HAMT_USE_FUEL(n) SCHEME_USE_FUEL(n)
+#include "hamt_subset.inc"
+
+/* fast variant for eq-based sets (i.e., no separate values in table) */
+#define HAMT_NONGCING XFORM_NONGCING
+#define HAMT_SUBSET_OF hamt_eq_subset_of
+#define HAMT_ELEMENT_OF hamt_eq_element_of
+#define HAMT_ELEMENT_OF_COLLISION hamt_eq_element_of_collision
+#define HAMT_EQUAL_ENTRIES(stype, eql_data, k1, v1, k2, v2) SAME_OBJ(k1, k2)
+#define HAMT_IF_VAL(v, n) n
+#define HAMT_USE_FUEL(n) /* empty */
+#include "hamt_subset.inc"
+
+/* fast variant for eq-based dictionaries, where values are compared with `eq?` */
+#define HAMT_NONGCING XFORM_NONGCING
+#define HAMT_SUBSET_OF hamt_eq_subset_match_of
+#define HAMT_ELEMENT_OF hamt_eq_element_match_of
+#define HAMT_ELEMENT_OF_COLLISION hamt_eq_element_match_of_collision
+#define HAMT_EQUAL_ENTRIES(stype, eql_data, k1, v1, k2, v2) (SAME_OBJ(k1, k2) && SAME_OBJ(v1, v2))
+#define HAMT_IF_VAL(v, n) v
+#define HAMT_USE_FUEL(n) /* empty */
+#include "hamt_subset.inc"
+
+static uintptr_t hamt_combine_key_hashes(Scheme_Hash_Tree *ht)
 {
-  /* Iteration uses a key where the bits say when to turn right */
-  return path_next(tree->root, ((pos == -1) ? 0 : pos));
+  int popcount, i;
+  uintptr_t k = 0, code;
+  
+  popcount = hamt_popcount(ht->bitmap);
+  
+  for (i = 0; i < popcount; i++) {
+    if (HASHTR_SUBTREEP(ht->els[i])) {
+      SCHEME_USE_FUEL(1);
+      code = hamt_combine_key_hashes((Scheme_Hash_Tree *)ht->els[i]);
+    } else if (HASHTR_COLLISIONP(ht->els[i])) {
+      int count = ((Scheme_Hash_Tree *)ht->els[i])->count, j;
+      code = _mzHAMT_CODE(ht, i, popcount);
+      for (j = 0; j < count; j++) {
+        MZ_MIX(code);
+      }
+    } else
+      code = _mzHAMT_CODE(ht, i, popcount);
+  
+    k += code;
+
+    /* Since the keys are always in the same order (we don't go into collision trees),
+       it's ok to mix the total: */
+    MZ_MIX(k);
+  }
+
+  return k;
 }
 
-int scheme_hash_tree_index(Scheme_Hash_Tree *tree, mzlonglong pos, Scheme_Object **_key, Scheme_Object **_val)
-{
-  return path_find(tree->root, pos, _key, _val);
-}
-
-int scheme_hash_tree_equal_rec(Scheme_Hash_Tree *t1, Scheme_Hash_Tree *t2, void *eql)
+int scheme_hash_tree_equal_rec(Scheme_Hash_Tree *t1, Scheme_Object *orig_t1,
+                               Scheme_Hash_Tree *t2, Scheme_Object *orig_t2,
+                               void *eql)
 {
   Scheme_Object *k, *v, *v2;
   int i;
 
+  t1 = resolve_placeholder(t1);
+  t2 = resolve_placeholder(t2);
+    
   if ((t1->count != t2->count)
-      || ((SCHEME_HASHTR_FLAGS(t1) & 0x3) != (SCHEME_HASHTR_FLAGS(t2) & 0x3)))
+      || (SCHEME_TYPE(t1) != SCHEME_TYPE(t2)))
     return 0;
+
+  if (SAME_OBJ((Scheme_Object *)t1, orig_t1)
+      && SAME_OBJ((Scheme_Object *)t2, orig_t2))
+    return hamt_subset_of(t1, t2, 0, SCHEME_TYPE(t1), eql);
     
   for (i = scheme_hash_tree_next(t1, -1); i != -1; i = scheme_hash_tree_next(t1, i)) {
     scheme_hash_tree_index(t1, i, &k, &v);
-    v2 = scheme_hash_tree_get(t2, k);
+
+    if (!SAME_OBJ((Scheme_Object *)t1, orig_t1))
+      v = scheme_chaperone_hash_traversal_get(orig_t1, k, &k);
+      
+    if (!SAME_OBJ((Scheme_Object *)t2, orig_t2))
+      v2 = scheme_chaperone_hash_get(orig_t2, k);
+    else
+      v2 = scheme_hash_tree_get(t2, k);
+
     if (!v2)
       return 0;
     if (!scheme_recur_equal(v, v2, eql))
@@ -2563,11 +3493,47 @@ int scheme_hash_tree_equal_rec(Scheme_Hash_Tree *t1, Scheme_Hash_Tree *t2, void 
   return 1;
 }
 
-int scheme_hash_tree_equal(Scheme_Hash_Tree *t1, Scheme_Hash_Tree *t2)
+int scheme_eq_hash_tree_subset_of(Scheme_Hash_Tree *t1, Scheme_Hash_Tree *t2)
+/* assumes that `t1` and `t2` are sets, as opposed to maps */
 {
-  return scheme_equal((Scheme_Object *)t1, (Scheme_Object *)t2);
+  t1 = resolve_placeholder(t1);
+  t2 = resolve_placeholder(t2);
+
+  if (t1->count > t2->count)
+    return 0;
+  
+  return hamt_eq_subset_of(t1, t2, 0, scheme_eq_hash_tree_type, NULL);
 }
 
+int scheme_hash_tree_subset_of(Scheme_Hash_Tree *t1, Scheme_Hash_Tree *t2)
+{
+  t1 = resolve_placeholder(t1);
+  t2 = resolve_placeholder(t2);
+
+  if (t1->count > t2->count)
+    return 0;
+  
+  return hamt_subset_of(t1, t2, 0, SCHEME_TYPE(t1), NULL);
+}
+
+int scheme_eq_hash_tree_subset_match_of(Scheme_Hash_Tree *t1, Scheme_Hash_Tree *t2)
+/* assumes that `t1` and `t2` are sets, as opposed to maps */
+{
+  t1 = resolve_placeholder(t1);
+  t2 = resolve_placeholder(t2);
+
+  if (t1->count > t2->count)
+    return 0;
+
+  return hamt_eq_subset_match_of(t1, t2, 0, scheme_eq_hash_tree_type, NULL);
+}
+
+intptr_t scheme_hash_tree_key_hash(Scheme_Hash_Tree *ht)
+{
+  ht = resolve_placeholder(ht);
+
+  return (intptr_t)hamt_combine_key_hashes(ht);
+}
 
 /*========================================================================*/
 /*                         precise GC traversers                          */
@@ -2582,7 +3548,11 @@ START_XFORM_SKIP;
 static void register_traversers(void)
 {
   GC_REG_TRAV(scheme_hash_tree_type, hash_tree_val);
-  GC_REG_TRAV(scheme_rt_avl_node, mark_avl_node);
+  GC_REG_TRAV(scheme_eq_hash_tree_type, hash_tree_val);
+  GC_REG_TRAV(scheme_eqv_hash_tree_type, hash_tree_val);
+  GC_REG_TRAV(scheme_hash_tree_subtree_type, hash_tree_val);
+  GC_REG_TRAV(scheme_hash_tree_collision_type, hash_tree_val);
+  GC_REG_TRAV(scheme_hash_tree_indirection_type, hash_tree_val);
 }
 
 END_XFORM_SKIP;

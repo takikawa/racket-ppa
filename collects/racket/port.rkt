@@ -87,16 +87,23 @@
   (unless (input-port? p) (raise-argument-error who "input-port?" p))
   (let ([s (open-output-string)]) (copy-port p s) s))
 
-(define (port->string [p (current-input-port)])
+(define-syntax-rule (define-port->X (name port-arg rest-args ...) body)
+  (define (name [port-arg (current-input-port)] rest-args ... #:close? [close? #f])
+    (begin0
+      body
+      (when close?
+        (close-input-port port-arg)))))
+
+(define-port->X (port->string p)
   (get-output-string (port->string-port 'port->string p)))
 
-(define (port->bytes [p (current-input-port)])
+(define-port->X (port->bytes p)
   (get-output-bytes (port->string-port 'port->bytes p) #t))
 
-(define (port->lines [p (current-input-port)] #:line-mode [mode 'any])
+(define-port->X (port->lines p #:line-mode [mode 'any])
   (port->x-lines 'port->lines p mode read-line))
 
-(define (port->bytes-lines [p (current-input-port)] #:line-mode [mode 'any])
+(define-port->X (port->bytes-lines p #:line-mode [mode 'any])
   (port->x-lines 'port->bytes-lines p mode read-bytes-line))
 
 (define (port->list [r read] [p (current-input-port)])
@@ -584,6 +591,8 @@
                             [name (object-name orig-in)]
                             [delta 0]
                             #:init-position [init-position 1])
+  (define buffer-mode (or (file-stream-buffer-mode orig-in)
+                          'block))
   (make-input-port/read-to-peek
    name
    (lambda (s)
@@ -595,16 +604,24 @@
    void
    #f
    void
-   init-position))
+   init-position
+   (case-lambda
+    [() buffer-mode]
+    [(mode)
+     (when (file-stream-buffer-mode orig-in)
+       (file-stream-buffer-mode orig-in mode))
+     (set! buffer-mode mode)])
+   (eq? buffer-mode 'block)))
 
 (define relocate-input-port
-  (lambda (p line col pos [close? #t])
-    (transplant-to-relocate transplant-input-port p line col pos close?)))
+  (lambda (p line col pos [close? #t] #:name [name (object-name p)])
+    (transplant-to-relocate transplant-input-port p line col pos close? name)))
 
 (define transplant-input-port
-  (lambda (p location-proc pos [close? #t] [count-lines!-proc void])
+  (lambda (p location-proc pos [close? #t] [count-lines!-proc void]
+             #:name [name (object-name p)])
     (make-input-port
-     (object-name p)
+     name
      p ;; redirect `read' to `p'
      ;; Here's the long way to redirect:
      #;
@@ -1026,7 +1043,11 @@
                 (if (eq? n 0)
                     (if (and progress-evt (sync/timeout 0 progress-evt))
                         #f
-                        (wrap-evt port (lambda (x) 0)))
+                        (wrap-evt (if (zero? skip)
+                                      port
+                                      (choice-evt (or progress-evt never-evt)
+                                                  (peek-bytes-evt 1 skip progress-evt port)))
+                                  (lambda (x) 0)))
                     n)))))
       (define (try-again)
         (wrap-evt
@@ -1576,7 +1597,7 @@
                                                        bytes-convert/post-nl
                                                        bytes-convert)
                                                      c buf buf-start buf-end ready-bytes)])
-                  (unless (memq status '(continues complete))
+                  (unless (positive? got-c)
                     (decode-error "unable to make decoding progress"
                                   port))
                   (set! ready-start 0)
@@ -1636,7 +1657,10 @@
           [out-end 0]
           [buffer-mode (or (file-stream-buffer-mode port) 'block)]
           [debuffer-buf #f]
-          [newline-buffer #f])
+          [newline-buffer #f]
+          [plumber (current-plumber)]
+          [flush-handle #f]
+          [self #f])
       (define-values (buffered-r buffered-w) (make-pipe 4096))
 
       ;; The main writing entry point:
@@ -1649,7 +1673,9 @@
            (flush-buffer-pipe #f enable-break?)
            (flush-some #f enable-break?)
            (if (buffer-flushed?)
-             0
+             (begin
+               (buffering! #f)
+               0)
              (write-it s start end no-buffer&block? enable-break?))]
           [no-buffer&block?
            (case (flush-all #t enable-break?)
@@ -1671,6 +1697,7 @@
           [(and (eq? buffer-mode 'block)
                 (zero? (pipe-content-length buffered-r)))
            ;; The port system can buffer to a pipe faster, so give it a pipe.
+           (buffering! #t)
            buffered-w]
           [else
            ;; Flush/buffer from pipe, first:
@@ -1687,6 +1714,7 @@
                (write-it s start end #f enable-break?)
                ;; Buffer and report success:
                (begin
+                 (buffering! #t)
                  (bytes-copy! out-bytes out-end s2 start2 (+ start2 cnt2))
                  (set! out-end (+ cnt2 out-end))
                  (case buffer-mode
@@ -1837,7 +1865,9 @@
                 [orig-out-end out-end])
             (flush-some non-block? enable-break?)
             (if (buffer-flushed?)
-              'done
+              (begin
+                (buffering! #f)
+                'done)
               ;; Couldn't flush everything. One possibility is that we need
               ;;  more bytes to convert before a flush.
               (if (and orig-none-ready?
@@ -1856,6 +1886,15 @@
         (and (= ready-start ready-end)
              (= out-start out-end)
              (zero? (pipe-content-length buffered-r))))
+
+      (define (buffering! on?)
+        (cond
+         [(and on? (not flush-handle))
+          (set! flush-handle (plumber-add-flush! plumber (lambda (fh) (flush-output self))))]
+         [(and (not on?) flush-handle)
+          (define h flush-handle)
+          (set! flush-handle #f)
+          (plumber-flush-handle-remove! h)]))
 
       ;; Try to flush immediately a certain number of bytes.
       ;;   we've already converted them, so we have to keep
@@ -1913,28 +1952,30 @@
                "could not create converter from ~e to UTF-8"
                encoding))
 
-      (make-output-port
-       name
-       port
-       write-it
-       (lambda ()
-         ;; Flush output
-         (write-it #"" 0 0 #f #f)
-         (when close?
-           (close-output-port port))
-         (bytes-close-converter c))
-       write-special-it
-       #f #f
-       #f void
-       1
-       (case-lambda
-         [() buffer-mode]
-         [(mode) (let ([old buffer-mode])
-                   (set! buffer-mode mode)
-                   (when (or (and (eq? old 'block) (memq mode '(none line)))
-                             (and (eq? old 'line) (memq mode '(none))))
-                     ;; Flush output
-                     (write-it #"" 0 0 #f #f)))])))))
+      (set! self
+            (make-output-port
+             name
+             port
+             write-it
+             (lambda ()
+               ;; Flush output
+               (flush-output self)
+               (when close?
+                 (close-output-port port))
+               (bytes-close-converter c))
+             write-special-it
+             #f #f
+             #f void
+             1
+             (case-lambda
+              [() buffer-mode]
+              [(mode) (let ([old buffer-mode])
+                        (set! buffer-mode mode)
+                        (when (or (and (eq? old 'block) (memq mode '(none line)))
+                                  (and (eq? old 'line) (memq mode '(none))))
+                          ;; Flush output
+                          (write-it #"" 0 0 #f #f)))])))
+      self)))
 
 ;; ----------------------------------------
 

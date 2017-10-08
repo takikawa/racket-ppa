@@ -1,6 +1,6 @@
 (module serialize racket/base
   (require syntax/modcollapse
-           unstable/struct
+           racket/struct
            racket/list
            racket/flonum
            racket/fixnum
@@ -41,6 +41,9 @@
 	(and (symbol? v)
              (or (symbol-interned? v)
                  (eq? v (string->unreadable-symbol (symbol->string v)))))
+        (keyword? v)
+        (regexp? v)
+        (byte-regexp? v)
 	(string? v)
 	(path-for-some-system? v)
 	(bytes? v)
@@ -72,6 +75,16 @@
      [(and (pair? p) (eq? (car p) 'submod) (bytes? (cadr p)))
       `(submod ,(unprotect-path (cadr p)) . ,(cddr p))]
      [else p]))
+
+  ;; A deserialization function is provided from a `deserialize-info`
+  ;; module:
+  (define (add-submodule p)
+    (module-path-index-join '(submod "." deserialize-info)
+                            (if (resolved-module-path? p)
+                                p
+                                (module-path-index-join
+                                 p
+                                 #f))))
 
   (define (revive-symbol s)
     (if (string? s)
@@ -141,7 +154,8 @@
 		 (vector? o)
 		 (hash? o))
 	     (not (immutable? o)))
-	(serializable-struct? o)
+	(and (serializable-struct? o)
+             (serialize-info-can-cycle? (serializable-info o)))
         (flvector? o)
         (fxvector? o)
         (let ([k (prefab-struct-key o)])
@@ -157,18 +171,24 @@
 
   ;; Finds a mutable object among those that make the
   ;;  current cycle.
-  (define (find-mutable v cycle-stack) 
+  (define (find-mutable v cycle-stack share cycle)
     ;; Walk back through cycle-stack to find something
     ;;  mutable. If we get to v without anything being
     ;;  mutable, then we're stuck.
-    (let ([o (car cycle-stack)])
+    (define (potentially-shared! v)
+      (unless (hash-ref share v #f)
+        (hash-set! share v (share-id share cycle))))
+    (potentially-shared! v)
+    (let loop ([cycle-stack cycle-stack])
+      (define o (car cycle-stack))
       (cond
        [(eq? o v)
 	(error 'serialize "cannot serialize cycle of immutable values: ~e" v)]
        [(is-mutable? o)
 	o]
        [else
-	(find-mutable v (cdr cycle-stack))])))
+        (potentially-shared! o)
+	(loop (cdr cycle-stack))])))
 
 
   (define (share-id share cycle)
@@ -191,6 +211,7 @@
 	      (number? v)
 	      (char? v)
 	      (symbol? v)
+	      (keyword? v)
 	      (null? v)
 	      (void? v)
               (srcloc? v))
@@ -204,11 +225,9 @@
 	  ;;  part of a cycle.
 	  (let ([mut-v (if (is-mutable? v)
 			   v
-			   (find-mutable v cycle-stack))])
-	    (hash-set! cycle mut-v (share-id share cycle))
-	    (unless (eq? mut-v v)
-	      ;; This value is potentially shared
-	      (hash-set! share v (share-id share cycle))))]
+			   (find-mutable v cycle-stack share cycle))])
+            (unless (hash-ref cycle mut-v #f)
+              (hash-set! cycle mut-v (share-id share cycle))))]
 	 [(hash-ref share v #f)
 	  ;; We already know that this value is shared
 	  (void)]
@@ -229,6 +248,8 @@
             (for-each loop (struct->list v))]
 	   [(or (string? v)
 		(bytes? v)
+                (regexp? v)
+                (byte-regexp? v)
 		(path-for-some-system? v))
 	    ;; No sub-structure
 	    (void)]
@@ -249,9 +270,9 @@
 	   [(date? v)
 	    (for-each loop (take (struct->list v) 10))]
 	   [(hash? v)
-	    (hash-for-each v (lambda (k v)
-                               (loop k)
-                               (loop v)))]
+            (for ([(k v) (in-hash v)])
+              (loop k)
+              (loop v))]
 	   [(arity-at-least? v)
 	    (loop (arity-at-least-value v))]
 	   [(module-path-index? v)
@@ -276,6 +297,9 @@
             (null? v)
             (string? v)
             (symbol? v)
+            (keyword? v)
+            (regexp? v)
+            (byte-regexp? v)
             (bytes? v))))
 
   (define (serialize-one v share check-share? mod-map mod-map-cache)
@@ -284,7 +308,8 @@
        [(or (boolean? v)
 	    (number? v)
 	    (char? v)
-	    (null? v))
+	    (null? v)
+            (keyword? v))
 	v]
        [(symbol? v)
         (if (symbol-interned? v)
@@ -299,6 +324,9 @@
 		 (bytes? v))
 	     (immutable? v))
 	v]
+       [(or (regexp? v)
+            (byte-regexp? v))
+        v]
        [(serializable-struct? v)
 	(let ([info (serializable-info v)])
 	  (cons (mod-to-id info mod-map mod-map-cache) 
@@ -352,9 +380,9 @@
 		(if (hash-eqv? v) '(eqv) null)
 		(if (hash-weak? v) '(weak) null))
 	       (let ([loop (serial #t)])
-		 (hash-map v (lambda (k v)
-                               (cons (loop k)
-                                     (loop v))))))]
+                 (for/list ([(k v) (in-hash v)])
+                   (cons (loop k)
+                         (loop v)))))]
        [(date*? v)
 	(cons 'date*
 	      (map (serial #t) (take (struct->list v) 12)))]
@@ -482,6 +510,9 @@
 	    (number? v)
 	    (char? v)
 	    (symbol? v)
+            (keyword? v)
+            (regexp? v)
+            (byte-regexp? v)
 	    (null? v))
 	v]
        [(string? v)
@@ -562,10 +593,8 @@
 	 ;; Hash table
 	 (let ([ht0 (make-hash/flags (cdr v))])
 	   (vector-set! fixup n (lambda (ht)
-				  (hash-for-each 
-				   ht
-				   (lambda (k v)
-				     (hash-set! ht0 k v)))))
+                                  (for ([(k v) (in-hash ht)])
+                                    (hash-set! ht0 k v))))
 	   ht0)]
         [(pf)
          ;; Prefab
@@ -648,7 +677,15 @@
                             (let ([p (unprotect-path (car path+name))]
                                   [sym (revive-symbol (cdr path+name))])
                               ((deserialize-module-guard) p sym)
-                              (dynamic-require p sym))
+                              (let ([sub (add-submodule p)]
+                                    [fallback
+                                     (lambda ()
+                                       ;; On failure, for backward compatibility,
+                                       ;; try module instead of submodule:
+                                       (dynamic-require p sym))])
+                                (if (module-declared? sub #t)
+                                    (dynamic-require sub sym fallback)
+                                    (fallback))))
                             (namespace-variable-value (cdr path+name)))])
               ;; Register maker and struct type:
               (vector-set! mod-map n des))

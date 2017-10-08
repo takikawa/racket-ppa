@@ -78,20 +78,22 @@ void fault_handler(int sn, siginfo_t *si, void *ctx)
       */
     }
     if (c == 0) {
-      /* I have no idea why this happens on linux */
-      /* supposedly its coming from the user via kill */
-      /* so just ignore it. It appears when */
-      /* running w/ places in GDB */
-      printf("SIGSEGV SI_USER SI_CODE %i fault on addr %p\n", c, p);
-#ifdef MZ_USE_PLACES
-      printf("pid %i uid %i thread %lx\n", si->si_pid, si->si_uid, mz_proc_thread_self());
-#else
-      printf("pid %i uid %i\n", si->si_pid, si->si_uid);
-#endif      
+      /* When running w/ places in gdb, the debugger
+         sometimes propagates extra copies of signals
+         that crash the process. Ignore them (but they're
+         rare enough that it's worth reporting that the signal
+         was received). */
+      printf("Signal as SI_USER (from debugger?) - ignoring\n");
       return;
     }
-    if (c == 128 ) {
-      printf("SIGSEGV SI_KERNEL SI_CODE %i fault on addr %p sent by kernel\n", c, p);
+    if (c == 128) {
+      /* A mysterious signal on Linux, probably the OS providing some
+         kind of alert. These can be frequent enough that printing
+         an alert is too noisy. */
+      if (0) {
+        printf("Signal as SI_KERNEL - ignoring\n");
+      }
+      return;
     }
 #if WAIT_FOR_GDB
     launchgdb();
@@ -162,7 +164,10 @@ void fault_handler(int sn, struct siginfo *si, void *ctx)
 #endif
 
 /* ========== Windows signal handler ========== */
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__CYGWIN32__)
+# if defined(__CYGWIN32__)
+#  include <windows.h>
+# endif
 LONG WINAPI fault_handler(LPEXCEPTION_POINTERS e) 
 {
   if ((e->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION)
@@ -216,9 +221,10 @@ static void initialize_signal_handler(GCTYPE *gc)
 # ifdef NEED_SIGSTACK
   {
     stack_t ss;
+    uintptr_t sz = 10*SIGSTKSZ;
     
-    ss.ss_sp = malloc(SIGSTKSZ);
-    ss.ss_size = SIGSTKSZ;
+    ss.ss_sp = malloc(sz);
+    ss.ss_size = sz;
     ss.ss_flags = 0;
     
     sigaltstack(&ss, NULL);
@@ -227,7 +233,7 @@ static void initialize_signal_handler(GCTYPE *gc)
 # ifdef NEED_SIGACTION
   {
     struct sigaction act, oact;
-    memset(&act, 0, sizeof(sigaction));
+    memset(&act, 0, sizeof(act));
     act.sa_sigaction = fault_handler;
     sigemptyset(&act.sa_mask);
     /* In Racket, SIGCHLD or SIGINT handling may trigger a write barrier: */
@@ -269,7 +275,7 @@ static void remove_signal_handler(GCTYPE *gc)
 # ifdef NEED_SIGACTION
   {
     struct sigaction act, oact;
-    memset(&act, 0, sizeof(sigaction));
+    memset(&act, 0, sizeof(act));
     act.sa_handler = SIG_DFL;
     sigemptyset(&act.sa_mask);
     act.sa_flags = SA_SIGINFO;

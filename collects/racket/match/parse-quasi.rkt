@@ -25,21 +25,32 @@
         [(Null? p1) p2]
         [else (error 'match "illegal input to append-pats")]))
 
+(define hard-case?
+  (lambda (p)
+    (or (ddk? p)
+        (syntax-case p (unquote-splicing)
+          [(unquote-splicing . _) #t]
+          [_ #f]))))
+
 ;; parse stx as a quasi-pattern
 ;; parse parses unquote
 (define (parse-quasi stx parse)
   (define (pq s) (parse-quasi s parse))
   (syntax-case stx (quasiquote unquote quote unquote-splicing)
     [(unquote p) (parse #'p)]
+    [((unquote-splicing p))
+     (let ([pat (parameterize ([in-splicing? #t]) (parse #'p))])
+       pat)]
     [((unquote-splicing p) . rest)
-     (let ([pat (parse #'p)]
+     (let ([pat (parameterize ([in-splicing? #t]) (parse #'p))]
            [rpat (pq #'rest)])
        (if (null-terminated? pat)
-         (append-pats pat rpat)
-         (raise-syntax-error 'match "non-list pattern inside unquote-splicing"
-                             stx #'p)))]
+           (append-pats pat rpat)
+           (raise-syntax-error 'match "non-list pattern inside unquote-splicing"
+                               stx #'p)))]
     [(p dd . rest)
      (ddk? #'dd)
+     ;; FIXME: parameterize dd-parse so that it can be used here
      (let* ([count (ddk? #'dd)]
             [min (and (number? count) count)])
        (make-GSeq
@@ -59,21 +70,19 @@
      (let ([key (prefab-struct-key (syntax-e #'struct))]
            [pats (cdr (vector->list (struct->vector (syntax-e #'struct))))])
        (make-And (list (make-Pred #`(struct-type-make-predicate (prefab-key->struct-type '#,key #,(length pats))))
-                       (make-App #'struct->vector
-                                 (make-Vector (cons (make-Dummy #f) (map pq pats))))))
-       #;
-       (make-PrefabStruct key (map pq pats)))]
+                       (if (ormap hard-case? pats)
+                           ;; hard cases
+                           (make-App #'(λ (v) (vector->list (struct->vector v)))
+                                     (list (make-Pair (make-Dummy #f) (pq pats))))
+                           ;; no hard cases, avoid creating a list
+                           (make-App #'struct->vector
+                                     (list (make-Vector (cons (make-Dummy #f) (map pq pats)))))))))]
     ;; the hard cases
     [#(p ...)
-     (ormap (lambda (p)
-              (or (ddk? p)
-                  (syntax-case p (unquote-splicing)
-                    [(unquote-splicing . _) #t]
-                    [_ #f])))
-            (syntax->list #'(p ...)))
+     (ormap hard-case? (syntax->list #'(p ...)))
      (make-And (list (make-Pred #'vector?)
                      (make-App #'vector->list
-                               (pq (quasisyntax/loc stx (p ...))))))]
+                               (list (pq (quasisyntax/loc stx (p ...)))))))]
     [#(p ...)
      (make-Vector (map pq (syntax->list #'(p ...))))]
     [bx

@@ -1,7 +1,8 @@
-(module macfw mzscheme
+(module macfw racket/base
   (require "mach-o.rkt"
-           mzlib/string
-           mzlib/process)
+           racket/string
+           (only-in racket/base regexp-quote)
+           racket/system)
 
   (provide update-framework-path
            get-current-framework-path
@@ -13,7 +14,10 @@
 			     (vector-ref v 1)
 			     (equal? (vector-ref v 2) "mred"))))
 
-  (define (update-framework-path fw-path dest mred?)
+  (define (update-framework-path fw-path #:as-given? [as-given? #f]
+                                 dest
+                                 mred?
+                                 #:matching [matchings '("Racket")])
     (let ([dest (if (path? dest)
 		    (path->string dest)
 		    dest)])
@@ -24,9 +28,11 @@
 				 "")]
 			 [old-path (or orig
 				       (format "~a.framework/Versions/~a~a/~a" p (version) 3m p))]
-			 [new-path (format "~a~a.framework/Versions/~a~a/~a" 
-					   fw-path
-					   p (version) 3m p)])
+			 [new-path (if as-given?
+                                       (format "~a" fw-path)
+                                       (format "~a~a.framework/Versions/~a~a/~a" 
+                                               fw-path
+                                               p (version) 3m p))])
 		    (get/set-dylib-path dest
 					(byte-regexp
 					 (bytes-append
@@ -35,16 +41,11 @@
 					   (regexp-quote old-path))
 					  #"$"))
 					(string->bytes/utf-8 new-path))))
-                '("Racket"))))
+                matchings)))
 
   (define (get-current-framework-path dest p)
     (let ([v (get/set-dylib-path dest
 				 (byte-regexp (string->bytes/utf-8 p))
 				 #f)])
-      (if v
-	  (bytes->string/utf-8 v)
-	  (begin
-            (eprintf "warning: cannot find existing link for ~a in ~a\n"
-                     p dest)
-            #f)))))
-
+      (and (pair? v)
+           (bytes->string/utf-8 (car v))))))

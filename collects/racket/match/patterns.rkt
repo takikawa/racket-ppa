@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require syntax/boundmap
-         racket/contract
+         racket/contract racket/list
          "stxtime.rkt"
          (for-syntax racket/base))
 
@@ -38,23 +38,36 @@
 (define-struct (Box CPat) (p) #:transparent)
 
 ;; p is a pattern to match against the literal
-(define-struct (Atom CPat) (p) #:transparent)
-(define-struct (String Atom) () #:transparent)
-(define-struct (Number Atom) () #:transparent)
-(define-struct (Symbol Atom) () #:transparent)
-(define-struct (Keyword Atom) () #:transparent)
-(define-struct (Char Atom) () #:transparent)
-(define-struct (Bytes Atom) () #:transparent)
-(define-struct (Regexp Atom) () #:transparent)
-(define-struct (Boolean Atom) () #:transparent)
-(define-struct (Null Atom) () #:transparent)
+;;(define-struct (Atom CPat) (p) #:transparent)
+;(define-struct (String Atom) () #:transparent)
+;; (define-struct (Number Atom) () #:transparent)
+;; (define-struct (Symbol Atom) () #:transparent)
+;; (define-struct (Keyword Atom) () #:transparent)
+;; (define-struct (Char Atom) () #:transparent)
+;; (define-struct (Bytes Atom) () #:transparent)
+;; (define-struct (Regexp Atom) () #:transparent)
+;; (define-struct (Boolean Atom) () #:transparent)
+(define-struct (Null CPat) (p) #:transparent)
 
-;; expr is an expression
-;; p is a pattern
-(define-struct (App Pat) (expr p) #:transparent)
+;; expr is an expression or an (expression -> expression) procedure
+;; ps is a list of patterns
+(define-struct (App Pat) (expr ps) #:transparent)
 
-;; pred is an expression
-(define-struct (Pred Pat) (pred) #:transparent)
+;; pred is an expression, or an Expr -> Expr procedure
+(define-struct (Pred Pat) (pred) #:transparent
+  #:property prop:equal+hash
+  (list (lambda (a b e?)
+          (or (eq? (Pred-pred a) (Pred-pred b))
+              (and (identifier? (Pred-pred a)) (identifier? (Pred-pred b))
+                   (free-identifier=? (Pred-pred a) (Pred-pred b)))))
+        (lambda (v r)
+          (if (identifier? (Pred-pred v))
+              (r (syntax-e (Pred-pred v)))
+              (r (Pred-pred v))))
+        (lambda (v r)
+          (if (identifier? (Pred-pred v))
+              (r (syntax-e (Pred-pred v)))
+              (r (Pred-pred v))))))
 
 ;; pred is an identifier
 ;; super is an identifier, or #f
@@ -62,9 +75,6 @@
 ;; accessors is a listof identifiers (NB in reverse order from the struct info)
 ;; ps is a listof patterns
 (define-struct (Struct CPat) (id pred super complete? accessors ps) #:transparent)
-
-;; both fields are lists of pats
-(define-struct (HashTable CPat) (key-pats val-pats) #:transparent)
 
 ;; ps are patterns
 (define-struct (Or Pat) (ps) #:transparent)
@@ -114,14 +124,6 @@
         [(Vector? p) 'vector]
         [(Pair? p) 'pair]
         [(MPair? p) 'mpair]
-        [(String? p) 'string]
-        [(Symbol? p) 'symbol]
-        [(Number? p) 'number]
-        [(Bytes? p) 'bytes]
-        [(Char? p) 'char]
-        [(Regexp? p) 'regexp]
-        [(Keyword? p) 'keyword]
-        [(Boolean? p) 'boolean]
         [(Null? p) 'null]
         [else #f]))
 
@@ -142,10 +144,13 @@
 (define (merge l)
   (cond [(null? l) null]
         [(null? (cdr l)) (car l)]
-        [else (let ([m (make-module-identifier-mapping)])
+        [else (let ([m (make-module-identifier-mapping)]
+                    [in-order null])
                 (for* ([ids l] [id ids])
-                  (module-identifier-mapping-put! m id #t))
-                (module-identifier-mapping-map m (lambda (k v) k)))]))
+                  (unless (module-identifier-mapping-get m id (lambda () #f))
+                    (set! in-order (cons id in-order))
+                    (module-identifier-mapping-put! m id #t)))
+                (reverse in-order))]))
 ;; bound-vars : Pat -> listof identifiers
 (define (bound-vars p)
   (cond
@@ -158,7 +163,7 @@
      (bound-vars (car (Or-ps p)))]
     [(Box? p)
      (bound-vars (Box-p p))]
-    [(Atom? p) null]
+    [(Null? p) null]
     [(Pair? p)
      (merge (list (bound-vars (Pair-a p)) (bound-vars (Pair-d p))))]
     [(MPair? p)
@@ -173,12 +178,17 @@
     [(Struct? p)
      (merge (map bound-vars (Struct-ps p)))]
     [(App? p)
-     (bound-vars (App-p p))]
+     (merge (map bound-vars (App-ps p)))]
     [(Not? p) null]
     [(And? p)
      (merge (map bound-vars (And-ps p)))]
     [(Exact? p) null]
     [else (error 'match "bad pattern: ~a" p)]))
+
+(define (pats->bound-vars parse-id pats)
+  (remove-duplicates
+   (foldr (λ (pat vars) (append (bound-vars (parse-id pat)) vars)) '() pats)
+   bound-identifier=?))
 
 (define current-renaming (make-parameter (make-free-identifier-mapping)))
 
@@ -208,5 +218,5 @@
                                [rhs syntax?]
                                [unmatch (or/c identifier? false/c)]
                                [vars-seen (listof (cons/c identifier?
-                                                          identifier?))])))
+                                                          (or/c #f identifier?)))])))
 

@@ -11,7 +11,9 @@
 ;; can't see them. If "stypes.h" changes, then "mz-gdbinit" needs
 ;; to be re-built.
 
-(require racket/runtime-path)
+(require racket/runtime-path
+         racket/match
+         racket/set)
 
 (define-runtime-path stypes-path "src/stypes.h")
 
@@ -71,6 +73,10 @@ define psoq
       set $TL = ((Scheme_Toplevel*) ($O))
       printf "scheme_toplevel_type depth=%d position=%d", $TL->depth, $TL->position
     end
+    if ( $OT == <<scheme_local_type>> )
+       set $local = ((Scheme_Local *) ($O))
+       printf "scheme_local position=%d", $local->position
+    end
 #    if ( $OT == <<scheme_symbol_type>> )
 #      set $SSO = ((Scheme_Simple_Object*) ($O))
 #      set $index = $SSO->u.ptr_int_val.pint
@@ -84,11 +90,11 @@ define psoq
       printf "scheme_application_type - args %i\n", $size
       set $RATOR = $AP->args[0]
       indent $arg1
-      printf "rator="
-      psox $RATOR $arg1+1
-
+      printf "rator = "
+      psonn $RATOR 
+      printf "\n"
       set $cnt = 1
-      while ( $cnt < $size ) 
+      while ( $cnt <= $size ) 
         indent $arg1
         printf "rand%i = ", ($cnt - 1)
         psonn $AP->args[$cnt] 
@@ -133,11 +139,104 @@ define psoq
       psox $unclosure->code $arg1+1
       set $OT = <<scheme_unclosed_procedure_type>>
     end
-
+    if ( $OT == <<scheme_compiled_unclosed_procedure_type>> )
+      set $unclosure = ((Scheme_Closure_Data *) $O)
+      #set $name = $code->name
+      set $param_num = $unclosure->num_params
+      printf "scheme_compiled_unclosed_procedure_type - num_params %i\n", $param_num
+      psox $unclosure->code $arg1+1
+    end
+    if ( $OT == <<scheme_let_value_type>> ) 
+       set $let_value = ((Scheme_Let_Value *) $O)
+       set $cnt = $let_value->count
+       set $pos = $let_value->position
+       set $val = $let_value->value
+       set $body = $let_value->body
+       printf "scheme_let_value\n"
+       indent $arg1
+       printf "count = %i\n", $cnt
+       indent $arg1
+       printf "position = %i\n", $pos
+       psox $val $arg1+1
+       printf "\n"
+       psox $body $arg1+1
+      printf "\n"
+    end
+    if ( $OT == <<scheme_let_void_type>> )
+       set $let_void = ((Scheme_Let_Void *) $O)
+       set $cnt = $let_void->count
+       set $body = $let_void->body
+       printf "scheme_let_void\n"   
+       indent $arg1
+       printf "count = %i\n", $cnt
+       indent $arg1
+       printf "body = "
+       psox $body $arg1+1
+      printf "\n"
+    end
+    if ( $OT == <<scheme_compiled_let_void_type>> )
+       set $let_header = ((Scheme_Let_Header *) $O)
+       set $cnt = $let_header->count
+       set $clauses = $let_header->num_clauses
+       set $body = $let_header->body
+       printf "scheme_let_header\n"   
+       indent $arg1
+       printf "count = %i, num_clauses = %i\n", $cnt, $clauses
+       indent $arg1
+       printf "body = "
+       psox $body $arg1+1
+      printf "\n"
+    end
+    if ( $OT == <<scheme_compiled_let_value_type>> )
+       set $let_value = ((Scheme_Compiled_Let_Value *) $O)
+       set $cnt = $let_value->count
+       set $pos = $let_value->position
+       set $val = $let_value->value
+       set $body = $let_value->body
+       printf "scheme_compiled_let_value\n"
+       indent $arg1
+       printf "count = %i, position = %i\n", $cnt, $pos
+       indent $arg1
+       printf "value =\n"
+       psox $val $arg1+1
+       printf "\n"
+       indent $arg1
+       printf "body =\n"
+       psox $body $arg1+1
+      printf "\n"
+    end
+    if ( $OT == <<scheme_set_bang_type>> )
+       set $sb = ((Scheme_Set_Bang *) $O)
+       set $var = $sb->var
+       set $val = $sb->val 
+       printf "scheme_set_bang\n"
+       indent $arg1
+       printf "var = "
+       psox $var $arg1+1
+       printf "\n"
+       printf "val = "
+       psox $val $arg1+1
+       printf "\n"
+    end
     if ( $OT == <<scheme_sequence_type>> )
       set $seq = ((Scheme_Sequence *) $O)
       set $size = $seq->count
       printf "scheme_sequence - size %i\n", $size
+      set $cnt = 0
+      while ( $cnt < $size ) 
+        indent $arg1
+        printf "%i - ", $cnt
+        psonn $seq->array[$cnt]
+        printf "\n"
+        #psox $seq->array[$cnt] $arg1+2
+        set $cnt++
+      end
+      set $OT = 0
+    end
+    if ( $OT == <<scheme_begin0_sequence_type>> )
+      set $seq = ((Scheme_Sequence *) $O)
+      set $size = $seq->count
+      printf "scheme_begin0_sequence - size %i\n", $size
       set $cnt = 0
       while ( $cnt < $size ) 
         indent $arg1
@@ -182,6 +281,13 @@ define psoq
       printf "value %p\n", $letone->value
       indent $arg1+1
       printf "body  %p\n", $letone->body
+    end
+    if ( $OT == <<scheme_boxenv_type>> )
+      set $box = ((Scheme_Simple_Object *) $O)
+      printf "scheme_boxenv_type\n"
+      psox $box->u.two_ptr_val.ptr1 $arg1+1
+      printf "\n"
+      psox $box->u.two_ptr_val.ptr2 $arg1+1
     end
     if ( $OT == <<scheme_closure_type>> )
       printf "scheme_closure_type\n"
@@ -378,6 +484,13 @@ define psoq
       psox $OO $arg1+1
       set $OT = 0
     end
+<<build_types>>
+    if ( $OT > <<highest_type>> )
+      printf "invalid type"
+    end
+    if ( $OT < <<lowest_type>> )
+      printf "invalid type"
+    end
   end
 end
 document psoq
@@ -413,6 +526,17 @@ EOS
 (define styles (with-input-from-file stypes-path
                  (lambda () (read-string (* 2 (file-size stypes-path))))))
 
+(define types-table
+  (let ([types (regexp-match* #rx"[A-Za-z][A-Za-z0-9_]*, */[*] ([0-9]+) [*]/" styles)])
+    (for/list ([i types])
+      (define split (regexp-match #rx"([A-Za-z][A-Za-z0-9_]*), */[*] ([0-9]+) [*]/" i))
+      (cdr split))))
+
+(define highest-type (apply max (map (lambda (x) (string->number (cadr x))) types-table)))
+(define lowest-type  (apply min (map (lambda (x) (string->number (cadr x))) types-table)))
+
+(define handled-table (mutable-set))
+
 (call-with-output-file* "mz-gdbinit"
   #:exists 'truncate 
   (lambda (out)
@@ -420,10 +544,27 @@ EOS
       (let loop ()
         (let ([m (regexp-match #rx"<<([^>]*)>>" in 0 #f out)])
           (when m
-            (let ([m2 (regexp-match (format "~a, */[*] ([0-9]+) [*]/" (cadr m))
-                                    styles)])
-              (if m2
-                  (display (cadr m2) out)
-                  (error 'mk-gdbinit "cannot find type in stypes.h: ~e" (cadr m))))
+            (match (cadr m)
+              [#"build_types"
+               (for ([type types-table]
+                     #:unless (set-member? handled-table (cadr type)))
+                 (display (format #<<EOS
+    if ( $OT == ~a)
+      printf "~a"
+    end
+
+EOS
+                          (cadr type) (car type))
+                          out))]
+              [#"highest_type" (display highest-type out)]
+              [#"lowest_type"  (display lowest-type  out)]
+              [else
+               (let ([m2 (regexp-match (format "~a, */[*] ([0-9]+) [*]/" (cadr m))
+                                       styles)])
+                 (if m2
+                     (begin
+                       (display (cadr m2) out)
+                       (set-add! handled-table (cadr m2)))
+                     (error 'mk-gdbinit "cannot find type in stypes.h: ~e" (cadr m))))])
             (loop)))))
     (newline out)))

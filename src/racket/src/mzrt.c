@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2009-2013 PLT Design Inc.
+  Copyright (c) 2009-2017 PLT Design Inc.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -49,11 +49,10 @@ START_XFORM_SUSPEND;
 # include <signal.h>
 # include <unistd.h>
 # include <time.h>
-# if defined(UNIX_LIMIT_STACK) || defined(UNIX_LIMIT_FDSET_SIZE)
-#   include <signal.h>
-#   include <sys/time.h>
-#   include <sys/resource.h>
-# endif
+#endif
+#ifdef UNIX_FIND_STACK_BOUNDS
+#include <sys/time.h>
+#include <sys/resource.h>
 #endif
 
 /* Define this is we need CGC support for threads. This was needed
@@ -170,6 +169,10 @@ void *mzrt_thread_stub(void *data){
 
   res = start_proc(start_proc_data);
 
+#ifdef WIN32
+  proc_thread_self->res = res;
+#endif
+
   if (!--proc_thread_self->refcount)
     free(proc_thread_self);
 
@@ -179,16 +182,19 @@ void *mzrt_thread_stub(void *data){
 }
 
 #ifdef WIN32
-DWORD WINAPI mzrt_win_thread_stub(void *data)
+unsigned int WINAPI mzrt_win_thread_stub(void *data)
 {
-  return (DWORD)mzrt_thread_stub(data);
+  (void)mzrt_thread_stub(data);
+  return 0;
 }
 #endif
 
 
-mzrt_thread_id mz_proc_thread_self() {
+mzrt_os_thread_id mz_proc_os_thread_self() {
 #ifdef WIN32
-  return GetCurrentThread();
+  /* For Windows, this result is not compatible with mz_proc_thread_id(),
+     so don't mix them up! */
+  return GetCurrentThreadId();
 #else
   return pthread_self();
 #endif
@@ -202,7 +208,14 @@ mzrt_thread_id mz_proc_thread_id(mz_proc_thread* thread) {
 mz_proc_thread* mzrt_proc_first_thread_init() {
   /* initialize mz_proc_thread struct for first thread that wasn't created with mz_proc_thread_create */
   mz_proc_thread *thread = (mz_proc_thread*)malloc(sizeof(mz_proc_thread));
-  thread->threadid  = mz_proc_thread_self();
+#ifdef WIN32
+  /* This pseudo-handle is not valid as a reference from any other thread,
+     but it will be distinct from all other IDs: */
+  thread->threadid  = GetCurrentThread();
+#else
+  thread->threadid  = mz_proc_os_thread_self();
+#endif
+  
   proc_thread_self  = thread;
   thread->refcount = 1;
   return thread;
@@ -235,7 +248,7 @@ mz_proc_thread* mz_proc_thread_create_w_stacksize(mz_proc_thread_start start_pro
   stub_data->thread     = thread;
 #   ifdef WIN32
   thread->threadid = (HANDLE)_beginthreadex(NULL, stacksize, mzrt_win_thread_stub, stub_data, 0, NULL);
-  ok = (thread->threadid != -1L);
+  ok = (thread->threadid != (HANDLE)-1L);
 #   else
 #    ifdef NEED_GC_THREAD_OPS
   ok = !GC_pthread_create(&thread->threadid, attr, mzrt_thread_stub, stub_data);
@@ -254,10 +267,20 @@ mz_proc_thread* mz_proc_thread_create_w_stacksize(mz_proc_thread_start start_pro
 }
 
 mz_proc_thread* mz_proc_thread_create(mz_proc_thread_start start_proc, void* data) {
-  intptr_t stacksize;
+  uintptr_t stacksize;
 
-#if defined(OS_X) || defined(linux)
-  stacksize = 8*1024*1024;
+#if defined(ASSUME_FIXED_STACK_SIZE)
+  stacksize = FIXED_STACK_SIZE;
+#elif defined(UNIX_FIND_STACK_BOUNDS)
+  {
+    struct rlimit rl;
+    getrlimit(RLIMIT_STACK, &rl);
+    stacksize = (uintptr_t)rl.rlim_cur;
+#  ifdef UNIX_STACK_MAXIMUM
+    if (stacksize > UNIX_STACK_MAXIMUM)
+      stacksize = UNIX_STACK_MAXIMUM;
+#  endif
+  }
 #else
   stacksize = 0;
 #endif
@@ -268,10 +291,8 @@ mz_proc_thread* mz_proc_thread_create(mz_proc_thread_start start_proc, void* dat
 void * mz_proc_thread_wait(mz_proc_thread *thread) {
   void *rc;
 #ifdef WIN32
-  DWORD rcw;
   WaitForSingleObject(thread->threadid,INFINITE);
-  GetExitCodeThread(thread->threadid, &rcw);
-  rc = (void *)rcw;
+  rc = proc_thread_self->res;
   CloseHandle(thread->threadid);
 #else
 #   ifdef NEED_GC_THREAD_OPS
@@ -307,7 +328,8 @@ int mz_proc_thread_detach(mz_proc_thread *thread) {
 
 void mz_proc_thread_exit(void *rc) {
 #ifdef WIN32
-  _endthreadex((unsigned)rc);
+  proc_thread_self->res = rc;
+  _endthreadex(0);
 #else
 #   ifndef MZ_PRECISE_GC
   pthread_exit(rc);
@@ -459,12 +481,15 @@ int mzrt_rwlock_unlock(mzrt_rwlock *lock) {
 }
 
 int mzrt_rwlock_destroy(mzrt_rwlock *lock) {
-  pthread_mutex_destroy(&lock->m);
-  pthread_cond_destroy(&lock->cr);
-  pthread_cond_destroy(&lock->cw);
-  free(lock);
+  int r = 0;
 
-  return 0;
+  r |= pthread_mutex_destroy(&lock->m);
+  r |= pthread_cond_destroy(&lock->cr);
+  r |= pthread_cond_destroy(&lock->cw);
+
+  if (!r) free(lock);
+
+  return r;
 }
 
 # endif
@@ -491,7 +516,10 @@ int mzrt_mutex_unlock(mzrt_mutex *mutex) {
 }
 
 int mzrt_mutex_destroy(mzrt_mutex *mutex) {
-  return pthread_mutex_destroy(&mutex->mutex);
+  int r;
+  r = pthread_mutex_destroy(&mutex->mutex);
+  if (!r) free(mutex);
+  return r;
 }
 
 struct mzrt_cond {
@@ -523,7 +551,10 @@ int mzrt_cond_broadcast(mzrt_cond *cond) {
 }
 
 int mzrt_cond_destroy(mzrt_cond *cond) {
-  return pthread_cond_destroy(&cond->cond);
+  int r;
+  r = pthread_cond_destroy(&cond->cond);
+  if (!r) free(cond);
+  return r;
 }
 
 struct mzrt_sema {
@@ -567,6 +598,18 @@ int mzrt_sema_wait(mzrt_sema *s)
   return 0;
 }
 
+int mzrt_sema_trywait(mzrt_sema *s)
+{
+  int locked = 1;
+  pthread_mutex_lock(&s->m);
+  if(s->ready) {
+    --s->ready;
+    locked = 0;
+  }
+  pthread_mutex_unlock(&s->m);
+  return locked;
+}
+
 int mzrt_sema_post(mzrt_sema *s)
 {
   pthread_mutex_lock(&s->m);
@@ -579,11 +622,14 @@ int mzrt_sema_post(mzrt_sema *s)
 
 int mzrt_sema_destroy(mzrt_sema *s)
 {
-  pthread_mutex_destroy(&s->m);
-  pthread_cond_destroy(&s->c);
-  free(s);
+  int r = 0;
 
-  return 0;
+  r |= pthread_mutex_destroy(&s->m);
+  r |= pthread_cond_destroy(&s->c);
+
+  if (!r) free(s);
+
+  return r;
 }
 
 #endif
@@ -592,7 +638,7 @@ int mzrt_sema_destroy(mzrt_sema *s)
 
 #ifdef WIN32
 
-typedef struct mzrt_rwlock {
+struct mzrt_rwlock {
   HANDLE readEvent;
   HANDLE writeMutex;
   LONG readers;
@@ -688,7 +734,8 @@ int mzrt_rwlock_destroy(mzrt_rwlock *lock) {
   int rc = 1;
   rc &= CloseHandle(lock->readEvent);
   rc &= CloseHandle(lock->writeMutex);
-  return rc; 
+  if (rc) free(lock);
+  return !rc;
 }
 
 struct mzrt_mutex {
@@ -720,6 +767,7 @@ int mzrt_mutex_unlock(mzrt_mutex *mutex) {
 
 int mzrt_mutex_destroy(mzrt_mutex *mutex) {
   DeleteCriticalSection(&mutex->critical_section);
+  free(mutex);
   return 0;
 }
 
@@ -774,6 +822,11 @@ int mzrt_sema_wait(mzrt_sema *s)
   return 0;
 }
 
+int mzrt_sema_trywait(mzrt_sema *s)
+{
+  return WaitForSingleObject(s->ws, 0);
+}
+
 int mzrt_sema_post(mzrt_sema *s)
 {
   ReleaseSemaphore(s->ws, 1, NULL);  
@@ -782,10 +835,12 @@ int mzrt_sema_post(mzrt_sema *s)
 
 int mzrt_sema_destroy(mzrt_sema *s)
 {
-  CloseHandle(s->ws);
-  free(s);
+  int r;
 
-  return 0;
+  r = CloseHandle(s->ws);
+  if (r) free(s);
+
+  return !r;
 }
 
 #endif

@@ -4,11 +4,14 @@
          syntax/boundmap
          racket/struct-info
          ;macro-debugger/emit
-         "patterns.rkt")
+         "patterns.rkt"
+         "syntax-local-match-introduce.rkt")
 
 (provide ddk? parse-literal all-vars pattern-var? match:syntax-err
-         match-expander-transform trans-match parse-struct
-         dd-parse parse-quote parse-id)
+         match-expander-transform trans-match trans-match* parse-struct
+         dd-parse parse-quote parse-id in-splicing?)
+
+(define in-splicing? (make-parameter #f))
 
 ;; parse x as a match variable
 ;; x : identifier
@@ -34,8 +37,8 @@
                     (parse (quasisyntax/loc stx (quote #,e)))))]
     [(quote bx)
      (box? (syntax-e #'bx))
-     (make-Box (parse (quasisyntax/loc 
-                       stx 
+     (make-Box (parse (quasisyntax/loc
+                       stx
                        (quote #,(unbox (syntax-e #'bx))))))]
     [(quote v)
      (or (parse-literal (syntax-e #'v))
@@ -46,19 +49,30 @@
 ;; p : the repeated pattern
 ;; dd : the ... stx
 ;; rest : the syntax for the rest
-(define (dd-parse parse p dd rest #:mutable [mutable? #f])
-  (let* ([count (ddk? dd)]
-         [min (and (number? count) count)])
-    (make-GSeq
-     (parameterize ([match-...-nesting (add1 (match-...-nesting))])
-       (list (list (parse p))))
-     (list min)
-     ;; no upper bound
-     (list #f)
-     ;; patterns in p get bound to lists
-     (list #f)
-     (parse rest)
-     mutable?)))
+;; pred? : recognizer for the parsed data structure (such as list?)
+;; to-list: function to convert the value to a list
+(define (dd-parse parse p dd rest pred? #:to-list [to-list #f] #:mutable [mutable? #f])
+  (define count (ddk? dd))
+  (define min (and (number? count) count))
+  (define pat (parameterize ([match-...-nesting (add1 (match-...-nesting))])
+                (parse p)))
+  (define rest-pat (parse rest))
+  (cond [(and (not (in-splicing?)) ;; when we're inside splicing, rest-pat isn't the rest
+              (not min) ;; if we have a count, better generate general code
+              (Null? rest-pat)
+              (or (Var? pat) (Dummy? pat)))
+         (make-OrderedAnd (list (make-Pred pred?)
+                                (if to-list
+                                    (make-App to-list (list pat))
+                                    pat)))]
+        [else (make-GSeq (list (list pat))
+                         (list min)
+                         ;; no upper bound
+                         (list #f)
+                         ;; patterns in p get bound to lists
+                         (list #f)
+                         rest-pat
+                         mutable?)]))
 
 ;; stx : the syntax object for the whole pattern
 ;; parse : the pattern parser
@@ -84,7 +98,7 @@
                                5)])
           (cond [(equal? super #t) (values #t '())] ;; no super type exists
                 [(equal? super #f) (values #f '())] ;; super type is unknown
-                [else 
+                [else
                  (let-values ([(complete? lineage) (get-lineage super)])
                    (values complete?
                            (cons super lineage)))])))
@@ -100,24 +114,38 @@
                           [(not (car acc)) (cdr acc)]
                           [else acc])])
           (make-Struct pred
-                       (syntax-property 
-                        pred 
-                        'disappeared-use (list struct-name))
+                       (syntax-property
+                        pred
+                        'disappeared-use (list (syntax-local-introduce struct-name)))
                        lineage (and (checked-struct-info? v) complete?)
                        acc
-                       (cond [(eq? '_ (syntax-e pats))                            
+                       (cond [(eq? '_ (syntax-e pats))
                               (map make-Dummy acc)]
                              [(syntax->list pats)
                               =>
                               (lambda (ps)
                                 (unless (= (length ps) (length acc))
-                                  (raise-syntax-error
-                                   'match
-                                   (format "~a structure ~a: expected ~a but got ~a"
-                                           "wrong number for fields for"
-                                           (syntax->datum struct-name) (length acc)
-                                           (length ps))
-                                   stx pats))
+                                  (when (< (length acc) (length ps))
+                                    (raise-syntax-error
+                                     'match
+                                     (format "~a structure ~a: expected ~a but got ~a"
+                                             "excess number of fields for"
+                                             (syntax->datum struct-name) (length acc)
+                                             (length ps))
+                                     stx pats))
+                                  (when (> (length acc) (length ps))
+                                     (raise-syntax-error
+                                       'match
+                                       (format "~a structure ~a: expected ~a but got ~a; ~a ~a"
+                                               "insufficient number of fields for"
+                                               (syntax->datum struct-name) (length acc)
+                                               (length ps)
+                                               "missing fields"
+                                               (list-tail
+                                                 (for/list [(i (in-list acc))]
+                                                           (symbol->string (syntax->datum i)))
+                                                 (length ps)))
+                                       stx pats)))
                                 (map parse ps))]
                              [else (raise-syntax-error
                                     'match
@@ -125,7 +153,11 @@
                                     stx pats)])))))))
 
 (define (trans-match pred transformer pat)
-  (make-And (list (make-Pred pred) (make-App transformer pat))))
+  (make-OrderedAnd (list (make-Pred pred) (make-App transformer (list pat)))))
+
+(define (trans-match* preds transformers pats)
+  (make-OrderedAnd (append (map make-Pred preds)
+                           (map (λ (t p) (make-App t (list p))) transformers pats))))
 
 ;; transform a match-expander application
 ;; parse : stx -> pattern
@@ -143,14 +175,15 @@
                           (set!-transformer-procedure transformer)
                           transformer)])
     (unless transformer (raise-syntax-error #f error-msg expander*))
-    (let* ([introducer (make-syntax-introducer)]
-           [mstx (introducer (syntax-local-introduce stx))]
-           [mresult (if (procedure-arity-includes? transformer 2) 
-                        (transformer expander* mstx)
-                        (transformer mstx))]
-           [result (syntax-local-introduce (introducer mresult))])
-      ;(emit-local-step stx result #:id expander)
-      (parse result))))
+    (define introducer (make-syntax-introducer))
+    (parameterize ([current-match-introducer introducer])
+      (let* ([mstx (introducer (syntax-local-introduce stx))]
+             [mresult (if (procedure-arity-includes? transformer 2)
+                          (transformer expander* mstx)
+                          (transformer mstx))]
+             [result (syntax-local-introduce (introducer mresult))])
+        ;(emit-local-step stx result #:id expander)
+        (parse result)))))
 
 ;; raise an error, blaming stx
 (define (match:syntax-err stx msg)
@@ -193,7 +226,7 @@
 ;; (listof pat) syntax -> void
 ;; ps is never null
 ;; check that all the ps bind the same set of variables
-(define (all-vars ps stx)  
+(define (all-vars ps stx)
   (let* ([first-vars (bound-vars (car ps))]
          [l (length ps)]
          [ht (make-free-identifier-mapping)])

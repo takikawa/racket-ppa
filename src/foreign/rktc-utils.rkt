@@ -1,8 +1,8 @@
 ;; Preprocessor utilities for the .rktc file.
 
-#lang at-exp scheme/base
+#lang at-exp racket/base
 
-(require (for-syntax scheme/base) scheme/list scribble/text/output)
+(require (for-syntax racket/base) racket/list scribble/text/output)
 
 (provide maplines)
 (define (maplines #:semicolons? [semi? #t] fun . ls)
@@ -51,9 +51,9 @@
 ;; User function definition
 (provide cfunctions)
 (define cfunctions (make-parameter '()))
-(define (_cdefine name minargs maxargs . body)
+(define (_cdefine name minargs maxargs kind . body)
   (define cname @list{foreign_@(racket-id->c-name name)})
-  (cfunctions (cons (list name cname minargs maxargs) (cfunctions)))
+  (cfunctions (cons (list name cname minargs maxargs kind) (cfunctions)))
   @list{@disable-prefix{#define MYNAME "@name"}
         static Scheme_Object *@|cname|(int argc, Scheme_Object *argv[])
         {
@@ -63,16 +63,23 @@
 (provide cdefine)
 (define-syntax (cdefine stx)
   (syntax-case stx ()
+    [(_ name minargs maxargs #:kind kind body ...)
+     (number? (syntax-e #'maxargs))
+     #'(_cdefine `name minargs maxargs `kind body ...)]
     [(_ name minargs maxargs body ...)
      (number? (syntax-e #'maxargs))
-     #'(_cdefine `name minargs maxargs body ...)]
+     ;; Default is 'noncm, because anything that involves
+     ;; cpointers can involve a structure-type property
+     #'(_cdefine `name minargs maxargs 'noncm body ...)]
+    [(_ name args #:kind kind body ...)
+     #'(_cdefine `name args args `kind body ...)]
     [(_ name args body ...)
-     #'(_cdefine `name args args body ...)]))
+     #'(_cdefine `name args args 'noncm body ...)]))
 
 ;; Struct definitions
 (provide cstructs)
 (define cstructs (make-parameter '()))
-(define (_cdefstruct name slots types)
+(define (_cdefstruct name slots types #:tag [tag #f])
   (define cname (regexp-replace* #rx"-" (symbol->string name) "_"))
   (define mname (string-upcase (regexp-replace* #rx"_" cname "")))
   (define predname (string->symbol (format "~a?" name)))
@@ -87,13 +94,15 @@
           }})
   (cstructs (cons (list* name cname slots) (cstructs)))
   @list{/* @name structure definition */
-        static Scheme_Type @|cname|_tag;
+        @(if tag
+             @list{#define @|cname|_tag @tag}
+             @list{static Scheme_Type @|cname|_tag;})
         typedef struct @|cname|_struct {
           Scheme_Object so;
           @(maplines (lambda (s t) @list{@t @s}) slots types)
         } @|cname|_struct;
         #define SCHEME_@|mname|P(x) (SCHEME_TYPE(x)==@|cname|_tag)
-        @_cdefine[predname 1 1]{
+        @_cdefine[predname 1 1 'immed]{
           return SCHEME_@|mname|P(argv[0]) ? scheme_true : scheme_false@";"
         }
         /* 3m stuff for @cname */
@@ -107,8 +116,8 @@
         END_XFORM_SKIP;
         #endif})
 (provide cdefstruct)
-(define-syntax-rule (cdefstruct name [slot type] ...)
-  (_cdefstruct `name (list `slot ...) (list type ...)))
+(define-syntax-rule (cdefstruct name [arg ...] [slot type] ...)
+  (_cdefstruct `name (list `slot ...) (list type ...) arg ...))
 
 ;; Tagged object allocation
 (define (_cmake var type . values)

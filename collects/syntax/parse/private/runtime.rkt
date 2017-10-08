@@ -1,6 +1,5 @@
 #lang racket/base
 (require racket/stxparam
-         unstable/syntax
          syntax/parse/private/residual ;; keep abs. path
          (for-syntax racket/base
                      racket/list
@@ -8,7 +7,6 @@
                      syntax/strip-context
                      racket/private/sc
                      racket/syntax
-                     "rep-attrs.rkt"
                      "rep-data.rkt"))
 
 (provide with
@@ -24,7 +22,6 @@
          let/unpack
 
          defattrs/unpack
-         check-list^depth
 
          check-literal
          no-shadow
@@ -56,10 +53,10 @@ residual.rkt.
 
 (define-syntax-parameter fail-handler
   (lambda (stx)
-    (wrong-syntax stx "internal error: used out of context")))
+    (wrong-syntax stx "internal error: fail-handler used out of context")))
 (define-syntax-parameter cut-prompt
   (lambda (stx)
-    (wrong-syntax stx "internal error: used out of context")))
+    (wrong-syntax stx "internal error: cut-prompt used out of context")))
 
 (define-syntax-rule (wrap-user-code e)
   (with ([fail-handler #f]
@@ -142,13 +139,9 @@ residual.rkt.
                   (define-syntax name (make-syntax-mapping 'depth (quote-syntax stmp)))
                   ...)))]))
 
-;; (check-list^depth attr expr)
-(define-syntax (check-list^depth stx)
-  (syntax-case stx ()
-    [(_ a expr)
-     (with-syntax ([#s(attr name depth syntax?) #'a])
-       (quasisyntax/loc #'expr
-         (check-list^depth* 'name 'depth expr)))]))
+(define-syntax-rule (phase-of-enclosing-module)
+  (variable-reference->module-base-phase
+   (#%variable-reference)))
 
 ;; (check-literal id phase-level-expr ctx) -> void
 (define-syntax (check-literal stx)

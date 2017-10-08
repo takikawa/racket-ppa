@@ -1,10 +1,11 @@
 #lang racket/base
+(require setup/cross-system)
 
 (provide add-plt-segment
          get/set-dylib-path)
 
 (define exe-id
-  (if (equal? (path->bytes (system-library-subpath #f)) #"x86_64-macosx")
+  (if (equal? (path->bytes (cross-system-library-subpath #f)) #"x86_64-macosx")
       #xFeedFacf
       #xFeedFace))
 
@@ -27,14 +28,34 @@
 (define (round-up-page v)
   (bitwise-and #xFFFFF000 (+ v #xFFF)))
 
-(define (mult-of-4 n)
-  (let ([m (modulo n 4)])
+(define (mult-of-8 n)
+  (let ([m (modulo n 8)])
     (if (zero? m)
         n
-        (+ n (- 4 m)))))
+        (+ n (- 8 m)))))
 
 (define move-link-edit? #t)
 
+;; To add a segment to a Mach-O executable, we need to add a load command.
+;; To support code signing of the resulting executable, we need to place the
+;; new segment before the linkedit segment, because code signing wants the
+;; linkedit segment last.
+;;
+;; Also, we need to strip away any existing signature. We expect any
+;; existing signature to be at the end of the linkedit segment. The
+;; signature is 16-byte aligned, which means that some padding may
+;; have been added to the linkedit segment, and we have to undo that
+;; when removing the signature. In other words, we have to recognize
+;; everything that contributes to the linkedit segment and find the
+;; contibution that is otherwise last; that's the job of
+;; `linkedit-limit-offset`, below.
+;;
+;; Since the new segment is written before the linkedit segment, we
+;; need to shift all the offsets that refer to file positions of
+;; things within the linkedit segment. The `...-pos` variables
+;; generally retain the location in a file of an offset that needs to
+;; be updated.
+;;
 (define (add-plt-segment file segdata)
   (let-values ([(p out) (open-input-output-file file #:exists 'update)])
     (dynamic-wind
@@ -65,7 +86,10 @@
                  [data-in-code-offset #f]
                  [code-signature-pos #f]
                  [code-signature-size 0]
-                 [code-signature-lc-sz 0])
+                 [code-signature-lc-sz 0]
+                 [code-sign-drs-pos #f]
+                 [code-sign-drs-offset 0]
+                 [linkedit-limit-offset 0])
             ;; (printf "~a cmds, length 0x~x\n" cnt cmdssz)
             (read-ulong p) ; flags
             (when (equal? exe-id #xFeedFacf)
@@ -121,11 +145,36 @@
                                  (when 64? (read-ulong p)))
                                (loop (sub1 nsects)))))))]
                     [(2)
-                     ;; Symbol table
-                     (set! sym-tab-pos pos)]
+                     ;; LC_SYMTAB, symbol table
+                     (set! sym-tab-pos pos)
+                     (let ([symoffset (read-ulong p)]
+                           [nsyms (read-ulong p)]
+                           [stroffset (read-ulong p)]
+                           [strsize (read-ulong p)]
+                           [symsize (if link-edit-64? 16 12)])
+                       (set! linkedit-limit-offset (max linkedit-limit-offset (+ symoffset (* nsyms symsize))))
+                       (set! linkedit-limit-offset (max linkedit-limit-offset (+ stroffset strsize))))]
                     [(#xB)
-                     ;; Dysym
-                     (set! dysym-pos pos)]
+                     ;; LC_DYSYMTAB, Dysym
+                     (set! dysym-pos pos)
+                     ;; Skip over counts:
+                     (for ([i 6]) (read-ulong p))
+                     ;; Check that unhandled counts are zero; we could handle
+                     ;; more of these, and it's just a matter of working out
+                     ;; the size to multiply each count
+                     (for ([i 3])
+                       (read-ulong p)
+                       (unless (zero? (read-ulong p))
+                         (error 'check-header "unhandled LC_DYSYMTAB count is not 0")))
+                     ;; indirect syms
+                     (let ([offset (read-ulong p)]
+                           [count (read-ulong p)])
+                       (set! linkedit-limit-offset (max linkedit-limit-offset (+ offset (* count 4)))))
+                     ;; Two more:
+                     (for ([i 2])
+                       (read-ulong p)
+                       (unless (zero? (read-ulong p))
+                         (error 'check-header "unhandled LC_DYSYMTAB count is not 0")))]
                     [(#x16)
                      ;; 2-level hints table
                      (set! hints-pos pos)]
@@ -142,15 +191,27 @@
                            [exportbindoff (read-ulong p)]
                            [exportbindsize (read-ulong p)])
                        (set! dyld-info-pos pos)
-                       (set! dyld-info-offs (vector rebaseoff bindoff weakbindoff lazybindoff exportbindoff)))]
+                       (set! dyld-info-offs (vector rebaseoff bindoff weakbindoff lazybindoff exportbindoff))
+                       (set! linkedit-limit-offset (max linkedit-limit-offset
+                                                        (+ rebaseoff rebasesize)
+                                                        (+ bindoff bindsize)
+                                                        (+ weakbindoff weakbindsize)
+                                                        (+ lazybindoff lazybindsize)
+                                                        (+ exportbindoff exportbindsize))))]
                     [(#x26)
                      ;; LC_FUNCTION_STARTS
-                     (set! function-starts-offset (read-ulong p))
-                     (set! function-starts-pos pos)]
+                     (let ([offset (read-ulong p)]
+                           [size (read-ulong p)])
+                       (set! function-starts-offset offset)
+                       (set! function-starts-pos pos)
+                       (set! linkedit-limit-offset (max linkedit-limit-offset (+ offset size))))]
                     [(#x29)
                      ;; LC_DATA_IN_CODE
-                     (set! data-in-code-offset (read-ulong p))
-                     (set! data-in-code-pos pos)]
+                     (let ([offset (read-ulong p)]
+                           [size (read-ulong p)])
+                       (set! data-in-code-offset offset)
+                       (set! data-in-code-pos pos)
+                       (set! linkedit-limit-offset (max linkedit-limit-offset (+ offset size))))]
                     [(#x1D)
                      ;; LC_CODE_SIGNATURE
                      (if (= cnt 1)
@@ -158,16 +219,29 @@
                                [size (read-ulong p)])
                            (file-position p (+ offset size))
                            (if (eof-object? (read-byte p))
-                               (let ([extra (detect-linkedit-padding p
-                                                                     link-edit-offset
-                                                                     link-edit-len
-                                                                     offset
-                                                                     (if link-edit-64? 8 4))])
+                               (begin
+                                 (unless ((abs (- offset linkedit-limit-offset)) . < . 16)
+                                   (error 'check-header
+                                          "code signature does not line up with end of other linkedit blocks: ~s vs. ~s"
+                                          offset linkedit-limit-offset))
                                  (set! code-signature-pos pos)
                                  (set! code-signature-lc-sz sz)
-                                 (set! code-signature-size (+ size extra)))
+                                 ;; Claim a larger size to account for padding:
+                                 (set! code-signature-size (- link-edit-len (- linkedit-limit-offset link-edit-offset))))
                                (log-warning "WARNING: code signature is not at end of file")))
                          (log-warning "WARNING: code signature is not last load command"))]
+                    [(#x2B)
+                     ;; LC_DYLIB_CODE_SIGN_DRS
+                     (let ([offset (read-ulong p)]
+                           [size (read-ulong p)])
+                       (set! code-sign-drs-offset offset)
+                       (set! code-sign-drs-pos pos)
+                       (set! linkedit-limit-offset (max linkedit-limit-offset (+ offset size))))]
+                    [(#x1E #x2E)
+                     ;; LC_SEGMENT_SPLIT_INFO or LC_LINKER_OPTIMIZATION_HINT
+                     (let ([offset (read-ulong p)]
+                           [size (read-ulong p)])
+                       (set! linkedit-limit-offset (max linkedit-limit-offset (+ offset size))))]
                     [else
                      (void)])
                   (file-position p (+ pos sz))
@@ -229,6 +303,9 @@
               (when data-in-code-pos
                 (when (data-in-code-pos . > . link-edit-pos)
                   (set! data-in-code-pos (+ data-in-code-pos new-cmd-sz))))
+              (when code-sign-drs-pos
+                (when (code-sign-drs-pos . > . link-edit-pos)
+                  (set! code-sign-drs-pos (+ code-sign-drs-pos new-cmd-sz))))
               (set! link-edit-pos (+ link-edit-pos new-cmd-sz))
               (when move-link-edit?
                 ;; Update link-edit segment entry:
@@ -275,6 +352,10 @@
                 (when data-in-code-pos
                   (file-position p (+ data-in-code-pos 8))
                   (write-ulong (+ data-in-code-offset outlen) out))
+                ;; Shift code-sign drs:
+                (when code-sign-drs-pos
+                  (file-position p (+ code-sign-drs-pos 8))
+                  (write-ulong (+ code-sign-drs-offset outlen) out))
                 ;; Shift dyld-info offs
                 (when dyld-info-pos
                   (let ([update (lambda (n)
@@ -297,32 +378,6 @@
           (close-input-port p)
           (close-output-port out)))))
 
-(define (detect-linkedit-padding p offset size lc-offset alignment)
-  ;; To add a code signature, link-edit size may have been rounded up
-  ;; to a multiple of 16. Look for extra \0s before the code-signature
-  ;; offset.
-  (unless (zero? (modulo size 16))
-    (error 'detect-linkedit-padding "expected a multiple of 16 for current size"))
-  (define orig-pos (file-position p))
-  (file-position p (- lc-offset 16))
-  (define bstr (read-bytes 16 p))
-  (file-position p orig-pos)
-  (if (= alignment 8)
-      (if (regexp-match? #px#"\0{9}$" bstr)
-          8 ; must be an extra word
-          0)
-      (cond
-       [(regexp-match? #px#"\0{14}$" bstr)
-        ;; three extra words
-        12]
-       [(regexp-match? #px#"\0{10}$" bstr)
-        ;; two extra words
-        8]
-       [(regexp-match? #px#"\0{6}$" bstr)
-        ;; an extra word
-        4]
-       [else 0])))
-
 (define (fix-offset p pos out d base delta)
   (when (and out (not (zero? delta)))
     (file-position p (+ pos d))
@@ -343,13 +398,13 @@
           (check-same exe-id (read-ulong p))
           (read-ulong p)
           (read-ulong p)
-          (check-same #x2 (read-ulong p))
+          (read-ulong p) ; 2 is executable, etc.
           (let* ([cnt (read-ulong p)]
                  [cmdssz (read-ulong p)])
             (read-ulong p)
             (when (equal? exe-id #xFeedFacf)
               (read-ulong p))
-            (let loop ([cnt cnt][base 0][delta 0][result #f])
+            (let loop ([cnt cnt] [base 0] [delta 0] [result null])
               (if (zero? cnt)
                   result
                   (let ([pos (file-position p)]
@@ -365,7 +420,7 @@
                                 [segname (car (regexp-match #rx#"^[^\0]*" segname))])
                            (if (regexp-match rx segname)
                                (let* ([newnamelen (and out
-                                                       (mult-of-4 (+ 1 (bytes-length new-path))))]
+                                                       (mult-of-8 (+ 1 (bytes-length new-path))))]
                                       [delta (if out
                                                  (-  newnamelen namelen)
                                                  0)])
@@ -396,7 +451,7 @@
                                    (write-bytes (make-bytes (- newnamelen (bytes-length new-path)) 0) out)
                                    (flush-output out))
                                  (file-position p (+ pos sz delta))
-                                 (loop (sub1 cnt) pos delta segname))
+                                 (loop (sub1 cnt) pos delta (cons segname result)))
                                (begin
                                  (file-position p (+ pos sz))
                                  (loop (sub1 cnt) base delta result)))))]

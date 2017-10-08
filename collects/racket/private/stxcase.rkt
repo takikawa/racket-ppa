@@ -4,16 +4,14 @@
 (module stxcase '#%kernel
   (#%require "stx.rkt" "small-scheme.rkt" '#%paramz '#%unsafe
              "ellipses.rkt"
-             (for-syntax "stx.rkt" "small-scheme.rkt" "sc.rkt" '#%kernel))
+             (for-syntax "stx.rkt" "small-scheme.rkt"
+                         "member.rkt" "sc.rkt" '#%kernel))
 
   (-define (datum->syntax/shape orig datum)
      (if (syntax? datum)
 	 datum
-	 (let ([stx (datum->syntax orig datum orig #f orig)])
-	   (let ([shape (syntax-property orig 'paren-shape)])
-	     (if shape
-		 (syntax-property stx 'paren-shape shape)
-		 stx)))))
+         ;; Keeps 'paren-shape and any other properties:
+	 (datum->syntax orig datum orig orig)))
 
   (-define (catch-ellipsis-error thunk sexp sloc)
       ((let/ec esc

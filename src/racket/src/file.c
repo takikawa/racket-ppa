@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2013 PLT Design Inc.
+  Copyright (c) 2004-2017 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -38,82 +38,8 @@
  */
 
 #include "schpriv.h"
-#ifdef UNISTD_INCLUDE
-# include <unistd.h>
-#endif
-#ifndef NO_STAT_PROC
-# ifdef NO_SYS_INCLUDE_SUBDIR
-#  include <stat.h>
-# else
-#  include <sys/types.h>
-#  include <sys/stat.h>
-# endif
-#endif
-#ifdef EXPAND_FILENAME_TILDE
-# include <pwd.h>
-#endif
-#ifndef NO_FILE_SYSTEM_UTILS
-# include <ctype.h>
-# ifndef NO_READDIR
-#  include <dirent.h>
-# endif
-#endif
-#ifdef DIR_INCLUDE
-# include <dir.h>
-#endif
-#ifdef DIRECT_INCLUDE
-# include <direct.h>
-#endif
-#ifdef IO_INCLUDE
-# include <io.h>
-#endif
-#if defined(MACINTOSH_EVENTS)
-# ifdef OS_X
-#  include <Carbon/Carbon.h>
-# else
-#  include <Carbon.h>
-# endif
-#endif
-#ifdef UNIX_FILE_SYSTEM
-# include <fcntl.h>
-# include <grp.h>
-# include <pwd.h>
-# include <utime.h>
-#endif
-#ifdef DOS_FILE_SYSTEM
-# include <windows.h>
-# include <shlobj.h>
-# ifdef __BORLANDC__
-#  include <utime.h>
-# else
-#  include <sys/utime.h>
-# endif
-#endif
-#ifdef NO_ERRNO_GLOBAL
-# define errno -1
-#else
-# include <errno.h>
-#endif
-
-#if defined(S_IFDIR) && !defined(S_ISDIR)
-# define S_ISDIR(m) ((m) & S_IFDIR)
-#endif
-#if defined(S_IFREG) && !defined(S_ISREG)
-# define S_ISREG(m) ((m) & S_IFREG)
-#endif
-#if defined(S_IFLNK) && !defined(S_ISLNK)
-# define S_ISLNK(m) ((m) & S_IFLNK)
-#endif
-#if defined(_S_IFDIR) && !defined(S_ISDIR)
-# define S_ISDIR(m) ((m) & _S_IFDIR)
-#endif
-#if defined(_S_IFREG) && !defined(S_ISREG)
-# define S_ISREG(m) ((m) & _S_IFREG)
-#endif
-
-#if defined(CARBON_FILE_SYSTEM)
-long scheme_creator_id = 'MzSc';
-#endif
+#include "schrktio.h"
+#include <ctype.h>
 
 #define UNIX_FN_SEP '/'
 #define IS_A_UNIX_SEP(x) ((x) == '/')
@@ -138,10 +64,6 @@ void scheme_set_ignore_link_paths(int v) { scheme_ignore_link_paths = v; }
 
 #define TO_PATH(x) (SCHEME_GENERAL_PATHP(x) ? x : scheme_char_string_to_path(x))
 
-#ifdef DOS_FILE_SYSTEM
-extern int scheme_stupid_windows_machine;
-#endif
-
 /* Define TILDE_IS_ABSOLUTE to get pre-v4.0 handling of "~". */
 
 #ifdef TILDE_IS_ABSOLUTE
@@ -156,6 +78,12 @@ static int check_dos_slashslash_qm(const char *next, int len, int *drive_end,
 				   int *clean_start, int *add_sep);
 
 #define is_drive_letter(c) (((unsigned char)c < 128) && isalpha((unsigned char)c))
+
+#ifdef __clang__
+# ifdef MZ_PRECISE_GC
+#  pragma clang diagnostic ignored "-Wtautological-compare"
+# endif
+#endif
 
 /* local */
 static Scheme_Object *path_p(int argc, Scheme_Object **argv);
@@ -175,7 +103,6 @@ static Scheme_Object *file_exists(int argc, Scheme_Object **argv);
 static Scheme_Object *directory_exists(int argc, Scheme_Object **argv);
 static Scheme_Object *link_exists(int argc, Scheme_Object **argv);
 
-#ifndef NO_FILE_SYSTEM_UTILS
 static Scheme_Object *build_path_kind(int argc, Scheme_Object **argv);
 static Scheme_Object *delete_file(int argc, Scheme_Object **argv);
 static Scheme_Object *rename_file(int argc, Scheme_Object **argv);
@@ -187,6 +114,7 @@ static Scheme_Object *make_directory(int argc, Scheme_Object *argv[]);
 static Scheme_Object *delete_directory(int argc, Scheme_Object *argv[]);
 static Scheme_Object *make_link(int argc, Scheme_Object *argv[]);
 static Scheme_Object *split_path(int argc, Scheme_Object **argv);
+static Scheme_Object *explode_path(int argc, Scheme_Object **argv);
 static Scheme_Object *relative_path_p(int argc, Scheme_Object **argv);
 static Scheme_Object *absolute_path_p(int argc, Scheme_Object **argv);
 static Scheme_Object *complete_path_p(int argc, Scheme_Object **argv);
@@ -200,22 +128,24 @@ static Scheme_Object *file_or_dir_permissions(int argc, Scheme_Object *argv[]);
 static Scheme_Object *file_identity(int argc, Scheme_Object *argv[]);
 static Scheme_Object *file_size(int argc, Scheme_Object *argv[]);
 static Scheme_Object *current_library_collection_paths(int argc, Scheme_Object *argv[]);
+static Scheme_Object *current_library_collection_links(int argc, Scheme_Object *argv[]);
 static Scheme_Object *use_compiled_kind(int, Scheme_Object *[]);
 static Scheme_Object *compiled_file_roots(int, Scheme_Object *[]);
 static Scheme_Object *use_user_paths(int, Scheme_Object *[]);
 static Scheme_Object *use_link_paths(int, Scheme_Object *[]);
+static Scheme_Object *use_compiled_file_check(int, Scheme_Object *[]);
 static Scheme_Object *find_system_path(int argc, Scheme_Object **argv);
-#endif
 
-#ifdef DIR_FUNCTION
 static Scheme_Object *current_directory(int argc, Scheme_Object *argv[]);
-#endif
+static Scheme_Object *current_user_directory(int argc, Scheme_Object *argv[]);
+static Scheme_Object *current_force_delete_perms(int argc, Scheme_Object *argv[]);
 
 static int has_null(const char *s, intptr_t l);
 static void raise_null_error(const char *name, Scheme_Object *path, const char *mod);
 
 static char *do_path_to_complete_path(char *filename, intptr_t ilen, const char *wrt, intptr_t wlen, int kind);
-static Scheme_Object *do_simplify_path(Scheme_Object *path, Scheme_Object *cycle_check, int skip, int use_filesystem, int force_rel_up, int kind);
+static Scheme_Object *do_simplify_path(Scheme_Object *path, Scheme_Object *cycle_check, int skip, int use_filesystem,
+				       int force_rel_up, int kind, int guards);
 static char *do_normal_path_seps(char *si, int *_len, int delta, int strip_trail, int kind, int *_did);
 static char *remove_redundant_slashes(char *filename, int *l, int delta, int *expanded, int kind);
 static Scheme_Object *do_path_to_directory_path(char *s, intptr_t offset, intptr_t len, Scheme_Object *p, int just_check, int kind);
@@ -223,7 +153,6 @@ static Scheme_Object *do_path_to_directory_path(char *s, intptr_t offset, intptr
 READ_ONLY static Scheme_Object *up_symbol;
 READ_ONLY static Scheme_Object *relative_symbol;
 READ_ONLY static Scheme_Object *same_symbol;
-#ifndef NO_FILE_SYSTEM_UTILS
 READ_ONLY static Scheme_Object *read_symbol, *write_symbol, *execute_symbol;
 
 READ_ONLY static Scheme_Object *temp_dir_symbol, *home_dir_symbol, *pref_dir_symbol;
@@ -231,30 +160,17 @@ READ_ONLY static Scheme_Object *doc_dir_symbol, *desk_dir_symbol;
 READ_ONLY static Scheme_Object *init_dir_symbol, *init_file_symbol, *sys_dir_symbol;
 READ_ONLY static Scheme_Object *exec_file_symbol, *run_file_symbol, *collects_dir_symbol;
 READ_ONLY static Scheme_Object *pref_file_symbol, *orig_dir_symbol, *addon_dir_symbol;
-READ_ONLY static Scheme_Object *links_file_symbol;
+READ_ONLY static Scheme_Object *config_dir_symbol;
+READ_ONLY static Scheme_Object *host_collects_dir_symbol, *host_config_dir_symbol;
 
 SHARED_OK static Scheme_Object *exec_cmd;
 SHARED_OK static Scheme_Object *run_cmd;
-SHARED_OK static Scheme_Object *collects_path;
+SHARED_OK static Scheme_Object *collects_path, *config_path;
+SHARED_OK static Scheme_Object *host_collects_path, *host_config_path;
 THREAD_LOCAL_DECL(static Scheme_Object *original_pwd);
 SHARED_OK static Scheme_Object *addon_dir;
-SHARED_OK static Scheme_Object *links_file;
-THREAD_LOCAL_DECL(static Scheme_Object *inst_links_path);
 
-#endif
 READ_ONLY static Scheme_Object *windows_symbol, *unix_symbol;
-
-#if defined(UNIX_FILE_SYSTEM) && !defined(NO_UNIX_USERS)
-
-# define GROUP_CACHE_SIZE 10
-THREAD_LOCAL_DECL(static Scheme_Object *group_member_cache);
-
-SHARED_OK static int have_user_ids = 0;
-SHARED_OK static uid_t uid;
-SHARED_OK static uid_t euid;
-SHARED_OK static gid_t gid;
-SHARED_OK static gid_t egid;
-#endif
 
 void scheme_init_file(Scheme_Env *env)
 {
@@ -263,7 +179,6 @@ void scheme_init_file(Scheme_Env *env)
   REGISTER_SO(up_symbol);
   REGISTER_SO(relative_symbol);
   REGISTER_SO(same_symbol);
-#ifndef NO_FILE_SYSTEM_UTILS
   REGISTER_SO(read_symbol);
   REGISTER_SO(write_symbol);
   REGISTER_SO(execute_symbol);
@@ -280,10 +195,12 @@ void scheme_init_file(Scheme_Env *env)
   REGISTER_SO(exec_file_symbol);
   REGISTER_SO(run_file_symbol);
   REGISTER_SO(collects_dir_symbol);
+  REGISTER_SO(config_dir_symbol);
+  REGISTER_SO(host_collects_dir_symbol);
+  REGISTER_SO(host_config_dir_symbol);
   REGISTER_SO(orig_dir_symbol);
   REGISTER_SO(addon_dir_symbol);
-  REGISTER_SO(links_file_symbol);
-#endif
+
   REGISTER_SO(windows_symbol);
   REGISTER_SO(unix_symbol);
 
@@ -291,7 +208,6 @@ void scheme_init_file(Scheme_Env *env)
   relative_symbol = scheme_intern_symbol("relative");
   same_symbol = scheme_intern_symbol("same");
   
-#ifndef NO_FILE_SYSTEM_UTILS
   read_symbol = scheme_intern_symbol("read");
   write_symbol = scheme_intern_symbol("write");
   execute_symbol = scheme_intern_symbol("execute");
@@ -308,15 +224,16 @@ void scheme_init_file(Scheme_Env *env)
   exec_file_symbol = scheme_intern_symbol("exec-file");
   run_file_symbol = scheme_intern_symbol("run-file");
   collects_dir_symbol = scheme_intern_symbol("collects-dir");
+  config_dir_symbol = scheme_intern_symbol("config-dir");
+  host_collects_dir_symbol = scheme_intern_symbol("host-collects-dir");
+  host_config_dir_symbol = scheme_intern_symbol("host-config-dir");
   orig_dir_symbol = scheme_intern_symbol("orig-dir");
   addon_dir_symbol = scheme_intern_symbol("addon-dir");
-  links_file_symbol = scheme_intern_symbol("links-file");
-#endif
 
   windows_symbol = scheme_intern_symbol("windows");
   unix_symbol = scheme_intern_symbol("unix");
 
-  p = scheme_make_prim_w_arity(path_p, "path?", 1, 1);
+  p = scheme_make_immed_prim(path_p, "path?", 1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
                                                             | SCHEME_PRIM_IS_OMITABLE);
   scheme_add_global_constant("path?", p, env);
@@ -332,49 +249,49 @@ void scheme_init_file(Scheme_Env *env)
                                                       1, 1, 1), 
 			     env);
   scheme_add_global_constant("system-path-convention-type", 
-			     scheme_make_prim_w_arity(platform_path_kind, 
-                                                      "system-path-convention-type", 
-                                                      0, 0),
+			     scheme_make_immed_prim(platform_path_kind, 
+                                                    "system-path-convention-type", 
+                                                    0, 0),
 			     env);
   scheme_add_global_constant("path->string", 
-			     scheme_make_prim_w_arity(path_to_string, 
-						      "path->string", 
-						      1, 1), 
+			     scheme_make_immed_prim(path_to_string, 
+                                                    "path->string", 
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("path->bytes", 
-			     scheme_make_prim_w_arity(path_to_bytes, 
-						      "path->bytes", 
-						      1, 1), 
+			     scheme_make_immed_prim(path_to_bytes, 
+                                                    "path->bytes", 
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("path-element->bytes", 
-			     scheme_make_prim_w_arity(path_element_to_bytes, 
-						      "path-element->bytes", 
-						      1, 1), 
+			     scheme_make_immed_prim(path_element_to_bytes, 
+                                                    "path-element->bytes", 
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("path-element->string", 
-			     scheme_make_prim_w_arity(path_element_to_string, 
-						      "path-element->string", 
-						      1, 1), 
+			     scheme_make_immed_prim(path_element_to_string, 
+                                                    "path-element->string", 
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("string->path", 
-			     scheme_make_prim_w_arity(string_to_path, 
-						      "string->path", 
-						      1, 1), 
+			     scheme_make_immed_prim(string_to_path, 
+                                                    "string->path", 
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("bytes->path", 
-			     scheme_make_prim_w_arity(bytes_to_path, 
-						      "bytes->path", 
-						      1, 2), 
+			     scheme_make_immed_prim(bytes_to_path, 
+                                                    "bytes->path", 
+                                                    1, 2), 
 			     env);
   scheme_add_global_constant("bytes->path-element", 
-			     scheme_make_prim_w_arity(bytes_to_path_element, 
-						      "bytes->path-element", 
-						      1, 2), 
+			     scheme_make_immed_prim(bytes_to_path_element, 
+                                                    "bytes->path-element", 
+                                                    1, 2), 
 			     env);
   scheme_add_global_constant("string->path-element", 
-			     scheme_make_prim_w_arity(string_to_path_element, 
-						      "string->path-element", 
-						      1, 1), 
+			     scheme_make_immed_prim(string_to_path_element, 
+                                                    "string->path-element", 
+                                                    1, 1), 
 			     env);
 
   scheme_add_global_constant("file-exists?", 
@@ -392,7 +309,6 @@ void scheme_init_file(Scheme_Env *env)
 						      "link-exists?", 
 						      1, 1), 
 			     env);
-#ifndef NO_FILE_SYSTEM_UTILS
   scheme_add_global_constant("delete-file", 
 			     scheme_make_prim_w_arity(delete_file, 
 						      "delete-file", 
@@ -409,19 +325,19 @@ void scheme_init_file(Scheme_Env *env)
 						      2, 3), 
 			     env);
   scheme_add_global_constant("build-path", 
-			     scheme_make_prim_w_arity(scheme_build_path,
-						      "build-path", 
-						      1, -1), 
+			     scheme_make_immed_prim(scheme_build_path,
+                                                    "build-path", 
+                                                    1, -1), 
 			     env);
   scheme_add_global_constant("build-path/convention-type", 
-			     scheme_make_prim_w_arity(build_path_kind,
-						      "build-path/convention-type", 
-						      2, -1), 
+			     scheme_make_immed_prim(build_path_kind,
+                                                    "build-path/convention-type", 
+                                                    2, -1), 
 			     env);
   scheme_add_global_constant("path->directory-path",
-			     scheme_make_prim_w_arity(path_to_directory_path,
-						      "path->directory-path",
-						      1, 1), 
+			     scheme_make_immed_prim(path_to_directory_path,
+                                                    "path->directory-path",
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("split-path", 
 			     scheme_make_prim_w_arity2(split_path,
@@ -429,25 +345,30 @@ void scheme_init_file(Scheme_Env *env)
 						       1, 1,
 						       3, 3), 
 			     env);
+  scheme_add_global_constant("explode-path", 
+			     scheme_make_immed_prim(explode_path,
+                                                    "explode-path",
+                                                    1, 1), 
+			     env);
   scheme_add_global_constant("relative-path?", 
-			     scheme_make_prim_w_arity(relative_path_p,
-						      "relative-path?",
-						      1, 1), 
+			     scheme_make_immed_prim(relative_path_p,
+                                                    "relative-path?",
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("absolute-path?", 
-			     scheme_make_prim_w_arity(absolute_path_p,
-						      "absolute-path?",
-						      1, 1), 
+			     scheme_make_immed_prim(absolute_path_p,
+                                                    "absolute-path?",
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("complete-path?", 
-			     scheme_make_prim_w_arity(complete_path_p,
-						      "complete-path?",
-						      1, 1), 
+			     scheme_make_immed_prim(complete_path_p,
+                                                    "complete-path?",
+                                                    1, 1), 
 			     env);
   scheme_add_global_constant("path->complete-path",
-			     scheme_make_prim_w_arity(path_to_complete_path,
-						      "path->complete-path",
-						      1, 2), 
+			     scheme_make_immed_prim(path_to_complete_path,
+                                                    "path->complete-path",
+                                                    1, 2), 
 			     env);
   scheme_add_global_constant("resolve-path",
 			     scheme_make_prim_w_arity(resolve_path,
@@ -527,23 +448,32 @@ void scheme_init_file(Scheme_Env *env)
 						      1, 1), 
 			     env);
 
-#endif
-
-#ifdef DIR_FUNCTION
   scheme_add_global_constant("current-directory",
 			     scheme_register_parameter(current_directory,
 						       "current-directory", 
 						       MZCONFIG_CURRENT_DIRECTORY),
 			     env);
-#endif
+  scheme_add_global_constant("current-directory-for-user",
+			     scheme_register_parameter(current_user_directory,
+						       "current-directory-for-user", 
+						       MZCONFIG_CURRENT_USER_DIRECTORY),
+			     env);
+  scheme_add_global_constant("current-force-delete-permissions",
+			     scheme_register_parameter(current_force_delete_perms,
+						       "current-force-delete-permissions",
+						       MZCONFIG_FORCE_DELETE_PERMS),
+			     env);
 
-#ifndef NO_FILE_SYSTEM_UTILS
   scheme_add_global_constant("current-library-collection-paths",
 			     scheme_register_parameter(current_library_collection_paths,
 						       "current-library-collection-paths",
 						       MZCONFIG_COLLECTION_PATHS),
 			     env);
-#endif
+  scheme_add_global_constant("current-library-collection-links",
+			     scheme_register_parameter(current_library_collection_links,
+						       "current-library-collection-links",
+						       MZCONFIG_COLLECTION_LINKS),
+			     env);
   scheme_add_global_constant("use-compiled-file-paths",
 			     scheme_register_parameter(use_compiled_kind,
 						       "use-compiled-file-paths",
@@ -564,13 +494,16 @@ void scheme_init_file(Scheme_Env *env)
 						       "use-collection-link-paths",
 						       MZCONFIG_USE_LINK_PATHS),
 			     env);
+  scheme_add_global_constant("use-compiled-file-check",
+			     scheme_register_parameter(use_compiled_file_check,
+						       "use-compiled-file-check",
+						       MZCONFIG_USE_COMPILED_FILE_CHECK),
+			     env);
 }
 
 void scheme_init_file_places()
 {
-#ifndef NO_FILE_SYSTEM_UTILS
   REGISTER_SO(original_pwd);
-#endif
 }
 
 /**********************************************************************/
@@ -677,7 +610,7 @@ static Scheme_Object *make_protected_path(char *chars)
 }
 #endif
 
-Scheme_Object *make_exposed_sized_offset_path(int already_protected, 
+Scheme_Object *make_exposed_sized_offset_path(int *optional, int already_protected, 
 					      char *chars, intptr_t d, intptr_t len, int copy,
                                               int kind)
   /* Called to make a directory path where the end has been removed.
@@ -714,7 +647,7 @@ Scheme_Object *make_exposed_sized_offset_path(int already_protected,
         memcpy(s2+9, chars + i + 1, l);
         s2[l + 9] = 0;
         last = scheme_make_sized_offset_kind_path(s2, 0, l+9, 0, SCHEME_WINDOWS_PATH_KIND);
-        first = make_exposed_sized_offset_path(0, chars, d, i-d+1, 1, SCHEME_WINDOWS_PATH_KIND);
+        first = make_exposed_sized_offset_path(NULL, 0, chars, d, i-d+1, 1, SCHEME_WINDOWS_PATH_KIND);
         a[0] = first;
         a[1] = last;
         return scheme_build_path(2, a);
@@ -732,6 +665,11 @@ Scheme_Object *make_exposed_sized_offset_path(int already_protected,
       len--;
       copy = 1;
     }
+  }
+
+  if (optional) {
+    *optional = len;
+    return NULL;
   }
 
   return scheme_make_sized_offset_kind_path(chars, d, len, copy, kind);
@@ -752,17 +690,13 @@ Scheme_Object *scheme_make_path_without_copying(char *chars)
   return scheme_make_sized_offset_path(chars, 0, -1, 0);
 }
 
-static Scheme_Object *append_path(Scheme_Object *a, Scheme_Object *b)
-{
-  Scheme_Object *s;
-  s = scheme_append_byte_string(a, b);
-  s->type = SCHEME_PLATFORM_PATH_KIND;
-  return s;
-}
-
 Scheme_Object *scheme_char_string_to_path(Scheme_Object *p)
 {
+#ifdef DOS_FILE_SYSTEM
+  p = scheme_char_string_to_byte_string(p);
+#else
   p = scheme_char_string_to_byte_string_locale(p);
+#endif
   p->type = SCHEME_PLATFORM_PATH_KIND;
   return p;
 }
@@ -838,7 +772,11 @@ Scheme_Object *scheme_path_to_char_string(Scheme_Object *p)
 {
   Scheme_Object *s;
 
+#ifdef DOS_FILE_SYSTEM
+  s = scheme_byte_string_to_char_string(p);
+#else
   s = scheme_byte_string_to_char_string_locale(p);
+#endif
 
   if (!SCHEME_CHAR_STRLEN_VAL(s))
     return scheme_make_utf8_string("?");
@@ -1015,19 +953,24 @@ static Scheme_Object *do_bytes_to_path_element(const char *name, Scheme_Object *
     }
   }
 
-  if (i >= len)
-    p = make_protected_sized_offset_path(1, SCHEME_BYTE_STR_VAL(s),
-                                         0, len,
-                                         SCHEME_MUTABLEP(s), 0,
-                                         kind);
-  else
+  if (i >= len) {
+    if (len == 0)
+      p = NULL;
+    else
+      p = make_protected_sized_offset_path(1, SCHEME_BYTE_STR_VAL(s),
+                                           0, len,
+                                           SCHEME_MUTABLEP(s), 0,
+                                           kind);
+  } else
     p = NULL;
   
   if (!p || !is_path_element(p))
     scheme_contract_error(name,
                           "cannot be converted to a path element",
                           "path", 1, argv[0],
-                          "explanation", 0, "path can be split, is not relative, or names a special element",
+                          "explanation", 0, (len 
+                                             ? "path can be split, is not relative, or names a special element"
+                                             : "path element cannot be empty"),
                           NULL);
 
   return p;
@@ -1054,183 +997,89 @@ static Scheme_Object *string_to_path_element(int argc, Scheme_Object **argv)
 /*                                                                    */
 /**********************************************************************/
 
-
-#ifdef DOS_FILE_SYSTEM
-static char *mz_getcwd(char *s, int l)
-{
- int need_l, bl = 256;
- wchar_t buffer[256], *wbuf;
-
- wbuf = buffer;
- while (1) {
-   need_l = GetCurrentDirectoryW(bl, wbuf);
-   if (need_l > bl) {
-     wbuf = (wchar_t *)scheme_malloc_atomic(need_l * sizeof(wchar_t));
-     bl = need_l;
-   } else
-     break;
- }
-
- if (!need_l)
-   return NULL;
- 
- bl = scheme_utf8_encode((unsigned int *)wbuf, 0, need_l, NULL, 0, 1 /*UTF-16*/);
- if (bl + 1 > l) {
-   s = (char *)scheme_malloc_atomic(bl + 1);
- }
- bl = scheme_utf8_encode((unsigned int *)wbuf, 0, need_l, s, 0, 1 /*UTF-16*/);
- s[bl] = 0;
-
- return s;
-}
-#else
-# define mz_getcwd MSC_IZE(getcwd)
-#endif
-
 char *scheme_os_getcwd(char *buf, int buflen, int *actlen, int noexn)
 {
-# define GETCWD_BUFSIZE 1024
-  char buffer[GETCWD_BUFSIZE], *r, *gbuf;
-  int obuflen = buflen;
+  char *s;
+  int slen;
 
-  if (buflen < GETCWD_BUFSIZE) {
-    gbuf = buffer;
-    buflen = GETCWD_BUFSIZE;
-  } else
-    gbuf = buf;
-
-  r = mz_getcwd(gbuf, buflen - 1);
-  if (!r) {
-    char *r2;
-
-    r = mz_getcwd(NULL, 0);
-    if (!r) {
-      /* Something bad happened! */
-      if (noexn) {
-        /* We need to invent some complete path. */
+  s = rktio_get_current_directory(scheme_rktio);
+  if (!s) {
+    if (noexn) {
+      /* We need to invent some complete path. */
 #ifdef DOS_FILE_SYSTEM
-        r = "C:\\";
+      s = MSC_IZE(strdup)("C:\\");
 #else
-        r = "/";
-#endif        
-	if (actlen)
-	  *actlen = strlen(r);
-
-	if (buf) {
-          strcpy(buf, r);
-	  return buf;
-	} else {
-	  return r;
-	}
-      }
-	
-      scheme_raise_exn(MZEXN_FAIL_FILESYSTEM, 
-		       "current-directory: unknown failure\n"
-                       "  system error: %e", 
-                       errno);
-    }
-
-    buflen = strlen(r) + 1;
-    r2 = (char *)scheme_malloc_atomic(buflen);
-    memcpy(r2, r, buflen);
-    r2[buflen] = 0;
-    free(r);
-    r = r2;
-
-    if (actlen)
-      *actlen = buflen;
-  } else {
-    int slen = strlen(r) + 1;
-
-    if (actlen)
-      *actlen = slen;
-
-    if (obuflen < slen)
-      r = scheme_strdup(r);
-    else if (r != buf) {
-      memcpy(buf, r, slen);
-      r = buf;
+      s = strdup("/");
+#endif
+    } else {
+      scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
+                       "current-directory: unknown failure\n"
+                       "  system error: %R");
+      return NULL;
     }
   }
-     
-  return r;
+
+  slen = strlen(s);
+
+  if (actlen)
+    *actlen = slen+1;
+
+  if (buflen < slen) {
+    return scheme_strdup_and_free(s);
+  } else {
+    memcpy(buf, s, slen+1);
+    free(s);
+    return buf;
+  }
 }
 
 int scheme_os_setcwd(char *expanded, int noexn)
 {
-  int err;
-
-  while (1) {
-    err = MSC_W_IZE(chdir)(MSC_WIDE_PATH(expanded));
-    if (!err || (errno != EINTR))
-      break;
-  }
-
-  if (err && !noexn)
+  if (!rktio_set_current_directory(scheme_rktio, expanded)) {
+    if (!noexn)
       scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
 		       "current-directory: unable to switch to directory\n"
-                       "  path: %q",
+                       "  path: %q\n"
+                       "  system error: %R",
 		       expanded);
+    return 0;
+  }
 
-  return !err;
+  return 1;
 }
 
 #ifdef DOS_FILE_SYSTEM
-#define WC_BUFFER_SIZE 1024
-THREAD_LOCAL_DECL(static void *file_path_wc_buffer);
 
-static int wc_strlen(const wchar_t *ws)
+static intptr_t wc_strlen(const wchar_t *ws)
 {
-  int l;
+  intptr_t l;
   for (l =0; ws[l]; l++) { }
   return l;
 }
 
-wchar_t *scheme_convert_to_wchar(const char *s, int do_copy)
-     /* This function uses '\t' in place of invalid UTF-8 encoding
-	bytes, because '\t' is not a legal filename under Windows. */
+wchar_t *scheme_path_to_wide_path(const char *who, const char *p)
 {
-  intptr_t len, l;
-  wchar_t *ws;
+  wchar_t *wp, *gc_wp;
+  intptr_t len;
+  
+  wp = rktio_path_to_wide_path(scheme_rktio, p);
+  if (wp) {
+    len = wc_strlen(wp);
+    gc_wp = scheme_malloc_atomic((len + 1) * sizeof(wchar_t));
+    memcpy(gc_wp, wp, (len + 1) * sizeof(wchar_t));
+    free(wp);
+    return gc_wp;
+  }
+  if (who)
+    scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
+                     "%s: could not read file\n"
+                     "  path: %q\n"
+                     "  system error: %R",
+                     p);
 
-  l = strlen(s);
-  len = scheme_utf8_decode(s, 0, l,
-			   NULL, 0, -1,
-			   NULL, 1/*UTF-16*/, '\t');
-
-  if (!do_copy && (len < (WC_BUFFER_SIZE-1))) {
-    if (!file_path_wc_buffer) {
-      REGISTER_SO(file_path_wc_buffer);
-      file_path_wc_buffer = scheme_malloc_atomic(sizeof(wchar_t) * WC_BUFFER_SIZE);
-    }
-    ws = (wchar_t *)file_path_wc_buffer;
-  } else
-    ws = (wchar_t *)scheme_malloc_atomic(sizeof(wchar_t) * (len + 1));
-  scheme_utf8_decode(s, 0, l,
-		     (unsigned int *)ws, 0, -1,
-		     NULL, 1/*UTF-16*/, '\t');
-  ws[len] = 0;
-  return ws;
-}
-
-char *scheme_convert_from_wchar(const wchar_t *ws)
-{
-  intptr_t len, l;
-  char *s;
-
-  l = wc_strlen(ws);
-  len = scheme_utf8_encode((unsigned int *)ws, 0, l,
-			   NULL, 0,
-			   1/*UTF-16*/);
-  s = (char *)scheme_malloc_atomic(len + 1);
-  scheme_utf8_encode((unsigned int *)ws, 0, l,
-		     s, 0,
-		     1/*UTF-16*/);
-  s[len] = 0;
-  return s;
+  return NULL;
 }
 #endif
-
 
 Scheme_Object *scheme_get_file_directory(const char *filename)
 {
@@ -1247,7 +1096,7 @@ Scheme_Object *scheme_remove_current_directory_prefix(Scheme_Object *fn)
   Scheme_Object *cwd;
   intptr_t len;
 
-  cwd = scheme_get_param(scheme_current_config(), MZCONFIG_CURRENT_DIRECTORY);
+  cwd = scheme_get_param(scheme_current_config(), MZCONFIG_CURRENT_USER_DIRECTORY);
 
   fn = TO_PATH(fn);
 
@@ -1740,6 +1589,11 @@ int scheme_is_special_filename(const char *f, int not_nul)
 {
   return is_special_filename(f, 0, strlen(f), not_nul, 0);
 }
+#else
+int scheme_is_special_filename(const char *f, int not_nul)
+{
+  return 0;
+}
 #endif
 
 static char *remove_redundant_slashes(char *filename, int *l, int delta, int *expanded, int kind)
@@ -1812,70 +1666,20 @@ static char *do_expand_filename(Scheme_Object *o, char* filename, int ilen, cons
 
 #ifdef UNIX_FILE_SYSTEM
     if (expand_user && (filename[0] == '~')) {
-      char user[256], *home = NULL, *naya;
-      struct passwd *who = NULL;
-      int u, f, len, flen;
-    
-      for (u = 0, f = 1; 
-           u < 255 && filename[f] && filename[f] != '/'; 
-           u++, f++) {
-        user[u] = filename[f];
+      char *new_filename;
+      new_filename = rktio_expand_user_tilde(scheme_rktio, filename);
+      if (!new_filename) {
+        scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
+                         "%s: bad username in path\n"
+                         "  path: %q\n"
+                         "  system error: %R", 
+                         errorin, filename);
       }
 
-      if (filename[f] && filename[f] != '/') {
-        if (errorin && report_bad_user)
-          scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
-                           "%s: bad username in path\n"
-                           "  path: %q", 
-                           errorin, filename);
-        return NULL;
-      }
-      user[u] = 0;
-
-      if (!user[0]) {
-        if (!(home = getenv("HOME"))) {
-          char *ptr;
-
-          ptr = getenv("USER");
-          if (!ptr)
-            ptr = getenv("LOGNAME");
-
-          who = ptr ? getpwnam(ptr) : NULL;
-
-          if (!who)
-            who = getpwuid(getuid());
-        }
-      } else
-        who = getpwnam(user);
-
-      if (!home && who)
-        home = who->pw_dir;
-
-      if (!home) {
-        if (errorin && report_bad_user)
-          scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
-                           "%s: bad username in path\n"
-                           "  path: %q", 
-                           errorin, filename);
-        return NULL;
-      }
-
-      len = strlen(home);
-      if (f < ilen) 
-        flen = ilen - f - 1;
-      else
-        flen = 0;
-      naya = (char *)scheme_malloc_atomic(len + flen + 2);
-      memcpy(naya, home, len);
-      naya[len] = '/';
-      memcpy(naya + len + 1, filename + f + 1, flen);
-      naya[len + flen + 1] = 0;
-
+      filename = scheme_strdup_and_free(new_filename);
+      ilen = strlen(filename);
       if (expanded)
         *expanded = 1;
-  
-      filename = naya;
-      ilen = len + flen + 1;
     }
 #endif
 
@@ -2013,7 +1817,7 @@ static char *do_expand_filename(Scheme_Object *o, char* filename, int ilen, cons
           Scheme_Object *p;
 
           p = scheme_make_sized_path(filename, ilen, 0);
-          p = do_simplify_path(p, scheme_null, 0, 1, 0, SCHEME_WINDOWS_PATH_KIND);
+          p = do_simplify_path(p, scheme_null, 0, 0, 0, SCHEME_WINDOWS_PATH_KIND, 0);
           filename = SCHEME_PATH_VAL(p);
           ilen = SCHEME_PATH_LEN(p);
 
@@ -2042,259 +1846,25 @@ char *scheme_expand_string_filename(Scheme_Object *o, const char *errorin, int *
   return do_expand_filename(o, NULL, 0, errorin, expanded, 1, 1, guards, SCHEME_PLATFORM_PATH_KIND, 0);
 }
 
-#ifdef DOS_FILE_SYSTEM
-# define FIND_FIRST FindFirstFileW
-# define FIND_NEXT FindNextFileW
-# define FIND_CLOSE FindClose
-# define FF_TYPE WIN32_FIND_DATAW
-# define FF_HANDLE_TYPE HANDLE
-# define FIND_FAILED(h) (h == INVALID_HANDLE_VALUE)
-# define FF_A_RDONLY FILE_ATTRIBUTE_READONLY
-# define FF_A_DIR FILE_ATTRIBUTE_DIRECTORY
-# define GET_FF_ATTRIBS(fd) (fd.dwFileAttributes)
-# define GET_FF_MODDATE(fd) convert_date(&fd.ftLastWriteTime)
-# define GET_FF_NAME(fd) fd.cFileName
-static time_t convert_date(const FILETIME *ft)
-{
-  LONGLONG l, delta;
-  FILETIME ft2;
-  SYSTEMTIME st;
-  TIME_ZONE_INFORMATION tz;
-
-  /* FindFirstFile incorrectly shifts for daylight saving. It
-     subtracts an hour to get to UTC when daylight saving is in effect
-     now, even when daylight saving was not in effect when the file
-     was saved.  Counteract the difference. There's a race condition
-     here, because we might cross the daylight-saving boundary between
-     the time that FindFirstFile runs and GetTimeZoneInformation
-     runs. Cross your fingers... */
-  FileTimeToLocalFileTime(ft, &ft2);
-  FileTimeToSystemTime(&ft2, &st);
-  
-  delta = 0;
-  if (GetTimeZoneInformation(&tz) == TIME_ZONE_ID_DAYLIGHT) {
-    /* Daylight saving is in effect now, so there may be a bad
-       shift. Check the file's date. */
-    int start_day_of_month, end_day_of_month, first_day_of_week, diff, end_shift;
-
-    /* Valid only when the months match: */
-    first_day_of_week = (st.wDayOfWeek - (st.wDay - 1 - (((st.wDay - 1) / 7) * 7)));
-    if (first_day_of_week < 0)
-      first_day_of_week += 7;
-
-    diff = (tz.DaylightDate.wDayOfWeek - first_day_of_week);
-    if (diff < 0)
-      diff += 7;
-    start_day_of_month = 1 + (((tz.DaylightDate.wDay - 1) * 7)
-			      + diff);
-	
-    diff = (tz.StandardDate.wDayOfWeek - first_day_of_week);
-    if (diff < 0)
-      diff += 7;
-    end_day_of_month = 1 + (((tz.StandardDate.wDay - 1) * 7)
-			    + diff);
-
-    /* Count ambigious range (when the clock goes back) as
-       in standard time. We assume that subtracting the 
-       ambiguous range does not go back into the previous day,
-       and that the shift is a multiple of an hour. */
-    end_shift = ((tz.StandardBias - tz.DaylightBias) / 60);
-
-    if ((st.wMonth < tz.DaylightDate.wMonth)
-	|| ((st.wMonth == tz.DaylightDate.wMonth)
-	    && ((st.wDay < start_day_of_month)
-		|| ((st.wDay == start_day_of_month)
-		    && (st.wHour < tz.DaylightDate.wHour))))) {
-      /* Daylight saving had not yet started. */
-      delta = ((tz.StandardBias - tz.DaylightBias) * 60);
-    } else if ((st.wMonth > tz.StandardDate.wMonth)
-	       || ((st.wMonth == tz.StandardDate.wMonth)
-		   && ((st.wDay > end_day_of_month)
-		       || ((st.wDay == end_day_of_month)
-			   && (st.wHour >= (tz.StandardDate.wHour
-					    - end_shift)))))) {
-      /* Daylight saving was already over. */
-      delta = ((tz.StandardBias - tz.DaylightBias) * 60);
-    }
-  }
-
-  l = ((((LONGLONG)ft->dwHighDateTime << 32) | ft->dwLowDateTime)
-       - (((LONGLONG)0x019DB1DE << 32) | 0xD53E8000));
-  l /= 10000000;
-  l += delta;
-
-  return (time_t)l;
-}
-#endif
-
-#ifdef DOS_FILE_SYSTEM
-# define MZ_UNC_READ 0x1
-# define MZ_UNC_WRITE 0x2
-# define MZ_UNC_EXEC 0x4
-
-static int UNC_stat(char *dirname, int len, int *flags, int *isdir, Scheme_Object **date,
-		    mzlonglong *filesize, int set_flags)
-  /* dirname must be absolute */
-{
-  /* Note: stat() doesn't work with UNC "drive" names or \\?\ paths.
-     Also, stat() doesn't distinguish between the ability to
-     list a directory's content and whether the directory exists. 
-     So, we use GetFileAttributesExW(). */
-  char *copy;
-  WIN32_FILE_ATTRIBUTE_DATA fd;
-  int must_be_dir = 0;
-
-  if (isdir)
-    *isdir = 0;
-  if (date)
-    *date = scheme_false;
-
-  copy = scheme_malloc_atomic(len + 14);
-  if (check_dos_slashslash_qm(dirname, len, NULL, NULL, NULL)) {
-    memcpy(copy, dirname, len + 1);
-  } else {
-    memcpy(copy, dirname, len + 1);
-    while (IS_A_DOS_SEP(copy[len - 1])) {
-      --len;
-      copy[len] = 0;
-      must_be_dir = 1;
-    }
-  }
-  /* If we ended up with "\\?\X:", then drop the "\\?\" */
-  if ((copy[0] == '\\')&& (copy[1] == '\\') && (copy[2] == '?') && (copy[3] == '\\') 
-      && is_drive_letter(copy[4]) && (copy[5] == ':') && !copy[6]) {
-    memmove(copy, copy + 4, len - 4);
-    len -= 4;
-    copy[len] = 0;
-  }
-  /* If we ended up with "\\?\X:", then drop the "\\?\\" */
-  if ((copy[0] == '\\') && (copy[1] == '\\') && (copy[2] == '?') && (copy[3] == '\\') 
-      && (copy[4] == '\\') && is_drive_letter(copy[5]) && (copy[6] == ':') && !copy[7]) {
-    memmove(copy, copy + 5, len - 5);
-    len -= 5;
-    copy[len] = 0;
-  }
-  if (!GetFileAttributesExW(WIDE_PATH(copy), GetFileExInfoStandard, &fd)) {
-    errno = -1;
-    return 0;
-  } else {
-    if (set_flags != -1) {
-      DWORD attrs = GET_FF_ATTRIBS(fd);
-
-      if (!(set_flags & MZ_UNC_WRITE))
-        attrs |= FF_A_RDONLY;
-      else if (attrs & FF_A_RDONLY)
-        attrs -= FF_A_RDONLY;
-      
-      if (!SetFileAttributesW(WIDE_PATH(copy), attrs)) {
-        errno = -1;
-        return 0;
-      }
-    } else {
-      if (must_be_dir && !(GET_FF_ATTRIBS(fd) & FF_A_DIR))
-        return 0;
-      if (flags)
-        *flags = MZ_UNC_READ | MZ_UNC_EXEC | ((GET_FF_ATTRIBS(fd) & FF_A_RDONLY) ? 0 : MZ_UNC_WRITE);
-      if (date) {
-        Scheme_Object *dt;
-        time_t mdt;
-        mdt = GET_FF_MODDATE(fd);
-        dt = scheme_make_integer_value_from_time(mdt);
-        *date = dt;
-      }
-      if (isdir) {
-        *isdir = (GET_FF_ATTRIBS(fd) & FF_A_DIR);
-      }
-      if (filesize) {
-        *filesize = ((mzlonglong)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
-      }
-    }
-    return 1;
-  }
-}
-#endif
+#define MZ_UNC_READ RKTIO_PERMISSION_READ
+#define MZ_UNC_WRITE RKTIO_PERMISSION_WRITE
+#define MZ_UNC_EXEC RKTIO_PERMISSION_EXEC
 
 int scheme_file_exists(char *filename)
 {
-# ifdef NO_STAT_PROC
-  FILE *fp;
-
-  fp = fopen(filename, "r");
-  if (fp) {
-    fclose(fp);
-    return 1;
-  } else
-    return 0;
-# else
-#  ifdef DOS_FILE_SYSTEM
-  /* Claim that all special files exist: */
   if (scheme_is_special_filename(filename, 0))
     return 1;
-
-  {
-    int isdir;
-    return (UNC_stat(filename, strlen(filename), NULL, &isdir, NULL, NULL, -1)
-	    && !isdir);
-  }
-#  else
-  struct MSC_IZE(stat) buf;
-  int ok;
-
-  do {
-    ok = MSC_W_IZE(stat)(MSC_WIDE_PATH(filename), &buf);
-  } while ((ok == -1) && (errno == EINTR));
-
-  return !ok && !S_ISDIR(buf.st_mode);
-#  endif
-# endif
+  return rktio_file_exists(scheme_rktio, filename);
 }
 
 int scheme_directory_exists(char *dirname)
 {
-# ifdef NO_STAT_PROC
-  return 0;
-# else
-#  ifdef DOS_FILE_SYSTEM
-  int isdir;
-
-  return (UNC_stat(dirname, strlen(dirname), NULL, &isdir, NULL, NULL, -1)
-	  && isdir);
-#  else
-  struct MSC_IZE(stat) buf;
-
-  while (1) {
-    if (!MSC_IZE(stat)(dirname, &buf))
-      break;
-    else if (errno != EINTR)
-      return 0;
-  }
-
-  return S_ISDIR(buf.st_mode);
-#  endif
-# endif
+  return rktio_directory_exists(scheme_rktio, dirname);
 }
 
 int scheme_is_regular_file(char *filename)
 {
-# ifdef NO_STAT_PROC
-  return 0;
-# else
-  struct MSC_IZE(stat) buf;
-
-#  ifdef DOS_FILE_SYSTEM
-  if (scheme_is_special_filename(filename, 1))
-    return 0;
-#  endif
-
-  while (1) {
-    if (!MSC_W_IZE(stat)(MSC_WIDE_PATH(filename), &buf))
-      break;
-    else if (errno != EINTR)
-      return 0;
-  }
-
-  return S_ISREG(buf.st_mode);
-# endif  
+  return rktio_is_regular_file(scheme_rktio, filename);
 }
 
 static Scheme_Object *file_exists(int argc, Scheme_Object **argv)
@@ -2340,157 +1910,70 @@ static Scheme_Object *directory_exists(int argc, Scheme_Object **argv)
 static Scheme_Object *link_exists(int argc, Scheme_Object **argv)
 {
   char *filename;
-#ifndef UNIX_FILE_SYSTEM
-  Scheme_Object *bs;
-#endif
 
   if (!SCHEME_PATH_STRINGP(argv[0]))
     scheme_wrong_contract("link-exists?", "path-string?", 0, argc, argv);
 
+  filename = do_expand_filename(argv[0],
+				NULL,
+				0,
+				"link-exists?",
+				NULL,
+				0, 1,
+				SCHEME_GUARD_FILE_EXISTS,
+				SCHEME_PLATFORM_PATH_KIND,
+				0);
 
-#ifndef UNIX_FILE_SYSTEM
-  /* DOS or MAC: expand isn't called, so check the form now */
-  bs = TO_PATH(argv[0]);
-  filename = SCHEME_PATH_VAL(bs);
-  if (has_null(filename, SCHEME_PATH_LEN(bs))) {
-    raise_null_error("link-exists?", bs, "");
-    return NULL;
-  }
-#endif
-
-#ifdef DOS_FILE_SYSTEM
-  scheme_security_check_file("link-exists?", filename, SCHEME_GUARD_FILE_EXISTS);
-
-  return scheme_false;
-#endif
-#ifdef UNIX_FILE_SYSTEM
-  {
-    struct MSC_IZE(stat) buf;
-
-    filename = do_expand_filename(argv[0],
-				  NULL,
-				  0,
-				  "link-exists?",
-				  NULL,
-				  0, 1,
-				  SCHEME_GUARD_FILE_EXISTS, 
-                                  SCHEME_PLATFORM_PATH_KIND,
-                                  0);
-    while (1) {
-      if (!MSC_W_IZE(lstat)(MSC_WIDE_PATH(filename), &buf))
-	break;
-      else if (errno != EINTR)
-	return scheme_false;
-    }
-
-    if (S_ISLNK(buf.st_mode))
+  if (rktio_link_exists(scheme_rktio, filename))
       return scheme_true;
     else
       return scheme_false;
-  }
-#endif
 }
 
-Scheme_Object *scheme_get_fd_identity(Scheme_Object *port, intptr_t fd, char *path)
+Scheme_Object *scheme_get_fd_identity(Scheme_Object *port, intptr_t fd, char *path, int noerr)
 /* If path is supplied, then fd is 0 for stat, 1 for lstat */
 {
-  int errid = 0;
-  uintptr_t devi = 0, inoi = 0, inoi2 = 0;
-  int shift = 0, shift2 = -1;
-  Scheme_Object *devn, *inon, *a[2];
+  rktio_identity_t *ident;
+  Scheme_Object *a, *b, *c, *args[2];
 
-#ifdef FILES_HAVE_FDS
-  struct MSC_IZE(stat) buf;
-
-  while (1) {
-    if (!path && !MSC_IZE(fstat)(fd, &buf))
-      break;
-    else if (path && !fd && !MSC_IZE(stat)(path, &buf))
-      break;
-    else if (path && fd && !MSC_IZE(lstat)(path, &buf))
-      break;
-    else if (errno != EINTR) {
-      errid = errno;
-      break;
-    }
+  if (path)
+    ident = rktio_path_identity(scheme_rktio, path, fd == 0);
+  else {
+    rktio_fd_t *rfd;
+    rfd = rktio_system_fd(scheme_rktio, fd, RKTIO_OPEN_NOT_REGFILE);
+    ident = rktio_fd_identity(scheme_rktio, rfd);
+    rktio_forget(scheme_rktio, rfd);
   }
-  
-  if (!errid) {
-    /* Warning: we assume that dev_t and ino_t fit in a long. */
-    devi = (uintptr_t)buf.st_dev;
-    inoi = (uintptr_t)buf.st_ino;
-    shift = sizeof(dev_t);
-  }
-#endif
-#ifdef WINDOWS_FILE_HANDLES
-  BY_HANDLE_FILE_INFORMATION info;
-  HANDLE fdh = (HANDLE)fd;
 
-  errid = 0;
-  if (path) {
-    fdh = CreateFileW(WIDE_PATH(path),
-                      0, /* not even read access => just get info */
-                      FILE_SHARE_READ | FILE_SHARE_WRITE,
-                      NULL,
-                      OPEN_EXISTING,
-                      FILE_FLAG_BACKUP_SEMANTICS,
-                      NULL);
-    if (fdh == INVALID_HANDLE_VALUE) {
-      errid = GetLastError();
+  if (!ident) {
+    if (!path) {
+      scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
+                       "port-file-identity: error obtaining identity\n"
+                       "  system error: %R");
+    } else {
+      scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
+                       "file-or-directory-identity: error obtaining identity for path\n"
+                       "  path: %q\n"
+                       "  system error: %R",
+                       path);
     }
   }
 
-  if (fdh == INVALID_HANDLE_VALUE) {
-    /* errid is set */
-  } else {
-    if (!GetFileInformationByHandle(fdh, &info))
-      errid = GetLastError();
-    
-    if (path)
-      CloseHandle(fdh);
-  }
+  a = scheme_make_integer_value_from_unsigned(ident->a);
+  b = scheme_make_integer_value_from_unsigned(ident->b);
+  c = scheme_make_integer_value_from_unsigned(ident->c);
 
-  if (!errid) {
-    devi = info.dwVolumeSerialNumber;
-    inoi = info.nFileIndexLow;
-    inoi2 = info.nFileIndexHigh;
-    shift = sizeof(DWORD);
-    shift2 = 2 * sizeof(DWORD);
-  }
-#endif
+  args[0] = b;
+  args[1] = scheme_make_integer(ident->c_bits);
+  b = scheme_bitwise_shift(2, args);
 
-  if (!errid) {
-    devn = scheme_make_integer_value_from_unsigned(devi);
-    inon = scheme_make_integer_value_from_unsigned(inoi);
-    
-    a[0] = inon;
-    a[1] = scheme_make_integer(shift);
-    inon = scheme_bitwise_shift(2, a);
-    
-    if (shift2 > -1) {
-      a[0] = scheme_make_integer_value_from_unsigned(inoi2);
-      a[1] = scheme_make_integer(shift2);
-      inon = scheme_bin_plus(inon, scheme_bitwise_shift(2, a));
-    }
+  args[0] = a;
+  args[1] = scheme_make_integer(ident->c_bits + ident->b_bits);
+  a = scheme_bitwise_shift(2, args);
 
-    return scheme_bin_plus(devn, inon);
-  }
+  free(ident);
 
-  if (!path) {
-    scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
-                     "port-file-identity: error obtaining identity\n"
-                     "  system error: %)",
-                     errid);
-  } else {
-    scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
-                     "file-or-directory-identity: error obtaining identity for path\n"
-                     "  path: %q\n"
-                     "  system error: %E", 
-                     path, 
-                     errid);
-  }
-
-  return NULL;
+  return scheme_bin_plus(scheme_bin_plus(a, b), c);
 }
 
 static int path_is_simple_dir_without_sep(Scheme_Object *path)
@@ -2856,7 +2339,7 @@ static Scheme_Object *do_build_path(int argc, Scheme_Object **argv, int idelta, 
 		  simp = do_simplify_path(scheme_make_sized_offset_kind_path(str, 0, pos, 0,
                                                                              SCHEME_WINDOWS_PATH_KIND),
 					  scheme_null, first_len, 0, 0,
-                                          SCHEME_WINDOWS_PATH_KIND);
+                                          SCHEME_WINDOWS_PATH_KIND, 0);
 		  if (SCHEME_FALSEP(simp)) {
 		    /* Base path is just relative "here". We can ignore it. */
 		    pos = 0;
@@ -2919,7 +2402,7 @@ static Scheme_Object *do_build_path(int argc, Scheme_Object **argv, int idelta, 
 		    simp = do_simplify_path(scheme_make_sized_offset_kind_path(str, 0, pos, 0,
                                                                                SCHEME_WINDOWS_PATH_KIND),
 					    scheme_null, first_len, 0, 1,
-                                            SCHEME_WINDOWS_PATH_KIND);
+                                            SCHEME_WINDOWS_PATH_KIND, 0);
 		    if (SCHEME_FALSEP(simp)) {
                       /* Note: if root turns out to be relative, then we couldn't
                          have had a \\?\RED\ path. */
@@ -3211,7 +2694,7 @@ static Scheme_Object *do_build_path(int argc, Scheme_Object **argv, int idelta, 
       str = do_normal_path_seps(str, &p, first_len, 1, SCHEME_WINDOWS_PATH_KIND, NULL);
       str = remove_redundant_slashes(str, &p, first_len, NULL, SCHEME_WINDOWS_PATH_KIND);
       simp = do_simplify_path(scheme_make_sized_offset_kind_path(str, 0, p, 0, SCHEME_WINDOWS_PATH_KIND),
-                              scheme_null, first_len, 0, 1, SCHEME_WINDOWS_PATH_KIND);
+                              scheme_null, first_len, 0, 1, SCHEME_WINDOWS_PATH_KIND, 0);
       if (SCHEME_FALSEP(simp))
         return scheme_make_sized_offset_kind_path(".\\", 0, 1, 0, SCHEME_WINDOWS_PATH_KIND);
       else
@@ -3261,15 +2744,18 @@ static Scheme_Object *path_to_directory_path(int argc, Scheme_Object **argv)
   return scheme_path_to_directory_path(inpath);
 }
 
-static Scheme_Object *do_split_path(const char *path, int len, Scheme_Object **base_out, int *id_out,
-                                    int *cleaned_slashes, int kind)
+static Scheme_Object *do_split_path(const char *path, int len, 
+                                    Scheme_Object **base_out, char **base_str_out, int *base_len_out,
+                                    int *id_out,
+                                    int *cleaned_slashes, int kind,
+                                    int check_repeats)
 {
   char *s;
   int p, last_was_sep = 0, is_dir, no_up = 0, not_same;
   Scheme_Object *file;
   int allow_double_before = 0, drive_end, no_slash_sep = 0;
 
-#define MAKE_SPLIT(x, y, z) (*base_out = x, *id_out = z, y)
+#define MAKE_SPLIT(x, x_str, x_len, y, z) (*base_out = x, *base_str_out = x_str, *base_len_out = x_len, *id_out = z, y)
 
   s = (char *)path;
 
@@ -3295,7 +2781,6 @@ static Scheme_Object *do_split_path(const char *path, int len, Scheme_Object **b
                 {
                   int len2, nsep;
                   char *s2;
-                  Scheme_Object *dir;
                   len2 = len - p - 1 + 9;
                   s2 = scheme_malloc_atomic(len2 + 1);
                   memcpy(s2, "\\\\?\\REL\\\\", 9);
@@ -3316,9 +2801,8 @@ static Scheme_Object *do_split_path(const char *path, int len, Scheme_Object **b
                         nsep = 1;
                     }
                   }
-                  dir = scheme_make_sized_offset_kind_path(s, 0, p + nsep, 1, SCHEME_WINDOWS_PATH_KIND);
                   file = scheme_make_sized_offset_kind_path(s2, 0, len2, 0, SCHEME_WINDOWS_PATH_KIND);
-                  return MAKE_SPLIT(dir, file, is_dir);
+                  return MAKE_SPLIT(NULL, s, p + nsep, file, is_dir);
                 }
               }
             }
@@ -3327,15 +2811,14 @@ static Scheme_Object *do_split_path(const char *path, int len, Scheme_Object **b
           if (dots_end > 0) {
             /* There are dots (so no literals) */
             if (dots_end - 3 > 8) {
-              file = scheme_make_sized_offset_kind_path(s, 0, dots_end - 3, 1, SCHEME_WINDOWS_PATH_KIND);
-              return MAKE_SPLIT(file, up_symbol, 1);
+              return MAKE_SPLIT(NULL, s, dots_end - 3, up_symbol, 1);
             } else
-              return MAKE_SPLIT(relative_symbol, up_symbol, 1);
+              return MAKE_SPLIT(relative_symbol, NULL, 0, up_symbol, 1);
           } else {
             /* No dots, so there must be one element. */
             if (s[6] == 'L') {
               /* keep \\?\REL\ on path, and report 'relative as base */
-              return MAKE_SPLIT(relative_symbol, 
+              return MAKE_SPLIT(relative_symbol, NULL, 0,
                                 scheme_make_sized_offset_kind_path(s, 0, len, 1,
                                                                    SCHEME_WINDOWS_PATH_KIND), 
                                 is_dir);
@@ -3355,7 +2838,7 @@ static Scheme_Object *do_split_path(const char *path, int len, Scheme_Object **b
               }
               dir = scheme_make_sized_offset_kind_path("\\", 0, 1, 0,
                                                        SCHEME_WINDOWS_PATH_KIND);
-              return MAKE_SPLIT(dir, 
+              return MAKE_SPLIT(dir, NULL, 0,
                                 scheme_make_sized_offset_kind_path(naya, 0, len, 0,
                                                                    SCHEME_WINDOWS_PATH_KIND), 
                                 is_dir);
@@ -3385,30 +2868,32 @@ static Scheme_Object *do_split_path(const char *path, int len, Scheme_Object **b
   }
 
   /* Look for confusing repeated separators (e.g. "x//y") */
-  for (p = len; p--; ) {
-    if (p > allow_double_before) {
-      if (IS_A_SEP(kind, s[p]) && IS_A_SEP(kind, s[p - 1])) {
-	/* Found it; copy without repeats */
-	int q;
-	char *old = s;
+  if (check_repeats) {
+    for (p = len; p--; ) {
+      if (p > allow_double_before) {
+        if (IS_A_SEP(kind, s[p]) && IS_A_SEP(kind, s[p - 1])) {
+          /* Found it; copy without repeats */
+          int q;
+          char *old = s;
 
-        if (cleaned_slashes)
-          *cleaned_slashes = 1;
+          if (cleaned_slashes)
+            *cleaned_slashes = 1;
 
-	s = (char *)scheme_malloc_atomic(len);
-	--len;
+          s = (char *)scheme_malloc_atomic(len);
+          --len;
 
-	for (p = 0, q = 0; p < allow_double_before; p++) {
-	  s[q++] = old[p];
-	}
+          for (p = 0, q = 0; p < allow_double_before; p++) {
+            s[q++] = old[p];
+          }
 
-	for (; p < len; p++) {
-	  if (!IS_A_SEP(kind, old[p]) || !IS_A_SEP(kind, old[p + 1]))
-	    s[q++] = old[p];
-	}
-	s[q++] = old[len];
-	len = q;
-	break;
+          for (; p < len; p++) {
+            if (!IS_A_SEP(kind, old[p]) || !IS_A_SEP(kind, old[p + 1]))
+              s[q++] = old[p];
+          }
+          s[q++] = old[len];
+          len = q;
+          break;
+        }
       }
     }
   }
@@ -3454,19 +2939,22 @@ static Scheme_Object *do_split_path(const char *path, int len, Scheme_Object **b
        For Mac, it is relative or root with trailing sep. */
     if (kind == SCHEME_UNIX_PATH_KIND) {
       if (s[0] == '/')
-        return MAKE_SPLIT(scheme_false, scheme_make_sized_offset_kind_path(s, 0, len, 1, kind), 1);
+        return MAKE_SPLIT(scheme_false, NULL, 0,
+                          scheme_make_sized_offset_kind_path(s, 0, len, 1, kind), 1);
 #ifdef TILDE_IS_ABSOLUTE
       if (s[0] == '~') {
         /* Strip ending slashes, if any. */
         while (IS_A_UNIX_SEP(s[len - 1])) {
           --len;
         }
-        return MAKE_SPLIT(scheme_false, scheme_make_sized_offset_kind_path(s, 0, len, 1, kind), 1);
+        return MAKE_SPLIT(scheme_false, NULL, 0,
+                          scheme_make_sized_offset_kind_path(s, 0, len, 1, kind), 1);
       }
 #endif
     } else {
       if (IS_A_DOS_SEP(s[0]) || drive_end)
-        return MAKE_SPLIT(scheme_false, scheme_make_sized_offset_kind_path(s, 0, len, 1, kind), 1);
+        return MAKE_SPLIT(scheme_false, NULL, 0,
+                          scheme_make_sized_offset_kind_path(s, 0, len, 1, kind), 1);
     }
 
     dir = relative_symbol;
@@ -3488,7 +2976,7 @@ static Scheme_Object *do_split_path(const char *path, int len, Scheme_Object **b
                                               kind);
     }
     
-    return MAKE_SPLIT(dir, file, is_dir);
+    return MAKE_SPLIT(dir, NULL, 0, file, is_dir);
   }
   
   /* Check for 'up and 'same: */
@@ -3517,27 +3005,51 @@ static Scheme_Object *do_split_path(const char *path, int len, Scheme_Object **b
   /* Check directory */
   if (p > 0) {
     Scheme_Object *ss;
-    ss = make_exposed_sized_offset_path(no_up, s, 0, p + 1, 1, kind);
-    return MAKE_SPLIT(ss, 
-		      file, 
-		      is_dir);
+    int new_len;
+    ss = make_exposed_sized_offset_path(&new_len, no_up, s, 0, p + 1, 1, kind);
+    if (ss) {
+      s = SCHEME_PATH_VAL(ss);
+      new_len = SCHEME_PATH_LEN(ss);
+    }
+    return MAKE_SPLIT(NULL, s, new_len, file, is_dir);
   }
 	
   /* p = 0; this means root dir. */
   {
     Scheme_Object *ss;
-    ss = scheme_make_sized_offset_kind_path(s, 0, 1, 1, kind);
-    return MAKE_SPLIT(ss, file, is_dir);
+    if (s[0] == '/')
+      ss = scheme_make_sized_offset_kind_path("/", 0, 1, 0, kind);
+    else
+      ss = scheme_make_sized_offset_kind_path(s, 0, 1, 1, kind);
+    return MAKE_SPLIT(ss, NULL, 0, file, is_dir);
   }
+}
+
+static Scheme_Object *do_split_path_once(const char *path, int len, 
+                                         Scheme_Object **base_out,
+                                         int *id_out,
+                                         int *cleaned_slashes, int kind)
+{
+  Scheme_Object *name, *base;
+  char *base_str;
+  int base_len;
+
+  name = do_split_path(path, len, base_out, &base_str, &base_len, id_out, cleaned_slashes, kind, 1);
+
+  if (!*base_out) {
+    base = scheme_make_sized_offset_kind_path(base_str, 0, base_len, 1, kind);
+    *base_out = base;
+  }
+
+  return name;
 }
 
 Scheme_Object *scheme_split_path(const char *path, int len, Scheme_Object **base_out, int *id_out, int kind)
 {
-  return do_split_path(path, len, base_out, id_out, NULL, kind);
+  return do_split_path_once(path, len, base_out, id_out, NULL, kind);
 }
 
-#ifndef NO_FILE_SYSTEM_UTILS
-static Scheme_Object *split_path(int argc, Scheme_Object **argv)
+static Scheme_Object *_split_path(const char *who, int argc, Scheme_Object **argv, int multi)
 {
   char *s;
   int is_dir, len;
@@ -3546,7 +3058,7 @@ static Scheme_Object *split_path(int argc, Scheme_Object **argv)
   inpath = argv[0];
 
   if (!SCHEME_GENERAL_PATH_STRINGP(inpath))
-    scheme_wrong_contract("split-path", "(or/c path-for-some-system? path-string?)", 0, argc, argv);
+    scheme_wrong_contract(who, "(or/c path-for-some-system? path-string?)", 0, argc, argv);
 
   inpath = TO_PATH(inpath);
 
@@ -3554,21 +3066,51 @@ static Scheme_Object *split_path(int argc, Scheme_Object **argv)
   len = SCHEME_PATH_LEN(inpath);
 
   if (!len) {
-    scheme_contract_error("split-path",
+    scheme_contract_error(who,
                           "path is an empty string",
                           NULL);
   }
 
   if (has_null(s, len))
-    raise_null_error("split-path", inpath, "");
+    raise_null_error(who, inpath, "");
 
-  three[1] = scheme_split_path(s, len, &three[0], &is_dir, SCHEME_PATH_KIND(inpath));
+  if (multi) {
+    Scheme_Object *l = scheme_null, *name, *base;
+    char *next_s;
+    int next_len;
+    int kind = SCHEME_PATH_KIND(inpath), check = 1;
 
-  three[2] = is_dir ? scheme_true : scheme_false;
-
-  return scheme_values(3, three);
+    while (1) {
+      name = do_split_path(s, len, &base, &next_s, &next_len, &is_dir, NULL, kind, check);
+      l = scheme_make_pair(name, l);
+      if (base) {
+        if (SCHEME_FALSEP(base) || SAME_OBJ(base, relative_symbol)) return l;
+        return scheme_make_pair(base, l);
+      } else {
+        s = next_s;
+        len = next_len;
+      }
+      check = 0;
+      SCHEME_USE_FUEL(1);
+    }
+  } else {
+    three[1] = scheme_split_path(s, len, &three[0], &is_dir, SCHEME_PATH_KIND(inpath));
+    
+    three[2] = is_dir ? scheme_true : scheme_false;
+    
+    return scheme_values(3, three);
+  }
 }
-#endif
+
+static Scheme_Object *split_path(int argc, Scheme_Object **argv)
+{
+  return _split_path("split-path", argc, argv, 0);
+}
+
+static Scheme_Object *explode_path(int argc, Scheme_Object **argv)
+{
+  return _split_path("explode-path", argc, argv, 1);
+}
 
 int scheme_is_relative_path(const char *s, intptr_t len, int kind)
 {
@@ -3769,8 +3311,6 @@ Scheme_Object *scheme_path_to_complete_path(Scheme_Object *path, Scheme_Object *
   return path_to_complete_path(relto_path ? 2 : 1, a);
 }
 
-#ifndef NO_FILE_SYSTEM_UTILS
-
 static char *filename_for_error(Scheme_Object *p)
 {
   return do_expand_filename(p, NULL, 0,
@@ -3781,32 +3321,36 @@ static char *filename_for_error(Scheme_Object *p)
                             0);
 }
 
+int scheme_can_enable_write_permission(void)
+{
+#ifdef DOS_FILE_SYSTEM
+  if (SCHEME_TRUEP(scheme_get_param(scheme_current_config(), MZCONFIG_FORCE_DELETE_PERMS)))
+    return 1;
+#endif
+  return 0;
+}
+
 static Scheme_Object *delete_file(int argc, Scheme_Object **argv)
 {
-  int errid;
+  char *fn;
 
   if (!SCHEME_PATH_STRINGP(argv[0]))
     scheme_wrong_contract("delete-file", "path-string?", 0, argc, argv);
 
-  while (1) {
-    if (!MSC_W_IZE(unlink)(MSC_WIDE_PATH(scheme_expand_string_filename(argv[0],
-								       "delete-file",
-								       NULL,
-								       SCHEME_GUARD_FILE_DELETE))))
-      return scheme_void;
-    else if (errno != EINTR)
-      break;
-  }
-  errid = errno;
-  
-  scheme_raise_exn(MZEXN_FAIL_FILESYSTEM, 
-		   "delete-file: cannot delete file\n"
-                   "  path: %q\n"
-                   "  system error: %e",
-		   filename_for_error(argv[0]),
-		   errid);
+  fn = scheme_expand_string_filename(argv[0],
+                                     "delete-file",
+                                     NULL,
+                                     SCHEME_GUARD_FILE_DELETE);
 
-  return NULL;
+  if (!rktio_delete_file(scheme_rktio, fn, scheme_can_enable_write_permission())) {
+    scheme_raise_exn(MZEXN_FAIL_FILESYSTEM, 
+                     "delete-file: cannot delete file\n"
+                     "  path: %q\n"
+                     "  system error: %R",
+                     filename_for_error(argv[0]));
+  }
+
+  return scheme_void;
 }
 
 static Scheme_Object *rename_file(int argc, Scheme_Object **argv)
@@ -3834,71 +3378,42 @@ static Scheme_Object *rename_file(int argc, Scheme_Object **argv)
 				       NULL,
 				       SCHEME_GUARD_FILE_WRITE);
 
-# ifdef DOS_FILE_SYSTEM
-  if (MoveFileExW(WIDE_PATH_COPY(src), WIDE_PATH(dest), (exists_ok ? MOVEFILE_REPLACE_EXISTING : 0)))
-    return scheme_void;
-  
-  {
-    int errid;
-    errid = GetLastError();
-    errno = errid;
+  if (!rktio_rename_file(scheme_rktio, dest, src, exists_ok)) {
+    if (scheme_last_error_is_racket(RKTIO_ERROR_EXISTS)) {
+      /* We use a specialized error message here, because it's not
+         a system error. */
+      scheme_raise_exn(MZEXN_FAIL_FILESYSTEM_EXISTS,
+                       "rename-file-or-directory: cannot rename file or directory;\n"
+                       " the destination path already exists\n"
+                       "  source path: %q\n"
+                       "  dest path: %q",
+                       filename_for_error(argv[0]),
+                       filename_for_error(argv[1]));
+    } else {
+      scheme_raise_exn((exists_ok < 0) ? MZEXN_FAIL_FILESYSTEM_EXISTS : MZEXN_FAIL_FILESYSTEM, 
+                       "rename-file-or-directory: cannot rename file or directory\n"
+                       "  source path: %q\n"
+                       "  dest path: %q\n"
+                       "  system error: %R",
+                       filename_for_error(argv[0]),
+                       filename_for_error(argv[1]));
+    }
   }
 
-  if (errno == ERROR_CALL_NOT_IMPLEMENTED) {
-    /* Then we have the great misfortune of running in Windows 9x. If
-       exists_ok, then do something no less stupid than the OS
-       itself: */
-    int errid;
-    if (exists_ok)
-      MSC_W_IZE(unlink)(MSC_WIDE_PATH(dest));
-    if (MoveFileW(WIDE_PATH_COPY(src), WIDE_PATH(dest)))
-      return scheme_void;
-    errid = GetLastError();
-    errno = errid;
-  } else if (errno == ERROR_ALREADY_EXISTS) {
-    exists_ok = -1;
-  }
-
-# define MOVE_ERRNO_FORMAT "%E"
-# else
-  if (!exists_ok && (scheme_file_exists(dest) || scheme_directory_exists(dest))) {
-    exists_ok = -1;
-    errno = EEXIST;
-    goto failed;
-  }
-  
-  while (1) {
-    if (!rename(src, dest))
-      return scheme_void;
-    else if (errno != EINTR)
-      break;
-  }
-# define MOVE_ERRNO_FORMAT "%e"
-# endif
-
-#ifndef DOS_FILE_SYSTEM
-failed:
-#endif
-  scheme_raise_exn((exists_ok < 0) ? MZEXN_FAIL_FILESYSTEM_EXISTS : MZEXN_FAIL_FILESYSTEM, 
-		   "rename-file-or-directory: cannot rename file or directory\n"
-                   "  source path: %q\n"
-                   "  dest path: %q\n"
-                   "  system error: " MOVE_ERRNO_FORMAT,
-		   filename_for_error(argv[0]),
-		   filename_for_error(argv[1]),
-		   errno);
-  
-  return NULL;
+  return scheme_void;
 }
 
+static void escape_during_copy(rktio_file_copy_t *cf)
+{
+  rktio_copy_file_stop(scheme_rktio, cf);
+}
+  
 static Scheme_Object *copy_file(int argc, Scheme_Object **argv)
 {
-  char *reason = NULL;
-#ifdef DOS_FILE_SYSTEM
   char *src, *dest;
-#endif 
-  int pre_exists = 0, has_err_val = 0, err_val = 0, exists_ok = 0;
+  int exists_ok = 0;
   Scheme_Object *bss, *bsd;
+  rktio_file_copy_t *cf;
 
   if (!SCHEME_PATH_STRINGP(argv[0]))
     scheme_wrong_contract("copy-file", "path-string?", 0, argc, argv);
@@ -3909,130 +3424,93 @@ static Scheme_Object *copy_file(int argc, Scheme_Object **argv)
   bsd = argv[1];
   exists_ok = ((argc > 2) && SCHEME_TRUEP(argv[2]));
 
-#ifdef DOS_FILE_SYSTEM
-  src = 
-#endif 
-    scheme_expand_string_filename(bss,
-                                  "copy-file",
-                                  NULL,
-                                  SCHEME_GUARD_FILE_READ);
+  src = scheme_expand_string_filename(bss,
+                                      "copy-file",
+                                      NULL,
+                                      SCHEME_GUARD_FILE_READ);
+  
+  dest = scheme_expand_string_filename(bsd,
+                                       "copy-file",
+                                       NULL, 
+                                       SCHEME_GUARD_FILE_WRITE | SCHEME_GUARD_FILE_DELETE);
 
-#ifdef DOS_FILE_SYSTEM
-  dest = 
-#endif 
-    scheme_expand_string_filename(bsd,
-                                  "copy-file",
-                                  NULL, 
-                                  SCHEME_GUARD_FILE_WRITE | SCHEME_GUARD_FILE_DELETE);
-
-#ifdef UNIX_FILE_SYSTEM
-  {
-# define COPY_BUFFER_SIZE 2048
-    char b[COPY_BUFFER_SIZE];
-    intptr_t len;
-    int ok;
-    struct stat buf;
-    mz_jmp_buf newbuf, * volatile savebuf;
-    int a_cnt;
-    Scheme_Object *a[2], * volatile in, * volatile out;
-
-    reason = NULL;
-    in = scheme_do_open_input_file("copy-file", 0, 1, argv, 1, &reason, &err_val);
-    if (!in) {
-      has_err_val = !!err_val;
-      goto failed;
-    }
-
-    do {
-      ok = fstat(scheme_get_port_fd(in), &buf);
-    } while ((ok == -1) && (errno == EINTR));
-    if (ok || S_ISDIR(buf.st_mode)) {
-      reason = "error getting mode";
-      err_val = errno;
-      has_err_val = 1;
-      goto failed;
-    }
-
-    a[0] = argv[1];
-    if (exists_ok) {
-      a_cnt = 2;
-      a[1] = scheme_intern_symbol("truncate");
-    } else
-      a_cnt = 1;
-    out = scheme_do_open_output_file("copy-file", 0, a_cnt, a, 0, 1, &reason, &err_val);
-    if (!out) {
-      scheme_close_input_port(in);
-      has_err_val = !!err_val;
-      pre_exists = (err_val == EEXIST);
-      goto failed;
-    }
-
-    /* catch errors or breaks during read and write to close ports: */
-    savebuf = scheme_current_thread->error_buf;
-    scheme_current_thread->error_buf = &newbuf;
-    if (scheme_setjmp(newbuf)) {
-      scheme_close_input_port(in);
-      scheme_close_output_port(out);
-      scheme_current_thread->error_buf = savebuf;
-      scheme_longjmp(*savebuf, 1);
-      return NULL;
-    } else {
-      ok = 1;
-      while ((len = scheme_get_byte_string("copy-file", in, b, 0, COPY_BUFFER_SIZE, 0, 0, NULL))) {
-        if (len == -1)
-          break;
-        if (scheme_put_byte_string("copy-file", out, b, 0, len, 0) != len) {
-          ok = 0;
-          break;
-        }
+  cf = rktio_copy_file_start(scheme_rktio, dest, src, exists_ok);
+  if (cf) {
+    int ok = 1;
+    while (!rktio_copy_file_is_done(scheme_rktio, cf)) {
+      if (!rktio_copy_file_step(scheme_rktio, cf)) {
+        ok = 0;
+        break;
+      }
+      ok++;
+      if (ok == 10) {
+        BEGIN_ESCAPEABLE(escape_during_copy, cf);
+        SCHEME_USE_FUEL(1);
+        END_ESCAPEABLE();
+        ok = 1;
       }
     }
-    scheme_current_thread->error_buf = savebuf;
 
     if (ok) {
-      do {
-        err_val = fchmod(scheme_get_port_fd(out), buf.st_mode);
-      } while ((err_val == -1) && (errno != EINTR));
-      if (err_val) {
-        err_val = errno;
-        has_err_val = 0;
-        reason = "cannot set destination's mode";
-        ok = 0;
+      if (!rktio_copy_file_finish_permissions(scheme_rktio, cf)) {
+        rktio_copy_file_stop(scheme_rktio, cf);
+        scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
+                         "copy-file: cannot set destination's permissions\n"
+                         "  source path: %q\n"
+                         "  destination path: %q",
+                         filename_for_error(argv[0]),
+                         filename_for_error(argv[1]));
       }
-    } else
-      reason = "read or write failed";
-
-    scheme_close_input_port(in);
-    scheme_close_output_port(out);
-
+    }
+    rktio_copy_file_stop(scheme_rktio, cf);
     if (ok)
       return scheme_void;
   }
- failed:
-#endif
-#ifdef DOS_FILE_SYSTEM
-  if (CopyFileW(WIDE_PATH_COPY(src), WIDE_PATH(dest), !exists_ok))
-    return scheme_void;
   
-  reason = "copy failed";
-  err_val = GetLastError();
-  if ((err_val == ERROR_FILE_EXISTS)
-      || (err_val == ERROR_ALREADY_EXISTS))
-    pre_exists = 1;
-  has_err_val = 1;
-#endif
+  if (scheme_last_error_is_racket(RKTIO_ERROR_EXISTS)) {
+    /* We use a specialized error message here, because it's not
+       a system error. */
+    scheme_raise_exn(MZEXN_FAIL_FILESYSTEM_EXISTS,
+                     "copy-file: destination exists\n"
+                     "  source path: %q\n"
+                     "  destination path: %q",
+                     filename_for_error(argv[0]),
+                     filename_for_error(argv[1]));
+  } else {
+    const char *how;
 
-  scheme_raise_exn(pre_exists ? MZEXN_FAIL_FILESYSTEM_EXISTS : MZEXN_FAIL_FILESYSTEM, 
-		   "copy-file: %s\n"
-                   "  source path: %q\n"
-                   "  destination path: %q"
-                   "%s%M",
-		   reason,
-		   filename_for_error(argv[0]),
-		   filename_for_error(argv[1]),
-		   has_err_val ? "\n  system error: " : "",
-		   has_err_val,
-		   err_val);
+    switch (rktio_get_last_error_step(scheme_rktio)) {
+    case RKTIO_COPY_STEP_OPEN_SRC:
+      how = "cannot open source file";
+      break;
+    case RKTIO_COPY_STEP_OPEN_DEST:
+      how = "cannot open destination file";
+      break;
+    case RKTIO_COPY_STEP_READ_SRC_DATA:
+      how = "error reading source file";
+      break;
+    case RKTIO_COPY_STEP_WRITE_DEST_DATA:
+      how = "error writing destination file";
+      break;
+    case RKTIO_COPY_STEP_READ_SRC_METADATA:
+      how = "error reading source-file metadata";
+      break;
+    case RKTIO_COPY_STEP_WRITE_DEST_METADATA:
+      how = "error writing destination-file metadata";
+      break;
+    default:
+      how = "copy failed";
+    }
+
+    scheme_raise_exn(MZEXN_FAIL_FILESYSTEM, 
+                     "copy-file: %s\n"
+                     "  source path: %q\n"
+                     "  destination path: %q\n"
+                     "  system error: %R",
+                     how,
+                     filename_for_error(argv[0]),
+                     filename_for_error(argv[1]));
+  }
 
   return NULL;
 }
@@ -4103,17 +3581,9 @@ static Scheme_Object *absolute_path_p(int argc, Scheme_Object **argv)
 	  : scheme_false);
 }
 
-static Scheme_Object *resolve_path(int argc, Scheme_Object *argv[])
+static Scheme_Object *do_resolve_path(int argc, Scheme_Object *argv[], int guards)
 {
-#ifndef NO_READLINK
-#define SL_NAME_MAX 2048
-  char buffer[SL_NAME_MAX];
-#endif
-#ifndef NO_READLINK
-  intptr_t len;
-  int copied = 0;
-#endif
-  char *filename;
+  char *content, *filename;
   int expanded;
 
   if (!SCHEME_PATH_STRINGP(argv[0]))
@@ -4125,13 +3595,14 @@ static Scheme_Object *resolve_path(int argc, Scheme_Object *argv[])
 				"resolve-path",
 				&expanded,
 				1, 0,
-				SCHEME_GUARD_FILE_EXISTS,
+				guards ? SCHEME_GUARD_FILE_EXISTS : 0,
                                 SCHEME_PLATFORM_PATH_KIND,
                                 0);
 
-#ifndef NO_READLINK
   {
     char *fullfilename = filename;
+    intptr_t len;
+    int copied = 0;
 
     len = strlen(fullfilename);
     if (!scheme_is_complete_path(fullfilename, len, SCHEME_PLATFORM_PATH_KIND)) {
@@ -4149,30 +3620,27 @@ static Scheme_Object *resolve_path(int argc, Scheme_Object *argv[])
       fullfilename[--len] = 0;
     }
 
-    while (1) {
-      len = readlink(fullfilename, buffer, SL_NAME_MAX);
-      if (len == -1) {
-	if (errno != EINTR)
-	  break;
-      } else
-	break;
-    }
+    content = rktio_readlink(scheme_rktio, fullfilename);
 
-#ifdef BROKEN_READLINK_NUL_TERMINATOR
-    while (len > 0 && buffer[len-1] == 0) {
-      len--;
-    }
-#endif
+    /* Treating all errors (such as link cycles) as `RKTIO_ERROR_NOT_A_LINK` */
 
-    if (len > 0)
-      return scheme_make_sized_path(buffer, len, 1);
+    if (content) {
+      Scheme_Object *r;
+      r = scheme_make_sized_path(content, -1, 1);
+      free(content);
+      return r;
+    }
   }
-#endif
 
-  if (!expanded)
+  if (!expanded && SCHEME_PATHP(argv[0]))
     return argv[0];
   else
     return scheme_make_sized_path(filename, strlen(filename), 1);
+}
+
+static Scheme_Object *resolve_path(int argc, Scheme_Object *argv[])
+{
+  return do_resolve_path(argc, argv, 1);
 }
 
 static Scheme_Object *convert_literal_relative(Scheme_Object *file)
@@ -4358,7 +3826,7 @@ static Scheme_Object *simplify_qm_path(Scheme_Object *path)
 static Scheme_Object *do_simplify_path(Scheme_Object *path, Scheme_Object *cycle_check, int skip, 
 				       int use_filesystem, 
                                        int force_rel_up,
-                                       int kind)
+                                       int kind, int guards)
      /* When !use_filesystem, the result can be #f for an empty relative
 	path, and it can contain leading ".."s, or ".."s after an initial
         "~" path with "~" paths are absolute.
@@ -4511,7 +3979,7 @@ static Scheme_Object *do_simplify_path(Scheme_Object *path, Scheme_Object *cycle
       len = SCHEME_PATH_LEN(base);
       if (len <= skip)
         break;
-      file = do_split_path(s, len, &base, &isdir, &cleaned_slashes, kind);
+      file = do_split_path_once(s, len, &base, &isdir, &cleaned_slashes, kind);
       if (kind == SCHEME_WINDOWS_PATH_KIND) {
         if (force_rel_up) {
           file = convert_literal_relative(file);
@@ -4537,7 +4005,7 @@ static Scheme_Object *do_simplify_path(Scheme_Object *path, Scheme_Object *cycle
       /* Make it absolute */
       s = scheme_expand_string_filename(path,
 					"simplify-path", NULL,
-					SCHEME_GUARD_FILE_EXISTS);
+					guards ? SCHEME_GUARD_FILE_EXISTS : 0);
       len = strlen(s);
     }
 
@@ -4616,13 +4084,13 @@ static Scheme_Object *do_simplify_path(Scheme_Object *path, Scheme_Object *cycle
     /* Build up path, watching for links just before a ..: */
     while (!SCHEME_NULLP(accum)) {
       if (SAME_OBJ(SCHEME_CAR(accum), up_symbol)) {
-	if (use_filesystem) {
+	if (use_filesystem && (SCHEME_PLATFORM_PATH_KIND != SCHEME_WINDOWS_PATH_KIND)) {
 	  /* Look for symlink in result-so-far. */
 	  Scheme_Object *new_result, *a[1];
 
 	  while (1) {
 	    a[0] = result;
-	    new_result = resolve_path(1, a);
+	    new_result = do_resolve_path(1, a, guards);
 	
 	    /* Was it a link? */
 	    if (result != new_result) {
@@ -4641,11 +4109,28 @@ static Scheme_Object *do_simplify_path(Scheme_Object *path, Scheme_Object *cycle
 		aa[1] = new_result;
 		new_result = do_build_path(2, aa, 0, 0, SCHEME_PLATFORM_PATH_KIND);
 	      }
+
+	      {
+		Scheme_Object *cl, *cp;
+		for (cl = cycle_check; !SCHEME_NULLP(cl); cl = SCHEME_CDR(cl)) {
+		  cp = SCHEME_CAR(cl);
+		  if ((SCHEME_PATH_LEN(cp) == SCHEME_PATH_LEN(new_result))
+		      && !strcmp(SCHEME_PATH_VAL(cp), SCHEME_PATH_VAL(new_result))) {
+		    /* cycle */
+		    new_result = NULL;
+		    break;
+		  }
+		}
+	      }
 	    
-	      /* Simplify the new result */
-	      result = do_simplify_path(new_result, cycle_check, skip, 
-					use_filesystem, force_rel_up, kind);
-	      cycle_check = scheme_make_pair(new_result, cycle_check);
+	      if (new_result) {
+		/* Simplify the new result */
+		result = do_simplify_path(new_result, cycle_check, skip,
+					  use_filesystem, force_rel_up, kind,
+					  guards);
+		cycle_check = scheme_make_pair(new_result, cycle_check);
+	      } else
+		break;
 	    } else
 	      break;
 	  }
@@ -4748,7 +4233,7 @@ Scheme_Object *scheme_simplify_path(int argc, Scheme_Object *argv[])
                           NULL);
   }
   
-  r = do_simplify_path(bs, scheme_null, 0, use_fs, 0, kind);
+  r = do_simplify_path(bs, scheme_null, 0, use_fs, 0, kind, 1);
 
   if (SCHEME_FALSEP(r)) {
     /* Input was just 'same: */
@@ -4815,7 +4300,7 @@ static Scheme_Object *expand_user_path(int argc, Scheme_Object *argv[])
 				"expand-user-path",
 				&expanded,
 				1, 0,
-				SCHEME_GUARD_FILE_EXISTS, 
+				SCHEME_GUARD_FILE_EXISTS,
                                 SCHEME_PLATFORM_PATH_KIND,
                                 1);
 
@@ -4825,42 +4310,25 @@ static Scheme_Object *expand_user_path(int argc, Scheme_Object *argv[])
     return scheme_make_sized_path(filename, strlen(filename), 1);
 }
 
-#ifdef USE_FINDFIRST
-void do_find_close(void *p) 
+static void escape_during_directory_list(rktio_directory_list_t *dl)
 {
-  FIND_CLOSE(*(FF_HANDLE_TYPE *)p);
+  rktio_directory_list_stop(scheme_rktio, dl);
 }
-#endif
 
 static Scheme_Object *do_directory_list(int break_ok, int argc, Scheme_Object *argv[])
 {
-#if !defined(NO_READDIR) || defined(USE_FINDFIRST)
   char *filename;
-  Scheme_Object * volatile first = scheme_null, * volatile last = NULL, *n, *elem;
-#endif
-#ifndef NO_READDIR
-  DIR *dir;
-  int nlen;
-  struct dirent *e;
-#endif
-#ifdef USE_FINDFIRST
-  char *pattern;
-  int len;
-  FF_HANDLE_TYPE hfile, *hfile_ptr = NULL;
-  FF_TYPE info;
-#endif
-  volatile int counter = 0;
+  Scheme_Object *first = scheme_null, *last = NULL, *n, *elem;
+  int counter = 0;
+  rktio_directory_list_t *dl;
+  char *s;
 
   if (argc && !SCHEME_PATH_STRINGP(argv[0]))
     scheme_wrong_contract("directory-list", "path-string?", 0, argc, argv);
 
-#if defined(NO_READDIR) && !defined(USE_FINDFIRST)
-  return scheme_null;
-#else
-
   if (argc) {
     Scheme_Object *path = argv[0];
-# ifdef USE_FINDFIRST
+# ifdef DOS_FILE_SYSTEM
     while (1) {
 # endif
       filename = do_expand_filename(path, NULL, 0, 
@@ -4871,12 +4339,12 @@ static Scheme_Object *do_directory_list(int break_ok, int argc, Scheme_Object *a
                                     0);
       if (!filename)
 	return NULL;
-# ifdef USE_FINDFIRST
+# ifdef DOS_FILE_SYSTEM
       /* Eliminate "." and "..": */
       if (SAME_OBJ(path, argv[0])) {
 	Scheme_Object *old;
 	old = scheme_make_path(filename);
-	path = do_simplify_path(old, scheme_null, 0, 1, 0, SCHEME_WINDOWS_PATH_KIND);
+	path = do_simplify_path(old, scheme_null, 0, 1, 0, SCHEME_WINDOWS_PATH_KIND, break_ok);
 	if (SAME_OBJ(path, old))
 	  break;
       } else
@@ -4891,122 +4359,23 @@ static Scheme_Object *do_directory_list(int break_ok, int argc, Scheme_Object *a
     }
   }
 
-# ifdef USE_FINDFIRST
-
-  if (!filename)
-    pattern = "*.*";
-  else {
-    char *nf;
-    int is_unc = 0, d, nd;
-    len = strlen(filename);
-    if ((len > 1) && IS_A_DOS_SEP(filename[0]) && check_dos_slashslash_drive(filename, 0, len, NULL, 0, 0))
-      is_unc = 1;
-    nf = scheme_normal_path_seps(filename, &len, 0);
-    pattern = (char *)scheme_malloc_atomic(len + 14);
-    
-    if ((scheme_stupid_windows_machine > 0)
-	|| check_dos_slashslash_qm(filename, len, NULL, NULL, NULL)) {
-      d = 0;
-      nd = 0;
-    } else {
-      pattern[0] = '\\';
-      pattern[1] = '\\';
-      pattern[2] = '?';
-      pattern[3] = '\\';
-      if (is_unc) {
-	pattern[4] = 'U';
-	pattern[5] = 'N';
-	pattern[6] = 'C';
-	pattern[7] = '\\';
-	d = 8;
-	nd = 2;
-      } else {
-	d = 4;
-	nd = 0;
-      }
-    }
-    memcpy(pattern + d, nf + nd, len - nd);
-    len += (d - nd);
-    if (len && !IS_A_DOS_SEP(pattern[len - 1]))
-      pattern[len++] = '\\';      
-    memcpy(pattern + len, "*.*", 4);
-  }
-
-  hfile = FIND_FIRST(WIDE_PATH(pattern), &info);
-  if (FIND_FAILED(hfile)) {
-    if (!filename)
-      return scheme_null;
+  dl = rktio_directory_list_start(scheme_rktio, filename);
+  if (!dl) {
     if (break_ok)
       scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
                        "directory-list: could not open directory\n"
                        "  path: %q\n"
-                       "  system error: %E",
-                       filename,
-                       GetLastError());  
+                       "  system error: %R",
+                       filename);
     return NULL;
   }
 
   do {
-    if ((GET_FF_NAME(info)[0] == '.')
-	&& (!GET_FF_NAME(info)[1] || ((GET_FF_NAME(info)[1] == '.')
-				      && !GET_FF_NAME(info)[2]))) {
-      /* skip . and .. */
-    } else {
-      n = make_protected_path(NARROW_PATH(info.cFileName));
-      elem = scheme_make_pair(n, scheme_null);
-      if (last)
-	SCHEME_CDR(last) = elem;
-      else
-	first = elem;
-      last = elem;
-    }
-    counter++;
-    if (break_ok && !(counter & 0x15)) {
-      if (!hfile_ptr) {
-	hfile_ptr = (FF_HANDLE_TYPE *)scheme_malloc_atomic(sizeof(FF_HANDLE_TYPE));
-	*hfile_ptr = hfile;
-      }
-      BEGIN_ESCAPEABLE(do_find_close, hfile_ptr);
-      scheme_thread_block(0);
-      END_ESCAPEABLE();
-      scheme_current_thread->ran_some = 1;
-    }
-  } while (FIND_NEXT(hfile, &info));
-  
-  FIND_CLOSE(hfile);
+    s = rktio_directory_list_step(scheme_rktio, dl);
+    if (!*s)
+      break;
 
-  return first;
-# else
-  
-  dir = opendir(filename ? filename : ".");
-  if (!dir) {
-    if (!filename)
-      return scheme_null;
-    if (break_ok)
-      scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
-                       "directory-list: could not open directory\n"
-                       "  path: %q\n"
-                       "  system error: %e",
-                       filename,
-                       errno);
-    return NULL;
-  }
-  
-  while ((e = readdir(dir))) {
-#  ifdef DIRENT_NO_NAMLEN
-    nlen = strlen(e->d_name);
-#  elif defined(__QNX__) || defined(__QNXNTO__)
-    nlen = e->d_namelen;
-#  else
-    nlen = e->d_namlen;
-#  endif
-#  if defined(UNIX_FILE_SYSTEM) || defined(DOS_FILE_SYSTEM)
-    if (nlen == 1 && e->d_name[0] == '.')
-      continue;
-    if (nlen == 2 && e->d_name[0] == '.' && e->d_name[1] == '.')
-      continue;
-#  endif
-    n = make_protected_sized_offset_path(1, e->d_name, 0, nlen, 1, 0, SCHEME_PLATFORM_PATH_KIND);
+    n = make_protected_sized_offset_path(1, s, 0, strlen(s), 1, 0, SCHEME_PLATFORM_PATH_KIND);
     elem = scheme_make_pair(n, scheme_null);
     if (last)
       SCHEME_CDR(last) = elem;
@@ -5016,18 +4385,13 @@ static Scheme_Object *do_directory_list(int break_ok, int argc, Scheme_Object *a
 
     counter++;
     if (break_ok && !(counter & 0xF)) {
-      BEGIN_ESCAPEABLE(closedir, dir);
-      scheme_thread_block(0);
+      BEGIN_ESCAPEABLE(escape_during_directory_list, dl);
+      SCHEME_USE_FUEL(1);
       END_ESCAPEABLE();
-      scheme_current_thread->ran_some = 1;
     }
-  }
-  
-  closedir(dir);
+  } while (1);
 
   return first;
-# endif
-#endif
 }
 
 static Scheme_Object *directory_list(int argc, Scheme_Object *argv[])
@@ -5128,35 +4492,40 @@ char *scheme_find_completion(char *fn)
   return SCHEME_PATH_VAL(f);
 }
 
-static Scheme_Object *explode_path(Scheme_Object *p)
+static Scheme_Object *do_explode_path(Scheme_Object *p)
 {
-  Scheme_Object *l = scheme_null, *base, *name;
-  int isdir;
-
-  while (1) {
-    name = scheme_split_path(SCHEME_PATH_VAL(p), SCHEME_PATH_LEN(p), &base, &isdir, SCHEME_PATH_KIND(p));
-    l = scheme_make_pair(name, l);
-
-    if (!SCHEME_PATHP(base)) {
-      l = scheme_make_pair(base, l);
-      return l;
-    }
-    p = base;
-  }
+  return explode_path(1, &p);
 }
 
-Scheme_Object *scheme_extract_relative_to(Scheme_Object *obj, Scheme_Object *dir)
+static Scheme_Object *to_bytes(Scheme_Object *p)
 {
-  Scheme_Object *de, *be, *oe;
+  if (SCHEME_PATHP(p))
+    return scheme_make_sized_byte_string(SCHEME_PATH_VAL(p),
+                                         SCHEME_PATH_LEN(p),
+                                         1);
+  else
+    return p;
+}
+
+Scheme_Object *scheme_extract_relative_to(Scheme_Object *obj, Scheme_Object *dir, Scheme_Hash_Table *cache)
+/* When cache is non-NULL, generate a path or a list of byte strings (suitable for bytecode) */
+{
+  Scheme_Object *de, *be, *oe, *orig_obj = obj;
+
+  if (cache) {
+    de = scheme_hash_get(cache, obj);
+    if (de)
+      return de;
+  }
 
   if (SCHEME_PAIRP(dir)) {
-    be = explode_path(SCHEME_CAR(dir));
-    de = explode_path(SCHEME_CDR(dir));
+    be = do_explode_path(SCHEME_CAR(dir));
+    de = do_explode_path(SCHEME_CDR(dir));
   } else {
-    be = explode_path(dir);
+    be = do_explode_path(dir);
     de = be;
   }
-  oe = explode_path(obj);
+  oe = do_explode_path(obj);
 
   while (SCHEME_PAIRP(de)
 	 && SCHEME_PAIRP(oe)) {
@@ -5177,89 +4546,107 @@ Scheme_Object *scheme_extract_relative_to(Scheme_Object *obj, Scheme_Object *dir
       be = SCHEME_CDR(be);
     }
 
+    /* If cache is non-NULL, generate a list of byte strings */
+
     if (SCHEME_NULLP(oe)) {
-      a[0] = same_symbol;
-      obj = scheme_build_path(1, a);
+      if (cache) {
+        obj = scheme_null;
+      } else {
+        a[0] = same_symbol;
+        obj = scheme_build_path(1, a);
+      }
     } else {
       obj = SCHEME_CAR(oe);
+      if (cache)
+        obj = scheme_make_pair(to_bytes(obj), scheme_null);
       oe = SCHEME_CDR(oe);
     }
 
     while (SCHEME_PAIRP(oe)) {
-      a[0] = obj;
-      a[1] = SCHEME_CAR(oe);
-      obj = scheme_build_path(2, a);
+      if (cache) {
+        obj = scheme_make_pair(to_bytes(SCHEME_CAR(oe)), obj);
+      } else {
+        a[0] = obj;
+        a[1] = SCHEME_CAR(oe);
+        obj = scheme_build_path(2, a);
+      }
       oe = SCHEME_CDR(oe);
     }
 
+    if (cache)
+      obj = scheme_reverse(obj);
+
     while (!SCHEME_NULLP(be)) {
-      a[0] = up_symbol;
-      a[1] = obj;
-      obj = scheme_build_path(2, a);
+      if (cache) {
+        obj = scheme_make_pair(up_symbol, obj);
+      } else {
+        a[0] = up_symbol;
+        a[1] = obj;
+        obj = scheme_build_path(2, a);
+      }
       be = SCHEME_CDR(be);
     }
   }
 
+  if (cache)
+    scheme_hash_set(cache, orig_obj, obj);
+
   return obj;
+}
+
+Scheme_Object *scheme_maybe_build_path(Scheme_Object *base, Scheme_Object *elem)
+{
+  Scheme_Object *a[2];
+  
+  if (!base)
+    base = scheme_get_param(scheme_current_config(), MZCONFIG_CURRENT_DIRECTORY);
+
+  if (SAME_OBJ(elem, same_symbol)
+      || SAME_OBJ(elem, up_symbol)) {
+    /* ok */
+  } else if (SCHEME_BYTE_STRINGP(elem)) {
+    a[0] = elem;
+    elem = bytes_to_path_element(1, a);
+  } else
+    elem = NULL;
+
+  if (elem) {
+    a[0] = base;
+    a[1] = elem;
+    return scheme_build_path(2, a);
+  } else
+    return base;
 }
 
 static Scheme_Object *filesystem_root_list(int argc, Scheme_Object *argv[])
 {
   Scheme_Object *first = scheme_null;
-#if defined(DOS_FILE_SYSTEM)
   Scheme_Object *last = NULL, *v;
-#endif
-
+  char **roots;
+  int i;
+  
   scheme_security_check_file("filesystem-root-list", NULL, SCHEME_GUARD_FILE_EXISTS);
 
-#ifdef UNIX_FILE_SYSTEM 
-  first = scheme_make_pair(scheme_make_path("/"), scheme_null);
-#endif
-#ifdef DOS_FILE_SYSTEM
-  {
-#   define DRIVE_BUF_SIZE 1024
-    char drives[DRIVE_BUF_SIZE], *s;
-    intptr_t len, ds;
-    UINT oldmode;
-
-    len = GetLogicalDriveStrings(DRIVE_BUF_SIZE, drives);
-    if (len <= DRIVE_BUF_SIZE)
-      s = drives;
-    else {
-      s = scheme_malloc_atomic(len + 1);
-      GetLogicalDriveStrings(len + 1, s);
-    }
-
-    ds = 0;
-    oldmode = SetErrorMode(SEM_FAILCRITICALERRORS);      
-    while (s[ds]) {
-      DWORD a, b, c, d;
-      /* GetDiskFreeSpace effectively checks whether we can read the disk: */
-      if (GetDiskFreeSpace(s XFORM_OK_PLUS ds, &a, &b, &c, &d)) {
-	v = scheme_make_pair(scheme_make_sized_offset_path(s, ds, -1, 1), scheme_null);
-	if (last)
-	  SCHEME_CDR(last) = v;
-	else
-	  first = v;
-	last = v;
-      }
-      ds += strlen(s XFORM_OK_PLUS ds) + 1;
-    }
-    SetErrorMode(oldmode);
+  roots = rktio_filesystem_roots(scheme_rktio);
+  for (i = 0; roots[i]; i++) {
+    v = scheme_make_pair(scheme_make_sized_offset_path(roots[i], 0, -1, 1), scheme_null);
+    if (last)
+      SCHEME_CDR(last) = v;
+    else
+      first = v;
+    last = v;
+    free(roots[i]);
   }
-#endif
+
+  free(roots);
 
   return first;
 }
 
 static Scheme_Object *make_directory(int argc, Scheme_Object *argv[])
 {
-#ifdef NO_MKDIR
-  return scheme_false;
-#else
   char *filename;
-  int exists_already = 0;
-  int len, copied;
+  int copied;
 
   if (!SCHEME_PATH_STRINGP(argv[0]))
     scheme_wrong_contract("make-directory", "path-string?", 0, argc, argv);
@@ -5268,50 +4655,30 @@ static Scheme_Object *make_directory(int argc, Scheme_Object *argv[])
 					   "make-directory",
 					   &copied,
 					   SCHEME_GUARD_FILE_WRITE);
-  
-  /* Make sure path doesn't have trailing separator: */
-  len = strlen(filename);
-  while (len && IS_A_SEP(SCHEME_PLATFORM_PATH_KIND, filename[len - 1])) {
-    if (!copied) {
-      filename = scheme_strdup(filename);
-      copied = 1;
+
+  if (!rktio_make_directory(scheme_rktio, filename)) {
+    if (scheme_last_error_is_racket(RKTIO_ERROR_EXISTS)) {
+      scheme_raise_exn(MZEXN_FAIL_FILESYSTEM_EXISTS,
+                       "make-directory: cannot make directory;\n"
+                       " the path already exists\n"
+                       "  path: %q",
+                       filename_for_error(argv[0]));
+    } else {
+      scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
+                       "make-directory: cannot make directory\n"
+                       "  path: %q\n"
+                       "  system error: %R",
+                       filename_for_error(argv[0]));
     }
-    filename[--len] = 0;
   }
-
-  while (1) {
-    if (!MSC_W_IZE(mkdir)(MSC_WIDE_PATH(filename)
-#  ifndef MKDIR_NO_MODE_FLAG
-			  , 0777
-# endif
-			  ))
-      return scheme_void;
-    else if (errno != EINTR)
-      break;
-  }
-
-  exists_already = (errno == EEXIST);
-# define MKDIR_EXN_TYPE "%e"
-
-  scheme_raise_exn(exists_already ? MZEXN_FAIL_FILESYSTEM_EXISTS : MZEXN_FAIL_FILESYSTEM,
-		   "make-directory: cannot make directory\n"
-                   "  path: %q\n"
-                   "  system error: " MKDIR_EXN_TYPE,
-		   filename_for_error(argv[0]),
-		   errno);
-  return NULL;
-#endif
+  
+  return scheme_void;
 }
 
 static Scheme_Object *delete_directory(int argc, Scheme_Object *argv[])
 {
-#ifdef NO_RMDIR
-  return scheme_false;
-#else
-# ifdef DOS_FILE_SYSTEM
-  int tried_cwd = 0;
-# endif
   char *filename;
+  char *current_directory;
 
   if (!SCHEME_PATH_STRINGP(argv[0]))
     scheme_wrong_contract("delete-directory", "path-string?", 0, argc, argv);
@@ -5321,37 +4688,33 @@ static Scheme_Object *delete_directory(int argc, Scheme_Object *argv[])
 					   NULL,
 					   SCHEME_GUARD_FILE_DELETE);
 
-  while (1) {
-    if (!MSC_W_IZE(rmdir)(MSC_WIDE_PATH(filename)))
-      return scheme_void;
-# ifdef DOS_FILE_SYSTEM
-    else if ((errno == EACCES) && !tried_cwd) {
-      /* Maybe we're using the target directory. Try a real setcwd. */
-      Scheme_Object *tcd;
-      tcd = scheme_get_param(scheme_current_config(), MZCONFIG_CURRENT_DIRECTORY);
-      scheme_os_setcwd(SCHEME_PATH_VAL(tcd), 0);
-      tried_cwd = 1;
-    }
-# endif
-    else if (errno != EINTR)
-      break;
+#ifdef DOS_FILE_SYSTEM
+  {
+    Scheme_Object *tcd;
+    tcd = scheme_get_param(scheme_current_config(), MZCONFIG_CURRENT_DIRECTORY);
+    current_directory = SCHEME_PATH_VAL(tcd);
+  }
+#else
+  current_directory = NULL;
+#endif
+  
+  if (!rktio_delete_directory(scheme_rktio, filename, current_directory,
+                              scheme_can_enable_write_permission())) {
+    scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
+                     "delete-directory: cannot delete directory\n"
+                     "  path: %q\n"
+                     "  system error: %R",
+                     filename_for_error(argv[0]));
   }
 
-  scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
-		   "delete-directory: cannot delete directory\n"
-                   "  path: %q\n"
-                   "  system error: %e",
-		   filename_for_error(argv[0]),
-		   errno);
-  return NULL;
-#endif
+  return scheme_void;
 }
 
 static Scheme_Object *make_link(int argc, Scheme_Object *argv[])
 {
   char *src;
   Scheme_Object *dest;
-  int copied;
+  int dest_is_dir, copied;
 
   if (!SCHEME_PATH_STRINGP(argv[0]))
     scheme_wrong_contract("make-file-or-directory-link", "path-string?", 0, argc, argv);
@@ -5375,29 +4738,33 @@ static Scheme_Object *make_link(int argc, Scheme_Object *argv[])
 				  src, 
 				  SCHEME_PATH_VAL(dest));
 
-#if defined(DOS_FILE_SYSTEM)
-  scheme_raise_exn(MZEXN_FAIL_UNSUPPORTED,
-		   "make-file-or-directory-link: " NOT_SUPPORTED_STR ";\n"
-		   " cannot create link\n"
-                   "  path: %Q",
-		   argv[1]);
-#else
-  while (1) {
-    if (!symlink(SCHEME_PATH_VAL(dest), src))
-      return scheme_void;
-    else if (errno != EINTR)
-      break;
-  }
 
-  scheme_raise_exn((errno == EEXIST) ? MZEXN_FAIL_FILESYSTEM_EXISTS : MZEXN_FAIL_FILESYSTEM,
-		   "make-file-or-directory-link: cannot make link\n"
-                   "  path: %q\n"
-                   "  system error: %e",
-		   filename_for_error(argv[1]),
-		   errno);
+#if defined(DOS_FILE_SYSTEM)
+  if (do_path_to_directory_path(src, 0, -1, argv[1], 1, SCHEME_WINDOWS_PATH_KIND))
+	dest_is_dir = 1;
+  else
+	dest_is_dir = 0;
+#else
+  dest_is_dir = 0;
 #endif
 
-  return NULL;
+  if (!rktio_make_link(scheme_rktio, src, SCHEME_PATH_VAL(dest), dest_is_dir)) {
+    if (scheme_last_error_is_racket(RKTIO_ERROR_EXISTS)) {
+      scheme_raise_exn(MZEXN_FAIL_FILESYSTEM_EXISTS,
+                       "make-file-or-directory-link: cannot make link;\n"
+                       " the path already exists\n"
+                       "  path: %q",
+                       filename_for_error(argv[0]));
+    } else {
+      scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
+                       "make-file-or-directory-link: cannot make link\n"
+                       "  path: %q\n"
+                       "  system error: %R",
+                       filename_for_error(argv[0]));
+    }
+  }
+
+  return scheme_void;
 }
 
 static Scheme_Object *file_modify_seconds(int argc, Scheme_Object **argv)
@@ -5405,7 +4772,6 @@ static Scheme_Object *file_modify_seconds(int argc, Scheme_Object **argv)
   char *file;
   int set_time = 0;
   UNBUNDLE_TIME_TYPE mtime;
-  struct MSC_IZE(stat) buf;
 
   if (!SCHEME_PATH_STRINGP(argv[0]))
     scheme_wrong_contract("file-or-directory-modify-seconds", "path-string?", 0, argc, argv);
@@ -5438,31 +4804,20 @@ static Scheme_Object *file_modify_seconds(int argc, Scheme_Object **argv)
     scheme_check_proc_arity("file-or-directory-modify-seconds", 0, 2, argc, argv);
   }
 
-# ifdef DOS_FILE_SYSTEM
   if (!set_time) {
-    int len = strlen(file);
-    Scheme_Object *secs;
+    rktio_timestamp_t *ts;
 
-    if (UNC_stat(file, len, NULL, NULL, &secs, NULL, -1))
-      return secs;
-  } else 
-# endif
-    {
-      while (1) {
-	if (set_time) {
-	  struct MSC_IZE(utimbuf) ut;
-	  ut.actime = mtime;
-	  ut.modtime = mtime;
-	  if (!MSC_W_IZE(utime)(MSC_WIDE_PATH(file), &ut))
-	    return scheme_void;
-	} else {
-	  if (!MSC_W_IZE(stat)(MSC_WIDE_PATH(file), &buf))
-	    return scheme_make_integer_value_from_time(buf.st_mtime);
-	}
-	if (errno != EINTR)
-	  break;
-      }
+    ts = rktio_get_file_modify_seconds(scheme_rktio, file);
+
+    if (ts) {
+      intptr_t ts_v = *ts;
+      free(ts);
+      return scheme_make_integer_value_from_time(ts_v);
     }
+  } else {
+    if (rktio_set_file_modify_seconds(scheme_rktio, file, mtime))
+      return scheme_void;
+  }
 
   if (argc > 2) {
     return _scheme_tail_apply(argv[2], 0, NULL);
@@ -5471,65 +4826,19 @@ static Scheme_Object *file_modify_seconds(int argc, Scheme_Object **argv)
   scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
 		   "file-or-directory-modify-seconds: error %s file/directory time\n"
                    "  path: %q\n"
-                   "  system error: %e",
+                   "  system error: %R",
 		   set_time ? "setting" : "getting",
-		   filename_for_error(argv[0]),
-		   errno);
+		   filename_for_error(argv[0]));
+
   return NULL;
 }
-
-#if defined(UNIX_FILE_SYSTEM) && !defined(NO_UNIX_USERS)
-static int user_in_group(uid_t uid, gid_t gid)
-{
-  struct group *g;
-  struct passwd *pw;
-  int i, in;
-
-  if (!group_member_cache) {
-    group_member_cache = scheme_make_vector(2 * GROUP_CACHE_SIZE, scheme_false);
-    REGISTER_SO(group_member_cache);
-  }
-
-  for (i = 0; i < GROUP_CACHE_SIZE; i++) {
-    Scheme_Object *gid_e;
-    gid_e = SCHEME_VEC_ELS(group_member_cache)[2*i];
-    if (!SCHEME_FALSEP(gid_e) && (SCHEME_INT_VAL(gid_e) == gid))
-      return SCHEME_FALSEP(SCHEME_VEC_ELS(group_member_cache)[2*i+1]) ? 0 : 1;
-  }
-
-  pw = getpwuid(uid);
-  if (!pw)
-    return 0;
-
-  g = getgrgid(gid);
-  if (!g)
-    return 0;
-
-  for (i = 0; g->gr_mem[i]; i++) {
-    if (!strcmp(g->gr_mem[i], pw->pw_name))
-      break;
-  }
-
-  in = !!(g->gr_mem[i]);
-
-  for (i = 0; i < GROUP_CACHE_SIZE; i++) {
-    if (SCHEME_FALSEP(SCHEME_VEC_ELS(group_member_cache)[2*i])) {
-      SCHEME_VEC_ELS(group_member_cache)[2*i]   = scheme_make_integer(gid);
-      SCHEME_VEC_ELS(group_member_cache)[2*i+1] = in ? scheme_true : scheme_false;
-      return in;
-    }
-  }
-
-  return in;
-}
-#endif
 
 static Scheme_Object *file_or_dir_permissions(int argc, Scheme_Object *argv[])
 {
   Scheme_Object *l = scheme_null;
   char *filename;
   int as_bits = 0, set_bits = 0, new_bits = 0;
-  int err_val = 0;
+  int r = 0;
 
   if (!SCHEME_PATH_STRINGP(argv[0]))
     scheme_wrong_contract("file-or-directory-permissions", "path-string?", 0, argc, argv);
@@ -5549,7 +4858,7 @@ static Scheme_Object *file_or_dir_permissions(int argc, Scheme_Object *argv[])
         new_bits = SCHEME_INT_VAL(l);
       } else
         scheme_wrong_contract("file-or-directory-permissions", 
-                              "(or/c #f 'bits (integer-in 0 65535)",
+                              "(or/c #f 'bits (integer-in 0 65535))",
                               1, argc, argv);
     }
   }
@@ -5561,188 +4870,44 @@ static Scheme_Object *file_or_dir_permissions(int argc, Scheme_Object *argv[])
                                             ? SCHEME_GUARD_FILE_WRITE
                                             : SCHEME_GUARD_FILE_READ));
 
-# ifdef NO_STAT_PROC
-  return scheme_null;
-# else
-#  ifdef UNIX_FILE_SYSTEM
-  /* General strategy for permissions (to deal with setuid)
-     taken from euidaccess() in coreutils... */
-#   ifndef NO_UNIX_USERS
-  if (have_user_ids == 0) {
-    have_user_ids = 1;
-    uid = getuid();
-    gid = getgid();
-    euid = geteuid();
-    egid = getegid();
-  }
-
-  if (!as_bits && (uid == euid) && (gid == egid)) {
-    /* Not setuid; use access() */
-    int read, write, execute, ok;
-    
-    do {
-      ok = access(filename, R_OK);
-    } while ((ok == -1) && (errno == EINTR));
-    read = !ok;
-
-    if (ok && (errno != EACCES))
-      l = NULL;
-    else {
-      do {
-	ok = access(filename, W_OK);
-      } while ((ok == -1) && (errno == EINTR));
-      write = !ok;
-      
-      if (ok && (errno != EACCES))
-	l = NULL;
+  if (!set_bits) {
+    r = rktio_get_file_or_directory_permissions(scheme_rktio, filename, as_bits);
+    if (r != RKTIO_PERMISSION_ERROR) {
+      if (as_bits)
+        return scheme_make_integer(r);
       else {
-	do {
-	  ok = access(filename, X_OK);
-	} while ((ok == -1) && (errno == EINTR));
-	execute = !ok;
-      
-        /* Don't fail at the exec step if the user is the
-           superuser and errno is EPERM; under Mac OS X,
-           at least, such a failure simply means tha the
-           file is not executable. */
-	if (ok && (errno != EACCES) 
-            && (uid || gid || (errno != EPERM))) {
-	  l = NULL;
-	} else {
-	  if (read)
-	    l = scheme_make_pair(read_symbol, l);
-	  if (write)
-	    l = scheme_make_pair(write_symbol, l);
-	  if (execute)
-	    l = scheme_make_pair(execute_symbol, l);
-	}
-      }
-    }
-  } else 
-#  endif
-    {
-      /* Use stat, because setuid, or because or no user info available */
-      struct stat buf;
-      int ok, read, write, execute;
-
-      do {
-        ok = stat(filename, &buf);
-      } while ((ok == -1) && (errno == EINTR));
-
-      if (ok)
-	l = NULL;
-      else {
-        if (as_bits) {
-          if (set_bits) {
-            do {
-              ok = chmod(filename, new_bits);
-            } while ((ok == -1) && (errno == EINTR));
-            if (ok)
-              l = NULL;
-            else
-              l = scheme_void;
-          } else {
-            int bits = buf.st_mode;
-#   ifdef S_IFMT
-            bits -= (bits & S_IFMT);
-#   endif
-            l = scheme_make_integer(bits);
-          }
-        } else {
-#   ifndef NO_UNIX_USERS
-          if (euid == 0) {
-            /* Super-user can read/write anything, and can
-               execute anything that someone can execute */
-            read = 1;
-            write = 1;
-            execute = !!(buf.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH));
-          } else if (buf.st_uid == euid) {
-            read = !!(buf.st_mode & S_IRUSR);
-            write = !!(buf.st_mode & S_IWUSR);
-            execute = !!(buf.st_mode & S_IXUSR);
-          } else if ((egid == buf.st_gid) || user_in_group(euid, buf.st_gid)) {
-            read = !!(buf.st_mode & S_IRGRP);
-            write = !!(buf.st_mode & S_IWGRP);
-            execute = !!(buf.st_mode & S_IXGRP);
-          } else {
-            read = !!(buf.st_mode & S_IROTH);
-            write = !!(buf.st_mode & S_IWOTH);
-            execute = !!(buf.st_mode & S_IXOTH);
-          }
-#   else
-          read = !!(buf.st_mode & (S_IRUSR | S_IRGRP | S_IROTH));
-          write = !!(buf.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH));
-          execute = !!(buf.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH));
-#   endif
-	
-          if (read)
-            l = scheme_make_pair(read_symbol, l);
-          if (write)
-            l = scheme_make_pair(write_symbol, l);
-          if (execute)
-            l = scheme_make_pair(execute_symbol, l);
-        }
-      }
-    }
-  if (!l)
-    err_val = errno;
-#  endif  
-#  ifdef DOS_FILE_SYSTEM
-  {
-    int len = strlen(filename);
-    int flags;
-
-    if (set_bits) {
-      int ALWAYS_SET_BITS = ((MZ_UNC_READ | MZ_UNC_EXEC)
-                             | ((MZ_UNC_READ | MZ_UNC_EXEC) << 3)
-                             | ((MZ_UNC_READ | MZ_UNC_EXEC) << 6));
-      if (((new_bits & ALWAYS_SET_BITS) != ALWAYS_SET_BITS)
-          || ((new_bits & MZ_UNC_WRITE) != ((new_bits & (MZ_UNC_WRITE << 3)) >> 3))
-          || ((new_bits & MZ_UNC_WRITE) != ((new_bits & (MZ_UNC_WRITE << 6)) >> 6))
-          || (new_bits >= (1 << 9)))
-        scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
-                         "file-or-directory-permissions: update failed due to"
-                         " unsupported bit combination\n"
-                         "  path: %s\n"
-                         "  permission value: %d",
-                         filename_for_error(argv[0]),
-                         new_bits);
-      l = scheme_void;
-    } else
-      new_bits = -1;
-    
-    if (UNC_stat(filename, len, &flags, NULL, NULL, NULL, new_bits)) {
-      if (set_bits)
-	l = scheme_void;
-      else if (as_bits)
-        l = scheme_make_integer(flags | (flags << 3) | (flags << 6));
-      else {
-        if (flags & MZ_UNC_READ)
+        if (r & RKTIO_PERMISSION_READ)
           l = scheme_make_pair(read_symbol, l);
-        if (flags & MZ_UNC_WRITE)
+        if (r & RKTIO_PERMISSION_WRITE)
           l = scheme_make_pair(write_symbol, l);
-        if (flags & MZ_UNC_EXEC)
+        if (r & RKTIO_PERMISSION_EXEC)
           l = scheme_make_pair(execute_symbol, l);
+        return l;
       }
-    } else {
-      l = NULL;
-      err_val = GetLastError();
+    }
+  } else {
+    if (rktio_set_file_or_directory_permissions(scheme_rktio, filename, new_bits))
+      return scheme_void;
+
+    if (scheme_last_error_is_racket(RKTIO_ERROR_BAD_PERMISSION)) {
+      scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
+                       "file-or-directory-permissions: update failed due to"
+                       " unsupported bit combination\n"
+                       "  path: %s\n"
+                       "  permission value: %d",
+                       filename_for_error(argv[0]),
+                       new_bits);
     }
   }
-#  endif
-# endif
   
-  if (!l) {
-    scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
-		     "file-or-directory-permissions: %s failed\n"
-                     "  path: %q\n"
-                     "  system error: %e",
-                     set_bits ? "update" : "access",
-		     filename_for_error(argv[0]),
-                     err_val);
-  }
+  scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
+                   "file-or-directory-permissions: %s failed\n"
+                   "  path: %q\n"
+                   "  system error: %R",
+                   set_bits ? "update" : "access",
+                   filename_for_error(argv[0]));
 
-  return l;
+  return NULL;
 }
 
 static Scheme_Object *file_identity(int argc, Scheme_Object *argv[])
@@ -5761,13 +4926,13 @@ static Scheme_Object *file_identity(int argc, Scheme_Object *argv[])
   if (argc > 1)
     as_link = SCHEME_TRUEP(argv[1]);
 
-  return scheme_get_fd_identity(NULL, as_link, filename);
+  return scheme_get_fd_identity(NULL, as_link, filename, 0);
 }
 
 static Scheme_Object *file_size(int argc, Scheme_Object *argv[])
 {
+  rktio_filesize_t *sz;
   char *filename;
-  mzlonglong len = 0;
 
   if (!SCHEME_PATH_STRINGP(argv[0]))
     scheme_wrong_contract("file-size", "path-string?", 0, argc, argv);
@@ -5777,44 +4942,21 @@ static Scheme_Object *file_size(int argc, Scheme_Object *argv[])
 					   NULL,
 					   SCHEME_GUARD_FILE_READ);
 
-#ifdef DOS_FILE_SYSTEM
- {
-   if (UNC_stat(filename, strlen(filename), NULL, NULL, NULL, &len, -1)) {
-     return scheme_make_integer_value_from_long_long(len);
-   }
- }
-#else
-  {
-    struct BIG_OFF_T_IZE(stat) buf;
-
-    while (1) {
-      if (!BIG_OFF_T_IZE(stat)(MSC_WIDE_PATH(filename), &buf))
-	break;
-      else if (errno != EINTR)
-	goto failed;
-    }
-
-    if (S_ISDIR(buf.st_mode))
-      goto failed;
-
-    len = buf.st_size;
+  sz = rktio_file_size(scheme_rktio, filename);
+  if (sz) {
+    mzlonglong szv = *sz;
+    free(sz);
+    return scheme_make_integer_value_from_long_long(szv);
   }
 
-  return scheme_make_integer_value_from_long_long(len);
-
- failed:
-#endif
-
   scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
-		   "file-size: file not found\n"
-                   "  path: %q",
+		   "file-size: cannot get size\n"
+                   "  path: %q\n"
+                   "  system error: %R",
 		   filename_for_error(argv[0]));
+  
   return NULL;
 }
-
-#endif
-
-#ifdef DIR_FUNCTION
 
 static Scheme_Object *cwd_check(int argc, Scheme_Object **argv)
 {
@@ -5827,9 +4969,7 @@ static Scheme_Object *cwd_check(int argc, Scheme_Object **argv)
     expanded = scheme_expand_string_filename(argv[0], "current-directory", NULL, SCHEME_GUARD_FILE_EXISTS);
     ed = scheme_make_sized_path(expanded, strlen(expanded), 1);
 
-# ifndef NO_FILE_SYSTEM_UTILS
-    ed = do_simplify_path(ed, scheme_null, 0, 1, 0, SCHEME_PLATFORM_PATH_KIND);
-# endif
+    ed = do_simplify_path(ed, scheme_null, 0, 1, 0, SCHEME_PLATFORM_PATH_KIND, 1);
 
     ed = scheme_path_to_directory_path(ed);
 
@@ -5842,18 +4982,64 @@ static Scheme_Object *current_directory(int argc, Scheme_Object **argv)
   if (!argc)
     scheme_security_check_file("current-directory", NULL, SCHEME_GUARD_FILE_EXISTS);
 
-  return scheme_param_config("current-directory",
-			     scheme_make_integer(MZCONFIG_CURRENT_DIRECTORY),
-			     argc, argv,
-			     -1, cwd_check, 
-			     "complete path or string", 1);
+  return scheme_param_config2("current-directory",
+                              scheme_make_integer(MZCONFIG_CURRENT_DIRECTORY),
+                              argc, argv,
+                              -1, cwd_check, 
+                              "path-string?", 1);
 }
 
-#endif
+static Scheme_Object *current_user_directory(int argc, Scheme_Object **argv)
+{
+  if (!argc)
+    scheme_security_check_file("current-directory-for-user", NULL, SCHEME_GUARD_FILE_EXISTS);
 
-static Scheme_Object *collpaths_gen_p(int argc, Scheme_Object **argv, int rel_ok, int abs_ok, int sym_ok)
+  return scheme_param_config2("current-directory-for-user",
+                              scheme_make_integer(MZCONFIG_CURRENT_USER_DIRECTORY),
+                              argc, argv,
+                              -1, cwd_check, 
+                              "path-string?", 1);
+}
+
+static Scheme_Object *current_force_delete_perms(int argc, Scheme_Object *argv[])
+{
+  return scheme_param_config("current-force-delete-permissions",
+                             scheme_make_integer(MZCONFIG_FORCE_DELETE_PERMS),
+                             argc, argv, -1, NULL, NULL, 1);
+}
+
+static Scheme_Object *check_link_key_val(Scheme_Object *key, Scheme_Object *val)
+{
+  Scheme_Object *new_val = scheme_null, *a;
+
+  if (!SCHEME_FALSEP(key)
+      && (!SCHEME_SYMBOLP(key)
+          || !scheme_is_module_path(key)))
+    return NULL;
+  
+  while (SCHEME_PAIRP(val)) {
+    a = SCHEME_CAR(val);
+    if (!SCHEME_PATH_STRINGP(a))
+      return NULL;
+    a = TO_PATH(a);
+    if (!scheme_is_complete_path(SCHEME_PATH_VAL(a),
+                                 SCHEME_PATH_LEN(a),
+                                 SCHEME_PLATFORM_PATH_KIND))
+      return NULL;
+    new_val = scheme_make_pair(a, new_val);
+    val = SCHEME_CDR(val);
+  }
+
+  if (!SCHEME_NULLP(val))
+    return NULL;
+
+  return scheme_reverse(new_val);
+}
+
+static Scheme_Object *collpaths_gen_p(int argc, Scheme_Object **argv, int rel_ok, int abs_ok, int sym_ok, int links_ok)
 {
   Scheme_Object *v = argv[0];
+  Scheme_Object *new_hts = scheme_null;
 
   if (scheme_proper_list_length(v) < 0)
     return NULL;
@@ -5866,6 +5052,36 @@ static Scheme_Object *collpaths_gen_p(int argc, Scheme_Object **argv, int rel_ok
     s = SCHEME_CAR(v);
     if (sym_ok && SAME_OBJ(s, same_symbol)) {
       /* ok */
+    } else if (links_ok && SCHEME_FALSEP(s)) {
+      /* ok */
+    } else if (links_ok && (SCHEME_CHAPERONE_HASHTP(s)
+                            || SCHEME_CHAPERONE_HASHTRP(s)
+                            || SCHEME_CHAPERONE_BUCKTP(s))) {
+      Scheme_Hash_Tree *new_ht;
+      Scheme_Object *key, *val, *idx, *a[2];
+
+      new_ht = scheme_make_hash_tree(SCHEME_hashtr_eq);
+
+      a[0] = s;
+      idx = scheme_hash_table_iterate_start(1, a);
+      while (SCHEME_TRUEP(idx)) {
+        a[0] = s;
+        a[1] = idx;
+        key = scheme_hash_table_iterate_key(2, a);
+        
+        val = scheme_chaperone_hash_get(s, key);
+        if (val) {
+          val = check_link_key_val(key, val);
+          if (!val) return NULL;
+          new_ht = scheme_hash_tree_set(new_ht, key, val);
+        }
+
+        a[0] = s;
+        a[1] = idx;
+        idx = scheme_hash_table_iterate_next(2, a);
+      }
+
+      new_hts = scheme_make_pair((Scheme_Object *)new_ht, new_hts);
     } else {
       if (!SCHEME_PATH_STRINGP(s))
         return NULL;
@@ -5885,14 +5101,24 @@ static Scheme_Object *collpaths_gen_p(int argc, Scheme_Object **argv, int rel_ok
   if (!SCHEME_NULLP(v))
     return NULL;
 
+  new_hts = scheme_reverse(new_hts);
+
   /* Convert to list of paths: */
   {
     Scheme_Object *last = NULL, *first = NULL, *p, *s;
     v = argv[0];
     while (SCHEME_PAIRP(v)) {
       s = SCHEME_CAR(v);
-      if (!SCHEME_SYMBOLP(s))
+      if (SCHEME_SYMBOLP(s)) {
+        /* ok */
+      } else if (SCHEME_FALSEP(s)) {
+        /* ok */
+      } else if (SCHEME_PATH_STRINGP(s)) {
         s = TO_PATH(s);
+      } else {
+        s = SCHEME_CAR(new_hts);
+        new_hts = SCHEME_CDR(new_hts);
+      }
       
       p = scheme_make_pair(s, scheme_null);
       if (!first)
@@ -5908,11 +5134,9 @@ static Scheme_Object *collpaths_gen_p(int argc, Scheme_Object **argv, int rel_ok
   }
 }
 
-#ifndef NO_FILE_SYSTEM_UTILS
-
 static Scheme_Object *collpaths_p(int argc, Scheme_Object **argv)
 {
-  return collpaths_gen_p(argc, argv, 0, 1, 0);
+  return collpaths_gen_p(argc, argv, 0, 1, 0, 0);
 }
 
 Scheme_Object *scheme_current_library_collection_paths(int argc, Scheme_Object *argv[]) {
@@ -5921,30 +5145,49 @@ Scheme_Object *scheme_current_library_collection_paths(int argc, Scheme_Object *
 
 static Scheme_Object *current_library_collection_paths(int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("current-library-collection-paths", 
-			     scheme_make_integer(MZCONFIG_COLLECTION_PATHS),
-			     argc, argv,
-			     -1, collpaths_p, "list of complete paths and strings", 1);
+  return scheme_param_config2("current-library-collection-paths", 
+                              scheme_make_integer(MZCONFIG_COLLECTION_PATHS),
+                              argc, argv,
+                              -1, collpaths_p, "(listof (and/c path-string? complete-path?))", 1);
 }
 
-#endif
+static Scheme_Object *colllinks_p(int argc, Scheme_Object **argv)
+{
+  return collpaths_gen_p(argc, argv, 0, 1, 0, 1);
+}
+
+Scheme_Object *scheme_current_library_collection_links(int argc, Scheme_Object *argv[]) {
+  return current_library_collection_links(argc, argv);
+}
+
+static Scheme_Object *current_library_collection_links(int argc, Scheme_Object *argv[])
+{
+  return scheme_param_config2("current-library-collection-links", 
+                              scheme_make_integer(MZCONFIG_COLLECTION_LINKS),
+                              argc, argv,
+                              -1, colllinks_p, 
+                              "(listof (or/c #f (and/c path-string? complete-path?)"
+                              /**/         " (hash/c (or/c (and/c symbol? module-path?) #f)"
+                              /**/                 " (listof (and/c path-string? complete-path?)))))", 
+                              1);
+}
 
 static Scheme_Object *compiled_kind_p(int argc, Scheme_Object **argv)
 {
-  return collpaths_gen_p(argc, argv, 1, 0, 0);
+  return collpaths_gen_p(argc, argv, 1, 0, 0, 0);
 }
 
 static Scheme_Object *use_compiled_kind(int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("use-compiled-file-paths",
-			     scheme_make_integer(MZCONFIG_USE_COMPILED_KIND),
-			     argc, argv,
-			     -1, compiled_kind_p, "list of relative paths and strings", 1);
+  return scheme_param_config2("use-compiled-file-paths",
+                              scheme_make_integer(MZCONFIG_USE_COMPILED_KIND),
+                              argc, argv,
+                              -1, compiled_kind_p, "(listof (and/c path-string? relative-path?))", 1);
 }
 
 static Scheme_Object *compiled_roots_p(int argc, Scheme_Object **argv)
 {
-  return collpaths_gen_p(argc, argv, 1, 1, 1);
+  return collpaths_gen_p(argc, argv, 1, 1, 1, 0);
 }
 
 Scheme_Object *scheme_compiled_file_roots(int argc, Scheme_Object *argv[])
@@ -5954,10 +5197,10 @@ Scheme_Object *scheme_compiled_file_roots(int argc, Scheme_Object *argv[])
 
 static Scheme_Object *compiled_file_roots(int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("current-compiled-file-roots",
-			     scheme_make_integer(MZCONFIG_USE_COMPILED_ROOTS),
-			     argc, argv,
-			     -1, compiled_roots_p, "list of paths, string, and 'same", 1);
+  return scheme_param_config2("current-compiled-file-roots",
+                              scheme_make_integer(MZCONFIG_USE_COMPILED_ROOTS),
+                              argc, argv,
+                              -1, compiled_roots_p, "(listof (or/c path-string? 'same))", 1);
 }
 
 static Scheme_Object *use_user_paths(int argc, Scheme_Object *argv[])
@@ -5976,23 +5219,30 @@ static Scheme_Object *use_link_paths(int argc, Scheme_Object *argv[])
 			     -1, NULL, NULL, 1);
 }
 
+static Scheme_Object *compiled_file_check_p(int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *v = argv[0];
+
+  if (SCHEME_SYMBOLP(v)
+      && !SCHEME_SYM_WEIRDP(v)
+      && (((SCHEME_SYM_LEN(v) == 14)
+           && !strcmp(SCHEME_SYM_VAL(v), "modify-seconds"))
+          || ((SCHEME_SYM_LEN(v) == 6)
+              && !strcmp(SCHEME_SYM_VAL(v), "exists"))))
+    return v;
+
+  return NULL;
+}
+
+static Scheme_Object *use_compiled_file_check(int argc, Scheme_Object *argv[])
+{
+  return scheme_param_config2("use-compiled-file-check", 
+                              scheme_make_integer(MZCONFIG_USE_COMPILED_FILE_CHECK),
+                              argc, argv,
+                              -1, compiled_file_check_p, "(or/c 'modify-seconds 'exists)", 0);
+}
+
 /********************************************************************************/
-
-#ifndef NO_FILE_SYSTEM_UTILS
-
-enum {
-  id_temp_dir,
-  id_home_dir,
-  id_doc_dir,
-  id_desk_dir,
-  id_pref_dir,
-  id_pref_file,
-  id_init_dir,
-  id_init_file,
-  id_sys_dir,
-  id_addon_dir,
-  id_links_file
-};
 
 Scheme_Object *scheme_get_run_cmd(void)
 {
@@ -6006,25 +5256,28 @@ static Scheme_Object *
 find_system_path(int argc, Scheme_Object **argv)
 {
   int which;
+  int should_be_dir = 1;
 
   if (argv[0] == temp_dir_symbol)
-    which = id_temp_dir;
+    which = RKTIO_PATH_TEMP_DIR;
   else if (argv[0] == home_dir_symbol)
-    which = id_home_dir;
+    which = RKTIO_PATH_HOME_DIR;
   else if (argv[0] == doc_dir_symbol)
-    which = id_doc_dir;
+    which = RKTIO_PATH_DOC_DIR;
   else if (argv[0] == desk_dir_symbol)
-    which = id_desk_dir;
+    which = RKTIO_PATH_DESK_DIR;
   else if (argv[0] == pref_dir_symbol)
-    which = id_pref_dir;
+    which = RKTIO_PATH_PREF_DIR;
   else if (argv[0] == init_dir_symbol)
-    which = id_init_dir;
-  else if (argv[0] == pref_file_symbol)
-    which = id_pref_file;
-  else if (argv[0] == init_file_symbol)
-    which = id_init_file;
-  else if (argv[0] == sys_dir_symbol)
-    which = id_sys_dir;
+    which = RKTIO_PATH_INIT_DIR;
+  else if (argv[0] == pref_file_symbol) {
+    which = RKTIO_PATH_PREF_FILE;
+    should_be_dir = 0;
+  } else if (argv[0] == init_file_symbol) {
+    which = RKTIO_PATH_INIT_FILE;
+    should_be_dir = 0;
+  } else if (argv[0] == sys_dir_symbol)
+    which = RKTIO_PATH_SYS_DIR;
   else if (argv[0] == exec_file_symbol) {
     if (!exec_cmd) {
        return scheme_make_path("racket");
@@ -6032,302 +5285,76 @@ find_system_path(int argc, Scheme_Object **argv)
     return exec_cmd;
   } else if (argv[0] == run_file_symbol) {
     return scheme_get_run_cmd();
-  } else if (argv[0] == collects_dir_symbol) {
+  } else if ((argv[0] == host_collects_dir_symbol) && host_collects_path)
+    return host_collects_path;
+  else if ((argv[0] == collects_dir_symbol) || (argv[0] == host_collects_dir_symbol)) {
     if (!collects_path) {
       return scheme_make_path("collects");
     }
     return collects_path;
+  } else if ((argv[0] == host_config_dir_symbol) && host_config_path)
+    return host_config_path;
+  else if ((argv[0] == config_dir_symbol) || (argv[0] == host_config_dir_symbol)) {
+    if (!config_path) {
+      return scheme_make_path("lib");
+    }
+    return config_path;
   } else if (argv[0] == orig_dir_symbol) {
     return original_pwd;
   } else if (argv[0] == addon_dir_symbol) {
     if (addon_dir) return addon_dir;
-    which = id_addon_dir;
-  } else if (argv[0] == links_file_symbol) {
-    if (links_file) return links_file;
-    if (addon_dir) {
-      Scheme_Object *pa[2];
-      pa[0] = addon_dir;
-      pa[1] = scheme_make_path("links.rktd");
-      return scheme_build_path(2, pa);
-    }
-    which = id_links_file;
+    which = RKTIO_PATH_ADDON_DIR;
   } else {
     scheme_wrong_contract("find-system-path", 
                           "(or/c 'home-dir 'pref-dir 'pref-file 'temp-dir\n"
-                          "       'init-dir 'init-file 'links-file 'addon-dir\n"
+                          "       'init-dir 'init-file 'addon-dir\n"
                           "       'doc-dir 'desk-dir 'sys-dir 'exec-file 'run-file\n"
-                          "       'collects-dir 'orig-dir)",
+                          "       'collects-dir 'config-dir 'orig-dir\n"
+                          "       'host-collects-dir 'host-config-fir)",
                           0, argc, argv);
     return NULL;
   }
 
   scheme_security_check_file("find-system-path", NULL, SCHEME_GUARD_FILE_EXISTS);
 
-#ifdef UNIX_FILE_SYSTEM
-  if (which == id_sys_dir) {
-    return scheme_make_path("/");
-  }
-
-  if (which == id_temp_dir) {
-    char *p;
-    
-    if ((p = getenv("TMPDIR"))) {
-      p = scheme_expand_filename(p, -1, NULL, NULL, 0);
-      if (p && scheme_directory_exists(p))
-	return scheme_make_path(p);
-    }
-
-    if (scheme_directory_exists("/var/tmp"))
-      return scheme_make_path("/var/tmp");
-
-    if (scheme_directory_exists("/usr/tmp"))
-      return scheme_make_path("/usr/tmp");
-
-    if (scheme_directory_exists("/tmp"))
-      return scheme_make_path("/tmp");
-
-    return CURRENT_WD();
-  }
-  
   {
-    /* Everything else is in ~: */
-    Scheme_Object *home;
-    char *home_str, *ex_home;
-    int ends_in_slash;
+    Scheme_Object *p;
+    char *s;
 
-    if ((which == id_pref_dir) 
-	|| (which == id_pref_file)
-	|| (which == id_addon_dir)
-	|| (which == id_links_file)) {
-#if defined(OS_X) && !defined(XONX)
-      if ((which == id_addon_dir)
-          || (which == id_links_file))
-	home_str = "~/Library/Racket/";
-      else
-	home_str = "~/Library/Preferences/";
-#else
-      home_str = "~/.racket/";
-#endif 
-    } else {
-#if defined(OS_X) && !defined(XONX)
-      if (which == id_desk_dir)
-	home_str = "~/Desktop/";
-      else if (which == id_doc_dir)
-	home_str = "~/Documents/";
-      else
-#endif
-        home_str = "~/";
+    s = rktio_system_path(scheme_rktio, which);
+
+    p = scheme_make_sized_offset_path(s, 0, -1, 1);
+    
+    if (!scheme_is_complete_path(SCHEME_PATH_VAL(p), SCHEME_PATH_LEN(p), SCHEME_PLATFORM_PATH_KIND)) {
+      p = scheme_path_to_complete_path(p, original_pwd);
     }
-    
-    ex_home = do_expand_filename(NULL, home_str, strlen(home_str), NULL,
-                                 NULL,
-                                 0, 1,
-                                 0, SCHEME_UNIX_PATH_KIND, 
-                                 1);
-
-    if (!ex_home) {
-      /* Something went wrong with the user lookup. Just drop "~'. */
-      home = scheme_make_sized_offset_path(home_str, 1, -1, 1);
-    } else
-      home = scheme_make_path(ex_home);
-
-    
-    if ((which == id_pref_dir) || (which == id_init_dir) 
-	|| (which == id_home_dir) || (which == id_addon_dir)
-	|| (which == id_desk_dir) || (which == id_doc_dir))
-      return home;
-
-    ends_in_slash = (SCHEME_PATH_VAL(home))[SCHEME_PATH_LEN(home) - 1] == '/';
-    
-    if (which == id_init_file)
-      return append_path(home, scheme_make_path("/.racketrc" + ends_in_slash));
-    if (which == id_pref_file) {
-#if defined(OS_X) && !defined(XONX)
-      return append_path(home, scheme_make_path("/org.racket-lang.prefs.rktd" + ends_in_slash));
-#else      
-      return append_path(home, scheme_make_path("/racket-prefs.rktd" + ends_in_slash));
-#endif
-    }
-    if (which == id_links_file)
-      return append_path(home, scheme_make_path("/links.rktd" + ends_in_slash));
+    if (should_be_dir)
+      p = scheme_path_to_directory_path(p);
+ 
+    return p;
   }
-#endif
-
-#ifdef DOS_FILE_SYSTEM
-  if (which == id_sys_dir) {
-    int size;
-    wchar_t *s;
-    size = GetSystemDirectoryW(NULL, 0);
-    s = (wchar_t *)scheme_malloc_atomic((size + 1) * sizeof(wchar_t));
-    GetSystemDirectoryW(s, size + 1);
-    return scheme_make_path(NARROW_PATH(s));
-  }
-
-  {
-    char *d, *p;
-    Scheme_Object *home;
-    int ends_in_slash;
-    
-    if (which == id_temp_dir) {
-      if ((p = getenv("TMP")) || (p = getenv("TEMP"))) {
-	p = scheme_expand_filename(p, -1, NULL, NULL, 0);
-	if (p && scheme_directory_exists(p))
-	  return scheme_make_path(p);
-      }
-      
-      return CURRENT_WD();
-    }
-
-    home = NULL;
-
-    {
-      /* Try to get Application Data directory: */
-      LPITEMIDLIST items;
-      int which_folder;
-
-      if ((which == id_addon_dir)
-	  || (which == id_pref_dir)
-	  || (which == id_pref_file)
-	  || (which == id_links_file)) 
-	which_folder = CSIDL_APPDATA;
-      else if (which == id_doc_dir) {
-#       ifndef CSIDL_PERSONAL
-#         define CSIDL_PERSONAL 0x0005
-#       endif
-	which_folder = CSIDL_PERSONAL;
-      } else if (which == id_desk_dir)	
-	which_folder = CSIDL_DESKTOPDIRECTORY;
-      else {
-#       ifndef CSIDL_PROFILE
-#         define CSIDL_PROFILE 0x0028
-#       endif
-	which_folder = CSIDL_PROFILE;
-      }
-
-      if (SHGetSpecialFolderLocation(NULL, which_folder, &items) == S_OK) {
-	int ok;
-	IMalloc *mi;
-	wchar_t *buf;
-
-	buf = (wchar_t *)scheme_malloc_atomic(MAX_PATH * sizeof(wchar_t));
-	ok = SHGetPathFromIDListW(items, buf);
-
-	SHGetMalloc(&mi);
-	mi->lpVtbl->Free(mi, items);
-	mi->lpVtbl->Release(mi);
-
-	if (ok) {
-	  home = scheme_make_path_without_copying(NARROW_PATH(buf));
-	}
-      }
-    }
-
-    if (!home) {
-      /* Back-up: try USERPROFILE environment variable */
-      d = getenv("USERPROFILE");
-      if (d) {
-	if (scheme_directory_exists(d))
-	  home = scheme_make_path_without_copying(d);
-      }
-    }
-
-    if (!home) {
-    /* Last-ditch effort: try HOMEDRIVE+HOMEPATH */
-      d = getenv("HOMEDRIVE");
-      p = getenv("HOMEPATH");
-
-      if (d && p) {
-	char *s;
-	s = scheme_malloc_atomic(strlen(d) + strlen(p) + 1);
-	strcpy(s, d);
-	strcat(s, p);
-      
-	if (scheme_directory_exists(s))
-	  home = scheme_make_path_without_copying(s);
-	else
-	  home = NULL;
-      } else 
-	home = NULL;
-    
-      if (!home) {
-	wchar_t name[1024];
-      
-	if (!GetModuleFileNameW(NULL, name, 1024)) {
-	  /* Disaster. Use CWD. */
-	  home = CURRENT_WD();
-	} else {
-	  int i;
-	  wchar_t *s;
-	
-	  s = name;
-	
-	  i = wc_strlen(s) - 1;
-	
-	  while (i && (s[i] != '\\')) {
-	    --i;
-	  }
-	  s[i] = 0;
-	  home = scheme_make_path(NARROW_PATH(s));
-	}
-      }
-    }
-    
-    if ((which == id_init_dir)
-	|| (which == id_home_dir)
-	|| (which == id_doc_dir)
-	|| (which == id_desk_dir))
-      return home;
-
-    ends_in_slash = (SCHEME_PATH_VAL(home))[SCHEME_PATH_LEN(home) - 1];
-    ends_in_slash = ((ends_in_slash == '/') || (ends_in_slash == '\\'));
-
-    if ((which == id_addon_dir)
-	|| (which == id_pref_dir)
-	|| (which == id_pref_file)) {
-      home = append_path(home, scheme_make_path("\\Racket" + ends_in_slash));
-      ends_in_slash = 0;
-    }
-
-    if (which == id_init_file)
-      return append_path(home, scheme_make_path("\\racketrc.rktl" + ends_in_slash));
-    if (which == id_pref_file)
-      return append_path(home, scheme_make_path("\\racket-prefs.rktd" + ends_in_slash));
-    if (which == id_links_file)
-      return append_path(home, scheme_make_path("\\links.rktd" + ends_in_slash));
-    return home;
-  }
-#endif
-
-  /* Something went wrong if we get here. */
-  return scheme_void;
 }
-
-#endif
 
 /* should only called from main */
 Scheme_Object *scheme_set_exec_cmd(char *s)
 {
-#ifndef NO_FILE_SYSTEM_UTILS
   if (!exec_cmd) {
     REGISTER_SO(exec_cmd);
     exec_cmd = scheme_make_path(s);
   }
 
   return exec_cmd;
-#endif
 }
 
 /* should only called from main */
 Scheme_Object *scheme_set_run_cmd(char *s)
 {
-#ifndef NO_FILE_SYSTEM_UTILS
   if (!run_cmd) {
     REGISTER_SO(run_cmd);
     run_cmd = scheme_make_path(s);
   }
 
   return run_cmd;
-#endif
 }
 
 char *scheme_get_exec_path(void)
@@ -6347,6 +5374,33 @@ void scheme_set_collects_path(Scheme_Object *p)
   collects_path = p;
 }
 
+/* should only called from main */
+void scheme_set_config_path(Scheme_Object *p)
+{
+  if (!config_path) {
+    REGISTER_SO(config_path);
+  }
+  config_path = p;
+}
+
+/* should only called from main */
+void scheme_set_host_collects_path(Scheme_Object *p)
+{
+  if (!host_collects_path) {
+    REGISTER_SO(host_collects_path);
+  }
+  host_collects_path = p;
+}
+
+/* should only called from main */
+void scheme_set_host_config_path(Scheme_Object *p)
+{
+  if (!host_config_path) {
+    REGISTER_SO(host_config_path);
+  }
+  host_config_path = p;
+}
+
 
 void scheme_set_original_dir(Scheme_Object *d)
 {
@@ -6362,53 +5416,27 @@ void scheme_set_addon_dir(Scheme_Object *p)
   addon_dir = p;
 }
 
-/* should only called from main */
-void scheme_set_links_file(Scheme_Object *p)
-{
-  if (!links_file) {
-    REGISTER_SO(links_file);
-  }
-  links_file = p;
-}
-
-Scheme_Object *scheme_find_links_path(int argc, Scheme_Object *argv[])
-{
-  if (inst_links_path)
-    return inst_links_path;
-
-  REGISTER_SO(inst_links_path);
-  inst_links_path = scheme_apply(argv[0], 0, NULL);
-
-  return inst_links_path;
-}
-
 /********************************************************************************/
 
 #ifdef DOS_FILE_SYSTEM
 
-static wchar_t *dlldir;
-
-wchar_t *scheme_get_dll_path(wchar_t *s)
-{
-  if (dlldir) {
-    int len1, len2;
-    wchar_t *p;
-    len1 = wc_strlen(dlldir);
-    len2 = wc_strlen(s);
-    p = (wchar_t *)scheme_malloc_atomic((len1 + len2 + 2) * sizeof(wchar_t));
-    memcpy(p, dlldir, len1 * sizeof(wchar_t));
-    if (p[len1 - 1] != '\\') {
-      p[len1++] = '\\';
-    }
-    memcpy(p + len1, s, (len2 + 1) * sizeof(wchar_t));
-    return p;
-  } else
-    return s;
-}
-
 void scheme_set_dll_path(wchar_t *p)
 {
-  dlldir = p;
+  rktio_set_dll_path(p);
+}
+
+wchar_t *scheme_get_dll_path(wchar_t *p)
+{
+  wchar_t *r, *r2;
+  intptr_t len;
+  r = rktio_get_dll_path(p);
+  if (!r)
+    return p;
+  len = wcslen(r) + 1;
+  r2 = scheme_malloc_atomic(sizeof(wchar_t) * len);
+  memcpy(r2, r, sizeof(wchar_t) * len);
+  free(r);
+  return r2;
 }
 
 #endif

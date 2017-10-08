@@ -1,12 +1,24 @@
 #lang racket/base
 (require setup/dirs
-         setup/variant)
+         setup/variant
+         setup/cross-system)
 (provide find-exe)
 
-(define (find-exe [mred? #f] [variant (system-type 'gc)])
+(define (find-exe #:cross? [cross? #f]
+                  #:untethered? [untethered? #f]
+                  [mred? #f]
+                  [variant (if cross?
+                               (cross-system-type 'gc)
+                               (system-type 'gc))])
   (let* ([base (if mred?
-                   (find-gui-bin-dir)
-                   (find-console-bin-dir))]
+                   (or (and (not untethered?)
+                            (find-addon-tethered-gui-bin-dir)
+                            (find-config-tethered-gui-bin-dir))
+                       (find-lib-dir))
+                   (or (and (not untethered?)
+                            (find-addon-tethered-console-bin-dir)
+                            (find-config-tethered-console-bin-dir))
+                       (find-console-bin-dir)))]
          [fail
           (lambda ()
             (error 'find-exe
@@ -15,7 +27,9 @@
                    variant))])
     (let ([exe (build-path
                 base
-                (case (system-type)
+                (case (if cross?
+                          (cross-system-type)
+                          (system-type))
                   [(macosx)
                    (cond
                      [(not mred?)
