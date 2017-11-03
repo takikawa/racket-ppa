@@ -1,14 +1,17 @@
-#lang racket/base
-(require (for-syntax racket/base
-                     syntax/parse)
-         racket/stxparam
-         racket/match
-         racket/list
-         "lib.rkt"
-         (for-syntax "lib.rkt"))
+#lang web-server/base
 
-(define-syntax-parameter #%# 
-  (λ (stx) (raise-syntax-error '#%# "Only allowed inside formlet or formlet*" stx)))
+(require racket/stxparam
+         racket/match
+         "lib.rkt"
+         (only-in "unsafe/syntax.rkt"
+                  #%#)
+         (for-syntax "lib.rkt"
+                     racket/base
+                     syntax/parse))
+
+(provide formlet #%#)
+
+; redefine formlet using contracted version of lib.rkt
 
 (define-for-syntax (cross-of stx)
   (syntax-parse 
@@ -16,8 +19,8 @@
    #:literals (unquote unquote-splicing => #%# values)
    [,(formlet . => . (values name:id ...)) (syntax/loc stx (vector name ...))]
    [,(formlet . => . name:id) (syntax/loc stx name)]
-   [,e (syntax/loc stx empty)]
-   [,@e (syntax/loc stx empty)]
+   [,e (syntax/loc stx null)]
+   [,@e (syntax/loc stx null)]
    [(#%# n ...)
     (quasisyntax/loc stx (list #,@(map cross-of (syntax->list #'(n ...)))))]
    [(t ([k v] ...) n ...)
@@ -25,7 +28,7 @@
    [(t n ...)
     (quasisyntax/loc stx (list #,@(map cross-of (syntax->list #'(n ...)))))]
    [s:expr
-    (syntax/loc stx empty)]))
+    (syntax/loc stx null)]))
 
 (define-for-syntax (circ-of stx)
   (syntax-parse
@@ -49,16 +52,14 @@
                  #,(circ-of (syntax/loc stx (#%# n ...)))))]
    [(t n ...)
     (quasisyntax/loc stx
-      (tag-xexpr `t empty
+      (tag-xexpr `t null
                  #,(circ-of (syntax/loc stx (#%# n ...)))))]
    [s:expr
     (syntax/loc stx (xml 's))]))
 
 (define-syntax (formlet stx)
-  (syntax-case stx ()
-    [(_ q e)
+  (syntax-parse stx 
+    [(_ q e:expr)
      (quasisyntax/loc stx
        (cross (pure (match-lambda [#,(cross-of #'q) e]))
               #,(circ-of #'q)))]))
-
-(provide formlet #%#)

@@ -8,7 +8,8 @@
  (rep type-rep prop-rep object-rep fme-utils)
  (utils tc-utils)
  (env type-name-env row-constraint-env)
- (rep core-rep rep-utils type-mask values-rep base-types numeric-base-types)
+ (rep core-rep rep-utils free-ids type-mask values-rep
+      base-types numeric-base-types)
  (types resolve utils printer match-expanders union)
  (prefix-in t: (types abbrev numeric-tower subtype))
  (private parse-type syntax-properties)
@@ -522,7 +523,8 @@
                                  unsafe-spp/sc
                                  safe-spp/sc)])
           (or/sc optimized/sc (t->sc/fun t)))]
-       [(and t (? Fun?)) (t->sc/fun t)]
+       [(? Fun? t) (t->sc/fun t)]
+       [(? DepFun? t) (t->sc/fun t)]
        [(Set: t) (set/sc (t->sc t))]
        [(Sequence: ts) (apply sequence/sc (map t->sc ts))]
        [(Vector: t) (vectorof/sc (t->sc/both t))]
@@ -730,12 +732,9 @@
         (channel/sc (t->sc t))]
        [(Evt: t)
         (evt/sc (t->sc t))]
-       [rep
-        (cond
-          [(Prop? rep)
-           (fail #:reason "contract generation not supported for this proposition")]
-          [else
-           (fail #:reason "contract generation not supported for this type")])]))))
+       [(? Prop? rep) (prop->sc rep)]
+       [_
+        (fail #:reason "contract generation not supported for this type")]))))
 
 
 (define (t->sc/function f fail typed-side recursive-values loop method?)
@@ -744,35 +743,36 @@
   (define (t->sc/neg t #:recursive-values (recursive-values recursive-values))
     (loop t (flip-side typed-side) recursive-values))
 
-  ;; handle-range : Arr (-> Static-Contact) -> Static-Contract
+  ;; handle-arrow-range : Arr (-> Static-Contact) -> Static-Contract
   ;; Match the range of an arr and determine if a contract can be generated
   ;; and call the given thunk or raise an error
-  (define (handle-range arrow convert-arrow)
+  (define (handle-arrow-range arrow proceed)
     (match arrow
-      ;; functions with no props or objects
-      [(Arrow: _ _ _
-               (Values: (list (Result: _
-                                       (PropSet: (TrueProp:)
-                                                 (TrueProp:))
-                                       (Empty:)) ...)))
-       (convert-arrow)]
+      [(or (Arrow: _ _ _ rng)
+           (DepFun: _ _ rng))
+       (handle-range rng proceed)]))
+  (define (handle-range rng proceed)
+    (match rng
+      [(Values: (list (Result: _
+                               (PropSet: (TrueProp:)
+                                         (TrueProp:))
+                               (Empty:)) ...))
+       (proceed)]
       ;; Functions that don't return
-      [(Arrow: _ _ _
-               (Values: (list (Result: (== -Bottom) _ _) ...)))
-       (convert-arrow)]
+      [(Values: (list (Result: (== -Bottom) _ _) ...))
+       (proceed)]
       ;; functions with props or objects
-      [(Arrow: _ _ _ (Values: (list (Result: rngs _ _) ...)))
+      [(Values: (list (Result: rngs _ _) ...))
        (if (from-untyped? typed-side)
            (fail #:reason (~a "cannot generate contract for function type"
                               " with props or objects."))
-           (convert-arrow))]
-      [(Arrow: _ _ _ (? ValuesDots?))
+           (proceed))]
+      [(? ValuesDots?)
        (fail #:reason (~a "cannot generate contract for function type"
                           " with dotted return values"))]
-      [(Arrow: _ _ _ (? AnyValues?))
+      [(? AnyValues?)
        (fail #:reason (~a "cannot generate contract for function type"
                           " with unknown return values"))]))
-
   (match f
     [(Fun: arrows)
      ;; Try to generate a single `->*' contract if possible.
@@ -782,21 +782,24 @@
      (define (partition-kws kws) (partition (match-lambda [(Keyword: _ _ mand?) mand?]) kws))
      (define (process-dom dom*)  (if method? (cons any/sc dom*) dom*))
      (cond
-      ;; To generate a single `->*', everything must be the same for all arrs, except for positional
-      ;; arguments which can increase by at most one each time.
-      ;; Note: optional arguments can only increase by 1 each time, to avoid problems with
-      ;;  functions that take, e.g., either 2 or 6 arguments. These functions shouldn't match,
-      ;;  since this code would generate contracts that accept any number of arguments between
-      ;;  2 and 6, which is wrong.
-      ;; TODO sufficient condition, but may not be necessary
-      [(has-optional-args? arrows)
-       (define first-arrow (first arrows))
+       ;; To generate a single `->*':
+       ;; - keywords and range must be the same for all arrows
+       ;; - only the last arrow may have a rest argument
+       ;; - positional argument count increases by one at each step
+       ;; Note: optional arguments can only increase by 1 each time, to avoid problems with
+       ;;  functions that take, e.g., either 2 or 6 arguments. These functions shouldn't match,
+       ;;  since this code would generate contracts that accept any number of arguments between
+       ;;  2 and 6, which is wrong.
+       ;; TODO sufficient condition, but may not be necessary
+       [(has-optional-args? arrows)
+        (define first-arrow (first arrows))
        (define last-arrow (last arrows))
        (define (convert-arrow)
-         (match-define (Arrow: first-dom rst kws
+         (match-define (Arrow: first-dom _ kws
                                (Values: (list (Result: rngs _ _) ...)))
            first-arrow)
-         ;; all but dom is the same for all arrs
+         (define rst (Arrow-rst last-arrow))
+         ;; kws and rng same for all arrs
          (define last-dom (Arrow-dom last-arrow))
          (define mand-args (map t->sc/neg first-dom))
          (define opt-args (map t->sc/neg (drop last-dom (length first-dom))))
@@ -807,7 +810,7 @@
          (define range (map t->sc rngs))
          (define rest (and rst (listof/sc (t->sc/neg rst))))
          (function/sc (from-typed? typed-side) (process-dom mand-args) opt-args mand-kws opt-kws rest range))
-       (handle-range first-arrow convert-arrow)]
+       (handle-arrow-range first-arrow convert-arrow)]
       [else
        (define ((f case->) a)
          (define (convert-arr arr)
@@ -837,7 +840,7 @@
                                    (hash-set recursive-values dbound (same any/sc))))]
                       [_ #f])
                     (map t->sc rngs))))]))
-         (handle-range a (λ () (convert-arr a))))
+         (handle-arrow-range a (λ () (convert-arr a))))
        (define arities
          (for/list ([t (in-list arrows)]) (length (Arrow-dom t))))
        (define maybe-dup (check-duplicates arities))
@@ -845,7 +848,32 @@
          (fail #:reason (~a "function type has two cases of arity " maybe-dup)))
        (if (= (length arrows) 1)
            ((f #f) (first arrows))
-           (case->/sc (map (f #t) arrows)))])]))
+           (case->/sc (map (f #t) arrows)))])]
+    [(DepFun/ids: ids dom pre rng)
+     (define (continue)
+       (match rng
+         [(Values: (list (Result: rngs _ _) ...))
+          (define (dom-id? id) (member id ids free-identifier=?))
+          (define-values (dom* dom-deps)
+            (for/lists (_1 _2) ([d (in-list dom)])
+              (values (t->sc/neg d)
+                      (filter dom-id? (free-ids d)))))
+          (define pre* (if (TrueProp? pre) #f (t->sc/neg pre)))
+          (define pre-deps (filter dom-id? (free-ids pre)))
+          (define rng* (map t->sc rngs))
+          (define rng-deps (filter dom-id?
+                                   (remove-duplicates
+                                    (apply append (map free-ids rngs))
+                                    free-identifier=?)))
+          (->i/sc (from-typed? typed-side)
+                  ids
+                  dom*
+                  dom-deps
+                  pre*
+                  pre-deps
+                  rng*
+                  rng-deps)]))
+     (handle-range rng continue)]))
 
 ;; Generate a contract for a object/class method clause
 ;; Precondition: type is a valid method type
@@ -864,6 +892,17 @@
      (t->sc/function type fail typed-side recursive-values loop #t)]
     [_ (fail #:reason "invalid method type")]))
 
+(define (is-a-function-type? initial)
+  (let loop ([ty initial])
+    (match (resolve ty)
+      [(? Fun?) #t]
+      [(? DepFun?) #t]
+      [(Union: _ elems) (andmap loop elems)]
+      [(Intersection: elems _) (ormap loop elems)]
+      [(Poly: _ body) (loop body)]
+      [(PolyDots: _ body) (loop body)]
+      [_ #f])))
+
 ;; Generate a contract for a polymorphic function type
 (define (t->sc/poly type fail typed-side recursive-values t->sc)
   (match-define (Poly: vs b) type)
@@ -874,16 +913,7 @@
         (t->sc b #:recursive-values recursive-values))
       ;; in negative position, use parametric contracts.
       (match-let ([(Poly-names: vs-nm b) type])
-        (define function-type?
-          (let loop ([ty b])
-            (match (resolve ty)
-              [(? Fun?) #t]
-              [(Union: _ elems) (andmap loop elems)]
-              [(Intersection: elems _) (ormap loop elems)]
-              [(Poly: _ body) (loop body)]
-              [(PolyDots: _ body) (loop body)]
-              [_ #f])))
-        (unless function-type?
+        (unless (is-a-function-type? b)
           (fail #:reason "cannot generate contract for non-function polymorphic type"))
         (let ((temporaries (generate-temporaries vs-nm)))
           (define rv (for/fold ((rv recursive-values)) ((temp temporaries)
@@ -912,17 +942,7 @@
         (extend-row-constraints vs (list constraints)
           (t->sc body #:recursive-values recursive-values)))
       (match-let ([(PolyRow-names: vs-nm constraints b) type])
-        ;; FIXME: abstract this
-        (define function-type?
-          (let loop ([ty b])
-            (match (resolve ty)
-              [(? Fun?) #t]
-              [(Union: _ elems) (andmap loop elems)]
-              [(Intersection: elems _) (ormap loop elems)]
-              [(Poly: _ body) (loop body)]
-              [(PolyDots: _ body) (loop body)]
-              [_ #f])))
-        (unless function-type?
+        (unless (is-a-function-type? b)
           (fail #:reason "cannot generate contract for non-function polymorphic type"))
         (let ([temporaries (generate-temporaries vs-nm)])
           (define rv (for/fold ([rv recursive-values])

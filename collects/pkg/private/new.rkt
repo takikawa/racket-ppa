@@ -131,6 +131,7 @@ env:
     - RACKET_VERSION=6.9
     - RACKET_VERSION=6.10
     - RACKET_VERSION=6.10.1
+    - RACKET_VERSION=6.11
     - RACKET_VERSION=HEAD
 
 matrix:
@@ -166,9 +167,8 @@ EOS
         (lambda () (expand/display #<<EOS
 #lang info
 (define collection "<<name>>")
-(define deps '("base"
-               "rackunit-lib"))
-(define build-deps '("scribble-lib" "racket-doc"))
+(define deps '("base"))
+(define build-deps '("scribble-lib" "racket-doc" "rackunit-lib"))
 (define scribblings '(("scribblings/<<name>>.scrbl" ())))
 (define pkg-desc "Description Here")
 (define version "0.0")

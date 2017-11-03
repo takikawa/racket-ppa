@@ -22,6 +22,7 @@
          (for-syntax racket/base syntax/parse))
 
 (provide (all-defined-out)
+         extract-props
          (all-from-out "base-abbrev.rkt" "match-expanders.rkt"))
 
 ;; Convenient constructors
@@ -53,13 +54,6 @@
 (define (-opt t) (Un (-val #f) t))
 
 (define (-ne-lst t) (-pair t (-lst t)))
-
-;; Convenient constructor for Values
-;; (wraps arg types with Result)
-(define/cond-contract (-values args)
-  (c:-> (c:listof Type?) (c:or/c Type? Values?))
-  (match args
-    [_ (make-Values (for/list ([i (in-list args)]) (-result i)))]))
 
 ;; Convenient constructor for ValuesDots
 ;; (wraps arg types with Result)
@@ -174,8 +168,9 @@
 (define (opt-fn args opt-args result #:rest [rest #f] #:kws [kws null])
   (apply cl->* (for/list ([i (in-range (add1 (length opt-args)))])
                  (make-Fun (list (-Arrow (append args (take opt-args i))
-                                         result
-                                         #:rest rest #:kws kws))))))
+                                         result ;; only the LAST arrow gets the rest arg
+                                         #:rest (and (= i (length opt-args)) rest)
+                                         #:kws kws))))))
 
 (define-syntax-rule (->opt args ... [opt ...] res)
   (opt-fn (list args ...) (list opt ...) res))
