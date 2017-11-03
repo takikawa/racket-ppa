@@ -4,6 +4,16 @@ racket (6.10.1-1~trusty1~ppa1) trusty; urgency=medium
 
  -- Asumu Takikawa <asumu@racket-lang.org>  Tue, 12 Sep 2017 15:30:00 -0800
 
+racket (6.10.1+dfsg1-1) unstable; urgency=medium
+
+  * New upstream release    
+  * fix changelog for 6.9-1; wrong patch was discussed
+  * Assert compliance with policy 4.1.1; no changes.
+  * Bump debhelper compat level to 10
+  * non-free docs for srfi 5, 29, 32 removed
+
+ -- David Bremner <bremner@debian.org>  Sun, 08 Oct 2017 18:19:53 -0300
+
 racket (6.9-2) unstable; urgency=medium
 
   * rebuild for unstable
@@ -13,7 +23,7 @@ racket (6.9-2) unstable; urgency=medium
 racket (6.9-1) experimental; urgency=medium
 
   * New upstream release
-  * Remove patch to libcrypto.rkt, now upstream
+  * Remove type-masks patch, now upstream
 
  -- David Bremner <bremner@debian.org>  Sun, 04 Jun 2017 17:06:39 -0300
 
@@ -26,6 +36,22 @@ racket (6.8-1) experimental; urgency=medium
   * Cherry pick fix for type-masks to fix compilation on 32bit arches.
 
  -- David Bremner <bremner@debian.org>  Sat, 04 Mar 2017 11:54:04 -0400
+
+racket (6.7-3) unstable; urgency=medium
+
+  * Disable parallel building on 32bit architectures. Racket's parallel
+    build currently uses OS threads, so unbounded parallelism hits per
+    process address space limitations. (Closes: #860670).
+
+ -- David Bremner <bremner@debian.org>  Sat, 22 Apr 2017 14:26:26 -0300
+
+racket (6.7-2) unstable; urgency=medium
+
+  * Patch libcrypto.rkt to look for openssl 1.1, recommend libssl1.1. Bug
+    fix: "Raco fails without libssl-dev", thanks to Martin Tang (Closes:
+    #836346).
+
+ -- David Bremner <bremner@debian.org>  Sun, 05 Mar 2017 08:55:03 -0400
 
 racket (6.7-1) unstable; urgency=medium
 
