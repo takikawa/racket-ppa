@@ -108,6 +108,7 @@
     ("datum-case" 1)
     ("match" 1)
     ("match*" 1)
+    ("syntax-parse" 1)
     ("syntax-rules" 1)
     ("syntax-case" 2)
     ("syntax-case*" 3)
@@ -459,6 +460,8 @@
                with-output-to-file with-output-to-port 
 
 	       for-all
+
+               big-bang
                
                type-case))
   (preferences:set-default 
