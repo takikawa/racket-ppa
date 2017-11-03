@@ -2,7 +2,6 @@
 (require ffi/unsafe
          ffi/unsafe/define
          ffi/unsafe/alloc
-         "bstr.rkt"
          "../private/utils.rkt"
          "../private/libs.rkt")
 
@@ -215,8 +214,10 @@
   (error 'png "~a" s))
 
 (define (read-png-bytes png p len)
-  (let ([bstr (scheme_make_sized_byte_string p len 0)])
-    (read-bytes! bstr (car (ptr-ref (png_get_io_ptr png) _scheme)))))
+  (define bstr (make-bytes len))
+  (define n (read-bytes! bstr (car (ptr-ref (png_get_io_ptr png) _scheme))))
+  (memcpy p bstr n)
+  n)
 
 (define free-cell ((deallocator) free-immobile-cell))
 (define make-cell ((allocator free-cell) malloc-immobile-cell))
@@ -318,8 +319,11 @@
     (png_read_end (reader-png reader) (reader-info reader))
     (list->vector
      (for/list ([i (in-range (reader-h reader))])
-       (let ([p (ptr-ref rows _gcpointer i)])
-         (scheme_make_sized_byte_string p row-bytes 1))))))
+       (define p (ptr-ref rows _pointer i))
+       (define bstr (make-bytes row-bytes))
+       (memcpy bstr p row-bytes)
+       (void/reference-sink rows) ; keep alive until memcpy is done
+       bstr))))
 
 (define (destroy-png-reader reader)
   (when (reader-png reader)
@@ -338,8 +342,9 @@
 (define-struct writer (png info ob))
 
 (define (write-png-bytes png p len)
-  (let ([bstr (scheme_make_sized_byte_string p len 0)])
-    (write-bytes bstr (car (ptr-ref (png_get_io_ptr png) _scheme)))))
+  (define bstr (make-bytes len))
+  (memcpy bstr p len)
+  (write-bytes bstr (car (ptr-ref (png_get_io_ptr png) _scheme))))
 
 (define (flush-png-bytes png)
   (flush-output (car (ptr-ref (png_get_io_ptr png) _scheme))))
@@ -369,7 +374,7 @@
              [w (bytes-length (vector-ref vector-of-rows 0))]
              [rows (malloc-rows h w)])
         (for/list ([i (in-range h)])
-          (memcpy (ptr-ref rows _gcpointer i)
+          (memcpy (ptr-ref rows _pointer i)
                   (vector-ref vector-of-rows i)
                   w))
         (png_write_image (writer-png writer) rows)))

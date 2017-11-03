@@ -92,12 +92,8 @@ static void apply_prim_to_fail(int argc, Scheme_Object **argv, void *_p)
 static Scheme_Object *vector_check_chaperone_of(Scheme_Object *o, Scheme_Object *orig, int setter)
 {
   if (!scheme_chaperone_of(o, orig))
-    scheme_contract_error((setter ? "vector-set!" : "vector-ref"),
-                          "chaperone produced a result that is not a chaperone of the original result",
-                          "chaperone result", 1, o,
-                          "original result", 1, o,
-                          NULL);
-  
+    scheme_wrong_chaperoned((setter ? "vector-set!" : "vector-ref"), "result", orig, o);
+
   return o;
 }
 
@@ -664,7 +660,7 @@ static int common1b(mz_jit_state *jitter, void *_data)
       mz_prolog(JIT_R2);
       JIT_UPDATE_THREAD_RSPTR();
       jit_prepare(2);
-      if (j) {
+      if (!j) {
         jit_pusharg_p(JIT_R1);
         jit_pusharg_p(JIT_R0);
       } else {
@@ -4012,9 +4008,10 @@ static int more_common1(mz_jit_state *jitter, void *_data)
          is still argv, but R1 doesn't have the count any more; 
          we re-compute R1 as we traverse the list again. */
 
-      jit_subi_l(JIT_R0, JIT_V1, 1);
-      jit_lshi_ul(JIT_R0, JIT_R0, JIT_LOG_WORD_SIZE);
-      jit_ldxr_p(JIT_R0, JIT_RUNSTACK, JIT_R0);
+      jit_subi_l(JIT_R1, JIT_V1, 1);
+      jit_lshi_ul(JIT_R1, JIT_R1, JIT_LOG_WORD_SIZE);
+      jit_ldxr_p(JIT_R0, JIT_RUNSTACK, JIT_R1);
+      jit_stxr_p(JIT_R1, JIT_RUNSTACK, JIT_RUNSTACK); /* clear list from runstack */
       CHECK_LIMIT();
     
       jit_subi_l(JIT_R1, JIT_V1, 2); /* drop first and last original arg */

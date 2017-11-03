@@ -17,6 +17,7 @@
          "logging-timer.rkt"
          "coroutine.rkt"
          "unicode-ascii-art.rkt"
+         (prefix-in i: "inline-overview.rkt")
          data/queue
          racket/unit)
 
@@ -889,7 +890,7 @@
               (send dc set-alpha 1)
               (send dc set-pen "gray" 1 'transparent)
               (send dc set-brush (if w-o-b? "black" "white") 'solid)
-              (send dc draw-rectangle (+ (unbox bx) dx) (+ y-coord dy) (unbox bw) th)
+              (send dc draw-rectangle (+ (unbox bx) dx) (+ y-coord dy) (unbox bw) (+ th 1))
               (send dc set-text-foreground
                     (send the-color-database find-color
                           (if w-o-b? "white" "black")))
@@ -4905,6 +4906,9 @@ designates the character that triggers autocompletion
      
     (super-new)))
 
+(define inline-overview-mixin i:inline-overview-mixin)
+(define inline-overview<%> i:inline-overview<%>)
+  
 (define basic% (basic-mixin (editor:basic-mixin text%)))
 (define line-spacing% (line-spacing-mixin basic%))
 (define hide-caret/selection% (hide-caret/selection-mixin line-spacing%))
