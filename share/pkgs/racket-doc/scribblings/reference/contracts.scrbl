@@ -101,14 +101,14 @@ Contracts in Racket are subdivided into three different categories:
                  that the value had before being wrapped by the contract
                  are preserved by the contract wrapper. 
                  
-                 All @tech{flat contracts} are also @tech{chaperone contracts} (but
-                 not vice-versa).}
+                 All @tech{flat contracts} may be used where @tech{chaperone contracts} are expected
+                 (but not vice-versa).}
          @item{@deftech{Impersonator @tech{contracts}} do not provide any 
                 guarantees about values they check. Impersonator contracts
                 may hide properties of values, or even make them completely
                 opaque (e.g, @racket[new-∀/c]).
                 
-                All @tech{contracts} are impersonator contracts.}]
+                All @tech{contracts} may be used where impersonator contracts are expected.}]
 
 For more about this hierarchy, see the section ``@secref["chaperones"]''
 as well as a research paper @cite{Strickland12} on chaperones, impersonators,
@@ -2231,7 +2231,10 @@ The @racket[stronger] argument is used to implement @racket[contract-stronger?].
 first argument is always the contract itself and the second argument is whatever
 was passed as the second argument to @racket[contract-stronger?]. If no
 @racket[stronger] argument is supplied, then a default that compares its arguments
-with @racket[equal?] is used.
+with @racket[equal?] is used for @tech{flat contracts} and @tech{chaperone contracts}.
+For @tech{impersonator contracts} constructed with @racket[make-contract] that do not
+supply the @racket[stronger] argument, @racket[contract-stronger?] returns @racket[#f].
+
 
 The @racket[is-list-contract?] argument is used by the @racket[list-contract?] predicate
 to determine if this is a contract that accepts only @racket[list?] values.
@@ -2356,7 +2359,7 @@ contracts.  The error messages assume that the function named by
 @defform*[[(with-contract-continuation-mark blame body ...)
           (with-contract-continuation-mark blame+neg-party body ...)]]{
 Inserts a continuation mark that informs the contract profiler (see
-@other-doc['(lib "contract-profile/scribblings/contract-profile")
+@other-doc['(lib "contract-profile/scribblings/contract-profile.scrbl")
            #:indirect "contract profiling"])
 that contract checking is happening.
 For the costs from checking your new combinator to be included, you should wrap
@@ -2957,8 +2960,9 @@ are below):
   Returns @racket[#t] if the contract @racket[c1] accepts either fewer
   or the same number of values as @racket[c2] does.
 
-  Contracts that are the same (i.e., where @racket[c1] is @racket[equal?]
-  to @racket[c2]) are considered to always be stronger than each other.
+  @tech{Chaperone contracts} and @tech{flat contracts} that are the same
+  (i.e., where @racket[c1] is @racket[equal?] to @racket[c2]) are
+  considered to always be stronger than each other.
   
   This function is conservative, so it may return @racket[#f] when
   @racket[c1] does, in fact, accept fewer values.
@@ -3111,13 +3115,15 @@ name @racket[sexp-name] when signaling a contract violation.}
            (recursive-contract contract-expr type recursive-contract-option ...)]
           #:grammar ([recursive-contract-option
                       #:list-contract?
-                      #:extra-delay])]{
+                      #:extra-delay]
+                     [type
+                      #:impersonator
+                      #:chaperone
+                      #:flat])]{
 
 Delays the evaluation of its argument until the contract is checked,
-making recursive contracts possible.  If @racket[type] is given, it
-describes the expected type of contract and must be one of the keywords
-@racket[#:impersonator], @racket[#:chaperone], or @racket[#:flat].  If
-@racket[type] is not given, an impersonator contract is created.
+making recursive contracts possible.
+If @racket[type] is not given, an impersonator contract is created.
 
 If the @racket[recursive-contract-option]
 @racket[#:list-contract?] is given, then the result is a
@@ -3129,6 +3135,17 @@ then the @racket[contract-expr] expression is evaluated only when the first
 value to be checked against the contract is supplied to the contract.
 Without it, the @racket[contract-expr] is evaluated earlier. This option
 is supported only when @racket[type] is @racket[#:flat].
+
+@examples[#:eval (contract-eval)
+  (define even-length-list/c
+    (or/c null?
+          (cons/c any/c
+                  (cons/c any/c
+                          (recursive-contract even-length-list/c #:flat)))))
+
+  (even-length-list/c '(A B))
+  (even-length-list/c '(1 2 3))
+]
 
  @history[#:changed "6.0.1.13" @list{Added the @racket[#:list-contract?] option.}
           #:changed "6.7.0.3" @list{Added the @racket[#:extra-delay] option.}]

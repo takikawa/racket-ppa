@@ -346,9 +346,7 @@ scheme_init_port (Scheme_Env *env)
   REGISTER_SO(scheme_redirect_output_port_type);
 
 #ifndef DONT_IGNORE_PIPE_SIGNAL
-  START_XFORM_SKIP;
-  MZ_SIGSET(SIGPIPE, SIG_IGN);
-  END_XFORM_SKIP;
+  scheme_set_signal_handler(SIGPIPE, NULL);
 #endif
 
   if (!scheme_sleep)
@@ -6122,7 +6120,7 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
   block_timer_signals(1);
   
   result = rktio_process(scheme_rktio,
-                         command, argc, argv,
+                         command, argc, (rktio_const_string_t *)argv,
                          stdout_fd, stdin_fd, stderr_fd,
                          SCHEME_PATH_VAL(current_dir), envvars,
                          flags);
@@ -6525,9 +6523,6 @@ static void itimer_expired(int ignored)
 {
   scheme_fuel_counter = 0;
   scheme_jit_stack_boundary = (uintptr_t)-1;
-#  ifdef SIGSET_NEEDS_REINSTALL
-  MZ_SIGSET(SIGPROF, itimer_expired);
-#  endif
 }
 
 static void kickoff_itimer(intptr_t usec) 
@@ -6539,7 +6534,7 @@ static void kickoff_itimer(intptr_t usec)
 
   if (!itimer_handler_installed) {
     itimer_handler_installed = 1;
-    MZ_SIGSET(SIGPROF, itimer_expired);
+    scheme_set_signal_handler(SIGPROF, itimer_expired);
   }
 
   t.it_value.tv_sec = 0;
