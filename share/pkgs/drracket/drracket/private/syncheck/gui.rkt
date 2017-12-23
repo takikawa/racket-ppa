@@ -181,6 +181,20 @@ If the namespace does not, they are colored the unbound color.
 (color-prefs:add-color-scheme-entry 'drracket:syncheck:matching-identifiers 
                                     "GreenYellow"
                                     "DarkGreen")
+(color-prefs:add-color-scheme-entry 'drracket:syncheck:var-arrow
+                                    "BLUE"
+                                    "LightSteelBlue")
+(color-prefs:add-color-scheme-entry 'drracket:syncheck:template-arrow
+                                    (send the-color-database find-color "purple")
+                                    "orchid")
+(color-prefs:add-color-scheme-entry 'drracket:syncheck:tail-arrow
+                                    "orchid"
+                                    "orchid")
+(let ([framework:basic-canvas-background (color-prefs:lookup-in-color-scheme
+                                          'framework:basic-canvas-background)])
+  (color-prefs:add-color-scheme-entry 'drracket:syncheck:untacked
+                                      framework:basic-canvas-background
+                                      framework:basic-canvas-background))
 
 (define tool@ 
   (unit 
@@ -247,32 +261,36 @@ If the namespace does not, they are colored the unbound color.
 
     (define-struct prefixable-reference (id-text id-start id-end))
     
-    (define (get-tacked-var-brush white-on-black?)
-      (if white-on-black?
-          (send the-brush-list find-or-create-brush "LightSteelBlue" 'solid)
-          (send the-brush-list find-or-create-brush "BLUE" 'solid)))
-    (define (get-var-pen white-on-black?)
-      (if white-on-black?
-          (send the-pen-list find-or-create-pen "LightSteelBlue" 1 'solid)
-          (send the-pen-list find-or-create-pen "BLUE" 1 'solid)))
+    (define (get-tacked-var-brush)
+      (send the-brush-list find-or-create-brush
+            (color-prefs:lookup-in-color-scheme 'drracket:syncheck:var-arrow)
+            'solid))
+    (define (get-var-pen)
+      (send the-pen-list find-or-create-pen
+            (color-prefs:lookup-in-color-scheme 'drracket:syncheck:var-arrow)
+            1 'solid))
     
     (define templ-color (send the-color-database find-color "purple"))
-    (define (get-templ-pen white-on-black?)
-      (if white-on-black?
-          (send the-pen-list find-or-create-pen "orchid" 1 'solid)
-          (send the-pen-list find-or-create-pen templ-color 1 'solid)))
-    (define (get-tacked-templ-brush white-on-black?) 
-      (if white-on-black?
-          (send the-brush-list find-or-create-brush "orchid" 'solid)
-          (send the-brush-list find-or-create-brush templ-color 'solid)))
+    (define (get-templ-pen)
+      (send the-pen-list find-or-create-pen
+            (color-prefs:lookup-in-color-scheme 'drracket:syncheck:template-arrow)
+            1 'solid))
+    (define (get-tacked-templ-brush)
+      (send the-brush-list find-or-create-brush
+            (color-prefs:lookup-in-color-scheme 'drracket:syncheck:template-arrow)
+            'solid))
     
-    (define (get-tail-pen white-on-black?) 
-      (send the-pen-list find-or-create-pen "orchid" 1 'solid))
-    (define (get-tacked-tail-brush white-on-black?)
-      (send the-brush-list find-or-create-brush "orchid" 'solid))
-    (define (get-untacked-brush white-on-black?)
+    (define (get-tail-pen)
+      (send the-pen-list find-or-create-pen
+            (color-prefs:lookup-in-color-scheme 'drracket:syncheck:tail-arrow)
+            1 'solid))
+    (define (get-tacked-tail-brush)
+      (send the-brush-list find-or-create-brush
+            (color-prefs:lookup-in-color-scheme 'drracket:syncheck:tail-arrow)
+            'solid))
+    (define (get-untacked-brush)
       (send the-brush-list find-or-create-brush 
-            (if white-on-black? "black" "white")
+            (color-prefs:lookup-in-color-scheme 'drracket:syncheck:untacked)
             'solid))
         
     (define-local-member-name
@@ -861,8 +879,7 @@ If the namespace does not, they are colored the unbound color.
                     name-to-offer
                     #:dialog-mixin frame:focus-table-mixin))))
               (when new-str
-                (define new-sym (format "~s" (string->symbol new-str)))
-                (define dup-name? (name-dup? new-sym))
+                (define dup-name? (name-dup? new-str))
                 
                 (define do-renaming?
                   (or (not dup-name?)
@@ -871,7 +888,7 @@ If the namespace does not, they are colored the unbound color.
                         (string-constant check-syntax)
                         (fw:gui-utils:format-literal-label
                          (string-constant cs-name-duplication-error) 
-                         new-sym)
+                         new-str)
                         (string-constant cs-rename-anyway)
                         (string-constant cancel)
                         #f
@@ -885,7 +902,7 @@ If the namespace does not, they are colored the unbound color.
                    make-identifiers-hash
                    (λ (source-txt start end)
                      (send source-txt delete start end #f)
-                     (send source-txt insert new-sym start start #f))))))
+                     (send source-txt insert new-str start start #f))))))
 
             
 
@@ -1034,9 +1051,28 @@ If the namespace does not, they are colored the unbound color.
             ;; in the assoc
             ;; If use-key? is #f, it adds `to-add' without a key.
             ;; pre: arrow-records is not #f
-            (define/private (add-to-range/key text start pre-end to-add key use-key?)
-              (define end (if (= start pre-end) (+ start 1) pre-end))
-              (when (<= 0 start end (send text last-position))
+            (define/private (add-to-range/key text _start _end to-add key use-key?)
+              ;; adjust the tooltip ranges to sensible values
+              ;; (e.g., in bounds and not equal to each other)
+              (define lp (send text last-position))
+
+              (unless (= 0 lp)
+
+                ;; first get them in bounds
+                (define start (max 0 (min lp _start)))
+                (define end (max 0 (min lp _end)))
+
+                ;; now make sure they are in order
+                (when (end . < . start) (set! end start))
+
+                ;; now make sure they are different
+                ;; (this code relies on there being at least
+                ;; one character in the buffer, checked above)
+                (when (= start end)
+                  (cond
+                    [(= end lp) (set! start (- end 1))]
+                    [else (set! end (+ start 1))]))
+
                 (define arrow-record (get-arrow-record text))
                 ;; Dropped the check (< _ (vector-length arrow-vector))
                 ;; which had the following comment:
@@ -1138,13 +1174,13 @@ If the namespace does not, they are colored the unbound color.
                       (cond
                         [(var-arrow? arrow)
                          (if (var-arrow-actual? arrow)
-                             (begin (send dc set-pen (get-var-pen white-on-black?))
-                                    (send dc set-brush (get-tacked-var-brush white-on-black?)))
-                             (begin (send dc set-pen (get-templ-pen white-on-black?))
-                                    (send dc set-brush (get-tacked-templ-brush white-on-black?))))]
+                             (begin (send dc set-pen (get-var-pen))
+                                    (send dc set-brush (get-tacked-var-brush)))
+                             (begin (send dc set-pen (get-templ-pen))
+                                    (send dc set-brush (get-tacked-templ-brush))))]
                         [(tail-arrow? arrow)
-                         (send dc set-pen (get-tail-pen white-on-black?))
-                         (send dc set-brush (get-tacked-tail-brush white-on-black?))])
+                         (send dc set-pen (get-tail-pen))
+                         (send dc set-brush (get-tacked-tail-brush))])
                       (draw-arrow2 arrow)))
                   (when (and cursor-pos
                              cursor-text)
@@ -1154,16 +1190,16 @@ If the namespace does not, they are colored the unbound color.
                       (for ([ele (in-list arrow-records-at-cursor)])
                         (cond [(var-arrow? ele)
                                (if (var-arrow-actual? ele)
-                                   (begin (send dc set-pen (get-var-pen white-on-black?))
-                                          (send dc set-brush (get-untacked-brush white-on-black?)))
-                                   (begin (send dc set-pen (get-templ-pen white-on-black?))
-                                          (send dc set-brush (get-untacked-brush white-on-black?))))
+                                   (begin (send dc set-pen (get-var-pen))
+                                          (send dc set-brush (get-untacked-brush)))
+                                   (begin (send dc set-pen (get-templ-pen))
+                                          (send dc set-brush (get-untacked-brush))))
                                (draw-arrow2 ele)]
                               [(tail-arrow? ele)
                                (set! tail-arrows (cons ele tail-arrows))])))
                     
-                    (send dc set-pen (get-tail-pen white-on-black?))
-                    (send dc set-brush (get-untacked-brush white-on-black?))
+                    (send dc set-pen (get-tail-pen))
+                    (send dc set-brush (get-untacked-brush))
                     (for-each-tail-arrows draw-arrow2 tail-arrows))
                   (send dc set-brush old-brush)
                   (send dc set-pen old-pen)
@@ -1303,29 +1339,38 @@ If the namespace does not, they are colored the unbound color.
                 (cond [(send event leaving?) (values #f #f)]
                       [else (values (send event get-x) (send event get-y))]))
               
-              (set! mouse-admin (get-admin))
-              (set! mouse-x x)
-              (set! mouse-y y)
-              
               ;; mouse motion cancels arrow draw cooldown
               (when (eq? 'motion (send event get-event-type))
                 (set! arrow-draw-cooldown-time (current-milliseconds)))
               
-              ;; if the arrows changed, start the draw timer
-              (when (update-latent-arrows x y)
-                (start-arrow-draw-timer syncheck-arrow-delay))
+              (mouse-is-in-new-place x y (get-admin))
               
               (super on-event event))
+
+            (define/private (mouse-is-in-new-place x y admin)
+              (set! mouse-admin admin)
+              (set! mouse-x x)
+              (set! mouse-y y)
+
+              ;; if the arrows changed, start the draw timer
+              (when (update-latent-arrows x y)
+                (start-arrow-draw-timer syncheck-arrow-delay)))
             
             (define/public (syncheck:update-drawn-arrows)
-              ;; This will ensure on-paint is called, once for each canvas that
-              ;; is displaying the editor. In the on-paint call for the canvas
-              ;; that the mouse is over, arrows will be updated, arrow-draw-timer
-              ;; will be set, etc.
-              ;; If this were done more directly, the tooltip would show up in
-              ;; the wrong canvas half the time - when the current admin isn't
-              ;; the admin for the canvas the mouse is over.
-              (invalidate-bitmap-cache 0 0 'display-end 'display-end))
+              ;; This updates the arrows immediately (without waiting
+              ;; for the cooldown mouse movement); based on the
+              ;; locations in mouse-x and mouse-y (which, as it turns out
+              ;; might be wrong because this editor's on-event isn't called
+              ;; when it isn't installed into a canvas (of course))
+              (define canvas (get-canvas))
+              (when canvas
+                (define-values (pt state) (get-current-mouse-state))
+                (define-values (dx dy) (get-display-left-top-inset))
+                (define-values (sx sy) (send canvas screen->client
+                                             (+ (send pt get-x) dx)
+                                             (+ (send pt get-y) dy)))
+                (mouse-is-in-new-place sx sy (get-admin)))
+              (update-drawn-arrows))
             
             (define/public (syncheck:build-popup-menu menu pos text [sep-before? #t])
               (when arrow-records

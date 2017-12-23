@@ -58,7 +58,7 @@ includes a citation to section 8 of the Racket reference.
                        (code:line #:date=? date-compare-expr)
                        (code:line #:cite-author cite-author-id)
                        (code:line #:cite-year cite-year-id)])
-              #:contracts ([style-expr (or/c author+date-style number-style)]
+              #:contracts ([style-expr (or/c number-style author+date-style author+date-square-bracket-style)]
                            [spaces-expr number?]
                            [disambiguator-expr (or/c #f (-> exact-nonnegative-integer? element?))]
                            [render-date-expr (or/c #f (-> date? element?))]
@@ -144,10 +144,16 @@ optionally given @racket[render-date-expr] functions.
 
 @deftogether[(
 @defthing[author+date-style any/c]
+@defthing[author+date-square-bracket-style any/c]
 @defthing[number-style any/c]
 )]{
 
-Styles for use with @racket[define-cite].}
+Styles for use with @racket[define-cite].
+
+The @racket[author+date-square-bracket-style] definition is the same
+as @racket[author+date-style], except that references to citations
+are enclosed in @litchar["[]"] instead of @litchar["()"].
+}
 
 
 @defproc[(bib? [v any/c]) boolean?]{

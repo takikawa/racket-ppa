@@ -173,6 +173,7 @@
  (root "pkgs/srfi-doc")
  (root "pkgs/syntax-color-doc")
  (root "pkgs/web-server-lib")
+ ("typed" "pkgs/rackunit-typed")
  (root "pkgs/unix-socket-lib")
  (root "pkgs/unix-socket-doc")
  (root "pkgs/xrepl-lib")

@@ -39,6 +39,7 @@
     render-nested-flow
     render-block
     render-other
+    link-render-style-at-element
     get-dest-directory
     format-number
     number-depth))
@@ -606,17 +607,28 @@
                                               number))
                                     sub-pos
                                     sub-numberers))
+                    (define unnumbered-and-unnumbered-subsections?
+                      (and (not sub-grouper?)
+                           ;; If this section wasn't marked with
+                           ;; 'grouper but is unnumbered and doesn't
+                           ;; have numbered subsections, then didn't
+                           ;; reset counters, so propagate the old
+                           ;; position
+                           (and unnumbered?
+                                (= next-sub-pos sub-pos))))
                     (loop (cdr parts)
                           (if (or unnumbered? numberer)
                               pos
                               (add1 pos))
                           next-numberers
-                          (if sub-grouper?
-                              next-sub-pos
-                              1)
-                          (if sub-grouper?
-                              next-sub-numberers
-                              #hash())))))))
+                          (cond
+                            [sub-grouper? next-sub-pos]
+                            [unnumbered-and-unnumbered-subsections? sub-pos]
+                            [else 1])
+                          (cond
+                            [sub-grouper? next-sub-numberers]
+                            [unnumbered-and-unnumbered-subsections? sub-numberers]
+                            [else #hash()])))))))
         (let ([prefix (part-tag-prefix d)])
           (for ([(k v) (collect-info-ht p-ci)])
             (when (cadr k)
@@ -737,7 +749,8 @@
 
     (define/public (resolve-part d ri)
       (parameterize ([current-tag-prefixes
-                      (extend-prefix d (fresh-tag-resolve-context? d ri))])
+                      (extend-prefix d (fresh-tag-resolve-context? d ri))]
+                     [current-link-render-style (part-render-style d)])
         (when (part-title-content d)
           (resolve-content (part-title-content d) d ri))
         (resolve-flow (part-blocks d) d ri)
@@ -811,6 +824,15 @@
         [(multiarg-element? i)
          (resolve-content (multiarg-element-contents i) d ri)]))
 
+    (define/public (link-render-style-at-element e)
+      (link-render-style-mode
+       (or (let ([s (element-style e)])
+             (and (style? s)
+                  (for/or ([p (in-list (style-properties s))]
+                           #:when (link-render-style? p))
+                    p)))
+           (current-link-render-style))))
+
     ;; ----------------------------------------
     ;; render methods
 
@@ -871,8 +893,15 @@
 
     (define/public (render-part d ri)
       (parameterize ([current-tag-prefixes
-                      (extend-prefix d (fresh-tag-render-context? d ri))])
+                      (extend-prefix d (fresh-tag-render-context? d ri))]
+                     [current-link-render-style (part-render-style d)])
         (render-part-content d ri)))
+
+    (define/private (part-render-style d)
+      (or (for/or ([p (in-list (style-properties (part-style d)))]
+                   #:when (link-render-style? p))
+            p)
+          (current-link-render-style)))
 
     (define/public (render-part-content d ri)
       (list
@@ -962,7 +991,11 @@
          (render-content (traverse-element-content i ri) part ri)]
         [(part-relative-element? i)
          (render-content (part-relative-element-content i ri) part ri)]
-        [(convertible? i) (list "???")]
+        [(convertible? i)
+         (define s (convert i 'text))
+         (if (string? s)
+             (render-other s part ri)
+             (render-other (format "~s" i) part ri))]
         [else (render-other i part ri)]))
 
     (define/public (render-other i part ri)
