@@ -1,8 +1,9 @@
-racket (6.11+dfsg1-1) UNRELEASED; urgency=medium
+racket (6.11+dfsg1-1) unstable; urgency=medium
 
   * New upstream release
+  * Use new logo (thanks to Asumu Takikawa)
 
- -- David Bremner <bremner@debian.org>  Sat, 23 Dec 2017 12:22:12 -0400
+ -- David Bremner <bremner@debian.org>  Sat, 23 Dec 2017 15:26:58 -0400
 
 racket (6.10.1+dfsg1-1) unstable; urgency=medium
 
