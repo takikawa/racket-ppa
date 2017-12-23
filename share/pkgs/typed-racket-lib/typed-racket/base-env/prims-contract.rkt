@@ -57,7 +57,7 @@
 ;; unsafe operations go in this submodule
 (module* unsafe #f
   ;; turned into a macro on the requiring side
-  (provide -unsafe-require/typed))
+  (provide unsafe-require/typed))
 
 ;; used for private unsafe functionality in require macros
 ;; *do not export*
@@ -116,7 +116,7 @@
   #:literals (:)
   (pattern [field:id : type]))
 
-(define-values (require/typed-legacy require/typed -unsafe-require/typed)
+(define-values (require/typed-legacy require/typed unsafe-require/typed)
  (let ()
   (define-syntax-class opt-rename
     #:attributes (nm orig-nm spec)
@@ -256,6 +256,7 @@
               (require/typed/provide lib other-clause ...))]))
 
 
+
 (define require-typed-struct/provide
   (syntax-rules ()
     [(_ (nm par) . rest)
@@ -286,8 +287,10 @@
    ;; that `(cast-table-ref id)` can get that type here.
    (λ ()
      (define type-stx
-       (or (cast-table-ref id)
-           #f))
+       (let ([types (cast-table-ref id)])
+         (if types
+             #`(U #,@types)
+             #f)))
      `#s(contract-def ,type-stx ,flat? ,maker? typed))))
 
 
@@ -352,7 +355,7 @@
                                      (make-contract-def-rhs/from-typed existing-ty-id #f #f)))
             (define (store-existing-type existing-type)
               (check-no-free-vars existing-type #'v)
-              (cast-table-set! existing-ty-id (datum->syntax #f existing-type #'v)))
+              (cast-table-add! existing-ty-id (datum->syntax #f existing-type #'v)))
             (define (check-valid-type _)
               (define type (parse-type #'ty))
               (check-no-free-vars type #'ty))

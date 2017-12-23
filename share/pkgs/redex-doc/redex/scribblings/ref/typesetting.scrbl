@@ -65,8 +65,8 @@ using with Slideshow (see the @racketmodname[pict]
 library).
 
 For producing papers with Scribble, just include the
-picts inline in the paper and pass the the @DFlag{dvipdf} 
-flag generate the @filepath{.pdf} file. For producing
+picts inline in the paper and pass the @DFlag{dvipdf} 
+flag to generate the @filepath{.pdf} file. For producing
 papers with LaTeX, create @filepath{.ps} files from Redex and use
 @tt{latex} and @tt{dvipdf} to create @filepath{.pdf} files
 (using @tt{pdflatex} with @filepath{.pdf} files will 
@@ -477,7 +477,7 @@ variant, the side-conditions don't contribute to the width of the
 pict, but are just overlaid on the second line of each rule.  The
 @racket['horizontal-left-align] style is like the @racket['horizontal]
 style, but the left-hand sides of the rules are aligned on the left,
-instead of on the right. The @racket[''horizontal-side-conditions-same-line]
+instead of on the right. The @racket['horizontal-side-conditions-same-line]
 is like @racket['horizontal], except that side-conditions
 are on the same lines as the rule, instead of on their own line below.
 
@@ -942,6 +942,11 @@ single reduction relation.
   The @racket[combine] function is called with the list of picts that are obtained by rendering
   a relation; it should put them together into a single pict. It defaults to
   @racket[(λ (l) (apply vc-append 20 l))]
+}
+
+@defparam[metafunction-arrow-pict make-arrow (parameter/c (-> pict?))]{
+  Specifies the pict to use for the arrow when typesetting
+  a metafunction contract.
 }
 
 @defparam[where-make-prefix-pict make-prefix (parameter/c (-> pict?))]{

@@ -14,7 +14,7 @@
          racket/contract)
 
 (provide define-cite
-         author+date-style number-style
+         author+date-style author+date-square-bracket-style number-style
          make-bib in-bib (rename-out [auto-bib? bib?])
          author-name org-author-name 
          (contract-out
@@ -70,26 +70,28 @@
      (lambda (renderer part ri)
        ;; (list which key) should be mapped to the bibliography element.
        (define s (resolve-get part ri `(,which ,key)))
-       (make-link-element #f
-                          (list (or s "???")
-                                (cond [(not (send style disambiguate-date?)) '()]
-                                      [disambiguation ;; should be a list of bib-entries with same author/date
-                                       (define disambiguation*
-                                         (add-between (for/list ([bib (in-list disambiguation)])
-                                                        (define key (auto-bib-key bib))
-                                                        (define maybe-disambiguation
-                                                          (resolve-get part ri `(autobib-disambiguation ,key)))
-                                                        (case maybe-disambiguation
-                                                          [(#f) #f]
-                                                          [(unambiguous) #f]
-                                                          [else (make-link-element #f maybe-disambiguation `(autobib ,key))]))
-                                                      ","))
-                                       (cond [(not (car disambiguation*)) '()] ;; the bib was unambiguous
-                                             [else disambiguation*])]
-                                      [else '()])
-                                (if with-specific?
-                                    (auto-bib-specific bib-entry)
-                                    ""))
+       (define content
+         (list (or s "???")
+               (cond [(not (send style disambiguate-date?)) '()]
+                     [disambiguation ;; should be a list of bib-entries with same author/date
+                      (define disambiguation*
+                        (add-between (for/list ([bib (in-list disambiguation)])
+                                       (define key (auto-bib-key bib))
+                                       (define maybe-disambiguation
+                                         (resolve-get part ri `(autobib-disambiguation ,key)))
+                                       (case maybe-disambiguation
+                                         [(#f) #f]
+                                         [(unambiguous) #f]
+                                         [else (make-link-element "AutobibLink" maybe-disambiguation `(autobib ,key))]))
+                                     ","))
+                      (cond [(not (car disambiguation*)) '()] ;; the bib was unambiguous
+                            [else disambiguation*])]
+                     [else '()])
+               (if with-specific?
+                   (auto-bib-specific bib-entry)
+                   "")))
+       (make-link-element "AutobibLink"
+                          content
                           `(autobib ,(auto-bib-key bib-entry))))
      (lambda () "(???)")
      (lambda () "(???)"))))
@@ -138,7 +140,7 @@
     (error 'citet "citet must be used with identical authors, given ~a"
            (map (compose author-element-names* auto-bib-author) bib-entries)))
   (make-element
-   #f
+   (make-style "Autobibref" '())
    (list (add-cite group (car bib-entries) 'autobib-author #f #f style)
          'nbsp
          (send style get-cite-open)
@@ -155,7 +157,7 @@
         (values (hash-update h k (lambda (cur) (cons b cur)) null)
                 (cons k (remove k ks))))))
   (make-element
-   #f
+   (make-style "Autobibref" '())
    (append
     (list 'nbsp (send style get-cite-open))
     (add-between
@@ -195,20 +197,28 @@
     (error 'default-disambiguation "Citations too ambiguous for default disambiguation scheme."))
   (make-element #f (list (format "~a" (integer->char (+ 97 n))))))
 
-(define author+date-style
+(define author+date-style%
+  (class object%
+    (define/public (bibliography-table-style) bib-single-style)
+    (define/public (entry-style) bibentry-style)
+    (define/public (disambiguate-date?) #t)
+    (define/public (collapse-for-date?) #t)
+    (define/public (get-cite-open) "(")
+    (define/public (get-cite-close) ")")
+    (define/public (get-group-sep) "; ")
+    (define/public (get-item-sep) ", ")
+    (define/public (render-citation date-cite i) date-cite)
+    (define/public (render-author+dates author dates) (list* author " " dates))
+    (define/public (bibliography-line i e) (list e))
+    (super-new)))
+
+(define author+date-style (new author+date-style%))
+
+(define author+date-square-bracket-style
   (new
-   (class object%
-     (define/public (bibliography-table-style) bib-single-style)
-     (define/public (entry-style) bibentry-style)
-     (define/public (disambiguate-date?) #t)
-     (define/public (collapse-for-date?) #t)
-     (define/public (get-cite-open) "(")
-     (define/public (get-cite-close) ")")
-     (define/public (get-group-sep) "; ")
-     (define/public (get-item-sep) ", ")
-     (define/public (render-citation date-cite i) date-cite)
-     (define/public (render-author+dates author dates) (list* author " " dates))
-     (define/public (bibliography-line i e) (list e))
+   (class author+date-style%
+     (define/override (get-cite-open) "[")
+     (define/override (get-cite-close) "]")
      (super-new))))
 
 (define number-style
@@ -522,11 +532,17 @@
                 s)])
     s))
 
+(define (string-capitalize str)
+  (if (non-empty-string? str)
+      (let ([chars (string->list str)])
+        (list->string (cons (char-upcase (car chars)) (cdr chars))))
+      str))
+  
 (define (book-location
          #:edition [edition #f]
          #:publisher [publisher #f])
   (let* ([s (if edition
-                @elem{@(string-titlecase (to-string edition)) edition}
+                @elem{@(string-capitalize (to-string edition)) edition}
                 #f)]
          [s (if publisher
                 (if s

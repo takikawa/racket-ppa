@@ -1,6 +1,6 @@
 #lang scheme/base
-
-(require scribble/manual
+(require racket/contract/base
+         scribble/manual
          scribble/core
          scribble/decode
          scribble/html-properties
@@ -12,9 +12,18 @@
          figure*
          figure**
          figure-here
-         Figure-target 
-         Figure-ref
-         figure-ref
+         (contract-out
+          [Figure-target (->* (string?)
+                              (#:continue? any/c)
+                              element?)]
+          [Figure-ref (->* (string?)
+                           (#:link-render-style link-render-style?)
+                           #:rest (listof string?)
+                           element?)]
+          [figure-ref (->* (string?)
+                           (#:link-render-style link-render-style?)
+                           #:rest (listof string?)
+                           element?)])
          left-figure-style
          center-figure-style
          right-figure-style
@@ -66,30 +75,40 @@
                                        figure-style-extras))
     c))
 
+(define default-label-sep ": ")
+
 (define (figure tag caption 
                 #:style [style center-figure-style]
+                #:label-sep [label-sep default-label-sep]
+                #:label-style [label-style #f]
                 #:continue? [continue? #f]
                 . content)
-  (figure-helper figure-style style tag caption content continue?))
+  (figure-helper figure-style style label-sep label-style tag caption content continue?))
 
 (define (figure-here tag caption 
-                     #:style [style center-figure-style] 
+                     #:style [style center-figure-style]
+                     #:label-sep [label-sep default-label-sep]
+                     #:label-style [label-style #f]
                      #:continue? [continue? #f]
                      . content)
-  (figure-helper herefigure-style style tag caption content continue?))
+  (figure-helper herefigure-style style label-sep label-style tag caption content continue?))
 
 (define (figure* tag caption 
                  #:style [style center-figure-style]
+                 #:label-sep [label-sep default-label-sep]
+                 #:label-style [label-style #f]
                  #:continue? [continue? #f]
                  . content)
-  (figure-helper figuremulti-style style tag caption content continue?))
+  (figure-helper figuremulti-style style label-sep label-style tag caption content continue?))
 (define (figure** tag caption 
-                  #:style [style center-figure-style] 
+                  #:style [style center-figure-style]
+                  #:label-sep [label-sep default-label-sep]
+                  #:label-style [label-style #f]
                   #:continue? [continue? #f]
                   . content)
-  (figure-helper figuremultiwide-style style tag caption content continue?))
+  (figure-helper figuremultiwide-style style label-sep label-style tag caption content continue?))
 
-(define (figure-helper figure-style content-style tag caption content continue?)
+(define (figure-helper figure-style content-style label-sep label-style tag caption content continue?)
   (make-nested-flow 
    figure-style 
    (list
@@ -101,37 +120,57 @@
      (list (make-element (if continue?
                              legend-continued-style
                              legend-style)
-                         (list (Figure-target tag #:continue? continue?) caption)))))))
+                         (list (Figure-target tag
+                                              #:label-sep label-sep
+                                              #:label-style label-style
+                                              #:continue? continue?)
+                               caption)))))))
 
 (define figures (new-counter "figure" 
                              #:target-wrap make-figure-target
                              #:ref-wrap make-figure-ref))
-(define (Figure-target tag #:continue? [continue? #f])
+(define (Figure-target tag
+                       #:continue? [continue? #f]
+                       #:label-sep [label-sep ": "]
+                       #:label-style [label-style #f])
   (counter-target figures tag 
                   "Figure" 
-                  (if continue? " (continued): " ": ")
+                  #:label-suffix (list (if continue? " (continued)" "") label-sep)
+                  #:label-style label-style
                   #:target-style figure-target-style
                   #:continue? continue?))
 
 (define (ref-proc initial)
-  (case-lambda 
-   [(tag)
-    (make-element #f (list (counter-ref figures tag (string-append initial "igure"))))]
-   [(tag1 tag2)
-    (make-element #f (list (counter-ref figures tag1 (string-append initial "igures"))
-                           " and "
-                           (counter-ref figures tag2 #f)))]
-   [(tag . tags)
-    (make-element #f (cons (counter-ref figures tag (string-append initial "igures"))
-                           (let loop ([tags tags])
-                             (cond
-                              [(null? (cdr tags))
-                               (list ", and "
-                                     (counter-ref figures (car tags) #f))]
-                              [else
-                               (list* ", "
-                                      (counter-ref figures (car tags) #f)
-                                      (loop (cdr tags)))]))))]))
+  (lambda (tag #:link-render-style [link-style #f]
+               . tags)
+    (cond
+      [(null? tags)
+       (make-element
+        #f
+        (counter-ref figures tag (string-append initial "igure")
+                     #:link-render-style link-style))]
+      [(null? (cdr tags))
+       (define tag1 (car tags))
+       (define tag2 (cadr tags))
+       (make-element #f (list (counter-ref figures tag1 (string-append initial "igures")
+                                           #:link-render-style link-style)
+                              " and "
+                              (counter-ref figures tag2 #f
+                                           #:link-render-style link-style)))]
+      [else
+       (make-element #f (cons (counter-ref figures tag (string-append initial "igures")
+                                           #:link-render-style link-style)
+                              (let loop ([tags tags])
+                                (cond
+                                  [(null? (cdr tags))
+                                   (list ", and "
+                                         (counter-ref figures (car tags) #f
+                                                      #:link-render-style link-style))]
+                                  [else
+                                   (list* ", "
+                                          (counter-ref figures (car tags) #f
+                                                       #:link-render-style link-style)
+                                          (loop (cdr tags)))]))))])))
 
 (define Figure-ref (ref-proc "F"))
 (define figure-ref (ref-proc "f"))
