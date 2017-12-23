@@ -15,21 +15,29 @@
 @defproc[(figure [tag string?] [caption content?] 
                  [p pre-flow?] ...
                  [#:style style style? center-figure-style]
+                 [#:label-sep label-sep pre-content? ": "]
+                 [#:label-style label-style element-style? #f]
                  [#:continue? continue? any/c #f]) 
          block?]
 @defproc[(figure* [tag string?] [caption content?]
                   [p pre-flow?] ...
                   [#:style style style? center-figure-style]
-                 [#:continue? continue? any/c #f])
+                  [#:label-sep label-sep pre-content? ": "]
+                  [#:label-style label-style element-style? #f]
+                  [#:continue? continue? any/c #f])
          block?]
 @defproc[(figure** [tag string?] [caption content?]
                    [p pre-flow?] ...
                    [#:style style style? center-figure-style]
+                   [#:label-sep label-sep pre-content? ": "]
+                   [#:label-style label-style element-style? #f]
                    [#:continue? continue? any/c #f])
          block?]
 @defproc[(figure-here [tag string?] [caption content?]
                       [pre-flow pre-flow?] ...
                       [#:style style style? center-figure-style]
+                      [#:label-sep label-sep pre-content? ": "]
+                      [#:label-style label-style element-style? #f]
                       [#:continue? continue? any/c #f])
          block?]
 )]{
@@ -52,8 +60,18 @@ By default, @racket[style] is set so that the content of the figure is
 centered.  Use @racket[left-figure-style], @racket[center-figure-style],
 or @racket[right-figure-style] to specify the alignment.
 
+The @racket[label-sep] and @racket[label-style] arguments adjust the
+way that the caption's label is shown. By default, the label is the
+word ``Figure'' followed by a space, the figure number, ``:'', and a
+space, but @racket[label-sep] can specify an alternative to the ``:''
+and ending space. The composed label is given the style specified by
+@racket[label-style].
+
 If @racket[continue?] is a true value, then the figure counter is not
-incremented.}
+incremented.
+
+@history[#:changed "1.24" @elem{Added the @racket[#:label-sep] and
+                                @racket[#:label-style] arguments.}]}
 
 @deftogether[(
 @defthing[left-figure-style style?]
@@ -67,14 +85,28 @@ The @racket[left] binding is a synonym for @racket[left-figure-style],
 provided for backward compatibility.}
 
 
-@defproc[(figure-ref [tag string?] ...+) element?]{
+@defproc[(figure-ref [tag string?] ...+
+                     [#:link-render-style link-style (or/c link-render-style? #f)])
+         element?]{
 
-Generates a reference to one or more figures, using a lowercase word ``figure''.}
+Generates a reference to one or more figures, using a lowercase word ``figure''.
+
+If @racket[link-style] or @racket[(current-link-render-style)] at the
+time of rendering indicates the @racket['number] style mode, then the
+word ``figure'' itself is not hyperlinked. Otherwise, the word
+@racket[figure] is hyperlinked together with the referenced figure's
+number.
+
+@history[#:changed "1.26" @elem{Added the @racket[#:link-render-style] argument.}]}
 
 
-@defproc[(Figure-ref [tag string?] ...+) element?]{
+@defproc[(Figure-ref [tag string?] ...+
+                     [#:link-render-style link-style (or/c link-render-style? #f)])
+         element?]{
 
-Generates a reference to one or more figures, capitalizing the word ``Figure''.}
+Like @racket[figure-ref], but capitalizes the word ``Figure''.
+
+@history[#:changed "1.26" @elem{Added the @racket[#:link-render-style] argument.}]}
 
 
 @defproc[(Figure-target [tag string?]

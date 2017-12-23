@@ -2,7 +2,6 @@
 
 (require "../utils/utils.rkt"
          racket/match racket/sequence racket/set racket/list
-         (only-in racket/list make-list)
          (contract-req)
          (typecheck check-below tc-subst tc-metafunctions possible-domains)
          (utils tc-utils)
@@ -22,7 +21,7 @@
   (add-typeof-expr f-stx (ret (make-Fun (list ftype0))))
   (match* (ftype0 argtys)
     ;; we check that all kw args are optional
-    [((Arrow: dom rest (and kws (list (Keyword: _ _ #f) ...)) rng)
+    [((Arrow: dom rest (list (Keyword: _ _ #f) ...) rng)
       (list (tc-result1: t-a _ o-a) ...))
      #:when (not (RestDots? rest))
      
@@ -79,15 +78,43 @@
     [(tc-any-results: _) (-AnyValues -tt)]
     [_ t]))
 
-(define (stringify-domain dom rst [rng #f])
-  (let ([doms-string (if (null? dom) "" (string-append (stringify (map make-printable dom)) " "))]
-        [rng-string (if rng (format " -> ~a" rng) "")])
+;; creates a "pretty-printed" version of the domain
+;; (and optionally also followed by "-> rng")
+;; of a function, so we can easily print things like:
+;; Domain was          Number Number *
+;; but arguments were  String
+(define/cond-contract (stringify-domain dom rst [rng #f])
+  (->* ((listof (or/c Type? tc-results/c))
+        (or/c #f Type? RestDots?))
+       ((or/c Type? SomeValues? tc-results/c))
+       string?)
+  (let ([doms-string (if (null? dom) "" (stringify (map make-printable dom)))]
+        [rng-string (if rng (format " -> ~a" (make-printable rng)) "")])
     (match rst
       [(RestDots: dty dbound)
-       (format "~a~a ... ~a~a" doms-string dty dbound rng-string)]
+       (format "~a ~a ... ~a~a" doms-string dty dbound rng-string)]
       [rst
-       (format "~a~a *~a" doms-string rst rng-string)]
-      [else (string-append (stringify (map make-printable dom)) rng-string)])))
+       (format "~a~a~a"
+               doms-string
+               (if rst (format "~a *" rst) "")
+               rng-string)])))
+
+;; creates a "pretty-printed" version of the arguments
+;; to a function, so we can easily print things like:
+;; Domain was          Number Number *
+;; but arguments were  String
+(define/cond-contract (stringify-args dom rst)
+  (-> (listof (or/c Type? tc-results/c))
+      (or/c #f Type? RestDots?)
+      string?)
+  (let ([doms-string (if (null? dom)
+                         ""
+                         (stringify (map make-printable dom)))])
+    (match rst
+      [#f doms-string]
+      [(RestDots: dty dbound)
+       (format "~a ~a ... ~a~a" doms-string dty dbound)]
+      [rst (format "~a ~a" doms-string rst)])))
 
 ;; Generates error messages when operand types don't match operator domains.
 (provide/cond-contract
@@ -96,15 +123,18 @@
      (listof SomeValues?) (listof tc-results?) (or/c #f Type?) any/c)
     (#:expected (or/c #f tc-results/c)
      #:return tc-results?
-     #:msg-thunk (-> string? string?))
+     #:msg-thunk (-> string? string?)
+     #:arg-names (listof identifier?))
     . ->* . tc-results/c)])
 (define (domain-mismatches f-stx args-stx ty doms rests rngs arg-tys tail-ty tail-bound
-                           #:expected [expected #f] #:return [return (ret -Bottom)]
-                           #:msg-thunk [msg-thunk (lambda (dom) dom)])
+                           #:expected [expected #f]
+                           #:return [return (ret -Bottom)]
+                           #:msg-thunk [msg-thunk (lambda (dom) dom)]
+                           ;; if it's a dependent function, pass the argument identifiers so we
+                           ;; can report those in the error message
+                           #:arg-names [arg-names '()])
   (define arguments-str
-    (stringify-domain arg-tys
-                      (if (not tail-bound) tail-ty #f)
-                      (if tail-bound (cons tail-ty tail-bound) #f)))
+    (stringify-args arg-tys tail-ty))
   (cond
     [(null? doms)
      (tc-error/expr/fields
@@ -124,12 +154,24 @@
                   (format "Wrong number of arguments - Expected ~a, but got ~a\n\n" (length (car doms)) (length arg-tys))
                   "")
               (append
-               (for/list ([dom-t (in-list (list-extend arg-tys (car doms) #f))]
+               (for/list ([i (in-naturals 1)]
+                          [dom-t (in-list (list-extend arg-tys (car doms) #f))]
                           [arg-t (in-list (list-extend (car doms) arg-tys #f))]
-                          [i (in-naturals 1)])
+                          [arg-id (in-list/rest arg-names #f)])
                          (let ([dom-t (or dom-t "-none-")]
                                [arg-t (or arg-t "-none-")])
-                           (format "Argument ~a:\n  Expected: ~a\n  Given:    ~a\n" i (make-printable dom-t) (make-printable arg-t))))
+                           (cond
+                             [arg-id
+                              (format "Argument ~a (position ~a):\n  Expected: ~a\n  Given:    ~a\n"
+                                      (syntax-e arg-id)
+                                      i
+                                      (make-printable dom-t)
+                                      (make-printable arg-t))]
+                             [else
+                              (format "Argument ~a:\n  Expected: ~a\n  Given:    ~a\n"
+                                      i
+                                      (make-printable dom-t)
+                                      (make-printable arg-t))])))
                (list
                 (if expected
                     (format "\nResult type:     ~a\nExpected result: ~a\n"
@@ -246,6 +288,26 @@
                                                                (list->seteq msg-vars)))
                                                  (string-append "Type Variables: " (stringify msg-vars) "\n")
                                                  ""))))))]
+    [(Poly-names:
+      msg-vars
+      (DepFun/pretty-ids: ids domain _ rng))
+     (let ([fcn-string (name->function-str name)])
+       (if (and (null? domain)
+                (null? argtypes))
+           (tc-error/expr (string-append
+                           "Could not infer types for applying polymorphic "
+                           fcn-string
+                           "\n"))
+           (domain-mismatches f-stx args-stx t (list domain) (list #f)
+                              (list rng) argtypes #f #f #:expected expected
+                              #:msg-thunk (lambda (dom)
+                                            (string-append
+                                             "Polymorphic " fcn-string " could not be applied to arguments:\n"
+                                             dom
+                                             (if (not (subset? (fv/list domain) (list->seteq msg-vars)))
+                                                 (string-append "Type Variables: " (stringify msg-vars) "\n")
+                                                 "")))
+                              #:arg-names ids)))]
     [(or (Poly-names:
           msg-vars
           (Fun: (list (Arrow: msg-doms msg-rests kws msg-rngs) ...)))

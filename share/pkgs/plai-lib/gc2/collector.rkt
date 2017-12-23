@@ -6,7 +6,7 @@
          plai/gc2/private/gc-core
          syntax/parse/define)
 
-(provide (except-out (all-from-out scheme) #%module-begin error)
+(provide (except-out (all-from-out scheme) #%module-begin error collect-garbage)
          (all-from-out plai/gc2/private/gc-core)
          (all-from-out plai/datatype)
          (rename-out

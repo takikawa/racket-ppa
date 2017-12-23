@@ -244,22 +244,25 @@ has been moved out).
                        (send (to-bitmap (to-img img)) save-file s 'png)
                        (get-output-bytes s))]
                     [(svg-bytes) (to-svg-bytes img)]
-                    [else default]))]
+                    [else (convert (convert-to-pict img) format default)]))]
                [prop:pict-convertible
                 (λ (image)
-                  (define the-bb (send image get-bb))
-                  (pict:dc
-                   (λ (dc dx dy)
-                     (render-image image dc dx dy))
-                   (ceiling (inexact->exact (bb-right the-bb)))
-                   (ceiling (inexact->exact (bb-bottom the-bb)))
-                   0
-                   (ceiling (inexact->exact (- (bb-bottom the-bb) 
-                                               (bb-baseline the-bb))))))])))
+                  (convert-to-pict image))])))
+
+(define (convert-to-pict image)
+  (define the-bb (send image get-bb))
+  (pict:dc
+   (λ (dc dx dy)
+     (render-image image dc dx dy))
+   (ceiling (inexact->exact (bb-right the-bb)))
+   (ceiling (inexact->exact (bb-bottom the-bb)))
+   0
+   (ceiling (inexact->exact (- (bb-bottom the-bb)
+                               (bb-baseline the-bb))))))
 
 (define (to-bitmap img)
   (define-values (w h) (get-size/but-subject-to-max (send img get-bb)))
-  (define bm (make-bitmap w h))
+  (define bm (make-bitmap (max 1 w) (max 1 h)))
   (define bdc (new bitmap-dc% [bitmap bm]))
   (render-image img bdc 0 0)
   (send bdc set-bitmap #f)
@@ -845,11 +848,10 @@ has been moved out).
 
 (define (save-image-as-bitmap image filename kind)
   (let* ([bb (send image get-bb)]
-         [bm (make-object bitmap% 
+         [bm (make-bitmap
                (+ 1 (ceiling (inexact->exact (bb-right bb))))
                (+ 1 (ceiling (inexact->exact (bb-bottom bb)))))]
          [bdc (make-object bitmap-dc% bm)])
-    (send bdc erase)
     (render-image image bdc 0 0)
     (send bdc set-bitmap #f)
     (send bm save-file filename kind)))
