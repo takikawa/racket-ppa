@@ -986,7 +986,15 @@ please adhere to these guidelines:
   "error loading info.rkt file for ~s")
  (tool-error-phase1 "Error in phase 1 for tool ~s; ~s")
  (tool-error-phase2 "Error in phase 2 for tool ~s; ~s")
-
+ ;; tool preferences panel
+ (tool-config-changes "Changes to tool configuration will take effect the next time you start DrRacket.")
+ (installed-tools "Installed tools")
+ (tool-prefs-panel-tool:-label "Tool: ")
+ (load-tool-when-drracket-starts? "Load the tool when DrRacket starts?")
+ (unnamed-tool "unnamed tool ~a")
+ (note-that-tool-loaded " (loaded)")
+ (note-that-tool-was-skipped " (skipped)")
+ (note-that-tool-failed-to-load " (failed to load)")
 
  ;;; define popup menu
  (end-of-buffer-define "<< end of buffer >>")

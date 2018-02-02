@@ -1,6 +1,6 @@
-;; Bulgarian translation of Racket string constants file, version: 1.16
+;; Bulgarian translation of Racket string constants file, version: 1.18
 ;; This file is distributed under the same terms as Racket
-;; Copyright on translation: Alexander Shopov <ash@kambanaria.org>, 2015, 2016, 2017.
+;; Copyright on translation: Alexander Shopov <ash@kambanaria.org>, 2015, 2016, 2017, 2018.
 
 (module bulgarian-string-constants "string-constant-lang.rkt"
  ;;; when translating this constant, substitute name of actual language for `English'
@@ -409,7 +409,11 @@
 
  ;;; save file in particular format prompting.
  (save-as-plain-text "Да се запази ли файлът като обикновен текст?")
+ (save-as-binary-format "Да се запази ли файлът във форма̀та на DrRacket, за да се запазят елементите, които не са чист текст?")
  (save-in-drs-format "Да се запази ли файлът във форма̀та на DrScheme (не е текстов)?")
+ (keep-format "Запазване в първоначалния формат")
+ (convert-format "Запазване във форма̀та на DrRacket")
+ (dont-save "В момента да не се запазва")
  (yes "Да")
  (no "Не")
 
@@ -900,7 +904,15 @@
   "грешка при зареждането на файла „info.rkt“ за „~s“")
  (tool-error-phase1 "Грешка във фаза № 1 на инструмента „~s“; ~s")
  (tool-error-phase2 "Грешка във фаза № 2 на инструмента „~s“; ~s")
-
+ ;; tool preferences panel
+ (tool-config-changes "Промените в настройките ще влязат в сила при следващото стартиране на DrRacket.")
+ (installed-tools "Инсталирани инструменти")
+ (tool-prefs-panel-tool:-label "Инструмент: ")
+ (load-tool-when-drracket-starts? "Зареждане при стартиране на DrRacket?")
+ (unnamed-tool "ненаименован инструмент „~a“")
+ (note-that-tool-loaded " (зареден)")
+ (note-that-tool-was-skipped " (прескочен)")
+ (note-that-tool-failed-to-load " (не се зареди)")
 
  ;;; define popup menu
  (end-of-buffer-define "«край на буфера»")

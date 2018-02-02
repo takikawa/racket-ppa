@@ -37,25 +37,33 @@
     (force derivp)))
 
 ;; trace/result : stx -> stx/exn Deriv
-(define (trace/result stx [expander expand/compile-time-evals])
-  (let-values ([(result events derivp) (trace* stx expander)])
+(define (trace/result stx [expander expand/compile-time-evals] [norec? #f])
+  (let-values ([(result events derivp) (trace* stx expander norec?)])
     (values result
             (force derivp))))
 
 ;; trace* : stx (stx -> stx) -> stx/exn (list-of event) (promise-of Deriv)
-(define (trace* stx [expander expand/compile-time-evals])
-  (let-values ([(result events) (expand/events stx expander)])
-    (values result
-            events
-            (delay (parse-derivation
-                    (events->token-generator events))))))
+(define (trace* stx [expander expand/compile-time-evals] [norec? #f])
+  (parameterize ((current-module-name-resolver
+                  (if norec?
+                      (let ([old-resolver (current-module-name-resolver)])
+                        (lambda args
+                          (parameterize ((current-expand-observe void)
+                                         (current-module-name-resolver old-resolver))
+                            (apply old-resolver args))))
+                      (current-module-name-resolver))))
+    (let-values ([(result events) (expand/events stx expander)])
+      (values result
+              events
+              (delay (parse-derivation
+                      (events->token-generator events)))))))
 
 ;; trace*-module : module-path -> stx/exn (listof event) (promiseof Deriv)
-(define (trace*-module module-path)
+(define (trace*-module module-path [expander expand])
   (get-module-code (resolve-module-path module-path #f)
                    #:choose (lambda _ 'src)
                    #:compile (lambda (stx)
-                               (trace* stx expand))))
+                               (trace* stx expander))))
 
 ;; events->token-generator : (list-of event) -> (-> token)
 (define (events->token-generator events)
