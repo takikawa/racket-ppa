@@ -575,7 +575,7 @@ change events}.
 
 @defproc[(filesystem-change-evt? [v any/c]) boolean?]{
 
-Returns @racket[#f] if @racket[v] is a @tech{filesystem change
+Returns @racket[#t] if @racket[v] is a @tech{filesystem change
 event}, @racket[#f] otherwise.}
 
 
@@ -622,7 +622,7 @@ operating-system error when creating the event (such as a non-existent
 file), then the @exnraise[exn:fail:filesystem] or @racket[failure-thunk]
 is called.
 
-Creation of a @tech{filesystem change event} alloates resources at the
+Creation of a @tech{filesystem change event} allocates resources at the
 operating-system level. The resources are released at latest when the
 event is sychronized and @tech{ready for synchronization} or when the
 event is canceled with @racket[filesystem-change-evt-cancel].

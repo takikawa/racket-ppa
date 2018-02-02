@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2017 PLT Design Inc.
+  Copyright (c) 2004-2018 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -1874,12 +1874,12 @@ XFORM_SKIP_PROC
    */
 
   if (!SCHEME_MUTABLE_BOXP(box)) {
-    scheme_wrong_contract("box-cas!", "(and/c box? (not immutable?) (not impersonator?))", 0, 1, &box);
+    scheme_wrong_contract("box-cas!", "(and/c box? (not/c immutable?) (not/c impersonator?))", 0, 1, &box);
   }
 
 #ifdef MZ_USE_FUTURES
-  return mzrt_cas((volatile size_t *)(&SCHEME_BOX_VAL(box)), 
-		  (size_t)ov, (size_t)nv)
+  return mzrt_cas((volatile uintptr_t *)(&SCHEME_BOX_VAL(box)),
+                  (uintptr_t)ov, (uintptr_t)nv)
     ? scheme_true : scheme_false;
 #else
   /* For cooperative threading, no atomicity required */
@@ -1966,7 +1966,7 @@ static Scheme_Object *do_chaperone_box(const char *name, int is_impersonator, in
   Scheme_Chaperone *px;
   Scheme_Object *val = argv[0];
   Scheme_Object *redirects;
-  Scheme_Hash_Tree *props;
+  Scheme_Object *props;
 
   if (SCHEME_CHAPERONEP(val))
     val = SCHEME_CHAPERONE_VAL(val);
@@ -3177,7 +3177,7 @@ static Scheme_Object *do_chaperone_hash(const char *name, int is_impersonator, i
   Scheme_Chaperone *px;
   Scheme_Object *val = argv[0];
   Scheme_Object *redirects, *clear, *equal_key_wrap;
-  Scheme_Hash_Tree *props;
+  Scheme_Object *props;
   int start_props = 5;
 
   if (SCHEME_CHAPERONEP(val))

@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2017 PLT Design Inc.
+  Copyright (c) 2004-2018 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
   All rights reserved.
 
@@ -304,6 +304,9 @@ void scheme_init_finalization(void);
 void scheme_init_portable_case(void);
 void scheme_init_stack_check(void);
 void scheme_init_overflow(void);
+#ifdef MZ_USE_JIT
+void scheme_init_jit(void);
+#endif
 #ifdef MZ_PRECISE_GC
 void scheme_register_traversers(void);
 void scheme_init_hash_key_procs(void);
@@ -376,6 +379,7 @@ void scheme_init_exn(Scheme_Env *env);
 void scheme_init_debug(Scheme_Env *env);
 void scheme_init_thread(Scheme_Env *env);
 void scheme_init_unsafe_thread(Scheme_Env *env);
+void scheme_init_unsafe_port(Scheme_Env *env);
 void scheme_init_read(Scheme_Env *env);
 void scheme_init_print(Scheme_Env *env);
 #ifndef NO_SCHEME_THREADS
@@ -601,6 +605,8 @@ extern Scheme_Object *scheme_eqv_proc;
 extern Scheme_Object *scheme_equal_proc;
 
 extern Scheme_Object *scheme_def_exit_proc;
+
+extern Scheme_Object *scheme_unsafe_poller_proc;
 
 THREAD_LOCAL_DECL(extern Scheme_Object *scheme_orig_stdout_port);
 THREAD_LOCAL_DECL(extern Scheme_Object *scheme_orig_stdin_port);
@@ -1072,6 +1078,9 @@ typedef struct Scheme_Structure
   Scheme_Object *slots[mzFLEX_ARRAY_DECL];
 } Scheme_Structure;
 
+#define MAX_STRUCT_FIELD_COUNT 32768
+#define MAX_STRUCT_FIELD_COUNT_STR "32768"
+
 #ifdef MZ_USE_PLACES
 typedef struct Scheme_Serialized_Structure
 {
@@ -1150,7 +1159,7 @@ typedef struct Scheme_Chaperone {
   Scheme_Inclhash_Object iso; /* 0x1 => impersonator, rather than a checking chaperone */
   Scheme_Object *val;  /* root object */
   Scheme_Object *prev; /* immediately chaperoned object */
-  Scheme_Hash_Tree *props;
+  Scheme_Object *props; /* NULL, a vector, or a hash tree */
   Scheme_Object *redirects; /* specific to the type of chaperone and root object */
 } Scheme_Chaperone;
 
@@ -1209,7 +1218,9 @@ void scheme_chaperone_vector_set(Scheme_Object *o, int i, Scheme_Object *v);
 Scheme_Object *scheme_apply_chaperone(Scheme_Object *o, int argc, Scheme_Object **argv, 
                                       Scheme_Object *auto_val, int checks);
 
-Scheme_Hash_Tree *scheme_parse_chaperone_props(const char *who, int start_at, int argc, Scheme_Object **argv);
+Scheme_Object *scheme_parse_chaperone_props(const char *who, int start_at, int argc, Scheme_Object **argv);
+Scheme_Object *scheme_chaperone_props_get(Scheme_Object *props, Scheme_Object *prop);
+Scheme_Object *scheme_chaperone_props_remove(Scheme_Object *props, Scheme_Object *prop);
 
 Scheme_Object *scheme_chaperone_hash_get(Scheme_Object *table, Scheme_Object *key);
 Scheme_Object *scheme_chaperone_hash_traversal_get(Scheme_Object *table, Scheme_Object *key, Scheme_Object **alt_key);
@@ -2870,6 +2881,7 @@ typedef struct Scheme_Comp_Env
 
   struct Scheme_Comp_Env *next;
   struct Scheme_Comp_Env *use_scopes_next; /* fast-forward for use-site scope revert */
+  struct Scheme_Comp_Env *intdef_next; /* when `next` = NULL, can be non-null to continue binding search */
 } Scheme_Comp_Env;
 
 #define LAMBDA_HAS_REST 1
@@ -3998,6 +4010,8 @@ Scheme_Object *scheme_intern_resolved_module_path(Scheme_Object *o);
 Scheme_Object *scheme_resolved_module_path_value(Scheme_Object *rmp);
 int scheme_resolved_module_path_value_matches(Scheme_Object *rmp, Scheme_Object *o);
 
+Scheme_Object *scheme_resolved_module_path_to_modidx(Scheme_Object *rmp);
+
 Scheme_Object *scheme_hash_module_variable(Scheme_Env *env, Scheme_Object *modidx, 
 					   Scheme_Object *stxsym, Scheme_Object *insp,
 					   int pos, intptr_t mod_phase, int is_constant,
@@ -4431,6 +4445,7 @@ Scheme_Object *scheme_checked_set_mcar (int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_checked_set_mcdr (int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_checked_vector_ref(int argc, Scheme_Object **argv);
 Scheme_Object *scheme_checked_vector_set(int argc, Scheme_Object **argv);
+Scheme_Object *scheme_checked_vector_cas(int argc, Scheme_Object **argv);
 Scheme_Object *scheme_string_length(Scheme_Object *v);
 Scheme_Object *scheme_string_eq_2(Scheme_Object *str1, Scheme_Object *str2);
 Scheme_Object *scheme_checked_string_ref(int argc, Scheme_Object *argv[]);
