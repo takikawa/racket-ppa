@@ -10,6 +10,31 @@ racket (6.90.0.901+ppa1-1~bionic1) bionic; urgency=medium
 
  -- Asumu Takikawa <asumu@racket-lang.org>  Thu, 28 Jun 2018 13:30:00 -0800
 
+racket (6.12+dfsg1-2) unstable; urgency=medium
+
+  * Bug fix: "hostname verification with OpenSSL fails", thanks to
+    Benjamin Barenblat (Closes: #877427). Cherry pick upstream pull
+    request 2041.
+
+ -- David Bremner <bremner@debian.org>  Tue, 08 May 2018 09:24:44 -0400
+
+racket (6.12+dfsg1-1) unstable; urgency=medium
+
+  * New upstream release
+  * Install man pages for racket, drracket, and raco
+  * drop "Recommends libunique", thanks to Jeremy Bicha (Closes:
+    #885816). It seems that -singleInstance is not actually working in
+    in 6.11, so no loss of functionality.
+
+ -- David Bremner <bremner@debian.org>  Sun, 11 Mar 2018 09:44:59 -0500
+
+racket (6.11+dfsg1-1) unstable; urgency=medium
+
+  * New upstream release
+  * Use new logo (thanks to Asumu Takikawa)
+
+ -- David Bremner <bremner@debian.org>  Sat, 23 Dec 2017 15:26:58 -0400
+
 racket (6.10.1+dfsg1-1) unstable; urgency=medium
 
   * New upstream release    
