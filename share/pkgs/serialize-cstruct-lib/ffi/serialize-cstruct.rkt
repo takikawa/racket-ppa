@@ -230,7 +230,7 @@
                (old-fill! (other-vers-unconvert s0))
                (fill! old-v))))))
 
-(define ptr-types '(bytes string/ucs-4 string/utf-16 pointer))
+(define ptr-types '(bytes string/ucs-4 string/utf-16 pointer gcpointer))
 
 
 (define (serialize-cstruct-pointers o)

@@ -147,10 +147,12 @@
         (test-T-hiding/id (lambda (x) (id (begin (define-values (y) x) x))))
         (test-T-hiding (lambda (x) (begin (id (define-values (y) x)) y))
                        (lambda (x) (id (define-values (y) x)) y))
+        #| FIXME
         (test-T-hiding (lambda (x) (id (begin (Tid (define-values (y) x)))) (Tid y))
                        (lambda (x) (id (begin (define-values (y) x))) y))
         (test-T-hiding (lambda (x) (id (begin (Tid (define-values (y) x)))) x (Tid y))
                        (lambda (x) (id (begin (define-values (y) x))) x y))
+        |#
         (test-T-hiding (lambda (x) (define-values (y) (id x)) y)
                        (lambda (x) (letrec-values ([(y) (id x)]) y)))
         (test-T-hiding (lambda (x y) x (id y))
@@ -183,12 +185,14 @@
                            (require 'helper)
                            (define x 1))))
 
+        #| FIXME
         (test-T-hiding (module m mzscheme
                          (require 'helper)
                          (define x (Tlist 1)))
                        (module m mzscheme
                          (require 'helper)
                          (define x (list 1))))
+        |#
         (test-Tm-hiding (module m mzscheme
                           (require 'helper)
                           (define x (Tlist 1)))

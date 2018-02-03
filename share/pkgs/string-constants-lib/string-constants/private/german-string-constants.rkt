@@ -160,6 +160,7 @@
  (online-expansion-finished-successfully "Hintergrund-Expansion erfolgreich abgeschlossen")
 
  (jump-to-error "Zum Fehler springen")
+ (copy-error-message "Fehlermeldung kopieren")
  (online-expansion-is-disabled "Hintergrund-Expansion ist deaktiviert")
  ;; these next two show up in the bar along the bottom of the drracket window
  (online-expansion-pending "Hintergrund-Expansion läuft …")
@@ -868,7 +869,15 @@
   "Fehler beim Laden von info.rkt file für ~s")
  (tool-error-phase1 "Fehler in Phase 1 von Tool ~s; ~s")
  (tool-error-phase2 "Fehler in Phase 2 von Tool ~s; ~s")
-
+ ;; tool preferences panel
+ (tool-config-changes "Änderungen an der Tool-Konfiguration werden erst beim nächsten Start von DrRacket aktiv.")
+ (installed-tools "Installierte Tools")
+ (tool-prefs-panel-tool:-label "Tool: ")
+ (load-tool-when-drracket-starts? "Tool laden wenn DrRacket startet?")
+ (unnamed-tool "Tool ohne Namen ~a")
+ (note-that-tool-loaded " (geladen)")
+ (note-that-tool-was-skipped " (übersprungen)")
+ (note-that-tool-failed-to-load " (konnte nicht geladen werden)")
 
  ;;; define popup menu
  (end-of-buffer-define "<< Text-Ende >>")

@@ -516,7 +516,7 @@ this case, the result of @racketin[register-profile-start] should be
 
 @defsignature[stacktrace/annotator-imports^ ()]{
 
-Like @racket[stacktrace^], but providing more control over the annotation function for test
+Like @racket[stacktrace-imports^], but providing more control over the annotation function for test
 cases. The only difference between the two signatures is @racket[test-coverage-enabled],
 @racket[initialize-test-coverage-point], and @racket[test-covered] are replaced by
 @racket[test-coverage-point].

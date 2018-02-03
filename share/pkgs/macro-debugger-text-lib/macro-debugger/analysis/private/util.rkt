@@ -59,7 +59,7 @@
                      #:submodule-path subs
                      #:choose (lambda _ 'src)
                      #:compile (lambda (stx)
-                                 (let-values ([(stx deriv) (trace/result stx expand)])
+                                 (let-values ([(stx deriv) (trace/result stx expand #t)])
                                    (values (compile stx) deriv))))))
 
 ;; here-mpi? : any -> boolean

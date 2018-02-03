@@ -90,3 +90,16 @@ Accepts a client connection for @racket[listener]. If no client
 connection is waiting to be accepted, the call to
 @racket[unix-socket-accept] will block.
 }
+
+@defproc[(unix-socket-accept-evt [listener unix-socket-listener?])
+         evt?]{
+
+Returns a synchronizable event that is ready for synchronization when
+@racket[unix-socket-accept] on @racket[listener] would not block. The
+synchronization result is a list containing two items: an input port
+and an output port. The ports are managed by the custodian that is the
+current custodian at the time that @racket[unix-socket-accept-evt] is
+called.
+
+@history[#:added "1.2"]
+}
