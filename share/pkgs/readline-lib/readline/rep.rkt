@@ -5,11 +5,14 @@
 
 (define-runtime-path rep-start "rep-start.rkt")
 
-(provide install-readline!)
+(provide install-readline!
+         pre-readline-input-port)
 
-(let ([inp (current-input-port)] [outp (current-output-port)])
-  (when (and (eq? 'stdin (object-name inp)) (terminal-port? inp))
-    (dynamic-require rep-start #f)))
+(define pre-readline-input-port
+  (let ([inp (current-input-port)] [outp (current-output-port)])
+    (and (eq? 'stdin (object-name inp))
+         (terminal-port? inp)
+         (dynamic-require rep-start 'pre-readline-input-port))))
 
 (define readline-init-expr
   '(require readline/rep))

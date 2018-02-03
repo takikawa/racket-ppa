@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2017 PLT Design Inc.
+  Copyright (c) 2004-2018 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -60,6 +60,7 @@ typedef struct Scheme_Subprocess {
   Scheme_Object so;
   rktio_process_t *proc;
   Scheme_Custodian_Reference *mref;
+  int is_group_rep;
 } Scheme_Subprocess;
 
 /******************** refcounts ********************/
@@ -233,6 +234,13 @@ static void register_subprocess_wait();
 
 static void block_timer_signals(int block);
 
+static Scheme_Object *unsafe_fd_to_port(int, Scheme_Object *[]);
+static Scheme_Object *unsafe_port_to_fd(int, Scheme_Object *[]);
+static Scheme_Object *unsafe_fd_to_semaphore(int, Scheme_Object *[]);
+static Scheme_Object *unsafe_socket_to_port(int, Scheme_Object *[]);
+static Scheme_Object *unsafe_port_to_socket(int, Scheme_Object *[]);
+static Scheme_Object *unsafe_socket_to_semaphore(int, Scheme_Object *[]);
+
 typedef struct Scheme_Read_Write_Evt {
   Scheme_Object so;
   Scheme_Object *port;
@@ -270,7 +278,7 @@ ROSYM static Scheme_Object *must_truncate_symbol;
 
 ROSYM Scheme_Object *scheme_none_symbol, *scheme_line_symbol, *scheme_block_symbol;
 
-ROSYM static Scheme_Object *exact_symbol;
+ROSYM static Scheme_Object *exact_symbol, *new_symbol;
 
 #define READ_STRING_BYTE_BUFFER_SIZE 1024
 THREAD_LOCAL_DECL(static char *read_string_byte_buffer);
@@ -327,8 +335,10 @@ scheme_init_port (Scheme_Env *env)
   scheme_block_symbol = scheme_intern_symbol("block");
 
   REGISTER_SO(exact_symbol);
+  REGISTER_SO(new_symbol);
 
   exact_symbol = scheme_intern_symbol("exact");
+  new_symbol = scheme_intern_symbol("new");
 
   REGISTER_SO(fd_input_port_type);
   REGISTER_SO(fd_output_port_type);
@@ -398,6 +408,17 @@ void scheme_init_port_wait()
   scheme_add_evt(scheme_port_closed_evt_type, (Scheme_Ready_Fun)closed_evt_ready, NULL, NULL, 1);
   scheme_add_evt(scheme_filesystem_change_evt_type, (Scheme_Ready_Fun)filesystem_change_evt_ready, 
                  filesystem_change_evt_need_wakeup, NULL, 1);
+}
+
+void scheme_init_unsafe_port (Scheme_Env *env)
+{
+  GLOBAL_PRIM_W_ARITY("unsafe-file-descriptor->port", unsafe_fd_to_port, 3, 3, env);
+  GLOBAL_PRIM_W_ARITY("unsafe-port->file-descriptor", unsafe_port_to_fd, 1, 1, env);
+  GLOBAL_PRIM_W_ARITY("unsafe-file-descriptor->semaphore", unsafe_fd_to_semaphore, 2, 2, env);
+
+  GLOBAL_PRIM_W_ARITY("unsafe-socket->port", unsafe_socket_to_port, 3, 3, env);
+  GLOBAL_PRIM_W_ARITY("unsafe-port->socket", unsafe_port_to_socket, 1, 1, env);
+  GLOBAL_PRIM_W_ARITY("unsafe-socket->semaphore", unsafe_socket_to_semaphore, 2, 2, env);
 }
 
 void scheme_init_port_places(void)
@@ -3405,6 +3426,142 @@ intptr_t scheme_get_port_fd(Scheme_Object *p)
     return -1;
 }
 
+static Scheme_Object *unsafe_handle_to_port(const char *who, int argc, Scheme_Object *argv[], int socket)
+{
+  Scheme_Object *name = argv[1], *l, *a;
+  intptr_t s;
+  int closemode = 1;
+  int regfile = 0;
+  int textmode = 0;
+  int readmode = 0, writemode = 0;
+
+  if (!scheme_get_int_val(argv[0], &s))
+    scheme_wrong_contract(who, "handle-integer?", 0, argc, argv);
+
+  if (socket) {
+    if (!SCHEME_BYTE_STRINGP(name))
+      scheme_wrong_contract(who, "bytes?", 1, argc, argv);
+  }
+  
+  l = argv[2];
+  while (SCHEME_PAIRP(l)) {
+    a = SCHEME_CAR(l);
+    if (!SCHEME_SYMBOLP(a) || SCHEME_SYM_WEIRDP(a))
+      break;
+    if (socket) {
+      if (!strcmp(SCHEME_SYM_VAL(a), "no-close"))
+        closemode = 0;
+    } else {
+      if (!strcmp(SCHEME_SYM_VAL(a), "read"))
+        readmode = 1;
+      else if (!strcmp(SCHEME_SYM_VAL(a), "write"))
+        writemode = 1;
+      else if (!strcmp(SCHEME_SYM_VAL(a), "text"))
+        textmode = 1;
+      else if (!strcmp(SCHEME_SYM_VAL(a), "regular-file"))
+        regfile = 1;
+      else
+        break;
+    }
+    l = SCHEME_CDR(l);
+  }
+  if (!SCHEME_NULLP(l))
+    scheme_wrong_contract(who, "mode-symbol-list?", 2, argc, argv);
+
+  if (socket) {
+    Scheme_Object *p[2];
+    scheme_socket_to_ports(s, SCHEME_BYTE_STR_VAL(name), closemode, &p[0], &p[1]);
+    return scheme_values(2, p);
+  } else if (writemode)
+    return scheme_make_fd_output_port(s, name, regfile, textmode, readmode);
+  else if (readmode)
+    return scheme_make_fd_input_port(s, name, regfile, textmode);
+  else {
+    scheme_contract_error(who,
+                          "mode list must include at least one of 'read or 'write"
+                          "mode list", 1, argv[2],
+                          NULL);
+    return NULL;
+  }
+}
+
+static Scheme_Object *unsafe_fd_to_port(int argc, Scheme_Object *argv[])
+{
+  return unsafe_handle_to_port("unsafe-file-descriptor->port", argc, argv, 0);
+}
+  
+static Scheme_Object *unsafe_socket_to_port(int argc, Scheme_Object *argv[])
+{
+  return unsafe_handle_to_port("unsafe-socket->port", argc, argv, 1);
+}
+  
+static Scheme_Object *unsafe_port_to_fd(int argc, Scheme_Object *argv[])
+{
+  intptr_t s;
+  
+  if (scheme_get_port_file_descriptor(argv[0], &s))
+    return scheme_make_integer_value(s);
+  else {
+    if (!SCHEME_INPUT_PORTP(argv[0]) && !SCHEME_OUTPUT_PORTP(argv[0]))
+      scheme_wrong_contract("unsafe-port->file-descriptor", "port?", 0, argc, argv);
+    return scheme_false;
+  }
+}
+
+static Scheme_Object *unsafe_port_to_socket(int argc, Scheme_Object *argv[])
+{
+  intptr_t s;
+  
+  if (scheme_get_port_socket(argv[0], &s))
+    return scheme_make_integer_value(s);
+  else {
+    if (!SCHEME_INPUT_PORTP(argv[0]) && !SCHEME_OUTPUT_PORTP(argv[0]))
+      scheme_wrong_contract("unsafe-port->socket", "port?", 0, argc, argv);
+    return scheme_false;
+  }
+}
+
+static Scheme_Object *unsafe_handle_to_semaphore(const char *who, int argc, Scheme_Object *argv[], int is_socket)
+{
+  Scheme_Object *a = argv[1];
+  intptr_t s;
+  int mode;
+
+  if (!scheme_get_int_val(argv[0], &s))
+    scheme_wrong_contract(who, "handle-integer?", 0, argc, argv);
+
+  if (!SCHEME_SYMBOLP(a) || SCHEME_SYM_WEIRDP(a))
+    mode = -1;
+  else if (!strcmp(SCHEME_SYM_VAL(a), "read"))
+    mode = MZFD_CREATE_READ;
+  else if (!strcmp(SCHEME_SYM_VAL(a), "write"))
+    mode = MZFD_CREATE_WRITE;
+  else if (!strcmp(SCHEME_SYM_VAL(a), "check-read"))
+    mode = MZFD_CHECK_READ;
+  else if (!strcmp(SCHEME_SYM_VAL(a), "check-write"))
+    mode = MZFD_CHECK_WRITE;
+  else if (!strcmp(SCHEME_SYM_VAL(a), "remove"))
+    mode = MZFD_REMOVE;
+  else 
+    mode = -1;
+
+  if (mode == -1)
+    scheme_wrong_contract(who, "semaphore-mode-symbol?", 1, argc, argv);
+
+  a = scheme_fd_to_semaphore(s, mode, is_socket);
+  return (a ? a : scheme_false);
+}
+
+static Scheme_Object *unsafe_fd_to_semaphore(int argc, Scheme_Object *argv[])
+{
+  return unsafe_handle_to_semaphore("unsafe-file-descriptor->semaphore", argc, argv, 0);
+}
+
+static Scheme_Object *unsafe_socket_to_semaphore(int argc, Scheme_Object *argv[])
+{
+  return unsafe_handle_to_semaphore("unsafe-socket->semaphore", argc, argv, 1);
+}
+
 Scheme_Object *scheme_file_identity(int argc, Scheme_Object *argv[])
 {
   intptr_t fd = 0;
@@ -5778,6 +5935,8 @@ static Scheme_Object *redirect_get_or_peek_bytes_k(void)
 /*                             subprocess                                 */
 /*========================================================================*/
 
+#define SCHEME_SUBPROCESSP(o) SAME_TYPE(SCHEME_TYPE(o), scheme_subprocess_type)
+
 static void close_subprocess_handle(void *so, void *ignored)
 {
   Scheme_Subprocess *sp = (Scheme_Subprocess *)so;
@@ -5877,7 +6036,7 @@ static Scheme_Object *do_subprocess_kill(Scheme_Object *_sp, Scheme_Object *kill
   if (!ok) {
     if (can_error)
       scheme_raise_exn(MZEXN_FAIL, 
-                       "subprocess-kill: operation failed\n"
+                       "Subprocess-kill: operation failed\n"
                        "  system error: %R");
   }
 
@@ -5957,7 +6116,7 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
   Scheme_Object *errport;
   Scheme_Object *a[4];
   Scheme_Subprocess *subproc;
-  Scheme_Object *cust_mode, *current_dir;
+  Scheme_Object *cust_mode, *current_dir, *group;
   int flags = 0;
   rktio_fd_t *stdout_fd = NULL;
   rktio_fd_t *stdin_fd = NULL;
@@ -5966,6 +6125,7 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
   rktio_envvars_t *envvars;
   rktio_process_result_t *result;
   Scheme_Config *config;
+  int command_arg_i;
   int argc;
   char **argv, *command;
 
@@ -6030,18 +6190,34 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
       scheme_wrong_contract(name, "(or/c (and/c file-stream-port? output-port?) #f 'stdout)", 2, c, args);
   }
 
-  if (!SCHEME_PATH_STRINGP(args[3]))
-    scheme_wrong_contract(name, "path-string?", 3, c, args);
+  if ((c > 4)
+      && (SCHEME_FALSEP(args[3])
+          || SAME_OBJ(args[3], new_symbol)
+          || SCHEME_SUBPROCESSP(args[3]))) {
+    /* optional group specification provided */
+    command_arg_i = 4;
+    group = args[3];
+  } else {
+    command_arg_i = 3;
+    group = scheme_false;
+  }
+
+  if (!SCHEME_PATH_STRINGP(args[command_arg_i]))
+    scheme_wrong_contract(name,
+                          (((command_arg_i == 3) && (c > 4))
+                           ? "(or/c path-string? #f 'new subprocess?)"
+                           : "path-string?"),
+                          command_arg_i, c, args);
 
   /*--------------------------------------*/
   /*          Sort out arguments          */
   /*--------------------------------------*/
 
-  argc = c - 3;
+  argc = c - command_arg_i;
   argv = MALLOC_N(char *, argc);
   {
     char *ef;
-    ef = scheme_expand_string_filename(args[3],
+    ef = scheme_expand_string_filename(args[command_arg_i],
 				       (char *)name, 
 				       NULL,
 				       SCHEME_GUARD_FILE_EXECUTE);
@@ -6056,13 +6232,13 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
     argv[0] = np;
   }
   
-  if ((c == 6) && SAME_OBJ(args[4], exact_symbol)) {
+  if ((c == (command_arg_i + 3)) && SAME_OBJ(args[command_arg_i+1], exact_symbol)) {
     argv[2] = NULL;
-    if (!SCHEME_CHAR_STRINGP(args[5]) || scheme_any_string_has_null(args[5]))
-      scheme_wrong_contract(name, CHAR_STRING_W_NO_NULLS, 5, c, args);
+    if (!SCHEME_CHAR_STRINGP(args[command_arg_i+2]) || scheme_any_string_has_null(args[command_arg_i+2]))
+      scheme_wrong_contract(name, CHAR_STRING_W_NO_NULLS, command_arg_i+2, c, args);
     {
       Scheme_Object *bs;
-      bs = scheme_char_string_to_byte_string(args[5]);
+      bs = scheme_char_string_to_byte_string(args[command_arg_i+2]);
       argv[1] = SCHEME_BYTE_STR_VAL(bs);
     }
 
@@ -6071,11 +6247,11 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
     else 
       scheme_contract_error(name,
                             "exact command line not supported on this platform",
-                            "exact command", 1, args[5],
+                            "exact command", 1, args[command_arg_i + 2],
                             NULL);
   } else {
     int i;
-    for (i = 4; i < c; i++) {
+    for (i = command_arg_i + 1; i < c; i++) {
       if (((!SCHEME_CHAR_STRINGP(args[i]) && !SCHEME_BYTE_STRINGP(args[i]))
            || scheme_any_string_has_null(args[i]))
           && !SCHEME_PATHP(args[i]))
@@ -6087,12 +6263,21 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
         bs = args[i];
         if (SCHEME_CHAR_STRINGP(args[i]))
           bs = scheme_char_string_to_byte_string_locale(bs);
-	argv[i - 3] = SCHEME_BYTE_STR_VAL(bs);
+	argv[i - command_arg_i] = SCHEME_BYTE_STR_VAL(bs);
       }
     }
   }
 
   command = argv[0];
+
+  if (SCHEME_SUBPROCESSP(group)) {
+    if (!((Scheme_Subprocess *)group)->is_group_rep) {
+      scheme_contract_error(name, "subprocess does not represent a new group",
+                            "subprocess", 1, group,
+                            NULL);
+      return NULL;
+    }
+  }
 
   if (!stdin_fd || !stdout_fd || !stderr_fd)
     scheme_custodian_check_available(NULL, name, "file-stream");
@@ -6102,9 +6287,13 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
   /*--------------------------------------*/
 
   config = scheme_current_config();
-  
-  cust_mode = scheme_get_param(config, MZCONFIG_SUBPROC_GROUP_ENABLED);
-  if (SCHEME_TRUEP(cust_mode))
+
+  if (SCHEME_FALSEP(group)) {
+    group = scheme_get_param(config, MZCONFIG_SUBPROC_GROUP_ENABLED);
+    if (SCHEME_TRUEP(group))
+      group = new_symbol;
+  }
+  if (SAME_OBJ(group, new_symbol))
     flags |= RKTIO_PROCESS_NEW_GROUP;
 
   cust_mode = scheme_get_param(config, MZCONFIG_SUBPROC_CUSTODIAN_MODE);
@@ -6122,6 +6311,7 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
   result = rktio_process(scheme_rktio,
                          command, argc, (rktio_const_string_t *)argv,
                          stdout_fd, stdin_fd, stderr_fd,
+                         (SCHEME_SUBPROCESSP(group) ? ((Scheme_Subprocess *)group)->proc : NULL),
                          SCHEME_PATH_VAL(current_dir), envvars,
                          flags);
 
@@ -6160,6 +6350,7 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
     subproc = MALLOC_ONE_TAGGED(Scheme_Subprocess);
     subproc->so.type = scheme_subprocess_type;
     subproc->proc = result->process;
+    subproc->is_group_rep = SAME_OBJ(group, new_symbol);
     scheme_add_finalizer(subproc, close_subprocess_handle, NULL);
 
     if (SCHEME_TRUEP(cust_mode)) {
@@ -6610,99 +6801,17 @@ void scheme_kill_green_thread_timer()
 
 #ifdef OS_X
 
-/* Sleep-in-thread support needed for GUIs Mac OS X.
-   To merge waiting on a CoreFoundation event with a select(), an embedding
-   application can attach a single socket to an event callback, and then
-   create a Mac thread to call the usual sleep and write to the socket when
-   data is available. */
-
-#ifdef MZ_PRECISE_GC
-START_XFORM_SKIP;
-#endif
-
-typedef struct {
-  pthread_mutex_t lock;
-  pthread_cond_t cond;
-  int count;
-} pt_sema_t;
-
-void pt_sema_init(pt_sema_t *sem)
+void scheme_start_sleeper_thread(void (*ignored_sleep)(float seconds, void *fds), float secs, void *fds, int hit_fd)
+  XFORM_SKIP_PROC
 {
-  pthread_mutex_init(&sem->lock, NULL);
-  pthread_cond_init(&sem->cond, NULL);
-  sem->count = 0;
-}
-
-void pt_sema_wait(pt_sema_t *sem)
-{
-  pthread_mutex_lock(&sem->lock);
-  while (sem->count <= 0)
-    pthread_cond_wait(&sem->cond, &sem->lock);
-  sem->count--;
-  pthread_mutex_unlock(&sem->lock);
-}
-
-void pt_sema_post(pt_sema_t *sem)
-{
-  pthread_mutex_lock(&sem->lock);
-  sem->count++;
-  if (sem->count > 0)
-    pthread_cond_signal(&sem->cond);
-  pthread_mutex_unlock(&sem->lock);
-}
-
-static pthread_t watcher;
-static pt_sema_t sleeping_sema, done_sema;
-static float sleep_secs;
-static int slept_fd;
-static void *sleep_fds;
-static void (*sleep_sleep)(float seconds, void *fds);
-
-static void *do_watch(void *other)
-{
-  scheme_init_os_thread_like(other);
-  while (1) {
-    pt_sema_wait(&sleeping_sema);
-
-    sleep_sleep(sleep_secs, sleep_fds);
-    write(slept_fd, "y", 1);
-
-    pt_sema_post(&done_sema);
-  }
-  return NULL;
-}
-
-void scheme_start_sleeper_thread(void (*given_sleep)(float seconds, void *fds), float secs, void *fds, int hit_fd)
-{
-  if (!watcher) {
-    pt_sema_init(&sleeping_sema);
-    pt_sema_init(&done_sema);
-
-    if (pthread_create(&watcher, NULL, do_watch, scheme_get_os_thread_like())) {
-      scheme_log_abort("pthread_create failed");
-      abort();
-    }
-  }
-
-  sleep_sleep = given_sleep;
-  sleep_fds = fds;
-  sleep_secs = secs;
-  slept_fd = hit_fd;
-  pt_sema_post(&sleeping_sema);
+  rktio_start_sleep(scheme_rktio, secs, fds, scheme_semaphore_fd_set, hit_fd);
 }
 
 void scheme_end_sleeper_thread()
+  XFORM_SKIP_PROC
 {
-  scheme_signal_received();
-  pt_sema_wait(&done_sema);
-
-  /* Clear external event flag */
-  rktio_flush_signals_received(scheme_rktio);
+  rktio_end_sleep(scheme_rktio);
 }
-
-#ifdef MZ_PRECISE_GC
-END_XFORM_SKIP;
-#endif
 
 #else
 

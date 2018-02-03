@@ -62,9 +62,11 @@ example:
 
 The @racketmodname[readline] library automatically checks whether the
 current input port is a terminal, as determined by
-@racket[terminal-port?], and it installs @|readline| only to replace
-terminal ports.  The @racketmodname[readline/rep-start] module
-installs @|readline| without a terminal check.
+@racket[terminal-port?], and also checks that its name, as determined
+by @racket[object-name], is @racket['stdin], and it installs
+@|readline| only to replace the stdin terminal port.  The
+@racketmodname[readline/rep-start] module installs @|readline| without
+a terminal check.
 
 By default, @|readline|'s completion is set to use the visible
 bindings in the current namespace. This is far from ideal, but it's
@@ -100,6 +102,23 @@ file.
 For more fine-grained control, such as conditionally loading
 @|readline| based on an environment variable, edit
 @filepath{~/.racketrc} manually.}
+
+@defthing[pre-readline-input-port (or/c input-port? false/c)]{
+If required through @racketmodname[readline/rep-start], @racket[pre-readline-input-port] will always
+be the input port replaced by the readline input port.
+
+If required through @racketmodname[readline], @racket[pre-readline-input-port] will be an input port
+only when the @racket[current-input-port] is actually replaced.
+Otherwise, it is @racket[#f].
+
+Using @racket[pre-readline-input-port] is useful for sending the
+original stdin to subprocesses.  Subprocesses generally require an
+input port backed by a file descriptor, and many interactive programs
+behave differently when they have a terminal file descriptor.
+Otherwise, @racket[pre-readline-input-port] should not be used, as
+reading from it will interfere with the readline port.
+
+@history[#:added "1.1"]}
 
 @section{Interacting with the @|Readline|-Enabled Input Port }
 
@@ -248,6 +267,39 @@ Sets @|readline|'s @tt{rl_completion_entry_function} to
 @racket[proc]. The @racket[type] argument, whose possible values are
 from @racketmodname[ffi/unsafe], determines the type of value supplied
 to the @racket[proc].}
+
+@defproc[(set-completion-append-character! [c char?])
+         void?]{
+Sets @|readline|'s @tt{rl_completion_append_character} to
+@racket[c].  The value is reset by the readline library, so it must
+be set inside a completion function each time it is called.
+The default is @racket[#\space].  Set it to @racket[#\null] to
+have no character appended to the completion result.
+
+The @tt{rl_completion_append_character} is used by the readline
+library whenever a completion function returns a single option, and it
+is therefore chosen.  The choice will be filled in on the command
+line, and then the @tt{rl_completion_append_character} is
+appended.
+
+As an example, you could set the completion append character to a
+slash when completing the name of a directory, a space when you know
+the user will want to write another argument, or @racket[#\null] to
+avoid appending when a user might want to write something directly
+after the completion, such as punctuation or an extension of a word.
+
+If you want to make a completion function to more easily write the
+names of your favorite characters (and share your excitement about
+them), a use of @racket[set-completion-append-character!] may look
+like this:
+
+@racketblock[
+(define (christmas-character-complete name-str)
+  (set-completion-append-character! #\!)
+  (filter (λ (x) (string-prefix? x name-str))
+          '("Rudolf" "Hermie" "Bumble" "Yukon" "Clarise" "Santa")))]
+
+@history[#:added "1.1"]}
 
 @defproc[(readline-newline) void?]{
 

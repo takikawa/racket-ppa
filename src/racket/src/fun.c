@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2017 PLT Design Inc.
+  Copyright (c) 2004-2018 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -3535,7 +3535,7 @@ static Scheme_Object *do_chaperone_procedure(const char *name, const char *whati
 {
   Scheme_Chaperone *px, *px2;
   Scheme_Object *val = argv[0], *orig, *naya, *r, *app_mark;
-  Scheme_Hash_Tree *props;
+  Scheme_Object *props;
 
   if (SCHEME_CHAPERONEP(val))
     val = SCHEME_CHAPERONE_VAL(val);
@@ -3569,13 +3569,10 @@ static Scheme_Object *do_chaperone_procedure(const char *name, const char *whati
 
   props = scheme_parse_chaperone_props(name, 2, argc, argv);
   if (props) {
-    app_mark = scheme_hash_tree_get(props, scheme_app_mark_impersonator_property);
+    app_mark = scheme_chaperone_props_get(props, scheme_app_mark_impersonator_property);
     if (app_mark) {
       /* don't need to keep the property */
-      if (props->count == 1)
-        props = NULL; 
-      else
-        props = scheme_hash_tree_set(props, scheme_app_mark_impersonator_property, NULL);
+      props = scheme_chaperone_props_remove(props, scheme_app_mark_impersonator_property);
     } else
       app_mark = scheme_false;
   } else
@@ -4555,7 +4552,7 @@ Scheme_Object *do_chaperone_continuation_mark_key (const char *name, int is_impe
   Scheme_Chaperone *px;
   Scheme_Object *val = argv[0];
   Scheme_Object *redirects;
-  Scheme_Hash_Tree *props;
+  Scheme_Object *props;
 
   if (SCHEME_CHAPERONEP(val))
     val = SCHEME_CHAPERONE_VAL(val);
@@ -5368,9 +5365,9 @@ void prune_cont_marks(Scheme_Meta_Continuation *resume_mc, Scheme_Cont *cont, Sc
     return;
   }
 
-  for (pos = cont->cont_mark_total, num_coverlap = 0;
-       pos--;
-       num_coverlap++) {
+  for (pos = 0, num_coverlap = 0;
+       pos < cont->cont_mark_total;
+       num_coverlap++, pos++) {
     if (cont->cont_mark_stack_copied[pos].pos != (cont->cont_mark_pos_bottom + 2))
       break;
   }
@@ -5399,7 +5396,7 @@ void prune_cont_marks(Scheme_Meta_Continuation *resume_mc, Scheme_Cont *cont, Sc
       scheme_hash_set(ht, SCHEME_VEC_ELS(extra_marks)[i], val);
     }
   }
-  for (pos = cont->cont_mark_total - 1, i = 0; i < num_coverlap; i++, pos--) {
+  for (pos = 0, i = 0; i < num_coverlap; i++, pos++) {
     scheme_hash_set(ht, 
                     cont->cont_mark_stack_copied[pos].key,
                     NULL);
@@ -6495,7 +6492,7 @@ Scheme_Object *do_chaperone_prompt_tag (const char *name, int is_impersonator, i
   Scheme_Chaperone *px;
   Scheme_Object *val = argv[0];
   Scheme_Object *redirects;
-  Scheme_Hash_Tree *props;
+  Scheme_Object *props;
   int ppos;
 
   if (SCHEME_CHAPERONEP(val))
@@ -8456,10 +8453,6 @@ scheme_extract_one_cc_mark_with_meta(Scheme_Object *mark_set, Scheme_Object *key
     while (chain) {
       if (chain->key == key)
         if (key_arg != key)
-          /*
-           * TODO: is this the only name that this procedure is called as
-           * publicly?
-           */
           return scheme_chaperone_do_continuation_mark("continuation-mark-set-first",
                                                        1, key_arg, chain->val);
         else

@@ -302,7 +302,7 @@ Windows examples.
 Like @racket[build-path], except a path convention type is specified
 explicitly.}
 
-@defproc[(absolute-path? [path (or/c path-string? path-for-some-system?)]) boolean?]{
+@defproc[(absolute-path? [path (or/c path? string? path-for-some-system?)]) boolean?]{
 
 Returns @racket[#t] if @racket[path] is an absolute path, @racket[#f]
 otherwise. The @racket[path] argument can be a path for any
@@ -311,7 +311,7 @@ contains a nul character), @racket[#f] is returned. This procedure
 does not access the filesystem.}
 
 
-@defproc[(relative-path? [path (or/c path-string? path-for-some-system?)]) boolean?]{
+@defproc[(relative-path? [path (or/c path? string? path-for-some-system?)]) boolean?]{
 
 Returns @racket[#t] if @racket[path] is a relative path, @racket[#f]
 otherwise. The @racket[path] argument can be a path for any
@@ -320,7 +320,7 @@ contains a nul character), @racket[#f] is returned. This procedure
 does not access the filesystem.}
 
 
-@defproc[(complete-path? [path (or/c path-string? path-for-some-system?)]) boolean?]{
+@defproc[(complete-path? [path (or/c path? string? path-for-some-system?)]) boolean?]{
 
 Returns @racket[#t] if @racket[path] is a @deftech{complete}ly determined path
 (@italic{not} relative to a directory or drive), @racket[#f]
@@ -389,8 +389,8 @@ see @secref["windowspaths"] for more information.
 @techlink{Cleanse}s @racket[path] (as described at the beginning of
 this chapter) without consulting the filesystem.
 
-@examples[#:eval (make-base-eval)
-  (let ([p (build-path/convention-type 'unix "foo//bar")])
+@examples[#:eval (make-base-eval '(require racket/path))
+  (let ([p (string->some-system-path "tiny//dancer" 'unix)])
     (cleanse-path p))
 ]}
 
@@ -451,8 +451,8 @@ simplification).
 See @secref["unixpaths"] and @secref["windowspaths"] for more
 information on simplifying paths.
 
-@examples[#:eval (make-base-eval)
-  (let ([p (build-path/convention-type 'unix "foo//bar/baz/..")])
+@examples[#:eval (make-base-eval '(require racket/path))
+  (let ([p (string->some-system-path "tiny//in/my/head/../../../dancer" 'unix)])
     (simplify-path p #f))
 ]}
  

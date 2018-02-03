@@ -7,6 +7,7 @@
          add-history add-history-bytes
          history-length history-get history-delete
          set-completion-function!
+         set-completion-append-character!
          readline-newline readline-redisplay)
 
 ;; libncurses and/or libtermcap needed on some platforms
@@ -156,6 +157,16 @@
                     [cur (if (string? cur) (string->bytes/utf-8 cur) cur)])
                (malloc (add1 (bytes-length cur)) cur 'raw)))))
     complete))
+
+(define (set-completion-append-character! c)
+  (cond [(char? c)
+         (set-ffi-obj! "rl_completion_append_character"
+                       libreadline
+                       _int
+                       (char->integer c))]
+        [else (raise-argument-error 'set-completion-append-character!
+                                    "char?"
+                                    c)]))
 
 (set-ffi-obj! "rl_readline_name" libreadline _pointer
               (let ([s #"mzscheme"])

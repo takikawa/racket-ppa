@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2017 PLT Design Inc.
+  Copyright (c) 2004-2018 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -51,8 +51,10 @@ READ_ONLY Scheme_Object *scheme_liberal_def_ctx_type;;
 READ_ONLY Scheme_Object *scheme_object_name_property;
 READ_ONLY Scheme_Object *scheme_struct_to_vector_proc;
 READ_ONLY Scheme_Object *scheme_authentic_property;
+READ_ONLY Scheme_Object *scheme_unsafe_poller_proc;
 
 READ_ONLY static Scheme_Object *location_struct;
+READ_ONLY static Scheme_Object *poller_struct;
 READ_ONLY static Scheme_Object *write_property;
 READ_ONLY static Scheme_Object *print_attribute_property;
 READ_ONLY static Scheme_Object *evt_property;
@@ -168,6 +170,7 @@ static void get_struct_type_info(int argc, Scheme_Object *argv[], Scheme_Object 
 
 
 static int evt_struct_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo);
+static void evt_struct_needs_wakeup(Scheme_Object *o, void *fds);
 static int is_evt_struct(Scheme_Object *);
 
 static int wrapped_evt_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo);
@@ -220,6 +223,9 @@ static void register_traversers(void);
 
 THREAD_LOCAL_DECL(static Scheme_Bucket_Table *prefab_table);
 static Scheme_Object *make_prefab_key(Scheme_Struct_Type *type);
+
+#define SCHEME_POLLERP(v) (SCHEME_STRUCTP(v) && scheme_is_struct_instance(poller_struct, v))
+#define SCHEME_POLLER_PROC(o) (((Scheme_Structure *)(o))->slots[0])
 
 #define cons scheme_make_pair
 #define icons scheme_make_pair
@@ -336,6 +342,11 @@ scheme_init_struct (Scheme_Env *env)
     scheme_add_global_constant(scheme_symbol_val(loc_names[i]), loc_values[i], 
 			       env);
   }
+
+  /* Add poller structure: */
+  REGISTER_SO(poller_struct);
+  poller_struct = scheme_make_struct_type_from_string("unsafe-poller", NULL, 1, NULL, NULL, 1);
+  scheme_unsafe_poller_proc = make_struct_proc((Scheme_Struct_Type *)poller_struct, "unsafe-poller", SCHEME_CONSTR, 1);
 
   REGISTER_SO(write_property);
   {
@@ -887,7 +898,7 @@ void scheme_init_struct_wait()
 {
   scheme_add_evt(scheme_structure_type,
                  (Scheme_Ready_Fun)evt_struct_is_ready,
-                 NULL,
+                 (Scheme_Needs_Wakeup_Fun)evt_struct_needs_wakeup,
                  is_evt_struct, 1);
   scheme_add_evt(scheme_proc_struct_type,
                  (Scheme_Ready_Fun)evt_struct_is_ready,
@@ -1048,6 +1059,43 @@ static Scheme_Object *current_code_inspector(int argc, Scheme_Object *argv[])
 /*                             properties                                 */
 /*========================================================================*/
 
+Scheme_Object *scheme_chaperone_props_get(Scheme_Object *props, Scheme_Object *prop)
+{
+  if (!props)
+    return NULL;
+  else if (SCHEME_VECTORP(props)) {
+    int i;
+    for (i = SCHEME_VEC_SIZE(props); i > 0; ) {
+      i -= 2;
+      if (SAME_OBJ(SCHEME_VEC_ELS(props)[i], prop))
+        return SCHEME_VEC_ELS(props)[i+1];
+    }
+    return NULL;
+  } else
+    return (Scheme_Object *)scheme_hash_tree_get((Scheme_Hash_Tree *)props, prop);
+}
+
+Scheme_Object *scheme_chaperone_props_remove(Scheme_Object *props, Scheme_Object *prop)
+/* assumes that `prop` is currently set in `props` */
+{
+  if (SCHEME_VECTORP(props)) {
+    Scheme_Object *vec;
+    int i, j;
+    j = SCHEME_VEC_SIZE(props);
+    if (j == 2) return NULL;
+    vec = scheme_make_vector(j - 2, NULL);
+    for (i = SCHEME_VEC_SIZE(props), j = 0; i > 0; ) {
+      i -= 2;
+      if (!SAME_OBJ(SCHEME_VEC_ELS(props)[i], prop)) {
+        SCHEME_VEC_ELS(vec)[j++] = SCHEME_VEC_ELS(props)[i];
+        SCHEME_VEC_ELS(vec)[j++] = SCHEME_VEC_ELS(props)[i+1];
+      }
+    }
+    return vec;
+  } else
+    return (Scheme_Object *)scheme_hash_tree_set((Scheme_Hash_Tree *)props, prop, NULL);
+}
+
 static Scheme_Object *prop_pred(int argc, Scheme_Object **args, Scheme_Object *prim)
 {
   Scheme_Struct_Type *stype;
@@ -1060,10 +1108,7 @@ static Scheme_Object *prop_pred(int argc, Scheme_Object **args, Scheme_Object *p
     if (SCHEME_CHAPERONEP(v)) {
       /* Check for property at chaperone level: */
       px = (Scheme_Chaperone *)v;
-      if (px->props)
-        v = scheme_hash_tree_get(px->props, prop);
-      else
-        v = NULL;
+      v = scheme_chaperone_props_get(px->props, prop);
       if (v)
         return scheme_true;
       v = px->val;
@@ -1176,11 +1221,9 @@ static Scheme_Object *do_chaperone_prop_accessor(const char *who, Scheme_Object 
       Scheme_Object *v;
       Scheme_Hash_Tree *ht;
 
-      if (px->props) {
-        v = scheme_hash_tree_get(px->props, prop);
-        if (v)
-          return v;
-      }
+      v = scheme_chaperone_props_get(px->props, prop);
+      if (v)
+        return v;
 
       if (!SCHEME_REDIRECTS_STRUCTP(px->redirects)
 	  || SCHEME_FALSEP(SCHEME_VEC_ELS(px->redirects)[0]))
@@ -1612,11 +1655,20 @@ static Scheme_Object *check_indirect_property_value_ok(const char *name, Check_V
   return v;
 }
 
+static int is_evt_or_poller(Scheme_Object *v)
+{
+  if (scheme_is_evt(v))
+    return 1;
+  if (SCHEME_POLLERP(v))
+    return 1;
+  return 0;
+}
+
 static Scheme_Object *check_evt_property_value_ok(int argc, Scheme_Object *argv[])
 /* This is the guard for prop:evt */
 {
   return check_indirect_property_value_ok("guard-for-prop:evt", 
-                                          scheme_is_evt, 1,
+                                          is_evt_or_poller, 1,
                                           "(or/c evt? (any/c . -> . any) exact-nonnegative-integer?)",
                                           argc, argv);
 }
@@ -1624,6 +1676,21 @@ static Scheme_Object *check_evt_property_value_ok(int argc, Scheme_Object *argv[
 static Scheme_Object *return_wrapped(void *data, int argc, Scheme_Object *argv[])
 {
   return (Scheme_Object *)data;
+}
+
+static Scheme_Object *return_wrapped_multi(void *data, int argc, Scheme_Object *argv[])
+{
+  Scheme_Object **a, *l = (Scheme_Object *)data;
+  int i, n;
+
+  n = scheme_list_length(l);
+  a = MALLOC_N(Scheme_Object *, n);
+  for (i = 0; i < n; i++) {
+    a[i] = SCHEME_CAR(l);
+    l = SCHEME_CDR(l);
+  }
+
+  return scheme_values(n, a);
 }
 
 static int evt_struct_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo)
@@ -1682,7 +1749,86 @@ static int evt_struct_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo)
     }
   }
 
+  if (SCHEME_POLLERP(v)) {
+    Scheme_Thread *p;
+    Scheme_Object *a[2];
+    int done;
+    
+    scheme_start_in_scheduler();
+    a[0] = o;
+    a[1] = scheme_false;
+    v = _scheme_apply_multi(SCHEME_POLLER_PROC(v), 2, a);
+
+    p = scheme_current_thread;
+    if ((v == SCHEME_MULTIPLE_VALUES)
+        && (p->ku.multiple.count == 2)) {
+      if (SCHEME_FALSEP(p->ku.multiple.array[0])) {
+        v = p->ku.multiple.array[1];
+        if (v == o) v = NULL;
+        done = 0;
+      } else {
+        v = p->ku.multiple.array[0];
+        done = 1;
+      }
+    } else {
+      /* wrong number of results => treat as not ready */
+      v = NULL;
+      done = 0;
+    }
+    scheme_end_in_scheduler();
+
+    if (v) {
+      if (done) {
+        int check_proc = 1;
+        if (SCHEME_PAIRP(v) && SCHEME_NULLP(SCHEME_CDR(v)) && !SCHEME_PROCP(SCHEME_CAR(v)))
+          v = SCHEME_CAR(v); /* single result */
+        else if (!SCHEME_NULLP(v) && !SCHEME_PAIRP(v)) {
+          /* wrong result, be we allow it for backward compatibility */
+        } else {
+          v = scheme_make_closed_prim_w_arity(return_wrapped_multi, (void *)v, "multi-wrapper", 1, 1);
+          check_proc = 0;
+        }
+
+        if (check_proc && SCHEME_PROCP(v))
+          v = scheme_make_closed_prim_w_arity(return_wrapped, (void *)v, "wrapper", 1, 1);
+      }
+      scheme_set_sync_target(sinfo, v, (done ? v : NULL), NULL, 0, 0, NULL);
+      return 1;
+    }
+  }
+
   return 0;
+}
+
+void evt_struct_needs_wakeup(Scheme_Object *o, void *fds)
+{
+  Scheme_Object *v;
+  
+  /* Check for wakeup only if the struct has an immediate `unsafe-poller` */
+
+  if (SCHEME_CHAPERONEP(o))
+    return;
+  
+  v = scheme_struct_type_property_ref(evt_property, o);
+  if (SCHEME_POLLERP(v)) {
+    Scheme_Object *a[2], *e, *r;
+    
+    scheme_start_in_scheduler();
+    a[0] = o;
+    e = scheme_make_cptr(fds, scheme_false);
+    a[1] = e;
+    r = _scheme_apply_multi(SCHEME_POLLER_PROC(v), 2, a);
+    scheme_end_in_scheduler();
+
+    /* If event claims to be ready, then cancel the sleep: */
+    if (r == SCHEME_MULTIPLE_VALUES) {
+      Scheme_Thread *p = scheme_current_thread;
+      if (p->ku.multiple.count == 2) {
+        if (SCHEME_TRUEP(p->ku.multiple.array[0]))
+          scheme_cancel_sleep();
+      }
+    }
+  }
 }
 
 static int is_evt_struct(Scheme_Object *o)
@@ -2751,7 +2897,7 @@ static int parse_pos(const char *who, Scheme_Object *prim, Scheme_Object **args,
 
   if (!SCHEME_INTP(args[1]) || (SCHEME_INT_VAL(args[1]) < 0)) {
     if (SCHEME_BIGNUMP(args[1]) && SCHEME_BIGPOS(args[1])) {
-      pos = 32769; /* greater than max field count */
+      pos = (MAX_STRUCT_FIELD_COUNT + 1);
     } else {
       if (!who)
 	who = extract_field_proc_name(prim);
@@ -3394,9 +3540,6 @@ static Scheme_Object *make_prefab_struct(int argc, Scheme_Object *argv[])
   return scheme_make_prefab_struct_instance(stype, vec);
 }
 
-#define MAX_STRUCT_FIELD_COUNT 32768
-#define MAX_STRUCT_FIELD_COUNT_STR "32768"
-
 static Scheme_Object *prefab_key_struct_type(int argc, Scheme_Object *argv[])
 {
   Scheme_Struct_Type *stype;
@@ -3945,7 +4088,7 @@ Scheme_Object *scheme_do_chaperone_evt(const char *name, int is_impersonator, in
 {
   Scheme_Chaperone *px;
   Scheme_Object *o, *val, *a[1];
-  Scheme_Hash_Tree *props;
+  Scheme_Object *props;
 
   val = argv[0];
   if (SCHEME_CHAPERONEP(val))
@@ -6101,12 +6244,12 @@ static Scheme_Object *do_chaperone_struct(const char *name, int is_impersonator,
 {
   Scheme_Chaperone *px;
   Scheme_Struct_Type *stype, *st;
-  Scheme_Object *val = argv[0], *proc;
+  Scheme_Object *val = argv[0], *proc, *props = NULL;
   Scheme_Object *redirects, *prop, *si_chaperone = scheme_false;
   Scheme_Object *a[1], *inspector, *getter_positions = scheme_null;
   int i, offset, arity, non_applicable_op, repeat_op;
   const char *kind;
-  Scheme_Hash_Tree *props = NULL, *red_props = NULL, *empty_red_props = NULL, *setter_positions = NULL;
+  Scheme_Hash_Tree *red_props = NULL, *empty_red_props = NULL, *setter_positions = NULL;
   intptr_t field_pos;
   int empty_si_chaperone = 0, *empty_redirects = NULL, has_redirect = 0, witnessed = 0;
 
@@ -6444,7 +6587,7 @@ Scheme_Object *scheme_chaperone_not_undefined (Scheme_Object *orig_val)
 {
   Scheme_Chaperone *px;
   Scheme_Object *val, *redirects;
-  Scheme_Hash_Tree *props;
+  Scheme_Object *props;
 
   val = orig_val;
 
@@ -6478,7 +6621,7 @@ static Scheme_Object *do_chaperone_struct_type(const char *name, int is_imperson
   Scheme_Chaperone *px;
   Scheme_Object *val = argv[0];
   Scheme_Object *redirects;
-  Scheme_Hash_Tree *props;
+  Scheme_Object *props;
   int arity;
 
   if (SCHEME_CHAPERONEP(val))
@@ -6524,35 +6667,99 @@ static Scheme_Object *chaperone_struct_type(int argc, Scheme_Object **argv)
   return do_chaperone_struct_type("chaperone-struct-type", 0, argc, argv);
 }
 
-Scheme_Hash_Tree *scheme_parse_chaperone_props(const char *who, int start_at, int argc, Scheme_Object **argv)
+#define PROPS_MAX_VECTOR_SIZE 5
+
+Scheme_Object *scheme_parse_chaperone_props(const char *who, int start_at, int argc, Scheme_Object **argv)
 {
-  Scheme_Hash_Tree *ht;
-  Scheme_Object *v;
+  Scheme_Object *v, *props;
+  int pos;
 
   if (SCHEME_CHAPERONEP(argv[0]))
-    ht = ((Scheme_Chaperone *)argv[0])->props;
+    props = ((Scheme_Chaperone *)argv[0])->props;
   else
-    ht = NULL;
+    props = NULL;
 
-  while (start_at < argc) {
-    v = argv[start_at];
-    if (!SAME_TYPE(SCHEME_TYPE(v), scheme_chaperone_property_type))
-      scheme_wrong_contract(who, "impersonator-property?", start_at, argc, argv);
+  if (start_at < argc) {
+    /* Check */
+    for (pos = start_at; pos < argc; pos += 2) {
+      v = argv[pos];
+      if (!SAME_TYPE(SCHEME_TYPE(v), scheme_chaperone_property_type))
+        scheme_wrong_contract(who, "impersonator-property?", pos, argc, argv);
 
-    if (start_at + 1 >= argc)
-      scheme_contract_error(who,
-                            "missing value after chaperone property",
-                            "chaperone property", 1, v,
-                            NULL);
+      if (pos + 1 >= argc)
+        scheme_contract_error(who,
+                              "missing value after chaperone property",
+                              "chaperone property", 1, v,
+                              NULL);
+    }
 
-    if (!ht)
+    /* Prepare to add */
+    if (props && SCHEME_VECTORP(props)
+        && (((argc - start_at) + SCHEME_VEC_SIZE(props)) > (2 * PROPS_MAX_VECTOR_SIZE))) {
+      /* Convert vector to a hash tree */
+      Scheme_Hash_Tree *ht;
+      int i;
       ht = scheme_make_hash_tree(SCHEME_hashtr_eq);
-    ht = scheme_hash_tree_set(ht, v, argv[start_at + 1]);
+      for (i = SCHEME_VEC_SIZE(props); i > 0; ) {
+        i -= 2;
+        ht = scheme_hash_tree_set(ht, SCHEME_VEC_ELS(props)[i], SCHEME_VEC_ELS(props)[i+1]);
+      }
+      props = (Scheme_Object *)ht;
+    }
 
-    start_at += 2;
+    if (!props || SCHEME_VECTORP(props)) {
+      /* Keep as vector, and start by counting new distinct entries */
+      int count = 0, i, len = (props ? SCHEME_VEC_SIZE(props) : 0);
+      
+      for (pos = start_at; pos < argc; pos += 2) {
+        v = argv[pos];
+        if (props) {
+          for (i = 0; i < len; i += 2) {
+            if (SAME_OBJ(v, SCHEME_VEC_ELS(props)[i]))
+              break;
+          }
+        } else
+          i = 0;
+        if (i >= len) {
+          for (i = start_at; i < pos; i += 2) {
+            if (SAME_OBJ(v, argv[i]))
+              break;
+          }
+          if (i >= pos)
+            count++;
+        }
+      }
+
+      if (props) {
+        /* Copy vector, possibly making it larger */
+        Scheme_Object *old_props = props;
+        props = scheme_make_vector(SCHEME_VEC_SIZE(old_props) + 2 * count, NULL);
+        memcpy(SCHEME_VEC_ELS(props), SCHEME_VEC_ELS(old_props), sizeof(Scheme_Object *)*SCHEME_VEC_SIZE(old_props));
+      } else {
+        props = scheme_make_vector(2 * count, NULL);
+      }
+      len = SCHEME_VEC_SIZE(props);
+
+      /* Fill in vector */
+      for (pos = start_at; pos < argc; pos += 2) {
+        v = argv[pos];
+        for (i = 0; i < len; i += 2) {
+          if (!SCHEME_VEC_ELS(props)[i] || SAME_OBJ(v, SCHEME_VEC_ELS(props)[i])) {
+            SCHEME_VEC_ELS(props)[i] = v;
+            SCHEME_VEC_ELS(props)[i+1] = argv[pos+1];
+            break;
+          }
+        }
+      }
+    } else {
+      /* Add to hash tree */
+      for (pos = start_at; pos < argc; pos += 2) {
+        props = (Scheme_Object *)scheme_hash_tree_set((Scheme_Hash_Tree *)props, argv[pos], argv[pos+1]);
+      }
+    }
   }
 
-  return ht;
+  return props;
 }
 
 /**********************************************************************/

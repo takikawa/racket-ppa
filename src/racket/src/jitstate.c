@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2006-2017 PLT Design Inc.
+  Copyright (c) 2006-2018 PLT Design Inc.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -28,6 +28,22 @@
 
 /* Used by vector-set-performance-stats!: */
 int scheme_jit_malloced;
+
+void scheme_init_jit()
+{
+#ifdef CAN_INLINE_ALLOC
+  intptr_t max_alloc;
+  max_alloc = GC_max_nursery_object_size();
+  if ((sizeof(Scheme_Vector) + (JIT_MAX_VECTOR_INLINE_SIZE - mzFLEX_DELTA) * sizeof(Scheme_Object *)) > max_alloc) {
+    scheme_log_abort("Misconfigured: inlined vector size is greater than maximum allowed by GC");
+    abort();
+  }
+  if ((sizeof(Scheme_Structure) + ((JIT_MAX_STRUCT_FIELD_INLINE_COUNT - mzFLEX_DELTA) * sizeof(Scheme_Object *))) > max_alloc) {
+    scheme_log_abort("Misconfigured: inlined struct size is greater than maximum allowed by GC");
+    abort();
+  }
+#endif
+}
 
 /*========================================================================*/
 /*                              JIT buffer                                */
