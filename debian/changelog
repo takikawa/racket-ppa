@@ -1,9 +1,12 @@
-racket (6.12+dfsg1-1) UNRELEASED; urgency=medium
+racket (6.12+dfsg1-1) unstable; urgency=medium
 
   * New upstream release
   * Install man pages for racket, drracket, and raco
+  * drop "Recommends libunique", thanks to Jeremy Bicha (Closes:
+    #885816). It seems that -singleInstance is not actually working in
+    in 6.11, so no loss of functionality.
 
- -- David Bremner <bremner@debian.org>  Fri, 02 Feb 2018 21:27:12 -0400
+ -- David Bremner <bremner@debian.org>  Sun, 11 Mar 2018 09:44:59 -0500
 
 racket (6.11+dfsg1-1) unstable; urgency=medium
 
