@@ -1,2 +1,2 @@
 # this is merely quoted example link to adsense, not actual use
-racket-doc: privacy-breach-google-adsense usr/share/doc/racket/web-server/templates.html
+racket-doc: privacy-breach-google-adsense usr/share/doc/racket/web-server/templates.html (choke on: "google-analytics.com/ga.js')
