@@ -67,7 +67,9 @@
 (define-for-syntax popular-keys
   ;; of the 6075 contracts that get compiled during
   ;; 'raco setup' of main-distribution and main-distribution-test,
-  ;; these are all the ones that appear at least 60 times
+  ;; these are all the ones that appear at least 60 times, as of
+  ;; January 2016. Plus the ones that appear at least 10 times in
+  ;; contracts that TR generates for plot-gui-lib, as of October 2017
   `((() 0 () () #f 1)
     (() 0 () () #f #f)
     ((#f) 0 () () #f 1)
@@ -79,8 +81,37 @@
     ((#f #f #f) 0 () () #f #f)
     ((#f #f #f #f) 0 () () #f 1)
     ((#f #f #f #f) 0 () () #f #f)
+    ((#f #f #f #f #f) 0 () () #f 1)
     ((#f #f #f #f #f) 0 () () #f #f)
-    ((#f #f #f #f #f #f) 0 () () #f #f)))
+    ((#f #f #f #f #f #f) 0 () () #f 1)
+    ((#f #f #f #f #f #f) 0 () () #f #f)
+    ((#f #f #f #f #f #f #f) 0 () () #f 1)
+    ((#f #f #f #f #f #f #f #f) 0 () () #f 1)
+    ;; 9 argument doesn't seem to show up
+    ((#f #f #f #f #f #f #f #f #f #f) 0 () () #f 1)
+
+    ;; multiple results or optional arguments below
+    ((#f) 2 () () #f 1)
+    ((#f) 3 () () #f 1)
+    ((#f) 4 () () #f 1)
+    ((#f) 0 () () #f 2)
+    ((#f) 0 () () #f 4)
+    ((#f) 0 () () #f 6)
+    ((#f #f) 1 () () #f 1)
+    ((#f #f) 2 () () #f 1)
+    ((#f #f) 3 () () #f 1)
+    ((#f #f) 3 () () #f 4)
+    ((#f #f) 5 () () #f 1)
+    ((#f #f #f) 0 () () #f 2)
+    ((#f #f #f) 0 () () #f 4)
+    ((#f #f #f) 1 () () #f 1)
+    ((#f #f #f) 4 () () #f 1)
+    ((#f #f #f #f) 1 () () #f 1)
+    ((#f #f #f #f) 3 () () #f 1)
+    ((#f #f #f #f #f) 1 () () #f 1)
+    ((#f #f #f #f #f #f) 2 () () #f 1)
+    ((#f #f #f #f #f #f #f) 1 () () #f 1)
+    ((#f #f #f #f #f #f #f #f) 3 () () #f 1)))
 
 (define-syntax (generate-popular-key-ids stx)
   (syntax-case stx ()
@@ -672,20 +703,50 @@
           method?))
        (syntax-property
         #`(let #,let-bindings
-            #,(quasisyntax/loc stx
-                (build-simple-->
-                 (list #,@regular-args)
-                 '(#,@kwds)
-                 (list #,@kwd-args)
-                 #,(if rngs
-                       #`(list #,@rngs)
-                       #'#f)
-                 #,plus-one-arity-function
-                 #,chaperone-constructor
-                 #,(if ellipsis-info
-                       #`(ellipsis-rest-arg #,(length regular-args) #,@ellipsis-info)
-                       #'#f)
-                 #,method?)))
+            #,(cond
+                [(and (not method?)
+                      (null? kwd-args)
+                      (not ellipsis-info))
+                 (define rng-count (and rngs (length rngs)))
+                 (define doms-count (length regular-args))
+                 (cond
+                   [(and (equal? rng-count 1) (= doms-count 0))
+                    (quasisyntax/loc stx
+                      (build-nullary-very-simple-->
+                       #,(car rngs)
+                       #,plus-one-arity-function
+                       #,chaperone-constructor))]
+                   [(and (equal? rng-count 1) (= doms-count 1))
+                    (quasisyntax/loc stx
+                      (build-unary-very-simple-->
+                       #,(car regular-args)
+                       #,(car rngs)
+                       #,plus-one-arity-function
+                       #,chaperone-constructor))]
+                   [else
+                    (quasisyntax/loc stx
+                      (build-very-simple-->
+                       (list #,@regular-args)
+                       #,(if rngs
+                             #`(list #,@rngs)
+                             #'#f)
+                       #,plus-one-arity-function
+                       #,chaperone-constructor))])]
+                [else
+                 (quasisyntax/loc stx
+                   (build-simple-->
+                    (list #,@regular-args)
+                    '(#,@kwds)
+                    (list #,@kwd-args)
+                    #,(if rngs
+                          #`(list #,@rngs)
+                          #'#f)
+                    #,plus-one-arity-function
+                    #,chaperone-constructor
+                    #,(if ellipsis-info
+                          #`(ellipsis-rest-arg #,(length regular-args) #,@ellipsis-info)
+                          #'#f)
+                    #,method?))]))
         'racket/contract:contract
         (vector this->
                 ;; the -> in the original input to this guy
@@ -830,11 +891,14 @@
     (parse->* stx this->*))
   (with-syntax ([((mandatory-dom-kwd mandatory-dom-kwd-ctc) ...) man-dom-kwds]
                 [((optional-dom-kwd optional-dom-kwd-ctc) ...) opt-dom-kwds])
-    (valid-app-shapes-from-man/opts (length (syntax->list man-dom))
-                                    (length (syntax->list opt-dom))
-                                    rest-ctc
-                                    (syntax->datum #'(mandatory-dom-kwd ...))
-                                    (syntax->datum #'(optional-dom-kwd ...)))))
+    (cond
+      [(or pre pre/desc post post/desc) #f]
+      [else
+       (valid-app-shapes-from-man/opts (length (syntax->list man-dom))
+                                       (length (syntax->list opt-dom))
+                                       rest-ctc
+                                       (syntax->datum #'(mandatory-dom-kwd ...))
+                                       (syntax->datum #'(optional-dom-kwd ...)))])))
 
 (define-syntax (->* stx)
   (syntax-case stx ()
@@ -915,6 +979,83 @@
    (if (= 1 length-reses) "" "s")
    expected-values
    (if (= 1 expected-values) "" "s")))
+
+(define (build-nullary-very-simple--> _rng
+                                      plus-one-arity-function
+                                      chaperone-constructor)
+  (define rng (coerce-contract '-> _rng))
+  (cond
+    [(and (flat-contract? rng)
+          (eq? void? (flat-contract-predicate rng)))
+     ->void-contract]
+    [(chaperone-contract? rng)
+     (make--> 0
+              '() '() #f #f
+              (list rng) #f
+              plus-one-arity-function
+              chaperone-constructor
+              #f)]
+    [else
+     (make-impersonator-> 0 '() '() #f #f
+                          (list rng) #f
+                          plus-one-arity-function
+                          chaperone-constructor
+                          #f)]))
+
+(define (build-unary-very-simple--> _dom _rng
+                                    plus-one-arity-function
+                                    chaperone-constructor)
+  (define dom (coerce-contract '-> _dom))
+  (define rng (coerce-contract '-> _rng))
+  (cond
+    [(and (any/c? dom)
+          (flat-contract? rng)
+          (eq? boolean? (flat-contract-predicate rng)))
+     any/c->boolean-contract]
+    [(and (chaperone-contract? dom)
+          (chaperone-contract? rng))
+     (make--> 1
+              (list dom) '() #f #f
+              (list rng) #f
+              plus-one-arity-function
+              chaperone-constructor
+              #f)]
+    [else
+     (make-impersonator-> 1
+                          (list dom) '() #f #f
+                          (list rng) #f
+                          plus-one-arity-function
+                          chaperone-constructor
+                          #f)]))
+
+;; INVARIANT: this is not called when `build-unary-very-simple-->`
+;; or `build-nullary-very-simple-->` could have been
+(define (build-very-simple--> raw-regular-doms raw-rngs
+                              plus-one-arity-function
+                              chaperone-constructor)
+  (define regular-doms
+    (for/list ([dom (in-list raw-regular-doms)])
+      (coerce-contract '-> dom)))
+  (define rngs
+    (and raw-rngs
+         (for/list ([rng (in-list raw-rngs)])
+           (coerce-contract '-> rng))))
+  (cond
+    [(and (andmap chaperone-contract? regular-doms)
+          (andmap chaperone-contract? (or rngs '())))
+     (make--> (length raw-regular-doms)
+              regular-doms '() #f #f
+              rngs #f
+              plus-one-arity-function
+              chaperone-constructor
+              #f)]
+    [else
+     (make-impersonator-> (length raw-regular-doms)
+                          regular-doms '() #f #f
+                          rngs #f
+                          plus-one-arity-function
+                          chaperone-constructor
+                          #f)]))
 
 (define (build-simple--> raw-regular-doms
                          mandatory-kwds mandatory-raw-kwd-doms
@@ -1093,7 +1234,7 @@
                                       optional-keywords
                                       (and rest-contract #t)
                                       rng-len)
-        (λ (blame f neg-party blame-party-info rng-ctc-x . args)
+        (λ (blame f neg-party blame-party-info is-impersonator? rng-ctc-x . args)
           (define-next next args)
           (define mandatory-dom-projs (next min-arity))
           (define optional-dom-projs (next optionals))
@@ -1152,10 +1293,12 @@
                     args-dealt-with)))))
           
           (values (arity-checking-wrapper f blame neg-party blame+neg-party
-                                          interposition-proc #f interposition-proc #f #f #f
+                                          interposition-proc interposition-proc
+                                          #f interposition-proc interposition-proc #f #f #f
                                           min-arity max-arity
                                           mandatory-keywords optional-keywords
-                                          #f) ; not a method contract
+                                          #f ; not a method contract
+                                          is-impersonator?)
                   #f))))
   
   (build--> 'dynamic->*
@@ -1363,13 +1506,13 @@
        (keywords-match man-kwds opt-kwds x)
        #t))
 
-(define (make-property chaperone?)
+(define (make-property is-impersonator?)
   (define build-X-property
-    (if chaperone? build-chaperone-contract-property build-contract-property))
+    (if is-impersonator? build-contract-property build-chaperone-contract-property))
   (define val-first-proj
     (λ (->stct)
       (maybe-warn-about-val-first ->stct)
-      (->-proj chaperone? ->stct
+      (->-proj is-impersonator? ->stct
                (base->-min-arity ->stct)
                (base->-doms ->stct)
                (base->-kwd-infos ->stct)
@@ -1383,7 +1526,7 @@
                #f)))
   (define late-neg-proj
     (λ (->stct)
-      (->-proj chaperone? ->stct
+      (->-proj is-impersonator? ->stct
                (base->-min-arity ->stct)
                (base->-doms ->stct)
                (base->-kwd-infos ->stct)
@@ -1435,13 +1578,13 @@
        (not (base->-post? that))))
      
 (define-struct (-> base->) ()
-  #:property prop:chaperone-contract (make-property #t))
+  #:property prop:chaperone-contract (make-property #f))
 
 (define-struct (predicate/c base->) ()
-  #:property prop:chaperone-contract (make-property #t))
+  #:property prop:chaperone-contract (make-property #f))
 
 (define-struct (impersonator-> base->) ()
-  #:property prop:contract (make-property #f))
+  #:property prop:contract (make-property #t))
 
 (define ->void-contract
   (let-syntax ([get-chaperone-constructor
@@ -1511,6 +1654,7 @@
                   1))
                (λ (blame f neg-party
                          _ignored-blame-party-info
+                         _ignored-is-impersonator?
                          _ignored-rng-ctcs
                          _ignored-dom-contract
                          _ignored-rng-contract)

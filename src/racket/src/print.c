@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2017 PLT Design Inc.
+  Copyright (c) 2004-2018 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -2250,6 +2250,16 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
       }
       closed = 1;
     }
+  else if (SAME_TYPE(SCHEME_TYPE(obj), scheme_unquoted_printing_string_type))
+    {
+      if (compact || !pp->print_unreadable) {
+	cannot_print(pp, notdisplay, obj, ht, compact);
+      } else {
+        obj = SCHEME_PTR_VAL(obj);
+        do_print_string(compact, 0, pp, 
+                        SCHEME_CHAR_STR_VAL(obj), 0, SCHEME_CHAR_STRTAG_VAL(obj));
+      }
+    }
   else if (SCHEME_CHARP(obj))
     {
       if (compact) {
@@ -3002,11 +3012,12 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
 	    print_utf8_string(pp, SCHEME_BYTE_STR_VAL(stx->srcloc->src), 0, SCHEME_BYTE_STRLEN_VAL(stx->srcloc->src));
 	    print_utf8_string(pp, ":", 0, 1);
 	  }
-	  if (stx->srcloc->line >= 0)
+	  if ((stx->srcloc->line >= 0)
+              && (stx->srcloc->col >= 0))
 	    sprintf(quick_buffer, 
 		    "%" PRIdPTR ":%" PRIdPTR "", 
 		    stx->srcloc->line, stx->srcloc->col-1);
-	  else
+	  else if (stx->srcloc->pos >= 0)
 	    sprintf(quick_buffer, ":%" PRIdPTR "", 
 		    stx->srcloc->pos);
 	  print_utf8_string(pp, quick_buffer, 0, -1);
@@ -3907,6 +3918,25 @@ print_pair(Scheme_Object *pair, int notdisplay, int compact,
         && !first_unquoted 
         && is_special_reader_form(pp, notdisplay, pair)) {
       print_special_reader_form(SCHEME_CAR(pair), pp, notdisplay);
+      /* Corner case: if we just printed "#," or ",", make sure we don't
+         next print a symbol that starts "@". For example, ","
+         followed by the symbol whose string is "@d" should not print
+         as ",@d". */
+      if ((SAME_OBJ(SCHEME_CAR(pair), unquote_symbol)
+           || SAME_OBJ(SCHEME_CAR(pair), unsyntax_symbol))
+          && (SCHEME_SYMBOLP(SCHEME_CADR(pair))
+              && (SCHEME_SYM_VAL(SCHEME_CADR(pair))[0] == '@'))) {
+        /* Double-check that `@` will be the next character: */
+        const char *sv;
+        sv = scheme_symbol_name_and_size(SCHEME_CADR(pair), NULL, 
+                                         ((pp->can_read_pipe_quote 
+                                          ? SCHEME_SNF_PIPE_QUOTE
+                                           : SCHEME_SNF_NO_PIPE_QUOTE)));
+        if (sv[0] == '@') {
+          /* Avoid ambiguity: */
+          print_utf8_string(pp, " ", 0, 1);
+        }
+      }
       (void)print(SCHEME_CADR(pair), notdisplay, compact, ht, mt, pp);
       return;
     } else if ((notdisplay == 3) && !first_unquoted) {
@@ -4235,7 +4265,7 @@ static Scheme_Object *custom_recur(int notdisplay, void *_vec, int argc, Scheme_
   mz_jmp_buf escape, * volatile save;
   volatile intptr_t save_max;
 
-  if (!SCHEME_OUTPORTP(argv[1])) {
+  if (!SCHEME_OUTPUT_PORTP(argv[1])) {
     scheme_wrong_contract((notdisplay > 1)
                           ? "print/recursive"
                           : (notdisplay ? "write/recursive" : "display/recursive"),

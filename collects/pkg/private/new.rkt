@@ -119,15 +119,8 @@ env:
     # create a Travis-CI build matrix to test against multiple Racket
     # versions.
     - RACKET_VERSION=6.0
-    - RACKET_VERSION=6.1
-    - RACKET_VERSION=6.1.1
-    - RACKET_VERSION=6.2
-    - RACKET_VERSION=6.3
-    - RACKET_VERSION=6.4
     - RACKET_VERSION=6.5
-    - RACKET_VERSION=6.6
-    - RACKET_VERSION=6.7
-    - RACKET_VERSION=6.8
+    - RACKET_VERSION=6.11
     - RACKET_VERSION=HEAD
 
 matrix:
@@ -163,9 +156,8 @@ EOS
         (lambda () (expand/display #<<EOS
 #lang info
 (define collection "<<name>>")
-(define deps '("base"
-               "rackunit-lib"))
-(define build-deps '("scribble-lib" "racket-doc"))
+(define deps '("base"))
+(define build-deps '("scribble-lib" "racket-doc" "rackunit-lib"))
 (define scribblings '(("scribblings/<<name>>.scrbl" ())))
 (define pkg-desc "Description Here")
 (define version "0.0")

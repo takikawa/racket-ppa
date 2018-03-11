@@ -2,6 +2,7 @@
 (require "core.rkt"
          "latex-properties.rkt"
          "private/render-utils.rkt"
+         "private/latex-index.rkt"
          racket/class
          racket/runtime-path
          racket/port
@@ -18,9 +19,11 @@
 (define rendering-tt (make-parameter #f))
 (define show-link-page-numbers (make-parameter #f))
 (define done-link-page-numbers (make-parameter #f))
+(define multiple-page-references (make-parameter #f))
 (define disable-images (make-parameter #f))
 (define escape-brackets (make-parameter #f))
 (define suppress-newline-content (make-parameter #f))
+(define disable-hyperref (make-parameter #f))
 
 (define-struct (toc-paragraph paragraph) ())
 
@@ -81,7 +84,14 @@
              extract-version
              extract-date
              extract-authors
-             extract-pretitle)
+             extract-pretitle-content
+             link-render-style-at-element)
+
+    (define/public (extract-short-title d)
+      (ormap (lambda (v)
+               (and (short-title? v)
+                    (short-title-text v)))
+             (style-properties (part-style d))))
 
     (define/override (auto-extra-files? v) (latex-defaults? v))
     (define/override (auto-extra-files-paths v) (latex-defaults-extra-files v))
@@ -144,15 +154,22 @@
           (when (part-title-content d)
             (let ([vers (extract-version d)]
                   [date (extract-date d)]
-                  [pres (extract-pretitle d)]
-                  [auths (extract-authors d)])
+                  [pres (extract-pretitle-content d)]
+                  [auths (extract-authors d)]
+                  [short (extract-short-title d)])
               (for ([pre (in-list pres)])
                 (printf "\n\n")
-                (do-render-paragraph pre d ri #t #f))
+                (cond
+                  [(paragraph? pre)
+                   (do-render-paragraph pre d ri #t #f)]
+                  [(nested-flow? pre)
+                   (do-render-nested-flow pre d ri #t #f #t)]))
               (when date (printf "\\date{~a}\n" date))
-              (printf "\\titleAnd~aVersionAnd~aAuthors{" 
+              (printf "\\titleAnd~aVersionAnd~aAuthors~a{"
+                      
                       (if (equal? vers "") "Empty" "")
-                      (if (null? auths) "Empty" ""))
+                      (if (null? auths) "Empty" "")
+                      (if short "AndShort" ""))
               (render-content (part-title-content d) d ri)
               (printf "}{~a}{" vers)
               (unless (null? auths)
@@ -161,7 +178,9 @@
                 (unless first? (printf "\\SAuthorSep{}"))
                 (do-render-paragraph auth d ri #t #f)
                 #f)
-              (printf "}\n"))))
+              (if short
+                  (printf "}{~a}\n" short)
+                  (printf "}\n")))))
         (render-part d ri)
         (when whole-doc?
           (printf "\n\n\\postDoc\n\\end{document}\n"))))
@@ -177,7 +196,7 @@
                          (and d (positive? d)))))
           (when (eq? (style-name (part-style d)) 'index)
             (printf "\\twocolumn\n\\parskip=0pt\n\\addcontentsline{toc}{section}{Index}\n"))
-          (let ([pres (extract-pretitle d)])
+          (let ([pres (extract-pretitle-content d)])
             (for ([pre (in-list pres)])
               (printf "\n\n")
               (do-render-paragraph pre d ri #t #f)))
@@ -228,12 +247,14 @@
               (printf "{")
               (show-number)
               (parameterize ([disable-images #t]
-                             [escape-brackets #t])
+                             [escape-brackets #t]
+                             [disable-hyperref #t])
                 (render-content (part-title-content d) d ri))
               (printf "}"))
             (printf "{")
             (show-number)
-            (render-content (part-title-content d) d ri)
+            (parameterize ([disable-hyperref #t])
+              (render-content (part-title-content d) d ri))
             (printf "}")
             (when (and (part-style? d 'hidden-number)
                        (not (part-style? d 'unnumbered)))
@@ -329,13 +350,15 @@
                                           (format-number number null))]
                    [lbl? (and dest 
                               (not ext?)
-                              (not (show-link-page-numbers)))])
+                              (not (show-link-page-numbers)))]
+                   [link-number? (and lbl?
+                                      (eq? 'number (link-render-style-at-element e)))])
               (printf "\\~aRef~a~a~a{"
                       (case (and dest (number-depth number))
                         [(0) "Book"]
                         [(1) (if (string? (car number)) "Part" "Chap")]
                         [else "Sec"])
-                      (if lbl?
+                      (if (and lbl? (not link-number?))
                           "Local"
                           "")
                       (if (let ([s (element-style e)])
@@ -345,9 +368,10 @@
                       (if (null? formatted-number)
                           "UN"
                           ""))
-              (when lbl?
+              (when (and lbl? (not link-number?))
                 (printf "t:~a}{" (t-encode (vector-ref dest 1))))
               (unless (null? formatted-number)
+                (when link-number? (printf "\\SectionNumberLink{t:~a}{" (t-encode (vector-ref dest 1))))
                 (render-content
                  (if dest
                      (if (list? number)
@@ -358,6 +382,7 @@
                                 '("!!!")))
                      (list "???"))
                  part ri)
+                (when link-number? (printf "}"))
                 (printf "}{"))))
           (let* ([es (cond
                       [(element? e) (element-style e)]
@@ -367,6 +392,11 @@
                                  (style-name es)
                                  es)]
                  [style (and (style? es) es)]
+                 [hyperref? (and (not part-label?)
+                                 (link-element? e)
+                                 (not (disable-hyperref))
+                                 (let-values ([(dest ext?) (resolve-get/ext? part ri (link-element-tag e))])
+                                   (and dest (not ext?))))]
                  [check-render
                   (lambda ()
                     (when (render-element? e)
@@ -476,6 +506,11 @@
                    [(multiarg-element? e)
                     (check-render)
                     (printf "\\~a" style-name)
+                    (define maybe-optional-args
+                      (findf command-optional? (if style (style-properties style) '())))
+                    (when maybe-optional-args
+                      (for ([i (in-list (command-optional-arguments maybe-optional-args))])
+                        (printf "[~a]" i)))
                     (if (null? (multiarg-element-contents e))
                         (printf "{}")
                         (for ([i (in-list (multiarg-element-contents e))])
@@ -484,16 +519,31 @@
                             (render-content i part ri))
                           (printf "}")))]
                    [else
-                    (wrap e style-name tt?)]))]
+                    (define maybe-optional
+                      (findf command-optional? (if style (style-properties style) '())))
+                    (if maybe-optional
+                        (wrap e
+                              (string-join #:before-first (format "~a[" style-name)
+                                           #:after-last "]"
+                                           (command-optional-arguments maybe-optional)
+                                           "][")
+                              tt?)
+                        (wrap e style-name tt?))]))]
                [(and (not style-name)
                      style
                      (memq 'exact-chars (style-properties style)))
                 (wrap e style-name 'exact)]
                [else
                 (core-render e tt?)]))
+            (when hyperref?
+              (printf "\\hyperref[t:~a]{"
+                      (t-encode (link-element-tag e))))
             (let loop ([l (if style (style-properties style) null)] [tt? #f])
               (if (null? l)
-                  (finish tt?)
+                  (if hyperref?
+                      (parameterize ([disable-hyperref #t])
+                        (finish tt?))
+                      (finish tt?))
                   (let ([v (car l)])
                     (cond
                      [(target-url? v)
@@ -531,16 +581,27 @@
                       (loop (cdr l) tt?)
                       (for ([l (in-list (command-extras-arguments (car l)))])
                         (printf "{~a}" l))]
-                     [else (loop (cdr l) tt?)]))))))
+                     [else (loop (cdr l) tt?)]))))
+            (when hyperref?
+              (printf "}"))))
         (when part-label?
           (printf "}"))
         (when (and (link-element? e)
                    (show-link-page-numbers)
                    (not (done-link-page-numbers)))
-          (printf ", \\pageref{t:~a}"
-                  (t-encode 
-                   (let ([v (resolve-get part ri (link-element-tag e))])
-                     (and v (vector-ref v 1))))))
+          (define (make-ref e)
+            (string-append
+             "t:"
+             (t-encode 
+              (let ([v (resolve-get part ri (link-element-tag e))])
+                (and v (vector-ref v 1))))))
+          (cond
+            [(multiple-page-references) ; for index
+             => (lambda (l)
+                  (printf ", \\Smanypageref{~a}" ; using cleveref
+                          (string-join (map make-ref l) ",")))]
+            [else
+             (printf ", \\pageref{~a}" (make-ref e))]))
         null))
 
     (define/private (t-encode s)
@@ -576,6 +637,11 @@
       (let* ([s-name (style-name (table-style t))]
              [boxed? (eq? 'boxed s-name)]
              [index? (eq? 'index s-name)]
+             [merge-index? (let loop ([part part])
+                             (or (memq 'enable-index-merge (style-properties (part-style part)))
+                                 (let* ([ci (part-collected-info part ri)]
+                                        [p (and ci (collected-info-parent ci))])
+                                   (and p (loop p)))))]
              [tableform
               (cond [index? "list"]
                     [(eq? 'block s-name) "tabular"]
@@ -621,6 +687,7 @@
                part 
                ri
                #t
+               #f
                #f)
               (when (string? s-name)
                 (printf "\\end{~a}" s-name)))
@@ -707,6 +774,17 @@
                   (let ([flows (car blockss)]
                         [cell-styles (car cell-styless)])
                     (unless index? (add-clines prev-styles cell-styles))
+                    (define group-size
+                      (cond
+                        [merge-index?
+                         ;; Merge entries that have the same text & style
+                         (let loop ([blockss (cdr blockss)] [group-size 1])
+                           (cond
+                             [(null? blockss) group-size]
+                             [(same-index-entry? flows (car blockss))
+                              (loop (cdr blockss) (add1 group-size))]
+                             [else group-size]))]
+                        [else 1]))
                     (let loop ([flows flows]
                                [cell-styles cell-styles]
                                [all-left-line?s all-left-line?s]
@@ -718,7 +796,10 @@
                           (cond
                            [index?
                             (printf "\n\\item ")
-                            (render-cell 1)
+                            (parameterize ([multiple-page-references
+                                            (and (group-size . > . 1)
+                                                 (extract-index-link-targets (take blockss group-size)))])
+                              (render-cell 1))
                             #f]
                            [(eq? 'cont (car flows))
                             #f]
@@ -747,17 +828,18 @@
                                                           (cdr cell-styles)
                                                           (cdr all-left-line?s)
                                                           right-line?))))
+                    (define rest-blockss (list-tail blockss group-size))
                     (unless (or index?
-                                (and (null? (cdr blockss))
+                                (and (null? rest-blockss)
                                      (not (for/or ([cell-style (in-list cell-styles)])
                                             (or (memq 'bottom-border (style-properties cell-style))
                                                 (memq 'border (style-properties cell-style)))))))
                       (printf " \\\\\n"))
                     (cond
-                     [(null? (cdr blockss))
+                     [(null? rest-blockss)
                       (unless index? (add-clines cell-styles #f))]
                      [else
-                      (loop (cdr blockss) (cdr cell-styless) cell-styles)])))
+                      (loop rest-blockss (list-tail cell-styless group-size) cell-styles)])))
                 (unless inline?
                   (printf "\\end{~a}~a"
                           tableform
@@ -824,7 +906,7 @@
        [(table? p)
         (render-table* p part ri #f (format "[~a]" mode))]
        [(nested-flow? p)
-        (do-render-nested-flow p part ri #f mode)]
+        (do-render-nested-flow p part ri #f mode #f)]
        [(paragraph? p)
         (do-render-paragraph p part ri #f mode)]))
 
@@ -855,7 +937,7 @@
         (printf "\\end{~a}" mode)
         null))
 
-    (define/private (do-render-nested-flow t part ri single-column? as-box-mode)
+    (define/private (do-render-nested-flow t part ri single-column? as-box-mode show-pre?)
       (let* ([props (style-properties (nested-flow-style t))]
              [kind (or (and as-box-mode
                             (or
@@ -876,29 +958,31 @@
              [multicommand? (memq 'multicommand props)]
              [command? (or (and as-box-mode (not multicommand?))
                            (memq 'command props))])
-        (cond
-         [command? (printf "\\~a{" kind)]
-         [multicommand? (printf "\\~a" kind)]
-         [else (printf "\\begin{~a}" kind)])
-        (parameterize ([current-table-mode (if (or single-column?
-                                                   (not (current-table-mode)))
-                                               (current-table-mode)
-                                               (list "nested-flow" t))])
-          (if as-box-mode
-              (for-each (lambda (p) 
-                          (when multicommand? (printf "{"))
-                          (render-boxable-block p part ri as-box-mode)
-                          (when multicommand? (printf "}")))
-                        (nested-flow-blocks t))
-              (render-flow (nested-flow-blocks t) part ri #f multicommand?)))
-        (cond
-         [command? (printf "}")]
-         [multicommand? (void)]
-         [else (printf "\\end{~a}" kind)])
-        null))
+        (unless (and (not show-pre?)
+                     (member 'pretitle props))
+          (cond
+            [command? (printf "\\~a{" kind)]
+            [multicommand? (printf "\\~a" kind)]
+            [else (printf "\\begin{~a}" kind)])
+          (parameterize ([current-table-mode (if (or single-column?
+                                                     (not (current-table-mode)))
+                                                 (current-table-mode)
+                                                 (list "nested-flow" t))])
+            (if as-box-mode
+                (for-each (lambda (p) 
+                            (when multicommand? (printf "{"))
+                            (render-boxable-block p part ri as-box-mode)
+                            (when multicommand? (printf "}")))
+                          (nested-flow-blocks t))
+                (render-flow (nested-flow-blocks t) part ri #f multicommand?)))
+          (cond
+            [command? (printf "}")]
+            [multicommand? (void)]
+            [else (printf "\\end{~a}" kind)])
+          null)))
 
     (define/override (render-nested-flow t part ri starting-item?)
-      (do-render-nested-flow t part ri #f #f))
+      (do-render-nested-flow t part ri #f #f #f))
 
     (define/override (render-compound-paragraph t part ri starting-item?)
       (let ([kind (style-name (compound-paragraph-style t))]
@@ -1053,6 +1137,9 @@
                                 [(#\↕) "$\\updownarrow$"]
                                 [(#\↔) "$\\leftrightarrow$"]
                                 [(#\↗) "$\\nearrow$"]
+                                [(#\↝) "$\\leadsto$"]
+                                [(#\↱) "$\\Lsh$"]
+                                [(#\↰) "$\\Rsh$"]
                                 [(#\⇕) "$\\Updownarrow$"]
                                 [(#\א) "$\\aleph$"]
                                 [(#\′) "$\\prime$"]
@@ -1081,8 +1168,8 @@
                                 [(#\ϑ) "$\\vartheta$"]
                                 [(#\τ) "$\\tau$"]
                                 [(#\υ) "$\\upsilon$"]
-                                [(#\φ) "$\\phi$"]
-                                [(#\ϕ) "$\\varphi$"]
+                                [(#\φ) "$\\varphi$"]
+                                [(#\ϕ) "$\\phi$"]
                                 [(#\δ) "$\\delta$"]
                                 [(#\ρ) "$\\rho$"]
                                 [(#\ϱ) "$\\varrho$"]
@@ -1127,6 +1214,7 @@
                                 [(#\∨) "$\\vee$"]
                                 [(#\∧) "$\\wedge$"]
                                 [(#\◃) "$\\triangleright$"]
+                                [(#\◊) "$\\Diamond$"]
                                 [(#\⊙) "$\\odot$"]
                                 [(#\★) "$\\star$"]
                                 [(#\†) "$\\dagger$"]

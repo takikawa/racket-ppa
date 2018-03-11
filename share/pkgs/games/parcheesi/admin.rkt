@@ -112,7 +112,7 @@
       
       (define/public (start-game observer) 
         (unless cheated?
-          (with-handlers ([exn? (lambda (x) (cheated "start-game error ~a" (exn-message x)))])
+          (with-handlers ([exn:fail? (lambda (x) (cheated "start-game error ~a" (exn-message x)))])
             (let ([res-name (send player start-game color)])
               (cond
                 [(string? res-name)
@@ -128,9 +128,20 @@
           [else
            (with-handlers ([exn:bad-move? 
                             (lambda (x)
+                              (when (exn:bad-move-with-info? x)
+                                (let ([l (current-logger)])
+                                  (when (log-level? parcheesi-bad-move-information-logger
+                                                    'info
+                                                    'parcheesi-bad-move-information)
+                                    (log-message l 'info 'parcheesi-bad-move-information
+                                                 (exn-message x)
+                                                 (vector (exn:bad-move-with-info-color x)
+                                                         (exn:bad-move-with-info-board x)
+                                                         (exn:bad-move-with-info-dice x)
+                                                         (exn:bad-move-with-info-moves x))))))
                               (cheated "~s" (exn-message x))
                               (remove-player board))])
-             (let ([moves (with-handlers ([exn? (lambda (x) (list 'error (exn-message x)))])
+             (let ([moves (with-handlers ([exn:fail? (lambda (x) (list 'error (exn-message x)))])
                             (send player do-move board dice))])
                (cond
                  [(and (list? moves) (andmap move? moves))
@@ -152,13 +163,15 @@
         (cond
           [cheated? board]
           [else
-           (with-handlers ([exn? (lambda (x) 
-                                   (cheated "doubles-penalty: ~a\n" (exn-message x))
-                                   (void))])
+           (with-handlers ([exn:fail? (lambda (x)
+                                        (cheated "doubles-penalty: ~a\n" (exn-message x))
+                                        (void))])
              (send player doubles-penalty))
            (board-doubles-penalty board color)]))
       
       (super-new)))
+
+  (define-logger parcheesi-bad-move-information)
   
   (define die%
     (class object%

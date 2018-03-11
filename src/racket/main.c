@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2017 PLT Design Inc.
+  Copyright (c) 2004-2018 PLT Design Inc.
   Copyright (c) 1995-2000 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -61,17 +61,14 @@ XFORM_GC_VARIABLE_STACK_THROUGH_DIRECT_FUNCTION;
 START_XFORM_SUSPEND;
 #endif
 
-#ifdef FILES_HAVE_FDS
-# include <sys/types.h>
+#include <sys/types.h>
+#ifndef DOS_FILE_SYSTEM
 # include <sys/time.h>
-# ifdef SELECT_INCLUDE
-#  include <sys/select.h>
-# endif
 #endif
 #ifndef NO_USER_BREAK_HANDLER
 # include <signal.h>
 #endif
-#ifdef UNISTD_INCLUDE
+#ifdef OS_X
 # include <unistd.h>
 #endif
 
@@ -188,14 +185,10 @@ extern Scheme_Object *scheme_initialize(Scheme_Env *env);
 # define INITIAL_NAMESPACE_MODULE "racket/init"
 #endif
 
-#ifdef EXPAND_FILENAME_TILDE
-# define INIT_FILENAME UNIX_INIT_FILENAME
+#ifdef DOS_FILE_SYSTEM
+# define INIT_FILENAME WINDOWS_INIT_FILENAME
 #else
-# ifdef DOS_FILE_SYSTEM
-#  define INIT_FILENAME WINDOWS_INIT_FILENAME
-# else
-#  define INIT_FILENAME MACOS9_INIT_FILENAME
-# endif
+# define INIT_FILENAME UNIX_INIT_FILENAME
 #endif
 
 #define CMDLINE_FFLUSH fflush
@@ -228,12 +221,6 @@ void set_os_process_name(char *sprog)
 #include "cmdline.inc"
 
 /*========================================================================*/
-/*                             OSKit glue                                 */
-/*========================================================================*/
-
-#include "oskglue.inc"
-
-/*========================================================================*/
 /*                           ctl-C handler                                */
 /*========================================================================*/
 
@@ -249,10 +236,6 @@ static void user_break_hit(int ignore)
 {
   scheme_break_main_thread_at(break_handle);
   scheme_signal_received_at(signal_handle);
-
-#  ifdef SIGSET_NEEDS_REINSTALL
-  MZ_SIGSET(SIGINT, user_break_hit);
-#  endif
 }
 
 # ifndef NO_SIGTERM_HANDLER
@@ -261,10 +244,6 @@ static void term_hit(int ignore)
 {
   scheme_break_kind_main_thread_at(break_handle, MZEXN_BREAK_TERMINATE);
   scheme_signal_received_at(signal_handle);
-
-#  ifdef SIGSET_NEEDS_REINSTALL
-  MZ_SIGSET(SIGTERM, term_hit);
-#  endif
 }
 # endif
 
@@ -274,10 +253,6 @@ static void hup_hit(int ignore)
 {
   scheme_break_kind_main_thread_at(break_handle, MZEXN_BREAK_HANG_UP);
   scheme_signal_received_at(signal_handle);
-
-#  ifdef SIGSET_NEEDS_REINSTALL
-  MZ_SIGSET(SIGHUP, hup_hit);
-#  endif
 }
 # endif
 
@@ -425,10 +400,6 @@ static int main_after_stack(void *data)
   argc = ((Main_Args *)data)->argc;
   MAIN_argv = ((Main_Args *)data)->argv;
 
-#if defined(OSKIT) && !defined(OSKIT_TEST) && !KNIT
-  oskit_prepare(&argc, &argv);
-#endif
-
 #ifdef WINDOWS_UNICODE_MAIN
   {
     char *a;
@@ -455,12 +426,12 @@ static int main_after_stack(void *data)
   break_handle = scheme_get_main_thread_break_handle();
   signal_handle = scheme_get_signal_handle();
 # ifndef NO_USER_BREAK_HANDLER
-  MZ_SIGSET(SIGINT, user_break_hit);
+  scheme_set_signal_handler(SIGINT, user_break_hit);
 #  ifndef NO_SIGTERM_HANDLER
-  MZ_SIGSET(SIGTERM, term_hit);
+  scheme_set_signal_handler(SIGTERM, term_hit);
 #  endif
 #  ifndef NO_SIGHUP_HANDLER
-  MZ_SIGSET(SIGHUP, hup_hit);
+  scheme_set_signal_handler(SIGHUP, hup_hit);
 #  endif
 # endif
 # ifdef DOS_FILE_SYSTEM

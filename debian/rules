@@ -11,7 +11,7 @@ MZDYN := mzdyn3m.o
 # keep the collect build from using every available core, unless 
 # explicitly enabled.
 ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
-    ifeq $(shell dpkg-architecture -qDEB_BUILD_ARCH_BITS) 64
+    ifeq ($(shell dpkg-architecture -qDEB_BUILD_ARCH_BITS),64)
 	NUMJOBS = $(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
     else
 	NUMJOBS = 1

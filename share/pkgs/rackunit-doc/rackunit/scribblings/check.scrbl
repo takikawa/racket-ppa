@@ -120,13 +120,13 @@ that checks are conceptually functions.
 For example, the following checks succeed:
 
 @interaction[#:eval rackunit-eval
-  (check-exn 
-   exn:fail? 
+  (check-exn
+   exn:fail?
    (lambda ()
      (raise (make-exn:fail "Hi there"
                            (current-continuation-marks)))))
-  (check-exn 
-   exn:fail? 
+  (check-exn
+   exn:fail?
    (lambda ()
      (error 'hi "there")))
 ]
@@ -259,25 +259,88 @@ included in the output.
 
 @section{Augmenting Information on Check Failure}
 
-When a check fails it stores information including the name
+When a check fails it stores @tech[#:key "check-info"]{information} including the name
 of the check, the location and message (if available), the
 expression the check is called with, and the parameters to
-the check.  Additional information can be stored by using
+the check.  Additional information can be @tech[#:key "check-info stack"]{stored} by using
 the @racket[with-check-info*] function, and the
 @racket[with-check-info] macro.
 
-@defstruct[check-info ([name symbol?] [value any])]{
+@defstruct[check-info ([name symbol?] [value any]) #:transparent]{
+ A @deftech[#:key "check-info"]{check-info structure} stores information
+ associated with the context of the execution of a check. The @racket[value]
+ is normally written in a check failure message using @racket[write], but the
+ @racketmodname[rackunit] library provides several special formatting wrappers
+ that can influence how the check info value is printed.
 
-A check-info structure stores information associated
-with the context of execution of a check.}
+ @history[#:changed "1.6" "Changed from opaque to transparent"]}
 
-The are several predefined functions that create check
-information structures with predefined names.  This avoids
+@defstruct*[string-info ([value string?]) #:transparent]{
+ A special wrapper around a string for use as a @tech{check-info} value. When
+ displayed in a check failure message, @racket[value] is displayed without
+ quotes. Used to print messages instead of writing values.
+ 
+ @(interaction
+   #:eval rackunit-eval
+   (define-check (string-info-check)
+     (with-check-info (['value "hello world"]
+                       ['message (string-info "hello world")])
+       (fail-check)))
+   (string-info-check))
+
+ @history[#:added "1.2"]}
+
+@defstruct*[nested-info ([values (listof check-info?)]) #:transparent]{
+ A special wrapper around a list of @tech{check-infos} for use as a
+ @racket[check-info] value. A check info whose value is a nested info is
+ displayed as an indented subsequence of infos. Nested infos can be placed
+ inside nested infos, yielding greater indentation.
+ 
+ @(interaction
+   #:eval rackunit-eval
+   (define-check (nested-info-check)
+     (define infos
+       (list (make-check-info 'foo "foo") (make-check-info 'bar "bar")))
+     (with-check-info (['nested (nested-info infos)]) (fail-check)))
+   (nested-info-check))
+ 
+ @history[#:added "1.7"]}
+
+@defstruct*[dynamic-info ([proc (-> any/c)]) #:transparent]{
+ A special wrapper around a procedure that produces a value for a
+ @tech{check-info}. When a @racket[dynamic-info] is displayed in a check info
+ stack, @racket[proc] is called to determine what value to display.
+
+ @(interaction
+   #:eval rackunit-eval
+   (with-check-info (['current-dir (dynamic-info current-directory)])
+     (check-equal? 1 2)
+     (parameterize ([current-directory (find-system-path 'temp-dir)])
+       (check-equal? 1 2))))
+
+ The value returned by @racket[proc] may itself be a special formatting value
+ such as @racket[nested-info] (or even another @racket[dynamic-info]), in which
+ case that value is rendered as it would be if it had not been wrapped in
+ @racket[dynamic-info].
+
+ @(interaction
+   #:eval rackunit-eval
+   (define current-foo (make-parameter #f))
+   (with-check-info (['foo (dynamic-info current-foo)])
+     (check-equal? 1 2)
+     (parameterize ([current-foo
+                     (nested-info (list (make-check-info 'nested 'foo)))])
+       (check-equal? 1 2))))
+
+ @history[#:added "1.9"]}
+
+The are several predefined functions that create @tech{check-info}
+structures with predefined names.  This avoids
 misspelling errors:
 
 @defproc*[([(make-check-name (name string?)) check-info?]
            [(make-check-params (params (listof any))) check-info?]
-           [(make-check-location (loc (list/c any (or/c number? #f) (or/c number? #f) 
+           [(make-check-location (loc (list/c any (or/c number? #f) (or/c number? #f)
                                                   (or/c number? #f) (or/c number? #f))))
             check-info?]
            [(make-check-expression (msg any)) check-info?]
@@ -287,7 +350,7 @@ misspelling errors:
 
 @defproc[(with-check-info* (info (listof check-info?)) (thunk (-> any))) any]{
 
-Stores the given @racket[info] on the check-info stack for
+Pushes the given @racket[info] on the @tech{check-info stack} for
 the duration (the dynamic extent) of the execution of
 @racket[thunk]}
 
@@ -305,10 +368,10 @@ is printed along with the usual information on an check failure.
 
 @defform[(with-check-info ((name val) ...) body ...)]{
 
-The @racket[with-check-info] macro stores the given
-information in the check information stack for the duration
-of the execution of the body expressions.  @racket[Name] is
-a quoted symbol and @racket[val] is any value.}
+The @racket[with-check-info] macro pushes the given
+information onto the @tech{check-info stack} for the duration
+of the execution of the body expressions. Each @racket[name] must be
+a quoted symbol and each @racket[val] must be a value.}
 
 @interaction[#:eval rackunit-eval
  (for-each
@@ -343,15 +406,17 @@ that code must be wrapped in a thunk (a function of no
 arguments) by the user.  The predefined @racket[check-exn]
 is an example of this type of check.
 
-It is also useful to understand how the check information stack
-operates.  The stack is stored in a parameter and the
-@racket[with-check-info] forms evaluate to calls to
-@racket[parameterize].  For this reason simple checks (see below)
+It is also useful to understand how the @deftech{check-info stack}
+operates.  The stack contains a list of @tech{check-info} structures;
+when a check fails, RackUnit interprets these structures to print an error
+message. The @tech{check-info stack} is stored in a parameter and the
+@racket[with-check-info] forms evaluate to
+@racket[parameterize] forms.  For this reason simple checks (see below)
 cannot usefully contain calls to @racket[with-check-info] to report
 additional information.  All checks created using
 @racket[define-simple-check] or @racket[define-check] grab some
-information by default: the name of the checks and the values of the
-parameters.  Additionally the macro forms of checks grab location
+information by default, for example the name of the checks and the values of the
+parameters.  Additionally, the macro forms of checks grab location
 information and the expressions passed as parameters.
 
 @defform[(define-simple-check (name param ...) body ...)]{
@@ -375,16 +440,16 @@ We can use these checks in the usual way:
 
 @interaction[#:eval rackunit-eval
   (check-odd? 3)
-  (check-odd? 2) 
+  (check-odd? 2)
 ]
 
 @defform*[[(define-binary-check (name pred actual expected))
           (define-binary-check (name actual expected) body ...)]]{
 
 The @racket[define-binary-check] macro constructs a check
-that tests a binary predicate.  It's benefit over
-@racket[define-simple-check] is in better reporting on check
-failure.  The first form of the macro accepts a binary
+that tests a binary predicate.  Compared to
+@racket[define-simple-check], this macro does a better job reporting check
+failures.  The first form of @racket[define-binary-check] accepts a binary
 predicate and tests if the predicate holds for the given
 values.  The second form tests if the last @racket[body]
 evaluates to a non-false value.
@@ -403,9 +468,9 @@ In use:
   (check-char=? (read-char (open-input-string "a")) #\a)
 ]
 
-If the expression is more complicated the second form should
+If the expression is more complicated, the second form should
 be used.  For example, below we define a binary check that
-tests a number if within 0.01 of the expected value:
+tests whether a number is within 0.01 of the expected value:
 
 @interaction[#:eval rackunit-eval
   (define-binary-check (check-in-tolerance actual expected)
@@ -416,18 +481,13 @@ tests a number if within 0.01 of the expected value:
 
 The @racket[define-check] macro acts in exactly the same way
 as @racket[define-simple-check], except the check only fails
-if the macro @racket[fail-check] is called in the body of
-the check.  This allows more flexible checks, and in
-particular more flexible reporting options.}
+if @racket[fail-check] is called in the body of the check.
+This allows more flexible checks, and in particular more flexible
+reporting options.}
 
-@defform*[[(fail-check)
-           (fail-check message-expr)]]{
-
-The @racket[fail-check] macro raises an @racket[exn:test:check] with
-the contents of the check information stack. The optional message
-is used as the exception's message.
-
-}
-
+@defproc[(fail-check [message string?]) void?]{
+Raises an @racket[exn:test:check] with the contents of the @tech{check-info stack}.
+The optional message is used as the exception's
+message.}
 
 @close-eval[rackunit-eval]

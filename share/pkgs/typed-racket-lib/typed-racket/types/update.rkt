@@ -12,7 +12,6 @@
                     [->* -->*]
                     [one-of/c -one-of/c]))
 
-
 (provide update)
 
 ;; update
@@ -47,23 +46,17 @@
          
          ;; struct ops
          [((Struct: nm par flds proc poly pred)
-           (StructPE: (? (λ (s) (subtype t s))) idx))
+           (StructPE: s idx))
+          #:when (subtype t s)
           ;; Note: this updates fields even if they are not polymorphic.
           ;; Because subtyping is nominal and accessor functions do not
           ;; reflect this, this behavior is unobservable except when a
           ;; variable aliases the field in a let binding
-          (define-values (lhs rhs) (split-at flds idx))
-          (define-values (ty* acc-id)
-            (match rhs
-              [(cons (fld: ty acc-id #f) _)
-               (values (update ty rst) acc-id)]
-              [_ (int-err "update on mutable struct field")]))
-          (cond 
-            [(Bottom? ty*) ty*]
-            [else
-             (define flds*
-               (append lhs (cons (make-fld ty* acc-id #f) (cdr rhs))))
-             (make-Struct nm par flds* proc poly pred)])]
+          (match-define-values (lhs (cons (fld: ty acc-id #f) rhs)) (split-at flds idx))
+          (match (update ty rst)
+            [(Bottom:) -Bottom]
+            [ty (let ([flds (append lhs (cons (make-fld ty acc-id #f) rhs))])
+                  (make-Struct nm par flds proc poly pred))])]
          
          ;; class field ops
          ;;
@@ -73,10 +66,9 @@
          ;; is an object type that doesn't mention private fields. Thus we use the
          ;; FieldPE path element as a marker to refine the result of the accessor
          ;; function.
-         [((Function: (list (arr: doms (Values: (list (Result: rng _ _))) _ _ _)))
+         [((Fun: (list (Arrow: doms _ _ (Values: (list (Result: rng _ _))))))
            (FieldPE:))
-          (make-Function
-           (list (make-arr* doms (update rng rst))))]
+          (make-Fun (list (-Arrow doms (update rng rst))))]
          
          [((Union: _ ts) _)
           ;; Note: if there is a path element, then all Base types are
@@ -84,10 +76,11 @@
           ;; bases from the union
           (Union-fmap (λ (t) (update t path)) -Bottom ts)]
 
-         [((Intersection: ts) _)
-          (for/fold ([t Univ])
-                    ([elem (in-list ts)])
-            (intersect t (update elem path)))]
+         [((Intersection: ts raw-prop) _)
+          (-refine (for/fold ([t Univ])
+                             ([elem (in-list ts)])
+                     (intersect t (update elem path)))
+                   raw-prop)]
          
          [(_ _)
           (match path-elem

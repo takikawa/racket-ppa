@@ -238,12 +238,7 @@ variants.
 @defform[(for*/hasheq type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for*/hasheqv type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for*/vector type-ann-maybe (for-clause ...) expr ...+)]
-@defform[(for*/flvector type-ann-maybe (for-clause ...) expr ...+)]
-@defform[(for*/extflvector type-ann-maybe (for-clause ...) expr ...+)]
-@defform[(for*/and type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for*/or   type-ann-maybe (for-clause ...) expr ...+)]
-@defform[(for*/first type-ann-maybe (for-clause ...) expr ...+)]
-@defform[(for*/last type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for*/sum type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for*/product type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for*/set type-ann-maybe (for-clause ...) expr ...+)]
@@ -256,11 +251,12 @@ annotated with a @racket[Listof] type. All annotations are optional.
 }
 
 @deftogether[[
-@defform[(for/flvector type-ann-maybe (for-clause ...) expr ...+)]
-@defform[(for/extflvector type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for/and type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for/first type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for/last type-ann-maybe (for-clause ...) expr ...+)]
+@defform[(for*/and type-ann-maybe (for-clause ...) expr ...+)]
+@defform[(for*/first type-ann-maybe (for-clause ...) expr ...+)]
+@defform[(for*/last type-ann-maybe (for-clause ...) expr ...+)]
 ]]{
 Like the above, except they are not yet supported by the typechecker.
 }
@@ -559,14 +555,25 @@ protect higher-order uses of the value.
 Instantiate the type of @racket[e] with types @racket[t ...] or with the
 poly-dotted types @racket[t ... t ooo bound]. @racket[e] must
 have a polymorphic type that can be applied to the supplied number of type
-variables. This is legal only in expression contexts.
+variables. For non-poly-dotted functions, however, fewer arguments can be
+  provided and the omitted types default to @racket[Any].
+  @racket[inst] is legal only in expression contexts.
 @ex[(foldl (inst cons Integer Integer) null (list 1 2 3 4))
 
-    (: fold-list : (All (A) (Listof A) -> (Listof A)))
-    (define (fold-list lst)
-      (foldl (inst cons A A) null lst))
+    (: my-cons (All (A B) (-> A B (Pairof A B))))
+    (define my-cons cons)
 
-    (fold-list (list "1" "2" "3" "4"))
+    (: foldl-list : (All (α) (Listof α) -> (Listof α)))
+    (define (foldl-list lst)
+      (foldl (inst my-cons α (Listof α)) null lst))
+
+    (foldl-list (list "1" "2" "3" "4"))
+
+    (: foldr-list : (All (α) (Listof α) -> Any))
+    (define (foldr-list lst)
+      (foldr (inst my-cons α) null lst))
+
+    (foldr-list (list "1" "2" "3" "4"))
 
     (: my-values : (All (A B ...) (A B ... -> (values A B ... B))))
     (define (my-values arg . args)
@@ -687,7 +694,8 @@ a @racket[require/typed] form. Here is an example of using
 so we need to use @racket[case->].
 
 @history[#:changed "1.4" @elem{Added the @racket[#:type-name] option.}
-         #:changed "1.6" "Added syntax for struct type variables, only works in unsafe requires"]}
+         #:changed "1.6" "Added syntax for struct type variables, only works in unsafe requires."
+         #:changed "1.12" @elem{Added default type @racket[Any] for omitted @racket[inst] args.}]}
 
 @defform[(require/typed/provide m rt-clause ...)]{
 Similar to @racket[require/typed], but also provides the imported identifiers.

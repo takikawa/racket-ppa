@@ -1,5 +1,6 @@
+
 #lang scribble/doc
-@(require "common.rkt" (for-label graphics/value-turtles))
+@(require "common.rkt" (for-label graphics/value-turtles pict))
 
 @title{Value Turtles}
 
@@ -23,7 +24,7 @@ turtles-window value.
 Creates a new turtles window with the given @racket[width] and
 @racket[height]. The remaining arguments specify position of the
 initial turtle and the direction in radians (where @racket[0] is to
-the right).}
+the right). The turtle's pen width is @racket[1].}
 
 @defproc[(turtles? [v any/c]) boolean?]{
   Determines if @racket[v] is a turtles drawing.
@@ -64,6 +65,18 @@ new turtles window.}
 Turns the turtle @racket[theta] radians counter-clockwise, returning a
 new turtles window.}
 
+@defproc[(set-pen-width [turtles turtles?] [width (real-in 0 255)]) turtles?]{
+  Creates a new turtles that draws with the pen width @racket[width].
+
+ @history[#:added "1.5"]
+}
+
+@defproc[(set-pen-color [turtles turtles?] [color (or/c string? (is-a?/c color%))]) turtles?]{
+  Creates a new turtles that draws with the pen color @racket[color].
+
+ @history[#:added "1.6"]
+}
+
 @defproc[(merge [turtles1 turtles?] [turtles2 turtles?]) turtles?]{
 
 The @racket[split] and @racket[tprompt] forms provided by
@@ -77,8 +90,60 @@ window contains all of the turtles of the previous two windows, but
 only the line drawings of the first turtles argument.}
 
 @defproc[(clean [turtles turtles?]) turtles?]{
-  Produces a turtles like @racket[turtles], but with only a single
-  turtle, positioned in the center.
+ Produces a turtles with the drawing as in @racket[turtles], but with
+ zero turtles.
+}
+
+@defproc[(turtles-width [turtles turtles?]) (and/c real? positive?)]{
+  Returns the width of @racket[turtles].
+}
+
+@defproc[(turtles-height [turtles turtles?]) (and/c real? positive?)]{
+  Returns the height of @racket[turtles].
+}
+
+@defproc[(turtles-pen-width [turtles turtles?]) (real-in 0 255)]{
+  Returns the current width of the pen that the turtles use to draw.
+
+  @history[#:added "1.5"]
+}
+
+@defproc[(turtles-pen-color [turtles turtles?]) (is-a?/c color%)]{
+  Returns the current color of the pen that the turtles use to draw.
+
+  @history[#:added "1.6"]
+}
+
+@defproc[(turtle-state [turtles turtles?]) (listof (vector/c real? real? real?
+                                                             #:immutable? #t
+                                                             #:flat? #t))]{
+  Returns the position and heading of all of the turtles; the first
+ element in each vector is the @racket[_x] coordinate, the second is the
+ @racket[_y] coordinate and the third is the angle in degrees.
+
+  @history[#:added "1.5"]
+
+}
+
+@defproc[(restore-turtle-state [turtles turtles?]
+                               [state (listof (vector/c real? real? real?
+                                                        #:immutable? #t
+                                                        #:flat? #t))])
+         turtles?]{
+ Keeps the drawing as in @racket[turtles], but puts the turtles positions
+ and headings as specified in @racket[state].
+
+  @history[#:added "1.5"]
+}
+
+@defproc[(turtles-pict [turtles turtles?]) pict?]{
+ Constructs a pict that draws the same way that @racket[turtles] would draw,
+ except that it does not draw the frame around the turtles, nor
+ does it draw the turtles themselves. Additionally, the size of the resulting
+ is not the size of @racket[turtles], but instead sized exactly to the
+ the lines that that are in the drawing in @racket[turtles].
+
+  @history[#:added "1.5"]
 }
 
 @; ----------------------------------------

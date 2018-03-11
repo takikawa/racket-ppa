@@ -9,6 +9,7 @@
          racket/match
          string-constants
          framework
+         framework/private/srcloc-panel
          mrlib/name-message
          mrlib/bitmap-label
          mrlib/include-bitmap
@@ -21,7 +22,7 @@
          net/url
          
          drracket/private/drsig
-         "auto-language.rkt"
+         "insulated-read-language.rkt"
          "insert-large-letters.rkt"
          "get-defs.rkt"
          "local-member-names.rkt"
@@ -345,8 +346,8 @@
       (keymap:call/text-keymap-initializer
        (λ ()
          (make-object text-field% #f hp void))))
-    (define vp (make-object vertical-panel% hp))
-    (define hp2 (make-object horizontal-panel% vp))
+    (define vp (new-vertical-panel% [parent hp]))
+    (define hp2 (new-horizontal-panel% [parent vp]))
     (define num 
       (keymap:call/text-keymap-initializer
        (λ ()
@@ -498,7 +499,7 @@
   
   
   (define definitions-canvas%
-    (class (make-searchable-canvas% (canvas:delegate-mixin (canvas:info-mixin canvas:color%)))
+    (class (make-searchable-canvas% (canvas:info-mixin canvas:color%))
       (init [style '()])
       (super-new (style (cons 'auto-hscroll style)))
       (inherit set-scroll-via-copy)
@@ -542,12 +543,12 @@
                 (color:text-mixin
                  (drracket:rep:drs-bindings-keymap-mixin
                   (mode:host-text-mixin
-                   (text:delegate-mixin
-                    (text:foreground-color-mixin
-                     (drracket:rep:drs-autocomplete-mixin
-                      (λ (x) x)
-                      (text:normalize-paste-mixin
-                       (text:column-guide-mixin
+                   (text:foreground-color-mixin
+                    (drracket:rep:drs-autocomplete-mixin
+                     (λ (x) x)
+                     (text:normalize-paste-mixin
+                      (text:column-guide-mixin
+                       (text:inline-overview-mixin
                         (text:all-string-snips-mixin
                          (text:ascii-art-enlarge-boxes-mixin
                           text:info%))))))))))))))])
@@ -929,7 +930,10 @@
            (is-a? (drracket:language-configuration:language-settings-language next-settings)
                   drracket:module-language:module-language<%>))
           (inherit set-max-undo-history)
-          (set-max-undo-history 'forever)))))
+          (set-max-undo-history 'forever)
+
+          (inherit set-inline-overview-enabled?)
+          (set-inline-overview-enabled? (preferences:get 'drracket:inline-overview-shown?))))))
   
   (define (get-module-language/settings)
     (let* ([module-language
@@ -1395,7 +1399,7 @@
     show-planet-status)
   
   (define frame-mixin
-    (mixin (drracket:frame:<%> frame:searchable-text<%> frame:delegate<%> frame:size-pref<%>)
+    (mixin (drracket:frame:<%> frame:status-line<%> frame:searchable-text<%> frame:size-pref<%>)
       (drracket:unit:frame<%>)
       (init filename)
       (inherit set-label-prefix get-show-menu
@@ -1410,8 +1414,7 @@
                file-menu:get-save-item
                file-menu:get-save-as-item
                file-menu:get-revert-item
-               file-menu:get-print-item
-               set-delegated-text)
+               file-menu:get-print-item)
       
       (define resizable-panel (drr-named-undefined 'resizable-panel))
       (define definitions-canvas (drr-named-undefined 'definitions-canvas))
@@ -1549,12 +1552,12 @@
                         (remq logger-panel l)])))]
             [else
              (when show? ;; if we want to hide and it isn't built yet, do nothing
-               (define logger-gui-content-panel-parent (new vertical-panel%
+               (define logger-gui-content-panel-parent (new-vertical-panel%
                                                             [style '(border)]
                                                             [parent logger-panel]
                                                             [stretchable-height #t]))
                (set! logger-gui-content-panel
-                     (new horizontal-panel%
+                     (new-horizontal-panel%
                           [parent logger-gui-content-panel-parent]
                           [stretchable-height #f]))
                (new-logger-text)
@@ -1885,39 +1888,39 @@
                        (make-two-way-prefs-dragable-panel% panel:horizontal-dragable%
                                                            'drracket:module-browser-size-percentage)
                        parent)]
-               [_module-browser-panel (new vertical-panel%
+               [_module-browser-panel (new-vertical-panel%
                                            (parent _module-browser-parent-panel)
                                            (alignment '(left center))
                                            (stretchable-width #f))]
-               [planet-status-outer-panel (new vertical-panel% [parent _module-browser-parent-panel])]
-               [execute-warning-outer-panel (new vertical-panel% [parent planet-status-outer-panel])]
+               [planet-status-outer-panel (new vertical-pane% [parent _module-browser-parent-panel])]
+               [execute-warning-outer-panel (new vertical-pane% [parent planet-status-outer-panel])]
                [logger-outer-panel (new (make-two-way-prefs-dragable-panel%
                                          panel:vertical-dragable%
                                          'drracket:logging-size-percentage)
                                         [parent execute-warning-outer-panel])]
-               [trans-outer-panel (new vertical-panel% [parent logger-outer-panel])]
+               [trans-outer-panel (new vertical-pane% [parent logger-outer-panel])]
                [root (make-object cls trans-outer-panel)])
           (set! module-browser-parent-panel _module-browser-parent-panel)
           (set! module-browser-panel _module-browser-panel)
           (send module-browser-parent-panel change-children (λ (l) (remq module-browser-panel l)))
           (set! logger-parent-panel logger-outer-panel)
-          (set! logger-panel (new vertical-panel% [parent logger-parent-panel]))
+          (set! logger-panel (new-vertical-panel% [parent logger-parent-panel]))
           (send logger-parent-panel change-children (lambda (x) (remq logger-panel x)))
           
           (set! execute-warning-parent-panel execute-warning-outer-panel)
-          (set! execute-warning-panel (new horizontal-panel% 
+          (set! execute-warning-panel (new-horizontal-panel% 
                                            [parent execute-warning-parent-panel]
                                            [stretchable-height #f]))
           (send execute-warning-parent-panel change-children (λ (l) (remq execute-warning-panel l)))
           
-          (set! transcript-parent-panel (new horizontal-panel%
+          (set! transcript-parent-panel (new-horizontal-panel%
                                              (parent trans-outer-panel)
                                              (stretchable-height #f)))
           (set! transcript-panel (make-object horizontal-panel% transcript-parent-panel))
-          (set! planet-status-parent-panel (new vertical-panel% 
+          (set! planet-status-parent-panel (new-vertical-panel% 
                                                 [parent planet-status-outer-panel]
                                                 [stretchable-height #f]))
-          (set! planet-status-panel (new horizontal-panel% 
+          (set! planet-status-panel (new-horizontal-panel% 
                                          [parent planet-status-parent-panel]))
           (send planet-status-parent-panel change-children (λ (l) (remq planet-status-panel l)))
           (unless (toolbar-shown?)
@@ -2224,7 +2227,8 @@
                                        (drracket:language-configuration:language-settings-settings
                                         settings))
                                  ""
-                                 (string-append " " (string-constant custom)))))
+                                 (string-append " " (string-constant custom)))
+                             " "))
         (update-teachpack-menu)
         (when (is-a? language-specific-menu menu%)
           (define label (send language-specific-menu get-label))
@@ -3013,7 +3017,6 @@
             (update-save-message)
             (update-save-button)
             (language-changed)
-            (set-delegated-text definitions-text)
             
             (send definitions-text update-frame-filename)
             (update-running (send current-tab is-running?))
@@ -3329,8 +3332,7 @@
       (define/public (get-definitions/interactions-panel-parent)
         toolbar/rest-panel)
       
-      (inherit delegated-text-shown? hide-delegated-text show-delegated-text
-               set-show-menu-sort-key)
+      (inherit set-show-menu-sort-key)
       (define/override (add-show-menu-items show-menu)
         (super add-show-menu-items show-menu)
         (set! definitions-item
@@ -3382,25 +3384,28 @@
                                          (cons 'shift (get-default-shortcut-prefix)))])])
           (set-show-menu-sort-key layout-item 103))
         
-        (let ([overview-menu-item 
-               (new menu:can-restore-menu-item%
-                    (shortcut #\u)
-                    (label 
-                     (if (delegated-text-shown?)
-                         (string-constant hide-overview)
-                         (string-constant show-overview)))
-                    (parent (get-show-menu))
-                    (callback
-                     (λ (menu evt)
-                       (if (delegated-text-shown?)
-                           (begin
-                             (send menu set-label (string-constant show-overview))
-                             (preferences:set 'framework:show-delegate? #f)
-                             (hide-delegated-text))
-                           (begin
-                             (send menu set-label (string-constant hide-overview))
-                             (preferences:set 'framework:show-delegate? #t)
-                             (show-delegated-text))))))])
+        (let ()
+          (define (overview-shown?)
+            (send (send (get-current-tab) get-defs) get-inline-overview-enabled?))
+          (define overview-menu-item
+            (new menu:can-restore-menu-item%
+                 (shortcut #\u)
+                 (label
+                  (if (overview-shown?)
+                      (string-constant hide-overview)
+                      (string-constant show-overview)))
+                 (parent (get-show-menu))
+                 (callback
+                  (λ (menu evt)
+                    (cond
+                      [(overview-shown?)
+                       (send menu set-label (string-constant show-overview))
+                       (preferences:set 'drracket:inline-overview-shown? #f)
+                       (send (send (get-current-tab) get-defs) set-inline-overview-enabled? #f)]
+                      [else
+                       (send menu set-label (string-constant hide-overview))
+                       (preferences:set 'drracket:inline-overview-shown? #t)
+                       (send (send (get-current-tab) get-defs) set-inline-overview-enabled? #t)])))))
           (set-show-menu-sort-key overview-menu-item 301))
         
         (set! module-browser-menu-item
@@ -4291,6 +4296,12 @@
           (λ (_1 _2) (send interactions-text kill-evaluation))
           #\k
           (string-constant force-quit-menu-item-help-string))
+        (new menu:can-restore-menu-item%
+             [label (string-constant module-language-#lang-flush-cache-menu-item)]
+             [parent language-specific-menu]
+             [callback (λ (_1 _2) (send (send current-tab get-defs) move-to-new-language #t))]
+             [shortcut #\d]
+             [shortcut-prefix (cons 'shift (get-default-shortcut-prefix))])
         (when (custodian-memory-accounting-available?)
           (new menu-item%
                [label (string-constant limit-memory-menu-item-label)]
@@ -4631,21 +4642,21 @@
       ;   ;                                                 ;                         
       
       
-      (define toolbar/rest-panel (new vertical-panel% [parent (get-area-container)]))
+      (define toolbar/rest-panel (new-vertical-panel% [parent (get-area-container)]))
       
       ;; most contain only top-panel (or nothing)
-      (define top-outer-panel (new horizontal-panel% 
+      (define top-outer-panel (new horizontal-pane% 
                                    [parent toolbar/rest-panel]
                                    [alignment '(right top)]
                                    [stretchable-height #f]))
       
       [define top-panel (make-object horizontal-panel% top-outer-panel)]
-      [define name-panel (new horizontal-panel%
+      [define name-panel (new-horizontal-panel%
                               (parent top-panel)
                               (alignment '(left center))
                               (stretchable-width #f)
                               (stretchable-height #f))]
-      (define panel-with-tabs (new vertical-panel%
+      (define panel-with-tabs (new vertical-pane%
                                    (parent (get-definitions/interactions-panel-parent))))
       (define tabs-panel (new tab-panel% 
                               (font small-control-font)
@@ -4809,7 +4820,7 @@
       
       (define language-message
         (let* ([info-panel (get-info-panel)]
-               [p (new vertical-panel% 
+               [p (new-vertical-panel% 
                        [parent info-panel]
                        [alignment '(left center)])]
                [language-message (new language-label-message% [parent p] [frame this])])
@@ -4823,7 +4834,6 @@
       (update-save-message)
       (update-save-button)
       (language-changed)
-      (set-delegated-text definitions-text)
       
       (cond
         [filename
@@ -4971,11 +4981,11 @@
                         [parent d]
                         [label (string-constant limit-memory-msg-2)]))
     
-    (define top-hp (new horizontal-panel%
+    (define top-hp (new-horizontal-panel%
                         [parent d] 
                         [stretchable-height #f]
                         [alignment '(left center)]))
-    (define bot-hp (new horizontal-panel%
+    (define bot-hp (new-horizontal-panel%
                         [parent d]
                         [stretchable-height #f]
                         [alignment '(left bottom)]))
@@ -4996,7 +5006,7 @@
                        (cb-checked))]
            [parent bot-hp]))
     
-    (define unlimited-warning-panel (new horizontal-panel%
+    (define unlimited-warning-panel (new-horizontal-panel%
                                          [parent d]
                                          [stretchable-width #t]
                                          [stretchable-height #f]))
@@ -5079,7 +5089,7 @@
          (send ok-button enable #t)]))
     
     (define msg2 (new message% [parent top-hp] [label (string-constant limit-memory-megabytes)]))
-    (define bp (new horizontal-panel% [parent d]))
+    (define bp (new-horizontal-panel% [parent d]))
     (define-values (ok-button cancel-button)
       (gui-utils:ok/cancel-buttons
        bp 
@@ -5269,8 +5279,8 @@
                                             [label (string-constant drscheme)]
                                             [width 600]))
         (set! saved-bug-reports-panel
-              (new vertical-panel% [parent (send saved-bug-reports-window get-area-container)]))
-        (define hp (new horizontal-panel% 
+              (new-vertical-panel% [parent (send saved-bug-reports-window get-area-container)]))
+        (define hp (new-horizontal-panel% 
                         [parent (send saved-bug-reports-window get-area-container)] 
                         [stretchable-width #f] 
                         [alignment '(right center)]))
@@ -5309,12 +5319,12 @@
                            (cdr rib)
                            (loop (cdr item))))])))
          (define vp
-           (new vertical-panel% 
+           (new-vertical-panel% 
                 [style '(border)]
                 [parent saved-bug-reports-panel]
                 [stretchable-height #f]))
          (define hp
-           (new horizontal-panel% 
+           (new-horizontal-panel% 
                 [parent vp]
                 [stretchable-height #f]))
          (define first-line-msg 
@@ -5392,16 +5402,15 @@
          (frame:searchable-text-mixin 
           (frame:searchable-mixin
            (frame:text-info-mixin 
-            (frame:delegate-mixin
-             (frame:status-line-mixin
-              (frame:info-mixin
-               (frame:text-mixin
-                (frame:editor-mixin
-                 (frame:standard-menus-mixin
-                  (frame:register-group-mixin
-                   (frame:focus-table-mixin
-                    (frame:basic-mixin
-                     frame%))))))))))))))))))
+            (frame:status-line-mixin
+             (frame:info-mixin
+              (frame:text-mixin
+               (frame:editor-mixin
+                (frame:standard-menus-mixin
+                 (frame:register-group-mixin
+                  (frame:focus-table-mixin
+                   (frame:basic-mixin
+                    frame%)))))))))))))))))
   
   (define-local-member-name enable-two-way-prefs)
   (define (make-two-way-prefs-dragable-panel% % pref-key)

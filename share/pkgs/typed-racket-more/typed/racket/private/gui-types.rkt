@@ -171,6 +171,7 @@
                [cap Pen-Cap-Style #:optional]
                [join Pen-Join-Style #:optional]
                [stipple (Option (Instance Bitmap%)) #:optional])
+         [get-style (-> Pen-Style)]
          [get-cap (-> Pen-Cap-Style)]
          [get-color (-> (Instance Color%))]
          [get-join (-> Pen-Join-Style)]
@@ -565,15 +566,15 @@
                              Font-Smoothing Any)
                        (List Real Font-Family Font-Style Font-Weight Any
                              Font-Smoothing Any Font-Hinting)
-                       (List Real String Font-Family)
-                       (List Real String Font-Family Font-Style)
-                       (List Real String Font-Family Font-Style Font-Weight)
-                       (List Real String Font-Family Font-Style Font-Weight Any)
-                       (List Real String Font-Family Font-Style Font-Weight Any
+                       (List Real (Option String) Font-Family)
+                       (List Real (Option String) Font-Family Font-Style)
+                       (List Real (Option String) Font-Family Font-Style Font-Weight)
+                       (List Real (Option String) Font-Family Font-Style Font-Weight Any)
+                       (List Real (Option String) Font-Family Font-Style Font-Weight Any
                              Font-Smoothing)
-                       (List Real String Font-Family Font-Style Font-Weight Any
+                       (List Real (Option String) Font-Family Font-Style Font-Weight Any
                              Font-Smoothing Any)
-                       (List Real String Font-Family Font-Style Font-Weight Any
+                       (List Real (Option String) Font-Family Font-Style Font-Weight Any
                              Font-Smoothing Any Font-Hinting)))
          [get-face (-> (Option String))]
          [get-family (-> Font-Family)]
@@ -789,7 +790,10 @@
 
 (define-type Subwindow<%>
   (Class #:implements Subarea<%>
-         #:implements Window<%>))
+         #:implements Window<%>
+         [reparent (-> (U (Instance Frame%) (Instance Dialog%)
+                          (Instance Panel%) (Instance Pane%))
+                       Void)]))
 
 (define-type Canvas<%>
   (Class #:implements Subwindow<%>
@@ -1838,7 +1842,7 @@
                   ((Option (Boxof Integer)) (Option (Boxof Real)) -> (Listof Real))
                   ((Option (Boxof Integer)) (Option (Boxof Real))
                    (Option (Boxof Any)) -> (Listof Real)))]
-         [get-text (Integer (U Integer 'eof) -> String)]
+         [get-text (->* () (Integer (U Integer 'eof) Any Any) String)]
          [get-top-line-base (-> Nonnegative-Real)]
          [get-visible-line-range
           (case-> ((Option (Boxof Integer)) (Option (Boxof Real)) -> Void)

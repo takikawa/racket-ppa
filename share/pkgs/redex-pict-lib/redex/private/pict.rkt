@@ -70,6 +70,7 @@
 
          where-make-prefix-pict
          where-combine
+         metafunction-arrow-pict
          
          just-before
          just-after         
@@ -87,6 +88,7 @@
          metafunction-up/down-indent
          metafunction-cases
          judgment-form-cases
+         judgment-form-show-rule-names
          compact-vertical-min-width
          extend-language-show-union
          extend-language-show-extended-order
@@ -95,10 +97,9 @@
          horizontal-bar-spacing
          relation-clauses-combine
          
-         rule-pict-info->side-condition-pict)
+         rule-pict-info->side-condition-pict
 
-(provide/contract
- [linebreaks (parameter/c (or/c #f (listof boolean?)))])
+         linebreaks sc-linebreaks)
 
 
 ;                                                                             
@@ -432,6 +433,8 @@
 (define where-make-prefix-pict
   (make-parameter (lambda ()
                     (basic-text " where " (default-style)))))
+(define metafunction-arrow-pict
+  (make-parameter (λ () (basic-text " → " (default-style)))))
 (define otherwise-make-pict
   (make-parameter (lambda ()
                     (basic-text " otherwise" (default-style)))))
@@ -938,12 +941,13 @@
      #'(render-judgment-form rest ...)]))
                
 (define linebreaks (make-parameter #f))
+(define sc-linebreaks (make-parameter #f))
 
 (define metafunction-pict-style (make-parameter 'left-right))
 (define metafunction-cases (make-parameter #f))
 (define metafunction-up/down-indent (make-parameter 0))
 
-(define (select-mf-cases contracts eqns case-labelss)
+(define (select-mf-cases contracts eqnss case-labelss)
   (define mf-cases (metafunction-cases))
   (cond
     [mf-cases
@@ -953,7 +957,7 @@
                                    #:when (or (symbol? case)
                                               (string? case)))
                            (if (symbol? case) (symbol->string case) case)))
-     (for/list ([eqns (in-list eqns)]
+     (for/list ([eqns (in-list eqnss)]
                 [contract (in-list contracts)]
                 [case-labels (in-list case-labelss)])
        (filter
@@ -971,7 +975,7 @@
               eqn]
              [else #f])
             (set! i (+ i 1)))))))]
-    [else (for/list ([eqns (in-list eqns)]
+    [else (for/list ([eqns (in-list eqnss)]
                      [contract (in-list contracts)])
             (if contract
                 (cons contract eqns)
@@ -1028,6 +1032,7 @@
                   mfs)
     (error name "expected metafunctions that are all drawn from the same language"))
   (define current-linebreaks (linebreaks))
+  (define current-sc-linebreaks (sc-linebreaks))
   (define all-nts (language-nts (metafunc-proc-lang (metafunction-proc (car mfs)))))
   (define hsep 2)
   (define style (metafunction-pict-style))
@@ -1058,18 +1063,24 @@
   (define lhs/contractss (select-mf-cases contracts all-lhss case-labels))
   
   (define num-eqns (apply + (map length eqnss)))
-  (unless (or (not current-linebreaks)
-              (= (length current-linebreaks) num-eqns))
-    (error 'metafunction->pict
-           (string-append
-            "expected the current-linebreaks parameter to be a list"
-            " whose length matches the number of cases in the metafunction"
-            " plus one if there is a contract (~a), but got ~s")
-           num-eqns
-           current-linebreaks))
+  (define (check-linebreaks the-linebreaks linebreak-param-name)
+    (unless (or (not the-linebreaks)
+                (= (length the-linebreaks) num-eqns))
+      (error linebreak-param-name
+             (string-append
+              "contract violation\n"
+              "  expected: list of length ~a\n"
+              "  got: ~e")
+             num-eqns
+             the-linebreaks)))
+  (check-linebreaks current-linebreaks 'linebreaks)
+  (check-linebreaks current-sc-linebreaks 'sc-linebreaks)
   (define linebreakss (unappend (or current-linebreaks
                                     (for/list ([i (in-range num-eqns)]) #f))
                                 eqnss))
+  (define sc-linebreakss (unappend (or current-sc-linebreaks
+                                       (for/list ([i (in-range num-eqns)]) #f))
+                                   eqnss))
   (define mode (case style
                  [(left-right 
                    left-right/vertical-side-conditions
@@ -1190,7 +1201,7 @@
           (define sc-info (list-ref eqn/contract 1))
           (cond
            [(member 'or sc-info)
-            (build-brace-based-rhs 
+            (build-brace-based-rhs
              (cons (list-ref eqn/contract 2)
                    (reverse sc-info)))]
            [else
@@ -1285,11 +1296,16 @@
         (for/list ([lhs/contracts (in-list lhs/contractss)]
                    [scs (in-list scss)]
                    [rhss (in-list rhsss)]
-                   [linebreaks (in-list linebreakss)])
+                   [linebreaks (in-list linebreakss)]
+                   [sc-linebreaks (in-list sc-linebreakss)])
           (for/list ([lhs/contract (in-list lhs/contracts)]
                      [sc (in-list scs)]
                      [rhs (in-list rhss)]
-                     [linebreak? (in-list linebreaks)])
+                     [linebreak? (in-list linebreaks)]
+                     [sc-linebreak? (in-list sc-linebreaks)])
+            (define sc-beside? (and sc
+                                    (and (eq? style 'left-right/beside-side-conditions)
+                                         (not sc-linebreak?))))
             (append
              (list
               (cond
@@ -1297,7 +1313,7 @@
                 (list lhs/contract 'fill 'fill)]
                [linebreak?
                 (list lhs/contract 'fill 'fill)]
-               [(and sc (eq? style 'left-right/beside-side-conditions))
+               [sc-beside?
                 (list lhs/contract =-pict (htl-append 10 rhs sc))]
                [else
                 (list lhs/contract =-pict rhs)]))
@@ -1307,12 +1323,12 @@
                         'fill
                         'fill))
                  null)
-             (if (or (not sc)
-                     (and (not linebreak?)
-                          (eq? style 'left-right/beside-side-conditions)))
-                 null
+
+             (if (and sc (or (not sc-beside?)
+                             linebreak?))
                  (list
-                  (list sc 'fill 'fill))))))))
+                  (list sc 'fill 'fill))
+                 null))))))
      ;; We want to do the same thing as flattening into one list
      ;; and using `table` with 3 columns, but we also want to adjust
      ;; individual metafunctions and contracts.
@@ -1391,12 +1407,18 @@
    [else (error 'render-metafunction "internal error: more than one contract")]))
 
 (define (render-metafunction-contract lang name doms rngs separators)
+  (define name-rewritten (apply-atomic-rewrite name))
+  (define name-pict
+    (cond
+      [(or (symbol? name-rewritten) (string? name-rewritten))
+       ((current-text) (format "~a" name) (metafunction-style) (metafunction-font-size))]
+      [else name-rewritten]))
   ((adjust 'metafunction-contract)
-   (hbl-append ((current-text) (format "~a" name) (metafunction-style) (metafunction-font-size))
+   (hbl-append name-pict
                (basic-text " : " (default-style))
                (apply hbl-append (add-between (map (λ (x) (lw->pict lang x)) doms) 
                                               (basic-text " " (default-style))))
-               (basic-text " → " (default-style))
+               ((metafunction-arrow-pict))
                (apply hbl-append 
                       (add-between (interleave-ctc-separators
                                     (map (λ (x) (lw->pict lang x)) rngs)
@@ -1508,6 +1530,7 @@
      (parameterize ([dc-for-text-size (make-object bitmap-dc% (make-object bitmap% 1 1))])
        (make-pict))]))
 
+(define judgment-form-show-rule-names (make-parameter #t))
 (define (inference-rules-pict name all-eqns eqn-names lang judgment-form?)
   (define all-nts (language-nts lang))
   (define (wrapper->pict lw) (lw->pict all-nts lw))
@@ -1576,7 +1599,7 @@
         top
         line
         conclusion))
-     (if name
+     (if (and name (judgment-form-show-rule-names))
          (let ([label (string->bracketed-label name)])
            (let-values ([(x y) (rc-find w/out-label line)])
              (hb-append w/out-label 

@@ -14,13 +14,21 @@
          racket/contract)
 
 (provide define-cite
-         author+date-style number-style
+         author+date-style author+date-square-bracket-style number-style
          make-bib in-bib (rename-out [auto-bib? bib?])
-         proceedings-location journal-location book-location
-         techrpt-location dissertation-location
          author-name org-author-name 
          (contract-out
-          [authors (->* (content?) #:rest (listof content?) element?)])
+          [authors (->* (content?) #:rest (listof content?) element?)]
+          [proceedings-location
+           (->* [any/c] [#:pages (or/c (list/c any/c any/c) #f) #:series any/c #:volume any/c] element?)]
+          [journal-location
+           (->* [any/c] [#:pages (or/c (list/c any/c any/c) #f) #:number any/c #:volume any/c] element?)]
+          [book-location
+           (->* [] [#:edition any/c #:publisher any/c] element?)]
+          [techrpt-location
+           (-> #:institution any/c #:number any/c element?)]
+          [dissertation-location
+           (->* [#:institution any/c] [#:degree any/c] element?)])
          other-authors
          editor
          abbreviate-given-names)
@@ -62,26 +70,28 @@
      (lambda (renderer part ri)
        ;; (list which key) should be mapped to the bibliography element.
        (define s (resolve-get part ri `(,which ,key)))
-       (make-link-element #f
-                          (list (or s "???")
-                                (cond [(not (send style disambiguate-date?)) '()]
-                                      [disambiguation ;; should be a list of bib-entries with same author/date
-                                       (define disambiguation*
-                                         (add-between (for/list ([bib (in-list disambiguation)])
-                                                        (define key (auto-bib-key bib))
-                                                        (define maybe-disambiguation
-                                                          (resolve-get part ri `(autobib-disambiguation ,key)))
-                                                        (case maybe-disambiguation
-                                                          [(#f) #f]
-                                                          [(unambiguous) #f]
-                                                          [else (make-link-element #f maybe-disambiguation `(autobib ,key))]))
-                                                      ","))
-                                       (cond [(not (car disambiguation*)) '()] ;; the bib was unambiguous
-                                             [else disambiguation*])]
-                                      [else '()])
-                                (if with-specific?
-                                    (auto-bib-specific bib-entry)
-                                    ""))
+       (define content
+         (list (or s "???")
+               (cond [(not (send style disambiguate-date?)) '()]
+                     [disambiguation ;; should be a list of bib-entries with same author/date
+                      (define disambiguation*
+                        (add-between (for/list ([bib (in-list disambiguation)])
+                                       (define key (auto-bib-key bib))
+                                       (define maybe-disambiguation
+                                         (resolve-get part ri `(autobib-disambiguation ,key)))
+                                       (case maybe-disambiguation
+                                         [(#f) #f]
+                                         [(unambiguous) #f]
+                                         [else (make-link-element "AutobibLink" maybe-disambiguation `(autobib ,key))]))
+                                     ","))
+                      (cond [(not (car disambiguation*)) '()] ;; the bib was unambiguous
+                            [else disambiguation*])]
+                     [else '()])
+               (if with-specific?
+                   (auto-bib-specific bib-entry)
+                   "")))
+       (make-link-element "AutobibLink"
+                          content
                           `(autobib ,(auto-bib-key bib-entry))))
      (lambda () "(???)")
      (lambda () "(???)"))))
@@ -130,7 +140,7 @@
     (error 'citet "citet must be used with identical authors, given ~a"
            (map (compose author-element-names* auto-bib-author) bib-entries)))
   (make-element
-   #f
+   (make-style "Autobibref" '())
    (list (add-cite group (car bib-entries) 'autobib-author #f #f style)
          'nbsp
          (send style get-cite-open)
@@ -147,7 +157,7 @@
         (values (hash-update h k (lambda (cur) (cons b cur)) null)
                 (cons k (remove k ks))))))
   (make-element
-   #f
+   (make-style "Autobibref" '())
    (append
     (list 'nbsp (send style get-cite-open))
     (add-between
@@ -187,20 +197,28 @@
     (error 'default-disambiguation "Citations too ambiguous for default disambiguation scheme."))
   (make-element #f (list (format "~a" (integer->char (+ 97 n))))))
 
-(define author+date-style
+(define author+date-style%
+  (class object%
+    (define/public (bibliography-table-style) bib-single-style)
+    (define/public (entry-style) bibentry-style)
+    (define/public (disambiguate-date?) #t)
+    (define/public (collapse-for-date?) #t)
+    (define/public (get-cite-open) "(")
+    (define/public (get-cite-close) ")")
+    (define/public (get-group-sep) "; ")
+    (define/public (get-item-sep) ", ")
+    (define/public (render-citation date-cite i) date-cite)
+    (define/public (render-author+dates author dates) (list* author " " dates))
+    (define/public (bibliography-line i e) (list e))
+    (super-new)))
+
+(define author+date-style (new author+date-style%))
+
+(define author+date-square-bracket-style
   (new
-   (class object%
-     (define/public (bibliography-table-style) bib-single-style)
-     (define/public (entry-style) bibentry-style)
-     (define/public (disambiguate-date?) #t)
-     (define/public (collapse-for-date?) #t)
-     (define/public (get-cite-open) "(")
-     (define/public (get-cite-close) ")")
-     (define/public (get-group-sep) "; ")
-     (define/public (get-item-sep) ", ")
-     (define/public (render-citation date-cite i) date-cite)
-     (define/public (render-author+dates author dates) (list* author " " dates))
-     (define/public (bibliography-line i e) (list e))
+   (class author+date-style%
+     (define/override (get-cite-open) "[")
+     (define/override (get-cite-close) "]")
      (super-new))))
 
 (define number-style
@@ -246,8 +264,8 @@
               [(date<? b a) #f]
               [else (string-ci<? (auto-bib-key a) (auto-bib-key b))]))))
   (define (ambiguous? a b)
-    (and (string-ci=? (author-element-cite (extract-bib-author a))
-                      (author-element-cite (extract-bib-author b)))
+    (and (string-ci=? (content->string (author-element-cite (extract-bib-author a)))
+                      (content->string (author-element-cite (extract-bib-author b))))
          (auto-bib-date a)
          (auto-bib-date b)
          (date=? a b)))
@@ -365,15 +383,17 @@
 
 (define-syntax (define-cite stx)
   (syntax-parse stx
-    [(_ (~var ~cite) citet generate-bibliography
+    [(_ (~var ~cite id) citet:id generate-bibliography:id
         (~or (~optional (~seq #:style style) #:defaults ([style #'author+date-style]))
              (~optional (~seq #:disambiguate fn) #:defaults ([fn #'#f]))
              (~optional (~seq #:render-date-in-bib render-date-bib) #:defaults ([render-date-bib #'#f]))
              (~optional (~seq #:spaces spaces) #:defaults ([spaces #'1]))
              (~optional (~seq #:render-date-in-cite render-date-cite) #:defaults ([render-date-cite #'#f]))
              (~optional (~seq #:date<? date<?) #:defaults ([date<? #'#f]))
-             (~optional (~seq #:date=? date=?) #:defaults ([date=? #'#f]))) ...)
-     (syntax/loc stx
+             (~optional (~seq #:date=? date=?) #:defaults ([date=? #'#f]))
+             (~optional (~seq #:cite-author cite-author:id) #:defaults ([cite-author #'#f]))
+             (~optional (~seq #:cite-year cite-year:id) #:defaults ([cite-year #'#f]))) ...)
+     (quasisyntax/loc stx
        (begin
          (define group (make-bib-group (make-hasheq)))
          (define the-style style)
@@ -382,7 +402,15 @@
          (define (citet bib-entry . bib-entries)
            (add-inline-cite group (cons bib-entry bib-entries) the-style date<? date=?))
          (define (generate-bibliography #:tag [tag "doc-bibliography"] #:sec-title [sec-title "Bibliography"])
-           (gen-bib tag group sec-title the-style fn render-date-bib render-date-cite date<? date=? spaces))))]))
+           (gen-bib tag group sec-title the-style fn render-date-bib render-date-cite date<? date=? spaces))
+         #,(when (identifier? #'cite-author)
+             #'(define (cite-author bib-entry)
+                 (add-cite group bib-entry 'autobib-author #f #f the-style)))
+         #,(when (identifier? #'cite-year)
+             #'(define (cite-year bib-entry . bib-entries)
+                 (add-date-cites group (cons bib-entry bib-entries)
+                                 (send the-style get-group-sep)
+                                 the-style #t date<? date=?)))))]))
 
 (define (ends-in-punc? e)
   (regexp-match? #rx"[.!?,]$" (content->string e)))
@@ -475,12 +503,12 @@
          #:pages [pages #f]
          #:series [series #f]
          #:volume [volume #f])
-  (let* ([s @elem{In @italic{@elem{Proc. @|location|}}}]
+  (let* ([s @elem{In @italic{@elem{Proc. @to-string[location]}}}]
          [s (if series
-                @elem{@|s|, @(format "~a" series)}
+                @elem{@|s|, @to-string[series]}
                 s)]
          [s (if volume
-                @elem{@|s| volume @(format "~a" volume)}
+                @elem{@|s| volume @to-string[volume]}
                 s)]
          [s (if pages
                 @elem{@|s|, pp. @(to-string (car pages))--@(to-string (cadr pages))}
@@ -492,7 +520,7 @@
          #:pages [pages #f]
          #:number [number #f]
          #:volume [volume #f])
-  (let* ([s @italic{@|location|}]
+  (let* ([s @italic{@to-string[location]}]
          [s (if volume
                 @elem{@|s| @(to-string volume)}
                 s)]
@@ -504,16 +532,22 @@
                 s)])
     s))
 
+(define (string-capitalize str)
+  (if (non-empty-string? str)
+      (let ([chars (string->list str)])
+        (list->string (cons (char-upcase (car chars)) (cdr chars))))
+      str))
+  
 (define (book-location
          #:edition [edition #f]
          #:publisher [publisher #f])
   (let* ([s (if edition
-                @elem{@(string-titlecase edition) edition}
+                @elem{@(string-capitalize (to-string edition)) edition}
                 #f)]
          [s (if publisher
                 (if s
-                   @elem{@|s|. @|publisher|}
-                   publisher)
+                   @elem{@|s|. @to-string[publisher]}
+                   @elem{@to-string[publisher]})
                 s)])
     (unless s
       (error 'book-location "no arguments"))
@@ -522,12 +556,12 @@
 (define (techrpt-location
          #:institution org
          #:number num)
-  @elem{@|org|, @|num|})
+  @elem{@to-string[org], @to-string[num]})
 
 (define (dissertation-location
          #:institution org
          #:degree [degree "PhD"])
-  @elem{@|degree| dissertation, @|org|})
+  @elem{@to-string[degree] dissertation, @to-string[org]})
 
 ;; ----------------------------------------
 
@@ -559,8 +593,8 @@
   (make-other-author-element
    #f
    (list "Alia")
-   "al."
-   "al."))
+   (list "al" ._)
+   (list "al" ._)))
 
 (define (authors name . names*)
   (define names (map parse-author (cons name names*)))
@@ -569,11 +603,12 @@
     (case (length names)
       [(1) (author-element-cite (car names))]
       [(2) (if (other-author-element? (cadr names))
-               (format "~a et al." (author-element-cite (car names)))
-               (format "~a and ~a"
-                       (author-element-cite (car names))
-                       (author-element-cite (cadr names))))]
-      [else (format "~a et al." (author-element-cite (car names)))]))
+               (list (author-element-cite (car names)) " et al" @._)
+               (list
+                (author-element-cite (car names))
+                " and "
+                (author-element-cite (cadr names))))]
+      [else (list (author-element-cite (car names)) " et al" ._)]))
   (make-author-element
      #f
      (let loop ([names names] [prefix 0])
@@ -581,10 +616,10 @@
               (case prefix
                 [(0) names]
                 [(1) (if (other-author-element? (car names))
-                         (list " et al.")
+                         (list " et al" ._)
                          (list " and " (car names)))]
                 [else (if (other-author-element? (car names))
-                          (list ", et al.")
+                          (list ", et al" ._)
                           (list ", and " (car names)))])]
              [else
               (case prefix

@@ -18,6 +18,9 @@
          (struct-out test-success)
          (struct-out rackunit-test-case)
          (struct-out rackunit-test-suite)
+         (struct-out string-info)
+         (struct-out nested-info)
+         (struct-out dynamic-info)
 
          with-check-info
          with-check-info*
@@ -107,8 +110,6 @@
          check-regexp-match
          check-match
          fail)
-
-(define (void-thunk) (void))
 
 
 (define-syntax (define-shortcut stx)

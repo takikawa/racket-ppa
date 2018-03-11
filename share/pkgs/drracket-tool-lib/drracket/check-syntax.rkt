@@ -34,6 +34,7 @@
 ;; methods in syncheck-annotations<%>
 (provide 
  syncheck:find-source-object
+ syncheck:add-text-type
  syncheck:add-background-color
  syncheck:add-require-open-menu
  syncheck:add-docs-menu
@@ -46,6 +47,7 @@
  syncheck:add-mouse-over-status
  syncheck:add-jump-to-definition
  syncheck:add-prefixed-require-reference
+ syncheck:add-unused-require
  syncheck:color-range)
 
 (define (show-content file-or-stx)

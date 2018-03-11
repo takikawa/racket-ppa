@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2017 PLT Design Inc.
+  Copyright (c) 2004-2018 PLT Design Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -1284,7 +1284,7 @@ Scheme_Object *scheme_stx_adjust_scopes(Scheme_Object *o, Scheme_Scope_Set *scop
   return stx_adjust_scopes(o, scopes, phase, mode, &mutate);
 }
 
-/* For each continuation frame, we need to keep track of various sets of scopes:
+/* For each environment frame, we need to keep track of various sets of scopes:
     - bind scopes (normally 0 or 1) are created for the binding context
     - use-site scopes are created for macro expansions that need them
     - intdef scopes are for immediately nested internal-definition contexts;
@@ -2196,6 +2196,7 @@ static Scheme_Object *raw_stx_content(Scheme_Object *o)
                          shifts,
                          add_taint, false_insp);
       v = scheme_box(result);
+      SCHEME_SET_BOX_IMMUTABLE(v);
     } else if (SCHEME_VECTORP(v)) {
       Scheme_Object *v2;
       int size = SCHEME_VEC_SIZE(v), i;
@@ -2209,6 +2210,8 @@ static Scheme_Object *raw_stx_content(Scheme_Object *o)
                            add_taint, false_insp);
       	SCHEME_VEC_ELS(v2)[i] = result;
       }
+
+      SCHEME_SET_VECTOR_IMMUTABLE(v2);
       
       v = v2;
     } else if (SCHEME_HASHTRP(v)) {
@@ -6445,6 +6448,10 @@ static Scheme_Object *srcloc_path_to_string(Scheme_Object *p)
   name = scheme_split_path(SCHEME_PATH_VAL(p), SCHEME_PATH_LEN(p), &base, &isdir, SCHEME_PLATFORM_PATH_KIND);
   if (SCHEME_PATHP(name) && SCHEME_PATHP(base)) {
     dir_name = scheme_split_path(SCHEME_PATH_VAL(base), SCHEME_PATH_LEN(base), &base, &isdir, SCHEME_PLATFORM_PATH_KIND);
+    if (SCHEME_FALSEP(base)) {
+      /* Path is file at root, so just keep the whole path */
+      return scheme_path_to_char_string(p);
+    }
     if (SCHEME_PATHP(dir_name))
       name = scheme_append_strings(scheme_path_to_char_string(dir_name),
                                    scheme_append_strings(scheme_make_utf8_string("/"),
@@ -8225,7 +8232,7 @@ static Scheme_Object *syntax_property(int argc, Scheme_Object **argv)
   if ((argc > 3) && SCHEME_TRUEP(argv[3])) {
     if (!SCHEME_SYMBOLP(argv[1]) || SCHEME_SYM_WEIRDP(argv[1]))
       scheme_contract_error("syntax-property",
-                            "expected an interned symbol key for a preserved property"
+                            "expected an interned symbol key for a preserved property",
                             "given", 1, argv[1],
                             NULL);
   }

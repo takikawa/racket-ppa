@@ -122,7 +122,10 @@
     [(form lang #:satisfying (jform-id . pats) property . kw-args)
      (unless (set-empty? bad-kws)
        (raise-syntax-error 'redex-check (format "~s cannot be used with #:satisfying" (car (set->list bad-kws))) stx))
-     (redex-check/jf stx #'form #'lang #'jform-id #'pats #'property #'kw-args)]
+     (syntax-property
+      (redex-check/jf stx #'form #'lang #'jform-id #'pats #'property #'kw-args)
+      'disappeared-use
+      (syntax-local-introduce #'jform-id))]
     [(form lang #:satisfying . rest)
      (raise-syntax-error 'redex-check "#:satisfying expected judgment form or metafunction syntax followed by a property" stx #'rest)]
     [(form lang pat #:enum biggest-e property . kw-args)
@@ -148,12 +151,11 @@
   (define clauses (judgment-form-gen-clauses j-f))
   (define relation? (judgment-form-relation? j-f))
   (define args-stx (if relation?
-                       (syntax/loc #'args #`(#,pats))
+                       (quasisyntax/loc #'args (#,pats))
                        pats))
   (with-syntax* ([(syncheck-exp pattern (names ...) (names/ellipses ...))
                   (rewrite-side-conditions/check-errs lang 'redex-check #t args-stx)]
                  [show (show-message orig-stx)]
-                 [res-term-stx #`(#,jf-id #,@args-stx)]
                  [property #`(bind-prop
                                (λ (bindings)
                                  #,(bind-pattern-names 'redex-check
@@ -162,7 +164,7 @@
                                                        property)))])
                 (quasisyntax/loc orig-stx
                   (let ([term-match (λ (generated)
-                                      (cond [(test-match #,lang res-term-stx generated) => values]
+                                      (cond [(test-match #,lang #,args-stx (cdr generated)) => values]
                                             [else (give-up-match-result)]))])
                     syncheck-exp
                     (let ([default-attempt-size (λ (s) (add1 (default-attempt-size s)))])
@@ -189,7 +191,6 @@
                   (rewrite-side-conditions/check-errs lang 'redex-check #t args-stx)]
                  [(rhs-syncheck-exp rhs-pat (rhs-names ...) (rhs-names/ellipses ...))
                   (rewrite-side-conditions/check-errs lang 'redex-check #t res-stx)]
-                 [res-term-stx #`((#,mf-id #,@args-stx) = #,res-stx)]
                  [mf-id (term-fn-get-id mf)]
                  [show (show-message orig-stx)]
                  [property #`(bind-prop
@@ -202,7 +203,10 @@
                                                        property)))])
                 (quasisyntax/loc orig-stx
                   (let ([term-match (λ (generated)
-                                      (cond [(test-match #,lang res-term-stx generated) => values]
+                                      (cond [(test-match #,lang (#,args-stx #,res-stx)
+                                                         (list (cdr (list-ref generated 0))
+                                                               (list-ref generated 2)))
+                                             => values]
                                             [else (give-up-match-result)]))])
                     lhs-syncheck-exp
                     rhs-syncheck-exp
@@ -476,55 +480,73 @@
           (define term (with-handlers ([exn:fail? (handler "fixing" raw-term)])
                          (if term-fix (term-fix raw-term) raw-term)))
           (cond
-            [(skip-term? term) (loop (- remaining 1) actual-attempts)]
-            [(cond
-               [term-match
-                (define match-result (term-match term))
-                (cond
-                  [(give-up-match-result? match-result) #t]
-                  [else
-                   (define bindings
-                     (make-bindings 
-                      (match-bindings
-                       (pick-from-list match-result))))
-                   (with-handlers ([exn:fail? (handler "checking" term)])
-                     (match property
-                       [(term-prop pred) (pred term)]
-                       [(bind-prop pred) (pred bindings)]))])]
-               [else
-                (with-handlers ([exn:fail? (handler "checking" term)])
-                  (match (cons property term-fix)
-                    [(cons (term-prop pred) _) (pred term)]
-                    [(cons (bind-prop pred) #f) (pred bindings)]))])
-             (loop (sub1 remaining) (+ actual-attempts 1))]
+            [(skip-term? term)
+             (loop (- remaining 1) actual-attempts)]
             [else
-             (when show
-               (show
-                #t
-                (format "counterexample found after ~a~a:\n"
-                        (format-attempts (+ actual-attempts 1))
-                        (if source (format " with ~a" source) "")))
-               (pretty-write term (current-error-port)))
-             (if keep-going?
-                 (loop (sub1 remaining) (+ actual-attempts 1))
-                 (values (make-counterexample term) (+ actual-attempts 1)))])])])))
+             (define-values (this-test-passed? was-actual-attempt?)
+               (cond
+                 [term-match
+                  (define match-result (term-match term))
+                  (cond
+                    [(give-up-match-result? match-result)
+                     (values #t #f)]
+                    [else
+                     (define bindings
+                       (make-bindings
+                        (match-bindings
+                         (pick-from-list match-result))))
+                     (with-handlers ([exn:fail? (handler "checking" term)])
+                       (values (match property
+                                 [(term-prop pred) (pred term)]
+                                 [(bind-prop pred) (pred bindings)])
+                               #t))])]
+                 [else
+                  (with-handlers ([exn:fail? (handler "checking" term)])
+                    (values (match (cons property term-fix)
+                              [(cons (term-prop pred) _) (pred term)]
+                              [(cons (bind-prop pred) #f) (pred bindings)])
+                            #t))]))
+             (cond
+               [this-test-passed?
+                (loop (sub1 remaining)
+                      (if was-actual-attempt?
+                          (+ actual-attempts 1)
+                          actual-attempts))]
+               [else
+                (when show
+                  (show
+                   #t
+                   (format "counterexample found after ~a~a:\n"
+                           (format-attempts (+ actual-attempts 1))
+                           (if source (format " with ~a" source) "")))
+                  (pretty-write term (current-error-port)))
+                (if keep-going?
+                    (loop (sub1 remaining) (+ actual-attempts 1))
+                    (values (make-counterexample term) (+ actual-attempts 1)))])])])])))
 
 (define (check-lhs-pats lang mf/rr prop attempts retries what show term-fix keep-going?
                         #:term-match [term-match #f])
   (define lang-gen (compile lang what))
-  (define-values (pats srcs skip-term?)
+  (define-values (pats srcs skip-term? mf/rr-lang)
     (cond [(metafunc-proc? mf/rr)
            (values (map metafunc-case-lhs-pat
                         (metafunc-proc-cases mf/rr))
                    (metafunction-srcs mf/rr)
-                   (compose not (metafunc-proc-in-dom? mf/rr)))]
+                   (compose not (metafunc-proc-in-dom? mf/rr))
+                   (metafunc-proc-lang mf/rr))]
           [(reduction-relation? mf/rr)
            (values (map rewrite-proc-side-conditions-rewritten (reduction-relation-make-procs mf/rr))
                    (reduction-relation-srcs mf/rr)
                    (let ([pat (compile-pattern (reduction-relation-lang mf/rr)
                                                (reduction-relation-domain-pat mf/rr)
                                                #f)])
-                     (λ (x) (not (match-pattern? pat x)))))]))
+                     (λ (x) (not (match-pattern? pat x))))
+                   (reduction-relation-lang mf/rr))]))
+  (unless (equal? lang mf/rr-lang)
+    (error what "language of the ~a does not match the lang argument"
+           (if (metafunc-proc? mf/rr)
+               "metafunction"
+               "reduction relation")))
   (let loop ([pats pats] [srcs srcs] [overall-actual-attempts 0])
     (cond
       [(and (null? pats) (null? srcs))
@@ -903,6 +925,12 @@
                          #'not-lang-id)]))
 
 (define (make-jf-gen/proc jf-id mk-clauses lang pat size)
+
+  ;; this raises an error if there is an ellipsis, etc. in the pattern
+  ;; not sure why, but the result of this is not the right thing to pass
+  ;; to search/next
+  (validate-pat lang pat)
+  
   (define gen (search/next (mk-clauses) pat size lang))
   (define (termify search-res)
     (cond

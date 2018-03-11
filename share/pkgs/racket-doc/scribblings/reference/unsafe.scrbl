@@ -246,15 +246,17 @@ Unsafe versions of @racket[unbox] and @racket[set-box!], where the
 @defproc[(unsafe-vector*-length [v (and/c vector? (not/c impersonator?))]) fixnum?]
 @defproc[(unsafe-vector*-ref [v (and/c vector? (not/c impersonator?))] [k fixnum?]) any/c]
 @defproc[(unsafe-vector*-set! [v (and/c vector? (not/c impersonator?))] [k fixnum?] [val any/c]) void?]
+@defproc[(unsafe-vector*-cas! [v (and/c vector? (not/c impersonator?))] [k fixnum?] [old-val any/c] [new-val any/c]) boolean?]
 )]{
 
-Unsafe versions of @racket[vector-length], @racket[vector-ref], and
-@racket[vector-set!], where the @schemeidfont{vector*} variants can be
+Unsafe versions of @racket[vector-length], @racket[vector-ref],
+@racket[vector-set!], and @racket[vector-cas!], where the @schemeidfont{vector*} variants can be
 faster but do not work on @tech{impersonators}.
 
 A vector's size can never be larger than a @tech{fixnum}, so even
-@racket[vector-length] always returns a fixnum.}
+@racket[vector-length] always returns a fixnum.
 
+@history[#:changed "6.11.0.2" @elem{Added @racket[unsafe-vector*-cas!].}]}
 
 @deftogether[(
 @defproc[(unsafe-string-length [str string?]) fixnum?]
@@ -338,6 +340,7 @@ Unsafe versions of @racket[u16vector-ref] and
 @defproc[(unsafe-struct-set! [v any/c] [k fixnum?] [val any/c]) void?]
 @defproc[(unsafe-struct*-ref [v (not/c impersonator?)] [k fixnum?]) any/c]
 @defproc[(unsafe-struct*-set! [v (not/c impersonator?)] [k fixnum?] [val any/c]) void?]
+@defproc[(unsafe-struct*-cas! [v (not/c impersonator?)] [k fixnum?] [old-val any/c] [new-val any/c]) boolean?]
 )]{
 
 Unsafe field access and update for an instance of a structure
@@ -345,7 +348,11 @@ type, where the @schemeidfont{struct*} variants can be
 faster but do not work on @tech{impersonators}.
 The index @racket[k] must be between @racket[0] (inclusive) and
 the number of fields in the structure (exclusive). In the case of
-@racket[unsafe-struct-set!], the field must be mutable.}
+@racket[unsafe-struct-set!], @racket[unsafe-struct*-set!], and @racket[unsafe-struct*-cas!], the
+field must be mutable. The @racket[unsafe-struct*-cas!] operation
+is analogous to @racket[box-cas!] to perform an atomic compare-and-set.
+
+@history[#:changed "6.11.0.2" @elem{Added @racket[unsafe-struct*-cas!].}]}
 
 @deftogether[(
 @defproc[(unsafe-mutable-hash-iterate-first
@@ -626,6 +633,28 @@ fixnum).}
  @history[#:added "6.4.0.4"]
 }
 
+@defproc[(unsafe-impersonate-vector [vec vector?]
+                                    [replacement-vec (and/c vector? (not/c impersonator?))]
+                                    [prop impersonator-property?]
+                                    [prop-val any/c] ... ...)
+         (and/c vector? impersonator?)]{
+ Like @racket[impersonate-vector], but instead of going through interposition procedures, all
+ accesses to the impersonator are dispatched to @racket[replacement-vec].
+
+ The result of @racket[unsafe-impersonate-vector] is an impersonator of @racket[vec].
+
+ @history[#:added "6.9.0.2"]
+}
+@defproc[(unsafe-chaperone-vector [vec vector?]
+                                  [replacement-vec (and/c vector? (not/c impersonator?))]
+                                  [prop impersonator-property?]
+                                  [prop-val any/c] ... ...)
+         (and/c vector? chaperone?)]{
+ Like @racket[unsafe-impersonate-vector], but the result of @racket[unsafe-chaperone-vector] is a
+ chaperone of @racket[vec].
+
+ @history[#:added "6.9.0.2"]
+}
 @; ------------------------------------------------------------------------
 
 @include-section["unsafe-undefined.scrbl"]

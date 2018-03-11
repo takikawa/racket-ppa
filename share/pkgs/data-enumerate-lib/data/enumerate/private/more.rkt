@@ -277,10 +277,10 @@ In plain English, we'll
                (if (two-way-enum? e)
                    (suggest/c two-way-enum?
                               "suggestion"
-                              "maybe supply `#:one-way #t' to cons/de?")
+                              "maybe supply `#:one-way? #t' to cons/de?")
                    (suggest/c one-way-enum?
                               "suggestion"
-                              "maybe supply `#:one-way #f' to cons/de?")))))
+                              "maybe supply `#:one-way? #f' to cons/de?")))))
   (define (f v)
     (contract f-range-ctc
               (_f v) 
@@ -616,10 +616,10 @@ In plain English, we'll
                             "suggestion"
                             "maybe supply `#:flat-enum? #f' to delay/e?")
                  (not/c flat-enum?))))
-    (unless (or (exact-nonnegative-integer? count)
+    (unless (or (natural? count)
                 (and (number? count) (= count +inf.0)))
       (raise-argument-error 'delay/e 
-                            (format "~s" '(or/c exact-nonnegative-integer? +inf.0))
+                            (format "~s" '(or/c natural? +inf.0))
                             count))
     (thunk/e (λ () (contract ctc
                              (thunk)

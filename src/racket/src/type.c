@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2017 PLT Design Inc.
+  Copyright (c) 2004-2018 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -326,6 +326,8 @@ scheme_init_type ()
   set_name(scheme_phantom_bytes_type, "<phantom-bytes>");
 
   set_name(scheme_environment_variables_type, "<environment-variables>");
+
+  set_name(scheme_unquoted_printing_string_type, "<unquoted-printing-string>");
 
 #ifdef MZ_GC_BACKTRACE
   set_name(scheme_rt_runstack, "<runstack>");
@@ -764,6 +766,8 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_syntax_property_preserve_type, small_object);
 
   GC_REG_TRAV(scheme_plumber_handle_type, twoptr_obj);
+
+  GC_REG_TRAV(scheme_unquoted_printing_string_type, small_object);
 }
 
 END_XFORM_SKIP;

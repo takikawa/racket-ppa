@@ -203,7 +203,7 @@
   (cs-open-file "Ouvrir ~a")
   (cs-rename-var "Renommer ~a")
   (cs-rename-id "Renommer l'identificateur")
-  (cs-rename-var-to "Renommer ~a en :")
+  (cs-rename-var-to "Renommer « ~a » en :")
   (cs-name-duplication-error "Le nouveau nom que vous avez choisi, ~s, est en conflit avec un autre nom préexistant dans le même contexte.")
   (cs-rename-anyway "Renommer quand même")
   (cs-status-init "Vérificateur de syntaxe : initialisation de l'environnement pour le code de l'utilisateur")
@@ -212,16 +212,17 @@
   (cs-status-expanding-expression "Vérificateur de syntaxe : expansion d'une expression")
   (cs-status-loading-docs-index "Vérificateur de syntaxe : chargement de l'index de la documentation")
   (cs-syncheck-running "Vérificateur de syntaxe en cours d'exécution")
-  (cs-mouse-over-import "l'identificateur ~s est importé de ~s")
-  (cs-view-docs "Documentation pour ~a")
+  (cs-mouse-over-import "l'identificateur « ~s » est importé de « ~s »")
+  (cs-mouse-over-import/library-only "importé de « ~s »")
+  (cs-view-docs "Documentation pour « ~a »")
   (cs-view-docs-from "~a dans ~a")  ;; a completed version of the line above
   ;; (cs-view-docs) is put into the first ~a and a list of modules (separated by commas)
   ;; is put into the second ~a. Use check syntax and right-click on a documented variable (eg, 'require') to see this in use
 
-  (cs-lexical-variable "variables lexicales")
-  (cs-set!d-variable "variables modifiées à l'aide de set!")
-  (cs-imported-variable "variables importées")
-  (cs-unused-require "« require » unitilisé")
+  (cs-lexical-variable "variable lexicale")
+  (cs-set!d-variable "variable modifiée")
+  (cs-imported-variable "variable importée")
+  (cs-unused-require "« require » inutilisé")
   (cs-free-variable "variable libre")
 
   (cs-binder-count "~a sources de référence")
@@ -233,6 +234,13 @@
   (cs-contract-their-obligation "Contrat: obligation des modules clients")
   (cs-contract-both-obligation "Contrat: obligation de ce module et des modules clients")
   (cs-contract-unk-obligation "Contrat: obligation inconnue")
+
+  ;; require prefix functionality
+  (cs-add-prefix-for-require "Ajouter un préfixe pour « require »")
+  (cs-prefix-require-title "Préfixe pour « require »")
+  (cs-prefix-require "Choisissez un préfixe à ajouter à chaque variable importée")
+  (cs-all-binders-are-prefixed "Tous les « require » ont déjà un préfixe; essayez plutôt de renommer")
+  (cs-the-binder-is-prefixed "Le « require » a déjà un préfixe; essayez plutôt de le renommer")
 
   ;; mode sub-menu in the "view" menu
   (cs-check-syntax-mode "Mode de vérification syntaxique")
@@ -252,13 +260,14 @@
   (online-expansion-finished-successfully "Expansion en arrière-plan terminée correctement")
 
   (jump-to-error "Aller à l'erreur")
-  (online-expansion-is-disabled "L'expansion en arrière-plan est interdite")
+  (copy-error-message "Copier le message d'erreur")
+  (online-expansion-is-disabled "L'expansion en arrière-plan est désactivée")
   ; these next two show up in the bar along the bottom of the drracket window
   (online-expansion-pending "Expansion en cours…")
   (online-expansion-finished "Expansion terminée") ;; note: there may still be errors in this case
   ; the next two show up in a menu when you click on the circle in the bottom right corner
-  (disable-online-expansion "Interdire l'expansion en arrière-plan")
-  (enable-online-expansion "Autoriser l'expansion en arrière-plan")
+  (disable-online-expansion "Désactiver l'expansion en arrière-plan")
+  (enable-online-expansion "Activer l'expansion en arrière-plan")
   ;; the online expansion preferences pane
   (online-expansion "Expansion en arrière-plan") ;; title of prefs pane
   ; the different kinds of errors
@@ -534,12 +543,13 @@
   (display-line-numbers "Montrer les numéros de ligne et de colonne, pas la distance depuis le début de l'éditeur.")
   (show-line-and-column-numbers "Montrer les numéros de ligne et de colonne") ; used for popup menu; right click on line/column box in bottom of drs window
   (show-character-offsets "Montrer la distance depuis le début de l'éditeur") ; used for popup menu; right click on line/column box in bottom of drs window
-  (enable-keybindings-in-menus "Raccourcis clavier dans les menus.")
+  (enable-keybindings-in-menus "Activer les raccourcis clavier dans les menus (ceci remplace les raccourcis clavier Emacs)")
   (printing-mode "Mode d'impression")
   (print-using-platform-specific-mode "Impression dépendante de la plateforme")
   (print-to-ps "Imprimer vers un fichier PostScript")
   (print-to-pdf "Imprimer vers un fichier PDF")
   (command-as-meta "Utiliser la touche « commande » comme touche « meta »") ;; macos/macos x only
+  (any-control+alt-is-altgr "Utiliser la combinaison « Control-Alt » comme touche « AltGr »") ; Windows only
   (alt-as-meta "Utiliser la touche « alt » comme touche « meta »")
   (reuse-existing-frames "Réutiliser les fenêtres existantes lors de l'ouverture de nouveaux fichiers")
   (default-fonts "Polices par défaut")
@@ -555,6 +565,7 @@
   (show-line-numbers-in-definitions "Numéros de ligne dans la fenêtre de définition")
   ;; the constant above shows up in the popup menu item in the bottom of
   ;; the drracket window; controls the line numbers on each line in the definitions; used in a checkable menu item
+  (reflow-paragraph-maximum-width "Largeur maximale lors de la refusion des paragraphes")
   (maximum-char-width-guide-pref-check-box "Guide pour la largeur maximum de texte")
   (hide-column-width-guide "Cacher le guide de largeur de texte pour les fichiers avec ~a colonnes")
   (show-column-width-guide "Montrer le guide de largeur de texte à partir de ~a colonnes") ;; filled with a number > 2
@@ -574,6 +585,9 @@
   (style-and-color-names "Noms de styles et de couleurs")
 
   (add-spacing-between-lines "Ajouter un pixel d'espace supplémentaire entre les lignes")
+
+  (editor-x-selection-mode "Requérir une opération de copie explicite avant de coller / Ne pas automatiquement copier la sélection")
+
 
   ; title of the color choosing dialog
 
@@ -823,9 +837,9 @@
   (no-completions "… pas de complétion connue") ; shows up in the completions menu when there are no completions (in italics)
 
   (overwrite-mode "Mode d'écrasement")
-  (enable-overwrite-mode-keybindings "Raccourci clavier pour le mode d'écrasement")
+  (enable-overwrite-mode-keybindings "Activer les raccourcis clavier pour le mode d'écrasement")
 
-  (enable-automatic-parens "Parenthèses automatiques") ; should "and square brackets and quotes" appear here?
+  (enable-automatic-parens "Activer les parenthèses automatiques") ; should "and square brackets and quotes" appear here?
 
   (preferences-info "Configurer vos préférences.")
   (preferences-menu-item "Préférences…")
@@ -876,6 +890,7 @@
   ;; menu item in the windows menu under mac os x. first ~a is filled with a number between 1 and 9; second one is the filename of the tab
   (tab-i "Onglet ~a : ~a")
   (tab-i/no-name "Onglet ~a")
+  (last-tab "Dernier onglet: ~a")
 
   (view-menu-label "&Montrer")
   (show-overview "Montrer le contour du &programme")
@@ -1113,6 +1128,7 @@
   (execute-button-label "Exécuter")
   (save-button-label "Sauvegarder")
   (break-button-label "Stopper")
+  (break-button-kill-label "Tuer")
 
   ;;; search help desk popup menu
   (search-help-desk-for "Rechercher « ~a » dans l'Aide.")
@@ -1200,8 +1216,8 @@
   (enforce-primitives-group-box-label "Définitions initiales")
   (enforce-primitives-check-box-label "Interdire la redéfinition des définitions initiales")
   (automatically-compile "Peupler les répertoires « compiled » (pour un chargement plus rapide)")
-  (preserve-stacktrace-information "Préserver la trace de la pile (ceci invalide certaines optimisations)")
-  (enforce-module-constants-checkbox-label "Imposer les définitions constantes (permet certaines optimisations)")
+  (preserve-stacktrace-information "Préserver la trace de la pile (ceci désactive certaines optimisations)")
+  (enforce-module-constants-checkbox-label "Imposer la constance des définitions (permet certaines optimisations)")
   (expression-level-stacktrace "Traçage de la pile au niveau des expressions")
   (function-level-stacktrace "Traçage de la pile au niveau des fonctions")
   (submodules-to-run "Sous-modules à exécuter")
@@ -1248,6 +1264,17 @@
   (module-language-name "Déterminer le langage à partir du code source")
   (module-language-one-line-summary "La ligne #lang spécifie le langage utilisé")
   (module-language-auto-text "Ligne #lang automatique") ;; shows up in the details section of the module language
+  ;; the next four string constants show up in the REPL in DrRacket in the "Racket Language",
+  ;; which is also the "Determine language from source" language. They are put right after the name
+  ;; of the language from the "#lang" line at the beginning of the source file
+  (module-language-repl-no-annotations "")
+  (module-language-repl-debug-annotations ", avec débogage")
+  (module-language-repl-debug/profile-annotations ", avec débogage et profilage")
+  (module-language-repl-test-annotations ", avec couverture des tests")
+
+  (module-language-#lang-error-more-information "Plus d'information")
+  (module-language-#lang-flush-cache "Recharger")
+  (module-language-#lang-flush-cache-menu-item "Recharger les extensions #lang")
 
   ;; for the upper portion of the language dialog
   (the-racket-language "Le langage Racket")
@@ -1336,22 +1363,25 @@
   (profiling-unknown-src "« inconnu »")
   (profiling-no-information-available
    "Pas d'information de profilage disponible. Assurez vous que"
-   " l'option de profilage ait été spécifiée pour ce langage et que vous ayez exécuté le programme.")
+   " le profilage ait été activé pour ce langage et que vous ayez exécuté le programme.")
   (profiling-clear? "Modifier le contenu de la fenêtre de définition invalide le profil. Voulez-vous continuer ?")
 
   ;; test coverage
   (test-coverage-clear? "Modifier le contenu de la fenêtre de définition invalide l'information de couverture de vos tests. Voulez-vous continuer ?")
   (test-coverage-clear-and-do-not-ask-again "Oui, et ne me redemandez pas")
   (test-coverage-ask? "Demander à propos de l'invalidation de l'information de couverture des tests ?")
+  (test-coverage-entirely-covered "Toutes les expressions sont couvertes")
+  (test-coverage-next-time-check-box "Montrer la prochaine fois ?")
+  (test-coverage-summary "Montrer le résumé des résultats de couverture des tests")
 
-  (test-coverage-on "Tests couverts")
-  (test-coverage-off "Tests non couverts")
+  (test-coverage-on "Couvert par les tests")
+  (test-coverage-off "Non-couvert par les tests")
 
   ;; tracing
-  (tracing-enable-tracing "Traçage")
+  (tracing-enable-tracing "Activer le traçage")
   (tracing-show-tracing-window "Montrer le traçage")
   (tracing-hide-tracing-window "Cacher le traçage")
-  (tracing-tracing-nothing-to-show "Aucun résultat de traçage n'est disponible. Assurez-vous que votre language supporte le traçage et que le traçage est en place")
+  (tracing-tracing-nothing-to-show "Aucun résultat de traçage n'est disponible. Assurez-vous que votre langage supporte le traçage et que le traçage est activé.")
 
   ;;; repl stuff
   (evaluation-terminated "Évaluation terminée.")
@@ -1561,7 +1591,7 @@
   ;; Profj
   (profj-java "Java")
   (profj-java-mode "mode Java")
-  (profj-java-coverage "Couvrage Java") ;; shows up in the preferences dialog under 'Color'
+  (profj-java-coverage "Couverture Java") ;; shows up in the preferences dialog under 'Color'
 
   (profj-beginner-lang "Débutant")
   (profj-beginner-lang-one-line-summary "Langage Java restreint pour l'enseignement des etudiants niveau débutant")
@@ -1586,7 +1616,7 @@
   (profj-java-mode-color-prim-type "types élémentaires") ; Example text for built-in Java types
   (profj-java-mode-color-default "valeur par défaut")
 
-  (profj-coverage-color-heading "Couleurs de couvrage") ; Heading for preference to choose coverage colors
+  (profj-coverage-color-heading "Couleurs de couverture") ; Heading for preference to choose coverage colors
   (profj-coverage-color-covered "expressions couvertes")
 
   (profj-language-config-display-preferences "Préférences pour l'affichage") ; Heading for preferences controlling printing
@@ -1596,7 +1626,7 @@
   (profj-language-config-display-array "Montrer le contenu des tableaux ?")
   (profj-language-config-testing-preferences "Préférences pour les tests") ; Heading for preferences controlling test behavior
   ;(profj-language-config-testing-enable "Montrer le résultat des tests lors de l'exécution ?") ; Run should be the word found on the Run button
-  (profj-language-config-testing-coverage "Collecter l'information de couvrage durant les tests ?")
+  (profj-language-config-testing-coverage "Collecter l'information de couverture durant les tests ?")
   (profj-language-config-support-test-language "Supporter l'extension de langage « test » ?")
   (profj-language-config-testing-check "Permettre les expressions de type « check » ?") ; check should not be translated
   (profj-language-config-classpath "Chemin d'accès aux classes")
@@ -1607,9 +1637,9 @@
   (profj-test-name-example-miscapitalized "Le mot « example » dans le nom de classe ~a doit être écrit « Example »")
 
   ;; Close testing window and do not run test cases any more
-  ;(profj-test-results-close-and-disable "Fermer la fenêtre et arrêter l'exécution des tests")
+  ;(profj-test-results-close-and-disable "Fermer la fenêtre et désactiver l'exécution des tests")
   ;; Hide docked testing window and do not run test cases any more
-  ;(profj-test-results-hide-and-disable "Cacher la fenêtre et arrêter l'exécution des tests")
+  ;(profj-test-results-hide-and-disable "Cacher la fenêtre et désactiver l'exécution des tests")
   ;Renamed below
   ;(profj-test-results-window-title "Résultats des tests")
 
@@ -1631,8 +1661,10 @@
   (test-engine-dock-report "Attacher le rapport de test")
   (test-engine-undock-report "Détacher le rapport de test")
   ;;Following two appear in Racket (Java, etc) menu, cause Tests to be Run automatically or not
-  (test-engine-enable-tests "Revalider les tests")
-  (test-engine-disable-tests "Invalider les tests")
+  (test-engine-enable-tests "Activer les tests")
+  (test-engine-disable-tests "Désactiver les tests")
+  (test-engine-enable-disable-tests-only-in-teaching-languages
+   "Le menu « Activer/Désactiver les tests » est utilisé pour activer et désactiver le support pour les tests dans les langages d'enseignement HtDP et DMdA uniquement. Utilisez la section « Montrer les détails » dans la fenêtre de sélection du langage pour controller les sous-modules qui sont exécutés par le langage Racket.")
 
   (test-engine-ran-1-test "1 test exécuté.")
   (test-engine-ran-1-check "1 contrôle exécuté.")
@@ -1653,7 +1685,7 @@
   (test-engine-m-of-n-checks-failed "~a contrôles parmi ~a ont échoué.")
   (test-engine-must-be-tested "Ce programme doit être testé !")
   (test-engine-is-unchecked "Ce programme n'est pas contrôlé !")
-  (test-engine-tests-disabled "Tests invalidés.")
+  (test-engine-tests-disabled "Tests désactivés.")
   (test-engine-should-be-tested "Ce programme devrait être testé.")
   (test-engine-at-line-column "à la ligne ~a, colonne ~a")
   (test-engine-in-at-line-column "dans ~a, ligne ~a, colonne ~a")
@@ -1683,7 +1715,7 @@
   (test-engine-property-fail-error "Propriété falsifiable par")
   (test-engine-property-error-error "check-property a rencontré l'erreur suivante~n:: ~a")
 
-  (signature-enable-checks "Permettre la vérification des signatures")
+  (signature-enable-checks "Activer la vérification des signatures")
   (signature-disable-checks "Désactiver la vérification des signatures")
 
   ; section header
@@ -1711,8 +1743,8 @@
   (test-case-too-many-expressions-error "Expressions trop nombreuses dans un test.")
   ;; DrRacket window menu items
   (test-case-insert "Insérer un test")
-  (test-case-disable-all "Invalider tous les tests")
-  (test-case-enable-all "Revalider tous les tests")
+  (test-case-disable-all "Désactiver tous les tests")
+  (test-case-enable-all "Activer tous les tests")
 
   ;; NOTE: The following three string constants are labels of the test-case fields. The width
   ;;       of the field is determined by the length of the longest of the following three words.
@@ -1734,7 +1766,7 @@
   (test-case-switch-to-nonerror-box "Changer pour une boîte de test sans erreur")
   (test-case-collapse "Escamoter le test")
   (test-case-show-actual "Montrer la valeur")
-  (test-case-enable "Revalider le test")
+  (test-case-enable "Activer le test")
   (test-case-show-predicate "Montrer le predicat")
   (test-case-show-error-message "Montrer le message d'erreur")
   (test-case-convert-to-text "Convertir en texte")
@@ -1849,11 +1881,14 @@
   (install-pkg-file-or-dir? "Sélectionner un fichier ou un répertoire?")
   (install-pkg-force? "Ignorer les conflits")
   (install-pkg-replace? "Les mises à jour peuvent remplacer les installations existantes")
+  (install-pkg-dry-run? "Essai uniquement (pas de changement de l'installation)")
   (install-pkg-command-line "Ligne de commande équivalente :")
   (install-pkg-error-installing-title "Erreur durant l'installation du paquetage")
   (install-pkg-action-label "Action à prendre")
   (install-pkg-install "Installer")
   (install-pkg-update "Mettre à jour")
+  (install-pkg-setup "Configuration") ; for button
+  (install-pkg-setup-long "Configurer l'installation actuelle") ; for menu
   (install-pkg-remove "Supprimer")
   (install-pkg-do-not-remove "Ne pas supprimer")
   (install-pkg-action-inferred-to-be-update "L'action inférée est une mise à jour")
@@ -1884,6 +1919,7 @@
   (install-pkg-abort-demote "Abandonner la rétrogradation")
   (install-pkg-abort-promote "Abandonner la promotion")
   (install-pkg-abort-migrate "Abandonner la migration")
+  (install-pkg-abort-setup "Abandonner la configuration")
   (install-pkg-abort-generic-action "Abandonner l'action")
   (install-pkg-close-terminal-output "Fermer la sortie de données")
   (install-pkg-show-all-options "Montrer toutes les options")

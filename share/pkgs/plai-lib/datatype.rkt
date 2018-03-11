@@ -50,15 +50,19 @@
       (plai-syntax-error 'define-type dup-id
                          define-type:duplicate-variant))))
 
-(define-for-syntax type-symbol (gensym))
-
 (begin-for-syntax
-  (define (plai-stx-type? lst)
-    (and (list? lst) (eq? type-symbol (first lst)))))
+  (struct a-datatype-id (sym variants pred)
+    #:property prop:procedure
+    (λ (adi stx)
+      (plai-syntax-error
+       (syntax->datum (a-datatype-id-sym adi)) stx
+       "Illegal use of type name outside type-case.")))
+  
+  (define plai-stx-type? a-datatype-id?))
 
-(define-for-syntax (validate-and-remove-type-symbol stx-loc lst)
-  (if (plai-stx-type? lst)
-    (rest lst)
+(define-for-syntax (validate-and-remove-type-symbol stx-loc v)
+  (if (plai-stx-type? v)
+    (list (a-datatype-id-variants v) (a-datatype-id-pred v))
     (plai-syntax-error 'type-case stx-loc type-case:not-a-type)))
 
 (require (for-syntax syntax/parse
@@ -235,10 +239,11 @@
             (quasisyntax/loc stx
               (begin
                 (define-syntax datatype
-                  (list type-symbol
-                        (list (list #'variant (list #'variant-field ...) #'variant?)
-                              ...)
-                        #'datatype?))
+                  (a-datatype-id
+                   #'datatype
+                   (list (list #'variant (list #'variant-field ...) #'variant?)
+                         ...)
+                   #'datatype?))
                 (define-struct variant* (field ...)
                   #:transparent
                   #:omit-define-syntaxes
@@ -376,13 +381,6 @@
              (plai-syntax-error
               'type-case malformed-field
               "this must be an identifier that names the value of a field"))]
-       [(not (= (length (syntax->list #'(body ...))) 1))
-        (plai-syntax-error
-         'type-case clause-stx
-         (string-append
-          "there must be just one body expression in a clause, but you "
-          "provided ~a body expressions.")
-         (length (syntax->list #'(body ...))))]
        [else #t])]
     [(variant (field ...))
      (plai-syntax-error
@@ -395,17 +393,17 @@
 
 (define-syntax (bind-fields-in stx)
   (syntax-case stx ()
-    [(_ (binding-name ...) case-variant-id ((variant-id (selector-id ...) ___) . rest) value-id body-expr)
+    [(_ (binding-name ...) case-variant-id ((variant-id (selector-id ...) ___) . rest) value-id body-expr ...)
      (if (free-identifier=? #'case-variant-id #'variant-id)
        #'(let ([binding-name (selector-id value-id)]
                ...)
-           body-expr)
-       #'(bind-fields-in (binding-name ...) case-variant-id rest value-id body-expr))]))
+           body-expr ...)
+       #'(bind-fields-in (binding-name ...) case-variant-id rest value-id body-expr ...))]))
 
 (define-syntax (type-case stx)
   (with-disappeared-uses
   (syntax-case stx (else)
-    [(_ type-id test-expr [variant (field ...) case-expr] ... [else else-expr])
+    [(_ type-id test-expr [variant (field ...) case-expr ...] ... [else else-expr ...])
      ;; Ensure that everything that should be an identifier is an identifier.
      (and (identifier? #'type-id)
           (andmap identifier? (syntax->list #'(variant ...)))
@@ -443,10 +441,10 @@
              (cond
                [(let ([variant-info (lookup-variant variant #,type-info)])
                   ((second variant-info) expr))
-                (bind-fields-in (field ...) variant #,type-info expr case-expr)]
+                (bind-fields-in (field ...) variant #,type-info expr case-expr ...)]
                ...
-               [else else-expr]))))]
-    [(_ type-id test-expr [variant (field ...) case-expr] ...)
+               [else else-expr ...]))))]
+    [(_ type-id test-expr [variant (field ...) case-expr ...] ...)
      ;; Ensure that everything that should be an identifier is an identifier.
      (and (identifier? #'type-id)
           (andmap identifier? (syntax->list #'(variant ...)))
@@ -482,7 +480,7 @@
              (cond
                [(let ([variant-info (lookup-variant variant #,type-info)])
                   ((second variant-info) expr))
-                (bind-fields-in (field ...) variant #,type-info expr case-expr)]
+                (bind-fields-in (field ...) variant #,type-info expr case-expr ...)]
                ...
                [else (error 'type-case bug:fallthru-no-else)]))))]
     ;;; The remaining clauses are for error reporting only.  If we got this

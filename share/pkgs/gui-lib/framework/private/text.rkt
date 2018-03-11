@@ -17,6 +17,7 @@
          "logging-timer.rkt"
          "coroutine.rkt"
          "unicode-ascii-art.rkt"
+         (prefix-in i: "inline-overview.rkt")
          data/queue
          racket/unit)
 
@@ -530,7 +531,7 @@
              delete find-snip 
              get-style-list change-style
              position-line line-start-position
-             get-filename)
+             get-filename get-end-position)
     
     (define/public (get-fixed-style)
       (send (get-style-list) find-named-style "Standard"))
@@ -585,29 +586,80 @@
    (define/augment (after-delete start len)
      (set! edition (+ edition 1))
      (inner (void) after-delete start len))
+
+    (define/public (move-to dest-edit start end dest-position)
+      (unless (and (<= 0 start) (<= 0 end) (<= 0 dest-position))
+        (error 'move-to
+               "expected start, end, and dest-pos to be non-negative"))
+      (when (> start end)
+          (error 'move-to
+                 "expected start position smaller than end position"))
+      (define (release-or-copy snip)
+        (cond
+          [(send snip release-from-owner) snip]
+          [else
+           (define copy (send snip copy))
+           (define snip-start (get-snip-position snip))
+           (define snip-end (+ snip-start (send snip get-count)))
+           (delete snip-start snip-end)
+           copy]))
+      (define move-to-self? (object=? this dest-edit))
+      (unless (or (= start end) (and move-to-self? (<= start dest-position end)))
+        (let loop ([current-start start]
+                   [current-end (min end (get-end-position))]
+                   [current-dest dest-position])
+          (split-snip current-start)
+          (split-snip current-end)
+          (define snip (find-snip current-end 'before-or-none))
+          (cond
+            [(or (not snip) (< (get-snip-position snip) current-start)) (void)]
+            [else
+             (define released/copied (release-or-copy snip))
+             (define snip-count (send released/copied get-count))
+             (define new-start
+               (cond
+                 [(or (not move-to-self?) (> current-dest current-start)) current-start]
+                 [else (+ current-start snip-count)]))
+             (define new-end
+               (cond
+                 [(and move-to-self? (< current-dest current-end)) current-end]
+                 [else (- current-end snip-count)]))
+             (define new-dest
+               (cond
+                 [(or (not move-to-self?) (< current-dest current-start)) current-dest]
+                 [else (- current-dest snip-count)]))
+             (send dest-edit insert released/copied new-dest new-dest)
+             (loop new-start new-end new-dest)]))))
+
+    (define/public (copy-to dest-edit start end dest-position)
+      (unless (and (<= 0 start) (<= 0 end) (<= 0 dest-position))
+        (error 'copy-to
+               "expected start, end, and dest-pos to be non-negative"))
+      (when (> start end)
+        (error 'copy-to
+               "expected start position smaller than end position"))
+      (unless (= start end)
+        (split-snip start)
+        (split-snip end)
+        (define snips
+          (let loop ([snip (find-snip end 'before)] [snips '()])
+            (cond
+              [(or (not snip) (< (get-snip-position snip) start)) (reverse snips)]
+              [else (loop (send snip previous) (cons (send snip copy) snips))])))
+        (for ([snip (in-list snips)])
+          (send dest-edit insert snip dest-position dest-position))))
     
     (define/public (move/copy-to-edit dest-edit start end dest-position
                                       #:try-to-move? [try-to-move? #t])
-      (split-snip start)
-      (split-snip end)
-      (let loop ([snip (find-snip end 'before)])
-        (cond
-          [(or (not snip) (< (get-snip-position snip) start))
-           (void)]
-          [else
-           (let ([prev (send snip previous)]
-                 [released/copied 
-                  (if try-to-move?
-                      (if (send snip release-from-owner)
-                          snip
-                          (let* ([copy (send snip copy)]
-                                 [snip-start (get-snip-position snip)]
-                                 [snip-end (+ snip-start (send snip get-count))])
-                            (delete snip-start snip-end)
-                            snip))
-                      (send snip copy))])
-             (send dest-edit insert released/copied dest-position dest-position)
-             (loop prev))])))
+      (unless (and (<= 0 start) (<= 0 end) (<= 0 dest-position))
+        (error 'move/copy-to-edit
+               "expected start, end, and dest-pos to be non-negative"))
+      (when (> start end)
+          (error 'move/copy-to-edit
+                 "expected start position smaller than end position"))
+      (cond
+        [try-to-move? (move-to dest-edit start end dest-position)]
+        [else (copy-to dest-edit start end dest-position)]))
     
     (public initial-autowrap-bitmap)
     (define (initial-autowrap-bitmap) (icon:get-autowrap-bitmap))
@@ -838,7 +890,7 @@
               (send dc set-alpha 1)
               (send dc set-pen "gray" 1 'transparent)
               (send dc set-brush (if w-o-b? "black" "white") 'solid)
-              (send dc draw-rectangle (+ (unbox bx) dx) (+ y-coord dy) (unbox bw) th)
+              (send dc draw-rectangle (+ (unbox bx) dx) (+ y-coord dy) (unbox bw) (+ th 1))
               (send dc set-text-foreground
                     (send the-color-database find-color
                           (if w-o-b? "white" "black")))
@@ -2254,7 +2306,8 @@
                     (gui-utils:get-choice
                      (string-constant save-as-plain-text) 
                      (string-constant yes)
-                     (string-constant no))))
+                     (string-constant no)
+                     #:dialog-mixin frame:focus-table-mixin)))
            (set-file-format 'text)]
           [(and (not all-strings?)
                 (eq? format 'same)
@@ -2263,7 +2316,8 @@
                     (gui-utils:get-choice
                      (string-constant save-in-drs-format)
                      (string-constant yes)
-                     (string-constant no))))
+                     (string-constant no)
+                     #:dialog-mixin frame:focus-table-mixin)))
            (set-file-format 'standard)]
           [else (void)]))
       (inner (void) on-save-file name format))
@@ -4852,6 +4906,9 @@ designates the character that triggers autocompletion
      
     (super-new)))
 
+(define inline-overview-mixin i:inline-overview-mixin)
+(define inline-overview<%> i:inline-overview<%>)
+  
 (define basic% (basic-mixin (editor:basic-mixin text%)))
 (define line-spacing% (line-spacing-mixin basic%))
 (define hide-caret/selection% (hide-caret/selection-mixin line-spacing%))

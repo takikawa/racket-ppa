@@ -267,8 +267,7 @@ specification is required at minimum:
   @indexed-racket['nonatomic] (uses @cpp{scheme_malloc} from
   Racket's C API), @indexed-racket['atomic]
   (@cpp{scheme_malloc_atomic}), @indexed-racket['tagged]
-  (@cpp{scheme_malloc_tagged}), @indexed-racket['atomic]
-  (@cpp{scheme_malloc_atomic}), @indexed-racket['stubborn]
+  (@cpp{scheme_malloc_tagged}), @indexed-racket['stubborn]
   (@cpp{scheme_malloc_stubborn}), @indexed-racket['uncollectable]
   (@cpp{scheme_malloc_uncollectable}), @indexed-racket['eternal]
   (@cpp{scheme_malloc_eternal}), @indexed-racket['interior]
@@ -296,7 +295,11 @@ Uses the operating system's @cpp{free} function for
 library allocated and we should free.  Note that this is useful as
 part of a finalizer (see below) procedure hook (e.g., on the Racket
 pointer object, freeing the memory when the pointer object is
-collected, but beware of aliasing).}
+collected, but beware of aliasing).
+
+Memory allocated with @racket[malloc] and modes other than
+@racket['raw] must not be @racket[free]d, since those modes allocate
+memory that is managed by the garbage collector.}
 
 
 @defproc[(end-stubborn-change [cptr cpointer?]) void?]{
@@ -405,6 +408,17 @@ offset is immediately added to the pointer. Thus, this function cannot
 be used with @racket[ptr-add] to create a substring of a Racket byte
 string, because the offset pointer would be to the middle of a
 collectable object (which is not allowed).}
+
+
+@defproc[(void/reference-sink [v any/c] ...) void?]{
+
+Returns @|void-const|, but unlike calling the @racket[void] function
+where the compiler may optimize away the call and replace it with a
+@|void-const| result, calling @racket[void/reference-sink] ensures
+that the arguments are considered reachable by the garbage collector
+until the call returns.
+
+@history[#:added "6.10.1.2"]}
 
 @; ----------------------------------------------------------------------
 

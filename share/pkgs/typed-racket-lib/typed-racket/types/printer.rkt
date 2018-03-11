@@ -8,8 +8,9 @@
          racket/list
          racket/set
          (path-up "rep/type-rep.rkt" "rep/prop-rep.rkt" "rep/object-rep.rkt"
-                  "rep/core-rep.rkt" "rep/values-rep.rkt"
-                  "rep/rep-utils.rkt" "types/subtype.rkt" "types/overlap.rkt"
+                  "rep/core-rep.rkt" "rep/values-rep.rkt" "rep/fme-utils.rkt"
+                  "rep/rep-utils.rkt" "rep/free-ids.rkt"
+                  "types/subtype.rkt" "types/overlap.rkt"
                   "types/match-expanders.rkt"
                   "types/kw-types.rkt"
                   "types/utils.rkt" "types/abbrev.rkt"
@@ -17,7 +18,6 @@
                   "types/resolve.rkt"
                   "types/prefab.rkt"
                   "utils/utils.rkt"
-                  "utils/primitive-comparison.rkt"
                   "utils/tc-utils.rkt")
          (for-syntax racket/base syntax/parse))
 
@@ -70,6 +70,14 @@
       n))
   (and (pair? candidates)
        (sort candidates string>? #:key symbol->string #:cache-keys? #t)))
+
+;; primitive<=?
+;;
+;; provides a consistent ordering when printing things like
+;; unions, intersections, etc
+(define (primitive<=? s1 s2)
+  (string<=? (format "~a" s1)
+             (format "~a" s2)))
 
 ;; print-<thing> : <thing> Output-Port Boolean -> Void
 ;; print-type also takes an optional (Listof Symbol)
@@ -126,19 +134,41 @@
 ;; prop->sexp : Prop -> S-expression
 ;; Print a Prop (see prop-rep.rkt) to the given port
 (define (prop->sexp prop)
-  (define (path->sexps path)
-    (if (null? path)
-        '()
-        (list (map pathelem->sexp path))))
   (match prop
-    [(NotTypeProp: (Path: path nm) type)
-     `(! ,(type->sexp type) @ ,@(path->sexps path) ,(name-ref->sexp nm))]
-    [(TypeProp: (Path: path nm) type)
-     `(,(type->sexp type) @ ,@(path->sexps path) ,(name-ref->sexp nm))]
+    [(NotTypeProp: o type)
+     `(! ,(object->sexp o) ,(type->sexp type))]
+    [(TypeProp: o type)
+     `(: ,(object->sexp o) ,(type->sexp type))]
     [(TrueProp:) 'Top]
     [(FalseProp:) 'Bot]
-    [(AndProp: a) `(AndProp ,@(map prop->sexp a))]
-    [(OrProp: a) `(OrProp ,@(map prop->sexp a))]
+    [(AndProp: ps)
+     ;; We do a little bit of work here to print equalities
+     ;; instead of (<= x y) (<= y x) when we have both inequalities
+     (define-values (leqs others) (partition LeqProp? ps))
+     (define-values (eqs simple-leqs)
+       (for/fold ([eqs '()] [simple-leqs '()])
+                 ([leq (in-list leqs)])
+         (match leq
+           [(LeqProp: lhs rhs)
+            (define flip (-leq rhs lhs))
+            (cond
+              [(not (member flip leqs))
+               (values eqs (cons leq simple-leqs))]
+              [(member flip eqs) (values eqs simple-leqs)]
+              [else (values (cons leq eqs) simple-leqs)])])))
+     (let ([simple-leqs (map prop->sexp simple-leqs)]
+           [eqs (for/list ([leq (in-list eqs)])
+                  (match leq
+                    [(LeqProp: lhs rhs) `(= ,(object->sexp lhs) ,(object->sexp rhs))]))]
+           [others (map prop->sexp others)])
+       (match (append eqs simple-leqs others)
+         [(list sexp) sexp]
+         [sexps `(and ,@sexps)]))]
+    [(OrProp: ps) `(or ,@(map prop->sexp ps))]
+    [(LeqProp: (and lhs (LExp: 1 _))
+               (and rhs (LExp: 0 _)))
+     `(< ,(object->sexp (-lexp-sub1 lhs)) ,(object->sexp rhs))]
+    [(LeqProp: lhs rhs) `(<= ,(object->sexp lhs) ,(object->sexp rhs))]
     [else `(Unknown Prop: ,(struct->vector prop))]))
 
 ;; pathelem->sexp : PathElem -> S-expression
@@ -149,6 +179,7 @@
     [(CdrPE:) 'cdr]
     [(ForcePE:) 'force]
     [(StructPE: t i) `(,(type->sexp t)-,i)]
+    [(VecLenPE:) 'vector-length]
     [(SyntaxPE:) 'syntax]
     [else `(Invalid Path-Element: ,(struct->vector pathelem))]))
 
@@ -157,7 +188,56 @@
 (define (object->sexp object)
   (match object
     [(Empty:) '-]
-    [(Path: pes n) (append (map pathelem->sexp pes) (list (name-ref->sexp n)))]
+    [(Path: pes n)
+     (let ([pes (map pathelem->sexp pes)])
+       (cond
+         [(null? pes) (name-ref->sexp n)]
+         [else (append pes (list (name-ref->sexp n)))]))]
+    [(LExp: c terms)
+     (cond
+       [(terms-empty? terms) c]
+       [else
+        (define (positive-term? t)
+          (match t
+            [(? number? n) (exact-positive-integer? n)]
+            [(list '* (? number? n) var) (exact-positive-integer? n)]
+            [(or (? symbol?) (? list?)) ;; obj w/ coeff 1
+             #t]))
+        (define term-list
+          (let ([terms (for/list ([(obj coeff) (in-terms terms)])
+                         (if (= 1 coeff)
+                             (object->sexp obj)
+                             `(* ,coeff ,(object->sexp obj))))])
+            (if (zero? c) terms (cons c terms))))
+        (cond
+          [(null? (cdr term-list)) (car term-list)]
+          [else
+           (define-values (pos-terms neg-terms) (partition positive-term? term-list))
+           (define (flip-sign term)
+             (match term
+               [(? number? n) (* -1 n)]
+               [(list '* (? number? n) obj)
+                (if (= -1 n)
+                    obj
+                    `(* ,(* -1 n) ,obj))]
+               [(or (? symbol? obj) (? list? obj)) ;; obj w/ coeff 1
+                (list '* -1 obj)]))
+           (cond
+             [(null? neg-terms) (cons '+ pos-terms)]
+             ;; if we have zero or one positive term t1,
+             ;; and the rest (-t2 -t3 etc) are negative,
+             ;; turn it into (- t1 t2 t3 ...) (where t1 may be omitted)
+             [(<= (length pos-terms) 1)
+              (append '(-)
+                      pos-terms
+                      (map flip-sign neg-terms))]
+             ;; otherwise we have some negative terms (-t1 -t2 ...)
+             ;; and two or more positive terms (t3 t4 ...),
+             ;; convert it into (- (+ t3 t4 ...) t1 t2 ...)
+             [else
+              (append '(-)
+                      (cons '+ pos-terms)
+                      (map flip-sign neg-terms))])])])]
     [else `(Unknown Object: ,(struct->vector object))]))
 
 ;; cover-union : Type LSet<Type> -> Listof<Symbol> Listof<Type>
@@ -220,7 +300,7 @@
 ;; Convert an arr (see type-rep.rkt) to its printable form
 (define (arr->sexp arr)
   (match arr
-    [(arr: dom rng rest drest kws)
+    [(Arrow: dom rest kws rng)
      (append
       (list '->)
       (map type->sexp dom)
@@ -234,8 +314,11 @@
            (if req?
                (format "~a ~a" k (type->sexp t))
                (format "[~a ~a]" k (type->sexp t)))]))
-      (if rest  `(,(type->sexp rest) *)                       null)
-      (if drest `(,(type->sexp (car drest)) ... ,(cdr drest)) null)
+      (match rest
+        [(? Type?) `(,(type->sexp rest) *)]
+        [(RestDots: dty dbound)
+         `(,(type->sexp dty) ... ,dbound)]
+        [_ null])
       (match rng
         [(AnyValues: (? TrueProp?)) '(AnyValues)]
         [(AnyValues: p) `(AnyValues : ,(prop->sexp p))]
@@ -287,8 +370,8 @@
   ;; see type-contract.rkt, which does something similar and this code
   ;; was stolen from/inspired by/etc.
   (match* ((first arrs) (last arrs))
-    [((arr: first-dom rng rst _ kws)
-      (arr: last-dom _ _ _ _))
+    [((Arrow: first-dom _ kws rng)
+      (Arrow: last-dom rst _ _))
      (define-values (mand-kws opt-kws) (partition-kws kws))
      (define opt-doms (drop last-dom (length first-dom)))
      `(->*
@@ -336,8 +419,8 @@
 ;; Convert a case-> type to an s-expression
 (define (case-lambda->sexp type)
   (match type
-    [(Function: arities)
-     (match arities
+    [(Fun: arrows)
+     (match arrows
        [(list) '(case->)]
        [(list a) (arr->sexp a)]
        [(and arrs (list a b ...))
@@ -468,10 +551,6 @@
               (set-box! (current-print-unexpanded)
                         (cons (car names) (unbox (current-print-unexpanded)))))
             (car names)])]
-    ;; format as a string to preserve reader abbreviations and primitive
-    ;; values like characters (when `display`ed)
-    [(Val-able: v) (format "~v" v)]
-    [(? Base?) (Base-name type)]
     [(StructType: (Struct: nm _ _ _ _ _)) `(StructType ,(syntax-e nm))]
     ;; this case occurs if the contained type is a type variable
     [(StructType: ty) `(Struct-Type ,(t->s ty))]
@@ -486,7 +565,6 @@
     [(Async-ChannelTop:) 'Async-ChannelTop]
     [(ThreadCellTop:) 'ThreadCellTop]
     [(VectorTop:) 'VectorTop]
-    [(HashtableTop:) 'HashTableTop]
     [(MPairTop:) 'MPairTop]
     [(Prompt-TagTop:) 'Prompt-TagTop]
     [(Continuation-Mark-KeyTop:) 'Continuation-Mark-KeyTop]
@@ -507,11 +585,11 @@
      `#(,(string->symbol (format "struct:~a" (syntax-e nm)))
         ,(map t->s t)
         ,@(if proc (list (t->s proc)) null))]
-    [(Function: arities)
+    [(? Fun?)
      (parameterize ([current-print-type-fuel
                      (sub1 (current-print-type-fuel))])
        (case-lambda->sexp type))]
-    [(arr: _ _ _ _ _) `(arr ,(arr->sexp type))]
+    [(? Arrow?) `(Arrow ,(arr->sexp type))]
     [(Vector: e) `(Vectorof ,(t->s e))]
     [(HeterogeneousVector: e) `(Vector ,@(map t->s e))]
     [(Box: e) `(Boxof ,(t->s e))]
@@ -534,8 +612,17 @@
     [(BaseUnion-bases: bs)
      (define-values (covered remaining) (cover-union type bs ignored-names))
      (cons 'U (sort (append covered (map t->s remaining)) primitive<=?))]
-    [(Intersection: elems)
+    [(Refine-name: x ty prop)
+     `(Refine [,(name-ref->sexp x) : ,ty] ,(prop->sexp prop))]
+    [(Intersection: elems _)
      (cons '∩ (sort (map t->s elems) primitive<=?))]
+    ;; format as a string to preserve reader abbreviations and primitive
+    ;; values like characters (when `display`ed)
+    ;; (comes after Intersection since Val-able will match
+    ;;  when an element of an intersection is a val)
+    [(Val-able: v) (cond [(void? v) 'Void]
+                         [else (format "~v" v)])]
+    [(? Base?) (Base-name type)]
     [(Pair: l r) `(Pairof ,(t->s l) ,(t->s r))]
     [(ListDots: dty dbound) `(List ,(t->s dty) ... ,dbound)]
     [(F: nm) nm]
@@ -543,7 +630,11 @@
      (if (equal? in out)
          `(Parameterof ,(t->s in))
          `(Parameterof ,(t->s in) ,(t->s out)))]
-    [(Hashtable: k v) `(HashTable ,(t->s k) ,(t->s v))]
+    [(Mutable-HashTable: k v) `(Mutable-HashTable ,(t->s k) ,(t->s v))]
+    [(Mutable-HashTableTop:) 'Mutable-HashTableTop]
+    [(Immutable-HashTable: k v) `(Immutable-HashTable ,(t->s k) ,(t->s v))]
+    [(Weak-HashTable: k v) `(Weak-HashTable ,(t->s k) ,(t->s v))]
+    [(Weak-HashTableTop:) 'Weak-HashTableTop]
     [(Continuation-Mark-Keyof: rhs)
      `(Continuation-Mark-Keyof ,(t->s rhs))]
     [(Prompt-Tagof: body handler)
@@ -601,6 +692,25 @@
     ;[(fld: t a m) `(fld ,(type->sexp t))]
     [(Distinction: name sym ty) ; from define-new-subtype
      name]
+    [(DepFun/pretty-ids: ids dom pre rng)
+     (define (arg-id? id) (member id ids free-identifier=?))
+     (define pre-deps (map name-ref->sexp
+                           (filter arg-id? (free-ids pre))))
+     `(-> ,(for/list ([id (in-list ids)]
+                      [d (in-list dom)])
+             (define deps (map name-ref->sexp
+                               (filter arg-id? (free-ids d))))
+             `(,(syntax-e id)
+               :
+               ,@(if (null? deps)
+                     '()
+                     (list deps))
+               ,(t->s d)))
+          ,@(cond
+              [(TrueProp? pre) '()]
+              [(null? pre-deps) `(#:pre ,(prop->sexp pre))]
+              [else `(#:pre ,pre-deps ,(prop->sexp pre))])
+          ,(values->sexp rng))]
     [else `(Unknown Type: ,(struct->vector type))]))
 
 

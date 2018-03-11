@@ -373,8 +373,14 @@
 (define orig-write (port-write-handler (open-output-string)))
 
 (define (pretty-print-newline pport width)
-  (let-values ([(l col p) (port-next-location pport)])
-    ((printing-port-print-line pport) #t (or col 0) width)))
+  (cond
+   [(printing-port? pport)
+    (let-values ([(l col p) (port-next-location pport)])
+      ((printing-port-print-line pport) #t (or col 0) width))]
+   [(output-port? pport)
+    (newline pport)]
+   [else
+    (raise-argument-error 'pretty-print-newline "output-port?" pport)]))
 
 (define (tentative-pretty-print-port-transfer a-pport pport)
   (let ([content ((get a-pport print-port-info-get-content))])
@@ -757,7 +763,21 @@
                (equal? open "("))
           (begin
             (out (read-macro-prefix expr car))
-            (wr (read-macro-body expr car cdr) depth qd))
+            ;; Special case: "," or "#," followed by a symbol that might start "@"
+            (cond
+              [(and (or (eq? (car expr) 'unquote)
+                        (eq? (car expr) 'unsyntax))
+                    (symbol? (cadr expr)))
+               (define s (if display?
+                             (symbol->string (cadr expr))
+                             (format "~s" (cadr expr))))
+               (when (and (positive? (string-length s))
+                          (eqv? #\@ (string-ref s 0)))
+                 ;; Avoid ambiguity by adding a space
+                 (out " "))
+               (out s)]
+              [else
+               (wr (read-macro-body expr car cdr) depth qd)]))
           (wr-lst expr #t depth pair? car cdr open close qd)))
 
     (define (wr-lst l check? depth pair? car cdr open close qd)

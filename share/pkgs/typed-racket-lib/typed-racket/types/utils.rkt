@@ -17,10 +17,12 @@
 (define (instantiate-poly t types)
   (match t
     [(Poly: ns body)
-     (unless (= (length types) (length ns))
+     (unless (<= (length types) (length ns))
        (int-err "instantiate-poly: wrong number of types: expected ~a, got ~a"
                 (length ns) (length types)))
-     (subst-all (make-simple-substitution ns types) body)]
+     ;; use Any as the default type for any omitted types
+     (subst-all (make-simple-substitution ns (list-extend ns types Univ))
+                body)]
     [(PolyDots: (list fixed ... dotted) body)
      (unless (>= (length types) (length fixed))
        (int-err
@@ -74,33 +76,39 @@
 ;; has-optional-args? : (Listof arr) -> Boolean
 ;; Check if the given arrs meet the necessary conditions to be printed
 ;; with a ->* constructor or for generating a ->* contract
-(define (has-optional-args? arrs)
- (and (> (length arrs) 1)
-      ;; No polydots
-      (for/and ([arr (in-list arrs)])
-        (match arr [(arr: _ _ _ drest _) (not drest)]))
-      ;; Keyword args, range and rest specs all the same.
-      (let* ([xs (map (match-lambda [(arr: _ rng rest-spec _ kws)
-                                (list rng rest-spec kws)])
-                      arrs)]
-             [first-x (first xs)])
-        (for/and ([x (in-list (rest xs))])
-          (equal? x first-x)))
-      ;; Positionals are monotonically increasing by at most one.
-      (let-values ([(_ ok?)
-                    (for/fold ([positionals (arr-dom (first arrs))]
-                               [ok-so-far?  #t])
-                              ([arr (in-list (rest arrs))])
-                      (match arr
-                        [(arr: dom _ _ _ _)
-                         (define ldom         (length dom))
-                         (define lpositionals (length positionals))
-                         (values dom
-                                 (and ok-so-far?
-                                      (or (= ldom lpositionals)
-                                          (= ldom (add1 lpositionals)))
-                                      (equal? positionals (take dom lpositionals))))]))])
-        ok?)))
+(define (has-optional-args? arrows)
+  (and (pair? arrows)
+       (pair? (cdr arrows)) ;; i.e. (> (length arrows) 1)
+       (match arrows
+         [(cons (Arrow: dom #f kws rng) as)
+          (let loop ([dom dom]
+                     [to-check (cdr arrows)])
+            (match to-check
+              [(cons (Arrow: next-dom next-rst next-kws next-rng)
+                     remaining)
+               (cond
+                 ;; a #:rest must be the LAST clause,
+                 ;; can't be a rest dots
+                 [(and next-rst (or (not (null? remaining))
+                                    (RestDots? next-rst)))
+                  #f]
+                 ;; keywords and range must be the same
+                 [(not (and (equal? kws next-kws)
+                            (equal? rng next-rng)))
+                  #f]
+                 [else
+                  ;; next arrow should have one more domain type
+                  ;; and their domains should be pointwise equal
+                  ;; for all other positional args
+                  (define dom-len (length dom))
+                  (define next-dom-len (length next-dom))
+                  (and (= next-dom-len (add1 dom-len))
+                       (for/and ([d (in-list dom)]
+                                 [next-d (in-list next-dom)])
+                         (equal? d next-d))
+                       (loop next-dom remaining))])]
+              [_ #t]))]
+         [_ #f])))
 
 (provide/cond-contract
  [instantiate-poly ((or/c Poly? PolyDots? PolyRow?) (listof Rep?)
@@ -111,6 +119,6 @@
  [fi (Rep? . -> . (listof symbol?))]
  [fv/list ((listof Rep?) . -> . (set/c symbol?))]
  [current-poly-struct (parameter/c (or/c #f poly?))]
- [has-optional-args? (-> (listof arr?) any)]
+ [has-optional-args? (-> (listof Arrow?) any)]
  )
 

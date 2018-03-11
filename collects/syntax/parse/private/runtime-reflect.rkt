@@ -1,7 +1,6 @@
 #lang racket/base
-(require syntax/parse/private/residual ;; keep abs. path
-         (only-in syntax/parse/private/residual-ct ;; keep abs. path
-                  attr-name attr-depth)
+(require "residual.rkt"
+         (only-in "residual-ct.rkt" attr-name attr-depth)
          "kws.rkt")
 (provide reflect-parser
          (struct-out reified)
@@ -36,9 +35,7 @@ A Reified is
 (define (check-params who e-arity r-arity obj)
   (let ([e-pos (arity-minpos e-arity)]
         [e-kws (arity-minkws e-arity)])
-    (check-arity/neg r-arity e-pos e-kws
-                     (lambda (msg)
-                       (raise-mismatch-error who (string-append msg ": ") obj)))))
+    (check-arity r-arity e-pos e-kws (lambda (msg) (error who "~a" msg)))))
 
 (define (adapt-parser who esig0 rsig0 parser splicing?)
   (if (equal? esig0 rsig0)
@@ -66,13 +63,13 @@ A Reified is
                   [else
                    (loop (cdr result) indexes (add1 i))])))
         (make-keyword-procedure
-         (lambda (kws kwargs x cx pr es fh cp rl success . rest)
-           (keyword-apply parser kws kwargs x cx pr es fh cp rl
+         (lambda (kws kwargs x cx pr es undos fh cp rl success . rest)
+           (keyword-apply parser kws kwargs x cx pr es undos fh cp rl
                           (if splicing?
-                              (lambda (fh x cx pr . result)
-                                (apply success fh x cx pr (take-indexes result indexes)))
-                              (lambda (fh . result)
-                                (apply success fh (take-indexes result indexes))))
+                              (lambda (fh undos x cx pr . result)
+                                (apply success fh undos x cx pr (take-indexes result indexes)))
+                              (lambda (fh undos . result)
+                                (apply success fh undos (take-indexes result indexes))))
                           rest))))))
 
 (define (wrong-depth who a b)

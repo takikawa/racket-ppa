@@ -39,6 +39,7 @@
     render-nested-flow
     render-block
     render-other
+    link-render-style-at-element
     get-dest-directory
     format-number
     number-depth))
@@ -251,25 +252,42 @@
                     (document-date-text v)))
              (style-properties (part-style d))))
 
-    (define/private (extract-pre-paras d sym)
+    (define/private (extract-content d lift-proc)
       (let loop ([l (part-blocks d)])
+        (apply append
+               (for/list ([b (in-list l)])
+                 (define lifted (lift-proc b loop))
+                 lifted))))
+
+    (define/private (extract-pre-paras-proc sym)
+      (λ (v loop)
         (cond
-         [(null? l) null]
-         [else (let ([v (car l)])
-                 (cond
-                  [(and (paragraph? v)
-                        (eq? sym (style-name (paragraph-style v))))
-                   (cons v (loop (cdr l)))]
-                  [(compound-paragraph? v)
-                   (append (loop (compound-paragraph-blocks v))
-                           (loop (cdr l)))]
-                  [else (loop (cdr l))]))])))
+          [(and (paragraph? v)
+                (eq? sym (style-name (paragraph-style v))))
+           (list v)]
+          [(compound-paragraph? v)
+           (loop (compound-paragraph-blocks v))]
+          [else '()])))
+  
+    (define/private (extract-pre-content-proc sym)
+      (λ (v loop)
+        (define pre-para ((extract-pre-paras-proc sym) v loop))
+        (cond
+          [(not (null? pre-para)) pre-para]
+          [(and (nested-flow? v)
+                (member sym (style-properties (nested-flow-style v))))
+           (list v)]
+          [else '()])))
+
 
     (define/public (extract-authors d)
-      (extract-pre-paras d 'author))
-
+      (extract-content d (extract-pre-paras-proc 'author)))
+    
     (define/public (extract-pretitle d)
-      (extract-pre-paras d 'pretitle))
+      (extract-content d (extract-pre-paras-proc 'pretitle)))
+
+    (define/public (extract-pretitle-content d)
+      (extract-content d (extract-pre-content-proc 'pretitle)))
     
     ;; ----------------------------------------
 
@@ -589,17 +607,28 @@
                                               number))
                                     sub-pos
                                     sub-numberers))
+                    (define unnumbered-and-unnumbered-subsections?
+                      (and (not sub-grouper?)
+                           ;; If this section wasn't marked with
+                           ;; 'grouper but is unnumbered and doesn't
+                           ;; have numbered subsections, then didn't
+                           ;; reset counters, so propagate the old
+                           ;; position
+                           (and unnumbered?
+                                (= next-sub-pos sub-pos))))
                     (loop (cdr parts)
                           (if (or unnumbered? numberer)
                               pos
                               (add1 pos))
                           next-numberers
-                          (if sub-grouper?
-                              next-sub-pos
-                              1)
-                          (if sub-grouper?
-                              next-sub-numberers
-                              #hash())))))))
+                          (cond
+                            [sub-grouper? next-sub-pos]
+                            [unnumbered-and-unnumbered-subsections? sub-pos]
+                            [else 1])
+                          (cond
+                            [sub-grouper? next-sub-numberers]
+                            [unnumbered-and-unnumbered-subsections? sub-numberers]
+                            [else #hash()])))))))
         (let ([prefix (part-tag-prefix d)])
           (for ([(k v) (collect-info-ht p-ci)])
             (when (cadr k)
@@ -680,6 +709,8 @@
         (begin (when (target-element? i) (collect-target-element i ci))
                (when (index-element? i) (collect-index-element i ci))
                (when (collect-element? i) ((collect-element-collect i) ci))
+               (when (traverse-element? i)
+                 (collect-content (traverse-element-content i ci) ci))
                (when (element? i)
                  (collect-content (element-content i) ci))
                (when (multiarg-element? i)
@@ -718,7 +749,8 @@
 
     (define/public (resolve-part d ri)
       (parameterize ([current-tag-prefixes
-                      (extend-prefix d (fresh-tag-resolve-context? d ri))])
+                      (extend-prefix d (fresh-tag-resolve-context? d ri))]
+                     [current-link-render-style (part-render-style d)])
         (when (part-title-content d)
           (resolve-content (part-title-content d) d ri))
         (resolve-flow (part-blocks d) d ri)
@@ -792,6 +824,15 @@
         [(multiarg-element? i)
          (resolve-content (multiarg-element-contents i) d ri)]))
 
+    (define/public (link-render-style-at-element e)
+      (link-render-style-mode
+       (or (let ([s (element-style e)])
+             (and (style? s)
+                  (for/or ([p (in-list (style-properties s))]
+                           #:when (link-render-style? p))
+                    p)))
+           (current-link-render-style))))
+
     ;; ----------------------------------------
     ;; render methods
 
@@ -852,8 +893,15 @@
 
     (define/public (render-part d ri)
       (parameterize ([current-tag-prefixes
-                      (extend-prefix d (fresh-tag-render-context? d ri))])
+                      (extend-prefix d (fresh-tag-render-context? d ri))]
+                     [current-link-render-style (part-render-style d)])
         (render-part-content d ri)))
+
+    (define/private (part-render-style d)
+      (or (for/or ([p (in-list (style-properties (part-style d)))]
+                   #:when (link-render-style? p))
+            p)
+          (current-link-render-style)))
 
     (define/public (render-part-content d ri)
       (list
@@ -943,7 +991,11 @@
          (render-content (traverse-element-content i ri) part ri)]
         [(part-relative-element? i)
          (render-content (part-relative-element-content i ri) part ri)]
-        [(convertible? i) (list "???")]
+        [(convertible? i)
+         (define s (convert i 'text))
+         (if (string? s)
+             (render-other s part ri)
+             (render-other (format "~s" i) part ri))]
         [else (render-other i part ri)]))
 
     (define/public (render-other i part ri)

@@ -61,8 +61,8 @@ Alt-q (or Meta-q) to end the slides. Here are more controls:
 @control-table[
   (list "Alt-q, Meta-q, or Cmd-q"             "end slide show")
   (list "Esc"                                 "if confirmed, end show")
-  (list "Right arrow, Space, f, n, or click"  "next slide")
-  (list "Left arrow, Backspace, Delete, or b" "previous slide")
+  (list "Right/Down arrow, Space, f, n, or click" "next slide")
+  (list "Left/Up arrow, Backspace, Delete, or b"  "previous slide")
   (list "g"                                   "last slide")
   (list "1"                                   "first slide")
   (list "s"                                   "next slide with a different title/name")
@@ -110,6 +110,9 @@ slideshow
 As the example illustrates, the @racket[item] function accepts a
 mixture of strings and picts, and it formats them as a paragraph.
 
+@history[#:changed "1.4" @elem{Added support for unmodified Up and Down arrow keys
+                               to behave like Left and Right arrow keys.}]
+
 @; ------------------------------------------------------------------------
 
 @section[#:tag "staging"]{Staging Slides}
@@ -143,7 +146,7 @@ usually a pict, but there are a few other possibilities:
   @item{If an element is @racket['alts], then the next element must be
     a list of element lists. Each list up to the last one is appended
     to the elements before @racket['alts] and the resulting list of
-    elements is processed. The last lists is appended to the preceding
+    elements is processed. The last list is appended to the preceding
     elements along with the remaining elements (after the list of
     lists) and the result is re-processed.}
 

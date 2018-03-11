@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2017 PLT Design Inc.
+  Copyright (c) 2004-2018 PLT Design Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -275,9 +275,9 @@ scheme_init_port_fun(Scheme_Env *env)
   GLOBAL_NONCM_PRIM("read-syntax/recursive",          read_syntax_recur_f,            0, 5, env);
   GLOBAL_PRIM_W_ARITY2("read-language",               read_language,                  0, 2, 0, -1, env);
   GLOBAL_NONCM_PRIM("read-char",                      read_char,                      0, 1, env);
-  GLOBAL_NONCM_PRIM("read-char-or-special",           read_char_spec,                 0, 1, env);
+  GLOBAL_PRIM_W_ARITY2("read-char-or-special",        read_char_spec,                 0, 3, 0, -1, env);
   GLOBAL_NONCM_PRIM("read-byte",                      read_byte,                      0, 1, env);
-  GLOBAL_NONCM_PRIM("read-byte-or-special",           read_byte_spec,                 0, 1, env);
+  GLOBAL_PRIM_W_ARITY2("read-byte-or-special",        read_byte_spec,                 0, 3, 0, -1, env);
   GLOBAL_NONCM_PRIM("read-bytes-line",                read_byte_line,                 0, 2, env);
   GLOBAL_NONCM_PRIM("read-line",                      read_line,                      0, 2, env);
   GLOBAL_NONCM_PRIM("read-string",                    sch_read_string,                1, 2, env);
@@ -305,9 +305,9 @@ scheme_init_port_fun(Scheme_Env *env)
   GLOBAL_NONCM_PRIM("write-special",                  scheme_write_special,           1, 2, env);
   GLOBAL_NONCM_PRIM("write-special-avail*",           scheme_write_special_nonblock,  1, 2, env);
   GLOBAL_NONCM_PRIM("peek-char",                      peek_char,                      0, 2, env);
-  GLOBAL_NONCM_PRIM("peek-char-or-special",           peek_char_spec,                 0, 2, env);
+  GLOBAL_PRIM_W_ARITY2("peek-char-or-special",           peek_char_spec,              0, 4, 0, -1, env);
   GLOBAL_NONCM_PRIM("peek-byte",                      peek_byte,                      0, 2, env);
-  GLOBAL_NONCM_PRIM("peek-byte-or-special",           peek_byte_spec,                 0, 3, env);
+  GLOBAL_PRIM_W_ARITY2("peek-byte-or-special",           peek_byte_spec,              0, 5, 0, -1, env);
   GLOBAL_NONCM_PRIM("byte-ready?",                    byte_ready_p,                   0, 1, env);
   GLOBAL_NONCM_PRIM("char-ready?",                    char_ready_p,                   0, 1, env);
   GLOBAL_NONCM_PRIM("newline",                        newline,                        0, 1, env);
@@ -2556,7 +2556,7 @@ make_output_port (int argc, Scheme_Object *argv[])
 static Scheme_Object *
 open_input_file (int argc, Scheme_Object *argv[])
 {
-  return scheme_do_open_input_file("open-input-file", 0, argc, argv, 0, NULL, NULL, 0);
+  return scheme_do_open_input_file("open-input-file", 0, argc, argv, 0, 0);
 }
 
 static Scheme_Object *
@@ -2602,13 +2602,13 @@ open_input_char_string (int argc, Scheme_Object *argv[])
 static Scheme_Object *
 open_output_file (int argc, Scheme_Object *argv[])
 {
-  return scheme_do_open_output_file("open-output-file", 0, argc, argv, 0, 0, NULL, NULL);
+  return scheme_do_open_output_file("open-output-file", 0, argc, argv, 0, 0);
 }
 
 static Scheme_Object *
 open_input_output_file (int argc, Scheme_Object *argv[])
 {
-  return scheme_do_open_output_file("open-input-output-file", 0, argc, argv, 1, 0, NULL, NULL);
+  return scheme_do_open_output_file("open-input-output-file", 0, argc, argv, 1, 0);
 }
 
 static Scheme_Object *
@@ -2745,7 +2745,7 @@ call_with_output_file (int argc, Scheme_Object *argv[])
 
   scheme_check_proc_arity("call-with-output-file", 1, 1, argc, argv);
 
-  port = scheme_do_open_output_file("call-with-output-file", 1, argc, argv, 0, 0, NULL, NULL);
+  port = scheme_do_open_output_file("call-with-output-file", 1, argc, argv, 0, 0);
 
   v = _scheme_apply_multi(argv[1], 1, &port);
 
@@ -2770,7 +2770,7 @@ call_with_input_file(int argc, Scheme_Object *argv[])
 
   scheme_check_proc_arity("call-with-input-file", 1, 1, argc, argv);
 
-  port = scheme_do_open_input_file("call-with-input-file", 1, argc, argv, 0, NULL, NULL, 0);
+  port = scheme_do_open_input_file("call-with-input-file", 1, argc, argv, 0, 0);
 
   v = _scheme_apply_multi(argv[1], 1, &port);
 
@@ -2807,7 +2807,7 @@ with_output_to_file (int argc, Scheme_Object *argv[])
 
   scheme_check_proc_arity("with-output-to-file", 0, 1, argc, argv);
 
-  port = scheme_do_open_output_file("with-output-to-file", 1, argc, argv, 0, 0, NULL, NULL);
+  port = scheme_do_open_output_file("with-output-to-file", 1, argc, argv, 0, 0);
 
   config = scheme_extend_config(scheme_current_config(),
 				MZCONFIG_OUTPUT_PORT,
@@ -2841,7 +2841,7 @@ with_input_from_file(int argc, Scheme_Object *argv[])
 
   scheme_check_proc_arity("with-input-from-file", 0, 1, argc, argv);
 
-  port = scheme_do_open_input_file("with-input-from-file", 1, argc, argv, 0, NULL, NULL, 0);
+  port = scheme_do_open_input_file("with-input-from-file", 1, argc, argv, 0, 0);
 
   config = scheme_extend_config(scheme_current_config(),
 				MZCONFIG_INPUT_PORT,
@@ -3038,7 +3038,8 @@ static Scheme_Object *
 do_read_char(char *name, int argc, Scheme_Object *argv[], int peek, int spec, int is_byte)
 {
   Scheme_Object *port;
-  int ch;
+  Scheme_Object *skip, *unless_evt, *src, *spec_wrap;
+  int ch, pos;
 
   if (argc && !SCHEME_INPUT_PORTP(argv[0]))
     scheme_wrong_contract(name, "input-port?", 0, argc, argv);
@@ -3049,8 +3050,7 @@ do_read_char(char *name, int argc, Scheme_Object *argv[], int peek, int spec, in
     port = CURRENT_INPUT_PORT(scheme_current_config());
 
   if (peek) {
-    Scheme_Object *skip, *unless_evt = NULL;
-
+    unless_evt = NULL;
     if (argc > 1) {
       skip = argv[1];
       if (!(SCHEME_INTP(skip) && (SCHEME_INT_VAL(skip) >= 0))
@@ -3058,7 +3058,7 @@ do_read_char(char *name, int argc, Scheme_Object *argv[], int peek, int spec, in
 	scheme_wrong_contract(name, "exact-nonnegative-integer?", 1, argc, argv);
 	return NULL;
       }
-      if (argc > 2) {
+      if (is_byte && (argc > 2)) {
 	if (SCHEME_TRUEP(argv[2])) {
 	  unless_evt = argv[2];
 	  if (!SAME_TYPE(SCHEME_TYPE(unless_evt), scheme_progress_evt_type)) {
@@ -3077,7 +3077,31 @@ do_read_char(char *name, int argc, Scheme_Object *argv[], int peek, int spec, in
       }
     } else
       skip = NULL;
+  } else {
+    unless_evt = NULL;
+    skip = NULL;
+  }
 
+  pos = (peek ? (is_byte ? 3 : 2) : 1);
+  if (argc > pos) {
+    spec_wrap = argv[pos];
+    if (SCHEME_FALSEP(spec_wrap))
+      spec_wrap = NULL;
+    else if (!scheme_fast_check_arity(spec_wrap, 1))
+      scheme_check_proc_arity2(name, 1, pos, argc, argv, 1);
+    pos++;
+    if (argc > pos) {
+      src = argv[pos++];
+      if (SCHEME_FALSEP(src))
+        src = NULL;
+    } else
+      src = NULL;
+  } else {
+    src = NULL;
+    spec_wrap = NULL;
+  }
+
+  if (peek) {
     if (spec) {
       if (is_byte) {
 	ch = scheme_peek_byte_special_ok_skip(port, skip, unless_evt);
@@ -3104,7 +3128,13 @@ do_read_char(char *name, int argc, Scheme_Object *argv[], int peek, int spec, in
   }
 
   if (ch == SCHEME_SPECIAL) {
-    return scheme_get_ready_special(port, NULL, peek);
+    src = scheme_get_ready_special(port, src, peek);
+    if (spec_wrap) {
+      Scheme_Object *a[1];
+      a[0] = src;
+      return _scheme_tail_apply(spec_wrap, 1, a);
+    } else
+      return src;
   } else if (ch == EOF)
     return scheme_eof;
   else if (is_byte)
@@ -4869,7 +4899,7 @@ static Scheme_Object *default_load(int argc, Scheme_Object *argv[])
                           "(or/c #f symbol? (cons/c (or/c #f symbol?) (non-empty-listof symbol?)))",
                           1, argc, argv);
 
-  port = scheme_do_open_input_file("default-load-handler", 0, 1, argv, 0, NULL, NULL, SCHEME_TRUEP(expected_module));
+  port = scheme_do_open_input_file("default-load-handler", 0, 1, argv, 0, SCHEME_TRUEP(expected_module));
 
   /* Turn on line/column counting, unless it's a .zo file: */
   if (SCHEME_PATHP(argv[0])) {

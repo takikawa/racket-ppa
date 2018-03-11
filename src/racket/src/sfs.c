@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2017 PLT Design Inc.
+  Copyright (c) 2004-2018 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -29,6 +29,7 @@
 
 #include "schpriv.h"
 #include "schrunst.h"
+#include "schmach.h"
 #include "schexpobs.h"
 
 struct SFS_Info {
@@ -1185,7 +1186,7 @@ static Scheme_Object *begin_for_syntax_sfs(Scheme_Object *data, SFS_Info *info)
 /*                             closures                                   */
 /*========================================================================*/
 
-static Scheme_Object *sfs_closure(Scheme_Object *expr, SFS_Info *info, int self_pos)
+static Scheme_Object *sfs_lambda(Scheme_Object *expr, SFS_Info *info, int self_pos)
 {
   Scheme_Lambda *data = (Scheme_Lambda *)expr;
   Scheme_Object *code;
@@ -1360,11 +1361,39 @@ top_level_require_sfs(Scheme_Object *data, SFS_Info *rslv)
 /*                            expressions                                 */
 /*========================================================================*/
 
+static Scheme_Object *sfs_expr_k(void)
+{
+  Scheme_Thread *p = scheme_current_thread;
+  Scheme_Object *e = (Scheme_Object *)p->ku.k.p1;
+  SFS_Info *info = (SFS_Info *)p->ku.k.p2;
+
+  p->ku.k.p1 = NULL;
+  p->ku.k.p2 = NULL;
+
+  return scheme_sfs_expr(e, info, p->ku.k.i1);
+}
+
 Scheme_Object *scheme_sfs_expr(Scheme_Object *expr, SFS_Info *info, int closure_self_pos)
 /* closure_self_pos == -2 => immediately in sequence */
 {
   Scheme_Type type = SCHEME_TYPE(expr);
   int seqn, stackpos, tp;
+
+#ifdef DO_STACK_CHECK
+  {
+# include "mzstkchk.h"
+    {
+      Scheme_Thread *p = scheme_current_thread;
+
+      p->ku.k.p1 = (void *)expr;
+      p->ku.k.p2 = (void *)info;
+      p->ku.k.i1 = closure_self_pos;
+
+      return scheme_handle_stack_overflow(sfs_expr_k);
+    }
+  }
+#endif
+
 
   seqn = info->seqn;
   stackpos = info->stackpos;
@@ -1422,7 +1451,7 @@ Scheme_Object *scheme_sfs_expr(Scheme_Object *expr, SFS_Info *info, int closure_
     expr = sfs_wcm(expr, info);
     break;
   case scheme_lambda_type:
-    expr = sfs_closure(expr, info, closure_self_pos);
+    expr = sfs_lambda(expr, info, closure_self_pos);
     break;
   case scheme_let_value_type:
     expr = sfs_let_value(expr, info);
@@ -1441,7 +1470,7 @@ Scheme_Object *scheme_sfs_expr(Scheme_Object *expr, SFS_Info *info, int closure_
       Scheme_Closure *c = (Scheme_Closure *)expr;
       if (ZERO_SIZED_CLOSUREP(c)) {
         Scheme_Object *code;
-	code = sfs_closure((Scheme_Object *)c->code, info, closure_self_pos);
+	code = sfs_lambda((Scheme_Object *)c->code, info, closure_self_pos);
         if (SAME_TYPE(SCHEME_TYPE(code), scheme_begin0_sequence_type))  {
           Scheme_Sequence *seq = (Scheme_Sequence *)code;
           c->code = (Scheme_Lambda *)seq->array[0];

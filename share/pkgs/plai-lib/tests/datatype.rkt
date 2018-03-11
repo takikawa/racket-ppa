@@ -36,24 +36,23 @@
   (format f (+ line# THIS-LINE#)))
 
 (define ERR1
-  (ERR "\\(exception \\(make-i #f\\) \"make-i.+\" '<no-expected-value> \"at line ~a\"\\)"))
+  (ERR "exception \\(make-i #f\\) at line ~a\n  expected: <no-expected-value>\nmake-i: contract violation.+"))
 
 (define ERR2
-  (ERR "\\(exception \\(i-f #f\\) \"i-f.+\" '<no-expected-value> \"at line ~a\"\\)"))
+  (ERR "exception \\(i-f #f\\) at line ~a\n  expected: <no-expected-value>\ni-f: contract violation.+"))
 
 (define ERR3 
   (ERR
-   "\\(exception \\(c1 \\(quote not-a-number\\)\\) \"c1.+\" '<no-expected-value> \"at line ~a\"\\)"))
+   "exception \\(c1 \\(quote not-a-number\\)\\) at line ~a\n  expected: <no-expected-value>\nc1: contract violation.+"))
 
 (define (ERR4 line#)
   (string-append 
-   (regexp-quote "(exception (type-case t (list 1) (c () 1)) \"")
-   (regexp-quote "type-case: expected a value from type t, got: '(1)\"")
-   (regexp-quote " '<no-expected-value> \"at line ")
+   (regexp-quote "exception (type-case t (list 1) (c () 1)) at line ")
    ((ERR "~a") line#)
-   (regexp-quote "\")")))
+   (regexp-quote "\n  expected: <no-expected-value>\n")
+   (regexp-quote "type-case: expected a value from type t, got: '(1)\n")))
 
-(define THIS-LINE# 56)
+(define THIS-LINE# 55)
 
 (eli:test
  (i 4)
@@ -70,4 +69,7 @@
 
  (type-case "foo" "bar") =error> "this must be a type defined with define-type"
  (type-case + "bar") =error> "this must be a type defined with define-type"
- (type-case #f [x () 1]) =error> "this must be a type defined with define-type")
+ (type-case #f [x () 1]) =error> "this must be a type defined with define-type"
+
+ (type-case A (mta) [mta () (define x 2) x] [else (define x 3) x]) => 2
+ (type-case A (a (mtb)) [mta () (define x 2) x] [a (b) (define x 3) x]) => 3)

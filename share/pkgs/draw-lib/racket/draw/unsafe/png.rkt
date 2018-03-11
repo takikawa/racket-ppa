@@ -2,7 +2,6 @@
 (require ffi/unsafe
          ffi/unsafe/define
          ffi/unsafe/alloc
-         "bstr.rkt"
          "../private/utils.rkt"
          "../private/libs.rkt")
 
@@ -53,8 +52,10 @@
 (define-png png_create_read_struct
   (_fun _bytes
         _pointer
-        (_fun _png_structp _string -> _void)
-        (_fun _png_structp _string -> _void)
+        (_fun #:keep (lambda (v) ((current-fun-keep) v))
+              _png_structp _string -> _void)
+        (_fun #:keep (lambda (v) ((current-fun-keep) v))
+              _png_structp _string -> _void)
         -> _png_structp))
 
 (define png_destroy_read_struct1
@@ -75,8 +76,10 @@
 (define-png png_create_write_struct
   (_fun _bytes
         _pointer
-        (_fun _png_structp _string -> _void)
-        (_fun _png_structp _string -> _void)
+        (_fun #:keep (lambda (v) ((current-fun-keep) v))
+              _png_structp _string -> _void)
+        (_fun #:keep (lambda (v) ((current-fun-keep) v))
+              _png_structp _string -> _void)
         -> _png_structp))
 (define png_destroy_write_struct1
   (get-ffi-obj 'png_destroy_write_struct
@@ -215,19 +218,23 @@
   (error 'png "~a" s))
 
 (define (read-png-bytes png p len)
-  (let ([bstr (scheme_make_sized_byte_string p len 0)])
-    (read-bytes! bstr (car (ptr-ref (png_get_io_ptr png) _scheme)))))
+  (define bstr (make-bytes len))
+  (define n (read-bytes! bstr (car (ptr-ref (png_get_io_ptr png) _scheme))))
+  (memcpy p bstr n)
+  n)
 
 (define free-cell ((deallocator) free-immobile-cell))
 (define make-cell ((allocator free-cell) malloc-immobile-cell))
 
 (define (create-png-reader in keep-alpha? bg-rgb)
-  (let* ([png (png_create_read_struct PNG_LIBPNG_VER_STRING #f error-esc void)]
+  (let* ([funs (box null)]
+         [fun-keep (lambda (v)
+                     (set-box! funs (cons v (unbox funs))))]
+         [png (parameterize ([current-fun-keep fun-keep])
+                (png_create_read_struct PNG_LIBPNG_VER_STRING #f error-esc void))]
          [info (png_create_info_struct png)]
-         [funs (box null)]
          [ib (make-cell (cons in funs))])
-    (parameterize ([current-fun-keep (lambda (v)
-                                       (set-box! funs (cons v (unbox funs))))])
+    (parameterize ([current-fun-keep fun-keep])
       (png_set_read_fn png ib read-png-bytes))
     (png_read_info png info)
     (let-values ([(w h depth color-type
@@ -318,8 +325,11 @@
     (png_read_end (reader-png reader) (reader-info reader))
     (list->vector
      (for/list ([i (in-range (reader-h reader))])
-       (let ([p (ptr-ref rows _gcpointer i)])
-         (scheme_make_sized_byte_string p row-bytes 1))))))
+       (define p (ptr-ref rows _pointer i))
+       (define bstr (make-bytes row-bytes))
+       (memcpy bstr p row-bytes)
+       (void/reference-sink rows) ; keep alive until memcpy is done
+       bstr))))
 
 (define (destroy-png-reader reader)
   (when (reader-png reader)
@@ -338,19 +348,22 @@
 (define-struct writer (png info ob))
 
 (define (write-png-bytes png p len)
-  (let ([bstr (scheme_make_sized_byte_string p len 0)])
-    (write-bytes bstr (car (ptr-ref (png_get_io_ptr png) _scheme)))))
+  (define bstr (make-bytes len))
+  (memcpy bstr p len)
+  (write-bytes bstr (car (ptr-ref (png_get_io_ptr png) _scheme))))
 
 (define (flush-png-bytes png)
   (flush-output (car (ptr-ref (png_get_io_ptr png) _scheme))))
 
 (define (create-png-writer out w h b&w? alpha?)
-  (let* ([png (png_create_write_struct PNG_LIBPNG_VER_STRING #f error-esc void)]
+  (let* ([funs (box null)]
+         [fun-keep (lambda (v)
+                     (set-box! funs (cons v (unbox funs))))]
+         [png (parameterize ([current-fun-keep fun-keep])
+                (png_create_write_struct PNG_LIBPNG_VER_STRING #f error-esc void))]
          [info (png_create_info_struct png)]
-         [funs (box null)]
          [ob (make-cell (cons out funs))])
-    (parameterize ([current-fun-keep (lambda (v)
-                                       (set-box! funs (cons v (unbox funs))))])
+    (parameterize ([current-fun-keep fun-keep])
       (png_set_write_fn png ob write-png-bytes flush-png-bytes))
     (png_set_IHDR png info w h (if b&w? 1 8)
                   (cond
@@ -369,7 +382,7 @@
              [w (bytes-length (vector-ref vector-of-rows 0))]
              [rows (malloc-rows h w)])
         (for/list ([i (in-range h)])
-          (memcpy (ptr-ref rows _gcpointer i)
+          (memcpy (ptr-ref rows _pointer i)
                   (vector-ref vector-of-rows i)
                   w))
         (png_write_image (writer-png writer) rows)))

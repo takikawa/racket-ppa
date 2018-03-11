@@ -108,6 +108,7 @@
     ("datum-case" 1)
     ("match" 1)
     ("match*" 1)
+    ("syntax-parse" 1)
     ("syntax-rules" 1)
     ("syntax-case" 2)
     ("syntax-case*" 3)
@@ -385,7 +386,8 @@
 (preferences:set-default 'framework:paren-match #t boolean?)
 (let ([defaults-ht (make-hasheq)])
   (for-each (λ (x) (hash-set! defaults-ht x 'for/fold))
-            '(for/fold for/fold: for*/fold for*/fold:))
+            '(for/fold for/fold: for*/fold for*/fold:
+              for/lists for/lists: for*/lists for*/lists:))
   (for-each (λ (x) (hash-set! defaults-ht x 'define))
             '(struct
               local
@@ -393,7 +395,7 @@
               struct: define-struct: define-typed-struct define-struct/exec:
               define: pdefine:
               define-type define-predicate
-              match-define))
+              match-define match-define-values))
   (for-each (λ (x) (hash-set! defaults-ht x 'begin))
             '(case-lambda case-lambda: pcase-lambda:
                match-lambda match-lambda*
@@ -402,7 +404,11 @@
                delay
                unit compound-unit compound-unit/sig
                public private override require
-               inherit sequence))
+               inherit sequence
+               ;; Explicitly indent these with- constructs using begin-like style
+               ;; for otherwise they will be captured by the regexp of lambda-like style
+               with-output-to-string with-output-to-bytes
+               with-module-reading-parameterization))
   (for-each (λ (x) (hash-set! defaults-ht x 'lambda))
             `(
               cases
@@ -455,10 +461,13 @@
                interface
                parameterize parameterize* syntax-parameterize
                call-with-input-file call-with-input-file* with-input-from-file
+               with-input-from-string
                with-input-from-port call-with-output-file
                with-output-to-file with-output-to-port 
 
 	       for-all
+
+               big-bang
                
                type-case))
   (preferences:set-default 

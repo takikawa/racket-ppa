@@ -6,7 +6,7 @@
          (rep object-rep type-rep values-rep)
          (utils tc-utils)
          (typecheck renamer)
-         (types subtype resolve)
+         (types subtype resolve numeric-tower)
          (except-in (types utils abbrev kw-types) -> ->* one-of/c))
 
 (require-for-cond-contract (rep rep-utils))
@@ -54,7 +54,12 @@
        (match-let ([(fld: ft _ _) (list-ref flds idx)])
          (path-type rst ft (hash)))]
 
-      [((Intersection: ts) _)
+      ;; vector length
+      [(vec-t (list (VecLenPE:)))
+       #:when (subtype vec-t -VectorTop)
+       -Index]
+
+      [((Intersection: ts _) _)
        (apply -unsafe-intersect (for*/list ([t (in-list ts)]
                                             [t (in-value (path-type path t resolved))]
                                             #:when t)
@@ -72,7 +77,7 @@
       [((Distinction: _ _ t) _) (path-type path t resolved)]
 
       ;; for private fields in classes
-      [((Function: (list (arr: doms (Values: (list (Result: rng _ _))) _ _ _)))
+      [((Fun: (list (Arrow: doms _ _ (Values: (list (Result: rng _ _))))))
         (cons (FieldPE:) rst))
        (path-type rst rng (hash))]
 

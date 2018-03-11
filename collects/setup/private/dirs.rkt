@@ -14,7 +14,10 @@
 ;; ----------------------------------------
 ;; config: definitions
 
-(define config-table
+(provide get-config-table
+         to-path)
+
+(define (get-config-table find-config-dir)
   (delay/sync
    (let ([d (find-config-dir)])
      (if d
@@ -28,6 +31,9 @@
                      (read in)))))
                #hash()))
          #hash()))))
+
+(define config-table
+  (get-config-table find-config-dir))
 
 (define (to-path l)
   (cond [(string? l) (simplify-path (complete-path (string->path l)))]
@@ -58,6 +64,8 @@
 (define-config config:include-dir 'include-dir to-path)
 (define-config config:include-search-dirs 'include-search-dirs to-path)
 (define-config config:bin-dir 'bin-dir to-path)
+(define-config config:gui-bin-dir/raw 'gui-bin-dir to-path)
+(define config:gui-bin-dir (delay/sync (or (force config:gui-bin-dir/raw) (force config:bin-dir))))
 (define-config config:config-tethered-console-bin-dir 'config-tethered-console-bin-dir to-path)
 (define-config config:config-tethered-gui-bin-dir 'config-tethered-gui-bin-dir to-path)
 (define-config config:man-dir 'man-dir to-path)
@@ -235,7 +243,7 @@
   find-lib-dir
   find-user-lib-dir
   config:lib-search-dirs
-  get-lib-search-dirs
+  get-cross-lib-search-dirs
   "lib")
 
 ;; ----------------------------------------
@@ -271,6 +279,7 @@
 ;; `setup/dirs`
 
 (provide config:bin-dir
+         config:gui-bin-dir
          config:config-tethered-console-bin-dir
          config:config-tethered-gui-bin-dir)
 

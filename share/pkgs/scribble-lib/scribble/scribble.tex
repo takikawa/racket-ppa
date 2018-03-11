@@ -14,6 +14,7 @@
 \packageTocstyle
 \packageCJK
 
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Configuration that is especially meant to be overridden:
 
@@ -59,12 +60,19 @@
 
 \newcommand{\BookRefLocalUN}[2]{\hyperref[#1]{\BookRefUN{#2}}}
 \newcommand{\ChapRefLocalUN}[2]{\SecRefLocalUN{#1}{#2}}
-\newcommand{\SecRefLocalUN}[2]{\SecRefUN{#2} on page~\pageref{#1}}
+\newcommand{\SecRefLocalUN}[2]{\hyperref[#1]{\SecRefUN{#2}}}
 \newcommand{\PartRefLocalUN}[2]{\SecRefLocalUN{#1}{#2}}
 \newcommand{\BookRefLocalUCUN}[2]{\BookRefLocalUN{#1}{#2}}
 \newcommand{\ChapRefLocalUCUN}[2]{\ChapRefLocalUN{#1}{#2}}
 \newcommand{\SecRefLocalUCUN}[2]{\SecRefLocalUN{#1}{#2}}
 \newcommand{\PartRefLocalUCUN}[2]{\PartRefLocalUN{#1}{#2}}
+
+\newcommand{\SectionNumberLink}[2]{\hyperref[#1]{#2}}
+
+% Enabled with a 'enable-index-merge part style property. This default
+% implementation isn't good enough, because the argument is a
+% comma-separated sequence of labels:
+\newcommand{\Smanypageref}[1]{\pageref{#1}}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Fonts
@@ -301,6 +309,10 @@
 \newcommand{\titleAndVersionAndEmptyAuthors}[3]{\title{#1\\{\normalsize \SVersionBefore{}#2}}#3\maketitle}
 \newcommand{\titleAndEmptyVersionAndAuthors}[3]{\title{#1}\author{#3}\maketitle}
 \newcommand{\titleAndEmptyVersionAndEmptyAuthors}[3]{\title{#1}\maketitle}
+\newcommand{\titleAndVersionAndAuthorsAndShort}[4]{\title[#4]{#1\\{\normalsize \SVersionBefore{}#2}}\author{#3}\maketitle}
+\newcommand{\titleAndVersionAndEmptyAuthorsAndShort}[4]{\title[#4]{#1\\{\normalsize \SVersionBefore{}#2}}#3\maketitle}
+\newcommand{\titleAndEmptyVersionAndAuthorsAndShort}[4]{\title[#4]{#1}\author{#3}\maketitle}
+\newcommand{\titleAndEmptyVersionAndEmptyAuthorsAndShort}[4]{\title[#4]{#1}\maketitle}
 \newcommand{\SAuthor}[1]{#1}
 \newcommand{\SAuthorSep}[1]{\qquad}
 \newcommand{\SVersionBefore}[1]{Version }

@@ -28,8 +28,12 @@
         [(? (lambda (t) (subtype t -FloatComplex))) -FloatComplex]
         [(? (lambda (t) (subtype t -SingleFlonumComplex))) -SingleFlonumComplex]
         [(? (lambda (t) (subtype t -Number))) -Number]
+        [(? (lambda (t) (subtype t -Char))) -Char]
         [(? (lambda (t) (subtype t -ExtFlonum))) -ExtFlonum]
         [(Listof: _) t*]
+        [(Immutable-HashTable: k v) (-HT k v)]
+        [(Mutable-HashTable: k v) (-HT k v)]
+        [(Weak-HashTable: k v) (-HT k v)]
         [(Pair: t1 (== -Null)) (-lst t1)]
         [(MPair: t1 (== -Null)) (-mlst t1)]
         [(or (Pair: t1 t2) (MPair: t1 t2))
@@ -45,4 +49,5 @@
         [(ListDots: t bound) (-lst (substitute Univ bound t))]
         [(? (lambda (t) (subtype t -Symbol))) -Symbol]
         [(== -True) -Boolean]
+        [(Refine: t _) (loop t)]
         [_ t*]))))

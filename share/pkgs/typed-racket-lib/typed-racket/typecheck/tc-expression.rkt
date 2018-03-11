@@ -54,15 +54,19 @@
     (if row? do-row-inst do-normal-inst))
   (define (error-case number)
     (tc-error/expr
-      "Cannot instantiate expression that produces ~a values"
-      number))
+     "Cannot instantiate expression that produces ~a values"
+     number))
   (match tc-res
-    [(tc-results: tys fs os)
-     (match tys
-      [(list ty)
-       (ret (list (inst-type ty inst)) fs os)]
-      [_ (error-case (if (null? tys) 0 "multiple"))])]
-    [_ (error-case "multiple")]))
+    [(tc-results: (list (tc-result: t ps o)) #f)
+     ;; we erase 'o' -- if they bothered to put an instantiation,
+     ;; odds are this is not something where 'o' matters, and leaving
+     ;; 'o' can cause complications (see TR gh issue 561) -- maybe there's
+     ;; a better way? this seems totally fine for now
+     (ret (inst-type t inst) ps -empty-obj)]
+    [_ (error-case (if (and (tc-results? tc-res)
+                            (null? (tc-results-ts tc-res)))
+                       0
+                       "multiple"))]))
 
 
 ;; do-normal-inst : Type Syntax -> Type
@@ -73,11 +77,12 @@
      (tc-error/expr #:return -Bottom "Cannot instantiate non-polymorphic type ~a"
                     (cleanup-type ty))]
     [(and (Poly? ty)
-          (not (= (syntax-length inst) (Poly-n ty))))
+          (> (syntax-length inst) (Poly-n ty)))
      (tc-error/expr #:return -Bottom
-                    "Wrong number of type arguments to polymorphic type ~a:\nexpected: ~a\ngot: ~a"
+                    "Too many type arguments to polymorphic type ~a:\nexpected ~a or fewer\ngot: ~a"
                     (cleanup-type ty) (Poly-n ty) (syntax-length inst))]
-    [(and (PolyDots? ty) (not (>= (syntax-length inst) (sub1 (PolyDots-n ty)))))
+    [(and (PolyDots? ty)
+          (not (>= (syntax-length inst) (sub1 (PolyDots-n ty)))))
      ;; we can provide 0 arguments for the ... var
      (tc-error/expr #:return -Bottom
                     "Wrong number of type arguments to polymorphic type ~a:\nexpected at least: ~a\ngot: ~a"

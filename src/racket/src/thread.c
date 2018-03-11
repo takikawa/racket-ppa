@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2017 PLT Design Inc.
+  Copyright (c) 2004-2018 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -41,69 +41,17 @@
 #include "schpriv.h"
 #include "schmach.h"
 #include "schgc.h"
+#include "schrktio.h"
 #ifdef MZ_USE_FUTURES
 # include "future.h"
 #endif
-#ifndef PALMOS_STUFF
-# include <time.h>
-#endif
-#ifdef FILES_HAVE_FDS
-# include <sys/types.h>
-# include <sys/time.h>
-# ifdef SELECT_INCLUDE
-#  include <sys/select.h>
-# endif
-# ifdef USE_BEOS_SOCKET_INCLUDE
-#  include <be/net/socket.h>
-# endif
-# ifdef HAVE_POLL_SYSCALL
-#  include <poll.h>
-# endif
-# ifdef HAVE_EPOLL_SYSCALL
-#  include <sys/epoll.h>
-# endif
-# ifdef HAVE_KQUEUE_SYSCALL
-#  include <sys/types.h>
-#  include <sys/event.h>
-#  include <sys/time.h>
-# endif
-# include <errno.h>
-#endif
-#ifdef USE_WINSOCK_TCP
-# ifdef USE_TCP
-#  include <winsock.h>
-# endif
-#endif
-#ifdef USE_BEOS_PORT_THREADS
-# include <be/net/socket.h>
-#endif
 #ifdef USE_STACKAVAIL
 # include <malloc.h>
-#endif
-#ifdef UNISTD_INCLUDE
-# include <unistd.h>
 #endif
 
 #ifndef SIGNMZTHREAD
 # define SIGMZTHREAD SIGUSR2
 #endif
-
-#if defined(WINDOWS_PROCESSES) || defined(WINDOWS_FILE_HANDLES)
-# include <windows.h>
-THREAD_LOCAL_DECL(extern void *scheme_break_semaphore;)
-#endif
-
-#if defined(FILES_HAVE_FDS) \
-     || defined(USE_BEOS_PORT_THREADS) \
-     || (defined(USE_WINSOCK_TCP) && defined(USE_TCP)) \
-     || (defined(WINDOWS_PROCESSES) || defined(WINDOWS_FILE_HANDLES))
-# define USING_FDS
-# if (!defined(USE_WINSOCK_TCP) || !defined(USE_TCP)) && !defined(FILES_HAVE_FDS)
-#  include <sys/types.h>
-# endif
-#endif
-
-#include "schfd.h"
 
 #define DEFAULT_INIT_STACK_SIZE 1000
 #define MAX_INIT_STACK_SIZE 100000
@@ -193,7 +141,7 @@ THREAD_LOCAL_DECL(MZ_MARK_STACK_TYPE scheme_current_cont_mark_stack);
 THREAD_LOCAL_DECL(MZ_MARK_POS_TYPE scheme_current_cont_mark_pos);
 #endif
 
-THREAD_LOCAL_DECL(int scheme_semaphore_fd_kqueue);
+THREAD_LOCAL_DECL(struct rktio_ltps_t *scheme_semaphore_fd_set);
 
 THREAD_LOCAL_DECL(static Scheme_Custodian *main_custodian);
 THREAD_LOCAL_DECL(static Scheme_Hash_Table *limited_custodians = NULL);
@@ -235,11 +183,14 @@ THREAD_LOCAL_DECL(static volatile short delayed_break_ready);
 THREAD_LOCAL_DECL(static Scheme_Thread *main_break_target_thread);
 
 THREAD_LOCAL_DECL(Scheme_Sleep_Proc scheme_place_sleep);
+THREAD_LOCAL_DECL(Scheme_Object *thread_sleep_callback);
+THREAD_LOCAL_DECL(int thread_sleep_callback_fd);
 HOOK_SHARED_OK void (*scheme_sleep)(float seconds, void *fds);
 HOOK_SHARED_OK void (*scheme_notify_multithread)(int on);
 HOOK_SHARED_OK void (*scheme_wakeup_on_input)(void *fds);
 HOOK_SHARED_OK int (*scheme_check_for_break)(void);
 THREAD_LOCAL_DECL(static Scheme_On_Atomic_Timeout_Proc on_atomic_timeout);
+THREAD_LOCAL_DECL(static void *on_atomic_timeout_data);
 THREAD_LOCAL_DECL(static int atomic_timeout_auto_suspend);
 THREAD_LOCAL_DECL(static int atomic_timeout_atomic_level);
 
@@ -371,15 +322,25 @@ static Scheme_Object *evt_p(int argc, Scheme_Object *args[]);
 static Scheme_Object *evts_to_evt(int argc, Scheme_Object *args[]);
 
 static Scheme_Object *make_custodian(int argc, Scheme_Object *argv[]);
-static Scheme_Object *make_custodian_from_main(int argc, Scheme_Object *argv[]);
 static Scheme_Object *custodian_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *custodian_close_all(int argc, Scheme_Object *argv[]);
+static Scheme_Object *custodian_shut_down_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *custodian_to_list(int argc, Scheme_Object *argv[]);
 static Scheme_Object *current_custodian(int argc, Scheme_Object *argv[]);
 static Scheme_Object *make_custodian_box(int argc, Scheme_Object *argv[]);
 static Scheme_Object *custodian_box_value(int argc, Scheme_Object *argv[]);
 static Scheme_Object *custodian_box_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *call_as_nested_thread(int argc, Scheme_Object *argv[]);
+
+static Scheme_Object *unsafe_thread_at_root(int argc, Scheme_Object *argv[]);
+
+static Scheme_Object *unsafe_make_custodian_at_root(int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_custodian_register(int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_custodian_unregister(int argc, Scheme_Object *argv[]);
+
+static Scheme_Object *unsafe_register_process_global(int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_get_place_table(int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_set_on_atomic_timeout(int argc, Scheme_Object *argv[]);
 
 static Scheme_Object *make_plumber(int argc, Scheme_Object *argv[]);
 static Scheme_Object *plumber_p(int argc, Scheme_Object *argv[]);
@@ -409,6 +370,11 @@ static Scheme_Object *is_thread_cell_values(int argc, Scheme_Object *args[]);
 static Scheme_Object *make_security_guard(int argc, Scheme_Object *argv[]);
 static Scheme_Object *security_guard_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *current_security_guard(int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_make_security_guard_at_root(int argc, Scheme_Object *argv[]);
+
+static Scheme_Object *security_guard_check_file(int argc, Scheme_Object *argv[]);
+static Scheme_Object *security_guard_check_file_link(int argc, Scheme_Object *argv[]);
+static Scheme_Object *security_guard_check_network(int argc, Scheme_Object *argv[]);
 
 static Scheme_Object *cache_configuration(int argc, Scheme_Object **argv);
 
@@ -432,6 +398,18 @@ static Scheme_Object *will_executor_go(int argc, Scheme_Object *args[]);
 static Scheme_Object *will_executor_sema(Scheme_Object *w, int *repost);
 
 static Scheme_Object *check_break_now(int argc, Scheme_Object *args[]);
+
+static Scheme_Object *unsafe_start_atomic(int argc, Scheme_Object **argv);
+static Scheme_Object *unsafe_end_atomic(int argc, Scheme_Object **argv);
+static Scheme_Object *unsafe_start_breakable_atomic(int argc, Scheme_Object **argv);
+static Scheme_Object *unsafe_end_breakable_atomic(int argc, Scheme_Object **argv);
+static Scheme_Object *unsafe_in_atomic_p(int argc, Scheme_Object **argv);
+
+static Scheme_Object *unsafe_poll_ctx_fd_wakeup(int argc, Scheme_Object **argv);
+static Scheme_Object *unsafe_poll_ctx_eventmask_wakeup(int argc, Scheme_Object **argv);
+static Scheme_Object *unsafe_poll_ctx_time_wakeup(int argc, Scheme_Object **argv);
+static Scheme_Object *unsafe_signal_received(int argc, Scheme_Object **argv);
+static Scheme_Object *unsafe_set_sleep_in_thread(int argc, Scheme_Object **argv);
 
 static void make_initial_config(Scheme_Thread *p);
 
@@ -568,6 +546,7 @@ void scheme_init_thread(Scheme_Env *env)
   GLOBAL_PRIM_W_ARITY("make-custodian"        , make_custodian       , 0, 1, env);
   GLOBAL_FOLDING_PRIM("custodian?"            , custodian_p          , 1, 1, 1  , env);
   GLOBAL_PRIM_W_ARITY("custodian-shutdown-all", custodian_close_all  , 1, 1, env);
+  GLOBAL_PRIM_W_ARITY("custodian-shut-down?"  , custodian_shut_down_p, 1, 1, env);
   GLOBAL_PRIM_W_ARITY("custodian-managed-list", custodian_to_list    , 2, 2, env);
   GLOBAL_PRIM_W_ARITY("make-custodian-box"    , make_custodian_box   , 2, 2, env);
   GLOBAL_PRIM_W_ARITY("custodian-box-value"   , custodian_box_value  , 1, 1, env);
@@ -637,6 +616,56 @@ void scheme_init_thread(Scheme_Env *env)
   GLOBAL_PRIM_W_ARITY("set-phantom-bytes!", set_phantom_bytes, 2, 2, env);
 }
 
+void
+scheme_init_unsafe_thread (Scheme_Env *env)
+{
+  scheme_add_global_constant("unsafe-start-atomic",
+			     scheme_make_prim_w_arity(unsafe_start_atomic,
+						      "unsafe-start-atomic",
+						      0, 0),
+			     env);
+  scheme_add_global_constant("unsafe-end-atomic",
+			     scheme_make_prim_w_arity(unsafe_end_atomic,
+						      "unsafe-end-atomic",
+						      0, 0),
+			     env);
+  scheme_add_global_constant("unsafe-start-breakable-atomic",
+			     scheme_make_prim_w_arity(unsafe_start_breakable_atomic,
+						      "unsafe-start-breakable-atomic",
+						      0, 0),
+			     env);
+  scheme_add_global_constant("unsafe-end-breakable-atomic",
+			     scheme_make_prim_w_arity(unsafe_end_breakable_atomic,
+						      "unsafe-end-breakable-atomic",
+						      0, 0),
+			     env);
+  scheme_add_global_constant("unsafe-in-atomic?",
+			     scheme_make_prim_w_arity(unsafe_in_atomic_p,
+						      "unsafe-in-atomic?",
+						      0, 0),
+			     env);
+
+  GLOBAL_PRIM_W_ARITY("unsafe-thread-at-root", unsafe_thread_at_root, 1, 1, env);
+ 
+  GLOBAL_PRIM_W_ARITY("unsafe-make-custodian-at-root", unsafe_make_custodian_at_root, 0, 0, env);
+  GLOBAL_PRIM_W_ARITY("unsafe-custodian-register", unsafe_custodian_register, 5, 5, env);
+  GLOBAL_PRIM_W_ARITY("unsafe-custodian-unregister", unsafe_custodian_unregister, 2, 2, env);
+
+  GLOBAL_PRIM_W_ARITY("unsafe-register-process-global", unsafe_register_process_global, 2, 2, env);
+  GLOBAL_PRIM_W_ARITY("unsafe-get-place-table", unsafe_get_place_table, 0, 0, env);
+
+  GLOBAL_PRIM_W_ARITY("unsafe-set-on-atomic-timeout!", unsafe_set_on_atomic_timeout, 1, 1, env);
+
+  GLOBAL_PRIM_W_ARITY("unsafe-make-security-guard-at-root", unsafe_make_security_guard_at_root, 0, 3, env);
+
+  scheme_add_global_constant("unsafe-poller", scheme_unsafe_poller_proc, env);
+  GLOBAL_PRIM_W_ARITY("unsafe-poll-ctx-fd-wakeup", unsafe_poll_ctx_fd_wakeup, 3, 3, env);
+  GLOBAL_PRIM_W_ARITY("unsafe-poll-ctx-eventmask-wakeup", unsafe_poll_ctx_eventmask_wakeup, 2, 2, env);
+  GLOBAL_PRIM_W_ARITY("unsafe-poll-ctx-milliseconds-wakeup", unsafe_poll_ctx_time_wakeup, 2, 2, env);
+  GLOBAL_PRIM_W_ARITY("unsafe-signal-received", unsafe_signal_received, 0, 0, env);
+  GLOBAL_PRIM_W_ARITY("unsafe-set-sleep-in-thread!", unsafe_set_sleep_in_thread, 2, 2, env);
+}
+
 void scheme_init_thread_places(void) {
   buffer_init_size = INIT_TB_SIZE;
   REGISTER_SO(recycle_cell);
@@ -644,6 +673,7 @@ void scheme_init_thread_places(void) {
   REGISTER_SO(gc_prepost_callback_descs);
   REGISTER_SO(place_local_misc_table);
   REGISTER_SO(gc_info_prefab);
+  REGISTER_SO(on_atomic_timeout_data);
   gc_info_prefab = scheme_lookup_prefab_type(scheme_intern_symbol("gc-info"), 10);
 }
 
@@ -712,9 +742,12 @@ void scheme_init_paramz(Scheme_Env *env)
   GLOBAL_PRIM_W_ARITY("extend-parameterization" , scheme_extend_parameterization , 1, -1, newenv);
   GLOBAL_PRIM_W_ARITY("check-for-break"         , check_break_now         , 0,  0, newenv);
   GLOBAL_PRIM_W_ARITY("reparameterize"          , reparameterize          , 1,  1, newenv);
-  GLOBAL_PRIM_W_ARITY("make-custodian-from-main", make_custodian_from_main, 0,  0, newenv);
 
   GLOBAL_PRIM_W_ARITY("cache-configuration"     , cache_configuration, 2,  2, newenv);
+
+  GLOBAL_PRIM_W_ARITY("security-guard-check-file", security_guard_check_file, 3,  3, newenv);
+  GLOBAL_PRIM_W_ARITY("security-guard-check-file-link", security_guard_check_file_link, 3,  3, newenv);
+  GLOBAL_PRIM_W_ARITY("security-guard-check-network", security_guard_check_network, 4,  4, newenv);
 
   scheme_finish_primitive_module(newenv);
   scheme_protect_primitive_provide(newenv, NULL);
@@ -898,7 +931,7 @@ static Scheme_Object *custodian_limit_mem(int argc, Scheme_Object *args[])
 
   if (argc > 2) {
     if (NOT_SAME_TYPE(SCHEME_TYPE(args[2]), scheme_custodian_type)) {
-      scheme_wrong_contract("custodian-require-memory", "custodian?", 2, argc, args);
+      scheme_wrong_contract("custodian-limit-memory", "custodian?", 2, argc, args);
       return NULL;
     }
   }
@@ -1341,6 +1374,53 @@ void scheme_remove_managed(Scheme_Custodian_Reference *mr, Scheme_Object *o)
   remove_managed(mr, o, NULL, NULL);
 }
 
+static void call_registered_callback(Scheme_Object *v, void *callback)
+{
+  Scheme_Object *argv[1];
+
+  argv[0] = v;
+
+  scheme_start_in_scheduler();
+  _scheme_apply_multi(callback, 1, argv);
+  scheme_end_in_scheduler();
+}
+
+static Scheme_Object *unsafe_custodian_register(int argc, Scheme_Object *argv[])
+{
+  Scheme_Custodian_Reference *mr;
+  Scheme_Custodian *custodian = (Scheme_Custodian *)argv[0];
+  Scheme_Object *v = argv[1];
+  Scheme_Object *callback = argv[2];
+  int at_exit = SCHEME_TRUEP(argv[3]);
+  int init_weak = SCHEME_TRUEP(argv[4]);
+
+  /* Some checks, just to be polite */
+  if (!SCHEME_CUSTODIANP(argv[0]))
+    scheme_wrong_contract("unsafe-custodian-register", "custodian?", 0, argc, argv);
+  if (!SCHEME_PROCP(callback))
+    scheme_wrong_contract("unsafe-custodian-register", "procedure?", 2, argc, argv);
+
+  if (!scheme_custodian_is_available(custodian))
+    return scheme_false;
+
+  if (at_exit)
+    mr = scheme_add_managed_close_on_exit(custodian, v, call_registered_callback, callback);
+  else
+    mr = scheme_add_managed(custodian, v, call_registered_callback, callback, !init_weak);
+
+  return scheme_make_cptr(mr, NULL);
+}
+
+static Scheme_Object *unsafe_custodian_unregister(int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *v = argv[0];
+  Scheme_Custodian_Reference *mr = (Scheme_Custodian_Reference *)SCHEME_CPTR_VAL(argv[1]);
+
+  scheme_remove_managed(mr, v);
+
+  return scheme_void;
+}
+
 Scheme_Thread *scheme_do_close_managed(Scheme_Custodian *m, Scheme_Exit_Closer_Func cf)
 {
   Scheme_Thread *kill_self = NULL;
@@ -1531,7 +1611,7 @@ static Scheme_Object *make_custodian(int argc, Scheme_Object *argv[])
   return (Scheme_Object *)scheme_make_custodian(m);
 }
 
-static Scheme_Object *make_custodian_from_main(int argc, Scheme_Object *argv[])
+static Scheme_Object *unsafe_make_custodian_at_root(int argc, Scheme_Object *argv[])
 {
   return (Scheme_Object *)scheme_make_custodian(NULL);
 }
@@ -1549,6 +1629,16 @@ static Scheme_Object *custodian_close_all(int argc, Scheme_Object *argv[])
   scheme_close_managed((Scheme_Custodian *)argv[0]);
 
   return scheme_void;
+}
+
+static Scheme_Object *custodian_shut_down_p(int argc, Scheme_Object *argv[])
+{
+  if (!SCHEME_CUSTODIANP(argv[0]))
+    scheme_wrong_contract("custodian-shut-down?", "custodian?", 0, argc, argv);
+
+  return (((Scheme_Custodian *)argv[0])->shut_down
+          ? scheme_true
+          : scheme_false);
 }
 
 Scheme_Custodian* scheme_custodian_extract_reference(Scheme_Custodian_Reference *mr)
@@ -1859,15 +1949,7 @@ void scheme_add_atexit_closer(Scheme_Exit_Closer_Func f)
 
   if (!cust_closers) {
     if (RUNNING_IN_ORIGINAL_PLACE) {
-      if (replacement_at_exit) {
-        replacement_at_exit(do_run_atexit_closers_on_all);
-      } else {
-#ifdef USE_ON_EXIT_FOR_ATEXIT
-        on_exit(do_run_atexit_closers_on_all, NULL);
-#else
-        atexit(do_run_atexit_closers_on_all);
-#endif
-      }
+      scheme_atexit(do_run_atexit_closers_on_all);
     }
 
     REGISTER_SO(cust_closers);
@@ -1875,6 +1957,19 @@ void scheme_add_atexit_closer(Scheme_Exit_Closer_Func f)
   }
 
   cust_closers = scheme_make_raw_pair((Scheme_Object *)f, cust_closers);
+}
+
+int scheme_atexit(void (*func)(void))
+{
+      if (replacement_at_exit) {
+        return replacement_at_exit(func);
+      } else {
+#ifdef USE_ON_EXIT_FOR_ATEXIT
+        return on_exit(func, NULL);
+#else
+        return atexit(func);
+#endif
+      }
 }
 
 void scheme_schedule_custodian_close(Scheme_Custodian *c)
@@ -2678,6 +2773,29 @@ void *scheme_register_process_global(const char *key, void *val)
   return old_val;
 }
 
+static Scheme_Object *unsafe_register_process_global(int argc, Scheme_Object *argv[])
+{
+  void *val;
+  
+  if (!SCHEME_BYTE_STRINGP(argv[0]))
+    scheme_wrong_contract("unsafe-register-process-global", "bytes?", 0, argc, argv);
+  if (!scheme_is_cpointer(argv[1]))
+    scheme_wrong_contract("unsafe-register-process-global", "cpointer?", 1, argc, argv);
+  
+  val = scheme_register_process_global(SCHEME_BYTE_STR_VAL(argv[0]),
+                                       scheme_extract_pointer(argv[1]));
+
+  if (val)
+    return scheme_make_cptr(val, NULL);
+  else
+    return scheme_false;
+}
+
+static Scheme_Object *unsafe_get_place_table(int argc, Scheme_Object *argv[])
+{
+  return (Scheme_Object *)scheme_get_place_table();
+}
+
 void scheme_init_process_globals(void)
 {
 #if defined(MZ_USE_MZRT)
@@ -3258,6 +3376,18 @@ static Scheme_Object *sch_thread(int argc, Scheme_Object *args[])
   return scheme_thread(args[0]);
 }
 
+static Scheme_Object *unsafe_thread_at_root(int argc, Scheme_Object *args[])
+{
+  scheme_check_proc_arity("unsafe-thread-at-root", 0, 0, argc, args);
+
+  return scheme_thread_w_details(args[0],
+                                 scheme_minimal_config(),
+                                 scheme_empty_cell_table(),
+                                 NULL, /* default break cell */
+                                 main_custodian,
+                                 0);
+}
+
 static Scheme_Object *sch_thread_nokill(int argc, Scheme_Object *args[])
 {
   scheme_check_proc_arity("thread/suspend-to-kill", 0, 0, argc, args);
@@ -3620,7 +3750,7 @@ Scheme_Object *scheme_call_as_nested_thread(int argc, Scheme_Object *argv[], voi
       v = NULL;
     failure = 1;
   } else {
-    v = scheme_apply(argv[0], 0, NULL);
+    v = scheme_apply_with_prompt(argv[0], 0, NULL);
     failure = 0;
   }
 
@@ -3711,471 +3841,127 @@ static Scheme_Object *call_as_nested_thread(int argc, Scheme_Object *argv[])
 /*                     thread scheduling and termination                  */
 /*========================================================================*/
 
-void scheme_init_kqueue(void)
+static int check_fd_semaphores();
+
+void scheme_init_fd_semaphores(void)
 {
-#if defined(HAVE_KQUEUE_SYSCALL) || defined(HAVE_EPOLL_SYSCALL)
-  scheme_semaphore_fd_kqueue = -1;
-#endif
+  scheme_semaphore_fd_set = rktio_ltps_open(scheme_rktio);
 }
 
-void scheme_release_kqueue(void)
+void scheme_release_fd_semaphores(void)
 {
-#if defined(HAVE_KQUEUE_SYSCALL) || defined(HAVE_EPOLL_SYSCALL)
-  if (scheme_semaphore_fd_kqueue >= 0) {
-    intptr_t rc;
-    do {
-      rc = close(scheme_semaphore_fd_kqueue);
-    } while ((rc == -1) && (errno == EINTR));
+  if (scheme_semaphore_fd_set) {
+    rktio_ltps_remove_all(scheme_rktio, scheme_semaphore_fd_set);
+    (void)check_fd_semaphores();
+    rktio_ltps_close(scheme_rktio, scheme_semaphore_fd_set);
   }
-#endif
 }
 
-#if defined(HAVE_KQUEUE_SYSCALL) || defined(HAVE_EPOLL_SYSCALL)
-static void log_kqueue_error(const char *action, int kr)
+static void log_fd_semaphore_error()
 {
-  if (kr < 0) {
+  {
     Scheme_Logger *logger;
     logger = scheme_get_main_logger();
     scheme_log(logger, SCHEME_LOG_WARNING, 0, 
-#ifdef HAVE_KQUEUE_SYSCALL
-	       "kqueue"
-#else
-	       "epoll"
-#endif
-	       " error at %s: %E", 
-	       action, errno);
+	       "error for long-term poll set: %R");
   }
 }
-
-static void log_kqueue_fd(int fd, int flags)
-{
-  Scheme_Logger *logger;
-  logger = scheme_get_main_logger();
-  scheme_log(logger, SCHEME_LOG_WARNING, 0, 
-#ifdef HAVE_KQUEUE_SYSCALL
-             "kqueue"
-#else
-             "epoll"
-#endif
-             " expected event %d %d", 
-             fd, flags);
-}
-#endif
 
 Scheme_Object *scheme_fd_to_semaphore(intptr_t fd, int mode, int is_socket)
 {
-#ifdef USE_WINSOCK_TCP
-  return NULL;
-#else
-  Scheme_Object *key, *v, *s = NULL;
-#if defined(HAVE_KQUEUE_SYSCALL) || defined(HAVE_EPOLL_SYSCALL)
-# else
-  void *r, *w, *e;
-# endif
-
-  if (!scheme_semaphore_fd_mapping)
+  rktio_fd_t *rfd;
+  Scheme_Object *sema;
+  
+  if (!scheme_semaphore_fd_set)
     return NULL;
 
-# ifdef HAVE_KQUEUE_SYSCALL
-  if (!is_socket) {
-    /* kqueue() might not work on devices, such as ttys; also, while
-       Mac OS X kqueue() claims to work on FIFOs, there are problems:
-       watching for reads on a FIFO sometimes disables watching for
-       writes on the same FIFO with a different file descriptor */
-    if (!scheme_fd_regular_file(fd, 1))
-      return NULL;
-  }
-  if (scheme_semaphore_fd_kqueue < 0) {
-    scheme_semaphore_fd_kqueue = kqueue();
-    if (scheme_semaphore_fd_kqueue < 0) {
-      log_kqueue_error("create", scheme_semaphore_fd_kqueue);
-      return NULL;
-    }
-  }
-# endif
-# ifdef HAVE_EPOLL_SYSCALL
-  if (scheme_semaphore_fd_kqueue < 0) {
-    scheme_semaphore_fd_kqueue = epoll_create(5);
-    if (scheme_semaphore_fd_kqueue < 0) {
-      log_kqueue_error("create", scheme_semaphore_fd_kqueue);
-      return NULL;
-    }
-  }
-# endif
+  rfd = rktio_system_fd(scheme_rktio, fd, (RKTIO_OPEN_READ
+                                           | RKTIO_OPEN_WRITE
+                                           | (is_socket ? RKTIO_OPEN_SOCKET : 0)));
 
-  key = scheme_make_integer_value(fd);
-  v = scheme_hash_get(scheme_semaphore_fd_mapping, key);
-  if (!v && ((mode == MZFD_CHECK_READ)
-             || (mode == MZFD_CHECK_WRITE)
-             || (mode == MZFD_CHECK_VNODE)
-             || (mode == MZFD_REMOVE)
-             || (mode == MZFD_REMOVE_VNODE)))
+  sema = scheme_rktio_fd_to_semaphore(rfd, mode);
+
+  rktio_forget(scheme_rktio, rfd);
+
+  return sema;
+}
+
+Scheme_Object *scheme_rktio_fd_to_semaphore(rktio_fd_t *fd, int mode)
+{
+  rktio_ltps_handle_t *h;
+  void **ib;
+
+  if (!scheme_semaphore_fd_set)
     return NULL;
 
-  if (!v) {
-    v = scheme_make_vector(2, scheme_false);
-    scheme_hash_set(scheme_semaphore_fd_mapping, key, v);
+  switch(mode) {
+  case MZFD_CREATE_READ:
+    mode = RKTIO_LTPS_CREATE_READ;
+    break;
+  case MZFD_CREATE_WRITE:
+    mode = RKTIO_LTPS_CREATE_WRITE;
+    break;
+  case MZFD_CHECK_READ:
+    mode = RKTIO_LTPS_CHECK_READ;
+    break;
+  case MZFD_CHECK_WRITE:
+    mode = RKTIO_LTPS_CHECK_WRITE;
+    break;
+  case MZFD_REMOVE:
+    mode = RKTIO_LTPS_REMOVE;
+    break;
   }
 
-# if !defined(HAVE_KQUEUE_SYSCALL) && !defined(HAVE_EPOLL_SYSCALL)
-  r = MZ_GET_FDSET(scheme_semaphore_fd_set, 0);
-  w = MZ_GET_FDSET(scheme_semaphore_fd_set, 1);
-  e = MZ_GET_FDSET(scheme_semaphore_fd_set, 2);
-# endif
+  h = rktio_ltps_add(scheme_rktio, scheme_semaphore_fd_set, fd, mode);
 
-  if ((mode == MZFD_REMOVE) || (mode == MZFD_REMOVE_VNODE)) {
-    s = SCHEME_VEC_ELS(v)[0];
-    if (!SCHEME_FALSEP(s))
-      scheme_post_sema_all(s);
-    s = SCHEME_VEC_ELS(v)[1];
-    if (!SCHEME_FALSEP(s))
-      scheme_post_sema_all(s);
-    s = NULL;
-    scheme_hash_set(scheme_semaphore_fd_mapping, key, NULL);
-# ifdef HAVE_KQUEUE_SYSCALL
-    {
-      GC_CAN_IGNORE struct kevent kev[2];
-      struct timespec timeout = {0, 0};
-      int kr, pos = 0;
-      if (mode == MZFD_REMOVE_VNODE) {
-        EV_SET(&kev[pos], fd, EVFILT_VNODE, EV_DELETE, 0, 0, NULL);
-        pos++;
-      } else {
-        if (SCHEME_TRUEP(SCHEME_VEC_ELS(v)[0])) {
-          EV_SET(&kev[pos], fd, EVFILT_READ, EV_DELETE, 0, 0, NULL);
-          pos++;
-        }
-        if (SCHEME_TRUEP(SCHEME_VEC_ELS(v)[1])) {
-          EV_SET(&kev[pos], fd, EVFILT_WRITE, EV_DELETE, 0, 0, NULL);
-          pos++;
-        }
-      }
-      do {
-        kr = kevent(scheme_semaphore_fd_kqueue, kev, pos, NULL, 0, &timeout);
-      } while ((kr == -1) && (errno == EINTR));
-      log_kqueue_error("remove", kr);
+  if (!h) {
+    if (scheme_last_error_is_racket(RKTIO_ERROR_LTPS_REMOVED)
+        || scheme_last_error_is_racket(RKTIO_ERROR_LTPS_NOT_FOUND)) {
+      /* That's a kind of success, not failure. */
+      return NULL;
     }
-# elif defined(HAVE_EPOLL_SYSCALL)
-    {
-      int kr;
-      kr = epoll_ctl(scheme_semaphore_fd_kqueue, EPOLL_CTL_DEL, fd, NULL);
-      log_kqueue_error("remove", kr);
-    }
-# else
-    MZ_FD_CLR(fd, r);
-    MZ_FD_CLR(fd, w);
-    MZ_FD_CLR(fd, e);
-# endif
-    s = NULL;
-  } else if ((mode == MZFD_CHECK_READ)
-             || (mode == MZFD_CREATE_READ)
-             || (mode == MZFD_CHECK_VNODE)
-             || (mode == MZFD_CREATE_VNODE)) {
-    s = SCHEME_VEC_ELS(v)[0];
-    if (SCHEME_FALSEP(s)) {
-      if ((mode == MZFD_CREATE_READ)
-          || (mode == MZFD_CREATE_VNODE)) {
-        s = scheme_make_sema(0);
-        SCHEME_VEC_ELS(v)[0] = s;
-# ifdef HAVE_KQUEUE_SYSCALL
-        {
-          GC_CAN_IGNORE struct kevent kev;
-          struct timespec timeout = {0, 0};
-          int kr;
-          if (mode == MZFD_CREATE_READ)
-            EV_SET(&kev, fd, EVFILT_READ, EV_ADD | EV_ONESHOT, 0, 0, NULL);
-          else
-            EV_SET(&kev, fd, EVFILT_VNODE, EV_ADD | EV_ONESHOT, 
-                   (NOTE_DELETE | NOTE_WRITE | NOTE_EXTEND 
-                    | NOTE_RENAME | NOTE_ATTRIB),
-                   0, NULL);
-          do {
-            kr = kevent(scheme_semaphore_fd_kqueue, &kev, 1, NULL, 0, &timeout);
-          } while ((kr == -1) && (errno == EINTR));
-	  log_kqueue_error("read", kr);
-        }
-# elif defined(HAVE_EPOLL_SYSCALL)
-	{
-	  GC_CAN_IGNORE struct epoll_event ev;
-	  int already = !SCHEME_FALSEP(SCHEME_VEC_ELS(v)[1]), kr;
-	  memset(&ev, 0, sizeof(ev));
-	  ev.data.fd = fd;
-	  ev.events = EPOLLIN | (already ? EPOLLOUT : 0);
-	  kr = epoll_ctl(scheme_semaphore_fd_kqueue, 
-			 (already ? EPOLL_CTL_MOD : EPOLL_CTL_ADD), fd, &ev);
-	  log_kqueue_error("read", kr);
-	}
-# else
-        MZ_FD_SET(fd, r);
-        MZ_FD_SET(fd, e);
-#endif
-      } else
-        s = NULL;
-    }
-  } else if ((mode == MZFD_CHECK_WRITE)
-             || (mode == MZFD_CREATE_WRITE)) {
-    s = SCHEME_VEC_ELS(v)[1];
-    if (SCHEME_FALSEP(s)) {
-      if (mode == MZFD_CREATE_WRITE) {
-        s = scheme_make_sema(0);
-        SCHEME_VEC_ELS(v)[1] = s;
-# ifdef HAVE_KQUEUE_SYSCALL
-        {
-          GC_CAN_IGNORE struct kevent kev;
-          struct timespec timeout = {0, 0};
-          int kr;
-          EV_SET(&kev, fd, EVFILT_WRITE, EV_ADD | EV_ONESHOT, 0, 0, NULL);
-          do {
-            kr = kevent(scheme_semaphore_fd_kqueue, &kev, 1, NULL, 0, &timeout);
-          } while ((kr == -1) && (errno == EINTR));
-	  log_kqueue_error("write", kr);
-        }
-
-# elif defined(HAVE_EPOLL_SYSCALL)
-	{
-	  GC_CAN_IGNORE struct epoll_event ev;
-	  int already = !SCHEME_FALSEP(SCHEME_VEC_ELS(v)[0]), kr;
-	  memset(&ev, 0, sizeof(ev));
-	  ev.data.fd = fd;
-	  ev.events = EPOLLOUT | (already ? EPOLLIN : 0);
-	  kr = epoll_ctl(scheme_semaphore_fd_kqueue, 
-			 (already ? EPOLL_CTL_MOD : EPOLL_CTL_ADD), fd, &ev);
-	  log_kqueue_error("write", kr);
-	}
-# else
-        MZ_FD_SET(fd, w);
-        MZ_FD_SET(fd, e);
-#endif
-      } else
-        s = NULL;
-    }
+    log_fd_semaphore_error();
+    return NULL;    
   }
 
-  return s;
-#endif
+  ib = rktio_ltps_handle_get_data(scheme_rktio, h);
+  if (!ib) {
+    ib = scheme_malloc_immobile_box(scheme_make_sema(0));
+    rktio_ltps_handle_set_data(scheme_rktio, h, ib);
+  }
+
+  return *(Scheme_Object **)ib;
 }
 
 static int check_fd_semaphores()
 {
-#ifdef USE_WINSOCK_TCP
-  return 0;
-#elif defined(HAVE_KQUEUE_SYSCALL)
-  Scheme_Object *v, *s, *key;
-  GC_CAN_IGNORE struct kevent kev;
-  struct timespec timeout = {0, 0};
-  int kr, hit = 0;
+  rktio_ltps_handle_t *h;
+  int did = 0;
+  void *p;
+  Scheme_Object *sema;
 
-  if (!scheme_semaphore_fd_mapping || (scheme_semaphore_fd_kqueue < 0))
+  if (!scheme_semaphore_fd_set)
     return 0;
 
-  while (1) {
-    do {
-      kr = kevent(scheme_semaphore_fd_kqueue, NULL, 0, &kev, 1, &timeout);
-    } while ((kr == -1) && (errno == EINTR));
-    log_kqueue_error("wait", kr);
- 
-    if (kr > 0) {
-      key = scheme_make_integer_value(kev.ident);
-      v = scheme_hash_get(scheme_semaphore_fd_mapping, key);
-      if (v) {
-        if ((kev.filter == EVFILT_READ) || (kev.filter == EVFILT_VNODE)) {
-          s = SCHEME_VEC_ELS(v)[0];
-          if (!SCHEME_FALSEP(s)) {
-            scheme_post_sema_all(s);
-            hit = 1;
-            SCHEME_VEC_ELS(v)[0] = scheme_false;
-          }
-        } else if (kev.filter == EVFILT_WRITE) {
-          s = SCHEME_VEC_ELS(v)[1];
-          if (!SCHEME_FALSEP(s)) {
-            scheme_post_sema_all(s);
-            hit = 1;
-            SCHEME_VEC_ELS(v)[1] = scheme_false;
-          }
-        }
-        if (SCHEME_FALSEP(SCHEME_VEC_ELS(v)[0])
-            && SCHEME_FALSEP(SCHEME_VEC_ELS(v)[1]))
-          scheme_hash_set(scheme_semaphore_fd_mapping, key, NULL);
-      } else {
-        log_kqueue_fd(kev.ident, kev.filter);
-      }
-    } else
-      break;
-  }
-
-  return hit;
-#elif defined(HAVE_EPOLL_SYSCALL)
-  Scheme_Object *v, *s, *key;
-  int kr, hit = 0;
-  GC_CAN_IGNORE struct epoll_event ev;
-  memset(&ev, 0, sizeof(ev));
-
-  if (!scheme_semaphore_fd_mapping || (scheme_semaphore_fd_kqueue < 0))
-    return 0;
-
-  while (1) {
-    
-    do {
-      kr = epoll_wait(scheme_semaphore_fd_kqueue, &ev, 1, 0);
-    } while ((kr == -1) && (errno == EINTR));
-    log_kqueue_error("wait", kr);
- 
-    if (kr > 0) {
-      key = scheme_make_integer_value(ev.data.fd);
-      v = scheme_hash_get(scheme_semaphore_fd_mapping, key);
-      if (v) {
-	if (ev.events & (POLLIN | POLLHUP | POLLERR)) {
-	  s = SCHEME_VEC_ELS(v)[0];
-          if (!SCHEME_FALSEP(s)) {
-            scheme_post_sema_all(s);
-            hit = 1;
-            SCHEME_VEC_ELS(v)[0] = scheme_false;
-          }
-	}
-	if (ev.events & (POLLOUT | POLLHUP | POLLERR)) {
-	  s = SCHEME_VEC_ELS(v)[1];
-          if (!SCHEME_FALSEP(s)) {
-            scheme_post_sema_all(s);
-            hit = 1;
-            SCHEME_VEC_ELS(v)[1] = scheme_false;
-          }
-	}
-        if (SCHEME_FALSEP(SCHEME_VEC_ELS(v)[0])
-            && SCHEME_FALSEP(SCHEME_VEC_ELS(v)[1])) {
-          scheme_hash_set(scheme_semaphore_fd_mapping, key, NULL);
-	  kr = epoll_ctl(scheme_semaphore_fd_kqueue, EPOLL_CTL_DEL, ev.data.fd, NULL);
-	  log_kqueue_error("remove*", kr);
-	} else {
-	  ev.events = ((SCHEME_FALSEP(SCHEME_VEC_ELS(v)[0]) ? 0 : POLLIN)
-		       | (SCHEME_FALSEP(SCHEME_VEC_ELS(v)[1]) ? 0 : POLLOUT));
-	  kr = epoll_ctl(scheme_semaphore_fd_kqueue, EPOLL_CTL_MOD, ev.data.fd, &ev);
-	  log_kqueue_error("update", kr);
-	}
-      } else {
-        log_kqueue_fd(ev.data.fd, ev.events);
-      }
-    } else
-      break;
-  }
-
-  return hit;
-#elif defined(HAVE_POLL_SYSCALL)
-  struct pollfd *pfd;
-  intptr_t i, c;
-  Scheme_Object *v, *s, *key;
-  int sr, hit = 0;
-
-  if (!scheme_semaphore_fd_mapping || !scheme_semaphore_fd_mapping->count)
-    return 0;
-
-  scheme_clean_fd_set(scheme_semaphore_fd_set);
-  c = SCHEME_INT_VAL(scheme_semaphore_fd_set->data->count);
-  pfd = scheme_semaphore_fd_set->data->pfd;
-
-  do {
-    sr = poll(pfd, c, 0);
-  } while ((sr == -1) && (errno == EINTR));  
-
-  if (sr > 0) {
-    for (i = 0; i < c; i++) {
-      if (pfd[i].revents) {
-        key = scheme_make_integer_value(pfd[i].fd);
-        v = scheme_hash_get(scheme_semaphore_fd_mapping, key);
-        if (v) {
-          if (pfd[i].revents & (POLLIN | POLLHUP | POLLERR)) {
-            s = SCHEME_VEC_ELS(v)[0];
-            if (!SCHEME_FALSEP(s)) {
-              scheme_post_sema_all(s);
-              hit = 1;
-              SCHEME_VEC_ELS(v)[0] = scheme_false;
-            }
-            pfd[i].events -= (pfd[i].events & POLLIN);
-          }
-          if (pfd[i].revents & (POLLOUT | POLLHUP | POLLERR)) {
-            s = SCHEME_VEC_ELS(v)[1];
-            if (!SCHEME_FALSEP(s)) {
-              scheme_post_sema_all(s);
-              hit = 1;
-              SCHEME_VEC_ELS(v)[1] = scheme_false;
-            }
-            pfd[i].events -= (pfd[i].events & POLLOUT);
-          }
-          if (SCHEME_FALSEP(SCHEME_VEC_ELS(v)[0])
-              && SCHEME_FALSEP(SCHEME_VEC_ELS(v)[1]))
-            scheme_hash_set(scheme_semaphore_fd_mapping, key, NULL);
-        }
-      }
-    }
-  }
-
-  return hit;
-#else
-  void *fds;
-  struct timeval time = {0, 0};
-  int i, actual_limit, r, w, e, sr, hit = 0;
-  Scheme_Object *key, *v, *s;
-  DECL_FDSET(set, 3);
-  fd_set *set1, *set2;
-
-  if (!scheme_semaphore_fd_mapping || !scheme_semaphore_fd_mapping->count)
-    return 0;
-
-  INIT_DECL_FDSET(set, set1, set2);
-  set1 = (fd_set *) MZ_GET_FDSET(set, 1);
-  set2 = (fd_set *) MZ_GET_FDSET(set, 2);
+  rktio_ltps_poll(scheme_rktio, scheme_semaphore_fd_set);
   
-  fds = (void *)set;
-  MZ_FD_ZERO(set);
-  MZ_FD_ZERO(set1);
-  MZ_FD_ZERO(set2);
+  while (1) {
+    h = rktio_ltps_get_signaled_handle(scheme_rktio, scheme_semaphore_fd_set);
+    if (h) {
+      p = rktio_ltps_handle_get_data(scheme_rktio, h);
+      free(h);
 
-  scheme_merge_fd_sets(fds, scheme_semaphore_fd_set);
+      sema = *(Scheme_Object **)p;
+      scheme_free_immobile_box(p);
 
-  actual_limit = scheme_get_fd_limit(fds);
-
-  do {
-    sr = select(actual_limit, set, set1, set2, &time);
-  } while ((sr == -1) && (errno == EINTR));
-
-  if (sr > 0) {
-    for (i = 0; i < actual_limit; i++) {
-      r = MZ_FD_ISSET(i, set);
-      w = MZ_FD_ISSET(i, set1);
-      e = MZ_FD_ISSET(i, set2);
-      if (r || w || e) {
-        key = scheme_make_integer_value(i);
-        v = scheme_hash_get(scheme_semaphore_fd_mapping, key);
-        if (v) {
-          if (r || e) {
-            s = SCHEME_VEC_ELS(v)[0];
-            if (!SCHEME_FALSEP(s)) {
-              scheme_post_sema_all(s);
-              hit = 1;
-              SCHEME_VEC_ELS(v)[0] = scheme_false;
-            }
-            MZ_FD_CLR(i, MZ_GET_FDSET(scheme_semaphore_fd_set, 0));
-          }
-          if (w || e) {
-            s = SCHEME_VEC_ELS(v)[1];
-            if (!SCHEME_FALSEP(s)) {
-              scheme_post_sema_all(s);
-              hit = 1;
-              SCHEME_VEC_ELS(v)[1] = scheme_false;
-            }
-            MZ_FD_CLR(i, MZ_GET_FDSET(scheme_semaphore_fd_set, 1));
-          }
-          if (SCHEME_FALSEP(SCHEME_VEC_ELS(v)[0])
-              && SCHEME_FALSEP(SCHEME_VEC_ELS(v)[1])) {
-            MZ_FD_CLR(i, MZ_GET_FDSET(scheme_semaphore_fd_set, 2));
-            scheme_hash_set(scheme_semaphore_fd_mapping, key, NULL);
-          }
-        }
-      }
-    }
+      scheme_post_sema_all(sema);
+      
+      did = 1;
+    } else
+      break;
   }
 
-  return hit;
-#endif
+  return did;
 }
 
 void scheme_check_fd_semaphores(void)
@@ -4243,10 +4029,6 @@ static int check_sleep(int need_activity, int sleep_now)
 {
   Scheme_Thread *p, *p2;
   int end_with_act;
-#if defined(USING_FDS)
-  DECL_FDSET(set, 3);
-  fd_set *set1, *set2;
-#endif
   void *fds;
 
   if (scheme_no_stack_overflow)
@@ -4268,7 +4050,7 @@ static int check_sleep(int need_activity, int sleep_now)
   p2 = scheme_first_thread;
   while (p2) {
     if (p2->ran_some) {
-      scheme_notify_sleep_progress();
+      rkio_reset_sleep_backoff(scheme_rktio);
       p2->ran_some = 0;
     }
     p2 = p2->next;
@@ -4292,19 +4074,8 @@ static int check_sleep(int need_activity, int sleep_now)
       scheme_active_but_sleeping = 1;
     if (have_activity && scheme_notify_multithread)
       scheme_notify_multithread(0);
-    
-#if defined(USING_FDS)
-    INIT_DECL_FDSET(set, set1, set2);
-    set1 = (fd_set *) MZ_GET_FDSET(set, 1);
-    set2 = (fd_set *) MZ_GET_FDSET(set, 2);
 
-    fds = (void *)set;
-    MZ_FD_ZERO(set);
-    MZ_FD_ZERO(set1);
-    MZ_FD_ZERO(set2);
-#else
-    fds = NULL;
-#endif
+    fds = rktio_make_poll_set(scheme_rktio);
     
     needs_sleep_cancelled = 0;
 
@@ -4355,23 +4126,15 @@ static int check_sleep(int need_activity, int sleep_now)
       p = p->next;
     }
   
-    if (needs_sleep_cancelled)
+    if (needs_sleep_cancelled) {
+      rktio_poll_set_forget(scheme_rktio, fds);
       return 0;
+    }
 
     if (post_system_idle()) {
+      rktio_poll_set_forget(scheme_rktio, fds);
       return 0;
     }
-
-# if defined(HAVE_KQUEUE_SYSCALL) || defined(HAVE_EPOLL_SYSCALL) 
-    if (scheme_semaphore_fd_mapping && (scheme_semaphore_fd_kqueue >= 0)) {
-      MZ_FD_SET(scheme_semaphore_fd_kqueue, set);
-      MZ_FD_SET(scheme_semaphore_fd_kqueue, set2);
-    }
-# else
-    fds = scheme_merge_fd_sets(fds, scheme_semaphore_fd_set); 
-# endif
-
-    scheme_clean_fd_set(fds);
  
     if (sleep_now) {
       float mst = (float)max_sleep_time;
@@ -4393,6 +4156,8 @@ static int check_sleep(int need_activity, int sleep_now)
     } else if (scheme_wakeup_on_input)
       scheme_wakeup_on_input(fds);
 
+    rktio_poll_set_forget(scheme_rktio, fds);
+    
     return 1;
   }
 
@@ -4755,10 +4520,6 @@ void scheme_break_kind_thread(Scheme_Thread *p, int kind)
     }
   }
   scheme_weak_resume_thread(p);
-# if defined(WINDOWS_PROCESSES) || defined(WINDOWS_FILE_HANDLES)
-  if (SAME_OBJ(p, scheme_main_thread))
-    ReleaseSemaphore((HANDLE)scheme_break_semaphore, 1, NULL);
-# endif
 }
 
 void scheme_break_thread(Scheme_Thread *p)
@@ -4780,7 +4541,7 @@ static void call_on_atomic_timeout(int must)
      local variable so that the function call isn't
      obscured to xform: */
   oat = on_atomic_timeout;
-  oat(must);
+  oat(on_atomic_timeout_data, must);
 
   restore_thread_schedule_state(p, &ssr, 1);
 }
@@ -4979,10 +4740,8 @@ void scheme_thread_block(float sleep_time)
   /* Check scheduled_kills early and often. */
   check_scheduled_kills();
 
-#if defined(UNIX_PROCESSES) && !defined(MZ_PLACES_WAITPID)
   /* Reap zombie processes: */
-  scheme_check_child_done();
-#endif
+  rktio_reap_processes(scheme_rktio);
 
   shrink_cust_box_array();
 
@@ -5019,10 +4778,6 @@ void scheme_thread_block(float sleep_time)
   }
   
  swap_or_sleep:
-
-#ifdef USE_OSKIT_CONSOLE
-  scheme_check_keyboard_input();
-#endif
 
   /* Check scheduled_kills early and often. */
   check_scheduled_kills();
@@ -5451,12 +5206,13 @@ int scheme_wait_until_suspend_ok(void)
   return did;
 }
 
-Scheme_On_Atomic_Timeout_Proc scheme_set_on_atomic_timeout(Scheme_On_Atomic_Timeout_Proc p)
+Scheme_On_Atomic_Timeout_Proc scheme_set_on_atomic_timeout(Scheme_On_Atomic_Timeout_Proc p, void *data)
 {
   Scheme_On_Atomic_Timeout_Proc old;
 
   old = on_atomic_timeout;
   on_atomic_timeout = p;
+  on_atomic_timeout_data = data;
   if (p) {
     atomic_timeout_auto_suspend = 1;
     atomic_timeout_atomic_level = do_atomic;
@@ -5466,6 +5222,58 @@ Scheme_On_Atomic_Timeout_Proc scheme_set_on_atomic_timeout(Scheme_On_Atomic_Time
 
   return old;
 }
+
+static void call_timeout_callback(void *data, int must_give_up)
+{
+  Scheme_Object *a[1];
+  a[0] = (must_give_up ? scheme_true : scheme_false);
+
+  scheme_start_in_scheduler();
+  _scheme_apply_multi((Scheme_Object *)data, 1, a);
+  scheme_end_in_scheduler(); 
+}
+
+static Scheme_Object *unsafe_set_on_atomic_timeout(int argc, Scheme_Object *argv[])
+{
+  Scheme_On_Atomic_Timeout_Proc r;
+  
+  if (SCHEME_FALSEP(argv[0]))
+    r = scheme_set_on_atomic_timeout(NULL, NULL);
+  else
+    r = scheme_set_on_atomic_timeout(call_timeout_callback, argv[0]);
+
+  return (r ? scheme_true : scheme_false);
+}
+
+static Scheme_Object *unsafe_start_atomic(int argc, Scheme_Object **argv)
+{
+  scheme_start_atomic_no_break();
+  return scheme_void;
+}
+
+static Scheme_Object *unsafe_end_atomic(int argc, Scheme_Object **argv)
+{
+  scheme_end_atomic_can_break();
+  return scheme_void;
+}
+
+static Scheme_Object *unsafe_start_breakable_atomic(int argc, Scheme_Object **argv)
+{
+  scheme_start_atomic();
+  return scheme_void;
+}
+
+static Scheme_Object *unsafe_end_breakable_atomic(int argc, Scheme_Object **argv)
+{
+  scheme_end_atomic();
+  return scheme_void;
+}
+
+static Scheme_Object *unsafe_in_atomic_p(int argc, Scheme_Object **argv)
+{
+  return (scheme_is_atomic() ? scheme_true : scheme_false);
+}
+
 
 void scheme_weak_suspend_thread(Scheme_Thread *r)
 {
@@ -5535,6 +5343,88 @@ sch_sleep(int argc, Scheme_Object *args[])
 
   scheme_thread_block(t);
   scheme_current_thread->ran_some = 1;
+
+  return scheme_void;
+}
+
+Scheme_Object *unsafe_poll_ctx_fd_wakeup(int argc, Scheme_Object **argv)
+{
+  if (SCHEME_TRUEP(argv[0])) {
+    void *fds = SCHEME_CPTR_VAL(argv[0]);
+    intptr_t fd;
+    int m;
+
+    if (SCHEME_INTP(argv[1]))
+      fd = SCHEME_INT_VAL(argv[1]);
+    else
+      fd = rktio_fd_system_fd(scheme_rktio, (rktio_fd_t *)SCHEME_CPTR_VAL(argv[1]));
+
+    if (SAME_OBJ(argv[2], read_symbol))
+      m = 0;
+    else if (SAME_OBJ(argv[2], write_symbol))
+      m = 1;
+    else
+      m = 2;
+    
+    scheme_fdset(scheme_get_fdset(fds, m), fd);
+  }
+
+  return scheme_void;
+}
+
+Scheme_Object *unsafe_poll_ctx_eventmask_wakeup(int argc, Scheme_Object **argv)
+{
+  if (SCHEME_TRUEP(argv[0])) {
+    void *fds = SCHEME_CPTR_VAL(argv[0]);
+    intptr_t mask = SCHEME_INT_VAL(argv[1]);
+
+    scheme_add_fd_eventmask(fds, mask);
+  }
+
+  return scheme_void;
+}
+
+Scheme_Object *unsafe_poll_ctx_time_wakeup(int argc, Scheme_Object **argv)
+{
+  if (SCHEME_TRUEP(argv[0])) {
+    void *fds = SCHEME_CPTR_VAL(argv[0]);
+    double msecs = SCHEME_DBL_VAL(argv[1]);
+
+    scheme_set_wakeup_time(fds, msecs);
+  }
+
+  return scheme_void;
+}
+
+Scheme_Object *unsafe_signal_received(int argc, Scheme_Object **argv)
+{
+  scheme_signal_received();
+  return scheme_void;
+}
+
+static void sleep_via_thread(float seconds, void *fds)
+{
+#ifdef OS_X
+  scheme_start_sleeper_thread(scheme_sleep, seconds, fds, thread_sleep_callback_fd);
+  scheme_start_in_scheduler();
+  _scheme_apply_multi(thread_sleep_callback, 0, NULL);
+  scheme_end_in_scheduler();
+  scheme_end_sleeper_thread();
+#endif
+}
+
+Scheme_Object *unsafe_set_sleep_in_thread(int argc, Scheme_Object **argv)
+{
+  if (!thread_sleep_callback)
+    REGISTER_SO(thread_sleep_callback);
+
+  thread_sleep_callback = argv[0];
+  if (SCHEME_INTP(argv[1]))
+    thread_sleep_callback_fd = SCHEME_INT_VAL(argv[1]);
+  else
+    thread_sleep_callback_fd = rktio_fd_system_fd(scheme_rktio, (rktio_fd_t *)SCHEME_CPTR_VAL(argv[1]));
+
+  scheme_place_sleep = sleep_via_thread;
 
   return scheme_void;
 }
@@ -8444,6 +8334,27 @@ static Scheme_Object *make_security_guard(int argc, Scheme_Object *argv[])
   return (Scheme_Object *)sg;
 }
 
+static Scheme_Object *unsafe_make_security_guard_at_root(int argc, Scheme_Object *argv[])
+{
+  Scheme_Security_Guard *sg;
+
+  if (argc > 0)
+    scheme_check_proc_arity("unsafe-make-security-guard-at-root", 3, 0, argc, argv);
+  if (argc > 1)
+    scheme_check_proc_arity("unsafe-make-security-guard-at-root", 4, 1, argc, argv);
+  if (argc > 2)
+    scheme_check_proc_arity2("unsafe-make-security-guard-at-root", 3, 2, argc, argv, 1);
+
+  sg = MALLOC_ONE_TAGGED(Scheme_Security_Guard);
+  sg->so.type = scheme_security_guard_type;
+  sg->parent = NULL;
+  sg->file_proc = ((argc > 0) ? argv[0] : NULL);
+  sg->network_proc = ((argc > 1) ? argv[1] : NULL);
+  sg->link_proc = ((argc > 2) ? argv[2] : NULL);
+
+  return (Scheme_Object *)sg;
+}
+
 static Scheme_Object *security_guard_p(int argc, Scheme_Object *argv[])
 {
   return ((SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_security_guard_type)) 
@@ -8459,6 +8370,105 @@ static Scheme_Object *current_security_guard(int argc, Scheme_Object *argv[])
                               -1, security_guard_p, "security-guard?", 0);
 }
 
+static Scheme_Object *security_guard_check_file(int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *l, *a;
+  int guards = 0;
+  
+  if (!SCHEME_SYMBOLP(argv[0]))
+    scheme_wrong_contract("security-guard-check-file", "symbol?", 0, argc, argv);
+  
+  if (!SCHEME_PATH_STRINGP(argv[1]))
+    scheme_wrong_contract("security-guard-check-file", "path-string?", 1, argc, argv);
+
+  l = argv[2];
+  while (SCHEME_PAIRP(l)) {
+    a = SCHEME_CAR(l);
+    if (SAME_OBJ(a, exists_symbol))
+      guards |= SCHEME_GUARD_FILE_EXISTS;
+    else if (SAME_OBJ(a, delete_symbol))
+      guards |= SCHEME_GUARD_FILE_DELETE;
+    else if (SAME_OBJ(a, execute_symbol))
+      guards |= SCHEME_GUARD_FILE_EXECUTE;
+    else if (SAME_OBJ(a, write_symbol))
+      guards |= SCHEME_GUARD_FILE_WRITE;
+    else if (SAME_OBJ(a, read_symbol))
+      guards |= SCHEME_GUARD_FILE_READ;
+    else
+      break;
+    
+    l = SCHEME_CDR(l);
+  }
+
+  if (!SCHEME_NULLP(l))
+    scheme_wrong_contract("security-guard-check-file",
+                          "(listof (or/c 'read 'write 'execute 'delete 'exists))",
+                          2, argc, argv);
+
+  a = argv[1];
+  if (!SCHEME_PATHP(a))
+    a = scheme_char_string_to_path(a);
+
+  scheme_security_check_file(scheme_symbol_val(argv[0]),
+                             SCHEME_PATH_VAL(a),
+                             guards);
+
+  return scheme_void;
+}
+  
+static Scheme_Object *security_guard_check_file_link(int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *a, *b;
+  
+  if (!SCHEME_SYMBOLP(argv[0]))
+    scheme_wrong_contract("security-guard-check-file-link", "symbol?", 0, argc, argv);
+  
+  if (!SCHEME_PATH_STRINGP(argv[1]))
+    scheme_wrong_contract("security-guard-check-file-link", "path-string?", 1, argc, argv);
+
+  if (!SCHEME_PATH_STRINGP(argv[2]))
+    scheme_wrong_contract("security-guard-check-file-link", "path-string?", 2, argc, argv);
+
+  a = argv[1];
+  if (!SCHEME_PATHP(a))
+    a = scheme_char_string_to_path(a);
+
+  b = argv[2];
+  if (!SCHEME_PATHP(b))
+    b = scheme_char_string_to_path(b);
+
+  scheme_security_check_file_link(scheme_symbol_val(argv[0]), SCHEME_PATH_VAL(a), SCHEME_PATH_VAL(b));
+
+  return scheme_void;
+}
+
+static Scheme_Object *security_guard_check_network(int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *a;
+  
+  if (!SCHEME_SYMBOLP(argv[0]))
+    scheme_wrong_contract("security-guard-check-network", "symbol?", 0, argc, argv);
+
+  if (!SCHEME_CHAR_STRINGP(argv[1]))
+    scheme_wrong_contract("security-guard-check-network", "string?", 1, argc, argv);
+
+  if (!SCHEME_INTP(argv[2])
+      || (SCHEME_INT_VAL(argv[2]) < 1)
+      || (SCHEME_INT_VAL(argv[2]) > 65535))
+    scheme_wrong_contract("security-guard-check-network", "(integer-in 1 65535)", 2, argc, argv);
+  
+  if (!SAME_OBJ(argv[3], client_symbol) && !SAME_OBJ(argv[3], server_symbol))
+    scheme_wrong_contract("security-guard-check-network", "(or/c 'client'server)", 3, argc, argv);
+
+  a = scheme_char_string_to_byte_string(argv[1]);
+  
+  scheme_security_check_network(scheme_symbol_val(argv[0]),
+                                SCHEME_BYTE_STR_VAL(a),
+                                SCHEME_INT_VAL(argv[2]),
+                                SAME_OBJ(argv[3], client_symbol));
+
+  return scheme_void;
+}
 
 void scheme_security_check_file(const char *who, const char *filename, int guards)
 {
@@ -9160,9 +9170,6 @@ static void get_ready_for_GC()
 #ifdef WINDOWS_PROCESSES
   scheme_suspend_remembered_threads();
 #endif
-#if defined(UNIX_PROCESSES) && !defined(MZ_PLACES_WAITPID)
-  scheme_block_child_signals(1);
-#endif
 
   {
     GC_CAN_IGNORE void *data;
@@ -9196,9 +9203,6 @@ static void done_with_GC()
 #endif
 #ifdef WINDOWS_PROCESSES
   scheme_resume_remembered_threads();
-#endif
-#if defined(UNIX_PROCESSES) && !defined(MZ_PLACES_WAITPID)
-  scheme_block_child_signals(0);
 #endif
 
   end_this_gc_time = scheme_get_process_milliseconds();

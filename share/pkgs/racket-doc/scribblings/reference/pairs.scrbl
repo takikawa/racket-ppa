@@ -1,6 +1,7 @@
 #lang scribble/doc
 @(require "mz.rkt" scribble/scheme racket/generator racket/list
-          (for-syntax racket/base))
+          (for-syntax racket/base)
+          (for-label racket/list))
 
 @(define (generate-c_r-example proc)
   (define (make-it start n)
@@ -663,7 +664,7 @@ Like @racket[assoc], but finds an element using @racket[eqv?].
 Like @racket[assoc], but finds an element using @racket[eq?].
 
 @mz-examples[
-  (assq 3 (list (list 1 2) (list 3 4) (list 5 6)))]}
+  (assq 'c (list (list 'a 'b) (list 'c 'd) (list 'e 'f)))]}
 
 
 @defproc[(assf [proc procedure?] [lst list?])
@@ -1054,8 +1055,8 @@ except that it can be faster.
 
 
 @deftogether[(
-  @defproc[(takef-right [lst any/c] [pred procedure?]) list?]
-  @defproc[(dropf-right [lst any/c] [pred procedure?]) any/c]
+  @defproc[(takef-right [lst any/c] [pred procedure?]) any/c]
+  @defproc[(dropf-right [lst any/c] [pred procedure?]) list?]
   @defproc[(splitf-at-right [lst any/c] [pred procedure?]) (values list? any/c)]
 )]{
 
@@ -1172,12 +1173,25 @@ traversal.
 
 @defproc[(check-duplicates [lst list?]
                            [same? (any/c any/c . -> . any/c) equal?]
-                           [#:key extract-key (-> any/c any/c) (lambda (x) x)])
-         (or/c any/c #f)]{
+                           [#:key extract-key (-> any/c any/c) (lambda (x) x)]
+                           [#:default failure-result (failure-result/c any/c) (lambda () #f)])
+         any]{
 
 Returns the first duplicate item in @racket[lst]. More precisely, it
 returns the first @racket[_x] such that there was a previous
 @racket[_y] where @racket[(same? (extract-key _x) (extract-key _y))].
+
+If no duplicate is found, then @racket[failure-result] determines the 
+result:
+
+@itemize[
+
+ @item{If @racket[failure-result] is a procedure, it is called
+       (through a tail call) with no arguments to produce the result.}
+
+ @item{Otherwise, @racket[failure-result] is returned as the result.}
+
+]
 
 The @racket[same?] argument should be an equivalence predicate such as
 @racket[equal?] or @racket[eqv?] or a dictionary.
@@ -1190,9 +1204,11 @@ use a dictionary for speed.
 (check-duplicates '((a 1) (b 2) (a 3)) #:key car)
 (check-duplicates '(1 2 3 4 5 6)
                   (lambda (x y) (equal? (modulo x 3) (modulo y 3))))
+(check-duplicates '(1 2 3 4) #:default "no duplicates")
 ]
-@history[#:added "6.3"]{}
-}
+
+@history[#:added "6.3"
+         #:changed "6.11.0.2" @elem{Addede the @racket[#:default] optional argument.}]}
 
 @defproc[(remove-duplicates [lst list?]
                             [same? (any/c any/c . -> . any/c) equal?]
@@ -1358,6 +1374,7 @@ it builds the permutations one-by-one on each iteration}
 
 Returns the first element in the list @racket[lst] that minimizes the
 result of @racket[proc].  Signals an error on an empty list.
+See also @racket[min].
 
 @mz-examples[#:eval list-eval
   (argmin car '((3 pears) (1 banana) (2 apples)))
@@ -1369,11 +1386,11 @@ result of @racket[proc].  Signals an error on an empty list.
 
 Returns the first element in the list @racket[lst] that maximizes the
 result of @racket[proc].  Signals an error on an empty list.
+See also @racket[max].
 
 @mz-examples[#:eval list-eval
   (argmax car '((3 pears) (1 banana) (2 apples)))
   (argmax car '((3 pears) (3 oranges)))]}
-
 
 @defproc[(group-by [key (-> any/c any/c)]
                    [lst list?]

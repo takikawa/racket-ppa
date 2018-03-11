@@ -5,6 +5,7 @@
 (define syncheck-annotations<%>
   (interface ()
     syncheck:find-source-object
+    syncheck:add-text-type
     syncheck:add-background-color
     syncheck:add-require-open-menu
     syncheck:add-docs-menu
@@ -17,6 +18,7 @@
     syncheck:add-jump-to-definition
     syncheck:add-definition-target
     syncheck:add-prefixed-require-reference
+    syncheck:add-unused-require
     syncheck:color-range
     
     syncheck:add-rename-menu))
@@ -29,6 +31,7 @@
 (define annotations-mixin
   (mixin () (syncheck-annotations<%>)
     (define/public (syncheck:find-source-object stx) #f)
+    (define/public (syncheck:add-text-type source start end text-type) (void))
     (define/public (syncheck:add-background-color source start end color) (void))
     (define/public (syncheck:add-require-open-menu source start end key) (void))
     (define/public (syncheck:add-id-set all-ids new-name-intereferes?) (void))
@@ -69,6 +72,7 @@
     (define/public (syncheck:add-prefixed-require-reference req-src req-pos-left req-pos-right
                                                             prefix-in-src prefix-in-pos)
       (void))
+    (define/public (syncheck:add-unused-require req-src req-pos-left req-pos-right) (void))
     (super-new)))
 
 (provide syncheck-annotations<%>

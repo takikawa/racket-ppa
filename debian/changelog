@@ -1,3 +1,40 @@
+racket (6.12+dfsg1-1) UNRELEASED; urgency=medium
+
+  * New upstream release
+  * Install man pages for racket, drracket, and raco
+
+ -- David Bremner <bremner@debian.org>  Fri, 02 Feb 2018 21:27:12 -0400
+
+racket (6.11+dfsg1-1) unstable; urgency=medium
+
+  * New upstream release
+  * Use new logo (thanks to Asumu Takikawa)
+
+ -- David Bremner <bremner@debian.org>  Sat, 23 Dec 2017 15:26:58 -0400
+
+racket (6.10.1+dfsg1-1) unstable; urgency=medium
+
+  * New upstream release    
+  * fix changelog for 6.9-1; wrong patch was discussed
+  * Assert compliance with policy 4.1.1; no changes.
+  * Bump debhelper compat level to 10
+  * non-free docs for srfi 5, 29, 32 removed
+
+ -- David Bremner <bremner@debian.org>  Sun, 08 Oct 2017 18:19:53 -0300
+
+racket (6.9-2) unstable; urgency=medium
+
+  * rebuild for unstable
+
+ -- David Bremner <bremner@debian.org>  Thu, 29 Jun 2017 20:27:37 -0300
+
+racket (6.9-1) experimental; urgency=medium
+
+  * New upstream release
+  * Remove type-masks patch, now upstream
+
+ -- David Bremner <bremner@debian.org>  Sun, 04 Jun 2017 17:06:39 -0300
+
 racket (6.8-1) experimental; urgency=medium
 
   * New upstream version
@@ -7,6 +44,22 @@ racket (6.8-1) experimental; urgency=medium
   * Cherry pick fix for type-masks to fix compilation on 32bit arches.
 
  -- David Bremner <bremner@debian.org>  Sat, 04 Mar 2017 11:54:04 -0400
+
+racket (6.7-3) unstable; urgency=medium
+
+  * Disable parallel building on 32bit architectures. Racket's parallel
+    build currently uses OS threads, so unbounded parallelism hits per
+    process address space limitations. (Closes: #860670).
+
+ -- David Bremner <bremner@debian.org>  Sat, 22 Apr 2017 14:26:26 -0300
+
+racket (6.7-2) unstable; urgency=medium
+
+  * Patch libcrypto.rkt to look for openssl 1.1, recommend libssl1.1. Bug
+    fix: "Raco fails without libssl-dev", thanks to Martin Tang (Closes:
+    #836346).
+
+ -- David Bremner <bremner@debian.org>  Sun, 05 Mar 2017 08:55:03 -0400
 
 racket (6.7-1) unstable; urgency=medium
 

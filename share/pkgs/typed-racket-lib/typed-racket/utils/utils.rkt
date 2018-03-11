@@ -8,26 +8,43 @@ at least theoretically.
 (require (for-syntax racket/base racket/string)
          racket/require-syntax racket/provide-syntax
          racket/match
+         racket/list
          syntax/parse/define
          racket/struct-info "timing.rkt")
 
 (provide
  ;; optimization
  optimize?
+ ;; parameter to toggle refinement reasoning
+ with-refinements?
  ;; timing
  start-timing do-time
  ;; provide macros
  rep utils typecheck infer env private types static-contracts
  ;; misc
  list-extend
+ ends-with?
  filter-multiple
  syntax-length
  in-pair
- in-sequence-forever
+ in-list/rest
+ list-ref/default
  match*/no-order
- bind)
+ bind
+ genid
+ gen-pretty-id
+ gen-existential-id
+ existential-id?
+ local-tr-identifier?
+ mark-id-as-normalized
+ normalized-id?
+ assoc-ref
+ assoc-set
+ assoc-remove
+ in-assoc)
 
 (define optimize? (make-parameter #t))
+(define with-refinements? (make-parameter #f))
 (define-for-syntax enable-contracts? (and (getenv "PLT_TR_CONTRACTS") #t))
 
 (define-syntax do-contract-req
@@ -91,6 +108,7 @@ at least theoretically.
 (define-requirer env env-out)
 (define-requirer private private-out)
 (define-requirer types types-out)
+(define-requirer logic logic-out)
 (define-requirer optimizer optimizer-out)
 (define-requirer base-env base-env-out)
 (define-requirer static-contracts static-contracts-out)
@@ -228,7 +246,19 @@ at least theoretically.
 ;; Listof[A] Listof[B] B -> Listof[B]
 ;; pads out t to be as long as s
 (define (list-extend s t extra)
-  (append t (build-list (max 0 (- (length s) (length t))) (lambda _ extra))))
+  (define s-len (length s))
+  (define t-len (length t))
+  (cond
+    [(<= s-len t-len) t]
+    [else (append t (build-list (- s-len t-len) (λ _ extra)))]))
+
+;; does l1 end with l2?
+;; e.g. (list 1 2 3) ends with (list 2 3)
+(define (ends-with? l1 l2)
+  (define len1 (length l1))
+  (define len2 (length l2))
+  (and (<= len2 len1)
+       (equal? l2 (drop l1 (- len1 len2)))))
 
 (define (filter-multiple l . fs)
   (apply values
@@ -237,17 +267,6 @@ at least theoretically.
 (define (syntax-length stx)
   (let ((list (syntax->list stx)))
     (and list (length list))))
-
-(define (in-sequence-forever seq val)
-  (make-do-sequence
-   (λ ()
-     (let-values ([(more? gen) (sequence-generate seq)])
-       (values (λ (e) (if (more?) (gen) val))
-               (λ (_) #t)
-               #t
-               (λ (_) #t)
-               (λ _ #t)
-               (λ _ #t))))))
 
 (define-syntax (match*/no-order stx)
   (define (parse-clauses clauses)
@@ -282,3 +301,190 @@ at least theoretically.
 
 (define-syntax-rule (in-pair p)
   (in-parallel (in-value (car p)) (in-value (cdr p))))
+
+
+
+;; in-list/rest
+;; (in-list/rest l v)
+;;
+;; iterates through the elements of the
+;; list 'l' until they are exhausted, at which
+;; point 'v' is used for each subsequent iteration
+
+(define (in-list/rest-proc l rest)
+  (in-sequences l (in-cycle (in-value rest))))
+
+(define-sequence-syntax in-list/rest
+  (λ () #'in-list/rest-proc)
+  (λ (stx)
+    (syntax-case stx ()
+      [[(val) (_ list-exp rest-exp)]
+       #'[(val)
+          (:do-in
+           ;; ([(outer-id ...) outer-expr] ...)
+           ([(l) list-exp]
+            [(r) rest-exp])
+           ;; outer-check
+           #t
+           ;; ([loop-id loop-expr] ...)
+           ([pos l])
+           ;; pos-guard
+           #t
+           ;; ([(inner-id ...) inner-expr] ...)
+           ([(val pos) (if (pair? pos)
+                           (values (car pos) (cdr pos))
+                           (values r '()))])
+           ;; pre-guard
+           #t
+           ;; post-guard
+           #t
+           ;; (loop-arg ...)
+           (pos))]]
+      [[xs (_ dd-exp)]
+       (list? (syntax->datum #'xs))
+       (raise-syntax-error 'in-list/rest
+                           (format "expected an identifier, given ~a"
+                                   (syntax->list #'xs))
+                           #'xs)]
+      [blah (raise-syntax-error 'in-list/rest "invalid usage" #'blah)])))
+
+;; quick in-list/rest sanity checks
+(module+ test
+  (unless (equal? (for/list ([_ (in-range 0)]
+                             [val (in-list/rest (list 1 2) #f)])
+                    val)
+                  (list))
+    (error 'in-list/rest "broken!"))
+  (unless (equal? (for/list ([_ (in-range 2)]
+                             [val (in-list/rest (list 1 2) #f)])
+                    val)
+                  (list 1 2))
+    (error 'in-list/rest "broken!"))
+  (unless (equal? (for/list ([_ (in-range 4)]
+                             [val (in-list/rest (list 1 2) #f)])
+                    val)
+                  (list 1 2 #f #f))
+    (error 'in-list/rest "broken!")))
+
+
+(define (list-ref/default xs idx default)
+  (cond
+    [(pair? xs)
+     (if (eqv? 0 idx)
+         (car xs)
+         (list-ref/default (cdr xs) (sub1 idx) default))]
+    [else default]))
+
+(define assoc-ref
+  (let ([no-arg (gensym)])
+    (λ (d key [default no-arg])
+      (cond
+        [(assoc key d) => cdr]
+        [(eq? default no-arg)
+         (raise-mismatch-error 'assoc-ref
+                               (format "no value for key: ~e in: " key)
+                               d)]
+        [(procedure? default) (default)]
+        [else default]))))
+
+(define (assoc-set d key val)
+  (let loop ([entries d])
+    (cond
+      [(null? entries) (list (cons key val))]
+      [else
+       (let ([entry (car entries)])
+         (if (equal? (car entry) key)
+             (cons (cons key val) (cdr entries))
+             (cons entry (loop (cdr entries)))))])))
+
+(define (assoc-remove d key)
+  (let loop ([xd d])
+    (cond
+      [(null? xd) null]
+      [else
+       (let ([a (car xd)])
+         (if (equal? (car a) key)
+             (cdr xd)
+             (cons a (loop (cdr xd)))))])))
+
+(define (in-assoc-proc l)
+  (in-parallel (map car l) (map cdr l)))
+
+(define-sequence-syntax in-assoc
+  (λ () #'in-list/rest-proc)
+  (λ (stx)
+    (syntax-case stx ()
+      [[(key val) (_ assoc-exp)]
+       #'[(val)
+          (:do-in
+           ;; ([(outer-id ...) outer-expr] ...)
+           ([(l) assoc-exp])
+           ;; outer-check
+           #t
+           ;; ([loop-id loop-expr] ...)
+           ([pos l])
+           ;; pos-guard
+           #t
+           ;; ([(inner-id ...) inner-expr] ...)
+           ([(key val pos) (if (pair? pos)
+                               (values (caar pos) (cdar pos) (cdr pos))
+                               (values #f #f #f))])
+           ;; pre-guard
+           pos
+           ;; post-guard
+           #t
+           ;; (loop-arg ...)
+           (pos))]]
+      [blah (raise-syntax-error 'in-assoc "invalid usage" #'blah)])))
+
+
+(module local-ids racket
+  (provide local-tr-identifier?
+           genid
+           gen-pretty-id
+           gen-existential-id
+           mark-id-as-normalized
+           normalized-id?
+           existential-id?)
+  ;; we use this syntax location to recognized gensymed identifiers
+  (define-for-syntax loc #'x)
+  (define dummy-id (datum->syntax #'loc (gensym 'x)))
+  ;; tools for marking identifiers as normalized and recognizing normalized
+  ;; identifiers (we normalize ids so free-identifier=? ids are represented
+  ;; with the same syntax object and are thus equal?)
+  (define-values (mark-id-as-normalized
+                  normalized-id?)
+    (let ([normalized-identifier-sym (gensym 'normal-id)])
+      (values (λ (id) (syntax-property id normalized-identifier-sym #t))
+              (λ (id) (syntax-property id normalized-identifier-sym)))))
+  (define-values (mark-id-as-existential
+                  existential-id?)
+    (let ([existential-identifier-sym (gensym 'existential-id)])
+      (values (λ (id) (syntax-property id existential-identifier-sym #t))
+              (λ (id) (syntax-property id existential-identifier-sym)))))
+  ;; generates fresh identifiers for use while typechecking
+  (define (genid [sym (gensym 'local)])
+    (mark-id-as-normalized (datum->syntax #'loc sym)))
+  (define letters (vector-immutable "x" "y" "z" "a" "b" "c" "d" "e" "f" "g" "h" "i" "j" "k"
+                                    "l" "m" "n" "o" "p" "q" "r" "s" "t" "u" "v"  "w"))
+  ;; this is just a silly helper function that gives us a letter from
+  ;; the latin alphabet in a cyclic manner
+  (define next-letter
+    (let ([i 0])
+      (λ ()
+        (define letter (string->uninterned-symbol (vector-ref letters i)))
+        (set! i (modulo (add1 i) (vector-length letters)))
+        letter)))
+  ;; generates a fresh identifier w/ a "pretty" printable representation
+  (define (gen-pretty-id [sym (next-letter)])
+    (mark-id-as-normalized (datum->syntax #'loc sym)))
+  (define (gen-existential-id [sym (next-letter)])
+    (mark-id-as-existential (genid sym)))
+  ;; allows us to recognize and distinguish gensym'd identifiers
+  ;; from ones that came from the program we're typechecking
+  (define (local-tr-identifier? id)
+    (and (identifier? id)
+         (eq? (syntax-source-module dummy-id)
+              (syntax-source-module id)))))
+
+(require 'local-ids)

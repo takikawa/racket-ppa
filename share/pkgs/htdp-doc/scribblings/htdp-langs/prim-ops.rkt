@@ -300,13 +300,15 @@
   @; ----------------------------------------------------------------------
 
   @defform*[#:id [if if-id]
-            [(if test-expression then-expression else-expression)]]{
+            [(if question-expression
+		 then-answer-expression
+		 else-answer-expression)]]{
 
-   When the value of the @racket[test-expression] is @true-elem,
-   @if-elem evaluates the @racket[then-expression]. When the test is
-   @false-elem, @if-elem evaluates the @racket[else-expression].
+   When the value of the @racket[question-expression] is @true-elem,
+   @if-elem evaluates the @racket[then-answer-expression]. When the test is
+   @false-elem, @if-elem evaluates the @racket[else-answer-expression].
 
-   If the @racket[test-expression] is neither @true-elem nor
+   If the @racket[question-expression] is neither @true-elem nor
    @false-elem, @if-elem reports an error.}
 
   @; ----------------------------------------------------------------------
@@ -429,8 +431,8 @@ value or an inexact number; see note on @racket[check-expect] for details.
 
    Checks that the first @racket[expression] satisfies the named
    @racket[predicate] (function of one argument).  Recall that
-   ``satisfies'' means ``the function produces a value other than
-   @racket[false].''
+   ``satisfies'' means ``the function produces @racket[#true] for the given
+   value.''
 
 Here are simple examples for @racket[check-satisfied]: 
 @interaction[

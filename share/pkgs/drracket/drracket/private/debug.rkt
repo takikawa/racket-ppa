@@ -11,6 +11,7 @@
          string-constants
          framework
          framework/private/bday
+         framework/private/srcloc-panel
          "embedded-snip-utils.rkt"
          drracket/private/drsig
          "bindings-browser.rkt"
@@ -525,7 +526,7 @@
       (cond
         [(null? pkgs)
          (when (port-writes-special? (current-error-port))
-           (display "\n  no packages suggestions are available " (current-error-port))
+           (display "\n  no package suggestions are available " (current-error-port))
            (write-special update-pkgs-node (current-error-port)))]
         [else
          (display "\n  packages that provide the missing module:" (current-error-port))
@@ -823,7 +824,7 @@
                         (λ (l) (if (zero? (send tab-panel get-selection))
                                    (list ec1)
                                    (list ec2)))))])
-          (new vertical-panel% [parent (send current-backtrace-window get-area-container)])))
+          (new-vertical-panel% [parent (send current-backtrace-window get-area-container)])))
     (define ec1 (add-ec/text dis1 editions1 defs ints tab-panel error-text))
     (define ec2 (add-ec/text dis2 editions2 defs ints tab-panel error-text))
     (when (and (pair? dis1) (pair? dis2))
@@ -995,8 +996,8 @@
         (send text insert (number->string skip-count))
         (send text insert " duplicate frame")
         (unless (= skip-count 1)
-          (send text insert "s"))
-        (send text insert #\newline))
+          (send text insert "s")))
+      (send text insert #\newline)
       
       (when (and start span)
         (insert-context editor-canvas text debug-source start span defs ints)
@@ -1274,7 +1275,7 @@
           (send entirely-covered-checkbox set-value v)))
       (define/private (create-entirely-covered-panel-gui)
         (unless entirely-covered-panel
-          (set! entirely-covered-panel (new horizontal-panel%
+          (set! entirely-covered-panel (new-horizontal-panel%
                                             [stretchable-height #f]
                                             [parent entirely-covered-parent-panel]))
           (new message%
@@ -1304,7 +1305,7 @@
       
       (define/override (make-root-area-container cls parent)
         (set! entirely-covered-parent-panel
-              (super make-root-area-container vertical-panel% parent))
+              (super make-root-area-container vertical-pane% parent))
         (make-object cls entirely-covered-parent-panel))
       (super-new)))
   
@@ -1991,7 +1992,7 @@
           (set! profile-info-panel (instantiate horizontal-panel% ()
                                      (parent profile-info-outer-panel)
                                      (stretchable-height #f)))
-          (define profile-left-side (instantiate vertical-panel% (profile-info-panel)))
+          (define profile-left-side (new-vertical-panel% [parent profile-info-panel]))
           (set! profile-info-editor-canvas 
                 (new canvas:basic% 
                      (parent profile-info-panel)
@@ -2386,7 +2387,7 @@
     (preferences:add-panel
      (string-constant profiling)
      (λ (s-parent)
-       (letrec ([parent (make-object vertical-panel% s-parent)]
+       (letrec ([parent (new-vertical-panel% [parent s-parent])]
                 [msg (make-object message% 
                        (string-constant profiling-color-config) 
                        parent)]

@@ -9,9 +9,11 @@
     (snip-class%))
   (define-signature number-snip^ extends number-snip-class^
     (make-repeating-decimal-snip
-     make-fraction-snip))
+     make-fraction-snip
+     is-number-snip?
+     get-number))
   (define-signature number-snip/int^ extends number-snip^
-    (is-number-snip?))
+    ())
   
   (define-signature comment-box-class^
     (snip%))
@@ -183,6 +185,7 @@
   
   (define-signature text-class^
     (basic<%>
+     inline-overview<%>
      line-spacing<%>
      ascii-art-enlarge-boxes<%>
      first-line<%>
@@ -227,6 +230,7 @@
      input-box%
      
      basic-mixin
+     inline-overview-mixin
      line-spacing-mixin
      ascii-art-enlarge-boxes-mixin
      first-line-mixin

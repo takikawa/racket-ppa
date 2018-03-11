@@ -3,9 +3,10 @@
 (require (for-syntax scheme)
          plai/datatype
          plai/test-harness
-         plai/gc2/private/gc-core)
+         plai/gc2/private/gc-core
+         syntax/parse/define)
 
-(provide (except-out (all-from-out scheme) #%module-begin error)
+(provide (except-out (all-from-out scheme) #%module-begin error collect-garbage)
          (all-from-out plai/gc2/private/gc-core)
          (all-from-out plai/datatype)
          (rename-out
@@ -15,7 +16,7 @@
           [collector-module-begin #%module-begin]))
 
 (provide with-heap)
-(define-syntax-rule (with-heap heap exp ...) (with-heap/proc heap (λ () exp ...)))
+(define-simple-macro (with-heap heap exp ...+) (with-heap/proc heap (λ () exp ...)))
 (define (with-heap/proc vec h)
   (unless (vector? vec)
     (error 'with-heap "expected a vector as first argument, got ~e" vec))

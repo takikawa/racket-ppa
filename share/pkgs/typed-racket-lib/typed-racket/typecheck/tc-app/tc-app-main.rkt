@@ -3,10 +3,13 @@
 (require "../../utils/utils.rkt"
          "signatures.rkt"
          "utils.rkt"
+         (utils tc-utils)
          syntax/parse racket/match 
          syntax/parse/experimental/reflect
          "../signatures.rkt" "../tc-funapp.rkt"
-         (types utils)
+         (types abbrev utils prop-ops)
+         (env lexical-env)
+         (typecheck tc-subst tc-envops check-below)
          (rep type-rep prop-rep object-rep values-rep))
 
 (import tc-expr^ tc-app-keywords^
@@ -47,55 +50,74 @@
 
 
 ;; TODO: handle drest, and props/objects
-(define (arr-matches? arr args)
+(define (arrow-matches? arr args)
   (match arr
-    [(arr: domain
-           (Values: (list (Result: v
-                                   (PropSet: (TrueProp:) (TrueProp:))
-                                   (Empty:)) ...))
-           rest #f (list (Keyword: _ _ #f) ...))
+    [(Arrow: domain
+             (and rst (not (? RestDots?)))
+             (list (Keyword: _ _ #f) ...)
+             (Values: (list (Result: v
+                                     (PropSet: (TrueProp:) (TrueProp:))
+                                     (Empty:))
+                            ...)))
      (cond
-       [(< (length domain) (length args)) rest]
+       [(< (length domain) (length args)) rst]
        [(= (length domain) (length args)) #t]
        [else #f])]
     [_ #f]))
 
 (define (has-props? arr)
   (match arr
-    [(arr: _ (Values: (list (Result: v
+    [(Arrow: _
+             _
+             (list (Keyword: _ _ #f) ...)
+             (Values: (list (Result: v
                                      (PropSet: (TrueProp:) (TrueProp:))
-                                     (Empty:)) ...))
-           _ _ (list (Keyword: _ _ #f) ...)) #f]
+                                     (Empty:)) ...)))
+     #f]
     [else #t]))
 
 
 (define (tc/app-regular form expected)
   (syntax-case form ()
     [(f . args)
-     (let* ([f-ty (tc-expr/t #'f)]
-            [args* (syntax->list #'args)])
+     (let ([f-ty (tc-expr/t #'f)]
+           [args* (syntax->list #'args)])
        (define (matching-arities arrs)
-         (for/list ([arr (in-list arrs)] #:when (arr-matches? arr args*)) arr))
+         (for/list ([arr (in-list arrs)] #:when (arrow-matches? arr args*)) arr))
        (define (has-drest/props? arrs)
          (for/or ([arr (in-list arrs)])
-           (or (has-props? arr) (arr-drest arr))))
+           (or (has-props? arr)
+               (RestDots? (Arrow-rst arr)))))
+       (match f-ty
+         [(Fun: (? has-drest/props?))
+          (define arg-types
+            (cond
+              [(with-refinements?)
+               (map tc-dep-fun-arg args*)]
+              [else (map single-value args*)]))
+          (tc/funapp #'f #'args f-ty arg-types expected)]
+         [(or (? DepFun?)
+              (Poly-unsafe: _ (? DepFun?)))
+          (parameterize ([with-refinements? #t])
+            (tc/funapp #'f #'args f-ty (map tc-dep-fun-arg args*) expected))]
+         [(Fun: (app matching-arities
+                     (list (Arrow: doms rsts _ _) ..1)))
+          ;; if for a particular argument, all of the domain types
+          ;; agree for each arrow type in the case->, then we use
+          ;; that type to check the argument expression against
+          (define arg-types
+            (for/list ([arg-stx (in-list args*)]
+                       [arg-idx (in-naturals)])
+              (define dom-ty (list-ref/default (car doms)
+                                               arg-idx
+                                               (car rsts)))
+              (cond
+                [(for/and ([dom (in-list doms)]
+                           [rst (in-list rsts)])
+                   (equal? dom-ty
+                           (list-ref/default dom arg-idx rst)))
+                 (single-value arg-stx (ret dom-ty))]
+                [else (single-value arg-stx)])))
+          (tc/funapp #'f #'args f-ty arg-types expected)]
+         [_ (tc/funapp #'f #'args f-ty (map single-value args*) expected)]))]))
 
-       (define arg-tys
-         (match f-ty
-           [(Function: (? has-drest/props?))
-            (map single-value args*)]
-           [(Function:
-              (app matching-arities
-                (list (arr: doms ranges rests drests _) ..1)))
-            (define matching-domains
-              (in-values-sequence
-                (apply in-parallel
-                  (for/list ((dom (in-list doms)) (rest (in-list rests)))
-                    (in-sequences (in-list dom) (in-cycle (in-value rest)))))))
-            (for/list ([a (in-list args*)] [types matching-domains])
-              (match-define (cons t ts) types)
-              (if (for/and ((t2 (in-list ts))) (equal? t t2))
-                  (tc-expr/check a (ret t))
-                  (single-value a)))]
-           [_ (map single-value args*)]))
-       (tc/funapp #'f #'args f-ty arg-tys expected))]))

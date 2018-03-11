@@ -14,7 +14,6 @@
          (typecheck signatures tc-metafunctions tc-subst internal-forms tc-envops)
          (utils tarjan)
          racket/match (contract-req)
-         racket/list
          syntax/parse syntax/stx
          syntax/id-table
          ;; For internal type forms
@@ -76,13 +75,18 @@
                              [(PropSet: p+ p-) (values p+ p-)]
                              ;; it's unclear if this 2nd clause is necessary any more.
                              [_ (values -tt -tt)]))
-    (define prop (cond ;; if n can't be #f, we can assume p+
-                   [(not (overlap? type -False)) p+]
-                   [mutated? -tt]
-                   [else ;; otherwise we know ((o ∉ #f) ∧ p+) ∨ ((o ∈ #f) ∧ p-)
-                    (let ([obj (if (Object? obj) obj name)])
-                      (-or (-and (-not-type obj -False) p+)
-                           (-and (-is-type obj -False) p-)))]))
+    (define-values (type* extracted-props)
+      (cond
+        [(Object? aliased-obj) (extract-props aliased-obj type)]
+        [else (extract-props (-id-path name) type)]))
+    (define truthy-prop (cond ;; if n can't be #f, we can assume p+
+                          [(not (overlap? type* -False)) p+]
+                          [mutated? -tt]
+                          [else ;; otherwise we know ((o ∉ #f) ∧ p+) ∨ ((o ∈ #f) ∧ p-)
+                           (let ([obj (if (Object? obj) obj name)])
+                             (-or (-and (-not-type obj -False) p+)
+                                  (-and (-is-type obj -False) p-)))]))
+    (define prop (apply -and truthy-prop extracted-props))
     (values name type aliased-obj prop)))
 
 ;; check-let-body
@@ -118,8 +122,7 @@
     [#:identifiers idents
      #:types types
      #:aliased-objects aliased-objs]
-    (erase-names
-     ids-to-erase
+    (erase-identifiers
      (with-lexical-env+props
        props
        #:expected expected
@@ -130,7 +133,8 @@
        ;; before checking the body
        (pre-body-thunk)
        ;; typecheck the body
-       (tc-body/check body expected)))))
+       (tc-body/check body expected))
+     ids-to-erase)))
 
 (define (tc-expr/maybe-expected/t e names)
   (syntax-parse names
@@ -208,7 +212,7 @@
      ordered-clauses
      (λ ()
        ;; types the user gave.
-       (define given-rhs-types (map (λ (l) (map tc-result (map get-type l))) remaining-names))
+       (define given-rhs-types (map (λ (l) (map -tc-result (map get-type l))) remaining-names))
        (check-let-body
         remaining-names
         given-rhs-types
@@ -300,9 +304,9 @@
            (with-extended-lexical-env
              [#:identifiers names
               #:types ts]
-             (replace-names names
-                            os
-                            (loop (cdr clauses))))])))
+             (substitute-names (loop (cdr clauses))
+                               names
+                               os))])))
 
 ;; this is so match can provide us with a syntax property to
 ;; say that this binding is only called in tail position
@@ -316,6 +320,7 @@
      #:when expected
      (tc-expr/check e expected)]
     [_ (tc-expr e)]))
+
 
 (define (tc/let-values namess exprs body [expected #f])
   (let* (;; a list of each name clause

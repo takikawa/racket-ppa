@@ -1,0 +1,6 @@
+This library is distributed under the GNU Lesser General Public License
+    http://www.gnu.org/licenses/lgpl-3.0.txt
+interpreted as described by the Racket maintainers at
+    http://download.racket-lang.org/license.html
+
+Copyright (C) 2015, Jordan M. Johnson

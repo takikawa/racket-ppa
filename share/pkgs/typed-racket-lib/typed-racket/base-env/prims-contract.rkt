@@ -57,7 +57,7 @@
 ;; unsafe operations go in this submodule
 (module* unsafe #f
   ;; turned into a macro on the requiring side
-  (provide -unsafe-require/typed))
+  (provide unsafe-require/typed))
 
 ;; used for private unsafe functionality in require macros
 ;; *do not export*
@@ -111,8 +111,12 @@
   (pattern nm:id #:with parent #'#f)
   (pattern (nm:id parent:id)))
 
+(define-syntax-class typed-field
+  #:attributes (field type)
+  #:literals (:)
+  (pattern [field:id : type]))
 
-(define-values (require/typed-legacy require/typed -unsafe-require/typed)
+(define-values (require/typed-legacy require/typed unsafe-require/typed)
  (let ()
   (define-syntax-class opt-rename
     #:attributes (nm orig-nm spec)
@@ -142,7 +146,7 @@
     #:attributes (nm type (body 1) (constructor-parts 1) (tvar 1))
     (pattern [(~or (~datum struct) #:struct)
               (~optional (~seq (tvar ...)) #:defaults ([(tvar 1) '()]))
-              nm:opt-parent (body ...)
+              nm:opt-parent (body:typed-field ...)
               (~var opts (struct-opts legacy #'nm.nm))]
              #:with (constructor-parts ...) #'opts.ctor-value
              #:attr type #'opts.type))
@@ -150,7 +154,9 @@
   (define-syntax-class signature-clause
     #:literals (:)
     #:attributes (sig-name [var 1] [type 1])
-    (pattern [#:signature sig-name:id ([var:id : type] ...)]))
+    (pattern [#:signature sig-name:id (body:typed-field ...)]
+      #:with (var ...) #'(body.field ...)
+      #:with (type ...) #'(body.type ...)))
 
   (define-syntax-class opaque-clause
     ;#:literals (opaque)
@@ -250,6 +256,7 @@
               (require/typed/provide lib other-clause ...))]))
 
 
+
 (define require-typed-struct/provide
   (syntax-rules ()
     [(_ (nm par) . rest)
@@ -280,8 +287,10 @@
    ;; that `(cast-table-ref id)` can get that type here.
    (λ ()
      (define type-stx
-       (or (cast-table-ref id)
-           #f))
+       (let ([types (cast-table-ref id)])
+         (if types
+             #`(U #,@types)
+             #f)))
      `#s(contract-def ,type-stx ,flat? ,maker? typed))))
 
 
@@ -346,7 +355,7 @@
                                      (make-contract-def-rhs/from-typed existing-ty-id #f #f)))
             (define (store-existing-type existing-type)
               (check-no-free-vars existing-type #'v)
-              (cast-table-set! existing-ty-id (datum->syntax #f existing-type #'v)))
+              (cast-table-add! existing-ty-id (datum->syntax #f existing-type #'v)))
             (define (check-valid-type _)
               (define type (parse-type #'ty))
               (check-no-free-vars type #'ty))
@@ -450,7 +459,7 @@
     (syntax-parse stx #:literals (:)
       [(_ name:opt-parent
           (~optional (~seq (tvar:id ...)) #:defaults ([(tvar 1) '()]))
-          ([fld : ty] ...)
+          (body:typed-field ...)
           (~var input-maker (constructor-term legacy #'name.nm))
           (~optional (~seq #:type-name type:id) #:defaults ([type #'name.nm]))
           unsafe:unsafe-clause
@@ -460,6 +469,8 @@
                       [hidden (generate-temporary #'name.nm)]
                       [orig-struct-info (generate-temporary #'nm)]
                       [spec (if (syntax-e #'name.parent) #'(nm parent) #'nm)]
+                      [(fld ...) #'(body.field ...)]
+                      [(ty ...) #'(body.type ...)]
                       [num-fields (syntax-length #'(fld ...))]
                       [(type-des _ pred sel ...)
                        (build-struct-names #'nm (syntax->list #'(fld ...)) #f #t)]
@@ -540,7 +551,7 @@
                                   (make-struct-info-self-ctor #'internal-maker si)
                                   si))
 
-                         (dtsi* (tvar ...) spec type ([fld : ty] ...) #:maker maker-name #:type-only)
+                         (dtsi* (tvar ...) spec type (body ...) #:maker maker-name #:type-only)
                          #,(ignore #'(require/contract pred hidden (or/c struct-predicate-procedure?/c (c-> any-wrap/c boolean?)) lib))
                          #,(internal #'(require/typed-internal hidden (Any -> Boolean : type)))
                          (require/typed #:internal (maker-name real-maker) type lib

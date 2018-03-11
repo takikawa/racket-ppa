@@ -10,6 +10,9 @@
 
 @title[#:tag "test"]{@exec{raco test}: Run tests}
 
+@; For `history` to connect to the "compiler-lib" package:
+@declare-exporting[compiler/commands/test]
+
 The @exec{raco test} command requires and runs the (by default)
 @racket[test] submodule associated with each path given on the command
 line. Command-line flags can control which submodule is run, whether to
@@ -139,6 +142,10 @@ The @exec{raco test} command accepts several flags:
  @item{@Flag{e} or @DFlag{check-stderr}
        --- Count any stderr output as a test failure.}
 
+ @item{@DFlag{deps}
+       --- If considering arguments as packages, also check package
+       dependencies.}
+
  @item{@DPFlag{ignore-stderr} @nonterm{pattern}
        --- Don't count stderr output as a test failure if it matches
        @nonterm{pattern}.  This flag can be used multiple times, and
@@ -160,11 +167,27 @@ The @exec{raco test} command accepts several flags:
        successes and failures, the table reports test and failure
        counts based on the log.}
 
+ @item{@DPFlag{arg} @nonterm{argument}
+       --- Adds @nonterm{argument} to the list of arguments to the invoked test module,
+       so that the invoked module sees @nonterm{argument} in its
+       @racket[current-command-line-arguments]. These arguments are
+       combined with any arguments specified in @filepath{info.rkt}
+       by @racket[test-command-line-arguments].}
+
+ @item{@DPFlag{args} @nonterm{arguments}
+        --- The same as @DPFlag{arg}, but @nonterm{arguments} is treated
+        as a whitespace-delimited list of arguments to add. To specify
+        multiple arguments using this flag within a typical shell,
+        @nonterm{arguments} must be
+        enclosed in quotation marks.
+ }
 ]
 
 @history[#:changed "1.1" @elem{Added @DFlag{heartbeat}.}
          #:changed "1.4" @elem{Changed recognition of module suffixes to use @racket[get-module-suffixes],
-                               which implies recognizing @filepath{.ss} and @filepath{.rkt}.}]
+                               which implies recognizing @filepath{.ss} and @filepath{.rkt}.}
+         #:changed "1.5" @elem{Added @DPFlag{ignore-stderr}.}
+         #:changed "1.6" @elem{Added @DPFlag{arg} and @DPFlag{args}.}]
 
 @section[#:tag "test-config"]{Test Configuration by Submodule}
 
@@ -193,6 +216,11 @@ identifiers:
        @envvar{PLTLOCKTIME} environment variable or defaults to 4
        hours.}
 
+ @item{@racket[ignore-stderr] --- a string, byte string, or
+       @tech[#:doc reference-doc]{regexp value}, as a pattern that
+       causes error output to not be treated as a failure if the
+       output matches the pattern.}
+
  @item{@racket[random?] --- if true, indicates that the test's output
        is expected to vary. See @secref["test-responsible"].}
 
@@ -212,6 +240,8 @@ instance, a file might look like this:
   ;; don't run this file for testing:
   (module test racket/base)
  )
+
+@history[#:changed "1.5" @elem{Added @racket[ignore-stderr] support.}]
 
 @section[#:tag "test-config-info"]{Test Configuration by @filepath{info.rkt}}
 
@@ -272,6 +302,14 @@ The following @filepath{info.rkt} fields are recognized:
        for @racket[_module-path-string]. See @racket[lock-name] in
        @secref["test-config"].}
 
+ @item{@racket[test-ignore-stderrs] --- a list of @racket[(list
+       _module-path-string _pattern)] or @racket[(list 'all _pattern)]
+       to declare patterns of standard error output that are allowed a
+       non-failures for @racket[_module-path-string] or all files
+       within the directory. Each @racket[_pattern] must be a string,
+       byte string, or @tech[#:doc reference-doc]{regexp value}. See
+       @racket[ignore-stderr] in @secref["test-config"].}
+
  @item{@racket[test-randoms] --- a list of path strings (relative to
        the enclosing directory) for modules whose output varies.
        See @secref["test-responsible"].}
@@ -280,6 +318,8 @@ The following @filepath{info.rkt} fields are recognized:
        Used indirectly via @racket[get-module-suffixes].}
 
 ]
+
+@history[#:changed "1.5" @elem{Added @racket[test-ignore-stderrs] support.}]
 
 @section[#:tag "test-responsible"]{Responsible-Party and Varying-Output Logging}
 

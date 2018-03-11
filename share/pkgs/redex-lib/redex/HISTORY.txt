@@ -1,3 +1,38 @@
+v6.12
+
+  * typeset prime characters better, e.g. when writing e_′,
+    don't use the subscript style for the ′ character
+
+  * various bug fixes
+
+v6.11
+
+  * various bug fixes
+
+v6.10
+
+  * added a two argument version of `alpha-equivalent?`
+
+  * added `sc-linebreaks`
+
+  * use the atomic rewriters when rendering a 
+    metafunction's name in its type signature
+
+  * added judgment-form-show-rule-names
+
+  * improved the binding-forms documentation
+
+  * misc bug fixes
+
+v6.9
+
+  * add mf-apply
+
+  * improve define-relation's cooperation with judgment-holds and
+    related constructs
+
+  * various bug fixes
+
 v6.8
 
   * improved the ambiguity checker

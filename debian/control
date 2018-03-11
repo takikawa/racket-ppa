@@ -2,8 +2,8 @@ Source: racket
 Section: lisp
 Priority: optional
 Maintainer: David Bremner <bremner@debian.org>
-Standards-Version: 3.9.3
-Build-Depends: autotools-dev, cdbs, debhelper (>= 7.0.0), patchutils, libffi-dev,
+Standards-Version: 4.1.1
+Build-Depends: autotools-dev, cdbs, debhelper (>= 10), patchutils, libffi-dev,
  libfreetype6-dev, libjpeg-dev, libpango1.0-dev, libpng-dev, libssl-dev,
  libxaw7-dev, xbitmaps, libxft-dev, libgl1-mesa-dev | libgl-dev,
  libglu1-mesa-dev | libglu-dev, libx11-dev, libxrender-dev, libcairo2-dev,

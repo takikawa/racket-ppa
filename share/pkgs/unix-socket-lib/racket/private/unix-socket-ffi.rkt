@@ -1,7 +1,8 @@
 ;; FFI functions, constants, and types for unix domain sockets (unsafe)
 #lang racket/base
 (require ffi/unsafe
-         ffi/unsafe/define)
+         ffi/unsafe/define
+         ffi/unsafe/port)
 (provide (protect-out (all-defined-out)))
 
 ;; platform : (U 'bsd 'linux #f)
@@ -152,20 +153,9 @@
 ;; ========================================
 ;; Racket constants and functions
 
-(define MZFD_CREATE_READ 1)
-(define MZFD_CREATE_WRITE 2)
-(define MZFD_REMOVE 5)
-
-(define-libc scheme_make_fd_output_port
-  (_fun _int _racket _bool _bool _bool -> _racket))
-
-(define-libc scheme_socket_to_ports
-  (_fun _intptr _string _bool (in : (_ptr o _racket)) (out : (_ptr o _racket))
-        -> _void
-        -> (values in out)))
-
-(define-libc scheme_fd_to_semaphore
-  (_fun _intptr _int _bool -> _racket))
+;; indirection to support testing; see below
+(define (socket->semaphore fd mode)
+  (unsafe-socket->semaphore fd mode))
 
 ;; ============================================================
 ;; Testing
@@ -182,7 +172,7 @@
 (when #f
   ;; -- mock for connect returning EINPROGRESS
   (let ([real-connect connect]
-        [real-fd_to_sema scheme_fd_to_semaphore])
+        [real-socket->semaphore socket->semaphore])
     ;; connecting-fds : hash[nat => #t]
     (define connecting-fds (make-hash))
     (set! connect
@@ -194,9 +184,9 @@
                    (eprintf "** mock connect: setting EINPROGRESS\n")
                    -1]
                   [else r])))
-    (set! scheme_fd_to_semaphore
-          (lambda (fd kind reg?)
-            (cond [(and (= kind MZFD_CREATE_WRITE)
+    (set! socket->semaphore
+          (lambda (fd kind)
+            (cond [(and (eq? kind 'write)
                         (hash-ref connecting-fds fd #f))
                    (define sema (make-semaphore))
                    (eprintf "** mock fd_to_sema: creating semaphore\n")
@@ -207,12 +197,14 @@
                    (hash-remove! connecting-fds fd)
                    sema]
                   [else
-                   (real-fd_to_sema fd kind reg?)])))))
+                   (real-socket->semaphore fd kind)])))))
 
+;; mock for accept returning EWOULDBLOCK/EAGAIN no longer works,
+;; probably because doesn't intercept unsafe-poll-ctx-fd-wakeup
 (when #f
   ;; - mock for accept returning EWOULDBLOCK/EAGAIN
   (let ([real-accept accept]
-        [real-fd_to_sema scheme_fd_to_semaphore])
+        [real-socket->semaphore socket->semaphore])
     ;; accepting-fds : hash[nat => #t]
     (define accepting-fds (make-hash))
     (set! accept
@@ -225,9 +217,9 @@
                    (hash-set! accepting-fds s #t)
                    (saved-errno EWOULDBLOCK)
                    -1])))
-    (set! scheme_fd_to_semaphore
-          (lambda (fd kind reg?)
-            (cond [(and (= kind MZFD_CREATE_READ)
+    (set! socket->semaphore
+          (lambda (fd kind)
+            (cond [(and (eq? kind 'read)
                         (hash-ref accepting-fds fd #f))
                    (define sema (make-semaphore))
                    (eprintf "** mock fd_to_sema: creating semaphore\n")
@@ -237,4 +229,4 @@
                              (semaphore-post sema)))
                    sema]
                   [else
-                   (real-fd_to_sema fd kind reg?)])))))
+                   (real-socket->semaphore fd kind)])))))

@@ -1,4 +1,53 @@
 ------------------------------
+       Version 6.12
+------------------------------
+
+  . added color scheme entries for syntax-check document
+    variables and unused variables.
+
+  . misc bug fixes
+
+------------------------------
+       Version 6.11
+------------------------------
+
+  . added a font size option to the "insert large letters"
+    menu item
+
+  . added color scheme entries for syntax-check arrows
+
+  . change the implementation strategy for the program
+    contour to one that uses less screen real-estate and
+    is significantly more efficient.
+
+    Thanks to Jennie Tran for the implementation.
+
+  . misc bug fixes
+
+------------------------------
+       Version 6.10
+------------------------------
+
+  . reduce the number of nested panel% objects to attempt to work around
+    a bug in the Windows 10 Creators Update
+
+  . misc bug fixes
+
+------------------------------
+       Version 6.9
+------------------------------
+
+  . add the "remove unused requires" refactoring
+
+  . improved support for #lang-based tooling
+
+  . add opt-in toolbar buttons
+
+  . add support for #lang-specified keybindings
+
+  . bug fixes and minor performance improvements
+
+------------------------------
        Version 6.8
 ------------------------------
 

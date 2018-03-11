@@ -14,8 +14,6 @@
          "free-variance.rkt"
          "type-mask.rkt"
          (contract-req)
-         racket/match
-         racket/list
          racket/lazy-require
          (for-syntax racket/base racket/syntax
                      syntax/parse))
@@ -29,7 +27,7 @@
          def-values
          def-prop
          def-object
-         def-pathelem)
+         def-path-elem)
 
 
 ;;************************************************************
@@ -136,7 +134,7 @@
 ;;--------------
 
 ;; e.g. car, cdr, etc
-(def-rep-class PathElem #:printer print-pathelem #:define-form def-pathelem)
+(def-rep-class PathElem #:printer print-pathelem #:define-form def-path-elem)
 
 
 ;;----------

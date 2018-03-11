@@ -65,8 +65,8 @@ using with Slideshow (see the @racketmodname[pict]
 library).
 
 For producing papers with Scribble, just include the
-picts inline in the paper and pass the the @DFlag{dvipdf} 
-flag generate the @filepath{.pdf} file. For producing
+picts inline in the paper and pass the @DFlag{dvipdf} 
+flag to generate the @filepath{.pdf} file. For producing
 papers with LaTeX, create @filepath{.ps} files from Redex and use
 @tt{latex} and @tt{dvipdf} to create @filepath{.pdf} files
 (using @tt{pdflatex} with @filepath{.pdf} files will 
@@ -126,7 +126,7 @@ sets @racket[dc-for-text-size] and the latter does not.
  Produces a pict like @racket[render-term], but without
  adjusting @racket[dc-for-text-size].
 
- The first argument is expected to be a @racket[compiled-language?] and
+ The first argument is expected to be a @racket[compiled-lang?] and
  the second argument is expected to be a term (without the
  @racket[term] wrapper). The formatting in the @racket[term] argument
  is used to determine how the resulting pict will look.
@@ -154,7 +154,6 @@ sets @racket[dc-for-text-size] and the latter does not.
 
 @defproc[(term->pict/pretty-write [lang compiled-lang?] 
                                   [term any/c]
-                                  [filename (or/c path-string? #f)]
                                   [#:width width #f])
          pict?]{
   Like @racket[term->pict], but with the same change that
@@ -274,7 +273,7 @@ metafunctions and renders them together, lining up all of the
 clauses together.
 
 Parameters that affect rendering include
-@racket[metafunction-pict-style], @racket[linebreaks], and
+@racket[metafunction-pict-style], @racket[linebreaks], @racket[sc-linebreaks], and
 @racket[metafunction-cases].
 
 If the metafunctions have contracts, they are typeset as the first
@@ -477,7 +476,7 @@ variant, the side-conditions don't contribute to the width of the
 pict, but are just overlaid on the second line of each rule.  The
 @racket['horizontal-left-align] style is like the @racket['horizontal]
 style, but the left-hand sides of the rules are aligned on the left,
-instead of on the right. The @racket[''horizontal-side-conditions-same-line]
+instead of on the right. The @racket['horizontal-side-conditions-same-line]
 is like @racket['horizontal], except that side-conditions
 are on the same lines as the rule, instead of on their own line below.
 
@@ -637,10 +636,23 @@ It's default value is @racket[default-white-square-bracket]. See also
   are rendered on two lines and which are rendered on one.
   
   If its value is a list, the length of the list must match
-  the number of cases plus one if there is a contract. 
+  the number of cases plus one if there is a contract that is rendered.
   Each boolean indicates if that case has a linebreak or not.
   
   This parameter's value influences the @racket['left/right] styles only.
+}
+
+@defparam[sc-linebreaks breaks (or/c #f (listof boolean?))]{
+  This parameter controls which cases in the metafunction
+  have the side-conditions rendered on the next line
+  instead of the same line as the right-hand side of the metafunction clause.
+  
+  Its value must have the same shape as the value of the @racket[linebreaks]
+  parameter.
+  
+  This parameter's value influences the @racket['left-right/beside-side-conditions] style only.
+
+  @history[#:added "1.6"]
 }
 
 @defparam[metafunction-cases
@@ -671,6 +683,13 @@ case, only the numbers are used).
    it is a list, then only the selected clauses appear (numbers
    count from @racket[0], and strings and symbols correspond to the labels
    in a judgment form).
+}
+
+@defparam[judgment-form-show-rule-names show-rule-names? boolean?]{
+  Determines if the names of the cases are shown beside the
+ rules in a rendered judgment form. Defaults to @racket[#t].
+
+ @history[#:added "1.5"]
 }
 
 @deftogether[[
@@ -712,7 +731,10 @@ to follow it; the second, @racket[non-terminal-superscript-style], applies
 to the segment following that caret. For example, in the non-terminal 
 reference @racket[x_y^z], @racket[x] has style @racket[non-terminal-style],
 @racket[y] has style @racket[non-terminal-subscript-style], and @racket[z]
-has style @racket[non-terminal-superscript-style].
+has style @racket[non-terminal-superscript-style]. The only exception to this
+is when the subscript section consists only of unicode prime characters
+(@litchar{′}), in which case the @racket[non-terminal-style] is used instead
+of the @racket[non-terminal-subscript-style].
 
 The @racket[default-style] parameter is used for parenthesis, the dot in dotted
 lists, spaces, the
@@ -922,6 +944,11 @@ single reduction relation.
   The @racket[combine] function is called with the list of picts that are obtained by rendering
   a relation; it should put them together into a single pict. It defaults to
   @racket[(λ (l) (apply vc-append 20 l))]
+}
+
+@defparam[metafunction-arrow-pict make-arrow (parameter/c (-> pict?))]{
+  Specifies the pict to use for the arrow when typesetting
+  a metafunction contract.
 }
 
 @defparam[where-make-prefix-pict make-prefix (parameter/c (-> pict?))]{

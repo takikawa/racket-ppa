@@ -8,12 +8,12 @@
 (provide examples
 
          ;; Re-exports:
-         
          make-base-eval
          make-base-eval-factory
          make-eval-factory
          close-eval
 
+         make-log-based-eval
          scribble-exn->string
          scribble-eval-handler
          make-log-based-eval)

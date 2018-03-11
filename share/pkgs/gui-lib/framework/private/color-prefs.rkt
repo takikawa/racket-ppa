@@ -10,7 +10,8 @@
            string-constants
            racket/pretty
            "../preferences.rkt"
-           "sig.rkt")
+           "sig.rkt"
+           "srcloc-panel.rkt")
   
   (import [prefix preferences: framework:preferences^]
           [prefix editor: framework:editor^]
@@ -44,7 +45,7 @@
         (send working-delta copy (get-from-pref-sym))
         (func working-delta)
         (set-via-pref-sym working-delta)))
-    (define hp (new horizontal-panel%
+    (define hp (new-horizontal-panel%
                     [parent parent]
                     [style '(border)]
                     [alignment '(center top)]
@@ -157,21 +158,43 @@
                             hp)]
                 [callback
                  (λ (color-button evt)
-                   (let* ([add (send (get-from-pref-sym) get-foreground-add)]
-                          [color (make-object color%
-                                   (send add get-r)
-                                   (send add get-g)
-                                   (send add get-b))]
-                          [users-choice
-                           (get-color-from-user
-                            (format (string-constant syntax-coloring-choose-color) example-text)
-                            (send color-button get-top-level-window)
-                            color
-                            '(alpha))])
-                     (when users-choice
-                       (update-style-delta
-                        (λ (delta)
-                          (send delta set-delta-foreground users-choice))))))])))
+                   (define pref (get-from-pref-sym))
+                   (define orig-add (send pref get-foreground-add))
+                   (define orig-mult (send pref get-foreground-mult))
+                   (define (avg x y z) (/ (+ x y z) 3))
+                   (define (pin-between lo x hi) (min (max lo x) hi))
+                   (define orig-α
+                     (- 1 (pin-between 0
+                                       (avg (send orig-mult get-r)
+                                            (send orig-mult get-g)
+                                            (send orig-mult get-b))
+                                       1)))
+                   (define (to-byte v) (pin-between 0 (inexact->exact (round v)) 255))
+                   (define color
+                     (make-object color%
+                       (to-byte (- 255 (/ (- 255 (send orig-add get-r)) orig-α)))
+                       (to-byte (- 255 (/ (- 255 (send orig-add get-g)) orig-α)))
+                       (to-byte (- 255 (/ (- 255 (send orig-add get-b)) orig-α)))
+                       orig-α))
+                   (define users-choice
+                     (get-color-from-user
+                      (format (string-constant syntax-coloring-choose-color) example-text)
+                      (send color-button get-top-level-window)
+                      color
+                      '(alpha)))
+                   (when users-choice
+                     (update-style-delta
+                      (λ (delta)
+                        (define new-α (send users-choice alpha))
+                        (define α*users-choice
+                          (make-object color%
+                            (to-byte (- 255 (* (- 255 (send users-choice red)) new-α)))
+                            (to-byte (- 255 (* (- 255 (send users-choice green)) new-α)))
+                            (to-byte (- 255 (* (- 255 (send users-choice blue)) new-α)))))
+                        (send delta set-delta-foreground α*users-choice)
+                        (define new-mult (send delta get-foreground-mult))
+                        (send new-mult set (- 1 new-α) (- 1 new-α) (- 1 new-α))))))])))
+
     (define background-color-button
       (and (>= (get-display-depth) 8)
            background?
@@ -355,7 +378,7 @@
      (list (string-constant preferences-colors)
            (string-constant background-color))
      (λ (parent)
-       (let ([vp (new vertical-panel% (parent parent) (alignment '(left top)))])
+       (let ([vp (new-vertical-panel% (parent parent) (alignment '(left top)))])
          (add-solid-color-config (string-constant background-color)
                                  vp
                                  'framework:basic-canvas-background)
@@ -394,7 +417,7 @@
            (update-choice (preferences:get 'framework:paren-color-scheme)))))))
     
   (define (build-text-foreground-selection-panel parent pref-sym style-name example-text)
-    (define hp (new horizontal-panel% 
+    (define hp (new-horizontal-panel% 
                     (parent parent)
                     (style '(border))
                     (stretchable-height #f)))
@@ -435,8 +458,8 @@
     (send e set-position 0))
   
   (define (add-solid-color-config label parent pref-id)
-    (define panel (new vertical-panel% (parent parent) (stretchable-height #f)))
-    (define hp (new horizontal-panel% (parent panel) (stretchable-height #f)))
+    (define panel (new-vertical-panel% (parent parent) (stretchable-height #f)))
+    (define hp (new-horizontal-panel% (parent panel) (stretchable-height #f)))
     (define msg (new message% (parent hp) (label label)))
     (define canvas
       (new canvas%
@@ -480,7 +503,7 @@
     (preferences:add-panel
      (list (string-constant preferences-colors) panel-name)
      (λ (parent)
-       (let ([panel (new vertical-panel% (parent parent))])
+       (let ([panel (new-vertical-panel% (parent parent))])
          (func panel)
          panel))))
   
@@ -715,13 +738,22 @@
                               (props->style-delta (cdr line))]))))
                   example)))))
 
+(define color-vector/c
+  (or/c (vector/c byte? byte? byte? #:flat? #t)
+        (vector/c byte? byte? byte? (between/c 0.0 1.0) #:flat? #t)))
+
+(struct background [color] #:prefab)
+
+(define background-color/c
+  (struct/c background color-vector/c))
+
 (define valid-props? 
   (listof (or/c 'bold 'italic 'underline
-                (vector/c byte? byte? byte? #:flat? #t)
-                (vector/c byte? byte? byte? (between/c 0.0 1.0) #:flat? #t))))
+                color-vector/c
+                background-color/c)))
 
 (define (valid-key-values? h)
-  (for/or ([(k v) (in-hash h)])
+  (for/and ([(k v) (in-hash h)])
     (cond
       [(equal? k 'name) (or (string? v) (symbol? v))]
       [(equal? k 'white-on-black-base?) (boolean? v)]
@@ -749,6 +781,8 @@
       [`bold (send sd set-delta 'change-bold)]
       [`italic (send sd set-delta 'change-italic)]
       [`underline (send sd set-delta 'change-underline #t)]
+      [(? background-color/c)
+       (send sd set-delta-background (vec->color (background-color prop)))]
       [else (send sd set-delta-foreground (vec->color prop))]))
   sd)
 
@@ -998,13 +1032,13 @@
          (string-constant color-schemes))
    (λ (parent)
      (define vp 
-       (new vertical-panel% 
+       (new-vertical-panel% 
             [parent parent]
             [style '(auto-vscroll)]))
      (extras vp)
      (define buttons
        (for/list ([color-scheme (in-list known-color-schemes)])
-         (define hp (new horizontal-panel% 
+         (define hp (new-horizontal-panel% 
                          [parent vp]
                          [alignment '(left top)]
                          [stretchable-height #t]))
@@ -1029,7 +1063,7 @@
                                         (if (equal? c #\newline)
                                             1
                                             0))))
-         (define bp (new vertical-panel% [parent hp] 
+         (define bp (new-vertical-panel% [parent hp] 
                          [stretchable-height #f]
                          [stretchable-width #f]))
          (define defaults? #f)

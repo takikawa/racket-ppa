@@ -1,11 +1,12 @@
 #lang scribble/doc
 @(require scribble/manual
           scribble/eval
-          scribble/struct
+          scribble/bnf
           racket/sandbox
           racket/runtime-path
           "config.rkt"
-          (for-label db db/util/datetime db/util/geometry db/util/postgresql db/util/testing))
+          (for-label db db/util/datetime db/util/geometry db/util/postgresql
+                     db/util/testing db/util/cassandra))
 
 @(define-runtime-path log-file "log-for-util.rktd")
 @(define the-eval (make-pg-eval log-file #t))
@@ -211,6 +212,31 @@ Returns @racket[#t] if @racket[v] is a @racket[pg-range] or
 @racket[pg-empty-range] instance; otherwise, returns @racket[#f].
 }
 
+@defproc[(uuid? [v any/c]) boolean?]{
+
+Returns @racket[#t] if @racket[v] is a
+@tech[#:doc '(lib "scribblings/reference/reference.scrbl")]{string}
+that matches the format of a hexadecimal representation of a
+@hyperlink["https://en.wikipedia.org/wiki/Universally_unique_identifier"]{UUID}.
+Specifically, it must be a series of hexadecimal digits separated by
+dashes, in the following pattern:
+
+@(let* ([digit @nonterm{digit@subscript{16}}]
+        [digit4 (kleenerange 4 4 digit)]
+        [digit8 (kleenerange 8 8 digit)]
+        [digit12 (kleenerange 12 12 digit)]
+        [dash @litchar{-}])
+   @BNF[(list @nonterm{uuid}
+              @BNF-seq[digit8 dash digit4 dash digit4
+                       dash digit4 dash digit12])])
+
+The digits themselves are case-insensitive, accepting both uppercase
+and lowercase characters. Otherwise, if @racket[v] is not a string
+matching the above pattern, this function returns @racket[#f].
+
+@history[#:added "1.1"]
+}
+
 @deftogether[[
 @defstruct*[pg-box
             ([ne point?] [sw point?])]
@@ -231,6 +257,23 @@ types that have no appropriate analogue in the OpenGIS model:
 
 Note: PostgreSQL's built-in geometric types are distinct from those
 provided by the PostGIS extension library (see @secref["geometry"]).
+}
+
+@;{========================================}
+
+@section[#:tag "cassandra-util"]{Cassandra-Specific Functionality}
+
+@defmodule[db/util/cassandra]
+
+@defparam[cassandra-consistency consistency
+          (or/c 'any 'one 'two 'three 'quorum 'all 'local-quorum
+                'each-quorum 'serial 'local-serial 'local-one)]{
+
+Controls the @hyperlink["http://cassandra.apache.org/doc/latest/architecture/dynamo.html#tunable-consistency"]{tunable
+consistency level} that Cassandra uses to execute query operations.
+@; Alt url: http://docs.datastax.com/en/cassandra/latest/cassandra/dml/dmlConfigConsistency.html
+
+The default consistency level is @racket['one].
 }
 
 @;{========================================}

@@ -336,7 +336,7 @@ todo:
            (error 'to-nat "no elements in the enumerator"))
          none/c))
 
-(define natural/e (-enum +inf.0 values values exact-nonnegative-integer?))
+(define natural/e (-enum +inf.0 values values natural?))
 
 (define (empty/e? e)
   (= 0 (enum-count e)))
@@ -767,10 +767,16 @@ todo:
         [(cons flroot (r . - . flroot))]))
 
 (define (binary-boxy-to x y)
-  (cond [(x . >= . y)
+  (cond [(x . < . y)
          ((y . * . y) . + . x)]
         [else
          (+ (x . * . x) x y)]))
+
+(module+ test
+  (for* ([x (in-range 30)]
+         [y (in-range 30)])
+    (check-equal? (cons x y)
+                  (binary-boxy-from (binary-boxy-to x y)))))
 
 ;; Like or/e, but sequences the enumerations instead of interleaving
 (define (append/e e-p #:one-way-enum? [one-way-enum? #f] . e-ps)
@@ -1082,12 +1088,16 @@ todo:
              (let ([thunk/e-ctc
                     (recursive-contract
                      (enum-contract
-                      (force promise/e))
+                      (begin
+                        (give-up-on-bijection-checking promise/e)
+                        (force promise/e)))
                      #:flat #:extra-delay)])
                thunk/e-ctc)
              (let ([thunk/e-ctc (recursive-contract
-                                 (enum-contract
-                                  (force promise/e)))])
+                                 (begin
+                                   (give-up-on-bijection-checking promise/e)
+                                   (enum-contract
+                                    (force promise/e))))])
                thunk/e-ctc))))
 
 (define (cantor-untuple k)
@@ -1500,7 +1510,7 @@ todo:
 
 (define (box-tuples/e k)
   (-enum +inf.0 (box-untuple k) (box-tuple k) 
-         (apply list/c (build-list k (λ (_) exact-nonnegative-integer?)))))
+         (apply list/c (build-list k (λ (_) natural?)))))
 
 ;; Enumeration of lists of length `len` of nats <= bound, 
 ;; containing bound at least once

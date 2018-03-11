@@ -20,7 +20,7 @@
          language-id-nt-hole-map
          pattern-symbols
          
-         build-disappeared-use
+         build-disappeared-uses
 
          from-smiley-number
          to-smiley-number
@@ -38,6 +38,7 @@
        (cond [(syntax-local-value stx (λ () #f)) => p?]
              [else #f])))
 
+;; mode: (or/c #f (listof (or/c 'I 'O))  -- #f means the judgment form is actually a relation
 (define-struct judgment-form (name mode proc mk-proc lang lws rule-names 
                                    gen-clauses mk-gen-clauses term-proc relation?
                                    cache transformer)
@@ -73,31 +74,28 @@
 (define (language-id-nt-identifiers stx id) (language-id-getter stx id 3))
 (define (language-id-nt-hole-map stx id) (language-id-getter stx id 4))
 
-(define pattern-symbols '(any number natural integer real string variable 
+(define pattern-symbols '(any number natural integer real string boolean variable
                               variable-not-otherwise-mentioned hole symbol))
 
-(define (build-disappeared-use id-stx-table nt id-stx)
+(define (build-disappeared-uses nt-identifiers nt id-stx)
   (cond
-    [id-stx-table
-     (define table-entry (hash-ref id-stx-table nt #f))
-     (cond
-       [table-entry
-        (define the-srcloc (vector
-                            (syntax-source id-stx)
-                            (syntax-line id-stx)
-                            (syntax-column id-stx)
-                            (syntax-position id-stx)
-                            ;; shorten the span so it covers only up to the underscore
-                            (string-length (symbol->string nt))))
-        (define the-id (datum->syntax table-entry
-                                      (syntax-e table-entry)
-                                      the-srcloc id-stx))
-        (syntax-property the-id 'original-for-check-syntax #t)]
-       [else
-        #f])]
-    [else
-     #f]))
-
+    [nt-identifiers
+     (define table-entries (hash-ref nt-identifiers nt '()))
+     (for/list ([table-entry (in-list (if (syntax? table-entries)
+                                          (syntax->list table-entries)
+                                          table-entries))])
+       (define the-srcloc (vector
+                           (syntax-source id-stx)
+                           (syntax-line id-stx)
+                           (syntax-column id-stx)
+                           (syntax-position id-stx)
+                           ;; shorten the span so it covers only up to the underscore
+                           (string-length (symbol->string nt))))
+       (define the-id (datum->syntax table-entry
+                                     (syntax-e table-entry)
+                                     the-srcloc id-stx))
+       (syntax-property the-id 'original-for-check-syntax #t))]
+    [else '()]))
 
 (define (to-smiley-number n)
   (define candidate

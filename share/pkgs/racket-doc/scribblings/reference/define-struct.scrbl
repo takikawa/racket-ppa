@@ -24,6 +24,7 @@
                               (code:line #:property prop-expr val-expr)
                               (code:line #:transparent)
                               (code:line #:prefab)
+                              (code:line #:authentic)
                               (code:line #:name name-id)
                               (code:line #:extra-name name-id)
                               (code:line #:constructor-name constructor-id)
@@ -166,6 +167,14 @@ must also be a @tech{prefab} structure type.
   (prefab-point? #s(prefab-point 1 2))
 ]
 
+The @racket[#:authentic] option is a shorthand for @racket[#:property
+prop:authentic #t], which prevents instances of the structure type
+from being impersonated (see @racket[impersonate-struct]), chaperoned
+(see @racket[chaperone-struct]), or acquiring a non-@tech{flat
+contract} (see @racket[struct/c]). See @racket[prop:authentic] for
+more information. If a supertype is specified, it must also have the
+@racket[prop:authentic] property.
+
 If @racket[name-id] is supplied via @racket[#:extra-name] and it is
 not @racket[id], then both @racket[name-id] and @racket[id] are bound
 to information about the structure type. Only one of
@@ -232,7 +241,7 @@ and expressions may also appear in @racket[method-defs].
 ]
 
 If the @racket[#:omit-define-syntaxes] option is supplied, then
-@racket[name-id] (and @racket[id], if @racket[#:extra-name] is specified])
+@racket[name-id] (and @racket[id], if @racket[#:extra-name] is specified)
 is not bound as a transformer. If the
 @racket[#:omit-define-values] option is supplied, then none of the
 usual variables are bound, but @racket[id] is bound. If both are
@@ -289,7 +298,8 @@ cp
 ]
 
 For serialization, see @racket[define-serializable-struct].
-}
+
+@history[#:changed "6.9.0.4" @elem{Added @racket[#:authentic].}]}
 
 
 @defform[(struct-field-index field-id)]{

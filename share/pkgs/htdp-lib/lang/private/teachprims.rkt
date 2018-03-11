@@ -110,9 +110,18 @@ namespace.
     (unless (boolean? a)
       (raise
        (make-exn:fail:contract
-        (format "not: expected either true or false; given ~e" a)
+        (format "not: expected either #true or #false; given ~e" a)
         (current-continuation-marks))))
     (not a)))
+
+(define-teach beginner boolean->string 
+  (lambda (a)
+    (unless (boolean? a)
+      (raise
+       (make-exn:fail:contract
+        (format "boolean->string: expected either #true or #false; given ~e" a)
+        (current-continuation-marks))))
+    (if a "#true" "#false")))
 
 (define-teach beginner random 
   (lambda (a)
@@ -441,33 +450,36 @@ namespace.
     (check-last/cycle 'append x)
     (apply append x)))
 
-(define-teach advanced make-hash
-  (lambda ([a empty])
-    (make-hash (map (lambda (l) (cons (first l) (second l))) a))))
+;; ---------------------------------------------------------------------------------------------------
+;; hash tables
 
-(define-teach advanced make-hasheq
-  (lambda ([a empty])
-    (make-hasheq (map (lambda (l) (cons (first l) (second l))) a))))
+;; [Listof [List X Y]] -> [Listof [Racket:Cons X Y]]
+;; translate ASL lists into Racket cons pairs so that the hash table works
+;; *****************************************************************************
+;; MF: This design decision breaks one of the fundamental design guidelines for
+;; the teaching languages but it clearly has been in place for years. No going back.
+;; The correct design would have modified hash-ref and other observers of HASHes. 
+;; *****************************************************************************
+(define (list->cons-for-hash a)
+  (map (lambda (l) (cons (car l) (cadr l))) a))
 
-(define-teach advanced make-hasheqv
-  (lambda ([a empty])
-    (make-hasheqv (map (lambda (l) (cons (first l) (second l))) a))))
+(define-syntax-rule
+  (define-hasher lang some-hash-maker)
+  (define-teach lang some-hash-maker
+    (lambda ([a empty])
+      (some-hash-maker (list->cons-for-hash a)))))
 
-(define-teach advanced make-immutable-hash
-  (lambda ([a empty])
-    (make-immutable-hash (map (lambda (l) (cons (first l) (second l))) a))))
-
-(define-teach advanced make-immutable-hasheq
-  (lambda ([a empty])
-    (make-immutable-hasheq (map (lambda (l) (cons (first l) (second l))) a))))
-
-(define-teach advanced make-immutable-hasheqv
-  (lambda ([a empty])
-    (make-immutable-hasheqv (map (lambda (l) (cons (first l) (second l))) a))))
+(define-hasher advanced make-hash)
+(define-hasher advanced make-hasheq)
+(define-hasher advanced make-hasheqv)
+(define-hasher advanced make-immutable-hash)
+(define-hasher advanced make-immutable-hasheq)
+(define-hasher advanced make-immutable-hasheqv)
 
 (provide  
  false?
  beginner-not
+ beginner-boolean->string
  beginner-random
  beginner-+
  beginner-/
@@ -657,6 +669,12 @@ namespace.
     (cerr 'string-contains? (string? t) "string" t)
     (regexp-match? (regexp-quote s) t)))
 
+(define-teach beginner string-contains-ci? 
+  (lambda (s t)
+    (cerr 'string-contains? (string? s) "string" s)
+    (cerr 'string-contains? (string? t) "string" t)
+    (regexp-match? (regexp-quote (string-foldcase s)) (string-foldcase t))))
+
 (provide
  beginner-string-ith
  beginner-replicate
@@ -670,4 +688,5 @@ namespace.
  beginner-string-upper-case?
  beginner-string-lower-case?
  beginner-string-contains?
+ beginner-string-contains-ci?
  )

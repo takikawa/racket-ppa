@@ -85,11 +85,10 @@
   (syntax-case stx ()
     [(_ ctc e)
      (quasisyntax/loc stx
-       (let ([me (quote-module-name)])
-         (contract ctc e
-                   me me
-                   '#,(syntax-local-infer-name stx)
-                   '#,(build-source-location-vector #'ctc))))]))
+       (contract ctc e
+                 invariant-assertion-party invariant-assertion-party
+                 '#,(syntax-local-infer-name stx)
+                 '#,(build-source-location-vector #'ctc)))]))
 
 (define-syntax (-recursive-contract stx)
   (define (parse-type/kwds arg type kwds)
@@ -194,8 +193,13 @@
        (unless (list-contract? forced-ctc)
          (raise-argument-error 'recursive-contract "list-contract?" forced-ctc)))
      (set-recursive-contract-ctc! ctc forced-ctc)
-     (set-recursive-contract-name! ctc (append `(recursive-contract ,(contract-name forced-ctc))
-                                               (cddr old-name)))
+     (when (and (pair? old-name) (pair? (cdr old-name)))
+       ;; this guard will be #f when we are forcing this contract
+       ;; in a nested which (which can make the `cddr` below fail)
+       ;; in this case, there should be a pending `force-recursive-contract`
+       ;; that will do the actual updating of the name to the right thing
+       (set-recursive-contract-name! ctc (append `(recursive-contract ,(contract-name forced-ctc))
+                                                 (cddr old-name))))
      forced-ctc]
     [else current]))
 
@@ -218,8 +222,11 @@
        (define r-ctc (force-recursive-contract ctc))
        (define f (get/build-late-neg-projection r-ctc))
        (define blame-known (blame-add-context blame #f))
+       (define f-blame-known (make-thread-cell #f))
        (λ (val neg-party)
-         ((f blame-known) val neg-party)))]))
+         (unless (thread-cell-ref f-blame-known)
+           (thread-cell-set! f-blame-known (f blame-known)))
+         ((thread-cell-ref f-blame-known) val neg-party)))]))
 
 (define (flat-recursive-contract-late-neg-projection ctc)
   (cond

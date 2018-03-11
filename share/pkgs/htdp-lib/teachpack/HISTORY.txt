@@ -1,4 +1,22 @@
 ------------------------------------------------------------------------
+Version 6.12				  [Fri Nov  3 13:09:49 EDT 2017]
+
+* added file-exists? to batch-io 
+* added web-io teachpack (used to be a package) 
+* added some primitives to *SL 
+* improved the documentation of (universe ...) and its example
+
+------------------------------------------------------------------------
+Version 6.11				  [Mon Oct 30 13:35:12 EDT 2017]
+
+* none 
+
+------------------------------------------------------------------------
+Version 6.9				  [Wed Apr 19 21:48:38 EDT 2017]
+
+* bug fixes in test engine and 2htdp/universe 
+
+------------------------------------------------------------------------
 Version 6.8				  [Mon Jan 16 17:13:05 EST 2017]
 
 * bug fixes in test engine (regression) 

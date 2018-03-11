@@ -1,3 +1,15 @@
+6.12
+- Fixes for contract generation (merged before 6.11 but not released).
+- Change `inst` to handle missing arguments (uses `Any`).
+6.11
+- Syntax for refinment types and dependent function types.
+- Improvements to case-lambda inference and rest arg handling.
+6.10
+- Improve refinement types.
+- Split mutable and immutable hash types.
+6.9
+- Added initial steps towards refinement types.
+- Fixes related to numeric types and NaN.
 6.8
 - Restructured internal representations, especially of Union types.
   See https://pnwamk.github.io/blog/2017/01/08/some-changes-in-typed-racket-v6-8/

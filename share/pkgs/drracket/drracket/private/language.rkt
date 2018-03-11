@@ -22,6 +22,7 @@
          launcher
          mred
          framework
+         framework/private/srcloc-panel
          mrlib/syntax-browser
          compiler/distribute
          compiler/bundle-dist
@@ -246,7 +247,7 @@
                                     (string-constant case-sensitive-label)
                                     input-panel
                                     void))]
-             [debugging-panel (new horizontal-panel%
+             [debugging-panel (new-horizontal-panel%
                                    [parent dynamic-panel]
                                    [stretchable-height #f]
                                    [alignment '(left center)])]
@@ -447,7 +448,7 @@
            (text:send-snip-to-port value port)
            1]
           [(pict:convertible? value)
-           (write-special (mk-pict-snip value))]
+           (write-special (mk-pict-snip value) port)]
           [(use-number-snip? value)
            (write-special (number->number-snip value) port)
            1]

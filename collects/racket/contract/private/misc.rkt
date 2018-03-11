@@ -14,6 +14,7 @@
 (provide flat-murec-contract
          not/c
          =/c >=/c <=/c </c >/c between/c
+         renamed->-ctc renamed-<-ctc
          char-in
          real-in
          natural-number/c
@@ -28,7 +29,7 @@
          parameter/c
          procedure-arity-includes/c
          
-         any/c  any/c?
+         any/c any/c?
          any
          none/c
          make-none/c
@@ -53,7 +54,10 @@
 
          suggest/c
 
-         flat-contract-with-explanation)
+         flat-contract-with-explanation
+
+         (struct-out between/c-s)
+         renamed-between/c)
 
 (define-syntax (flat-murec-contract stx)
   (syntax-case stx  ()
@@ -176,18 +180,18 @@
   (build-flat-contract-property
    #:name
    (λ (ctc)
-     (define n (between/c-s-low ctc))
-     (define m (between/c-s-high ctc))
-     (define name (if (renamed-between/c? ctc) (renamed-between/c-name ctc) 'between/c))
      (cond
-       [(and (= n -inf.0) (= m +inf.0))
-        (if (renamed-between/c? ctc)
-            (renamed-between/c-name ctc)
-            'real?)]
-       [(= n -inf.0) (if (= m 0) `(and/c real? (not/c positive?)) `(<=/c ,m))]
-       [(= m +inf.0) (if (= n 0) `(and/c real? (not/c negative?)) `(>=/c ,n))]
-       [(= n m) `(=/c ,n)]
-       [else `(,name ,n ,m)]))
+       [(renamed-between/c? ctc) (renamed-between/c-name ctc)]
+       [else
+        `(between/c ,(between/c-s-low ctc) ,(between/c-s-high ctc))
+        #;
+        (cond
+          [(and (= n -inf.0) (= m +inf.0))
+           'real?]
+          [(= n -inf.0) (if (= m 0) `(and/c real? (not/c positive?)) `(<=/c ,m))]
+          [(= m +inf.0) (if (= n 0) `(and/c real? (not/c negative?)) `(>=/c ,n))]
+          [(= n m) `(=/c ,n)]
+          [else ])]))
    #:stronger between/c-stronger
    #:first-order between/c-first-order
    #:generate between/c-generate))
@@ -201,29 +205,28 @@
 
 (define/final-prop (=/c x) 
   (check-unary-between/c '=/c x)
-  (make-between/c-s x x))
+  (make-renamed-between/c x x `(=/c ,x)))
 (define/final-prop (<=/c x) 
   (check-unary-between/c '<=/c x)
-  (make-between/c-s -inf.0 x))
+  (make-renamed-between/c -inf.0 x `(<=/c ,x)))
 (define/final-prop (>=/c x)
   (check-unary-between/c '>=/c x)
-  (make-between/c-s x +inf.0))
+  (make-renamed-between/c x +inf.0 `(>=/c ,x)))
 (define (check-between/c x y)
   (check-two-args 'between/c x y real? real?))
 (define/final-prop (between/c x y)
   (check-between/c x y)
   (if (= x y)
-      (coerce-contract 'between/c x)
+      (make-renamed-between/c x x `(between/c ,x ,y))
       (make-between/c-s x y)))
 
 (define (make-</c->/c-contract-property name </> -/+ less/greater)
   (build-flat-contract-property
    #:name (λ (c)
             (cond
-              [(= (</>-ctc-x c) 0)
-               `(and/c real? ,(if (equal? name '>/c) 'positive? 'negative?))]
-              [else
-               `(,name ,(</>-ctc-x c))]))
+              [(renamed-<-ctc? c) (renamed-<-ctc-name c)]
+              [(renamed->-ctc? c) (renamed->-ctc-name c)]
+              [else `(,name ,(</>-ctc-x c))]))
    #:first-order (λ (ctc) (define x (</>-ctc-x ctc)) (λ (y) (and (real? y) (</> y x))))
    #:late-neg-projection
    (λ (ctc)
@@ -276,11 +279,13 @@
   #:property prop:flat-contract
   (make-</c->/c-contract-property '</c < - "less")
   #:property prop:custom-write custom-write-property-proc)
+(struct renamed-<-ctc <-ctc (name))
 (define (</c x) (<-ctc x))
 (struct >-ctc </>-ctc ()
   #:property prop:flat-contract
   (make-</c->/c-contract-property '>/c > + "greater")
   #:property prop:custom-write custom-write-property-proc)
+(struct renamed->-ctc >-ctc (name))
 (define (>/c x) (>-ctc x))
 
 (define (check-two-args name arg1 arg2 pred1? pred2?)
@@ -295,7 +300,7 @@
                           1
                           arg1 arg2)))
 
-(set-some-basic-misc-contracts! (between/c -inf.0 +inf.0)
+(set-some-basic-misc-contracts! (renamed-between/c -inf.0 +inf.0 'real?)
                                 renamed-between/c
                                 between/c-s?
                                 between/c-s-low
@@ -307,7 +312,7 @@
 
 (define/final-prop (real-in start end)
   (check-two-args 'real-in start end real? real?)
-  (make-renamed-between/c start end 'real-in))
+  (make-renamed-between/c start end `(real-in ,start ,end)))
 
 (define/final-prop (not/c f)
   (let* ([ctc (coerce-flat-contract 'not/c f)]
@@ -350,7 +355,8 @@
   (define c/i-procedure (if chap? chaperone-procedure impersonate-procedure))
   (define ctc-proc (get/build-late-neg-projection (promise-base-ctc-ctc ctc)))
   (λ (blame)
-    (define p-app (ctc-proc (blame-add-context blame "the promise from")))
+    (define promise-blame (blame-add-context blame "the promise from"))
+    (define p-app (ctc-proc promise-blame))
     (λ (val neg-party)
       (define blame+neg-party (cons blame neg-party))
       (if (promise? val)
@@ -361,9 +367,27 @@
              (c/i-procedure
               proc
               (λ (promise)
-                (values (λ (val) (with-contract-continuation-mark
-                                  blame+neg-party
-                                  (p-app val neg-party)))
+                (values (case-lambda
+                          [(val) (with-contract-continuation-mark
+                                     blame+neg-party
+                                   (p-app val neg-party))]
+                          [()
+                           (raise-blame-error
+                            promise-blame #:missing-party neg-party val
+                            '("received 0 values" expected: "1 value"))]
+                          [reses
+                           (define length-reses (length reses))
+                           (raise-blame-error
+                            promise-blame #:missing-party neg-party val
+                            '("received ~a values~a~a" expected: "1 value")
+                            length-reses
+                            (if (<= length-reses 10)
+                                ":"
+                                ", the first 10 of which are:")
+                            (apply string-append
+                                   (for/list ([v (in-list reses)]
+                                              [_ (in-range 10)])
+                                     (format "\n   ~e" v))))])
                         promise))))
            impersonator-prop:contracted ctc
            impersonator-prop:blame blame)
@@ -911,28 +935,29 @@
   (flat-named-contract
    'printable/c
    (λ (x)
-     (let printable? ([x x])
-       (or (symbol? x)
-           (string? x)
-           (bytes? x)
-           (boolean? x)
-           (char? x)
-           (null? x)
-           (number? x)
-           (regexp? x)
-           (prefab-struct-key x) ;; this cannot be last, since it doesn't return just #t
-           (and (pair? x)
-                (printable? (car x))
-                (printable? (cdr x)))
-           (and (vector? x)
-                (andmap printable? (vector->list x)))
-           (and (box? x)
-                (printable? (unbox x)))
-           (and (hash? x)
-                (immutable? x)
-                (for/and ([(k v) (in-hash x)])
-                  (and (printable? k)
-                       (printable? v)))))))))
+     (and (let printable? ([x x])
+            (or (symbol? x)
+                (string? x)
+                (bytes? x)
+                (boolean? x)
+                (char? x)
+                (null? x)
+                (number? x)
+                (regexp? x)
+                (prefab-struct-key x) ;; this cannot be last, since it doesn't return just #t
+                (and (pair? x)
+                     (printable? (car x))
+                     (printable? (cdr x)))
+                (and (vector? x)
+                     (andmap printable? (vector->list x)))
+                (and (box? x)
+                     (printable? (unbox x)))
+                (and (hash? x)
+                     (immutable? x)
+                     (for/and ([(k v) (in-hash x)])
+                       (and (printable? k)
+                            (printable? v))))))
+          #t))))
 
 
 (define natural-number/c
@@ -1060,7 +1085,7 @@
    #:stronger (λ (this that) (contract-stronger? ctc that))
    #:list-contract? (list-contract? ctc)))
 
-(define (flat-contract-with-explanation ?)
+(define (flat-contract-with-explanation ? #:name [name (object-name ?)])
   (define (call-? x)
     (define reason (? x))
     (unless (or (boolean? reason)
@@ -1070,6 +1095,7 @@
                             (format "~s" '(or/c boolean? (-> blame? any)))))
     reason)
   (make-flat-contract
+   #:name name
    #:first-order (λ (x) (equal? #t (call-? x)))
    #:late-neg-projection
    (λ (b)

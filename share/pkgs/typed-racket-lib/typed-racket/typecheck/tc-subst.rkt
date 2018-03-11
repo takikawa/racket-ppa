@@ -5,201 +5,129 @@
 
 (require "../utils/utils.rkt"
          (utils tc-utils)
-         racket/match racket/list
+         racket/match
          (contract-req)
-         (except-in (types abbrev utils prop-ops path-type subtract overlap)
+         (env lexical-env)
+         (except-in (types abbrev utils prop-ops subtype
+                           path-type subtract overlap)
                     -> ->* one-of/c)
          (only-in (infer infer) intersect restrict)
-         (types subtype)
          (rep core-rep type-rep object-rep
               prop-rep rep-utils values-rep))
 
+(provide instantiate-obj+simplify)
+
 (provide/cond-contract
- [restrict-values (-> SomeValues? (listof Type?) SomeValues?)]
  [values->tc-results (->* (SomeValues? (listof OptObject?))
                           ((listof Type?))
                           full-tc-results/c)]
- [replace-names (-> (listof identifier?)
-                    (listof OptObject?)
-                    tc-results/c
-                    tc-results/c)]
- [erase-names (-> (listof identifier?)
-                  tc-results/c
-                  tc-results/c)])
+ [values->tc-results/explicit-subst
+  (-> SomeValues?
+      (listof (cons/c exact-nonnegative-integer?
+                      (cons/c OptObject?
+                              Type?)))
+      full-tc-results/c)]
+ [erase-identifiers (-> tc-results/c
+                        (listof identifier?)
+                        tc-results/c)])
 
-(provide subst-rep)
 
 ;; Substitutes the given objects into the values and turns it into a
 ;; tc-result.  This matches up to the substitutions in the T-App rule
 ;; from the ICFP paper.
-(define (values->tc-results v os [ts (map (λ (_) Univ) os)])
-  (define targets
-    (for/list ([o (in-list os)]
-               [arg (in-naturals)]
-               [t (in-list ts)])
-      (list (cons 0 arg) o t)))
-  (define res
-    (match v
-      [(AnyValues: p)
-       (tc-any-results p)]
-      [(Results: t ps o)
-       (ret t ps o)]
-      [(Results: t ps o dty dbound)
-       (ret t ps o dty dbound)]
-      [_ (int-err "invalid res in values->tc-results: ~a" res)]))
+;; NOTE! 'os' should contain no unbound relative addresses (i.e. "free" 
+;;       De Bruijn indices) as those indices will NOT be updated if they
+;;        are substituted under binders.
+(define (values->tc-results v objs [types '()])
+  (values->tc-results/explicit-subst
+   v
+   (for/list ([o (in-list objs)]
+              [t (in-list/rest types Univ)]
+              [idx (in-naturals)])
+     (list* idx o t))))
+
+(define (values->tc-results/explicit-subst v subst)
+  (define res->tc-res
+    (match-lambda
+      [(Result: t ps o) (-tc-result t ps o)]))
   
-  (subst-tc-results res targets))
+  (match (instantiate-obj+simplify v subst)
+    [(AnyValues: p)
+     (-tc-any-results p)]
+    [(Values: rs)
+     (-tc-results (map res->tc-res rs) #f)]
+    [(ValuesDots: rs dty dbound)
+     (-tc-results (map res->tc-res rs) (make-RestDots dty dbound))]))
 
-;; Restrict the objects in v refering to the current functions
-;; arguments to be of the types ts. Uses an identity substitution (yuck)
-;; since substitution does this same restriction.
-(define (restrict-values v ts)
-  (define targets
-    (for/list ([t (in-list ts)]
-               [arg (in-naturals)])
-      (define nm (cons 0 arg))
-      (list nm (-id-path nm) t)))
-  (subst-rep v targets))
+(define (erase-identifiers res names)
+  (substitute-names res names (for/list ([_ (in-list names)])
+                                -empty-obj)))
 
-
-;; For each name replaces all uses of it in res with the
-;; corresponding object.  This is used so that names do not escape the
-;; scope of their definitions
-(define (replace-names names objects res)
-  (define targets
-    (for/list ([nm (in-list names)]
-               [o (in-list objects)])
-      (list nm o Univ)))
-  (subst-tc-results res targets))
-
-(define (erase-names names res)
-  (define targets
-    (for/list ([nm (in-list names)])
-      (list nm -empty-obj Univ)))
-  (subst-tc-results res targets))
-
-(define (subst-tc-results res targets)
-  (define (sr t ps o)
-    (subst-tc-result t ps o targets))
-  (define (sub x) (subst-rep x targets))
-  
-  (match res
-    [(tc-any-results: p) (tc-any-results (sub p))]
-    [(tc-results: ts ps os)
-     (tc-results (map sr ts ps os) #f)]
-    [(tc-results: ts ps os dt db)
-     (tc-results (map sr ts ps os) (cons (sub dt) db))]
-    [_ (int-err "invalid res in subst-tc-results: ~a" res)]))
-
-;; Substitution of objects into a tc-result This is a combination of
-;; the other substitutions, plus a restriction of the returned type to
-;; the arguments type if the returned object corresponds to an
-;; argument.
-(define (subst-tc-result r-t r-ps r-o targets)
-  (define type*
-    (match r-o
-      [(Path: flds nm)
-       (cond
-         [(assoc nm targets name-ref=?) =>
-          (match-lambda
-            [(list _ _ t)
-             (or (path-type flds t) Univ)])]
-         [else Univ])]
-      [_ Univ]))
-
-  (tc-result
-   (intersect (subst-rep r-t targets)
-              type*)
-   (subst-rep r-ps targets)
-   (subst-rep r-o targets)))
-
-
-;; inc-lvl
-;; (cons nat nat) -> (cons nat nat)
-;; DeBruijn indexes are represented as a pair of naturals.
-;; This function increments the 'lvl' field of such an index.
-(define (inc-lvl x)
-  (match x
-    [(cons lvl arg) (cons (add1 lvl) arg)]
-    [_ x]))
-
-;; inc-lvls
-;; This function increments the 'lvl' field in all of the targets
-;; and objects of substitution (see 'inc-lvl' above)
-(define (inc-lvls targets)
-  (for/list ([tgt (in-list targets)])
-    (match tgt
-      [(list nm1 (Path: flds nm2) ty)
-       (list (inc-lvl nm1) (make-Path flds (inc-lvl nm2)) ty)]
-      [(cons nm1 rst)
-       (cons (inc-lvl nm1) rst)])))
-
-;; Simple substitution of objects into a Rep
-;; This is basically 'rep[x ↦ o]'.
-;; If that was the only substitution we were doing,
-;; and the type of 'x' was 'τ', then 'targets'
-;; would equal (list (list x o τ)) (i.e. it's the list of
-;; identifiers being substituted out, the optional object replacing
-;; them, and their type).
-(define/cond-contract (subst-rep rep targets)
-  (-> any/c (listof (list/c name-ref/c OptObject? Type?))
-      any/c)
-  (define (sub/inc rep)
-    (subst-rep rep (inc-lvls targets)))
-  ;; substitution loop
-  (let subst ([rep rep])
+(define (instantiate-obj+simplify rep mapping)
+  ;; lookup: if idx has a mapping,
+  ;; then returns (cons/c OptObject? Type?),
+  ;; else returns #f
+  (define (lookup idx) (match (assv idx mapping)
+                         [(cons _ entry) entry]
+                         [_ #f]))
+  (let subst/lvl ([rep rep] [lvl 0])
+    (define (subst rep) (subst/lvl rep lvl))
     (match rep
       ;; Functions
       ;; increment the level of the substituted object
-      [(arr: dom rng rest drest kws)
-       (make-arr (map subst dom)
-                 (sub/inc rng)
-                 (and rest (subst rest))
-                 (and drest (cons (subst (car drest)) (cdr drest)))
-                 (map subst kws))]
-      [(Path: flds nm)
-       (let ([flds (map subst flds)])
-         (cond
-           [(assoc nm targets name-ref=?) =>
-            (λ (l) (match (second l)
-                     [(Empty:) -empty-obj]
-                     [(Path: flds* nm*)
-                      (make-Path (append flds flds*) nm*)]))]
-           [else (make-Path flds nm)]))]
+      [(Arrow: dom rst kws rng)
+       (make-Arrow (map subst dom)
+                   (and rst (subst rst))
+                   (map subst kws)
+                   (subst/lvl rng (add1 lvl)))]
+      [(DepFun: dom pre rng)
+       (make-DepFun (for/list ([d (in-list dom)])
+                      (subst/lvl d (add1 lvl)))
+                    (subst/lvl pre (add1 lvl))
+                    (subst/lvl rng (add1 lvl)))]
+      [(Intersection: ts raw-prop)
+       (-refine (make-Intersection (map subst ts))
+                (subst/lvl raw-prop (add1 lvl)))]
+      [(Path: flds (cons (== lvl) (app lookup (cons o _))))
+       (make-Path (map subst flds) o)]
       ;; restrict with the type for results and props
-      [(TypeProp: (Path: flds nm) ty-at-flds)
-       (let ([flds (map subst flds)])
-         (cond
-           [(assoc nm targets name-ref=?) =>
-            (match-lambda
-              [(list _ new-obj new-obj-ty)
-               (define arg-ty-at-flds (or (path-type flds new-obj-ty) Univ))
-               (define new-ty-at-flds (intersect ty-at-flds arg-ty-at-flds))
-               (match new-obj
-                 [_ #:when (Bottom? new-ty-at-flds) -ff]
-                 [_ #:when (subtype arg-ty-at-flds ty-at-flds) -tt]
-                 [(Empty:) -tt]
-                 [(Path: flds* nm*)
-                  (define resulting-obj (make-Path (append flds flds*) nm*))
-                  (-is-type resulting-obj new-ty-at-flds)])])]
-           [else (-is-type (make-Path flds nm) (subst ty-at-flds))]))]
-      [(NotTypeProp: (Path: flds nm) not-ty-at-flds)
-       (let ([flds (map subst flds)])
-         (cond
-           [(assoc nm targets name-ref=?) =>
-            (match-lambda
-              [(list _ new-obj new-obj-ty)
-               (define arg-ty-at-flds (or (path-type flds new-obj-ty) Univ))
-               (define new-ty-at-flds (subtract arg-ty-at-flds not-ty-at-flds))
-               (define new-not-ty-at-flds (restrict not-ty-at-flds arg-ty-at-flds))
-               (match new-obj
-                 [_ #:when (Bottom? new-ty-at-flds) -ff]
-                 [_ #:when (Bottom? new-not-ty-at-flds) -tt]
-                 [(Empty:) -tt]
-                 [(Path: flds* nm*)
-                  (define resulting-obj (make-Path (append flds flds*) nm*))
-                  (-not-type resulting-obj new-not-ty-at-flds)])])]
-           [else
-            (-not-type (make-Path flds nm) (subst not-ty-at-flds))]))]
+      [(TypeProp: (Path: flds (cons (== lvl) (app lookup (? pair? entry))))
+                  prop-ty)
+       (define o (make-Path (map subst flds) (car entry)))
+       (define o-ty (or (path-type flds (cdr entry)) Univ))
+       (define new-prop-ty (intersect prop-ty o-ty o))
+       (cond
+         [(Bottom? new-prop-ty) -ff]
+         [(subtype o-ty prop-ty) -tt]
+         [(Empty? o) -tt]
+         [else (-is-type o new-prop-ty)])]
+      [(NotTypeProp: (Path: flds (cons (== lvl) (app lookup (? pair? entry))))
+                     prop-ty)
+       (define o (make-Path (map subst flds) (car entry)))
+       (define o-ty (or (path-type flds (cdr entry)) Univ))
+       (define new-o-ty (subtract o-ty prop-ty o))
+       (define new-prop-ty (restrict prop-ty o-ty o))
+       (cond
+         [(or (Bottom? new-o-ty)
+              (Univ? new-prop-ty))
+          -ff]
+         [(Empty? o) -tt]
+         [else (-not-type o new-prop-ty)])]
+      [(tc-result: orig-t
+                   orig-ps
+                   (Path: flds (cons (== lvl) (app lookup (? pair? entry)))))
+       (define o (make-Path (map subst flds) (car entry)))
+       (define t (intersect orig-t (or (path-type flds (cdr entry)) Univ)))
+       (define ps (subst orig-ps))
+       (-tc-result t ps o)]
+      [(Result: orig-t
+                orig-ps
+                (Path: flds (cons (== lvl) (app lookup (? pair? entry)))))
+       (define o (make-Path (map subst flds) (car entry)))
+       (define t (intersect orig-t (or (path-type flds (cdr entry)) Univ)))
+       (define ps (subst orig-ps))
+       (make-Result t ps o)]
       ;; else default fold over subfields
       [_ (Rep-fmap rep subst)])))
+
+

@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2017 PLT Design Inc.
+  Copyright (c) 2004-2018 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -639,7 +639,8 @@ int is_equal (Scheme_Object *obj1, Scheme_Object *obj2, Equal_Info *eql)
     }
     if (!eql->for_chaperone) {
       if (SCHEME_CHAPERONEP(obj1)) {
-        obj1 = ((Scheme_Chaperone *)obj1)->val;
+	/* OPT only use prev for unsafe-chaperone-vector, use val otherwise */
+        obj1 = ((Scheme_Chaperone *)obj1)->prev;
         goto top_after_next;
       }
       if (SCHEME_CHAPERONEP(obj2)) {

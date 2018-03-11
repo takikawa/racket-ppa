@@ -174,6 +174,21 @@ and the @racket[URL] and @racket[Path/Param] types from
 @defmodule/incl[typed/racket/async-channel @history[#:added "1.1"]]
 @defmodule/incl[typed/racket/date]
 @defmodule/incl[typed/racket/draw]
+
+@defmodule/incl[typed/racket/extflonum]{
+  @deftogether[[
+    @defform[(for/extflvector type-ann-maybe (for-clause ...) expr ...+)]
+    @defform[(for*/extflvector type-ann-maybe (for-clause ...) expr ...+)]
+  ]]
+}
+
+@defmodule/incl[typed/racket/flonum]{
+  @deftogether[[
+    @defform[(for/flvector type-ann-maybe (for-clause ...) expr ...+)]
+    @defform[(for*/flvector type-ann-maybe (for-clause ...) expr ...+)]
+  ]]
+}
+
 @defmodule/incl[typed/racket/gui]
 @defmodule/incl[typed/racket/gui/no-check]
 @defmodule/incl[typed/racket/random @history[#:added "1.5"]]
@@ -205,7 +220,7 @@ and the @racket[URL] and @racket[Path/Param] types from
 @defmodule/incl[typed/web-server/http]
 @defmodule/incl[typed/db]
 @defmodule/incl[typed/db/base]
-@defmodule/incl[typed/db/splite3]
+@defmodule/incl[typed/db/sqlite3]
 
 In some cases, these typed adapters may not contain all of exports of the
 original module, or their types may be more limited.

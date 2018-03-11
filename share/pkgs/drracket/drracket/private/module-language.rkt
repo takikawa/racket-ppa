@@ -16,6 +16,7 @@
          compiler/cm
          launcher
          framework
+         framework/private/srcloc-panel
          string-constants
          racket/place
          mrlib/close-icon
@@ -25,6 +26,7 @@
          "rep.rkt"
          "eval-helpers-and-pref-init.rkt"
          "local-member-names.rkt"
+         "insulated-read-language.rkt"
          drracket/private/rectangle-intersect
          pkg/lib
          pkg/gui
@@ -116,8 +118,7 @@
   
   (define module-language<%>
     (interface ()
-      get-users-language-name
-      get-language-info))
+      get-users-language-name))
   
   ;; add-module-language : -> void
   ;; adds the special module-only language to drracket
@@ -159,35 +160,7 @@
   ;;             -> (implements drracket:language:language<%>)
   (define (module-mixin %)
     (class* % (drracket:language:language<%> module-language<%>)
-      
-      (define language-info #f) ;; a result from module-compiled-language-info
-      (define sandbox #f)       ;; a sandbox for querying the language-info
-      (define/public (get-language-info key default)
-        (init-sandbox)
-        (cond
-          [(and language-info sandbox)
-           (let ([mp (vector-ref language-info 0)]
-                 [name (vector-ref language-info 1)]
-                 [val (vector-ref language-info 2)])
-             (call-in-sandbox-context
-              sandbox
-              (λ ()
-                (parameterize ([current-security-guard drracket:init:system-security-guard])
-                  (((dynamic-require mp name) val) key default)))))]
-          [else default]))
-      (define/private (init-sandbox)
-        (unless sandbox
-          (when language-info
-            ;; creating a sanbox can fail in strange ways so we just
-            ;; swallow the failures so as to not wreck DrRacket
-            (with-handlers ((exn:fail? (λ (x) 
-                                         (log-error "DrRacket:module-language:sandbox exn: ~a" 
-                                                    (exn-message x))
-                                         (for ([x (in-list (continuation-mark-set->context
-                                                            (exn-continuation-marks x)))])
-                                           (log-error (format "  ~s" x))))))
-              (set! sandbox (make-evaluator 'racket/base))))))
-      
+
       (define/override (first-opened settings)
         (define ns (with-handlers ([exn:fail? 
                                     (λ (x) 
@@ -222,39 +195,21 @@
       
       (inherit get-language-name)
       (define/public (get-users-language-name defs-text settings)
-        (define defs-port (open-input-text-editor defs-text))
-        (port-count-lines! defs-port)
-        (define read-successfully?
-          (with-handlers ((exn:fail? (λ (x) #f)))
-            (read-language defs-port (λ () #f))
-            #t))
+        (define str (send defs-text irl-get-read-language-name))
+        (define pos (and str (regexp-match-positions #rx"#(?:!|lang )" str)))
         (cond
-          [read-successfully?
-           (define-values (_line _col port-pos) (port-next-location defs-port))
-           (define after-comments-position
-             (let ()
-               (define p (open-input-text-editor defs-text))
-               (port-count-lines! p)
-               (skip-past-comments p)
-               (define-values (line col pos) (port-next-location p))
-               (- pos 1)))
-           (define str (send defs-text get-text after-comments-position (- port-pos 1)))
-           (define pos (regexp-match-positions #rx"#(?:!|lang )" str))
-           (cond
-             [(not pos)
-              (get-language-name)]
-             [else
-              (define language-name-without-runtime-stuff
-                (substring str (cdr (car pos)) (string-length str)))
-              (format "~a~a"
-                      language-name-without-runtime-stuff
-                      (case (drracket:language:simple-settings-annotations settings)
-                        [(none) (string-constant module-language-repl-no-annotations)]
-                        [(debug) (string-constant module-language-repl-debug-annotations)]
-                        [(debug/profile)
-                         (string-constant module-language-repl-debug/profile-annotations)]
-                        [(test-coverage)
-                         (string-constant module-language-repl-test-annotations)]))])]
+          [pos
+           (define language-name-without-runtime-stuff
+             (substring str (cdr (car pos)) (string-length str)))
+           (format "~a~a"
+                   language-name-without-runtime-stuff
+                   (case (drracket:language:simple-settings-annotations settings)
+                     [(none) (string-constant module-language-repl-no-annotations)]
+                     [(debug) (string-constant module-language-repl-debug-annotations)]
+                     [(debug/profile)
+                      (string-constant module-language-repl-debug/profile-annotations)]
+                     [(test-coverage)
+                      (string-constant module-language-repl-test-annotations)]))]
           [else
            (get-language-name)]))
       
@@ -391,11 +346,6 @@
       (define/override (on-execute settings run-in-user-thread)
         (super on-execute settings run-in-user-thread)
         
-        ;; reset the language info so that if the module is illformed, 
-        ;; we don't save the language info from the last run
-        (set! language-info #f)
-        (set! sandbox #f)
-        
         (let ([currently-open-files (get-currently-open-files)])
           (run-in-user-thread
            (λ ()
@@ -424,8 +374,10 @@
       
       (inherit get-reader)
       (define repl-init-thunk (make-thread-cell #f))
-      
-      (define/override (front-end/complete-program port settings)
+
+      ;; drracket will always supply `the-irl`, but some tools might call this,
+      ;; and they might not supply it
+      (define/override (front-end/complete-program port settings [the-irl #f])
         (define (super-thunk) 
           (define reader (get-reader))
           (reader (object-name port) port))
@@ -453,16 +405,7 @@
              (define expr
                ;; just reading the definitions might be a syntax error,
                ;; possibly due to bad language (eg, no foo/lang/reader)
-               (with-handlers ([exn:fail?
-                                (λ (e)
-                                  ;; [Eli] FIXME: use `read-language' on `port' after calling
-                                  ;; `file-position' to reset it to the beginning (need to
-                                  ;; make sure that it's always a seekable port), then see
-                                  ;; the position that we're left at, re-read that part of
-                                  ;; the port (a second reset), construct a string holding
-                                  ;; the #lang, and read from it an empty module, and extract
-                                  ;; the base module from it (ask Matthew about this).
-                                  (raise-hopeless-exception e))])
+               (with-handlers ([exn:fail? (λ (e) (raise-hopeless-exception e))])
                  (super-thunk)))
              (when (eof-object? expr)
                (raise-hopeless-syntax-error (string-append
@@ -530,23 +473,25 @@
           (current-namespace (module->namespace modspec))
           (check-interactive-language))
         (define (*do-module-specified-configuration)
-          (let ([info (module->language-info modspec #t)])
+          (define info (module->language-info modspec #t))
+          (unless (mcli? info) (set! info #f))
+          (when the-irl
             (parameterize ([current-eventspace drracket:init:system-eventspace])
               (queue-callback
-               (λ () (set! language-info info))))
-            (when info
-              (let ([get-info
-                     ((dynamic-require (vector-ref info 0)
-                                       (vector-ref info 1))
-                      (vector-ref info 2))])
-                (let ([configs (get-info 'configure-runtime '())])
-                  (for ([config (in-list configs)])
-                    ((dynamic-require (vector-ref config 0)
-                                      (vector-ref config 1))
-                     (vector-ref config 2)))))))
-          (let ([cr-submod `(submod ,modspec configure-runtime)])
-            (when (module-declared? cr-submod)
-              (dynamic-require cr-submod #f))))
+               (λ () (set-irl-mcli-vec! the-irl info)))))
+          (when info
+            (let ([get-info
+                   ((dynamic-require (vector-ref info 0)
+                                     (vector-ref info 1))
+                    (vector-ref info 2))])
+              (let ([configs (get-info 'configure-runtime '())])
+                (for ([config (in-list configs)])
+                  ((dynamic-require (vector-ref config 0)
+                                    (vector-ref config 1))
+                   (vector-ref config 2))))))
+          (define cr-submod `(submod ,modspec configure-runtime))
+          (when (module-declared? cr-submod)
+            (dynamic-require cr-submod #f)))
         ;; here's where they're all combined with the module expression
         (expr-getter *pre module-expr *post))
       
@@ -696,7 +641,7 @@
   ;; module-language-config-panel : panel -> (case-> (-> settings) (settings -> void))
   (define (module-language-config-panel parent)
     (define new-parent
-      (new vertical-panel%
+      (new-vertical-panel%
            [parent parent]
            [alignment '(center center)]
            [stretchable-height #f]
@@ -820,7 +765,7 @@
                                      [choices '("a" "b" "c")]
                                      [label #f]
                                      [callback (λ (x y) (update-buttons))]))
-    (define button-panel (new horizontal-panel%
+    (define button-panel (new-horizontal-panel%
                               [parent cp-panel]
                               [alignment '(center center)]
                               [stretchable-height #f]))
@@ -1344,10 +1289,14 @@
           (define copy-msg
             (cond
               [bottom-bar-most-recent-jumped-to-loc
-               (for/list ([error/status-message-str+srcloc 
-                           (in-list error/status-message-strs+srclocs)]
-                          #:when (matching-srcloc error/status-message-str+srcloc))
-                 (combine-msg error/status-message-str+srcloc))]
+               (apply
+                string-append
+                (add-between
+                 (for/list ([error/status-message-str+srcloc
+                             (in-list error/status-message-strs+srclocs)]
+                            #:when (matching-srcloc error/status-message-str+srcloc))
+                   (combine-msg error/status-message-str+srcloc))
+                 "\n"))]
               [else
                (combine-msg (list-ref error/status-message-strs+srclocs error/status-index))]))
           (send (send (get-tab) get-frame) set-expand-error/status
@@ -1408,6 +1357,13 @@
         (update-frame-expand-error))
       
       (define/private (jump-to vec)
+        ;; when we get here, the only errors we see are from online expansion
+        ;; and those errors' source locs are always in the definitions text
+        (send (send (get-tab) get-ints) highlight-a-single-error
+              (srcloc this
+                      #f #f
+                      (vector-ref vec 0)
+                      (vector-ref vec 1)))
         (set-position (- (vector-ref vec 0) 1))
         (define cnvs (get-canvas))
         (when cnvs (send cnvs focus)))
@@ -1641,10 +1597,10 @@
       
       (define/override (make-root-area-container cls parent)
         (set! expand-error-parent-panel
-              (super make-root-area-container vertical-panel% parent))
+              (super make-root-area-container vertical-pane% parent))
         (define root (make-object cls expand-error-parent-panel))
         (set! expand-error-panel
-              (new horizontal-panel% 
+              (new-horizontal-panel% 
                    [stretchable-height #f]
                    [parent expand-error-parent-panel]))
         
@@ -1654,12 +1610,12 @@
                                         [msgs '("hi")]
                                         [err? #f]))
         (set! expand-error-button-parent-panel
-              (new horizontal-panel%
+              (new-horizontal-panel%
                    [stretchable-width #f]
                    [stretchable-height #f]
                    [parent expand-error-panel]))
         (set! expand-error-install-suggestions-panel
-              (new horizontal-panel%
+              (new-horizontal-panel%
                    [stretchable-width #f]
                    [stretchable-height #f]
                    [parent expand-error-panel]))
@@ -1679,9 +1635,9 @@
                    [font small-control-font]
                    [callback (λ (b evt) (send (send (get-current-tab) get-defs) expand-error-next))]))
         (set! expand-error-multiple-child
-              (new horizontal-panel% [parent expand-error-button-parent-panel]))
+              (new-horizontal-panel% [parent expand-error-button-parent-panel]))
         (set! expand-error-zero-child
-              (new horizontal-panel% [parent expand-error-button-parent-panel]))
+              (new-horizontal-panel% [parent expand-error-button-parent-panel]))
         (new button% 
              [label "<"]
              [font small-control-font]
@@ -1747,7 +1703,20 @@
                                  l
                                  (append l (list expand-error-panel))))))
             (send expand-error-message set-msgs 
-                  expand-error-msgs expand-error-msg-is-err? expand-error-msgs+stack)
+                  expand-error-msgs expand-error-msg-is-err? expand-error-msgs+stack
+                  (cond
+                    [(not err?) '()]
+                    [(= srcloc-count 0) '()]
+                    [(= srcloc-count 1)
+                     (list (list sc-jump-to-error
+                                 (λ () (send (send (get-current-tab) get-defs) expand-error-next))))]
+                    [else
+                     (list
+                      (list (string-constant jump-to-next-error-highlight-menu-item-label)
+                                 (λ () (send (send (get-current-tab) get-defs) expand-error-next)))
+                      (list (string-constant jump-to-prev-error-highlight-menu-item-label)
+                            (λ () (send (send (get-current-tab) get-defs) expand-error-prev))))]))
+
             (send expand-error-install-suggestions-panel change-children (λ (l) '()))
             (when expand-error-install-suggestions
               (cond
@@ -1936,11 +1905,18 @@
   (define error-message%
     (class canvas%
       (init-field msgs err? [copy-msg ""])
+      (define menu-items '())
       (inherit refresh get-dc get-client-size popup-menu)
-      (define/public (set-msgs _msgs _err? _copy-msg) 
+      (define/public (set-msgs _msgs _err? _copy-msg _menu-items)
+        (unless (string? _copy-msg)
+          (raise-argument-error 'error-message%::set-msgs
+                                "string?"
+                                2
+                                _msgs _err? _copy-msg _menu-items))
         (set! msgs _msgs)
         (set! err? _err?)
         (set! copy-msg _copy-msg)
+        (set! menu-items _menu-items)
         (set-the-height/dc-font (editor:get-current-preferred-font-size))
         (refresh))
       (define/override (on-event evt)
@@ -1948,13 +1924,18 @@
           [(and (send evt button-down?) err?)
            (define m (new popup-menu%))
            (define itm (new menu-item% 
-                            [label (string-constant copy-menu-item)]
+                            [label (string-constant copy-error-message)]
                             [parent m]
                             [callback
                              (λ (itm evt)
                                (send the-clipboard set-clipboard-string 
                                      copy-msg
                                      (send evt get-time-stamp)))]))
+           (for ([item (in-list menu-items)])
+             (new menu-item%
+                  [label (list-ref item 0)]
+                  [parent m]
+                  [callback (λ (itm evt) ((list-ref item 1)))]))
            (popup-menu m 
                        (+ (send evt get-x) 1)
                        (+ (send evt get-y) 1))]
@@ -1964,14 +1945,11 @@
         (define dc (get-dc))
         (define-values (cw ch) (get-client-size))
         (send dc set-text-foreground (if err? "firebrick" "black"))
-        (define tot-th
-          (for/sum ([msg (in-list msgs)])
-            (define-values (tw th td ta) (send dc get-text-extent msg))
-            th))
+        (define-values (tot-th gap-space) (height/gap-space dc))
         (for/fold ([y (- (/ ch 2) (/ tot-th 2))]) ([msg (in-list msgs)])
           (define-values (tw th td ta) (send dc get-text-extent msg))
           (send dc draw-text msg 2 y)
-          (+ y th)))
+          (+ y th gap-space)))
       (super-new [style '(transparent)])
       
       ;; need object to hold onto this function, so this is
@@ -1997,11 +1975,19 @@
                     (send normal-control-font get-weight)
                     (send normal-control-font get-underlined)
                     (send normal-control-font get-smoothing)))
-        (define tot-th
+        (define top/bottom-padding 4)
+        (define-values (tot-th gap-space) (height/gap-space dc))
+        (min-height (+ top/bottom-padding (inexact->exact (ceiling tot-th)))))
+
+      (define/private (height/gap-space dc)
+        (define gap-space 2)
+        (define tot-th-without-gap-space
           (for/sum ([msg (in-list msgs)])
             (define-values (tw th td ta) (send dc get-text-extent msg))
             th))
-        (min-height (inexact->exact (ceiling tot-th))))
+        (values (+ tot-th-without-gap-space
+                   (* (max 0 (- (length msgs) 1)) gap-space))
+                gap-space))
       
       (inherit min-height)
       (set-the-height/dc-font
@@ -2695,26 +2681,26 @@
     (preferences:add-panel
      (string-constant online-expansion)
      (λ (parent)
-       (define parent-vp (new vertical-panel% 
+       (define parent-vp (new-vertical-panel% 
                               [parent parent]
                               [alignment '(center top)]))
-       (new vertical-panel% [parent parent-vp])
-       (define vp (new vertical-panel% 
+       (new-vertical-panel% [parent parent-vp])
+       (define vp (new-vertical-panel% 
                        [parent parent-vp]
                        [stretchable-width #f]
                        [stretchable-height #f]
                        [alignment '(left center)]))
-       (new vertical-panel% [parent parent-vp])
+       (new-vertical-panel% [parent parent-vp])
        
        (define ((make-callback pref-sym) choice evt)
          (preferences:set pref-sym (index->pref (send choice get-selection))))
-       (preferences:add-check (new horizontal-panel% 
+       (preferences:add-check (new-horizontal-panel% 
                                    [parent vp]
                                    [stretchable-height #f]
                                    [alignment '(center center)])
                               'drracket:online-compilation-default-on
                               (string-constant enable-online-expansion))
-       (new vertical-panel% [parent vp] [stretchable-height #f] [min-height 20])
+       (new-vertical-panel% [parent vp] [stretchable-height #f] [min-height 20])
        (define read-choice
          (new choice% 
               [parent vp]
@@ -2766,7 +2752,6 @@
       v))
   
   (define modes<%> (interface () 
-                     maybe-change-language
                      change-mode-to-match))
   
   (define modes-mixin
@@ -2788,11 +2773,7 @@
       (define/public (set-current-mode mode)
         (set! current-mode mode)
         (define surrogate (drracket:modes:mode-surrogate mode))
-        (cond
-          [(is-a? surrogate default-surrogate%)
-           (update-surrogate)]
-          [else
-           (set-surrogate surrogate)])
+        (set-surrogate surrogate)
         (define interactions-text (send (get-tab) get-ints))
         (when interactions-text
           (send interactions-text set-surrogate surrogate)
@@ -2820,210 +2801,4 @@
                           (unless (is-current-mode? mode)
                             (set-current-mode mode))
                           (loop (cdr modes))))]))))
-      
-      (define current-surrogate-mod #f)
-      (define current-language-end #f)
-      
-      ;; called by the surrogate-mixin to see if the surrogate needs changing if
-      ;; the mode is not the racket language mode, then this doesn't get called.
-      (define/public (maybe-change-language start)
-        (when (or (not current-language-end)
-                  (< start current-language-end))
-          (update-surrogate)))
-      
-      (define/private (update-surrogate)
-        (define defs-port (open-input-text-editor this))
-        ;; need this to count chars, not bytes (in case of non-ASCII
-        ;; in defs before #lang line)
-        (port-count-lines! defs-port)
-        (define get-info
-          (with-handlers ([exn:fail? (λ (x) #f)])
-            (read-language defs-port (λ () #f))))
-        (define-values (line col pos) (port-next-location defs-port))
-        (define new-surrogate-mod
-          (and get-info
-               (get-info 'definitions-text-surrogate #f)))
-        (set! current-language-end pos)
-        (unless (and current-surrogate-mod
-                     (equal? current-surrogate-mod new-surrogate-mod))
-          (set! current-surrogate-mod new-surrogate-mod)
-          (define new-surrogate
-            (and new-surrogate-mod
-                 (with-handlers ([exn:fail? 
-                                  (λ (x)
-                                    (log-error
-                                     (format "Error while loading surrogate; expected to be in ~s\n~a"
-                                             new-surrogate-mod
-                                             (exn-message x)))
-                                    #f)])
-                   (dynamic-require new-surrogate-mod 'surrogate%))))
-          (cond
-            [new-surrogate
-             (set-surrogate (new (change-lang-surrogate-mixin new-surrogate)))]
-            [else
-             (unless (is-a? (get-surrogate) default-surrogate%)
-               (set-surrogate (new default-surrogate%)))])))
-      
-      (super-new)))
-  
-  (define change-lang-surrogate-mixin
-    (mixin (mode:surrogate-text<%>) ()
-      (define/override (after-insert ths supr start len)
-        (super after-insert ths supr start len)
-        (when (is-a? ths modes<%>)
-          (send ths maybe-change-language start)))
-      
-      (define/override (after-delete ths supr start len)
-        (super after-delete ths supr start len)
-        (when (is-a? ths modes<%>)
-          (send ths maybe-change-language start)))
-      
-      (super-new)))
-  
-  (define default-surrogate%
-    (change-lang-surrogate-mixin
-     racket:text-mode%)))
-
-(define (skip-past-comments port)
-  (define (get-it str)
-    (for ([c1 (in-string str)])
-      (define c2 (read-char-or-special port))
-      (unless (equal? c1 c2)
-        (error 'get-it
-               "expected ~s, got ~s, orig string ~s"
-               c1 c2 str))))
-  (let loop ()
-    (define p (peek-char-or-special port))
-    (cond-strs port
-      [";"
-       (let loop ()
-         (define c (read-char-or-special port))
-         (case c
-           [(#\linefeed #\return #\u133 #\u8232 #\u8233)
-            (void)]
-           [else
-            (unless (eof-object? c)
-              (loop))]))
-       (loop)]
-      ["#|"
-       (let loop ([depth 0])
-         (define p1 (peek-char-or-special port))
-         (cond
-           [(and (equal? p1 #\|)
-                 (equal? (peek-char-or-special port 1) #\#))
-            (get-it "|#")
-            (cond
-              [(= depth 0) (void)]
-              [else (loop (- depth 1))])]
-           [(and (equal? p1 #\#)
-                 (equal? (peek-char-or-special port 1) #\|))
-            (get-it "#|")
-            (loop (+ depth 1))]
-           [else
-            (read-char-or-special port)
-            (loop depth)]))
-       (loop)]
-      ["#;"
-       (with-handlers ((exn:fail:read? void))
-         (read port)
-         (loop))]
-      ["#! "
-       (read-line-slash-terminates port)
-       (loop)]
-      ["#!/"
-       (read-line-slash-terminates port)
-       (loop)]
-      [else
-       (define p (peek-char-or-special port))
-       (cond
-         [(eof-object? p) (void)]
-         [(and (char? p) (char-whitespace? p))
-          (read-char-or-special port)
-          (loop)]
-         [else (void)])])))
-
-(define-syntax (cond-strs stx)
-  (syntax-case stx (else)
-    [(_ port [chars rhs ...] ... [else last ...])
-     (begin
-       (for ([chars (in-list (syntax->list #'(chars ...)))])
-         (unless (string? (syntax-e chars))
-           (raise-syntax-error 'chars "expected a string" stx chars))
-         (for ([char (in-string (syntax-e chars))])
-           (unless (< (char->integer char) 128)
-             (raise-syntax-error 'chars "expected only one-byte chars" stx chars))))
-       #'(cond
-           [(check-chars port chars)
-            rhs ...]
-           ...
-           [else last ...]))]))
-
-(define (check-chars port chars)
-  (define matches?
-    (for/and ([i (in-naturals)]
-              [c (in-string chars)])
-      (equal? (peek-char-or-special port i) c)))
-  (when matches?
-    (for ([c (in-string chars)])
-      (read-char-or-special port)))
-  matches?)
-
-(define (read-line-slash-terminates port)
-  (let loop ([previous-slash? #f])
-    (define c (read-char-or-special port))
-    (case c
-      [(#\\) (loop #t)]
-      [(#\linefeed #\return)
-       (cond
-         [previous-slash?
-          (define p (peek-char-or-special port))
-          (when (and (equal? c #\return)
-                     (equal? p #\linefeed))
-            (read-char-or-special port))
-          (loop #f)]
-         [else
-          (void)])]
-      [else
-       (unless (eof-object? c)
-         (loop #f))])))
-
-(module+ test
-  (require rackunit racket/port)
-  (define (clear-em str)
-    (define sp (if (port? str) str (open-input-string str)))
-    (skip-past-comments sp)
-    (apply
-     string
-     (for/list ([i (in-port read-char sp)])
-       i)))
-  (check-equal? (clear-em ";") "")
-  (check-equal? (clear-em ";\n1") "1")
-  (check-equal? (clear-em ";  \n1") "1")
-  (check-equal? (clear-em ";  \r\n1") "1")
-  (check-equal? (clear-em ";  \u8233\n1") "1")
-  (check-equal? (clear-em "         1") "1")
-  (check-equal? (clear-em "#| |#1") "1")
-  (check-equal? (clear-em "#| #| #| #| #| |# |# |# |# |#1") "1")
-  (check-equal? (clear-em "#| #| #| #| #| |# |# #| |# |# |# |#1") "1")
-  (check-equal? (clear-em "#||#1") "1")
-  (check-equal? (clear-em "#|#|#|#|#||#|#|#|#|#1") "1")
-  (check-equal? (clear-em "#|#|#|#|#||#|##||#|#|#|#1") "1")
-  (check-equal? (clear-em " #!    \n         1") "1")
-  (check-equal? (clear-em " #!/    \n         1") "1")
-  (check-equal? (clear-em " #!/    \\\n2\n         1") "1")
-  (check-equal? (clear-em " #!/    \\\r2\n         1") "1")
-  (check-equal? (clear-em " #!/    \\\r\n2\n         1") "1")
-  (check-equal? (clear-em " #!/    \n\r\n         1") "1")
-  (check-equal? (clear-em "#;()1") "1")
-  (check-equal? (clear-em "#;  (1 2 3 [] {} ;xx\n 4)  1") "1")
-  (check-equal? (clear-em "#||##|#lang rong|#1") "1")
-
-  (let ()
-    (define-values (in out) (make-pipe-with-specials))
-    (thread
-     (λ ()
-       (display ";" out)
-       (write-special '(x) out)
-       (display "\n1" out)
-       (close-output-port out)))
-    (check-equal? (clear-em in) "1")))
+      (super-new))))

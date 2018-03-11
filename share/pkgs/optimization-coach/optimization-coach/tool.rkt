@@ -8,9 +8,7 @@
 
 (require "structs.rkt" "report.rkt" "display.rkt")
 
-(provide tool@
-         optimization-coach-drracket-button
-         optimization-coach-loaded?)
+(provide tool@)
 
 ;; DrRacket tool for reporting missed optimizations in the editor.
 
@@ -61,26 +59,12 @@
   optimization-coach-profile
   launch-profile)
 
-(define optimization-coach-drracket-button
-  (list
-   "Optimization Coach"
-   optimization-coach-bitmap
-   (lambda (drr-frame)
-     (with-handlers
-         ([exn:fail:object?
-           (lambda _ (message-box
-                      "Optimization Coach"
-                      "Please restart DrRacket to use Optimization Coach."))])
-       (send drr-frame launch-optimization-coach)))))
-
-(define optimization-coach-loaded? #f)
-
 (define-unit tool@
 
   (import drracket:tool^)
   (export drracket:tool-exports^)
 
-  (define (phase1) (set! optimization-coach-loaded? #t))
+  (define (phase1) (void))
   (define (phase2) (void))
 
   (define highlights-mixin
@@ -252,7 +236,7 @@
   (define frame-mixin
     (mixin (drracket:unit:frame<%>) ()
       (inherit set-show-menu-sort-key get-current-tab
-               get-definitions-text get-interactions-text get-area-container)
+               get-definitions-text get-interactions-text)
 
 
       ;; view menu
@@ -297,39 +281,44 @@
       ;; -----------------------------------------------------------------------
 
       ;; control panel
+      (define pane               #f)
       (define panel              #f)
-      (define check-box-panel    #f)
-      (define profile-panel      #f)
+      (define check-box-pane     #f)
+      (define profile-pane       #f)
       (define profile-file-field #f)
+      (define/override (make-root-area-container cls parent)
+        (define rac (super make-root-area-container vertical-panel% parent))
+        (set! pane rac)
+        (new cls [parent rac]))
       (define (create-panel)
         (set! panel
               (new vertical-panel%
-                   [parent (get-area-container)]
+                   [parent pane]
                    [stretchable-height #f]))
-        (set! check-box-panel
-              (new horizontal-panel%
+        (set! check-box-pane
+              (new horizontal-pane%
                    [parent panel]
                    [stretchable-height #f]))
-        (set! profile-panel
-              (new horizontal-panel%
+        (set! profile-pane
+              (new horizontal-pane%
                    [parent panel]
                    [stretchable-height #f]))
         (new button%
              [label (string-constant close)]
-             [parent check-box-panel]
+             [parent check-box-pane]
              [callback (lambda _ (close-optimization-coach))])
         (new button%
              [label "Show More"]
-             [parent profile-panel]
+             [parent profile-pane]
              [callback (lambda _ (launch-optimization-coach #:verbose? #t))])
         (new button%
              [label "Refine"]
-             [parent profile-panel]
+             [parent profile-pane]
              [callback (lambda _ (launch-profile))])
         (set! profile-file-field
               (new text-field%
                    [label "Profile file:"]
-                   [parent profile-panel]
+                   [parent profile-pane]
                    [init-value (send (get-definitions-text) get-profile-file)]
                    [callback ; when the value changes, propagate to master
                     (lambda (text-field control-event)
@@ -337,7 +326,7 @@
                             (send text-field get-value)))]))
         (new button%
              [label (string-constant browse...)]
-             [parent profile-panel]
+             [parent profile-pane]
              [callback
               (lambda _
                 (define-values (dir name _)
@@ -351,7 +340,7 @@
         (for ([(l f) (in-dict check-boxes)])
           (new check-box%
                [label l]
-               [parent check-box-panel]
+               [parent check-box-pane]
                [callback
                 (lambda _
                   (define definitions (get-definitions-text))
@@ -364,13 +353,12 @@
                [value #f]))) ; will be updated in `show-optimization-coach'
 
       (define/public (show-optimization-coach)
-        (define area-container (get-area-container))
-        (cond [panel (or (memq panel (send area-container get-children))
-                         (send area-container add-child panel))]
+        (cond [panel (or (memq panel (send pane get-children))
+                         (send pane add-child panel))]
               [else  (create-panel)])
         ;; update check-boxes
         (define filters (send (get-definitions-text) get-filters))
-        (for ([c (in-list (for/list ([c (in-list (send check-box-panel
+        (for ([c (in-list (for/list ([c (in-list (send check-box-pane
                                                        get-children))]
                                      #:when (is-a? c check-box%))
                             c))]
@@ -381,10 +369,8 @@
               (send (get-definitions-text) get-profile-file)))
 
       (define/public (hide-optimization-coach)
-        (define container (get-area-container))
-        ;; in rare cases, for unknown reasons, the panel may already be gone
-        (when (member panel (send container get-children))
-          (send container delete-child panel)))
+        (when (member panel (send pane get-children))
+          (send pane delete-child panel)))
 
 
       ;; tab switching
@@ -439,4 +425,21 @@
 
       (super-new)))
 
-  (drracket:get/extend:extend-unit-frame frame-mixin))
+  (drracket:get/extend:extend-unit-frame frame-mixin)
+
+  (drracket:module-language-tools:add-opt-in-toolbar-button
+   (lambda (drr-frame container)
+     (new switchable-button%
+          [parent container]
+          [label "Optimization Coach"]
+          [bitmap optimization-coach-bitmap]
+          [callback
+           (lambda (_)
+             (with-handlers
+               ([exn:fail:object?
+                 (lambda _
+                   (message-box
+                    "Optimization Coach"
+                    "Please restart DrRacket to use Optimization Coach."))])
+               (send drr-frame launch-optimization-coach)))]))
+   'optimization-coach))

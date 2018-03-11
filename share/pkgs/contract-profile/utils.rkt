@@ -4,9 +4,15 @@
 
 (provide (except-out (all-defined-out) shorten-paths))
 
+(struct contract-sample
+  (blame
+   space-efficient?
+   ;; from regular profiler
+   profile-sample))
+
 (struct contract-profile
   (total-time
-   ;; (pairof blame? profile-sample)
+   ;; (listof contract-sample?)
    ;; samples taken while a contract was running
    live-contract-samples
    ;; (listof blame?)
@@ -18,7 +24,7 @@
 
 (define (samples-time samples)
   (for/sum ([s (in-list samples)])
-    (cadr s)))
+    (car (contract-sample-profile-sample s))))
 
 
 ;; for debugging

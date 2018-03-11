@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2017 PLT Design Inc.
+  Copyright (c) 2004-2018 PLT Design Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -4156,7 +4156,7 @@ static int same_resolved_modidx(Scheme_Object *a, Scheme_Object *b)
   return scheme_equal(a, b);
 }
 
-static Scheme_Object *resolved_module_path_to_modidx(Scheme_Object *rmp)
+Scheme_Object *scheme_resolved_module_path_to_modidx(Scheme_Object *rmp)
 {
   Scheme_Object *path;
 
@@ -4566,7 +4566,7 @@ static void setup_accessible_table(Scheme_Module *m)
             if (SAME_TYPE(SCHEME_TYPE(form), scheme_define_values_type)) {
               int checked_st = 0, is_st_prop = 0, has_guard = 0;
               Scheme_Object *is_st = NULL;
-              Simple_Stuct_Type_Info stinfo;
+              Simple_Struct_Type_Info stinfo;
               Scheme_Object *parent_identity;
               for (k = SCHEME_VEC_SIZE(form); k-- > 1; ) {
                 tl = SCHEME_VEC_ELS(form)[k];
@@ -7654,7 +7654,7 @@ static Scheme_Object *do_module(Scheme_Object *form, Scheme_Comp_Env *env,
 
     /* result should be a module body value: */
     if (!SAME_OBJ(fm, (Scheme_Object *)m)) {
-      scheme_wrong_syntax(NULL, NULL, form, "compiled body was not built with #%%module-begin");
+      scheme_wrong_syntax(NULL, NULL, form, "expansion of #%%module-begin is not a #%%plain-module-begin form");
     }
 
     if (restore_confusing_name)
@@ -8215,7 +8215,7 @@ static void propagate_imports(Module_Begin_Expand_State *bxs,
         binding = scheme_stx_lookup_stop_at_free_eq(name, phase, NULL);
         if (!SCHEME_VECTORP(binding)
             || !SAME_OBJ(phase, SCHEME_VEC_ELS(binding)[2]))
-          scheme_signal_error("internal error: broken binding of defined id from encloding module: %V at %V = %V",
+          scheme_signal_error("internal error: broken binding of defined id from enclosing module: %V at %V = %V",
                               name, phase, binding);
         v = SCHEME_VEC_ELS(binding)[1];
         SCHEME_VEC_ELS(vec)[2] = v;
@@ -9787,6 +9787,7 @@ static Scheme_Object *do_module_begin_at_phase(Scheme_Object *form, Scheme_Comp_
     cenv = scheme_new_comp_env(env->genv, env->insp, frame_scopes,
                                SCHEME_TOPLEVEL_FRAME | SCHEME_KEEP_SCOPES_FRAME);
     cenv->observer = env->observer;
+    cenv->intdef_next = xenv;
   }
 
   lift_data = scheme_make_vector(3, NULL);
@@ -12828,7 +12829,7 @@ void parse_requires(Scheme_Object *form, int at_phase,
       }
 
       if (SAME_TYPE(SCHEME_TYPE(idx), scheme_resolved_module_path_type))
-        idx = resolved_module_path_to_modidx(idx);
+        idx = scheme_resolved_module_path_to_modidx(idx);
 
       add_single_require(m->me, x_just_mode, x_mode, idx, rename_env,
                          rn_set, (for_m ? for_m->rn_stx : NULL),

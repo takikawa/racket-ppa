@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2017 PLT Design Inc.
+  Copyright (c) 2004-2018 PLT Design Inc.
   Copyright (c) 1995-2002 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -47,7 +47,9 @@ static Boolean get_ext_file_spec(FSSpec *spec, const char *filename );
 static Boolean load_ext_file_spec(FSSpec *spec, CFragConnectionID *connID);
 #endif
 
-#if defined(RTLD_NOW)
+#if defined(OS_X)
+# define DLOPEN_MODE (RTLD_NOW | RTLD_LOCAL)
+#elif defined(RTLD_NOW)
 # define DLOPEN_MODE (RTLD_NOW)
 #elif defined(RTLD_LAZY)
 # define DLOPEN_MODE (RTLD_LAZY)
@@ -297,16 +299,18 @@ static Scheme_Object *do_load_extension(const char *filename,
     HINSTANCE dl;
     Setup_Procedure f;
     char *vers;
-  
-    dl = LoadLibraryW(WIDE_PATH(filename));
+    wchar_t *wp;
+
+    wp = scheme_path_to_wide_path(NULL, filename);
+    dl = LoadLibraryW(wp);
     if (!dl) {
       long err;
       err = GetLastError();
       scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
-		       "load-extension: could not load file\n"
+                       "load-extension: could not load file\n"
                        "  path: %q\n"
                        "  system error: %E",
-		       filename, err);
+                       filename, err);
     }
     
     handle = (void *)dl;

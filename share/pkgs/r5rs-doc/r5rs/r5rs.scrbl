@@ -3,7 +3,7 @@
           (only-in scribble/core style)
           scribble/html-properties
           (for-label (only-meta-in 0 r5rs)
-                     (only-in r5rs syntax-rules ...)
+                     (only-in r5rs syntax-rules ... #%module-begin)
                      (only-in mzscheme #%plain-module-begin)
                      (only-in scheme/mpair mmap)
                      (only-in scheme/contract one-of/c)
@@ -20,6 +20,7 @@
 
 @(define r5rs @elem{R@superscript{5}RS})
 @(define drs-doc '(lib "scribblings/drracket/drracket.scrbl"))
+@(define racket-doc '(lib "scribblings/reference/reference.scrbl"))
 
 @(define r5rs-std (style #f (list (install-resource "scribblings/r5rs-std"))))
 
@@ -154,11 +155,24 @@ syntax, so there is no danger of collisions in @|r5rs| programs):
 #%app #%datum #%top #%top-interaction #%require #%provide
 ]
 
-It also provides @racketmodname[racket]'s
-@racket[#%plain-module-begin] as @racket[#%module-begin]. Note that
-@racket[#%require] can be used to import Racket libraries into an
-otherwise @|r5rs| program, and @racket[#%provide] can be used to
-export from a module that is implemented in an @|r5rs|-like language.
+It also provides a @racket[#%module-begin] binding as defined below.
+
+Note that @racket[#%require] can be used to import Racket libraries
+into an otherwise @|r5rs| program, and @racket[#%provide] can be used
+to export from a module that is implemented in an @|r5rs|-like
+language.
+
+@history[#:changed "1.1" @elem{Added an @|r5rs|-specific @racket[#%module-begin],
+                               instead of reexporting
+                               @racketmodname[racket]'s @racket[#%plain-module-begin].}]
+
+@defform[(#%module-begin form ...)]{
+
+Besides allowing definitions and other forms like
+@racketmodname[racket]'s @racket[#%plain-module-begin], defines a
+@racketidfont{configure-runtime} submodule (see
+@secref["configure-runtime" #:doc racket-doc]) that runs
+@racketmodname[r5rs/init].}
 
 @; --------------------
 
@@ -170,8 +184,8 @@ is @racket[mcdr], and @racket[map] is @racketmodname[compatibility/mlist]'s
 @racket[mmap], and so on.
 
 An @|r5rs| @defterm{environment} is implemented as a
-@racket[racket/base] @defterm{namespace}. Also, relative to
-@racket[racket/base], the @racket[expr] passed to @racket[eval] is
+@racketmodname[racket/base] @defterm{namespace}. Also, relative to
+@racketmodname[racket/base], the @racket[expr] passed to @racket[eval] is
 constructed using mutable pairs.
 
 The @racket[scheme-report-environment] function returns a namespace

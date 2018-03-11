@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2017 PLT Design Inc.
+  Copyright (c) 2004-2018 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -161,12 +161,6 @@
 #endif
 #ifdef WINDOWS_FIND_STACK_BOUNDS
 #include <windows.h>
-#endif
-#ifdef BEOS_FIND_STACK_BOUNDS
-# include <be/kernel/OS.h>
-#endif
-#ifdef OSKIT_FIXED_STACK_BOUNDS
-# include <oskit/machine/base_stack.h>
 #endif
 #include "schmach.h"
 #ifdef MACOS_STACK_LIMIT
@@ -699,18 +693,6 @@ void scheme_init_stack_check()
       SysGetStackInfo(Ptr &s, &e);
       scheme_stack_boundary = (uintptr_t)e + STACK_SAFETY_MARGIN;
     }
-# endif
-
-# ifdef BEOS_FIND_STACK_BOUNDS
-    {
-      thread_info info;
-      get_thread_info(find_thread(NULL), &info);
-      scheme_stack_boundary = (uintptr_t)info.stack_base + STACK_SAFETY_MARGIN;
-    }
-# endif
-
-# ifdef OSKIT_FIXED_STACK_BOUNDS
-    scheme_stack_boundary = (uintptr_t)base_stack_start + STACK_SAFETY_MARGIN;
 # endif
 
 # ifdef UNIX_FIND_STACK_BOUNDS
@@ -1472,7 +1454,7 @@ static Scheme_Dynamic_Wind *intersect_dw(Scheme_Dynamic_Wind *a, Scheme_Dynamic_
 {
   int alen = 0, blen = 0;
   int a_has_tag = 0, a_prompt_delta = 0, b_prompt_delta = 0;
-  Scheme_Dynamic_Wind *dw;
+  Scheme_Dynamic_Wind *dw, *match_a, *match_b;
 
   for (dw = a; dw && (dw->prompt_tag != prompt_tag); dw = dw->prev) {
   }
@@ -1504,18 +1486,32 @@ static Scheme_Dynamic_Wind *intersect_dw(Scheme_Dynamic_Wind *a, Scheme_Dynamic_
   }
 
   /* At this point, we have chains that are the same length. */
+  match_a = NULL;
+  match_b = NULL;
   while (blen) {
     if (SAME_OBJ(a->id ? a->id : (Scheme_Object *)a, 
-                 b->id ? b->id : (Scheme_Object *)b))
-      break;
+                 b->id ? b->id : (Scheme_Object *)b)) {
+      if (!match_a) {
+        match_a = a;
+        match_b = b;
+      }
+    } else {
+      match_a = NULL;
+      match_b = NULL;
+    }
     a = a->prev;
     b = b->prev;
     blen--;
   }
 
-  *_common_depth = (b ? b->depth : -1);
+  if (!match_a) {
+    match_a = a;
+    match_b = b;
+  }
 
-  return a;
+  *_common_depth = (match_b ? match_b->depth : -1);
+
+  return match_a;
 }
 
 static Scheme_Prompt *lookup_cont_prompt(Scheme_Cont *c, 
@@ -1548,7 +1544,7 @@ static Scheme_Prompt *check_barrier(Scheme_Prompt *prompt,
                                     Scheme_Meta_Continuation *prompt_cont, MZ_MARK_POS_TYPE prompt_pos,
                                     Scheme_Cont *c)
 /* A continuation barrier is analogous to a dynamic-wind. A jump is
-   allowed if no dynamic-wind-like barriers would be executed for
+   allowed if no dynamic-wind-like pre-thunks would be executed for
    the jump. */
 {
   Scheme_Prompt *barrier_prompt, *b1, *b2;
@@ -1570,8 +1566,8 @@ static Scheme_Prompt *check_barrier(Scheme_Prompt *prompt,
     if (!b2->is_barrier)
       b2 = NULL;
   }
-  
-  if (b1 != b2) {
+
+  if (b2 && (b1 != b2)) {
     scheme_raise_exn(MZEXN_FAIL_CONTRACT_CONTINUATION,
                      "continuation application: attempt to cross a continuation barrier");
   }
@@ -2653,6 +2649,7 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 {
   Scheme_Type type;
   Scheme_Object *v;
+  int check_rands;
   GC_CAN_IGNORE Scheme_Object *tmpv; /* safe-for-space relies on GC_CAN_IGNORE */
   GC_CAN_IGNORE Scheme_Object **tmprands; /* safe-for-space relies on GC_CAN_IGNORE */
   GC_MAYBE_IGNORE_INTERIOR Scheme_Object **old_runstack, **runstack_base;
@@ -2752,6 +2749,8 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
       MZ_CONT_MARK_POS -= 2;
       return scheme_enlarge_runstack(SCHEME_TAIL_COPY_THRESHOLD, (void *(*)(void))do_eval_k);
     }
+
+    check_rands = num_rands;
 
   apply_top:
 
@@ -3085,79 +3084,72 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
                       the chaperone may guard access to the function as a field inside
                       the struct. We'll need to keep track of the original object
                       as we unwrap to discover procedure chaperones. */
-                   && (SCHEME_VECTORP(((Scheme_Chaperone *)obj)->redirects))
-                   && !(SCHEME_VEC_SIZE(((Scheme_Chaperone *)obj)->redirects) & 1))
+		   && SCHEME_REDIRECTS_STRUCTP(((Scheme_Chaperone *) obj)->redirects))
                /* A raw pair is from scheme_apply_chaperone(), propagating the
                   original object for an applicable structure. */
                || (type == scheme_raw_pair_type)) {
       int is_method;
-      int check_rands = num_rands;
       Scheme_Object *orig_obj;
 
-      if (SCHEME_RPAIRP(obj)) {
-        orig_obj = SCHEME_CDR(obj);
-        obj = SCHEME_CAR(obj);
-      } else {
-        orig_obj = obj;
-      }
+      orig_obj = obj;
 
       while (1) {
         /* Like the apply loop around this one, but we need
            to keep track of orig_obj until we get down to the
            structure. */
 
+        if (SCHEME_RPAIRP(obj)) {
+          orig_obj = SCHEME_CDR(obj);
+          obj = SCHEME_CAR(obj);
+        }
+
         type = SCHEME_TYPE(obj);
         if (type == scheme_proc_struct_type) {
-          do {
-            VACATE_TAIL_BUFFER_USE_RUNSTACK();
+          VACATE_TAIL_BUFFER_USE_RUNSTACK();
 
-            UPDATE_THREAD_RSPTR_FOR_ERROR(); /* in case */
+          UPDATE_THREAD_RSPTR_FOR_ERROR(); /* in case */
 
-            v = obj;
-            obj = scheme_extract_struct_procedure(orig_obj, check_rands, rands, &is_method);
-            if (is_method) {
-              /* Have to add an extra argument to the front of rands */
-              if ((rands == RUNSTACK) && (RUNSTACK != RUNSTACK_START)){
-                /* Common case: we can just push self onto the front: */
-                rands = PUSH_RUNSTACK(p, RUNSTACK, 1);
-                rands[0] = v;
+          v = obj;
+          obj = scheme_extract_struct_procedure(orig_obj, check_rands, rands, &is_method);
+          if (is_method) {
+            /* Have to add an extra argument to the front of rands */
+            if ((rands == RUNSTACK) && (RUNSTACK != RUNSTACK_START)){
+              /* Common case: we can just push self onto the front: */
+              rands = PUSH_RUNSTACK(p, RUNSTACK, 1);
+              rands[0] = v;
+            } else {
+              int i;
+              Scheme_Object **a;
+
+              if (p->tail_buffer && (num_rands < p->tail_buffer_size)) {
+                /* Use tail-call buffer. Shift in such a way that this works if
+                   rands == p->tail_buffer */
+                a = p->tail_buffer;
               } else {
-                int i;
-                Scheme_Object **a;
-
-                if (p->tail_buffer && (num_rands < p->tail_buffer_size)) {
-                  /* Use tail-call buffer. Shift in such a way that this works if
-                     rands == p->tail_buffer */
-                  a = p->tail_buffer;
-                } else {
-                  /* Uncommon general case --- allocate an array */
-                  UPDATE_THREAD_RSPTR_FOR_GC();
-                  a = MALLOC_N(Scheme_Object *, num_rands + 1);
-                }
-
-                for (i = num_rands; i--; ) {
-                  a[i + 1] = rands[i];
-                }
-                a[0] = v;
-                rands = a;
+                /* Uncommon general case --- allocate an array */
+                UPDATE_THREAD_RSPTR_FOR_GC();
+                a = MALLOC_N(Scheme_Object *, num_rands + 1);
               }
-              num_rands++;
+
+              for (i = num_rands; i--; ) {
+                a[i + 1] = rands[i];
+              }
+              a[0] = v;
+              rands = a;
             }
+            num_rands++;
+          }
 
-            /* After we check arity once, no need to check again
-               (which would lead to O(n^2) checking for nested
-               struct procs): */
-            check_rands = -1;
+          DO_CHECK_FOR_BREAK(p, UPDATE_THREAD_RSPTR_FOR_GC(); if (rands == p->tail_buffer) make_tail_buffer_safe(););
 
-            DO_CHECK_FOR_BREAK(p, UPDATE_THREAD_RSPTR_FOR_GC(); if (rands == p->tail_buffer) make_tail_buffer_safe(););
-
-            break;
-          } while (SAME_TYPE(scheme_proc_struct_type, SCHEME_TYPE(obj)));
+          /* After we check arity once, no need to check again
+             (which would lead to O(n^2) checking for nested
+             struct procs): */
+          check_rands = -1;
 
           goto apply_top;
         } else {
-          if (SCHEME_VECTORP(((Scheme_Chaperone *)obj)->redirects)
-              && !(SCHEME_VEC_SIZE(((Scheme_Chaperone *)obj)->redirects) & 1))
+          if (SCHEME_REDIRECTS_STRUCTP(((Scheme_Chaperone *)obj)->redirects))
             obj = ((Scheme_Chaperone *)obj)->prev;
           else if (SAME_TYPE(SCHEME_TYPE(((Scheme_Chaperone *)obj)->redirects), scheme_nack_guard_evt_type))
             /* Chaperone is for evt, not function arguments */
@@ -3192,6 +3184,7 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
       if (SAME_TYPE(SCHEME_TYPE(((Scheme_Chaperone *)obj)->redirects), scheme_nack_guard_evt_type)) {
         /* Chaperone is for evt, not function arguments */
         obj = ((Scheme_Chaperone *)obj)->prev;
+        check_rands = num_rands;
         goto apply_top;
       } else {
         /* Chaperone is for function arguments */
@@ -3387,7 +3380,8 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 	    }
 	  } else
 	    rands = &zero_rands_ptr;
-      
+
+          check_rands = num_rands;
 	  goto apply_top;
 	}
 
@@ -3466,7 +3460,8 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 
 	  rands[0] = arg;
 	  num_rands = 1;
-      
+
+          check_rands = num_rands;
 	  goto apply_top;
 	}
 	
@@ -3560,7 +3555,8 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 	  rands[1] = arg;
 
 	  num_rands = 2;
-      
+
+          check_rands = num_rands;
 	  goto apply_top;
 	}
       
@@ -3956,6 +3952,7 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
     p->ku.apply.tail_rands = NULL;
     RUNSTACK = runstack_base;
     RUNSTACK_CHANGED();
+    check_rands = num_rands;
     goto apply_top;
   }
 
@@ -4800,7 +4797,8 @@ Scheme_Object *scheme_expand(Scheme_Object *obj, Scheme_Env *env)
 {
   return r_expand(obj, scheme_new_expand_env(env, NULL, scheme_true,
                                              SCHEME_TOPLEVEL_FRAME
-                                             | SCHEME_KEEP_SCOPES_FRAME),
+                                             | SCHEME_KEEP_SCOPES_FRAME
+                                             | SCHEME_TMP_TL_BIND_FRAME),
 		  -1, 1, 0, scheme_false, -1, 0);
 }
 
@@ -5013,7 +5011,8 @@ static Scheme_Object *expand(int argc, Scheme_Object **argv)
 
   return r_expand(argv[0], scheme_new_expand_env(env, NULL, scheme_true,
                                                  SCHEME_TOPLEVEL_FRAME
-                                                 | SCHEME_KEEP_SCOPES_FRAME),
+                                                 | SCHEME_KEEP_SCOPES_FRAME
+                                                 | SCHEME_TMP_TL_BIND_FRAME),
 		  -1, 1, 0, scheme_false, 0, 0);
 }
 
@@ -5028,7 +5027,8 @@ static Scheme_Object *expand_stx(int argc, Scheme_Object **argv)
   
   return r_expand(argv[0], scheme_new_expand_env(env, NULL, scheme_true,
                                                  SCHEME_TOPLEVEL_FRAME
-                                                 | SCHEME_KEEP_SCOPES_FRAME),
+                                                 | SCHEME_KEEP_SCOPES_FRAME
+                                                 | SCHEME_TMP_TL_BIND_FRAME),
 		  -1, 0, 0, scheme_false, 0, 0);
 }
 

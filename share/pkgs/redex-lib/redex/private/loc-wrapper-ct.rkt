@@ -30,10 +30,13 @@
                 'init-loc-wrapper-sequence/unquoted)
           #,op #,(syntax-line stx) #,(syntax-column stx)
           others ...)))
-  (syntax-case* stx (name unquote quote unquote-splicing term) (λ (x y) (eq? (syntax-e x) (syntax-e y)))
+  (syntax-case* stx (name unquote quote unquote-splicing term mf-apply) (λ (x y) (eq? (syntax-e x) (syntax-e y)))
     ['a (reader-shorthand #'a +1 (if (= quote-depth 0) "" "'"))]
     [,a (reader-shorthand #'a -1 (if (= quote-depth 1) "" ","))]
     [,@a (reader-shorthand #'a -1 (if (= quote-depth 1) "" ",@"))]
+    [(mf-apply . e)
+     ;; do not render `mf-apply` annotations
+     (process-arg (syntax e) quote-depth)]
     [(term a)
      (if (= quote-depth 0)
          #`#(#,init-loc-wrapper/q?
@@ -76,9 +79,18 @@
     [x 
      #`#(#,init-loc-wrapper/q?
          #,(let ([base (syntax-e #'x)])
-             (if (string? base)
-                 #`#(rewrite-quotes #,(format "~s" base))
-                 (format "~s" (syntax-e #'x))))
+             (cond
+               [(string? base)
+                #`#(rewrite-quotes #,(format "~s" base))]
+               [(boolean? base)
+                (cond
+                  [(and base (equal? (syntax-span #'x) 5))
+                   "#true"]
+                  [(and (not base) (equal? (syntax-span #'x) 6))
+                   "#false"]
+                  [else (format "~s" base)])]
+               [else
+                (format "~s" (syntax-e #'x))]))
          #,(syntax-line stx) 
          #,(syntax-column stx))]))
 

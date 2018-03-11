@@ -905,7 +905,7 @@
                strlen cos cosl sin sinl exp expl pow powl log logl sqrt sqrtl atan2 atan2l frexp
                isnan isinf fpclass signbit _signbit _fpclass __fpclassify __fpclassifyf __fpclassifyl
 	       _isnan __isfinited __isnanl __isnan __signbit __signbitf __signbitd __signbitl
-               __isinff __isinfl isnanf isinff __isinfd __isnanf __isnand __isinf
+               __isinff __isinfl isnanf isinff __isinfd __isnanf __isnand __isinf __isinff128
                __inline_isnanl __inline_isnan __inline_signbit __inline_signbitf __inline_signbitd __inline_signbitl
                __builtin_popcount __builtin_clz __builtin_isnan __builtin_isinf __builtin_signbit
                __builtin_signbitf __builtin_signbitd __builtin_signbitl __builtin_isinf_sign
@@ -923,6 +923,7 @@
                __acrt_iob_func ; VC 14.0 (2015)
                |GetStdHandle| |__CFStringMakeConstantString|
                _vswprintf_c
+	       malloc strdup
                
                scheme_make_small_bignum scheme_make_small_rational scheme_make_small_complex))
         (define non-functions-table

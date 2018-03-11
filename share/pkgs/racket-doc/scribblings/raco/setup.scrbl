@@ -130,9 +130,11 @@ flags:
   addition to specified collections.}
 
  @item{@DFlag{tidy} --- remove metadata cache information and
-  documentation for non-existent collections or documentation (to
-  clean up after removal), even when setup actions are otherwise
-  confined to specified collections.}
+  documentation for non-existent collections or documentation to
+  clean up after removal, even when setup actions are otherwise
+  confined to specified collections. Although tidying is not confined
+  to specified collections, it can be constrained with @DFlag{avoid-main}
+  or @DFlag{no-user}.}
 
 ]}
 @item{Constraining to specific tasks:
@@ -141,7 +143,10 @@ flags:
  @item{@DFlag{clean} or @Flag{c} --- delete existing @filepath{.zo}
    files, thus ensuring a clean build from the source files. The exact
    set of deleted files can be controlled by @filepath{info.rkt}; see
-   @elemref["clean"]{@racket[clean]} for more information.}
+   @elemref["clean"]{@racket[clean]} for more information. Unless
+   @DFlag{no-info-domain} or @Flag{d} is also specified, the @filepath{info.rkt}
+   cache is cleared. Unless @DFlag{no-docs} or @Flag{D} is also
+   specified, the documentation-index database is reset.}
 
  @item{@DFlag{fast-clean} or @Flag{c} --- like @DFlag{clean}, but
    without forcing a bootstrap of @exec{raco setup} from source (which
@@ -1028,7 +1033,14 @@ form.}
     The prefix used when printing status messages.
     @defaults[@racket["raco setup"]]
   }
-  
+
+@defparam[setup-compiled-file-paths paths (or/c #f (listof (and/c path? relative-path?)))]{
+ If not @racket[#f], supplies a value like the one for @racket[use-compiled-file-paths]
+ to control operations such as cleaning, where @racket[use-compiled-file-paths]
+ may have been set to @racket[null] to avoid loading bytecode.
+
+ @history[#:added "1.7"]}
+
 @defboolparam[verbose on?]{
   If on, prints messages from @exec{make} to @envvar{stderr}.
   @defaults[@racket[#f]]}
@@ -1232,9 +1244,20 @@ function for installing a single @filepath{.plt} file.
 
 @section[#:tag "dirs"]{API for Finding Installation Directories}
 
-@defmodule[setup/dirs]{
-  The @racketmodname[setup/dirs] library provides several procedures for locating
-  installation directories:}
+@defmodule[setup/dirs]{ The @racketmodname[setup/dirs] library
+  provides several procedures for locating installation directories.
+  Many of these paths can be configured through the
+  @tech{configuration directory} (see @secref["config-file"]).}
+
+In cross-platform build mode (see @secref["cross-system"]), the
+functions provided by @racketmodname[setup/dirs] generally report
+target-system paths, instead of current-system paths. The exceptions are
+@racket[get-lib-search-dirs] and @racket[find-dll-dir], which report
+current-system paths while @racket[get-cross-lib-search-dirs] and
+@racket[find-cross-dll-dir] report target-system paths.
+
+@(define-syntax-rule (see-config id)
+   @elem{See also @racket['id] in @secref["config-file"].})
 
 @defproc[(find-collects-dir) (or/c path? #f)]{
   Returns a path to the installation's main @filepath{collects} directory, or
@@ -1271,7 +1294,9 @@ function for installing a single @filepath{.plt} file.
 @defproc[(find-links-file) path?]{
   Returns a path to the installation's @tech[#:doc
   reference-doc]{collection links file}.  The file indicated by the
-  returned path may or may not exist.}
+  returned path may or may not exist.
+
+  @see-config[links-file]}
 
 @defproc[(find-user-links-file [vers string? (get-installation-name)]) path?]{
   Returns a path to the user's @tech[#:doc reference-doc]{collection
@@ -1284,12 +1309,16 @@ function for installing a single @filepath{.plt} file.
   order. (Normally, the result includes the result of
   @racket[(find-links-file)], which is where new installation-wide
   links are installed by @exec{raco link} or @racket[links].) The
-  files indicated by the returned paths may or may not exist.}
+  files indicated by the returned paths may or may not exist.
+
+  @see-config[links-search-files]}
 
 @defproc[(find-pkgs-dir) path?]{
   Returns a path to the directory containing packages with
   installation scope; the directory indicated by the returned path may
-  or may not exist.}
+  or may not exist.
+
+  @see-config[pkgs-dir]}
 
 @defproc[(find-user-pkgs-dir [vers string? (get-installation-name)]) path?]{
   Returns a path to the directory containing packages with
@@ -1301,11 +1330,15 @@ function for installing a single @filepath{.plt} file.
   installation scope.  (Normally, the result includes the result of
   @racket[(find-pkgs-dir)], which is where new packages are installed
   by @exec{raco pkg install}.) The directories indicated by the returned
-  paths may or may not exist.}
+  paths may or may not exist.
+
+  @see-config[pkgs-search-dirs]}
 
 @defproc[(find-doc-dir) (or/c path? #f)]{
   Returns a path to the installation's @filepath{doc} directory.
-  The result is @racket[#f] if no such directory is available.}
+  The result is @racket[#f] if no such directory is available.
+
+  @see-config[doc-dir]}
 
 @defproc[(find-user-doc-dir) path?]{
   Returns a path to a user-specific @filepath{doc} directory. The directory
@@ -1317,41 +1350,78 @@ function for installing a single @filepath{.plt} file.
   configured otherwise, the result includes any non-@racket[#f] result of
   @racket[(find-doc-dir)] and @racket[(find-user-doc-dir)]---but the latter is
   included only if the value of the @racket[use-user-specific-search-paths]
-  parameter is @racket[#t].}
+  parameter is @racket[#t].
+
+  @see-config[doc-search-dirs]}
 
 @defproc[(find-lib-dir) (or/c path? #f)]{
   Returns a path to the installation's @filepath{lib} directory, which contains
   libraries and other build information. The result is @racket[#f] if no such
-  directory is available.}
+  directory is available.
+
+  @see-config[lib-dir]}
 
 @defproc[(find-user-lib-dir) path?]{
   Returns a path to a user-specific @filepath{lib} directory; the directory
   indicated by the returned path may or may not exist.}
 
 @defproc[(get-lib-search-dirs) (listof path?)]{
-  Returns a list of paths to search for foreign libraries. Unless it is
-  configured otherwise, the result includes any non-@racket[#f] result of
-  @racket[(find-lib-dir)]
-  and @racket[(find-user-lib-dir)]---but the latter is included only if the
-  value of the @racket[use-user-specific-search-paths] parameter
-  is @racket[#t].
+  Returns a list of paths to search for foreign libraries.
+
+  Unless it is configured otherwise, and except in cross-platform
+  build mode, the result includes any non-@racket[#f] result of
+  @racket[(find-lib-dir)] and @racket[(find-user-lib-dir)]---but the
+  latter is included only if the value of the
+  @racket[use-user-specific-search-paths] parameter is @racket[#t].
+
+  In cross-platform build mode (see @secref["cross-system"]),
+  @racket[get-lib-search-dirs] reports a result suitable for the
+  current system, instead of the target system. See also
+  @racket[get-cross-lib-search-dirs].
+
+  @see-config[lib-search-dirs]
 
   @history[#:changed "6.1.1.4" @elem{Dropped @racket[(find-dll-dir)]
                                      from the set of paths to
                                      explicitly include in the
-                                     default.}]}
+                                     default.}
+           #:changed "6.9.0.1" @elem{Changed behavior in cross-platform build mode.}]}
+
+@defproc[(get-cross-lib-search-dirs) (listof path?)]{
+  Like @racket[get-lib-search-dirs], but in cross-platform build mode,
+  reports directories for the target system (including any
+  non-@racket[#f] result of @racket[(find-lib-dir)], etc.)
+  instead of the current system.
+
+  @history[#:added "6.9.0.1"]}
 
 @defproc[(find-dll-dir) (or/c path? #f)]{
   Returns a path to the directory that contains DLLs for use with the
   current executable (e.g., @filepath{libracket.dll} on Windows).
   The result is @racket[#f] if no such directory is available, or if no
   specific directory is available (i.e., other than the platform's normal
-  search path).}
+  search path).
+
+  In cross-platform build mode (see @secref["cross-system"]),
+  @racket[find-dll-dir] reports a result suitable for the current
+  system, instead of the target system. See also
+  @racket[find-cross-dll-dir].
+
+  @history[#:changed "6.9.0.1" @elem{Changed behavior in cross-platform build mode.}]}
+
+@defproc[(find-cross-dll-dir) (or/c path? #f)]{
+  Like @racket[find-dll-dir], but in cross-platform build mode,
+  reports a directory for the target system
+  instead of the current system.
+
+  @history[#:added "6.9.0.1"]}
 
 @defproc[(find-share-dir) (or/c path? #f)]{ Returns a path to the
   installation's @filepath{share} directory, which contains installed
   packages and other platform-independent files. The result is
-  @racket[#f] if no such directory is available.}
+  @racket[#f] if no such directory is available.
+
+  @see-config[share-dir]}
 
 @defproc[(find-user-share-dir) path?]{
   Returns a path to a user-specific @filepath{share} directory; the directory
@@ -1360,7 +1430,9 @@ function for installing a single @filepath{.plt} file.
 @defproc[(find-include-dir) (or/c path? #f)]{
   Returns a path to the installation's @filepath{include} directory, which
   contains @filepath{.h} files for building Racket extensions and embedding
-  programs. The result is @racket[#f] if no such directory is available.}
+  programs. The result is @racket[#f] if no such directory is available.
+
+  @see-config[include-dir]}
 
 @defproc[(find-user-include-dir) path?]{
   Returns a path to a user-specific @filepath{include} directory; the
@@ -1371,17 +1443,23 @@ function for installing a single @filepath{.plt} file.
   configured otherwise, the result includes any non-@racket[#f] result of
   @racket[(find-include-dir)] and @racket[(find-user-include-dir)]---but the
   latter is included only if the value of the
-  @racket[use-user-specific-search-paths] parameter is @racket[#t].}
+  @racket[use-user-specific-search-paths] parameter is @racket[#t].
+
+  @see-config[include-search-dirs]}
 
 @defproc[(find-console-bin-dir) (or/c path? #f)]{
   Returns a path to the installation's executable directory, where the
   stand-alone Racket executable resides. The result is @racket[#f] if no
-  such directory is available.}
+  such directory is available.
+
+  @see-config[bin-dir]}
 
 @defproc[(find-gui-bin-dir) (or/c path? #f)]{
   Returns a path to the installation's executable directory, where the
   stand-alone GRacket executable resides. The result is @racket[#f] if no such
-  directory is available.}
+  directory is available.
+
+  @see-config[gui-bin-dir]}
 
 @defproc[(find-user-console-bin-dir) path?]{
   Returns a path to the user's executable directory; the directory
@@ -1395,7 +1473,9 @@ function for installing a single @filepath{.plt} file.
 @defproc[(find-apps-dir) (or/c path? #f)]{
   Returns a path to the installation's directory @filepath{.desktop}
   files (for Unix). The result is @racket[#f] if no such directory
-  exists.}
+  exists.
+
+  @see-config[apps-dir]}
 
 @defproc[(find-user-apps-dir) path?]{
   Returns a path to the user's directory for @filepath{.desktop} files
@@ -1404,7 +1484,7 @@ function for installing a single @filepath{.plt} file.
 
 @defproc[(find-man-dir) (or/c path? #f)]{
   Returns a path to the installation's man-page directory. The result is
-  @racket[#f] if no such directory exists.}
+  @racket[#f] if no such directory exists. @see-config[man-dir]}
 
 @defproc[(find-user-man-dir) path?]{
   Returns a path to the user's man-page directory; the directory
@@ -1412,7 +1492,9 @@ function for installing a single @filepath{.plt} file.
 
 @defproc[(get-doc-search-url) string?]{
   Returns a string that is used by the documentation system, augmented
-  with a version and search-key query, for remote documentation links.}
+  with a version and search-key query, for remote documentation links.
+
+  @see-config[doc-search-url]}
 
 @defproc[(get-doc-open-url) (or/c string? #f)]{
   Returns @racket[#f] or a string for a root URL to be used as an
@@ -1420,6 +1502,8 @@ function for installing a single @filepath{.plt} file.
   non-@racket[#f] configuration means that DrRacket, for example,
   performs keyword searches for documentation via the specified URL
   instead of from locally installed documentation.
+
+  @see-config[doc-open-url]
 
   @history[#:added "6.0.1.6"]}
 
@@ -1469,7 +1553,7 @@ function for installing a single @filepath{.plt} file.
   @exec{raco setup} creates the executable copies, then further
   package build and setup operations through the entry points will be
   confined to the sandbox and not affect a user's default environment.
- 
+
   @history[#:added "6.5.0.2"]}
 
 
@@ -1922,14 +2006,15 @@ run in cross-installation mode.
 For example, if an in-place Racket installation for a different
 platform resides at @nonterm{cross-dir}, then
 
-@commandline{racket -G @nonterm{cross-dir}/etc -X @nonterm{cross-dir}/collects -l- raco pkg}
+@commandline{racket -C -G @nonterm{cross-dir}/etc -X @nonterm{cross-dir}/collects -l- raco pkg}
 
 runs @exec{raco pkg} using the current platform's @exec{racket}
 executable, but using the collections and other configuration
 information of @nonterm{cross-dir}, as well as modifying the packages
 of @nonterm{cross-dir}. That can work as long as no platform-specific
 libraries need to run to perform the requested @exec{raco pkg} action
-(e.g., when installing built packages).
+(e.g., when installing built packages), or as long as the current
+platform's installation already includes those libraries.
 
 
 @history[#:added "6.3"]
@@ -1942,7 +2027,9 @@ libraries need to run to perform the requested @exec{raco pkg} action
 Like @racket[system-type], but for the target platform instead of the
 current platform in cross-installation mode. When not in
 cross-installation mode, the results are the same as for
-@racket[system-type].}
+@racket[system-type].
+
+See also @racket['cross] mode for @racket[system-type].}
 
 
 @defproc[(cross-system-library-subpath [mode (or/c 'cgc '3m #f)

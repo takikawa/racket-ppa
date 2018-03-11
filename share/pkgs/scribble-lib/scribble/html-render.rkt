@@ -277,7 +277,8 @@
              extract-part-style-files
              extract-version
              extract-authors
-             extract-pretitle)
+             extract-pretitle
+             link-render-style-at-element)
     (inherit-field prefix-file style-file style-extra-files image-preferences)
 
     (init-field [alt-paths null]
@@ -373,7 +374,7 @@
           (collect-put! ci key
                         (let ([v (vector (or (part-title-content d) '("???"))
                                          (add-current-tag-prefix key)
-                                         number ; for consistency with base
+                                         number
                                          (and (current-output-file)
                                               (path->relative (current-output-file)))
                                          (current-part-whole-page? d))])
@@ -407,6 +408,8 @@
       (vector-ref dest 3))
     (define (dest-title dest)
       (vector-ref dest 0))
+    (define (dest-number dest)
+      (vector-ref dest 2))
     (define (dest-page? dest)
       (vector-ref dest 4))
     (define (dest-anchor dest)
@@ -1228,6 +1231,14 @@
               (element-style->attribs (style-name s) s extras)
               (element-style->attribs s #f extras))))
 
+    (define (element-style-property-matching e pred)
+      (and (or (element? e) (multiarg-element? e))
+           (ormap (lambda (v) (and (pred v) v))
+                  (let ([s (if (element? e)
+                               (element-style e)
+                               (multiarg-element-style e))])
+                    (if (style? s) (style-properties s) null)))))
+
     (define/override (render-content e part ri)
       (define (attribs [extras null]) (content-attribs e extras))
       (cond
@@ -1317,13 +1328,8 @@
                 ,@(if svg? 
                       `((param ([name "src"] [value ,srcref])))
                       null)))))]
-        [(and (or (element? e) (multiarg-element? e))
-              (ormap (lambda (v) (and (script-property? v) v))
-                     (let ([s (if (element? e)
-                                  (element-style e)
-                                  (multiarg-element-style e))])
-                       (if (style? s) (style-properties s) null))))
-         =>
+        [(element-style-property-matching e script-property?)
+         => 
          (lambda (v)
            (let* ([t `[type ,(script-property-type v)]]
                   [s (script-property-script v)]
@@ -1332,6 +1338,12 @@
                          `(script (,t ,@(attribs) [src ,s])))])
              (list s
                    `(noscript ,@(render-plain-content e part ri)))))]
+        [(element-style-property-matching e xexpr-property?)
+         =>
+         (lambda (v)
+           (cons (xexpr-property-before v)
+                 (append (render-plain-content e part ri)
+                         (list (xexpr-property-after v)))))]
         [(target-element? e)
          `((a ([name ,(format "~a" (anchor-name (add-current-tag-prefix
                                                  (tag-key (target-element-tag e)
@@ -1341,13 +1353,31 @@
         [(and (link-element? e) (not (current-no-links)))
          (parameterize ([current-no-links #t])
            (define indirect-link? (link-element-indirect? e))
-           (let-values ([(dest ext-id)
-                         (if (and indirect-link?
-                                  external-tag-path)
-                             (values #f #f)
-                             (resolve-get/ext-id part ri (link-element-tag e)))])
+           (let*-values ([(dest ext-id)
+                          (if (and indirect-link?
+                                   external-tag-path)
+                              (values #f #f)
+                              (resolve-get/ext-id part ri (link-element-tag e)))]
+                         [(number-link?)
+                          (and dest
+                               (not ext-id)
+                               (let ([n (dest-number dest)])
+                                 ;; If the section number is empty, don't generate an
+                                 ;; empty link:
+                                 (not (or (not n)
+                                          (string=? "" (apply string-append (format-number n '("")))))))
+                               (eq? 'number (link-render-style-at-element e))
+                               (empty-content? (element-content e)))])
+             
              (if (or indirect-link? dest)
-                 `((a ([href
+                 `(,@(cond
+                       [number-link?
+                        `(,(if (let ([s (element-style e)])
+                                 (and (style? s) (memq 'uppercase (style-properties s))))
+                               "Section "
+                               "section "))]
+                       [else '()])
+                   (a ([href
                       ,(cond
                         [(and ext-id external-root-url dest
                               (let* ([ref-path (relative->path (dest-path dest))]
@@ -1401,7 +1431,10 @@
                                     null))
                      [data-pltdoc "x"])
                     ,@(if (empty-content? (element-content e))
-                          (render-content (strip-aux (dest-title dest)) part ri)
+                          (cond
+                            [number-link? (format-number (dest-number dest) '(""))]
+                            [else
+                             (render-content (strip-aux (dest-title dest)) part ri)])
                           (render-content (element-content e) part ri))))
                (begin
                  (when #f
@@ -2013,11 +2046,12 @@
                    (loop (cdr path) (cdr root)))))))))
 
 (define (from-root p d)
-  (define c-p (path->complete-path p))
+  (define c-p (simplify-path (path->complete-path p)))
   (define e-p (explode c-p))
-  (define e-d (and d (explode (path->complete-path d))))
+  (define e-d (and d (explode (simplify-path (path->complete-path d)))))
   (define p-in? (in-plt? e-p))
   (define d-in? (and d (in-plt? e-d)))
+  (define (normalize p) (normal-case-path p))
   ;; use an absolute link if the link is from outside the plt tree
   ;; going in (or if d is #f)
   (if (not (and d (cond
@@ -2025,7 +2059,10 @@
                     [d-in? (error 'from-root
                                   "got a link from the PLT tree going out; ~e"
                                   p)]
-                    [else #f])))
+                    [else #f])
+		  ;; On Windows, need to be on the same drive, at least:
+		  (equal? (normalize (car e-d))
+		          (normalize (car e-p)))))
     (path->url-string c-p)
     (let loop ([e-d e-d] [e-p e-p])
       (cond
@@ -2033,11 +2070,11 @@
          (string-append*
           (let loop ([e-p e-p])
             (cond [(null? e-p) '("/")]
-                  [(null? (cdr e-p)) (list (path->string (car e-p)))]
+                  [(null? (cdr e-p)) (list (path-element->string (car e-p)))]
                   [(eq? 'same (car e-p)) (loop (cdr e-p))]
                   [(eq? 'up (car e-p)) (cons "../" (loop (cdr e-p)))]
-                  [else (cons (path->string (car e-p)) (cons "/" (loop (cdr e-p))))])))]
-        [(equal? (car e-d) (car e-p)) (loop (cdr e-d) (cdr e-p))]
+                  [else (cons (path-element->string (car e-p)) (cons "/" (loop (cdr e-p))))])))]
+        [(equal? (normalize (car e-d)) (normalize (car e-p))) (loop (cdr e-d) (cdr e-p))]
         [(eq? 'same (car e-d)) (loop (cdr e-d) e-p)]
         [(eq? 'same (car e-p)) (loop e-d (cdr e-p))]
         [else (string-append (string-append* (map (lambda (x) "../") e-d))

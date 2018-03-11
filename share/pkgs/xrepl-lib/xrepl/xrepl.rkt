@@ -115,8 +115,13 @@
     (if (not (complete-path? x)) ; shouldn't happen
       x
       (let* ([r (path->string (find-relative-path (current-directory) x))]
-             [h (path->string (build-path (string->path-element "~")
-                                          (find-relative-path home-dir x)))]
+             [h (path->string (let ([p (find-relative-path home-dir x)])
+                                ;; On Windows, HOME might be on a different
+                                ;; volume, so make sure we get a relative
+                                ;; path back:
+                                (if (relative-path? p)
+                                    (build-path (string->path-element "~") p)
+                                    p)))]
              [best (if (< (string-length r) (string-length h)) r h)]
              [best (if (< (string-length best) (string-length x)) best x)])
         best)))
@@ -265,13 +270,11 @@
   (let ([x (here-source)]) (if (path? x) x no-path)))
 (define (here-mod-or-eof)
   (let ([x (here-source)])
-    (if (not x)
-      eof
-      (datum->syntax #f
-        (cond [(symbol? x) `',x]
-              [(path? x)   (let ([s (path->string x)])
-                             (if (absolute-path? x) `(file ,s) s))]
-              [else (error 'here-mod-or-eof "internal error: ~s" x)])))))
+    (cond [(not x) eof]
+          [(symbol? x) `',x]
+          [(path? x)   (let ([s (path->string x)])
+                         (if (absolute-path? x) `(file ,s) s))]
+          [else (error 'here-mod-or-eof "internal error: ~s" x)])))
 
 (define (getarg kind [flag 'req] #:default [dflt #f])
   (unless (memq flag '(req opt list list+))

@@ -1,6 +1,6 @@
  /*
   Racket
-  Copyright (c) 2004-2017 PLT Design Inc.
+  Copyright (c) 2004-2018 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -2633,7 +2633,7 @@ static Scheme_Object *attach_shape_tag(Scheme_Object *list,
                         intptr_t line, intptr_t col, intptr_t pos, intptr_t span,
 					    Scheme_Object *stxsrc, 
 					    ReadParams *params, 
-					    int closer);
+                        int closer, int shape);
 
 static int next_is_delim(Scheme_Object *port,
 			 ReadParams *params,
@@ -2848,7 +2848,7 @@ read_list(Scheme_Object *port,
       }
       if (!list) list = scheme_null;
       pop_indentation(indentation);
-      list = attach_shape_tag(list, line, col, pos, SPAN(port, pos), stxsrc, params, closer);
+      list = attach_shape_tag(list, line, col, pos, SPAN(port, pos), stxsrc, params, closer, shape);
       list = (stxsrc
 	      ? scheme_make_stx_w_offset(list, line, col, pos, SPAN(port, pos), stxsrc, STX_SRCTAG)
 	      : list);
@@ -2945,7 +2945,7 @@ read_list(Scheme_Object *port,
       }
 
       pop_indentation(indentation);
-      list = attach_shape_tag(list, line, col, pos, SPAN(port, pos), stxsrc, params, closer);
+      list = attach_shape_tag(list, line, col, pos, SPAN(port, pos), stxsrc, params, closer, shape);
       list = (stxsrc
 	      ? scheme_make_stx_w_offset(list, line, col, pos, SPAN(port, pos), stxsrc, STX_SRCTAG)
 	      : list);
@@ -3027,7 +3027,7 @@ read_list(Scheme_Object *port,
 	/* Assert: infixed is NULL (otherwise we raised an exception above) */
 
 	pop_indentation(indentation);
-      list = attach_shape_tag(list, line, col, pos, SPAN(port, pos), stxsrc, params, closer);
+    list = attach_shape_tag(list, line, col, pos, SPAN(port, pos), stxsrc, params, closer, shape);
         list = (stxsrc
 		? scheme_make_stx_w_offset(list, line, col, pos, SPAN(port, pos), stxsrc, STX_SRCTAG)
 		: list);
@@ -3094,7 +3094,7 @@ static Scheme_Object *attach_shape_tag(Scheme_Object *list,
                         intptr_t line, intptr_t col, intptr_t pos, intptr_t span,
 					    Scheme_Object *stxsrc, 
 					    ReadParams *params, 
-					    int closer)
+                        int closer, int shape)
 {
   Scheme_Object *tag;
   tag = NULL;
@@ -3105,7 +3105,7 @@ static Scheme_Object *attach_shape_tag(Scheme_Object *list,
     tag = braces_symbol;
   }
   
-  if (tag) {
+  if (tag && shape == mz_shape_cons) {
     if (stxsrc) {
       tag = scheme_make_stx_w_offset(tag, line, col, pos, span, stxsrc, STX_SRCTAG);
     }
@@ -6154,7 +6154,7 @@ Scheme_Object *scheme_load_delayed_code(int _which, Scheme_Load_Delay *_delay_in
     scheme_release_file_descriptor();
 
     a[0] = delay_info->path;
-    port = scheme_do_open_input_file("on-demand-loader", 0, 1, a, 0, NULL, NULL, 0);
+    port = scheme_do_open_input_file("on-demand-loader", 0, 1, a, 1, 0);
 
     savebuf = scheme_current_thread->error_buf;
     scheme_current_thread->error_buf = &newbuf;

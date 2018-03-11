@@ -110,7 +110,7 @@
 
  (proc-doc/names
   text:range-style
-  (-> text:range? exact-nonnegative-integer?)
+  (-> text:range? (or/c 'rectangle 'hollow-ellipse 'ellipse 'dot))
   (range)
   @{Returns the style of the range.
     See also @method[text:basic<%> highlight-range].})
@@ -193,22 +193,38 @@
 
  (proc-doc/names
   number-snip:make-repeating-decimal-snip
-  (real? boolean? . -> . (is-a?/c snip%))
+  (-> real? boolean? number-snip:is-number-snip?)
   (num show-prefix?)
-  @{Makes a number snip that shows the decimal expansion for @racket[number].
+  @{Makes a @tech{number snip} that shows the decimal expansion for @racket[number].
     The boolean indicates if a @litchar{#e} prefix appears on the number.
     
     See also @racket[number-snip:make-fraction-snip].})
 
  (proc-doc/names
   number-snip:make-fraction-snip
-  (real? boolean? . -> . (is-a?/c snip%))
+  (-> real? boolean? number-snip:is-number-snip?)
   (num show-prefix-in-decimal-view?)
-  @{Makes a number snip that shows a fractional view of @racket[number].
+  @{Makes a @tech{number snip} that shows a fractional view of @racket[number].
     The boolean indicates if a @litchar{#e} prefix appears on the number, when
     shown in the decimal state.
     
     See also @racket[number-snip:make-repeating-decimal-snip].})
+
+ (proc-doc/names
+  number-snip:is-number-snip?
+  (-> any/c boolean?)
+  (v)
+  @{Determines if @racket[v] is a @deftech{number snip}, i.e., created
+                  by @racket[number-snip:make-fraction-snip]
+                  or @racket[number-snip:make-repeating-decimal-snip].
+
+ All values that answer @racket[#t] to this predicate are also @racket[snip%]s.})
+
+ (proc-doc/names
+  number-snip:get-number
+  (-> number-snip:is-number-snip? real?)
+  (ns)
+  @{Returns the number that this @tech{number snip} displays.})
  
  (thing-doc
   comment-box:snipclass
@@ -1935,12 +1951,43 @@
                       the ``Classic'' color scheme is used.}
                @item{@racket['colors]: must be a non-empty list whose first position
                       is a symbol, naming a color or style. The rest of the elements describe
-                      the style or color. In either case, an element may be a vector of three
-                      bytes: this describes a color (in r/g/b order) with an alpha value of
-                      @racket[1.0]. The vector may also have three bytes followed by a real
-                      number between @racket[0] and @racket[1], which is used as the alpha
-                      value. If the name corresponds to a style, then the list may also contain
-                      the symbols @racket['bold], @racket['italic], or @racket['underline].}]
+                      the style or color. In either case, an element may be a vector describing
+                      a color, see below.
+                      If the name corresponds to a style, then the list may also contain
+
+                      @itemlist[@item{Symbols @racket['bold], @racket['italic],
+                                      or @racket['underline], changing the font style
+                                      or underline status, or}
+                                @item{A prefab struct @racket[`#s(background ,_vec)],
+                                      specifying the background color where
+                                      @racket[_vec] is a vector describing a color.}]
+
+                      A vector describing a color is either a vector of three bytes describing
+                      the red, green and blue component of a non-transparent color,
+                      or a vector of three bytes followed by a real number between
+                      @racket[0] and @racket[1], giving the alpha value in addition to color
+                      components. In other words, a vector satisfying the following contract
+                      describes a color:
+
+                      @racketblock[
+                       (or/c (vector/c byte? byte? byte? #:flat? #t)
+                             (vector/c byte? byte? byte? (between/c 0.0 1.0) #:flat? #t))
+                      ]
+
+                      Examples:
+
+                      @racketblock[
+                      '((framework:syntax-color:scheme:symbol
+                         #(0 0 0))
+                        (framework:syntax-color:scheme:comment
+                         #(#xC2 #x74 #x1F) italic)
+                        (framework:syntax-color:scheme:error
+                         bold underline #(#xFF #x00 #x00))
+                        (plt:htdp:test-coverage-off
+                         #(#xFF #xA5 #x00)
+                         #s(background #(#x00 #x00 #x00))))
+                      ]
+                      }]
     
     The names of the colors and styles are extensible; new ones can be added by calling
     @racket[color-prefs:add-color-scheme-entry]. When

@@ -15,7 +15,8 @@
          racket/contract 
          
          (for-syntax racket/base
-                     syntax/parse))
+                     syntax/parse
+                     syntax/contract))
 
 (define pink-code-font 'modern)
 
@@ -60,6 +61,8 @@
          left-curly-bracket-middle-piece
          left-curly-bracket-lower-hook
          curly-bracket-extension
+         (contract-out
+          [apply-atomic-rewrite (-> symbol? (or/c string? pict? symbol?))])
 
          current-render-pict-adjust
          adjust
@@ -75,7 +78,7 @@
   
   (define STIX? #f)
   
-  ;; atomic-rewrite-table : (parameter (listof (list symbol (union string pict))))
+  ;; atomic-rewrite-table : (parameter (listof (list symbol (or/c string (-> pict)))))
   (define atomic-rewrite-table 
     (make-parameter 
      `((... ,(λ ()
@@ -93,8 +96,9 @@
        #:declare transformer
        (expr/c #'(or/c (-> pict?) string?)
                #:name "atomic-rewriter rewrite")
-       #'(parameterize ([atomic-rewrite-table
-                         (cons (list name.c transformer.c)
+       #`(parameterize ([atomic-rewrite-table
+                         (cons (list name.c #,(wrap-expr/c #'(or/c string? (-> pict?))
+                                                           #'transformer.c))
                                (atomic-rewrite-table))])
            e)]))
   
@@ -250,7 +254,8 @@
                         (pair? (cdr rewritten))
                         (eq? (cadr rewritten) 
                              (cadr e)))
-               (error 'apply-rewrites "rewritten version still has symbol of the same name as original: ~s" 
+               (error 'apply-rewrites
+                      "rewritten version still has symbol of the same name as original: ~s" 
                       (cadr rewritten)))
              (let ([adjusted 
                     (adjust-spacing rewritten 
@@ -282,31 +287,39 @@
                             (car l))]))]))
     
   (define (rewrite-metafunction-app lst line line-span col col-span something-or-other)
-    (list* (build-lw "" line 0 col 0)
-           'spring
-           (just-after (hbl-append 
-                        (metafunction-text (symbol->string (lw-e (cadr lst))))
-                        (open-white-square-bracket))
-                       (cadr lst))
-           'spring
-           (let loop ([lst (cddr lst)])
-             (cond
-               [(null? lst) null]
-               [(null? (cdr lst))
-                (let ([last (car lst)])
-                  (list (build-lw "" (lw-line last) 0 (lw-column last) 0)
-                        'spring
-                        (just-after (close-white-square-bracket) last)))]
-               [(null? (cddr lst))
-                (cons (car lst) (loop (cdr lst)))]
-               [else 
-                (if (and (not (delimit-ellipsis-arguments?))
-                         (eq? '... (lw-e (cadr lst))))
-                    (cons (car lst)
-                          (loop (cdr lst)))
-                    (list* (car lst) 
-                           (just-after (basic-text "," (default-style)) (car lst))
-                           (loop (cdr lst))))]))))
+    (define first-argument (and (pair? (cddr lst)) (caddr lst)))
+    (define mf-name (cadr lst))
+    (define first-argument-on-same-line-as-mf-name?
+      (or (not first-argument)
+          (= (lw-line first-argument)
+             (lw-line mf-name))))
+    (append (list (build-lw "" line 0 col 0)
+                  'spring
+                  (just-after (hbl-append 
+                               (metafunction-text (symbol->string (lw-e mf-name)))
+                               (open-white-square-bracket))
+                              mf-name))
+            (if first-argument-on-same-line-as-mf-name? '(spring) '())
+            (let loop ([lst (cddr lst)]
+                       [first? #t])
+              (cond
+                [(null? lst) null]
+                [(null? (cdr lst))
+                 (define last (car lst))
+                 (list (build-lw "" (lw-line last) 0 (lw-column last) 0)
+                       'spring
+                       (just-after (close-white-square-bracket) last))]
+                [(null? (cddr lst))
+                 (cons (car lst)
+                       (loop (cdr lst) #f))]
+                [else 
+                 (if (and (not (delimit-ellipsis-arguments?))
+                          (eq? '... (lw-e (cadr lst))))
+                     (cons (car lst)
+                           (loop (cdr lst) #f))
+                     (list* (car lst)
+                            (just-after (basic-text "," (default-style)) (car lst))
+                            (loop (cdr lst) #f)))]))))
   
   (define (just-before what lw)
     (build-lw (if (symbol? what)
@@ -374,12 +387,17 @@
         (cond
           [(= line next-lw-line)
            (when (next-lw-column . < . column)
-             (error 'adjust-spacing "for ~a; loc-wrapper takes up too many columns. Expected it to not pass ~a, but it went to ~a"
+             (error 'adjust-spacing
+                    (string-append "for ~a; loc-wrapper takes up too many columns."
+                                   " Expected it to not pass ~a, but it went to ~a")
                     who
                     next-lw-column
                     column))]
           [(next-lw-line . < . line)
-           (error 'adjust-spacing "for ~a; last loc-wrapper takes up too many lines. Expected it to not pass line ~a, but it went to ~a"
+           (error 'adjust-spacing
+                  (string-append
+                   "for ~a; last loc-wrapper takes up too many lines."
+                   " Expected it to not pass line ~a, but it went to ~a")
                   who
                   next-lw-line
                   line)])
@@ -491,8 +509,8 @@
            
            (cond [last-token-spring? 
                   ;; gobble up empty lines
-                  ;; we gobble up lines so that we continue on the line we were
-                  ;; on before (which is actually now split into two different elements of the line list)
+                  ;; we gobble up lines so that we continue on the previous line
+                  ;; (which is actually now split into two different elements of the line list)
                   (set! gobbled-lines (+ gobbled-lines lines-to-end))]
                  [else 
                   ;; insert a bunch of blank lines
@@ -531,7 +549,9 @@
           (make-pict-token col col-span (blank))
           (let ([str (apply string (build-list col-span (λ (x) #\space)))])
             (if unquoted?
-                (make-pict-token col col-span (pink-background ((current-text) str pink-code-font (default-font-size))))
+                (make-pict-token col col-span
+                                 (pink-background
+                                  ((current-text) str pink-code-font (default-font-size))))
                 (make-string-token col col-span str (default-style))))))
     
     (define (handle-loc-wrapped lw)
@@ -583,7 +603,8 @@
                          (let ([rst (split-out (token-span (car line-content))
                                                pict
                                                rst)])
-                           (cons (make-line line-num (cons (make-align-token pict) (cdr line-content)))
+                           (cons (make-line line-num
+                                            (cons (make-align-token pict) (cdr line-content)))
                                  (loop rst)))))
                    (cons line (loop (cdr lines))))))])))
 
@@ -603,7 +624,10 @@
                         (cond
                           [(not (spacer-token? spacer))
                            (cons (make-line (line-n line)
-                                            (insert-new-token col new-token (token-column spacer) tokens))
+                                            (insert-new-token col
+                                                              new-token
+                                                              (token-column spacer)
+                                                              tokens))
                                  (cdr lines))]
                           [(= (token-span spacer)
                               col)
@@ -614,7 +638,11 @@
                            (cons line (loop (cdr lines)))]
                           [(< (token-span spacer)
                               col)
-                           (cons (make-line (line-n line) (insert-new-token col new-token (token-column spacer) tokens))
+                           (cons (make-line (line-n line)
+                                            (insert-new-token col
+                                                              new-token
+                                                              (token-column spacer)
+                                                              tokens))
                                  (cdr lines))]))))]))))
                   
   ;; insert-new-token : number token number (listof token) -> (listof token)
@@ -752,7 +780,9 @@
        =>
        (match-lambda
            [(list _ nt sub sup)
-            (let* ([sub-pict (basic-text sub (non-terminal-subscript-style))]
+            (let* ([sub-pict (if (regexp-match? #rx"^′+$" sub)
+                                 (basic-text sub (non-terminal-style))
+                                 (basic-text sub (non-terminal-subscript-style)))]
                    [sup-pict (basic-text sup (non-terminal-superscript-style))]
                    [sub+sup (lbl-superimpose sub-pict sup-pict)])
               (list (non-terminal->token col span nt)
@@ -774,17 +804,24 @@
       [else (error 'atom->tokens "unk ~s" atom)]))
 
   (define (rewrite-atomic col span e get-style)
+    (define str/pict/sym (apply-atomic-rewrite e))
     (cond
-     [(assoc e (atomic-rewrite-table))
-      =>
-      (λ (m)
-         (when (eq? (cadr m) e)
-           (error 'apply-rewrites "rewritten version of ~s is still ~s" e e))
-         (let ([p (cadr m)])
-           (if (procedure? p)
-               (make-pict-token col span (p))
-               (make-string-token col span p (get-style)))))]
-     [else #f]))
+     [(string? str/pict/sym) (make-string-token col span str/pict/sym (get-style))]
+     [(pict? str/pict/sym) (make-pict-token col span str/pict/sym)]
+     [(symbol? str/pict/sym) #f]))
+
+(define (apply-atomic-rewrite e)
+  (cond
+    [(assoc e (atomic-rewrite-table))
+     =>
+     (λ (m)
+       (when (eq? (cadr m) e)
+         (error 'apply-rewrites "rewritten version of ~s is still ~s" e e))
+       (let ([p (cadr m)])
+         (if (procedure? p)
+             (p)
+             p)))]
+    [else e]))
 
   (define (non-terminal->token col span str)
     (let ([e (string->symbol str)])

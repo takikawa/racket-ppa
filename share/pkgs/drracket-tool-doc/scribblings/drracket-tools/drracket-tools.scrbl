@@ -128,15 +128,37 @@ in order to make the results be platform independent.
     a @racket[_source-obj] argument.
   }
   
+ @defmethod[(syncheck:add-text-type [source-obj (not/c #f)]
+                                    [start exact-nonnegative-integer?]
+                                    [end exact-nonnegative-integer?]
+                                    [text-type (or/c 'matching-identifiers
+                                                     'unused-identifier
+                                                     'document-identifier)])
+            void?]{
+   Called to indicate that the color associated with the text type @racket[text-type]
+   should be drawn on the background of the given range in the editor,
+   when the mouse moves over it.
+
+   This method is usually called by Check Syntax to add background colors to an
+   identifier based on its lexical information. The types @racket['matching-identifiers],
+   @racket['unused-identifier] and @racket['document-identifier] correspond to
+   the color @racket['drracket:syncheck:matching-identifiers],
+   @racket['drracket:syncheck:unused-identifier] and @racket['drracket:syncheck:document-identifier]
+   in color scheme specifications, respectively.
+   See @secref["color-scheme" #:doc '(lib "scribblings/drracket/drracket.scrbl")].
+
+   @history[#:added "1.8"]
+ }
  @defmethod[(syncheck:add-background-color [source-obj (not/c #f)] 
                                            [start exact-nonnegative-integer?]
                                            [end exact-nonnegative-integer?]
                                            [color string?])
             void?]{
    Called to indicate that the color @racket[color] should be drawn on the background of 
-   the given range in the editor, when the mouse moves over it. This method is typically
-   called in conjuction with some other method that provides some other annotation
-   on the source.
+   the given range in the editor, when the mouse moves over it.
+
+   This method is not directly called by Check Syntax anymore. Instead see
+   @method[syncheck-annotations<%> syncheck:add-text-type].
  }
  @defmethod[(syncheck:add-require-open-menu [source-obj (not/c #f)]
                                             [start exact-nonnegative-integer?]
@@ -275,6 +297,16 @@ in order to make the results be platform independent.
   or a similar form). The method is passed
   the location of the @racket[require] in the original program.
  }
+
+ @defmethod[(syncheck:add-unused-require
+             [req-src (not/c #f)]
+             [req-pos-left exact-nonnegative-integer?]
+             [req-pos-right exact-nonnegative-integer?])
+            void?]{
+  This method is called for each @racket[require] that Check Syntax
+  determines to be unused. The method is passed the location of the
+  name of the required module in the original program.
+ }
                   
  @defmethod[(syncheck:add-jump-to-definition [source-obj (not/c #f)] 
                                              [start exact-nonnegative-integer?]
@@ -387,6 +419,7 @@ in order to make the results be platform independent.
                         that is used in @racket[syncheck-annotations<%>].}
           ...))
 @syncheck-method-id[syncheck:find-source-object
+                    syncheck:add-text-type
                     syncheck:add-background-color
                     syncheck:add-require-open-menu
                     syncheck:add-docs-menu
@@ -399,7 +432,8 @@ in order to make the results be platform independent.
                     syncheck:add-jump-to-definition
                     syncheck:add-id-set 
                     syncheck:color-range
-                    syncheck:add-prefixed-require-reference]
+                    syncheck:add-prefixed-require-reference
+                    syncheck:add-unused-require]
 
 @section{Module Browser}
 

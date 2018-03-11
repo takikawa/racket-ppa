@@ -1,5 +1,6 @@
 #lang scribble/doc
-@(require "utils.rkt")
+@(require "utils.rkt"
+          (for-label ffi/unsafe/custodian))
 
 @title{Custodians}
 
@@ -51,18 +52,23 @@ be remembered until either the custodian shuts it down or
 zero, the value is allowed to be garbage collected (and automatically
 removed from the custodian).
 
-Independent of whether @var{strong} is zero, the value @var{o} is
-initially weakly held. A value associated with a custodian can
-therefore be finalized via will executors.
+Independent of whether @var{strong} is zero, the value @var{o}
+is initially weakly held and becomes strongly held when
+the garbage collector attempts to collect it. A value
+associated with a custodian can therefore be finalized via
+will executors.
 
 The return value from @cpp{scheme_add_managed} can be used to refer
 to the value's custodian later in a call to
 @cpp{scheme_remove_managed}. A value can be registered with at
 most one custodian.
 
-If @var{m} (or the current custodian if @var{m} is @cpp{NULL})is shut
+If @var{m} (or the current custodian if @var{m} is @cpp{NULL}) is shut
 down, then @var{f} is called immediately, and the result is
-@cpp{NULL}.}
+@cpp{NULL}.
+
+See also @racket[register-custodian-shutdown] from
+@racketmodname[ffi/unsafe/custodian].}
 
 @function[(Scheme_Custodian_Reference* scheme_add_managed_close_on_exit
            [Scheme_Custodian* m]
@@ -92,7 +98,10 @@ Checks whether @var{m} is already shut down, and raises an error if
 
 Removes @var{o} from the management of its custodian. The @var{mref}
  argument must be a value returned by @cpp{scheme_add_managed} or
- @cpp{NULL}.}
+ @cpp{NULL}.
+
+See also @racket[unregister-custodian-shutdown] from
+@racketmodname[ffi/unsafe/custodian].}
 
 @function[(void scheme_close_managed
            [Scheme_Custodian* m])]{
@@ -126,3 +135,15 @@ file-stream output port would disable the flushing action of the final
 at-exit function. Typically, an at-exit function ignores most objects
 while handling a specific type of object that requires a specific
 clean-up action before the OS-level process terminates.}
+
+@function[(int scheme_atexit
+               [Exit_Func func])]{
+                              
+ Identical to calling the system's @cpp{atexit} function.
+ Provided to give programs a common interface, different
+ systems link to @cpp{atexit} in different ways. The type of
+ @var{func} must be:
+
+ @verbatim[#:indent 2]{
+  typedef void (*func)(void);
+}}

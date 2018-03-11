@@ -5,24 +5,19 @@
          string-constants
          framework)
 
-(provide determine-spaces paragraph-indentation surrogate%)
+(provide determine-spaces paragraph-indentation keystrokes)
 
 (define paragraph-width-pref-name 'scribble-reindent-paragraph-width)
 (define paragraph-width-good-val? (and/c exact-nonnegative-integer? (>=/c 10)))
 (preferences:set-default paragraph-width-pref-name 60 paragraph-width-good-val?)
 
-(define surrogate%
-  (class (racket:text-mode-mixin 
-          (color:text-mode-mixin
-           mode:surrogate-text%))
-    (define/override (on-enable-surrogate txt)
-      (send (send txt get-keymap) chain-to-keymap at-exp-keymap #f)
-      (super on-enable-surrogate txt))
-    (define/override (on-disable-surrogate txt)
-      (keymap:remove-chained-keymap txt at-exp-keymap)
-      (super on-disable-surrogate txt))
-    (super-new)))
-
+;; DrRacket loads this file when it encounters a suitable #lang
+;; line, but the support for that doesn't correctly set up the
+;; context when calling the "(λ (editor-panel) .." function, nor
+;; when the callbacks of the GUI controls that that function adds.
+;; So, we just disable it for now until there is time to figure out
+;; a proper solution
+#;
 (preferences:add-to-editor-checkbox-panel
  (λ (editor-panel)
    (define hp (new horizontal-panel% [parent editor-panel] [stretchable-height #f]))
@@ -50,7 +45,6 @@
        (preferences:set paragraph-width-pref-name candidate-num)))
    (update-tf-bkg)))
 
-(define at-exp-keymap (new keymap:aug-keymap%))
 (define (reindent-paragraph t evt)
   (unless (send t is-stopped?)
     (define sp (send t get-start-position))
@@ -59,11 +53,12 @@
        t sp
        (preferences:get paragraph-width-pref-name)))))
 
-(send at-exp-keymap add-function "reindent-paragraph" reindent-paragraph)
-(send at-exp-keymap map-function "esc;q" "reindent-paragraph")
-(send at-exp-keymap map-function "?:a:q" "reindent-paragraph")
-(when (equal? (system-type) 'unix)
-  (send at-exp-keymap map-function "m:q" "reindent-paragraph"))
+(define keystrokes
+  (append (list (list "esc;q" reindent-paragraph)
+                (list "?:a:q" reindent-paragraph))
+          (if (equal? (system-type) 'unix)
+              (list (list "m:q" reindent-paragraph))
+              (list))))
 
 ;;(paragraph-indentation a-racket:text posi width) → void?
 ;; pos : exact-integer? = current given position

@@ -21,6 +21,9 @@
 
 @author["Jacob Matthews" "Robert Bruce Findler"]
 
+This page is for legacy support of PLaneT, Racket's deprecated, old 
+package system. All new work should use the new @link["http://pkgs.racket-lang.org/"]{Racket package system instead.}
+
 The @PLaneT system is a method for automatically sharing code packages,
 both as libraries and as full applications, that gives every user of a
 @PLaneT client the illusion of having a local copy of every code

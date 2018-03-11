@@ -11,6 +11,7 @@
          "bday.rkt"
          "gen-standard-menus.rkt"
          "interfaces.rkt"
+         "srcloc-panel.rkt"
          framework/private/focus-table
          mrlib/close-icon
          mred/mred-sig)
@@ -582,7 +583,7 @@
            ;; status-line-msgs : (listof status-line-msg)
            [status-line-msgs null])
     (define/override (make-root-area-container % parent)
-      (let* ([s-root (super make-root-area-container vertical-panel% parent)]
+      (let* ([s-root (super make-root-area-container vertical-pane% parent)]
              [r-root (make-object % s-root)])
         (set! status-line-container-panel
               (instantiate vertical-panel% ()
@@ -738,13 +739,32 @@
 
 (define magic-space 25)
 
+(define-local-member-name get-memory-use-canvas)
+(define memory-use-timer-cell (make-thread-cell #f))
+(define (update-memory-use-canvases)
+  (define found-any? #f)
+  (for ([window (in-list (get-top-level-windows))])
+    (when (is-a? window frame:info<%>)
+      (set! found-any? #t)
+      (send (send window get-memory-use-canvas) update-memory-use-if-bigish-change)))
+  (unless found-any?
+    (send (thread-cell-ref memory-use-timer-cell) stop)
+    (thread-cell-set! memory-use-timer-cell #f)))
+(define (maybe-create-memory-use-timer)
+  (unless (thread-cell-ref memory-use-timer-cell)
+    (when (eq? (current-thread) (eventspace-handler-thread (current-eventspace)))
+      (thread-cell-set! memory-use-timer-cell
+                        (new timer%
+                             [notify-callback update-memory-use-canvases]
+                             [interval 1000])))))
+
 (define info-mixin
   (mixin (basic<%>) (info<%>)
     [define rest-panel 'uninitialized-root]
     [define super-root 'uninitialized-super-root]
     (define/override (make-root-area-container % parent)
       (let* ([s-root (super make-root-area-container
-                            vertical-panel%
+                            vertical-pane%
                             parent)]
              [r-root (make-object % s-root)])
         (set! super-root s-root)
@@ -848,59 +868,39 @@
     (set! outer-info-panel (make-object horizontal-panel% super-root))
     (send outer-info-panel stretchable-height #f)
     
-    (define info-panel (new horizontal-panel% [parent outer-info-panel]))
+    (define info-panel (new-horizontal-panel% [parent outer-info-panel]))
     (new grow-box-spacer-pane% [parent outer-info-panel])
     
     (define/public (get-info-panel) info-panel)
-    (define/public (update-memory-text)
-      (for ([memory-canvas (in-list memory-canvases)])
-        (send memory-canvas set-str (format-number (current-memory-use)))))
-    
-    (define/private (format-number n)
-      (let* ([mbytes (/ n 1024 1024)]
-             [before-decimal (floor mbytes)]
-             [after-decimal (modulo (floor (* mbytes 100)) 100)])
-        (string-append
-         (number->string before-decimal)
-         "."
-         (cond
-           [(<= after-decimal 9) (format "0~a" after-decimal)]
-           [else (number->string after-decimal)])
-         " MB")))
-    
-    (define/private (pad-to-3 n)
-      (cond
-        [(<= n 9) (format "00~a" n)]
-        [(<= n 99) (format "0~a" n)]
-        [else (number->string n)]))
+    (define/public (get-memory-use-canvas) this-frames-memory-canvas)
     
     (define pref-save-canvas #f)
     (set! pref-save-canvas (new pref-save-canvas% [parent (get-info-panel)]))
     
     [define lock-canvas (make-object lock-canvas% (get-info-panel))]
-    
+    (define this-frames-memory-canvas #f)
     ; set up the memory use display in the status line
-    (let* ([panel (new horizontal-panel%
+    (let* ([panel (new-horizontal-panel%
                        [parent (get-info-panel)]
                        [stretchable-width #f]
-                       [stretchable-height #f])]
-           [ec (new position-canvas%
-                    [parent panel]
-                    [button-up
-                     (λ (evt)
-                       (cond
-                         [(or (send evt get-alt-down)
-                              (send evt get-control-down))
-                          (dynamic-require 'framework/private/follow-log #f)]
-                         [else
-                          (collect-garbage)
-                          (update-memory-text)]))]
-                    [init-width "99.99 MB"])])
-      (set! memory-canvases (cons ec memory-canvases))
-      (update-memory-text)
+                       [stretchable-height #f])])
+      (set! this-frames-memory-canvas
+            (new memory-position-canvas%
+                 [parent panel]
+                 [button-up
+                  (λ (evt)
+                    (cond
+                      [(or (send evt get-alt-down)
+                           (send evt get-control-down))
+                       (dynamic-require 'framework/private/follow-log #f)]
+                      [else
+                       (collect-garbage)
+                       (update-memory-text)]))]))
+      (set! memory-canvases (cons this-frames-memory-canvas memory-canvases))
+      (maybe-create-memory-use-timer)
       (set! memory-cleanup
             (λ ()
-              (set! memory-canvases (remq ec memory-canvases))))
+              (set! memory-canvases (remq this-frames-memory-canvas memory-canvases))))
       (send panel stretchable-width #f))
     
     (define gc-canvas (new bday-click-canvas% [parent (get-info-panel)] [style '(border no-focus)]))
@@ -1020,6 +1020,37 @@
       (let-values ([(_1 th _2 _3) (send dc get-text-extent str)])
         (min-client-height (inexact->exact (floor th)))))
     (update-client-width init-width)))
+
+(define memory-canvases '())
+(define (update-memory-text)
+  (for ([memory-canvas (in-list memory-canvases)])
+    (send memory-canvas update-memory-use)))
+(define memory-position-canvas%
+  (class position-canvas%
+    (inherit set-str)
+    (define/public (update-memory-use)
+      (set! last-memory-use (current-memory-use))
+      (set-str (format-number last-memory-use)))
+    (define/public (update-memory-use-if-bigish-change)
+      (define change-amount (abs (- (current-memory-use) last-memory-use)))
+      (when (change-amount . > . (* 1024 1024)) ;; more than one meg
+        (update-memory-use)))
+
+    (define/private (format-number n)
+      (let* ([mbytes (/ n 1024 1024)]
+             [before-decimal (floor mbytes)]
+             [after-decimal (modulo (floor (* mbytes 100)) 100)])
+        (string-append
+         (number->string before-decimal)
+         "."
+         (cond
+           [(<= after-decimal 9) (format "0~a" after-decimal)]
+           [else (number->string after-decimal)])
+         " MB")))
+
+    (super-new [init-width "99.99 MB"])
+    (define last-memory-use 0)
+    (update-memory-use)))
 
 (define text-info<%> frame:text-info<%>)
 (define text-info-mixin
@@ -1241,7 +1272,7 @@
           (λ (l)
             (cons position-parent (remq position-parent l))))
 
-    (define file-text-mode-msg-parent (new horizontal-panel%
+    (define file-text-mode-msg-parent (new-horizontal-panel%
                                            [stretchable-width #f]
                                            [stretchable-height #f]
                                            [parent (get-info-panel)]))
@@ -1251,7 +1282,7 @@
           (λ (l)
             (cons file-text-mode-msg-parent (remq file-text-mode-msg-parent l))))
     
-    (define uncommon-parent (new horizontal-panel%
+    (define uncommon-parent (new-horizontal-panel%
                                  [parent (get-info-panel)]
                                  [stretchable-width #f]))
     
@@ -1509,7 +1540,8 @@
                          (string-constant no)
                          (string-constant are-you-sure-revert-title)
                          #f
-                         this))
+                         this
+                         #:dialog-mixin focus-table-mixin))
                 (revert))))
         #t))
     
@@ -1882,7 +1914,7 @@
     [define/override make-root-area-container
       (λ (% parent)
         (let* ([s-root (super make-root-area-container
-                              horizontal-panel%
+                              horizontal-pane%
                               parent)]
                [r-root (make-object % s-root)])
           (set! super-root s-root)
@@ -2380,7 +2412,7 @@
     (define/override make-root-area-container
       (λ (% parent)
         (let* ([s-root (super make-root-area-container
-                              vertical-panel%
+                              vertical-pane%
                               parent)]
                [root (make-object % s-root)])
           (set! super-root s-root)
@@ -2496,16 +2528,26 @@
     (define/public (search-replace)
       (define text-to-search (get-text-to-search))
       (when text-to-search
-        (define replacee-start (send text-to-search get-replace-search-hit))
-        (when replacee-start
+        (define replacee-start-or-pair (send text-to-search get-replace-search-hit))
+        (when replacee-start-or-pair
+          (define-values (text-to-replace-in replacee-start)
+            (cond
+              [(pair? replacee-start-or-pair)
+               (values (car replacee-start-or-pair) (cdr replacee-start-or-pair))]
+              [else (values text-to-search replacee-start-or-pair)]))
           (define replacee-end (+ replacee-start (send find-edit last-position)))
+          (send text-to-replace-in begin-edit-sequence)
           (send text-to-search begin-edit-sequence)
-          (send text-to-search set-position replacee-end replacee-end)
-          (send text-to-search delete replacee-start replacee-end)
-          (copy-over replace-edit 0 (send replace-edit last-position) text-to-search replacee-start)
+          (send text-to-replace-in set-position replacee-end replacee-end)
+          (send text-to-replace-in delete replacee-start replacee-end)
+          (copy-over replace-edit
+                     0 (send replace-edit last-position)
+                     text-to-replace-in
+                     replacee-start)
           (search 'forward)
           (send text-to-search finish-pending-search-work)
-          (send text-to-search end-edit-sequence))))
+          (send text-to-search end-edit-sequence)
+          (send text-to-replace-in end-edit-sequence))))
       
     (define/private (copy-over src-txt src-start src-end dest-txt dest-pos)
       (send src-txt split-snip src-start)
@@ -2605,15 +2647,15 @@
         (begin-container-sequence)
         (set! find-edit (new find-text%))
         (set! replace-edit (new replace-text%))
-        (set! search/replace-panel (new horizontal-panel% 
+        (set! search/replace-panel (new-horizontal-panel% 
                                         [parent super-root]
                                         [stretchable-height #f]))
         (define search-panel
-          (new horizontal-panel% 
+          (new-horizontal-panel% 
                [parent search/replace-panel]
                [stretchable-height #f]))
         (define replace-panel
-          (new horizontal-panel%
+          (new-horizontal-panel%
                [parent search/replace-panel]
                [stretchable-height #f]))
         (set! find-canvas (new searchable-canvas%
@@ -2646,7 +2688,7 @@
                                         [callback (λ (x y) (search 'backward))]
                                         [font small-control-font]))
         
-        (define hits-panel (new vertical-panel%
+        (define hits-panel (new-vertical-panel%
                                 [parent search-panel]
                                 [alignment '(left center)]
                                 [stretchable-height #f]
@@ -2755,8 +2797,6 @@
     (define/override (get-editor<%>) text:searching<%>)
     (define/override (get-editor%) (text:searching-mixin (super get-editor%)))
     (super-new)))
-
-(define memory-canvases '())
 
 (define bday-click-canvas%
   (class canvas%

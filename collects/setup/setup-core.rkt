@@ -39,6 +39,7 @@
          "private/pkg-deps.rkt"
          "collection-name.rkt"
          "private/format-error.rkt"
+         "private/encode-relative.rkt"
          compiler/private/dep
          (only-in pkg/lib pkg-directory
                   pkg-single-collection))
@@ -76,10 +77,16 @@
                                (values (simple-form-path p) #t)))
   (define main-links-files (for/hash ([p (in-list (get-links-search-files))])
                              (values (simple-form-path p) #t)))
+
   (define mode-dir
-    (if (compile-mode)
-      (build-path "compiled" (compile-mode))
-      (build-path "compiled")))
+    (let ([compiled-dir (let ([l (or (setup-compiled-file-paths)
+                                     (use-compiled-file-paths))])
+                          (if (pair? l)
+                              (car l)
+                              "compiled"))])
+      (if (compile-mode)
+          (build-path compiled-dir (compile-mode))
+          (build-path compiled-dir))))
 
   (unless (make-user)
     (current-library-collection-paths
@@ -836,21 +843,23 @@
              (delete-file/record-dependency zo dependencies)
              (delete-file/record-dependency dep dependencies))))
         (when did-something? (loop dependencies)))
-      (setup-printf #f "clearing info-domain caches")
-      (define (check-one-info-domain fn)
-        (when (file-exists? fn)
-          (with-handlers ([exn:fail:filesystem? (warning-handler (void))])
-            (with-output-to-file fn void #:exists 'truncate/replace))))
-      (for ([p (current-library-collection-paths)])
-        (check-one-info-domain (build-path p "info-domain" "compiled" "cache.rktd")))
-      (check-one-info-domain (build-path (find-share-dir) "info-cache.rktd"))
-      (check-one-info-domain (build-path (find-user-share-dir) "info-cache.rktd"))
-      (setup-printf #f "deleting documentation databases")
-      (for ([d (in-list (list (find-doc-dir) (find-user-doc-dir)))])
-        (when d
-          (define f (build-path d "docindex.sqlite"))
-          (when (file-exists? f)
-            (delete-file f))))))
+      (when (make-info-domain)
+        (setup-printf #f "clearing info-domain caches")
+        (define (check-one-info-domain fn)
+          (when (file-exists? fn)
+            (with-handlers ([exn:fail:filesystem? (warning-handler (void))])
+              (with-output-to-file fn void #:exists 'truncate/replace))))
+        (for ([p (current-library-collection-paths)])
+          (check-one-info-domain (build-path p "info-domain" "compiled" "cache.rktd")))
+        (check-one-info-domain (build-path (find-share-dir) "info-cache.rktd"))
+        (check-one-info-domain (build-path (find-user-share-dir) "info-cache.rktd")))
+      (when make-docs?
+        (setup-printf #f "deleting documentation databases")
+        (for ([d (in-list (list (find-doc-dir) (find-user-doc-dir)))])
+          (when d
+            (define f (build-path d "docindex.sqlite"))
+            (when (file-exists? f)
+              (delete-file f)))))))
 
   (define (do-install-part part)
     (when (if (eq? part 'post) (call-post-install) (call-install))
@@ -1160,9 +1169,23 @@
                     (set! all-ok? #t)
                     (for ([i l])
                       (match i
-                        [(list (and a (or (? bytes?) (list (or 'info 'lib) (? bytes?) ...)))
+                        [(list (and a (or (? bytes?)
+                                          (list (or 'info 'lib) (? bytes?) ...)
+                                          (list 'rel (or 'up (? bytes?)) ...)))
                                (list (? symbol? b) ...) c (? integer? d) (? integer? e))
-                         (define p (if (bytes? a) (bytes->path a) a))
+                         (define p
+                           (cond
+                            [(bytes? a) (bytes->path a)]
+                            [(and (pair? a) (eq? 'rel (car a)))
+                             (decode-relative-path a)]
+                            [else a]))
+                         (define (normalize-relative-encoding a p)
+                           (if (and (bytes? a) (relative-path? p))
+                               ;; Convert to encoded form, since new entries will
+                               ;; use encoding to avoid path-convention problems
+                               ;; with cross-compilation:
+                               (encode-relative-path p)
+                               a))
                          ;; Check that the path is suitably absolute or relative:
                          (define dir
                            (case info-path-mode
@@ -1219,7 +1242,7 @@
                                          (not (eq? 'all (omitted-paths dir getinfo/log-failure omit-root)))))
                                   (or (file-exists? (build-path dir "info.rkt"))
                                       (file-exists? (build-path dir "info.ss"))))
-                             (hash-set! t a (list b c d e))
+                             (hash-set! t (normalize-relative-encoding a p) (list b c d e))
                              (begin (when (verbose) (printf " drop entry: ~s\n" i))
                                     (set! all-ok? #f)))]
                         [_ (when (verbose) (printf " bad entry: ~s\n" i))
@@ -1263,9 +1286,12 @@
                       (let ([p (path->main-lib-relative (cc-path cc))])
                         (if (path? p)
                             ;; Fall back to relative (with ".."s) to info root:
-                            (path->bytes (find-relative-path (cc-info-root cc)
-                                                             p
-                                                             #:more-than-root? #t))
+                            (let ([rp (find-relative-path (cc-info-root cc)
+                                                          p
+                                                          #:more-than-root? #t)])
+                              (if (relative-path? rp)
+                                  (encode-relative-path rp)
+                                  (path->bytes rp)))
                             p))]
                      [else (path->bytes (cc-path cc))])
                    (cons (domain) (cc-shadowing-policy cc)))))

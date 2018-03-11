@@ -29,6 +29,7 @@
 (define-keyword ~fail)
 (define-keyword ~parse)
 (define-keyword ~do)
+(define-keyword ~undo)
 (define-keyword ...+)
 (define-keyword ~delimit-cut)
 (define-keyword ~commit)
@@ -38,3 +39,6 @@
 (define-keyword ~eh-var)
 (define-keyword ~peek)
 (define-keyword ~peek-not)
+
+(define-keyword ~or*)
+(define-keyword ~alt)

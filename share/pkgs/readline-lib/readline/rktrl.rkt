@@ -7,6 +7,7 @@
          add-history add-history-bytes
          history-length history-get history-delete
          set-completion-function!
+         set-completion-append-character!
          readline-newline readline-redisplay)
 
 ;; libncurses and/or libtermcap needed on some platforms
@@ -30,7 +31,7 @@
   (or
    (let ([readline-path (getenv "PLT_READLINE_LIB")])
      (and readline-path
-          (ffi-lib readline-path (lambda () #f))))
+          (ffi-lib readline-path #:fail (lambda () #f))))
    (find-libreadline (find-user-share-dir))
    (find-libreadline (find-share-dir))
    ;; Old versions of libedit have a 1 indexed history rather than a 0 indexed history.
@@ -40,7 +41,7 @@
      (when lib
        (set! old-libedit #t))
      lib)
-   (ffi-lib "libedit" '("3" "2" "0.0.43" "0.0.53" ""))))
+   (ffi-lib "libedit" '("3" "2" "0.0.43" "0.0.53" "0" ""))))
 
 (define make-byte-string ; helper for the two types below
   (get-ffi-obj "scheme_make_byte_string" #f (_fun _pointer -> _scheme)))
@@ -156,6 +157,16 @@
                     [cur (if (string? cur) (string->bytes/utf-8 cur) cur)])
                (malloc (add1 (bytes-length cur)) cur 'raw)))))
     complete))
+
+(define (set-completion-append-character! c)
+  (cond [(char? c)
+         (set-ffi-obj! "rl_completion_append_character"
+                       libreadline
+                       _int
+                       (char->integer c))]
+        [else (raise-argument-error 'set-completion-append-character!
+                                    "char?"
+                                    c)]))
 
 (set-ffi-obj! "rl_readline_name" libreadline _pointer
               (let ([s #"mzscheme"])

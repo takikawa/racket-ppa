@@ -35,6 +35,7 @@ If the namespace does not, they are colored the unbound color.
          (prefix-in fw: framework/framework)
          mred
          framework
+         framework/private/srcloc-panel
          net/url
          browser/external
          (for-syntax racket/base)
@@ -65,6 +66,10 @@ If the namespace does not, they are colored the unbound color.
 (define jump-to-definition (string-constant cs-jump-to-definition))
 
 (define cs-check-syntax-mode (string-constant cs-check-syntax-mode))
+(define cs-check-syntax-background-colors
+  (hash 'matching-identifiers 'drracket:syncheck:matching-identifiers
+        'unused-identifier 'drracket:syncheck:unused-identifier
+        'document-identifier 'drracket:syncheck:document-identifier))
 (define cs-mode-menu-show-my-obligations (string-constant cs-mode-menu-show-my-obligations))
 (define cs-mode-menu-show-client-obligations (string-constant cs-mode-menu-show-client-obligations))
 (define cs-mode-menu-show-syntax (string-constant cs-mode-menu-show-syntax))
@@ -177,9 +182,32 @@ If the namespace does not, they are colored the unbound color.
                                     #:style both-obligation-style-name
                                     (make-object color% 139 142 28)
                                     (send the-color-database find-color "khaki"))
-(color-prefs:add-color-scheme-entry 'drracket:syncheck:matching-identifiers 
+(color-prefs:add-color-scheme-entry (hash-ref cs-check-syntax-background-colors
+                                              'matching-identifiers )
                                     "GreenYellow"
                                     "DarkGreen")
+(color-prefs:add-color-scheme-entry (hash-ref cs-check-syntax-background-colors
+                                              'unused-identifier)
+                                    "firebrick"
+                                    "firebrick")
+(color-prefs:add-color-scheme-entry (hash-ref cs-check-syntax-background-colors
+                                              'document-identifier)
+                                    "palegreen"
+                                    "DarkGreen")
+(color-prefs:add-color-scheme-entry 'drracket:syncheck:var-arrow
+                                    "BLUE"
+                                    "LightSteelBlue")
+(color-prefs:add-color-scheme-entry 'drracket:syncheck:template-arrow
+                                    (send the-color-database find-color "purple")
+                                    "orchid")
+(color-prefs:add-color-scheme-entry 'drracket:syncheck:tail-arrow
+                                    "orchid"
+                                    "orchid")
+(let ([framework:basic-canvas-background (color-prefs:lookup-in-color-scheme
+                                          'framework:basic-canvas-background)])
+  (color-prefs:add-color-scheme-entry 'drracket:syncheck:untacked
+                                      framework:basic-canvas-background
+                                      framework:basic-canvas-background))
 
 (define tool@ 
   (unit 
@@ -234,7 +262,7 @@ If the namespace does not, they are colored the unbound color.
     ;; name-dup? : symbol? -> boolean?
     (define-struct identifier-location-set (set name-dup?) #:transparent)
         
-    ;; color : string
+    ;; color : (or/c (is-a?/c color%) string)
     ;; text: text:basic<%>
     ;; start, fin: number
     ;; used to represent regions to highlight when passing the mouse over the syncheck window
@@ -246,32 +274,36 @@ If the namespace does not, they are colored the unbound color.
 
     (define-struct prefixable-reference (id-text id-start id-end))
     
-    (define (get-tacked-var-brush white-on-black?)
-      (if white-on-black?
-          (send the-brush-list find-or-create-brush "LightSteelBlue" 'solid)
-          (send the-brush-list find-or-create-brush "BLUE" 'solid)))
-    (define (get-var-pen white-on-black?)
-      (if white-on-black?
-          (send the-pen-list find-or-create-pen "LightSteelBlue" 1 'solid)
-          (send the-pen-list find-or-create-pen "BLUE" 1 'solid)))
+    (define (get-tacked-var-brush)
+      (send the-brush-list find-or-create-brush
+            (color-prefs:lookup-in-color-scheme 'drracket:syncheck:var-arrow)
+            'solid))
+    (define (get-var-pen)
+      (send the-pen-list find-or-create-pen
+            (color-prefs:lookup-in-color-scheme 'drracket:syncheck:var-arrow)
+            1 'solid))
     
     (define templ-color (send the-color-database find-color "purple"))
-    (define (get-templ-pen white-on-black?)
-      (if white-on-black?
-          (send the-pen-list find-or-create-pen "orchid" 1 'solid)
-          (send the-pen-list find-or-create-pen templ-color 1 'solid)))
-    (define (get-tacked-templ-brush white-on-black?) 
-      (if white-on-black?
-          (send the-brush-list find-or-create-brush "orchid" 'solid)
-          (send the-brush-list find-or-create-brush templ-color 'solid)))
+    (define (get-templ-pen)
+      (send the-pen-list find-or-create-pen
+            (color-prefs:lookup-in-color-scheme 'drracket:syncheck:template-arrow)
+            1 'solid))
+    (define (get-tacked-templ-brush)
+      (send the-brush-list find-or-create-brush
+            (color-prefs:lookup-in-color-scheme 'drracket:syncheck:template-arrow)
+            'solid))
     
-    (define (get-tail-pen white-on-black?) 
-      (send the-pen-list find-or-create-pen "orchid" 1 'solid))
-    (define (get-tacked-tail-brush white-on-black?)
-      (send the-brush-list find-or-create-brush "orchid" 'solid))
-    (define (get-untacked-brush white-on-black?)
+    (define (get-tail-pen)
+      (send the-pen-list find-or-create-pen
+            (color-prefs:lookup-in-color-scheme 'drracket:syncheck:tail-arrow)
+            1 'solid))
+    (define (get-tacked-tail-brush)
+      (send the-brush-list find-or-create-brush
+            (color-prefs:lookup-in-color-scheme 'drracket:syncheck:tail-arrow)
+            'solid))
+    (define (get-untacked-brush)
       (send the-brush-list find-or-create-brush 
-            (if white-on-black? "black" "white")
+            (color-prefs:lookup-in-color-scheme 'drracket:syncheck:untacked)
             'solid))
         
     (define-local-member-name
@@ -430,6 +462,10 @@ If the namespace does not, they are colored the unbound color.
             ;;                             -o> (setof (list text number number))]
             ;; this is a private field
             (define bindings-table (make-hash))
+
+            ;; unused-require-table : hash-table[(list text number number) -o> #t]
+            ;; this table records if a given require appears to be unused
+            (define unused-require-table (make-hash))
             
             ;; add-to-bindings-table : text number number text number number -> boolean
             ;; results indicates if the binding was added to the table. It is added, unless
@@ -598,7 +634,8 @@ If the namespace does not, they are colored the unbound color.
               (set! arrow-records (make-hasheq))
               (set! bindings-table (make-hash))
               (set! cleanup-texts '())
-              (set! definition-targets (make-hash)))
+              (set! definition-targets (make-hash))
+              (set! unused-require-table (make-hash)))
             
             (define/public (syncheck:arrows-visible?)
               (or arrow-records cursor-pos cursor-text cursor-eles cursor-tooltip))
@@ -739,6 +776,31 @@ If the namespace does not, they are colored the unbound color.
                 (when arrows
                   (tack/untack-callback arrows))))
 
+            (define (find-preceding-ws-pos edit pos)
+              (let loop ([token-type (send edit classify-position (sub1 pos))]
+                         [current-pos pos])
+                (cond
+                  [(eq? token-type 'white-space)
+                   (define-values (ws-start ws-end)
+                     (send edit get-token-range (sub1 current-pos)))
+                   (loop (send edit classify-position (sub1 ws-start)) ws-start)]
+                  [(and (eq? token-type 'comment)
+                        (char=? (send edit get-character current-pos) #\newline))
+                   (add1 current-pos)]
+                  [else current-pos])))
+
+            (define/public (remove-unused-requires txt pos)
+              (define unused-reqs
+                (sort (hash-keys unused-require-table) > #:key cadr))
+              (begin-edit-sequence)
+              (for ([req (in-list unused-reqs)])
+                (match-define (list edit start end) req)
+                (define prev-token-end (find-preceding-ws-pos edit start))
+                (send edit delete prev-token-end end)
+                (send edit tabify prev-token-end))
+              (hash-clear! unused-require-table)
+              (end-edit-sequence))
+
             (define/public (add-prefix-for-require txt pos)
               (define binding-identifiers (position->binding-arrows txt pos pos #t))
               (define candidate-binders/possibly-prefixed
@@ -830,8 +892,7 @@ If the namespace does not, they are colored the unbound color.
                     name-to-offer
                     #:dialog-mixin frame:focus-table-mixin))))
               (when new-str
-                (define new-sym (format "~s" (string->symbol new-str)))
-                (define dup-name? (name-dup? new-sym))
+                (define dup-name? (name-dup? new-str))
                 
                 (define do-renaming?
                   (or (not dup-name?)
@@ -840,7 +901,7 @@ If the namespace does not, they are colored the unbound color.
                         (string-constant check-syntax)
                         (fw:gui-utils:format-literal-label
                          (string-constant cs-name-duplication-error) 
-                         new-sym)
+                         new-str)
                         (string-constant cs-rename-anyway)
                         (string-constant cancel)
                         #f
@@ -854,7 +915,7 @@ If the namespace does not, they are colored the unbound color.
                    make-identifiers-hash
                    (λ (source-txt start end)
                      (send source-txt delete start end #f)
-                     (send source-txt insert new-sym start start #f))))))
+                     (send source-txt insert new-str start start #f))))))
 
             
 
@@ -916,7 +977,19 @@ If the namespace does not, they are colored the unbound color.
               (when arrow-records
                 (when (<= 0 start-pos end-pos (last-position))
                   (add-to-range/key text start-pos end-pos make-menu key (and key #t)))))
-            
+
+            (define/public (syncheck:add-text-type text start fin text-type)
+              (when arrow-records
+                (when (is-a? text text:basic<%>)
+                  (when (hash-has-key? cs-check-syntax-background-colors text-type)
+                    (define color
+                      (color-prefs:lookup-in-color-scheme
+                       (hash-ref cs-check-syntax-background-colors text-type)))
+                    (add-to-range/key text start fin
+                                      (make-colored-region color text start fin)
+                                      #f #f)))))
+
+            ;; these three methods are no longer used; see docs for more
             (define/public (syncheck:add-background-color text start fin raw-color)
               (when arrow-records
                 (when (is-a? text text:basic<%>)
@@ -932,8 +1005,6 @@ If the namespace does not, they are colored the unbound color.
                   (add-to-range/key text start fin
                                     (make-colored-region color text start fin)
                                     #f #f))))
-            
-            ;; these two methods are no longer used; see docs for more
             (define/public (syncheck:add-arrow start-text start-pos-left start-pos-right
                                                end-text end-pos-left end-pos-right
                                                actual? level)
@@ -982,6 +1053,11 @@ If the namespace does not, they are colored the unbound color.
                                                                     req-pos-left
                                                                     req-pos-right)
               (hash-set! prefix-table (list req-text req-pos-left req-pos-right) #t))
+
+            (define/public (syncheck:add-unused-require req-text
+                                                        req-pos-left
+                                                        req-pos-right)
+              (hash-set! unused-require-table (list req-text req-pos-left req-pos-right) #t))
             
             ;; syncheck:add-mouse-over-status : text pos-left pos-right string -> void
             (define/public (syncheck:add-mouse-over-status text pos-left pos-right str)
@@ -998,9 +1074,28 @@ If the namespace does not, they are colored the unbound color.
             ;; in the assoc
             ;; If use-key? is #f, it adds `to-add' without a key.
             ;; pre: arrow-records is not #f
-            (define/private (add-to-range/key text start pre-end to-add key use-key?)
-              (define end (if (= start pre-end) (+ start 1) pre-end))
-              (when (<= 0 start end (send text last-position))
+            (define/private (add-to-range/key text _start _end to-add key use-key?)
+              ;; adjust the tooltip ranges to sensible values
+              ;; (e.g., in bounds and not equal to each other)
+              (define lp (send text last-position))
+
+              (unless (= 0 lp)
+
+                ;; first get them in bounds
+                (define start (max 0 (min lp _start)))
+                (define end (max 0 (min lp _end)))
+
+                ;; now make sure they are in order
+                (when (end . < . start) (set! end start))
+
+                ;; now make sure they are different
+                ;; (this code relies on there being at least
+                ;; one character in the buffer, checked above)
+                (when (= start end)
+                  (cond
+                    [(= end lp) (set! start (- end 1))]
+                    [else (set! end (+ start 1))]))
+
                 (define arrow-record (get-arrow-record text))
                 ;; Dropped the check (< _ (vector-length arrow-vector))
                 ;; which had the following comment:
@@ -1039,44 +1134,13 @@ If the namespace does not, they are colored the unbound color.
                   (when any-tacked?
                     (invalidate-bitmap-cache/padding)))))
             
-            (define view-corner-hash (make-weak-hasheq))
-            
-            (define/private (get-last-view-corner admin)
-              (hash-ref view-corner-hash admin (λ () (cons #f #f))))
-            
-            (define/private (set-last-view-corner! admin corner)
-              (hash-set! view-corner-hash admin corner))
-            
-            (define/private (get-view-corner admin)
-              (define new-x (box #f))
-              (define new-y (box #f))
-              (send admin get-view new-x new-y #f #f)
-              (cons (unbox new-x) (unbox new-y)))
-            
-            (define/private (update-view-corner admin)
-              (define old-corner (get-last-view-corner admin))
-              (define new-corner (get-view-corner admin))
-              (define scrolled? (not (equal? old-corner new-corner)))
-              (set-last-view-corner! admin new-corner)
-              scrolled?)
-            
             (define/override (on-paint before dc left top right bottom dx dy draw-caret)
               (when (and arrow-records (not before))
                 (define admin (get-admin))
-                ;; update the known editor location for the upper-left corner
-                (define scrolled? (update-view-corner admin))
                 ;; when painting on the canvas the mouse is over...
-                (when (eq? mouse-admin admin)
+                (when (or (not mouse-admin) (object=? mouse-admin admin))
                   (define update-tooltip-frame-and-matching-identifiers?
                     (cond
-                      ;; turn off arrows immediately if scrolling
-                      [scrolled? (set! cursor-tooltip #f)
-                                 (set! cursor-pos #f)
-                                 (set! cursor-text #f)
-                                 (set! cursor-eles #f)
-                                 (update-docs-background #f)
-                                 (start-arrow-draw-cooldown syncheck-scroll-arrow-cooldown)
-                                 #t]
                       ;; try to update the tooltips if they're wrong
                       [(eq? cursor-tooltip 'out-of-sync)
                        (set! cursor-tooltip (get-tooltip cursor-eles))
@@ -1133,13 +1197,13 @@ If the namespace does not, they are colored the unbound color.
                       (cond
                         [(var-arrow? arrow)
                          (if (var-arrow-actual? arrow)
-                             (begin (send dc set-pen (get-var-pen white-on-black?))
-                                    (send dc set-brush (get-tacked-var-brush white-on-black?)))
-                             (begin (send dc set-pen (get-templ-pen white-on-black?))
-                                    (send dc set-brush (get-tacked-templ-brush white-on-black?))))]
+                             (begin (send dc set-pen (get-var-pen))
+                                    (send dc set-brush (get-tacked-var-brush)))
+                             (begin (send dc set-pen (get-templ-pen))
+                                    (send dc set-brush (get-tacked-templ-brush))))]
                         [(tail-arrow? arrow)
-                         (send dc set-pen (get-tail-pen white-on-black?))
-                         (send dc set-brush (get-tacked-tail-brush white-on-black?))])
+                         (send dc set-pen (get-tail-pen))
+                         (send dc set-brush (get-tacked-tail-brush))])
                       (draw-arrow2 arrow)))
                   (when (and cursor-pos
                              cursor-text)
@@ -1149,16 +1213,16 @@ If the namespace does not, they are colored the unbound color.
                       (for ([ele (in-list arrow-records-at-cursor)])
                         (cond [(var-arrow? ele)
                                (if (var-arrow-actual? ele)
-                                   (begin (send dc set-pen (get-var-pen white-on-black?))
-                                          (send dc set-brush (get-untacked-brush white-on-black?)))
-                                   (begin (send dc set-pen (get-templ-pen white-on-black?))
-                                          (send dc set-brush (get-untacked-brush white-on-black?))))
+                                   (begin (send dc set-pen (get-var-pen))
+                                          (send dc set-brush (get-untacked-brush)))
+                                   (begin (send dc set-pen (get-templ-pen))
+                                          (send dc set-brush (get-untacked-brush))))
                                (draw-arrow2 ele)]
                               [(tail-arrow? ele)
                                (set! tail-arrows (cons ele tail-arrows))])))
                     
-                    (send dc set-pen (get-tail-pen white-on-black?))
-                    (send dc set-brush (get-untacked-brush white-on-black?))
+                    (send dc set-pen (get-tail-pen))
+                    (send dc set-brush (get-untacked-brush))
                     (for-each-tail-arrows draw-arrow2 tail-arrows))
                   (send dc set-brush old-brush)
                   (send dc set-pen old-pen)
@@ -1298,29 +1362,38 @@ If the namespace does not, they are colored the unbound color.
                 (cond [(send event leaving?) (values #f #f)]
                       [else (values (send event get-x) (send event get-y))]))
               
-              (set! mouse-admin (get-admin))
-              (set! mouse-x x)
-              (set! mouse-y y)
-              
               ;; mouse motion cancels arrow draw cooldown
               (when (eq? 'motion (send event get-event-type))
                 (set! arrow-draw-cooldown-time (current-milliseconds)))
               
-              ;; if the arrows changed, start the draw timer
-              (when (update-latent-arrows x y)
-                (start-arrow-draw-timer syncheck-arrow-delay))
+              (mouse-is-in-new-place x y (get-admin))
               
               (super on-event event))
+
+            (define/private (mouse-is-in-new-place x y admin)
+              (set! mouse-admin admin)
+              (set! mouse-x x)
+              (set! mouse-y y)
+
+              ;; if the arrows changed, start the draw timer
+              (when (update-latent-arrows x y)
+                (start-arrow-draw-timer syncheck-arrow-delay)))
             
             (define/public (syncheck:update-drawn-arrows)
-              ;; This will ensure on-paint is called, once for each canvas that
-              ;; is displaying the editor. In the on-paint call for the canvas
-              ;; that the mouse is over, arrows will be updated, arrow-draw-timer
-              ;; will be set, etc.
-              ;; If this were done more directly, the tooltip would show up in
-              ;; the wrong canvas half the time - when the current admin isn't
-              ;; the admin for the canvas the mouse is over.
-              (invalidate-bitmap-cache 0 0 'display-end 'display-end))
+              ;; This updates the arrows immediately (without waiting
+              ;; for the cooldown mouse movement); based on the
+              ;; locations in mouse-x and mouse-y (which, as it turns out
+              ;; might be wrong because this editor's on-event isn't called
+              ;; when it isn't installed into a canvas (of course))
+              (define canvas (get-canvas))
+              (when canvas
+                (define-values (pt state) (get-current-mouse-state))
+                (define-values (dx dy) (get-display-left-top-inset))
+                (define-values (sx sy) (send canvas screen->client
+                                             (+ (send pt get-x) dx)
+                                             (+ (send pt get-y) dy)))
+                (mouse-is-in-new-place sx sy (get-admin)))
+              (update-drawn-arrows))
             
             (define/public (syncheck:build-popup-menu menu pos text [sep-before? #t])
               (when arrow-records
@@ -1390,6 +1463,10 @@ If the namespace does not, they are colored the unbound color.
                        [label "Add Require Prefix"]
                        [parent menu]
                        [callback (λ (item evt) (add-prefix-for-require text pos))])
+                  (new menu-item%
+                       [label "Remove Unused Requires"]
+                       [parent menu]
+                       [callback (λ (item evt) (remove-unused-requires text pos))])
                   (for ([f (in-list add-menus)])
                     (f menu))
                   
@@ -1433,8 +1510,9 @@ If the namespace does not, they are colored the unbound color.
             (define current-matching-identifiers (make-hash))
             
             (define/private (update-matching-identifiers refreshing?)
-              (define clr (color-prefs:lookup-in-color-scheme  
-                           'drracket:syncheck:matching-identifiers))
+              (define clr (color-prefs:lookup-in-color-scheme
+                           (hash-ref cs-check-syntax-background-colors
+                                     'matching-identifiers)))
               (define style 'ellipse) 
               (define in-edit-sequence '())
               (define (un/highlight highlight?)
@@ -1626,13 +1704,12 @@ If the namespace does not, they are colored the unbound color.
                     (send (colored-region-text current-colored-region) unhighlight-range 
                           (colored-region-start current-colored-region)
                           (colored-region-fin current-colored-region)
-                          (send the-color-database find-color 
-                                (colored-region-color current-colored-region))))
+                          (colored-region-color current-colored-region)))
                   (when new-region
                     (send (colored-region-text new-region) highlight-range
                           (colored-region-start new-region)
                           (colored-region-fin new-region)
-                          (send the-color-database find-color (colored-region-color new-region))))
+                          (colored-region-color new-region)))
                   (set! current-colored-region new-region))))
                 
             ;; tack/untack-callback : (listof arrow) -> void
@@ -2088,8 +2165,10 @@ If the namespace does not, they are colored the unbound color.
              (send defs-text syncheck:add-tail-arrow defs-text from-pos defs-text to-pos)]
             [`#(syncheck:add-mouse-over-status ,pos-left ,pos-right ,str)
              (send defs-text syncheck:add-mouse-over-status defs-text pos-left pos-right str)]
-            [`#(syncheck:add-background-color ,color ,start ,fin)
-             (send defs-text syncheck:add-background-color defs-text color start fin)]
+            [`#(syncheck:add-text-type ,start ,fin ,text-type)
+             (send defs-text syncheck:add-text-type defs-text start fin text-type)]
+            [`#(syncheck:add-background-color ,start ,fin ,color) ; unused
+             (send defs-text syncheck:add-background-color defs-text start fin color)]
             [`#(syncheck:add-jump-to-definition ,start ,end ,id ,filename ,submods)
              (send defs-text syncheck:add-jump-to-definition defs-text start end id filename submods)]
 
@@ -2108,7 +2187,9 @@ If the namespace does not, they are colored the unbound color.
              (send defs-text syncheck:add-id-set to-be-renamed/poss/fixed name-dup?)]
             [`#(syncheck:add-prefixed-require-reference ,id-pos-left ,id-pos-right)
              (send defs-text syncheck:add-prefixed-require-reference
-                   defs-text id-pos-left id-pos-right)]))
+                   defs-text id-pos-left id-pos-right)]
+            [`#(syncheck:add-unused-require ,req-pos-left ,req-pos-right)
+             (send defs-text syncheck:add-unused-require defs-text req-pos-left req-pos-right)]))
         
         (define/private (build-name-dup? name-dup-pc name-dup-id known-dead-place-channels)
           (define (name-dup? name) 
@@ -2152,13 +2233,13 @@ If the namespace does not, they are colored the unbound color.
                          (inner (void) after-percentage-change))
                        (super-new))
                      [parent (super get-definitions/interactions-panel-parent)]))
-          (set! report-error-panel (new horizontal-panel%
+          (set! report-error-panel (new-horizontal-panel%
                                         [parent report-error-parent-panel]
                                         [stretchable-height #f]
                                         [alignment '(center center)]
                                         [style '(border)]))
           (send report-error-parent-panel change-children (λ (l) null))
-          (let ([message-panel (new vertical-panel%
+          (let ([message-panel (new-vertical-panel%
                                     [parent report-error-panel]
                                     [stretchable-width #f]
                                     [stretchable-height #f]
@@ -2201,17 +2282,6 @@ If the namespace does not, they are colored the unbound color.
               (send report-error-parent-panel set-percentages 
                     (list p (- 1 p))))
             (send report-error-parent-panel start-recording-prefs)))
-        
-        (define rest-panel 'uninitialized-root)
-        (define super-root 'uninitialized-super-root)
-        (define/override (make-root-area-container % parent)
-          (let* ([s-root (super make-root-area-container
-                                vertical-panel%
-                                parent)]
-                 [r-root (make-object % s-root)])
-            (set! super-root s-root)
-            (set! rest-panel r-root)
-            r-root))
                 
         (inherit open-status-line close-status-line update-status-line ensure-rep-hidden)
         ;; syncheck:button-callback : (case-> (-> void) ((union #f syntax) -> void)

@@ -118,7 +118,10 @@
 (define trail (make-parameter #f))
 (define (contract-struct-stronger? a b)
   (cond
-    [(equal? a b) #t]
+    [(and (or (flat-contract-struct? a)
+              (chaperone-contract-struct? a))
+          (equal? a b))
+     #t]
     [else
      (define prop (contract-struct-property a))
      (define stronger? (contract-property-stronger prop))
@@ -300,6 +303,16 @@
        proc-name
        (build-context))))
 
+  (unless (and (procedure? list-contract?)
+               (procedure-arity-includes? list-contract? 1))
+    (error proc-name
+           (string-append
+            "contract violation\n"
+            "  expected: (procedure-arity-includes/c 1)\n"
+            "  given: ~e\n"
+            "  in the #:list-contract? argument")
+           list-contract?))
+
   (mk (or get-name (λ (c) default-name))
       (or get-first-order get-any?)
       get-projection
@@ -453,7 +466,7 @@
          #:stronger [stronger #f]
          #:generate [generate (λ (ctc) (λ (fuel) #f))]
          #:exercise [exercise (λ (ctc) (λ (fuel) (values void '())))]
-         #:list-contract? [list-contract? (λ (ctc) #f)])
+         #:list-contract? [list-contract? #f])
 
   (unless (or first-order
               projection
@@ -484,9 +497,9 @@
             (late-neg-first-order-projection name first-order)]
            [else #f])]
         [else late-neg-projection])
-      (or stronger as-strong?)
+      (or stronger weakest)
       generate exercise
-      list-contract?))
+      (and list-contract? #t)))
 
 (define (late-neg-first-order-projection name p?)
   (λ (b)
@@ -499,12 +512,6 @@
            '(expected: "~s" given: "~e")
            name
            v)))))
-
-(define (as-strong? a b)
-  (define late-neg-a (contract-struct-late-neg-projection a))
-  (define late-neg-b (contract-struct-late-neg-projection b))
-  (and late-neg-a late-neg-b
-       (procedure-closure-contents-eq? late-neg-a late-neg-b)))
 
 (define make-contract
   (procedure-rename 

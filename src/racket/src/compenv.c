@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2017 PLT Design Inc.
+  Copyright (c) 2004-2018 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -261,6 +261,13 @@ Scheme_Comp_Env *scheme_new_compilation_frame(int num_bindings, int flags, Schem
     frame->skip_depth = 0;
 
   init_compile_data(frame);
+
+  if (flags & SCHEME_USE_SCOPES_TO_NEXT) {
+    if (base->use_scopes_next)
+      frame->use_scopes_next = base->use_scopes_next;
+    else
+      frame->use_scopes_next = base;
+  }
 
   return frame;
 }
@@ -1357,6 +1364,11 @@ scheme_compile_lookup(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
 
       if (!frame->vals)
         p += frame->num_bindings;
+
+      if (!frame->next->next && frame->next->intdef_next) {
+        frame = frame->next->intdef_next;
+        continue;
+      }
     }
     
     if (!(flags & SCHEME_OUT_OF_CONTEXT_OK)) {
@@ -1862,10 +1874,12 @@ static Scheme_Object *select_binding_name(Scheme_Object *sym, Scheme_Env *env,
 static int binding_matches_env(Scheme_Object *binding, Scheme_Env *env, Scheme_Object *phase)
 {
   return (SCHEME_VECTORP(binding)
-          && SAME_OBJ(SCHEME_VEC_ELS(binding)[0], 
-                      (env->module
-                       ? env->module->self_modidx
-                       : scheme_false))
+          && (SAME_OBJ(SCHEME_VEC_ELS(binding)[0],
+                       (env->module
+                        ? env->module->self_modidx
+                        : scheme_false))
+              || SAME_OBJ(SCHEME_VEC_ELS(binding)[0],
+                          env->link_midx))
           && SAME_OBJ(SCHEME_VEC_ELS(binding)[2], phase));
 }
 

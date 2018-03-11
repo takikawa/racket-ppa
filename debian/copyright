@@ -3,6 +3,11 @@ Fri, 4 Feb 2000 22:10:09 -0700.
 
 It was downloaded from http://racket-lang.org/download
 
+Files removed, because of license forbidding modifications:
+ share/pkgs/srfi-doc/srfi/scribblings/srfi-std/srfi-29.html |  507 ------------------
+ share/pkgs/srfi-doc/srfi/scribblings/srfi-std/srfi-5.html  |  345 ------------
+ share/pkgs/srfi-lib/srfi/32/sort.txt                       | 1069 ------
+
 readline collection notes:
 GNU's readline library is covered by the GPL (found at
 /usr/share/common-licenses/GPL on Debian systems), and that applies to
@@ -22,6 +27,11 @@ Licence: Lgpl 2.1+
     distribute it under the terms of the LGPL, which in particular means
     that you must release the source code for the modified software.  See
     doc/release-notes/COPYING.LIB for more information.
+
+Files: debian/*
+Copyright: © 2000-2017 Brent Fulgham, David Bremner, Ari Pollock, James Vega
+Licence: LGPL 2.1+
+	 Licensed under the same terms as upstream.
 
 Files: src/racket/src/gmp/*
 Copyright: © 1992, 1993, 1994, 1996  Free Software Foundation, Inc.

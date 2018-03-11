@@ -6,7 +6,8 @@
          "signatures.rkt"
          "check-below.rkt" "../types/kw-types.rkt"
          (types utils abbrev subtype type-table path-type
-                prop-ops overlap resolve generalize tc-result)
+                prop-ops overlap resolve generalize tc-result
+                numeric-tower)
          (private-in syntax-properties parse-type)
          (rep type-rep prop-rep object-rep)
          (only-in (infer infer) intersect)
@@ -15,18 +16,20 @@
          racket/list
          racket/private/class-internal
          syntax/parse
-         (only-in racket/list split-at)
          (typecheck internal-forms tc-envops)
          racket/sequence
          racket/extflonum
          ;; Needed for current implementation of typechecking letrec-syntax+values
-         (for-template (only-in racket/base letrec-values)
-                       (only-in racket/base list)
+         (for-template (only-in racket/base list letrec-values
+                                + - * < <= = >= > add1 sub1 modulo
+                                min max vector-length random
+                                make-vector)
                        ;; see tc-app-contracts.rkt
                        racket/contract/private/provide)
 
          (for-label (only-in '#%paramz [parameterization-key pz:pk])
-                    (only-in racket/private/class-internal find-method/who)))
+                    (only-in racket/private/class-internal find-method/who))
+         (for-syntax racket/base racket/syntax))
 
 (import tc-if^ tc-lambda^ tc-app^ tc-let^ tc-send^ check-subforms^ tc-literal^
         check-class^ check-unit^ tc-expression^)
@@ -46,14 +49,10 @@
   ;; see if id* is an alias for an object
   ;; if not (-id-path id*) is returned
   (define obj (lookup-alias/lexical id*))
-  (define-values (alias-path alias-id)
+  (define ty
     (match obj
-      [(Path: p x) (values p x)]
-      [(Empty:) (values (list) id*)]))
-  ;; calculate the type, resolving aliasing and paths if necessary
-  (define ty (or (path-type alias-path (lookup-type/lexical alias-id))
-                 Univ))
- 
+      [(Empty:) (lookup-id-type/lexical id*)]
+      [_ (lookup-obj-type/lexical obj)]))
   (ret ty
        (if (overlap? ty (-val #f))
            (-PS (-not-type obj (-val #f)) (-is-type obj (-val #f)))
@@ -76,7 +75,7 @@
   (--> syntax? Type? tc-results/c)
   (tc-expr/check form (ret expected)))
 
-(define (tc-expr/check form expected)
+(define (tc-expr/check form expected [existential? #f])
   (parameterize ([current-orig-stx form])
     ;; the argument must be syntax
     (unless (syntax? form)
@@ -89,8 +88,18 @@
          (tc-expr/check/internal #'exp (parse-tc-results (attribute exp.value)))]
         [_ (reduce-tc-results/subsumption
             (tc-expr/check/internal form expected))]))
-    (add-typeof-expr form result)
-    (cond-check-below result expected)))
+    ;; if 'existential?' is true, then it means this expression should be
+    ;; given an existential identifier as an object if it has no object
+    (define adjusted-result
+      (cond
+        [existential?
+         (match result
+           [(tc-result1: t ps (not (? Object?)))
+            (ret t ps (-id-path (gen-existential-id)))]
+           [_ result])]
+        [else result]))
+    (add-typeof-expr form adjusted-result)
+    (cond-check-below adjusted-result expected)))
 
 ;; typecheck and return a truth value indicating a typecheck failure (#f)
 ;; or success (any non-#f value)
@@ -110,7 +119,7 @@
     [#f #f]))
 
 (define (explicit-fail stx msg var)
-  (cond [(and (identifier? var) (lookup-type/lexical var #:fail (λ _ #f)))
+  (cond [(and (identifier? var) (lookup-id-type/lexical var #:fail (λ _ #f)))
          =>
          (λ (t)
            (tc-error/expr #:stx stx
@@ -149,11 +158,17 @@
       [(quote #f) (ret (-val #f) -false-propset)]
       [(quote #t) (ret (-val #t) -true-propset)]
       [(quote val)
-       (match expected
-         [(tc-result1: t)
-          (ret (tc-literal #'val t) -true-propset)]
-         [_
-          (ret (tc-literal #'val) -true-propset)])]
+       (ret (match expected
+              [(tc-result1: t) (tc-literal #'val t)]
+              [_ (tc-literal #'val)])
+            -true-propset
+            ;; sometimes we want integer's symbolic objects
+            ;; to be themselves
+            (let ([v (syntax-e #'val)])
+              (if (and (exact-integer? v)
+                       (with-refinements?))
+                  (-lexp v)
+                  -empty-obj)))]
       ;; syntax
       [(quote-syntax datum . _)
        (define expected-type
@@ -195,7 +210,12 @@
           ;(tc-expr/check #'e3 expected)
           (tc-error/expr "with-continuation-mark requires a continuation-mark-key, but got ~a" key-t)])]
       ;; application
-      [(#%plain-app . _) (tc/app form expected)]
+      [(#%plain-app . _)
+       (define result (tc/app form expected))
+       (cond
+         [(with-refinements?)
+          (add-applicable-linear-info form result)]
+         [else result])]
       ;; #%expression
       [(#%expression e) (tc/#%expression form expected)]
       ;; begin
@@ -206,7 +226,7 @@
       [(begin0 e . es)
        (begin0
          (tc-expr/check #'e expected)
-         (tc-body/check #'es (tc-any-results -tt)))]
+         (tc-body/check #'es (-tc-any-results -tt)))]
       ;; if
       [(if tst thn els) (tc/if-twoarm #'tst #'thn #'els expected)]
       ;; lambda
@@ -237,14 +257,12 @@
       [(~and (let-values ([(f) fun]) . body) kw:kw-lambda^)
        #:when expected
        (match expected
-         [(tc-result1: (and f (or (Function: _)
-                                  (Poly: _ (Function: _)))))
+         [(tc-result1: (and f (or (? Fun?) (Poly-unsafe: _ (? Fun?)))))
           (define actual-kws (attribute kw.value))
           (check-kw-arity actual-kws f)
           (tc-expr/check/type #'fun (kw-convert f actual-kws #:split #t))
           (ret f -true-propset)]
-         [(or (tc-results: _) (tc-any-results: _))
-          (tc-expr/check form #f)])]
+         [_ (tc-expr/check form #f)])]
       ;; opt function def
       [(~and (let-values ([(f) fun]) . body) opt:opt-lambda^)
        #:when expected
@@ -334,12 +352,20 @@
           #:stx form
           "expected single value, got multiple (or zero) values")]))
 
+(define (tc-dep-fun-arg form [expected #f])
+  (define t (tc-expr/check form expected #t))
+  (match t
+    [(tc-result1: _ _ _) t]
+    [_ (tc-error/expr
+        #:stx form
+        "expected single value, got multiple (or zero) values")]))
+
 
 ;; tc-body/check: syntax? tc-results? -> tc-results?
 ;; Body must be a non empty sequence of expressions to typecheck.
 ;; The final one will be checked against expected.
 (define (tc-body/check body expected)
-  (define any-res (tc-any-results #f))
+  (define any-res (-tc-any-results #f))
   (define exps (syntax->list body))
   (let loop ([exps exps])
     (match exps
@@ -349,10 +375,11 @@
        (define props
          (match results
            [(tc-any-results: p) (list p)]
-           [(tc-results: _ (list (PropSet: p+ p-) ...) _)
-            (map -or p+ p-)]
-           [(tc-results: _ (list (PropSet: p+ p-) ...) _ _ _)
-            (map -or p+ p-)]))
+           [(tc-results: tcrs _)
+            (map (match-lambda
+                   [(tc-result: _ (PropSet: p+ p-) _)
+                    (-or p+ p-)])
+                 tcrs)]))
        (with-lexical-env+props
          props
          #:expected any-res
@@ -390,7 +417,7 @@
        [(HeterogeneousVector: ts)
         (make-HeterogeneousVector
          (for/list ([x (in-list xs)]
-                    [t (in-sequence-forever (in-list ts) #f)])
+                    [t (in-list/rest ts #f)])
            (cond-check-below (find-stx-type x t) t)))]
        [_ (make-HeterogeneousVector (for/list ([x (in-list xs)])
                                       (generalize (find-stx-type x #f))))])]
@@ -399,16 +426,162 @@
        [(Box: t) (-box (check-below (find-stx-type x t) t))]
        [_ (-box (generalize (find-stx-type x)))])]
     [(? hash? h)
-     (match (and expected (resolve (intersect expected -HashtableTop)))
-       [(Hashtable: kt vt)
-        (define kts (hash-map h (lambda (x y) (find-stx-type x kt))))
-        (define vts (hash-map h (lambda (x y) (find-stx-type y vt))))
-        (make-Hashtable
-         (check-below (apply Un kts) kt)
-         (check-below (apply Un vts) vt))]
-       [_ (make-Hashtable (generalize (apply Un (map find-stx-type (hash-keys h))))
-                          (generalize (apply Un (map find-stx-type (hash-values h)))))])]
+     (cond
+      [(immutable? h)
+       (match (and expected (resolve (intersect expected (-Immutable-HT Univ Univ))))
+        [(Immutable-HashTable: k v)
+         (value->HT/find-stx-type h -Immutable-HT k v)]
+        [_
+         (value->HT/find-stx-type h -Immutable-HT)])]
+      [(hash-weak? h)
+       (match (and expected (resolve (intersect expected (-Weak-HT Univ Univ))))
+        [(Weak-HashTable: k v)
+         (value->HT/find-stx-type h -Weak-HT k v)]
+        [_
+         (value->HT/find-stx-type h -Weak-HT)])]
+      [else
+       (match (and expected (resolve (intersect expected (-Mutable-HT Univ Univ))))
+        [(Mutable-HashTable: k v)
+         (value->HT/find-stx-type h -Mutable-HT k v)]
+        [_
+         (value->HT/find-stx-type h -HT)])])]
     [(? prefab-struct-key)
      ;; FIXME is there a type for prefab structs?
      Univ]
     [_ Univ]))
+
+;; value->HT/find-stx-type : hash? (-> type? type? type?) -> type?
+;;                         : hash? (-> type? type? type?) type? type? -> type?
+;; Build a HashTable type from a value, type constructor, and (optionally)
+;;  upper bounds on the key and value types.
+(define value->HT/find-stx-type
+  (case-lambda
+   [(h tycon expected-kt expected-vt)
+    (let* ([kts (hash-map h (lambda (x y) (find-stx-type x expected-kt)))]
+           [vts (hash-map h (lambda (x y) (find-stx-type y expected-vt)))]
+           [kt (apply Un kts)]
+           [vt (apply Un vts)])
+      (tycon (check-below kt expected-kt) (check-below vt expected-vt)))]
+   [(h tycon)
+    (let ([kt (generalize (apply Un (map find-stx-type (hash-keys h))))]
+          [vt (generalize (apply Un (map find-stx-type (hash-values h))))])
+      (tycon kt vt))]))
+
+
+;; adds linear info for the following operations:
+;; + - * < <= = >= > make-vector
+;; when the arguments are integers w/ objects.
+;; These are the 'axiomatized' arithmetic operators.
+;; NOTE: We should keep these axiomatizations so that they
+;; only add info that we could later reasonably encode in a
+;; standard function type for TR, so we're not bound to always
+;; doing this.
+(define (add-applicable-linear-info form result)
+  ;; class to recognize expressions that typecheck at a subtype of -Int
+  ;; and whose object is non-empty
+  (define-syntax-class (t/obj type)
+    #:attributes (obj)
+    (pattern e:expr
+             #:do [(define o
+                     (match (type-of #'e)
+                       [(tc-result1: t _ (? Object? o))
+                        #:when (subtype t type)
+                        o]
+                       [_ #f]))]
+             #:fail-unless o (format "not a ~a expr with a non-empty object" type)
+             #:attr obj o))
+  (define-syntax (obj stx)
+    (syntax-case stx ()
+      [(_ e)
+       (with-syntax ([e* (format-id #'e "~a.obj" (syntax->datum #'e))])
+         (syntax/loc #'e (attribute e*)))]))
+  ;; class to recognize int comparisons and associate their
+  ;; internal TR prop constructors
+  (define-syntax-class int-comparison
+    #:attributes (constructor)
+    (pattern (~literal <) #:attr constructor -lt)
+    (pattern (~literal <=) #:attr constructor -leq)
+    (pattern (~literal >=) #:attr constructor -geq)
+    (pattern (~literal >) #:attr constructor -gt)
+    (pattern (~literal =) #:attr constructor -eq))
+
+  ;; takes a result and adds p to the then proposition
+  ;; and (not p) to the else proposition
+  (define (add-p/not-p result p)
+    (match result
+      [(tc-result1: t (PropSet: p+ p-) o)
+       (ret t
+            (-PS (-and p p+) (-and (negate-prop p) p-))
+            o)]
+      [_ result]))
+
+  ;; inspect the function appplication to see if it is a linear
+  ;; integer compatible form we want to enrich with info when
+  ;; #:with-logical-refinements is specified by the user
+  (match result
+    [(tc-result1: ret-t ps orig-obj)
+     (syntax-parse form
+       ;; *
+       [(#%plain-app (~literal *) (~var e1 (t/obj -Int)) (~var e2 (t/obj -Int)))
+        (define product-obj (-obj* (obj e1) (obj e2)))
+        (cond
+          [(Object? product-obj)
+           (ret (-refine/fresh x ret-t (-eq (-lexp x) product-obj))
+                ps
+                product-obj)]
+          [else result])]
+       ;; +/- (2 args)
+       [(#%plain-app (~and op (~or (~literal +) (~literal -)))
+                     (~var e1 (t/obj -Int))
+                     (~var e2 (t/obj -Int)))
+        (define (sign o) (if (eq? '+ (syntax->datum #'op))
+                             o
+                             (scale-obj -1 o)))
+        (define l (-lexp (obj e1) (sign (obj e2))))
+        (ret (-refine/fresh x ret-t (-eq (-lexp x) l))
+             ps
+             l)]
+       ;; +/- (3 args)
+       [(#%plain-app (~and op (~or (~literal +) (~literal -)))
+                     (~var e1 (t/obj -Int))
+                     (~var e2 (t/obj -Int))
+                     (~var e3 (t/obj -Int)))
+        (define (sign o) (if (eq? '+ (syntax->datum #'op))
+                             o
+                             (scale-obj -1 o)))
+        (define l (-lexp (obj e1) (sign (obj e2)) (sign (obj e3))))
+        (ret (-refine/fresh x ret-t (-eq (-lexp x) l))
+             ps
+             l)]
+       ;; integer comparisons, 2 args
+       [(#%plain-app comp:int-comparison
+                     (~var e1 (t/obj -Int))
+                     (~var e2 (t/obj -Int)))
+        (define p ((attribute comp.constructor)
+                   (obj e1)
+                   (obj e2)))
+        (add-p/not-p result p)]
+       ;; integer comparisons, 3 args
+       [(#%plain-app comp:int-comparison
+                     (~var e1 (t/obj -Int))
+                     (~var e2 (t/obj -Int))
+                     (~var e3 (t/obj -Int)))
+        (define p (-and ((attribute comp.constructor)
+                         (obj e1)
+                         (obj e2))
+                        ((attribute comp.constructor)
+                         (obj e2)
+                         (obj e3))))
+        (add-p/not-p result p)]
+       ;; make-vector include length in result
+       [(#%plain-app (~literal make-vector)
+                     (~var size (t/obj -Int))
+                     . _)
+        #:when (Object? (obj size))
+        (ret (-refine/fresh v ret-t (-eq (-lexp (-vec-len-of (-id-path v)))
+                                         (obj size)))
+             ps
+             orig-obj)]
+       [_ result])]
+    [_ result]))
+

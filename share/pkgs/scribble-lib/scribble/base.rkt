@@ -6,6 +6,7 @@
          "decode-struct.rkt"
          "html-properties.rkt"
          "tag.rkt"
+         "private/tag.rkt"
          scheme/list
          scheme/class
          racket/contract/base
@@ -41,29 +42,6 @@
                           #:rest (listof pre-content?)
                           block?)])
 (provide include-section)
-
-(define (gen-tag content)
-  (datum-intern-literal
-   (regexp-replace* "[^-a-zA-Z0-9_=]" (content->string content) "_")))
-
-(define (prefix->string p)
-  (and p (if (string? p) 
-             (datum-intern-literal p)
-             (module-path-prefix->string p))))
-
-(define (convert-tag tag content)
-  (if (list? tag)
-    (append-map (lambda (t) (convert-tag t content)) tag)
-    `((part ,(or tag (gen-tag content))))))
-
-(define (convert-part-style who s)
-  (cond
-   [(style? s) s]
-   [(not s) plain]
-   [(string? s) (make-style s null)]
-   [(symbol? s) (make-style #f (list s))]
-   [(and (list? s) (andmap symbol? s)) (make-style #f s)]
-   [else (raise-argument-error who "(or/c style? string? symbol? (listof symbol?) #f)" s)]))
 
 (define (title #:tag [tag #f] #:tag-prefix [prefix #f] #:style [style plain]
                #:version [version #f] #:date [date #f]
@@ -571,45 +549,55 @@
 
 ;; ----------------------------------------
 
-(provide/contract
- [elemtag (->* ((or/c taglet? generated-tag?))
-               ()
-               #:rest (listof pre-content?)
-               element?)]
- [elemref (->* ((or/c taglet? generated-tag?))
-               (#:underline? any/c)
-               #:rest (listof pre-content?)
-               element?)]
- [secref (->* (string?)
-              (#:doc module-path?
-                     #:tag-prefixes (or/c #f (listof string?))
-                     #:underline? any/c)
-              element?)]
- [Secref (->* (string?)
-              (#:doc module-path?
-                     #:tag-prefixes (or/c #f (listof string?))
-                     #:underline? any/c)
-              element?)]
- [seclink (->* (string?)
+(provide
+ (contract-out
+  [elemtag (->* ((or/c taglet? generated-tag?))
+                ()
+                #:rest (listof pre-content?)
+                element?)]
+  [elemref (->* ((or/c taglet? generated-tag?))
+                (#:underline? any/c)
+                #:rest (listof pre-content?)
+                element?)]
+  [secref (->* (string?)
                (#:doc module-path?
-                      #:tag-prefixes (or/c #f (listof string?))
-                      #:underline? any/c
-                      #:indirect? any/c)
-               #:rest (listof pre-content?)
+                #:tag-prefixes (or/c #f (listof string?))
+                #:underline? any/c
+                #:link-render-style (or/c #f link-render-style?))
                element?)]
- [other-doc (->* (module-path?)
-                 (#:underline? any/c
-                               #:indirect (or/c #f content?))
-                 element?)])
+  [Secref (->* (string?)
+               (#:doc module-path?
+                #:tag-prefixes (or/c #f (listof string?))
+                #:underline? any/c
+                #:link-render-style (or/c #f link-render-style?))
+               element?)]
+  [seclink (->* (string?)
+                (#:doc module-path?
+                 #:tag-prefixes (or/c #f (listof string?))
+                 #:underline? any/c
+                 #:indirect? any/c)
+                #:rest (listof pre-content?)
+                element?)]
+  [other-doc (->* (module-path?)
+                  (#:underline? any/c
+                   #:indirect (or/c #f content?))
+                  element?)]))
 
 (define (elemtag t . body)
   (make-target-element #f (decode-content body) `(elem ,t)))
 (define (elemref #:underline? [u? #t] t . body)
   (make-link-element (if u? #f "plainlink") (decode-content body) `(elem ,t)))
 
-(define (secref s #:underline? [u? #t] #:doc [doc #f] #:tag-prefixes [prefix #f])
-  (make-link-element (if u? #f "plainlink") null (make-section-tag s #:doc doc #:tag-prefixes prefix)))
-(define (Secref s #:underline? [u? #t] #:doc [doc #f] #:tag-prefixes [prefix #f])
+(define (secref s #:underline? [u? #t] #:doc [doc #f] #:tag-prefixes [prefix #f]
+                #:link-render-style [link-style #f])
+  (make-link-element (let ([name (if u? #f "plainlink")])
+                       (if link-style
+                           (style name (list link-style))
+                           name))
+                     null
+                     (make-section-tag s #:doc doc #:tag-prefixes prefix)))
+(define (Secref s #:underline? [u? #t] #:doc [doc #f] #:tag-prefixes [prefix #f]
+                #:link-render-style [link-style #f])
   (let ([le (secref s #:underline? u? #:doc doc #:tag-prefixes prefix)])
     (make-link-element
      (make-style (element-style le) '(uppercase))

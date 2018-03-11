@@ -146,13 +146,15 @@
                                                      #'extra-neg-party-argument-fn))
                                    lifted-neg-party
                                    more ...)))
-                         #`(app #,(gen-slow-path-code) more ...)))]))
+                         (adjust-location
+                          #`(app #,(gen-slow-path-code) more ...))))]))
               ;; In case of partial expansion for module-level and internal-defn
               ;; contexts, delay expansion until it's a good time to lift
               ;; expressions:
               (quasisyntax/loc stx (#%expression #,stx)))))))
   
-  (struct provide/contract-transformer provide/contract-info (saved-id-table partially-applied-id blame)
+  (struct provide/contract-transformer provide/contract-info
+    (saved-id-table partially-applied-id blame)
     #:property
     prop:set!-transformer
     (λ (self stx)
@@ -283,9 +285,14 @@
       [(-> . _) 
        (not (->-arity-check-only->? ctrct))
        (values #t (->-valid-app-shapes ctrct))]
-      [(->* . _) 
-       (values (not (->*-arity-check-only->? ctrct))
-               (->*-valid-app-shapes ctrct))]
+      [(->* . _)
+       (cond
+         [(->*-arity-check-only->? ctrct) (values #f #f)]
+         [else
+          (define shapes (->*-valid-app-shapes ctrct))
+          (if shapes
+              (values #t shapes)
+              (values #f #f))])]
       [(->i . _) (values #t (->i-valid-app-shapes ctrct))]
       [_ (values #f #f)]))
   (with-syntax ([id id]
@@ -309,7 +316,9 @@
     #`(begin
         (define contract-id
           ;; let is here to give the right name.
-          (let ([#,ex-id (coerce-contract '#,contract-error-name ctrct)
+          (let ([#,ex-id #,(if arrow?
+                               #'ctrct
+                               #`(coerce-contract '#,contract-error-name ctrct))
                          #;(opt/c ctrct #:error-name #,contract-error-name)])
             #,ex-id))
         
