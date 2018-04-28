@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2017 PLT Design Inc.
+  Copyright (c) 2004-2018 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -1202,7 +1202,7 @@ Scheme_Object *do_chaperone_channel(const char *name, int is_impersonator, int a
   Scheme_Chaperone *px;
   Scheme_Object *val = argv[0];
   Scheme_Object *evt;
-  Scheme_Hash_Tree *props;
+  Scheme_Object *props;
 
   if (SCHEME_CHAPERONEP(val))
     val = SCHEME_CHAPERONE_VAL(val);

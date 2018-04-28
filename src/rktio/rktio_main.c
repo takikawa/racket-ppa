@@ -2,6 +2,10 @@
 #include "rktio_private.h"
 #include <stdlib.h>
 #include <string.h>
+#ifdef OS_X
+# include <sys/types.h>
+# include <sys/sysctl.h>
+#endif
 
 rktio_t *rktio_init(void)
 {
@@ -33,11 +37,33 @@ rktio_t *rktio_init(void)
 
   rktio_syslog_init(rktio);
 
+#ifdef OS_X
+  {
+    int a[2], i, k = 0;
+    size_t len;
+    char *vers;
+
+    a[0] = CTL_KERN;
+    a[1] = KERN_OSRELEASE;
+    sysctl(a, 2, NULL, &len, NULL, 0);
+    vers = malloc(len * sizeof(char));
+    sysctl(a, 2, vers, &len, NULL, 0);
+
+    for (i = 0; (i < len) && (vers[i] != '.'); i++)
+      k = (k * 10) + vers[i] - '0';
+
+    rktio->macos_kernel_version = k;
+
+    free(vers);
+  }
+#endif
+
   return rktio;
 }
 
 void rktio_destroy(rktio_t *rktio)
 {
+  rktio_stop_background(rktio);
   rktio_syslog_clean(rktio);
   rktio_dll_clean(rktio);
   rktio_error_clean(rktio);

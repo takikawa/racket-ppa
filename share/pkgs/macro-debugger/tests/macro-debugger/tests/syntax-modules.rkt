@@ -95,6 +95,7 @@
              (define-syntaxes (x) (lambda (_) (if '#t (quote-syntax *) '#f)))
              (x))))])
 
+  #| FIXME
   (test "module k+helper, macro use"
         (module m '#%kernel (#%require 'helper) (Tid 'a))
         [#:steps
@@ -110,6 +111,7 @@
           (module m '#%kernel
             (#%require 'helper)
             'a))])
+  |#
 
   (test "module k+helper, defs and opaque macros"
         (module m '#%kernel
