@@ -1,15 +1,18 @@
 #lang racket/base
+
 (require racket/contract
          web-server/servlet
          web-server/private/xexpr
-         "lib.rkt")
+         "lib.rkt"
+         "embed.rkt")
 
-(provide/contract
- [send/formlet ((formlet*/c)
-                (#:method (or/c "GET" "POST" "get" "post")
-                 #:wrap (pretty-xexpr/c . -> . pretty-xexpr/c))
-                . ->* .
-                any)])
+(provide
+ (recontract-out embed-formlet)
+ (contract-out
+  [send/formlet (->* (formlet*/c)
+                     (#:method (or/c "GET" "POST" "get" "post")
+                      #:wrap (-> pretty-xexpr/c pretty-xexpr/c))
+                     any)]))
 
 (define (send/formlet f
                       #:method
@@ -28,15 +31,3 @@
         `(form ([action ,k-url] [method ,method])
                ,@(formlet-display f))))))))
 
-(provide/contract
- [embed-formlet 
-  (((request? . -> . any) . -> . string?)
-   formlet*/c
-   . -> .
-   pretty-xexpr/c)])
-
-(define (embed-formlet embed/url f)
-  `(form ([action ,(embed/url
-                    (lambda (r)
-                      (formlet-process f r)))])
-         ,@(formlet-display f)))

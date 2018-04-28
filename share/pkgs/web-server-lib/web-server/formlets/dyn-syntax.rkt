@@ -1,19 +1,19 @@
-#lang racket/base
-(require (for-syntax racket/base
-                     racket/local
-                     racket/list
-                     syntax/parse
-                     syntax/strip-context)
-         racket/function
-         racket/list
-         racket/match
+#lang web-server/base
+
+(require racket/match
          racket/stxparam
          "lib.rkt"
          "syntax.rkt"
-         (for-syntax "lib.rkt"))
+         (only-in "unsafe/dyn-syntax.rkt"
+                  =>*)
+         (for-syntax "lib.rkt"
+                     racket/base
+                     syntax/parse
+                     syntax/strip-context))
 
-(define-syntax-parameter =>*
-  (λ (stx) (raise-syntax-error '=>* "Only allowed inside formlet*" stx)))
+(provide formlet* =>*)
+
+; redefine formlet* using contracted version of lib.rkt
 
 (define (snoc x l) (append l (list x)))
 
@@ -25,7 +25,7 @@
                   (λ (answers) 
                     (for ([label (in-list labels)]
                           [ans (in-list anss)])
-                      (hash-update! answers label (curry snoc ans) empty)))))
+                      (hash-update! answers label (λ (l) (snoc ans l)) null)))))
           formlet)))
 
 (define xexpr-forest->label-formlet
@@ -48,7 +48,7 @@
      (tag-xexpr tag (map list attr str)
                 (xexpr-forest->label-formlet xexpr))]
     [(list (? symbol? tag) xexpr ...)
-     (tag-xexpr tag empty
+     (tag-xexpr tag null
                 (xexpr-forest->label-formlet xexpr))]
     [(label-formlet p)
      p]
@@ -66,34 +66,33 @@
 (define-syntax-rule (inner-#%# e ...) (#%#-mark (list e ...)))
 
 (define-syntax (formlet* stx)
-  (syntax-case stx ()
-    [(_ q e)
-     (local [(define label->name (make-hash))
-             (define (this-=>* stx)
-               (syntax-parse stx
-                             #:literals (values)
-                             [(=>* formlet:expr name:id)
-                              #'(=>* formlet (values name))]
-                             [(_ formlet:expr (values name:id ...))
-                              (define names (syntax->list #'(name ...)))
-                              (define labels (map (compose gensym syntax->datum) names))
-                              (for ([label (in-list labels)]
-                                    [name (in-list names)])
-                                (hash-set! label->name label (replace-context #'e name)))
-                              #`(label-formlet-answers '#,labels formlet)]))
-             (define q-raw 
-               (local-expand #`(syntax-parameterize ([=>* #,this-=>*]
-                                                     [#%# (make-rename-transformer #'inner-#%#)])
-                                                    q)
-                             'expression empty))]
+  (syntax-parse stx 
+    [(_ q e:expr)
+     (let ()
+       (define label->name (make-hash))
+       (define (this-=>* stx)
+         (syntax-parse stx
+           #:literals (values)
+           [(=>* formlet:expr name:id)
+            #'(=>* formlet (values name))]
+           [(_ formlet:expr (values name:id ...))
+            (define names (syntax->list #'(name ...)))
+            (define labels (map (compose1 gensym syntax->datum) names))
+            (for ([label (in-list labels)]
+                  [name (in-list names)])
+              (hash-set! label->name label (replace-context #'e name)))
+            #`(label-formlet-answers '#,labels formlet)]))
+       (define q-raw 
+         (local-expand #`(syntax-parameterize ([=>* #,this-=>*]
+                                               [#%# (make-rename-transformer #'inner-#%#)])
+                           q)
+                       'expression null))
        (with-syntax ([((label . name) ...)
                       (for/list ([(k v) (in-hash label->name)])
                         (cons k v))])
          (quasisyntax/loc stx
            (label-formlet-cross (lambda (labeled)
-                                  (let ([name (hash-ref labeled 'label empty)]
+                                  (let ([name (hash-ref labeled 'label null)]
                                         ...)
                                     e))
                                 #,q-raw))))]))
-
-(provide formlet* =>*)

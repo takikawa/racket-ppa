@@ -1,5 +1,17 @@
 #lang racket/base
 
+#|
+
+Additional (backwards-incompatible) checks to
+consider adding when in some special mode:
+
+  - ellipses that have a name => should not be literals; instead syntax errors
+
+see also rewrite-side-conditions.rkt for some restrictions/changes there
+
+
+|#
+
 (require (for-syntax racket/base 
                      "term-fn.rkt"
                      syntax/boundmap
@@ -237,12 +249,10 @@
                                 (string->symbol (list-ref m 1))
                                 raw-sym))
          (check-id (syntax->datum (term-id-id id)) stx ellipsis-allowed? #t)
-         
-         (define new-id
-           (build-disappeared-use (current-id-stx-table) 
+         (record-disappeared-uses
+          (build-disappeared-uses (current-id-stx-table)
                                   prefix-sym
                                   (syntax-local-introduce #'x)))
-         (when new-id (record-disappeared-uses (list new-id)))
          (values stx-result
                  (term-id-depth id)
                  #t))]
