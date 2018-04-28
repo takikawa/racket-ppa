@@ -72,11 +72,10 @@ on the values of terms.
            (linear-comp symbolic-object symbolic-object)]
           [linear-comp < <= = >= >]
           [symbolic-object exact-integer
-           linear-term
-           (+ linear-term linear-term ...)
-           (- linear-term linear-term ...)]
-          [linear-term symbolic-path
-           (* exact-integer symbolic-path)]
+           symbolic-path
+           (+ symbolic-object ...)
+           (- symbolic-object ...)
+           (* exact-integer symbolic-object)]
           [symbolic-path id
            (path-elem symbolic-path)]
           [path-elem car
@@ -126,10 +125,11 @@ specifying the language of your program:
 @racketmod[typed/racket #:with-refinements]
 
 
-With this language option on, type checking the following arithmetic
+With this language option on, type checking the following
 primitives will produce more specific logical info (when they are being
 applied to 2 or 3 arguments): @racket[*], @racket[+], @racket[-],
-@racket[<], @racket[<=], @racket[=], @racket[>=], and @racket[>].
+@racket[<], @racket[<=], @racket[=], @racket[>=], @racket[>],
+and @racket[make-vector].
 
 This allows code such as the following to type check:
 

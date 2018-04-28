@@ -1,7 +1,7 @@
 /* 
    Racket's garbage collector
    By Adam Wick, Matthew Flatt, and Kevin Tew
-   Copyright (c) 2004-2017 PLT Design Inc.
+   Copyright (c) 2004-2018 PLT Design Inc.
    Copyright (C) 2001, 2002 Matthew Flatt and Adam Wick
 */
 
@@ -1773,6 +1773,8 @@ intptr_t GC_alloc_alignment()
 }
 
 intptr_t GC_malloc_stays_put_threshold() { return MAX_OBJECT_SIZE; }
+
+intptr_t GC_max_nursery_object_size() { return MAX_OBJECT_SIZE - OBJHEAD_SIZE; }
 
 /*****************************************************************************/
 /* Nursery (a.k.a. generation 0) and generation 1/2                          */

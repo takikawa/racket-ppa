@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2017 PLT Design Inc.
+  Copyright (c) 2004-2018 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -256,6 +256,9 @@ Scheme_Env *scheme_engine_instance_init()
   scheme_init_resolve();
   scheme_init_sfs();
   scheme_init_validate();
+#ifdef MZ_USE_JIT
+  scheme_init_jit();
+#endif
 
   scheme_init_process_globals();
 
@@ -330,6 +333,7 @@ static void init_unsafe(Scheme_Env *env)
   scheme_init_unsafe_vector(unsafe_env);
   scheme_init_unsafe_fun(unsafe_env);
   scheme_init_unsafe_thread(unsafe_env);
+  scheme_init_unsafe_port(unsafe_env);
 
   scheme_init_extfl_unsafe_number(unsafe_env);
   scheme_init_extfl_unsafe_numarith(unsafe_env);
@@ -492,7 +496,7 @@ static Scheme_Env *place_instance_init(void *stack_base, int initial_main_os_thr
 
   scheme_init_stack_check();
   scheme_init_overflow();
-
+  
   scheme_init_thread_lwc();
 
   scheme_init_compenv_places();
@@ -2106,7 +2110,7 @@ static Scheme_Object *do_variable_namespace(const char *who, int tl, int argc, S
         || !env->module) {
       scheme_contract_error(who, 
                             "variable reference does not refer to an anonymous module variable",
-                            "variable reference", 1, v,
+                            "variable reference", 1, argv[0],
                             NULL);
     }
     return env->access_insp;
@@ -2218,11 +2222,7 @@ static Scheme_Object *variable_modidx(int argc, Scheme_Object *argv[])
           && SCHEME_TRUEP(((Scheme_Modidx *)env->module->self_modidx)->path))
         return env->module->self_modidx;
       else
-        return scheme_make_modidx(scheme_make_pair(scheme_intern_symbol("quote"),
-                                                   scheme_make_pair(scheme_resolved_module_path_value(env->module->modname),
-                                                                    scheme_null)),
-                                  scheme_false,
-                                  scheme_false);
+        return scheme_resolved_module_path_to_modidx(env->module->modname);
     } else
       return env->link_midx;
   } else

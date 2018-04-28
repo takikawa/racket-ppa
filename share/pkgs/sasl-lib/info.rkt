@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.12"))) (define version "1.0") (define collection "sasl") (define deps (quote (("base" #:version "6.10"))))))

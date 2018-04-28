@@ -10,14 +10,14 @@
  (env type-name-env row-constraint-env)
  (rep core-rep rep-utils free-ids type-mask values-rep
       base-types numeric-base-types)
- (types resolve utils printer match-expanders union)
+ (types resolve utils printer match-expanders union subtype)
  (prefix-in t: (types abbrev numeric-tower subtype))
  (private parse-type syntax-properties)
  racket/match racket/syntax racket/list
  racket/format
  syntax/flatten-begin
  (only-in (types abbrev) -Bottom -Boolean)
- (static-contracts instantiate optimize structures combinators constraints)
+ (static-contracts instantiate structures combinators constraints)
  (only-in (submod typed-racket/static-contracts/instantiate internals) compute-constraints)
  ;; TODO make this from contract-req
  (prefix-in c: racket/contract)
@@ -287,15 +287,14 @@
                         #:sc-cache [sc-cache (make-hash)])
   (let/ec escape
     (define (fail #:reason [reason #f]) (escape (init-fail #:reason reason)))
-    (instantiate
-     (optimize
-      (type->static-contract ty #:typed-side typed-side fail
-                             #:cache sc-cache)
-      #:trusted-positive typed-side
-      #:trusted-negative (not typed-side))
+    (instantiate/optimize
+     (type->static-contract ty #:typed-side typed-side fail
+                            #:cache sc-cache)
      fail
      kind
-     #:cache cache)))
+     #:cache cache
+     #:trusted-positive typed-side
+     #:trusted-negative (not typed-side))))
 
 (define any-wrap/sc (chaperone/sc #'any-wrap/c))
 
@@ -526,6 +525,11 @@
        [(? Fun? t) (t->sc/fun t)]
        [(? DepFun? t) (t->sc/fun t)]
        [(Set: t) (set/sc (t->sc t))]
+       [(Sequence: (list t))
+        #:when (subtype t:-Nat t)
+        ;; sequence/c is always a wrapper, so avoid it when we just have a number
+        (or/sc (flat/sc #'exact-nonnegative-integer?)
+               (sequence/sc (t->sc t)))]
        [(Sequence: ts) (apply sequence/sc (map t->sc ts))]
        [(Vector: t) (vectorof/sc (t->sc/both t))]
        [(HeterogeneousVector: ts) (apply vector/sc (map t->sc/both ts))]

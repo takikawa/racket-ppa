@@ -1,6 +1,6 @@
 /*
   Racket
-  Copyright (c) 2004-2017 PLT Design Inc.
+  Copyright (c) 2004-2018 PLT Design Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -183,6 +183,8 @@ THREAD_LOCAL_DECL(static volatile short delayed_break_ready);
 THREAD_LOCAL_DECL(static Scheme_Thread *main_break_target_thread);
 
 THREAD_LOCAL_DECL(Scheme_Sleep_Proc scheme_place_sleep);
+THREAD_LOCAL_DECL(Scheme_Object *thread_sleep_callback);
+THREAD_LOCAL_DECL(int thread_sleep_callback_fd);
 HOOK_SHARED_OK void (*scheme_sleep)(float seconds, void *fds);
 HOOK_SHARED_OK void (*scheme_notify_multithread)(int on);
 HOOK_SHARED_OK void (*scheme_wakeup_on_input)(void *fds);
@@ -322,6 +324,7 @@ static Scheme_Object *evts_to_evt(int argc, Scheme_Object *args[]);
 static Scheme_Object *make_custodian(int argc, Scheme_Object *argv[]);
 static Scheme_Object *custodian_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *custodian_close_all(int argc, Scheme_Object *argv[]);
+static Scheme_Object *custodian_shut_down_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *custodian_to_list(int argc, Scheme_Object *argv[]);
 static Scheme_Object *current_custodian(int argc, Scheme_Object *argv[]);
 static Scheme_Object *make_custodian_box(int argc, Scheme_Object *argv[]);
@@ -336,6 +339,7 @@ static Scheme_Object *unsafe_custodian_register(int argc, Scheme_Object *argv[])
 static Scheme_Object *unsafe_custodian_unregister(int argc, Scheme_Object *argv[]);
 
 static Scheme_Object *unsafe_register_process_global(int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_get_place_table(int argc, Scheme_Object *argv[]);
 static Scheme_Object *unsafe_set_on_atomic_timeout(int argc, Scheme_Object *argv[]);
 
 static Scheme_Object *make_plumber(int argc, Scheme_Object *argv[]);
@@ -400,6 +404,12 @@ static Scheme_Object *unsafe_end_atomic(int argc, Scheme_Object **argv);
 static Scheme_Object *unsafe_start_breakable_atomic(int argc, Scheme_Object **argv);
 static Scheme_Object *unsafe_end_breakable_atomic(int argc, Scheme_Object **argv);
 static Scheme_Object *unsafe_in_atomic_p(int argc, Scheme_Object **argv);
+
+static Scheme_Object *unsafe_poll_ctx_fd_wakeup(int argc, Scheme_Object **argv);
+static Scheme_Object *unsafe_poll_ctx_eventmask_wakeup(int argc, Scheme_Object **argv);
+static Scheme_Object *unsafe_poll_ctx_time_wakeup(int argc, Scheme_Object **argv);
+static Scheme_Object *unsafe_signal_received(int argc, Scheme_Object **argv);
+static Scheme_Object *unsafe_set_sleep_in_thread(int argc, Scheme_Object **argv);
 
 static void make_initial_config(Scheme_Thread *p);
 
@@ -536,6 +546,7 @@ void scheme_init_thread(Scheme_Env *env)
   GLOBAL_PRIM_W_ARITY("make-custodian"        , make_custodian       , 0, 1, env);
   GLOBAL_FOLDING_PRIM("custodian?"            , custodian_p          , 1, 1, 1  , env);
   GLOBAL_PRIM_W_ARITY("custodian-shutdown-all", custodian_close_all  , 1, 1, env);
+  GLOBAL_PRIM_W_ARITY("custodian-shut-down?"  , custodian_shut_down_p, 1, 1, env);
   GLOBAL_PRIM_W_ARITY("custodian-managed-list", custodian_to_list    , 2, 2, env);
   GLOBAL_PRIM_W_ARITY("make-custodian-box"    , make_custodian_box   , 2, 2, env);
   GLOBAL_PRIM_W_ARITY("custodian-box-value"   , custodian_box_value  , 1, 1, env);
@@ -641,10 +652,18 @@ scheme_init_unsafe_thread (Scheme_Env *env)
   GLOBAL_PRIM_W_ARITY("unsafe-custodian-unregister", unsafe_custodian_unregister, 2, 2, env);
 
   GLOBAL_PRIM_W_ARITY("unsafe-register-process-global", unsafe_register_process_global, 2, 2, env);
+  GLOBAL_PRIM_W_ARITY("unsafe-get-place-table", unsafe_get_place_table, 0, 0, env);
 
   GLOBAL_PRIM_W_ARITY("unsafe-set-on-atomic-timeout!", unsafe_set_on_atomic_timeout, 1, 1, env);
 
   GLOBAL_PRIM_W_ARITY("unsafe-make-security-guard-at-root", unsafe_make_security_guard_at_root, 0, 3, env);
+
+  scheme_add_global_constant("unsafe-poller", scheme_unsafe_poller_proc, env);
+  GLOBAL_PRIM_W_ARITY("unsafe-poll-ctx-fd-wakeup", unsafe_poll_ctx_fd_wakeup, 3, 3, env);
+  GLOBAL_PRIM_W_ARITY("unsafe-poll-ctx-eventmask-wakeup", unsafe_poll_ctx_eventmask_wakeup, 2, 2, env);
+  GLOBAL_PRIM_W_ARITY("unsafe-poll-ctx-milliseconds-wakeup", unsafe_poll_ctx_time_wakeup, 2, 2, env);
+  GLOBAL_PRIM_W_ARITY("unsafe-signal-received", unsafe_signal_received, 0, 0, env);
+  GLOBAL_PRIM_W_ARITY("unsafe-set-sleep-in-thread!", unsafe_set_sleep_in_thread, 2, 2, env);
 }
 
 void scheme_init_thread_places(void) {
@@ -912,7 +931,7 @@ static Scheme_Object *custodian_limit_mem(int argc, Scheme_Object *args[])
 
   if (argc > 2) {
     if (NOT_SAME_TYPE(SCHEME_TYPE(args[2]), scheme_custodian_type)) {
-      scheme_wrong_contract("custodian-require-memory", "custodian?", 2, argc, args);
+      scheme_wrong_contract("custodian-limit-memory", "custodian?", 2, argc, args);
       return NULL;
     }
   }
@@ -1610,6 +1629,16 @@ static Scheme_Object *custodian_close_all(int argc, Scheme_Object *argv[])
   scheme_close_managed((Scheme_Custodian *)argv[0]);
 
   return scheme_void;
+}
+
+static Scheme_Object *custodian_shut_down_p(int argc, Scheme_Object *argv[])
+{
+  if (!SCHEME_CUSTODIANP(argv[0]))
+    scheme_wrong_contract("custodian-shut-down?", "custodian?", 0, argc, argv);
+
+  return (((Scheme_Custodian *)argv[0])->shut_down
+          ? scheme_true
+          : scheme_false);
 }
 
 Scheme_Custodian* scheme_custodian_extract_reference(Scheme_Custodian_Reference *mr)
@@ -2750,7 +2779,7 @@ static Scheme_Object *unsafe_register_process_global(int argc, Scheme_Object *ar
   
   if (!SCHEME_BYTE_STRINGP(argv[0]))
     scheme_wrong_contract("unsafe-register-process-global", "bytes?", 0, argc, argv);
-  if (!scheme_is_cpointer(argv[0]))
+  if (!scheme_is_cpointer(argv[1]))
     scheme_wrong_contract("unsafe-register-process-global", "cpointer?", 1, argc, argv);
   
   val = scheme_register_process_global(SCHEME_BYTE_STR_VAL(argv[0]),
@@ -2760,6 +2789,11 @@ static Scheme_Object *unsafe_register_process_global(int argc, Scheme_Object *ar
     return scheme_make_cptr(val, NULL);
   else
     return scheme_false;
+}
+
+static Scheme_Object *unsafe_get_place_table(int argc, Scheme_Object *argv[])
+{
+  return (Scheme_Object *)scheme_get_place_table();
 }
 
 void scheme_init_process_globals(void)
@@ -3716,7 +3750,7 @@ Scheme_Object *scheme_call_as_nested_thread(int argc, Scheme_Object *argv[], voi
       v = NULL;
     failure = 1;
   } else {
-    v = scheme_apply(argv[0], 0, NULL);
+    v = scheme_apply_with_prompt(argv[0], 0, NULL);
     failure = 0;
   }
 
@@ -5309,6 +5343,88 @@ sch_sleep(int argc, Scheme_Object *args[])
 
   scheme_thread_block(t);
   scheme_current_thread->ran_some = 1;
+
+  return scheme_void;
+}
+
+Scheme_Object *unsafe_poll_ctx_fd_wakeup(int argc, Scheme_Object **argv)
+{
+  if (SCHEME_TRUEP(argv[0])) {
+    void *fds = SCHEME_CPTR_VAL(argv[0]);
+    intptr_t fd;
+    int m;
+
+    if (SCHEME_INTP(argv[1]))
+      fd = SCHEME_INT_VAL(argv[1]);
+    else
+      fd = rktio_fd_system_fd(scheme_rktio, (rktio_fd_t *)SCHEME_CPTR_VAL(argv[1]));
+
+    if (SAME_OBJ(argv[2], read_symbol))
+      m = 0;
+    else if (SAME_OBJ(argv[2], write_symbol))
+      m = 1;
+    else
+      m = 2;
+    
+    scheme_fdset(scheme_get_fdset(fds, m), fd);
+  }
+
+  return scheme_void;
+}
+
+Scheme_Object *unsafe_poll_ctx_eventmask_wakeup(int argc, Scheme_Object **argv)
+{
+  if (SCHEME_TRUEP(argv[0])) {
+    void *fds = SCHEME_CPTR_VAL(argv[0]);
+    intptr_t mask = SCHEME_INT_VAL(argv[1]);
+
+    scheme_add_fd_eventmask(fds, mask);
+  }
+
+  return scheme_void;
+}
+
+Scheme_Object *unsafe_poll_ctx_time_wakeup(int argc, Scheme_Object **argv)
+{
+  if (SCHEME_TRUEP(argv[0])) {
+    void *fds = SCHEME_CPTR_VAL(argv[0]);
+    double msecs = SCHEME_DBL_VAL(argv[1]);
+
+    scheme_set_wakeup_time(fds, msecs);
+  }
+
+  return scheme_void;
+}
+
+Scheme_Object *unsafe_signal_received(int argc, Scheme_Object **argv)
+{
+  scheme_signal_received();
+  return scheme_void;
+}
+
+static void sleep_via_thread(float seconds, void *fds)
+{
+#ifdef OS_X
+  scheme_start_sleeper_thread(scheme_sleep, seconds, fds, thread_sleep_callback_fd);
+  scheme_start_in_scheduler();
+  _scheme_apply_multi(thread_sleep_callback, 0, NULL);
+  scheme_end_in_scheduler();
+  scheme_end_sleeper_thread();
+#endif
+}
+
+Scheme_Object *unsafe_set_sleep_in_thread(int argc, Scheme_Object **argv)
+{
+  if (!thread_sleep_callback)
+    REGISTER_SO(thread_sleep_callback);
+
+  thread_sleep_callback = argv[0];
+  if (SCHEME_INTP(argv[1]))
+    thread_sleep_callback_fd = SCHEME_INT_VAL(argv[1]);
+  else
+    thread_sleep_callback_fd = rktio_fd_system_fd(scheme_rktio, (rktio_fd_t *)SCHEME_CPTR_VAL(argv[1]));
+
+  scheme_place_sleep = sleep_via_thread;
 
   return scheme_void;
 }
