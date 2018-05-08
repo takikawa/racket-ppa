@@ -1,3 +1,11 @@
+racket (6.12+dfsg1-2) unstable; urgency=medium
+
+  * Bug fix: "hostname verification with OpenSSL fails", thanks to
+    Benjamin Barenblat (Closes: #877427). Cherry pick upstream pull
+    request 2041.
+
+ -- David Bremner <bremner@debian.org>  Tue, 08 May 2018 09:24:44 -0400
+
 racket (6.12+dfsg1-1) unstable; urgency=medium
 
   * New upstream release
