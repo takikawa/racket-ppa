@@ -1,3 +1,10 @@
+racket (6.12+dfsg1-3) unstable; urgency=medium
+
+  * Add two patches from upstream to restore drracket -singleInstance.
+    https://github.com/racket/drracket/issues/191
+
+ -- David Bremner <bremner@debian.org>  Sun, 20 May 2018 17:04:14 -0700
+
 racket (6.12+dfsg1-2) unstable; urgency=medium
 
   * Bug fix: "hostname verification with OpenSSL fails", thanks to
