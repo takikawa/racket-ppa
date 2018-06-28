@@ -286,10 +286,12 @@
                      ,(build-compound-type-name 'field 'field-name field-ctc-var) ...)
                    #:projection
                    (lambda (blame)
-                     (lambda (val)
-                       (make-wrapper-object ctc val blame #f
+                     (define p-app
+                       (make-wrapper-object blame
                                             (list 'method-name ...) (list method-ctc-var ...)
-                                            (list 'field-name ...) (list field-ctc-var ...))))
+                                            '(field-name ...) (list field-ctc-var ...)))
+                     (lambda (val)
+                       (p-app ctc val #f)))
                    #:first-order
                    (lambda (val)
                      (let/ec ret

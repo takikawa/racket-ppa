@@ -28,7 +28,7 @@
   (parser
    (options (start Expansion)
             (src-pos)
-            (tokens basic-empty-tokens basic-tokens prim-tokens renames-tokens)
+            (tokens basic-empty-tokens basic-tokens prim-tokens)
             (end EOF)
             #| (debug "/tmp/DEBUG-PARSER.txt") |#
             (error deriv-error))
@@ -36,7 +36,7 @@
    ;; tokens
    (skipped-token-values
     visit resolve next next-group return
-    enter-macro macro-pre-transform macro-post-transform exit-macro 
+    enter-macro macro-pre-x macro-post-x exit-macro
     enter-prim exit-prim
     enter-block block->list block->letrec splice
     enter-list exit-list
@@ -45,72 +45,93 @@
     local-bind enter-bind exit-bind exit-local-bind
     local-value-result local-value-binding
     phase-up module-body
-    renames-lambda
-    renames-case-lambda
-    renames-let
-    renames-letrec-syntaxes
-    renames-block
+    lambda-renames
+    let-renames
+    letrec-syntaxes-renames
+    block-renames
     rename-one
     rename-list
     tag
     IMPOSSIBLE
-    start
+    start start-top start-ecte
     top-non-begin
     prepare-env)
 
     ;; Entry point
    (productions
     (Expansion
-     [(start EE/Lifts) $2]
-     [(start EE/Lifts/Interrupted) $2]
-     [(start ExpandCTE) $2]
-     [(start ExpandCTE/Interrupted) $2]))
+     [(start-ecte ExpandCTE) $2]
+     [(start-ecte ExpandCTE/Interrupted) $2]
+     [(MainExpand) $1]
+     [(MainExpand/Interrupted) $1]))
 
    (productions/I
 
+    ;; ----------------------------------------
+    ;; ./trace.rkt expand/compile-time-evals
+
     (ExpandCTE
      ;; The first 'Eval' is there for---I believe---lazy phase 1 initialization.
-     [(visit start (? Eval) (? CheckImmediateMacro/Lifts)
-             top-non-begin start (? EE) (? Eval) return)
-      (make ecte $1 $9 $3 $4 $7 $8)]
-     [(visit start Eval CheckImmediateMacro/Lifts
-             top-begin (? NextExpandCTEs) return)
-      (begin
-        (unless (list? $6)
-          (error "NextExpandCTEs returned non-list ~s" $6))
-        (make ecte $1 $7 $3 $4
-              (make p:begin $5 $7 (list (stx-car $5)) #f
-                    (make lderiv (cdr (stx->list $5))
-                          (and $7 (cdr (stx->list $7)))
-                          #f
-                          $6))
-              null))])
-
-    (CheckImmediateMacro/Lifts
-     [((? CheckImmediateMacro))
-      $1]
-     [(CheckImmediateMacro lift-loop)
-      (let ([e1 (wderiv-e1 $1)]
-            [e2 $2])
-        (make lift-deriv e1 e2 $1 $2 (make p:stop $2 $2 null #f)))])
+     [(visit (? MainExpandToTop) top-non-begin (? MainExpand) (? Eval) return)
+      (make ecte $1 $6 null $2 $4 $5)]
+     [(visit MainExpandToTop top-begin (? NextExpandCTEs) return)
+      (make ecte $1 $5 null $2
+            (let ([b-e1 $3] [b-e2 $5])
+              (make p:begin b-e1 b-e2 (list (stx-car b-e1)) #f
+                    (derivs->lderiv (stx-cdr b-e1) $4)))
+            null)])
 
     (NextExpandCTEs
      (#:skipped null)
      [() null]
      [(next (? ExpandCTE) (? NextExpandCTEs)) (cons $2 $3)])
 
-    ;; Expand with possible lifting
-    (EE/Lifts
-     [((? EE)) $1]
-     [(EE lift-loop (? EE/Lifts))
-      (let ([e1 (wderiv-e1 $1)]
-            [e2 (wderiv-e2 $3)])
-        (make lift-deriv e1 e2 $1 $2 $3))])
+    ;; ----------------------------------------
+    ;; src/eval/main.rkt expand and expand-to-top-form
+
+    (MainExpand
+     [(start-top (? PTLL)) $2])
+
+    (MainExpandToTop
+     [(start-top (? PTLL)) $2])
+
+    (PTLL ;; per-top-level loop
+     [(visit (? ECL) return)
+      $2]
+     [(visit ECL (? EE))
+      (let ([e2 (and $3 (node-z2 $3))])
+        (make ecte $1 e2 null $2 $3 null))]
+     [(visit ECL lift-loop (? PTLL))
+      (make lift-deriv $1 (wderiv-e2 $4) $2 $3 $4)]
+     [(visit ECL prim-begin ! (? NextPTLLs) return)
+      (make ecte $1 $6 null $2
+            (let* ([b-e1 (and $2 (node-z2 $2))]
+                   [ld (and b-e1 (derivs->lderiv (stx-cdr b-e1) $5))])
+              (make p:begin b-e1 $6 (list (stx-car b-e1)) $4 ld))
+            null)]
+     [(visit ECL prim-begin-for-syntax ! (? PrepareEnv) (? NextPTLLs) return)
+      (make ecte $1 $7 null $2
+            (let* ([b-e1 (and $2 (node-z2 $2))]
+                   [ld (and b-e1 (derivs->lderiv (stx-cdr b-e1) $6))])
+              (make p:begin-for-syntax b-e1 $7 (list (stx-car b-e1)) $4 $5 ld null))
+            null)])
+
+    (NextPTLLs
+     (#:skipped null)
+     [() null]
+     [(next (? PTLL) (? NextPTLLs)) (cons $2 $3)])
+
+    (ECL ;; expand-capturing-lifts
+     [((? CheckImmediateMacro)) $1])
+
+    ;; ----------------------------------------
+    ;; EE = src/expander/expand/main.rkt expand
+    ;; CheckImmediateMacro = like EE but with ctx w/ only-immediate?=#t
 
     ;; Expand, convert lifts to let (rhs of define-syntaxes, mostly)
     (EE/LetLifts
      [((? EE)) $1]
-     [(EE lift/let-loop (? EE/LetLifts))
+     [(EE letlift-loop (? EE/LetLifts))
       (let ([initial (wderiv-e1 $1)]
             [final (wderiv-e2 $3)])
         (make lift/let-deriv initial final $1 $2 $3))])
@@ -154,7 +175,7 @@
      [(visit Resolves tag (? EE/k))
       (let ([next ($4 $3 $2)])
         (make tagrule $1 (wderiv-e2 next) $3 next))]
-     [(visit opaque)
+     [(visit opaque-expr)
       (make p:stop $1 $2 null #f)])
 
     (EE/k
@@ -173,8 +194,7 @@
 
     (MacroStep
      (#:args e1 rs next)
-     [(enter-macro ! macro-pre-transform (? LocalActions)
-                   macro-post-transform ! exit-macro)
+     [(enter-macro ! macro-pre-x (? LocalActions) macro-post-x ! exit-macro)
       (let ([e2 (and next (wderiv-e2 next))])
         (make mrule e1 e2 rs $2
               $3 $4 (and $5 (car $5)) $6 $7 next))])
@@ -197,7 +217,7 @@
        local-pre (? LocalExpand/Inner) OptLifted local-post
        OptOpaqueExpr exit-local)
       (make local-expansion $1 $8 $2 $3 $4 $5 $6 $7)]
-     [(lift)
+     [(lift-expr)
       (make local-lift (cdr $1) (car $1))]
      [(lift-statement)
       (make local-lift-end $1)]
@@ -230,11 +250,7 @@
      [(local-mess)
       ;; Represents subsequence of event stream incoherent due to
       ;; jump (eg, macro catches exn raised from within local-expand).
-      (make local-mess $1)]
-     ;; -- Not really local actions, but can occur during evaluation
-     ;; called 'expand' (not 'local-expand') within transformer
-     [(start (? EE)) #f]
-     [(start (? CheckImmediateMacro)) #f])
+      (make local-mess $1)])
 
     (LocalExpand/Inner
      [(start (? EE)) $2]
@@ -244,7 +260,7 @@
      [(lift-loop) $1]
      [() #f])
     (OptOpaqueExpr
-     [(opaque) $1]
+     [(opaque-expr) $1]
      [() #f])
     (OptPhaseUp
      [(phase-up) #t]
@@ -268,7 +284,6 @@
      [((? PrimLambda)) ($1 e1 e2 rs)]
      [((? PrimCaseLambda)) ($1 e1 e2 rs)]
      [((? PrimLetValues)) ($1 e1 e2 rs)]
-     [((? PrimLet*Values)) ($1 e1 e2 rs)]
      [((? PrimLetrecValues)) ($1 e1 e2 rs)]
      [((? PrimLetrecSyntaxes+Values)) ($1 e1 e2 rs)]
      [((? PrimSTOP)) ($1 e1 e2 rs)]
@@ -283,15 +298,19 @@
     (PrimModule
      (#:args e1 e2 rs)
      [(prim-module ! (? PrepareEnv) OptTag rename-one
-                   (? OptCheckImmediateMacro) OptTag !
+                   (? OptCheckImmediateMacro) (? OptTagAndCheckImmediateMacro) !
                    (? EE) rename-one)
-      (make p:module e1 e2 rs $2 $3 $4 $5 $6 $7 $8 $9 $10)])
+      (make p:module e1 e2 rs $2 $3 $4 $5 $6 (and $7 (car $7)) (and $7 (cadr $7)) $8 $9 $10)])
     (OptTag
      [() #f]
      [(tag) $1])
     (OptCheckImmediateMacro
      [() #f]
      [((? CheckImmediateMacro)) $1])
+    (OptTagAndCheckImmediateMacro
+     [() (list #f #f)]
+     [(tag) (list $1 #f)]
+     [(tag (? CheckImmediateMacro)) (list $1 $2)])
 
     ;; FIXME: workaround for problem in expander instrumentation:
     ;;   observer not propagated correctly to expand_all_provides
@@ -299,7 +318,7 @@
     ;;   instead appear directly here
     (Prim#%ModuleBegin
      (#:args e1 e2 rs)
-     [(prim-#%module-begin ! rename-one (? ModuleBegin/Phase) (? Eval) next (? ExpandSubmodules))
+     [(prim-module-begin ! rename-one (? ModuleBegin/Phase) (? Eval) next (? ExpandSubmodules))
       (make p:#%module-begin e1 e2 rs $2 $3 $4
             (for/or ([la (in-list $5)])
               (and (local-exn? la) (local-exn-exn la)))
@@ -408,9 +427,9 @@
     ;; Simple expressions
     (PrimExpression
      (#:args e1 e2 rs)
-     [(prim-expression ! (? EE))
+     [(prim-#%expression ! (? EE))
       (make p:#%expression e1 e2 rs $2 $3 #f)]
-     [(prim-expression EE tag)
+     [(prim-#%expression EE tag)
       (make p:#%expression e1 e2 rs #f $2 $3)])
 
     (PrimIf
@@ -420,7 +439,7 @@
 
     (PrimWCM 
      (#:args e1 e2 rs)
-     [(prim-wcm ! (? EE) next (? EE) next (? EE))
+     [(prim-with-continuation-mark ! (? EE) next (? EE) next (? EE))
       (make p:wcm e1 e2 rs $2 $3 $5 $7)])
 
     ;; Sequence-containing expressions
@@ -444,7 +463,7 @@
     ;; Binding expressions
     (PrimLambda
      (#:args e1 e2 rs)
-     [(prim-lambda ! renames-lambda (? EB))
+     [(prim-lambda ! lambda-renames (? EB))
       (make p:lambda e1 e2 rs $2 $3 $4)])
 
     (PrimCaseLambda
@@ -459,41 +478,28 @@
      [() null])
 
     (CaseLambdaClause
-     [(! renames-case-lambda (? EB))
+     [(! lambda-renames (? EB))
       (make clc $1 $2 $3)])
 
     (PrimLetValues
      (#:args e1 e2 rs)
-     [(prim-let-values ! renames-let (? NextEEs) next-group (? EB/EL))
+     [(prim-let-values ! let-renames (? NextEEs) next-group (? EB/EL))
       (make p:let-values e1 e2 rs $2 $3 $4 $6)])
-
-    ;; There's no primitive `let*-values`, anymore
-    (PrimLet*Values
-     (#:args e1 e2 rs)
-     ;; let*-values with bindings is "macro-like"
-     [(prim-let*-values !!)
-      (make mrule e1 e2 rs $2 #f null #f #f #f #f)]
-     [(prim-let*-values (? EE))
-      (let* ([next-e1 (wderiv-e1 $2)])
-        (make mrule e1 e2 rs #f e1 null next-e1 #f next-e1 $2))]
-     ;; No bindings... model as "let"
-     [(prim-let*-values renames-let (? NextEEs) next-group (? EB))
-      (make p:let-values e1 e2 rs #f $2 $3 $5)])
 
     (PrimLetrecValues
      (#:args e1 e2 rs)
-     [(prim-letrec-values ! renames-let (? NextEEs) next-group (? EB/EL))
+     [(prim-letrec-values ! let-renames (? NextEEs) next-group (? EB/EL))
       (make p:letrec-values e1 e2 rs $2 $3 $4 $6)])
 
     (PrimLetrecSyntaxes+Values
      (#:args e1 e2 rs)
-     [(prim-letrec-syntaxes+values ! renames-letrec-syntaxes
+     [(prim-letrec-syntaxes+values ! letrec-syntaxes-renames
        (? PrepareEnv) (? NextBindSyntaxess) next-group (? EB/EL) OptTag)
       (make p:letrec-syntaxes+values e1 e2 rs $2 $3 $4 $5 #f null $7 $8)]
-     [(prim-letrec-syntaxes+values renames-letrec-syntaxes 
+     [(prim-letrec-syntaxes+values letrec-syntaxes-renames
        PrepareEnv NextBindSyntaxess next-group
        prim-letrec-values
-       renames-let (? NextEEs) next-group (? EB/EL) OptTag)
+       let-renames (? NextEEs) next-group (? EB/EL) OptTag)
       (make p:letrec-syntaxes+values e1 e2 rs #f $2 $3 $4 $7 $8 $10 $11)])
 
     ;; Atomic expressions
@@ -528,11 +534,12 @@
 
     (PrimVarRef
      (#:args e1 e2 rs)
-     [(prim-varref !) (make p:#%variable-reference e1 e2 rs $2)])
+     [(prim-#%variable-reference !)
+      (make p:#%variable-reference e1 e2 rs $2)])
 
     (PrimStratifiedBody
      (#:args e1 e2 rs)
-     [(prim-#%stratified-body ! (? EB)) (make p:#%stratified-body e1 e2 rs $2 $3)])
+     [(prim-#%stratified ! (? EB)) (make p:#%stratified-body e1 e2 rs $2 $3)])
 
     (PrimBeginForSyntax
      (#:args e1 e2 rs)
@@ -562,10 +569,10 @@
     ;; Blocks
     ;; EB Answer = BlockDerivation
     (EB
-     [(enter-block renames-block (? BlockPass1) block->list (? EL))
+     [(enter-block block-renames (? BlockPass1) block->list (? EL))
       (make bderiv $1 (and $5 (wlderiv-es2 $5))
             $2 $3 'list $5)]
-     [(enter-block renames-block BlockPass1 block->letrec (? EE))
+     [(enter-block block-renames BlockPass1 block->letrec (? EE))
       (make bderiv $1 (and $5 (list (wderiv-e2 $5)))
             $2 $3 'letrec $5)])
 
@@ -618,3 +625,7 @@
      [(next (? EE) (? EL*)) (cons $2 $3)])
 
     )))
+
+(define (derivs->lderiv es1 ds)
+  (define es2 (map node-z2 ds))
+  (lderiv (stx->list es1) (and es2 (andmap values es2)) #f ds))

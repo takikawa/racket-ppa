@@ -83,6 +83,14 @@
 (defparam plot-y-far-axis? Boolean #t)
 (defparam plot-z-far-axis? Boolean #t)
 
+(defparam plot-x-tick-labels? Boolean #t)
+(defparam plot-y-tick-labels? Boolean #t)
+(defparam plot-z-tick-labels? Boolean #t)
+
+(defparam plot-x-far-tick-labels? Boolean #f)
+(defparam plot-y-far-tick-labels? Boolean #f)
+(defparam plot-z-far-tick-labels? Boolean #f)
+
 (defparam2 plot-x-tick-label-angle angle Real Real 0 (rational 'plot-x-tick-label-angle))
 (defparam2 plot-y-tick-label-angle angle Real Real 0 (rational 'plot-y-tick-label-angle))
 (defparam2 plot-x-far-tick-label-angle angle Real Real 0 (rational 'plot-x-far-tick-label-angle))
@@ -204,6 +212,15 @@
 (defparam2 error-bar-line-width Real Nonnegative-Real 1 (nonnegative-rational 'error-bar-line-width))
 (defparam error-bar-line-style Plot-Pen-Style 'solid)
 (defparam2 error-bar-alpha Real Nonnegative-Real 2/3 (unit-ivl 'error-bar-alpha))
+
+;; Candlesticks
+
+(defparam2 candlestick-width Real Nonnegative-Real 1 (nonnegative-rational 'candlestick-width))
+(defparam candlestick-up-color Plot-Color 2)
+(defparam candlestick-down-color Plot-Color 1)
+(defparam2 candlestick-line-width Real Nonnegative-Real 1 (nonnegative-rational 'candlestick-line-width))
+(defparam candlestick-line-style Plot-Pen-Style 'solid)
+(defparam2 candlestick-alpha Real Nonnegative-Real 2/3 (unit-ivl 'candlestick-alpha))
 
 ;; Contours
 

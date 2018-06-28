@@ -90,7 +90,7 @@ See match-a-pattern.rkt for more details
 
 ;; compile-language : language-pict-info[see pict.rkt] (listof nt) (listof (uf-set/c symbol?))
 ;; (listof (list rewritten-pattern bspec)) -> compiled-lang
-(define (compile-language pict-info lang binding-info aliases)
+(define (compile-language pict-info lang binding-info aliases language-name)
   (let* ([clang-ht (make-hasheq)]
          [clang-list-ht (make-hasheq)]
          [clang-all-ht (make-hasheq)]
@@ -113,7 +113,8 @@ See match-a-pattern.rkt for more details
                                     collapsible-nts
                                     'uninitialized-ambiguity-info
                                     `() ;; internal patterns don't need freshening
-                                    #f)]
+                                    #f
+                                    language-name)]
          [binders (map (match-lambda
                          [`(,rewritten-pattern ,bspec)
                           (bf-table-entry (compile-pattern clang rewritten-pattern #t)
@@ -691,7 +692,9 @@ See match-a-pattern.rkt for more details
      names
      (if (empty? (compiled-lang-binding-table clang))
          equal?
-         (λ (lhs rhs) (α-equal? (compiled-lang-binding-table clang) match-pattern lhs rhs))))))
+         (λ (lhs rhs) (α-equal? (compiled-lang-binding-table clang)
+                                (compiled-lang-literals clang)
+                                match-pattern lhs rhs))))))
 
 (define (build-compiled-pattern proc names lang-α-equal?)
   (make-compiled-pattern
@@ -737,9 +740,10 @@ See match-a-pattern.rkt for more details
   (define clang-list-ht (compiled-lang-list-ht clang))
   (define has-hole-or-hide-hole-ht (compiled-lang-has-hole-or-hide-hole-ht clang))
   (define binding-forms (compiled-lang-binding-table clang))
+  (define literals (compiled-lang-literals clang))
 
   (define lang-α-equal?
-    (λ (lhs rhs) (α-equal? binding-forms match-pattern lhs rhs)))
+    (λ (lhs rhs) (α-equal? binding-forms literals match-pattern lhs rhs)))
 
   ;; Note that `bind-names?` means that identical names must match identical values, and
   ;; binding forms specify alpha-equivalence behavior in the user-defined language.
@@ -774,7 +778,7 @@ See match-a-pattern.rkt for more details
             [(equal? (procedure-arity compiled-pattern-without-freshening) 3)
              (lambda (exp hole-info nesting-depth)
                      (compiled-pattern-without-freshening
-                      (freshen binding-forms match-pattern exp)
+                      (freshen binding-forms literals match-pattern exp)
                       hole-info nesting-depth))]
             ;; only returns a boolean, no need to freshen
             [else compiled-pattern-without-freshening]))
@@ -1834,7 +1838,7 @@ See match-a-pattern.rkt for more details
 ;; remove-bindings/filter : (union #f (listof mtch)) (exp exp -> boolean) -> (union #f (listof mtch))
 (define (remove-bindings/filter matches lang-α-equal?)
   (and matches
-       (let ([filtered (filter-multiples matches equal?)])
+       (let ([filtered (filter-multiples matches lang-α-equal?)])
          ;(printf ">> ~s\n=> ~s\n\n" matches filtered)
          (and (not (null? filtered))
               (map (λ (match)
@@ -2060,6 +2064,7 @@ See match-a-pattern.rkt for more details
  (compile-language (-> any/c (listof nt?)
                        (listof (list/c (not/c compiled-pattern?) bspec?))
                        (listof symbol?)
+                       symbol?
                        compiled-lang?)))
 (provide compiled-pattern? 
          print-stats)

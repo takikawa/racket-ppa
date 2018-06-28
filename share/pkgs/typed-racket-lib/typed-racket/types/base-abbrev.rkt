@@ -6,6 +6,7 @@
 ;; extends it with more types and type abbreviations.
 
 (require "../utils/utils.rkt"
+         "../utils/identifier.rkt"
          "../rep/type-rep.rkt"
          "../rep/prop-rep.rkt"
          "../rep/object-rep.rkt"
@@ -44,8 +45,12 @@
 (define/decl -Null (-val null))
 
 ;; Char type and List type (needed because of how sequences are checked in subtype)
-(define (make-Listof elem) (-mu list-rec (Un -Null (make-Pair elem list-rec))))
-(define (make-MListof elem) (-mu list-rec (Un -Null (make-MPair elem list-rec))))
+(define (make-Listof elem) (unsafe-make-Mu  (Un -Null (make-Pair elem (make-B 0)))))
+(define (make-MListof elem) (unsafe-make-Mu (Un -Null (make-MPair elem (make-B 0)))))
+(define (make-CyclicListof cycle)
+  (cond
+    [(ormap Bottom? cycle) -Null]
+    [else (unsafe-make-Mu (Un -Null (-Tuple* cycle (make-B 0))))]))
 
 ;; -Tuple Type is needed by substitute for ListDots
 (define -pair make-Pair)
@@ -128,13 +133,13 @@
                               #:props [props -tt-propset]
                               #:object [obj -empty-obj])
   (c:->* ((c:listof Type?) (c:or/c SomeValues? Type?))
-         (#:rest (c:or/c #f Type? RestDots?)
+         (#:rest (c:or/c #f Type? RestDots? Rest?)
           #:kws (c:listof Keyword?)
           #:props PropSet?
           #:object OptObject?)
          Arrow?)
   (make-Arrow dom
-              rst
+              (if (Type? rst) (make-Rest (list rst)) rst)
               (sort kws Keyword<?)
               (match rng
                 [(? SomeValues?) rng]
@@ -206,10 +211,7 @@
                  #:object obj))))
 
 (define (cl->* . args)
-  (define (funty-arities f)
-    (match f
-      [(Fun: as) as]))
-  (make-Fun (apply append (map funty-arities args))))
+  (make-Fun (apply append (map Fun-arrows args))))
 
 (define-syntax (cl-> stx)
   (syntax-parse stx

@@ -99,6 +99,7 @@ static void add_group_signal_fd(rktio_signal_handle_t *signal_fd);
 static void remove_group_signal_fd(rktio_signal_handle_t *signal_fd);
 static void do_group_signal_fds();
 static int centralized_get_child_status(int pid, int in_group, int can_check_group, int *status);
+static int raw_get_child_status(int pid, int *status, int done_only, int do_remove, int do_free);
 
 static void add_child_status(int pid, int status)
 {
@@ -129,12 +130,13 @@ static void add_child_status(int pid, int status)
   if (st->signal_fd && st->in_group)
     remove_group_signal_fd(st->signal_fd);
 
-  pthread_mutex_unlock(&child_status_lock);
   
   if (st->signal_fd)
     rktio_signal_received_at(st->signal_fd);
   if (st->unneeded)
-    (void)centralized_get_child_status(st->pid, 0, 0, NULL);
+    (void)raw_get_child_status(st->pid, NULL, 1, 1, 1);
+
+  pthread_mutex_unlock(&child_status_lock);
 }
 
 static int raw_get_child_status(int pid, int *status, int done_only, int do_remove, int do_free)
@@ -818,7 +820,8 @@ rktio_status_t *rktio_process_status(rktio_t *rktio, rktio_process_t *sp)
       get_windows_error();
       return NULL;
     }
-  }
+  } else
+    status = -1;
 # endif
 #endif
 
@@ -984,7 +987,7 @@ void rktio_process_deinit(rktio_t *rktio)
 /*========================================================================*/
 
 #ifdef RKTIO_SYSTEM_WINDOWS
-static char *cmdline_protect(char *s)
+static char *cmdline_protect(const char *s)
 {
   char *naya;
   int ds;
@@ -1290,7 +1293,7 @@ rktio_process_result_t *rktio_process(rktio_t *rktio,
       for (i = 0; i < argc; i++) {
 	new_argv[i] = cmdline_protect(argv[i]);
       }
-      argv = new_argv;
+      argv = (rktio_const_string_t *)new_argv;
     }
 
     pid = 0;
@@ -1308,7 +1311,7 @@ rktio_process_result_t *rktio_process(rktio_t *rktio,
 
     if (!windows_exact_cmdline) {
       for (i = 0; i < argc; i++) {
-        free(argv[i]);
+        free((char *)argv[i]);
       }
       free(argv);
     }

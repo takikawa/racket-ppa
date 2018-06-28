@@ -1572,7 +1572,6 @@ static uintptr_t equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Info *hi)
     }
   case scheme_vector_type:
   case scheme_fxvector_type:
-  case scheme_wrap_chunk_type:
     {
       int len = SCHEME_VEC_SIZE(o), i, val;
       Scheme_Object *elem;
@@ -1850,33 +1849,6 @@ static uintptr_t equal_hash_key(Scheme_Object *o, uintptr_t k, Hash_Info *hi)
       o = (Scheme_Object *)((Scheme_Place_Bi_Channel *)o)->link->sendch;
     }
     break;
-  case scheme_resolved_module_path_type:
-    /* Needed for interning */
-    {
-      k += 7;
-      o = SCHEME_PTR_VAL(o);
-    }
-    break;
-  case scheme_module_index_type:
-    {
-      Scheme_Modidx *midx = (Scheme_Modidx *)o;
-#     include "mzhashchk.inc"
-      hi->depth += 2;
-      k++;
-      k = (k << 3) + k;
-      k += equal_hash_key(midx->path, 0, hi);
-      o = midx->base;
-    }
-    break;
-  case scheme_scope_table_type:
-    {
-      Scheme_Scope_Table *mt = (Scheme_Scope_Table *)o;
-      hi->depth += 2;
-      k = (k << 3) + k;
-      k += equal_hash_key((Scheme_Object *)mt->simple_scopes, 0, hi);
-      o = mt->multi_scopes;
-    }
-    break;
   default:
     {
       Scheme_Primary_Hash_Proc h1 = scheme_type_hash1s[t];
@@ -2075,7 +2047,6 @@ static uintptr_t equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
     }
   case scheme_vector_type:
   case scheme_fxvector_type:
-  case scheme_wrap_chunk_type:
     {
       int len = SCHEME_VEC_SIZE(o), i;
       uintptr_t k = 0;
@@ -2352,30 +2323,6 @@ static uintptr_t equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
     
       return k;
     }
-  case scheme_resolved_module_path_type:
-    /* Needed for interning */
-    o = SCHEME_PTR_VAL(o);
-    goto top;
-  case scheme_module_index_type:
-    {
-      Scheme_Modidx *midx = (Scheme_Modidx *)o;
-      uintptr_t v1, v2;
-#     include "mzhashchk.inc"
-      hi->depth += 2;
-      v1 = equal_hash_key2(midx->path, hi);
-      v2 = equal_hash_key2(midx->base, hi);
-      return v1 + v2;
-    }
-  case scheme_scope_table_type:
-    {
-      Scheme_Scope_Table *mt = (Scheme_Scope_Table *)o;
-      uintptr_t k;
-      hi->depth += 2;
-      k = equal_hash_key2((Scheme_Object *)mt->simple_scopes, hi);
-      k += equal_hash_key2(mt->multi_scopes, hi);
-      return k;
-    }
-    break;
   case scheme_place_bi_channel_type:
     /* a bi channel has sendch and recvch, but
        sends are the same iff recvs are the same: */
@@ -2812,7 +2759,132 @@ Scheme_Object *scheme_hash_tree_next_pos(Scheme_Hash_Tree *tree, mzlonglong pos)
 # define HAMT_TRAVERSE_NEXT(i) ((i)+1)
 #endif
 
+XFORM_NONGCING static void hamt_subtree_at_index(Scheme_Hash_Tree *ht, mzlonglong pos,
+                                                 Scheme_Hash_Tree **_subtree, int *_i, int *_popcount)
+{
+  int popcount, i;
+  Scheme_Hash_Tree *sub;
+
+  while (1) {
+    popcount = hamt_popcount(ht->bitmap);
+    i = HAMT_TRAVERSE_INIT(popcount);
+    while (1) {
+      if (HASHTR_SUBTREEP(ht->els[i])
+          || HASHTR_COLLISIONP(ht->els[i])) {
+        sub = (Scheme_Hash_Tree *)ht->els[i];
+        if (pos < sub->count) {
+          ht = sub;
+          break; /* to outer loop */
+        } else
+          pos -= sub->count;
+      } else {
+        if (!pos) {
+          *_subtree = ht;
+          *_i = i;
+          if (_popcount) *_popcount = popcount;
+          return;
+        }
+        --pos;
+      }
+      i = HAMT_TRAVERSE_NEXT(i);
+    }
+  }
+}
+
+/* We have two different implementations of Scheme_Hash_Tree traversal
+   as exposed by `unsafe-immutable-hash-next`, etc.:
+
+   * Consecutive integers from 0 as the index values (the same as
+     `scheme_hash_tree_next`), or
+
+   * Subtree lists (for the spine of a subtree up to the root) plus
+     offset into a subtree.
+
+   The second one is more direct, but requires some allocation. To
+   avoid allocation for small trees, it uses an integer encoding of a
+   path.
+
+   The first implementation is better for small trees, and the second
+   is better for very large trees, but there's not a big difference.
+   Small trees dominate for macro expansion, which is a big use of
+   hash trees, so that gives the first implementation the edge.
+
+   Microbenchmark:
+
+    (let loop ([size 2])
+      (define ht (for/hasheq ([i (in-range size)])
+                   (values i i)))
+      (define c (quotient 10000000 size))
+      (printf "~s: " size)
+      (time
+       (for ([j (in-range c)])
+         (for/fold ([v #f]) ([k (in-immutable-hash-keys ht)])
+           k)))
+      (unless (= size (expt 2 20))
+        (loop (* size 2))))
+
+ */
+
+#if 1
+/* ------ Implementation 1 of hash-tree traversal ------ */
+
+Scheme_Object *scheme_unsafe_hash_tree_start(Scheme_Hash_Tree *ht)
+{
+  ht = resolve_placeholder(ht);
+
+  if (!ht->count)
+    return scheme_false;
+  else
+    return scheme_make_integer(0);
+}
+
+XFORM_NONGCING void scheme_unsafe_hash_tree_subtree(Scheme_Object *obj, Scheme_Object *args,
+                                                    Scheme_Hash_Tree **_subtree, int *_i)
+{
+  Scheme_Hash_Tree *ht;
+
+  if (SCHEME_NP_CHAPERONEP(obj))
+    obj = SCHEME_CHAPERONE_VAL(obj);
+  ht = (Scheme_Hash_Tree *)obj;
+  ht = resolve_placeholder(ht);
+
+  hamt_subtree_at_index(ht, SCHEME_INT_VAL(args), _subtree, _i, NULL);
+}
+
+XFORM_NONGCING Scheme_Object *scheme_unsafe_hash_tree_access(Scheme_Hash_Tree *subtree, int i)
+{
+  return _mzHAMT_VAL(subtree, i, hamt_popcount(subtree->bitmap));
+}
+
+Scheme_Object *scheme_unsafe_hash_tree_next(Scheme_Hash_Tree *ht, Scheme_Object *args)
+{
+  intptr_t i = SCHEME_INT_VAL(args) + 1;
+  ht = resolve_placeholder(ht);
+  if (i < ht->count)
+    return scheme_make_integer(i);
+  else
+    return scheme_false;
+}
+
+#else
+/* ------ Implementation 2 of hash-tree traversal ------ */
+
 #define mzHAMT_MAX_INDEX_LEVEL 4 /* For the compressed form of the index */
+
+Scheme_Object *make_index_frame(Scheme_Hash_Tree *ht, intptr_t i, Scheme_Object *rest)
+{
+  Scheme_Object *vec;
+  vec = scheme_make_vector(3, NULL);
+  SCHEME_VEC_ELS(vec)[0] = (Scheme_Object *)ht;
+  SCHEME_VEC_ELS(vec)[1] = scheme_make_integer(i);
+  SCHEME_VEC_ELS(vec)[2] = rest;
+  return vec;
+}
+
+#define INDEX_FRAMEP(o) SCHEME_VECTORP(o)
+#define INDEX_FRAME_SUBTREE(o) ((Scheme_Hash_Tree *)(SCHEME_VEC_ELS(o)[0]))
+#define INDEX_FRAME_INDEX(o) (SCHEME_INT_VAL(SCHEME_VEC_ELS(o)[1]))
+#define INDEX_FRAME_REST(o) (SCHEME_VEC_ELS(o)[2])
 
 /* instead of returning a pos, these unsafe iteration ops */
 /* return a view into the tree consisting of a: */
@@ -2845,9 +2917,7 @@ Scheme_Object *scheme_unsafe_hash_tree_start(Scheme_Hash_Tree *ht)
           || HASHTR_COLLISIONP(ht->els[i]))) {
     /* go down tree but save return point */
     if (level == -1) {
-      stack = scheme_make_pair((Scheme_Object *)ht,
-                               scheme_make_pair(scheme_make_integer(i),
-                                                stack));
+      stack = make_index_frame(ht, i, stack);
     } else if (level < mzHAMT_MAX_INDEX_LEVEL) {
       ht_n[level] = ht;
       i_n[level] = i;
@@ -2855,13 +2925,9 @@ Scheme_Object *scheme_unsafe_hash_tree_start(Scheme_Hash_Tree *ht)
     } else {
       stack = scheme_null;
       for (j = 0; j < mzHAMT_MAX_INDEX_LEVEL; j++) {
-        stack = scheme_make_pair((Scheme_Object *)ht_n[j],
-                                  scheme_make_pair(scheme_make_integer(i_n[j]),
-                                                   stack));
+        stack = make_index_frame(ht_n[j], i_n[j], stack);
       }
-      stack = scheme_make_pair((Scheme_Object *)ht,
-                               scheme_make_pair(scheme_make_integer(i),
-                                                stack));
+      stack = make_index_frame(ht, i, stack);
       level = -1;
     }
     ht = (Scheme_Hash_Tree *)ht->els[i];
@@ -2869,9 +2935,7 @@ Scheme_Object *scheme_unsafe_hash_tree_start(Scheme_Hash_Tree *ht)
   }
 
   if (level == -1) {
-    stack = scheme_make_pair((Scheme_Object *)ht,
-                             scheme_make_pair(scheme_make_integer(i),
-                                              stack));
+    stack = make_index_frame(ht, i, stack);
     return stack;
   } else {
     i = (1<<mzHAMT_LOG_WORD_SIZE) + i;
@@ -2890,9 +2954,9 @@ XFORM_NONGCING void scheme_unsafe_hash_tree_subtree(Scheme_Object *obj, Scheme_O
   Scheme_Hash_Tree *subtree;
   int i;
 
-  if (SCHEME_PAIRP(args)) {
-    subtree = (Scheme_Hash_Tree *)SCHEME_CAR(args);
-    i = SCHEME_INT_VAL(SCHEME_CADR(args));
+  if (INDEX_FRAMEP(args)) {
+    subtree = INDEX_FRAME_SUBTREE(args);
+    i = INDEX_FRAME_INDEX(args);
   } else {
     if (SCHEME_NP_CHAPERONEP(obj))
       subtree = (Scheme_Hash_Tree *)SCHEME_CHAPERONE_VAL(obj);
@@ -2924,10 +2988,10 @@ Scheme_Object *scheme_unsafe_hash_tree_next(Scheme_Hash_Tree *ht, Scheme_Object 
   int j, i, i_n[mzHAMT_MAX_INDEX_LEVEL], level;
   Scheme_Hash_Tree *ht_n[mzHAMT_MAX_INDEX_LEVEL];
 
-  if (SCHEME_PAIRP(args)) {
-    ht = (Scheme_Hash_Tree *)SCHEME_CAR(args);
-    i = SCHEME_INT_VAL(SCHEME_CADR(args));
-    stack = SCHEME_CDDR(args);
+  if (INDEX_FRAMEP(args)) {
+    ht = INDEX_FRAME_SUBTREE(args);
+    i = INDEX_FRAME_INDEX(args);
+    stack = INDEX_FRAME_REST(args);
     level = -1; /* -1 = too big */
   } else {
     ht = resolve_placeholder(ht);
@@ -2946,9 +3010,9 @@ Scheme_Object *scheme_unsafe_hash_tree_next(Scheme_Hash_Tree *ht, Scheme_Object 
   while (1) {
     if (!i) { /* pop up the tree */
       if (level == -1) {
-        ht = (Scheme_Hash_Tree *)SCHEME_CAR(stack);
-        i = SCHEME_INT_VAL(SCHEME_CADR(stack));
-        stack = SCHEME_CDDR(stack);
+        ht = INDEX_FRAME_SUBTREE(stack);
+        i = INDEX_FRAME_INDEX(stack);
+        stack = INDEX_FRAME_REST(stack);
         if (SCHEME_NULLP(stack))
           level = 0;
       } else if (!level) {
@@ -2963,9 +3027,7 @@ Scheme_Object *scheme_unsafe_hash_tree_next(Scheme_Hash_Tree *ht, Scheme_Object 
       if (!(HASHTR_SUBTREEP(ht->els[i])
             || HASHTR_COLLISIONP(ht->els[i]))) {
         if (level == -1) {
-          stack = scheme_make_pair((Scheme_Object *)ht,
-                                   scheme_make_pair(scheme_make_integer(i),
-                                                    stack));
+          stack = make_index_frame(ht, i, stack);
           return stack;
         } else {
           i = (1<<mzHAMT_LOG_WORD_SIZE) + i;
@@ -2976,9 +3038,7 @@ Scheme_Object *scheme_unsafe_hash_tree_next(Scheme_Hash_Tree *ht, Scheme_Object 
         }
       } else { /* go down tree but save return point */
         if (level == -1) {
-          stack = scheme_make_pair((Scheme_Object *)ht,
-                                   scheme_make_pair(scheme_make_integer(i),
-                                                    stack));
+          stack = make_index_frame(ht, i, stack);
         } else if (level < mzHAMT_MAX_INDEX_LEVEL) {
           ht_n[level] = ht;
           i_n[level] = i;
@@ -2986,13 +3046,9 @@ Scheme_Object *scheme_unsafe_hash_tree_next(Scheme_Hash_Tree *ht, Scheme_Object 
         } else {
           stack = scheme_null;
           for (j = 0; j < mzHAMT_MAX_INDEX_LEVEL; j++) {
-            stack = scheme_make_pair((Scheme_Object *)ht_n[j],
-                                     scheme_make_pair(scheme_make_integer(i_n[j]),
-                                                      stack));
+            stack = make_index_frame(ht_n[j], i_n[j], stack);
           }
-          stack = scheme_make_pair((Scheme_Object *)ht,
-                                   scheme_make_pair(scheme_make_integer(i),
-                                                    stack));
+          stack = make_index_frame(ht, i, stack);
           level = -1;
         }
         ht = (Scheme_Hash_Tree *)ht->els[i];
@@ -3002,38 +3058,21 @@ Scheme_Object *scheme_unsafe_hash_tree_next(Scheme_Hash_Tree *ht, Scheme_Object 
   }
 }
 
+#endif
+
 XFORM_NONGCING static void hamt_at_index(Scheme_Hash_Tree *ht, mzlonglong pos,
                                          Scheme_Object **_key, Scheme_Object **_val, uintptr_t *_code)
 {
   int popcount, i;
   Scheme_Hash_Tree *sub;
 
-  while (1) {
-    popcount = hamt_popcount(ht->bitmap);
-    i = HAMT_TRAVERSE_INIT(popcount);
-    while (1) {
-      if (HASHTR_SUBTREEP(ht->els[i])
-          || HASHTR_COLLISIONP(ht->els[i])) {
-        sub = (Scheme_Hash_Tree *)ht->els[i];
-        if (pos < sub->count) {
-          ht = sub;
-          break; /* to outer loop */
-        } else
-          pos -= sub->count;
-      } else {
-        if (!pos) {
-          *_key = ht->els[i];
-          if (_val)
-            *_val = _mzHAMT_VAL(ht, i, popcount);
-          if (_code)
-            *_code = _mzHAMT_CODE(ht, i, popcount);
-          return;
-        }
-        --pos;
-      }
-      i = HAMT_TRAVERSE_NEXT(i);
-    }
-  }
+  hamt_subtree_at_index(ht, pos, &sub, &i, &popcount);
+
+  *_key = sub->els[i];
+  if (_val)
+    *_val = _mzHAMT_VAL(sub, i, popcount);
+  if (_code)
+    *_code = _mzHAMT_CODE(sub, i, popcount);
 }
 
 int scheme_hash_tree_index(Scheme_Hash_Tree *ht, mzlonglong pos, Scheme_Object **_key, Scheme_Object **_val)
@@ -3318,6 +3357,9 @@ Scheme_Hash_Tree *scheme_hash_tree_set_w_key_wraps(Scheme_Hash_Tree *tree, Schem
         }
       } else {
         /* update collision */
+        /* (we're not looking for a shortcut here if the current value
+            matched the new value, but we could do that if it seems
+            worthwhile; hopefully, collisions are relatively rare) */
         in_tree = hamt_set(in_tree, code, 0, key, val, 0);
         inc = 0;
       }
@@ -3357,6 +3399,9 @@ Scheme_Hash_Tree *scheme_hash_tree_set_w_key_wraps(Scheme_Hash_Tree *tree, Schem
           return tree;
         } else
           return tree;
+      } else if (SAME_OBJ(val, mzHAMT_VAL(in_tree, pos))) {
+        /* Shortcut: setting to the current value */
+        return tree;
       } else
         return hamt_set(tree, h, 0, key, val, 0);
     } else {

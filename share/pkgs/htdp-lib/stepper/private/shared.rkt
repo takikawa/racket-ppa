@@ -10,19 +10,25 @@
          "shared-typed.rkt")
 
 #;(provide/contract
-   [skipto/auto (syntax? (symbols 'rebuild 'discard) 
-                         (syntax? . -> . syntax?)
-                         . -> . 
-                         syntax?)]
+   [skipto/auto (syntax?
+                 (syntax? syntax? . -> . syntax?) 
+                 (syntax? . -> . syntax?)
+                 . -> . 
+                 syntax?)]
    [in-closure-table (-> any/c boolean?)]
    [attach-info (-> syntax? syntax? syntax?)]
    [transfer-info (-> syntax? syntax? syntax?)])
 
 (provide
- (contract-out [syntax->hilite-datum 
-                ((syntax?) (#:ignore-highlight? boolean?) . ->* . any)] ; sexp with explicit tags
-               [syntax->interned-datum (-> syntax? any)])
- skipto/auto
+ (contract-out
+  [syntax->hilite-datum 
+   ((syntax?) (#:ignore-highlight? boolean?) . ->* . any)] ; sexp with explicit tags
+  [syntax->interned-datum (-> syntax? any)]
+  [skipto/auto (-> syntax? boolean? (-> syntax? syntax?)
+                   syntax?)]
+  [check-path (-> syntax? (listof symbol?) syntax?)]
+  )
+ 
  attach-info
  transfer-info
  *unevaluated* 
@@ -126,29 +132,29 @@
 ;; (cons 'both (list trace trace))
 ;; null
 
-(define (swap-args 2-arg-fun)
-  (lambda (x y)
-    (2-arg-fun y x)))
+;; given a symbol, return the corresponding
+;; "rebuilding" outward traversal function
+(define (rebuild-up-fn fn)
+  (case fn 
+    [(car)      (λ (stx new) (cons new (cdr stx)))]
+    [(cdr)      (λ (stx new) (cons (car stx) new))]
+    [(syntax-e) (λ (stx new) (rebuild-stx new stx))]
+    [(both-l both-r) (lambda (stx a b) (cons a b))]
+    [else (raise-argument-error 'rebuild-up-fn
+                                "legal traversal symbol"
+                                0 fn)]))
 
-(define second-arg (lambda (dc y) y))
-
-(define (up-mapping traversal fn)
-  (unless (symbol? fn)
-    (error 'up-mapping "expected symbol for stepper traversal, given: ~v" fn))
-  (case traversal
-    [(rebuild) (case fn 
-                 [(car) (lambda (stx new) (cons new (cdr stx)))]
-                 [(cdr) (lambda (stx new) (cons (car stx) new))]
-                 [(syntax-e) (swap-args rebuild-stx)]
-                 [(both-l both-r) (lambda (stx a b) (cons a b))]
-                 [else (error 'up-mapping "unexpected symbol in up-mapping (1): ~v" fn)])]
-    [(discard) (case fn
-                 [(car) second-arg]
-                 [(cdr) second-arg]
-                 [(syntax-e) second-arg]
-                 [(both-l) (lambda (stx a b) a)]
-                 [(both-r) (lambda (stx a b) b)]
-                 [else (error 'up-mapping "unexpected symbol in up-mapping (2): ~v" fn)])]))
+;; given a symbol, return the corresponding
+;; "discard" outward traversal function
+;; (basically, just return (λ (x y) y))
+(define (discard-up-fn fn)
+  (case fn
+    [(car cdr syntax-e) (λ (stx new) new)]
+    [(both-l) (lambda (stx a b) a)]
+    [(both-r) (lambda (stx a b) b)]
+    [else (raise-argument-error 'discard-up-fn
+                                "legal traversal symbol"
+                                0 fn)]))
 
 ;; like car, but provide a useful error message if given a non-pair
 (define (noisy-car arg)
@@ -158,34 +164,60 @@
 ;; like cdr,  but provide a useful error message if given a non-pair
 (define (noisy-cdr arg)
   (cond [(pair? arg) (cdr arg)]
-        [else (raise-argument-error 'noisy-car "pair in syntax traversal" 0 arg)]))
+        [else (raise-argument-error 'noisy-cdr "pair in syntax traversal" 0 arg)]))
 
 ;; like syntax-e,  but provide a useful error message if given a non-syntax-object
 (define (noisy-syntax-e arg)
   (cond [(syntax? arg) (syntax-e arg)]
-        [else (raise-argument-error 'noisy-car "syntax object in syntax traversal" 0 arg)]))
+        [else (raise-argument-error 'noisy-syntax-e "syntax object in syntax traversal" 0 arg)]))
 
 ;; map a symbol in '(car cdr syntax-e) to the appropriate projector
-(define (down-mapping fn)
+(define (down-fn-finder fn)
   (case fn
     [(car) noisy-car]
     [(cdr) noisy-cdr]
     [(syntax-e) noisy-syntax-e]
     [else (error 'down-mapping "called on something other than 'car, 'cdr, & 'syntax-e: ~v" fn)]))
 
-(define (update fn-list val fn traversal)
-  (if (null? fn-list)
-      (fn val)
-      (let ([up (up-mapping traversal (car fn-list))])
-        (case (car fn-list)
-          [(both-l both-r) (up val 
-                               (update (cadr fn-list) (car val) fn traversal)
-                               (update (caddr fn-list) (cdr val) fn traversal))]
-          [else (let ([down (down-mapping (car fn-list))])
-                  (up val (update (cdr fn-list) (down val) fn traversal)))]))))
-  
+;; given a list of traversal symbols[*] and a val and a core-fn and an up-fn-finder,
+;; use the traversal symbols to find the target expression, apply the core-fn to
+;; it, and the use the up-fn-finder to rebuild the syntax object
+;; If the stx is a syntax? object and the fn-list is not empty, infer the
+;; existence of a syntax unwrap and re-wrap
+;; [*] actually, it can be a tree... it looks like both-l and both-r
+;; split annotation into a tree where one path is for the car of the syntax
+;; pair and the other is for the cdr. I think this is only used by lazy.
+(define (update fn-list stx core-fn up-fn-finder)
+  (cond
+    [(null? fn-list) (core-fn stx)]
+    [else
+     (define fn (car fn-list))
+     ;; NB this is bogus in the case of both-l and both-r:
+     (define rest-fns (cdr fn-list))
+     (cond
+       [(syntax? stx)
+        (define up (up-fn-finder 'syntax-e))
+        (up stx (update fn-list (syntax-e stx) core-fn up-fn-finder))]
+       ;; simply ignore the syntax-e symbol
+       ;; (this clause should not be necessary after the now-obsolete syntax-e label is
+       ;; removed everywhere):
+       [(equal? fn 'syntax-e)
+        (update rest-fns stx core-fn up-fn-finder)]
+       [(member fn '(both-l both-r))
+        (define up (up-fn-finder fn))
+        (up stx
+            (update (cadr fn-list) (car stx) core-fn up-fn-finder)
+            (update (caddr fn-list) (cdr stx) core-fn up-fn-finder))]
+       [else
+        (define up (up-fn-finder fn))
+        (define down (down-fn-finder (car fn-list)))
+        (up stx (update rest-fns (down stx) core-fn up-fn-finder))])]))
 
-    #;(display (equal? (update '(cdr cdr car both-l (car) (cdr))
+;; for debugging, do the "down" part only
+(define (check-path stx fn-list)
+  (update fn-list stx (λ (x) x) discard-up-fn))
+
+#;(display (equal? (update '(cdr cdr car both-l (car) (cdr))
                            `(a . (b ((1) c . 2) d))
                            (lambda (x) (+ x 1))
                            'rebuild)
@@ -193,26 +225,31 @@
   
   
 ;; skipto/auto : syntax?
-;;               (symbols 'rebuild 'discard)
+;;               (syntax? syntax? . -> . syntax?)
 ;;               (syntax? . -> . syntax?)
 ;; "skips over" part of a tree to find a subtree indicated by the
 ;; stepper-skipto property at the root of the tree, and applies
 ;; the transformer to it. If no stepper-skipto or stepper-skipto/discard
 ;; property is present, apply the transformer to the whole tree.
-;; If the traversal argument is 'rebuild, the
-;; result of transformation is embedded again in the same tree.  if the
-;; traversal argument is 'discard, the result of the transformation is the
-;; result of this function
-(define (skipto/auto stx traversal transformer)
-  (cond [(or (stepper-syntax-property stx 'stepper-skipto)
-             (stepper-syntax-property stx 'stepper-skipto/discard))
-         =>
-         (lambda (x) (update x stx 
-                             (lambda (y) 
-                               (skipto/auto y traversal transformer)) 
-                             traversal))]
-        [else (transformer stx)]))
-
+;; The rebuild-mapper is used to rebuild the tree (one rebuilder
+;; rebuilds the tree, the other just discards the context completely).
+(define (skipto/auto stx force-discard? transformer)
+  (cond
+    [(stepper-syntax-property stx 'stepper-skipto)
+     =>
+     (lambda (x) (update x stx 
+                         (lambda (stx)
+                           (skipto/auto stx force-discard? transformer)) 
+                         (if force-discard?
+                             discard-up-fn
+                             rebuild-up-fn)))]
+    [(stepper-syntax-property stx 'stepper-skipto/discard)
+     =>
+     (lambda (x) (update x stx
+                         (lambda (stx)
+                           (skipto/auto stx force-discard? transformer)) 
+                         discard-up-fn))]
+    [else (transformer stx)]))
 
 ;; take info from source expressions to reconstructed expressions
 
@@ -364,44 +401,41 @@
 
 (module+ test
   (require rackunit)
-
-
-  
   
   (check-equal?
    (syntax->datum
     (skipto/auto (stepper-syntax-property
                   #`(a #,(stepper-syntax-property #`(b c)
                                                   'stepper-skipto
-                                                  '(syntax-e cdr car)))
+                                                  '(cdr car)))
                   'stepper-skipto
-                  '(syntax-e cdr car))
-                 'discard
+                  '(cdr car))
+                 #t
                  (lambda (x) x)))
    'c)
 
   (define (lifted-name sym) 
-  (syntax->datum (get-lifted-var sym)))
-(define cd-stx 
-  (datum->syntax #f 'cd))
+    (syntax->datum (get-lifted-var sym)))
+  (define cd-stx 
+    (datum->syntax #f 'cd))
 
-(check-equal? (lifted-name (datum->syntax #f 'ab)) 'lifter-ab-0)
-(check-equal? (lifted-name cd-stx) 'lifter-cd-1)
-(check-equal? (lifted-name (datum->syntax #f 'ef)) 'lifter-ef-2)
-(check-equal? (lifted-name cd-stx) 'lifter-cd-1)
+  (check-equal? (lifted-name (datum->syntax #f 'ab)) 'lifter-ab-0)
+  (check-equal? (lifted-name cd-stx) 'lifter-cd-1)
+  (check-equal? (lifted-name (datum->syntax #f 'ef)) 'lifter-ef-2)
+  (check-equal? (lifted-name cd-stx) 'lifter-cd-1)
 
-(check-exn exn:fail? (lambda () (stepper-syntax-property #`13 'boozle)))
-(check-exn exn:fail? (lambda () (stepper-syntax-property #`13 'boozle #t)))
-(check-equal? (stepper-syntax-property #`13 'stepper-hint) #f)
-(check-equal? (stepper-syntax-property (stepper-syntax-property #`13 'stepper-hint 'yes)
-                                       'stepper-hint) 'yes)
-(check-equal? 
- (stepper-syntax-property (stepper-syntax-property (stepper-syntax-property #`13 
-                                                                            'stepper-hint
-                                                                            'no)
-                                                   'stepper-hint 'yes)
-                          'stepper-hint)
- 'yes)
-(check-equal? (stepper-syntax-property (stepper-syntax-property (stepper-syntax-property #`13 'stepper-hint 'yes) 'stepper-black-box-expr 'arg) 'stepper-hint) 'yes)
-(check-equal? (syntax->datum (stepper-syntax-property (stepper-syntax-property #`13 'stepper-hint 'yes) 'stepper-black-box-expr 'arg)) 13)
-)
+  (check-exn exn:fail? (lambda () (stepper-syntax-property #`13 'boozle)))
+  (check-exn exn:fail? (lambda () (stepper-syntax-property #`13 'boozle #t)))
+  (check-equal? (stepper-syntax-property #`13 'stepper-hint) #f)
+  (check-equal? (stepper-syntax-property (stepper-syntax-property #`13 'stepper-hint 'yes)
+                                         'stepper-hint) 'yes)
+  (check-equal? 
+   (stepper-syntax-property (stepper-syntax-property (stepper-syntax-property #`13 
+                                                                              'stepper-hint
+                                                                              'no)
+                                                     'stepper-hint 'yes)
+                            'stepper-hint)
+   'yes)
+  (check-equal? (stepper-syntax-property (stepper-syntax-property (stepper-syntax-property #`13 'stepper-hint 'yes) 'stepper-black-box-expr 'arg) 'stepper-hint) 'yes)
+  (check-equal? (syntax->datum (stepper-syntax-property (stepper-syntax-property #`13 'stepper-hint 'yes) 'stepper-black-box-expr 'arg)) 13)
+  )

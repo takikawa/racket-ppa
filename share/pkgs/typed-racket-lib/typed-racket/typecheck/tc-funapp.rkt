@@ -3,7 +3,7 @@
 (require (rename-in "../utils/utils.rkt" [infer r:infer])
          racket/match racket/list racket/sequence
          (prefix-in c: (contract-req))
-         (utils tc-utils)
+         (utils tc-utils identifier)
          (env tvar-env lexical-env)
          (for-syntax syntax/parse racket/base)
          (types utils subtype resolve abbrev
@@ -151,10 +151,9 @@
          #:infer-when
          ;; only try inference if the argument lengths are appropriate
          (match rst
-           [(? Type?) (<= (length dom) (length argtys))]
            [(RestDots: _ dbound) (and (<= (length dom) (length argtys))
                                       (eq? dotted-var dbound))]
-           [_ (= (length dom) (length argtys))])
+           [_ (Arrow-includes-arity? dom rst argtys)])
          ;; Only try to infer the free vars of the rng (which includes the vars
          ;; in props/objects).
          #:maybe-inferred-substitution
@@ -162,7 +161,7 @@
            (extend-tvars
             fixed-vars
             (match rst
-              [(? Type?)
+              [(? Rest?)
                (infer/vararg
                 fixed-vars (list dotted-var) argtys dom rst rng
                 (and expected (tc-results->values expected))
@@ -197,7 +196,7 @@
          ;; and there's no mandatory kw
          #:infer-when
          (and (not (ormap Keyword-required? kws))
-              ((if rst <= =) (length dom) (length argtys)))
+              (Arrow-includes-arity? dom rst argtys))
          ;; Only try to infer the free vars of the rng (which includes the vars
          ;; in props/objects).
          #:maybe-inferred-substitution
@@ -307,7 +306,8 @@
       [(? resolvable?)
        (tc/funapp f-stx args-stx (resolve-once f-type) args-res expected)]
       ;; a union of functions can be applied if we can apply all of the elements
-      [(Union: (? Bottom?) ts) #:when (andmap Fun? ts)
+      [(Union: (? Bottom?) ts) #:when (for/and ([t (in-list ts)])
+                                        (subtype t top-func))
        (merge-tc-results
         (for/list ([fty (in-list ts)])
           (tc/funapp f-stx args-stx fty args-res expected)))]

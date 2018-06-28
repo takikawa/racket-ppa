@@ -495,7 +495,11 @@ please adhere to these guidelines:
  
  ;;; save file in particular format prompting.
  (save-as-plain-text "Save this file as plain text?")
- (save-in-drs-format "Save this file in drscheme-specific non-text format?")
+ (save-as-binary-format "Convert this file to a DrRacket specific format to keep non-text elements?")
+ (save-in-drs-format "Save this file in DrRacket-specific non-text format?")
+ (keep-format "Keep (may lose data)")
+ (convert-format "Convert (recommended)")
+ (dont-save "Don't Save")
  (yes "Yes")
  (no "No")
  
@@ -1108,6 +1112,7 @@ please adhere to these guidelines:
  (stand-alone-explanatory-label "Stand-alone (for this machine only, run compiled copy)")
  (distribution "Distribution")
  (distribution-explanatory-label "Distribution (to install on other machines)")
+ (embed-dlls? "Embed DLLs in the executable?") ;; appears in the GUI only under windows
  (executable-type "Type")
  (executable-base "Base")
  (filename "Filename: ")

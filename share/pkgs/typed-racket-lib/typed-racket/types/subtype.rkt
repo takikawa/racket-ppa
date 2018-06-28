@@ -6,14 +6,15 @@
          (rep type-rep prop-rep object-rep
               core-rep type-mask values-rep rep-utils
               free-variance rep-switch)
-         (utils tc-utils)
+         (utils tc-utils prefab identifier)
          (only-in (env type-env-structs)
                   with-lexical-env
                   with-naively-extended-lexical-env
                   lexical-env)
          (types utils resolve match-expanders current-seen
-                numeric-tower substitute prefab signatures)
+                numeric-tower substitute signatures)
          (for-syntax racket/base syntax/parse racket/sequence)
+         "../infer/fail.rkt"
          (except-in (rename-in "abbrev.rkt"
                                [-> t->]
                                [->* t->*])
@@ -34,7 +35,10 @@
  [subval (-> SomeValues? SomeValues? boolean?)]
  [type-equiv? (-> Type? Type? boolean?)]
  [subtypes (-> (listof Type?) (listof Type?) boolean?)]
- [subtypes/varargs (-> (listof Type?) (listof Type?) (or/c Type? #f) boolean?)]
+ [subtypes/varargs (-> (listof Type?)
+                       (listof Type?)
+                       (or/c Type? Rest? #f)
+                       boolean?)]
  [unrelated-structs (-> Struct? Struct? boolean?)])
 
 
@@ -80,15 +84,16 @@
 ;;************************************************************
 
 
-;; check subtyping for two lists of types
+;; check subtyping for two lists of types, possibly terminated with a `Rest` or `RestDots`
 ;; List[(cons Number Number)] listof[type] listof[type] -> Opt[List[(cons Number Number)]]
-(define (subtypes* A t1s t2s)
-  (cond [(and (null? t1s) (null? t2s) A)]
-        [(or (null? t1s) (null? t2s)) #f]
-        [(subtype* A (car t1s) (car t2s))
-         =>
-         (λ (A*) (subtypes* A* (cdr t1s) (cdr t2s)))]
-        [else #f]))
+(define/cond-contract (subtypes* A t1s t2s)
+  (-> list? (listof Type?) (listof Type?) (or/c #f list?))
+  (match* (t1s t2s)
+    [((cons t1 rst1) (cons t2 rst2))
+     (subtype-seq A
+                  (subtype* t1 t2)
+                  (subtypes* rst1 rst2))]
+    [(_ _) (and (equal? t1s t2s) A)]))
 
 (define (subresults* A rs1 rs2)
   (cond [(and (null? rs1) (null? rs2) A)]
@@ -176,18 +181,28 @@
        [(_ _) #f]))))
 
 
-;; used when checking if (Arrow ... rst1 ...)
-;; is a subtype of (Arrow2 ... rst2 ...)
-(define (rest-arg-subtype* A rst1 rst2)
-  (match* (rst1 rst2)
-    [(_ #f) A]
-    [(t t) A]
-    [((? Type? t1) (? Type? t2)) (subtype* A t2 t1)]
-    [((RestDots: t1 dbound)
-      (RestDots: t2 dbound))
-     (subtype* A t2 t1)]
-    [(_ _) #f]))
-
+;; Based soley on the domain, is one arrow (i.e. dom1 + rst1)
+;; a subtype of another arrow (i.e. dom1 + rst1)?
+;; NOTE: This function takes into account that domains are
+;; contravariant w.r.t. subtyping, i.e. callers should NOT
+;; flip argument order.
+(define/cond-contract (Arrow-domain-subtypes* A dom1 rst1 dom2 rst2 [objs #f])
+  (->* (list?
+        (listof Type?)
+        (or/c #f Rest? RestDots?)
+        (listof Type?)
+        (or/c #f Rest? RestDots?))
+       ((listof Object?))
+       (or/c #f list?))
+  (match* (dom1 dom2)
+    [((cons t1 ts1) (cons t2 ts2))
+     (subtype-seq A
+                  (subtype* t2 t1 (and objs (car objs)))
+                  (Arrow-domain-subtypes* ts1 rst1 ts2 rst2 (and objs (cdr objs))))]
+    [(_ _)
+     (subtype* A
+               (-Tuple* dom2 (Rest->Type rst2))
+               (-Tuple* dom1 (Rest->Type rst1)))]))
 
 (define-syntax-rule (with-fresh-ids len ids . body)
   (let-values ([(ids seq) (for/fold ([ids '()]
@@ -199,23 +214,22 @@
       . body)))
 
 ;; simple co/contra-variance for ->
-(define (arrow-subtype* A arr1 arr2)
+(define/cond-contract (arrow-subtype* A arr1 arr2)
+  (-> list? Arrow? Arrow? (or/c #f list?))
   (match* (arr1 arr2)
     [((Arrow: dom1 rst1 kws1 raw-rng1)
       (Arrow: dom2 rst2 kws2 raw-rng2))
      (define A* (subtype-seq A
-                             (rest-arg-subtype* rst1 rst2)
-                             (subtypes*/varargs dom2 dom1 rst1 #f)
+                             (Arrow-domain-subtypes* dom1 rst1 dom2 rst2)
                              (kw-subtypes* kws1 kws2)))
      (cond
        [(not A*) #f]
        [else
-        (define arity (max (length dom1) (length dom2)))
-        (with-fresh-ids arity ids
+        (with-fresh-ids (length dom2) ids
           (define mapping
-            (for/list ([idx (in-range arity)]
+            (for/list ([idx (in-naturals)]
                        [id (in-list ids)]
-                       [t (in-list/rest dom2 (or rst2 Univ))])
+                       [t (in-list dom2)])
               (list* idx id t)))
           (subval* A*
                    (instantiate-obj+simplify raw-rng1 mapping)
@@ -228,22 +242,23 @@
 ;; x : T3 ⊢ T2 <: T4
 ;; -----------------------
 ;; ⊢ (T1 → T2) <: (x:T3)→T4
-(define (arrow-subtype-dfun* A arrow dfun)
+(define/cond-contract (arrow-subtype-dfun* A arrow dfun)
+  (-> list? Arrow? DepFun? (or/c #f list?))
   (match* (arrow dfun)
-    [((Arrow:  dom1     rst1 kws1 raw-rng1)
+    [((Arrow: dom1 rst1 kws1 raw-rng1)
       (DepFun: raw-dom2 raw-pre2  raw-rng2))
-     (define arity (max (length dom1) (length raw-dom2)))
+     #:when (Arrow-includes-arity? arrow (length raw-dom2))
+     (define arity (length raw-dom2))
      (with-fresh-ids arity ids
        (define dom2 (for/list ([d (in-list raw-dom2)])
                       (instantiate-obj d ids)))
-       (define pre2 (instantiate-obj raw-pre2 ids))
        (define A* (subtype-seq A
-                               (rest-arg-subtype* rst1 #f)
-                               (subtypes*/varargs dom2 dom1 rst1 (map -id-path ids))
-                               (kw-subtypes* kws1 '())))
+                               (kw-subtypes* kws1 '())
+                               (Arrow-domain-subtypes* dom1 rst1 dom2 #f (map -id-path ids))))
        (cond
          [(not A*) #f]
          [else
+          (define pre2 (instantiate-obj raw-pre2 ids))
           (define-values (mapping t2s)
             (for/lists (_1 _2)
               ([idx (in-range arity)]
@@ -256,7 +271,8 @@
                #:props (list pre2)]
             (subval* A*
                      (instantiate-obj+simplify raw-rng1 mapping)
-                     (instantiate-obj raw-rng2 ids)))]))]))
+                     (instantiate-obj raw-rng2 ids)))]))]
+    [(_ _) #f]))
 
 ;;************************************************************
 ;; Prop 'Subtyping'
@@ -279,45 +295,22 @@
     [(_ _) #f]))
 
 (define (subtypes/varargs args dom rst)
-  (and (subtypes*/varargs null args dom rst #f) #t))
+  (and (subtypes*/varargs null args dom rst) #t))
 
 ; subtypes*/varargs : list?
 ;                     (listof Type)
 ;                     (listof Type)
-;                     (or/c #f Type)
+;                     (or/c #f Type Rest)
 ;                     (or/c #f (listof Object))
 ; ->
 ; list? or #f
-(define (subtypes*/varargs A argtys dom rst argobjs)
-  (let loop-varargs ([dom dom]
-                     [argtys argtys]
-                     [argobjs argobjs]
-                     [A A])
-    (cond
-      [(not A) #f]
-      [(and (null? dom) (null? argtys)) A]
-      [(null? argtys) #f]
-      [(and (null? dom) rst)
-       (cond
-         [(subtype* A
-                    (car argtys)
-                    rst
-                    (and argobjs (car argobjs)))
-          => (λ (A) (loop-varargs dom
-                                  (cdr argtys)
-                                  (and argobjs (cdr argobjs))
-                                  A))]
-         [else #f])]
-      [(null? dom) #f]
-      [(subtype* A
-                 (car argtys)
-                 (car dom)
-                 (and argobjs (car argobjs)))
-       => (λ (A) (loop-varargs (cdr dom)
-                               (cdr argtys)
-                               (and argobjs (cdr argobjs))
-                               A))]
-      [else #f])))
+(define/cond-contract (subtypes*/varargs A argtys dom raw-rst)
+  (-> list? (listof Type?) (listof Type?) (or/c #f Type? Rest? RestDots?)
+      (or/c #f list?))
+  (define rst (match raw-rst
+                [(? Type?) (make-Rest (list raw-rst))]
+                [_ raw-rst]))
+  (Arrow-domain-subtypes* A dom rst argtys #f))
 
 
 ;;************************************************************
@@ -459,11 +452,13 @@
                    (subtype* A t1 t2 obj))])
           (and A
                (or (TrueProp? raw-prop)
-                   (let* ([obj (if (Object? obj) obj (-id-path (genid)))]
-                          [prop (instantiate-obj raw-prop obj)])
-                     (implies-in-env? (lexical-env)
-                                      (-is-type obj t1)
-                                      prop)))
+                   (let ([A (remember t1 t2 A)])
+                     (with-updated-seen A
+                       (let* ([obj (if (Object? obj) obj (-id-path (genid)))]
+                              [prop (instantiate-obj raw-prop obj)])
+                         (implies-in-env? (lexical-env)
+                                          (-is-type obj t1)
+                                          prop)))))
                A))]
        [(_ (? resolvable?))
         (let ([A (remember t1 t2 A)])
@@ -475,7 +470,9 @@
                               (cons lower-bound upper-bound)))
         #:when (and (with-refinements?)
                     (subtype* A t1 -Int obj)
-                    (provable-int-subtype? A t1 lower-bound upper-bound obj))
+                    (let ([A (remember t1 t2 A)])
+                      (with-updated-seen A
+                        (provable-int-subtype? A t1 t2 lower-bound upper-bound obj))))
         A]
        [(_ _) ;; otherwise we case on t1
         (subtype-cases A t1 t2 obj)])]))
@@ -483,7 +480,7 @@
 
 
 ;; if obj ∈ t1, can we prove 'lower-bound <= obj' and 'obj <= upper-bound'? 
-(define (provable-int-subtype? A t1 lower-bound upper-bound obj)
+(define (provable-int-subtype? A t1 t2 lower-bound upper-bound obj)
   (define lower-ineq
     (cond
       [lower-bound (-leq (-lexp lower-bound)
@@ -500,19 +497,20 @@
     ;; both inequalities were trivially true, succeed!
     [(and (TrueProp? lower-ineq) (TrueProp? upper-ineq)) A]
     [else
-     ;; otherwise we have at least one inequality that must
-     ;; be provable for subtyping to hold
-     (define-values (t1* extracted-props) (extract-props obj t1))
-     (define assumptions (apply -and (cons (-is-type obj t1*) extracted-props)))
+     (let ([A (remember t1 t2 A)])
+       (with-updated-seen A
+         ;; be provable for subtyping to hold
+         (define-values (t1* extracted-props) (extract-props obj t1))
+         (define assumptions (apply -and (cons (-is-type obj t1*) extracted-props)))
 
-     (define goal
-       (match* (lower-ineq upper-ineq)
-         [((? TrueProp?) p) p]
-         [(p (? TrueProp?)) p]
-         [(_ _) (make-AndProp (list lower-ineq upper-ineq))]))
-     (implies-in-env? (lexical-env)
-                      assumptions
-                      goal)]))
+         (define goal
+           (match* (lower-ineq upper-ineq)
+             [((? TrueProp?) p) p]
+             [(p (? TrueProp?)) p]
+             [(_ _) (make-AndProp (list lower-ineq upper-ineq))]))
+         (implies-in-env? (lexical-env)
+                          assumptions
+                          goal)))]))
 
 
 (define (continue<: A t1 t2 obj)
@@ -740,11 +738,12 @@
                [#:identifiers ids
                 #:types dom2
                 #:props (list pre2)]
-             (define A*
-               (subtype-seq A
-                            (subtypes*/varargs dom2 dom1 #f (map -id-path ids))
-                            (subval* rng1 rng2)))
-
+             (define A* (for/fold ([A (subval* A rng1 rng2)])
+                                  ([d1 (in-list dom1)]
+                                   [d2 (in-list dom2)]
+                                   [id (in-list ids)]
+                                   #:break (not A))
+                          (subtype* A d2 d1 (-id-path id))))
              (and (implies-in-env? (lexical-env) pre2 pre1)
                   A*)))])]
      [(Fun: arrows2)
@@ -761,7 +760,7 @@
           (match a2
             [(Arrow: dom2 rst2 kws2 raw-rng2)
              (define A* (subtype-seq A
-                                     (subtypes*/varargs dom2 dom1 #f #f)
+                                     (subtypes* dom2 dom1)
                                      (kw-subtypes* '() kws2)))
              (cond
                [(not A*) #f]
@@ -770,8 +769,8 @@
                 (define-values (mapping t2s)
                   (for/lists (_1 _2)
                     ([idx (in-range arity)]
-                     [id (in-list ids)]
-                     [t (in-list/rest dom2 (or rst2 Univ))])
+                     [id (in-list ids)])
+                    (define t (dom+rst-ref dom2 rst2 idx Univ))
                     (values (list* idx id t) t)))
                 (with-naively-extended-lexical-env
                     [#:identifiers ids
@@ -1050,6 +1049,20 @@
                                             (subtype* t s)
                                             (subtype* s t))
                                (subtype* A s t))))))))]
+     [(PrefabTop: k2) (and (prefab-key-subtype? k1 k2) A)]
+     [_ (continue<: A t1 t2 obj)])]
+  [(case: PrefabTop (PrefabTop: k1))
+   (match t2
+     [(Prefab: k2 flds)
+      (and (prefab-key-subtype? k1 k2)
+           (not (prefab-key/mutable-fields? k2))
+           (for/fold ([A A])
+                     ([fld-t (in-list flds)]
+                      ;; only check the fields both have in common
+                      [_ (in-range (prefab-key->field-count k2))]
+                      #:break (not A))
+             (subtype* A Univ fld-t)))]
+     [(PrefabTop: k2) (and (prefab-key-subtype? k1 k2) A)]
      [_ (continue<: A t1 t2 obj)])]
   [(case: Promise (Promise: elem1))
    (match t2

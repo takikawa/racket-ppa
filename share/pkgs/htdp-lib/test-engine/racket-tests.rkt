@@ -17,6 +17,7 @@
          "test-info.scm")
 
 (require (for-syntax stepper/private/syntax-property))
+(require  syntax/macro-testing)
 
 (provide
  check-expect ;; syntax : (check-expect <expression> <expression>)
@@ -80,11 +81,12 @@
     (stepper-syntax-property #`#,(gensym 'test) 'stepper-hide-completed #t))
   (define src-info
     (with-stepper-syntax-properties (['stepper-skip-completely #t])
-                                    #`(list #,@(list #`(quote #,(syntax-source stx))
-                                                     (syntax-line stx)
-                                                     (syntax-column stx)
-                                                     (syntax-position stx)
-                                                     (syntax-span stx)))))
+      #`(list #,@(list #`(quote #,(syntax-source stx))
+                       (syntax-line stx)
+                       (syntax-column stx)
+                       (syntax-position stx)
+                       (syntax-span stx)))))
+  (define test-expr-checked-for-syntax-error #`(convert-compile-time-error #,test-expr))
   (if (eq? 'module (syntax-local-context))
       #`(define #,bogus-name
           #,(stepper-syntax-property
@@ -94,27 +96,27 @@
                    (insert-test test-engine
                                 (lambda ()
                                   #,(with-stepper-syntax-properties
-                                     (['stepper-hint hint-tag]
-                                      ['stepper-hide-reduction #t]
-                                      ['stepper-use-val-as-final #t])
-                                     (quasisyntax/loc stx
-                                       (#,checker-proc-stx
-                                        #,(with-stepper-syntax-properties
-                                           (['stepper-hide-reduction #t])
-                                           #`(car 
-                                              #,(with-stepper-syntax-properties
-                                                 (['stepper-hide-reduction #t])
-                                                 #`(list
-                                                    (lambda () #,test-expr)
-                                                    #,(with-stepper-syntax-properties
-                                                          (['stepper-hide-reduction #t])
-                                                        (syntax/loc stx (void)))))))
-                                        #,@embedded-stxes
-                                        #,src-info
-                                        #,(with-stepper-syntax-properties
-                                           (['stepper-no-lifting-info #t]
-                                            ['stepper-hide-reduction #t])
-                                           #'test-engine))))))))
+                                        (['stepper-hint hint-tag]
+                                         ['stepper-hide-reduction #t]
+                                         ['stepper-use-val-as-final #t])
+                                      (quasisyntax/loc stx
+                                        (#,checker-proc-stx
+                                         #,(with-stepper-syntax-properties
+                                               (['stepper-hide-reduction #t])
+                                             #`(car 
+                                                #,(with-stepper-syntax-properties
+                                                      (['stepper-hide-reduction #t])
+                                                    #`(list
+                                                       (lambda () #,test-expr-checked-for-syntax-error)
+                                                       #,(with-stepper-syntax-properties
+                                                             (['stepper-hide-reduction #t])
+                                                           (syntax/loc stx (void)))))))
+                                         #,@embedded-stxes
+                                         #,src-info
+                                         #,(with-stepper-syntax-properties
+                                               (['stepper-no-lifting-info #t]
+                                                ['stepper-hide-reduction #t])
+                                             #'test-engine))))))))
              'stepper-skipto
              (append skipto/third ;; first let* binding
                      skipto/third ;; second let* binding
@@ -134,25 +136,25 @@
             (insert-test test-engine
                          (lambda ()
                            #,(with-stepper-syntax-properties
-                              (['stepper-hint hint-tag]
-                               ['stepper-hide-reduction #t]
-                               ['stepper-use-val-as-final #t])
-                              (quasisyntax/loc stx
-                                (#,checker-proc-stx
-                                 #,(with-stepper-syntax-properties
-                                    (['stepper-hide-reduction #t])
-                                    #`(car 
-                                       #,(with-stepper-syntax-properties
-                                          (['stepper-hide-reduction #t])
-                                          #`(list
-                                             (lambda () #,test-expr)
-                                             #,(syntax/loc stx (void))))))
-                                 #,@embedded-stxes
-                                 #,src-info
-                                 #,(with-stepper-syntax-properties
-                                    (['stepper-no-lifting-info #t]
-                                     ['stepper-hide-reduction #t])
-                                    #'test-engine))))))))))
+                                 (['stepper-hint hint-tag]
+                                  ['stepper-hide-reduction #t]
+                                  ['stepper-use-val-as-final #t])
+                               (quasisyntax/loc stx
+                                 (#,checker-proc-stx
+                                  #,(with-stepper-syntax-properties
+                                        (['stepper-hide-reduction #t])
+                                      #`(car 
+                                         #,(with-stepper-syntax-properties
+                                               (['stepper-hide-reduction #t])
+                                             #`(list
+                                                (lambda () #,test-expr-checked-for-syntax-error)
+                                                #,(syntax/loc stx (void))))))
+                                  #,@embedded-stxes
+                                  #,src-info
+                                  #,(with-stepper-syntax-properties
+                                        (['stepper-no-lifting-info #t]
+                                         ['stepper-hide-reduction #t])
+                                      #'test-engine))))))))))
 
 (define-for-syntax (check-context?)
   (let ([c (syntax-local-context)])
@@ -242,7 +244,7 @@
      (cond
        [(boolean? r) r]
        [else 
-	 ; (error-check (lambda (v) #f) name "expected a boolean" #t)
+        ; (error-check (lambda (v) #f) name "expected a boolean" #t)
         (check-result (format "~a [as predicate in check-satisfied]" name) boolean? "boolean" r)]))
    ;; maker
    (lambda (src format v1 _v2 _) (make-satisfied-failed src format v1 name))
@@ -412,21 +414,18 @@
                                [exn:fail?
                                 (lambda (e)
                                   (define msg (get-rewriten-error-message e))
-                                  (if (and (pair? kind) (eq? 'check-satisfied (car kind)))
-                                      (list (unsatisfied-error src (test-format) (cadr kind) msg e) 
-                                            'error e)
-                                      (list (unexpected-error src (test-format) expect msg e) 
-                                            'error e)))])
+                                  (cons (if (and (pair? kind) (eq? 'check-satisfied (car kind)))
+                                            (unsatisfied-error src (test-format) (cadr kind) msg e)
+                                            (unexpected-error src (test-format) expect msg e))
+                                        (list 'error e)))])
                  (define test-val (test))
-                 (cond [(check expect test-val range) (list #t test-val #f)]
-                       [else (list (maker src (test-format) test-val expect range)
-                                   test-val
-                                   #f)]))])
-    (cond [(check-fail? result)
-           (define c (send test-engine get-info))
-           (send c check-failed result (check-fail-src result) exn)
-           (if exn (raise exn) #f)]
-          [else #t])))
+                 (define passes?  (check expect test-val range))
+                 (cons (or passes? (maker src (test-format) test-val expect range)) (list test-val #f)))])
+    (define failed? (check-fail? result))
+    (cond [(not failed?) #t]
+          [else (define c (send test-engine get-info))
+                (send c check-failed result (check-fail-src result) exn)
+                #f])))
 
 ;;Wishes
 (struct exn:fail:wish exn:fail (name args))
@@ -580,8 +579,3 @@
 
 (provide scheme-test-data test-format test-execute test-silence error-handler 
          signature-test-info% build-test-engine)
-
-; (check-satisfied 1 equal?)
-; (check-satisfied 1 (values odd?))
-; (check-satisfied (random 10) 11)
-; (test)

@@ -3,8 +3,10 @@
 (require (for-syntax racket/base)
          typed/racket/draw
          typed/racket/class
+         typed/pict
          "type-doc.rkt"
          "math.rkt")
+
 
 (provide (all-defined-out))
 
@@ -13,7 +15,8 @@
 (deftype Anchor
   (U 'top-left    'top    'top-right
      'left        'center 'right
-     'bottom-left 'bottom 'bottom-right))
+     'bottom-left 'bottom 'bottom-right
+     'auto))
 
 (deftype Color
   (U (List Real Real Real)
@@ -60,7 +63,7 @@
         'circle7           'circle8          'bullet
         'fullcircle1       'fullcircle2      'fullcircle3
         'fullcircle4       'fullcircle5      'fullcircle6
-        'fullcircle7       'fullcircle8)))
+        'fullcircle7       'fullcircle8      'none)))
 
 (deftype (List-Generator A B) (U (Listof B) (-> A (Listof B))))
 
@@ -126,4 +129,5 @@
    [draw-tick (-> (Vectorof Real) Real Real Void)]
    [draw-arrow-glyph (-> (Vectorof Real) Real Real Void)]
    [draw-glyphs (-> (Listof (Vectorof Real)) Point-Sym Nonnegative-Real Void)]
+   [draw-pict (->* [pict (Vectorof Real)] (Anchor Real) Void)]
    [draw-legend (-> (Listof legend-entry) Rect Void)]))

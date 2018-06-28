@@ -94,7 +94,7 @@
           ((typeid) name) ...
           ((*typeid) *name) ...
           (else
-           (lambda (fsym index param)
+           (lambda (fsym param)
              (error/unsupported-type fsym x))))))))
 
 (define (mk-check typeid pred #:contract-parts [ctc-parts #f])
@@ -109,9 +109,9 @@
 (define (check-numeric fsym param)
   (define (bad note)
     (error/no-convert fsym "ODBC" "numeric" param note))
-  (unless (rational? param) (bad ""))
+  (unless (and (rational? param) (exact? param)) (bad "(expected exact rational)"))
   (let ([scaled (exact->scaled-integer (inexact->exact param))])
-    (unless scaled (bad ""))
+    (unless scaled (bad "(bad denominator for exact decimal)"))
     (let ([ma (car scaled)]
           [ex (cdr scaled)])
       ;; check (abs ma) fits in 16*8 bits, ex fits in char
@@ -131,6 +131,7 @@
    (12 varchar        string?)
    (91 date           sql-date?)
    (92 time           sql-time?)
+   (-154 time2        sql-time?)
    (93 timestamp      sql-timestamp?)
    (-1 longvarchar    string?)
    (-2 binary         bytes?)
@@ -190,9 +191,14 @@
   (110 interval-day-second    #f)
   (111 interval-hour-minute   #f)
   (112 interval-hour-second   #f)
-  (113 interval-minute-second #f))
+  (113 interval-minute-second #f)
+
+  ;; SQL Server extensions
+  (-154 time 0)
+  )
 
 (define (supported-typeid? x)
   (case x
     ((0 1 2 3 4 5 6 7 8 9 12 91 92 93 -1 -2 -3 -4 -5 -6 -7 -8 -9 -10) #t)
+    ((-154) #t)
     (else #f)))

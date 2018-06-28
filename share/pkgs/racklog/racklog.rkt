@@ -22,8 +22,8 @@
   (syntax-rules ()
     ((%or g ...)
      (lambda (__fk)
-       (let/racklog-cc __sk
-         (let/racklog-cc __fk
+       (let/racklog-sk __sk
+         (let/racklog-fk __fk
            (__sk ((logic-var-val* g) __fk)))
          ...
          (__fk 'fail))))))
@@ -43,7 +43,9 @@
   (syntax-rules ()
     ((%cut-delimiter g)
      (lambda (__fk)
-       (let ((this-! (lambda (__fk2) __fk)))
+       (let ((this-! (lambda (__fk2)
+                       (__fk2 'unwind-trail)
+                       __fk)))
          (syntax-parameterize 
           ([! (make-rename-transformer #'this-!)])
           ((logic-var-val* g) __fk)))))))
@@ -53,10 +55,10 @@
     ((%rel (v ...) ((a ...) subgoal ...) ...)
      (lambda __fmls
        (lambda (fail-relation)
-         (let/racklog-cc 
+         (let/racklog-sk 
           __sk
           (%let (v ...)
-                (let/racklog-cc 
+                (let/racklog-fk 
                  fail-case
                  (define-values
                    (unify-cleanup fail-unify)
@@ -65,6 +67,7 @@
                  (define this-! 
                    (lambda (fk1) 
                      (λ (fk2)
+                       ;; XXX could be (fail-unify 'unwind-trail)
                        (unify-cleanup)
                        (fail-relation 'fail))))
                  (syntax-parameterize 
@@ -175,8 +178,8 @@
 (define ((make-negation p) . args) 
   ;basically inlined cut-fail
   (lambda (fk)
-    (if (let/racklog-cc k
-          ((apply p args) (lambda (d) (k #f))))
+    (if (let/racklog-sk k
+          ((apply p args) (make-racklog-fk (lambda (d) (k #f)))))
         (fk 'fail)
         fk)))
 
@@ -206,10 +209,7 @@
     ((%= (copy s) c) fk)))
 
 (define (%not g)
-  (lambda (fk)
-    (if (let/racklog-cc k
-          ((logic-var-val* g) (lambda (d) (k #f))))
-        (fk 'fail) fk)))
+  (%if-then-else g %fail %true))
 
 (define (%empty-rel . args)
   %fail)
@@ -255,7 +255,7 @@
 
 (define (make-bag-of-aux kons fvv lv goal bag)
   (lambda (fk)
-    (let/racklog-cc sk
+    (let/racklog-sk sk
       (let ((lv2 (cons fvv lv)))
         (let* ((acc '())
                (fk-final
@@ -304,9 +304,10 @@
        (%let (v ...)
          (set-box! *more-fk*
                    ((logic-var-val* g)
-                    (lambda (d)
-                      (set-box! *more-fk* #f)
-                      (abort-to-racklog-prompt #f))))
+                    (make-racklog-fk
+                     (lambda (d)
+                       (set-box! *more-fk* #f)
+                       (abort-to-racklog-prompt #f)))))
          (abort-to-racklog-prompt
           (list (cons 'v (logic-var-val* v))
                 ...)))))
@@ -338,6 +339,15 @@
   (call-with-continuation-prompt (λ () e ...) racklog-prompt-tag))
 (define-syntax-rule (let/racklog-cc k e ...)
   (call-with-current-continuation (λ (k) e ...) racklog-prompt-tag))
+(define-syntax-rule (let/racklog-sk k e ...)
+  (let/racklog-cc k e ...))
+(define (make-racklog-fk fk)
+  (λ (msg)
+    (if (not (eq? msg 'unwind-trail))
+      (fk 'fail)
+      #f)))
+(define-syntax-rule (let/racklog-fk k e ...)
+  (let/racklog-cc fk (let ([k (make-racklog-fk fk)]) e ...)))
 
 (define (%member x y)
   (%let (xs z zs)

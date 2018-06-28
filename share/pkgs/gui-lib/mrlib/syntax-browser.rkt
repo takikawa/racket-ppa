@@ -14,8 +14,8 @@ needed to really make this work:
            racket/gui/base
            racket/match
            racket/contract
-           (prefix-in : racket/base)
-           "include-bitmap.rkt")
+           (only-in racket/base [read :read])
+           "expandable-snip.rkt")
 
   (define orig-output-port (current-output-port))
   (define (oprintf . args) (apply fprintf orig-output-port args))
@@ -67,7 +67,7 @@ needed to really make this work:
   (define-struct range (stx start end))
 
   (define syntax-snip%
-    (class editor-snip%
+    (class expandable-snip%
       (init-field main-stx)
       
       (unless (syntax? main-stx)
@@ -79,66 +79,10 @@ needed to really make this work:
       (define/override (write stream)
         (send stream put (string->bytes/utf-8 (format "~s" (marshall-syntax main-stx)))))
       
-      (define-values (datum paths-ht) (syntax-object->datum/record-paths main-stx))
-      
       (define output-text (new text:hide-caret/selection%))
       (define output-text-filled-in? #f)
       (define info-text (new text:hide-caret/selection%))
       (define info-port (make-text-port info-text))
-      
-      (define/private (make-modern text)
-        (send text change-style
-              (make-object style-delta% 'change-family 'modern)
-              0
-              (send text last-position)))
-
-      (define path '())
-      (define next-push 0)
-      (define/private (push!)
-        (set! path (cons next-push path))
-        (set! next-push 0))
-      (define/private (pop!)
-        (set! next-push (+ (car path) 1))
-        (set! path (cdr path)))
-      
-      (define/private (populate-range-ht)
-        ;; range-start-ht : hash-table[obj -o> number]
-        (define range-start-ht (make-hasheq))
-        
-        ;; range-ht : hash-table[obj -o> (listof (cons number number))]
-        (define range-ht (make-hasheq))
-      
-        (let* ([range-pretty-print-pre-hook 
-                (λ (x port)
-                  (push!)
-                  (let ([stx-object (hash-ref paths-ht path (λ () #f))])
-                    (hash-set! range-start-ht stx-object (send output-text last-position))))]
-               [range-pretty-print-post-hook 
-                (λ (x port)
-                  (let ([stx-object (hash-ref paths-ht path (λ () #f))])
-                    (when stx-object
-                      (let ([range-start (hash-ref range-start-ht stx-object (λ () #f))])
-                        (when range-start
-                          (hash-set! range-ht 
-                                     stx-object 
-                                     (cons
-                                      (cons
-                                       range-start
-                                       (send output-text last-position))
-                                      (hash-ref range-ht stx-object (λ () null))))))))
-                  (pop!))])
-          
-          ;; reset `path' and `next-push' for use in pp hooks.
-          (set! path '())
-          (set! next-push 0)
-          (parameterize ([current-output-port (make-text-port output-text)]
-                         [pretty-print-pre-print-hook range-pretty-print-pre-hook]
-                         [pretty-print-post-print-hook range-pretty-print-post-hook]
-                         [pretty-print-columns 30])
-            (pretty-print datum)
-            (make-modern output-text)))
-
-        (values range-start-ht range-ht))
       
       (define/private (show-info stx)
         (insert/big "General Info\n")
@@ -232,8 +176,7 @@ needed to really make this work:
                 (send info-text last-position))))
       
       (define/private (insert/big str)
-        (let ([sd (make-object style-delta% 'change-bold)])
-          (send sd set-delta-foreground "Navy")
+        (let ([sd (make-big-style-delta)])
           (let ([pos (send info-text last-position)])
             (send info-text insert str 
                   (send info-text last-position)
@@ -242,6 +185,11 @@ needed to really make this work:
                   sd
                   pos 
                   (send info-text last-position)))))
+
+      (define/private (make-big-style-delta)
+        (define sd (make-object style-delta% 'change-bold))
+        (send sd set-delta-foreground "Navy")
+        sd)
       
       (define/private (optional-newline)
         (unless (equal?
@@ -264,26 +212,63 @@ needed to really make this work:
         (make-modern info-text)
         (send info-text lock #t)
         (send info-text end-edit-sequence))
-      
-      (define outer-t (new text:hide-caret/selection%))
 
-      (inherit get-admin)
-      (define/override (set-admin a)
-        (super set-admin a)
-        (define new-admin (get-admin))
-        (when new-admin
-          (define sl (send (send new-admin get-editor) get-style-list))
-          (send outer-t set-style-list sl)
-          (define standard (send sl find-named-style "Standard"))
-          (send outer-t lock #f)
-          (send outer-t change-style standard 0 (send outer-t last-position))
-          (send outer-t lock #t)
-          (send info-text set-style-list sl)
-          (send output-text set-style-list sl)))
-      
+      ;; ----
+
+      (inherit show-border set-tight-text-fit)
+
+      (define/override (update-style-list sl)
+        (super update-style-list sl)
+        (send summary-t set-style-list sl)
+        (send inner-t set-style-list sl)
+        (send info-text set-style-list sl)
+        (send info-header-t set-style-list sl)
+        (send info-snip update-style-list sl)
+        (send output-text set-style-list sl))
+
+      (define summary-t (new text:hide-caret/selection%))
+      (define inner-t (new text:hide-caret/selection%))
+      (define info-header-t (new text:hide-caret/selection%))
+
+      (send summary-t insert (format "~s" main-stx))
+      (make-modern summary-t)
+
+      (send info-header-t insert "Syntax Info")
+      (send info-header-t change-style (make-big-style-delta)
+            0 (send info-header-t last-position))
+      (make-modern info-header-t)
+      (send info-header-t lock #t)
+      (define info-snip (new expandable-snip%
+                             (closed-editor info-header-t)
+                             (open-editor info-text)
+                             (layout 'replace)
+                             (with-border? #t)))
+
+      (send inner-t insert (instantiate editor-snip% ()
+                             (editor output-text)
+                             (with-border? #f)
+                             (left-margin 0)
+                             (top-margin 0)
+                             (right-margin 0)
+                             (bottom-margin 0)
+                             (left-inset 0)
+                             (top-inset 0)
+                             (right-inset 0)
+                             (bottom-inset 0)))
+      (send inner-t insert " ")
+      (send inner-t insert info-snip)
+      (send inner-t change-style (make-object style-delta% 'change-alignment 'top)
+            0 (send inner-t last-position))
+
+      (send output-text lock #t)
+      (send info-text lock #t)
+      (send inner-t lock #t)
+      (send summary-t lock #t)
+
       (super-instantiate ()
-        (editor outer-t)
         (with-border? #f)
+        (closed-editor summary-t)
+        (open-editor inner-t)
         (left-margin 3)
         (top-margin 0)
         (right-margin 0)
@@ -291,77 +276,20 @@ needed to really make this work:
         (left-inset 1)
         (top-inset 0)
         (right-inset 0)
-        (bottom-inset 0))
-      
-      (define inner-t (new text:hide-caret/selection%))
-      (define inner-es (instantiate editor-snip% ()
-                         (editor inner-t)
-                         (with-border? #f)
-                         (left-margin 0)
-                         (top-margin 0)
-                         (right-margin 0)
-                         (bottom-margin 0)
-                         (left-inset 0)
-                         (top-inset 0)
-                         (right-inset 0)
-                         (bottom-inset 0)))
-      
-      (define details-shown? #t)
-      
-      (inherit show-border set-tight-text-fit)
-      (define/private (hide-details)
-        (when details-shown?
-          (send outer-t lock #f)
-          (show-border #f)
-          (set-tight-text-fit #t)
-          (send outer-t release-snip inner-es)
-          (send outer-t delete (send outer-t last-position))
-          (send outer-t lock #t)
-          (set! details-shown? #f)))
-      
-      (define/private (show-details)
-        (unless details-shown?
-          (fill-in-output-text)
-          (send outer-t lock #f)
-          (show-border #t)
-          (set-tight-text-fit #f)
-          (send outer-t insert #\newline
-                (send outer-t last-position)
-                (send outer-t last-position))
-          (send outer-t insert inner-es
-                (send outer-t last-position)
-                (send outer-t last-position))
-          (send outer-t lock #t)
-          (set! details-shown? #t)))
-      
-      (let ()
-        
-        (send outer-t insert (new turn-snip% 
-                                  [on-up (λ () (hide-details))]
-                                  [on-down (λ () (show-details))]))
-        (send outer-t insert (format "~s\n" main-stx))
-        (send outer-t insert inner-es)
-        (make-modern outer-t)
-        
-        (send inner-t insert (instantiate editor-snip% ()
-                               (editor output-text)
-                               (with-border? #f)
-                               (left-margin 0)
-                               (top-margin 0)
-                               (right-margin 0)
-                               (bottom-margin 0)
-                               (left-inset 0)
-                               (top-inset 0)
-                               (right-inset 0)
-                               (bottom-inset 0)))
-        (send inner-t insert (make-object editor-snip% info-text))
-        (send inner-t change-style (make-object style-delta% 'change-alignment 'top) 0 2))
+        (bottom-inset 0)
+        (callback
+         (lambda (details-shown?)
+           (fill-in-output-text)
+           (show-border details-shown?)
+           (set-tight-text-fit (not details-shown?)))))
 
       (define/private (fill-in-output-text)
         (unless output-text-filled-in?
           (set! output-text-filled-in? #t)
+          (send output-text begin-edit-sequence)
           (send output-text lock #f)
-          (define-values (range-start-ht range-ht) (populate-range-ht))
+          (define-values (range-start-ht range-ht)
+            (populate-range-ht main-stx output-text))
           (define ranges
             (sort
              (apply append
@@ -386,18 +314,14 @@ needed to really make this work:
           (unless (null? ranges)
             (let ([rng (car ranges)])
               (show-range (range-stx rng) (range-start rng) (range-end rng))))
+          (send output-text end-edit-sequence)
           (send output-text lock #t)))
-      
-      (send output-text lock #t)
-      (send info-text lock #t)
-      (send inner-t lock #t)
-      (send outer-t lock #t)
-      
-      (hide-details)
-      
+
       (inherit set-snipclass)
       (set-snipclass snip-class)))
-      
+
+;; ------------------------------------------------------------
+
 ;; record-paths : val -> hash-table[path -o> syntax-object]
 (define (syntax-object->datum/record-paths val)
   (define path '())
@@ -463,6 +387,65 @@ needed to really make this work:
           val]))
      ht)))
 
+;; populate-range-ht : Datum text%
+;;                  -> (values Hash[Datum -> Nat] Hash[Datum -> (listof (cons Nat Nat))])
+(define (populate-range-ht main-stx output-text)
+  (define-values (datum paths-ht) (syntax-object->datum/record-paths main-stx))
+
+  ;; range-start-ht : hash-table[obj -o> number]
+  (define range-start-ht (make-hasheq))
+
+  ;; range-ht : hash-table[obj -o> (listof (cons number number))]
+  (define range-ht (make-hasheq))
+
+  (define path '())
+  (define next-push 0)
+  (define (push!)
+    (set! path (cons next-push path))
+    (set! next-push 0))
+  (define (pop!)
+    (set! next-push (+ (car path) 1))
+    (set! path (cdr path)))
+
+  (let* ([range-pretty-print-pre-hook
+          (λ (x port)
+            (push!)
+            (let ([stx-object (hash-ref paths-ht path (λ () #f))])
+              (hash-set! range-start-ht stx-object (send output-text last-position))))]
+         [range-pretty-print-post-hook
+          (λ (x port)
+            (let ([stx-object (hash-ref paths-ht path (λ () #f))])
+              (when stx-object
+                (let ([range-start (hash-ref range-start-ht stx-object (λ () #f))])
+                  (when range-start
+                    (hash-set! range-ht
+                               stx-object
+                               (cons
+                                (cons
+                                 range-start
+                                 (send output-text last-position))
+                                (hash-ref range-ht stx-object (λ () null))))))))
+            (pop!))])
+
+    ;; reset `path' and `next-push' for use in pp hooks.
+    (set! path '())
+    (set! next-push 0)
+    (parameterize ([current-output-port (make-text-port output-text)]
+                   [pretty-print-pre-print-hook range-pretty-print-pre-hook]
+                   [pretty-print-post-print-hook range-pretty-print-post-hook]
+                   [pretty-print-columns 30])
+      (pretty-write datum)
+      (make-modern output-text)))
+
+  (values range-start-ht range-ht))
+
+(define (make-modern text)
+  (send text change-style
+        (make-object style-delta% 'change-family 'modern)
+        0
+        (send text last-position)))
+
+
 (module+ test
   (let ([x (datum->syntax #f 'x #f #f)]
         [y (datum->syntax #f 'y #f #f)])
@@ -488,118 +471,6 @@ needed to really make this work:
   (void (send green-style-delta set-delta-foreground "forest green"))
   (define small-style (make-object style-delta% 'change-size 4))
   
-  (define turn-snip%
-    (class snip%
-      
-      (init-field on-up on-down)
-      
-      ;; state : (union 'up 'down 'up-click 'down-click))
-      (init-field [state 'up])
-      
-      (define/override (copy)
-        (instantiate turn-snip% ()
-          (on-up on-up)
-          (on-down on-down)
-          (state state)))
-      
-      (define/override (draw dc x y left top right bottom dx dy draw-caret)
-        (let ([bitmap (case state
-                        [(up) up-bitmap]
-                        [(down) down-bitmap]
-                        [(up-click) up-click-bitmap]
-                        [(down-click) down-click-bitmap])])
-          (cond
-            [(send bitmap ok?)
-             (send dc draw-bitmap bitmap x y)]
-            [(send dc draw-rectangle x y 10 10)
-             (send dc drawline x y 10 10)])))
-             
-
-      (define/override (get-extent dc x y w h descent space lspace rspace)
-        (set-box/f! descent 0)
-        (set-box/f! space 0)
-        (set-box/f! lspace 0)
-        (set-box/f! rspace 0)
-        (set-box/f! w arrow-snip-width)
-        (set-box/f! h arrow-snip-height))
-      
-      (define/override (on-event dc x y editorx editory evt)
-        (let ([snip-evt-x (- (send evt get-x) x)]
-              [snip-evt-y (- (send evt get-y) y)])
-          (cond
-            [(send evt button-down? 'left)
-             (set-state (case state
-                          [(up) 'up-click]
-                          [(down) 'down-click]
-                          [else 'down-click]))]
-            [(and (send evt button-up? 'left)
-                  (<= 0 snip-evt-x arrow-snip-width)
-                  (<= 0 snip-evt-y arrow-snip-height))
-             (set-state (case state
-                          [(up up-click) 
-                           (on-down)
-                           'down]
-                          [(down down-click)
-                           (on-up)
-                           'up]
-                          [else 'down]))]
-            [(send evt button-up? 'left)
-             (set-state (case state
-                          [(up up-click) 'up]
-                          [(down down-click) 'down]
-                          [else 'up]))]
-            [(and (send evt get-left-down)
-                  (send evt dragging?)
-                  (<= 0 snip-evt-x arrow-snip-width)
-                  (<= 0 snip-evt-y arrow-snip-height))
-             (set-state (case state
-                          [(up up-click) 'up-click]
-                          [(down down-click) 'down-click]
-                          [else 'up-click]))]
-            [(and (send evt get-left-down)
-                  (send evt dragging?))
-             (set-state (case state
-                          [(up up-click) 'up]
-                          [(down down-click) 'down]
-                          [else 'up-click]))]
-            [else
-             (super on-event dc x y editorx editory evt)])))
-
-      (inherit get-admin)
-      (define/private (set-state new-state)
-        (unless (eq? state new-state)
-          (set! state new-state)
-          (let ([admin (get-admin)])
-            (when admin
-              (send admin needs-update this 0 0 arrow-snip-width arrow-snip-height)))))
-      
-      (define/override (adjust-cursor dc x y editorx editory event) arrow-snip-cursor)
-      
-      (super-instantiate ())
-      
-      (inherit get-flags set-flags)
-      (set-flags (cons 'handles-events (get-flags)))))
-  
-  (define (set-box/f! b v) (when (box? b) (set-box! b v)))
-  
-  (define down-bitmap (include-bitmap (lib "icons/turn-down.png") 'png))
-  (define up-bitmap (include-bitmap (lib "icons/turn-up.png") 'png))
-  (define down-click-bitmap (include-bitmap (lib "icons/turn-down-click.png") 'png))
-  (define up-click-bitmap (include-bitmap (lib "icons/turn-up-click.png") 'png))
-  (define arrow-snip-height
-    (max 10
-         (send up-bitmap get-height)
-         (send down-bitmap get-height)
-         (send up-click-bitmap get-height)
-         (send down-click-bitmap get-height)))
-  (define arrow-snip-width
-    (max 10
-         (send up-bitmap get-width)
-         (send down-bitmap get-width)
-         (send up-click-bitmap get-width)
-         (send down-click-bitmap get-width)))
-  (define arrow-snip-cursor (make-object cursor% 'arrow))
-
   ;; make-text-port : text -> port
   ;; builds a port from a text object.  
   (define (make-text-port text)

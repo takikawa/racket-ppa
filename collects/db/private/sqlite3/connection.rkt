@@ -1,5 +1,6 @@
 #lang racket/base
 (require racket/class
+         ffi/file
          ffi/unsafe
          ffi/unsafe/atomic
          ffi/unsafe/custodian
@@ -10,7 +11,14 @@
          "ffi.rkt"
          "dbsystem.rkt")
 (provide connection%
-         handle-status*)
+         handle-status*
+         (protect-out unsafe-load-extension
+                      unsafe-create-function
+                      unsafe-create-aggregate))
+
+(define-local-member-name unsafe-load-extension)
+(define-local-member-name unsafe-create-function)
+(define-local-member-name unsafe-create-aggregate)
 
 ;; == Connection
 
@@ -346,7 +354,7 @@
         (set! name-counter (add1 name-counter))
         (format "λmz_~a" n)))
 
-    ;; Reflection
+    ;; == Reflection
 
     (define/public (list-tables fsym schema)
       (let ([stmt
@@ -357,7 +365,41 @@
           (for/list ([row (in-list (rows-result-rows result))])
             (vector-ref row 0)))))
 
-    ;; ----
+    ;; == Load Extension
+
+    (define/public (unsafe-load-extension who lib)
+      (define lib-path (cleanse-path (path->complete-path lib)))
+      (security-guard-check-file who lib-path '(read execute))
+      (call-with-lock who
+        (lambda ()
+          (HANDLE who (A (sqlite3_enable_load_extension -db 1)))
+          (HANDLE who (A (sqlite3_load_extension -db lib-path)))
+          (HANDLE who (A (sqlite3_enable_load_extension -db 0)))
+          (void))))
+
+    ;; == Create Function
+
+    (define dont-gc null)
+
+    (define/public (unsafe-create-function who name arity proc)
+      (define wrapped (wrap-fun name proc))
+      (call-with-lock who
+       (lambda ()
+         (set! dont-gc (cons wrapped dont-gc))
+         (HANDLE who (A (sqlite3_create_function_v2 -db name (or arity -1) wrapped))))))
+
+    (define/public (unsafe-create-aggregate who name arity step final [init #f])
+      (define aggbox (box init))
+      (define wrapped-step (wrap-agg-step name step aggbox init))
+      (define wrapped-final (wrap-agg-final name final aggbox init))
+      (call-with-lock who
+       (lambda ()
+         (set! dont-gc (list* wrapped-step wrapped-final dont-gc))
+         (HANDLE who
+                 (A (sqlite3_create_aggregate -db name (or arity -1)
+                                              wrapped-step wrapped-final))))))
+
+    ;; == Error handling
 
     (define-syntax HANDLE
       (syntax-rules ()

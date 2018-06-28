@@ -923,21 +923,9 @@
 [hash-eqv? (-> -HashTableTop B)]
 [hash-equal? (-> -HashTableTop B)]
 [hash-weak? (asym-pred -HashTableTop B (-PS (-is-type 0 -Weak-HashTableTop) (-not-type 0 -Weak-HashTableTop)))]
-[hash (-poly (a b) (cl->* (-> (-Immutable-HT a b))
-                          (a b . -> . (-Immutable-HT a b))
-                          (a b a b . -> . (-Immutable-HT a b))
-                          (a b a b a b . -> . (-Immutable-HT a b))
-                          (a b a b a b a b . -> . (-Immutable-HT a b))))]
-[hasheqv (-poly (a b) (cl->* (-> (-Immutable-HT a b))
-                             (a b . -> . (-Immutable-HT a b))
-                             (a b a b . -> . (-Immutable-HT a b))
-                             (a b a b a b . -> . (-Immutable-HT a b))
-                             (a b a b a b a b . -> . (-Immutable-HT a b))))]
-[hasheq (-poly (a b) (cl->* (-> (-Immutable-HT a b))
-                            (a b . -> . (-Immutable-HT a b))
-                            (a b a b . -> . (-Immutable-HT a b))
-                            (a b a b a b . -> . (-Immutable-HT a b))
-                            (a b a b a b a b . -> . (-Immutable-HT a b))))]
+[hash (-poly (a b) (->* (list) (make-Rest (list a b)) (-Immutable-HT a b)))]
+[hasheqv (-poly (a b) (->* (list) (make-Rest (list a b)) (-Immutable-HT a b)))]
+[hasheq (-poly (a b) (->* (list) (make-Rest (list a b)) (-Immutable-HT a b)))]
 [make-hash (-poly (a b) (->opt [(-lst (-pair a b))] (-Mutable-HT a b)))]
 [make-hasheq (-poly (a b) (->opt [(-lst (-pair a b))] (-Mutable-HT a b)))]
 [make-hasheqv (-poly (a b) (->opt [(-lst (-pair a b))] (-Mutable-HT a b)))]
@@ -949,7 +937,9 @@
 [make-immutable-hasheqv (-poly (a b) (->opt [(-lst (-pair a b))] (-Immutable-HT a b)))]
 
 [hash-set (-poly (a b) ((-HT a b) a b . -> . (-Immutable-HT a b)))]
+[hash-set* (-poly (a b) (->* (list (-HT a b)) (make-Rest (list a b)) (-Immutable-HT a b)))]
 [hash-set! (-poly (a b) ((-HT a b) a b . -> . -Void))]
+[hash-set*! (-poly (a b) (->* (list (-HT a b)) (make-Rest (list a b)) -Void))]
 [hash-ref (-poly (a b c)
                  (cl-> [((-HT a b) a) b]
                        [((-HT a b) a (-val #f)) (-opt b)]
@@ -1207,6 +1197,8 @@
 ;; Section 4.18 (Void and Undefined)
 [void (->* '() Univ -Void)]
 [void? (make-pred-ty -Void)]
+
+[unsafe-undefined -Unsafe-Undefined]
 
 ;; Section 5.2 (Structure Types)
 [make-struct-type
@@ -2347,6 +2339,7 @@
 [variable-reference->module-source (-> -Variable-Reference (Un Sym (-val #f) -Path))]
 [variable-reference->phase (-> -Variable-Reference -Nat)]
 [variable-reference-constant? (-> -Variable-Reference -Boolean)]
+[variable-reference-from-unsafe? (-> -Variable-Reference -Boolean)]
 
 ;; Section 14.2 (Evaluation and Compilation)
 [current-eval (-Param (-> Univ ManyUniv) (-> Univ ManyUniv))]
@@ -3081,15 +3074,25 @@
 
 ;; Section 15.9 (racket/cmdline)
 [parse-command-line
- (let ([mode-sym (one-of/c 'once-each 'once-any 'multi 'final 'help-labels)])
-   (-polydots (b a)
-              (cl->* (-Pathlike
-                      (Un (-lst -String) (-vec -String))
-                      (-lst (Un (-pair mode-sym (-lst (-lst Univ)))
-                                (-pair (-val 'ps) (-lst -String))))
-                      ((list Univ) [a a] . ->... . b)
-                      (-lst -String)
-                      . -> . b))))]
+ (let ([mode-sym (one-of/c 'once-each 'once-any 'multi 'final)]
+       [label-sym (one-of/c 'ps 'help-labels 'usage-help)])
+   (-polydots
+    (b a) 
+    (cl->* (->opt -Pathlike
+                  (Un (-lst -String) (-vec -String))
+                  (-lst (Un (-pair mode-sym
+                                   ;; With the `command-line` macro, the typechecker
+                                   ;; can't figure out that a type specifying the shape of
+                                   ;; the flag specification list would be satisfied.
+                                   (-lst Univ))
+                            (-pair label-sym
+                                   (-lst -String))))
+                  (->... (list (-lst Univ)) [-String a] b)
+                  (-lst -String)
+                  [(-> -String Univ)
+                   ;; Still permits unknown-proc args that accept rest arguments
+                   (-> -String Univ)]
+                  b))))] 
 
 ;; Section 16.1 (Weak Boxes)
 [make-weak-box (-poly (a) (-> a (-weak-box a)))]
@@ -3319,8 +3322,8 @@
  (-poly
   (a b)
   (cl->*
-   (->key (-lst a) (-> a a -Boolean) #:key (-> a a) #f #:cache-keys? -Boolean #f (-lst a))
-   (->key (-lst a) (-> b b -Boolean) #:key (-> a b) #f #:cache-keys? -Boolean #f (-lst a)))))
+   (->key (-lst a) (-> a a -Boolean) #:key (-opt (-> a a)) #f #:cache-keys? -Boolean #f (-lst a))
+   (->key (-lst a) (-> b b -Boolean) #:key (-opt (-> a b)) #f #:cache-keys? -Boolean #f (-lst a)))))
 (check-duplicates
  (-poly
   (a b c)
@@ -3343,8 +3346,8 @@
  (-poly
   (a b)
   (cl->*
-   (->optkey (-lst a) ((-> a a Univ)) #:key (-> a a) #f (-lst a))
-   (->optkey (-lst a) ((-> b b Univ)) #:key (-> a b) #f (-lst a)))))
+   (->optkey (-lst a) ((-> a a Univ)) #:key (-opt (-> a a)) #f (-lst a))
+   (->optkey (-lst a) ((-> b b Univ)) #:key (-opt (-> a b)) #f (-lst a)))))
 (open-input-file (->key -Pathlike
                         #:mode (one-of/c 'binary 'text) #f
                         #:for-module? Univ #f
@@ -3426,6 +3429,7 @@
 (find-relative-path (->key -SomeSystemPathlike 
                            -SomeSystemPathlike 
                            #:more-than-root? Univ #f
+                           #:more-than-same? Univ #f
                            #:normalize-case? Univ #f
 			   -SomeSystemPath))
 (regexp-match*

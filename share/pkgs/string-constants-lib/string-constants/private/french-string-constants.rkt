@@ -495,7 +495,11 @@
 
   ;;; save file in particular format prompting.
   (save-as-plain-text "Sauvegarder ce fichier au format texte ?")
-  (save-in-drs-format "Sauvegarder ce fichier au format DrRacket (non-texte) ?")
+  (save-as-binary-format "Convertir ce fichier au format DrRacket pour préserver les éléments non-textuels ?")
+  (save-in-drs-format "Sauvegarder ce fichier au format DrRacket non-textuel ?")
+  (keep-format "Ne pas convertir (des données peuvent être perdues)")
+  (convert-format "Convertir (recommendé)")
+  (dont-save "Ne pas Sauvegarder")
   (yes "Oui")
   (no "Non")
 
@@ -986,7 +990,15 @@
    "erreur durant le chargement du fichier info.rkt pour ~s")
   (tool-error-phase1 "Erreur durant la phase 1 pour l'outil ~s; ~s")
   (tool-error-phase2 "Erreur durant la phase 2 oour l'outil ~s; ~s")
-
+  ;; tool preferences panel
+  (tool-config-changes "Les changements dans la configuration d'outil prendront effet au prochain démarrage de DrRacket.")
+  (installed-tools "Outils installés")
+  (tool-prefs-panel-tool:-label "Outil: ")
+  (load-tool-when-drracket-starts? "Charger l'outil quand DrRacket démarre ?")
+  (unnamed-tool "outil anonyme ~a")
+  (note-that-tool-loaded " (chargé)")
+  (note-that-tool-was-skipped " (sauté)")
+  (note-that-tool-failed-to-load " (chargement a échoué)")
 
   ;;; define popup menu
   (end-of-buffer-define "« fin du tampon »")

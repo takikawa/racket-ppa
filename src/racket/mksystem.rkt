@@ -1,11 +1,11 @@
 (module mkincludes '#%kernel
-  (#%require '#%min-stx)
   ;; Arguments are
   ;;   <output-file> [<cpp-command> <3m-exe-suffix> <run-racket-command> <this-racket-command>]
   (define-values (args) (current-command-line-arguments))
   
   (define-values (ht)
-    (if (or (= (vector-length args) 1)
+    (if (if (= (vector-length args) 1)
+            #t
             (equal? (vector-ref args (- (vector-length args) 1))
                     (vector-ref args (- (vector-length args) 2))))
         ;; Not cross-compiling
@@ -15,7 +15,8 @@
                       '3m ; GC mode for suffixless executables
                       (if (string=? "" (vector-ref args 2))
                           '3m
-                          'cgc)) 
+                          'cgc))
+              'vm (system-type 'vm)
               'link (system-type 'link)
               'machine (bytes->string/utf-8 (path->bytes (system-library-subpath #f)))
               'so-suffix (system-type 'so-suffix)
@@ -57,6 +58,7 @@
                             'gc (if (string=? "" (vector-ref args 2))
                                     '3m
                                     'cgc)
+                            'vm 'racket
                             'link (get-symbol "system_type_link")
                             'machine library-subpath
                             'so-suffix (string->bytes/utf-8 (get-string "system_type_so_suffix"))

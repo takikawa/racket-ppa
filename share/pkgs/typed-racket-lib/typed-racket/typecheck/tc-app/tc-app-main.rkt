@@ -7,6 +7,7 @@
          syntax/parse racket/match 
          syntax/parse/experimental/reflect
          "../signatures.rkt" "../tc-funapp.rkt"
+         "../integer-refinements.rkt"
          (types abbrev utils prop-ops)
          (env lexical-env)
          (typecheck tc-subst tc-envops check-below)
@@ -47,8 +48,6 @@
     [(#%plain-app . (~var v (tc/app-special-cases expected)))
      ((attribute v.check))]))
 
-
-
 ;; TODO: handle drest, and props/objects
 (define (arrow-matches? arr args)
   (match arr
@@ -59,10 +58,7 @@
                                      (PropSet: (TrueProp:) (TrueProp:))
                                      (Empty:))
                             ...)))
-     (cond
-       [(< (length domain) (length args)) rst]
-       [(= (length domain) (length args)) #t]
-       [else #f])]
+     (Arrow-includes-arity? domain rst args)]
     [_ #f]))
 
 (define (has-props? arr)
@@ -102,22 +98,28 @@
             (tc/funapp #'f #'args f-ty (map tc-dep-fun-arg args*) expected))]
          [(Fun: (app matching-arities
                      (list (Arrow: doms rsts _ _) ..1)))
+          (define check-arg (if (and (identifier? #'f)
+                                     (with-refinements?)
+                                     (has-linear-integer-refinements? #'f))
+                                tc-dep-fun-arg
+                                single-value))
           ;; if for a particular argument, all of the domain types
           ;; agree for each arrow type in the case->, then we use
           ;; that type to check the argument expression against
           (define arg-types
             (for/list ([arg-stx (in-list args*)]
                        [arg-idx (in-naturals)])
-              (define dom-ty (list-ref/default (car doms)
-                                               arg-idx
-                                               (car rsts)))
+              (define dom-ty (dom+rst-ref (car doms) (car rsts) arg-idx))
               (cond
-                [(for/and ([dom (in-list doms)]
-                           [rst (in-list rsts)])
-                   (equal? dom-ty
-                           (list-ref/default dom arg-idx rst)))
-                 (single-value arg-stx (ret dom-ty))]
-                [else (single-value arg-stx)])))
+                [(for/and ([dom (in-list (cdr doms))]
+                           [rst (in-list (cdr rsts))])
+                   (equal? dom-ty (dom+rst-ref dom rst arg-idx)))
+                 (check-arg arg-stx (ret dom-ty))]
+                [else (check-arg arg-stx)])))
           (tc/funapp #'f #'args f-ty arg-types expected)]
+         [_ #:when (and (identifier? #'f)
+                        (with-refinements?)
+                        (has-linear-integer-refinements? #'f))
+            (tc/funapp #'f #'args f-ty (map tc-dep-fun-arg args*) expected)]
          [_ (tc/funapp #'f #'args f-ty (map single-value args*) expected)]))]))
 

@@ -162,7 +162,8 @@ Like @racket[~reflect] but for reified splicing syntax classes.
 @defmodule[syntax/parse/experimental/splicing]
 
 @defform[(define-primitive-splicing-syntax-class (name-id param-id ...) 
-           maybe-description maybe-attrs
+           #:description description-expr
+           #:attributes (attr-arity-decl ...)
            parser-expr)
           #:contracts ([parser (-> syntax?
                                    (->* () ((or/c string? #f) -> any))
@@ -277,127 +278,20 @@ patterns as @racket[target-stxclass-id] but with the given
 
 @defmodule[syntax/parse/experimental/template]
 
-@(define literal-ellipsis (racket ...))
+@deftogether[[
+@defform[(template tmpl)]
+@defform[(template/loc loc-expr tmpl)]
+@defform[(quasitemplate tmpl)]
+@defform[(quasitemplate/loc loc-expr tmpl)]
+]]{
 
-@defform[#:literals (?? ?@)
-         (template tmpl)
-         #:grammar
-         ([tmpl pattern-variable-id
-                (head-tmpl . tmpl)
-                (head-tmpl ellipsis ...+ . tmpl)
-                (metafunction-id . tmpl)
-                (?? tmpl tmpl)
-                #(@#,svar[head-tmpl] ...)
-                #s(prefab-struct-key @#,svar[head-tmpl] ...)
-                #&@#,svar[tmpl]
-                constant-term]
-          [head-templ tmpl
-                      (?? head-tmpl)
-                      (?? head-tmpl head-tmpl)
-                      (?@ . tmpl)]
-          [ellipsis @#,literal-ellipsis])]{
-
-Constructs a syntax object from a syntax template, like
-@racket[syntax], but provides additional templating forms for dealing
-with optional terms and splicing sequences of terms. Only the
-additional forms are described here; see @racket[syntax] for
-descriptions of pattern variables, etc.
-
-As in @racket[syntax], a template can be ``escaped'' with ellipses,
-like @racket[(... _escaped-tmpl)]. Within the escaped template,
-ellipses (@racket[...]), the @racket[??] and @racket[?@] forms, and
-metafunctions are treated as constants rather than interpreted as
-template forms.
-
-@specsubform[#:literals (??)
-             (?? tmpl alt-tmpl)]{
-
-Produces @racket[tmpl] unless any attribute used in @racket[tmpl] has
-an absent value; in that case, @racket[alt-tmpl] is used instead.
-
-@examples[#:eval the-eval
-(syntax-parse #'(m 1 2 3)
-  [(_ (~optional (~seq #:op op:expr)) arg:expr ...)
-   (template ((?? op +) arg ...))])
-(syntax-parse #'(m #:op max 1 2 3)
-  [(_ (~optional (~seq #:op op:expr)) arg:expr ...)
-   (template ((?? op +) arg ...))])
-]
-
-If @racket[??] is used as a head-template, then its sub-templates may
-also be head-templates.
-
-@examples[#:eval the-eval
-(syntax-parse #'(m 1)
-  [(_ x:expr (~optional y:expr))
-   (template (m2 x (?? (?@ #:y y) (?@ #:z 0))))])
-(syntax-parse #'(m 1 2)
-  [(_ x:expr (~optional y:expr))
-   (template (m2 x (?? (?@ #:y y) (?@ #:z 0))))])
-]
+Equivalent to @racket[syntax], @racket[syntax/loc],
+@racket[quasisyntax], and @racket[quasisyntax/loc], respectively.
 }
 
-@specsubform[#:literals (??)
-             (?? head-tmpl)]{
+@defform[(datum-template tmpl)]{
 
-Produces @racket[head-tmpl] unless any attribute used in
-@racket[head-tmpl] has an absent value; in that case, the term is
-omitted.  Can only occur in head position in a template.
-
-Equivalent to @racket[(?? head-tmpl (?@))].
-
-@examples[#:eval the-eval
-(syntax-parse #'(m 1)
-  [(_ x:expr (~optional y:expr))
-   (template (m2 x (?? y)))])
-(syntax-parse #'(m 1 2)
-  [(_ x:expr (~optional y:expr))
-   (template (m2 x (?? y)))])
-(syntax-parse #'(m 1 2)
-  [(_ x:expr (~optional y:expr))
-   (template (m2 x (?? (?@ #:y y))))])
-]
-}
-
-@specsubform[#:literals (?@)
-             (?@ . tmpl)]{
-
-Similar to @racket[unquote-splicing], splices the result of
-@racket[tmpl] (which must produce a syntax list) into the surrounding
-template. Can only occur in head position in a template.
-
-@examples[#:eval the-eval
-(syntax-parse #'(m #:a 1 #:b 2 3 4 #:e 5)
-  [(_ (~alt pos:expr (~seq kw:keyword kwarg:expr)) ...)
-   (template (m2 (?@ kw kwarg) ... pos ...))])
-]
-
-The @racket[tmpl] must produce a proper syntax list, but it does not
-need to be expressed as a proper list. For example, to unpack pattern
-variables that contain syntax lists, use a ``dotted'' template:
-
-@examples[#:eval the-eval
-(with-syntax ([x #'(a b c)])
-  (template ((?@ . x) d)))
-(with-syntax ([(x ...) #'((1 2 3) (4 5))])
-  (template ((?@ . x) ...)))
-]
-}
-
-@specsubform[(metafunction-id . tmpl)]{
-
-Applies the template metafunction named @racket[metafunction-id] to
-the result of the template (including @racket[metafunction-id]
-itself). See @racket[define-template-metafunction] for examples.
-}
-
-The @racket[??] and @racket[?@] forms and metafunction applications
-are disabled in an ``escaped template'' (see @racket[_stat-template]
-under @racket[syntax]).
-
-@examples[#:eval the-eval
-(template (... ((?@ a b c) d)))
-]
+Equivalent to @racket[datum].
 }
 
 @deftogether[[
@@ -405,16 +299,15 @@ under @racket[syntax]).
 @defidform[?@]
 ]]{
 
-Auxiliary forms used by @racket[template]. They may not be used as
-expressions.
+Equivalent to @racket[~?] and @racket[~@], respectively.
 }
 
 @defform*[[(define-template-metafunction metafunction-id expr)
            (define-template-metafunction (metafunction-id . formals) body ...+)]]{
 
 Defines @racket[metafunction-id] as a @deftech{template
-metafunction}. A metafunction application in a @racket[template]
-expression (but not a @racket[syntax] expression) is evaluated by
+metafunction}. A metafunction application in a @racket[syntax]
+or @racket[template] expression is evaluated by
 applying the metafunction to the result of processing the ``argument''
 part of the template.
 
@@ -451,25 +344,6 @@ example:
 If @racket[join] were defined as a macro, it would not be usable in
 the context above; instead, @racket[let-values] would report an
 invalid binding list.
-}
-
-@deftogether[[
-@defform[(template/loc loc-expr tmpl)]
-@defform[(quasitemplate tmpl)]
-@defform[(quasitemplate/loc loc-expr tmpl)]
-]]{
-
-Like @racket[syntax/loc], @racket[quasisyntax], and
-@racket[quasisyntax/loc], respectively, but with the additional
-features of @racket[template].
-}
-
-@defform[(datum-template tmpl)]{
-
-Like @racket[datum] but with some of the additional features of
-@racket[template]: @racket[?@] and @racket[??] are supported (although
-@racket[??] is useless, since @racket[datum-case] cannot bind
-``absent'' variables), but template metafunctions are not allowed.
 }
 
 @(close-eval the-eval)

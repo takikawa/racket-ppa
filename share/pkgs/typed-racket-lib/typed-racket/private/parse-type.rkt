@@ -5,10 +5,11 @@
 (require (rename-in "../utils/utils.rkt" [infer infer-in])
          (rep core-rep type-rep object-rep values-rep free-ids rep-utils)
          (types abbrev utils prop-ops resolve
-                classes prefab signatures
+                classes signatures
                 subtype path-type numeric-tower)
          (only-in (infer-in infer) intersect)
-         (utils tc-utils stxclass-util literal-syntax-class)
+         (utils tc-utils prefab stxclass-util literal-syntax-class
+                identifier)
          syntax/stx (prefix-in c: (contract-req))
          syntax/parse racket/sequence
          (env tvar-env type-alias-env mvar-env
@@ -136,6 +137,7 @@
 (define-literal-syntax-class #:for-label Struct)
 (define-literal-syntax-class #:for-label Struct-Type)
 (define-literal-syntax-class #:for-label Prefab)
+(define-literal-syntax-class #:for-label PrefabTop)
 (define-literal-syntax-class #:for-label Values)
 (define-literal-syntax-class #:for-label values)
 (define-literal-syntax-class #:for-label AnyValues)
@@ -254,7 +256,7 @@
 ;; that looks the same as the original and which meets the above
 ;; conditions.
 (define (id->local-id id)
-  (gen-pretty-id (syntax->datum id)))
+  (symbol->fresh-pretty-normal-id (syntax->datum id)))
 
 (define-syntax-class dependent-fun-arg
   #:description "dependent function argument"
@@ -296,7 +298,7 @@
            ;; does not need to be delayed since there's no parsing done
            #:attr result #'t))
 
-(define-splicing-syntax-class ->*-rest
+(define-splicing-syntax-class optional->*-rest
   #:description "rest argument type for ->*"
   #:attributes (type)
   (pattern (~optional (~seq #:rest type:non-keyword-ty))))
@@ -609,6 +611,18 @@
                       "key" (prefab-key->field-count new-key)
                       "fields" num-fields))
        (make-Prefab new-key (parse-types #'(ts ...)))]
+      [(:PrefabTop^ key count)
+       #:fail-unless (prefab-key? (syntax->datum #'key))
+       "expected a prefab key"
+       #:fail-unless (exact-nonnegative-integer? (syntax->datum #'count))
+       "expected a field count (i.e. an exact nonnegative integer)"
+       (define num-fields (syntax->datum #'count))
+       (define new-key (normalize-prefab-key (syntax->datum #'key) num-fields))
+       (unless (= (prefab-key->field-count new-key) num-fields)
+         (parse-error "the number of fields in the prefab key and type disagree"
+                      "key" (prefab-key->field-count new-key)
+                      "fields" num-fields))
+       (make-PrefabTop new-key)]
       [(:Refine^ [x:id :colon^ type:expr] prop:expr)
        ;; x is not in scope for the type
        (define t (parse-type #'type))
@@ -683,16 +697,27 @@
        (-pair (parse-type #'fst) (parse-type #'rst))]
       [(:pred^ t)
        (make-pred-ty (parse-type #'t))]
-      [(:case->^ tys ...)
+      [((~and :case->^ operator) tys ...)
+       (when (eq? (syntax-e #'operator) 'case-lambda)
+         (log-message
+          (current-logger)
+          'warning
+          (format "~a~a"
+                  "The case-lambda type constructor is deprecated!"
+                  " Please use case-> instead.")
+          stx))
        (make-Fun
-        (for/list ([ty (in-syntax #'(tys ...))])
-          (let ([t (parse-type ty)])
-            (match t
-              [(Fun: (list arr)) arr]
-              [_ (parse-error
-                  #:stx ty
-                  "expected a function type for component of case-> type"
-                  "given" t)]))))]
+        (remove-duplicates
+         (apply
+          append
+          (for/list ([ty (in-syntax #'(tys ...))])
+            (let ([t (parse-type ty)])
+              (match t
+                [(Fun: arrows) arrows]
+                [_ (parse-error
+                    #:stx ty
+                    "expected a function type for component of case-> type"
+                    "given" t)]))))))]
       [(:Rec^ x:id t)
        (let* ([var (syntax-e #'x)]
               [tvar (make-F var)])
@@ -811,6 +836,7 @@
           ;; let's keep going!
           (define arg-order (arg-deps->idx-order (attribute args.deps)))
           (define arg-type-dict (make-hasheq))
+          ;; parse argument type syntax in the (dependency based) order
           (for ([idx (in-list arg-order)])
             (define dep-ids (cdr (list-ref (attribute args.deps) idx)))
             (define-values (dep-local-ids dep-local-types)
@@ -825,21 +851,40 @@
                    #:types dep-local-types]
                 (with-local-term-names (map cons dep-ids dep-local-ids)
                   (parse-type (list-ref (attribute args.type-stx) idx)))))
-
             (hash-set! arg-type-dict idx idx-type))
+          
           (define (abstract rep)
             (abstract-obj rep (attribute args.local-name)))
           (define dom (for/list ([idx (in-range (length arg-order))])
                               (hash-ref arg-type-dict idx)))
           (define abstracted-dom (map abstract dom))
+          (define arg-idents (attribute args.name))
+          (define arg-local-idents (attribute args.local-name))
+          ;; type check the pre-condition with the specified args in scope
+          (define abstracted-pre-prop
+            (let-values ([(in-scope-arg-names
+                           in-scope-arg-local-names
+                           in-scope-arg-types)
+                          (for/lists (_1 _2 _3)
+                                     ([arg-id (in-list arg-idents)]
+                                      [arg-local-id (in-list arg-local-idents)]
+                                      [arg-ty (in-list dom)]
+                                      #:when (member arg-id pre-deps free-identifier=?))
+                            (values arg-id arg-local-id arg-ty))])
+              (with-extended-lexical-env
+                  [#:identifiers in-scope-arg-local-names
+                   #:types in-scope-arg-types]
+                (with-local-term-names (map cons
+                                            in-scope-arg-names
+                                            in-scope-arg-local-names)
+                  (abstract (parse-prop #'pre-stx))))))
+          ;; now type check the range
           (with-extended-lexical-env
-              [#:identifiers (attribute args.local-name)
+              [#:identifiers arg-local-idents
                #:types dom]
             (with-local-term-names (map cons
-                                        (attribute args.name)
-                                        (attribute args.local-name))
-              (define pre-prop (parse-prop #'pre-stx))
-              (define abstracted-pre-prop (abstract pre-prop))
+                                        arg-idents
+                                        arg-local-idents)
               (match (parse-values-type #'rng-type)
                 ;; single value'd return type, propositions/objects allowed
                 [(Values: (list (Result: rng-t _ _)))
@@ -968,19 +1013,37 @@
               (parse-type #'rng)
               : (-PS (attribute latent.positive) (attribute latent.negative))
               : (attribute latent.object)))]
+      ;; like ->* below but w/ a #:rest-pat present
       [(:->*^ (~var mand (->*-args #t))
               (~optional (~var opt (->*-args #f))
                          #:defaults ([opt.doms null] [opt.kws null]))
-              rest:->*-rest
+              #:rest-star (rest-types-stx:non-keyword-ty ...)
               rng)
        (with-arity (length (attribute mand.doms))
-         (define doms (for/list ([d (attribute mand.doms)])
-                        (parse-type d)))
-         (define opt-doms (for/list ([d (attribute opt.doms)])
-                            (parse-type d)))
+         (define doms (map parse-type (attribute mand.doms)))
+         (define opt-doms (map parse-type (attribute opt.doms)))
+         (define rest-tys (stx-map parse-type #'(rest-types-stx ...)))
+         (cond
+           [(< (length rest-tys) 1)
+            (opt-fn doms opt-doms (parse-values-type #'rng)
+                    #:kws (map force (append (attribute mand.kws)
+                                             (attribute opt.kws))))]
+           [else
+            (opt-fn doms opt-doms (parse-values-type #'rng)
+                    #:rest (make-Rest rest-tys)
+                    #:kws (map force (append (attribute mand.kws)
+                                             (attribute opt.kws))))]))]
+      [(:->*^ (~var mand (->*-args #t))
+              (~optional (~var opt (->*-args #f))
+                         #:defaults ([opt.doms null] [opt.kws null]))
+              rest:optional->*-rest
+              rng)
+       (with-arity (length (attribute mand.doms))
+         (define doms (map parse-type (attribute mand.doms)))
+         (define opt-doms (map parse-type (attribute opt.doms)))
          (opt-fn doms opt-doms (parse-values-type #'rng)
                  #:rest (and (attribute rest.type)
-                             (parse-type (attribute rest.type)))
+                             (make-Rest (list (parse-type (attribute rest.type)))))
                  #:kws (map force (append (attribute mand.kws)
                                           (attribute opt.kws)))))]
       [:->^

@@ -114,7 +114,7 @@
     (make-srcloc-shortener all-blames blame-source))
   (define (format-contract/loc c s)
     (string-append
-     (~a (blame-contract c) #:limit-marker limit-dots #:width location-width)
+     (~s (blame-contract c) #:limit-marker limit-dots #:width location-width)
      (~a (format-samples-time s) "\n")
      (~a (srcloc->string (shorten-source c))
          #:limit-marker limit-dots
@@ -146,8 +146,12 @@
                           (blame-value (contract-sample-blame x)))
                         g)
               > #:key length)])
-      (display (~a "    " (blame-value (contract-sample-blame (car x)))
-                   #:limit-marker limit-dots #:width location-width))
+      (define indent "    ")
+      (display (string-append
+                indent
+                (~s (blame-value (contract-sample-blame (car x)))
+                    #:limit-marker limit-dots
+                    #:width (- location-width (string-length indent)))))
       (displayln (format-samples-time x)))
     (newline))
 

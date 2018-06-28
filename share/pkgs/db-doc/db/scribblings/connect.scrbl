@@ -294,6 +294,7 @@ Reports whether the SQLite native library is found, in which case
                        [#:character-mode character-mode
                         (or/c 'wchar 'utf-8 'latin-1)
                         'wchar]
+                       [#:quirks quirks (listof symbol?) null]
                        [#:use-place use-place boolean? #f])
          connection?]{
 
@@ -308,13 +309,35 @@ Reports whether the SQLite native library is found, in which case
   attempts to determine and enforce specific types for query
   parameters. See @secref["odbc-types"] for more details.
 
-  By default, connections use ODBC's @tt{SQL_C_WCHAR}-based character
-  encoding (as UTF-16) to send and receive Unicode character
-  data. Unfortunately, some drivers' support for this method is
-  buggy. To use @tt{SQL_C_CHAR} instead, set @racket[character-mode]
-  to @racket['utf-8] or @racket['latin-1], depending on which encoding
-  the driver uses.
+  The @racket[character-mode] argument controls the handling of
+  character data; the following values are supported:
 
+  @itemlist[
+
+  @item{@racket['wchar] (the default) -- use @tt{SQL_C_WCHAR} and
+  treat the data as UTF-16 (or UTF-32/UCS-4 when the driver manager is
+  iODBC)}
+
+  @item{@racket['utf-8] -- use @tt{SQL_C_CHAR} and treat the data as
+  UTF-8}
+
+  @item{@racket['latin-1] -- use @tt{SQL_C_CHAR} and treat the data as
+  Latin-1. Characters not in Latin-1 are replaced with @racket[#\?].}
+
+  ]
+
+  The @racket[quirks] argument represents a list of flags to modify
+  the behavior of the connection. The following quirks are currently
+  supported:
+  @itemlist[
+
+  @item{@racket['no-c-bigint] --- Don't use @tt{SQL_C_NUMERIC} to
+  fetch @tt{NUMERIC}/@tt{DECIMAL} values.}
+
+  @item{@racket['no-c-numeric] --- Don't use @tt{SQL_C_BIGINT} to bind
+  parameters or fetch field values.}
+
+  ]
   See @secref["odbc-status"] for notes on specific ODBC drivers and
   recommendations for connection options.
 
@@ -323,6 +346,8 @@ Reports whether the SQLite native library is found, in which case
   proxy is returned; see @secref["ffi-concurrency"].
 
   If the connection cannot be made, an exception is raised.
+
+  @history[#:changed "1.3" @elem{Added @racket[#:quirks] argument.}]
 }
 
 @defproc[(odbc-driver-connect [connection-string string?]
@@ -334,6 +359,7 @@ Reports whether the SQLite native library is found, in which case
                               [#:character-mode character-mode
                                (or/c 'wchar 'utf-8 'latin-1)
                                'wchar]
+                              [#:quirks quirks (listof symbol?) null]
                               [#:use-place use-place boolean? #f])
          connection?]{
 
@@ -345,6 +371,8 @@ Reports whether the SQLite native library is found, in which case
   driver. The other arguments are the same as in @racket[odbc-connect].
 
   If the connection cannot be made, an exception is raised.
+
+  @history[#:changed "1.3" @elem{Added @racket[#:quirks] argument.}]
 }
 
 @defproc[(odbc-data-sources)

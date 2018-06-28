@@ -9,7 +9,7 @@
  (syntax-case stx ()
    [(_ module-name)
     (let ([exports (syntax-local-module-exports (syntax->datum #'module-name))])
-      #`(quote #,(cdaddr exports)))]))
+      #`(quote #,(cdr (assoc 0 exports))))]))
 
 (test (sort (exports-of 'ex) string-ci<? #:key symbol->string)
       =>

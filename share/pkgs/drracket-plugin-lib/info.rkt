@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.12"))) (define collection (quote multi)) (define version "1.1") (define deps (quote ("base" "compatibility-lib"))) (define pkg-desc "DrRacket's plugin API") (define pkg-authors (quote (robby)))))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.90.0.901"))) (define collection (quote multi)) (define version "1.1") (define deps (quote ("base" "compatibility-lib"))) (define pkg-desc "DrRacket's plugin API") (define pkg-authors (quote (robby)))))

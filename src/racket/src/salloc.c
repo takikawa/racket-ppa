@@ -74,6 +74,8 @@ uintptr_t scheme_tls_delta;
 int scheme_tls_index;
 # elif defined(IMPLEMENT_THREAD_LOCAL_VIA_WIN_TLS_FUNC)
 DWORD scheme_thread_local_key;
+# elif defined(IMPLEMENT_THREAD_LOCAL_VIA_OFFSET)
+SHARED_OK THREAD_LOCAL Thread_Local_Variables scheme_thread_locals_space;
 # else
 SHARED_OK THREAD_LOCAL Thread_Local_Variables scheme_thread_locals;
 # endif
@@ -105,6 +107,11 @@ extern MZGC_DLLIMPORT void GC_register_indirect_disappearing_link(void **link, v
 
 #ifdef MZ_GC_BACKTRACE
 static void init_allocation_callback(void);
+#endif
+
+#ifdef IMPLEMENT_WRITE_XOR_EXECUTE_BY_SIGNAL_HANDLER
+static void install_w_xor_x_handler();
+static void register_as_executable(void *p, size_t len, int can_exec);
 #endif
 
 SHARED_OK static int use_registered_statics;
@@ -153,6 +160,13 @@ void scheme_set_stack_base(void *base, int no_auto_statics) XFORM_SKIP_PROC
   init_allocation_callback();
 # endif
 #endif
+
+#ifdef IMPLEMENT_WRITE_XOR_EXECUTE_BY_SIGNAL_HANDLER
+  install_w_xor_x_handler();
+# if defined(USE_SENORA_GC) && !defined(MZ_PRECISE_GC)
+  GC_register_as_executable_callback = register_as_executable;
+# endif
+#endif
 }
 
 void scheme_set_current_os_thread_stack_base(void *base)
@@ -193,6 +207,8 @@ int scheme_main_setup(int no_auto_statics, Scheme_Env_Main _main, int argc, char
   return scheme_main_stack_setup(no_auto_statics, call_with_basic, &d);
 }
 
+extern int _tls_index;
+
 static int do_main_stack_setup(int no_auto_statics, Scheme_Nested_Main _main, void *data) 
 {
   void *stack_start;
@@ -231,6 +247,19 @@ void scheme_register_tls_space(void *tls_space, int tls_index) XFORM_SKIP_PROC
 Thread_Local_Variables *scheme_external_get_thread_local_variables() XFORM_SKIP_PROC
 {
   return scheme_get_thread_local_variables();
+}
+#elif defined(IMPLEMENT_THREAD_LOCAL_VIA_OFFSET)
+int scheme_tls_delta;
+extern int _tls_index;
+void scheme_register_tls_space(void *tls_space, int tls_index) XFORM_SKIP_PROC
+{
+  if (_tls_index == 0) {
+    /* The Racket DLL didn't get its own index, which means that it's
+       being instantiated in-memory instead of loaded from a ".dll" file.
+       Use space reserved by the application for thread-local variables. */
+    scheme_tls_delta = ((char *)tls_space - (char *)&scheme_thread_locals_space);
+  } else
+    scheme_tls_delta = 0;
 }
 #else
 void scheme_register_tls_space(void *tls_space, int tls_index) XFORM_SKIP_PROC
@@ -710,7 +739,7 @@ intptr_t scheme_check_overflow(intptr_t n, intptr_t m, intptr_t a)
 {
   intptr_t v;
 
-  v = (n * m) + a;
+  v = (intptr_t)(((uintptr_t)n * (uintptr_t)m) + (uintptr_t)a);
   if ((v < n) || (v < m) || (v < a) || (((v - a) / n) != m))
     scheme_signal_error("allocation size overflow");
 
@@ -919,6 +948,12 @@ THREAD_LOCAL_DECL(intptr_t scheme_code_page_total);
 static int fd, fd_created;
 #endif
 
+#ifdef IMPLEMENT_WRITE_XOR_EXECUTE_BY_SIGNAL_HANDLER
+# define MAYBE_PROT_EXEC 0
+#else
+# define MAYBE_PROT_EXEC PROT_EXEC
+#endif
+
 #define LOG_CODE_MALLOC(lvl, s) /* if (lvl > 1) s */
 #define CODE_PAGE_OF(p) ((void *)(((uintptr_t)p) & ~(page_size - 1)))
 
@@ -993,13 +1028,13 @@ static void *malloc_page(intptr_t size)
   }
 #else
 # ifdef MAP_ANON
-  r = mmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANON, -1, 0);
+  r = mmap(NULL, size, PROT_READ | PROT_WRITE | MAYBE_PROT_EXEC, MAP_PRIVATE | MAP_ANON, -1, 0);
 # else
   if (!fd_created) {
     fd_created = 1;
     fd = open("/dev/zero", O_RDWR);
   }
-  r = mmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE, fd, 0);
+  r = mmap(NULL, size, PROT_READ | PROT_WRITE | MAYBE_PROT_EXEC, MAP_PRIVATE, fd, 0);
 # endif
   if (r  == (void *)-1)
     r = NULL;
@@ -1007,6 +1042,10 @@ static void *malloc_page(intptr_t size)
 
   if (!r)
     scheme_raise_out_of_memory(NULL, NULL);
+
+#ifdef IMPLEMENT_WRITE_XOR_EXECUTE_BY_SIGNAL_HANDLER
+  register_as_executable(r, size, 1);
+#endif
 
   return r;
 }
@@ -1020,6 +1059,9 @@ static void free_page(void *p, intptr_t size)
   VirtualFree(p, 0, MEM_RELEASE);
 #else
   munmap(p, size);
+# ifdef IMPLEMENT_WRITE_XOR_EXECUTE_BY_SIGNAL_HANDLER
+  register_as_executable(p, size, 0);
+# endif
 #endif
 }
 
@@ -1362,7 +1404,7 @@ void *scheme_malloc_gcable_code(intptr_t size)
 #  else
       {
         int r;
-        r = mprotect ((void *) page, length, PROT_READ | PROT_WRITE | PROT_EXEC);
+        r = mprotect ((void *) page, length, PROT_READ | PROT_WRITE | MAYBE_PROT_EXEC);
         if (r == -1) {
           scheme_log_abort("mprotect for generate-code page failed; aborting");
         }
@@ -1398,6 +1440,185 @@ void scheme_notify_code_gc()
   jit_prev_length = 0;
 #endif
 }
+#endif
+
+#ifdef IMPLEMENT_WRITE_XOR_EXECUTE_BY_SIGNAL_HANDLER
+
+/* We abide by W^X for generated code by following the letter of the
+   law, but not the sprirt. Pages are mapped without execute mode.
+   When the process crashes by trying to execute code from those
+   pages, we switch the page from writable to executable --- or vice
+   versa if the process changes back to writing. */
+
+# include <signal.h>
+# include <sys/param.h>
+static intptr_t wx_page_size;
+static int wx_log_page_size;
+static void (*previous_fault_handler)(int sn, siginfo_t *si, void *ctx);
+
+typedef char exec_state_t;
+#define EXEC_STATE_NONE  0
+#define EXEC_STATE_WRITE 1
+#define EXEC_STATE_EXEC  2
+static exec_state_t ***exec_page_map;
+
+#ifdef MZ_USE_MZRT
+static mzrt_mutex *exec_page_mutex = NULL;
+#endif
+
+#ifdef SIXTY_FOUR_BIT_INTEGERS
+# define EXEC_PAGEMAP_LEVEL_BITS 22
+#else
+# define EXEC_PAGEMAP_LEVEL_BITS 8
+#endif
+
+static void exec_state_lock()
+{
+  /* We assume that allocation functions that manipulate the
+     executable-state table will not themselves trip into
+     execute--write mismatches that would deadlock via the signal
+     handler. */
+#ifdef MZ_USE_MZRT
+  mzrt_mutex_lock(exec_page_mutex);
+#endif
+}
+
+static void exec_state_unlock()
+{
+#ifdef MZ_USE_MZRT
+  mzrt_mutex_unlock(exec_page_mutex);
+#endif
+}
+
+/* Call with lock: */
+static void exec_pagemap_set(void *p, exec_state_t es) {
+  uintptr_t addr, pos;
+  exec_state_t **p1, *p2;
+
+  addr = ((uintptr_t)p) >> wx_log_page_size;
+
+  if (!exec_page_map)
+    exec_page_map = calloc(sizeof(exec_state_t**), ((sizeof(void*) << 3) - wx_log_page_size - (2 * EXEC_PAGEMAP_LEVEL_BITS)));
+
+  pos = addr >> (2 * EXEC_PAGEMAP_LEVEL_BITS);
+  p1 = exec_page_map[pos];
+  if (!p1) {
+    p1 = calloc(sizeof(exec_state_t*), (1 << EXEC_PAGEMAP_LEVEL_BITS));
+    exec_page_map[pos] = p1;
+  }
+
+  pos = (addr >> EXEC_PAGEMAP_LEVEL_BITS) & ((1 << EXEC_PAGEMAP_LEVEL_BITS) - 1);
+  p2 = p1[pos];
+  if (!p2) {
+    p2 = calloc(sizeof(exec_state_t), (1 << EXEC_PAGEMAP_LEVEL_BITS));
+    p1[pos] = p2;
+  }
+
+  pos = addr & ((1 << EXEC_PAGEMAP_LEVEL_BITS) - 1);
+  p2[pos] = es;
+}
+
+/* Call with lock: */
+static exec_state_t exec_pagemap_get(void *p) {
+  uintptr_t addr, pos;
+  exec_state_t **p1, *p2;
+
+  addr = ((uintptr_t)p) >> wx_log_page_size;
+
+  if (!exec_page_map) return EXEC_STATE_NONE;
+
+  pos = addr >> (2 * EXEC_PAGEMAP_LEVEL_BITS);
+  p1 = exec_page_map[pos];
+  if (!p1) return EXEC_STATE_NONE;
+
+  pos = (addr >> EXEC_PAGEMAP_LEVEL_BITS) & ((1 << EXEC_PAGEMAP_LEVEL_BITS) - 1);
+  p2 = p1[pos];
+  if (!p2) return EXEC_STATE_NONE;
+
+  pos = addr & ((1 << EXEC_PAGEMAP_LEVEL_BITS) - 1);
+  return p2[pos];
+}
+
+static void register_as_executable(void *p, size_t len, int can_exec)
+{
+  exec_state_lock();
+  while (len > 0) {
+    exec_pagemap_set(p, (can_exec ? EXEC_STATE_WRITE : EXEC_STATE_NONE));
+    p = ((char *)p) + wx_page_size;
+    len -= wx_page_size;
+  }
+  exec_state_unlock();
+}
+
+static void fault_handler(int sn, siginfo_t *si, void *ctx)
+{
+  void *addr = si->si_addr;
+  exec_state_t es;
+  int fail = 0;
+
+#ifdef MZ_PRECISE_GC
+  /* For precise GC, defer to its handler for GC-managed pages, which
+     are never intended to be executable pages */
+  if (GC_is_on_allocated_page(addr)) {
+    previous_fault_handler(sn, si, ctx);
+    return;
+  }
+#endif
+
+  addr = (char *)addr - ((intptr_t)addr & (wx_page_size - 1));
+
+  exec_state_lock();
+  es = exec_pagemap_get(addr);
+
+  if (es == EXEC_STATE_NONE) {
+    fail = 1;
+  } else if (es == EXEC_STATE_WRITE) {
+    exec_pagemap_set(addr, EXEC_STATE_EXEC);
+    if (mprotect(addr, wx_page_size, PROT_READ | PROT_EXEC))
+      fail = 1;
+  } else {
+    exec_pagemap_set(addr, EXEC_STATE_WRITE);
+    if (mprotect(addr, wx_page_size, PROT_READ | PROT_WRITE))
+      fail = 1;
+  }
+  exec_state_unlock();
+
+  if (fail) {
+    fprintf(stderr, "SIGSEGV at %p\n", si->si_addr);
+    abort();
+  }
+}
+
+#ifdef OS_X
+# define SIG_W_XOR_X SIGBUS
+#else
+# define SIG_W_XOR_X SIGSEGV
+#endif
+
+static void install_w_xor_x_handler()
+{
+  wx_page_size = sysconf (_SC_PAGESIZE);
+  while (1 << wx_log_page_size < wx_page_size)
+    wx_log_page_size++;
+
+#ifdef MZ_USE_MZRT
+  mzrt_mutex_create(&exec_page_mutex);
+#endif
+
+  {
+    struct sigaction act, oact;
+    memset(&act, 0, sizeof(act));
+    act.sa_sigaction = fault_handler;
+    sigemptyset(&act.sa_mask);
+    sigaddset(&act.sa_mask, SIGINT);
+    sigaddset(&act.sa_mask, SIGCHLD);
+    act.sa_flags = SA_SIGINFO;
+    sigaction(SIG_W_XOR_X, &act, &oact);
+    previous_fault_handler = oact.sa_sigaction;
+  }
+
+}
+
 #endif
 
 #ifdef MZ_PRECISE_GC
@@ -1984,6 +2205,35 @@ static void cons_onto_list(void *p)
 
 static int print_all_traced(void *p) { return 1; }
 
+static int record_nth_counter, record_nth_target;
+static GC_record_traced_filter_proc record_nth_traced_filter;
+static int record_nth_traced(void *p) {
+  if (!record_nth_traced_filter(p))
+    return 0;
+  record_nth_counter++;
+  if (record_nth_counter == record_nth_target) {
+    record_nth_counter = 0;
+    return 1;
+  }
+  return 0;
+}
+
+/* A vector with keywords is interesting, because serialized
+   syntax-object literals have that shape. */
+static int vector_has_keywords(void *p)
+{
+  Scheme_Object *vec = (Scheme_Object *)p;
+  int i;
+
+  for (i = SCHEME_VEC_SIZE(vec); i--; ) {
+    if (SCHEME_VEC_ELS(vec)[i])
+      if (SCHEME_KEYWORDP(SCHEME_VEC_ELS(vec)[i]))
+        return 1;
+  }
+  
+  return 0;
+}
+
 static int traced_buffer_counter, traced_buffer_size;
 static void **traced_buffer;
 
@@ -1996,7 +2246,8 @@ static int record_traced(void *p)
                     : 512);
     if (!traced_buffer) REGISTER_SO(traced_buffer);
     b2 = scheme_malloc(sizeof(void*) * new_size);
-    memcpy(b2, traced_buffer, sizeof(void*)*traced_buffer_size);
+    if (traced_buffer)
+      memcpy(b2, traced_buffer, sizeof(void*)*traced_buffer_size);
     traced_buffer = b2;
     traced_buffer_size = new_size;
   }
@@ -2016,6 +2267,16 @@ static int record_traced_and_print_new(void *p)
   }
 
   return record_traced(p);
+}
+
+static char struct_name_to_match[64];
+static int record_if_matching_struct_name(void *p)
+{
+  Scheme_Struct_Type *stype = ((Scheme_Structure *)p)->stype;
+  if (!strcmp(SCHEME_SYM_VAL(stype->name), struct_name_to_match))
+    return 1;
+  else
+    return 0;
 }
 
 static void record_allocated_object(void *p, intptr_t size, int tagged, int atomic)
@@ -2156,33 +2417,23 @@ static void print_tagged_value(const char *prefix,
       memcpy(t2 + len, buffer, len2 + 1);
       len += len2;
       type = t2;      
-    } else if (!scheme_strncmp(type, "#<namespace", 11)) {
-      char *t2;
-      int len2;
-	    
-      sprintf(buffer, "[%ld/%ld:%.100s]",
-	      ((Scheme_Env *)v)->phase,
-              ((Scheme_Env *)v)->mod_phase,
-	      (((Scheme_Env *)v)->module
-	       ? scheme_write_to_string(((Scheme_Env *)v)->module->modname, NULL)
-	       : "(toplevel)"));
-	    
-      len2 = strlen(buffer);
-      t2 = (char *)scheme_malloc_atomic(len + len2 + 1);
-      memcpy(t2, type, len);
-      memcpy(t2 + len, buffer, len2 + 1);
-      len += len2;
-      type = t2;
     } else if (!scheme_strncmp(type, "#<global-variable-code", 22)) {
       Scheme_Bucket *b = (Scheme_Bucket *)v;
       Scheme_Object *bsym = (Scheme_Object *)b->key;
       char *t2;
       int len2;
 
-      len2 = SCHEME_SYM_LEN(bsym);
+      if (SCHEME_FALSEP(bsym))
+        len2 = 2;
+      else
+        len2 = SCHEME_SYM_LEN(bsym);
+
       t2 = scheme_malloc_atomic(len + len2 + 3);
       memcpy(t2, type, len);
-      memcpy(t2 + len + 1, SCHEME_SYM_VAL(bsym), len2);
+      if (SCHEME_FALSEP(bsym))
+        memcpy(t2 + len + 1, "#f", len2);
+      else
+        memcpy(t2 + len + 1, SCHEME_SYM_VAL(bsym), len2);
       t2[len] = '[';
       t2[len + 1 + len2] = ']';
       t2[len + 1 + len2 + 1] = 0;
@@ -2304,6 +2555,7 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
   int dump_flags = 0;
   GC_for_each_found_proc for_each_found = NULL;
   GC_print_traced_filter_proc maybe_print_traced_filter = NULL;
+  GC_record_traced_filter_proc record_traced_filter = NULL;
 # else
 #  define skip_summary 0
 #  define dump_flags 0
@@ -2323,6 +2575,7 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
 
 #if defined(MZ_PRECISE_GC) && MZ_PRECISE_GC_TRACE
   maybe_print_traced_filter = print_all_traced;
+  record_traced_filter = print_all_traced;
 #endif
 
 #if 0
@@ -2404,7 +2657,7 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
 		    && SCHEME_SYMBOLP(p[1])
 		    && !strcmp(SCHEME_SYM_VAL(p[1]), "objects"));
 
-    for (i = 0; i < maxpos; i++) {
+    for (i = maxpos; i--; ) {
       void *tn = scheme_get_type_name_or_null(i);
       if (tn && !strcmp(tn, s)) {
 	if (just_objects)
@@ -2591,7 +2844,7 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
         && SCHEME_SYMBOLP(p[1])) {
       int i, maxpos;
       maxpos = scheme_num_types();
-      for (i = 0; i < maxpos; i++) {
+      for (i = maxpos; i--; ) {
         void *tn;
         tn = scheme_get_type_name_or_null(i);
         if (tn && !strcmp(tn, SCHEME_SYM_VAL(p[1]))) {
@@ -2619,18 +2872,20 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
 
     maxpos = scheme_num_types();
 
-    for (i = 0; i < maxpos; i++) {
+    for (i = maxpos; i--; ) {
       void *tn;
       tn = scheme_get_type_name_or_null(i);
       if (tn && !strcmp(tn, s)) {
 	trace_for_tag = i;
 	dump_flags |= GC_DUMP_SHOW_TRACE;
-        if ((c > 1)
-            && SCHEME_SYMBOLP(p[1])
-            && !strcmp(SCHEME_SYM_VAL(p[1]), "new"))
-          maybe_print_traced_filter = record_traced_and_print_new;
-	break;
+        break;
       }
+    }
+
+    if (!strcmp("kw-vec", s)) {
+      trace_for_tag = scheme_vector_type;
+      dump_flags |= GC_DUMP_SHOW_TRACE;
+      record_traced_filter = vector_has_keywords;
     }
 
     if (!strcmp("fnl", s))
@@ -2671,6 +2926,17 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
       scheme_end_atomic();      
       return scheme_make_integer_value((intptr_t)p[1]);
     }
+  } else if (c
+             && SCHEME_PAIRP(p[0])
+             && SCHEME_PAIRP(SCHEME_CDR(p[0]))
+             && SCHEME_NULLP(SCHEME_CDR(SCHEME_CDR(p[0])))
+             && SCHEME_SYMBOLP(SCHEME_CAR(p[0]))
+             && SCHEME_SYMBOLP(SCHEME_CADR(p[0]))
+             && !strcmp(SCHEME_SYM_VAL(SCHEME_CAR(p[0])), "struct")) {
+    trace_for_tag = scheme_structure_type;
+    dump_flags |= GC_DUMP_SHOW_TRACE;
+    record_traced_filter = record_if_matching_struct_name;
+    strncpy(struct_name_to_match, SCHEME_SYM_VAL(SCHEME_CADR(p[0])), sizeof(struct_name_to_match));
   } else if (c && SCHEME_INTP(p[0])) {
     trace_for_tag = SCHEME_INT_VAL(p[0]);
     dump_flags |= GC_DUMP_SHOW_TRACE;
@@ -2703,12 +2969,24 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
     return scheme_void;
   }
 
-  if ((c > 1) && SCHEME_INTP(p[1]))
+  
+  if ((c > 1)
+      && SCHEME_SYMBOLP(p[1])
+      && !strcmp(SCHEME_SYM_VAL(p[1]), "new"))
+    maybe_print_traced_filter = record_traced_and_print_new;
+  else if ((c > 1) && SCHEME_INTP(p[1]))
     path_length_limit = SCHEME_INT_VAL(p[1]);
   else if ((c > 1) && SCHEME_SYMBOLP(p[1]) && !strcmp("cons", SCHEME_SYM_VAL(p[1]))) {
     for_each_found = cons_onto_list;
     cons_accum_result = scheme_null;
     dump_flags -= (dump_flags & GC_DUMP_SHOW_TRACE);
+  }
+
+  if ((c > 2) && SCHEME_INTP(p[2])) {
+    record_nth_target = SCHEME_INT_VAL(p[2]);
+    record_nth_counter = 0;
+    record_nth_traced_filter = record_traced_filter;
+    record_traced_filter = record_nth_traced;
   }
 #endif
 
@@ -2720,6 +2998,7 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
 		      scheme_get_type_name_or_null,
 		      for_each_found,
 		      trace_for_tag, trace_for_tag,
+                      record_traced_filter,
                       maybe_print_traced_filter,
 		      print_tagged_value,
 		      path_length_limit,
@@ -2732,6 +3011,7 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
 #if MZ_PRECISE_GC_TRACE
   if (for_each_struct) {
     scheme_console_printf("Begin Struct\n");
+    cons_accum_result = scheme_add_builtin_struct_types(cons_accum_result);
     while (SCHEME_PAIRP(cons_accum_result)) {
       Scheme_Struct_Type *stype = (Scheme_Struct_Type *)SCHEME_CAR(cons_accum_result);
       if (stype->total_instance_count) {
@@ -2795,11 +3075,11 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
   }
 
   scheme_console_printf("Begin Help\n");
-  scheme_console_printf(" (dump-memory-stats sym) - prints paths to instances of type named by sym.\n");
-  scheme_console_printf("   Examples: (dump-memory-stats '<pair>), (dump-memory-stats 'frame).\n");
-  scheme_console_printf("   If sym is 'stack, prints paths to thread stacks.\n");
-  scheme_console_printf(" (dump-memory-stats sym 'objects) - prints all instances of type named by sym.\n");
-  scheme_console_printf(" (dump-memory-stats sym 'from from-v) - prints paths, paths through from-v first.\n");
+  scheme_console_printf(" (dump-memory-stats sym) - prints paths to instances of type named by sym\n");
+  scheme_console_printf("   Examples: (dump-memory-stats '<pair>), (dump-memory-stats 'frame)\n");
+  scheme_console_printf("   If sym is 'stack, prints paths to thread stacks\n");
+  scheme_console_printf(" (dump-memory-stats sym 'objects) - prints all instances of type named by sym\n");
+  scheme_console_printf(" (dump-memory-stats sym 'from from-v) - prints paths, paths through from-v first\n");
   scheme_console_printf("End Help\n");
 
   if (obj_type >= 0) {
@@ -2813,22 +3093,28 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
   if (!skip_summary) {
 #ifdef MZ_PRECISE_GC
     scheme_console_printf("Begin Help\n");
-    scheme_console_printf(" (dump-memory-stats 'count sym) - return number of instances of type named by sym.\n");
+# if MZ_PRECISE_GC_TRACE
+    scheme_console_printf(" (dump-memory-stats 'struct) - show counts for specific structure types\n");
+    scheme_console_printf(" (dump-memory-stats spec) - prints path to instances, where spec is\n");
+    scheme_console_printf("     sym : prints paths to objects of type named by sym\n");
+    scheme_console_printf("           Example: (dump-memory-stats '<pair>)\n");
+    scheme_console_printf("     num : prints paths to objects with tag num\n");
+    scheme_console_printf("     -num : prints paths to objects of size num\n");
+    scheme_console_printf("     (list 'struct sym) : print paths to structs of type named by sym\n");
+    scheme_console_printf("   ** Backtraces depend on the most recent major GC **\n");
+    scheme_console_printf(" (dump-memory-stats spec 'new) - show only objects new since last dump\n");
+    scheme_console_printf(" (dump-memory-stats spec num) - limits backtrace path length to num\n");
+    scheme_console_printf(" (dump-memory-stats spec 'cons) - builds list instead of showing paths\n");
+    scheme_console_printf(" (dump-memory-stats spec any num) - record only each numth object\n");
+#endif
+    scheme_console_printf(" (dump-memory-stats 'count sym) - return number of instances of type named by sym\n");
     scheme_console_printf("   Example: (dump-memory-stats 'count '<pair>)\n");
 # if MZ_PRECISE_GC_TRACE
-    scheme_console_printf(" (dump-memory-stats sym ['new]) - prints paths to instances of type named by sym.\n");
-    scheme_console_printf("   Example: (dump-memory-stats '<pair>)\n");
-    scheme_console_printf("   If 'new, all will be retrined, only new paths will be shown\n");
-    scheme_console_printf(" (dump-memory-stats 'struct) - show counts for specific structure types.\n");
-    scheme_console_printf(" (dump-memory-stats 'fnl) - prints not-yet-finalized objects.\n");
-    scheme_console_printf(" (dump-memory-stats num) - prints paths to objects with tag num.\n");
-    scheme_console_printf(" (dump-memory-stats -num) - prints paths to objects of size num.\n");
-    scheme_console_printf(" (dump-memory-stats sym/num len) - limits path to size len.\n");
-    scheme_console_printf(" (dump-memory-stats sym/num 'cons) - builds list instead of showing paths.\n");
-    scheme_console_printf(" (dump-memory-stats 'peek num v) - returns value if num is address of object, v otherwise.\n");
-    scheme_console_printf(" (dump-memory-stats 'next v) - next tagged object after v, #f if none; start with #f.\n");
-    scheme_console_printf(" (dump-memory-stats 'addr v) - returns the address of v.\n");
-    scheme_console_printf(" (dump-memory-stats thread) - shows information about the thread.\n");
+    scheme_console_printf(" (dump-memory-stats 'peek num v) - returns value if num is address of object, else v\n");
+    scheme_console_printf(" (dump-memory-stats 'fnl) - prints not-yet-finalized objects\n");
+    scheme_console_printf(" (dump-memory-stats 'next v) - next tagged object after v, #f if none; start with #f\n");
+    scheme_console_printf(" (dump-memory-stats 'addr v) - returns the address of v\n");
+    scheme_console_printf(" (dump-memory-stats thread) - shows information about the thread\n");
 # endif
     scheme_console_printf("End Help\n");
 #endif
@@ -3208,33 +3494,6 @@ intptr_t scheme_count_memory(Scheme_Object *root, Scheme_Hash_Table *ht)
       }
     }
     break;
-  case scheme_namespace_type:
-    {
-      Scheme_Env *env = (Scheme_Env *)root;
-
-      s = sizeof(Scheme_Env);
-#if FORCE_KNOWN_SUBPARTS
-      e = COUNT(env->toplevel);
-#endif
-    }
-    break;
-  case scheme_config_type:
-    {
-      s = sizeof(Scheme_Config) + (sizeof(Scheme_Object *) * __MZCONFIG_BUILTIN_COUNT__);
-#if FORCE_SUBPARTS
-      {
-	Scheme_Config *c = (Scheme_Config *)root;
-	int i;
-
-	e = COUNT(c->extensions) + COUNT(c->base);
-
-	for (i = 0; i < __MZCONFIG_BUILTIN_COUNT__; i++) {
-	  e += COUNT(*c->configs[i]);
-	}
-      }
-#endif
-    }
-    break;
   case scheme_proc_struct_type:
   case scheme_structure_type:
     {
@@ -3265,9 +3524,6 @@ intptr_t scheme_count_memory(Scheme_Object *root, Scheme_Hash_Table *ht)
     break;
   case scheme_sema_type:
     s = sizeof(Scheme_Sema);
-    break;
-  case scheme_compilation_top_type:
-    s = sizeof(Scheme_Compilation_Top);
     break;
   case scheme_hash_table_type:
     {
