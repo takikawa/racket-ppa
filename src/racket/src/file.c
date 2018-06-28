@@ -54,12 +54,6 @@
 #define IS_A_SEP(kind, x) ((kind == SCHEME_UNIX_PATH_KIND) ? IS_A_UNIX_SEP(x) : IS_A_DOS_SEP(x))
 #define IS_A_PRIM_SEP(kind, x) ((kind == SCHEME_UNIX_PATH_KIND) ? IS_A_UNIX_PRIM_SEP(x) : IS_A_DOS_PRIM_SEP(x))
 
-SHARED_OK int scheme_ignore_user_paths;
-void scheme_set_ignore_user_paths(int v) { scheme_ignore_user_paths = v; }
-
-SHARED_OK int scheme_ignore_link_paths;
-void scheme_set_ignore_link_paths(int v) { scheme_ignore_link_paths = v; }
-
 #define CURRENT_WD() scheme_get_param(scheme_current_config(), MZCONFIG_CURRENT_DIRECTORY)
 
 #define TO_PATH(x) (SCHEME_GENERAL_PATHP(x) ? x : scheme_char_string_to_path(x))
@@ -127,13 +121,6 @@ static Scheme_Object *file_modify_seconds(int argc, Scheme_Object *argv[]);
 static Scheme_Object *file_or_dir_permissions(int argc, Scheme_Object *argv[]);
 static Scheme_Object *file_identity(int argc, Scheme_Object *argv[]);
 static Scheme_Object *file_size(int argc, Scheme_Object *argv[]);
-static Scheme_Object *current_library_collection_paths(int argc, Scheme_Object *argv[]);
-static Scheme_Object *current_library_collection_links(int argc, Scheme_Object *argv[]);
-static Scheme_Object *use_compiled_kind(int, Scheme_Object *[]);
-static Scheme_Object *compiled_file_roots(int, Scheme_Object *[]);
-static Scheme_Object *use_user_paths(int, Scheme_Object *[]);
-static Scheme_Object *use_link_paths(int, Scheme_Object *[]);
-static Scheme_Object *use_compiled_file_check(int, Scheme_Object *[]);
 static Scheme_Object *find_system_path(int argc, Scheme_Object **argv);
 
 static Scheme_Object *current_directory(int argc, Scheme_Object *argv[]);
@@ -172,7 +159,7 @@ SHARED_OK static Scheme_Object *addon_dir;
 
 READ_ONLY static Scheme_Object *windows_symbol, *unix_symbol;
 
-void scheme_init_file(Scheme_Env *env)
+void scheme_init_file(Scheme_Startup_Env *env)
 {
   Scheme_Object *p;
 
@@ -235,269 +222,234 @@ void scheme_init_file(Scheme_Env *env)
 
   p = scheme_make_immed_prim(path_p, "path?", 1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
-                                                            | SCHEME_PRIM_IS_OMITABLE);
-  scheme_add_global_constant("path?", p, env);
+                                                            | SCHEME_PRIM_IS_OMITABLE
+                                                            | SCHEME_PRIM_PRODUCES_BOOL);
+  scheme_addto_prim_instance("path?", p, env);
 
-  scheme_add_global_constant("path-for-some-system?", 
+  scheme_addto_prim_instance("path-for-some-system?", 
 			     scheme_make_folding_prim(general_path_p, 
                                                       "path-for-some-system?", 
                                                       1, 1, 1), 
 			     env);
-  scheme_add_global_constant("path-convention-type", 
+  scheme_addto_prim_instance("path-convention-type", 
 			     scheme_make_folding_prim(path_kind, 
                                                       "path-convention-type", 
                                                       1, 1, 1), 
 			     env);
-  scheme_add_global_constant("system-path-convention-type", 
+  scheme_addto_prim_instance("system-path-convention-type", 
 			     scheme_make_immed_prim(platform_path_kind, 
                                                     "system-path-convention-type", 
                                                     0, 0),
 			     env);
-  scheme_add_global_constant("path->string", 
+  scheme_addto_prim_instance("path->string", 
 			     scheme_make_immed_prim(path_to_string, 
                                                     "path->string", 
                                                     1, 1), 
 			     env);
-  scheme_add_global_constant("path->bytes", 
+  scheme_addto_prim_instance("path->bytes", 
 			     scheme_make_immed_prim(path_to_bytes, 
                                                     "path->bytes", 
                                                     1, 1), 
 			     env);
-  scheme_add_global_constant("path-element->bytes", 
+  scheme_addto_prim_instance("path-element->bytes", 
 			     scheme_make_immed_prim(path_element_to_bytes, 
                                                     "path-element->bytes", 
                                                     1, 1), 
 			     env);
-  scheme_add_global_constant("path-element->string", 
+  scheme_addto_prim_instance("path-element->string", 
 			     scheme_make_immed_prim(path_element_to_string, 
                                                     "path-element->string", 
                                                     1, 1), 
 			     env);
-  scheme_add_global_constant("string->path", 
+  scheme_addto_prim_instance("string->path", 
 			     scheme_make_immed_prim(string_to_path, 
                                                     "string->path", 
                                                     1, 1), 
 			     env);
-  scheme_add_global_constant("bytes->path", 
+  scheme_addto_prim_instance("bytes->path", 
 			     scheme_make_immed_prim(bytes_to_path, 
                                                     "bytes->path", 
                                                     1, 2), 
 			     env);
-  scheme_add_global_constant("bytes->path-element", 
+  scheme_addto_prim_instance("bytes->path-element", 
 			     scheme_make_immed_prim(bytes_to_path_element, 
                                                     "bytes->path-element", 
                                                     1, 2), 
 			     env);
-  scheme_add_global_constant("string->path-element", 
+  scheme_addto_prim_instance("string->path-element", 
 			     scheme_make_immed_prim(string_to_path_element, 
                                                     "string->path-element", 
                                                     1, 1), 
 			     env);
 
-  scheme_add_global_constant("file-exists?", 
+  scheme_addto_prim_instance("file-exists?", 
 			     scheme_make_prim_w_arity(file_exists, 
 						      "file-exists?", 
 						      1, 1), 
 			     env);
-  scheme_add_global_constant("directory-exists?", 
+  scheme_addto_prim_instance("directory-exists?", 
 			     scheme_make_prim_w_arity(directory_exists, 
 						      "directory-exists?", 
 						      1, 1), 
 			     env);
-  scheme_add_global_constant("link-exists?", 
+  scheme_addto_prim_instance("link-exists?", 
 			     scheme_make_prim_w_arity(link_exists, 
 						      "link-exists?", 
 						      1, 1), 
 			     env);
-  scheme_add_global_constant("delete-file", 
+  scheme_addto_prim_instance("delete-file", 
 			     scheme_make_prim_w_arity(delete_file, 
 						      "delete-file", 
 						      1, 1), 
 			     env);
-  scheme_add_global_constant("rename-file-or-directory", 
+  scheme_addto_prim_instance("rename-file-or-directory", 
 			     scheme_make_prim_w_arity(rename_file, 
 						      "rename-file-or-directory", 
 						      2, 3), 
 			     env);
-  scheme_add_global_constant("copy-file", 
+  scheme_addto_prim_instance("copy-file", 
 			     scheme_make_prim_w_arity(copy_file, 
 						      "copy-file", 
 						      2, 3), 
 			     env);
-  scheme_add_global_constant("build-path", 
+  scheme_addto_prim_instance("build-path", 
 			     scheme_make_immed_prim(scheme_build_path,
                                                     "build-path", 
                                                     1, -1), 
 			     env);
-  scheme_add_global_constant("build-path/convention-type", 
+  scheme_addto_prim_instance("build-path/convention-type", 
 			     scheme_make_immed_prim(build_path_kind,
                                                     "build-path/convention-type", 
                                                     2, -1), 
 			     env);
-  scheme_add_global_constant("path->directory-path",
+  scheme_addto_prim_instance("path->directory-path",
 			     scheme_make_immed_prim(path_to_directory_path,
                                                     "path->directory-path",
                                                     1, 1), 
 			     env);
-  scheme_add_global_constant("split-path", 
+  scheme_addto_prim_instance("split-path", 
 			     scheme_make_prim_w_arity2(split_path,
 						       "split-path",
 						       1, 1,
 						       3, 3), 
 			     env);
-  scheme_add_global_constant("explode-path", 
+  scheme_addto_prim_instance("explode-path", 
 			     scheme_make_immed_prim(explode_path,
                                                     "explode-path",
                                                     1, 1), 
 			     env);
-  scheme_add_global_constant("relative-path?", 
+  scheme_addto_prim_instance("relative-path?", 
 			     scheme_make_immed_prim(relative_path_p,
                                                     "relative-path?",
                                                     1, 1), 
 			     env);
-  scheme_add_global_constant("absolute-path?", 
+  scheme_addto_prim_instance("absolute-path?", 
 			     scheme_make_immed_prim(absolute_path_p,
                                                     "absolute-path?",
                                                     1, 1), 
 			     env);
-  scheme_add_global_constant("complete-path?", 
+  scheme_addto_prim_instance("complete-path?", 
 			     scheme_make_immed_prim(complete_path_p,
                                                     "complete-path?",
                                                     1, 1), 
 			     env);
-  scheme_add_global_constant("path->complete-path",
+  scheme_addto_prim_instance("path->complete-path",
 			     scheme_make_immed_prim(path_to_complete_path,
                                                     "path->complete-path",
                                                     1, 2), 
 			     env);
-  scheme_add_global_constant("resolve-path",
+  scheme_addto_prim_instance("resolve-path",
 			     scheme_make_prim_w_arity(resolve_path,
 						      "resolve-path",
 						      1, 1), 
 			     env);
-  scheme_add_global_constant("simplify-path",
+  scheme_addto_prim_instance("simplify-path",
 			     scheme_make_prim_w_arity(scheme_simplify_path,
 						      "simplify-path",
 						      1, 2), 
 			     env);
-  scheme_add_global_constant("cleanse-path",
+  scheme_addto_prim_instance("cleanse-path",
 			     scheme_make_prim_w_arity(cleanse_path,
 						      "cleanse-path",
 						      1, 1), 
 			     env);
-  scheme_add_global_constant("expand-user-path",
+  scheme_addto_prim_instance("expand-user-path",
 			     scheme_make_prim_w_arity(expand_user_path,
 						      "expand-user-path",
 						      1, 1), 
 			     env);
-  scheme_add_global_constant("directory-list",
+  scheme_addto_prim_instance("directory-list",
 			     scheme_make_prim_w_arity(directory_list,
 						      "directory-list",
 						      0, 1), 
 			     env);
-  scheme_add_global_constant("filesystem-root-list",
+  scheme_addto_prim_instance("filesystem-root-list",
 			     scheme_make_prim_w_arity(filesystem_root_list,
 						      "filesystem-root-list",
 						      0, 0), 
 			     env);
-  scheme_add_global_constant("make-directory",
+  scheme_addto_prim_instance("make-directory",
 			     scheme_make_prim_w_arity(make_directory,
 						      "make-directory",
 						      1, 1), 
 			     env);
-  scheme_add_global_constant("delete-directory",
+  scheme_addto_prim_instance("delete-directory",
 			     scheme_make_prim_w_arity(delete_directory,
 						      "delete-directory",
 						      1, 1), 
 			     env);
-  scheme_add_global_constant("make-file-or-directory-link",
+  scheme_addto_prim_instance("make-file-or-directory-link",
 			     scheme_make_prim_w_arity(make_link,
 						      "make-file-or-directory-link",
 						      2, 2), 
 			     env);
-  scheme_add_global_constant("file-or-directory-modify-seconds",
+  scheme_addto_prim_instance("file-or-directory-modify-seconds",
 			     scheme_make_prim_w_arity(file_modify_seconds,
 						      "file-or-directory-modify-seconds",
 						      1, 3), 
 			     env);
-  scheme_add_global_constant("file-or-directory-permissions",
+  scheme_addto_prim_instance("file-or-directory-permissions",
 			     scheme_make_prim_w_arity(file_or_dir_permissions,
 						      "file-or-directory-permissions",
 						      1, 2), 
 			     env);
-  scheme_add_global_constant("file-or-directory-identity",
+  scheme_addto_prim_instance("file-or-directory-identity",
 			     scheme_make_prim_w_arity(file_identity,
 						      "file-or-directory-identity",
 						      1, 2), 
 			     env);
-  scheme_add_global_constant("file-size",
+  scheme_addto_prim_instance("file-size",
 			     scheme_make_prim_w_arity(file_size,
 						      "file-size",
 						      1, 1), 
 			     env);
 
-  scheme_add_global_constant("current-drive", 
+  scheme_addto_prim_instance("current-drive", 
 			     scheme_make_prim_w_arity(current_drive, 
 						      "current-drive", 
 						      0, 0), 
 			     env);
 
-  scheme_add_global_constant("find-system-path", 
+  scheme_addto_prim_instance("find-system-path", 
 			     scheme_make_prim_w_arity(find_system_path, 
 						      "find-system-path", 
 						      1, 1), 
 			     env);
 
-  scheme_add_global_constant("current-directory",
+  scheme_addto_prim_instance("current-directory",
 			     scheme_register_parameter(current_directory,
 						       "current-directory", 
 						       MZCONFIG_CURRENT_DIRECTORY),
 			     env);
-  scheme_add_global_constant("current-directory-for-user",
+  scheme_addto_prim_instance("current-directory-for-user",
 			     scheme_register_parameter(current_user_directory,
 						       "current-directory-for-user", 
 						       MZCONFIG_CURRENT_USER_DIRECTORY),
 			     env);
-  scheme_add_global_constant("current-force-delete-permissions",
+  scheme_addto_prim_instance("current-force-delete-permissions",
 			     scheme_register_parameter(current_force_delete_perms,
 						       "current-force-delete-permissions",
 						       MZCONFIG_FORCE_DELETE_PERMS),
-			     env);
-
-  scheme_add_global_constant("current-library-collection-paths",
-			     scheme_register_parameter(current_library_collection_paths,
-						       "current-library-collection-paths",
-						       MZCONFIG_COLLECTION_PATHS),
-			     env);
-  scheme_add_global_constant("current-library-collection-links",
-			     scheme_register_parameter(current_library_collection_links,
-						       "current-library-collection-links",
-						       MZCONFIG_COLLECTION_LINKS),
-			     env);
-  scheme_add_global_constant("use-compiled-file-paths",
-			     scheme_register_parameter(use_compiled_kind,
-						       "use-compiled-file-paths",
-						       MZCONFIG_USE_COMPILED_KIND),
-			     env);
-  scheme_add_global_constant("current-compiled-file-roots",
-			     scheme_register_parameter(compiled_file_roots,
-						       "current-compiled-file-roots",
-						       MZCONFIG_USE_COMPILED_ROOTS),
-			     env);
-  scheme_add_global_constant("use-user-specific-search-paths",
-			     scheme_register_parameter(use_user_paths,
-						       "use-user-specific-search-paths",
-						       MZCONFIG_USE_USER_PATHS),
-			     env);
-  scheme_add_global_constant("use-collection-link-paths",
-			     scheme_register_parameter(use_link_paths,
-						       "use-collection-link-paths",
-						       MZCONFIG_USE_LINK_PATHS),
-			     env);
-  scheme_add_global_constant("use-compiled-file-check",
-			     scheme_register_parameter(use_compiled_file_check,
-						       "use-compiled-file-check",
-						       MZCONFIG_USE_COMPILED_FILE_CHECK),
 			     env);
 }
 
@@ -613,48 +565,8 @@ static Scheme_Object *make_protected_path(char *chars)
 Scheme_Object *make_exposed_sized_offset_path(int *optional, int already_protected, 
 					      char *chars, intptr_t d, intptr_t len, int copy,
                                               int kind)
-  /* Called to make a directory path where the end has been removed.
-     We may need to remove a redundant separator.
-     Under Windows, if the resulting last element has spaces or is a 
-     special file, then we need to protect it with "\\?\". */
+  /* Called to make a directory path where the end has been removed. */
 {
-  if (kind == SCHEME_WINDOWS_PATH_KIND) {
-    if (!already_protected) {
-      int i, name_end;
-      int non_dot = 0, trailing_dots = 0, protect = 0;
-      /* Skip trailing seps: */
-      for (i = d + len - 1; (i > d) && IS_A_DOS_SEP(chars[i]); --i) {
-      }
-      name_end = i+1;
-      for (; (i > d) && !IS_A_DOS_SEP(chars[i]); --i) {
-        if ((chars[i] != ' ') && (chars[i] != '.'))
-          non_dot = 1;
-        else if (!non_dot)
-          trailing_dots = 1;
-      }
-      if (non_dot && trailing_dots)
-        protect = 1;
-      else if (name_end == (d + len))
-        protect = is_special_filename(chars, i+1, name_end, 0, 1);
-
-      if (protect) {
-        Scheme_Object *first, *last, *a[2];
-        char *s2;
-        int l;
-        l = name_end - (i+1);
-        s2 = (char *)scheme_malloc_atomic(l + 9 + 1);
-        memcpy(s2, "\\\\?\\REL\\\\", 9);
-        memcpy(s2+9, chars + i + 1, l);
-        s2[l + 9] = 0;
-        last = scheme_make_sized_offset_kind_path(s2, 0, l+9, 0, SCHEME_WINDOWS_PATH_KIND);
-        first = make_exposed_sized_offset_path(NULL, 0, chars, d, i-d+1, 1, SCHEME_WINDOWS_PATH_KIND);
-        a[0] = first;
-        a[1] = last;
-        return scheme_build_path(2, a);
-      }
-    }
-  }
-
   /* We may need to remove a redundant separator from the directory
      path. Try removing it, and see if anyone would care: */
   if (do_path_to_directory_path(chars, d, len - 1, scheme_true, 1, kind)) {
@@ -1491,9 +1403,9 @@ char *strip_trailing_spaces(const char *s, int *_len, int delta, int in_place)
   else
     len = strlen(s);
 
-  /* Keep separators that are at the very end: */
+  /* Don't strip before a separator: */
   if ((len - skip_end > delta) && IS_A_DOS_SEP(s[len - 1 - skip_end])) {
-    skip_end++;
+    return (char *)s;
   }
 
   if ((len - skip_end > delta) 
@@ -4754,7 +4666,7 @@ static Scheme_Object *make_link(int argc, Scheme_Object *argv[])
                        "make-file-or-directory-link: cannot make link;\n"
                        " the path already exists\n"
                        "  path: %q",
-                       filename_for_error(argv[0]));
+                       filename_for_error(argv[1]));
     } else {
       scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
                        "make-file-or-directory-link: cannot make link\n"
@@ -5008,240 +4920,6 @@ static Scheme_Object *current_force_delete_perms(int argc, Scheme_Object *argv[]
                              argc, argv, -1, NULL, NULL, 1);
 }
 
-static Scheme_Object *check_link_key_val(Scheme_Object *key, Scheme_Object *val)
-{
-  Scheme_Object *new_val = scheme_null, *a;
-
-  if (!SCHEME_FALSEP(key)
-      && (!SCHEME_SYMBOLP(key)
-          || !scheme_is_module_path(key)))
-    return NULL;
-  
-  while (SCHEME_PAIRP(val)) {
-    a = SCHEME_CAR(val);
-    if (!SCHEME_PATH_STRINGP(a))
-      return NULL;
-    a = TO_PATH(a);
-    if (!scheme_is_complete_path(SCHEME_PATH_VAL(a),
-                                 SCHEME_PATH_LEN(a),
-                                 SCHEME_PLATFORM_PATH_KIND))
-      return NULL;
-    new_val = scheme_make_pair(a, new_val);
-    val = SCHEME_CDR(val);
-  }
-
-  if (!SCHEME_NULLP(val))
-    return NULL;
-
-  return scheme_reverse(new_val);
-}
-
-static Scheme_Object *collpaths_gen_p(int argc, Scheme_Object **argv, int rel_ok, int abs_ok, int sym_ok, int links_ok)
-{
-  Scheme_Object *v = argv[0];
-  Scheme_Object *new_hts = scheme_null;
-
-  if (scheme_proper_list_length(v) < 0)
-    return NULL;
-
-  if (SCHEME_NULLP(v))
-    return v;
-
-  while (SCHEME_PAIRP(v)) {
-    Scheme_Object *s;
-    s = SCHEME_CAR(v);
-    if (sym_ok && SAME_OBJ(s, same_symbol)) {
-      /* ok */
-    } else if (links_ok && SCHEME_FALSEP(s)) {
-      /* ok */
-    } else if (links_ok && (SCHEME_CHAPERONE_HASHTP(s)
-                            || SCHEME_CHAPERONE_HASHTRP(s)
-                            || SCHEME_CHAPERONE_BUCKTP(s))) {
-      Scheme_Hash_Tree *new_ht;
-      Scheme_Object *key, *val, *idx, *a[2];
-
-      new_ht = scheme_make_hash_tree(SCHEME_hashtr_eq);
-
-      a[0] = s;
-      idx = scheme_hash_table_iterate_start(1, a);
-      while (SCHEME_TRUEP(idx)) {
-        a[0] = s;
-        a[1] = idx;
-        key = scheme_hash_table_iterate_key(2, a);
-        
-        val = scheme_chaperone_hash_get(s, key);
-        if (val) {
-          val = check_link_key_val(key, val);
-          if (!val) return NULL;
-          new_ht = scheme_hash_tree_set(new_ht, key, val);
-        }
-
-        a[0] = s;
-        a[1] = idx;
-        idx = scheme_hash_table_iterate_next(2, a);
-      }
-
-      new_hts = scheme_make_pair((Scheme_Object *)new_ht, new_hts);
-    } else {
-      if (!SCHEME_PATH_STRINGP(s))
-        return NULL;
-      s = TO_PATH(s);
-      if (!abs_ok && !scheme_is_relative_path(SCHEME_PATH_VAL(s),
-                                              SCHEME_PATH_LEN(s),
-                                              SCHEME_PLATFORM_PATH_KIND))
-        return NULL;
-      if (!rel_ok && !scheme_is_complete_path(SCHEME_PATH_VAL(s),
-                                              SCHEME_PATH_LEN(s),
-                                              SCHEME_PLATFORM_PATH_KIND))
-        return NULL;
-    }
-    v = SCHEME_CDR(v);
-  }
-
-  if (!SCHEME_NULLP(v))
-    return NULL;
-
-  new_hts = scheme_reverse(new_hts);
-
-  /* Convert to list of paths: */
-  {
-    Scheme_Object *last = NULL, *first = NULL, *p, *s;
-    v = argv[0];
-    while (SCHEME_PAIRP(v)) {
-      s = SCHEME_CAR(v);
-      if (SCHEME_SYMBOLP(s)) {
-        /* ok */
-      } else if (SCHEME_FALSEP(s)) {
-        /* ok */
-      } else if (SCHEME_PATH_STRINGP(s)) {
-        s = TO_PATH(s);
-      } else {
-        s = SCHEME_CAR(new_hts);
-        new_hts = SCHEME_CDR(new_hts);
-      }
-      
-      p = scheme_make_pair(s, scheme_null);
-      if (!first)
-	first = p;
-      else
-	SCHEME_CDR(last) = p;
-      last = p;
-
-      v = SCHEME_CDR(v);
-    }
-
-    return first;
-  }
-}
-
-static Scheme_Object *collpaths_p(int argc, Scheme_Object **argv)
-{
-  return collpaths_gen_p(argc, argv, 0, 1, 0, 0);
-}
-
-Scheme_Object *scheme_current_library_collection_paths(int argc, Scheme_Object *argv[]) {
-  return current_library_collection_paths(argc, argv);
-}
-
-static Scheme_Object *current_library_collection_paths(int argc, Scheme_Object *argv[])
-{
-  return scheme_param_config2("current-library-collection-paths", 
-                              scheme_make_integer(MZCONFIG_COLLECTION_PATHS),
-                              argc, argv,
-                              -1, collpaths_p, "(listof (and/c path-string? complete-path?))", 1);
-}
-
-static Scheme_Object *colllinks_p(int argc, Scheme_Object **argv)
-{
-  return collpaths_gen_p(argc, argv, 0, 1, 0, 1);
-}
-
-Scheme_Object *scheme_current_library_collection_links(int argc, Scheme_Object *argv[]) {
-  return current_library_collection_links(argc, argv);
-}
-
-static Scheme_Object *current_library_collection_links(int argc, Scheme_Object *argv[])
-{
-  return scheme_param_config2("current-library-collection-links", 
-                              scheme_make_integer(MZCONFIG_COLLECTION_LINKS),
-                              argc, argv,
-                              -1, colllinks_p, 
-                              "(listof (or/c #f (and/c path-string? complete-path?)"
-                              /**/         " (hash/c (or/c (and/c symbol? module-path?) #f)"
-                              /**/                 " (listof (and/c path-string? complete-path?)))))", 
-                              1);
-}
-
-static Scheme_Object *compiled_kind_p(int argc, Scheme_Object **argv)
-{
-  return collpaths_gen_p(argc, argv, 1, 0, 0, 0);
-}
-
-static Scheme_Object *use_compiled_kind(int argc, Scheme_Object *argv[])
-{
-  return scheme_param_config2("use-compiled-file-paths",
-                              scheme_make_integer(MZCONFIG_USE_COMPILED_KIND),
-                              argc, argv,
-                              -1, compiled_kind_p, "(listof (and/c path-string? relative-path?))", 1);
-}
-
-static Scheme_Object *compiled_roots_p(int argc, Scheme_Object **argv)
-{
-  return collpaths_gen_p(argc, argv, 1, 1, 1, 0);
-}
-
-Scheme_Object *scheme_compiled_file_roots(int argc, Scheme_Object *argv[])
-{
-  return compiled_file_roots(argc, argv);
-}
-
-static Scheme_Object *compiled_file_roots(int argc, Scheme_Object *argv[])
-{
-  return scheme_param_config2("current-compiled-file-roots",
-                              scheme_make_integer(MZCONFIG_USE_COMPILED_ROOTS),
-                              argc, argv,
-                              -1, compiled_roots_p, "(listof (or/c path-string? 'same))", 1);
-}
-
-static Scheme_Object *use_user_paths(int argc, Scheme_Object *argv[])
-{
-  return scheme_param_config("use-user-specific-search-paths", 
-			     scheme_make_integer(MZCONFIG_USE_USER_PATHS),
-			     argc, argv,
-			     -1, NULL, NULL, 1);
-}
-
-static Scheme_Object *use_link_paths(int argc, Scheme_Object *argv[])
-{
-  return scheme_param_config("use-collection-link-paths", 
-			     scheme_make_integer(MZCONFIG_USE_LINK_PATHS),
-			     argc, argv,
-			     -1, NULL, NULL, 1);
-}
-
-static Scheme_Object *compiled_file_check_p(int argc, Scheme_Object *argv[])
-{
-  Scheme_Object *v = argv[0];
-
-  if (SCHEME_SYMBOLP(v)
-      && !SCHEME_SYM_WEIRDP(v)
-      && (((SCHEME_SYM_LEN(v) == 14)
-           && !strcmp(SCHEME_SYM_VAL(v), "modify-seconds"))
-          || ((SCHEME_SYM_LEN(v) == 6)
-              && !strcmp(SCHEME_SYM_VAL(v), "exists"))))
-    return v;
-
-  return NULL;
-}
-
-static Scheme_Object *use_compiled_file_check(int argc, Scheme_Object *argv[])
-{
-  return scheme_param_config2("use-compiled-file-check", 
-                              scheme_make_integer(MZCONFIG_USE_COMPILED_FILE_CHECK),
-                              argc, argv,
-                              -1, compiled_file_check_p, "(or/c 'modify-seconds 'exists)", 0);
-}
-
 /********************************************************************************/
 
 Scheme_Object *scheme_get_run_cmd(void)
@@ -5307,10 +4985,10 @@ find_system_path(int argc, Scheme_Object **argv)
   } else {
     scheme_wrong_contract("find-system-path", 
                           "(or/c 'home-dir 'pref-dir 'pref-file 'temp-dir\n"
-                          "       'init-dir 'init-file 'addon-dir\n"
-                          "       'doc-dir 'desk-dir 'sys-dir 'exec-file 'run-file\n"
-                          "       'collects-dir 'config-dir 'orig-dir\n"
-                          "       'host-collects-dir 'host-config-fir)",
+                          "      'init-dir 'init-file 'addon-dir\n"
+                          "      'doc-dir 'desk-dir 'sys-dir 'exec-file 'run-file\n"
+                          "      'collects-dir 'config-dir 'orig-dir\n"
+                          "      'host-collects-dir 'host-config-dir)",
                           0, argc, argv);
     return NULL;
   }
@@ -5420,6 +5098,9 @@ void scheme_set_addon_dir(Scheme_Object *p)
 
 #ifdef DOS_FILE_SYSTEM
 
+static scheme_dll_open_proc alt_dll_open;
+static scheme_dll_find_object_proc alt_find_obj;
+
 void scheme_set_dll_path(wchar_t *p)
 {
   rktio_set_dll_path(p);
@@ -5437,6 +5118,36 @@ wchar_t *scheme_get_dll_path(wchar_t *p)
   memcpy(r2, r, sizeof(wchar_t) * len);
   free(r);
   return r2;
+}
+
+void scheme_set_dll_procs(scheme_dll_open_proc dll_open, scheme_dll_find_object_proc find_obj)
+{
+  rktio_set_dll_procs(dll_open, find_obj);
+  alt_dll_open = dll_open;
+  alt_find_obj = find_obj;
+}
+
+HANDLE scheme_dll_load_library(const char *s, const wchar_t *ws, int *_mode)
+{
+  if (alt_dll_open) {
+    void *h;
+    h = alt_dll_open(s, 0);
+    if (h) {
+      *_mode = 1;
+      return (HANDLE)h;
+    }
+  }
+
+  *_mode = 0;
+  return LoadLibraryW(scheme_get_dll_path(ws));
+}
+
+void *scheme_dll_get_proc_address(HANDLE m, const char *name, int dll_mode)
+{
+  if (dll_mode)
+    return alt_find_obj((void *)m, name);
+  else
+    return GetProcAddress(m, name);
 }
 
 #endif

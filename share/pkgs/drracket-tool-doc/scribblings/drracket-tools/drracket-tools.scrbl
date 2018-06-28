@@ -106,7 +106,7 @@ in order to make the results be platform independent.
 @definterface[syncheck-annotations<%> ()]{
 
   Classes implementing this interface are
-  accceptors of information about a traversal
+  acceptors of information about a traversal
   of syntax objects. See @racket[make-traversal].
   
   Do not implement this interface directly, as it
@@ -175,12 +175,14 @@ in order to make the results be platform independent.
                                     [end exact-nonnegative-integer?]
                                     [id symbol?]
                                     [label any/c]
+                                    [definition-tag definition-tag?]
                                     [path any/c]
                                     [tag any/c])
             void?]{
    Called to indicate that there is something that has documentation between the range
    @racket[start] and @racket[end]. The documented identifier's name is given by @racket[id]
    and the docs are found in the html file @racket[path] at the html tag @racket[tag].
+   The @racket[definition-tag] argument matches the documented definition.
    The @racket[label] argument describes the binding for use in the menu item (although it may
    be longer than 200 characters).
  }
@@ -289,13 +291,21 @@ in order to make the results be platform independent.
  @defmethod[(syncheck:add-prefixed-require-reference
              [req-src (not/c #f)]
              [req-pos-left exact-nonnegative-integer?]
-             [req-pos-right exact-nonnegative-integer?])
+             [req-pos-right exact-nonnegative-integer?]
+             [prefix symbol?]
+             [prefix-src any/c]
+             [prefix-left (or/c #f exact-nonnegative-integer?)]
+             [prefix-right (or/c #f exact-nonnegative-integer?)])
            void?]{
   This method is called for each @racket[require] in the program that
   has a @racket[_prefix] or @racket[_prefix-all-except] around it in
   fully expanded form (i.e., it seems to come from a @racket[prefix-in]
-  or a similar form). The method is passed
-  the location of the @racket[require] in the original program.
+  or a similar form).
+
+  The method is passed the location of the @racket[require]
+  in the original program, as well as the prefix (as a symbol)
+  and the source locations of the prefix (if they are
+  available).
  }
 
  @defmethod[(syncheck:add-unused-require

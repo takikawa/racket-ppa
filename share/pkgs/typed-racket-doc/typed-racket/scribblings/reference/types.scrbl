@@ -84,9 +84,18 @@ all floating-point numbers. This is the most general type for which comparisons
 Exact-Number
 Float-Complex
 Single-Flonum-Complex
-Inexact-Complex)]
+Inexact-Complex
+Imaginary
+Exact-Complex
+Exact-Imaginary
+Inexact-Imaginary)]
 These types correspond to Racket's complex numbers.
 
+@history[#:changed "1.7"]{@elem{Added @racket[Imaginary],
+ @racket[Inexact-Complex],
+ @racket[Exact-Complex],
+ @racket[Exact-Imaginary],
+ @racket[Inexact-Imaginary].}}
 
 The above types can be subdivided into more precise types if you want to
 enforce tighter constraints. Typed Racket provides types for the positive,
@@ -715,7 +724,8 @@ functions and continuation mark functions.
           [optional-dom type
                         (code:line keyword type)]
           [rest (code:line)
-                (code:line #:rest type)])]{
+                (code:line #:rest type)
+                (code:line #:rest-star (type ...))])]{
   Constructs the type of functions with optional or rest arguments. The first
   list of @racket[mandatory-dom]s correspond to mandatory argument types. The list
   @racket[optional-doms], if provided, specifies the optional argument types.
@@ -724,13 +734,29 @@ functions and continuation mark functions.
       (define (append-bar str [how-many 1])
         (apply string-append str (make-list how-many "bar")))]
 
-  If provided, the @racket[rest] expression specifies the type of
+  If provided, the @racket[#:rest type] specifies the type of
   elements in the rest argument list.
 
   @ex[(: +all (->* (Integer) #:rest Integer (Listof Integer)))
       (define (+all inc . rst)
         (map (λ ([x : Integer]) (+ x inc)) rst))
       (+all 20 1 2 3)]
+
+  A @racket[#:rest-star (type ...)] specifies the rest list is a sequence
+  of types which occurs 0 or more times (i.e. the Kleene closure of the
+  sequence).
+
+ @ex[(: print-name+ages (->* () #:rest-star (String Natural) Void))
+     (define (print-name+ages . names+ages)
+       (let loop ([names+ages : (Rec x (U Null (List* String Natural x))) names+ages])
+         (when (pair? names+ages)
+           (printf "~a is ~a years old!\n"
+                   (first names+ages)
+                   (second names+ages))
+           (loop (cddr names+ages))))
+       (printf "done printing ~a ages" (/ (length names+ages) 2)))
+     (print-name+ages)
+     (print-name+ages "Charlotte" 8 "Harrison" 5 "Sydney" 3)]
 
   Both the mandatory and optional argument lists may contain keywords paired
   with types.
@@ -774,8 +800,9 @@ functions and continuation mark functions.
  @ex[((λ #:forall (A) ([x : (∩ Symbol A)]) x) 'foo)]}
 
 @defform[(case-> fun-ty ...)]{is a function that behaves like all of
-  the @racket[fun-ty]s, considered in order from first to last.  The @racket[fun-ty]s must all be function
-  types constructed with @racket[->].
+  the @racket[fun-ty]s, considered in order from first to last.
+ The @racket[fun-ty]s must all be non-dependent function types (i.e. no
+ preconditions or dependencies between arguments are currently allowed).
   @ex[(: add-map : (case->
                      [(Listof Integer) -> (Listof Integer)]
                      [(Listof Integer) (Listof Integer) -> (Listof Integer)]))]
@@ -833,20 +860,79 @@ this top type.
 @ex[(struct-info (arity-at-least 0))]
 }
 
-@defform[(Prefab key type ...)]{
-  Represents a @rtech{prefab} structure type with the given prefab structure
-  key (such as one returned by @racket[prefab-struct-key] or accepted by
-  @racket[make-prefab-struct]) and with the given types for each field.
+@defform[(Prefab key type ...)]{Describes a @rtech{prefab}
+ structure with the given (implicitly quoted) @emph{prefab
+  key} @racket[key] and specified field types.
 
-  In the case of prefab structure types with supertypes, the field types of the
-  supertypes come before the field types of the child structure type. The order
-  of types matches the order of arguments to a prefab struct constructor.
+ Prefabs are more-or-less tagged polymorphic tuples which
+ can be directly serialized and whose fields can be accessed
+ by anyone. Subtyping is covariant for immutable fields and
+ invariant for mutable fields.
 
-  @ex[#s(salad "potato" "mayo")
-      (: q-salad (Prefab (salad food 1) String String Symbol))
-      (define q-salad
-        #s((salad food 1) "quinoa" "EVOO" salad))]
+ When a prefab struct is defined with @racket[struct] the
+ struct name is bound at the type-level to the
+ @racket[Prefab] type with the corresponding key and field
+ types and the constructor expects types corresponding to
+ those declared for each field. The defined predicate,
+ however, only tests whether a value is a prefab structure
+ with the same key and number of fields, but does not inspect
+ the fields' values.
+
+  @ex[(struct person ([name : String]) #:prefab)
+      person
+      person?
+      person-name
+      (person "Jim")
+      (ann '#s(person "Dwight") person)
+      (ann '#s(person "Pam") (Prefab person String))
+      (ann '#s(person "Michael") (Prefab person Any))
+      (eval:error (person 'Toby))
+      (eval:error (ann #s(person Toby) (Prefab person String)))
+      (ann '#s(person Toby) (Prefab person Symbol))
+      (person? '#s(person "Michael"))
+      (person? '#s(person Toby))
+      (struct employee person ([schrute-bucks : Natural]) #:prefab)
+      (employee "Oscar" 10000)
+      (ann '#s((employee person 1) "Oscar" 10000) employee)
+      (ann '#s((employee person 1) "Oscar" 10000)
+           (Prefab (employee person 1) String Natural))
+      (person? '#s((employee person 1) "Oscar" 10000))
+      (employee? '#s((employee person 1) "Oscar" 10000))
+      (eval:error (employee 'Toby -1))
+      (ann '#s((employee person 1) Toby -1)
+           (Prefab (employee person 1) Symbol Integer))
+      (person? '#s((employee person 1) Toby -1))
+      (employee? '#s((employee person 1) Toby -1))]
 }
+
+@defform[(PrefabTop key field-count)]{Describes all
+prefab types with the (implicitly quoted) prefab-key
+ @racket[key] and @racket[field-count] many fields.
+
+ For immutable prefabs this is equivalent to
+ @racket[(Prefab key Any ...)] with @racket[field-count] many
+ occurrences of @racket[Any]. For mutable prefabs, this
+ describes a prefab that can be read from but not written to
+ (since we do not know at what type other code may have the
+ fields typed at).
+
+@ex[(struct point ([x : Number] [y : Number])
+      #:prefab
+      #:mutable)
+    point
+    point-x
+    point-y
+    point?
+    (define (maybe-read-x p)
+      (if (point? p)
+          (ann (point-x p) Any)
+          'not-a-point))
+    (eval:error (define (read-some-x-num p)
+      (if (point? p)
+          (ann (point-x p) Number)
+          -1)))]
+
+@history[#:added "1.7"]}
 
 @defalias[Union U]
 @defalias[Intersection ∩]

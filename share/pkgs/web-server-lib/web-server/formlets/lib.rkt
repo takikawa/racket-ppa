@@ -7,6 +7,7 @@
          racket/function
          racket/serialize
          syntax/location
+         setup/collects
          (for-syntax racket/base
                      syntax/parse))
 
@@ -70,7 +71,7 @@
                   #:range-contracts (map (curry coerce-contract 'formlet/c)
                                          contracts)))]))
 (define quote-this-module-path
-  (quote-module-path))
+  (path->collects-relative (quote-module-path)))
 (define-syntax formlet/c
   (syntax-parser
     [(_ range ...)
@@ -83,7 +84,7 @@
         (-> contract? (... ...) contract?)
         dynamic-formlet/c
         quote-this-module-path
-        (quote-module-path)
+        (path->collects-relative (quote-module-path))
         "formlet/c"
         #'name)]))
 

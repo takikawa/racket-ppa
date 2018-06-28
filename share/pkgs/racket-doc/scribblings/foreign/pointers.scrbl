@@ -138,20 +138,9 @@ easily lead to a segmentation fault or memory corruption.}
 
 
 @defproc*[([(memmove [cptr cpointer?]
+                     [offset exact-integer? 0]
                      [src-cptr cpointer?]
-                     [count exact-nonnegative-integer?]
-                     [type ctype? _byte])
-            void?]
-           [(memmove [cptr cpointer?]
-                     [offset exact-integer?]
-                     [src-cptr cpointer?]
-                     [count exact-nonnegative-integer?]
-                     [type ctype? _byte])
-            void?]
-           [(memmove [cptr cpointer?]
-                     [offset exact-integer?]
-                     [src-cptr cpointer?]
-                     [src-offset exact-integer?]
+                     [src-offset exact-integer? 0]
                      [count exact-nonnegative-integer?]
                      [type ctype? _byte])
             void?])]{
@@ -164,20 +153,9 @@ destination is determined by @racket[count], which is in @racket[type]
 instances when supplied.}
 
 @defproc*[([(memcpy [cptr cpointer?]
+                    [offset exact-integer? 0]
                     [src-cptr cpointer?]
-                    [count exact-nonnegative-integer?]
-                    [type ctype? _byte])
-            void?]
-           [(memcpy [cptr cpointer?]
-                    [offset exact-integer?]
-                    [src-cptr cpointer?]
-                    [count exact-nonnegative-integer?]
-                    [type ctype? _byte])
-            void?]
-           [(memcpy [cptr cpointer?]
-                    [offset exact-integer?]
-                    [src-cptr cpointer?]
-                    [src-offset exact-integer?]
+                    [src-offset exact-integer? 0]
                     [count exact-nonnegative-integer?]
                     [type ctype? _byte])
             void?])]{
@@ -186,12 +164,7 @@ Like @racket[memmove], but the result is undefined if the destination
 and source overlap.}
 
 @defproc*[([(memset [cptr cpointer?]
-                    [byte byte?]
-                    [count exact-nonnegative-integer?]
-                    [type ctype? _byte])
-            void?]
-           [(memset [cptr cpointer?]
-                    [offset exact-integer?]
+                    [offset exact-integer? 0]
                     [byte byte?]
                     [count exact-nonnegative-integer?]
                     [type ctype? _byte])
@@ -394,12 +367,13 @@ procedure would then not close over @racket[b].)}
          bytes?]{
 
 Returns a byte string made of the given pointer and the given length.
-No copying is done.  This can be used as an alternative to make
-pointer values accessible in Racket when the size is known.
+No copying is performed. Beware that future implementations of Racket
+may not support this function (in case of a byte string representation
+that combines a size and byte-string content without an indirection).
 
-Beware that the representation of a Racket byte string normally
+Beware also that the representation of a Racket byte string normally
 requires a nul terminator at the end of the byte string (after
-@racket[length] bytes), but some function work with a byte-string
+@racket[length] bytes), but some functions work with a byte-string
 representation that has no such terminator---notably
 @racket[bytes-copy].
 

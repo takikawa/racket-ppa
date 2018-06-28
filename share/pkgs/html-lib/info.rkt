@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.12"))) (define collection (quote multi)) (define deps (quote ("base"))) (define pkg-desc "implementation (no documentation) part of \"html\"") (define pkg-authors (quote (jay mflatt)))))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.90.0.901"))) (define collection (quote multi)) (define deps (quote ("base"))) (define pkg-desc "implementation (no documentation) part of \"html\"") (define pkg-authors (quote (jay mflatt)))))

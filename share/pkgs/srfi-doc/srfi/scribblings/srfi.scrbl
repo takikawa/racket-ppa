@@ -1,5 +1,6 @@
 #lang scribble/doc
-@(require scribble/manual
+@(require srfi/scribblings/util
+          scribble/manual
           scribble/eval
           scriblib/render-cond
           scribble/core
@@ -7,54 +8,6 @@
           (for-syntax scheme/base)
           (for-label scheme/base
                      racket/stream))
-
-@(define-syntax (srfi stx)
-  (syntax-case stx ()
-   [(_ num #:subdir subdir? . title)
-    (with-syntax ([srfi/n (string->symbol (format "srfi/~a" (syntax-e #'num)))])
-      #'(begin
-          (section #:tag (format "srfi-~a" num)
-                   #:style 'unnumbered
-                   (format "SRFI ~a: " num)
-                   . title)
-          (defmodule srfi/n)
-          "Original specification: "
-          (let* ([label (format "SRFI ~a" num)]
-                 [sub (if subdir? (format "srfi-~a/" num) "")]
-                 [url (λ (b) (format "~a/srfi-std/~asrfi-~a.html" b sub num))])
-            (cond-element
-              [(or latex text) @link[(url "http://docs.racket-lang.org") label]]
-              [else @link[(url ".") label]]))))]
-   [(_ num . title) #'(srfi num #:subdir #f . title)]))
-
-@;{ The `lst' argument is a list of
-       (list sym syntactic-form? html-anchor) }
-@(define (redirect n lst #:subdir [subdir? #f])
-   (let ([file (if subdir?
-                 (format "srfi-~a/srfi-~a.html" n n)
-                 (format "srfi-~a.html" n))]
-         [mod-path (string->symbol (format "srfi/~a" n))])
-     (make-binding-redirect-elements mod-path
-       (map (lambda (b)
-              (list (car b) (cadr b)
-                    (build-path "srfi-std" file)
-                    (caddr b)))
-            lst))))
-
-@(define in-core
-   (case-lambda
-     [() (in-core ".")]
-     [(k) @elem{This SRFI's bindings are also available in
-                @racketmodname[racket/base]@|k|}]))
-
-@(begin
-  (define-syntax-rule (def-mz mz-if)
-    (begin
-      (require (for-label mzscheme))
-      (define mz-if (racket if))))
-  (def-mz mz-if))
-
-@(define srfi-std (style #f (list (install-resource "srfi-std"))))
 
 @; ----------------------------------------------------------------------
 
@@ -242,14 +195,6 @@ functions.
 
 This SRFI's reader and printer syntax is not supported. The bindings
 are also available from @racketmodname[scheme/foreign].
-
-@; ----------------------------------------
-
-@srfi[5]{A compatible let form with signatures and rest arguments}
-
-@redirect[5 '(
- (let #t "unnamed")
-)]
 
 @; ----------------------------------------
 
@@ -668,20 +613,6 @@ returns @racket[#f].
 )]
 
 @in-core{}
-
-@; ----------------------------------------
-
-@srfi[29]{Localization}
-
-@redirect[29 '(
- (current-language #f "current-language")
- (current-country #f "current-country")
- (current-locale-details #f "current-locale-details")
- (declare-bundle! #f "declare-bundle!")
- (store-bundle #f "store-bundle")
- (load-bundle! #f "load-bundle!")
- (localized-template #f "localized-template")
-)]
 
 @; ----------------------------------------
 

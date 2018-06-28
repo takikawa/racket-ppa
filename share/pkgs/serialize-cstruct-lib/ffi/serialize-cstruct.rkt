@@ -95,14 +95,14 @@
                                                           
                    [make-ID/mode (format-id #'_ID "make-~a/mode" id)]
 
-                   [serialize-inplace (and (attribute serialize-inplace-kw) #t)]
-                   [deserialize-inplace (and (attribute deserialize-inplace-kw) #t)])
+                   [serialize-inplace (and (attribute serialize-inplace-kw) (not (eq? 'cs (system-type 'gc))))]
+                   [deserialize-inplace (and (attribute deserialize-inplace-kw) (not (eq? 'cs (system-type 'gc))))])
 
        (quasisyntax/loc stx
          (begin
            #,@(if (eq? 'top-level (syntax-local-context))
                   ;; Forward reference:
-                  `((define-syntaxes (all-serializable) (values)))
+                  `((define-syntaxes (copy-any-non-pointers-for-ID? all-serializable) (values)))
                   null)
            
            ;; the wrapped cstruct
@@ -114,13 +114,13 @@
               (lambda (s)
                 (force all-serializable)
                 (hash-set! cpointer-mapping s s)
-                (define inplace-bs (make-sized-byte-string s (ctype-sizeof _ID)))
                 (define bs
                   (if serialize-inplace
-                      inplace-bs
-                      (let ([mem (malloc _ID 'atomic)])
-                        (memcpy mem inplace-bs 1 _ID)
-                        (make-sized-byte-string mem (ctype-sizeof _ID)))))
+                      (make-sized-byte-string s (ctype-sizeof _ID))
+                      (let ([mem (make-bytes (ctype-sizeof _ID))])
+                        (when (force copy-any-non-pointers-for-ID?)
+                          (memcpy mem s 1 _ID))
+                        mem)))
                 (vector bs (serialize-cstruct-pointers s)))
               (quote-syntax deser-ID)
               #t
@@ -134,13 +134,17 @@
                  (malloc-mode (ctype-sizeof _ID))
                  (malloc _ID malloc-mode)))
 
+           ;; must be delayed to handle cyclic structs
+           (define copy-any-non-pointers-for-ID?
+             (delay (copy-any-non-pointers? _ID)))
+
            ;; deserialization proc
            #,@(if (eq? (syntax-local-context) 'module)
                   #`((runtime-require (submod "." deserialize-info))
                      (module+ deserialize-info (provide deser-ID
                                                         other-vers-deser-ID ...)))
                   null)
-           (define deser-chain-ID (id->deserialize-chain-info _ID _ID-pointer deserialize-inplace malloc-ID))
+           (define deser-chain-ID (id->deserialize-chain-info _ID _ID-pointer deserialize-inplace malloc-ID copy-any-non-pointers-for-ID?))
            (define deser-ID (deserialize-chain-info->deserialize-info deser-chain-ID))
            (define other-vers-deser-ID (chain+converters->deserialize-info other-vers-deser-chain
                                                                            other-vers-convert
@@ -184,7 +188,6 @@
       (array-base-type (array-type ((ctype-c->scheme ct) #f)))
       ct))
 
-
 (define (ctype-layout-base-type v)
   (if (vector? v)
       (ctype-layout-base-type (vector-ref v 0))
@@ -192,14 +195,15 @@
 
 (struct chain-deserialize-info (make cycle-make))
 
-(define (id->deserialize-chain-info _ID _ID-pointer deserialize-inplace malloc-ID)
+(define (id->deserialize-chain-info _ID _ID-pointer deserialize-inplace malloc-ID copy-any-non-pointers-for-ID?)
   (chain-deserialize-info
    (lambda (bs ptrs)
      (define s
        (if deserialize-inplace
            (cast bs _bytes _ID-pointer)
            (let ([mem (malloc-ID)])
-             (memcpy mem bs 1 _ID)
+             (when (force copy-any-non-pointers-for-ID?)
+               (memcpy mem bs 1 _ID))
              (cast mem _pointer _ID-pointer))))
      (deserialize-cstruct-pointers s ptrs)
      s)
@@ -232,6 +236,14 @@
 
 (define ptr-types '(bytes string/ucs-4 string/utf-16 pointer gcpointer))
 
+(define (copy-any-non-pointers? _ID)
+  (for/or ([t (in-list (ctype->layout _ID))])
+    (let ([base (ctype-layout-base-type t)])
+      (let loop ([base base])
+        (cond
+          [(list? base) (ormap loop base)]
+          [(vector? base) (loop (vector-ref base 0))]
+          [else (not (memq base ptr-types))])))))
 
 (define (serialize-cstruct-pointers o)
   (define who 'serialize-cstruct-pointers)

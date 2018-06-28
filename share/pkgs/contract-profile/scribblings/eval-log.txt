@@ -16,7 +16,7 @@
  #"")
 ((contract-profile (sum* (range (expt 10 7))))
  ((3) 0 () 0 () () (q values 49999995000000))
- #"Running time is 20.68% contracts\n529/2555 ms\n\n(-> (listof integer?) integer?)                                  528.5 ms\n#<blame>::-1                                                    \n    sum*                                                         528.5 ms\n\n"
+ #"Running time is 47.84% contracts\n1094/2287 ms\n\n(-> (listof integer?) integer?)                                  1094 ms\n#<blame>::-1                                                    \n    sum*                                                         1094 ms\n\n"
  #"")
 ((define/contract
   (vector-max* vec-of-numbers)
@@ -30,5 +30,9 @@
  #"")
 ((contract-profile (vector-max* (make-vector 10 (range (expt 10 7)))))
  ((3) 0 () 0 () () (q values 499999950000000))
- #"Running time is 93.25% contracts\n4453/4775 ms\n\n(-> (vectorof (listof any/c)) integer?)                          2055.5 ms\n#<blame>::-1                                                    \n    vector-max*                                                  2055.5 ms\n\n(-> (listof integer?) integer?)                                  2397 ms\n#<blame>::-1                                                    \n    sum*                                                         2397 ms\n\n"
+ #"Running time is 93.76% contracts\n4180/4458 ms\n\n(-> (vectorof (listof any/c)) integer?)                          1939 ms\n#<blame>::-1                                                    \n    vector-max*                                                  1939 ms\n\n(-> (listof integer?) integer?)                                  2241 ms\n#<blame>::-1                                                    \n    sum*                                                         2241 ms\n\n"
+ #"")
+((contract-profile-thunk (lambda () (sum* (range (expt 10 7)))))
+ ((3) 0 () 0 () () (q values 49999995000000))
+ #"Running time is 44.16% contracts\n908/2056 ms\n\n(-> (listof integer?) integer?)                                  908 ms\n#<blame>::-1                                                    \n    sum*                                                         908 ms\n\n"
  #"")

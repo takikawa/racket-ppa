@@ -177,27 +177,50 @@
                  [c (in-list (class/c-method-contracts ctc))])
         (and c
              ((contract-late-neg-projection c) (blame-add-method-context blame name)))))
-    
     (define external-field-projections
       (for/list ([f (in-list (class/c-fields ctc))]
                  [c (in-list (class/c-field-contracts ctc))])
         (define pos-blame (blame-add-field-context blame f #:swap? #f))
         (define neg-blame (blame-add-field-context blame f #:swap? #t))
-        (and c
-             (let ([p-pos ((contract-late-neg-projection c)
-                           pos-blame)]
-                   [p-neg ((contract-late-neg-projection c)
-                           neg-blame)])
-               (cons (lambda (x pos-party)
-                       (define blame+pos-party (cons pos-blame pos-party))
-                       (with-contract-continuation-mark
-                        blame+pos-party
+        (cond
+          [c
+           (define-values (filled? maybe-p-pos maybe-p-neg)
+             (contract-pos/neg-doubling ((contract-late-neg-projection c) pos-blame)
+                                        ((contract-late-neg-projection c) neg-blame)))
+           (cond
+             [filled?
+              (cons (lambda (x pos-party)
+                      (define blame+pos-party (cons pos-blame pos-party))
+                      (with-contract-continuation-mark
+                          blame+pos-party
+                        (maybe-p-pos x pos-party)))
+                    (lambda (x neg-party)
+                      (define blame+neg-party (cons neg-blame neg-party))
+                      (with-contract-continuation-mark
+                          blame+neg-party
+                        (maybe-p-neg x neg-party))))]
+             [else
+              (define tc-pos (make-thread-cell #f))
+              (define tc-neg (make-thread-cell #f))
+              (cons (lambda (x pos-party)
+                      (define blame+pos-party (cons pos-blame pos-party))
+                      (with-contract-continuation-mark
+                          blame+pos-party
+                        (define p-pos (or (thread-cell-ref tc-pos)
+                                          (let ([p-pos (maybe-p-pos)])
+                                            (thread-cell-set! tc-pos p-pos)
+                                            p-pos)))
                         (p-pos x pos-party)))
-                     (lambda (x neg-party)
-                       (define blame+neg-party (cons neg-blame neg-party))
-                       (with-contract-continuation-mark
-                        blame+neg-party
-                        (p-neg x neg-party))))))))
+                    (lambda (x neg-party)
+                      (define blame+neg-party (cons neg-blame neg-party))
+                      (with-contract-continuation-mark
+                          blame+neg-party
+                        (define p-neg (or (thread-cell-ref tc-neg)
+                                          (let ([p-neg (maybe-p-neg)])
+                                            (thread-cell-set! tc-neg p-neg)
+                                            p-neg)))
+                        (p-neg x neg-party))))])]
+          [else #f])))
     
     ;; zip the inits and contracts together for ordered selection
     (define inits+contracts 
@@ -439,20 +462,52 @@
     (define internal-field-projections
       (for/list ([f (in-list (internal-class/c-inherit-fields internal-ctc))]
                  [c (in-list (internal-class/c-inherit-field-contracts internal-ctc))])
-        (and c
-             (let* ([blame-acceptor (contract-late-neg-projection c)]
-                    [p-pos (blame-acceptor blame)]
-                    [p-neg (blame-acceptor bswap)])
-               (cons (lambda (x pos-party)
-                       (define blame+pos-party (cons blame pos-party))
-                       (with-contract-continuation-mark
-                        blame+pos-party
+        (cond
+          [c
+           (define blame-acceptor (contract-late-neg-projection c))
+           (define-values (filled? maybe-p-pos maybe-p-neg)
+             (contract-pos/neg-doubling (blame-acceptor blame)
+                                        (blame-acceptor bswap)))
+           (cond
+             [filled?
+              (cons (lambda (x pos-party)
+                      (define blame+pos-party (cons blame pos-party))
+                      (with-contract-continuation-mark
+                          blame+pos-party
+                        (maybe-p-pos x pos-party)))
+                    (lambda (x neg-party)
+                      (define blame+neg-party (cons blame neg-party))
+                      (with-contract-continuation-mark
+                          blame+neg-party
+                        (maybe-p-neg x neg-party))))]
+             [else
+              (define tc-pos (make-thread-cell #f))
+              (define tc-neg (make-thread-cell #f))
+              (cons (lambda (x pos-party)
+                      (define blame+pos-party (cons blame pos-party))
+                      (with-contract-continuation-mark
+                          blame+pos-party
+                        (define p-pos
+                          (cond
+                            [(thread-cell-ref tc-pos) => values]
+                            [else
+                             (define p-pos (maybe-p-pos))
+                             (thread-cell-set! tc-pos p-pos)
+                             p-pos]))
                         (p-pos x pos-party)))
-                     (lambda (x neg-party)
-                       (define blame+neg-party (cons blame neg-party))
-                       (with-contract-continuation-mark
-                        blame+neg-party
-                        (p-neg x neg-party))))))))
+                    (lambda (x neg-party)
+                      (define blame+neg-party (cons blame neg-party))
+                      (with-contract-continuation-mark
+                          blame+neg-party
+                        (define p-neg
+                          (cond
+                            [(thread-cell-ref tc-neg) => values]
+                            [else
+                             (define p-neg (maybe-p-neg))
+                             (thread-cell-set! tc-neg p-neg)
+                             p-neg]))
+                        (p-neg x neg-party))))])]
+          [else #f])))
     
     (define override-projections
       (for/list ([m (in-list (internal-class/c-overrides internal-ctc))]
@@ -885,9 +940,7 @@
       (check-one-stronger class/c-inits class/c-init-contracts this that)
       
       ;; check both ways for fields (since mutable)
-      (check-one-stronger class/c-fields class/c-field-contracts this that) 
-      (check-one-stronger class/c-fields class/c-field-contracts that this)
-      
+      (check-one-equivalent class/c-fields class/c-field-contracts this that)
 
       ;; inherits
       (check-one-stronger internal-class/c-inherits internal-class/c-inherit-contracts
@@ -916,6 +969,36 @@
       (equal? (class/c-opaque? this) (class/c-opaque? that))
       (all-included? (class/c-absent-fields that) (class/c-absent-fields this))
       (all-included? (class/c-absents that) (class/c-absents this)))]
+    [else #f]))
+
+(define (class/c-equivalent this that)
+  (define this-internal (class/c-internal this))
+  (cond
+    [(class/c? that)
+     (define that-internal (class/c-internal that))
+     (and
+      (check-one-equivalent class/c-methods class/c-method-contracts this that)
+      (check-one-equivalent class/c-inits class/c-init-contracts this that)
+      (check-one-equivalent class/c-fields class/c-field-contracts this that)
+      (check-one-equivalent internal-class/c-inherits internal-class/c-inherit-contracts
+                            this-internal that-internal)
+      (check-one-equivalent internal-class/c-inherit-fields internal-class/c-inherit-field-contracts
+                            this-internal that-internal)
+      (check-one-equivalent internal-class/c-inherit-fields internal-class/c-inherit-field-contracts
+                            that-internal this-internal)
+      (check-one-equivalent internal-class/c-supers internal-class/c-super-contracts
+                            this-internal that-internal)
+      (check-one-equivalent internal-class/c-inners internal-class/c-inner-contracts
+                            this-internal that-internal)
+      (check-one-equivalent internal-class/c-overrides internal-class/c-override-contracts
+                            this-internal that-internal)
+      (check-one-equivalent internal-class/c-augments internal-class/c-augment-contracts
+                            this-internal that-internal)
+      (check-one-equivalent internal-class/c-augrides internal-class/c-augride-contracts
+                            this-internal that-internal)
+      (equal? (class/c-opaque? this) (class/c-opaque? that))
+      (equal? (class/c-absent-fields that) (class/c-absent-fields this))
+      (equal? (class/c-absents that) (class/c-absents this)))]
     [else #f]))
 
 (define (all-included? this-items that-items)
@@ -983,6 +1066,14 @@
       (and (equal? this-name that-name)
            (contract-stronger? this-ctc that-ctc)))))
 
+(define (check-one-equivalent names-sel ctcs-sel this that)
+  (for/and ([this-name (in-list (names-sel this))]
+            [this-ctc (in-list (ctcs-sel this))])
+    (for/or ([that-name (in-list (names-sel that))]
+             [that-ctc (in-list (ctcs-sel that))])
+      (and (equal? this-name that-name)
+           (contract-equivalent? this-ctc that-ctc)))))
+
 (define-struct class/c 
   (methods method-contracts fields field-contracts inits init-contracts
    absents absent-fields 
@@ -994,6 +1085,7 @@
    #:late-neg-projection class/c-late-neg-proj
    #:name build-class/c-name
    #:stronger class/c-stronger
+   #:equivalent class/c-equivalent
    #:first-order
    (λ (ctc)
      (λ (cls)
@@ -1412,6 +1504,11 @@
        (contract-stronger? (base-instanceof/c-class-ctc this)
                            (base-instanceof/c-class-ctc that))))
 
+(define (instanceof/c-equivalent this that)
+  (and (base-instanceof/c? that)
+       (contract-equivalent? (base-instanceof/c-class-ctc this)
+                             (base-instanceof/c-class-ctc that))))
+
 (define-struct base-instanceof/c (class-ctc)
   #:property prop:custom-write custom-write-property-proc
   #:property prop:contract
@@ -1421,9 +1518,10 @@
    (λ (ctc)
      (build-compound-type-name 'instanceof/c (base-instanceof/c-class-ctc ctc)))
    #:first-order instanceof/c-first-order
+   #:equivalent instanceof/c-equivalent
    #:stronger instanceof/c-stronger))
 
-(define (instanceof/c cctc)
+(define/subexpression-pos-prop (instanceof/c cctc)
   (let ([ctc (coerce-contract 'instanceof/c cctc)])
     (make-base-instanceof/c ctc)))
 
@@ -1458,10 +1556,9 @@
   (define fields (base-object/c-fields ctc))
   (define field-contracts (base-object/c-field-contracts ctc))
   (λ (blame)
+    (define p-app (make-wrapper-class blame methods method-contracts fields field-contracts))
     (λ (val neg-party)
-      (make-wrapper-class
-       val blame neg-party
-       methods method-contracts fields field-contracts))))
+      (p-app val neg-party))))
 
 (define (check-object-contract obj methods fields fail)
   (unless (object? obj)
@@ -1495,14 +1592,24 @@
       (object/c-width-subtype? this that))]
     [else #f]))
 
+(define (object/c-equivalent this that)
+  (cond
+    [(base-object/c? that)
+     (and
+      (equal? (base-object/c-methods that)
+              (base-object/c-methods this))
+      (equal? (base-object/c-fields that)
+              (base-object/c-fields this))
+      (check-one-object/equivalent base-object/c-methods base-object/c-method-contracts this that)
+      (check-one-object/equivalent base-object/c-fields base-object/c-field-contracts this that))]
+    [else #f]))
+
 (define (object/c-common-methods-stronger? this that)
   (check-one-object base-object/c-methods base-object/c-method-contracts this that))
 
 (define (object/c-common-fields-stronger? this that)
   ;; check both ways for fields (since mutable)
-  (and
-    (check-one-object base-object/c-fields base-object/c-field-contracts this that)
-    (check-one-object base-object/c-fields base-object/c-field-contracts that this)))
+  (check-one-object/equivalent base-object/c-fields base-object/c-field-contracts this that))
 
 ;; True if `this` has at least as many field / method names as `that`
 (define (object/c-width-subtype? this that)
@@ -1515,13 +1622,23 @@
 ;; See `check-one-stronger`. The difference is that this one only checks the
 ;; names that are in both this and that.
 (define (check-one-object names-sel ctcs-sel this that)
+  (check-one-object/common-names names-sel ctcs-sel this that contract-stronger?))
+
+;; Similar to `check-one-object`, but compare common fields/methods with
+;; `contract-equivalent?`
+(define (check-one-object/equivalent names-sel ctcs-sel this that)
+  (check-one-object/common-names names-sel ctcs-sel this that contract-equivalent?))
+
+;; Extract names (using `names-sel`) and contracts (`ctcs-sel`) from objects `this` and `that`.
+;; For all contracts with the same name, compare the contracts using `compare-ctcs`.
+(define (check-one-object/common-names names-sel ctcs-sel this that compare-ctcs)
   (for/and ([this-name (in-list (names-sel this))]
             [this-ctc (in-list (ctcs-sel this))])
     (or (not (member this-name (names-sel that)))
         (for/or ([that-name (in-list (names-sel that))]
                  [that-ctc (in-list (ctcs-sel that))])
           (and (equal? this-name that-name)
-               (contract-stronger?
+               (compare-ctcs
                 (if (just-check-existence? this-ctc)
                     any/c
                     this-ctc)
@@ -1542,6 +1659,7 @@
                                (base-object/c-fields ctc)
                                (base-object/c-field-contracts ctc)))
    #:first-order object/c-first-order
+   #:equivalent object/c-equivalent
    #:stronger object/c-stronger))
 
 (define (build-object/c-type-name name method-names method-ctcs field-names field-ctcs)
@@ -1579,18 +1697,50 @@
 ;; make-wrapper-object: contract object blame neg-party
 ;;                      (listof symbol) (listof contract?) (listof symbol) (listof contract?)
 ;;                   -> wrapped object
-(define (make-wrapper-object ctc obj blame neg-party methods method-contracts fields field-contracts)
-  (check-object-contract obj methods fields (λ args (apply raise-blame-error blame obj args)))
-  (let ([original-obj (if (has-original-object? obj) (original-object obj) obj)]
-        [new-cls (make-wrapper-class (object-ref obj)  ;; TODO: object-ref audit
-                                     blame neg-party
-                                     methods method-contracts fields field-contracts)])
-    (impersonate-struct obj object-ref (λ (o c) new-cls) ;; TODO: object-ref audit
-                        impersonator-prop:contracted ctc
-                        impersonator-prop:original-object original-obj)))
+(define (make-wrapper-object blame methods method-contracts fields field-contracts)
+  (define p-app
+    (make-wrapper-class blame methods method-contracts fields field-contracts))
+  (λ (ctc obj neg-party)
+    (check-object-contract obj methods fields (λ args (apply raise-blame-error blame obj args)))
+    (let ([original-obj (if (has-original-object? obj) (original-object obj) obj)]
+          [new-cls (p-app (object-ref obj)  ;; TODO: object-ref audit
+                          neg-party)])
+      (impersonate-struct obj object-ref (λ (o c) new-cls) ;; TODO: object-ref audit
+                          impersonator-prop:contracted ctc
+                          impersonator-prop:original-object original-obj))))
 
 
-(define (make-wrapper-class cls blame neg-party methods method-contracts fields field-contracts)
+(define (make-wrapper-class blame methods method-contracts fields field-contracts)
+  (define method-projs
+    (for/list ([c (in-list method-contracts)]
+               [m (in-list methods)])
+      (cond
+        [(and c (not (just-check-existence? c)))
+         (define blame* (blame-add-context blame (format "the ~a method in" m)
+                                           #:important m))
+         ((contract-late-neg-projection c) blame*)]
+        [else #f])))
+
+  (define-values (filled? maybe-pos-field-projs maybe-neg-field-projs)
+    (contract-pos/neg-doubling
+     (for/list ([f (in-list fields)]
+                [c (in-list field-contracts)])
+       (cond
+         [(just-check-existence? c) #f]
+         [else
+          (define prj (contract-late-neg-projection c))
+          (prj (blame-add-field-context blame f #:swap? #f))]))
+     (for/list ([f (in-list fields)]
+                [c (in-list field-contracts)])
+       (cond
+         [(just-check-existence? c) #f]
+         [else
+          (define prj (contract-late-neg-projection c))
+          (prj (blame-add-field-context blame f #:swap? #t))]))))
+
+  (define tc (and (not filled?) (make-thread-cell #f)))
+
+  (λ (cls neg-party)
   (let* ([name (class-name cls)]
          [method-width (class-method-width cls)]
          [method-ht (class-method-ht cls)]
@@ -1683,33 +1833,59 @@
       (vector-copy! meths 0 (class-methods cls))
       ;; Now apply projections
       (for ([m (in-list methods)]
-            [c (in-list method-contracts)])
+            [c (in-list method-contracts)]
+            [method-proj (in-list method-projs)])
         (when c
-          (unless (just-check-existence? c)
+          (when method-proj
             (define i (hash-ref method-ht m))
-            (define p ((contract-late-neg-projection c)
-                       (blame-add-context blame (format "the ~a method in" m)
-                                          #:important m)))
-            (vector-set! meths i (make-method (p (vector-ref meths i) neg-party) m))))))
-    
+            (vector-set! meths i (make-method (method-proj (vector-ref meths i) neg-party) m))))))
+
     ;; Handle external field contracts
     (unless (null? fields)
-      (for ([f (in-list fields)]
-            [c (in-list field-contracts)])
-        (unless (just-check-existence? c)
-          (define fi (hash-ref field-ht f))
-          (define prj (contract-late-neg-projection c))
-          (define p-pos (prj (blame-add-field-context blame f #:swap? #f)))
-          (define p-neg (prj (blame-add-field-context blame f #:swap? #t)))
-          (hash-set! field-ht f (field-info-extend-external fi
-                                                            (lambda args
-                                                              (with-contract-continuation-mark
-                                                               (cons blame neg-party)
-                                                               (apply p-pos args)))
-                                                            (lambda args
-                                                              (with-contract-continuation-mark
-                                                               (cons blame neg-party)
-                                                               (apply p-neg args)))
-                                                            neg-party)))))
+      (define (install-new-fields pos-field-projs neg-field-projs)
+        (for ([f (in-list fields)]
+              [c (in-list field-contracts)]
+              [p-pos (in-list pos-field-projs)]
+              [p-neg (in-list neg-field-projs)])
+          (unless (just-check-existence? c)
+            (define fi (hash-ref field-ht f))
+            (hash-set! field-ht f (field-info-extend-external
+                                   fi
+                                   (lambda args
+                                     (with-contract-continuation-mark
+                                         (cons blame neg-party)
+                                       (apply p-pos args)))
+                                   (lambda args
+                                     (with-contract-continuation-mark
+                                         (cons blame neg-party)
+                                       (apply p-neg args)))
+                                   neg-party)))))
+      (cond
+        [filled? (install-new-fields maybe-pos-field-projs maybe-neg-field-projs)]
+        [(thread-cell-ref tc)
+         =>
+         (λ (pr) (install-new-fields (car pr) (cdr pr)))]
+        [else
+         (define pos-field-projs (maybe-pos-field-projs))
+         (define neg-field-projs (maybe-neg-field-projs))
+         (thread-cell-set! tc (cons pos-field-projs neg-field-projs))
+         (install-new-fields pos-field-projs neg-field-projs)]))
     
-    (copy-seals cls c)))
+    (copy-seals cls c))))
+
+;; evaluates `e`, unless we are 5 deep nested in evaluating
+;; thing wrapped in limit-depth; in that case, just return #f
+;; without evaluating `e`
+(define-syntax-rule
+  (limit-depth e)
+  (limit-depth/proc (λ () e)))
+(define (limit-depth/proc thunk)
+  (define current-depth
+    (or (continuation-mark-set-first (current-continuation-marks) depth-cm-key)
+        0))
+  (cond
+    [(< current-depth 5)
+     (with-continuation-mark depth-cm-key (+ current-depth 1)
+       (thunk))]
+    [else #f]))
+(define depth-cm-key (gensym 'racket/contract-fields-stronger?-depth-limit))

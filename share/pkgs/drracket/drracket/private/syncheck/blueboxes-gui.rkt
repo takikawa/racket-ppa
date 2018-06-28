@@ -231,6 +231,7 @@
         (invalidate-blue-box-region)
         (set! mouse-in-blue-box? b)
         (invalidate-blue-box-region)
+        (trigger-buffer-changed-callback #:now? #t)
         (end-edit-sequence)))
     (define/public (update-locked b)
       (preferences:set 'drracket:syncheck:contracts-locked? b)
@@ -425,16 +426,16 @@
       (inner (void) on-lexer-valid valid?)
       (when valid?
         (trigger-buffer-changed-callback)))
-    (define/private (trigger-buffer-changed-callback)
+    (define/private (trigger-buffer-changed-callback #:now? [now? #f])
       (when (or locked?
                 mouse-in-blue-box?
                 (not the-strs))
         (set! update-the-strs-coroutine #f)
-        (start-the-timer)))
-    (define/private (start-the-timer)
+        (start-the-timer now?)))
+    (define/private (start-the-timer now?)
       (unless timer-running?
         (set! timer-running? #t)
-        (send timer start 300 #t)))
+        (send timer start (if now? 10 300) #t)))
 
     (define update-the-strs-coroutine #f)
 
@@ -475,7 +476,7 @@
                 (end-edit-sequence))]
              [#f (void)]))]
         [else
-         (start-the-timer)]))
+         (start-the-timer #f)]))
 
     (define/private (compute-tag+rng maybe-pause pos)
       (define basic-info
@@ -518,41 +519,41 @@
              (null? require-candidates))
          #f]
         [else
-         (define-values (start end)
-           (let loop ([pos pos])
-             (define-values (this-token-start this-token-end)
-               (get-token-range pos))
-             (cond
-               [(member (classify-position pos) '(symbol keyword))
-                (get-token-range pos)]
-               [(zero? pos) (values #f #f)]
-               [else
-                (maybe-pause)
-                (loop (- pos 1))])))
-         (cond
-           [(and start end)
-            (define id (string->symbol (get-text start end)))
-            (define xref (load-collections-xref))
-            (define default (list start end #f #f #f))
-            (or (for/or ([require-candidate (in-list require-candidates)])
-                  (maybe-pause)
-                  (define mp (path->module-path require-candidate #:cache (get-path->pkg-cache)))
-                  (define definition-tag (xref-binding->definition-tag xref (list mp id) #f))
-                  (cond
-                    [definition-tag
-                      (define-values (path url-tag) (xref-tag->path+anchor xref definition-tag))
-                      (cond
-                        [path
-                         (list start
-                               end
-                               definition-tag
-                               path
-                               url-tag)]
-                        [else #f])]
-                    [else #f]))
-                default)]
-           [else #f])]))
+         (let loop ([pos pos])
+           (cond
+             [(member (classify-position pos) '(symbol keyword))
+              (define-values (start end) (get-token-range pos))
+              (cond
+                [(and start end)
+                 (define candidate (try-to-find-docs start end
+                                                     maybe-pause
+                                                     require-candidates))
+                 (or candidate (loop (- pos 1)))]
+                [else (loop (- pos 1))])]
+             [(zero? pos) #f]
+             [else
+              (maybe-pause)
+              (loop (- pos 1))]))]))
 
+    (define/private (try-to-find-docs start end maybe-pause require-candidates)
+      (define id (string->symbol (get-text start end)))
+      (define xref (load-collections-xref))
+      (for/or ([require-candidate (in-list require-candidates)])
+        (maybe-pause)
+        (define mp (path->module-path require-candidate #:cache (get-path->pkg-cache)))
+        (define definition-tag (xref-binding->definition-tag xref (list mp id) #f))
+        (cond
+          [definition-tag
+            (define-values (path url-tag) (xref-tag->path+anchor xref definition-tag))
+            (cond
+              [path
+               (list start
+                     end
+                     definition-tag
+                     path
+                     url-tag)]
+              [else #f])]
+          [else #f])))
     
     (define/augment (on-insert where len)
       (define docs-im (get-docs-im))

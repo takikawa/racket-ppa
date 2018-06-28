@@ -77,7 +77,7 @@
 
 ;; ============================================================
 
-(require db/private/generic/functions)
+(require db/private/generic/functions2)
 
 (define fetch-size/c
   (or/c exact-positive-integer? +inf.0))
@@ -315,5 +315,6 @@
         #:notice-handler (or/c 'output 'error)
         #:strict-parameter-types? boolean?
         #:character-mode (or/c 'wchar 'utf-8 'latin-1)
+        #:quirks (listof symbol?)
         #:use-place boolean?)
        data-source?)])

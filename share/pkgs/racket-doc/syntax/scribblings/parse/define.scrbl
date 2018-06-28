@@ -20,7 +20,8 @@ Defines a macro named @racket[macro-id]; equivalent to the following:
 @racketblock[
 (define-syntax (macro-id stx)
   (syntax-parse stx
-    [(macro-id . pattern) pattern-directive ... (syntax template)]))
+    #:track-literals
+    [((~var macro-id id) . pattern) pattern-directive ... (syntax template)]))
 ]
 
 @(the-eval '(require syntax/parse/define))
@@ -38,6 +39,12 @@ Defines a macro named @racket[macro-id]; equivalent to the following:
 (fn2 a #:b 'c)
 ]
 
+@history[#:changed "6.12.0.3" @elem{Changed pattern head to @racket[(~var macro-id id)] from
+                                    @racket[macro-id], allowing tilde-prefixed identifiers or
+                                    identifiers containing colons to be used as @racket[macro-id]
+                                    without producing a syntax error.}
+         #:changed "6.90.0.29" @elem{Changed to always use the @racket[#:track-literals]
+                                     @racket[syntax-parse] option.}]
 }
 
 @defform[(define-syntax-parser macro-id parse-option ... clause ...+)]{

@@ -588,6 +588,13 @@
          (sort (map cons kwds kwd-args)
                keyword<?
                #:key (compose syntax-e car)))
+       (when (pair? sorted)
+         (for ([pr1 (in-list sorted)]
+               [pr2 (in-list (cdr sorted))])
+           (when (equal? (syntax-e (car pr1)) (syntax-e (car pr2)))
+             (raise-syntax-error #f "duplicate keyword" stx
+                                 (car pr1)
+                                 (list (car pr2))))))
        (values (reverse regular-args)
                (map car sorted)
                (map cdr sorted)
@@ -811,6 +818,8 @@
                        opt-dom-kwds
                        opt-lets)
                       (:split-doms stx '->* raw-optional-doms this->*)])
+         ;; call sort-keywords for the duplicate variable check
+         (sort-keywords stx (append (syntax->list #'man-dom-kwds) (syntax->list #'opt-dom-kwds)))
          (values
           #'man-dom
           #'man-dom-kwds
@@ -1549,6 +1558,7 @@
        (λ (val)
          ((cblame val) #f))))
    #:stronger ->-stronger
+   #:equivalent ->-equivalent
    #:generate ->-generate
    #:exercise ->-exercise
    #:val-first-projection val-first-proj
@@ -1571,6 +1581,29 @@
        (if (base->-rngs this)
            (and (base->-rngs that)
                 (andmap contract-struct-stronger? (base->-rngs this) (base->-rngs that)))
+           (not (base->-rngs that)))
+       (not (base->-pre? this))
+       (not (base->-pre? that))
+       (not (base->-post? this))
+       (not (base->-post? that))))
+
+(define (->-equivalent this that)
+  (and (base->? that)
+       (= (length (base->-doms that))
+          (length (base->-doms this)))
+       (= (base->-min-arity this) (base->-min-arity that))
+       (andmap contract-struct-equivalent? (base->-doms that) (base->-doms this))
+       (= (length (base->-kwd-infos this))
+          (length (base->-kwd-infos that)))
+       (for/and ([this-kwd-info (base->-kwd-infos this)]
+                 [that-kwd-info (base->-kwd-infos that)])
+         (and (equal? (kwd-info-kwd this-kwd-info)
+                      (kwd-info-kwd that-kwd-info))
+              (contract-struct-equivalent? (kwd-info-ctc that-kwd-info)
+                                           (kwd-info-ctc this-kwd-info))))
+       (if (base->-rngs this)
+           (and (base->-rngs that)
+                (andmap contract-struct-equivalent? (base->-rngs this) (base->-rngs that)))
            (not (base->-rngs that)))
        (not (base->-pre? this))
        (not (base->-pre? that))

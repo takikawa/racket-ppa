@@ -5,11 +5,12 @@
 ;; within Typed Racket implementation code.
 
 (require "../utils/utils.rkt"
+         (utils prefab identifier)
          racket/list
          racket/match
          (prefix-in c: (contract-req))
          (rep rep-utils type-rep prop-rep object-rep values-rep)
-         (types numeric-tower prefab)
+         (types numeric-tower)
          ;; Using this form so all-from-out works
          "base-abbrev.rkt" "match-expanders.rkt"
 
@@ -43,6 +44,8 @@
 (define -inst make-Instance)
 (define (-prefab key . types)
   (make-Prefab (normalize-prefab-key key (length types)) types))
+(define (-prefab-top key field-count)
+  (make-PrefabTop (normalize-prefab-key key field-count)))
 (define -unit make-Unit)
 (define -signature make-Signature)
 
@@ -97,6 +100,7 @@
            (make-Listof (-Syntax e))
            (-pair (-Syntax e) (-Syntax e)))))
 (define/decl Any-Syntax (-Syntax In-Syntax))
+(define/decl -Stxish (-mu S (Un -Null (-Syntax Univ) (-pair (-Syntax Univ) S))))
 (define (-Sexpof t)
   (-mu sexp
        (Un -Null

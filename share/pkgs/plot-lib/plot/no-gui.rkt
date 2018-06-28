@@ -23,12 +23,20 @@
 ;; 2D exports
 
 (require (rename-in "private/no-gui/plot2d.rkt"
-                    [plot/dc  typed-plot/dc])
+                    [plot/dc     typed-plot/dc]
+                    [plot-bitmap typed-plot-bitmap]
+                    [plot-pict   typed-plot-pict])
          "private/no-gui/plot2d-untyped.rkt")
 
 (define-typed/untyped-identifier plot/dc
   typed-plot/dc
   untyped-plot/dc)
+(define-typed/untyped-identifier plot-bitmap
+  typed-plot-bitmap
+  untyped-plot-bitmap)
+(define-typed/untyped-identifier plot-pict
+  typed-plot-pict
+  untyped-plot-pict)
 
 (provide
  plot/dc
@@ -40,7 +48,8 @@
 (provide
  points
  vector-field
- error-bars)
+ error-bars
+ candlesticks)
 
 (require "private/plot2d/line.rkt")
 (provide
@@ -84,10 +93,15 @@
  y-tick-lines
  tick-grid
  point-label
+ point-pict
  parametric-label
+ parametric-pict
  polar-label
+ polar-pict
  function-label
- inverse-label)
+ function-pict
+ inverse-label
+ inverse-pict)
 
 ;; ===================================================================================================
 ;; 3D exports

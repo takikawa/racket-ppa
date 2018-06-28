@@ -990,6 +990,7 @@
  (stand-alone-explanatory-label "Stand-alone (nur für diese Maschine, startet compilierte Kopie)")
  (distribution "Distribution")
  (distribution-explanatory-label "Distribution (für die Installation auf anderen Maschinen)")
+ (embed-dlls? "DLLs in Programmdatei einbetten?") ;; appears in the GUI only under windows
  (executable-type "Typ")
  (executable-base "Hauptteil")
  (filename "Dateiname: ")
@@ -1262,7 +1263,7 @@
  (test-coverage-ask? "Frage nach dem Löschen der Testabdeckungs-Information")
  (test-coverage-on "Durch Tests abgedeckt")
  (test-coverage-off "Durch Tests nicht abgedeckt")
- (test-coverage-entirely-covered "Alle Ausdrücke are sind abgedeckt")
+ (test-coverage-entirely-covered "Alle Ausdrücke sind abgedeckt")
  (test-coverage-next-time-check-box "Nächstes Mal anzeigen?")
  (test-coverage-summary "Zusammenfassung der Abdeckungs-Ergebnisse anzeigen")
   

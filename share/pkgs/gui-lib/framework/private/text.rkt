@@ -559,11 +559,15 @@
         (or (and (path? id)
                  (path? filename)
                  (or (equal? id filename) ;; "fast path" check
-                     (equal? (normal-case-path (normalize-path (get-filename)))
-                             (normal-case-path (normalize-path id)))))
+                     (equal? (normal-case-path-normalize-path/f (get-filename))
+                             (normal-case-path-normalize-path/f id))))
             (and (symbol? port-name-identifier)
                  (symbol? id)
                  (equal? port-name-identifier id)))))
+
+    (define/private (normal-case-path-normalize-path/f fn)
+      (with-handlers ([exn:fail? (λ (exn) #f)])
+        (normal-case-path (normalize-path fn))))
     
     
     (define styles-fixed? #f)
@@ -2295,31 +2299,48 @@
           [(is-a? s string-snip%)
            (loop (send s next))]
           [else #f])))
+
+    ;; Saving in text when wxme is needed looses data,
+    ;; therefore if the user refuses to change file formats
+    ;; abort save.
+    (define/augment (can-save-file? name format)
+      (define needs-wxme?
+        (and (not (all-string-snips))
+             (eq? format 'same)
+             (eq? 'text (get-file-format))))
+      (define format-converted
+        (and needs-wxme?
+             (or (not (preferences:get 'framework:verify-change-format))
+                 (message-box/custom
+                  (string-constant warning)
+                  (string-constant save-as-binary-format)
+                  (string-constant convert-format)
+                  (string-constant keep-format)
+                  (string-constant dont-save)
+                  #f
+                  '(disallow-close default=3)
+                  3
+                  #:dialog-mixin frame:focus-table-mixin))))
+      (define continue-saving?
+        (case format-converted
+          [(1 #t)
+           (set-file-format 'standard)
+           #t]
+          [(2) #t]
+          [(3) #f]))
+        (and continue-saving? (inner #t can-save-file? name format)))
     
     (define/augment (on-save-file name format)
-      (let ([all-strings? (all-string-snips)])
-        (cond
-          [(and all-strings?
-                (eq? format 'same)
-                (eq? 'standard (get-file-format))
-                (or (not (preferences:get 'framework:verify-change-format))
-                    (gui-utils:get-choice
-                     (string-constant save-as-plain-text) 
-                     (string-constant yes)
-                     (string-constant no)
-                     #:dialog-mixin frame:focus-table-mixin)))
-           (set-file-format 'text)]
-          [(and (not all-strings?)
-                (eq? format 'same)
-                (eq? 'text (get-file-format))
-                (or (not (preferences:get 'framework:verify-change-format))
-                    (gui-utils:get-choice
-                     (string-constant save-in-drs-format)
-                     (string-constant yes)
-                     (string-constant no)
-                     #:dialog-mixin frame:focus-table-mixin)))
-           (set-file-format 'standard)]
-          [else (void)]))
+      (when (and (all-string-snips)
+                 (eq? format 'same)
+                 (eq? 'standard (get-file-format))
+                 (or (not (preferences:get 'framework:verify-change-format))
+                     (gui-utils:get-choice
+                      (string-constant save-as-plain-text) 
+                      (string-constant yes)
+                      (string-constant no)
+                      #:dialog-mixin frame:focus-table-mixin)))
+        (set-file-format 'text))
       (inner (void) on-save-file name format))
     
     (super-new)))
@@ -3451,11 +3472,14 @@
                     (handle-evt
                      done-evt
                      (λ (v)
-                       (let ([nth-pos (cdr (at-peek-n data (- kr 1)))])
+                       (let* ([nth (at-peek-n data (- kr 1))]
+                              [nth-pos (cdr nth)])
                          (set! position
-                               (list (car nth-pos)
-                                     (+ 1 (cadr nth-pos))
-                                     (+ 1 (caddr nth-pos)))))
+                               (if (eof-object? (car nth))
+                                   nth-pos
+                                   (list (car nth-pos)
+                                         (+ 1 (cadr nth-pos))
+                                         (+ 1 (caddr nth-pos))))))
                        (set! data (at-dequeue-n data kr))
                        (semaphore-post peeker-sema)
                        (set! peeker-sema (make-semaphore 0))

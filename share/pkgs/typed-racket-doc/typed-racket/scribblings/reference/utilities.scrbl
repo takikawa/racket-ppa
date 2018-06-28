@@ -73,6 +73,32 @@ the error message.
 
 }
 
+@defform*[[(assert-typecheck-fail body-expr)
+           (assert-typecheck-fail body-expr #:result result-expr)]]{
+Explicitly produce a type error if @racket[body-expr] does not produce a type error.
+If @racket[result-expr] is provided, it will be the result of evaluating the
+ expression, otherwise @racket[(void)] will be returned. If there is an expected type,
+ that type is propagated as the expected type when checking @racket[body-expr].
+@history[#:added "1.7"]}
+
+@section{Ignoring type information}
+
+In some contexts, it is useful to have the typechecker forget type
+information on particular expressions. Any expression with the shape
+@racket[(#%expression sub)] that has a true value for the syntax property
+@racket['typed-racket:ignore-type-information] will have the type @racket[Any], and
+the type checker won't learn anything about the expression for use in
+refining other types.
+@history[#:added "1.7"]
+
+The expression @racket[sub] must still type check, but can have any
+single-valued type.
+
+This is similar to @racket[(ann sub Any)], but differs in whether the
+typechecker can use this to refine other types, and can be used in
+context that do not depend on Typed Racket.
+
+
 @section{Untyped Utilities}
 
 @defmodule[typed/untyped-utils]

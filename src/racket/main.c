@@ -172,8 +172,7 @@ extern Scheme_Object *scheme_initialize(Scheme_Env *env);
 
 #ifndef UNIX_INIT_FILENAME
 # define UNIX_INIT_FILENAME "~/.racketrc"
-# define WINDOWS_INIT_FILENAME "%%HOMEDIRVE%%\\%%HOMEPATH%%\\racketrc.rktl"
-# define MACOS9_INIT_FILENAME "PREFERENCES:racketrc.rktl"
+# define WINDOWS_INIT_FILENAME "<home-dir>\\racketrc.rktl"
 # define INIT_FILENAME_CONF_SYM "interactive-file"
 # define DEFAULT_INIT_MODULE "racket/interactive"
 # define USER_INIT_MODULE "interactive.rkt"
@@ -312,12 +311,21 @@ START_XFORM_SKIP;
 
 #ifdef DOS_FILE_SYSTEM
 # include "win_tls.inc"
+# include "../start/embedded_dll.inc"
 #endif
 
 #ifdef DOS_FILE_SYSTEM
+static int load_delayed_done;
+
 void load_delayed()
 {
+  if (load_delayed_done)
+    return;
+  load_delayed_done = 1;
+  
   (void)SetErrorMode(SEM_FAILCRITICALERRORS);
+
+  parse_embedded_dlls();
 
 # ifndef MZ_NO_LIBRACKET_DLL
   /* Order matters: load dependencies first */
@@ -327,6 +335,8 @@ void load_delayed()
   load_delayed_dll(NULL, "libracket" DLL_3M_SUFFIX "xxxxxxx.dll");
 # endif
   record_dll_path();
+
+  register_embedded_dll_hooks();
 
   register_win_tls();
 }
@@ -472,13 +482,13 @@ static void do_scheme_rep(Scheme_Env *env, FinishArgs *fa)
 
 #ifdef GRAPHICAL_REPL
   if (!fa->a->alternate_rep) {
-    a[0] = scheme_intern_symbol("racket/gui/init");
+    a[0] = scheme_intern_symbol("racket/gui/base");
     a[1] = scheme_intern_symbol("graphical-read-eval-print-loop");
     ending_newline = 0;
   } else
 #endif
     {
-      a[0] = scheme_intern_symbol("racket/base");
+      a[0] = scheme_intern_symbol("racket/repl");
       a[1] = scheme_intern_symbol("read-eval-print-loop");
     }
 

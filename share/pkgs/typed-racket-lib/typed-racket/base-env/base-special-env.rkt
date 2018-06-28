@@ -121,9 +121,6 @@
   ;; check-vector
   [(make-template-identifier 'check-vector 'racket/private/for)
    (-> Univ -Void)]
-  ;; check-in-hash
-  [(make-template-identifier 'check-in-hash 'racket/private/for)
-   (-> Univ -Void)]
   ;; in-range
   [(make-template-identifier 'in-range 'racket/private/for)
    (cl->* (-> -Byte (-seq -Byte))
@@ -214,6 +211,39 @@
    (-> Univ -Boolean)]
   [(make-template-identifier 'not-weak? 'racket/private/for)
    (-> -HashTableTop -Boolean)]
+  ;; check-in-hash and friends
+  [(make-template-identifier 'check-in-hash 'racket/private/for)
+   (-> Univ -Void)]
+  [(make-template-identifier 'check-in-hash-keys 'racket/private/for)
+   (-> Univ -Void)]
+  [(make-template-identifier 'check-in-hash-values 'racket/private/for)
+   (-> Univ -Void)]
+  [(make-template-identifier 'check-in-hash-pairs 'racket/private/for)
+   (-> Univ -Void)]
+  [(make-template-identifier 'check-in-mutable-hash 'racket/private/for)
+   (-> Univ -Void)]
+  [(make-template-identifier 'check-in-mutable-hash-keys 'racket/private/for)
+   (-> Univ -Void)]
+  [(make-template-identifier 'check-in-mutable-hash-values 'racket/private/for)
+   (-> Univ -Void)]
+  [(make-template-identifier 'check-in-mutable-hash-pairs 'racket/private/for)
+   (-> Univ -Void)]
+  [(make-template-identifier 'check-in-immutable-hash 'racket/private/for)
+   (-> Univ -Void)]
+  [(make-template-identifier 'check-in-immutable-hash-keys 'racket/private/for)
+   (-> Univ -Void)]
+  [(make-template-identifier 'check-in-immutable-hash-values 'racket/private/for)
+   (-> Univ -Void)]
+  [(make-template-identifier 'check-in-immutable-hash-pairs 'racket/private/for)
+   (-> Univ -Void)]
+  [(make-template-identifier 'check-in-weak-hash 'racket/private/for)
+   (-> Univ -Void)]
+  [(make-template-identifier 'check-in-weak-hash-keys 'racket/private/for)
+   (-> Univ -Void)]
+  [(make-template-identifier 'check-in-weak-hash-values 'racket/private/for)
+   (-> Univ -Void)]
+  [(make-template-identifier 'check-in-weak-hash-pairs 'racket/private/for)
+   (-> Univ -Void)]
   ;; in-port
   [(make-template-identifier 'in-port 'racket/private/for)
    (-poly (a)
@@ -260,12 +290,39 @@
   ;; check-in-port
   [(make-template-identifier 'check-in-port 'racket/private/for)
    (-> Univ Univ Univ)]
-  ;; from the expansion of `with-syntax'
+  ;; from the expansion of `with-syntax' or `quasisyntax'
   [(make-template-identifier 'apply-pattern-substitute 'racket/private/stxcase)
    (->* (list (-Syntax Univ) Univ) Univ (-Syntax Univ))]
   ;; same
   [(make-template-identifier 'with-syntax-fail 'racket/private/with-stx)
    (-> (-Syntax Univ) (Un))]
+  ; from `quasisyntax'
+  [(make-template-identifier 'check-splicing-list 'racket/private/qqstx)
+   (-> Univ (-Syntax Univ) (-Syntax Univ))]
+  ;; more from with-syntax, a Guide is ...
+  [(make-template-identifier 't-append 'racket/private/template)
+   (-> (-lst (-Syntax Univ)) -Stxish -Stxish)]
+  ;; ... or a Guide is ...
+  [(make-template-identifier 't-resyntax 'racket/private/template)
+   (-> (Un (-val #f) (-Syntax Univ)) (-Syntax Univ) Univ (-Syntax Univ))]
+  ;; ... or a Guide is ...
+  [(make-template-identifier 't-relocate 'racket/private/template)
+   (-> (-Syntax Univ) (Un (-val #f) (-Syntax Univ)) (-Syntax Univ))]
+  ;; ... or a Guide is ...
+  [(make-template-identifier 't-orelse* 'racket/private/template)
+   (-> (-> -Stxish) (-> -Stxish) -Stxish)]
+  ;; ... or a Guide is ...
+  [(make-template-identifier 't-struct 'racket/private/template)
+   (-> Univ (-lst (-Syntax Univ)) (-Syntax Univ))]
+  ;; ... or a Guide is ...
+  [(make-template-identifier 'h-splice 'racket/private/template)
+   (-> Univ Univ Univ (-lst (-Syntax Univ)))]
+  ;; ... or a Guide is ...
+  [(make-template-identifier 't-subst 'racket/private/template)
+   (->* (list (Un (-val #f) (-Syntax Univ)) (-Syntax Univ) Univ) Univ (-Syntax Univ))]
+  ;; ... or a Guide is ...
+  [(make-template-identifier 'check-same-length 'racket/private/template)
+   (-> (Un (-val #f) (-Syntax Univ)) (Un (-val #f) (-Syntax Univ)) (-lst Univ) -Void)]
   ;; from the expansion of `make-temp-file`
   [(make-template-identifier 'make-temporary-file/proc 'racket/file)
    (->opt [-String (Un -Pathlike (-val 'directory) (-val #f)) (-opt -Pathlike)]

@@ -101,11 +101,35 @@
         (contract-struct-stronger? this-content-r that-content-r)]
        [(or (equal? that-immutable 'dont-care)
             (equal? this-immutable that-immutable))
-        (and (contract-struct-stronger? this-content-r that-content-r)
-             (contract-struct-stronger? that-content-w this-content-w))]
+        (if (and (eq? this-content-r this-content-w)
+                 (eq? that-content-r that-content-w))
+            ;; if the original box/c didn't specify a separate read and write
+            ;; contract, we end up in this case
+            (contract-struct-equivalent? this-content-r that-content-r)
+            (and (contract-struct-stronger? this-content-r that-content-r)
+                 (contract-struct-stronger? that-content-w this-content-w)))]
        [else #f])]
     [else #f]))
 
+(define (box/c-equivalent this that)
+  (cond
+    [(base-box/c? that)
+     (define this-content-w (base-box/c-content-w this))
+     (define this-content-r (base-box/c-content-r this))
+     (define this-immutable (base-box/c-immutable this))
+     (define that-content-w (base-box/c-content-w that))
+     (define that-content-r (base-box/c-content-r that))
+     (define that-immutable (base-box/c-immutable that))
+     (and (equal? this-immutable that-immutable)
+          (cond
+            [(or (equal? this-immutable 'immutable)
+                 (and (eq? this-content-r this-content-w)
+                      (eq? that-content-r that-content-w)))
+             (contract-struct-equivalent? this-content-r that-content-r)]
+            [else
+             (and (contract-struct-equivalent? this-content-r that-content-r)
+                  (contract-struct-equivalent? that-content-w this-content-w))]))]
+    [else #f]))
 
 (define-struct (flat-box/c base-box/c) ()
   #:property prop:custom-write custom-write-property-proc
@@ -114,6 +138,7 @@
    #:name box/c-name
    #:first-order box/c-first-order
    #:stronger box/c-stronger
+   #:equivalent box/c-equivalent
    #:late-neg-projection
    (λ (ctc)
      (define content-ctc (get/build-late-neg-projection (base-box/c-content-w ctc)))
@@ -137,29 +162,45 @@
     (define r-vfp (get/build-late-neg-projection elem-r-ctc))
     (λ (blame)
       (define box-blame (add-box-context blame))
-      (define pos-elem-r-proj (r-vfp box-blame))
-      (define neg-elem-w-proj (w-vfp (blame-swap box-blame)))
-      (λ (val neg-party)
-        (define blame+neg-party (cons blame neg-party))
-        (cond
-          [(check-box/c-np ctc val blame)
-           =>
-           (λ (f) (f neg-party))]
-          [else
-           (if (and (immutable? val) (not (chaperone? val)))
-               (box-immutable (pos-elem-r-proj (unbox val) neg-party))
-               (chaperone/impersonate-box 
-                val
-                (λ (b v)
-                  (with-contract-continuation-mark
-                   blame+neg-party
-                   (pos-elem-r-proj v neg-party)))
-                (λ (b v)
-                  (with-contract-continuation-mark
-                   blame+neg-party
-                   (neg-elem-w-proj v neg-party)))
-                impersonator-prop:contracted ctc
-                impersonator-prop:blame (blame-add-missing-party blame neg-party)))])))))
+      (define-values (filled? maybe-pos-elem-r-proj maybe-neg-elem-w-proj)
+        (contract-pos/neg-doubling (r-vfp box-blame)
+                                   (w-vfp (blame-swap box-blame))))
+      (define (make-val-np/proc pos-elem-r-proj neg-elem-w-proj)
+        (λ (val neg-party)
+          (define blame+neg-party (cons blame neg-party))
+          (cond
+            [(check-box/c-np ctc val blame)
+             =>
+             (λ (f) (f neg-party))]
+            [else
+             (if (and (immutable? val) (not (chaperone? val)))
+                 (box-immutable (pos-elem-r-proj (unbox val) neg-party))
+                 (chaperone/impersonate-box 
+                  val
+                  (λ (b v)
+                    (with-contract-continuation-mark
+                        blame+neg-party
+                      (pos-elem-r-proj v neg-party)))
+                  (λ (b v)
+                    (with-contract-continuation-mark
+                        blame+neg-party
+                      (neg-elem-w-proj v neg-party)))
+                  impersonator-prop:contracted ctc
+                  impersonator-prop:blame (blame-add-missing-party blame neg-party)))])))
+      (cond
+        [filled?
+         (make-val-np/proc maybe-pos-elem-r-proj maybe-neg-elem-w-proj)]
+        [else
+         (define tc (make-thread-cell #f))
+         (λ (val neg-party)
+           (cond
+             [(thread-cell-ref tc)
+              =>
+              (λ (f) (f val neg-party))]
+             [else
+              (define proc (make-val-np/proc (maybe-pos-elem-r-proj) (maybe-neg-elem-w-proj)))
+              (thread-cell-set! tc proc)
+              (proc val neg-party)]))]))))
 
 (define-struct (chaperone-box/c base-box/c) ()
   #:property prop:custom-write custom-write-property-proc
@@ -168,6 +209,7 @@
    #:name box/c-name
    #:first-order box/c-first-order
    #:stronger box/c-stronger
+   #:equivalent box/c-equivalent
    #:late-neg-projection (ho-late-neg-projection chaperone-box)))
 
 (define-struct (impersonator-box/c base-box/c) ()
@@ -177,6 +219,7 @@
    #:name box/c-name
    #:first-order box/c-first-order
    #:stronger box/c-stronger
+   #:equivalent box/c-equivalent
    #:late-neg-projection (ho-late-neg-projection impersonate-box)))
 
 (define-syntax (box/c stx)

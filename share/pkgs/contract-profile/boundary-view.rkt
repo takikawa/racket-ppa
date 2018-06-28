@@ -117,7 +117,7 @@
       #:exists 'replace
       (lambda ()
         (for ([contract+key (in-list contracts->keys)])
-          (printf "[~a] = ~a\n"
+          (printf "[~a] = ~s\n"
                   (cdr contract+key)
                   (car contract+key)))))))
 

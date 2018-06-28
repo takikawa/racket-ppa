@@ -5,13 +5,14 @@
          racket/match (prefix-in - (contract-req))
          "signatures.rkt"
          "check-below.rkt" "../types/kw-types.rkt"
+         "integer-refinements.rkt"
          (types utils abbrev subtype type-table path-type
                 prop-ops overlap resolve generalize tc-result
                 numeric-tower)
          (private-in syntax-properties parse-type)
          (rep type-rep prop-rep object-rep)
          (only-in (infer infer) intersect)
-         (utils tc-utils)
+         (utils tc-utils identifier)
          (env lexical-env scoped-tvar-env)
          racket/list
          racket/private/class-internal
@@ -75,6 +76,13 @@
   (--> syntax? Type? tc-results/c)
   (tc-expr/check form (ret expected)))
 
+;; form : what expression are we typechecking?
+;; expected : what is the expected tc-result (can be #f)
+;; existential? : do we want to create an existential
+;;   identifier for this expression if it does not
+;;   have a non-trivual object? This is useful when
+;;   the type of other expressions can depend on
+;;   the specific type of this term.
 (define (tc-expr/check form expected [existential? #f])
   (parameterize ([current-orig-stx form])
     ;; the argument must be syntax
@@ -151,9 +159,17 @@
       [stx:exn-handlers^
        (register-ignored! form)
        (check-subforms/with-handlers form expected) ]
+      [(~and stx:typed-racket:ignore-type-information^ (#%expression inner))
+       (tc-expr/check/internal #'inner Univ)
+       (ret Univ -tt-propset -empty-obj)]
       ;; explicit failure
       [t:typecheck-failure
        (explicit-fail #'t.stx #'t.message #'t.var)]
+      [t:assert-typecheck-failure
+       (cond
+         [(tc-expr/check? #'t.body expected)
+          (tc-error/expr #:stx #'t.body (format "Expected a type check error!"))]
+         [else expected])]
       ;; data
       [(quote #f) (ret (-val #f) -false-propset)]
       [(quote #t) (ret (-val #t) -true-propset)]
@@ -210,11 +226,12 @@
           ;(tc-expr/check #'e3 expected)
           (tc-error/expr "with-continuation-mark requires a continuation-mark-key, but got ~a" key-t)])]
       ;; application
-      [(#%plain-app . _)
+      [(#%plain-app fun . args-stx)
        (define result (tc/app form expected))
        (cond
-         [(with-refinements?)
-          (add-applicable-linear-info form result)]
+         [(and (identifier? #'fun)
+               (with-refinements?))
+          (maybe-add-linear-integer-refinements #'fun #'args-stx result)]
          [else result])]
       ;; #%expression
       [(#%expression e) (tc/#%expression form expected)]
@@ -269,9 +286,9 @@
        (define conv-type
          (match expected
            [(tc-result1: fun-type)
-            (match-define (list required-pos optional-pos)
+            (match-define (list required-pos optional-pos optional-supplied?)
                           (attribute opt.value))
-            (opt-convert fun-type required-pos optional-pos)]
+            (opt-convert fun-type required-pos optional-pos optional-supplied?)]
            [_ #f]))
        (if conv-type
            (begin (tc-expr/check/type #'fun conv-type) expected)
@@ -392,21 +409,21 @@
 
 ;; find-stx-type : Any [(or/c Type? #f)] -> Type?
 ;; recursively find the type of either a syntax object or the result of syntax-e
-(define (find-stx-type datum-stx [expected #f])
-  (match datum-stx
+(define (find-stx-type datum-stx-or-datum [expected-type #f])
+  (match datum-stx-or-datum
     [(? syntax? (app syntax-e stx-e))
-     (match (and expected (resolve (intersect expected (-Syntax Univ))))
+     (match (and expected-type (resolve (intersect expected-type (-Syntax Univ))))
        [(Syntax: t) (-Syntax (find-stx-type stx-e t))]
        [_ (-Syntax (find-stx-type stx-e))])]
     [(or (? symbol?) (? null?) (? number?) (? extflonum?) (? boolean?) (? string?) (? char?)
          (? bytes?) (? regexp?) (? byte-regexp?) (? keyword?))
-     (tc-literal #`#,datum-stx expected)]
+     (tc-literal #`#,datum-stx-or-datum expected-type)]
     [(cons car cdr)
-     (match (and expected (resolve (intersect expected (-pair Univ Univ))))
+     (match (and expected-type (resolve (intersect expected-type (-pair Univ Univ))))
        [(Pair: car-t cdr-t) (-pair (find-stx-type car car-t) (find-stx-type cdr cdr-t))]
        [_ (-pair (find-stx-type car) (find-stx-type cdr))])]
     [(vector xs ...)
-     (match (and expected (resolve (intersect expected -VectorTop)))
+     (match (and expected-type (resolve (intersect expected-type -VectorTop)))
        [(Vector: t)
         (make-Vector
          (check-below
@@ -422,166 +439,11 @@
        [_ (make-HeterogeneousVector (for/list ([x (in-list xs)])
                                       (generalize (find-stx-type x #f))))])]
     [(box x)
-     (match (and expected (resolve (intersect expected -BoxTop)))
+     (match (and expected-type (resolve (intersect expected-type -BoxTop)))
        [(Box: t) (-box (check-below (find-stx-type x t) t))]
        [_ (-box (generalize (find-stx-type x)))])]
-    [(? hash? h)
-     (cond
-      [(immutable? h)
-       (match (and expected (resolve (intersect expected (-Immutable-HT Univ Univ))))
-        [(Immutable-HashTable: k v)
-         (value->HT/find-stx-type h -Immutable-HT k v)]
-        [_
-         (value->HT/find-stx-type h -Immutable-HT)])]
-      [(hash-weak? h)
-       (match (and expected (resolve (intersect expected (-Weak-HT Univ Univ))))
-        [(Weak-HashTable: k v)
-         (value->HT/find-stx-type h -Weak-HT k v)]
-        [_
-         (value->HT/find-stx-type h -Weak-HT)])]
-      [else
-       (match (and expected (resolve (intersect expected (-Mutable-HT Univ Univ))))
-        [(Mutable-HashTable: k v)
-         (value->HT/find-stx-type h -Mutable-HT k v)]
-        [_
-         (value->HT/find-stx-type h -HT)])])]
-    [(? prefab-struct-key)
-     ;; FIXME is there a type for prefab structs?
-     Univ]
+    [(? hash? hash-val) (tc-hash find-stx-type hash-val expected-type)]
+    [(? prefab-struct-key prefab-val) (tc-prefab find-stx-type prefab-val expected-type)]
     [_ Univ]))
 
-;; value->HT/find-stx-type : hash? (-> type? type? type?) -> type?
-;;                         : hash? (-> type? type? type?) type? type? -> type?
-;; Build a HashTable type from a value, type constructor, and (optionally)
-;;  upper bounds on the key and value types.
-(define value->HT/find-stx-type
-  (case-lambda
-   [(h tycon expected-kt expected-vt)
-    (let* ([kts (hash-map h (lambda (x y) (find-stx-type x expected-kt)))]
-           [vts (hash-map h (lambda (x y) (find-stx-type y expected-vt)))]
-           [kt (apply Un kts)]
-           [vt (apply Un vts)])
-      (tycon (check-below kt expected-kt) (check-below vt expected-vt)))]
-   [(h tycon)
-    (let ([kt (generalize (apply Un (map find-stx-type (hash-keys h))))]
-          [vt (generalize (apply Un (map find-stx-type (hash-values h))))])
-      (tycon kt vt))]))
-
-
-;; adds linear info for the following operations:
-;; + - * < <= = >= > make-vector
-;; when the arguments are integers w/ objects.
-;; These are the 'axiomatized' arithmetic operators.
-;; NOTE: We should keep these axiomatizations so that they
-;; only add info that we could later reasonably encode in a
-;; standard function type for TR, so we're not bound to always
-;; doing this.
-(define (add-applicable-linear-info form result)
-  ;; class to recognize expressions that typecheck at a subtype of -Int
-  ;; and whose object is non-empty
-  (define-syntax-class (t/obj type)
-    #:attributes (obj)
-    (pattern e:expr
-             #:do [(define o
-                     (match (type-of #'e)
-                       [(tc-result1: t _ (? Object? o))
-                        #:when (subtype t type)
-                        o]
-                       [_ #f]))]
-             #:fail-unless o (format "not a ~a expr with a non-empty object" type)
-             #:attr obj o))
-  (define-syntax (obj stx)
-    (syntax-case stx ()
-      [(_ e)
-       (with-syntax ([e* (format-id #'e "~a.obj" (syntax->datum #'e))])
-         (syntax/loc #'e (attribute e*)))]))
-  ;; class to recognize int comparisons and associate their
-  ;; internal TR prop constructors
-  (define-syntax-class int-comparison
-    #:attributes (constructor)
-    (pattern (~literal <) #:attr constructor -lt)
-    (pattern (~literal <=) #:attr constructor -leq)
-    (pattern (~literal >=) #:attr constructor -geq)
-    (pattern (~literal >) #:attr constructor -gt)
-    (pattern (~literal =) #:attr constructor -eq))
-
-  ;; takes a result and adds p to the then proposition
-  ;; and (not p) to the else proposition
-  (define (add-p/not-p result p)
-    (match result
-      [(tc-result1: t (PropSet: p+ p-) o)
-       (ret t
-            (-PS (-and p p+) (-and (negate-prop p) p-))
-            o)]
-      [_ result]))
-
-  ;; inspect the function appplication to see if it is a linear
-  ;; integer compatible form we want to enrich with info when
-  ;; #:with-logical-refinements is specified by the user
-  (match result
-    [(tc-result1: ret-t ps orig-obj)
-     (syntax-parse form
-       ;; *
-       [(#%plain-app (~literal *) (~var e1 (t/obj -Int)) (~var e2 (t/obj -Int)))
-        (define product-obj (-obj* (obj e1) (obj e2)))
-        (cond
-          [(Object? product-obj)
-           (ret (-refine/fresh x ret-t (-eq (-lexp x) product-obj))
-                ps
-                product-obj)]
-          [else result])]
-       ;; +/- (2 args)
-       [(#%plain-app (~and op (~or (~literal +) (~literal -)))
-                     (~var e1 (t/obj -Int))
-                     (~var e2 (t/obj -Int)))
-        (define (sign o) (if (eq? '+ (syntax->datum #'op))
-                             o
-                             (scale-obj -1 o)))
-        (define l (-lexp (obj e1) (sign (obj e2))))
-        (ret (-refine/fresh x ret-t (-eq (-lexp x) l))
-             ps
-             l)]
-       ;; +/- (3 args)
-       [(#%plain-app (~and op (~or (~literal +) (~literal -)))
-                     (~var e1 (t/obj -Int))
-                     (~var e2 (t/obj -Int))
-                     (~var e3 (t/obj -Int)))
-        (define (sign o) (if (eq? '+ (syntax->datum #'op))
-                             o
-                             (scale-obj -1 o)))
-        (define l (-lexp (obj e1) (sign (obj e2)) (sign (obj e3))))
-        (ret (-refine/fresh x ret-t (-eq (-lexp x) l))
-             ps
-             l)]
-       ;; integer comparisons, 2 args
-       [(#%plain-app comp:int-comparison
-                     (~var e1 (t/obj -Int))
-                     (~var e2 (t/obj -Int)))
-        (define p ((attribute comp.constructor)
-                   (obj e1)
-                   (obj e2)))
-        (add-p/not-p result p)]
-       ;; integer comparisons, 3 args
-       [(#%plain-app comp:int-comparison
-                     (~var e1 (t/obj -Int))
-                     (~var e2 (t/obj -Int))
-                     (~var e3 (t/obj -Int)))
-        (define p (-and ((attribute comp.constructor)
-                         (obj e1)
-                         (obj e2))
-                        ((attribute comp.constructor)
-                         (obj e2)
-                         (obj e3))))
-        (add-p/not-p result p)]
-       ;; make-vector include length in result
-       [(#%plain-app (~literal make-vector)
-                     (~var size (t/obj -Int))
-                     . _)
-        #:when (Object? (obj size))
-        (ret (-refine/fresh v ret-t (-eq (-lexp (-vec-len-of (-id-path v)))
-                                         (obj size)))
-             ps
-             orig-obj)]
-       [_ result])]
-    [_ result]))
 

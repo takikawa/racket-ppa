@@ -1,6 +1,7 @@
 #lang racket/base
 
 (require syntax/parse/pre
+         racket/private/immediate-default
          "../private/parse-classes.rkt"
          "../private/syntax-properties.rkt"
          (for-label "colon.rkt"))
@@ -10,8 +11,8 @@
 ;; ----------------
 ;;
 ;; A LambdaKeywords is a
-;;   (lambda-kws (Listof Keyword) (Listof Keyword))
-(struct lambda-kws (mand opt))
+;;   (lambda-kws (Listof Keyword) (Listof Keyword) (Listof Keyword) Integer (listof Boolean))
+(struct lambda-kws (mand opt opt-supplied pos-mand-count pos-opt-supplied?))
 
 ;; interp.
 ;;   - the first list contains the mandatory keywords
@@ -194,13 +195,20 @@
            #:attr default #f
            #:attr type #f)
   (pattern (~seq kw:keyword [id:id default:expr])
-           #:with form #'(kw [id default])
+           #:with i-id (if (immediate-default? #'default)
+                           (optional-immediate-arg-property #'id #true)
+                           (optional-non-immediate-arg-property #'id #true))
+           #:with form #`(kw [i-id default])
            #:attr type #f)
   (pattern (~seq kw:keyword [id:id : type:expr])
            #:with form #`(kw #,(type-label-property #'id #'type))
            #:attr default #f)
   (pattern (~seq kw:keyword [id:id : type:expr default:expr])
-           #:with form #`(kw [#,(type-label-property #'id #'type) default])))
+           #:with t-id (type-label-property #'id #'type)
+           #:with i-id (if (immediate-default? #'default)
+                           (optional-immediate-arg-property #'t-id #true)
+                           (optional-non-immediate-arg-property #'t-id #true))
+           #:with form #`(kw [i-id default])))
 
 (define-splicing-syntax-class mand-formal
   #:description "lambda argument"
@@ -222,11 +230,18 @@
   #:attributes (form id default type kw)
   #:literal-sets (colon)
   (pattern [id:id default:expr]
-           #:with form #'([id default])
+           #:with form #`([#,(if (immediate-default? #'default)
+                                 (optional-immediate-arg-property #'id #t)
+                                 (optional-non-immediate-arg-property #'id #t))
+                           default])
            #:attr type #f
            #:attr kw #f)
   (pattern [id:id : type:expr default:expr]
-           #:with form #`([#,(type-label-property #'id #'type) default])
+           #:with form #`([#,(let ([t-id (type-label-property #'id #'type)])
+                               (if (immediate-default? #'default)
+                                   (optional-immediate-arg-property t-id #t)
+                                   (optional-non-immediate-arg-property t-id #t)))
+                           default])
            #:attr kw #f)
   (pattern :kw-formal))
 
@@ -257,22 +272,44 @@
            ;; put them in a struct for later use by tc-expr
            (let ([kws (append (attribute mand.kw)
                               (attribute opt.kw))]
-                 [opt?s (append (attribute mand.default)
-                                (attribute opt.default))])
-             (define-values (mand-kws opt-kws)
+                 [defaults (append (attribute mand.default)
+                                   (attribute opt.default))])
+             (define-values (mand-kws opt-kws opt-kws-supplied)
                (for/fold ([mand-kws '()]
-                          [opt-kws '()])
+                          [opt-kws '()]
+                          [opt-kws-supplied '()])
                          ([kw (in-list kws)]
-                          [opt? (in-list opt?s)]
+                          [default (in-list defaults)]
                           #:when kw)
-                 (if opt?
-                     (values mand-kws (cons (syntax-e kw) opt-kws))
-                     (values (cons (syntax-e kw) mand-kws) opt-kws))))
+                 (if default
+                     (values mand-kws
+                             (cons (syntax-e kw) opt-kws)
+                             (if (immediate-default? default)
+                                 (cons (syntax-e kw) opt-kws-supplied)
+                                 opt-kws-supplied))
+                     (values (cons (syntax-e kw) mand-kws)
+                             opt-kws
+                             opt-kws-supplied))))
+             (define pos-mand-count
+               (for/sum ([kw (in-list kws)]
+                         [default (in-list defaults)]
+                         #:unless default
+                         #:unless kw)
+                 1))
+             (define pos-opt-supplied?s
+               (for/list ([kw (in-list kws)]
+                          [default (in-list defaults)]
+                          #:when default
+                          #:unless kw)
+                 (immediate-default? default)))
              (and (or (not (null? mand-kws))
                       (not (null? opt-kws)))
-                  (lambda-kws mand-kws opt-kws)))
+                  (lambda-kws mand-kws opt-kws opt-kws-supplied pos-mand-count pos-opt-supplied?s)))
            #:attr opt-property
-           (list (length (attribute mand)) (length (attribute opt)))
+           (list (length (attribute mand))
+                 (length (attribute opt))
+                 (for/list ([default (in-list (attribute opt.default))])
+                   (and default (immediate-default? default))))
            #:attr erased
            (with-syntax ([((mand-form ...) ...) #'(mand.form ...)]
                          [((opt-form ...) ...) #'(opt.form ...)])

@@ -980,7 +980,7 @@
  (stepper-previous "Paso")
  (stepper-next "Paso")
  (stepper-next-application "Aplicación")
- (stepper-jump-to-beginning "Hogar")
+ (stepper-jump-to-beginning "al inicio")
  
  (dialog-back "Atrás")
  

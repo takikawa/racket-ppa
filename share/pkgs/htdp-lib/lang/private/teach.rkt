@@ -84,8 +84,9 @@
 (define-for-syntax EXPECTED-MATCH-PATTERN
   "expected a pattern--answer clause after the expression following `match', but nothing's there")
 
+#;
 (define-for-syntax EXPECTED-FUNCTION-NAME
-  "expected a function after the open parenthesis, but found a structure name")
+  "expected a function after the open parenthesis, but found a structure type (do you mean ~a)")
 
 (define-for-syntax EXPECTED-MUTABLE
   "expected a mutable variable after set!, but found a variable that cannot be modified: ~a")
@@ -897,7 +898,7 @@
                               [(getter-id ...)     getter-names])
                   (define defns
                     (quasisyntax/loc stx
-                      (define-values (#,parametric-signature-name def-proc-name ...)
+                      (define-values (#,signature-name #,parametric-signature-name def-proc-name ...)
                         (let ()
                           (define-values (type-descriptor
                                           raw-constructor
@@ -972,13 +973,11 @@
                              (make-inspector)))
                           
                           #,@(map-with-index (lambda (i name field-name)
-                                               (quasisyntax/loc stx
-                                                 (define #,name
-                                                   (let ([raw (make-struct-field-accessor
+                                               #`(define #,name
+                                                   (make-struct-field-accessor
                                                                raw-generic-access
                                                                #,i
-                                                               '#,field-name)])
-                                                     raw))))
+                                                               '#,field-name)))
                                              getter-names
                                              fields)
                           #,@(map-with-index (lambda (i name field-name)
@@ -993,8 +992,8 @@
                                              fields)
                           (define #,predicate-name raw-predicate)
                           (define #,constructor-name raw-constructor)
-                          
-                          (define #,signature-name (signature (predicate raw-predicate)))
+			  
+                          (define #,signature-name (signature #,signature-name (predicate raw-predicate)))
                           
                           #,(if setters?
                                 (quasisyntax/loc stx
@@ -1022,7 +1021,7 @@
                                                   arbs))))
                                       sig))))
                           
-                          (values #;#,signature-name #,parametric-signature-name proc-name ...)))))
+                          (values #,signature-name #,parametric-signature-name proc-name ...)))))
                   ;; --- IN ---
                   (stepper-syntax-property defns 'stepper-black-box-expr stx)))))
            ;; --------------------------------------------------------------------------------
@@ -1121,17 +1120,16 @@
                                                     [(self . args)
                                                      (raise-syntax-error
                                                       #f
-                                                      EXPECTED-FUNCTION-NAME
+                                                      (format EXPECTED-FUNCTION-NAME (format "make-~a" (syntax-e #'name_)))
                                                       stx
                                                       #'self)]
                                                     [else
                                                      (raise-syntax-error
                                                       #f
-                                                      (format "structure type; do you mean make-~a"
-                                                              (syntax-e #'name_))
+                                                      (format "structure type; do you mean make-~a" (syntax-e #'name_))
                                                       stx
                                                       stx)
-                                                     #;#'#,signature-name
+                                                     #'#,signature-name
                                                      ])))
                           ;; support `shared'
                           (make-info (lambda () compile-info)))))
