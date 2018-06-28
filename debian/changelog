@@ -1,8 +1,8 @@
-racket (6.12+ppa1-1~trusty2) trusty; urgency=medium
+racket (6.90.0.901+ppa1-1~bionic1) bionic; urgency=medium
 
-  * PPA release
+  * PPA release (beta)
 
- -- Asumu Takikawa <asumu@racket-lang.org>  Sat, 28 Apr 2018 14:30:00 -0800
+ -- Asumu Takikawa <asumu@racket-lang.org>  Thu, 28 Jun 2018 13:30:00 -0800
 
 racket (6.10.1+dfsg1-1) unstable; urgency=medium
 
