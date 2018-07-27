@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define package-content-state (quote (built "6.90.0.901"))) (define collection (quote multi)) (define deps (quote ("base"))) (define pkg-desc "Legacy (Scheme) libraries") (define pkg-authors (quote (mflatt)))))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "7.0"))) (define collection (quote multi)) (define deps (quote ("base"))) (define pkg-desc "Legacy (Scheme) libraries") (define pkg-authors (quote (mflatt)))))
