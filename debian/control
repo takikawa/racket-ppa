@@ -3,14 +3,14 @@ Section: lisp
 Priority: optional
 Maintainer: David Bremner <bremner@debian.org>
 Standards-Version: 4.1.1
-Build-Depends: autotools-dev, cdbs, debhelper (>= 10), patchutils, libffi-dev,
+Build-Depends: cdbs, debhelper (>= 10), patchutils, libffi-dev,
  libfreetype6-dev, libjpeg-dev, libpango1.0-dev, libpng-dev, libssl-dev,
  libxaw7-dev, xbitmaps, libxft-dev, libgl1-mesa-dev | libgl-dev,
  libglu1-mesa-dev | libglu-dev, libx11-dev, libxrender-dev, libcairo2-dev,
  sqlite3
-Vcs-Git: git://anonscm.debian.org/collab-maint/racket.git
-Vcs-Browser: http://anonscm.debian.org/gitweb/?p=collab-maint/racket.git
-Homepage: http://www.racket-lang.org/
+Vcs-Git: https://salsa.debian.org/bremner/racket
+Vcs-Browser: https://salsa.debian.org/bremner/racket
+Homepage: https://www.racket-lang.org/
 
 Package: racket
 Architecture: any
