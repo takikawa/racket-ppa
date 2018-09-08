@@ -35,7 +35,7 @@
  queue-event
  yield)
 
-(import-class NSApplication NSAutoreleasePool NSColor NSProcessInfo NSArray)
+(import-class NSApplication NSAutoreleasePool NSColor NSProcessInfo NSArray NSMenu)
 
 ;; Extreme hackery to hide original arguments from
 ;; NSApplication, because NSApplication wants to turn 
@@ -82,6 +82,8 @@
       (queue-file-event (string->path filename))
       (post-dummy-event)]
   [-a _void (applicationDidFinishLaunching: [_id notification])
+      ;; Create an empty windows menu for right clicking in the dock
+      (tell app setWindowsMenu: (tell (tell NSMenu alloc) init))
       (unless got-file?
         (queue-start-empty-event))]
   [-a _BOOL (applicationShouldHandleReopen: [_id app] hasVisibleWindows: [_BOOL has-visible?])
@@ -177,7 +179,7 @@
 ;;  that, so there's an additional hack above.
 (define-appserv CGDisplayRegisterReconfigurationCallback 
   (_fun (_fun #:atomic? #t _uint32 _uint32 -> _void) _pointer -> _int32))
-(define (on-screen-changed display flags) 
+(define (on-screen-changed display flags)
   (screen-changed-callback flags)
   (post-dummy-event))
 (define screen-changed-callback void)
@@ -248,12 +250,12 @@
 ;; the CoreFoundation run loop
 
 (define _CFIndex _uint)
-(define _CFStringRef _NSString)
+(define _CFStringRef _pointer) ; don't use NSString, because we don't want to acquire/release
 (define-cstruct _CFSocketContext ([version _CFIndex]
                                   [info _pointer]
                                   [retain (_fun _pointer -> _pointer)]
                                   [release (_fun _pointer -> _void)]
-                                  [copyDescription (_fun _pointer -> _CFStringRef)]))
+                                  [copyDescription (_fun _pointer -> _NSString)]))
 (define (sock_retain v) #f)
 (define (sock_release v) (void))
 (define (sock_copy_desc v) "sock")
@@ -302,13 +304,13 @@
 ;; icon. (But why does that happen?)
 
 (define _Boolean _BOOL)
-(define-cf kCFRunLoopCommonModes _pointer)
+(define-cf kCFRunLoopCommonModes _CFStringRef)
 (define-cf CFRunLoopObserverCreate (_fun _pointer ; CFAllocatorRef
                                          _int ; CFOptionFlags
                                          _Boolean ; repeats?
                                          _CFIndex ; order
                                          (_fun #:atomic? #t _pointer _int _pointer -> _void)
-                                         _pointer ; CFRunLoopObserverContext
+                                         _CFStringRef ; CFRunLoopObserverContext
                                          -> _pointer))
 (define-cf CFRunLoopAddObserver (_fun _pointer _pointer _pointer -> _void))
 (define-cf CFRunLoopGetMain (_fun -> _pointer))
@@ -324,6 +326,50 @@
   (CFRunLoopAddObserver (CFRunLoopGetMain) o kCFRunLoopCommonModes))
 
 ;; ------------------------------------------------------------
+;; Detecting menu-bar clicks:
+;; In 10.13 and later, detecting a menu-bar click by NSSystemDefined
+;; doesn't work, so we have to install a lower-level event tap.
+
+(define mb-detect-box (box #f))
+(define-cg CGEventTapCreate (_fun _uint32 _uint32 _uint32 _uint64
+                                  (_fun #:atomic? #t
+                                        #:keep mb-detect-box
+                                        _pointer _uint32 _id _pointer -> _id)
+                                  _pointer
+                                  -> _pointer))
+(define-cf CFMachPortCreateRunLoopSource (_fun _pointer _pointer _long -> _pointer))
+(define-cf CFRunLoopGetCurrent (_fun -> _pointer))
+(define-cg CGEventGetLocation (_fun _pointer -> _NSPoint))
+(define-appkit NSEventTrackingRunLoopMode _CFStringRef)
+
+(define in-menu-bar-detected? #f)
+
+(define (menu-bar-tap-callback proxy type evt data)
+  (when (in-menu-bar-range? (CGEventGetLocation evt) #t)
+    (set! in-menu-bar-detected? #t))
+  evt)
+
+(define kCGSessionEventTap 1)
+(define kCGAnnotatedSessionEventTap 2)
+(define kCGHeadInsertEventTap 0)
+(define kCGEventTapOptionDefault 0) ; => active
+(define NX_LMOUSEDOWN 1)
+(define NX_RMOUSEDOWN 3)
+(define menu-bar-tap
+  (and (version-10.13-or-later?)
+       (CGEventTapCreate kCGSessionEventTap #; kCGAnnotatedSessionEventTap
+                         kCGHeadInsertEventTap
+                         kCGEventTapOptionDefault
+                         (bitwise-ior
+                          (1 . arithmetic-shift . NX_LMOUSEDOWN)
+                          (1 . arithmetic-shift . NX_RMOUSEDOWN))
+                         menu-bar-tap-callback
+                         (malloc-immobile-cell mb-detect-box))))
+(when menu-bar-tap
+  (define src (CFMachPortCreateRunLoopSource #f menu-bar-tap 0))
+  (CFRunLoopAddSource (CFRunLoopGetCurrent) src kCFRunLoopCommonModes))
+
+;; ------------------------------------------------------------
 ;; Cocoa event pump
 
 (define-cocoa NSDefaultRunLoopMode _id) ; more specifically an _NSString, but we don't need a conversion
@@ -337,7 +383,7 @@
 (define front-hook (lambda () (values #f #f)))
 (define (set-front-hook! proc) (set! front-hook proc))
 
-(define in-menu-bar-range? (lambda (p) #f))
+(define in-menu-bar-range? (lambda (p flipped?) #f))
 (define (set-menu-bar-hooks! r?) 
   (set! in-menu-bar-range? r?))
 
@@ -346,12 +392,21 @@
 
 (define avoid-mouse-key-until #f)
 
+;; Check for menu-bar click to trigger `on-demand` callbacks.
+;; Why not use a delegate on NSMenu? Because that's a less convenient
+;; time to call arbitrary Racket code. It might be better to do that
+;; using `call-as-nonatomic-retry-point` and `constrained-reply`, but
+;; I'm not sure, and I'll stick with this for now.
 (define (check-menu-bar-click evt)
-  (if (and evt 
-           (= 14 (tell #:type _NSUInteger evt type))
-           (= 7 (tell #:type _short evt subtype))
-           (not (tell evt window))
-           (in-menu-bar-range? (tell #:type _NSPoint evt locationInWindow)))
+  (if (if menu-bar-tap
+          (and in-menu-bar-detected?
+               (set! in-menu-bar-detected? #f)
+               #t)
+          (and evt
+               (= NSSystemDefined (tell #:type _NSUInteger evt type))
+               (= 7 (tell #:type _short evt subtype))
+               (not (tell evt window))
+               (in-menu-bar-range? (tell #:type _NSPoint evt locationInWindow) #f)))
       ;; Mouse down in the menu bar:
       (let-values ([(f e) (front-hook)])
         (when e

@@ -11,7 +11,17 @@
                               vc-append hbl-append vl-append)
                      redex))
 
-@(define redex-eval (make-base-eval '(require redex/reduction-semantics)))
+@(define redex-eval (make-base-eval '(require redex/reduction-semantics redex/pict)))
+@; this definition is copied from languages.scrbl
+@(redex-eval
+  '(define-language lc-lang
+     (e ::= (e e ...)
+        x
+        (λ (x ...) e))
+     (v ::= (λ (x ...) e))
+     (E ::= (v ... E e ...)
+        hole)
+     (x y ::= variable-not-otherwise-mentioned)))
 
 @title{Other Relations}
 
@@ -99,8 +109,8 @@ clause to be taken.
 The @racket[clause-name] is used only when typesetting. See
 @racket[metafunction-cases].
 
-The @racket[or] clause is used to define a form of conditional
-right-hand side of a metafunction. In particular, if any of the
+The @racket[or] clause is used to define piecewise conditional
+metafunctions. In particular, if any of the
 @racket[where] or @racket[side-condition] clauses fail, then
 evaluation continues after an @racket[or] clause, treating the
 term that follows as the result (subject to any subsequent
@@ -109,6 +119,29 @@ is equivalent to simply duplicating the left-hand side of the
 clause, once for each @racket[or] expression, but signals to
 the typesetting library to use a large left curly brace to group
 the conditions in the @racket[or].
+
+ For example, here are two equivalent definitions of a @racket[biggest]
+ metafunction that typeset differently:
+
+ @examples[#:eval redex-eval
+           (define-metafunction lc-lang
+             biggest : natural natural -> natural
+             [(biggest natural_1 natural_2)
+              natural_2
+              (side-condition (< (term natural_1) (term natural_2)))]
+             [(biggest natural_1 natural_2)
+              natural_1])
+           (render-metafunction biggest)
+           (define-metafunction lc-lang
+             biggest : natural natural -> natural
+             [(biggest natural_1 natural_2)
+              natural_2
+              (side-condition (< (term natural_1) (term natural_2)))
+
+              or
+
+              natural_1])
+           (render-metafunction biggest)]
 
 Note that metafunctions are assumed to always return the same results
 for the same inputs, and their results are cached, unless
@@ -333,8 +366,10 @@ A rule's @racket[where], @racket[where/hidden], and @racket[where/error] premise
 A rule's @racket[side-condition] and @racket[side-condition/hidden] premises are similar
 to those in @racket[reduction-relation] and @racket[define-metafunction], except that
 they do not implicitly unquote their right-hand sides. In other words, a premise 
-of the form @racket[(side-condition term)] is equivalent to the premise 
-@racket[(where #t term)], except it does not typeset with the ``#t = '', as that would.
+of the form @racket[(side-condition term)] is close to the premise 
+@racket[(where #t term)], except it does not typeset with the ``#t = '', as that would
+and it holds whenever the expression evaluates to any non @racket[#f] value
+(not just @racket[#t]).
 
 Judgments with exclusively @racket[I] mode positions may also be used in @|tttterm|s
 in a manner similar to metafunctions, and evaluate to a boolean.

@@ -17,11 +17,13 @@
          "bsp-trees.rkt"
          "bsp.rkt")
 
-(provide (all-defined-out)
+(provide plot3d-subdivisions
          plot3d-back-layer
          plot3d-area-layer
          plot3d-front-layer
-         )
+         3D-Plot-Area%
+         3d-plot-area%
+         (struct-out render-tasks))
 
 (define plot3d-back-layer 2)
 (define plot3d-area-layer 1)
@@ -573,13 +575,19 @@
     
     ;; -----------------------------------------------------------------------------------------------
     ;; Tick label parameters
-    
+
+    (: draw-x-tick-labels? Boolean)
+    (: draw-y-tick-labels? Boolean)
+    (: draw-z-tick-labels? Boolean)
     (: draw-x-far-tick-labels? Boolean)
     (: draw-y-far-tick-labels? Boolean)
     (: draw-z-far-tick-labels? Boolean)
-    (define draw-x-far-tick-labels? (not (and (plot-x-axis?) (equal? x-ticks x-far-ticks))))
-    (define draw-y-far-tick-labels? (not (and (plot-y-axis?) (equal? y-ticks y-far-ticks))))
-    (define draw-z-far-tick-labels? (not (and (plot-z-axis?) (equal? z-ticks z-far-ticks))))
+    (define draw-x-tick-labels? (plot-x-tick-labels?))
+    (define draw-y-tick-labels? (plot-y-tick-labels?))
+    (define draw-z-tick-labels? (plot-z-tick-labels?))
+    (define draw-x-far-tick-labels? (or (plot-x-far-tick-labels?) (not (and (plot-x-axis?) (equal? x-ticks x-far-ticks)))))
+    (define draw-y-far-tick-labels? (or (plot-y-far-tick-labels?) (not (and (plot-y-axis?) (equal? y-ticks y-far-ticks)))))
+    (define draw-z-far-tick-labels? (or (plot-z-far-tick-labels?) (not (and (plot-z-axis?) (equal? z-ticks z-far-ticks)))))
     
     (: sort-ticks (-> (Listof tick) (-> Real FlVector) (Listof tick)))
     (define/private (sort-ticks ts tick-value->view)
@@ -625,7 +633,7 @@
     
     (: get-x-tick-label-params (-> (Listof Label-Params)))
     (define (get-x-tick-label-params)
-      (if (plot-x-axis?)
+      (if (and (plot-x-axis?) draw-x-tick-labels?)
           (let ([offset  (if x-axis-y-min? (vneg (y-axis-dir)) (y-axis-dir))])
             (get-tick-label-params (sort-ticks x-ticks (λ ([x : Real]) (x-tick-value->view x)))
                                    (λ ([x : Real]) (x-tick-value->dc x))
@@ -635,7 +643,7 @@
     
     (: get-y-tick-label-params (-> (Listof Label-Params)))
     (define (get-y-tick-label-params)
-      (if (plot-y-axis?)
+      (if (and (plot-y-axis?) draw-y-tick-labels?)
           (let ([offset  (if y-axis-x-min? (vneg (x-axis-dir)) (x-axis-dir))])
             (get-tick-label-params (sort-ticks y-ticks (λ ([y : Real]) (y-tick-value->view y)))
                                    (λ ([y : Real]) (y-tick-value->dc y))
@@ -645,7 +653,7 @@
     
     (: get-z-tick-label-params (-> (Listof Label-Params)))
     (define (get-z-tick-label-params)
-      (if (plot-z-axis?)
+      (if (and (plot-z-axis?) draw-z-tick-labels?)
           (get-tick-label-params z-ticks
                                  (λ ([z : Real]) (z-tick-value->dc z))
                                  #(-1 0)
@@ -743,13 +751,13 @@
     
     (: max-x-tick-label-diag (-> Real))
     (define (max-x-tick-label-diag)
-      (if (plot-x-axis?)
+      (if (and (plot-x-axis?) draw-x-tick-labels?)
           (max-tick-label-diag (y-axis-dir) max-x-tick-label-width max-x-tick-label-height)
           0))
     
     (: max-y-tick-label-diag (-> Real))
     (define (max-y-tick-label-diag)
-      (if (plot-y-axis?)
+      (if (and (plot-y-axis?) draw-y-far-tick-labels?)
           (max-tick-label-diag (x-axis-dir) max-y-tick-label-width max-y-tick-label-height)
           0))
     

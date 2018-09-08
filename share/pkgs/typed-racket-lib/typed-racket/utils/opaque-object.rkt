@@ -39,14 +39,20 @@
 
 (provide object/c-opaque)
 
+(module+ for-testing
+  (provide restrict-typed->/c
+           restrict-typed-field/c))
+
 ;; projection for base-object/c-opaque
 (define ((object/c-opaque-late-neg-proj ctc) blame)
+  (match-define (base-object/c-opaque
+                 base-ctc
+                 methods method-ctcs
+                 fields field-ctcs)
+    ctc)
+  (define guard/c (dynamic-object/c methods method-ctcs fields field-ctcs))
+  (define guard/c-proj ((contract-late-neg-projection guard/c) blame))
   (λ (obj neg-party)
-    (match-define (base-object/c-opaque
-                   base-ctc
-                   methods method-ctcs
-                   fields field-ctcs)
-                  ctc)
     (when (not (object? obj))
       (raise-blame-error blame #:missing-party neg-party obj "expected an object got ~a" obj))
     (define actual-fields (field-names obj))
@@ -56,19 +62,23 @@
       (remove* fields actual-fields))
     (define remaining-methods
       (remove* methods actual-methods))
-    (define guard/c
-      (dynamic-object/c (append methods remaining-methods)
-                        (append method-ctcs
-                                (for/list ([m remaining-methods])
-                                  (restrict-typed->/c m)))
-                        (append fields remaining-fields)
-                        (append field-ctcs
-                                (for/list ([m remaining-fields])
-                                  (restrict-typed-field/c m)))))
-    ;; FIXME: this is a bit sketchy because we have to construct
-    ;;        a contract that depends on the actual object that we got
-    ;;        since we don't know its methods beforehand
-    (((contract-late-neg-projection guard/c) blame) obj neg-party)))
+    (cond
+      [(and (null? remaining-methods) (null? remaining-fields))
+       (guard/c-proj obj neg-party)]
+      [else
+       (define restrict-guard/c
+         (dynamic-object/c remaining-methods
+                           (for/list ([m (in-list remaining-methods)])
+                             (restrict-typed->/c m))
+                           remaining-fields
+                           (for/list ([m (in-list remaining-fields)])
+                             (restrict-typed-field/c m))))
+       ;; FIXME: this is a bit sketchy because we have to construct
+       ;;        a contract that depends on the actual object that we got
+       ;;        since we don't know its methods beforehand
+       (((contract-late-neg-projection restrict-guard/c) blame)
+        (guard/c-proj obj neg-party)
+        neg-party)])))
 
 (define (object/c-opaque-name ctc)
   (build-object/c-type-name 'object/c-opaque
@@ -85,7 +95,7 @@
 ;;   and `this` has stronger contracts on all members
 ;; - `that` is an object/c contract
 ;;   and `this` has stronger contracts on their common members
-(define (object/c-opaque-stronger this that)
+(define (object/c-opaque-stronger? this that)
   (define that-opaque? (base-object/c-opaque? that))
   (cond
    [(or that-opaque?
@@ -102,12 +112,20 @@
       #t)]
    [else #f]))
 
+;; An `object/c-opaque` contract is equivalent to another `object/c-opaque`
+;;  contract that has the same fields+methods and the same contracts on them.
+(define (object/c-opaque-equivalent? this that)
+  (and (base-object/c-opaque? that)
+       (contract-equivalent? (base-object/c-opaque-obj/c this)
+                             (base-object/c-opaque-obj/c that))))
+
 (struct base-object/c-opaque
   (obj/c ; keep a copy of the normal object/c for first-order and stronger checks
    method-names method-ctcs field-names field-ctcs)
   #:property prop:contract
   (build-contract-property
-   #:stronger object/c-opaque-stronger
+   #:stronger object/c-opaque-stronger?
+   #:equivalent object/c-opaque-equivalent?
    #:name object/c-opaque-name
    #:first-order (λ (ctc)
                    (define obj/c (base-object/c-opaque-obj/c ctc))
@@ -145,34 +163,34 @@
 ;; method is typed (assuming that the caller is untyped or the receiving
 ;; object went through untyped code)
 (define (((restrict-typed->-late-neg-projection ctc) blame) val neg-party)
-  (define blame+neg-party (cons blame neg-party))
-  (chaperone-procedure val
-                       (make-keyword-procedure
-                        (λ (_ kw-args . rst)
-                          (with-contract-continuation-mark
-                           blame+neg-party
-                           (when (typed-method? val)
+  (cond
+    [(typed-method? val)
+     (chaperone-procedure val
+                          (make-keyword-procedure
+                           (λ (_ kw-args . rst)
                              (raise-blame-error (blame-swap blame) val #:missing-party neg-party
                                                 "cannot call uncontracted typed method"))
-                           (apply values kw-args rst)))
-                        (λ args
-                          (with-contract-continuation-mark
-                           blame+neg-party
-                           (when (typed-method? val)
+                           (λ args
                              (raise-blame-error (blame-swap blame) val #:missing-party neg-party
-                                                "cannot call uncontracted typed method"))
-                           (apply values args))))))
+                                                "cannot call uncontracted typed method"))))]
+    [else val]))
 
 ;; Returns original method name
 (define (restrict-typed->-name ctc)
   (define name (restrict-typed->/c-name ctc))
   (build-compound-type-name 'restrict-typed->/c name))
 
+(define (restrict-typed->/c-equivalent? this that)
+  (and (restrict-typed->/c? that)
+       (eq? (restrict-typed->/c-name this)
+            (restrict-typed->/c-name that))))
+
 (struct restrict-typed->/c (name)
         #:property prop:chaperone-contract
         (build-chaperone-contract-property
          #:name restrict-typed->-name
-         #:stronger equal?
+         #:stronger restrict-typed->/c-equivalent?
+         #:equivalent restrict-typed->/c-equivalent?
          #:late-neg-projection restrict-typed->-late-neg-projection))
 
 (define (restrict-typed-field-late-neg-proj ctc)
@@ -194,9 +212,15 @@
   (define name (restrict-typed-field/c-name ctc))
   (build-compound-type-name 'restrict-typed-field/c name))
 
+(define (restrict-typed-field-equivalent? this that)
+  (and (restrict-typed-field/c? that)
+       (equal? (restrict-typed-field/c-name this)
+               (restrict-typed-field/c-name that))))
+
 (struct restrict-typed-field/c (name)
         #:property prop:flat-contract
         (build-flat-contract-property
          #:name restrict-typed-field-name
-         #:stronger equal?
+         #:stronger restrict-typed-field-equivalent?
+         #:equivalent restrict-typed-field-equivalent?
          #:late-neg-projection restrict-typed-field-late-neg-proj))

@@ -1,5 +1,5 @@
 #lang racket/base
-(require racket/promise)
+(require racket/promise (for-syntax racket/base))
 (provide (struct-out nt) make-multi-name-nt
          (struct-out rhs)
          (struct-out bind)
@@ -18,11 +18,20 @@
          the-not-hole
          the-hole
          hole?
+         term/pretty-write-doing-the-printing
          (struct-out compiled-lang) 
          compiled-lang-across-ht 
          compiled-lang-across-list-ht
          compiled-lang-cclang
-         default-language)
+         default-language
+
+         extend-nt-ellipses
+         (for-syntax extend-nt-ellipses))
+
+
+(begin-for-syntax
+  (define extend-nt-ellipses '(....)))
+(define extend-nt-ellipses '(....))
 
 ;; lang = (listof nt)
 ;; nt = (make-nt sym (listof rhs))
@@ -30,6 +39,7 @@
 ;; single-pattern = sexp
 (define-struct nt (name rhs) #:transparent)
 (define-struct rhs (pattern) #:transparent)
+(define term/pretty-write-doing-the-printing (make-parameter #f))
 (define-values (the-hole the-not-hole hole?)
   (let ()
     (struct hole (which)
@@ -42,7 +52,7 @@
                          "hole"
                          "not-hole"))
          (cond
-           [(or (equal? mode 0) (equal? mode 1))
+           [(or (equal? mode 0) (equal? mode 1) (term/pretty-write-doing-the-printing))
             (write-string str port)]
            [else
             (write-string "#<" port)
@@ -114,7 +124,14 @@
                                    has-hole-or-hide-hole-ht cache binding-forms-absent-cache
                                    bind-names-cache pict-builder
                                    literals aliases collapsible-nts
-                                   ambiguity-cache binding-table enum-table))
+                                   ambiguity-cache binding-table enum-table
+                                   language-name)
+   #:methods gen:custom-write
+  [(define (write-proc clang port mode)
+     (define lang-name (compiled-lang-language-name clang))
+     (display "#<language: " port)
+     (display lang-name port)
+     (display ">" port))])
 
 (define (compiled-lang-cclang x) (force (compiled-lang-delayed-cclang x)))
 (define (compiled-lang-across-ht x)

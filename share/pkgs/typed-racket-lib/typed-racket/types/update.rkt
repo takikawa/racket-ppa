@@ -5,7 +5,7 @@
          (contract-req)
          (infer-in infer)
          (rep core-rep type-rep prop-rep object-rep values-rep rep-utils)
-         (utils tc-utils)
+         (utils tc-utils prefab)
          (types resolve subtype subtract)
          (rename-in (types abbrev)
                     [-> -->]
@@ -45,6 +45,8 @@
           (rebuild -Promise (update t rst))]
          
          ;; struct ops
+         ;; (NOTE: we assume path elements to mutable fields
+         ;;        are never created)
          [((Struct: nm par flds proc poly pred)
            (StructPE: s idx))
           #:when (subtype t s)
@@ -57,6 +59,16 @@
             [(Bottom:) -Bottom]
             [ty (let ([flds (append lhs (cons (make-fld ty acc-id #f) rhs))])
                   (make-Struct nm par flds proc poly pred))])]
+
+         ;; prefab struct ops
+         ;; (NOTE: we assume path elements to mutable fields
+         ;;        are never created)
+         [((Prefab: key flds) (PrefabPE: path-key idx))
+          #:when (prefab-key-subtype? key path-key)
+          (match-define-values (lhs (cons fld-ty rhs)) (split-at flds idx))
+          (match (update fld-ty rst)
+            [(Bottom:) -Bottom]
+            [fld-ty (make-Prefab key (append lhs (cons fld-ty rhs)))])]
          
          ;; class field ops
          ;;
@@ -88,6 +100,15 @@
             [(CdrPE:) (intersect t (-pair Univ (update Univ rst)))]
             [(SyntaxPE:) (intersect t (-syntax-e (update Univ rst)))]
             [(ForcePE:) (intersect t (-force (update Univ rst)))]
+            [(PrefabPE: key idx)
+             #:when (not (prefab-key/mutable-fields? key))
+             (define field-count (prefab-key->field-count key))
+             (define updated-field (update Univ rst))
+             (define fields (for/list ([fld-idx (in-range field-count)])
+                              (if (eqv? idx fld-idx)
+                                  updated-field
+                                  Univ)))
+             (intersect t (make-Prefab key fields))]
             [_ t])])]
       ;; path is empty (base case)
       [_ (cond

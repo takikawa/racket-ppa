@@ -16,9 +16,9 @@
          (for-syntax syntax/parse racket/base)
          (types abbrev struct-table utils)
          data/queue
-         racket/dict racket/list racket/promise
+         racket/private/dict racket/list racket/promise
          racket/match
-         syntax/id-table)
+         syntax/private/id-table)
 
 (provide ;; convenience form for defining an initial environment
          ;; used by "base-special-env.rkt" and "base-contracted.rkt"
@@ -257,6 +257,7 @@
     [(Prefab: key flds)
      `(make-Prefab (quote ,key)
                    (list ,@(map type->sexp flds)))]
+    [(PrefabTop: key) `(make-PrefabTop (quote ,key))]
     [(App: rator rands)
      `(make-App ,(type->sexp rator)
                 (list ,@(map type->sexp rands)))]
@@ -264,7 +265,9 @@
      `(make-Opaque (quote-syntax ,pred))]
     [(Refinement: parent pred)
      `(make-Refinement ,(type->sexp parent) (quote-syntax ,pred))]
-    [(Mu-name: n b)
+    [(Mu-maybe-name: n (? Type? b))
+     `(make-Mu (quote ,n) ,(type->sexp b))]
+    [(Mu: n b)
      `(make-Mu (quote ,n) ,(type->sexp b))]
     [(Poly-names: ns b)
      `(make-Poly (list ,@(for/list ([n (in-list ns)])
@@ -324,6 +327,8 @@
        ,(and rest (type->sexp rest))
        (list ,@(map type->sexp kws))
        ,(type->sexp rng))]
+    [(Rest: tys )
+     `(make-Rest (list ,@(map type->sexp tys)))]
     [(RestDots: ty db)
      `(make-RestDots ,(type->sexp ty)
                      (quote ,db))]
@@ -386,7 +391,9 @@
     [(In-Predefined-Table: id) id]
     ;; CarPE, CdrPE, SyntaxPE, ForcePE, FieldPE are in the table
     [(StructPE: ty idx)
-     `(make-StructPE ,(type->sexp ty) ,idx)]))
+     `(make-StructPE ,(type->sexp ty) ,idx)]
+    [(PrefabPE: key idx)
+     `(make-PrefabPE (quote ,key) ,idx)]))
 
 (define (bound-in-this-module id)
   (let ([binding (identifier-binding id)])
@@ -456,10 +463,19 @@
   (make-init-code
    struct-fn-table-map
    (λ (id v)
-     (match-define (list pe mut?) v)
-     #`(add-struct-fn! (quote-syntax #,id)
-                       #,(path-elem->sexp pe)
-                       #,mut?))))
+     (match-define (struct-field-entry type idx mutator? mutable?) v)
+     (cond
+       [mutator?
+        #`(add-struct-mutator-fn!
+           (quote-syntax #,id)
+           #,(type->sexp type)
+           #,idx)]
+       [else
+        #`(add-struct-accessor-fn!
+           (quote-syntax #,id)
+           #,(type->sexp type)
+           #,idx
+           #,mutable?)]))))
 
 ;; -> (Listof Syntax)
 ;; Construct syntax that does type environment serialization

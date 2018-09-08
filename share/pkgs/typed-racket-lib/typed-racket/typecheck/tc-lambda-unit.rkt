@@ -26,20 +26,16 @@
   #:literal-sets (kernel-literals)
   #:attributes (i cond)
   [pattern i:id #:attr cond #f]
-  [pattern (if cond:id i:id e:expr)])
+  [pattern (if cond:expr e:expr i:id)])
 
 (define-syntax-class rebuild-let*
   #:literal-sets (kernel-literals)
-  #:attributes (mapping flag-mapping)
+  #:attributes (mapping)
   (pattern (#%expression :rebuild-let*))
   (pattern (let-values ([(new-id) e:cl-rhs]) body:rebuild-let*)
-           #:attr mapping (free-id-table-set (attribute body.mapping) #'e.i #'new-id)
-           #:attr flag-mapping (if (attribute e.cond)
-                                   (free-id-table-set (attribute body.flag-mapping) #'e.i #'e.cond)
-                                   (attribute body.flag-mapping)))
+           #:attr mapping (free-id-table-set (attribute body.mapping) #'e.i #'new-id))
   (pattern body:expr
-           #:attr mapping (make-immutable-free-id-table)
-           #:attr flag-mapping (make-immutable-free-id-table)))
+           #:attr mapping (make-immutable-free-id-table)))
 
 ;; positional: (listof identifier?)
 ;; rest: id or #f
@@ -83,23 +79,18 @@
 ;; expected: The expected type of the body forms.
 ;; body: The body of the lambda to typecheck.
 (define/cond-contract
-  (tc-lambda-body arg-names arg-types #:rest-arg+type [rest-arg+type #f] #:expected [expected #f] body)
+  (tc-lambda-body arg-names arg-types
+                  #:rest-id+type+body-type [rest-id+type+body-type #f]
+                  #:expected [expected #f] body)
   (->* ((listof identifier?) (listof Type?) syntax?)
-       (#:rest-arg+type (or/c #f (cons/c identifier? (or/c Type? RestDots?)))
+       (#:rest-id+type+body-type (or/c #f (list/c identifier? (or/c Rest? RestDots?) Type?))
         #:expected (or/c #f tc-results/c))
        Arrow?)
 
   (define-values (rst-id rst-type names types)
-    (match rest-arg+type
-      [(cons id rst)
-       (values id rst
-               (cons id arg-names)
-               (cons (match rst
-                       [(? Bottom?) -Null]
-                       [(? Type?) (-lst rst)]
-                       [(RestDots: dty dbound)
-                        (make-ListDots dty dbound)])
-                     arg-types))]
+    (match rest-id+type+body-type
+      [(list id rst body-type)
+       (values id rst (cons id arg-names) (cons body-type arg-types))]
       [_ (values #f #f arg-names arg-types)]))
 
   (-Arrow
@@ -117,28 +108,33 @@
 ;; rest-id: The identifier of the rest arg, or #f for no rest arg
 ;; body: The body of the lambda to typecheck.
 ;; arg-tys: The expected positional argument types.
-;; rst: #f, expected rest arg Type, or expected RestDots
+;; rst: #f, expected rest arg Rest, or expected RestDots
 ;; ret-ty: The expected type of the body of the lambda.
 (define/cond-contract (check-clause arg-list rest-id body arg-tys rst ret-ty)
   ((listof identifier?)
-   (or/c #f identifier?) syntax? (listof Type?) (or/c #f Type? RestDots?)
+   (or/c #f identifier?) syntax? (listof Type?) (or/c #f Rest? RestDots?)
    tc-results/c
    . -> .
    Arrow?)
   (let* ([arg-len (length arg-list)]
-         [tys-len (length arg-tys)]
+         [arg-tys-len (length arg-tys)]
+         [extra-arg-count (- arg-len arg-tys-len)]
          [arg-types
-          (if (andmap type-annotation arg-list)
-              (get-types arg-list #:default Univ)
-              (cond
-                [(= arg-len tys-len) arg-tys]
-                [(< arg-len tys-len) (take arg-tys arg-len)]
-                [(> arg-len tys-len)
-                 (append arg-tys
-                         (map (if (Type? rst)
-                                  (λ _ rst)
-                                  (λ _ -Bottom))
-                              (drop arg-list tys-len)))]))])
+          (cond
+            [(andmap type-annotation arg-list)
+             (get-types arg-list #:default Univ)]
+            [(zero? extra-arg-count) arg-tys]
+            [(negative? extra-arg-count) (take arg-tys arg-len)]
+            [else
+             (define tail-tys (match rst
+                                [(Rest: rst-tys)
+                                 (define rst-len (length rst-tys))
+                                 (for/list ([_ (in-range extra-arg-count)]
+                                            [rst-t (in-list-cycle rst-tys)])
+                                   rst-t)]
+                                [_ (for/list ([_ (in-range extra-arg-count)])
+                                     -Bottom)]))
+             (append arg-tys tail-tys)])])
 
     ;; Check that the number of formal arguments is valid for the expected type.
     ;; Thus it must be able to accept the number of arguments that the expected
@@ -146,72 +142,116 @@
     ;; enough arguments, or if it requires too many arguments.
     ;; This allows a form like (lambda args body) to have the type (-> Symbol
     ;; Number) with out a rest arg.
-    (when (or (and (< arg-len tys-len) (not rest-id))
-              (and (> arg-len tys-len) (not rst)))
-      (tc-error/delayed (expected-str tys-len rst arg-len rest-id)))
-    (define rest-type
+    (when (or (and (< arg-len arg-tys-len) (not rest-id))
+              (and (> arg-len arg-tys-len) (not rst)))
+      (tc-error/delayed (expected-str arg-tys-len rst arg-len rest-id)))
+
+    ;; rst-type - the type of the rest argument in the Arrow type
+    ;; rest-body-type - the type the rest argument id has in the body
+    ;;                  of the function
+    ;; e.g. for
+    ;; (: foo (->* () () #:rest String Number))
+    ;; (define (foo . rest-strings) ...)
+    ;; the caller can provide 0 or more Strings, so the Arrow's
+    ;; rest spec would be (make-Rest (list -String))
+    ;; and in the body of the function, the rest argument
+    ;; identifier (rest-strings) have type (Listof String)
+    (define-values (rst-type rest-body-type)
       (cond
-        [(not rest-id) #f]
-        [(RestDots? rst) rst]
+        ;; there's not a rest ident... easy
+        [(not rest-id) (values #f #f)]
+        ;; a dotted rest spec, so the body has a ListDots
+        [(RestDots? rst)
+         (match-define (RestDots: dty dbound) rst)
+         (values rst (make-ListDots dty dbound))]
+        ;; the rest-id is dotted?, lets go get its type
         [(dotted? rest-id)
-         => (λ (b) (make-RestDots (extend-tvars (list b) (get-type rest-id #:default Univ))
-                                  b))]
+         => (λ (dbound)
+              (define ty (extend-tvars (list dbound) (get-type rest-id #:default Univ)))
+              (values (make-RestDots ty dbound)
+                      (make-ListDots ty dbound)))]
         [else
-         (define base-rest-type
+         ;; otherwise let's get the sequence of types the rest argument would have
+         ;; and call it 'rest-types' (i.e. in our above example 'foo', this would
+         ;; be (list -String)
+         (define rest-types
            (cond
-             [(type-annotation rest-id) (get-type rest-id #:default Univ)]
-             [(Type? rst) rst]
-             [(not rst) -Bottom]
-             [else Univ]))
-         (define extra-types
-           (if (<= arg-len tys-len)
-               (drop arg-tys arg-len)
-               null))
-         (apply Un base-rest-type extra-types)]))
-    (tc-lambda-body arg-list arg-types
-                    #:rest-arg+type (and rest-type (cons rest-id rest-type))
-                    #:expected ret-ty
-                    body)))
+             [(type-annotation rest-id) (list (get-type rest-id #:default Univ))]
+             [else
+              (match rst
+                [#f (list -Bottom)]
+                [(? Type? t) (list t)]
+                [(Rest: rst-ts) rst-ts]
+                [_ (list Univ)])]))
+         ;; now that we have the list of types, we need to calculate, based on how many
+         ;; positional argument identifiers there are, how the rest should look
+         ;; i.e. if our rest was (Num Str)* (i.e. an even length rest arg of numbers
+         ;; followed by strings) and there was 1 more positional argument that positional
+         ;; domain types, then that extra positional arg would be type Num (i.e. the type
+         ;; it gets since its type is coming from the rest type) and the rest id's type
+         ;; in the body of the function would (Pair Str (Num Str)*) (i.e. the rest arg
+         ;; would _have_ to have a Str in it, and then would have 0 or more Num+Strs
+         (cond
+           [(= arg-len arg-tys-len)
+            (values (make-Rest rest-types)
+                    (make-CyclicListof rest-types))]
+           ;; some of the args are _in_ the rst arg (i.e. they
+           ;; do not have argument names) ...
+           [(<= arg-len arg-tys-len)
+            (define extra-types (drop arg-tys arg-len))
+            (define rst-type (apply Un (append extra-types rest-types)))
+            (values (make-Rest (list rst-type))
+                    (make-Listof rst-type))]
+           ;; there are named args whose type came from the rst argument
+           ;; i.e. we need to pull there types out of the rst arg
+           [else
+            (define rest-remainder (drop rest-types (remainder extra-arg-count
+                                                               (length rest-types))))
+            (values (make-Rest rest-types)
+                    (-Tuple* rest-remainder
+                             (make-CyclicListof rest-types)))])]))
+
+    (tc-lambda-body
+     arg-list
+     arg-types
+     #:rest-id+type+body-type (and rst-type (list rest-id rst-type rest-body-type))
+     #:expected ret-ty
+     body)))
 
 ;; typecheck a single lambda, with argument list and body
 ;; drest-ty and drest-bound are both false or not false
 (define/cond-contract (tc/lambda-clause/check f body arg-tys ret-ty rst)
-  (-> formals? syntax? (listof Type?) (or/c tc-results/c #f) (or/c #f Type? RestDots?)
+  (-> formals?
+      syntax?
+      (listof Type?)
+      (or/c tc-results/c #f)
+      (or/c #f Rest? RestDots?)
       Arrow?)
-  (check-clause (formals-positional f) (formals-rest f) body arg-tys rst ret-ty))
+  (check-clause (formals-positional f)
+                (formals-rest f)
+                body
+                arg-tys
+                rst
+                ret-ty))
 
 ;; typecheck a single opt-lambda clause with argument list and body
-(define/cond-contract (tc/opt-lambda-clause arg-list body aux-table flag-table)
-  (-> (listof identifier?) syntax? free-id-table? free-id-table?
+(define/cond-contract (tc/opt-lambda-clause arg-list body aux-table)
+  (-> (listof identifier?) syntax? free-id-table?
       (listof Arrow?))
   ;; arg-types: Listof[Type?]
   (define arg-types
     (for/list ([a (in-list arg-list)])
       (get-type a #:default (lambda ()
                               (define id (free-id-table-ref aux-table a #f))
-                              (if id
-                                  (get-type id #:default Univ)
-                                  Univ)))))
+                              (cond
+                                [id
+                                 (define ty (get-type id #:default Univ))
+                                 (if (optional-non-immediate-arg-property id)
+                                     (Un -Unsafe-Undefined ty)
+                                     ty)]
+                                [else Univ])))))
 
-  ;; new-arg-types: Listof[Listof[Type?]]
-  (define new-arg-types
-    (if (= 0 (free-id-table-count flag-table))
-        (list arg-types)
-        (apply append
-               (for/list ([(k v) (in-free-id-table flag-table)])
-                 (list
-                  (for/list ([i (in-list arg-list)]
-                             [t (in-list arg-types)])
-                    (cond [(free-identifier=? i k) t]
-                          [(free-identifier=? i v) (-val #t)]
-                          [else t]))
-                  (for/list ([i (in-list arg-list)]
-                             [t (in-list arg-types)])
-                    (cond [(free-identifier=? i k) (-val #f)]
-                          [(free-identifier=? i v) (-val #f)]
-                          [else t])))))))
-  (for/list ([arg-types (in-list new-arg-types)])
-    (tc-lambda-body arg-list arg-types body)))
+  (list (tc-lambda-body arg-list arg-types body)))
 
 ;; restrict-to-arity : Arrow? nat -> (or/c #f Arrow?)
 ;; either produces a new arrow which is a subtype of arr with arity n,
@@ -226,11 +266,10 @@
 
 (define/cond-contract (tc/lambda-clause f body)
   (-> formals? syntax? (listof Arrow?))
-  (define-values (aux-table flag-table)
+  (define aux-table
     (syntax-parse body
-      [(b:rebuild-let*) (values (attribute b.mapping) (attribute b.flag-mapping))]
-      [_ (values (make-immutable-free-id-table)
-                 (make-immutable-free-id-table))]))
+      [(b:rebuild-let*) (values (attribute b.mapping))]
+      [_ (make-immutable-free-id-table)]))
 
   (define arg-list (formals-positional f))
   (define rest-id (formals-rest f))
@@ -246,7 +285,7 @@
   
   (cond
     [(and (> (free-id-table-count aux-table) 0) (not rest-id))
-     (tc/opt-lambda-clause arg-list body aux-table flag-table)]
+     (tc/opt-lambda-clause arg-list body aux-table)]
     [else
      (define arg-types (get-types arg-list #:default (lambda () #f)))
      (define rest-type
@@ -262,8 +301,10 @@
             (make-RestDots (extend-tvars (list bound) (get-type rest-id #:default Univ))
                            bound))]
          ;; Lambda with regular rest argument
-         [rest-id
-          (get-type rest-id #:default Univ)]
+         [rest-id (match (get-type rest-id #:default Univ)
+                    [(? Type? t) (make-Rest (list t))]
+                    [(? Rest? rst) rst]
+                    [(? RestDots? rst) rst])]
          ;; Lambda with no rest argument
          [else #f]))
      (cond 
@@ -290,10 +331,17 @@
          (register-ignored! (car (syntax-e body)))
          x)]
       [else
+       (define rest-body-type
+         (match rest-type
+           [#f #f]
+           [(Rest: ts) (make-CyclicListof ts)]
+           [(RestDots: dty dbound) (make-ListDots dty dbound)]))
        (list
-        (tc-lambda-body arg-list (map (lambda (v) (or v Univ)) arg-types)
-                        #:rest-arg+type (and rest-type (cons rest-id rest-type))
-                        body))])]))
+        (tc-lambda-body
+         arg-list
+         (map (λ (v) (or v Univ)) arg-types)
+         #:rest-id+type+body-type (and rest-type (list rest-id rest-type rest-body-type))
+         body))])]))
 
 
 
@@ -379,7 +427,7 @@
               #:unless (in-arities? seen arrow)
               #:when (cond
                        [formals-rest?
-                        (or (Type? rst) (>= (length dom) pos-count))]
+                        (or (Rest? rst) (>= (length dom) pos-count))]
                        [rst (<= (length dom) pos-count)]
                        [else (= (length dom) pos-count)]))
     arrow))

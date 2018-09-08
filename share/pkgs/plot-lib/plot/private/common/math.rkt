@@ -146,11 +146,12 @@
 ;; ===================================================================================================
 ;; Vectors
 
+;; The final case was dead code and has been deleted. There are no instances of
+;; vector-andmap thattake more than two vectors as arguments.
 (:: vector-andmap
    (All (A B C ...)
         (case-> (-> (-> A Boolean) (Vectorof A) Boolean)
-                (-> (-> A B Boolean) (Vectorof A) (Vectorof B) Boolean)
-                (-> (-> A B C ... C Boolean) (Vectorof A) (Vectorof B) (Vectorof C) ... C Boolean))))
+                (-> (-> A B Boolean) (Vectorof A) (Vectorof B) Boolean))))
 (define vector-andmap
   (case-lambda
     [([f : (-> A Boolean)] [as : (Vectorof A)])
@@ -162,27 +163,14 @@
        (raise-argument-error 'vector-andmap (format "vector of length ~a" n) 2 f as bs))
      (for/and ([a  (in-vector as)]
                [b  (in-vector bs)])
-       (f a b))]
-    [(f as bs . vs)
-     (define n (vector-length as))
-     (for ([v  (in-list (cons bs vs))]
-           [i  (in-naturals 2)])
-       (unless (= (vector-length v) n)
-         (apply raise-argument-error 'vector-andmap (format "vector of length ~a" n) i f as bs vs)))
-     (let loop ([i : Nonnegative-Fixnum  0])
-       (cond [(< i n)
-              (and (apply f (vector-ref as n) (vector-ref bs n)
-                          (map (plambda: (C) ([v : (Vectorof C)])
-                                 (vector-ref v n))
-                               vs))
-                   (loop (+ i 1)))]
-             [else  #t]))]))
+       (f a b))]))
 
+
+;; As with vector-andmap, dead code has been deleted.
 (:: vector-ormap
    (All (A B C ...)
         (case-> (-> (-> A Boolean) (Vectorof A) Boolean)
-                (-> (-> A B Boolean) (Vectorof A) (Vectorof B) Boolean)
-                (-> (-> A B C ... C Boolean) (Vectorof A) (Vectorof B) (Vectorof C) ... C Boolean))))
+                (-> (-> A B Boolean) (Vectorof A) (Vectorof B) Boolean))))
 (define vector-ormap
   (case-lambda
     [([f : (-> A Boolean)] [as : (Vectorof A)])
@@ -194,21 +182,7 @@
        (raise-argument-error 'vector-ormap (format "vector of length ~a" n) 2 f as bs))
      (for/or ([a  (in-vector as)]
               [b  (in-vector bs)])
-       (f a b))]
-    [(f as bs . vs)
-     (define n (vector-length as))
-     (for ([v  (in-list (cons bs vs))]
-           [i  (in-naturals 2)])
-       (unless (= (vector-length v) n)
-         (apply raise-argument-error 'vector-ormap (format "vector of length ~a" n) i f as bs vs)))
-     (let loop ([i : Nonnegative-Fixnum  0])
-       (cond [(< i n)
-              (or (apply f (vector-ref as n) (vector-ref bs n)
-                         (map (plambda: (C) ([v : (Vectorof C)])
-                                (vector-ref v n))
-                              vs))
-                  (loop (+ i 1)))]
-             [else  #f]))]))
+       (f a b))]))
 
 (:: vcross (-> (Vectorof Real) (Vectorof Real) (Vector Real Real Real)))
 (define (vcross v1 v2)

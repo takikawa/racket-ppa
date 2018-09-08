@@ -198,7 +198,7 @@
     (testKE (lambda () (define-values (x) 1))
             [#:rename+error-step rename-lambda])
     (testKE (lambda () (define-values (x) 1) . 2)
-            [#:rename+error-step rename-lambda])
+            #:error-step)
     (testKE (lambda () (begin (define-values (x) 1) . 2))
             [#:rename+error-step rename-lambda])
     (testKE (lambda () (begin (define-values (x) 1) . 2) 3)

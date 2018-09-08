@@ -10,7 +10,7 @@
 (define very-verbose (make-parameter #f))
 
 (define gui (make-parameter #f))
-(define 3m (make-parameter #t))
+(define variant (make-parameter (system-type 'gc)))
 (define launcher (make-parameter #f))
 
 (define exe-output (make-parameter #f))
@@ -41,6 +41,8 @@
         (list "-A" (path->string (find-system-path 'addon-dir)))
         (remove "-U" (exe-embedded-flags)))))
     (launcher #t)]
+   [("--embed-dlls") "On Windows, embed DLLs in the executable"
+    (exe-aux (cons (cons 'embed-dlls? #t) (exe-aux)))]
    [("--config-path") path "Set <path> as configuration directory for executable"
     (exe-embedded-config-path path)]
    [("--collects-path") path "Set <path> as main collects for executable"
@@ -54,9 +56,11 @@
    [("--orig-exe") "Use original executable instead of stub"
     (exe-aux (cons (cons 'original-exe? #t) (exe-aux)))]
    [("--3m") "Generate using 3m variant"
-    (3m #t)]
+    (variant '3m)]
    [("--cgc") "Generate using CGC variant"
-    (3m #f)]
+    (variant 'cgc)]
+   [("--cs") "Generate using CS variant"
+    (variant 'cs)]
    #:multi
    [("++aux") aux-file "Extra executable info (based on <aux-file> suffix)"
     (let ([auxes (extract-aux-from-path (path->complete-path aux-file))])
@@ -106,7 +110,7 @@
                                 dest)))))))
   (cond
    [(launcher)
-    (parameterize ([current-launcher-variant (if (3m) '3m 'cgc)])
+    (parameterize ([current-launcher-variant (variant)])
       ((if (gui) 
            make-gracket-launcher 
            make-racket-launcher)
@@ -123,7 +127,7 @@
     (mzc:create-embedding-executable
      dest
      #:mred? (gui)
-     #:variant (if (3m) '3m 'cgc)
+     #:variant (variant)
      #:verbose? (very-verbose)
      #:modules (cons `(#%mzc: (file ,source-file) (main configure-runtime))
                      (map (lambda (l) `(#t (lib ,l)))

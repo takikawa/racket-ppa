@@ -18,7 +18,8 @@
                    (λ () (make-evaluator 'racket/base))))
         (e '(require xrepl/xrepl))
         (e '(current-namespace (module->namespace 'xrepl/xrepl)))
-        (set! c (e '(for/list ([c (in-list commands-list)])
+        (set! c (e '(for*/list ([cs (in-list (reverse commands-dict))]
+                                [c (in-list (reverse (cdr cs)))])
                       (list (car (command-names c))
                             (cdr (command-names c))
                             (command-argline c)

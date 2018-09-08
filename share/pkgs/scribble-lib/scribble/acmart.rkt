@@ -9,6 +9,7 @@
          scribble/html-properties
          scribble/latex-properties
          scribble/private/tag
+         scribble/private/lang-parameters
          (for-syntax racket/base))
 
 (struct affiliation (position institution street-address city state postcode country)
@@ -86,7 +87,8 @@
   (->* () () #:rest (listof pre-content?)
        any/c)])
 (provide
-  invisible-element-to-collect-for-acmart-extras)
+  invisible-element-to-collect-for-acmart-extras
+  include-abstract)
 
 (define-syntax-rule (defopts name ...)
   (begin (define-syntax (name stx)
@@ -131,7 +133,8 @@
     ...))
 
 ; format options
-(defopts manuscript acmsmall acmlarge acmtog sigconf siggraph sigplan sigchi sigchi-a)
+(defopts manuscript acmsmall acmlarge acmtog sigconf siggraph sigplan sigchi sigchi-a
+  dtrap pacmcgit tiot tdsci)
 ; boolean options
 (defopts review screen natbib anonymous authorversion 9pt 10pt 11pt 12pt)
 
@@ -158,6 +161,20 @@
   (make-nested-flow
    abstract-style
    (decode-flow strs)))
+
+(define (extract-abstract p)
+  (unless (part? p)
+    (error 'include-abstract "doc binding is not a part: ~e" p))
+  (unless (null? (part-parts p))
+    (error 'include-abstract "abstract part has sub-parts: ~e" (part-parts p)))
+  (when (part-title-content p)
+    (error 'include-abstract "abstract part has title content: ~e" (part-title-content p)))
+  (part-blocks p))
+
+(define-syntax-rule (include-abstract mp)
+  (begin
+    (require (only-in mp [doc abstract-doc]))
+    (make-nested-flow abstract-style (extract-abstract abstract-doc))))
 
 (define (acmConference name date venue)
   (make-paragraph (make-style 'pretitle '())
@@ -392,3 +409,7 @@
 
 ; FIXME: theorem styles
 
+(default-figure-label-text (make-element 'sf "Fig."))
+(default-figure-label-sep ". ")
+(default-figure-caption-style 'sf)
+(default-figure-counter-style 'sf)

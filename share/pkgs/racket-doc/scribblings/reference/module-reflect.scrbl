@@ -273,7 +273,8 @@ Returns @racket[#t] if @racket[v] is a @tech{module path index},
 @racket[#f] otherwise.}
 
 
-@defproc[(module-path-index-resolve [mpi module-path-index?])
+@defproc[(module-path-index-resolve [mpi module-path-index?]
+                                    [load? any/c #f])
          resolved-module-path?]{
 
 Returns a @tech{resolved module path} for the resolved module name,
@@ -285,9 +286,12 @@ name resolver} (see @racket[current-module-name-resolver]). Depending
 on the kind of module paths encapsulated by @racket[mpi], the computed
 resolved name can depend on the value of
 @racket[current-load-relative-directory] or
-@racket[current-directory].
+@racket[current-directory]. The @racket[load?] argument is propagated as
+the last argument to the @tech{module name resolver}.
 
-See @racket[resolve-module-path-index].}
+See @racket[resolve-module-path-index].
+
+@history[#:changed "6.90.0.16" @elem{Added the @racket[load?] optional argument.}]}
 
 
 @defproc[(module-path-index-split [mpi module-path-index?])
@@ -476,6 +480,11 @@ Return @racket[#t] if @racket[compiled-module-code] represents a
                           [fail-thunk (-> any) (lambda () ....)])
          (or/c void? any/c)]{
 
+@margin-note{Because @racket[dynamic-require] is a procedure, giving a plain S-expression for
+@racket[mod] the same way as you would for a @racket[require] expression likely won't give you
+expected results. What you need instead is something that evaluates to an S-expression; using
+@racket[quote] is one way to do it.}
+
 Dynamically @tech{instantiates} the module specified by @racket[mod]
 in the current namespace's registry at the namespace's @tech{base
 phase}, if it is not yet @tech{instantiate}d. The current @tech{module
@@ -493,6 +502,11 @@ above the @tech{base phase}.
   (module a racket/base (displayln "hello"))
   (dynamic-require ''a #f)
 ]
+
+@margin-note{The double quoted @racket[''a] evaluates to the @racket[root-module-path] @racket['a]
+(see the grammar for @racket[require]). Using @racket['a] or @racket[a] for @racket[mod] won't work
+because the former evaluates to @racket[root-module-path] @racket[a] which fails since the example is
+not a module installed in a collection, the latter is an undefined variable.}
 
 When @racket[provided] is a symbol, the value of the module's export
 with the given name is returned, and still the module is not
@@ -535,6 +549,31 @@ If @racket[provided] is @|void-const|, then the module is
 @tech{visit}ed but not @tech{instantiate}d (see @secref["mod-parse"]),
 and the result is @|void-const|.}
 
+More examples using different @racket[module-path] grammar expressions are given below:
+
+@examples[#:eval mod-eval
+  (dynamic-require 'racket/base #f)
+]
+
+@examples[#:eval mod-eval
+  (dynamic-require (list 'lib "racket/base") #f)
+]
+
+@examples[#:eval mod-eval
+  (module a racket/base
+    (module b racket/base
+      (provide inner-dessert)
+      (define inner-dessert "tiramisu")))
+  (dynamic-require '(submod 'a b) 'inner-dessert)
+]
+
+The last line in the above example could instead have been written as
+
+@examples[#:eval mod-eval
+  (dynamic-require ((lambda () (list 'submod ''a 'b))) 'inner-dessert)
+]
+
+which is equivalent.
 
 @defproc[(dynamic-require-for-syntax [mod module-path?]
                                      [provided (or/c symbol? #f)]

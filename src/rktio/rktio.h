@@ -88,6 +88,7 @@ Thread and signal conventions:
 #define RKTIO_EXTERN_STEP   RKTIO_EXTERN
 
 #define RKTIO_NULLABLE      /* empty */
+#define RKTIO_BLOCKING      /* empty */
 
 /*************************************************/
 /* Initialization and general datatypes          */
@@ -736,7 +737,7 @@ enum {
   RKTIO_LTPS_HANDLE_FREE
 };
 
-RKTIO_EXTERN void rktio_sleep(rktio_t *rktio, float nsecs, rktio_poll_set_t *fds, rktio_ltps_t *lt);
+RKTIO_EXTERN RKTIO_BLOCKING void rktio_sleep(rktio_t *rktio, float nsecs, rktio_poll_set_t *fds, rktio_ltps_t *lt);
 /* Waits up to `nsecs` seconds (or forever if `nsecs` is 0), until
    something registered with `fds` or `lt` is ready, or until there's
    some other activity that sometimes causes an early wakeup. */
@@ -1165,6 +1166,12 @@ RKTIO_EXTERN char *rktio_dll_get_error(rktio_t *rktio);
 /* Returns an error for a previous `rktio_dll_...` call, or NULL
    if no error string is available or has already been returned.
    See `rktio_dll_open` for more information. */
+
+typedef void *(*dll_open_proc)(rktio_const_string_t name, rktio_bool_t as_global);
+typedef void *(*dll_find_object_proc)(void *h, rktio_const_string_t name);
+RKTIO_EXTERN void rktio_set_dll_procs(dll_open_proc dll_open, dll_find_object_proc dll_find_object);
+/* Installs procedures that are tried before native mechanisms,
+   currently only supported for Windows. */
 
 /*************************************************/
 /* Errors                                        */

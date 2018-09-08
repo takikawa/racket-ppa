@@ -33,7 +33,7 @@
                 (code:line binding-pattern #:...bind (id beta beta))]
 	       [beta nothing
 	             symbol
-		     (shadow beta-seqence ...)]
+		     (shadow beta-sequence ...)]
 	       [beta-sequence beta
 	                      (code:line ... (code:comment "literal ellipsis"))])]{
 
@@ -46,7 +46,8 @@ side-condition @|pattern|s can restrict matches in complex ways.
 A @racket[non-terminal-def] comprises one or more non-terminal names
 (considered aliases) followed by one or more productions.
 
-For example, the following defines @deftech{@racket[_lc-lang]} as the
+@; this language is copied to other-relations.scrbl to be used in examples there, too
+ For example, the following defines @deftech{@racket[_lc-lang]} as the
 grammar of the λ-calculus:
 @examples[#:label #f #:eval redex-eval #:no-prompt #:no-result
 (define-language lc-lang
@@ -64,7 +65,8 @@ grammar of the λ-calculus:
  @racket[E] for the evaluation contexts.
 
 Non-terminals used in @racket[define-language] are not bound in
-@pattech[side-condition] patterns and duplicates are not constrained
+@pattech[side-condition] patterns. Duplicate non-terminals
+that appear outside of the binding-forms section are not constrained
 to be the same unless they have underscores in them.
 
 @mini-heading{Binding Forms}
@@ -427,12 +429,12 @@ non-terminal has all of the alternatives from the original
 language's non-terminal, as well as any new ones. If a
 non-terminal occurs in both the base language and the
 extension, the extension's non-terminal replaces the
-originals. If a non-terminal only occurs in either the base
+originals. If a non-terminal only occurs in the base
 language, then it is carried forward into the
-extension. And, of course, extend-language lets you add new
+extension. And, of course, @racket[define-extended-language] lets you add new
 non-terminals to the language.
 
-If a language is has a group of multiple non-terminals
+If a language has a group of multiple non-terminals
 defined together, extending any one of those non-terminals
 extends all of them.
 }

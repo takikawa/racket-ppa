@@ -67,7 +67,7 @@ with the following meaning of the numbers and labels:
   functions/expressions. (Corresponds to the @racket[node-self] field.)}
 @item{@tt{N5} --- this is the percentage of @tt{N4} out of the total
   observed time of the profile.  Functions/expressions with high values here can
-  be good candidates for optimization, But, of course, they can
+  be good candidates for optimization. But, of course, they can
   represent doing real work for a caller that needs to be optimized.}
 @item{@tt{B} and @tt{C} --- these are labels for the callers and
   callees of the function/expression.  Any number of callers and callees can
