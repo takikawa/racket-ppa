@@ -1,8 +1,10 @@
 racket (7.0+dfsg2-1) unstable; urgency=medium
 
   * Major new upstream release
+  * Add Recommends: sensible-utils to racket-common (for
+    sensible-browser).
 
- -- David Bremner <bremner@debian.org>  Sat, 08 Sep 2018 13:34:59 -0300
+ -- David Bremner <bremner@debian.org>  Sat, 08 Sep 2018 18:31:54 -0300
 
 racket (6.12+dfsg1-3) unstable; urgency=medium
 
