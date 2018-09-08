@@ -107,20 +107,6 @@ arguments which specify their destination files. An argument of @racket[#f]
 }
 ]
 
-}
-
-@defproc[(contract-profile-thunk
-          [thunk (-> any)]
-          [#:module-graph-view-file module-graph-view-file (or/c path-string #f) #f]
-          [#:boundary-view-file boundary-view-file (or/c path-string #f) #f]
-          [#:boundary-view-key-file boundary-view-key-file (or/c path-string #f) #f]
-          [#:report-space-efficient? report-space-efficient? any/c #f])
-          any]{
-  Like @racket[contract-profile], but as a function which takes a thunk to
-  profile as argument.
-}
-
-
 @examples[#:eval contract-profile-eval #:preserve-source-locations
   (define/contract (sum* numbers)
     (-> (listof integer?) integer?)
@@ -137,6 +123,27 @@ arguments which specify their destination files. An argument of @racket[#f]
       (+ total (sum* numbers))))
 
   (contract-profile (vector-max* (make-vector 10 (range (expt 10 7)))))
+]
+
+}
+
+@defproc[(contract-profile-thunk
+          [thunk (-> any)]
+          [#:module-graph-view-file module-graph-view-file (or/c path-string #f) #f]
+          [#:boundary-view-file boundary-view-file (or/c path-string #f) #f]
+          [#:boundary-view-key-file boundary-view-key-file (or/c path-string #f) #f]
+          [#:report-space-efficient? report-space-efficient? any/c #f])
+          any]{
+  Like @racket[contract-profile], but as a function which takes a thunk to
+  profile as argument.
+}
+
+
+@examples[#:eval contract-profile-eval #:preserve-source-locations
+
+  (contract-profile-thunk
+    (lambda ()
+      (sum* (range (expt 10 7)))))
 ]
 
 @(close-eval contract-profile-eval)

@@ -348,13 +348,15 @@
                            [label "Top to Bottom"]))
 
   (define reductions-lang
-    (cond
-      [(reduction-relation? reductions) (reduction-relation-lang reductions)]
-      [(IO-judgment-form? reductions) (runtime-judgment-form-lang reductions)]))
+    (reduction-relation/IO-jf-lang reductions))
 
   (define snip-cache
-    (let* ([term-equal? (lambda (x y) (α-equal? (compiled-lang-binding-table reductions-lang) match-pattern x y))]
-           [term-hash (lambda (x) (α-equal-hash-code (compiled-lang-binding-table reductions-lang) match-pattern x))])
+    (let* ([term-equal? (lambda (x y) (α-equal? (compiled-lang-binding-table reductions-lang)
+                                                (compiled-lang-literals reductions-lang)
+                                                match-pattern x y))]
+           [term-hash (lambda (x) (α-equal-hash-code (compiled-lang-binding-table reductions-lang)
+                                                     (compiled-lang-literals reductions-lang)
+                                                     match-pattern x))])
       (make-custom-hash term-equal? term-hash)))
 
   ;; call-on-eventspace-main-thread : (-> any) -> any

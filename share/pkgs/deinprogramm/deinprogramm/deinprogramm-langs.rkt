@@ -1016,12 +1016,18 @@
                  (collection-file-path "mf.gif" "icons"))])
           (and (send bitmap ok?)
                (make-object image-snip% bitmap))))
+
+      (define (deinprogramm-path? path)
+	(let ((rel (path->collects-relative path)))
+	  (and (pair? rel)
+	       (eq? 'collects (car rel))
+	       (equal? #"deinprogramm" (cadr rel)))))
       
       ;; teaching-languages-error-display-handler : 
       ;;    (string (union TST exn) -> void) -> string exn -> void
       ;; adds in the bug icon, if there are contexts to display
       (define (teaching-languages-error-display-handler msg exn)
-          
+
           (if (exn? exn)
               (display (get-rewriten-error-message exn) (current-error-port))
               (eprintf "uncaught exception: ~e" exn))
@@ -1044,7 +1050,11 @@
 			   ((not cms) '())
 			   ((findf (lambda (mark)
 				     (and mark
-					  (or (path? (car mark))
+					  (or (and (path? (car mark))
+						   ;; exclude paths that result from macro expansion,
+						   ;; specifically define-record-procedures
+						   ;; see racket/drracket#157
+						   (not (deinprogramm-path? (car mark))))
 					      (symbol? (car mark)))))
 				   cms)
 			    => (lambda (mark)

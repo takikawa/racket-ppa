@@ -43,26 +43,25 @@
      lib)
    (ffi-lib "libedit" '("3" "2" "0.0.43" "0.0.53" "0" ""))))
 
-(define make-byte-string ; helper for the two types below
-  (get-ffi-obj "scheme_make_byte_string" #f (_fun _pointer -> _scheme)))
-
-(define _bytes/eof/free ; register a finalizer on the resulting bytes
+(define _bytes/eof/free ; copies bytes and frees result pointer
   (make-ctype _pointer
     (lambda (x) (and (not (eof-object? x)) x))
     (lambda (x)
       (if x
-        (let ([b (make-byte-string x)])
-          (register-finalizer b (lambda (_) (free x)))
-          b)
-        eof))))
+          (begin0
+            (bytes-copy (cast x _pointer _bytes))
+            (free x))
+          eof))))
 
 (define _string/eof/free ; make a Scheme str from C str & free immediately
   (make-ctype _pointer
     (lambda (x) (and (not (eof-object? x)) (string->bytes/utf-8 x)))
     (lambda (x)
       (if x
-        (let ([s (bytes->string/utf-8 (make-byte-string x))]) (free x) s)
-        eof))))
+          (begin0
+            (cast x _pointer _string)
+            (free x))
+          eof))))
 
 (define readline
   (get-ffi-obj "readline" libreadline (_fun _string -> _string/eof/free)))

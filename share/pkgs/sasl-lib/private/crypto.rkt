@@ -5,7 +5,8 @@
          ffi/unsafe/define)
 (provide (protect-out (all-defined-out)))
 
-(define-ffi-definer define-libcrypto libcrypto)
+(define-ffi-definer define-libcrypto libcrypto
+  #:default-make-fail make-not-available)
 
 (define-cpointer-type _EVP_MD)
 (define-cpointer-type _EVP_MD_CTX)
@@ -17,9 +18,14 @@
 (define-libcrypto EVP_sha1   (_fun -> _EVP_MD))
 (define-libcrypto EVP_sha256 (_fun -> _EVP_MD))
 
+;; In libcrypto 1.1, EVP_MD_CTX_{create,destroy} renamed to {new,free}.
+(define-libcrypto EVP_MD_CTX_new (_fun -> _EVP_MD_CTX))
+(define-libcrypto EVP_MD_CTX_free (_fun _EVP_MD_CTX -> _void))
 (define-libcrypto EVP_MD_CTX_destroy (_fun _EVP_MD_CTX -> _void)
+  #:fail (lambda () EVP_MD_CTX_free)
   #:wrap (deallocator))
 (define-libcrypto EVP_MD_CTX_create (_fun -> _EVP_MD_CTX)
+  #:fail (lambda () EVP_MD_CTX_new)
   #:wrap (allocator EVP_MD_CTX_destroy))
 (define-libcrypto EVP_MD_CTX_md (_fun _EVP_MD_CTX -> _EVP_MD))
 
@@ -48,8 +54,8 @@
         (_int = (bytes-length data))
         (md : _bytes = (make-bytes (EVP_MD_size alg)))
         (_pointer = #f)
-        -> (r : _int)
-        -> (and (positive? r) md)))
+        -> (r : _pointer)
+        -> (and r md)))
 
 (define-libcrypto PKCS5_PBKDF2_HMAC
   (_fun (digest password salt iters keylen) ::

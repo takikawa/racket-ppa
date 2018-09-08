@@ -2,6 +2,7 @@
   
   (require racket/contract/base
            racket/file
+           racket/list
            (only-in racket/runtime-path define-runtime-path)
            racket/string racket/format
            syntax/modread
@@ -113,10 +114,6 @@
                                  (lambda ()
                                    (with-input-from-file path read))))
                #t))))
-  (define (rdc ls)
-    (if (null? (cdr ls))
-        '()
-        (cons (car ls) (rdc (cdr ls)))))
   
   ;;Retrieve a localized template given its package name and a template name
   (define (localized-template package-name template-name)
@@ -127,5 +124,5 @@
            (let ((bundle (hash-ref *localization-bundles* specifier #f)))
              (cond ((and bundle (assq template-name bundle)) => cdr)
                    ((null? (cdr specifier)) #f)
-                   (else (loop (rdc specifier))))))))
+                   (else (loop (drop-right specifier 1))))))))
   )

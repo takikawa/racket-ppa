@@ -138,23 +138,27 @@ sets @racket[dc-for-text-size] and the latter does not.
  @ex[(term->pict nums (+ 1 (+ 3 4)))]
 }
 
-@defproc[(render-term/pretty-write [lang compiled-lang?]
-                                   [term any/c]
-                                   [filename path-string?]
-                                   [#:width width #f])
-         void?]{
+@defproc[(render-term/pretty-write
+          [lang compiled-lang?]
+          [term any/c]
+          [filename (or/c path-string? #f) #f]
+          [#:width width (or/c exact-positive-integer? 'infinity) (pretty-print-columns)])
+         (or/c void? pict?)]{
   Like @racket[render-term], except that the @racket[term] argument is evaluated,
   and expected to return a term. Then, @racket[pretty-write] is used
   to determine where the line breaks go, using the @racket[width] argument
   as a maximum width (via @racket[pretty-print-columns]).
 
+  If @racket[filename] is provided, the pict is saved as a pdf to that file.
+
 
   @ex[(render-term/pretty-write nums '(+ (1 1 1) (1 0 1)))]
 }
 
-@defproc[(term->pict/pretty-write [lang compiled-lang?] 
-                                  [term any/c]
-                                  [#:width width #f])
+@defproc[(term->pict/pretty-write
+          [lang compiled-lang?]
+          [term any/c]
+          [#:width width (or/c exact-positive-integer? 'infinity) (pretty-print-columns)])
          pict?]{
   Like @racket[term->pict], but with the same change that
   @racket[render-term/pretty-write] has from @racket[render-term].
@@ -257,9 +261,8 @@ other tools that combine @racketmodname[pict]s together.
 }
 
 @deftogether[[
-@defform[(render-metafunction metafunction-name maybe-contract)]{}
-@defform/none[#:literals (render-metafunction)
-              (render-metafunction metafunction-name filename maybe-contract)]{}
+@defform*[[(render-metafunction metafunction-name maybe-contract)
+           (render-metafunction metafunction-name filename maybe-contract)]]{}
 @defform[(render-metafunctions metafunction-name ... 
                                maybe-filename maybe-contract)
           #:grammar ([maybe-filename (code:line)
@@ -427,8 +430,8 @@ This function sets @racket[dc-for-text-size]. See also
 
 A parameter that controls the rendering of extended languages.
 If the parameter value is @racket[#t], then a language constructed with
-extend-language is shown as if the language had been
-constructed directly with @racket[language]. If it is @racket[#f], then only
+@racket[define-extended-language] is shown as if the language had been
+constructed directly with @racket[define-language]. If it is @racket[#f], then only
 the last extension to the language is shown (with
 four-period ellipses, just like in the concrete syntax).
 
@@ -1067,6 +1070,11 @@ appears in a pattern.
    (render-term lam-lang (term (lambda (x) e))))
 ]
 }
+
+@defform[(with-atomic-rewriters ([name-symbol string-or-thunk-returning-pict] ...)
+                                  expression)]{
+Shorthand for nested @racket[with-atomic-rewriter] expressions.
+@history[#:added "1.4"]}
 
 @defform[(with-compound-rewriter name-symbol
                                  proc

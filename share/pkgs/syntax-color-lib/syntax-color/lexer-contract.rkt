@@ -35,6 +35,7 @@
       [else lexer]))
   (define initial-state (pseudo-random-generator->vector
                          (current-pseudo-random-generator)))
+  (define latest-input-string #f)
   (with-handlers ([exn:fail?
                    (lambda (exn)
                      (raise
@@ -43,9 +44,11 @@
                                               " random testing of lexer failed\n"
                                               "  lexer: ~e\n"
                                               "  pseudo-random state: ~s\n"
+                                              "  latest input string: ~s\n"
                                               "  error message: ~s")
                                lexer
                                initial-state
+                               latest-input-string
                                (exn-message exn))
                        (exn-continuation-marks exn))))])
     (for ([x (in-range 10)])
@@ -65,6 +68,7 @@
                        (string-ref s (random (string-length s)))]
                       [(1 2)
                        (integer->char (random 255))])))))
+      (set! latest-input-string s)
       (define in (open-input-string s))
       (port-count-lines! in)
       (let loop ([mode #f][offset 0])

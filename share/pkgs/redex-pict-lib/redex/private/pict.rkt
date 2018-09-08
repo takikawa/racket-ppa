@@ -225,8 +225,7 @@
                (list lhs arrow 
                      (hbl-append
                       rhs
-                      (let ([sc (rule-pict-info->side-condition-pict rp max-w)])
-                        (inset sc (min 0 (- max-rhs (pict-width sc))) 0 0 0)))
+                      (rule-pict-info->side-condition-pict rp max-w))
                      label))
               (list
                (list lhs arrow rhs label)
@@ -1102,7 +1101,7 @@
                   left-right/compact-side-conditions
                   left-right*/compact-side-conditions)))
   
-  (define (handle-single-side-condition scs)
+  (define (handle-single-side-condition scs ignore-compact-side-conditions?)
     (define-values (fresh where/sc) (partition metafunc-extra-fresh? scs))
     (define side-cond-picts
       (for/list ([thing (in-list where/sc)])
@@ -1124,7 +1123,7 @@
        [vertical-side-conditions? 
         ;; maximize line breaks:
         0]
-       [compact-side-conditions?
+       [(and compact-side-conditions? (not ignore-compact-side-conditions?))
         ;; maximize line break as needed:
         (apply max max-line-w/pre-sc
                (map pict-width side-cond-picts))]
@@ -1149,7 +1148,8 @@
                              ((adjust 'side-condition-line)
                               ((adjust 'side-condition)
                                ((otherwise-make-pict)))))
-                            (handle-single-side-condition (cdr cond-line))))
+                            (handle-single-side-condition (cdr cond-line)
+                                                          #t)))
                       (list rhs scs)))
     (define rhs (map car rhs+scs))
     (define scs (map cadr rhs+scs))
@@ -1245,7 +1245,7 @@
                      (cond
                       [(null? scs) #f]
                       [(member 'or scs) #f]
-                      [else (handle-single-side-condition scs)])]))))
+                      [else (handle-single-side-condition scs #f)])]))))
   (define contractss
     (for/list ([lhs/contracts (in-list lhs/contractss)]
                [rhss (in-list rhsss)])
@@ -1688,7 +1688,8 @@
 (define (term->pict/pretty-write lang term #:width [width (pretty-print-columns)])
   (define-values (in out) (make-pipe))
   (thread (λ ()
-            (parameterize ([pretty-print-columns width])
+            (parameterize ([pretty-print-columns width]
+                           [term/pretty-write-doing-the-printing #t])
               (pretty-write term out))
             (close-output-port out)))
   (port-count-lines! in)

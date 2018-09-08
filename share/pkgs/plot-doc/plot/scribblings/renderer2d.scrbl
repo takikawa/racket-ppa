@@ -160,6 +160,26 @@ The first and second element in each vector in @(racket bars) comprise the coord
                                                   (vector 6 36 10)))))]
 }
 
+@defproc[(candlesticks
+          [candles (sequence/c (sequence/c #:min-count 5 real?))]
+          [#:x-min x-min (or/c rational? #f) #f] [#:x-max x-max (or/c rational? #f) #f]
+          [#:y-min y-min (or/c rational? #f) #f] [#:y-max y-max (or/c rational? #f) #f]
+          [#:up-color up-color plot-color/c (candlestick-up-color)]
+          [#:down-color down-color plot-color/c (candlestick-down-color)]
+          [#:line-width line-width (>=/c 0) (candlestick-line-width)]
+          [#:line-style line-style plot-pen-style/c (candlestick-line-style)]
+          [#:width width (>=/c 0) (candlestick-width)]
+          [#:alpha alpha (real-in 0 1) (candlestick-alpha)]
+          ) renderer2d?]{
+Returns a renderer that draws candlesticks. This is most common when plotting historical prices for financial 
+instruments. The first element in each vector of @(racket candles) comprises the x-axis coordinate; the second, third, 
+fourth, and fifth elements in each vector comprise the open, high, low, and close, respectively, of the y-axis coordinates.
+@interaction[#:eval plot-eval
+                    (plot (list (candlesticks (list (vector 2 4 12 4 8)
+                                                    (vector 4 16 20 8 12)
+                                                    (vector 6 24 36 10 24)))))]
+}
+
 @section{2D Line Renderers}
 
 @defproc[(function [f (real? . -> . real?)]
@@ -528,7 +548,13 @@ For example, the canonical saddle, with its gradient field superimposed:
           [#:label label (or/c string? #f) #f]
           ) renderer2d?]{
 Returns a renderer that draws rectangles.
-The rectangles are given as a sequence of sequences of intervals---each inner sequence defines the bounds of a rectangle. For example,
+
+The rectangles are given as a sequence of sequences of intervals---each inner
+sequence defines the bounds of a rectangle.  Any of the bounds can be
+@racket[-inf.0] or @racket[+inf.0], in which case the rectangle extents to the
+edge of the plot area in the respective direction.
+
+For example,
 @interaction[#:eval plot-eval (plot (rectangles (list (vector (ivl -1 0) (ivl -1 1))
                                                       (vector (ivl 0 2) (ivl 1 2)))))]
 }
@@ -718,6 +744,27 @@ If @(racket label) is @(racket #f), the point is labeled with its position.
 The remaining labeled-point functions are defined in terms of this one.
 }
 
+@defproc[(point-pict
+          [v (sequence/c real?)]
+          [pict pict?]
+          [#:anchor anchor anchor/c (label-anchor)]
+          [#:point-color point-color plot-color/c (point-color)]
+          [#:point-fill-color point-fill-color (or/c plot-color/c 'auto) 'auto]
+          [#:point-size point-size (>=/c 0) (label-point-size)]
+          [#:point-line-width point-line-width (>=/c 0) (point-line-width)]
+          [#:point-sym point-sym point-sym/c 'fullcircle]
+          [#:alpha alpha (real-in 0 1) (label-alpha)]
+          ) renderer2d?]{
+Returns a renderer that draws a point with a pict as the label.
+
+@interaction[#:eval plot-eval
+                    (require pict)
+                    (plot (list (function sqr 0 2)
+                                (point-pict (vector 1 1) (standard-fish 40 15))))]
+
+The remaining labeled-pict functions are defined in terms of this one.
+}
+
 @defproc[(function-label
           [f  (real? . -> . real?)] [x real?] [label (or/c string? #f) #f]
           [#:color color plot-color/c (plot-foreground)]
@@ -741,6 +788,19 @@ Returns a renderer that draws a labeled point on a function's graph.
                                                 #:anchor 'right)))]
 }
 
+@defproc[(function-pict
+          [f  (real? . -> . real?)] [x real?] [pict pict?]
+          [#:anchor anchor anchor/c (label-anchor)]
+          [#:point-color point-color plot-color/c (point-color)]
+          [#:point-fill-color point-fill-color (or/c plot-color/c 'auto) 'auto]
+          [#:point-size point-size (>=/c 0) (label-point-size)]
+          [#:point-line-width point-line-width (>=/c 0) (point-line-width)]
+          [#:point-sym point-sym point-sym/c 'fullcircle]
+          [#:alpha alpha (real-in 0 1) (label-alpha)]
+          ) renderer2d?]{
+Returns a renderer that draws a point with a pict as the label on a function's graph.
+}
+
 @defproc[(inverse-label
           [f  (real? . -> . real?)] [y real?] [label (or/c string? #f) #f]
           [#:color color plot-color/c (plot-foreground)]
@@ -759,6 +819,20 @@ Returns a renderer that draws a labeled point on a function's graph.
 Returns a renderer that draws a labeled point on a function's inverted graph.
 }
 
+@defproc[(inverse-pict
+          [f  (real? . -> . real?)] [y real?] [pict pict?]
+          [#:anchor anchor anchor/c (label-anchor)]
+          [#:point-color point-color plot-color/c (point-color)]
+          [#:point-fill-color point-fill-color (or/c plot-color/c 'auto) 'auto]
+          [#:point-size point-size (>=/c 0) (label-point-size)]
+          [#:point-line-width point-line-width (>=/c 0) (point-line-width)]
+          [#:point-sym point-sym point-sym/c 'fullcircle]
+          [#:alpha alpha (real-in 0 1) (label-alpha)]
+          ) renderer2d?]{
+Returns a renderer that draws a point with a pict as the label on a function's inverted graph.
+}
+
+
 @defproc[(parametric-label
           [f (real? . -> . (sequence/c real?))] [t real?] [label (or/c string? #f) #f]
           [#:color color plot-color/c (plot-foreground)]
@@ -775,6 +849,19 @@ Returns a renderer that draws a labeled point on a function's inverted graph.
           [#:alpha alpha (real-in 0 1) (label-alpha)]
           ) renderer2d?]{
 Returns a renderer that draws a labeled point on a parametric function's graph.
+}
+
+@defproc[(parametric-pict
+          [f (real? . -> . (sequence/c real?))] [t real?] [pict pict?]
+          [#:anchor anchor anchor/c (label-anchor)]
+          [#:point-color point-color plot-color/c (point-color)]
+          [#:point-fill-color point-fill-color (or/c plot-color/c 'auto) 'auto]
+          [#:point-size point-size (>=/c 0) (label-point-size)]
+          [#:point-line-width point-line-width (>=/c 0) (point-line-width)]
+          [#:point-sym point-sym point-sym/c 'fullcircle]
+          [#:alpha alpha (real-in 0 1) (label-alpha)]
+          ) renderer2d?]{
+Returns a renderer that draws a point with a pict as the label on a parametric function's graph.
 }
 
 
@@ -795,3 +882,113 @@ Returns a renderer that draws a labeled point on a parametric function's graph.
           ) renderer2d?]{
 Returns a renderer that draws a labeled point on a polar function's graph.
 }
+
+
+@defproc[(polar-pict
+          [f (real? . -> . real?)] [θ real?] [pict pict?]
+          [#:anchor anchor anchor/c (label-anchor)]
+          [#:point-color point-color plot-color/c (point-color)]
+          [#:point-fill-color point-fill-color (or/c plot-color/c 'auto) 'auto]
+          [#:point-size point-size (>=/c 0) (label-point-size)]
+          [#:point-line-width point-line-width (>=/c 0) (point-line-width)]
+          [#:point-sym point-sym point-sym/c 'fullcircle]
+          [#:alpha alpha (real-in 0 1) (label-alpha)]
+          ) renderer2d?]{
+Returns a renderer that draws a point with a pict as the label on a polar function's graph.
+}
+
+@section[#:tag "2d-plot-snip-interactive-overlays"]{Interactive Overlays for 2D plots}
+
+@defmodule[plot/snip]
+
+A plot @racket[snip%] object returned by @racket[plot-snip] can be set up to
+provide interactive overlays.  This feature can be used, for example, to show
+the current value of the plot function at the mouse cursor.
+
+If the code below is evaluated in DrRacket, the resulting plot will show a
+vertical line tracking the mouse and the current plot position is shown on a
+label.  This is achieved by adding a mouse callback to the plot snip returned
+by @racket[plot-snip].  When the mouse callback is invoked, it will add a
+@racket[vrule] at the current X position and a @racket[point-label] at the
+current value of the plotted function.
+
+@racketblock[
+(require plot)
+(define snip (plot-snip (function sin) #:x-min -5 #:x-max 5))
+(define (mouse-callback snip event x y)
+   (if (and x y)
+       (send snip set-overlay-renderers
+             (list (vrule x)
+                   (point-label (vector x (sin x)))))
+       (send snip set-overlay-renderers #f)))
+(send snip set-mouse-event-callback mouse-callback)
+snip]
+
+Here are a few hints for adding common interactive elements to racket plots:
+
+@itemlist[
+
+@item{The @racket[hrule] and @racket[vrule] renderers can be used to draw
+horizontal and vertical lines that track the mouse position}
+
+@item{The @racket[rectangles] renderer can be used to highlight a region on
+the plot.  For example, to highlight a vertical region between @racket[_xmin]
+and @racket[_xmax], you can use:
+
+@racketblock[
+(rectangles (list (vector (ivl _xmin _xmax) (ivl -inf.0 +inf.0)))
+            #:alpha 0.2)]
+}
+
+@item{A @racket[point-label] renderer can be used to add a point with a
+string label to the plot.  To add only the label, use @racket['none] as the
+value for the @racket[#:point-sym] argument.}
+
+@item{A @racket[point-pict] renderer can be used to add a point with an
+attached @racketmodname[pict] instead of a string label.  This can be used to
+draw fancy labels (for example with rounded corners), or any other type of
+graphics element.}
+
+@item{A @racket[points] renderer can be used to mark specific locations on
+the plot, without specifying a label for them}
+]
+
+@defclass[2d-plot-snip% snip% ()]{
+
+An instance of this class is returned by @racket[plot-snip].
+
+@defmethod[(set-mouse-event-callback [callback (or/c plot-mouse-event-callback/c #f)]) any/c]{
+
+Set a callback function to be invoked with mouse events from the snip.  The
+callback is invoked with the actual snip object, the @racket[mouse-event%] and
+the X, Y position of the mouse in plot coordinates (i.e., the coordinate system
+used by the renderers in the plot).  The X and Y values are
+@racket[#f] when the mouse is outside the plot area (for example, when the
+mouse is over the axis area).
+
+When a callback is installed, the default zoom functionality of the plot snips
+is disabled.  This can be restored by calling
+@racket[set-mouse-event-callback] with a @racket[#f] argument.
+
+}
+
+@defmethod[(set-overlay-renderers [renderers (or/c (treeof renderer2d?) #f)]) any/c]{
+
+Set a collection of renderers to be drawn
+on top of the existing plot.  This can be any combination of 2D renderers, but
+it will not be able to modify the axes or the dimensions of the plot area.
+Only one set of overlay renderers can be installed; calling this method a
+second time will replace the previous overlays.  Specifying @racket[#f] as the
+renderers will cause overlays to be disabled.
+
+}
+}
+
+@defthing[plot-mouse-event-callback/c contract? #:value (-> (is-a?/c snip%)
+                                                            (is-a?/c mouse-event%)
+                                                            (or/c real? #f)
+                                                            (or/c real? #f)
+                                                            any/c)]{
+A contract for callback functions passed to @racket[set-mouse-event-callback].
+}
+

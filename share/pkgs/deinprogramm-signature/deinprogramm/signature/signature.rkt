@@ -56,7 +56,11 @@
 	   (display name port)
 	   (display ">" port)))
      (else
-      (display "#<signature>" port)))))
+      (display "#<signature>" port))))
+  #:property prop:procedure
+  (lambda (self . rest)
+    (raise (make-exn:fail:contract (format "expected a function after the parenthesis, but received ~v" self)
+				   (current-continuation-marks)))))
 
 (define (make-signature name enforcer syntax-promise
 		       #:arbitrary-promise (arbitrary-promise (delay #f))
@@ -90,7 +94,6 @@
 						  (raise (make-exn:fail:contract (or message
 										     (format "got ~e" obj))
 										 (current-continuation-marks))))))
-
 (define (signature-violation obj signature msg blame)
   ((signature-violation-proc) obj signature msg blame))
 

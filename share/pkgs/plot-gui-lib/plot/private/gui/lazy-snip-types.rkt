@@ -9,10 +9,9 @@
   (-> (Instance Bitmap%)
       Plot-Parameters
       (-> Boolean Rect Positive-Integer Positive-Integer
-          (Values (Instance Bitmap%) Rect (-> Rect Rect)))
+          (Values (Instance Bitmap%) (U #f (Instance 2D-Plot-Area%))))
       Rect
-      Rect
-      (-> Rect Rect)
+      (U #f (Instance 2D-Plot-Area%))
       Positive-Integer
       Positive-Integer
       (Instance Snip%)))
@@ -28,7 +27,7 @@
       (Instance Snip%)))
 
 (define-type Make-Snip-Frame
-  (-> (Instance Snip%)
+  (-> (-> Positive-Integer Positive-Integer (Instance Snip%))
       Positive-Real
       Positive-Real
       String
