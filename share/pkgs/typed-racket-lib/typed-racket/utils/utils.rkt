@@ -23,21 +23,16 @@ at least theoretically.
  rep utils typecheck infer env private types static-contracts
  ;; misc
  list-extend
+ repeat-list
  ends-with?
  filter-multiple
  syntax-length
  in-pair
  in-list/rest
+ in-list-cycle
  list-ref/default
  match*/no-order
  bind
- genid
- gen-pretty-id
- gen-existential-id
- existential-id?
- local-tr-identifier?
- mark-id-as-normalized
- normalized-id?
  assoc-ref
  assoc-set
  assoc-remove
@@ -252,6 +247,12 @@ at least theoretically.
     [(<= s-len t-len) t]
     [else (append t (build-list (- s-len t-len) (λ _ extra)))]))
 
+;; repeat l n times
+(define (repeat-list l n)
+  (for/fold ([acc '()])
+            ([_ (in-range n)])
+    (append l acc)))
+
 ;; does l1 end with l2?
 ;; e.g. (list 1 2 3) ends with (list 2 3)
 (define (ends-with? l1 l2)
@@ -348,7 +349,41 @@ at least theoretically.
                            #'xs)]
       [blah (raise-syntax-error 'in-list/rest "invalid usage" #'blah)])))
 
-;; quick in-list/rest sanity checks
+(define-sequence-syntax in-list-cycle
+  (λ () #'in-cycle)
+  (λ (stx)
+    (syntax-case stx ()
+      [[(val) (_ list-exp)]
+       #'[(val)
+          (:do-in
+           ;; ([(outer-id ...) outer-expr] ...)
+           ([(l) list-exp])
+           ;; outer-check
+           (unless (not (null? l))
+             (error 'in-list-cycle "must be given a non-empty list"))
+           ;; ([loop-id loop-expr] ...)
+           ([pos l])
+           ;; pos-guard
+           #t
+           ;; ([(inner-id ...) inner-expr] ...)
+           ([(val pos) (if (pair? pos)
+                           (values (car pos) (cdr pos))
+                           (values (car l) (cdr l)))])
+           ;; pre-guard
+           #t
+           ;; post-guard
+           #t
+           ;; (loop-arg ...)
+           (pos))]]
+      [[xs (_ dd-exp)]
+       (list? (syntax->datum #'xs))
+       (raise-syntax-error 'in-list-cycle
+                           (format "expected an identifier, given ~a"
+                                   (syntax->list #'xs))
+                           #'xs)]
+      [blah (raise-syntax-error 'in-list-cycle "invalid usage" #'blah)])))
+
+;; quick in-list/rest and in-list-cycle sanity checks
 (module+ test
   (unless (equal? (for/list ([_ (in-range 0)]
                              [val (in-list/rest (list 1 2) #f)])
@@ -364,7 +399,34 @@ at least theoretically.
                              [val (in-list/rest (list 1 2) #f)])
                     val)
                   (list 1 2 #f #f))
-    (error 'in-list/rest "broken!")))
+    (error 'in-list/rest "broken!"))
+
+  (unless (with-handlers ([exn:fail?
+                           (λ (e) #t)])
+            (for/list ([n (in-range 10)]
+                       [m (in-list-cycle '())])
+              m)
+            #f)
+    (error 'in-list-cycle "broken!"))
+
+  (unless (equal? (for/list ([n (in-range 1)]
+                             [m (in-list-cycle '(1))])
+                    m)
+                  '(1))
+    (error 'in-list-cycle "broken!"))
+
+  (unless (equal? (for/list ([n (in-range 5)]
+                             [m (in-list-cycle '(1))])
+                    m)
+                  '(1 1 1 1 1))
+    (error 'in-list-cycle "broken!"))
+
+  (unless (equal? (for/list ([n (in-range 5)]
+                             [m (in-list-cycle '(1 2))])
+                    m)
+                  '(1 2 1 2 1))
+    (error 'in-list-cycle "broken!")))
+
 
 
 (define (list-ref/default xs idx default)
@@ -411,7 +473,7 @@ at least theoretically.
   (in-parallel (map car l) (map cdr l)))
 
 (define-sequence-syntax in-assoc
-  (λ () #'in-list/rest-proc)
+  (λ () #'in-assoc-proc)
   (λ (stx)
     (syntax-case stx ()
       [[(key val) (_ assoc-exp)]
@@ -437,54 +499,3 @@ at least theoretically.
            (pos))]]
       [blah (raise-syntax-error 'in-assoc "invalid usage" #'blah)])))
 
-
-(module local-ids racket
-  (provide local-tr-identifier?
-           genid
-           gen-pretty-id
-           gen-existential-id
-           mark-id-as-normalized
-           normalized-id?
-           existential-id?)
-  ;; we use this syntax location to recognized gensymed identifiers
-  (define-for-syntax loc #'x)
-  (define dummy-id (datum->syntax #'loc (gensym 'x)))
-  ;; tools for marking identifiers as normalized and recognizing normalized
-  ;; identifiers (we normalize ids so free-identifier=? ids are represented
-  ;; with the same syntax object and are thus equal?)
-  (define-values (mark-id-as-normalized
-                  normalized-id?)
-    (let ([normalized-identifier-sym (gensym 'normal-id)])
-      (values (λ (id) (syntax-property id normalized-identifier-sym #t))
-              (λ (id) (syntax-property id normalized-identifier-sym)))))
-  (define-values (mark-id-as-existential
-                  existential-id?)
-    (let ([existential-identifier-sym (gensym 'existential-id)])
-      (values (λ (id) (syntax-property id existential-identifier-sym #t))
-              (λ (id) (syntax-property id existential-identifier-sym)))))
-  ;; generates fresh identifiers for use while typechecking
-  (define (genid [sym (gensym 'local)])
-    (mark-id-as-normalized (datum->syntax #'loc sym)))
-  (define letters (vector-immutable "x" "y" "z" "a" "b" "c" "d" "e" "f" "g" "h" "i" "j" "k"
-                                    "l" "m" "n" "o" "p" "q" "r" "s" "t" "u" "v"  "w"))
-  ;; this is just a silly helper function that gives us a letter from
-  ;; the latin alphabet in a cyclic manner
-  (define next-letter
-    (let ([i 0])
-      (λ ()
-        (define letter (string->uninterned-symbol (vector-ref letters i)))
-        (set! i (modulo (add1 i) (vector-length letters)))
-        letter)))
-  ;; generates a fresh identifier w/ a "pretty" printable representation
-  (define (gen-pretty-id [sym (next-letter)])
-    (mark-id-as-normalized (datum->syntax #'loc sym)))
-  (define (gen-existential-id [sym (next-letter)])
-    (mark-id-as-existential (genid sym)))
-  ;; allows us to recognize and distinguish gensym'd identifiers
-  ;; from ones that came from the program we're typechecking
-  (define (local-tr-identifier? id)
-    (and (identifier? id)
-         (eq? (syntax-source-module dummy-id)
-              (syntax-source-module id)))))
-
-(require 'local-ids)

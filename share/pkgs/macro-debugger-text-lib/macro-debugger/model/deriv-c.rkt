@@ -53,9 +53,9 @@
 (define-struct (prule base) () #:transparent)
 (define-struct (p:variable prule) () #:transparent)
 
-;;   (make-p:module <Base> PrepareEnv ?stx stx ?Deriv ?stx ?exn Deriv ?stx)
+;;   (make-p:module <Base> PrepareEnv ?stx stx ?Deriv ?stx ?Deriv ?exn Deriv ?stx)
 ;;   (make-p:#%module-begin <Base> Stx ModuleBegin/Phase ?exn)
-(define-struct (p:module prule) (prep tag rename check tag2 ?3 body shift)
+(define-struct (p:module prule) (prep tag rename check tag2 check2 ?3 body shift)
   #:transparent)
 (define-struct (p:#%module-begin prule) (me body ?2 subs) #:transparent)
 

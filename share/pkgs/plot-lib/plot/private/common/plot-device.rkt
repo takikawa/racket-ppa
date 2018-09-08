@@ -527,6 +527,7 @@
                      [else  (set-brush brush-color 'transparent)
                             real-sym]))
              (case line-sym
+               [(none)    void]
                ; circles
                [(circle)  (make-draw-circle-glyph r)]
                ; squares
@@ -575,6 +576,11 @@
         (for ([v  (in-list vs)])
           (draw-glyph v))))
 
+    (define/public (draw-pict pict v [anchor 'top-left] [dist 0])
+      (when (vrational? v)
+        (match-define (vector x y) v)
+        (draw-pict/anchor dc pict x y anchor dist)))
+
     ;; ===============================================================================================
     ;; Legend
 
@@ -608,7 +614,7 @@
         (cond
           [(and x-min x-max)
            (case (plot-legend-anchor)
-             [(top-left left bottom-left)     x-min]
+             [(top-left left bottom-left auto)     x-min]
              [(top-right right bottom-right)  (- x-max legend-x-size)]
              [(center bottom top)             (- (* 1/2 (+ x-min x-max))
                                                  (* 1/2 legend-x-size))])]
@@ -619,7 +625,7 @@
         (cond
           [(and y-min y-max)
            (case (plot-legend-anchor)
-             [(top-left top top-right)           y-min]
+             [(top-left top top-right auto)      y-min]
              [(bottom-left bottom bottom-right)  (- y-max legend-y-size)]
              [(center left right)                (- (* 1/2 (+ y-min y-max))
                                                     (* 1/2 legend-y-size))])]

@@ -73,7 +73,7 @@
     ("delta" "δ")
     ("kappa" "κ")
     ("rho" "ρ")
-    ("varphi" "ϕ")
+    ("varphi" "φ")
     ("epsilon" "ϵ")
     ("lambda" "λ")
     ("varrho" "ϱ")
@@ -192,6 +192,7 @@
     ("ddots" "⋱")
     ("cdots" "⋯")
     ("hdots" "⋯")
+    ("ldots" "…")
     
     ("langle" "⟨")
     ("rangle" "⟩")))

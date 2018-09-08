@@ -59,11 +59,15 @@
   (build-contract-property
    #:late-neg-projection
    (λ (ctc)
+     (define flds (object-contract-fields ctc))
+     (define fld-ctcs (object-contract-field-ctcs ctc))
+     (define mtds (object-contract-methods ctc))
+     (define mtd-ctcs (object-contract-method-ctcs ctc))
      (λ (blame)
+       (define p-app
+         (make-wrapper-object blame mtds mtd-ctcs flds fld-ctcs))
        (λ (val neg-party)
-         (make-wrapper-object ctc val blame neg-party
-                              (object-contract-methods ctc) (object-contract-method-ctcs ctc)
-                              (object-contract-fields ctc) (object-contract-field-ctcs ctc)))))
+         (p-app ctc val neg-party))))
    #:name
    (λ (ctc) `(object-contract ,@(map (λ (fld ctc) (build-compound-type-name 'field fld ctc))
                                      (object-contract-fields ctc)
@@ -124,6 +128,9 @@
                   [(subclass/c? that)
                    (subclass? (subclass/c-% this) (subclass/c-% that))]
                   [else #f]))
+   #:equivalent (λ (this that)
+                  (and (subclass/c? that)
+                       (equal? (subclass/c-% this) (subclass/c-% that))))
    #:name (λ (ctc) `(subclass?/c ,(or (object-name (subclass/c-% ctc)) 'unknown%)))))
 (define (subclass?/c %)
   (unless (class? %)
@@ -141,6 +148,10 @@
                    (interface-extension? (implementation/c-<%> this)
                                          (implementation/c-<%> that))]
                   [else #f]))
+   #:equivalent (λ (this that)
+                  (and (implementation/c? that)
+                       (equal? (implementation/c-<%> this)
+                               (implementation/c-<%> that))))
    #:name (λ (ctc) `(implementation?/c ,(or (object-name (implementation/c-<%> ctc)) 'unknown<%>)))))
             
 (define (implementation?/c <%>)
@@ -181,6 +192,10 @@
            (interface-extension? this-<%> that-<%>)]
           [else #f])]
        [else #f]))
+   #:equivalent
+   (λ (this that)
+     (and (is-a?-ctc? that)
+          (equal? (is-a?-ctc-<%> this) (is-a?-ctc-<%> that))))
    #:name
    (λ (ctc)
      (define <%> (is-a?-ctc-<%> ctc))

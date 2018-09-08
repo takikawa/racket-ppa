@@ -22,7 +22,7 @@
   (are-you-sure-you-want-to-switch-languages
    "为了改变界面语言，现在需要重新启动DrRacket。你确定吗？")
   
-  (interact-with-drscheme-in-language "使用简体中文作DrRacket界面语言")
+  (interact-with-drscheme-in-language "使用简体中文作为DrRacket界面语言")
   
   ;; these two should probably be the same in all languages excepet English.
   ;; they are the button labels (under macos and windows, respectively)
@@ -146,7 +146,7 @@
   (cs-lexical-variable "词法变量")
   (cs-set!d-variable "set!过的变量")
   (cs-imported-variable "导入的变量")
-  (cs-unused-require "无用的require")
+  (cs-unused-require "无效的require")
   (cs-free-variable "自由变量")
   
   (cs-binder-count "~a次绑定出现")
@@ -198,7 +198,7 @@
   (online-expansion-show-variable-errors-as "显示未绑定变量")
   (online-expansion-show-other-errors-as "显示其他错误")
   ; locations the errors can be shown
-  (online-expansion-error-gold-highlight "使用高亮突出")
+  (online-expansion-error-gold-highlight "使用高亮显示错误")
   (online-expansion-error-margin "在一侧显示")
   ; the label of a preference in the (string-constant online-expansion) section
   (show-arrows-on-mouseover "鼠标悬停时显示绑定及尾位置箭头")

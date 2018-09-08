@@ -9,10 +9,9 @@
          "error.rkt"
          "judgment-form.rkt"
          "search.rkt"
-         "lang-struct.rkt"
          "enum.rkt"
          (only-in "binding-forms.rkt"
-                  α-equal? safe-subst binding-forms-opened? make-immutable-α-hash)
+                  safe-subst binding-forms-opened? make-immutable-α-hash)
          (only-in "binding-forms-definitions.rkt"
                   shadow nothing bf-table-entry-pat bf-table-entry-bspec)
          racket/trace
@@ -272,18 +271,15 @@
     [(runtime-judgment-form? p)
      (define jf-res
        (parameterize ([include-jf-rulename tag-with-names?])
-         (call-judgment-form (runtime-judgment-form-name p)
-                             (runtime-judgment-form-proc p)
-                             (runtime-judgment-form-mode p)
-                             
-                             ;; this list is because we expect one argument
-                             ;; judgment forms, but the general API puts the
-                             ;; arguments into a list. 
-                             (list v)
-                             
-                             #f
-                             (runtime-judgment-form-cache p)
-                             (runtime-judgment-form-lang p))))
+         (call-runtime-judgment-form
+          p
+
+          ;; this list is because we expect one argument
+          ;; judgment forms, but the general API puts the
+          ;; arguments into a list.
+          (list v)
+
+          #f)))
      (apply
       append
       (for/list ([d-sub (in-list jf-res)])
@@ -2101,7 +2097,10 @@
                                  (append (loop (car stx))
                                          (loop (cdr stx)))]
                                 [else '()]))])
-               (check-for-cycles stx #'(name ...) #'((r-rhs ...) ...) nt-identifiers)
+               (define-values (nt-hole-at-top nt-neighbors)
+                 (build-graph-and-check-for-cycles stx #'(name ...) #'((r-rhs ...) ...)
+                                                   nt-identifiers
+                                                   aliases #f #f))
                (define nt->hole (make-hash))
                (for ([name (in-list all-names-stx-list)])
                  (hash-set! nt->hole (syntax-e name) 'unknown))
@@ -2141,7 +2140,8 @@
                             (list (list 'name rhs/lw ...) ...)
                             (list (make-nt 'first-names (list (make-rhs `r-rhs) ...)) ...)
                             binding-table
-                            '(alias-names ...)))))))))
+                            '(alias-names ...)
+                            'lang-id))))))))
 
                ;; this keeps things from breaking at the top level if `errortrace` is on
                (define errortrace-safe-language-def
@@ -2177,7 +2177,9 @@
                         (hash #,@(apply append (for/list ([(k v) (in-hash nt-identifiers)])
                                                  (with-syntax ([k k] [v v])
                                                    (list #''k #'#'v)))))
-                        '#,nt->hole)))
+                        '#,nt->hole
+                        '#,nt-hole-at-top
+                        '#,nt-neighbors)))
                     #,errortrace-safe-language-def))))))))]))
 
 (define-for-syntax (nt-hole-lub l r)
@@ -2206,7 +2208,13 @@
         (unless (equal? (hash-ref nt->hole name) nt-hole-count)
           (hash-set! nt->hole name nt-hole-count)
           (set! changed? #t))))
-    (when changed? (loop))))
+    (when changed? (loop)))
+  ;; at the end of this process, any unknown
+  ;; non-terminals cannot produce a hole,
+  ;; so update the nt map to reflect that
+  (for ([nt (in-list (hash-keys nt->hole))])
+    (when (equal? (hash-ref nt->hole nt) 'unknown)
+      (hash-set! nt->hole nt 0))))
 
 (define-for-syntax (record-nts-disappeared-bindings lang nt-ids [prop `disappeared-binding])
   (let loop ([nt-ids nt-ids]
@@ -2323,7 +2331,7 @@
            (unless (member the-name old-names)
              (raise-syntax-error
               #f
-              (format "cannot extend the `~a' non-terminal because `~s' does not define it"
+              (format "cannot extend the `~a` non-terminal because the language ~s does not define it"
                       the-name
                       (syntax->datum #'orig-lang))
               stx rhs))
@@ -2360,7 +2368,7 @@
              (unless (hash-ref nt->hole name #f)
                (hash-set! nt->hole name 'unknown))))
          
-         (define extended-language-stx
+         (define-values (extended-language-stx nt-hole-at-top nt-neighbors)
            (with-syntax ([(((r-syncheck-expr r-rhs r-names r-names/ellipses) ...) ...)
                           (for/list ([rhss (in-list rhsss)])
                             (for/list ([rhs (in-list rhss)])
@@ -2378,20 +2386,31 @@
                                (map syntax->list (syntax->list #'((r-rhs ...) ...)))
                                rhsss
                                nt->hole)
+
+             (define-values (nt-hole-at-top nt-neighbors)
+               (build-graph-and-check-for-cycles
+                stx #'(names ...) #'((r-rhs ...) ...) nt-identifiers
+                aliases
+                (language-id-nt-hole-at-top #'orig-lang 'define-extended-language)
+                (language-id-nt-neighbors #'orig-lang 'define-extended-language)))
              
-             (with-syntax ([(primary-name ...) unaliased-new-names]
-                           [((all-names ...) ...) namess]
-                           [(alias-names ...) (hash-keys aliases)])
-               (forward-errortrace-prop
-                stx
-                (syntax/loc stx
-                  (do-extend-language
-                   (begin r-syncheck-expr ... ... orig-lang)
-                   (list (make-nt 'primary-name
-                                  (list (make-rhs `r-rhs) ...)) ...)
-                   new-bindings-table
-                   (list (list '(all-names ...) rhs/lw ...) ...)
-                   '(alias-names ...)))))))
+             (values
+              (with-syntax ([(primary-name ...) unaliased-new-names]
+                            [((all-names ...) ...) namess]
+                            [(alias-names ...) (hash-keys aliases)])
+                (forward-errortrace-prop
+                 stx
+                 (syntax/loc stx
+                   (do-extend-language
+                    (begin r-syncheck-expr ... ... orig-lang)
+                    (list (make-nt 'primary-name
+                                   (list (make-rhs `r-rhs) ...)) ...)
+                    new-bindings-table
+                    (list (list '(all-names ...) rhs/lw ...) ...)
+                    '(alias-names ...)
+                    'name))))
+              nt-hole-at-top
+              nt-neighbors)))
          (forward-errortrace-prop
           stx
           (quasisyntax/loc stx
@@ -2418,17 +2437,15 @@
                   (hash #,@(apply append (for/list ([(k v) (in-hash nt-identifiers)])
                                            (with-syntax ([k k] [v v])
                                              (list #''k #'#'v)))))
-                  '#,nt->hole))))))))]))
-
-(begin-for-syntax
-  (define extend-nt-ellipses '(....)))
-(define extend-nt-ellipses '(....))
+                  '#,nt->hole
+                  '#,nt-hole-at-top
+                  '#,nt-neighbors))))))))]))
 
 ;; do-extend-language : compiled-lang (listof (listof nt)) (listof (list compiled-pattern bspec)) ?
 ;;    -> compiled-lang
 ;; note: the nts that come here are an abuse of the `nt' struct; they have
 ;; lists of symbols in the nt-name field.
-(define (do-extend-language old-lang new-nts new-bindings-table new-pict-infos alias-names)
+(define (do-extend-language old-lang new-nts new-bindings-table new-pict-infos alias-names lang-name)
   (unless (compiled-lang? old-lang)
     (error 'define-extended-language "expected a language as first argument, got ~e" old-lang))
   
@@ -2462,7 +2479,8 @@
                                 (list (bf-table-entry-pat bf-table-entry)
                                       (bf-table-entry-bspec bf-table-entry)))
                                 new-bindings-table)
-                      alias-names)))
+                      alias-names
+                      lang-name)))
 
 (define-syntax (define-union-language stx)
   (syntax-case stx ()
@@ -2594,9 +2612,22 @@
            ;; make the hash be immutable
            (for/hash ([(k v) (in-hash aliases)])
              (values k v))))
-       
+
        (define nt-identifiers (build-nt-identifiers-table #'name '()))
-       
+
+       (define-values (nt-hole-at-top nt-neighbors)
+         (build-union-language-nt-neighbors/nt-hole-at-top
+          aliases
+          (for/list ([normalized-orig-lang (in-list normalized-orig-langs)])
+            (list-ref normalized-orig-lang 0))
+          (for/list ([normalized-orig-lang (in-list normalized-orig-langs)])
+            (language-id-nt-hole-at-top (list-ref normalized-orig-lang 1)
+                                        'define-union-language))
+          (for/list ([normalized-orig-lang (in-list normalized-orig-langs)])
+            (language-id-nt-neighbors (list-ref normalized-orig-lang 1)
+                                      'define-union-language))))
+       (check-for-cycles stx nt-identifiers nt-neighbors)
+
        (with-syntax ([(all-names ...) (sort (hash-map names-table (λ (x y) x))
                                             string<=?
                                             #:key symbol->string)]
@@ -2605,7 +2636,8 @@
          #`(begin
              (define define-language-name (union-language
                                            (list (list 'prefix old-lang) ...)
-                                           '#,aliases))
+                                           '#,aliases
+                                           'name))
              (define-syntax name
                (make-set!-transformer
                 (make-language-id
@@ -2622,9 +2654,11 @@
                  (hash #,@(apply append (for/list ([(k v) (in-hash nt-identifiers)])
                                           (with-syntax ([k k] [v v])
                                             (list #''k #'#'v)))))
-                 '#,nt->hole))))))]))
+                 '#,nt->hole
+                 '#,nt-hole-at-top
+                 '#,nt-neighbors))))))]))
 
-(define (union-language old-langs/prefixes aliases)
+(define (union-language old-langs/prefixes aliases union-langs-name)
   (define (add-prefix prefix sym)
     (if prefix
         (string->symbol
@@ -2671,8 +2705,8 @@
   (compile-language #f
                     (hash-map names-table (λ (name set) (make-nt name (set->list set))))
                     binding-table
-                    (hash-keys aliases)))
-
+                    (hash-keys aliases)
+                    union-langs-name))
 
 (define (apply-reduction-relation* reductions exp
                                    #:all? [return-all? #f]
@@ -2686,6 +2720,11 @@
 
 (struct search-success ())
 (struct search-failure (cutoff?))
+
+(define (reduction-relation/IO-jf-lang reductions)
+  (if (reduction-relation? reductions)
+      (reduction-relation-lang reductions)
+      (runtime-judgment-form-lang reductions)))
 
 ;; traverse-reduction-graph : 
 ;;  reduction-relation term #:goal (-> any boolean?) #:steps number?
@@ -2709,9 +2748,11 @@
                ;; in commit
                ;;    152084d5ce6ef49df3ec25c18e40069950146041
                ;; suggest that a hash works better than a trie.
-               [path (make-immutable-α-hash (compiled-lang-binding-table
-                                             (reduction-relation-lang reductions))
-                                            match-pattern)]
+               [path
+                (let ([lang (reduction-relation/IO-jf-lang reductions)])
+                  (make-immutable-α-hash (compiled-lang-binding-table lang)
+                                         (compiled-lang-literals lang)
+                                         match-pattern))]
                [more-steps steps])
       (if (and goal? (goal? term))
           (return (search-success))
@@ -2759,13 +2800,23 @@
 ;; nexts already has had the check that they are in the codomain (or domain
 ;; if there is one); here we remove the ones that are outside the codomain
 (define (remove-outside-domain reductions nexts)
-  (define dom-pat (reduction-relation-compiled-domain-pat reductions))
   (cond
-    [dom-pat
-     (for/list ([next (in-list nexts)]
-                #:when (match-pattern? dom-pat next))
-       next)]
-    [else nexts]))
+    [(reduction-relation? reductions)
+     (define dom-pat (reduction-relation-compiled-domain-pat reductions))
+     (cond
+       [dom-pat
+        (for/list ([next (in-list nexts)]
+                   #:when (match-pattern? dom-pat next))
+          next)]
+       [else nexts])]
+    [else
+     (define input-pat
+       (runtime-judgment-form-compiled-input-contract-pat reductions))
+     (if input-pat
+         (for/list ([next (in-list nexts)]
+                    #:when (match-pattern? input-pat (list next)))
+           next)
+         nexts)]))
 
 ;; map/mt : (a -> b) (listof a) (listof b) -> (listof b)
 ;; map/mt is like map, except
@@ -2781,8 +2832,13 @@
              (cons this-one (loop (cdr l)))
              (loop (cdr l))))])))
 
-(define (reduction-relation->rule-names x) 
+(define (reduction-relation->rule-names x)
   (reverse (reduction-relation-rule-names x)))
+
+(define (reduction-relation/IO-jf->rule-names x)
+  (cond
+    [(reduction-relation? x) (reduction-relation->rule-names x)]
+    [(IO-judgment-form? x) '(judgment-form->rule-names x)]))
 
 
 ;                                                                               
@@ -3084,6 +3140,7 @@
       (define lang (default-language))
       (unless lang (error 'substitute "unable to determine the language to use"))
       (safe-subst (compiled-lang-binding-table lang)
+                  (compiled-lang-literals lang)
                   match-pattern
                   (term any_body) (term variable) (term any_substitution)))])
 
@@ -3194,6 +3251,7 @@
 (provide (rename-out [-reduction-relation reduction-relation])
          ::=
          reduction-relation->rule-names
+         reduction-relation/IO-jf-lang
          extend-reduction-relation
          reduction-relation?
          union-reduction-relations

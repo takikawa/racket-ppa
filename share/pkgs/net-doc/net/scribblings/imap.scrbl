@@ -247,7 +247,7 @@ empty list, @racket[#t] otherwise.}
          (listof (cons/c exact-nonnegative-integer?
                          (listof pair?)))]{
 
-Returns information must like @racket[imap-get-messages], but includes
+Returns information much like @racket[imap-get-messages], but includes
 information reported asynchronously by the server (e.g., to notify a
 client with some other client changes a message attribute).  Instead
 of reporting specific requested information for specific messages, the
@@ -314,7 +314,7 @@ Pending expunges must be handled before calling this function; see
 @racket[imap-get-expunges].
 
 @examples[
-(eval:alts (imap-get-message imap '(1 3 5) '(uid header))
+(eval:alts (imap-get-messages imap '(1 3 5) '(uid header))
            '((107 #"From: larry@stooges.com ...")
              (110 #"From: moe@stooges.com ...")
              (112 #"From: curly@stooges.com ...")))

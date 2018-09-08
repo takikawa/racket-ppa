@@ -31,7 +31,7 @@ Then,
 
                @commandline{racket -l errortrace -t @nonterm{prog}}}
 
-         @item{If you program is a non-module top-level sequence of
+         @item{If your program is a non-module top-level sequence of
                definitions and expressions, you can instead add
                @racketblock[(require errortrace)]
                to the beginning of the program or start Racket with the @Flag{l} option before the

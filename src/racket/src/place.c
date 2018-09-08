@@ -88,9 +88,11 @@ static Scheme_Object *places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Tab
 # define mzPDC_DIRECT_UNCOPY 3
 # define mzPDC_DESER 4
 # define mzPDC_CLEAN 5
+
+static Scheme_Object *strip_chaperones(Scheme_Object *so);
 #endif
 
-static void places_prepare_direct(Scheme_Object *so);
+static Scheme_Object *places_prepare_direct(Scheme_Object *so);
 static void log_place_event(const char *what, const char *tag, int has_amount, intptr_t amount);
 
 # ifdef MZ_PRECISE_GC
@@ -100,13 +102,13 @@ static void register_traversers(void);
 static void *place_start_proc(void *arg);
 MZ_DO_NOT_INLINE(static void *place_start_proc_after_stack(void *data_arg, void *stack_base));
 
-# define PLACE_PRIM_W_ARITY(name, func, a1, a2, env) GLOBAL_PRIM_W_ARITY(name, func, a1, a2, env)
+# define PLACE_PRIM_W_ARITY(name, func, a1, a2, env) ADD_PRIM_W_ARITY(name, func, a1, a2, env)
 
 #else
 
 SHARED_OK static int scheme_places_enabled = 0;
 
-# define PLACE_PRIM_W_ARITY(name, func, a1, a2, env) GLOBAL_PRIM_W_ARITY(name, not_implemented, a1, a2, env)
+# define PLACE_PRIM_W_ARITY(name, func, a1, a2, env) ADD_PRIM_W_ARITY(name, not_implemented, a1, a2, env)
 
 static Scheme_Object *not_implemented(int argc, Scheme_Object **argv)
 {
@@ -124,39 +126,35 @@ static void register_traversers(void) { }
 /*                             initialization                             */
 /*========================================================================*/
 
-void scheme_init_place(Scheme_Env *env)
+void scheme_init_place(Scheme_Startup_Env *env)
 {
-  Scheme_Env *plenv;
-
 #ifdef MZ_PRECISE_GC
   register_traversers();
 #endif
-  
-  plenv = scheme_primitive_module(scheme_intern_symbol("#%place"), env);
 
-  GLOBAL_PRIM_W_ARITY("place-enabled?",       scheme_place_enabled,   0, 0, plenv);
-  GLOBAL_PRIM_W_ARITY("place-shared?",        scheme_place_shared,    1, 1, plenv);
-  PLACE_PRIM_W_ARITY("dynamic-place",         scheme_place,           5, 5, plenv);
-  PLACE_PRIM_W_ARITY("place-pumper-threads",  place_pumper_threads,   1, 2, plenv);
-  PLACE_PRIM_W_ARITY("place-sleep",           place_sleep,     1, 1, plenv);
-  PLACE_PRIM_W_ARITY("place-wait",            place_wait,      1, 1, plenv);
-  PLACE_PRIM_W_ARITY("place-kill",            place_kill,      1, 1, plenv);
-  PLACE_PRIM_W_ARITY("place-break",           place_break,     1, 2, plenv);
-  PLACE_PRIM_W_ARITY("place?",                place_p,         1, 1, plenv);
-  PLACE_PRIM_W_ARITY("place-channel",         place_channel,   0, 0, plenv);
-  PLACE_PRIM_W_ARITY("place-channel-put",     place_send,      2, 2, plenv);
-  PLACE_PRIM_W_ARITY("place-channel-get",     place_receive,   1, 1, plenv);
-  PLACE_PRIM_W_ARITY("place-channel?",        place_channel_p, 1, 1, plenv);
-  PLACE_PRIM_W_ARITY("place-message-allowed?", place_allowed_p, 1, 1, plenv);
-  PLACE_PRIM_W_ARITY("place-dead-evt",        make_place_dead, 1, 1, plenv);
+  scheme_switch_prim_instance(env, "#%place");
 
-  scheme_finish_primitive_module(plenv);
+  ADD_PRIM_W_ARITY("place-enabled?",       scheme_place_enabled,   0, 0, env);
+  ADD_PRIM_W_ARITY("place-shared?",        scheme_place_shared,    1, 1, env);
+  PLACE_PRIM_W_ARITY("dynamic-place",         scheme_place,           5, 5, env);
+  PLACE_PRIM_W_ARITY("place-pumper-threads",  place_pumper_threads,   1, 2, env);
+  PLACE_PRIM_W_ARITY("place-sleep",           place_sleep,     1, 1, env);
+  PLACE_PRIM_W_ARITY("place-wait",            place_wait,      1, 1, env);
+  PLACE_PRIM_W_ARITY("place-kill",            place_kill,      1, 1, env);
+  PLACE_PRIM_W_ARITY("place-break",           place_break,     1, 2, env);
+  PLACE_PRIM_W_ARITY("place?",                place_p,         1, 1, env);
+  PLACE_PRIM_W_ARITY("place-channel",         place_channel,   0, 0, env);
+  PLACE_PRIM_W_ARITY("place-channel-put",     place_send,      2, 2, env);
+  PLACE_PRIM_W_ARITY("place-channel-get",     place_receive,   1, 1, env);
+  PLACE_PRIM_W_ARITY("place-channel?",        place_channel_p, 1, 1, env);
+  PLACE_PRIM_W_ARITY("place-message-allowed?", place_allowed_p, 1, 1, env);
+  PLACE_PRIM_W_ARITY("place-dead-evt",        make_place_dead, 1, 1, env);
 
-  /* Treat place creation as "unsafe", since the new place starts with
-     permissive guards that can access unsafe features that affect
-     existing places. */
-  scheme_protect_primitive_provide(plenv, scheme_intern_symbol("dynamic-place"));
+  scheme_restore_prim_instance(env);
+}
 
+void scheme_init_place_per_place()
+{
 #ifdef MZ_USE_PLACES
   REGISTER_SO(all_child_places);
   
@@ -264,6 +262,12 @@ static void close_six_fds(rktio_fd_t **rw) {
   }
 }
 
+static int is_predefined_module_path(Scheme_Object *v)
+{
+  /* Every table of primitives should have a corresponding predefined module */
+  return !!scheme_hash_get(scheme_startup_env->primitive_tables, v);
+}
+
 Scheme_Object *place_pumper_threads(int argc, Scheme_Object *args[]) {
   Scheme_Place          *place;
   Scheme_Object         *tmp;
@@ -343,7 +347,7 @@ Scheme_Object *scheme_place(int argc, Scheme_Object *args[]) {
     out_arg = args[3];
     err_arg = args[4];
 
-    if (!scheme_is_module_path(args[0]) && !SCHEME_PATHP(args[0]) && !SCHEME_MODNAMEP(args[0])) {
+    if (!scheme_is_module_path(args[0]) && !SCHEME_PATHP(args[0]) && !scheme_is_resolved_module_path(args[0])) {
       scheme_wrong_contract("dynamic-place", "(or/c module-path? path? resolved-module-path?)", 0, argc, args);
     }
     if (!SCHEME_SYMBOLP(args[1])) {
@@ -361,7 +365,7 @@ Scheme_Object *scheme_place(int argc, Scheme_Object *args[]) {
 
     if (SCHEME_PAIRP(args[0]) 
         && SAME_OBJ(SCHEME_CAR(args[0]), quote_symbol)
-        && !scheme_is_predefined_module_p(args[0])) {
+        && !is_predefined_module_path(args[0])) {
       scheme_contract_error("dynamic-place", "not a filesystem or predefined module-path", 
                             "module path", 1, args[0],
                             NULL);
@@ -483,13 +487,22 @@ Scheme_Object *scheme_place(int argc, Scheme_Object *args[]) {
       place_data->err = rw[5];
     }
   }
-
-  places_prepare_direct(place_data->current_library_collection_paths);
-  places_prepare_direct(place_data->current_library_collection_links);
-  places_prepare_direct(place_data->compiled_roots);
-  places_prepare_direct(place_data->channel);
-  places_prepare_direct(place_data->module);
-  places_prepare_direct(place_data->function);
+  
+  {
+    Scheme_Object *tmp;
+    tmp = places_prepare_direct(place_data->current_library_collection_paths);
+    place_data->current_library_collection_paths = tmp;
+    tmp = places_prepare_direct(place_data->current_library_collection_links);
+    place_data->current_library_collection_links = tmp;
+    tmp = places_prepare_direct(place_data->compiled_roots);
+    place_data->compiled_roots = tmp;
+    tmp = places_prepare_direct(place_data->channel);
+    place_data->channel = tmp;
+    tmp = places_prepare_direct(place_data->module);
+    place_data->module = tmp;
+    tmp = places_prepare_direct(place_data->function);
+    place_data->function = tmp;
+  }
   
   /* create new place */
   proc_thread = mz_proc_thread_create(place_start_proc, place_data);
@@ -773,8 +786,10 @@ static Scheme_Object *do_places_deep_copy(Scheme_Object *so, int mode, int gcabl
 #endif
 }
 
-static void places_prepare_direct(Scheme_Object *so) {
+static Scheme_Object *places_prepare_direct(Scheme_Object *so) {
+  so = strip_chaperones(so);
   (void)do_places_deep_copy(so, mzPDC_CHECK, 1, NULL, NULL);
+  return so;
 }
 
 static Scheme_Object *places_deep_direct_uncopy(Scheme_Object *so) {
@@ -1929,6 +1944,79 @@ DEEP_DONE_L:
 
 }
 
+static Scheme_Object *strip_chaperones_k(void);
+
+/* Recognizes the same shapes as places_deep_copy_worker, but also
+   allows chaperones and impersonators. The result is an
+   impersonator-free copy of `so`. */
+static Scheme_Object *strip_chaperones(Scheme_Object *so)
+{
+  Scheme_Object *o;
+
+#ifdef DO_STACK_CHECK
+  {
+# include "mzstkchk.h"
+    {
+      Scheme_Thread *p = scheme_current_thread;
+      p->ku.k.p1 = (void *)so;
+      return scheme_handle_stack_overflow(strip_chaperones_k);
+    }
+  }
+#endif
+
+  if (SCHEME_CHAPERONEP(so))
+    o = SCHEME_CHAPERONE_VAL(so);
+  else
+    o = so;
+
+  if (SCHEME_PAIRP(o)) {
+    return scheme_make_pair(strip_chaperones(SCHEME_CAR(o)),
+                            strip_chaperones(SCHEME_CDR(o)));
+  } else if (SCHEME_VECTORP(o)) {
+    Scheme_Object *v, *e;
+    intptr_t len = SCHEME_VEC_SIZE(o), i;
+    v = scheme_make_vector(len, NULL);
+    for (i = 0; i < len; i++) {
+      if (SAME_OBJ(o, so))
+        e = SCHEME_VEC_ELS(so)[i];
+      else
+        e = scheme_chaperone_vector_ref(so, i);
+      e = strip_chaperones(e);
+      SCHEME_VEC_ELS(v)[i] = e;
+    }
+    return v;
+  } else if (SCHEME_HASHTP(o) || SCHEME_HASHTRP(o)) {
+    return scheme_chaperone_hash_table_filtered_copy(so, strip_chaperones);
+  } else if (SCHEME_STRUCTP(o)) {
+    Scheme_Structure *s = (Scheme_Structure *)(o), *s2;
+    Scheme_Object *e;
+    intptr_t i, len = s->stype->num_slots;
+    if (!s->stype->prefab_key)
+      return NULL;
+    s2 = (Scheme_Structure *)scheme_make_blank_prefab_struct_instance(s->stype);
+    for (i = 0; i < len; i++) {
+      if (SAME_OBJ(o, so))
+        e = s->slots[i];
+      else
+        e = scheme_struct_ref(so, i);
+      e = strip_chaperones(e);
+      s2->slots[i] = e;
+    }
+    return (Scheme_Object *)s2;
+  } else
+    return so;
+}
+
+static Scheme_Object *strip_chaperones_k(void)
+{
+  Scheme_Thread *p = scheme_current_thread;
+  Scheme_Object *so = (Scheme_Object *)p->ku.k.p1;
+
+  p->ku.k.p1 = NULL;
+
+  return strip_chaperones(so);
+}
+
 #if 0
 /* unused code, may be useful when/if we revive shared symbol and prefab key tables */
 Scheme_Struct_Type *scheme_make_prefab_struct_type_in_master(Scheme_Object *base,
@@ -2358,13 +2446,10 @@ static void *place_start_proc_after_stack(void *data_arg, void *stack_base) {
     saved_error_buf = p->error_buf;
     p->error_buf = &new_error_buf;
     if (!scheme_setjmp(new_error_buf)) {
-      Scheme_Object *dynamic_require;
-
       if (!scheme_rktio)
         scheme_signal_error("place: I/O manager initialization failed");
 
-      dynamic_require = scheme_builtin_value("dynamic-require");
-      place_main = scheme_apply(dynamic_require, 2, a);
+      place_main = scheme_dynamic_require(2, a);
       a[0] = channel;
       (void)scheme_apply(place_main, 1, a);
       rc = scheme_make_integer(0);
@@ -2394,10 +2479,21 @@ static Scheme_Object *places_serialize(Scheme_Object *so, void **msg_memory, Sch
   new_so = trivial_copy(so, NULL);
   if (new_so) return new_so;
 
-  GC_create_message_allocator();
-  new_so = do_places_deep_copy(so, mzPDC_COPY, 0, master_chain, invalid_object);
-  tmp = GC_finish_message_allocator();
-  (*msg_memory) = tmp;
+  while (1) {
+    GC_create_message_allocator();
+    new_so = do_places_deep_copy(so, mzPDC_COPY, 0, master_chain, invalid_object);
+    tmp = GC_finish_message_allocator();
+    (*msg_memory) = tmp;
+
+    if (!new_so && SCHEME_CHAPERONEP(*invalid_object)) {
+      /* try again after removing chaperones */
+      so = strip_chaperones(so);
+      if (!so)
+        break;
+    } else
+      break;
+  }
+  
   return new_so;
 #else
   return so;
@@ -2478,11 +2574,20 @@ Scheme_Object *place_receive(int argc, Scheme_Object *args[]) {
 static Scheme_Object* place_allowed_p(int argc, Scheme_Object *args[])
 {
   Scheme_Hash_Table *ht = NULL;
-  
-  if (places_deep_copy_worker(args[0], &ht, mzPDC_CHECK, 1, 0, NULL, NULL))
+  Scheme_Object *v, *invalid_object = NULL;
+
+  v = args[0];
+
+  if (places_deep_copy_worker(v, &ht, mzPDC_CHECK, 1, 0, NULL, &invalid_object))
     return scheme_true;
-  else
+  else {
+    if (invalid_object && SCHEME_CHAPERONEP(invalid_object)) {
+      v = strip_chaperones(v);
+      if (v && places_deep_copy_worker(v, &ht, mzPDC_CHECK, 1, 0, NULL, NULL))
+        return scheme_true;
+    }
     return scheme_false;
+  }
 }
 
 # ifdef MZ_PRECISE_GC

@@ -95,7 +95,7 @@
   (define macro-stack null) ;; (listof (cons (U stx 'local-bind) nat))
   (define (add! x y)
     (set! counter (add1 counter))
-    (set! events (cons (cons (signal->symbol x) y) events)))
+    (set! events (cons (cons x y) events)))
   (define add!/check
     (let ([limit (trace-macro-limit)]
           [handler (trace-limit-handler)]
@@ -104,14 +104,14 @@
       (lambda (x y)
         (add! x y)
         (case x
-          ((8) ;; enter-macro
+          ((enter-macro)
            (set! limit-counter (add1 limit-counter))
            (when (>= limit-counter limit)
              (set! limit (handler limit-counter))))
-          ((21) ;; macro-pre-transform
+          ((macro-pre-x)
            (let ([rec (cons y counter)])
              (set! macro-stack (cons rec macro-stack))))
-          ((22) ;; macro-post-transform
+          ((macro-post-x)
            (cond [(and (pair? macro-stack)
                        (eq? (car (car macro-stack)) (cdr y)))
                   (set! macro-stack (cdr macro-stack))]
@@ -127,20 +127,20 @@
                                (set! events sfx)
                                (set! counter (cdr top))
                                (add! 'local-mess (reverse pfx))
-                               (add! 'macro-post-transform y))]
+                               (add! 'macro-post-x y))]
                             [else (loop (cdr ms))])))]))
-          ((143) ;; local-bind
+          ((local-bind)
            (let ([rec (cons 'local-bind counter)])
              (set! macro-stack (cons rec macro-stack))))
-          ((160) ;; exit-local-bind
+          ((exit-local-bind)
            (let ([top (car macro-stack)])
              (cond [(eq? (car top) 'local-bind)
                     (set! macro-stack (cdr macro-stack))]
                    [else ;; Jumped!
                     (error 'trace "internal error: cannot handle catch within bind")])))
-          ((153) ;; local-value
+          ((local-value)
            (set! last-local-value-id y))
-          ((154) ;; local-value-result
+          ((local-value-result)
            (add! 'local-value-binding
                  (and y (identifier-binding last-local-value-id)))
            (set! last-local-value-id #f))))))
@@ -188,7 +188,7 @@
              e))]))
     (emit 'return e2)
     e2)
-  (emit 'start)
+  (emit 'start-ecte)
   (expand/cte (namespace-syntax-introduce (datum->syntax #f stx))))
 
 ;; eval-compile-time-part : syntax boolean -> void

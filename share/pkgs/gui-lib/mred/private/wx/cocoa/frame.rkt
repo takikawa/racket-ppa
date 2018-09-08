@@ -46,6 +46,7 @@
 
 ;; called in atomic mode
 (define (send-screen-change-notifications flags)
+  (reset-menu-bar!)
   (when (zero? (bitwise-and flags 1)) ;; discard the "about to change" notifications
     (for ([b (in-hash-values all-windows)])
       (define f (weak-box-value b))
@@ -128,7 +129,12 @@
               (send wx install-wait-cursor)
               (send wx install-mb)
               (queue-window-event wx (lambda ()
-                                       (send wx on-activate #t)))))))]
+                                       (send wx on-activate #t)))))))
+      ;; If the fake root became main (because no other windows exist),
+      ;; we need to hide it again to avoid it getting stuck in the window list.
+      (when (and root-fake-frame (ptr-equal? self (send root-fake-frame get-cocoa)))
+        (tellv self orderFront: #f)
+        (tellv self orderOut: #f))]
   [-a _void (windowDidBecomeKey: [_id notification])
       (when (tell #:type _BOOL self isVisible)
         (when wxb
@@ -387,7 +393,8 @@
               (define fs? (fullscreened?))
               (set! unshown-fullscreen? fs?)
               (tellv cocoa setReleasedWhenClosed: #:type _BOOL #f)
-              (tellv cocoa close))
+              (tellv cocoa close)
+              (tellv (tell NSApplication sharedApplication) removeWindowsItem: cocoa))
             (force-window-focus)))
       (register-frame-shown this on?)
       (let ([num (tell #:type _NSInteger cocoa windowNumber)])

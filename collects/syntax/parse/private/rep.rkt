@@ -7,6 +7,7 @@
          racket/contract/base
          "make.rkt"
          "minimatch.rkt"
+         syntax/apply-transformer
          syntax/private/id-table
          syntax/stx
          syntax/keyword
@@ -616,13 +617,8 @@
 
 ;; expand-pattern : pattern-expander Syntax -> Syntax
 (define (expand-pattern pe stx)
-  (let* ([proc (pattern-expander-proc pe)]
-         [introducer (make-syntax-introducer)]
-         [mstx (introducer (syntax-local-introduce stx))]
-         [mresult (parameterize ([current-syntax-parse-pattern-introducer introducer])
-                    (proc mstx))]
-         [result (syntax-local-introduce (introducer mresult))])
-    result))
+  (let ([proc (pattern-expander-proc pe)])
+    (local-apply-transformer proc stx 'expression)))
 
 ;; parse-ellipsis-head-pattern : stx DeclEnv -> (listof EllipsisHeadPattern)
 (define (parse-ellipsis-head-pattern stx decls)
@@ -1267,6 +1263,9 @@
     [(cons (list '#:undo undo-stx stmts) rest)
      (cons (action:undo stmts)
            (parse-pattern-sides rest decls))]
+    [(cons (list '#:cut cut-stx) rest)
+     (cons (action:cut)
+           (parse-pattern-sides rest decls))]
     ['()
      '()]))
 
@@ -1607,6 +1606,7 @@
 ;; parse-directive-table
 (define parse-directive-table
   (list* (list '#:context check-expression)
+         (list '#:track-literals)
          common-parse-directive-table))
 
 ;; rhs-directive-table
@@ -1632,7 +1632,8 @@
         (list '#:and check-expression)
         (list '#:post check-expression)
         (list '#:do check-stmt-list)
-        (list '#:undo check-stmt-list)))
+        (list '#:undo check-stmt-list)
+        (list '#:cut)))
 
 ;; fail-directive-table
 (define fail-directive-table

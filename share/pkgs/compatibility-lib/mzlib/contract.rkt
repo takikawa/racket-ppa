@@ -170,9 +170,6 @@
           :prop:chaperone-contract
           :prop:contract
           :prop:flat-contract
-          :prop:opt-chaperone-contract
-          :prop:opt-chaperone-contract-get-test
-          :prop:opt-chaperone-contract?
           :skip-projection-wrapper?
           :opt/c
           :define-opt/c))
@@ -187,6 +184,7 @@
 (require racket/contract/combinator)
 ;; exports from racket/contract/combinator as of 5.3.5
 ;; except some cleanup that tried to happen in late 2015
+;; and the removal of three opt-contract related exports in 2018
 (provide blame-add-unknown-context blame-context blame-contract blame-negative
          blame-original? blame-positive blame-replace-negative blame-source blame-swap blame-swapped?
          blame-update blame-value blame? build-chaperone-contract-property build-compound-type-name 
@@ -198,7 +196,7 @@
          exn:fail:contract:blame-object exn:fail:contract:blame? 
          flat-contract-property? impersonator-prop:contracted make-chaperone-contract make-contract
          make-exn:fail:contract:blame make-flat-contract prop:chaperone-contract prop:contract
-         prop:contracted prop:flat-contract prop:opt-chaperone-contract
-         prop:opt-chaperone-contract-get-test prop:opt-chaperone-contract? raise-blame-error
+         prop:contracted prop:flat-contract
+         raise-blame-error
          skip-projection-wrapper? struct:exn:fail:contract:blame define/final-prop 
          exn:fail:contract:blame blame-add-context define/subexpression-pos-prop)

@@ -9,6 +9,10 @@
 [Inexact-Complex -InexactComplex]
 [Single-Flonum-Complex -SingleFlonumComplex]
 [Float-Complex -FloatComplex]
+[Exact-Complex -ExactComplex]
+[Exact-Imaginary -ExactImaginary]
+[Inexact-Imaginary -InexactImaginary]
+[Imaginary -Imaginary]
 [Exact-Number -ExactNumber]
 [Real -Real]
 [Nonpositive-Real -NonPosReal]
@@ -89,6 +93,7 @@
 
 [Void -Void]
 [Undefined -Undefined] ; initial value of letrec bindings
+;; [Unsafe-Undefined -Unsafe-Undefined] ; not clear that it makes sense to export this
 [Boolean -Boolean]
 [Symbol -Symbol]
 [String -String]

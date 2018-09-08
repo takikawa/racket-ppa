@@ -205,8 +205,6 @@ TO DO:
   (or libssl-load-fail-reason
       libcrypto-load-fail-reason))
 
-(define 3m? (eq? '3m (system-type 'gc)))
-
 (define libmz (ffi-lib #f))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -281,13 +279,13 @@ TO DO:
   (SSL_CTX_ctrl ctx SSL_CTRL_OPTIONS opts #f))
 
 (define-ssl SSL_CTX_set_verify (_fun _SSL_CTX* _int _pointer -> _void))
-(define-ssl SSL_CTX_use_certificate_chain_file (_fun _SSL_CTX* _bytes -> _int))
-(define-ssl SSL_CTX_load_verify_locations (_fun _SSL_CTX* _bytes _bytes -> _int))
+(define-ssl SSL_CTX_use_certificate_chain_file (_fun _SSL_CTX* _path -> _int))
+(define-ssl SSL_CTX_load_verify_locations (_fun _SSL_CTX* _path _path -> _int))
 (define-ssl SSL_CTX_set_client_CA_list (_fun _SSL_CTX* _X509_NAME* -> _int))
 (define-ssl SSL_CTX_set_session_id_context (_fun _SSL_CTX* _bytes _int -> _int))
-(define-ssl SSL_CTX_use_RSAPrivateKey_file (_fun _SSL_CTX* _bytes _int -> _int))
-(define-ssl SSL_CTX_use_PrivateKey_file (_fun _SSL_CTX* _bytes _int -> _int))
-(define-ssl SSL_load_client_CA_file (_fun _bytes -> _X509_NAME*/null))
+(define-ssl SSL_CTX_use_RSAPrivateKey_file (_fun _SSL_CTX* _path _int -> _int))
+(define-ssl SSL_CTX_use_PrivateKey_file (_fun _SSL_CTX* _path _int -> _int))
+(define-ssl SSL_load_client_CA_file (_fun _path -> _X509_NAME*/null))
 (define-ssl SSL_CTX_set_cipher_list (_fun _SSL_CTX* _string -> _int))
 
 (define-ssl SSL_free (_fun _SSL* -> _void)
@@ -340,10 +338,21 @@ TO DO:
 (define-crypto X509_NAME_get_entry (_fun _X509_NAME* _int -> _X509_NAME_ENTRY*/null))
 (define-crypto X509_NAME_ENTRY_get_data (_fun _X509_NAME_ENTRY* -> _ASN1_STRING*))
 (define-crypto X509_get_ext_d2i (_fun _X509* _int _pointer _pointer -> _STACK*/null))
-(define-crypto sk_num (_fun _STACK* -> _int))
-(define-crypto sk_GENERAL_NAME_value (_fun _STACK* _int -> _GENERAL_NAME-pointer)
-  #:c-id sk_value)
-(define-crypto sk_pop_free (_fun _STACK* _fpointer -> _void))
+(define sk_num
+  (or (get-ffi-obj 'sk_num libcrypto (_fun _STACK* -> _int)
+                   (lambda () #f))
+      (get-ffi-obj 'OPENSSL_sk_num libcrypto (_fun _STACK* -> _int)
+                   (make-not-available 'sk_num))))
+(define sk_GENERAL_NAME_value
+  (or (get-ffi-obj 'sk_value libcrypto (_fun _STACK* _int -> _GENERAL_NAME-pointer) 
+                   (lambda () #f))
+      (get-ffi-obj 'OPENSSL_sk_value libcrypto (_fun _STACK* _int -> _GENERAL_NAME-pointer) 
+                   (make-not-available "sk_GENERAL_NAME_value"))))
+(define sk_pop_free
+  (or (get-ffi-obj 'sk_pop_free libcrypto (_fun _STACK* _fpointer -> _void) 
+                   (lambda () #f))
+      (get-ffi-obj 'OPENSSL_sk_pop_free libcrypto (_fun _STACK* _fpointer -> _void)
+                   (make-not-available "sk_pop_free"))))
 
 ;; (define-crypto X509_get_default_cert_area (_fun -> _string))
 (define-crypto X509_get_default_cert_dir  (_fun -> _string))
@@ -512,14 +521,6 @@ TO DO:
                           error
                           server?)
   #:mutable)
-
-(define (make-immobile-bytes n)
-  (if 3m?
-      ;; Allocate the byte string via malloc:
-      (let ([p (malloc 'atomic-interior n)])
-        (make-sized-byte-string p n))
-      ;; Normal byte string is immobile:
-      (make-bytes n)))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Errors
@@ -715,13 +716,12 @@ TO DO:
            (path->complete-path (cleanse-path pathname)
                                 (current-directory))])
       (security-guard-check-file who path '(read))
-      (let ([path (path->bytes path)])
-        (atomically ;; for to connect ERR_get_error to `load-it'
-         (let ([n (load-it ctx path)])
-           (unless (or (= n 1) try?)
-             (error who "load failed from: ~e ~a"
-                    pathname
-                    (get-error-message (ERR_get_error))))))))))
+      (atomically ;; for to connect ERR_get_error to `load-it'
+       (let ([n (load-it ctx path)])
+         (unless (or (= n 1) try?)
+           (error who "load failed from: ~e ~a"
+                  pathname
+                  (get-error-message (ERR_get_error)))))))))
 
 (define (ssl-load-certificate-chain! ssl-context-or-listener pathname)
   (ssl-load-... 'ssl-load-certificate-chain! 
@@ -1020,7 +1020,7 @@ TO DO:
   ;;  call to SSL_read must use the same arguments.
   ;; Use xfer-buffer so we have a consistent buffer to use with
   ;;  SSL_read across calls to the port's write function.
-  (let-values ([(xfer-buffer) (make-immobile-bytes BUFFER-SIZE)]
+  (let-values ([(xfer-buffer) (make-bytes BUFFER-SIZE)]
          [(got-r got-w) (make-pipe)]
          [(must-read-len) #f])
     (make-input-port/read-to-peek
@@ -1156,7 +1156,7 @@ TO DO:
   ;;  call to SSL_write must use the same arguments.
   ;; Use xfer-buffer so we have a consistent buffer to use with
   ;;  SSL_write across calls to the port's write function.
-  (let ([xfer-buffer (make-immobile-bytes BUFFER-SIZE)]
+  (let ([xfer-buffer (make-bytes BUFFER-SIZE)]
         [buffer-mode (or (file-stream-buffer-mode (mzssl-o mzssl)) 'bloack)]
         [flush-ch (make-channel)]
         [must-write-len #f])
@@ -1694,7 +1694,7 @@ TO DO:
   ;; it.
   (begin
     (start-atomic)
-    (let* ([done (cast 1 _scheme _pointer)]
+    (let* ([done (ptr-add #f 1)]
            [v (register-process-global #"OpenSSL-support-initializing" done)])
       (if v
           ;; Some other place is initializing:

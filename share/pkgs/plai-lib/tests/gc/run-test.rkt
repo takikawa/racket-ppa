@@ -47,7 +47,7 @@
  
  (test-mutator (build-path here "other-mutators" "top.rkt"))
  =error>
- #rx"unbound identifier in module\n  in: frozzle"
+ #rx"unbound identifier.*in: frozzle"
  
  (capture-output (test-mutator (build-path here "other-mutators" "printing.rkt")))
  =>

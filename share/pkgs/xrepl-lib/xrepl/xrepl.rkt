@@ -14,7 +14,7 @@
 
 ;; ----------------------------------------------------------------------------
 
-(require racket/list racket/match scribble/text/wrap)
+(require racket/dict racket/list racket/match scribble/text/wrap)
 
 ;; ----------------------------------------------------------------------------
 ;; utilities
@@ -114,8 +114,8 @@
     ;; "~/..." path.
     (if (not (complete-path? x)) ; shouldn't happen
       x
-      (let* ([r (path->string (find-relative-path (current-directory) x))]
-             [h (path->string (let ([p (find-relative-path home-dir x)])
+      (let* ([r (path->string (find-relative-path (current-directory) (string->path x)))]
+             [h (path->string (let ([p (find-relative-path home-dir (string->path x))])
                                 ;; On Windows, HOME might be on a different
                                 ;; volume, so make sure we get a relative
                                 ;; path back:
@@ -235,8 +235,13 @@
 
 (struct command (names argline blurb desc handler))
 (define commands (make-hasheq))
-(define commands-list '()) ; for help displays, in definition order
+;; For help displays: commands organized into sections, where sections are
+;; subdicts. Sections and items within each section are added in reverse
+;; definition order. Nested sections are printed correctly by ",help", but
+;; `defcommand-section' does not currently support defining nested sections.
+(define commands-dict null)
 (define current-command (make-parameter #f))
+(define current-commands-section (make-parameter commands-dict))
 (define (register-command! names blurb argline desc handler)
   (let* ([names (if (list? names) names (list names))]
          [cmd (command names blurb argline desc handler)])
@@ -244,11 +249,18 @@
       (if (hash-ref commands n #f)
         (error 'defcommand "duplicate command name: ~s" n)
         (hash-set! commands n cmd)))
-    (set! commands-list (cons cmd commands-list))))
+    (set! commands-dict (dict-update commands-dict
+                                     (current-commands-section)
+                                     (λ (sec-cmd-list) (cons cmd sec-cmd-list))))))
 (define-syntax-rule (defcommand cmd+aliases argline blurb [desc ...]
                       body0 body ...)
   (register-command! `cmd+aliases `argline `blurb `(desc ...)
                      (λ () body0 body ...)))
+(define (defcommand-section name)
+  (when (dict-has-key? commands-dict name)
+    (error 'defcommand-section "duplicate command section name: ~s" name))
+  (set! commands-dict (cons (cons name null) commands-dict))
+  (current-commands-section name))
 
 (define (cmderror fmt #:default-who [dwho #f] . args)
   (let ([cmd (current-command)])
@@ -351,6 +363,11 @@
       ((command-handler (or (hash-ref commands cmd #f)
                             (error "Unknown command:" cmd)))))))
 
+;; ----------------------------------------------------------------------------
+;; generic commands
+
+(defcommand-section "General commands")
+
 (defcommand (help h ?) "[<command-name>]"
   "display available commands"
   ["Lists known commands and their help; use with a command name to get"
@@ -359,24 +376,30 @@
   (define cmd
     (and arg (hash-ref commands arg
                        (λ () (printf "*** Unknown command: `~s'\n" arg) #f))))
-  (define (show-cmd cmd indent)
+  (define (indentation-string indent-level)
+    (string-append "; " (make-string (* 2 indent-level) #\space)))
+  (define (show-cmd cmd indent-level)
     (define names (command-names cmd))
-    (printf "~a~s" indent (car names))
+    (printf "~a~s" (indentation-string indent-level) (car names))
     (when (pair? (cdr names)) (printf " ~s" (cdr names)))
     (printf ": ~a\n" (command-blurb cmd)))
+  (define (show-cmd-sec sec [indent-level 0])
+    (for ([(name commands-or-sections) (in-dict (reverse sec))])
+      (unless (null? commands-or-sections)
+        (printf "~a~a:\n" (indentation-string indent-level) name)
+        (for-each (λ (c) (if (dict? c)
+                             (show-cmd-sec c (add1 indent-level))
+                             (show-cmd c (add1 indent-level))))
+                  (reverse commands-or-sections)))))
   (with-wrapped-output
-    (if cmd
-      (begin (show-cmd cmd "; ")
-             (printf ";   usage: ,~a" arg)
-             (let ([a (command-argline cmd)]) (when a (printf " ~a" a)))
-             (printf "\n")
-             (for ([d (in-list (command-desc cmd))])
-               (printf "; ~a\n" d)))
-      (begin (printf "; Available commands:\n")
-             (for-each (λ (c) (show-cmd c ";   ")) (reverse commands-list))))))
-
-;; ----------------------------------------------------------------------------
-;; generic commands
+   (if cmd
+       (begin (show-cmd cmd "; ")
+              (printf ";   usage: ,~a" arg)
+              (let ([a (command-argline cmd)]) (when a (printf " ~a" a)))
+              (printf "\n")
+              (for ([d (in-list (command-desc cmd))])
+                (printf "; ~a\n" d)))
+       (show-cmd-sec commands-dict))))
 
 (defcommand (exit quit ex) "[<exit-code>]"
   "exit racket"
@@ -587,6 +610,8 @@
 ;; ----------------------------------------------------------------------------
 ;; binding related commands
 
+(defcommand-section "Binding information")
+
 (defcommand (apropos ap) "<search-for> ..."
   "look for a binding"
   ["Additional arguments restrict the shown matches.  The search specs can"
@@ -750,6 +775,8 @@
 ;; ----------------------------------------------------------------------------
 ;; require/load commands
 
+(defcommand-section "Requiring and loading")
+
 (defcommand (require req r) "<require-spec> ...+"
   "require a module"
   ["The arguments are usually passed to `require', unless an argument"
@@ -815,6 +842,8 @@
 
 ;; ----------------------------------------------------------------------------
 ;; debugging commands
+
+(defcommand-section "Debugging")
 
 ;; not useful: catches only escape continuations
 ;; (define last-break-exn (make-parameter #f))
@@ -1032,6 +1061,8 @@
 
 ;; ----------------------------------------------------------------------------
 ;; namespace switching
+
+(defcommand-section "Miscellaneous")
 
 (define default-namespace-name '*)
 (define current-namespace-name (make-parameter default-namespace-name))

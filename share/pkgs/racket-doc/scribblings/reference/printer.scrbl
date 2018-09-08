@@ -40,7 +40,7 @@ When the @racket[print-graph] parameter is set to @racket[#t], then
 the printer first scans an object to detect cycles. The scan traverses
 the components of pairs, mutable pairs, vectors, boxes (when
 @racket[print-box] is @racket[#t]), hash tables (when
-@racket[print-hash-table] is @racket[#t]), fields of structures
+@racket[print-hash-table] is @racket[#t] and when key are held strongly), fields of structures
 exposed by @racket[struct->vector] (when @racket[print-struct] is
 @racket[#t]), and fields of structures exposed by printing when the
 structure's type has the @racket[prop:custom-write] property. If
@@ -424,7 +424,8 @@ When the @racket[print-hash-table] parameter is set to @racket[#t], in
 @racket[write] and @racket[display] modes, a @tech{hash table} prints
 starting with @litchar{#hash(}, @litchar{#hasheqv(}, or
 @litchar{#hasheq(} for a table using @racket[equal?], @racket[eqv?],
-or @racket[eq?] key comparisons, respectively. After the prefix, each
+or @racket[eq?] key comparisons, respectively, as long as the hash table
+retains keys strongly. After the prefix, each
 key--value mapping is shown as @litchar{(}, the printed form of a key,
 a space, @litchar{.}, a space, the printed form the corresponding
 value, and @litchar{)}, with an additional space if the key--value
@@ -444,7 +445,8 @@ separated by spaces, and finally a closing @litchar{)}. A hash table
 is @tech{quotable} when all of its keys and values are
 @tech{quotable}.
 
-When the @racket[print-hash-table] parameter is set to @racket[#f], a
+When the @racket[print-hash-table] parameter is set to @racket[#f]
+or when a hash table retains its keys weakly, a
 hash table prints as @litchar{#<hash>} and counts as @tech{quotable}.
 
 
@@ -553,17 +555,16 @@ assembly code for Racket, and reading such a form produces a compiled
 form when the @racket[read-accept-compiled] parameter is set to
 @racket[#t].
 
-When a compiled form contains syntax object constants, they must not
-be @tech{tainted} or @tech{armed}; the @litchar{#~}-marshaled form
-drops source-location information and properties (see
-@secref["stxprops"]) for the @tech{syntax objects}.
-
-Compiled code parsed from @litchar{#~} may contain references to
-unexported or protected bindings from a module. At read time, such
-references are associated with the current code inspector (see
-@racket[current-code-inspector]), and the code will only execute if
-that inspector controls the relevant module invocation (see
-@secref["modprotect"]).
+Compiled code parsed from @litchar{#~} is marked as non-runnable if
+the current code inspector (see @racket[current-code-inspector]) is
+not the original code inspector; on attempting to evaluate or reoptimize
+non-runnable bytecode, @exnraise[exn:fail]. Otherwise, compiled
+code parsed from @litchar{#~} may contain references to unexported or
+protected bindings from a module. Conceptually, the references in
+bytecode are associated with the current code inspector, where the
+code will only execute if that inspector controls the relevant module
+invocation (see @secref["modprotect"])---but the original code
+inspector controls all other inspectors, anyway.
 
 A compiled-form object may contain @tech{uninterned} symbols (see
 @secref["symbols"]) that were created by @racket[gensym] or
@@ -585,19 +586,9 @@ identifiers either with @racket[generate-temporaries] or by applying
 the result of @racket[make-syntax-introducer] to an existing
 identifier; those functions lead to top-level and module variables
 with @tech{unreadable symbol}ic names, and the names are deterministic
-as long as expansion is otherwise deterministic. 
+as long as expansion is otherwise deterministic.
 
-Despite the problems inherent with @tech{uninterned} symbols as
-variable names, they are partially supported even across multiple
-@litchar{#~}s: When compiled code contains a reference to a module-defined
-variable whose name is an @tech{uninterned} symbol, the relative
-position of the variable among the module's definitions is recorded,
-and the reference can be linked back to the definition based on its
-position and the characters in its name. This accommodation works only
-for variable references in compiled code; it does not work for
-@racket[syntax]-quoted identifiers, for example.
-
-Finally, a compiled form may contain path literals. Although paths are
+A compiled form may contain path literals. Although paths are
 not normally printed in a way that can be read back in, path literals
 can be written and read as part of compiled code. The
 @racket[current-write-relative-directory] parameter is used to convert
@@ -613,3 +604,33 @@ path is not relative to the value of the
 coerced to a string that preserves only part of the path (an in effort
 to make it less tied to the build-time filesystem, which can be
 different than the run-time filesystem).
+
+Finally, a compiled form may contain @racket[srcloc] structures if the
+source field of the structure is a path for some system, a string, a
+byte string, a symbol, or @racket[#f]. For a path value (matching the
+current platform's convention), if the path cannot be recorded as a
+relative path based on @racket[current-write-relative-directory], then
+it is converted to a string with at most two path elements; if the
+path contains more than two elements, then the string contains
+@litchar{.../}, the next-to-last element, @litchar{/} and the last
+element. The intent of the constraints on @racket[srcloc] values and
+the conversion of the source field is to preserve some source
+information but not expose or record a path that makes no sense on
+a different filesystem or platform.
+
+For internal testing purposes, when the
+@as-index{@envvar{PLT_VALIDATE_LOAD}} environment variable is set, the
+reader runs a validator on bytecode parsed from @litchar{#~}. The
+validator may catch miscompilations or bytecode-file corruption. The
+validtor may run lazily, such as checking a procedure only when the
+procedure is called.
+
+@history[#:changed "6.90.0.21" @elem{Adjusted the effect of changing
+                                    the code inspector on parsed
+                                    bytecode, causing the reader to
+                                    mark the loaded code as generally
+                                    unrunnable instead of rejecting at
+                                    read time references to unsafe
+                                    operations.}
+        #:changed "7.0" @elem{Allowed some @racket[srcloc] values
+                              embedded in compiled code.}]

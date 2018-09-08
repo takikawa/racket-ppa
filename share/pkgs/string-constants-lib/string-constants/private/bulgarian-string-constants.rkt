@@ -1,4 +1,4 @@
-;; Bulgarian translation of Racket string constants file, version: 1.18
+;; Bulgarian translation of Racket string constants file, version: 1.19
 ;; This file is distributed under the same terms as Racket
 ;; Copyright on translation: Alexander Shopov <ash@kambanaria.org>, 2015, 2016, 2017, 2018.
 
@@ -1025,6 +1025,7 @@
  (stand-alone-explanatory-label "Компилат (работи само на тази машина, използва компилиран вариант)")
  (distribution "Дистрибуция")
  (distribution-explanatory-label "Дистрибуция (за инсталация на други машини)")
+ (embed-dlls? "Да се вградят ли библиотеките DLL в изпълнимия файл?") ;; appears in the GUI only under windows
  (executable-type "Вид")
  (executable-base "Основа")
  (filename "Име на файл: ")

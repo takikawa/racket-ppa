@@ -176,7 +176,7 @@ Like always, you don't even need to save the file.
                         [#:ssl-cert ssl-cert (or/c false/c path-string?) (and ssl? (build-path server-root-path "server-cert.pem"))]
                         [#:ssl-key ssl-key (or/c false/c path-string?) (and ssl? (build-path server-root-path "private-key.pem"))]
 
-                        [#:log-file log-file (or/c false/c path-string?) #f]
+                        [#:log-file log-file (or/c false/c path-string? output-port?) #f]
                         [#:log-format log-format (or/c log-format/c format-req/c) 'apache-default])
                        void]{
  This sets up and starts a fairly default server instance.
@@ -235,6 +235,8 @@ order they appear in the list.
 
  If @racket[log-file] is given, then it used to log requests using @racket[log-format] as the format. Allowable formats
  are those allowed by @racket[log-format->format]. If @racket[log-format] is a function, it is used directly to render the log entry.
+ If @racket[log-file] is a filepath, the given file is opened and written in a different thread. If @racket[log-file] is an @racket[output-port?], 
+ logs are written directly to the port.
  
  If @racket[connection-close?] is @racket[#t], then every connection is closed after one
  request. Otherwise, the client decides based on what HTTP version it uses.
