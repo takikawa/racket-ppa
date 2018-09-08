@@ -68,7 +68,7 @@ interface to the embedding mechanism.
 
 A stand-alone executable is ``stand-alone'' in the sense that you can
 run it without starting @exec{racket}, @exec{gracket}, or
-DrRacket. However, the executable depends on Racket shared libraries,
+DrRacket. However, the executable may depend on Racket shared libraries
 and possibly other run-time files declared via
 @racket[define-runtime-path]. The executable can be packaged with
 support libraries to create a distribution using @exec{raco
@@ -94,6 +94,14 @@ The @exec{raco exe} command accepts the following command-line flags:
    flags to build into the launcher prevent access to packages that
    are installed in user scope; use @exec{--exf -U} to enable access
    to user-scope packages from the launcher.}
+
+ @item{@DFlag{embed-dlls} --- On Windows, for a stand-alone executable,
+   copies any needed DLLs into the executable. Embedding DLLs makes
+   the resulting executable truly stand-alone if it does not depend on
+   other external files. Not all DLLs work with embedding, and
+   limitations are mostly related to thread-local storage and
+   resources, but all DLLs within the main Racket distribution work
+   with @DFlag{embed-dlls}.}
 
  @item{@DFlag{config-path} @nonterm{path} --- set @nonterm{path}
    within the executable as the path to the @tech{configuration
@@ -146,6 +154,10 @@ The @exec{raco exe} command accepts the following command-line flags:
    variant of Racket, which is the default only when running a
    @exec{raco exe} that is based on the @gtech{CGC} variant.}
 
+ @item{@DFlag{cs} --- generate an executable based on the @gtech{cs}
+   variant of Racket, which is the default unless running a @exec{raco
+   exe} that is based on the @gtech{CS} variant.}
+
  @item{@DPFlag{aux} @nonterm{file} --- attach information to the
    executable based on @nonterm{file}'s suffix; see
    @racket[extract-aux-from-path] for a list of recognized suffixes
@@ -180,7 +192,8 @@ The @exec{raco exe} command accepts the following command-line flags:
 ]
 
 @history[#:changed "6.3.0.11" @elem{Added support for
-                                    @racketidfont{declare-preserve-for-embedding}.}]
+                                    @racketidfont{declare-preserve-for-embedding}.}
+         #:changed "6.90.0.23" @elem{Added @DFlag{embed-dlls}.}]
 
 @; ----------------------------------------------------------------------
 

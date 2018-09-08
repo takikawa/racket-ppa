@@ -31,41 +31,96 @@
 (define invariant-assertion-party (string->uninterned-symbol "invariant-assertion"))
 
 (define (blame=? a b equal?/recur)
-  (and (equal?/recur (blame-source a) (blame-source b))
-       (equal?/recur (blame-value a) (blame-value b))
-       (equal?/recur (blame-contract a) (blame-contract b))
-       (equal?/recur (blame-positive a) (blame-positive b))
-       (equal?/recur (blame-negative a) (blame-negative b))
-       (equal?/recur (blame-original? a) (blame-original? b))
-       (equal?/recur (blame-context a) (blame-context b))
-       (equal?/recur (blame-top-known? a) (blame-top-known? b))
-       (equal?/recur (blame-important a) (blame-important b))
-       (equal?/recur (blame-missing-party? a) (blame-missing-party? b))))
+  (and (or (and (blame-no-swap? a) (blame-no-swap? b))
+           (and (blame-yes-swap? a) (blame-yes-swap? b)))
+       (equal?/recur (blame-context-frame a) (blame-context-frame b))
+       (equal?/recur (blame-and-more a) (blame-and-more b))))
+
+(define (combine-them x y)
+  (bitwise-xor x (* 3 y)))
+
+(define (blame-hash/combine b hash/recur combine-them)
+  (combine-them (hash/recur (blame-no-swap? b))
+                (combine-them (hash/recur (blame-context-frame b))
+                              (hash/recur (blame-and-more b)))))
 
 (define (blame-hash b hash/recur)
-  (bitwise-xor (hash/recur (blame-source b))
-               (hash/recur (blame-value b))
-               (hash/recur (blame-contract b))
-               (hash/recur (blame-positive b))
-               (hash/recur (blame-negative b))
-               (hash/recur (blame-original? b))
-               (hash/recur (blame-context b))
-               (hash/recur (blame-top-known? b))
-               (hash/recur (blame-important b))
-               (hash/recur (blame-missing-party? b))))
+  (blame-hash/combine b hash/recur (λ (x y) (bitwise-xor x (* 3 y)))))
+(define (blame-secondary-hash b hash/recur)
+  (blame-hash/combine b hash/recur (λ (x y) (bitwise-xor (* 5 x) y))))
 
 ;; missing-party? field is #t when the missing party
 ;; is still missing and it is #f when the missing party
 ;; has been filled in (or if it was filled in from the start)
-(define-struct blame
-  [source value build-name positive negative original? context top-known? important missing-party?
-          extra-fields]
+(define-struct all-the-info
+  [positive
+   negative
+   source value build-name important missing-party? context-limit extra-fields]
+  #:transparent)
+
+;; and-more : (or/c blame-no-swap? blame-swap? all-the-info?)
+;; context : string?
+(define-struct blame (context-frame and-more)
   #:property prop:equal+hash
-  (list blame=? blame-hash blame-hash))
+  (list blame=? blame-hash blame-secondary-hash))
+
+(define-struct (blame-no-swap blame) ()
+  #:property prop:equal+hash
+  (list blame=? blame-hash blame-secondary-hash))
+(define-struct (blame-yes-swap blame) ()
+  #:property prop:equal+hash
+  (list blame=? blame-hash blame-secondary-hash))
+
+(define (blame->all-the-info b)
+  (let loop ([b b])
+    (cond
+      [(blame? b) (loop (blame-and-more b))]
+      [else b])))
+(define (blame-source b) (all-the-info-source (blame->all-the-info b)))
+(define (blame-value b) (all-the-info-value (blame->all-the-info b)))
+(define (blame-important b) (all-the-info-important (blame->all-the-info b)))
+(define (blame-missing-party? b) (all-the-info-missing-party? (blame->all-the-info b)))
+(define (blame-contract b) ((all-the-info-build-name (blame->all-the-info b))))
+(define (blame-extra-fields b) (all-the-info-extra-fields (blame->all-the-info b)))
+(define (blame-context-limit b) (all-the-info-context-limit (blame->all-the-info b)))
+
+(define (blame-get-info b f)
+  (let loop ([b b]
+             [swapped? #f])
+    (cond
+      [(blame-yes-swap? b) (loop (blame-and-more b) (not swapped?))]
+      [(blame-no-swap? b) (loop (blame-and-more b) swapped?)]
+      [else (f b swapped?)])))
+(define (blame-original? b) (blame-get-info b (λ (all-the-info swapped?) (not swapped?))))
+(define (blame-swapped? b) (blame-get-info b (λ (all-the-info swapped?) swapped?)))
+(define (blame-positive b)
+  (blame-get-info b (λ (all-the-info swapped?)
+                      (if swapped?
+                          (all-the-info-negative all-the-info)
+                          (all-the-info-positive all-the-info)))))
+(define (blame-negative b)
+  (blame-get-info b (λ (all-the-info swapped?)
+                      (if swapped?
+                          (all-the-info-positive all-the-info)
+                          (all-the-info-negative all-the-info)))))
+
+(define (blame-context b)
+  (let loop ([top (blame-context-frame b)]
+             [b (blame-and-more b)])
+    (cond
+      [(all-the-info? b)
+       ;; there is a dummy #f at the end
+       ;; but it might be dropped if the
+       ;; context is limited, so we don't
+       ;; include it in the list
+       (if top (list top) '())]
+      [else (cons top (loop (blame-context-frame b)
+                            (blame-and-more b)))])))
 
 (define -make-blame
   (let ([make-blame
-         (lambda (source value build-name positive negative original?)
+         (λ (source value build-name positive negative original?
+                    #:context-limit [context-limit #f])
            (unless (srcloc? source)
              (raise-argument-error 'make-blame "srcloc?" 0
                                    source value build-name positive negative original?))
@@ -76,68 +131,200 @@
            (unless positive
              (raise-type-error 'make-blame "(not/c #f)" 3
                                source value build-name positive negative original?))
-           (make-blame
-            source
-            value
-            build-name
-            (list positive)
-            (and negative (list negative))
-            original?
-            '()
-            #t 
-            #f
-            (not negative)
-            '()))])
+           (unless (or (not context-limit)
+                       (exact-nonnegative-integer? context-limit))
+             (raise-argument-error 'make-blame
+                                   (format "~s" '(or/c #f natural?))
+                                   context-limit))
+           (define build/memo-name
+             (let* ([uniq (box #f)]
+                    [ans uniq])
+               (λ ()
+                 (when (eq? uniq ans)
+                   (set! ans (build-name)))
+                 ans)))
+           (define all-the-info
+             (make-all-the-info
+              (list positive)
+              (and negative (list negative))
+              source
+              value
+              build/memo-name
+              #f
+              (not negative)
+              context-limit
+              '()))
+           ;; we always start with a yes-swap or no-swap struct
+           ;; so be careful in other parts of the code to ignore
+           ;; it, as appropriate.
+           (if original?
+               (blame-no-swap #f all-the-info)
+               (blame-yes-swap #f all-the-info)))])
     make-blame))
 
-;; s : (or/c string? #f)
 (define (blame-add-context b s #:important [name #f] #:swap? [swap? #f])
-  (define new-original? (if swap? (not (blame-original? b)) (blame-original? b)))
-  (define new-context (if s (cons s (blame-context b)) (blame-context b)))
-  (struct-copy
-   blame b
-   [original? new-original?]
-   [positive (if swap? (blame-negative b) (blame-positive b))]
-   [negative (if swap? (blame-positive b) (blame-negative b))]
-   [important (if name (important name new-original?) (blame-important b))]
-   [context new-context]
-   [top-known? #t]))
+  (unless (blame? b)
+    (raise-argument-error 'blame-add-context
+                          "blame?"
+                          0
+                          b s))
+  (unless (or (string? s)
+              (not s))
+    (raise-argument-error 'blame-add-context
+                          (format "~s" '(or/c string? #f))
+                          1
+                          b s))
+  (cond
+    [(string? s)
+     (do-blame-add-context b s name swap?)]
+    [else b]))
 
-(struct important (name sense-swapped?))
+;; this has become a no op. it seems to never have been
+;; documented. probably exported because of the Great
+;; Extra Export ScrewUp that happened years back
+(define (blame-add-unknown-context b) b)
 
-(define (blame-add-unknown-context b)
-  (define old (blame-context b))
-  (struct-copy
-   blame b
-   [top-known? #f]
-   [context (if (blame-top-known? b)
-                (blame-context b)
-                (cons "..." (blame-context b)))]))
+(define (do-blame-add-context b s name swap?)
+  (define context-limit (blame-context-limit b))
+  (cond
+    [(and context-limit
+          ;; if we are not tracking context,
+          ;; we are not updating the name
+          ;; at the top of the messages either
+          ;(not name)
+          )
+     (cond
+       [(not (zero? context-limit))
+        ;; if the limit is zero, we skip this case,
+        ;; which has the effect of always keeping only
+        ;; the dummy context frame
+        (define-values (limited-b dropped-swap?) (drop-to-limit b context-limit))
+        (if (equal? dropped-swap? swap?)
+            (blame-no-swap s limited-b)
+            (blame-yes-swap s limited-b))]
+       [swap?
+        (if (blame-yes-swap? b)
+            (blame-no-swap (blame-context-frame b) (blame-and-more b))
+            (blame-yes-swap (blame-context-frame b) (blame-and-more b)))]
+       [else b])]
+    [else
+     (define blame-yes/no-swap (if swap? blame-yes-swap blame-no-swap))
+     (define inside-part
+       (cond
+         [name
+          (let loop ([inner-b b])
+            (cond
+              [(blame-yes-swap? inner-b)
+               (blame-yes-swap (blame-context-frame inner-b) (loop (blame-and-more inner-b)))]
+              [(blame-no-swap? inner-b)
+               (blame-no-swap (blame-context-frame inner-b) (loop (blame-and-more inner-b)))]
+              [else
+               (define new-original? (if swap? (not (blame-original? b)) (blame-original? b)))
+               ;; in this case, we need to make a new blame record
+               (struct-copy
+                all-the-info inner-b
+                [important (if name
+                               (important name new-original?)
+                               (all-the-info-important inner-b))])]))]
+         [else b]))
+     (if swap?
+         (blame-yes-swap s inside-part)
+         (blame-no-swap s inside-part))]))
 
-(define (blame-contract b) ((blame-build-name b)))
+(define (drop-to-limit b context-limit)
+  (define short-enough?
+    (let loop ([b b]
+               [n (- context-limit 1)])
+      (cond
+        [(all-the-info? b) #t]
+        [(blame? b)
+         (if (zero? n)
+             #f
+             (loop (blame-and-more b) (- n 1)))])))
+  (cond
+    [short-enough? (values b #f)]
+    [else
+     (define swapped? #f)
+     (define limited-b
+       (let loop ([b b]
+                  [n (- context-limit 1)])
+         (cond
+           [(= n 0)
+            (let loop ([b b]
+                       [swap? #f])
+              (cond
+                [(blame-yes-swap? b) (loop (blame-and-more b) (not swap?))]
+                [(blame-no-swap? b) (loop (blame-and-more b) swap?)]
+                [else
+                 (set! swapped? swap?)
+                 b]))]
+           [(blame-no-swap? b)
+            (blame-no-swap (blame-context-frame b)
+                                  (loop (blame-and-more b) (- n 1)))]
+           [(blame-yes-swap? b)
+            (blame-yes-swap (blame-context-frame b)
+                                   (loop (blame-and-more b) (- n 1)))])))
+     (values limited-b swapped?)]))
+  
+(struct important (name sense-swapped?) #:transparent)
 
 (define (blame-swap b)
-  (struct-copy
-   blame b
-   [original? (not (blame-original? b))]
-   [positive (blame-negative b)]
-   [negative (blame-positive b)]))
-
+  (cond
+    [(blame-yes-swap? b)
+     (blame-no-swap (blame-context-frame b) (blame-and-more b))]
+    [(blame-no-swap? b)
+     (blame-yes-swap (blame-context-frame b) (blame-and-more b))]))
 
 (define (blame-replace-negative b new-neg)
-  (struct-copy blame b [negative (list new-neg)]))
+  (update-the-info
+   b
+   (λ (an-all-the-info swap?)
+     (if swap?
+         (all-the-info-replace-positive an-all-the-info new-neg)
+         (all-the-info-replace-negative an-all-the-info new-neg)))))
 
 (define (blame-replace-positive b new-pos)
-  (struct-copy blame b [positive (list new-pos)]))
+  (update-the-info
+   b
+   (λ (an-all-the-info swap?)
+     (if swap?
+         (all-the-info-replace-negative an-all-the-info new-pos)
+         (all-the-info-replace-positive an-all-the-info new-pos)))))
 
+(define (all-the-info-replace-positive an-all-the-info new-pos)
+  (struct-copy
+   all-the-info an-all-the-info
+   [positive (list new-pos)]))
 
-(define (blame-update blame-info extra-positive extra-negative)
-  (ensure-blame-known 'blame-update blame-info)
-  (struct-copy 
-   blame 
-   blame-info
-   [positive (cons extra-positive (blame-positive blame-info))]
-   [negative (cons extra-negative (blame-negative blame-info))]))
+(define (all-the-info-replace-negative an-all-the-info new-neg)
+  (struct-copy
+   all-the-info an-all-the-info
+   [negative (list new-neg)]))
+
+(define (blame-update b extra-positive extra-negative)
+  (ensure-blame-known 'blame-update b)
+  (update-the-info
+   b
+   (λ (an-all-the-info swap?)
+     (if swap?
+         (struct-copy
+          all-the-info an-all-the-info
+          [positive (cons extra-negative (all-the-info-positive an-all-the-info))]
+          [negative (cons extra-positive (all-the-info-negative an-all-the-info))])
+         (struct-copy
+          all-the-info an-all-the-info
+          [positive (cons extra-positive (all-the-info-positive an-all-the-info))]
+          [negative (cons extra-negative (all-the-info-negative an-all-the-info))])))))
+
+(define (update-the-info b f)
+  (let loop ([b b]
+             [swap? #f])
+    (cond
+      [(blame-yes-swap? b)
+       (blame-yes-swap (blame-context-frame b) (loop (blame-and-more b) (not swap?)))]
+      [(blame-no-swap? b)
+       (blame-no-swap (blame-context-frame b) (loop (blame-and-more b) swap?))]
+      [else (f b swap?)])))
 
 (define (ensure-blame-known who blame)
   (unless (and (blame-positive blame)
@@ -153,9 +340,6 @@
         [else info]))
 (define (show-blame-positive b) (show-blame blame-positive b))
 (define (show-blame-negative b) (show-blame blame-negative b))
-
-(define (blame-swapped? b)
-  (not (blame-original? b)))
 
 (define-struct (exn:fail:contract:blame exn:fail:contract) [object]
   #:transparent)
@@ -187,7 +371,7 @@
        raw-blame]
       [else
        (blame-add-missing-party raw-blame missing-party)]))
-  
+
   (raise
    (make-exn:fail:contract:blame
     ((current-blame-format)
@@ -197,25 +381,21 @@
     blame)))
 
 (define (blame-add-missing-party b missing-party)
-  (define (check-and-fail)
-    (unless (blame-missing-party? b)
-      (error 'blame-add-missing-party "already have the party: ~s; trying to add ~s" 
-             (if (blame-swapped? b) (blame-positive b) (blame-negative b))
-             missing-party)))
   (cond
     [(not missing-party) b]
-    [(blame-swapped? b)
-     (check-and-fail)
-     (struct-copy blame b
-                  [positive (or (blame-positive b)
-                                (list missing-party))]
-                  [missing-party? #f])]
     [else
-     (check-and-fail)
-     (struct-copy blame b
-                  [negative (or (blame-negative b)
-                                (list missing-party))]
-                  [missing-party? #f])]))
+     (unless (blame-missing-party? b)
+       (error 'blame-add-missing-party "already have the party: ~s; trying to add ~s"
+              (if (blame-swapped? b) (blame-positive b) (blame-negative b))
+              missing-party))
+     (update-the-info
+      b
+      (λ (an-all-the-info swap?)
+        (struct-copy
+         all-the-info an-all-the-info
+         [negative (or (all-the-info-negative an-all-the-info)
+                       (list missing-party))]
+         [missing-party? #f])))]))
 
 (define (blame-fmt->-string blame fmt)
   (cond
@@ -280,7 +460,7 @@
   (define source-message (source-location->string (blame-source blme)))
   
   (define context (blame-context blme))
-  (define context-lines (if (null? context)
+  (define context-lines (if (or (null? context) (not context))
                             #f
                             (apply string-append 
                                    (for/list ([context (in-list context)]
@@ -389,11 +569,14 @@
     (raise-argument-error 'blame-add-extra-field
                           "string?"
                           2 b name field))
-  (struct-copy
-   blame b
-   [extra-fields (cons (format "  ~a: ~a" name field)
-                       (blame-extra-fields b))]))
-  
+  (update-the-info
+   b
+   (λ (an-all-the-info swap?)
+     (struct-copy
+      all-the-info an-all-the-info
+      [extra-fields (cons (format "  ~a: ~a" name field)
+                          (blame-extra-fields b))]))))
+
 ;; combine-lines : (-> (listof (or/c string? #f))) string?)
 ;; combines each of 'lines' into a single message, dropping #fs,
 ;; and otherwise guaranteeing that each string is on its own line,
@@ -438,10 +621,8 @@
     [(path? x) (path->relative-string/library x)]
     [else x]))
 
-
 (define (from-info x)
-  (convert-blame-singleton (last x))) 
-
+  (convert-blame-singleton (last x)))
 
 (define (convert-blame-party x)
   (let ((preface 

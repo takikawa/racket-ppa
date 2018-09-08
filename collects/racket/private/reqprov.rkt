@@ -1071,7 +1071,7 @@
                                           (list-ref super-v 3)))
                            (list-ize (list-ref v 4)
                                      (and super-v
-                                          (list-ref super-v 3)))))))
+                                          (list-ref super-v 4)))))))
                   (raise-syntax-error
                    #f
                    "identifier is not bound to struct type information"
@@ -1177,12 +1177,12 @@
     (datum->syntax
      (import-orig-stx i)
      (list #'just-meta
-           (import-req-mode i)
+           (import-orig-mode i)
            (list #'for-meta
                  (import-mode i)
                  (list #'rename
                        (import-src-mod-path i)
-                       (syntax-local-introduce (import-local-id i))
+                       (import-local-id i)
                        (import-src-sym i))))
      (import-orig-stx i)))
 
@@ -1192,25 +1192,26 @@
   (define-syntax (local-require stx)
     (when (eq? 'expression (syntax-local-context))
       (raise-syntax-error #f "not allowed in an expression context" stx))
-    (syntax-case stx []
-      [(_ spec ...)
-       (let*-values ([(imports sources)
-                      (expand-import
-                       (datum->syntax
-                        stx
-                        (list* #'only-meta-in 0 (syntax->list #'(spec ...)))
-                        stx))]
-                     [(names) (map import-local-id imports)]
-                     [(reqd-names) 
-                      (let ([ctx (syntax-local-get-shadower (datum->syntax #f (gensym)))])
-                        (map (lambda (n) (datum->syntax ctx (syntax-e n) n)) names))]
-                     [(renamed-imports) (map rename-import imports reqd-names)]
-                     [(raw-specs) (map import->raw-require-spec renamed-imports)]
-                     [(lifts) (map syntax-local-lift-require raw-specs reqd-names)])
-         (with-syntax ([(name ...) names]
-                       [(lifted ...) lifts])
-           (syntax/loc stx (define-syntaxes (name ...)
-                             (values (make-rename-transformer (quote-syntax lifted)) ...)))))]))
+    (let ([stx (syntax-local-introduce stx)])
+      (syntax-case stx []
+        [(_ spec ...)
+         (let*-values ([(imports sources)
+                        (expand-import
+                         (datum->syntax
+                          stx
+                          (list* #'only-meta-in 0 (syntax->list #'(spec ...)))
+                          stx))]
+                       [(names) (map import-local-id imports)]
+                       [(reqd-names)
+                        (let ([ctx (syntax-local-get-shadower (datum->syntax #f (gensym)))])
+                          (map (lambda (n) (datum->syntax ctx (syntax-e n) n)) names))]
+                       [(renamed-imports) (map rename-import imports reqd-names)]
+                       [(raw-specs) (map import->raw-require-spec renamed-imports)]
+                       [(lifts) (map syntax-local-lift-require raw-specs reqd-names)])
+           (with-syntax ([(name ...) (map syntax-local-introduce names)]
+                         [(lifted ...) (map syntax-local-introduce lifts)])
+             (syntax/loc stx (define-syntaxes (name ...)
+                               (values (make-rename-transformer (quote-syntax lifted)) ...)))))])))
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   )

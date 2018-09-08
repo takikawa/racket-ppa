@@ -27,18 +27,20 @@ In @indexed-racket['word] mode, the result is either @racket[32] or
 or 64-bit program.
 
 In @indexed-racket['vm] mode,
-the only possible symbol result is:
+the possible symbol results are:
 
 @itemize[
 @item{@indexed-racket['racket]}
+@item{@indexed-racket['chez-scheme]}
 ]
 
 In @indexed-racket['gc] mode,
 the possible symbol results are:
 
 @itemize[
-@item{@indexed-racket['cgc]}
-@item{@indexed-racket['3m]}
+@item{@indexed-racket['cgc] --- when @racket[(system-type 'vm)] is @racket['racket]}
+@item{@indexed-racket['3m] --- when @racket[(system-type 'vm)] is @racket['racket]}
+@item{@indexed-racket['cs] --- when @racket[(system-type 'vm)] is @racket['chez-scheme]}
 ]
 
 In @indexed-racket['link] mode, the possible symbol results are:
@@ -162,8 +164,8 @@ ends with a newline.}
 
 
 @defparam*[current-command-line-arguments argv
-                                          (vectorof (and/c string? immutable?))
-                                          (vectorof string?)]{
+                                          (vectorof string?)
+                                          (vectorof (and/c string? immutable?))]{
 
 A @tech{parameter} that is initialized with command-line arguments when
 Racket starts (not including any command-line arguments that were

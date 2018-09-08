@@ -7,12 +7,12 @@
            setup/cross-system
            pkg/path
            setup/main-collects
-           dynext/filename-version
            "private/macfw.rkt"
            "private/windlldir.rkt"
            "private/elf.rkt"
            "private/collects-path.rkt"
-           "private/write-perm.rkt")
+           "private/write-perm.rkt"
+	   "private/win-dll-list.rkt")
 
   (provide assemble-distribution)
 
@@ -32,7 +32,7 @@
                                  (case (cross-system-type)
                                    [(windows) #f]
                                    [(unix) "bin"]
-                                   [(macosx) (if (memq type '(gracketcgc gracket3m))
+                                   [(macosx) (if (memq type '(gracketcgc gracket3m gracketcs))
                                                  #f
                                                  "bin")])))
                           orig-binaries
@@ -48,7 +48,7 @@
                            (make-directory dest-dir))
                          (let-values ([(base name dir?) (split-path b)])
                            (let ([dest (build-path dest-dir name)])
-                             (if (and (memq type '(gracketcgc gracket3m))
+                             (if (and (memq type '(gracketcgc gracket3m gracketcs))
                                       (eq? 'macosx (cross-system-type)))
                                  (begin
                                    (copy-app b dest)
@@ -67,7 +67,7 @@
 	   [single-mac-app? (and executables?
                                  (eq? 'macosx (cross-system-type))
 				 (= 1 (length types))
-				 (memq (car types) '(gracketcgc gracket3m)))])
+				 (memq (car types) '(gracketcgc gracket3m gracketcs)))])
       ;; Create directories for libs, collects, and extensions:
       (let-values ([(lib-dir collects-dir relative-collects-dir exts-dir relative-exts-dir)
 		    (if single-mac-app?
@@ -106,12 +106,17 @@
 				  relative-collects-dir
                                   (build-path dest-dir specific-lib-dir "exts")
                                   (build-path specific-lib-dir "exts"))))])
-	(make-directory* lib-dir)
-	(make-directory* collects-dir)
-	(make-directory* exts-dir)
 	;; Copy libs into place
-        (install-libs lib-dir types (not executables?))
+        (install-libs lib-dir types
+		      #:extras-only? (not executables?)
+		      #:no-dlls? (and (eq? 'windows (cross-system-type))
+				      executables?
+				      ;; If all executables have "<system>" the the
+				      ;; DLL dir, then no base DLLS are needed
+				      (for/and ([f (in-list orig-binaries)])
+					(current-no-dlls? f))))
 	;; Copy collections into place
+	(unless (null? copy-collects) (make-directory* collects-dir))
 	(for-each (lambda (dir)
 		    (for-each (lambda (f)
 				(copy-directory/files*
@@ -131,7 +136,7 @@
                   [sub-dir
                    (build-path 'up relative-dir)]
                   [(and (eq? 'macosx (cross-system-type))
-                        (memq type '(gracketcgc gracket3m))
+                        (memq type '(gracketcgc gracket3m gracketcs))
                         (not single-mac-app?))
                    (build-path 'up 'up 'up relative-dir)]
                   [else
@@ -161,48 +166,35 @@
             ;; Done!
             (void))))))
 
-  (define (install-libs lib-dir types extras-only?)
+  (define (install-libs lib-dir types
+			#:extras-only? extras-only?
+			#:no-dlls? no-dlls?)
     (case (cross-system-type)
       [(windows)
-       (let ([copy-dll (lambda (name)
-			 (copy-file* (search-dll (find-cross-dll-dir) name)
-				     (build-path lib-dir name)))]
-	     [versionize (lambda (template)
-			   (let ([f (search-dll (find-cross-dll-dir)
-						(format template filename-version-part))])
-			     (if (file-exists? f)
-				 (format template filename-version-part)
-				 (format template "xxxxxxx"))))])
-	 (map copy-dll (list
-                        "libiconv-2.dll"
-                        "longdouble.dll"))
-         (unless extras-only?
-           (when (or (memq 'racketcgc types)
-                     (memq 'gracketcgc types))
-             (map copy-dll
-                  (list
-                   (versionize "libracket~a.dll")
-                   (versionize "libmzgc~a.dll"))))
-           (when (or (memq 'racket3m types)
-                     (memq 'gracket3m types))
-             (map copy-dll
-                  (list
-                   (versionize "libracket3m~a.dll"))))))]
+       (if no-dlls?
+	   '()
+	   (let ([copy-dll (lambda (name)
+			     (make-directory* lib-dir)
+			     (copy-file* (search-dll name)
+					 (build-path lib-dir name)))])
+	     (map copy-dll (get-racket-dlls types #:extras-only? extras-only?))))]
       [(macosx)
        (unless extras-only?
          (when (or (memq 'racketcgc types)
                    (memq 'gracketcgc types))
-           (copy-framework "Racket" #f lib-dir))
+           (copy-framework "Racket" 'cgc lib-dir))
          (when (or (memq 'racket3m types)
                    (memq 'gracket3m types))
-           (copy-framework "Racket" #t lib-dir)))]
+           (copy-framework "Racket" '3m lib-dir))
+         (when (or (memq 'racketcs types)
+                   (memq 'gracketcs types))
+           (copy-framework "Racket" 'cs lib-dir)))]
       [(unix)
        (unless extras-only?
          (let ([lib-plt-dir (build-path lib-dir "plt")])
-           (unless (directory-exists? lib-plt-dir)
-             (make-directory lib-plt-dir))
            (let ([copy-bin
                   (lambda (name variant gr?)
+		    (make-directory* lib-plt-dir)
                     (copy-file* (build-path (if gr?
                                                 (find-lib-dir)
                                                 (find-console-bin-dir))
@@ -213,10 +205,14 @@
                (copy-bin "racket" 'cgc #f))
              (when (memq 'racket3m types)
                (copy-bin "racket" '3m #f))
+             (when (memq 'racketcs types)
+               (copy-bin "racket" 'cs #f))
              (when (memq 'gracketcgc types)
                (copy-bin "gracket" 'cgc #t))
              (when (memq 'gracket3m types)
-               (copy-bin "gracket" '3m #t)))
+               (copy-bin "gracket" '3m #t))
+             (when (memq 'gracketcs types)
+               (copy-bin "gracket" 'cs #t)))
            (when (shared-libraries?)
              (when (or (memq 'racketcgc types)
                        (memq 'gracketcgc types))
@@ -224,36 +220,18 @@
                (copy-shared-lib "mzgc" lib-dir))
              (when (or (memq 'racket3m types)
                        (memq 'gracket3m types))
-               (copy-shared-lib "racket3m" lib-dir)))))]))
+               (copy-shared-lib "racket3m" lib-dir))
+             (when (or (memq 'racketcs types)
+                       (memq 'gracketcs types))
+               (copy-shared-lib "racketcs" lib-dir)))))]))
 
-  (define (search-dll dll-dir dll)
-    (if dll-dir
-	(build-path dll-dir dll)
-	(let* ([exe-dir
-		(let ([exec (path->complete-path 
-			     (find-executable-path (find-system-path 'exec-file))
-			     (find-system-path 'orig-dir))])
-		  (let-values ([(base name dir?) (split-path exec)])
-		    base))]
-	       [paths (cons
-		       exe-dir
-		       (path-list-string->path-list
-			(or (getenv "PATH") "")
-			(list (find-system-path 'sys-dir))))])
-	  (or (ormap (lambda (p)
-		       (let ([p (build-path p dll)])
-			 (and (file-exists? p)
-			      p)))
-		     paths)
-	      ;; Can't find it, so just use executable's dir:
-	      (build-path exe-dir dll)))))
-
-  (define (copy-framework name 3m? lib-dir)
+  (define (copy-framework name variant lib-dir)
     (let* ([fw-name (format "~a.framework" name)]
 	   [sub-dir (build-path fw-name "Versions"
-				(if 3m?
-				    (format "~a_3m" (version))
-				    (version)))])
+                                (case variant
+                                  [(3m) (format "~a_3m" (version))]
+                                  [(cs) (format "~a_CS" (version))]
+                                  [else (version)]))])
       (make-directory* (build-path lib-dir sub-dir))
       (let* ([fw-name (build-path sub-dir (format "~a" name))]
 	     [dll-dir (find-framework fw-name)])
@@ -282,6 +260,7 @@
   (define avail-lib-files #f)
 
   (define (copy-shared-lib name lib-dir)
+    (make-directory* lib-dir)
     (unless avail-lib-files
       (set! avail-lib-files (directory-list (find-cross-dll-dir))))
     (let* ([rx (byte-regexp (string->bytes/latin-1
@@ -304,22 +283,23 @@
     (case (cross-system-type)
       [(windows)
        (for-each (lambda (b)
-		   (update-dll-dir b "lib"))
+		   (unless (current-no-dlls? b)
+		     (update-dll-dir b "lib")))
 		 binaries)]
       [(macosx)
        (if (and (= 1 (length types))
-		(memq (car types) '(gracketcgc gracket3m)))
+		(memq (car types) '(gracketcgc gracket3m gracketcs)))
 	   ;; Special case for single GRacket app:
 	   (update-framework-path "@executable_path/../Frameworks/"
 				  (car binaries)
 				  #t)
 	   ;; General case:
 	   (for-each (lambda (b type)
-		       (update-framework-path (if (memq type '(racketcgc racket3m))
+		       (update-framework-path (if (memq type '(racketcgc racket3m racketcs))
 						  "@executable_path/../lib/" 
 						  "@executable_path/../../../lib/" )
 					      b
-					      (memq type '(gracketcgc gracket3m))))
+					      (memq type '(gracketcgc gracket3m gracketcs))))
 		     binaries types))]
       [(unix)
        (for-each (lambda (b type)
@@ -645,14 +625,19 @@
 		    (error 'assemble-distribution
 			   "file is an original PLT executable, not a stub binary: ~e"
 			   b)))
-		(let ([3m? (equal? (list-ref m 4) #"3")])
+		(let ([variant (case (list-ref m 4)
+                                 [(#"3") '3m]
+                                 [(#"s") 'cs]
+                                 [else 'cgc])])
 		  (if (equal? (caddr m) #"r")
-		      (if 3m?
-			  'gracket3m
-			  'gracketcgc)
-		      (if 3m?
-			  'racket3m
-			  'racketcgc))))
+		      (case variant
+                        [(3m) 'gracket3m]
+                        [(cs) 'gracketcs]
+                        [else 'gracketcgc])
+		      (case variant
+                        [(3m) 'racket3m]
+                        [(cs) 'racketcs]
+                        [else 'racketcgc]))))
 	      (error 'assemble-distribution
 		     "file is not a PLT executable: ~e"
 		     b))))))

@@ -24,9 +24,8 @@
   (with-disappeared-uses
     (syntax-parse clauses
       [([pats . rhs] ...)
-       (parameterize ([orig-stx stx])
-         (unless (syntax->list es)
-           (raise-syntax-error 'match* "expected a sequence of expressions to match" es)))
+       (unless (syntax->list es)
+         (raise-syntax-error 'match* "expected a sequence of expressions to match" es))
        (define/with-syntax form-name
          (syntax-case stx ()
            [(fname . _)
@@ -80,6 +79,9 @@
        (syntax-property
         (quasisyntax/loc stx
           (let ([xs exprs*] ...)
-            (define (outer-fail) raise-error)
-            body))
+            (let ([outer-fail
+                   #,(syntax-property
+                      #'(λ () raise-error)
+                      'typechecker:called-in-tail-position #t)])
+              body)))
         'feature-profile:pattern-matching #t)])))

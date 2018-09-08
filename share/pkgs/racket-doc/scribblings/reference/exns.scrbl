@@ -309,13 +309,39 @@ The @racket[arg-v] arguments are the actual supplied
 arguments, which are shown in the error message (using the error value
 conversion handler; see @racket[error-value->string-handler]); also,
 the number of supplied @racket[arg-v]s is explicitly mentioned in the
-message.}
+message.
+
+@examples[
+(eval:error (raise-arity-error 'unite (arity-at-least 13) "Virginia" "Maryland"))
+]}
+
+
+@defproc[(raise-result-arity-error [name (or/c symbol? #f)]
+                                   [arity-v exact-nonnegative-integer?]
+                                   [detail-str (or/c string? #f)]
+                                   [result-v any/c] ...)
+         any]{
+
+Like @racket[raise-arity-error], but reports a ``result'' mismatch
+instead of an ``argument'' mismatch. The @racket[name] argument can be
+@racket[#f] to omit an initial source for the error. The
+@racket[detail-str] argument, if non-@racket[#f], should be a string
+that starts with a newline, since it is added near the end of the
+generated error message.
+
+@examples[
+(eval:error (raise-result-arity-error 'let-values 2 "\n  in: example" 'a 2.0 "three"))
+]
+
+@history[#:added "6.90.0.26"]}
+
 
 @defproc[(raise-syntax-error [name (or/c symbol? #f)]
                              [message string?]
                              [expr any/c #f]
                              [sub-expr any/c #f]
-                             [extra-sources (listof syntax?) null])
+                             [extra-sources (listof syntax?) null]
+                             [message-suffix string? ""])
          any]{
 
 Creates an @racket[exn:fail:syntax] value and @racket[raise]s it as an
@@ -366,7 +392,15 @@ through a combination of the @racket[name], @racket[expr], and
  @item{When @racket[name] is a symbol, then the symbol
   is used as the form name in the generated error message.}
 
-]}
+]
+
+The @racket[message-suffix] string is appended to the end of the error
+message. If not @racket[""], it should normally start with a newline
+and two spaces to add extra fields to the message (see
+@secref["err-msg-conventions"]).
+
+@history[#:changed "6.90.0.18" @elem{Added the @racket[message-suffix] optional argument.}]}
+
 
 @deftogether[(
 @defproc[(unquoted-printing-string? [v any/c]) boolean?]
@@ -954,7 +988,10 @@ The fields of a @racket[srcloc] instance are as follows:
  @item{@racket[span] --- The number of covered positions (counts from
  0) or @racket[#f] (unknown).}
 
-]}
+]
+
+See @secref["print-compiled"] for information about the treatment of
+@racket[srcloc] values that are embedded in compiled code.}
 
 
 @defproc[(srcloc->string [srcloc srcloc?]) (or/c string? #f)]{

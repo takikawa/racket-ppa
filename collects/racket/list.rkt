@@ -61,7 +61,8 @@
          remf
          remf*)
 
-(require (for-syntax racket/base))
+(require (for-syntax racket/base)
+         racket/private/list-predicates)
 
 (define (first x)
   (if (and (pair? x) (list? x))
@@ -111,8 +112,6 @@
     (cdr l)
     (raise-argument-error 'rest "(and/c list? (not/c empty?))" l)))
 
-(define (cons? l) (pair? l))
-(define (empty? l) (null? l))
 (define empty '())
 
 (define (make-list n x)

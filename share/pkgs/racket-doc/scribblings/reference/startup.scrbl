@@ -80,20 +80,26 @@ submodule of the required module or the
 language is used before the module is instantiated; see
 @secref["configure-runtime"].
 
-After running all command-line expressions, files, and modules,
-Racket or GRacket then starts a read-eval-print loop for interactive
+After running all command-line expressions, files, and modules, Racket
+or GRacket then starts a read-eval-print loop for interactive
 evaluation if no command line flags are provided other than
-@tech{configuration options}.  If any command-line argument is
+@tech{configuration options}. For Racket, the read-eval-print loop is
+run by calling @racket[read-eval-print-loop] from
+@racketmodname[racket/repl]. For GRacket, the read-eval-print loop is
+run by calling @racket[graphical-read-eval-print-loop] from
+@racketmodname[racket/gui/base]. If any command-line argument is
 provided that is not a @tech{configuration option}, then the
 read-eval-print-loop is not started, unless the @Flag{i}/@DFlag{repl}
 flag is provided on the command line to
-specifically re-enable it. In addition, just before the command line
+specifically re-enable it.
+
+In addition, just before the read-eval-print loop
 is started, Racket runs @racketmodname[racket/interactive]
 and GRacket runs @racketmodname[racket/gui/interactive], unless a different
 interactive file is specified in the the installation's @filepath{config.rktd}
 file found in @racket[(find-config-dir)], or the file @filepath{interactive.rkt}
 is found in @racket[(find-system-path 'addon-dir)]. If the
-@Flag{q}/@DFlag{no-init-file} flag is specified on the command line
+@Flag{q}/@DFlag{no-init-file} flag is specified on the command line,
 then no interactive file is run.
 
 Finally, before Racket or GRacket exits, it calls the procedure that
@@ -103,7 +109,10 @@ specified. Requiring @racketmodname[racket/gui/base] sets this parameter call
 @racket[(racket 'yield)].
 
 @history[#:changed "6.7" @elem{Run @racketmodname[racket/interactive] file
-         rather than directly running @racket[(find-system-path 'init-file)].}]
+         rather than directly running @racket[(find-system-path 'init-file)].}
+         #:changed "6.90.0.30" @elem{Run a read-eval-print loop by
+         using @racketmodname[racket/repl] or @racketmodname[racket/gui/base]
+         instead of @racketmodname[racket/base] or @racketmodname[racket/gui/init].}]
 
 @; ----------------------------------------------------------------------
 
@@ -347,6 +356,12 @@ flags:
         are the same as for the @envvar{PLTSTDERR} environment
         variable. See @secref["logging"] for more information.}
 
+  @item{@FlagFirst{O} @nonterm{levels} or @DFlagFirst{stdout}
+        @nonterm{levels} : Sets the logging level for writing events to
+        the original output port. The possible @nonterm{level} values
+        are the same as for the @envvar{PLTSTDOUT} environment
+        variable. See @secref["logging"] for more information.}
+
   @item{@FlagFirst{L} @nonterm{levels} or @DFlagFirst{syslog}
         @nonterm{levels} : Sets the logging level for writing events to
         the system log. The possible @nonterm{level} values
@@ -438,6 +453,8 @@ of the collapsed set.
 
 Extra arguments following the last option are available from the
 @indexed-racket[current-command-line-arguments] parameter.
+
+@history[#:changed "6.90.0.17" @elem{Added @Flag{O}/@DFlag{stdout}.}]
 
 @; ----------------------------------------------------------------------
 

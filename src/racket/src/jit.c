@@ -53,6 +53,11 @@ static Scheme_Object *make_global_ref(Scheme_Object *var, Scheme_Object *dummy)
   o = scheme_alloc_object();
   o->type = scheme_global_ref_type;
   SCHEME_PTR1_VAL(o) = var;
+  if (!SCHEME_FALSEP(dummy)) {
+    Scheme_Instance *home;
+    home = scheme_get_bucket_home((Scheme_Bucket *)dummy);
+    dummy = (Scheme_Object *)home;
+  }
   SCHEME_PTR2_VAL(o) = dummy;
 
   return o;
@@ -414,7 +419,7 @@ static int is_short(Scheme_Object *obj, int fuel)
       return is_short(branch->fbranch, fuel);
     }
   case scheme_toplevel_type:
-  case scheme_quote_syntax_type:
+  case scheme_static_toplevel_type:
   case scheme_local_type:
   case scheme_local_unbox_type:
   case scheme_lambda_type:
@@ -445,29 +450,6 @@ Scheme_Object *scheme_extract_global(Scheme_Object *o, Scheme_Native_Closure *nc
   }
 
   return globs->a[pos];
-}
-
-static Scheme_Object *extract_syntax(Scheme_Quote_Syntax *qs, Scheme_Native_Closure *nc)
-{
-  /* GLOBAL ASSUMPTION: we assume that globals are the last thing
-     in the closure; grep for "GLOBAL ASSUMPTION" in fun.c. */
-  Scheme_Prefix *globs;
-  int i, pos;
-  Scheme_Object *v;
-
-  globs = (Scheme_Prefix *)nc->vals[nc->code->u2.orig_code->closure_size - 1];
-
-  i = qs->position;
-  pos = qs->midpoint;
-
-  v = globs->a[i+pos+1];
-  if (!v) {
-    v = globs->a[pos];
-    v = scheme_delayed_shift((Scheme_Object **)v, i);
-    globs->a[i+pos+1] = v;
-  }
-
-  return v;
 }
 
 static Scheme_Object *extract_closure_local(int pos, mz_jit_state *jitter, int get_constant)
@@ -520,13 +502,22 @@ Scheme_Object *scheme_specialize_to_constant(Scheme_Object *obj, mz_jit_state *j
       }
     }
 
-    if (SAME_TYPE(SCHEME_TYPE(obj), scheme_toplevel_type)) {
+    if (SAME_TYPE(SCHEME_TYPE(obj), scheme_toplevel_type)
+        && (SCHEME_TOPLEVEL_FLAGS(obj) & SCHEME_TOPLEVEL_FLAGS_MASK) >= SCHEME_TOPLEVEL_FIXED) {
       c = scheme_extract_global(obj, jitter->nc, 0);
       if (c) {
         c = ((Scheme_Bucket *)c)->val;
         if (c)
           return c;
       }
+    }
+
+    if (SAME_TYPE(SCHEME_TYPE(obj), scheme_static_toplevel_type)
+        && (SCHEME_TOPLEVEL_FLAGS(obj) & SCHEME_TOPLEVEL_FLAGS_MASK) >= SCHEME_TOPLEVEL_FIXED) {
+      c = SCHEME_STATIC_TOPLEVEL_PREFIX(obj)->a[SCHEME_TOPLEVEL_POS(obj)];
+      c = ((Scheme_Bucket *)c)->val;
+      if (c)
+        return c;
     }
   }
 
@@ -562,6 +553,10 @@ int scheme_is_noncm(Scheme_Object *a, mz_jit_state *jitter, int depth, int stack
       if ((((Scheme_Prim_Proc_Header *)a)->flags & SCHEME_PRIM_OTHER_TYPE_MASK)
           == SCHEME_PRIM_STRUCT_TYPE_PRED)
         return 0;
+      /* Closures need a 3rd argument, so don't claim NONCM for them, either.
+         (Currently, all of those are predicates, anyway.) */
+      if (((Scheme_Prim_Proc_Header *)a)->flags & SCHEME_PRIM_IS_CLOSURE)
+        return 0;
       return 1;
     }
   }
@@ -581,6 +576,17 @@ int scheme_is_noncm(Scheme_Object *a, mz_jit_state *jitter, int depth, int stack
     }
   }
 
+  if (SAME_TYPE(SCHEME_TYPE(a), scheme_static_toplevel_type)
+      && ((SCHEME_TOPLEVEL_FLAGS(a) & SCHEME_TOPLEVEL_FLAGS_MASK) >= SCHEME_TOPLEVEL_FIXED)) {
+    Scheme_Object *p;
+    p = SCHEME_STATIC_TOPLEVEL_PREFIX(a)->a[SCHEME_TOPLEVEL_POS(a)];
+    p = ((Scheme_Bucket *)p)->val;
+    if (p && SAME_TYPE(SCHEME_TYPE(p), scheme_native_closure_type)) {
+      if (scheme_native_closure_preserves_marks(p))
+        return 1;
+    }
+  }
+
   if (SAME_TYPE(SCHEME_TYPE(a), scheme_local_type)) {
     int pos = SCHEME_LOCAL_POS(a) - stack_start;
     if (pos >= 0) {
@@ -589,6 +595,11 @@ int scheme_is_noncm(Scheme_Object *a, mz_jit_state *jitter, int depth, int stack
         return (flags & NATIVE_PRESERVES_MARKS);
       }
     }
+  }
+
+  if (SAME_TYPE(SCHEME_TYPE(a), scheme_native_closure_type)) {
+    if (scheme_native_closure_preserves_marks(a))
+      return 1;
   }
 
   if (depth && SAME_TYPE(SCHEME_TYPE(a), scheme_closure_type)) {
@@ -662,7 +673,7 @@ int scheme_is_simple(Scheme_Object *obj, int depth, int just_markless, mz_jit_st
     {
       Scheme_Object *rator;
       rator = scheme_specialize_to_constant(((Scheme_App_Rec *)obj)->args[0], jitter,
-                                            stack_start +  ((Scheme_App_Rec *)obj)->num_args);
+                                            stack_start + ((Scheme_App_Rec *)obj)->num_args);
       if (scheme_inlined_nary_prim(rator, obj, jitter)
           && !SAME_OBJ(rator, scheme_values_proc))
         return 1;
@@ -697,7 +708,7 @@ int scheme_is_simple(Scheme_Object *obj, int depth, int just_markless, mz_jit_st
     break;
     
   case scheme_toplevel_type:
-  case scheme_quote_syntax_type:
+  case scheme_static_toplevel_type:
   case scheme_local_type:
   case scheme_local_unbox_type:
   case scheme_lambda_type:
@@ -758,6 +769,12 @@ int scheme_is_non_gc(Scheme_Object *obj, int depth)
     break;
 
   case scheme_toplevel_type:
+    if ((SCHEME_TOPLEVEL_FLAGS(obj) & SCHEME_TOPLEVEL_FLAGS_MASK) >= SCHEME_TOPLEVEL_CONST)
+      return 1;
+    break;
+  case scheme_static_toplevel_type:
+    if ((SCHEME_TOPLEVEL_FLAGS(obj) & SCHEME_TOPLEVEL_FLAGS_MASK) >= SCHEME_TOPLEVEL_FIXED)
+      return 1;
     break;
   case scheme_lambda_type:
     break;
@@ -768,7 +785,6 @@ int scheme_is_non_gc(Scheme_Object *obj, int depth)
     return 1;
     break;
     
-  case scheme_quote_syntax_type:
   case scheme_local_unbox_type:
     return 1;
     break;
@@ -804,6 +820,15 @@ static int is_a_procedure(Scheme_Object *v, mz_jit_state *jitter)
           return SAME_TYPE(SCHEME_TYPE(p), scheme_native_closure_type);
         }
       }
+    }
+  } else if (t == scheme_static_toplevel_type) {
+    if ((SCHEME_TOPLEVEL_FLAGS(v) & SCHEME_TOPLEVEL_FLAGS_MASK) >= SCHEME_TOPLEVEL_FIXED) {
+      Scheme_Object *p;
+
+      p = SCHEME_STATIC_TOPLEVEL_PREFIX(v)->a[SCHEME_TOPLEVEL_POS(v)];
+      p = ((Scheme_Bucket *)p)->val;
+      if (p)
+        return SAME_TYPE(SCHEME_TYPE(p), scheme_native_closure_type);
     }
   }
 
@@ -847,7 +872,8 @@ int scheme_can_delay_and_avoids_r1(Scheme_Object *obj)
 {
   Scheme_Type t = SCHEME_TYPE(obj);
 
-  if (SAME_TYPE(t, scheme_toplevel_type)) {
+  if (SAME_TYPE(t, scheme_toplevel_type)
+      || SAME_TYPE(t, scheme_static_toplevel_type)) {
     return (((SCHEME_TOPLEVEL_FLAGS(obj) & SCHEME_TOPLEVEL_FLAGS_MASK) >= SCHEME_TOPLEVEL_FIXED)
             ? 1
             : 0);
@@ -859,7 +885,8 @@ int scheme_is_constant_and_avoids_r1(Scheme_Object *obj)
 {
   Scheme_Type t = SCHEME_TYPE(obj);
 
-  if (SAME_TYPE(t, scheme_toplevel_type)) {
+  if (SAME_TYPE(t, scheme_toplevel_type)
+      || SAME_TYPE(t, scheme_static_toplevel_type)) {
     return (((SCHEME_TOPLEVEL_FLAGS(obj) & SCHEME_TOPLEVEL_FLAGS_MASK) >= SCHEME_TOPLEVEL_FIXED)
             ? 1
             : 0);
@@ -879,7 +906,7 @@ static int expression_avoids_clearing_local(Scheme_Object *wrt, int pos, int fue
   else if (SAME_TYPE(t, scheme_local_type))
     return ((SCHEME_LOCAL_POS(wrt) != pos)
             || !(SCHEME_GET_LOCAL_FLAGS(wrt) == SCHEME_LOCAL_CLEAR_ON_READ));
-  else if (SAME_TYPE(t, scheme_toplevel_type))
+  else if (SAME_TYPE(t, scheme_toplevel_type) || SAME_TYPE(t, scheme_static_toplevel_type))
     return 1;
   else if (t == scheme_application2_type) {
     Scheme_App2_Rec *app = (Scheme_App2_Rec *)wrt;
@@ -2045,6 +2072,7 @@ int scheme_generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int w
       && !jitter->unbox
       && !IS_SKIP_TYPE(SCHEME_TYPE(obj))
       && !SAME_TYPE(SCHEME_TYPE(obj), scheme_toplevel_type)
+      && !SAME_TYPE(SCHEME_TYPE(obj), scheme_static_toplevel_type)
       && !SAME_TYPE(SCHEME_TYPE(obj), scheme_local_type)
       && !SAME_TYPE(SCHEME_TYPE(obj), scheme_local_unbox_type)
       && (SCHEME_TYPE(obj) < _scheme_values_types_)) {
@@ -2115,6 +2143,43 @@ int scheme_generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int w
         END_JIT_DATA(0);
       }
       if (for_branch) finish_branch(jitter, target, for_branch);
+      return 1;
+    }
+  case scheme_static_toplevel_type:
+    {
+      int can_fail;
+      /* Other parts of the JIT rely on this code not modifying R1 */
+      can_fail = ((SCHEME_TOPLEVEL_FLAGS(obj) & SCHEME_TOPLEVEL_FLAGS_MASK) < SCHEME_TOPLEVEL_READY);
+      if (!can_fail && result_ignored) {
+        /* skip */
+      } else {
+        Scheme_Object *b;
+        START_JIT_DATA();
+        LOG_IT(("static-top-level\n"));
+        if ((SCHEME_TOPLEVEL_FLAGS(obj) & SCHEME_TOPLEVEL_FLAGS_MASK) >= SCHEME_TOPLEVEL_FIXED) {
+          /* load constant */
+          b = SCHEME_STATIC_TOPLEVEL_PREFIX(obj)->a[SCHEME_TOPLEVEL_POS(obj)];
+          b = ((Scheme_Bucket *)b)->val;
+          scheme_mz_load_retained(jitter, target, b);
+        } else {
+          mz_rs_sync_fail_branch();
+          /* Load bucket: */
+          b = SCHEME_STATIC_TOPLEVEL_PREFIX(obj)->a[SCHEME_TOPLEVEL_POS(obj)];
+          scheme_mz_load_retained(jitter, JIT_R2, b);
+          /* Extract bucket value */
+          jit_ldxi_p(target, JIT_R2, &(SCHEME_VAR_BUCKET(0x0)->val));
+          CHECK_LIMIT();
+          if (can_fail) {
+            /* Is it NULL? */
+            scheme_generate_pop_unboxed(jitter);
+            CHECK_LIMIT();
+            (void)jit_beqi_p(sjc.unbound_global_code, target, 0);
+          }
+          if (jitter->unbox) scheme_generate_unboxing(jitter, target);
+          END_JIT_DATA(0);
+        }
+        if (for_branch) finish_branch(jitter, target, for_branch);
+      }
       return 1;
     }
   case scheme_local_type:
@@ -2359,13 +2424,19 @@ int scheme_generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int w
       scheme_generate_non_tail(p, jitter, 0, 1, 0);
       CHECK_LIMIT();
       mz_rs_sync();
-      
-      /* Load prefix: */
-      pos = mz_remap(SCHEME_TOPLEVEL_DEPTH(v));
-      mz_rs_ldxi(JIT_R2, pos);
-      /* Extract bucket from prefix: */
-      pos = SCHEME_TOPLEVEL_POS(v);
-      jit_ldxi_p(JIT_R2, JIT_R2, &(((Scheme_Prefix *)0x0)->a[pos]));
+
+      if (SAME_TYPE(SCHEME_TYPE(v), scheme_toplevel_type)) {
+        /* Load prefix: */
+        pos = mz_remap(SCHEME_TOPLEVEL_DEPTH(v));
+        mz_rs_ldxi(JIT_R2, pos);
+        /* Extract bucket from prefix: */
+        pos = SCHEME_TOPLEVEL_POS(v);
+        jit_ldxi_p(JIT_R2, JIT_R2, &(((Scheme_Prefix *)0x0)->a[pos]));
+      } else {
+        /* Load bucket */
+        v = SCHEME_STATIC_TOPLEVEL_PREFIX(v)->a[SCHEME_TOPLEVEL_POS(v)];
+        scheme_mz_load_retained(jitter, JIT_R2, v);
+      }
       CHECK_LIMIT();
 	
       /* R0 has values, R2 has bucket */
@@ -2570,7 +2641,9 @@ int scheme_generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int w
           (void)jit_calli(code);
           /* non-tail code pops args off runstack for us */
           jitter->need_set_rs = 1;
+          __START_SHORT_JUMPS__(1);
           mz_patch_ucbranch(ref5);
+          __END_SHORT_JUMPS__(1);
           if (target != JIT_R0)
             jit_movr_p(target, JIT_R0);
         }
@@ -2666,7 +2739,7 @@ int scheme_generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int w
         finish_branch_with_true(jitter, for_branch);
       else {
         Scheme_Object *dummy;
-        int pos, is_const;
+        int pos, is_const, prefix_ready = 0;
 
         mz_rs_sync();
 
@@ -2674,19 +2747,31 @@ int scheme_generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int w
 
         dummy = SCHEME_PTR2_VAL(obj);
         obj = SCHEME_PTR1_VAL(obj);
-      
-        /* Load global array: */
-        pos = mz_remap(SCHEME_TOPLEVEL_DEPTH(obj));
-        jit_ldxi_p(JIT_R2, JIT_RUNSTACK, WORDS_TO_BYTES(pos));
-        /* Load bucket: */
-        pos = SCHEME_TOPLEVEL_POS(obj);
-        jit_ldxi_p(JIT_R1, JIT_R2, &(((Scheme_Prefix *)0x0)->a[pos]));
-        CHECK_LIMIT();
+
+        if (!SCHEME_SYMBOLP(obj) && !SCHEME_FALSEP(obj) && !SAME_OBJ(obj, scheme_true)) {
+          /* Load global array: */
+          pos = mz_remap(SCHEME_TOPLEVEL_DEPTH(obj));
+          jit_ldxi_p(JIT_R2, JIT_RUNSTACK, WORDS_TO_BYTES(pos));
+          /* Load bucket: */
+          pos = SCHEME_TOPLEVEL_POS(obj);
+          jit_ldxi_p(JIT_R1, JIT_R2, &(((Scheme_Prefix *)0x0)->a[pos]));
+          CHECK_LIMIT();
+          prefix_ready = 1;
+        } else if (SCHEME_FALSEP(obj)) {
+          (void)jit_movi_p(JIT_R1, scheme_false);
+        } else {
+          scheme_mz_load_retained(jitter, JIT_R1, obj);
+        }
 
         /* Load dummy bucket: */
         if (SCHEME_FALSEP(dummy)) {
           (void)jit_movi_p(JIT_R2, scheme_false);
         } else {
+          if (!prefix_ready) {
+            /* Load global array: */
+            pos = mz_remap(SCHEME_TOPLEVEL_DEPTH(dummy));
+            jit_ldxi_p(JIT_R2, JIT_RUNSTACK, WORDS_TO_BYTES(pos));
+          }
           pos = SCHEME_TOPLEVEL_POS(dummy);
           jit_ldxi_p(JIT_R2, JIT_R2, &(((Scheme_Prefix *)0x0)->a[pos]));
           CHECK_LIMIT();
@@ -2712,12 +2797,7 @@ int scheme_generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int w
       return 1;
     }
     break;
-  case scheme_splice_sequence_type:
   case scheme_define_values_type:
-  case scheme_define_syntaxes_type:
-  case scheme_begin_for_syntax_type:
-  case scheme_require_form_type:
-  case scheme_module_type:
   case scheme_inline_variant_type:
     {
       scheme_signal_error("internal error: cannot JIT a top-level form");
@@ -2990,18 +3070,20 @@ int scheme_generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int w
           mz_patch_branch(ref2);
           __END_SHORT_JUMPS__(1);
           (void)jit_movi_p(JIT_R0, NULL);
-          jit_stxi_p(&((Scheme_Thread *)0x0)->ku.multiple.array, JIT_V1, JIT_R0);
-          for (i = 0; i < lv->count; i++) {
-            jit_ldxi_p(JIT_R1, JIT_R2, WORDS_TO_BYTES(i));
-            if (ab) {
-              pos = mz_remap(lv->position + i);
-              jit_ldxi_p(JIT_R0, JIT_RUNSTACK, WORDS_TO_BYTES(pos));
-              jit_str_p(JIT_R0, JIT_R1);
-            } else {
-              pos = mz_remap(lv->position + i);
-              jit_stxi_p(WORDS_TO_BYTES(pos), JIT_RUNSTACK, JIT_R1);
+          if (lv->count) {
+            jit_stxi_p(&((Scheme_Thread *)0x0)->ku.multiple.array, JIT_V1, JIT_R0);
+            for (i = 0; i < lv->count; i++) {
+              jit_ldxi_p(JIT_R1, JIT_R2, WORDS_TO_BYTES(i));
+              if (ab) {
+                pos = mz_remap(lv->position + i);
+                jit_ldxi_p(JIT_R0, JIT_RUNSTACK, WORDS_TO_BYTES(pos));
+                jit_str_p(JIT_R0, JIT_R1);
+              } else {
+                pos = mz_remap(lv->position + i);
+                jit_stxi_p(WORDS_TO_BYTES(pos), JIT_RUNSTACK, JIT_R1);
+              }
+              CHECK_LIMIT();
             }
-            CHECK_LIMIT();
           }
         }
       }
@@ -3292,44 +3374,6 @@ int scheme_generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int w
 	
       return scheme_generate(wcm->body, jitter, is_tail, wcm_may_replace, 
                              multi_ok, orig_target, for_branch, for_values);
-    }
-  case scheme_quote_syntax_type:
-    {
-      Scheme_Quote_Syntax *qs = (Scheme_Quote_Syntax *)obj;
-      int i, c, p;
-      START_JIT_DATA();
-      
-      LOG_IT(("quote-syntax\n"));
-
-      if (for_branch)
-        finish_branch_with_true(jitter, for_branch);
-      else {
-        i = qs->position;
-        c = mz_remap(qs->depth);
-        p = qs->midpoint;
-      
-        mz_rs_sync();
-
-        if (SCHEME_NATIVE_LAMBDA_FLAGS(jitter->nc->code) & NATIVE_SPECIALIZED) {
-          Scheme_Object *stx;
-          stx = extract_syntax(qs, jitter->nc);
-          scheme_mz_load_retained(jitter, target, stx);
-          CHECK_LIMIT();
-        } else {
-          jit_movi_i(JIT_R0, WORDS_TO_BYTES(c));
-          jit_movi_i(JIT_R1, (int)(intptr_t)&(((Scheme_Prefix *)0x0)->a[i + p + 1]));
-          jit_movi_i(JIT_R2, (int)(intptr_t)&(((Scheme_Prefix *)0x0)->a[p]));
-          (void)jit_calli(sjc.quote_syntax_code);
-          CHECK_LIMIT();
-
-          if (target != JIT_R0)
-            jit_movr_p(target, JIT_R0);
-        }
-      }
-      
-      END_JIT_DATA(10);
-
-      return 1;
     }
   default:
     /* Other parts of the JIT rely on this code modifying the target register, only */
@@ -3854,7 +3898,8 @@ static int do_generate_closure(mz_jit_state *jitter, void *_data)
       }
   
     /* A define-values context? */
-    if (lam->context && SAME_TYPE(SCHEME_TYPE(lam->context), scheme_toplevel_type)) {
+    if (lam->context && (SAME_TYPE(SCHEME_TYPE(lam->context), scheme_toplevel_type)
+                         || SAME_TYPE(SCHEME_TYPE(lam->context), scheme_static_toplevel_type))) {
       jitter->self_toplevel_pos = SCHEME_TOPLEVEL_POS(lam->context);
       jitter->self_closure_size = lam->closure_size;
     }

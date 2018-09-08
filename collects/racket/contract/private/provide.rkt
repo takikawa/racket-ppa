@@ -259,7 +259,8 @@
                                                                     id-rename
                                                                     (stx->srcloc-expr srcloc-id)
                                                                     'provide/contract
-                                                                    pos-module-source)
+                                                                    pos-module-source
+                                                                    #f)
                              #,@(if provide?
                                     (list #`(provide (rename-out [#,id-rename external-name])))
                                     null)))
@@ -279,7 +280,8 @@
                                                         id-rename
                                                         srcloc-expr
                                                         contract-error-name
-                                                        pos-module-source)
+                                                        pos-module-source
+                                                        context-limit)
   (define-values (arrow? the-valid-app-shapes)
     (syntax-case ctrct (-> ->* ->i)
       [(-> . _) 
@@ -306,7 +308,8 @@
                            id
                            '#,name-for-blame
                            #,pos-module-source
-                           #,srcloc-expr))
+                           #,srcloc-expr
+                           #,context-limit))
          #,@(if arrow?
                 (list #`(define extra-neg-party-argument-fn 
                           (wrapped-extra-arg-arrow-extra-neg-party-argument
@@ -351,15 +354,17 @@
             (raise-syntax-error #f "expected an identifier" stx #'new-id))
           (unless (identifier? #'orig-id)
             (raise-syntax-error #f "expected an identifier" stx #'orig-id))
-          (define-values (pos-blame-party-expr srcloc-expr name-for-blame)
+          (define-values (pos-blame-party-expr srcloc-expr name-for-blame context-limit)
             (let loop ([kwd-args (syntax->list #'(kwd-args ...))]
                        [pos-blame-party-expr #'(quote-module-path)]
                        [srcloc-expr #f]
-                       [name-for-blame #f])
+                       [name-for-blame #f]
+                       [context-limit #f])
               (cond
                 [(null? kwd-args) (values pos-blame-party-expr
                                           (or srcloc-expr (stx->srcloc-expr stx))
-                                          (or name-for-blame #'new-id))]
+                                          (or name-for-blame #'new-id)
+                                          context-limit)]
                 [else
                  (define kwd (car kwd-args))
                  (cond 
@@ -370,7 +375,8 @@
                     (loop (cddr kwd-args)
                           (cadr kwd-args)
                           srcloc-expr
-                          name-for-blame)]
+                          name-for-blame
+                          context-limit)]
                    [(equal? (syntax-e kwd) '#:srcloc)
                     (when (null? (cdr kwd-args))
                       (raise-syntax-error #f "expected a keyword argument to follow #:srcloc"
@@ -378,7 +384,8 @@
                     (loop (cddr kwd-args)
                           pos-blame-party-expr
                           (cadr kwd-args)
-                          name-for-blame)]
+                          name-for-blame
+                          context-limit)]
                    [(equal? (syntax-e kwd) '#:name-for-blame)
                     (when (null? (cdr kwd-args))
                       (raise-syntax-error #f "expected a keyword argument to follow #:name-for-blame"
@@ -391,11 +398,23 @@
                     (loop (cddr kwd-args)
                           pos-blame-party-expr
                           srcloc-expr
-                          name-for-blame)]
+                          name-for-blame
+                          context-limit)]
+                   [(equal? (syntax-e kwd) '#:context-limit)
+                    (when (null? (cdr kwd-args))
+                      (raise-syntax-error #f "expected an expression to follow #:context-limit"
+                                          stx))
+                    (loop (cddr kwd-args)
+                          pos-blame-party-expr
+                          srcloc-expr
+                          name-for-blame
+                          (cadr kwd-args))]
                    [else
                     (raise-syntax-error
                      #f
-                     "expected one of the keywords #:pos-source, #:srcloc, or #:name-for-blame"
+                     (string-append
+                      "expected one of the keywords"
+                      " #:pos-source, #:srcloc, #:name-for-blame, or #:context-limit")
                      stx
                      (car kwd-args))])])))
           (internal-function-to-be-figured-out #'ctrct
@@ -405,10 +424,11 @@
                                                #'new-id
                                                srcloc-expr
                                                'define-module-boundary-contract
-                                               pos-blame-party-expr))])]))
+                                               pos-blame-party-expr
+                                               context-limit))])]))
 
 ;; ... -> (values (or/c #f (-> neg-party val)) blame)
-(define (do-partial-app ctc val name pos-module-source source)
+(define (do-partial-app ctc val name pos-module-source source context-limit)
   (define p (parameterize ([warn-about-val-first? #f])
               ;; when we're building the val-first projection
               ;; here we might be needing the plus1 arity
@@ -419,7 +439,8 @@
                            name
                            (λ () (contract-name ctc))
                            pos-module-source
-                           #f #t))
+                           #f #t
+                           #:context-limit context-limit))
   (with-contract-continuation-mark
    (cons blme 'no-negative-party) ; we don't know the negative party yet
    ;; computing neg-accepter may involve some front-loaded checking. instrument
@@ -1165,7 +1186,8 @@
                [field-name (in-list field-names)])
       ((get/build-late-neg-projection ctc)
        (blame-add-context blame
-                          (format "the ~a field of" field-name)))))
+                          (format "the ~a field of" field-name)
+                          #:swap? #t))))
   (chaperone-struct-type
    struct-type
    (λ (a b c d e f g h) (values a b c d e f g h))

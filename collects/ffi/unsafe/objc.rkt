@@ -219,9 +219,7 @@
                       (cast (objc_lookUpClass name) _Class _Protocol))))
 
 (define-objc sel_registerName (_fun _string -> _SEL)
-  #:fail (lambda () (lambda (name)
-                      ;; Fake registration using interned symbols
-                      (cast (string->symbol name) _racket _gcpointer))))
+  #:fail (lambda () (lambda (name) #f)))
 
 (define-objc objc_allocateClassPair (_fun _Class _string _long -> _Class)
   #:fail (lambda () #f))
@@ -553,7 +551,10 @@
 
 (define-for-syntax liftable-type?
   (let ([prims 
-         (syntax->list #'(_id _Class _SEL _void _int _long _float _double _double* _BOOL))])
+         (syntax->list #'(_id _Class _SEL
+                              _void _short _ushort _int _uint _long _ulong _intptr _uintptr
+                              _float _double _double*
+                              _BOOL))])
     (lambda (t)
       (and (identifier? t)
            (ormap (lambda (p) (free-identifier=? t p))
@@ -561,11 +562,36 @@
 
 (define-syntax (type-vector stx)
   (let ([types (cdr (syntax->list stx))])
-    ((if (andmap liftable-type? (cdr (syntax->list stx)))
-         (lambda (e)
-           (syntax-local-lift-expression #`(intern-type-vector #,e)))
-         values)
-     (quasisyntax/loc stx (vector . #,types)))))
+    (let ([vec-exp (quasisyntax/loc stx (vector . #,types))]
+          [type-exprs (cdr (syntax->list stx))])
+      (cond
+        [(andmap liftable-type? type-exprs)
+         ;; Recognized types => simple lift
+         (syntax-local-lift-expression #`(intern-type-vector #,vec-exp))]
+        [(andmap (lambda (type-expr)
+                   (and (identifier? type-expr)
+                        (pair? (identifier-binding type-expr))))
+                 type-exprs)
+         ;; Types bound as imports => lift with cache and `#%variable-reference-constant?` check
+         (let* ([expanded-type-exprs
+                 (map (lambda (type-expr)
+                        (local-expand type-expr 'expression #f))
+                      type-exprs)]
+                [expanded-vec-exp #`(vector . #,expanded-type-exprs)])
+           (cond
+             [(andmap identifier? expanded-type-exprs)
+              (let ([saved-vector-id (syntax-local-lift-expression #'(box #f))])
+                (quasisyntax/loc stx
+                  (or (unbox #,saved-vector-id)
+                      (maybe-cache-type-vector-in-box
+                       #,expanded-vec-exp
+                       #,saved-vector-id
+                       (vector #,@(for/list ([expanded-type-expr (in-list expanded-type-exprs)])
+                                    #`(variable-reference-constant? (#%variable-reference #,expanded-type-expr))))))))]
+             [else expanded-vec-exp]))]
+        [else
+         ;; General case: construct type vector every time
+         vec-exp]))))
 
 (define type-vectors (make-hash))
 (define (intern-type-vector v)
@@ -573,6 +599,12 @@
       (begin
         (hash-set! type-vectors v v)
         v)))
+
+(define (maybe-cache-type-vector-in-box vec saved-vec-box const?s)
+  (when (for/and ([c? (in-vector const?s)])
+          c?)
+    (set-box! saved-vec-box vec))
+  vec)
 
 ;; ----------------------------------------
 
@@ -697,11 +729,10 @@
       (objc_addClass (cast id _Class _objc_class-pointer))))
 
 (define (add-protocol id proto)
-  (unless proto
-    (error 'add-protocol "NULL protocol"))
-  (if class_addProtocol
-      (class_addProtocol id proto)
-      (add-protocol-the-hard-way id proto)))
+  (when proto
+    (if class_addProtocol
+        (class_addProtocol id proto)
+        (add-protocol-the-hard-way id proto))))
 
 (define (object-get-class id)
   (if object_getClass

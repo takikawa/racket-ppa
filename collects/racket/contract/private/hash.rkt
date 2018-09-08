@@ -81,9 +81,6 @@
 ;; ... --> boolean
 ;;  returns #t when it called raise-blame-error, #f otherwise
 (define (check-hash/c dom-ctc immutable flat? val blame neg-party) 
-  ;(define dom-ctc (base-hash/c-dom ctc))
-  ;(define immutable (base-hash/c-immutable ctc))
-  ;(define flat? (flat-hash/c? ctc))
   (cond
     [(hash? val)
      (cond
@@ -172,11 +169,23 @@
              (contract-struct-stronger? this-rng that-rng))]
        [(or (equal? that-immutable 'dont-care)
             (equal? this-immutable that-immutable))
-        (and (contract-struct-stronger? this-dom that-dom)
-             (contract-struct-stronger? that-dom this-dom)
-             (contract-struct-stronger? this-rng that-rng)
-             (contract-struct-stronger? that-rng this-rng))]
+        (and (contract-struct-equivalent? this-dom that-dom)
+             (contract-struct-equivalent? this-rng that-rng))]
        [else #f])]
+    [else #f]))
+
+(define (hash/c-equivalent this that)
+  (cond
+    [(base-hash/c? that)
+     (define this-dom (base-hash/c-dom this))
+     (define this-rng (base-hash/c-rng this))
+     (define this-immutable (base-hash/c-immutable this))
+     (define that-dom (base-hash/c-dom that))
+     (define that-rng (base-hash/c-rng that))
+     (define that-immutable (base-hash/c-immutable that))
+     (and (equal? this-immutable that-immutable)
+          (contract-struct-equivalent? this-dom that-dom)
+          (contract-struct-equivalent? this-rng that-rng))]
     [else #f]))
 
 (define-struct (flat-hash/c base-hash/c) ()
@@ -187,6 +196,7 @@
    #:name hash/c-name
    #:first-order hash/c-first-order
    #:stronger hash/c-stronger
+   #:equivalent hash/c-equivalent
    #:late-neg-projection
    (λ (ctc)
      (define dom-ctc (base-hash/c-dom ctc))
@@ -215,18 +225,46 @@
     (define dom-proc (get/build-late-neg-projection dom-ctc))
     (define rng-proc (get/build-late-neg-projection (base-hash/c-rng ctc)))
     (λ (blame)
-      (define pos-dom-proj (dom-proc (blame-add-key-context blame #f)))
-      (define neg-dom-proj (dom-proc (blame-add-key-context blame #t)))
-      (define pos-rng-proj (rng-proc (blame-add-value-context blame #f)))
-      (define neg-rng-proj (rng-proc (blame-add-value-context blame #t)))
-      (λ (val neg-party)
-        (cond
-          [(check-hash/c dom-ctc immutable flat? val blame neg-party)
-           val]
-          [else
-           (handle-the-hash val neg-party
-                            pos-dom-proj neg-dom-proj (λ (v) pos-rng-proj) (λ (v) neg-rng-proj)
-                            chaperone-or-impersonate-hash ctc blame)])))))
+      (define-values (dom-filled? maybe-pos-dom-proj maybe-neg-dom-proj)
+        (contract-pos/neg-doubling (dom-proc (blame-add-key-context blame #f))
+                                   (dom-proc (blame-add-key-context blame #t))))
+      (define-values (rng-filled? maybe-pos-rng-proj maybe-neg-rng-proj)
+        (contract-pos/neg-doubling (rng-proc (blame-add-value-context blame #f))
+                                   (rng-proc (blame-add-value-context blame #t))))
+      (cond
+        [(and dom-filled? rng-filled?)
+         (λ (val neg-party)
+           (cond
+             [(check-hash/c dom-ctc immutable flat? val blame neg-party)
+              val]
+             [else
+              (handle-the-hash val neg-party
+                               maybe-pos-dom-proj maybe-neg-dom-proj
+                               (λ (v) maybe-pos-rng-proj) (λ (v) maybe-neg-rng-proj)
+                               chaperone-or-impersonate-hash ctc blame)]))]
+        [else
+         (define tc (make-thread-cell #f))
+         (λ (val neg-party)
+           (define-values (pos-dom-proj neg-dom-proj pos-rng-proj neg-rng-proj)
+             (cond
+               [(thread-cell-ref tc)
+                =>
+                (λ (v) (values (vector-ref v 1) (vector-ref v 2) (vector-ref v 3) (vector-ref v 4)))]
+               [else
+                (define pos-dom-proj (maybe-pos-dom-proj))
+                (define neg-dom-proj (maybe-neg-dom-proj))
+                (define pos-rng-proj (maybe-pos-rng-proj))
+                (define neg-rng-proj (maybe-neg-rng-proj))
+                (thread-cell-set! tc (vector pos-dom-proj neg-dom-proj pos-rng-proj neg-rng-proj))
+                (values pos-dom-proj neg-dom-proj pos-rng-proj neg-rng-proj)]))
+           (cond
+             [(check-hash/c dom-ctc immutable flat? val blame neg-party)
+              val]
+             [else
+              (handle-the-hash val neg-party
+                               pos-dom-proj neg-dom-proj
+                               (λ (v) pos-rng-proj) (λ (v) neg-rng-proj)
+                               chaperone-or-impersonate-hash ctc blame)]))]))))
 
 (define (blame-add-key-context blame swap?) (blame-add-context blame "the keys of" #:swap? swap?))
 (define (blame-add-value-context blame swap?) (blame-add-context blame "the values of" #:swap? swap?))
@@ -274,6 +312,7 @@
    #:name hash/c-name
    #:first-order hash/c-first-order
    #:stronger hash/c-stronger
+   #:equivalent hash/c-equivalent
    #:late-neg-projection (ho-projection chaperone-hash)))
 
 (define-struct (impersonator-hash/c base-hash/c) ()
@@ -284,6 +323,7 @@
    #:name hash/c-name
    #:first-order hash/c-first-order
    #:stronger hash/c-stronger
+   #:equivalent hash/c-equivalent
    #:late-neg-projection (ho-projection impersonate-hash)))
 
 
@@ -312,6 +352,7 @@
                 (contract-first-order-passes? (rng-f k) v))))))
 
 (define (hash/dc-stronger this that) #f)
+(define (hash/dc-equivalent this that) #f)
 
 (define ((hash/dc-late-neg-projection chaperone-or-impersonate-hash) ctc)
   (define dom-ctc (base-hash/dc-dom ctc))
@@ -346,6 +387,7 @@
   (build-flat-contract-property
    #:name hash/dc-name
    #:first-order hash/dc-first-order
+   #:equivalent hash/dc-equivalent
    #:stronger hash/dc-stronger))
 
 (struct chaperone-hash/dc base-hash/dc ()
@@ -355,6 +397,7 @@
    #:name hash/dc-name
    #:first-order hash/dc-first-order
    #:stronger hash/dc-stronger
+   #:equivalent hash/dc-equivalent
    #:late-neg-projection (hash/dc-late-neg-projection chaperone-hash)))
 (struct impersonator-hash/dc base-hash/dc ()
   #:property prop:custom-write custom-write-property-proc
@@ -363,6 +406,7 @@
    #:name hash/dc-name
    #:first-order hash/dc-first-order
    #:stronger hash/dc-stronger
+   #:equivalent hash/dc-equivalent
    #:late-neg-projection (hash/dc-late-neg-projection impersonate-hash)))
 
 (define (build-hash/dc dom dep-rng here name-info immutable kind)

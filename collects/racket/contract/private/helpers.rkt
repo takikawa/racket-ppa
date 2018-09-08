@@ -13,7 +13,10 @@
 
 (require setup/main-collects
          racket/struct-info
-         (for-template racket/base))
+         (only-in racket/private/list-predicates empty? cons?)
+         (for-template racket/base
+                       (only-in racket/private/list-predicates
+                                empty? cons?)))
 
 (define (update-loc stx loc)
   (datum->syntax stx (syntax-e stx) loc))
@@ -188,6 +191,8 @@
        (sort known-good-syms
              string<=?
              #:key symbol->string)))
+
+-- also add empty? and cons? to the above
 
 |#
 
@@ -365,7 +370,10 @@
          (void? . #t)
          (weak-box? . #t)
          (will-executor? . #t)
-         (zero? . #t)))
+         (zero? . #t)
+         ;; from racket/private/list-predicates
+         (empty? . #t)
+         (cons? . #t)))
 
 (define (known-good-contract? id)
   (define r-id (syntax-e id))
