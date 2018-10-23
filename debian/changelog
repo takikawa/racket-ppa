@@ -4,11 +4,24 @@ racket (7.0+ppa1-1~bionic1) bionic; urgency=medium
 
  -- Asumu Takikawa <asumu@racket-lang.org>  Fri, 27 Jul 2018 15:15:00 -0800
 
-racket (6.90.0.901+ppa1-1~bionic1) bionic; urgency=medium
+racket (7.0+dfsg2-1) unstable; urgency=medium
 
-  * PPA release (beta)
+  * Major new upstream release
+  * Add Recommends: sensible-utils to racket-common (for
+    sensible-browser).
+  * Drop Build-depends on autotools-dev
+  * Drop patches from https://github.com/racket/drracket/issues/191, now
+    upstream.
+  * Update Vcs-* to point to salsa.debian.org
 
- -- Asumu Takikawa <asumu@racket-lang.org>  Thu, 28 Jun 2018 13:30:00 -0800
+ -- David Bremner <bremner@debian.org>  Sat, 08 Sep 2018 20:07:32 -0300
+
+racket (6.12+dfsg1-3) unstable; urgency=medium
+
+  * Add two patches from upstream to restore drracket -singleInstance.
+    https://github.com/racket/drracket/issues/191
+
+ -- David Bremner <bremner@debian.org>  Sun, 20 May 2018 17:04:14 -0700
 
 racket (6.12+dfsg1-2) unstable; urgency=medium
 
