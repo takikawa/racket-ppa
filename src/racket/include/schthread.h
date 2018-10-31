@@ -250,6 +250,7 @@ typedef struct Thread_Local_Variables {
   intptr_t scheme_current_cont_mark_pos_;
   struct Scheme_Custodian *main_custodian_;
   struct Scheme_Hash_Table *limited_custodians_;
+  struct Scheme_Object *post_custodian_shutdowns_;
   struct Scheme_Plumber *initial_plumber_;
   struct Scheme_Config *initial_config_;
   struct Scheme_Thread *swap_target_;
@@ -310,6 +311,8 @@ typedef struct Thread_Local_Variables {
   volatile short delayed_break_ready_;
   struct Scheme_Thread *main_break_target_thread_;
   intptr_t scheme_code_page_total_;
+  intptr_t scheme_code_total_;
+  intptr_t scheme_code_count_;
   intptr_t max_gc_pre_used_bytes_;
   int num_major_garbage_collections_;
   int num_minor_garbage_collections_;
@@ -357,6 +360,7 @@ typedef struct Thread_Local_Variables {
   struct Scheme_Object *is_syntax_proc_;
   struct Scheme_Object *expander_syntax_to_datum_proc_;
   struct Scheme_Hash_Table *local_primitive_tables_;
+  struct Scheme_Object *current_linklet_native_lambdas_;
 } Thread_Local_Variables;
 
 #if defined(IMPLEMENT_THREAD_LOCAL_VIA_PTHREADS)
@@ -628,6 +632,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define main_custodian XOA (scheme_get_thread_local_variables()->main_custodian_)
 #define last_custodian XOA (scheme_get_thread_local_variables()->last_custodian_)
 #define limited_custodians XOA (scheme_get_thread_local_variables()->limited_custodians_)
+#define post_custodian_shutdowns XOA (scheme_get_thread_local_variables()->post_custodian_shutdowns_)
 #define initial_plumber XOA (scheme_get_thread_local_variables()->initial_plumber_)
 #define initial_config XOA (scheme_get_thread_local_variables()->initial_config_)
 #define swap_target XOA (scheme_get_thread_local_variables()->swap_target_)
@@ -688,6 +693,8 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define delayed_break_ready XOA (scheme_get_thread_local_variables()->delayed_break_ready_)
 #define main_break_target_thread XOA (scheme_get_thread_local_variables()->main_break_target_thread_)
 #define scheme_code_page_total XOA (scheme_get_thread_local_variables()->scheme_code_page_total_)
+#define scheme_code_total XOA (scheme_get_thread_local_variables()->scheme_code_total_)
+#define scheme_code_count XOA (scheme_get_thread_local_variables()->scheme_code_count_)
 #define max_gc_pre_used_bytes XOA (scheme_get_thread_local_variables()->max_gc_pre_used_bytes_)
 #define num_major_garbage_collections XOA (scheme_get_thread_local_variables()->num_major_garbage_collections_)
 #define num_minor_garbage_collections XOA (scheme_get_thread_local_variables()->num_minor_garbage_collections_)
@@ -735,6 +742,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define is_syntax_proc XOA (scheme_get_thread_local_variables()->is_syntax_proc_)
 #define expander_syntax_to_datum_proc XOA (scheme_get_thread_local_variables()->expander_syntax_to_datum_proc_)
 #define local_primitive_tables XOA (scheme_get_thread_local_variables()->local_primitive_tables_)
+#define current_linklet_native_lambdas XOA (scheme_get_thread_local_variables()->current_linklet_native_lambdas_)
 
 /* **************************************** */
 

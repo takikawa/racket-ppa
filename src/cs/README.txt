@@ -71,20 +71,28 @@ Racket on Chez Scheme currently supports two modes:
     Select this mode by seting the `PLT_CS_MACH` environment variable,
     but it's currently the default.
 
+    Set `PLT_CS_COMPILE_LIMIT` to set the maximum size of forms to
+    compile before falling back to interpreted "bytecode". The default
+    is 10000.
+
  * JIT mode --- The compiled form of a module is an S-expression where
     individual `lambda`s are compiled on demand. Compiled ".zo" files
     in this format are written to a "cs" subdirectory of "compiled".
 
     Select this mode by seting the `PLT_CS_JIT` environment variable.
 
+    S-expressions fragments are hashed at compilation time, so that
+    the hash for each fragment is stored in the ".zo" file. At JIT
+    time, the hash is used to consult and/or update a cache
+    (implemented as an SQLite database) of machine-code forms. Set the
+    `PLT_JIT_CACHE` environment variable to change the cache file, or
+    set the environment variable to empty to disable the cache.
+
 Set the `PLT_ZO_PATH` environment variable to override the path used
 for ".zo" files. For example, you may want to preserve a normal build
 while also building in machine-code mode with `PLT_CS_DEBUG` set, in
 which case setting `PLT_ZO_PATH` to something like "a6osx-debug" could
 be a good idea.
-
-In machine-code code, set `PLT_CS_COMPILE_LIMIT` to set the maximum
-size of forms to compile. The default is 10000.
 
 
 Running
@@ -145,6 +153,8 @@ Files in this directory:
  rumble/*.ss - Parts of "rumble.sls" (via `include`) to implement data
          structures, immutable hash tables, structs, delimited
          continuations, engines, impersonators, etc.
+
+ linklet/*.ss - Parts of "linklet.sls" (via `include`).
 
  compiled/*.rktl (generated) - A Racket library (e.g., to implement
          regexps) that has been fully macro expanded and flattened
@@ -297,6 +307,66 @@ FFI Differences
    not actually an array of pointers.
 
 
+Threads, Threads, Atomicity, Atomicity, and Atomicity
+-----------------------------------------------------
+
+Racket's thread layer does not use Chez Scheme threads. Chez Scheme
+threads correspond to OS threads. Racket threads are implemented in
+terms of engines at the Rumble layer. At the same time, futures and
+places use Chez Scheme threads, and so parts of Rumble are meant to be
+thread-safe with respect to Chez Scheme and OS threads. The FFI also
+exposes elements of Chez Scheme / OS threads.
+
+As a result of these layers, there are multiple ways to implement
+atomic regions:
+
+ * For critical sections with respect to Chez Scheme / OS threads, use
+   a mutex.
+
+   For example, the implementation of `eq?` and `eqv?`-based hash
+   tables uses mutex to guard hash tables, so they can be accessed
+   concurrently from futures. In contrast, `equal?`-based hash table
+   operations are not atomic from the Racket perspective, so they
+   can't be locked by a mutex; they use Racket-thread locks, instead.
+   The "rumble/lock.ss" layer skips the `eq?`/`eqv?`-table mutex when
+   threads are not enabled at the Chez Scheme level.
+
+ * For critical sections at the Racket level, there are multiple
+   possibilities:
+
+     - The Racket "thread" layer provides `start-atomic` and
+       `end-atomic` to prevent Racket-thread swaps.
+
+       These are the same opertations as provided by
+       `ffi/unsafe/atomic`.
+
+     - Disabling Chez Scheme interrupts will also disable Racket
+       thread swaps, since a thread swap via engines depends on a
+       timer interrupt --- unless something explicitly blocks via the
+       Racket thread scheduler, such as with `(sleep)`.
+
+       Disable interrupts for atomicity only at the Rumble level where
+       no Racket-level callbacks are not involved. Also, beware that
+       disabling interrupts will prevent GC interrupts.
+
+       The Racket "thread" layer provides `start-atomic/no-interrupts`
+       and `end-atomic/no-interrupts` for both declaing atomicity at
+       the Racket level and turning off Chez Scheme interrupts. The
+       combination is useful for implementing functionality that might
+       be called in response to a GC and might also be called by
+       normal (non-atomic) code; the implementation of logging at the
+       "io" layer might be the only use case.
+
+     - The implementation of engines and continuations uses its own
+       flag to protect regions where an engine timeout should not
+       happen, such as when the metacontinuation is being manipulated.
+       That flag is managed by `start-uninterrupted` and
+       `end-uninterrupted` in "rumble/interrupt.ss".
+
+       It may be tempting to use that flag for other purposes, as a
+       cheap way to disable thread swaps. For now, don't do that.
+
+
 Status and Thoughts on Various Racket Subsystems
 ------------------------------------------------
 
@@ -305,10 +375,6 @@ Status and Thoughts on Various Racket Subsystems
    analysis in "../schemify/schemify.rkt", the indirection is not
    needed often in a typical program, and the overhead appears to be
    light when it is needed.
-
- * Racket's delimited continuations, continuation marks, threads, and
-   events are mostly in place (see "rumble/control.ss",
-   "rumble/engine.ss", and the source for "thread.rktl").
 
  * The "rktio" library fills the gap between Racket and Chez Scheme's
    native I/O. The "rktio" library provides a minimal, non-blocking,
@@ -319,6 +385,11 @@ Status and Thoughts on Various Racket Subsystems
 
  * The Racket and Chez Scheme numeric systems likely differ in some
    ways, and I don't know how much work that will be.
+
+ * Places are implemented as Chez Scheme threads. Possibly because a
+   GC is stop-the-world across all threads, however, this
+   implementation currently does not scale as much as the traditional
+   Racket implementation's places.
 
  * For futures, Chez Scheme exposes OS-level threads with limited
    safety guarantees. An implementation of futures can probably take
@@ -333,7 +404,7 @@ Status and Thoughts on Various Racket Subsystems
 
  * For now, `make setup` builds platform-specific ".zo" files in a
    subdirectory of "compiled" named by the Chez Scheme platform name
-   (e.g., "a6osx"). Longer term, although bytecode as it currently
+   (e.g., "ta6osx"). Longer term, although bytecode as it currently
    exists goes away, platform-independent ".zo" files might contain
    fully expanded source (possibly also run through Chez Scheme's
    source-to-source optimizer) with `raco setup` gaining a new step in

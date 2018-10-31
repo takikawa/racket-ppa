@@ -58,6 +58,10 @@ all mutually exclusive.}
 @defidform[natbib]
 @defidform[anonymous]
 @defidform[authorversion]
+@defidform[nonacm]
+@defidform[timestamp]
+@defidform[authordraft]
+@defidform[acmthm]
 @defidform[9pt]
 @defidform[10pt]
 @defidform[11pt]
@@ -74,6 +78,53 @@ number of options may be used:
 }|
 
 If multiple font size options are used, all but the last are ignored.
+
+The @link["https://www.acm.org/binaries/content/assets/publications/consolidated-tex-template/acmart.pdf"
+ ]{ACM documentation} (version 1.54, 2018-07-16, by Boris
+Veytsman) provides these defaults and descriptions:
+
+@tabular[#:style 'boxed
+         #:sep @hspace[1]
+         ;#:column-properties '(left left left)
+         #:row-properties '(bottom-border ())
+         (list
+          (list @bold{name} @bold{default} @bold{description})
+          (list "review" "false"
+                "A review version: lines are numbered and\
+ hyperlinks are colored")
+          (list "screen" "see text"
+                "A screen version: hyperlinks are colored")
+          (list "natbib" "true"
+                "Whether to use the natbib package")
+          (list "anonymous"
+                "false"
+                "Whether to make author(s) anonymous")
+          (list "authorversion"
+                "false"
+                "Whether to generate a special version\
+ for the authors’ personal use or posting")
+          ;; these options are documented in ACM docs but don't
+          ;; appear to exist in the scribble acmart format:
+          (list "nonacm" "false"
+                "Use the class typesetting options for a non-ACM\
+ document, which will not include the conference/journal\
+ header and footers or permission statements")
+          (list "timestamp" "false"
+                "Whether to put a time stamp in the footer\
+ of each page")
+          (list "authordraft" "false"
+                "Whether author’s-draft mode is enabled")
+          (list "acmthm" "true"
+                "Whether to define theorem-like environments"))]
+
+Further details for some of these are provided by the full
+documentation for the acmart LaTeX class.
+
+In order to disable a default-true option (e.g. @racket[natbib]), call
+the option as a function with the value @racket[#false]:
+
+@code|{#lang scribble/acmart @natbib[#f] @sigplan}|
+
 }
 
 @defproc[(abstract [pre-content pre-content?] ...) block?]{
@@ -223,6 +274,11 @@ screen version of the image links to the badge authority.
 
  @history[#:added "1.26"]}
 
+@defproc[(shortauthors [name pre-content?] ...) element?]{
+ Sets the text for the names of the authors in the running header.
+
+ @history[#:added "1.29"]}
+
 @deftogether[(
 @defproc[(terms [content pre-content?] ...) content?]
 @defproc[(keywords [content pre-content?] ...) content?]
@@ -302,7 +358,7 @@ sponsors, @racket[name] is the name of the sponsor.  The
 @codeblock[#:keep-lang-line? #f]|{
   #lang scribble/acmart
   @acks{
-    The author thanks Benjamin Greenman for helpful comments on this
+    The author thanks Ben Greenman for helpful comments on this
     code. Financial support provided by the @grantsponsor["NSF7000"
     "National Scribble Foundation"]{http://racket-lang.org} under
     grant No.: @grantnum["NSF7000"]{867-5309}.}

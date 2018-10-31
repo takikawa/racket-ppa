@@ -455,12 +455,12 @@
 
               (let-syntax ([update! 
                             (syntax-rules ()
-                              [(_ fld base)
+                              [(_ fld delta-base)
                                (cond
-                                [(and (eq? (-on fld) base) (eq? (-off fld) base))
+                                [(and (eq? (-on fld) delta-base) (eq? (-off fld) delta-base))
                                  (-set-on! fld ((-don fld) delta-in))
                                  (-set-off! fld ((-doff fld) delta-in))]
-                                [(and (not (eq? (-on fld) base)) (not (eq? (-off fld) base)))
+                                [(and (not (eq? (-on fld) delta-base)) (not (eq? (-off fld) delta-base)))
                                  (when (and (eq? (-on fld) (-off fld))
                                             (or (not (eq? ((-don fld) delta-in) 'base))
                                                 (not (eq? ((-doff fld) delta-in) 'base))))

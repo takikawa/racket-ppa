@@ -62,7 +62,7 @@
 ;; linklet imports, where #t to means that a value is expected, and #f
 ;; means that a variable (which boxes a value) is expected
 (define (schemify-linklet lk serializable? for-jitify? allow-set!-undefined? unsafe-mode?
-                          reannotate prim-knowns get-import-knowns import-keys)
+                          prim-knowns get-import-knowns import-keys)
   (define (im-int-id id) (unwrap (if (pair? id) (cadr id) id)))
   (define (im-ext-id id) (unwrap (if (pair? id) (car id) id)))
   (define (ex-int-id id) (unwrap (if (pair? id) (car id) id)))
@@ -91,8 +91,10 @@
             (for/list ([im-id (in-list im-ids)])
               (define id (im-int-id im-id))
               (define ext-id (im-ext-id im-id))
-              (define im (import grp (gensym (symbol->string id)) id ext-id))
+              (define int-id (gensym (symbol->string id)))
+              (define im (import grp int-id id ext-id))
               (hash-set! imports id im)
+              (hash-set! imports int-id im) ; useful for optimizer to look up known info late
               im)))
          imports))
      ;; Inlining can add new import groups or add imports to an existing group
@@ -114,7 +116,7 @@
            (values bodys null)))
      ;; Schemify the body, collecting information about defined names:
      (define-values (new-body defn-info mutated)
-       (schemify-body* bodys/constants-lifted reannotate prim-knowns imports exports
+       (schemify-body* bodys/constants-lifted prim-knowns imports exports
                        for-jitify? allow-set!-undefined? add-import! #f unsafe-mode?))
      (define all-grps (append grps (reverse new-grps)))
      (values
@@ -152,39 +154,40 @@
         (define v (known-inline->export-known (hash-ref defn-info id #f)
                                               prim-knowns imports exports))
         (cond
-         [(and v
-               (not (set!ed-mutated-state? (hash-ref mutated id #f))))
+         [(not (set!ed-mutated-state? (hash-ref mutated id #f)))
           (define ext-id (ex-ext-id ex-id))
-          (hash-set knowns ext-id v)]
+          (hash-set knowns ext-id (or v a-known-constant))]
          [else knowns])))]))
 
 ;; ----------------------------------------
 
-(define (schemify-body l reannotate prim-knowns imports exports for-cify? unsafe-mode?)
+(define (schemify-body l prim-knowns imports exports for-cify? unsafe-mode?)
   (define-values (new-body defn-info mutated)
-    (schemify-body* l reannotate prim-knowns imports exports
+    (schemify-body* l prim-knowns imports exports
                     #f #f (lambda (im ext-id index) #f)
                     for-cify? unsafe-mode?))
   new-body)
 
-(define (schemify-body* l reannotate prim-knowns imports exports
+(define (schemify-body* l prim-knowns imports exports
                         for-jitify? allow-set!-undefined? add-import!
                         for-cify? unsafe-mode?)
   ;; Various conversion steps need information about mutated variables,
   ;; where "mutated" here includes visible implicit mutation, such as
   ;; a variable that might be used before it is defined:
-  (define mutated (mutated-in-body l exports prim-knowns (hasheq) imports))
+  (define mutated (mutated-in-body l exports prim-knowns (hasheq) imports unsafe-mode?))
   ;; Make another pass to gather known-binding information:
   (define knowns
     (for/fold ([knowns (hasheq)]) ([form (in-list l)])
       (define-values (new-knowns info)
-        (find-definitions form prim-knowns knowns imports mutated #t))
+        (find-definitions form prim-knowns knowns imports mutated unsafe-mode?
+                          #:optimize? #t))
       new-knowns))
   ;; While schemifying, add calls to install exported values in to the
   ;; corresponding exported `variable` records, but delay those
   ;; installs to the end, if possible
   (define schemified
-    (let loop ([l l] [accum-exprs null] [accum-ids null])
+    (let loop ([l l] [in-mut-l l] [accum-exprs null] [accum-ids null])
+      (define mut-l (update-mutated-state! l in-mut-l mutated))
       (cond
        [(null? l)
         (define set-vars
@@ -200,11 +203,11 @@
                        set-vars)])]
        [else
         (define form (car l))
-        (define schemified (schemify form reannotate
+        (define schemified (schemify form
                                      prim-knowns knowns mutated imports exports
                                      allow-set!-undefined?
                                      add-import!
-                                     for-cify?
+                                     for-cify? for-jitify?
                                      unsafe-mode?))
         (match form
           [`(define-values ,ids ,_)
@@ -216,7 +219,7 @@
              schemified 
              (let id-loop ([ids ids] [accum-exprs null] [accum-ids accum-ids])
                (cond
-                [(wrap-null? ids) (loop (wrap-cdr l) accum-exprs accum-ids)]
+                [(wrap-null? ids) (loop (wrap-cdr l) mut-l accum-exprs accum-ids)]
                 [(or (or for-jitify? for-cify?)
                      (via-variable-mutated-state? (hash-ref mutated (unwrap (wrap-car ids)) #f)))
                  (define id (unwrap (wrap-car ids)))
@@ -231,7 +234,7 @@
                 [else
                  (id-loop (wrap-cdr ids) accum-exprs (cons (unwrap (wrap-car ids)) accum-ids))]))))]
           [`,_
-           (loop (wrap-cdr l) (cons schemified accum-exprs) accum-ids)])])))
+           (loop (wrap-cdr l) mut-l (cons schemified accum-exprs) accum-ids)])])))
   ;; Return both schemified and known-binding information, where
   ;; the later is used for cross-linklet optimization
   (values schemified knowns mutated))
@@ -258,27 +261,27 @@
 
 ;; Schemify `let-values` to `let`, etc., and
 ;; reorganize struct bindings.
-(define (schemify v reannotate prim-knowns knowns mutated imports exports allow-set!-undefined? add-import!
-                  for-cify? unsafe-mode?)
+(define (schemify v prim-knowns knowns mutated imports exports allow-set!-undefined? add-import!
+                  for-cify? for-jitify? unsafe-mode?)
   (let schemify/knowns ([knowns knowns] [inline-fuel init-inline-fuel] [v v])
-    (let schemify ([v v])
+    (define (schemify v)
       (define s-v
         (reannotate
          v 
          (match v
            [`(lambda ,formals ,body ...)
-            `(lambda ,formals ,@(map schemify body))]
+            `(lambda ,formals ,@(schemify-body body))]
            [`(case-lambda [,formalss ,bodys ...] ...)
             `(case-lambda ,@(for/list ([formals (in-list formalss)]
                                        [body (in-list bodys)])
-                              `[,formals ,@(map schemify body)]))]
+                              `[,formals ,@(schemify-body body)]))]
            [`(define-values (,struct:s ,make-s ,s? ,acc/muts ...)
                (let-values (((,struct: ,make ,?1 ,-ref ,-set!) ,mk))
                  (values ,struct:2
                          ,make2
                          ,?2
                          ,make-acc/muts ...)))
-            #:guard (not for-cify?)
+            #:guard (not (or for-jitify? for-cify?))
             ;; Convert a `make-struct-type` binding into a 
             ;; set of bindings that Chez's cp0 recognizes,
             ;; and push the struct-specific extra work into
@@ -294,7 +297,7 @@
                     ;; of `make-struct-type`:
                     (simple-mutated-state? (hash-ref mutated (unwrap struct:) #f)))
                (define can-impersonate? (not (struct-type-info-authentic? sti)))
-               (define raw-s? (if can-impersonate? (gensym s?) s?))
+               (define raw-s? (if can-impersonate? (gensym (unwrap s?)) s?))
                `(begin
                   (define ,struct:s (make-record-type-descriptor ',(struct-type-info-name sti)
                                                                  ,(schemify (struct-type-info-parent sti))
@@ -318,7 +321,7 @@
                                                              ,(struct-type-info-immediate-field-count sti)
                                                              0
                                                              ,(schemify (struct-type-info-parent sti))
-                                                             ,@(map schemify (struct-type-info-rest sti))))))
+                                                             ,@(schemify-body (struct-type-info-rest sti))))))
                   (define ,make-s ,(let ([ctr `(record-constructor
                                                 (make-record-constructor-descriptor ,struct:s #f #f))])
                                      (if (struct-type-info-pure-constructor? sti)
@@ -330,7 +333,7 @@
                         null)
                   ,@(for/list ([acc/mut (in-list acc/muts)]
                                [make-acc/mut (in-list make-acc/muts)])
-                      (define raw-acc/mut (if can-impersonate? (gensym acc/mut) acc/mut))
+                      (define raw-acc/mut (if can-impersonate? (gensym (unwrap acc/mut)) acc/mut))
                       (match make-acc/mut
                         [`(make-struct-field-accessor ,(? (lambda (v) (wrap-eq? v -ref))) ,pos ,_)
                          (define raw-def `(define ,raw-acc/mut (record-accessor ,struct:s ,pos)))
@@ -385,23 +388,31 @@
             (define new-knowns
               (for/fold ([knowns knowns]) ([id (in-list ids)]
                                            [rhs (in-list rhss)])
-                (define k (infer-known rhs #f #f id knowns prim-knowns imports mutated))
+                (define k (infer-known rhs #f #f id knowns prim-knowns imports mutated unsafe-mode?))
                 (if k
                     (hash-set knowns (unwrap id) k)
                     knowns)))
-            (left-to-right/let ids
-                               (for/list ([rhs (in-list rhss)])
+            (define (merely-a-copy? id)
+              (define u-id (unwrap id))
+              (and (known-copy? (hash-ref new-knowns u-id #f))
+                   (simple-mutated-state? (hash-ref mutated u-id #f))))
+            (left-to-right/let (for/list ([id (in-list ids)]
+                                          #:unless (merely-a-copy? id))
+                                 id)
+                               (for/list ([id (in-list ids)]
+                                          [rhs (in-list rhss)]
+                                          #:unless (merely-a-copy? id))
                                  (schemify rhs))
                                (for/list ([body (in-list bodys)])
                                  (schemify/knowns new-knowns inline-fuel body))
                                prim-knowns knowns imports mutated)]
            [`(let-values ([() (begin ,rhss ... (values))]) ,bodys ...)
-            `(begin ,@(map schemify rhss) ,@(map schemify bodys))]
+            `(begin ,@(schemify-body rhss) ,@(schemify-body bodys))]
            [`(let-values ([,idss ,rhss] ...) ,bodys ...)
             (left-to-right/let-values idss
                                       (for/list ([rhs (in-list rhss)])
                                         (schemify rhs))
-                                      (map schemify bodys)
+                                      (schemify-body bodys)
                                       mutated
                                       for-cify?)]
            [`(letrec-values () ,bodys ...)
@@ -415,7 +426,7 @@
             (define new-knowns
               (for/fold ([knowns knowns]) ([id (in-list ids)]
                                            [rhs (in-list rhss)])
-                (define k (infer-known rhs #f #t id knowns prim-knowns imports mutated))
+                (define k (infer-known rhs #f #t id knowns prim-knowns imports mutated unsafe-mode?))
                 (if k
                     (hash-set knowns (unwrap id) k)
                     knowns)))
@@ -454,7 +465,7 @@
                                     ,@(for/list ([id (in-list ids)]
                                                  [pos (in-naturals)])
                                         `[,id (unsafe-vector*-ref ,lr ,pos)]))]))))
-                         ,@(map schemify bodys))])]
+                         ,@(schemify-body bodys))])]
            [`(if ,tst ,thn ,els)
             `(if ,(schemify tst) ,(schemify thn) ,(schemify els))]
            [`(with-continuation-mark ,key ,val ,body)
@@ -462,9 +473,9 @@
            [`(begin ,exp)
             (schemify exp)]
            [`(begin ,exps ...)
-            `(begin . ,(map schemify exps))]
+            `(begin . ,(schemify-body exps))]
            [`(begin0 ,exps ...)
-            `(begin0 . ,(map schemify exps))]
+            `(begin0 . ,(schemify-body exps))]
            [`(set! ,id ,rhs)
             (define int-id (unwrap id))
             (define ex (hash-ref exports int-id #f))
@@ -472,11 +483,20 @@
                 `(,(if allow-set!-undefined? 'variable-set! 'variable-set!/check-undefined) ,(export-id ex) ,(schemify rhs) '#f)
                 `(set! ,id ,(schemify rhs)))]
            [`(variable-reference-constant? (#%variable-reference ,id))
-            (let ([id (unwrap id)])
-              (and (not (hash-ref mutated id #f))
-                   (let ([im (hash-ref imports id #f)])
-                     (or (not im)
-                         (known-constant? (import-lookup im))))))]
+            (define u-id (unwrap id))
+            (cond
+              [(hash-ref mutated u-id #f) #f]
+              [else
+               (define im (hash-ref imports u-id #f))
+               (cond
+                 [(not im)
+                  ;; Not imported and not mutable => a constant or local defined
+                  ;; in this linklet or a direct primitive reference
+                  #t]
+                 [(known-constant? (import-lookup im)) #t]
+                 [else
+                  ;; Not statically known
+                  `(variable-reference-constant? ,(schemify `(#%variable-reference ,id)))])])]
            [`(variable-reference-from-unsafe? (#%variable-reference))
             unsafe-mode?]
            [`(#%variable-reference)
@@ -493,9 +513,10 @@
                   ,v)
                 `(make-instance-variable-reference 
                   instance-variable-reference
-                  ',(if (hash-ref mutated u #f)
-                        'mutable
-                        'immutable)))]
+                  ',(cond
+                      [(hash-ref mutated u #f) 'mutable]
+                      [(hash-ref prim-knowns u #f) 'primitive]
+                      [else 'constant])))]
            [`(equal? ,exp1 ,exp2)
             (let ([exp1 (schemify exp1)]
                   [exp2 (schemify exp2)])
@@ -553,24 +574,77 @@
             (define (inline-rator)
               (define u-rator (unwrap rator))
               (and (symbol? u-rator)
-                   (let ([k (find-known u-rator prim-knowns knowns imports mutated)])
+                   (let-values ([(k im) (find-known+import u-rator prim-knowns knowns imports mutated)])
                      (and (known-procedure/can-inline? k)
                           (left-left-lambda-convert
-                           (inline-clone k (hash-ref imports u-rator #f) add-import! mutated imports reannotate)
+                           (inline-clone k im add-import! mutated imports)
                            (sub1 inline-fuel))))))
+            (define (maybe-tmp e name)
+              ;; use `e` directly if it's ok to duplicate
+              (if (simple/can-copy? e prim-knowns knowns imports mutated)
+                  e
+                  (gensym name)))
+            (define (wrap-tmp tmp e body)
+              (if (eq? tmp e)
+                  body
+                  `(let ([,tmp ,e])
+                     ,body)))
+            (define (inline-field-access k s-rator im args)
+              ;; For imported accessors or for JIT mode, inline the
+              ;; selector with an `unsafe-struct?` test plus `unsafe-struct*-ref`.
+              (define type-id (and (or im for-jitify?)
+                                   (pair? args)
+                                   (null? (cdr args))
+                                   (inline-type-id k im add-import! mutated imports)))
+              (cond
+                [type-id
+                 (define tmp (maybe-tmp (car args) 'v))
+                 (define sel `(if (unsafe-struct? ,tmp ,(schemify type-id))
+                                  (unsafe-struct*-ref ,tmp ,(known-field-accessor-pos k))
+                                  (,s-rator ,tmp)))
+                 (wrap-tmp tmp (car args)
+                           sel)]
+                [else #f]))
+            (define (inline-field-mutate k s-rator im args)
+              (define type-id (and (or im for-jitify?)
+                                   (pair? args)
+                                   (pair? (cdr args))
+                                   (null? (cddr args))
+                                   (inline-type-id k im add-import! mutated imports)))
+              (cond
+                [type-id
+                 (define tmp (maybe-tmp (car args) 'v))
+                 (define tmp-rhs (maybe-tmp (cadr args) 'rhs))
+                 (define mut `(if (unsafe-struct? ,tmp ,(schemify type-id))
+                                  (unsafe-struct*-set! ,tmp ,(known-field-mutator-pos k) ,tmp-rhs)
+                                  (,s-rator ,tmp ,tmp-rhs)))
+                 (wrap-tmp tmp (car args)
+                           (wrap-tmp tmp-rhs (cadr args)
+                                     mut))]
+                [else #f]))
             (or (left-left-lambda-convert rator inline-fuel)
                 (and (positive? inline-fuel)
                      (inline-rator))
                 (let ([s-rator (schemify rator)]
-                      [args (map schemify exps)]
+                      [args (schemify-body exps)]
                       [u-rator (unwrap rator)])
-                  (let ([plain-app?
-                         (or (known-procedure? (find-known u-rator prim-knowns knowns imports mutated))
-                             (lambda? rator))])
-                    (left-to-right/app s-rator
-                                       args
-                                       plain-app? for-cify?
-                                       prim-knowns knowns imports mutated))))]
+                  (define-values (k im) (find-known+import u-rator prim-knowns knowns imports mutated))
+                  (cond
+                    [(and (not for-cify?)
+                          (known-field-accessor? k)
+                          (inline-field-access k s-rator im args))
+                     => (lambda (e) e)]
+                    [(and (not for-cify?)
+                          (known-field-mutator? k)
+                          (inline-field-mutate k s-rator im args))
+                     => (lambda (e) e)]
+                    [else
+                     (define plain-app? (or (known-procedure? k)
+                                            (lambda? rator)))
+                     (left-to-right/app s-rator
+                                        args
+                                        plain-app? for-cify?
+                                        prim-knowns knowns imports mutated)])))]
            [`,_
             (let ([u-v (unwrap v)])
               (cond
@@ -604,4 +678,10 @@
                          (schemify (known-copy-id k))]
                         [else v]))]
                 [else v]))])))
-      (optimize s-v prim-knowns knowns imports mutated))))
+      (optimize s-v prim-knowns knowns imports mutated))
+
+    (define (schemify-body l)
+      (for/list ([e (in-list l)])
+        (schemify e)))
+
+    (schemify v)))

@@ -313,6 +313,7 @@ void scheme_init_stack_check(void);
 void scheme_init_overflow(void);
 #ifdef MZ_USE_JIT
 void scheme_init_jit(void);
+void scheme_init_jitprep(void);
 #endif
 #ifdef MZ_PRECISE_GC
 void scheme_register_traversers(void);
@@ -376,6 +377,7 @@ void scheme_init_compile(Scheme_Startup_Env *env);
 void scheme_init_symbol(Scheme_Startup_Env *env);
 void scheme_init_char_constants(void);
 void scheme_init_char(Scheme_Startup_Env *env);
+void scheme_init_unsafe_char(Scheme_Startup_Env *env);
 void scheme_init_bool(Scheme_Startup_Env *env);
 void scheme_init_syntax(Scheme_Startup_Env *env);
 void scheme_init_marshal(Scheme_Startup_Env *env);
@@ -638,6 +640,13 @@ extern Scheme_Object *scheme_unsafe_fx_plus_proc;
 extern Scheme_Object *scheme_unsafe_fx_minus_proc;
 extern Scheme_Object *scheme_unsafe_fx_times_proc;
 
+extern Scheme_Object *scheme_unsafe_char_eq_proc;
+extern Scheme_Object *scheme_unsafe_char_lt_proc;
+extern Scheme_Object *scheme_unsafe_char_gt_proc;
+extern Scheme_Object *scheme_unsafe_char_lt_eq_proc;
+extern Scheme_Object *scheme_unsafe_char_gt_eq_proc;
+extern Scheme_Object *scheme_unsafe_char_to_integer_proc;
+
 extern Scheme_Object *scheme_not_proc;
 extern Scheme_Object *scheme_true_object_p_proc;
 extern Scheme_Object *scheme_boolean_p_proc;
@@ -675,6 +684,7 @@ extern Scheme_Hash_Tree *scheme_source_stx_props;
 
 extern Scheme_Object *scheme_stack_dump_key;
 
+extern Scheme_Object *scheme_root_prompt_tag;
 extern Scheme_Object *scheme_default_prompt_tag;
 
 THREAD_LOCAL_DECL(extern Scheme_Object *scheme_system_idle_channel);
@@ -873,6 +883,7 @@ Scheme_Thread *scheme_do_close_managed(Scheme_Custodian *m, Scheme_Exit_Closer_F
 Scheme_Custodian *scheme_get_current_custodian(void);
 void scheme_run_atexit_closers_on_all(Scheme_Exit_Closer_Func alt);
 void scheme_run_atexit_closers(Scheme_Object *o, Scheme_Close_Custodian_Client *f, void *data);
+void scheme_run_post_custodian_shutdown();
 
 typedef struct Scheme_Security_Guard {
   Scheme_Object so;
@@ -1412,6 +1423,7 @@ typedef struct Scheme_IR_Local
       /* To detect uses on right-hand sides in `letrec` */
       int *use_box;
       int use_position;
+      int keep_assignment; /* don't optimize away an assignment to this variable */
     } compile;
     struct {
       /* Maps the variable into the letrec-check pass's frames: */
@@ -2444,6 +2456,11 @@ int scheme_bin_lt_eq(const Scheme_Object *n1, const Scheme_Object *n2);
 
 Scheme_Object *scheme_bin_quotient_remainder(const Scheme_Object *n1, const Scheme_Object *n2, Scheme_Object **_rem);
 
+Scheme_Object *scheme_bin_bitwise_or(Scheme_Object *a, Scheme_Object *b);
+Scheme_Object *scheme_bin_bitwise_xor(Scheme_Object *a, Scheme_Object *b);
+Scheme_Object *scheme_bin_bitwise_and(Scheme_Object *a, Scheme_Object *b);
+int scheme_bin_bitwise_bit_set_p (Scheme_Object *so, Scheme_Object *sb);
+
 Scheme_Object *scheme_sub1(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_add1(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_odd_p(int argc, Scheme_Object *argv[]);
@@ -2994,6 +3011,7 @@ void scheme_jit_fill_threadlocal_table();
 
 #ifdef MZ_USE_JIT
 void scheme_on_demand_generate_lambda(Scheme_Native_Closure *nc, int argc, Scheme_Object **argv, int delta);
+void scheme_force_jit_generate(Scheme_Native_Lambda *nlam);
 #endif
 
 struct Start_Module_Args;
@@ -3291,6 +3309,8 @@ struct Scheme_Linklet
   Scheme_Hash_Table *constants; /* holds info about the linklet's body for inlining */
 
   Scheme_Prefix *static_prefix; /* non-NULL for a linklet compiled in static mode */
+
+  Scheme_Object *native_lambdas; /* non-NULL => native lambdas to force-JIT on instantiation */
 };
 
 #define SCHEME_DEFN_VAR_COUNT(d) (SCHEME_VEC_SIZE(d)-1)
@@ -3406,7 +3426,9 @@ int scheme_any_string_has_null(Scheme_Object *o);
 Scheme_Object *scheme_do_exit(int argc, Scheme_Object *argv[]);
 
 Scheme_Object *scheme_make_arity(mzshort minc, mzshort maxc);
+Scheme_Object *scheme_make_arity_mask(intptr_t minc, intptr_t maxc);
 Scheme_Object *scheme_arity(Scheme_Object *p);
+Scheme_Object *scheme_arity_mask_to_arity(Scheme_Object *mask, int mode);
 
 typedef struct {
   MZTAG_IF_REQUIRED
@@ -3426,8 +3448,11 @@ Scheme_Object *scheme_get_stack_trace(Scheme_Object *mark_set);
 
 XFORM_NONGCING int scheme_fast_check_arity(Scheme_Object *v, int a);
 Scheme_Object *scheme_get_or_check_arity(Scheme_Object *p, intptr_t a);
+Scheme_Object *scheme_get_arity_mask(Scheme_Object *p);
 int scheme_native_arity_check(Scheme_Object *closure, int argc);
 Scheme_Object *scheme_get_native_arity(Scheme_Object *closure, int mode);
+
+#define SCHEME_MAX_FAST_ARITY_CHECK 29
 
 struct Scheme_Logger {
   Scheme_Object so;
@@ -3846,6 +3871,14 @@ void *scheme_environment_variables_to_block(Scheme_Object *env, int *_need_free)
 
 int scheme_compare_equal(void *v1, void *v2);
 
+typedef struct Scheme_Performance_State {
+  intptr_t start, gc_start;
+  intptr_t old_nested_delta, old_nested_gc_delta;
+} Scheme_Performance_State;
+
+void scheme_performance_record_start(Scheme_Performance_State *perf_state);
+void scheme_performance_record_end(const char *who, Scheme_Performance_State *perf_state);
+
 /*========================================================================*/
 /*                           places                                       */
 /*========================================================================*/
@@ -3936,7 +3969,7 @@ typedef struct Scheme_Place_Object {
 typedef struct Scheme_Serialized_File_FD {
   Scheme_Object so;
   Scheme_Object *name;
-  struct rktio_fd_t *fd;
+  struct rktio_fd_transfer_t *fdt;
   intptr_t type;
   char flush_mode;
 } Scheme_Serialized_File_FD;
@@ -3944,7 +3977,7 @@ typedef struct Scheme_Serialized_File_FD {
 typedef struct Scheme_Serialized_Socket_FD {
   Scheme_Object so;
   Scheme_Object *name;
-  struct rktio_fd_t *fd;
+  struct rktio_fd_transfer_t *fdt;
   intptr_t type;
 } Scheme_Serialized_Socket_FD;
 
@@ -3980,6 +4013,7 @@ void scheme_sort_resolve_ir_local_array(Scheme_IR_Local **a, intptr_t count);
 Scheme_Object *scheme_place_make_async_channel();
 void scheme_place_async_channel_send(Scheme_Object *ch, Scheme_Object *uo);
 Scheme_Object *scheme_place_async_channel_receive(Scheme_Object *ch);
+int scheme_place_can_receive();
 #endif
 int scheme_is_predefined_module_path(Scheme_Object *v);
   

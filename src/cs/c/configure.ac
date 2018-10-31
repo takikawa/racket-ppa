@@ -14,6 +14,7 @@ AC_ARG_ENABLE(shared,     [  --enable-shared         create shared libraries (ok
 AC_ARG_ENABLE(standalone, [  --enable-standalone     create a standalone shared library])
 AC_ARG_ENABLE(pthread,    [  --enable-pthread        link with pthreads (usually auto-enabled if needed)])
 AC_ARG_ENABLE(iconv,      [  --enable-iconv          use iconv (usually auto-enabled)])
+AC_ARG_ENABLE(compress,   [  --enable-compress       compress compiled code])
 AC_ARG_ENABLE(xonx,       [  --enable-xonx           use Unix style (e.g., use Gtk) for Mac OS])
 AC_ARG_ENABLE(racket,     [  --enable-racket=<path>  use <path> as Racket to build; or "auto" to create])
 AC_ARG_ENABLE(scheme,     [  --enable-scheme=<path>  Chez Scheme build directory at <path>])
@@ -45,6 +46,7 @@ show_explicitly_set()
 
 show_explicitly_enabled "${enable_pthread}" "pthreads"
 show_explicitly_disabled "${enable_pthread}" "pthreads"
+show_explicitly_enabled "${enable_compress}" "Compressed code"
 show_explicitly_enabled "${enable_xonx}" "Unix style"
 show_explicitly_set "${enable_racket}" "Racket"
 show_explicitly_set "${enable_scheme}" "Chez Scheme build directory"
@@ -66,6 +68,7 @@ INCLUDEDEP="#"
 OSX="not_osx"
 NOT_OSX=""
 CONFIGURE_RACKET_SO_COMPILE=""
+COMPRESS_COMP=""
 
 FRAMEWORK_INSTALL_DIR='$(srcdir)/../../../lib/'
 FRAMEWORK_PREFIX='@executable_path/../lib/'
@@ -181,9 +184,11 @@ case "$host_cpu" in
 esac
 
 SCHEME_SRC=../ChezScheme
+MAKE_BUILD_SCHEME=y
 
 if test "${enable_scheme}" != "" ; then
   SCHEME_SRC="${enable_scheme}"
+  MAKE_BUILD_SCHEME=n
 fi
 
 if test "${enable_racket}" != "" ; then
@@ -195,6 +200,10 @@ if test "${enable_mach}" != "" ; then
 fi
 
 SCHEME_CONFIG_ARGS="--machine=${MACH} ${thread_config_arg}"
+
+if test "${enable_compress}" = "yes" ; then
+  COMPRESS_COMP="--compress"
+fi
 
 ############## C flags ################
 
@@ -348,7 +357,9 @@ AC_SUBST(MACH)
 AC_SUBST(OSX)
 AC_SUBST(NOT_OSX)
 AC_SUBST(CONFIGURE_RACKET_SO_COMPILE)
+AC_SUBST(COMPRESS_COMP)
 AC_SUBST(SCHEME_SRC)
+AC_SUBST(MAKE_BUILD_SCHEME)
 AC_SUBST(SCHEME_CONFIG_ARGS)
 AC_SUBST(FRAMEWORK_INSTALL_DIR)
 AC_SUBST(FRAMEWORK_PREFIX)

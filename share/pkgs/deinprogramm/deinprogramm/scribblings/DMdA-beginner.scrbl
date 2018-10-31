@@ -6,14 +6,14 @@
 @title[#:style 'toc #:tag "DMdA-beginner"]{Die Macht der Abstraktion - Anfänger}
 
 This is documentation for the language level @italic{Die Macht der
-Abstraktion - Anfänger} to go with the German textbook @italic{Die
-Macht der Abstraktion}.
+Abstraktion - Anfänger} to go with the German textbooks
+@italic{Schreibe Dein Programm!} / @italic{Die Macht der Abstraktion}.
 
 @declare-exporting[deinprogramm/DMdA-beginner #:use-sources (deinprogramm/DMdA deinprogramm/define-record-procedures)]
 
 @racketgrammar*-DMdA[
 #:literals ()
-() () ()
+() () () () ()
 ]
 
 @|prim-nonterms|
@@ -30,13 +30,25 @@ globalen Namen an den Wert von @racket[exp].}
 
 @section{Record-Typ-Definitionen}
 
-@defform[(define-record-procedures t c p (s1 ...))]{
+@defform[(define-record-procedures t c p (f1 ...))]{
 
 Die @racket[define-record-procedures]-Form ist eine Definition
 für einen neuen Record-Typ.  Dabei ist @racket[t] der Name der Record-Signatur,
-@racket[c] der Name des Konstruktors, @racket[p]
-der Name des Prädikats, und die @racket[si] sind die 
-Namen der Selektoren.}
+@racket[c] der Name des Konstruktors und @racket[p]
+der Name des Prädikats.
+
+Jedes @racket[f]@subscript{i} beschreibt ein @italic{Feld} des
+Record-Typs.  Es hat zwei mögliche Formen:
+
+@itemlist[
+
+@item{Das Feld besteht nur aus einem Namen @racket[sel]: Dann ist
+@racket[sel] der Name des Selektors für das Feld.}
+
+@item{Das Feld hat die Form @racket[(sel sig)]: Dann ist @racket[sel]
+der Name des Selektors für das Feld und @racket[sig] die Signatur des Feldes.}
+]
+}
 
 @section[#:tag "application"]{Prozedurapplikation}
 
@@ -61,10 +73,14 @@ Operanden ersetzt wurden.}
 @as-index{@litchar{#t}} ist das Literal für den booleschen Wert "wahr",
 @as-index{@litchar{#f}} das Literal für den booleschen Wert "falsch".
 
-@section{@racket[lambda]}
+@section{@racket[lambda] / @racket[λ]}
 
 @defform[(lambda (id ...) expr)]{
 Ein Lambda-Ausdruck ergibt bei der Auswertung eine neue Prozedur.}
+
+@defform[(λ (id ...) expr)]{
+@racket[λ] ist ein anderer Name für @racket[lambda].
+}
 
 @section[#:tag "id"]{Bezeichner}
 
@@ -91,7 +107,7 @@ Programm mit einer Fehlermeldung abgebrochen.
 
 @defform/none[#:literals (cond else)
               (cond (expr expr) ... (else expr))]{
- Die Form des cond-Ausdrucks ist ähnlich zur vorigen, mit der
+ Die Form des @racket[cond]-Ausdrucks ist ähnlich zur vorigen, mit der
  Ausnahme, daß in dem Fall, in dem kein Test @racket[#t] ergibt, der Wert des
  letzten Ausdruck zum Wert der @racket[cond]-Form wird.
 }
@@ -267,6 +283,20 @@ von der entsprechenden Zahl im zweiten @racket[expr] abweicht.}
 Ähnlich wie @racket[check-expect]: Der Testfall überprüft, daß das Resultat
 des ersten Operanden gleich dem Wert eines der folgenden Operanden ist.}
 
+@defform[(check-satisfied expr pred)]{
+Ähnlich wie @racket[check-expect]: Der Testfall überprüft, ob der Wert
+des Ausdrucks @racket[expr] vom Prädikat @racket[pred] erfüllt wird -
+das bedeutet, daß die Prozedur @racket[pred] den Wert @racket[#t]
+liefert, wenn sie auf den Wert von @racket[expr] angewendet wird.
+
+Der folgende Test wird also bestanden:
+@racketblock[(check-satisfied 1 odd?)]
+
+Der folgende Test hingegen wird hingegen nicht bestanden:
+
+@racketblock[(check-satisfied 1 even?)]
+}
+
 @defform[(check-range expr expr expr)]{
 
 Ähnlich wie @racket[check-expect]: Alle drei Operanden müssen 
@@ -295,11 +325,50 @@ wurden - wohl aber für Signaturen, die mit dem durch
 @scheme[define-record-procedures-parametric] definierten
 Signaturkonstruktor erzeugt wurden.}
 
+@section{Pattern-Matching}
+
+@defform[(match expr (pattern expr) ...)
+		#:grammar [(pattern
+		                id
+				#t
+				#f
+				string
+				number
+				(constructor pattern ...))]
+					
+]{ Ein @racket[match]- Ausdruck führt eine Verzweigung durch, ähnlich
+wie @racket[cond].  Dazu wertet match zunächst einmal den Ausdruck
+@racket[expr] nach dem match zum Wert @italic{v} aus.  Es prüft dann
+nacheinander jeden Zweig der Form @racket[(pattern expr)] dahingehend,
+ob das Pattern @racket[pattern] darin auf den Wert @italic{v} paßt
+(``matcht'').  Beim ersten passenden Zweig @racket[(pattern expr)]
+macht @racket[match] dann mit der Auswertung voh @racket[expr] weiter.
+
+Ob ein Wert @italic{v} paßt, hängt von @racket[pattern] ab:
+
+@itemlist[
+@item{Ein Pattern, das ein Literal ist (@racket[#t], @racket[#f],
+Zeichenketten @racket[string], Zahlen @racket[number]) paßt nur dann,
+wenn der Wert @italic{v} gleich dem Pattern ist.}
+
+@item{Ein Pattern, das ein Bezeichner @racket[id] ist, paßt auf
+@emph{jeden} Wert.  Der Bezeichner wird dann an diesen Wert gebunden
+und kann in dem Ausdruck des Zweigs benutzt werden.
+}
+
+@item{Ein Pattern @racket[(constructor pattern ...)], bei dem
+@racket[constructor] ein Record-Konstruktor ist (ein
+@italic{Konstruktor-Pattern}), paßt auf @italic{v}, falls @italic{v}
+ein passender Record ist, und dessen Felder auf die entsprechenden
+Patterns passen, die noch im Konstruktor-Pattern stehen.}
+]
+}
+
 @section{Parametrische Record-Typ-Definitionen}
 
 @defform[(define-record-procedures-parametric t cc c p (s1 ...))]{
 
-Die @racket[define-record-procedures-parametric] ist wie
+Die Form @racket[define-record-procedures-parametric] ist wie
 @racket[define-record-procedures].  Zusäzlich wird der Bezeichner
 @racket[cc] an einen Signaturkonstruktor gebunden: Dieser akzeptiert
 für jedes Feld eine Feld-Signatur und liefert eine Signatur, die nur

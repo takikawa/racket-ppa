@@ -58,6 +58,9 @@
          flat-contract-with-explanation
 
          (struct-out between/c-s)
+         (struct-out </>-ctc)
+         (struct-out <-ctc)
+         (struct-out >-ctc)
          renamed-between/c)
 
 (define-syntax (flat-murec-contract stx)
@@ -592,18 +595,36 @@
   (cond
     [(zero? (hash-count env-hash))
      (rand-choice
-      [1/3 (any/c-simple-value)]
+      [1/3 (any/c-structured-value)]
       [1/3 (any/c-procedure env-hash fuel)]
       [else (any/c-from-predicate-generator env-hash fuel)])]
     [else
      (rand-choice
       [1/4 (oneof (hash-ref env-hash (oneof (hash-keys env-hash))))]
-      [1/4 (any/c-simple-value)]
+      [1/4 (any/c-structured-value)]
       [1/4 (any/c-procedure env-hash fuel)]
       [else (any/c-from-predicate-generator env-hash fuel)])]))
 
+(define (any/c-structured-value)
+  (let loop ([depth 3])
+    (cond
+      [(zero? depth) (any/c-simple-value)]
+      [else
+       (rand-choice
+        [1/10 (cons (loop (- depth 1)) (loop (- depth 1)))]
+        [1/10 (make-vector (random 10) (λ (_) (loop (- depth 1))))]
+        [1/10 (make-hash (for/list ([i (in-range (random 10))])
+                           (cons (loop (- depth 1))
+                                 (loop (- depth 1)))))]
+        [1/10 (make-immutable-hash (for/list ([i (in-range (random 10))])
+                                     (cons (loop (- depth 1))
+                                           (loop (- depth 1)))))]
+        [1/10 (box (loop (- depth 1)))]
+        [else (any/c-simple-value)])])))
+
 (define (any/c-simple-value)
   (oneof '(0 #f "" () #() -1 1 #t elephant)))
+
 (define (any/c-from-predicate-generator env fuel)
   ((hash-ref predicate-generator-table
              (oneof (hash-keys predicate-generator-table)))
@@ -644,7 +665,7 @@
   (raise-blame-error
    blame #:missing-party neg-party
    val
-   '("~s accepts no values" given: "~e")
+   '("~s allows no values" given: "~e")
    (none/c-name ctc)
    val))
 
@@ -1218,7 +1239,8 @@
                 (and (procedure? reason)
                      (procedure-arity-includes? reason 1)))
       (raise-argument-error 'flat-contract-with-explanation
-                            (format "~s" '(or/c boolean? (-> blame? any)))))
+                            (format "~s" '(or/c boolean? (-> blame? any)))
+                            reason))
     reason)
   (make-flat-contract
    #:name name

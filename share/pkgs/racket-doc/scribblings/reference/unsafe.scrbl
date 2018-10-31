@@ -42,9 +42,9 @@ operations can be prevented by adjusting the code inspector (see
 @section{Unsafe Numeric Operations}
 
 @deftogether[(
-@defproc[(unsafe-fx+ [a fixnum?] [b fixnum?]) fixnum?]
-@defproc[(unsafe-fx- [a fixnum?] [b fixnum?]) fixnum?]
-@defproc[(unsafe-fx* [a fixnum?] [b fixnum?]) fixnum?]
+@defproc[(unsafe-fx+ [a fixnum?] ...) fixnum?]
+@defproc[(unsafe-fx- [a fixnum?] [b fixnum?] ...) fixnum?]
+@defproc[(unsafe-fx* [a fixnum?] ...) fixnum?]
 @defproc[(unsafe-fxquotient  [a fixnum?] [b fixnum?]) fixnum?]
 @defproc[(unsafe-fxremainder [a fixnum?] [b fixnum?]) fixnum?]
 @defproc[(unsafe-fxmodulo    [a fixnum?] [b fixnum?]) fixnum?]
@@ -57,13 +57,16 @@ For @tech{fixnums}: Like @racket[+], @racket[-], @racket[*],
 @tech{fixnum} result. The mathematical operation on @racket[a] and
 @racket[b] must be representable as a @tech{fixnum}. In the case of
 @racket[unsafe-fxquotient], @racket[unsafe-fxremainder], and
-@racket[unsafe-fxmodulo], @racket[b] must not be @racket[0].}
+@racket[unsafe-fxmodulo], @racket[b] must not be @racket[0].
+
+@history[#:changed "7.0.0.13" @elem{Allow zero or more arguments for @racket[unsafe-fx+] and @racket[unsafe-fx*]
+                                    and allow one or more arguments for @racket[unsafe-fx-].}]}
 
 
 @deftogether[(
-@defproc[(unsafe-fxand [a fixnum?] [b fixnum?]) fixnum?]
-@defproc[(unsafe-fxior [a fixnum?] [b fixnum?]) fixnum?]
-@defproc[(unsafe-fxxor [a fixnum?] [b fixnum?]) fixnum?]
+@defproc[(unsafe-fxand [a fixnum?] ...) fixnum?]
+@defproc[(unsafe-fxior [a fixnum?] ...) fixnum?]
+@defproc[(unsafe-fxxor [a fixnum?] ...) fixnum?]
 @defproc[(unsafe-fxnot [a fixnum?]) fixnum?]
 @defproc[(unsafe-fxlshift [a fixnum?] [b fixnum?]) fixnum?]
 @defproc[(unsafe-fxrshift [a fixnum?] [b fixnum?]) fixnum?]
@@ -80,49 +83,62 @@ the result is always a @tech{fixnum}. The @racket[unsafe-fxlshift] and
 number of bits to shift must be no more than the number of bits used to
 represent a @tech{fixnum}. In the case of @racket[unsafe-fxlshift],
 bits in the result beyond the number of bits used to represent a
-@tech{fixnum} are effectively replaced with a copy of the high bit.}
+@tech{fixnum} are effectively replaced with a copy of the high bit.
+
+@history[#:changed "7.0.0.13" @elem{Allow zero or more arguments for
+                                    @racket[unsafe-fxand], @racket[unsafe-fxior],
+                                    and @racket[unsafe-fxxor].}]}
 
 
 @deftogether[(
-@defproc[(unsafe-fx=   [a fixnum?] [b fixnum?]) boolean?]
-@defproc[(unsafe-fx<   [a fixnum?] [b fixnum?]) boolean?]
-@defproc[(unsafe-fx>   [a fixnum?] [b fixnum?]) boolean?]
-@defproc[(unsafe-fx<=  [a fixnum?] [b fixnum?]) boolean?]
-@defproc[(unsafe-fx>=  [a fixnum?] [b fixnum?]) boolean?]
-@defproc[(unsafe-fxmin [a fixnum?] [b fixnum?]) fixnum?]
-@defproc[(unsafe-fxmax [a fixnum?] [b fixnum?]) fixnum?]
+@defproc[(unsafe-fx=   [a fixnum?] [b fixnum?] ...) boolean?]
+@defproc[(unsafe-fx<   [a fixnum?] [b fixnum?] ...) boolean?]
+@defproc[(unsafe-fx>   [a fixnum?] [b fixnum?] ...) boolean?]
+@defproc[(unsafe-fx<=  [a fixnum?] [b fixnum?] ...) boolean?]
+@defproc[(unsafe-fx>=  [a fixnum?] [b fixnum?] ...) boolean?]
+@defproc[(unsafe-fxmin [a fixnum?] [b fixnum?] ...) fixnum?]
+@defproc[(unsafe-fxmax [a fixnum?] [b fixnum?] ...) fixnum?]
 )]{
 
 For @tech{fixnums}: Like @racket[=], @racket[<], @racket[>],
 @racket[<=], @racket[>=], @racket[min], and @racket[max], but
-constrained to consume @tech{fixnums}.}
+constrained to consume @tech{fixnums}.
+
+@history[#:changed "7.0.0.13" @elem{Allow one or more argument,
+                                    instead of allowing just two.}]}
 
 
 @deftogether[(
-@defproc[(unsafe-fl+   [a flonum?] [b flonum?]) flonum?]
-@defproc[(unsafe-fl-   [a flonum?] [b flonum?]) flonum?]
-@defproc[(unsafe-fl*   [a flonum?] [b flonum?]) flonum?]
-@defproc[(unsafe-fl/   [a flonum?] [b flonum?]) flonum?]
+@defproc[(unsafe-fl+   [a flonum?] ...) flonum?]
+@defproc[(unsafe-fl-   [a flonum?] [b flonum?] ...) flonum?]
+@defproc[(unsafe-fl*   [a flonum?] ...) flonum?]
+@defproc[(unsafe-fl/   [a flonum?] [b flonum?] ...) flonum?]
 @defproc[(unsafe-flabs [a flonum?]) flonum?]
 )]{
 
 For @tech{flonums}: Unchecked versions of @racket[fl+], @racket[fl-],
-@racket[fl*], @racket[fl/], and @racket[flabs].}
+@racket[fl*], @racket[fl/], and @racket[flabs].
+
+@history[#:changed "7.0.0.13" @elem{Allow zero or more arguments for @racket[unsafe-fl+] and @racket[unsafe-fl*]
+                                    and one or more arguments for @racket[unsafe-fl-] and @racket[unsafe-fl/].}]}
 
 
 @deftogether[(
-@defproc[(unsafe-fl=   [a flonum?] [b flonum?]) boolean?]
-@defproc[(unsafe-fl<   [a flonum?] [b flonum?]) boolean?]
-@defproc[(unsafe-fl>   [a flonum?] [b flonum?]) boolean?]
-@defproc[(unsafe-fl<=  [a flonum?] [b flonum?]) boolean?]
-@defproc[(unsafe-fl>=  [a flonum?] [b flonum?]) boolean?]
-@defproc[(unsafe-flmin [a flonum?] [b flonum?]) flonum?]
-@defproc[(unsafe-flmax [a flonum?] [b flonum?]) flonum?]
+@defproc[(unsafe-fl=   [a flonum?] [b flonum?] ...) boolean?]
+@defproc[(unsafe-fl<   [a flonum?] [b flonum?] ...) boolean?]
+@defproc[(unsafe-fl>   [a flonum?] [b flonum?] ...) boolean?]
+@defproc[(unsafe-fl<=  [a flonum?] [b flonum?] ...) boolean?]
+@defproc[(unsafe-fl>=  [a flonum?] [b flonum?] ...) boolean?]
+@defproc[(unsafe-flmin [a flonum?] [b flonum?] ...) flonum?]
+@defproc[(unsafe-flmax [a flonum?] [b flonum?] ...) flonum?]
 )]{
 
 For @tech{flonums}: Unchecked versions of @racket[fl=], @racket[fl<],
 @racket[fl>], @racket[fl<=], @racket[fl>=], @racket[flmin], and
-@racket[flmax].}
+@racket[flmax].
+
+@history[#:changed "7.0.0.13" @elem{Allow one or more argument,
+                                    instead of allowing just two.}]}
 
 
 @deftogether[(
@@ -189,6 +205,24 @@ but further constrained to consume or produce a fixnum.
 
 Unchecked version of @racket[flrandom].
 }
+
+
+@section{Unsafe Character Operations}
+
+@deftogether[(
+@defproc[(unsafe-char=?   [a char?] [b char?] ...) boolean?]
+@defproc[(unsafe-char<?   [a char?] [b char?] ...) boolean?]
+@defproc[(unsafe-char>?   [a char?] [b char?] ...) boolean?]
+@defproc[(unsafe-char<=?  [a char?] [b char?] ...) boolean?]
+@defproc[(unsafe-char>=?  [a char?] [b char?] ...) boolean?]
+@defproc[(unsafe-char->integer [a char?]) fixnum?]
+)]{
+
+Unchecked versions of @racket[char=?], @racket[char<?], @racket[char>?],
+@racket[char<=?], @racket[char>=?], and @racket[char->integer].
+
+@history[#:added "7.0.0.14"]}
+
 
 
 @section{Unsafe Data Extraction}
@@ -356,91 +390,168 @@ is analogous to @racket[box-cas!] to perform an atomic compare-and-set.
 
 @deftogether[(
 @defproc[(unsafe-mutable-hash-iterate-first
-          [h (and/c hash? (not/c immutable?) (not/c hash-weak?))])
+          [hash (and/c hash? (not/c immutable?) (not/c hash-weak?))])
 	  (or/c #f any/c)]
 @defproc[(unsafe-mutable-hash-iterate-next
-          [h (and/c hash? (not/c immutable?) (not/c hash-weak?))]
-	  [i any/c])
+          [hash (and/c hash? (not/c immutable?) (not/c hash-weak?))]
+	  [pos any/c])
 	  (or/c #f any/c)]
 @defproc[(unsafe-mutable-hash-iterate-key
-          [h (and/c hash? (not/c immutable?) (not/c hash-weak?))]
-	  [i any/c]) 
+          [hash (and/c hash? (not/c immutable?) (not/c hash-weak?))]
+	  [pos any/c]) 
+	  any/c]
+@defproc[#:link-target? #f
+         (unsafe-mutable-hash-iterate-key
+          [hash (and/c hash? (not/c immutable?) (not/c hash-weak?))]
+	  [pos any/c]
+          [bad-index-v any/c]) 
 	  any/c]
 @defproc[(unsafe-mutable-hash-iterate-value
-          [h (and/c hash? (not/c immutable?) (not/c hash-weak?))]
-	  [i any/c]) 
+          [hash (and/c hash? (not/c immutable?) (not/c hash-weak?))]
+	  [pos any/c]) 
+	  any/c]
+@defproc[#:link-target? #f
+         (unsafe-mutable-hash-iterate-value
+          [hash (and/c hash? (not/c immutable?) (not/c hash-weak?))]
+	  [pos any/c]
+          [bad-index-v any/c]) 
 	  any/c]
 @defproc[(unsafe-mutable-hash-iterate-key+value
-          [h (and/c hash? (not/c immutable?) (not/c hash-weak?))]
-	  [i any/c]) 
+          [hash (and/c hash? (not/c immutable?) (not/c hash-weak?))]
+	  [pos any/c]) 
+	  (values any/c any/c)]
+@defproc[#:link-target? #f
+         (unsafe-mutable-hash-iterate-key+value
+          [hash (and/c hash? (not/c immutable?) (not/c hash-weak?))]
+	  [pos any/c]
+          [bad-index-v any/c])
 	  (values any/c any/c)]
 @defproc[(unsafe-mutable-hash-iterate-pair
-          [h (and/c hash? (not/c immutable?) (not/c hash-weak?))]
-	  [i any/c]) 
+          [hash (and/c hash? (not/c immutable?) (not/c hash-weak?))]
+	  [pos any/c]) 
+	  pair?]
+@defproc[#:link-target? #f
+         (unsafe-mutable-hash-iterate-pair
+          [hash (and/c hash? (not/c immutable?) (not/c hash-weak?))]
+	  [pos any/c]
+          [bad-index-v any/c]) 
 	  pair?]
 @defproc[(unsafe-immutable-hash-iterate-first
-          [h (and/c hash? immutable?)])
+          [hash (and/c hash? immutable?)])
 	  (or/c #f any/c)]
 @defproc[(unsafe-immutable-hash-iterate-next
-          [h (and/c hash? immutable?)]
-	  [i any/c])
+          [hash (and/c hash? immutable?)]
+	  [pos any/c])
 	  (or/c #f any/c)]
 @defproc[(unsafe-immutable-hash-iterate-key
-          [h (and/c hash? immutable?)]
-	  [i any/c]) 
+          [hash (and/c hash? immutable?)]
+	  [pos any/c]) 
+	  any/c]
+@defproc[#:link-target? #f
+         (unsafe-immutable-hash-iterate-key
+          [hash (and/c hash? immutable?)]
+	  [pos any/c]
+          [bad-index-v any/c]) 
 	  any/c]
 @defproc[(unsafe-immutable-hash-iterate-value
-          [h (and/c hash? immutable?)]
-	  [i any/c])
+          [hash (and/c hash? immutable?)]
+	  [pos any/c])
+	  any/c]
+@defproc[#:link-target? #f
+         (unsafe-immutable-hash-iterate-value
+          [hash (and/c hash? immutable?)]
+	  [pos any/c]
+          [bad-index-v any/c])
 	  any/c]
 @defproc[(unsafe-immutable-hash-iterate-key+value
-          [h (and/c hash? immutable?)]
-	  [i any/c])
+          [hash (and/c hash? immutable?)]
+	  [pos any/c])
+	  (values any/c any/c)]
+@defproc[#:link-target? #f
+         (unsafe-immutable-hash-iterate-key+value
+          [hash (and/c hash? immutable?)]
+	  [pos any/c]
+          [bad-index-v any/c])
 	  (values any/c any/c)]
 @defproc[(unsafe-immutable-hash-iterate-pair
-          [h (and/c hash? immutable?)]
-	  [i any/c])
+          [hash (and/c hash? immutable?)]
+	  [pos any/c])
+	  pair?]
+@defproc[#:link-target? #f
+         (unsafe-immutable-hash-iterate-pair
+          [hash (and/c hash? immutable?)]
+	  [pos any/c]
+          [bad-index-v any/c])
 	  pair?]
 @defproc[(unsafe-weak-hash-iterate-first
-          [h (and/c hash? hash-weak?)])
+          [hash (and/c hash? hash-weak?)])
 	  (or/c #f any/c)]
 @defproc[(unsafe-weak-hash-iterate-next
-          [h (and/c hash? hash-weak?)]
-	  [i any/c])
+          [hash (and/c hash? hash-weak?)]
+	  [pos any/c])
 	  (or/c #f any/c)]
 @defproc[(unsafe-weak-hash-iterate-key
-          [h (and/c hash? hash-weak?)]
-	  [i any/c]) 
+          [hash (and/c hash? hash-weak?)]
+	  [pos any/c]) 
+	  any/c]
+@defproc[#:link-target? #f
+         (unsafe-weak-hash-iterate-key
+          [hash (and/c hash? hash-weak?)]
+	  [pos any/c]
+          [bad-index-v any/c]) 
 	  any/c]
 @defproc[(unsafe-weak-hash-iterate-value
-          [h (and/c hash? hash-weak?)]
-	  [i any/c]) 
+          [hash (and/c hash? hash-weak?)]
+	  [pos any/c]) 
+	  any/c]
+@defproc[#:link-target? #f
+         (unsafe-weak-hash-iterate-value
+          [hash (and/c hash? hash-weak?)]
+	  [pos any/c]
+          [bad-index-v any/c]) 
 	  any/c]
 @defproc[(unsafe-weak-hash-iterate-key+value
-          [h (and/c hash? hash-weak?)]
-	  [i any/c]) 
+          [hash (and/c hash? hash-weak?)]
+	  [pos any/c]) 
+	  (values any/c any/c)]
+@defproc[#:link-target? #f
+         (unsafe-weak-hash-iterate-key+value
+          [hash (and/c hash? hash-weak?)]
+	  [pos any/c]
+          [bad-index-v any/c]) 
 	  (values any/c any/c)]
 @defproc[(unsafe-weak-hash-iterate-pair
-          [h (and/c hash? hash-weak?)]
-	  [i any/c]) 
+          [hash (and/c hash? hash-weak?)]
+	  [pos any/c]) 
+	  pair?]
+@defproc[#:link-target? #f
+         (unsafe-weak-hash-iterate-pair
+          [hash (and/c hash? hash-weak?)]
+	  [pos any/c]
+          [bad-index-v any/c]) 
 	  pair?]
 )]{
-Unsafe versions of @racket[hash-iterate-key] and similar ops. These operations
-support @tech{chaperones} and @tech{impersonators}.
+Unsafe versions of @racket[hash-iterate-key] and similar procedures.
+These operations support @tech{chaperones} and @tech{impersonators}.
 
-Each unsafe @code{-first} and @code{-next} operation may not return a number
-index but rather an internal representation of a view into the hash structure,
-enabling faster iteration. 
+Each unsafe ...@code{-first} and ...@code{-next} procedure may return,
+instead of a number index, an internal representation of a view into
+the hash structure, enabling faster iteration. The result of these
+...@code{-first} and ...@code{-next} functions should be given as
+@racket[pos] to the corresponding unsafe accessor functions.
 
-The result of these @code{-first} and @code{-next}] functions should be given
-to the corresponding unsafe accessor functions.
+If the @racket[pos] provided to an accessor function for a mutable
+@racket[hash] was formerly a @tech{valid hash index} but is no longer
+a @tech{valid hash index} for @racket[hash], and if
+@racket[bad-index-v] is not provided, then the
+@exnraise[exn:fail:contract]. No behavior is specified for a
+@racket[pos] that was never a @tech{valid hash index} for
+@racket[hash]. Note that @racket[bad-index-v] argument is technically
+not useful for the @code{unsafe-immutable-hash-iterate-} functions,
+since an index cannot become invalid for an immutable @racket[hash].
 
-If the key or value at the position returned by the @code{-first} and
-@code{-next} ops becomes invalid (e.g., because of mutation or garbage
-collection), then the operations @exnraise[exn:fail:contract].
-
-@history[#:added "6.4.0.6"]
-}
+@history[#:added "6.4.0.6"
+         #:changed "7.0.0.10" @elem{Added the optional @racket[bad-index-v] argument.}]}
 
 @; ------------------------------------------------------------------------
 
