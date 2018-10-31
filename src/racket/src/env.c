@@ -370,6 +370,7 @@ static void init_unsafe(Scheme_Startup_Env *env)
   scheme_init_unsafe_number(env);
   scheme_init_unsafe_numarith(env);
   scheme_init_unsafe_numcomp(env);
+  scheme_init_unsafe_char(env);
   scheme_init_unsafe_list(env);
   scheme_init_unsafe_hash(env);
   scheme_init_unsafe_vector(env);
@@ -444,6 +445,10 @@ static Scheme_Env *place_instance_init(void *stack_base, int initial_main_os_thr
   scheme_init_thread_lwc();
 
   scheme_init_compenv_places();
+
+#ifdef MZ_USE_JIT
+  scheme_init_jitprep();
+#endif
 
 #ifdef TIME_STARTUP_PROCESS
   printf("pre-process @ %" PRIdPTR "\n", scheme_get_process_milliseconds());
@@ -532,6 +537,8 @@ static Scheme_Env *place_instance_init(void *stack_base, int initial_main_os_thr
 
   scheme_starting_up = 0;
 
+  scheme_performance_record_end("boot", NULL);
+
   --scheme_current_thread->suspend_break; /* created with breaks suspended */
 
 #ifdef TIME_STARTUP_PROCESS
@@ -554,6 +561,7 @@ Scheme_Env *scheme_place_instance_init(void *stack_base, struct NewGC *parent_gc
   GC_construct_child_gc(parent_gc, memory_limit);
 # endif
   scheme_rktio = rktio_init();
+  if (!scheme_rktio) return NULL;
   env = place_instance_init(stack_base, 0);
 # if defined(MZ_PRECISE_GC)
   if (scheme_rktio) {
@@ -589,6 +597,8 @@ void scheme_place_instance_destroy(int force)
     scheme_run_atexit_closers_on_all(force_more_closed);
   else
     scheme_run_atexit_closers_on_all(force_more_closed_after);
+
+  scheme_run_post_custodian_shutdown();
 
   scheme_release_fd_semaphores();
   

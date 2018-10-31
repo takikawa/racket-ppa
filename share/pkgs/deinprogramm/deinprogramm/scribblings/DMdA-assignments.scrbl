@@ -7,8 +7,8 @@
 @title[#:style 'toc #:tag "DMdA-assignments"]{Die Macht der Abstraktion mit Zuweisungen}
 
 This is documentation for the language level @italic{Die Macht der
-Abstraktion mit Zuweisungen} to go with the German textbook
-@italic{Die Macht der Abstraktion}.
+Abstraktion mit Zuweisungen} to go with the German textbooks
+@italic{Schreibe Dein Programm!} / @italic{Die Macht der Abstraktion}.
 
 @declare-exporting[deinprogramm/DMdA-assignments]
 
@@ -22,7 +22,18 @@ Abstraktion mit Zuweisungen} to go with the German textbook
   [field-spec id (id id)]
 )
 (
+  @#,racket[(let ((id expr) (... ...)) expr)]
+  @#,racket[(letrec ((id expr) (... ...)) expr)]
+  @#,racket[(let* ((id expr) (... ...)) expr) ]
+  @#,racket[(begin expr expr (... ...))]
   (set! id expr)
+)
+(
+  @#,racket[(list-of sig)]
+)
+(
+ @#,racket[(make-pair pattern pattern)]
+ @#,racket[(list pattern ...)]
 )
 ]
 
@@ -91,10 +102,11 @@ oder @racket[write-string].
 Sprachebenen, mit dem Unterschied, dass an @racket[id] mit
 @racket[set!] zugewiesen werden kann.}
 
-@section[#:tag "advanced-lambda"]{@racket[lambda]}
+@section[#:tag "advanced-lambda"]{@racket[lambda] / @racket[λ]}
 @declare-exporting[deinprogramm/DMdA-deflam]
 
-@defform[(lambda (id id ... . id) expr)]{Bei @racket[lambda] ist in
+@defform[(lambda (id id ... . id) expr)]{
+Bei @racket[lambda] ist in
 dieser Sprachebene in einer Form zulässig, die es erlaubt, eine
 Prozedur mit einer variablen Anzahl von Paramern zu erzeugen: Alle
 Parameter vor dem Punkt funktionieren wie gewohnt und werden jeweils
@@ -102,6 +114,9 @@ an die entsprechenden Argumente gebunden.  Alle restlichen Argumente
 werden in eine Liste verpackt und an den Parameter nach dem Punkt
 gebunden.}
 
+@defform[(λ (id id ... . id) expr)]{
+@racket[λ] ist ein anderer Name für @racket[lambda].
+}
 
 @section[#:tag "assignments-prim-op"]{Primitive Operationen}
 

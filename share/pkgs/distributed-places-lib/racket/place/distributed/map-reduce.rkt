@@ -97,7 +97,7 @@
     (supervise-place-at n
                         (->module-path (quote-module-path))
                         'map-reduce-worker
-                        #:named (i->place-name)))
+                        #:named (i->place-name i)))
   nodes)
 
 (define (default-sorter a b)

@@ -1,5 +1,7 @@
 #lang racket/base
-(require "../common/check.rkt"
+(require racket/fixnum
+         "../common/check.rkt"
+         "../common/fixnum.rkt"
          "../host/thread.rkt"
          "port.rkt"
          "input-port.rkt"
@@ -49,18 +51,18 @@
   (check who #:or-false exact-positive-integer? limit)
   (define bstr (make-bytes (min+1 limit 16)))
   (define len (bytes-length bstr))
-  (define peeked-amt 0) ; peeked but not yet read effectively extends `limit`
-  (define start 0)
-  (define end 0)
+  (define-fixnum peeked-amt 0) ; peeked but not yet read effectively extends `limit`
+  (define-fixnum start 0)
+  (define-fixnum end 0)
   (define write-pos #f) ; to adjust the write position via `file-position` on a string port
   (define input-closed? #f)
   (define output-closed? #f)
 
   (define (content-length)
-    (if (start . <= . end)
-        (- end start)
-        (+ end (- len start))))
-  (define (input-empty?) (= start end))
+    (if (start . fx<= . end)
+        (fx- end start)
+        (fx+ end (fx- len start))))
+  (define (input-empty?) (fx= start end))
   (define (output-full?)
     (and limit
          ((content-length) . >= . (+ limit peeked-amt))))
@@ -75,7 +77,7 @@
        [() (or write-pos end)]
        [(pos)
         ;; `pos` must be between `start` and `end`
-        (if (= pos end)
+        (if (fx= pos end)
             (set! write-pos #f)
             (set! write-pos pos))])
      ;; discard-all
@@ -158,6 +160,7 @@
      
      #:read-byte
      (lambda ()
+       (assert-atomic)
        (cond
          [(input-empty?)
           (if output-closed?
@@ -167,16 +170,19 @@
          [else
           (define pos start)
           (check-output-unblocking)
-          (set! start (add1 pos))
-          (set! peeked-amt (max 0 (sub1 peeked-amt)))
-          (when (= start len)
-            (set! start 0))
+          (unless (fx= 0 peeked-amt)
+            (set! peeked-amt (fxmax 0 (fx- peeked-amt 1))))
+          (define new-pos (fx+ pos 1))
+          (if (fx= new-pos len)
+              (set! start 0)
+              (set! start new-pos))
           (check-input-blocking)
           (progress!)
           (bytes-ref bstr pos)]))
 
      #:read-in
      (lambda (dest-bstr dest-start dest-end copy?)
+       (assert-atomic)
        (cond
          [(input-empty?)
           (if output-closed?
@@ -186,25 +192,26 @@
           (check-output-unblocking)
           (begin0
             (cond
-              [(start . < . end)
-               (define amt (min (- dest-end dest-start)
-                                (- end start)))
-               (bytes-copy! dest-bstr dest-start bstr start (+ start amt))
-               (set! start (+ start amt))
-               (set! peeked-amt (max 0 (- peeked-amt amt)))
+              [(start . fx< . end)
+               (define amt (fxmin (fx- dest-end dest-start)
+                                  (fx- end start)))
+               (bytes-copy! dest-bstr dest-start bstr start (fx+ start amt))
+               (set! start (fx+ start amt))
+               (set! peeked-amt (fxmax 0 (fx- peeked-amt amt)))
                amt]
               [else
-               (define amt (min (- dest-end dest-start)
-                                (- len start)))
-               (bytes-copy! dest-bstr dest-start bstr start (+ start amt))
-               (set! start (modulo (+ start amt) len))
-               (set! peeked-amt (max 0 (- peeked-amt amt)))
+               (define amt (fxmin (fx- dest-end dest-start)
+                                  (fx- len start)))
+               (bytes-copy! dest-bstr dest-start bstr start (fx+ start amt))
+               (set! start (modulo (fx+ start amt) len))
+               (set! peeked-amt (fxmax 0 (fx- peeked-amt amt)))
                amt])
             (check-input-blocking)
             (progress!))]))
 
      #:peek-byte
      (lambda ()
+       (assert-atomic)
        (cond
          [(input-empty?)
           (if output-closed?
@@ -216,6 +223,7 @@
      
      #:peek-in
      (lambda (dest-bstr dest-start dest-end skip progress-evt copy?)
+       (assert-atomic)
        (define content-amt (content-length))
        (cond
          [(and progress-evt
@@ -233,25 +241,26 @@
                                        (lambda (v) 0))))
              evt])]
          [else
-          (define peek-start (modulo (+ start skip) len))
+          (define peek-start (fxmodulo (fx+ start skip) len))
           (cond
-            [(peek-start . < . end)
-             (define amt (min (- dest-end dest-start)
-                              (- end peek-start)))
-             (bytes-copy! dest-bstr dest-start bstr peek-start (+ peek-start amt))
+            [(peek-start . fx< . end)
+             (define amt (fxmin (fx- dest-end dest-start)
+                                (fx- end peek-start)))
+             (bytes-copy! dest-bstr dest-start bstr peek-start (fx+ peek-start amt))
              (peeked! (+ skip amt))
              amt]
             [else
-             (define amt (min (- dest-end dest-start)
-                              (- len peek-start)))
-             (bytes-copy! dest-bstr dest-start bstr peek-start (+ peek-start amt))
+             (define amt (fxmin (fx- dest-end dest-start)
+                                (fx- len peek-start)))
+             (bytes-copy! dest-bstr dest-start bstr peek-start (fx+ peek-start amt))
              (peeked! (+ skip amt))
              amt])]))
 
      #:byte-ready
      (lambda (work-done!)
+       (assert-atomic)
        (or output-closed?
-           (not (zero? (content-length)))))
+           (not (fx= 0 (content-length)))))
 
      #:close
      (lambda ()
@@ -273,6 +282,7 @@
      ;; Allows `amt` to be zero and #f for other arguments,
      ;; which is helpful for `open-input-peek-via-read`.
      (lambda (amt progress-evt ext-evt finish)
+       (assert-atomic)
        ;; `progress-evt` is a `semepahore-peek-evt`, and `ext-evt`
        ;; is constrained; we can send them over to different threads
        (cond
@@ -285,20 +295,20 @@
            (lambda ()
              (let ([amt (min amt (content-length))])
                (cond
-                 [(zero? amt)
+                 [(fx= 0 amt)
                   ;; There was nothing to commit; claim success for 0 bytes
                   (finish #"")]
                  [else
                   (define dest-bstr (make-bytes amt))
                   (cond
-                    [(start . < . end)
-                     (bytes-copy! dest-bstr 0 bstr start (+ start amt))]
+                    [(start . fx< . end)
+                     (bytes-copy! dest-bstr 0 bstr start (fx+ start amt))]
                     [else
-                     (define amt1 (min (- len start) amt))
-                     (bytes-copy! dest-bstr 0 bstr start (+ start amt1))
-                     (when (amt1 . < . amt)
-                       (bytes-copy! dest-bstr amt1 bstr 0 (- amt amt1)))])
-                  (set! start (modulo (+ start amt) len))
+                     (define amt1 (fxmin (fx- len start) amt))
+                     (bytes-copy! dest-bstr 0 bstr start (fx+ start amt1))
+                     (when (amt1 . fx< . amt)
+                       (bytes-copy! dest-bstr amt1 bstr 0 (fx- amt amt1)))])
+                  (set! start (fxmodulo (fx+ start amt) len))
                   (progress!)
                   (check-input-blocking)
                   (finish dest-bstr)]))))]))))
@@ -314,24 +324,25 @@
      #:write-out
      ;; in atomic mode
      (lambda (src-bstr src-start src-end nonblock? enable-break? copy?)
+       (assert-atomic)
        (let try-again ()
-         (define top-pos (if (zero? start)
-                             (sub1 len)
+         (define top-pos (if (fx= start 0)
+                             (fx- len 1)
                              len))
          (define (maybe-grow)
            (cond
              [(or (not limit)
-                  ((+ limit peeked-amt) . > . (sub1 len)))
+                  ((+ limit peeked-amt) . > . (fx- len 1)))
               ;; grow pipe size
               (define new-bstr (make-bytes (min+1 (and limit (+ limit peeked-amt)) (* len 2))))
               (cond
-                [(zero? start)
-                 (bytes-copy! new-bstr 0 bstr 0 (sub1 len))]
+                [(fx= 0 start)
+                 (bytes-copy! new-bstr 0 bstr 0 (fx- len 1))]
                 [else
                  (bytes-copy! new-bstr 0 bstr start len)
-                 (bytes-copy! new-bstr (- len start) bstr 0 end)
+                 (bytes-copy! new-bstr (fx- len start) bstr 0 end)
                  (set! start 0)
-                 (set! end (sub1 len))])
+                 (set! end (fx- len 1))])
               (set! bstr new-bstr)
               (set! len (bytes-length new-bstr))
               (try-again)]
@@ -343,59 +354,59 @@
                (min amt (- (+ limit peeked-amt) (content-length)))
                amt))
          (cond
-           [(= src-start src-end) ;; => flush
+           [(fx= src-start src-end) ;; => flush
             0]
            [write-pos ; set by `file-position` on a bytes port
-            (define amt (apply-limit (min (- end write-pos)
-                                          (- src-end src-start))))
+            (define amt (apply-limit (fxmin (fx- end write-pos)
+                                            (fx- src-end src-start))))
             (cond
-              [(zero? amt) (pipe-is-full)]
+              [(fx= amt 0) (pipe-is-full)]
               [else
                (check-input-unblocking)
-               (bytes-copy! bstr write-pos src-bstr src-start (+ src-start amt))
-               (let ([new-write-pos (+ write-pos amt)])
-                 (if (= new-write-pos end)
+               (bytes-copy! bstr write-pos src-bstr src-start (fx+ src-start amt))
+               (let ([new-write-pos (fx+ write-pos amt)])
+                 (if (fx= new-write-pos end)
                      (set! write-pos #f) ; back to normal mode
                      (set! write-pos new-write-pos)))
                (check-output-blocking)
                amt])]
-           [(and (end . >= . start)
-                 (end . < . top-pos))
-            (define amt (apply-limit (min (- top-pos end)
-                                          (- src-end src-start))))
+           [(and (end . fx>= . start)
+                 (end . fx< . top-pos))
+            (define amt (apply-limit (fxmin (fx- top-pos end)
+                                            (fx- src-end src-start))))
             (cond
-              [(zero? amt) (pipe-is-full)]
+              [(fx= amt 0) (pipe-is-full)]
               [else
                (check-input-unblocking)
-               (bytes-copy! bstr end src-bstr src-start (+ src-start amt))
-               (let ([new-end (+ end amt)])
-                 (set! end (if (= new-end len) 0 new-end)))
+               (bytes-copy! bstr end src-bstr src-start (fx+ src-start amt))
+               (let ([new-end (fx+ end amt)])
+                 (set! end (if (fx= new-end len) 0 new-end)))
                (check-output-blocking)
                amt])]
-           [(= end top-pos)
+           [(fx= end top-pos)
             (cond
-              [(zero? start)
+              [(fx= start 0)
                (maybe-grow)]
               [else
-               (define amt (min (sub1 start)
-                                (- src-end src-start)))
+               (define amt (fxmin (fx- start 1)
+                                  (fx- src-end src-start)))
                (cond
-                 [(zero? amt) (pipe-is-full)]
+                 [(fx= amt 0) (pipe-is-full)]
                  [else
                   (check-input-unblocking)
-                  (bytes-copy! bstr 0 src-bstr src-start (+ src-start amt))
+                  (bytes-copy! bstr 0 src-bstr src-start (fx+ src-start amt))
                   (set! end amt)
                   (check-output-blocking)
                   amt])])]
-           [(end . < . (sub1 start))
-            (define amt (apply-limit (min (- (sub1 start) end)
-                                          (- src-end src-start))))
+           [(end . fx< . (fx- start 1))
+            (define amt (apply-limit (fxmin (fx- (fx- start 1) end)
+                                            (fx- src-end src-start))))
             (cond
-              [(zero? amt) (pipe-is-full)]
+              [(fx= amt 0) (pipe-is-full)]
               [else
                (check-input-unblocking)
-               (bytes-copy! bstr end src-bstr src-start (+ src-start amt))
-               (set! end (+ end amt))
+               (bytes-copy! bstr end src-bstr src-start (fx+ src-start amt))
+               (set! end (fx+ end amt))
                (check-output-blocking)
                amt])]
            [else

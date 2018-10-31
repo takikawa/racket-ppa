@@ -1,7 +1,8 @@
 (library (io)
   (export)
-  (import (except (chezpart)
-                  close-port)
+  (import (rename (except (chezpart)
+                          close-port)
+                  [define chez:define])
           (rename (only (chezscheme)
                         read-char peek-char
                         current-directory
@@ -12,8 +13,23 @@
                   [input-port? chez:input-port?]
                   [output-port? chez:output-port?]
                   [flush-output-port flush-output])
-          (rumble)
+          (rename (rumble)
+                  ;; Remapped to place-local register operations:
+                  [unsafe-make-place-local rumble:unsafe-make-place-local]
+                  [unsafe-place-local-ref rumble:unsafe-place-local-ref]
+                  [unsafe-place-local-set! rumble:unsafe-place-local-set!])
           (thread))
+
+  (include "place-register.ss")
+  (define-place-register-define place:define io-register-start io-register-count)
+
+  (define-syntax (define stx)
+    (syntax-case stx (unsafe-make-place-local)
+      ;; Workaround for redirected access of `unsafe-make-place-local` from #%pthread:
+      [(_ alias-id unsafe-make-place-local) #'(begin)]
+      ;; Chain to place-register handling:
+      [(_ . rest) #'(place:define . rest)]))
+
   ;; ----------------------------------------
   ;; Tie knots:
 
@@ -41,6 +57,7 @@
     (define-ftype intptr_t iptr)
     (define-ftype uintptr_t uptr)
     (define-ftype rktio_int64_t integer-64)
+    (define-ftype function-pointer uptr)
     (define _uintptr _uint64)
     (define NULL 0)
 
@@ -113,7 +130,7 @@
              (with-syntax ([ret-type (convert-type #'orig-ret-type)]
                            [(arg-type ...) (map convert-type #'(orig-arg-type ...))]
                            [(conv ...) (if (#%memq 'blocking (map syntax->datum #'(flag ...)))
-                                           #'(__thread)
+                                           #'(__collect_safe)
                                            #'())])
                #'(let ([proc (foreign-procedure conv ... (rktio-lookup 'name)
                                                 (arg-type ...)
@@ -255,6 +272,11 @@
       (rktio_to_bytes_list lls len)
       (void))
 
+    (define (rktio_make_sha1_ctx)
+      (make-bytevector (ftype-sizeof rktio_sha1_ctx_t)))
+    (define (rktio_make_sha2_ctx)
+      (make-bytevector (ftype-sizeof rktio_sha2_ctx_t)))
+
     (define (null-to-false v) (if (eqv? v NULL) #f v))
 
     (define (rktio_process_result_stdin_fd r)
@@ -270,6 +292,11 @@
       (ftype-ref rktio_status_t (running) (make-ftype-pointer rktio_status_t (ptr->address r))))
     (define (rktio_status_result r)
       (ftype-ref rktio_status_t (result) (make-ftype-pointer rktio_status_t (ptr->address r))))
+
+    (define (rktio_pipe_results r)
+      (values
+       (address->ptr (foreign-ref 'uptr (ptr->address r) 0))
+       (address->ptr (foreign-ref 'uptr (ptr->address r) (foreign-sizeof 'uptr)))))
 
     (define (rktio_do_install_os_signal_handler rktio)
       (rktio_install_os_signal_handler rktio))
@@ -318,12 +345,15 @@
                                  'rktio_free_bytes_list rktio_free_bytes_list
                                  'rktio_from_bytes_list rktio_from_bytes_list
                                  'rktio_free_bytes_list rktio_free_bytes_list
+                                 'rktio_make_sha1_ctx rktio_make_sha1_ctx
+                                 'rktio_make_sha2_ctx rktio_make_sha2_ctx
                                  'rktio_process_result_stdin_fd rktio_process_result_stdin_fd
                                  'rktio_process_result_stdout_fd rktio_process_result_stdout_fd
                                  'rktio_process_result_stderr_fd rktio_process_result_stderr_fd
                                  'rktio_process_result_process rktio_process_result_process
                                  'rktio_status_running rktio_status_running
                                  'rktio_status_result rktio_status_result
+                                 'rktio_pipe_results rktio_pipe_results
                                  'rktio_do_install_os_signal_handler rktio_do_install_os_signal_handler
                                  'rktio_get_ctl_c_handler rktio_get_ctl_c_handler]
                                 form ...)]))
@@ -377,14 +407,15 @@
 
   (define (primitive-table key)
     (case key
+      [(|#%pthread|) (hasheq)]
       [(|#%thread|) |#%thread-instance|]
       [(|#%rktio|) |#%rktio-instance|]
       [else #f]))
 
   (include "include.ss")
   (include-generated "io.scm")
-  
-  ;; Initialize:
+
+   ;; Initialize:
   (|#%app| 1/current-directory (current-directory))
   (|#%app| 1/current-directory-for-user (current-directory))
   (set-log-system-message! (lambda (level str)

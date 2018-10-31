@@ -21,7 +21,7 @@ linklet. A linklet is also used for metadata such as the @tech{module
 path index}es for a module's @racket[require]s. These linklets, plus
 some other metadata, are combined to form a @deftech{linklet bundle}.
 Information in a @tech{linklet bundle} is keyed by either a symbol or
-a @tech{fixnum}. A @tech{linklet directory} containing
+a @tech{fixnum}. A @tech{linklet bundle} containing
 @tech{linklet}s can be marshaled to and from a byte stream by
 @racket[write] and (with @racket[read-accept-compiled] is enabled)
 @racket[read].
@@ -95,7 +95,7 @@ Primitives are accessed directly by name, and shadowing is not allowed
 within a @racketidfont{linklet} form for primitive names, imported
 variables, defined variables, or local variables.
 
-When a @racket[_exported-id/renamed] has no corresponding definition
+When an @racket[_exported-id/renamed] has no corresponding definition
 among the @racket[_defn-or-expr]s, then the variable is effectively
 defined as uninitialized; referencing the variable will trigger
 @racket[exn:fail:contract:variable], the same as referencing a
@@ -106,7 +106,7 @@ uninitialized variables provides core support for top-level evaluation
 where variables may be referenced and then defined in a separate
 element of compilation.
 
-@history[#:added "6.6.1"]
+@history[#:added "6.90.0.1"]
 
 @; --------------------------------------------------
 
@@ -135,7 +135,7 @@ Takes an S-expression or @tech{correlated object} for a
 @schemeidfont{linklet} form and produces a @tech{linklet}.
 As long as @racket['serializable] included in @racket[options], the
 resulting linklet can be marshaled to and from a byte stream when it is
-part of a @tech{linklet bundle}.
+part of a @tech{linklet bundle} (possibly in a @tech{linklet directory}).
 
 The optional @racket[name] is associated to the linklet for debugging
 purposes and as the default name of the linklet's instance.
@@ -152,7 +152,7 @@ provided to the compiled linklet when it is eventually instantiated;
 ensuring consistency between reported linklet or instance and the eventual
 instance is up to the caller of @racket[compile-linklet]. If
 @racket[get-import] returns @racket[#f] as its first value, the
-compiler will be prevented from make any assumptions about the
+compiler will be prevented from making any assumptions about the
 imported instance. The second result from @racket[get-import] is an
 optional vector of keys to provide transitive information on a
 returned linklet's imports (and is not allowed for a returned instance);
@@ -183,8 +183,8 @@ the linklet is compiled in @tech{unsafe mode} can be exposed through
 produced by a @racket[#%variable-reference] form within the module
 body.
 
-If @racket['static] is included in @racket[options] then the linklet
-must be instantiated only once; in the linklet is serialized, then any
+If @racket['static] is included in @racket[options], then the linklet
+must be instantiated only once; if the linklet is serialized, then any
 individual instance read from the serialized form must be instantiated
 at most once. Compilation with @racket['static] is intended to improve
 the performance of references within the linklet to defined and
@@ -385,17 +385,28 @@ Sets or creates the variable exported as @racket[name] in
 variable does not exist already as constant. If a variable for
 @racket[name] exists as constant, the @exnraise[exn:fail:contract].
 
-If @racket[mode] is a single, then the variable is created or changed
-to be constant. If @racket[mode] is @racket['consistent], then
-the optimizer can assume that the value has the same shape in all
-instances that are used to satisfy a linklet's imports.}
+If @racket[mode] is @racket['constant] or @racket['consistent], then
+the variable is created or changed to be constant. Furthermore, when
+the instance is reported for a linklet's import though a
+@racket[_get-import] callback to @racket[compile-linklet], the
+compiler can assume that the variable will be constant in all future
+instances that are used to satisfy a linklet's imports.
+
+If @racket[mode] is @racket['consistent], when the instance is
+reported though a callback to @racket[compile-linklet], the compiler
+can further assume that the variable's value will be the same for
+future instances. For compilation purposes, ``the same'' can mean that
+a procedure value will have the same arity and implementation details,
+a @tech{structure type} value will have the same configuration, a
+marshalable constant will be @racket[equal?] to the current value, and
+so on.}
 
 
 @defproc[(instance-unset-variable! [instance instance?]
                                    [name symbol?])
           void?]{
 
-Changes @racket[instance] so taht it does not export a variable as
+Changes @racket[instance] so that it does not export a variable as
 @racket[name], as long as @racket[name] does not exist as a constant
 variable. If a variable for @racket[name] exists as constant, the
 @exnraise[exn:fail:contract].}

@@ -128,7 +128,7 @@
   (cs-rename-var "重命名~a")
   (cs-rename-id "重命名标识符")
   (cs-rename-var-to "将~a重命名为：")
-  (cs-name-duplication-error "你所选择的新名称~s与当前辖域内现有标识符相同。")
+  (cs-name-duplication-error "你所选择的新名称~s与当前作用域内现有标识符相同。")
   (cs-rename-anyway "强制重命名")
   (cs-status-init "检查语法：为用户代码初始化环境")
   (cs-status-coloring-program "检查语法：为程序着色")
@@ -180,10 +180,11 @@
   (online-expansion-running "语法检查后台运行中")
   (online-expansion-only-raw-text-files-supported "仅支持纯文本文件")
   (online-expansion-abnormal-termination "语法检查后台异常退出")
-  (online-expansion-abnormal-termination-out-of-memory "语法检查后台异常退出(内存不足)")
+  (online-expansion-abnormal-termination-out-of-memory "语法检查后台异常退出（内存不足）")
   (online-expansion-finished-successfully "语法检查后台成功运行")
   
   (jump-to-error "跳至错误")
+  (copy-error-message "复制错误信息")
   (online-expansion-is-disabled "语法检查后台运行被禁用")
   ; these next two show up in the bar along the bottom of the drracket window
   (online-expansion-pending "语法检查后台运行……")
@@ -315,7 +316,7 @@
   (plt:hd:containing-match "包含")
   (plt:hd:regexp-match "正则表达式匹配")
   (plt:hd:find-docs-for "搜索文档：")
-  (plt:hd:search-stopped-too-many-matches "[搜索中断：过多匹配结果]")
+  (plt:hd:search-stopped-too-many-matches "【搜索中断：过多匹配结果】")
   (plt:hd:nothing-found-for "找不到任何关于~a的信息")
   (plt:hd:and "并且")
   (plt:hd:refresh "更新")
@@ -334,7 +335,7 @@
    "帮助台是Racket软件的完整信息来源。\n\n版本~a\n版权所有（c）~a—~a PLT")
   (plt:hd:help-on-help "关于帮助的帮助")
   (plt:hd:help-on-help-details
-   "关于使用帮助台的帮助，请参见帮助台首页中的第一个链接‘帮助台’。（要进入帮助台的首页，请单击帮助台视窗上方的‘首页’按钮。）")
+   "关于使用帮助台的帮助，请参见帮助台首页中的第一个链接“帮助台”。（要进入帮助台的首页，请单击帮助台视窗上方的“首页”按钮。）")
   (reload "刷新") ;; refresh the page in a web browser
   (plt:hd:ask-about-separate-browser
    "你选择了一个指向万维网的链接。请问您是要在帮助台中打开该页面，还是想使用浏览器程序浏览网页？")
@@ -385,7 +386,7 @@
   (paren-file-size "（该文件的长度是~a字节）")
   (download-and-install "下载并安装(&&)") ;; button label
   (download "下载") ;; button label
-  (save-downloaded-file/size "下载文件(~a字节)并保存为") ;; label for get-file dialog
+  (save-downloaded-file/size "下载文件（~a字节）并保存为") ;; label for get-file dialog
   (save-downloaded-file "下载文件并保存为")  ;; label for get-file dialog
   (downloading "下载中") ;; dialog title
   (downloading-file... "下载文件中……")
@@ -416,7 +417,11 @@
   
   ;;; save file in particular format prompting.
   (save-as-plain-text "保存本文件为纯文本？")
-  (save-in-drs-format "保存本文件为drscheme（非纯文本）格式？")
+　 (save-as-binary-format "将此文件转换为DrRacket格式以保留非文本元素？")
+  (save-in-drs-format "将本文件保存为DrRacket（非纯文本）格式？")
+　 (keep-format "保留（可能会丢失数据）")
+ 　(convert-format "转换（推荐选项）")
+ 　(dont-save "不保存")
   (yes "是")
   (no "否")
   
@@ -439,9 +444,9 @@
   (try-again "重试") ;; button label
   (give-up-and-use-the-default "放弃并使用默认值") ;; button label
   
-  (prefs-file-still-locked "存储首选项的文件仍然被锁定（由于文件~a的存在）, 所以这些改动将不会被保存。")
+  (prefs-file-still-locked "存储首选项的文件仍然被锁定（由于文件~a的存在），所以这些改动将不会被保存。")
   (prefs-file-locked-nothing-doing
-   "首选项文件友~s锁定，故修改不会被保存。")
+   "首选项文件由~s锁定，故修改不会被保存。")
   ;; the  ~s is filled with the lockfile; this string is (currently) used only on windows where lockfiles are less friendly (and there is no steal fallback)
   
   (scheme-prefs-panel-label "Racket")
@@ -474,7 +479,7 @@
   (alt-as-meta "将alt键当作meta")
   (reuse-existing-frames "在打开新文件时，使用现有的视窗")
   (default-fonts "默认字体")
-  (paren-match-color "高亮显示括号所使用的颜色") ; in prefs dialog
+　 (basic-gray-paren-match-color "高亮显示括号所使用的颜色") ; in prefs dialog
   (online-coloring-active "实时根据语法用颜色标记程序")
   (open-files-in-tabs "在不同的标签下打开多个文件（不使用多个视窗）")
   (show-interactions-on-execute "在运行程序时自动打开交互视窗")
@@ -506,6 +511,8 @@
   (style-and-color-names "风格和颜色名称")
   
   (add-spacing-between-lines "在行间额外填充一个像素")
+  
+  (editor-x-selection-mode "粘贴之前明确要求复制操作/不自动复制选中的内容")
   
   ; title of the color choosing dialog
   
@@ -584,7 +591,7 @@
   (search-show-replace "显示替换")
   (search-hide-replace "隐藏替换")
   (find-case-sensitive "大小写敏感")  ;; the check box in both the docked & undocked search
-  (find-anchor-based "用锚进行搜索")
+  (find-anchor-based "用anchor搜索")
   
   ;; these string constants used to be used by searching,
   ;; but aren't anymore. They are still used by other tools, tho.
@@ -624,7 +631,7 @@
   (error-saving "保存出错") ;; title of error message dialog
   (error-saving-file/name "在保存文件~a时出现错误。")
   (error-loading "读取出错")
-  (error-loading-file/name "在读取~a时出现错误.")
+  (error-loading-file/name "在读取~a时出现错误。")
   (unknown-filename "《未知》")
   
   ;;; finder dialog
@@ -646,7 +653,7 @@
   (dir-dne "该目录不存在。")
   (file-dne "该文件不存在。")
   (empty-filename "文件名中必须包含文字。")
-  (that-is-dir-name "这是一个目录名。")
+  (that-is-dir-name "这是个目录名。")
   
   ;;; raw menu names -- these must match the 
   ;;; versions below, once the &s have been stripped.
@@ -686,7 +693,7 @@
   (save-info "保存当前文件")
   (save-menu-item "保存(&S)")
   
-  (save-as-info "输入新的文件名,保存当前文件")
+  (save-as-info "输入新的文件名，保存当前文件")
   (save-as-menu-item "另存为(&A)…")
   
   (print-info "打印当前文件")
@@ -772,14 +779,14 @@
   (keybindings-menu-remove "移除~a")
   (keybindings-choose-user-defined-file "请选择一个包含快捷键的文件")
   (keybindings-planet-malformed-spec "错误的PLaneT名称：~a") ; the string will be what the user typed in
-  (keybindings-type-planet-spec "请输入PLaneT包名称（无需输入‘require’）")
+  (keybindings-type-planet-spec "请输入PLaneT包名称（无需输入“require”）")
   
   ; first ~a will be a string naming the file or planet package where the keybindings come from;
   ; second ~a will be an error message
   (keybindings-error-installing-file "安装快捷键~a时出错：\n\n~a")
   
   (user-defined-keybinding-error "快捷键~a出错\n\n~a")
-  (user-defined-keybinding-malformed-file "文件~a并不是一个使用framework/keybinding-lang语言编写的module.")
+  (user-defined-keybinding-malformed-file "文件~a并不是一个使用framework/keybinding-lang语言编写的module。")
   (user-defined-keybinding-malformed-file/found-lang
    "文件~a并不是一个使用framework/keybinding-lang语言编写的module，而是由~s语言编写")
   
@@ -889,26 +896,34 @@
   (drscheme-internal-error "DrRacket内部错误")
   
   ;;; tools
-  (invalid-tool-spec "Collection ~a中info.rkt的tool定义不正确。需要一个字符串或者一个非空表，实得：~e")
+  (invalid-tool-spec "Collection ~a中info.rkt的tool定义不正确。需要字符串或非空表，实得：~e")
   (error-invoking-tool-title "调用tool ~s出错；~s")
   (error-loading-tool-title "载入tool ~s出错\n~a") ;; ~s filled with a path, ~a filled with an error message from an exn
   (tool-tool-names-same-length
-   "在~s的info.rkt文件中，‘tool-names’和‘tools’应该是等长的表，实得~e和~e")
+   "在~s的info.rkt文件中，“tool-names”和“tools”应该是等长的表，实得~e和~e")
   (tool-tool-icons-same-length
-   "在~s的info.rkt文件中，‘tool-icons’和“tools’应该是等长的表，实得~e和~e")
+   "在~s的info.rkt文件中，“tool-icons”和“tools”应该是等长的表，实得~e和~e")
   (tool-tool-urls-same-length
-   "在~s的info.rkt文件中，‘tool-urls’和“tools’应该是等长的表，实得~e和~e")
+   "在~s的info.rkt文件中，“tool-urls”和“tools”应该是等长的表，实得~e和~e")
   (error-getting-info-tool
    "载入~s的info.rkt文件出错")
   (tool-error-phase1 "tool ~s第一阶段出错；~s")
   (tool-error-phase2 "tool ~s第二阶段出错；~s")
-  
+　 ;; tool preferences panel
+　 (tool-config-changes "Tool配置的修改将在下次启动DrRacket时生效。")
+　 (installed-tools "已安装的tool")
+　 (tool-prefs-panel-tool:-label "Tool：")
+　 (load-tool-when-drracket-starts? "DrRacket启动时加载tool？")
+　 (unnamed-tool "未命名的tool ~a")
+　 (note-that-tool-loaded "（已加载）")
+　 (note-that-tool-was-skipped "（跳过）")
+　 (note-that-tool-failed-to-load " （加载失败）")
   
   ;;; define popup menu
-  (end-of-buffer-define "<<缓冲区结束>>")
+  (end-of-buffer-define "《缓冲区结束》")
   (sort-by-name "按名称排序")
   (sort-by-position "按文件中的位置排序")
-  (no-definitions-found "<<没有定义>>")
+  (no-definitions-found "《没有定义》")
   (jump-to-defn "跳至~a的定义")
   (define-menu-configure "配置") ;; label of a submenu that configures the (define ...) popup menu
   
@@ -959,12 +974,12 @@
   (execute-menu-item-label "运行")
   (execute-menu-item-help-string "重新运行定义视窗中的程序")
   (ask-quit-menu-item-label "要求程序终止")
-  (ask-quit-menu-item-help-string "使用break-thread中止当前计算得主线程")
+  (ask-quit-menu-item-help-string "使用break-thread中止当前计算的主线程")
   (force-quit-menu-item-label "强制终止")
   (force-quit-menu-item-help-string "使用custodian-shutdown-all退出当前计算")
   (limit-memory-menu-item-label "限制内存使用…")
   (limit-memory-msg-1 "内存限制会在下一次运行时生效，")
-  (limit-memory-msg-2 "内存限制最低值为八兆字节。")
+  (limit-memory-msg-2 "内存限制最低值为八兆字节(8MB)。")
   (limit-memory-unlimited "无限制")
   (limit-memory-limited "限制")
   (limit-memory-megabytes "兆字节(MB)")
@@ -973,7 +988,7 @@
   ; (the first can be the empty string)
   (limit-memory-warning-prefix "警告：")
   (limit-memory-warning 
-   "不限制内存有潜在的危险。DrRacket将无法保护自己，当运行的程序分配过多内存时，DrRacket会崩溃.")
+   "不限制内存有潜在的危险。DrRacket将无法保护自己，当运行的程序分配过多内存时，DrRacket可能会崩溃。")
   
   (clear-error-highlight-menu-item-label "清除错误高亮显示")
   (clear-error-highlight-item-help-string "清除错误区域的粉红色高亮显示")
@@ -982,7 +997,7 @@
   (reindent-menu-item-label "调整缩进(&R)")
   (reindent-all-menu-item-label "全文调整缩进(&A)")
   (semicolon-comment-out-menu-item-label "用分号注释(&C)")
-  (box-comment-out-menu-item-label "用注释框注释(&C)")
+  (box-comment-out-menu-item-label "用注释框注释(&B)")
   (uncomment-menu-item-label "取消注释(&U)")
   
   (convert-to-semicolon-comment "转化为分号注释")
@@ -991,14 +1006,14 @@
   (create-executable-menu-item-label "创建可执行程序(&E)…")
   (create-executable-title "创建可执行程序")
   (drracket-creates-executables-only-in-some-languages
-   "在DrRacket中创建可执行程序仅支持下列语言选择：在DrRacket语言对话框中选择教学语言（DMdA或者HtDP）；在DrRacket语言对话框中选择“Racket语言”，并且用#lang在文件开始处指定语言。\n\n请考虑使用命令行工具raco exe。")
+   "在DrRacket中创建可执行程序仅支持下列语言选择：在DrRacket语言对话框中选择教学语言（DMdA或者HtDP）；或者在DrRacket语言对话框中选择“Racket语言”，并且用#lang在文件开始处指定语言。\n\n请考虑使用命令行工具raco exe。")
   (must-save-before-executable "在创建可执行程序之前，你必须保存源程序")
   (save-a-mred-launcher "保存为GRacket启动程序")
   (save-a-mzscheme-launcher "保存为Racket启动程序")
   (save-a-mred-stand-alone-executable "保存为GRacket独立可执行程序")
   (save-a-mzscheme-stand-alone-executable "保存为Racket独立可执行程序")
-  (save-a-mred-distribution "保存为GRacket可发布程序")
-  (save-a-mzscheme-distribution "保存为Racket可发布程序")
+  (save-a-mred-distribution "保存为GRacket发布程序")
+  (save-a-mzscheme-distribution "保存为Racket发布程序")
   (error-creating-executable "创建可执行程序出错：") ;; this is suffixed with an error message ala error-display-handler
   
   (definitions-not-saved "当前定义视窗中的程序并没有被保存过。将使用最近保存过的版本来生成可执行程序。是否继续？")
@@ -1008,8 +1023,9 @@
   (launcher-explanatory-label "启动程序（仅在本机运行，运行源代码）")
   (stand-alone "独立程序")
   (stand-alone-explanatory-label "独立程序（仅在本机运行，运行编译代码）")
-  (distribution "可发布程序")
-  (distribution-explanatory-label "可发布程序（可以在其它计算机上安装并运行）")
+  (distribution "发布程序")
+  (distribution-explanatory-label "发布程序（可以在其它计算机上安装并运行）")
+  (embed-dlls? "在可执行文件中嵌入DLL？") ;; appears in the GUI only under windows
   (executable-type "类型")
   (executable-base "基于")
   (filename "文件名：")
@@ -1021,11 +1037,11 @@
   (macosx-executables-must-end-with-app
    "~a文件名\n\n  ~a\n\n不合法。在Mac OS中，文件名必须以.app结尾。")
   (warning-directory-will-be-replaced
-   "警告：目录：\n\n  ~a\n\n将会被重置。继续操作？")
+   "警告：目录：\n\n  ~a\n\n将会被重置。继续？")
   
-  (distribution-progress-window-title "创建进程")
-  (creating-executable-progress-status "创建可执行程序……")
-  (assembling-distribution-files-progress-status "汇编……")
+  (distribution-progress-window-title "发布进度")
+  (creating-executable-progress-status "创建发布程序……")
+  (assembling-distribution-files-progress-status "编译……")
   (packing-distribution-progress-status "打包……")
   
   (create-servlet "创建Servlet……")
@@ -1053,7 +1069,7 @@
   (whole-part "整数部分")
   (numerator "分子")
   (denominator "分母")
-  (insert-number/bad-whole-part "整数部分必须输入一个整数")
+  (insert-number/bad-whole-part "整数部分必须输入整数")
   (insert-number/bad-numerator "分子必须是非负整数")
   (insert-number/bad-denominator "分母必须是正整数")
   (insert-fraction-menu-item-label "插入分数…")
@@ -1068,11 +1084,11 @@
   (select-a-teachpack "选择教学包")
   (clear-teachpack "卸载教学包~a")
   (teachpack-error-label "DrRacket——教学包出错")
-  (teachpack-didnt-load "无法装载教学包~a。")
+  (teachpack-didnt-load "无法加载教学包~a。")
   (add-teachpack-menu-item-label "加载教学包……")
   (clear-all-teachpacks-menu-item-label "卸载全部教学包")
   (drscheme-teachpack-message-title "DrRacket教学包")
-  (already-added-teachpack "教学包~a已装载")
+  (already-added-teachpack "教学包~a已加载")
   
   ; ~a is filled with the teachpack's name; the message appears in the teachpack selection dialog when a user installs a new teachpack
   (compiling-teachpack "编译教学包~a……")
@@ -1080,11 +1096,11 @@
   (teachpack-pre-installed/htdp "自带的HtDP教学包")
   (teachpack-pre-installed/2htdp "自带的HtDP/2e教学包")
   (teachpack-user-installed "用户安装的教学包")
-  (add-teachpack-to-list... "添加教学包…")
+  (add-teachpack-to-list... "添加教学包……")
   ; first and second ~a are teachpack names, third is a symbol identifing an export
   (teachpack-conflict
    "警告：已安装的教学包~a和~a冲突（都export ~a）")
-   ;; a button label; the two ~a are filled with teachpack names
+  ;; a button label; the two ~a are filled with teachpack names
   (remove-and-add-teachpack "移除~a，加载~a")
   (teachpack-already-installed "已经存在一个名为“~a”的教学包。是否覆盖？")
   ; ~a is filled with a list of language names. Each name is separated by a newline and is indented two spaces (no commas, no 'and')
@@ -1096,7 +1112,7 @@
   (language-dialog-title "语言选择")
   (case-sensitive-label "大小写敏感")
   (output-style-label "输出格式")
-  (constructor-printing-style "构造器")
+  (constructor-printing-style "构造函数")
   (quasiquote-printing-style "Quasiquote")
   (write-printing-style "write")
   (print-printing-style "print")
@@ -1120,7 +1136,7 @@
   (revert-to-language-defaults "恢复默认语言设置")
   (fraction-style "分数格式")
   (use-mixed-fractions "带分数")
-  (use-repeating-decimals "循环小数")
+  (use-repeating-decimals "（循环）小数")
   (decimal-notation-for-rationals "使用十进制表示有理数")
   (enforce-primitives-group-box-label "初始绑定")
   (enforce-primitives-check-box-label "不允许改变初始绑定")
@@ -1130,7 +1146,7 @@
   (expression-level-stacktrace "表达式级堆栈跟踪")
   (function-level-stacktrace "函数级堆栈跟踪")
   (submodules-to-run "运行子module")
-  (add-submodule "添加子module选项…") ;; menu item
+  (add-submodule "添加子module…") ;; menu item
   (add-submodule-title "添加子module") ;; title of dialog opened by above menu item
   
   ; used in the bottom left of the drscheme frame as the label
@@ -1147,15 +1163,15 @@
   
   ;;; languages
   (beginning-student "初级")
-  (beginning-one-line-summary "define、cond、结构体、常量和基本操作")
+  (beginning-one-line-summary "define、cond、结构体、常量和基本运算")
   (beginning-student/abbrev "初级+缩写的表")
   (beginning/abbrev-one-line-summary "在初级的基础上，用缩写形式输出表")
   (intermediate-student "中级")
-  (intermediate-one-line-summary "在初级的基础上增加了词法作用域")
+  (intermediate-one-line-summary "在初级的基础上增加词法作用域")
   (intermediate-student/lambda "中级+lambda")
-  (intermediate/lambda-one-line-summary "在中级的基础上，增加了高阶函数")
+  (intermediate/lambda-one-line-summary "在中级的基础上，增加高阶函数")
   (advanced-student "高级")
-  (advanced-one-line-summary "在中级的基础上，增加了lambda和赋值")
+  (advanced-one-line-summary "在中级的基础上，增加lambda和赋值")
   (how-to-design-programs "程序设计方法/How to Design Programs") ;; should agree with MIT Press on this one...
   (pretty-big-scheme "大")
   (pretty-big-scheme-one-line-summary "MzScheme/MrEd加HtDP(程序设计方法)语言")
@@ -1163,7 +1179,7 @@
   (r5rs-one-line-summary "Scheme语言标准第5修改稿")
   (expander "Expander")
   (expander-one-line-summary "展开表达式，而不是求值")
-  (legacy-languages "过去的语言")
+  (legacy-languages "历史遗留语言")
   (teaching-languages "教学语言")
   (experimental-languages "实验语言")
   (initial-language-category "初始语言")
@@ -1177,10 +1193,14 @@
   ;; which is also the "Determine language from source" language. They are put right after the name
   ;; of the language from the "#lang" line at the beginning of the source file
   (module-language-repl-no-annotations "")
-  (module-language-repl-debug-annotations ",带调试")
-  (module-language-repl-debug/profile-annotations ",带调试和性能分析")
+  (module-language-repl-debug-annotations "，带调试")
+  (module-language-repl-debug/profile-annotations "，带调试和性能分析")
   (module-language-repl-test-annotations "，带测试覆盖率")
   
+  (module-language-#lang-error-more-information "更多信息")
+  (module-language-#lang-flush-cache "重新加载")
+  (module-language-#lang-flush-cache-menu-item "重新加载#lang扩展")
+
   ;; for the upper portion of the language dialog
   (the-racket-language "Racket语言")
   (choose-a-language "选择语言")
@@ -1200,9 +1220,9 @@
   ;; The two comments are separated by a blank line.
   (racket-dialect-in-buffer-message 
    "Racket的方言一般而言由源代码指定，而不是语言对话框这里的选项指定。")
-  (racket-dialect-add-new-#lang-line "这就是说，需要在定义视窗开头添加“~a”吗？")
-  (racket-dialect-replace-#lang-line "这就是说，在你的文件里现在有“~a”；需要将其替换成“~a”吗？")
-  (racket-dialect-already-same-#lang-line "不过你的文件中已经包含“~a”；你可以开始编写程序了！")
+  (racket-dialect-add-new-#lang-line "尽管如此，需要在定义视窗开头添加“~a”吗？")
+  (racket-dialect-replace-#lang-line "尽管如此，在你的文件里现在有“~a”；需要将其替换成“~a”吗？")
+  (racket-dialect-already-same-#lang-line "不过你的文件中已经包含“~a”了；可以开始编写程序了！")
   
   ;; in the dialog containing the above strings, one of these is a button that appears
   (add-#lang-line "添加#lang行")
@@ -1228,13 +1248,13 @@
   
   ; the three string constants are concatenated together and the middle
   ; one is hyperlinked to the dialog that suggests various languages
-  (get-guidance-before "请使用“语言”菜单中的“选择语言”对话框，或者")
+  (get-guidance-before "请使用“语言”菜单中的“选择语言…”对话框，或者")
   (get-guidance-during "由DrRacket帮助你选择")
   (get-guidance-after "。")
   
   ;;; debug language
-  (unknown-debug-frame "[未知]")
-  (backtrace-window-title "向后跟踪—DrRacket")
+  (unknown-debug-frame "【未知】")
+  (backtrace-window-title "回溯——DrRacket")
   (files-interactions "~a的交互") ;; filled with a filename
   (current-interactions "交互")
   (current-definitions "定义")
@@ -1299,7 +1319,7 @@
   (exited-with-error-code "退出，错误代码~a。") ;; ~a is filled in with a number between 1 and 255
   (program-ran-out-of-memory "内存耗尽。")
   
-  (show-evaluation-terminated-dialog "显示‘计算终止’对话框")
+  (show-evaluation-terminated-dialog "显示“计算终止”对话框")
   (evaluation-terminated-ask "下次再显示该对话框")
   
   (last-stack-frame "显示最新的栈帧")
@@ -1325,7 +1345,7 @@
   (version:connecting-server  "连接Racket版本服务器")
   (version:results-title      "Racket版本检查")
   (version:do-periodic-checks "定期检查Racket版本更新")
-  (version:take-me-there      "下载") ; ...to the download website
+  (version:take-me-there      "去下载") ; ...to the download website
   ;; the next one can appear alone, or followed by a comma and the one after that
   (version:plt-up-to-date     "您现在使用的已经是最新版本的Racket")
   (version:but-newer-alpha    "但是还有一个更新的alpha版本")
@@ -1352,7 +1372,7 @@
   (module-browser-in-file "M&odule浏览~a") ;; menu item title; ~a is filled with a filename
   (module-browser-no-file "Module浏览存盘文件") ;; menu item title for above menu item; used when there is no saved file
   (module-browser-error-expanding "展开程序时出错：\n\n~a")
-  (module-browser-show-lib-paths "显示通过(lib ..)加载的文件的路径")
+  (module-browser-show-lib-paths "显示通过(lib ..)路径加载的文件")
   (module-browser-progress "Module浏览器：~a") ;; prefix in the status line
   (module-browser-compiling-defns "Module浏览器：正在编译定义")
   (module-browser-show-lib-paths/short "跟随lib调用") ;; check box label in show module browser pane in drscheme window.
@@ -1360,12 +1380,12 @@
   (module-browser-refresh "刷新") ;; button label in show module browser pane in drscheme window.
   (module-browser-highlight "高亮显示") ;; used to search in the graph; the label on a text-field% object
   (module-browser-only-in-plt-and-module-langs
-   "Module浏览器只能对基于module的程序中使用。")
+   "Module浏览器只能对基于module的程序使用。")
   (module-browser-name-length "名称长度")
   (module-browser-name-short "短")
   (module-browser-name-medium "中")
   (module-browser-name-long "长")
-  (module-browser-name-very-long "长，包含阶段")  ;; like 'Long' but shows the phases where this file is loaded
+  (module-browser-name-very-long "长，包含phase")  ;; like 'Long' but shows the phases where this file is loaded
   (module-browser-open-all "打开所有这些文件")
   
   (happy-birthday-matthias "生日快乐，Matthias！")
@@ -1373,7 +1393,7 @@
   (happy-birthday-shriram "生日快乐，Shriram！")
   
   (mrflow-using-default-language-title "正在使用默认语言")
-  (mrflow-using-default-language "当前使用的语言并不包含其原素的类型。改用R5RS Scheme。")
+  (mrflow-using-default-language "当前使用的语言并不包含其基本运算的类型表。请改用R5RS Scheme。")
   (mrflow-button-title "分析")
   ;(mrflow-unknown-style-delta-error-title "Unknown Box Style Delta")
   ;(mrflow-unknown-style-delta-error "Unknown box style delta: ~a")
@@ -1438,7 +1458,7 @@
   
   (stepper-no-earlier-application-step "前向无调用步骤。")
   (stepper-no-later-application-step "无调用步骤。")
-  (stepper-complete "所有定义都已执行完毕。")
+  (stepper-complete "所有定义都已计算完毕。")
   
   (stepper-no-earlier-step "前向无步骤。")
   (stepper-no-later-step "无步骤。")
@@ -1464,7 +1484,7 @@
   ;; ml-cp names are all for the module language collection path
   ;; configuration. See the details portion of the language dialog
   ;; for the module language (at the bottom).
-  (ml-cp-default-collection-path "<<默认collection路径>>")
+  (ml-cp-default-collection-path "《默认collection路径》")
   
   ;; in std get-directory 
   (ml-cp-choose-a-collection-path "请选择collection路径")
@@ -1486,9 +1506,72 @@
   
   (ml-always-show-#lang-line "在Module语言中，始终显示#lang行")
   
-  ;; Strings for Profj removed as ProfessorJ is no longer actively developed as part of DrScheme
+  ;; Profj
+  (profj-java "Java")
+  (profj-java-mode "Java模式")
+  (profj-java-coverage "Java覆盖率") ;; shows up in the preferences dialog under 'Color'
   
+  (profj-beginner-lang "初级")
+  (profj-beginner-lang-one-line-summary "类似于Java的初级教学语言")
+  (profj-full-lang "完整")
+  (profj-full-lang-one-line-summary "类似于Java 1.0（部分1.1功能）")
+  (profj-advanced-lang "高级")
+  (profj-advanced-lang-one-line-summary "类似于Java的高级教学语言")
+  (profj-intermediate-lang "中级")
+  (profj-intermediate-lang-one-line-summary "类似于Java的中级教学语言")
+  (profj-intermediate-access-lang "中级+access")
+  (profj-intermediate-access-lang-one-line-summary "类似于Java的中级教学语言，带access modifier")
+  (profj-dynamic-lang "Java+dynamic")
+  (profj-dynamic-lang-one-summary "带动态类型能力的Java")
+
+  (profj-java-mode-color-heading "编辑颜色") ; Heading for preference to choose editing colors  
+  (profj-java-mode-color-keyword "关键字")
+  (profj-java-mode-color-string "字符串")
+  (profj-java-mode-color-literal "文本")
+  (profj-java-mode-color-comment "注释")
+  (profj-java-mode-color-error "错误")
+  (profj-java-mode-color-identifier "标识符")
+  (profj-java-mode-color-prim-type "基本类型") ; Example text for built-in Java types
+  (profj-java-mode-color-default "默认")
+
+  (profj-coverage-color-heading "覆盖率颜色") ; Heading for preference to choose coverage colors
+  (profj-coverage-color-covered "覆盖的表达式") 
   
+  (profj-language-config-display-preferences "显示首选项") ; Heading for preferences controlling printing
+  (profj-language-config-display-style "显示风格")
+  (profj-language-config-display-field "类+字段")
+  (profj-language-config-class "类")
+  (profj-language-config-display-array "打印数组的全部内容？")
+  (profj-language-config-testing-preferences "测试首选项") ; Heading for preferences controlling test behavior
+  ;(profj-language-config-testing-enable "Display testing results on Run?") ; Run should be the word found on the Run button
+  (profj-language-config-testing-coverage "收集测试的覆盖率信息？")
+  (profj-language-config-support-test-language "支持测试语言扩展？")
+  (profj-language-config-testing-check "允许check表达式？") ; check should not be translated
+  (profj-language-config-classpath "Classpath")
+  (profj-language-config-choose-classpath-directory "选择要添加到class path的目录")
+  (profj-language-config-classpath-display "显示当前") ; Button label to print the current classpath
+
+  (profj-test-name-close-to-example "Class ~a's name contains a phrase close to Example.")
+  (profj-test-name-example-miscapitalized "Class ~a's name contains a miscapitalized example.")
+  
+  ;; Close testing window and do not run test cases any more
+  ;(profj-test-results-close-and-disable "Close and Disable Testing")
+  ;; Hide docked testing window and do not run test cases any more
+  ;(profj-test-results-hide-and-disable "Hide and Disable Testing")
+  ;Renamed below
+  ;(profj-test-results-window-title "Test Results")
+  
+  (profj-unsupported "不支持")
+  (profj-executables-unsupported "对不起——目前不支持Java可执行文件")
+
+  (profj-convert-to-text-comment "转换为文本注释")
+  (profj-convert-to-comment "转换为注释")
+
+  (profj-executing-main "执行main")
+
+  (profj-insert-java-comment-box "插入Java注释框")
+  (profj-insert-java-interactions-box "插入Java交互框")
+
   ;;The Test engine tool
   ;;
   (test-engine-window-title "测试结果")
@@ -1522,92 +1605,108 @@
   (test-engine-is-unchecked "程序还没有检查！")
   (test-engine-tests-disabled "测试未启用。")
   (test-engine-should-be-tested "程序需要测试。")
-  (test-engine-at-line-column "于行~a，列~a")
-  (test-engine-in-at-line-column "于文件~a，行~a，列~a")
+  (test-engine-at-line-column "于行~a、列~a")
+  (test-engine-in-at-line-column "于文件~a、行~a、列~a")
   ; as in "column (unknown)"
   (test-engine-unknown "（未知）")
   (test-engine-trace-error "跟踪错误")
   
   ; The ~F is special marker for the offending values, which may be
   ; printed specially in DrRacket.
-  ;; no way to translate these as the order of expected value and actual value (also range) should be ordered differently in Chinese
   (test-engine-check-encountered-error
-   "check-expect encountered the following error instead of the expected value, ~F. ~n   :: ~a")
+   "check-expect遇到如下错误，而非期望值，~F。~n   :: ~a")
   (test-engine-actual-value-differs-error
-   "Actual value ~F differs from ~F, the expected value.")
+   "实际值~F不同与期望值~F。")
   (test-engine-actual-value-not-within-error
-   "Actual value ~F is not within ~v of expected value ~F.")
+   "实际值~F不在~v范围内、期望值~F的。")　;; NO way to express this order natively in Chinese!!!
   (test-engine-encountered-error-error
-   "check-error encountered the following error instead of the expected ~a~n   :: ~a")
+   "check-error遇到如下error，而非期望的~a~n   :: ~a")
   (test-engine-expected-error-error
-   "check-error expected the following error, but instead received the value ~F.~n ~a")
+   "check-error期望遇到如下的，但实际得到值~F。~n ~a")
   (test-engine-expected-an-error-error
-   "check-error expected an error, but instead received the value ~F.")
+   "check-error期望遇到错误，但实际得到值~F。")
   ;; members are appended to the message
-  (test-engine-not-mem-error "Actual value ~F differs from all given members in ")
-  (test-engine-not-range-error "Actual value ~F is not between ~F and ~F, inclusive.")
+  (test-engine-not-mem-error "实际值~F不同与所有给定的")
+  (test-engine-not-range-error "实际值~F不在~F和~F之间（包含）。")
   
   ;; followed by list of variable bindings
-  (test-engine-property-fail-error "Property falsifiable with")
+  (test-engine-property-fail-error "Property由……证伪")
   (test-engine-property-error-error "check-property遇到如下错误~n:: ~a")
   
-  (signature-enable-checks "启用Signature Checks")
-  (signature-disable-checks "停用Signature Checks")
+  (signature-enable-checks "启用签名检查")
+  (signature-disable-checks "停用签名检查")
   
   ; section header
-  (test-engine-check-failures "Check失败：")
+  (test-engine-check-failures "检查失败：")
   ; section header
-  (test-engine-signature-violations "Signature违规：")
+  (test-engine-signature-violations "签名违规：")
   
   ; part of one phrase "signature <at line ...> to blame: procedure <...>
-  (test-engine-signature "signature")
-  (test-engine-to-blame "to blame: procedure")
+  (test-engine-signature "签名")
+  (test-engine-to-blame "责任在于：procedure")
   
-  (test-engine-no-signature-violations "无signature违规。")
-  (test-engine-1-signature-violation "1个signature违规。")
-  (test-engine-n-signature-violations "~a个signature违规。")
+  (test-engine-no-signature-violations "无签名违规。")
+  (test-engine-1-signature-violation "1个签名违规。")
+  (test-engine-n-signature-violations "~a个签名违规。")
   
   ; as in got <value>, signature <at ...>
   (test-engine-got "实得")
   
+  (profjWizward-insert-java-class "插入Java类")
+  (profjWizard-insert-java-union "插入Java联合（体）")
+  
   ;; The Test Suite Tool
   ;; Errors
-  (test-case-empty-error "空白test")
-  (test-case-too-many-expressions-error "一个test中包含过多表达式。")
+  (test-case-empty-error "空白测试用例")
+  (test-case-too-many-expressions-error "一个测试用例中包含过多表达式。")
   ;; DrRacket window menu items
-  (test-case-insert "插入Test Case")
-  (test-case-disable-all "禁用所有Test Cases")
-  (test-case-enable-all "允许所有Test Cases")
+  (test-case-insert "插入测试用例")
+  (test-case-disable-all "禁用所有测试用例")
+  (test-case-enable-all "允许所有测试用例")
   
   ;; NOTE: The following string constants are labels of the test-case fields. The width
   ;;       of the field is determined by the length of the longest of the following three words.
   ;;       if the words are too long the test case will take up too much horizontal room and
   ;;       not look very good.
   ;; This string is the label of the expression that is being tested in a test case.
-  (test-case-to-test "Test")
+  (test-case-to-test "测试")
   ;; This string is the label of the expression that is the expected value of the to-test expression.
   (test-case-expected "应该为")
   ;; This string is the label of the actual result of the to test expression.
   (test-case-actual "实际值")
   (test-case-predicate "预测值")
-  (test-case-should-raise "应该Raise")
+  (test-case-should-raise "应该抛出")
   ;; The label of a field of the test-case that describes the expected error message of a test case
   (test-case-error-message "错误信息")
   
-  (test-case-menu-title "Test Case")
-  (test-case-switch-to-error-box "切换为Error Test框")
-  (test-case-switch-to-nonerror-box "切换为Nonerror Test框")
-  (test-case-collapse "折叠Test Case")
+  (test-case-menu-title "测试用例")
+  (test-case-switch-to-error-box "切换为错误测试框")
+  (test-case-switch-to-nonerror-box "切换为无错误测试框")
+  (test-case-collapse "折叠测试用例")
   (test-case-show-actual "显示实际值")
-  (test-case-enable "启用Test Case")
+  (test-case-enable "启用测试用例")
   (test-case-show-predicate "显示预测值")
   (test-case-show-error-message "显示错误信息")
   (test-case-convert-to-text "转化为文本")
   
+  ;; Profj Boxes
+  (profjBoxes-empty-error "空白交互")
+  (profjBoxes-too-many-expressions-error "框中的表达式太多")
+  (profjBoxes-interactions-label "交互")
+  (profjBoxes-bad-java-id-error "错误的Java ID")
+  (profjBoxes-examples-label "例子")
+  (profjBoxes-add-new-example-button "添加新例子")
+  (profjBoxes-type "类型")
+  ;; The Java identifier of an example of data
+  (profjBoxes-name "Name")
+  (profjBoxes-value "值")
+  (profjBoxes-insert-java-examples "插入Java示例")
+  (profjBoxes-insert-java-interactions "插入Java交互")
+  
   ;; Slideshow
   (slideshow-hide-picts "显示嵌套的框")
   (slideshow-show-picts "显示图片")
-  (slideshow-cannot-show-picts "无法显示图片；请先运行程序建立大小")
+  (slideshow-cannot-show-picts "无法显示图片；请先运行程序以建立大小")
   (slideshow-insert-pict-box "插入图片框")
   
   ;; GUI Tool
@@ -1621,7 +1720,7 @@
   ;; contract violation tracking
   
   ; tooltip for new planet icon in drscheme window (must have a planet violation logged to see it)
-  (show-planet-contract-violations "显示PLaneT中的contract违背")
+  (show-planet-contract-violations "显示PLaneT中的契约违反")
   
   ; buttons in the dialog that lists the recorded bug reports
   (bug-track-report "发送报告")
@@ -1641,7 +1740,7 @@
   ;; the first three strings are in the dialog that appears. The last one is in the preferences dialog
   (normalize "标准化")
   (leave-alone "保留原样")
-  (normalize-string-info "粘帖来的文字包含未经标准化的连字。标准化？")
+  (normalize-string-info "粘帖来的文字包含未经标准化的连字。是否标准化？")
   (normalize-string-preference "标准化粘帖字符串")
   (ask-about-normalizing-strings "询问是否标准化字符")
   
@@ -1674,9 +1773,98 @@
   (spell-choose-replacement-word "选择替代词") ;; label in dialog
 
   ;; GUI for installing a pkg package; available via File|Install Package...
+  (install-pkg-install-by-source "执行")         ; tab label
+  (install-pkg-install-from-list "从Catalog获取") ; tab label
+  (install-pkg-install-installed "已安装")    ; tab label
+  (install-pkg-migrate-from "从版本中复制")           ; tab label
+  (install-pkg-settings "设置")                        ; tab label
   (install-pkg-menu-item... "安装Package…")
   (install-pkg-dialog-title "安装Package")
+  (install-pkg-source-label "Package来源")
+  (install-pkg-package-name "Package名称")
+  (install-pkg-package-source-desc "Package来源是package名称、文件、目录、URL或GitHub引用")
+  (install-pkg-infer "推断")
+  (install-pkg-use "使用") ; as opposed to "Infer", label for text box
+  (install-pkg-type-label "Package来源类型")
+  (install-pkg-file "文件")
+  (install-pkg-dir "目录")
+  (install-pkg-dir-url "远程目录")
+  (install-pkg-file-url "远程文件")
+  (install-pkg-git "Git存储库")
+  (install-pkg-github "GitHub")
+  (install-pkg-name "名称（查询解析器）")
+  (install-pkg-inferred-as "类型推断为~a") ; ~a gets install-pkg-{file,dir,...}
+  (install-pkg-link-dirs "本地目录作为链接")
+  (install-pkg-file-or-dir? "选择文件或目录？")
+  (install-pkg-force? "忽略冲突")
+  (install-pkg-replace? "更新可以替换现有安装")
+  (install-pkg-dry-run? "演习（不做安装更改）")
+  (install-pkg-command-line "等效的命令行调用：")
+  (install-pkg-error-installing-title "安装Package错误")
+  (install-pkg-action-label "要采取的行动")
+  (install-pkg-install "安装")
+  (install-pkg-update "更新")
+  (install-pkg-setup "设置") ; for button
+  (install-pkg-setup-long "设置当前安装") ; for menu
+  (install-pkg-remove "删除")
+  (install-pkg-do-not-remove "不删除")
+  (install-pkg-action-inferred-to-be-update "行动推断为更新")
+  (install-pkg-action-inferred-to-be-install "操作推断为安装")
+  (install-pkg-default "默认的")
+  (install-pkg-scope-label "Package作用域")
+  (install-pkg-default-scope-label "默认的作用域") ; for picking the scope to be default
+  (install-pkg-installation "特定的Racket安装")
+  (install-pkg-user "特定的用户及Racket版本")
+  (install-pkg-set-as-default "设为默认")
+  (install-pkg-scope-is "Package作用域是~a") ; ~a gets install-pkg-{installation,user,shared}
+  (install-pkg-select-package-directory "选择Package目录")
+  (install-pkg-select-package-file "选择Package文件")
+  (install-pkg-update-package-list "更新Package列表")
+  (install-pkg-stop-update "停止更新")
+  (install-pkg-filter "过滤")
+  (install-pkg-update-catalogs? "更新数据库以匹配配置的catalog？")
+  (install-pkg-currently-configured-are "当前配置的catalog是")
+  (install-pkg-database-recorded-are "数据库中记录的catalog是")
+  (install-pkg-update-catalogs "更新")
+  (install-pkg-do-not-update-catalogs "不更新")
+  (install-pkg-really-remove? "确定要删除以下所选package吗？")
+  (install-pkg-promote "从自动安装Promote")
+  (install-pkg-demote "Demote为自动安装")
+  (install-pkg-abort-install "中止安装")
+  (install-pkg-abort-update "中止更新")
+  (install-pkg-abort-remove "中止删除")
+  (install-pkg-abort-demote "中止Demote")
+  (install-pkg-abort-promote "中止Promote")
+  (install-pkg-abort-migrate "中止Migrate")
+  (install-pkg-abort-setup "中止设置")
+  (install-pkg-abort-generic-action "中止行动")
+  (install-pkg-close-terminal-output "关闭输出")
+  (install-pkg-show-all-options "显示所有选项")
+  (install-pkg-migrate-available-installations "可用的安装")
   (pkg-manager-menu-item "Package管理…")
+  ;; where ~a gets an installation name:
+  (install-pkg-packages-for "~a的package")
+  (install-pkg-really-remove-installation "您确定要删除所有~a已安装的package和信息吗？")
+  
+  (install-pkg-abort-set-scope "中止作用域修改")
+
+  (install-pkg-dependencies-fail "Fail：如果依赖关系未满足，则取消安装/更新")
+  (install-pkg-dependencies-force "Force：不管依赖的缺失或版本不匹配，强制安装")
+  (install-pkg-dependencies-search-ask "Ask：提示每个缺少的依赖项（GUI不支持）")
+  (install-pkg-dependencies-search-auto "Auto：自动安装缺失或版本不匹配的依赖项")
+  (install-pkg-dependencies-search-auto+update "Auto + Update：尽可能地更新依赖项")
+
+  (install-pkg-dependencies-mode "依赖模式")
+
+  (install-pkg-dependencies-search-ask-not-supported-in-gui
+   "GUI安装程序不支持依赖关系的“ask”模式。")
+  ;; "~a" is pre-":" part of `install-pkg-dependencies-fail' or `install-pkg-dependencies-search-auto':
+  (install-pkg-deps-is "默认的依赖模式是~a")
+
+  (install-pkg-package-catalogs "Package Catalogs") ; label for a list box
+  (install-pkg-add-package-catalog "添加Package Catalog")
+
+  (install-pkg-not-rentrant "安装和更新不可能同时进行；要么中止当前的工作，要么等待它完成。")
   
   ;; open a file via a collection path (new "Open" menu item in DrRacket)
   (open-require-path "打开Require路径…")

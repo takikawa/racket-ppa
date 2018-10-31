@@ -1,5 +1,6 @@
 #lang racket/base
-(require "engine.rkt"
+(require "host.rkt"
+         "place-local.rkt"
          "internal-error.rkt"
          "debug.rkt")
 
@@ -11,6 +12,8 @@
 
          start-atomic/no-interrupts
          end-atomic/no-interrupts
+
+         in-atomic-mode?
 
          set-end-atomic-callback!
 
@@ -41,7 +44,12 @@
      (set! end-atomic-callback #f)
      (current-atomic n)
      (cb)]
+    [(negative? n) (internal-error "not in atomic mode to end")]
     [else
+     ;; There's a small chance that `end-atomic-callback`
+     ;; was set by the scheduler after the check and
+     ;; before we exit atomic mode. Make sure that rare
+     ;; event is ok.
      (current-atomic n)]))
 
 (define (start-atomic/no-interrupts)
@@ -52,9 +60,12 @@
   (host:enable-interrupts)
   (end-atomic))
 
+(define (in-atomic-mode?)
+  (positive? (current-atomic)))
+
 ;; ----------------------------------------
 
-(define end-atomic-callback #f)
+(define-place-local end-atomic-callback #f)
 
 (define (set-end-atomic-callback! cb)
   (set! end-atomic-callback cb))

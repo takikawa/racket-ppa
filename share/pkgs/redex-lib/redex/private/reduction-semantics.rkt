@@ -11,7 +11,7 @@
          "search.rkt"
          "enum.rkt"
          (only-in "binding-forms.rkt"
-                  safe-subst binding-forms-opened? make-immutable-α-hash)
+                  safe-subst binding-forms-opened? make-immutable-α-hash make-α-hash)
          (only-in "binding-forms-definitions.rkt"
                   shadow nothing bf-table-entry-pat bf-table-entry-bspec)
          racket/trace
@@ -46,6 +46,21 @@
   (sort (append (hash-keys (compiled-lang-ht lang))
                 (compiled-lang-aliases lang))
          symbol<?))
+
+(define (make-binding-hash lang [assocs '()])
+  (define ht (make-α-hash (compiled-lang-binding-table lang)
+                          (compiled-lang-literals lang)
+                          match-pattern))
+  (for ([assoc (in-list assocs)])
+    (dict-set! ht (car assoc) (cdr assoc)))
+  ht)
+
+(define (make-immutable-binding-hash lang [assocs '()])
+  (for/fold ([ht (make-immutable-α-hash (compiled-lang-binding-table lang)
+                                        (compiled-lang-literals lang)
+                                        match-pattern)])
+            ([assoc (in-list assocs)])
+    (dict-set ht (car assoc) (cdr assoc))))
 
 (define-for-syntax (term-matcher orig-stx make-matcher)
   (syntax-case orig-stx ()
@@ -2736,9 +2751,17 @@
                                   #:all? [return-all? #f]
                                   #:cache-all? [cache-all? (or return-all? (current-cache-all?))]
                                   #:stop-when [stop-when (λ (x) #f)])
-  (define visited (and (or cache-all? return-all?) (make-hash)))
+  (define lang (reduction-relation/IO-jf-lang reductions))
+  (define visited (and (or cache-all? return-all?)
+                       (make-α-hash (compiled-lang-binding-table lang)
+                                    (compiled-lang-literals lang)
+                                    match-pattern)))
   (let/ec return
-    (define answers (if return-all? #f (make-hash)))
+    (define answers (if return-all?
+                        #f
+                        (make-α-hash (compiled-lang-binding-table lang)
+                                     (compiled-lang-literals lang)
+                                     match-pattern)))
     (define cycle? #f)
     (define cutoff? #f)
     (let loop ([term start]
@@ -2749,10 +2772,9 @@
                ;;    152084d5ce6ef49df3ec25c18e40069950146041
                ;; suggest that a hash works better than a trie.
                [path
-                (let ([lang (reduction-relation/IO-jf-lang reductions)])
-                  (make-immutable-α-hash (compiled-lang-binding-table lang)
-                                         (compiled-lang-literals lang)
-                                         match-pattern))]
+                (make-immutable-α-hash (compiled-lang-binding-table lang)
+                                       (compiled-lang-literals lang)
+                                       match-pattern)]
                [more-steps steps])
       (if (and goal? (goal? term))
           (return (search-success))
@@ -2765,7 +2787,7 @@
                [(stop-when term)
                 (unless goal?
                   (when answers
-                    (hash-set! answers term #t)))]
+                    (dict-set! answers term #t)))]
                [else
                 (define nexts (remove-duplicates (apply-reduction-relation reductions term)))
                 (define nexts-in-domain (remove-outside-domain reductions nexts))
@@ -2775,22 +2797,22 @@
                      (when answers
                        (cond
                          [(null? nexts)
-                          (hash-set! answers term #t)]
+                          (dict-set! answers term #t)]
                          [else
                           (for ([next (in-list nexts)])
-                            (hash-set! answers next #t))])))]
+                            (dict-set! answers next #t))])))]
                   [else (if (zero? more-steps)
                             (set! cutoff? #t)
                             (for ([next (in-list nexts-in-domain)])
                               (when (or (not visited)
-                                        (not (hash-ref visited next #f)))
-                                (when visited (hash-set! visited next #t))
+                                        (not (dict-ref visited next #f)))
+                                (when visited (dict-set! visited next #t))
                                 (loop next 
                                       (dict-set path term #t) 
                                       (sub1 more-steps)))))])])])))
     (if goal?
         (search-failure cutoff?)
-        (values (sort (hash-map (or answers visited) (λ (x y) x))
+        (values (sort (dict-map (or answers visited) (λ (x y) x))
                       string<?
                       #:key (λ (x) (format "~s" x)))
                 cycle?))))
@@ -2817,6 +2839,21 @@
                     #:when (match-pattern? input-pat (list next)))
            next)
          nexts)]))
+
+(define (is-in-domain? reductions t)
+  (cond
+    [(reduction-relation? reductions)
+     (define dom-pat (reduction-relation-compiled-domain-pat reductions))
+     (cond
+       [dom-pat (match-pattern? dom-pat t)]
+       [else #t])]
+    [else
+     (define input-pat
+       (runtime-judgment-form-compiled-input-contract-pat reductions))
+     (cond
+       [input-pat
+        (match-pattern? input-pat (list t))]
+       [else #t])]))
 
 ;; map/mt : (a -> b) (listof a) (listof b) -> (listof b)
 ;; map/mt is like map, except
@@ -2944,15 +2981,16 @@
   (values (apply-reduction-relation red arg) #f))
 
 (define (test-->>/procs name red arg-thnk expected-thnk apply-red cycles-ok? equiv? pred srcinfo)
-  (unless (reduction-relation? red)
-    (error name "expected a reduction relation as first argument, got ~e" red))
+  (unless (or (reduction-relation? red)
+              (IO-judgment-form? red))
+    (error name "expected a reduction relation or an IO-judgment-form as first argument, got ~e" red))
   (when pred
     (unless (and (procedure? pred)
                  (procedure-arity-includes? pred 1))
       (error 'test-->> "expected a procedure that accepted one argument for the #:pred, got ~e"
              pred)))
   (define-values (arg expected)
-    (parameterize ([default-language (reduction-relation-lang red)])
+    (parameterize ([default-language (reduction-relation/IO-jf-lang red)])
       (values (arg-thnk) (expected-thnk))))
   (define test-failed? #f)
   (define (fail) (inc-failures) (set! test-failed? #t))
@@ -2999,7 +3037,7 @@
            relation
            start:expr
            goal)
-     #:declare relation (expr/c #'reduction-relation? 
+     #:declare relation (expr/c #'(or/c reduction-relation? IO-judgment-form?)
                                 #:name "reduction relation expression")
      #:declare goal (expr/c #'(or/c (-> any/c any/c) (not/c procedure?)) 
                             #:name "goal expression")
@@ -3281,7 +3319,8 @@
          metafunc-proc?
          (struct-out metafunc-case)
          
-         (struct-out binds))
+         (struct-out binds)
+         is-in-domain?)
 
 (provide shadow nothing)
 
@@ -3318,7 +3357,10 @@
          apply-reduction-relation*
          current-cache-all?
          variable-not-in
-         variables-not-in)
+         variables-not-in
+
+         make-binding-hash
+         make-immutable-binding-hash)
 
 (provide relation-coverage
          covered-cases

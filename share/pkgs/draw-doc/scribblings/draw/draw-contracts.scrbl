@@ -28,11 +28,8 @@ and functions.
 }
 
 @defthing[font-weight/c flat-contract?]{
-  Recognizes font weights. Corresponds to the @racket[_weight]
+  Recognizes @tech{font weights}. Corresponds to the @racket[_weight]
   initialization argument of the @racket[font%] class.
-
-  Equivalent to the following definition:
-  @racketblock[(or/c 'normal 'bold 'light)]
 }
 
 @defthing[font-smoothing/c flat-contract?]{

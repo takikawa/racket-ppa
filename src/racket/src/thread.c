@@ -335,15 +335,21 @@ static Scheme_Object *unsafe_make_custodian_at_root(int argc, Scheme_Object *arg
 static Scheme_Object *unsafe_custodian_register(int argc, Scheme_Object *argv[]);
 static Scheme_Object *unsafe_custodian_unregister(int argc, Scheme_Object *argv[]);
 
+static Scheme_Object *unsafe_add_post_custodian_shutdown(int argc, Scheme_Object *argv[]);
+
 static Scheme_Object *unsafe_register_process_global(int argc, Scheme_Object *argv[]);
 static Scheme_Object *unsafe_get_place_table(int argc, Scheme_Object *argv[]);
 static Scheme_Object *unsafe_set_on_atomic_timeout(int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_add_global_finalizer(int argc, Scheme_Object *argv[]);
 
 static Scheme_Object *unsafe_os_thread_enabled_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *unsafe_call_in_os_thread(int argc, Scheme_Object *argv[]);
 static Scheme_Object *unsafe_make_os_semaphore(int argc, Scheme_Object *argv[]);
 static Scheme_Object *unsafe_os_semaphore_wait(int argc, Scheme_Object *argv[]);
 static Scheme_Object *unsafe_os_semaphore_post(int argc, Scheme_Object *argv[]);
+
+static Scheme_Object *unsafe_add_collect_callbacks(int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_remove_collect_callbacks(int argc, Scheme_Object *argv[]);
 
 static Scheme_Object *make_plumber(int argc, Scheme_Object *argv[]);
 static Scheme_Object *plumber_p(int argc, Scheme_Object *argv[]);
@@ -411,6 +417,10 @@ static Scheme_Object *unsafe_poll_ctx_time_wakeup(int argc, Scheme_Object **argv
 static Scheme_Object *unsafe_signal_received(int argc, Scheme_Object **argv);
 static Scheme_Object *unsafe_set_sleep_in_thread(int argc, Scheme_Object **argv);
 
+static Scheme_Object *unsafe_make_place_local(int argc, Scheme_Object **argv);
+static Scheme_Object *unsafe_place_local_ref(int argc, Scheme_Object **argv);
+static Scheme_Object *unsafe_place_local_set(int argc, Scheme_Object **argv);
+
 static void make_initial_config(Scheme_Thread *p);
 
 static int do_kill_thread(Scheme_Thread *p);
@@ -477,6 +487,12 @@ extern BOOL WINAPI DllMain(HINSTANCE inst, ULONG reason, LPVOID reserved);
 #endif
 
 SHARED_OK Scheme_Object *initial_cmdline_vec;
+
+#if defined(MZ_USE_PLACES)
+# define RUNNING_IN_ORIGINAL_PLACE (scheme_current_place_id == 0)
+#else
+# define RUNNING_IN_ORIGINAL_PLACE 1
+#endif
 
 /*========================================================================*/
 /*                             initialization                             */
@@ -614,6 +630,8 @@ void scheme_init_thread(Scheme_Startup_Env *env)
 void
 scheme_init_unsafe_thread (Scheme_Startup_Env *env)
 {
+  Scheme_Object *p;
+
   scheme_addto_prim_instance("unsafe-start-atomic",
 			     scheme_make_prim_w_arity(unsafe_start_atomic,
 						      "unsafe-start-atomic",
@@ -646,12 +664,16 @@ scheme_init_unsafe_thread (Scheme_Startup_Env *env)
   ADD_PRIM_W_ARITY("unsafe-custodian-register", unsafe_custodian_register, 5, 5, env);
   ADD_PRIM_W_ARITY("unsafe-custodian-unregister", unsafe_custodian_unregister, 2, 2, env);
 
+  ADD_PRIM_W_ARITY("unsafe-add-post-custodian-shutdown", unsafe_add_post_custodian_shutdown, 1, 1, env);
+
   ADD_PRIM_W_ARITY("unsafe-register-process-global", unsafe_register_process_global, 2, 2, env);
   ADD_PRIM_W_ARITY("unsafe-get-place-table", unsafe_get_place_table, 0, 0, env);
 
   ADD_PRIM_W_ARITY("unsafe-set-on-atomic-timeout!", unsafe_set_on_atomic_timeout, 1, 1, env);
 
   ADD_PRIM_W_ARITY("unsafe-make-security-guard-at-root", unsafe_make_security_guard_at_root, 0, 3, env);
+
+  ADD_PRIM_W_ARITY("unsafe-add-global-finalizer", unsafe_add_global_finalizer, 2, 2, env);
 
   scheme_addto_prim_instance("unsafe-poller", scheme_unsafe_poller_proc, env);
   ADD_PRIM_W_ARITY("unsafe-poll-ctx-fd-wakeup", unsafe_poll_ctx_fd_wakeup, 3, 3, env);
@@ -665,6 +687,27 @@ scheme_init_unsafe_thread (Scheme_Startup_Env *env)
   ADD_PRIM_W_ARITY("unsafe-make-os-semaphore", unsafe_make_os_semaphore, 0, 0, env);
   ADD_PRIM_W_ARITY("unsafe-os-semaphore-wait", unsafe_os_semaphore_wait, 1, 1, env);
   ADD_PRIM_W_ARITY("unsafe-os-semaphore-post", unsafe_os_semaphore_post, 1, 1, env);
+
+  ADD_PRIM_W_ARITY("unsafe-add-collect-callbacks", unsafe_add_collect_callbacks, 2, 2, env);
+  ADD_PRIM_W_ARITY("unsafe-remove-collect-callbacks", unsafe_remove_collect_callbacks, 1, 1, env);
+
+  /* Place locals are just boxes, so these operations are just aliases box operations */
+  p = scheme_make_prim_w_arity(unsafe_make_place_local, "unsafe-make-place-local", 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
+                                                            | SCHEME_PRIM_IS_OMITABLE_ALLOCATION);
+  scheme_addto_prim_instance("unsafe-make-place-local", p, env);
+
+  p = scheme_make_immed_prim(unsafe_place_local_ref, "unsafe-place-local-ref", 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
+                                                            | SCHEME_PRIM_IS_UNSAFE_OMITABLE
+                                                            | SCHEME_PRIM_IS_OMITABLE
+                                                            | SCHEME_PRIM_AD_HOC_OPT);
+  scheme_addto_prim_instance("unsafe-place-local-ref", p, env);
+
+  p = scheme_make_immed_prim(unsafe_place_local_set, "unsafe-place-local-set!", 2, 2);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED
+                                                            | SCHEME_PRIM_AD_HOC_OPT);
+  scheme_addto_prim_instance("unsafe-place-local-set!", p, env);
 }
 
 void scheme_init_thread_places(void) {
@@ -1916,6 +1959,40 @@ void do_run_atexit_closers_on_all()
   scheme_run_atexit_closers_on_all(NULL);
 }
 
+static Scheme_Object *unsafe_add_post_custodian_shutdown(int argc, Scheme_Object *argv[])
+{
+  scheme_check_proc_arity("unsafe-add-post-custodian-shutdown", 0, 0, argc, argv);
+
+#if defined(MZ_USE_PLACES)
+  if (!RUNNING_IN_ORIGINAL_PLACE) {
+    if (!post_custodian_shutdowns) {
+      REGISTER_SO(post_custodian_shutdowns);
+      post_custodian_shutdowns = scheme_null;
+    }
+    
+    post_custodian_shutdowns = scheme_make_pair(argv[0], post_custodian_shutdowns);
+  }
+#endif
+  
+  return scheme_void;
+}
+
+void scheme_run_post_custodian_shutdown()
+{
+#if defined(MZ_USE_PLACES)
+  if (post_custodian_shutdowns) {
+    Scheme_Object *proc;
+    scheme_start_in_scheduler();
+    while (SCHEME_PAIRP(post_custodian_shutdowns)) {
+      proc = SCHEME_CAR(post_custodian_shutdowns);
+      post_custodian_shutdowns = SCHEME_CDR(post_custodian_shutdowns);
+      _scheme_apply_multi(proc, 0, NULL);
+    }
+    scheme_end_in_scheduler();
+  }
+#endif
+}
+
 void scheme_set_atexit(Scheme_At_Exit_Proc p)
 {
   replacement_at_exit = p;
@@ -1923,12 +2000,6 @@ void scheme_set_atexit(Scheme_At_Exit_Proc p)
 
 void scheme_add_atexit_closer(Scheme_Exit_Closer_Func f)
 {
-#if defined(MZ_USE_PLACES)
-# define RUNNING_IN_ORIGINAL_PLACE (scheme_current_place_id == 0)
-#else
-# define RUNNING_IN_ORIGINAL_PLACE 1
-#endif
-
   if (!cust_closers) {
     if (RUNNING_IN_ORIGINAL_PLACE) {
       scheme_atexit(do_run_atexit_closers_on_all);
@@ -2353,6 +2424,8 @@ XFORM_NONGCING static void unschedule_in_set(Scheme_Object *s, Scheme_Thread_Set
 	t_set->current = t_set->first;
       }
     }
+    if (t_set->search_start == s)
+      t_set->search_start = t_set->current;
     
     if (t_set->current)
       break;
@@ -2837,6 +2910,12 @@ static Scheme_Object *unsafe_os_semaphore_wait(int argc, Scheme_Object *argv[])
 static Scheme_Object *unsafe_os_semaphore_post(int argc, Scheme_Object *argv[])
 {
   scheme_raise_exn(MZEXN_FAIL_UNSUPPORTED, "unsafe-os-semaphore-post: " NOT_SUPPORTED_STR);
+  ESCAPED_BEFORE_HERE;
+}
+
+static Scheme_Object *unsafe_add_global_finalizer(int argc, Scheme_Object *argv[])
+{
+  scheme_raise_exn(MZEXN_FAIL_UNSUPPORTED, "unsafe-add-global-finalizer: " NOT_SUPPORTED_STR);
   ESCAPED_BEFORE_HERE;
 }
 
@@ -7264,6 +7343,26 @@ static Scheme_Object *evts_to_evt(int argc, Scheme_Object *argv[])
 }
 
 /*========================================================================*/
+/*                         boxes as place locals                          */
+/*========================================================================*/
+
+static Scheme_Object *unsafe_make_place_local(int argc, Scheme_Object **argv)
+{
+  return scheme_box(argv[0]);
+}
+
+static Scheme_Object *unsafe_place_local_ref(int argc, Scheme_Object **argv)
+{
+  return SCHEME_BOX_VAL(argv[0]);
+}
+
+static Scheme_Object *unsafe_place_local_set(int argc, Scheme_Object **argv)
+{
+  SCHEME_BOX_VAL(argv[0]) = argv[1];
+  return scheme_void;
+}
+
+/*========================================================================*/
 /*                             thread cells                               */
 /*========================================================================*/
 
@@ -7570,7 +7669,7 @@ Scheme_Object *scheme_extend_parameterization(int argc, Scheme_Object *argv[])
       key = argv[i + 1];
       if (SCHEME_CHAPERONEP(param)) {
         a[0] = key;
-        key = scheme_apply_chaperone(param, 1, a, scheme_void, 0);
+        key = scheme_apply_chaperone(param, 1, a, scheme_void, 0x3);
         param = SCHEME_CHAPERONE_VAL(param);
       }
       a[0] = key;
@@ -8707,6 +8806,17 @@ void scheme_remove_gc_callback(Scheme_Object *key)
     prev = desc;
     desc = desc->next;
   }
+}
+
+static Scheme_Object *unsafe_add_collect_callbacks(int argc, Scheme_Object *argv[])
+{
+  return scheme_add_gc_callback(argv[0], argv[1]);
+}
+
+static Scheme_Object *unsafe_remove_collect_callbacks(int argc, Scheme_Object *argv[])
+{
+  scheme_remove_gc_callback(argv[0]);
+  return scheme_void;
 }
 
 #if defined(_MSC_VER) || defined(__MINGW32__)

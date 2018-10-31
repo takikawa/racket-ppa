@@ -432,7 +432,7 @@ An example with a 2-parameter function:
 @codeblock|{
 ; another-white : color number -> number
 (define (another-white c old-total)
-   (+ old (if (color=? c "white") 1 0)))
+   (+ old-total (if (color=? c "white") 1 0)))
 
 ; count-white-pixels : image -> number
 (define (count-white-pixels pic)
@@ -456,7 +456,7 @@ For example,
 
 ; count-pixels-of-color : image color -> number
 (define (count-pixels-of-color pic color-to-count)
-   (fold-image/extra count-pixels-of-color 0 pic))
+   (fold-image/extra another-of-color 0 pic color-to-count))
 }|
 }
 

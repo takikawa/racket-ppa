@@ -1335,6 +1335,7 @@
          (define-values (exer ctcs) ((contract-struct-exercise c) fuel))
          (set! dom-exers (cons exer dom-exers))
          (set! addl-available (append ctcs addl-available)))
+       (set! dom-exers (reverse dom-exers))
        (define rngs-gens 
          (if (base->-rngs ctc)
              (with-definitely-available-contracts
@@ -1386,6 +1387,12 @@
        (define kwd-gens
          (for/list ([kwd-info (in-list dom-kwd-infos)])
            (contract-random-generate/choose (kwd-info-ctc kwd-info) fuel)))
+       (define rng-exers
+         (and rng-ctcs
+              (for/list ([rng-ctc (in-list rng-ctcs)])
+                (define-values (exer ctcs)
+                  ((contract-struct-exercise rng-ctc) fuel))
+                exer)))
        (define env (contract-random-generate-get-current-environment))
        (cond
          [(and (andmap values gens)
@@ -1405,7 +1412,10 @@
                 (when rng-ctcs
                   (for ([res-ctc (in-list rng-ctcs)]
                         [result (in-list results)])
-                    (contract-random-generate-stash env res-ctc result))))))
+                    (contract-random-generate-stash env res-ctc result))
+                  (for ([exer (in-list rng-exers)]
+                        [result (in-list results)])
+                    (exer result))))))
            (or rng-ctcs '()))]
          [else
           (values void '())]))]
@@ -1720,7 +1730,7 @@
                                (unless (= 1 (length other))
                                  (raise-wrong-number-of-args-error
                                   #:missing-party neg-party
-                                  blame f (length other) 1 1 1
+                                  blame f (length other) 1 1
                                   #f)) ; not a method contract
                                (values (rng-checker f blame neg-party) (car other))))])
                          #f))

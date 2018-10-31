@@ -12,7 +12,11 @@
          "prune-name.rkt"
          "decompile.rkt"
          "save-and-report.rkt"
+         "global.rkt"
          "underscore.rkt"
+         "symbol.rkt"
+         "../run/status.rkt"
+         "../common/set.rkt"
          racket/pretty)
 
 (provide extract)
@@ -26,6 +30,9 @@
                  #:as-c? as-c?
                  #:as-decompiled? as-decompiled?
                  #:as-bytecode? as-bytecode?
+                 #:local-rename? local-rename?
+                 #:no-global? no-global?
+                 #:global-ok global-ok
                  ;; Table of symbol -> (listof knot-spec),
                  ;; to redirect a remaining import back to
                  ;; an implementation that is defined in the
@@ -40,7 +47,10 @@
                  ;; Override linklet compiler's simple inference
                  ;; of side-effects to remove a module from the
                  ;; flattened form if it's not otherwise referenced:
-                 #:side-effect-free-modules side-effect-free-modules)
+                 #:side-effect-free-modules side-effect-free-modules
+                 ;; A list of symbols that should not be defined in the
+                 ;; flattened, GCed form:
+                 #:disallows disallows)
   ;; Located modules:
   (define compiled-modules (make-hash))
 
@@ -97,11 +107,12 @@
                #:needed needed)))
   
   ;; Check for bootstrap obstacles, and report what we've found
-  (check-and-report! #:compiled-modules compiled-modules
-                     #:linklets linklets
-                     #:linklets-in-order linklets-in-order
-                     #:needed needed
-                     #:instance-knot-ties instance-knot-ties)
+  (define check-later-vars
+    (check-and-record-report! #:compiled-modules compiled-modules
+                              #:linklets linklets
+                              #:linklets-in-order linklets-in-order
+                              #:needed needed
+                              #:instance-knot-ties instance-knot-ties))
   
   ;; If we're in source mode, we can generate a single linklet
   ;; that combines all the ones we found
@@ -114,26 +125,48 @@
                                    #:cache cache))
 
     ;; Generate the flattened linklet
-    (define flattened-linklet-expr
+    (define-values (variable-names flattened-linklet-expr)
       (flatten! start-link
                 #:linklets linklets
                 #:linklets-in-order linklets-in-order
                 #:needed needed
                 #:exports exports
                 #:instance-knot-ties instance-knot-ties
-                #:primitive-table-directs primitive-table-directs))
+                #:primitive-table-directs primitive-table-directs
+                #:check-later-vars check-later-vars))
     
     (define simplified-expr
       (simplify-definitions flattened-linklet-expr))
 
     ;; Remove unreferenced definitions
     (define gced-linklet-expr
-      (garbage-collect-definitions simplified-expr))
+      (garbage-collect-definitions simplified-expr
+                                   #:disallows disallows))
+
+    (log-status "Checking that references outside the runtime were removed by simplification...")
+    (define really-used-names (all-used-symbols gced-linklet-expr))
+    (define complained? #f)
+    (for ([(var complains) (in-hash check-later-vars)])
+      (when (set-member? really-used-names (hash-ref variable-names var))
+        (for ([complain (in-list (reverse complains))])
+          (complain (lambda (var)
+                      (set-member? really-used-names (hash-ref variable-names var))))
+          (set! complained? #t))))
+    (when complained?
+      (exit 1))
+
+    (when no-global?
+      (check-global gced-linklet-expr global-ok))
 
     ;; Avoid gratuitous differences due to names generated during
-    ;; expansion
+    ;; expansion...
     (define re-renamed-linklet-expr
-      (simplify-underscore-numbers gced-linklet-expr))
+      (if local-rename?
+          ;; ... and allow the same name to be used in different non-shadowing
+          ;; local contextx
+          (collapse-underscore-numbers gced-linklet-expr)
+          ;; ... but use a distinct symbol for every binder's name
+          (simplify-underscore-numbers gced-linklet-expr)))
 
     ;; Prune any explicit function names (using a `quote` pattern in
     ;; the body) when they still match a name that would be inferred

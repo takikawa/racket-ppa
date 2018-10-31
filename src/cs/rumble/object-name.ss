@@ -38,7 +38,7 @@
      [(arity-wrapper-procedure? v)
       (extract-jit-procedure-name v)]
      [else
-      (let ([name (((inspect/object v) 'code) 'name)])
+      (let ([name (#%$code-name (#%$closure-code v))])
         (and name
              (string->symbol name)))])]
    [(impersonator? v)
@@ -58,5 +58,5 @@
     (and
      ;; Having an entry in `rtd-props` is a sign that
      ;; this structure type was created with `make-struct-type`:
-     (hashtable-contains? rtd-props rtd)
+     (with-global-lock* (hashtable-contains? rtd-props rtd))
      (object-name (record-rtd v)))))

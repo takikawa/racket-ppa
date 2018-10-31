@@ -1,8 +1,11 @@
 #lang racket/base
-(require "check.rkt"
+(require "place-local.rkt"
+         "check.rkt"
          "tree.rkt"
          "internal-error.rkt"
-         "sandman-struct.rkt")
+         "sandman-struct.rkt"
+         "current-sandman.rkt"
+         "host.rkt")
 
 ;; A "sandman" manages the set of all sleeping threads that may need
 ;; to be awoken in response to an external event, and it implements
@@ -34,6 +37,8 @@
          sandman-remove-sleeping-thread!
          sandman-poll
          sandman-sleep
+         sandman-get-wakeup-handle
+         sandman-wakeup
          sandman-any-sleepers?
          sandman-sleepers-external-events
          sandman-condition-wait
@@ -66,6 +71,14 @@
 (define (sandman-sleep exts)
   ((sandman-do-sleep the-sandman) exts))
 
+;; potentially in atomic mode
+(define (sandman-get-wakeup-handle)
+  ((sandman-do-get-wakeup the-sandman)))
+
+;; potentially in atomic mode
+(define (sandman-wakeup h)
+  ((sandman-do-wakeup the-sandman) h))
+
 ;; in atomic mode
 (define (sandman-any-sleepers?)
   ((sandman-do-any-sleepers? the-sandman)))
@@ -86,14 +99,6 @@
 (define (sandman-any-waiters?)
   ((sandman-do-any-waiters? the-sandman)))
 
-;; in atomic mode
-(define/who current-sandman
-  (case-lambda
-    [() the-sandman]
-    [(sm)
-     (check who sandman? sm)
-     (set! the-sandman sm)]))
-
 ;; created simple lock here to avoid cycle in loading from using lock defined in future.rkt
 (define (make-lock)
   (box 0))
@@ -107,26 +112,28 @@
   (unless (box-cas! box 1 0)
     (internal-error "Failed to release lock\n")))
 
-(define waiting-threads '())
-(define awoken-threads '())
+(define-place-local waiting-threads '())
+(define-place-local awoken-threads '())
 
 ;; ----------------------------------------
 ;; Default sandman implementation
 
 ;; A tree mapping times (in milliseconds) to a hash table of threads
 ;; to wake up at that time
-(define sleeping-threads empty-tree)
+(define-place-local sleeping-threads empty-tree)
 
 (define (min* a-sleep-until b-sleep-until)
   (if (and a-sleep-until b-sleep-until)
       (min a-sleep-until b-sleep-until)
       (or a-sleep-until b-sleep-until)))
 
-(define the-sandman
+;; Sandman should not have place-local state itself, but
+;; it can access place-local state that's declared as such.
+(define the-default-sandman
   (sandman
    ;; sleep
    (lambda (timeout-at)
-     (sleep (/ (- (or timeout-at (distant-future)) (current-inexact-milliseconds)) 1000.0)))
+     (host:sleep (/ (- (or timeout-at (distant-future)) (current-inexact-milliseconds)) 1000.0)))
 
    ;; poll
    (lambda (mode wakeup)
@@ -137,6 +144,14 @@
          (unless (null? threads)
            (for ([t (in-hash-keys threads)])
              (wakeup t))))))
+
+   ;; get-wakeup-handle
+   (lambda ()
+     (host:get-wakeup-handle))
+
+   ;; wakeup
+   (lambda (h)
+     (host:wakeup h))
 
    ;; any-sleepers?
    (lambda ()
@@ -211,6 +226,7 @@
 
    (make-lock)))
 
+(void (current-sandman the-default-sandman))
 
 ;; Compute an approximation to infinity:
 (define (distant-future)

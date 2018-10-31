@@ -53,21 +53,46 @@
                        (exn-continuation-marks exn))))])
     (for ([x (in-range 10)])
       (define size (random 100))
+
+      (define opens '())
+      (define (update-opens c)
+        (define (update-open c) (set! opens (cons c opens)))
+        (case c
+          [(#\") (update-open #\")]
+          [(#\|) (update-open #\|)]
+          [(#\() (update-open #\))]
+          [(#\[) (update-open #\])]
+          [(#\{) (update-open #\})])
+        c)
+
       (define (quash-backslash-r c)
         ;; it isn't clear the spec is right in
         ;; the case of \r\n combinations, so we
         ;; punt for now
         (if (equal? c #\return) #\newline c))
-      (define s (build-string
-                 size
-                 (λ (c) 
-                   (quash-backslash-r
-                    (case (random 3)
-                      [(0)
-                       (define s " ()@{}\"λΣ\0")
-                       (string-ref s (random (string-length s)))]
-                      [(1 2)
-                       (integer->char (random 255))])))))
+
+      (define (char-at-random)
+        (update-opens
+         (quash-backslash-r
+          (case (random 3)
+            [(0)
+             (define s " ()@{}\"λΣ\0|")
+             (string-ref s (random (string-length s)))]
+            [(1 2)
+             (integer->char (random 255))]))))
+
+      (define (pick-a-char)
+        (cond
+          [(null? opens)
+           (char-at-random)]
+          [else
+           (case (random 4)
+             [(0)
+              (begin0 (car opens)
+                      (set! opens (cdr opens)))]
+             [else (char-at-random)])]))
+
+      (define s (build-string size (λ (c) (pick-a-char))))
       (set! latest-input-string s)
       (define in (open-input-string s))
       (port-count-lines! in)
