@@ -705,7 +705,9 @@ int scheme_omittable_expr(Scheme_Object *o, int vals, int fuel, int flags,
         && (SCHEME_LOCAL_POS(sb->var) == SCHEME_LOCAL_POS(sb->val)))
       return 1;
     else if (SAME_TYPE(scheme_ir_local_type, SCHEME_TYPE(sb->var))
-             && SAME_OBJ(sb->var, sb->val))
+             && SAME_OBJ(sb->var, sb->val)
+             && ((((Scheme_IR_Local *)sb->var)->mode != SCHEME_VAR_MODE_COMPILE)
+                 || !((Scheme_IR_Local *)sb->var)->compile.keep_assignment))
       return 1;
   }
 
@@ -2656,7 +2658,8 @@ int check_potential_size(Scheme_Object *var)
 }
 
 Scheme_Object *do_lookup_constant_proc(Optimize_Info *info, Scheme_Object *le,
-                                       int argc, int for_inline, int for_props, int *_single_use)
+                                       int argc, int for_inline, int for_props,
+                                       int *_single_use, Scheme_Object **_single_use_var)
 /* Return a known procedure, if any.
    When argc == -1, the result may be a case-lambda or `scheme_constant_key`;
    otherwise, unless `for_props`, the arity is used to split a case-lambda to extact
@@ -2685,6 +2688,8 @@ Scheme_Object *do_lookup_constant_proc(Optimize_Info *info, Scheme_Object *le,
     int tmp;
     tmp = check_single_use(le);
     *_single_use = tmp;
+    if (tmp)
+      *_single_use_var = le;
     if ((SCHEME_VAR(le)->mode != SCHEME_VAR_MODE_OPTIMIZE)) {
       /* We got a local that is bound in a let that is not yet optimized. */
       return NULL;
@@ -2830,7 +2835,8 @@ Scheme_Object *do_lookup_constant_proc(Optimize_Info *info, Scheme_Object *le,
 Scheme_Object *lookup_constant_proc(Optimize_Info *info, Scheme_Object *le, int argc)
 {
   int single_use = 0;
-  return do_lookup_constant_proc(info, le, argc, 0, 0, &single_use);
+  Scheme_Object *single_use_var;
+  return do_lookup_constant_proc(info, le, argc, 0, 0, &single_use, &single_use_var);
 }
 
 #if 0
@@ -2848,7 +2854,7 @@ Scheme_Object *optimize_for_inline(Optimize_Info *info, Scheme_Object *le, int a
    application with two arguments. */
 {
   int single_use = 0, psize = 0;
-  Scheme_Object *prev = NULL, *orig_le = le, *le2;
+  Scheme_Object *prev = NULL, *orig_le = le, *le2, *single_use_var = NULL;
   int already_opt = optimized_rator;
 
   if ((info->inline_fuel < 0) && info->has_nonleaf)
@@ -2869,7 +2875,7 @@ Scheme_Object *optimize_for_inline(Optimize_Info *info, Scheme_Object *le, int a
   }
 
   le2 = le;
-  le = do_lookup_constant_proc(info, le, argc, 1, 0, &single_use);
+  le = do_lookup_constant_proc(info, le, argc, 1, 0, &single_use, &single_use_var);
   
   if (!le) {
     info->has_nonleaf = 1;
@@ -2892,7 +2898,7 @@ Scheme_Object *optimize_for_inline(Optimize_Info *info, Scheme_Object *le, int a
     int len;
     const char *pname = NULL, *context;
     info->escapes = 1;
-    le2 = do_lookup_constant_proc(info, le2, argc, 1, 1, &single_use);
+    le2 = do_lookup_constant_proc(info, le2, argc, 1, 1, &single_use, &single_use_var);
     if (!SAME_TYPE(SCHEME_TYPE(le2), scheme_struct_proc_shape_type)
         && !SAME_TYPE(SCHEME_TYPE(le2), scheme_struct_prop_proc_shape_type)){
       pname = scheme_get_proc_name(le2, &len, 0);
@@ -2940,6 +2946,8 @@ Scheme_Object *optimize_for_inline(Optimize_Info *info, Scheme_Object *le, int a
                      sz,
                      threshold,
                      scheme_optimize_context_to_string(info->context));
+        if (single_use_var)
+          SCHEME_VAR(single_use_var)->optimize_used = 0; /* just in case tentatively used */
         le = apply_inlined((Scheme_Lambda *)le, sub_info, argc, app, app2, app3, context,
                            orig_le, prev, single_use);
         return le;
@@ -4007,9 +4015,9 @@ static void check_known_both_try(Optimize_Info *info, Scheme_Object *app,
       reset_rator(app, unsafe);
     } else {
       pred1 = expr_implies_predicate(rand1, info); 
-      if (pred1 && SAME_OBJ(pred1, expect_pred)) { 
+      if (pred1 && predicate_implies(pred1, expect_pred)) { 
         pred2 = expr_implies_predicate(rand2, info);
-        if (pred2 && SAME_OBJ(pred2, expect_pred)) { 
+        if (pred2 && predicate_implies(pred2, expect_pred)) { 
           reset_rator(app, unsafe);
         }
       }
@@ -4417,7 +4425,9 @@ static Scheme_Object *finish_optimize_application2(Scheme_App2_Rec *app, Optimiz
     rator = scheme_values_proc;
   }
 
-  if (SCHEME_PRIMP(rator)) {
+  if (SCHEME_PRIMP(rator)
+      && (1 >= ((Scheme_Primitive_Proc *)rator)->mina)
+      && (1 <= ((Scheme_Primitive_Proc *)rator)->mu.maxa)) {
     /* Check for things like (cXr (cons X Y)): */
     switch (SCHEME_TYPE(rand)) {
     case scheme_application2_type:
@@ -4518,6 +4528,12 @@ static Scheme_Object *finish_optimize_application2(Scheme_App2_Rec *app, Optimiz
         }
         break;
       }
+    }
+
+    if (IS_NAMED_PRIM(rator, "length")
+        && SCHEME_LISTP(rand)) {
+      alt = scheme_make_integer(scheme_list_length(rand));
+      return replace_tail_inside(alt, inside, app->rand);
     }
 
     alt = try_reduce_predicate(rator, rand, info);
@@ -4627,6 +4643,8 @@ static Scheme_Object *finish_optimize_application2(Scheme_App2_Rec *app, Optimiz
         check_known(info, app_o, rator, rand, "symbol->string", scheme_symbol_p_proc, scheme_true, info->unsafe_mode);
         check_known(info, app_o, rator, rand, "string->keyword", scheme_string_p_proc, scheme_true, info->unsafe_mode);
         check_known(info, app_o, rator, rand, "keyword->string", scheme_keyword_p_proc, scheme_true, info->unsafe_mode);
+
+        check_known(info, app_o, rator, rand, "char->integer", scheme_char_p_proc, scheme_unsafe_char_to_integer_proc, info->unsafe_mode);
       }
       
       if (SCHEME_PRIM_PROC_OPT_FLAGS(rator) & SCHEME_PRIM_WANTS_REAL)
@@ -5074,7 +5092,9 @@ static Scheme_Object *finish_optimize_application3(Scheme_App3_Rec *app, Optimiz
     }
   }
 
-  if (SCHEME_PRIMP(app->rator)) {
+  if (SCHEME_PRIMP(app->rator)
+      && (2 >= ((Scheme_Primitive_Proc *)app->rator)->mina)
+      && (2 <= ((Scheme_Primitive_Proc *)app->rator)->mu.maxa)) {
     Scheme_Object *app_o = (Scheme_Object *)app, *rator = app->rator, *rand1 = app->rand1, *rand2 = app->rand2;
 
     if (SCHEME_PRIM_PROC_OPT_FLAGS(rator) & SCHEME_PRIM_AD_HOC_OPT) {
@@ -5111,6 +5131,12 @@ static Scheme_Object *finish_optimize_application3(Scheme_App3_Rec *app, Optimiz
       check_known_both_try(info, app_o, rator, rand1, rand2, "fx+", scheme_fixnum_p_proc, scheme_unsafe_fx_plus_proc, info->unsafe_mode);
       check_known_both_try(info, app_o, rator, rand1, rand2, "fx-", scheme_fixnum_p_proc, scheme_unsafe_fx_minus_proc, info->unsafe_mode);
       check_known_both_try(info, app_o, rator, rand1, rand2, "fx*", scheme_fixnum_p_proc, scheme_unsafe_fx_times_proc, info->unsafe_mode);
+
+      check_known_both_try(info, app_o, rator, rand1, rand2, "char=?", scheme_char_p_proc, scheme_unsafe_char_eq_proc, info->unsafe_mode);
+      check_known_both_try(info, app_o, rator, rand1, rand2, "char<?", scheme_char_p_proc, scheme_unsafe_char_lt_proc, info->unsafe_mode);
+      check_known_both_try(info, app_o, rator, rand1, rand2, "char>?", scheme_char_p_proc, scheme_unsafe_char_gt_proc, info->unsafe_mode);
+      check_known_both_try(info, app_o, rator, rand1, rand2, "char<=?", scheme_char_p_proc, scheme_unsafe_char_lt_eq_proc, info->unsafe_mode);
+      check_known_both_try(info, app_o, rator, rand1, rand2, "char>=?", scheme_char_p_proc, scheme_unsafe_char_gt_eq_proc, info->unsafe_mode);
 
       rator = app->rator; /* in case it was updated */
 

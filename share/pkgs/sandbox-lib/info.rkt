@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define package-content-state (quote (built "7.0"))) (define collection (quote multi)) (define deps (quote ("scheme-lib" "base" "errortrace-lib"))) (define pkg-desc "Library for sandboxing Racket programs") (define pkg-authors (quote (eli)))))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "7.1"))) (define collection (quote multi)) (define deps (quote ("scheme-lib" "base" "errortrace-lib"))) (define pkg-desc "Library for sandboxing Racket programs") (define pkg-authors (quote (eli)))))

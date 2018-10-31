@@ -7,14 +7,17 @@ SCHEME = scheme
 # Controls whether Racket layers are built as unsafe:
 UNSAFE_COMP = --unsafe
 
+# Controls whether compiled code is compressed:
+COMPRESS_COMP = # --compress
+
 # Controls whether Racket layers are built with expression-level debugging:
 DEBUG_COMP = # --debug
 
 # Controls whether Rumble is built as unsafe:
 RUMBLE_UNSAFE_COMP = --unsafe
 
-COMPILE_FILE = $(SCHEME) --script compile-file.ss $(UNSAFE_COMP) $(DEBUG_COMP) --dest "$(BUILDDIR)"
-COMPILE_FILE_DEPS = compile-file.ss include.ss
+COMPILE_FILE = $(SCHEME) --script compile-file.ss $(UNSAFE_COMP) $(COMPRESS_COMP) $(DEBUG_COMP) --dest "$(BUILDDIR)"
+COMPILE_FILE_DEPS = compile-file.ss include.ss place-register.ss 
 
 RACKET_SETUP_ARGS = ../../bin/racket ../collects ../etc 0 false
 
@@ -53,7 +56,7 @@ all:
 	$(MAKE) rktl
 	$(MAKE) $(BUILDDIR)racket.so
 
-expander-demo: $(BUILDDIR)expander.so demo/expander.ss
+expander-demo: $(BUILDDIR)expander.so demo/expander.ss ../../bin/racket
 	$(SCHEME) $(EXPANDER_DEPS) $(BUILDDIR)expander.so demo/expander.ss
 
 run: $(BUILDDIR)main.so ../../bin/racket
@@ -63,7 +66,7 @@ setup:
 	$(MAKE) run ARGS="-l- setup $(ARGS)"
 
 setup-v:
-	$(MAKE) run ARGS="-W 'info@compiler/cm info@linklet debug@GC:major error' -l- setup $(ARGS)"
+	$(MAKE) run ARGS="-W 'info@compiler/cm info@linklet debug@GC:major error' -l- setup -j 1 $(ARGS)"
 
 run-wpo: $(BUILDDIR)racket.so ../../bin/racket
 	$(SCHEME) --script $(BUILDDIR)racket.so $(RACKET_SETUP_ARGS) $(ARGS)
@@ -105,7 +108,14 @@ expander-rktl:
 linklet-demo: $(BUILDDIR)linklet.so
 	$(SCHEME) $(LINKLET_DEPS) $(BUILDDIR)linklet.so demo/linklet.ss
 
-$(BUILDDIR)linklet.so: linklet.sls $(LINKLET_DEPS) $(COMPILE_FILE_DEPS)
+LINKLET_SRCS = linklet/read.ss \
+               linklet/write.ss \
+               linklet/performance.ss \
+               linklet/annotation.ss \
+               linklet/compress.ss \
+               linklet/db.ss
+
+$(BUILDDIR)linklet.so: linklet.sls $(LINKLET_SRCS) $(LINKLET_DEPS) $(COMPILE_FILE_DEPS)
 	$(COMPILE_FILE) linklet.sls $(LINKLET_DEPS)
 
 
@@ -232,6 +242,7 @@ RUMBLE_SRCS = rumble/define.ss \
               rumble/hash.ss \
               rumble/datum.ss \
 	      rumble/lock.ss \
+	      rumble/thread-local.ss \
               rumble/thread-cell.ss \
               rumble/parameter.ss \
               rumble/begin0.ss \
@@ -239,6 +250,7 @@ RUMBLE_SRCS = rumble/define.ss \
               rumble/control.ss \
               rumble/interrupt.ss \
               rumble/engine.ss \
+              rumble/source.ss \
               rumble/error.ss \
               rumble/srcloc.ss \
               rumble/boolean.ss \

@@ -624,7 +624,9 @@ LIBOBJS
 FRAMEWORK_PREFIX
 FRAMEWORK_INSTALL_DIR
 SCHEME_CONFIG_ARGS
+MAKE_BUILD_SCHEME
 SCHEME_SRC
+COMPRESS_COMP
 CONFIGURE_RACKET_SO_COMPILE
 NOT_OSX
 OSX
@@ -705,6 +707,7 @@ enable_shared
 enable_standalone
 enable_pthread
 enable_iconv
+enable_compress
 enable_xonx
 enable_racket
 enable_scheme
@@ -1335,6 +1338,7 @@ Optional Features:
   --enable-standalone     create a standalone shared library
   --enable-pthread        link with pthreads (usually auto-enabled if needed)
   --enable-iconv          use iconv (usually auto-enabled)
+  --enable-compress       compress compiled code
   --enable-xonx           use Unix style (e.g., use Gtk) for Mac OS
   --enable-racket=<path>  use <path> as Racket to build; or "auto" to create
   --enable-scheme=<path>  Chez Scheme build directory at <path>
@@ -2226,6 +2230,11 @@ if test "${enable_iconv+set}" = set; then :
   enableval=$enable_iconv;
 fi
 
+# Check whether --enable-compress was given.
+if test "${enable_compress+set}" = set; then :
+  enableval=$enable_compress;
+fi
+
 # Check whether --enable-xonx was given.
 if test "${enable_xonx+set}" = set; then :
   enableval=$enable_xonx;
@@ -2273,6 +2282,7 @@ show_explicitly_set()
 
 show_explicitly_enabled "${enable_pthread}" "pthreads"
 show_explicitly_disabled "${enable_pthread}" "pthreads"
+show_explicitly_enabled "${enable_compress}" "Compressed code"
 show_explicitly_enabled "${enable_xonx}" "Unix style"
 show_explicitly_set "${enable_racket}" "Racket"
 show_explicitly_set "${enable_scheme}" "Chez Scheme build directory"
@@ -2294,6 +2304,7 @@ INCLUDEDEP="#"
 OSX="not_osx"
 NOT_OSX=""
 CONFIGURE_RACKET_SO_COMPILE=""
+COMPRESS_COMP=""
 
 FRAMEWORK_INSTALL_DIR='$(srcdir)/../../../lib/'
 FRAMEWORK_PREFIX='@executable_path/../lib/'
@@ -3286,9 +3297,11 @@ case "$host_cpu" in
 esac
 
 SCHEME_SRC=../ChezScheme
+MAKE_BUILD_SCHEME=y
 
 if test "${enable_scheme}" != "" ; then
   SCHEME_SRC="${enable_scheme}"
+  MAKE_BUILD_SCHEME=n
 fi
 
 if test "${enable_racket}" != "" ; then
@@ -3300,6 +3313,10 @@ if test "${enable_mach}" != "" ; then
 fi
 
 SCHEME_CONFIG_ARGS="--machine=${MACH} ${thread_config_arg}"
+
+if test "${enable_compress}" = "yes" ; then
+  COMPRESS_COMP="--compress"
+fi
 
 ############## C flags ################
 
@@ -3895,6 +3912,8 @@ fi
 ############## final output ################
 
 CPPFLAGS="$CPPFLAGS $PREFLAGS"
+
+
 
 
 

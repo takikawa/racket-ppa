@@ -398,9 +398,13 @@ all users of the Racket installation.
 
 A directory path can be used as a @tech{package scope}, in which case
 package operations affect the set of packages installations in the
-directory. An installation can be configured to include the
-directory in its search path for installed packages (see
-@secref["config-file" #:doc raco-doc]).
+directory. An installation can be configured to include the directory
+in its search path for installed packages (see @secref["config-file"
+#:doc raco-doc]). When a directory path is used as a @tech{package
+scope}, operations such as dependency checking will use all paths in
+the configured search path starting with the one that is designed as a
+@tech{package scope}; if the designated path is not in the configured
+search path, then the dierctory by itself is used as the search path.
 
 Conflict checking disallows installation of the same or conflicting
 package in different scopes, but if such a configuration is forced,
@@ -512,10 +516,13 @@ sub-commands.
         @tech{package name} must be mapped by the @tech{package catalog} to a
         Git or GitHub @tech{package source}.}
 
+  @item{@DFlag{source} --- Strips built elements of a package before installing, and implies @DFlag{copy}.
+                           See also @secref["strip"].}
+
   @item{@DFlag{binary} --- Strips source elements of a package before installing, and implies @DFlag{copy}.
                            See also @secref["strip"].}
 
-  @item{@DFlag{source} --- Strips built elements of a package before installing, and implies @DFlag{copy}.
+  @item{@DFlag{binary-lib} --- Strips source and documentation elements of a package before installing, and implies @DFlag{copy}.
                            See also @secref["strip"].}
 
  @item{@DFlag{scope} @nonterm{scope} --- Selects the @tech{package scope} for installation, where @nonterm{scope} is one of
@@ -849,8 +856,10 @@ package is created.
 
  @item{@DFlag{deps} @nonterm{behavior} --- Same as for @command-ref{install}, except that @exec{search-auto} is
        the default.}
-  @item{@DFlag{binary} --- Same as for @command-ref{install}.}
+  
   @item{@DFlag{source} --- Same as for @command-ref{install}.}
+  @item{@DFlag{binary} --- Same as for @command-ref{install}.}
+  @item{@DFlag{binary-lib} --- Same as for @command-ref{install}.}
   @item{@DFlag{scope} @nonterm{scope} --- Same as for @command-ref{install}.}
   @item{@Flag{i} or @DFlag{installation} --- Shorthand for @exec{--scope installation}.}
   @item{@Flag{u} or @DFlag{user} --- Shorthand for @exec{--scope user}.}
@@ -895,6 +904,7 @@ package is created.
  @item{@DFlag{source} --- Bundles only sources in the package directory; see @secref["strip"].}
  @item{@DFlag{binary} --- Bundles compiled bytecode and rendered
        documentation in the package directory; see @secref["strip"].}
+ @item{@DFlag{binary-lib} --- Bundles compiled bytecode only in the package directory; see @secref["strip"].}
  @item{@DFlag{built} --- Bundles compiled sources, bytecode, and rendered
        documentation in the package directory, filtering repository elements; see @secref["strip"].}
   @item{@DFlag{dest} @nonterm{dest-dir} --- Writes generated bundles to @nonterm{dest-dir}.}

@@ -721,6 +721,7 @@ please adhere to these guidelines:
 
   ;; windows menu
  (windows-menu-label "О&кна")
+ (tabs-menu-label "В&кладки") ;; this is the name of the menu under linux & windows
  (minimize "Свернуть") ;; minimize and zoom are only used under mac os x
  (zoom "Изменить размер")
  (bring-frame-to-front "Показать поверх всех окон")       ;;; title of dialog
@@ -728,6 +729,12 @@ please adhere to these guidelines:
  (most-recent-window "Последнее окно")
   (next-tab "Следующая вкладка")
   (prev-tab "Предыдущая вкладка")
+  (move-current-tab-right "Сдвинуть вкладку в&право")
+  (move-current-tab-left "Сдвинуть вкладку в&лево")
+  ;; menu item in the windows menu under mac os x. first ~a is filled with a number between 1 and 9; second one is the filename of the tab
+  (tab-i "Вкладка ~a: ~a")
+  (tab-i/no-name "Вкладка ~a")
+  (last-tab "Последняя вкладка: ~a")
 
  (view-menu-label "В&ид")
  (show-overview "Показать Ко&нтур программы") 

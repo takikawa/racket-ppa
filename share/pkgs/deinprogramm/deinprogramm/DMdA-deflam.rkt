@@ -7,4 +7,5 @@
 ;; can connect up the re-exports to the documentation properly.
 
 (provide (rename-out (DMdA-advanced-lambda lambda))
+	 (rename-out (DMdA-advanced-lambda λ))
 	 (rename-out (DMdA-advanced-define define)))

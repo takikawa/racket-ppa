@@ -53,6 +53,12 @@
             (free x))
           eof))))
 
+;; Keep some values alive as long as the current place exists
+(define alive-values (box null))
+(void (malloc-immobile-cell alive-values))
+(define (keep-alive! v)
+  (set-box! alive-values (cons v (unbox alive-values))))
+
 (define _string/eof/free ; make a Scheme str from C str & free immediately
   (make-ctype _pointer
     (lambda (x) (and (not (eof-object? x)) (string->bytes/utf-8 x)))
@@ -67,13 +73,13 @@
   (get-ffi-obj "readline" libreadline (_fun _string -> _string/eof/free)))
 
 (define readline-bytes
-  (get-ffi-obj "readline" libreadline (_fun _bytes -> _bytes/eof/free)))
+  (get-ffi-obj "readline" libreadline (_fun _bytes/nul-terminated -> _bytes/eof/free)))
 
 (define add-history
   (get-ffi-obj "add_history" libreadline (_fun _string -> _void)))
 
 (define add-history-bytes
-  (get-ffi-obj "add_history" libreadline (_fun _bytes -> _void)))
+  (get-ffi-obj "add_history" libreadline (_fun _bytes/nul-terminated -> _void)))
 
 (define history-length
   (let ([hl (ffi-obj #"history_length" libreadline)])
@@ -141,10 +147,10 @@
     [(func) (set-completion-function! func _string)]
     [(func type)
      (if func
-       (set-ffi-obj! "rl_completion_entry_function" libreadline
-                     (_fun type _int -> _pointer)
-                     (completion-function func))
-       (set-ffi-obj! "rl_completion_entry_function" libreadline _pointer #f))]))
+         (set-ffi-obj! "rl_completion_entry_function" libreadline
+                       (_fun #:keep keep-alive! type _int -> _pointer)
+                       (completion-function func))
+         (set-ffi-obj! "rl_completion_entry_function" libreadline _pointer #f))]))
 
 (define (completion-function func)
   (let ([cur '()])
@@ -169,8 +175,11 @@
 
 (set-ffi-obj! "rl_readline_name" libreadline _pointer
               (let ([s #"mzscheme"])
-                (define m (malloc (add1 (bytes-length s)) 'atomic-interior))
-                (memcpy m s (add1 (bytes-length s)))
+                (define len (bytes-length s))
+                (define m (malloc (add1 len) 'atomic-interior))
+                (memcpy m s len)
+                (ptr-set! m _byte len 0)
+                (keep-alive! m)
                 m))
 
 ;; need to capture the real input port below
@@ -184,7 +193,7 @@
 ;; We need to tell readline to pull content through our own function,
 ;; to avoid buffering issues between C and Racket, and to allow
 ;; racket threads to run while waiting for input.
-(set-ffi-obj! "rl_getc_function" libreadline (_fun _pointer -> _int)
+(set-ffi-obj! "rl_getc_function" libreadline (_fun #:keep keep-alive! _pointer -> _int)
               (lambda (_)
                 (define next-byte (read-byte real-input-port))
                 (if (eof-object? next-byte) -1 next-byte)))

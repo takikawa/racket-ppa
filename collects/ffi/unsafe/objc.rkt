@@ -98,8 +98,10 @@
 
 (define (strcpy s)
   (let* ([n (cast s _string _bytes)]
-         [p (malloc 'raw (add1 (bytes-length n)))])
-    (memcpy p n (add1 (bytes-length n)))
+         [len (bytes-length n)]
+         [p (malloc 'raw (add1 len))])
+    (memcpy p n len)
+    (ptr-set! p _byte len 0)
     p))
 
 (define (allocate-class-pair-the-hard-way superclass name)
@@ -288,7 +290,7 @@
 (define-syntax-rule (as-atomic e)
   (begin (start-atomic) (begin0 e (end-atomic))))
 
-(define (lookup-send types msgSends msgSend msgSend_fpret msgSend_stret first-arg-type)
+(define (lookup-send blocking? types msgSends msgSend msgSend_fpret msgSend_stret first-arg-type)
   ;; First type in `types' vector is the result type
   (or (as-atomic (hash-ref msgSends types #f))
       (let ([ret-layout (ctype->layout (vector-ref types 0))])
@@ -297,6 +299,7 @@
             ;; Structure return type:
             (let* ([pre-m (function-ptr msgSend_stret
                                         (_cprocedure
+                                         #:blocking? blocking?
                                          (list* _pointer first-arg-type _SEL (cdr (vector->list types)))
                                          _void))]
                    [m (lambda args
@@ -311,6 +314,7 @@
                                        msgSend_fpret
                                        msgSend)
                                    (_cprocedure
+                                    #:blocking? blocking?
                                     (list* first-arg-type _SEL (cdr (vector->list types)))
                                     (vector-ref types 0)))])
               (as-atomic (hash-set! msgSends types m))
@@ -318,13 +322,32 @@
 
 (define msgSends (make-weak-hash))
 (define (objc_msgSend/typed types)
-  (lookup-send types msgSends objc_msgSend objc_msgSend_fpret objc_msgSend_stret _id))
+  (lookup-send #f types msgSends objc_msgSend objc_msgSend_fpret objc_msgSend_stret _id))
 (provide objc_msgSend/typed)
 
 (define msgSendSupers (make-weak-hash))
 (define (objc_msgSendSuper/typed types)
-  (lookup-send types msgSendSupers objc_msgSendSuper objc_msgSendSuper_fpret objc_msgSendSuper_stret _pointer))
+  (lookup-send #f types msgSendSupers objc_msgSendSuper objc_msgSendSuper_fpret objc_msgSendSuper_stret _pointer))
 (provide objc_msgSendSuper/typed)
+
+(define msgSends/blocking (make-weak-hash))
+(define (objc_msgSend/typed/blocking types)
+  (lookup-send #t types msgSends/blocking objc_msgSend objc_msgSend_fpret objc_msgSend_stret _id))
+(provide objc_msgSend/typed/blocking)
+
+(define msgSendSupers/blocking (make-weak-hash))
+(define (objc_msgSendSuper/typed/blocking types)
+  (lookup-send #t types msgSendSupers/blocking objc_msgSendSuper objc_msgSendSuper_fpret objc_msgSendSuper_stret _pointer))
+(provide objc_msgSendSuper/typed/blocking)
+
+(define-syntax-parameter objc_msgSend/typed* (make-rename-transformer #'objc_msgSend/typed))
+(define-syntax-parameter objc_msgSendSuper/typed* (make-rename-transformer #'objc_msgSendSuper/typed))
+
+(define-syntax-rule (with-blocking-tell e0 e ...)
+  (syntax-parameterize ([objc_msgSend/typed* (make-rename-transformer #'objc_msgSend/typed/blocking)]
+                        [objc_msgSendSuper/typed* (make-rename-transformer #'objc_msgSendSuper/typed/blocking)])
+    e0 e ...))
+(provide with-blocking-tell)
 
 ;; ----------------------------------------
 
@@ -508,7 +531,7 @@
                   [send send/typed]
                   [(send-arg ...) send-args])
       (quasisyntax/loc stx
-        ((send (type-vector #,result-type type ...))
+        ((send (type-vector '(tag ...) #,result-type type ...))
          send-arg ... #,(register-selector (combine #'(tag ...)))
          arg ...)))))
 
@@ -527,23 +550,26 @@
                          "method identifier missing"
                          stx)]
     [(_ #:type t target method)
+     (and (not (keyword? (syntax-e #'target)))
+          (identifier? #'method))
      (let ([m #'method])
        (check-method-name m stx)
        (quasisyntax/loc stx
-         ((objc_msgSend/typed (type-vector t)) target #,(register-selector (syntax-e m)))))]
+         ((objc_msgSend/typed* (type-vector 'method t)) target #,(register-selector (syntax-e m)))))]
     [(_ target method)
-     (not (keyword? (syntax-e #'target)))
+     (and (not (keyword? (syntax-e #'target)))
+          (identifier? #'method))
      (let ([m #'method])
        (check-method-name m stx)
        (quasisyntax/loc stx
-         ((objc_msgSend/typed (type-vector _id)) target #,(register-selector (syntax-e m)))))]
+         ((objc_msgSend/typed* (type-vector 'method _id)) target #,(register-selector (syntax-e m)))))]
     [(_ #:type result-type target method/arg ...)
      (build-send stx #'result-type 
-                 #'objc_msgSend/typed #'(target)
+                 #'objc_msgSend/typed* #'(target)
                  #'(method/arg ...))]
     [(_ target method/arg ...)
      (build-send stx #'_id 
-                 #'objc_msgSend/typed #'(target)
+                 #'objc_msgSend/typed* #'(target)
                  #'(method/arg ...))]))
 
 (define-syntax-rule (tellv a ...)
@@ -561,37 +587,39 @@
                   prims)))))
 
 (define-syntax (type-vector stx)
-  (let ([types (cdr (syntax->list stx))])
-    (let ([vec-exp (quasisyntax/loc stx (vector . #,types))]
-          [type-exprs (cdr (syntax->list stx))])
-      (cond
-        [(andmap liftable-type? type-exprs)
-         ;; Recognized types => simple lift
-         (syntax-local-lift-expression #`(intern-type-vector #,vec-exp))]
-        [(andmap (lambda (type-expr)
-                   (and (identifier? type-expr)
-                        (pair? (identifier-binding type-expr))))
-                 type-exprs)
-         ;; Types bound as imports => lift with cache and `#%variable-reference-constant?` check
-         (let* ([expanded-type-exprs
-                 (map (lambda (type-expr)
-                        (local-expand type-expr 'expression #f))
-                      type-exprs)]
-                [expanded-vec-exp #`(vector . #,expanded-type-exprs)])
-           (cond
-             [(andmap identifier? expanded-type-exprs)
-              (let ([saved-vector-id (syntax-local-lift-expression #'(box #f))])
-                (quasisyntax/loc stx
-                  (or (unbox #,saved-vector-id)
-                      (maybe-cache-type-vector-in-box
-                       #,expanded-vec-exp
-                       #,saved-vector-id
-                       (vector #,@(for/list ([expanded-type-expr (in-list expanded-type-exprs)])
-                                    #`(variable-reference-constant? (#%variable-reference #,expanded-type-expr))))))))]
-             [else expanded-vec-exp]))]
-        [else
-         ;; General case: construct type vector every time
-         vec-exp]))))
+  (syntax-case stx ()
+    [(_ who . types)
+     (let* ([type-exprs (syntax->list #'types)]
+            [vec-exp (quasisyntax/loc stx (vector . #,type-exprs))])
+       (cond
+         [(andmap liftable-type? type-exprs)
+          ;; Recognized types => simple lift
+          (syntax-local-lift-expression #`(intern-type-vector #,vec-exp))]
+         [(andmap (lambda (type-expr)
+                    (and (identifier? type-expr)
+                         (pair? (identifier-binding type-expr))))
+                  type-exprs)
+          ;; Types bound as imports => lift with cache and `#%variable-reference-constant?` check
+          (let* ([expanded-type-exprs
+                  (map (lambda (type-expr)
+                         (local-expand type-expr 'expression #f))
+                       type-exprs)]
+                 [expanded-vec-exp #`(vector . #,expanded-type-exprs)])
+            (cond
+              [(andmap identifier? expanded-type-exprs)
+               (let ([saved-vector-id (syntax-local-lift-expression #'(box #f))])
+                 (quasisyntax/loc stx
+                   (or (unbox #,saved-vector-id)
+                       (maybe-cache-type-vector-in-box
+                        who
+                        #,expanded-vec-exp
+                        #,saved-vector-id
+                        (vector #,@(for/list ([expanded-type-expr (in-list expanded-type-exprs)])
+                                     #`(variable-reference-constant? (#%variable-reference #,expanded-type-expr))))))))]
+              [else expanded-vec-exp]))]
+         [else
+          ;; General case: construct type vector every time
+          vec-exp]))]))
 
 (define type-vectors (make-hash))
 (define (intern-type-vector v)
@@ -600,10 +628,15 @@
         (hash-set! type-vectors v v)
         v)))
 
-(define (maybe-cache-type-vector-in-box vec saved-vec-box const?s)
-  (when (for/and ([c? (in-vector const?s)])
-          c?)
-    (set-box! saved-vec-box vec))
+(define-logger ffi/unsafe/objc)
+
+(define (maybe-cache-type-vector-in-box who vec saved-vec-box const?s)
+  (cond
+    [(for/and ([c? (in-vector const?s)])
+       c?)
+     (set-box! saved-vec-box vec)]
+    [else
+     (log-ffi/unsafe/objc-debug "not a known-constant type vector for ~s" who)])
   vec)
 
 ;; ----------------------------------------
@@ -867,10 +900,16 @@
          [(kind result-type (id arg ...) body0 body ...)
           (loop stx 
                 (with-syntax ([async
-                               (if (eq? (syntax-e #'id) 'dealloc)
-                                   ;; so that objects can be destroyed in foreign threads:
-                                   #'apply-directly
-                                   #'#f)])
+                               (cond
+                                 [(eq? (syntax-e #'id) 'dealloc)
+                                  ;; so that objects can be destroyed in foreign threads:
+                                  #'apply-directly]
+                                 [(eq? (system-type 'vm) 'chez-scheme)
+                                  ;; to cooperate with blocking callouts, we need a non-#f
+                                  ;; `async-apply`
+                                  #'complain-apply-foreign-thread]
+                                 [else                                  
+                                  #'#f])])
                   (syntax/loc m 
                     (kind #:async-apply async result-type (id arg ...) body0 body ...))))]
          [else (raise-syntax-error #f
@@ -879,6 +918,13 @@
                                    #'m)]))]))
 
 (define (apply-directly f) (f))
+
+(define (complain-apply-foreign-thread f)
+  ;; We'd like to complain, but we' not in a context where there's a
+  ;; valid way to complain. Try logging an error, and just maybe that
+  ;; will get some information out.
+  (log-error "callback in unexpected thread")
+  (void))
 
 (define methods (make-hasheq))
 (define (save-method! m)
@@ -907,7 +953,7 @@
      (let ([m #'method])
        (check-method-name m stx)
        (quasisyntax/loc stx
-         ((objc_msgSendSuper/typed (type-vector t))
+         ((objc_msgSendSuper/typed* (type-vector 'method t))
           (make-objc_super self super-class) 
           #,(register-selector (syntax-e m)))))]
     [(_ method)
@@ -915,17 +961,17 @@
      (let ([m #'method])
        (check-method-name m stx)
        (quasisyntax/loc stx
-         ((objc_msgSendSuper/typed (type-vector _id)) 
+         ((objc_msgSendSuper/typed* (type-vector 'method _id)) 
           (make-objc_super self super-class)
           #,(register-selector (syntax-e m)))))]
     [(_ #:type result-type method/arg ...)
      (build-send stx #'result-type 
-                 #'objc_msgSendSuper/typed
+                 #'objc_msgSendSuper/typed*
                  #'((make-objc_super self super-class))
                  #'(method/arg ...))]
     [(_ method/arg ...)
      (build-send stx #'_id
-                 #'objc_msgSendSuper/typed
+                 #'objc_msgSendSuper/typed*
                  #'((make-objc_super self super-class))
                  #'(method/arg ...))]))
 

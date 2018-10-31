@@ -45,6 +45,9 @@ static Scheme_Object *omitable_symbol;
 static Scheme_Object *folding_symbol;
 
 THREAD_LOCAL_DECL(Scheme_Hash_Table *local_primitive_tables);
+THREAD_LOCAL_DECL(extern intptr_t scheme_code_page_total);
+THREAD_LOCAL_DECL(extern intptr_t scheme_code_total);
+THREAD_LOCAL_DECL(extern intptr_t scheme_code_count);
 
 static Scheme_Object *primitive_table(int argc, Scheme_Object **argv);
 static Scheme_Object *primitive_to_position(int argc, Scheme_Object **argv);
@@ -1166,6 +1169,9 @@ static Scheme_Linklet *compile_and_or_optimize_linklet(Scheme_Object *form, Sche
 {
   Scheme_Config *config;
   int enforce_const, set_undef, can_inline;
+  Scheme_Performance_State perf_state;
+
+  scheme_performance_record_start(&perf_state);
 
   config = scheme_current_config();
   enforce_const = SCHEME_TRUEP(scheme_get_param(config, MZCONFIG_COMPILE_MODULE_CONSTS));
@@ -1201,6 +1207,8 @@ static Scheme_Linklet *compile_and_or_optimize_linklet(Scheme_Object *form, Sche
 
   if (validate_compile_result)
     scheme_validate_linklet(NULL, linklet);
+
+  scheme_performance_record_end("compile", &perf_state);
 
   return linklet;
 }
@@ -1351,6 +1359,9 @@ static void *instantiate_linklet_k(void)
   int depth;
   Scheme_Object *b, *v;
   Scheme_Hash_Tree *source_names;
+  Scheme_Performance_State perf_state;
+
+  scheme_performance_record_start(&perf_state);
 
   p->ku.k.p1 = NULL;
   p->ku.k.p2 = NULL;
@@ -1402,6 +1413,40 @@ static void *instantiate_linklet_k(void)
 
   if (!multi)
     v = scheme_check_one_value(v);
+
+#ifdef MZ_USE_JIT
+  if (linklet->native_lambdas) {
+    int mc;
+    Scheme_Object **mv, *l;
+
+    if (SAME_OBJ(v, SCHEME_MULTIPLE_VALUES)) {
+      p = scheme_current_thread;
+      mv = p->ku.multiple.array;
+      mc = p->ku.multiple.count;
+      if (SAME_OBJ(mv, p->values_buffer))
+        p->values_buffer = NULL;
+    } else {
+      mv = NULL;
+      mc = 0;
+    }
+
+    l = linklet->native_lambdas;
+    linklet->native_lambdas = NULL;
+
+    while (SCHEME_PAIRP(l)) {
+      scheme_force_jit_generate((Scheme_Native_Lambda *)SCHEME_CAR(l));
+      l = SCHEME_CDR(l);
+    }
+
+    if (mv) {
+      p = scheme_current_thread;
+      p->ku.multiple.array = mv;
+      p->ku.multiple.count = mc;
+    }
+  }
+#endif
+
+  scheme_performance_record_end("instantiate", &perf_state);
 
   return (void *)v;
 }
@@ -1510,7 +1555,7 @@ static Scheme_Hash_Tree *push_prefix(Scheme_Linklet *linklet, Scheme_Instance *i
 
       if (v) {
         if (!((Scheme_Bucket *)v)->val) {
-          bad_reason = "is unintialized";
+          bad_reason = "is uninitialized";
           v = NULL;
         } else if (linklet->import_shapes) {
           Scheme_Object *shape = SCHEME_VEC_ELS(linklet->import_shapes)[pos-1];
@@ -1712,6 +1757,309 @@ int check_pruned_prefix(void *p) XFORM_SKIP_PROC
   return SCHEME_PREFIX_FLAGS(pf) & 0x1;
 }
 #endif
+
+/*========================================================================*/
+/*  Recorindg performance times                                           */
+/*========================================================================*/
+
+static intptr_t nested_delta, nested_gc_delta;
+static int perf_reg, perf_count;
+
+typedef struct {
+  const char *name;
+  intptr_t accum;
+  intptr_t gc_accum;
+  intptr_t count;
+} Performance_Entry;
+
+#define MAX_PERF_ENTRIES 16
+
+static Performance_Entry perf_entries[MAX_PERF_ENTRIES];
+
+#define MAX_PERF_CATS    3
+#define MAX_PERF_SUBS    3
+
+typedef struct {
+  const char *name;
+  Performance_Entry perf_entries[MAX_PERF_SUBS];
+  int perf_count;
+} Performance_Cat;
+
+typedef struct {
+  const char *entry;
+  const char *cat;
+} Performace_Recat;
+
+static Performace_Recat recats[] = { { "instantiate", "run" },
+                                     { "jit", "run" },
+                                     { "comp-ffi-call", "comp-ffi" },
+                                     { "comp-ffi-back", "comp-ffi" },
+                                     { NULL, NULL} };
+
+static char *do_tab(int len, char *tab, int max_len)
+{
+  int i;
+
+  len = max_len - len;
+  if (len < 0)
+    len = 0;
+  for (i = 0; i < len; i++) {
+    tab[i] = ' ';
+  }
+  tab[i] = 0;
+
+  return tab;
+}
+
+static int numlen(intptr_t n)
+{
+  int len = 1;
+
+  while (n >= 10) {
+    n = n / 10;
+    len++;
+  }
+
+  return len;
+}
+
+static char *tab_number(intptr_t n, char *tab, int max_len)
+{
+  return do_tab(numlen(n), tab, max_len);
+}
+
+static char *tab_string(const char *s, char *tab, int max_len)
+{
+  return do_tab(strlen(s), tab, max_len);
+}
+
+static void sort_perf(Performance_Entry *pref_entries, int lo, int hi)
+{
+  int i, pivot;
+  
+  if (lo >= hi)
+    return;
+
+  pivot = lo;
+  for (i = lo + 1; i < hi; i++) {
+    if (perf_entries[i].accum < perf_entries[pivot].accum) {
+      Performance_Entry tmp = perf_entries[pivot];
+      perf_entries[pivot] = perf_entries[i];
+      perf_entries[i] = perf_entries[pivot+1];
+      perf_entries[pivot+1] = tmp;
+      pivot++;
+    }
+  }
+
+  sort_perf(perf_entries, lo, pivot);
+  sort_perf(perf_entries, pivot+1, hi);
+}
+
+static void show_perf(Performance_Entry *perf_entries, int perf_count,
+                      int len, int name_len, int gc_len,
+                      int depth)
+{
+  intptr_t total = 0, gc_total = 0;
+  int i, j, k, m, n;
+  char name_tab[16], tab[10], gc_tab[10], pre_indent[8], post_indent[8];
+  Performance_Cat cats[MAX_PERF_CATS];
+  int num_cats = 0;
+
+  memset(cats, 0, sizeof(cats));
+
+  if (!depth) {
+    for (i = 0; i < perf_count; i++) {
+      for (j = 0; recats[j].entry; j++) {
+        if (!strcmp(recats[j].entry, perf_entries[i].name)) {
+          for (m = 0; m < num_cats; m++) {
+            if (!strcmp(recats[j].cat, cats[m].name))
+              break;
+          }
+          if (num_cats <= m) num_cats = m+1;
+          cats[m].name = recats[j].cat;
+          for (k = 0; k < perf_count; k++) {
+            if (perf_entries[k].name) {
+              if (!strcmp(perf_entries[k].name, recats[j].cat))
+                break;
+            } else
+              break;
+          }
+          perf_entries[k].name = recats[j].cat;
+          if (perf_count <= k) perf_count = k+1;
+          perf_entries[k].accum += perf_entries[i].accum;
+          perf_entries[k].gc_accum += perf_entries[i].gc_accum;
+          perf_entries[k].count = -1;
+
+          n = cats[m].perf_count++;
+          cats[m].perf_entries[n] = perf_entries[i];
+          perf_entries[i].accum = 0;
+          perf_entries[i].gc_accum = 0;
+          perf_entries[i].count = 0;
+        }
+      }
+    }
+  }
+
+  sort_perf(perf_entries, 0, perf_count);
+
+  for (i = 0; i < perf_count; i++) {
+    n = strlen(perf_entries[i].name);
+    if (n > name_len) name_len = n;
+    total += perf_entries[i].accum;
+    gc_total += perf_entries[i].gc_accum;
+  }
+
+  n = numlen(total);
+  if (n > len) len = n;
+  n = numlen(gc_total);
+  if (n > gc_len) gc_len = n;
+
+  if (name_len >= sizeof(name_tab))
+    name_len = sizeof(name_tab) - 1;
+  if (len >= sizeof(tab))
+    len = sizeof(tab) - 1;
+  if (gc_len >= sizeof(gc_tab))
+    gc_len = sizeof(gc_tab) -1;
+
+  for (i = 0; i < depth * 2; i++) {
+    pre_indent[i] = ' ';
+  }
+  pre_indent[i] = 0;
+  for (i = 0; i < (3 - depth) * 2; i++) {
+    post_indent[i] = ' ';
+  }
+  post_indent[i] = 0;
+
+  if (!depth)
+    scheme_log(NULL, SCHEME_LOG_ERROR, 0, ";;");
+
+#define BASE_TIMES_TEMPLATE ";; %s%s%s%s  %s%ld [%s%ld] ms"
+#define FULL_TIMES_TEMPLATE BASE_TIMES_TEMPLATE " ; %ld times"
+
+  for (i = 0; i < perf_count; i++) {
+    if (perf_entries[i].count)
+      scheme_log(NULL, SCHEME_LOG_ERROR, 0,
+                 ((perf_entries[i].count < 0)
+                  ? BASE_TIMES_TEMPLATE
+                  : FULL_TIMES_TEMPLATE),
+                 pre_indent,
+                 perf_entries[i].name,
+                 tab_string(perf_entries[i].name, name_tab, name_len),
+                 post_indent,
+                 tab_number(perf_entries[i].accum, tab, len),
+                 perf_entries[i].accum,
+                 tab_number(perf_entries[i].gc_accum, gc_tab, gc_len),
+                 perf_entries[i].gc_accum,
+                 perf_entries[i].count);
+    for (m = 0; m < num_cats; m++) {
+      if (!strcmp(perf_entries[i].name, cats[m].name))
+        show_perf(cats[m].perf_entries, cats[m].perf_count, len, name_len, gc_len, depth+1);
+    }
+  }
+
+  if (!depth) {
+    scheme_log(NULL, SCHEME_LOG_ERROR, 0,
+               ";; %stotal%s  %s%ld [%s%ld] ms",
+               tab_number(total, tab, len),
+               tab_string("total", name_tab, name_len),
+               post_indent,
+               total,
+               tab_number(gc_total, gc_tab, gc_len),
+               gc_total);
+#ifdef MZ_PRECISE_GC
+    scheme_log(NULL, SCHEME_LOG_ERROR, 0, ";;");
+    scheme_log(NULL, SCHEME_LOG_ERROR, 0,
+               ";; [JIT code: %d procs  %d bytes  code+admin: %d bytes]",
+               scheme_code_count,
+               scheme_code_total,
+               scheme_code_page_total);
+#endif
+  }
+}
+
+static void show_all_perf()
+{
+  return show_perf(perf_entries, perf_count, 0, 0, 0, 0);
+}
+
+void scheme_performance_record_start(GC_CAN_IGNORE Scheme_Performance_State *perf_state)
+{
+#if defined(MZ_USE_PLACES)
+  if (scheme_current_place_id != 0)
+    return;
+#endif
+  
+  if (!perf_reg) {
+    if (scheme_getenv("PLT_LINKLET_TIMES")) {
+      perf_reg = 1;
+      scheme_atexit(show_all_perf);
+    } else {
+      perf_reg = -1;
+    }
+  }
+
+  if (perf_reg < 0)
+    return;
+
+  perf_state->gc_start = scheme_total_gc_time;
+  perf_state->start = scheme_get_process_milliseconds();
+  perf_state->old_nested_delta = nested_delta;
+  perf_state->old_nested_gc_delta = nested_gc_delta;
+
+  nested_delta = 0;
+  nested_gc_delta = 0;
+}
+
+void scheme_performance_record_end(const char *who, GC_CAN_IGNORE Scheme_Performance_State *perf_state)
+{
+  int i;
+  intptr_t d, gc_d;
+  Scheme_Performance_State zero_perf_state;
+
+#if defined(MZ_USE_PLACES)
+  if (scheme_current_place_id != 0)
+    return;
+#endif
+
+  if (perf_reg < 0)
+    return;
+
+  for (i = 0; i < MAX_PERF_ENTRIES; i++) {
+    if (perf_entries[i].name) {
+      if (!strcmp(perf_entries[i].name, who))
+        break;
+    } else
+      break;
+  }
+
+  if (i >= MAX_PERF_ENTRIES)
+    return;
+
+  if (!perf_state) {
+    memset(&zero_perf_state, 0, sizeof(zero_perf_state));
+    perf_state = &zero_perf_state;
+  }
+
+  d = (scheme_get_process_milliseconds() - perf_state->start);
+  gc_d = (scheme_total_gc_time - perf_state->gc_start);
+
+  perf_state->old_nested_delta += d;
+  perf_state->old_nested_gc_delta += gc_d;
+
+  d -= nested_delta;
+  gc_d -= nested_gc_delta;
+
+  nested_delta = perf_state->old_nested_delta;
+  nested_gc_delta = perf_state->old_nested_gc_delta;
+
+  if (!perf_entries[i].name) {
+    perf_entries[i].name = who;
+    perf_count++;
+  }
+  perf_entries[i].accum += d;
+  perf_entries[i].gc_accum += gc_d;
+  perf_entries[i].count++;
+}
 
 /*========================================================================*/
 /*                         precise GC traversers                          */

@@ -19,7 +19,7 @@
   (keyboard-interrupt-handler))
 
 (define (engine-exit v)
-  (chez:exit v))
+  (place-exit v))
 
 (define (set-engine-exit-handler! proc)
   (set! engine-exit proc))
@@ -92,6 +92,17 @@
             (engine-state-thread-cell-values es)
             (engine-state-init-break-enabled-cell es)))))))))
 
+(define (engine-timeout)
+  (let ([can-block? (fx= 1 (disable-interrupts))])
+    (enable-interrupts)
+    (cond
+     [can-block?
+      (engine-block)]
+     [else
+      ;; Cause the timer to fire as soon as possible (i.e., as soon
+      ;; as interrupts are enabled)
+      (set-timer 1)])))
+
 (define (engine-return . args)
   (assert-not-in-uninterrupted)
   (timer-interrupt-handler void)
@@ -112,13 +123,15 @@
 (define (make-empty-thread-cell-values)
   (make-ephemeron-eq-hashtable))
 
-(define root-thread-cell-values (make-empty-thread-cell-values))
+(define-virtual-register root-thread-cell-values (make-empty-thread-cell-values))
+
+(define original-thread-id (get-thread-id))
 
 (define (current-engine-thread-cell-values)
   (let ([es (current-engine-state)])
     (if es
         (engine-state-thread-cell-values es)
-        root-thread-cell-values)))
+        (root-thread-cell-values))))
 
 (define (set-current-engine-thread-cell-values! new-t)
   (let ([current-t (current-engine-thread-cell-values)])

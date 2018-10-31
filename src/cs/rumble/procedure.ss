@@ -67,45 +67,54 @@
 
 (define (extract-procedure f n-args)
   (cond
-   [(chez:procedure? f) f]
-   [else (or (try-extract-procedure/check-arity f n-args)
-             (not-a-procedure f))]))
+   [(#%procedure? f) f]
+   [else (slow-extract-procedure f n-args)]))
 
-;; returns #f or a host-Scheme procedure, and checks arity so that
-;; checking and reporting use the right top-level function
-(define (try-extract-procedure/check-arity f n-args)
-  (let ([v (try-extract-procedure f)])
-    (cond
-     [(not v) #f]
-     [(procedure-arity-includes? f n-args) v]
-     [else (wrong-arity-wrapper f)])))
+(define (slow-extract-procedure f n-args)
+  (pariah ; => don't inline enclosing procedure
+   (do-extract-procedure f f n-args #f)))
 
-(define (try-extract-procedure f)
+;; Returns a host-Scheme procedure, but first checks arity so that
+;; checking and reporting use the right top-level function, and
+;; the returned procedure may just report a not-a-procedure error
+(define (do-extract-procedure f orig-f n-args success-k)
   (cond
-   [(chez:procedure? f) f]
+   [(#%procedure? f)
+    (if (chez:procedure-arity-includes? f n-args)
+        (if success-k
+            (success-k f)
+            f)
+        (wrong-arity-wrapper orig-f))]
    [(record? f)
     (let ([v (struct-property-ref prop:procedure (record-rtd f) none)])
       (cond
-       [(eq? v none) #f]
+       [(eq? v none) (not-a-procedure orig-f)]
        [(fixnum? v)
-        (try-extract-procedure (unsafe-struct-ref f v))]
+        (do-extract-procedure (unsafe-struct-ref f v) orig-f n-args success-k)]
        [(eq? v 'unsafe)
-        (try-extract-procedure
+        (do-extract-procedure
          (if (chaperone? f)
              (unsafe-procedure-chaperone-replace-proc f)
-             (unsafe-procedure-impersonator-replace-proc f)))]
+             (unsafe-procedure-impersonator-replace-proc f))
+         orig-f
+         n-args
+         success-k)]
        [else
-        (let ([v (try-extract-procedure v)])
-          (cond
-           [(not v) (case-lambda)]
-           [else
-            (case-lambda
-             [() (v f)]
-             [(a) (v f a)]
-             [(a b) (v f a b)]
-             [(a b c) (v f a b c)]
-             [args (chez:apply v f args)])]))]))]
-   [else #f]))
+        (do-extract-procedure
+         v
+         orig-f
+         (fx+ n-args 1)
+         (lambda (v)
+           (cond
+            [(not v) (case-lambda)]
+            [else
+             (case-lambda
+              [() (v f)]
+              [(a) (v f a)]
+              [(a b) (v f a b)]
+              [(a b c) (v f a b c)]
+              [args (chez:apply v f args)])])))]))]
+   [else (not-a-procedure orig-f)]))
 
 (define (extract-procedure-name f)
   (cond
@@ -241,26 +250,70 @@
 
 (define-record reduced-arity-procedure (proc mask name))
 
-(define/who (procedure-reduce-arity proc a)
-  (check who procedure? proc)
-  (let ([mask (arity->mask a)])
-    (unless mask
-      (raise-arguments-error who "procedure-arity?" a))
-    (unless (= mask (bitwise-and mask (procedure-arity-mask proc)))
-      (raise-arguments-error who
-                             "arity of procedure does not include requested arity"
-                             "procedure" proc
-                             "requested arity" a))
-    (make-reduced-arity-procedure
-     (lambda args
-       (unless (bitwise-bit-set? mask (length args))
-         (apply raise-arity-error
-                (or (object-name proc) 'procedure)
-                (mask->arity mask)
-                args))
-       (apply proc args))
-     mask
-     (object-name proc))))
+(define/who procedure-reduce-arity
+  (case-lambda
+    [(proc a name)
+     (check who procedure? proc)
+     (let ([mask (arity->mask a)])
+       (unless mask
+         (raise-arguments-error who "procedure-arity?" a))
+       (check who symbol? :or-false name)
+       (unless (= mask (bitwise-and mask (procedure-arity-mask proc)))
+         (raise-arguments-error who
+                                "arity of procedure does not include requested arity"
+                                "procedure" proc
+                                "requested arity" a))
+       (do-procedure-reduce-arity-mask proc mask name))]
+    [(proc a) (procedure-reduce-arity proc a #f)]))
+
+(define/who procedure-reduce-arity-mask
+  (case-lambda
+    [(proc mask name)
+     (check who procedure? proc)
+     (check who exact-integer? mask)
+     (check who symbol? :or-false name)
+     (unless (= mask (bitwise-and mask (procedure-arity-mask proc)))
+       (raise-arguments-error who
+                              "arity mask of procedure does not include requested arity mask"
+                              "procedure" proc
+                              "requested arity mask" mask))
+     (do-procedure-reduce-arity-mask proc mask name)]
+    [(proc mask) (procedure-reduce-arity-mask proc mask #f)]))
+
+(define (do-procedure-reduce-arity-mask proc mask name)
+  (let ([name (object-name proc)])
+    (case mask
+      [(1) (make-arity-wrapper-procedure (if (#%procedure? proc)
+                                             (lambda () (proc))
+                                             (lambda () (|#%app| proc)))
+                                         mask
+                                         name)]
+      [(2) (make-arity-wrapper-procedure (if (#%procedure? proc)
+                                             (lambda (x) (proc x))
+                                             (lambda (x) (|#%app| proc x)))
+                                         mask
+                                         name)]
+      [(4) (make-arity-wrapper-procedure (if (#%procedure? proc)
+                                             (lambda (x y) (proc x y))
+                                             (lambda (x y) (|#%app| proc x y)))
+                                         mask
+                                         name)]
+      [(8) (make-arity-wrapper-procedure (if (#%procedure? proc)
+                                             (lambda (x y z) (proc x y z))
+                                             (lambda (x y z) (|#%app| proc x y z)))
+                                         mask
+                                         name)]
+      [else
+       (make-reduced-arity-procedure
+        (lambda args
+          (unless (bitwise-bit-set? mask (length args))
+            (apply raise-arity-error
+                   (or (object-name proc) 'procedure)
+                   (mask->arity mask)
+                   args))
+          (apply proc args))
+        mask
+        name)])))
 
 ;; ----------------------------------------
 
@@ -279,7 +332,9 @@
    [else
     (check who procedure? proc)
     (check who symbol? name)
-    (make-named-procedure proc name)]))
+    (if (#%procedure? proc)
+        (make-arity-wrapper-procedure proc (procedure-arity-mask proc) name)
+        (make-named-procedure proc name))]))
 
 (define (procedure-maybe-rename proc name)
   (if name
@@ -654,6 +709,13 @@
    [(eq? prim make-struct-type) 5]
    [else
     (raise-argument-error 'primitive-result-arity "primitive?" prim)]))
+
+;; ----------------------------------------
+
+;; Used to encode an 'inferred-name property as a Scheme expression
+(define-syntax (|#%name| stx)
+  (syntax-case stx ()
+    [(_ name val) #`(let ([name val]) name)]))
 
 ;; ----------------------------------------
 

@@ -8,19 +8,26 @@
            texpict/utils
            mzlib/math
            "sig.rkt"
-           (prefix-in start: "start-param.rkt"))
-
+           (prefix-in start: "start-param.rkt")
+           "private/aspect.rkt")
+  
   (provide cmdline@)
 
   (define-unit cmdline@
     (import)
     (export (prefix final: cmdline^))
 
-    (define-values (screen-w screen-h) (values 1024 768))
+    (define-values (screen-ws screen-hs)
+      (values #hasheq((#f . 1024) (fullscreen . 1024) (widescreen . 1360))
+              #hasheq((#f .  768) (fullscreen .  768) (widescreen .  766))))
     (define base-font-size 32)
 
     (define-values (actual-screen-w actual-screen-h) (get-display-size #t))
-    (define-values (use-screen-w use-screen-h) (values actual-screen-w actual-screen-h))
+    (define-values (use-screen-ws use-screen-hs)
+      (values (for/hasheq ([aspect (in-hash-keys screen-ws)])
+                (values aspect actual-screen-w))
+              (for/hasheq ([aspect (in-hash-keys screen-hs)])
+                (values aspect actual-screen-h))))
     (define auto-screen-size? #t)
 
     (define condense? #f)
@@ -44,6 +51,7 @@
     (define use-prefetch? #t)
     (define use-prefetch-in-preview? #f)
     (define print-target #f)
+    (define print-not-paper? #f)
     (define smoothing? #t)
     (define screen-number 0)
     (define right-half-screen? #f)
@@ -55,7 +63,22 @@
     (define no-stretch? #f)
     (define screen-set? #f)
 
+    (define save-aspect? #f)
+    (define selected-aspect #f)
 
+    (define (select-aspect! aspect)
+      (set! selected-aspect aspect)
+      (set! screen-ws (hash-set screen-ws #f (hash-ref screen-ws aspect)))
+      (set! screen-hs (hash-set screen-hs #f (hash-ref screen-hs aspect))))
+
+    (let ([aspect (get-preference 'slideshow:default-aspect)])
+      (when (and aspect (aspect? aspect))
+        (select-aspect! aspect)))
+
+    (define (maybe-add-default aspects str)
+      (if (memq selected-aspect aspects)
+          (string-append str " (current default)")
+          str))
 
     (define (die name . args)
       (eprintf "~a: ~a\n" name (apply format args))
@@ -80,6 +103,8 @@
          (set! printing-mode 'pdf))
         (("-o") file "set output file for PostScript or PDF printing"
          (set! print-target file))
+        (("-e" "--not-paper") "use slide as PostScript or PDF bounding box"
+         (set! print-not-paper? #t))
         (("-c" "--condense") "condense"
          (set! condense? #t))
         (("-x" "--export") "short for `--pdf -c -o <slide-module-file-without-suffix>.pdf`"
@@ -94,6 +119,14 @@
         (("-q" "--quad") "show four slides at a time"
          (set! quad-view? #t)
          (set! pixel-scale 1/2))
+        #:once-any
+        [("--widescreen") ((maybe-add-default '(widescreen) "set default slide aspect to 16:9"))
+         (select-aspect! 'widescreen)]
+        [("--fullscreen") ((maybe-add-default '(#f fullscreen) "set default slide aspect to 4:3"))
+         (select-aspect! 'fullscreen)]
+        #:once-each
+        [("--save-aspect") "record selected aspect in preferences"
+         (set! save-aspect? #t)]
         [("-r" "--no-resize") "don't resize window when the connected display changes"
          (set! auto-screen-size? #f)]
         (("-n" "--no-stretch") "don't stretch the slide window to fit the screen"
@@ -109,9 +142,9 @@
            (set! auto-screen-size? #f)
            (set! actual-screen-w nw)
            (set! actual-screen-h nh)))
-        (("-a" "--squash") "scale to full window, even if not 4:3 aspect"
+        (("-a" "--squash") "scale to full window, even if not matching aspect"
          (set! no-squash? #f))
-        (("-z" "--zero-margins") "when printing, draw the slides right to the edge of the page"
+        (("-z" "--zero-margins") "when printing, draw the slides to the edge of the page"
                                  (set! zero-margins? #t))
         (("-m" "--no-smoothing")
          "disable anti-aliased drawing (usually faster)"
@@ -148,6 +181,9 @@
         #:args ([slide-module-file #f])
         slide-module-file))
 
+    (when (and save-aspect? selected-aspect)
+      (put-preferences '(slideshow:default-aspect) (list selected-aspect)))
+
     (define printing? (and printing-mode #t))
 
     (unless (zero? screen-number)
@@ -157,10 +193,10 @@
       (set! auto-screen-size? #f))
 
     (when no-stretch?
-      (when (> actual-screen-w screen-w)
+      (when (> actual-screen-w (hash-ref screen-ws #f))
         (set! auto-screen-size? #f)
-        (set! actual-screen-w screen-w)
-        (set! actual-screen-h screen-h)))
+        (set! actual-screen-w (hash-ref screen-ws #f))
+        (set! actual-screen-h (hash-ref screen-hs #f))))
 
     (when (or printing-mode condense?)
       (set! use-transitions? #f))
@@ -195,6 +231,9 @@
                                     (format "untitled.~a" suffix)))))
                     (when zero-margins? (send pss set-margin 0 0))
                     (send pss set-orientation 'landscape)
+                    (when print-not-paper?
+                      (send pss set-scaling 1.0 1.0)
+                      (send pss set-margin 0 0))
                     (parameterize ([current-ps-setup pss])
                       (case printing-mode
                         [(print)
@@ -204,11 +243,25 @@
                              (if v
                                  (send pss copy-from v)
                                  (exit))))
-                         (make-object printer-dc% #f)]
-                        [(ps)
-                         (make-object post-script-dc% (not print-target) #f #t #f)]
-                        [(pdf)
-                         (make-object pdf-dc% (not print-target) #f #t #f)])))])
+                         (new printer-dc%)]
+                        [else
+                         (when print-not-paper?
+                           (send pss set-orientation 'portrait)
+                           (send pss set-scaling 1.0 1.0)
+                           (send pss set-margin 0 0))
+                         (define-values (print-w print-h)
+                           (if print-not-paper?
+                               (values (hash-ref screen-ws #f) (hash-ref screen-hs #f))
+                               (values #f #f)))
+                         (new (case printing-mode
+                                [(ps) post-script-dc%]
+                                [else pdf-dc%])
+                              [interactive (not (or print-target
+                                                    print-not-paper?))]
+                              [use-paper-bbox (not print-not-paper?)]
+                              [as-eps #f]
+                              [width print-w]
+                              [height print-h])])))])
            ;; Init page, set "screen" size, etc.:
            (unless (send p ok?) (exit))
            (send p start-doc "Slides")
@@ -222,15 +275,28 @@
     (start:trust-me? trust-me?)
     (start:file-to-load file-to-load)
 
-    (set!-values (use-screen-w use-screen-h)
-                 (if no-squash?
-                     (if (< (/ actual-screen-w screen-w)
-                            (/ actual-screen-h screen-h))
-                         (values actual-screen-w
-                                 (floor (* (/ actual-screen-w screen-w) screen-h)))
-                         (values (floor (* (/ actual-screen-h screen-h) screen-w))
-                                 actual-screen-h))
-                     (values actual-screen-w actual-screen-h)))
+    (set!-values (use-screen-ws use-screen-hs)
+                 (cond
+                   [no-squash?
+                    (define sizes (for/hasheq ([(aspect screen-w) (in-hash screen-ws)])
+                                    (define screen-h (hash-ref screen-hs aspect))
+                                    (values
+                                     aspect
+                                     (if (< (/ actual-screen-w screen-w)
+                                            (/ actual-screen-h screen-h))
+                                         (cons actual-screen-w
+                                               (floor (* (/ actual-screen-w screen-w) screen-h)))
+                                         (cons (floor (* (/ actual-screen-h screen-h) screen-w))
+                                               actual-screen-h)))))
+                    (values (for/hasheq ([(aspect size) (in-hash sizes)])
+                              (values aspect (car size)))
+                            (for/hasheq ([(aspect size) (in-hash sizes)])
+                              (values aspect (cdr size))))]
+                   [else
+                    (values (for/hasheq ([aspect (in-hash-keys screen-ws)])
+                              (values aspect actual-screen-w))
+                            (for/hasheq ([aspect (in-hash-keys screen-hs)])
+                              (values aspect actual-screen-h)))]))
 
     ;; We need to copy all exported bindings into the final:
     ;; form. Accumulating a unit from context and then invoking

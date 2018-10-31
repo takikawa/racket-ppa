@@ -50,7 +50,6 @@ static Scheme_Object *place_pumper_threads(int argc, Scheme_Object *args[]);
 static Scheme_Object *place_wait(int argc, Scheme_Object *args[]);
 static Scheme_Object *place_kill(int argc, Scheme_Object *args[]);
 static Scheme_Object *place_break(int argc, Scheme_Object *args[]);
-static Scheme_Object *place_sleep(int argc, Scheme_Object *args[]);
 static Scheme_Object *place_p(int argc, Scheme_Object *args[]);
 static Scheme_Object *place_send(int argc, Scheme_Object *args[]);
 static Scheme_Object *place_receive(int argc, Scheme_Object *args[]);
@@ -138,7 +137,6 @@ void scheme_init_place(Scheme_Startup_Env *env)
   ADD_PRIM_W_ARITY("place-shared?",        scheme_place_shared,    1, 1, env);
   PLACE_PRIM_W_ARITY("dynamic-place",         scheme_place,           5, 5, env);
   PLACE_PRIM_W_ARITY("place-pumper-threads",  place_pumper_threads,   1, 2, env);
-  PLACE_PRIM_W_ARITY("place-sleep",           place_sleep,     1, 1, env);
   PLACE_PRIM_W_ARITY("place-wait",            place_wait,      1, 1, env);
   PLACE_PRIM_W_ARITY("place-kill",            place_kill,      1, 1, env);
   PLACE_PRIM_W_ARITY("place-break",           place_break,     1, 2, env);
@@ -236,11 +234,6 @@ static void null_out_runtime_globals() {
   scheme_current_cont_mark_pos    = 0;
 }
 
-Scheme_Object *place_sleep(int argc, Scheme_Object *args[]) {
-  mzrt_sleep(SCHEME_INT_VAL(args[0]));
-  return scheme_void;
-}
-
 Scheme_Object *scheme_make_place_object() {
   Scheme_Place_Object   *place_obj;
   place_obj = GC_master_malloc_tagged(sizeof(Scheme_Place_Object));
@@ -260,12 +253,6 @@ static void close_six_fds(rktio_fd_t **rw) {
     if (rw[i])
       rktio_close_noerr(scheme_rktio, rw[i]);
   }
-}
-
-static int is_predefined_module_path(Scheme_Object *v)
-{
-  /* Every table of primitives should have a corresponding predefined module */
-  return !!scheme_hash_get(scheme_startup_env->primitive_tables, v);
 }
 
 Scheme_Object *place_pumper_threads(int argc, Scheme_Object *args[]) {
@@ -357,15 +344,15 @@ Scheme_Object *scheme_place(int argc, Scheme_Object *args[]) {
       scheme_wrong_contract("dynamic-place", "(or/c (and/c file-stream-port? input-port?) #f)", 2, argc, args);
     }
     if (SCHEME_TRUEP(out_arg) && !SCHEME_TRUEP(scheme_file_stream_port_p(1, &out_arg))) {
-      scheme_wrong_contract("dynamic-place", "(or/c (and/c file-stream-port? input-port?) #f)", 3, argc, args);
+      scheme_wrong_contract("dynamic-place", "(or/c (and/c file-stream-port? output-port?) #f)", 3, argc, args);
     }
     if (SCHEME_TRUEP(err_arg) && !SCHEME_TRUEP(scheme_file_stream_port_p(1, &err_arg))) {
-      scheme_wrong_contract("dynamic-place", "(or/c (and/c file-stream-port? input-port?) #f)", 4, argc, args);
+      scheme_wrong_contract("dynamic-place", "(or/c (and/c file-stream-port? output-port?) #f)", 4, argc, args);
     }
 
     if (SCHEME_PAIRP(args[0]) 
         && SAME_OBJ(SCHEME_CAR(args[0]), quote_symbol)
-        && !is_predefined_module_path(args[0])) {
+        && !scheme_is_predefined_module_path(args[0])) {
       scheme_contract_error("dynamic-place", "not a filesystem or predefined module-path", 
                             "module path", 1, args[0],
                             NULL);
@@ -523,6 +510,9 @@ Scheme_Object *scheme_place(int argc, Scheme_Object *args[]) {
   mzrt_sema_destroy(ready);
   ready = NULL;
 
+  if (!place_data->place_obj)
+    scheme_signal_error("place: place creation failed");
+
   log_place_event("id %d: create %" PRIdPTR, "create", 1, place_data->place_obj->id);
 
   place_data->ready = NULL;
@@ -588,12 +578,31 @@ static void do_place_kill(Scheme_Place *place)
   {
     mzrt_mutex_lock(place_obj->lock);
 
-    if (!place_obj->die)
-      place_obj->die = 1;
+    if (!place_obj->dead) {
+      if (!place_obj->die)
+        place_obj->die = 1;
+      if (place_obj->signal_handle)
+        scheme_signal_received_at(place_obj->signal_handle);
+      resume_one_place_with_lock(place_obj);
+
+      do {
+        /* We need to block until the place is really finished; that
+           should happen quickly, so block atomically (with a little
+           cooperation for GCing, just in case). */
+        mzrt_mutex_unlock(place_obj->lock);
+        GC_check_master_gc_request();
+        scheme_start_atomic();
+        scheme_thread_block(0.0);
+        scheme_end_atomic_no_swap();
+        mzrt_mutex_lock(place_obj->lock);
+      } while (!place_obj->dead);
+    }
+
     place_obj->refcount--;
     refcount = place_obj->refcount;
 
-    if (place_obj->signal_handle) { scheme_signal_received_at(place_obj->signal_handle); }
+    if (place_obj->signal_handle)
+      scheme_signal_received_at(place_obj->signal_handle);
 
     place->result = place_obj->result;
 
@@ -803,17 +812,17 @@ static void bad_place_message(Scheme_Object *so) {
                         NULL);
 }
 
-static void *box_fd(rktio_fd_t *fd)
+static void *box_fd(rktio_fd_transfer_t *fd)
 {
-  rktio_fd_t **fdp;
-  fdp = scheme_malloc_atomic(sizeof(rktio_fd_t*));
+  rktio_fd_transfer_t **fdp;
+  fdp = scheme_malloc_atomic(sizeof(rktio_fd_transfer_t*));
   *fdp = fd;
   return fdp;
 }
 
-static rktio_fd_t *unbox_fd(void *p)
+static rktio_fd_transfer_t *unbox_fd(void *p)
 {
-  return *(rktio_fd_t **)p;
+  return *(rktio_fd_transfer_t **)p;
 }
 
 static void bad_place_message2(Scheme_Object *so, Scheme_Object *o, int can_raise_exn) {
@@ -823,7 +832,7 @@ static void bad_place_message2(Scheme_Object *so, Scheme_Object *o, int can_rais
     if (SCHEME_VEC_ELS(v)[0]) {
       l = SCHEME_VEC_ELS(v)[0];
       while (SCHEME_PAIRP(l)) {
-        rktio_close(scheme_rktio, unbox_fd(SCHEME_CAR(l)));
+        rktio_fd_close_transfer(unbox_fd(SCHEME_CAR(l)));
         l = SCHEME_CDR(l);
         SCHEME_USE_FUEL(1);
       }
@@ -831,7 +840,7 @@ static void bad_place_message2(Scheme_Object *so, Scheme_Object *o, int can_rais
     if (SCHEME_VEC_ELS(v)[1]) {
       l = SCHEME_VEC_ELS(v)[1];
       while (SCHEME_PAIRP(l)) {
-        rktio_close(scheme_rktio, unbox_fd(SCHEME_CAR(l)));
+        rktio_fd_close_transfer(unbox_fd(SCHEME_CAR(l)));
         l = SCHEME_CDR(l);
         SCHEME_USE_FUEL(1);
       }
@@ -841,7 +850,7 @@ static void bad_place_message2(Scheme_Object *so, Scheme_Object *o, int can_rais
     bad_place_message(so);
 }
 
-static void push_duped_fd(Scheme_Object **fd_accumulators, intptr_t slot, rktio_fd_t *dupfd) {
+static void push_duped_fd(Scheme_Object **fd_accumulators, intptr_t slot, rktio_fd_transfer_t *dupfdt) {
   Scheme_Object *tmp;
   Scheme_Vector *v; 
   if (fd_accumulators) {
@@ -851,7 +860,7 @@ static void push_duped_fd(Scheme_Object **fd_accumulators, intptr_t slot, rktio_
     }
     v = (Scheme_Vector*) *fd_accumulators;
 
-    tmp = scheme_make_raw_pair(box_fd(dupfd), SCHEME_VEC_ELS(v)[slot]);
+    tmp = scheme_make_raw_pair(box_fd(dupfdt), SCHEME_VEC_ELS(v)[slot]);
     SCHEME_VEC_ELS(v)[slot] = tmp;
   }
 }
@@ -1161,6 +1170,7 @@ static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *h
             Scheme_Object *portname;
             Scheme_Serialized_Socket_FD *ssfd;
             rktio_fd_t *dupfd;
+            rktio_fd_transfer_t *dupfdt;
             dupfd = rktio_dup(scheme_rktio, fd);
             if (!dupfd) {
               if (can_raise_exn)
@@ -1174,11 +1184,12 @@ static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *h
               }
               return NULL;
             }
-            push_duped_fd(fd_accumulators, 1, dupfd);
+            dupfdt = rktio_fd_detach(scheme_rktio, dupfd);
+            push_duped_fd(fd_accumulators, 1, dupfdt);
             ssfd = scheme_malloc_tagged(sizeof(Scheme_Serialized_Socket_FD));
             ssfd->so.type = scheme_serialized_tcp_fd_type;
             ssfd->type = so->type;
-            ssfd->fd = dupfd;
+            ssfd->fdt = dupfdt;
             portname = scheme_port_name(so);
             tmp = shallow_types_copy(portname, ht, fd_accumulators, delayed_errno, delayed_errkind,
                                      mode, can_raise_exn, master_chain, invalid_object);
@@ -1192,6 +1203,7 @@ static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *h
               Scheme_Object *tmp;
               Scheme_Serialized_File_FD *sffd;
               rktio_fd_t *dupfd;
+              rktio_fd_transfer_t *dupfdt;
               sffd = scheme_malloc_tagged(sizeof(Scheme_Serialized_File_FD));
               sffd->so.type = scheme_serialized_file_fd_type;
               scheme_get_serialized_fd_flags(so, sffd);
@@ -1211,8 +1223,9 @@ static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *h
                 }
                 return NULL;
               }
-              push_duped_fd(fd_accumulators, 0, dupfd);
-              sffd->fd = dupfd;
+              dupfdt = rktio_fd_detach(scheme_rktio, dupfd);
+              push_duped_fd(fd_accumulators, 0, dupfdt);
+              sffd->fdt = dupfdt;
               sffd->type = so->type;
               new_so = (Scheme_Object *) sffd;
             }
@@ -1237,8 +1250,11 @@ static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *h
           Scheme_Object *out;
           Scheme_Object *name;
           int type = ((Scheme_Serialized_Socket_FD *) so)->type;
-          rktio_fd_t *fd   = ((Scheme_Serialized_Socket_FD *) so)->fd;
+          rktio_fd_transfer_t *fdt = ((Scheme_Serialized_Socket_FD *) so)->fdt;
+          rktio_fd_t *fd;
+
           name = ((Scheme_Serialized_Socket_FD *) so)->name;
+          fd = rktio_fd_attach(scheme_rktio, fdt);
 
           /* scheme_socket_to_ports(fd, "tcp-accepted", 1, &in, &out); */
           if (type == scheme_input_port_type) {
@@ -1252,8 +1268,8 @@ static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *h
             new_so = out;
           }
         } else if (mode == mzPDC_CLEAN) {
-          rktio_fd_t *fd   = ((Scheme_Serialized_Socket_FD *) so)->fd;
-          rktio_close(scheme_rktio, fd);
+          rktio_fd_transfer_t *fdt = ((Scheme_Serialized_Socket_FD *) so)->fdt;
+          rktio_fd_close_transfer(fdt);
         } else {
           scheme_log_abort("encountered serialized TCP socket in bad mode");
           abort();
@@ -1269,7 +1285,7 @@ static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *h
           int type;
 
           ffd = (Scheme_Serialized_File_FD *) so;
-          fd = ffd->fd;
+          fd = rktio_fd_attach(scheme_rktio, ffd->fdt);
           name = ffd->name;
           type = ffd->type;
 
@@ -1282,7 +1298,7 @@ static Scheme_Object *shallow_types_copy(Scheme_Object *so, Scheme_Hash_Table *h
         } else if (mode == mzPDC_CLEAN) {
           Scheme_Serialized_File_FD *sffd;
           sffd = (Scheme_Serialized_File_FD *) so;
-          rktio_close(scheme_rktio, sffd->fd);
+          rktio_fd_close_transfer(sffd->fdt);
         } else {
           scheme_log_abort("encountered serialized fd in bad mode");
           abort();
@@ -1478,8 +1494,6 @@ static Scheme_Object *places_deep_copy_worker(Scheme_Object *so, Scheme_Hash_Tab
   Scheme_Structure *st;
   Scheme_Serialized_Structure *sst;
   Scheme_Struct_Type *stype;
-  Scheme_Struct_Type *ptype;
-  int local_slots;
 
 #define DEEP_DO_CDR       1
 #define DEEP_DO_FIN_PAIR  2
@@ -1650,9 +1664,7 @@ DEEP_VEC2:
     case scheme_structure_type:
       st = (Scheme_Structure*)so;
       stype = st->stype;
-      ptype = stype->parent_types[stype->name_pos - 1];
       size = stype->num_slots;
-      local_slots = stype->num_slots - (ptype ? ptype->num_slots : 0);
 
       if (!stype->prefab_key) {
         bad_place_message2(so, fd_accumulators, can_raise_exn);
@@ -1660,13 +1672,11 @@ DEEP_VEC2:
         new_so = NULL;
         ABORT;
       }
-      for (i = 0; i < local_slots; i++) {
-        if (!stype->immutables || stype->immutables[i] != 1) {
-          bad_place_message2(so, fd_accumulators, can_raise_exn);
-          if (invalid_object) *invalid_object = so;
-          new_so = NULL;
-          ABORT;
-        }
+      if (!(MZ_OPT_HASH_KEY(&stype->iso) & STRUCT_TYPE_ALL_IMMUTABLE)) {
+        bad_place_message2(so, fd_accumulators, can_raise_exn);
+        if (invalid_object) *invalid_object = so;
+        new_so = NULL;
+        ABORT;
       }
 
       IFS_PUSH((Scheme_Object *)st);
@@ -2355,7 +2365,7 @@ static void *place_start_proc_after_stack(void *data_arg, void *stack_base) {
   
   place_data = (Place_Start_Data *) data_arg;
   data_arg = NULL;
- 
+
   /* printf("Startin place: proc thread id%u\n", ptid); */
 
   /* create pristine THREAD_LOCAL variables*/
@@ -2368,7 +2378,12 @@ static void *place_start_proc_after_stack(void *data_arg, void *stack_base) {
   mem_limit = SCHEME_INT_VAL(place_data->cust_limit);
 
   /* scheme_make_thread behaves differently if the above global vars are not null */
-  scheme_place_instance_init(stack_base, place_data->parent_gc, mem_limit);
+  if (!scheme_place_instance_init(stack_base, place_data->parent_gc, mem_limit)) {
+    /* setup failed (because we're out of some resource?); try to exit gracefully */
+    place_data->place_obj = NULL; /* reports failure */
+    mzrt_sema_post(place_data->ready);
+    return NULL;
+  }
 
   a[0] = places_deep_direct_uncopy(place_data->current_library_collection_paths);
   scheme_current_library_collection_paths(1, a);
@@ -3365,6 +3380,11 @@ static Scheme_Object *place_async_receive(Scheme_Place_Async_Channel *ch) {
 
 Scheme_Object *scheme_place_async_channel_receive(Scheme_Object *ch) {
   return place_async_receive((Scheme_Place_Async_Channel *)ch);
+}
+
+int scheme_place_can_receive()
+{
+  return !!place_object;
 }
 
 /*========================================================================*/

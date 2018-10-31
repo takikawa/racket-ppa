@@ -32,7 +32,7 @@
    (define-syntax define
      (syntax-rules ()
        [(_ id rhs) (set! id rhs)]))
-   
+
    (check #t (thread? (current-thread)))
    (check #t (evt? (current-thread)))
    (define s (make-semaphore))
@@ -185,6 +185,39 @@
      (check 11 result)
      (sync (system-idle-evt))
      (check 2 trying)) ; second thread should have completed
+
+   (let* ([place-symbols (make-hasheq)]
+          [register-place-symbol!
+           (lambda (sym proc)
+             (hash-set! place-symbols sym proc))])
+     (set-start-place!
+      (lambda (pch mod sym in out err cust plumber)
+        (lambda ()
+          ((hash-ref place-symbols sym) pch))))
+
+     (register-place-symbol! 'nothing void)
+     (let-values ([(pl1 in1 out1 err1) (dynamic-place 'dummy 'nothing #f #f #f)])
+       (check #t (place? pl1))
+       (check 0 (place-wait pl1)))
+
+     (register-place-symbol! 'exit1 (lambda (pch) (exit 1)))
+     (let-values ([(pl2 in2 out2 err2) (dynamic-place 'dummy 'exit1 #f #f #f)])
+       (check #t (place? pl2))
+       (check 1 (place-wait pl2)))
+
+     (register-place-symbol! 'loop (lambda (pch) (let loop () (loop))))
+     (let-values ([(pl3 in3 out3 err3) (dynamic-place 'dummy 'loop #f #f #f)])
+       (check #t (place? pl3))
+       (place-break pl3)
+       (check 1 (place-wait pl3))
+       (printf "[That break was from a place, and it's expected]\n"))
+
+     (let-values ([(pl4 in4 out4 err4) (dynamic-place 'dummy 'loop #f #f #f)])
+       (check #f (sync/timeout 0.01 (place-dead-evt pl4)))
+       (place-kill pl4)
+       (check 1 (place-wait pl4))
+       (check #t (evt? (sync (place-dead-evt pl4))))
+       (check #t (evt? (sync/timeout 0.01 (place-dead-evt pl4))))))
 
    ;; Measure thread quantum:
    #;
