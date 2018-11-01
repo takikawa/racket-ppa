@@ -649,7 +649,7 @@ Supported for any @racket[st] and @racket[st2] that both @supp{support}
 
 @defproc[(subset? [st generic-set?] [st2 generic-set?]) boolean?]{
 
-Returns @racket[#t] if @racket[st2] contains every member of @racket[st];
+@index["set-subset?"]{Returns} @racket[#t] if @racket[st2] contains every member of @racket[st];
 returns @racket[#f] otherwise.
 
 If @racket[st] is a list, then @racket[st2] must also be a list.  This
@@ -932,15 +932,15 @@ Produces seven values:
 
 @itemize[
 @item{a predicate recognizing all instances of the new set type,}
-@item{a predicate recognizing immutable instances,}
-@item{a predicate recognizing mutable instances,}
 @item{a predicate recognizing weak instances,}
-@item{a constructor for immutable instances,}
+@item{a predicate recognizing mutable instances,}
+@item{a predicate recognizing immutable instances,}
+@item{a constructor for weak instances,}
 @item{a constructor for mutable instances, and}
-@item{a constructor for weak instances.}
+@item{a constructor for immutable instances.}
 ]
 
-See @racket[define-custom-hash-types] for an example.
+See @racket[define-custom-set-types] for an example.
 
 }
 

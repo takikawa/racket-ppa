@@ -66,17 +66,28 @@ static void c_pop_mark_stack(c_saved_mark_stack_t s)
 }
 #endif
 
-#define c_use_fuel() if (DECREMENT_FUEL(c_scheme_fuel_counter, 1) <= 0) scheme_out_of_fuel();
+#ifdef SCHEME_BIG_ENDIAN
+# define c_SELECT_LITTLE_BIG_ENDIAN(l, b) b
+#else
+# define c_SELECT_LITTLE_BIG_ENDIAN(l, b) l
+#endif
 
+#define c_use_fuel() if (DECREMENT_FUEL(c_scheme_fuel_counter, 1) <= 0) scheme_out_of_fuel();
 
 #define c_RUNSTACK_INIT_VAL NULL
 
 static void scheme_instance_add(Scheme_Instance *inst, const char *name, Scheme_Object *val)
 {
   Scheme_Bucket *b;
+  MZ_GC_DECL_REG(1);
+  MZ_GC_VAR_IN_REG(0, val);
+  MZ_GC_REG();
+
   b = scheme_instance_variable_bucket(scheme_intern_symbol(name), inst);
   b->val = val;
   ((Scheme_Bucket_With_Flags *)b)->flags |= GLOB_IS_CONST | GLOB_IS_CONSISTENT;
+
+  MZ_GC_UNREG();
 }
 
 #define c_check_runstack_space(max_depth, runstack, runstack_start) \
@@ -133,7 +144,7 @@ static Scheme_Object *do_apply_k(void)
 static Scheme_Object *c_handle_overflow_or_space(Scheme_Object *proc, int argc, Scheme_Object **argv, int runstack_space)
 {
   Scheme_Thread *p;
-  Scheme_Object **argv2;
+  Scheme_Object **argv2 = NULL;
 
   /* stash before allocation: */
   p = scheme_current_thread;
@@ -141,13 +152,17 @@ static Scheme_Object *c_handle_overflow_or_space(Scheme_Object *proc, int argc, 
   p->ku.k.i1 = argc;
   p->ku.k.i2 = runstack_space;
   p->ku.k.p2 = (void *)argv;
-  
-  argv2 = MALLOC_N(Scheme_Object*, argc);
 
-  p = scheme_current_thread;
-  argv = (Scheme_Object **)p->ku.k.p2;
-  
-  memcpy(argv2, argv, sizeof(Scheme_Object *) * argc);
+  if (argc != 0) {
+    argv2 = MALLOC_N(Scheme_Object*, argc);
+
+    /* In order for this code to be GC friendly, which can be triggered 
+     *  anytime memory is allocated, we need to refresh scheme_current_thread */
+    p = scheme_current_thread;
+    argv = (Scheme_Object **)p->ku.k.p2;
+    memcpy(argv2, argv, sizeof(Scheme_Object *) * argc);
+  }
+    
   if (argv == MZ_RUNSTACK)
     memset(argv, 0, sizeof(Scheme_Object *) * argc); /* space safety */
 
@@ -212,20 +227,12 @@ static Scheme_Object *c_wrong_arity(const char *name, int argc, Scheme_Object **
   return NULL;
 }
 
-static mzshort *convert_arities(int mina, const char *a)
-{
-  /* FIXME: On a big-endian machine, we need to reverse the byte order in arities */
-  return (mzshort *)a;
-}
-
 static Scheme_Object *scheme_make_prim_w_case_arity(Scheme_Prim *prim, const char *name, mzshort mina, const char *arities)
 {
   Scheme_Object *p;
-  mzshort *a;
   p = scheme_make_prim_w_arity(prim, name, 0, 0);
   ((Scheme_Primitive_Proc *)p)->mina = mina;
-  a = convert_arities(mina, arities);
-  ((Scheme_Primitive_Proc *)p)->mu.cases = a;
+  ((Scheme_Primitive_Proc *)p)->mu.cases = (mzshort *)arities;
   return p;
 }
 
@@ -235,11 +242,9 @@ static Scheme_Object *scheme_make_prim_closure_w_case_arity(Scheme_Primitive_Clo
                                                             mzshort mina, const char *arities)
 {
   Scheme_Object *p;
-  mzshort *a;
   p = scheme_make_prim_closure_w_arity(prim, size, vals, name, 0, 0);
   ((Scheme_Primitive_Proc *)p)->mina = mina;
-  a = convert_arities(mina, arities);
-  ((Scheme_Primitive_Proc *)p)->mu.cases = a;
+  ((Scheme_Primitive_Proc *)p)->mu.cases = (mzshort *)arities;
   return p;
 }
 
@@ -326,6 +331,11 @@ static MZ_INLINE int c_int_gt(Scheme_Object *a, Scheme_Object *b)
 static MZ_INLINE Scheme_Object *c_int_add(Scheme_Object *a, Scheme_Object *b)
 {
   return scheme_make_integer(SCHEME_INT_VAL(a) + SCHEME_INT_VAL(b));
+}
+
+static MZ_INLINE Scheme_Object *c_int_mult(Scheme_Object *a, Scheme_Object *b)
+{
+  return scheme_make_integer(SCHEME_INT_VAL(a) * SCHEME_INT_VAL(b));
 }
 
 static MZ_INLINE Scheme_Object *c_int_sub(Scheme_Object *a, Scheme_Object *b)
@@ -474,6 +484,11 @@ static MZ_INLINE Scheme_Object *c_bytes_ref(Scheme_Object *v, Scheme_Object *i)
 {
   int c = SCHEME_BYTE_STR_VAL(v)[SCHEME_INT_VAL(i)];
   return scheme_make_integer(c);
+}
+
+static MZ_INLINE Scheme_Object *c_make_box(Scheme_Object *v)
+{
+  return scheme_box(v);
 }
 
 static MZ_INLINE Scheme_Object *c_box_ref(Scheme_Object *b)
@@ -782,8 +797,14 @@ static MZ_INLINE Scheme_Object *c_last_use(Scheme_Object **r, int i)
 static Scheme_Object *scheme_box_variable(Scheme_Object *v)
 {
   Scheme_Object **b;
+  MZ_GC_DECL_REG(1);
+  MZ_GC_VAR_IN_REG(0, v);
+  MZ_GC_REG();
+
   b = MALLOC_ONE(Scheme_Object *);
   b[0] = v;
+
+  MZ_GC_UNREG();
   return (Scheme_Object *)b;
 }
 

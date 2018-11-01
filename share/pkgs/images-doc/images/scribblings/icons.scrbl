@@ -43,7 +43,7 @@ As a first approximation, an icon is just a small @racket[bitmap%], usually with
 But an icon also communicates.
 Its shape and color are a visual metaphor for an action or a message.
 Icons should be @bold{easily recognizable}, @bold{distinguishable}, @bold{visually consistent}, and @bold{metaphorically appropriate} for the actions and messages they are used with.
-It can be difficult to meet all four requirements at once (``distinguishable'' and ``visually consistent' are often at odds), but good examples, good abstractions, and an existing icon library help considerably.
+It can be difficult to meet all four requirements at once (``distinguishable'' and ``visually consistent'' are often at odds), but good examples, good abstractions, and an existing icon library help considerably.
 
 @(define (hash-quote) (hash-quote-icon #:color macro-stepper-hash-color #:height 16))
 @(define (step) (step-icon #:color syntax-icon-color #:height 16))

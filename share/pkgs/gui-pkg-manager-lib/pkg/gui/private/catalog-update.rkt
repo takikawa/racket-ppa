@@ -87,6 +87,15 @@
                         (queue-callback
                          (λ ()
                            (show-exn exn))))])
+       (define current-catalogs (pkg-config-catalogs))
+       (unless (equal? (db:get-catalogs) current-catalogs)
+         ;; Force the set of catalogs to match the current configuration.
+         ;; This is particularly important if the database doesn't
+         ;; exists, in which case the current set is empty.
+         ;; It risks discarding information about other catalogs that
+         ;; the user might want to keep, but that seems relatively
+         ;; unlikely.
+         (db:set-catalogs! current-catalogs))
        (for ([catalog (in-list (db:get-catalogs))])
          (define s (make-semaphore 0))
          (queue-callback

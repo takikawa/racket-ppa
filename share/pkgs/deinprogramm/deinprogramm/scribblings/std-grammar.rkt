@@ -13,11 +13,13 @@
                      #:literals (lit ...)
                      (def-rule ...)
                      (prod ...)
-                     (expr-rule ...))
+                     (expr-rule ...)
+		     (signature-rule ...)
+		     (pattern-rule ...))
   (racketgrammar*
-   #:literals (define define-record-procedures lambda cond if and or let letrec let* begin 
+   #:literals (define define-record-procedures lambda cond if and or let letrec let* begin match
 		#;require lib planet
-		check-expect check-within check-error
+		check-expect check-within check-error check-satisfied
 		signature :
 		predicate one-of mixed list %a %b %c
 		lit ...)
@@ -27,7 +29,7 @@
      test-case
      #;library-require]
    [definition @#,racket[(define id expr)]
-     @#,racket[(define-record-procedures id id id (id (... ...)))]
+     @#,racket[(define-record-procedures id id id (field (... ...)))]
      @#,racket[(define-record-procedures-parametric (id id (... ...)) id id (id (... ...)))]
      @#,racket[(: id sig)]
      def-rule ...]
@@ -38,33 +40,41 @@
 	 @#,racket[number]
 	 @#,racket[string]
 	 @#,racket[(lambda (id (... ...)) expr)]
+	 @#,racket[(λ (id (... ...)) expr)]
 	 @#,racket[(code:line id (code:comment @#,seclink["id"]{Bezeichner}))]
 	 @#,racket[(cond (expr expr) (expr expr) (... ...))]
 	 @#,racket[(cond (expr expr) (... ...) (else expr))]
 	 @#,racket[(if expr expr)]
 	 @#,racket[(and expr (... ...))]
 	 @#,racket[(or expr (... ...))]
-	 @#,racket[(let ((id expr) (... ...)) expr)]
-	 @#,racket[(letrec ((id expr) (... ...)) expr)]
-	 @#,racket[(let* ((id expr) (... ...)) expr) ]
-	 @#,racket[(begin expr expr (... ...))]
+	 @#,racket[(match expr (pattern expr) (... ...))]
 	 @#,racket[(signature sig)]
 	 @#,racket[(for-all ((id sig) (... ...)) expr)]
 	 @#,racket[(==> expr expr)]
 	 expr-rule ...]
+   [field id (id id)]
    [sig  id
 	      @#,racket[(predicate expr)]
 	      @#,racket[(one-of expr (... ...))]
 	      @#,racket[(mixed sig (... ...))]
 	      @#,racket[(code:line (sig (... ...) -> sig) (code:comment @#,seclink["proc-signature"]{Prozedur-Signatur}))]
-	      @#,racket[(list sig)]
+	      @#,racket[(list-of sig)]
 	      @#,racket[(code:line %a %b %c (code:comment @#,seclink["signature-variable"]{Signatur-Variable}))]
 	      @#,racket[(combined sig (... ...))]
-	      @#,racket[signature]
-   ]
+	      signature-rule ...
+	      ]
+   [pattern @#,racket[#t]
+	    @#,racket[#f]
+	    @#,racket[number]
+	    @#,racket[string]
+	    @#,racket[id]
+	    @#,racket[(constructor pattern (... ...))]
+	    pattern-rule ...]
+	    
    [test-case @#,racket[(check-expect expr expr)]
               @#,racket[(check-within expr expr expr)]
 	      @#,racket[(check-member-of expr expr (... ...))]
+	      @#,racket[(check-satisfied expr expr)]
 	      @#,racket[(check-range expr expr expr)]
               @#,racket[(check-error expr expr)]
 	      @#,racket[(check-property expr)]]

@@ -25,6 +25,7 @@
                          (namespace-require ''#%futures)
                          (namespace-require ''#%foreign)
                          (namespace-require ''#%paramz)
+                         (namespace-require ''#%linklet)
                          (for/hasheq ([name (in-list (namespace-mapped-symbols))])
                            (values (namespace-variable-value name #t (lambda () #f))
                                    name))))])
@@ -224,6 +225,7 @@
                                          [import-shape (in-list import-shapes)]
                                          #:when import-shape)
                                 `[,import ,import-shape]))
+           '(source-names: ,source-names)
            ,@body-l))]))
 
 (define (decompile-data-linklet l)
@@ -421,6 +423,7 @@
          (begin
            (hash-set! closed gen-id #t)
            `(#%closed ,gen-id ,(decompile-expr lam globs stack closed))))]
+    [(? void?) (list 'void)]
     [else `(quote ,expr)]))
 
 (define (decompile-lam expr globs stack closed)

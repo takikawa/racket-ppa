@@ -3,7 +3,7 @@
          (only-in '#%unsafe
                   unsafe-custodian-register
                   unsafe-custodian-unregister)
-         "../../thread/sandman.rkt"
+         "../../thread/current-sandman.rkt"
          ffi/unsafe/atomic
          "bootstrap-rktio.rkt")
 
@@ -71,12 +71,29 @@
       (eq? always-evt evt)
       (eq? never-evt evt)))
 
+(define-values (prop:place-message place-message? place-message-ref)
+  (make-struct-type-property 'place-message))
+
+(primitive-table '#%pthread
+                 (hasheq 'unsafe-make-place-local box
+                         'unsafe-place-local-ref unbox
+                         'unsafe-place-local-set! set-box!
+                         'unsafe-add-global-finalizer (lambda (v proc) (void))))
+
 (primitive-table '#%thread
-                 (hasheq 'make-semaphore make-semaphore
+                 (hasheq 'thread thread
+                         'thread-suspend-evt thread-suspend-evt
+                         'thread-dead-evt thread-dead-evt
+                         'current-thread current-thread
+                         'thread-resume thread-resume
+                         'make-semaphore make-semaphore
                          'semaphore-post semaphore-post
                          'semaphore-wait semaphore-wait
                          'semaphore-peek-evt semaphore-peek-evt
+                         'make-channel make-channel
+                         'channel-put-evt channel-put-evt
                          'wrap-evt wrap-evt
+                         'handle-evt handle-evt
                          'always-evt always-evt
                          'choice-evt (lambda (l) (apply choice-evt l))
                          'sync sync
@@ -96,10 +113,11 @@
                          'async-evt async-evt
                          'schedule-info-current-exts schedule-info-current-exts
                          'current-sandman current-sandman
-                         'start-atomic start-atomic
-                         'end-atomic end-atomic
+                         'unsafe-start-atomic start-atomic
+                         'unsafe-end-atomic end-atomic
                          'start-atomic/no-interrupts start-atomic
                          'end-atomic/no-interrupts end-atomic
+                         'in-atomic-mode? in-atomic-mode?
                          'current-custodian current-custodian
                          'custodian-shut-down? (lambda (c)
                                                  (define v (box 1))
@@ -107,8 +125,13 @@
                                                  (cond
                                                    [ref (unsafe-custodian-unregister v ref) #f]
                                                    [else #t]))
+                         'current-plumber current-plumber
+                         'plumber-add-flush! plumber-add-flush!
+                         'plumber-flush-handle-remove! plumber-flush-handle-remove!
                          'unsafe-custodian-register unsafe-custodian-register
                          'unsafe-custodian-unregister unsafe-custodian-unregister
                          'thread-push-kill-callback! thread-push-kill-callback!
                          'thread-pop-kill-callback! thread-pop-kill-callback!
-                         'set-get-subprocesses-time! void))
+                         'unsafe-add-pre-poll-callback! (lambda (proc) (void))
+                         'set-get-subprocesses-time! void
+                         'prop:place-message prop:place-message))
