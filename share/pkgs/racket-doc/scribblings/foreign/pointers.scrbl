@@ -299,11 +299,15 @@ Frees an immobile cell created by @racket[malloc-immobile-cell].}
 @defproc[(register-finalizer [obj any/c] [finalizer (any/c . -> . any)]) void?]{
 
 Registers a finalizer procedure @racket[finalizer-proc] with the given
-@racket[obj], which can be any Racket (GC-able) object.  The finalizer
-is registered with a will executor; see
-@racket[make-will-executor]. The finalizer is invoked when
-@racket[obj] is about to be collected.
-See also @racket[register-custodian-shutdown].
+@racket[obj], which can be any Racket (GC-able) object. The finalizer
+is registered with a ``late'' @tech[#:doc reference.scrbl]{will
+executor} that makes wills ready for a value only after all
+@tech[#:doc reference.scrbl]{weak box}es referencing the value have
+been cleared, which implies that the value is unreachable and no
+normal @tech[#:doc reference.scrbl]{will executor} has a will ready
+for the value. The finalizer is invoked when the will for @racket[obj]
+becomes ready in the ``late'' will executor, which means that the
+value is unreachable (even from wills) by safe code.
 
 The finalizer is invoked in a thread that is in charge of triggering
 will executors for @racket[register-finalizer]. The given
@@ -320,9 +324,13 @@ foreign code.  Note, however, that the finalizer is registered for the
 free a pointer object, then you must be careful to not register
 finalizers for two cpointers that point to the same address.  Also, be
 careful to not make the finalizer a closure that holds on to the
-object.
+object. Finally, beware that the finalizer is not guaranteed to
+be run when a place exits; see @racketmodname[ffi/unsafe/alloc]
+and @racket[register-finalizer-and-custodian-shutdown] for more
+complete solutions.
 
-For example, suppose that you're dealing with a foreign function that returns a
+As an example for @racket[register-finalizer],
+suppose that you're dealing with a foreign function that returns a
 C string that you should free.  Here is an attempt at creating a suitable type:
 
 @racketblock[
@@ -337,7 +345,7 @@ C string that you should free.  Here is an attempt at creating a suitable type:
 
 The above code is wrong: the finalizer is registered for @racket[x],
 which is no longer needed after the byte string is created.  Changing
-the example to register the finalizer for @racket[b] correct the problem,
+the example to register the finalizer for @racket[b] corrects the problem,
 but then @racket[free] is invoked @racket[b] it instead of on @racket[x].
 In the process of fixing this problem, we might be careful and log a message
 for debugging:
@@ -361,6 +369,20 @@ value that is finalized, use the input argument to the finalizer; simply changin
 @racket[ignored] to @racket[b] above solves the problem.  (Removing the
 debugging message also avoids the problem, since the finalization
 procedure would then not close over @racket[b].)}
+
+
+@deftogether[(
+@defproc[(make-late-weak-box [v any/c]) weak-box?]
+@defproc[(make-late-weak-hasheq [v any/c]) (and/c hash? hash-eq? hash-weak?)]
+)]{
+
+Like @racket[make-weak-box] and @racket[make-weak-hasheq], but with
+``late'' weak references that last longer than references in the
+result of @racket[make-weak-box] or @racket[make-weak-hasheq].
+Specifically, a ``late'' weak reference remains intact if a value is
+unreachable but not yet processed by a finalizer installed with
+@racket[register-finalizer]. ``Late'' weak references are intended for
+use by such finalizers.}
 
 
 @defproc[(make-sized-byte-string [cptr cpointer?] [length exact-nonnegative-integer?]) 

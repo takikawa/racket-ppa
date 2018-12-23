@@ -45,16 +45,15 @@ to delegate to the scheme-lexer (in the 'no-lang-line mode).
             #t))
         (cond
           [read-succeeded?
-           (define lexer-end (file-position lexer-port))
            ;; sync ports
            (for/list ([i (in-range (file-position in) (file-position lexer-port))])
              (read-byte-or-special in))
-           (define after-read-end (+ new-token-end (- lexer-end position-before-read)))
-           (values lexeme type data new-token-start after-read-end 0 'before-lang-line)]
+           (define-values (_1 _2 new-token-end) (port-next-location in))
+           (values lexeme type data new-token-start new-token-end 0 'before-lang-line)]
           [else
            (copy-port in (open-output-nowhere))
-           (define end (file-position in))
-           (values "#;" 'error #f new-token-start (+ end 1) 0 'before-lang-line)])]
+           (define-values (_1 _2 end) (port-next-location in))
+           (values "#;" 'error #f new-token-start end 0 'before-lang-line)])]
        [(or (eq? type 'comment) (eq? type 'white-space))
         (define lexer-end (file-position lexer-port))
         ;; sync ports

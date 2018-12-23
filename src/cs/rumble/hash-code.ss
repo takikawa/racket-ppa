@@ -29,11 +29,12 @@
    [(number? x) (number-hash x)]
    [(char? x) (char->integer x)]
    [else
-    (or (eq-hashtable-ref codes x #f)
-        (let ([c (fx1+ counter)])
-          (set! counter c)
-          (eq-hashtable-set! codes x counter)
-          c))]))
+    (with-global-lock
+     (or (eq-hashtable-ref codes x #f)
+         (let ([c (fx1+ counter)])
+           (set! counter c)
+           (eq-hashtable-set! codes x counter)
+           c)))]))
 
 ;; Mostly copied from Chez Scheme's "newhash.ss":
 (define number-hash
@@ -125,6 +126,15 @@
                 (vec-loop (fx+ i 1)
                           burn
                           (+/fx (mix2 hc) hc0)))]))]))]
+     [(hash? x)
+      ;; Treat hash-table hashing specially, so it can be order-insensitive
+      (let ([burn (fx* (fxmax burn 1) 2)])
+        (let ([hc (+/fx hc (->fx (hash-hash-code
+                                  x
+                                  (lambda (x)
+                                    (let-values ([(hc0 burn0) (equal-hash-loop x burn 0)])
+                                      hc0)))))])
+          (values hc burn)))]
      [(and (#%$record? x) (#%$record-hash-procedure x))
       => (lambda (rec-hash)
            (let ([burn (fx+ burn 2)])

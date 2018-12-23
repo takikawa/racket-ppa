@@ -1712,8 +1712,14 @@ please adhere to these guidelines:
    "check-expect encountered the following error instead of the expected value, ~F. ~n   :: ~a")
   (test-engine-actual-value-differs-error
    "Actual value ~F differs from ~F, the expected value.")
+  ;; need to translated only one of these next two
+  ;; (test-engine-actual-value-not-within-error or
+  ;;  test-engine-actual-value-not-within-error/alt-word-order)
+  ;; if both are present, test-engine-actual-value-not-within-error is used
   (test-engine-actual-value-not-within-error
    "Actual value ~F is not within ~v of expected value ~F.")
+  (test-engine-actual-value-not-within-error/alt-order
+   "Actual value ~F is not near enough to expected value ~F; expected it to be within ~v.")
   (test-engine-encountered-error-error
    "check-error encountered the following error instead of the expected ~a~n   :: ~a")
   (test-engine-expected-error-error

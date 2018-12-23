@@ -8,6 +8,7 @@
          rackunit/log
          syntax/parse/define
          "base.rkt"
+         "equal-within.rkt"
          "check-info.rkt"
          "format.rkt"
          "location.rkt")
@@ -35,6 +36,7 @@
          check-eqv?
          check-equal?
          check-=
+         check-within
          check-not-false
          check-not-eq?
          check-not-eqv?
@@ -88,36 +90,34 @@
 
 (define (list/if . vs) (filter values vs))
 
-(define-simple-macro
-  (define-check-func (name:id formal:id ...) #:public-name pub:id body:expr ...)
-  (define (name formal ... [message #f]
-                #:location [location (list 'unknown #f #f #f #f)]
-                #:expression [expression 'unknown])
-    (define infos
-      (list/if (make-check-name 'pub)
-               (make-check-location location)
-               (make-check-expression expression)
-               (make-check-params (list formal ...))
-               (and message (make-check-message message))))
-    (with-check-info* infos
-      (λ () ((current-check-around) (λ () body ... (void)))))))
+(define-simple-macro (make-check-func (name:id formal:id ...) #:public-name pub:id body:expr ...)
+  (λ (#:location [location (list 'unknown #f #f #f #f)]
+      #:expression [expression 'unknown])
+    (procedure-rename
+      (λ (formal ... [message #f])
+          (define infos
+            (list/if (make-check-name 'pub)
+                     (make-check-location location)
+                     (make-check-expression expression)
+                     (make-check-params (list formal ...))
+                     (and message (make-check-message message))))
+          (with-default-check-info* infos
+            (λ () ((current-check-around) (λ () body ... (void))))))
+      'pub)))
 
 (define-simple-macro (define-check (name:id formal:id ...) body:expr ...)
   (begin
-    (define-check-func (check-impl formal ...) #:public-name name body ...)
+    (define check-impl (make-check-func (check-impl formal ...) #:public-name name body ...))
     (define-syntax (name stx)
       (with-syntax ([loc (datum->syntax #f 'loc stx)])
         (syntax-parse stx
           [(chk . args)
-           #'(check-impl #:location (syntax->location #'loc)
-                         #:expression '(chk . args)
-                         . args)]
+           #'((check-impl #:location (syntax->location #'loc)
+                          #:expression '(chk . args))
+              . args)]
           [chk:id
-           #'(lambda args
-               (apply check-impl
-                      #:location (syntax->location #'loc)
-                      #:expression 'chk
-                      args))])))))
+           #'(check-impl #:location (syntax->location #'loc)
+                         #:expression 'chk)])))))
 
 (define-syntax-rule (define-simple-check (name param ...) body ...)
   (define-check (name param ...)
@@ -127,7 +127,7 @@
   (syntax-rules ()
     [(_ (name expr1 expr2) body ...)
      (define-check (name expr1 expr2)
-       (with-check-info*
+       (with-default-check-info*
         (list (make-check-actual expr1)
               (make-check-expected expr2))
         (lambda () (or (let () body ...) (fail-check)))))]
@@ -163,18 +163,15 @@
            ;; failure
            [exn:fail?
             (lambda (exn)
-              (with-check-info*
-               (list/if
-                (and (not (check-info-contains-key? 'message))
-                     (make-check-message "Wrong exception raised"))
+              (with-default-check-info*
+               (list
+                (make-check-message "Wrong exception raised")
                 (make-check-info 'exn-message (exn-message exn))
                 (make-check-info 'exn exn))
                (lambda () (fail-check))))])
         (thunk))
-      (with-check-info*
-       (list/if
-         (and (not (check-info-contains-key? 'message))
-              (make-check-message "No exception raised")))
+      (with-default-check-info*
+       (list (make-check-message "No exception raised"))
        (lambda () (fail-check))))))
 
 (define-check (check-not-exn thunk)
@@ -183,10 +180,9 @@
       ([exn:test:check? refail-check]
        [exn?
         (lambda (exn)
-          (with-check-info*
-           (list/if
-            (and (not (check-info-contains-key? 'message))
-                 (make-check-message "Exception raised"))
+          (with-default-check-info*
+           (list
+            (make-check-message "Exception raised")
             (make-check-info 'exception-message (exn-message exn))
             (make-check-info 'exception exn))
            (lambda () (fail-check))))])
@@ -208,6 +204,14 @@
   [(check-not-equal? expr1 expr2) (not (equal? expr1 expr2))]
   [(fail) #f])
 
+(define-check (check-within expr1 expr2 epsilon)
+  (with-check-info*
+   (list (make-check-actual expr1)
+         (make-check-expected expr2))
+   (lambda ()
+     (unless (equal?/within expr1 expr2 epsilon)
+       (fail-check)))))
+
 (define-binary-check (check-eq? eq? expr1 expr2))
 (define-binary-check (check-eqv? eqv? expr1 expr2))
 (define-binary-check (check-equal? equal? expr1 expr2))
@@ -219,10 +223,10 @@
     [(_ actual expected pred)
      (quasisyntax
       (let ([actual-val actual])
-       (with-check-info*
+       (with-default-check-info*
         (list (make-check-name 'check-match)
               (make-check-location
-               (syntax->location (quote-syntax #,(datum->syntax #f 'loc stx))))
+                (syntax->location (quote-syntax #,(datum->syntax #f 'loc stx))))
               (make-check-expression '#,(syntax->datum stx))
               (make-check-actual actual-val)
               (make-check-expected 'expected))

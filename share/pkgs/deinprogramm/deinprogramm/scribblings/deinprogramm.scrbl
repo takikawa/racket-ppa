@@ -3,14 +3,19 @@
 @(require scribble/manual
           (for-label scheme))
 
-@title[#:style '(toc) #:tag "deinprogramm"]{Sprachebenen und Material zu @italic{Die Macht der Abstraktion}}
+@title[#:style '(toc) #:tag "deinprogramm"]{Sprachebenen und Material zu @italic{Schreibe Dein Programm!} / @italic{Die Macht der Abstraktion}}
 
 Note: This is documentation for the teachpacks that go with the German
-textbook @italic{@link["http://www.deinprogramm.de/dmda/"]{Die Macht
+textbooks
+@italic{@link["http://www.deinprogramm.de/sdp/"]{Schreibe Dein Programm!}}.
+and
+@italic{@link["http://www.deinprogramm.de/dmda/"]{Die Macht
 der Abstraktion}}.
 
-Das Material in diesem Handbuch ist für die Verwendung mit dem Buch
-the @italic{@link["http://www.deinprogramm.de/dmda/"]{Die Macht der
+Das Material in diesem Handbuch ist für die Verwendung mit den Büchern
+@italic{@link["http://www.deinprogramm.de/sdp/"]{Schreibe Dein Programm!}}.
+und
+@italic{@link["http://www.deinprogramm.de/dmda/"]{Die Macht der
 Abstraktion}} gedacht.
 
 @table-of-contents[]

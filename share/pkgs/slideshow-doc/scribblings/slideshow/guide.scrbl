@@ -45,7 +45,7 @@ the presentation with a given content. For example, the ``Hello
 World'' presentation can be defined by the following module:
 
 @racketmod[
-slideshow
+slideshow (code:comment @#,t{or @racketmodname[slideshow/widescreen]})
 
 (slide
  #:title "How to Say Hello"
@@ -187,39 +187,44 @@ slideshow
 
 @; ------------------------------------------------------------------------
 
-@section[#:tag "display-size"]{Display Size and Fonts}
+@section[#:tag "display-size"]{Display Size and Font Selection}
 
-Slideshow is configured for generating slides in @math{1024} by
-@math{768} pixel format. When the current display has a different
-size as Slideshow is started, the Slideshow display still
-occupies the entire screen, and pictures are scaled just before
-they are displayed. Thus, one picture unit reliably corresponds
-to a ``pixel'' that occupies @math{1/1024} by @math{1/768} of the
-screen.
+Slideshow is configured for generating slides in either @math{1024} by
+@math{768} for fullscreen (4:3) mode or @math{1360} by @math{766} for
+widescreen (16:9) mode. When the current display has a different size as
+Slideshow is started, the Slideshow display still occupies the entire
+screen, and pictures are scaled just before they are displayed. Thus,
+one picture unit reliably corresponds to a ``pixel'' that occupies
+@math{1/1024} by @math{1/768} of the screen or @math{1/1360} by
+@math{1/766} of the screen.
 
-The @racket[text] form for generating text pictures takes into
-account any expected scaling for the display when measuring
-text. (All Slideshow text functions, such as @racket[t] and
-@racket[item] are built on @racket[text].) In particular, scaling
-the picture causes a different font size to be used for drawing
-the slide---rather than bitmap-scaling the original font---and
-changing the font size by a factor of @math{k} does not
-necessarily scale all text dimensions equally by a factor of
-@math{k}---because, for most devices, each character must have
-integer dimensions. Nevertheless, especially if you use the
-@racket[current-expected-text-scale] parameter, Slideshow is
-usually able to produce good results when the slide is scaled.
+Fullscreen versus widescreen mode is a property of an individual slide
+that can be selected using the @racket[#:aspect] argument to
+@racket[slide], but the default is to adapt to a mode that the user
+selects with @DFlag{widescreen} or @DFlag{fullscreen}. See
+@secref["aspect"] for more information.
 
-More generally, different font sets on different platforms can
-change the way a slide is rendered. For example, the @racket[tt]
-font on one platform might be slightly wider than on another,
-causing different line breaks, and so on. Beware.
+Beware that different font sets on different platforms can change the
+way a slide is rendered. For example, the @racket[tt] font on one
+platform might be slightly wider than on another, causing different
+line breaks, and so on. Beware also of using bitmaps in slides when
+the presentation screen's pixels do not exactly match the slide's
+drawing units. In that case, consider using @racket[size-in-pixels]
+(with the caveat that the resulting picture will take up different
+amounts of the slide on different displays).
 
-Beware also of using bitmaps in slides when the presentation
-screen is not @math{1024} by @math{768}. In that case, consider
-using @racket[size-in-pixels] (with the caveat that the resulting
-picture will take up different amounts of the slide on different
-displays).
+Finally, beware that the @racket[text] form for generating text
+pictures attempts to take into account any expected scaling for the
+display when measuring text. (All Slideshow text functions, such as
+@racket[t] and @racket[item] are built on @racket[text].) On some
+devices, scaling the picture potentially causes a different font size
+to be used for drawing the slide---rather than bitmap-scaling the
+original font---and changing the font size by a factor of @math{k}
+does not necessarily scale all text dimensions equally by a factor of
+@math{k}. Modern displays and drawing libraries make this scaling
+compensation a smaller effect than it used to be, but using
+@racket[current-expected-text-scale] parameter can sometimes improve
+text scaling.
 
 @; ------------------------------------------------------------------------
 
@@ -262,7 +267,9 @@ The @Flag{p} or @DFlag{print} command-line flag causes Slideshow to
 print slides instead of showing them on the screen using the current
 platform's printing system. The @Flag{P} or @DFlag{ps} generates
 PostScript directly, while @Flag{D} or @DFlag{pdf} generates
-PDF directly.
+PDF directly. By default, PS or PDF output is configured for paper
+output; use @Flag{e} or @DFlag{not-paper} to produce output where each
+page's bounding box matches the slide bounds.
 
 PS-to-PDF converters vary on how well they handle landscape
 mode. Here's a Ghostscript command that converts slides reliably

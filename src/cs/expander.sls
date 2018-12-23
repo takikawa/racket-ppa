@@ -4,10 +4,12 @@
           load-on-demand-enabled
           call-in-main-thread
           version
-          exit)
-  (import (except (chezpart)
-                  syntax->datum
-                  datum->syntax)
+          exit
+          compile-keep-source-locations!)
+  (import (rename (except (chezpart)
+                          syntax->datum
+                          datum->syntax)
+                  [define chez:define])
           (rename (rumble)
                   [correlated? syntax?]
                   [correlated-source syntax-source]
@@ -19,11 +21,17 @@
                   [correlated->datum syntax->datum]
                   [datum->correlated datum->syntax]
                   [correlated-property syntax-property]
-                  [correlated-property-symbol-keys syntax-property-symbol-keys])
+                  [correlated-property-symbol-keys syntax-property-symbol-keys]
+                  ;; Remapped to place-local register operations:
+                  [unsafe-place-local-ref rumble:unsafe-place-local-ref]
+                  [unsafe-place-local-set! rumble:unsafe-place-local-set!])
           (thread)
           (regexp)
           (io)
           (linklet))
+
+  (include "place-register.ss")
+  (define-place-register-define define expander-register-start expander-register-count)
 
   ;; Set to `#t` to make compiled code reliably compatible with
   ;; changes to primitive libraries. Changing ths setting makes
@@ -133,7 +141,14 @@
     (eval '(define-syntax with-continuation-mark
              (syntax-rules ()
                [(_ key val body)
-                (call/cm key val (lambda () body))])))
+                (call-with-current-continuation-attachment
+                 empty-mark-frame
+                 (lambda (a)
+                   (call-setting-continuation-attachment
+                    (mark-frame-update a key val)
+                    (lambda ()
+                      body))))])))
+    (eval '(define call-with-immediate-continuation-mark call-with-immediate-continuation-mark/proc))
     (eval '(define-syntax begin0
              (syntax-rules ()
                [(_ expr0 expr ...)
@@ -152,6 +167,9 @@
                [(_ rator rand ...)
                 (with-syntax ([n-args (length #'(rand ...))])
                   #'((extract-procedure rator n-args) rand ...))])))
+    (eval '(define-syntax (|#%name| stx)
+             (syntax-case stx ()
+               [(_ name val) #`(let ([name val]) name)])))
     (eval `(define raise-binding-result-arity-error ',raise-binding-result-arity-error)))
 
   ;; For interpretation of the outer shell of a linklet:

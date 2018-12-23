@@ -9,7 +9,8 @@
          "thread.rkt"
          (only-in (submod "thread.rkt" scheduling)
                   thread-descheduled?)
-         "schedule-info.rkt")
+         "schedule-info.rkt"
+         "pre-poll.rkt")
 
 (provide sync
          sync/timeout
@@ -96,6 +97,7 @@
        (cond
          [(or (and (real? timeout) (zero? timeout))
               (procedure? timeout))
+          (atomically (call-pre-poll-external-callbacks))
           (let poll-loop ()
             (sync-poll s #:fail-k (lambda (sched-info polled-all?)
                                     (cond
@@ -125,10 +127,12 @@
                   (end-atomic)
                   (loop #f #f)]
                  [else
+                  (end-atomic)
                   ;; Return result in a thunk:
                   (lambda () #f)])]
               [(and (all-asynchronous? s)
-                    (not (syncing-selected s)))
+                    (not (syncing-selected s))
+                    (not (syncing-need-retry? s)))
                (suspend-syncing-thread s timeout-at)
                (set-syncing-wakeup! s void)
                (loop #f #t)]
@@ -164,11 +168,40 @@
       ;; Just `go`:
       (go)])))
 
-(define (sync . args)
-  (do-sync 'sync #f args))
+(define sync
+  (case-lambda
+    [(evt)
+     (cond
+       [(evt-impersonator? evt)
+        (do-sync 'sync #f (list evt))]
+       [(semaphore? evt)
+        (semaphore-wait evt)
+        evt]
+       [(channel? evt)
+        (channel-get evt)]
+       [(channel-put-evt? evt)
+        (channel-put-do evt)
+        evt]
+       [else
+        (do-sync 'sync #f (list evt))])]
+    [args
+     (do-sync 'sync #f args)]))
 
-(define (sync/timeout timeout . args)
-  (do-sync 'sync/timeout timeout args))
+(define sync/timeout
+  (case-lambda
+    [(timeout evt)
+     (cond
+       [(evt-impersonator? evt)
+        (do-sync 'sync/timeout timeout (list evt))]
+       [(and (semaphore? evt)
+             (eqv? timeout 0))
+        (if (semaphore-try-wait? evt)
+            evt
+            #f)]
+       [else
+        (do-sync 'sync/timeout timeout (list evt))])]
+    [(timeout . args)
+     (do-sync 'sync/timeout timeout args)]))
 
 (define (sync/enable-break . args)
   (do-sync 'sync/enable-break #f args #:enable-break? #t))

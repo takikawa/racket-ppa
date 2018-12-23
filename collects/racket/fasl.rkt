@@ -1,6 +1,7 @@
 #lang racket/base
 (require (for-syntax racket/base)
-         "private/truncate-path.rkt")
+         "private/truncate-path.rkt"
+         "private/relative-path.rkt")
 
 (provide s-exp->fasl
          fasl->s-exp)
@@ -126,38 +127,8 @@
       [(prefab-struct-key v)
        (loop (struct->vector v))]
       [else (void)]))
-  (define exploded-base-dir 'not-ready)
-  (define exploded-wrt-rel-dir 'not-ready)
-  (define (path->relative-path-elements v)
-    (when (and (eq? exploded-base-dir 'not-ready)
-               (path? v))
-      (define wr-dir (current-write-relative-directory))
-      (define wrt-dir (and wr-dir (if (pair? wr-dir) (car wr-dir) wr-dir)))
-      (define base-dir (and wr-dir (if (pair? wr-dir) (cdr wr-dir) wr-dir)))
-      (set! exploded-base-dir (and base-dir (explode-path base-dir)))
-      (set! exploded-wrt-rel-dir
-            (if (eq? base-dir wrt-dir)
-                '()
-                (list-tail (explode-path wrt-dir)
-                           (length exploded-base-dir)))))
-    (and exploded-base-dir
-         (path? v)
-         (let ([exploded (explode-path v)])
-           (and (for/and ([base-p (in-list exploded-base-dir)]
-                          [p (in-list exploded)])
-                  (equal? base-p p))
-                ((length exploded) . >= . (length exploded-base-dir))
-                (let loop ([exploded-wrt-rel-dir exploded-wrt-rel-dir ]
-                           [rel (list-tail exploded (length exploded-base-dir))])
-                  (cond
-                    [(null? exploded-wrt-rel-dir) rel]
-                    [(and (pair? rel)
-                          (equal? (car rel) (car exploded-wrt-rel-dir)))
-                     (loop (cdr exploded-wrt-rel-dir) (cdr rel))]
-                    [else (append (for/list ([p (in-list exploded-wrt-rel-dir)])
-                                    'up)
-                                  rel)]))))))
   (define (treat-immutable? v) (or (not keep-mutable?) (immutable? v)))
+  (define path->relative-path-elements (make-path->relative-path-elements))
   ;; The fasl formal prefix:
   (write-bytes fasl-prefix o)
   ;; Write content to a string, so we can measure it
@@ -240,8 +211,7 @@
            (cond
              [rel-elems
               (write-byte fasl-relative-path-type o)
-              (loop (for/list ([p (in-list rel-elems)])
-                      (if (path? p) (path-element->bytes p) p)))]
+              (loop rel-elems)]
              [else
               (write-byte fasl-path-type o)
               (write-fasl-bytes (path->bytes v) o)
@@ -358,7 +328,7 @@
                 ;; Faster to work with a byte string:
                 (let ([bstr (read-bytes/exactly len init-i)])
                   (mcons bstr 0))))
-  
+
   (define (intern v) (if intern? (datum-intern-literal v) v))
   (let loop ()
     (define type (read-byte/no-eof i))
@@ -464,7 +434,7 @@
          (+ (- type fasl-small-integer-start) fasl-lowest-small-integer)]
         [else
          (read-error "unrecognized fasl tag" "tag" type)])])))
-      
+
 ;; ----------------------------------------
 
 ;; Integer encoding:
@@ -554,15 +524,14 @@
      (integer-bytes->integer (read-bytes/exactly 8 i) #f #f)]
     [(eqv? b 131)
      (define len (read-fasl-integer i))
-     (define str (read-string len i))
+     (define str (read-fasl-string i len))
      (unless (and (string? str) (= len (string-length str)))
        (read-error "truncated stream at number"))
      (string->number str 16)]
     [else
      (read-error "internal error on integer mode")]))
 
-(define (read-fasl-string i)
-  (define len (read-fasl-integer i))
+(define (read-fasl-string i [len (read-fasl-integer i)])
   (define bstr (read-bytes/exactly len i))
   (bytes->string/utf-8 bstr))
 
