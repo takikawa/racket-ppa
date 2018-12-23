@@ -33,6 +33,10 @@
 #include "schmach.h"
 #include "schrktio.h"
 #include <errno.h>
+#ifdef OS_X
+/* needed for old gcc to define `off_t` */
+# include <unistd.h>
+#endif
 #ifndef DONT_IGNORE_PIPE_SIGNAL
 # include <signal.h>
 #endif
@@ -4792,8 +4796,8 @@ static intptr_t fd_get_string_slow(Scheme_Input_Port *port,
 
   while (1) {
     /* Loop until a read succeeds. */
-    int none_avail = 0;
-    int target_size, target_offset, ext_target;
+    int none_avail = 0, ext_target;
+    intptr_t target_size, target_offset;
     char *target;
     Scheme_Object *sema;
 

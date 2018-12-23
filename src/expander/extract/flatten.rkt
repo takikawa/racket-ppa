@@ -17,45 +17,50 @@
                   #:needed needed
                   #:exports exports
                   #:instance-knot-ties instance-knot-ties
-                  #:primitive-table-directs primitive-table-directs)
+                  #:primitive-table-directs primitive-table-directs
+                  #:check-later-vars check-later-vars)
   (log-status "Flattening to a single linklet...")
   (define needed-linklets-in-order
     (for/list ([lnk (in-list (unbox linklets-in-order))]
                #:when (hash-ref needed lnk #f))
       lnk))
-  
+
+  ;; variable -> symbol
   (define variable-names (pick-variable-names
                           #:linklets linklets
                           #:needed-linklets-in-order needed-linklets-in-order
                           #:instance-knot-ties instance-knot-ties))
 
   (for ([var (in-hash-keys variable-names)]
-        #:when (symbol? (link-name (variable-link var))))
+        #:when (symbol? (link-name (variable-link var)))
+        #:unless (hash-ref check-later-vars var #f))
     (error 'flatten "found a dependency on a non-primitive: ~s from ~s"
            (variable-name var)
            (link-name (variable-link var))))
-  
-  `(linklet
-    ;; imports
-    ()
-    ;; exports
-    ,(for/list ([ex-sym (in-list (sort (hash-keys exports) symbol<?))])
-       (define var (hash-ref exports ex-sym))
-       (define int-sym (hash-ref variable-names var #f))
-       (unless int-sym
-         (error 'flatten "export does not map to an instance variable: ~s" ex-sym))
-       `[,int-sym ,ex-sym])
-    ;; body
-    ,@(apply
-       append
-       (for/list ([lnk (in-list (reverse needed-linklets-in-order))])
-         (define body
-           (body-with-substituted-variable-names lnk
-                                                 (hash-ref linklets lnk)
-                                                 variable-names
-                                                 #:linklets linklets
-                                                 #:instance-knot-ties instance-knot-ties))
-         (substitute-primitive-table-access body primitive-table-directs)))))
+
+  (values
+   variable-names
+   `(linklet
+     ;; imports
+     ()
+     ;; exports
+     ,(for/list ([ex-sym (in-list (sort (hash-keys exports) symbol<?))])
+        (define var (hash-ref exports ex-sym))
+        (define int-sym (hash-ref variable-names var #f))
+        (unless int-sym
+          (error 'flatten "export does not map to an instance variable: ~s" ex-sym))
+        `[,int-sym ,ex-sym])
+     ;; body
+     ,@(apply
+        append
+        (for/list ([lnk (in-list (reverse needed-linklets-in-order))])
+          (define body
+            (body-with-substituted-variable-names lnk
+                                                  (hash-ref linklets lnk)
+                                                  variable-names
+                                                  #:linklets linklets
+                                                  #:instance-knot-ties instance-knot-ties))
+          (substitute-primitive-table-access body primitive-table-directs))))))
 
 (define (pick-variable-names #:linklets linklets
                              #:needed-linklets-in-order needed-linklets-in-order
@@ -145,8 +150,11 @@
     (cond
      [(find-knot-tying-alternate knot-ties lnk (car external+local) linklets)
       => (lambda (alt-lnk)
-           (unless (eq? alt-lnk 'ignore)
-             (add-subst! alt-lnk external+local knot-ties)))]
+           (if (eq? alt-lnk 'ignore)
+               ;; Map to original name:
+               (hash-set! substs (cdr external+local) (car external+local))
+               ;; Map to alt-link:
+               (add-subst! alt-lnk external+local knot-ties)))]
      [else
       (hash-set! substs
                  (cdr external+local)
@@ -175,7 +183,15 @@
                  'ignore]
                 [else
                  (define alt-lnk (link alt-path 0))
-                 (define li (hash-ref linklets alt-lnk))
+                 (define li (hash-ref linklets alt-lnk
+                                      (lambda ()
+                                        (error 'flatten
+                                               (string-append "module for knot tying is not part"
+                                                              " of the flattened module's implementation\n"
+                                                              "  module: ~a\n"
+                                                              "  attempted redirect for: ~a")
+                                               (link-name alt-lnk)
+                                               (link-name lnk)))))
                  (define exports+locals (bootstrap:s-expr-linklet-exports+locals (linklet-info-linklet li)))
                  (for/or ([export+local (in-list exports+locals)])
                    (and (eq? external (car export+local))

@@ -548,7 +548,7 @@ void *scheme_jit_get_threadlocal_table();
 #  ifdef THREAD_LOCAL_USES_JIT_V2
 #   define mz_tl_addr(reg, addr) (jit_addi_p(reg, JIT_V2, addr))
 #   define mz_tl_addr_tmp(tmp_reg, addr) (void)0
-#   define mz_tl_addr_untmp(tmp_reg) 0
+#   define mz_tl_addr_untmp(tmp_reg) (void)0
 #   define mz_tl_tmp_reg(tmp_reg) (void)0
 #   define _mz_tl_str_p(addr, tmp_reg, reg) jit_stxi_p(addr, JIT_V2, reg)
 #   define _mz_tl_str_l(addr, tmp_reg, reg) jit_stxi_l(addr, JIT_V2, reg)
@@ -820,7 +820,7 @@ static void *top;
       LOCAL1 (which is a cont_mark_stack offset, if anything)
       LOCAL2 (some pointer, never to stack or runstack)
       LOCAL3 (temp space for misc uses; not saved across calls that might capture LWC)
-      LOCAL4 (x86_64: = saved R14 otherwise when THREAD_LOCAL
+      LOCAL4 (x86_64: = saved R14 when THREAD_LOCAL
               x86: = RUNSTACK_BASE or THREAD_LOCAL)
       [some empty slots, maybe, depending on alignment]
       [space for "flostack" --- local unboxed values, such as flonums]
@@ -944,9 +944,6 @@ void scheme_jit_prolog_again(mz_jit_state *jitter, int n, int ret_addr_reg)
 #  else
 #   define STACK_ALIGN_WORDS 3
 #  endif
-#  define mz_prolog(x) (ADDQiBr(-(STACK_ALIGN_WORDS * JIT_WORD_SIZE), JIT_SP))
-#  define mz_epilog_without_jmp() ADDQiBr((STACK_ALIGN_WORDS + 1) * JIT_WORD_SIZE, JIT_SP)
-#  define mz_epilog(x) (ADDQiBr(STACK_ALIGN_WORDS * JIT_WORD_SIZE, JIT_SP), RET_())
 #  define JIT_LOCAL3 -(JIT_WORD_SIZE * 6)
 #  ifdef NEED_LOCAL4
 #   ifdef JIT_X86_64
@@ -958,10 +955,10 @@ void scheme_jit_prolog_again(mz_jit_state *jitter, int n, int ret_addr_reg)
 #  else
 #   define LOCAL_FRAME_SIZE 3
 #  endif
+#  define _mz_prolog(x) (ADDQiBr(-(STACK_ALIGN_WORDS * JIT_WORD_SIZE), JIT_SP))
+#  define _mz_epilog_without_jmp() ADDQiBr((STACK_ALIGN_WORDS + 1) * JIT_WORD_SIZE, JIT_SP)
+#  define _mz_epilog(x) (ADDQiBr(STACK_ALIGN_WORDS * JIT_WORD_SIZE, JIT_SP), RET_())
 # else
-#  define mz_prolog(x) /* empty */
-#  define mz_epilog(x) RET_()
-#  define mz_epilog_without_jmp() ADDQir(JIT_WORD_SIZE, JIT_SP)
 #  define JIT_LOCAL3 JIT_LOCAL2
 #  ifdef NEED_LOCAL4
 #   define LOCAL_FRAME_SIZE 3
@@ -969,9 +966,28 @@ void scheme_jit_prolog_again(mz_jit_state *jitter, int n, int ret_addr_reg)
 #  else
 #   define LOCAL_FRAME_SIZE 2
 #  endif
+#  define _mz_prolog(x) /* empty */
+#  define _mz_epilog(x) RET_()
+#  define _mz_epilog_without_jmp() ADDQir(JIT_WORD_SIZE, JIT_SP)
 # endif
 # ifdef NEED_LOCAL4
 #   define JIT_LOCAL4 -(JIT_WORD_SIZE * JIT_LOCAL4_OFFSET)
+# endif
+# ifdef MZ_PROLOG_CREATE_FULL_STACK_FRAME
+  /* Make the internal ABI the same as the main call ABI */
+#  define MZ_LOCAL_FRAME_SIZE (LOCAL_FRAME_SIZE+3)
+#  define mz_prolog(x) (PUSHQr(_EBP),                                  \
+                        mz_get_local_p((x), JIT_LOCAL3),               \
+                        MOVQrr(_ESP, _EBP),                            \
+                        ADDQiBr(-(MZ_LOCAL_FRAME_SIZE * JIT_WORD_SIZE), JIT_SP), \
+                        mz_set_local_p((x), JIT_LOCAL3))
+#  define mz_epilog_without_jmp() (ADDQiBr(MZ_LOCAL_FRAME_SIZE * JIT_WORD_SIZE, JIT_SP), POPQr(_EBP), ADDQiBr(JIT_WORD_SIZE, JIT_SP))
+#  define mz_epilog(x) (ADDQiBr(MZ_LOCAL_FRAME_SIZE * JIT_WORD_SIZE, JIT_SP), POPQr(_EBP), RET_())
+# else
+  /* Normal internal ABI */
+#  define mz_prolog(x) _mz_prolog(x)
+#  define mz_epilog_without_jmp() _mz_epilog_without_jmp()
+#  define mz_epilog(x) _mz_epilog(x)
 # endif
 # define mz_push_locals() SUBQir((LOCAL_FRAME_SIZE << JIT_LOG_WORD_SIZE), JIT_SP)
 # define mz_pop_locals() ADDQir((LOCAL_FRAME_SIZE << JIT_LOG_WORD_SIZE), JIT_SP)
@@ -1458,6 +1474,7 @@ int scheme_generate_unboxing(mz_jit_state *jitter, int target);
 int scheme_generate_pop_unboxed(mz_jit_state *jitter);
 int scheme_generate_nary_arith(mz_jit_state *jitter, Scheme_App_Rec *app,
                                int arith, int cmp, Branch_Info *for_branch, int branch_short,
+                               int unsafe_fx, int unsafe_fl,
                                int dest);
 int scheme_generate_alloc_double(mz_jit_state *jitter, int inline_retry, int dest);
 int scheme_generate_arith(mz_jit_state *jitter, Scheme_Object *rator, Scheme_Object *rand, Scheme_Object *rand2, 
@@ -1596,7 +1613,7 @@ int scheme_jit_check_closure_extflonum_bit(Scheme_Lambda *data, int pos, int del
 
 Scheme_Object *scheme_extract_global(Scheme_Object *o, Scheme_Native_Closure *nc, int local_only);
 Scheme_Object *scheme_extract_closure_local(Scheme_Object *obj, mz_jit_state *jitter, int extra_push, int get_constant);
-Scheme_Object *scheme_specialize_to_constant(Scheme_Object *obj, mz_jit_state *jitter, int extra_push);
+Scheme_Object *scheme_specialize_to_constant(Scheme_Object *obj, mz_jit_state *jitter, int extra_push, int extract_static);
 
 void scheme_jit_register_traversers(void);
 #ifdef MZ_USE_LWC

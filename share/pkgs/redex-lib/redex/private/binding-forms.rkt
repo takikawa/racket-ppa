@@ -153,12 +153,10 @@ to traverse the whole value at once, rather than one binding form at a time.
   (cond
    ;; short-circuit on some easy cases:
    [(eq? redex-val-lhs redex-val-rhs) #t]
-   [(and (symbol? redex-val-lhs) (symbol? redex-val-rhs)) (equal? redex-val-lhs redex-val-rhs)]
-   [(or (xor (symbol? redex-val-lhs)
-             (symbol? redex-val-rhs))
-        (xor (list? redex-val-lhs)
-             (list? redex-val-rhs))) #f]
    [(not (list? redex-val-lhs)) (equal? redex-val-lhs redex-val-rhs)]
+   [(not (list? redex-val-rhs)) (equal? redex-val-lhs redex-val-rhs)]
+   [(xor (symbol? redex-val-lhs)
+         (symbol? redex-val-rhs)) #f]
    [else
     (equal? (canonicalize language-bf-table language-literals match-pattern redex-val-lhs)
             (canonicalize language-bf-table language-literals match-pattern redex-val-rhs))]))
@@ -236,7 +234,12 @@ to traverse the whole value at once, rather than one binding form at a time.
           (match match-res
             [#f (loop rest)]
             ;; "bindings" is what the rest of Redex calls what we call "red-match"
-            [`(,m) 
+            [(cons m _)
+             ;; we ignore the rest position because there should be no way to get
+             ;; information there that isn't redundant with what's in the first
+             ;; position. I belive the only way to even get a tail is to have an
+             ;; ambiguous match, but even then the bindings
+             ;; should all be the same, so we can safely take the first one. I hope.
              (when (binding-forms-opened?)
                    (set-box! (binding-forms-opened?) #t))
              (fn (splay-all-...binds (bindings-table (mtch-bindings m)) bspec)

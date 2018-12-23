@@ -2,12 +2,15 @@
 ;; Check to make we're using a build of Chez Scheme
 ;; that has all the features we need.
 
-(define (check-defined expr)
-  (unless (guard (x [else #f]) (eval expr))
+(define (check-ok what thunk)
+  (unless (guard (x [else #f]) (thunk))
     (error 'compile-file
            (format
             "failed trying `~a`; probably you need a newer Chez Scheme"
-            expr))))
+            what))))
+
+(define (check-defined expr)
+  (check-ok expr (lambda () (eval expr))))
 
 (check-defined 'box-cas!)
 (check-defined 'make-arity-wrapper-procedure)
@@ -16,7 +19,19 @@
 (check-defined 'current-generate-id)
 (check-defined 'load-compiled-from-port)
 (check-defined 'collect-rendezvous)
-(check-defined '(define-ftype T (function __thread () void)))
+(check-defined '(define-ftype T (function __collect_safe () void)))
+(check-defined 'call-setting-continuation-attachment)
+(check-defined 'hashtable-cells)
+(check-ok "fxvector-set!"
+          (lambda ()
+            (parameterize ([optimize-level 3]
+                           [run-cp0 (lambda (cp0 x) x)])
+
+              (eval '(define (op x)
+                       (if (fx- 0) 0 0)))
+              (eval '(define (f x)
+                       (fxvector-set! x 0 (op 0))))
+              (eval '(f (fxvector 0))))))
 
 ;; ----------------------------------------
 
@@ -42,6 +57,7 @@
 (define whole-program? #f)
 (generate-inspector-information #f)
 (generate-procedure-source-information #t)
+(compile-compressed #f)
 (define build-dir "")
 
 (define-values (src deps)
@@ -54,6 +70,11 @@
      [(get-opt args "--unsafe" 0)
       => (lambda (args)
            (optimize-level 3)
+           (loop args))]
+     [(get-opt args "--compress" 0)
+      => (lambda (args)
+           (compile-compressed #t)
+           (putenv "PLT_CS_MAKE_COMPRESSED" "y") ; for "linklet.sls"
            (loop args))]
      [(get-opt args "--whole-program" 0)
       => (lambda (args)

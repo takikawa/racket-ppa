@@ -16,7 +16,7 @@
 (preferences:set-default 'MacroStepper:PropertiesPanelPercentage 1/3 number?)
 (preferences:set-default 'MacroStepper:DrawArrows? #t boolean?)
 
-(preferences:set-default 'MacroStepper:MacroHidingMode "Standard" string?)
+(preferences:set-default 'MacroStepper:MacroHidingMode "Disable" string?)
 (preferences:set-default 'MacroStepper:ShowHidingPanel? #t boolean?)
 (preferences:set-default 'MacroStepper:IdentifierComparison "bound-identifier=?" string?)
 (preferences:set-default 'MacroStepper:IdentifierPartition "By macro scopes" string?)

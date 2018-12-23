@@ -73,7 +73,7 @@ AC_ARG_ENABLE(sgc,     [  --enable-sgc            use Senora GC instead of Boehm
 AC_ARG_ENABLE(sgcdebug,[  --enable-sgcdebug       use Senora GC for debugging (expensive debug mode)])
 AC_ARG_ENABLE(backtrace, [  --enable-backtrace      3m: support GC backtrace dumps (expensive debug mode)])
 
-AC_ARG_ENABLE(backtrace, [  --enable-cify          compile startup code to C insteda of bytecode])
+AC_ARG_ENABLE(backtrace, [  --enable-cify           compile startup code to C instead of bytecode])
 
 AC_ARG_ENABLE(pthread, [  --enable-pthread        link with pthreads (usually auto-enabled if needed)])
 AC_ARG_ENABLE(stackup, [  --enable-stackup        assume "up" if stack direction cannot be determined])
@@ -89,6 +89,7 @@ AC_ARG_ENABLE(gcov,    [  --enable-gcov           compile to gather gcov statist
 AC_ARG_ENABLE(noopt,   [  --enable-strip          strip debug on install (usually enabled by default)])
 AC_ARG_ENABLE(noopt,   [  --enable-noopt          drop -O C flags (useful for low-level debugging)])
 AC_ARG_ENABLE(ubsan,   [  --enable-ubsan          compile with -fsanitize=undefined)])
+AC_ARG_ENABLE(jitframe,[  --enable-jitframe       x86_64: use frame pointer for internal calls])
 
 ###### Some flags imply other flags #######
 
@@ -341,6 +342,8 @@ show_explicitly_enabled "${enable_smalloskit}" "OSKit small mode"
 
 show_explicitly_enabled "${enable_gprof}" "gprof"
 show_explicitly_enabled "${enable_gcov}" "gcov"
+
+show_explicitly_enabled "${enable_jitframe}" "jitframe"
 
 show_explicitly_enabled "${enable_noopt}" "No-optimization" "Note that this mode is intended only for debugging purposes"
 show_explicitly_enabled "${enable_strip}" "Debug-symbol stripping"
@@ -676,6 +679,10 @@ fi
 
 if test "${enable_gcov}" = "yes" ; then
   PROFFLAGS="$PROFFLAGS -fprofile-arcs -ftest-coverage"
+fi
+
+if test "${enable_jitframe}" = "yes" ; then
+  MZOPTIONS="$MZOPTIONS -DMZ_PROLOG_CREATE_FULL_STACK_FRAME"
 fi
 
 ORIG_CC_FOR_BUILD="${CC_FOR_BUILD}"
@@ -1250,19 +1257,6 @@ AC_CHECK_SIZEOF(bool, unused, [#include <stdbool.h>])
 
 AC_TYPE_INTPTR_T
 AC_TYPE_UINTPTR_T
-
-if test "${endianness}" = "unknown" ; then
-  if test "${enable_bigendian}" = "yes" ; then
-    endianness=big
-  else
-    echo configure: warning: cannot determine endianness, assuming little
-  fi
-fi
-
-if test "${endianness}" = "big" ; then
-  AC_DEFINE(SCHEME_BIG_ENDIAN,1,[Big endian])
-fi
-
 
 [ msg="for stack direction" ]
 AC_MSG_CHECKING($msg)

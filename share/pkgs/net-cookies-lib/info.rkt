@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define package-content-state (quote (built "7.0"))) (define collection (quote multi)) (define pkg-desc "implementation (no documentation) part of \"net-cookies\"") (define deps (quote ("srfi-lite-lib" "base"))) (define version "1.1.3")))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "7.1"))) (define collection (quote multi)) (define pkg-desc "implementation (no documentation) part of \"net-cookies\"") (define deps (quote ("srfi-lite-lib" "base"))) (define version "1.1.3")))

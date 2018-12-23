@@ -32,6 +32,13 @@ struct background_sleep_t;
 #endif
 
 /*========================================================================*/
+/* File-descriptor actions without a rktio_t                              */
+/*========================================================================*/
+
+intptr_t rktio_internal_fd_system_fd(rktio_fd_t *rfd);
+rktio_ok_t rktio_internal_close(rktio_t *rktio /* may be NULL */, rktio_fd_t *rfd, int set_error);
+
+/*========================================================================*/
 /* Globals, as gathered into `rktio_t`                                    */
 /*========================================================================*/
 
@@ -106,6 +113,8 @@ struct rktio_t {
 #endif
 
   int pending_os_signals[RKTIO_NUM_OS_SIGNALS];
+
+  int processor_count;
 
   struct rktio_dll_t *all_dlls;
   struct rktio_hash_t *dlls_by_name;
@@ -326,6 +335,8 @@ void *rktio_envvars_to_block(rktio_t *rktio, rktio_envvars_t *envvars);
 void rktio_stop_fs_change(rktio_t *rktio);
 
 void rktio_init_time(rktio_t *rktio);
+
+void rktio_init_cpu(rktio_t *rktio);
 
 #ifdef RKTIO_SYSTEM_WINDOWS
 int rktio_winsock_init(rktio_t *rktio);

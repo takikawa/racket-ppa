@@ -2,7 +2,7 @@
 
 (require "../utils/utils.rkt"
          racket/match
-         (rep core-rep type-rep rep-utils type-mask
+         (rep core-rep type-rep rep-utils
               numeric-base-types base-union base-type-rep
               object-rep prop-rep)
          (types numeric-predicates)
@@ -22,12 +22,13 @@
          -InexactRealPosZero -InexactRealNegZero -InexactRealZero -InexactRealNan
          -PosInexactReal -NonNegInexactReal -NegInexactReal -NonPosInexactReal -InexactReal
          -RealZero -RealZeroNoNan -PosReal -NonNegReal -NegReal -NonPosReal -Real
+         -RealZeroNoNan -PosRealNoNan -NonNegRealNoNan -NegRealNoNan -NonPosRealNoNan -RealNoNan
          -PosInfinity -NegInfinity
          -ExactImaginary -FloatImaginary -SingleFlonumImaginary -InexactImaginary -Imaginary
          -ExactNumber -ExactComplex -FloatComplex -SingleFlonumComplex -InexactComplex -Number
          has-int-provable-range?
          int-type->provable-range
-         extract-props
+         int-type->known-bounds
          (rename-out (-Int -Integer)))
 
 ;;
@@ -80,8 +81,8 @@
 (define/decl -InexactRealPosZero (Un -SingleFlonumPosZero -FlonumPosZero))
 (define/decl -InexactRealNegZero (Un -SingleFlonumNegZero -FlonumNegZero))
 (define/decl -InexactRealZero    (Un -InexactRealPosZero
-                                 -InexactRealNegZero
-                                 -InexactRealNan))
+                                     -InexactRealNegZero
+                                     -InexactRealNan))
 
 
 (define/decl -PosSingleFlonum    (Un -PosSingleFlonumNoNan -SingleFlonumNan))
@@ -98,12 +99,19 @@
 
 ;; Reals
 (define/decl -RealZero      (Un -Zero -InexactRealZero))
-(define/decl -RealZeroNoNan (Un -Zero -InexactRealPosZero -InexactRealNegZero))
 (define/decl -PosReal       (Un -PosRat -PosInexactReal))
 (define/decl -NonNegReal    (Un -NonNegRat -NonNegInexactReal))
 (define/decl -NegReal       (Un -NegRat -NegInexactReal))
 (define/decl -NonPosReal    (Un -NonPosRat -NonPosInexactReal))
 (define/decl -Real          (Un -Rat -InexactReal))
+
+;; Reals sans NaN (used for comparison specifications)
+(define/decl -RealZeroNoNan      (Un -Zero -InexactRealPosZero -InexactRealNegZero))
+(define/decl -PosRealNoNan       (Un -PosRat -PosFlonumNoNan -PosSingleFlonumNoNan))
+(define/decl -NonNegRealNoNan    (Un -RealZeroNoNan -PosRealNoNan))
+(define/decl -NegRealNoNan       (Un -NegRat -NegFlonumNoNan -NegSingleFlonumNoNan))
+(define/decl -NonPosRealNoNan    (Un -RealZeroNoNan -NegRealNoNan))
+(define/decl -RealNoNan          (Un -NegRealNoNan -RealZeroNoNan -PosRealNoNan))
 
 (define/decl -ExactNumber (Un -ExactImaginary -ExactComplex -Rat))
 (define/decl -InexactImaginary (Un -FloatImaginary -SingleFlonumImaginary))
@@ -167,7 +175,6 @@
      (hash-ref int-type-bounds-hash nbits #f)]
     [_ #f]))
 
-
 (define all-bounded-int-types
   ;; relies on numeric bits being eq?
   (for/hasheq ([t (in-list (list -Zero -One -PosByte -Byte>1 -Byte -PosIndex -Index
@@ -186,53 +193,3 @@
      (hash-ref all-bounded-int-types nbits #f)]
     [_ #f]))
 
-
-;; extract-props : Object Type -> (values Type (listof Prop?))
-;; given the fact that 'obj' is of type 'type',
-;; look inside of type trying to learn
-;; more info about obj
-;;
-;; NOTE: why is this HERE? It depends on the numeric
-;; types defined in this file... so it needs to be
-;; here or further downstream. At a glance I couldn't
-;; see an ideal place to stick it, so here it landed -AMK
-(define (extract-props obj type)
-  (cond
-    [(Empty? obj) (values type '())]
-    [else
-     (define props '())
-     (define new-type
-       (let extract ([rep type]
-                     [obj obj])
-         (match rep
-           [(app int-type->known-bounds
-                 (cons maybe-lower-bound maybe-upper-bound))
-            #:when (with-refinements?)
-            (when maybe-lower-bound
-              (set! props (cons (-leq (-lexp maybe-lower-bound) (-lexp obj))
-                                props)))
-            (when maybe-upper-bound
-              (set! props (cons (-leq (-lexp obj) (-lexp maybe-upper-bound))
-                                props)))
-            rep]
-           [(Pair: t1 t2) (make-Pair (extract t1 (-car-of obj))
-                                     (extract t2 (-cdr-of obj)))]
-           [(Refine-obj: obj t prop)
-            (set! props (cons prop props))
-            (extract t obj)]
-           [(HeterogeneousVector: ts)
-            #:when (with-refinements?)
-            (set! props (cons (-eq (-vec-len-of obj) (-lexp (length ts)))
-                              props))
-            rep]
-           [_ #:when (and (with-refinements?)
-                          (eqv? mask:vector (mask rep)))
-              (set! props (cons (-leq (-lexp 0) (-vec-len-of obj))
-                                props))
-              rep]
-           [(Intersection: ts _)
-            (apply -unsafe-intersect
-                   (for/list ([t (in-list ts)])
-                     (extract t obj)))]
-           [_ rep])))
-     (values new-type props)]))

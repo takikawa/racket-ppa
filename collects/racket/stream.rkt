@@ -33,6 +33,7 @@
          stream-length
          stream-ref
          stream-tail
+         stream-take
          stream-append
          stream-map
          stream-andmap
@@ -69,10 +70,15 @@
 
 (define-syntax stream*
   (syntax-rules ()
-    [(_ hd tl)
-     (stream-cons hd tl)]
+    [(_ tl)
+     (assert-stream? 'stream* tl)]
     [(_ hd tl ...)
      (stream-cons hd (stream* tl ...))]))
+
+(define (assert-stream? who st)
+  (if (stream? st)
+    st
+    (raise-argument-error who "stream?" st)))
 
 (define (stream->list s)
   (for/list ([v (in-stream s)]) v))
@@ -114,6 +120,23 @@
                              "stream" st)]
      [else
       (loop (sub1 n) (stream-rest s))])))
+
+
+
+(define (stream-take st i)
+  (unless (stream? st) (raise-argument-error 'stream-take "stream?" st))
+  (unless (exact-nonnegative-integer? i)
+    (raise-argument-error 'stream-take "exact-nonnegative-integer?" i))
+  (let loop ([n i] [s st])
+    (cond
+     [(zero? n) empty-stream]
+     [(stream-empty? s)
+      (raise-arguments-error 'stream-take
+                             "stream ended before index"
+                             "index" i
+                             "stream" st)]
+     [else
+      (stream* (stream-first s) (loop (sub1 n) (stream-rest s)))])))
 
 (define (stream-append . l)
   (for ([s (in-list l)])

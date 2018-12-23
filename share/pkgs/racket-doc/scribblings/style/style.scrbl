@@ -22,9 +22,9 @@ To help manage the growth our code and showcase good Racket style, we need
  code base so that everyone who opens files can easily find their way
  around.
 
-This document spells out the guidelines. They cover a range of topics, from
- basic work (commit) habits to small syntactic ideas like indentation and
- naming.
+This document spells out the guidelines and best practices. They cover a range
+ of topics, from basic work (commit) habits to small syntactic ideas like
+ indentation and naming.
 
 Many pieces of the code base don't live up to the guidelines yet.  Here is how
  we get started. When you start a new file, stick to the guidelines. If you need
@@ -32,7 +32,7 @@ Many pieces of the code base don't live up to the guidelines yet.  Here is how
  workings. If doing so takes quite a while due to inconsistencies with the
  guidelines, please take the time to fix (portions of) the file. After all, if
  the inconsistencies throw you off for that much time, others are likely to
- have the same problems. If you help fixing it, you reduce future
+ have the same problems. If you help fix it, you reduce future
  maintenance time. Whoever touches the file next will be grateful to you.
  @emph{Do} run the test suites, and do @emph{not} change the behavior of
  the file.

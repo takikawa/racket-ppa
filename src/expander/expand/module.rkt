@@ -1,7 +1,8 @@
 #lang racket/base
-(require racket/promise
+(require "../common/promise.rkt"
          "../common/struct-star.rkt"
          "../common/performance.rkt"
+         "../common/parameter-like.rkt"
          "../syntax/syntax.rkt"
          "../syntax/debug.rkt"
          "../syntax/property.rkt"
@@ -250,7 +251,8 @@
                                     (module-begin-k s ctx)))]
                                ;; Also, force `post-expansion` to be right, in case 'module-begin
                                ;; module is triggered within some other mode; a correct value
-                               ;; for `post-expansion` is important to getting scopes right.
+                               ;; for `post-expansion` is important to getting phase-specific
+                               ;; binding right.
                                [post-expansion #:parent root-expand-context
                                                (lambda (s) (add-scope s inside-scope))]))
 
@@ -1033,7 +1035,7 @@
 (define (check-defined-by-now need-eventually-defined self ctx requires+provides)
   ;; If `need-eventually-defined` is not empty, report an error
   (for ([(phase l) (in-hash need-eventually-defined)])
-    (for ([id (in-list l)])
+    (for ([id (in-list (reverse l))])
       (define b (resolve+shift id phase))
       (define bound-here? (and b
                                (module-binding? b)
@@ -1298,13 +1300,14 @@
       (void)]
      [else
       ;; an expression
-      (parameterize ([current-expand-context ctx]
-                     [current-namespace m-ns])
-        (eval-single-top
-         (compile-single p (make-compile-context
-                            #:namespace m-ns
-                            #:phase phase))
-         m-ns))])))
+      (parameterize ([current-namespace m-ns])
+        (parameterize-like
+         #:with ([current-expand-context ctx])
+         (eval-single-top
+          (compile-single p (make-compile-context
+                             #:namespace m-ns
+                             #:phase phase))
+          m-ns)))])))
 
 ;; ----------------------------------------
 
