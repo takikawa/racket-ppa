@@ -15,13 +15,17 @@ DrRacket's GUI.
 @declare-exporting[string-constants/string-constant string-constants]
 
 @defform[(string-constant name)]{
- 
-This form returns the string constant named @racket[name].}
+ This form returns the string constant named @racket[name] for @racket[this-language].
+}
    
 @defform[(string-constants name)]{
 
 This form returns a list of string constants, one for each language
 that DrRacket's GUI supports.}
+
+@defform[(string-constant-in-current-language? name)]{
+ Produces @racket[#t] if @racket[key] has been translated for @racket[this-language].
+}
 
 @defproc[(dynamic-string-constant [name string-constant?]) string?]{
   This, like @racket[string-constant], returns the string constant
@@ -38,6 +42,11 @@ that DrRacket's GUI supports.}
 @defproc[(string-constant? [v any/c]) boolean?]{
   Returns @racket[#t] if @racket[v] is a symbol naming a known string constant.
 }
+
+@defproc[(dynamic-string-constant-in-current-language? [key string-constant?]) boolean?]{
+ Like @racket[string-constant-in-current-language?], but without compile-time checking.
+}
+
 
 @defform[(this-language)]{
 

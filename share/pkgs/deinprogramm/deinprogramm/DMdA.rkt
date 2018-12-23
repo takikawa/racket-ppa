@@ -56,6 +56,7 @@
  (DMdA-let* let*)
  (DMdA-letrec letrec)
  (DMdA-lambda lambda)
+ (DMdA-lambda λ)
  (DMdA-cond cond)
  (DMdA-if if)
  (DMdA-else else)
@@ -339,6 +340,8 @@
  ("Symbole"
   (symbol? (any -> boolean)
 	   "feststellen, ob ein Wert ein Symbol ist")
+  (symbol=? (symbol symbol -> boolean)
+	    "Sind zwei Symbole gleich?")
   (symbol->string (symbol -> string)
 		  "Symbol in Zeichenkette umwandeln")
   (string->symbol (string -> symbol)
@@ -365,15 +368,21 @@
   (read (-> any)
 	"Externe Repräsentation eines Werts in der REPL einlesen und den zugehörigen Wert liefern")))
 
-(define (real-make-pair f r)
-  (when (and (not (null? r))
-	     (not (pair? r)))
-    (raise
-     (make-exn:fail:contract
-      (string->immutable-string
-       (format "Zweites Argument zu make-pair ist keine Liste, sondern ~e" r))
-      (current-continuation-marks))))
-  (cons f r))
+(define real-make-pair
+  (let ()
+    (define make-pair
+      (procedure-rename
+       (lambda (f r)
+         (when (and (not (null? r))
+                    (not (pair? r)))
+           (raise
+            (make-exn:fail:contract
+             (string->immutable-string
+              (format "Zweites Argument zu make-pair ist keine Liste, sondern ~e" r))
+             (current-continuation-marks))))
+         (cons f r))
+       'make-pair))
+    make-pair))
 
 (define-syntax make-pair
   (let ()
@@ -859,6 +868,20 @@
 (define (boolean=? a b)
   (verify-boolean a 'boolean=?)
   (verify-boolean b 'boolean=?)
+  (eq? a b))
+
+(define (verify-symbol b where)
+  (if (symbol? b)
+      b
+      (raise
+       (make-exn:fail:contract
+	(string->immutable-string
+	 (format "~a: Wert ist kein Symbol: ~e" where b))
+	(current-continuation-marks)))))
+
+(define (symbol=? a b)
+  (verify-symbol a 'symbol=?)
+  (verify-symbol b 'symbol=?)
   (eq? a b))
 
 (define-syntax (DMdA-app stx)

@@ -104,6 +104,10 @@
 (define (io:read-int16 port)
   (integer-bytes->integer (read-bytes 2 port) #t #t))
 
+;; read-uint16 : port -> integer
+(define (io:read-uint16 port)
+  (integer-bytes->integer (read-bytes 2 port) #f #t))
+
 ;; read-int32 : port -> integer
 (define (io:read-int32 port)
   (integer-bytes->integer (read-bytes 4 port) #t #t))
@@ -167,7 +171,7 @@
         ((2) (make-AuthenticationKerberosV5))
         ((3) (make-AuthenticationCleartextPassword))
         ((4) (let ([salt (io:read-bytes-as-bytes p 2)])
-               (make-AuthenticationCleartextPassword salt)))
+               (make-AuthenticationCryptPassword salt)))
         ((5) (let ([salt (io:read-bytes-as-bytes p 4)])
                (make-AuthenticationMD5Password salt)))
         ((6) (make-AuthenticationSCMCredential))
@@ -368,7 +372,7 @@
 (define (parse:ParameterDescription p)
   (with-length-in p #\t
     (let* ([type-oids
-            (for/list ([i (in-range (io:read-int16 p))])
+            (for/list ([i (in-range (io:read-uint16 p))])
               (io:read-int32 p))])
       (make-ParameterDescription type-oids))))
 

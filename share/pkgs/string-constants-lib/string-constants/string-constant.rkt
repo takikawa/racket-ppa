@@ -19,13 +19,15 @@
          (prefix-in korean: "private/korean-string-constants.rkt")
          (prefix-in bulgarian: "private/bulgarian-string-constants.rkt"))
 
-(provide string-constant string-constants 
+(provide string-constant string-constants
+         string-constant-in-current-language?
          this-language all-languages set-language-pref)
 (provide
  (contract-out
   [string-constant? (-> any/c boolean?)]
   [dynamic-string-constant (-> string-constant? string?)]
-  [dynamic-string-constants (-> string-constant? (listof string?))]))
+  [dynamic-string-constants (-> string-constant? (listof string?))]
+  [dynamic-string-constant-in-current-language? (-> string-constant? boolean?)]))
 
 ;; set-language-pref : symbol -> void
 (define (set-language-pref language)
@@ -114,6 +116,8 @@
                         (λ ()
                           (error who
                                  "unknown string-constant\n  key: ~e" key))))))
+(define (dynamic-string-constant-in-current-language? key)
+  (hash-has-key? (sc-constants the-sc) key))
 
 (define (string-constant? sym)
   (and (hash-ref (sc-constants first-string-constant-set) sym #f)
@@ -232,7 +236,12 @@
        (check-name #'name stx)
        #'(dynamic-string-constants 'name))]))
 
+(define-syntax (string-constant-in-current-language? stx)
+  (syntax-case stx ()
+    [(_ name)
+     (check-name #'name stx)
+     #'(dynamic-string-constant-in-current-language? 'name)]))
+
 (define (this-language) language)
 
 (define (all-languages) (map sc-language-name available-string-constant-sets))
-
