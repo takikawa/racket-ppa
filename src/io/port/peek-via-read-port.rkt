@@ -26,7 +26,7 @@
     ((core-input-port-prepare-change peek-pipe-i)))
 
   ;; in atomic mode
-  (define (pull-some-bytes [amt (bytes-length buf)] #:keep-eof? [keep-eof? #t])
+  (define (pull-some-bytes [amt (if (eq? 'block buffer-mode) (bytes-length buf) 1)] #:keep-eof? [keep-eof? #t])
     (define v (read-in buf 0 amt #f))
     (cond
       [(eof-object? v)
@@ -74,7 +74,7 @@
   (define (read-byte)
     (define b ((core-input-port-read-byte peek-pipe-i)))
     (cond
-      [(not (evt? b))
+      [(or (fixnum? b) (eof-object? b))
        b]
       [peeked-eof?
        (set! peeked-eof? #f)

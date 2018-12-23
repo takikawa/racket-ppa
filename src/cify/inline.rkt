@@ -18,12 +18,15 @@
     [(cons) (and (= n 2) can-gc? 'scheme_make_pair)]
     [(list*) (and (= n 2) can-gc? 'scheme_make_pair)]
     [(list) (and (or (= n 1) (= n 2)) can-gc? (if (= n 1) 'c_make_list1 'c_make_list2))]
-    [(unbox unsafe-unbox unbox* unsafe-unbox*) (and (= n 1) 'c_box_ref)]
+    [(box unsafe-make-place-local) (and (= n 1) can-gc? 'c_make_box)]
+    [(unbox unsafe-unbox unbox* unsafe-unbox* unsafe-place-local-ref) (and (= n 1) 'c_box_ref)]
     [(weak-box-value) (and (or (= n 1) (= n 2)) 'c_weak_box_value)]
-    [(set-box! set-box*! unsafe-set-box! unsafe-set-box*!) (and (= n 2) 'c_box_set)]
-    [(vector-ref unsafe-vector-ref) (and (= n 2) 'c_vector_ref)]
+    [(set-box! unsafe-set-box!) (and (= n 2) can-gc? 'c_box_set)]
+    [(set-box*! unsafe-set-box*! unsafe-place-local-set!) (and (= n 2) 'c_box_set)]
+    [(vector-ref unsafe-vector-ref) (and (= n 2) can-gc? 'c_vector_ref)]
     [(vector*-ref unsafe-vector*-ref) (and (= n 2) 'c_authentic_vector_ref)]
-    [(vector-set! unsafe-vector-set! vector*-set! unsafe-vector*-set!) (and (= n 3) 'c_vector_set)]
+    [(vector-set! unsafe-vector-set!) (and (= n 3) can-gc? 'c_vector_set)]
+    [(vector*-set! unsafe-vector*-set!) (and (= n 3) 'c_vector_set)]
     [(vector-length unsafe-vector-length vector*-length unsafe-vector*-length) (and (= n 1) 'c_vector_length)]
     [(string-ref unsafe-string-ref) (and (= n 2) can-gc? 'c_string_ref)]
     [(bytes-ref unsafe-bytes-ref) (and (= n 2) 'c_bytes_ref)]
@@ -57,15 +60,19 @@
         (define k (hash-ref knowns rator #f))
         (cond
           [(and (struct-accessor? k) (= n 1))
-           (lambda (s)
-             (if (struct-info-authentic? (struct-accessor-si k))
-                 (format "c_authentic_struct_ref(~a, ~a)" s (struct-accessor-pos k))
-                 (and can-gc? (format "c_struct_ref(~a, ~a)" s (struct-accessor-pos k)))))]
+           (define authentic? (struct-info-authentic? (struct-accessor-si k)))
+           (and (or can-gc? authentic?)
+                (lambda (s)
+                  (if authentic?
+                      (format "c_authentic_struct_ref(~a, ~a)" s (struct-accessor-pos k))
+                      (and can-gc? (format "c_struct_ref(~a, ~a)" s (struct-accessor-pos k))))))]
           [(and (struct-mutator? k) (= n 2))
-           (lambda (s)
-             (if (struct-info-authentic? (struct-mutator-si k))
-                 (format "c_authentic_struct_set(~a, ~a)" s (struct-mutator-pos k))
-                 (and can-gc? (format "c_struct_set(~a, ~a)" s (struct-mutator-pos k)))))]
+           (define authentic? (struct-info-authentic? (struct-mutator-si k)))
+           (and (or can-gc? authentic?)
+                (lambda (s)
+                  (if authentic?
+                      (format "c_authentic_struct_set(~a, ~a)" s (struct-mutator-pos k))
+                      (format "c_struct_set(~a, ~a)" s (struct-mutator-pos k)))))]
           [(and (struct-property-accessor? k) (= n 1))
            (and can-gc?
                 (lambda (s top-ref)
@@ -108,6 +115,7 @@
     [`(eqv? ,e1 ,e2) (simple "scheme_eqv(~a)" e1 e2)]
     [`(equal? ,e1 ,e2) (simple #:can-gc? #t "scheme_equal(~a)"e1 e2)]
     [`(char=? ,e1 ,e2) (simple "c_scheme_char_eq(~a)" e1 e2)]
+    [`(unsafe-char=? ,e1 ,e2) (simple "c_scheme_char_eq(~a)" e1 e2)]
     [`(char-whitespace? ,e) (simple "c_scheme_char_whitespacep(~a)" e)]
     [`(unsafe-fx< ,e1 ,e2) (simple "c_int_lt(~a)" e1 e2)]
     [`(fx< ,e1 ,e2) (simple "c_int_lt(~a)" e1 e2)]

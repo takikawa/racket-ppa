@@ -10,6 +10,9 @@
 ;; with `break-enabled-key`, and it does not support using an
 ;; exception handler in an engine.
 
+(provide register-place-symbol!
+         set-io-place-init!)
+
 (define (make-engine thunk init-break-enabled-cell empty-config?)
   (define ready-s (make-semaphore))
   (define s (make-semaphore))
@@ -83,6 +86,9 @@
 (define (engine-block)
   (thread-suspend (current-thread)))
 
+(define (engine-timeout)
+  (void))
+
 (define ctl-c-handler #f)
 
 (define (set-ctl-c-handler! proc)
@@ -132,18 +138,90 @@
 (struct exn:break:terminate/non-engine exn:break/non-engine ())
 
 (define (make-pthread-parameter v)
-  (define x v)
+  (define l (unsafe-make-place-local v))
   (case-lambda
-    [() x]
-    [(v) (set! x v)]))
+    [() (unsafe-place-local-ref l)]
+    [(v) (unsafe-place-local-set! l v)]))
+
+(define initial-place-local-table (make-hasheq))
+(define place-local-table (make-parameter initial-place-local-table))
+
+(define (unsafe-make-place-local v)
+  (define key (vector v 'place-locale))
+  (hash-set! (place-local-table) key v)
+  key)
+
+(define (unsafe-place-local-ref key)
+  (hash-ref (place-local-table) key (vector-ref key 0)))
+
+(define (unsafe-place-local-set! key val)
+  (hash-set! (place-local-table) key val))
+
+(define wakeables (make-weak-hasheq))
+
+(define (wakeable-sleep msecs)
+  (define s (make-semaphore))
+  (hash-set! wakeables (place-local-table) s)
+  (sync/timeout msecs s)
+  (void))
+
+(define (get-wakeup-handle)
+  (place-local-table))
+
+(define (wakeup t)
+  (define s (hash-ref wakeables t #f))
+  (when s (semaphore-post s)))
+
+(define place-done-prompt (make-continuation-prompt-tag 'place-done))
+
+;; Beware that this implementation of `fork-place` doesn't support
+;; rktio-based blocking in different places. So, be careful of the
+;; preliminary tests that you might try with the "io" layer and
+;; places.
+(define (fork-place thunk finish)
+  (parameterize ([place-local-table (make-hasheq)])
+    (thread (lambda ()
+              (define v
+                (call-with-continuation-prompt
+                 thunk
+                 place-done-prompt))
+              (finish v)))))               
+
+(define place-symbols (make-hasheq))
+(define io-place-init! void)
+
+(define (start-place pch mod sym in-fd out-fd err-fd cust plumber)
+  (io-place-init! in-fd out-fd err-fd cust plumber)
+  (lambda ()
+    ((hash-ref place-symbols sym) pch)))
+
+;; For use in "demo.rkt"
+(define (register-place-symbol! sym proc)
+  (hash-set! place-symbols sym proc))
+
+;; For use in "demo-thread.rkt" in "io"
+(define (set-io-place-init! proc)
+  (set! io-place-init! proc))
+
+(define (place-exit v)
+  (if (eq? initial-place-local-table (place-local-table))
+      (exit v)
+      (abort-current-continuation
+       place-done-prompt
+       (lambda () v))))
 
 (primitive-table '#%pthread
                  (hash
-                  'make-pthread-parameter make-pthread-parameter))
+                  'make-pthread-parameter make-pthread-parameter
+                  'unsafe-make-place-local unsafe-make-place-local
+                  'unsafe-place-local-ref unsafe-place-local-ref
+                  'unsafe-place-local-set! unsafe-place-local-set!
+                  'unsafe-add-global-finalizer (lambda (v proc) (void))))
 (primitive-table '#%engine
                  (hash 
                   'make-engine make-engine
                   'engine-block engine-block
+                  'engine-timeout engine-timeout
                   'engine-return (lambda args
                                    (error "engine-return: not ready"))
                   'current-process-milliseconds current-process-milliseconds
@@ -164,27 +242,33 @@
                   'poll-async-callbacks (lambda () null)
                   'disable-interrupts void
                   'enable-interrupts void
+                  'sleep wakeable-sleep
+                  'get-wakeup-handle get-wakeup-handle
+                  'wakeup wakeup
+                  'fork-place fork-place
+                  'start-place start-place
+                  'exit place-exit
                   'fork-pthread (lambda args
                                   (error "fork-pthread: not ready"))
                   'pthread? (lambda args
                               (error "thread?: not ready"))
                   'get-thread-id (lambda args
                                    (error "get-pthread-id: not ready"))
-                  'make-condition (lambda () 'condition)
-                  'condition-wait (lambda args
-                                    (error "condition-wait: not ready"))
-                  'condition-signal (lambda args
-                                      (error "condition-signal: not ready"))
+                  'make-condition (lambda () (make-semaphore))
+                  'condition-wait (lambda (c s)
+                                    (semaphore-post s)
+                                    (semaphore-wait c)
+                                    (semaphore-wait s))
+                  'condition-signal (lambda (c)
+                                      (semaphore-post c))
                   'condition-broadcast (lambda args
                                          (error "condition-broadcast: not ready"))
                   'threaded? (lambda () #f)
                   'current-engine-state (lambda args
                                           (error "current-engine state: not ready"))
-                  'make-mutex (lambda () 'mutex)
-                  'mutex-acquire (lambda args
-                                   (error "mutex-acquire: not ready"))
-                  'mutex-release (lambda args
-                                   (error "mutex-release: not ready"))))
+                  'make-mutex (lambda () (make-semaphore 1))
+                  'mutex-acquire (lambda (s) (semaphore-wait s))
+                  'mutex-release (lambda (s) (semaphore-post s))))
 
 ;; add dummy definitions that implement pthreads and conditions etc.
 ;; dummy definitions that error

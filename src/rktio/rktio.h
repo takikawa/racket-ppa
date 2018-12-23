@@ -63,6 +63,10 @@ Thread and signal conventions:
    before a second call, different `rktio_t` values can be used freely
    from different threads.
 
+ - Unless otherwise specificed, anything created with a particular
+   `rktio_t` must be used with that same `rktio_t` thereafter (and in
+   only one thread at a time).
+
  - If a function doesn't take a `rktio_t` argument, then it can be
    called concurrently with anything else. Notably,
    `rktio_signal_received_at` does not take a `rktio_t`.
@@ -151,9 +155,6 @@ RKTIO_EXTERN rktio_char16_t *rktio_get_dll_path(rktio_char16_t *p);
 /* Reading and writing files                     */
 
 typedef struct rktio_fd_t rktio_fd_t;
-/* Although a `rktio_fd_t` instance is manipulated with respect to
-   some `rktio_t`, it's not attached to the `rktio_t`. The `rktio_fd_t`
-   can be manipulated with a different `rktio_t`. */
 
 /* Mode flags shared in part by `rktio_open` and `rktio_system_fd`. */
 
@@ -335,6 +336,24 @@ RKTIO_EXTERN rktio_filesize_t *rktio_get_file_position(rktio_t *rktio, rktio_fd_
 
 RKTIO_EXTERN rktio_ok_t rktio_set_file_size(rktio_t *rktio, rktio_fd_t *rfd, rktio_filesize_t sz);
 /* Can report `RKTIO_ERROR_CANNOT_FILE_POSITION` on Windows. */
+
+typedef struct rktio_fd_transfer_t rktio_fd_transfer_t;
+/* Represents an rktio_fd_t that is detached from a specific rktio_t */
+
+RKTIO_EXTERN_NOERR rktio_fd_transfer_t *rktio_fd_detach(rktio_t *rktio, rktio_fd_t *rfd);
+/* Returns a variant of `rfd` that does not depend on `rktio`. The
+   `rfd` must not currently have any file locks, and deatching
+   transfers ownership of `rfd` to the result. To use the result, it
+   must be reattached to some `rktio_t` using rktio_fd_attach, or it
+   can be freed with `rktio_fd_free_transfer`. */
+
+RKTIO_EXTERN_NOERR rktio_fd_t *rktio_fd_attach(rktio_t *rktio, rktio_fd_transfer_t *rfdt);
+/* Attaches a file descriptor that was formerly detached with
+   `rktio_fd_detach` so it can be used again, consuming the `rfdt`. */
+
+RKTIO_EXTERN void rktio_fd_close_transfer(rktio_fd_transfer_t *rfdt);
+/* Closes and frees a detached file descriptor without having to
+   attach it to a `rktio_t`. */
 
 /*************************************************/
 /* Pipes                                         */
@@ -1016,6 +1035,13 @@ RKTIO_EXTERN_NOERR char *rktio_wide_path_to_path(rktio_t *rktio, const rktio_cha
    function can fail and report `RKTIO_ERROR_INVALID_PATH`. */
 
 /*************************************************/
+/* Processor count                               */
+
+RKTIO_EXTERN_NOERR int rktio_processor_count(rktio_t *rktio);
+/* Returns the number of processing units, either as CPUs, cores, or
+   hyoperthreads. */
+
+/*************************************************/
 /* Logging                                       */
 
 RKTIO_EXTERN rktio_ok_t rktio_syslog(rktio_t *rktio, int level, rktio_const_string_t name, rktio_const_string_t msg,
@@ -1134,6 +1160,46 @@ RKTIO_EXTERN void rktio_pop_c_numeric_locale(rktio_t *rktio, char *prev);
 RKTIO_EXTERN char *rktio_system_language_country(rktio_t *rktio);
 /* Returns the current system's language in country in a 5-character
    format such as "en_US". */
+
+
+/*************************************************/
+/* SHA-1, SHA-224, SHA-256                       */
+
+/* From Steve Reid's implementation at https://www.ghostscript.com/ */
+
+typedef struct rktio_sha1_ctx_t {
+  unsigned int state[5];
+  unsigned int count[2];
+  unsigned char buffer[64];
+} rktio_sha1_ctx_t;
+
+#define RKTIO_SHA1_DIGEST_SIZE 20
+
+RKTIO_EXTERN void rktio_sha1_init(rktio_sha1_ctx_t *context);
+/* Initialize a context, which is memory of length `rktio_sha1_ctx_size()`
+   containing no pointers. */
+
+RKTIO_EXTERN void rktio_sha1_update(rktio_sha1_ctx_t *context,
+                                    const unsigned char *data, intptr_t start, intptr_t end);
+/* Add some bytes to the hash. */
+
+RKTIO_EXTERN void rktio_sha1_final(rktio_sha1_ctx_t *context, unsigned char *digest /* RKTIO_SHA1_DIGEST_SIZE */);
+/* Get the final hash value after all bytes have been added. */
+
+typedef struct rktio_sha2_ctx_t {
+    unsigned total[2];
+    unsigned state[8];
+    unsigned char buffer[64];
+    int is224;
+} rktio_sha2_ctx_t;
+
+#define RKTIO_SHA224_DIGEST_SIZE 28
+#define RKTIO_SHA256_DIGEST_SIZE 32
+
+RKTIO_EXTERN void rktio_sha2_init(rktio_sha2_ctx_t *ctx, rktio_bool_t is224);
+RKTIO_EXTERN void rktio_sha2_update(rktio_sha2_ctx_t *ctx,
+                                    const unsigned char *data, intptr_t start, intptr_t end);
+RKTIO_EXTERN void rktio_sha2_final(rktio_sha2_ctx_t *ctx, unsigned char *digest /* RKTIO_SHA2{24,56}_DIGEST_SIZE */);
 
 /*************************************************/
 /* Dynamically loaded libraries                  */

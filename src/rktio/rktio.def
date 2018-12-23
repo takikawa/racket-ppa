@@ -33,6 +33,9 @@ rktio_file_unlock
 rktio_set_file_position
 rktio_get_file_position
 rktio_set_file_size
+rktio_fd_detach
+rktio_fd_attach
+rktio_fd_close_transfer
 rktio_make_pipe
 rktio_start_addrinfo_lookup
 rktio_get_ipv4_family
@@ -164,6 +167,7 @@ rktio_seconds_to_date
 rktio_shell_execute
 rktio_path_to_wide_path
 rktio_wide_path_to_path
+rktio_processor_count
 rktio_syslog
 rktio_convert_properties
 rktio_converter_open
@@ -179,9 +183,16 @@ rktio_set_locale
 rktio_push_c_numeric_locale
 rktio_pop_c_numeric_locale
 rktio_system_language_country
+rktio_sha1_init
+rktio_sha1_update
+rktio_sha1_final
+rktio_sha2_init
+rktio_sha2_update
+rktio_sha2_final
 rktio_dll_open
 rktio_dll_find_object
 rktio_dll_get_error
+rktio_set_dll_procs
 rktio_get_last_error_kind
 rktio_get_last_error
 rktio_get_last_error_step

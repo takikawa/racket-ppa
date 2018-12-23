@@ -106,7 +106,7 @@ element representation followed by an exact-integer count.
 
 @defproc[(compiler-sizeof [sym (or/c symbol? (listof symbol?))]) exact-nonnegative-integer?]{
 
-Possible values for @racket[sym] are @racket['int], @racket['char],
+Possible values for @racket[sym] are @racket['int], @racket['char], @racket['wchar],
 @racket['short], @racket['long], @racket['*], @racket['void],
 @racket['float], @racket['double], or lists of symbols, such as 
 @racket['(long long)]. The result is the size of the
@@ -152,6 +152,15 @@ for @racket[_sint8] and @racket[_uint8], respectively.
 The @racket[_byte] type is like @racket[_ubyte], but adds
 256 to a negative Racket value that would work as a @racket[_sbyte]
 (i.e., it casts signed bytes to unsigned bytes).}
+
+
+@defthing*[([_wchar ctype?])]{
+
+The @racket[_wchar] type is an alias for an unsigned integer type,
+such as @racket[_uint16] or @racket[_uint32], corresponding to the platform's
+@as-index{@tt{wchar_t}} type.
+
+@history[#:added "7.0.0.3"]}
 
 
 @defthing*[([_word ctype?]
@@ -240,17 +249,18 @@ values.}
 @defthing[_stdbool ctype?]{
 
 The @racket[_stdbool] type represents the C99 @cpp{bool} type from
-@cpp{<stdbool.h>}. It translates @racket[#f] to a @racket[0]
-@cpp{bool} and any other value to a @racket[1] @cpp{bool}.
+@cpp{<stdbool.h>}. Going from Racket to C, @racket[_stdbool] translates
+@racket[#f] to a @racket[0] @cpp{bool} and any other value to a
+@racket[1] @cpp{bool}. Going from C to Racket, @racket[_stdbool] translates
+@racket[0] to a @racket[#f] and any other value to @racket[#t].
 
 @history[#:added "6.0.0.6"]}
 
 @defthing[_bool ctype?]{
 
-Translates @racket[#f] to a @racket[0] @cpp{int} and any other
-value to a @racket[1] @cpp{int}, reflecting one of many
-traditional (i.e., pre-C99) encodings of booleans. See also
-@racket[_stdbool].}
+Like @racket[_stdbool], but with an @cpp{int} representation on the C
+side, reflecting one of many traditional (i.e., pre-C99) encodings of
+booleans.}
 
 @defthing[_void ctype?]{
 
@@ -989,7 +999,8 @@ following:
   some value, and this value is accessible after the call, to be used
   by an extra return expression.  If @racket[_ptr] is used in this
   mode, then the generated wrapper does not expect an argument since
-  one will be freshly allocated before the call.}
+  one will be freshly allocated before the call. The argument is
+  allocated using @racket[(malloc type-expr)].}
 
  @item{@racket[io] --- combines the above into an
   @italic{input/output} pointer argument: the wrapper gets the Racket

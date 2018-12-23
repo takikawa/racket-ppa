@@ -25,6 +25,8 @@
          "time.rkt"
          "stats.rkt"
          "stack-size.rkt"
+         "place.rkt"
+         "place-message.rkt"
          "future.rkt"
          "fsemaphore.rkt"
          "os-thread.rkt")
@@ -157,8 +159,26 @@
          unsafe-custodian-register
          unsafe-custodian-unregister
 
+         dynamic-place  ; not the one from `racket/place`
+         place?
+         place-break
+         place-kill
+         place-wait
+         place-dead-evt
+
+         place-channel
+         place-channel? 
+         place-channel-get
+         place-channel-put
+         place-message-allowed?
+
+         prop:place-message
+
+         set-make-place-ports+fds!
+         place-pumper-threads
+         unsafe-add-post-custodian-shutdown
+
          futures-enabled?
-         processor-count
          future
          future?
          touch

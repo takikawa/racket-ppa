@@ -1,5 +1,8 @@
 #lang racket/base
 (require "bootstrap-thread-main.rkt"
+         (only-in "../thread/bootstrap.rkt"
+                  register-place-symbol!
+                  set-io-place-init!)
          (only-in racket/base
                   [current-directory host:current-directory]
                   [path->string host:path->string]))
@@ -7,6 +10,8 @@
 ;; Don't use exceptions here; see "../thread/demo.rkt"
 
 (current-directory (host:path->string (host:current-directory)))
+(set-io-place-init! io-place-init!)
+(set-make-place-ports+fds! make-place-ports+fds)
 
 (define done? #f)
 
@@ -18,7 +23,7 @@
 
 (call-in-main-thread
  (lambda ()
-
+   
    ;; Make `N` threads trying to write `P` copies
    ;; of each possible byte into a limited pipe, and
    ;; make `N` other threads try to read those bytes.
@@ -110,7 +115,7 @@
        (test #f (sync/timeout 0 progress1))
        (test #"hel" (peek-bytes 3 0 in))
        (test #f (sync/timeout 0 progress1))
-       (test #f (port-commit-peeked 3 progress1 fail-dest-evt in))
+       ;(test #f (port-commit-peeked 3 progress1 fail-dest-evt in))
        (test #"hel" (peek-bytes 3 0 in))
        (test #f (sync/timeout 0 progress1))
        (test #t (port-commit-peeked 3 progress1 dest-evt in))
@@ -178,6 +183,67 @@
        (for ([j 10])
          (open-input-file "compiled/hello.txt")))
      (custodian-shutdown-all c))
+
+   ;; Places
+   ;;  BEWARE: we can run some basic places tests in bootstrap mode,
+   ;;  but since "places" are just Racket threads, avoid any rktio-based
+   ;;  blocking operations
+   (register-place-symbol! 'report
+                           (lambda (pch)
+                             (write-string "expected place out\n")
+                             (write-string "expected place err\n" (current-error-port))))
+   (define-values (pl1 pin1 pout1 perr1) (dynamic-place 'dummy 'report
+                                                        (current-input-port)
+                                                        (current-output-port)
+                                                        (current-error-port)))
+   (test #t (place? pl1))
+   (test #f pin1)
+   (test #f pout1)
+   (test #f perr1)
+   (test 0 (place-wait pl1))
+
+   ;; See warnign about about places in bootstrap-demo mode
+   (register-place-symbol! 'echo2
+                           (lambda (pch)
+                             (define s (read-line))
+                             (write-string s)
+                             (define s2 (list->string (reverse (string->list s))))
+                             (write-string s2 (current-error-port))))
+   (define-values (pl2 pin2 pout2 perr2) (dynamic-place 'dummy 'echo2 #f #f #f))
+   (test #t (place? pl2))
+   (test #t (output-port? pin2))
+   (test #t (input-port? pout2))
+   (test #t (input-port? perr2))
+   (write-string "hello" pin2)
+   (close-output-port pin2)
+   (test "hello" (read-string 100 pout2))
+   (test "olleh" (read-string 100 perr2))
+   (test 0 (place-wait pl2))
+
+   ;; Can pass a file-stream port through a place channel, but it
+   ;; makes a fresh port on the other end
+   (define-values (left1 right1) (place-channel))
+   (let ([f (open-input-file "compiled/hello.txt")])
+     (file-stream-buffer-mode f 'none)
+     (test #\h (read-char f))
+     (test 1 (file-position f))
+     (place-channel-put left1 f)
+     (define f2 (place-channel-get right1))
+     (file-stream-buffer-mode f2 'none)
+     (test #\e (read-char f2))
+     (test 2 (file-position f2))
+     (close-input-port f2)
+     (test 2 (file-position f))
+     (test #\l (read-char f))
+     (test 3 (file-position f))
+     (close-input-port f))
+   ;; Paths are ok as place messages:
+   (let ([p (bytes->path #"ok" 'windows)])
+     (place-channel-put left1 p)
+     (test p (place-channel-get right1)))
+   (let ([p (bytes->path #"ok" 'unix)])
+     (place-channel-put left1 p)
+     (test p (place-channel-get right1)))
 
    ;; TCP and accept evts
    (parameterize ([current-custodian (make-custodian)])

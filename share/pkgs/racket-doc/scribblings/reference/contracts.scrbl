@@ -2745,11 +2745,11 @@ returns @racket[#f] but @racket[value-blame] returns @racket[#f].
           [#:generate
            generate
            (->i ([c contract?])
-                ([generator
-                  (c)
-                  (-> (and/c positive? real?)
-                      (or/c (-> (or/c contract-random-generate-fail? c))
-                            #f))]))
+                [generator
+                 (c)
+                 (-> (and/c positive? real?)
+                     (or/c (-> (or/c contract-random-generate-fail? c))
+                           #f))])
            (λ (c) (λ (fuel) #f))]
           [#:list-contract? is-list-contract? (-> contract? boolean?) (λ (c) #f)])
          flat-contract-property?]
@@ -2764,7 +2764,7 @@ returns @racket[#f] but @racket[value-blame] returns @racket[#f].
            (λ (c) (λ (x) #t))]
           [#:late-neg-projection
            late-neg-proj
-           (or/c #f (-> contract? blame? (-> any/c any/c any/c)))
+           (or/c #f (-> contract? (-> blame? (-> any/c any/c any/c))))
            #f]
           [#:val-first-projection 
            val-first-proj
@@ -2791,21 +2791,21 @@ returns @racket[#f] but @racket[value-blame] returns @racket[#f].
           [#:generate
            generate
            (->i ([c contract?])
-                ([generator
-                  (c)
-                  (-> (and/c positive? real?)
-                      (or/c (-> (or/c contract-random-generate-fail? c))
-                            #f))]))
+                [generator
+                 (c)
+                 (-> (and/c positive? real?)
+                     (or/c (-> (or/c contract-random-generate-fail? c))
+                           #f))])
            (λ (c) (λ (fuel) #f))]
           [#:exercise
            exercise
            (->i ([c contract?])
-                ([result
-                  (c)
-                  (-> (and/c positive? real?)
-                      (values
-                       (-> c void?)
-                       (listof contract?)))]))
+                [result
+                 (c)
+                 (-> (and/c positive? real?)
+                     (values
+                      (-> c void?)
+                      (listof contract?)))])
            (λ (c) (λ (fuel) (values void '())))]
           [#:list-contract? is-list-contract? (-> contract? boolean?) (λ (c) #f)])
          chaperone-contract-property?]
@@ -2820,7 +2820,7 @@ returns @racket[#f] but @racket[value-blame] returns @racket[#f].
            (λ (c) (λ (x) #t))]
           [#:late-neg-projection
            late-neg-proj
-           (or/c #f (-> contract? blame? (-> any/c any/c any/c)))
+           (or/c #f (-> contract? (-> blame? (-> any/c any/c any/c))))
            #f]
           [#:val-first-projection 
            val-first-proj
@@ -2847,21 +2847,21 @@ returns @racket[#f] but @racket[value-blame] returns @racket[#f].
           [#:generate
            generate
            (->i ([c contract?])
-                ([generator
-                  (c)
-                  (-> (and/c positive? real?)
-                      (or/c (-> (or/c contract-random-generate-fail? c))
-                            #f))]))
+                [generator
+                 (c)
+                 (-> (and/c positive? real?)
+                     (or/c (-> (or/c contract-random-generate-fail? c))
+                           #f))])
            (λ (c) (λ (fuel) #f))]
           [#:exercise
            exercise
            (->i ([c contract?])
-                ([result
-                  (c)
-                  (-> (and/c positive? real?)
-                      (values
-                       (-> c void?)
-                       (listof contract?)))]))
+                [result
+                 (c)
+                 (-> (and/c positive? real?)
+                     (values
+                      (-> c void?)
+                      (listof contract?)))])
            (λ (c) (λ (fuel) (values void '())))]
           [#:list-contract? is-list-contract? (-> contract? boolean?) (λ (c) #f)])
          contract-property?])]{
@@ -3507,7 +3507,7 @@ parts of the contract system.
                                    [fuel 5 exact-nonnegative-integer?]
                                    [fail (or/c #f (-> any) (-> boolean? any)) #f])
          any/c]{
-Attempts to randomly generate a value which will match the contract. The fuel
+Attempts to randomly generate a value which will match the contract. The @racket[_fuel]
 argument limits how hard the generator tries to generate a value matching the
 contract and is a rough limit of the size of the resulting value.
 
@@ -3527,13 +3527,24 @@ ended up returning @racket[contract-random-generate-fail].
 
 }
 
-@defproc[(contract-exercise [val any/c] ...+) void?]{
+@defproc[(contract-exercise [#:fuel fuel exact-nonnegative-integer? 10]
+                            [#:shuffle? shuffle? any/c #f]
+                            [val any/c] ...+) void?]{
   Attempts to get the @racket[val]s to break their contracts (if any).
                   
   Uses @racket[value-contract] to determine if any of the @racket[val]s have a
   contract and, for those that do, uses information about the contract's shape
   to poke and prod at the value. For example, if the value is function, it will
   use the contract to tell it what arguments to supply to the value.
+
+  The argument @racket[_fuel] determines how hard @racket[contract-exercise]
+  tries to break the values. It controls both the number of exercise iterations
+  and the size of the intermediate values generated during the exercises.
+
+  The argument @racket[_shuffle?] controls whether @racket[contract-exercise]
+  randomizes the exercise order or not. If @racket[_shuffle?] is not @racket[#f],
+  @racket[contract-exercise] would shuffle the order of the contracts in each
+  exercise iteration.
 
  @examples[#:eval (contract-eval) #:once
            (define/contract (returns-false x)
@@ -3548,14 +3559,26 @@ ended up returning @racket[contract-random-generate-fail].
              (code:comment "we're supposed to return a boolean")
              (f 11))
            (eval:error (contract-exercise calls-its-argument-with-eleven))]
+
+ @history[#:changed "7.0.0.18" @elem{Added the @racket[shuffle?] optional argument.}]
 }
 
 @defproc[(contract-random-generate/choose [c contract?] [fuel exact-nonnegative-integer?])
          (or/c #f (-> c))]{
   This function is like @racket[contract-random-generate], but it is intended to
   be used with combinators that generate values based on sub-contracts
-  they have. It cannot be called, except during contract
-  generation. It will never fail, but it might escape back to an enclosing
+  they have. It must be called when @racket[contract-random-generate]
+  (and @racket[contract-exercise]) creates the generators.
+  To be more precise, @racket[contract-random-generate/choose] is available
+  only for the @racket[_generate] and @racket[_exercise] arguments in
+  @racket[build-contract-property], @racket[build-chaperone-contract-property]
+  or @racket[build-flat-contract-property] and only during the dynamic
+  extent of the call to @racket[_generate] (and @racket[_exercise]).
+  That is, after it receives the @racket[_c] and @racket[_fuel] arguments
+  and before it returns the thunk (or the exerciser).
+
+  @racket[contract-random-generate/choose] will never fail,
+  but it might escape back to an enclosing
   call or to the original call to @racket[contract-random-generate].
  
   It chooses one of several possible generation strategies, and thus it may not
