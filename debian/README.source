@@ -6,8 +6,10 @@ Extra details for PPA:
   * follow steps below in README.source for upstream branch
   * merge upstream branch into ppa branch (instead of dfsg, etc)
   * adjust debian/changelog and anything else as required for PPA
-  * use `debuild -S -k'...'` to build the package
-  * use `dput ppa:plt/racket racket_X.Y+ppaZ-XX~ver_source.changes` to upload PPA
+  * use `./debian/rules get-orig-source` as written below for tarball
+  * use `debuild -S -k'...'` to build the package with appropriate PPA key
+  * use `dput ppa:plt/racket racket_X.Y+ppaZ-XX~release_source.changes` to upload PPA
+  * push changes to racket-ppa repo
 
 ##
 
