@@ -3,7 +3,7 @@ Section: lisp
 Priority: optional
 Maintainer: Asumu Takikawa <asumu@racket-lang.org>
 Standards-Version: 4.1.1
-Build-Depends: cdbs, debhelper (>= 10), patchutils, libffi-dev,
+Build-Depends: cdbs, debhelper (>= 9), patchutils, libffi-dev,
  libfreetype6-dev, libjpeg-dev, libpango1.0-dev, libpng-dev, libssl-dev,
  libxaw7-dev, xbitmaps, libxft-dev, libgl1-mesa-dev | libgl-dev,
  libglu1-mesa-dev | libglu-dev, libx11-dev, libxrender-dev, libcairo2-dev,
