@@ -1,3 +1,16 @@
+##
+
+Extra details for PPA:
+
+  * merge upstream (Debian) master into PPA master
+  * follow steps below in README.source for upstream branch
+  * merge upstream branch into ppa branch (instead of dfsg, etc)
+  * adjust debian/changelog and anything else as required for PPA
+  * use `debuild -S -k'...'` to build the package
+  * use `dput ppa:plt/racket racket_X.Y+ppaZ-XX~ver_source.changes` to upload PPA
+
+##
+
 This package should be ready to build when the source package is
 unpackaged via "dpkg-source -x".
 
