@@ -535,14 +535,14 @@
       (send deps-msg set-label
             (cond
               [(equal? 0 (send deps-choice get-selection)) 
-               (format sc-install-pkg-deps-is 
-                       (cadr
-                        (regexp-match #rx"^(.*):" 
-                                      (case (get-deps-selected-type)
-                                        [(fail)
-                                         (string-constant install-pkg-dependencies-fail)]
-                                        [(search-auto)
-                                         (string-constant install-pkg-dependencies-search-auto)]))))]
+               (define str
+                 (case (get-deps-selected-type)
+                   [(fail)
+                    (string-constant install-pkg-dependencies-fail)]
+                   [(search-auto)
+                    (string-constant install-pkg-dependencies-search-auto)]))
+               (define m (regexp-match #rx"^(.*)[：:]" str))
+               (format sc-install-pkg-deps-is (if m (cadr m) str))]
               [else ""])))
     
     (define (get-deps-selected-type)

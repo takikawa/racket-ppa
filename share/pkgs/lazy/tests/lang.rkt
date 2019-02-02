@@ -10,6 +10,7 @@
    (! ((car (list or)) 3 (error "poof"))) => 3
    (! ((car (list and)) (< 2 1) (error "poof"))) => #f
    (!! (let ([x 0]) (set! x 1) (list x))) => '(1) ; implicit begin forces
+   (! (let () (define f 1) ((λ (x) x) f))) => 1
    (! (let ([x 0]) (when (zero? x) (error "poof")) 1)) =error> "poof"
    (! (let ([x 0]) (when (zero? x) (set! x (add1 x)) (set! x (add1 x))) x))
    => 2

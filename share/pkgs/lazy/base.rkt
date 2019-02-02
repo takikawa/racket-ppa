@@ -123,7 +123,8 @@
                 #'(~define ~define-values define-syntax define-syntaxes
                    define-struct struct require provide))])
       (define (definition? stx)
-        (ormap (lambda (id) (free-identifier=? id stx)) ids))
+        (and (identifier? stx)
+             (ormap (lambda (id) (free-identifier=? id stx)) ids)))
       (lambda (stx)
         (syntax-case stx ()
           ;; optimize simple cases

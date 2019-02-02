@@ -370,6 +370,10 @@
 
 (define-for-syntax (validate-clause clause-stx)
   (syntax-case clause-stx ()
+    [(variant (field ...))
+     (plai-syntax-error
+      'type-case clause-stx
+      "this case is missing a body expression")]
     [(variant (field ...) body ...)
      (cond
        [(not (identifier? #'variant))
@@ -382,10 +386,6 @@
               'type-case malformed-field
               "this must be an identifier that names the value of a field"))]
        [else #t])]
-    [(variant (field ...))
-     (plai-syntax-error
-      'type-case clause-stx
-      "this case is missing a body expression")]
     [_
      (plai-syntax-error
       'type-case clause-stx
@@ -404,11 +404,14 @@
   (with-disappeared-uses
   (syntax-case stx (else)
     [(_ type-id test-expr [variant (field ...) case-expr ...] ... [else else-expr ...])
-     ;; Ensure that everything that should be an identifier is an identifier.
+     ;; Ensure that everything that should be an identifier is an identifier
+     ;; and all clauses have bodies.
      (and (identifier? #'type-id)
           (andmap identifier? (syntax->list #'(variant ...)))
           (andmap (λ (stx) (andmap identifier? (syntax->list stx)))
-                  (syntax->list #'((field ...) ...))))
+                  (syntax->list #'((field ...) ...)))
+          (andmap (lambda (stx) (pair? (syntax->list stx)))
+                  (syntax->list #'((case-expr ...) ...))))
      (let* ([info (validate-and-remove-type-symbol
                    #'type-id (syntax-local-value/record #'type-id plai-stx-type?))]
             [type-info (first info)]
@@ -445,11 +448,14 @@
                ...
                [else else-expr ...]))))]
     [(_ type-id test-expr [variant (field ...) case-expr ...] ...)
-     ;; Ensure that everything that should be an identifier is an identifier.
+     ;; Ensure that everything that should be an identifier is an identifier
+     ;; and all clauses have bodies.
      (and (identifier? #'type-id)
           (andmap identifier? (syntax->list #'(variant ...)))
           (andmap (λ (stx) (andmap identifier? (syntax->list stx)))
-                  (syntax->list #'((field ...) ...))))
+                  (syntax->list #'((field ...) ...)))
+          (andmap (lambda (stx) (pair? (syntax->list stx)))
+                  (syntax->list #'((case-expr ...) ...))))
      (let* ([info (validate-and-remove-type-symbol
                    #'type-id (syntax-local-value/record #'type-id plai-stx-type?))]
             [type-info (first info)]

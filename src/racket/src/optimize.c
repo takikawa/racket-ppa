@@ -1,28 +1,3 @@
-/*
-  Racket
-  Copyright (c) 2004-2018 PLT Design Inc.
-  Copyright (c) 1995-2001 Matthew Flatt
-
-    This library is free software; you can redistribute it and/or
-    modify it under the terms of the GNU Library General Public
-    License as published by the Free Software Foundation; either
-    version 2 of the License, or (at your option) any later version.
-
-    This library is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-    Library General Public License for more details.
-
-    You should have received a copy of the GNU Library General Public
-    License along with this library; if not, write to the Free
-    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301 USA.
-
-  libscheme
-  Copyright (c) 1994 Brent Benson
-  All rights reserved.
-*/
-
 /* This file implements bytecode optimization.
 
    See "eval.c" for an overview of compilation passes. */
@@ -3441,7 +3416,7 @@ static Scheme_Object *do_expr_implies_predicate(Scheme_Object *expr, Optimize_In
           || SAME_OBJ(app->rator, scheme_unsafe_cdr_proc)) {
         Scheme_Object *p;
         p = do_expr_implies_predicate(app->rand, info, NULL, fuel-1, ignore_vars);
-        if (SAME_OBJ(p, scheme_list_pair_p_proc))
+        if (predicate_implies(p, scheme_list_p_proc))
           return scheme_list_p_proc;
       }
 
@@ -6538,6 +6513,8 @@ with_immed_mark_optimize(Scheme_Object *data, Optimize_Info *info, int context)
   wcm->key = key;
   wcm->val = val;
   SCHEME_CDR(wcm->body) = body;
+
+  info->preserves_marks = 0;
 
   return data;
 }

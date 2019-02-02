@@ -91,8 +91,11 @@
 
 ;; language : symbol
 (define language
-  (with-handlers ([exn:fail? (lambda (_) (default-language))])
-    (get-preference 'plt:human-language (lambda () (default-language)))))
+  (or (let ([env-lang (getenv "PLTSTRINGCONSTANTSLANG")])
+        (and (string? env-lang)
+             (string->symbol env-lang)))
+      (with-handlers ([exn:fail? (lambda (_) (default-language))])
+        (get-preference 'plt:human-language (lambda () (default-language))))))
 
 (define the-sc
   (or (for/or ([sc (in-list available-string-constant-sets)])

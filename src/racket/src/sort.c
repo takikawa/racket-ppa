@@ -1,28 +1,3 @@
-/*
-  Racket
-  Copyright (c) 2004-2016 PLT Design Inc.
-  Copyright (c) 1995-2001 Matthew Flatt
-
-    This library is free software; you can redistribute it and/or
-    modify it under the terms of the GNU Library General Public
-    License as published by the Free Software Foundation; either
-    version 2 of the License, or (at your option) any later version.
-
-    This library is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-    Library General Public License for more details.
-
-    You should have received a copy of the GNU Library General Public
-    License along with this library; if not, write to the Free
-    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301 USA.
-
-  libscheme
-  Copyright (c) 1994 Brent Benson
-  All rights reserved.
-*/
-
 #include "schpriv.h"
 
 #ifdef MZ_XFORM
@@ -33,14 +8,49 @@ START_XFORM_SKIP;
 END_XFORM_SKIP;
 #endif
 
-static int compare_syms(const void *_a, const void *_b)
-{
-  Scheme_Object *a = *(Scheme_Object **)_a;
-  Scheme_Object *b = *(Scheme_Object **)_b;
-  intptr_t l = SCHEME_SYM_LEN(a), i;
+enum {
+      sort_major_unknown,
+      sort_major_boolean,
+      sort_major_char,
+      sort_major_real,
+      sort_major_symbol,
+      sort_major_keyword,
+      sort_major_string,
+      sort_major_bytes,
+      sort_major_null,
+      sort_major_void,
+      sort_major_eof,
+};
 
-  MZ_ASSERT(SCHEME_SYMBOLP(a));
-  MZ_ASSERT(SCHEME_SYMBOLP(b));
+static int sort_major(Scheme_Object *v)
+{
+  if (SAME_OBJ(v, scheme_true) || SCHEME_FALSEP(v))
+    return sort_major_boolean;
+  else if (SCHEME_CHARP(v))
+    return sort_major_char;
+  else if (SCHEME_REALP(v))
+    return sort_major_real;
+  else if (SCHEME_SYMBOLP(v))
+    return sort_major_symbol;
+  else if (SCHEME_KEYWORDP(v))
+    return sort_major_keyword;
+  else if (SCHEME_CHAR_STRINGP(v))
+    return sort_major_string;
+  else if (SCHEME_BYTE_STRINGP(v))
+    return sort_major_bytes;
+  else if (SCHEME_NULLP(v))
+    return sort_major_null;
+  else if (SCHEME_VOIDP(v))
+    return sort_major_void;
+  else if (SCHEME_EOFP(v))
+    return sort_major_eof;
+  else
+    return sort_major_unknown;
+}
+
+static int compare_sym_likes(Scheme_Object *a, Scheme_Object *b)
+{
+  intptr_t l = SCHEME_SYM_LEN(a), i;
 
   if (SCHEME_SYM_LEN(b) < l)
     l = SCHEME_SYM_LEN(b);
@@ -53,22 +63,42 @@ static int compare_syms(const void *_a, const void *_b)
   return SCHEME_SYM_LEN(a) - SCHEME_SYM_LEN(b);
 }
 
-static void sort_symbol_array(Scheme_Object **a, intptr_t count)
+static int compare_syms(Scheme_Object *a, Scheme_Object *b)
 {
-  my_qsort(a, count, sizeof(Scheme_Object *), compare_syms);
+  MZ_ASSERT(SCHEME_SYMBOLP(a));
+  MZ_ASSERT(SCHEME_SYMBOLP(b));
+
+  /* Sort uninterned before unreadable before interned.
+     There's no guarantee that uninterned symbols are
+     usefully sorted, but try anyway. */
+  if (SCHEME_SYM_UNINTERNEDP(a)) {
+    if (!SCHEME_SYM_UNINTERNEDP(b))
+      return -1;
+  } else {
+    if (SCHEME_SYM_UNINTERNEDP(b))
+      return 1;
+    if (SCHEME_SYM_PARALLELP(a)) {
+      if (!SCHEME_SYM_PARALLELP(b))
+        return -1;
+    } else {
+      if (SCHEME_SYM_PARALLELP(b))
+        return 1;
+    }
+  }
+
+  return compare_sym_likes(a, b);
 }
 
-static int compare_nums(const void *_a, const void *_b)
-/* also allow #fs */
+static int compare_keywords(Scheme_Object *a, Scheme_Object *b)
 {
-  Scheme_Object *a = *(Scheme_Object **)_a;
-  Scheme_Object *b = *(Scheme_Object **)_b;
+  MZ_ASSERT(SCHEME_KEYWORDP(a));
+  MZ_ASSERT(SCHEME_KEYWORDP(b));
 
-  if (SCHEME_FALSEP(a))
-    return -1;
-  else if (SCHEME_FALSEP(b))
-    return 1;
+  return compare_sym_likes(a, b);
+}
 
+static int compare_reals(Scheme_Object *a, Scheme_Object *b)
+{
   MZ_ASSERT(SCHEME_REALP(a));
   MZ_ASSERT(SCHEME_REALP(b));
 
@@ -80,10 +110,50 @@ static int compare_nums(const void *_a, const void *_b)
     return 0;
 }
 
-static void sort_number_array(Scheme_Object **a, intptr_t count)
+int compare_sortable(const void *_a, const void *_b)
 {
-  my_qsort(a, count, sizeof(Scheme_Object *), compare_nums);
+  Scheme_Object *a = *(Scheme_Object **)_a;
+  Scheme_Object *b = *(Scheme_Object **)_b;
+  int am, bm;
+
+  am = sort_major(a);
+  bm = sort_major(b);
+
+  if (am != bm)
+    return am - bm;
+  else {
+    switch (am) {
+    case sort_major_boolean:
+      if (SAME_OBJ(a, b))
+        return 0;
+      else if (SCHEME_FALSEP(a))
+        return -1;
+      else
+        return 1;
+    case sort_major_char:
+      return SCHEME_CHAR_VAL(a) - SCHEME_CHAR_VAL(b);
+    case sort_major_real:
+      return compare_reals(a, b);
+    case sort_major_symbol:
+      return compare_syms(a, b);
+    case sort_major_keyword:
+      return compare_keywords(a, b);
+    case sort_major_string:
+      return scheme_string_compare(a, b);
+    case sort_major_bytes:
+      return scheme_bytes_compare(a, b);
+    case sort_major_null:
+    case sort_major_void:
+    case sort_major_eof:
+      /* There can be only one. */
+      return 0;
+    }
+  }
+
+  return 0;
 }
+
+/**************************************************************/
 
 static int compare_vars_at_resolve(const void *_a, const void *_b)
 {
@@ -99,22 +169,18 @@ void scheme_sort_resolve_ir_local_array(Scheme_IR_Local **a, intptr_t count)
 
 /**************************************************************/
 
-static int all_symbols(Scheme_Object **a, int c)
+static int all_sortable(Scheme_Object **a, int c)
 {
   while (c--) {
-    if (!SCHEME_SYMBOLP(a[c]))
+    if (sort_major(a[c]) == sort_major_unknown)
       return 0;
   }
   return 1;
 }
 
-static int all_reals(Scheme_Object **a, int c)
+static void sort_sortable_array(Scheme_Object **a, intptr_t count)
 {
-  while (c--) {
-    if (!SCHEME_REALP(a[c]))
-      return 0;
-  }
-  return 1;
+  my_qsort(a, count, sizeof(Scheme_Object *), compare_sortable);
 }
 
 Scheme_Object **scheme_extract_sorted_keys(Scheme_Object *tree)
@@ -159,11 +225,10 @@ Scheme_Object **scheme_extract_sorted_keys(Scheme_Object *tree)
     MZ_ASSERT(j == count);
   }
 
-  if (SCHEME_SYMBOLP(a[0]) && all_symbols(a, count))
-    sort_symbol_array(a, count);
-  else if (all_reals(a, count))
-    sort_number_array(a, count);
-  else
+  if (all_sortable(a, count)) {
+    sort_sortable_array(a, count);
+    return a;
+  } else
     return NULL;
 
   return a;

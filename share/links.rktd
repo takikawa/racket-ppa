@@ -124,6 +124,7 @@
  (root "pkgs/pict-snip-lib")
  (root "pkgs/option-contract-lib")
  (root "pkgs/syntax-color-lib")
+ ("quickscript" "pkgs/quickscript")
  (root "pkgs/mzscheme-doc")
  (root "pkgs/net-doc")
  (root "pkgs/planet-doc")

@@ -1,4 +1,4 @@
-;; Bulgarian translation of Racket string constants file, version: 1.19
+;; Bulgarian translation of Racket string constants file, version: 1.20
 ;; This file is distributed under the same terms as Racket
 ;; Copyright on translation: Alexander Shopov <ash@kambanaria.org>, 2015, 2016, 2017, 2018.
 
@@ -1621,10 +1621,18 @@
  ; printed specially in DrRacket.
  (test-engine-check-encountered-error
    "check-expect получи грешката „~F“ вместо очакваната стойност ~n   :: ~a")
+ (test-engine-check-error-cause
+   "причинена от израз")
  (test-engine-actual-value-differs-error
    "Получената стойност „~F“ се различава от очакваната „~F“.")
+ ;; need to translate only one of these next two
+ ;; (test-engine-actual-value-not-within-error or
+ ;;  test-engine-actual-value-not-within-error/alt-word-order)
+ ;; if both are present, test-engine-actual-value-not-within-error is used
  (test-engine-actual-value-not-within-error
    "Получената стойност „~F“ се различава с повече от „~v“ от очакваната „~F“.")
+ ;; (test-engine-actual-value-not-within-error/alt-order
+ ;;  "Получената стойност „~F“ не е достатъчно близо до очакваната „~F“ — разликата трябваше да е не по-голяма от „~v“.")
  (test-engine-encountered-error-error
    "check-error получи грешка „~a“, която е различна от очакваната.~n   :: ~a")
  (test-engine-expected-error-error

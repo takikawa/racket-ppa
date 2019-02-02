@@ -35,6 +35,7 @@
           -MPairTop
           -BoxTop
           -ChannelTop
+          -SequenceTop
           -ThreadCellTop
           make-Ephemeron
           make-CustodianBox
@@ -1057,7 +1058,7 @@
 [make-weak-custom-hash (->opt (-> Univ Univ Univ) (-> Univ -Nat) [(-> Univ -Nat)] Univ)]
 
 ;; Section 4.14 (Sequences and Streams)
-[sequence? (make-pred-ty (-seq Univ))]
+[sequence? (make-pred-ty -SequenceTop)]
 [in-sequences
  (-poly (a) (->* (list) (-seq a) (-seq a)))]
 [in-cycle
@@ -1092,7 +1093,7 @@
 ;; Doesn't render nicely (but seems to work fine):
 [empty-sequence (-poly (a) (-seq a))]
 [sequence->list (-poly (a) ((-seq a) . -> . (-lst a)))]
-[sequence-length (-poly (a) ((-seq a) . -> . -Nat))]
+[sequence-length (-SequenceTop . -> . -Nat)]
 [sequence-ref (-poly (a) ((-seq a) -Integer . -> . a))]
 [sequence-tail (-poly (a) ((-seq a) -Integer . -> . (-seq a)))]
 [sequence-append (-poly (a) (->* (list) (-seq a) (-seq a)))]
@@ -1114,26 +1115,26 @@
 [set (-poly (e) (->* (list) e (-set e)))]
 [seteqv (-poly (e) (->* (list) e (-set e)))]
 [seteq (-poly (e) (->* (list) e (-set e)))]
-[set-empty? (-poly (e) (-> (-set e) B))]
-[set-count (-poly (e) (-> (-set e) -Index))]
-[set-member? (-poly (e) (-> (-set e) e B))]
-[set-first (-poly (e) (-> (-set e) e))]
-[set-rest (-poly (e) (-> (-set e) (-set e)))]
-[set-add (-poly (e) (-> (-set e) e (-set e)))]
-[set-remove (-poly (e) (-> (-set e) Univ (-set e)))]
+[set-empty? (-poly (e) (-> (-list-or-set e) B))]
+[set-count (-poly (e) (-> (-list-or-set e) -Index))]
+[set-member? (-poly (e) (-> (-list-or-set e) e B))]
+[set-first (-poly (e) (-> (-list-or-set e) e))]
+[set-rest (-poly (e) (set-abs -set (-> (-set e) (-set e))))]
+[set-add (-poly (e) (set-abs -set (-> (-set e) e (-set e))))]
+[set-remove (-poly (e) (set-abs -set (-> (-set e) Univ (-set e))))]
 
-[set-union (-poly (e) (->* (list (-set e)) (-set e) (-set e)))]
-[set-intersect (-poly (a b) (->* (list (-set a)) (-set b) (-set a)))]
-[set-subtract (-poly (a b) (->* (list (-set a)) (-set b) (-set a)))]
-[set-symmetric-difference (-poly (e) (->* (list (-set e)) (-set e) (-set e)))]
+[set-union (-poly (e) (set-abs -set (->* (list (-set e)) (-set e) (-set e))))]
+[set-intersect (-poly (a b) (set-abs -set (->* (list (-set a)) (-set b) (-set a))))]
+[set-subtract (-poly (a b) (set-abs -set (->* (list (-set a)) (-set b) (-set a))))]
+[set-symmetric-difference (-poly (e) (set-abs -set (->* (list (-set e)) (-set e) (-set e))))]
 
-[set=? (-poly (a b) (-> (-set a) (-set b) B))]
+[set=? (-poly (a b) (set-abs -set (-> (-set a) (-set b) B)))]
 
-[subset? (-poly (e) (-> (-set e) (-set e) B))]
-[proper-subset? (-poly (e) (-> (-set e) (-set e) B))]
-[set-map (-poly (e b) (-> (-set e) (-> e b) (-lst b)))]
-[set-for-each (-poly (e b) (-> (-set e) (-> e b) -Void))]
-[generic-set? (asym-pred Univ B (-PS -tt (-not-type 0 (-set Univ))))]
+[subset? (-poly (e) (set-abs -set (-> (-set e) (-set e) B)))]
+[proper-subset? (-poly (e) (set-abs -set (-> (-set e) (-set e) B)))]
+[set-map (-poly (e b) (-> (-list-or-set e) (-> e b) (-lst b)))]
+[set-for-each (-poly (e b) (-> (-list-or-set e) (-> e b) -Void))]
+[generic-set? (asym-pred Univ B (-PS -tt (-not-type 0 (-list-or-set Univ))))]
 [set? (make-pred-ty (-set Univ))]
 [set-equal? (-poly (e) (-> (-set e) B))]
 [set-eqv? (-poly (e) (-> (-set e) B))]
@@ -2299,6 +2300,11 @@
 ;; Section 13.9
 
 ;; Section 13.10
+
+;; Section 13.11
+[sha1-bytes (->opt (Un -Bytes -Input-Port) [-Nat (Un -Nat (-val #f))] -Bytes)]
+[sha224-bytes (->opt (Un -Bytes -Input-Port) [-Nat (Un -Nat (-val #f))] -Bytes)]
+[sha256-bytes (->opt (Un -Bytes -Input-Port) [-Nat (Un -Nat (-val #f))] -Bytes)]
 
 ;; Section 14.1 (Namespaces)
 [namespace? (make-pred-ty -Namespace)]
