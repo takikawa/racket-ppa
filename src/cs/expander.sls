@@ -38,23 +38,32 @@
   ;; the build incompatible with previously generated ".zo" files.
   (define compile-as-independent? #f)
 
+  (define (fasl->s-exp/intern s)
+    (1/fasl->s-exp/intern s))
+
   ;; The expander needs various tables to set up primitive modules, and
   ;; the `primitive-table` function is the bridge between worlds
 
-  (define (primitive-table key)
-    (case key
-      [(|#%linklet|) linklet-table]
-      [(|#%kernel|) kernel-table]
-      [(|#%read|) (make-hasheq)]
-      [(|#%paramz|) paramz-table]
-      [(|#%unsafe|) unsafe-table]
-      [(|#%foreign|) foreign-table]
-      [(|#%futures|) futures-table]
-      [(|#%place|) place-table]
-      [(|#%flfxnum|) flfxnum-table]
-      [(|#%extfl|) extfl-table]
-      [(|#%network|) network-table]
-      [else #f]))
+  (define user-installed-tables (make-hasheq))
+
+  (define primitive-table
+    (case-lambda
+     [(key)
+      (case key
+        [(|#%linklet|) linklet-table]
+        [(|#%kernel|) kernel-table]
+        [(|#%read|) (make-hasheq)]
+        [(|#%paramz|) paramz-table]
+        [(|#%unsafe|) unsafe-table]
+        [(|#%foreign|) foreign-table]
+        [(|#%futures|) futures-table]
+        [(|#%place|) place-table]
+        [(|#%flfxnum|) flfxnum-table]
+        [(|#%extfl|) extfl-table]
+        [(|#%network|) network-table]
+        [else (hash-ref user-installed-tables key #f)])]
+     [(key table)
+      (hash-set! user-installed-tables key table)]))
 
   (define-syntax define-primitive-table
     (syntax-rules ()
@@ -172,6 +181,9 @@
                [(_ name val) #`(let ([name val]) name)])))
     (eval `(define raise-binding-result-arity-error ',raise-binding-result-arity-error)))
 
+  ;; Special "primitive" for syntax-data deserialization:
+  (eval `(define fasl->s-exp/intern ',fasl->s-exp/intern))
+
   ;; For interpretation of the outer shell of a linklet:
   (install-linklet-primitive-tables! kernel-table
                                      unsafe-table
@@ -185,7 +197,7 @@
                                      linklet-table
                                      internal-table
                                      schemify-table)
-  
+
   ;; ----------------------------------------
 
   ;; `install-reader!` is from the `io` library, where the

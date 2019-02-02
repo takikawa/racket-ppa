@@ -48,6 +48,8 @@
                                #:filter-with (-> ua-cookie? boolean?))
                               (or/c bytes? #f))]
 
+          [cookie-expired? (->* (ua-cookie?) ((and/c integer? positive?))
+                                boolean?)]
           [current-cookie-jar (parameter/c (is-a?/c cookie-jar<%>))]
           [list-cookie-jar% 
            (class/c [save-cookies! (->*m ((listof ua-cookie?)) (boolean?) void?)]

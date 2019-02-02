@@ -1,17 +1,3 @@
-/*
-  Racket
-  Copyright (c) 2004-2018 PLT Design Inc.
-  Copyright (c) 1995-2001 Matthew Flatt
-  All rights reserved.
-
-  Please see the full copyright in the documentation.
-
-  Originally based on:
-  libscheme
-  Copyright (c) 1994 Brent Benson
-  All rights reserved.
-*/
-
 #ifndef SCHEME_H
 #define SCHEME_H
 
@@ -1357,6 +1343,7 @@ enum {
   MZCONFIG_COMPILE_MODULE_CONSTS,
   MZCONFIG_USE_JIT,
   MZCONFIG_DISALLOW_INLINE,
+  MZCONFIG_COMPILE_TARGET_MACHINE,
 
   MZCONFIG_CUSTODIAN,
   MZCONFIG_INSPECTOR,
@@ -1835,6 +1822,7 @@ MZ_EXTERN int scheme_hash_percent_syntax_only; /* Defaults to 0 */
 MZ_EXTERN int scheme_hash_percent_globals_only; /* Defaults to 0 */
 MZ_EXTERN int scheme_binary_mode_stdio; /* Windows-specific; Defaults to 0 */
 MZ_EXTERN int scheme_startup_use_jit; /* Defaults to 1 */
+MZ_EXTERN int scheme_startup_compile_machine_independent; /* Defaults to 0 */
 MZ_EXTERN int scheme_ignore_user_paths; /* Defaults to 0 */
 MZ_EXTERN int scheme_ignore_link_paths; /* Defaults to 0 */
 
@@ -1842,6 +1830,7 @@ MZ_EXTERN void scheme_set_case_sensitive(int);
 MZ_EXTERN void scheme_set_allow_set_undefined(int);
 MZ_EXTERN void scheme_set_binary_mode_stdio(int);
 MZ_EXTERN void scheme_set_startup_use_jit(int);
+MZ_EXTERN void scheme_set_startup_compile_machine_independent(int);
 MZ_EXTERN void scheme_set_startup_load_on_demand(int);
 MZ_EXTERN void scheme_set_ignore_user_paths(int);
 MZ_EXTERN void scheme_set_ignore_link_paths(int);
@@ -1883,6 +1872,7 @@ MZ_EXTERN void scheme_set_console_printf(scheme_console_printf_t p);
 typedef void (*scheme_console_output_t)(char *str, intptr_t len);
 MZ_EXTERN scheme_console_output_t scheme_console_output;
 MZ_EXTERN void scheme_set_console_output(scheme_console_output_t p);
+MZ_EXTERN void scheme_ensure_console_ready();
 MZ_EXTERN void (*scheme_sleep)(float seconds, void *fds);
 MZ_EXTERN void (*scheme_notify_multithread)(int on);
 MZ_EXTERN void (*scheme_wakeup_on_input)(void *fds);

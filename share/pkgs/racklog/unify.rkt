@@ -45,10 +45,11 @@
 (require racket/sequence)
 (define (in-compound-struct s)
   (define-values (stype _) (struct-info s))
-  (define-values (name init-field-cnt auto-field-cnt accessor-proc mutator-proc immutable-k-list super-type skipped?) (struct-type-info stype))
-  (define total-field-cnt (+ init-field-cnt)
-    #;(compound-struct-type-field-cnt stype))
-  (sequence-map (curry accessor-proc s) (in-range total-field-cnt)))
+  (let loop ([stype stype])
+    (define-values (name init-field-cnt auto-field-cnt accessor-proc mutator-proc immutable-k-list super-type skipped?) (struct-type-info stype))
+    (sequence-append
+     (if super-type (loop super-type) '())
+     (sequence-map (curry accessor-proc s) (in-range init-field-cnt)))))
 
 (define (compound-struct-map f s)
   (define-values (stype _) (struct-info s))
@@ -63,17 +64,31 @@
   (for/and ([e (in-compound-struct s)])
     (f e)))
 (define (compound-struct-same? x y)
-  (define-values (xtype _) (struct-info x))
-  ((struct-type-make-predicate xtype) y))  
+  (define-values (xtype xskipped?) (struct-info x))
+  (define-values (ytype yskipped?) (struct-info y))
+  (and ((struct-type-make-predicate xtype) y)
+       ((struct-type-make-predicate ytype) x)))
 (define (compound-struct-cmp x y =)
   (and (compound-struct-same? x y)
        (for/and ([ex (in-compound-struct x)]
                  [ey (in-compound-struct y)])
          (= ex ey))))
 
-(define-struct logic-var (val) #:mutable)
+(define-struct logic-var
+  (val)
+  #:mutable
+  #:property prop:procedure
+  (lambda (v . args)
+    ; Coerce (v arg ...) to a goal, equivalent to %fail if v is not a procedure of the correct arity
+    (lambda (fk)
+      (let ([pred (if (unbound-logic-var? v)
+                      (fk 'fail)
+                      (logic-var-val* v))])
+        (if (and (procedure? pred) (procedure-arity-includes? pred (length args)))
+            ((apply pred args) fk)
+            (fk 'fail))))))
 
-(define *unbound* '_)
+(define *unbound* (string->uninterned-symbol "_"))
 
 ;;unbound refs point to themselves
 (define (make-ref [val *unbound*])
@@ -141,8 +156,9 @@
   (uni-match 
    v
    [(? logic-var? s)
-    (if (frozen-logic-var? s) s
-        (logic-var-val* (logic-var-val s)))]
+    (cond [(unbound-logic-var? s) '_]
+          [(frozen-logic-var? s) s]
+          [else (logic-var-val* (logic-var-val s))])]
    [(cons l r)
     (cons (logic-var-val* l) (logic-var-val* r))]
    [(mcons l r)
@@ -440,9 +456,6 @@
     (define (cleanup-n-fail s)
       (cleanup s)
       (fk 'fail))
-    (define (unwind-trail s)
-      (cleanup s)
-      (fk 'unwind-trail))
     (define (unify1 t1 t2 s)
       (cond [(eqv? t1 t2) s]
             [(logic-var? t1)
@@ -505,8 +518,10 @@
     (values
      (λ () (cleanup s))
      (lambda (d)
-       ((if (eq? d 'unwind-trail) unwind-trail cleanup-n-fail)
-        s)))))
+       (cleanup s)
+       (if (procedure? d)
+           (unless (equal? fk d) (fk d)) ; unwind
+           (fk 'fail))))))
 
 (define-syntax-rule (or* x f ...)
   (or (f x) ...))
@@ -515,7 +530,10 @@
   (not (compound-struct? v)))
 (define (compound-struct? v)
   (let-values ([(stype skipped?) (struct-info v)])
-    (and stype (not skipped?))))
+    (and stype (not skipped?)
+         (let loop ([stype stype])
+           (define-values (name init-field-cnt auto-field-cnt accessor-proc mutator-proc immutable-k-list super-type skipped?) (struct-type-info stype))
+           (and (not skipped?) (or (not super-type) (loop super-type)))))))
 
 (define (atom? x)
   (or* x boolean? number? string? bytes? char? symbol?
