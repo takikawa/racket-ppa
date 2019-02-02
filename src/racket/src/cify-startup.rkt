@@ -64,7 +64,7 @@
 
 (printf "Serializable...\n")
 (define-values (bodys/constants-lifted lifted-constants)
-  (time (convert-for-serialize l #t)))
+  (time (convert-for-serialize l #t #t)))
 
 ;; Startup code reuses names to keep it compact; make
 ;; te names unique again
@@ -78,6 +78,8 @@
                   ;; for cify:
                   #t
                   ;; unsafe mode:
+                  #t
+                  ;; no prompts:
                   #t)))
 
 (printf "Lift...\n")

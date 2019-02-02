@@ -588,8 +588,14 @@
            [(stx-null? (syntax body))
             ;; It's a null:
             expr]
-           ;; check for functions that are known to always succeed,
-           ;; in which case we can skip the wrapper:
+           ;; Wrong idea:
+           ;;  check for functions that are known to always succeed,
+           ;;  in which case we can skip the wrapper:
+           ;; Why it's wrong:
+           ;;  although these functions always succeed, the argument
+           ;;  expressions may not, and we want to include this call
+           ;;  in the stack trace if the argument goes wrong
+           #;
            [(syntax-case* expr (void cons mcons list list* vector box
                                      vector-immutable)
                           (lambda (a b)

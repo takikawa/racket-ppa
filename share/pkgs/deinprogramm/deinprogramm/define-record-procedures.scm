@@ -217,7 +217,7 @@
 						      (delay (arbitrary-one-of equal? (real-constructor))))
 						     sig))
 						((andmap values maybe-field-signatures) ; monomorphic
-						 #'(let* ((sigs (list field-signature ...))
+						 #'(let* ((sigs (list (signature field-signature) ...))
 							  (sig
 							   (make-lazy-wrap-signature '?type-name #t
 										     type-descriptor raw-predicate
@@ -353,6 +353,12 @@
     (syntax-case x ()
       ((_ ?type-name
           ?constructor
+          (?field-spec ...))
+       (syntax
+	(define-record-procedures ?type-name ?constructor dummy-predicate (?field-spec ...))))
+      
+      ((_ ?type-name
+          ?constructor
           ?predicate
           (?field-spec ...))
 
@@ -393,31 +399,31 @@
               ?predicate
               field-specs)))))
 
-       ((_ ?type-name
-           ?constructor
-           ?predicate
-           rest)
-        (raise-syntax-error 
-         #f 
-         "Der vierte Operand ist keine Liste von Selektoren" (syntax rest)))
-       ((_ ?type-name
-           ?constructor
-           ?predicate
-           rest1 rest2 ... (accessor ...))
-        (raise-syntax-error 
-         #f 
-         "Vor den Selektoren steht eine Form zuviel" #'rest1))
-       ((_ ?type-name
-           ?constructor
-           ?predicate
-           rest1 rest2 ...)
-        (raise-syntax-error 
-         #f 
-         "Zu viele Operanden für define-record-procedures" x))
-       ((_ arg1 ...)
-        (raise-syntax-error 
-         #f 
-         "Zu wenige Operanden für define-record-procedures" x))
+      ((_ ?type-name
+          ?constructor
+          ?predicate
+          rest)
+       (raise-syntax-error 
+        #f 
+        "Der vierte Operand ist keine Liste von Selektoren" (syntax rest)))
+      ((_ ?type-name
+          ?constructor
+          ?predicate
+          rest1 rest2 ... (accessor ...))
+       (raise-syntax-error 
+        #f 
+        "Vor den Selektoren steht eine Form zuviel" #'rest1))
+      ((_ ?type-name
+          ?constructor
+          ?predicate
+          rest1 rest2 ...)
+       (raise-syntax-error 
+        #f 
+        "Zu viele Operanden für define-record-procedures" x))
+      ((_ arg1 ...)
+       (raise-syntax-error 
+        #f 
+        "Zu wenige Operanden für define-record-procedures" x))
       )))
 
 (define-syntax define-record-procedures-parametric

@@ -94,7 +94,7 @@
       [else (values knowns #f)])]
     [`(define-values (,prop:s ,s? ,s-ref)
        (make-struct-type-property ,_ . ,rest))
-     (define type (gensym (symbol->string prop:s)))
+     (define type (gensym (symbol->string (unwrap prop:s))))
      (values
       (let* ([knowns (hash-set knowns (unwrap s-ref) (known-accessor 2 type))]
              [knowns (hash-set knowns (unwrap s?) (known-predicate 2 type))])
@@ -106,4 +106,22 @@
           (hash-set knowns (unwrap prop:s) (known-struct-type-property/immediate-guard))]
          [else knowns]))
       #f)]
+    [`(define-values ,ids ,rhs)
+     (let loop ([rhs rhs])
+       (match rhs
+         [`(let-values () ,rhs) (loop rhs)]
+         [`(values ,rhss ...)
+          (cond
+            [(equal? (length ids) (length rhss))
+             (values
+              (for/fold ([knowns knowns]) ([id (in-list ids)]
+                                           [rhs (in-list rhss)])
+                (define-values (new-knowns info)
+                  (find-definitions `(define-values (,id) ,rhs)
+                                    prim-knowns knowns imports mutated unsafe-mode?
+                                    #:optimize? optimize?))
+                new-knowns)
+              #f)]
+            [else (values knowns #f)])]
+         [`,_  (values knowns #f)]))]
     [`,_ (values knowns #f)]))

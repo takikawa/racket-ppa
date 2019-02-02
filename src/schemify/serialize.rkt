@@ -1,6 +1,7 @@
 #lang racket/base
 (require racket/extflonum
          "match.rkt"
+         "wrap.rkt"
          "quoted.rkt")
 
 (provide convert-for-serialize)
@@ -15,7 +16,7 @@
 ;; reference. This lifting can interefere with optimizations, so only
 ;; lift as a last resort.
 
-(define (convert-for-serialize bodys for-cify?)
+(define (convert-for-serialize bodys for-cify? datum-intern?)
   (define lifted-eq-constants (make-hasheq))
   (define lifted-equal-constants (make-hash))
   (define lift-bindings null)
@@ -29,53 +30,56 @@
   (define new-bodys
     (for/list ([v (in-list bodys)])
       (cond
-        [(convert-any? v for-cify?)
+        [(convert-any? v for-cify? datum-intern?)
          (define (convert v)
-           (match v
-             [`(quote ,q)
-              (cond
-                [(lift-quoted? q for-cify?)
-                 (make-construct q add-lifted lifted-eq-constants lifted-equal-constants for-cify?)]
-                [else v])]
-             [`(lambda ,formals ,body ...)
-              `(lambda ,formals ,@(convert-function-body body))]
-             [`(case-lambda [,formalss ,bodys ...] ...)
-              `(case-lambda ,@(for/list ([formals (in-list formalss)]
-                                         [body (in-list bodys)])
-                                `[,formals ,@(convert-function-body body)]))]
-             [`(define-values ,ids ,rhs)
-              `(define-values ,ids ,(convert rhs))]
-             [`(let-values ([,idss ,rhss] ...) ,bodys ...)
-              `(let-values ,(for/list ([ids (in-list idss)]
-                                       [rhs (in-list rhss)])
-                              `[,ids ,(convert rhs)])
-                 ,@(convert-body bodys))]
-             [`(letrec-values ([,idss ,rhss] ...) ,bodys ...)
-              `(letrec-values ,(for/list ([ids (in-list idss)]
-                                          [rhs (in-list rhss)])
-                                 `[,ids ,(convert rhs)])
-                 ,@(convert-body bodys))]
-             [`(if ,tst ,thn ,els)
-              `(if ,(convert tst) ,(convert thn) ,(convert els))]
-             [`(with-continuation-mark ,key ,val ,body)
-              `(with-continuation-mark ,(convert key) ,(convert val) ,(convert body))]
-             [`(begin ,exps ...)
-              `(begin . ,(convert-body exps))]
-             [`(begin0 ,exps ...)
-              `(begin0 . ,(convert-body exps))]
-             [`(set! ,id ,rhs)
-              `(set! ,id ,(convert rhs))]
-             [`(#%variable-reference) v]
-             [`(#%variable-reference ,_) v]
-             [`(,rator ,exps ...)
-              `(,(convert rator) ,@(convert-body exps))]
-             [`,_
-              (cond
-                [(and for-cify?
-                      (not (symbol? v))
-                      (lift-quoted? v for-cify?))
-                 (convert `(quote ,v))]
-                [else v])]))
+           (reannotate
+            v
+            (match v
+              [`(quote ,q)
+               (cond
+                 [(lift-quoted? q for-cify? datum-intern?)
+                  (make-construct q add-lifted lifted-eq-constants lifted-equal-constants
+                                  for-cify? datum-intern?)]
+                 [else v])]
+              [`(lambda ,formals ,body ...)
+               `(lambda ,formals ,@(convert-function-body body))]
+              [`(case-lambda [,formalss ,bodys ...] ...)
+               `(case-lambda ,@(for/list ([formals (in-list formalss)]
+                                          [body (in-list bodys)])
+                                 `[,formals ,@(convert-function-body body)]))]
+              [`(define-values ,ids ,rhs)
+               `(define-values ,ids ,(convert rhs))]
+              [`(let-values ([,idss ,rhss] ...) ,bodys ...)
+               `(let-values ,(for/list ([ids (in-list idss)]
+                                        [rhs (in-list rhss)])
+                               `[,ids ,(convert rhs)])
+                  ,@(convert-body bodys))]
+              [`(letrec-values ([,idss ,rhss] ...) ,bodys ...)
+               `(letrec-values ,(for/list ([ids (in-list idss)]
+                                           [rhs (in-list rhss)])
+                                  `[,ids ,(convert rhs)])
+                  ,@(convert-body bodys))]
+              [`(if ,tst ,thn ,els)
+               `(if ,(convert tst) ,(convert thn) ,(convert els))]
+              [`(with-continuation-mark ,key ,val ,body)
+               `(with-continuation-mark ,(convert key) ,(convert val) ,(convert body))]
+              [`(begin ,exps ...)
+               `(begin . ,(convert-body exps))]
+              [`(begin0 ,exps ...)
+               `(begin0 . ,(convert-body exps))]
+              [`(set! ,id ,rhs)
+               `(set! ,id ,(convert rhs))]
+              [`(#%variable-reference) v]
+              [`(#%variable-reference ,_) v]
+              [`(,rator ,exps ...)
+               `(,(convert rator) ,@(convert-body exps))]
+              [`,_
+               (cond
+                 [(and for-cify?
+                       (not (symbol? v))
+                       (lift-quoted? v for-cify? datum-intern?))
+                  (convert `(quote ,v))]
+                 [else v])])))
          (define (convert-body body)
            (for/list ([e (in-list body)])
              (convert e)))
@@ -94,10 +98,10 @@
           (reverse lift-bindings)))
 
 ;; v is a form or a list of forms
-(define (convert-any? v for-cify?)
+(define (convert-any? v for-cify? datum-intern?)
   (let convert-any? ([v v])
     (match v
-      [`(quote ,q) (lift-quoted? q for-cify?)]
+      [`(quote ,q) (lift-quoted? q for-cify? datum-intern?)]
       [`(lambda ,formals ,body ...)
        (convert-any? body)]
       [`(case-lambda [,formalss ,bodys ...] ...)
@@ -131,10 +135,11 @@
          (convert-any? exp))]
       [`,_ (and for-cify?
                 (not (symbol? v))
-                (lift-quoted? v for-cify?))])))
+                (lift-quoted? v for-cify? datum-intern?))])))
 
 ;; Construct an expression to be lifted
-(define (make-construct q add-lifted lifted-eq-constants lifted-equal-constants for-cify?)
+(define (make-construct q add-lifted lifted-eq-constants lifted-equal-constants
+                        for-cify? datum-intern?)
   (define (quote? e) (and (pair? e) (eq? 'quote (car e))))
   (let make-construct ([q q])
     (define lifted-constants (if (or (string? q) (bytes? q))
@@ -150,6 +155,13 @@
                                     ',(path-convention-type q))]
            [(regexp? q)
             `(,(if (pregexp? q) 'pregexp 'regexp) ,(object-name q))]
+           [(srcloc? q)
+            `(unsafe-make-srcloc
+              ,(make-construct (srcloc-source q))
+              ,(make-construct (srcloc-line q))
+              ,(make-construct (srcloc-column q))
+              ,(make-construct (srcloc-position q))
+              ,(make-construct (srcloc-span q)))]
            [(byte-regexp? q)
             `(,(if (byte-pregexp? q) 'byte-pregexp 'byte-regexp) ,(object-name q))]
            [(keyword? q)
@@ -178,16 +190,14 @@
                       `(cons ,a ,d))))]
            [(vector? q)
             (let ([args (map make-construct (vector->list q))])
-              (if (and (andmap quote? args)
-                       (not (impersonator? q)))
-                  `(quote ,q)
-                  `(vector ,@args)))]
+              `(vector->immutable-vector
+                ,(if (and (andmap quote? args)
+                          (not (impersonator? q)))
+                     `(quote ,q)
+                     `(vector ,@args))))]
            [(box? q)
             (let ([arg (make-construct (unbox q))])
-              (if (and (quote? arg)
-                       (not (impersonator? q)))
-                  `(quote ,q)
-                  `(box ,arg)))]
+              `(box-immutable ,arg))]
            [(prefab-struct-key q)
             => (lambda (key)
                  `(make-prefab-struct ',key ,@(map make-construct
@@ -198,7 +208,7 @@
        (cond
          [(and (quote? rhs)
                (or (not for-cify?)
-                   (not (lift-quoted? (cadr rhs) #t))))
+                   (not (lift-quoted? (cadr rhs) #t datum-intern?))))
           rhs]
          [else
           (define id (add-lifted rhs))

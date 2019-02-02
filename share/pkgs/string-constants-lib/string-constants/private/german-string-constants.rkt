@@ -1584,6 +1584,8 @@
 
   (test-engine-check-encountered-error
    "check-expect bekam den folgenden Fehler statt des erwarteten Werts, ~F. ~n   :: ~a")
+  (test-engine-check-error-cause
+   "verursacht durch Ausdruck")
   (test-engine-actual-value-differs-error
    "Der tatsächliche Wert ~F ist nicht der erwartete Wert ~F.")
   (test-engine-actual-value-not-within-error

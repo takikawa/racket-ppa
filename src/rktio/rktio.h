@@ -245,6 +245,13 @@ RKTIO_EXTERN rktio_fd_t *rktio_std_fd(rktio_t *rktio, int which);
 #define RKTIO_STDOUT 1
 #define RKTIO_STDERR 2
 
+RKTIO_EXTERN void rktio_create_console(void);
+/* On Windows, ensures that a console is available for output. If a
+   console is created for an application started in GUI mode, The
+   console cannot be closed by the user until the process exits, and
+   then an atexit callback pauses the exit until the user closes the
+   console. */
+
 RKTIO_EXTERN_ERR(RKTIO_READ_ERROR)
 intptr_t rktio_read(rktio_t *rktio, rktio_fd_t *fd, char *buffer, intptr_t len);
 /* Returns the number of bytes read, possibly 0, in non-blocking mode.
@@ -480,6 +487,8 @@ RKTIO_EXTERN rktio_length_and_addrinfo_t *rktio_udp_recvfrom(rktio_t *rktio, rkt
 RKTIO_EXTERN rktio_length_and_addrinfo_t *rktio_udp_recvfrom_in(rktio_t *rktio, rktio_fd_t *rfd,
                                                                 char *buffer, intptr_t start, intptr_t end);
 /* Like `rktio_udp_recvfrom`, but with starting and ending offsets. */
+
+RKTIO_EXTERN rktio_ok_t rktio_udp_set_receive_buffer_size(rktio_t *rktio, rktio_fd_t *rfd, int size);
 
 RKTIO_EXTERN_ERR(RKTIO_PROP_ERROR) rktio_tri_t rktio_udp_get_multicast_loopback(rktio_t *rktio, rktio_fd_t *rfd);
 RKTIO_EXTERN rktio_ok_t rktio_udp_set_multicast_loopback(rktio_t *rktio, rktio_fd_t *rfd, rktio_bool_t on);
