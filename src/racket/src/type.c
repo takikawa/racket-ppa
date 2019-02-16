@@ -1,28 +1,3 @@
-/*
-  Racket
-  Copyright (c) 2004-2018 PLT Design Inc.
-  Copyright (c) 1995-2001 Matthew Flatt
-
-    This library is free software; you can redistribute it and/or
-    modify it under the terms of the GNU Library General Public
-    License as published by the Free Software Foundation; either
-    version 2 of the License, or (at your option) any later version.
-
-    This library is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-    Library General Public License for more details.
-
-    You should have received a copy of the GNU Library General Public
-    License along with this library; if not, write to the Free
-    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301 USA.
-
-  libscheme
-  Copyright (c) 1994 Brent Benson
-  All rights reserved.
-*/
-
 #include "schpriv.h"
 #include <string.h>
 
@@ -133,7 +108,6 @@ scheme_init_type ()
 
   set_name(scheme_linklet_type, "<linklet>");
   set_name(scheme_instance_type, "<instance>");
-  set_name(scheme_linklet_directory_type, "<linklet-directory>");
   set_name(scheme_linklet_bundle_type, "<linklet-bundle>");
 
   set_name(scheme_eval_waiting_type, "<eval-waiting>");
@@ -568,7 +542,6 @@ void scheme_register_traversers(void)
 
   GC_REG_TRAV(scheme_linklet_type, linklet_val);
   GC_REG_TRAV(scheme_instance_type, instance_val);
-  GC_REG_TRAV(scheme_linklet_directory_type, small_object);
   GC_REG_TRAV(scheme_linklet_bundle_type, small_object);
 
   GC_REG_TRAV(_scheme_ir_values_types_, bad_trav);

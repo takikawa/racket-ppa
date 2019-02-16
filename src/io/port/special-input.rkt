@@ -39,7 +39,7 @@
   (when progress-evt
     (check-progress-evt who progress-evt orig-in))
   (let ([in (->core-input-port orig-in)])
-    (define peek-byte (core-input-port-read-byte in))
+    (define peek-byte (core-input-port-peek-byte in))
     (cond
       [peek-byte (do-peek-byte who peek-byte in orig-in)]
       [else
@@ -80,7 +80,10 @@
        [else
         (define special
           (cond
-            [(not source-name)
+            [#f
+             ;; There doesn't seem to be a case anymore
+             ;; where the old Racket implementation uses
+             ;; the 0-arity and/or no-position protocol
              (cond
                [(procedure-arity-includes? v 0)
                 (v)]

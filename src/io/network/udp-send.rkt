@@ -76,7 +76,7 @@
   (check who string? hostname)
   (check who port-number? port-no)
   (check-bstr who bstr start end)
-  (security-guard-check-network who hostname port-no #t))
+  (security-guard-check-network who hostname port-no 'client))
 
 ;; ----------------------------------------
 
@@ -137,7 +137,7 @@
                                             "socket" u)))]
          [else
           ;; if the socket is not bound already, send[to] binds it
-          (set-udp-bound?! u #t)
+          (set-udp-is-bound?! u #t)
           (define r (rktio_udp_sendto_in rktio (udp-s u) addr bstr start end))
           (cond
             [(rktio-error? r)

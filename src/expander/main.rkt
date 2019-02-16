@@ -1,5 +1,6 @@
 #lang racket/base
 (require "common/set.rkt"
+         "common/fasl.rkt"
          "common/module-path.rkt"
          "namespace/namespace.rkt"
          "eval/main.rkt"
@@ -30,6 +31,8 @@
          "boot/runtime-primitive.rkt"
          "boot/handler.rkt"
          "syntax/api.rkt"
+         (only-in "compile/recompile.rkt"
+                  compiled-expression-recompile)
          (only-in racket/private/config find-main-config)
          (only-in "syntax/cache.rkt" cache-place-init!)
          (only-in "syntax/scope.rkt" scope-place-init!)
@@ -75,8 +78,6 @@
          use-collection-link-paths
          use-user-specific-search-paths
          
-         compile-to-linklets
-         
          syntax?
          read-syntax
          datum->syntax syntax->datum
@@ -101,6 +102,7 @@
          namespace-attach-module
          namespace-attach-module-declaration
          namespace-mapped-symbols
+         namespace-variable-value
          
          module-path-index?
          module-path-index-join
@@ -115,6 +117,8 @@
 
          expander-place-init!
 
+         fasl->s-exp/intern
+
          ;; The remaining functions are provided for basic testing
          ;; (such as "demo.rkt")
 
@@ -127,7 +131,9 @@
          read-accept-compiled
 
          syntax-shift-phase-level
-         bound-identifier=?)
+         bound-identifier=?
+
+         compiled-expression-recompile)
 
 ;; ----------------------------------------
 
@@ -162,13 +168,16 @@
             (hash-remove (hash-remove linklet-primitives
                                       'variable-reference?)
                          'variable-reference-constant?)])
-       (declare-hash-based-module! '#%linklet linklet-primitives #:namespace ns
+       (declare-hash-based-module! '#%linklet-primitive linklet-primitives #:namespace ns
                                    #:primitive? #t
-                                   #:register-builtin? #t))
+                                   #:register-builtin? #t)
+       (declare-hash-based-module! '#%linklet-expander linklet-expander-primitives #:namespace ns)
+       (declare-reexporting-module! '#%linklet (list '#%linklet-primitive
+                                                     '#%linklet-expander)
+                                    #:namespace ns))
      (declare-hash-based-module! '#%expobs expobs-primitives #:namespace ns
                                  #:protected? #t)
      (declare-kernel-module! ns
-                             #:eval eval
                              #:main-ids (for/set ([name (in-hash-keys main-primitives)])
                                           name)
                              #:read-ids (for/set ([name (in-hash-keys read-primitives)])

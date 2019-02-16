@@ -1,32 +1,9 @@
-/*
-  Racket
-  Copyright (c) 2004-2018 PLT Design Inc.
-  Copyright (c) 1995-2001 Matthew Flatt
-
-    This library is free software; you can redistribute it and/or
-    modify it under the terms of the GNU Library General Public
-    License as published by the Free Software Foundation; either
-    version 2 of the License, or (at your option) any later version.
-
-    This library is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-    Library General Public License for more details.
-
-    You should have received a copy of the GNU Library General Public
-    License along with this library; if not, write to the Free
-    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301 USA.
-*/
-
 /* This file implements Racket threads.
 
-   Usually, Racket threads are implemented by copying the stack.
-   The scheme_thread_block() function is called occasionally by the
-   evaluator so that the current thread can be swapped out.
-   do_swap_thread() performs the actual swap. Threads can also be
-   implemented by the OS; the bottom part of this file contains
-   OS-specific thread code.
+   Racket threads are implemented by copying the stack. The
+   scheme_thread_block() function is called occasionally by the
+   evaluator so that the current thread can be swapped out, and
+   do_swap_thread() performs the actual swap.
 
    Much of the work in thread management is knowning when to go to
    sleep, to be nice to the OS outside of Racket. The rest of the
@@ -199,6 +176,7 @@ ROSYM static Scheme_Object *read_symbol, *write_symbol, *execute_symbol, *delete
 ROSYM static Scheme_Object *client_symbol, *server_symbol;
 ROSYM static Scheme_Object *major_symbol, *minor_symbol, *incremental_symbol;
 ROSYM static Scheme_Object *cumulative_symbol;
+ROSYM static Scheme_Object *racket_symbol;
 
 THREAD_LOCAL_DECL(static int do_atomic = 0);
 THREAD_LOCAL_DECL(static int missed_context_switch = 0);
@@ -529,6 +507,9 @@ void scheme_init_thread(Scheme_Startup_Env *env)
 
   REGISTER_SO(cumulative_symbol);
   cumulative_symbol = scheme_intern_symbol("cumulative");
+
+  REGISTER_SO(racket_symbol);
+  racket_symbol = scheme_intern_symbol("racket");
 
   ADD_PRIM_W_ARITY("dump-memory-stats"            , scheme_dump_gc_stats, 0, -1, env);
   ADD_PRIM_W_ARITY("vector-set-performance-stats!", current_stats       , 1, 2, env);
@@ -7972,6 +7953,7 @@ static void make_initial_config(Scheme_Thread *p)
 
   init_param(cells, paramz, MZCONFIG_COMPILE_MODULE_CONSTS, scheme_true);
   init_param(cells, paramz, MZCONFIG_USE_JIT, scheme_startup_use_jit ? scheme_true : scheme_false);
+  init_param(cells, paramz, MZCONFIG_COMPILE_TARGET_MACHINE, scheme_startup_compile_machine_independent ? scheme_false : racket_symbol);
 
   {
     Scheme_Object *s;
@@ -8123,6 +8105,14 @@ static void make_initial_config(Scheme_Thread *p)
 Scheme_Config *scheme_minimal_config(void)
 {
   return initial_config;
+}
+
+Scheme_Object *scheme_compile_target_check(int argc, Scheme_Object **argv)
+{
+  if (SCHEME_FALSEP(argv[0]) || SAME_OBJ(argv[0], racket_symbol))
+    return scheme_true;
+  else
+    return scheme_false;
 }
 
 void scheme_set_startup_load_on_demand(int on)
