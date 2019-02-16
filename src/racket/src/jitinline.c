@@ -1,24 +1,3 @@
-/*
-  Racket
-  Copyright (c) 2006-2018 PLT Design Inc.
-
-    This library is free software; you can redistribute it and/or
-    modify it under the terms of the GNU Library General Public
-    License as published by the Free Software Foundation; either
-    version 2 of the License, or (at your option) any later version.
-
-    This library is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-    Library General Public License for more details.
-
-    You should have received a copy of the GNU Library General Public
-    License along with this library; if not, write to the Free
-    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301 USA.
-*/
-
-
 #include "schpriv.h"
 #include "schmach.h"
 #include "future.h"
@@ -5767,7 +5746,7 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
 
       return 1;
     } else if (IS_NAMED_PRIM(rator, "hash-ref")) {
-      GC_CAN_IGNORE jit_insn *refdone0, *refdone, *refslow;
+      GC_CAN_IGNORE jit_insn *refdone0, *refdone, *refslow, *refslow2;
       
       /* We only get here if we have three arguments with the last as a
          non-procedure constant */
@@ -5779,7 +5758,8 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
 
       /* Jump to slow path for anything other than an immutable hasheq */
       __START_SHORT_JUMPS__(1);
-      refslow = mz_bnei_t(jit_forward(), JIT_R0, scheme_eq_hash_tree_type, JIT_R2);
+      refslow = jit_bmsi_ul(jit_forward(), JIT_R0, 0x1);
+      refslow2 = mz_bnei_t(jit_forward(), JIT_R0, scheme_eq_hash_tree_type, JIT_R2);
       __END_SHORT_JUMPS__(1);
 
       /* scheme_eq_hash_tree_get doesn't trigger a GC */
@@ -5798,6 +5778,7 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
  
       /* slow path */
       mz_patch_branch(refslow);
+      mz_patch_branch(refslow2);
       __END_SHORT_JUMPS__(1);
 
       scheme_mz_load_retained(jitter, JIT_R2, app->args[3]);

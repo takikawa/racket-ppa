@@ -22,7 +22,7 @@
 
 (define (output-response/method conn resp meth)
   (cond
-    [(or 
+    [(or
       ;; If it is terminated, just continue
       (terminated-response? resp)
       ;; If it is HTTP/1.0, ditto
@@ -63,7 +63,7 @@
    (append
     (maybe-headers
      seen?
-     [#"Date" 
+     [#"Date"
       (string->bytes/utf-8 (seconds->gmt-string (current-seconds)))]
      [#"Last-Modified"
       (string->bytes/utf-8 (seconds->gmt-string (response-seconds bresp)))]
@@ -98,7 +98,7 @@
 (define (terminated-response? r)
   (define hs (response-headers r))
   (or (headers-assq* #"Content-Length" hs)
-      (cond 
+      (cond
         [(headers-assq* #"Transfer-Encoding" hs)
          => (λ (h) (not (bytes=? (header-value h) #"identity")))]
         [else #f])))
@@ -109,25 +109,36 @@
   (flush-output o-port))
 
 (define (output-response-body/chunked conn bresp)
+  ;; Flush the headers immediately since the response handler can wait
+  ;; indefinitely before writing anything out to the output port.
+  (flush-output (connection-o-port conn))
+
   (define-values (from-servlet to-chunker) (make-pipe))
   (define to-client (connection-o-port conn))
-  (define to-chunker-t    
-    (thread (λ () 
+  (define to-chunker-t
+    (thread (λ ()
               ((response-output bresp) to-chunker)
               (close-output-port to-chunker))))
-  (define buffer (make-bytes 1024))
-  (let loop ()
-    (define bytes-read-or-eof
-      (read-bytes-avail! buffer from-servlet))
-    (unless (eof-object? bytes-read-or-eof)
-      (fprintf to-client "~a\r\n" (number->string bytes-read-or-eof 16))
-      (write-bytes buffer to-client 0 bytes-read-or-eof)
-      (fprintf to-client "\r\n")
-      (loop)))
-  (thread-wait to-chunker-t)
-  (fprintf to-client "0\r\n")
-  (fprintf to-client "\r\n")
-  (flush-output to-client))
+
+  ;; The client might go away while the response is being generated,
+  ;; in which case the output port will be closed so we have to
+  ;; gracefully back out when that happens.
+  (with-handlers ([exn:fail? (lambda (e)
+                               (kill-thread to-chunker-t))])
+    (define buffer (make-bytes 16384))
+    (let loop ()
+      (define bytes-read-or-eof
+        (read-bytes-avail! buffer from-servlet))
+      (unless (eof-object? bytes-read-or-eof)
+        (fprintf to-client "~a\r\n" (number->string bytes-read-or-eof 16))
+        (write-bytes buffer to-client 0 bytes-read-or-eof)
+        (fprintf to-client "\r\n")
+        (flush-output to-client)
+        (loop)))
+    (thread-wait to-chunker-t)
+    (fprintf to-client "0\r\n")
+    (fprintf to-client "\r\n")
+    (flush-output to-client)))
 
 ; seconds->gmt-string : Nat -> String
 ; format is rfc1123 compliant according to rfc2068 (http/1.1)
@@ -223,7 +234,7 @@
                       conn
                       (make-416-response modified-seconds maybe-mime-type)))])
     (let* (; converted-ranges : (alist-of integer integer)
-           ; This is a list of actual start and end offsets in the file. 
+           ; This is a list of actual start and end offsets in the file.
            ; See the comments for convert-http-ranges for more information.
            [converted-ranges
             (if ranges
@@ -249,7 +260,7 @@
                            (bytes-length headers)      ; length of the headers and header newlinw
                            (- (cdr range) (car range)) ; length of the content
                            2))                         ; length of the content newline
-                      (+ (* (+ boundary-length 4) 
+                      (+ (* (+ boundary-length 4)
                             (length converted-ranges)) ; length of the intermediate boundaries
                          (+ boundary-length 6))        ; length of the final boundary
                       converted-ranges
@@ -277,7 +288,7 @@
                   ; Multiple ranges are encoded as multipart/byteranges:
                   (let loop ([ranges converted-ranges] [multipart-headers multipart-headers])
                     (match ranges
-                      [(list) 
+                      [(list)
                        ; Final boundary (must start on new line; ends with a new line)
                        (fprintf (connection-o-port conn) "--~a--\r\n" boundary)
                        (void)]
@@ -321,7 +332,7 @@
 ;; Converts a list of HTTP ranges:
 ;;
 ;; into pairs of offsets we can use to read from a file:
-;; 
+;;
 ;;   - suffix-byte-range-specs are converted to pairs of absolute offsets;
 ;;   - missing end offsets in byte-range-specs ranges are filled in;
 ;;   - end offsets are exclusive (as opposed to the inclusive offsets in ranges and the HTTP spec).
@@ -366,7 +377,7 @@
         (response
          206 #"Partial content"
          modified-seconds
-         maybe-mime-type 
+         maybe-mime-type
          (list (make-header #"Accept-Ranges" #"bytes")
                (make-content-length-header total-content-length)
                (make-content-range-header start end total-file-length))
@@ -384,7 +395,7 @@
   (response
    200 #"OK"
    modified-seconds
-   maybe-mime-type 
+   maybe-mime-type
    (list (make-header #"Accept-Ranges" #"bytes")
          (make-content-length-header total-content-length))
    void))
@@ -394,7 +405,7 @@
   (response
    416 #"Invalid range request"
    modified-seconds
-   maybe-mime-type 
+   maybe-mime-type
    null
    void))
 
@@ -405,7 +416,7 @@
 ;; make-content-range-header : integer integer integer -> header
 ;; start must be inclusive; end must be exclusive.
 (define (make-content-range-header start end total-file-length)
-  (make-header #"Content-Range" 
+  (make-header #"Content-Range"
                (string->bytes/utf-8
                 (format "bytes ~a-~a/~a" start (sub1 end) total-file-length))))
 

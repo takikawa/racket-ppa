@@ -966,17 +966,26 @@
        (format "scheme_intern_symbol(~s)" (symbol->string e))]
       [(string? e)
        (define s (string->bytes/utf-8 e))
-       (format "scheme_make_sized_utf8_string(~s, ~a)"
-               (bytes->string/latin-1 s)
+       (format "scheme_make_sized_utf8_string(~a, ~a)"
+               (substring (format "~s" s) 1)
                (bytes-length s))]
       [(bytes? e)
-       (format "scheme_make_sized_byte_string(~s, ~a, 0)"
-               (bytes->string/latin-1 e)
+       (format "scheme_make_sized_byte_string(~a, ~a, 0)"
+               (substring (format "~s" e) 1)
                (bytes-length e))]
       [(number? e)
        (cond
          [(always-fixnum? e)
           (format "scheme_make_integer(~a)" e)]
+         [(exact-integer? e)
+          (cond
+            [(and (< e (expt 2 63))
+                  (>= e (- (expt 2 63))))
+             (format "scheme_make_integer_value_from_long_halves(~aL, ~aL)"
+                     (bitwise-and e (sub1 (expt 2 32)))
+                     (arithmetic-shift e -32))]
+            [else
+             (error 'generate-quite "number is too large: ~e" e)])]
          [(eqv? e +inf.0) "scheme_inf_object"]
          [(eqv? e -inf.0) "scheme_minus_inf_object"]
          [(eqv? e +nan.0) "scheme_nan_object"]
