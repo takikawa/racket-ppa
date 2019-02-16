@@ -24,7 +24,9 @@
 (require scribble/xref
          scribble/manual-struct)
 
-(provide text@)
+(define-local-member-name as-a-paste)
+
+(provide text@ as-a-paste)
 (define-unit text@
 (import mred^
         [prefix icon: framework:icon^]
@@ -91,6 +93,9 @@
 
 (define basic<%> text:basic<%>)
 
+(define hollow-ellipse-pen-size 3)
+(define hollow-ellipse-embiggen 4)
+
 (define highlight-range-mixin
   (mixin (editor:basic<%> (class->interface text%)) ()
   
@@ -154,11 +159,11 @@
                   [else
                    (define-values (new-left new-top new-right new-bottom)
                      (for/fold ([left left] [top top] [right right] [bottom bottom]) 
-                       ([r (in-list new-rectangles)])
+                               ([r (in-list new-rectangles)])
                        (join-rectangles left top right bottom r)))
                    (define-values (both-left both-top both-right both-bottom)
                      (for/fold ([left new-left] [top new-top] [right new-right] [bottom new-bottom]) 
-                       ([r (in-list old-rectangles)])
+                               ([r (in-list old-rectangles)])
                        (join-rectangles left top right bottom r)))
                    (set-range-rectangles! a-range new-rectangles)
                    (loop both-left both-top both-right both-bottom)])]
@@ -201,7 +206,8 @@
     
       (define/private (adjust r w f)
         (+ w (f (case (rectangle-style r)
-                  [(dot hollow-ellipse) 8]
+                  [(dot) 8]
+                  [(hollow-ellipse) (+ hollow-ellipse-pen-size hollow-ellipse-embiggen)]
                   [else 0]))))
     
     (define b1 (box 0))
@@ -247,8 +253,8 @@
                                               start end 
                                               (send this get-filename)
                                               (send this get-text 0 100)))))]
-        [(or (eq? style 'hollow-ellipse)
-             (eq? style 'ellipse))
+        [(or (equal? style 'hollow-ellipse)
+             (equal? style 'ellipse))
          (define end-line (position-line end end-eol?))
          (let loop ([l (min start-x end-x)]
                     [r (max start-x end-x)]
@@ -502,13 +508,13 @@
                      (send dc set-brush color 'solid)
                      (send dc draw-ellipse (+ dx cx -3) (+ dy cy -3) 6 6))]
                   [(hollow-ellipse)
-                   (send dc set-pen color 3 'solid)
+                   (send dc set-pen color hollow-ellipse-pen-size 'solid)
                    (send dc set-brush "black" 'transparent)
                    (send dc draw-ellipse 
-                         (+ dx left -4)
-                         (+ dy top -4)
-                         (+ width 8)
-                         (+ height 8))]
+                         (+ dx left (- hollow-ellipse-embiggen))
+                         (+ dy top (- hollow-ellipse-embiggen))
+                         (+ width (+ hollow-ellipse-embiggen hollow-ellipse-embiggen))
+                         (+ height (+ hollow-ellipse-embiggen hollow-ellipse-embiggen)))]
                   [(rectangle)
                    (send dc set-pen color 1 'transparent)
                    (send dc set-brush color 'solid)
@@ -1177,24 +1183,24 @@
     (define/public (ask-normalize?)
       (cond
         [(preferences:get 'framework:ask-about-paste-normalization)
-         (let-values ([(mbr checked?)
-                       (message+check-box/custom
-                        (string-constant drscheme)
-                        (string-constant normalize-string-info)
-                        (string-constant dont-ask-again)
-                        (string-constant normalize)
-                        (string-constant leave-alone)
-                        #f
-                        (get-top-level-window)
-                        (cons (if (preferences:get 'framework:do-paste-normalization)
-                                  'default=1
-                                  'default=2)
-                              '(caution))
-                        2)])
-           (let ([normalize? (not (equal? 2 mbr))])
-             (preferences:set 'framework:ask-about-paste-normalization (not checked?))
-             (preferences:set 'framework:do-paste-normalization normalize?)
-             normalize?))]
+         (define-values (mbr checked?)
+           (message+check-box/custom
+            (string-constant drscheme)
+            (string-constant normalize-string-info)
+            (string-constant dont-ask-again)
+            (string-constant normalize)
+            (string-constant leave-alone)
+            #f
+            (get-top-level-window)
+            (cons (if (preferences:get 'framework:do-paste-normalization)
+                      'default=1
+                      'default=2)
+                  '(caution))
+            2))
+         (define normalize? (not (equal? 2 mbr)))
+         (preferences:set 'framework:ask-about-paste-normalization (not checked?))
+         (preferences:set 'framework:do-paste-normalization normalize?)
+         normalize?]
         [else
          (preferences:get 'framework:do-paste-normalization)]))
     (define/public (string-normalize s) 
@@ -1205,17 +1211,22 @@
         (string-normalize-nfkc s)
         "-")
        ""))
-    
-    (define/override (do-paste start time)
+
+    ;; method for use in the test suites
+    (define/public-final (as-a-paste thunk)
       (dynamic-wind
        (λ () (set! paste-info '()))
-       (λ () (super do-paste start time)
-         (let ([local-paste-info paste-info])
-           (set! paste-info #f)
-           (deal-with-paste local-paste-info)))
+       (λ ()
+         (thunk)
+         (define local-paste-info paste-info)
+         (set! paste-info #f)
+         (deal-with-paste local-paste-info))
        ;; use the dynamic wind to be sure that the paste-info is set back to #f
        ;; in the case that the middle thunk raises an exception
        (λ () (set! paste-info #f))))
+    
+    (define/override (do-paste start the-time)
+      (as-a-paste (λ () (super do-paste start the-time))))
     
     (define/augment (after-insert start len)
       (when paste-info
@@ -1230,21 +1241,22 @@
           (define len (list-ref insertion 1))
           (split-snip start)
           (split-snip (+ start len))
-          (let loop ([snip (find-snip start 'after-or-none)])
+          (let loop ([snip (find-snip (+ start len) 'before-or-none)])
             (when snip
-              (let ([pos (get-snip-position snip)])
-                (when (< pos (+ start len))
-                  (when (is-a? snip string-snip%)
-                    (let* ([old (send snip get-text 0 (send snip get-count))]
-                           [new (string-normalize old)])
-                      (unless (equal? new old)
-                        (when ask?
-                          (set! ask? #f)
-                          (unless (ask-normalize?) (abort)))
-                        (let ([snip-pos (get-snip-position snip)])
-                          (delete snip-pos (+ snip-pos (string-length old)))
-                          (insert new snip-pos snip-pos #f)))))
-                  (loop (send snip next)))))))))
+              (define prev-snip (send snip previous))
+              (define pos (get-snip-position snip))
+              (when (pos . >= . start)
+                (when (is-a? snip string-snip%)
+                  (define old (send snip get-text 0 (send snip get-count)))
+                  (define new (string-normalize old))
+                  (unless (equal? new old)
+                    (when ask?
+                      (set! ask? #f)
+                      (unless (ask-normalize?) (abort)))
+                    (define snip-pos (get-snip-position snip))
+                    (delete snip-pos (+ snip-pos (string-length old)))
+                    (insert new snip-pos snip-pos #f)))
+                (loop prev-snip)))))))
     
     (super-new)))
 
@@ -1270,13 +1282,10 @@
 
 (define searching-mixin
   (mixin (editor:basic<%> editor:keymap<%> basic<%>) (searching<%>)
-    (inherit invalidate-bitmap-cache
-             get-start-position get-end-position
+    (inherit get-start-position get-end-position
              unhighlight-ranges/key unhighlight-range highlight-range
-             run-after-edit-sequence begin-edit-sequence end-edit-sequence
-             find-string find-string-embedded get-admin position-line
-             in-edit-sequence? get-pos/text-dc-location
-             get-canvas get-top-level-window)
+             begin-edit-sequence end-edit-sequence
+             find-string in-edit-sequence? get-canvas get-top-level-window)
     
     (define has-focus? #f)
     (define clear-yellow void)
@@ -1407,16 +1416,28 @@
                 (define next (do-search (get-start-position)))
                 (begin-edit-sequence #t #f)
                 (cond
-                  [(number? next)
-                   (unless (and to-replace-highlight
-                                (= (car to-replace-highlight) next)
-                                (= (cdr to-replace-highlight) 
-                                   (string-length searching-str)))
-                     (replace-highlight->normal-hit)
-                     (define pr (cons next (string-length searching-str)))
-                     (unhighlight-hit pr)
-                     (highlight-replace pr))]
+                  [next
+                   (define-values (txt-t start-t end-t)
+                     (if to-replace-highlight
+                         (get-highlighting-text-and-range to-replace-highlight)
+                         (values #f #f #f)))
+                   (define next-to-replace-highlight (cons next (string-length searching-str)))
+                   (define-values (txt-n start-n end-n)
+                     (get-highlighting-text-and-range next-to-replace-highlight))
+                   (cond
+                     [(and (object-or-false=? txt-t txt-n)
+                           (equal? start-t start-n)
+                           (equal? end-t end-n))
+                      ;; here the hit remains the same, so we do nothing
+                      (void)]
+                     [else
+                      ;; here we have to move the next-hit search bubble
+                      (replace-highlight->normal-hit)
+                      (unhighlight-hit next-to-replace-highlight)
+                      (highlight-replace next-to-replace-highlight)])]
                   [else
+                   ;; here the next-search hit converts to a a regular one
+                   ;; but we don't have another one to highlight
                    (replace-highlight->normal-hit)])
                 (end-edit-sequence)])))
          #f)))
@@ -2899,12 +2920,12 @@
     ;; txt is in the reverse order of the things to be inserted.
     ;; the evt is waited on when the text has actually been inserted
     ;; thread: any thread, except the eventspace main thread
-    (define/private (queue-insertion txts signal)
+    (define/private (queue-insertion txts signal #:async? [async? #f])
       (parameterize ([current-eventspace eventspace])
         (queue-callback
          (λ ()
            (do-insertion txts #f)
-           (sync signal))
+           (if async? (thread (λ () (sync signal))) (sync signal)))
          #f)))
     
     ;; do-insertion : (listof (cons (union string snip) style-delta)) boolean -> void
@@ -2980,84 +3001,86 @@
     
     (define/public (after-io-insertion) (void))
 
-    (define output-buffer-thread
-      (let ([converter (bytes-open-converter "UTF-8-permissive" "UTF-8")])
-        (thread
-         (λ ()
-           (let loop (;; text-to-insert : (queue (cons (union snip bytes) style))
-                      [text-to-insert (empty-at-queue)]
-                      [last-flush (current-inexact-milliseconds)])
-             (sync
-              (if (at-queue-empty? text-to-insert)
-                  never-evt
-                  (handle-evt
-                   (alarm-evt (+ last-flush msec-timeout))
-                   (λ (_)
-                     (define-values (viable-bytes remaining-queue flush-keep-trying?)
-                       (split-queue converter text-to-insert))
-                     ;; we always queue the work here since the 
-                     ;; always event means no one waits for the callback
-                     (queue-insertion viable-bytes always-evt)
-                     (loop remaining-queue (current-inexact-milliseconds)))))
-              (handle-evt
-               flush-chan/diy
-               (λ (return-evt/to-insert-chan)
-                 (define remaining-queue #f)
-                 (define viable-bytess
-                   (let loop ([q text-to-insert])
-                     (define-values (viable-bytes next-remaining-queue flush-keep-trying?)
-                       (split-queue converter q))
-                     (cond
-                       [flush-keep-trying?
-                        (cons viable-bytes (loop next-remaining-queue))]
-                       [else
-                        (set! remaining-queue next-remaining-queue)
-                        (list viable-bytes)])))
-                 (channel-put return-evt/to-insert-chan viable-bytess)
-                 (loop remaining-queue (current-inexact-milliseconds))))
-              (handle-evt
-               flush-chan/queue
-               (λ (return-evt/to-insert-chan)
-                 (define remaining-queue #f)
-                 (let loop ([q text-to-insert])
-                   (define-values (viable-bytes next-remaining-queue flush-keep-trying?)
-                     (split-queue converter q))
+    (let ()
+      (define converter (bytes-open-converter "UTF-8-permissive" "UTF-8"))
+      (define (output-buffer-thread)
+        (let loop (;; text-to-insert : (queue (cons (union snip bytes) style))
+                   [text-to-insert (empty-at-queue)]
+                   [last-flush (current-inexact-milliseconds)])
+          (sync
+           (if (at-queue-empty? text-to-insert)
+               never-evt
+               (handle-evt
+                (alarm-evt (+ last-flush msec-timeout))
+                (λ (_)
+                  (define-values (viable-bytes remaining-queue flush-keep-trying?)
+                    (split-queue converter text-to-insert))
+                  ;; we always queue the work here since the
+                  ;; always event means no one waits for the callback
+                  (queue-insertion viable-bytes always-evt)
+                  (loop remaining-queue (current-inexact-milliseconds)))))
+           (handle-evt
+            flush-chan/diy
+            (λ (return-evt/to-insert-chan)
+              (define remaining-queue #f)
+              (define viable-bytess
+                (let loop ([q text-to-insert])
+                  (define-values (viable-bytes next-remaining-queue flush-keep-trying?)
+                    (split-queue converter q))
+                  (cond
+                    [flush-keep-trying?
+                     (cons viable-bytes (loop next-remaining-queue))]
+                    [else
+                     (set! remaining-queue next-remaining-queue)
+                     (list viable-bytes)])))
+              (channel-put return-evt/to-insert-chan viable-bytess)
+              (loop remaining-queue (current-inexact-milliseconds))))
+           (handle-evt
+            flush-chan/queue
+            (λ (return-evt/to-insert-chan)
+              (define remaining-queue #f)
+              (let loop ([q text-to-insert])
+                (define-values (viable-bytes next-remaining-queue flush-keep-trying?)
+                  (split-queue converter q))
+                (cond
+                  [flush-keep-trying?
+                   (queue-insertion viable-bytes always-evt)
+                   (loop next-remaining-queue)]
+                  [else
+                   (set! remaining-queue next-remaining-queue)
+                   (queue-insertion viable-bytes return-evt/to-insert-chan #:async? #t)
+                   #f]))
+              (loop remaining-queue (current-inexact-milliseconds))))
+           (handle-evt
+            clear-output-chan
+            (λ (_)
+              (loop (empty-at-queue) (current-inexact-milliseconds))))
+           (handle-evt
+            write-chan
+            (λ (pr-pr)
+              (define return-chan (car pr-pr))
+              (define pr (cdr pr-pr))
+              (let ([new-text-to-insert (at-enqueue pr text-to-insert)])
+                (cond
+                  [((at-queue-size text-to-insert) . < . output-buffer-full)
+                   (when return-chan
+                     (channel-put return-chan '()))
+                   (loop new-text-to-insert
+                         (if (at-queue-empty? text-to-insert)
+                             (current-inexact-milliseconds)
+                             last-flush))]
+                  [else
+                   (define-values (viable-bytes remaining-queue flush-keep-trying?)
+                     (split-queue converter new-text-to-insert))
                    (cond
-                     [flush-keep-trying?
-                      (queue-insertion viable-bytes always-evt)
-                      (loop next-remaining-queue)]
+                     [return-chan
+                      (channel-put return-chan viable-bytes)]
                      [else
-                      (set! remaining-queue next-remaining-queue)
-                      (queue-insertion viable-bytes return-evt/to-insert-chan)
-                      #f]))
-                 (loop remaining-queue (current-inexact-milliseconds))))
-              (handle-evt
-               clear-output-chan
-               (λ (_)
-                 (loop (empty-at-queue) (current-inexact-milliseconds))))
-              (handle-evt
-               write-chan
-               (λ (pr-pr)
-                 (define return-chan (car pr-pr))
-                 (define pr (cdr pr-pr))
-                 (let ([new-text-to-insert (at-enqueue pr text-to-insert)])
-                   (cond
-                     [((at-queue-size text-to-insert) . < . output-buffer-full)
-                      (when return-chan
-                        (channel-put return-chan '()))
-                      (loop new-text-to-insert 
-                            (if (at-queue-empty? text-to-insert)
-                                (current-inexact-milliseconds)
-                                last-flush))]
-                     [else
-                      (let ([chan (make-channel)])
-                        (let-values ([(viable-bytes remaining-queue flush-keep-trying?)
-                                      (split-queue converter new-text-to-insert)])
-                          (if return-chan
-                              (channel-put return-chan viable-bytes)
-                              (queue-insertion viable-bytes (channel-put-evt chan (void))))
-                          (channel-get chan)
-                          (loop remaining-queue (current-inexact-milliseconds))))]))))))))))
+                      (define chan (make-channel))
+                      (queue-insertion viable-bytes (channel-put-evt chan (void)))
+                      (channel-get chan)])
+                   (loop remaining-queue (current-inexact-milliseconds))])))))))
+      (thread output-buffer-thread))
     
     (field [in-port-args #f]
            [out-port #f]

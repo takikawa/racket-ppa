@@ -23,10 +23,12 @@
               set-eventspace-hook!
               set-front-hook!
               set-menu-bar-hooks!
+              set-mouse-or-key-hook!
               set-fixup-window-locations!
               post-dummy-event
 
               try-to-sync-refresh
+              try-to-flush
               sync-cocoa-events
               set-screen-changed-callback!)
 
@@ -35,7 +37,11 @@
  queue-event
  yield)
 
-(import-class NSApplication NSAutoreleasePool NSColor NSProcessInfo NSArray NSMenu)
+(import-class NSApplication NSAutoreleasePool NSColor NSProcessInfo NSArray NSMenu NSThread)
+
+(unless (tell #:type _BOOL NSThread isMainThread)
+  (error 'racket/gui
+         "cannot instantiate in a non-main place on Mac OS"))
 
 ;; Extreme hackery to hide original arguments from
 ;; NSApplication, because NSApplication wants to turn 
@@ -364,6 +370,9 @@
 (define NX_RMOUSEDOWN 3)
 (define menu-bar-tap
   (and (version-10.13-or-later?)
+       (not (version-10.14-or-later?))
+       ;; 10.13: detecting `NSSystemDefined` with subtype 7 doesn't work,
+       ;;        but it seems to work for all other OS versions
        (CGEventTapCreate kCGSessionEventTap #; kCGAnnotatedSessionEventTap
                          kCGHeadInsertEventTap
                          kCGEventTapOptionDefault
@@ -398,6 +407,10 @@
 (define was-menu-bar #f)
 
 (define avoid-mouse-key-until #f)
+
+(define mouse-or-key-hook void)
+(define (set-mouse-or-key-hook! proc)
+  (set! mouse-or-key-hook proc))
 
 ;; Check for menu-bar click to trigger `on-demand` callbacks.
 ;; Why not use a delegate on NSMenu? Because that's a less convenient
@@ -465,11 +478,14 @@
        (when evt (check-menu-bar-click evt))
        (and evt
             (or (not dequeue?)
-                (let ([e (eventspace-hook evt (tell evt window))])
+                (let* ([w (tell evt window)]
+                       [e (eventspace-hook evt w)])
                   (if e
                       (let ([mouse-or-key?
                              (bitwise-bit-set? MouseAndKeyEventMask
                                                (tell #:type _NSInteger evt type))])
+                        (when mouse-or-key?
+                          (mouse-or-key-hook w))
                         ;; If it's a mouse or key event, delay further
                         ;;  dequeue of mouse and key events until this
                         ;;  one can be handled.
@@ -518,6 +534,13 @@
   ;; atomically => outside of the event loop
   (atomically
    (pre-event-sync #t)))
+
+(define (try-to-flush)
+  (tell app nextEventMatchingMask: #:type _NSUInteger 0
+        untilDate: #f
+        inMode: NSDefaultRunLoopMode
+        dequeue: #:type _BOOL #t)
+  (void))
 
 (set-platform-queue-sync!
  (lambda ()

@@ -23,7 +23,7 @@
     ((%or g ...)
      (lambda (__fk)
        (let/racklog-sk __sk
-         (let/racklog-fk __fk
+         (let/racklog-fk (__fk __fk)
            (__sk ((logic-var-val* g) __fk)))
          ...
          (__fk 'fail))))))
@@ -36,6 +36,37 @@
               ...)
          __fk)))))
 
+(define (%apply pred args)
+  (lambda (fk)
+    (let ([pred-v (if (logic-var? pred)
+                      (logic-var-val pred)
+                      pred)]
+          [args-v (let lv->list ([lv args])
+                    (let ([v (if (logic-var? lv) (logic-var-val lv) lv)])
+                      (cond
+                        [(null? v) v]
+                        [(pair? v) (cons (car v) (lv->list (cdr v)))]
+                        [else (fk 'fail)])))])
+      (if (and (procedure? pred-v) (procedure-arity-includes? pred-v (length args-v)))
+          ((apply pred-v args-v) fk)
+          (fk 'fail)))))
+
+(define (%andmap pred lst . rest)
+  (define lsts (cons lst rest))
+  (lambda (fk)
+    (let/racklog-sk sk
+      ; Base case (all lists empty)
+      (let/racklog-fk (fk fk)
+        (sk (foldl (lambda (lst fk) ((%= lst '()) fk)) fk lsts)))
+      ; Call and recurse
+      (let/racklog-fk (fk fk)
+        (sk (let ([heads (map (lambda (lst) (_)) lsts)]
+                  [tails (map (lambda (lst) (_)) lsts)])
+              (let* ([fk (foldl (lambda (lst h t fk) ((%= lst (cons h t)) fk)) fk lsts heads tails)]
+                     [fk ((%apply pred heads) fk)])
+                ((apply %andmap pred tails) fk)))))
+      (fk 'fail))))
+
 (define-syntax-parameter !
   (λ (stx) (raise-syntax-error '! "May only be used syntactically inside %rel or %cut-delimiter expression." stx)))
 
@@ -44,39 +75,37 @@
     ((%cut-delimiter g)
      (lambda (__fk)
        (let ((this-! (lambda (__fk2)
-                       (__fk2 'unwind-trail)
-                       __fk)))
+                       (lambda (msg)
+                         ; Unwind any bindings in the body
+                         (unless (equal? __fk2 __fk) (__fk2 __fk))
+                         ; Pass on the message, skipping the body
+                         (unless (equal? __fk msg) (__fk msg))))))
          (syntax-parameterize 
           ([! (make-rename-transformer #'this-!)])
           ((logic-var-val* g) __fk)))))))
 
+(struct relation (clauses)
+  #:property prop:procedure
+  (lambda (rel . __fmls)
+    (%cut-delimiter
+      (lambda (__fk)
+        (let/racklog-sk __sk
+          (for ([clause (in-list (relation-clauses rel))])
+            (let/racklog-fk (fail-clause __fk)
+              (__sk ((clause __fmls !) fail-clause))))
+          (__fk 'fail))))))
+
 (define-syntax %rel
   (syntax-rules ()
     ((%rel (v ...) ((a ...) subgoal ...) ...)
-     (lambda __fmls
-       (lambda (fail-relation)
-         (let/racklog-sk 
-          __sk
-          (%let (v ...)
-                (let/racklog-fk 
-                 fail-case
-                 (define-values
-                   (unify-cleanup fail-unify)
-                   ((inner-unify __fmls (list a ...))
-                    fail-case))
-                 (define this-! 
-                   (lambda (fk1) 
-                     (λ (fk2)
-                       ;; XXX could be (fail-unify 'unwind-trail)
-                       (unify-cleanup)
-                       (fail-relation 'fail))))
-                 (syntax-parameterize 
-                     ([! (make-rename-transformer #'this-!)])
-                   (__sk 
-                    ((%and subgoal ...) 
-                     fail-unify))))
-                ...
-                (fail-relation 'fail))))))))
+     (relation
+      (list
+       (lambda (__fmls rel-cut)
+         (syntax-parameterize ([! (make-rename-transformer #'rel-cut)])
+           (%let (v ...)
+             (%and (%= __fmls (list a ...))
+                   subgoal ...))))
+       ...)))))
 
 (define %fail
   (lambda (fk) (fk 'fail)))
@@ -211,8 +240,8 @@
 (define (%not g)
   (%if-then-else g %fail %true))
 
-(define (%empty-rel . args)
-  %fail)
+(define %empty-rel
+  (relation '()))
 
 (define-syntax %assert!
   (syntax-rules ()
@@ -220,9 +249,8 @@
      (set! rel-name
            (let ((__old-rel rel-name)
                  (__new-addition (%rel (v ...) ((a ...) subgoal ...) ...)))
-             (lambda __fmls
-               (%or (apply __old-rel __fmls)
-                    (apply __new-addition __fmls))))))))
+             (relation (append (relation-clauses __old-rel)
+                               (relation-clauses __new-addition))))))))
 
 (define-syntax %assert-after!
   (syntax-rules ()
@@ -230,9 +258,8 @@
      (set! rel-name
            (let ((__old-rel rel-name)
                  (__new-addition (%rel (v ...) ((a ...) subgoal ...) ...)))
-             (lambda __fmls
-               (%or (apply __new-addition __fmls)
-                    (apply __old-rel __fmls))))))))
+             (relation (append (relation-clauses __new-addition)
+                               (relation-clauses __old-rel))))))))
 
 (define (set-cons e s)
   (if (member e s) s (cons e s)))
@@ -341,13 +368,13 @@
   (call-with-current-continuation (λ (k) e ...) racklog-prompt-tag))
 (define-syntax-rule (let/racklog-sk k e ...)
   (let/racklog-cc k e ...))
-(define (make-racklog-fk fk)
+(define (make-racklog-fk fk [uk #f])
   (λ (msg)
-    (if (not (eq? msg 'unwind-trail))
-      (fk 'fail)
-      #f)))
-(define-syntax-rule (let/racklog-fk k e ...)
-  (let/racklog-cc fk (let ([k (make-racklog-fk fk)]) e ...)))
+    (if (procedure? msg)
+        (when uk (unless (equal? uk msg) (uk msg))) ; unwind
+        (fk 'fail))))
+(define-syntax-rule (let/racklog-fk (k uk) e ...)
+  (let/racklog-cc fk (let ([k (make-racklog-fk fk uk)]) e ...)))
 
 (define (%member x y)
   (%let (xs z zs)
@@ -373,7 +400,7 @@
         (())
         (() (%repeat))))
 
-(define fk? (symbol? . -> . any))
+(define fk? ((or/c symbol? procedure?) . -> . any))
 (define goal/c 
   (or/c goal-with-free-vars?
         (fk? . -> . fk?)))
@@ -403,7 +430,9 @@
  [%== (unifiable? unifiable? . -> . goal/c)]
  [%> (unifiable? unifiable? . -> . goal/c)]
  [%>= (unifiable? unifiable? . -> . goal/c)]
+ [%andmap (unifiable? unifiable? unifiable? ... . -> . goal/c)]
  [%append (unifiable? unifiable? unifiable? . -> . goal/c)]
+ [%apply (unifiable? unifiable? . -> . goal/c)]
  [%bag-of (unifiable? goal/c unifiable? . -> . goal/c)]
  [%bag-of-1 (unifiable? goal/c unifiable? . -> . goal/c)]
  [%compound (unifiable? . -> . goal/c)]

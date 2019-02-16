@@ -291,9 +291,24 @@
             (define base (simplify-path* base*))
             (loop (cdr paths)
                   (if (member base bases) bases (cons base bases)))))))
-  (append (map (lambda (p) `(read-bytecode ,p)) paths)
-          (map (lambda (b) `(read-bytecode ,(build-path b "compiled"))) bases)
-          (map (lambda (b) `(exists ,b)) bases)))
+  (add-compiled-file-roots
+   (append (map (lambda (p) `(read-bytecode ,p)) paths)
+           (map (lambda (b) `(read-bytecode ,(build-path b "compiled"))) bases)
+           (map (lambda (b) `(exists ,b)) bases))))
+
+;; For each 'read-bytecode entry in lm for each root in
+;; `(current-compiled-file-roots)`, add the rerooted path
+(define (add-compiled-file-roots l)
+  (append
+   l
+   (for/list ([e (in-list l)]
+              #:when (eq? 'read-bytecode (car e))
+              ;; For every absolute root, add this directory
+              ;; under that root:
+              [root (in-list (current-compiled-file-roots))]
+              #:when (and (path? root)
+                          (absolute-path? root)))
+     `(read-bytecode ,(reroot-path (cadr e) root)))))
 
 ;; takes a module-spec list and returns all module paths that are needed
 ;; ==> ignores (lib ...) modules
@@ -460,9 +475,10 @@
                    (* 1000 secs)))
      (λ (a) #f)))
 
+  (define results null)
   (parameterize ([current-custodian cust]
                  [current-subprocess-custodian-mode 'kill])
-    (thread thunk))
+    (thread (lambda () (set! results (call-with-values thunk list)))))
 
   (define r
     (let loop ()
@@ -481,9 +497,10 @@
        timeout-evt)))
   (custodian-shutdown-all cust)
   (unless r
-    (raise (make-exn:fail:resource (format "call-with-deep-time-limit: out of ~a" r)
+    (raise (make-exn:fail:resource "call-with-deep-time-limit: out of time"
                                    (current-continuation-marks)
-                                   'deep-time))))
+                                   'deep-time)))
+  (apply values results))
 
 (define-syntax-rule (with-deep-time-limit sec body ...)
   (call-with-deep-time-limit sec (λ () body ...)))
@@ -1014,35 +1031,39 @@
              (append (sandbox-override-collection-paths)
                      (current-library-collection-paths)))]
     [sandbox-path-permissions
-     `(,@(map (lambda (p) `(read-bytecode ,p))
-              (apply
-               append
-               (for/list ([l (current-library-collection-links)])
-                 (cond
-                  [(not l)
-                   (current-library-collection-paths)]
-                  [(hash? l)
-                   (hash-values l)]
-                  [else
-                   (if (file-exists? l)
-                       (call-and-accumulate-captured-filesystem-accesses
-                        saw-accesses
-                        (lambda ()
-                          (append
-                           (links #:root? #t #:file l)
-                           (map cdr (links #:file l #:with-path? #t)))))
-                       null)]))))
+     `(,@(add-compiled-file-roots
+          (map (lambda (p) `(read-bytecode ,p))
+               (apply
+                append
+                (for/list ([l (current-library-collection-links)])
+                  (cond
+                    [(not l)
+                     (current-library-collection-paths)]
+                    [(hash? l)
+                     (hash-values l)]
+                    [else
+                     (if (file-exists? l)
+                         (call-and-accumulate-captured-filesystem-accesses
+                          saw-accesses
+                          (lambda ()
+                            (append
+                             (links #:root? #t #:file l)
+                             (map cdr (links #:file l #:with-path? #t)))))
+                         null)])))))
        ,@(for/list ([l (current-library-collection-links)]
                     #:when (path? l))
            `(read ,l))
        ,@(for/list ([(k v) (in-hash saw-accesses)])
            `(,v ,k))
-       ,@(for*/list ([l (append (get-pkgs-search-dirs)
-                                (list (find-user-pkgs-dir)))]
-                     [f (in-list (list "pkgs.rktd" (make-lock-file-name "pkgs.rktd")))])
-           `(read ,(build-path l f)))
-       (read ,(build-path (find-user-pkgs-dir) "pkgs.rktd"))
-       (read-bytecode ,(PLANET-BASE-DIR))
+       ,@(let ([pkg-dirs (append (get-pkgs-search-dirs)
+                                 (list (find-user-pkgs-dir)))])
+           (append (for/list ([l (in-list pkg-dirs)])
+                     `(exists ,l))
+                   (for*/list ([l (in-list pkg-dirs)]
+                               [f (in-list (list "pkgs.rktd" (make-lock-file-name "pkgs.rktd")))])
+                     `(read ,(build-path l f)))))
+       ,@(add-compiled-file-roots
+          (list `(read-bytecode ,(PLANET-BASE-DIR))))
        (exists ,(find-system-path 'addon-dir))
        ,@(for/list ([dir (get-lib-search-dirs)])
            `(read ,dir))

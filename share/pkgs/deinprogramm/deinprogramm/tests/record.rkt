@@ -10,6 +10,10 @@
   kons pare?
   (kar kdr))
 
+(define-record-procedures paire
+  koins
+  (kair kdir))
+
 (define-record-procedures chocolate-cookie
   make-chocolate-cookie chocolate-cookie?
   (chocolate-cookie-chocolate chocolate-cookie-cookie))
@@ -45,6 +49,17 @@
     (check-equal? (kdr p1) 2)
     (check-equal? (kar p2) 3)
     (check-equal? (kdr p2) 4))
+
+   (test-case
+    "no predicate"
+
+    (define p1 (koins 1 2))
+    (define p2 (koins 3 4))
+
+    (check-equal? (kair p1) 1)
+    (check-equal? (kdir p1) 2)
+    (check-equal? (kair p2) 3)
+    (check-equal? (kdir p2) 4))
 
    (test-case
     "matching"

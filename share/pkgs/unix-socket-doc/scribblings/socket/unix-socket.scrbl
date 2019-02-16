@@ -84,7 +84,7 @@ listener itself.
 }
 
 @defproc[(unix-socket-accept [listener unix-socket-listener?])
-         (values input-port? output-port)]{
+         (values input-port? output-port?)]{
 
 Accepts a client connection for @racket[listener]. If no client
 connection is waiting to be accepted, the call to
