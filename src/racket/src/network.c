@@ -1,28 +1,3 @@
-/*
-  Racket
-  Copyright (c) 2004-2018 PLT Design Inc.
-  Copyright (c) 2000-2001 Matthew Flatt
-
-    This library is free software; you can redistribute it and/or
-    modify it under the terms of the GNU Library General Public
-    License as published by the Free Software Foundation; either
-    version 2 of the License, or (at your option) any later version.
-
-    This library is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-    Library General Public License for more details.
-
-    You should have received a copy of the GNU Library General Public
-    License along with this library; if not, write to the Free
-    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301 USA.
-
-  libscheme
-  Copyright (c) 1994 Brent Benson
-  All rights reserved.
-*/
-
 /* This file implements the TCP and UDP interfaces. */
 
 #include "schpriv.h"
@@ -95,6 +70,7 @@ static Scheme_Object *udp_send_enable_break(int argc, Scheme_Object *argv[]);
 static Scheme_Object *udp_receive(int argc, Scheme_Object *argv[]);
 static Scheme_Object *udp_receive_star(int argc, Scheme_Object *argv[]);
 static Scheme_Object *udp_receive_enable_break(int argc, Scheme_Object *argv[]);
+static Scheme_Object *udp_set_receive_buffer_size(int argc, Scheme_Object *argv[]);
 static Scheme_Object *udp_read_ready_evt(int argc, Scheme_Object *argv[]);
 static Scheme_Object *udp_write_ready_evt(int argc, Scheme_Object *argv[]);
 static Scheme_Object *udp_read_evt(int argc, Scheme_Object *argv[]);
@@ -171,6 +147,7 @@ void scheme_init_network(Scheme_Startup_Env *env)
   ADD_PRIM_W_ARITY  ( "udp-multicast-set-interface!", udp_multicast_set_interface,2,2, env) ;
   ADD_PRIM_W_ARITY  ( "udp-multicast-join-group!" , udp_multicast_join_group , 3 , 3 , env) ;
   ADD_PRIM_W_ARITY  ( "udp-multicast-leave-group!", udp_multicast_leave_group, 3 , 3 , env) ;
+  ADD_PRIM_W_ARITY  ( "udp-set-receive-buffer-size!", udp_set_receive_buffer_size, 2 , 2 , env) ;
 
   scheme_restore_prim_instance(env);
 }
@@ -2692,6 +2669,34 @@ udp_multicast_leave_group(int argc, Scheme_Object *argv[])
 					   RKTIO_DROP_MEMBERSHIP,
 					   argc,
 					   argv);
+}
+
+static Scheme_Object *udp_set_receive_buffer_size(int argc, Scheme_Object *argv[])
+{
+  Scheme_UDP *udp = (Scheme_UDP *)argv[0];
+
+  if (!SCHEME_UDPP(argv[0]))
+    scheme_wrong_contract("udp-set-receive-buffer-size!", "udp?", 0, argc, argv);
+
+  if (!SCHEME_INTP(argv[1]) || (SCHEME_INT_VAL(argv[1]) <= 0)) {
+    if (SCHEME_BIGNUMP(argv[1]) && SCHEME_BIGPOS(argv[1]))
+      scheme_raise_exn(MZEXN_FAIL_NETWORK,
+                       "udp-set-receive-buffer-size!: given size is too large\n"
+                       "  given size: %V",
+                       argv[1]);
+    else
+      scheme_wrong_contract("udp-set-receive-buffer-size!", "exact-positive-integer?", 1, argc, argv);
+    return NULL;
+  }
+
+  udp_check_open("udp-set-receive-buffer-size!", argc, argv);
+
+  if (!rktio_udp_set_receive_buffer_size(scheme_rktio, udp->s, SCHEME_INT_VAL(argv[1])))
+    scheme_raise_exn(MZEXN_FAIL_NETWORK,
+                     "udp-set-receive-buffer-size!: setsockopt failed\n"
+                     "  system error: %R");
+
+  return scheme_void;
 }
 
 /*========================================================================*/

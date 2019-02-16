@@ -1,28 +1,3 @@
-/*
-  Racket
-  Copyright (c) 2004-2018 PLT Design Inc.
-  Copyright (c) 1995-2001 Matthew Flatt
-
-    This library is free software; you can redistribute it and/or
-    modify it under the terms of the GNU Library General Public
-    License as published by the Free Software Foundation; either
-    version 2 of the License, or (at your option) any later version.
-
-    This library is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-    Library General Public License for more details.
-
-    You should have received a copy of the GNU Library General Public
-    License along with this library; if not, write to the Free
-    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301 USA.
-
-  libscheme
-  Copyright (c) 1994 Brent Benson
-  All rights reserved.
-*/
-
 /* This file contains the main interpreter eval-apply loop,
    scheme_do_eval(), C and Scheme stack management routines,
    and other bridges between evaluation and compilation.
@@ -181,7 +156,11 @@
 
 /* globals */
 SHARED_OK int scheme_startup_use_jit = INIT_JIT_ON;
+SHARED_OK int scheme_startup_compile_machine_independent = 0;
 void scheme_set_startup_use_jit(int v) { scheme_startup_use_jit =  v; }
+void scheme_set_startup_compile_machine_independent(int v) {
+  scheme_startup_compile_machine_independent = v;
+}
 
 /* THREAD LOCAL SHARED */
 THREAD_LOCAL_DECL(volatile int scheme_fuel_counter);
@@ -213,6 +192,8 @@ static Scheme_Object *allow_set_undefined(int argc, Scheme_Object **argv);
 static Scheme_Object *compile_module_constants(int argc, Scheme_Object **argv);
 static Scheme_Object *use_jit(int argc, Scheme_Object **argv);
 static Scheme_Object *disallow_inline(int argc, Scheme_Object **argv);
+static Scheme_Object *compile_target_machine(int argc, Scheme_Object **argv);
+static Scheme_Object *compile_is_target_machine(int argc, Scheme_Object **argv);
 
 void scheme_escape_to_continuation(Scheme_Object *obj, int num_rands, Scheme_Object **rands, Scheme_Object *alt_full);
 
@@ -262,6 +243,9 @@ scheme_init_eval (Scheme_Startup_Env *env)
   ADD_PARAMETER("compile-enforce-module-constants",  compile_module_constants, MZCONFIG_COMPILE_MODULE_CONSTS, env);
   ADD_PARAMETER("eval-jit-enabled",                  use_jit,                  MZCONFIG_USE_JIT,               env);
   ADD_PARAMETER("compile-context-preservation-enabled", disallow_inline,       MZCONFIG_DISALLOW_INLINE,       env);
+  ADD_PARAMETER("current-compile-target-machine",    compile_target_machine,  MZCONFIG_COMPILE_TARGET_MACHINE, env);
+
+  ADD_PRIM_W_ARITY("compile-target-machine?",        compile_is_target_machine,                       1, 1, env);
 }
 
 void scheme_init_eval_places()
@@ -1972,7 +1956,7 @@ scheme_make_closure(Scheme_Thread *p, Scheme_Object *code, int close)
 #ifdef MZ_USE_JIT
   if (data->u.native_code
       /* If the union points to a another Scheme_Lambda*, then it's not actually
-         a pointer to native code. We must have a closure referenced frmo non-JITted code
+         a pointer to native code. We must have a closure referenced from non-JITted code
          where the closure is also referenced by JITted code. */
       && !SAME_TYPE(SCHEME_TYPE(data->u.native_code), scheme_lambda_type)) {
     Scheme_Object *nc;
@@ -3903,6 +3887,22 @@ static Scheme_Object *disallow_inline(int argc, Scheme_Object **argv)
 			     scheme_make_integer(MZCONFIG_DISALLOW_INLINE),
 			     argc, argv,
 			     -1, NULL, NULL, 1);
+}
+
+static Scheme_Object *compile_target_machine(int argc, Scheme_Object **argv)
+{
+  return scheme_param_config2("current-compile-target-machine", 
+                              scheme_make_integer(MZCONFIG_COMPILE_TARGET_MACHINE),
+                              argc, argv,
+                              -1, scheme_compile_target_check, 
+                              "(or/c #f (and/c symbol? compile-target-machine?))", 0);
+}
+
+static Scheme_Object *compile_is_target_machine(int argc, Scheme_Object **argv)
+{
+  if (!SCHEME_SYMBOLP(argv[0]))
+    scheme_wrong_contract("compile-target-machine?", "symbol?", 0, argc, argv);
+  return scheme_compile_target_check(argc, argv);
 }
 
 static Scheme_Object *

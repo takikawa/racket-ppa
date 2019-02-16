@@ -151,7 +151,10 @@
               (never (make-foo 2 1) (make-foo 1 1))
               (never (make-foo 1 2) (make-foo 1 1))
               (never (make-foo 2 2) (make-foo 1 1))
-              (constant (make-foo 1 1)))]
+              (constant (make-foo 1 1)))
+            (define (d-struct-test make-foo make-bar)
+              (never (make-foo 1) (make-bar 1 1))
+              (never (make-bar 1 1) (make-foo 1)))]
       (local [(define-struct foo (x y))]
         (test #:failure-prefix "default"
               (a-struct-test make-foo)))
@@ -169,7 +172,27 @@
               (define another-inspector (make-inspector some-inspector))
               (define-struct foo (x y) #:inspector another-inspector)]
         (test #:failure-prefix "sibling -> child"
-              (a-struct-test make-foo))))))
+              (a-struct-test make-foo)))
+      (local [(define-struct foo (x) #:transparent)
+              (define-struct (bar foo) (y) #:transparent)]
+        (test #:failure-prefix "derived"
+              (cs-struct-test make-bar)
+              (d-struct-test make-foo make-bar)))
+      (local [(define-struct foo (x))
+              (define-struct (bar foo) (y) #:transparent)]
+        (test #:failure-prefix "transparent derived from opaque"
+              (a-struct-test make-bar)
+              (d-struct-test make-foo make-bar)))
+      (local [(define-struct foo (x) #:transparent)
+              (define-struct (bar foo) (y))]
+        (test #:failure-prefix "opaque derived from transparent"
+              (a-struct-test make-bar)
+              (d-struct-test make-foo make-bar)))
+      (local [(define-struct foo (x))
+              (define-struct (bar foo) (y))]
+        (test #:failure-prefix "opaque derived from opaque"
+              (a-struct-test make-bar)
+              (d-struct-test make-foo make-bar))))))
  
  (test
   #:failure-prefix "unify + logic var"
@@ -258,6 +281,8 @@
  
  ; Unit tests
  (logic-var? (_))
+ 
+ (%which (x) (%= x '_) (%= x 'foo)) => #f
  
  (%which () (%/= 1 1)) => #f
  (%which () (%/= 1 2)) => empty
@@ -426,6 +451,59 @@
  (%which () (%cut-delimiter (%or (%and ! %true) %true))) => empty
  (%more) => #f
  
+ (%which (x) (%not (%= x 1))) => #f
+ (%which (x) (%or (%not (%= x 1)) %true)) => `([x . _])
+ (%more) => #f
+ (%which (x) (%not (%not (%= x 1)))) => `([x . _])
+ (%more) => #f
+ (%which (x) (%if-then-else (%= x 1) %true %fail)) => `([x . 1])
+ (%more) => #f
+ (%which (x) (%if-then-else (%and (%= x 1) (%= x 2)) %true %true)) => `([x . _])
+ (%more) => #f
+ (%which (x) (%cut-delimiter (%and (%= x 1) !))) => `([x . 1])
+ (%more) => #f
+ (let ([r (%rel (x) [(x) (%= x 1) !])]) (%which (x) (%or (r x) %true))) => `([x . 1])
+ (%more) => `([x . _])
+ (%more) => #f
+ (%which (x) (%or ((%rel () [() (%= x 1) !])) %true)) => `([x . 1])
+ (%more) => `([x . _])
+ (%more) => #f
+ (%which (x y) (%= x 1) (%or (%cut-delimiter (%and (%= y 2) !)) %true)) => `([x . 1] [y . 2])
+ (%more) => `([x . 1] [y . _])
+ (%more) => #f
+ (%which (x) (%= x 1) (%or (%cut-delimiter !) %true)) => `([x . 1])
+ (%more) => `([x . 1])
+ (%more) => #f
+ (%which (x) (%= x 1) (%or ((%rel () [() !])) %true)) => `([x . 1])
+ (%more) => `([x . 1])
+ (%more) => #f
+ (%which (x) (%= x 1) (%or (%cut-delimiter (%and ! !)) %true)) => `([x . 1])
+ (%more) => `([x . 1])
+ (%more) => #f
+ (%which (x) (%= x 1) (%or ((%rel () [() ! !])) %true)) => `([x . 1])
+ (%more) => `([x . 1])
+ (%more) => #f
+ 
+ (%which (x y)
+   (%or (%= x 1) (%= x 2))
+   (%cut-delimiter (%and (%or (%= x 2) (%= y 'foo))
+                         (%or %true)
+                         !)))
+ => `([x . 1] [y . foo])
+ (%more) => `([x . 2] [y . _])
+ (%more) => #f
+ 
+ (%which (x y)
+   (%or (%= x 1) (%= x 2))
+   (%cut-delimiter (%and (%or (%= x 2) (%= y 'foo))
+                         ((%rel () [()]))
+                         !)))
+ => `([x . 1] [y . foo])
+ (%more) => `([x . 2] [y . _])
+ (%more) => #f
+ 
+ (%which (x) (%or (%cut-delimiter (%and (%= x 1) (%cut-delimiter %true) ! %fail)) %true)) => `([x . _])
+ 
  (%which () (%empty-rel 1 1)) => #f
  
  (%which () %fail) => #f
@@ -519,6 +597,14 @@
  (let ([rel (%rel () [(1) !] [(1) (%repeat)])])
    (test (%which () (rel 1)) => empty
          (%more) => #f))
+ (let ([rel (%rel () [(2)])])
+   (%assert-after! rel () [(1) !])
+   (test (%which (x) (rel x)) => `([x . 1])
+         (%more) => #f))
+ (let ([rel (%rel () [(1) !])])
+   (%assert! rel () [(2)])
+   (test (%which (x) (rel x)) => `([x . 1])
+         (%more) => #f))
  
  (local [(define (many-%more n)
            (if (zero? n)
@@ -559,5 +645,52 @@
 
  (%which () %true %true) => empty
  (%more) => #f
- 
+
+ (%which () (%let (p) (%and (%= p %<=) (p 4 11)))) => empty
+ (%more) => #f
+ (%which () (%let (p) (%and (%= p %<=) (p 3)))) => #f
+ (%which () (%let (p) (%and (%= p 'nonfunc) (p 3)))) => #f
+
+ (let* ([%foo (lambda (x) (%= x 'foo))]
+        [%bar (lambda (x) (%= x 'bar))]
+        [%foobar (lambda (x) (%or (%foo x) (%bar x)))])
+   (test (%which (x) (%foobar x)) => `([x . foo])
+         (%more) => `([x . bar])
+         (%more) => #f
+         (%which (x) (%let (p) (%and (%or (%= p %foo) (%= p %bar)) (p x))))
+         => `([x . foo])
+         (%more) => `([x . bar])
+         (%more) => #f))
+
+ (%which () (%apply %= '(1 1))) => empty
+ (%more) => #f
+ (%which () (%apply %= '(1 2))) => #f
+ (%which () (%apply %= (list 1 (_)))) => empty
+ (%more) => #f
+ (%which () (%apply %= '())) => #f
+ (%which () (%apply %= '(1 2 3))) => #f
+ (%which () (%apply %= (cons 1 (_)))) => #f
+ (%which () (%apply %= 'not-a-list)) => #f
+ (%which () (%apply (_) '(1))) => #f
+ (%which () (%apply 'not-a-procedure '(1))) => #f
+
+ (%which () (%andmap %= '(1 2 3) '(1 2 3))) => empty
+ (%more) => #f
+ (%which () (%andmap %= '(1 2 3) '(3 2 1))) => #f
+ (%more) => #f
+ (%which () (%andmap %= '(1 2 3) '(1 2))) => #f
+ (%which () (%andmap %= '(1 2 3) 'bad)) => #f
+ (%which () (%andmap %= '(1 2 3))) => #f
+ (%which () (%andmap %= '(1) '(2) '(3))) => #f
+ (%which () (%andmap %= '() '())) => empty
+ (%more) => #f
+ (%which (x) (%andmap %= '(1 2 3) (cons 1 x))) => `([x . (2 3)])
+ (%more) => #f
+ (%which (p) (%or (%= p %=) (%= p %/=) (%= p %<=))
+             (%andmap p '(1 2 3) '(2 3 4)))
+ => `([p . ,%/=])
+ (%more) => `([p . ,%<=])
+ (%more) => #f
+ (%which () (%apply %andmap (list %var (list (_))))) => empty
+ (%more) => #f
  )

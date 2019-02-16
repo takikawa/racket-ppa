@@ -91,6 +91,7 @@ that operate on @racketmodname[pict]s
 @racket[reduction-relation->pict],
 @racket[relation->pict],
 @racket[judgment-form->pict],
+@racket[derivation->pict],
 @racket[metafunction->pict], and
 @racket[lw->pict].
 The primary difference between these functions is that the former list
@@ -167,8 +168,8 @@ sets @racket[dc-for-text-size] and the latter does not.
 }
 
 @defproc[(render-language [lang compiled-lang?]
-                          [file (or/c false/c path-string?) #f]
-                          [#:nts nts (or/c false/c (listof (or/c string? symbol?)))
+                          [file (or/c #f path-string?) #f]
+                          [#:nts nts (or/c #f (listof (or/c string? symbol?)))
                            (render-language-nts)])
          (if file void? pict?)]{
 
@@ -192,7 +193,7 @@ are otherwise setting @racket[dc-for-text-size].
 }
 
 @defproc[(language->pict (lang compiled-lang?)
-                         [#:nts nts (or/c false/c (listof (or/c string? symbol?)))
+                         [#:nts nts (or/c #f (listof (or/c string? symbol?)))
                           (render-language-nts)])
          pict?]{
 
@@ -208,7 +209,7 @@ together.
 }
 
 @defproc[(render-reduction-relation [rel reduction-relation?]
-                                    [file (or/c false/c path-string?) #f]
+                                    [file (or/c #f path-string?) #f]
                                     [#:style style reduction-rule-style/c (rule-pict-style)])
          (if file void? pict?)]{
 
@@ -264,11 +265,12 @@ other tools that combine @racketmodname[pict]s together.
 @defform*[[(render-metafunction metafunction-name maybe-contract)
            (render-metafunction metafunction-name filename maybe-contract)]]{}
 @defform[(render-metafunctions metafunction-name ... 
-                               maybe-filename maybe-contract)
+                               maybe-filename maybe-contract maybe-only-contract)
           #:grammar ([maybe-filename (code:line)
                       (code:line #:file filename)
                       (code:line #:filename filename)]
-                     [maybe-contract? (code:line) (code:line #:contract? bool-expr)])]{}]]{
+                     [maybe-contract? (code:line) (code:line #:contract? bool-expr)]
+                     [maybe-only-contract? (code:line) (code:line #:only-contract? bool-expr)])]{}]]{
 Like @racket[render-reduction-relation] but for metafunctions.
 
 Similarly, @racket[render-metafunctions] accepts multiple 
@@ -281,7 +283,9 @@ Parameters that affect rendering include
 
 If the metafunctions have contracts, they are typeset as the first
 lines of the output unless the expression following @racket[#:contract?]
-evaluates to @racket[#f] (which is the default).
+evaluates to @racket[#f] (which is the default). If
+the expression following @racket[#:only-contract?] is not @racket[#false]
+(the default) then only the contract is typeset.
 
 This function sets @racket[dc-for-text-size]. See also
 @racket[metafunction->pict] and
@@ -297,17 +301,19 @@ This function sets @racket[dc-for-text-size]. See also
       [(add (1 K_1) (1 K_2)) (0 (add (1 ·) (add K_1 K_2)))])
     (render-metafunction add #:contract? #t)]
 
-@history[#:changed "1.3" @list{Added @racket[#:contract?] keyword argument.}]
+@history[#:changed "1.3" @list{Added @racket[#:contract?] keyword argument.}
+         #:changed "1.7" @list{Added @racket[#:only-contract?] keyword argument.}]
 }
 
-@defform[(metafunction->pict metafunction-name maybe-contract?)]{
+@defform[(metafunction->pict metafunction-name maybe-contract? maybe-only-contract?)]{
   Produces a pict like @racket[render-metafunction], but without setting @racket[dc-for-text-size].
   It is suitable for use in Slideshow or other libraries that combine
   @racketmodname[pict]s.
 
   @ex[(metafunction->pict add)]
   
- @history[#:changed "1.3" @list{Added @racket[#:contract?] keyword argument.}]
+ @history[#:changed "1.3" @list{Added @racket[#:contract?] keyword argument.}
+          #:changed "1.7" @list{Added @racket[#:only-contract?] keyword argument.}]
 }
 
 @defform[(metafunctions->pict metafunction-name ...)]{
@@ -394,6 +400,16 @@ This function sets @racket[dc-for-text-size]. See also
 @racket[judgment-form->pict].
 }
 
+@defproc[(derivation->pict [language compiled-lang?] [derivation derivation?]) pict?]{
+ Produces a pict that looks like the derivation in @racket[show-derivations],
+ except that it uses @racket[term->pict/pretty-write] to draw the
+ individual terms in the derivation.
+
+ @ex[(derivation->pict nums (car (build-derivations (eq (0 (1 (0 ·))) (0 (1 ·))))))]
+
+ @history[#:added "1.8"]
+}
+
 @defform[(relation->pict relation-name)]{
   This produces a pict, but without setting @racket[dc-for-text-size].
   It is suitable for use in Slideshow or other libraries that combine
@@ -408,7 +424,7 @@ This function sets @racket[dc-for-text-size]. See also
 
 @section{Customization}
 
-@defparam[render-language-nts nts (or/c false/c (listof symbol?))]{
+@defparam[render-language-nts nts (or/c #f (listof symbol?))]{
   The value of this parameter controls which non-terminals
   @racket[render-language] and @racket[language->pict] render by default. If it
   is @racket[#f] (the default), all non-terminals are rendered.
@@ -456,7 +472,7 @@ Defaults to @racket[#f].
 
 @defparam[render-reduction-relation-rules 
           rules 
-          (or/c false/c 
+          (or/c #f
                 (listof (or/c symbol? 
                               string?
                               exact-nonnegative-integer?)))]{

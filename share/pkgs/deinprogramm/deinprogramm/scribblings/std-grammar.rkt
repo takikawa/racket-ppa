@@ -30,6 +30,7 @@
      #;library-require]
    [definition @#,racket[(define id expr)]
      @#,racket[(define-record-procedures id id id (field (... ...)))]
+     @#,racket[(define-record-procedures id id (field (... ...)))]
      @#,racket[(define-record-procedures-parametric (id id (... ...)) id id (id (... ...)))]
      @#,racket[(: id sig)]
      def-rule ...]

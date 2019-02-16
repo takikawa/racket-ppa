@@ -168,7 +168,8 @@
              [else false])
            expected-val))
         (quote #,(syntax->datum #'result-expr))
-        (format "at line ~a" #,(syntax-line stx)))]))
+        (format "at line ~a" #,(syntax-line stx)))]
+    [_ (handle-test-case-parse-error stx)]))
 
 (define-syntax (test/pred stx)
   (syntax-case stx ()
@@ -182,7 +183,8 @@
              [else (pred val)])
            (quote #,(syntax->datum #'pred))))
         (quote #,(syntax->datum #'test-expr))
-        (format "at line ~a" #,(syntax-line stx)))]))
+        (format "at line ~a" #,(syntax-line stx)))]
+    [_ (handle-test-case-parse-error stx)]))
 
 (define-syntax (test/exn stx)
   (syntax-case stx ()
@@ -197,7 +199,8 @@
                     (string-contains (exn-message val) exception-substring-val)))
            exception-substring-val))
         (quote #,(syntax->datum #'test-expr))
-        (format "at line ~a" #,(syntax-line stx)))]))
+        (format "at line ~a" #,(syntax-line stx)))]
+    [_ (handle-test-case-parse-error stx)]))
 
 (define-syntax (test/regexp stx)
   (syntax-case stx ()
@@ -212,6 +215,22 @@
                     (regexp-match regexp (exn-message val))))
            regexp-val))
         (quote #,(syntax->datum #'test-expr))
-        (format "at line ~a" #,(syntax-line stx)))]))
+        (format "at line ~a" #,(syntax-line stx)))]
+    [_ (handle-test-case-parse-error stx)]))
+
+(define-for-syntax (handle-test-case-parse-error stx)
+  (syntax-case stx ()
+    [(name only)
+     (raise-syntax-error (syntax-e #'name)
+                         "Expected both result and expected expression, but got only one expression"
+                         stx
+                         #f
+                         (list #'only))]
+    [(name lots ...)
+     (raise-syntax-error (syntax-e #'name)
+                         "Expected only result and expected expression, but got more expressions"
+                         stx
+                         #f
+                         (syntax->list #'(lots ...)))]))
 
 (install-test-inspector)

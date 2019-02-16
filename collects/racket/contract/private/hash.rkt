@@ -4,7 +4,10 @@
          syntax/location
          "guts.rkt"
          "blame.rkt"
-         "prop.rkt")
+         "prop.rkt"
+         "rand.rkt"
+         "generate.rkt"
+         "generate-base.rkt")
 
 (provide (rename-out [wrap-hash/c hash/c])
          hash/dc)
@@ -188,6 +191,51 @@
           (contract-struct-equivalent? this-rng that-rng))]
     [else #f]))
 
+;; Will periodically generate empty hashes and hashes with multiple elements
+(define (hash/c-generate ctc)
+  (define this-dom (base-hash/c-dom ctc))
+  (define this-rng (base-hash/c-rng ctc))
+  (define this-immutable (base-hash/c-immutable ctc))
+  (λ (fuel)
+    (define rnd (random fuel)) ;; used to return empty hashes from time to time
+    (define gen-key (contract-random-generate/choose this-dom fuel))
+    (define gen-val (contract-random-generate/choose this-rng fuel))
+    (λ ()
+      (cond [(or (zero? rnd) (not gen-key) (not gen-val))
+             (if this-immutable
+                 (hash)
+                 (make-hash))]
+            [else
+             (let ([pair-list
+                    (let loop ([so-far (list (cons (gen-key) (gen-val)))])
+                      (rand-choice
+                       [1/5 so-far]
+                       [else
+                        (loop
+                         (cons (cons (gen-key) (gen-val)) so-far))]))])
+               (if this-immutable
+                   (make-immutable-hash pair-list)
+                   (make-hash pair-list)))]))))
+
+(define (hash/c-exercise ctc)
+  (define env (contract-random-generate-get-current-environment))
+  (define dom (base-hash/c-dom ctc))
+  (define rng (base-hash/c-rng ctc))
+  (λ (fuel)
+    ;; passing (list dom rng) to multi-exercise will produce
+    ;; a function that exercises values of form (list/c dom rng)
+    ;; and a list of newly available contracts.
+    (define-values (exercise-list-dom-rng available-ctcs)
+      ((multi-exercise (list dom rng)) fuel))
+    (values
+     (λ (h)
+       ;; iterate over key-value pairs, exercise and stash
+       (for ([(k v) (in-hash h)])
+         (exercise-list-dom-rng (list k v))
+         (contract-random-generate-stash env dom k)
+         (contract-random-generate-stash env dom v)))
+     (cons dom (cons rng available-ctcs)))))
+
 (define-struct (flat-hash/c base-hash/c) ()
   #:omit-define-syntaxes
   #:property prop:custom-write custom-write-property-proc
@@ -195,6 +243,8 @@
   (build-flat-contract-property
    #:name hash/c-name
    #:first-order hash/c-first-order
+   #:generate hash/c-generate
+   #:exercise hash/c-exercise
    #:stronger hash/c-stronger
    #:equivalent hash/c-equivalent
    #:late-neg-projection
@@ -282,25 +332,25 @@
        val
        (λ (h k)
          (values (with-contract-continuation-mark
-                  blame+neg-party
-                  (neg-dom-proj k neg-party))
+                   blame+neg-party
+                   (neg-dom-proj k neg-party))
                  (λ (h k v)
                    (with-contract-continuation-mark
-                    blame+neg-party
-                    ((mk-pos-rng-proj k) v neg-party)))))
+                     blame+neg-party
+                     ((mk-pos-rng-proj k) v neg-party)))))
        (λ (h k v)
          (with-contract-continuation-mark
-          blame+neg-party
-          (values (neg-dom-proj k neg-party)
-                  ((mk-neg-rng-proj k) v neg-party))))
+           blame+neg-party
+           (values (neg-dom-proj k neg-party)
+                   ((mk-neg-rng-proj k) v neg-party))))
        (λ (h k)
          (with-contract-continuation-mark
-          blame+neg-party
-          (neg-dom-proj k neg-party)))
+           blame+neg-party
+           (neg-dom-proj k neg-party)))
        (λ (h k)
          (with-contract-continuation-mark
-          blame+neg-party
-          (pos-dom-proj k neg-party)))
+           blame+neg-party
+           (pos-dom-proj k neg-party)))
        impersonator-prop:contracted ctc
        impersonator-prop:blame blame)))
 
@@ -311,6 +361,8 @@
   (build-chaperone-contract-property
    #:name hash/c-name
    #:first-order hash/c-first-order
+   #:generate hash/c-generate
+   #:exercise hash/c-exercise
    #:stronger hash/c-stronger
    #:equivalent hash/c-equivalent
    #:late-neg-projection (ho-projection chaperone-hash)))

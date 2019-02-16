@@ -1617,8 +1617,12 @@
    "check-expect遇到如下错误，而非期望值，~F。~n   :: ~a")
   (test-engine-actual-value-differs-error
    "实际值~F不同与期望值~F。")
-  (test-engine-actual-value-not-within-error
-   "实际值~F不在~v范围内、期望值~F的。")　;; NO way to express this order natively in Chinese!!!
+  ;; need to translate only one of these next two
+  ;; (test-engine-actual-value-not-within-error or
+  ;;  test-engine-actual-value-not-within-error/alt-word-order)
+  ;; if both are present, test-engine-actual-value-not-within-error is used
+  (test-engine-actual-value-not-within-error/alt-order
+   "实际值~F不在期望值~F的~v范围内。")
   (test-engine-encountered-error-error
    "check-error遇到如下error，而非期望的~a~n   :: ~a")
   (test-engine-expected-error-error
@@ -1808,7 +1812,7 @@
   (install-pkg-setup-long "设置当前安装") ; for menu
   (install-pkg-remove "删除")
   (install-pkg-do-not-remove "不删除")
-  (install-pkg-action-inferred-to-be-update "行动推断为更新")
+  (install-pkg-action-inferred-to-be-update "操作推断为更新")
   (install-pkg-action-inferred-to-be-install "操作推断为安装")
   (install-pkg-default "默认的")
   (install-pkg-scope-label "Package作用域")

@@ -7,6 +7,7 @@
          racket/pretty
          racket/list
          racket/set
+         (except-in (path-up "utils/utils.rkt") infer)
          (path-up "rep/type-rep.rkt" "rep/prop-rep.rkt" "rep/object-rep.rkt"
                   "rep/core-rep.rkt" "rep/values-rep.rkt" "rep/fme-utils.rkt"
                   "rep/rep-utils.rkt" "rep/free-ids.rkt"
@@ -17,9 +18,10 @@
                   "types/union.rkt" "types/numeric-tower.rkt"
                   "types/resolve.rkt"
                   "utils/prefab.rkt" "utils/identifier.rkt"
-                  "utils/utils.rkt"
                   "utils/tc-utils.rkt"
-                  "types/struct-table.rkt")
+                  "types/struct-table.rkt"
+                  "infer/infer.rkt"
+                  "types/substitute.rkt")
          (for-syntax racket/base syntax/parse))
 
 ;; printer-type: (one-of/c 'custom 'debug)
@@ -253,7 +255,7 @@
                  [(ForcePE:) (list 'force sexp)]
                  [(StructPE: t idx)
                   (define maybe-accessor-id
-                    (id-for-struct-pe
+                    (find-struct-accessor-id
                      (λ (t* idx*) (and (subtype t t*)
                                        (= idx idx*)))))
                   (cond
@@ -262,7 +264,7 @@
                     [else (list 'struct-ref sexp idx)])]
                  [(PrefabPE: key idx)
                   (define maybe-accessor-id
-                    (id-for-struct-pe
+                    (find-struct-accessor-id
                      (λ (t* idx*) (and (Prefab? t*)
                                        (prefab-key-subtype? (Prefab-key t*) key)
                                        (= idx idx*)))))
@@ -285,15 +287,28 @@
 ;; cover, and all the names types we know about being the sets.
 (define (cover-union t elems ignored-names)
   (define valid-names
-    ;; We keep only unions, and only those that are subtypes of t.
-    ;; It's no use attempting to cover t with things that go outside of t.
-    (filter (lambda (p)
-              (match p
-                [(cons name (and t* (or (? Union?) (? BaseUnion?))))
-                 (and (not (member name ignored-names))
-                      (subtype t* t))]
-                [_ #f]))
-            (force (current-type-names))))
+    ;; We keep only the unions and (instantiated) polymorphic unions
+    ;; which are subtypes of t. It's no use attempting to cover t with
+    ;; things that go outside of t.
+    (filter-map
+     (match-lambda
+       [(and name/type (cons name t*))
+        (and
+         (not (member name ignored-names))
+         (match t*
+           [(or (? Union?) (? BaseUnion?))
+            (and (subtype t* t) name/type)]
+           [(Poly: names (and raw-body (or (? Union?) (? BaseUnion?))))
+            (match (infer names null (list raw-body) (list t) Univ)
+              [(and (? hash? type-sub)
+                    (app (λ (sub) (subst-all sub raw-body))
+                         (and body (or (? Union?) (? BaseUnion?)))))
+               (define args (for/list ([arg-name (in-list names)])
+                              (type->sexp (t-subst-type (hash-ref type-sub arg-name)))))
+               (cons (cons name args) body)]
+              [_ #f])]
+           [_ #f]))])
+     (force (current-type-names))))
   ;; names and the sets themselves (not the union types)
   ;; note that racket/set supports lists with equal?
   (define candidates
@@ -669,7 +684,9 @@
      (match type
        [(Union-all-flat: ts)
         (define-values (covered remaining) (cover-union type ts ignored-names))
-        (cons 'U (sort (append covered (map t->s remaining)) primitive<=?))]
+        (match (sort (append covered (map t->s remaining)) primitive<=?)
+          [(list t) t]
+          [ts (cons 'U ts)])]
        [_ (t->s type)])]
     [(BaseUnion-bases: bs)
      (define-values (covered remaining) (cover-union type bs ignored-names))
@@ -759,6 +776,7 @@
      `(Refinement ,(t->s parent) ,(syntax-e p?))]
     [(Sequence: ts)
      `(Sequenceof ,@(map t->s ts))]
+    [(SequenceTop:) 'SequenceTop]
     [(Error:) 'Error]
     ;[(fld: t a m) `(fld ,(type->sexp t))]
     [(Distinction: name sym ty) ; from define-new-subtype

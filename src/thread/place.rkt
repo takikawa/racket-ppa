@@ -1,6 +1,7 @@
 #lang racket/base
 (require (only-in '#%unsafe unsafe-abort-current-continuation/no-wind)
-         "place-local.rkt"
+         "place-object.rkt"
+         "custodian-object.rkt"
          "check.rkt"
          "host.rkt"
          "schedule.rkt"
@@ -34,108 +35,87 @@
          place-pumper-threads
          unsafe-add-post-custodian-shutdown)
 
+;; For `(struct place ...)`, see "place-object.rkt"
+
 ;; ----------------------------------------
 
-(struct place (parent
-               lock
-               activity-canary           ; box for quick check before taking lock
-               pch                       ; channel to new place
-               [result #:mutable]        ; byte or #f, where #f means "not done"
-               [queued-result #:mutable] ; non-#f triggers a place exit
-               custodian
-               [post-shutdown #:mutable] ; list of callbacks
-               [pumpers #:mutable]       ; vector of up to three pumper threads
-               [pending-break #:mutable] ; #f, 'break, 'hangup, or 'terminate
-               done-waiting              ; hash table of places to ping when this one ends
-               [wakeup-handle #:mutable]
-               [dequeue-semas #:mutable]) ; semaphores reflecting place-channel waits to recheck
-  #:property prop:evt (struct-field-index pch)
-  #:property prop:place-message (lambda (self) (lambda () (lambda () (place-pch self)))))
-
-(define (make-place lock cust
-                    #:parent [parent #f]
-                    #:place-channel [pch #f])
-  (place parent
-         lock
-         (box #f)             ; activity canary
-         pch
-         #f                   ; result
-         #f                   ; queued-result
-         cust
-         '()                  ; post-shutdown
-         #f                   ; pumper-threads
-         #f                   ; pending-break
-         (make-hasheq)        ; done-waiting
-         #f                   ; wakeup-handle
-         '()))                ; dequeue-semas
-
-(define-place-local current-place (make-place (host:make-mutex)
-                                              (current-custodian)))
-
 (define/who (dynamic-place path sym in out err)
+  (when (eq? initial-place current-place)
+    ;; needed by custodian GC callback for memory limits:
+    (atomically (ensure-wakeup-handle!)))
   (define orig-cust (create-custodian))
   (define lock (host:make-mutex))
   (define started (host:make-condition))
   (define-values (place-pch child-pch) (place-channel))
+  (define orig-plumber (make-plumber))
   (define new-place (make-place lock orig-cust
                                 #:parent current-place
                                 #:place-channel place-pch))
+  (set-custodian-place! orig-cust new-place)
   (define done-waiting (place-done-waiting new-place))
-  (define orig-plumber (make-plumber))
   (define (default-exit v)
     (plumber-flush-all orig-plumber)
     (atomically
      (host:mutex-acquire lock)
      (set-place-queued-result! new-place (if (byte? v) v 0))
      (place-has-activity! new-place)
+     (unsafe-custodian-unregister new-place (place-custodian-ref new-place))
      (host:mutex-release lock))
     ;; Switch to scheduler, so it can exit:
     (engine-block))
   ;; Atomic mode to create ports and deliver them to the new place
   (start-atomic)
+  (define cref (custodian-register-place (current-custodian) new-place shutdown-place))
+  (unless cref
+    (end-atomic)
+    (raise-custodian-is-shut-down who (current-custodian)))
+  (set-place-custodian-ref! new-place cref)
   (define-values (parent-in parent-out parent-err child-in-fd child-out-fd child-err-fd)
     (make-place-ports+fds in out err))
   (host:mutex-acquire lock)
   ;; Start the new place
-  (host:fork-place
-   (lambda ()
-     (call-in-another-main-thread
-      orig-cust
-      (lambda ()
-        (set! current-place new-place)
-        (current-thread-group root-thread-group)
-        (current-custodian orig-cust)
-        (current-plumber orig-plumber)
-        (exit-handler default-exit)
-        (current-pseudo-random-generator (make-pseudo-random-generator))
-        (current-evt-pseudo-random-generator (make-pseudo-random-generator))
-        (define finish
-          (host:start-place child-pch path sym
-                            child-in-fd child-out-fd child-err-fd
-                            orig-cust orig-plumber))
-        (call-with-continuation-prompt
-         (lambda ()
-           (host:mutex-acquire lock)
-           (set-place-wakeup-handle! new-place (sandman-get-wakeup-handle))
-           (host:condition-signal started) ; place is sufficiently started
-           (host:mutex-release lock)
-           (finish))
-         (default-continuation-prompt-tag)
-         (lambda (thunk)
-           ;; Thread ended with escape => exit with status 1
-           (call-with-continuation-prompt thunk)
-           (default-exit 1)))
-        (default-exit 0))))
-   (lambda (result)
-     ;; Place is done, so save the result and alert anyone waiting on
-     ;; the place
-     (do-custodian-shutdown-all orig-cust)
-     (host:mutex-acquire lock)
-     (set-place-result! new-place result)
-     (host:mutex-release lock)
-     (for ([pl (in-hash-keys done-waiting)])
-       (wakeup-waiting pl))
-     (hash-clear! done-waiting)))
+  (define host-thread
+    (host:fork-place
+     (lambda ()
+       (call-in-another-main-thread
+        orig-cust
+        (lambda ()
+          (set! current-place new-place)
+          (set-place-host-roots! new-place (host:current-place-roots))
+          (current-thread-group root-thread-group)
+          (current-custodian orig-cust)
+          (current-plumber orig-plumber)
+          (exit-handler default-exit)
+          (current-pseudo-random-generator (make-pseudo-random-generator))
+          (current-evt-pseudo-random-generator (make-pseudo-random-generator))
+          (define finish
+            (host:start-place child-pch path sym
+                              child-in-fd child-out-fd child-err-fd
+                              orig-cust orig-plumber))
+          (call-with-continuation-prompt
+           (lambda ()
+             (host:mutex-acquire lock)
+             (set-place-wakeup-handle! new-place (sandman-get-wakeup-handle))
+             (host:condition-signal started) ; place is sufficiently started
+             (host:mutex-release lock)
+             (finish))
+           (default-continuation-prompt-tag)
+           (lambda (thunk)
+             ;; Thread ended with escape => exit with status 1
+             (call-with-continuation-prompt thunk)
+             (default-exit 1)))
+          (default-exit 0))))
+     (lambda (result)
+       ;; Place is done, so save the result and alert anyone waiting on
+       ;; the place
+       (do-custodian-shutdown-all orig-cust)
+       (host:mutex-acquire lock)
+       (set-place-result! new-place result)
+       (host:mutex-release lock)
+       (for ([pl (in-hash-keys done-waiting)])
+         (wakeup-waiting pl))
+       (hash-clear! done-waiting))))
+  (set-place-host-thread! new-place host-thread)
   ;; Wait for the place to start, then return the place object
   (host:condition-wait started lock)
   (host:mutex-release lock)
@@ -152,13 +132,12 @@
    (when (or (not pending-break)
              (break>? (or kind 'break) pending-break))
      (set-place-pending-break! p (or kind 'break))
-     (place-has-activity! p)
-     (sandman-wakeup (place-wakeup-handle p)))
+     (place-has-activity! p))
    (host:mutex-release (place-lock p))))
 
 (define (place-has-activity! p)
   (box-cas! (place-activity-canary p) #f #t)
-  (void))
+  (sandman-wakeup (place-wakeup-handle p)))
 
 (void
  (set-check-place-activity!
@@ -185,15 +164,19 @@
         (thread-did-work!)
         (do-break-thread root-thread break #f))))))
 
+;; in atomic mode
+(define (do-place-kill p)
+  (host:mutex-acquire (place-lock p))
+  (unless (or (place-result p)
+              (place-queued-result p))
+    (set-place-queued-result! p 1)
+    (place-has-activity! p))
+  (host:mutex-release (place-lock p)))
+
 (define/who (place-kill p)
   (check who place? p)
   (atomically
-   (host:mutex-acquire (place-lock p))
-   (unless (or (place-result p)
-               (place-queued-result p))
-     (set-place-queued-result! p 1)
-     (place-has-activity! p))
-   (host:mutex-release (place-lock p)))
+   (do-place-kill p))
   (place-wait p)
   (void))
 
@@ -206,6 +189,21 @@
       (when (thread? s) (thread-wait s)))
     (set-place-pumpers! p #f))
   result)
+
+;; In atomic mode, callback from custodian:
+(define (shutdown-place p c)
+  (do-place-kill p)
+  ;; Wait for the place to finish; that should happen quickly,
+  ;; so loop here in the atomic region:
+  (let loop ()
+    (host:mutex-acquire (place-lock p))
+    (define result (place-result p))
+    (unless result
+      (hash-set! (place-done-waiting p) current-place #t))
+    (host:mutex-release (place-lock p))
+    (unless result
+      (sandman-sleep #f)
+      (loop))))
 
 (struct place-done-evt (p get-result?)
   #:property prop:evt (poller (lambda (self poll-ctx)
@@ -233,8 +231,9 @@
 (struct message-queue (lock
                        [q #:mutable]
                        [rev-q #:mutable]
-                       key-box              ; holds write key when non-empty
-                       [waiters #:mutable]) ; hash of waiting place -> semaphore
+                       out-key-box          ; holds write key when non-empty
+                       [waiters #:mutable]  ; hash of waiting place -> semaphore
+                       in-key-box)          ; holds read key when waiters
   #:authentic)
 
 (define (make-message-queue)
@@ -242,7 +241,8 @@
                  '()
                  '()
                  (box #f)
-                 #hash()))
+                 #hash()
+                 (box #f)))
 
 (define (enqueue! mq msg wk)
   (define lock (message-queue-lock mq))
@@ -251,8 +251,11 @@
    (set-message-queue-rev-q! mq (cons msg (message-queue-rev-q mq)))
    (define waiters (message-queue-waiters mq))
    (set-message-queue-waiters! mq '#hash())
-   (set-box! (message-queue-key-box mq) wk)
+   (set-box! (message-queue-out-key-box mq) wk)
+   (set-box! (message-queue-in-key-box mq) #f)
    (host:mutex-release lock)
+   ;; Waking all waiters is not great, but we don't know which of
+   ;; them is still waiting and can reliably succeed
    (for ([(pl s) (in-hash waiters)])
      (host:mutex-acquire (place-lock pl))
      (set-place-dequeue-semas! pl (cons s (place-dequeue-semas pl)))
@@ -266,7 +269,7 @@
 ;; a message. Note that if the message queue becomes
 ;; inaccessible (so no writers), then the semaphores
 ;; become inaccessible.
-(define (dequeue! mq success-k fail-k)
+(define (dequeue! mq rk success-k fail-k)
   (ensure-wakeup-handle!)
   (define lock (message-queue-lock mq))
   (host:mutex-acquire lock)
@@ -286,28 +289,31 @@
        [else
         (define s (make-semaphore))
         (set-message-queue-waiters! mq (hash-set waiters current-place s))
+        (set-box! (message-queue-in-key-box mq) rk)
         (host:mutex-release lock)
         (fail-k s)])]
     [else
      (define new-q (cdr q))
      (set-message-queue-q! mq new-q)
      (when (null? new-q)
-       (set-box! (message-queue-key-box mq) #f))
+       (set-box! (message-queue-out-key-box mq) #f))
      (host:mutex-release lock)
      (success-k (car q))]))
 
 ;; ----------------------------------------
 
-(struct pchannel (in-mq-e     ; ephemeron of writer key and message-queue
-                  out-mq-e    ; ephemeron of reader key and message-queue
+(struct pchannel (in-mq-e      ; ephemeron of writer key and message-queue
+                  out-mq-e     ; ephemeron of reader key and message-queue
                   reader-key 
                   writer-key
-                  in-key-box) ; causes in-mq-e to be retained when non-empty
+                  in-key-box   ; causes in-mq-e value to be retained when non-empty
+                  out-key-box) ; causes out-mq-e value to be retained when waiters
   #:reflection-name 'place-channel
   #:property prop:evt (poller (lambda (self poll-ctx)
                                 (define in-mq (ephemeron-value (pchannel-in-mq-e self)))
                                 (if in-mq
                                     (dequeue! in-mq
+                                              (pchannel-reader-key self)
                                               (lambda (v)
                                                 (values #f
                                                         (wrap-evt
@@ -336,8 +342,10 @@
   (define wk1 (gensym 'write))
   (define rk2 (gensym 'read))
   (define wk2 (gensym 'write))
-  (values (pchannel (make-ephemeron wk1 mq1) (make-ephemeron rk2 mq2) rk1 wk2 (message-queue-key-box mq1))
-          (pchannel (make-ephemeron wk2 mq2) (make-ephemeron rk1 mq1) rk2 wk1 (message-queue-key-box mq2))))
+  (values (pchannel (make-ephemeron wk1 mq1) (make-ephemeron rk2 mq2) rk1 wk2
+                    (message-queue-out-key-box mq1) (message-queue-in-key-box mq2))
+          (pchannel (make-ephemeron wk2 mq2) (make-ephemeron rk1 mq1) rk2 wk1
+                    (message-queue-out-key-box mq2) (message-queue-in-key-box mq1))))
 
 (define/who (place-channel-get in-pch)
   (check who place-channel? in-pch)
@@ -347,6 +355,7 @@
       (begin
         (start-atomic)
         (dequeue! in-mq
+                  (pchannel-reader-key pch)
                   (lambda (v)
                     (end-atomic)
                     (un-message-ize v))
@@ -378,11 +387,16 @@
     (set-place-wakeup-handle! current-place (sandman-get-wakeup-handle))))
 
 ;; in atomic mode
-(define (wakeup-waiting k)
-  (host:mutex-acquire (place-lock k))
-  (unless (place-result k)
-    (sandman-wakeup (place-wakeup-handle k)))
-  (host:mutex-release (place-lock k)))
+(define (wakeup-waiting pl)
+  (host:mutex-acquire (place-lock pl))
+  (unless (place-result pl)
+    (sandman-wakeup (place-wakeup-handle pl)))
+  (host:mutex-release (place-lock pl)))
+
+(define (wakeup-initial-place)
+  ;; This is ok without a lock, because if the initial place
+  ;; terminates, the process exist:
+  (sandman-wakeup (place-wakeup-handle initial-place)))
 
 ;; ----------------------------------------
 
@@ -403,3 +417,14 @@
      (set-place-post-shutdown! current-place
                                (cons proc
                                      (place-post-shutdown current-place))))))
+
+(void (set-place-custodian-procs!
+       (lambda ()
+         (atomically (ensure-wakeup-handle!))
+         current-place)
+       ;; in atomic mode
+       (lambda ()
+         (wakeup-initial-place))
+       ;; in atomic mode
+       (lambda (pl)
+         (wakeup-waiting pl))))
