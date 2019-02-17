@@ -1,8 +1,10 @@
 racket (7.2+dfsg1-1) experimental; urgency=medium
 
   * New upstream bugfix release.
+  * Bug fix: "Install Package doesn't work in DrRacket", thanks to
+    Mike Manilone (Closes: #922444).
 
- -- David Bremner <bremner@debian.org>  Sat, 16 Feb 2019 19:56:51 -0400
+ -- David Bremner <bremner@debian.org>  Sat, 16 Feb 2019 20:59:49 -0400
 
 racket (7.1+dfsg1-1) unstable; urgency=medium
 
