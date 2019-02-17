@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "7.2"))) (define collection (quote multi)) (define deps (quote ("base"))) (define pkg-desc "Utilities for interoperating between testing frameworks") (define version "1.1") (define pkg-authors (quote (florence)))))

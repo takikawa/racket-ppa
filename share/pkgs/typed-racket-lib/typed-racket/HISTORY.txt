@@ -1,0 +1,130 @@
+7.1
+- Add immutable vectors.
+7.0
+- Revamp prefab struct handling.
+- Improve contract generation for unions.
+- Handle NaN correctly in comparisons.
+- Improve `unsafe-provide` on imported bindings.
+- Add `#:rest-star` in function types.
+- Add `typed-racket:ignore-type-information` syntax property.
+6.12
+- Fixes for contract generation (merged before 6.11 but not released).
+- Change `inst` to handle missing arguments (uses `Any`).
+6.11
+- Syntax for refinment types and dependent function types.
+- Improvements to case-lambda inference and rest arg handling.
+6.10
+- Improve refinement types.
+- Split mutable and immutable hash types.
+6.9
+- Added initial steps towards refinement types.
+- Fixes related to numeric types and NaN.
+6.8
+- Restructured internal representations, especially of Union types.
+  See https://pnwamk.github.io/blog/2017/01/08/some-changes-in-typed-racket-v6-8/
+  for more details.
+- Add `typed/setup/getinfo`, `typed/images/compile-time`, `typed/file/glob`,
+  `typed/racket/gui/no-check`
+- Add `(Intersection ...)` syntax.
+- Fix type checking of optional & keyword arguments to be sound.
+6.7
+- Add `row-inst` and `Row`
+- Support polymorphic structs in `unsafe-require/typed`
+- Add `typed/racket/os` and `typed/racket/db{/sqlite3}`.
+6.6
+- Warn on opaque values passed to `any-wrap/c`. This will become an
+  error in the future.
+- Added intersection types.
+- Add typed/syntax/{modread,srcloc,readerr}
+- Improve type & contract serialization and avoid pconvert.
+- Check source type in `cast` (potential incompatibility)
+- Internal: rename "filter" to "prop"
+6.5
+- Added `simple-result->` to improve generated contract performance.
+- Improve error message printing.
+- Add `typed/racket/random`.
+- Internal: populate type table unconditionally, for use in tooltips.
+6.4
+- Contract performance improvements, including generating code that
+  the contract system can optimize
+- Make `any-wrap/c` more permissive on opaque structs.
+- Soundly check opaque predicates.
+- Add `#:type-name` option to `struct`.
+6.3
+- Startup time reduction
+- Tightening and cleanup of numeric types
+- Sealing contracts for row polymorphic types
+- `define-new-subtype`
+- More robust compound pair operations optimizations
+- Redesign of top-level support, using trampolining macros
+- Static contract caching more conservative, causes contract generation slowdowns
+- Experimental unit support
+- `typed/racket/unsafe`, with `unsafe-require/typed` and `unsafe-provide`
+6.2
+- Use submodules to avoid allocating contract wrappers when not needed.
+- Class types and contract generation are significantly improved, but still experimental.
+- Many types for GUI classes added.
+- Tests on let-bound variables now refine the type of what was bound to them.
+- DrRacket tooltips for types and type errors.
+- Support for prefab structs.
+- Types for a variety of libraries, including `rackunit` and `json`.
+6.1.1
+- Exception handling is now sound. Broke existing programs (e.g. marketplace).
+- More types for GUI and framework.
+- Support for casts and predicates in typed regions.
+6.1
+- Inference speedups.
+- Support for contracted functions in the base environment.
+- Better keyword support.
+6.0.1
+- Types for classes (including row types, sealing contracts, etc).
+  Still experimental.  
+- Contracts are now optimized; in particular, redundant contracts are omitted
+- Filters work with conditions that raise errors, as in the pattern
+  (begin (unless (number? x) (error 'fail))
+         (add1 x))
+- Types are now pretty-printed
+- Add prefix-style function types and `->*` function type constructor
+- Support syntactic forms without : (such as let, lambda, for, etc)
+- Type aliases support arbitrary mutual recursion
+- Inform check-syntax about expansion results
+- Add `typed/untyped-utils` library
+- Add `typed/syntax/stx`, `typed/pict`, 
+- Significant test suite improvments
+- Improved support for `Struct-Type` values
+- Support keyword function definitions without annotation.
+- Handle forward references in un-annotated definitions
+- Improve type inference for `letrec`-bound variables
+6.0
+- Support for `define-type', `struct:', `make-predicate', etc. at the REPL
+- Performance work: optimized subtyping
+- Make `struct:' have the correct bindings in struct info
+- Use pairs for objects on arrow types
+- Split off `recover-source-syntax' into a separate package and generalized it
+- Lots of doc improvements
+- Lots of error message improvements
+- Split into multiple packages
+5.3.4
+- Moved Optimization Coach to the package system
+- Multiple fixes to polydots
+5.3.3
+  No changes
+5.3.2
+- Added types for control operators
+- Added `typed/untyped-utils`
+5.3.1
+- Revised handling of `Any` exported to untyped code
+- Added `cast`
+- Correctly compute variance of polymorphic type application
+5.3
+- Keyword and optional arguments
+- Faster startup
+- Random testing of the numeric tower
+5.2.1
+- Inference of functions with keyword arguments
+- `typecheck-fail' for explicit creation of type errors
+- Extensive documentation of typed numeric tower
+5.2
+- Performance work: delayed environment evaluation
+- Support `racket'-style optional arguments
+- Changes to support new-style keyword argument expansion

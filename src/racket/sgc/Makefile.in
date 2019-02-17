@@ -1,0 +1,55 @@
+#
+# Makefile for SenoraGC
+#
+
+srcdir = @srcdir@
+prefix = @prefix@
+exec_prefix = @exec_prefix@
+libdir = @libdir@
+
+# for version.mak:
+mainsrcdir = @srcdir@/../..
+@INCLUDEDEP@ @srcdir@/../version.mak
+
+CC = @CC@
+CXX = @CXX@
+RANLIB = @RANLIB@
+NICEAR = $(srcdir)/../../utils/nicear
+AR = @AR@
+ARFLAGS = @ARFLAGS@
+
+CFLAGS = @CFLAGS@ @COMPFLAGS@ @PROFFLAGS@
+CPPFLAGS = @PREFLAGS@
+
+OBJS =  sgc.@LTO@
+
+SRCS =  $(srcdir)/sgc.c
+
+../libmzgc.@LIBSFX@: $(OBJS)
+	$(MAKE) gcobjects
+	$(NICEAR) $(AR) $(ARFLAGS) ../libmzgc.@LIBSFX@ $(OBJS)
+	$(RANLIB) ../libmzgc.@LIBSFX@
+
+test: $(OBJS) test.@LTO@
+	$(CC) -o test $(OBJS) test.@LTO@
+
+gcobjects: $(OBJS)
+
+EXTRA_DEPS = $(srcdir)/autostat.inc $(srcdir)/collect.inc \
+             $(srcdir)/../utils/splay.c $(srcdir)/../utils/schiptr.h \
+             $(srcdir)/../sconfig.h
+
+sgc.@LTO@: $(srcdir)/sgc.c $(EXTRA_DEPS)
+	$(CC) $(CFLAGS) $(CPPFLAGS) @OPTIONS@ -DSGC_EXPORTS -I.. -c $(srcdir)/sgc.c -o sgc.@LTO@
+
+test.@LTO@: $(srcdir)/test.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) @OPTIONS@ -c $(srcdir)/test.c -o test.@LTO@
+
+clean:
+	/bin/rm -f $(OBJS) gc.@LIBSFX@ test
+
+# Extra dependencies
+
+sgc.@LTO@: $(srcdir)/sgc.h
+
+test.@LTO@: $(srcdir)/sgc.h

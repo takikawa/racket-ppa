@@ -1,0 +1,69 @@
+/* Re-implementation of i386 setjmp to avoid Windows-specific work,
+   which messes up Racket's (GRacket's, really) threads. */
+
+#include "schpriv.h"
+
+#ifdef _WIN64
+
+# ifdef USE_MZ_SETJMP_INDIRECT
+
+/* Implementation in "mzsj86w64.S", and these wrappers make
+   DLL exporting work: */
+
+extern int _scheme_mz_setjmp(mz_pre_jmp_buf b);
+extern void _scheme_mz_longjmp(mz_pre_jmp_buf b, int v);
+
+Scheme_Setjmp_Proc scheme_get_mz_setjmp(void)
+{
+  return _scheme_mz_setjmp;
+}
+
+void scheme_mz_longjmp(mz_pre_jmp_buf b, int v)
+{
+  _scheme_mz_longjmp(b, v);
+}
+
+int scheme_mz_setjmp(mz_pre_jmp_buf b)
+{
+  scheme_log_abort("internal error: setjmp wasn't indirect");
+  abort();
+  return 0;
+}
+
+# endif
+
+#else
+
+int __declspec(naked) scheme_mz_setjmp(mz_jmp_buf b)
+{
+  __asm {
+    mov ECX, [ESP]
+	mov EAX, [ESP+4]
+	mov [EAX], EBP
+	mov [EAX+4], EBX
+	mov [EAX+8], EDI
+	mov [EAX+12], ESI
+	mov [EAX+16], ESP
+	mov [EAX+20], ECX
+	mov EAX, 0
+	ret
+  }
+}
+
+void __declspec(naked) scheme_mz_longjmp(mz_jmp_buf b, int v)
+{
+  __asm {
+    mov EAX, [ESP+8]
+	mov ECX, [ESP+4]
+	mov ESP, [ECX+16]
+	mov EBP, [ECX]
+	mov EBX, [ECX+4]
+	mov EDI, [ECX+8]
+	mov ESI, [ECX+12]
+	mov ECX, [ECX+20]
+	mov [ESP], ECX
+	ret
+  }
+}
+
+#endif

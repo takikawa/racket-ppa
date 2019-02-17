@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "7.2"))) (define version "1.4") (define collection (quote multi)) (define deps (quote ("srfi-lite-lib" ("base" #:version "6.90.0.24") "unix-socket-lib" "sasl-lib"))) (define pkg-desc "implementation (no documentation) part of \"db\"") (define pkg-authors (quote (ryanc)))))
