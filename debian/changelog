@@ -1,3 +1,9 @@
+racket (7.2+dfsg1-1) experimental; urgency=medium
+
+  * New upstream bugfix release.
+
+ -- David Bremner <bremner@debian.org>  Sat, 16 Feb 2019 19:56:51 -0400
+
 racket (7.1+dfsg1-1) unstable; urgency=medium
 
   * New upstream bugfix release
