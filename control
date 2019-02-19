@@ -1,0 +1,60 @@
+Source: racket
+Section: lisp
+Priority: optional
+Maintainer: David Bremner <bremner@debian.org>
+Standards-Version: 4.1.1
+Build-Depends: cdbs, debhelper (>= 10), patchutils, libffi-dev,
+ libfreetype6-dev, libjpeg-dev, libpango1.0-dev, libpng-dev, libssl-dev,
+ libxaw7-dev, xbitmaps, libxft-dev, libgl1-mesa-dev | libgl-dev,
+ libglu1-mesa-dev | libglu-dev, libx11-dev, libxrender-dev, libcairo2-dev,
+ sqlite3
+Vcs-Git: https://salsa.debian.org/bremner/racket
+Vcs-Browser: https://salsa.debian.org/bremner/racket
+Homepage: https://www.racket-lang.org/
+
+Package: racket
+Architecture: any
+Depends: ${misc:Depends}, ${shlibs:Depends}, racket-common (= ${source:Version})
+Recommends: racket-doc (>= ${source:Upstream-Version}),
+            libglib2.0-0, libpangocairo-1.0-0, libjpeg62-turbo, libpng16-16,
+            libgtk2.0-0, libgdk-pixbuf2.0-0, libssl1.1
+Breaks: plt-scheme (<<5.0~)
+Replaces: plt-scheme (<<5.0~)
+Provides: plt-scheme
+Description: extensible programming language in the Scheme family
+ Racket (previously PLT Scheme) is a programming language suitable for
+ scripting and application development, including GUIs and web
+ services.
+ .
+ It supports the creation of new programming languages through a rich,
+ expressive syntax system. Supplied languages include Typed Racket,
+ ACL2, FrTime, and Lazy Racket, and R6RS Scheme.
+ .
+ Racket includes the DrRacket programming environment, a virtual
+ machine with a just-in-time compiler, tools for creating stand-alone
+ executables, the Racket web server, extensive libraries, and
+ documentation for both beginners and experts.
+
+Package: racket-common
+Architecture: all
+Depends: ${misc:Depends}, ${shlibs:Depends}
+Recommends: racket (>= ${source:Upstream-Version})
+            , racket-doc (>= ${source:Upstream-Version})
+            , sensible-utils
+Breaks: plt-scheme (<<5.0~), racket-doc (<<6.1~)
+Replaces: plt-scheme (<<5.0~), racket-doc (<<6.1~)
+Description: extensible programming language in the Scheme family (shared files)
+ This package includes the architecture independent files for Racket
+ (but not the documentation, see racket-doc for that).
+
+Package: racket-doc
+Section: doc
+Architecture: all
+Depends: ${misc:Depends}, ${shlibs:Depends}
+Recommends: racket (>= ${source:Upstream-Version})
+Enhances: racket
+Breaks: plt-scheme-doc (<<5.0~)
+Replaces: plt-scheme-doc (<<5.0~)
+Provides: plt-scheme-doc
+Description: extensible programming language in the Scheme family (documentation)
+ This package includes all of the documentation for Racket.

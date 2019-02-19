@@ -1,0 +1,403 @@
+This package was debianized by Brent A. Fulgham bfulgham@debian.org on
+Fri, 4 Feb 2000 22:10:09 -0700.
+
+It was downloaded from http://racket-lang.org/download
+
+Files removed, because of license forbidding modifications:
+ share/pkgs/srfi-doc/srfi/scribblings/srfi-std/srfi-29.html |  507 ------------------
+ share/pkgs/srfi-doc/srfi/scribblings/srfi-std/srfi-5.html  |  345 ------------
+ share/pkgs/srfi-lib/srfi/32/sort.txt                       | 1069 ------
+
+readline collection notes:
+GNU's readline library is covered by the GPL (found at
+/usr/share/common-licenses/GPL on Debian systems), and that applies to
+code that links with it.  PLT Scheme is LGPL, so this code is not used by
+default; you should explicitly enable it if you want to.  Also, be aware that
+if you write code that uses this library, it will make your code link to the
+readline library when invoked, with the usual GPL implications.
+
+Files: *
+Copyright: © 1995-2011 PLT Scheme Inc.
+Portions Copyright: © 1994 Brent Benson
+Licence: Lgpl 2.1+
+    Racket is distributed under the GNU Lesser General Public License
+    (LGPL).  This means that you can link Racket into proprietary
+    applications, provided you follow the rules stated in the LGPL.  You can
+    also modify Racket; if you distribute a modified version, you must
+    distribute it under the terms of the LGPL, which in particular means
+    that you must release the source code for the modified software.  See
+    doc/release-notes/COPYING.LIB for more information.
+
+Files: debian/*
+Copyright: © 2000-2017 Brent Fulgham, David Bremner, Ari Pollock, James Vega
+Licence: LGPL 2.1+
+	 Licensed under the same terms as upstream.
+
+Files: src/racket/src/gmp/*
+Copyright: © 1992, 1993, 1994, 1996  Free Software Foundation, Inc.
+License: LGPL2.1+
+
+Files: src/racket/src/unwind/*
+Copyright: © 2003-2005 Hewlett-Packard Development Company, L.P.
+License: MIT
+  see below for license text
+
+Files: src/racket/src/lightning/*
+Copyright: © 1994, 1995, 1996, 1999, 2000, 2001, 2002  Free Software Foundation, Inc.
+License: LGPL2.1+
+
+Files: src/racket/src/lightning/i386/fp-sse.h
+Copyright: © 2006, 2010 Free Software Foundation, Inc.
+License: LGPL3+
+
+File: share/pkgs/drracket/gui-debugger/icons/clanbomber-*.png, share/pkgs/icons/stop*.png
+Copyright: © 2008 Everaldo Coelho
+License: LGPL2.1+
+
+Files: .share/pkgs/compatibility-lib/mzlib/deflate.rkt
+Copyright © 1992-1993 Jean-loup Gailly
+License: DFSG. If GPL versus LGPL matters, contact PLT Scheme team.
+    *** The original version that this code was taken from was
+    distributed with a GPL license, but later the code (later version of
+    it) was also included in zlib, which is distributed with an
+    LGPL-compatible license.  I (Eli Barzilay) have tried to contact the
+    author, but no reply yet.
+
+File: share/pkgs/icons/save.png
+Copyright: © 2008  David Vignoni
+License: LGPL 2.1
+
+Files: src/racket/gc/*
+Copyright: 1988, 1989 Hans-J. Boehm, Alan J. Demers
+Copyright: (c) 1991-1995 by Xerox Corporation.  All rights reserved.
+Copyright: (c) 1996-1999 by Silicon Graphics.  All rights reserved.
+Copyright: (c) 1999-2001 by Hewlett-Packard. All rights reserved.
+License:
+    THIS MATERIAL IS PROVIDED AS IS, WITH ABSOLUTELY NO WARRANTY EXPRESSED
+    OR IMPLIED.  ANY USE IS AT YOUR OWN RISK.
+
+    Permission is hereby granted to use or copy this program
+    for any purpose,  provided the above notices are retained on all copies.
+    Permission to modify the code and to distribute modified code is granted,
+    provided the above notices are retained, and a notice that the code was
+    modified is included with the above copyright notice.
+
+Files: src/foreign/libffi/*
+Copyright: © 1996-2009  Anthony Green, Red Hat, Inc and others.  
+License: MIT
+
+Files: share/pkgs/r6rs-doc/r6rs/scribblings/r6rs-std/*
+Copyright: © 2007 William D Clinger, Richard Kelsey, Jonathan A Rees.
+License:
+
+    We intend this report to belong to the entire Scheme community,
+    and so we grant permission to copy it in whole or in part without
+    fee. In particular, we encourage implementors of Scheme to use
+    this report as a starting point for manuals and other
+    documentation, modifying it as necessary.
+
+Files:  share/pkgs/r5rs-doc/r5rs/scribblings/r5rs-std/*
+Copyright: © 1998 William D Clinger, Richard Kelsey, Jonathan A Rees.
+License:
+
+    We intend this report to belong to the entire Scheme community,
+    and so we grant permission to copy it in whole or in part without
+    fee.  In particular, we encourage implementors of Scheme to use
+    this report as a starting point for manuals and other
+    documentation, modifying it as necessary. 
+
+Note from Ari Pollak <ari@debian.org>: because the R5RS license wasn't clear
+enough according to the Debian Free Software Guidelines, I asked the authors to
+clarify what they meant. Here are their responses:
+
+On Jun 28, William D Clinger wrote:
+> > Can R5RS be modified and distributed by anyone, with or without fee?
+> 
+> Yes.
+> 
+> William D Clinger
+> Co-editor, R5RS
+
+On Jun 29, Richard Kelsey wrote:
+> > Can R5RS be modified and distributed by anyone, with or without fee?
+> 
+> Yes.
+> 
+> Richard A Kelsey
+> Co-editor, R5RS
+
+On Jul  6, Jonathan A Rees wrote:
+> In answer to "Can R5RS be modified and distributed by anyone, with or  
+> without fee?", the answer is
+> yes.
+> 
+> Jonathan
+
+(Comment from David Bremner <bremner@debian.org>, apparently Eli
+Barzilay did the actual questioning and collecting of answers, with the
+question provided by Ari).
+
+Files: share/pkgs/srfi-doc/scribblings/srfi-std/*
+Copyright: SRFI contributors
+License: MIT
+
+Files: share/pkgs/htdp-lib/2htdp/private/csv/csv.rkt
+Copyright: ©  2004-2009 Neil Van Dyke
+License: LGPL3+
+
+Files: collects/file/sha1.rkt
+Copyright: © 2006 Eric Knauel
+License: LGPL2.1+ (relicensed from BSD3)
+
+Files: collects/mred/private/wx/common/rbtree.rkt
+Copyright: © 2000 Jean-Christophe FILLIATRE
+Copyright: © 2006-2010 PLT Scheme Inc.
+License: LGPL2.1+
+	   
+Files: collects/net/*
+Copyright: 2001-2004 by Francisco Solsona, Noel Walsh
+License: LGPL2.1+
+
+Files: share/pkgs/r6rs/records-{core|explicit}
+Copyright: © 2005 Michael Sperber 
+License: MIT
+
+Files: share/pkgs/draw-lib/draw/private/lzw.rkt
+Copyright: © 2006 Zachary Beane
+License: MIT
+
+Files: share/pkgs/rackunit/*
+Copyright: © 2005 by Noel Welsh. 
+License: LGPL2.1+
+
+Files: share/pkgs/r6rs-lib/rnrs/records/syntactic-6.rkt
+Copyright: © 2005 Michael Sperber
+License: MIT 
+
+Files: share/pkgs/sgl/sgl.rkt
+Copyright: ©  2003-2011  Scott Owens
+License: LGPL 2.1+
+
+Files: share/pkgs/sgl/examples/gears.rkt
+Copyright: ©  2003-2011  Scott Owens, © 1999-2001
+License: 
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the
+    "Software"), to deal in the Software without restriction, including
+    without limitation the rights to use, copy, modify, merge, publish,
+    distribute, sublicense, and/or sell copies of the Software, and to
+    permit persons to whom the Software is furnished to do so, subject to
+    the following conditions:
+
+    The above copyright notice and this permission notice shall be included
+    in all copies or substantial portions of the Software.
+
+Files: share/pkgs/srfi-lib/srfi/*
+Copyright: (c) 1998, 1999 by Olin Shivers, 2002 Noel Walsh
+License: LGPL 2.1+
+
+Files: share/pkgs/srfi-lib/srfi/41/derived.rkt
+Copyright (C) 2007 by Philip L. Bewig of Saint Louis, Missouri, USA.  
+License: MIT
+
+Files: share/pkgs/srfi-lib/srfi/60/60.rkt
+Copyright: (C) 2005 David Van Horn
+Copyright: (C) 1991, 1993, 2001, 2003, 2005 Aubrey Jaffer
+License: SRFI
+
+Files: share-pkgs/srfi-lib/srfi/63/63.rkt
+Copyright: © 2007-2011 Chongkai Zhu, © 2001, 2003, 2005, 2006 Aubrey Jaffer
+License: SRFI
+
+Files: share/pkgs/srfi-lib/srfi/64/testing.rkt
+Copyright: © 2005, 2006 Per Bothner
+License: MIT
+
+Files: share/pkgs/srfi-lib/srfi/67/compare-reference.scm
+Copyright: © 2005 Sebastian Egner and Jens Axel S{\o}gaard.
+License: MIT
+
+Files: share/pkgs/srfi-lib/srfi/74/blob.scm
+Copyright: © 2005 Michael Sperber 
+License: MIT
+
+Files: share/pkgs/srfi-lib/srfi/78/{check-reference.scm, examples-78.scm}
+Copyright: © 2005-2006 Sebastian Egner.
+License: MIT
+
+Files: share/pkgs/srfi-lib/srfi/98.rkt
+Copyright: © 2009-2011 Derick Eddington.  All rights reserved.
+License: MIT
+
+Files: share/pkgs/srfi-lib/srfi/optional.rkt
+Copyright: © 1993-1999 Richard Kelsey and Jonathan Rees, © 1994-1999 by Olin Shivers and Brian D. Carlstrom.
+License: BSD3
+
+Files: share/pkgs/swindle/*
+Copyright: © 1998-2011 Eli Barzilay (eli@barzilay.org)
+License: LGPL 2.1+
+
+Files: share/pkgs/swindle/tiny-clos.rkt
+Copyright: © 1992 Xerox Corporation, © 1998-2011 Eli Barzilay (eli@barzilay.org)
+License: LGPL2.1+, and the following:
+    Use, reproduction, and preparation of derivative works are permitted.  Any
+    copy of this software or of any derivative work must include the above
+    copyright notice of Xerox Corporation, this paragraph and the one after it.
+    Any distribution of this software or derivative works must comply with all
+    applicable United States export control laws.
+    This software is made available AS IS, and XEROX CORPORATION DISCLAIMS ALL
+    WARRANTIES, EXPRESS OR IMPLIED, INCLUDING WITHOUT LIMITATION THE IMPLIED
+    WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE, AND
+    NOTWITHSTANDING ANY OTHER PROVISION CONTAINED HEREIN, ANY LIABILITY FOR
+    DAMAGES RESULTING FROM THE SOFTWARE OR ITS USE IS EXPRESSLY DISCLAIMED,
+    WHETHER ARISING IN CONTRACT, TORT (INCLUDING NEGLIGENCE) OR STRICT
+    LIABILITY, EVEN IF XEROX CORPORATION IS ADVISED OF THE POSSIBILITY OF SUCH
+    DAMAGES.
+
+
+Files: share/pkgs/srfi-lib/srfi/19/time.rkt
+Copyright: (C) I/NET, Inc. (2000, 2002, 2003). 
+Copyright: (C) Neodesic Corporation (2000). All Rights Reserved. 
+License:
+    The following note comes from the scsh-0.6 debian/copyright	
+    ;; SRFI-19: Time Data Types and Procedures.
+    ;;
+    ;; Debian maintainer's note: Originally published under the license hereunder,
+    ;; this file has since been elevated to the public domain by its author,
+    ;; Will Fitzgerald.
+    ;; 
+
+    Here is a relevant mailing list post 
+    (http://article.gmane.org/gmane.lisp.scheme.scsh/6497):
+
+    To:	scsh@zurich.csail.mit.edu
+    Subject:	 Re: possible licensing issues with some scsh source files
+    From:	 Lionel Elie Mamane <lmamane-scsh-list-2003-10-29@conuropsis.org>
+    Date:	 Tue, 6 Jan 2004 18:57:56 +0100
+    Cc:	 Martin Gasbichler <gasbichl@informatik.uni-tuebingen.de>, 
+	     joostvb-scsh-list-2003-10-29@conuropsis.org
+    Sender:	 Lionel Elie Mamane <master@tofu.mamane.lu>
+
+    On Sun, Jan 04, 2004 at 11:44:28PM +0100, Lionel Elie Mamane wrote:
+    > On Sun, Jan 04, 2004 at 02:05:48PM +0100, Lionel Elie Mamane wrote:
+
+    >> indeed includes (a derivative of) the reference implementation of
+    >> SRFI 19, but the SRFI copyright notice was stripped.
+
+    > Having said that, I must say that it is the policy of the GNU
+    > project to include code in its official projects only if the
+    > copyright is assigned to the FSF, so in this particular case, the
+    > original author (Will Fitzgerald) probably has signed copyright over
+    > to the FSF.
+
+    I got an answer back from the FSF "records" guy and he tells me that
+    Will Fitzgerald elevated his reference implementation of SRFI 19 to
+    the public domain. But this answer comes with a disclaimer:
+
+     this is not a legal opinion, nor is this a binding pronouncment of
+     the FSF
+
+    so I don't know if we can rely on it.
+
+    -- 
+    Lionel
+
+
+
+    Original License:
+
+    This document and translations of it may be copied and furnished to others, 
+    and derivative works that comment on or otherwise explain it or assist in its 
+    implementation may be prepared, copied, published and distributed, in whole or 
+    in part, without restriction of any kind, provided that the above copyright 
+    notice and this paragraph are included on all such copies and derivative works. 
+    However, this document itself may not be modified in any way, such as by 
+    removing the copyright notice or references to the Scheme Request For 
+    Implementation process or editors, except as needed for the purpose of 
+    developing SRFIs in which case the procedures for copyrights defined in the SRFI 
+    process must be followed, or as required to translate it into languages other 
+    than English. 
+
+    The limited permissions granted above are perpetual and will not be revoked 
+    by the authors or their successors or assigns. 
+
+    This document and the information contained herein is provided on an "AS IS" 
+    basis and THE AUTHOR AND THE SRFI EDITORS DISCLAIM ALL WARRANTIES, EXPRESS OR 
+    IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTY THAT THE USE OF THE 
+    INFORMATION HEREIN WILL NOT INFRINGE ANY RIGHTS OR ANY IMPLIED WARRANTIES OF 
+    MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE. 
+
+Files: share/pkgs/scribble/sigplan/sigplanconf.cls
+Copyright: © 2004 by Paul C. Anagnostopoulos
+License: CC-BY-3.0
+    This work is licensed under the Creative Commons Attribution License.
+    To view a copy of this license, visit
+      http://creativecommons.org/licenses/by/3.0/
+    or send a letter to Creative Commons, 171 2nd Street, Suite 300,
+    San Francisco, California, 94105, U.S.A.
+
+License: SRFI
+    Permission to copy this software, to modify it, to redistribute it,
+    to distribute modified versions, and to use it for any purpose is
+    granted, subject to the following restrictions and understandings.
+
+    1.  Any copy made of this software must include this copyright notice
+    in full.
+
+    2.  I have made no warranty or representation that the operation of
+    this software will be error-free, and I am under no obligation to
+    provide any services, by way of maintenance, update, or otherwise.
+
+    3.  In conjunction with products arising from the use of this
+    material, there shall be no use of my name in any advertising,
+    promotional, or sales literature without prior written consent in
+    each case.
+
+
+License: MIT
+    Permission is hereby granted, free of charge, to any person obtaining
+    a copy of this software and associated documentation files (the
+    "Software"), to deal in the Software without restriction, including
+    without limitation the rights to use, copy, modify, merge, publish,
+    distribute, sublicense, and/or sell copies of the Software, and to
+    permit persons to whom the Software is furnished to do so, subject to
+    the following conditions:
+
+    The above copyright notice and this permission notice shall be
+    included in all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+    NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+    LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+    OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+    WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+License: BSD3
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions
+    are met:
+    1. Redistributions of source code must retain the above copyright
+       notice, this list of conditions and the following disclaimer.
+    2. Redistributions in binary form must reproduce the above copyright
+       notice, this list of conditions and the following disclaimer in the
+       documentation and/or other materials provided with the distribution.
+    3. The name of the authors may not be used to endorse or promote products
+       derived from this software without specific prior written permission.
+
+    THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR
+    IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+    OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+    IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+    INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+    NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+    THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+    THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+
+
+
