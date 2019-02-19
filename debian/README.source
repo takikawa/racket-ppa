@@ -1,0 +1,127 @@
+This package should be ready to build when the source package is
+unpackaged via "dpkg-source -x".
+
+The Debian packaging for racket (previously known as plt-scheme) is now stored in git.
+
+* Branch Layout
+
+  Currently there are three main branches
+
+ - dfsg contains the release branch history, along with file deletions
+   to make it match the upstream release tar balls, and some further
+   deletions of non-free bits. Tags are upstream/$ver where $ver is an
+   upstream version.
+
+ - patch-queue/dfsg contains patches on top of dfsg. Tags are 
+   patches/$debian_ver where $debian_ver is a debian version. This
+   branch is rebased for each new upstream version.
+
+ - master is merged debian packaging and upstream commits.
+
+   Tags are debian/$debian_ver where $debian_ver is a debian version.
+   To get a list of packaging commits, run
+
+      git log dfsg..
+
+There is also a branch pristine-tar contains information used by the
+pristine-tar utility to reconstruct bit identical upstream tarball.
+There was a branch debian of just packaging commits, but I (David)
+kept forgetting to use it.
+
+The master branch is a debianized source tree, and should be buildable
+by any number of tools (including dpkg-buildpackage).
+
+* gitpkg and sbuild basics
+
+  My (David's) preferred workflow is based on gitpkg and sbuild.  To
+  tell gitpkg to use the tarballs from git,
+
+  % git config gitpkg.pre-export-hook /usr/share/gitpkg/hooks/pristine-tar-pre-export-hook
+
+** Make a source package. This relies on gitpkg (>= 0.19)
+
+  % gitpkg master
+
+** Build existing debian version
+   - gitpkg debian/$version
+
+** Problems with pristine-tar?
+   pristine-tar Needs a large TMPDIR.  I found even 180M free in /tmp
+   is not enough. Try
+
+     export TMPDIR=/var/tmp
+
+* New upstream version
+
+** Update upstream branch
+   - git checkout upstream
+   - git merge -s recursive -X theirs vXXXX  
+     # where vXXXX is an upstream tag. Since v5.0.1, these tags should all be on 
+     # upstream branch stable.
+     
+   - optionally auto resolve file deletion conflicts: 
+     - git status -s | egrep '^(DU|UA| U|U |UD)' | cut -c4- | xargs git rm --ignore-unmatch DUMMY$$
+     - git commit
+
+** Import upstream tarball
+
+   We do a manual import, because e.g. git-import-orig wants to merge
+   into master. I have a git alias [1] which does most of this
+
+     - git checkout upstream
+     - git clean -fxd
+     - git ls-files -z | xargs -0 rm -f
+     - tar --strip-components=1 -zxf $tarball
+     - git add -A
+     - git commit -m 'Importing '`basename $tarball`
+     - pristine-tar commit $tarball
+
+** Update dfsg branch
+   - git checkout dfsg
+   - git merge upstream
+
+   - probably the same conflicts with deletions exist here, which can
+     be resolved as above.
+
+   - git tag upstream/$version+dfsg1
+
+** Make a tarball
+
+   git checkout master && ./debian/rules get-orig-source
+   pristine-tar commit ../racket_$version.orig.tar.gz
+
+* Managing patches
+
+Patches are exported based on debian/source/git-patches; each line is
+an argument to git-format-patch. The variables $DEB_VERSION and
+$UPSTREAM_VERSION are the Debian and upstream version being exported.
+You can either use git-format-patch manually, or install gitpkg
+version 0.17 or later.
+
+1) To have the patches automatically exported at source package creation time
+
+  a) to setup gitpkg, run
+  
+     % git config gitpkg.deb-export-hook /usr/share/gitpkg/hooks/quilt-patches-deb-export-hook
+
+  b) run 
+    
+      % gitpkg master
+
+     to make a source package including patches.
+
+2) To manually export patches, run
+
+       % ./debian/rules export-patches
+
+
+Notes:
+
+[1] My git alias to import tarballs is
+
+ [alias]
+	import-tgz = "!f() { if [ -f $1 ]; then git clean -fxd; git ls-files -z | xargs -0 rm -f; tar --strip-components=1 -zxvf $1 ; git add -A; git commit -m'Importing '`basename $1`; else echo "missing tarball $1"; fi; }; f"
+
+
+ -- David Bremner <bremner@debian.org>, Fri, 27 May 2011 18:37:25 -0300
+

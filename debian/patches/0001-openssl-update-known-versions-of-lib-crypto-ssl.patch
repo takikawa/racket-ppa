@@ -1,0 +1,37 @@
+From 12841663cfa9e03ee9071d9fc3b044603ed2ed43 Mon Sep 17 00:00:00 2001
+From: David Bremner <david@tethera.net>
+Date: Sat, 4 Mar 2017 09:18:41 -0400
+Subject: [PATCH] openssl: update known versions of lib{crypto,ssl}.
+
+The existing versions no longer work on current Debian.
+---
+ collects/openssl/libcrypto.rkt | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/collects/openssl/libcrypto.rkt b/collects/openssl/libcrypto.rkt
+index 091d26f2a8..6974eb7c14 100644
+--- a/collects/openssl/libcrypto.rkt
++++ b/collects/openssl/libcrypto.rkt
+@@ -21,7 +21,8 @@
+ ;; - Debian and Ubuntu use a few fixed library versions even though
+ ;;   actual OpenSSL version changes:
+ ;;   - Debian squeeze: lib{crypto,ssl}.so.0.9.8
+-;;   - Debian {wheezy, jessie, stretch, sid}: lib{crypto,ssl}.so.1.0.0
++;;   - Debian {wheezy, jessie}: lib{crypto,ssl}.so.1.0.0
++;;   - Debian {stretch, sid}: lib{crypto,ssl}.so.1.1, lib{crypto,ssl}.so.1.0.2
+ ;;   - Ubuntu {14.04, 14.10, 15.04}: lib{crypto,ssl}.so.1.0.0
+ ;;   - Debian and Ubuntu also provide versionless library in pkg "libssl-dev"
+ ;; - Fedora provides libraries suffixed with actual versions (eg
+@@ -41,9 +42,11 @@
+ 
+     ;; Compatibility-based version / SONAME
+     "10"     ;; Fedora
+-    "1.0.0"  ;; Debian, Ubuntu
++    "1.1"    ;; Newer Debian
++    "1.0.0"  ;; Older Debian, Ubuntu
+ 
+     ;; Other specific known versions
++    "1.0.2"
+     "1.0.1k" "1.0.1j" "1.0.1g" "1.0.1e"
+     "1.0" "1.0.0" "1.0.0e" "1.0.0d" "1.0.0c" "1.0.0b" "1.0.0a"
+     "0.9.8e" "0.9.8b" "0.9.8" "0.9.7"))

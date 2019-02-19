@@ -1,0 +1,2 @@
+# False positive. See Debian bug #877999
+racket source: license-problem-non-free-RFC debian/copyright

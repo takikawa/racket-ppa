@@ -1,0 +1,9 @@
+racket (5.3+dfsg1-1) unstable; urgency=low
+
+  The planet binary is no longer provided with racket.  Uses of it should be
+  replaced with “raco planet”.
+
+  This removal is planned upstream as well, but it is being performed earlier
+  in Debian's packaging due to #680685.
+
+ -- James McCoy <jamessan@debian.org>  Fri, 10 Aug 2012 16:34:33 -0400

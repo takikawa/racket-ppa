@@ -1,0 +1,2 @@
+debian/racket-arch.mk
+debian/mzconfig.h
