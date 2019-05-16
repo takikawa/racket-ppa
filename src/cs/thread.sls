@@ -30,10 +30,10 @@
                   [get-initial-pthread rumble:get-initial-pthread]
                   [current-place-roots rumble:current-place-roots]
                   [set-ctl-c-handler! rumble:set-ctl-c-handler!]
-                  [unsafe-root-continuation-prompt-tag rumble:unsafe-root-continuation-prompt-tag]
                   [set-break-enabled-transition-hook! rumble:set-break-enabled-transition-hook!]
                   [set-reachable-size-increments-callback! rumble:set-reachable-size-increments-callback!]
-                  [set-custodian-memory-use-proc! rumble:set-custodian-memory-use-proc!]))
+                  [set-custodian-memory-use-proc! rumble:set-custodian-memory-use-proc!]
+                  [set-immediate-allocation-check-proc! rumble:set-immediate-allocation-check-proc!]))
 
   (include "place-register.ss")
   (define-place-register-define place:define thread-register-start thread-register-count)
@@ -41,11 +41,19 @@
   ;; Special handling of `current-atomic`: use the last virtual register;
   ;; we rely on the fact that the register's default value is 0.
   (define-syntax (define stx)
-    (syntax-case stx (current-atomic make-pthread-parameter unsafe-make-place-local)
+    (syntax-case stx (current-atomic end-atomic-callback make-pthread-parameter unsafe-make-place-local)
       ;; Recognize definition of `current-atomic`:
       [(_ current-atomic (make-pthread-parameter 0))
        (with-syntax ([(_ id _) stx]
-                     [n (datum->syntax #'here (sub1 (virtual-register-count)))])
+                     [n (datum->syntax #'here (- (virtual-register-count) 1))])
+         #'(define-syntax id
+             (syntax-rules ()
+               [(_) (virtual-register n)]
+               [(_ v) (set-virtual-register! n v)])))]
+      ;; Recognize definition of `end-atomic-callback`:
+      [(_ end-atomic-callback (make-pthread-parameter 0))
+       (with-syntax ([(_ id _) stx]
+                     [n (datum->syntax #'here (- (virtual-register-count) 2))])
          #'(define-syntax id
              (syntax-rules ()
                [(_) (virtual-register n)]
@@ -95,6 +103,8 @@
        ;; "primitives/internal.ss".
        (hasheq
         'make-pthread-parameter make-pthread-parameter
+        'unsafe-root-continuation-prompt-tag unsafe-root-continuation-prompt-tag
+        'break-enabled-key break-enabled-key
         ;; These are actually redirected by "place-register.ss", but
         ;; we list them here for compatibility with the bootstrapping
         ;; variant of `#%pthread`
@@ -109,18 +119,17 @@
         'engine-return rumble:engine-return
         'current-engine-state (lambda (v) (rumble:current-engine-state v))
         'set-ctl-c-handler! rumble:set-ctl-c-handler!
-        'root-continuation-prompt-tag rumble:unsafe-root-continuation-prompt-tag
         'poll-will-executors poll-will-executors
         'make-will-executor rumble:make-will-executor
         'make-stubborn-will-executor rumble:make-stubborn-will-executor
         'will-executor? rumble:will-executor?
         'will-register rumble:will-register
         'will-try-execute rumble:will-try-execute
-        'break-enabled-key break-enabled-key
         'set-break-enabled-transition-hook! rumble:set-break-enabled-transition-hook!
         'continuation-marks rumble:continuation-marks
         'set-reachable-size-increments-callback! rumble:set-reachable-size-increments-callback!
         'set-custodian-memory-use-proc! rumble:set-custodian-memory-use-proc!
+        'set-immediate-allocation-check-proc! rumble:set-immediate-allocation-check-proc!
         'exn:break/non-engine exn:break
         'exn:break:hang-up/non-engine exn:break:hang-up
         'exn:break:terminate/non-engine exn:break:terminate
@@ -162,8 +171,8 @@
      (|#%app| (|#%app| 1/exit-handler) v)))
 
   (set-scheduler-lock-callbacks! (lambda () (1/make-semaphore 1))
-                                 1/semaphore-wait
-                                 1/semaphore-post)
+                                 unsafe-semaphore-wait
+                                 unsafe-semaphore-post)
 
   (set-scheduler-atomicity-callbacks! (lambda ()
                                         (current-atomic (fx+ (current-atomic) 1)))

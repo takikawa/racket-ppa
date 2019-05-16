@@ -243,8 +243,8 @@ and @racket[#f] otherwise.
              ([mode-spec (code:line #:mode (form-id pos-use ...))]
               [contract-spec (code:line) 
                              (code:line #:contract (form-id @#,ttpattern-sequence ...))]
-              [invariant-spec (code:line #:inv @#,tttterm)
-                                   (code:line)]
+              [invariant-spec (code:line)
+                              (code:line #:inv @#,tttterm)]
               [pos-use I
                        O]
               [rule [premise
@@ -289,8 +289,8 @@ declaration is present, Redex dynamically checks that the terms flowing through
 these positions match the provided patterns, raising an exception recognized by 
 @racket[exn:fail:redex?] if not. The term in the optional @racket[invariant-spec] is
 evaluated after the output positions have been computed and the contract has matched
-successfully, with variables from the contract bound; a result of @racket[#f] is
-considered to be a contract violation and an exception is raised.
+successfully, with variables (that have underscores) from the contract bound;
+a result of @racket[#f] is considered to be a contract violation and an exception is raised.
 
 For example, the following defines addition on natural numbers:
 @examples[#:label #f #:eval redex-eval
@@ -450,6 +450,10 @@ choose one of the names listed above. Or, evaluate the expression
                                     "examples"
                                     "define-judgment-form")]
 replacing @bold{«filename.rkt»} with one of the names listed above.
+
+Note that @racket[current-traced-metafunctions] also traces judgment forms and is
+helpful when debugging.
+
 }
 
 @defform[(define-extended-judgment-form language judgment-form-id
@@ -565,17 +569,36 @@ the argument contracts.
 
 @defparam[current-traced-metafunctions traced-metafunctions (or/c 'all (listof symbol?))]{
 
-Controls which metafunctions are currently being traced. If it is
+Controls which metafunctions and judgment forms are currently being traced. If it is
 @racket['all], all of them are. Otherwise, the elements of the list
-name the metafunctions to trace. 
+name the metafunctions and judgments to trace.
 
 The tracing looks just like the tracing done by the @racketmodname[racket/trace]
 library, except that the first column printed by each traced call indicate
 if this call to the metafunction is cached. Specifically, a @tt{c} is printed
 in the first column if the result is just returned from the cache and a
-space is printed if the metafunction call is actually performed.
+space is printed if the metafunction or judgment call is actually performed.
 
 Defaults to @racket['()].
+
+@examples[
+ #:eval redex-eval
+ (define-judgment-form nats
+   #:mode (odd I)
+   #:contract (odd n)
+
+   [-------- "oddsz"
+    (odd (s z))]
+
+   [(odd n)
+    ---------------- "odd2"
+    (odd (s (s n)))])
+ (parameterize ([current-traced-metafunctions '(odd)])
+   (judgment-holds (odd (s (s (s z))))))
+
+ (parameterize ([current-traced-metafunctions '(odd)])
+   (judgment-holds (odd (s (s (s (s (s z))))))))]
+
 }
 
 @(close-eval redex-eval)

@@ -47,12 +47,8 @@
 ;; ----------------------------------------
 
 (define/who (read-byte [orig-in (current-input-port)])
-  (check who input-port? orig-in)
-  (let ([in (->core-input-port orig-in)])
-    (define read-byte (core-input-port-read-byte in))
-    (cond
-      [read-byte (do-read-byte who read-byte in)]
-      [else (read-byte-via-bytes in #:special-ok? #f)])))
+  (let ([in (->core-input-port orig-in who)])
+    (read-a-byte who in)))
 
 (define/who (read-bytes amt [in (current-input-port)])
   (check who exact-nonnegative-integer? amt)
@@ -125,14 +121,9 @@
       v))
 
 (define/who (peek-byte [orig-in (current-input-port)] [skip-k 0])
-  (check who input-port? orig-in)
-  (check who exact-nonnegative-integer? skip-k)
-  (let ([in (->core-input-port orig-in)])
-    (define peek-byte (and (zero? skip-k)
-                           (core-input-port-peek-byte in)))
-    (cond
-      [peek-byte (do-peek-byte who peek-byte in orig-in)]
-      [else (peek-byte-via-bytes in skip-k #:special-ok? #f)])))
+  (let ([in (->core-input-port orig-in who)])
+    (check who exact-nonnegative-integer? skip-k)
+    (peek-a-byte who in skip-k)))
 
 (define/who (peek-bytes amt skip-k [in (current-input-port)])
   (check who exact-nonnegative-integer? amt)

@@ -32,6 +32,51 @@
 (let ([is (open-input-string "barfoo")]) 
   (test (list (rx:regexp-match "foo" is 0 3) (read-char is)) '(#f #\f)))
 
+;; Don't consume bytes that corresponds to a prefix:
+(let ()
+  (define in (open-input-string "a\nb\nc\n"))
+  (define rx:.n (rx:byte-regexp #"(?m:^.\n)"))
+  (test (rx:regexp-match rx:.n in 0 #f #f #"") '(#"a\n"))
+  (test (rx:regexp-match rx:.n in 0 #f #f #"\n") '(#"b\n"))
+  (test (rx:regexp-match rx:.n in 0 #f #f #"\n") '(#"c\n")))
+
+(let ()
+  (define in (open-input-bytes #" a b c "))
+
+  (define discard (open-output-bytes))
+  (rx:regexp-match "[abc]" in 0 3 discard #"")
+  (test (get-output-bytes discard) #" ")
+
+  (define discard2 (open-output-bytes))
+  (rx:regexp-match "[abc]" in 0 1 discard2 #"")
+  (test (get-output-bytes discard2) #" "))
+
+;; Input streams that are large enough for bytes to be discarded along the way
+(test (rx:regexp-match #"(.)x" (open-input-string (string-append (make-string 50000 #\y) "x")))
+      '(#"yx" #"y"))
+(test (rx:regexp-match-positions #"(.)x" (open-input-string (string-append (make-string 50000 #\y) "x")))
+      '((49999 . 50001) (49999 . 50000)))
+(test (rx:regexp-match "(.)x" (string-append (make-string 50000 #\y) "x"))
+      '("yx" "y"))
+(test (rx:regexp-match-positions "(.)x" (string-append (make-string 50000 #\y) "x"))
+      '((49999 . 50001) (49999 . 50000)))
+(test (rx:regexp-match "(.)\u3BC" (string-append (make-string 50000 #\u3BB) "\u3BC"))
+      '("\u3BB\u3BC" "\u3BB"))
+(test (rx:regexp-match-positions "(.)\u3BC" (string-append (make-string 50000 #\y) "\u3BC"))
+      '((49999 . 50001) (49999 . 50000)))
+
+(test (rx:regexp-match-positions #"<([abc])(>)?" "<a + <b = <c" 3)
+      '((5 . 7) (6 . 7) #f))
+(test (rx:regexp-match-positions "[abc]" " a b c " 2)
+      '((3 . 4)))
+(test (rx:regexp-match-positions "(?m:^.\n)" "a\nb\nc\n" 2 6 #f #"\n")
+      '((2 . 4)))
+(test (rx:regexp-match-positions "(?:(?m:^$))(?<=..)" "ge \n TLambda-tc\n\n ;; (extend Γ o Γx-s\n extend\n\n ;;" 29 #f #f #"\n")
+      '((46 . 46)))
+
+(test (regexp-replace* "-" "zero-or-more?" "_")
+      "zero_or_more?")
+
 ;; ----------------------------------------
 
 (define (check rx in N [M (max 1 (quotient N 10))])

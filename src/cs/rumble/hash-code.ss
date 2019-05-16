@@ -81,7 +81,7 @@
   (let* ([+/fx
           (lambda (hc k)
             (#3%fx+ hc k))]
-         [sll/fs
+         [sll/fx
           (lambda (hc i)
             (#3%fxsll hc i))]
          [->fx
@@ -91,10 +91,11 @@
                 (modulo v (greatest-fixnum))))]
          [mix1
           (lambda (hc)
-            (+/fx hc (sll/fs hc 3)))]
+            (let ([hc2 (+/fx hc (sll/fx hc 10))])
+              (fxlogxor hc2 (fxsrl hc2 6))))]
          [mix2
           (lambda (hc)
-            (+/fx hc (sll/fs hc 5)))])
+            (mix1 hc))])
     (cond
      [(fx> burn MAX-HASH-BURN) (values hc burn)]
      [(boolean? x) (values (+/fx hc (if x #x0ace0120 #x0cafe121)) burn)]
@@ -122,7 +123,7 @@
             (cond
              [(fx= i len) (values hc burn)]
              [else
-              (let-values ([(hc0 burn) (equal-hash-loop (vector-ref x i) burn 0)])
+              (let-values ([(hc0 burn) (equal-hash-loop (vector-ref x i) (fx+ burn 2) 0)])
                 (vec-loop (fx+ i 1)
                           burn
                           (+/fx (mix2 hc) hc0)))]))]))]

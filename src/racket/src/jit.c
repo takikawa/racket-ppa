@@ -2332,7 +2332,6 @@ int scheme_generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int w
         if (multi_ok) {
           mz_pushr_p(JIT_R0);
           mz_pushr_p(JIT_R0);
-          mz_pushr_p(JIT_R0);
           mz_rs_sync();
           __START_SHORT_JUMPS__(1);
           ref = jit_bnei_p(jit_forward(), JIT_R0, SCHEME_MULTIPLE_VALUES);
@@ -4052,6 +4051,7 @@ static void on_demand_generate_lambda(Scheme_Native_Closure *nc, Scheme_Native_L
     case_lam = ((Scheme_Native_Lambda_Plus_Case *)nlam)->case_lam;
     if (case_lam->max_let_depth < max_depth)
       case_lam->max_let_depth = max_depth;
+    ((Scheme_Native_Lambda_Plus_Case *)nlam)->case_lam = NULL;
   }
 
   while (gdata.patch_depth) {
@@ -4098,6 +4098,11 @@ Scheme_Object **scheme_on_demand(Scheme_Object **rs)
 
 void scheme_force_jit_generate(Scheme_Native_Lambda *nlam)
 {
+#ifdef MZTAG_REQUIRED
+  MZ_ASSERT(SAME_TYPE(nlam->iso.so.type, scheme_rt_native_code)
+            || SAME_TYPE(nlam->iso.so.type, scheme_rt_native_code_plus_case));
+#endif
+
   if (nlam->start_code == scheme_on_demand_jit_code)
     on_demand_generate_lambda(NULL, nlam, 0, NULL, 0);
 }

@@ -24,17 +24,28 @@
 (define (set-engine-exit-handler! proc)
   (set! engine-exit proc))
 
-(define (make-engine thunk init-break-enabled-cell empty-config?)
+(define (make-engine thunk prompt-tag init-break-enabled-cell empty-config?)
   (let ([paramz (if empty-config?
                     empty-parameterization
                     (current-parameterization))])
     (create-engine empty-metacontinuation
                    (lambda (prefix)
+                     ;; Set parameterize for `prefix` to use:
                      (with-continuation-mark
                          parameterization-key paramz
-                         (begin
-                           (prefix)
-                           (call-with-values (lambda () (|#%app| thunk)) engine-return))))
+                       (begin
+                         (prefix)
+                         (call-with-values (lambda ()
+                                             (call-with-continuation-prompt
+                                              (lambda ()
+                                                ;; Set parameterization again inside
+                                                ;; the prompt tag, so it goes along with
+                                                ;; a captured continuation:
+                                                (with-continuation-mark
+                                                    parameterization-key paramz
+                                                  (|#%app| thunk)))
+                                              prompt-tag))
+                           engine-return))))
                    (if empty-config?
                        (make-empty-thread-cell-values)
                        (new-engine-thread-cell-values))

@@ -140,9 +140,13 @@
 
 (define (intmap-remove t key)
   (let ([et (intmap-eqtype t)])
-    (make-intmap
-     et
-     ($intmap-remove et (intmap-root t) (hash-code et key) key))))
+    (let ([r ($intmap-remove et (intmap-root t) (hash-code et key) key)])
+      (if r
+          (make-intmap et r)
+          (case et
+           [(eq) empty-hasheq]
+           [(equal) empty-hash]
+           [else empty-hasheqv])))))
 
 (define ($intmap-remove et t h key)
   (cond
@@ -219,10 +223,9 @@
          [x4 (fxior x3 (fxsrl x3 4))]
          [x5 (fxior x4 (fxsrl x4 8))]
          [x6 (fxior x5 (fxsrl x5 16))]
-         [x7 (meta-cond
-              [(> (fixnum-width) 32)
-               (fxior x6 (fxsrl x6 32))]
-              [else x6])])
+         [x7 (if (> (fixnum-width) 32)
+                 (fxior x6 (fxsrl x6 32))
+                 x6)])
     (fxxor x7 (fxsrl x7 1))))
 
 ;; basic utils

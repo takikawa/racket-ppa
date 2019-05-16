@@ -5,7 +5,7 @@
 #include <string.h>
 #include <stdlib.h>
 #ifdef WIN32
-# include <Windows.h>
+# include <windows.h>
 # define DOS_FILE_SYSTEM
 static int scheme_utf8_encode(unsigned int *path, int zero_offset, int len,
 			      char *dest, int dest_len, int get_utf16);
@@ -303,8 +303,8 @@ static void *extract_dlldir()
 #endif
 
 static int bytes_main(int argc, char **argv,
-		      /* for Windows GUI mode */
-		      int wm_is_gracket, char *gracket_guid)
+		      /* for Windows and X11 GUI modes */
+		      int wm_is_gracket_or_x11_arg_count, char *gracket_guid_or_x11_args)
 {
   char *boot_exe, *exec_file = argv[0], *run_file = NULL;
   int pos1, pos2, pos3;
@@ -353,12 +353,12 @@ static int bytes_main(int argc, char **argv,
   memcpy(&pos2, boot_file_data + boot_file_offset + 4, sizeof(pos2));
   memcpy(&pos3, boot_file_data + boot_file_offset + 8, sizeof(pos2));
 
-  boot_offset = 0;
 #ifdef ELF_FIND_BOOT_SECTION
   boot_offset = find_boot_section(boot_exe);
-#endif
-#ifdef WIN32
+#elif WIN32
   boot_offset = find_resource_offset(dll_path, 259, boot_rsrc_offset);
+#else
+  boot_offset = 0;
 #endif
 
   pos1 += boot_offset;
@@ -370,13 +370,13 @@ static int bytes_main(int argc, char **argv,
               extract_coldir(), extract_configdir(), extract_dlldir(),
               pos1, pos2, pos3,
               CS_COMPILED_SUBDIR, RACKET_IS_GUI,
-	      wm_is_gracket, gracket_guid,
+	      wm_is_gracket_or_x11_arg_count, gracket_guid_or_x11_args,
 	      embedded_dll_open, scheme_dll_find_object);
   
   return 0;
 }
 
-#if defined(WIN32) && defined(CHECK_SINGLE_INSTANCE)
+#if defined(WIN32) && (defined(CHECK_SINGLE_INSTANCE) || defined(__MINGW32__))
 int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR ignored, int nCmdShow)
 {
   int argc;
@@ -387,11 +387,13 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR ignored
 
   argv = cmdline_to_argv(&argc, &normalized_path);
 
+#ifdef CHECK_SINGLE_INSTANCE
   if (CheckSingleInstance(normalized_path, argv))
     return 0;
   wm = wm_is_gracket;
   guid = GRACKET_GUID;
-
+#endif
+  
   return bytes_main(argc, argv, wm, guid);
 }
 #elif defined(WIN32)
@@ -407,7 +409,10 @@ int wmain(int argc, wchar_t **wargv)
   return bytes_main(argc, argv, 0, "");
 }
 #else
+static int x11_arg_count = 0;
+static char *x11_args = "0";
+
 int main(int argc, char **argv) {
-  return bytes_main(argc, argv, 0, "");
+  return bytes_main(argc, argv, x11_arg_count, x11_args);
 }
 #endif

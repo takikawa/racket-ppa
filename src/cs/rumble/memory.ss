@@ -109,6 +109,20 @@
 (define custodian-memory-use (lambda (mode all) all))
 (define (set-custodian-memory-use-proc! proc) (set! custodian-memory-use proc))
 
+(define immediate-allocation-check (lambda (n) (void)))
+(define (set-immediate-allocation-check-proc! proc) (set! immediate-allocation-check proc))
+
+(define (guard-large-allocation who what len size)
+  (when (exact-nonnegative-integer? len)
+    (let ([n (* len size)])
+      (unless (fixnum? n)
+        (raise (|#%app|
+                exn:fail:out-of-memory
+                (#%format "out of memory making ~a\n  length: ~a"
+                          what len)
+                (current-continuation-marks))))
+      (immediate-allocation-check n))))
+
 (define prev-stats-objects #f)
 
 (define (dump-memory-stats . args)
@@ -125,9 +139,9 @@
            [get-count (lambda (static?) (lambda (e) (apply + (map (extract static? cadr) (cdr e)))))]
            [get-bytes (lambda (static?) (lambda (e) (apply + (map (extract static? cddr) (cdr e)))))]
            [pad (lambda (s n)
-                  (string-append (make-string (max 0 (- n (string-length s))) #\space) s))]
+                  (string-append (#%make-string (max 0 (- n (string-length s))) #\space) s))]
            [pad-right (lambda (s n)
-                        (string-append s (make-string (max 0 (- n (string-length s))) #\space)))]
+                        (string-append s (#%make-string (max 0 (- n (string-length s))) #\space)))]
            [commas (lambda (n)
                      (let* ([l (string->list (number->string n))]
                             [len (length l)])
@@ -165,7 +179,7 @@
                        (cond
                         [(null? args) "\n"]
                         [(< actual-col want-col)
-                         (string-append (make-string (- want-col actual-col) #\space)
+                         (string-append (#%make-string (- want-col actual-col) #\space)
                                         (loop args want-col want-col))]
                         [(integer? (car args))
                          (loop (cons (pad (commas (car args))
@@ -310,16 +324,19 @@
 ;; ----------------------------------------
 
 (define-record-type (phantom-bytes create-phantom-bytes phantom-bytes?)
-  (fields [mutable size]))
+  (fields pbv))
 
 (define/who (make-phantom-bytes k)
   (check who exact-nonnegative-integer? k)
-  (create-phantom-bytes k))
+  (let ([ph (create-phantom-bytes (make-phantom-bytevector k))])
+    (when (>= (bytes-allocated) (* 2 allocated-after-major))
+      (collect-garbage))
+    ph))
 
 (define/who (set-phantom-bytes! phantom-bstr k)
   (check who phantom-bytes? phantom-bstr)
   (check who exact-nonnegative-integer? k)
-  (phantom-bytes-size-set! phantom-bstr k))
+  (set-phantom-bytevector-length! (phantom-bytes-pbv phantom-bstr) k))
 
 ;; ----------------------------------------
 

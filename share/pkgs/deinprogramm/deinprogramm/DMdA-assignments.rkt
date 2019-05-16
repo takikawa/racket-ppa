@@ -15,7 +15,7 @@
 	 number real rational integer natural boolean true false string empty-list unspecific any property)
 (provide-and-document
  procedures
- (all-from-except assignments: deinprogramm/DMdA procedures
+ (all-from-except assignments: deinprogramm/DMdA/private/primitives procedures
 		  quote
 		  symbol? symbol=? string->symbol symbol->string))
 

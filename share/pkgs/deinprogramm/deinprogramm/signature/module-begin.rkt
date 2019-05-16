@@ -2,7 +2,7 @@
 
 (provide module-begin)
 
-(require deinprogramm/define-record-procedures
+(require deinprogramm/DMdA/define-record-procedures
 	 deinprogramm/signature/signature
 	 deinprogramm/signature/signature-syntax)
 

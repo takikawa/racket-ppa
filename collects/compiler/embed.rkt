@@ -405,7 +405,10 @@
                   (extract-last (unix-style-split s)))])
     (let ([p (build-path collects-dest
                          (apply build-path dir)
-                         "compiled"
+                         (let ([l (use-compiled-file-paths)])
+                           (if (pair? l)
+                               (car l)
+                               "compiled"))
                          (path-add-extension file #".zo"))])
       (let-values ([(base name dir?) (split-path p)])
         (make-directory* base)
@@ -540,12 +543,6 @@
                             ;; check for run-time paths by visiting the module in an
                             ;; expand-time namespace:
                             (parameterize ([current-namespace expand-namespace])
-                              (define no-submodule-code
-                                ;; Strip away submodules to avoid re-declaring them:
-                                (module-compiled-submodules 
-                                 (module-compiled-submodules code #f null)
-                                 #t
-                                 null))
                               (let ([module-path
                                      (if (path? module-path)
                                          (path->complete-path module-path)
@@ -555,7 +552,7 @@
                                                   (module-path-index-resolve (module-path-index-join
                                                                               module-path
                                                                               #f))])
-                                    (eval no-submodule-code)))
+                                    (eval code)))
                                 (define e (expand `(,#'module m racket/kernel
                                                      (#%require (only ,module-path)
                                                                 racket/runtime-path)
@@ -1527,6 +1524,7 @@
                                            dest
                                            mred?))))))
 	(define embed-dlls? (and (eq? 'windows (cross-system-type))
+                                 (eq? 'racket (cross-system-type 'vm))
 				 (let ([m (assq 'embed-dlls? aux)])
 				   (and m (cdr m)))))
 	(define embedded-dlls-box (and embed-dlls? (box null)))

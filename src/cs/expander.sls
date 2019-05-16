@@ -28,7 +28,9 @@
           (thread)
           (regexp)
           (io)
-          (linklet))
+          (linklet)
+          (only (schemify)
+                force-unfasl))
 
   (include "place-register.ss")
   (define-place-register-define define expander-register-start expander-register-count)
@@ -37,9 +39,6 @@
   ;; changes to primitive libraries. Changing ths setting makes
   ;; the build incompatible with previously generated ".zo" files.
   (define compile-as-independent? #f)
-
-  (define (fasl->s-exp/intern s)
-    (1/fasl->s-exp/intern s))
 
   ;; The expander needs various tables to set up primitive modules, and
   ;; the `primitive-table` function is the bridge between worlds
@@ -113,7 +112,9 @@
                      (thread)
                      (io)
                      (regexp)
-                     (linklet)))
+                     (linklet)
+                     (only (schemify)
+                           force-unfasl)))
       ;; Ensure that the library is visited, especially for a wpo build:
       (eval 'variable-set!)))
 
@@ -181,9 +182,6 @@
                [(_ name val) #`(let ([name val]) name)])))
     (eval `(define raise-binding-result-arity-error ',raise-binding-result-arity-error)))
 
-  ;; Special "primitive" for syntax-data deserialization:
-  (eval `(define fasl->s-exp/intern ',fasl->s-exp/intern))
-
   ;; For interpretation of the outer shell of a linklet:
   (install-linklet-primitive-tables! kernel-table
                                      unsafe-table
@@ -208,7 +206,11 @@
   ;; the printer needs to check whether a string parses as a number
   ;; for deciding wheter to quote the string
   (set-string->number?! (lambda (str)
-                          (not (not (1/string->number str 10 'read)))))
+                          (and (1/string->number str 10 'read)
+                               ;; Special case: `#%` is never read as a number or error:
+                               (not (and (>= (string-length str) 2)
+                                         (eqv? (string-ref str 0) #\#)
+                                         (eqv? (string-ref str 1) #\%))))))
 
   ;; `set-maybe-raise-missing-module!` is also from the `io` library
   (set-maybe-raise-missing-module! maybe-raise-missing-module))

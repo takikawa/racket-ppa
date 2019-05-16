@@ -13,7 +13,7 @@
 (provide register-place-symbol!
          set-io-place-init!)
 
-(define (make-engine thunk init-break-enabled-cell empty-config?)
+(define (make-engine thunk prompt-tag init-break-enabled-cell empty-config?)
   (define ready-s (make-semaphore))
   (define s (make-semaphore))
   (define prefix void)
@@ -50,7 +50,12 @@
                                 (semaphore-wait s)
                                 (run-prefix)
                                 (set! results
-                                      (call-with-values thunk list)))))
+                                      (call-with-continuation-prompt
+                                       (lambda ()
+                                         (call-with-values thunk list))
+                                       prompt-tag
+                                       (lambda (proc)
+                                         (abort-current-continuation prompt-tag proc)))))))
                           the-root-continuation-prompt-tag
                           (lambda (exn)
                             ((error-display-handler) (exn-message exn) exn))))))))
@@ -95,7 +100,7 @@
   (set! ctl-c-handler proc))
 
 (define the-root-continuation-prompt-tag (make-continuation-prompt-tag 'root))
-(define (root-continuation-prompt-tag) the-root-continuation-prompt-tag)
+(define (unsafe-root-continuation-prompt-tag) the-root-continuation-prompt-tag)
 (define break-enabled-key (gensym 'break-enabled))
 
 (struct will-executor/notify (we queue notify))
@@ -216,7 +221,9 @@
                   'unsafe-make-place-local unsafe-make-place-local
                   'unsafe-place-local-ref unsafe-place-local-ref
                   'unsafe-place-local-set! unsafe-place-local-set!
-                  'unsafe-add-global-finalizer (lambda (v proc) (void))))
+                  'unsafe-add-global-finalizer (lambda (v proc) (void))
+                  'unsafe-root-continuation-prompt-tag unsafe-root-continuation-prompt-tag
+                  'break-enabled-key break-enabled-key))
 (primitive-table '#%engine
                  (hash 
                   'make-engine make-engine
@@ -226,8 +233,6 @@
                                    (error "engine-return: not ready"))
                   'current-process-milliseconds current-process-milliseconds
                   'set-ctl-c-handler! set-ctl-c-handler!
-                  'root-continuation-prompt-tag root-continuation-prompt-tag
-                  'break-enabled-key break-enabled-key
                   'set-break-enabled-transition-hook! void
                   'continuation-marks continuation-marks ; doesn't work on engines
                   'poll-will-executors poll-will-executors
@@ -238,6 +243,7 @@
                   'will-try-execute will-try-execute/notify
                   'set-reachable-size-increments-callback! (lambda (proc) (void))
                   'set-custodian-memory-use-proc! (lambda (proc) (void))
+                  'set-immediate-allocation-check-proc! (lambda (proc) (void))
                   'exn:break/non-engine exn:break/non-engine
                   'exn:break:hang-up/non-engine exn:break:hang-up/non-engine
                   'exn:break:terminate/non-engine exn:break:terminate/non-engine

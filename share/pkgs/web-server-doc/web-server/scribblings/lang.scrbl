@@ -47,9 +47,12 @@
  Like @racket[send/suspend/url/dispatch] but with a string URL representation.
 }
 
-@deftogether[(
-@defproc[(redirect/get) request?]
-)]{
 
-See @racketmodname[web-server/servlet/web].}
+@defproc[(redirect/get [#:headers hs (listof header?) empty]) request?]{
+See @racketmodname[web-server/servlet/web].
+
+  @history[#:changed "1.3"
+           @elem{Added @racket[hs] argument and
+              changed to use @racket[see-other] instead of @racket[temporarily].}]
+ }
 }

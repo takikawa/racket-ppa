@@ -108,6 +108,7 @@ THREAD_LOCAL_DECL(static intptr_t max_gc_pre_used_bytes);
 #ifdef MZ_PRECISE_GC
 THREAD_LOCAL_DECL(static int num_major_garbage_collections);
 THREAD_LOCAL_DECL(static int num_minor_garbage_collections);
+THREAD_LOCAL_DECL(static intptr_t max_code_page_total);
 #endif
 
 #ifdef RUNSTACK_IS_GLOBAL
@@ -389,6 +390,7 @@ static Scheme_Object *unsafe_start_breakable_atomic(int argc, Scheme_Object **ar
 static Scheme_Object *unsafe_end_breakable_atomic(int argc, Scheme_Object **argv);
 static Scheme_Object *unsafe_in_atomic_p(int argc, Scheme_Object **argv);
 
+static Scheme_Object *unsafe_poll_fd(int argc, Scheme_Object **argv);
 static Scheme_Object *unsafe_poll_ctx_fd_wakeup(int argc, Scheme_Object **argv);
 static Scheme_Object *unsafe_poll_ctx_eventmask_wakeup(int argc, Scheme_Object **argv);
 static Scheme_Object *unsafe_poll_ctx_time_wakeup(int argc, Scheme_Object **argv);
@@ -657,6 +659,7 @@ scheme_init_unsafe_thread (Scheme_Startup_Env *env)
   ADD_PRIM_W_ARITY("unsafe-add-global-finalizer", unsafe_add_global_finalizer, 2, 2, env);
 
   scheme_addto_prim_instance("unsafe-poller", scheme_unsafe_poller_proc, env);
+  ADD_PRIM_W_ARITY("unsafe-poll-fd", unsafe_poll_fd, 2, 3, env);
   ADD_PRIM_W_ARITY("unsafe-poll-ctx-fd-wakeup", unsafe_poll_ctx_fd_wakeup, 3, 3, env);
   ADD_PRIM_W_ARITY("unsafe-poll-ctx-eventmask-wakeup", unsafe_poll_ctx_eventmask_wakeup, 2, 2, env);
   ADD_PRIM_W_ARITY("unsafe-poll-ctx-milliseconds-wakeup", unsafe_poll_ctx_time_wakeup, 2, 2, env);
@@ -689,6 +692,8 @@ scheme_init_unsafe_thread (Scheme_Startup_Env *env)
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_BINARY_INLINED
                                                             | SCHEME_PRIM_AD_HOC_OPT);
   scheme_addto_prim_instance("unsafe-place-local-set!", p, env);
+
+  ADD_PRIM_W_ARITY("unsafe-make-srcloc", scheme_unsafe_make_srcloc, 5, 5, env);
 }
 
 void scheme_init_thread_places(void) {
@@ -3994,7 +3999,8 @@ Scheme_Object *scheme_rktio_fd_to_semaphore(rktio_fd_t *fd, int mode)
       /* That's a kind of success, not failure. */
       return NULL;
     }
-    log_fd_semaphore_error();
+    if (!scheme_last_error_is_racket(RKTIO_ERROR_UNSUPPORTED))
+      log_fd_semaphore_error();
     return NULL;    
   }
 
@@ -5419,6 +5425,39 @@ sch_sleep(int argc, Scheme_Object *args[])
   scheme_current_thread->ran_some = 1;
 
   return scheme_void;
+}
+
+Scheme_Object *unsafe_poll_fd(int argc, Scheme_Object **argv)
+{
+  intptr_t sfd = 0;
+  rktio_fd_t *rfd = NULL;
+  int mode = 0;
+  int ready = 0;
+  int is_socket = 1;
+
+  if (!scheme_get_int_val(argv[0], &sfd))
+    scheme_wrong_contract("unsafe-poll-fd", "handle-integer?", 0, argc, argv);
+
+  if (SAME_OBJ(argv[1], read_symbol))
+    mode = RKTIO_POLL_READ;
+  else if (SAME_OBJ(argv[1], write_symbol))
+    mode = RKTIO_POLL_WRITE;
+  else
+    scheme_wrong_contract("unsafe-poll-fd", "(or/c 'read 'write)", 1, argc, argv);
+
+  if (argc > 2) {
+    is_socket = SCHEME_TRUEP(argv[2]);
+  }
+
+  rfd = rktio_system_fd(scheme_rktio, sfd, (is_socket ? RKTIO_OPEN_SOCKET : 0));
+
+  if (mode == RKTIO_POLL_READ)
+    ready = rktio_poll_read_ready(scheme_rktio, rfd);
+  else if (mode == RKTIO_POLL_WRITE)
+    ready = rktio_poll_write_ready(scheme_rktio, rfd);
+
+  rktio_forget(scheme_rktio, rfd);
+  return (ready == RKTIO_POLL_READY) ? scheme_true : scheme_false;
 }
 
 Scheme_Object *unsafe_poll_ctx_fd_wakeup(int argc, Scheme_Object **argv)
@@ -9330,10 +9369,13 @@ static void inform_GC(int master_gc, int major_gc, int inc_gc,
 {
   Scheme_Logger *logger;
 
-  if (!master_gc 
-      && (pre_used > max_gc_pre_used_bytes)
-      && (max_gc_pre_used_bytes >= 0))
-    max_gc_pre_used_bytes = pre_used;
+  if (!master_gc) {
+    if ((pre_used > max_gc_pre_used_bytes)
+        && (max_gc_pre_used_bytes >= 0))
+      max_gc_pre_used_bytes = pre_used;
+    if (scheme_code_page_total > max_code_page_total)
+      max_code_page_total = scheme_code_page_total;
+  }
 
   if (major_gc)
     num_major_garbage_collections++;
@@ -9415,7 +9457,7 @@ static void log_peak_memory_use()
   if (max_gc_pre_used_bytes > 0) {
     logger = scheme_get_gc_logger();
     if (logger && scheme_log_level_p(logger, SCHEME_LOG_INFO)) {
-      char buf[256], nums[128], *num, *numt, *num2;
+      char buf[256], nums[128], *num, *numc, *numt, *num2;
       intptr_t buflen, allocated_bytes;
 #ifdef MZ_PRECISE_GC
       allocated_bytes = GC_get_memory_ever_allocated();
@@ -9424,14 +9466,16 @@ static void log_peak_memory_use()
 #endif
       memset(nums, 0, sizeof(nums));
       num = gc_num(nums, max_gc_pre_used_bytes);     
+      numc = gc_num(nums, max_code_page_total);
       numt = gc_num(nums, allocated_bytes);
       num2 = gc_unscaled_num(nums, scheme_total_gc_time);
       sprintf(buf,
-              "" PLACE_ID_FORMAT "atexit peak %sK; alloc %sK; major %d; minor %d; %sms",
+              "" PLACE_ID_FORMAT "atexit peak %sK[+%sK]; alloc %sK; major %d; minor %d; %sms",
 #ifdef MZ_USE_PLACES
               scheme_current_place_id,
 #endif
               num,
+              numc,
               numt,
               num_major_garbage_collections,
               num_minor_garbage_collections,

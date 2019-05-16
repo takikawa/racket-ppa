@@ -80,6 +80,8 @@
       (add-flags '((make-zo #f)))]
      [("--trust-zos") "Trust existing \".zo\"s (use only with prepackaged \".zo\"s)"
       (add-flags '((trust-existing-zos #t)))]
+     [("--recompile-only") "Fail if compilation must start from source"
+      (add-flags '((recompile-only #t)))]
      [("-x" "--no-launcher") "Do not produce launcher programs"
       (add-flags '((make-launchers #f)))]
      [("-F" "--no-foreign-libs") "Do not install foreign libraries"
@@ -147,6 +149,10 @@
       (add-flags `((compile-mode ,mode)))]
      [("--fail-fast") "Trigger a break on the first error"
       (add-flags '((fail-fast #t)))]
+     [("--error-out") file "On continuable error, create <file> and exit as success"
+      (add-flags `((next-error-out-file ,file)))]
+     [("--error-in") file "Check <file> for report of previous errors"
+      (add-flags `((previous-error-in-file ,file)))]
      [("-p" "--pause") "Pause at the end if there are any errors"
       (add-flags '((pause-on-errors #t)))]
      #:help-labels

@@ -282,7 +282,7 @@ and has no effect on the returned syntax object.}
 @deftogether[(
 @defproc[(syntax-binding-set? [v any/c]) boolean?]
 @defproc[(syntax-binding-set) syntax-binding-set?]
-@defproc[(syntax-binding-set->syntax [binding-set syntax-binding-set?] [datum any/c]) syntax-binding-set?]
+@defproc[(syntax-binding-set->syntax [binding-set syntax-binding-set?] [datum any/c]) syntax?]
 @defproc[(syntax-binding-set-extend [binding-set syntax-binding-set?]
                                     [symbol symbol?]
                                     [phase (or/c exact-integer? #f)]
@@ -300,7 +300,7 @@ and has no effect on the returned syntax object.}
 A @deftech{syntax binding set} supports explicit construction of
 binding information for a syntax object. Start by creating an empty
 binding set with @racket[syntax-binding-set], add bindings with
-@racket[binding-set-extend], and create a syntax object that has the
+@racket[syntax-binding-set-extend], and create a syntax object that has the
 bindings as its @tech{lexical information} using
 @racket[syntax-binding-set->syntax].
 

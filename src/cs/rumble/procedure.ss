@@ -2,7 +2,11 @@
   (make-struct-type-property 'method-arity-error))
 
 (define-values (prop:arity-string arity-string? arity-string-ref)
-  (make-struct-type-property 'arity-string))
+  (make-struct-type-property 'arity-string (lambda (v info)
+                                             (check 'guard-for-prop:arity-string
+                                                    (procedure-arity-includes/c 1)
+                                                    v)
+                                             v)))
 
 (define-values (prop:procedure procedure-struct? procedure-struct-ref)
   (make-struct-type-property 'procedure (lambda (v info)
@@ -253,6 +257,18 @@
 (define (wrong-arity-wrapper f)
   (lambda args
     (cond
+     [(arity-string-maker f)
+      => (lambda (make-str)
+           (let ([expected (make-str)])
+             (do-raise-arity-error
+              f
+              (if (string? expected)
+                  (string-append "  expected: " expected "\n")
+                  "")
+              (if (and (pair? args)
+                       (procedure-is-method? f))
+                  (cdr args)
+                  args))))]
      [(procedure-is-method? f)
       (chez:apply raise-arity-error
                   f
@@ -266,21 +282,74 @@
 
 (define/who (procedure-result-arity p)
   (check who procedure? p)
-  #f)
+  (cond
+   [(#%procedure? p)
+    (and (procedure-known-single-valued? p)
+         1)]
+   [(impersonator? p)
+    (procedure-result-arity (strip-impersonator p))]
+   [(record? p)
+    (let* ([rtd (record-rtd p)]
+           [v (struct-property-ref prop:procedure rtd none)])
+      (cond
+       [(eq? v none) #f]
+       [(fixnum? v)
+        (procedure-result-arity (unsafe-struct-ref p v))]
+       [(eq? v 'unsafe)
+        (procedure-result-arity
+         (if (chaperone? p)
+             (unsafe-procedure-chaperone-replace-proc p)
+             (unsafe-procedure-impersonator-replace-proc p)))]
+       [else (procedure-result-arity v)]))]
+   [else #f]))
+
+;; ----------------------------------------
+
+;; Host Scheme wrapper procedures data content:
+;;
+;;  - (vector <symbol-or-#f> <proc>) => not a method, and name is either
+;;                                      <symbol-or-#f> or name of <proc>
+;;  - (vector <symbol-or-#f> <proc> 'method) => is a method
+;;  - (box <symbol>) => JIT function generated, name is <symbol>, not a method
 
 ;; ----------------------------------------
 
 (define-record method-procedure (proc))
 
+(define (method-wrapper-vector? vec)
+  (fx= 3 (#%vector-length vec)))
+
 (define/who (procedure->method proc)
   (check who procedure? proc)
-  (if (procedure-is-method? proc)
-      proc
-      (make-method-procedure proc)))
+  (cond
+   [(procedure-is-method? proc)
+    proc]
+   [(#%procedure? proc)
+    ;; preserve primitiveness of the procedure
+    (let ([v (and (wrapper-procedure? proc)
+                  (let ([v (wrapper-procedure-data proc)])
+                    (and (#%vector? v)
+                         v)))])
+      (if v
+          (make-arity-wrapper-procedure (#%vector-ref v 1)
+                                        (procedure-arity-mask proc)
+                                        (vector (#%vector-ref v 0)
+                                                (#%vector-ref v 1)
+                                                'method))
+          (make-arity-wrapper-procedure proc
+                                        (procedure-arity-mask proc)
+                                        (vector #f proc 'method))))]
+   [else
+    (make-method-procedure proc)]))
 
 (define (procedure-is-method? f)
   (cond
-   [(#%procedure? f) #f]
+   [(#%procedure? f)
+    (if (wrapper-procedure? f)
+        (let ([name (wrapper-procedure-data f)])
+          (and (#%vector? name)
+               (method-wrapper-vector? name)))
+        #f)]
    [(record? f)
     (or (method-arity-error? f)
         (let ([v (struct-property-ref prop:procedure (record-rtd f) #f)])
@@ -289,7 +358,34 @@
             (procedure-is-method? (unsafe-struct-ref f v))]
            [(eq? v 'unsafe)
             (procedure-is-method? (impersonator-val f))]
+           [(impersonator? f)
+            ;; follow wrapped procedure instead of impersonator method:
+            (procedure-is-method? (strip-impersonator f))]
            [else (procedure-is-method? v)])))]
+   [else #f]))
+
+(define-syntax-rule (|#%method-arity| e)
+  (procedure->method e))
+
+;; ----------------------------------------
+
+(define (arity-string-maker f)
+  (cond
+   [(record? f)
+    (cond
+     [(arity-string-ref f #f)
+      => (lambda (make-str)
+           (lambda () (make-str f)))]
+     [(method-arity-error? f) #f]
+     [(reduced-arity-procedure? f) #f]
+     [else
+      (let ([v (struct-property-ref prop:procedure (record-rtd f) #f)])
+        (cond
+         [(fixnum? v)
+          (arity-string-maker (unsafe-struct-ref f v))]
+         [(eq? v 'unsafe)
+          (arity-string-maker (impersonator-val f))]
+         [else #f]))])]
    [else #f]))
 
 ;; ----------------------------------------
@@ -328,40 +424,31 @@
 
 (define (do-procedure-reduce-arity-mask proc mask name)
   (cond
-   [(and (arity-wrapper-procedure? proc)
-         (#%vector? (arity-wrapper-procedure-data proc)))
-    (let ([v (arity-wrapper-procedure-data proc)])
-      (do-procedure-reduce-arity-mask (#%vector-ref v 1)
-                                      mask
-                                      (or name (#%vector-ref v 0))))]
+   [(and (wrapper-procedure? proc)
+         (#%vector? (wrapper-procedure-data proc)))
+    (let ([v (wrapper-procedure-data proc)])
+      (make-arity-wrapper-procedure (#%vector-ref v 1)
+                                    mask
+                                    (cond
+                                     [(method-wrapper-vector? v)
+                                      (vector (or name (#%vector-ref v 0))
+                                              (#%vector-ref v 1)
+                                              'method)]
+                                     [name (vector name
+                                                   (#%vector-ref v 1))]
+                                     [else v])))]
+   [(#%procedure? proc)
+    (make-arity-wrapper-procedure proc
+                                  mask
+                                  (vector name proc))]
    [(reduced-arity-procedure? proc)
     (do-procedure-reduce-arity-mask (reduced-arity-procedure-proc proc)
                                     mask
                                     (or name (reduced-arity-procedure-name proc)))]
    [else
-    (case mask
-      [(1) (make-arity-wrapper-procedure (if (#%procedure? proc)
-                                             (lambda () (proc))
-                                             (lambda () (|#%app| proc)))
-                                         mask
-                                         (vector name proc))]
-      [(2) (make-arity-wrapper-procedure (if (#%procedure? proc)
-                                             (lambda (x) (proc x))
-                                             (lambda (x) (|#%app| proc x)))
-                                         mask
-                                         (vector name proc))]
-      [(4) (make-arity-wrapper-procedure (if (#%procedure? proc)
-                                             (lambda (x y) (proc x y))
-                                             (lambda (x y) (|#%app| proc x y)))
-                                         mask
-                                         (vector name proc))]
-      [(8) (make-arity-wrapper-procedure (if (#%procedure? proc)
-                                             (lambda (x y z) (proc x y z))
-                                             (lambda (x y z) (|#%app| proc x y z)))
-                                         mask
-                                         (vector name proc))]
-      [else
-       (make-reduced-arity-procedure proc mask name)])]))
+    (make-reduced-arity-procedure proc
+                                  mask
+                                  name)]))
 
 ;; ----------------------------------------
 
@@ -369,20 +456,22 @@
 
 (define/who (procedure-rename proc name)
   (cond
+   [(#%procedure? proc)
+    ;; Potentially avoid an extra wrapper layer, and also work before
+    ;; `procedure?` is fully filled in
+    (check who symbol? name)
+    (do-procedure-reduce-arity-mask proc (#%procedure-arity-mask proc) name)]
    [(reduced-arity-procedure? proc)
     ;; Avoid an extra wrapper layer, and also work before
     ;; `procedure?` is fully filled in
     (check who symbol? name)
-    (make-reduced-arity-procedure
-     (reduced-arity-procedure-proc proc)
-     (reduced-arity-procedure-mask proc)
-     name)]
+    (make-reduced-arity-procedure (reduced-arity-procedure-proc proc)
+                                  (reduced-arity-procedure-mask proc)
+                                  name)]
    [else
     (check who procedure? proc)
     (check who symbol? name)
-    (if (#%procedure? proc)
-        (make-arity-wrapper-procedure proc (procedure-arity-mask proc) name)
-        (make-named-procedure proc name))]))
+    (make-named-procedure proc name)]))
 
 (define (procedure-maybe-rename proc name)
   (if name
@@ -392,22 +481,22 @@
 ;; ----------------------------------------
 
 (define (make-jit-procedure force mask name)
-  (letrec ([p (make-arity-wrapper-procedure
+  (letrec ([p (make-wrapper-procedure
                (lambda args
                  (let ([f (force)])
                    (with-interrupts-disabled
                     ;; atomic with respect to Racket threads,
-                    (let ([name (arity-wrapper-procedure-data p)])
+                    (let ([name (wrapper-procedure-data p)])
                       (unless (#%box? name)
-                        (set-arity-wrapper-procedure! p f)
-                        (set-arity-wrapper-procedure-data! p (box name)))))
+                        (set-wrapper-procedure! p f)
+                        (set-wrapper-procedure-data! p (box name)))))
                    (apply p args)))
                mask
                name)])
     p))
 
-(define (extract-jit-procedure-name p)
-  (let ([name (arity-wrapper-procedure-data p)])
+(define (extract-wrapper-procedure-name p)
+  (let ([name (wrapper-procedure-data p)])
     (cond
      [(#%box? name) (#%unbox name)]
      [(#%vector? name) (or (#%vector-ref name 0)
@@ -754,7 +843,8 @@
 
 (define (primitive? v)
   (or (eq? v make-struct-type-property)
-      (eq? v make-struct-type)))
+      (eq? v make-struct-type)
+      (eq? v car)))
 
 (define (primitive-closure? v) #f)
 
@@ -762,6 +852,7 @@
   (cond
    [(eq? prim make-struct-type-property) 3]
    [(eq? prim make-struct-type) 5]
+   [(eq? prim car) 1]
    [else
     (raise-argument-error 'primitive-result-arity "primitive?" prim)]))
 

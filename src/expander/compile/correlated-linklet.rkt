@@ -10,6 +10,7 @@
          correlated-linklet-name
 
          force-compile-linklet
+         eval-correlated-linklet
 
          correlated-linklet-vm-bytes
          write-correlated-linklet-bundle-hash
@@ -33,11 +34,26 @@
            c))]
     [else l]))
 
+;; Ignore compiled version, if any, and evaluate from correlated source:
+(define (eval-correlated-linklet l)
+  (cond
+    [(correlated-linklet? l)
+     (eval-linklet
+      ;; Omitting `'serializable` should generate a preferred and
+      ;; executable compilation
+      (compile-linklet (correlated-linklet-expr l)
+                       (correlated-linklet-name l)
+                       #f
+                       #f
+                       '()))]
+    [else
+     (error 'eval-correlated-linklet "cannot evaluate unknown linklet: ~s" l)]))
+
 ;; ----------------------------------------
 
 (define correlated-linklet-vm-bytes #"linklet")
 
-(struct faslable-correlated (e source position line column span name)
+(struct faslable-correlated (e source position line column span props)
   #:prefab)
 
 (struct faslable-correlated-linklet (expr name)
@@ -65,7 +81,13 @@
       (correlated-line v)
       (correlated-column v)
       (correlated-span v)
-      (correlated-property v 'inferred-name))]
+      (for/fold ([ht #f]) ([k (in-list '(inferred-name
+                                         undefined-error-name
+                                         method-arity-error))])
+        (define p (correlated-property v k))
+        (if p
+            (hash-set (or ht '#hasheq()) k p)
+            ht)))]
     [(hash? v)
      (cond
        [(hash-eq? v)
@@ -85,7 +107,7 @@
 ;; ----------------------------------------
 
 (define (read-correlated-linklet-bundle-hash in)
-  (faslable-> (fasl->s-exp in)))
+  (faslable-> (fasl->s-exp in #:datum-intern? #t)))
 
 (define (faslable-> v)
   (cond
@@ -97,7 +119,7 @@
          v
          (cons a d))]
     [(faslable-correlated? v)
-     (define name (faslable-correlated-name v))
+     (define props (faslable-correlated-props v))
      (define c (datum->correlated (faslable-> (faslable-correlated-e v))
                                   (vector
                                    (faslable-correlated-source v)
@@ -105,8 +127,9 @@
                                    (faslable-correlated-column v)
                                    (faslable-correlated-position v)
                                    (faslable-correlated-span v))))
-     (if name
-         (correlated-property c 'inferred-name name)
+     (if props
+         (for/fold ([c c]) ([(k p) (in-hash props)])
+           (correlated-property c k p))
          c)]
     [(hash? v)
      (cond

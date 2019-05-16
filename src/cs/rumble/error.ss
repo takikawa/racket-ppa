@@ -173,7 +173,7 @@
          [(eqv? #\newline (string-ref s i))
           (string-append
            (loop i s (fx1+ i))
-           (make-string amt #\space)
+           (#%make-string amt #\space)
            (substring s (fx1+ i) end))]
          [else
           (loop i s end)]))])))
@@ -322,11 +322,7 @@
               [else (cons (string-append "\n   " (error-value->string (car args)))
                           (loop (cdr args)))])))]))
 
-(define/who (raise-arity-error name arity . args)
-  (check who (lambda (p) (or (symbol? name) (procedure? name)))
-         :contract "(or/c symbol? procedure?)"
-         name)
-  (check who procedure-arity? arity)
+(define (do-raise-arity-error name arity-or-expect-string args)
   (raise
    (|#%app|
     exn:fail:contract:arity
@@ -339,11 +335,19 @@
            ""))
      "arity mismatch;\n"
      " the expected number of arguments does not match the given number\n"
-     (expected-arity-string arity)
+     (if (string? arity-or-expect-string)
+         arity-or-expect-string
+         (expected-arity-string arity-or-expect-string))
      "  given: " (number->string (length args))
      (arguments->context-string args))
     (current-continuation-marks))))
 
+(define/who (raise-arity-error name arity . args)
+  (check who (lambda (p) (or (symbol? name) (procedure? name)))
+         :contract "(or/c symbol? procedure?)"
+         name)
+  (check who procedure-arity? arity)
+  (do-raise-arity-error name arity args))
   
 (define/who (raise-arity-mask-error name mask . args)
   (check who (lambda (p) (or (symbol? name) (procedure? name)))
@@ -493,7 +497,9 @@
                                   (string->symbol (format "body of ~a" n))))
                            (let* ([c (#%$continuation-return-code k)]
                                   [n (#%$code-name c)])
-                             n))]
+                             (if (special-procedure-name-string? n)
+                                 #f
+                                 n)))]
                  [desc
                   (let* ([ci (#%$code-info (#%$continuation-return-code k))]
                          [src (and
@@ -633,15 +639,16 @@
 (define (exn->string v)
   (format "~a~a"
           (if (who-condition? v)
-              (format "~a: " (condition-who v))
+              (format "~a: " (rewrite-who (condition-who v)))
               "")
           (cond
            [(exn? v)
             (exn-message v)]
            [(format-condition? v)
-            (apply format
-                   (condition-message v)
-                   (condition-irritants v))]
+            (let-values ([(fmt irritants)
+                          (rewrite-format (condition-message v)
+                                          (condition-irritants v))])
+              (apply format fmt irritants))]
            [(syntax-violation? v)
             (let ([show (lambda (s)
                           (cond
@@ -661,63 +668,56 @@
        [(and (format-condition? v)
              (irritants-condition? v)
              (string-prefix? "incorrect number of arguments" (condition-message v))
-             (pair? (condition-irritants v))
-             (procedure? (car (condition-irritants v))))
-        (let* ([proc (car (condition-irritants v))]
-               [name (object-name proc)]
-               [arity (procedure-arity proc)])
-          (|#%app|
-           exn:fail:contract:arity
-           (string-append
-            (if (symbol? name) (symbol->string name) "#<procedure>")
-            ": arity mismatch;\n the expected number of arguments does not match the given number"
-            (cond
-             [(list? arity)
-              ""]
-             [else
-              (string-append
-               "\n  expected: "
-               (cond
-                [(arity-at-least? arity) (string-append "at least " (number->string (arity-at-least-value arity)))]
-                [else (number->string arity)]))]))
-           (current-continuation-marks)))]
+             (let ([vs (condition-irritants v)])
+               (and (pair? vs)
+                    (or (#%procedure? (car vs))
+                        (and (integer? (car vs))
+                             (pair? (cdr vs))
+                             (#%procedure? (cadr vs)))))))
+        (let ([vs (condition-irritants v)])
+          (if (#%procedure? (car vs))
+              (make-arity-exn (car vs) #f)
+              (make-arity-exn (cadr vs) (car vs))))]
        [else
         (|#%app|
-         (cond
-          [(or (and (format-condition? v)
-                    (or (string-prefix? "incorrect number of arguments" (condition-message v))
-                        (string-suffix? "values to single value return context" (condition-message v))
-                        (string-prefix? "incorrect number of values received in multiple value context" (condition-message v))))
-               (and (message-condition? v)
-                    (or (string-prefix? "incorrect argument count in call" (condition-message v))
-                        (string-prefix? "incorrect number of values from rhs" (condition-message v)))))
-           exn:fail:contract:arity]
-          [(and (format-condition? v)
-                (who-condition? v)
-                (eq? '/ (condition-who v))
-                (string=? "undefined for ~s" (condition-message v)))
-           exn:fail:contract:divide-by-zero]
-          [(and (format-condition? v)
-                (or (string=? "attempt to reference undefined variable ~s" (condition-message v))
-                    (string=? "attempt to assign undefined variable ~s" (condition-message v))))
-           (lambda (msg marks)
-             (|#%app| exn:fail:contract:variable msg marks (car (condition-irritants v))))]
-          [(and (format-condition? v)
-                (string-prefix? "~?.  Some debugging context lost" (condition-message v)))
-           exn:fail]
-          [else
-           exn:fail:contract])
+         (condition->exception-constructor v)
          (exn->string v)
          (current-continuation-marks))])
       v))
 
-(define (string-prefix? p str)
-  (and (>= (string-length str) (string-length p))
-       (string=? (substring str 0 (string-length p)) p)))
-
-(define (string-suffix? p str)
-  (and (>= (string-length str) (string-length p))
-       (string=? (substring str (- (string-length str) (string-length p)) (string-length str)) p)))
+(define (make-arity-exn proc n-args)
+  (let* ([name (object-name proc)]
+         [make-str (arity-string-maker proc)]
+         [arity (procedure-arity proc)]
+         [adjust-for-method (lambda (n)
+                              (if (and (procedure-is-method? proc)
+                                       (positive? n))
+                                  (sub1 n)
+                                  n))])
+    (|#%app|
+     exn:fail:contract:arity
+     (string-append
+      (if (symbol? name) (symbol->string name) "#<procedure>")
+      ": arity mismatch;\n the expected number of arguments does not match the given number"
+      (cond
+       [make-str
+        (let ([str (make-str)])
+          (if (string? str)
+              (string-append "\n  expected: " str)
+              ""))]
+       [(list? arity)
+        ""]
+       [else
+        (string-append
+         "\n  expected: "
+         (cond
+          [(arity-at-least? arity) (string-append "at least " (number->string
+                                                               (adjust-for-method (arity-at-least-value arity))))]
+          [else (number->string (adjust-for-method arity))]))])
+      (cond
+       [(not n-args) ""]
+       [else (string-append "\n  given: " (number->string (adjust-for-method n-args)))]))
+     (current-continuation-marks))))
 
 (define/who uncaught-exception-handler
   (make-parameter default-uncaught-exception-handler

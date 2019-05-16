@@ -252,6 +252,12 @@ extern "C"
 {
 #endif
 
+#if defined(MZ_DECLARE_NORETURN) && defined(__GNUC__)
+#define NORETURN __attribute__((__noreturn__))
+#else
+#define NORETURN
+#endif
+
 /* Allowed by all configurations, currently: */
 #define MZ_CAN_ACCESS_THREAD_LOCAL_DIRECTLY
 

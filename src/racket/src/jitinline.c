@@ -2151,6 +2151,7 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
       scheme_mz_unbox_restore(jitter, &ubs);
 
       mz_runstack_unskipped(jitter, 1);
+      mz_rs_sync();
 
       mz_prepare(1);
       jit_pusharg_p(JIT_R0);
@@ -3276,7 +3277,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
 
     /* check in range of type treated by eqv: */
     ref_f4 = jit_blti_i(jit_forward(), JIT_R2, scheme_integer_type);
-    ref_f5 = jit_bgti_i(jit_forward(), JIT_R2, scheme_char_type);
+    ref_f5 = jit_bgti_i(jit_forward(), JIT_R2, scheme_long_double_type);
     CHECK_LIMIT();
     
     /* in range of interesting types, so break out the generic comparison */
