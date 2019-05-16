@@ -1,9 +1,8 @@
-racket (7.2+ppa2-1~trusty1) trusty; urgency=medium
+racket (7.3+ppa1-1~bionic1) bionic; urgency=medium
 
   * PPA release
-  * Applied extflvector-length patch from upstream
 
- -- Asumu Takikawa <asumu@racket-lang.org>  Sun, 03 Feb 2019 10:00:00 -0800
+ -- Asumu Takikawa <asumu@racket-lang.org>  Wed, 15 May 2019 10:00:00 -0800
 
 racket (7.2+dfsg1-2) unstable; urgency=medium
 
