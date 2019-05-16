@@ -5,6 +5,7 @@
           null eof void void?
 
           begin0
+          $value
 
           letrec*/names
 
@@ -158,6 +159,7 @@
           primitive-result-arity
           make-jit-procedure ; not exported to racket
           |#%name|           ; not exported to racket
+          |#%method-arity|   ; not exported to racket
 
           equal?
           equal?/recur
@@ -271,6 +273,8 @@
           hash? hash-eq? hash-equal? hash-eqv? hash-weak? immutable-hash?
           hash-count
           hash-keys-subset?
+          eq-hashtable->hash   ; not exported to racket
+          hash->eq-hashtable   ; not exported to racket
 
           datum-intern-literal
           set-intern-regexp?!  ; not exported to racket
@@ -292,6 +296,7 @@
           bytes-append
           subbytes
 
+          make-string
           string-copy!
           substring
 
@@ -320,6 +325,7 @@
 
           vector?
           mutable-vector?
+          make-vector
           (rename [inline:vector-length vector-length]
                   [inline:vector-ref vector-ref]
                   [inline:vector-set! vector-set!])
@@ -463,6 +469,7 @@
           set-garbage-collect-notify!             ; not exported to Racket
           set-reachable-size-increments-callback! ; not exported to Racket
           set-custodian-memory-use-proc!          ; not exported to Racket
+          set-immediate-allocation-check-proc!    ; not exported to Racket
           unsafe-add-collect-callbacks
           unsafe-remove-collect-callbacks
 
@@ -608,7 +615,7 @@
           (rename [ffi-lib* ffi-lib])
           set-ffi-get-lib-and-obj!        ; not exported to Racket
           poll-async-callbacks            ; not exported to Racket
-          set-async-callback-poll-wakeup! ; not exported to Racket
+          set-make-async-callback-poll-wakeup! ; not exported to Racket
           set-foreign-eval!               ; not exported to Racket
 
           unsafe-unbox
@@ -650,6 +657,7 @@
           unsafe-struct-set!
           unsafe-struct*-ref
           unsafe-struct*-set!
+          unsafe-struct*-cas!
           unsafe-struct? ; not exported to racket
 
           unsafe-s16vector-ref
@@ -698,9 +706,11 @@
 
   (include "rumble/define.ss")
   (include "rumble/virtual-register.ss")
+  (include "rumble/layout.ss")
   (include "rumble/begin0.ss")
   (include "rumble/letrec.ss")
   (include "rumble/syntax-rule.ss")
+  (include "rumble/value.ss")
   (include "rumble/lock.ss")
   (include "rumble/thread-local.ss")
   (include "rumble/version.ss")
@@ -727,6 +737,7 @@
   (include "rumble/engine.ss")
   (include "rumble/source.ss")
   (include "rumble/error.ss")
+  (include "rumble/error-rewrite.ss")
   (include "rumble/srcloc.ss")
   (include "rumble/boolean.ss")
   (include "rumble/bytes.ss")

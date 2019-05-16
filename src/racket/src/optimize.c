@@ -2256,6 +2256,7 @@ int scheme_ir_duplicate_ok(Scheme_Object *fb, int cross_linklet)
           || SCHEME_EOFP(fb)
           || SCHEME_INTP(fb)
           || SCHEME_NULLP(fb)
+          || (SCHEME_HASHTRP(fb) && !((Scheme_Hash_Tree *)fb)->count)
           || (!cross_linklet && SAME_TYPE(SCHEME_TYPE(fb), scheme_ir_toplevel_type))
           || (!cross_linklet && SAME_TYPE(SCHEME_TYPE(fb), scheme_ir_local_type))
           || SCHEME_PRIMP(fb)
@@ -3618,6 +3619,8 @@ static Scheme_Object *do_expr_implies_predicate(Scheme_Object *expr, Optimize_In
       return scheme_not_proc;
     if (SCHEME_PROCP(expr))
       return scheme_procedure_p_proc;
+    if (SCHEME_LONG_DBLP(expr))
+      return scheme_extflonum_p_proc;
   }
 
   /* This test is slower, so put it at the end */  
@@ -4129,10 +4132,17 @@ static Scheme_Object *finish_optimize_application(Scheme_App_Rec *app, Optimize_
       return le;
   }
 
-  if (!app->num_args  
-      && (SAME_OBJ(rator, scheme_list_proc)
-          || (SCHEME_PRIMP(rator) && IS_NAMED_PRIM(rator, "append")))) {
-    return scheme_null;
+  if (!app->num_args && SCHEME_PRIMP(rator)) {
+    if (SAME_OBJ(rator, scheme_list_proc))
+      return scheme_null;
+    if (SAME_OBJ(rator, scheme_append_proc))
+      return scheme_null;
+    if (SAME_OBJ(rator, scheme_hasheq_proc))
+      return (Scheme_Object *)scheme_make_hash_tree(0);
+    if (SAME_OBJ(rator, scheme_hash_proc))
+      return (Scheme_Object *)scheme_make_hash_tree(1);
+    if (SAME_OBJ(rator, scheme_hasheqv_proc))
+      return (Scheme_Object *)scheme_make_hash_tree(2);
   }
    
   if (SCHEME_PRIMP(rator)
@@ -5165,7 +5175,6 @@ static Scheme_Object *finish_optimize_application3(Scheme_App3_Rec *app, Optimiz
       check_known(info, app_o, rator, rand2, "ormap", scheme_list_p_proc, NULL, info->unsafe_mode);
     }
 
-    rator = app->rator; /* in case it was updated */
   }
 
   /* Using a struct mutator? */
@@ -5713,13 +5722,13 @@ static int relevant_predicate(Scheme_Object *pred)
       || SAME_OBJ(pred, scheme_byte_string_p_proc)
       || SAME_OBJ(pred, scheme_vector_p_proc)
       || SAME_OBJ(pred, scheme_procedure_p_proc)
-      || SAME_OBJ(pred, scheme_syntax_p_proc)
-      || SAME_OBJ(pred, scheme_extflonum_p_proc))
+      || SAME_OBJ(pred, scheme_syntax_p_proc))
     return RLV_IS_RELEVANT;
   if (SAME_OBJ(pred, scheme_char_p_proc)
       || SAME_OBJ(pred, scheme_flonum_p_proc)
       || SAME_OBJ(pred, scheme_number_p_proc)
-      || SAME_OBJ(pred, scheme_real_p_proc))
+      || SAME_OBJ(pred, scheme_real_p_proc)
+      || SAME_OBJ(pred, scheme_extflonum_p_proc))
     return RLV_EQV_TESTEABLE;
   if (SAME_OBJ(pred, scheme_symbol_p_proc)
       || SAME_OBJ(pred, scheme_keyword_p_proc)

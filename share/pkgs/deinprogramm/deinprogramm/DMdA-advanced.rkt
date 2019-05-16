@@ -15,5 +15,5 @@
 	 number real rational integer natural boolean true false string symbol empty-list unspecific any property)
 (provide-and-document
  procedures
- (all-from advanced: deinprogramm/DMdA procedures))
+ (all-from advanced: deinprogramm/DMdA/private/primitives procedures))
 

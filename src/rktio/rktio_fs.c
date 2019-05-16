@@ -629,8 +629,10 @@ char *rktio_get_current_directory(rktio_t *rktio)
    } else
      break;
  }
- if (!r)
+ if (!r) {
+   free(s);
    get_posix_error();
+ }
  return r;
 #endif
 }
@@ -887,6 +889,7 @@ char *rktio_readlink(rktio_t *rktio, const char *fullfilename)
           set_racket_error(RKTIO_ERROR_NOT_A_LINK);
         else
           get_posix_error();
+        free(buffer);
         return NULL;
       }
     } else if (len == buf_len) {
@@ -915,7 +918,8 @@ int rktio_make_directory(rktio_t *rktio, const char *filename)
   /* Make sure path doesn't have trailing separator: */
   len = strlen(filename);
   while (len && IS_A_SEP(filename[len - 1])) {
-    copied = MSC_IZE(strdup)(filename);
+    if (!copied)
+      copied = MSC_IZE(strdup)(filename);
     copied[--len] = 0;
     filename = copied;
   }

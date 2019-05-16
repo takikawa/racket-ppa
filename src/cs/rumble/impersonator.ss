@@ -56,7 +56,8 @@
              rtd)
         (let ([r (loop (impersonator-next v))])
           (when (eq? r unsafe-undefined)
-            (raise-unsafe-undefined 'struct-ref "undefined" "use" acc (impersonator-val v) (cdr key)))
+            (let ([abs-pos (fx+ (cdr key) (struct-type-parent-total*-count (car key)))])
+              (raise-unsafe-undefined 'struct-ref "undefined" "use" acc (impersonator-val v) abs-pos)))
           r)]
        [(impersonator? v)
         (loop (impersonator-next v))]
@@ -95,7 +96,7 @@
           (when (eq? (unsafe-struct*-ref (impersonator-val v) abs-pos) unsafe-undefined)
             (unless (eq? (continuation-mark-set-first #f prop:chaperone-unsafe-undefined)
                          unsafe-undefined)
-              (raise-unsafe-undefined 'struct-set! "assignment disallowed" "assign" set (impersonator-val v) pos)))
+              (raise-unsafe-undefined 'struct-set! "assignment disallowed" "assign" set (impersonator-val v) abs-pos)))
           (loop (impersonator-next v) a)]
          [(impersonator? v)
           (loop (impersonator-next v) a)]
@@ -609,18 +610,13 @@
 ;; ----------------------------------------
 
 (define (set-impersonator-applicables!)
-  (struct-property-set! prop:procedure
-                        (record-type-descriptor props-procedure-impersonator)
-                        impersonate-apply)  
-  (struct-property-set! prop:procedure
-                        (record-type-descriptor props-procedure-chaperone)
-                        impersonate-apply)
-  (struct-property-set! prop:procedure-arity
-                        (record-type-descriptor props-procedure-impersonator)
-                        3)
-  (struct-property-set! prop:procedure-arity
-                        (record-type-descriptor props-procedure-chaperone)
-                        3)
+  (let ([add (lambda (rtd)
+               (struct-property-set! prop:procedure rtd impersonate-apply)  
+               (struct-property-set! prop:procedure-arity rtd 3))])
+    (add (record-type-descriptor props-procedure-impersonator))
+    (add (record-type-descriptor props-procedure-chaperone))
+    (add (record-type-descriptor props-procedure~-impersonator))
+    (add (record-type-descriptor props-procedure~-chaperone)))
 
   (struct-property-set! prop:procedure
                         (record-type-descriptor impersonator-property-accessor-procedure)

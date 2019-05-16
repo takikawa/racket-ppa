@@ -338,10 +338,10 @@
 			   (recur (cdr arbitrary-els)
 				  (cdr lis))))))))
 
-(define (arbitrary-sequence choose-sequence sequence->list arbitrary-el)
+(define (arbitrary-sequence min-length choose-sequence sequence->list arbitrary-el)
   (make-arbitrary (sized
 		   (lambda (n)
-		     (>>= (choose-integer 0 n)
+		     (>>= (choose-integer min-length (+ n min-length))
 			  (lambda (length)
 			    (choose-sequence (arbitrary-generator arbitrary-el) length)))))
 		  (lambda (seq gen)
@@ -353,22 +353,25 @@
 			   (variant 1 (recur (cdr lis)))))))))
 
 (define (arbitrary-list arbitrary-el)
-  (arbitrary-sequence choose-list values arbitrary-el))
+  (arbitrary-sequence 0 choose-list values arbitrary-el))
+
+(define (arbitrary-nonempty-list arbitrary-el)
+  (arbitrary-sequence 1 choose-list values arbitrary-el))
 
 (define (arbitrary-vector arbitrary-el)
-  (arbitrary-sequence choose-vector vector->list arbitrary-el))
+  (arbitrary-sequence 0 choose-vector vector->list arbitrary-el))
 
 (define arbitrary-ascii-string
-  (arbitrary-sequence choose-string string->list arbitrary-ascii-char))
+  (arbitrary-sequence 0 choose-string string->list arbitrary-ascii-char))
 
 (define arbitrary-printable-ascii-string
-  (arbitrary-sequence choose-string string->list arbitrary-printable-ascii-char))
+  (arbitrary-sequence 0 choose-string string->list arbitrary-printable-ascii-char))
 
 (define arbitrary-string
-  (arbitrary-sequence choose-string string->list arbitrary-char))
+  (arbitrary-sequence 0 choose-string string->list arbitrary-char))
 
 (define arbitrary-symbol
-  (arbitrary-sequence choose-symbol
+  (arbitrary-sequence 0 choose-symbol
 		      (lambda (symbol)
 			(string->list (symbol->string symbol)))
 		      arbitrary-ascii-letter))

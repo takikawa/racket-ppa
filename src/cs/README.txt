@@ -198,7 +198,7 @@ Structure
 
 The Racket-on-Chez implementation is in layers. The immediate layer
 over Chez Scheme is called "Rumble", and it implements delimited
-continuations, structures, chaperones and imperaontors, engines (for
+continuations, structures, chaperones and impersonators, engines (for                                          
 threads), and similar base functionality. The Rumble layer is
 implemented in Chez Scheme.
 
@@ -321,6 +321,9 @@ compiled terms when a linklet is not compliled whole; set
 `PLT_LINKLET_SHOW_POST_LAMBDA` to see the linlet reorganized around
 those compiled parts; and/or set `PLT_LINKLET_SHOW_POST_INTERP` to see
 the "bytecode" form.
+
+Set `PLT_LINKLET_SHOW_CP0` to see the Schmeified form of a linklet
+after expansion and optimization by Chez Scheme's cp0.
 
 Safety and Debugging Mode
 -------------------------
@@ -517,12 +520,12 @@ configuration:
  * `DEBUG_COMP` not enabled --- or, if you enable it, run `make
    strip`.
 
-   Effectivess: Avoids increasing the load time for the Rumble and
+   Effectiveness: Avoids increasing the load time for the Rumble and
    other layers by 30-50%.
 
  * `PLT_CS_DEBUG` not set --- an environment variable similar to
    `DEBUG_COMP`, but applies to code compiled by Racket-on-Chez.
 
-   Effectivess: Avoids improvement to stack traces, but also avoids
+   Effectiveness: Avoids improvement to stack traces, but also avoids
    increases load time and memory use of Racket programs by as much as
    50%.

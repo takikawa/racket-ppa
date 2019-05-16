@@ -29,9 +29,9 @@
   (-> syntax?
       boolean?)]
  [parse-rhs
-  (-> syntax? boolean?
-      #:context (or/c false/c syntax?)
-      rhs?)]
+  (->* [syntax? boolean? #:context (or/c false/c syntax?)]
+       [#:default-description (or/c #f string?)]
+       rhs?)]
  [parse-pattern+sides
   (-> syntax? syntax?
       #:splicing? boolean?
@@ -176,10 +176,14 @@
                            "identifier or syntax with leading identifier"
                            x)]))
 
+(define (propagate-disappeared! stx)
+  (cond [(and (syntax? stx) (syntax-property stx 'disappeared-use))
+         => (lambda (xs) (record-disappeared-uses (filter identifier? (flatten xs)) #f))]))
+
 ;; ---
 
-;; parse-rhs : Syntax Boolean #:context Syntax -> RHS
-(define (parse-rhs stx splicing? #:context ctx)
+;; parse-rhs : Syntax Boolean #:context Syntax #:default-description (U String #f) -> RHS
+(define (parse-rhs stx splicing? #:context ctx #:default-description [default-description #f])
   (call/txlifts
    (lambda ()
      (parameterize ((current-syntax-context ctx))
@@ -194,7 +198,7 @@
          (or attributes
              (filter (lambda (a) (symbol-interned? (attr-name a)))
                      (intersect-sattrss (map variant-attrs variants)))))
-       (make rhs sattrs transp? description variants
+       (make rhs sattrs transp? (or description #`(quote #,default-description)) variants
              (append (get-txlifts-as-definitions) defs)
              commit? delimit-cut?)))))
 
@@ -252,7 +256,7 @@
     (append/check-lits+litsets lits datum-lits litsets))
   (define-values (convs-rules convs-defs)
     (for/fold ([convs-rules null] [convs-defs null])
-        ([conv-entry (in-list convs)])
+              ([conv-entry (in-list convs)])
       (let* ([c (car conv-entry)]
              [argu (cdr conv-entry)]
              [get-parser-id (conventions-get-procedures c)]
@@ -447,6 +451,7 @@
           [else
            (wrong-syntax stx "action pattern not allowed here")]))
   (define not-shadowed? (make-not-shadowed? decls))
+  (propagate-disappeared! stx)
   (check-pattern
   (syntax-case* stx (~var ~literal ~datum ~and ~or ~or* ~alt ~not ~rest ~describe
                      ~seq ~optional ~! ~bind ~fail ~parse ~do ~undo
@@ -622,6 +627,7 @@
     (unless (stx-list? stx) (wrong-syntax stx "expected sequence of patterns"))
     (apply append (map recur (cdr (stx->list stx)))))
   (define not-shadowed? (make-not-shadowed? decls))
+  (propagate-disappeared! stx)
   (syntax-case* stx (~eh-var ~or ~alt ~between ~optional ~once)
                 (make-not-shadowed-id=? decls)
     [id
@@ -696,7 +702,7 @@
                (define entry (declenv-lookup decls suffix))
                (cond [(or (den:lit? entry) (den:datum-lit? entry))
                       (pat:and (list (pat:svar name) (parse-pat:id/entry id allow-head? entry)))]
-                     [else (parse-stxclass-use id allow-head? name suffix no-arguments #f)])])]
+                     [else (parse-stxclass-use id allow-head? name suffix no-arguments "." #f)])])]
         [(declenv-apply-conventions decls id)
          => (lambda (entry) (parse-pat:id/entry id allow-head? entry))]
         [else (pat:svar id)]))
@@ -733,13 +739,13 @@
     [(den:datum-lit internal sym)
      (pat:datum sym)]
     [(den:magic-class name scname argu role)
-     (parse-stxclass-use scname allow-head? id scname argu role)]
+     (parse-stxclass-use scname allow-head? id scname argu "." role)]
     [(den:class _n _c _a)
      (error 'parse-pat:id
             "(internal error) decls had leftover stxclass entry: ~s"
             entry)]
     [(den:delayed parser scname)
-     (parse-stxclass-use id allow-head? id scname no-arguments #f parser)]))
+     (parse-stxclass-use id allow-head? id scname no-arguments "." #f parser)]))
 
 (define (parse-pat:var stx decls allow-head?)
   (define name0
@@ -773,24 +779,22 @@
         [(and (wildcard? name0) (not scname))
          (pat:any)]
         [scname
-         (parse-stxclass-use stx allow-head? name0 scname argu role)]
+         (parse-stxclass-use stx allow-head? name0 scname argu pfx role)]
         [else ;; Just proper name
          (pat:svar name0)]))
 
 ;; ----
 
-(define (parse-stxclass-use stx allow-head? varname scname argu role [parser* #f])
-  (cond [(and (memq (stxclass-lookup-config) '(yes try)) (get-stxclass scname #t))
+(define (parse-stxclass-use stx allow-head? varname scname argu pfx role [parser* #f])
+  (define config (stxclass-lookup-config))
+  (cond [(and (memq config '(yes try)) (get-stxclass scname (eq? config 'try)))
          => (lambda (sc)
               (unless parser*
                 (check-stxclass-arity sc stx (length (arguments-pargs argu)) (arguments-kws argu)))
-              (parse-stxclass-use* stx allow-head? varname sc argu "." role parser*))]
-        [(memq (stxclass-lookup-config) '(try no))
+              (parse-stxclass-use* stx allow-head? varname sc argu pfx role parser*))]
+        [else
          (define bind (name->bind varname))
-         (pat:fixup stx bind varname scname argu role parser*)]
-        [else (wrong-syntax scname "not defined as syntax class (config=~s)"
-                            ;; XXX FIXME
-                            (stxclass-lookup-config))]))
+         (pat:fixup stx bind varname scname argu pfx role parser*)]))
 
 ;; ----
 
@@ -1255,8 +1259,8 @@
   (define (fixup p allow-head?)
     (define (I p) (fixup p allow-head?))
     (match p
-      [(pat:fixup stx bind varname scname argu role parser*)
-       (parse-stxclass-use stx allow-head? varname scname argu role parser*)]
+      [(pat:fixup stx bind varname scname argu pfx role parser*)
+       (parse-stxclass-use stx allow-head? varname scname argu pfx role parser*)]
       ;; ----
       ;; [(pat:any)
       ;;  (pat:any)]
@@ -1658,7 +1662,7 @@
      (syntax->list #'(e ...))]
     [_
      (raise-syntax-error #f "expected list of expressions and definitions" ctx stx)]))
-     
+
 ;; Arguments and Arities
 
 ;; parse-argu : (listof stx) -> Arguments

@@ -52,8 +52,7 @@
            install-do-global-print!))
 
 (define/who (display v [o (current-output-port)])
-  (check who output-port? o)
-  (let ([co (->core-output-port o)])
+  (let ([co (->core-output-port o who)])
     (define display-handler (core-output-port-display-handler co))
     (if display-handler
         (display-handler v o)
@@ -63,7 +62,7 @@
 (define (do-display who v o [max-length #f])
   (cond
     [(and (bytes? v) (not max-length))
-     (write-bytes v o)
+     (unsafe-write-bytes who v o)
      (void)]
     [(and (string? v) (not max-length))
      (write-string v o)
@@ -74,8 +73,7 @@
      (void)]))
 
 (define/who (write v [o (current-output-port)])
-  (check who output-port? o)
-  (let ([co (->core-output-port o)])
+  (let ([co (->core-output-port o who)])
     (define write-handler (core-output-port-write-handler co))
     (if write-handler
         (write-handler v o)
@@ -88,9 +86,8 @@
   (void))
 
 (define/who (print v [o (current-output-port)] [quote-depth PRINT-MODE/UNQUOTED])
-  (check who output-port? o)
-  (check who print-mode? #:contract "(or/c 0 1)" quote-depth)
-  (let ([co (->core-output-port o)])
+  (let ([co (->core-output-port o who)])
+    (check who print-mode? #:contract "(or/c 0 1)" quote-depth)
     (define print-handler (core-output-port-print-handler co))
     (if print-handler
         (print-handler v o quote-depth)
@@ -122,15 +119,15 @@
              (global-print v o2 quote-depth)
              (define bstr (get-output-bytes o2))
              (if ((bytes-length bstr) . <= . max-length)
-                 (write-bytes bstr o)
+                 (unsafe-write-bytes who bstr o)
                  (begin
-                   (write-bytes (subbytes bstr 0 (sub3 max-length)) o)
-                   (write-bytes #"..." o)))])
+                   (unsafe-write-bytes who (subbytes bstr 0 (sub3 max-length)) o)
+                   (unsafe-write-bytes who #"..." o)))])
           (void))))
 
 (define/who (newline [o (current-output-port)])
   (check who output-port? o)
-  (write-bytes #"\n" o)
+  (unsafe-write-bytes 'newline #"\n" o)
   (void))
 
 ;; ----------------------------------------
@@ -239,7 +236,28 @@
     [(pair? v)
      (print-list p who v mode o max-length graph config #f #f)]
     [(vector? v)
-     (print-list p who (vector->list v) mode o max-length graph config "#(" "(vector")]
+     (cond
+       [(and (not (eq? mode PRINT-MODE/UNQUOTED))
+             (config-get config print-vector-length))
+        (define len (vector-length v))
+        (define same-n
+          (cond
+            [(zero? len) 0]
+            [else
+             (let loop ([i (sub1 len)] [accum 0])
+               (cond
+                 [(zero? i) accum]
+                 [(eq? (vector-ref v (sub1 i)) (vector-ref v i))
+                  (loop (sub1 i) (add1 accum))]
+                 [else accum]))]))
+        (define lst (if (zero? same-n)
+                        (vector->list v)
+                        (for/list ([e (in-vector v 0 (- len same-n))])
+                          e)))
+        (define lbl (string-append "#" (number->string len) "("))
+        (print-list p who lst mode o max-length graph config lbl "(vector")]
+       [else
+        (print-list p who (vector->list v) mode o max-length graph config "#(" "(vector")])]
     [(flvector? v)
      (define l (for/list ([e (in-flvector v)]) e))
      (print-list p who l mode o max-length graph config "#fl(" "(flvector")]
@@ -291,7 +309,8 @@
           (p who v mode o (output-port/max-max-length o/m max-length) graph config)))
        ((custom-write-accessor v) v o/m mode)
        (output-port/max-max-length o/m max-length))]
-    [(struct? v)
+    [(and (struct? v)
+          (config-get config print-struct))
      (cond
        [(eq? mode PRINT-MODE/UNQUOTED)
         (define l (vector->list (struct->vector v)))

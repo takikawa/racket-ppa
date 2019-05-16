@@ -87,15 +87,15 @@
          (begin (record-disappeared-uses (list id))
                 value))))
 
-(define (record-disappeared-uses ids)
+(define (record-disappeared-uses ids [intro? (syntax-transforming?)])
   (cond
-    [(identifier? ids) (record-disappeared-uses (list ids))]
+    [(identifier? ids) (record-disappeared-uses (list ids) intro?)]
     [(and (list? ids) (andmap identifier? ids))
      (let ([uses (current-recorded-disappeared-uses)])
        (when uses
          (current-recorded-disappeared-uses 
           (append
-           (if (syntax-transforming?)
+           (if intro?
                (map syntax-local-introduce ids)
                ids)
            uses))))]
@@ -205,6 +205,8 @@
 
 (define-syntax (with-syntax* stx)
   (syntax-case stx ()
-    [(_ (cl) body ...) #'(with-syntax (cl) body ...)]
+    [(_ () body ...) (syntax/loc stx (let () body ...))]
+    [(_ (cl) body ...) (syntax/loc stx (with-syntax (cl) body ...))]
     [(_ (cl cls ...) body ...)
-     #'(with-syntax (cl) (with-syntax* (cls ...) body ...))]))
+     (with-syntax ([with-syntax/rest (syntax/loc stx (with-syntax* (cls ...) body ...))])
+       (syntax/loc stx (with-syntax (cl) with-syntax/rest)))]))

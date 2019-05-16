@@ -40,7 +40,7 @@
          break-enabled
          check-for-break
          break-enabled-key
-         current-break-suspend
+         current-breakable-atomic
          
          thread-push-kill-callback!
          thread-pop-kill-callback!
@@ -80,7 +80,6 @@
 
            current-break-enabled-cell
            check-for-break
-           current-break-suspend
 
            set-force-atomic-timeout-callback!
 
@@ -150,8 +149,8 @@
   (define p (if (or at-root? initial?)
                 root-thread-group
                 (current-thread-group)))
-  (define e (make-engine (lambda ()
-                           (call-with-continuation-prompt proc))
+  (define e (make-engine proc
+                         (default-continuation-prompt-tag)
                          (if (or initial? at-root?)
                              break-enabled-default-cell
                              (current-break-enabled-cell))
@@ -722,18 +721,16 @@
 ;; A continuation-mark key (not made visible to regular Racket code):
 (define break-enabled-default-cell (make-thread-cell #t))
 
-;; For disabling breaks, such as through `unsafe-start-atomic`:
-(define-place-local break-suspend 0)
-(define current-break-suspend
-  (case-lambda
-    [() break-suspend]
-    [(v) (set! break-suspend v)]))
+;; For enable breaks despite atomic mode, such as through
+;; `unsafe-start-breakable-atomic`; breaks are enabled as long as
+;; `current-atomic` does not exceed `current-breakable-atomic`:
+(define current-breakable-atomic (make-pthread-parameter 0))
 
 (define (current-break-enabled-cell)
   (continuation-mark-set-first #f
                                break-enabled-key
                                break-enabled-default-cell
-                               (root-continuation-prompt-tag)))
+                               (unsafe-root-continuation-prompt-tag)))
 
 (define break-enabled
   (case-lambda
@@ -758,7 +755,7 @@
         [(and (thread-pending-break t)
               (break-enabled)
               (not (thread-ignore-break-cell? t (current-break-enabled-cell)))
-              (zero? (current-break-suspend)))
+              (>= (add1 (current-breakable-atomic)) (current-atomic)))
          (define exn:break* (case (thread-pending-break t)
                               [(hang-up) exn:break:hang-up/non-engine]
                               [(terminate) exn:break:terminate/non-engine]
@@ -808,7 +805,9 @@
              (thread-reschedule! t))))
        void])))
   (when (eq? t check-t)
-    (check-for-break)))
+    (check-for-break)
+    (when (in-atomic-mode?)
+      (add-end-atomic-callback! check-for-break))))
 
 (define (break>? k1 k2)
   (cond
@@ -1004,3 +1003,14 @@
 
 (define/who (thread-receive-evt)
   (thread-receiver-evt))
+
+;; ----------------------------------------
+
+(void (set-immediate-allocation-check-proc!
+       ;; Called to check large vector, string, and byte-string allocations
+       (lambda (n)
+         (define t (current-thread))
+         (when t
+           (define mrefs (thread-custodian-references t))
+           (unless (null? mrefs)
+             (custodian-check-immediate-limit (car mrefs) n))))))

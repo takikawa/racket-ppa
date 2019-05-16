@@ -290,7 +290,7 @@ racket
  ;;
  ;; (define-strategy (s board tiles available score) ...)
  ;; defines a function from an instance of player to a
- ;; placement. The four identifier denote the state of
+ ;; placement. The four identifiers denote the state of
  ;; the board, the player's hand, the places where a
  ;; tile can be placed, and the player's current score.
  define-strategy)
@@ -323,8 +323,9 @@ Pick a rule for consistently naming and ordering the parameters of your
 Finally pick the same name for all function/method arguments in a module
  that refer to the same kind of data---regardless of whether the module
  implements a common data structure. For example, in
- @filepath{collects/setup/scribble}, all functions use @racket[latex-dest]
- to refer to the same kind of data, even those that are not exported.
+ @hyperlink["https://github.com/racket/racket/blob/master/pkgs/racket-index/setup/scribble.rkt"]{@filepath{pkgs/racket-index/setup/scribble.rkt}},
+ all functions use @racket[latex-dest] to refer to the same kind of data, 
+ even those that are not exported.
 
 @subsection{Sections and Sub-modules}
 

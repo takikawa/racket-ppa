@@ -2,14 +2,14 @@
 #lang scheme/base
 (require scribblings/htdp-langs/common
          scribble/decode
-         (for-label deinprogramm/DMdA-beginner))
+         (for-label deinprogramm/sdp/beginner))
 
 (provide prim-nonterms
-         racketgrammar*-DMdA)
+         racketgrammar*-sdp)
 
 (define ex-str "Dies ist eine Zeichenkette, die \" enthält.")
 
-(define-syntax-rule (racketgrammar*-DMdA
+(define-syntax-rule (racketgrammar*-sdp
                      #:literals (lit ...)
                      (def-rule ...)
                      (prod ...)
@@ -42,7 +42,7 @@
 	 @#,racket[string]
 	 @#,racket[(lambda (id (... ...)) expr)]
 	 @#,racket[(λ (id (... ...)) expr)]
-	 @#,racket[(code:line id (code:comment @#,seclink["id"]{Bezeichner}))]
+	 @#,racket[(code:line id (code:comment @#,seclink["id"]{Name}))]
 	 @#,racket[(cond (expr expr) (expr expr) (... ...))]
 	 @#,racket[(cond (expr expr) (... ...) (else expr))]
 	 @#,racket[(if expr expr)]
@@ -60,6 +60,7 @@
 	      @#,racket[(mixed sig (... ...))]
 	      @#,racket[(code:line (sig (... ...) -> sig) (code:comment @#,seclink["proc-signature"]{Prozedur-Signatur}))]
 	      @#,racket[(list-of sig)]
+	      @#,racket[(nonempty-list-of sig)]
 	      @#,racket[(code:line %a %b %c (code:comment @#,seclink["signature-variable"]{Signatur-Variable}))]
 	      @#,racket[(combined sig (... ...))]
 	      signature-rule ...

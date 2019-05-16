@@ -78,6 +78,9 @@
 (define unsafe-vector*-set! (unsafe-primitive vector-set!))
 (define unsafe-vector*-cas! (unsafe-primitive vector-cas!))
 
+(define (unsafe-struct*-cas! s k old new)
+  (#3%$record-cas! s k old new))
+
 (define unsafe-unbox* (unsafe-primitive unbox))
 (define unsafe-set-box*! (unsafe-primitive set-box!))
 (define unsafe-box*-cas! (unsafe-primitive box-cas!))
@@ -94,47 +97,61 @@
 (define unsafe-fxvector-ref (unsafe-primitive fxvector-ref))
 (define unsafe-fxvector-set! (unsafe-primitive fxvector-set!))
 
-(define (unsafe-s16vector-ref cptr k)
-  (let ([mem (cpointer-memory cptr)])
+(define (unsafe-s16vector-ref s16 k)
+  (let* ([cptr (unsafe-struct*-ref s16 0)]
+         [mem (cpointer-memory cptr)]
+         [k (fx* k 2)])
     (if (bytes? mem)
         (bytevector-s16-native-ref mem k)
         (foreign-ref 'int16 mem k))))
-(define (unsafe-s16vector-set! cptr k v)
-  (let ([mem (cpointer-memory cptr)])
+(define (unsafe-s16vector-set! s16 k v)
+  (let* ([cptr (unsafe-struct*-ref s16 0)]
+         [mem (cpointer-memory cptr)]
+         [k (fx* k 2)])
     (if (bytes? mem)
         (bytevector-s16-native-set! mem k v)
         (foreign-set! 'int16 mem k v))))
 
-(define (unsafe-u16vector-ref cptr k)
-  (let ([mem (cpointer-memory cptr)])
+(define (unsafe-u16vector-ref u16 k)
+  (let* ([cptr (unsafe-struct*-ref u16 0)]
+         [mem (cpointer-memory cptr)]
+         [k (fx* k 2)])
     (if (bytes? mem)
         (bytevector-u16-native-ref mem k)
         (foreign-ref 'uint16 mem k))))
-(define (unsafe-u16vector-set! cptr k v)
-  (let ([mem (cpointer-memory cptr)])
+(define (unsafe-u16vector-set! u16 k v)
+  (let* ([cptr (unsafe-struct*-ref u16 0)]
+         [mem (cpointer-memory cptr)]
+         [k (fx* k 2)])
     (if (bytes? mem)
         (bytevector-u16-native-set! mem k v)
         (foreign-set! 'uint16 mem k v))))
 
-(define (unsafe-f64vector-ref cptr k)
-  (let ([mem (cpointer-memory cptr)])
+(define (unsafe-f64vector-ref f64 k)
+  (let* ([cptr (unsafe-struct*-ref f64 0)]
+         [mem (cpointer-memory cptr)]
+         [k (fx* k 8)])
     (if (bytes? mem)
         (bytevector-ieee-double-native-ref mem k)
         (foreign-ref 'double mem k))))
-(define (unsafe-f64vector-set! cptr k v)
-  (let ([mem (cpointer-memory cptr)])
+(define (unsafe-f64vector-set! f64 k v)
+  (let* ([cptr (unsafe-struct*-ref f64 0)]
+         [mem (cpointer-memory cptr)]
+         [k (fx* k 8)])
     (if (bytes? mem)
         (bytevector-ieee-double-native-set! mem k v)
         (foreign-set! 'double mem k v))))
 
 ;; FIXME
-(define (unsafe-f80vector-ref cptr k)
-  (let ([mem (cpointer-memory cptr)])
+(define (unsafe-f80vector-ref f80 k)
+  (let* ([cptr (unsafe-struct*-ref f80 0)]
+         [mem (cpointer-memory cptr)])
     (if (bytes? mem)
         (bytevector-ieee-double-native-ref mem k)
         (foreign-ref 'double mem k))))
-(define (unsafe-f80vector-set! cptr k v)
-  (let ([mem (cpointer-memory cptr)])
+(define (unsafe-f80vector-set! f80 k v)
+  (let* ([cptr (unsafe-struct*-ref f80 0)]
+         [mem (cpointer-memory cptr)])
     (if (bytes? mem)
         (bytevector-ieee-double-native-set! mem k v)
         (foreign-set! 'double mem k v))))
@@ -151,10 +168,20 @@
 
 (define (check-not-unsafe-undefined v sym)
   (when (eq? v unsafe-undefined)
-    (raise-arguments-error sym "undefined;\n cannot use before initialization"))
+    (raise (|#%app|
+            exn:fail:contract:variable
+            (string-append (symbol->string sym)
+                           ": undefined;\n cannot use before initialization")
+            (current-continuation-marks)
+            sym)))
   v)
 
 (define (check-not-unsafe-undefined/assign v sym)
   (when (eq? v unsafe-undefined)
-    (raise-arguments-error sym "assignment disallowed;\n cannot assign before initialization"))
+    (raise (|#%app|
+            exn:fail:contract:variable
+            (string-append (symbol->string sym)
+                           ": assignment disallowed;\n cannot assign before initialization")
+            (current-continuation-marks)
+            sym)))
   v)

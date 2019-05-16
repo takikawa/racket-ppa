@@ -5,6 +5,8 @@
          "../host/pthread.rkt"
          "../host/rktio.rkt"
          "../string/convert.rkt"
+         "../path/system.rkt"
+         "../path/path.rkt"
          "level.rkt"
          "logger.rkt")
 
@@ -12,7 +14,9 @@
          make-log-receiver
          add-stderr-log-receiver!
          add-stdout-log-receiver!
-         log-receiver-send!)
+         add-syslog-log-receiver!
+         log-receiver-send!
+         receiver-add-topics)
 
 (struct log-receiver (filters))
 
@@ -119,7 +123,31 @@
   
 (define/who (add-stdout-log-receiver! logger . args)
   (add-stdio-log-receiver! who logger args 'make-stdio-log-receiver RKTIO_STDOUT))
-  
+
+;; ----------------------------------------
+
+(struct syslog-log-receiver log-receiver (cmd)
+  #:property
+  prop:receiver-send
+  (lambda (lr msg)
+    ;; called in atomic mode and possibly in host interrupt handler
+    (define bstr (bytes-append (string->bytes/utf-8 (vector-ref msg 1)) #"\n"))
+    (define pri
+      (case (vector-ref msg 0)
+        [(fatal) RKTIO_LOG_FATAL]
+        [(error) RKTIO_LOG_ERROR]
+        [(warning) RKTIO_LOG_WARNING]
+        [(info) RKTIO_LOG_INFO]
+        [else RKTIO_LOG_DEBUG]))
+    (rktio_syslog rktio pri #f bstr (syslog-log-receiver-cmd lr))))
+
+(define/who (add-syslog-log-receiver! logger . args)
+  (define lr (syslog-log-receiver (parse-filters 'make-syslog-log-receiver args #:default-level 'none)
+                                  (path-bytes (find-system-path 'run-file))))
+  (atomically
+   (add-log-receiver! logger lr #f)
+   (set-logger-permanent-receivers! logger (cons lr (logger-permanent-receivers logger)))))
+
 ;; ----------------------------------------
 
 (define (add-log-receiver! logger lr backref)
@@ -144,9 +172,10 @@
    (set-box! ts-box (add1 (unbox ts-box)))
    ;; Post a semaphore to report that wanted levels may have
    ;; changed:
-   (when (logger-level-sema logger)
-     (semaphore-post (logger-level-sema logger))
-     (set-logger-level-sema! logger #f))))
+   (define sema-box (logger-level-sema-box logger))
+   (when (unbox sema-box)
+     (semaphore-post (unbox sema-box))
+     (set-box! sema-box #f))))
 
 ;; Called in atomic mode and with interrupts disabled
 (define (log-receiver-send! r msg in-interrupt?)
@@ -157,3 +186,13 @@
       ;; Record any any other message for posting later:
       (unsafe-add-pre-poll-callback! (lambda ()
                                        ((receiver-send-ref r) r msg)))))
+
+;; ----------------------------------------
+
+(define (receiver-add-topics r topics default-level)
+  (let loop ([filters (log-receiver-filters r)] [topics topics])
+    (cond
+      [(pair? filters)
+       (loop (cdr filters) (hash-set topics (caar filters) #t))]
+      [else
+       (values topics (level-max default-level filters))])))

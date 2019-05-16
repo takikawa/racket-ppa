@@ -1,5 +1,6 @@
 #lang racket/base
 (require "../common/check.rkt"
+         "../common/class.rkt"
          "../host/thread.rkt"
          "../host/pthread.rkt"
          "port.rkt"
@@ -9,7 +10,7 @@
          output-port?
          ->core-output-port
          (struct-out core-output-port)
-         make-core-output-port)
+         get-write-evt-via-write-out)
 
 (define-values (prop:output-port output-port-via-property? output-port-ref)
   (make-struct-type-property 'output-port
@@ -34,138 +35,88 @@
 
 ;; This function should not be called in atomic mode,
 ;; since it can invoke an arbitrary function
-(define (->core-output-port v)
+(define (->core-output-port v [who #f]
+                            #:default [default empty-output-port])
   (cond
-    [(core-output-port? v) (if (impersonator? v)
-                               ;; If there's an impersonator, it's only
-                               ;; an evt impersonator
-                               (unsafe-strip-impersonator v)
-                               v)]
-    [(output-port? v)
-     (let ([p (output-port-ref v)])
-       (cond
-         [(struct-accessor-procedure? p)
-          (->core-output-port (p v))]
-         [else
-          (->core-output-port p)]))]
-    [else
-     empty-output-port]))
+    [(core-output-port? v) v]
+    [(output-port-ref v #f)
+     => (lambda (p)
+          (cond
+            [(struct-accessor-procedure? p)
+             (->core-output-port (p v))]
+            [else
+             (->core-output-port p)]))]
+    [who (raise-argument-error who "output-port?" v)]
+    [else default]))
 
-(struct core-output-port core-port
-  (
-   ;; Various functions below are called in atomic mode; see
-   ;; `core-input-port` for more information on atomicity.
+(class core-output-port #:extends core-port
+  #:field
+  [evt always-evt] ; An evt that is ready when writing a byte won't block
+  [write-handler #f]
+  [print-handler #f]
+  [display-handler #f]
 
-   evt ; An evt that is ready when writing a byte won't block
-   
-   write-out ; port or (bstr start-k end-k no-block/buffer? enable-break? copy? -*> ...)
-   ;;          Called in atomic mode.
-   ;;          Doesn't block if `no-block/buffer?` is true.
-   ;;          Does enable breaks while blocking if `enable-break?` is true.
-   ;;          The `copy?` flag indicates that the given byte string should
-   ;;          not be exposed to untrusted code, and instead of should be
-   ;;          copied if necessary. The return values are the same as
-   ;;          documented for `make-output-port`.
+  #:public
+  ;; port or (bstr start-k end-k no-block/buffer? enable-break? copy? -*> ...)
+  ;; Called in atomic mode.
+  ;; Doesn't block if `no-block/buffer?` is true. Does enable breaks
+  ;; while blocking if `enable-break?` is true. The `copy?` flag
+  ;; indicates that the given byte string should not be exposed to
+  ;; untrusted code, and instead of should be copied if necessary.
+  ;; The return values are the same as documented for
+  ;; `make-output-port`.
+  [write-out (lambda (bstr start-k end-k no-block/buffer? enable-break? copy?)
+               (- end-k start-k))]
 
-   write-out-special ; (any no-block/buffer? enable-break? -*> boolean?)
-   ;;          Called in atomic mode.
+  ;; #f or (any no-block/buffer? enable-break? -*> boolean?)
+  ;; Called in atomic mode.
+  [write-out-special #f]
+  
+  ;; #f or (bstr start-k end-k -*> evt?)
+  ;; Called in atomic mode.
+  ;; The given bstr should not be exposed to untrusted code.
+  [get-write-evt (lambda (bstr start-k end-k) always-evt)]
 
-   get-write-evt ; (port bstr start-k end-k -*> evt?)
-   ;;            Called in atomic mode.
-   ;;            Note the extra "self" argument as a port, which is useful
-   ;;            for implementing `count-write-evt-via-write-out`.
-   ;;            The given bstr should not be exposed to untrusted code.
+  ;; #f or (any -*> evt?)
+  ;; *Not* called in atomic mode.
+  [get-write-special-evt #f]
 
-   get-write-special-evt ; (-*> evt?)
-   ;;            *Not* called in atomic mode.
-   
-   [write-handler #:mutable]
-   [print-handler #:mutable]
-   [display-handler #:mutable])
-  #:authentic
-  #:property prop:output-port-evt (lambda (o)
-                                    ;; not atomic mode
-                                    (let ([o (->core-output-port o)])
-                                      (choice-evt
-                                       (list
-                                        (poller-evt
-                                         (poller
-                                          (lambda (self sched-info)
-                                            ;; atomic mode
-                                            (cond
-                                              [(closed-state-closed? (core-port-closed o))
-                                               (values '(#t) #f)]
-                                              [else (values #f self)]))))
-                                        (core-output-port-evt o))))))
+  #:property
+  [prop:output-port-evt (lambda (o)
+                          ;; not atomic mode
+                          (let ([o (->core-output-port o)])
+                            (choice-evt
+                             (list
+                              (poller-evt
+                               (poller
+                                (lambda (self sched-info)
+                                  ;; atomic mode
+                                  (cond
+                                    [(core-port-closed? o)
+                                     (values '(#t) #f)]
+                                    [else (values #f self)]))))
+                              (core-output-port-evt o)))))])
+
+;; If `write-out` is always atomic (in no-block, no-buffer mode),
+;; then an event can poll `write-out`
+(define (get-write-evt-via-write-out count-write-evt-via-write-out)
+  (lambda (out src-bstr src-start src-end)
+    (write-evt
+     ;; in atomic mode:
+     (lambda (self-evt)
+       (define v (send core-output-port out write-out src-bstr src-start src-end #f #f #t))
+       (when (exact-integer? v)
+         (count-write-evt-via-write-out out v src-bstr src-start))
+       (if (evt? v)
+           (values #f (replace-evt v self-evt))
+           (values (list v) #f))))))
 
 (struct write-evt (proc)
   #:property prop:evt (poller
                        (lambda (self sched-info)
                          ((write-evt-proc self) self))))
 
-(define (make-core-output-port #:name name
-                               #:data [data #f]
-                               #:self self
-                               #:evt evt
-                               #:write-out write-out
-                               #:close close
-                               #:write-out-special [write-out-special #f]
-                               #:get-write-evt [get-write-evt #f]
-                               #:count-write-evt-via-write-out [count-write-evt-via-write-out #f]
-                               #:get-write-special-evt [get-write-special-evt #f]
-                               #:get-location [get-location #f]
-                               #:count-lines! [count-lines! #f]
-                               #:file-position [file-position #f]
-                               #:init-offset [init-offset 0]
-                               #:buffer-mode [buffer-mode #f])
-  (core-output-port name
-                    data
-                    self
-
-                    close
-                    count-lines!
-                    get-location
-                    file-position
-                    buffer-mode
-
-                    (closed-state #f #f)
-                    init-offset ; offset
-                    #f   ; count?
-                    #f   ; state
-                    #f   ; cr-state
-                    #f   ; line
-                    #f   ; column
-                    #f   ; position
-                    
-                    evt
-                    write-out
-                    write-out-special
-                    (or get-write-evt
-                        (and count-write-evt-via-write-out
-                             ;; If `write-out` is always atomic (in no-block, no-buffer mode),
-                             ;; then an event can poll `write-out`:
-                             (lambda (self o src-bstr src-start src-end)
-                               (write-evt
-                                ;; in atomic mode:
-                                (lambda (self-evt)
-                                  (define v (write-out self src-bstr src-start src-end #f #f #t))
-                                  (when (exact-integer? v)
-                                    (count-write-evt-via-write-out self o v src-bstr src-start))
-                                  (if (evt? v)
-                                      (values #f (replace-evt v self-evt))
-                                      (values (list v) #f)))))))
-                    get-write-special-evt
-                    
-                    #f   ; write-handler
-                    #f   ; display-handler
-                    #f)) ; print-handler
-  
 (define empty-output-port
-  (make-core-output-port #:name 'empty
-                         #:self #f
-                         #:evt always-evt
-                         #:write-out (lambda (self bstr start end no-buffer? enable-break?)
-                                       (- end start))
-                         #:write-out-special (lambda (self v no-buffer? enable-break?)
-                                               #t)
-                         #:close void))
+  (new core-output-port
+       #:field
+       [name 'empty]))

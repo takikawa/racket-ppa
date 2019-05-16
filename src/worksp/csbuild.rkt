@@ -67,7 +67,8 @@
 
 ;; ----------------------------------------
 
-(unless (directory-exists? scheme-dir)
+(let ([submodules '("nanopass"  "stex"   "zlib"   "lz4")]
+      [readmes    '("ReadMe.md" "ReadMe" "README" "README.md")])  
   (define (clone from to [git-clone-args '()])
     (apply system*! (append
                      (list "git"
@@ -76,29 +77,33 @@
                      (list from to))))
   (cond
     [extra-repos-base
-     ;; Intentionally not using `git-clone-args`
-     (clone (format "~aChezScheme/.git" extra-repos-base)
-            scheme-dir)
-     (clone (format "~ananopass/.git" extra-repos-base)
-            (build-path scheme-dir "nanopass"))
-     (clone (format "~astex/.git" extra-repos-base)
-            (build-path scheme-dir "stex"))
-     (clone (format "~azlib/.git" extra-repos-base)
-            (build-path scheme-dir "zlib"))]
+     ;; Intentionally not using `git-clone-args`, because dumb transport
+     ;; (likely for `extra-repos-base`) does not support shallow copies
+     (unless (directory-exists? scheme-dir)
+       (clone (format "~aChezScheme/.git" extra-repos-base)
+              scheme-dir))
+     (for ([submodule (in-list submodules)]
+           [readme (in-list readmes)])
+       (define dir (build-path scheme-dir submodule))
+       (unless (file-exists? (build-path dir readme))
+         (clone (format "~a~a/.git" extra-repos-base submodule)
+                (build-path scheme-dir submodule))))
+     (when pull?
+       (parameterize ([current-directory scheme-dir])
+         (system*! "git" "pull")
+         (for ([submodule (in-list submodules)])
+           (parameterize ([current-directory (build-path submodule)])
+             (system*! "git" "pull" "origin" "master")))))]
     [else
-     (clone "https://github.com/mflatt/ChezScheme"
-            scheme-dir
-            git-clone-args)]))
-
-(when pull?
-  (unless scheme-dir-provided?
-    (parameterize ([current-directory scheme-dir])
-      (system*! "git" "pull"))))
-
-(unless (file-exists? (build-path scheme-dir "zlib" "Makefile"))
-  (parameterize ([current-directory scheme-dir])
-    (system*! "git" "submodule" "init")
-    (system*! "git" "submodule" "update")))
+     (unless (directory-exists? scheme-dir)
+       (clone "https://github.com/mflatt/ChezScheme"
+              scheme-dir
+              git-clone-args))
+     (when pull?
+       (parameterize ([current-directory scheme-dir])
+         (system*! "git" "pull")
+         (system*! "git" "submodule" "init")
+         (system*! "git" "submodule" "update")))]))
 
 (prep-chez-scheme scheme-dir machine)
 
@@ -196,7 +201,8 @@
 	  "--script"
 	  "../cs/c/convert-to-boot.ss"
 	  "../build/racket.so"
-	  "../build/racket.boot")
+	  "../build/racket.boot"
+	  machine)
 
 (system*! scheme
 	  "--script"

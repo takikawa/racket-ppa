@@ -4,7 +4,7 @@
 	 signature signature/arbitrary
 	 define-contract contract ; legacy
 	 define/signature define-values/signature
-	 -> mixed one-of predicate combined property list-of)
+	 -> mixed one-of predicate combined property list-of nonempty-list-of)
 
 (require deinprogramm/signature/signature
 	 deinprogramm/signature/signature-german
@@ -20,7 +20,7 @@
 
 (define-for-syntax (parse-signature name stx)
   (syntax-case* stx
-		(mixed one-of predicate list -> combined property reference at signature list-of)
+		(mixed one-of predicate list -> combined property reference at signature list-of nonempty-list-of)
 		module-or-top-identifier=?
     ((mixed ?signature ...)
      (with-syntax ((?stx (phase-lift stx))
@@ -71,6 +71,15 @@
     ((list-of ?signature)
      (raise-syntax-error #f
 			 "list-of-Signatur darf nur einen Operanden haben."
+			 (syntax ?signature1)))
+    ((nonempty-list-of ?signature)
+     (with-syntax ((?stx (phase-lift stx))
+		   (?name name)
+		   (?signature-expr (parse-signature #f #'?signature)))
+       #'(make-nonempty-list-signature '?name ?signature-expr ?stx)))
+    ((nonempty-list-of ?signature)
+     (raise-syntax-error #f
+			 "nonempty-list-of-Signatur darf nur einen Operanden haben."
 			 (syntax ?signature1)))
     ((?arg-signature ... -> ?return-signature)
      (with-syntax ((?stx (phase-lift stx))
@@ -290,3 +299,4 @@
 (define-syntax combined within-signature-syntax-transformer)
 (define-syntax property within-signature-syntax-transformer)
 (define-syntax list-of within-signature-syntax-transformer)
+(define-syntax nonempty-list-of within-signature-syntax-transformer)

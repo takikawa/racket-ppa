@@ -75,7 +75,7 @@ a @racket[css-addition] structure instance to a style's @tech{style property}
 list. To map a style name to a Latex macro or environment, add a
 @racket[tex-addition] structure instance. A @racket[css-addition] or
 @racket[tex-addition] is normally associated with the style whose name
-is implemented by the adition, but it can also be added to the style
+is implemented by the addition, but it can also be added to the style
 for an enclosing part.
 
 Scribble includes a number of predefined styles that are used by the
@@ -369,6 +369,7 @@ The style classes:
                           add space before and after suitable for code.}]
   [@css{SCentered} @elem{For a @racket[nested-flow] created by @racket[centered]: horizontally
                           centered.}]
+  [@css{SVerbatim} @elem{For a @racket[table] created by @racket[verbatim]: disables line breaks.}]
 
   [@spacer @spacer]
 
@@ -630,7 +631,10 @@ style:
        with the @racket['code-inset] style name.}
 
  @item{@ltxe{SVInsetFlow} environment --- for a @racket[nested-flow]
-       with the @racket['vertical-inset] style name.}
+            with the @racket['vertical-inset] style name.}
+
+ @item{@ltxe{SVerbatim} environment --- for a @racket[table] created
+            by @racket[verbatim].}
 
  @item{@ltxd[1]{SCodeBox}, @ltxd[1]{SVInsetBox} --- for a
        @racket[nested-flow] with the @racket['code-inset] or

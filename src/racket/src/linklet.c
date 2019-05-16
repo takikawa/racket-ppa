@@ -8,6 +8,7 @@ SHARED_OK Scheme_Hash_Tree *empty_hash_tree;
 
 SHARED_OK static int validate_compile_result = 0;
 SHARED_OK static int recompile_every_compile = 0;
+SHARED_OK static int show_linklets = 0;
 
 static Scheme_Object *serializable_symbol;
 static Scheme_Object *unsafe_symbol;
@@ -189,6 +190,9 @@ void scheme_init_linklet(Scheme_Startup_Env *env)
         recompile_every_compile = 32;
     }
   }
+
+  if (scheme_getenv("PLT_LINKLET_SHOW"))
+    show_linklets = 1;
 }
 
 void scheme_init_unsafe_linklet(Scheme_Startup_Env *env)
@@ -337,7 +341,7 @@ void extract_import_info(const char *who, int argc, Scheme_Object **argv,
       if (!*_import_keys) {
         scheme_contract_error(who,
                               "no vector supplied for import keys, but import-getting function provided;\n"
-                              " the function argument must be `#f' when the vector argument is `#f'",
+                              " the function argument must be `#f` when the vector argument is `#f`",
                               "import-getting function", 1, argv[3],
                               NULL);
       }
@@ -418,6 +422,13 @@ static Scheme_Object *compile_linklet(int argc, Scheme_Object **argv)
   e = argv[0];
   if (!SCHEME_STXP(e))
     e = scheme_datum_to_syntax(e, scheme_false, DTS_CAN_GRAPH);
+
+  if (show_linklets) {
+    char *s;
+    intptr_t s_len;
+    s = scheme_write_to_string(scheme_syntax_to_datum(e), &s_len);
+    printf("%s\n", s);
+  }
 
   if (argc > 4)
     parse_compile_options("compile-linklet", 4, argc, argv, &unsafe, &static_mode);
@@ -501,6 +512,18 @@ static Scheme_Object *eval_linklet(int argc, Scheme_Object **argv)
       linklet = scheme_jit_linklet(linklet, 1);
     }
   }
+
+#ifdef MZ_USE_JIT
+  if (linklet->native_lambdas) {
+    Scheme_Object *l;
+    l = linklet->native_lambdas;
+    linklet->native_lambdas = NULL;
+    while (SCHEME_PAIRP(l)) {
+      scheme_force_jit_generate((Scheme_Native_Lambda *)SCHEME_CAR(l));
+      l = SCHEME_CDR(l);
+    }
+  }
+#endif
 
   return (Scheme_Object *)linklet;
 }

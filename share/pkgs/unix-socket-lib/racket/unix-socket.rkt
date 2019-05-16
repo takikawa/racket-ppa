@@ -80,7 +80,7 @@
 ;; close/unregister : Nat Cust-Reg/#f -> Void
 (define (close/unregister fd [reg #f])
   (close fd)
-  (socket->semaphore fd 'remove)
+  (fd->evt fd 'remove)
   (when reg (unregister-custodian-shutdown fd reg)))
 
 ;; make-socket-ports : Symbol FD Cust-Reg/#f -> (values Input-Port Output-Port)
@@ -172,9 +172,9 @@
               (define-values (in out) (make-socket-ports 'unix-socket-connect socket-fd reg))
               (lambda () (values in out))]
              [(= errno EINPROGRESS) ;; wait and see
-              (define sema (socket->semaphore socket-fd 'write))
+              (define ready-evt (fd->evt socket-fd 'write))
               (lambda () ;; called in non-atomic mode!
-                (sync sema)
+                (sync ready-evt)
                 ;; FIXME: check custodian hasn't been shut down?
                 (call-as-atomic
                  (lambda ()
@@ -209,10 +209,10 @@
      (lambda ()
        (wrap-evt
         ;; ready when fd is readable OR listener is closed
-        ;; If closed after evt creation, then fd-sema becomes ready
-        ;; when fd closed and fd-sema unregistered.
+        ;; If closed after evt creation, then fd-evt becomes ready
+        ;; when fd closed and fd-evt is unregistered.
         (cond [(unix-socket-listener-fd self)
-               => (lambda (fd) (socket->semaphore fd 'read))]
+               => (lambda (fd) (fd->evt fd 'read))]
               [else always-evt])
         (lambda (r) self))))))
 
@@ -280,8 +280,8 @@
                [else (accept-poll/check who accept-evt lfd)])]))
 
 (define (accept-poll/sleep who accept-evt wakeups lfd)
-  ;; No need to register wakeup for custodian; if custodian is shut down, then
-  ;; lfd semaphore becomes ready when it is unregistered
+  ;; No need to register wakeup for custodian; custodian shutdown means a Racket thread
+  ;; did work, so accept-evt will get re-polled.
   (unsafe-poll-ctx-fd-wakeup wakeups lfd 'read)
   (values #f accept-evt))
 

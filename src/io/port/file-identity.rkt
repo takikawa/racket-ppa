@@ -12,11 +12,9 @@
 
 (define/who (port-file-identity p)
   (check who file-stream-port? p)
-  (define cp (cond
-               [(input-port? p) (->core-input-port p)]
-               [else (->core-output-port p)]))
+  (define cp (or (->core-input-port p #:default #f)
+                 (->core-output-port p #:default #f)))
   (start-atomic)
   (check-not-closed who cp)
-  (define fd (let ([pd (core-port-data cp)])
-               ((file-stream-ref pd) pd)))
+  (define fd ((file-stream-ref cp) cp))
   (path-or-fd-identity who #:fd fd #:port p))

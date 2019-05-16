@@ -564,8 +564,8 @@ For @tech{callouts} to foreign functions with the generated type:
  @item{If @racket[blocking?] is true, then a foreign @tech{callout}
        deactivates tracking of the calling OS thread---to the degree
        supported by the Racket variant---during the foreign call. The
-       value of @racket[blocking?] affects only the @tech[#:doc
-       guide.scrbl]{CS} variant of Racket, where it enable activity
+       value of @racket[blocking?] affects only the @CS[] variant of
+       Racket, where it enable activity
        such as garbage collection in other OS threads while the
        @tech{callout} blocks. If the blocking @tech{callout} can
        invoke any @tech{callbacks} back to Racket, those
@@ -1711,7 +1711,7 @@ enumeration maps between a symbol in the given @racket[symbols] list and
 corresponding integers, counting from @racket[0].
 
 To call a foreign function that takes an enum as a parameter simply provide
-the symbol of the desiered enum as an argument.
+the symbol of the desired enum as an argument.
 
 @racketblock[
  (code:comment "example sdl call")
