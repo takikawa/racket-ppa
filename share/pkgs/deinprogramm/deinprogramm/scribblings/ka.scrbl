@@ -8,8 +8,8 @@
 
 @title{Konstruktionsanleitungen 1 bis 10}
 
-This documents the design recipes of the German textbook @italic{Die
-Macht der Abstraktion}.
+This documents the design recipes of the German textbook @italic{Schreibe
+Dein Programm!}.
 
 @table-of-contents[]
 
@@ -83,9 +83,11 @@ auch Namen für die Record-Signatur @racket[sig], Konstruktor @racket[constr],
 Prädikat @racket[pred?] und die Selektoren @elem[@racket[select] @subscript{i}]
 wählen:
 @racketblock[
-(define-record-procedures sig
+(define-record-functions sig
   constr pred?
-  (#,(elem @racket[select] @subscript{1}) ... #,(elem @racket[select] @subscript{n})))
+  (#,(elem @racket[select] @subscript{1}) #,(elem @racket[sig] @subscript{n}))
+  ...
+  (#,(elem @racket[select] @subscript{n}) #,(elem @racket[sig] @subscript{n})))
 ]
 
 Schreiben Sie außerdem eine Signatur für den Konstruktor der
@@ -327,30 +329,3 @@ Beispiel:
         (!-helper (- n 1) (* n acc)))))
 ]
 
-@section{gekapselter Zustand}
-Falls ein Wert Zustand enthalten soll, schreiben Sie eine
-Datendefinition wie bei zusammengesetzten Daten.
-
-Schreiben Sie dann eine Record-Definition mit
-@racket[define-record-procedures-2] und legen Sie dabei fest, welche
-Bestandteile veränderbar sein sollen.  Geben Sie Mutatoren für die
-betroffenen Felder an.  Wenn der Selektor für das Feld @racket[select]
-heißt, sollte der Mutator i.d.R. @racket[set-select!] heißen.  Die Form
-sieht folgendermaßen aus, wobei an der Stelle @racket[k] ein
-veränderbares Feld steht:
-
-@racketblock[
-(define-record-procedures-2 sig
-  constr pred?
-  (#,(elem @racket[select] @subscript{1}) ... (#,(elem @racket[s] @subscript{k}) #,(elem @racket[mutate] @subscript{k})) ... #,(elem @racket[s] @subscript{n})))
-]
-
-In der Schablone für Prozeduren, die den Zustand eines Record-Arguments
-@racket[r] ändern, benutzen Sie den dazugehörigen Mutator
-@elem[@racket[mutate] @subscript{k}] Wenn @racket[a] der Ausdruck für
-den neuen Wert der Komponente ist, sieht der Aufruf folgendermaßen aus:
-@racket[(#,(elem @racket[mutate] @subscript{k}) r a)].
-
-Um mehrere Komponenten in einer Prozedur zu verändern, oder um einen
-sinnvollen Rückgabewert nach einer Mutation zu liefern, benutzen Sie
-@racket[begin].

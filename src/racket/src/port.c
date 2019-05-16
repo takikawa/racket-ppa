@@ -1594,12 +1594,9 @@ static int complete_peeked_read_via_get(Scheme_Input_Port *ip,
 					intptr_t size)
 {
   Scheme_Get_String_Fun gs;
-  int did;
   char *buf, _buf[16];
   int buf_size = 16;
   buf = _buf;
-  
-  did = 0;
 
   /* Target event is ready, so commit must succeed */
 
@@ -1631,7 +1628,6 @@ static int complete_peeked_read_via_get(Scheme_Input_Port *ip,
 
     if (ip->progress_evt)
       post_progress(ip);
-    did = 1;
   }
 
   if (size) {
@@ -1651,14 +1647,12 @@ static int complete_peeked_read_via_get(Scheme_Input_Port *ip,
         if ((cnt < size) && (ip->pending_eof == 2)) {
 	  ip->pending_eof = 1;
           size--;
-          did = 1;
         }
 	pip = (Scheme_Input_Port *)ip->peeked_read;
 	gs = pip->get_string_fun;
       } else {
         if (ip->pending_eof == 2) {
           ip->pending_eof = 1;
-          did = 1;
           if (ip->progress_evt)
             post_progress(ip);
         }
@@ -1683,15 +1677,11 @@ static int complete_peeked_read_via_get(Scheme_Input_Port *ip,
           ip->p.position += size;
         if (buf)
           do_count_lines((Scheme_Port *)ip, buf, 0, size);
-	did = 1;
       }
     }
   }
 
-  /* We used to return `did', but since an event has already been
-     selected, claim success at this point always. */
-
-  return 1 || did;
+  return 1;
 }
 
 static Scheme_Object *return_data(void *data, int argc, Scheme_Object **argv)
@@ -3301,8 +3291,6 @@ scheme_file_stream_port_p (int argc, Scheme_Object *argv[])
       return scheme_true;
     else if (SAME_OBJ(op->sub_type, fd_output_port_type))
       return scheme_true;
-  } else {
-    scheme_wrong_contract("file-stream-port?", "port?", 0, argc, argv);
   }
 
   return scheme_false;
@@ -6002,7 +5990,7 @@ static Scheme_Object *do_subprocess_kill(Scheme_Object *_sp, Scheme_Object *kill
   if (!ok) {
     if (can_error)
       scheme_raise_exn(MZEXN_FAIL, 
-                       "Subprocess-kill: operation failed\n"
+                       "subprocess-kill: operation failed\n"
                        "  system error: %R");
   }
 

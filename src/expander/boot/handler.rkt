@@ -15,7 +15,8 @@
          "../expand/missing-module.rkt"
          "../read/api.rkt"
          "../read/primitive-parameter.rkt"
-         "load-handler.rkt")
+         "load-handler.rkt"
+         "../common/performance.rkt")
 
 (provide boot
          seal
@@ -111,16 +112,17 @@
                                     (date-of-1 alt-path))]
                    [path-d (or main-path-d alt-path-d)]
                    [get-so (lambda (file rep-sfx?)
-                             (lambda (root-dir compiled-dir)
-                               (build-path (reroot base root-dir)
-                                           compiled-dir
-                                           "native"
-                                           (system-library-subpath)
-                                           (if rep-sfx?
-                                               (path-add-extension
-                                                file
-                                                dll-suffix)
-                                               file))))]
+                             (and (eq? 'racket (system-type 'vm))
+                                  (lambda (root-dir compiled-dir)
+                                    (build-path (reroot base root-dir)
+                                                compiled-dir
+                                                "native"
+                                                (system-library-subpath)
+                                                (if rep-sfx?
+                                                    (path-add-extension
+                                                     file
+                                                     dll-suffix)
+                                                    file)))))]
                    [zo (lambda (root-dir compiled-dir)
                          (build-path (reroot base root-dir)
                                      compiled-dir
@@ -135,12 +137,14 @@
                    [try-alt? (and alt-file (or alt-path-d (not main-path-d)))]
                    [with-dir (lambda (t) (with-dir* base t))])
               (cond
-               [(and try-main?
+               [(and so
+                     try-main?
                      (date>=? modes roots so path-d))
                 => (lambda (so-d)
                      (parameterize ([current-module-declare-source #f])
                        (with-dir (lambda () ((current-load-extension) (car so-d) expect-module)))))]
-               [(and try-alt?
+               [(and alt-so
+                     try-alt?
                      (date>=? modes roots alt-so alt-path-d))
                 => (lambda (so-d)
                      (parameterize ([current-module-declare-source alt-path])
@@ -456,12 +460,16 @@
                  (cond
                    [(symbol? s)
                     (or (path-cache-get (cons s (get-reg)))
+                        (performance-region
+                         ['eval 'resolve-symbol]
                         (let-values ([(cols file) (split-relative-string (symbol->string s) #f)])
                           (let* ([f-file (if (null? cols)
                                              "main.rkt"
                                              (string-append file ".rkt"))]
                                  [col (if (null? cols) file (car cols))]
                                  [col-path (if (null? cols) null (cdr cols))])
+                            (performance-region
+                             ['eval 'resolve-find]
                             (find-col-file (if (not subm-path)
                                                show-collection-err
                                                ;; Invent a fictional collection directory, if necessary,
@@ -471,7 +479,7 @@
                                            col
                                            col-path
                                            f-file
-                                           #t))))]
+                                           #t))))))]
                    [(string? s)
                     (let* ([dir (get-dir)])
                       (or (path-cache-get (cons s dir))

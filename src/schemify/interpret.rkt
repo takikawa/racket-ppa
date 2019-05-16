@@ -3,6 +3,8 @@
          racket/fixnum
          "match.rkt"
          "wrap.rkt"
+         "path-for-srcloc.rkt"
+         "to-fasl.rkt"
          "interp-match.rkt"
          "interp-stack.rkt")
 
@@ -80,8 +82,18 @@
               (loop (cdr bindings)
                     (fx+ elem 1)
                     (hash-set env (car binding) (indirect 0 elem))
-                    (cons (compile-expr (cadr binding) env 1 bindings-stk-i #t)
-                          accum)))]))]))
+                    (let ([rhs (cadr binding)])
+                      (cons (cond
+                              [(or (path? rhs)
+                                   (path-for-srcloc? rhs)
+                                   (to-fasl? rhs))
+                               ;; The caller must extract all the paths from the bindings
+                               ;; and pass them back in at interp time; assume '#%path is
+                               ;; not a primitive
+                               '#%path]
+                              [else
+                               (compile-expr rhs env 1 bindings-stk-i #t)])
+                            accum))))]))]))
 
   (define (compile-linklet-body v env stack-depth)
     (match v
@@ -212,13 +224,15 @@
       [`(letrec* . ,_) (compile-letrec e env stack-depth stk-i tail?)]
       [`(begin . ,vs)
        (compile-body vs env stack-depth stk-i tail?)]
+      [`(begin0 ,e)
+       (compile-expr e env stack-depth stk-i tail?)]
       [`(begin0 ,e . ,vs)
        (define new-body (compile-body vs env stack-depth stk-i #f))
        (vector 'begin0
                (compile-expr e env stack-depth stk-i #f)
                new-body)]
-      [`(pariah ,e)
-       (compile-expr e env stack-depth stk-i tail?)]
+      [`($value ,e)
+       (vector '$value (compile-expr e env stack-depth stk-i #f))]
       [`(if ,tst ,thn ,els)
        (define then-stk-i (stack-info-branch stk-i))
        (define else-stk-i (stack-info-branch stk-i))
@@ -408,6 +422,7 @@
 ;; ----------------------------------------
 
 (define (interpret-linklet b            ; compiled form
+                           paths        ; unmarshaled paths
                            primitives   ; hash of symbol -> value
                            ;; the implementation of variables:
                            variable-ref variable-ref/no-check variable-set!
@@ -419,10 +434,15 @@
     (let ([consts (and consts
                        (let ([vec (make-vector (vector*-length consts))])
                          (define stack (stack-set empty-stack 0 vec))
-                         (for ([b (in-vector consts)]
-                               [i (in-naturals)])
-                           (vector-set! vec i (interpret-expr b stack primitives void void void void))
-                           vec)
+                         (for/fold ([paths paths]) ([b (in-vector consts)]
+                                                    [i (in-naturals)])
+                           (cond
+                             [(eq? b '#%path)
+                              (vector-set! vec i (car paths))
+                              (cdr paths)]
+                             [else
+                              (vector-set! vec i (interpret-expr b stack primitives void void void void))
+                              paths]))
                          vec))])
       (lambda args
         (define start-stack (if consts
@@ -592,6 +612,9 @@
                       (apply values vals)
                       (apply values new-stack vals))
                   (loop (fx+ i 1) new-stack)))))]
+        [#($value ,e)
+         (let ([v (interpret e stack)])
+           v)]
         [#(clear ,clears ,e)
          (let loop ([clears clears] [stack stack])
            (cond

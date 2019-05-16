@@ -6,6 +6,7 @@
          "export.rkt"
          "struct-type-info.rkt"
          "simple.rkt"
+         "source-sym.rkt"
          "find-definition.rkt"
          "mutated.rkt"
          "mutated-state.rkt"
@@ -17,7 +18,8 @@
          "find-known.rkt"
          "infer-known.rkt"
          "inline.rkt"
-         "letrec.rkt")
+         "letrec.rkt"
+         "infer-name.rkt")
 
 (provide schemify-linklet
          schemify-body)
@@ -43,12 +45,20 @@
 ;;     `#%app` whenever a call might go through something other than a
 ;;     plain function;
 ;;
+;;   - convert all `letrec` patterns that might involve `call/cc` to
+;;     ensure that locations are allocated at the right time;
+;;
+;;   - explicily handle all potential too-early variable uses, so that
+;;     the right name and enclosing module are reported;
+;;
 ;;   - convert `make-struct-type` bindings to a pattern that Chez can
 ;;     recognize;
 ;;
 ;;   - optimize away `variable-reference-constant?` uses, which is
 ;;     important to make keyword-argument function calls work directly
 ;;     without keywords;
+;;
+;;  - similarly optimize away `variable-reference-from-unsafe?`;
 ;;
 ;;   - simplify `define-values` and `let-values` to `define` and
 ;;     `let`, when possible, and generally avoid `let-values`.
@@ -57,10 +67,10 @@
 ;; called from the Racket expander, those annotation will be
 ;; "correlated" objects that just support source locations.
 
-;; Returns (values schemified-linklet import-abi export-info)
+;; Returns (values schemified-linklet import-abi export-info).
 ;; An import ABI is a list of list of booleans, parallel to the
 ;; linklet imports, where #t to means that a value is expected, and #f
-;; means that a variable (which boxes a value) is expected
+;; means that a variable (which boxes a value) is expected.
 (define (schemify-linklet lk serializable? datum-intern? for-jitify? allow-set!-undefined?
                           unsafe-mode? no-prompt?
                           prim-knowns get-import-knowns import-keys)
@@ -115,6 +125,9 @@
        (if serializable?
            (convert-for-serialize bodys #f datum-intern?)
            (values bodys null)))
+     ;; Collect source names for define identifiers, to the degree that the source
+     ;; name differs from the
+     (define src-syms (get-definition-source-syms bodys))
      ;; Schemify the body, collecting information about defined names:
      (define-values (new-body defn-info mutated)
        (schemify-body* bodys/constants-lifted prim-knowns imports exports
@@ -135,9 +148,12 @@
       (for/list ([grp (in-list all-grps)])
         (for/list ([im (in-list (import-group-imports grp))])
           (import-ext-id im)))
-      ;; Exports (external names):
+      ;; Exports (external names, but paired with source name if it's different):
       (for/list ([ex-id (in-list ex-ids)])
-        (ex-ext-id ex-id))
+        (define sym (ex-ext-id ex-id))
+        (define int-sym (ex-int-id ex-id))
+        (define src-sym (hash-ref src-syms int-sym sym)) ; external name unless 'source-name
+        (if (eq? sym src-sym) sym (cons sym src-sym)))
       ;; Import keys --- revised if we added any import groups
       (if (null? new-grps)
           import-keys
@@ -149,11 +165,12 @@
         (for/list ([im (in-list (import-group-imports grp))])
           (and im-ready?
                (known-constant? (import-group-lookup grp (import-ext-id im))))))
-      ;; Convert internal to external identifiers
+      ;; Convert internal to external identifiers for known-value info
       (for/fold ([knowns (hasheq)]) ([ex-id (in-list ex-ids)])
         (define id (ex-int-id ex-id))
         (define v (known-inline->export-known (hash-ref defn-info id #f)
-                                              prim-knowns imports exports))
+                                              prim-knowns imports exports
+                                              serializable?))
         (cond
          [(not (set!ed-mutated-state? (hash-ref mutated id #f)))
           (define ext-id (ex-ext-id ex-id))
@@ -228,7 +245,7 @@
         ;; For the case that the right-hand side won't capture a
         ;; continuation or return multiple times, we can generate a
         ;; simple definition:
-        (define (finish-definition ids)
+        (define (finish-definition ids [accum-exprs accum-exprs] [accum-ids accum-ids])
           (append
            (make-expr-defns accum-exprs)
            (cons
@@ -304,8 +321,10 @@
            (match form
              [`(define-values ,ids ,_)
               ;; This is a rearranged `struct` form where any necessary
-              ;; prompt is in place already
-              (finish-definition ids)]
+              ;; prompt is in place already. There may be arbitrary expressions
+              ;; for properties, though, so sync exported variables
+              (define set-vars (make-set-variables))
+              (finish-definition ids (append set-vars accum-exprs) null)]
              [`,_
               (cond
                 [(simple? #:pure? #f schemified prim-knowns knowns imports mutated)
@@ -366,11 +385,15 @@
          v 
          (match v
            [`(lambda ,formals ,body ...)
-            `(lambda ,formals ,@(schemify-body body))]
+            (infer-procedure-name
+             v
+             `(lambda ,formals ,@(schemify-body body)))]
            [`(case-lambda [,formalss ,bodys ...] ...)
-            `(case-lambda ,@(for/list ([formals (in-list formalss)]
-                                       [body (in-list bodys)])
-                              `[,formals ,@(schemify-body body)]))]
+            (infer-procedure-name
+             v
+             `(case-lambda ,@(for/list ([formals (in-list formalss)]
+                                        [body (in-list bodys)])
+                               `[,formals ,@(schemify-body body)])))]
            [`(define-values (,struct:s ,make-s ,s? ,acc/muts ...)
                (let-values (((,struct: ,make ,?1 ,-ref ,-set!) ,mk))
                  (values ,struct:2
@@ -430,7 +453,7 @@
                                          `(struct-type-constructor-add-guards ,ctr ,struct:s ',(struct-type-info-name sti)))))
                   (define ,raw-s? (record-predicate ,struct:s))
                   ,@(if can-impersonate?
-                        `((define ,s? (lambda (v) (if (,raw-s? v) #t (pariah (if (impersonator? v) (,raw-s? (impersonator-val v)) #f))))))
+                        `((define ,s? (lambda (v) (if (,raw-s? v) #t ($value (if (impersonator? v) (,raw-s? (impersonator-val v)) #f))))))
                         null)
                   ,@(for/list ([acc/mut (in-list acc/muts)]
                                [make-acc/mut (in-list make-acc/muts)])
@@ -444,7 +467,7 @@
                                 (define ,acc/mut
                                   (lambda (s) (if (,raw-s? s)
                                                   (,raw-acc/mut s)
-                                                  (pariah (impersonate-ref ,raw-acc/mut ,struct:s ,pos s))))))
+                                                  ($value (impersonate-ref ,raw-acc/mut ,struct:s ,pos s))))))
                              raw-def)]
                         [`(make-struct-field-mutator ,(? (lambda (v) (wrap-eq? v -set!))) ,pos ,_)
                          (define raw-def `(define ,raw-acc/mut (record-mutator ,struct:s ,pos)))
@@ -456,7 +479,7 @@
                                 (define ,acc/mut
                                   (lambda (s v) (if (,raw-s? s)
                                                     (,raw-acc/mut s v)
-                                                    (pariah (impersonate-set! ,raw-acc/mut ,struct:s ,pos ,abs-pos s v))))))
+                                                    ($value (impersonate-set! ,raw-acc/mut ,struct:s ,pos ,abs-pos s v))))))
                              raw-def)]
                         [`,_ (error "oops")]))
                   (define ,(gensym)
@@ -753,6 +776,12 @@
                           (known-field-mutator? k)
                           (inline-field-mutate k s-rator im args))
                      => (lambda (e) e)]
+                    [(and unsafe-mode?
+                          (known-procedure/has-unsafe? k))
+                     (left-to-right/app (known-procedure/has-unsafe-alternate k)
+                                        args
+                                        #t for-cify?
+                                        prim-knowns knowns imports mutated)]
                     [else
                      (define plain-app? (or (known-procedure? k)
                                             (lambda? rator)))

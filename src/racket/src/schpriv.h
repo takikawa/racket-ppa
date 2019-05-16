@@ -326,6 +326,7 @@ void scheme_init_struct_wait();
 void scheme_init_list(Scheme_Startup_Env *env);
 void scheme_init_unsafe_list(Scheme_Startup_Env *env);
 void scheme_init_unsafe_hash(Scheme_Startup_Env *env);
+void scheme_init_hash_tree(void);
 void scheme_init_stx(Scheme_Startup_Env *env);
 void scheme_init_module(Scheme_Startup_Env *env);
 void scheme_init_module_path_table(void);
@@ -545,6 +546,7 @@ extern Scheme_Object *scheme_list_p_proc;
 extern Scheme_Object *scheme_list_proc;
 extern Scheme_Object *scheme_list_star_proc;
 extern Scheme_Object *scheme_list_pair_p_proc;
+extern Scheme_Object *scheme_append_proc;
 extern Scheme_Object *scheme_vector_proc;
 extern Scheme_Object *scheme_vector_p_proc;
 extern Scheme_Object *scheme_vector_length_proc;
@@ -565,6 +567,9 @@ extern Scheme_Object *scheme_unsafe_struct_ref_proc;
 extern Scheme_Object *scheme_unsafe_struct_star_ref_proc;
 extern Scheme_Object *scheme_unsafe_struct_set_proc;
 extern Scheme_Object *scheme_unsafe_struct_star_set_proc;
+extern Scheme_Object *scheme_hash_proc;
+extern Scheme_Object *scheme_hasheq_proc;
+extern Scheme_Object *scheme_hasheqv_proc;
 extern Scheme_Object *scheme_hash_ref_proc;
 extern Scheme_Object *scheme_box_p_proc;
 extern Scheme_Object *scheme_box_proc;
@@ -3802,6 +3807,7 @@ Scheme_Object *scheme_copy_list(Scheme_Object *l);
 Scheme_Object *scheme_append_strings(Scheme_Object *s1, Scheme_Object *s2);
 
 Scheme_Object *scheme_unsafe_make_location(void);
+Scheme_Object *scheme_unsafe_make_srcloc(int argc, Scheme_Object **argv);
 
 void scheme_reset_hash_table(Scheme_Hash_Table *ht, int *history);
 

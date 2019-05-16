@@ -1,6 +1,6 @@
-;; Bulgarian translation of Racket string constants file, version: 1.20
+;; Bulgarian translation of Racket string constants file, version: 1.22
 ;; This file is distributed under the same terms as Racket
-;; Copyright on translation: Alexander Shopov <ash@kambanaria.org>, 2015, 2016, 2017, 2018.
+;; Copyright on translation: Alexander Shopov <ash@kambanaria.org>, 2015, 2016, 2017, 2018, 2019.
 
 (module bulgarian-string-constants "string-constant-lang.rkt"
  ;;; when translating this constant, substitute name of actual language for `English'
@@ -103,6 +103,10 @@
  (cs-italic "Курсив")
  (cs-bold "Получерно")
  (cs-underline "Подчертаване")
+ (cs-smoothing-default "Default")
+ (cs-smoothing-partial "Partly smoothed")
+ (cs-smoothing-full "Smoothed")
+ (cs-smoothing-none "Unsmoothed")
  (cs-change-color "Смяна на цвета")
  (cs-foreground-color "Основен цвят")
  (cs-background-color "Цвят на фона")

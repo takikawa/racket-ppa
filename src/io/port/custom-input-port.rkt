@@ -1,11 +1,13 @@
 #lang racket/base
 (require "../common/check.rkt"
+         "../common/class.rkt"
          "../host/thread.rkt"
          "port.rkt"
          "input-port.rkt"
          "custom-port.rkt"
          "pipe.rkt"
-         "peek-via-read-port.rkt")
+         "peek-via-read-port.rkt"
+         "count.rkt")
 
 (provide make-input-port)
 
@@ -162,8 +164,7 @@
           (set! input-pipe #f)
           (read-in self dest-bstr dest-start dest-end copy?)]
          [else
-          (define read-in (core-input-port-read-in input-pipe))
-          (read-in (core-port-self input-pipe) dest-bstr dest-start dest-end copy?)])]
+          (send core-input-port input-pipe read-in dest-bstr dest-start dest-end copy?)])]
       [else
        (define r
          (parameterize-break #f
@@ -189,8 +190,7 @@
           (set! input-pipe #f)
           (peek-in self dest-bstr dest-start dest-end skip-k progress-evt copy?)]
          [else
-          (define peek-in (core-input-port-peek-in input-pipe))
-          (peek-in (core-port-self input-pipe) dest-bstr dest-start dest-end skip-k progress-evt copy?)])]
+          (send core-input-port input-pipe peek-in dest-bstr dest-start dest-end skip-k progress-evt copy?)])]
       [else
        (define r
          (parameterize-break #f
@@ -260,41 +260,45 @@
     (and user-buffer-mode
          (make-buffer-mode user-buffer-mode)))
 
-  (cond
-   [user-peek-in
-    (make-core-input-port
-     #:name name
-     #:self #f
-     #:read-in
-     (if (input-port? user-read-in)
-         user-read-in
-         read-in)
-     #:peek-in
-     (if (input-port? user-peek-in)
-         user-peek-in
-         peek-in)
-     #:byte-ready
-     (if (input-port? user-peek-in)
-         user-peek-in
-         byte-ready)
-     #:close close
-     #:get-progress-evt (and user-get-progress-evt get-progress-evt)
-     #:commit (and user-commit commit)
-     #:get-location get-location
-     #:count-lines! count-lines!
-     #:init-offset init-offset
-     #:file-position file-position
-     #:buffer-mode buffer-mode)]
-   [else
-    (define-values (port buffer-flusher)
-      (open-input-peek-via-read
-       #:name name
-       #:self #f
-       #:read-in read-in
-       #:close close
-       #:get-location get-location
-       #:count-lines! count-lines!
-       #:init-offset init-offset
-       #:file-position file-position
-       #:alt-buffer-mode buffer-mode))
-    port]))
+  (finish-port/count
+   (cond
+     [user-peek-in
+      (new core-input-port
+           #:field
+           [name name]
+           [offset init-offset]
+           #:override
+           [read-in (if (input-port? user-read-in)
+                        user-read-in
+                        read-in)]
+           [peek-in (if (input-port? user-peek-in)
+                        user-peek-in
+                        peek-in)]
+           [byte-ready (if (input-port? user-peek-in)
+                           user-peek-in
+                           byte-ready)]
+           [close close]
+           [get-progress-evt (and user-get-progress-evt get-progress-evt)]
+           [commit (and user-commit commit)]
+           [get-location get-location]
+           [count-lines! count-lines!]
+           [file-position file-position]
+           [buffer-mode buffer-mode])]
+     [else
+      (new peek-via-read-input-port
+           #:field
+           [name name]
+           [offset init-offset]
+           #:override
+           [read-in/inner read-in]
+           [close (values
+                   (lambda (self)
+                     (close self)
+                     (send peek-via-read-input-port self close-peek-buffer)))]
+           [get-location  get-location]
+           [count-lines! count-lines!]
+           [file-position file-position]
+           [buffer-mode (or buffer-mode
+                            (case-lambda
+                              [(self) (send peek-via-read-input-port self default-buffer-mode)]
+                              [(self mode) (send peek-via-read-input-port self default-buffer-mode mode)]))])])))

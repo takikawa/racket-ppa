@@ -169,13 +169,16 @@ Here is an example typical of what you will find in many applications:
 
 @defmodule[web-server/http/response-structs]{
 
-@defstruct*[response
-           ([code number?]
-            [message bytes?]
-            [seconds number?]
-            [mime (or/c false/c bytes?)]
-            [headers (listof header?)]
-            [output (output-port? . -> . any)])]{
+@deftogether[
+ (@defstruct*[response
+              ([code response-code/c]
+               [message bytes?]
+               [seconds real?]
+               [mime (or/c #f bytes?)]
+               [headers (listof header?)]
+               [output (output-port? . -> . any)])]
+   @defthing[response-code/c flat-contract?
+             #:value (integer-in 100 999)])]{
 
 An HTTP response where @racket[output] produces the body by writing to
 the output port. @racket[code] is the response code, @racket[message]
@@ -223,12 +226,18 @@ Examples:
    void)
  ]
 
-@history[#:changed "1.2"
-         @elem{Contract on @racket[output] weaked to allow @racket[any]
+@history[#:changed "1.3"
+         @elem{Added @racket[response-code/c] and made the
+            contracts on @racket[code] and @racket[seconds]
+            stronger (rather than accepting @racket[number?]).}
+         #:changed "1.2"
+         @elem{Contract on @racket[output] weakened to allow @racket[any]
                as the result (instead of demanding @racket[void?]).}]
 }
 
-@defproc[(response/full [code number?] [message bytes?] [seconds number?] [mime (or/c false/c bytes?)]
+@defproc[(response/full [code response-code/c] [message (or/c #f bytes?)]
+                        [seconds real?]
+                        [mime (or/c #f bytes?)]
                         [headers (listof header?)] [body (listof bytes?)])
          response?]{
  A constructor for responses where @racket[body] is the response body.
@@ -246,20 +255,77 @@ Examples:
          #"\">here</a> instead."
          #"</p></body></html>"))
  ]
+
+ If @racket[message] is not supplied or is @racket[#f], a status message will be inferred based on @racket[code]. Status messages will be inferred based on RFCs 7231 (``Hypertext Transfer Protocol (HTTP/1.1): Semantics and Content'') and 7235 (``Hypertext Transfer Protocol (HTTP/1.1): Authentication''). These are the following:
+
+  @tabular[#:sep @hspace[1]
+   (list (list @bold{Code} @bold{Message})
+   (list "100" "Continue")
+   (list "101" "Switching Protocols")
+
+   (list "200" "OK")
+   (list "201" "Created")
+   (list "202" "Accepted")
+   (list "203" "Non-Authoritative Information")
+   (list "204" "No Content")
+   (list "205" "Reset Content")
+
+   (list "300" "Multiple Choices")
+   (list "301" "Moved Permanently")
+   (list "302" "Found")
+   (list "303" "See Other")
+   (list "305" "Use Proxy")
+   (list "307" "Temporary Redirect")
+
+   (list "400" "Bad Request")
+   (list "401" "Unauthorized")
+   (list "402" "Payment Required")
+   (list "403" "Forbidden")
+   (list "404" "Not Found")
+   (list "405" "Method Not Allowed")
+   (list "406" "Not Acceptable")
+   (list "407" "Proxy Authentication Required")
+   (list "408" "Request Timeout")
+   (list "409" "Conflict")
+   (list "410" "Gone")
+   (list "411" "Length Required")
+   (list "413" "Payload Too Large")
+   (list "414" "URI Too Long")
+   (list "415" "Unsupported Media Type")
+   (list "417" "Expectation Failed")
+   (list "426" "Upgrade Required")
+
+   (list "500" "Internal Server Error")
+   (list "501" "Not Implemented")
+   (list "502" "Bad Gateway")
+   (list "503" "Service Unavailable")
+   (list "504" "Gateway Timeout")
+   (list "505" "HTTP Version Not Supported"))]
+
+ @history[#:changed "1.3"
+          @elem{Updated contracts on @racket[code] and @racket[seconds]
+             as with @racket[response].}]
+ @history[#:changed "1.4"
+         @elem{Contract on @racket[message] relaxed to allow both @racket[#f] and a @racket[bytes?], with a default of @racket[#f]. Previously, @racket[bytes?] was required, and had a default of @racket[#"Okay"].}]
 }
-                   
+
 @defproc[(response/output [output (-> output-port? any)]
                           [#:code code number? 200]
-                          [#:message message bytes? #"Okay"]
+                          [#:message message (or/c false/c bytes?) #f]
                           [#:seconds seconds number? (current-seconds)]
                           [#:mime-type mime-type (or/c bytes? #f) TEXT/HTML-MIME-TYPE]
                           [#:headers headers (listof header?) '()])
          response?]{
 Equivalent to
-@racketblock[(response code message seconds mime-type headers output)]
+@racketblock[(response code message seconds mime-type headers output)], with the understanding that if @racket[message] is missing, it will be inferred from @racket[code] using the association between status codes and messages found in RFCs 7231 and 7235. See the documentation for @racket[response/full] for the table of built-in status codes.
 
-@history[#:changed "1.2"
-         @elem{Contract on @racket[output] weaked to allow @racket[any]
+@history[#:changed "1.4"
+         @elem{Contract on @racket[message] relaxed to allow both @racket[#f] and a @racket[bytes?], with a default of @racket[#f]. Previously, @racket[bytes?] was required, and had a default of @racket[#"Okay"].}
+         #:changed "1.3"
+         @elem{Updated contracts on @racket[code] and @racket[seconds]
+            as with @racket[response].}
+         #:changed "1.2"
+         @elem{Contract on @racket[output] weakened to allow @racket[any]
                as the result (instead of demanding @racket[void?]).}]
 }
 
@@ -276,16 +342,20 @@ transmission that the server @bold{will not catch}.}
 @(require (for-label (except-in net/cookies/server
                                 make-cookie)
                      net/cookies/common
-                      web-server/servlet
+                     web-server/servlet
                      web-server/http/xexpr
                      web-server/http/redirect
                      web-server/http/request-structs
                      web-server/http/response-structs
                      web-server/http/cookie))
 
+@(define rfc6265
+   (hyperlink "https://tools.ietf.org/html/rfc6265.html"
+              "RFC 6265"))
+
 @defmodule[web-server/http/cookie]{
  This module provides functions to create cookies and responses that set them.
- 
+
  @defproc[(make-cookie [name cookie-name?]
                        [value cookie-value?]
                        [#:comment comment any/c #f]
@@ -300,11 +370,23 @@ transmission that the server @bold{will not catch}.}
    Constructs a cookie with the appropriate fields.
 
    This is a wrapper around @racket[make-cookie] from @racketmodname[net/cookies/server]
-   for backwards compatability. The @racket[comment] argument is ignored.
+   for backwards compatibility. The @racket[comment] argument is ignored.
    If @racket[expires] is given as a string, it should match
    @link["https://tools.ietf.org/html/rfc7231#section-7.1.1.2"]{RFC 7231, Section 7.1.1.2},
    in which case it will be converted to a @racket[date?] value.
    If conversion fails, an @racket[exn:fail:contract?] is raised.
+
+   @history[
+ #:changed "1.3"
+ @elem{Added support for @rfc6265 via @racketmodname[net/cookies/server].
+    Enforce stronger contracts on string-valued arguments.
+    Allow @racket[expires] to be a @racket[date?]
+    and allow @racket[secure] to be @racket[any/c]
+    (rather than @racket[boolean?]).
+    Forbid @racket[0] for @racket[max-age].
+    Support @racket[http-only?] and @racket[extension] arguments.
+    Ignore @racket[comment].
+    }]
  }
 
  @defproc[(cookie->header [c cookie?]) header?]{
@@ -358,25 +440,24 @@ cookie, it will reverify this digest and check that the cookie's
 @racket[_authored-seconds] is not after a timeout period, and only
 then return the cookie data to the program.
 
-The interface represents the secret key as a byte string. The best way
-to generate this is by using random bytes from something like OpenSSL
-or
-@tt{/dev/random}. @link["http://www.madboa.com/geek/openssl/#random-generate"]{This
-FAQ} lists a few options. A convenient purely Racket-based option is
-available (@racket[make-secret-salt/file]),
- which is implemented using @racket[crypto-random-bytes].
+The interface represents the secret key as a byte string.
+@bold{For security, this should be created using cryptographic-quality randomness.}
+A convenient purely Racket-based option is @racket[make-secret-salt/file],
+which is implemented using @racket[crypto-random-bytes].
+You can also generate random bytes using something like OpenSSL or @tt{/dev/random}:
+ @link["https://www.madboa.com/geek/openssl/#random-data"]{this FAQ} lists a few options.
 
  @defproc*[([(make-id-cookie
               [name (and/c string? cookie-name?)]
               [value (and/c string? cookie-value?)]
               [#:key secret-salt bytes?]
               [#:path path (or/c path/extension-value? #f) #f]
-              [#:expires expires (or/c date? #f) #f]	 	 	 
+              [#:expires expires (or/c date? #f) #f]
               [#:max-age max-age
-               (or/c (and/c integer? positive?) #f) #f]	 	 	 
-              [#:domain domain (or/c domain-value? #f) #f]	 
-              [#:secure? secure? any/c #f]	 	 	 
-              [#:http-only? http-only? any/c #f]	 	 
+               (or/c (and/c integer? positive?) #f) #f]
+              [#:domain domain (or/c domain-value? #f) #f]
+              [#:secure? secure? any/c #f]
+              [#:http-only? http-only? any/c #f]
               [#:extension extension
                (or/c path/extension-value? #f) #f])
              cookie?]
@@ -385,12 +466,12 @@ available (@racket[make-secret-salt/file]),
               [secret-salt bytes?]
               [value (and/c string? cookie-value?)]
               [#:path path (or/c path/extension-value? #f) #f]
-              [#:expires expires (or/c date? #f) #f]	 	 	 
+              [#:expires expires (or/c date? #f) #f]
               [#:max-age max-age
-               (or/c (and/c integer? positive?) #f) #f]	 	 	 
-              [#:domain domain (or/c domain-value? #f) #f]	 
-              [#:secure? secure? any/c #f]	 	 	 
-              [#:http-only? http-only? any/c #t]	 	 
+               (or/c (and/c integer? positive?) #f) #f]
+              [#:domain domain (or/c domain-value? #f) #f]
+              [#:secure? secure? any/c #f]
+              [#:http-only? http-only? any/c #t]
               [#:extension extension
                (or/c path/extension-value? #f) #f])
              cookie?])]{
@@ -398,11 +479,22 @@ available (@racket[make-secret-salt/file]),
 
   The calling conventions allow @racket[secret-salt] to be given either as a keyword
   argument (mirroring the style of @racket[make-cookie]) or a by-position argument
-  (for compatability with older versions of this library).
+  (for compatibility with older versions of this library).
 
   The other arguments are passed to @racket[make-cookie]; however, note that the
   default value for @racket[http-only?] is @racket[#t]. Users will also likely
   want to set @racket[secure?] to @racket[#t] when using HTTPS.
+
+  @history[
+ #:changed "1.3"
+ @elem{Added support for @rfc6265 as with @racket[make-cookie],
+    including adding the optional arguments
+    @racket[expires], @racket[max-age], @racket[domain],
+    @racket[secure], @racket[extension],
+    and @racket[http-only?] (which is @racket[#true] by default).
+    Allowed @racket[secret-salt] to be given with the keyword
+    @racket[#:key] instead of by position.
+    }]
  }
 
  @defproc*[([(request-id-cookie [request request?]
@@ -422,8 +514,14 @@ available (@racket[make-secret-salt/file]),
   from @racket[request], with the allowable age of the cookie
   is controlled by @racket[shelf-life] and @racket[timeout] as with
   @racket[valid-id-cookie?].
-  
+
   If no valid cookie is available, returns @racket[#f].
+
+  @history[#:changed "1.3"
+           @elem{Added @racket[shelf-life] argument and
+              support for giving @racket[name] and @racket[secret-salt]
+              by keyword instead of by position.
+              Added support for @rfc6265 as with @racket[make-cookie].}]
  }
 
 @defproc[(valid-id-cookie? [cookie any/c]
@@ -453,8 +551,10 @@ available (@racket[make-secret-salt/file]),
   value returned by @racket[(current-seconds)] when the cookie was created.
   The default value, @racket[+inf.0], permits all properly named and
   signed cookies.
+
+  @history[#:added "1.3"]
  }
-                                                       
+
  @defproc[(logout-id-cookie [name cookie-name?]
                             [#:path path (or/c #f string?) #f]
                             [#:domain domain (or/c domain-value? #f) #f])
@@ -464,7 +564,7 @@ available (@racket[make-secret-salt/file]),
 
   This will cause non-malicious browsers to overwrite a previously set
   cookie. If you use authenticated cookies for login information, you
-  could send this to cause a "logout". However, malicious browsers do
+  could send this to cause a ``logout.'' However, malicious browsers do
   not need to respect such an overwrite. Therefore, this is not an
   effective way to implement timeouts or protect users on
   public (i.e. possibly compromised) computers. The only way to securely
@@ -472,14 +572,23 @@ available (@racket[make-secret-salt/file]),
   keeping track of which cookies (sessions, etc.) are invalid. Depending
   on your application, it may be better to track live sessions or dead
   sessions, or never set cookies to begin with and just use
-  continuations, which you can revoke with @racket[send/finish].
+  (stateful) continuations, which you can revoke with @racket[send/finish].
+
+  @history[#:changed "1.3"
+           @elem{Added support for @rfc6265 as with @racket[make-cookie],
+              including adding the @racket[domain] argument.}]
  }
 
  @defproc[(make-secret-salt/file [secret-salt-path path-string?])
           bytes?]{
   Extracts the bytes from @racket[secret-salt-path]. If
   @racket[secret-salt-path] does not exist, then it is created and
-  initialized with 128 random bytes.
+  initialized with 128 cryptographic-quality random bytes
+  from @racket[crypto-random-bytes].
+
+  @history[#:changed "1.3"
+           @elem{Changed to use cryptographic-quality randomness
+              to initialize @racket[secret-salt-path].}]
  }
 }
 
@@ -505,6 +614,10 @@ available (@racket[make-secret-salt/file]),
  @defproc[(request-cookies [req request?])
           (listof client-cookie?)]{
   Extracts the cookies from @racket[req]'s headers.
+
+  @history[#:changed "1.3"
+           @elem{Added support for @rfc6265 via
+              @racketmodname[net/cookies/client].}]
  }
 
  Examples:
@@ -541,28 +654,97 @@ available (@racket[make-secret-salt/file]),
 
 @defmodule[web-server/http/redirect]{
 
-@defproc[(redirect-to [uri non-empty-string?]
-                      [perm/temp redirection-status? temporarily]
-                      [#:headers headers (listof header?) (list)])
-         response?]{
- Generates an HTTP response that redirects the browser to @racket[uri],
- while including the @racket[headers] in the response.
+@deftogether[
+ (@defproc[(redirect-to [uri non-empty-string?]
+                        [status redirection-status? temporarily]
+                        [#:headers headers (listof header?) '()])
+           response?]
+   @defproc[(redirection-status? [v any/c]) boolean?]
+   @defthing[temporarily redirection-status?]
+   @defthing[temporarily/same-method redirection-status?]
+   @defthing[see-other redirection-status?]
+   @defthing[permanently redirection-status?])]{
+  The function @racket[redirect-to]
+  generates an HTTP response that redirects the browser to @racket[uri],
+  while including the @racket[headers] in the response.
+  The @racket[status] argument is a @deftech{redirection status}
+  value, which determines the specific type of HTTP redirect to be used.
 
- Example:
- @racket[(redirect-to "http://www.add-three-numbers.com" permanently)]
-}
+  The default @tech{redirection status}, @racket[temporarily],
+  is preserved for backwards compatibility:
+  new code should usually use either @racket[temporarily/same-method]
+  or @racket[see-other], instead.
+  The @racket[temporarily] @tech{redirection status} corresponds to
+  @hyperlink["https://tools.ietf.org/html/rfc7231#section-6.4.3"]{
+   @litchar{302 Found}}.
+  Unfortunately, browsers have not implemented this status consistently
+  for methods other than @litchar{GET} and (in practice, with all but some
+  very old browsers) @litchar{POST}.
 
-@defproc[(redirection-status? [v any/c])
-         boolean?]{
- Determines if @racket[v] is one of the following values.
-}
+  The @racket[temporarily/same-method] @tech{redirection status}
+  uses @hyperlink["https://tools.ietf.org/html/rfc7231#section-6.4.7"]{
+   @litchar{307 Temporary Redirect}}.
+  This redirects the browser to @racket[uri] using the same HTTP method
+  as the original request.
 
-@defthing[permanently redirection-status?]{A @racket[redirection-status?] for permanent redirections.}
+  The @racket[see-other] @tech{redirection status} corresponds to
+  @hyperlink["https://tools.ietf.org/html/rfc7231#section-6.4.4"]{
+   @litchar{303 See Other}}.
+  It is most often used to implement the @deftech{Post-Redirect-Get}
+  pattern: as a response to a request using @litchar{POST} or
+  another HTTP method with side-effects, it causes the browser to
+  perform a @litchar{GET} or @litchar{HEAD} request for @racket[uri],
+  which gives a response to the original @litchar{POST} request.
+  This prevents the @onscreen{Back} and @onscreen{Refresh} buttons
+  from duplicating effects, such as making a purchase or
+  adding items to a database.
+  The web server provides @racket[redirect/get] for added convenience
+  with @tech{Post-Redirect-Get}.
 
-@defthing[temporarily redirection-status?]{A @racket[redirection-status?] for temporary redirections.}
+  The @racket[permanently] @tech{redirection status} uses the HTTP status
+  @hyperlink["https://tools.ietf.org/html/rfc7231#section-6.4.2"]{
+   @litchar{301 Moved Permanently}}.
+  It is like @racket[temporarily], except that, as the name suggests,
+  it signifies that the move is permanent and that search engines,
+  for example, should use @racket[uri] instead of the URI of the
+  original request.
+  Unfortunately, @racket[permanently] is also like @racket[temporarily]
+  in that browsers have implemented it inconsistently for
+  methods other than @litchar{GET} and @litchar{HEAD}:
+  in particular, @hyperlink["https://tools.ietf.org/html/rfc7231#section-6.4.2"]{
+   RFC 7231} permits that, ``for historical reasons, a user agent @bold{may}
+  change the request method from @litchar{POST} to @litchar{GET} for the subsequent request.
+  When it is important to ensure that the request to @racket[uri] use the same method,
+  there are some possible alternatives:
+  @itemlist[
+ @item{RFC 7231 suggests using @litchar{307 Temporary Redirect},
+    i.e. @racket[temporarily/same-method].
+    This has the disadvantage that search engines and others won't
+    update references to the old URI.}
+ @item{@hyperlink["https://tools.ietf.org/html/rfc7538"]{RFC 7538}
+    specifies a new HTTP status, @litchar{308 Permanent Redirect},
+    which forbids changing the request method, analogously to
+    @litchar{307 Temporary Redirect}.
+    However, the RFC also highlights some important
+    @hyperlink["https://tools.ietf.org/html/rfc7538#section-4"]{
+     deployment considerations} for this status.
+    In particular, older browsers---including, as of this writing,
+    some that remain in
+    @hyperlink["https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/308#Browser_compatibility"]{
+     relatively common use}---do not understand this status and will
+    fall back to the semantics of
+    @hyperlink["https://tools.ietf.org/html/rfc7231#section-6.4.1"]{
+     @litchar{300 Multiple Choices}}, which is often undesirable.}
+ @item{The application can note the method of the original request
+    and use @racket[permanently] for @litchar{GET} and @litchar{HEAD} requests
+    or one of the other alternatives for other methods.}]
 
-@defthing[see-other redirection-status?]{A @racket[redirection-status?] for "see-other" redirections.}
+  Example:
+  @racket[(redirect-to "http://www.add-three-numbers.com" permanently)]
+ }
 
+ @history[#:changed "1.3"
+          @elem{Added @racket[temporarily/same-method].}]
 }
 
 @; ------------------------------------------------------------
@@ -700,10 +882,10 @@ web-server/insta
 @declare-exporting[web-server/http/xexpr web-server]
 
 @defproc[(response/xexpr [xexpr xexpr/c]
-                         [#:code code number? 200]
-                         [#:message message bytes? #"Okay"]
-                         [#:seconds seconds number? (current-seconds)]
-                         [#:mime-type mime-type (or/c false/c bytes?) TEXT/HTML-MIME-TYPE]
+                         [#:code code response-code/c 200]
+                         [#:message message (or/c #f bytes?) #f]
+                         [#:seconds seconds real? (current-seconds)]
+                         [#:mime-type mime-type (or/c #f bytes?) TEXT/HTML-MIME-TYPE]
                          [#:headers headers (listof header?) empty]
                          [#:cookies cookies (listof cookie?) empty]
                          [#:preamble preamble bytes? #""])
@@ -717,4 +899,12 @@ web-server/insta
  ]
 
  This is a viable function to pass to @racket[set-any->response!].
- }
+
+ See the documentation for @racket[response/full] to see how @racket[#f] is handled for @racket[message].
+
+@history[#:changed "1.4"
+         @elem{Contract on @racket[message] relaxed to allow both @racket[#f] and @racket[bytes?], with a default of @racket[#f]. Previously, @racket[bytes?] was required, and had a default of @racket[#"Okay"].}
+         #:changed "1.3"
+          @elem{Updated contracts on @racket[code] and @racket[seconds]
+             as with @racket[response].}]
+}

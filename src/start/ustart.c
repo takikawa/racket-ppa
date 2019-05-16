@@ -372,6 +372,7 @@ int main(int argc, char **argv)
     long buflen = 4096;
     buf = (char *)malloc(buflen);
     me = path_append(getcwd(buf, buflen), me);
+    free(buf);
   } else {
     /* We have to find the executable by searching PATH: */
     char *path = copy_string(getenv("PATH")), *p, *m;
@@ -422,7 +423,6 @@ int main(int argc, char **argv)
       if (errno == ENAMETOOLONG) {
 	/* Increase buffer size and try again: */
 	bufsize *= 2;
-	buf = (char *)malloc(bufsize + 1);
       } else
 	break;
     } else {
@@ -430,7 +430,6 @@ int main(int argc, char **argv)
       buf[len] = 0;
       buf = absolutize(buf, me);
       me = buf;
-      buf = (char *)malloc(bufsize + 1);
     }
   }
 
@@ -490,7 +489,7 @@ int main(int argc, char **argv)
       dll_path = "";
     }
     dll_path = string_append(dll_path, ":");
-    dll_path = string_append(lib_path, dll_path);
+    dll_path = string_append(dll_path, lib_path);
     dll_path = string_append(LD_LIB_PATH "=", dll_path);
     putenv(dll_path);
   }

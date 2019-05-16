@@ -2,6 +2,14 @@
 ;; Check to make we're using a build of Chez Scheme
 ;; that has all the features we need.
 
+(let-values ([(maj min sub) (scheme-version-number)])
+  (unless (or (> maj 9)
+              (and (= maj 9)
+                   (or (> min 5)
+                       (and (= min 5)
+                            (>= sub 3)))))
+    (error 'compile-file "need a newer Chez Scheme")))
+
 (define (check-ok what thunk)
   (unless (guard (x [else #f]) (thunk))
     (error 'compile-file
@@ -34,6 +42,20 @@
               (eval '(f (fxvector 0))))))
 (check-defined 'vfasl-convert-file)
 (check-defined 'compute-size-increments)
+(check-defined 'enable-type-recovery)
+(check-defined 'make-wrapper-procedure)
+(check-defined 'make-phantom-bytevector)
+(check-defined 'enable-arithmetic-left-associative)
+(check-ok "eq? on flonums"
+          (lambda ()
+            (let* ([n (string->number "3.14")]
+                   [v (vector n n)])
+              (collect 0)
+              (unless (eq? (vector-ref v 0) (vector-ref v 1))
+                (error 'eq-on-flonum "no")))))
+(check-defined 'procedure-known-single-valued?)
+(check-defined 'compress-format)
+(check-defined '#%$record-cas!)
 
 ;; ----------------------------------------
 
@@ -58,9 +80,11 @@
 
 (define whole-program? #f)
 (generate-inspector-information #f)
-(generate-procedure-source-information #t)
+(generate-procedure-source-information #f)
 (compile-compressed #f)
+(enable-arithmetic-left-associative #t)
 (define build-dir "")
+(define xpatch-path #f)
 
 (define-values (src deps)
   (let loop ([args (command-line-arguments)])
@@ -68,6 +92,10 @@
      [(get-opt args "--debug" 0)
       => (lambda (args)
            (generate-inspector-information #t)
+           (loop args))]
+     [(get-opt args "--srcloc" 0)
+      => (lambda (args)
+           (generate-procedure-source-information #f)
            (loop args))]
      [(get-opt args "--unsafe" 0)
       => (lambda (args)
@@ -85,6 +113,10 @@
      [(get-opt args "--dest" 1)
       => (lambda (args)
            (set! build-dir (car args))
+           (loop (cdr args)))]
+     [(get-opt args "--xpatch" 1)
+      => (lambda (args)
+           (set! xpatch-path (car args))
            (loop (cdr args)))]
      [(null? args)
       (error 'compile-file "missing source file")]
@@ -105,6 +137,9 @@
       src-so
       (string-append build-dir src-so)))
 
+(when xpatch-path
+  (load xpatch-path))
+
 (cond
  [whole-program?
   (unless (= 1 (length deps))
@@ -122,4 +157,24 @@
                              [g (gensym (symbol->string sym) (format "rkt-~a-~a-~a" src s n))])
                         (eq-hashtable-set! counter-ht sym (+ n 1))
                         g)))])
-    (compile-file src dest))])
+    (cond
+     [xpatch-path
+      ;; Cross compile: use `compile-to-file` to get a second, host-format output file
+      (let ([sfd (let ([i (open-file-input-port src)])
+                   (make-source-file-descriptor src i #t))])
+        (let ([exprs (call-with-input-file
+                      src
+                      (lambda (i)
+                        (let loop ([pos 0])
+                          (let-values ([(e pos) (get-datum/annotations i sfd pos)])
+                            (if (eof-object? e)
+                                '()
+                                ;; Strip enough of the annotation to expose 'library
+                                ;; or 'top-level-program:
+                                (let ([e (map annotation-expression
+                                              (annotation-expression e))])
+                                  (cons e (loop pos))))))))])
+          (compile-to-file exprs dest)))]
+     [else
+      ;; Normal mode
+      (compile-file src dest)]))])

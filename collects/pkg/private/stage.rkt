@@ -625,10 +625,16 @@
       (define pkg-dir
         (if in-place?
             (if strip-mode
-                (pkg-error "cannot strip directory in place")
+                (cond
+                  [in-place-clean?
+                   (unless force-strip?
+                     (check-strip-compatible strip-mode pkg-name pkg-path pkg-error))
+                   (generate-stripped-directory strip-mode pkg-path pkg-path)
+                   pkg-path]
+                  [else
+                   (pkg-error "cannot strip directory in place\n  path: ~a" pkg-path)])
                 pkg-path)
             (let ([pkg-dir (make-temporary-file "pkg~a" 'directory)])
-              (delete-directory pkg-dir)
               (if strip-mode
                   (begin
                     (unless force-strip?
@@ -637,6 +643,7 @@
                     (generate-stripped-directory strip-mode pkg-path pkg-dir))
                   (begin
                     (make-parent-directory* pkg-dir)
+                    (delete-directory pkg-dir)
                     (copy-directory/files pkg-path pkg-dir #:keep-modify-seconds? #t)))
               pkg-dir)))
       (when (or (not in-place?)
@@ -705,7 +712,7 @@
                                 #:given-checksum (pkg-desc-checksum desc)
                                 #:use-cache? use-cache?
                                 #t
-                                (if quiet? void printf)
+                                (if quiet? void printf/flush)
                                 metadata-ns
                                 #:in-place? in-place?
                                 #:strip strip-mode

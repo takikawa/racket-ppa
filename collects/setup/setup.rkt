@@ -2,7 +2,8 @@
 (require "option.rkt"
          "setup-core.rkt"
          launcher/launcher
-         compiler/compiler)
+         compiler/compiler
+         compiler/cm)
 
 (provide setup)
 
@@ -19,7 +20,11 @@
                #:avoid-main? [avoid-main? #f]
                #:force-user-docs? [force-user-docs? #f]
                #:jobs [parallel #f]
-               #:fail-fast? [fail-fast? #f])
+               #:recompile-only? [recompile-only? #f]
+               #:fail-fast? [fail-fast? #f]
+               #:check-pkg-deps? [always-check-dependencies? #f]
+               #:fix-pkg-deps? [fix-dependencies? #f]
+               #:unused-pkg-deps? [check-unused-dependencies? #f])
   (parameterize 
    (;; Here's where we tell setup the archive file:
     [archives (if (or clean? (not file)) (archives) (list file))]
@@ -57,9 +62,17 @@
     [make-launchers (if clean? #f (make-launchers))] 
     [make-info-domain (if clean? #t (make-info-domain))]
     [call-install (if clean? #f (call-install))]
+
+    [fix-dependencies fix-dependencies?]
+    [check-unused-dependencies check-unused-dependencies?]
+    [always-check-dependencies (or fix-dependencies?
+                                   check-unused-dependencies?
+                                   always-check-dependencies?)]
     
     [setup-program-name "raco setup"]
-    
+
+    [recompile-only recompile-only?]
+    [managed-recompile-only recompile-only?]
     [parallel-workers (if parallel parallel (parallel-workers))])
 
    (let/ec esc

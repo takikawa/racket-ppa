@@ -161,6 +161,12 @@ flags:
    @envvar{PLT_COMPILED_FILE_CHECK} environment variable is set to
    @litchar{exists}, in which case timestamps are ignored).}
 
+ @item{@DFlag{recompile-only} --- disallow recompilation of modules
+  from source, imposing the constraint that each @filepath{.zo} file
+  is up-to-date, needs only a timestamp adjustment, or can be
+  recompiled from an existing @filepath{.zo} in machine-independent
+  format (when compiling to a machine-dependent format).}
+
  @item{@DFlag{no-launcher} or @Flag{x} --- refrain from creating
    executables or installing @tt{man} pages (as specified in
    @filepath{info.rkt}; see @secref["setup-info"]).}
@@ -273,6 +279,19 @@ flags:
  @item{@DFlag{fail-fast} --- attempt to break as soon as any error is
   discovered.}
 
+ @item{@DFlag{error-out} @nonterm{file} --- handle survivable errors
+  by writing @nonterm{file} and exiting as successful, which
+  facilitates chaining multiple @exec{raco setup} invocations in
+  combination with @DFlag{error-in}. If there are no errors and
+  @nonterm{file} already exists, it is deleted.}
+
+ @item{@DFlag{error-in} @nonterm{file} --- treat the existence of
+  @nonterm{file} as a ``errors were reported by a previous process''
+  error. Typically, @nonterm{file} is created by previous @exec{raco
+  setup} run using @DFlag{error-out}. A file for @DFlag{error-in} is
+  detected before creating a file via @DFlag{error-out}, so the same
+  file can be used to chain a sequence of @exec{raco setup} steps.}
+
  @item{@DFlag{pause} or @Flag{p} --- pause for user input if any
   errors are reported (so that a user has time to inspect output that
   might otherwise disappear when the @exec{raco setup} process ends).}
@@ -337,7 +356,9 @@ update a compiled file's timestamp if the file is not recompiled.
          #:changed "6.1.1" @elem{Added the @DFlag{force-user-docs} flag.}
          #:changed "6.1.1.6" @elem{Added the @DFlag{only-foreign-libs} flag.}
          #:changed "6.6.0.3" @elem{Added support for @envvar{PLT_COMPILED_FILE_CHECK}.}
-         #:changed "7.0.0.19" @elem{Added @DFlag{places} and  @DFlag{processes}.}]
+         #:changed "7.0.0.19" @elem{Added @DFlag{places} and  @DFlag{processes}.}
+         #:changed "7.2.0.7" @elem{Added @DFlag{error-in} and  @DFlag{error-out}.}
+         #:changed "7.2.0.8" @elem{Added @DFlag{recompile-only}.}]
 
 @; ------------------------------------------------------------------------
 
@@ -921,6 +942,7 @@ normal dependency counts as a build-time dependency, too).
 
 @defproc[(setup [#:file file (or/c #f path-string?) #f]
                 [#:collections collections (or/c #f (listof (listof path-string?))) #f]
+                [#:pkgs pkgs (or/c #f (listof string?)) #f]
                 [#:planet-specs planet-specs (or/c #f 
                                                    (listof (list/c string?
                                                                    string?
@@ -932,8 +954,12 @@ normal dependency counts as a build-time dependency, too).
                 [#:make-docs? make-docs? any/c #t]
                 [#:make-doc-index? make-doc-index? any/c #f]
                 [#:force-user-docs? force-user-docs? any/c #f]
+                [#:check-pkg-deps? check-pkg-deps? any/c #f]
+                [#:fix-pkg-deps? fix-pkg-deps? any/c #f]
+                [#:unused-pkg-deps? unused-pkg-deps? any/c #f]
                 [#:clean? clean? any/c #f]
                 [#:tidy? tidy? any/c #f]
+                [#:recompile-only? recompile-only? any/c #f]
                 [#:jobs jobs exact-nonnegative-integer? #f]
                 [#:fail-fast? fail-fast? any/c #f]
                 [#:get-target-dir get-target-dir (or/c #f (-> path-string?)) #f])
@@ -946,10 +972,16 @@ Runs @exec{raco setup} with various options:
        a @filepath{.plt} archive.}
 
  @item{@racket[collections] --- if not @racket[#f], constrains setup to
-       the named collections, along with @racket[planet-specs], if any}
+       the named collections (along with @racket[pkgs] and
+       @racket[planet-specs], if any)}
+
+ @item{@racket[pkgs] --- if not @racket[#f], constrains setup to the
+       named packages (along with @racket[collections] and
+       @racket[planet-specs], if any)}
 
  @item{@racket[planet-spec] --- if not @racket[#f], constrains setup to
-       the named @|PLaneT| packages, along with @racket[collections], if any}
+       the named @|PLaneT| packages (along with @racket[collections] and
+       @racket[pkgs], if any)}
 
  @item{@racket[make-user?] --- if @racket[#f], disables any
        user-specific setup actions}
@@ -968,11 +1000,27 @@ Runs @exec{raco setup} with various options:
        documentation, creates a user-specific documentation entry point
        even if it has the same content as the installation}
 
+ @item{@racket[check-pkg-deps?] --- if true, enables
+       package-dependency checking even when @racket[collections],
+       @racket[pkgs], or @racket[planet-specs] is non-@racket[#f].}
+
+ @item{@racket[fix-pkg-deps?] --- if true, implies
+       @racket[check-pkg-deps?] and attempts to automatically correct
+       discovered package-dependency problems}
+ 
+ @item{@racket[unused-pkg-deps?] --- if true, implies
+       @racket[check-pkg-deps?] and also reports dependencies that
+       appear to be unused}
+
  @item{@racket[clean?] --- if true, enables cleaning mode instead of setup mode}
 
  @item{@racket[tidy?] --- if true, enables global tidying of
        documentation and metadata indexes even when @racket[collections]
        or @racket[planet-specs] is non-@racket[#f]}
+
+ @item{@racket[recompile-only?] --- if true, disallows compilation
+       from source, allowing only timestamp adjustments and recompilation
+       from machine-independent form}
 
  @item{@racket[jobs] --- if not @racket[#f], determines the maximum number of parallel
        tasks used for setup}
@@ -992,7 +1040,11 @@ Instead of using @envvar{PLT_COMPILED_FILE_CHECK}, @racket[setup] is
 sensitive to the @racket[use-compiled-file-check] parameter.
 
 @history[#:changed "6.1" @elem{Added the @racket[fail-fast?] argument.}
-         #:changed "6.1.1" @elem{Added the @racket[force-user-docs?] argument.}]}
+         #:changed "6.1.1" @elem{Added the @racket[force-user-docs?] argument.}
+         #:changed "7.2.0.7" @elem{Added the @racket[check-pkg-deps?],
+                                   @racket[fix-pkg-deps?] , and @racket[unused-pkg-deps?]
+                                   arguments.}
+         #:changed "7.2.0.8" @elem{Added the @racket[recompile-only?] argument.}]}
 
 
 

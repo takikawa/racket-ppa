@@ -549,16 +549,30 @@ Returns @racket[z] raised to the power of @racket[w].
 
 If @racket[w] is
  exact @racket[0], the result is exact @racket[1].
- If @racket[w] is @racket[0.0] or @racket[-0.0]  and @racket[z] is a @tech{real number}, the
+ If @racket[w] is @racket[0.0] or @racket[-0.0]  and @racket[z] is a @tech{real number}
+ other than exact @racket[1] or @racket[0], the
  result is @racket[1.0] (even if @racket[z] is @racket[+nan.0]).
 
 If @racket[z] is exact @racket[1], the result is exact @racket[1].
  If @racket[z] is @racket[1.0] and @racket[w] is a @tech{real number}, the
  result is @racket[1.0] (even if @racket[w] is @racket[+nan.0]).
 
-If @racket[z] is
- exact @racket[0] and @racket[w] is negative, the
- @exnraise[exn:fail:contract:divide-by-zero].
+If @racket[z] is exact @racket[0], the result is as follows:
+@;
+@itemlist[#:style 'compact
+
+ @item{@racket[w] is exact @racket[0] --- result is @racket[1]}
+
+ @item{@racket[w] is @racket[0.0] or @racket[-0.0] --- result is @racket[1.0]}
+
+ @item{real part of @racket[w] is negative --- the @exnraise[exn:fail:contract:divide-by-zero]}
+
+ @item{@racket[w] is nonreal with a nonpositive real part  --- the @exnraise[exn:fail:contract:divide-by-zero]}
+
+ @item{@racket[w] is @racket[+nan.0] --- result is @racket[+nan.0]}
+
+ @item{otherwise --- result is @racket[0]}
+]
 
 Further special cases when @racket[w] is a @tech{real number}:
 @margin-note*{These special cases correspond to @tt{pow} in C99 @cite["C99"],
@@ -569,45 +583,45 @@ integer.}
 
  @item{@racket[(expt 0.0 w)]:
        @itemlist[#:style 'compact
-         @item{@racket[w] is negative --- @racket[+inf.0]}
-         @item{@racket[w] is positive --- @racket[0.0]}]}
+         @item{@racket[w] is negative --- result is @racket[+inf.0]}
+         @item{@racket[w] is positive --- result is @racket[0.0]}]}
 
  @item{@racket[(expt -0.0 w)]:
        @itemlist[#:style 'compact
          @item{@racket[w] is negative:
                @itemlist[#:style 'compact
-                @item{@racket[w] is an odd integer --- @racket[-inf.0]}
-                @item{@racket[w] otherwise rational --- @racket[+inf.0]}]}
+                @item{@racket[w] is an odd integer --- result is @racket[-inf.0]}
+                @item{@racket[w] otherwise rational --- result is @racket[+inf.0]}]}
          @item{@racket[w] is positive:
                @itemlist[#:style 'compact
-                @item{@racket[w] is an odd integer --- @racket[-0.0]}
-                @item{@racket[w] otherwise rational --- @racket[+0.0]}]}]}
+                @item{@racket[w] is an odd integer --- result is @racket[-0.0]}
+                @item{@racket[w] otherwise rational --- result is @racket[+0.0]}]}]}
 
  @item{@racket[(expt z -inf.0)] for positive @racket[z]:
        @itemlist[#:style 'compact
-         @item{@racket[z] is less than @racket[1.0] --- @racket[+inf.0]}
-         @item{@racket[z] is greater than @racket[1.0] --- @racket[+0.0]}]}
+         @item{@racket[z] is less than @racket[1.0] --- result is @racket[+inf.0]}
+         @item{@racket[z] is greater than @racket[1.0] --- result is @racket[+0.0]}]}
 
  @item{@racket[(expt z +inf.0)] for positive @racket[z]:
        @itemlist[#:style 'compact
-         @item{@racket[z] is less than @racket[1.0] --- @racket[+0.0]}
-         @item{@racket[z] is greater than @racket[1.0] --- @racket[+inf.0]}]}
+         @item{@racket[z] is less than @racket[1.0] --- result is @racket[+0.0]}
+         @item{@racket[z] is greater than @racket[1.0] --- result is @racket[+inf.0]}]}
 
  @item{@racket[(expt -inf.0 w)] for integer @racket[w]:
        @itemlist[#:style 'compact
          @item{@racket[w] is negative:
                @itemlist[#:style 'compact
-                @item{@racket[w] is odd --- @racket[-0.0]}
-                @item{@racket[w] is even --- @racket[+0.0]}]}
+                @item{@racket[w] is odd --- result is @racket[-0.0]}
+                @item{@racket[w] is even --- result is @racket[+0.0]}]}
          @item{@racket[w] is positive:
                @itemlist[#:style 'compact
-                @item{@racket[w] is odd --- @racket[-inf.0]}
-                @item{@racket[w] is even --- @racket[+inf.0]}]}]}
+                @item{@racket[w] is odd --- result is @racket[-inf.0]}
+                @item{@racket[w] is even --- result is @racket[+inf.0]}]}]}
 
  @item{@racket[(expt +inf.0 w)]:
        @itemlist[#:style 'compact
-         @item{@racket[w] is negative --- @racket[+0.0]}
-         @item{@racket[w] is positive --- @racket[+inf.0]}]}
+         @item{@racket[w] is negative --- result is @racket[+0.0]}
+         @item{@racket[w] is positive --- result is @racket[+inf.0]}]}
 ]
 
 @mz-examples[(expt 2 3) (expt 4 0.5) (expt +inf.0 0)]}
@@ -690,7 +704,8 @@ Returns the arccosine in radians of @racket[z].
 
 In the one-argument case, returns the arctangent of the inexact
  approximation of @racket[z], except that the result is an exact
- @racket[0] for an exact @racket[0] argument.
+ @racket[0] for @racket[z] as @racket[0], and the @exnraise[exn:fail:contract:divide-by-zero]
+ for @racket[z] as exact @racket[0+1i] or exact @racket[0-1i].
 
 In the two-argument case, the result is roughly the same as @racket[
  (atan (/ (exact->inexact y)) (exact->inexact x))], but the signs of @racket[y]
@@ -698,11 +713,15 @@ In the two-argument case, the result is roughly the same as @racket[
  suitable angle is returned when @racket[y] divided by @racket[x]
  produces @racket[+nan.0] in the case that neither @racket[y] nor
  @racket[x] is @racket[+nan.0]. Finally, if @racket[y] is exact
- @racket[0] and @racket[x] is an exact positive number, the result is
+ @racket[0] and @racket[x] is a positive number, the result is
  exact @racket[0]. If both @racket[x] and @racket[y] are exact
  @racket[0], the @exnraise[exn:fail:contract:divide-by-zero].
 
-@mz-examples[(atan 0.5) (atan 2 1) (atan -2 -1) (atan 1+05.i) (atan +inf.0 -inf.0)]}
+@mz-examples[(atan 0.5) (atan 2 1) (atan -2 -1) (atan 1+05.i) (atan +inf.0 -inf.0)]
+
+@history[#:changed "7.2.0.2" @elem{Changed to raise @racket[exn:fail:contract:divide-by-zero]
+                                   for @racket[0+1i] and @racket[0-1i] and to produce exact @racket[0]
+                                   for any positive @racket[x] (not just exact values) when @racket[y] is @racket[0].}]}
 
 @; ------------------------------------------------------------------------
 @subsection{Complex Numbers}
@@ -747,9 +766,15 @@ Returns the imaginary part of the complex number @racket[z] in
 @defproc[(magnitude [z number?]) (and/c real? (not/c negative?))]{
 
  Returns the magnitude of the complex number @racket[z] in polar
- coordinates.
+ coordinates. A complex number with @racket[+inf.0] or @racket[-inf.0]
+ as a component has magnitude @racket[+inf.0], even if the other
+ component is @racket[+nan.0].
 
-@mz-examples[(magnitude -3) (magnitude 3.0) (magnitude 3+4i)]}
+@mz-examples[(magnitude -3) (magnitude 3.0) (magnitude 3+4i)]
+
+@history[#:changed "7.2.0.2" @elem{Changed to always return @racket[+inf.0]
+                                   for a complex number with a @racket[+inf.0]
+                                   or @racket[-inf.0] component.}]}
 
 
 @defproc[(angle [z number?]) real?]{ Returns the angle of

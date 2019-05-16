@@ -1083,7 +1083,11 @@ void scheme_init_extfl_number(Scheme_Startup_Env *env)
   ADD_PRIM_W_ARITY("make-shared-extflvector", make_shared_extflvector, 1, 2, env);
 
   p = scheme_make_immed_prim(extflvector_length, "extflvector-length", 1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNARY_INLINED
+  if (MZ_LONG_DOUBLE_AVAIL_AND(1))
+    flags = SCHEME_PRIM_IS_BINARY_INLINED;
+  else
+    flags = SCHEME_PRIM_SOMETIMES_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(flags
                                                             | SCHEME_PRIM_PRODUCES_FIXNUM);
   scheme_addto_prim_instance("extflvector-length", p, env);
 
@@ -2913,8 +2917,23 @@ static Scheme_Object *complex_atan(Scheme_Object *c)
 {
   Scheme_Object *one_half = NULL;
 
-  if (scheme_complex_eq(c, scheme_plus_i) || scheme_complex_eq(c, scheme_minus_i))
-    return scheme_minus_inf_object;
+  if (SAME_OBJ(_scheme_complex_real_part(c), scheme_make_integer(0))) {
+    Scheme_Object *i = _scheme_complex_imaginary_part(c);
+    if (SAME_OBJ(i, scheme_make_integer(1)) || SAME_OBJ(i, scheme_make_integer(-1))) {
+      scheme_raise_exn(MZEXN_FAIL_CONTRACT_DIVIDE_BY_ZERO, "atan: undefined for %V", c);
+      return NULL;
+#ifdef MZ_USE_SINGLE_FLOATS
+    } else if (SCHEME_FLTP(i)) {
+      float f = SCHEME_FLT_VAL(i);
+      if ((f == 1.0) || (f == -1.0))
+        return scheme_single_minus_inf_object;
+#endif
+    } else if (SCHEME_DBLP(i)) {
+      double d = SCHEME_DBL_VAL(i);
+      if ((d == 1.0) || (d == -1.0))
+        return scheme_minus_inf_object;
+    }
+  }
 
   /* select single versus complex: */
 #ifdef MZ_USE_SINGLE_FLOATS
@@ -3115,9 +3134,7 @@ atan_prim (int argc, Scheme_Object *argv[])
                          "atan: undefined for 0 and 0");
         ESCAPED_BEFORE_HERE;
       }
-      if ((SCHEME_INTP(n2) && (SCHEME_INT_VAL(n2) > 0))
-          || (SCHEME_BIGNUMP(n2) && (SCHEME_BIGPOS(n2)))
-          || (SCHEME_RATIONALP(n2) && scheme_is_positive(n2)))
+      if (!SCHEME_COMPLEXP(n2) && scheme_is_positive(n2))
         return zeroi;
     }
 
@@ -3886,13 +3903,13 @@ static Scheme_Object *magnitude(int argc, Scheme_Object *argv[])
     if (SCHEME_FLTP(i)) {
       float f;
       f = SCHEME_FLT_VAL(i);
-      if (MZ_IS_POS_INFINITY((double) f)) {
+      if (MZ_IS_INFINITY((double) f))
+        return scheme_single_inf_object;
+      else if (MZ_IS_NAN((double) f)) {
         if (SCHEME_FLTP(r)) { /* `r` is either a single-precision float or exact 0 */
           f = SCHEME_FLT_VAL(r);
-          if (MZ_IS_NAN((double) f)) {
-            return scheme_single_nan_object;
-          }
-          return scheme_single_inf_object;
+          if (MZ_IS_INFINITY((double) f))
+            return scheme_single_inf_object;
         }
       }
     }
@@ -3900,13 +3917,14 @@ static Scheme_Object *magnitude(int argc, Scheme_Object *argv[])
     if (SCHEME_FLOATP(i)) {
       double d;
       d = SCHEME_FLOAT_VAL(i);
-      if (MZ_IS_POS_INFINITY(d)) {
+      if (MZ_IS_INFINITY(d))
+        return scheme_inf_object;
+      else if (MZ_IS_NAN(d)) {
         if (SCHEME_FLOATP(r)) {
           d = SCHEME_FLOAT_VAL(r);
-          if (MZ_IS_NAN(d))
-            return scheme_nan_object;
+          if (MZ_IS_INFINITY(d))
+            return scheme_inf_object;
         }
-        return scheme_inf_object;
       }
     }
     q = scheme_bin_div(r, i);

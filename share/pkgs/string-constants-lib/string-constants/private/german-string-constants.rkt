@@ -89,6 +89,10 @@
  (cs-italic "Kursiv")
  (cs-bold "Fett")
  (cs-underline "Unterstrichen")
+ (cs-smoothing-default "Standard")
+ (cs-smoothing-partial "Teilweise geglättet")
+ (cs-smoothing-full "Geglättet")
+ (cs-smoothing-none "Ungeglättet")
  (cs-change-color "Farbe ändern")
  (cs-foreground-color "Vordergrundfarbe")
  (cs-background-color "Hintergrundfarbe")
@@ -387,7 +391,10 @@
  
  ;;; save file in particular format prompting.
  (save-as-plain-text "Diese Datei als Text speichern?")
+ (save-as-binary-format "Diese Datei in ein DrRacket-spezifisches Format konvertieren, um die Nicht-Text-Elemente zu erhalten??")
  (save-in-drs-format "Diese Datei im DrRacket-Format (kein Text) speichern?")
+ (keep-format "Behalten (Datenverlust möglich)")
+ (convert-format "Konvertieren (empfohlen)")
  (yes "Ja")
  (no "Nein")
  
@@ -909,7 +916,7 @@
  ;;; file menu
  (save-definitions-as "Definitionen speichern unter…")
  (save-definitions "Definitionen speichern")
- (print-definitions "Definition drucken…")
+ (print-definitions "Definitionen drucken…")
  (about-drscheme "Über DrRacket")
  (save-other "Speichern unter")
  (save-definitions-as-text "Definitionen als Text speichern…")
@@ -1433,7 +1440,7 @@
   
  (stepper-no-selected-step "Keine Schritte im markierten Bereich. Vielleicht ist es auskommentiert?")
   
- (stepper-no-last-step "Der letzte Schritt ist nocht nicht verfügbar.")
+ (stepper-no-last-step "Der letzte Schritt ist noch nicht verfügbar.")
 
  (debug-tool-button-name "Debugger")
 
@@ -1590,6 +1597,8 @@
    "Der tatsächliche Wert ~F ist nicht der erwartete Wert ~F.")
   (test-engine-actual-value-not-within-error
    "Der tatsächliche Wert ~F ist nicht innerhalb von ~v des erwarteten Werts ~F.")
+  (test-engine-actual-value-not-within-error/alt-order
+   "Der tatsächliche Wert ~F ist nicht nah genug am erwarteten Wert ~F; erwartet innerhalb von ~v.")
   (test-engine-encountered-error-error
    "check-error bekam den folgenden Fehler anstatt des erwarteten ~a~n   :: ~a")
   (test-engine-expected-error-error
