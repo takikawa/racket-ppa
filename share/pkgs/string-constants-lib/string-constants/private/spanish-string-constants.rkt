@@ -7,7 +7,7 @@
  (interact-with-drscheme-in-language "Interactúa con DrRacket en Español")
 
  (are-you-sure-you-want-to-switch-languages
-  "Esto cambiará el idioma de la interfaz, lo que requiere que reinicies DrRacket. ¿Estas seguro(a)?")
+  "Esto cambiará el idioma de la interfaz, lo que requiere que reinicies DrRacket. ¿Estás seguro(a)?")
  
 
  (accept-and-quit "Aceptar y salir")
@@ -27,7 +27,7 @@
  (close "Cerrar") ;; as in, close an open window
  (stop "Detener")
  (&stop "&Detener")
- (are-you-sure-delete? "¿Seguro(a) quieres borrar ~a?") ;; ~a is a filename or directory name
+ (are-you-sure-delete? "¿Seguro(a) que quieres borrar ~a?") ;; ~a is a filename or directory name
  (ignore "Ignorar")
  (revert "Revertir")
 
@@ -40,16 +40,16 @@
  (dont-ask-again                "No volver a preguntar")
  
  ;; important urls
- (web-materials "Sitios de Web Relacionados")
- (tool-web-sites "Sitios de Web de Herramientas")   ;; menu item title
+ (web-materials "Sitios Web Relacionados")
+ (tool-web-sites "Sitios Web de Herramientas")   ;; menu item title
  (plt-homepage "Racket")
  (pbd-homepage "Program by Design")
  
  ;;; bug report form
  (cancel-bug-report? "¿Cancelar el reporte de problemas?")
  (are-you-sure-cancel-bug-report?
-  "¿Estas seguro que quieres cancelar el envío de éste reporte de problemas?")
- (bug-report-form "Forma para reportar problemas")
+  "¿Estás seguro que quieres cancelar el envío de este reporte de problemas?")
+ (bug-report-form "Formulario para reportar problemas")
  (bug-report-field-name "Nombre")
  (bug-report-field-email "Correo Electrónico")
  (bug-report-field-summary "Resumen")
@@ -68,14 +68,14 @@
  (bug-report-submit "Enviar")
  (bug-report-submit-menu-item "Enviar reporte de problemas...") ;; in Help Menu (drs & help desk)
  (error-sending-bug-report "Error al enviar el reporte de problemas")
- (error-sending-bug-report-expln "Un error ocurrió mientras enviaba éste reporte de problemas.  Si tu conexión a Internet está funcionando bien, por favor visita:\n\n    http://bugs.racket-lang.org/\n\ny envía el reporte de problemas por medio de la forma de web en esea página de WEB. Sentimos mucho las molestias que esto te ocasiona.\n\nEl mensaje de error es:\n~a")
+ (error-sending-bug-report-expln "Un error ocurrió mientras se enviaba el reporte de problemas.  Si tu conexión a Internet está funcionando bien, por favor visita:\n\n    http://bugs.racket-lang.org/\n\ny envía el reporte de problemas por medio del formulario web en esa página. Sentimos mucho las molestias que esto te ocasiona.\n\nEl mensaje de error es:\n~a")
  (illegal-bug-report "Reporte de problemas ilegal")
- (pls-fill-in-field "Por favor requisita el campo \"~a\"")
+ (pls-fill-in-field "Por favor completa el campo \"~a\"")
  (malformed-email-address "Dirección de correo electrónico inválida")
- (pls-fill-in-either-description-or-reproduce "Por favor requisita el campo de Descripción o el de Pasos para Reproducir.")
+ (pls-fill-in-either-description-or-reproduce "Por favor completa el campo de Descripción o el de Pasos para Reproducir.")
 
  ;;; check syntax
- (check-syntax "Revisa la sintáxis")
+ (check-syntax "Revisar sintaxis")
  (cs-italic "Itálica")
  (cs-bold "Negrita")
  (cs-underline "Subrayado")
@@ -91,10 +91,10 @@
  (cs-rename-var-to "Renombrar ~a a:")
  (cs-name-duplication-error "El nuevo nombre que has seleccionado, ~s, colisiona con otro nombre en este ambiente.")
  (cs-rename-anyway "Renombrar de cualquier modo")
- (cs-status-init "Checar sintaxis: Iniciando el ambiente para el código de usuario")
- (cs-status-coloring-program "Checar sintaxis: coloreando la expresión")
- (cs-status-eval-compile-time "Checar sintaxis: tiempo de evaluación y compilación")
- (cs-status-expanding-expression "Checar sintaxis: expandiendo la expresión")
+ (cs-status-init "Revisar sintaxis: iniciando el ambiente para el código de usuario")
+ (cs-status-coloring-program "Revisar sintaxis: coloreando la expresión")
+ (cs-status-eval-compile-time "Revisar sintaxis: tiempo de evaluación y compilación")
+ (cs-status-expanding-expression "Revisar sintaxis: expandiendo la expresión")
  (cs-mouse-over-import "Asociación ~s importada desde ~s")
  
  (cs-lexical-variable "variable léxica")
@@ -754,9 +754,9 @@
  (write-printing-style "write")
  (sharing-printing-label "Show sharing in values")
  (use-pretty-printer-label "Insertar caracteres de nueva línea en valores impresos")
- (input-syntax "Sintáxis de Entrada")
+ (input-syntax "Sintaxis de Entrada")
  (dynamic-properties "Propiedades dinámicas")
- (output-syntax "Sintáxis de Salida")
+ (output-syntax "Sintaxis de Salida")
  (no-debugging-or-profiling "No depurando o delineando")
  (debugging "Depurando")
  (debugging-and-profiling "Depurando y delineando")

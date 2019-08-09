@@ -2296,7 +2296,7 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
           if (notdisplay == 3) {
             vec = scheme_vector_to_list(vec);
             vec = scheme_make_pair(scheme_object_name(obj), SCHEME_CDR(vec));
-            print_pair(vec, notdisplay, compact, ht, mt, pp, scheme_pair_type, !pp->print_pair_curly, 1);
+            print_pair(vec, notdisplay, compact, ht, mt, pp, scheme_pair_type, 1, 1);
           } else {
             if (SCHEME_TRUEP(prefab))
               SCHEME_VEC_ELS(vec)[0] = prefab;
@@ -2333,12 +2333,9 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
 	      name = SCHEME_STRUCT_NAME_SYM(obj);
             }
 
-            s = scheme_symbol_name_and_size(name, (uintptr_t *)&l, 
-                                            (pp->print_struct
-                                             ? SCHEME_SNF_FOR_TS
-                                             : (pp->can_read_pipe_quote 
-                                                ? SCHEME_SNF_PIPE_QUOTE
-                                                : SCHEME_SNF_NO_PIPE_QUOTE)));
+            s = scheme_symbol_val(name);
+            l = SCHEME_SYM_LEN(name);
+
             print_utf8_string(pp, s, 0, l);
 	    PRINTADDRESS(pp, obj);
 	    print_utf8_string(pp, ">", 0, 1);

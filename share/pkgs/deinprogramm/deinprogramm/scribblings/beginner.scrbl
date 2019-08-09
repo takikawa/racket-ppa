@@ -345,7 +345,7 @@ wenn der Wert @italic{v} gleich dem Pattern ist.}
 und kann in dem Ausdruck des Zweigs benutzt werden.
 }
 
-@item{Ein Pattern @racket[(constructor pattern ...)], bei dem
+@item{Ein Pattern @racket[(constructor pattern @#,racketmetafont{...})], bei dem
 @racket[constructor] ein Record-Konstruktor ist (ein
 @italic{Konstruktor-Pattern}), paßt auf @italic{v}, falls @italic{v}
 ein passender Record ist, und dessen Felder auf die entsprechenden

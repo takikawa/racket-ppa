@@ -1883,6 +1883,8 @@ please adhere to these guidelines:
   ; puts the path to the spell program in the ~a and then the error message
   ; is put following this string (with a blank line in between)
   (spell-program-wrote-to-stderr-on-startup "The spell program (~a) printed an error message:")
+  (spell-program-did-not-respond-after-some-seconds
+   "The spell program (~a) did not respond after ~a seconds")
   (spell-skip-to-next-misspelled-word "Skip to Next Mispelled Word") ;; menu item
   (spell-suggest-corrections "Suggest Spelling Corrections…") ;; menu item
   (spell-correction-suggestions "Spelling Correction Suggestions") ;; dialog title

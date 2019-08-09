@@ -49,6 +49,7 @@
  bf
  bigfloat-deserialize-info
  ;; Low-level stuff
+ mpfr-get-version
  mpfr-lib
  get-mpfr-fun
  _rnd_t
@@ -71,7 +72,7 @@
     [(windows) '(so "libmpfr-4.dll")]
     [else '(so "libmpfr")]))
 
-(define mpfr-lib (ffi-lib libmpfr-so '("4" "1" "") #:fail (λ () #f)))
+(define mpfr-lib (ffi-lib libmpfr-so '("6" "4" "1" "") #:fail (λ () #f)))
 
 ;; The mpfr_buildopt_tls_p() function indicates whether mpfr was compiled as thread-safe:
 (define thread-safe? ((get-ffi-obj 'mpfr_buildopt_tls_p mpfr-lib (_fun -> _bool)
@@ -219,6 +220,8 @@
 ;; ===================================================================================================
 ;; Foreign functions
 
+(define mpfr-get-version (get-mpfr-fun 'mpfr_get_version (_fun -> _string)))
+
 (define mpfr-get-emin (get-mpfr-fun 'mpfr_get_emin (_fun -> _exp_t)))
 (define mpfr-get-emax (get-mpfr-fun 'mpfr_get_emax (_fun -> _exp_t)))
 
@@ -239,7 +242,7 @@
                                     (_fun _mpz-pointer _mpfr-pointer -> _exp_t)))))
 (define mpfr-get-str
   (get-mpfr-fun 'mpfr_get_str (_fun _pointer (_cpointer _exp_t) _int _ulong _mpfr-pointer _rnd_t
-                                    -> _bytes)))
+                                    -> _pointer)))
 
 ;; Conversions from other types to _mpfr
 (define mpfr-set (get-mpfr-fun 'mpfr_set (_fun _mpfr-pointer _mpfr-pointer _rnd_t -> _int)))
@@ -492,7 +495,7 @@ There's no reason to allocate new limbs for an _mpfr without changing its precis
   (define exp-ptr (cast (malloc _exp_t 'atomic-interior) _pointer (_cpointer _exp_t)))
   (define bs (mpfr-get-str #f exp-ptr base 0 x rnd))
   (define exp (ptr-ref exp-ptr _exp_t))
-  (define str (bytes->string/utf-8 bs))
+  (define str (bytes->string/utf-8 (cast bs _pointer _bytes)))
   (mpfr-free-str bs)
   (values exp str))
 

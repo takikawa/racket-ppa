@@ -69,11 +69,17 @@
         (garbage-collect-notify gen
                                 pre-allocated pre-allocated+overhead pre-time pre-cpu-time
                                 post-allocated  (current-memory-bytes) (real-time) (cpu-time)))
+      (update-eq-hash-code-table-size!)
       (poll-foreign-guardian)
       (run-collect-callbacks cdr)
       (when (and reachable-size-increments-callback
                  (fx= gen (collect-maximum-generation)))
-        (reachable-size-increments-callback compute-size-increments)))))
+        (reachable-size-increments-callback compute-size-increments))
+      (when (and (= gen (collect-maximum-generation))
+                 (current-engine-state))
+        ;; This `set-timer` doesn't necessarily penalize the right thread,
+        ;; but it's likely to penalize a thread that is allocating quickly:
+        (set-timer 1)))))
 
 (define collect-garbage
   (case-lambda
@@ -102,7 +108,7 @@
    [(mode)
     (cond
      [(not mode) (bytes-allocated)]
-     [(eq? mode 'cumulative) (sstats-bytes (statistics))]
+     [(eq? mode 'cumulative) (+ (bytes-deallocated) (bytes-allocated))]
      ;; must be a custodian; hook is reposnsible for complaining if not
      [else (custodian-memory-use mode (bytes-allocated))])]))
 
@@ -129,7 +135,7 @@
   (let-values ([(backtrace-predicate use-prev? max-path-length) (parse-dump-memory-stats-arguments args)])
     (enable-object-counts #t)
     (enable-object-backreferences (and backtrace-predicate #t))
-    (collect (collect-maximum-generation))
+    (collect-garbage)
     (let* ([counts (object-counts)]
            [backreferences (object-backreferences)]
            [extract (lambda (static? cxr)
@@ -286,13 +292,26 @@
      #%procedure?]
     [(eq? 'ephemeron (car args))
      ephemeron-pair?]
+    [(eq? 'bignum (car args))
+     bignum?]
+    [(eq? 'keyword (car args))
+     keyword?]
+    [(eq? 'string (car args))
+     string?]
+    [(eq? 'symbol (car args))
+     symbol?]
+    [(eq? '<ffi-lib> (car args))
+     ffi-lib?]
+    [(eq? '<will-executor> (car args))
+     will-executor?]
+    [(eq? 'metacontinuation-frame (car args))
+     metacontinuation-frame?]
     [(symbol? (car args))
-     #f
-     ;; This is disaterously slow, so don't try it:
-     #;
-     (let ([type (car args)])
+     (let ([name (car args)])
        (lambda (o)
-         (eq? ((inspect/object o) 'type) type)))]
+         (and (#%record? o)
+              (let ([rtd (#%record-rtd o)])
+                (eq? name (#%record-type-name rtd))))))]
     [else #f])
    ;; 'new mode for backtrace?
    (and (pair? args)
@@ -340,25 +359,28 @@
 
 ;; ----------------------------------------
 
-;; List of (cons <pre> <post>), currently suported
+;; Weak table of (cons <pre> <post>) keys, currently suported
 ;; only in the original host thread of the original place
-(define collect-callbacks '())
+(define collect-callbacks (make-weak-eq-hashtable))
 
 (define (unsafe-add-collect-callbacks pre post)
   (when (in-original-host-thread?)
     (let ([p (cons pre post)])
       (with-interrupts-disabled
-       (set! collect-callbacks (cons p collect-callbacks)))
+       (hashtable-set! collect-callbacks p #t))
       p)))
 
 (define (unsafe-remove-collect-callbacks p)
   (when (in-original-host-thread?)
     (with-interrupts-disabled
-     (set! collect-callbacks (#%remq p collect-callbacks)))))
+     (hashtable-delete! collect-callbacks p))))
 
+;; Called during collection in a thread with all others stopped; currently
+;; we run callbacks only if the main thread gets to perform the GC, which
+;; is often enough to be useful for flashing a GC icon
 (define (run-collect-callbacks sel)
   (when (in-original-host-thread?)
-    (let loop ([l collect-callbacks])
+    (let loop ([l (vector->list (hashtable-keys collect-callbacks))])
       (unless (null? l)
         (let ([v (sel (car l))])
           (let loop ([i 0] [save #f])
@@ -410,7 +432,7 @@
        save]
       [(ptr_ptr_ptr_int_int_int_int_int_int_int_int_int->void)
        ((foreign-procedure proc (void* void* void* int int int int int int int int int) void)
-        (ptr 0) (ptr 2) (ptr 2)
+        (ptr 0) (ptr 1) (ptr 2)
         (val 3) (val 4) (val 5) (val 6)
         (val 7) (val 8) (val 9) (val 10) (val 11))
        save]

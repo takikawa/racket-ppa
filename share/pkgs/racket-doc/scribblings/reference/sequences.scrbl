@@ -1,9 +1,11 @@
 #lang scribble/doc
-@(require "mz.rkt" scribble/scheme
+@(require "mz.rkt"
+          scribble/scheme
           (for-syntax racket/base)
           (for-label racket/generator
                      racket/generic
-                     compatibility/mlist))
+                     compatibility/mlist
+                     syntax/stx))
 
 @(define (info-on-seq where what)
    @margin-note{See @secref[where] for information on using @|what| as
@@ -260,9 +262,9 @@ each element in the sequence.
   
   If @racket[start] is less than
   @racket[stop] and @racket[step] is negative, then the
-  @exnraise[exn:fail:contract:mismatch].  Similarly, if @racket[start]
+  @exnraise[exn:fail:contract].  Similarly, if @racket[start]
   is more than @racket[stop] and @racket[step] is positive, then the
-  @exnraise[exn:fail:contract:mismatch].
+  @exnraise[exn:fail:contract].
 
   @speed[in-vector "vector"]
 
@@ -1004,7 +1006,7 @@ If @racket[min-count] is a number, the stream is required to have at least that 
 @defproc[(in-syntax [stx syntax?]) sequence?]{
   Produces a sequence whose elements are the successive subparts of
   @racket[stx].
-  Equivalent to @racket[(syntax->list lst)].
+  Equivalent to @racket[(stx->list lst)].
   @speed[in-syntax "syntax"]
 
 @examples[#:eval sequence-evaluator
