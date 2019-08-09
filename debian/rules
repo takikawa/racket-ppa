@@ -24,6 +24,9 @@ ifneq (,$(filter noopt,$(DEB_BUILD_OPTIONS)))
     DEB_CONFIGURE_EXTRA_FLAGS += --enable-noopt
 endif
 
+# For Racket CS
+DEB_CONFIGURE_EXTRA_FLAGS += --enable-csdefault
+
 # Support for generating ".orig.tar.gz" from git
 
 SOURCEPKG=$(shell dpkg-parsechangelog | sed  -n 's/^Source: \(.*\)/\1/p')
