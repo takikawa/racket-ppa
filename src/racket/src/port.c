@@ -4498,17 +4498,16 @@ Scheme_Object *scheme_filesystem_change_evt(Scheme_Object *path, int flags, int 
   }
 
   if (!rfc) {
-    if (scheme_last_error_is_racket(RKTIO_ERROR_UNSUPPORTED)) {
-      scheme_raise_exn(MZEXN_FAIL_UNSUPPORTED,
-                       "filesystem-change-evt: " NOT_SUPPORTED_STR "\n"
-                       "  path: %q\n",
-                       filename);
-    } else {
-      scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
-                       "filesystem-change-evt: error generating event\n"
-                       "  path: %q\n"
-                       "  system error: %R",
-                       filename);
+    if (signal_errs) {
+      if (scheme_last_error_is_racket(RKTIO_ERROR_UNSUPPORTED)) {
+        if (signal_errs)
+          scheme_raise_exn(MZEXN_FAIL_UNSUPPORTED,
+                           "filesystem-change-evt: " NOT_SUPPORTED_STR "\n"
+                           "  path: %q\n",
+                           filename);
+      } else {
+        filename_exn("filesystem-change-evt", "error generating event", filename, 0);
+      }
     }
     
     return NULL;
@@ -4818,7 +4817,6 @@ static intptr_t fd_get_string_slow(Scheme_Input_Port *port,
          filled in parallel to the buffer. */
       ext_target = 0;
       target = fip->buffer;
-      target_offset = 0;
       if (fip->flush == MZ_FLUSH_ALWAYS)
         target_size = 1;
       else

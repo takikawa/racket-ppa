@@ -149,6 +149,17 @@
                      'path->main-lib-relative
                      'main-lib-relative->path))
 
+  ;; For checking and debugging memory leaks; set `PLT_SETUP_DMS_ARGS`
+  ;; to an S-expression list and use `-j 1` to run a non-parallel setup:
+  (define post-collection-dms-args
+    (let ([v (getenv "PLT_SETUP_DMS_ARGS")])
+      (and v (read (open-input-string v)))))
+
+  ;; Also help to check for leaks: set `PLT_SETUP_LIMIT_CACHE` to
+  ;; avoid caching compile-file information across different collections:
+  (define limit-cross-collection-cache?
+    (getenv "PLT_SETUP_LIMIT_CACHE"))
+
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;                   Errors                      ;;
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1063,8 +1074,10 @@
 
   ;; We keep timestamp information for all files that we try to compile.
   ;; That's O(N) for an installation of size N, but the constant is small,
-  ;; and it makes a do-nothing setup complete much faster.
-  (define caching-managed-compile-zo (make-caching-managed-compile-zo))
+  ;; and it makes a do-nothing setup complete much faster. But set the
+  ;; `PLT_SETUP_LIMIT_CACHE` environment variable to disable it.
+  (define caching-managed-compile-zo (and (not limit-cross-collection-cache?)
+                                          (make-caching-managed-compile-zo)))
 
   (define (compile-cc cc gcs has-module-suffix?)
     (parameterize ([current-namespace (make-base-empty-namespace)])
@@ -1084,9 +1097,13 @@
                                   #:verbose (verbose)
                                   #:has-module-suffix? has-module-suffix?
                                   #:omit-root (cc-omit-root cc)
-                                  #:managed-compile-zo caching-managed-compile-zo
+                                  #:managed-compile-zo (or caching-managed-compile-zo
+                                                           (make-caching-managed-compile-zo))
                                   #:skip-path (and (avoid-main-installation) main-collects-dir)
                                   #:skip-doc-sources? (not make-docs?))))))
+    (when post-collection-dms-args
+      (collect-garbage)
+      (apply dump-memory-stats post-collection-dms-args))
     (if (eq? 0 gcs)
         0
         (begin (collect-garbage) (sub1 gcs))))
@@ -2057,7 +2074,10 @@
   (setup-printf "version" "~a" (version))
   (setup-printf "platform" "~a [~a]" (cross-system-library-subpath #f) (cross-system-type 'gc))
   (setup-printf "target machine" "~a" (or (current-compile-target-machine)
-                                          (cross-system-type 'target-machine)
+                                          ;; Check for `cross-multi-compile?` mode like compiler/cm:
+                                          (and ((length (current-compiled-file-roots)) . > . 1)
+                                               (cross-installation?)
+                                               (cross-system-type 'target-machine))
                                           'any))
   (when (cross-installation?)
     (setup-printf "cross-installation" "yes"))

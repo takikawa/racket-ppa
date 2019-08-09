@@ -47,7 +47,7 @@ if test "$AR" = '' ; then
   fi
 fi
 if test "$ARFLAGS" = '' ; then 
-  ARFLAGS=ruv
+  ARFLAGS=rc
 fi
 
 AC_CHECK_LIB(m, fmod)
@@ -106,10 +106,9 @@ case "$host_os" in
     enable_pthread_by_default=yes
     try_kqueue_syscall=yes
 
-    # Although select() generally works as well as poll() on OS X,
-    # getdtablesize() appears not to be constant within a process,
-    # and that breaks static allocation of fd_sets
-    try_poll_syscall=yes
+    # select() generally works as well as poll() on OS X,
+    # and it works better for fifos
+    try_poll_syscall=no
 
     # -pthread is not needed and triggers a warning
     use_flag_pthread=no

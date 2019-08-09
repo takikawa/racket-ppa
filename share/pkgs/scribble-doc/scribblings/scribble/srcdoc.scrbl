@@ -26,17 +26,10 @@ same way that the module system keeps expansion-time code separate
 from run-time code, and documentation information is recorded in a
 submodule to be separately loadable from the enclosing module.
 
-For an example use, see the @filepath{file} collection's
-@filepath{gif.rkt} source file and the corresponding extraction in
-@filepath{scribblings/gif.scrbl}. As that example illustrates,
-starting the module declaration with
+For an example use, see
+@hyperlink["https://blog.racket-lang.org/2012/06/submodules.html"]{this post}
+at @url{blog.racket-lang.org}.
 
-@racketblock[
-  @#,hash-lang[] @#,racketmodname[at-exp]
-]
-
-enables the @"@"-reader, which is handy for writing documentation
-expressions.
 
 @; ----------------------------------------
 

@@ -64,11 +64,13 @@
     [(~var i (3d (conjoin flonum? positive?))) -PosFlonumNoNan]
     [(~var i (3d (conjoin flonum? negative?))) -NegFlonumNoNan]
     [(~var i (3d flonum?)) -Flonum] ; for nan
-    [(~var i (3d (lambda (x) (eqv? x 0.0f0)))) -SingleFlonumPosZero]
-    [(~var i (3d (lambda (x) (eqv? x -0.0f0)))) -SingleFlonumNegZero]
-    [(~var i (3d (lambda (x) (eqv? x +nan.f)))) -SingleFlonumNan]
-    [(~var i (3d(lambda (x) (eqv? x +inf.f)))) (-val +inf.f)]
-    [(~var i (3d (lambda (x) (eqv? x -inf.f)))) (-val -inf.f)]
+    [(~var i (3d (lambda (x) (and (single-flonum? x) (eqv? x (real->single-flonum 0.0f0)))))) -SingleFlonumPosZero]
+    [(~var i (3d (lambda (x) (and (single-flonum? x) (eqv? x (real->single-flonum -0.0f0)))))) -SingleFlonumNegZero]
+    [(~var i (3d (lambda (x) (and (single-flonum? x) (eqv? x (real->single-flonum +nan.f)))))) -SingleFlonumNan]
+    [(~var i (3d(lambda (x) (and (single-flonum? x) (eqv? x (real->single-flonum +inf.f)))))) (-val (and (single-flonum-available?)
+                                                                                                         (real->single-flonum +inf.f)))]
+    [(~var i (3d (lambda (x) (and (single-flonum? x) (eqv? x (real->single-flonum -inf.f)))))) (-val (and (single-flonum-available?)
+                                                                                                          (real->single-flonum -inf.f)))]
     [(~var i (3d (conjoin single-flonum? positive?))) -PosSingleFlonumNoNan]
     [(~var i (3d (conjoin single-flonum? negative?))) -NegSingleFlonumNoNan]
     [(~var i (3d single-flonum?)) -SingleFlonum] ; for nan
@@ -92,8 +94,10 @@
     [(~var i (3d (lambda (x) (eqv? x +nan.t)))) -ExtFlonumNan]
     [(~var i (3d (lambda (x) (eqv? x +inf.t)))) (-val +inf.t)]
     [(~var i (3d (lambda (x) (eqv? x -inf.t)))) (-val -inf.t)]
-    [(~var i (3d (conjoin extflonum? (λ (x) (extfl> x 0.0t0))))) -PosExtFlonum]
-    [(~var i (3d (conjoin extflonum? (λ (x) (extfl< x 0.0t0))))) -NegExtFlonum]
+    [(~var i (3d (conjoin extflonum? (λ (x) (and (extflonum-available?) (extfl> x 0.0t0))))))
+     -PosExtFlonum]
+    [(~var i (3d (conjoin extflonum? (λ (x) (and (extflonum-available?) (extfl< x 0.0t0))))))
+     -NegExtFlonum]
     [(~var i (3d extflonum?)) -ExtFlonum] ; for nan
     
     [i:str -String]

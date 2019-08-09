@@ -32,6 +32,7 @@
 (define CF_UNICODETEXT      13)
 (define CF_BITMAP           2)
 (define CF_DIB              8)
+(define CF_DIBV5            17)
 
 (define DIB_RGB_COLORS      0)
 (define SRCCOPY             #x00CC0020)
@@ -134,17 +135,26 @@
                          (cond
                           [(equal? t-id CF_UNICODETEXT)
                            ;; convert UTF-8 to UTF-16:
-                           (let ([p (cast (bytes->string/utf-8 d #\?)
-                                          _string/utf-16 
-                                          _gcpointer)])
-                             (let ([len (let loop ([i 0])
-                                          (if (and (zero? (ptr-ref p _byte i))
-                                                   (zero? (ptr-ref p _byte (add1 i))))
-                                              (+ i 2)
-                                              (loop (+ i 2))))])
-                               (scheme_make_sized_byte_string p
-                                                              len
-                                                              0)))]
+                           (cond
+                             [(eq? 'racket (system-type 'vm))
+                              (let ([p (cast (bytes->string/utf-8 d #\?)
+                                             _string/utf-16
+                                             _gcpointer)])
+                                (let ([len (let loop ([i 0])
+                                             (if (and (zero? (ptr-ref p _byte i))
+                                                      (zero? (ptr-ref p _byte (add1 i))))
+                                                 (+ i 2)
+                                                 (loop (+ i 2))))])
+                                  (scheme_make_sized_byte_string p
+                                                                 len
+                                                                 0)))]
+                             [else
+                              (define cvt (bytes-open-converter "platform-UTF-8-permissive"
+                                                                "platform-UTF-16"))
+                              (define-values (bstr used status)
+                                (bytes-convert cvt d))
+                              ;; add explcit nul terminator
+                              (bytes-append bstr #"\0\0")])]
                           [else
                            ;; no conversion:
                            d])))]
@@ -214,6 +224,27 @@
 (define (get-bitmap-from-clipboard)
   ;; atomic mode
   (cond
+   [(let ([bits (GetClipboardData CF_DIBV5)])
+      (and bits
+        (let* ([bmi (cast (GlobalLock bits) _pointer _BITMAPINFOHEADER-pointer)]
+	       [bits/pp (BITMAPINFOHEADER-biBitCount bmi)]) 
+	  (if (= bits/pp 32) 
+	      (list bits bmi)
+	      (begin (GlobalUnlock bits) #f)))))
+    => (lambda (bits/bmi)
+         (define-values (bits bmi) (apply values bits/bmi))
+         (let ([w (BITMAPINFOHEADER-biWidth bmi)]
+               [h (BITMAPINFOHEADER-biHeight bmi)]
+               [psize (PaletteSize bmi)])
+           (define dib (make-bytes (* 4 w h)))
+           (memcpy dib
+                   (ptr-add bmi (+ (BITMAPINFOHEADER-biSize bmi) psize
+                                   (if (= (BITMAPINFOHEADER-biCompression bmi) BI_BITFIELDS)
+                                       12
+                                       0)))
+                   (* 4 w h))
+           (GlobalUnlock bits)
+           (dib-argb->bitmap dib w h)))]
    ;; I think we should be able to use CF_BITMAP always, but
    ;; it doesn't work right under Windows XP with a particular 
    ;; image created by copying in Firefox. So, we do things the

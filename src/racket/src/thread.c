@@ -103,6 +103,7 @@ THREAD_LOCAL_DECL(static int swap_no_setjmp = 0);
 THREAD_LOCAL_DECL(static int thread_swap_count);
 THREAD_LOCAL_DECL(int scheme_did_gc_count);
 THREAD_LOCAL_DECL(static intptr_t process_time_at_swap);
+THREAD_LOCAL_DECL(static intptr_t process_time_skips);
 
 THREAD_LOCAL_DECL(static intptr_t max_gc_pre_used_bytes);
 #ifdef MZ_PRECISE_GC
@@ -125,6 +126,8 @@ THREAD_LOCAL_DECL(static Scheme_Hash_Table *limited_custodians = NULL);
 READ_ONLY static Scheme_Object *initial_inspector;
 
 THREAD_LOCAL_DECL(static Scheme_Plumber *initial_plumber);
+
+THREAD_LOCAL_DECL(static Scheme_Hash_Table *late_will_executors_with_pending = NULL);
 
 THREAD_LOCAL_DECL(Scheme_Config *initial_config);
 
@@ -2737,7 +2740,7 @@ Scheme_Object **scheme_alloc_runstack(intptr_t len)
 #ifdef MZ_PRECISE_GC
   intptr_t sz;
   void **p;
-  sz = sizeof(Scheme_Object*) * (len + 5);
+  sz = sizeof(Scheme_Object*) * (len + RUNSTACK_HEADER_FIELDS);
   p = (void **)GC_malloc_tagged_allow_interior(sz);
   *(Scheme_Type *)(void *)p = scheme_rt_runstack;
   ((intptr_t *)(void *)p)[1] = gcBYTES_TO_WORDS(sz);
@@ -2745,7 +2748,7 @@ Scheme_Object **scheme_alloc_runstack(intptr_t len)
   ((intptr_t *)(void *)p)[3] = len;
 # define MZ_RUNSTACK_OVERFLOW_CANARY 0xFF77FF77
   ((intptr_t *)(void *)p)[4] = MZ_RUNSTACK_OVERFLOW_CANARY;
-  return (Scheme_Object **)(p + 5);
+  return (Scheme_Object **)(p + RUNSTACK_HEADER_FIELDS);
 #else
   return (Scheme_Object **)scheme_malloc_allow_interior(sizeof(Scheme_Object*) * len);
 #endif
@@ -2985,11 +2988,12 @@ static void do_swap_thread()
   } else {
     Scheme_Thread *new_thread = swap_target;
 
-    {
+    if ((!scheme_fuel_counter) || (++process_time_skips >= 100)) {
       intptr_t cpm;
       cpm = scheme_get_process_milliseconds();
       scheme_current_thread->accum_process_msec += (cpm - scheme_current_thread->current_start_process_msec);
       process_time_at_swap = cpm;
+      process_time_skips = 0;
     }
 
     swap_target = NULL;
@@ -8643,7 +8647,7 @@ typedef struct WillExecutor {
   Scheme_Object so;
   Scheme_Object *sema;
   ActiveWill *first, *last;
-  int is_stubborn;
+  int is_late;
 } WillExecutor;
 
 static void activate_will(void *o, void *data) 
@@ -8674,6 +8678,16 @@ static void activate_will(void *o, void *data)
       w->first = a;
     w->last = a;
     scheme_post_sema(w->sema);
+
+    if (w->is_late) {
+      /* Ensure that a late will executor stays live in this place
+         as long as there are wills to execute. */
+      if (!late_will_executors_with_pending) {
+        REGISTER_SO(late_will_executors_with_pending);
+        late_will_executors_with_pending = scheme_make_hash_table(SCHEME_hash_ptr);
+      }
+      scheme_hash_set(late_will_executors_with_pending, (Scheme_Object *)w, scheme_true);
+    }
   }
 }
 
@@ -8684,8 +8698,11 @@ static Scheme_Object *do_next_will(WillExecutor *w)
 
   a = w->first;
   w->first = a->next;
-  if (!w->first)
+  if (!w->first) {
     w->last = NULL;
+    if (w->is_late)
+      scheme_hash_set(late_will_executors_with_pending, (Scheme_Object *)w, NULL);
+  }
   
   o[0] = a->o;
   a->o = NULL;
@@ -8705,17 +8722,17 @@ static Scheme_Object *make_will_executor(int argc, Scheme_Object **argv)
   w->first = NULL;
   w->last = NULL;
   w->sema = sema;
-  w->is_stubborn = 0;
+  w->is_late = 0;
 
   return (Scheme_Object *)w;
 }
 
-Scheme_Object *scheme_make_stubborn_will_executor()
+Scheme_Object *scheme_make_late_will_executor()
 {
   WillExecutor *w;
 
   w = (WillExecutor *)make_will_executor(0, NULL);
-  w->is_stubborn = 1;
+  w->is_late = 1;
 
   return (Scheme_Object *)w;
 }
@@ -8735,7 +8752,7 @@ static Scheme_Object *register_will(int argc, Scheme_Object **argv)
     scheme_wrong_contract("will-register", "will-executor?", 0, argc, argv);
   scheme_check_proc_arity("will-register", 1, 2, argc, argv);
 
-  if (((WillExecutor *)argv[0])->is_stubborn) {
+  if (((WillExecutor *)argv[0])->is_late) {
     e = scheme_make_pair(argv[0], argv[2]);
     scheme_add_finalizer(argv[1], activate_will, e);
   } else {
@@ -9076,7 +9093,7 @@ static void prepare_thread_for_GC(Scheme_Object *t)
       Scheme_Object **rs_start;
 
       /* If there's a meta-prompt, we can also zero out past the unused part */
-      if (p->meta_prompt && (p->meta_prompt->runstack_boundary_start == p->runstack_start)) {
+      if (p->meta_prompt && (scheme_prompt_runstack_boundary_start(p->meta_prompt) == p->runstack_start)) {
         rs_end = p->meta_prompt->runstack_boundary_offset;
       } else {
         rs_end = p->runstack_size;
@@ -9098,7 +9115,7 @@ static void prepare_thread_for_GC(Scheme_Object *t)
       for (saved = p->runstack_saved; saved; saved = saved->prev) {
 	RUNSTACK_TUNE( size += saved->runstack_size; );
 
-        if (p->meta_prompt && (p->meta_prompt->runstack_boundary_start == saved->runstack_start)) {
+        if (p->meta_prompt && (scheme_prompt_runstack_boundary_start(p->meta_prompt) == saved->runstack_start)) {
           rs_end = p->meta_prompt->runstack_boundary_offset;
         } else {
           rs_end = saved->runstack_size;

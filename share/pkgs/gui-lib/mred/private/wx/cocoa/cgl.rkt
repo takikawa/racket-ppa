@@ -127,6 +127,9 @@
 (define kCGLPFAOpenGLProfile         99)
 (define kCGLPFAVirtualScreenCount   128)
 
+(define kCGLOGLPVersion_Legacy #x1000)
+(define kCGLOGLPVersion_3_2_Core #x3200)
+
 (define dummy-cgl #f)
 (define current-cgl #f)
 
@@ -171,7 +174,7 @@
         (define height h)
 
         (define bstr (make-bytes (* w h 4)))
-        (define row-bstr (make-bytes (* w w)))
+        (define row-bstr (make-bytes (* w 4)))
 
         (define touched (box #f))
         
@@ -209,7 +212,7 @@
             ;; flip upside-down
             (for ([i (in-range (quotient height 2))])
               (define above-row (ptr-add bstr (* 4 i width)))
-              (define below-row (ptr-add bstr (* 4 (- height i) width)))
+              (define below-row (ptr-add bstr (* 4 (- height i 1) width)))
               (memcpy row-bstr above-row (* 4 width))
               (memcpy above-row below-row (* 4 width))
               (memcpy below-row row-bstr (* 4 width)))
@@ -227,6 +230,12 @@
          [context-handle (if share-context (send share-context get-handle) #f)]
          [fmt (CGLChoosePixelFormat
                (append
+                (if (version-10.7-or-later?)
+                    (list kCGLPFAOpenGLProfile
+                          (if (send conf get-legacy?)
+                              kCGLOGLPVersion_Legacy
+                              kCGLOGLPVersion_3_2_Core))
+                    null)
                 (list kCGLPFASampleAlpha
                       kCGLPFAColorSize 32)
                 (if (version-10.7-or-later?)

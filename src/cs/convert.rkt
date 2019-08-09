@@ -3,12 +3,16 @@
          racket/pretty
          racket/match
          racket/file
+         racket/fixnum
+         racket/flonum
+         racket/unsafe/ops
          racket/extflonum
          racket/include
          "../schemify/schemify.rkt"
          "../schemify/serialize.rkt"
          "../schemify/known.rkt"
-         "../schemify/lift.rkt")
+         "../schemify/lift.rkt"
+         "../schemify/wrap.rkt")
 
 (define skip-export? #f)
 (define for-cify? #f)
@@ -112,6 +116,24 @@
     (include "primitive/internal.ss")
     knowns))
 
+(define primitives
+  (let ([ns (make-base-namespace)])
+    (namespace-attach-module (current-namespace) 'racket/fixnum ns)
+    (namespace-require 'racket/fixnum ns)
+    (namespace-attach-module (current-namespace) 'racket/flonum ns)
+    (namespace-require 'racket/flonum ns)
+    (namespace-attach-module (current-namespace) 'racket/unsafe/ops ns)
+    (namespace-require 'racket/unsafe/ops ns)
+    (define primitives (make-hasheq))
+    (for ([s (in-list (namespace-mapped-symbols ns))])
+      (define v (namespace-variable-value s
+                                          #t
+                                          (lambda () #f)
+                                          ns))
+      (when v
+        (hash-set! primitives s v)))
+    primitives))
+
 ;; Convert:
 (define schemified-body
   (let ()
@@ -124,9 +146,9 @@
     (printf "Schemify...\n")
     (define body
       (time
-       (schemify-body bodys/constants-lifted prim-knowns #hasheq() #hasheq() for-cify? unsafe-mode? #t)))
+       (schemify-body bodys/constants-lifted prim-knowns primitives #hasheq() #hasheq() for-cify? unsafe-mode? #t)))
     (printf "Lift...\n")
-    ;; Lift functions to aviod closure creation:
+    ;; Lift functions to avoid closure creation:
     (define lifted-body
       (time
        (lift-in-schemified-body body)))
@@ -208,6 +230,13 @@
 ;; in general.
 (define (rename-functions e)
   (cond
+    [(wrap? e)
+     (cond
+       [(wrap-property e 'inferred-name)
+        => (lambda (name)
+             `(#%name ,name ,(rename-functions (unwrap e))))]
+       [else
+        (rename-functions (unwrap e))])]
     [(not (pair? e)) e]
     [else
      (define (begin-name e)

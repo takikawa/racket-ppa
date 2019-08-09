@@ -237,6 +237,7 @@ typedef struct Thread_Local_Variables {
   struct Scheme_Thread_Set *scheme_thread_set_top_;
   struct Scheme_Current_LWC *scheme_current_lwc_;
   intptr_t process_time_at_swap_;
+  intptr_t process_time_skips_;
   int num_running_threads_;
   int swap_no_setjmp_;
   int thread_swap_count_;
@@ -255,6 +256,7 @@ typedef struct Thread_Local_Variables {
   struct Scheme_Config *initial_config_;
   struct Scheme_Thread *swap_target_;
   struct Scheme_Object *scheduled_kills_;
+  struct Scheme_Hash_Table *late_will_executors_with_pending_;
   int do_atomic_;
   int missed_context_switch_;
   int all_breaks_disabled_;
@@ -622,6 +624,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define swap_no_setjmp XOA (scheme_get_thread_local_variables()->swap_no_setjmp_)
 #define thread_swap_count XOA (scheme_get_thread_local_variables()->thread_swap_count_)
 #define process_time_at_swap XOA (scheme_get_thread_local_variables()->process_time_at_swap_)
+#define process_time_skips XOA (scheme_get_thread_local_variables()->process_time_skips_)
 #define scheme_did_gc_count XOA (scheme_get_thread_local_variables()->scheme_did_gc_count_)
 #define scheme_future_state XOA (scheme_get_thread_local_variables()->scheme_future_state_)
 #define scheme_future_thread_state XOA (scheme_get_thread_local_variables()->scheme_future_thread_state_)
@@ -638,6 +641,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define initial_config XOA (scheme_get_thread_local_variables()->initial_config_)
 #define swap_target XOA (scheme_get_thread_local_variables()->swap_target_)
 #define scheduled_kills XOA (scheme_get_thread_local_variables()->scheduled_kills_)
+#define late_will_executors_with_pending XOA (scheme_get_thread_local_variables()->late_will_executors_with_pending_)
 #define do_atomic XOA (scheme_get_thread_local_variables()->do_atomic_)
 #define missed_context_switch XOA (scheme_get_thread_local_variables()->missed_context_switch_)
 #define all_breaks_disabled XOA (scheme_get_thread_local_variables()->all_breaks_disabled_)

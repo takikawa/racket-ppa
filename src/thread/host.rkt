@@ -29,11 +29,11 @@
         unsafe-place-local-ref
         unsafe-place-local-set!
         unsafe-root-continuation-prompt-tag
-        break-enabled-key)
+        break-enabled-key
+        engine-block)
 
 (bounce #%engine
         make-engine
-        engine-block
         engine-timeout
         engine-return
         current-engine-state
@@ -44,7 +44,7 @@
 
         [poll-will-executors host:poll-will-executors]
         [make-will-executor host:make-will-executor]
-        [make-stubborn-will-executor host:make-stubborn-will-executor]
+        [make-late-will-executor host:make-late-will-executor]
         [will-executor? host:will-executor?]
         [will-register host:will-register]
         [will-try-execute host:will-try-execute]
@@ -93,4 +93,6 @@
         [make-mutex host:make-mutex]
         [mutex-acquire host:mutex-acquire]
         [mutex-release host:mutex-release]
-        threaded?)
+        threaded?
+
+        continuation-current-primitive)

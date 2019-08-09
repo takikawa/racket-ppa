@@ -1,5 +1,7 @@
 #lang racket/gui
 
+(provide world% aworld%)
+
 (require "check-aux.rkt"
          "timer.rkt"
          "last.rkt"
@@ -7,6 +9,7 @@
          "stop.rkt"
          "universe-image.rkt"
          "pad.rkt"
+         "logging-gui.rkt"
          (only-in 2htdp/image scale overlay/align rotate empty-image)
          htdp/error
          mrlib/include-bitmap
@@ -14,8 +17,6 @@
          (only-in mrlib/image-core definitely-same-image?)
          string-constants
          mrlib/gif)
-
-(provide world% aworld%)
 
 ;                                     
 ;                                     
@@ -77,12 +78,12 @@
        [display-info  (if (cons? display-mode) (second display-mode) (lambda (w width height) w))])
       
       ;; -----------------------------------------------------------------------
-      (field
-       [to-draw on-draw]
-       [world
-        (new checked-cell% [value0 world0] [ok? check-with]
-             [display (and state (or name "your world program's state"))])])
-      
+      (define (mk-lbl x)
+        (and state (string-append (or name "your world program") "'s " x)))
+
+      (field [to-draw on-draw]
+             [gui   (new logging-gui% [label (mk-lbl "event log")])]
+             [world (new checked-cell% [value0 world0] [ok? check-with] [display (mk-lbl "state")])])
       
       ;; -----------------------------------------------------------------------
       (field [*out* #f] ;; (U #f OutputPort), where to send messages to 
@@ -303,8 +304,8 @@
        (pad     on-pad)
        (game-pad-image #f)
        (release (if on-release on-release (lambda (w ke) w)))
-       (mouse  on-mouse)
-       (rec    on-receive))
+       (mouse   on-mouse)
+       (receive on-receive))
       
       (define drawing #f) ;; Boolean; is a draw callback scheduled?
       (define (set-draw#!) 
@@ -329,8 +330,16 @@
                   (collect-garbage 'incremental)
                   (define H (handler #t))
                   (with-handlers ([exn? H])
-                    ; (define tag (object-name transform))
-                    (define nw (transform (send world get) arg ...))
+		    (define ws (send world get))
+                    (define nw (transform ws arg ...))
+
+		    ;; log events:
+		    (unless (eq? 'pub 'private)
+		      (define tg (symbol->string 'transform))
+		      (define e* (string-append tg " event: ~a " (begin arg "~a ") ...))
+		      (send gui log e* ws arg ...)
+		      (send gui log "new state: ~a" nw))
+
                     (define (d) 
                       (with-handlers ((exn? H))
                         (pdraw))
@@ -374,12 +383,13 @@
                          [stop? (wrap-up 'name)])
                        changed-world?]))))))]))
 
-      ;; tick, tock : deal with a tick event for this world 
-      (def/cback pubment (ptock) (lambda (w) (pptock w)) (name-of-tick-handler))
+      ;; tick, tock : deal with a tick event for this world
+      (define (clock w) (pptock w))
       (define/public (pptock w) (void))
-      (define/public (name-of-tick-handler)
-        "the on-tick handler")
+      (define/public (name-of-tick-handler) "the on-tick handler")
       
+      (def/cback pubment (ptock) clock (name-of-tick-handler))
+
       ;; key events 
       (def/cback pubment (pkey ke) key)
       
@@ -393,7 +403,7 @@
       (def/cback pubment (pmouse x y me) mouse)
       
       ;; receive revents 
-      (def/cback pubment (prec msg) rec)
+      (def/cback pubment (prec msg) receive)
 
       (def/cback private (pdisplay-info width height) display-info)
       
@@ -453,6 +463,7 @@
         ;; incremental mode:
         (collect-garbage)
         (collect-garbage 'incremental)
+        (and state (send gui show #t))
         (with-handlers ([exn? (handler #t)])
           (when width ;; and height
             (check-scene-dimensions "your to-draw clause" width height))

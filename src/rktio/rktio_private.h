@@ -68,6 +68,9 @@ struct rktio_t {
   /* A single fdset that can be reused for immediate actions: */
   struct rktio_poll_set_t *rktio_global_poll_set;
 #endif
+#ifdef RKTIO_GROWABLE_FDSET
+  int max_fd_so_far;
+#endif
 
 #if defined(RKTIO_SYSTEM_WINDOWS) || defined(RKTIO_USE_PTHREADS)
   int ghbn_started, ghbn_run;
@@ -164,7 +167,12 @@ int rktio_fdisset(rktio_poll_set_t *fd, intptr_t n);
 # define RKTIO_FD_ISSET(n, p) rktio_fdisset(p, n)
 
 # if !defined(HAVE_POLL_SYSCALL) && !defined(RKTIO_SYSTEM_WINDOWS)
-#  define RKTIO_FDS(p) ((fd_set *)p)
+#  ifdef RKTIO_GROWABLE_FDSET
+#   define RKTIO_FDS(p) ((fd_set *)rktio_resolve_fds(p))
+void *rktio_resolve_fds(rktio_poll_set_t *fd);
+#  else
+#   define RKTIO_FDS(p) ((fd_set *)p)
+#  endif
 # endif
 
 #else
@@ -325,7 +333,8 @@ void *rktio_get_proc_address(HANDLE m, rktio_const_string_t name);
 #ifdef RKTIO_SYSTEM_UNIX
 int rktio_reliably_close_err(intptr_t s);
 void rktio_reliably_close(intptr_t s);
-void rktio_close_fds_after_fork(int skip1, int skip2, int skip3);
+int rktio_close_fds_len();
+void rktio_close_fds_after_fork(int len, int skip1, int skip2, int skip3);
 #endif
 
 int rktio_system_fd_is_terminal(rktio_t *rktio, intptr_t fd);

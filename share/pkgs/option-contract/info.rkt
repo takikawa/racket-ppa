@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define package-content-state (quote (built "7.3"))) (define collection (quote multi)) (define version "1.0") (define deps (quote ("option-contract-lib" "option-contract-doc"))) (define pkg-authors (quote (chrdimo robby)))))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "7.4"))) (define collection (quote multi)) (define version "1.0") (define deps (quote ("option-contract-lib" "option-contract-doc"))) (define pkg-authors (quote (chrdimo robby)))))

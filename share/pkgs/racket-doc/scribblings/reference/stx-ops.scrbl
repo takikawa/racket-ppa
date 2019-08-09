@@ -104,7 +104,11 @@ can be inferred from its lexical context.  If
 @racket[source?] is @racket[#f], then result is a module path index or
 symbol (see @secref["modpathidx"]) or a @tech{resolved module path}; if @racket[source?] is true, the
 result is a path or symbol corresponding to the loaded module's
-source in the sense of @racket[current-module-declare-source].}
+source in the sense of @racket[current-module-declare-source].
+
+Note that @racket[syntax-source-module] does @emph{not} consult the
+source location of @racket[stx]. The result is based on the
+@tech{lexical information} of @racket[stx].}
 
 
 @defproc[(syntax-e [stx syntax?]) any]{
@@ -247,7 +251,12 @@ is a pair, vector, box, immutable @tech{hash table}, or immutable
 @tech{prefab} structure, recursively converted values are not given
 properties. If @racket[ctxt] is @tech{tainted} or
 @tech{armed}, then the resulting syntax object from
-@racket[datum->syntax] is @tech{tainted}.
+@racket[datum->syntax] is @tech{tainted}. The @tech{code inspector}
+of @racket[ctxt], if any, is compared to the code inspector of the
+module for the macro currently being transformed, if any; if both
+inspectors are available and if one is the same as or inferior to the
+other, then the result syntax has the same/inferior inspector,
+otherwise it has no code inspector.
 
 Any of @racket[ctxt], @racket[srcloc], or @racket[prop] can be
 @racket[#f], in which case the resulting syntax has no lexical

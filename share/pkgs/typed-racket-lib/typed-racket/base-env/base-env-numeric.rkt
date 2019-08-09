@@ -451,14 +451,15 @@
      (-NegFl     -NegFlonum     -NegExtFlonum)
      (-NonNegFl  -NonNegFlonum  -NonNegExtFlonum)
      (-NonPosFl  -NonPosFlonum  -NonPosExtFlonum)
-     (-Fl        -Flonum        -ExtFlonum)])
+     (-Fl        -Flonum        -ExtFlonum)
+     (-NonNegSignFl -NonNegSignFlonum -NonNegSignExtFlonum)])
 
 
   (define flabs-type
     (fl-type-lambda
-      (cl->* (-> -FlZero -FlZero)
+      (cl->* (-> -FlZero (Un -FlPosZero -FlonumNan))
              (-> (Un -PosFl -NegFl) -PosFl)
-             (-> -Fl -NonNegFl))))
+             (-> -Fl -NonNegSignFl))))
   (define fl+-type
     (fl-type-lambda
       (from-cases (map (lambda (t) (commutative-binop t -FlZero t))
@@ -741,6 +742,7 @@
 [exact? (make-pred-ty -ExactNumber)]
 [inexact? (make-pred-ty (Un -InexactReal -InexactImaginary -InexactComplex))]
 [fixnum? (make-pred-ty -Fixnum)]
+[fixnum-for-every-system? (asym-pred Univ B (-PS (-is-type 0 -Fixnum) -tt))]
 [index? (make-pred-ty -Index)]
 [positive? (-> -Real B : (-PS (-is-type 0 -PosReal) (-is-type 0 -NonPosReal)))]
 [negative? (-> -Real B : (-PS (-is-type 0 -NegReal) (-is-type 0 -NonNegReal)))]
@@ -1621,9 +1623,10 @@
              (-PosRat -Int . -> . -PosRat)
              (-NonNegRat -Int . -> . -NonNegRat)
              (-Rat -Int . -> . -Rat)
-             (-NonNegFlonum -Flonum . -> . -NonNegFlonum)
-             (-NonNegFlonum -Real . -> . (Un -NonNegFlonum -One))
+             (-NonNegSignFlonum -Flonum . -> . -NonNegFlonum)
              (-PosReal -NonNegFlonum . -> . (Un -NonNegFlonum -One))
+             (-NonNegFlonum -Flonum . -> . -Flonum)
+             (-NonNegFlonum -Real . -> . (Un -NonNegFlonum -One))
              ;; even integer exponents can give complex results
              ;; too large exponents turn into infinities, and (expt -inf.0 -inf.0) => nan.0+nan.0i
              ;; so no narrower cases for those. fixnums are ok, though
