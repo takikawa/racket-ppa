@@ -9,6 +9,22 @@
 
 The @web-server implements many HTTP libraries that are provided by this module.
 
+@;
+@;                         ;;            ;;
+@;                                       ;;
+@;   ;; ;  ;;   ; ;; ;;;   ;; ; ;;;   ;;;;;  ;;   ;; ;
+@;   ;;;  ;  ;  ;; ;;  ;   ;; ;;  ;  ;   ;; ;  ;  ;;;
+@;   ;;   ;  ;  ;; ;;  ;;  ;; ;;  ;; ;   ;; ;  ;  ;;
+@;   ;;  ;;;;;; ;; ;;  ;;  ;; ;;  ;;;;   ;;;;;;;; ;;
+@;   ;;   ;     ;; ;;  ;;  ;; ;;  ;; ;   ;; ;     ;;
+@;   ;;   ;     ;; ;;  ;;  ;; ;;  ;; ;   ;; ;     ;;
+@;   ;;    ;;;  ;; ;;  ;;  ;; ;;  ;;  ;;; ;  ;;;  ;;
+@;
+@;
+@;  Please update typed/web-server/http when you update
+@;  web-server/http. See https://github.com/racket/typed-racket.
+@;
+
 @; ------------------------------------------------------------
 @section[#:tag "request-structs"]{Requests}
 @(require (for-label web-server/http/request-structs
@@ -617,7 +633,7 @@ You can also generate random bytes using something like OpenSSL or @tt{/dev/rand
 
   @history[#:changed "1.3"
            @elem{Added support for @rfc6265 via
-              @racketmodname[net/cookies/client].}]
+              @racketmodname[net/cookies/common].}]
  }
 
  Examples:

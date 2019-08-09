@@ -54,7 +54,6 @@
                        [else (fx+ 1 (loop (cdr argss)))]))])
            (#2%apply #2%apply (extract-procedure proc len) argss)))]))
 
-;; See copy in "expander.sls"
 (define-syntax (|#%app| stx)
   (syntax-case stx ()
     [(_ rator rand ...)
@@ -72,10 +71,11 @@
            receiver
            (lambda args (apply receiver args)))))))
 
-(define (extract-procedure f n-args)
-  (cond
-   [(#%procedure? f) f]
-   [else (slow-extract-procedure f n-args)]))
+(define-syntax-rule (extract-procedure f n-args)
+  (let ([tmp f])
+    (if (#%procedure? tmp)
+        tmp
+        (slow-extract-procedure tmp n-args))))
 
 (define (slow-extract-procedure f n-args)
   (pariah ; => don't inline enclosing procedure
@@ -891,7 +891,8 @@
                                                (unsafe-struct*-ref s (+ p (position-based-accessor-offset pba))))
                                              (position-based-accessor-rtd pba)
                                              p
-                                             s)]
+                                             s
+                                             #f #f)]
                            [else (error 'struct-ref "bad access")])))
 
   (struct-property-set! prop:procedure
@@ -915,7 +916,8 @@
                                                 p
                                                 abs-pos
                                                 s
-                                                v))]
+                                                v
+                                                #f #f))]
                            [else
                             (error 'struct-set! "bad assignment")])))
 

@@ -6,6 +6,7 @@
          "../host/thread.rkt"
          "../host/pthread.rkt"
          "../sandman/main.rkt"
+         "../sandman/ltps.rkt"
          "../file/error.rkt"
          "port.rkt"
          "input-port.rkt"
@@ -32,6 +33,7 @@
 (define (fd-close fd fd-refcount)
   (set-box! fd-refcount (sub1 (unbox fd-refcount)))
   (when (zero? (unbox fd-refcount))
+    (fd-semaphore-update! fd 'remove)
     (define v (rktio_close rktio fd))
     (when (rktio-error? v)
       (end-atomic)
@@ -59,15 +61,15 @@
         (end-atomic)
         (send fd-input-port this raise-read-error n)]
        [(eqv? n RKTIO_READ_EOF) eof]
-       [(eqv? n 0) (wrap-evt (fd-evt fd RKTIO_POLL_READ this)
-                             (lambda (v) 0))]
+       [(eqv? n 0) (or (fd-semaphore-update! fd 'read)
+                       (fd-evt fd RKTIO_POLL_READ this))]
        [else n]))]
 
   [close
    (lambda ()
      (send fd-input-port this on-close)
      (fd-close fd fd-refcount)
-     (unsafe-custodian-unregister fd custodian-reference)
+     (unsafe-custodian-unregister this custodian-reference)
      (close-peek-buffer))]
 
   [file-position
@@ -250,7 +252,7 @@
        (plumber-flush-handle-remove! flush-handle)
        (set! bstr #f)
        (fd-close fd fd-refcount)
-       (unsafe-custodian-unregister fd custodian-reference)))]
+       (unsafe-custodian-unregister this custodian-reference)))]
 
   ;; in atomic mode
   [file-position
@@ -377,6 +379,9 @@
 
 ;; ----------------------------------------
 
+;; The ready value for an `fd-evt` is 0, so it can be used directly
+;; for an input port
+
 (struct fd-evt (fd mode [closed #:mutable])
   #:property
   prop:evt
@@ -386,7 +391,7 @@
    (lambda (fde ctx)
      (cond
        [(core-port-closed? (fd-evt-closed fde))
-        (values (list fde) #f)]
+        (values '(0) #f)]
        [else
         (define mode (fd-evt-mode fde))
         (define ready?
@@ -399,7 +404,17 @@
                       RKTIO_POLL_READY))))
         (cond
           [ready?
-           (values (list fde) #f)]
+           (values '(0) #f)]
+          ;; If the called is going to block (i.e., not just polling), then
+          ;; try to get a semaphore to represent the file descriptor, because
+          ;; that can be more scalable (especially for lots of TCP sockets)
+          [(and (not (sandman-poll-ctx-poll? ctx))
+                (fd-semaphore-update! (fd-evt-fd fde)
+                                      (if (eqv? RKTIO_POLL_READ (bitwise-and mode RKTIO_POLL_READ))
+                                          'read
+                                          'write)))
+           => (lambda (s) ; got a semaphore
+                (values #f (wrap-evt s (lambda (s) 0))))]
           [else
            ;; If `sched-info` in `poll-ctx` is not #f, then we can register this file
            ;; descriptor so that if no thread is able to make progress,
@@ -420,11 +435,14 @@
 
 (define (register-fd-close custodian fd fd-refcount flush-handle port)
   (unsafe-custodian-register custodian
-                             fd
+                             port
                              ;; in atomic mode
-                             (lambda (fd)
+                             (lambda (port)
                                (when flush-handle
                                  (plumber-flush-handle-remove! flush-handle))
+                               (if (input-port? port)
+                                   (send fd-input-port port on-close)
+                                   (send fd-output-port port on-close))
                                (fd-close fd fd-refcount)
                                (set-closed-state! port))
                              #f

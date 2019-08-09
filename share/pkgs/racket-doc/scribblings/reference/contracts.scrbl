@@ -1091,6 +1091,33 @@ This function is a holdover from before @tech{flat contracts} could be used
 directly as predicates. It exists today for backwards compatibility.
 }
 
+@defproc[(property/c [accessor (-> any/c any/c)]
+                     [ctc flat-contract?]
+                     [#:name name any/c (object-name accessor)])
+         flat-contract?]{
+
+Constructs a @tech{flat contract} that checks that the first-order property
+accessed by @racket[accessor] satisfies @racket[ctc]. The resulting contract
+is equivalent to
+
+@racketblock[(lambda (v) (ctc (accessor v)))]
+
+except that more information is included in error messages produced by
+violations of the contract. The @racket[name] argument is used to describe the
+property being checked in error messages.
+
+@examples[#:eval (contract-eval) #:once
+  (define/contract (sum-triple lst)
+    (-> (and/c (listof number?)
+               (property/c length (=/c 3)))
+        number?)
+    (+ (first lst) (second lst) (third lst)))
+  (eval:check (sum-triple '(1 2 3)) 6)
+  (eval:error (sum-triple '(1 2)))]
+
+@history[#:added "7.3.0.11"]
+}
+
 @defproc[(suggest/c [c contract?]
                     [field string?]
                     [message string?]) contract?]{
@@ -1784,8 +1811,11 @@ earlier fields.}}
 
 @defform/subs[
 #:literals (struct rename)
-(contract-out p/c-item ...)
-([p/c-item
+(contract-out unprotected-submodule contract-out-item ...)
+([unprotected-submodule
+  (code:line)
+  (code:line #:unprotected-submodule submodule-name)]
+ [contract-out-item
   (struct id/super ((id contract-expr) ...)
     struct-option)
   (rename orig-id id contract-expr)
@@ -1852,6 +1882,12 @@ the values they accept and ensure that the exported functions are treated
 parametrically. See @racket[new-∃/c] and @racket[new-∀/c] for details
 on how the clauses hide the values.
 
+If @racket[#:unprotected-submodule] appears, the identifier
+that follows it is used as the name of a submodule that
+@racket[contract-out] generates. The submodule exports all
+of the names in the @racket[contract-out], but without
+contracts.
+
 The implementation of @racket[contract-out] uses
 @racket[syntax-property] to attach properties to the code it generates
 that records the syntax of the contracts in the fully expanded program.
@@ -1859,6 +1895,8 @@ Specifically, the symbol @indexed-racket['provide/contract-original-contract]
 is bound to vectors of two elements, the exported identifier and a
 syntax object for the expression that produces the contract controlling
 the export.
+
+@history[#:changed "7.3.0.3" @list{Added @racket[#:unprotected-submodule].}]
 }
 
 @defform[(recontract-out id ...)]{
@@ -1895,9 +1933,9 @@ the export.
    the private module.                              
 }
 
-@defform[(provide/contract p/c-item ...)]{
+@defform[(provide/contract unprotected-submodule contract-out-item ...)]{
 
-A legacy shorthand for @racket[(provide (contract-out p/c-item ...))],
+A legacy shorthand for @racket[(provide (contract-out unprotected-submodule contract-out-item ...))],
 except that a @racket[_contract-expr] within @racket[provide/contract]
 is evaluated at the position of the @racket[provide/contract] form
 instead of at the end of the enclosing module.}

@@ -51,21 +51,32 @@ To build Racket-on-Chez on Unix variants or Mac OS:
  * ... in addition to the traditional variant of Racket: supply
    `--enable-cs` or `--enable-csdefault` to `configure`.
 
-   The generated Racket-on-Chez executables will have a "cs" suffix.
+   The generated Racket-on-Chez executables will have a "cs" suffix
+   for `--enable-cs`, and it will not have a "cs" suffix for
+   `--enable-csdefault`. Also, plain `make` will still build the
+   traditional Racket implementation with `--enable-cs`; use `make cs`
+   to build and `make install-cs` to install. With
+   `--enable-csdefault`, plain `make` and `make install` will build
+   and install Racket-on-Chez.
 
  * ... by itself: supply `--enable-csonly` to `configure`.
  
    The generated Racket-on-Chez executables will *not* have a "cs"
-   suffix.
+   suffix. Unlike `--enable-csdefault`, you must specify an existing
+   Racket using `--enable-racket=...`.
 
-Chez Scheme is not included with Racket sources, but building
-Racket-on-Chez requires either a "ChezScheme" build checkout within
-the build directory or at at an alternate location specified by the
-`--enable-scheme=...` argument to `configure`.
+Chez Scheme is included in a Racket source distribution and
+`configure` detects that source, so no separate download or Git
+checkout is needed in that case.
 
-For now, use the fork of Chez Scheme at
+Chez Scheme is not included in the Racket Git repository. Building
+Racket-on-Chez from a Git checkout requires a "ChezScheme" build
+checkout within the build directory or at at an alternate location
+specified by the `--enable-scheme=...` argument to `configure`.
 
-    https://github.com/mflatt/ChezScheme
+Use the patched version of Chez Scheme at
+
+    https://github.com/racket/ChezScheme
 
 We hope to eventually return to the current development version from
 
@@ -158,8 +169,10 @@ Detailed instructions:
     current directory, "[here]" is possibly unnecessary, or possibly
     just "./", depending on your shell and PATH setting.
 
-    If the `--prefix` flag is omitted, the executables are built for
-    an in-place installation (i.e., the parent of the directory
+    If the `--prefix` flag is omitted and if directories like `bindir`
+    and `libdir` appear to be the default paths or the
+    `--enable-origtree` flag is specified, then executables are built
+    for an in-place installation (i.e., the parent of the directory
     containing this README will be used directly). Unless
     `--enable-shared` is used, the "racket" directory can be moved
     later; most system administrators would recommend that you use

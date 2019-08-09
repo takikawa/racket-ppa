@@ -433,11 +433,11 @@
 
 (define engine-tag (default-continuation-prompt-tag))
 
-(define e (make-engine (lambda () 'done) engine-tag #f #f))
+(define e (make-engine (lambda () 'done) engine-tag #f #f #f))
 (check (cdr (e 100 void list vector))
        '(done))
 
-(define e-forever (make-engine (lambda () (let loop () (loop))) engine-tag #f #f))
+(define e-forever (make-engine (lambda () (let loop () (loop))) engine-tag #f #f #f))
 (check (vector? (e-forever 10 void list vector))
        #t)
 
@@ -450,14 +450,14 @@
                                [else
                                 (engine-block)
                                 (loop (sub1 n))])))
-                          engine-tag
+                          engine-tag #f
                           #f #f))
 (check (let ([started 0])
          (let loop ([e e-10] [n 0])
            (e 100
               (lambda () (set! started (add1 started)))
               (lambda (remain a b c) (list a b c n started))
-              (lambda (e)
+              (lambda (e remain)
                 (loop e (add1 n))))))
        '(1 2 3 10 11))
 
@@ -475,13 +475,13 @@
                                      (lambda () (set! pre (add1 pre)))
                                      (lambda () (loop (sub1 n)))
                                      (lambda () (set! post (add1 post))))])))
-                              engine-tag
+                              engine-tag #f
                               #f #f)])
     (check (let loop ([e e-10/dw] [n 0])
              (e 200
                 void
                 (lambda (remain a b c pre t-post) (list a b c pre t-post post n))
-                (lambda (e)
+                (lambda (e remain)
                   (loop e (add1 n)))))
            '(1 2 3 10 0 10 10))))
 
@@ -497,19 +497,19 @@
     (thread-cell-set! pt (add1 p-old))
     (list u-old
           p-old
-          (make-engine gen engine-tag #f #f)
+          (make-engine gen engine-tag #f #f #f)
           (thread-cell-ref ut)
           (thread-cell-ref pt)))
-  (define l1 ((make-engine gen engine-tag #f #f)
+  (define l1 ((make-engine gen engine-tag #f #f #f)
               100
               void
               (lambda (remain l) l)
-              (lambda (e) (error 'engine "oops"))))
+              (lambda (e remain) (error 'engine "oops"))))
   (define l2 ((list-ref l1 2)
               100
               void
               (lambda (remain l) l)
-              (lambda (e) (error 'engine "oops"))))
+              (lambda (e remain) (error 'engine "oops"))))
   (check (list-ref l1 0) 1)
   (check (list-ref l1 1) 100)
   (check (list-ref l1 3) 2)
@@ -526,9 +526,9 @@
 (check (procedure? my-param) #t)
 (let ([e (with-continuation-mark parameterization-key
              (extend-parameterization (continuation-mark-set-first #f parameterization-key) my-param 'set)
-           (make-engine (lambda () (|#%app| my-param)) engine-tag #f #f))])
+           (make-engine (lambda () (|#%app| my-param)) engine-tag #f #f #f))])
   (check (|#%app| my-param) 'init)
-  (check (e 1000 void (lambda (remain v) v) (lambda (e) (error 'engine "oops"))) 'set))
+  (check (e 1000 void (lambda (remain v) v) (lambda (e remain) (error 'engine "oops"))) 'set))
 
 (let ([also-my-param (make-derived-parameter my-param
                                              (lambda (v) (list v))
@@ -622,18 +622,18 @@
                                           (loop (sub1 n)))))
                                   (lambda ()
                                     (set! post (add1 post))))))))
-                          engine-tag
+                          engine-tag #f
                           #f #f))
 
 (check (let ([prefixes 0])
          (let loop ([e e-sw] [i 0])
-           (e 110
+           (e 100
               (lambda () (set! prefixes (add1 prefixes)))
               (lambda (remain v) (list (> i 2)
                                        (= prefixes (add1 i))
                                        (- (car v) i)
                                        (- (cadr v) i)))
-              (lambda (e) (loop e (add1 i))))))
+              (lambda (e remain) (loop e (add1 i))))))
        '(#t #t 1 0))
 
 ;; ----------------------------------------

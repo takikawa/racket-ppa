@@ -103,8 +103,9 @@
 
 (define (install-do-global-print! param default-value)
   (set! do-global-print
-        (lambda (who v o [quote-depth PRINT-MODE/UNQUOTED] [max-length #f])
+        (lambda (who v o [quote-depth-in PRINT-MODE/UNQUOTED] [max-length #f])
           (define global-print (param))
+          (define quote-depth (if (print-as-expression) quote-depth-in WRITE-MODE))
           (cond
             [(eq? global-print default-value)
              (do-print who v o quote-depth max-length)]
@@ -126,8 +127,7 @@
           (void))))
 
 (define/who (newline [o (current-output-port)])
-  (check who output-port? o)
-  (unsafe-write-bytes 'newline #"\n" o)
+  (unsafe-write-bytes 'newline #"\n" (->core-output-port o who))
   (void))
 
 ;; ----------------------------------------

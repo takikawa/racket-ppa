@@ -1211,7 +1211,8 @@
     ((_ ?case:expr (?pattern0 ?body0:expr) (?pattern ?body:expr) ...)
      (let ()
        (define (pattern-variables pat)
-	 (syntax-case pat (empty sdp-cons list quote)
+	 (syntax-case pat (empty sdp-cons list quote ...)
+	   ((... ...) '())
 	   (empty '())
 	   (?var (identifier? #'?var)
 	     (if (eq? (syntax->datum #'?var) '_)
@@ -1256,11 +1257,13 @@
 (define-syntax (match-helper stx)
   (syntax-case stx ()
     ((_ ?id ?pattern0 ?body0 ?nomatch)
-     (syntax-case #'?pattern0 (empty cons list quote)
+     (syntax-case #'?pattern0 (empty cons list quote ...)
        (empty
 	#'(if (null? ?id)
 	      ?body0
 	      ?nomatch))
+       ((... ...)
+	#'?body0)
        (?var (identifier? #'?var)
 	     (if (eq? (syntax->datum #'?var) '_) ; _ is magic
 		 #'?body0

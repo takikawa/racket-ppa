@@ -4,6 +4,7 @@
          "../host/rktio.rkt"
          "../security/main.rkt"
          "../sandman/main.rkt"
+         "../format/main.rkt"
          "port-number.rkt"
          "address.rkt"
          "error.rkt")
@@ -40,6 +41,8 @@
       ;; or might return a listener
       (call-with-resolved-address
        hostname port-no
+       #:family family
+       #:passive? #t
        ;; in atomic mode
        (lambda (addr)
          (cond

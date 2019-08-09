@@ -569,8 +569,14 @@
        (if (and (instrumenting-enabled)
                 (eq? reg
                      (namespace-module-registry (current-namespace)))
-                (equal? phase
-                        (namespace-base-phase (current-namespace)))
+                (or (equal? phase
+                            (namespace-base-phase (current-namespace)))
+                    ;; annotate a module at any phase
+                    (syntax-case e ()
+                      [(mod . _)
+                       (and (identifier? #'mod)
+                            (free-identifier=? #'mod #'module (namespace-base-phase (current-namespace)) phase))]
+                      [_ #f]))
                 (not (compiled-expression? (if (syntax? e)
                                                (syntax-e e)
                                                e))))

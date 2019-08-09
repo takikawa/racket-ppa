@@ -950,11 +950,11 @@
 (define (prune-table! t)
   (let ([ht (weak-equal-hash-keys-ht t)])
     (let-values ([(new-ht count)
-                  (let loop ([ht ht]
+                  (let loop ([new-ht empty-hasheqv]
                              [i (intmap-iterate-first ht)]
                              [count 0])
                     (cond
-                     [(not i) (values ht count)]
+                     [(not i) (values new-ht count)]
                      [else
                       (let-values ([(key l) (intmap-iterate-key+value ht i #f)])
                         (let ([l (let loop ([l l])
@@ -963,8 +963,8 @@
                                     [(bwp-object? (car l)) (loop (cdr l))]
                                     [else (weak/fl-cons (car l) (loop (cdr l)))]))])
                           (loop (if (null? l)
-                                    ht
-                                    (hash-set ht key l))
+                                    new-ht
+                                    (intmap-set new-ht key l))
                                 (intmap-iterate-next ht i)
                                 (+ count (length l)))))]))])
       (set-weak-equal-hash-keys-ht! t new-ht)
@@ -972,18 +972,15 @@
       (set-weak-equal-hash-prune-at! t (max 128 (* 2 count))))))
 
 ;; ----------------------------------------
+;; When `eq?`ness of flonums is not preserved by
+;; the GC, then we need special handling for flonums.
+;; But the GC now does preserve `eq?`ness.
 
 (define (weak/fl-cons key d)
-  ;; Special case for flonums, which are never retained in weak pairs,
-  ;; but we want to treat them like fixnums and other immediates:
-  (if (flonum? key)
-      (cons key d)
-      (weak-cons key d)))
+  (weak-cons key d))
 
 (define (ephemeron/fl-cons key d)
-  (if (flonum? key)
-      (cons key d)
-      (ephemeron-cons key d)))
+  (ephemeron-cons key d))
 
 ;; ----------------------------------------
 
@@ -1064,7 +1061,7 @@
   (impersonate-hash-ref/set 'hash-ref #f
                             (lambda (ht k v) (hash-ref ht k none))
                             (lambda (procs ht k none-v)
-                              ((hash-procs-ref procs) ht k))
+                              (|#%app| (hash-procs-ref procs) ht k))
                             hash-procs-ref
                             ht k none))
 
@@ -1072,7 +1069,7 @@
   (impersonate-hash-ref/set 'hash-set! #t
                             hash-set!
                             (lambda (procs ht k v)
-                              ((hash-procs-set procs) ht k v))
+                              (|#%app| (hash-procs-set procs) ht k v))
                             hash-procs-set
                             ht k v))
 
@@ -1080,7 +1077,7 @@
   (impersonate-hash-ref/set 'hash-set #t
                             hash-set
                             (lambda (procs ht k v)
-                              ((hash-procs-set procs) ht k v))
+                              (|#%app| (hash-procs-set procs) ht k v))
                             hash-procs-set
                             ht k v))
 
@@ -1088,7 +1085,7 @@
   (impersonate-hash-ref/set 'hash-remove! #t
                             (lambda (ht k false-v) (hash-remove! ht k))
                             (lambda (procs ht k false-v)
-                              (values ((hash-procs-remove procs) ht k) #f))
+                              (values (|#%app| (hash-procs-remove procs) ht k) #f))
                             hash-procs-remove
                             ht k #f))
 
@@ -1096,7 +1093,7 @@
   (impersonate-hash-ref/set 'hash-remove #t
                             (lambda (ht k false-v) (hash-remove ht k))
                             (lambda (procs ht k false-v)
-                              (values ((hash-procs-remove procs) ht k) #f))
+                              (values (|#%app| (hash-procs-remove procs) ht k) #f))
                             hash-procs-remove
                             ht k #f))
 
@@ -1172,7 +1169,7 @@
 (define (extend-get-k who get-k procs next-ht chaperone?)
   (lambda (k)
     (let* ([k (get-k k)]
-           [new-k ((hash-procs-equal-key procs) next-ht k)])
+           [new-k (|#%app| (hash-procs-equal-key procs) next-ht k)])
       (unless (or (not chaperone?) (chaperone-of? new-k k))
         (raise-chaperone-error who "key" new-k k))
       new-k)))
@@ -1189,7 +1186,7 @@
         (let ([clear (hash-procs-clear procs)])
           (cond
            [clear
-            (clear next-ht)
+            (|#%app| clear next-ht)
             (if mutable?
                 (loop next-ht)
                 (let ([r (loop next-ht)])
@@ -1268,12 +1265,12 @@
      [(hash-impersonator? ht)
       (let ([procs (hash-impersonator-procs ht)]
             [ht (impersonator-next ht)])
-        ((hash-procs-key procs) ht (loop ht)))]
+        (|#%app| (hash-procs-key procs) ht (loop ht)))]
      [(hash-chaperone? ht)
       (let ([procs (hash-chaperone-procs ht)]
             [ht (impersonator-next ht)])
         (let* ([k (loop ht)]
-               [new-k ((hash-procs-key procs) ht k)])
+               [new-k (|#%app| (hash-procs-key procs) ht k)])
           (unless (chaperone-of? new-k k)
             (raise-chaperone-error who "key" new-k k))
           new-k))]

@@ -109,7 +109,8 @@
   (define-signature autosave-class^
     (autosavable<%>))
   (define-signature autosave^ extends autosave-class^
-    (toc-path
+    (current-toc-path
+     toc-path
      register
      restore-autosave-files/gui))
   
@@ -171,7 +172,8 @@
      set-current-preferred-font-size
      font-size-pref->current-font-size
      set-change-font-size-when-monitors-change?
-     get-change-font-size-when-monitors-change?))
+     get-change-font-size-when-monitors-change?
+     doing-autosave?))
   
   (define-signature pasteboard-class^
     (basic%

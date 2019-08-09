@@ -2338,9 +2338,10 @@ static Scheme_Object **apply_guards(Scheme_Struct_Type *stype, int argc, Scheme_
                                       "calling guard procedure");
             return NULL;
           }
-          if (SAME_OBJ(v, SCHEME_MULTIPLE_VALUES))
-            memcpy(guard_argv, scheme_multiple_array, gcount * sizeof(Scheme_Object *));
-          else
+          if (SAME_OBJ(v, SCHEME_MULTIPLE_VALUES)) {
+            if (gcount)
+              memcpy(guard_argv, scheme_multiple_array, gcount * sizeof(Scheme_Object *));
+          } else
             guard_argv[0] = v;
           guard_argv[gcount] = guard_argv[argc];
         }
@@ -3422,6 +3423,10 @@ intptr_t scheme_get_or_check_structure_shape(Scheme_Object *e, Scheme_Object *ex
                 | ((st->nonfail_constructor
                     && (!expected || (v & STRUCT_PROC_SHAPE_NONFAIL_CONSTR)))
                    ? STRUCT_PROC_SHAPE_NONFAIL_CONSTR
+                   : 0)
+                | ((st->prefab_key
+                    && (!expected || (v & STRUCT_PROC_SHAPE_PREFAB)))
+                   ? STRUCT_PROC_SHAPE_PREFAB
                    : 0));
   } else if (!SCHEME_PRIMP(e)) {
     want_v = -1;

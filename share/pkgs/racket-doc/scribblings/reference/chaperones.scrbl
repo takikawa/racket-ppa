@@ -65,12 +65,20 @@ types and their instances.
 
 @defproc[(impersonator? [v any/c]) boolean?]{
 
-Returns @racket[#t] if @racket[v] is an @tech{impersonator}, @racket[#f] otherwise.
+Returns @racket[#t] if @racket[v] is an @tech{impersonator} created by
+procedures like @racket[impersonate-procedure] or
+@racket[impersonate-struct], @racket[#f] otherwise.
 
 Programs and libraries generally should avoid @racket[impersonator?] and
 treat impersonators the same as non-impersonator values. In rare cases,
 @racket[impersonator?] may be needed to guard against redirection by an
-impersonator of an operation to an arbitrary procedure.}
+impersonator of an operation to an arbitrary procedure.
+
+A limitation of @racket[impersonator?] is that it does @emph{not}
+recognize an @tech{impersonator} that is created by instantiating a
+structure type with the @racket[prop:impersonator-of] property. The
+limitation reflects how those impersonators cannot redirect structure
+access and mutation operations to arbitrary procedures.}
 
 
 @defproc[(chaperone? [v any/c]) boolean?]{
@@ -78,7 +86,9 @@ impersonator of an operation to an arbitrary procedure.}
 Returns @racket[#t] if @racket[v] is a @tech{chaperone}, @racket[#f] otherwise.
 
 Programs and libraries generally should avoid @racket[chaperone?] for
-the same reason that they should avoid @racket[impersonator?].}
+the same reason that they should avoid @racket[impersonator?]. A true
+value for @racket[chaperone?] implies a true value of
+@racket[impersonator?].}
 
 
 @defproc[(impersonator-of? [v1 any/c] [v2 any/c]) boolean?]{
@@ -129,15 +139,19 @@ proceeds by comparing @racket[_v1] and @racket[_v2] recursively (as with
 Indicates whether @racket[v1] can be considered equivalent modulo
 chaperones to @racket[v2].
 
-For values that include no chaperones, @racket[v1] and @racket[v2] can
-be considered chaperones of each other if they are @racket[equal?],
-except that mutable vectors, boxes, strings, byte strings, and mutable
-structures within @racket[v1] and @racket[v2] must be @racket[eq?].
+For values that include no chaperones or other impersonators,
+@racket[v1] and @racket[v2] can be considered chaperones of each other
+if they are @racket[equal?], except that corresponding mutable
+vectors, boxes, strings, byte strings, and mutable structures within
+@racket[v1] and @racket[v2] must be @racket[eq?].
 
-Otherwise, chaperones within @racket[v2] must be intact within
-@racket[v1] analogous to way that @racket[impersonator-of?] requires
-that impersonators are preserved, except that @racket[prop:impersonator-of]
-has no analog for @racket[chaperone-of?].}
+Otherwise, chaperones and other impersonators within @racket[v2] must
+be intact within @racket[v1] analogous to way that
+@racket[impersonator-of?] requires that impersonators are preserved.
+Furthermore, @racket[v1] must not have any non-chaperone impersonators
+whose corresponding value in @racket[v2] is not the same impersonator.
+Note that @racket[chaperone-of?] implies @racket[impersonator-of?],
+but not vice-versa.}
 
 
 @defproc[(impersonator-ephemeron [v any/c]) ephemeron?]{
@@ -474,7 +488,7 @@ applicable and if @racket[clear-proc] is not @racket[#f]) operations. When
 table, the result is an impersonator with the same redirecting procedures. 
 In addition, operations like
 @racket[hash-iterate-key] or @racket[hash-map], which extract
-keys from the table, use @racket[key-proc] to filter keys extracted
+keys from the table, use @racket[key-proc] to replace keys extracted
 from the table. Operations like @racket[hash-iterate-value] or
 @racket[hash-values] implicitly use @racket[hash-ref] and
 therefore redirect through @racket[ref-proc].
@@ -495,7 +509,7 @@ key and value are used with @racket[hash-set!] or @racket[hash-set] on
 the original @racket[hash] to install the value.
 
 The @racket[remove-proc] must accept @racket[hash] and a key passed to
-@racket[hash-remove!] or @racket[hash-remove]; it must produce the a
+@racket[hash-remove!] or @racket[hash-remove]; it must produce a
 replacement for the key, which is used with @racket[hash-remove!] or
 @racket[hash-remove] on the original @racket[hash] to remove any
 mapping using the (impersonator-replaced) key.
@@ -1102,7 +1116,7 @@ Creates a new @tech{impersonator property} and returns three values:
        have a value for the property (i.e. if the corresponding impersonator
        property predicate returns @racket[#f]), then a second optional argument
        to the selector determines its response: the @exnraise[exn:fail:contract]
-       is if a second argument is not provided, the second argument is tail-called
+       if a second argument is not provided, the second argument is tail-called
        with zero arguments if it is a procedure, and the second argument is returned
        otherwise.}
 
