@@ -7,7 +7,7 @@ Build-Depends: cdbs, debhelper (>= 9), patchutils, libffi-dev,
  libfreetype6-dev, libjpeg-dev, libpango1.0-dev, libpng-dev, libssl-dev,
  libxaw7-dev, xbitmaps, libxft-dev, libgl1-mesa-dev | libgl-dev,
  libglu1-mesa-dev | libglu-dev, libx11-dev, libxrender-dev, libcairo2-dev,
- sqlite3
+ sqlite3, uuid-dev
 Vcs-Git: https://github.com/takikawa/racket-ppa
 Vcs-Browser: https://github.com/takikawa/racket-ppa
 Homepage: https://www.racket-lang.org/
