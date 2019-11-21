@@ -114,10 +114,10 @@
                            (get-top-level-window))]
            [else
             (parameterize ([finder:default-filters
-                            '(("Package" "*.zip;*.plt;*.tgz;*.tar")
-                              ("Any" "*.*"))])
+                            `((,(string-constant install-pkg-package) "*.zip;*.plt;*.tgz;*.tar")
+                              (,(string-constant install-pkg-any) "*.*"))])
               (finder:get-file #f (string-constant install-pkg-select-package-file)
-                               #f "bad"
+                               #f (string-constant install-pkg-bad)
                                (get-top-level-window)))]))
         (when f
           (send tf set-value 
@@ -305,7 +305,7 @@
                                                                 #:set #t
                                                                 "default-scope"
                                                                 (~a scope))
-                                            (printf "Default scope successfully changed to ~a"
+                                            (printf "install-pkg-default-scope-changed"
                                                     scope)))
                                          (adjust-all))]))
     (define inferred-scope-msg-parent (new horizontal-panel% 

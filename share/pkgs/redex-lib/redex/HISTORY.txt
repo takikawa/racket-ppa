@@ -1,3 +1,10 @@
+v7.5
+
+  * add modeless judgment forms
+  * relicense under Apache v2 and MIT licenses
+  * add test-match and test-no-match
+  * bug fixes
+
 v7.4
 
   * added default-relation-clause-combine and relation-clause-combine

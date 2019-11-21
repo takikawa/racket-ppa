@@ -4,7 +4,7 @@
 	 signature signature/arbitrary
 	 define-contract contract ; legacy
 	 define/signature define-values/signature
-	 -> mixed one-of predicate combined property list-of nonempty-list-of)
+	 -> mixed one-of enum predicate combined property list-of nonempty-list-of)
 
 (require deinprogramm/signature/signature
 	 deinprogramm/signature/signature-german
@@ -20,7 +20,7 @@
 
 (define-for-syntax (parse-signature name stx)
   (syntax-case* stx
-		(mixed one-of predicate list -> combined property reference at signature list-of nonempty-list-of)
+		(mixed one-of enum predicate list -> combined property reference at signature list-of nonempty-list-of)
 		module-or-top-identifier=?
     ((mixed ?signature ...)
      (with-syntax ((?stx (phase-lift stx))
@@ -31,7 +31,27 @@
        #'(make-mixed-signature '?name
 			      (list ?signature-expr ...)
 			      ?stx)))
+    ; deprecated: Still in DMdA, early SdP
     ((one-of ?exp ...)
+     (with-syntax ((((?temp ?exp) ...) 
+		    (map list
+			 (generate-temporaries #'(?exp ...)) (syntax->list #'(?exp ...))))
+		   (?stx (phase-lift stx))
+		   (?name name))
+       (with-syntax (((?check ...) 
+		      (map (lambda (lis)
+			     (with-syntax (((?temp ?exp) lis))
+			       (with-syntax ((?raise
+					      (syntax/loc 
+					       #'?exp
+					       (error 'signatures "hier keine Signatur zulässig, nur normaler Wert"))))
+				 #'(when (signature? ?temp)
+				     ?raise))))
+			   (syntax->list #'((?temp ?exp) ...)))))
+         #'(let ((?temp ?exp) ...)
+	     ?check ...
+	     (make-case-signature '?name (list ?temp ...) equal? ?stx)))))
+    ((enum ?exp ...)
      (with-syntax ((((?temp ?exp) ...) 
 		    (map list
 			 (generate-temporaries #'(?exp ...)) (syntax->list #'(?exp ...))))
@@ -295,6 +315,7 @@
 (define-syntax -> within-signature-syntax-transformer)
 (define-syntax mixed within-signature-syntax-transformer)
 (define-syntax one-of within-signature-syntax-transformer)
+(define-syntax enum within-signature-syntax-transformer)
 (define-syntax predicate within-signature-syntax-transformer)
 (define-syntax combined within-signature-syntax-transformer)
 (define-syntax property within-signature-syntax-transformer)

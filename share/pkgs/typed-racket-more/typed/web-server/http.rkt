@@ -57,14 +57,14 @@
 (require/typed/provide web-server/http/response-structs
                        [#:struct response
                                  ([code : Natural]
-                                  [message : Bytes]
+                                  [message : Bytes] ;; NOT (Option Bytes)
                                   [seconds : Real]
                                   [mime : (Option Bytes)]
                                   [headers : (Listof Header)]
                                   [output : (-> Output-Port Any)])]
                        [response/full
                         (-> Natural
-                            Bytes
+                            (Option Bytes)
                             Real
                             (Option Bytes)
                             (Listof Header)
@@ -73,12 +73,13 @@
                        [response/output
                         (-> (-> Output-Port Any)
                             [#:code Natural]
-                            [#:message Bytes]
+                            [#:message (Option Bytes)]
                             [#:seconds Real]
                             [#:mime-type (Option Bytes)]
                             [#:headers (Listof Header)]
                             Response)]
-                       [TEXT/HTML-MIME-TYPE Bytes])
+                       [TEXT/HTML-MIME-TYPE Bytes]
+                       [APPLICATION/JSON-MIME-TYPE Bytes])
 
 ;; For backwards compatability:
 ;; these bindings are not and never were
@@ -92,7 +93,9 @@
          (only-in "../net/cookies/common.rkt"
                   cookie-name?
                   cookie-value?
-                  [domain-value? valid-domain?]))
+                  [domain-value? valid-domain?])
+         (only-in "../json.rkt"
+                  JSExpr))
 
 (define-type Cookie-Name String)
 (define-type Cookie-Value String)
@@ -135,7 +138,7 @@
                             [#:extension (Option String)]
                             ;; yes, these are really different
                             ;; than for typed/net/cookies/server
-                            [#:secure? Any]	 	 	 	 
+                            [#:secure? Any]
                             [#:http-only? Any]
                             Cookie)]
                        [request-id-cookie
@@ -210,10 +213,21 @@
                        [response/xexpr
                         (-> Any  ;;; it should be `xexpr?`ed value, but `Any` also works well.
                             [#:code Natural]
-                            [#:message Bytes]
+                            [#:message (Option Bytes)]
                             [#:seconds Real]
                             [#:mime-type (Option Bytes)]
                             [#:headers (Listof Header)]
                             [#:cookies (Listof Cookie)]
                             [#:preamble Bytes]
+                            Response)])
+
+(require/typed/provide web-server/http/json
+                       [response/jsexpr
+                        (-> JSExpr
+                            [#:code Natural]
+                            [#:message (Option Bytes)]
+                            [#:seconds Real]
+                            [#:mime-type (Option Bytes)]
+                            [#:headers (Listof Header)]
+                            [#:cookies (Listof Cookie)]
                             Response)])

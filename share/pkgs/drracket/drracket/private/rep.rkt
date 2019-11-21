@@ -204,7 +204,7 @@ TODO
                     [ctxt (and l (send l capability-value 'drscheme:help-context-term))]
                     [name (and l (send l get-language-name))])
                (drracket:help-desk:help-desk
-                str (and ctxt (list ctxt name))))])]
+                str (and ctxt (list ctxt name)) frame))])]
          [else
           (drracket:help-desk:help-desk)])))
     
@@ -1791,7 +1791,7 @@ TODO
           (insert/delta this (string-append " [" (string-constant custom) "]") dark-green-delta))
         (when custodian-limit
           (insert/delta this 
-                        "; memory limit: "
+                        (format "~a " (string-constant memory-limit))
                         welcome-delta)
           (insert/delta this
                         (format "~a MB" (floor (/ custodian-limit 1024 1024)))

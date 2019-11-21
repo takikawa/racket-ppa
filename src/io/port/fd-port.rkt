@@ -1,6 +1,7 @@
 #lang racket/base
 (require racket/fixnum
          "../common/class.rkt"
+         "../common/check.rkt"
          "../host/rktio.rkt"
          "../host/error.rkt"
          "../host/thread.rkt"
@@ -26,6 +27,7 @@
          open-output-fd
          finish-fd-output-port
          terminal-port?
+         port-waiting-peer?
          fd-port-fd
          prop:fd-place-message-opener)
 
@@ -164,6 +166,14 @@
         (define n (rktio_write_in rktio fd bstr start-pos end-pos))
         (cond
           [(rktio-error? n)
+           ;; Discard buffer content before reporting the error. This
+           ;; isn't the obviously right choice, but otherwise a future
+           ;; flush attempt (including one triggered by trying to
+           ;; close the port or one triggered by a plumber) will
+           ;; likely just fail again, which is probably worse than
+           ;; dropping bytes.
+           (set! start-pos 0)
+           (set! end-pos 0)
            (end-atomic)
            (send fd-output-port this raise-write-error n)]
           [(fx= n 0)
@@ -216,7 +226,8 @@
      (cond
        [(fx= src-start src-end)
         ;; Flush request
-        (and (flush-buffer) 0)]
+        (or (and (flush-buffer) 0)
+            (wrap-evt evt (lambda (v) #f)))]
        [(and (not (eq? buffer-mode 'none))
              (not nonbuffer/nonblock?)
              (fx< end-pos (bytes-length bstr)))
@@ -229,7 +240,7 @@
         (fast-mode! amt)
         amt]
        [(not (flush-buffer)) ; <- can temporarily leave atomic mode
-        #f]
+        (wrap-evt evt (lambda (v) #f))]
        [else
         (define n (rktio_write_in rktio fd src-bstr src-start src-end))
         (cond
@@ -249,7 +260,8 @@
      (flush-buffer-fully #f) ; can temporarily leave atomic mode
      (when bstr ; <- in case a concurrent close succeeded
        (send fd-output-port this on-close)
-       (plumber-flush-handle-remove! flush-handle)
+       (when flush-handle
+         (plumber-flush-handle-remove! flush-handle))
        (set! bstr #f)
        (fd-close fd fd-refcount)
        (unsafe-custodian-unregister this custodian-reference)))]
@@ -321,10 +333,11 @@
   (define fd (fd-output-port-fd p))
   (define fd-refcount (fd-output-port-fd-refcount p))
   (define evt (fd-evt fd RKTIO_POLL_WRITE p))
-  (define flush-handle (plumber-add-flush! plumber
-                                           (lambda (h)
-                                             (atomically
-                                              (send fd-output-port p flush-buffer/external)))))
+  (define flush-handle (and plumber
+                            (plumber-add-flush! plumber
+                                                (lambda (h)
+                                                  (atomically
+                                                   (send fd-output-port p flush-buffer/external))))))
   (define custodian-reference (register-fd-close cust fd fd-refcount flush-handle p))
   (set-core-output-port-evt! p evt)
   (set-fd-output-port-flush-handle! p flush-handle)
@@ -347,6 +360,19 @@
     [(fd-output-port? cp)
      (fd-output-port-fd cp)]
     [else #f]))
+
+(define/who (port-waiting-peer? p)
+  (define cp (->core-output-port p #:default #f))
+  (cond
+    [cp
+     (cond
+       [(fd-output-port? cp)
+        (define fd (fd-port-fd cp))
+        (rktio_fd_is_pending_open rktio fd)]
+       [else #f])]
+    [(input-port? p) #f]
+    [else
+     (raise-argument-error who "port?" p)]))
 
 ;; ----------------------------------------
 

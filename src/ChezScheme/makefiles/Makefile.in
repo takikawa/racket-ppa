@@ -1,0 +1,69 @@
+# Makefile.in
+# Copyright 1984-2017 Cisco Systems, Inc.
+# 
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+# 
+# http://www.apache.org/licenses/LICENSE-2.0
+# 
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+MAKEFLAGS += --no-print-directory
+
+build:
+	(cd $(workarea) && $(MAKE) build)
+
+run:
+	env SCHEMEHEAPDIRS=$(workarea)/boot/$(m) $(workarea)/bin/$(m)/scheme
+
+install:
+	(cd $(workarea) && $(MAKE) install)
+
+uninstall:
+	(cd $(workarea) && $(MAKE) uninstall)
+
+test:
+	(cd $(workarea) && $(MAKE) test PREFIX=$(workarea)/)
+
+bootfiles:
+	(cd $(workarea) && $(MAKE) bootfiles)
+
+# Supply XM=<machine> to build boot files for <machine>
+boot: build
+	mkdir -p boot/$(XM)
+	(cd $(workarea) && $(MAKE) -f Mf-boot $(XM).boot)
+
+# Supply ORIG=<dir> to build using existing at <dir>
+from-orig:
+	(cd $(m)/s && $(MAKE) -f Mf-cross m=$(m) xm=$(m) base=$(ORIG)/$(m))
+	$(MAKE) build
+
+docs: build
+	(cd csug && $(MAKE) m=$(m))
+	(cd release_notes && $(MAKE) m=$(m))
+
+create-bintar:
+	(cd $(workarea) && $(MAKE) create-bintar)
+
+create-rpm:
+	(cd $(workarea) && $(MAKE) create-rpm)
+
+create-pkg:
+	(cd $(workarea) && $(MAKE) create-pkg)
+
+clean:
+	(cd $(workarea) && $(MAKE) clean)
+
+distclean:
+	(cd csug && if [ -e Makefile ] ; then $(MAKE) reallyreallyclean ; fi)
+	rm -f csug/Makefile
+	(cd release_notes && if [ -e Makefile ] ; then $(MAKE) reallyreallyclean ; fi)
+	rm -f release_notes/Makefile
+	rm -rf $(workarea)
+	rm -f Makefile
+	rm -f Make.out

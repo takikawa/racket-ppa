@@ -471,11 +471,7 @@ has been moved out).
         (set-box/f! rspace 0)))
 
     (define/override (write f)
-      (define bp (open-output-bytes))
-      (parameterize ([print-graph #t]
-                     [bitmap-write-cache (make-hasheq)])
-        (:write (list shape bb pinhole) bp))
-      (define bytes (get-output-bytes bp))
+      (define bytes (image->snipclass-bytes this))
       (send f put (bytes-length bytes) bytes))
     
     (super-new)
@@ -527,6 +523,16 @@ has been moved out).
                  #f
                  (list-ref lst 2))]))
 
+(define (image->snipclass-bytes img)
+  (define bp (open-output-bytes))
+  (parameterize ([print-graph #t]
+                 [bitmap-write-cache (make-hasheq)])
+    (:write (list (send img get-shape)
+                  (send img get-bb)
+                  (send img get-pinhole))
+            bp))
+  (get-output-bytes bp))
+
 (provide snip-class) 
 (define snip-class (new image-snipclass%))
 (send snip-class set-classname (format "~s" (list '(lib "image-core.ss" "mrlib")
@@ -549,7 +555,13 @@ has been moved out).
              (cond
                [(bytes? (vector-ref sexp 0))
                 ;; bitmaps are vectors with a bytes in the first field
-                (apply bytes->bitmap (vector->list sexp))]
+                ;; in older versions, there were three elements of the vector
+                ;; and the bytes in the first element were the raw bytes (from get-argb-pixels)
+                ;; in the current version, the bytes are png bytes and there are two elements
+                ;; in the vector; the second is the backing scale
+                (if (= (vector-length sexp) 3)
+                    (apply bytes->bitmap (vector->list sexp))
+                    (apply png-bytes->bitmap (vector->list sexp)))]
                [else
                 (let* ([tag (vector-ref sexp 0)]
                        [args (cdr (vector->list sexp))]
@@ -1519,7 +1531,7 @@ the mask bitmap and the original bitmap are all together in a single bytes!
     (cond
       [already-gotten-bytes already-gotten-bytes]
       [else
-       (define res (call-with-values (λ () (bitmap->bytes o #f)) vector))
+       (define res (call-with-values (λ () (bitmap->png-bytes o)) vector))
        (when cache (hash-set! cache o res))
        res]))
 
@@ -1592,6 +1604,7 @@ the mask bitmap and the original bitmap are all together in a single bytes!
          mode-color->pen
          
          snipclass-bytes->image
+         image->snipclass-bytes
          (contract-out
           [definitely-same-image? (-> image? image? boolean?)])
          string->color-object/f

@@ -1,6 +1,6 @@
 
 /* The version string has one of the forms:
-      X.Y       Z = 0, W = 0
+      X.Y
       X.Y.Z     Z != 0
       X.Y.Z.W   W != 0
    where each X, Y, Z, W is a non-negative exact integer, Y must not
@@ -14,7 +14,7 @@
 */
 
 #define MZSCHEME_VERSION_X 7
-#define MZSCHEME_VERSION_Y 4
+#define MZSCHEME_VERSION_Y 5
 #define MZSCHEME_VERSION_Z 0
 #define MZSCHEME_VERSION_W 0
 

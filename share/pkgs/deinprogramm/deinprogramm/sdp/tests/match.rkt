@@ -90,18 +90,29 @@
    (test-case
     "anything"
     (check-equal? (match 5 (_ 7)) 7)
+    (check-equal? (match 5 (... 7)) 7)
     (check-equal? (match '(1 2) (_ 7)) 7)
+    (check-equal? (match '(1 2) (... 7)) 7)
     (check-equal? (match #f (_ 7)) 7)
+    (check-equal? (match #f (... 7)) 7)
     (check-equal? (let ((_ 5)) (match #f (_ _))) 5)
     (check-equal? (match #f
 		    ((kons _ _) 7)
 		    (_ 5))
 		  5)
+    (check-equal? (match #f
+		    ((kons ... ...) 7)
+		    (... 5))
+		  5)
     (check-equal? (match (kons 1 2)
 		    ((kons _ _) 7)
 		    (_ 5))
+		  7)
+    (check-equal? (match (kons 1 2)
+		    ((kons ... ...) 7)
+		    (... 5))
 		  7))
-
+   
    (test-case
     "records"
     (define foo
