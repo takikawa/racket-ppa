@@ -1,4 +1,4 @@
-racket (7.5+ppa1-1~bionic1) bionic; urgency=medium
+racket (7.5+ppa1-1~cs~bionic1) bionic; urgency=medium
 
   * PPA CS release
 
