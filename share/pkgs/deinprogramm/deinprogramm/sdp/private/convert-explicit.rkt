@@ -48,7 +48,7 @@
 	  (write-string (symbol->string n) port)
 	  (write-string ">" port)))
     (else
-     (write-string "#<function>"))))
+     (write-string "#<function>" port))))
  #:property prop:procedure (struct-field-index func)
  #:inspector (make-inspector))
 

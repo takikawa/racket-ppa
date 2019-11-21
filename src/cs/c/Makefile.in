@@ -178,6 +178,7 @@ scheme-cross:
 # Rebuild patch file and cross "petite.boot" and "scheme.boot" when older
 # than the build-host "scheme.boot"
 $(SCHEME_SRC)/$(TARGET_MACH)/s/xpatch: $(SCHEME_SRC)/$(MACH)/boot/$(MACH)/scheme.boot
+	rm -f $(SCHEME_SRC)/$(TARGET_MACH)/s/nanopass.so $(SCHEME_SRC)/$(TARGET_MACH)/s/nanopass/*.so
 	cd $(SCHEME_SRC)/$(TARGET_MACH)/s && $(MAKE) -f Mf-cross m=$(MACH) xm=$(TARGET_MACH) Scheme="$(SCHEME_BIN)" SCHEMEHEAPDIRS="$(SCHEME_INC)"
 
 XPATCH =
@@ -335,6 +336,10 @@ plain-install-upcased:
 	$(ICP) GRacketCS.exe $(libpltdir)/GRacket$(CS_INSTALLED).exe
 	$(ICP) MzStart.exe $(libpltdir)/MzStart.exe
 	$(ICP) MrStart.exe $(libpltdir)/MrStart.exe
+	$(STRIP_DEBUG) $(prefix)/Racket$(CS_INSTALLED).exe
+	$(STRIP_DEBUG) $(libpltdir)/GRacket$(CS_INSTALLED).exe
+	$(STRIP_DEBUG) $(libpltdir)/MzStart.exe
+	$(STRIP_DEBUG) $(libpltdir)/MrStart.exe
 	$(MAKE) system-install
 	$(MAKE) compile-xpatch.$(TARGET_MACH)
 	$(MAKE) library-xpatch.$(TARGET_MACH)

@@ -150,6 +150,10 @@
      `(make-Continuation-Mark-Keyof ,(type->sexp ty))]
     [(Sequence: tys)
      `(-seq ,@(map type->sexp tys))]
+    [(SequenceDots: tys dty dbound)
+     `(-seq-dots (list ,@(map type->sexp tys))
+                 ,(type->sexp dty)
+                 (quote ,dbound))]
     [(Syntax: ty)
      `(make-Syntax ,(type->sexp ty))]
     [(Listof: elem-ty)
@@ -232,7 +236,7 @@
      #:when (andmap Value? ts)
      `(one-of/c ,@(for/list ([t (in-list ts)])
                     `(quote ,(Value-val t))))]
-    
+
     [(BaseUnion: bbits nbits) `(make-BaseUnion ,bbits ,nbits)]
     [(Union: base elems) `(Un . ,(append (if (Bottom? base) '() (list (type->sexp base)))
                                          (map type->sexp elems)))]
@@ -250,14 +254,18 @@
      `(make-Name (quote-syntax ,stx) ,args ,struct?)]
     [(fld: t acc mut)
      `(make-fld ,(type->sexp t) (quote-syntax ,acc) ,mut)]
-    [(Struct: name parent flds proc poly? pred-id)
+    [(Struct: name parent flds proc poly? pred-id properties)
      `(make-Struct (quote-syntax ,name)
                    ,(and parent (type->sexp parent))
                    (list ,@(map type->sexp flds))
                    ,(and proc (type->sexp proc))
                    ,poly?
-                   (quote-syntax ,pred-id))]
+                   (quote-syntax ,pred-id)
+                   ;(list ,@properties)
+                   (box (list ,@(map type->sexp (unbox properties))))
+                   )]
     [(StructType: struct) `(make-StructType ,(type->sexp struct))]
+    [(Struct-Property: ty) `(make-Struct-Property ,(type->sexp ty))]
     [(Prefab: key flds)
      `(make-Prefab (quote ,key)
                    (list ,@(map type->sexp flds)))]
@@ -302,7 +310,7 @@
     [(Instance: ty) `(make-Instance ,(type->sexp ty))]
     [(Signature: name extends mapping)
      (define (serialize-mapping m)
-       (map (lambda (id/ty) 
+       (map (lambda (id/ty)
               (define id (car id/ty))
               (define ty (force (cdr id/ty)))
               `(cons (quote-syntax ,id) ,(type->sexp ty)))
