@@ -50,12 +50,4 @@
 	 (string c))))
 
 (define install-status-desc
-  (~a check-mark ": installed"
-      "  "
-      "*: auto-installed"
-      "  "
-      "!: not default scope"
-      "  "
-      "=: installed as link"
-      "  "
-      "@: installed from URL"))
+  (format (string-constant install-pkg-legend) check-mark "*" "!" "=" "@"))

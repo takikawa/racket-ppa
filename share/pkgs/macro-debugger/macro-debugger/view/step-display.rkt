@@ -46,6 +46,10 @@
       (when stx (send/i sbview sb:syntax-browser<%> add-syntax stx)))
 
     (define/private (show-internal-error-details exn events)
+      (parameterize ((current-eventspace (make-eventspace)))
+        (queue-callback (lambda () (show-internal-error-details/modal exn events)))))
+
+    (define/private (show-internal-error-details/modal exn events)
       (case (message-box/custom (if (exn:break? exn)
                                     "Macro stepper was interrupted"
                                     "Macro stepper internal error")

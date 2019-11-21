@@ -216,8 +216,8 @@ Die Signatur ist dann für einen Wert gültig, wenn das Prädikat, darauf angewe
 @racket[#t] ergibt.
 }
 
-@subsection{@racket[one-of]}
-@defform[(one-of expr ...)]{
+@subsection{@racket[enum]}
+@defform[(enum expr ...)]{
 Diese Signatur ist für einen Wert gültig, wenn er gleich dem Wert eines
 der @racket[expr] ist.
 }
@@ -323,6 +323,7 @@ Signaturkonstruktor erzeugt wurden.}
 				#f
 				string
 				number
+				...
 				(constructor pattern ...))]
 					
 ]{ Ein @racket[match]- Ausdruck führt eine Verzweigung durch, ähnlich
@@ -344,6 +345,9 @@ wenn der Wert @italic{v} gleich dem Pattern ist.}
 @emph{jeden} Wert.  Der Bezeichner wird dann an diesen Wert gebunden
 und kann in dem Ausdruck des Zweigs benutzt werden.
 }
+
+@item{Das Pattern @racketkeywordfont{...} paßt auf jeden Wert, ohne daß ein
+Bezeichner gebunden wird.}
 
 @item{Ein Pattern @racket[(constructor pattern @#,racketmetafont{...})], bei dem
 @racket[constructor] ein Record-Konstruktor ist (ein

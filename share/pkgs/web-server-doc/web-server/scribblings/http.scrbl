@@ -347,6 +347,8 @@ Equivalent to
 
 @defthing[TEXT/HTML-MIME-TYPE bytes?]{Equivalent to @racket[#"text/html; charset=utf-8"].}
 
+@defthing[APPLICATION/JSON-MIME-TYPE bytes?]{Equivalent to @racket[#"application/json; charset=utf-8"].}
+
 @warning{If you include a Content-Length header in a response that is inaccurate, there @bold{will be an error} in
 transmission that the server @bold{will not catch}.}
 
@@ -923,4 +925,37 @@ web-server/insta
          #:changed "1.3"
           @elem{Updated contracts on @racket[code] and @racket[seconds]
              as with @racket[response].}]
+}
+
+@section[#:tag "json"]{JSON Support}
+@(require (for-label web-server/http/json
+                     json))
+
+@defmodule*/no-declare[(web-server/http/json)]{}
+
+@declare-exporting[web-server/http/json json]
+
+JSON is a widely used data format for the web. Racket's JSON
+library meets the web server with @racket[response/jsexpr],
+which is for JSON what @racket[response/xexpr] is for XML.
+
+@defproc[(response/jsexpr [jsexpr jsexpr?]
+                          [#:code code response-code/c 200]
+                          [#:message message (or/c #f bytes?) #f]
+                          [#:seconds seconds real? (current-seconds)]
+                          [#:mime-type mime-type (or/c #f bytes?) APPLICATION/JSON-MIME-TYPE]
+                          [#:headers headers (listof header?) empty]
+                          [#:cookies cookies (listof cookie?) empty])
+         response?]{
+ Equivalent to
+ @racketblock[
+ (response/full
+  code message seconds mime-type
+  (append headers (map cookie->header cookies))
+  (list (jsexpr->bytes jsexpr)))
+ ]
+
+ See the documentation for @racket[response/full] to see how @racket[message], if @racket[#f], is turned into a @racket[bytes?].
+
+@history[#:added "1.5"]
 }

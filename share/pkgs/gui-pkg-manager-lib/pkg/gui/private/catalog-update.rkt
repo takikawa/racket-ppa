@@ -25,7 +25,7 @@
                       (send w popup-menu
                             (let ([m (make-object popup-menu%)])
                               (make-object menu-item%
-                                "Copy Message"
+                                (string-constant install-pkg-copy)
                                 m
                                 (lambda (i e)
                                   (send the-clipboard

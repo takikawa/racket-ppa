@@ -306,6 +306,7 @@ scheme_init_struct (Scheme_Startup_Env *env)
   /* Add poller structure: */
   REGISTER_SO(poller_struct);
   poller_struct = scheme_make_struct_type_from_string("unsafe-poller", NULL, 1, NULL, NULL, 1);
+  REGISTER_SO(scheme_unsafe_poller_proc);
   scheme_unsafe_poller_proc = make_struct_proc((Scheme_Struct_Type *)poller_struct, "unsafe-poller", SCHEME_CONSTR, 1);
 
   REGISTER_SO(write_property);
@@ -1564,11 +1565,6 @@ static int evt_struct_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo)
 {
   Scheme_Object *v;
 
-  if (sinfo->false_positive_ok) {
-    sinfo->potentially_false_positive = 1;
-    return 1;
-  }
-
   v = scheme_struct_type_property_ref(evt_property, o);
 
   if (!v) {
@@ -1660,7 +1656,7 @@ static int evt_struct_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo)
           v = scheme_make_closed_prim_w_arity(return_wrapped, (void *)v, "wrapper", 1, 1);
       }
       scheme_set_sync_target(sinfo, v, (done ? v : NULL), NULL, 0, 0, NULL);
-      return 1;
+      return done;
     }
   }
 
@@ -3855,12 +3851,6 @@ static int chaperone_evt_is_ready(Scheme_Object *obj, Scheme_Schedule_Info *sinf
   Scheme_Object *o = obj;
   Scheme_Chaperone *px;
   int redirected = 0;
-
-  if (sinfo->false_positive_ok) {
-    /* Safer, though maybe unnecessarily conservative: */
-    sinfo->potentially_false_positive = 1;
-    return 1;
-  }
 
   while (SCHEME_CHAPERONEP(o)) {
     px = (Scheme_Chaperone *)o;

@@ -203,7 +203,7 @@
   (online-expansion-error-margin "在一侧显示")
   ; the label of a preference in the (string-constant online-expansion) section
   (show-arrows-on-mouseover "鼠标悬停时显示绑定及尾位置箭头")
-  (show-blueboxes "显示蓝盒子、箭头和半圆")
+  (show-blueboxes "显示蓝盒子、箭头和半圆") ;; blue boxes should be ``signature'' boxes now
   ;;; info bar at botttom of drscheme frame
   (collect-button-label "垃圾收集")
   (read-only "只读")

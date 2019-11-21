@@ -28,6 +28,7 @@
          would-be-future
          touch
          future-block
+         future-sync
          current-future-prompt
          currently-running-future
          reset-future-logs-for-tracing!
@@ -90,7 +91,8 @@
       (internal-error "not running in a future")))
 
 ;; called with lock on f held;
-;; in a non-main pthread, caller is responsible for logging 'end-work
+;; in a non-main pthread, caller is responsible for logging 'end-work;
+;; in a non-mail thread, decrements `(current-atomic)` just before starting thunk
 (define (run-future f #:was-blocked? [was-blocked? #f])
   (set-future*-state! f 'running)
   (define thunk (future*-thunk f))
@@ -123,7 +125,9 @@
      ;; we only need to handle success
      (call-with-values (lambda ()
                          (call-with-continuation-prompt
-                          thunk
+                          (lambda ()
+                            (current-atomic (sub1 (current-atomic)))
+                            (thunk))
                           future-start-prompt-tag
                           (lambda args (void))))
                        (lambda results
@@ -350,6 +354,35 @@
 
 ;; ----------------------------------------
 
+;; Can be in a future thread
+;; Call `thunk` in the place's main thread:
+(define (future-sync who thunk)
+  (define me-f (current-future))
+  (cond
+    [(future*-would-be? me-f)
+     (current-future #f)
+     (log-future 'sync (future*-id me-f) #:prim-name who)
+     (let ([v (thunk)])
+       (log-future 'result (future*-id me-f))
+       (current-future me-f)
+       v)]
+    [else
+     ;; In case the main thread is trying to shut down futures, check in:
+     (engine-block)
+     ;; Host's `call-as-asynchronous-callback` will post `thunk`
+     ;; so that it's returned by `host:poll-async-callbacks` to
+     ;; the scheduler in the place's main thread; it will also
+     ;; tell the scheduler to be in atomic mode so that we don't
+     ;; get terminated or swapped out while blocking on the main thread
+     (host:call-as-asynchronous-callback
+      (lambda ()
+        (log-future 'sync (future*-id me-f) #:prim-name who)
+        (let ([v (thunk)])
+          (log-future 'result (future*-id me-f))
+          v)))]))
+
+;; ----------------------------------------
+
 (define pthread-count 1)
 
 ;; Called by io layer
@@ -360,14 +393,15 @@
                    [futures-head #:mutable]
                    [futures-tail #:mutable]
                    mutex   ; guards futures chain; see "future-lock.rkt" for discipline
-                   cond)   ; signaled when chain goes from empty to non-empty
+                   cond    ; signaled when chain goes from empty to non-empty
+                   ping-cond)
   #:authentic)
 
 (struct worker (id
                 [pthread #:mutable]
                 current-future-box ; reports current future (for access external to pthread)
                 [die? #:mutable]
-                sync-state) ; box used to sync shutdowns: 'idle, 'running, or 'pending
+                [ping #:mutable]) ; box set to #t when the thread should check in with scheduler
   #:authentic)
 
 (define current-scheduler
@@ -380,7 +414,7 @@
           #f         ; pthread
           (box #f)   ; current-future-box
           #f         ; die?
-          (box 'idle)))
+          (box #f)))
 
 ;; called in a Racket thread
 (define (maybe-start-scheduler)
@@ -391,6 +425,7 @@
                           #f  ; futures-head
                           #f  ; futures-tail
                           (host:make-mutex)
+                          (host:make-condition)
                           (host:make-condition)))
      (current-scheduler s)
      (define workers
@@ -407,7 +442,6 @@
     (host:mutex-acquire (scheduler-mutex s))
     (for ([w (in-list (scheduler-workers s))])
       (set-worker-die?! w #t))
-    (host:condition-broadcast (scheduler-cond s))
     (host:mutex-release (scheduler-mutex s))
     (futures-sync-for-shutdown)
     (current-scheduler #f)))
@@ -496,6 +530,9 @@
 
 ;; ----------------------------------------
 
+(define-syntax-rule (keep-trying e)
+  (let loop () (unless e (loop))))
+
 (define (start-worker w)
   (define s (current-scheduler))
   (define th
@@ -504,12 +541,10 @@
        (current-future 'worker)
        (host:mutex-acquire (scheduler-mutex s))
        (let loop ()
-         (or (box-cas! (worker-sync-state w) 'idle 'running)
-             (box-cas! (worker-sync-state w) 'pending 'running))
+         (check-in w)
          (cond
            [(worker-die? w) ; worker was killed
-            (host:mutex-release (scheduler-mutex s))
-            (box-cas! (worker-sync-state w) 'running 'idle)]
+            (host:mutex-release (scheduler-mutex s))]
            [(scheduler-futures-head s)
             => (lambda (f)
                  (deschedule-future f)
@@ -522,8 +557,6 @@
                  (loop))]
            [else
             ;; wait for work
-            (or (box-cas! (worker-sync-state w) 'pending 'idle)
-                (box-cas! (worker-sync-state w) 'running 'idle))
             (host:condition-wait (scheduler-cond s) (scheduler-mutex s))
             (loop)])))))
   (set-worker-pthread! w th))
@@ -534,7 +567,7 @@
   ;; because we may have transitioned from 'pending to
   ;; 'running without an intervening check
   (cond
-    [(custodian-shut-down? (future*-custodian f))
+    [(custodian-shut-down?/other-pthread (future*-custodian f))
      (set-future*-state! f 'blocked)
      (on-transition-to-unfinished)
      (lock-release (future*-lock f))]
@@ -553,26 +586,39 @@
   ;; still supposed to run.
   ;; We take advantage of `current-atomic`, which would otherwise
   ;; be unused, to disable interruptions.
-  (define e (make-engine (lambda () (run-future f))
+  (define e (make-engine (lambda ()
+                           ;; decrements `(current-atomic)`
+                           (run-future f))
                          future-scheduler-prompt-tag
                          void
                          break-enabled-default-cell
                          #t))
-  (let loop ([e e])
-    (e TICKS
-       (lambda ()
-         ;; Check that the future should still run
-         (when (and (custodian-shut-down? (future*-custodian f))
-                    (zero? (current-atomic)))
-           (lock-acquire (future*-lock f))
-           (set-future*-state! f #f)
-           (on-transition-to-unfinished)
-           (future-suspend)))
-       (lambda (leftover-ticks result)
-         ;; Done --- completed or suspend (e.g., blocked)
-         (void))
-       (lambda (e timeout?)
-         (loop e))))
+  (current-atomic (add1 (current-atomic)))
+  (call-with-engine-completion
+   (lambda (done)
+     (let loop ([e e])
+       (e TICKS
+          (lambda ()
+            ;; Check whether the main pthread wants to know we're here
+            (when (and (zero? (current-atomic))
+                       (worker-pinged? w))
+              (host:mutex-acquire (scheduler-mutex (current-scheduler)))
+              (check-in w)
+              (host:mutex-release (scheduler-mutex (current-scheduler))))
+            ;; Check that the future should still run
+            (when (and (or (custodian-shut-down?/other-pthread (future*-custodian f))
+                           (worker-die? w))
+                       (zero? (current-atomic)))
+              (lock-acquire (future*-lock f))
+              (set-future*-state! f #f)
+              (on-transition-to-unfinished)
+              (future-suspend)))
+          (lambda (e results leftover-ticks)
+            (cond
+              [e (loop e)]
+              [else
+               ;; Done --- completed or suspend (e.g., blocked)
+               (done (void))]))))))
   (log-future 'end-work (future*-id f))
   (current-future 'worker)
   (set-box! (worker-current-future-box w) #f))
@@ -583,18 +629,48 @@
   ;; have had a chance to notice a custodian shutdown or a
   ;; future-scheduler shutdown.
   ;;
-  ;; Move each 'running worker into the 'pending state:
-  (for ([w (in-list (scheduler-workers (current-scheduler)))])
-    (box-cas! (worker-sync-state w) 'running 'pending))
-  ;; A worker that transitions from 'pending to 'running or 'idle
-  ;; is guaranteed to not run a future chose custodian is
-  ;; shutdown or run any future if the worker is terminated
-  (for ([w (in-list (scheduler-workers (current-scheduler)))])
-    (define bx (worker-sync-state w))
-    (let loop ()
-      (when (box-cas! bx 'pending 'pending)
-        (host:sleep 0.001) ; not much alternative to spinning
-        (loop)))))
+  ;; Assert: all workers have `ping` as #f.
+  (define s (current-scheduler))
+  (host:mutex-acquire (scheduler-mutex s))
+  (for ([w (in-list (scheduler-workers s))])
+    (let retry ()
+      (unless (box-cas! (worker-ping w) #f #t)
+        (retry))))
+  ;; Assert: all workers have `ping` as #t.
+  ;; Wake up idle threads so they check in:
+  (host:condition-broadcast (scheduler-cond s))
+  (drain-async-callbacks (scheduler-mutex s)) ; releases and re-acquires mutex
+  ;; When a worker sets `ping` to #f, they must broadcast
+  ;; a wakeup for the following loop's benefit
+  (let loop ()
+    (when (for/or ([w (in-list (scheduler-workers s))])
+            (unbox (worker-ping w)))
+      (host:condition-wait (scheduler-ping-cond s) (scheduler-mutex s))
+      (loop)))
+  ;; Assert: all workers have `ping` as #f.
+  (host:mutex-release (scheduler-mutex s)))
+
+;; lock-free synchronization to check whether the box content is #f
+(define (worker-pinged? w)
+  (box-cas! (worker-ping w) #t #t))
+
+;; called with scheduler lock
+(define (check-in w)
+  (when (unbox (worker-ping w))
+    (set-box! (worker-ping w) #f)
+    (host:condition-broadcast (scheduler-ping-cond (current-scheduler)))))
+
+;; in atomic mode
+;; While we're trying to finish up futures, some of them
+;; may be blocked waiting for async callbacks. No new ones
+;; will get posted since we've set the ping flag, so we
+;; only have to drain once.
+(define (drain-async-callbacks m)
+  (host:mutex-release m)
+  (define callbacks (host:poll-async-callbacks))
+  (for ([callback (in-list callbacks)])
+    (callback))
+  (host:mutex-acquire m))
 
 ;; ----------------------------------------
 

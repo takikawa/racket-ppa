@@ -621,10 +621,47 @@ See match-a-pattern.rkt for more details
              (loop (cdr matches) (cons merged acc))
              (loop (cdr matches) acc)))])))
 
+(define (combine-bindings-lists bindings1 bindings1-to-dup
+                                bindings2 bindings2-to-dup
+                                lang-α-equal?)
+  (define all-combinations/f
+    (for*/list ([binding1 (in-list bindings1)]
+                [binding2 (in-list bindings2)])
+      (define table1 (bindings-table binding1))
+      (define table2 (bindings-table binding2))
+      (merge-multiples/remove/bindings
+       (make-bindings (append (fill-out-duplicates table1 bindings1-to-dup binding2)
+                              (fill-out-duplicates table2 bindings2-to-dup binding1)))
+       lang-α-equal?)))
+  (define all-combinations (filter values all-combinations/f))
+  (cond
+    [(null? all-combinations) #f]
+    [else all-combinations]))
+
+(define (fill-out-duplicates table to-duplicate table-with-lengths)
+  (for/list ([a-bind (in-list table)])
+    (define n (bind-name a-bind))
+    (cond
+      [(member n to-duplicate)
+       (define exp (bind-exp a-bind))
+       (define how-many-times (length (lookup-binding table-with-lengths n)))
+       (bind n
+             (for/list ([i (in-range how-many-times)])
+               exp))]
+      [else a-bind])))
+
 ;; merge-multiples/remove : bindings (exp exp -> boolean) -> (union #f bindings)
 ;; returns #f if all duplicate bindings don't bind the same thing
 ;; returns a new bindings 
 (define (merge-multiples/remove match lang-α-equal?)
+  (define bindings (merge-multiples/remove/bindings (mtch-bindings match) lang-α-equal?))
+  (and bindings
+       (make-mtch
+        bindings
+        (mtch-context match)
+        (mtch-hole match))))
+
+(define (merge-multiples/remove/bindings bindings lang-α-equal?)
   (let/ec fail
     (let (
           ;; match-ht : sym -o> sexp
@@ -633,7 +670,7 @@ See match-a-pattern.rkt for more details
           ;; mismatch-ht : sym -o> hash[sexp -o> #t]
           [mismatch-ht (make-hash)]
           
-          [ribs (bindings-table (mtch-bindings match))])
+          [ribs (bindings-table bindings)])
       (for ([rib (in-list ribs)])
         (cond
           [(bind? rib)
@@ -671,10 +708,7 @@ See match-a-pattern.rkt for more details
                   [else
                    (for ([exp-ele (in-list exp)])
                      (loop (- depth 1) exp-ele))]))])]))
-      (make-mtch
-       (make-bindings (hash-map match-ht make-bind))
-       (mtch-context match)
-       (mtch-hole match)))))
+      (make-bindings (hash-map match-ht make-bind)))))
 
 ;; compile-pattern : compiled-lang pattern boolean -> compiled-pattern
 (define (compile-pattern clang input-pattern bind-names?)
@@ -1981,6 +2015,23 @@ See match-a-pattern.rkt for more details
 (define (hash-maps? ht key)
   (not (eq? (hash-ref ht key uniq) uniq)))
 
+(define alpha-equivalent?
+  (case-lambda
+    [(lang lhs rhs)
+     (unless (compiled-lang? lang)
+       (raise-argument-error 'alpha-equivalent?
+                             "compiled-lang?"
+                             0
+                             lang lhs rhs))
+     (α-equal? (compiled-lang-binding-table lang)
+               (compiled-lang-literals lang)
+               match-pattern lhs rhs)]
+    [(lhs rhs)
+     (define l (default-language))
+     (unless l
+       (error 'alpha-equivalent?
+              "contract violation\n  expected default-language to be  a language\n  got: #f"))
+     (alpha-equivalent? l lhs rhs)]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -2072,7 +2123,14 @@ See match-a-pattern.rkt for more details
                        (listof (list/c (not/c compiled-pattern?) bspec?))
                        (listof symbol?)
                        symbol?
-                       compiled-lang?)))
+                       compiled-lang?))
+ [combine-bindings-lists
+  (-> (listof bindings?)
+      (listof symbol?)
+      (listof bindings?)
+      (listof symbol?)
+      (procedure-arity-includes/c 2)
+      (or/c #f (non-empty-listof bindings?)))])
 (provide compiled-pattern? 
          print-stats)
 
@@ -2085,7 +2143,8 @@ See match-a-pattern.rkt for more details
          (struct-out mismatch-bind)
          (struct-out compiled-pattern))
 
-(provide lookup-binding
+(provide alpha-equivalent?
+         lookup-binding
          
          compiled-pattern
          

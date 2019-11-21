@@ -793,6 +793,7 @@ lowest term is the number @math-style{(p+r)/(q+s)}.
 @; ----------------------------------------
 @section[#:tag "quadratics"]{The Quadratic Equation}
 
+
 @defproc[(quadratic-solutions [a Real] [b Real] [c Real]) (Listof Real)]{
 Returns a list of all real solutions to the equation @math-style{a x^2 + b x +c = 0}.
   @interaction[#:eval untyped-eval
@@ -815,6 +816,16 @@ Returns a list of all natural solutions to the equation @math-style{a x^2 + b x 
                       (quadratic-natural-solutions 1 0 -2)]  
 }
 
+@defproc[(complex-quadratic-solutions [a Complex] [b Complex] [c Complex]) (Listof Complex)]{
+Returns a list of all complex solutions to the equation @math-style{a x^2 + b x +c = 0}.
+This function allows complex coeffecients.
+  @interaction[#:eval untyped-eval
+                      (complex-quadratic-solutions 1 0 1)
+                      (complex-quadratic-solutions 1 0 (sqrt -1))
+                      (complex-quadratic-solutions 1 0 1)]
+
+@history[#:added "1.1"]
+}
 
 
 @; ----------------------------------------

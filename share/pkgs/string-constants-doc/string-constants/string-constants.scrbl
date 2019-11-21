@@ -106,7 +106,7 @@ messages for all the languages in the list. If either is
 bound to anything else, you see all of the languages.
 
 The @envvar{PLTSTRINGCONSTANTS} environment variable takes precedence
-of the @envvar{STRINGCONSTANTS} environment variable.
+over the @envvar{STRINGCONSTANTS} environment variable.
 
 The @indexed-envvar{PLTSTRINGCONSTANTSLANG} controls the language
 choice, overriding the default saved in the preferences file.

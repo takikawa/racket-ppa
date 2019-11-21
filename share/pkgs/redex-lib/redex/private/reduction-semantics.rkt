@@ -24,6 +24,7 @@
          (rename-in racket/match (match match:)))
 
 (require (for-syntax syntax/name
+                     syntax/stx
                      "keyword-macros.rkt"
                      "cycle-check.rkt"
                      "loc-wrapper-ct.rkt"
@@ -113,10 +114,9 @@
 (define ((term-match/single/proc form-name lang ps0 cps rhss) term)
   (let loop ([ps ps0] [cps cps] [rhss rhss])
     (if (null? ps)
-        (redex-error form-name 
-                     (if (null? (cdr ps0))
-                         (format "term ~s does not match pattern ~s" term (car ps0))
-                         (format "no patterns matched ~s" term)))
+        (if (null? (cdr ps0))
+            (redex-error form-name "term ~s does not match pattern ~s" term (car ps0))
+            (redex-error form-name "no patterns matched ~s" term))
         (let ([match (match-pattern (car cps) term)])
           (if match
               (begin
@@ -908,7 +908,6 @@
                       lang-nts
                       lang-id
                       sides/withs/freshs
-                      'flatten
                       #`(begin
                           from-syncheck-expr
                           (list (cons #,(or computed-name #'none)
@@ -1203,10 +1202,10 @@
                   (reduction-relation-make-procs subj))])
           (make-coverage subj h))))]))
 
-(define-syntax (test-match stx) (test-match/both stx #f))
-(define-syntax (test-match? stx) (test-match/both stx #t))
+(define-syntax (redex-match stx) (redex-match/both stx #f))
+(define-syntax (redex-match? stx) (redex-match/both stx #t))
 
-(define-for-syntax (test-match/both stx boolean-only?)
+(define-for-syntax (redex-match/both stx boolean-only?)
   (syntax-case stx ()
     [(form-name lang-exp pattern)
      (identifier? #'lang-exp)
@@ -1218,7 +1217,7 @@
                        [name (syntax-local-infer-name stx)])
            #`(begin
                syncheck-expr
-               (do-test-match lang-exp `side-condition-rewritten 'binders 'name #,boolean-only?)))))]
+               (do-redex-match lang-exp `side-condition-rewritten 'binders 'name #,boolean-only?)))))]
     [(form-name lang-exp pattern expression)
      (identifier? #'lang-exp)
      (syntax 
@@ -1232,7 +1231,7 @@
 
 (define-struct match (bindings) #:inspector #f)
 
-(define (do-test-match lang pat binders context-name boolean-only?)
+(define (do-redex-match lang pat binders context-name boolean-only?)
   (unless (compiled-lang? lang)
     (error 'redex-match "expected first argument to be a language, got ~e" lang))
   (define name (or context-name
@@ -1486,7 +1485,7 @@
                                    (bind-withs
                                     syn-error-name '()  
                                     #'effective-lang lang-nts #'lang
-                                    sc/b 'flatten
+                                    sc/b
                                     (if (free-identifier=? #'metafunction-leave-default-language-alone
                                                            #'lang)
                                         #`(list (term #,rhs))
@@ -1736,11 +1735,6 @@
     [_
      (set)]))
   
-(define-for-syntax (check-arity-consistency mode contracts full-def)
-  (when (and contracts (not (= (length mode) (length contracts))))
-    (raise-syntax-error 
-     #f "mode and contract specify different numbers of positions" full-def)))
-
 (define-for-syntax (defined-name declared-names clauses orig-stx)
   (with-syntax ([(((used-names _ ...) _ ...) ...) clauses])
     (define-values (the-name other-names)
@@ -3066,6 +3060,19 @@
 
 (define-syntax (test-judgment-holds stx)
   (syntax-parse stx
+    [(_ jf e:expr)
+     (unless (judgment-form-id? #'jf)
+       (raise-syntax-error 'test-judgment-holds
+                           "expected a modeless judgment-form"
+                           #'jf))
+     (define a-judgment-form (syntax-local-value #'jf))
+     (define mode (judgment-form-mode a-judgment-form))
+     (unless (number? mode)
+       (raise-syntax-error 'test-judgment-holds
+                           "expected a modeless judgment-form"
+                           #'jf))
+     #`(let ([derivation e])
+         (test-modeless-jf/proc 'jf derivation (judgment-holds jf derivation) #,(get-srcloc stx)))]
     [(_ (jf . rest))
      (unless (judgment-form-id? #'jf)
        (raise-syntax-error 'test-judgment-holds
@@ -3073,6 +3080,13 @@
                            #'jf))
      (define a-judgment-form (syntax-local-value #'jf))
      (define mode (judgment-form-mode a-judgment-form))
+     (when (number? mode)
+       (raise-syntax-error 'test-judgment-holds
+                           (string-append
+                            "modeless judgment forms should supply only the their name"
+                            " as the first argument")
+                           stx
+                           (stx-car (stx-cdr stx))))
      (define orig-jf-stx (list-ref (syntax->list stx) 1))
      (define jf-list (syntax->list #'(jf . rest)))
      (cond
@@ -3127,6 +3141,26 @@
         ;; this case should always result in a syntax error
         #`(judgment-holds #,orig-jf-stx)])]))
 
+(define (test-modeless-jf/proc jf derivation val srcinfo)
+  (cond
+    [val
+     (inc-successes)]
+    [else
+     (inc-failures)
+     (print-failed srcinfo)
+     (eprintf "  derivation does not satisfy ~a\n" jf)
+     (parameterize ([pretty-print-print-line
+                     (λ (new-line-number op old-len col)
+                       (cond
+                         [(number? new-line-number)
+                          (unless (= new-line-number 0) (newline op))
+                          (display "  " op)
+                          2]
+                         [else
+                          (newline op)
+                          0]))])
+       (pretty-print derivation (current-error-port)))]))
+
 (define (test-judgment-holds/proc thunk name lang pat srcinfo is-relation?)
   (define results (thunk))
   (cond
@@ -3158,6 +3192,35 @@
   (syntax-case stx ()
     [(_ p arg)
      #`(test-predicate/proc p arg #,(get-srcloc stx))]))
+
+(define-syntax (test-match stx)
+  (syntax-parse stx
+    [(_ lang:id
+        ; TODO: Make redex-match? respect default-language?
+        #;(~optional (~seq #:lang lang:id)
+                   #:defaults ([lang #'(default-language)])) p arg)
+     #`(test-match/proc values (redex-match? lang p) 'p arg #,(get-srcloc stx))]))
+
+(define-syntax (test-no-match stx)
+  (syntax-parse stx
+    [(_ lang:id p arg)
+     #`(test-match/proc not (redex-match? lang p) 'p arg #,(get-srcloc stx))]))
+
+(define (test-match/proc inv pred pat arg srcinfo)
+  ; inv is a test inversion operation:
+  ; if (inv #t) = #t, not matching is failure
+  ; if (inv #t) = #f, matching is failure
+  (cond
+    [(inv (pred arg)) (inc-successes)]
+    [else
+     (inc-failures)
+     (print-failed srcinfo)
+     (eprintf/value-at-end (format "  did~amatch pattern \"~a\""
+                                   (if (inv #t)
+                                       " not "
+                                       " ")
+                                   pat)
+                           arg)]))
 
 (define (test-predicate/proc pred arg srcinfo)
   (cond
@@ -3324,8 +3387,8 @@
 
 (provide shadow nothing)
 
-(provide test-match
-         test-match?
+(provide redex-match
+         redex-match?
          term-match
          term-match/single
          redex-let 
@@ -3342,6 +3405,8 @@
          test-->
          test-->>∃ (rename-out [test-->>∃ test-->>E])
          test-predicate
+         test-match
+         test-no-match
          test-judgment-holds
          test-results
          default-equiv
@@ -3367,6 +3432,6 @@
          (rename-out [fresh-coverage make-coverage])
          coverage?)
 
-(provide do-test-match)
+(provide do-redex-match)
 
 (provide inform-rackunit?)

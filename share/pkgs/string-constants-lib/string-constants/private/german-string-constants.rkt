@@ -193,7 +193,7 @@
  (online-expansion-error-margin "am Rand")
  ; the label of a preference in the (string-constant online-expansion) section
  (show-arrows-on-mouseover "Bindungen und Tail-Positionen unter Mauszeiger anzeigen")
- (show-blueboxes "Blaue Kästen  und blaue anzeigen")
+ (show-blueboxes "Blaue Kästen  und blaue anzeigen") ;; blue boxes should be ``signature'' boxes now
  ;;; info bar at botttom of drscheme frame
  (collect-button-label "GC")
  (read-only "Nur Lesen")
@@ -337,12 +337,30 @@
   (use-drscheme-font-size "DrRacket-Schriftgröße verwenden")
 
   (help-desk-this-is-just-example-text
-   "Dies ist nur ein Beispieltext für das Setzen der Schriftgröße.  Öffnen sie das Hilfezentrum (im „Hilfe“-Menü), um diesen Links zu folgen.")
+   "Dies ist nur ein Beispieltext für das Setzen der Schriftgröße.  Öffnen Sie das Hilfezentrum (im „Hilfe“-Menü), um diesen Links zu folgen.")
 
   ;; this appears in the bottom part of the frame the first time the user hits `f1' 
   ;; (assuming nothing else has loaded the documentation index first)
   ;; see also: cs-status-loading-docs-index
   (help-desk-loading-documentation-index "Hilfezentrum: Dokumentations-Index wird geladen")
+
+    ;; the next four are all in the same dialog box (only one of the first two appears)
+  (help-desk-materialize-docs-something-changed
+   "DrRacket hat ein mögliches Problem mit dem Index der Dokumentation"
+   " festgestellt. Soll eine Reparatur versucht werden? (Das kann ein"
+   " bisschen dauern.)?\n\nGenauer gesagt: Das Dokumentations-Verzeichnis ~a"
+   " existiert nicht, und deshalb könnte die Suche im Browser fehlschlagen.")
+  (help-desk-materialize-docs-first-time
+   "DrRacket hat ein mögliches Problem mit dem Index der Dokumentation"
+   " festgestellt. Soll eine Reparatur versucht werden? (Das kann ein"
+   " bisschen dauern.)?\n\nGenauer gesagt: DrRacket"
+   " hat die Dokumentation bisher noch nicht materialisiert, und deshalb"
+   " könnte die Suche im Browser fehlschlagen.")
+  (help-desk-do-nothing "Nichts tun")
+  (help-desk-materialize-user-docs "Dokumentation materialisieren")
+  ; this is used in a dialog to let the user know that work is being done based on
+  ; choices made from the previous dialog in the above four string constants
+  (help-desk-materializing-user-docs... "Dokumentation wird materialisiert…")
 
  ;; Help desk htty proxy
  (http-proxy "HTTP-Proxy")
@@ -868,7 +886,20 @@
  (overwrite-file-button-label "Überschreiben")
  
  (definitions-modified 
-  "Die Definitionen wurden auf der Platte geändert; bitte speichern sie die Definitionen oder holen Sie diese von der Platte zurück.")
+   "Die Definitionen wurden auf der Platte geändert; bitte speichern sie die Definitionen oder holen Sie diese von der Platte zurück.")
+ 
+ ;; for a dialog that appears when Run is clicked and there are unsaved files
+ ; the ~a is filled with a filename (same string that appears in a tab)
+ (one-file-not-saved-do-the-save?
+  "Die Datei “~a” ist nicht gespeechert; vor Start speichern??")
+ ; the string is suffixed with a list of filenames (which are separated by newlines)
+ (many-files-not-saved-do-the-save?
+  "Manche andere Dateien Dateien sind nicht gespeichert; vor Start speichern?\n\nDateien:")
+ ; button label to go ahead with saving
+ (save-all-files "Alle Dateien speichern")
+ ; check box in the dialog and also used in the preferences dialog
+ (save-after-switching-tabs "Dateien speichern immeer bei Tab- oder Fenster-Wechsel")
+ 
  (drscheme-internal-error "Interner Fehler in DrRacket")
  
  ;;; tools
@@ -1174,6 +1205,9 @@
  (module-language-one-line-summary "Die #lang-Zeile spezifiziert die tatsächliche Sprache.")
   
  (module-language-auto-text "Automatisch Zeile mit #lang") ;; shows up in the details section of the module language
+ (module-language-auto-text-most-recent "Zuletzt benutzte #lang-Zeile")
+  ; to the right of this string is a text entry field whose content is the #lang line that'll be used.
+ (module-language-auto-text-always-same "Immer die gleiche #lang-Zeile benutzen:")
  ;; the next four string constants show up in the REPL in DrRacket in the "Racket Language",
  ;; which is also the "Determine language from source" language. They are put right after the name
  ;; of the language from the "#lang" line at the beginning of the source file
@@ -1315,6 +1349,10 @@
  (teachpack "Teachpack")
  (welcome-to "Willkommen bei")
  (version "Version")
+  ;; The following is shown on 2nd line of welcome message in repl.
+ ;; It is concatenated at end of: "language": LANGUAGE "; memory limit:" LIMIT
+ ;; therefore you get to decide punctuation for your language here
+ (memory-limit "; Speicherlimit:")
  
  ;;; kill evaluation dialog
  (kill-evaluation? "Auswertung abbrechen?")
@@ -1778,6 +1816,8 @@
   (install-pkg-use "Benutzen") ; as opposed to "Infer", label for text box
   (install-pkg-type-label "Typ Paket-Quelle")
   (install-pkg-file "Datei")
+  (install-pkg-link "Link")
+  (install-pkg-static-link "Statischer link")
   (install-pkg-dir "Verzeichnis")
   (install-pkg-dir-url "Verzeichnis woanders")
   (install-pkg-file-url "Datei woanders")
@@ -1805,6 +1845,7 @@
   (install-pkg-default "Standard")
   (install-pkg-scope-label "Paket-Einzugsbereich")
   (install-pkg-default-scope-label "Standard-Paket-Einzugsbereich") ; for picking the scope to be default
+  (install-pkg-default-scope-changed "Standard-Paket-Einzugsbereich erfolgeich auf ~a geändert") ; confirming message after change
   (install-pkg-installation "Bestimmte Racket-Installation")
   (install-pkg-user "Bestimmter Benutzer und Racket-Version")
   (install-pkg-set-as-default "Als Standard setzen")
@@ -1814,6 +1855,17 @@
   (install-pkg-update-package-list "Paket-Liste aktualisieren")
   (install-pkg-stop-update "Aktualisierung anhalten")
   (install-pkg-filter "Filter")
+  (install-pkg-match "~a/~a passen")
+  (install-pkg-package "Paket")
+  (install-pkg-author "Autor")
+  (install-pkg-description "Beschreibung")
+  (install-pkg-tags "Tags")
+  (install-pkg-checksum "Prüfsumme")
+  (install-pkg-source "Quelle")
+  (install-pkg-catalog "Katalog")
+  (install-pkg-scope "Einzugsbereich")
+  (install-pkg-name "Name")
+
   (install-pkg-update-catalogs? "Datenbank aktualisieren um mit dem konfigurierten Satz Kataloge übereinzustimmen?")
   (install-pkg-currently-configured-are "Die aktuell konfigurierten Kataloge sind")
   (install-pkg-database-recorded-are "Die Kataloge in der Datenbank sind")
@@ -1834,11 +1886,26 @@
   (install-pkg-close-terminal-output "Anzeige schließen")
   (install-pkg-show-all-options "Alle Optionen anzeigen")
   (install-pkg-migrate-available-installations "Verfügbare Installationen")
+    ;; all ~a will be substituted with the different single characters
+  ;; conveying the state, by default these are ✓*!=@
+  (install-pkg-legend "~a: installiert ~a: auto-installiert ~a: nicht Standard-Einzugsbereich ~a: installiert als Link; ~a: installiert von URL")
   (pkg-manager-menu-item "Paket-Manager…")
+  (install-pkg-title "Paket-Manager")
   ;; where ~a gets an installation name:
   (install-pkg-packages-for "Pakete für ~a")
   (install-pkg-really-remove-installation "Sind Sie sicher, dass Sie alle installierten Pakete und Informationen für ~a löschen wollen?")
 
+  (install-pkg-installer "Paket-Installation")
+  (install-pkg-copy "Nachricht kopieren")
+  (install-pkg-installation "Installation")
+  (install-pkg-user "Benutzer")
+  (install-pkg-any "alles") ;; any file type
+  (install-pkg-bad "nicht unterstützt") ;; bad (not supported) file type
+  (install-pkg-catalogs "Paket-Katalog")
+  (install-pkg-updating "Paket-Liste wird aktualisiert…")
+  (install-pkg-updating-from "Aktualisierung von ~a…")
+  (install-pkg-details-from "Details für ~a werden von ~a geladen…")
+  
   (install-pkg-abort-set-scope "Änderung des Einzugsbereich widerrufen")
 
   (install-pkg-dependencies-fail "Fehlschlag: Installation/Aktualisierung widerrufen, falls Abhänigkeiten fehlen")

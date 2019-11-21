@@ -80,6 +80,15 @@
 
 (application:current-app-name (string-constant drscheme))
 
+(define (string-ending-with-newline? s)
+  (and (string? s)
+       (regexp-match? #rx"\n$" s)))
+
+(preferences:set-default 'drracket:most-recent-lang-line "#lang racket\n"
+                         string-ending-with-newline?)
+
+(preferences:set-default 'drracket:save-files-on-tab-switch? #f boolean?)
+
 (preferences:set-default 'drracket:inline-overview-shown? #f boolean?)
 
 (preferences:set-default 'drracket:coverage-show-overview-bar #t boolean?)
@@ -87,8 +96,10 @@
 (preferences:set-default 'drracket:define-popup-hidden-prefixes '() (listof string?))
 
 (preferences:set-default 'drracket:materialized-user-docs-versions
-                         (if (equal? (system-type) 'macosx) '() #f)
-                         (or/c #f (listof string?)))
+                         (if (equal? (system-type) 'macosx) (hash) #f)
+                         (or/c #f
+                               (and/c (hash/c string? bytes? #:flat? #t)
+                                      immutable?)))
 
 (preferences:set-default 'drracket:open-module-path-last-used "" string?)
 
@@ -370,7 +381,10 @@
      (make-check-box 'drracket:coverage-show-overview-bar
                      (string-constant test-coverage-summary)
                      editor-panel)
-     
+
+     (make-check-box 'drracket:save-files-on-tab-switch?
+                     (string-constant save-after-switching-tabs)
+                     editor-panel)
      ))
   
   (preferences:add-to-editor-checkbox-panel
@@ -593,7 +607,7 @@
                    (or/c #f
                          (cons/c (or/c string? #f)
                                  (real-in 0 1024))))
-  (drr:set-default 'drracket:module-language:auto-text "#lang racket\n" string?)
+  (drr:set-default 'drracket:module-language:auto-text #f (or/c #f string?))
 
 (let ([drs-handler-recent-items-super%
        (class (drracket:frame:basics-mixin
@@ -877,7 +891,13 @@
        (make-basic))
      (when (and (preferences:get 'drracket:open-in-tabs)
                 (not (null? no-dups)))
-       (define first-one (car no-dups))
-       (send (send (group:get-the-frame-group) locate-file first-one)
-             make-visible first-one))))
+       ;; usually first-one will be (car no-dups) but sometimes
+       ;; opening a file results in an error so we don't actually
+       ;; open it, so `locate-file` returns #f.
+       (define first-one
+         (for/or ([nd (in-list no-dups)])
+           (define f (send (group:get-the-frame-group) locate-file nd))
+           (and f (cons f nd))))
+       (when first-one
+         (send (car first-one) make-visible (cdr first-one))))))
  #f)

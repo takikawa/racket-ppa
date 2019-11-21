@@ -35,7 +35,8 @@
 (provide (all-from-out test-engine/scheme-tests))
 (provide signature define-contract :
 	 contract ; legacy
-	 -> mixed one-of predicate combined list-of nonempty-list-of)
+	 one-of ; deprecated
+	 -> mixed predicate enum combined list-of nonempty-list-of)
 
 (provide number real rational integer natural
 	 boolean true false
@@ -1009,12 +1010,12 @@
 (define (false? x)
   (eq? x #f))
 
-(define true (signature truen (one-of #t)))
-(define false (signature false (one-of #f)))
+(define true (signature truen (enum #t)))
+(define false (signature false (enum #f)))
 
 (define string (signature/arbitrary arbitrary-printable-ascii-string string (predicate string?)))
 (define symbol (signature/arbitrary arbitrary-symbol symbol (predicate symbol?)))
-(define empty-list (signature empty-list (one-of empty)))
+(define empty-list (signature empty-list (enum empty)))
 
 (define unspecific (signature unspecific %unspecific))
 (define any (signature any %any))
