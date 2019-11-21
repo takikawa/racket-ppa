@@ -279,7 +279,7 @@
   (online-expansion-error-margin "dans la marge")
   ; the label of a preference in the (string-constant online-expansion) section
   (show-arrows-on-mouseover "Montrer dynamiquement les flèches pour les liens entre variables et pour les appels de fonctions en position terminale") ; mouse over -> dynamiquement
-  (show-blueboxes "Montrer les boites bleues et le quart de cercle bleu")
+  (show-blueboxes "Montrer les boites bleues et le quart de cercle bleu") ;; blue boxes should be ``signature'' boxes now
   ;;; info bar at botttom of drscheme frame
   (collect-button-label "Ramassage") ; de miettes
   (read-only "Lecture seulement")

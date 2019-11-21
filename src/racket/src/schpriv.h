@@ -436,6 +436,7 @@ void scheme_register_network_evts();
 
 void scheme_free_dynamic_extensions(void);
 void scheme_free_all_code(void);
+void scheme_clear_locale_cache(void);
 
 XFORM_NONGCING int scheme_is_multithreaded(int now);
 
@@ -849,6 +850,7 @@ struct Scheme_Custodian {
   Scheme_Close_Custodian_Client **closers;
   void **data;
   void ***data_ptr; /* points to `data`, registered as finalizer data for strong retention */
+  Scheme_Object *post_callbacks; /* additional callbacks run after all others */
 
   /* weak indirections: */
   Scheme_Custodian_Reference *parent;
@@ -876,7 +878,6 @@ Scheme_Thread *scheme_do_close_managed(Scheme_Custodian *m, Scheme_Exit_Closer_F
 Scheme_Custodian *scheme_get_current_custodian(void);
 void scheme_run_atexit_closers_on_all(Scheme_Exit_Closer_Func alt);
 void scheme_run_atexit_closers(Scheme_Object *o, Scheme_Close_Custodian_Client *f, void *data);
-void scheme_run_post_custodian_shutdown();
 
 typedef struct Scheme_Security_Guard {
   Scheme_Object so;
@@ -1025,19 +1026,22 @@ Scheme_Object *scheme_hash_table_iterate_next(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_hash_table_iterate_value(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_hash_table_iterate_key(int argc, Scheme_Object *argv[]);
 
+Scheme_Object *scheme_hash_get_key(Scheme_Hash_Table *table, Scheme_Object *key);
 Scheme_Object *scheme_hash_get_w_key_wraps(Scheme_Hash_Table *table, Scheme_Object *key,
-                                           Scheme_Object *key_wraps);
+                                           Scheme_Object *key_wraps, Scheme_Object **_interned_key);
 void scheme_hash_set_w_key_wraps(Scheme_Hash_Table *table, Scheme_Object *key, Scheme_Object *val,
                                  Scheme_Object *key_wraps);
+Scheme_Object *scheme_lookup_key_in_table(Scheme_Bucket_Table *table, const char *key);
 Scheme_Bucket *scheme_bucket_or_null_from_table_w_key_wraps(Scheme_Bucket_Table *table,
                                                             const char *key, int add,
                                                             Scheme_Object *key_wraps);
 void scheme_add_to_table_w_key_wraps(Scheme_Bucket_Table *table, const char *key, void *val, 
                                      int constant, Scheme_Object *key_wraps);
 void *scheme_lookup_in_table_w_key_wraps(Scheme_Bucket_Table *table, const char *key,
-                                         Scheme_Object *key_wraps);
+                                         Scheme_Object *key_wraps, Scheme_Object **_interned_key);
+Scheme_Object *scheme_hash_tree_get_key(Scheme_Hash_Tree *tree, Scheme_Object *key);
 Scheme_Object *scheme_hash_tree_get_w_key_wraps(Scheme_Hash_Tree *tree, Scheme_Object *key,
-                                                Scheme_Object *key_wraps);
+                                                Scheme_Object *key_wraps, Scheme_Object **_interned_key);
 Scheme_Hash_Tree *scheme_hash_tree_set_w_key_wraps(Scheme_Hash_Tree *tree, Scheme_Object *key, Scheme_Object *val,
                                                    Scheme_Object *key_wraps);
 
@@ -1270,6 +1274,7 @@ Scheme_Object *scheme_chaperone_props_get(Scheme_Object *props, Scheme_Object *p
 Scheme_Object *scheme_chaperone_props_remove(Scheme_Object *props, Scheme_Object *prop);
 
 Scheme_Object *scheme_chaperone_hash_get(Scheme_Object *table, Scheme_Object *key);
+Scheme_Object *scheme_chaperone_hash_get_key(Scheme_Object *table, Scheme_Object *key);
 Scheme_Object *scheme_chaperone_hash_traversal_get(Scheme_Object *table, Scheme_Object *key, Scheme_Object **alt_key);
 void scheme_chaperone_hash_set(Scheme_Object *table, Scheme_Object *key, Scheme_Object *val);
 
@@ -3313,6 +3318,7 @@ struct Scheme_Linklet
 
   char jit_ready; /* true if the linklet is in has been prepared for the JIT */
   char reject_eval; /* true when loaded without the root inspector, for example */
+  char serializable; /* record whether the linklet was intended to be serialized */
 
   Scheme_Hash_Table *constants; /* holds info about the linklet's body for inlining */
 
@@ -3601,6 +3607,7 @@ void scheme_flush_orig_outputs(void);
 void scheme_flush_if_output_fds(Scheme_Object *o);
 Scheme_Object *scheme_file_stream_port_p(int, Scheme_Object *[]);
 Scheme_Object *scheme_terminal_port_p(int, Scheme_Object *[]);
+Scheme_Object *scheme_port_waiting_peer_p(int, Scheme_Object *[]);
 Scheme_Object *scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[], 
                                          int internal, int for_module);
 Scheme_Object *scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv[], int and_read, 

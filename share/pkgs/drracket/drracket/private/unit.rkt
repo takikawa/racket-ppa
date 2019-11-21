@@ -7,6 +7,7 @@
          racket/port
          racket/list
          racket/match
+         racket/format
          string-constants
          framework
          framework/private/srcloc-panel
@@ -2267,9 +2268,14 @@
         (let ([label (gui-utils:trim-string (get-defs-tab-label (send tab get-defs) tab) 200)])
           (unless (equal? label (send tabs-panel get-item-label (send tab get-i)))
             (send tabs-panel set-item-label (send tab get-i) label))))
-      
-      (define/public (get-tab-filename i)
-        (get-defs-tab-filename (send (list-ref tabs i) get-defs)))
+
+      ;; get-tab-filename : (or/c (is-a?/c tab<%>) natural?) -> string? [the tab's label]
+      (define/public (get-tab-filename _tab)
+        (define tab
+          (cond
+            [(exact-nonnegative-integer? _tab) (list-ref tabs _tab)]
+            [else _tab]))
+        (get-defs-tab-filename (send tab get-defs)))
       
       (define/private (get-defs-tab-label defs tab)
         (define tab-index
@@ -2648,68 +2654,64 @@
          (λ (c) (set! interactions-canvases c))))
       
       (define/private (handle-collapse target get-canvases set-canvases!)
-        (if (= 1 (length (get-canvases)))
-            (bell)
-            (let* ([old-percentages (send resizable-panel get-percentages)]
-                   [soon-to-be-bigger-canvas #f]
-                   [percentages
-                    (if (and target (eq? (car (get-canvases)) target))
-                        (begin
-                          (set! soon-to-be-bigger-canvas (cadr (get-canvases)))
-                          (cons (+ (car old-percentages)
-                                   (cadr old-percentages))
-                                (cddr old-percentages)))
-                        (let loop ([canvases (cdr (get-canvases))]
-                                   [prev-canvas (car (get-canvases))]
-                                   [percentages (cdr old-percentages)]
-                                   [prev-percentage (car old-percentages)])
-                          (cond
-                            [(null? canvases)
-                             (error 'collapse "internal error.1")]
-                            [(null? percentages)
-                             (error 'collapse "internal error.2")]
-                            [else
-                             (if (and target (eq? (car canvases) target))
-                                 (begin
-                                   (set! soon-to-be-bigger-canvas prev-canvas)
-                                   (cons (+ (car percentages)
-                                            prev-percentage)
-                                         (cdr percentages)))
-                                 (cons prev-percentage
-                                       (loop (cdr canvases)
-                                             (car canvases)
-                                             (cdr percentages)
-                                             (car percentages))))])))])
-              (unless soon-to-be-bigger-canvas
-                (error 'collapse "internal error.3"))
-              (set-canvases! (remq target (get-canvases)))
-              (update-shown)
+        (cond
+          [(= 1 (length (get-canvases))) (bell)]
+          [else
+           (define old-percentages (send resizable-panel get-percentages))
+           (define soon-to-be-bigger-canvas #f)
+           (define percentages
+             (cond
+               [(and target (eq? (car (get-canvases)) target))
+                (set! soon-to-be-bigger-canvas (cadr (get-canvases)))
+                (cons (+ (car old-percentages)
+                         (cadr old-percentages))
+                      (cddr old-percentages))]
+               [else
+                (let loop ([canvases (cdr (get-canvases))]
+                           [prev-canvas (car (get-canvases))]
+                           [percentages (cdr old-percentages)]
+                           [prev-percentage (car old-percentages)])
+                  (cond
+                    [(null? canvases)
+                     (error 'collapse "internal error.1")]
+                    [(null? percentages)
+                     (error 'collapse "internal error.2")]
+                    [else
+                     (cond
+                       [(and target (eq? (car canvases) target))
+                        (set! soon-to-be-bigger-canvas prev-canvas)
+                        (cons (+ (car percentages)
+                                 prev-percentage)
+                              (cdr percentages))]
+                       [else
+                        (cons prev-percentage
+                              (loop (cdr canvases)
+                                    (car canvases)
+                                    (cdr percentages)
+                                    (car percentages)))])]))]))
+           (unless soon-to-be-bigger-canvas
+             (error 'collapse "internal error.3"))
+           (set-canvases! (remq target (get-canvases)))
+           (update-shown)
               
-              (let ([target-admin 
-                     (send target call-as-primary-owner
-                           (λ ()
-                             (send (send target get-editor) get-admin)))]
-                    [to-be-bigger-admin 
-                     (send soon-to-be-bigger-canvas call-as-primary-owner
-                           (λ ()
-                             (send (send soon-to-be-bigger-canvas get-editor) get-admin)))])
-                (let-values ([(bx by bw bh) (get-visible-area target-admin)])
+           (define target-admin
+             (send target call-as-primary-owner
+                   (λ ()
+                     (send (send target get-editor) get-admin))))
+           (define to-be-bigger-admin
+             (send soon-to-be-bigger-canvas call-as-primary-owner
+                   (λ ()
+                     (send (send soon-to-be-bigger-canvas get-editor) get-admin))))
+           (define-values (bx by bw bh) (get-visible-area to-be-bigger-admin))
                   
-                  ;; this line makes the soon-to-be-bigger-canvas bigger
-                  ;; if it fails, we're out of luck, but at least we don't crash.
-                  (with-handlers ([exn:fail? (λ (x) (void))])
-                    (send resizable-panel set-percentages percentages))
-                  
-                  (let-values ([(ax ay aw ah) (get-visible-area to-be-bigger-admin)])
-                    (send soon-to-be-bigger-canvas scroll-to
-                          bx
-                          (- by (/ (- ah bh) 2))
-                          aw
-                          ah
-                          #t))))
-              
-              (send target set-editor #f)
-              (send soon-to-be-bigger-canvas focus))))
+           ;; this line makes the soon-to-be-bigger-canvas bigger
+           ;; if it fails, we're out of luck, but at least we don't crash.
+           (with-handlers ([exn:fail? (λ (x) (void))])
+             (send resizable-panel set-percentages percentages))
+
+           (send soon-to-be-bigger-canvas scroll-to bx by bw bh #t)
+           (send target set-editor #f)
+           (send soon-to-be-bigger-canvas focus)]))
       ;                                                                          
       ;                                                                          
       ;                                                                          
@@ -2861,47 +2863,49 @@
       ;; just the execute button.
       (define/public (execute-callback)
         (when (send execute-button is-enabled?)
+          (when (check-if-unsaved-tabs-and-maybe-save)
           
-          ;; if the language is not-a-language, and the buffer looks like a module,
-          ;; automatically make the switch to the module language
-          (let ([next-settings (send definitions-text get-next-settings)])
-            (when (is-a? (drracket:language-configuration:language-settings-language next-settings) 
-                         drracket:language-configuration:not-a-language-language<%>)
-              (when (looks-like-module? definitions-text)
-                (define-values (module-language module-language-settings)
-                  (get-module-language/settings))
-                (when (and module-language module-language-settings)
-                  (send definitions-text set-next-settings 
-                        (drracket:language-configuration:language-settings
-                         module-language
-                         module-language-settings))))))
+            ;; if the language is not-a-language, and the buffer looks like a module,
+            ;; automatically make the switch to the module language
+            (let ([next-settings (send definitions-text get-next-settings)])
+              (when (is-a? (drracket:language-configuration:language-settings-language next-settings) 
+                           drracket:language-configuration:not-a-language-language<%>)
+                (when (looks-like-module? definitions-text)
+                  (define-values (module-language module-language-settings)
+                    (get-module-language/settings))
+                  (when (and module-language module-language-settings)
+                    (send definitions-text set-next-settings 
+                          (drracket:language-configuration:language-settings
+                           module-language
+                           module-language-settings))))))
           
-          (check-if-save-file-up-to-date)
-          (when (preferences:get 'drracket:show-interactions-on-execute)
-            (ensure-rep-shown interactions-text))
-          (when transcript
-            (record-definitions)
-            (record-interactions))
-          (send definitions-text just-executed)
-          (send language-message set-yellow #f)
-          (send interactions-canvas focus)
-          (send interactions-text reset-console)
-          (send interactions-text clear-undos)
+            (check-if-save-file-up-to-date)
+            (when (preferences:get 'drracket:show-interactions-on-execute)
+              (ensure-rep-shown interactions-text))
+            (when transcript
+              (record-definitions)
+              (record-interactions))
+            (send definitions-text just-executed)
+            (send language-message set-yellow #f)
+            (send interactions-canvas focus)
+            (send interactions-text reset-console)
+            (send interactions-text clear-undos)
           
-          (define name (send definitions-text get-port-name))
-          (define defs-copy (new text%))
-          (send defs-copy set-style-list (send definitions-text get-style-list)) ;; speeds up the copy
-          (send definitions-text copy-self-to defs-copy)
-          (define text-port (open-input-text-editor defs-copy 0 'end values name #t))
-          (port-count-lines! text-port)
-          (send interactions-text evaluate-from-port
-                text-port
-                #t
-                (λ ()
-                  (parameterize ([current-eventspace drracket:init:system-eventspace])
-                    (queue-callback 
-                     (λ ()
-                       (send interactions-text clear-undos))))))))
+            (define name (send definitions-text get-port-name))
+            (define defs-copy (new text%))
+             ;; speeds up the copy
+            (send defs-copy set-style-list (send definitions-text get-style-list))
+            (send definitions-text copy-self-to defs-copy)
+            (define text-port (open-input-text-editor defs-copy 0 'end values name #t))
+            (port-count-lines! text-port)
+            (send interactions-text evaluate-from-port
+                  text-port
+                  #t
+                  (λ ()
+                    (parameterize ([current-eventspace drracket:init:system-eventspace])
+                      (queue-callback 
+                       (λ ()
+                         (send interactions-text clear-undos)))))))))
       
       (inherit revert save)
       (define/private (check-if-save-file-up-to-date)
@@ -2920,7 +2924,76 @@
             (case user-choice
               [(1) (void)]
               [(2) (revert)]))))
+
+      ;; returns #f if we should abort `Run`, #t if it is okay to `Run`
+      (define/private (check-if-unsaved-tabs-and-maybe-save)
+        (define save-candidates (get-unsaved-candidate-tabs #t))
+        (cond
+          [(null? save-candidates) #t]
+          [else
+           (define-values (cancel-run? do-save?)
+             (does-user-want-to-save-all-unsaved-files? save-candidates))
+           (cond
+             [cancel-run? #f]
+             [do-save?
+              (define continue?
+                (let/ec k
+                  (for ([tab (in-list save-candidates)])
+                    (unless (send (send tab get-defs) save-file/gui-error)
+                      (k #f)))
+                  #t))
+              (update-tabs-labels)
+              continue?]
+             [else #t])]))
+
+      (define/private (save-all-unsaved-files)
+        (let/ec k
+          (for ([tab (in-list (get-unsaved-candidate-tabs #f))])
+            (unless (send (send tab get-defs) save-file/gui-error)
+              (k (void)))))
+        (update-tabs-labels))
+
+      (define/private (get-unsaved-candidate-tabs skip-me?)
+        (define focused-frame (get-top-level-focus-window))
+        (for*/list ([frame (in-list (send (group:get-the-frame-group) get-frames))]
+                    #:when (is-a? frame drracket:unit:frame<%>)
+                    [tab (in-list (send frame get-tabs))]
+                    #:unless (and skip-me?
+                                  (eq? focused-frame frame)
+                                  (eq? current-tab tab))
+                    #:when (let ([defs (send tab get-defs)])
+                             (and (send defs is-modified?)
+                                  (send defs get-filename))))
+          tab))
       
+      (define/private (does-user-want-to-save-all-unsaved-files? save-candidates)
+        (define-values (message-box-result checked?)
+          (message+check-box/custom
+           (string-constant drracket)
+           (if (= (length save-candidates) 1)
+               (format (string-constant one-file-not-saved-do-the-save?)
+                       (get-tab-filename (car save-candidates)))
+               (apply
+                string-append
+                (string-constant many-files-not-saved-do-the-save?)
+                (for/list ([tab (in-list save-candidates)])
+                  (~a "\n" (get-tab-filename tab)))))
+           (string-constant save-after-switching-tabs)
+           (string-constant save-all-files)
+           (string-constant dont-save)
+           #f
+           this ; parent
+           (append
+            (if (preferences:get 'drracket:save-files-on-tab-switch?)
+                '(checked)
+                '())
+            '(default=1))))
+        (preferences:set 'drracket:save-files-on-tab-switch? checked?)
+        (case message-box-result
+          [(1) (values #f #t)]    ;; clicked save-all -> save (and run)
+          [(2) (values #f #f)]    ;; clicked dont-save -> don't save, but still run
+          [(#f) (values #t #f)])) ;; closed the dialog (with esc) -> cancel
+
       (inherit get-menu-bar get-focus-object get-edit-target-object)
       
       (define/override (get-editor) definitions-text)
@@ -3043,6 +3116,9 @@
             (for-each (λ (ints-canvas) (send ints-canvas refresh))
                       interactions-canvases)
             (set-color-status! (send definitions-text is-lexer-valid?))
+            
+            (when (preferences:get 'drracket:save-files-on-tab-switch?)
+              (save-all-unsaved-files))
             (send definitions-text end-edit-sequence)
             (send interactions-text end-edit-sequence)
             (end-container-sequence)
@@ -3268,6 +3344,8 @@
       
       (define/override (on-activate active?)
         (when active?
+          (when (preferences:get 'drracket:save-files-on-tab-switch?)
+            (save-all-unsaved-files))
           (send (get-current-tab) touched))
         (super on-activate active?))
       

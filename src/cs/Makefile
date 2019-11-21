@@ -275,6 +275,7 @@ RUMBLE_SRCS = rumble/define.ss \
               rumble/bytes.ss \
               rumble/string.ss \
               rumble/char.ss \
+              rumble/char-range.ss \
               rumble/symbol.ss \
               rumble/list.ss \
               rumble/vector.ss \
@@ -297,6 +298,7 @@ RUMBLE_SRCS = rumble/define.ss \
               rumble/place.ss \
               rumble/errno-data.ss \
               rumble/foreign.ss \
+              rumble/async-callback.ss \
               rumble/future.ss \
               rumble/version.ss \
               rumble/inline.ss \

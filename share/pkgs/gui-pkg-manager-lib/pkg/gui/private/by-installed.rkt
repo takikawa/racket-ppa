@@ -42,13 +42,13 @@
 (define (source->string s)
   (format "~a: ~a"
           (case (car s)
-            [(catalog) "Catalog"]
-            [(url) "URL"]
-            [(link) "Link"]
-            [(static-link) "Static link"]
-            [(file) "File"]
-            [(dir) "Directory copy"]
-            [(clone) "Clone"])
+            [(catalog) (string-constant install-pkg-catalog)]
+            [(url) (string-constant install-plt-url)]
+            [(link) (string-constant install-pkg-link)]
+            [(static-link) (string-constant install-pkg-static-link)]
+            [(file) (string-constant install-pkg-file)]
+            [(dir) (string-constant install-pkg-dir)]
+            [(clone) (string-constant install-pkg-git)])
           (cadr s)))
 
 (define (status-string a default-scope)
@@ -100,7 +100,11 @@
            [parent this]
            [label #f]
            [choices null]
-           [columns (list check-mark "Scope" "Name" "Checksum" "Source")]
+           [columns (list check-mark
+	              (string-constant install-pkg-scope)
+		      (string-constant install-pkg-name)
+		      (string-constant install-pkg-checksum)
+		      (string-constant install-pkg-source))]
            [style '(multiple column-headers clickable-headers)]
            [callback (lambda (lb e)
                        (when (e . is-a? . column-control-event%)

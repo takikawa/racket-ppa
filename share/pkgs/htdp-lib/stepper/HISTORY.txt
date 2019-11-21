@@ -1,9 +1,13 @@
 Stepper
 -------
 
-Changes for 7.3:
+Changes for 7.5:
 
-None.
+New button layout.
+
+Changes for 7.4:
+
+None
 
 Changes for 7.3:
 

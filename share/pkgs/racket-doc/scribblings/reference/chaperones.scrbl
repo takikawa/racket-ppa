@@ -178,7 +178,7 @@ an impersonator/chaperone of a value that was created with
 @defproc[(impersonate-procedure [proc procedure?]
                                 [wrapper-proc (or/c procedure? #f)]
                                 [prop impersonator-property?]
-                                [prop-val any] ... ...)
+                                [prop-val any/c] ... ...)
          (and/c procedure? impersonator?)]{
 
 Returns an impersonator procedure that has the same arity, name, and
@@ -226,13 +226,13 @@ impersonator (i.e., not counting optional arguments that were
 not supplied). The arguments must be ordered according to the sorted
 order of the supplied arguments' keywords.
 
-If @racket[wrapper] is @racket[#f], then applying the resulting
+If @racket[wrapper-proc] is @racket[#f], then applying the resulting
 impersonator is the same as applying @racket[proc]. If
-@racket[wrapper] is @racket[#f] and no @racket[prop] is provided, then
+@racket[wrapper-proc] is @racket[#f] and no @racket[prop] is provided, then
 @racket[proc] is returned and is not impersonated.
 
 Pairs of @racket[prop] and @racket[prop-val] (the number of arguments
-to @racket[procedure-impersonator] must be even) add impersonator properties
+to @racket[impersonate-procedure] must be even) add impersonator properties
 or override impersonator-property values of @racket[proc].
 
 If any @racket[prop] is @racket[impersonator-prop:application-mark] and if the
@@ -296,7 +296,7 @@ of impersonators with respect to wrapping impersonators to be detected within
 @defproc[(impersonate-procedure* [proc procedure?]
                                  [wrapper-proc (or/c procedure? #f)]
                                  [prop impersonator-property?]
-                                 [prop-val any] ... ...)
+                                 [prop-val any/c] ... ...)
          (and/c procedure? impersonator?)]{
 
 Like @racket[impersonate-procedure], except that @racket[wrapper-proc]
@@ -323,7 +323,7 @@ that are overridden by further impersonators, for example.
                                               struct-type-property-accessor-procedure?)]
                              [redirect-proc (or/c procedure? #f)] ... ...
                              [prop impersonator-property?]
-                             [prop-val any] ... ...)
+                             [prop-val any/c] ... ...)
           any/c]{
 
 Returns an impersonator of @racket[v], which redirects certain
@@ -397,7 +397,7 @@ after @racket[redirect-proc] (in the case of a mutator).
                              [ref-proc (or/c (vector? exact-nonnegative-integer? any/c . -> . any/c) #f)]
                              [set-proc (or/c (vector? exact-nonnegative-integer? any/c . -> . any/c) #f)]
                              [prop impersonator-property?]
-                             [prop-val any] ... ...)
+                             [prop-val any/c] ... ...)
           (and/c vector? impersonator?)]{
 
 Returns an impersonator of @racket[vec], which redirects the
@@ -430,7 +430,7 @@ or override impersonator-property values of @racket[vec].
                               [ref-proc (or/c (vector? vector? exact-nonnegative-integer? any/c . -> . any/c) #f)]
                               [set-proc (or/c (vector? vector? exact-nonnegative-integer? any/c . -> . any/c) #f)]
                               [prop impersonator-property?]
-                              [prop-val any] ... ...)
+                              [prop-val any/c] ... ...)
           (and/c vector? impersonator?)]{
  Like @racket[impersonate-vector], except that @racket[ref-proc] and @racket[set-proc] each receive
  an additional vector as argument before other arguments. The additional argument is the original
@@ -446,7 +446,7 @@ or override impersonator-property values of @racket[vec].
                           [unbox-proc (box? any/c . -> . any/c)]
                           [set-proc (box? any/c . -> . any/c)]
                           [prop impersonator-property?]
-                          [prop-val any] ... ...)
+                          [prop-val any/c] ... ...)
           (and/c box? impersonator?)]{
 
 Returns an impersonator of @racket[box], which redirects the
@@ -476,7 +476,7 @@ or override impersonator-property values of @racket[box].}
                            [clear-proc (or/c #f (hash? . -> . any)) #f]
                            [equal-key-proc (or/c #f (hash? any/c . -> . any/c)) #f]
                            [prop impersonator-property?]
-                           [prop-val any] ... ...)
+                           [prop-val any/c] ... ...)
           (and/c hash? impersonator?)]{
 
 Returns an impersonator of @racket[hash], which redirects the
@@ -491,7 +491,9 @@ In addition, operations like
 keys from the table, use @racket[key-proc] to replace keys extracted
 from the table. Operations like @racket[hash-iterate-value] or
 @racket[hash-values] implicitly use @racket[hash-ref] and
-therefore redirect through @racket[ref-proc].
+therefore redirect through @racket[ref-proc]. The @racket[hash-ref-key]
+operation uses both @racket[ref-proc] and @racket[key-proc], the
+former to lookup the requested key and the latter to extract it.
 
 The @racket[ref-proc] must accept @racket[hash] and a key passed
 to @racket[hash-ref]. It must return a replacement key
@@ -499,7 +501,8 @@ as well as a procedure. The returned procedure is called only if the
 returned key is found in @racket[hash] via @racket[hash-ref], in which
 case the procedure is called with @racket[hash], the previously
 returned key, and the found value. The returned procedure must itself
-return a replacement for the found value.
+return a replacement for the found value. The returned procedure
+is ignored by @racket[hash-ref-key].
 
 The @racket[set-proc] must accept @racket[hash], a key passed to
 @racket[hash-set!] or @racket[hash-set], and the value passed to
@@ -515,10 +518,10 @@ replacement for the key, which is used with @racket[hash-remove!] or
 mapping using the (impersonator-replaced) key.
 
 The @racket[key-proc] must accept @racket[hash] and a key that has
-been extracted from @racket[hash] (by @racket[hash-iterate-key] or
-other operations that use @racket[hash-iterate-key] internally); it
-must produce a replacement for the key, which is then reported as a
-key extracted from the table.
+been extracted from @racket[hash] (by @racket[hash-ref-key],
+@racket[hash-iterate-key], or other operations that use
+@racket[hash-iterate-key] internally); it must produce a replacement
+for the key, which is then reported as a key extracted from the table.
 
 If @racket[clear-proc] is not @racket[#f], it must accept
 @racket[hash] as an argument, and its result is ignored. The fact that
@@ -567,7 +570,7 @@ the second hash table.
                               [get-proc (channel? . -> . (values channel? (any/c . -> . any/c)))]
                               [put-proc (channel? any/c . -> . any/c)]
                               [prop impersonator-property?]
-                              [prop-val any] ... ...)
+                              [prop-val any/c] ... ...)
           (and/c channel? impersonator?)]{
 
 Returns an impersonator of @racket[channel], which redirects the
@@ -595,7 +598,7 @@ or override impersonator-property values of @racket[channel].}
                                  [cc-guard-proc procedure? values]
                                  [callcc-impersonate-proc (procedure? . -> . procedure?) (lambda (p) p)]
                                  [prop impersonator-property?]
-                                 [prop-val any] ... ...)
+                                 [prop-val any/c] ... ...)
           (and/c continuation-prompt-tag? impersonator?)]{
 
 Returns an impersonator of @racket[prompt-tag], which redirects
@@ -659,7 +662,7 @@ or override impersonator-property values of @racket[prompt-tag].
           [get-proc procedure?]
           [set-proc procedure?]
           [prop impersonator-property?]
-          [prop-val any] ... ...)
+          [prop-val any/c] ... ...)
          (and/c continuation-mark? impersonator?)]{
 
 Returns an impersonator of @racket[key], which redirects
@@ -751,7 +754,7 @@ and frequently used within a library.
 @defproc[(chaperone-procedure [proc procedure?]
                               [wrapper-proc (or/c procedure? #f)]
                               [prop impersonator-property?]
-                              [prop-val any] ... ...)
+                              [prop-val any/c] ... ...)
          (and/c procedure? chaperone?)]{
 
 Like @racket[impersonate-procedure], but for each value supplied to
@@ -774,7 +777,7 @@ order of the supplied arguments' keywords.}
 @defproc[(chaperone-procedure* [proc procedure?]
                                [wrapper-proc (or/c procedure? #f)]
                                [prop impersonator-property?]
-                               [prop-val any] ... ...)
+                               [prop-val any/c] ... ...)
          (and/c procedure? chaperone?)]{
 
 Like @racket[chaperone-procedure], but @racket[wrapper-proc] receives
@@ -791,7 +794,7 @@ an extra argument as with @racket[impersonate-procedure*].
                                             (one-of/c struct-info))]
                            [redirect-proc (or/c procedure? #f)] ... ...
                            [prop impersonator-property?]
-                           [prop-val any] ... ...)
+                           [prop-val any/c] ... ...)
           any/c]{
 
 Like @racket[impersonate-struct], but with the following refinements,
@@ -847,7 +850,7 @@ or structure type.
                            [ref-proc (or/c (vector? exact-nonnegative-integer? any/c . -> . any/c) #f)]
                            [set-proc (or/c (vector? exact-nonnegative-integer? any/c . -> . any/c) #f)]
                            [prop impersonator-property?]
-                           [prop-val any] ... ...)
+                           [prop-val any/c] ... ...)
           (and/c vector? chaperone?)]{
 
 Like @racket[impersonate-vector], but with support for immutable vectors. The
@@ -860,7 +863,7 @@ not be used if @racket[vec] is immutable.}
                             [ref-proc (or/c (vector? vector? exact-nonnegative-integer? any/c . -> . any/c) #f)]
                             [set-proc (or/c (vector? vector? exact-nonnegative-integer? any/c . -> . any/c) #f)]
                             [prop impersonator-property?]
-                            [prop-val any] ... ...)
+                            [prop-val any/c] ... ...)
          (and/c vector? chaperone?)]{
  Like @racket[chaperone-vector], but @racket[ref-proc] and @racket[set-proc] receive an extra argument
  as with @racket[impersonate-vector*].
@@ -872,7 +875,7 @@ not be used if @racket[vec] is immutable.}
                         [unbox-proc (box? any/c . -> . any/c)]
                         [set-proc (box? any/c . -> . any/c)]
                         [prop impersonator-property?]
-                        [prop-val any] ... ...)
+                        [prop-val any/c] ... ...)
           (and/c box? chaperone?)]{
 
 Like @racket[impersonate-box], but with support for immutable boxes. The
@@ -892,7 +895,7 @@ the same value or a chaperone of the value that it is given.  The
                          [clear-proc (or/c #f (hash? . -> . any)) #f]
                          [equal-key-proc (or/c #f (hash? any/c . -> . any/c)) #f]
                          [prop impersonator-property?]
-                         [prop-val any] ... ...)
+                         [prop-val any/c] ... ...)
           (and/c hash? chaperone?)]{
 
 Like @racket[impersonate-hash], but with constraints on the given functions
@@ -912,7 +915,7 @@ procedures must produce the given key or a chaperone of the key.
                                 [make-constructor-proc (procedure? . -> . procedure?)]
                                 [guard-proc procedure?]
                                 [prop impersonator-property?]
-                                [prop-val any] ... ...)
+                                [prop-val any/c] ... ...)
           (and/c struct-type? chaperone?)]{
 
 Returns a chaperoned value like @racket[struct-type], but with
@@ -953,7 +956,7 @@ or override impersonator-property values of @racket[struct-type].}
 @defproc[(chaperone-evt [evt evt?]
                         [proc (evt? . -> . (values evt? (any/c . -> . any/c)))]
                         [prop impersonator-property?]
-                        [prop-val any] ... ...)
+                        [prop-val any/c] ... ...)
           (and/c evt? chaperone?)]{
 
 Returns a chaperoned value like @racket[evt], but with @racket[proc]
@@ -977,7 +980,7 @@ or override impersonator-property values of @racket[evt].}
                             [get-proc (channel? . -> . (values channel? (any/c . -> . any/c)))]
                             [put-proc (channel? any/c . -> . any/c)]
                             [prop impersonator-property?]
-                            [prop-val any] ... ...)
+                            [prop-val any/c] ... ...)
           (and/c channel? chaperone?)]{
 
 Like @racket[impersonate-channel], but with restrictions on the
@@ -1003,7 +1006,7 @@ or override impersonator-property values of @racket[channel].}
                                [cc-guard-proc procedure? values]
                                [callcc-chaperone-proc (procedure? . -> . procedure?) (lambda (p) p)]
                                [prop impersonator-property?]
-                               [prop-val any] ... ...)
+                               [prop-val any/c] ... ...)
           (and/c continuation-prompt-tag? chaperone?)]{
 
 Like @racket[impersonate-prompt-tag], but produces a chaperoned value.
@@ -1049,7 +1052,7 @@ procedure.
           [get-proc procedure?]
           [set-proc procedure?]
           [prop impersonator-property?]
-          [prop-val any] ... ...)
+          [prop-val any/c] ... ...)
          (and/c continuation-mark-key? chaperone?)]{
 
 Like @racket[impersonate-continuation-mark-key], but produces a

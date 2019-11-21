@@ -33,9 +33,10 @@
          custodian-register-thread
          custodian-register-place
          raise-custodian-is-shut-down
-         set-post-shutdown-action!
+         unsafe-add-post-custodian-shutdown
          check-queued-custodian-shutdown
          set-place-custodian-procs!
+         set-post-shutdown-action!
          custodian-check-immediate-limit)
 
 (module+ scheduling
@@ -74,13 +75,15 @@
   (make-parameter root-custodian
                   (lambda (v)
                     (check who custodian? v)
-                    v)))
+                    v)
+                  'current-custodian))
 
 ;; To initialize a new place:
 (define (set-root-custodian! c)
   (set! root-custodian c)
   (current-custodian c)
-  (set! custodian-will-executor (host:make-late-will-executor void #f)))
+  (set! custodian-will-executor (host:make-late-will-executor void #f))
+  (set! custodians-with-limits (make-hasheq)))
 
 (define/who (make-custodian [parent (current-custodian)])
   (check who custodian? parent)
@@ -185,6 +188,10 @@
     (when self-ref
       (set-custodian-reference-c! self-ref (custodian-self-reference parent)))
     (hash-clear! (custodian-children c))
+    (set-custodian-post-shutdown! parent
+                                  (append (custodian-post-shutdown c)
+                                          (custodian-post-shutdown parent)))
+    (set-custodian-post-shutdown! c null)
     (when gc-roots (hash-clear! gc-roots))))
   
 ;; Called in scheduler thread:
@@ -265,7 +272,7 @@
 ;; In atomic mode
 (define (do-custodian-shutdown-all c)
   (unless (custodian-shut-down? c)
-    (set-custodian-shut-down?! c #t)
+    (set-custodian-shut-down! c)
     (when (custodian-sync-futures? c)
       (futures-sync-for-custodian-shutdown))
     (for ([(child callback) (in-hash (custodian-children c))])
@@ -273,6 +280,9 @@
           (callback child c)
           (callback child)))
     (hash-clear! (custodian-children c))
+    (for ([proc (in-list (custodian-post-shutdown c))])
+      (proc))
+    (set-custodian-post-shutdown! c null)
     (let ([sema (custodian-shutdown-sema c)])
       (when sema
         (semaphore-post-all sema)))
@@ -289,6 +299,15 @@
          (when (custodian-shut-down? c)
            (semaphore-post-all sema))
          sema))))
+
+(define/who (unsafe-add-post-custodian-shutdown proc [custodian #f])
+  (check who (procedure-arity-includes/c 0) proc)
+  (check who custodian? #:or-false custodian)
+  (define c (or custodian (place-custodian current-place)))
+  (unless (and (not (place-parent current-place))
+               (eq? c (place-custodian current-place)))
+    (atomically
+     (set-custodian-post-shutdown! c (cons proc (custodian-post-shutdown c))))))
 
 (define (custodian-subordinate? c super-c)
   (let loop ([p-cref (custodian-parent-reference c)])
@@ -356,7 +375,7 @@
 
 ;; Ensures that custodians with memory limits are not treated as
 ;; inaccessible and merged:
-(define custodians-with-limits (make-hasheq))
+(define-place-local custodians-with-limits (make-hasheq))
 
 ;; ----------------------------------------
 

@@ -21,7 +21,7 @@
 		#;require lib planet
 		check-expect check-within check-error check-satisfied
 		signature :
-		predicate one-of mixed list %a %b %c
+		predicate enum mixed list %a %b %c
 		lit ...)
    (... [program (code:line def-or-expr ...)])
    [def-or-expr definition
@@ -56,7 +56,7 @@
    [field id (id id)]
    [sig  id
 	      @#,racket[(predicate expr)]
-	      @#,racket[(one-of expr (... ...))]
+	      @#,racket[(enum expr (... ...))]
 	      @#,racket[(mixed sig (... ...))]
 	      @#,racket[(code:line (sig (... ...) -> sig) (code:comment @#,seclink["proc-signature"]{Prozedur-Signatur}))]
 	      @#,racket[(list-of sig)]
@@ -70,6 +70,7 @@
 	    @#,racket[number]
 	    @#,racket[string]
 	    @#,racket[id]
+	    @#,racket[(... ...)]
 	    @#,racket[(constructor pattern (... ...))]
 	    pattern-rule ...]
 	    

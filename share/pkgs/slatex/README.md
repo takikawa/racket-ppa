@@ -1,0 +1,48 @@
+# slatex
+
+This the source for the Racket package: "slatex".
+
+### Contributing
+
+Contribute to Racket by submitting a [pull request], reporting an
+[issue], joining the [development mailing list], or visiting the
+IRC or Slack channels.
+
+### License
+
+Racket, including these packages, is free software, see [LICENSE]
+for more details.
+
+By making a contribution, you are agreeing that your contribution
+is licensed under the [Apache 2.0] license.
+
+### Instructions for rebuilding (note: out of date)
+
+This collection contains Dorai Sitaram's slatex.  Unlike prior versions of this 
+collection, it contains only the 'translated' --- that is, the mzscheme-specific
+--- version of slatex.  This means that an update to slatex can only be incorporated
+into the PLT collects world by manually running scmxlate and placing the resulting
+file into this collection.
+
+Instructions for updating to a new version of SLaTeX (for the maintainer of this 
+collection):
+
+1) Follow Dorai's instructions for generating the file 'slatex.scm' (currently,
+this involves downloading the 'scmxlate' and 'slatex' packages and loading 
+the scmxlate.scm file while (current-directory) points to the slatex 
+directory.
+
+2) place this file in $PLTHOME/collects/slatex/private.
+3) also copy slatex.sty to $PLTHOME/collects/slatex.
+
+4) (hopefully temporary?) Modify slatex.scm so that it doesn't refer to
+   slatex::slatex-error at evaluation time.
+
+5) check it in.
+
+
+[Apache 2.0]: https://www.apache.org/licenses/LICENSE-2.0.txt
+[pull request]: https://github.com/racket/slatex/pulls
+[issue]: https://github.com/racket/slatex/issues
+[development mailing list]: https://lists.racket-lang.org
+[LICENSE]: LICENSE
