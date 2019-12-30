@@ -885,9 +885,10 @@ Identical to @racket[e] but only includes the values between
  given.
 
  If there are multiple arguments, then they must all be
- distinct; numbers except for @racket[+nan.0] and @racket[+nan.f] are
- compared using @racket[=] and all others are compared using
- @racket[equal?]).
+ distinct; numbers except for @racket[+nan.0] and
+ @racket[+nan.f] are compared using @racket[=] and all other
+ values (including @racket[+nan.0] and @racket[+nan.f]) are
+ compared using @racket[equal?].
  
  If some other
  equality function is appropriate, use @racket[map/e]
@@ -948,8 +949,11 @@ An @tech{enumeration} of natural numbers larger than @racket[lo].
                     [small (and/c two-way-enum? flat-enum? finite-enum?)])
          two-way-enum?]{
  Returns a @tech{two way enumeration} like @racket[big] except
- that the elements of @racket[small] are removed. See also
- @racket[except/e]. This operation is the one from @citet[whats-the-difference]'s
+ that the elements of @racket[small] are removed. Every element
+ in @racket[small] must also be in @racket[big]. See also
+ @racket[except/e].
+
+ This operation is the one from @citet[whats-the-difference]'s
  paper on subtracting bijections.
 
  @examples[#:eval the-eval
@@ -960,7 +964,7 @@ An @tech{enumeration} of natural numbers larger than @racket[lo].
  when the range of @racket[small] is a large set. When it
  is small, using @racket[except/e] performs better.
 
- The two enumerations  may also be in different orders.
+ The two enumerations may also be in different orders.
 
  @examples[#:eval the-eval
            (define (evens-below/e n)

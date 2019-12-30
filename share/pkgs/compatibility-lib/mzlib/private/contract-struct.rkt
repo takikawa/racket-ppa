@@ -41,7 +41,7 @@
                      (rev-selector-id ...)
                      (mutator-id ...)
                      super-id)
-                    (lookup-struct-info (syntax struct-name) stx)])
+                    (extract-struct-info (lookup-struct-info (syntax struct-name) stx))])
        (unless (= (length (syntax->list (syntax (rev-selector-id ...))))
                   (length (syntax->list (syntax (args ...)))))
          (raise-syntax-error 'struct/c 

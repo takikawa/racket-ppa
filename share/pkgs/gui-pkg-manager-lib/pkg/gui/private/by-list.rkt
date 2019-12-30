@@ -129,7 +129,14 @@
            [parent this]
            [label #f]
            [choices null]
-           [columns (list check-mark "Package" "Author" "Description" "Tags" "Checksum" "Source" "Catalog")]
+           [columns (list check-mark
+		      (string-constant install-pkg-package)
+		      (string-constant install-pkg-author)
+		      (string-constant install-pkg-description)
+		      (string-constant install-pkg-tags)
+		      (string-constant install-pkg-checksum)
+		      (string-constant install-pkg-source)
+		      (string-constant install-pkg-catalog))]
            [style '(multiple column-headers clickable-headers)]
            [callback (lambda (lb e)
                        (when (e . is-a? . column-control-event%)
@@ -236,7 +243,7 @@
       (define db-catalogs (db:get-catalogs))
       (unless (equal? (list->set db-catalogs)
                       (list->set user-catalogs))
-        (when (equal? 1 (message-box/custom "Package Catalogs"
+        (when (equal? 1 (message-box/custom (string-constant install-pkg-catalogs)
                                             (~a
                                              (string-constant install-pkg-update-catalogs?)
                                              "\n\n"
@@ -278,7 +285,7 @@
                                                    (queue-callback
                                                     (lambda ()
                                                       (message-box
-                                                       "Error"
+                                                       (string-constant error)
                                                        (exn-message exn)
                                                        (get-top-level-window)
                                                        '(ok stop)))))])
@@ -310,13 +317,13 @@
       (interrupt-task!)
       (set! updating? #t)
       (send update-button set-label sc-pkg-stop-update)
-      (send status-text set-label "Updating package list...")
+      (send status-text set-label (string-constant install-pkg-updating))
       (task!
        (lambda ()
          (for ([catalog (in-list (db:get-catalogs))])
            (queue-callback/wait
             (lambda ()
-              (send status-text set-label (format "Updating from ~a..." catalog))))
+              (send status-text set-label (format (string-constant install-pkg-updating-from) catalog))))
            (pkg-catalog-update-local #:catalogs (list catalog)
                                      #:set-catalogs? #f
                                      #:quiet? #t)))
@@ -335,7 +342,7 @@
            (define name (db:pkg-name a-pkg))
            (define catalog (db:pkg-catalog a-pkg))
            (send status-text set-label 
-                 (~a "Getting details for " name " from " catalog "..."))
+                 (format (string-constant install-pkg-details-from) name catalog))
            (define all-ht 
              (or (hash-ref catalog-ht catalog #f)
                  (let ([all-ht (parameterize ([current-pkg-catalogs (list (string->url catalog))])

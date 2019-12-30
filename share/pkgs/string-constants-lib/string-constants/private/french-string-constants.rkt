@@ -279,7 +279,7 @@
   (online-expansion-error-margin "dans la marge")
   ; the label of a preference in the (string-constant online-expansion) section
   (show-arrows-on-mouseover "Montrer dynamiquement les flèches pour les liens entre variables et pour les appels de fonctions en position terminale") ; mouse over -> dynamiquement
-  (show-blueboxes "Montrer les boites bleues et le quart de cercle bleu")
+  (show-blueboxes "Montrer les boites bleues et le quart de cercle bleu") ;; blue boxes should be ``signature'' boxes now
   ;;; info bar at botttom of drscheme frame
   (collect-button-label "Ramassage") ; de miettes
   (read-only "Lecture seulement")
@@ -1112,6 +1112,7 @@
   (stand-alone-explanatory-label "Autonome (pour cette machine uniquement, exécution d'une copie compilée)")
   (distribution "Distribution")
   (distribution-explanatory-label "Distribution (pour installation sur d'autres machines)")
+  (embed-dlls? "Insérer les DLLs dans l'exécutable ?") ;; appears in the GUI only under windows
   (executable-type "Type")
   (executable-base "Base")
   (filename "Nom de fichier : ")
@@ -1709,10 +1710,18 @@
   ; printed specially in DrRacket.
   (test-engine-check-encountered-error
    "check-expect a rencontré l'erreur suivante au lieu de la valeur attendue, ~F. ~n   :: ~a")
+  (test-engine-check-error-cause
+   "causée par l'expression")
   (test-engine-actual-value-differs-error
    "La valeur actuelle ~F est différente de ~F, la valeur attendue.")
+  ;; need to translate only one of these next two
+  ;; (test-engine-actual-value-not-within-error or
+  ;;  test-engine-actual-value-not-within-error/alt-word-order)
+  ;; if both are present, test-engine-actual-value-not-within-error is used
   (test-engine-actual-value-not-within-error
-   "La valeur actualle ~F n'est pas à moins de ~v de la valeur attendue ~F.")
+   "La valeur actuelle ~F n'est pas à moins de ~v de la valeur attendue ~F.")
+  (test-engine-actual-value-not-within-error/alt-order
+   "La valeur actuelle ~F n'est pas assez proche de la valeur attendue ~F ; elle aurait du être à moins de ~v de la valeur attendue.")
   (test-engine-encountered-error-error
    "check-error a rencontré l'erreur suivante au lieu du ~a attendu~n   :: ~a")
   (test-engine-expected-error-error

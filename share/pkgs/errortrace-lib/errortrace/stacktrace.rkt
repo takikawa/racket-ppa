@@ -662,7 +662,7 @@
     (parameterize ([current-recover-table (make-hash)])
       (no-cache-annotate-top expr phase)))
   (define (no-cache-annotate-named name expr phase)
-    ((make-annotate #t name) expr phase))
+    ((make-annotate #f name) expr phase))
   (define (annotate-named name expr phase)
     (parameterize ([current-recover-table (make-hash)])
       (no-cache-annotate-named name expr phase))))

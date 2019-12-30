@@ -1,6 +1,7 @@
 #lang typed/racket/base
 
 (require (only-in typed/mred/mred Snip% Frame%)
+         (only-in racket/gui/base get-display-backing-scale)
          typed/racket/draw typed/racket/class racket/match
          plot/utils
          plot/private/common/parameter-group
@@ -17,6 +18,11 @@
 (unsafe-provide plot-snip
                 plot-frame
                 plot)
+
+(require/typed plot/utils
+  (anchor/c (-> Any Boolean))
+  (plot-color/c (-> Any Boolean))
+  (plot-file-format/c (-> Any Boolean)))
 
 ;; ===================================================================================================
 ;; Plot to a snip
@@ -61,23 +67,20 @@
        (define (make-bm anim? bounds-rect width height)
          (: area (U #f (Instance 2D-Plot-Area%)))
          (define area #f)
-         (define bm
-           (parameterize/group ([plot-parameters  saved-plot-parameters]
-                                [plot-animating?  (if anim? #t (plot-animating?))])
-                               ((if (plot-animating?) draw-bitmap draw-bitmap/supersampling)
-                                (λ (dc)
-                                  (define-values (x-ticks x-far-ticks y-ticks y-far-ticks)
-                                    (get-ticks renderer-list bounds-rect))
-                                  
-                                  (define new-area
-                                    (make-object 2d-plot-area%
-                                      bounds-rect x-ticks x-far-ticks y-ticks y-far-ticks
-                                      dc 0 0 width height))
-                                  
-                                  (set! area new-area)
-                                  
-                                  (plot-area new-area renderer-list))
-                                width height)))
+         (define bm (make-bitmap
+                     width height #t
+                     #:backing-scale (or (get-display-backing-scale) 1.0)))
+         (parameterize/group ([plot-parameters  saved-plot-parameters]
+                              [plot-animating?  (if anim? #t (plot-animating?))])
+           (define dc (make-object bitmap-dc% bm))
+           (define-values (x-ticks x-far-ticks y-ticks y-far-ticks)
+             (get-ticks renderer-list bounds-rect))
+           (define new-area
+             (make-object 2d-plot-area%
+                          bounds-rect x-ticks x-far-ticks y-ticks y-far-ticks
+                          dc 0 0 width height))
+           (set! area new-area)
+           (plot-area new-area renderer-list))
          (values bm area))
        
        (define-values (bm area) (make-bm #f bounds-rect width height))
@@ -117,6 +120,13 @@
      ;; make-snip will be called in a separate thread, make sure the
      ;; parameters have the correct values in that thread as well.
      (define saved-plot-parameters (plot-parameters))
+     (cond ;; check arguments because function is provided unsafely
+      [(not (and (integer? width) (positive? width))) (fail/kw "positive integer" '#:width width)]
+      [(not (and (integer? height) (positive? height))) (fail/kw "positive integer" '#:height height)]
+      [(and title (not (string? title))) (fail/kw "#f or string" '#:title title)]
+      [(and x-label (not (string? x-label))) (fail/kw "#f or string" '#:x-label x-label)]
+      [(and y-label (not (string? y-label))) (fail/kw "#f or string" '#:y-label y-label)]
+      [(not (anchor/c legend-anchor)) (fail/kw "anchor/c" '#:legend-anchor legend-anchor)])
      (: make-snip (-> Positive-Integer Positive-Integer (Instance Snip%)))
      (define (make-snip width height)
        (parameterize/group ([plot-parameters  saved-plot-parameters])
@@ -173,6 +183,13 @@
     [(and y-min (not (rational? y-min)))  (fail/kw "#f or rational" '#:y-min y-min)]
     [(and y-max (not (rational? y-max)))  (fail/kw "#f or rational" '#:y-max y-max)]
     [else
+     (cond ;; check arguments because function is provided unsafely
+      [(and out-kind (not (plot-file-format/c out-kind)))
+       (fail/kw "plot-file-format/c" '#:out-kind out-kind)]
+      [(and fgcolor (not (plot-color/c fgcolor)))
+       (fail/kw "plot-color/c" '#:fgcolor fgcolor)]
+      [(and bgcolor (not (plot-color/c bgcolor)))
+       (fail/kw "plot-color/c" '#:bgcolor bgcolor)])
      (parameterize ([plot-foreground  (if fgcolor fgcolor (plot-foreground))]
                     [plot-background  (if bgcolor bgcolor (plot-background))])
        (when out-file

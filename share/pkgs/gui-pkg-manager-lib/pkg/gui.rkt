@@ -56,7 +56,7 @@
              allow-close?)
            (super-new
             [parent parent]
-            [label "Package Installer"]))))
+            [label (string-constant install-pkg-installer)]))))
 
   (define terminal #f)
   (define (in-terminal-panel abort-label thunk)
@@ -124,7 +124,7 @@
 
   (define frame
     (new pkg-gui-frame%
-         [label "Package Manager"]
+         [label (string-constant install-pkg-title)]
          [width 800]
          [height 600]))
 

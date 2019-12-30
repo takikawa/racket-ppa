@@ -22,11 +22,20 @@
          fxreverse-bit-field)
          ;; Many other provides from macros below
 
+(define CS? (eq? 'chez-scheme (system-type 'vm)))
 (define 64-bit? (fixnum? (expt 2 33)))
 
-(define (fixnum-width) (if 64-bit? 63 31))
-(define (least-fixnum) (if 64-bit? (- (expt 2 62)) -1073741824))
-(define (greatest-fixnum) (if 64-bit? (- (expt 2 62) 1) +1073741823))
+;; These would be better provided by Racket, instead of hardwiring
+;; numbers based on `system-type` results...
+(define (fixnum-width) (if CS?
+                           (if 64-bit? 61 30)
+                           (if 64-bit? 63 31)))
+(define (least-fixnum) (if CS?
+                           (if 64-bit? (- (expt 2 60)) -536870912)
+                           (if 64-bit? (- (expt 2 62)) -1073741824)))
+(define (greatest-fixnum) (if CS?
+                              (if 64-bit? (- (expt 2 60) 1) +536870911)
+                              (if 64-bit? (- (expt 2 62) 1) +1073741823)))
 
 (define-syntax-rule (check v alt)
   (if (fixnum? v)

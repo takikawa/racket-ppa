@@ -43,7 +43,8 @@ The following SRFI specification documents are licensed restrictively.
  (let #t "unnamed")
 )]
 
-Racket provides this SRFI in the @racket[srfi-lib-nonfree] package.
+Racket provides a free implementation of this SRFI in the @racket[srfi-lib] package.
+Only the SRFI specification document is nonfree.
 
 @; ----------------------------------------
 
@@ -59,7 +60,8 @@ Racket provides this SRFI in the @racket[srfi-lib-nonfree] package.
  (localized-template #f "localized-template")
 )]
 
-Racket provides a free implementation of this SRFI in the @racket[srfi-lib] package.  Only the SRFI specification document is nonfree.
+Racket provides a free implementation of this SRFI in the @racket[srfi-lib] package.
+Only the SRFI specification document is nonfree.
 
 @; ----------------------------------------
 

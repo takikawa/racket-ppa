@@ -8,6 +8,7 @@
          (rep rep-utils base-type-rep type-mask core-rep)
          (types numeric-predicates)
          racket/unsafe/ops
+         racket/fixnum
          ;; For base type contracts
          (for-template racket/base racket/contract/base (types numeric-predicates)))
 
@@ -21,15 +22,12 @@
          nbits-union
          nbits-subtract)
 
-;; Is the number a fixnum on *all* the platforms Racket supports?  This
-;; works because Racket compiles only on 32+ bit systems.  This check is
+;; Is the number a fixnum on *all* the platforms Racket supports?  This check is
 ;; done at compile time to typecheck literals -- so use it instead of
 ;; `fixnum?' to avoid creating platform-dependent .zo files.
 (define (portable-fixnum? n)
-  (and (exact-integer? n)
-       (< n (expt 2 30))
-       (>= n (- (expt 2 30)))))
-;; same, for indexes
+  (fixnum-for-every-system? n))
+;; same, for indexes; Racket compiles only on 32+ bit systems
 (define (portable-index? n)
   (and (exact-integer? n)
        (< n (expt 2 28))
@@ -165,12 +163,12 @@
   [-SingleFlonumPosZero ; disjoint from Flonum 0s
    Single-Flonum-Positive-Zero
    ;; eqv? equates 0.0f0 with itself, but not eq?
-   #'(λ (x) (eqv? x 0.0f0))
-   (λ (x) (eqv? x 0.0f0))]
+   #'(λ (x) (and (single-flonum? x) (eqv? x (real->single-flonum 0.0f0))))
+   (λ (x) (and (single-flonum? x) (eqv? x (real->single-flonum 0.0f0))))]
   [-SingleFlonumNegZero
    Single-Flonum-Negative-Zero
-   #'(λ (x) (eqv? x -0.0f0))
-   (λ (x) (eqv? x -0.0f0))]
+   #'(λ (x) (and (single-flonum? x) (eqv? x (real->single-flonum -0.0f0))))
+   (λ (x) (and (single-flonum? x) (eqv? x (real->single-flonum -0.0f0))))]
   [-PosSingleFlonumNoNan
    Positive-Single-Flonum-No-Nan
    #'(and/c single-flonum? positive?)

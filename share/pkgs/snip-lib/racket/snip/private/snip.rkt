@@ -177,7 +177,8 @@
                                                 width-depends-on-y 
                                                 height-depends-on-x
                                                 handles-all-mouse-events
-                                                handles-between-events))
+                                                handles-between-events
+                                                uses-editor-path))
                           new-flags])
     (s-set-flags (symbols->flags new-flags)))
   
@@ -815,8 +816,7 @@
   (set-version 2)
   
   (def/override (read [editor-stream-in% f])
-    (let ([scl (get-the-snip-class-list)]
-          [can-inline? ((send f do-reading-version this) . > . 1)])
+    (let ([can-inline? ((send f do-reading-version this) . > . 1)])
       (let ([filename (send f get-bytes #f)])
         (let-boxes ([type 0]
                     [w 0.0]

@@ -121,11 +121,14 @@
            (hash-set! memo-table sc result)
            result]))
   (define constraints
-    (if (hash-empty? name-defs)
-        (recur sc)
-        (close-loop (apply append (hash-keys name-defs))
-                    (map recur (apply append (hash-values name-defs)))
-                    (recur sc))))
+    (cond
+      [(hash-empty? name-defs)
+       (recur sc)]
+      [else
+       (define keys+values (hash->list name-defs))
+       (close-loop (apply append (map car keys+values))
+                   (map recur (apply append (map cdr keys+values)))
+                   (recur sc))]))
   (validate-constraints (add-constraint constraints max-kind))
   constraints)
 
@@ -173,19 +176,20 @@
           [(static-contract-may-contain-free-ids?) (make-contract sc)]
           [else
            (define ctc (make-contract sc))
-           (cond [(and ;; when a contract benefits from inlining
-                       ;; (e.g., ->) and this contract appears
-                       ;; directly in a define-module-boundary-contract
-                       ;; position (i.e, top-level? is #t) then
-                       ;; don't generate a new identifier for it
-                       (or (not (should-inline-contract? ctc))
-                           (not top-level?))
-                       cache)
-                  (define fresh-id (generate-temporary))
-                  (hash-set! cache sc (cons fresh-id ctc))
-                  (set! sc-queue (cons sc sc-queue))
-                  fresh-id]
-                 [else ctc])]))
+           (cond 
+            ;; when a contract benefits from inlining
+            ;; (e.g., ->) and this contract appears
+            ;; directly in a define-module-boundary-contract
+            ;; position (i.e, top-level? is #t) then
+            ;; don't generate a new identifier for it
+            [(or (should-inline-contract? ctc #:top-level? top-level?)
+                 (not cache))
+             ctc]
+            [else
+             (define fresh-id (generate-temporary))
+             (hash-set! cache sc (cons fresh-id ctc))
+             (set! sc-queue (cons sc sc-queue))
+             fresh-id])]))
   (define (make-contract sc)
     (match sc
       [(recursive-sc names values body)
@@ -216,9 +220,10 @@
   (define extra-defs
     (cond [(hash-empty? name-defs) null]
           [else
-           (define names (apply append (hash-keys name-defs)))
+           (define names+values (hash->list name-defs))
+           (define names (apply append (map car names+values)))
            (for/list ([name (in-list names)]
-                      [sc   (in-list (apply append (hash-values name-defs)))]
+                      [sc   (in-list (apply append (map cdr names+values)))]
                       #:unless (lookup-name-defined name))
              (set-name-defined name)
              #`(define #,name
@@ -232,14 +237,19 @@
                   #`(define #,id #,ctc)))
         ctc))
 
-;; Determine whether the given contract syntax should be inlined or not.
-(define (should-inline-contract? stx)
+;; Determine whether the given contract syntax should be inlined or
+;; not.  if top-level? is true, we inline functions because the
+;; contract system treats them specially. Otherwise, always inline
+;; simple things.
+(define (should-inline-contract? stx #:top-level? [top-level? #f])
   (or
+   (syntax-case stx (quote) [(quote _) #t] [_ #f])
    ;; no need to generate an extra def for things that are already identifiers
    (identifier? stx)
    ;; ->* are handled specially by the contract system
    (let ([sexp (syntax-e stx)])
-     (and (pair? sexp)
+     (and top-level?
+          (pair? sexp)
           (or (free-identifier=? (car sexp) #'->)
               (free-identifier=? (car sexp) #'->*))))))
 

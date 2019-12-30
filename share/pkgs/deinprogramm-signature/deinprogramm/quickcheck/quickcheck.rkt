@@ -11,7 +11,7 @@
 	 arbitrary-integer arbitrary-natural arbitrary-rational arbitrary-real
 	 arbitrary-mixed arbitrary-one-of
 	 arbitrary-pair
-	 arbitrary-list
+	 arbitrary-list arbitrary-nonempty-list
 	 arbitrary-vector
 	 arbitrary-tuple arbitrary-record
 	 arbitrary-string

@@ -11,6 +11,7 @@
          (prefix-in c: (contract-req))
          (rep rep-utils type-rep type-mask prop-rep object-rep values-rep)
          (types numeric-tower)
+         (only-in "utils.rkt" self-var imp-var)
          ;; Using this form so all-from-out works
          "base-abbrev.rkt" "match-expanders.rkt"
 
@@ -43,6 +44,7 @@
 (define (-mvec* . ts) (make-Mutable-HeterogeneousVector ts))
 (define (-vec* . ts) (make-HeterogeneousVector ts))
 (define -future make-Future)
+(define -struct-property make-Struct-Property)
 (define -evt make-Evt)
 (define -weak-box make-Weak-Box)
 (define -inst make-Instance)
@@ -54,6 +56,10 @@
 (define -signature make-Signature)
 
 (define (-seq . args) (make-Sequence args))
+(define/cond-contract (-seq-dots args dty dbound)
+  (c:-> (c:listof Type?) Type? (c:or/c symbol? c:natural-number/c)
+        SequenceDots?)
+  (make-SequenceDots args dty dbound))
 
 (define (one-of/c . args)
   (apply Un (map -val args)))
@@ -71,6 +77,8 @@
                    dty dbound))
 
 ;; Basic types
+(define -Self (make-F self-var))
+(define -Imp (make-F imp-var))
 (define -Listof (-poly (list-elem) (make-Listof list-elem)))
 (define/decl -Regexp (Un -PRegexp -Base-Regexp))
 (define/decl -Byte-Regexp (Un -Byte-Base-Regexp -Byte-PRegexp))
@@ -140,17 +148,21 @@
 (define/decl -ExtFlonumZero (Un -ExtFlonumPosZero -ExtFlonumNegZero -ExtFlonumNan))
 (define/decl -PosExtFlonum (Un -PosExtFlonumNoNan -ExtFlonumNan))
 (define/decl -NonNegExtFlonum (Un -PosExtFlonum -ExtFlonumZero))
+(define/decl -NonNegSignExtFlonum (Un -PosExtFlonum -ExtFlonumPosZero))
 (define/decl -NegExtFlonum (Un -NegExtFlonumNoNan -ExtFlonumNan))
 (define/decl -NonPosExtFlonum (Un -NegExtFlonum -ExtFlonumZero))
 (define/decl -ExtFlonum (Un -NegExtFlonumNoNan -ExtFlonumNegZero -ExtFlonumPosZero -PosExtFlonumNoNan -ExtFlonumNan))
+
+(define/decl -Struct-Type-Property (-struct-property Univ))
 
 ;; Type alias names
 (define (-struct-name name)
   (make-Name name 0 #t))
 
+
 ;; Structs
-(define (-struct name parent flds [proc #f] [poly #f] [pred #'dummy])
-  (make-Struct name parent flds proc poly pred))
+(define (-struct name parent flds [proc #f] [poly #f] [pred #'dummy] [props (box null)])
+  (make-Struct name parent flds proc poly pred props))
 
 ;; Function type constructors
 (define/decl top-func (make-Fun (list)))
@@ -304,7 +316,7 @@
 
 (define (-list-or-set s) (Un (-lst s) (-set s)))
 
-;; Since generics are not yet supported, we currently overload 
+;; Since generics are not yet supported, we currently overload
 ;; the set operations to work both on list sets and hash sets.
 ;; This helper makes those types in the base-env less verbose.
 (define-syntax-rule (set-abs s e)

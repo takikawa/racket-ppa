@@ -8,6 +8,7 @@
            scheme/gui/dynamic
            syntax/modread
            (only racket/snip/private/snip int->img-type)
+           (only racket/base make-hash hash-ref hash-set!)
            "image.rkt"
            "editor.rkt"
            "private/compat.rkt")
@@ -17,7 +18,7 @@
     (expect #rx#"^01" port who "unrecognized format (not \"01\")")
     (let ([vers (string->number
                  (bytes->string/latin-1
-                  (expect #rx#"^0[1-8]" port who "unrecognized version")))])
+                  (expect #rx#"^0[1-9]" port who "unrecognized version")))])
       (unless (vers . < . 4)
         (expect #rx#"^ ##[ \r\n]" port who "missing \" ## \" tag in the expected place"))
       (let ([header (read-header who port vers snip-filter skip-content?)])
@@ -48,13 +49,17 @@
 
   ;; ----------------------------------------
   
-  (define-struct header (classes data-classes styles snip-filter skip-unknown? snips-to-go stream skip-content?))
+  (define-struct header (classes data-classes styles snip-filter skip-unknown? snips-to-go stream skip-content?
+                                 previously-read-bytes))
   (define (header-plain-text? h)
     (not (header-snip-filter h)))
 
   (define (read-header who port vers snip-filter skip-content?)
-    (let* ([classes (read-snip-class-list who port vers)]
-           [data-classes (read-data-class-list who port vers)]
+    (let* ([previously-read-bytes (make-hash)]
+           [classes (read-snip-class-list who port vers
+                                          previously-read-bytes)]
+           [data-classes (read-data-class-list who port vers
+                                               previously-read-bytes)]
            [header (make-header classes 
                                 data-classes
                                 (make-hash-table) 
@@ -62,7 +67,8 @@
                                 (unknown-extensions-skip-enabled)
                                 0
                                 #f
-                                skip-content?)])
+                                skip-content?
+                                previously-read-bytes)])
       (set-header-stream! header (make-object stream% who port vers header))
       (let ([cnt (read-editor who port vers header)])
         (set-header-snips-to-go! header cnt))
@@ -70,7 +76,8 @@
 
   (define (read-editor who port vers header)
     (discard-headers/footers who port vers)
-    (read-styles who port vers (header-styles header))
+    (read-styles who port vers (header-styles header)
+                 (header-previously-read-bytes header))
     (read-class-headers who port vers header)
     (read-integer who port vers "snip count"))
 
@@ -99,14 +106,15 @@
 
   (define-struct snip-class (name version required? manager used?))
 
-  (define (read-snip-class-list who port vers)
+  (define (read-snip-class-list who port vers previously-read-bytes)
     (let ([cnt (read-integer who port vers "snip-class count")])
       (list->vector
        (let loop ([i 0])
          (if (= i cnt)
              null
              (cons
-              (let ([name (read-a-string who port vers "snip-class name")])
+              (let ([name (read-a-string who port vers "snip-class name"
+                                         previously-read-bytes)])
                 (make-snip-class name
                                  (read-integer who port vers "snip-class version")
                                  (begin (read-integer who port vers "snip-class required?")
@@ -119,14 +127,15 @@
 
   (define-struct data-class (name required? manager used?))
 
-  (define (read-data-class-list who port vers)
+  (define (read-data-class-list who port vers previously-read-bytes)
     (let ([cnt (read-integer who port vers "data-class count")])
       (list->vector
        (let loop ([i 0])
          (if (= i cnt)
              null
              (cons
-              (let ([name (read-a-string who port vers "data-class name")])
+              (let ([name (read-a-string who port vers "data-class name"
+                                         previously-read-bytes)])
                 (make-data-class name
                                  (equal? name #"wxloc")
                                  #f
@@ -141,7 +150,7 @@
             (skip-data port vers len)
             (loop (add1 i)))))))
 
-  (define (read-styles who port vers styles)
+  (define (read-styles who port vers styles previously-read-bytes)
     (let ([id (read-integer who port vers "style-list id")])
       (hash-table-get styles id
                       (lambda ()
@@ -150,11 +159,13 @@
                             (unless (= i cnt)
                               (unless ((read-integer who port vers "base-style id") . < . i)
                                 (read-error who "integer less than current index" "base-style id" port))
-                              (read-a-string who port vers "style name")
+                              (read-a-string who port vers "style name"
+                                             previously-read-bytes)
                               (if (zero? (read-integer who port vers "style is-join?"))
                                   (begin
                                     (read-integer who port vers "style family")
-                                    (read-a-string who port vers "style face")
+                                    (read-a-string who port vers "style face"
+                                                   previously-read-bytes)
                                     (read-inexact who port vers "style size multiply")
                                     (read-integer who port vers "style size addition")
                                     (read-integer who port vers "style weight on")
@@ -269,7 +280,7 @@
 
   ;; ----------------------------------------
 
-  (define (read-raw-string who port vers what)
+  (define (read-raw-string who port vers what previously-read-bytes)
     (let ([v (cond
               [(vers . >= . 8) (plain-read port)]
               [else (read-integer who port vers what)])])
@@ -291,11 +302,26 @@
             (unless (= (bytes-length s) v)
               (read-error who "list of byte strings whose total length matches an integer count" what port))
             s)]
+         [(and (list? s)
+               (pair? s)
+               (exact-nonnegative-integer? (car s))
+               (andmap bytes? (cdr s)))
+          (define bts (apply bytes-append (cdr s)))
+          (unless (= (bytes-length bts) v)
+            (read-error who "list of byte strings whose total length matches an integer count"
+                        what port))
+          (hash-set! previously-read-bytes (car s) bts)
+          bts]
+         [(and (exact-nonnegative-integer? s)
+               (hash-ref previously-read-bytes s #f))
+          =>
+          values]
          [else
-          (read-error who "byte string or byte-string list" what port)]))))
+          (read-error who "byte string or byte-string list or reference to earlier byte-string"
+                      what port)]))))
 
-  (define (read-a-string who port vers what)
-    (let ([s (read-raw-string who port vers what)])
+  (define (read-a-string who port vers what previously-read-bytes)
+    (let ([s (read-raw-string who port vers what previously-read-bytes)])
       (let ([len (bytes-length s)])
         (when (zero? len)
           (read-error who "non-empty raw string" what port))
@@ -412,7 +438,8 @@
             [(member name '(#"wxtext" #"wxtab"))
              (lambda (who port vers cvers header)
                (read-integer who port vers "string-snip flags")
-               (let ([s (read-raw-string who port vers "string-snip content")])
+               (let ([s (read-raw-string who port vers "string-snip content"
+                                         (header-previously-read-bytes header))])
                  (cond
                   [(= cvers 1) (string->bytes/utf-8 (bytes->string/latin-1 s))]
                   [(= cvers 2)
@@ -462,7 +489,8 @@
                      (make-object editor% n))))]
             [(equal? name #"wximage")
              (lambda (who port vers cvers header)
-               (let ([filename (read-a-string who port vers "image-snip filename")]
+               (let ([filename (read-a-string who port vers "image-snip filename"
+                                              (header-previously-read-bytes header))]
                      [type (read-integer who port vers "image-snip type")]
                      [w (read-inexact who port vers "image-snip width")]
                      [h (read-inexact who port vers "image-snip height")]
@@ -485,7 +513,9 @@
                                          (if (= i len)
                                              null
                                              (cons
-                                              (read-raw-string who port vers "image-snip image content")
+                                              (read-raw-string who port vers
+                                                               "image-snip image content"
+                                                               (header-previously-read-bytes header))
                                               (loop (add1 i))))))))
                                    (values 1.0 #f))])
                    (if (header-plain-text? header)
@@ -557,9 +587,11 @@
         (read-inexact who port vers what))
 
       (define/public (read-raw-bytes what)
-        (read-raw-string who port vers what))
+        (read-raw-string who port vers what
+                         (header-previously-read-bytes header)))
       (define/public (read-bytes what)
-        (read-a-string who port vers what))
+        (read-a-string who port vers what
+                       (header-previously-read-bytes header)))
 
       (public [rne read-editor-snip])
       (define (rne what)

@@ -1,6 +1,7 @@
 #lang typed/racket/base
 
 (require (only-in typed/mred/mred Snip% Frame%)
+         (only-in racket/gui/base get-display-backing-scale)
          typed/racket/draw typed/racket/class racket/match racket/list
          plot/utils
          plot/private/common/parameter-group
@@ -18,6 +19,11 @@
 (unsafe-provide plot3d-snip
                 plot3d-frame
                 plot3d)
+
+(require/typed plot/utils
+  (anchor/c (-> Any Boolean))
+  (plot-color/c (-> Any Boolean))
+  (plot-file-format/c (-> Any Boolean)))
 
 ;; ===================================================================================================
 ;; Plot to a snip
@@ -57,6 +63,8 @@
     [(and y-max (not (rational? y-max)))  (fail/kw "#f or rational" '#:y-max y-max)]
     [(and z-min (not (rational? z-min)))  (fail/kw "#f or rational" '#:z-min z-min)]
     [(and z-max (not (rational? z-max)))  (fail/kw "#f or rational" '#:z-max z-max)])
+  (cond ;; because this function is exported via `unsafe-provide`
+    [(not (anchor/c legend-anchor))        (fail/kw "anchor/c" '#:legend-anchor legend-anchor)])
   
   (parameterize ([plot-title          title]
                  [plot-x-label        x-label]
@@ -78,36 +86,38 @@
                            [plot-animating?  (if anim? #t (plot-animating?))]
                            [plot3d-angle     angle]
                            [plot3d-altitude  altitude])
-        ((if (plot-animating?) draw-bitmap draw-bitmap/supersampling)
-         (λ (dc)
-           (define area (make-object 3d-plot-area%
-                          bounds-rect x-ticks x-far-ticks y-ticks y-far-ticks z-ticks z-far-ticks
-                          dc 0 0 width height))
-           (send area start-plot)
+        (define bm (make-bitmap
+                     width height #t
+                     #:backing-scale (or (get-display-backing-scale) 1.0)))
+        (define dc (make-object bitmap-dc% bm))
+        (define area (make-object 3d-plot-area%
+                                  bounds-rect x-ticks x-far-ticks y-ticks y-far-ticks z-ticks z-far-ticks
+                                  dc 0 0 width height))
+        (send area start-plot)
            
-           (cond [(not (hash-ref render-tasks-hash (plot-animating?) #f))
-                  (hash-set!
-                   legend-entries-hash (plot-animating?)
-                   (flatten-legend-entries
-                    (for/list : (Listof (Treeof legend-entry)) ([rend  (in-list renderer-list)])
-                      (match-define (renderer3d rend-bounds-rect _bf _tf render-proc) rend)
-                      (send area start-renderer (if rend-bounds-rect
-                                                    (rect-inexact->exact rend-bounds-rect)
-                                                    (unknown-rect 3)))
-                      (if render-proc (render-proc area) empty))))
-                  
-                  (hash-set! render-tasks-hash (plot-animating?) (send area get-render-tasks))]
-                 [else
-                  (send area set-render-tasks (hash-ref render-tasks-hash (plot-animating?)))])
+        (cond [(not (hash-ref render-tasks-hash (plot-animating?) #f))
+               (hash-set!
+                legend-entries-hash (plot-animating?)
+                (flatten-legend-entries
+                 (for/list : (Listof (Treeof legend-entry)) ([rend  (in-list renderer-list)])
+                   (match-define (renderer3d rend-bounds-rect _bf _tf render-proc) rend)
+                   (send area start-renderer (if rend-bounds-rect
+                                                 (rect-inexact->exact rend-bounds-rect)
+                                                 (unknown-rect 3)))
+                   (if render-proc (render-proc area) empty))))
+               
+               (hash-set! render-tasks-hash (plot-animating?) (send area get-render-tasks))]
+              [else
+               (send area set-render-tasks (hash-ref render-tasks-hash (plot-animating?)))])
            
-           (send area end-renderers)
-           
-           (define legend-entries (hash-ref legend-entries-hash (plot-animating?) #f))
-           (when (and legend-entries (not (empty? legend-entries)))
-             (send area draw-legend legend-entries))
-           
-           (send area end-plot))
-         width height)))
+        (send area end-renderers)
+        
+        (define legend-entries (hash-ref legend-entries-hash (plot-animating?) #f))
+        (when (and legend-entries (not (empty? legend-entries)))
+          (send area draw-legend legend-entries))
+        
+        (send area end-plot)
+        bm))
     
     (make-3d-plot-snip
      (make-bm #f angle altitude width height) saved-plot-parameters
@@ -194,8 +204,8 @@
                 #:z-min [z-min #f] #:z-max [z-max #f]
                 #:width [width (plot-width)]
                 #:height [height (plot-height)]
-                #:angle [angle (plot3d-angle)]
-                #:altitude [altitude (plot3d-altitude)]
+                #:angle [angle #f]
+                #:altitude [altitude #f]
                 #:az [az #f] #:alt [alt #f]  ; backward-compatible aliases
                 #:title [title (plot-title)]
                 #:x-label [x-label (plot-x-label)]
@@ -226,6 +236,13 @@
     [(and y-max (not (rational? y-max)))  (fail/kw "#f or rational" '#:y-max y-max)]
     [(and z-min (not (rational? z-min)))  (fail/kw "#f or rational" '#:z-min z-min)]
     [(and z-max (not (rational? z-max)))  (fail/kw "#f or rational" '#:z-max z-max)])
+  (cond ;; because this function is exported via `unsafe-provide`
+    [(and out-kind (not (plot-file-format/c out-kind)))
+     (fail/kw "plot-file-format/c" '#:out-kind out-kind)]
+    [(and fgcolor (not (plot-color/c fgcolor)))
+     (fail/kw "plot-color/c" '#:fgcolor fgcolor)]
+    [(and bgcolor (not (plot-color/c bgcolor)))
+     (fail/kw "plot-color/c" '#:bgcolor bgcolor)])
   
   (parameterize ([plot-foreground  (if fgcolor fgcolor (plot-foreground))]
                  [plot-background  (if bgcolor bgcolor (plot-background))])

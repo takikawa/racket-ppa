@@ -29,8 +29,8 @@
 
 (define (list-tests)
   (test
-   (! (car 0)) =error> "car: contract violation\n  expected: pair?"
-   (! (cdr 0)) =error> "cdr: contract violation\n  expected: pair?"
+   (! (car 0)) =error> #rx"car: contract violation\n  expected: pair?|0 is not a pair"
+   (! (cdr 0)) =error> #rx"cdr: contract violation\n  expected: pair?|0 is not a pair"
    (! (car (cons 1 (/ 1 0)))) => 1
    (! (cdr (cons (/ 1 0) 1))) => 1
    (! (list-ref (list (/ 1 0) 1 (/ 1 0)) 1)) => 1
@@ -41,7 +41,7 @@
    (!! (member 1 (cons 0 (cons 1 2)))) => '(1 . 2)
    (!! (memq   1 (cons 0 (cons 1 2)))) => '(1 . 2)
    (!! (memv   1 (cons 0 (cons 1 2)))) => '(1 . 2)
-   (! (second (map car (list 1 2 3)))) =error> "contract violation"
+   (! (second (map car (list 1 2 3)))) =error> #rx"contract violation|not a pair"
    (! (second (map car (list 1 '(2) 3)))) => 2
    ))
 
@@ -50,11 +50,11 @@
   (test
    (! (take "nonnum" test-lst1))
    =error>
-   #rx"take: expects type <non-negative exact integer> as 1st argument, given: \"nonnum\"; other arguments were: .*\\((list )?1 2 3\\)"
+   #rx"take.*expect.*type <non-negative exact integer>.*given: \"nonnum\"; other arguments.*1 2 3"
    (! (take -1 test-lst1))
-   =error> "take: expects type <non-negative exact integer> as 1st argument"
+   =error> #rx"take.*expect.*type <non-negative exact integer>.*given: -1"
    (! (take -1 "nonlist"))
-   =error> "take: expects type <non-negative exact integer> as 1st argument"
+   =error> #rx"take.*expect.*type <non-negative exact integer>.*given: -1"
    (! (take 0 "nonlist")) => '()
    (! (take 1 "nonlist")) =error> "take: not a proper list: \"nonlist\""
    (! (take 0 null)) => '()
