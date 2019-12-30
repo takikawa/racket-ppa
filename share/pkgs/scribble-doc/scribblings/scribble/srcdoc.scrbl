@@ -26,17 +26,10 @@ same way that the module system keeps expansion-time code separate
 from run-time code, and documentation information is recorded in a
 submodule to be separately loadable from the enclosing module.
 
-For an example use, see the @filepath{file} collection's
-@filepath{gif.rkt} source file and the corresponding extraction in
-@filepath{scribblings/gif.scrbl}. As that example illustrates,
-starting the module declaration with
+For an example use, see
+@hyperlink["https://blog.racket-lang.org/2012/06/submodules.html"]{this post}
+at @url{blog.racket-lang.org}.
 
-@racketblock[
-  @#,hash-lang[] @#,racketmodname[at-exp]
-]
-
-enables the @"@"-reader, which is handy for writing documentation
-expressions.
 
 @; ----------------------------------------
 
@@ -185,6 +178,27 @@ See @racket[defform] for information on @racket[options],
 @racket[maybe-contracts].
 
 @history[#:added "1.6"]}
+
+
+@defform[(class*-doc id super (intf-id ...) pre-flow)]{
+
+Like @racket[proc-doc], but for class declarations that use @racket[class*].
+
+The @racket[id], @racket[super], and @racket[intf-id] expressions have the same
+meaning as in @racket[defclass].
+
+@history[#:added "1.30"]}
+
+
+@defform[(class-doc id super pre-flow)]{
+
+Like @racket[class*-doc], but for class declarations that use @racket[class]
+omitting @racket[interface-expr]s.
+
+The @racket[id], and @racket[super] expressions have the same meaning as in
+@racket[defclass].
+
+@history[#:added "1.30"]}
 
 
 @defform[(begin-for-doc form ...)]{

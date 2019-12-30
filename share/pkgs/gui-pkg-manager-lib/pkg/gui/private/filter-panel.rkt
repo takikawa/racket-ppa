@@ -38,7 +38,7 @@
   
   (define filter-result
     (new message%
-         [label "9999/9999 match"]
+         [label (format (string-constant install-pkg-match) 9999 9999)]
          [parent filter-panel]
          [font small-control-font]))
   (send filter-result set-label "")
@@ -47,4 +47,4 @@
          (super-new)
          (define/public (get-rx) keep-rx)
          (define/public (set-result match-count out-of-count)
-           (send filter-result set-label (format "~a/~a match" match-count out-of-count))))))
+           (send filter-result set-label (format (string-constant install-pkg-match) match-count out-of-count))))))

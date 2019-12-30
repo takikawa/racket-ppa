@@ -1,22 +1,19 @@
 #lang racket/base
-(require "../common/check.rkt"
-         "../common/fixnum.rkt"
-         "../common/object.rkt"
+(require racket/fixnum
+         "../common/check.rkt"
+         "../common/class.rkt"
          "../host/thread.rkt"
          "port.rkt"
          "input-port.rkt"
          "output-port.rkt"
-         "pipe.rkt"
          "bytes-input.rkt"
          "count.rkt"
-         "commit-manager.rkt")
+         "commit-port.rkt")
 
 (provide open-input-bytes
          open-output-bytes
          get-output-bytes
          string-port?)
-
-(struct input-bytes-data ())
 
 (define/who (open-input-bytes bstr [name 'string])
   (check who bytes? bstr)
@@ -25,201 +22,229 @@
     (port-count-lines! p))
   p)
 
-(define-constructor (make-input-bytes bstr name)
-  (define-fixnum i 0)
-  (define alt-pos #f)
-  (define len (bytes-length bstr))
+(class bytes-input-port #:extends commit-input-port
+  #:field
+  [bstr #f] ; normally installed as buffer
+  [pos 0]   ; used when bstr is not installed as buffer
+  [alt-pos #f]
 
-  (define progress-sema #f)
-  (define (progress!)
-    (when progress-sema
-      (semaphore-post progress-sema)
-      (set! progress-sema #f)))
+  #:private
+  ;; in atomic mode
+  [in-buffer-pos
+   (lambda ()
+     (define b buffer)
+     (if (direct-bstr b)
+         (direct-pos b)
+         pos))]
 
-  (define commit-manager #f)
+  #:override
+  [close
+   (lambda ()
+     (set! commit-manager #f) ; to indicate closed
+     (progress!)
+     (set! bstr #f)
+     (define b buffer)
+     (when (direct-bstr b)
+       (set! offset (direct-pos b))
+       (set-direct-bstr! b #f)))]
+  [file-position
+   (case-lambda
+     [() (or alt-pos (in-buffer-pos))]
+     [(given-pos)
+      (define b buffer)
+      (define len (direct-end b))
+      (define new-pos (if (eof-object? given-pos)
+                          len
+                          (min len given-pos)))
+      (if (direct-bstr b)
+          (set-direct-pos! b new-pos)
+          (set! pos new-pos))
+      (set! alt-pos (and (not (eof-object? given-pos))
+                         (given-pos . > . new-pos)
+                         given-pos))])]
 
-  ;; in atomic mode [can leave atomic mode temporarily]
-  ;; After this function returns, complete any commit-changing work
-  ;; before leaving atomic mode again.
-  (define (pause-waiting-commit)
-    (when commit-manager
-      (commit-manager-pause commit-manager)))
-  ;; in atomic mode [can leave atomic mode temporarily]
-  (define (wait-commit progress-evt ext-evt finish)
-    (cond
-      [(and (not commit-manager)
-            ;; Try shortcut:
-            (not (sync/timeout 0 progress-evt))
-            (sync/timeout 0 ext-evt))
-       (finish)
-       #t]
-      [else
-       ;; General case to support blocking and potentially multiple
-       ;; commiting threads:
-       (unless commit-manager
-         (set! commit-manager (make-commit-manager)))
-       (commit-manager-wait commit-manager progress-evt ext-evt finish)]))
+  [prepare-change
+   (lambda ()
+     (pause-waiting-commit))]
 
-  (make-core-input-port
-   #:name name
-   #:data (input-bytes-data)
-   #:self self
+  [read-in
+   (lambda (dest-bstr start end copy?)
+     (define b buffer)
+     (define len (direct-end b))
+     (define i (in-buffer-pos))
+     (cond
+       [(i . < . len)
+        (define amt (min (- end start) (fx- len i)))
+        (define new-pos (fx+ i amt))
+        ;; Keep/resume fast mode
+        (set-direct-pos! b new-pos)
+        (set! offset 0)
+        (set-direct-bstr! b bstr)
+        (bytes-copy! dest-bstr start bstr i new-pos)
+        (progress!)
+        amt]
+       [else eof]))]
 
-   #:prepare-change
-   (method
-    (lambda ()
-      (pause-waiting-commit)))
+  [peek-in
+   (lambda (dest-bstr start end skip progress-evt copy?)
+     (define b buffer)
+     (define len (direct-end b))
+     (define i (in-buffer-pos))
+     (define at-pos (+ i skip))
+     (cond
+       [(and progress-evt (sync/timeout 0 progress-evt))
+        #f]
+       [(at-pos . < . len)
+        (define amt (min (- end start) (fx- len at-pos)))
+        (bytes-copy! dest-bstr start bstr at-pos (fx+ at-pos amt))
+        amt]
+       [else eof]))]
 
-   #:read-byte
-   (method
-    (lambda ()
-      (let ([pos i])
-        (if (pos . < . len)
-            (begin
-              (set! i (add1 pos))
-              (progress!)
-              (bytes-ref bstr pos))
-            eof))))
-
-   #:read-in
-   (method
-    (lambda (dest-bstr start end copy?)
-      (define pos i)
-      (cond
-        [(pos . < . len)
-         (define amt (min (- end start) (- len pos)))
-         (set! i (+ pos amt))
-         (bytes-copy! dest-bstr start bstr pos (+ pos amt))
-         (progress!)
-         amt]
-        [else eof])))
-
-   #:peek-byte
-   (method
-    (lambda ()
-      (let ([pos i])
-        (if (pos . < . len)
-            (bytes-ref bstr pos)
-            eof))))
-
-   #:peek-in
-   (method
-    (lambda (dest-bstr start end skip progress-evt copy?)
-      (define pos (+ i skip))
-      (cond
-        [(and progress-evt (sync/timeout 0 progress-evt))
-         #f]
-        [(pos . < . len)
-         (define amt (min (- end start) (- len pos)))
-         (bytes-copy! dest-bstr start bstr pos (+ pos amt))
-         amt]
-        [else eof])))
-
-   #:byte-ready
-   (method
-    (lambda (work-done!)
-      (i . < . len)))
-
-   #:close
-   (method
-    (lambda ()
-      (set! commit-manager #f) ; to indicate closed
-      (progress!)))
-
-   #:get-progress-evt
-   (method
-    (lambda ()
+  [byte-ready
+   (lambda (work-done!)
+     ((in-buffer-pos) . < . (direct-end buffer)))]
+  
+  [get-progress-evt
+   (lambda ()
+     (atomically
       (unless progress-sema
-        (set! progress-sema (make-semaphore)))
-      (semaphore-peek-evt progress-sema)))
+        ;; set port to slow mode:
+        (define b buffer)
+        (when (direct-bstr b)
+          (define i (direct-pos b))
+          (set! pos i)
+          (set! offset i)
+          (set-direct-bstr! b #f)
+          (set-direct-pos! b (direct-end b))))
+      (make-progress-evt)))]
 
-   #:commit
-   (method
-    (lambda (amt progress-evt ext-evt finish)
-      (unless commit-manager
-        (set! commit-manager (make-commit-manager)))
-      (commit-manager-wait
-       commit-manager
-       progress-evt ext-evt
-       ;; in atomic mode, maybe in a different thread:
-       (lambda ()
-         (let ([amt (min amt (- len i))])
-           (define dest-bstr (make-bytes amt))
-           (bytes-copy! dest-bstr 0 bstr i (+ i amt))
-           (set! i (+ i amt))
-           (progress!)
-           (finish dest-bstr))))))
+  [commit
+   (lambda (amt progress-evt ext-evt finish)
+     (wait-commit
+      progress-evt ext-evt
+      ;; in atomic mode, maybe in a different thread:
+      (lambda ()
+        (define b buffer)
+        (define len (direct-end b))
+        (define i (in-buffer-pos))
+        (let ([amt (min amt (- len i))])
+          (define dest-bstr (make-bytes amt))
+          (bytes-copy! dest-bstr 0 bstr i (+ i amt))
+          ;; Keep/resume fast mode
+          (set-direct-pos! b (fx+ i amt))
+          (set-direct-bstr! b bstr)
+          (set! offset 0)
+          (progress!)
+          (finish dest-bstr)))))])
 
-   #:file-position
-   (method
-    (case-lambda
-      [() (or alt-pos i)]
-      [(new-pos)
-       (set! i (if (eof-object? new-pos)
-                   len
-                   (min len new-pos)))
-       (set! alt-pos
-             (and new-pos
-                  (not (eof-object? new-pos))
-                  (new-pos . > . i)
-                  new-pos))]))))
+(define (make-input-bytes bstr name)
+  (finish-port/count
+   (new bytes-input-port
+        #:field
+        [name name]
+        [buffer (direct bstr 0 (bytes-length bstr))]
+        [bstr bstr])))
 
 ;; ----------------------------------------
 
-(struct output-bytes-data (o get))
+(class bytes-output-port #:extends core-output-port
+  #:field
+  [bstr #""]
+  [pos 0]
+  [max-pos 0]
+
+  #:public
+  [get-length (lambda ()
+                (start-atomic)
+                (slow-mode!)
+                (end-atomic)
+                max-pos)]
+  [get-bytes (lambda (dest-bstr start-pos discard?)
+               (start-atomic)
+               (slow-mode!)
+               (bytes-copy! dest-bstr 0 bstr start-pos (fx+ start-pos (bytes-length dest-bstr)))
+               (when discard?
+                 (set! bstr #"")
+                 (set! pos 0)
+                 (set! max-pos 0))
+               (end-atomic))]
+
+  #:private
+  [enlarge!
+   (lambda (len)
+     (define new-bstr (make-bytes (fx* 2 len)))
+     (bytes-copy! new-bstr 0 bstr 0 pos)
+     (set! bstr new-bstr))]
+
+  [slow-mode!
+   (lambda ()
+     (define b buffer)
+     (when (direct-bstr b)
+       (define s (direct-pos b))
+       (set! pos s)
+       (set-direct-pos! b (direct-end b))
+       (set-direct-bstr! b #f)
+       (set! offset s)
+       (set! max-pos (fxmax s max-pos))))]
+
+  [fast-mode!
+   (lambda ()
+     (define b buffer)
+     (set-direct-bstr! b bstr)
+     (set-direct-pos! b pos)
+     (set-direct-end! b (bytes-length bstr))
+     (set! offset 0))]
+
+  #:override
+  [write-out
+   (lambda (src-bstr src-start src-end nonblock? enable-break? copy?)
+     (slow-mode!)
+     (define i pos)
+     (define amt (min (fx- src-end src-start) 4096))
+     (define end-i (fx+ i amt))
+     (when ((bytes-length bstr) . < . end-i)
+       (enlarge! end-i))
+     (bytes-copy! bstr i src-bstr src-start (fx+ src-start amt))
+     (set! pos end-i)
+     (set! max-pos (fxmax pos max-pos))
+     (fast-mode!)
+     amt)]
+  [get-write-evt
+   (get-write-evt-via-write-out (lambda (out v bstr start)
+                                  (port-count! out v bstr start)))]
+  [file-position
+   (case-lambda
+     [()
+      (define b buffer)
+      (if (direct-bstr b) (direct-pos b) pos)]
+     [(new-pos)
+      (slow-mode!)
+      (define len (bytes-length bstr))
+      (cond
+        [(eof-object? new-pos)
+         (set! pos max-pos)]
+        [(new-pos . > . len)
+         (when (new-pos . >= . (expt 2 48))
+           ;; implausibly large
+           (end-atomic)
+           (raise-arguments-error 'file-position
+                                  "new position is too large"
+                                  "port" this
+                                  "position" new-pos))
+         (enlarge! len)
+         (set! pos new-pos)
+         (set! max-pos new-pos)]
+        [else
+         (set! pos new-pos)
+         (set! max-pos (fxmax max-pos new-pos))])])])
 
 (define (open-output-bytes [name 'string])
-  (define-values (i/none o) (make-pipe-ends #f name name #:need-input? #f))
-  (define p
-    (make-core-output-port
-     #:name name
-     #:data (output-bytes-data o (lambda (o bstr start-pos discard?)
-                                   ;; in atomic mode
-                                   (pipe-get-content o bstr start-pos)
-                                   (when discard?
-                                     (pipe-discard-all o))))
-     #:self o
-     #:evt o
-     #:write-out o
-     #:close
-     (lambda (o) ((core-port-close o) (core-port-self o)))
-     #:get-write-evt
-     (and (core-output-port-get-write-evt o)
-          (lambda (o orig-o bstr start-k end-k)
-            ((core-output-port-get-write-evt o) (core-port-self o) o bstr start-k end-k)))
-     #:get-location
-     (and (core-port-get-location o)
-          (lambda (o) ((core-port-get-location o) (core-port-self o))))
-     #:count-lines!
-     (and (core-port-count-lines! o)
-          (lambda (o)
-            ((core-port-count-lines! o) (core-port-self o))))
-     #:file-position
-     (case-lambda
-       [(o) (pipe-write-position o)]
-       [(o new-pos)
-        (define len (pipe-content-length o))
-        (cond
-          [(eof-object? new-pos)
-           (pipe-write-position o len)]
-          [(new-pos . > . len)
-           (when (new-pos . >= . (expt 2 48))
-             ;; implausibly large
-             (end-atomic)
-             (raise-arguments-error 'file-position
-                                    "new position is too large"
-                                    "port" o
-                                    "position" new-pos))
-           (pipe-write-position o len)
-           (define amt (- new-pos len))
-           ((core-output-port-write-out o) (core-port-self o) (make-bytes amt 0) 0 amt #f #f #f)
-           (void)]
-          [else
-           (pipe-write-position o new-pos)])])))
-  (when (port-count-lines-enabled)
-    (port-count-lines! o)
-    (port-count-lines! p))
-  p)
+  (finish-port/count
+   (new bytes-output-port
+        #:field
+        [bstr (make-bytes 16)]
+        [name name]
+        [evt always-evt])))
 
 (define/who (get-output-bytes o [reset? #f] [start-pos 0] [end-pos #f])
   (check who (lambda (v) (and (output-port? o) (string-port? o)))
@@ -227,10 +252,9 @@
          o)
   (check who exact-nonnegative-integer? start-pos)
   (check who exact-nonnegative-integer? #:or-false end-pos)
-  (let ([bstr-o (->core-output-port o)])
-    (define o (output-bytes-data-o (core-port-data bstr-o)))
+  (let ([o (->core-output-port o)])
     (start-atomic)
-    (define len (pipe-content-length o))
+    (define len (send bytes-output-port o get-length))
     (when (start-pos . > . len)
       (end-atomic)
       (raise-range-error who "port content" "starting " start-pos o 0 len #f))
@@ -240,7 +264,7 @@
         (raise-range-error who "port content" "ending " end-pos o 0 len start-pos)))
     (define amt (- (min len (or end-pos len)) start-pos))
     (define bstr (make-bytes amt))
-    ((output-bytes-data-get (core-port-data bstr-o)) o bstr start-pos reset?)
+    (send bytes-output-port o get-bytes bstr start-pos reset?)
     (end-atomic)
     bstr))
 
@@ -250,9 +274,9 @@
   (cond
     [(input-port? p)
      (let ([p (->core-input-port p)])
-       (input-bytes-data? (core-port-data p)))]
+       (bytes-input-port? p))]
     [(output-port? p)
      (let ([p (->core-output-port p)])
-       (output-bytes-data? (core-port-data p)))]
+       (bytes-output-port? p))]
     [else
      (raise-argument-error 'string-port? "port?" p)]))

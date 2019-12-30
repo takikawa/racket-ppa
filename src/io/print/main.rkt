@@ -16,6 +16,7 @@
          "char.rkt"
          "list.rkt"
          "mlist.rkt"
+         "vector.rkt"
          "hash.rkt"
          "named.rkt"
          "parameter.rkt"
@@ -52,8 +53,7 @@
            install-do-global-print!))
 
 (define/who (display v [o (current-output-port)])
-  (check who output-port? o)
-  (let ([co (->core-output-port o)])
+  (let ([co (->core-output-port o who)])
     (define display-handler (core-output-port-display-handler co))
     (if display-handler
         (display-handler v o)
@@ -63,7 +63,7 @@
 (define (do-display who v o [max-length #f])
   (cond
     [(and (bytes? v) (not max-length))
-     (write-bytes v o)
+     (unsafe-write-bytes who v o)
      (void)]
     [(and (string? v) (not max-length))
      (write-string v o)
@@ -74,8 +74,7 @@
      (void)]))
 
 (define/who (write v [o (current-output-port)])
-  (check who output-port? o)
-  (let ([co (->core-output-port o)])
+  (let ([co (->core-output-port o who)])
     (define write-handler (core-output-port-write-handler co))
     (if write-handler
         (write-handler v o)
@@ -88,9 +87,8 @@
   (void))
 
 (define/who (print v [o (current-output-port)] [quote-depth PRINT-MODE/UNQUOTED])
-  (check who output-port? o)
-  (check who print-mode? #:contract "(or/c 0 1)" quote-depth)
-  (let ([co (->core-output-port o)])
+  (let ([co (->core-output-port o who)])
+    (check who print-mode? #:contract "(or/c 0 1)" quote-depth)
     (define print-handler (core-output-port-print-handler co))
     (if print-handler
         (print-handler v o quote-depth)
@@ -106,8 +104,9 @@
 
 (define (install-do-global-print! param default-value)
   (set! do-global-print
-        (lambda (who v o [quote-depth PRINT-MODE/UNQUOTED] [max-length #f])
+        (lambda (who v o [quote-depth-in PRINT-MODE/UNQUOTED] [max-length #f])
           (define global-print (param))
+          (define quote-depth (if (print-as-expression) quote-depth-in WRITE-MODE))
           (cond
             [(eq? global-print default-value)
              (do-print who v o quote-depth max-length)]
@@ -122,15 +121,14 @@
              (global-print v o2 quote-depth)
              (define bstr (get-output-bytes o2))
              (if ((bytes-length bstr) . <= . max-length)
-                 (write-bytes bstr o)
+                 (unsafe-write-bytes who bstr o)
                  (begin
-                   (write-bytes (subbytes bstr 0 (sub3 max-length)) o)
-                   (write-bytes #"..." o)))])
+                   (unsafe-write-bytes who (subbytes bstr 0 (sub3 max-length)) o)
+                   (unsafe-write-bytes who #"..." o)))])
           (void))))
 
 (define/who (newline [o (current-output-port)])
-  (check who output-port? o)
-  (write-bytes #"\n" o)
+  (unsafe-write-bytes 'newline #"\n" (->core-output-port o who))
   (void))
 
 ;; ----------------------------------------
@@ -239,13 +237,11 @@
     [(pair? v)
      (print-list p who v mode o max-length graph config #f #f)]
     [(vector? v)
-     (print-list p who (vector->list v) mode o max-length graph config "#(" "(vector")]
+     (print-vector p who v mode o max-length graph config "" vector-length vector-ref eq?)]
     [(flvector? v)
-     (define l (for/list ([e (in-flvector v)]) e))
-     (print-list p who l mode o max-length graph config "#fl(" "(flvector")]
+     (print-vector p who v mode o max-length graph config "fl" flvector-length flvector-ref equal?)]
     [(fxvector? v)
-     (define l (for/list ([e (in-fxvector v)]) e))
-     (print-list p who l mode o max-length graph config "#fx(" "(fxvector")]
+     (print-vector p who v mode o max-length graph config "fx" fxvector-length fxvector-ref eq?)]
     [(box? v)
      (cond
        [(config-get config print-box)
@@ -291,7 +287,8 @@
           (p who v mode o (output-port/max-max-length o/m max-length) graph config)))
        ((custom-write-accessor v) v o/m mode)
        (output-port/max-max-length o/m max-length))]
-    [(struct? v)
+    [(and (struct? v)
+          (config-get config print-struct))
      (cond
        [(eq? mode PRINT-MODE/UNQUOTED)
         (define l (vector->list (struct->vector v)))

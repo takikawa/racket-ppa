@@ -90,7 +90,7 @@ has been moved out).
   (unless (image? img)
     (error 'compute-cached-bitmap "expected an image as the first argument, got ~e" img))
   (when (is-a? img image<%>)
-    (send img compute-cached-bitmap))
+    (send img compute-cached-bitmap #:create-new-bitmap-if-not-ok? #t))
   (void))
   
 ;; a shape is either:
@@ -421,15 +421,19 @@ has been moved out).
     ;; this method is only used by the 'copy' method
     (define/public (set-cached-bitmap bm) (set! cached-bitmap bm))
     
-    (define/public (compute-cached-bitmap)
+    (define/public (compute-cached-bitmap #:create-new-bitmap-if-not-ok?
+                                          [create-new-bitmap-if-not-ok? #f])
       (when use-cached-bitmap?
-        (unless cached-bitmap
+        (when (or (not cached-bitmap)
+                  (and create-new-bitmap-if-not-ok?
+                       (not (send cached-bitmap ok?))))
           (define-values (w h) (get-size/but-subject-to-max bb))
           (set! cached-bitmap (make-bitmap (+ w 1) (+ h 1)))
-          (define bdc (make-object bitmap-dc% cached-bitmap))
-          (send bdc erase)
-          (render-image this bdc 0 0)
-          (send bdc set-bitmap #f))))
+          (when (send cached-bitmap ok?)
+            (define bdc (make-object bitmap-dc% cached-bitmap))
+            (send bdc erase)
+            (render-image this bdc 0 0)
+            (send bdc set-bitmap #f)))))
     
     (define/public (set-use-bitmap-cache?! u-b-c?) 
       (set! use-cached-bitmap? u-b-c?)
@@ -438,12 +442,20 @@ has been moved out).
     
     (define/override (draw dc x y left top right bottom dx dy draw-caret)
       (compute-cached-bitmap)
-      
+
+      ;; if the cached bitmap is not ok? that means we probably
+      ;; ran out of memory trying to allocate it. In that case,
+      ;; instead of failing, we just draw nothing. Don't try
+      ;; to fall back to the other drawing method because
+      ;; of the invariant that if a bitmap is present, we must
+      ;; use it or drawing nothing to avoid calling into unknown
+      ;; code in certain contexts
       (let ([alpha (send dc get-alpha)])
         (when (pair? draw-caret)
           (send dc set-alpha (* alpha .5)))
         (if use-cached-bitmap?
-            (send dc draw-bitmap cached-bitmap x y)
+            (when (send cached-bitmap ok?)
+              (send dc draw-bitmap cached-bitmap x y))
             (render-image this dc x y))
         (send dc set-alpha alpha)))
     
@@ -459,11 +471,7 @@ has been moved out).
         (set-box/f! rspace 0)))
 
     (define/override (write f)
-      (define bp (open-output-bytes))
-      (parameterize ([print-graph #t]
-                     [bitmap-write-cache (make-hasheq)])
-        (:write (list shape bb pinhole) bp))
-      (define bytes (get-output-bytes bp))
+      (define bytes (image->snipclass-bytes this))
       (send f put (bytes-length bytes) bytes))
     
     (super-new)
@@ -515,6 +523,16 @@ has been moved out).
                  #f
                  (list-ref lst 2))]))
 
+(define (image->snipclass-bytes img)
+  (define bp (open-output-bytes))
+  (parameterize ([print-graph #t]
+                 [bitmap-write-cache (make-hasheq)])
+    (:write (list (send img get-shape)
+                  (send img get-bb)
+                  (send img get-pinhole))
+            bp))
+  (get-output-bytes bp))
+
 (provide snip-class) 
 (define snip-class (new image-snipclass%))
 (send snip-class set-classname (format "~s" (list '(lib "image-core.ss" "mrlib")
@@ -537,7 +555,13 @@ has been moved out).
              (cond
                [(bytes? (vector-ref sexp 0))
                 ;; bitmaps are vectors with a bytes in the first field
-                (apply bytes->bitmap (vector->list sexp))]
+                ;; in older versions, there were three elements of the vector
+                ;; and the bytes in the first element were the raw bytes (from get-argb-pixels)
+                ;; in the current version, the bytes are png bytes and there are two elements
+                ;; in the vector; the second is the backing scale
+                (if (= (vector-length sexp) 3)
+                    (apply bytes->bitmap (vector->list sexp))
+                    (apply png-bytes->bitmap (vector->list sexp)))]
                [else
                 (let* ([tag (vector-ref sexp 0)]
                        [args (cdr (vector->list sexp))]
@@ -1507,7 +1531,7 @@ the mask bitmap and the original bitmap are all together in a single bytes!
     (cond
       [already-gotten-bytes already-gotten-bytes]
       [else
-       (define res (call-with-values (λ () (bitmap->bytes o #f)) vector))
+       (define res (call-with-values (λ () (bitmap->png-bytes o)) vector))
        (when cache (hash-set! cache o res))
        res]))
 
@@ -1580,6 +1604,7 @@ the mask bitmap and the original bitmap are all together in a single bytes!
          mode-color->pen
          
          snipclass-bytes->image
+         image->snipclass-bytes
          (contract-out
           [definitely-same-image? (-> image? image? boolean?)])
          string->color-object/f

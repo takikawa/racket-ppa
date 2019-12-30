@@ -13,7 +13,7 @@
 	 number real rational integer natural boolean true false string empty-list any property)
 (provide-and-document
  procedures
- (all-from-except beginner: deinprogramm/DMdA procedures
+ (all-from-except beginner: deinprogramm/DMdA/private/primitives procedures
 		  set! define-record-procedures-2 eq? equal?
 		  quote
 		  make-pair pair? cons? first rest

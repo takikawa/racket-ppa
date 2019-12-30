@@ -184,13 +184,14 @@ produces the typeset result
                        [#:keep-lang-line? keep? any/c #t]
                        [#:line-numbers line-numbers (or/c #f exact-nonnegative-integer?) #f]
                        [#:line-number-sep line-number-sep exact-nonnegative-integer? 1]
-                       [#:block? block? #t]
+                       [#:block? return-block? any/c #t]
                        [strs string?] ...)
-         block?]{
+         (if return-block? block? element?)]{
  A function-based version of @racket[codeblock], allowing you to compute the @racket[strs] arguments.
 
  Unlike @racket[codeblock], the default @racket[context] argument (@racket[#f]) implies that
- the context is untouched. The other arguments are treated the same way.
+ the context is untouched and the @racket[return-block?] argument determines the result
+ structure. The other arguments are treated the same way as @racket[codeblock].
 }
 
 @; ----------------------------------------
@@ -685,7 +686,7 @@ specified explicitly with @racket[#:packages]. Each @racket[pkg-expr]
 result is passed on to a function like @racket[tt] for
 typesetting. Provide an empty sequence after @racket[#:packages] to
 suppress any package name in the output. Each @racket[pkg-expr]
-expression is are duplicated for a  @racket[declare-exporting] form,
+expression is duplicated for a  @racket[declare-exporting] form,
 unless @racket[#:no-declare] is specified.
 
 Each @racket[option] form can appear at most once, and @racket[#:lang]

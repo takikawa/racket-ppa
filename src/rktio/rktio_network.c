@@ -13,6 +13,7 @@
 # include <netdb.h>
 # include <sys/socket.h>
 # include <sys/types.h>
+# include <sys/time.h>
 # include <fcntl.h>
 # include <errno.h>
 # define TCP_SOCKSENDBUF_SIZE 32768
@@ -209,9 +210,7 @@ struct rktio_addrinfo_t {
 # define rktio_AI_PASSIVE AI_PASSIVE 
 # define do_getaddrinfo(n, s, h, res) getaddrinfo(n, s, RKTIO_AS_ADDRINFO(h), RKTIO_AS_ADDRINFO_PTR(res))
 # define do_freeaddrinfo freeaddrinfo
-# ifdef RKTIO_SYSTEM_WINDOWS
-#  define do_gai_strerror gai_strerrorA
-# else
+# ifndef RKTIO_SYSTEM_WINDOWS
 #  define do_gai_strerror gai_strerror
 # endif
 #else
@@ -748,9 +747,18 @@ void rktio_addrinfo_free(rktio_t *rktio, rktio_addrinfo_t *a)
   do_freeaddrinfo(RKTIO_AS_ADDRINFO(a));
 }
 
-const char *rktio_gai_strerror(int errnum)
+const char *rktio_gai_strerror(rktio_t *rktio, int errnum)
 {
+#ifdef RKTIO_SYSTEM_WINDOWS
+  char *s;
+  s = NARROW_PATH_copy(gai_strerrorW(errnum));
+  if (rktio->last_err_str)
+    free(rktio->last_err_str);
+  rktio->last_err_str = s;
+  return s;
+#else
   return do_gai_strerror(errnum);
+#endif
 }
 
 /*========================================================================*/
@@ -1141,7 +1149,7 @@ intptr_t rktio_socket_write(rktio_t *rktio, rktio_fd_t *rfd, const char *buffer,
 /*========================================================================*/
 
 struct rktio_connect_t {
-  int inprogress;
+  int inprogress, failed;
   rktio_fd_t *trying_fd;
   rktio_addrinfo_t *dest, *src;
   rktio_addrinfo_t *addr; /* walking through dest */
@@ -1158,7 +1166,12 @@ rktio_connect_t *rktio_start_connect(rktio_t *rktio, rktio_addrinfo_t *dest, rkt
   conn->src = src;
   conn->addr = dest;
 
-  return try_connect(rktio, conn);
+  if (!try_connect(rktio, conn)) {
+    free(conn);
+    return NULL;
+  }
+  
+  return conn;
 }
 
 static rktio_connect_t *try_connect(rktio_t *rktio, rktio_connect_t *conn)
@@ -1201,9 +1214,10 @@ static rktio_connect_t *try_connect(rktio_t *rktio, rktio_connect_t *conn)
 #endif
 
       conn->trying_fd = rktio_system_fd(rktio,
-					(intptr_t)s,
-					RKTIO_OPEN_SOCKET | RKTIO_OPEN_READ | RKTIO_OPEN_WRITE | RKTIO_OPEN_OWN);
+                                        (intptr_t)s,
+                                        RKTIO_OPEN_SOCKET | RKTIO_OPEN_READ | RKTIO_OPEN_WRITE | RKTIO_OPEN_OWN);
       conn->inprogress = inprogress;
+      conn->failed = (inprogress ? 0 : status);
 
       return conn;
     }
@@ -1238,25 +1252,29 @@ rktio_fd_t *rktio_connect_finish(rktio_t *rktio, rktio_connect_t *conn)
 {
   rktio_fd_t *rfd = conn->trying_fd;
   
-  if (conn->inprogress) {
+  if (conn->inprogress || conn->failed) {
     /* Check whether connect succeeded, or get error: */
     int errid;
-    unsigned status;
-    rktio_sockopt_len_t so_len = sizeof(status);
-    rktio_socket_t s = rktio_fd_socket(rktio, rfd);
-    if (getsockopt(s, SOL_SOCKET, SO_ERROR, (void *)&status, &so_len) != 0) {
-      errid = SOCK_ERRNO();
-    } else
-      errid = status;
+    if (conn->failed) {
+      errid = conn->failed;
+    } else {
+      unsigned status;
+      rktio_sockopt_len_t so_len = sizeof(status);
+      rktio_socket_t s = rktio_fd_socket(rktio, rfd);
+      if (getsockopt(s, SOL_SOCKET, SO_ERROR, (void *)&status, &so_len) != 0) {
+        errid = SOCK_ERRNO();
+      } else
+        errid = status;
 #ifdef RKTIO_SYSTEM_WINDOWS
-    if (!rktio->windows_nt_or_later && !errid) {
-      /* getsockopt() seems not to work in Windows 95, so use the
-         result from select(), which seems to reliably detect an error condition */
-      if (rktio_poll_connect_ready(rktio, conn) == RKTIO_POLL_ERROR) {
-        errid = WSAECONNREFUSED; /* guess! */
+      if (!rktio->windows_nt_or_later && !errid) {
+        /* getsockopt() seems not to work in Windows 95, so use the
+           result from select(), which seems to reliably detect an error condition */
+        if (rktio_poll_connect_ready(rktio, conn) == RKTIO_POLL_ERROR) {
+          errid = WSAECONNREFUSED; /* guess! */
+        }
       }
-    }
 #endif
+    }
 
     if (errid) {
       rktio_close(rktio, rfd);

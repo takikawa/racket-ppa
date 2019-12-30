@@ -1,7 +1,9 @@
 #lang racket/base
-(require "host.rkt"
+(require racket/fixnum
+         "host.rkt"
          "place-local.rkt"
          "internal-error.rkt"
+         "parameter.rkt"
          "debug.rkt")
 
 (provide atomically
@@ -16,16 +18,18 @@
 
          in-atomic-mode?
 
-         set-end-atomic-callback!
+         future-barrier
+
+         add-end-atomic-callback!
 
          start-implicit-atomic-mode
          end-implicit-atomic-mode
-         assert-atomic-mode)
+         assert-atomic-mode
 
-;; This definition is specially recognized for Racket on
-;; Chez Scheme and converted to use a virtual register:
-(define current-atomic (make-pthread-parameter 0))
+         set-future-block!)
 
+;; "atomically" is atomic within a place; when a future-running
+;; pthread tries to enter atomic mode, it is suspended
 (define-syntax-rule (atomically expr ...)
   (begin
     (start-atomic)
@@ -40,25 +44,38 @@
      (let () expr ...)
      (end-atomic/no-interrupts))))
 
+;; inlined in Chez Scheme embedding:
 (define (start-atomic)
-  (current-atomic (add1 (current-atomic))))
+  (future-barrier)
+  (current-atomic (fx+ (current-atomic) 1)))
 
+;; inlined in Chez Scheme embedding:
 (define (end-atomic)
-  (define n (sub1 (current-atomic)))
+  (define n (fx- (current-atomic) 1))
   (cond
-    [(and end-atomic-callback
-          (zero? n))
-     (define cb end-atomic-callback)
-     (set! end-atomic-callback #f)
-     (current-atomic n)
-     (cb)]
-    [(negative? n) (internal-error "not in atomic mode to end")]
+    [(fx= n 0)
+     (if (eq? 0 (end-atomic-callback))
+         (current-atomic n)
+         (do-end-atomic-callback))]
+    [(fx< n 0) (bad-end-atomic)]
     [else
      ;; There's a small chance that `end-atomic-callback`
      ;; was set by the scheduler after the check and
      ;; before we exit atomic mode. Make sure that rare
-     ;; event is ok.
+     ;; possibility remains ok.
      (current-atomic n)]))
+
+(define (do-end-atomic-callback)
+  (define cbs (end-atomic-callback))
+  (end-atomic-callback 0)
+  (current-atomic 0)
+  (let loop ([cbs cbs])
+    (unless (eq? cbs 0)
+      ((car cbs))
+      (loop (cdr cbs)))))
+
+(define (bad-end-atomic)
+  (internal-error "not in atomic mode to end"))
 
 (define (start-atomic/no-interrupts)
   (start-atomic)
@@ -71,13 +88,39 @@
 (define (in-atomic-mode?)
   (positive? (current-atomic)))
 
+;; inlined in Chez Scheme embedding:
+(define (future-barrier)
+  (when (current-future)
+    (future-block-for-atomic)))
+
 ;; ----------------------------------------
 
-(define-place-local end-atomic-callback #f)
+;; A "list" of callbacks to run when exiting atomic mode,
+;; but the list is terminated by 0 insteda of '().
+;; This definition is converted to a virtual register on
+;; Chez Scheme, which explains why 0 is the "none" value.
+(define end-atomic-callback (make-pthread-parameter 0))
 
-(define (set-end-atomic-callback! cb)
-  (set! end-atomic-callback cb))
+;; in atomic mode, but need to disable interrupts to ensure
+;; no race with the scheduler
+(define (add-end-atomic-callback! cb)
+  (host:disable-interrupts)
+  (define all-cbs (end-atomic-callback))
+  (let loop ([cbs all-cbs])
+    (cond
+      [(eq? cbs 0)
+       (end-atomic-callback (cons cb all-cbs))]
+      [else
+       (unless (eq? (car cbs) cb)
+         (loop (cdr cbs)))]))
+  (host:enable-interrupts))
 
+;; ----------------------------------------
+
+(define future-block-for-atomic (lambda () (void)))
+
+(define (set-future-block! block)
+  (set! future-block-for-atomic block))
 
 ;; ----------------------------------------
 

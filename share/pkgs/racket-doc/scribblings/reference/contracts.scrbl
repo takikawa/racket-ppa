@@ -1,12 +1,13 @@
 #lang scribble/doc
 @(require "mz.rkt")
 @(require (for-label syntax/modcollapse
-                     racket/stxparam))
+                     racket/stxparam
+                     racket/serialize))
 
 @(define contract-eval
    (lambda ()
      (let ([the-eval (make-base-eval)])
-       (the-eval '(require racket/contract racket/contract/parametric racket/list))
+       (the-eval '(require racket/contract racket/contract/parametric racket/list racket/math))
        the-eval)))
 
 @(define blame-object @tech{blame object})
@@ -1090,6 +1091,33 @@ This function is a holdover from before @tech{flat contracts} could be used
 directly as predicates. It exists today for backwards compatibility.
 }
 
+@defproc[(property/c [accessor (-> any/c any/c)]
+                     [ctc flat-contract?]
+                     [#:name name any/c (object-name accessor)])
+         flat-contract?]{
+
+Constructs a @tech{flat contract} that checks that the first-order property
+accessed by @racket[accessor] satisfies @racket[ctc]. The resulting contract
+is equivalent to
+
+@racketblock[(lambda (v) (ctc (accessor v)))]
+
+except that more information is included in error messages produced by
+violations of the contract. The @racket[name] argument is used to describe the
+property being checked in error messages.
+
+@examples[#:eval (contract-eval) #:once
+  (define/contract (sum-triple lst)
+    (-> (and/c (listof number?)
+               (property/c length (=/c 3)))
+        number?)
+    (+ (first lst) (second lst) (third lst)))
+  (eval:check (sum-triple '(1 2 3)) 6)
+  (eval:error (sum-triple '(1 2)))]
+
+@history[#:added "7.3.0.11"]
+}
+
 @defproc[(suggest/c [c contract?]
                     [field string?]
                     [message string?]) contract?]{
@@ -1174,13 +1202,29 @@ produces a contract on functions of two arguments. The first argument
 must be an integer, and the second argument must be a boolean. The
 function must produce an integer.
 
+@examples[#:eval (contract-eval) #:once
+          (define/contract (maybe-invert i b)
+            (-> integer? boolean? integer?)
+            (if b (- i) i))
+
+          (maybe-invert 1 #t)
+          (eval:error (maybe-invert #f 1))]
+
 A domain specification may include a keyword. If so, the function must
 accept corresponding (mandatory) keyword arguments, and the values for
 the keyword arguments must match the corresponding contracts. For
 example:
-@racketblock[(integer? #:x boolean? . -> . integer?)]
+@racketblock[(integer? #:invert? boolean? . -> . integer?)]
 is a contract on a function that accepts a by-position argument that
-is an integer and a @racket[#:x] argument that is a boolean.
+is an integer and an @racket[#:invert?] argument that is a boolean.
+
+@examples[#:eval (contract-eval) #:once
+          (define/contract (maybe-invert i #:invert? b)
+            (-> integer? #:invert? boolean? integer?)
+            (if b (- i) i))
+
+          (maybe-invert 1 #:invert? #t)
+          (eval:error (maybe-invert 1 #f))]
 
 As an example that uses an @racket[...], this contract:
 @racketblock[(integer? string? ... integer? . -> . any)]
@@ -1188,14 +1232,52 @@ on a function insists that the first and last arguments to
 the function must be integers (and there must be at least
 two arguments) and any other arguments must be strings.
 
+@examples[#:eval (contract-eval) #:once
+          (define/contract (string-length/between? lower-bound s1 . more-args)
+            (-> integer? string? ... integer? boolean?)
+
+            (define all-but-first-arg-backwards (reverse (cons s1 more-args)))
+            (define upper-bound (first all-but-first-arg-backwards))
+            (define strings (rest all-but-first-arg-backwards))
+            (define strings-length
+              (for/sum ([str (in-list strings)])
+                (string-length str)))
+            (<= lower-bound strings-length upper-bound))
+
+          (string-length/between? 4 "farmer" "john" 40)
+          (eval:error (string-length/between? 4 "farmer" 'john 40))
+          (eval:error (string-length/between? 4 "farmer" "john" "fourty"))]
+
 If @racket[any] is used as the last sub-form for @racket[->], no
 contract checking is performed on the result of the function, and
 thus any number of values is legal (even different numbers on different
 invocations of the function).
 
+@examples[#:eval (contract-eval) #:once
+          (define/contract (multiple-xs n x)
+            (-> natural? any/c any)
+            (apply
+             values
+             (for/list ([_ (in-range n)])
+               n)))
+
+          (multiple-xs 4 "four")]
+
 If @racket[(values range-expr ...)] is used as the last sub-form of
 @racket[->], the function must produce a result for each contract, and
 each value must match its respective contract.
+
+
+@examples[#:eval (contract-eval) #:once
+          (define/contract (multiple-xs n x)
+            (-> natural? any/c (values any/c any/c any/c))
+            (apply
+             values
+             (for/list ([_ (in-range n)])
+               n)))
+
+          (multiple-xs 3 "three")
+          (eval:error (multiple-xs 4 "four"))]
 
 @history[#:changed "6.4.0.5" @list{Added support for ellipses}]
 }
@@ -1355,7 +1437,15 @@ arguments:
 @racketblock[(->i ()
                   (#:x [x number?]
                    #:y [y (x) (>=/c x)])
-                  [result (x y) (and/c number? (>=/c (+ x y)))])]
+                  [result (x y)
+                   (and/c number?
+                          (if (and (number? x) (number? y))
+                              (>=/c (+ x y))
+                              any/c))])]
+The conditional in the range that tests @racket[_x] and @racket[_y]
+is necessary to cover the situation where @racket[_x] or @racket[_y]
+are not supplied by the calling context (meaning they might be bound
+to @racket[the-unsupplied-arg]).
 
 The contract expressions are not always evaluated in
 order. First, if there is no dependency for a given contract expression,
@@ -1373,11 +1463,11 @@ there is no dependency between two arguments (or the result and an
 argument), then the contract that appears earlier in the source text is
 evaluated first.
 
- If all of the identifier positions of the range
-contract are @racket[_]s (underscores), then the range contract expressions
-are evaluated when the function is called instead of when it returns.
-Otherwise, dependent range expressions are evaluated when the function
- returns.
+ If all of the identifier positions of a range contract with
+ a dependency are @racket[_]s (underscores), then the range
+ contract expressions are evaluated when the function is
+ called instead of when it returns. Otherwise, dependent
+ range expressions are evaluated when the function returns.
 
  If there are optional arguments that are not supplied, then
  the corresponding variables will be bound to a special value
@@ -1729,8 +1819,11 @@ earlier fields.}}
 
 @defform/subs[
 #:literals (struct rename)
-(contract-out p/c-item ...)
-([p/c-item
+(contract-out unprotected-submodule contract-out-item ...)
+([unprotected-submodule
+  (code:line)
+  (code:line #:unprotected-submodule submodule-name)]
+ [contract-out-item
   (struct id/super ((id contract-expr) ...)
     struct-option)
   (rename orig-id id contract-expr)
@@ -1785,12 +1878,23 @@ the original structure-type name does not act as a constructor.
 If the @racket[#:omit-constructor] option is present, the constructor
 is not provided.
 
+Note that if the struct is created with @racket[serializable-struct]
+or @racket[define-serializable-struct], @racket[contract-out] does not
+protect struct instances that are created via
+@racket[deserialize]. Consider using @racket[struct-guard/c] instead.
+
 The @racket[#:∃], @racket[#:exists], @racket[#:∀], and @racket[#:forall]
 clauses define new abstract contracts. The variables are bound in the
 remainder of the @racket[contract-out] form to new contracts that hide
 the values they accept and ensure that the exported functions are treated
 parametrically. See @racket[new-∃/c] and @racket[new-∀/c] for details
 on how the clauses hide the values.
+
+If @racket[#:unprotected-submodule] appears, the identifier
+that follows it is used as the name of a submodule that
+@racket[contract-out] generates. The submodule exports all
+of the names in the @racket[contract-out], but without
+contracts.
 
 The implementation of @racket[contract-out] uses
 @racket[syntax-property] to attach properties to the code it generates
@@ -1799,6 +1903,8 @@ Specifically, the symbol @indexed-racket['provide/contract-original-contract]
 is bound to vectors of two elements, the exported identifier and a
 syntax object for the expression that produces the contract controlling
 the export.
+
+@history[#:changed "7.3.0.3" @list{Added @racket[#:unprotected-submodule].}]
 }
 
 @defform[(recontract-out id ...)]{
@@ -1835,12 +1941,25 @@ the export.
    the private module.                              
 }
 
-@defform[(provide/contract p/c-item ...)]{
+@defform[(provide/contract unprotected-submodule contract-out-item ...)]{
 
-A legacy shorthand for @racket[(provide (contract-out p/c-item ...))],
+A legacy shorthand for @racket[(provide (contract-out unprotected-submodule contract-out-item ...))],
 except that a @racket[_contract-expr] within @racket[provide/contract]
 is evaluated at the position of the @racket[provide/contract] form
 instead of at the end of the enclosing module.}
+
+@defform[(struct-guard/c contract-expr ...)]{
+  Returns a procedure suitable to be passed as the @racket[#:guard]
+ argument to @racket[struct], @racket[serializable-struct] (and related forms).
+ The guard procedure ensures that each contract protects the
+ corresponding field values, as long as the struct is not mutated.
+ Mutations are not protected.
+
+ @examples[#:eval (contract-eval) #:once
+           (struct snake (weight hungry?)
+             #:guard (struct-guard/c real? boolean?))
+           (eval:error (snake 1.5 "yep"))]
+}
 
 @subsection{Nested Contract Boundaries}
 @defmodule*/no-declare[(racket/contract/region)]
@@ -1877,7 +1996,7 @@ contracts paired with exported @racket[id]s.  Contracts broken
 within the @racket[with-contract] @racket[body] will use the
 @racket[blame-id] for their negative position.
 
-If a free-var-list is given, then any uses of the free variables
+If a @racket[free-var-list] is given, then any uses of the free variables
 inside the @racket[body] will be protected with contracts that
 blame the context of the @racket[with-contract] form for the positive
 positions and the @racket[with-contract] form for the negative ones.}
@@ -2020,7 +2139,7 @@ The @racket[define-struct/contract] form only allows a subset of the
                                 (code:line #:srcloc srcloc-expr)]
                     [name-for-blame
                      (code:line)
-                     #:name-for-blame blame-id]
+                     (code:line #:name-for-blame blame-id)]
                     [context-limit (code:line)
                      (code:line #:context-limit limit-expr)])]{
   Defines @racket[id] to be @racket[orig-id], but with the contract
@@ -2262,7 +2381,7 @@ The @racket[late-neg-proj] argument defines the behavior of applying
  missing one party. It must return two values. The first value must be
  a function that accepts both the value that is getting the contract and
  the name of the missing blame party, in that order. The second value should
- be a collapsible representation of the contract.
+ be a @tech[#:key "collapsible contract"]{collapsible} representation of the contract.
  
 The projection @racket[proj] and @racket[val-first-proj] are older mechanisms for
  defining the behavior of applying the contract.  The @racket[proj] argument
@@ -2937,8 +3056,8 @@ a contract.  It is specified in terms of seven properties:
    but using a different signature. They are here for backwards compatibility.);}
   @item{@racket[collapsible-late-neg-proj], similar to @racket[late-neg-proj]
    which produces a blame-tracking projection defining the behavior of the
-   contract, this function additionally specifies the collapsible behavior
-   of the contract;}
+   contract, this function additionally specifies the
+   @tech[#:key "collapsible contract"]{collapsible} behavior of the contract;}
   @item{@racket[stronger], a predicate that determines whether this
    contract (passed in the first argument) is stronger than some other
    contract (passed in the second argument) and whose default always
@@ -3517,11 +3636,23 @@ values. The @racket[vectorof], @racket[vector/c], and @racket[->] contract
 combinators support collapsing for vector contracts and function contracts for
 functions returning a single value.
 
+Intuitively, a collapsible contract is a tree structure.
+The @racketlink[collapsible-ho/c]{tree nodes} represent higher-order contracts
+ (e.g., @racket[->]) and the @racketlink[collapsible-leaf/c]{tree leaves}
+ represent sequences of flat contracts.
+Two trees can collapse into one tree via the @racket[merge] procedure,
+ which removes unnecessary flat contracts from the leaves.
+
+For more information on the motivation and design of collapsible contracts,
+ see @cite["Feltey18"].
+For the theoretical foundations, see @cite["Greenberg15"].
+
 @bold{Warning}: the features described in this section are experimental
 and may not be sufficient to implement new collapsible contracts. Implementing
 new collapsible contracts requires the use of unsafe chaperones and impersonators
 which are only supported for vector and procedure values. This documentation exists
-primarily to allow future maintenance of the @racket[racket/contract/collapsible] library/
+primarily to allow future maintenance of the @racket[racket/contract/collapsible]
+library. @bold{End Warning}
 
 @defproc[(get/build-collapsible-late-neg-projection [c contract?])
          (-> blame? (values (-> any/c any/c any/c) collapsible-contract?))]{
@@ -3587,7 +3718,7 @@ A predicate recognizing structures with the @racket[prop:collapsible-contract] p
            (-> collapsible-contract? any/c any/c any/c)
            (λ (cc v neg)
              (error
-              "internal error: contract does not support `collapsible-guard`" ctc))])
+              "internal error: contract does not support `collapsible-guard`" cc))])
          collapsible-contract-property?]{
  Constructs a @deftech{collapsible contract property} from a merging function and a guard.
  The @racket[try-merge] argument is similar to @racket[merge], but may return @racket[#f] instead
@@ -3602,7 +3733,7 @@ A predicate recognizing structures with the @racket[prop:collapsible-contract] p
              [latest-ctc contract?])]{
  A common parent structure for collapsible contracts for higher-order values.
  The @racket[latest-blame] field holds the blame object for the most recent
- contract attached. Similarly, the @racket[missing-party] filed holds the latest
+ contract attached. Similarly, the @racket[missing-party] field holds the latest
  missing party passed to the contract. The @racket[latest-contract] field stores
  the most recent contract attached to the value.
 }

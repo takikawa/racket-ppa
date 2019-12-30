@@ -10,7 +10,7 @@
   (for-each (lambda (arg)
               (check who byte? arg))
             args)
-  (apply #2%bytevector args))
+  (register-place-shared (apply #2%bytevector args)))
 
 (define bytes? #2%bytevector?)
 
@@ -22,15 +22,18 @@
    [(n b)
     (check who exact-nonnegative-integer? n)
     (check who byte? b)
+    (unless (and (fixnum? n)
+                 (fx<? n 4096))
+      (guard-large-allocation who "byte string" n 1))
     (#2%make-bytevector n b)]))
 
 (define/who make-shared-bytes
   (case-lambda
-   [(n) (#2%make-bytevector n 0)]
+   [(n) (make-shared-bytes n 0)]
    [(n b)
     (check who exact-nonnegative-integer? n)
     (check who byte? b)
-    (#2%make-bytevector n b)]))
+    (register-place-shared (#2%make-bytevector n b))]))
 
 (define/who (list->bytes lst)
   (check who

@@ -172,7 +172,7 @@ static int inlineable_struct_prim(Scheme_Object *o, mz_jit_state *jitter, int ex
     }
   }
 
-  return check_val_struct_prim(o, 1);
+  return check_val_struct_prim(o, arity);
 }
 
 int scheme_inlined_unary_prim(Scheme_Object *o, Scheme_Object *_app, mz_jit_state *jitter)
@@ -2151,6 +2151,7 @@ int scheme_generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
       scheme_mz_unbox_restore(jitter, &ubs);
 
       mz_runstack_unskipped(jitter, 1);
+      mz_rs_sync();
 
       mz_prepare(1);
       jit_pusharg_p(JIT_R0);
@@ -3276,7 +3277,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
 
     /* check in range of type treated by eqv: */
     ref_f4 = jit_blti_i(jit_forward(), JIT_R2, scheme_integer_type);
-    ref_f5 = jit_bgti_i(jit_forward(), JIT_R2, scheme_char_type);
+    ref_f5 = jit_bgti_i(jit_forward(), JIT_R2, scheme_long_double_type);
     CHECK_LIMIT();
     
     /* in range of interesting types, so break out the generic comparison */
@@ -4458,6 +4459,7 @@ int scheme_generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
 
       scheme_generate_two_args(app->rand1, app->rand2, jitter, 1, 2);
       CHECK_LIMIT();
+      mz_rs_sync();
       
       allocate_rectangular(jitter, dest);
 

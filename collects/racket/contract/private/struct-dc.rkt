@@ -733,6 +733,7 @@
 (define-struct (struct/dc base-struct/dc) ()
   #:property prop:chaperone-contract
   (build-chaperone-contract-property
+   #:trusted trust-me
    #:name struct/dc-name
    #:first-order struct/dc-first-order
    #:late-neg-projection struct/dc-late-neg-proj
@@ -744,6 +745,7 @@
 (define-struct (flat-struct/dc base-struct/dc) ()
   #:property prop:flat-contract
   (build-flat-contract-property
+   #:trusted trust-me
    #:name struct/dc-name
    #:first-order struct/dc-flat-first-order
    #:late-neg-projection struct/dc-late-neg-proj
@@ -755,6 +757,7 @@
 (define-struct (impersonator-struct/dc base-struct/dc) ()
   #:property prop:contract
   (build-contract-property
+   #:trusted trust-me
    #:name struct/dc-name
    #:first-order struct/dc-first-order
    #:late-neg-projection struct/dc-late-neg-proj
@@ -1071,6 +1074,10 @@
                           
        (values info #'id all-clauses))]))
 
+(define-for-syntax (disarm stx)
+  (syntax-disarm stx (variable-reference->module-declaration-inspector
+                      (#%variable-reference))))
+
 ;; name->sel-id : identifier syntax -> identifier
 ;; returns the identifier for the selector, where the 'id'
 ;; argument is either an identifier or a #'(id #:parent id)
@@ -1078,7 +1085,7 @@
 (define-for-syntax (name->sel-id struct-id id)
   (define (combine struct-id id)
     (datum->syntax
-     id
+     (disarm id)
      (string->symbol
       (format "~a-~a" 
               (syntax-e struct-id)
@@ -1096,7 +1103,7 @@
 (define-for-syntax (name->mut-id stx struct-id id)
   (define (combine struct-id id)
     (datum->syntax
-     id
+     (disarm id)
      (string->symbol
       (format "set-~a-~a!"
               (syntax-e struct-id)
@@ -1565,7 +1572,7 @@
                         (regexp (format "^~a-" (regexp-quote (symbol->string (syntax-e struct-id))))))
                       (define field-name
                         (datum->syntax 
-                         sel
+                         (disarm sel)
                          (string->symbol (regexp-replace strip-reg
                                                          (symbol->string (syntax-e sel))
                                                          ""))))

@@ -1,6 +1,7 @@
 #lang racket/base
 
 (provide contract
+         make-apply-contract
          (rename-out [-recursive-contract recursive-contract])
          current-contract-region
          invariant-assertion
@@ -68,6 +69,9 @@
                          #f)))]))
 
 (define (apply-contract c v pos neg name loc context-limit)
+  ((make-apply-contract c pos neg name loc context-limit) v))
+
+(define (make-apply-contract c pos neg name loc context-limit [backwards? #f])
   (let ([c (coerce-contract 'contract c)])
     (check-source-location! 'contract loc)
     (define clnp (contract-late-neg-projection c))
@@ -87,13 +91,16 @@
                   (if clnp #f neg)
                   #t
                   #:context-limit context-limit))
+    (define ccm-value (if clnp (cons blame neg) blame))
+    (define-syntax-rule (with-ccm e)
+      (with-contract-continuation-mark ccm-value e))
     (cond
-      [clnp (with-contract-continuation-mark
-             (cons blame neg)
-             ((clnp blame) v neg))]
-      [else (with-contract-continuation-mark
-             blame
-             (((contract-projection c) blame) v))])))
+      [clnp
+       (define proj (with-ccm (clnp blame)))
+       (lambda (v) (with-ccm (proj v neg)))]
+      [else
+       (define proj (with-ccm ((contract-projection c) blame)))
+       (lambda (v) (with-ccm (proj v)))])))
 
 (define-syntax (invariant-assertion stx)
   (syntax-case stx ()
@@ -203,7 +210,9 @@
          [(chaperone-recursive-contract? ctc)
           (coerce-chaperone-contract 'recursive-contract (thunk))]
          [(impersonator-recursive-contract? ctc)
-          (coerce-contract 'recursive-contract (thunk))]))
+          (coerce-contract 'recursive-contract (thunk))]
+         [else ;; internal error
+          (raise-argument-error 'force-recursive-contract "recursive-contract?" ctc)]))
      (when (recursive-contract-list-contract? ctc)
        (unless (list-contract? forced-ctc)
          (raise-argument-error 'recursive-contract "list-contract?" forced-ctc)))
@@ -317,6 +326,7 @@
   #:property prop:custom-write custom-write-property-proc
   #:property prop:flat-contract
   (build-flat-contract-property
+   #:trusted trust-me
    #:name recursive-contract-name
    #:first-order recursive-contract-first-order
    #:late-neg-projection flat-recursive-contract-late-neg-projection
@@ -328,6 +338,7 @@
   #:property prop:custom-write custom-write-property-proc
   #:property prop:chaperone-contract
   (build-chaperone-contract-property
+   #:trusted trust-me
    #:name recursive-contract-name
    #:first-order recursive-contract-first-order
    #:late-neg-projection recursive-contract-late-neg-projection
@@ -339,6 +350,7 @@
   #:property prop:custom-write custom-write-property-proc
   #:property prop:contract
   (build-contract-property
+   #:trusted trust-me
    #:name recursive-contract-name
    #:first-order recursive-contract-first-order
    #:late-neg-projection recursive-contract-late-neg-projection

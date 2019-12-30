@@ -259,7 +259,11 @@
     (dispatch-variable t s id ctx binding primitive? protected?)]
    [else
     ;; Some other compile-time value:
-    (raise-syntax-error #f "illegal use of syntax" s)]))
+    (raise-syntax-error #f "illegal use of syntax" s
+                        #f null
+                        (format "\n  value at phase ~s: ~e"
+                                (add1 (expand-context-phase ctx))
+                                t))]))
 
 ;; Call a core-form expander (e.g., `lambda`)
 (define (dispatch-core-form t s ctx)
@@ -319,12 +323,7 @@
     (cond
      [(expand-context-just-once? ctx) exp-s]
      [else (expand exp-s re-ctx
-                   #:alternate-id (and (rename-transformer? t)
-                                       (syntax-track-origin (transfer-srcloc
-                                                             (rename-transformer-target-in-context t ctx)
-                                                             id)
-                                                            id
-                                                            id))
+                   #:alternate-id (and (rename-transformer? t) (apply-rename-transformer t id ctx))
                    #:skip-log? (or (expand-context-only-immediate? ctx)
                                    (rename-transformer? t))
                    #:fail-non-transformer (and (rename-transformer? t) fail-non-transformer))])]))
@@ -478,6 +477,17 @@
       (struct*-copy expand-context ctx
                     [scopes (append (unbox def-ctx-scopes)
                                     (expand-context-scopes ctx))])))
+
+;; ----------------------------------------
+
+;; "Apply" a rename transformer, replacing it with its target.
+(define (apply-rename-transformer t id ctx)
+  (define target-id (rename-transformer-target-in-context t ctx))
+  ;; Adding a macro-introduction scope doesn't affect scoping at all, but it can affect
+  ;; whether the result is `syntax-original?`
+  (define intro-scope (new-scope 'macro))
+  (define intro-id (add-scope target-id intro-scope))
+  (syntax-track-origin (transfer-srcloc intro-id id) id id))
 
 ;; ----------------------------------------
 

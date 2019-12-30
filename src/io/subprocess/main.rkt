@@ -67,8 +67,14 @@
           [(or (not group/command)
                (eq? group/command 'new)
                (subprocess? group/command))
-           (define command (cadr command/args))
+           (unless (pair? command/args)
+             (raise-arguments-error who "missing command argument after group argument"))
+           (define command (car command/args))
            (check who path-string? command)
+           (when (subprocess? group/command)
+             (unless (subprocess-is-group? group/command)
+               (raise-arguments-error who "subprocess does not represent a new group"
+                                      "subprocess" group/command)))
            (values group/command command (cdr command/args))]
           [else
            (raise-argument-error who "(or/c path-string? #f 'new subprocess?)" group/command)]))
@@ -110,6 +116,14 @@
         
         (define command-bstr (->host (->path command) who '(execute)))
 
+        ;; If `stdout` or `stderr` is a fifo with no read end open, wait for it:
+        (define (maybe-wait fd)
+          (when (and fd (rktio_fd_is_pending_open rktio (fd-port-fd fd)))
+            (sync fd)))
+        (maybe-wait stdout)
+        (unless (eq? stderr 'stdout)
+          (maybe-wait stderr))
+
         (start-atomic)
         (poll-subprocess-finalizations)
         (check-current-custodian who)
@@ -131,7 +145,7 @@
                                  (and stdout (fd-port-fd stdout))
                                  (and stdin (fd-port-fd stdin))
                                  (and stderr (not (eq? stderr 'stdout)) (fd-port-fd stderr))
-                                 (and group (subprocess-process group))
+                                 (and (subprocess? group) (subprocess-process group))
                                  (->host (current-directory) #f null)
                                  envvars flags))
 
@@ -212,8 +226,8 @@
 (define/who (subprocess-kill sp force?)
   (check who subprocess? sp)
   (atomically (if force?
-                  (interrupt-subprocess sp)
-                  (kill-subprocess sp))))
+                  (kill-subprocess sp)
+                  (interrupt-subprocess sp))))
 
 ;; ----------------------------------------
 
@@ -241,10 +255,11 @@
   (make-parameter #f (lambda (v)
                        (unless (or (not v) (eq? v 'kill) (eq? v 'interrupt))
                          (raise-argument-error who "(or/c #f 'kill 'interrupt)" v))
-                       v)))
+                       v)
+                  'current-subprocess-custodian-mode))
 
 (define subprocess-group-enabled
-  (make-parameter #f (lambda (v) (and v #t))))
+  (make-parameter #f (lambda (v) (and v #t)) 'subprocess-group-enabled))
 
 ;; ----------------------------------------
 

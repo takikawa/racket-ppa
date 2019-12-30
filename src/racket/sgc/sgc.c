@@ -2452,8 +2452,6 @@ static void *do_malloc(SET_NO_BACKINFO
 
     ALLOC_STATISTIC(num_chunk_allocs_stat++);
 
-    cpos = 0;
-
     a = malloc_sector(size + size_align(sizeof(MemoryChunk)), sector_kind_chunk, 1, 
                       flags & do_malloc_EXECUTABLE);
     if (!a) {
@@ -4016,16 +4014,27 @@ static void push_collect_ignore(uintptr_t s, uintptr_t e,
   }
 }
 
+static void mark_chunks_finalization_data(MemoryChunk *c)
+{
+  for (; c; c = c->next) {
+    Finalizer *fn = c->finalizers;
+
+    if (fn) {
+      /* Mark data associated with finalization callback: */
+      uintptr_t p = PTR_TO_INT(&fn->data);
+      PUSH_COLLECT(p, p + PTR_SIZE, 0);
+    }
+  }
+
+  collect();
+}
+
 static void mark_chunks_for_finalizations(MemoryChunk *c)
 {
   for (; c; c = c->next) {
     Finalizer *fn = c->finalizers;
 
     if (fn) {
-      /* Always mark data associated with finalization: */
-      uintptr_t p = PTR_TO_INT(&fn->data);
-      PUSH_COLLECT(p, p + PTR_SIZE, 0);
-
       /* If not eager, mark data reachable from finalized block: */
       if (!fn->eager_level && !c->marked && !c->atomic) {
 	if (fn->ignore_self)
@@ -4033,6 +4042,27 @@ static void mark_chunks_for_finalizations(MemoryChunk *c)
 	else {
 	  PUSH_COLLECT(c->start, c->end, 0);
 	}
+      }
+    }
+  }
+
+  collect();
+}
+
+static void mark_common_finalization_data(BlockOfMemory **blocks, int atomic)
+{
+  int i;
+
+  for (i = 0; i < NUM_COMMON_SIZE; i++) {
+    BlockOfMemory *block = blocks[i];
+    for (; block; block = block->next) {
+      Finalizer *fn = block->finalizers;
+      for (; fn ; fn = fn->next) {
+	uintptr_t p;
+	  
+	/* Mark data associated with finalization: */
+	p = PTR_TO_INT(&fn->data);
+	PUSH_COLLECT(p, p + PTR_SIZE, 0);
       }
     }
   }
@@ -4050,10 +4080,6 @@ static void mark_common_for_finalizations(BlockOfMemory **blocks, int atomic)
       Finalizer *fn = block->finalizers;
       for (; fn ; fn = fn->next) {
 	uintptr_t p;
-	  
-	/* Always mark data associated with finalization: */
-	p = PTR_TO_INT(&fn->data);
-	PUSH_COLLECT(p, p + PTR_SIZE, 0);
 
 	/* If not eager, mark data reachable from finalized block: */
 	if (!fn->eager_level) {
@@ -4283,10 +4309,13 @@ static void do_disappear_and_finals()
   collect();
   if (GC_push_last_roots_again) { GC_push_last_roots_again(); collect(); }
 
-#if !NO_DISAPPEARING
-  /* Do disappearing: */
-  do_disappearing(&disappearing);
-#endif
+  /* Mark reachable from finalized callback data: */
+  for (j = 0; j < num_common_sets; j++) {
+    mark_chunks_finalization_data(*(common_sets[j]->othersptr));
+    mark_common_finalization_data(common_sets[j]->blocks, common_sets[j]->atomic);
+  }
+  collect();
+  if (GC_push_last_roots_again) { GC_push_last_roots_again(); collect(); }
 
   /* Queue unreachable eager finalizable, level 1: */  
   /* DO NOT COLLECT FROM collect_stack UNTIL AFTER THIS LOOP */
@@ -4297,6 +4326,11 @@ static void do_disappear_and_finals()
   }
   collect();
   if (GC_push_last_roots_again) { GC_push_last_roots_again(); collect(); }
+
+#if !NO_DISAPPEARING
+  /* Do disappearing: */
+  do_disappearing(&disappearing);
+#endif
 
   /* Queue unreachable eager finalizable, level 2: */  
   /* DO NOT COLLECT FROM collect_stack UNTIL AFTER THIS LOOP */

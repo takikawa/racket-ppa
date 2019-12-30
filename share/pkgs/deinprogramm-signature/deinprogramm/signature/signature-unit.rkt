@@ -25,6 +25,7 @@
    make-predicate-signature
    make-type-variable-signature
    make-list-signature
+   make-nonempty-list-signature
    make-vector-signature
    make-mixed-signature
    make-combined-signature
@@ -131,34 +132,37 @@
 ; maps lists to pairs of signature, enforced value
 (define lists-table (make-weak-hasheq))
 
+(define (check-list arg-signature self obj)
+
+  (let recur ((l obj))
+    (define (go-on)
+      (let ((enforced (cons (apply-signature arg-signature (car l))
+			    (recur (cdr l)))))
+	(hash-set! lists-table l (cons self enforced))
+	(hash-set! lists-table enforced (cons self enforced))
+	enforced))
+       
+    (cond
+     ((null? l)
+      l)
+     ((not (pair? l))
+      (signature-violation obj self #f #f)
+      obj)
+     ((hash-ref lists-table l #f)
+      => (lambda (seen)
+	   ;;(eprintf "~s\n" (list 'seen seen (eq? self (car seen))))
+	   (if (eq? self (car seen))
+	       (cdr seen)
+	       (go-on))))
+     (else
+      (go-on)))))
+
 (define (make-list-signature name arg-signature syntax)
   (make-signature
    name
    (lambda (self obj)
      ;;(eprintf "~s\n" (list 'list obj))
-     (let recur ((l obj))
-
-       (define (go-on)
-	 (let ((enforced (cons (apply-signature arg-signature (car l))
-			       (recur (cdr l)))))
-	   (hash-set! lists-table l (cons self enforced))
-	   (hash-set! lists-table enforced (cons self enforced))
-	   enforced))
-       
-       (cond
-	((null? l)
-	 l)
-	((not (pair? l))
-	 (signature-violation obj self #f #f)
-	 obj)
-	((hash-ref lists-table l #f)
-	 => (lambda (seen)
-	      ;;(eprintf "~s\n" (list 'seen seen (eq? self (car seen))))
-	      (if (eq? self (car seen))
-		  (cdr seen)
-		  (go-on))))
-	(else
-	 (go-on)))))
+     (check-list arg-signature self obj))
    (delay syntax)
    #:arbitrary-promise
    (delay
@@ -171,6 +175,30 @@
 	  (signature=? arg-signature (list-info-arg-signature other-info))))))
 
 (define-struct list-info (arg-signature) #:transparent)
+
+(define (make-nonempty-list-signature name arg-signature syntax)
+  (make-signature
+   name
+   (lambda (self obj)
+     ;;(eprintf "~s\n" (list 'list obj))
+     (if (null? obj)
+	 (begin
+	   (signature-violation obj self #f #f)
+	   obj)
+	 (check-list arg-signature self obj)))
+   (delay syntax)
+   #:arbitrary-promise
+   (delay
+     (lift->arbitrary arbitrary-nonempty-list arg-signature))
+   #:info-promise
+   (delay (make-nonempty-list-info arg-signature))
+   #:=?-proc
+   (lambda (this-info other-info)
+     (and (nonempty-list-info? other-info)
+	  (signature=? arg-signature (nonempty-list-info-arg-signature other-info))))))
+
+(define-struct nonempty-list-info (arg-signature) #:transparent)
+
 
 (define (lift->arbitrary proc . signatures)
   (let ((arbitraries (map force (map signature-arbitrary-promise signatures))))

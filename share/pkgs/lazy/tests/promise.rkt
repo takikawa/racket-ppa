@@ -14,11 +14,11 @@
 (define (test-syntax)
   (test (delay) =error> "bad syntax"
         (lazy)  =error> "bad syntax"
-        (delay #:foo 1 2) =error> "bad syntax"
+        (delay #:foo 1 2) =error> "unrecognized option"
         (force (delay/thread #:group #f)) =error> "bad syntax"
         (force (delay/thread #:group #f 1)) => 1
         (force (delay/thread 1 #:group #f 2)) => 2
-        (force (delay/thread #:groupie #f 1)) =error> "bad syntax"))
+        (force (delay/thread #:groupie #f 1)) =error> "unrecognized option"))
 
 ;; basic delay/lazy/force tests
 (define (test-basic-promises)
@@ -167,7 +167,8 @@
                   [p (delayer (channel-get ch) 99)])
              (thread (lambda () (channel-put ch 'x)))
              (test (force p) => 99))
-           (test (force (delayer (+ 1 "2"))) =error> "contract violation")))
+           (test (force (delayer (+ 1 "2"))) =error>
+                 #rx"contract violation.*expected: number|not a number")))
   (t delay/sync)
   (t delay/idle)
   (let* ([ch (make-channel)] [p (delay/idle #:wait-for ch 99)])

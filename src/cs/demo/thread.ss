@@ -132,6 +132,29 @@
    (check tdelay (sync tdelay))
    (printf "[That break was from a thread, and it's expected]\n")
    (check #t (>= (current-inexact-milliseconds) (+ now3 0.1)))
+
+   (define got-here? #f)
+   (define break-self (thread (lambda ()
+                                (unsafe-start-atomic)
+                                (break-thread (current-thread))
+                                (unsafe-end-atomic)
+                                (set! got-here? #t))))
+   (check break-self (sync break-self))
+   (printf "[That break was from a thread, and it's expected]\n")
+   (check #f got-here?)
+   
+   (define break-self-immediate (thread (lambda ()
+                                          (dynamic-wind
+                                              void
+                                              (lambda ()
+                                                (unsafe-start-breakable-atomic)
+                                                (break-thread (current-thread))
+                                                (set! got-here? #t))
+                                              (lambda ()
+                                                (unsafe-end-atomic))))))
+   (check break-self-immediate (sync break-self-immediate))
+   (printf "[That break was from a thread, and it's expected]\n")
+   (check #f got-here?)
    
    ;; Make sure breaks are disabled in a `dynamic-wind` post thunk
    (define dw-s (make-semaphore))
@@ -218,6 +241,28 @@
        (check 1 (place-wait pl4))
        (check #t (evt? (sync (place-dead-evt pl4))))
        (check #t (evt? (sync/timeout 0.01 (place-dead-evt pl4))))))
+
+   (let ()
+     (check 'ok (touch (future (lambda () 'ok))))
+     (check 'ok (touch (would-be-future (lambda () 'ok))))
+     (check 'ok (touch (would-be-future (lambda () (touch (would-be-future (lambda () 'ok))))))))
+
+   (let ()
+     (define fts (let loop ([i 0])
+                   (if (= i 50)
+                       '()
+                       (cons
+                        (future (lambda ()
+                                  (let loop ([i i])
+                                    (if (zero? i)
+                                        i
+                                        (add1 (loop (sub1 i)))))))
+                        (loop (add1 i))))))
+     (check (let loop ([i 0])
+              (if (= i 50)
+                  '()
+                  (cons i (loop (add1 i)))))
+            (map touch fts)))
 
    ;; Measure thread quantum:
    #;

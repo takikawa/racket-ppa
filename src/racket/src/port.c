@@ -1594,12 +1594,9 @@ static int complete_peeked_read_via_get(Scheme_Input_Port *ip,
 					intptr_t size)
 {
   Scheme_Get_String_Fun gs;
-  int did;
   char *buf, _buf[16];
   int buf_size = 16;
   buf = _buf;
-  
-  did = 0;
 
   /* Target event is ready, so commit must succeed */
 
@@ -1631,7 +1628,6 @@ static int complete_peeked_read_via_get(Scheme_Input_Port *ip,
 
     if (ip->progress_evt)
       post_progress(ip);
-    did = 1;
   }
 
   if (size) {
@@ -1651,14 +1647,12 @@ static int complete_peeked_read_via_get(Scheme_Input_Port *ip,
         if ((cnt < size) && (ip->pending_eof == 2)) {
 	  ip->pending_eof = 1;
           size--;
-          did = 1;
         }
 	pip = (Scheme_Input_Port *)ip->peeked_read;
 	gs = pip->get_string_fun;
       } else {
         if (ip->pending_eof == 2) {
           ip->pending_eof = 1;
-          did = 1;
           if (ip->progress_evt)
             post_progress(ip);
         }
@@ -1683,15 +1677,11 @@ static int complete_peeked_read_via_get(Scheme_Input_Port *ip,
           ip->p.position += size;
         if (buf)
           do_count_lines((Scheme_Port *)ip, buf, 0, size);
-	did = 1;
       }
     }
   }
 
-  /* We used to return `did', but since an event has already been
-     selected, claim success at this point always. */
-
-  return 1 || did;
+  return 1;
 }
 
 static Scheme_Object *return_data(void *data, int argc, Scheme_Object **argv)
@@ -3301,8 +3291,30 @@ scheme_file_stream_port_p (int argc, Scheme_Object *argv[])
       return scheme_true;
     else if (SAME_OBJ(op->sub_type, fd_output_port_type))
       return scheme_true;
+  }
+
+  return scheme_false;
+}
+
+Scheme_Object *scheme_port_waiting_peer_p(int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *p = argv[0];
+
+  if (SCHEME_OUTPUT_PORTP(p)) {
+    Scheme_Output_Port *op;
+
+    op = scheme_output_port_record(p);
+
+    if (SAME_OBJ(op->sub_type, fd_output_port_type)) {
+      rktio_fd_t *rfd = ((Scheme_FD *)op->port_data)->fd;
+      if (rktio_fd_is_pending_open(scheme_rktio, rfd))
+        return scheme_true;
+    }
+  } else if (SCHEME_INPUT_PORTP(p)) {
+    /* ok */
   } else {
-    scheme_wrong_contract("file-stream-port?", "port?", 0, argc, argv);
+    scheme_wrong_contract("port-waiting-peer?", "port?", 0, argc, argv);
+    ESCAPED_BEFORE_HERE;
   }
 
   return scheme_false;
@@ -3337,8 +3349,11 @@ int scheme_get_port_file_descriptor(Scheme_Object *p, intptr_t *_fd)
 	fd = MSC_IZE (fileno)((FILE *)((Scheme_Output_File *)op->port_data)->f);
 	fd_ok = 1;
       } else if (SAME_OBJ(op->sub_type, fd_output_port_type))  {
-	fd = rktio_fd_system_fd(scheme_rktio, ((Scheme_FD *)op->port_data)->fd);
-	fd_ok = 1;
+        rktio_fd_t *rfd = ((Scheme_FD *)op->port_data)->fd;
+        if (!rktio_fd_is_pending_open(scheme_rktio, rfd)) {
+          fd = rktio_fd_system_fd(scheme_rktio, rfd);
+          fd_ok = 1;
+        }
       }
     }
   }
@@ -4510,17 +4525,16 @@ Scheme_Object *scheme_filesystem_change_evt(Scheme_Object *path, int flags, int 
   }
 
   if (!rfc) {
-    if (scheme_last_error_is_racket(RKTIO_ERROR_UNSUPPORTED)) {
-      scheme_raise_exn(MZEXN_FAIL_UNSUPPORTED,
-                       "filesystem-change-evt: " NOT_SUPPORTED_STR "\n"
-                       "  path: %q\n",
-                       filename);
-    } else {
-      scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
-                       "filesystem-change-evt: error generating event\n"
-                       "  path: %q\n"
-                       "  system error: %R",
-                       filename);
+    if (signal_errs) {
+      if (scheme_last_error_is_racket(RKTIO_ERROR_UNSUPPORTED)) {
+        if (signal_errs)
+          scheme_raise_exn(MZEXN_FAIL_UNSUPPORTED,
+                           "filesystem-change-evt: " NOT_SUPPORTED_STR "\n"
+                           "  path: %q\n",
+                           filename);
+      } else {
+        filename_exn("filesystem-change-evt", "error generating event", filename, 0);
+      }
     }
     
     return NULL;
@@ -4830,7 +4844,6 @@ static intptr_t fd_get_string_slow(Scheme_Input_Port *port,
          filled in parallel to the buffer. */
       ext_target = 0;
       target = fip->buffer;
-      target_offset = 0;
       if (fip->flush == MZ_FLUSH_ALWAYS)
         target_size = 1;
       else
@@ -5211,6 +5224,16 @@ static void release_flushing_lock(void *_fop)
   fop->flushing = 0;
 }
 
+static void consume_buffer_bytes(Scheme_FD *fop, intptr_t wrote)
+{
+  if (fop->bufcount == wrote)
+    fop->bufcount = 0;
+  else {
+    memmove(fop->buffer + wrote, fop->buffer, fop->bufcount - wrote);
+    fop->bufcount -= wrote;
+  }
+}
+
 static intptr_t flush_fd(Scheme_Output_Port *op,
                          const char * volatile bufstr, volatile uintptr_t buflen, volatile uintptr_t offset,
                          int immediate_only, int enable_break)
@@ -5219,6 +5242,7 @@ static intptr_t flush_fd(Scheme_Output_Port *op,
 {
   Scheme_FD * volatile fop = (Scheme_FD *)op->port_data;
   volatile intptr_t wrote = 0;
+  volatile int consume_buffer;
 
   if (fop->flushing) {
     if (scheme_force_port_closed) {
@@ -5238,15 +5262,12 @@ static intptr_t flush_fd(Scheme_Output_Port *op,
   if (!bufstr) {
     bufstr = (char *)fop->buffer;
     buflen = fop->bufcount;
-  }
+    consume_buffer = 1;
+  } else
+    consume_buffer = 0;
 
   if (buflen) {
     fop->flushing = 1;
-    fop->bufcount = 0;
-    /* If write is interrupted, we drop chars on the floor.
-       Not ideal, but we'll go with it for now.
-       Note that write_string_avail supports break-reliable
-       output through `immediate_only'. */
 
     while (1) {
       intptr_t len;
@@ -5259,6 +5280,8 @@ static intptr_t flush_fd(Scheme_Output_Port *op,
 
         if (immediate_only == 2) {
           fop->flushing = 0;
+          if (consume_buffer)
+            consume_buffer_bytes(fop, wrote);
           return wrote;
         }
 
@@ -5274,6 +5297,14 @@ static intptr_t flush_fd(Scheme_Output_Port *op,
                                           enable_break);
         END_ESCAPEABLE();
       } else if (len == RKTIO_WRITE_ERROR) {
+        if (consume_buffer) {
+          /* Drop unsuccessfully flushed bytes. This isn't the
+             obviously right choice, but otherwise a future flush
+             attempt (including one triggered by trying to close the
+             port or one triggered by a plumber) will likely just fail
+             again, which is probably worse than dropping bytes. */
+          consume_buffer_bytes(fop, buflen);
+        }
 	if (scheme_force_port_closed) {
 	  /* Don't signal exn or wait. Just give up. */
 	  return wrote;
@@ -5285,6 +5316,8 @@ static intptr_t flush_fd(Scheme_Output_Port *op,
 	  return 0; /* doesn't get here */
           }
       } else if ((len + offset == buflen) || immediate_only) {
+        if (consume_buffer)
+          consume_buffer_bytes(fop, buflen);
 	fop->flushing = 0;
 	return wrote + len;
       } else {
@@ -6002,7 +6035,7 @@ static Scheme_Object *do_subprocess_kill(Scheme_Object *_sp, Scheme_Object *kill
   if (!ok) {
     if (can_error)
       scheme_raise_exn(MZEXN_FAIL, 
-                       "Subprocess-kill: operation failed\n"
+                       "subprocess-kill: operation failed\n"
                        "  system error: %R");
   }
 
@@ -6247,6 +6280,17 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
 
   if (!stdin_fd || !stdout_fd || !stderr_fd)
     scheme_custodian_check_available(NULL, name, "file-stream");
+
+  /* In case `stdout_fd` or `stderr_fd` is a fifo with no read end
+     open, wait for it. */
+  if (stdout_fd && rktio_fd_is_pending_open(scheme_rktio, stdout_fd)) {
+    a[0] = args[0];
+    scheme_sync(1, a);
+  }
+  if (stderr_fd && rktio_fd_is_pending_open(scheme_rktio, stderr_fd)) {
+    a[0] = args[2];
+    scheme_sync(1, a);
+  }
 
   /*--------------------------------------*/
   /*        Create subprocess             */
