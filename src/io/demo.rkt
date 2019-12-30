@@ -19,7 +19,7 @@
   (let ([e expect]
         [v rhs])
     (unless (equal? e v)
-      (error 'failed "~s: ~e" 'rhs v))))
+      (error 'failed "~s: ~e not ~e" 'rhs v e))))
 
 (test #f (bytes-utf-8-ref #"\364\220\200\200" 0))
 
@@ -319,7 +319,7 @@
 (let ()
   (define-values (i o) (make-pipe))
   (for ([n 3])
-    (write-bytes (make-bytes 4096 (char->integer #\a)) o)
+    (test 4096 (write-bytes (make-bytes 4096 (char->integer #\a)) o))
     (for ([j (in-range 4096)])
       (read-byte i))
     (unless (zero? (pipe-content-length i))
@@ -346,7 +346,6 @@
                       (car content))
         (error))
       (loop (add1 x) (cdr content) (list* bstr bstr accum))])))
-
 
 (let ()
   (define path (build-path "compiled" "demo-out"))
@@ -401,6 +400,7 @@
   (test (void) (file-position out 10))
   (test #"hola!!\0\0\0\0" (get-output-bytes out)))
 
+(log-error "start")
 (let ()
   (define-values (i o) (make-pipe))
   (port-count-lines! i)
@@ -428,6 +428,7 @@
   (write-bytes #"!" o)
   (test '(3 1 8) (next-location o))
 
+(log-error "here")
   (test #"x\r" (read-bytes 2 i))
   (test '(3 0 7) (next-location i))
   (test #"\n!" (read-bytes 2 i))
@@ -764,6 +765,20 @@
 
 ;; ----------------------------------------
 
+(call-with-output-file "compiled/demo-file3" void 'replace)
+(define e (filesystem-change-evt "compiled/demo-file3" (lambda () 'no)))
+(unless (eq? e 'no)
+  (test #t (evt? e))
+  ;; (test #f (sync/timeout 0.01 e)) ; bootstrap doesn't handle this
+  (call-with-output-file "compiled/demo-file3" (lambda (o) (write-char #\x o)) 'append)
+  (test e (sync/timeout 0.01 e))
+  (test e (sync/timeout 0.01 e))
+  (filesystem-change-evt-cancel e))
+(delete-file "compiled/demo-file3")
+
+;; ----------------------------------------
+
+'read-string
 (time
  (let loop ([j 10])
    (unless (zero? j)
@@ -778,6 +793,7 @@
        (loop (sub1 j))))))
 
 (define read-byte-buffer-mode 'block)
+(define count-lines? #t)
 
 'read-byte/host
 (time
@@ -786,7 +802,7 @@
      (let ()
        (define p (host:open-input-file "compiled/io.rktl"))
        (host:file-stream-buffer-mode p read-byte-buffer-mode)
-       (host:port-count-lines! p)
+       (when count-lines? (host:port-count-lines! p))
        (let loop ()
          (unless (eof-object? (host:read-byte p))
            (loop)))
@@ -800,7 +816,7 @@
      (let ()
        (define p (open-input-file "compiled/io.rktl"))
        (file-stream-buffer-mode p read-byte-buffer-mode)
-       (port-count-lines! p)
+       (when count-lines? (port-count-lines! p))
        (let loop ()
          (unless (eof-object? (read-byte p))
            (loop)))

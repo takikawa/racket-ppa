@@ -47,16 +47,42 @@ determines an output port that is typically used for errors and
 logging. For example, the default error display handler writes to this
 port.}
 
-@defproc[(file-stream-port? [port port?]) boolean?]{
-Returns @racket[#t] if the given port is a @tech{file-stream port} (see
-@secref["file-ports"]), @racket[#f] otherwise.}
+@defproc[(file-stream-port? [v any/c]) boolean?]{
+Returns @racket[#t] if @racket[v] is a @tech{file-stream port} (see
+@secref["file-ports"]), @racket[#f] otherwise.
 
-@defproc[(terminal-port? [port port?]) boolean?]{
-Returns @racket[#t] if the given port is attached to an interactive
-terminal, @racket[#f] otherwise.}
+@history[#:changed "7.2.0.5" @elem{Extended @racket[file-stream-port?]
+                                   to any value, instead of resticting
+                                   the domain to ports}]}
+
+@defproc[(terminal-port? [v any/c]) boolean?]{
+Returns @racket[#t] if @racket[v] is a port that is attached to an
+interactive terminal, @racket[#f] otherwise.
+
+@history[#:changed "7.2.0.5" @elem{Extended @racket[terminal-port?]
+                                   to any value, instead of resticting
+                                   the domain to ports}]}
+
+
+@defproc[(port-waiting-peer? [port port?]) boolean?]{
+
+Returns @racket[#t] if @racket[port] is not ready for reading or
+writing because it is waiting for a peer process to complete a stream
+construction, @racket[#f] otherwise.
+
+On Unix and Mac OS, opening a fifo for output creates a peer-waiting
+port if no reader for the same fifo is already opened. In that case,
+the output port is not ready for writing until a reader is opened;
+that is, write opertaions will block. Use @racket[sync] if necessary
+to wait until writing will not block---that is, until the read end of
+the fifo is opened.
+
+@history[#:added "7.4.0.5"]}
+
+
 
 @defthing[eof eof-object?]{A value (distinct from all other values)
 that represents an end-of-file.}
 
-@defproc[(eof-object? [a any/c]) boolean?]{Returns @racket[#t] if
+@defproc[(eof-object? [v any/c]) boolean?]{Returns @racket[#t] if
 @racket[v] is @racket[eof], @racket[#f] otherwise.}

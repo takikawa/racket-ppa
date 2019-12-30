@@ -1,6 +1,8 @@
 #lang racket/base
-(require "../common/check.rkt"
+(require racket/fixnum
+         "../common/check.rkt"
          "input-port.rkt"
+         "read-and-peek.rkt"
          "bytes-input.rkt"
          "string-input.rkt"
          "parameter.rkt"
@@ -10,60 +12,68 @@
          read-line)
 
 (define (ok-mode? v)
-  (memq v '(linefeed return return-linefeed any any-one)))
+  (case v [(linefeed return return-linefeed any any-one) #t] [else #f]))
 (define ok-mode-str "(or/c 'linefeed 'return 'return-linefeed 'any 'any-one)")
 
 (define-syntax-rule (define-read-line read-line
-                      make-string string-length string-set! 
+                      make-string string-set! 
                       string-copy! substring
-                      read-char peek-char
-                      as-char)
-  (define/who (read-line [in (current-input-port)] [mode 'linefeed])
-    (check who input-port? in)
+                      read-a-char peek-a-char
+                      as-char direct-string?)
+  (define/who (read-line [orig-in (current-input-port)] [mode 'linefeed])
+    (define in (->core-input-port orig-in who))
     (check who ok-mode? #:contract ok-mode-str mode)
-    (maybe-flush-stdout in)
-    (define cr? (memq mode '(return any any-one)))
-    (define lf? (memq mode '(linefeed any any-one)))
-    (define crlf? (memq mode '(return-linefeed any)))
-    (let loop ([str (make-string 32)] [pos 0])
-      (define ch (read-char in))
-      (define (keep-char)
-        (if (pos . < . (string-length str))
-            (begin
-              (string-set! str pos ch)
-              (loop str (add1 pos)))
-            (let ([new-str (make-string (* (string-length str) 2))])
-              (string-copy! new-str 0 str 0)
-              (string-set! new-str pos ch)
-              (loop new-str (add1 pos)))))
-      (cond
-       [(eof-object? ch)
-        (if (zero? pos)
-            eof
-            (substring str 0 pos))]
-       [(and (or cr? crlf?)
-             (eqv? ch (as-char #\return)))
-        (cond
-         [(and crlf?
-               (eqv? (peek-char in) (as-char #\linefeed)))
-          (read-char in)
-          (substring str 0 pos)]
-         [cr?
-          (substring str 0 pos)]
-         [else (keep-char)])]
-       [(and lf?
-             (eqv? ch (as-char #\newline)))
-        (substring str 0 pos)]
-       [else (keep-char)]))))
+    (maybe-flush-stdout orig-in)
+    (define cr? (case mode [(return any any-one) #t] [else #f]))
+    (define lf? (case mode [(linefeed any any-one) #t] [else #f]))
+    (define crlf? (case mode [(return-linefeed any) #t] [else #f]))
+    (cond
+      [(maybe-read-a-line in cr? lf? crlf? direct-string?)
+       => (lambda (r) r)]
+      [else
+       (define init-len 32)
+       (let loop ([str (make-string init-len)] [len init-len] [pos 0])
+         (define ch (read-a-char 'read-line in))
+         (define (keep-char)
+           (if (pos . fx< . len)
+               (begin
+                 (string-set! str pos ch)
+                 (loop str len (fx+ pos 1)))
+               (let* ([new-len (fx* len 2)]
+                      [new-str (make-string new-len)])
+                 (string-copy! new-str 0 str 0)
+                 (string-set! new-str pos ch)
+                 (loop new-str new-len (fx+ pos 1)))))
+         (cond
+           [(eof-object? ch)
+            (if (fx= pos 0)
+                eof
+                (substring str 0 pos))]
+           [(and (or cr? crlf?)
+                 (eqv? ch (as-char #\return)))
+            (cond
+              [(and crlf?
+                    (eqv? (peek-a-char 'read-line in 0) (as-char #\linefeed)))
+               (read-a-char 'read-line in)
+               (substring str 0 pos)]
+              [cr?
+               (substring str 0 pos)]
+              [else (keep-char)])]
+           [(and lf?
+                 (eqv? ch (as-char #\newline)))
+            (substring str 0 pos)]
+           [else (keep-char)]))])))
 
 (define-read-line read-line
-  make-string string-length string-set! 
+  make-string string-set! 
   string-copy! substring
-  read-char peek-char
-  values)
+  read-a-char peek-a-char
+  values
+  #t)
 
  (define-read-line read-bytes-line
-   make-bytes bytes-length bytes-set! 
+   make-bytes bytes-set! 
    bytes-copy! subbytes
-   read-byte peek-byte
-   char->integer)
+   read-a-byte peek-a-byte
+   char->integer
+   #f)

@@ -22,7 +22,12 @@
          make-log-receiver
          add-stderr-log-receiver!
          add-stdout-log-receiver!
-         logger-init!)
+         add-syslog-log-receiver!
+         logger-init!
+         logging-future-events?
+         log-future-event
+         logging-place-events?
+         log-place-event)
 
 (define (make-root-logger)
   (create-logger #:topic #f #:parent #f #:propagate-filters 'none))
@@ -34,7 +39,8 @@
                   (lambda (l)
                     (unless (logger? l)
                       (raise-argument-error 'current-logger "logger?" l))
-                    l)))
+                    l)
+                  'current-logger))
 
 (define (logger-init!)
   (set! root-logger (make-root-logger))
@@ -61,6 +67,14 @@
   (atomically/no-interrupts/no-wind
    (log-level?* logger level topic)))
 
+(define (logging-future-events?)
+  (atomically/no-interrupts/no-wind
+   (log-level?* root-logger 'debug 'future)))
+
+(define (logging-place-events?)
+  (atomically/no-interrupts/no-wind
+   (log-level?* root-logger 'debug 'place)))
+
 ;; In atomic mode with interrupts disabled
 (define/who (log-level?* logger level topic)
   (level>=? (logger-wanted-level logger topic) level))
@@ -68,8 +82,9 @@
 (define/who (log-max-level logger [topic #f])
   (check who logger? logger)
   (check who #:or-false symbol? topic)
-  (atomically/no-interrupts/no-wind
-   (logger-wanted-level logger topic)))
+  (level->user-representation
+   (atomically/no-interrupts/no-wind
+    (logger-wanted-level logger topic))))
 
 (define/who (log-all-levels logger)
   (check who logger? logger)
@@ -80,26 +95,37 @@
   (define s
     (atomically
      (cond
-       [(logger-level-sema logger)
+       [(unbox (logger-level-sema-box logger))
         => (lambda (s) s)]
        [else
         (define s (make-semaphore))
-        (set-logger-level-sema! logger s)
+        (set-box! (logger-level-sema-box logger) s)
         s])))
   (semaphore-peek-evt s))
 
 (define/who log-message
   ;; Complex dispatch based on number and whether third is a string:
   (case-lambda
-    [(logger level message data)
+    [(logger level message)
      (define topic (and (logger? logger) (logger-name logger)))
-     (do-log-message who logger level topic message data #t)]
+     (do-log-message who logger level topic message #f #t)]
+    [(logger level topic/message message/data)
+     (cond
+       [(string? topic/message)
+        (define topic (and (logger? logger) (logger-name logger)))
+        (do-log-message who logger level topic topic/message message/data #t)]
+       [(or (not topic/message) (symbol? topic/message))
+        (do-log-message who logger level topic/message message/data #f #t)]
+       [else
+        (check who logger? logger)
+        (check-level who level)
+        (raise-argument-error who "(or/c string? symbol?)" topic/message)])]
     [(logger level topic/message message/data data/prefix?)
      (cond
        [(string? topic/message)
         (define topic (and (logger? logger) (logger-name logger)))
         (do-log-message who logger level topic topic/message message/data data/prefix?)]
-       [(symbol? topic/message)
+       [(or (not topic/message) (symbol? topic/message))
         (do-log-message who logger level topic/message message/data data/prefix? #t)]
        [else
         (check who logger? logger)
@@ -116,12 +142,20 @@
   (atomically/no-interrupts/no-wind
    (log-message* logger level topic message data prefix? #f)))
 
+(define (log-future-event message data)
+  (atomically/no-interrupts/no-wind
+   (log-message* root-logger 'debug 'future message data #t #f)))
+
+(define (log-place-event message data)
+  (atomically/no-interrupts/no-wind
+   (log-message* root-logger 'debug 'place message data #t #f)))
+
 ;; In atomic mode with interrupts disabled
 ;; Can be called in any host Scheme thread and in interrupt handler,
 ;; like `log-level?*`
 (define (log-message* logger level topic message data prefix? in-interrupt?)
   (define msg #f)
-  (when ((logger-max-wanted-level logger) . level>=? . level)
+  (when ((logger-max-wanted-level* logger) . level>=? . level)
     (let loop ([logger logger])
       (for ([r (in-list (logger-receivers logger))])
         (when ((filters-level-for-topic (log-receiver-filters r) topic) . level>=? . level)

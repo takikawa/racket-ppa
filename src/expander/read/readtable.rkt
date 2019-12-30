@@ -13,6 +13,7 @@
          readtable-mapping
          current-readtable
          readtable-effective-char
+         readtable-effective-char/#
          effective-char
          readtable-handler
          readtable-dispatch-handler
@@ -51,7 +52,7 @@
         (raise-argument-error 'make-readtable "(or/c char? #f)" key))
       
       ;; Mode determines how the key is mapped
-      (when (null? args)
+      (when (null? (cdr args))
         (cond
          [key (raise-arguments-error 'make-readtable
                                      (string-append "expected 'terminating-macro, 'non-terminating-macro, 'dispatch-macro,"
@@ -135,6 +136,13 @@
    [(not target) c]
    [(char? target) target]
    [else #\x])) ; return some non-special character
+
+;; Similar to `readtable-effective-char`, but for a character after
+;; `#` to detect whether it has the usual meaning
+(define (readtable-effective-char/# rt c)
+  (cond
+    [(and rt (hash-ref (readtable-dispatch-ht rt) c #f)) #f]
+    [else c]))
 
 (define (effective-char c config)
   (readtable-effective-char (read-config-readtable config) c))

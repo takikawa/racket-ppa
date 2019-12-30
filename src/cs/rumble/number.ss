@@ -1,14 +1,16 @@
 
 (define (nonnegative-fixnum? n) (and (fixnum? n) (fx>= n 0)))
 
-(define (exact-integer? n) (and (integer? n) (exact? n)))
+(define (exact-integer? n) (or (fixnum? n) (bignum? n)))
 (define (exact-nonnegative-integer? n) (and (exact-integer? n) (>= n 0)))
 (define (exact-positive-integer? n) (and (exact-integer? n) (> n 0)))
 (define (inexact-real? n) (and (real? n) (inexact? n)))
-(define (byte? n) (and (exact-integer? n) (>= n 0) (<= n 255)))
+(define (byte? n) (and (fixnum? n) (fx>= n 0) (fx<= n 255)))
 
 (define (double-flonum? x) (flonum? x))
 (define (single-flonum? x) #f)
+
+(define (single-flonum-available?) #f)
 
 (define/who (real->double-flonum x)
   (check who real? x)
@@ -16,9 +18,58 @@
 
 (define/who (real->single-flonum x)
   (check who real? x)
-  (exact->inexact x))
+  (raise-unsupported-error who))
 
-(define arithmetic-shift bitwise-arithmetic-shift)
+(define-syntax (arithmetic-shift stx)
+  (syntax-case stx ()
+    [(_ x-expr n-expr)
+     #'(let ([x x-expr]
+             [n n-expr])
+         (if (and (fixnum? x)
+                  (fixnum? n))
+             ;; Implementation of `$ash` in Chez Scheme; this is
+             ;; a lot of code, but if you're using `arithmetic-shift`,
+             ;; you probably want it:
+             (let ([max-fx-shift (fx- (fixnum-width) 1)])
+               (if (#3%fx< n 0)
+                   (if (#3%fx< n (fx- max-fx-shift))
+                       (#3%fxsra x max-fx-shift)
+                       (#3%fxsra x (#3%fx- n)))
+                   (if (#3%fx> n max-fx-shift)
+                       (#3%bitwise-arithmetic-shift x n)
+                       (let ([m (#3%fxsll x n)])
+                         (if (#3%fx= (#3%fxsra m n) x)
+                             m
+                             (#3%bitwise-arithmetic-shift x n))))))
+             (#2%bitwise-arithmetic-shift x n)))]
+    [(_ expr ...) #'(#2%bitwise-arithmetic-shift expr ...)]
+    [_ #'#2%bitwise-arithmetic-shift]))
+
+(define-syntax-rule (define-bitwise op fxop)
+  (...
+   (define-syntax (op stx)
+     (syntax-case stx ()
+       [(_ a-expr ...)
+        (with-syntax ([(a ...) (generate-temporaries #'(a-expr ...))])
+          #'(let ([a a-expr] ...)
+              (if (and (fixnum? a) ...)
+                  (#3%fxop a ...)
+                  (#2%op a ...))))]
+       [_ #'#2%op]))))
+
+(define-bitwise bitwise-ior fxior)
+(define-bitwise bitwise-xor fxxor)
+(define-bitwise bitwise-and fxand)
+
+(define-syntax (bitwise-not stx)
+  (syntax-case stx ()
+    [(_ expr)
+     #'(let ([x expr])
+         (if (fixnum? x)
+             (#3%fxnot x)
+             (#2%bitwise-not x)))]
+    [(_ expr ...) #'(#2%bitwise-not expr ...)]
+    [_ #'#2%bitwise-not]))
 
 (define/who (integer-sqrt n)
   (check who integer? n)
@@ -28,19 +79,20 @@
     (let-values ([(s r) (exact-integer-sqrt (inexact->exact n))])
       (if (inexact? n)
           (exact->inexact s)
-          s))]))
+          s))]
+   [else n]))
 
 (define/who (integer-sqrt/remainder n)
   (check who integer? n)
   (let ([m (integer-sqrt n)])
     (values m (- n (* m m)))))
 
-(define fx->fl fixnum->flonum)
-(define fxrshift fxarithmetic-shift-right)
-(define fxlshift fxarithmetic-shift-left)
+(define fx->fl #2%fixnum->flonum)
+(define fxrshift #2%fxarithmetic-shift-right)
+(define fxlshift #2%fxarithmetic-shift-left)
 
-(define fl->fx flonum->fixnum)
-(define ->fl real->flonum)
+(define fl->fx #2%flonum->fixnum)
+(define ->fl #2%real->flonum)
 (define/who (fl->exact-integer fl)
   (check who flonum? fl)
   (inexact->exact (flfloor fl)))
@@ -166,6 +218,10 @@
     (check who exact-nonnegative-integer? start)
     (check who exact-nonnegative-integer? end)
     (case (- end start)
+      [(1)
+       (if signed?
+           (bytevector-s8-ref bstr start)
+           (bytevector-u8-ref bstr start))]
       [(2)
        (if signed?
            (bytevector-s16-ref bstr start (if big-endian?
@@ -192,7 +248,7 @@
                                               (endianness little))))]
       [else
        (raise-arguments-error 'integer-bytes->integer
-                              "length is not 2, 4, or 8 bytes"
+                              "length is not 1, 2, 4, or 8 bytes"
                               "length" (- end start))])]
    [(bstr signed?)
     (integer-bytes->integer bstr signed? (system-big-endian?) 0 (and (bytes? bstr) (bytes-length bstr)))]
@@ -243,7 +299,7 @@
                                                   (endianness big)
                                                   (endianness little)))]
       [else
-       (raise-arguments-error 'floating-point-bytes->real
+       (raise-arguments-error who
                               "length is not 4 or 8 bytes"
                               "length" (- end start))])]
    [(bstr)
@@ -267,18 +323,60 @@
 
 (define/who number->string
   (case-lambda
-   [(n) (number->string n 10)]
    [(n radix)
-    (check who number? n)
+    (unless (or (eq? radix 2) (eq? radix 8) (eq? radix 10) (eq? radix 16))
+      (check who number? n)
+      (check who (lambda (radix) #f)
+             :contract "(or/c 2 8 10 16)"
+             radix))
+    (when (and (not (eq? radix 10)) (inexact? n))
+      (raise
+       (exn:fail:contract (string-append
+                           "number->string: inexact numbers can only be printed in base 10\n"
+                           "  number: " (number->string n) "\n"
+                           "  requested base: " (number->string radix))
+                          (current-continuation-marks))))
+    (do-number->string n radix)]
+   [(n)
+    (do-number->string n 10)]))
+
+(define (do-number->string n radix)
+  ;; Host `number->string` goes through `format`, so we can do
+  ;; significantly better for fixnums by handling them directly
+  (cond
+   [(and (fixnum? n)
+         (or (fx> n 0)
+             (fixnum? (- n))))
+    (let-values ([(result pos) ; result string and pos after written so far
+                  (let loop ([v (fxabs n)] [len 0])
+                    (cond
+                     [(fx= v 0)
+                      (cond
+                       [(fx= len 0)
+                        (values (#%make-string 1 #\0) 1)]
+                       [(fx< n 0)
+                        (let ([result (#%make-string (fx+ 1 len))])
+                          (string-set! result 0 #\-)
+                          (values result 1))]
+                       [else
+                        (values (#%make-string len)
+                                0)])]
+                     [else
+                      (let ([q (fxquotient v radix)])
+                        (let-values ([(d) (fx- v (fx* q radix))]
+                                     [(result pos) (loop q (fx+ 1 len))])
+                          (string-set! result pos (integer->char (+ d (if (fx< d 10)
+                                                                          (char->integer #\0)
+                                                                          (fx- (char->integer #\a) 10)))))
+                          (values result (fx+ 1 pos))))]))])
+      result)]
+   [else
     (cond
      [(eq? radix 16)
       ;; Host generates uppercase letters, Racket generates lowercase
-      (string-downcase (chez:number->string n 16))]
+      (string-downcase (#2%number->string n radix))]
      [else
-      (check who (lambda (radix) (or (eq? radix 2) (eq? radix 8) (eq? radix 10) (eq? radix 16)))
-             :contract "(or/c 2 8 10 16)"
-             radix)
-      (chez:number->string n radix)])]))
+      (#2%number->string n radix)])]))
 
 (define/who (quotient/remainder n m)
   (check who integer? n)
@@ -287,9 +385,10 @@
 
 (define/who gcd
   (case-lambda
+   [() 0]
    [(n)
     (check who rational? n)
-    n]
+    (abs n)]
    [(n m)
     (check who rational? n)
     (check who rational? m)
@@ -313,9 +412,10 @@
 
 (define/who lcm
   (case-lambda
+   [() 1]
    [(n)
     (check who rational? n)
-    n]
+    (abs n)]
    [(n m)
     (check who rational? n)
     (check who rational? m)

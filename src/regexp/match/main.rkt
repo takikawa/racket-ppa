@@ -236,7 +236,7 @@
            (byte-positions->byte-positions ms-pos me-pos state #:delta delta)]
           [else
            (byte-positions->string-positions bstr-in ms-pos me-pos state
-                                              #:start-offset start-offset)]))
+                                             #:result-offset start-offset)]))
        (add-end-bytes positions end-bytes-count bstr-in me-pos)]
       [(strings)
        ;; If pattern is bytes-based, then results will be bytes instead of strings:
@@ -281,14 +281,16 @@
     ;; Create a lazy string from the port:
     (define lb-in (make-lazy-bytes port-in (if peek? start-offset 0) prefix
                                    peek? immediate-only? progress-evt
-                                   out (rx:regexp-max-lookbehind rx)))
-    (define end-pos (if (eq? 'eof end-offset)
+                                   out (rx:regexp-max-lookbehind rx)
+                                   (and (input-port? in)
+                                        (not (eq? 'eof end-offset))
+                                        (- end-offset start-offset))))
+    (define end-pos (if (or (eq? 'eof end-offset)
+                            (string? in))
                         'eof
                         (+ start-pos
-                           (cond
-                            [(string? in) (string-utf-8-length in start-offset end-offset)]
-                            [else (- end-offset start-offset)]))))
-    
+                           (- end-offset start-offset))))
+
     ;; Search for a match:
     (define-values (ms-pos me-pos)
       (if any-bytes-left?
@@ -303,17 +305,23 @@
       (when (not peek?)
         (cond
          [ms-pos
-          (when (or out (input-port? in))
+          (when out
             ;; Flush bytes before match:
-            (lazy-bytes-advance! lb-in ms-pos #t)
+            (lazy-bytes-advance! lb-in ms-pos #t))
+          (when (input-port? in)
             ;; Consume bytes that correspond to match:
-            (copy-port-bytes port-in #f me-pos))]
+            (copy-port-bytes port-in #f (- me-pos prefix-len)))]
          [(eq? end-pos 'eof)
-          ;; copy all remaining bytes from input to output
-          (copy-port-bytes port-in out #f)]
-         [else
+          ;; Copy all remaining bytes from input to output
           (when (or out (input-port? in))
-            (lazy-bytes-advance! lb-in end-pos #t))])))
+            (copy-port-bytes port-in out #f))]
+         [else
+          (when out
+            ;; Copy all bytes to output
+            (lazy-bytes-advance! lb-in end-pos #t))
+          (when (input-port? in)
+            ;; Consume all bytes
+            (copy-port-bytes port-in #f (- end-pos start-pos)))])))
 
     (begin0
 
@@ -322,11 +330,6 @@
                 (not (lazy-bytes-failed? lb-in))
                 mode)
        [(#f)
-        (when (and (not peek?)
-                   any-bytes-left?
-                   (input-port? in))
-          ;; Consume non-matching bytes
-          (copy-port-bytes port-in out (if (eq? 'eof end-offset) #f end-offset)))
         (add-end-bytes #f end-bytes-count #f #f)]
        [(?) #t]
        [(positions)
@@ -340,9 +343,18 @@
             (define delta (- start-offset start-pos))
             (byte-positions->byte-positions ms-pos me-pos state #:delta delta)]
            [else
+            ;; Some bytes may have been discarded in `lb-in`, and we
+            ;; don't know how many characters those add up to. The
+            ;; starting position `ms-pos` must be on a code-point
+            ;; boundary, and everything from `ms-pos` to `ms-end` must
+            ;; still be in `lb-in`. So, find `ms-pos` in the original
+            ;; string, and take it from there.
+            (define ms-str-pos (byte-index->string-index in start-offset (- ms-pos start-pos)))
+            (define delta (lazy-bytes-discarded-count lb-in))
             (byte-positions->string-positions bstr ms-pos me-pos state
-                                              #:start-pos start-pos
-                                              #:start-offset start-offset)]))
+                                              #:start-index (- ms-pos delta)
+                                              #:delta delta
+                                              #:result-offset (+ ms-str-pos start-offset))]))
         (add-end-bytes positions end-bytes-count bstr me-pos)]
        [(strings)
         ;; The byte string may be shifted by discarded bytes, if not

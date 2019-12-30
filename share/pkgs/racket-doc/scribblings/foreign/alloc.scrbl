@@ -9,14 +9,16 @@
 ensuring that values allocated through foreign functions are reliably
 deallocated.}
 
-@defproc[((allocator [dealloc (any/c . -> . any)]) [alloc procedure?]) procedure?]{
+@defproc[((allocator [dealloc (any/c . -> . any)]) [alloc (or/c procedure? #f)]) (or/c procedure? #f)]{
 
 Produces an @deftech{allocator} procedure that behaves like
 @racket[alloc], but each result @racket[_v] of the @tech{allocator},
 if not @racket[#f], is given a finalizer that calls @racket[dealloc]
-on @racket[_v] --- unless the call has been canceled by applying a
+on @racket[_v]---unless the call has been canceled by applying a
 @tech{deallocator} (produced by @racket[deallocator]) to @racket[_v].
 Any existing @racket[dealloc] registered for @racket[_v] is canceled.
+If and only if @racket[alloc] is @racket[#f], @racket[((allocator
+alloc) dealloc)] produces @racket[#f].
 
 The resulting @tech{allocator} calls @racket[alloc] in @tech{atomic
 mode} (see @racket[call-as-atomic]). The result from @racket[alloc] is
@@ -44,7 +46,9 @@ a new deallocation action that will run earlier.
 
 @history[#:changed "7.0.0.4" @elem{Added atomic mode for @racket[dealloc]
                                    and changed non-main place exits to call
-                                   all remaining @racket[dealloc]s.}]}
+                                   all remaining @racket[dealloc]s.}
+         #:changed "7.4.0.4" @elem{Produce @racket[#f] when @racket[alloc]
+                                   is @racket[#f].}]}
 
 @deftogether[(
 @defproc[((deallocator [get-arg (list? . -> . any/c) car]) [dealloc procedure?]) 
@@ -63,6 +67,9 @@ The optional @racket[get-arg] procedure determines which of
 @racket[dealloc]'s arguments correspond to the released object;
 @racket[get-arg] receives a list of arguments passed to
 @racket[dealloc], so the default @racket[car] selects the first one.
+Note that @racket[get-arg] can only choose one of the by-position
+arguments to @racket[dealloc], though the @tech{deallocator} will
+require and accept the same keyword arguments as @racket[dealloc], if any.
 
 The @racket[releaser] procedure is a synonym for
 @racket[deallocator].}
@@ -94,6 +101,9 @@ The optional @racket[get-arg] procedure determines which of the
 arguments) correspond to the retained object @racket[_v];
 @racket[get-arg] receives a list of arguments passed to
 @racket[retain], so the default @racket[car] selects the first one.
+Note that @racket[get-arg] can only choose one of the by-position
+arguments to @racket[retain], though the @tech{retainer} will
+require and accept the same keyword arguments as @racket[retain], if any.
 
 @history[#:changed "7.0.0.4" @elem{Added atomic mode for @racket[release]
                                    and changed non-main place exits to call

@@ -13,6 +13,7 @@
          "atomic.rkt"
          "schedule-info.rkt"
          "custodian.rkt"
+         "custodian-object.rkt"
          "exit.rkt")
 
 (provide (rename-out [make-thread thread])
@@ -40,7 +41,7 @@
          break-enabled
          check-for-break
          break-enabled-key
-         current-break-suspend
+         current-breakable-atomic
          
          thread-push-kill-callback!
          thread-pop-kill-callback!
@@ -53,15 +54,14 @@
 
          thread-ignore-break-cell!
          thread-remove-ignored-break-cell!
+
+         thread-representative-custodian
          
          thread-send
          thread-receive
          thread-try-receive
          thread-rewind-receive
-         thread-receive-evt
-
-         thread-condition-awaken
-         thread-condition-wait)
+         thread-receive-evt)
 
 ;; Exports needed by "schedule.rkt":
 (module* scheduling #f
@@ -71,6 +71,7 @@
            do-make-thread
            root-thread
            thread-running?
+           thread-dead?
            thread-dead!
            thread-did-work!
            
@@ -80,7 +81,6 @@
 
            current-break-enabled-cell
            check-for-break
-           current-break-suspend
 
            set-force-atomic-timeout-callback!
 
@@ -92,6 +92,9 @@
            do-break-thread
            break>?
            thread-did-work!))
+
+(module* for-future #f
+  (provide break-enabled-default-cell))
 
 ;; ----------------------------------------
 
@@ -125,6 +128,8 @@
                      [mailbox-wakeup #:mutable] ; callback to trigger (in atomic mode) on `thread-send`
 
                      [cpu-time #:mutable] ; accumulates CPU time in milliseconds
+
+                     [future #:mutable]   ; current would-be future
                      
                      [condition-wakeup #:mutable])
   #:property prop:waiter
@@ -136,6 +141,10 @@
   #:property prop:object-name (struct-field-index name))
 
 (define-place-local root-thread #f)
+
+(define (current-thread)
+  (future-barrier)
+  (current-thread/in-atomic))
 
 ;; ----------------------------------------
 ;; Thread creation
@@ -150,8 +159,9 @@
   (define p (if (or at-root? initial?)
                 root-thread-group
                 (current-thread-group)))
-  (define e (make-engine (lambda ()
-                           (call-with-continuation-prompt proc))
+  (define e (make-engine proc
+                         (default-continuation-prompt-tag)
+                         #f
                          (if (or initial? at-root?)
                              break-enabled-default-cell
                              (current-break-enabled-cell))
@@ -190,6 +200,8 @@
 
                     0 ; cpu-time
 
+                    #f ; future
+
                     void ; condition-wakeup
                     )) 
   ((atomically
@@ -216,7 +228,9 @@
     t))
 
 (define (unsafe-thread-at-root proc)
-  (do-make-thread 'unsafe-thread-at-root proc #:at-root? #t))
+  (do-make-thread 'unsafe-thread-at-root proc
+                  #:at-root? #t
+                  #:custodian root-custodian))
 
 ;; ----------------------------------------
 ;; Thread status
@@ -252,7 +266,8 @@
   (when (thread-dead-sema t)
     (semaphore-post-all (thread-dead-sema t)))
   (unless (thread-descheduled? t)
-    (thread-group-remove! (thread-parent t) t))
+    (thread-group-remove! (thread-parent t) t)
+    (thread-unscheduled-for-work-tracking! t))
   (remove-from-sleeping-threads! t)
   (run-kill-callbacks! t)
   (when (thread-forward-break-to t)
@@ -267,13 +282,13 @@
 ;; Called in atomic mode:
 (define (thread-push-kill-callback! cb)
   (assert-atomic-mode)
-  (define t (current-thread))
+  (define t (current-thread/in-atomic))
   (set-thread-kill-callbacks! t (cons cb (thread-kill-callbacks t))))
 
 ;; Called in atomic mode:
 (define (thread-pop-kill-callback!)
   (assert-atomic-mode)
-  (define t (current-thread))
+  (define t (current-thread/in-atomic))
   (set-thread-kill-callbacks! t (cdr (thread-kill-callbacks t))))
 
 (define/who (kill-thread t)
@@ -290,7 +305,7 @@
     [else
      (atomically
       (do-kill-thread t))
-     (when (eq? t (current-thread))
+     (when (eq? t (current-thread/in-atomic))
        (when (eq? t root-thread)
          (force-exit 0))
        (engine-block))
@@ -315,6 +330,12 @@
        (do-thread-suspend t)]
       [else
        (do-kill-thread t)])))
+
+(define (thread-representative-custodian t)
+  (atomically
+   (define cs (thread-custodian-references t))
+   (and (pair? cs)
+        (custodian-reference->custodian (car cs)))))
 
 ;; Called in atomic mode:
 (define (run-kill-callbacks! t)
@@ -403,9 +424,10 @@
     (internal-error "tried to deschedule a descheduled thread"))
   (set-thread-descheduled?! t #t)
   (thread-group-remove! (thread-parent t) t)
+  (thread-unscheduled-for-work-tracking! t)
   (when timeout-at
     (add-to-sleeping-threads! t (sandman-merge-timeout #f timeout-at)))
-  (when (eq? t (current-thread))
+  (when (eq? t (current-thread/in-atomic))
     (thread-did-work!))
   ;; Beware that this thunk is not used when a thread is descheduled
   ;; by a custodian callback
@@ -590,14 +612,14 @@
 ;; Given callbacks are also called in atomic mode
 (define (thread-push-suspend+resume-callbacks! s-cb r-cb)
   (assert-atomic-mode)
-  (define t (current-thread))
+  (define t (current-thread/in-atomic))
   (set-thread-suspend+resume-callbacks! t (cons (cons s-cb r-cb)
                                                 (thread-suspend+resume-callbacks t))))
 
 ;; Called in atomic mode:
 (define (thread-pop-suspend+resume-callbacks!)
   (assert-atomic-mode)
-  (define t (current-thread))
+  (define t (current-thread/in-atomic))
   (set-thread-suspend+resume-callbacks! t (cdr (thread-suspend+resume-callbacks t))))
 
 ;; Called in atomic mode:
@@ -673,7 +695,7 @@
          (schedule-info-did-work? sched-info))
      (thread-did-work!)]
     [else (thread-did-no-work!)])
-   (set-thread-sched-info! (current-thread) sched-info))
+   (set-thread-sched-info! (current-thread/in-atomic) sched-info))
   (engine-block))
 
 ;; Sleep for a while
@@ -682,16 +704,21 @@
          (lambda (c) (and (real? c) (c . >=  . 0)))
          #:contract "(>=/c 0)"
          secs)
-  (define until-msecs (+ (* secs 1000.0)
-                         (current-inexact-milliseconds)))
-  (let loop ()
-    ((thread-deschedule! (current-thread)
-                         until-msecs
-                         void
-                         (lambda ()
-                           ;; Woke up due to an ignored break?
-                           ;; Try again:
-                           (loop))))))
+  (cond
+    [(and (zero? secs)
+          (zero? (current-atomic)))
+     (thread-yield #f)]
+    [else
+     (define until-msecs (+ (* secs 1000.0)
+                            (current-inexact-milliseconds)))
+     (let loop ()
+       ((thread-deschedule! (current-thread)
+                            until-msecs
+                            void
+                            (lambda ()
+                              ;; Woke up due to an ignored break?
+                              ;; Try again:
+                              (loop)))))]))
 
 ;; ----------------------------------------
 ;; Tracking thread progress
@@ -708,6 +735,9 @@
 (define (thread-did-work!)
   (set! poll-done-threads #hasheq()))
 
+(define (thread-unscheduled-for-work-tracking! t)
+  (set! poll-done-threads (hash-remove poll-done-threads t)))
+
 ;; ----------------------------------------
 ;; Breaks
 
@@ -722,18 +752,16 @@
 ;; A continuation-mark key (not made visible to regular Racket code):
 (define break-enabled-default-cell (make-thread-cell #t))
 
-;; For disabling breaks, such as through `unsafe-start-atomic`:
-(define-place-local break-suspend 0)
-(define current-break-suspend
-  (case-lambda
-    [() break-suspend]
-    [(v) (set! break-suspend v)]))
+;; For enable breaks despite atomic mode, such as through
+;; `unsafe-start-breakable-atomic`; breaks are enabled as long as
+;; `current-atomic` does not exceed `current-breakable-atomic`:
+(define current-breakable-atomic (make-pthread-parameter 0))
 
 (define (current-break-enabled-cell)
   (continuation-mark-set-first #f
                                break-enabled-key
                                break-enabled-default-cell
-                               (root-continuation-prompt-tag)))
+                               (unsafe-root-continuation-prompt-tag)))
 
 (define break-enabled
   (case-lambda
@@ -747,32 +775,36 @@
 ;; changed, or when a thread is just swapped in, then
 ;; `check-for-break` should be called.
 (define (check-for-break)
-  (define t (current-thread))
-  (when (and
-         ;; allow `check-for-break` before threads are running:
-         t
-         ;; quick pre-test before going atomic:
-         (thread-pending-break t))
-    ((atomically
-      (cond
-        [(and (thread-pending-break t)
-              (break-enabled)
-              (not (thread-ignore-break-cell? t (current-break-enabled-cell)))
-              (zero? (current-break-suspend)))
-         (define exn:break* (case (thread-pending-break t)
-                              [(hang-up) exn:break:hang-up/non-engine]
-                              [(terminate) exn:break:terminate/non-engine]
-                              [else exn:break/non-engine]))
-         (set-thread-pending-break! t #f)
-         (lambda ()
-           ;; Out of atomic mode
-           (call-with-escape-continuation
-            (lambda (k)
-              (raise (exn:break*
-                      "user break"
-                      (current-continuation-marks)
-                      k)))))]
-        [else void])))))
+  (unless (current-future)
+    (define t (current-thread))
+    (when (and
+           ;; allow `check-for-break` before threads are running:
+           t
+           ;; quick pre-test before going atomic:
+           (thread-pending-break t))
+      ((atomically
+        (cond
+          [(and (thread-pending-break t)
+                ;; check atomicity early to avoid nested break checks,
+                ;; since `continuation-mark-set-first` inside `break-enabled`
+                ;; can take a while
+                (>= (add1 (current-breakable-atomic)) (current-atomic))
+                (break-enabled)
+                (not (thread-ignore-break-cell? t (current-break-enabled-cell))))
+           (define exn:break* (case (thread-pending-break t)
+                                [(hang-up) exn:break:hang-up/non-engine]
+                                [(terminate) exn:break:terminate/non-engine]
+                                [else exn:break/non-engine]))
+           (set-thread-pending-break! t #f)
+           (lambda ()
+             ;; Out of atomic mode
+             (call-with-escape-continuation
+              (lambda (k)
+                (raise (exn:break*
+                        "user break"
+                        (current-continuation-marks)
+                        k)))))]
+          [else void]))))))
 
 ;; The break-enabled transition hook is called by the host
 ;; system when a control transfer (such as a continuation jump)
@@ -808,7 +840,9 @@
              (thread-reschedule! t))))
        void])))
   (when (eq? t check-t)
-    (check-for-break)))
+    (check-for-break)
+    (when (in-atomic-mode?)
+      (add-end-atomic-callback! check-for-break))))
 
 (define (break>? k1 k2)
   (cond
@@ -905,36 +939,9 @@
       [else
        (lambda () #f)]))))
 
-(define/who (thread-condition-awaken thd)
-  (check who thread? thd)
-  ((atomically
-    (cond
-      [(not (thread-dead? thd))
-       (define wakeup (thread-condition-wakeup thd))
-       (set-thread-condition-wakeup! thd void)
-       wakeup] ;; should be called outside of atomic mode?
-      [else
-       (lambda () #f)]))))
-
-(define (thread-condition-wait lock-release)
-  ((atomically
-    (define t (current-thread))
-    (set-thread-condition-wakeup! t (sandman-condition-wait t))
-    (lock-release)
-    (define do-yield
-      (thread-deschedule! t
-                          #f
-                          void
-                          (lambda ()
-                            ;; try again?
-                            (do-yield))
-                          ))
-    (lambda ()
-      (do-yield)))))
-
 (define (thread-receive)
   ((atomically
-    (define t (current-thread))
+    (define t (current-thread/in-atomic))
     (cond
       [(is-mail? t)
        (define v (dequeue-mail! t))
@@ -959,7 +966,7 @@
  
 (define (thread-try-receive)
   (atomically
-   (define t (current-thread))
+   (define t (current-thread/in-atomic))
    (if (is-mail? t)
        (dequeue-mail! t)
        #f)))
@@ -967,7 +974,7 @@
 (define/who (thread-rewind-receive lst)
   (check who list? lst)
   (atomically
-   (define t (current-thread))
+   (define t (current-thread/in-atomic))
    (for-each (lambda (msg)
                (push-mail! t msg))
              lst)))
@@ -979,7 +986,7 @@
                        ;; in atomic mode:
                        (lambda (self poll-ctx)
                          (assert-atomic-mode)
-                         (define t (current-thread))
+                         (define t (current-thread/in-atomic))
                          (cond
                            [(is-mail? t) (values (list self) #f)]
                            [(poll-ctx-poll? poll-ctx) (values #f self)]
@@ -993,7 +1000,8 @@
                               (set-thread-mailbox-wakeup! t (lambda () (wakeup) (receive))))
                             (add-wakeup-callback!)
                             (values #f (control-state-evt
-                                        (wrap-evt async-evt (lambda (v) self))
+                                        async-evt
+                                        (lambda (v) self)
                                         ;; interrupt (all must be interrupted, so just install `void`):
                                         (lambda () (set-thread-mailbox-wakeup! t void))
                                         ;; abandon:
@@ -1004,3 +1012,14 @@
 
 (define/who (thread-receive-evt)
   (thread-receiver-evt))
+
+;; ----------------------------------------
+
+(void (set-immediate-allocation-check-proc!
+       ;; Called to check large vector, string, and byte-string allocations
+       (lambda (n)
+         (define t (current-thread))
+         (when t
+           (define mrefs (thread-custodian-references t))
+           (unless (null? mrefs)
+             (custodian-check-immediate-limit (car mrefs) n))))))

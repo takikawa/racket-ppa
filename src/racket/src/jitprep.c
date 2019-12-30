@@ -3,15 +3,15 @@
    or unmarshaled.
 
    See "eval.c" for an overview of compilation passes and JIT
-   prepraration. */
+   preparation. */
 
 #include "schpriv.h"
 #include "schrunst.h"
-
-THREAD_LOCAL_DECL(static Scheme_Object *current_linklet_native_lambdas);
-static int force_jit;
+#include "schmach.h"
 
 #ifdef MZ_USE_JIT
+THREAD_LOCAL_DECL(static Scheme_Object *current_linklet_native_lambdas);
+static int force_jit;
 
 void scheme_init_jitprep()
 {
@@ -390,7 +390,6 @@ static Scheme_Object *with_immed_mark_jit(Scheme_Object *o)
 
 Scheme_Object *scheme_case_lambda_jit(Scheme_Object *expr)
 {
-#ifdef MZ_USE_JIT
   Scheme_Case_Lambda *seqin = (Scheme_Case_Lambda *)expr;
 
   if (!seqin->native_code) {
@@ -420,13 +419,25 @@ Scheme_Object *scheme_case_lambda_jit(Scheme_Object *expr)
       ((Scheme_Lambda *)val)->name = name;
       if (((Scheme_Lambda *)val)->closure_size)
 	all_closed = 0;
-      if (current_linklet_native_lambdas)
-        current_linklet_native_lambdas = scheme_make_pair(val, current_linklet_native_lambdas);
     }
 
     /* Generating the code may cause empty closures to be formed: */
     ndata = scheme_generate_case_lambda(seqout);
     seqout->native_code = ndata;
+
+    if (current_linklet_native_lambdas) {
+      for (i = 0; i < cnt; i++) {
+        val = seqout->array[i];
+        {
+          /* Force jitprep on body, too, to discover all lambdas */
+          Scheme_Object *body;
+          body = jit_expr(((Scheme_Lambda *)val)->body);
+          ((Scheme_Lambda *)val)->body = body;
+        }
+        val = (Scheme_Object *)((Scheme_Lambda *)val)->u.native_code;
+        current_linklet_native_lambdas = scheme_make_pair(val, current_linklet_native_lambdas);
+      }
+    }
 
     if (all_closed) {
       /* Native closures do not refer back to the original bytecode,
@@ -460,8 +471,7 @@ Scheme_Object *scheme_case_lambda_jit(Scheme_Object *expr)
 
     return (Scheme_Object *)seqout;
   }
-#endif
- 
+
   return expr;
 }
 
@@ -525,7 +535,6 @@ Scheme_Object *scheme_jit_closure(Scheme_Object *code, Scheme_Object *context)
   /* If lr is supplied as a letrec binding this closure, it may be used
      for JIT compilation. */
 {
-#ifdef MZ_USE_JIT
   Scheme_Lambda *data = (Scheme_Lambda *)code, *data2;
 
   /* We need to cache clones to support multiple references
@@ -555,6 +564,13 @@ Scheme_Object *scheme_jit_closure(Scheme_Object *code, Scheme_Object *context)
 
     if (!context)
       data->u.jit_clone = data2;
+
+    if (current_linklet_native_lambdas) {
+      /* Force jitprep on body, too, to discover all lambdas */
+      Scheme_Object *body;
+      body = jit_expr(data2->body);
+      data2->body = body;
+    }
   }
 
   /* If it's zero-sized, then create closure now */
@@ -562,18 +578,38 @@ Scheme_Object *scheme_jit_closure(Scheme_Object *code, Scheme_Object *context)
     return scheme_make_native_closure(data2->u.native_code);
 
   return (Scheme_Object *)data2;
-#endif
-
-  return code;
 }
 
 /*========================================================================*/
 /*                            expressions                                 */
 /*========================================================================*/
 
+static Scheme_Object *jit_expr_k(void)
+{
+  Scheme_Thread *p = scheme_current_thread;
+  Scheme_Object *expr = (Scheme_Object *)p->ku.k.p1;
+
+  p->ku.k.p1 = NULL;
+
+  return jit_expr(expr);
+}
+
 static Scheme_Object *jit_expr(Scheme_Object *expr)
 {
   Scheme_Type type = SCHEME_TYPE(expr);
+
+#ifdef DO_STACK_CHECK
+  {
+# include "mzstkchk.h"
+    {
+      Scheme_Thread *p = scheme_current_thread;
+
+      p->ku.k.p1 = (void *)expr;
+
+      return scheme_handle_stack_overflow(jit_expr_k);
+    }
+  }
+#endif /* DO_STACK_CHECK */
 
   switch (type) {
   case scheme_application_type:
@@ -642,6 +678,9 @@ Scheme_Linklet *scheme_jit_linklet(Scheme_Linklet *linklet, int step)
   Scheme_Object *bodies, *v;
   int i;
 
+  if (force_jit)
+    step = 2;
+
   if (!linklet->jit_ready) {
     new_linklet = MALLOC_ONE_TAGGED(Scheme_Linklet);
     memcpy(new_linklet, linklet, sizeof(Scheme_Linklet));
@@ -676,11 +715,11 @@ Scheme_Linklet *scheme_jit_linklet(Scheme_Linklet *linklet, int step)
   return new_linklet;
 }
 
-#else
+#else /* ! MZ_USE_JIT */
 
 Scheme_Linklet *scheme_jit_linklet(Scheme_Linklet *linklet, int step)
 {
   return linklet;
 }
 
-#endif
+#endif /* MZ_USE_JIT */

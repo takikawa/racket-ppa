@@ -40,4 +40,46 @@ expressions. The @racket[expr/c] syntax class does not change how
 pattern variables are bound; it only computes an attribute that
 represents the checked expression.
 
+The previous example shows a macro applying a contract on an argument,
+but a macro can also apply a contract to an expression that it
+produces. In that case, it should use @racket[#:arg? #f] to indicate
+that the macro, not the calling context, is responsible for expression
+produced.
+
+@interaction[#:eval the-eval
+(code:comment "BUG: rationals not closed under inversion")
+(define-syntax (invert stx)
+  (syntax-parse stx
+    [(_ e)
+     #:declare e (expr/c #'rational?)
+     #:with result #'(/ 1 e.c)
+     #:declare result (expr/c #'rational? #:arg? #f)
+     #'result.c]))
+
+(invert 4)
+(invert 'abc)
+(invert 0.0)
+]
+
+The following example shows a macro that uses a contracted expression
+at a different phase level. The macro's @racket[_ref] argument is used
+as a ``compile-time expression''---more precisely, it is used as an
+expression at a phase level one higher than the use of the macro
+itself. That is because the macro places the expression in the
+right-hand side of a @racket[define-syntax] form. The macro uses
+@racket[expr/c] with a @racket[#:phase] argument to ensure that
+@racket[_ref] produces an identifier when used as a compile-time
+expression.
+
+@interaction[#:eval the-eval
+(define-syntax (define-alias stx)
+  (syntax-parse stx
+    [(_ name:id ref)
+     #:declare ref (expr/c #'identifier?
+                           #:phase (add1 (syntax-local-phase-level)))
+     #'(define-syntax name (make-rename-transformer ref.c))]))
+(define-alias plus #'+)
+(define-alias zero 0)
+]
+
 @(close-eval the-eval)

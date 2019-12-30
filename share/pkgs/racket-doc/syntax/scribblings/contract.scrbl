@@ -14,19 +14,21 @@ contracts to macro subexpressions.
 
 @defproc[(wrap-expr/c [contract-expr syntax?]
                       [expr syntax?]
+                      [#:arg? arg? any/c #t]
                       [#:positive pos-blame
                                   (or/c syntax? string? module-path-index?
                                         'from-macro 'use-site 'unknown)
-                                  'use-site]
+                                  'from-macro]
                       [#:negative neg-blame
                                   (or/c syntax? string? module-path-index?
                                         'from-macro 'use-site 'unknown)
-                                  'from-macro]
+                                  'use-site]
                       [#:name expr-name
                               (or/c identifier? symbol? string? #f) #f]
                       [#:macro macro-name
                                (or/c identifier? symbol? string? #f) #f]
-                      [#:context context (or/c syntax? #f) (current-syntax-context)])
+                      [#:context context (or/c syntax? #f) (current-syntax-context)]
+                      [#:phase phase exact-integer? (syntax-local-phase-level)])
          syntax?]{
 
 Returns a syntax object representing an expression that applies the
@@ -68,7 +70,11 @@ The other arguments have the same meaning as for @racket[expr/c].
 (app (lambda (x) 'pear) 5)
 ]
 
-@history[#:added "6.3"]{}
-}
+@history[
+#:added "6.3"
+#:changed "7.2.0.3" @elem{Added the @racket[#:arg?] keyword argument
+and changed the default values and interpretation of the
+@racket[#:positive] and @racket[#:negative] arguments.}
+#:changed "7.3.0.3" @elem{Added the @racket[#:phase] keyword argument.}]}
 
 @close-eval[the-eval]
