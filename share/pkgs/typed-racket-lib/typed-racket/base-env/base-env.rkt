@@ -14,6 +14,8 @@
   (only-in '#%kernel [apply kernel:apply] [reverse kernel:reverse])
   (only-in racket/private/pre-base new-apply-proc)
   compatibility/mlist
+  (only-in file/convertible prop:convertible)
+  (only-in mzlib/pconvert-prop prop:print-converter)
   racket/logging
   racket/private/stx
   (only-in mzscheme make-namespace)
@@ -59,7 +61,14 @@
 [equal?/recur (-> Univ Univ (-> Univ Univ Univ) B)]
 [immutable? (asym-pred Univ B (-PS (-is-type 0 (Un -Bytes -BoxTop -String (-Immutable-HT Univ Univ) (-ivec Univ)))
                                    (-not-type 0 (Un (-Immutable-HT Univ Univ) (-ivec Univ)))))]
-[prop:equal+hash -Struct-Type-Property]
+
+
+;; we can't use -Self for the second argument in the first fucntion, because
+;; -Self denotes the exact struct instance from which property values are
+;; extracted.
+[prop:equal+hash (-struct-property (-lst* (-> -Self -Imp (-> Univ Univ B) Univ)
+                                          (-> -Self (-> Univ -Int) -Int)
+                                          (-> -Self (-> Univ -Int) -Int)))]
 
 ;; Section 4.1.1 (racket/bool)
 [true (-val #t)]
@@ -1060,55 +1069,57 @@
 ;; Section 4.14 (Sequences and Streams)
 [sequence? (make-pred-ty -SequenceTop)]
 [in-sequences
- (-poly (a) (->* (list) (-seq a) (-seq a)))]
+ (-polydots (a) (->* '() (-seq-dots '() a 'a) (-seq-dots '() a 'a)))]
 [in-cycle
- (-poly (a) (->* (list) (-seq a) (-seq a)))]
+ (-polydots (a) (->* '() (-seq-dots '() a 'a) (-seq-dots '() a 'a)))]
 [in-parallel
- (-poly (a b c)
-   (cl->* (-> (-seq a) (-seq a))
-          (-> (-seq a) (-seq b) (-seq a b))
-          (-> (-seq a) (-seq b) (-seq c) (-seq a b c))))]
+ (-polydots (a) (->... '() ((-seq a) a) (-seq-dots '() a 'a)))]
 [in-values-sequence
- (-poly (a b c)
-   (cl->* (-> (-seq a) (-seq (-lst* a)))
-          (-> (-seq a b) (-seq (-lst* a b)))
-          (-> (-seq a b c) (-seq (-lst* a b c)))))]
+ (-polydots (a) (-> (-seq-dots '() a 'a) (-seq (make-ListDots a 'a))))]
 [in-values*-sequence
- (-poly (a b c)
+ (-polydots (a b c)
    (cl->* (-> (-seq a) (-seq a))
-          (-> (-seq a b) (-seq (-lst* a b)))
-          (-> (-seq a b c) (-seq (-lst* a b c)))))]
+          (-> (-seq-dots (list a b) c 'c) (-seq (-lst* a b #:tail (make-ListDots c 'c))))))]
 [stop-before (-poly (a) ((-seq a) (a . -> . Univ) . -> . (-seq a)))]
 [stop-after (-poly (a) ((-seq a) (a . -> . Univ) . -> . (-seq a)))]
-[make-do-sequence (-poly (a b) ((-> (-values (list (a . -> . b)
-                                                   (a . -> . a)
-                                                   a
-                                                   (Un (a . -> . Univ) (-val #f))
-                                                   (Un (b . -> . Univ) (-val #f))
-                                                   (Un (a b . -> . Univ) (-val #f)))))
-                                . -> . (-seq b)))]
-[sequence-generate (-poly (a) ((-seq a) . -> . (-values (list (-> -Boolean) (-> a)))))]
+[make-do-sequence
+ (-polydots (a b)
+   ((-> (-values (list (a . -> . (make-ValuesDots '() b 'b))
+                       (a . -> . a)
+                       a
+                       (Un (a . -> . Univ) (-val #f))
+                       (Un (->... '() (b b) Univ) (-val #f))
+                       (Un (->... (list a) (b b) Univ) (-val #f)))))
+    . -> . (-seq-dots '() b 'b)))]
+[sequence-generate
+ (-polydots (a) ((-seq-dots '() a 'a) . -> . (-values (list (-> -Boolean) (-> (make-ValuesDots '() a 'a))))))]
 ;; Doesn't work (mu types are single-valued only):
 ;[sequence-generate*  (-poly (a) ((-seq a) . -> . (-mu t (-values (list (Un (-lst a) (-val #f)) t)))))]
 ;; Doesn't render nicely (but seems to work fine):
-[empty-sequence (-poly (a) (-seq a))]
+[empty-sequence (-polydots (a) (-seq-dots '() a 'a))]
 [sequence->list (-poly (a) ((-seq a) . -> . (-lst a)))]
 [sequence-length (-SequenceTop . -> . -Nat)]
-[sequence-ref (-poly (a) ((-seq a) -Integer . -> . a))]
-[sequence-tail (-poly (a) ((-seq a) -Integer . -> . (-seq a)))]
-[sequence-append (-poly (a) (->* (list) (-seq a) (-seq a)))]
-[sequence-map (-poly (a b) ((a . -> . b) (-seq a) . -> . (-seq b)))]
-[sequence-andmap (-poly (a b) ((a . -> . b) (-seq a) . -> . (Un b (-val #t))))]
-[sequence-ormap (-poly (a b) ((a . -> . b) (-seq a) . -> . (Un b (-val #f))))]
-[sequence-for-each (-poly (a) ((a . -> . Univ) (-seq a) . -> . -Void))]
-[sequence-fold (-poly (a b) ((b a . -> . b) b (-seq a) . -> . b))]
-[sequence-count (-poly (a) ((a . -> . Univ) (-seq a) . -> . -Nat))]
-[sequence-filter (-poly (a b) (cl->*
-                                ((asym-pred a Univ (-PS (-is-type 0 b) -tt))
-                                 (-seq a)
-                                 . -> .
-                                 (-seq b))
-                                ((a . -> . Univ) (-seq a) . -> . (-seq a))))]
+[sequence-ref (-polydots (a) ((-seq-dots '() a 'a) -Integer . -> . (make-ValuesDots '() a 'a)))]
+[sequence-tail (-polydots (a) ((-seq-dots '() a 'a) -Integer . -> . (-seq-dots '() a 'a)))]
+[sequence-append (-polydots (a) (->* '() (-seq-dots '() a 'a) (-seq-dots '() a 'a)))]
+; We can't express the full type without multiple dotted type variables:
+[sequence-map (-polydots (a b)
+                (cl->*
+                  ((->... '() (b b) a) (-seq-dots '() b 'b) . -> . (-seq a))
+                  ((-> a (make-ValuesDots '() b 'b)) (-seq a) . -> . (-seq-dots '() b 'b))))]
+[sequence-andmap (-polydots (b a) ((->... '() (a a) b) (-seq-dots '() a 'a) . -> . (Un b (-val #t))))]
+[sequence-ormap (-polydots (b a) ((->... '() (a a) b) (-seq-dots '() a 'a) . -> . (Un b (-val #f))))]
+[sequence-for-each (-polydots (a) ((->... '() (a a) Univ) (-seq-dots '() a 'a) . -> . -Void))]
+[sequence-fold (-polydots (b a) ((->... (list b) (a a) b) b (-seq-dots '() a 'a) . -> . b))]
+[sequence-count (-polydots (a) ((->... '() (a a) Univ) (-seq-dots '() a 'a) . -> . -Nat))]
+[sequence-filter (-polydots (a b c)
+                   (cl->*
+                    ((asym-pred a Univ (-PS (-is-type 0 b) -tt))
+                     (-seq a)
+                     . -> .
+                     (-seq b))
+                    ((->... '() (c c) Univ) (-seq-dots '() c 'c) . -> . (-seq-dots '() c 'c))))]
+; The untyped version works with multi-valued sequences, but we can't express that:
 [sequence-add-between (-poly (a) ((-seq a) a . -> . (-seq a)))]
 
 ;; Section 4.16 (Sets)
@@ -1222,9 +1233,9 @@
        [(Un (one-of/c #f 'can-impersonate) (-> Univ (-lst Univ)))
         (-lst (-pair -Struct-Type-Property (-> Univ Univ)))
         Univ]
-       (-values (list -Struct-Type-Property (-> Univ B) (-> Univ Univ))))]
+       (-values (list (-poly (a) (-struct-property a)) (-> Univ B) (-> Univ Univ))))]
 
-[struct-type-property? (make-pred-ty -Struct-Type-Property)]
+[struct-type-property? (make-pred-ty (-struct-property -Bottom))]
 [struct-type-property-accessor-procedure? (-> Univ B)]
 
 ;; Section 5.6 (Structure Utilities)
@@ -1306,7 +1317,7 @@
 [error-print-source-location (-Param Univ B)]
 
 ;; Section 10.2.5
-[prop:exn:srclocs -Struct-Type-Property]
+[prop:exn:srclocs (-struct-property (-> -Self (-lst -Srcloc)))]
 [exn:srclocs? (-> Univ B)]
 [exn:srclocs-accessor (-> Univ (-lst Univ))] ;TODO
 
@@ -1490,6 +1501,7 @@
 [system-idle-evt (-> (-evt -Void))]
 [alarm-evt (-> -Real (-mu x (-evt x)))]
 [handle-evt? (asym-pred Univ B (-PS (-is-type 0 (-evt Univ)) -tt))]
+[prop:evt (-struct-property (Un (-evt Univ) (-> -Self ManyUniv) -Nat))]
 [current-evt-pseudo-random-generator
  (-Param -Pseudo-Random-Generator -Pseudo-Random-Generator)]
 
@@ -1702,12 +1714,14 @@
 [set!-transformer? (-> Univ B)]
 [make-set!-transformer (-> (-> (-Syntax Univ) (-Syntax Univ)) Univ)]
 [set!-transformer-procedure (-> Univ (-> (-Syntax Univ) (-Syntax Univ)))]
-[prop:set!-transformer -Struct-Type-Property]
+[prop:set!-transformer (-struct-property (Un -Nat
+                                             (cl-> [(-Self) (-Syntax Univ)]
+                                                   [(-Self (-Syntax Univ)) (-Syntax Univ)])))]
 
 [rename-transformer? (-> Univ B)]
 [make-rename-transformer (->opt (-Syntax Sym) [(-> (-Syntax Sym) (-Syntax Sym))] Univ)]
 [rename-transformer-target (-> Univ (-Syntax Sym))]
-[prop:rename-transformer -Struct-Type-Property]
+[prop:rename-transformer (-struct-property (Un -Nat (-Syntax Sym) (-> -Self (-Syntax Sym))))]
 
 [local-expand
  (->opt (-Syntax Univ)
@@ -1844,8 +1858,8 @@
 [current-output-port (-Param -Output-Port -Output-Port)]
 [current-error-port (-Param -Output-Port -Output-Port)]
 
-[file-stream-port? (-> Univ B)]
-[terminal-port? (-> Univ B)]
+[file-stream-port? (asym-pred Univ B (-PS (-is-type 0 -Port) -tt))]
+[terminal-port? (asym-pred Univ B (-PS (-is-type 0 -Port) -tt))]
 
 [eof (-val eof)]
 [eof-object? (make-pred-ty (-val eof))]
@@ -1934,8 +1948,8 @@
 [pipe-content-length (-> (Un -Input-Port -Output-Port) -Nat)]
 
 ;; Section 13.1.8
-[prop:input-port -Struct-Type-Property]
-[prop:output-port -Struct-Type-Property]
+[prop:input-port (-struct-property (Un -Input-Port -Nat))]
+[prop:output-port (-struct-property (Un -Output-Port -Nat))]
 
 ;; Section 13.1.9
 [make-input-port
@@ -2289,11 +2303,14 @@
 [special-comment-value (-> -Special-Comment Univ)]
 
 ;; Section 13.8
-[prop:custom-write -Struct-Type-Property]
+[prop:custom-write (-struct-property (-> -Self -Output-Port (Un B (-val 1) (-val 0)) ManyUniv))]
 [custom-write? (-> Univ B)]
-[custom-write-accessor (-> Univ (-> Univ -Output-Port B ManyUniv))]
+[custom-write-accessor (-> Univ (-> Univ -Output-Port (Un B (-val 1) (-val 0)) ManyUniv))]
 
-[prop:custom-print-quotable -Struct-Type-Property]
+[prop:custom-print-quotable (-struct-property (Un (-val 'self)
+                                                  (-val 'never)
+                                                  (-val 'maybe)
+                                                  (-val 'always)))]
 [custom-print-quotable? (-> Univ B)]
 [custom-print-quotable-accessor (-> Univ Univ)]
 
@@ -3060,6 +3077,7 @@
  (cl->*
   (-> (Un (-val 'unix) (-val 'windows) (-val 'macosx)))
   (-> (-val 'os) (Un (-val 'unix) (-val 'windows) (-val 'macosx)))
+  (-> (-val 'vm) -Symbol)
   (-> (-val 'gc) (Un (-val 'cgc) (-val '3m)))
   (-> (-val 'link) (Un (-val 'static) (-val 'shared) (-val 'dll) (-val 'framework)))
   (-> (-val 'so-suffix) -Bytes)
@@ -3082,7 +3100,7 @@
  (let ([mode-sym (one-of/c 'once-each 'once-any 'multi 'final)]
        [label-sym (one-of/c 'ps 'help-labels 'usage-help)])
    (-polydots
-    (b a) 
+    (b a)
     (cl->* (->opt -Pathlike
                   (Un (-lst -String) (-vec -String))
                   (-lst (Un (-pair mode-sym
@@ -3097,7 +3115,7 @@
                   [(-> -String Univ)
                    ;; Still permits unknown-proc args that accept rest arguments
                    (-> -String Univ)]
-                  b))))] 
+                  b))))]
 
 ;; Section 16.1 (Weak Boxes)
 [make-weak-box (-poly (a) (-> a (-weak-box a)))]
@@ -3438,8 +3456,8 @@
             (-lst -Bytes)))
 (display-lines
  (->optkey (-lst Univ) [-Output-Port] #:separator Univ #f -Void))
-(find-relative-path (->key -SomeSystemPathlike 
-                           -SomeSystemPathlike 
+(find-relative-path (->key -SomeSystemPathlike
+                           -SomeSystemPathlike
                            #:more-than-root? Univ #f
                            #:more-than-same? Univ #f
                            #:normalize-case? Univ #f
@@ -3472,3 +3490,10 @@
         (output (-opt (-pair ind-pair (-lst (-opt ind-pair)))))
         (-Input (Un -String -Input-Port -Bytes -Path)))
    (->optkey -Pattern -Input (N ?N -Bytes) #:match-select sel #f output)))
+
+;; File: Racket File and Format Libraries
+[prop:convertible (-struct-property (-> -Self -Symbol Univ Univ))]
+
+
+;; MzLib: Legacy Libraries
+[prop:print-converter (-struct-property (-> -Self (-> Univ Univ) Univ))]

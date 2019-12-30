@@ -51,7 +51,7 @@ socket.
 
 For any kind of result port, closing the resulting ports readies and
 unregisters any semaphores for the file descriptor or socket that were
-previously created with @racket[unsafe-file-descriptor->semaphore]
+previously created with @racket[unsafe-file-descriptor->semaphore] or
 @racket[unsafe-socket->semaphore].}
 
 
@@ -63,7 +63,17 @@ previously created with @racket[unsafe-file-descriptor->semaphore]
 )]{
 
 Returns a file descriptor (which is a @tt{HANDLE} value on Windows) of
-a socket for @racket[port] if it has one, @racket[#f] otherwise.}
+a socket for @racket[port] if it has one, @racket[#f] otherwise.
+
+On Unix and Mac OS, the result of
+@racket[unsafe-port->file-descriptor] can be @racket[#f] if it
+corresponds to a port that is waiting for its peer as reported by
+@racket[port-waiting-peer?], such as the write end of a fifo where no
+reader is connected. Wait until such is ready by using @racket[sync]).
+
+@history[#:changed "7.4.0.5" @elem{Accommodate a fifo write
+                                   end blocked on a reader by
+                                   returning @racket[#f].}]}
 
 
 @deftogether[(
@@ -75,13 +85,30 @@ a socket for @racket[port] if it has one, @racket[#f] otherwise.}
          (or/c semaphore? #f)]
 )]{         
 
-For @racket[mode] as @racket['read] or @racket['write], returns a
-semaphore that becomes ready when @racket[fd] or @racket[socket]
-becomes ready for reading or writing, respectively. The result is
-@racket[#f] if a conversion to a semaphore is not supported for the
-current platform or for the given file descriptor or socket.
+Returns a semaphore that becomes ready when @racket[fd] or @racket[socket]
+is ready for reading or writing, as selected by @racket[mode]. Specifically,
+these functions provide a one-shot, @emph{edge-triggered} indicator; the
+semaphore is posted the @emph{first time} any of the following cases holds:
 
-The @racket['read-check] and @racket['write-check] modes are like
+@itemlist[
+
+@item{@racket[fd] or @racket[socket] is ready for reading or writing
+(depending on @racket[mode]),}
+
+@item{ports were created from @racket[fd] or @racket[socket] using
+@racket[unsafe-file-descriptor->port] or @racket[unsafe-socket->port],
+and those ports were closed, or}
+
+@item{a subsequent call occurred with the same @racket[fd] or
+@racket[socket] and with @racket['remove] for @racket[mode].}
+
+]
+
+The result is @racket[#f] if a conversion to a semaphore is not
+supported for the current platform or for the given file descriptor or
+socket.
+
+The @racket['check-read] and @racket['check-write] modes are like
 @racket['read] and @racket['write], but the result if @racket[#f] if a
 semaphore is not already generated for the specified file descriptor
 or socket in the specified mode.
@@ -91,4 +118,44 @@ previously created for the given file descriptor or socket. Semaphores
 must be unregistered before the file descriptor or socket is closed.
 Beware that closing a port from @racket[unsafe-file-descriptor->port]
 or @racket[unsafe-socket->port] will also ready and unregister
-semaphores.}
+semaphores. In all of those cases, however, the semaphore is made
+ready asynchronously, so there may be a detectable delay.}
+
+
+@defproc[(unsafe-fd->evt [fd exact-integer?]
+                         [mode (or/c 'read 'write 'check-read 'check-write 'remove)]
+                         [socket? any/c #t])
+         (or/c evt? #f)]{
+
+Returns an event that is ready when @racket[fd] is ready for reading
+or writing, as selected by @racket[mode]. Specifically, it returns a
+multi-use, @emph{level-triggered} indicator; the event is ready
+@emph{whenever} any of the following cases holds:
+
+@itemlist[
+
+@item{@racket[fd] is ready for reading or writing (depending on
+@racket[mode]),}
+
+@item{a subsequent call occurred with the same @racket[fd] and with
+@racket['remove] for @racket[mode] (once removed, the event is
+perpetually ready).}
+
+]
+
+The synchronization result of the event is the event itself.
+
+The @racket['check-read] and @racket['check-write] modes are like
+@racket['read] and @racket['write], but the result is @racket[#f] if
+an event is not already generated for the specified file descriptor or
+socketin the specified mode.
+
+The @racket['remove] mode readies and unregisters any events
+previously created for the given file descriptor or socket. Events
+must be unregistered before the file descriptor or socket is
+closed. Unlike the semaphore result of @racket[unsafe-file-descriptor->semaphore] and
+@racket[unsafe-socket->semaphore], the event result of
+@racket[unsafe-fd->evt] is not triggered or unregistered by closing a port---not
+even a port from @racket[unsafe-file-descriptor->port] or @racket[unsafe-socket->port].
+
+@history[#:added "7.2.0.6"]}

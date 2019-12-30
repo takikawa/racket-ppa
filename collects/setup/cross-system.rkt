@@ -26,9 +26,9 @@
                                   ;; because cross-compiling requires the same VM.
                                   (eq? (system-type 'vm)
                                        (hash-ref ht 'vm #f))
-                                  (for/and ([sym (in-list (list*
-                                                           'library-subpath
-                                                           'library-subpath-convention
+                                  (for/and ([sym (in-list (append
+                                                           '(library-subpath
+                                                             library-subpath-convention)
                                                            system-type-symbols))])
                                     (not (void? (hash-ref ht sym (void)))))
                                   (not

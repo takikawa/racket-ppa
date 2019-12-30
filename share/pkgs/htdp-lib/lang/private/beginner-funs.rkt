@@ -158,8 +158,8 @@
  @interaction[#:eval (bsl) (min 3 2 8 7 2 9 0)]
 }
   @defproc[(quotient [x integer][y integer]) integer]{
- Divides the second integer---also called divisor---into the first---known as 
- dividend---to obtain the @index[(list "divide" "quotient")]{quotient}.
+ Divides the first integer---also called dividend---by the second---known as 
+ divisor---to obtain the @index[(list "divide" "quotient")]{quotient}.
  @interaction[#:eval (bsl) (quotient 9 2) (quotient 3 4)] 
 }
   @defproc[(remainder [x integer][y integer]) integer]{
@@ -831,7 +831,7 @@
  Copies a string. @;why is it included? 
  @interaction[#:eval (bsl) (string-copy "hello")]
 }
-  @defproc[(string-append [s string] ...) string]{
+  @defproc[([beginner-string-append string-append] [s string] [t string] [z string] ...) string]{
  Concatenates the characters of several strings. 
  @interaction[#:eval (bsl) (string-append "hello" " " "world" " " "good bye")]
 }
@@ -845,46 +845,46 @@
  @interaction[#:eval (bsl) (string-downcase "CAT") (string-downcase "cAt")]
 }
 
-  @defproc[(string=? [s string][t string][x string] ...) boolean?]{
+  @defproc[([beginner-string=? string=?] [s string][t string][x string] ...) boolean?]{
  Determines whether all strings are equal, character for character.
  @interaction[#:eval (bsl) (string=? "hello" "world") (string=? "bye" "bye")]
 }
-  @defproc[(string<? [s string][t string][x string] ...) boolean?]{
+  @defproc[([beginner-string<? string<?] [s string][t string][x string] ...) boolean?]{
  Determines whether the strings are ordered in a lexicographically strictly increasing manner.
  @interaction[#:eval (bsl) (string<? "hello" "world" "zoo")]
 }
-  @defproc[(string>? [s string][t string][x string] ...) boolean?]{
+  @defproc[([beginner-string>? string>?] [s string][t string][x string] ...) boolean?]{
  Determines whether the strings are ordered in a lexicographically strictly decreasing manner.
  @interaction[#:eval (bsl) (string>?  "zoo" "world" "hello")]
 }
-  @defproc[(string<=? [s string][t string][x string] ...) boolean?]{
+  @defproc[([beginner-string<=? string<=?] [s string][t string][x string] ...) boolean?]{
  Determines whether the strings are ordered in a lexicographically increasing manner.
  @interaction[#:eval (bsl) (string<=? "hello" "hello" "world" "zoo")]
 }
-  @defproc[(string>=? [s string][t string][x string] ...) boolean?]{
+  @defproc[([beginner-string>=? string>=?] [s string][t string][x string] ...) boolean?]{
  Determines whether the strings are ordered in a lexicographically decreasing manner.
  @interaction[#:eval (bsl) (string>=?  "zoo" "zoo" "world" "hello")]
 }
-  @defproc[(string-ci=?  [s string][t string][x string] ...) boolean?]{
+  @defproc[([beginner-string-ci=? string-ci=?]  [s string][t string][x string] ...) boolean?]{
  Determines whether all strings are equal, character for character, regardless of case. 
  @interaction[#:eval (bsl) (string-ci=?  "hello" "HellO")]
 }
-  @defproc[(string-ci<?  [s string][t string][x string] ...) boolean?]{
+  @defproc[([beginner-string-ci<? string-ci<?]  [s string][t string][x string] ...) boolean?]{
  Determines whether the strings are ordered in a lexicographically
  strictly increasing and case-insensitive manner.
  @interaction[#:eval (bsl) (string-ci<? "hello" "WORLD" "zoo")]
 }
-  @defproc[(string-ci>?  [s string][t string][x string] ...) boolean?]{
+  @defproc[([beginner-string-ci>? string-ci>?]  [s string][t string][x string] ...) boolean?]{
  Determines whether the strings are ordered in a lexicographically
  strictly decreasing and case-insensitive manner.
  @interaction[#:eval (bsl) (string-ci>?  "zoo" "WORLD" "hello")]
 }
-  @defproc[(string-ci<=? [s string][t string][x string] ...) boolean?]{
+  @defproc[([beginner-string-ci<=? string-ci<=?] [s string][t string][x string] ...) boolean?]{
  Determines whether the strings are ordered in a lexicographically
  increasing and case-insensitive manner. 
  @interaction[#:eval (bsl) (string-ci<=? "hello" "WORLD" "zoo")]
 }
-  @defproc[(string-ci>=? [s string][t string][x string] ...) boolean?]{
+  @defproc[([beginner-string-ci>=? string-ci>=?] [s string][t string][x string] ...) boolean?]{
  Determines whether the strings are ordered in a lexicographically
  decreasing and case-insensitive manner.
  @interaction[#:eval (bsl) (string-ci>?  "zoo" "WORLD" "hello")]

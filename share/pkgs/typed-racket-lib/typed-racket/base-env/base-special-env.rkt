@@ -262,7 +262,7 @@
   [(make-template-identifier 'in-bytes-lines 'racket/private/for)
    (->opt [-Input-Port -Symbol] (-seq -Bytes))]
   ;; in-directory
-  [(make-template-identifier '*in-directory 'racket/private/for)
+  [(make-template-identifier 'in-directory 'racket/private/for)
    (->opt [(Un (-val #f) -Pathlike) (-> -Path Univ)] (-seq -Path))]
   ;; in-producer
   [(make-template-identifier 'in-producer 'racket/private/for)
@@ -373,4 +373,9 @@
    (-> -Variable-Reference -Namespace-Anchor)]
   [(make-template-identifier 'check-logger-or-false 'racket/private/logger)
    (-> -Symbol Univ (Un (-val #f) -Logger))]
+  [(make-template-identifier 'place/proc 'racket/place)
+   (-> -Variable-Reference -Symbol -Symbol (-> -Symbol -Module-Path -Symbol (-opt -Input-Port) (-opt -Output-Port) (-opt -Output-Port) -Place)
+       (-opt -Input-Port) (-opt -Output-Port) (-opt -Output-Port) -Place)]
+  [(make-template-identifier 'start-place 'racket/place)
+   (-> -Symbol -Module-Path -Symbol (-opt -Input-Port) (-opt -Output-Port) (-opt -Output-Port) -Place)]
   )

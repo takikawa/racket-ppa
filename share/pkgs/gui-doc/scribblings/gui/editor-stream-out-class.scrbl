@@ -73,10 +73,13 @@ If @racket[n] is not supplied and @racket[v] is a byte string, then
  get-bytes] instead of @method[editor-stream-in%
  get-unterminated-bytes] to read the bytes later.
 
+  If @racket[v] is a @racket[real?], but not an
+  @racket[exact-integer?], then it is converted to an inexact
+  number as part of the process of writing it.
 }
 
 
-@defmethod[(put-fixed [v exact-integer?])
+@defmethod[(put-fixed [v (integer-in -9999999999 99999999999)])
            (is-a?/c editor-stream-out%)]{
 
 Puts a fixed-sized integer into the stream. This method is needed

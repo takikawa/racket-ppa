@@ -45,8 +45,10 @@
                 [("--total")
                  "Order functions by total time"
                  (set! order 'total)]
-                #:args (filename)
-                filename))
+                #:args (file.rkt . arg-for-file.rkt)
+                (current-command-line-arguments
+                 (list->vector arg-for-file.rkt))
+                file.rkt))
 
 (define (t)
   ;; use a fresh namespace every time, to play nice with --repeat

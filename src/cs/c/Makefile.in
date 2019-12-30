@@ -10,11 +10,18 @@ SCHEME_BIN = $(SCHEME_SRC)/$(MACH)/bin/$(MACH)/scheme
 SCHEME_INC = $(SCHEME_SRC)/$(MACH)/boot/$(MACH)
 SCHEME = $(SCHEME_BIN) -b $(SCHEME_INC)/petite.boot -b $(SCHEME_INC)/scheme.boot
 
+TARGET_MACH = @TARGET_MACH@
+SCHEME_TARGET_INC = $(SCHEME_SRC)/$(TARGET_MACH)/boot/$(TARGET_MACH)
+
 CC = @CC@
 BASE_CFLAGS = @CFLAGS@ @CPPFLAGS@
-CFLAGS = $(BASE_CFLAGS) -I$(SCHEME_INC) -I$(srcdir)/../../rktio -Irktio -I.
+CFLAGS = $(BASE_CFLAGS) -I$(SCHEME_TARGET_INC) -I$(srcdir)/../../rktio -Irktio -I.
 LDFLAGS = @LDFLAGS@
 LIBS = @LIBS@
+AR = @AR@
+ARFLAGS = @ARFLAGS@
+RANLIB = @RANLIB@
+WINDRES = @WINDRES@
 
 STRIP_DEBUG = @STRIP_DEBUG@
 STRIP_LIB_DEBUG = @STRIP_LIB_DEBUG@
@@ -35,6 +42,7 @@ libpltdir_rel = @libpltdir_rel@
 etcpltdir = @etcpltdir@
 sharepltdir = @sharepltdir@
 collectsdir = @collectsdir@
+configdir = @etcpltdir@
 
 ALLDIRINFO = "$(DESTDIR)$(bindir)" \
              "$(DESTDIR)$(libpltdir)"
@@ -44,14 +52,14 @@ mainsrcdir = @srcdir@/../..
 @INCLUDEDEP@ @srcdir@/../../racket/version.mak
 
 cs:
-	$(MAKE) scheme
+	$(MAKE) scheme@T_CROSS_MODE@
 	$(MAKE) racket-so
 	cd rktio; $(MAKE)
 	$(MAKE) racketcs
 	$(MAKE) gracketcs
 	$(MAKE) starter
 
-SETUP_BOOT_MODE = --chain
+SETUP_BOOT_MODE = @SETUP_BOOT_MODE@
 SETUP_COMMON_BOOT = -l- setup $(SETUP_BOOT_MODE) $(srcdir)/../../setup-go.rkt $(builddir)/compiled
 
 ABS_BOOT = $(SETUP_COMMON_BOOT) ignored $(builddir)/ignored.d
@@ -76,6 +84,7 @@ RACKET_SO_ENV = @CONFIGURE_RACKET_SO_COMPILE@ env COMPILED_SCM_DIR="$(builddir)/
 
 CS_PROGS = RACKET="$(RACKET)" SCHEME="$(SCHEME)" CONVERT_RACKET="$(CONVERT_RACKET)"
 CS_OPTS = COMPRESS_COMP=@COMPRESS_COMP@
+CS_OPTScross = $(CS_OPTS) CSO=$(MACH) CROSS_COMP="--xpatch $(SCHEME_SRC)/$(TARGET_MACH)/s/xpatch"
 
 build-racket-so:
 	$(MAKE) @RKTL_PRE@expander@RKTL_POST@
@@ -84,7 +93,7 @@ build-racket-so:
 	$(MAKE) @RKTL_PRE@regexp@RKTL_POST@
 	$(MAKE) @RKTL_PRE@schemify@RKTL_POST@
 	$(MAKE) @RKTL_PRE@known@RKTL_POST@
-	cd $(srcdir)/.. && $(RACKET_SO_ENV) $(MAKE) "$(builddir)/racket.so" $(CS_PROGS) $(CS_OPTS) BUILDDIR="$(builddir)/"
+	cd $(srcdir)/.. && $(RACKET_SO_ENV) $(MAKE) "$(builddir)/racket.so" $(CS_PROGS) $(CS_OPTS@CROSS_MODE@) BUILDDIR="$(builddir)/"
 
 bounce:
 	$(RACKET) -O 'info@compiler/cm' $(ABS_BOOT) $(srcdir)/../absify.rkt just-to-compile-absify
@@ -118,28 +127,65 @@ bounce:
 	cd $(srcdir)/../../schemify && $(MAKE) known-src-generate RACKET="$(BOOTSTRAP_RACKET)" BUILDDIR="$(builddir)/"
 
 scheme:
-	if [ "$(MAKE_BUILD_SCHEME)" = "y" ] ; \
-         then $(MAKE) scheme-make ; fi
+	$(MAKE) scheme-make-$(MAKE_BUILD_SCHEME)
 
-scheme-make:
-	cd @SCHEME_SRC@ && ./configure @SCHEME_CONFIG_ARGS@ CC="$(CC)" CFLAGS="$(BASE_CFLAGS)" LDFLAGS="$(LDFLAGS)"
-	mkdir -p @SCHEME_SRC@/@MACH@/boot/@MACH@
-	$(MAKE) @SCHEME_SRC@/@MACH@/boot/@MACH@/equates.h
-	$(MAKE) @SCHEME_SRC@/@MACH@/boot/@MACH@/petite.boot
-	$(MAKE) @SCHEME_SRC@/@MACH@/boot/@MACH@/scheme.boot
-	cd @SCHEME_SRC@ && $(MAKE)
+scheme-make-none:
+	echo Using Chez Scheme build as-is
 
-# Replace "equates.h", etc., if they seem to be out of date.
-# Otherwise, `make` on Chez Scheme cna fail.
-@SCHEME_SRC@/@MACH@/boot/@MACH@/equates.h: @SCHEME_SRC@/boot/@MACH@/equates.h
-	cp @SCHEME_SRC@/boot/@MACH@/equates.h @SCHEME_SRC@/@MACH@/boot/@MACH@/equates.h
-@SCHEME_SRC@/@MACH@/boot/@MACH@/petite.boot: @SCHEME_SRC@/boot/@MACH@/petite.boot
-	cp @SCHEME_SRC@/boot/@MACH@/petite.boot @SCHEME_SRC@/@MACH@/boot/@MACH@/petite.boot
-@SCHEME_SRC@/@MACH@/boot/@MACH@/scheme.boot: @SCHEME_SRC@/boot/@MACH@/scheme.boot
-	cp @SCHEME_SRC@/boot/@MACH@/scheme.boot @SCHEME_SRC@/@MACH@/boot/@MACH@/scheme.boot
+scheme-make-checkout:
+	cd $(SCHEME_SRC) && git submodule -q init && git submodule -q update
+	$(MAKE) scheme-make-finish
+
+scheme-make-copy:
+	if [ ! -d "$(SCHEME_SRC)" ] ; then cp -r $(srcdir)/../../ChezScheme "$(SCHEME_SRC)" ; fi
+	$(MAKE) scheme-make-finish
+
+SCHEME_CONFIG_VARS = CC="$(CC)" CFLAGS="$(BASE_CFLAGS)" LDFLAGS="$(LDFLAGS)" \
+                     AR="$(AR)" ARFLAGS="$(ARFLAGS)" RANLIB="$(RANLIB)" \
+                     WINDRES="$(WINDRES)"
+
+scheme-make-finish:
+	env SCHEME_SRC="$(SCHEME_SRC)" MACH="$(MACH)" $(BOOTSTRAP_RACKET) $(srcdir)/../bootstrap/make-boot.rkt
+	cd $(SCHEME_SRC) && ./configure @SCHEME_CONFIG_ARGS@ $(SCHEME_CONFIG_VARS)
+	$(MAKE) sync-bootfiles
+	cd $(SCHEME_SRC) && $(MAKE)
+
+sync-bootfiles:
+	mkdir -p $(SCHEME_SRC)/$(MACH)/boot/$(MACH)
+	$(MAKE) $(SCHEME_SRC)/$(MACH)/boot/$(MACH)/equates.h
+	$(MAKE) $(SCHEME_SRC)/$(MACH)/boot/$(MACH)/scheme.h
+	$(MAKE) $(SCHEME_SRC)/$(MACH)/boot/$(MACH)/petite.boot
+	$(MAKE) $(SCHEME_SRC)/$(MACH)/boot/$(MACH)/scheme.boot
+
+# If "equates.h", etc., are newly built since previous build, move them into place
+$(SCHEME_SRC)/$(MACH)/boot/$(MACH)/equates.h: $(SCHEME_SRC)/boot/$(MACH)/equates.h
+	cp $(SCHEME_SRC)/boot/$(MACH)/equates.h $(SCHEME_SRC)/$(MACH)/boot/$(MACH)/equates.h
+$(SCHEME_SRC)/$(MACH)/boot/$(MACH)/scheme.h: $(SCHEME_SRC)/boot/$(MACH)/scheme.h
+	cp $(SCHEME_SRC)/boot/$(MACH)/scheme.h $(SCHEME_SRC)/$(MACH)/boot/$(MACH)/scheme.h
+$(SCHEME_SRC)/$(MACH)/boot/$(MACH)/petite.boot: $(SCHEME_SRC)/boot/$(MACH)/petite.boot
+	cp $(SCHEME_SRC)/boot/$(MACH)/petite.boot $(SCHEME_SRC)/$(MACH)/boot/$(MACH)/petite.boot
+$(SCHEME_SRC)/$(MACH)/boot/$(MACH)/scheme.boot: $(SCHEME_SRC)/boot/$(MACH)/scheme.boot
+	cp $(SCHEME_SRC)/boot/$(MACH)/scheme.boot $(SCHEME_SRC)/$(MACH)/boot/$(MACH)/scheme.boot
+
+scheme-cross:
+	cd $(SCHEME_SRC) && git submodule -q init && git submodule -q update
+	env MAKE_BOOT_FOR_CROSS=yes SCHEME_SRC="$(SCHEME_SRC)" MACH="$(TARGET_MACH)" $(BOOTSTRAP_RACKET) $(srcdir)/../bootstrap/make-boot.rkt
+	$(MAKE) sync-bootfiles MACH="$(TARGET_MACH)"
+	cd $(SCHEME_SRC) && ./configure @SCHEME_CROSS_CONFIG_ARGS@ $(SCHEME_CONFIG_VARS)
+	cd $(SCHEME_SRC)/$(TARGET_MACH)/c && $(MAKE) o=o cross=t
+	$(MAKE) $(SCHEME_SRC)/$(TARGET_MACH)/s/xpatch
+
+# Rebuild patch file and cross "petite.boot" and "scheme.boot" when older
+# than the build-host "scheme.boot"
+$(SCHEME_SRC)/$(TARGET_MACH)/s/xpatch: $(SCHEME_SRC)/$(MACH)/boot/$(MACH)/scheme.boot
+	rm -f $(SCHEME_SRC)/$(TARGET_MACH)/s/nanopass.so $(SCHEME_SRC)/$(TARGET_MACH)/s/nanopass/*.so
+	cd $(SCHEME_SRC)/$(TARGET_MACH)/s && $(MAKE) -f Mf-cross m=$(MACH) xm=$(TARGET_MACH) Scheme="$(SCHEME_BIN)" SCHEMEHEAPDIRS="$(SCHEME_INC)"
+
+XPATCH =
+XPATCHcross = --xpatch $(SCHEME_SRC)/$(TARGET_MACH)/s/xpatch
 
 racket.boot: racket.so
-	$(SCHEME) --script $(srcdir)/convert-to-boot.ss @COMPRESS_COMP@ racket.so racket.boot
+	$(SCHEME) --script $(srcdir)/convert-to-boot.ss @BOOT_COMPRESS_COMP@ $(XPATCH@CROSS_MODE@) racket.so racket.boot $(TARGET_MACH)
 
 @INCLUDEDEP@ compiled/expander.d
 @INCLUDEDEP@ compiled/thread.d
@@ -153,28 +199,38 @@ racket.boot: racket.so
 
 EMBED_DEPS = $(srcdir)/embed-boot.rkt
 
-racketcs@NOT_OSX@: raw_racketcs petite-v.boot scheme-v.boot racket-v.boot $(EMBED_DEPS)
-	$(BOOTSTRAP_RACKET) $(srcdir)/embed-boot.rkt @ELF_COMP@ @COMPRESS_COMP@ raw_racketcs racketcs petite-v.boot scheme-v.boot racket-v.boot
+racketcs@NOT_OSX@@NOT_MINGW@: raw_racketcs petite-v.boot scheme-v.boot racket-v.boot $(EMBED_DEPS)
+	$(BOOTSTRAP_RACKET) $(srcdir)/embed-boot.rkt @ELF_COMP@ @BOOT_COMPRESS_COMP@ raw_racketcs racketcs petite-v.boot scheme-v.boot racket-v.boot
+	@POST_LINKER@ racketcs
 
-gracketcs@NOT_OSX@: raw_gracketcs petite-v.boot scheme-v.boot racket-v.boot $(EMBED_DEPS)
-	$(BOOTSTRAP_RACKET) $(srcdir)/embed-boot.rkt @ELF_COMP@ @COMPRESS_COMP@ raw_gracketcs gracketcs petite-v.boot scheme-v.boot racket-v.boot
+gracketcs@NOT_OSX@@NOT_MINGW@: raw_gracketcs petite-v.boot scheme-v.boot racket-v.boot $(EMBED_DEPS)
+	$(BOOTSTRAP_RACKET) $(srcdir)/embed-boot.rkt @ELF_COMP@ @BOOT_COMPRESS_COMP@ raw_gracketcs gracketcs petite-v.boot scheme-v.boot racket-v.boot
+	@POST_LINKER@ gracketcs
 
-BOOT_OBJS = boot.o $(SCHEME_INC)/kernel.o rktio/librktio.a
+OWN_Z_LIB = $(SCHEME_TARGET_INC)/../../zlib/libz.a
+OWN_LZ4_LIB = $(SCHEME_TARGET_INC)/../../lz4/lib/liblz4.a
+SCHEME_LIB_DEPS = $(SCHEME_TARGET_INC)/libkernel.a @Z_LIB_DEP@ @LZ4_LIB_DEP@
+SCHEME_LIBS = $(SCHEME_TARGET_INC)/libkernel.a @Z_LIB@ @LZ4_LIB@
 
-raw_racketcs: main.o boot.o $(BOOT_OBJS)
+BOOT_OBJ_DEPS = boot.o $(SCHEME_LIB_DEPS) rktio/librktio.a
+BOOT_OBJS = boot.o $(SCHEME_LIBS) rktio/librktio.a
+
+raw_racketcs: main.o boot.o $(BOOT_OBJ_DEPS)
 	$(CC) $(CFLAGS) -o raw_racketcs main.o $(BOOT_OBJS) $(LDFLAGS) $(LIBS)
+	@POST_LINKER@ raw_racketcs
 
-raw_gracketcs: grmain.o boot.o $(BOOT_OBJS)
+raw_gracketcs: grmain.o boot.o $(BOOT_OBJ_DEPS)
 	$(CC) $(CFLAGS) -o raw_gracketcs grmain.o $(BOOT_OBJS) $(LDFLAGS) $(LIBS)
+	@POST_LINKER@ raw_gracketcs
 
-petite-v.boot: $(SCHEME_INC)/petite.boot
-	$(SCHEME) --script $(srcdir)/to-vfasl.ss @COMPRESS_COMP@ $(SCHEME_INC)/petite.boot petite-v.boot
+petite-v.boot: $(SCHEME_TARGET_INC)/petite.boot
+	$(SCHEME) --script $(srcdir)/to-vfasl.ss @BOOT_COMPRESS_COMP@ @TT_CROSS_MODE@ $(SCHEME_TARGET_INC)/petite.boot petite-v.boot
 
-scheme-v.boot: $(SCHEME_INC)/scheme.boot
-	$(SCHEME) --script $(srcdir)/to-vfasl.ss @COMPRESS_COMP@ $(SCHEME_INC)/scheme.boot scheme-v.boot petite
+scheme-v.boot: $(SCHEME_TARGET_INC)/scheme.boot
+	$(SCHEME) --script $(srcdir)/to-vfasl.ss @BOOT_COMPRESS_COMP@ @TT_CROSS_MODE@ $(SCHEME_TARGET_INC)/scheme.boot scheme-v.boot petite
 
 racket-v.boot: racket.boot
-	$(SCHEME) --script $(srcdir)/to-vfasl.ss @COMPRESS_COMP@ racket.boot racket-v.boot petite scheme
+	$(SCHEME) --script $(srcdir)/to-vfasl.ss @BOOT_COMPRESS_COMP@ @TT_CROSS_MODE@ racket.boot racket-v.boot petite scheme
 
 # ----------------------------------------
 # Mac OS
@@ -184,40 +240,129 @@ RKTFW = $(RKTFWDIR)/Racket
 GRAPPSKEL = GRacketCS.app/Contents/Info.plist
 
 racketcs@OSX@: main.o $(RKTFW)
-	$(CC) $(CFLAGS) -o racketcs main.o -F. -framework Racket
+	$(CC) $(CFLAGS) -o racketcs main.o -F. -framework Racket $(LDFLAGS)
 	/usr/bin/install_name_tool -change "Racket.framework/Versions/$(FWVERSION)_CS/Racket" "@executable_path/Racket.framework/Versions/$(FWVERSION)_CS/Racket" racketcs
 
-GRACKET_BIN = GRacketCS.app/Contents/MacOS/GracketCS
+GRACKET_BIN = GRacketCS.app/Contents/MacOS/GRacketCS
 
 gracketcs@OSX@:
 	$(MAKE) $(GRACKET_BIN)
 
 $(GRACKET_BIN): grmain.o $(RKTFW) $(GRAPPSKEL)
-	$(CC) $(CFLAGS) -o $(GRACKET_BIN) grmain.o -F. -framework Racket
+	$(CC) $(CFLAGS) -o $(GRACKET_BIN) grmain.o -F. -framework Racket $(LDFLAGS)
 	/usr/bin/install_name_tool -change "Racket.framework/Versions/$(FWVERSION)_CS/Racket" "@executable_path/../../../Racket.framework/Versions/$(FWVERSION)_CS/Racket" $(GRACKET_BIN)
 
 $(GRAPPSKEL): $(srcdir)/../../mac/osx_appl.rkt  $(srcdir)/../../racket/src/schvers.h $(srcdir)/../../mac/icon/GRacket.icns
 	$(BOOTSTRAP_RACKET) $(srcdir)/../../mac/osx_appl.rkt $(srcdir)/../.. "CS"
 
-BOOT_FILES = $(SCHEME_INC)/petite.boot $(SCHEME_INC)/scheme.boot racket.boot
+BOOT_FILES = $(SCHEME_TARGET_INC)/petite.boot $(SCHEME_TARGET_INC)/scheme.boot racket.boot
 FW_BOOT_DEST = Racket.framework/Versions/$(FWVERSION)_CS/boot
 
-$(RKTFW): $(BOOT_OBJS) $(BOOT_FILES)
+$(RKTFW): $(BOOT_OBJ_DEPS) $(BOOT_FILES)
 	mkdir -p  Racket.framework/Versions/$(FWVERSION)_CS
-	@RKTLINKER@ -o $(RKTFW) @LDFLAGS@ -dynamiclib -all_load $(BOOT_OBJS) $(LDFLAGS) $(LIBS)
+	@RKTLINKER@ -o $(RKTFW) -dynamiclib -all_load $(BOOT_OBJS) $(LDFLAGS) $(LIBS)
 	rm -f Racket.framework/Racket
 	ln -s Versions/$(FWVERSION)_CS/Racket Racket.framework/Racket
 	mkdir -p Racket.framework/Versions/$(FWVERSION)_CS/boot
-	$(SCHEME) --script $(srcdir)/to-vfasl.ss @COMPRESS_COMP@ $(SCHEME_INC)/petite.boot $(FW_BOOT_DEST)/petite.boot
-	$(SCHEME) --script $(srcdir)/to-vfasl.ss @COMPRESS_COMP@ $(SCHEME_INC)/scheme.boot $(FW_BOOT_DEST)/scheme.boot petite
-	$(SCHEME) --script $(srcdir)/to-vfasl.ss @COMPRESS_COMP@ racket.boot $(FW_BOOT_DEST)/racket.boot petite scheme
-	$(BOOTSTRAP_RACKET) $(srcdir)/adjust-compress.rkt @COMPRESS_COMP@ $(FW_BOOT_DEST)/petite.boot $(FW_BOOT_DEST)/scheme.boot $(FW_BOOT_DEST)/racket.boot
+	$(SCHEME) --script $(srcdir)/to-vfasl.ss @BOOT_COMPRESS_COMP@ @TT_CROSS_MODE@ $(SCHEME_TARGET_INC)/petite.boot $(FW_BOOT_DEST)/petite.boot
+	$(SCHEME) --script $(srcdir)/to-vfasl.ss @BOOT_COMPRESS_COMP@ @TT_CROSS_MODE@ $(SCHEME_TARGET_INC)/scheme.boot $(FW_BOOT_DEST)/scheme.boot petite
+	$(SCHEME) --script $(srcdir)/to-vfasl.ss @BOOT_COMPRESS_COMP@ @TT_CROSS_MODE@ racket.boot $(FW_BOOT_DEST)/racket.boot petite scheme
+	$(BOOTSTRAP_RACKET) $(srcdir)/adjust-compress.rkt @BOOT_COMPRESS_COMP@ $(FW_BOOT_DEST)/petite.boot $(FW_BOOT_DEST)/scheme.boot $(FW_BOOT_DEST)/racket.boot
+
+# ----------------------------------------
+# MinGW
+
+racketcs@MINGW@:
+	$(MAKE) RacketCS.exe
+
+gracketcs@MINGW@:
+	$(MAKE) GRacketCS.exe
+
+RKT_DLL = libracketcsxxxxxxx.dll
+EXE_DESTS = ++exe raw_racketcs.exe RacketCS.exe ++exe raw_gracketcs.exe GRacketCS.exe
+V_BOOTS = petite-v.boot scheme-v.boot racket-v.boot
+
+RacketCS.exe GRacketCS.exe $(RKT_DLL): raw_libracketcs.dll raw_gracketcs.exe raw_racketcs.exe $(EMBED_DEPS) $(V_BOOTS)
+	$(BOOTSTRAP_RACKET) $(srcdir)/embed-boot.rkt --target $(TARGET_MACH) @BOOT_COMPRESS_COMP@ $(EXE_DESTS) raw_libracketcs.dll $(RKT_DLL) $(V_BOOTS)
+
+raw_racketcs.exe: main.o MemoryModule.o rres.o
+	$(CC) $(CFLAGS) -o raw_racketcs.exe main.o MemoryModule.o rres.o $(LDFLAGS)
+
+raw_gracketcs.exe: grmain.o MemoryModule.o grres.o
+	$(CC) $(CFLAGS) -mwindows -o raw_gracketcs.exe grmain.o MemoryModule.o grres.o $(LDFLAGS)
+
+MINGW_LIBS = -lshell32 -luser32 -lole32 -lrpcrt4 -luuid -lws2_32 -ladvapi32
+
+raw_libracketcs.dll: boot.o $(BOOT_OBJ_DEPS) libres.o
+	$(CC) $(CFLAGS) --shared -o raw_libracketcs.dll $(BOOT_OBJS) libres.o $(LDFLAGS) rktio/librktio.a $(MINGW_LIBS) -static-libgcc $(LIBS)
+
+MemoryModule.o: $(srcdir)/../../start/MemoryModule.c
+	$(CC) -c $(CFLAGS) -o MemoryModule.o $(srcdir)/../../start/MemoryModule.c
+
+rres.o: $(srcdir)/../../worksp/racket/racket.rc $(srcdir)/../../worksp/racket/racket.ico
+	@WINDRES@ -i $(srcdir)/../../worksp/racket/racket.rc -o rres.o
+
+grres.o: $(srcdir)/../../worksp/gracket/gracket.rc $(srcdir)/../../worksp/gracket/gracket.ico
+	@WINDRES@ -i $(srcdir)/../../worksp/gracket/gracket.rc -o grres.o
+
+libres.o: $(srcdir)/../../worksp/cs/libracket.rc
+	@WINDRES@ -i $(srcdir)/../../worksp/cs/libracket.rc -o libres.o
+
+starter@MINGW@:
+	$(MAKE) MzStart.exe
+	$(MAKE) MrStart.exe
+
+MzStart.exe: $(srcdir)/../../start/start.c start_rc.o
+	$(CC) $(CFLAGS) -o MzStart.exe -DMZSTART $(srcdir)/../../start/start.c start_rc.o
+
+MrStart.exe: $(srcdir)/../../start/start.c gstart_rc.o
+	$(CC) -mwindows $(CFLAGS) -o MrStart.exe -DMRSTART $(srcdir)/../../start/start.c gstart_rc.o
+
+start_rc.o: $(srcdir)/../../worksp/starters/start.rc
+	@WINDRES@ -DMZSTART -i $(srcdir)/../../worksp/starters/start.rc -o start_rc.o
+
+gstart_rc.o: $(srcdir)/../../worksp/starters/start.rc
+	@WINDRES@ -DMRSTART -i $(srcdir)/../../worksp/starters/start.rc -o gstart_rc.o
+
+install@MINGW@:
+	$(MAKE) plain-install
+
+plain-install@MINGW@:
+	$(MAKE) plain-install-upcased CS_INSTALLED=`echo $(CS_INSTALLED) | awk '{print toupper($0)}'`
+
+plain-install-upcased:
+	$(ICP) libracketcsxxxxxxx.dll $(libdir)/libracketcsxxxxxxx.dll
+	$(ICP) RacketCS.exe $(prefix)/Racket$(CS_INSTALLED).exe
+	$(ICP) GRacketCS.exe $(libpltdir)/GRacket$(CS_INSTALLED).exe
+	$(ICP) MzStart.exe $(libpltdir)/MzStart.exe
+	$(ICP) MrStart.exe $(libpltdir)/MrStart.exe
+	$(STRIP_DEBUG) $(prefix)/Racket$(CS_INSTALLED).exe
+	$(STRIP_DEBUG) $(libpltdir)/GRacket$(CS_INSTALLED).exe
+	$(STRIP_DEBUG) $(libpltdir)/MzStart.exe
+	$(STRIP_DEBUG) $(libpltdir)/MrStart.exe
+	$(MAKE) system-install
+	$(MAKE) compile-xpatch.$(TARGET_MACH)
+	$(MAKE) library-xpatch.$(TARGET_MACH)
+
+SCHEME_XPATCH = $(SCHEME_SRC)/$(TARGET_MACH)/s/xpatch
+
+compile-xpatch.$(TARGET_MACH): $(SCHEME_XPATCH) $(srcdir)/mk-cross-serve.ss $(srcdir)/cross-serve.ss $(srcdir)/../expander/env.ss
+	$(SCHEME) --script $(srcdir)/mk-cross-serve.ss $(srcdir)/cross-serve.ss $(srcdir)/../expander/env.ss
+	cat cross-serve.so $(SCHEME_XPATCH) > compile-xpatch.$(TARGET_MACH)
+
+RACKET_XPATCH = chezpart.$(MACH) rumble.$(MACH)	thread.$(MACH) \
+                io.$(MACH) regexp.$(MACH) schemify.$(MACH) linklet.$(MACH) expander.$(MACH)
+
+library-xpatch.$(TARGET_MACH): $(RACKET_XPATCH)
+	cat $(RACKET_XPATCH) > library-xpatch.$(TARGET_MACH)
 
 # ----------------------------------------
 # Common
 
-DEF_COLLECTS_DIR = -DINITIAL_COLLECTS_DIRECTORY='"'"`cd $(srcdir)/../../../collects; pwd`"'"'
-DEF_CONFIG_DIR = -DINITIAL_CONFIG_DIRECTORY='"'"`cd $(srcdir)/../../..; pwd`/etc"'"'
+DEF_COLLECTS_DIR@NOT_MINGW@ = -DINITIAL_COLLECTS_DIRECTORY='"'"`cd $(srcdir)/../../../collects; pwd`"'"'
+DEF_CONFIG_DIR@NOT_MINGW@ = -DINITIAL_CONFIG_DIRECTORY='"'"`cd $(srcdir)/../../..; pwd`/etc"'"'
+DEF_COLLECTS_DIR@MINGW@ =
+DEF_CONFIG_DIR@MINGW@ =
 DEF_C_DIRS = $(DEF_COLLECTS_DIR) $(DEF_CONFIG_DIR)
 COMP_SUBDIR = -DCS_COMPILED_SUBDIR=@CS_COMPILED_SUBDIR@
 
@@ -232,7 +377,7 @@ grmain.o: $(srcdir)/grmain.c $(MAIN_DEPS) $(srcdir)/../../start/gui_filter.inc
 boot.o: $(srcdir)/boot.c $(srcdir)/../../rktio/rktio.inc $(srcdir)/boot.h
 	$(CC) $(CFLAGS) -c -o boot.o $(srcdir)/boot.c
 
-starter: $(srcdir)/../../start/ustart.c
+starter@NOT_MINGW@: $(srcdir)/../../start/ustart.c
 	$(CC) $(CFLAGS) -o starter $(srcdir)/../../start/ustart.c
 
 # ----------------------------------------
@@ -240,17 +385,27 @@ starter: $(srcdir)/../../start/ustart.c
 
 ICP=@ICP@
 
-install:
+install@NOT_MINGW@:
 	$(MAKE) plain-install
 	$(MAKE) setup-install
 
+# RUN_RACKET typically redirects to RUN_THIS_RACKET, but it can also
+# redirect to a compatible existing Racket executable (e.g., for
+# cross-compilation)
+RUN_THIS_RACKET = $(DESTDIR)$(bindir)/racket$(CS_INSTALLED)
+
+INST_CONFIG = -X "$(DESTDIR)$(collectsdir)" -G "$(DESTDIR)$(configdir)"
+SETUP_RACKET_FLAGS = $(INST_CONFIG) $(SETUP_MACHINE_FLAGS) $(SELF_RACKET_FLAGS) @INSTALL_SETUP_RACKET_FLAGS@
+SETUP_SETUP_FLAGS = @INSTALL_SETUP_FLAGS@ $(PLT_SETUP_OPTIONS) $(PLT_ISO)
+SETUP_ARGS = $(SETUP_RACKET_FLAGS) -N "raco" -l- setup $(SETUP_SETUP_FLAGS)
+
 setup-install:
-	$(DESTDIR)$(bindir)/racket$(CS_INSTALLED) $(SELF_RACKET_FLAGS) -N raco -l- raco setup $(PLT_SETUP_OPTIONS)
+	@RUN_RACKET@ $(SELF_RACKET_FLAGS) $(SETUP_ARGS)
 
 no-setup-install:
 	echo done
 
-plain-install@NOT_OSX@:
+plain-install@NOT_OSX@@NOT_MINGW@:
 	$(MAKE) unix-install
 
 plain-install@OSX@:
@@ -267,7 +422,10 @@ common-install:
 	$(STRIP_DEBUG) "$(DESTDIR)$(libpltdir)/starter"
 	$(ICP) $(srcdir)/../../start/starter-sh "$(DESTDIR)$(libpltdir)/starter-sh"
 	$(RACKET) -cu "$(srcdir)/../../racket/collects-path.rkt" "$(DESTDIR)$(libpltdir)/starter" $(DESTDIR)@COLLECTS_PATH@ $(DESTDIR)@CONFIG_PATH@
-	$(RACKET) -cu "$(srcdir)/gen-system.rkt" $(DESTDIR)$(libpltdir)/system$(CS_INSTALLED).rktd $(MACH) @CROSS_COMPILE_TARGET_KIND@
+	$(MAKE) system-install
+
+system-install:
+	$(RACKET) -cu "$(srcdir)/gen-system.rkt" $(DESTDIR)$(libpltdir)/system$(CS_INSTALLED).rktd $(TARGET_MACH) @CROSS_COMPILE_TARGET_KIND@
 
 unix-install:
 	$(MAKE) common-install
@@ -284,6 +442,7 @@ macos-install:
 	$(MAKE) common-install
 	rm -f $(DESTDIR)$(RKTFWDEST)/Racket
 	rm -rf $(DESTDIR)$(RKTFWDEST)/Versions/$(FWVERSION)_CS
+	if [ @FRAMEWORK_REL_INSTALL@ = yes ] ; then $(RACKET) -cu "$(srcdir)/../../mac/clean-fw.rkt" $(DESTDIR)$(RKTFWDEST) ; fi
 	mkdir -p $(DESTDIR)"$(RKTFWDEST)/Versions/$(FWVERSION)_CS"
 	cp $(RKTFW) $(DESTDIR)$(RKTFWDEST)/Versions/$(FWVERSION)_CS/
 	mkdir -p $(DESTDIR)"$(RKTFWDEST)/Versions/$(FWVERSION)_CS/boot"
@@ -304,3 +463,26 @@ macos-install-gracket:
 	/usr/bin/install_name_tool -change "@executable_path/../../../../racket/Racket.framework/Versions/$(FWVERSION)_CS/Racket" "@FRAMEWORK_PREFIX@Racket.framework/Versions/$(FWVERSION)_CS/Racket" $(DESTDIR)"$(libpltdir)/GRacket$(CS_GR_INSTALLED).app/Contents/MacOS/GRacket$(CS_GR_INSTALLED)"
 	$(RACKET) -cu "$(srcdir)/../../racket/collects-path.rkt" $(DESTDIR)"$(libpltdir)/GRacket$(CS_GR_INSTALLED).app/Contents/MacOS/GRacket$(CS_GR_INSTALLED)" ../../../../collects ../../../../etc
 	$(STRIP_DEBUG) $(DESTDIR)"$(libpltdir)/GRacket$(CS_GR_INSTALLED).app/Contents/MacOS/GRacket$(CS_GR_INSTALLED)"
+	rm -rf $(DESTDIR)"$(libpltdir)/Starter.app"
+	$(ICP) -r Starter.app $(DESTDIR)"$(libpltdir)/."
+
+# ----------------------------------------
+# Reconfigure
+
+COMP_SUBDIR_CONFIGURE_ARGS=@COMP_SUBDIR_CONFIGURE_ARGS@
+
+CONFIGURE_SRCS = $(srcdir)/configure $(srcdir)/Makefile.in \
+                 $(srcdir)/../../rktio/Makefile.in $(srcdir)/../../rktio/configure
+
+# Only fire the `Makefile` rule explicitly via `reconfigure`
+NO_RECONFIG =
+ON_RECONFIG = no
+
+reconfigure:
+	$(MAKE) Makefile NO_RECONFIG=no ON_RECONFIG=
+
+Makefile$(ON_RECONFIG): $(CONFIGURE_SRCS)
+	$(srcdir)/configure $(COMP_SUBDIR_CONFIGURE_ARGS) $(CONFIGURE_ARGS_qq) $(MORE_CONFIGURE_ARGS)
+
+Makefile$(NO_RECONFIG):
+	$(NOOP)

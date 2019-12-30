@@ -29,6 +29,8 @@
           variable-reference-constant?
           variable-reference-from-unsafe?
 
+          add-cross-compiler!        ; not exported to racket
+
           compile-enforce-module-constants
           compile-context-preservation-enabled
           compile-allow-set!-undefined
@@ -51,6 +53,7 @@
           ;; schemify glue:
           make-internal-variable
           variable-set!
+          variable-set!/define
           variable-set!/check-undefined
           variable-ref
           variable-ref/no-check
@@ -84,9 +87,30 @@
                 current-environment-variables
                 find-system-path
                 build-path
-                format)
+                format
+                ;; Used by cross-compiler:
+                get-original-error-port
+                subprocess
+                write-string
+                write-bytes
+                flush-output
+                read-bytes
+                split-path
+                path->complete-path
+                file-exists?)
           (only (thread)
-                current-process-milliseconds)
+                current-process-milliseconds
+                ;; Used by cross-compiler:
+                unsafe-make-custodian-at-root
+                current-custodian
+                custodian-shutdown-all
+                thread
+                make-channel
+                channel-put
+                channel-get
+                make-will-executor
+                will-register
+                will-try-execute)
           (regexp)
           (schemify))
 
@@ -146,6 +170,8 @@
   (define post-interp-on? (getenv "PLT_LINKLET_SHOW_POST_INTERP"))
   (define jit-demand-on? (getenv "PLT_LINKLET_SHOW_JIT_DEMAND"))
   (define known-on? (getenv "PLT_LINKLET_SHOW_KNOWN"))
+  (define cp0-on? (getenv "PLT_LINKLET_SHOW_CP0"))
+  (define assembly-on? (getenv "PLT_LINKLET_SHOW_ASSEMBLY"))
   (define show-on? (or gensym-on?
                        pre-jit-on?
                        pre-lift-on?
@@ -153,6 +179,8 @@
                        post-interp-on?
                        jit-demand-on?
                        known-on?
+                       cp0-on?
+                       assembly-on?
                        (getenv "PLT_LINKLET_SHOW")))
   (define show
     (case-lambda
@@ -169,6 +197,7 @@
                              (correlated->annotation v))))))))
       v]))
 
+  (include "linklet/check.ss")
   (include "linklet/version.ss")
   (include "linklet/write.ss")
   (include "linklet/read.ss")
@@ -179,8 +208,19 @@
   ;; `compile`, `interpret`, etc. have `dynamic-wind`-based state
   ;; that need to be managed correctly when swapping Racket
   ;; engines/threads.
-  (define (compile* e)
-    (call-with-system-wind (lambda () (compile e))))
+  (define compile*
+    (case-lambda
+     [(e safe?)
+      (call-with-system-wind (lambda ()
+                               (parameterize ([optimize-level (if safe?
+                                                                  (optimize-level)
+                                                                  3)])
+                                 (if assembly-on?
+                                     (parameterize ([#%$assembly-output (#%current-output-port)])
+                                       (printf ";; assembly ---------------------\n")
+                                       (compile e))
+                                     (compile e)))))]
+     [(e) (compile* e #t)]))
   (define (interpret* e)
     (call-with-system-wind (lambda () (interpret e))))
   (define (fasl-write* s o)
@@ -191,27 +231,38 @@
   (define (eval/foreign e mode)
     (performance-region
      mode
-     (compile* e)))
+     (compile* e #f)))
 
-  (define primitives (make-hasheq))
+  (define primitives (make-hasheq)) ; hash of sym -> known
+  (define primitive-tables '())     ; list of (cons sym hash)
+
+  ;; Arguments are `(cons <sym> <hash-table>)`
   (define (install-linklet-primitive-tables! . tables)
+    (set! primitive-tables tables)
     (for-each
      (lambda (table)
-       (hash-for-each table (lambda (k v) (hash-set! primitives k v))))
-     tables))
+       (hash-for-each (cdr table) (lambda (k v) (hash-set! primitives k v))))
+     tables)
+    (unsafe-hash-seal! primitives)
+    ;; prropagate table to the rumble layer
+    (install-primitives-table! primitives))
   
-  (define (outer-eval s format)
+  (define (outer-eval s paths format)
     (if (eq? format 'interpret)
-        (interpret-linklet s primitives variable-ref variable-ref/no-check variable-set!
+        (interpret-linklet s paths primitives variable-ref variable-ref/no-check
+                           variable-set! variable-set!/define
                            make-arity-wrapper-procedure)
-        (compile* s)))
+        (let ([proc (compile* s)])
+          (if (null? paths)
+              proc
+              (#%apply proc paths)))))
 
   (define (compile*-to-bytevector s)
     (let-values ([(o get) (open-bytevector-output-port)])
       (compile-to-port* (list `(lambda () ,s)) o)
       (get)))
 
-  (define (compile-to-bytevector s format)
+  (define (compile-to-bytevector s paths format)
     (let ([bv (cond
                [(eq? format 'interpret)
                 (let-values ([(o get) (open-bytevector-output-port)])
@@ -222,7 +273,16 @@
           (bytevector-compress bv)
           bv)))
 
-  (define (eval-from-bytevector c-bv format)
+  (define (make-cross-compile-to-bytevector machine)
+    (lambda (s paths format)
+      (let ([bv (cond
+                 [(eq? format 'interpret) (cross-fasl-to-string machine s)]
+                 [else (cross-compile machine s)])])
+        (if compress-code?
+            (bytevector-compress bv)
+            bv))))
+
+  (define (eval-from-bytevector c-bv paths format)
     (let ([bv (if (bytevector-uncompressed-fasl? c-bv)
                   c-bv
                   (begin
@@ -238,11 +298,14 @@
                   (fasl-read (open-bytevector-input-port bv)))])
           (performance-region
            'outer
-           (outer-eval r format)))]
+           (outer-eval r paths format)))]
        [else
-        (performance-region
-         'faslin-code
-         (code-from-bytevector bv))])))
+        (let ([proc (performance-region
+                     'faslin-code
+                     (code-from-bytevector bv))])
+          (if (null? paths)
+              proc
+              (#%apply proc paths)))])))
 
   (define (code-from-bytevector bv)
     (let ([i (open-bytevector-input-port bv)])
@@ -285,7 +348,7 @@
      [else
       ;; Combine an annotation with a hash code in a vector
       (let-values ([(o get) (open-bytevector-output-port)])
-        (fasl-write (cons (version) a) o)
+        (fasl-write* (cons (version) a) o)
         (vector (sha1-bytes (get)) a))]))
 
   (define-record-type wrapped-code
@@ -317,13 +380,13 @@
                       [code (lookup-code hash)])
                  (cond
                   [code
-                   (let* ([f (eval-from-bytevector code 'compile)])
+                   (let* ([f (eval-from-bytevector code '() 'compile)])
                      (wrapped-code-content-set! wc f)
                      f)]
                   [else
-                   (let ([code (compile-to-bytevector (vector-ref f 1) 'compile)])
+                   (let ([code (compile-to-bytevector (vector-ref f 1) '() 'compile)])
                      (insert-code hash code)
-                     (let* ([f (eval-from-bytevector code 'compile)])
+                     (let* ([f (eval-from-bytevector code '() 'compile)])
                        (wrapped-code-content-set! wc f)
                        f))]))]
               [else
@@ -379,21 +442,25 @@
   ;; indicated by the "ABI" (which is based on information about which
   ;; exports of an imported linklet are constants).
 
-  ;; A linklet also has a table of information about its 
+  ;; A linklet also has a table of information about its exports. That
+  ;; known-value information is used by schemify to perform
+  ;; cross-linklet inlining and related optimizations.
 
   (define-record-type linklet
-    (fields (mutable code) ; the procedure
+    (fields (mutable code) ; the procedure or interpretable form
+            paths          ; list of paths; if non-empty, `code` expects them as arguments
             format         ; 'compile or 'interpret (where the latter may have compiled internal parts)
-            (mutable preparation) ; 'faslable, 'faslable-strict, 'callable, or 'lazy
+            (mutable preparation) ; 'faslable, 'faslable-strict, 'faslable-unsafe, 'callable, 'lazy, or (cons 'cross <machine>)
             importss-abi   ; ABI for each import, in parallel to `importss`
-            exports-info   ; hash(sym -> known) for info about each export; see "known.rkt"
+            (mutable exports-info) ; hash(sym -> known) for info about export; see "known.rkt"; unfasl on demand
             name           ; name of the linklet (for debugging purposes)
             importss       ; list of list of import symbols
-            exports)       ; list of export symbols
-    (nongenerative #{linklet Zuquy0g9bh5vmeespyap4g-0}))
+            exports)       ; list of export symbol-or-pair, pair is (cons export-symbol src-symbol)
+    (nongenerative #{linklet Zuquy0g9bh5vmeespyap4g-2}))
 
   (define (set-linklet-code linklet code preparation)
     (make-linklet code
+                  (linklet-paths linklet)
                   (linklet-format linklet)
                   preparation
                   (linklet-importss-abi linklet)
@@ -402,15 +469,59 @@
                   (linklet-importss linklet)
                   (linklet-exports linklet)))
 
+  (define (set-linklet-paths linklet paths)
+    (make-linklet (linklet-code linklet)
+                  paths
+                  (linklet-format linklet)
+                  (linklet-preparation linklet)
+                  (linklet-importss-abi linklet)
+                  (linklet-exports-info linklet)
+                  (linklet-name linklet)
+                  (linklet-importss linklet)
+                  (linklet-exports linklet)))
+
+  (define (set-linklet-preparation linklet preparation)
+    (make-linklet (linklet-code linklet)
+                  (linklet-paths linklet)
+                  (linklet-format linklet)
+                  preparation
+                  (linklet-importss-abi linklet)
+                  (linklet-exports-info linklet)
+                  (linklet-name linklet)
+                  (linklet-importss linklet)
+                  (linklet-exports linklet)))
+
+  (define (linklet-pack-exports-info! l)
+    (let ([info (linklet-exports-info l)])
+      (when (hash? info)
+        (let ([new-info (->fasl info)])
+          (linklet-exports-info-set! l new-info)))))
+
+  (define (linklet-unpack-exports-info! l)
+    (let ([info (linklet-exports-info l)])
+      (unless (hash? info)
+        (let ([new-info
+               (cond
+                [(not info) (hasheq)]
+                [else (fasl-> info)])])
+          (linklet-exports-info-set! l new-info)))))
+
   (define compile-linklet
     (case-lambda
-     [(c) (compile-linklet c #f #f (lambda (key) (values #f #f)) '(serializable))]
-     [(c name) (compile-linklet c name #f (lambda (key) (values #f #f)) '(serializable))]
-     [(c name import-keys) (compile-linklet c name import-keys (lambda (key) (values #f #f)) '(serializable))]
+     [(c) (compile-linklet c #f #f #f '(serializable))]
+     [(c name) (compile-linklet c name #f #f '(serializable))]
+     [(c name import-keys) (compile-linklet c name import-keys #f '(serializable))]
      [(c name import-keys get-import) (compile-linklet c name import-keys get-import '(serializable))]
      [(c name import-keys get-import options)
+      (define check-result (check-compile-args 'compile-linklet import-keys get-import options))
       (define serializable? (#%memq 'serializable options))
       (define use-prompt? (#%memq 'use-prompt options))
+      (define cross-machine (and serializable?
+                                 (let ([m  (|#%app| current-compile-target-machine)])
+                                   (and (not (eq? m (machine-type)))
+                                        m))))
+      (define enforce-constant? (|#%app| compile-enforce-module-constants))
+      (define inline? (not (|#%app| compile-context-preservation-enabled)))
       (performance-region
        'schemify
        (define jitify-mode?
@@ -427,12 +538,16 @@
                            jitify-mode?
                            (|#%app| compile-allow-set!-undefined)
                            #f ;; safe mode
+                           enforce-constant?
+                           inline?
                            (not use-prompt?)
                            prim-knowns
+                           primitives
                            ;; Callback to get a specific linklet for a
                            ;; given import:
-                           (lambda (key)
-                             (lookup-linklet-or-instance get-import key))
+                           (if get-import
+                               (lambda (key) (lookup-linklet-or-instance get-import key))
+                               (lambda (key) (values #f #f #f)))
                            import-keys))
        (define impl-lam/lifts
          (lift-in-schemified-linklet (show pre-lift-on? "pre-lift" impl-lam)))
@@ -462,37 +577,51 @@
                                                                       (add-code-hash a)
                                                                       a)
                                                                   arity-mask
-                                                                  name)))]
+                                                                  (extract-inferred-name expr name))))]
                                           [else
                                            ;; Compile an individual `lambda`:
                                            (lambda (expr arity-mask name)
                                              (performance-region
                                               'compile-nested
-                                              (let ([code ((if serializable? compile*-to-bytevector compile*)
+                                              (let ([code ((if serializable?
+                                                               (if cross-machine
+                                                                   (lambda (s) (cross-compile cross-machine s))
+                                                                   compile*-to-bytevector)
+                                                               compile*)
                                                            (show lambda-on? "lambda" (correlated->annotation expr)))])
                                                 (if serializable?
-                                                    (make-wrapped-code code arity-mask name)
+                                                    (make-wrapped-code code arity-mask (extract-inferred-name expr name))
                                                     code))))])))]))
+       (define-values (paths impl-lam/paths)
+         (if serializable?
+             (extract-paths-from-schemified-linklet impl-lam/jitified (not jitify-mode?))
+             (values '() impl-lam/jitified)))
        (define impl-lam/interpable
          (let ([impl-lam (case (and jitify-mode?
                                     linklet-compilation-mode)
-                           [(mach) (show post-lambda-on? "post-lambda" impl-lam/jitified)]
-                           [else (show "schemified" impl-lam/jitified)])])
+                           [(mach) (show post-lambda-on? "post-lambda" impl-lam/paths)]
+                           [else (show "schemified" impl-lam/paths)])])
            (if jitify-mode?
                (interpretable-jitified-linklet impl-lam correlated->datum)
                (correlated->annotation impl-lam))))
        (when known-on?
          (show "known" (hash-map exports-info (lambda (k v) (list k v)))))
+       (when (and cp0-on? (not jitify-mode?))
+         (show "cp0" (#%expand/optimize (correlated->annotation impl-lam/paths))))
        (performance-region
         'compile-linklet
         ;; Create the linklet:
-        (let ([lk (make-linklet (call-with-system-wind
-                                 (lambda ()
-                                   ((if serializable? compile-to-bytevector outer-eval)
-                                    (show (and jitify-mode? post-interp-on?) "post-interp" impl-lam/interpable)
-                                    format)))
+        (let ([lk (make-linklet ((if serializable?
+                                     (if cross-machine
+                                         (make-cross-compile-to-bytevector cross-machine)
+                                         compile-to-bytevector)
+                                     outer-eval)
+                                 (show (and jitify-mode? post-interp-on?) "post-interp" impl-lam/interpable)
+                                 paths
+                                 format)
+                                paths
                                 format
-                                (if serializable? 'faslable 'callable)
+                                (if serializable? (if cross-machine (cons 'cross cross-machine) 'faslable) 'callable)
                                 importss-abi
                                 exports-info
                                 name
@@ -515,6 +644,7 @@
       (let-values ([(lnk/inst more-import-keys) (get-import key)])
         (cond
          [(linklet? lnk/inst)
+          (linklet-unpack-exports-info! lnk/inst)
           (values (linklet-exports-info lnk/inst)
                   ;; No conversion needed:
                   #f
@@ -526,7 +656,19 @@
          [else (values #f #f #f)]))]
      [else (values #f #f #f)]))
 
-  (define (recompile-linklet lnk . args) lnk)
+  (define recompile-linklet
+    (case-lambda
+     [(lnk) (recompile-linklet lnk #f #f #f '(serializable))]
+     [(lnk name) (recompile-linklet lnk name #f #f '(serializable))]
+     [(lnk name import-keys) (recompile-linklet lnk name import-keys #f '(serializable))]
+     [(lnk name import-keys get-import) (recompile-linklet lnk name import-keys get-import '(serializable))]
+     [(lnk name import-keys get-import options)
+      (unless (linklet? lnk)
+        (raise-argument-error 'recompile-linklet "linklet?" lnk))
+      (check-compile-args 'recompile-linklet import-keys get-import options)
+      (if import-keys
+          (values lnk import-keys)
+          lnk)]))
 
   ;; Intended to speed up reuse of a linklet in exchange for not being
   ;; able to serialize anymore
@@ -535,10 +677,17 @@
       [(faslable)
        (set-linklet-code linklet (linklet-code linklet) 'lazy)]
       [(faslable-strict)
-       (set-linklet-code linklet (eval-from-bytevector (linklet-code linklet) (linklet-format linklet)) 'callable)]
+       (set-linklet-code linklet
+                         (eval-from-bytevector (linklet-code linklet) (linklet-paths linklet) (linklet-format linklet))
+                         'callable)]
+      [(faslable-unsafe)
+       (raise (|#%app|
+               exn:fail
+               "eval-linklet: cannot use linklet loaded with non-original code inspector"
+               (current-continuation-marks)))]
       [else
        linklet]))
-     
+
   (define instantiate-linklet
     (case-lambda
      [(linklet import-instances)
@@ -550,12 +699,12 @@
        [target-instance
         ;; Instantiate into the given instance and return the
         ;; result of the linklet body:
-        (call/cc
-         (lambda (k)
-           (register-linklet-instantiate-continuation! k (instance-name target-instance))
+        (with-continuation-mark
+          linklet-instantiate-key (instance-name target-instance)
+          (begin
            (when (eq? 'lazy (linklet-preparation linklet))
              ;; Trigger lazy conversion of code from bytevector
-             (let ([code (eval-from-bytevector (linklet-code linklet) (linklet-format linklet))])
+             (let ([code (eval-from-bytevector (linklet-code linklet) (linklet-paths linklet) (linklet-format linklet))])
                (with-interrupts-disabled
                 (when (eq? 'lazy (linklet-preparation linklet))
                   (linklet-code-set! linklet code)
@@ -563,18 +712,24 @@
            ;; Call the linklet:
            (performance-region
             'instantiate
-            (apply
-             (if (eq? 'callable (linklet-preparation linklet))
-                 (linklet-code linklet)
-                 (eval-from-bytevector (linklet-code linklet) (linklet-format linklet)))
-             (make-variable-reference target-instance #f)
-             (append (apply append
-                            (map (make-extract-variables target-instance)
-                                 import-instances
-                                 (linklet-importss linklet)
-                                 (linklet-importss-abi linklet)))
-                     (create-variables target-instance
-                                       (linklet-exports linklet)))))))]
+            ((if use-prompt?
+                 ;; For per-form prompts with in a module linklet,
+                 ;; rely on 'use-prompt provided at compile time.
+                 ;; But this one is useful for top-level forms.
+                 call-with-module-prompt
+                 (lambda (thunk) (thunk)))
+             (lambda ()
+               (apply
+                (if (eq? 'callable (linklet-preparation linklet))
+                    (linklet-code linklet)
+                    (eval-from-bytevector (linklet-code linklet) (linklet-paths linklet) (linklet-format linklet)))
+                (make-variable-reference target-instance #f)
+                (extract-imported-variabless target-instance
+                                             import-instances
+                                             (linklet-importss linklet)
+                                             (linklet-importss-abi linklet)
+                                             (create-variables target-instance
+                                                               (linklet-exports linklet)))))))))]
        [else
         ;; Make a fresh instance, recur, and return the instance
         (let ([i (make-instance (linklet-name linklet))])
@@ -585,7 +740,7 @@
     (linklet-importss linklet))
 
   (define (linklet-export-variables linklet)
-    (linklet-exports linklet))
+    (map (lambda (e) (if (pair? e) (car e) e)) (linklet-exports linklet)))
 
   ;; ----------------------------------------
 
@@ -596,6 +751,7 @@
     
   (define-record variable (val
                            name
+                           source-name
                            constance  ; #f (mutable), 'constant, or 'consistent (always the same shape)
                            inst-box)) ; weak pair with instance in `car`
 
@@ -604,7 +760,7 @@
   (define variable-undefined (gensym 'undefined))
 
   (define (make-internal-variable name)
-    (make-variable variable-undefined name #f (cons #!bwp #f)))
+    (make-variable variable-undefined name name #f (cons #!bwp #f)))
 
   (define (do-variable-set! var val constance as-define?)
     (cond
@@ -616,7 +772,7 @@
           exn:fail:contract:variable
           (string-append "define-values: assignment disallowed;\n"
                          " cannot re-define a constant\n"
-                         "  constant: " (symbol->string (variable-name var)) "\n"
+                         "  constant: " (symbol->string (variable-source-name var)) "\n"
                          "  in module:" (variable-module-name var))
           (current-continuation-marks)
           (variable-name var)))]
@@ -624,8 +780,8 @@
         (raise
          (|#%app|
           exn:fail:contract:variable
-          (string-append (symbol->string (variable-name var))
-                         ": cannot modify constant")
+          (string-append (symbol->string (variable-source-name var))
+                         ": cannot modify a constant")
           (current-continuation-marks)
           (variable-name var)))])]
      [else
@@ -633,13 +789,16 @@
       (when constance
         (set-variable-constance! var constance))]))
 
-  (define (variable-set! var val constance)
-    (do-variable-set! var val constance #f))
+  (define (variable-set! var val)
+    (do-variable-set! var val #f #f))
 
-  (define (variable-set!/check-undefined var val constance)
+  (define (variable-set!/define var val constance)
+    (do-variable-set! var val constance #t))
+
+  (define (variable-set!/check-undefined var val)
     (when (eq? (variable-val var) variable-undefined)
       (raise-undefined var #t))
-    (variable-set! var val constance))
+    (variable-set! var val))
 
   (define (variable-ref var)
     (let ([v (variable-val var)])
@@ -652,19 +811,28 @@
 
   ;; Find variables or values needed from an instance for a linklet's
   ;; imports
-  (define (make-extract-variables target-inst)
-    (lambda (inst syms imports-abi)
-      (let ([ht (instance-hash inst)])
-        (map (lambda (sym import-abi)
-               (let ([var (or (hash-ref ht sym #f)
-                              (raise-linking-failure "is not exported" target-inst inst sym))])
-                 (when (eq? (variable-val var) variable-undefined)
-                   (raise-linking-failure "is uninitialized" target-inst inst sym))
-                 (if import-abi
-                     (variable-val var)
-                     var)))
-             syms
-             imports-abi))))
+  (define (extract-imported-variabless target-inst insts symss imports-abis accum)
+    (cond
+     [(null? insts) accum]
+     [else (extract-imported-variables
+            target-inst (car insts) (car symss) (car imports-abis)
+            (extract-imported-variabless target-inst (cdr insts) (cdr symss) (cdr imports-abis)
+                                         accum))]))
+  (define (extract-imported-variables target-inst inst syms imports-abi accum)
+    (cond
+     [(null? syms) accum]
+     [else
+      (let ([sym (car syms)]
+            [import-abi (car imports-abi)])
+        (let ([var (or (eq-hashtable-ref (hash->eq-hashtable (instance-hash inst)) sym #f) ; raw hashtable avoids unnecessary lock
+                       (raise-linking-failure "is not exported" target-inst inst sym))])
+          (when (eq? (variable-val var) variable-undefined)
+            (raise-linking-failure "is uninitialized" target-inst inst sym))
+          (let ([v (if import-abi
+                       (variable-val var)
+                       var)])
+            (cons v
+                  (extract-imported-variables target-inst inst (cdr syms) (cdr imports-abi) accum)))))]))
 
   (define (raise-linking-failure why target-inst inst sym)
     (raise-arguments-error 'instantiate-linklet
@@ -693,25 +861,37 @@
        [set?
         (string-append "set!: assignment disallowed;\n"
                        " cannot set variable before its definition\n"
-                       "  variable: " (symbol->string (variable-name var))
+                       "  variable: " (symbol->string (variable-source-name var))
                        (identify-module var))]
        [else
-        (string-append (symbol->string (variable-name var))
-                       ": undefined;\n cannot reference undefined identifier"
+        (string-append (symbol->string (variable-source-name var))
+                       ": undefined;\n cannot reference an identifier before its definition"
                        (identify-module var))])
       (current-continuation-marks)
       (variable-name var))))
 
-  ;; Create the variables needed for a linklet's exports
-  (define (create-variables inst syms)
+  ;; Create the variables needed for a linklet's exports; assumes that
+  ;; the instance-hashtable lock is currently held
+  (define (create-variables inst syms-or-pairs)
     (let ([ht (instance-hash inst)]
           [inst-box (weak-cons inst #f)])
-      (map (lambda (sym)
-             (or (hash-ref ht sym #f)
-                 (let ([var (make-variable variable-undefined sym #f inst-box)])
-                   (hash-set! ht sym var)
-                   var)))
-           syms)))
+      (let ([raw-ht (hash->eq-hashtable ht)])
+        (with-interrupts-disabled ; since we test and add to `raw-ht`, and it might be shared
+         (create-the-variables syms-or-pairs raw-ht inst-box)))))
+  (define (create-the-variables syms-or-pairs raw-ht inst-box)
+    (cond
+     [(null? syms-or-pairs) '()]
+     [else
+      (let ([sym-or-pair (car syms-or-pairs)])
+        (let-values ([(sym src-sym)
+                      (if (pair? sym-or-pair)
+                          (values (car sym-or-pair) (cdr sym-or-pair))
+                          (values sym-or-pair sym-or-pair))])
+          (cons (or (eq-hashtable-ref raw-ht sym #f)
+                    (let ([var (make-variable variable-undefined sym src-sym #f inst-box)])
+                      (eq-hashtable-set! raw-ht sym var)
+                      var))
+                (create-the-variables (cdr syms-or-pairs) raw-ht inst-box))))]))
 
   (define (variable->known var)
     (let ([desc (cdr (variable-inst-box var))])
@@ -773,6 +953,7 @@
      [(name data) (make-instance name data #f)]
      [(name data constance . content)
       (let* ([ht (make-hasheq)]
+             [raw-ht (hash->eq-hashtable ht)] ; note: raw-ht isn't shared, yet
              [inst (new-instance name data ht)]
              [inst-box (weak-cons inst #f)])
         (check-constance 'make-instance constance)
@@ -780,7 +961,8 @@
           (cond
            [(null? content) (void)]
            [else
-            (hash-set! ht (car content) (make-variable (cadr content) (car content) constance inst-box))
+            (let ([name (car content)])
+              (eq-hashtable-set! raw-ht (car content) (make-variable (cadr content) name name constance inst-box)))
             (loop (cddr content))]))
         inst)]))
 
@@ -816,10 +998,10 @@
         (raise-argument-error 'instance-set-variable-value! "symbol?" i))
       (check-constance 'instance-set-variable-value! mode)
       (let ([var (or (hash-ref (instance-hash i) k #f)
-                     (let ([var (make-variable variable-undefined k #f (weak-cons i #f))])
+                     (let ([var (make-variable variable-undefined k k #f (weak-cons i #f))])
                        (hash-set! (instance-hash i) k var)
                        var))])
-        (variable-set! var v mode))]))
+        (do-variable-set! var v mode #f))]))
 
   (define (instance-unset-variable! i k)
     (unless (instance? i)
@@ -846,7 +1028,7 @@
   ;; --------------------------------------------------
 
   (define-record variable-reference (instance      ; the use-site instance
-                                     var-or-info)) ; the referenced variable, 'constant, 'mutable, #f, or 'primitive
+                                     var-or-info)) ; the referenced variable, 'constant, 'mutable, #f, or primitive name
               
   (define variable-reference->instance
     (case-lambda
@@ -864,13 +1046,16 @@
             (if (eq? i #!bwp)
                 (variable-reference->instance vr #t)
                 i))]
-         [(eq? v 'primitive)
-          ;; FIXME: We don't have the right primitive instance name
-          ;; ... but '#%kernel is usually right.
-          '|#%kernel|]
-         [else
+         [(or (eq? v 'constant) (eq? v 'mutable))
           ;; Local variable, so same as use-site
-          (variable-reference->instance vr #t)]))]))
+          (variable-reference->instance vr #t)]
+         [else
+          (or (#%ormap (lambda (table)
+                         (and (hash-ref (cdr table) v #f)
+                              (car table)))
+                       primitive-tables)
+              ;; Fallback, just in case
+              '|#%kernel|)]))]))
 
   (define (variable-reference-constant? vr)
     (let ([v (variable-reference-var-or-info vr)])
@@ -930,15 +1115,17 @@
           (loop (cdr vars) (cdr syms))))]))
 
   ;; --------------------------------------------------
+
+  (include "linklet/cross-compile.ss")
   
   (define compile-enforce-module-constants
-    (make-parameter #t (lambda (v) (and v #t))))
+    (make-parameter #t (lambda (v) (and v #t)) 'compile-enforce-module-constants))
 
   (define compile-context-preservation-enabled
-    (make-parameter #f (lambda (v) (and v #t))))
+    (make-parameter #f (lambda (v) (and v #t)) 'compile-context-preservation-enabled))
 
   (define compile-allow-set!-undefined
-    (make-parameter #f (lambda (v) (and v #t))))
+    (make-parameter #f (lambda (v) (and v #t)) 'compile-allow-set!-undefined))
 
   (define current-compile-target-machine
     (make-parameter (machine-type) (lambda (v)
@@ -948,18 +1135,21 @@
                                        (raise-argument-error 'current-compile-target-machine
                                                              "(or/c #f (and/c symbol? compile-target-machine?))"
                                                              v))
-                                     v)))
+                                     v)
+				     'current-compile-target-machine))
 
   (define (compile-target-machine? v)
     (unless (symbol? v)
       (raise-argument-error 'compile-target-machine? "symbol?" v))
-    (eq? v (machine-type)))
+    (or (eq? v (machine-type))
+        (and (#%assq v cross-machine-types)
+             #t)))
 
   (define eval-jit-enabled
-    (make-parameter #t (lambda (v) (and v #t))))
+    (make-parameter #t (lambda (v) (and v #t)) 'eval-jit-enabled))
   
   (define load-on-demand-enabled
-    (make-parameter #t (lambda (v) (and v #t))))
+    (make-parameter #t (lambda (v) (and v #t)) 'load-on-demand-enabled))
 
   ;; --------------------------------------------------
 
@@ -974,6 +1164,7 @@
     (primitive-table
      variable-set!
      variable-set!/check-undefined
+     variable-set!/define
      variable-ref
      variable-ref/no-check
      make-instance-variable-reference
@@ -994,4 +1185,5 @@
 
   (set-foreign-eval! eval/foreign)
 
+  (enable-arithmetic-left-associative #t)
   (expand-omit-library-invocations #t))

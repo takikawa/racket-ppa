@@ -1,5 +1,6 @@
 #lang scheme/gui
 (require "gc-core.rkt")
+(require racket/draw framework)
 (provide heap-viz%)
 
 (define row-size 10)
@@ -17,6 +18,11 @@
 
 (define show-arrows? #t)
 (define show-highlighted-cells? #f)
+
+;; Future work: Support C-+ and C-- in the heap visualizer window.
+(define (get-proper-font)
+  (define size (editor:get-current-preferred-font-size))
+  (send the-font-list find-or-create-font size 'default 'normal 'normal))
 
 (define heap-canvas%
   (class* canvas% (heap-viz<%>)
@@ -129,7 +135,9 @@
                   (not (equal? h (send offscreen get-height))))
           (set! offscreen (make-object bitmap% w h)))
         (let ([dc (make-object bitmap-dc% offscreen)])
+          ;; this is a fresh dc, so need to re-setup properties
           (send dc set-smoothing 'aligned)
+          (send dc set-font (get-proper-font))
           (send dc clear)
           
           (send dc set-origin 0 0)
@@ -356,7 +364,8 @@
     (super-new)
     
     (setup-min-width/height)
-    (send (get-dc) set-smoothing 'aligned)))
+    (send (get-dc) set-smoothing 'aligned)
+    (send (get-dc) set-font (get-proper-font))))
 
 (define (round-up-to-even-multiple n cols)
   (let ([%% (remainder n cols)])

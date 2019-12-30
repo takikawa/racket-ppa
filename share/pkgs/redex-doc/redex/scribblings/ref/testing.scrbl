@@ -153,12 +153,43 @@ relation @racket[rel-expr] to a term specified by @racket[goal-expr] in
        
        (test-results)]
 
-@defform[(test-judgment-holds (judgment-form-or-relation pat/term ...))]{
-  Tests to see if @racket[(judgment-form-or-relation pat/term ...)] holds.
+@defform*[((test-judgment-holds (judgment-form-or-relation pat/term ...))
+           (test-judgment-holds modeless-judgment-form derivation-expr))]{
+ In the first form, tests to see if @racket[(judgment-form-or-relation pat/term ...)] holds.
+ In the second form, tests to see if the result of @racket[derivation-expr] is a derivation and,
+ if so, that it is derivable using @racket[modeless-judgment-form].
 }
 
 @defform[(test-predicate p? e)]{
 Tests to see if the value of @racket[e] matches the predicate @racket[p?].
+}
+
+@defform[(test-match lang-id pat e)]{
+Tests to see if the value of @racket[e] matches, via @racket[redex-match?], the pattern @racket[pat].
+
+@examples[
+#:eval redex-eval
+(define-language L
+  (n natural))
+
+(test-match L n (term 1))
+(test-match L n (term #t))
+(test-results)
+]
+}
+
+@defform[(test-no-match lang-id pat e)]{
+Tests to see if the value of @racket[e] @emph{does not match}, via @racket[redex-match?], the pattern @racket[pat].
+
+@examples[
+#:eval redex-eval
+(define-language L
+  (n natural))
+
+(test-no-match L n (term 1))
+(test-no-match L n (term #t))
+(test-results)
+]
 }
 
 @defproc[(test-results) void?]{
@@ -252,7 +283,7 @@ metafunctions or unnamed reduction-relation cases) to application counts.}
                  (code:line #:source reduction-relation-expr
                             size-expr kw-args ...)
                  (code:line #:source reduction-relation-expr)]
-                [kw-args (code:line #:attempt-num attempts-expr)
+                [kw-args (code:line #:attempt-num attempt-num-expr)
                          (code:line #:retries retries-expr)])
               #:contracts ([size-expr natural-number/c]
                            [attempt-num-expr natural-number/c]

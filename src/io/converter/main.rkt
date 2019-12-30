@@ -12,6 +12,10 @@
          bytes-convert
          bytes-convert-end)
 
+(module+ reset
+  (provide bytes-open-converter-in-custodian
+           bytes-reset-converter))
+
 (struct bytes-converter ([c #:mutable]
                          [custodian-reference #:mutable]))
 
@@ -22,9 +26,9 @@
 (define windows? (eq? 'windows (system-type)))
 (define platform-utf-8 (if windows? 'utf-8-ish 'utf-8))
 (define platform-utf-8-permissive (if windows? 'utf-8-ish-permissive 'utf-8-permissive))
-(define platform-utf-16 (if windows? 'utf-16-ish 'utf-16))
+(define platform-utf-16 (if windows? 'utf-16-ish 'utf-16-assume))
 
-(define/who (bytes-open-converter from-str to-str)
+(define (bytes-open-converter-in-custodian who cust from-str to-str)
   (check who string? from-str)
   (check who string? to-str)
   (cond
@@ -67,7 +71,7 @@
         #f]
        [else
         (start-atomic)
-        (check-current-custodian who)
+        (unless cust (check-current-custodian who))
         (define c (rktio_converter_open rktio
                                         (encoding->bytes who to-str)
                                         (encoding->bytes who from-str)))
@@ -79,10 +83,13 @@
            #f]
           [else
            (define converter (bytes-converter c #f))
-           (define cref (unsafe-custodian-register (current-custodian) converter close-converter #f #f))
+           (define cref (unsafe-custodian-register (or cust (current-custodian)) converter close-converter #f #f))
            (set-bytes-converter-custodian-reference! converter cref)
            (end-atomic)
            converter])])]))
+
+(define/who (bytes-open-converter from-str to-str)
+  (bytes-open-converter-in-custodian who #f from-str to-str))
 
 ;; ----------------------------------------
 
@@ -115,7 +122,8 @@
   (check who bytes? src-bstr)
   (check who exact-nonnegative-integer? src-start-pos)
   (check who exact-nonnegative-integer? src-end-pos)
-  (check who #:or-false bytes? dest-bstr)
+  (check who (lambda (d) (or (not d) (and (bytes? d) (not (immutable? d)))))
+         #:contract "(or/c (and/c bytes? (not/c immutable?)) #f)" dest-bstr)
   (check who exact-nonnegative-integer? dest-start-pos)
   (check who #:or-false exact-nonnegative-integer? dest-end-pos)
   (check-range who src-start-pos src-end-pos (bytes-length src-bstr) src-bstr)
@@ -166,8 +174,8 @@
   (define c (bytes-converter-c converter))
   (unless c
     (end-atomic)
-    (raise-argument-error who "converter is closed"
-                          "converter" converter))
+    (raise-arguments-error who "converter is closed"
+                           "converter" converter))
   (define use-dest-bstr (or dest-bstr
                             (make-bytes (if dest-end-pos
                                             (- dest-end-pos dest-start-pos)
@@ -228,3 +236,9 @@
      (define err (and (= converted RKTIO_CONVERT_ERROR)
                       (rktio_get_last_error rktio)))
      (values in-consumed out-produced err)]))
+
+;; in atomic mode
+(define (bytes-reset-converter converter)
+  (define c (bytes-converter-c converter))
+  (unless (utf-8-converter? c)
+    (rktio_convert_reset rktio c)))

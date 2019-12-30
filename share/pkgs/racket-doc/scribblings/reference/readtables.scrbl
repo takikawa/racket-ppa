@@ -79,7 +79,8 @@ otherwise.
            readtable?]{
 
 Creates a new readtable that is like @racket[readtable] (which can be
-@racket[#f]), except that the reader's behavior is modified for each
+@racket[#f] to indicate the default readtable),
+except that the reader's behavior is modified for each
 @racket[key] according to the given @racket[mode] and
 @racket[action]. The @racket[...+] for @racket[make-readtable] applies
 to all three of @racket[key], @racket[mode], and @racket[action]; in
@@ -114,7 +115,9 @@ The possible combinations for @racket[key], @racket[mode], and
  @item{@racket[(code:line _char _like-char _readtable)] --- causes
  @racket[_char] to be parsed in the same way that @racket[_like-char]
  is parsed in @racket[_readtable], where @racket[_readtable] can be
- @racket[#f] to indicate the default readtable. Mapping a character to
+ @racket[#f] to indicate the default readtable. (The mapping of
+ @racket[_char] does not apply after @litchar{#}, which is configured
+ separately via @racket['dispatch-macro].) Mapping a character to
  the same actions as @litchar{|} in the default reader means that the
  character starts quoting for symbols, and the same character
  terminates the quote; in contrast, mapping a character to the same

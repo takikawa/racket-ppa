@@ -80,7 +80,7 @@
 ;; close/unregister : Nat Cust-Reg/#f -> Void
 (define (close/unregister fd [reg #f])
   (close fd)
-  (socket->semaphore fd 'remove)
+  (fd->evt fd 'remove)
   (when reg (unregister-custodian-shutdown fd reg)))
 
 ;; make-socket-ports : Symbol FD Cust-Reg/#f -> (values Input-Port Output-Port)
@@ -154,6 +154,7 @@
 ;; unix-socket-connect : Path/String -> (values Input-Port Output-Port)
 (define (unix-socket-connect path)
   (check-available 'unix-socket-connect)
+  (define cust (current-custodian))
   (define-values (sockaddr addrlen) (do-make-sockaddr 'unix-socket-connect path))
   (define connect-k
     ;; Non-blocking connect may succeed immediately or require waiting to see.
@@ -163,7 +164,7 @@
     ;; whatever needs doing.
     (call-as-atomic
      (lambda ()
-       (when (custodian-shut-down? (current-custodian))
+       (when (custodian-shut-down? cust)
          (error 'unix-socket-connect "the custodian has been shut down"))
        (define-values (socket-fd reg) (do-make-socket 'unix-socket-connect))
        (define r (connect socket-fd sockaddr addrlen))
@@ -172,12 +173,13 @@
               (define-values (in out) (make-socket-ports 'unix-socket-connect socket-fd reg))
               (lambda () (values in out))]
              [(= errno EINPROGRESS) ;; wait and see
-              (define sema (socket->semaphore socket-fd 'write))
+              (define ready-evt (fd->evt socket-fd 'write))
               (lambda () ;; called in non-atomic mode!
-                (sync sema)
-                ;; FIXME: check custodian hasn't been shut down?
+                (sync ready-evt)
                 (call-as-atomic
                  (lambda ()
+                   (when (custodian-shut-down? cust) ;; => socket-fd already closed by shutdown
+                     (error 'unix-socket-connect "the custodian has been shut down"))
                    (define errno (getsockopt socket-fd SOL_SOCKET SO_ERROR))
                    (cond [(= errno 0)
                           (make-socket-ports 'unix-socket-connect socket-fd reg)]
@@ -209,10 +211,10 @@
      (lambda ()
        (wrap-evt
         ;; ready when fd is readable OR listener is closed
-        ;; If closed after evt creation, then fd-sema becomes ready
-        ;; when fd closed and fd-sema unregistered.
+        ;; If closed after evt creation, then fd-evt becomes ready
+        ;; when fd closed and fd-evt is unregistered.
         (cond [(unix-socket-listener-fd self)
-               => (lambda (fd) (socket->semaphore fd 'read))]
+               => (lambda (fd) (fd->evt fd 'read))]
               [else always-evt])
         (lambda (r) self))))))
 
@@ -274,14 +276,15 @@
          (values (list (lambda () (error who "unix socket listener is closed")))
                  #f)]
         [(custodian-shut-down? (accept-evt-cust accept-evt))
-         (error '|unix-socket-accept-evt poll| "the custodian has been shut down")]
+         (values (list (lambda () (error '|unix-socket-accept-evt poll| "the custodian has been shut down")))
+                 #f)]
         [lfd
          (cond [maybe-wakeups (accept-poll/sleep who accept-evt maybe-wakeups lfd)]
                [else (accept-poll/check who accept-evt lfd)])]))
 
 (define (accept-poll/sleep who accept-evt wakeups lfd)
-  ;; No need to register wakeup for custodian; if custodian is shut down, then
-  ;; lfd semaphore becomes ready when it is unregistered
+  ;; No need to register wakeup for custodian; custodian shutdown means a Racket thread
+  ;; did work, so accept-evt will get re-polled.
   (unsafe-poll-ctx-fd-wakeup wakeups lfd 'read)
   (values #f accept-evt))
 

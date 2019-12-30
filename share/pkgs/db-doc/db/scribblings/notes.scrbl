@@ -64,8 +64,7 @@ explicitly allowed (see @racket[postgresql-connect])}
 @item{@tt{scram-sha-256}: password-based challenge/response protocol}
 @item{@tt{peer}: only for local sockets}
 ]
-The @tt{gss}, @tt{sspi}, @tt{krb5}, @tt{pam}, and @tt{ldap} methods
-are not supported.
+The @tt{gss}, @tt{sspi}, and @tt{krb5} methods are not supported.
 
 @history[#:changed "1.2" @elem{Added @tt{scram-sha-256} support.}]
 
@@ -105,14 +104,29 @@ timestamps as text, so they received timestamps with adjusted time
 zones.)
 
 
-@section{MySQL Authentication}
+@section[#:tag "MySQL_Authentication"]{MySQL Authentication}
 
 As of version 5.5.7, MySQL supports
 @hyperlink["http://dev.mysql.com/doc/mysql-security-excerpt/5.5/en/pluggable-authentication.html"]{authentication
-plugins}. The only plugins currently supported by this library are
-@tt{mysql_native_password} (the default) and @tt{mysql_old_password},
-which corresponds to the password authentication mechanisms used since
-version 4.1 and before 4.1, respectively.
+plugins}. This library supports the following plugins:
+
+@itemlist[
+@item{@tt{caching_sha2_password}: the default since MySQL version 8.0}
+@item{@tt{mysql_native_password}: the default for MySQL versions since 4.1 and before 8.0}
+@item{@tt{mysql_old_password}: the default before MySQL version 4.1}
+@item{@tt{mysql_clear_password}: used by LDAP and PAM authentication}
+]
+
+The @tt{caching_sha2_password} authentication plugin has two
+``paths''; a client always tries the fast path first, but the server
+may demand that it go through the slow path, based on the state of the
+server's authentication cache. The fast path uses a challenge-response
+protocol, but in the slow path the client simply sends the password to
+the server. This library refuses to send the password in the slow path
+unless allowed by the @racket[_allow-cleartext-password?] argument to
+@racket[mysql-connect]. See also @secref["dbsec-connect"].
+
+@history[#:changed "1.6" @elem{Added support for @tt{caching_sha2_password} authentication.}]
 
 
 @section{MySQL @tt{CALL}ing Stored Procedures}

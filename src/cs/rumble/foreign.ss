@@ -128,29 +128,26 @@
 
 ;; ----------------------------------------
 
-;; Hack: use `s_fxmul` as an identity function
-;; to corece a bytevector's start to an address
-(define bytevector->addr ; call with GC disabled
-  (foreign-procedure "(cs)fxmul"
-    (u8* uptr)
-    uptr))
-(define object->addr ; call with GC disabled
-  (foreign-procedure "(cs)fxmul"
-    (scheme-object uptr)
-    uptr))
-(define address->object ; call with GC disabled
-  (foreign-procedure "(cs)fxmul"
-    (uptr uptr)
-    scheme-object))
+(define (object->addr v) ; call with GC disabled
+  (#%$object-address v 0))
 
-(define vector-content-offset
-  ;; Hack: we rely on the implementation detail of bytevectors and vectors
-  ;; having the same offset from the address to the content.
-  (let ([s (make-bytevector 1)])
-    ;; Disable interrupts to avoid a GC:
-    (with-interrupts-disabled
-     (- (bytevector->addr s 1)
-        (object->addr s 1)))))
+(define (address->object n) ; call with GC disabled
+  (#%$address->object n 0))
+
+(define (bytevector->addr bv) ; call with GC disabled or locked object
+  (#%$object-address bv bytevector-content-offset))
+
+(define (vector->addr bv) ; call with GC disabled or locked object
+  (#%$object-address bv vector-content-offset))
+
+;; Convert a raw foreign address to a Scheme value on the
+;; assumption that the address is the payload of a byte
+;; string:
+(define (addr->gcpointer-memory v)  ; call with GC disabled
+  (#%$address->object v bytevector-content-offset))
+
+(define (addr->vector v)  ; call with GC disabled or when reuslt is locked
+  (#%$address->object v vector-content-offset))
 
 ;; Converts a primitive cpointer (normally the result of
 ;; `unwrap-cpointer`) to a raw foreign address. The
@@ -189,16 +186,9 @@
 (define (memory-address memory) ; call with GC disabled
   (cond
    [(integer? memory) memory]
-   [(bytes? memory) (bytevector->addr memory 1)]
-   [else
-    (+ (object->addr memory 1)
-       vector-content-offset)]))
-
-;; Convert a raw foreign address to a Scheme value on the
-;; assumption that the address is the payload of a byte
-;; string or vector:
-(define (addr->gcpointer-memory v)  ; call with GC disabled
-  (address->object (- v vector-content-offset) 1))
+   [(bytes? memory) (bytevector->addr memory)]
+   [(vector? memory) (vector->addr memory)] ; used for immobile cells
+   [else (object->addr memory)]))
 
 ;; ----------------------------------------
 
@@ -223,7 +213,7 @@
 (define/who (ptr-equal? p1 p2)
   (let ([p1 (unwrap-cpointer who p1)]
         [p2 (unwrap-cpointer who p2)])
-    (with-interrupts-disabled ; disable GC while extracting addresses
+    (with-interrupts-disabled* ; disable GC while extracting addresses
      (= (cpointer-address p1) (cpointer-address p2)))))
 
 (define/who (ptr-offset p)
@@ -308,7 +298,8 @@
   (parent ctype)
   (fields get-decls
           size
-          alignment))
+          alignment
+          malloc-mode))
 
 (define/who (make-ctype type racket-to-c c-to-racket)
   (check who ctype? type)
@@ -323,7 +314,8 @@
                            c-to-racket
                            (compound-ctype-get-decls type)
                            (compound-ctype-size type)
-                           (compound-ctype-alignment type))]
+                           (compound-ctype-alignment type)
+                           (compound-ctype-malloc-mode type))]
    [else
     (create-ctype (ctype-host-rep type)
                   (ctype-our-rep type)
@@ -520,9 +512,10 @@
 
 (define make-cstruct-type
   (case-lambda
-   [(types) (make-cstruct-type types #f #f)]
-   [(types abi) (make-cstruct-type types abi #f)]
-   [(types abi alignment)
+   [(types) (make-cstruct-type types #f #f 'atomic)]
+   [(types abi) (make-cstruct-type types abi #f 'atomic)]
+   [(types abi alignment) (make-cstruct-type types abi alignment 'atomic)]
+   [(types abi alignment malloc-mode)
     (let ([make-decls
            (escapes-ok
              (lambda (id next!-id)
@@ -540,7 +533,8 @@
                                (lambda (c) (memory->cpointer c))
                                make-decls
                                size
-                               alignment)))]))
+                               alignment
+                               malloc-mode)))]))
 
 (define/who (make-union-type . types)
   (for-each (lambda (type) (check who ctype? type))
@@ -563,7 +557,8 @@
                            (lambda (c) (memory->cpointer c))
                            make-decls
                            size
-                           alignment)))
+                           alignment
+                           'atomic)))
 
 (define/who (make-array-type type count)
   (check who ctype? type)
@@ -577,6 +572,9 @@
                            (array ,count ,(car reps))))))))]
         [size (* count (ctype-sizeof type))]
         [alignment (ctype-alignof type)])
+    (unless (fixnum? size)
+      (raise-arguments-error who "arithmetic overflow for overlarge array type"
+                             "size" size))
     (create-compound-ctype 'array
                            'array
                            (vector type count)
@@ -584,7 +582,8 @@
                            (lambda (c) (memory->cpointer c))
                            make-decls
                            size
-                           alignment)))
+                           alignment
+                           #f)))
 
 (define (compiler-sizeof sl)
   (let ([rest (lambda (sl) (if (pair? sl) (cdr sl) '()))])
@@ -749,6 +748,10 @@
                    (lambda (h)
                      (make-ffi-lib h name))))]))
 
+(define/who (ffi-lib-unload lib)
+  (check who ffi-lib? lib)
+  (ffi-unload-lib (ffi-lib-handle lib))) 
+
 (define-record-type (cpointer/ffi-obj make-ffi-obj ffi-obj?)
   (parent cpointer)
   (fields lib name))
@@ -778,6 +781,11 @@
         #f
         (success-k #f))))
 
+(define ffi-unload-lib
+  ;; Placeholder implementation that does nothing:
+  (lambda (lib)
+    (void)))
+
 (define ffi-get-obj
   ;; Placeholder implementation that always fails:
   (lambda (who lib lib-name name success-k)
@@ -791,9 +799,10 @@
   ;; Placeholder implementation
   (lambda (p) p))
 
-(define (set-ffi-get-lib-and-obj! do-ffi-get-lib do-ffi-get-obj do-ffi-ptr->address)
+(define (set-ffi-get-lib-and-obj! do-ffi-get-lib do-ffi-get-obj do-ffi-unload-lib do-ffi-ptr->address)
   (set! ffi-get-lib do-ffi-get-lib)
   (set! ffi-get-obj do-ffi-get-obj)
+  (set! ffi-unload-lib do-ffi-unload-lib)
   (set! ffi-ptr->address do-ffi-ptr->address))
 
 ;; ----------------------------------------
@@ -891,7 +900,7 @@
               (eq? 'utf-16be host-rep)
               (eq? 'utf-32le host-rep)
               (eq? 'utf-32be host-rep))
-          (let ([v (with-interrupts-disabled
+          (let ([v (with-interrupts-disabled*
                     (foreign-ref 'uptr (cpointer-address p) 0))])
             (case host-rep
               [(utf-16le) (utf16->string (uptr->bytes/2-byte-nul v) 'little #t)]
@@ -900,7 +909,7 @@
               [(utf-32be) (utf16->string (uptr->bytes/4-byte-nul v) 'big #t)]))]
          [else
           ;; Disable interrupts to avoid a GC:
-          (with-interrupts-disabled
+          (with-interrupts-disabled*
            ;; Special treatment is needed for 'scheme-object, since the
            ;; host Scheme rejects the use of 'scheme-object with
            ;; `foreign-ref`
@@ -910,7 +919,7 @@
                                  (cpointer-address p)
                                  offset)])
              (case host-rep
-               [(scheme-object) (address->object v 1)]
+               [(scheme-object) (address->object v)]
                [else
                 (case (ctype-our-rep type)
                   [(gcpointer) (addr->gcpointer-memory v)]
@@ -942,6 +951,71 @@
                    p
                    offset
                    v)]))
+
+(define-syntax-rule (define-fast-ptr-ops ref set _type ok-v? bytes-ref bytes-set foreign-type type-bits)
+  (begin
+    (define (ref p offset abs?)
+      (let ([simple-p (if (bytevector? p)
+                          p
+                          (and (authentic-cpointer? p)
+                               (let ([m (cpointer-memory p)])
+                                 (and (or (bytevector? m)
+                                          (exact-integer? m))
+                                      m))))])
+        (cond
+         [(and simple-p
+               (fixnum? offset)
+               (or (not abs?) (fx= 0 (fxand offset (fx- (fxsll 1 type-bits) 1)))))
+          (if (bytevector? simple-p)
+              (bytes-ref simple-p (if abs? offset (fxsll offset type-bits)))
+              (let ([offset (let ([offset (if abs? offset (fxsll offset type-bits))])
+                              (if (cpointer+offset? p)
+                                  (+ offset (cpointer+offset-offset p))
+                                  offset))])
+                (foreign-ref 'foreign-type simple-p offset)))]
+         [else
+          (if abs?
+              (ptr-ref p _type 'abs offset)
+              (ptr-ref p _type offset))])))
+    (define (set p offset v abs?)
+      (let ([simple-p (if (bytevector? p)
+                          p
+                          (and (authentic-cpointer? p)
+                               (let ([m (cpointer-memory p)])
+                                 (and (or (bytevector? m)
+                                          (exact-integer? m))
+                                      m))))])
+        (cond
+         [(and simple-p
+               (fixnum? offset)
+               (or (not abs?) (fx= 0 (fxand offset (fx- (fxsll 1 type-bits) 1))))
+               (ok-v? v))
+          (if (bytevector? simple-p)
+              (bytes-set simple-p (if abs? offset (fxsll offset type-bits)) v)
+              (let ([offset (let ([offset (if abs? offset (fxsll offset type-bits))])
+                              (if (cpointer+offset? p)
+                                  (+ offset (cpointer+offset-offset p))
+                                  offset))])
+                (foreign-set! 'foreign-type simple-p offset v)))]
+         [else
+          (if abs?
+              (ptr-set! p _type 'abs offset v)
+              (ptr-set! p _type offset v))])))))
+
+(define (fixnum-in-range? lo hi) (lambda (v) (and (fixnum? v) (fx>= v lo) (fx>= v hi))))
+(define (in-range? lo hi) (lambda (v) (and (exact-integer? v) (>= v lo) (>= v hi))))
+
+;; Schemify optimizes `(ptr-ref p _uint16 offset v)` to `(ptr-set!/uint16 p (fxlshift offset 1) v #f)`, etc.
+(define-fast-ptr-ops ptr-ref/int8 ptr-set!/int8 _int8 (fixnum-in-range? -128 127) bytevector-s8-ref bytevector-s8-set! integer-8 0)
+(define-fast-ptr-ops ptr-ref/uint8 ptr-set!/uint8 _uint8 byte? bytevector-u8-ref bytevector-u8-set! unsigned-8 0)
+(define-fast-ptr-ops ptr-ref/int16 ptr-set!/int16 _int16 (fixnum-in-range? -32768 32767) bytevector-s16-native-ref bytevector-s16-native-set! integer-16 1)
+(define-fast-ptr-ops ptr-ref/uint16 ptr-set!/uint16 _uint16 (fixnum-in-range? 0 65535) bytevector-u16-native-ref bytevector-u16-native-set! unsigned-16 1)
+(define-fast-ptr-ops ptr-ref/int32 ptr-set!/int32 _int32 (in-range? -2147483648 2147483647) bytevector-s32-native-ref bytevector-s32-native-set! integer-32 2)
+(define-fast-ptr-ops ptr-ref/uint32 ptr-set!/uint32 _uint32 (in-range? 0 4294967296) bytevector-u32-native-ref bytevector-u32-native-set! unsigned-32 2)
+(define-fast-ptr-ops ptr-ref/int64 ptr-set!/int64 _int64 (in-range? -9223372036854775808 9223372036854775807) bytevector-s64-native-ref bytevector-s64-native-set! integer-64 3)
+(define-fast-ptr-ops ptr-ref/uint64 ptr-set!/uint64 _uint64 (in-range? 0 18446744073709551616) bytevector-u64-native-ref bytevector-u64-native-set! unsigned-64 3)
+(define-fast-ptr-ops ptr-ref/double ptr-set!/double _double flonum? bytevector-ieee-double-native-ref bytevector-ieee-double-native-set! double 3)
+(define-fast-ptr-ops ptr-ref/float ptr-set!/float _float flonum? bytevector-ieee-single-native-ref bytevector-ieee-single-native-set! float 2)
 
 (define ptr-size-in-bytes (foreign-sizeof 'void*))
 (define log-ptr-size-in-bytes (- (integer-length ptr-size-in-bytes) 1))
@@ -1012,7 +1086,7 @@
                                  "atomic destination" orig-p)]
          [else
           ;; Disable interrupts to avoid a GC:
-          (with-interrupts-disabled
+          (with-interrupts-disabled*
            ;; Special treatment is needed for 'scheme-object, since
            ;; the host Scheme rejects the use of 'scheme-object with
            ;; `foreign-set!`
@@ -1022,7 +1096,7 @@
                          (cpointer-address p)
                          offset
                          (case host-rep
-                           [(scheme-object) (object->addr v 1)]
+                           [(scheme-object) (object->addr v)]
                            [(void*) (cpointer-address v)]
                            [else v])))]))])))
 
@@ -1059,68 +1133,64 @@
                                "destination" to
                                "source" from)])]
      [else
-      (with-interrupts-disabled
-       (let ([to (fx+ (cpointer*-address to) to-offset)]
-             [from (fx+ (cpointer*-address from) from-offset)])
+      (with-interrupts-disabled*
+       (let ([to (+ (cpointer*-address to) to-offset)]
+             [from (+ (cpointer*-address from) from-offset)])
        (cond
         [(and move?
               ;; overlap?
-              (or (<= to from (fx+ to len -1))
-                  (<= from to (fx+ from len -1)))
+              (or (<= to from (+ to len -1))
+                  (<= from to (+ from len -1)))
               ;; shifting up?
               (< from to))
          ;; Copy from high to low to move in overlapping region
-         (let loop ([to (+ to len)] [from (+ from len)] [len len])
+         (let loop ([len len])
            (unless (fx= len 0)
              (cond
-              #;
-              [(fx>= len 8)
-               (let ([to (fx- to 8)]
-                     [from (fx- from 8)])
-                 (foreign-set! 'integer-64 to 0
-                               (foreign-ref 'integer-64 from 0))
-                 (loop to from (fx- len 8)))]
-              [(and (meta-cond [(> (fixnum-width) 32) #t] [else #f])
+              [(and (> (fixnum-width) 64)
+                    (fx>= len 8))
+               (let ([len (fx- len 8)])
+                 (foreign-set! 'integer-64 to len
+                               (foreign-ref 'integer-64 from len))
+                 (loop len))]
+              [(and (> (fixnum-width) 32)
                     (fx>= len 4))
-               (let ([to (fx- to 4)]
-                     [from (fx- from 4)])
-                 (foreign-set! 'integer-32 to 0
-                               (foreign-ref 'integer-32 from 0))
-                 (loop to from (fx- len 4)))]
+               (let ([len (fx- len 4)])
+                 (foreign-set! 'integer-32 to len
+                               (foreign-ref 'integer-32 from len))
+                 (loop len))]
               [(fx>= len 2)
-               (let ([to (fx- to 2)]
-                     [from (fx- from 2)])
-                 (foreign-set! 'integer-16 to 0
-                               (foreign-ref 'integer-16 from 0))
-                 (loop to from (fx- len 2)))]
+               (let ([len (fx- len 2)])
+                 (foreign-set! 'integer-16 to len
+                               (foreign-ref 'integer-16 from len))
+                 (loop len))]
               [else
-               (let ([to (fx- to 1)]
-                     [from (fx- from 1)])
-                 (foreign-set! 'integer-8 to 0
-                               (foreign-ref 'integer-8 from 0))
-                 (loop to from (fx- len 1)))])))]
+               (let ([len (fx- len 1)])
+                 (foreign-set! 'integer-8 to len
+                               (foreign-ref 'integer-8 from len))
+                 (loop len))])))]
         [else
-         (let loop ([to to] [from from] [len len])
-           (unless (fx= len 0)
+         (let loop ([pos 0])
+           (when (fx< pos len)
              (cond
-              #;
-              [(fx>= len 8)
-               (foreign-set! 'integer-64 to 0
-                             (foreign-ref 'integer-64 from 0))
-               (loop (fx+ to 8) (fx+ from 8) (fx- len 8))]
-              [(and (meta-cond [(> (fixnum-width) 32) #t] [else #f])
-                    (fx>= len 4))
-               (foreign-set! 'integer-32 to 0
-                             (foreign-ref 'integer-32 from 0))
-               (loop (fx+ to 4) (fx+ from 4) (fx- len 4))]
-              [(fx>= len 2)
-               (foreign-set! 'integer-16 to 0
-                             (foreign-ref 'integer-16 from 0))
-               (loop (fx+ to 2) (fx+ from 2) (fx- len 2))]
+              [(and (> (fixnum-width) 64)
+                    (fx<= (fx+ pos 8) len))
+               (foreign-set! 'integer-64 to pos
+                             (foreign-ref 'integer-64 from pos))
+               (loop (fx+ pos 8))]
+              [(and (> (fixnum-width) 32)
+                    (fx<= (fx+ pos 4) len))
+               (foreign-set! 'integer-32 to pos
+                             (foreign-ref 'integer-32 from pos))
+               (loop (fx+ pos 4))]
+              [(fx<= (fx+ pos 2) len)
+               (foreign-set! 'integer-16 to pos
+                             (foreign-ref 'integer-16 from pos))
+               (loop (fx+ pos 2))]
               [else
-               (foreign-set! 'integer-8 to 0
-                             (foreign-ref 'integer-8 from 0))
-               (loop (fx+ to 1) (fx+ from 1) (fx- len 1))])))])))])))
+               (foreign-set! 'integer-8 to pos
+                             (foreign-ref 'integer-8 from pos))
+               (loop (fx+ pos 1))])))])))])))
 
 (define memcpy/memmove
   (case-lambda
@@ -1205,7 +1275,7 @@
       (raise-arguments-error 'memset "cannot set non-atomic"
                              "destination" to)]
      [else
-      (with-interrupts-disabled
+      (with-interrupts-disabled*
        (let ([to (fx+ (cpointer*-address to) to-offset)])
          (let loop ([to to] [len len])
            (unless (fx= len 0)
@@ -1331,18 +1401,18 @@
    [(eq? mode 'raw)
     (make-cpointer (foreign-alloc size) #f)]
    [(eq? mode 'atomic)
-    (make-cpointer (make-bytevector size) #f)]
+    (make-cpointer (make-bytevector size 0) #f)]
    [(eq? mode 'nonatomic)
-    (make-cpointer (make-vector (quotient size 8) 0) #f)]
+    (make-cpointer (#%make-vector (quotient size 8) 0) #f)]
    [(eq? mode 'atomic-interior)
     ;; This is not quite the same as traditional Racket, because
     ;; a finalizer is associated with the cpointer (as opposed to
     ;; the address that is wrapped by the cpointer). Also, interior
     ;; pointers are not allowed as GCable pointers.
-    (let* ([bstr (make-bytevector size)]
+    (let* ([bstr (make-bytevector size 0)]
            [p (make-cpointer bstr #f)])
       (lock-object bstr)
-      (with-global-lock (the-foreign-guardian p (lambda () (unlock-object bstr))))
+      (unsafe-add-global-finalizer p (lambda () (unlock-object bstr)))
       p)]
    [else
     (raise-unsupported-error 'malloc
@@ -1350,7 +1420,7 @@
 
 (define/who (free p)
   (let ([p (unwrap-cpointer who p)])
-    (with-interrupts-disabled
+    (with-interrupts-disabled*
      (foreign-free (cpointer-address p)))))
 
 (define-record-type (cpointer/cell make-cpointer/cell cpointer/cell?)
@@ -1364,6 +1434,15 @@
 
 (define (free-immobile-cell b)
   (unlock-object (cpointer-memory b)))
+
+(define (immobile-cell-ref b)
+  (#%vector-ref (cpointer-memory b) 0))
+
+(define (immobile-cell->address b)
+  (vector->addr (cpointer-memory b)))
+
+(define (address->immobile-cell a)
+  (make-cpointer/cell (addr->vector a) #f))
 
 (define (malloc-mode? v)
   (chez:memq v '(raw atomic nonatomic tagged
@@ -1395,7 +1474,7 @@
       (poll-foreign-guardian))))
 
 (define (unsafe-add-global-finalizer v proc)
-  (the-foreign-guardian v proc))
+  (with-global-lock (the-foreign-guardian v proc)))
 
 ;; ----------------------------------------
 
@@ -1430,7 +1509,8 @@
            :contract "(listof ctype?)"
            in-types)
     (check who ctype? out-type)
-    ((ffi-call/callable #t in-types out-type abi save-errno blocking? #f #f) p)]))
+    (check who string? :or-false lock-name)
+    ((ffi-call/callable #t in-types out-type abi save-errno lock-name blocking? orig-place? #f #f) p)]))
 
 (define/who ffi-call-maker
   (case-lambda
@@ -1451,7 +1531,8 @@
            :contract "(listof ctype?)"
            in-types)
     (check who ctype? out-type)
-    (ffi-call/callable #t in-types out-type abi save-errno blocking? #f #f)]))
+    (check who string? :or-false lock-name)
+    (ffi-call/callable #t in-types out-type abi save-errno lock-name blocking? orig-place? #f #f)]))
 
 ;; For sanity checking of callbacks during a blocking callout:
 (define-virtual-register currently-blocking? #f)
@@ -1461,12 +1542,12 @@
   ;; so uses of the FFI can rely on passing an argument to a foreign
   ;; function as retaining the argument until the function returns.
   (let ([result e])
-    ;; This comparsion will never be true, but the
-    ;; compiler and GC don't know that:
-    (when (eq? v none2) (raise none2)) ...
+    (#%$keep-live v) ...
     result))
 
-(define (ffi-call/callable call? in-types out-type abi save-errno blocking? atomic? async-apply)
+(define call-locks (make-eq-hashtable))
+
+(define (ffi-call/callable call? in-types out-type abi save-errno lock-name blocking? orig-place? atomic? async-apply)
   (let* ([conv (case abi
                  [(stdcall) '__stdcall]
                  [(sysv) '__cdecl]
@@ -1505,6 +1586,7 @@
                         ((compound-ctype-get-decls out-type) ret-id next!-id)
                         '())]
          [ret-size (and ret-id (ctype-sizeof out-type))]
+         [ret-malloc-mode (and ret-id (compound-ctype-malloc-mode out-type))]
          [gen-proc+ret-maker+arg-makers
           (let ([expr `(let ()
                          ,@decls
@@ -1536,26 +1618,34 @@
                                                (make-ftype-pointer ,id p))))
                                      ids)
                                 '())))])
-            (let* ([wb (with-interrupts-disabled
+            (let* ([wb (with-interrupts-disabled*
                         (weak-hash-ref ffi-expr->code expr #f))]
                    [code (if wb (car wb) #!bwp)])
               (if (eq? code #!bwp)
                   (let ([code (eval/foreign expr (if call? 'comp-ffi-call 'comp-ffi-back))])
                     (hashtable-set! ffi-code->expr (car code) expr)
-                    (with-interrupts-disabled
+                    (with-interrupts-disabled*
                      (weak-hash-set! ffi-expr->code expr (weak-cons code #f)))
                     code)
                   code)))]
          [gen-proc (car gen-proc+ret-maker+arg-makers)]
          [ret-maker (cadr gen-proc+ret-maker+arg-makers)]
          [arg-makers (cddr gen-proc+ret-maker+arg-makers)]
-         [async-callback-queue (and (procedure? async-apply) (current-async-callback-queue))])
+         [async-callback-queue (and (procedure? async-apply) (current-async-callback-queue))]
+         [lock (and lock-name
+                    (with-global-lock
+                     (or (eq-hashtable-ref call-locks (string->symbol lock-name) #f)
+                         (let ([lock (make-mutex)])
+                           (eq-hashtable-set! call-locks (string->symbol lock-name) lock)
+                           lock))))])
     (cond
      [call?
       (cond
        [(and (not ret-id)
              (not blocking?)
+             (not orig-place?)
              (not save-errno)
+             (not lock)
              (#%andmap (lambda (in-type)
                          (case (ctype-host-rep in-type)
                            [(scheme-object struct union) #f]
@@ -1579,24 +1669,24 @@
               [proc
                (case-lambda
                 [()
-                 (c->s out-type (with-interrupts-disabled (proc)))]
+                 (c->s out-type (with-interrupts-disabled* (proc)))]
                 [(orig-a)
                  (let ([a (unwrap orig-a (car in-types))])
                    (c->s out-type (retain
                                    orig-a
-                                   (with-interrupts-disabled (proc (unpack a (car in-types)))))))]
+                                   (with-interrupts-disabled* (proc (unpack a (car in-types)))))))]
                 [(orig-a orig-b)
                  (let ([a (unwrap orig-a (car in-types))]
                        [b (unwrap orig-b (cadr in-types))])
                    (c->s out-type (retain
                                    orig-a orig-b
-                                   (with-interrupts-disabled
+                                   (with-interrupts-disabled*
                                     (proc (unpack a (car in-types)) (unpack b (cadr in-types)))))))]
                 [(orig-a orig-b orig-c)
                  (let ([a (unwrap orig-a (car in-types))]
                        [b (unwrap orig-b (cadr in-types))]
                        [c (unwrap orig-c (caddr in-types))])
-                   (c->s out-type (with-interrupts-disabled
+                   (c->s out-type (with-interrupts-disabled*
                                    (retain
                                     orig-a orig-b orig-c
                                     (proc (unpack a (car in-types))
@@ -1609,21 +1699,21 @@
                        [d (unwrap orig-d (cadddr in-types))])
                    (c->s out-type (retain
                                    orig-a orig-b orig-c orig-d
-                                   (with-interrupts-disabled
+                                   (with-interrupts-disabled*
                                     (proc (unpack a (car in-types))
                                           (unpack b (cadr in-types))
                                           (unpack c (caddr in-types))
                                           (unpack d (cadddr in-types)))))))]
                 [orig-args
                  (let ([args (map (lambda (a t) (unwrap a t)) orig-args in-types)])
-                   (c->s out-type (with-interrupts-disabled
+                   (c->s out-type (with-interrupts-disabled*
                                    (retain
                                     orig-args
                                     (#%apply proc (map (lambda (a t) (unpack a t)) args in-types))))))])]
               [else
                (lambda orig-args
                  (let ([args (map (lambda (a t) (unwrap a t)) orig-args in-types)])
-                   (c->s out-type (with-interrupts-disabled
+                   (c->s out-type (with-interrupts-disabled*
                                    (retain
                                     orig-args
                                     (#%apply (gen-proc (cpointer-address proc-p))
@@ -1632,7 +1722,12 @@
              (cpointer->name proc-p))))]
        [else
         (lambda (to-wrap)
-          (let* ([proc-p (unwrap-cpointer 'ffi-call to-wrap)])
+          (let* ([proc-p (unwrap-cpointer 'ffi-call to-wrap)]
+                 #;
+                 [name (and (ffi-obj? proc-p) (let ([n (cpointer/ffi-obj-name proc-p)])
+                                                (if (bytes? n)
+                                                    (utf8->string n)
+                                                    n)))])
             (do-procedure-reduce-arity-mask
              (lambda orig-args
                (let* ([args (map (lambda (orig-arg in-type)
@@ -1648,35 +1743,41 @@
                                  orig-args in-types)]
                       [r (let ([ret-ptr (and ret-id
                                              ;; result is a struct type; need to allocate space for it
-                                             (make-bytevector ret-size))])
-                           (with-interrupts-disabled
-                            (when blocking? (currently-blocking? #t))
-                            (retain
-                             orig-args
-                             (let ([r (#%apply (gen-proc (cpointer-address proc-p))
-                                               (append
-                                                (if ret-ptr
-                                                    (list (ret-maker (memory-address ret-ptr)))
-                                                    '())
-                                                (map (lambda (arg in-type maker)
-                                                       (let ([host-rep (array-rep-to-pointer-rep
-                                                                        (ctype-host-rep in-type))])
-                                                         (case host-rep
-                                                           [(void*) (cpointer-address arg)]
-                                                           [(struct union)
-                                                            (maker (cpointer-address arg))]
-                                                           [else arg])))
-                                                     args in-types arg-makers)))])
-                               (when blocking? (currently-blocking? #f))
-                               (case save-errno
-                                 [(posix) (thread-cell-set! errno-cell (get-errno))]
-                                 [(windows) (thread-cell-set! errno-cell (get-last-error))])
-                               (cond
-                                [ret-ptr
-                                 (make-cpointer ret-ptr #f)]
-                                [(eq? (ctype-our-rep out-type) 'gcpointer)
-                                 (addr->gcpointer-memory r)]
-                                [else r])))))])
+                                             (normalized-malloc ret-size ret-malloc-mode))])
+                           (let ([go (lambda ()
+                                       (when lock (mutex-acquire lock))
+                                       (with-interrupts-disabled*
+                                        (when blocking? (currently-blocking? #t))
+                                        (retain
+                                         orig-args
+                                         (let ([r (#%apply (gen-proc (cpointer-address proc-p))
+                                                           (append
+                                                            (if ret-ptr
+                                                                (list (ret-maker (cpointer-address ret-ptr)))
+                                                                '())
+                                                            (map (lambda (arg in-type maker)
+                                                                   (let ([host-rep (array-rep-to-pointer-rep
+                                                                                    (ctype-host-rep in-type))])
+                                                                     (case host-rep
+                                                                       [(void*) (cpointer-address arg)]
+                                                                       [(struct union)
+                                                                        (maker (cpointer-address arg))]
+                                                                       [else arg])))
+                                                                 args in-types arg-makers)))])
+                                           (when lock (mutex-release lock))
+                                           (when blocking? (currently-blocking? #f))
+                                           (case save-errno
+                                             [(posix) (thread-cell-set! errno-cell (get-errno))]
+                                             [(windows) (thread-cell-set! errno-cell (get-last-error))])
+                                           (cond
+                                            [ret-ptr ret-ptr]
+                                            [(eq? (ctype-our-rep out-type) 'gcpointer)
+                                             (addr->gcpointer-memory r)]
+                                            [else r])))))])
+                             (if (and orig-place?
+                                      (not (eqv? 0 (get-thread-id))))
+                                 (async-callback-queue-call orig-place-async-callback-queue (lambda () (go)) #f #t #t)
+                                 (go))))])
                  (c->s out-type r)))
              (fxsll 1 (length in-types))
              (cpointer->name proc-p))))])]
@@ -1702,6 +1803,9 @@
                                                    [arg (c->s type
                                                               (case (ctype-host-rep type)
                                                                 [(struct union)
+                                                                 ;; Like old Racket, refer to argument on stack:
+                                                                 (make-cpointer (ftype-pointer-address arg) #f)
+                                                                 #;
                                                                  (let* ([size (compound-ctype-size type)]
                                                                         [addr (ftype-pointer-address arg)]
                                                                         [bstr (make-bytevector size)])
@@ -1749,21 +1853,19 @@
 (define PLACE-MAIN-THREAD 2)
 (define-virtual-register place-thread-category PLACE-KNOWN-THREAD)
 (define (register-as-place-main!)
-  (place-thread-category PLACE-MAIN-THREAD)
-  (foreign-place-init!))
+  (place-thread-category PLACE-MAIN-THREAD))
 
-(define (foreign-place-init!)
-  (current-async-callback-queue (make-async-callback-queue (make-mutex)
-                                                           (make-condition)
-                                                           '())))
+(define orig-place-async-callback-queue #f)
+(define (remember-original-place!)
+  (set! orig-place-async-callback-queue (current-async-callback-queue)))
 
 ;; Can be called in any Scheme thread
 (define (call-as-atomic-callback thunk atomic? async-apply async-callback-queue)
   (cond
    [(eqv? (place-thread-category) PLACE-MAIN-THREAD)
     ;; In the main thread of a place. We must have gotten here by a
-      ;; foreign call that called back, so interrupts are currently
-      ;; disabled.
+    ;; foreign call that called back, so interrupts are currently
+    ;; disabled.
     (cond
      [(not atomic?)
       ;; reenable interrupts
@@ -1783,63 +1885,24 @@
    [else
     ;; Not in a place's main thread; queue an async callback
     ;; and wait for the response
-    (let* ([result-done? (box #f)]
-           [result #f]
-           [q async-callback-queue]
-           [m (async-callback-queue-lock q)]
-           [need-interrupts?
-            ;; If we created this therad by `fork-pthread`, we must
-            ;; have gotten here by a foreign call, so interrupts are
-            ;; currently disabled
-            (eqv? (place-thread-category) PLACE-KNOWN-THREAD)])
-      (mutex-acquire m)
-      (set-async-callback-queue-in! q (cons (lambda ()
-                                              (set! result (|#%app| async-apply thunk))
-                                              (mutex-acquire m)
-                                              (set-box! result-done? #t)
-                                              (condition-broadcast (async-callback-queue-condition q))
-                                              (mutex-release m))
-                                            (async-callback-queue-in q)))
-      (async-callback-poll-wakeup)
-      (let loop ()
-        (unless (unbox result-done?)
-          (when need-interrupts?
-            ;; Enable interrupts so that the thread is deactivated
-            ;; when we wait on the condition
-            (enable-interrupts))
-          (condition-wait (async-callback-queue-condition q) m)
-          (when need-interrupts? (disable-interrupts))
-          (loop)))
-      (mutex-release m)
-      result)]))
+    (let ([known-thread? (eqv? (place-thread-category) PLACE-KNOWN-THREAD)])
+      (async-callback-queue-call async-callback-queue
+                                 (lambda () (|#%app| async-apply thunk))
+                                 ;; If we created this thread by `fork-pthread`, we must
+                                 ;; have gotten here by a foreign call, so interrupts are
+                                 ;; currently disabled
+                                 known-thread?
+                                 ;; In a thread created by `fork-pthread`, we'll have to tell
+                                 ;; the scheduler to be in atomic mode:
+                                 known-thread?
+                                 ;; Wait for result:
+                                 #t))]))
 
 (define scheduler-start-atomic void)
 (define scheduler-end-atomic void)
 (define (set-scheduler-atomicity-callbacks! start-atomic end-atomic)
   (set! scheduler-start-atomic start-atomic)
   (set! scheduler-end-atomic end-atomic))
-
-(define async-callback-poll-wakeup void)
-(define (set-async-callback-poll-wakeup! wakeup)
-  (set! async-callback-poll-wakeup wakeup))
-
-(define-record async-callback-queue (lock condition in))
-
-(define-virtual-register current-async-callback-queue #f)
-
-;; Returns callbacks to run in atomic mode
-(define (poll-async-callbacks)
-  (let ([q (current-async-callback-queue)])
-    (mutex-acquire (async-callback-queue-lock q))
-    (let ([in (async-callback-queue-in q)])
-      (cond
-       [(null? in)
-        (mutex-release (async-callback-queue-lock q))
-        '()]
-       [else
-        (set-async-callback-queue-in! q '())
-        (mutex-release (async-callback-queue-lock q))
-        (reverse in)]))))
 
 ;; ----------------------------------------
 
@@ -1879,13 +1942,13 @@
            :contract "(listof ctype?)"
            in-types)
     (check who ctype? out-type)
-    (let ([make-code (ffi-call/callable #f in-types out-type abi #f #f (and atomic? #t) async-apply)])
+    (let ([make-code (ffi-call/callable #f in-types out-type abi #f #f #f #f (and atomic? #t) async-apply)])
       (lambda (proc)
         (check 'make-ffi-callback procedure? proc)
         (let* ([code (make-code proc)]
                [cb (create-callback code)])
           (lock-object code)
-          (with-global-lock (the-foreign-guardian cb (lambda () (unlock-object code))))
+          (unsafe-add-global-finalizer cb (lambda () (unlock-object code)))
           cb)))]))
 
 ;; ----------------------------------------

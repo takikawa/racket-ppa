@@ -1,3 +1,5 @@
+#include "cs_config.h"
+
 #ifndef WIN32
 # include <unistd.h>
 #endif
@@ -5,7 +7,7 @@
 #include <string.h>
 #include <stdlib.h>
 #ifdef WIN32
-# include <Windows.h>
+# include <windows.h>
 # define DOS_FILE_SYSTEM
 static int scheme_utf8_encode(unsigned int *path, int zero_offset, int len,
 			      char *dest, int dest_len, int get_utf16);
@@ -32,17 +34,23 @@ static int scheme_utf8_encode(unsigned int *path, int zero_offset, int len,
 #ifdef WIN32
 typedef void *(*scheme_dll_open_proc)(const char *name, int as_global);
 typedef void *(*scheme_dll_find_object_proc)(void *h, const char *name);
+typedef void (*scheme_dll_close_proc)(void *h);
 static scheme_dll_open_proc embedded_dll_open;
 static scheme_dll_find_object_proc scheme_dll_find_object;
-static void scheme_set_dll_procs(scheme_dll_open_proc open, scheme_dll_find_object_proc find)
+static scheme_dll_close_proc embedded_dll_close;
+static void scheme_set_dll_procs(scheme_dll_open_proc open,
+                                 scheme_dll_find_object_proc find,
+                                 scheme_dll_close_proc close)
 {
   embedded_dll_open = open;
   scheme_dll_find_object = find;
+  embedded_dll_close = close;
 }
 # include "../../start/embedded_dll.inc"
 #else
 # define embedded_dll_open NULL
 # define scheme_dll_find_object NULL
+# define embedded_dll_close NULL
 #endif
 
 char *boot_file_data = "BooT FilE OffsetS:xxxxyyyyyzzzz";
@@ -98,6 +106,36 @@ static char *get_self_path(char *exec_file)
 # undef USE_GENERIC_GET_SELF_PATH
 #endif
 
+#if defined(__FreeBSD__)
+# include <sys/sysctl.h>
+# include <errno.h>
+static char *get_self_path(char *exec_file)
+{
+  int mib[4];
+  char *s;
+  size_t len;
+  int r;
+
+  mib[0] = CTL_KERN;
+  mib[1] = KERN_PROC;
+  mib[2] = KERN_PROC_PATHNAME;
+  mib[3] = -1;
+
+  r = sysctl(mib, 4, NULL, &len, NULL, 0);
+  if (r < 0) {
+      fprintf(stderr, "failed to get self (%d)\n", errno);
+      exit(1);
+  }
+  s = malloc(len);
+  r = sysctl(mib, 4, s, &len, NULL, 0);
+  if (r < 0) {
+      fprintf(stderr, "failed to get self (%d)\n", errno);
+      exit(1);
+  }
+  return s;
+}
+# undef USE_GENERIC_GET_SELF_PATH
+#endif
 
 #ifdef ELF_FIND_BOOT_SECTION
 # include <elf.h>
@@ -106,8 +144,13 @@ static char *get_self_path(char *exec_file)
 static long find_boot_section(char *me)
 {
   int fd, i;
+#if SIZEOF_VOID_P == 4
+  Elf32_Ehdr e;
+  Elf32_Shdr s;
+#else
   Elf64_Ehdr e;
   Elf64_Shdr s;
+#endif
   char *strs;
 
   fd = open(me, O_RDONLY, 0);
@@ -303,8 +346,8 @@ static void *extract_dlldir()
 #endif
 
 static int bytes_main(int argc, char **argv,
-		      /* for Windows GUI mode */
-		      int wm_is_gracket, char *gracket_guid)
+		      /* for Windows and X11 GUI modes */
+		      int wm_is_gracket_or_x11_arg_count, char *gracket_guid_or_x11_args)
 {
   char *boot_exe, *exec_file = argv[0], *run_file = NULL;
   int pos1, pos2, pos3;
@@ -353,12 +396,12 @@ static int bytes_main(int argc, char **argv,
   memcpy(&pos2, boot_file_data + boot_file_offset + 4, sizeof(pos2));
   memcpy(&pos3, boot_file_data + boot_file_offset + 8, sizeof(pos2));
 
-  boot_offset = 0;
 #ifdef ELF_FIND_BOOT_SECTION
   boot_offset = find_boot_section(boot_exe);
-#endif
-#ifdef WIN32
+#elif WIN32
   boot_offset = find_resource_offset(dll_path, 259, boot_rsrc_offset);
+#else
+  boot_offset = 0;
 #endif
 
   pos1 += boot_offset;
@@ -370,13 +413,13 @@ static int bytes_main(int argc, char **argv,
               extract_coldir(), extract_configdir(), extract_dlldir(),
               pos1, pos2, pos3,
               CS_COMPILED_SUBDIR, RACKET_IS_GUI,
-	      wm_is_gracket, gracket_guid,
-	      embedded_dll_open, scheme_dll_find_object);
+	      wm_is_gracket_or_x11_arg_count, gracket_guid_or_x11_args,
+	      embedded_dll_open, scheme_dll_find_object, embedded_dll_close);
   
   return 0;
 }
 
-#if defined(WIN32) && defined(CHECK_SINGLE_INSTANCE)
+#if defined(WIN32) && (defined(CHECK_SINGLE_INSTANCE) || defined(__MINGW32__))
 int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR ignored, int nCmdShow)
 {
   int argc;
@@ -387,11 +430,13 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR ignored
 
   argv = cmdline_to_argv(&argc, &normalized_path);
 
+#ifdef CHECK_SINGLE_INSTANCE
   if (CheckSingleInstance(normalized_path, argv))
     return 0;
   wm = wm_is_gracket;
   guid = GRACKET_GUID;
-
+#endif
+  
   return bytes_main(argc, argv, wm, guid);
 }
 #elif defined(WIN32)
@@ -407,7 +452,10 @@ int wmain(int argc, wchar_t **wargv)
   return bytes_main(argc, argv, 0, "");
 }
 #else
+static int x11_arg_count = 0;
+static char *x11_args = "0";
+
 int main(int argc, char **argv) {
-  return bytes_main(argc, argv, 0, "");
+  return bytes_main(argc, argv, x11_arg_count, x11_args);
 }
 #endif

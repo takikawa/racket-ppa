@@ -26,7 +26,7 @@
                  [sub (if subdir? (format "srfi-~a/" num) "")]
                  [url (λ (b) (format "~a/srfi-std/~asrfi-~a.html" b sub num))])
             (cond-element
-              [(or latex text) @link[(url "http://docs.racket-lang.org") label]]
+              [(or latex text) @link[(url "https://docs.racket-lang.org") label]]
               [else @link[(url ".") label]]))))]
    [(_ num . title) #'(srfi num #:subdir #f . title)]))
 

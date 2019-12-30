@@ -17,7 +17,9 @@ see also term.rkt for some restrictions/changes there
            "term-fn.rkt"
            "keyword-macros.rkt"
            racket/match
+           racket/sequence
            "match-a-pattern.rkt"
+           syntax/boundmap
            (for-template
             racket/base
             "term.rkt"
@@ -31,7 +33,8 @@ see also term.rkt for some restrictions/changes there
            make-language-id
            language-id-nts
            bind-pattern-names
-           check-hole-sanity)
+           check-hole-sanity
+           is-ellipsis?)
   
   (provide (struct-out id/depth))
   
@@ -83,9 +86,24 @@ see also term.rkt for some restrictions/changes there
 
     (define (expected-arguments name stx)
       (raise-syntax-error what (format "~a expected to have arguments" name) orig-stx stx))
-    (define (expect-identifier src stx)
+    (define (expect-identifier stx)
       (unless (identifier? stx)
-        (raise-syntax-error what "expected an identifier" src stx)))
+        (raise-syntax-error what "expected an identifier" orig-stx stx)))
+
+    (define (check-non-terminal-without-underscores id where)
+      (expect-identifier id)
+      (define-values (prefix-sym suffix-sym) (break-out-underscore id))
+      (unless (member prefix-sym all-nts)
+        (raise-syntax-error
+         what
+         (format "expected a non-terminal in ~a" where)
+         orig-stx #'a))
+      (when suffix-sym
+        (raise-syntax-error
+         what
+         (format "underscores not allowed on non-terminal names in ~a" where)
+         orig-stx #'a))
+      (hash-ref aliases prefix-sym prefix-sym))
     
     ; union-find w/o balancing or path compression (at least for now)
     (define (union e f sets)
@@ -152,7 +170,8 @@ see also term.rkt for some restrictions/changes there
                  [under '()]
                  [under-mismatch-ellipsis '()])
         (syntax-case term (side-condition variable-except variable-prefix
-                                          hole name in-hole hide-hole cross unquote and)
+                                          hole name in-hole hide-hole cross unquote and
+                                          compatible-closure-context)
           [(side-condition pre-pat (and))
            ;; rewriting metafunctions (and possibly other things) that have no where, etc clauses
            ;; end up with side-conditions that are empty 'and' expressions, so we just toss them here.
@@ -199,12 +218,12 @@ see also term.rkt for some restrictions/changes there
           [(variable-except a ...)
            (begin
              (for ([a (in-list (syntax->list #'(a ...)))])
-               (expect-identifier term a))
+               (expect-identifier a))
              (values term '()))]
           [variable-except (expected-arguments 'variable-except term)]
           [(variable-prefix a)
            (begin
-             (expect-identifier term #'a)
+             (expect-identifier #'a)
              (values term '()))]
           [(variable-prefix a ...) (expected-exact 'variable-prefix 1 term)]
           [variable-prefix (expected-arguments 'variable-prefix term)]
@@ -241,12 +260,35 @@ see also term.rkt for some restrictions/changes there
           [hide-hole (expected-arguments 'hide-hole term)]
           [(cross a)
            (let ()
-             (expect-identifier term #'a)
-             (define a-str (symbol->string (syntax-e #'a)))
-             (values #`(cross #,(string->symbol (format "~a-~a" a-str a-str)))
+             (define prefix-sym
+               (check-non-terminal-without-underscores #'a 'compatible-closure-context))
+             (values #`(cross #,(string->symbol (format "~a-~a" prefix-sym prefix-sym)))
                      '()))]
           [(cross a ...) (expected-exact 'cross 1 term)]
           [cross (expected-arguments 'cross term)]
+          [(compatible-closure-context id)
+           (let ()
+             (define prefix-sym
+               (check-non-terminal-without-underscores #'id 'compatible-closure-context))
+             (values #`(cross #,(string->symbol (format "~a-~a" prefix-sym prefix-sym)))
+                     '()))]
+          [(compatible-closure-context id #:wrt other-id)
+           (let ()
+             (define prefix-sym
+               (check-non-terminal-without-underscores #'id 'compatible-closure-context))
+             (define other-prefix-sym
+               (check-non-terminal-without-underscores #'other-id 'compatible-closure-context))
+             (values #`(cross #,(string->symbol (format "~a-~a" other-prefix-sym prefix-sym)))
+                     '()))]
+          [(compatible-closure-context . more)
+           (raise-syntax-error
+            what
+            (string-append
+             "compatible-closure-context expected to have 1 mandatory non-terminal name"
+             " argument and optionally the keyword argument #:wrt")
+            orig-stx
+            term)]
+          [compatible-closure-context (expected-arguments 'compatible-closure-context term)]
           [(unquote . _)
            (raise-syntax-error what "unquote disallowed in patterns" orig-stx term)]
           [_
@@ -325,9 +367,6 @@ see also term.rkt for some restrictions/changes there
           [(terms ...)
            (let ()
              (define terms-lst (syntax->list #'(terms ...)))
-             (define (is-ellipsis? term)
-               (and (identifier? term)
-                    (regexp-match? #rx"^[.][.][.]" (symbol->string (syntax-e term)))))
              (when (and (pair? terms-lst) (is-ellipsis? (car terms-lst)))
                (raise-syntax-error what
                                    "ellipsis should not appear in the first position of a sequence"
@@ -527,6 +566,11 @@ see also term.rkt for some restrictions/changes there
       (when nt->hole
         (check-hole-sanity what #'term nt->hole orig-stx))
       #'(void-stx term (name ...) (name/ellipses ...))))
+
+
+(define (is-ellipsis? term)
+  (and (identifier? term)
+       (regexp-match? #rx"^[.][.][.]" (symbol->string (syntax-e term)))))
 
 (define (break-out-underscore id)
   (define sym (syntax-e id))
@@ -751,9 +795,24 @@ see also term.rkt for some restrictions/changes there
                   (loop (cdr dups))))])))
 
   (define (bind-pattern-names err-name names/ellipses vals body)
-    (with-syntax ([(names/ellipsis ...) names/ellipses]
-                  [(val ...) vals])
+    (define known (make-free-identifier-mapping))
+    (define (get-id stx)
+      (syntax-case stx ()
+        [(x . y) (get-id #'x)]
+        [x (identifier? #'x) #'x]))
+    (with-syntax ([(binds ...)
+                   (for/list ([names/ellipsis (in-syntax names/ellipses)]
+                              [val (in-syntax vals)]
+                              #:unless (free-identifier-mapping-get
+                                        known
+                                        (get-id names/ellipsis)
+                                        (λ () #f)))
+                     (free-identifier-mapping-put!
+                      known
+                      (get-id names/ellipsis)
+                      #t)
+                     (list names/ellipsis val))])
       #`(term-let/error-name
          #,err-name
-         ([names/ellipsis val] ...) 
+         (binds ...)
          #,body)))

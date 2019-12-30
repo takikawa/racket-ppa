@@ -3,33 +3,37 @@
 ;;       [http://scheme2006.cs.uchicago.edu/07-clinger.pdf]
 
 (module case '#%kernel
-  (#%require '#%paramz '#%unsafe "small-scheme.rkt" "define.rkt"
+  (#%require '#%paramz '#%unsafe "small-scheme.rkt" "define.rkt" "fixnum.rkt"
              (for-syntax '#%kernel "small-scheme.rkt" "stxcase-scheme.rkt"
-                         "qqstx.rkt" "define.rkt" "sort.rkt"))
+                         "qqstx.rkt" "define.rkt" "sort.rkt" "fixnum.rkt"))
   (#%provide case)
-  
   
   (define-syntax (case stx)
     (syntax-case stx (else)
       ;; Empty case
-      [(_ v) (syntax/loc stx (#%expression (begin v (void))))]
+      [(_ v)
+       (syntax-protect
+        (syntax/loc stx (#%expression (begin v (void)))))]
       
       ;; Else-only case
       [(_ v [else e es ...])
-       (syntax/loc stx (#%expression (begin v (let-values () e es ...))))]
+       (syntax-protect
+        (syntax/loc stx (#%expression (begin v (let-values () e es ...)))))]
       
       ;; If we have a syntactically correct form without an 'else' clause,
       ;; add the default 'else' and try again.
       [(self v [(k ...) e1 e2 ...] ...)
-       (syntax/loc stx (self v [(k ...) e1 e2 ...] ... [else (void)]))]
+       (syntax-protect
+        (syntax/loc stx (self v [(k ...) e1 e2 ...] ... [else (void)])))]
       
       ;; The general case
       [(_ v [(k ...) e1 e2 ...] ... [else x1 x2 ...])
-       (if (< (length (syntax-e #'(k ... ...))) *sequential-threshold*)
-           (syntax/loc stx (let ([tmp v])
-                             (case/sequential tmp [(k ...) e1 e2 ...] ... [else x1 x2 ...])))
-           (syntax/loc stx (let ([tmp v])
-                             (case/dispatch   tmp [(k ...) e1 e2 ...] ... [else x1 x2 ...]))))]
+       (syntax-protect
+        (if (< (length (syntax-e #'(k ... ...))) *sequential-threshold*)
+            (syntax/loc stx (let ([tmp v])
+                              (case/sequential tmp [(k ...) e1 e2 ...] ... [else x1 x2 ...])))
+            (syntax/loc stx (let ([tmp v])
+                              (case/dispatch   tmp [(k ...) e1 e2 ...] ... [else x1 x2 ...])))))]
       
       ;; Error cases
       [(_ v clause ...)
@@ -62,7 +66,28 @@
                [(bad . _)
                 (raise-syntax-error 
                  #f
-                 "bad syntax (not a datum sequence)"
+                 ;; If #'bad is an identifier, report its binding in the error message.
+                 ;; This helps resolving the syntax error when `else' is shadowed somewhere
+                 (if (not (symbol? (syntax-e (syntax bad))))
+                     "bad syntax (not a datum sequence)"
+                     (string-append
+                      "bad syntax (not a datum sequence)\n"
+                      "  expected: a datum sequence or the binding 'else' from racket/base\n"
+                      "  given: "
+                      (let ([binding (identifier-binding (syntax bad))])
+                        (cond
+                          [(not binding) "an unbound identifier"]
+                          [(eq? binding 'lexical) "a locally bound identifier"]
+                          [else
+                           (let*-values ([(src) (car binding)]
+                                         [(mpath base) (module-path-index-split src)])
+                             (cond
+                               [(not mpath)
+                                "an identifier bound by the current module"]
+                               [else
+                                (format "an identifier required from the module ~a"
+                                        (resolved-module-path-name
+                                         (module-path-index-resolve src)))]))]))))
                  stx
                  (syntax bad))]
                [_
@@ -83,23 +108,27 @@
   (define-syntax (case/sequential stx)
     (syntax-case stx (else)
       [(_ v [(k ...) es ...] arms ... [else xs ...])
-       #'(if (case/sequential-test v (k ...))
-             (let-values () es ...)
-             (case/sequential v arms ... [else xs ...]))]
+       (syntax-protect
+        #'(if (case/sequential-test v (k ...))
+              (let-values () es ...)
+              (case/sequential v arms ... [else xs ...])))]
       [(_ v [(k ...) es ...] [else xs ...])
-       #'(if (case/sequential-test v (k ...))
-             (let-values () es ...)
-             (let-values () xs ...))]
+       (syntax-protect
+        #'(if (case/sequential-test v (k ...))
+              (let-values () es ...)
+              (let-values () xs ...)))]
       [(_ v [else xs ...])
-       #'(let-values () xs ...)]))
+       (syntax-protect
+        #'(let-values () xs ...))]))
   
   (define-syntax (case/sequential-test stx)
-    (syntax-case stx ()
-      [(_ v ())         #'#f]
-      [(_ v (k))        #`(equal? v 'k)]
-      [(_ v (k ks ...)) #`(if (equal? v 'k)
-                              #t
-                              (case/sequential-test v (ks ...)))]))
+    (syntax-protect
+     (syntax-case stx ()
+       [(_ v ())         #'#f]
+       [(_ v (k))        #`(equal? v 'k)]
+       [(_ v (k ks ...)) #`(if (equal? v 'k)
+                               #t
+                               (case/sequential-test v (ks ...)))])))
   
   ;; Triple-dispatch case:
   ;; (1) From the type of the value to a type-specific mechanism for
@@ -109,31 +138,31 @@
   (define-syntax (case/dispatch stx)
     (syntax-case stx (else)
       [(_ v [(k ...) es ...] ... [else xs ...])
-       #`(let ([index
-                #,(let* ([ks  (partition-constants #'((k ...) ...))]
-                         [exp #'0]
-                         [exp (if (null? (consts-other ks))
-                                  exp
-                                  (dispatch-other #'v (consts-other ks) exp))]
-                         [exp (if (null? (consts-char ks))
-                                  exp
-                                  #`(if (char? v)
-                                        #,(dispatch-char #'v (consts-char ks))
-                                        #,exp))]
-                         [exp (if (null? (consts-symbol ks))
-                                  exp
-                                  #`(if #,(test-for-symbol #'v (consts-symbol ks))
-                                        #,(dispatch-symbol #'v (consts-symbol ks) #'0)
-                                        #,exp))]
-                         [exp (if (null? (consts-fixnum ks))
-                                  exp
-                                  #`(if (fixnum? v)
-                                        #,(dispatch-fixnum #'v (consts-fixnum ks))
-                                        #,exp))])
-                    exp)])
-           #,(index-binary-search #'index #'([xs ...] [es ...] ...)))]))
+       (syntax-protect
+        #`(let ([index
+                 #,(let* ([ks  (partition-constants #'((k ...) ...))]
+                          [exp #'0]
+                          [exp (if (null? (consts-other ks))
+                                   exp
+                                   (dispatch-other #'v (consts-other ks) exp))]
+                          [exp (if (null? (consts-char ks))
+                                   exp
+                                   #`(if (char? v)
+                                         #,(dispatch-char #'v (consts-char ks))
+                                         #,exp))]
+                          [exp (if (null? (consts-symbol ks))
+                                   exp
+                                   #`(if #,(test-for-symbol #'v (consts-symbol ks))
+                                         #,(dispatch-symbol #'v (consts-symbol ks) #'0)
+                                         #,exp))]
+                          [exp (if (null? (consts-fixnum ks))
+                                   exp
+                                   #`(if (fixnum-for-every-system? v)
+                                         #,(dispatch-fixnum #'v (consts-fixnum ks))
+                                         #,exp))])
+                     exp)])
+            #,(index-binary-search #'index #'([xs ...] [es ...] ...))))]))
 
-    
   (begin-for-syntax
     (define *sequential-threshold* 12)
     (define *hash-threshold*       10)
@@ -165,7 +194,7 @@
                             [else
                              (let ([y (syntax->datum (car ys))])
                                (cond [(duplicate? y) (inner f s c o (cdr ys))]
-                                     [(fixnum? y)    (inner (add f y idx) s c o (cdr ys))]
+                                     [(fixnum-for-every-system? y) (inner (add f y idx) s c o (cdr ys))]
                                      [(symbol? y)    (inner f (add s y idx) c o (cdr ys))]
                                      [(keyword? y)   (inner f (add s y idx) c o (cdr ys))]
                                      [(char? y)      (inner f s (add c y idx) o (cdr ys))]

@@ -159,7 +159,8 @@
                                                    (raise-argument-error 'current-expand-observe
                                                                           "(or/c (procedure-arity-includes/c 2) #f)"
                                                                           v))
-                                                 v)))
+                                                 v)
+                                               'current-expand-observe))
 
 ;; ----------------------------------------
 
@@ -215,7 +216,7 @@
 ;; Register a callback for `raise-syntax-error`
 (set-current-previously-unbound!
  (lambda ()
-   (define ctx (current-expand-context))
+   (define ctx (force (current-expand-context)))
    (define phase-to-ids (and ctx (expand-context-need-eventually-defined ctx)))
    (and phase-to-ids
         (hash-ref phase-to-ids (expand-context-phase ctx) null))))

@@ -1,10 +1,12 @@
 #lang racket/base
 (require "../common/check.rkt"
+         "../common/class.rkt"
          "../host/thread.rkt"
          "port.rkt"
          "output-port.rkt"
          "custom-port.rkt"
-         "pipe.rkt")
+         "pipe.rkt"
+         "count.rkt")
 
 (provide make-output-port)
 
@@ -112,8 +114,7 @@
           (set! output-pipe #f)
           (write-out self bstr start end non-block/buffer? enable-break? copy?)]
          [else
-          (define write-out (core-output-port-write-out output-pipe))
-          (write-out (core-port-self output-pipe) bstr start end non-block/buffer? enable-break? copy?)])]
+          (send core-output-port output-pipe write-out bstr start end non-block/buffer? enable-break? copy?)])]
       [else
        (define r
          ;; Always tell user port to re-enable breaks if it blocks, since
@@ -132,7 +133,7 @@
           (wrap-check-write-evt-result '|user port write| r start end non-block/buffer?)]
          [else r])]))
 
-  (define (get-write-evt self orig-out bstr start end)
+  (define (get-write-evt self bstr start end)
     (end-atomic)
     (define r (user-get-write-evt bstr start end))
     (unless (evt? r)
@@ -167,25 +168,26 @@
     (user-close)
     (start-atomic))
 
-  (make-core-output-port
-   #:name name
-   #:self #f
-   #:evt evt
-   #:write-out
-   (if (output-port? user-write-out)
-       user-write-out
-       write-out)
-   #:close close
-   #:write-out-special
-   (if (output-port? user-write-out-special)
-       user-write-out-special
-       (and user-write-out-special write-out-special))
-   #:get-write-evt (and user-get-write-evt get-write-evt)
-   #:get-write-special-evt (and user-get-write-special-evt
-                                (lambda (self v)
-                                  (user-get-write-special-evt v)))
-   #:get-location get-location
-   #:count-lines! count-lines!
-   #:init-offset init-offset
-   #:file-position file-position
-   #:buffer-mode buffer-mode))
+  (finish-port/count
+   (new core-output-port
+        #:field
+        [name name]
+        [evt evt]
+        [offset init-offset]
+        #:override
+        [write-out (if (output-port? user-write-out)
+                       user-write-out
+                       write-out)]
+        [close close]
+        [write-out-special
+         (if (output-port? user-write-out-special)
+             user-write-out-special
+             (and user-write-out-special write-out-special))]
+        [get-write-evt (and user-get-write-evt get-write-evt)]
+        [get-write-special-evt (and user-get-write-special-evt
+                                    (lambda (self v)
+                                      (user-get-write-special-evt v)))]
+        [get-location get-location]
+        [count-lines! count-lines!]
+        [file-position file-position]
+        [buffer-mode buffer-mode])))

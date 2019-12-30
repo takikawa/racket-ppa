@@ -1,10 +1,12 @@
-;; Bulgarian translation of Racket string constants file, version: 1.20
+;; Bulgarian translation of Racket string constants file, version: 1.29
 ;; This file is distributed under the same terms as Racket
-;; Copyright on translation: Alexander Shopov <ash@kambanaria.org>, 2015, 2016, 2017, 2018.
+;; Copyright on translation: Alexander Shopov <ash@kambanaria.org>, 2015, 2016, 2017, 2018, 2019.
 
 (module bulgarian-string-constants "string-constant-lang.rkt"
  ;;; when translating this constant, substitute name of actual language for `English'
  (is-this-your-native-language "Български ли е майчиният ви език?")
+
+ (#:define drr "DrRacket")
 
  (are-you-sure-you-want-to-switch-languages
   "Това сменя езика на интерфейса и ще трябва да рестартирате DrRacket. Сигурни ли сте?")
@@ -19,8 +21,8 @@
 
  ;;; general purpose (DrRacket is hereby a word in every language, by decree of Robby :)
  (plt "PLT")
- (drscheme "DrRacket")
- (drracket "DrRacket")
+ (drscheme drr)
+ (drracket drr)
  (ok "Добре")
  (cancel "Отмяна")
  (abort "Преустановяване")
@@ -91,8 +93,8 @@
  (error-sending-bug-report "Грешка при изпращане на доклада за грешка")
  (error-sending-bug-report-expln
   "Възникна грешка при изпращането на този доклад."
-  " Ако сте сигурни, че нямате проблеми с връзката си към Интернет, посетете:\n\n    http://bugs.racket-lang.org/\n\nи"
-  " подайте доклада за грешка през формуляра онлайн. Много съжаляваме за затруднението.\n\nСъобщението към проблема е:\n~a")
+  " Ако сте сигурни, че нямате проблеми с връзката си към Интернет, посетете:\n\n    https://github.com/racket/racket/issues/new\n\n и"
+  " подайте доклада за грешка през GitHub. Много съжаляваме за затруднението.\n\nСъобщението към проблема е:\n~a")
  (illegal-bug-report "Недовършен доклад за грешка")
  (pls-fill-in-field "Попълнете полето „~a“")
  (malformed-email-address "Неправилен адрес на е-поща")
@@ -103,6 +105,10 @@
  (cs-italic "Курсив")
  (cs-bold "Получерно")
  (cs-underline "Подчертаване")
+ (cs-smoothing-default "Стандартно")
+ (cs-smoothing-partial "Частично заглаждане")
+ (cs-smoothing-full "Пълно заглаждане")
+ (cs-smoothing-none "Без заглаждане")
  (cs-change-color "Смяна на цвета")
  (cs-foreground-color "Основен цвят")
  (cs-background-color "Цвят на фона")
@@ -193,7 +199,7 @@
  (online-expansion-error-margin "в бялото поле")
  ; the label of a preference in the (string-constant online-expansion) section
  (show-arrows-on-mouseover "Присвояване и стрелки към крайната позиция при курсор")
- (show-blueboxes "Сини кутии и полуокръжности на стрелките към тях")
+ (show-blueboxes "Заместващи кутии и полуокръжности на стрелките към тях") ;; blue boxes should be ``signature'' boxes now - заместващи кутии
  ;;; info bar at botttom of drscheme frame
  (collect-button-label "Боклук")
  (read-only "Само за четене")
@@ -352,6 +358,21 @@
  ;; see also: cs-status-loading-docs-index
  (help-desk-loading-documentation-index "Помощ: индексът с документацията се зарежда")
 
+  ;; the next four are all in the same dialog box (only one of the first two appears)
+  (help-desk-materialize-docs-something-changed
+   "DrRacket установи проблем с индекса на документацията. Да се пробва ли поправка?"
+   " Това може да отнеме известно време?\n\nСъщинският проблем, е че директорията за"
+   " документация „~a“ не съществува и търсенето чрез браузър ще е неуспешно.")
+  (help-desk-materialize-docs-first-time
+   "DrRacket установи проблем с индекса на документацията. Да се пробва ли поправка?"
+   " Това може да отнеме известно време?\n\nСъщинският проблем, е DrRacket не е генерирал"
+   " досега документацията и търсенето чрез браузър ще е неуспешно.")
+  (help-desk-do-nothing "Нищо да не се прави")
+  (help-desk-materialize-user-docs "Генериране на потребителската документация")
+  ; this is used in a dialog to let the user know that work is being done based on
+  ; choices made from the previous dialog in the above four string constants
+  (help-desk-materializing-user-docs... "Генериране на потребителската документация…")
+
  ;; Help desk htty proxy
  (http-proxy "Сървър-посредник за HTTP")
  (proxy-direct-connection "Пряка връзка")
@@ -391,8 +412,8 @@
  (install-plt-filename "Име на файл:")
  (install-plt-url "Адрес:")
  ; an error message from a primitive operation is appended to the end of this message.
- (install-plt-error-downloading "Грешка при изтеглянето на файл"
-                                " „.plt“.\n\nДопълнителна информация:\n")
+ (install-plt-error-downloading "Грешка при изтеглянето на файл „.plt“.\n\nДопълнителна информация:\n")
+                                
  (install-plt-error-header "Грешка при проверката на изтегления файл „.plt“. Проверете адреса и опитайте отново.")
 
  ;; install plt file when opened in drscheme strings
@@ -502,7 +523,7 @@
  (design-your-own-color-schemes "Собствена цветова схема") ; pointer to (english-only) docs
  (style-and-color-names "&Имена на стилове и цветове")
 
- (add-spacing-between-lines " Добавяне по пиксел между редовете")
+ (add-spacing-between-lines "  Добавяне по пиксел между редовете")
 
  (editor-x-selection-mode "Изрично копиране преди поставяне, без автоматично копиране на избраното")
 
@@ -615,7 +636,7 @@
 
  ;;; reverting a file
  (are-you-sure-revert
-  "Сигурни ли сте, че искате да възстановите файла към запазеното му състояние. Промените след това ще бъдат необратимо загубени. Това действие е необратимо.")
+  "Сигурни ли сте, че искате да възстановите файла към запазеното му състояние. Промените след това ще бъдат безвъзвратно загубени. Това действие е необратимо.")
  (are-you-sure-revert-title
   "Възстановяване?")
 
@@ -670,7 +691,7 @@
 
  (file-menu-label "&Файл")
 
- (new-info  "Отваряне на файл")
+ (new-info "Отваряне на файл")
  (new-menu-item "&Нов")
  (new-...-menu-item "&Нов…")
 
@@ -888,6 +909,19 @@
 
  (definitions-modified
   "Файлът с дефинициите е променян във файловата система — или го запазете, или го възстановете от диска.")
+
+ ;; for a dialog that appears when Run is clicked and there are unsaved files
+ ; the ~a is filled with a filename (same string that appears in a tab)
+ (one-file-not-saved-do-the-save?
+  "Файлът „~a“ не е запазен. Да се запази ли преди изпълнението?")
+ ; the string is suffixed with a list of filenames (which are separated by newlines)
+ (many-files-not-saved-do-the-save?
+  "Следните файлове не са запазени. Да се запазят ли преди изпълнението?\n\nФайлове:")
+ ; button label to go ahead with saving
+ (save-all-files "Запазване на всички файлове")
+ ; check box in the dialog and also used in the preferences dialog
+ (save-after-switching-tabs "Запазване на файловете при смяна на подпрозорец")
+
  (drscheme-internal-error "Вътрешна грешка на DrRacket")
 
  ;;; tools
@@ -953,8 +987,8 @@
  (save-interactions-as-text "Запазване на скицника като текст…")
  (print-interactions "Отпечатване на скицника…")
  (new-tab "Нов подпрозорец")
- (close-tab "Затваряне  на подпрозорец") ;; must not have any &s in it.
- (close-tab-amp "&Затваряне  на подпрозорец") ;; like close-tab, but with an ampersand on the same letter as the one in close-menu-item
+ (close-tab "Затваряне на подпрозорец") ;; must not have any &s in it.
+ (close-tab-amp "&Затваряне на подпрозорец") ;; like close-tab, but with an ampersand on the same letter as the one in close-menu-item
 
  ;;; edit menu
  (split-menu-item-label "&Разделяне")
@@ -984,7 +1018,7 @@
  (limit-memory-warning-prefix " ПРЕДУПРЕЖДЕНИЕ: ")
  (limit-memory-warning
   "опасно е да стартирате програмата без ограничаване на паметта. Без него DrRacket"
-  "  може да забие, защото не може да се защити от програми, които заделят твърде много памет.")
+  " може да забие, защото не може да се защити от програми, които заделят твърде много памет.")
 
  (clear-error-highlight-menu-item-label "Изчистване на оцветяването на грешките")
  (clear-error-highlight-item-help-string "Без оцветяване на грешките в розово")
@@ -1188,8 +1222,12 @@
  (other-languages "Други езици")
 
  (module-language-name "Определяне на езика от изходния код")
- (module-language-one-line-summary "Редът започващ с „#lang“ определя езика")
- (module-language-auto-text "Автоматичен ред с „#lang“") ;; shows up in the details section of the module language
+ (module-language-one-line-summary "Редът, започващ с „#lang“, определя езика")
+ ;; shows up in the details section of the module language
+ (module-language-auto-text "Автоматичен ред с „#lang“")
+ (module-language-auto-text-most-recent "Последно ползван ред с „#lang“")
+ ; to the right of this string is a text entry field whose content is the #lang line that'll be used.
+ (module-language-auto-text-always-same "Винаги този ред с „#lang“:")
  ;; the next four string constants show up in the REPL in DrRacket in the "Racket Language",
  ;; which is also the "Determine language from source" language. They are put right after the name
  ;; of the language from the "#lang" line at the beginning of the source file
@@ -1333,6 +1371,9 @@
  (teachpack "Учебен модул")
  (welcome-to "Добре дошли в")
  (version "версия")
+ ;; The following is shown on 2nd line of welcome message in repl.
+ ;; It is concatenated at end of: "language": LANGUAGE; "memory limit:" LIMIT
+ (memory-limit ", ограничаване на паметта до:")
 
  ;;; kill evaluation dialog
  (kill-evaluation? "Принудително ли да е спирането на изчислението?")
@@ -1788,11 +1829,11 @@
  (spell-choose-replacement-word "Избор на друга дума") ;; label in dialog
 
  ;; GUI for installing a pkg package; available via File|Install Package...
- (install-pkg-install-by-source "Отгатване")         ; tab label
- (install-pkg-install-from-list "Има го в каталога") ; tab label
- (install-pkg-install-installed "Текущо инсталирани")    ; tab label
- (install-pkg-migrate-from "Копиране от версия")           ; tab label
- (install-pkg-settings "Настройки")                        ; tab label
+ (install-pkg-install-by-source "Отгатване")           ; tab label
+ (install-pkg-install-from-list "От каталога")         ; tab label
+ (install-pkg-install-installed "Текущо инсталирани")  ; tab label
+ (install-pkg-migrate-from "Копиране от версия")       ; tab label
+ (install-pkg-settings "Настройки")                    ; tab label
  (install-pkg-menu-item... "Инсталиране на пакет…")
  (install-pkg-dialog-title "Инсталиране на пакет")
  (install-pkg-source-label "Източник на пакет")
@@ -1802,6 +1843,8 @@
  (install-pkg-use "Използване") ; as opposed to "Infer", label for text box
  (install-pkg-type-label "Вид източник на пакет")
  (install-pkg-file "Файл")
+ (install-pkg-link "Връзка")
+ (install-pkg-static-link "Статична връзка")
  (install-pkg-dir "Директория")
  (install-pkg-dir-url "Изтриване на директория")
  (install-pkg-file-url "Изтриване на файл")
@@ -1828,6 +1871,7 @@
  (install-pkg-default "Стандартно")
  (install-pkg-scope-label "Обхват на пакета")
  (install-pkg-default-scope-label "Стандартен обхват на пакет") ; for picking the scope to be default
+ (install-pkg-default-scope-changed "Стандартният обхват е сменен на ~a") ; confirming message after change
  (install-pkg-installation "Конкретна инсталация на Racket")
  (install-pkg-user "Конкретен потребител и версия на Racket")
  (install-pkg-set-as-default "Да е стандартно")
@@ -1837,6 +1881,26 @@
  (install-pkg-update-package-list "Обновяване на списъка с пакети")
  (install-pkg-stop-update "Спиране на обновяването")
  (install-pkg-filter "Филтриране")
+ (install-pkg-match "~a/~a съвпадения")
+ (install-pkg-package "Пакет")
+ (install-pkg-author "Автор")
+ (install-pkg-description "Описание")
+ (install-pkg-tags "Етикети")
+ (install-pkg-checksum "Контролна сума")
+ (install-pkg-source "Източник")
+ (install-pkg-catalog "Каталог")
+ (install-pkg-scope "Обхват")
+ (install-pkg-name "Име")
+ (install-pkg-match "~a/~a съвпадения")
+ (install-pkg-package "Пакет")
+ (install-pkg-author "Автор")
+ (install-pkg-description "Описание")
+ (install-pkg-tags "Етикети")
+ (install-pkg-checksum "Контролна сума")
+ (install-pkg-source "Източник")
+ (install-pkg-catalog "Каталог")
+ (install-pkg-scope "Обхват")
+ (install-pkg-name "Име")
  (install-pkg-update-catalogs? "Да се приведе ли базата да отговаря на настроените каталози?")
  (install-pkg-currently-configured-are "Следните каталози са настроени в момента:")
  (install-pkg-database-recorded-are "Следните каталози са записани в базата:")
@@ -1856,10 +1920,24 @@
  (install-pkg-close-terminal-output "Затваряне на изхода")
  (install-pkg-show-all-options "Показване на всички опции")
  (install-pkg-migrate-available-installations "Налични инсталации")
+ ;; all ~a will be substituted with the different single characters
+ ;; conveying the state, by default these are ✓*!=@
+ (install-pkg-legend "~a: инсталиран; ~a: автоматично инсталиран; ~a: нестандартен обхват; ~a: като връзка; ~a: от адрес")
  (pkg-manager-menu-item "Управление на пакети…")
+ (install-pkg-title "Управление на пакети")
  ;; where ~a gets an installation name:
  (install-pkg-packages-for "Пакети за „~a“")
  (install-pkg-really-remove-installation "Сигурни ли сте, че искате да изтриете всички пакети и информация в „~a“?")
+ (install-pkg-installer "Инсталиране на пакети")
+ (install-pkg-copy "Копиране на съобщението")
+ (install-pkg-installation "инсталация")
+ (install-pkg-user "потребител")
+ (install-pkg-any "Всякакъв") ;; any file type
+ (install-pkg-bad "неправилен") ;; bad (not supported) file type
+ (install-pkg-catalogs "Каталози с пакети")
+ (install-pkg-updating "Обновяване на списъка с пакети…")
+ (install-pkg-updating-from "Обновяване от ~a…")
+ (install-pkg-details-from "Получаване на данните на ~a от ~a…")
 
  (install-pkg-abort-set-scope "Преустановяване на промяната на обхвата")
 
@@ -1880,7 +1958,7 @@
  (install-pkg-add-package-catalog "Добавяне на пакетен каталог")
 
  (install-pkg-not-rentrant "Не може едновременно да инсталирате и да обновявате —"
-                            " или спрете действието, или го изчакайте.")
+                           " или спрете действието, или го изчакайте.")
 
  ;; open a file via a collection path (new "Open" menu item in DrRacket)
  (open-require-path "Отваряне на път с необходими файлове…")
@@ -1898,9 +1976,8 @@
  ; first and third ~a are filled with /etc/paths.d/racket (or some other path like it in the future)
  ; and the second one is filled with the path to the bin directory that was put into that file.
  (added-racket/bin-to-path
-   "Вече можете да използвате „racket“ и инструментите от командния"
-   " ред.\n\nПроменливата на средата „PATH“ е настроена за всички потребители"
-   " чрез\nдобавяне на връзката „~a“,\nкоято сочи към „~a“.\nЗа да"
-   " отмените действието, изтрийте „~a“.")
+   "Вече можете да използвате „racket“ и инструментите от командния ред.\n\nПроменливата"
+   " на средата „PATH“ е настроена за всички потребители чрез\nдобавяне на връзката"
+   " „~a“,\nкоято сочи към „~a“.\nЗа да отмените действието, изтрийте „~a“.")
  (add-racket/bin-to-path "Настройване на командния ред за Racket…") ;; menu item label
 )

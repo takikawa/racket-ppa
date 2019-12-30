@@ -1,51 +1,136 @@
 #lang racket/base
 (require racket/contract/base
-         (for-template racket/base
-                       racket/contract/base
-                       syntax/location)
          syntax/srcloc
          syntax/modcollapse
-         racket/syntax)
+         racket/syntax
+         syntax/location)
 
 (provide/contract
  [wrap-expr/c
   (->* (syntax? syntax?)
-       (#:positive (or/c syntax? string? module-path-index?
+       (#:arg? any/c
+        #:positive (or/c syntax? string? module-path-index?
                          'from-macro 'use-site 'unknown)
         #:negative (or/c syntax? string? module-path-index?
                          'from-macro 'use-site 'unknown)
         #:name (or/c identifier? symbol? string? #f)
         #:macro (or/c identifier? symbol? string? #f)
-        #:context (or/c syntax? #f))
+        #:context (or/c syntax? #f)
+        #:phase exact-integer?)
        syntax?)])
 
-(module macro-arg/c racket/base
-  (require racket/contract/base
-           racket/contract/combinator)
+(module runtime racket/base
+  (require (for-syntax racket/base
+                       syntax/free-vars)
+           racket/contract/base
+           racket/contract/combinator
+           (only-in racket/contract/private/base
+                    make-apply-contract)
+           syntax/location)
+  (provide (all-from-out racket/base
+                         syntax/location)
+           expr/contract
+           relative-source)
 
-  (provide macro-arg/c)
+  (define (macro-expr/c arg? expr-name ctc0)
+    (define ctc (coerce-contract 'wrap-expr/c ctc0))
+    (define proj (get/build-late-neg-projection ctc))
+    (make-contract
+     #:name (unquoted-printing-string
+             (format "macro ~a contract~a~a"
+                     (if arg? "argument" "result")
+                     (if expr-name " on " "")
+                     (if expr-name expr-name "")))
+     #:first-order (contract-first-order ctc)
+     #:late-neg-projection
+     (λ (blame)
+       (define blame* (blame-add-context blame (format "~s" (contract-name ctc)) #:swap? arg?))
+       (proj blame*))
+     #:list-contract? (list-contract? ctc)))
 
-  (define (macro-arg/c macro-name ctc)
-    (let ([ctc-project (get/build-late-neg-projection (coerce-contract 'wrap-expr/c ctc))])
-      ((cond [(flat-contract? ctc) make-flat-contract]
-             [(chaperone-contract? ctc) make-chaperone-contract]
-             [else make-contract])
-       #:name (contract-name ctc)
-       #:first-order (contract-first-order ctc)
-       #:late-neg-projection
-       (λ (blame)
-         (let ([blame* (if macro-name (blame-add-context blame #f #:important macro-name) blame)])
-           (ctc-project (blame-swap blame*))))
-       #:list-contract? (list-contract? ctc)))))
+  (define (macro-dep-expr/c arg? expr-name)
+    (make-contract
+     #:name (unquoted-printing-string
+             (format "macro ~a contract~a~a"
+                     (if arg? "argument" "result")
+                     (if expr-name " on " "")
+                     (if expr-name expr-name "")))
+     #:late-neg-projection
+     (lambda (blame)
+       (lambda (_f neg)
+         ;; Note: specialized to _f = return-second-arg.
+         (lambda (c v)
+           (define (slow-path)
+             (define ctc (coerce-contract 'wrap-expr/c c))
+             (define proj (get/build-late-neg-projection ctc))
+             (define blame*
+               (blame-add-context blame (format "~s" (contract-name ctc)) #:swap? arg?))
+             ((proj blame*) v neg))
+           (cond [(flat-contract? c)
+                  (let ([c (if (procedure? c) c (coerce-contract 'wrap-expr/c c))])
+                    (if (c v) v (slow-path)))]
+                 [else (slow-path)]))))))
 
-(require (for-template 'macro-arg/c))
+  (define (return-second-arg c v) v)
+
+  (begin-for-syntax
+    (define (okay-to-lift? ee)
+      (and (identifier? ee) (not (local-free-vars? ee))))
+    (define (self-module-path-index? mpi)
+      (define-values (rel base) (module-path-index-split mpi))
+      (and (eq? rel #f) (eq? (module-path-index-submodule mpi) #f)))
+    (define (local-free-vars? ee)
+      (for/or ([fv (in-list (free-vars ee #:module-bound? #t))])
+        (define b (identifier-binding fv))
+        (cond [(list? b) (self-module-path-index? (car b))]
+              [else #t]))))
+
+  (define-syntax (expr/contract stx)
+    (cond
+      [(eq? (syntax-local-context) 'expression)
+       (syntax-case stx ()
+         [(_ val-expr ctc-expr arg? expr-name [mac-arg ...])
+          (let ([ctc-ee (local-expand #'ctc-expr 'expression null)])
+            (cond [(okay-to-lift? ctc-ee)
+                   #`(#,(syntax-local-lift-expression
+                         #`(make-apply-contract
+                            (macro-expr/c arg? expr-name #,ctc-ee)
+                            mac-arg ...))
+                      val-expr)]
+                  [else
+                   #`(#,(syntax-local-lift-expression
+                         #`((make-apply-contract
+                             (macro-dep-expr/c arg? expr-name)
+                             mac-arg ...)
+                            return-second-arg))
+                      #,ctc-ee
+                      val-expr)]))])]
+      [else #`(#%expression #,stx)]))
+
+  (define (relative-source base-mpi rel-mod-path)
+    (define r
+      (resolved-module-path-name
+       (module-path-index-resolve
+        (module-path-index-join rel-mod-path base-mpi))))
+    (cond [(pair? r)
+           (cons 'submod r)]
+          [(symbol? r)
+           (list 'quote r)]
+          [else r])))
+
+;; Allow phase shift of 0 or 1 without needing to lift requires
+(require (for-template (submod "." runtime))
+         ;; for phase +1 uses, only need to instantiate, since we’ll shift
+         (only-in (submod "." runtime)))
 
 (define (wrap-expr/c ctc-expr expr
-                     #:positive [pos-source 'use-site]
-                     #:negative [neg-source 'from-macro]
+                     #:arg? [arg? #t]
+                     #:positive [pos-source 'from-macro]
+                     #:negative [neg-source 'use-site]
                      #:name [expr-name #f]
                      #:macro [macro-name #f]
-                     #:context [ctx (current-syntax-context)])
+                     #:context [ctx (current-syntax-context)]
+                     #:phase [phase (syntax-local-phase-level)])
   (let* ([pos-source-expr
           (get-source-expr pos-source
                            (if (identifier? macro-name) macro-name ctx))]
@@ -63,32 +148,31 @@
                  (syntax-case ctx ()
                    [(x . _) (identifier? #'x) (syntax-e #'x)]
                    [x (identifier? #'x) (syntax-e #'x)]
-                   [_ #f])]
-                [else #f])])
-    (base-wrap-expr/c expr #`(macro-arg/c '#,macro-name #,ctc-expr)
-                      #:positive pos-source-expr
-                      #:negative neg-source-expr
-                      #:expr-name (cond [(and macro-name expr-name)
-                                         (format "~a of ~a" expr-name macro-name)]
-                                        [(or macro-name expr-name)
-                                         => (λ (name) (format "~a" name))]
-                                        [else #f])
-                      #:source #`(quote-syntax #,expr))))
-
-(define (base-wrap-expr/c expr ctc-expr
-                          #:positive positive
-                          #:negative negative
-                          #:expr-name expr-name
-                          #:source source)
-  (let ([expr-name (or expr-name #'#f)]
-        [source (or source #'#f)])
-    (quasisyntax/loc expr
-      (contract #,ctc-expr
-                #,expr
-                #,negative
-                #,positive
-                #,expr-name
-                #,source))))
+                   [_ '?])]
+                [else '?])]
+         [introduce (make-syntax-introducer)]
+         [phase-shift (- phase (syntax-local-phase-level))]
+         [shift+introduce (lambda (stx) (introduce (syntax-shift-phase-level stx phase-shift)))]
+         [unshift+introduce (lambda (stx) (introduce (syntax-shift-phase-level stx (- phase-shift))))]
+         [expr+ctc (shift+introduce
+                    #`(expr/contract #,(unshift+introduce expr) #,(unshift+introduce ctc-expr)
+                                     '#,(and arg? #t) '#,expr-name
+                                     [#,pos-source-expr
+                                      #,neg-source-expr
+                                      '#,macro-name
+                                      (quote-syntax #,expr)
+                                      #f]))])
+    (cond
+      ;; no need to lift for common phases, since we explicitly require them in this module
+      [(memq phase-shift '(0 1))
+       expr+ctc]
+      [else
+       (unless (syntax-transforming?)
+         (raise-arguments-error 'wrap-expr/c "not currently expanding"))
+       (define phased-require-spec
+         (introduce (datum->syntax #'here `(for-meta ,phase-shift ,(quote-module-path runtime)))))
+       (syntax-local-introduce (syntax-local-lift-require (syntax-local-introduce phased-require-spec)
+                                                          (syntax-local-introduce expr+ctc)))])))
 
 (define (get-source-expr source ctx)
   (cond [(eq? source 'use-site)
@@ -128,17 +212,3 @@
           (cond [(list? b) (car b)] ;; module-path-index
                 [else 'use-site]))
         'unknown)))
-
-(module source racket/base
-  (provide relative-source)
-  (define (relative-source base-mpi rel-mod-path)
-    (define r
-      (resolved-module-path-name
-       (module-path-index-resolve
-        (module-path-index-join rel-mod-path base-mpi))))
-    (cond [(pair? r)
-           (cons 'submod r)]
-          [(symbol? r)
-           (list 'quote r)]
-          [else r])))
-(require (for-template (submod "." source)))

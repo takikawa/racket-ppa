@@ -1,5 +1,31 @@
 ------------------------------
-       Version 7.1
+       Version 7.5
+------------------------------
+
+  . change the bound variable jumping around to ignore arrows that
+    come from `require`s.
+
+  . recall the most recently used #lang line and use that for new tabs
+
+  . minor bug fixes and documentation fixes
+
+------------------------------
+       Version 7.4
+------------------------------
+
+  . minor bug fixes
+
+------------------------------
+       Version 7.3
+------------------------------
+
+  . Improved DrRacket's support for the OS's
+    light-on-dark color schemes
+
+  . minor bug fixes
+
+------------------------------
+       Version 7.2
 ------------------------------
 
   . Added QuickScript to the standard install for DrRacket.

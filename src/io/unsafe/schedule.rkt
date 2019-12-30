@@ -8,6 +8,7 @@
          unsafe-poll-ctx-eventmask-wakeup
          unsafe-poll-ctx-milliseconds-wakeup
          unsafe-signal-received
+         unsafe-make-signal-received
          unsafe-set-sleep-in-thread!)
 
 (define (unsafe-poller proc)
@@ -21,7 +22,13 @@
                  [vals (values vals #f)]
                  [(eq? evt self)
                   ;; Register wakeups:
-                  (proc self poll-ctx)
+                  (define-values (vals evt) (proc self poll-ctx))
+                  (when vals
+                    ;; The rule here is that we cancel any sleep so
+                    ;; that the event will be polled again; we do not
+                    ;; select the event now. That rule accomodates
+                    ;; the old Racket scheduler.
+                    (sandman-poll-ctx-merge-timeout poll-ctx (current-inexact-milliseconds)))
                   (values #f self)]
                  [else
                   (values #f evt)])]))))
@@ -53,6 +60,11 @@
   
 (define (unsafe-signal-received)
   (rktio_signal_received rktio))
+
+(define (unsafe-make-signal-received)
+  (let ([rktio rktio]) ; capture current place's `rktio`
+    (lambda()
+      (rktio_signal_received rktio))))
 
 (define (unsafe-set-sleep-in-thread! do-sleep woke-fd)
   (sandman-set-background-sleep! do-sleep woke-fd))

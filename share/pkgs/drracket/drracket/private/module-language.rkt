@@ -308,7 +308,7 @@
                                    collection-paths)
                            (vector? command-line-args)
                            (andmap string? (vector->list command-line-args))
-                           (string? auto-text)
+                           (or (string? auto-text) (not auto-text))
                            (boolean? compilation-on?)
                            ((listof (listof symbol?)) submodules-to-run)
                            (boolean? enforce-module-constants)
@@ -358,7 +358,8 @@
         (string-constant module-language-one-line-summary))
       
       (define/public (get-auto-text settings)
-        (module-language-settings-auto-text settings))
+        (or (module-language-settings-auto-text settings)
+            (preferences:get 'drracket:most-recent-lang-line)))
       
       ;; utility for the front-end method: return a function that will return
       ;; each of the given syntax values on each call, executing thunks when
@@ -550,8 +551,9 @@
                            (create-embedding-executable
                             exe-name
                             #:gracket? gui?
-                            #:aux (cons '(subsystem . console) aux)
+                            #:aux aux
                             #:verbose? #f
+                            #:expand-namespace (make-base-namespace)
                             #:modules (list (list #f program-filename))
                             #:configure-via-first-module? #t
                             #:literal-expression
@@ -749,14 +751,40 @@
     (define auto-text-panel (new group-box-panel%
                                  [parent new-parent]
                                  [label (string-constant module-language-auto-text)]))
+    (define hp (new horizontal-panel%
+                    [parent auto-text-panel]
+                    [alignment '(center bottom)]))
+    (define auto-text-rb (new radio-box%
+                              [parent hp]
+                              [label #f]
+                              [choices
+                               (list
+                                (string-constant module-language-auto-text-most-recent)
+                                (string-constant module-language-auto-text-always-same))]
+                              [callback
+                               (λ (rb evt)
+                                 (preferences:set
+                                  'drracket:module-language:auto-text
+                                  (case (send rb get-selection)
+                                    [(0)
+                                     (turn-on/off-auto-text-text-box #f)
+                                     #f]
+                                    [(1)
+                                     (turn-on/off-auto-text-text-box #t)
+                                     "#lang racket\n"])))]))
     (define auto-text-text-box (new text-field%
-                                    [parent auto-text-panel]
+                                    [parent hp]
                                     [label #f]
                                     [init-value ""]
                                     [callback 
                                      (λ (tf evt)
                                        (preferences:set 'drracket:module-language:auto-text
                                                         (get-auto-text)))]))
+    (define (turn-on/off-auto-text-text-box on?)
+      (send auto-text-text-box enable on?)
+      (send auto-text-text-box set-field-background
+            (send the-color-database find-color
+                  (if on? "white" "gray"))))
     
     ;; data associated with each item in listbox : boolean
     ;; indicates if the entry is the default paths.
@@ -874,13 +902,23 @@
               (format "~s" vec))))
     
     (define (get-auto-text)
-      (let ([str (send auto-text-text-box get-value)])
-        (cond
-          [(equal? str "") ""]
-          [else (string-append str "\n")])))
+      (case (send auto-text-rb get-selection)
+        [(0) #f]
+        [(1)
+         (define str (send auto-text-text-box get-value))
+         (cond
+           [(equal? str "") ""]
+           [else (string-append str "\n")])]))
     
     (define (install-auto-text str)
-      (send auto-text-text-box set-value (regexp-replace #rx"\n$" str "")))
+      (cond
+        [(string? str)
+         (send auto-text-rb set-selection 1)
+         (send auto-text-text-box set-value (regexp-replace #rx"\n$" str ""))
+         (turn-on/off-auto-text-text-box #t)]
+        [else
+         (send auto-text-rb set-selection 0)
+         (turn-on/off-auto-text-text-box #f)]))
     
     (install-collection-paths '(default))
     (update-buttons)
@@ -1223,7 +1261,6 @@
                                             force-visible?)
         (define new-error/status-message-str 
           (exn-info-str (car new-error/status-message-strs+srclocs)))
-        (define srclocs (exn-info-src-vecs (car new-error/status-message-strs+srclocs)))
         (unless (string? new-error/status-message-str)
           (error 'set-bottom-bar-status "expected a string, got ~s" new-error/status-message-str))
         (when (or (not (and (equal? error/status-message-strs+srclocs 
@@ -1546,9 +1583,10 @@
 
       (define/augment (on-save-file filename format)
         (unless (equal? filename (get-filename))
-          (if (in-edit-sequence?)
-            (set! need-to-dirty? #t)
-            (oc-set-dirty (get-tab))))
+          (unless (editor:doing-autosave?)
+            (if (in-edit-sequence?)
+                (set! need-to-dirty? #t)
+                (oc-set-dirty (get-tab)))))
         (inner (void) on-save-file filename format))
       
       (define/augment (after-save-file success?)

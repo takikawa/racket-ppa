@@ -515,8 +515,10 @@
                                                    (if (struct-type? the-super)
                                                        the-super
                                                        (check-struct-type 'fm the-super)))))]
-                       [prune (lambda (stx) (identifier-prune-lexical-context stx
-                                                                              (list (syntax-e stx) '#%top)))]
+                       [prune (lambda (stx)
+                                (syntax-protect
+                                 (identifier-prune-lexical-context stx
+                                                                   (list (syntax-e stx) '#%top))))]
                        [reflect-name-expr (if reflect-name-expr
                                               (syntax-case reflect-name-expr (quote)
                                                 [(quote id)
@@ -739,6 +741,8 @@
                           (lambda ()
                             (cond
                               [(and info-name (not name-only?))
+                               (when omit-define-syntaxes?
+                                 (raise-syntax-error #f "#:extra-name cannot be combined with #:omit-define-syntaxes" stx))
                                ; reuse existing value
                                (list #`(define-syntaxes (#,info-name) (syntax-local-value #'#,id)))]
                               [else null]))])

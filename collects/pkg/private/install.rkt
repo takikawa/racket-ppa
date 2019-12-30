@@ -705,7 +705,7 @@
             (hash-set ht git-dir (cons checksum prev-checksums)))]
        [else ht])))
 
-  ;; relevant commits have been fecthed to the repos, and now we need
+  ;; relevant commits have been fetched to the repos, and now we need
   ;; to check them out; if a checkout fails, then we've left the
   ;; package installation in no worse shape than if a manual `git
   ;; pull` failed
@@ -716,7 +716,7 @@
                          git-dir
                          (dry-run-explain dry-run?))
         (when ((length checksums) . > . 1)
-          (download-printf (~a "Multiple packages in the of the clone\n"
+          (download-printf (~a "Multiple packages in the cloned repository\n"
                                "  " git-dir "\n"
                                " have different target commits; will try each commit, which will work\n"
                                " as long as some commit is a fast-forward of all of them\n")))
@@ -855,6 +855,7 @@
                      #:strict-doc-conflicts? [strict-doc-conflicts? #f]
                      #:use-cache? [use-cache? #t]
                      #:skip-installed? [skip-installed? #f]
+                     #:skip-auto-installed? [skip-auto-installed? #f]
                      #:pre-succeed [pre-succeed void]
                      #:dep-behavior [dep-behavior #f]
                      #:update-deps? [update-deps? #f]
@@ -897,7 +898,7 @@
          (filter (lambda (d)
                    (define pkg-name (desc->name d))
                    (define i (hash-ref all-scope-dbs pkg-name #f))
-                   (or (not i) (pkg-info-auto? i)))
+                   (or (not i) (and (not skip-auto-installed?) (pkg-info-auto? i))))
                  descs))
      pkg-desc=?))
 

@@ -27,30 +27,31 @@
         make-pthread-parameter
         unsafe-make-place-local
         unsafe-place-local-ref
-        unsafe-place-local-set!)
+        unsafe-place-local-set!
+        unsafe-root-continuation-prompt-tag
+        break-enabled-key
+        engine-block)
 
 (bounce #%engine
         make-engine
-        engine-block
         engine-timeout
         engine-return
-        current-engine-state
+        call-with-engine-completion
         current-process-milliseconds
         set-ctl-c-handler!
-        root-continuation-prompt-tag
-        break-enabled-key
         set-break-enabled-transition-hook!
         [continuation-marks host:continuation-marks]
 
         [poll-will-executors host:poll-will-executors]
         [make-will-executor host:make-will-executor]
-        [make-stubborn-will-executor host:make-stubborn-will-executor]
+        [make-late-will-executor host:make-late-will-executor]
         [will-executor? host:will-executor?]
         [will-register host:will-register]
         [will-try-execute host:will-try-execute]
 
         set-reachable-size-increments-callback!
         set-custodian-memory-use-proc!
+        set-immediate-allocation-check-proc!
 
         ;; Just `exn:break`, etc., but the host may need
         ;; to distinguish breaks raised by the thread
@@ -92,4 +93,9 @@
         [make-mutex host:make-mutex]
         [mutex-acquire host:mutex-acquire]
         [mutex-release host:mutex-release]
-        threaded?)
+        threaded?
+
+        [call-as-asynchronous-callback host:call-as-asynchronous-callback]
+        [post-as-asynchronous-callback host:post-as-asynchronous-callback]
+
+        continuation-current-primitive)
