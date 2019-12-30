@@ -1,8 +1,9 @@
 racket (7.5+dfsg1-1) unstable; urgency=medium
 
   * New upstream bugfix release.
+  * Drop openssl patch, upstream now recognizes 1.0.2
 
- -- David Bremner <bremner@debian.org>  Mon, 30 Dec 2019 15:25:50 -0400
+ -- David Bremner <bremner@debian.org>  Mon, 30 Dec 2019 17:47:51 -0400
 
 racket (7.2+dfsg1-2) unstable; urgency=medium
 
