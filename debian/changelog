@@ -1,4 +1,4 @@
-racket (7.5+dfsg1-1) unstable; urgency=medium
+racket (7.5+dfsg2-1) unstable; urgency=medium
 
   * New upstream bugfix release.
   * Drop openssl patch, upstream now recognizes 1.0.2
