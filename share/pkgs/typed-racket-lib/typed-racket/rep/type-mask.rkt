@@ -11,7 +11,7 @@
 ;;
 ;; - - Details - -
 ;;
-;; Type masks are represented with a simple 30-bit fixnum.
+;; Type masks are represented with a simple 29-bit fixnum.
 ;;
 ;; If a bit flag in a Type's bitmask is set to 1, it means the Type
 ;; _may_ overlap with the values described by that bit flag.
@@ -52,13 +52,13 @@
 ;; type mask predicate
 (define-syntax type-mask? (make-rename-transformer #'fixnum?))
 
-;; define the max size of type  masks -- if we limit the size to
-;; 30 we are guaranteed to be a fixnum on 32 and 64 bit machines.
-;; (30 is the max number of bits available in a 2's complement
-;; tagged integer on a 32-bit machine)
+;; define the max size of type masks -- if we limit the size to 29 we
+;; are guaranteed to be a fixnum on 32 and 64 bit machines.  (29 is
+;; the max number of bits available in a 2's complement tagged integer
+;; on a 32-bit machine (on Racket CS, traditional Racket has 30 bits))
 (module const racket/base
   (provide max-mask-size)
-  (define max-mask-size 30))
+  (define max-mask-size 29))
 (require 'const (for-syntax 'const))
 
 
@@ -99,8 +99,8 @@
      (define count (length name-list))
      (unless (<= count max-mask-size)
        (raise-syntax-error 'declare-type-flags
-                           (format "too many type flags (~a is the max)"
-                                   max-mask-size)
+                           (format "~a is too many type flags (~a is the max)"
+                                   count max-mask-size)
                            stx))
      (with-syntax ([(n ...) (build-list count (λ (n) (arithmetic-shift 1 n)))])
        #`(begin (begin (define name n)

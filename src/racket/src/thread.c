@@ -855,7 +855,7 @@ static void adjust_limit_table(Scheme_Custodian *c)
 {
   /* If a custodian has a limit and any object or children, then it
      must not be collected and merged with its parent. To prevent
-     collection, we register the custodian in the `limite_custodians'
+     collection, we register the custodian in the `limited_custodians'
      table. */
   if (c->has_limit) {
     if (c->elems || CUSTODIAN_FAM(c->children)) {
@@ -1456,8 +1456,8 @@ Scheme_Thread *scheme_do_close_managed(Scheme_Custodian *m, Scheme_Exit_Closer_F
   m->shut_down = 1;
 
   /* Need to kill children first, transitively, so find
-     last decendent. The family will be the global-list from
-     m to this last decendent, inclusive. */
+     last descendant. The family will be the global-list from
+     m to this last descendant, inclusive. */
   for (c = m; CUSTODIAN_FAM(c->children); ) {
     for (c = CUSTODIAN_FAM(c->children); CUSTODIAN_FAM(c->sibling); ) {
       c = CUSTODIAN_FAM(c->sibling);
@@ -1576,8 +1576,10 @@ Scheme_Thread *scheme_do_close_managed(Scheme_Custodian *m, Scheme_Exit_Closer_F
     m->mrefs = NULL;
     m->shut_down = 1;
     
-    if (SAME_OBJ(m, start))
+    if (SAME_OBJ(m, start)) {
+      adjust_limit_table(m);
       break;
+    }
     next_m = CUSTODIAN_FAM(m->global_prev);
 
     /* Remove this custodian from its parent */
@@ -2039,6 +2041,8 @@ void scheme_schedule_custodian_close(Scheme_Custodian *c)
 
 static void check_scheduled_kills()
 {
+  int force_gc = 0;
+
   if (scheme_no_stack_overflow) {
     /* don't shutdown something that may be in an atomic callback */
     return;
@@ -2049,6 +2053,16 @@ static void check_scheduled_kills()
     k = SCHEME_CAR(scheduled_kills);
     scheduled_kills = SCHEME_CDR(scheduled_kills);
     do_close_managed((Scheme_Custodian *)k);
+    force_gc = 1;
+  }
+
+  if (force_gc) {
+    /* A shutdown in response to a memory limit merits another major
+       GC to clean up and reset the expected heap size. Otherwise, if
+       another limit is put in place, it will be checked (on a major
+       GC) even later, which will set the major-GC trigger even
+       higher, and so on. */
+    scheme_collect_garbage();
   }
 }
 
@@ -4546,7 +4560,7 @@ void scheme_break_main_thread_at(void *p)
 }
 
 void scheme_break_main_thread()
-/* Calling this function from an arbitary
+/* Calling this function from an arbitrary
    thread is dangerous when therad locals are enabled. */
 {
   scheme_break_main_thread_at((void *)&delayed_break_ready);
@@ -4830,8 +4844,8 @@ void scheme_thread_block(float sleep_time)
   shrink_cust_box_array();
 
   /* Scheduling queries might involve callbacks through the FFI that put
-     the runtime system into `scheme_no_stack_overflow` mode. Immitate
-     the foriegn-call entry point with an extra check that we have enough
+     the runtime system into `scheme_no_stack_overflow` mode. Imitate
+     the foreign-call entry point with an extra check that we have enough
      stack to survive in foreign functions. */
   if (!scheme_no_stack_overflow && scheme_is_stack_too_shallow()) {
     p->sleep_end = sleep_time; /* an abuse of the `sleep_end` field to
@@ -8921,7 +8935,7 @@ static void run_gc_callbacks(int pre)
       for (j = 0; j < SCHEME_VEC_SIZE(acts); j++) {
         act = SCHEME_VEC_ELS(acts)[j];
         protocol = SCHEME_VEC_ELS(act)[0];
-        /* The set of suported protocols is arbitary, based on what we've needed
+        /* The set of suported protocols is arbitrary, based on what we've needed
            so far. */
         if (!strcmp(SCHEME_SYM_VAL(protocol), "int->void")) {
           gccb_Int_to_Void proc;

@@ -1114,6 +1114,13 @@
                  pre:  (x => (vector->cblock x t))
                  post: (x => (cblock->vector x t n)))]))
 
+;; Reflect the difference between 'racket and 'chez-scheme
+;; VMs for `_bytes` in `_bytes*`:
+(define _pointer/maybe-gcable
+  (if (eq? 'racket (system-type 'vm))
+      _gcpointer
+      _pointer))
+
 ;; _bytes or (_bytes o n) is for a memory block represented as a Scheme byte
 ;; string.  _bytes is just like a byte-string, and (_bytes o n) is for
 ;; pre-malloc of the string.  There is no need for other modes: i or io would
@@ -1123,7 +1130,7 @@
 (provide (rename-out [_bytes* _bytes]))
 (define-fun-syntax _bytes*
   (syntax-id-rules (o)
-    [(_ o n) (type: _gcpointer
+    [(_ o n) (type: _pointer/maybe-gcable
               pre:  (make-bytes-argument n)
               ;; post is needed when this is used as a function output type
               post: (x => (receive-bytes-result x n)))]
@@ -1154,16 +1161,17 @@
 (define _bytes/nul-terminated
   (make-ctype _bytes
               (lambda (bstr) (and bstr (bytes-append bstr #"\0")))
-              (lambda (bstr) (bytes-copy bstr))))
+              (lambda (bstr) (and bstr (bytes-copy bstr)))))
 (provide (rename-out [_bytes/nul-terminated* _bytes/nul-terminated]))
 (define-fun-syntax _bytes/nul-terminated*
   (syntax-id-rules (o)
     [(_ o n) (type: _pointer
               pre:  (make-bytes n)
               ;; post is needed when this is used as a function output type
-              post: (x => (let ([s (make-bytes n)])
-                            (memcpy s x n)
-                            s)))]
+              post: (x => (and x
+                               (let ([s (make-bytes n)])
+                                 (memcpy s x n)
+                                 s))))]
     [(_ . xs) (_bytes/nul-teriminated . xs)]
     [_ _bytes/nul-terminated]))
 

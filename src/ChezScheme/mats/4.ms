@@ -316,7 +316,7 @@
   (equivalent-expansion? 
      (parameterize ([optimize-level 2] [enable-cp0 #t] [#%$suppress-primitive-inlining #f])
        (expand/optimize '(if (begin (set! x y) (if (begin (set! z y) (zero? h)) #t #f)) e1 e2)))
-     '(begin (set! x y) (if (begin (set! z y) (#2%zero? h)) e1 e2)))
+     '(if (begin (set! x y) (set! z y) (#2%zero? h)) e1 e2))
 
   (equivalent-expansion? 
      (parameterize ([optimize-level 2] [enable-cp0 #t] [#%$suppress-primitive-inlining #f])
@@ -3402,7 +3402,16 @@
        (and (pair? ats)
             (equal? (car ats) v)
             r)))
-    #t)
+   (define (callcc-after-attachment proc)
+     (call-setting-continuation-attachment
+      'attach
+      (lambda ()
+        ;; Expect this `call/cc` to be inlined, but most promote
+        ;; the continuation created by `call-setting-continuation-attachment`
+        (call/cc
+         (lambda (k)
+           (proc k))))))
+   #t)
   (equal? 'yep (call-with-yep get-or-nope))
   (equal? 'yep (call-with-yep consume-or-nope))
   (equal? 'yeah (call-with-yep (lambda () (call-with-yeah get-or-nope))))
@@ -3616,6 +3625,29 @@
              (if (procedure? v)
                  (v)
                  'no))))
+  (let ([proc (callcc-after-attachment
+               (lambda (k)
+                 (lambda ()
+                   (k (lambda () #t)))))])
+    (proc))
+
+  (equal?
+   '(2 2)
+   (let ([f (parameterize ([run-cp0
+                            ;; Disable cp0 inlining of `for-each`:
+                            (lambda (cp0 e) e)])
+              (eval '(lambda (g l)
+                       (let-values ([(x y)
+                                     (call-setting-continuation-attachment
+                                      'hi
+                                      (lambda ()
+                                        ;; Could be by `cpnanopoass`, but make
+                                        ;; sure it's constrained by the fact that
+                                        ;; `for-each` can tail-call `g`:
+                                        (#3%for-each g l)))])
+                         (list x y)))))])
+     (f (lambda (x) (values x x)) (list 1 2))))
+
  )
  
 ;;; section 4-7:

@@ -368,7 +368,8 @@
 ;; ----------------------------------------
 
 (define-record-type (phantom-bytes create-phantom-bytes phantom-bytes?)
-  (fields pbv))
+  (fields pbv)
+  (sealed #t))
 
 (define/who (make-phantom-bytes k)
   (check who exact-nonnegative-integer? k)
@@ -423,7 +424,7 @@
        [else #'(foreign-procedure s ...)])]))
 
 ;; This is an inconvenient callback interface, certainly, but it
-;; accomodates a limitation of the traditional Racket implementation
+;; accommodates a limitation of the traditional Racket implementation
 (define (run-one-collect-callback v save sel)
   (let ([protocol (#%vector-ref v 0)]
         [proc (cpointer-address (#%vector-ref v 1))]

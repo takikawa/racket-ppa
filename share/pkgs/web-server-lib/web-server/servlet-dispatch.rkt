@@ -21,6 +21,7 @@
          web-server/servlet/setup
          web-server/servlet/servlet-structs
          web-server/dispatchers/dispatch
+         web-server/safety-limits
          (prefix-in filter: web-server/dispatchers/dispatch-filter)
          (prefix-in servlets: web-server/dispatchers/dispatch-servlets))
 
@@ -29,39 +30,40 @@
 (provide/contract
  [dispatch/servlet (((request? . -> . can-be-response?))
                     (#:regexp regexp?
-                              #:current-directory path-string?
-                              #:stateless? boolean?
-                              #:stuffer (stuffer/c serializable? bytes?)
-                              #:manager manager?
-                              #:responders-servlet-loading (url? any/c . -> . can-be-response?)
-                              #:responders-servlet (url? any/c . -> . can-be-response?))
+                     #:current-directory path-string?
+                     #:stateless? boolean?
+                     #:stuffer (stuffer/c serializable? bytes?)
+                     #:manager manager?
+                     #:responders-servlet-loading (url? any/c . -> . can-be-response?)
+                     #:responders-servlet (url? any/c . -> . can-be-response?))
                     . ->* .
                     dispatcher/c)]
  [serve/launch/wait (((semaphore? . -> . dispatcher/c))
-                     (#:launch-path (or/c false/c string?)
-                                    #:connection-close? boolean?
-                                    #:banner? boolean?
-                                    #:listen-ip (or/c false/c string?)
-                                    #:port listen-port-number?
-                                    #:max-waiting exact-nonnegative-integer?
-                                    #:ssl-cert (or/c false/c path-string?)
-                                    #:ssl-key (or/c false/c path-string?))
+                     (#:launch-path (or/c #f string?)
+                      #:connection-close? boolean?
+                      #:banner? boolean?
+                      #:listen-ip (or/c #f string?)
+                      #:port listen-port-number?
+                      #:max-waiting timeout/c
+                      #:safety-limits safety-limits?
+                      #:ssl-cert (or/c #f path-string?)
+                      #:ssl-key (or/c #f path-string?))
                      . ->* .
-                     void)])
+                     any)])
 
-(define (dispatch/servlet 
+(define (dispatch/servlet
          start
          #:regexp
          [servlet-regexp #rx""]
-         #:current-directory 
-         [servlet-current-directory (current-directory)]              
-         #:stateless? 
+         #:current-directory
+         [servlet-current-directory (current-directory)]
+         #:stateless?
          [stateless? #f]
          #:stuffer
          [stuffer default-stuffer]
          #:responders-servlet-loading
          [responders-servlet-loading servlet-loading-responder]
-         #:responders-servlet 
+         #:responders-servlet
          [responders-servlet servlet-error-responder]
          #:manager
          [manager
@@ -84,27 +86,29 @@
                  (parameterize ([current-custodian (make-custodian)]
                                 [current-namespace namespace-now])
                    (if stateless?
-                       (make-stateless.servlet servlet-current-directory stuffer manager start)
-                       (make-v2.servlet servlet-current-directory manager start)))])
+                     (make-stateless.servlet servlet-current-directory stuffer manager start)
+                     (make-v2.servlet servlet-current-directory manager start)))])
             (set-box! servlet-box servlet)
             servlet))))))
 
 (define (serve/launch/wait
          dispatcher
-         
+
          #:connection-close?
          [connection-close? #f]
          #:launch-path
-         [launch-path #f]          
+         [launch-path #f]
          #:banner?
          [banner? #t]
-         
+
          #:listen-ip
          [listen-ip "127.0.0.1"]
          #:port
          [port-arg 8000]
-         #:max-waiting
-         [max-waiting 511]
+         
+         #:max-waiting [_max-waiting 511]
+         #:safety-limits [limits (make-safety-limits #:max-waiting _max-waiting)]
+         
          #:ssl-cert
          [ssl-cert #f]
          #:ssl-key
@@ -118,40 +122,40 @@
            #:dispatch (dispatcher sema)
            #:listen-ip listen-ip
            #:port port-arg
-           #:max-waiting max-waiting
+           #:safety-limits limits
            #:dispatch-server-connect@ (if ssl?
-                                          (make-ssl-connect@ ssl-cert ssl-key)
-                                          raw:dispatch-server-connect@)))
+                                        (make-ssl-connect@ ssl-cert ssl-key)
+                                        raw:dispatch-server-connect@)))
   (define serve-res (async-channel-get confirm-ch))
   (if (exn? serve-res)
-      (begin
-        (when banner? (eprintf "There was an error starting the Web server.\n"))
-        (match serve-res
-          [(app exn-message (regexp "tcp-listen: listen on .+ failed \\(Address already in use; errno=.+\\)" (list _)))
-           (when banner? (eprintf "\tThe TCP port (~a) is already in use.\n" port-arg))]
-          [_
-           (void)]))
-      (local [(define port serve-res)
-              (define server-url
-                (string-append (if ssl? "https" "http")
-                               "://localhost"
-                               (if (and (not ssl?) (= port 80))
-                                   "" (format ":~a" port))))]
-        (when launch-path
-          ((send-url) (string-append server-url launch-path) #t))
-        (when banner?
-          (printf "Your Web application is running at ~a.\n" 
-                  (if launch-path 
-                      (string-append server-url launch-path)
-                      server-url))
-          (printf "Stop this program at any time to terminate the Web Server.\n")
-          (flush-output))
-        (let ([bye (lambda ()
-                     (when banner? (printf "\nWeb Server stopped.\n"))
-                     (shutdown-server))])
-          (with-handlers ([exn:break? (lambda (exn) (bye))])
-            (semaphore-wait/enable-break sema)
-            ; Give the final response time to get there
-            (sleep 2)
-            ;; We can get here if a /quit url is visited
-            (bye))))))
+    (begin
+      (when banner? (eprintf "There was an error starting the Web server.\n"))
+      (match serve-res
+        [(app exn-message (regexp "tcp-listen: listen on .+ failed \\(Address already in use; errno=.+\\)" (list _)))
+         (when banner? (eprintf "\tThe TCP port (~a) is already in use.\n" port-arg))]
+        [_
+         (void)]))
+    (local [(define port serve-res)
+            (define server-url
+              (string-append (if ssl? "https" "http")
+                             "://localhost"
+                             (if (and (not ssl?) (= port 80))
+                               "" (format ":~a" port))))]
+      (when launch-path
+        ((send-url) (string-append server-url launch-path) #t))
+      (when banner?
+        (printf "Your Web application is running at ~a.\n"
+                (if launch-path
+                  (string-append server-url launch-path)
+                  server-url))
+        (printf "Stop this program at any time to terminate the Web Server.\n")
+        (flush-output))
+      (let ([bye (lambda ()
+                   (when banner? (printf "\nWeb Server stopped.\n"))
+                   (shutdown-server))])
+        (with-handlers ([exn:break? (lambda (exn) (bye))])
+          (semaphore-wait/enable-break sema)
+          ; Give the final response time to get there
+          (sleep 2)
+          ;; We can get here if a /quit url is visited
+          (bye))))))

@@ -568,7 +568,10 @@
 		     (cons #'var (syntax/loc stx (define var expr)))))
 		  ((sdp-define v e1 e2 e3 ...)
 		   (raise-sdp-syntax-error
-		    #f "Definition mit mehr als zwei Operanden" stx))))
+		    #f "Definition mit mehr als zwei Operanden" stx))
+		  (else
+		   (raise-sdp-syntax-error
+		    #f "Hier muss Definition stehen" stx))))
 	      bodies)))
     (let loop ((pairs pairs))
       (when (pair? pairs)

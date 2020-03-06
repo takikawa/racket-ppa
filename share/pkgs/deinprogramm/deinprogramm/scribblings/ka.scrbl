@@ -64,6 +64,38 @@ dabei herauskommen soll.  Mache aus den Beispielen Tests mit
 Achte darauf, dass die Tests dafür sorgen, dass der Code Deiner
 Funktion durch die Tests vollständig abgedeckt wird.
 
+@section{Gerüst}
+  Schreibe unter die Tests ein Gerüst für die Funktion: Dazu
+  übernimmst Du den Namen aus der Signatur-Deklaration in eine
+  Funktionsdefinition wie zum Beispiel:
+
+@racketblock[
+(define billig-strom
+  (lambda (...)
+    ...))
+]
+
+Denke Dir Namen für die Eingaben der Funktion aus.  Das müssen
+  genauso viele sein, wie die Signatur Eingaben hat.  Schreibe dann
+  diese Namen als Eingaben in die @racket[lambda]-Abstraktion.
+  Beispiel:
+
+@racketblock[
+(define billig-strom
+  (lambda (kWh)
+    ...))
+]
+
+@section{Rumpf}
+  Als letzten Schritt fülle mit Hilfe des Wissens über das Problem
+  den Rumpf der Funktion aus.
+
+@racketblock[
+(define billig-strom
+  (lambda (kWh)
+    (+ 4.90 (* 0.19 kWh))))
+]
+
 @section{Datenanalyse}
 Suche in der Aufgabenstellung nach problemrelevanten Größen;
 Kandidaten sind immer die Substantive. Schreibe für jede dieser
@@ -239,7 +271,7 @@ Daten akzeptiert, kannst Du folgendermaßen konstruieren:
 
 @itemize[
 @item{Schreibe Tests für jeden der Fälle.}
-@item{Schreibe eine racket[cond]-Verzweigung als Rumpf in die
+@item{Schreibe eine @racket[cond]-Verzweigung als Rumpf in die
   Schablone, die genau @italic{n} Zweige hat - also genau soviele Zweige,
   wie es Fälle in der Datendefinition beziehungsweise der Signatur gibt.}
 @item{Schreibe für jeden Zweig eine Bedingung, der den entsprechenden
