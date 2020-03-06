@@ -322,10 +322,13 @@
          [else
           (set! remaining-command-line-arguments (vector->immutable-vector
                                                   (list->vector args)))
-          (when (and (null? args) (not (saw? saw 'non-config)))
+          (cond
+           [(and (null? args) (not (saw? saw 'non-config)))
             (set! repl? #t)
             (when text-repl?
-              (set! version? #t)))]))
+              (set! version? #t))]
+           [else
+            (no-init! saw)])]))
       ;; Dispatch on first argument:
       (if (null? args)
           (finish args saw)
@@ -359,7 +362,7 @@
               (let-values ([(file-name rest-args) (next-arg "file name" arg within-arg args)])
                 (set! loads (cons (lambda () (load file-name))
                                   loads))
-                (flags-loop rest-args (see saw 'non-config)))]
+                (flags-loop rest-args (see saw 'non-config 'top)))]
              [("-r" "--script")
               (let-values ([(file-name rest-args) (next-arg "file name" arg within-arg args)])
                 (set! loads (cons (lambda () (load file-name))
@@ -371,21 +374,26 @@
                 (set! loads
                       (cons
                        (lambda ()
-                         (call-with-values (lambda ()
-                                             (call-with-continuation-prompt
-                                              (lambda ()
-                                                (eval `(|#%top-interaction| . ,(read (open-input-string expr)))))
-                                              (default-continuation-prompt-tag)
-                                              (lambda (proc)
-                                                ;; continue escape to set error status:
-                                                (abort-current-continuation (default-continuation-prompt-tag) proc))))
-                           (lambda vals
-                             (for-each (lambda (v)
-                                         (|#%app| (current-print) v)
-                                         (flush-output))
-                                       vals))))
+                         (define i (open-input-string expr))
+                         (let loop ()
+                           (define expr (read i))
+                           (unless (eof-object? expr)
+                             (call-with-values (lambda ()
+                                                 (call-with-continuation-prompt
+                                                  (lambda ()
+                                                    (eval `(|#%top-interaction| . ,expr)))
+                                                  (default-continuation-prompt-tag)
+                                                  (lambda (proc)
+                                                    ;; continue escape to set error status:
+                                                    (abort-current-continuation (default-continuation-prompt-tag) proc))))
+                               (lambda vals
+                                 (for-each (lambda (v)
+                                             (|#%app| (current-print) v)
+                                             (flush-output))
+                                           vals)))
+                             (loop))))
                        loads))
-                (flags-loop rest-args (see saw 'non-config)))]
+                (flags-loop rest-args (see saw 'non-config 'top)))]
              [("-k")
               (let*-values ([(n rest-args) (next-arg "starting and ending offsets" arg within-arg args)]
                             [(m rest-args) (next-arg "first ending offset" arg within-arg (cons "-k" rest-args))]
@@ -411,7 +419,7 @@
              [("-m" "--main")
               (set! loads (cons (lambda () (call-main))
                                 loads))
-              (flags-loop (cdr args) (see saw 'non-config))]
+              (flags-loop (cdr args) (see saw 'non-config 'top))]
              [("-i" "--repl") 
               (set! repl? #t)
               (set! version? #t)
@@ -425,7 +433,6 @@
               (flags-loop (cdr args) (see saw 'non-config))]
              [("-v" "--version") 
               (set! version? #t)
-              (no-init! saw)
               (flags-loop (cdr args) (see saw 'non-config))]
              [("-c" "--no-compiled")
               (set! compiled-file-paths '())
@@ -558,8 +565,8 @@
                 (loop (cons (cadr args) (cons (car args) (cddr args))))])]
              [else
               (cond
-               [(and (eqv? (string-ref arg 0) #\-)
-                     (> (string-length arg) 1))
+               [(and (> (string-length arg) 1)
+                     (eqv? (string-ref arg 0) #\-))
                 (cond
                  [(and (> (string-length arg) 2)
                        (not (eqv? (string-ref arg 1) #\-)))

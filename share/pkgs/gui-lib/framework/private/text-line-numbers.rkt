@@ -13,6 +13,7 @@
 (define-unit text-line-numbers@
   (import mred^
           [prefix editor: framework:editor^]
+          [prefix color-prefs: framework:color-prefs^]
           )
   (export text-line-numbers^)
 
@@ -144,70 +145,6 @@
         (send dc set-font (get-style-font))
         (send dc set-text-foreground (get-foreground)))
 
-      (define/private (lighter-color color)
-        (define (integer number)
-          (inexact->exact (round number)))
-        ;; hue 0-360
-        ;; saturation 0-1
-        ;; lightness 0-1
-        ;; returns rgb as float values with ranges 0-1
-        (define (hsl->rgb hue saturation lightness)
-          (define (helper x a b)
-            (define x* (cond
-                         [(< x 0) (+ x 1)]
-                         [(> x 1) (- x 1)]
-                         [else x]))
-            (cond
-              [(< (* x 6) 1) (+ b (* 6 (- a b) x))]
-              [(< (* x 6) 3) a]
-              [(< (* x 6) 4) (+ b (* (- a b) (- 4 (* 6 x))))]
-              [else b]))
-
-          (define h (/ hue 360))
-          (define a (if (< lightness 0.5)
-                        (+ lightness (* lightness saturation))
-                        (- (+ lightness saturation) (* lightness saturation))))
-          (define b (- (* lightness 2) a))
-          (define red (helper (+ h (/ 1.0 3)) a b))
-          (define green (helper h a b))
-          (define blue (helper (- h (/ 1.0 3)) a b))
-          (values red green blue))
-        
-        ;; red 0-255
-        ;; green 0-255
-        ;; blue 0-255
-        (define (rgb->hsl red green blue)
-          (define-values (a b c d)
-            (if (> red green)
-                (if (> red blue)
-                    (if (> green blue)
-                        (values red (- green blue) blue 0)
-                        (values red (- green blue) green 0))
-                    (values blue (- red green) green 4))
-                (if (> red blue)
-                    (values green (- blue red) blue 2)
-                    (if (> green blue)
-                        (values green (- blue red) red 2)
-                        (values blue (- red green) red 4)))))
-          (define hue (if (= a c) 0
-                          (let ([x (* 60 (+ d (/ b (- a c))))])
-                            (if (< x 0) (+ x 360) x))))
-          (define saturation (cond
-                               [(= a c) 0]
-                               [(< (+ a c) 1) (/ (- a c) (+ a c))]
-                               [else (/ (- a c) (- 2 a c))]))
-          (define lightness (/ (+ a c) 2))
-          (values hue saturation lightness))
-        (define-values (hue saturation lightness)
-          (rgb->hsl (send color red)
-                    (send color green)
-                    (send color blue)))
-        (define-values (red green blue)
-          (hsl->rgb hue saturation (+ 0.5 lightness)))
-        (make-object color% (min 255 (integer (* 255 red)))
-          (min 255 (integer (* 255 green)))
-          (min 255 (integer (* 255 blue)))))
-
       ;; adjust space so that we are always at the left-most position where
       ;; drawing looks right
       (define/private (left-space dc dx)
@@ -275,9 +212,8 @@
            (send dc set-brush 
                  (if (get-highlight-text-color)
                      (get-highlight-background-color)
-                     (if (preferences:get 'framework:white-on-black?)
-                         "lime"
-                         "forestgreen"))               
+                     (color-prefs:lookup-in-color-scheme
+                      'framework:line-numbers-current-line-number-background))
                  'solid)
          
            (send dc draw-rectangle ls final-y (- right-space single-w) single-h)
@@ -288,18 +224,23 @@
          
            (define text-fg (send dc get-text-foreground))
            (send dc set-text-foreground (if (get-highlight-text-color)
-                                            (send dc get-text-foreground)
-                                            (if (preferences:get 'framework:white-on-black?)
-                                                "black"
-                                                "white")))
+                                            text-fg
+                                            (color-prefs:lookup-in-color-scheme
+                                             'framework:line-numbers-current-line-number-foreground)))
            (send dc draw-text view final-x final-y)
            (send dc set-text-foreground text-fg)]
           [(and last-paragraph (= last-paragraph (line-paragraph line)))
-           (send dc set-text-foreground (lighter-color (send dc get-text-foreground)))
+           (define text-fg (send dc get-text-foreground))
+           (send dc set-text-foreground
+                 (color-prefs:lookup-in-color-scheme 'framework:line-numbers-when-word-wrapping))
            (send dc draw-text view final-x final-y)
-           (send dc set-text-foreground (get-foreground))]
+           (send dc set-text-foreground text-fg)]
           [else
-           (send dc draw-text view final-x final-y)]))
+           (define text-fg (send dc get-text-foreground))
+           (send dc set-text-foreground
+                 (color-prefs:lookup-in-color-scheme 'framework:line-numbers))
+           (send dc draw-text view final-x final-y)
+           (send dc set-text-foreground text-fg)]))
 
       ;; draw the line between the line numbers and the actual text
       (define/public (draw-separator dc top bottom dx dy)

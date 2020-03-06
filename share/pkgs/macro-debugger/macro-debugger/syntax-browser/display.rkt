@@ -2,6 +2,7 @@
 (require racket/class
          racket/gui/base
          racket/promise
+         racket/match
          data/interval-map
          framework
          racket/class/iop
@@ -15,16 +16,7 @@
 
 (define-syntax-rule (uninterruptible e ...)
   ;; (coarsely) prevent breaks within editor operations
-  (parameterize-break #f (begin e ...))
-  #|
-  (parameterize-break #f
-    (let ([ta (now)])
-      (begin0 (begin e ...)
-        (let ([tb (now)])
-          (eprintf "****\n")
-          (pretty-write '(begin e ...) (current-error-port))
-          (eprintf "  -- ~s ms\n\n" (- tb ta))))))
-  |#)
+  (parameterize-break #f (begin e ...)))
 
 (define (now) (current-inexact-milliseconds))
 
@@ -76,7 +68,7 @@
     (define base-style
       (code-style text (send/i config config<%> get-syntax-font-size)))
 
-    ;; on-next-refresh : (listof (cons stx style-delta))
+    ;; on-next-refresh : (listof (list stx style-delta boolean)
     ;; Styles to be applied on next refresh only. (eg, underline)
     (define on-next-refresh null)
 
@@ -84,7 +76,7 @@
     ;; Styles to be re-applied on every refresh.
     (define extra-styles (make-hasheq))
 
-    ;; to-undo-styles : (listof (cons nat nat))
+    ;; to-undo-styles : (listof Range)
     ;; Ranges to unbold or unhighlight when selection changes.
     ;; FIXME: ought to be managed by text:region-data (to auto-update ranges)
     ;;   until then, positions are relative
@@ -97,8 +89,28 @@
          (send text change-style base-style start-position end-position #f)))
       (with-log-time "applying primary styles"
         (uninterruptible (apply-primary-partition-styles)))
+      (when #f
+        (with-log-time "autocorrect icon sizes"
+          (autocorrect-icon-sizes)))
       (with-log-time "adding clickbacks"
         (uninterruptible (add-clickbacks))))
+
+    (define/private (autocorrect-icon-sizes)
+      (define ratio
+        (let ([dc (send text get-dc)])
+          (define-values (xw _xh _xd _xa) (send dc get-text-extent "x"))
+          (define-values (aw _ah _ad _aa) (send dc get-text-extent "🔒"))
+          #;(define-values (cw _ch _cd _ca) (send dc get-text-extent "💥"))
+          (/ xw (max aw #;cw xw))))
+      (when (< ratio 0.90) ;; tolerance
+        (with-unlock text
+          (define sd (make-object style-delta%))
+          (send sd set-size-mult (max ratio 2/3))
+          (for ([r (in-list (send/i range range<%> all-ranges))]
+                #:when (not (= (range-start r) (range-pstart r))))
+            (send text change-style sd
+                  (relative->text-position (range-start r))
+                  (relative->text-position (range-pstart r)))))))
 
     ;; add-clickbacks : -> void
     (define/private (add-clickbacks)
@@ -108,7 +120,7 @@
           (with-log-time "forcing clickback mapping"
            (uninterruptible
             (for ([range (send/i range range<%> all-ranges)])
-              (let ([stx (range-obj range)]
+              (let ([stx (range-stx range)]
                     [start (range-start range)]
                     [end (range-end range)])
                 (interval-map-set! mapping (+ start-position start) (+ start-position end) stx)))))))
@@ -128,13 +140,14 @@
          (let ([undo-select/highlight-d (get-undo-select/highlight-d)])
            (for ([r (in-list to-undo-styles)])
              (send text change-style undo-select/highlight-d
-                   (relative->text-position (car r))
-                   (relative->text-position (cdr r)))))
+                   (relative->text-position (range-start r))
+                   (relative->text-position (range-end r)))))
          (set! to-undo-styles null))
         (uninterruptible
-         (for ([stx+delta (in-list on-next-refresh)])
-           (for ([r (in-list (send/i range range<%> get-ranges (car stx+delta)))])
-             (restyle-range r (cdr stx+delta) #f)))
+         (for ([todo (in-list on-next-refresh)])
+           (match-define (list stx delta pstart?) todo)
+           (for ([r (in-list (send/i range range<%> get-ranges stx))])
+             (restyle-range r delta #f pstart?)))
          (set! on-next-refresh null))
         (uninterruptible
          (apply-extra-styles))
@@ -166,7 +179,7 @@
     (define/public (underline-syntaxes stxs)
       (for ([stx (in-list stxs)])
         (set! on-next-refresh
-              (cons (cons stx underline-d) on-next-refresh))))
+              (cons (list stx underline-d #t) on-next-refresh))))
 
     ;; Primary styles
     ;; (Done once on initialization, never repeated)
@@ -192,7 +205,7 @@
       ;; Optimization: don't call change-style when new style = old style
       (let tr*loop ([trs (send/i range range<%> get-treeranges)] [old-style #f])
         (for ([tr trs])
-          (define stx (treerange-obj tr))
+          (define stx (treerange-stx tr))
           (define start (treerange-start tr))
           (define end (treerange-end tr))
           (define subs (treerange-subs tr))
@@ -242,12 +255,12 @@
                 (for ([r (in-list (send/i range range<%> get-ranges id))])
                   (restyle-range r secondary-highlight-d #t))))))))
 
-    ;; restyle-range : (cons num num) style-delta% boolean -> void
-    (define/private (restyle-range r style need-undo?)
+    ;; restyle-range : Range style-delta% boolean -> void
+    (define/private (restyle-range r style need-undo? [pstart? #f])
       (when need-undo? (set! to-undo-styles (cons r to-undo-styles)))
       (send text change-style style
-            (relative->text-position (car r))
-            (relative->text-position (cdr r))))
+            (relative->text-position (if pstart? (range-pstart r) (range-start r)))
+            (relative->text-position (range-end r))))
 
     ;; relative->text-position : number -> number
     (define/private (relative->text-position pos)
@@ -261,7 +274,7 @@
 ;; fixup-parentheses : string range -> void
 (define (fixup-parentheses string range)
   (for ([r (send/i range range<%> all-ranges)])
-    (let ([stx (range-obj r)]
+    (let ([stx (range-stx r)]
           [start (range-start r)]
           [end (range-end r)])
       (when (and (syntax? stx) (pair? (syntax-e stx)))
@@ -287,13 +300,6 @@
               style
               (make-object style-delta% 'change-size font-size))
         style)))
-
-;; anchor-snip%
-(define anchor-snip%
-  (class snip%
-    (define/override (copy)
-      (make-object string-snip% ""))
-    (super-instantiate ())))
 
 ;; Color translation
 
@@ -400,13 +406,6 @@
 
 (define get-secondary-highlight-d
   (mk-2-constant-style "yellow" "darkgoldenrod"))
-
-#|
-(define undo-select-d
-  (make-object style-delta% 'change-weight 'normal))
-(define get-undo-highlight-d
-  (mk-2-constant-style "white" "black"))
-|#
 
 (define (get-undo-select/highlight-d)
   (let ([sd (make-object style-delta% 'change-weight 'normal)]

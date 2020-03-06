@@ -320,18 +320,21 @@ the typed racket language.
            ;; Note: these don't ever typecheck
            (pattern (~seq (~and kw (~or #:break #:final)) guard-expr:expr)
                     #:with (expand ...) #'(kw guard-expr)))
+         (define-splicing-syntax-class break-clause
+           (pattern (~seq (~and kw (~or #:break #:final)) guard-expr:expr)
+                    #:with (expand ...) #'(kw guard-expr)))
          (define-syntax-class for-kw
            (pattern #:when
                     #:with replace-with #'when)
            (pattern #:unless
                     #:with replace-with #'unless))
          (syntax-parse clauses
-           [(head:for-clause next:for-clause ... kw:for-kw rest ...)
+           [(head:for-clause next:for-clause ... kw:for-kw guard b:break-clause ... rest ...)
             (add-ann
              (quasisyntax/loc stx
                (for
-                (head.expand ... next.expand ... ...)
-                #,(loop #'(kw rest ...))))
+                (head.expand ... next.expand ... ... kw guard b.expand ... ...)
+                #,(loop #'(rest ...))))
              #'Void)]
            [(head:for-clause ...) ; we reached the end
             (add-ann
@@ -390,27 +393,26 @@ the typed racket language.
   (for/list: for/list)
   (for/and: for/and)
   (for/or: for/or)
-  (for/first: for/first)
-  (for/last: for/last))
+  (for/first: for/first))
 
 ;; Unlike with the above, the inferencer can handle any number of #:when
 ;; clauses with these 2.
 (define-syntax (for/lists: stx)
   (syntax-parse stx
     [(_ a1:optional-standalone-annotation*
-        (var:optionally-annotated-formal ...)
+        (var:optionally-annotated-formal ... (~optional result:result-clause))
         clause:for-clauses
         a2:optional-standalone-annotation*
         c ...)
      (define all-typed? (andmap values (attribute var.ty)))
      (define for-stx
        (quasisyntax/loc stx
-          (for/lists (var.ann-name ...)
+          (for/lists (var.ann-name ... (~@ . (~? result ())))
             (clause.expand ... ...)
             c ...)))
      ((attribute a1.annotate)
       ((attribute a2.annotate)
-       (if all-typed?
+       (if (and all-typed? (not (attribute result)))
            (add-ann
             for-stx
             #'(values var.ty ...))
@@ -425,12 +427,12 @@ the typed racket language.
      (define all-typed? (andmap values (attribute accum.ty)))
      (define for-stx
        (quasisyntax/loc stx
-         (for/fold ((accum.ann-name accum.init) ...)
+         (for/fold ((accum.ann-name accum.init) ... (~@ . (~? accum.result ())))
                    (clause.expand ... ...)
            c ...)))
      ((attribute a1.annotate)
       ((attribute a2.annotate)
-       (if all-typed?
+       (if (and all-typed? (not (attribute accum.result)))
            (add-ann
             for-stx
             #'(values accum.ty ...))
@@ -469,44 +471,43 @@ the typed racket language.
 (define-for*-variants
   (for*/and: for*/and)
   (for*/or: for*/or)
-  (for*/first: for*/first)
-  (for*/last: for*/last))
+  (for*/first: for*/first))
 
 ;; Like for/lists: and for/fold:, the inferencer can handle these correctly.
 (define-syntax (for*/lists: stx)
   (syntax-parse stx
     [(_ a1:optional-standalone-annotation*
-        ((var:optionally-annotated-name) ...)
+        ((var:optionally-annotated-name) ... (~optional result:result-clause))
         clause:for-clauses
         a2:optional-standalone-annotation*
         c ...)
      (define all-typed? (andmap values (attribute var.ty)))
      (define for-stx
        (quasisyntax/loc stx
-         (for/lists (var.ann-name ...)
+         (for/lists (var.ann-name ... (~@ . (~? result ())))
              (clause.expand* ... ...)
            c ...)))
      ((attribute a1.annotate)
       ((attribute a2.annotate)
-       (if all-typed?
+       (if (and all-typed? (not (attribute result)))
            (add-ann for-stx #'(values var.ty ...))
            for-stx)))]))
 (define-syntax (for*/fold: stx)
   (syntax-parse stx #:literals (:)
     [(_ a1:optional-standalone-annotation*
-        ((var:optionally-annotated-name init:expr) ...)
+        ((var:optionally-annotated-name init:expr) ... (~optional result:result-clause))
         clause:for-clauses
         a2:optional-standalone-annotation*
         c ...)
      (define all-typed? (andmap values (attribute var.ty)))
      (define for-stx
        (quasisyntax/loc stx
-         (for/fold ((var.ann-name init) ...)
+         (for/fold ((var.ann-name init) ... (~@ . (~? result ())))
              (clause.expand* ... ...)
            c ...)))
      ((attribute a1.annotate)
       ((attribute a2.annotate)
-       (if all-typed?
+       (if (and all-typed? (not (attribute result)))
            (add-ann for-stx #'(values var.ty ...))
            for-stx)))]))
 
@@ -548,6 +549,8 @@ the typed racket language.
                   for*? #'for/folder: #'for/folder #'op #'initial #'final))
               ...))]))
 (define-for/acc:-variants
+  (for/last: for/fold: for/last #f begin #f #%expression)
+  (for*/last: for*/fold: for*/last #t begin #f #%expression)
   (for/sum: for/fold: for/sum #f + 0 #%expression)
   (for*/sum: for*/fold: for*/sum #t + 0 #%expression)
   (for*/list: for*/fold: for*/list #t (lambda (x y) (cons y x)) null reverse)
@@ -802,26 +805,26 @@ the typed racket language.
   (syntax-case stx ()
     [(name for ann T K #:length n-expr #:fill fill-expr (clauses ...) body-expr)
      (syntax/loc stx
-       (call/ec
-        (ann (λ (break)
-               (define n n-expr)
-               (define: vs : T (make-vector n fill-expr))
-               (define i 0)
-               (for (clauses ...)
-                 (unsafe-vector-set! vs i body-expr)
-                 (set! i (unsafe-fx+ i 1))
-                 (when (i . unsafe-fx>= . n) (break vs)))
-               vs)
-             K)))]
+       (ann (let ()
+              (define n n-expr)
+              (define: vs : T (make-vector n fill-expr))
+              (define i 0)
+              (for (clauses ... #:break (i . >= . n))
+                (unsafe-vector-set! vs i body-expr)
+                (set! i (+ i 1)))
+              vs)
+            T))]
     [(name for ann T K #:length n-expr (clauses ...) body-expr)
      (syntax/loc stx
        (let ([n n-expr])
          (define vs
-           (call/ec
-            (ann (λ (break)
+            (ann (let ()
                    (define: vs : T (vector))
                    (define i 0)
-                   (for (clauses ...)
+                   (unless (and (fixnum? n) (exact-nonnegative-integer? n))
+                     (raise-argument-error 'name '"exact-nonnegative-integer?" n))
+
+                   (for (clauses ... #:break (>= i n))
                      (define v body-expr)
                      ;; can't use `unsafe-fx=` here
                      ;; if `n` is larger than a fixnum, this is unsafe, and we
@@ -832,10 +835,9 @@ the typed racket language.
                      (cond [(= i 0)  (define: new-vs : T (make-vector n v))
                                               (set! vs new-vs)]
                            [else  (unsafe-vector-set! vs i v)])
-                     (set! i (unsafe-fx+ i 1))
-                     (when (i . unsafe-fx>= . n) (break vs)))
+                     (set! i (unsafe-fx+ i 1)))
                    vs)
-                 K)))
+                 T))
          (cond [(= (vector-length vs) n)  vs]
                [else
                 ;; Only happens when n > 0 and vs = (vector)

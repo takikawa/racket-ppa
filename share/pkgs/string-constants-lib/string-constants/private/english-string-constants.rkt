@@ -1074,7 +1074,9 @@ please adhere to these guidelines:
   (save-all-files "Save All Files")
   ; check box in the dialog and also used in the preferences dialog
   (save-after-switching-tabs "Save files whenever switching tabs or windows")
-
+  (dont-ask-about-saving-after-switching-tabs
+   "Don't ask and don't save files when clicking Run with unsaved tabs or windows")
+  
   (drscheme-internal-error "DrRacket Internal Error")
 
   ;;; tools

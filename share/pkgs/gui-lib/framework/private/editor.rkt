@@ -10,7 +10,8 @@
            mred/mred-sig
            racket/path
            racket/contract
-           racket/format)
+           racket/format
+           mrlib/panel-wob)
   
   (import mred^
           [prefix autosave: framework:autosave^]
@@ -329,7 +330,9 @@
   
   (define standard-style-list (new style-list%))
   (define (get-standard-style-list) standard-style-list)
-  
+
+;; this name can never change as the name is used directly in mrlib
+;; and we cannot add a dependency from mrlib to the framework
   (define default-color-style-name "framework:default-color")
   (define (get-default-color-style-name) default-color-style-name)
   
@@ -780,6 +783,9 @@
       (refresh))
     (define/override (on-paint)
       (define dc (get-dc))
+      (define text-foreground (send dc get-text-foreground))
+      (when (white-on-black-panel-scheme?)
+        (send dc set-text-foreground "white"))
       (define-values (cw ch) (get-client-size))
       (define-values (tot-th tot-tw)
         (for/fold ([tot-th 0] [tot-tw 0])
@@ -794,7 +800,8 @@
             [(left) 2]
             [(right) (- cw 2)]))
         (send dc draw-text msg x y)
-        (+ y th)))
+        (+ y th))
+      (send dc set-text-foreground text-foreground))
       (super-new [style '(transparent)][stretchable-height stretchable-height])
       
       ;; need object to hold onto this function, so this is

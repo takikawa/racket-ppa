@@ -2,6 +2,7 @@
 (require rackunit)
 (require macro-debugger/model/debug
          macro-debugger/model/steps
+         macro-debugger/model/stx-util
          "../test-setup.rkt")
 (provide regression-tests)
 
@@ -201,9 +202,9 @@
         (check-pred list? rs)
         (check-false (ormap misstep? rs))
         (check-true (for/or ([step rs])
-                      (equal? (syntax->datum (state-e (protostep-s1 step)))
+                      (equal? (stx->datum (state-e (protostep-s1 step)))
                               '(m y 12))
-                      (equal? (syntax->datum (state-e (step-s2 step)))
+                      (equal? (stx->datum (state-e (step-s2 step)))
                               '(define y 12)))
                     "looking for m => define")))
 
