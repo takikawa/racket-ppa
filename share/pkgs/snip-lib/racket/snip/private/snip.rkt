@@ -1195,35 +1195,36 @@
   (def/public (get-bitmap-mask)
     mask)
 
-  (def/override (other-equal-to? [image-snip% other] [any? recur])
-    (let* ([bm (send this get-bitmap)]
-           [bm2 (send other get-bitmap)])
-      (and
-       bm (send bm ok?)
-       bm2 (send bm ok?)
-       (= (send bm get-depth) (send bm2 get-depth))
-       (let ([w (send bm get-width)]
-             [h (send bm get-height)])
-         (and
-          (= w (send bm2 get-width))
-          (= h (send bm2 get-height))
-          (let ([s1 (make-bytes (* w h 4))]
-                [s2 (make-bytes (* w h 4))])
-            (send bm get-argb-pixels 0 0 w h s1 #f)
-            (send bm2 get-argb-pixels 0 0 w h s2 #f)
-            (let ([mask (send this get-bitmap-mask)])
-              (when (and mask
-                         (send mask ok?)
-                         (= w (send mask get-width))
-                         (= h (send mask get-height)))
-                (send mask get-argb-pixels 0 0 w h s1 #t)))
-            (let ([mask2 (send other get-bitmap-mask)])
-              (when (and mask2
-                         (send mask2 ok?)
-                         (= w (send mask2 get-width))
-                         (= h (send mask2 get-height)))
-                (send mask2 get-argb-pixels 0 0 w h s2 #t)))
-            (equal? s1 s2)))))))
+  (def/override (other-equal-to? [snip% other] [any? recur])
+    (and (is-a? other this%)
+         (let* ([bm (send this get-bitmap)]
+                [bm2 (send other get-bitmap)])
+           (and
+            bm (send bm ok?)
+            bm2 (send bm ok?)
+            (= (send bm get-depth) (send bm2 get-depth))
+            (let ([w (send bm get-width)]
+                  [h (send bm get-height)])
+              (and
+               (= w (send bm2 get-width))
+               (= h (send bm2 get-height))
+               (let ([s1 (make-bytes (* w h 4))]
+                     [s2 (make-bytes (* w h 4))])
+                 (send bm get-argb-pixels 0 0 w h s1 #f)
+                 (send bm2 get-argb-pixels 0 0 w h s2 #f)
+                 (let ([mask (send this get-bitmap-mask)])
+                   (when (and mask
+                              (send mask ok?)
+                              (= w (send mask get-width))
+                              (= h (send mask get-height)))
+                     (send mask get-argb-pixels 0 0 w h s1 #t)))
+                 (let ([mask2 (send other get-bitmap-mask)])
+                   (when (and mask2
+                              (send mask2 ok?)
+                              (= w (send mask2 get-width))
+                              (= h (send mask2 get-height)))
+                     (send mask2 get-argb-pixels 0 0 w h s2 #t)))
+                 (equal? s1 s2))))))))
 
   (define/private (do-hash-code hash-code)
     (if (and bm 

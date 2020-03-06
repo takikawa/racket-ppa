@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define package-content-state (quote (built "7.5"))) (define collection (quote multi)) (define deps (quote ("snip-lib" "gui-doc"))) (define pkg-desc "Text and graphics editor extension protocol") (define pkg-authors (quote (mflatt)))))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "7.6"))) (define collection (quote multi)) (define deps (quote ("snip-lib" "gui-doc"))) (define pkg-desc "Text and graphics editor extension protocol") (define pkg-authors (quote (mflatt)))))

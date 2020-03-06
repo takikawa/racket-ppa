@@ -15,7 +15,7 @@
   (only-in racket/private/pre-base new-apply-proc)
   compatibility/mlist
   (only-in file/convertible prop:convertible)
-  (only-in mzlib/pconvert-prop prop:print-converter)
+  (only-in mzlib/pconvert-prop prop:print-converter prop:print-convert-constructor-name)
   racket/logging
   racket/private/stx
   (only-in mzscheme make-namespace)
@@ -675,6 +675,10 @@
                         . -> . (-opt (-pair a b)))))]
 [assf  (-poly (a b) ((a . -> . Univ) (-lst (-pair a b))
                      . -> . (-opt (-pair a b))))]
+[index-of (-poly (a b)
+                 (cl->* ((-lst a) Univ . -> . (-opt -Index))
+                        ((-lst a) b (-> a b Univ)
+                           . -> . (-opt -Index))))]
 
 [list? (make-pred-ty (-lst Univ))]
 [list (-poly (a) (->* '() a (-lst a)))]
@@ -2802,6 +2806,8 @@
                 ((Un -TCP-Listener -Port) (-val #t) . -> . (-values (list -String -Index -String -Index))))]
 
 [tcp-port? (asym-pred Univ B (-PS (-is-type 0 (Un -Input-Port -Output-Port)) -tt))]
+[port-number? (Univ . -> . B)]
+[listen-port-number? (Univ . -> . B)]
 
 ;; Section 15.3.2 (racket/udp)
 [udp-open-socket (->opt [(-opt -String) (-opt -Int)] -UDP-Socket)]
@@ -3497,3 +3503,4 @@
 
 ;; MzLib: Legacy Libraries
 [prop:print-converter (-struct-property (-> -Self (-> Univ Univ) Univ))]
+[prop:print-convert-constructor-name (-struct-property -Symbol)]

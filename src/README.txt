@@ -2,21 +2,21 @@ This is the source code distribution for minimal Racket.
 
 If this directory is part of a clone of the Git repository for Racket,
 then the clone's root directory includes a makefile to both build
-minimal Racket and install packages. See "INSTALL.txt" in the clone's
+minimal Racket and install packages. See "build.md" in the clone's
 root directory.
 
 ========================================================================
  License and external links
 ========================================================================
 
-Racket is distributed under the GNU Lesser General Public License
-(LGPL). See the file "COPYING_LESSER.txt" for more information.
+Racket is distributed under the MIT license and the Apache version 2.0
+license, at your option. See "LICENSE.txt" for more information.
 
 Compiled executables, documentation, and up-to-date information:
    http://racket-lang.org/
 
 Pre-compiled daily snapshots:
-   http://pre.racket-lang.org/
+   http://snapshot.racket-lang.org/
 
 Main development repository:
    https://github.com/racket/racket
@@ -372,7 +372,7 @@ Some less commonly needed `configure` flags for traditional Racket:
 
  * `--enable-bigendian`, if target platform is big-endian.
 
- * `--enable-cify` or `--disable-cify` if the JIT availablity on the
+ * `--enable-cify` or `--disable-cify` if the JIT availability on the
     target platform is different than the build platform; use
     `--enable-cify` if the JIT is not abailable on the target
     platform.

@@ -577,6 +577,7 @@
                    [$optimize-closures ($optimize-closures)]
                    [enable-cross-library-optimization (enable-cross-library-optimization)]
                    [enable-arithmetic-left-associative (enable-arithmetic-left-associative)]
+                   [enable-error-source-expression (enable-error-source-expression)]
                    [enable-type-recovery (enable-type-recovery)])
       (emit-header op (constant machine-type))
       (when hostop (emit-header hostop (host-machine-type)))
@@ -666,9 +667,7 @@
                                   x2)])
                           (if cpletrec-ran?
                               x
-                              (let* ([x (cptypes x)]
-                                     [waste (check-prelex-flags x 'cptypes)]
-                                     [x ($pass-time 'cpletrec (lambda () (do-trace $cpletrec x)))]
+                              (let* ([x ($pass-time 'cpletrec (lambda () (do-trace $cpletrec x)))]
                                      [waste (check-prelex-flags x 'cpletrec)])
                                 x))))]
                  [x2b ($pass-time 'cpcheck (lambda () (do-trace $cpcheck x2a)))]
@@ -1577,8 +1576,7 @@
                                       ($pass-time 'cpletrec (lambda () ($cpletrec x)))))
                                   x2)])
                           (if cpletrec-ran? x
-                              (let ([x (cptypes x)])
-                                ($pass-time 'cpletrec (lambda () ($cpletrec x)))))))]
+                              ($pass-time 'cpletrec (lambda () ($cpletrec x))))))]
                  [x2b ($pass-time 'cpcheck (lambda () ($cpcheck x2a)))]
                  [x2b ($pass-time 'cpcommonize (lambda () ($cpcommonize x2b)))])
             (when (and (expand/optimize-output) (not ($noexpand? x0)))

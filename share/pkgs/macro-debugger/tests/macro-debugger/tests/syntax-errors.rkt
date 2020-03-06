@@ -221,12 +221,6 @@
                                         'b
                                         (define-values (y) 'c)
                                         'd))))
-                     (rename-letrec-values (#%stratified-body
-                                            (letrec-values ([(x) 'a])
-                                              (#%stratified-body
-                                               'b
-                                               (define-values (y) 'c)
-                                               'd))))
                      error])
     (testKE (#%stratified-body (define-values (x) 'a))
             [#:steps error])]
@@ -305,9 +299,9 @@
     (testKE (lambda (x) (begin0 (wrong)))
             [#:rename+error-step rename-lambda])
     (testKE (letrec-values ([(x) (wrong)]) 1)
-            [#:rename+error-step rename-letrec-values])
+            [#:rename+error-step rename-letX])
     (testKE (letrec-values ([(x) 'a]) (begin0 (wrong)))
-            [#:rename+error-step rename-letrec-values])]
+            [#:rename+error-step rename-letX])]
    [#:suite
     "Internal definitions"
     (testKE (lambda () (wrong))
@@ -316,7 +310,6 @@
             [#:steps 
              (rename-lambda (lambda () (define-values () (wrong)) 1))
              (block->letrec (lambda () (letrec-values ([() (wrong)]) 1)))
-             (rename-letrec-values (lambda () (letrec-values ([() (wrong)]) 1)))
              error])
     (testKE (lambda () (define-values (x) 1) (wrong))
             [#:rename+error-step rename-lambda])]])

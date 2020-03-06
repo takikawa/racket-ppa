@@ -473,6 +473,7 @@
               [(uptr) 0 -1 'a (+ *max-uptr 1) #f]
               [(uptr/iptr) -1 'q (+ *max-uptr 1) (- *min-iptr 1) #f]
               [(vector) '#(a) "a" #f]
+              [(stencil-vector) (stencil-vector 7 1 2 3) "a" #f]
               [(who-condition) (make-who-condition 'me) (make-message-condition "hello") 'the-who])
             (meta-cond
               [(memq 'pthreads feature*)
@@ -510,7 +511,8 @@
                            (lambda (good.bad*)
                              (loop in* (cons (car good.bad*) rgood*) (cons (cdr good.bad*) rbad**)))]
                           [else (errorf 'fuzz-prim-args "unhandled type ~s" in)])))))))
-          (when (flags-set? primitive proc)
+          (when (and (flags-set? primitive proc)
+                     (not (flags-set? system proc)))
             (for-each
               (lambda (in*)
                 (good/bad in*

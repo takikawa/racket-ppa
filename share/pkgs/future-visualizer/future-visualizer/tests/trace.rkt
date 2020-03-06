@@ -62,8 +62,12 @@ Invariants:
                      (map touch fs)))))
    (check-true (> (length log1) 2000)) 
    ;Event types 
-   (check-equal? (length (filter (λ (e) (and (synchronization-event? e) 
-                                             (equal? (op-name e) 'printf))) 
+   (check-equal? (length (filter (λ (e) (and (synchronization-event? e)
+                                             (memq (op-name e) '(printf
+                                                                 ;; In Racket CS, synchronization is
+                                                                 ;; within `printf` where it's looking
+                                                                 ;; up a parameter:
+                                                                 continuation-mark-set-first))))
                                  log1)) 
                  1000)
    (define syncs-len (length (filter synchronization-event? log1))) 
@@ -80,7 +84,8 @@ Invariants:
                                 [current-output-port (open-output-string)])
                    (void (dynamic-require 'tests/racket/benchmarks/shootout/mandelbrot-futures #f))))) 
    (check-true (> (length log3) 0))
-   (check-true (list? (memf jitcompile-event? log3)) "No JIT compilation events found in mandelbrot")
+   (when (eq? 'racket (system-type 'vm))
+     (check-true (list? (memf jitcompile-event? log3)) "No JIT compilation events found in mandelbrot"))
    (define tr3 (build-trace log3)) 
    (check-equal? (length (hash-keys (trace-future-timelines tr3))) 2001)
    
@@ -92,10 +97,11 @@ Invariants:
                    (sleep 0.5)
                    (touch f)))) 
    (check-true (> (length log4) 0))
-   (check-true (list? (memf allocation-event? log4)) "No allocation events found in log4")
-   (define ae (findf allocation-event? log4)) 
-   (check-true (allocation-event? ae)) 
-   (check-true (runtime-synchronization-event? ae))
+   (when (eq? 'racket (system-type 'vm))
+     (check-true (list? (memf allocation-event? log4)) "No allocation events found in log4")
+     (define ae (findf allocation-event? log4)) 
+     (check-true (allocation-event? ae))
+     (check-true (runtime-synchronization-event? ae)))
    
    (check-true (proc-id-or-gc<? 'gc 0)) 
    (check-false (proc-id-or-gc<? 0 'gc)) 

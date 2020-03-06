@@ -1,4 +1,5 @@
 #lang racket/base
+
 (require racket/contract
          racket/list
          (for-syntax racket/base)
@@ -6,6 +7,7 @@
          racket/runtime-path
          "configuration-table-structs.rkt"
          web-server/http/bindings)
+
 (define configuration-table-sexpr? list?)
 
 (provide/contract
@@ -37,7 +39,9 @@
   (define default-host-table (get-binding* 'default-host-table t `()))
   (define virtual-host-table (get-binding* 'virtual-host-table t `()))
   (make-configuration-table
-   port max-waiting initial-connection-timeout
+   port
+   max-waiting
+   initial-connection-timeout
    (parse-host default-host-table)
    (map (lambda (h)
           (cons (car h) (parse-host (cdr h))))

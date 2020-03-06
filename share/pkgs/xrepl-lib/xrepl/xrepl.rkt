@@ -284,8 +284,9 @@
   (let ([x (here-source)])
     (cond [(not x) eof]
           [(symbol? x) `',x]
-          [(path? x)   (let ([s (path->string x)])
-                         (if (absolute-path? x) `(file ,s) s))]
+          [(path? x)
+           (let ([s (path->string x)])
+             (if (absolute-path? x) `(file ,s) s))]
           [else (error 'here-mod-or-eof "internal error: ~s" x)])))
 
 (define (getarg kind [flag 'req] #:default [dflt #f])

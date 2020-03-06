@@ -18,6 +18,9 @@
 ;; Maps a property-accessor function to `(cons predicate-proc can-impersonate)`:
 (define property-accessors (make-ephemeron-eq-hashtable))
 
+;; Maps a property-predicate function to `struct-property`:
+(define property-predicates (make-ephemeron-eq-hashtable))
+
 (define (struct-type-property? v)
   (struct-type-prop? v))
 
@@ -96,6 +99,10 @@
           (hashtable-set! property-accessors
                           acc
                           (cons pred can-impersonate?)))
+         (with-global-lock*
+          (hashtable-set! property-predicates
+                          pred
+                          st))
          (values st
                  pred
                  acc)))]))
@@ -105,6 +112,19 @@
        (let ([v (strip-impersonator v)])
          (with-global-lock* (hashtable-ref property-accessors v #f)))
        #t))
+
+(define/who struct-type-property-predicate-procedure?
+  (case-lambda
+   [(v) (struct-type-property-predicate-procedure? v #f)]
+   [(v spt)
+    (check who struct-type-property? :or-false spt)
+    (and (procedure? v)
+         (let* ([v (strip-impersonator v)]
+                [spt-c (with-global-lock* (hashtable-ref property-predicates v #f))])
+           (cond
+            [(not spt-c) #f]
+            [(not spt) #t]
+            [else (eq? spt spt-c)])))]))
 
 (define (struct-type-property-accessor-procedure-pred v)
   (car (with-global-lock (hashtable-ref property-accessors v #f))))
@@ -120,7 +140,9 @@
 
 ;; ----------------------------------------
 
-(define-record-type (inspector new-inspector inspector?) (fields parent))
+(define-record-type (inspector new-inspector inspector?)
+  (fields parent)
+  (sealed #t))
 
 (define root-inspector (new-inspector #f))
 
@@ -355,6 +377,13 @@
 (define-record position-based-accessor (rtd offset field-count))
 (define-record position-based-mutator (rtd offset field-count))
 
+(define (position-based-accessor-name f)
+  (let ([rtd (position-based-accessor-rtd f)])
+    (string->symbol (string-append (symbol->string (record-type-name rtd)) "-ref"))))
+(define (position-based-mutator-name f)
+  (let ([rtd (position-based-mutator-rtd f)])
+    (string->symbol (string-append (symbol->string (record-type-name rtd)) "-set!"))))
+
 ;; Register other procedures in hash tables; avoid wrapping to
 ;; avoid making the procedures slower
 (define struct-constructors (make-ephemeron-eq-hashtable))
@@ -427,19 +456,19 @@
 (define make-struct-type
   (case-lambda 
     [(name parent-rtd init-count auto-count)
-     (make-struct-type name parent-rtd init-count auto-count #f '() (current-inspector) #f '() #f name)]
+     (make-struct-type name parent-rtd init-count auto-count #f '() (current-inspector) #f '() #f #f)]
     [(name parent-rtd init-count auto-count auto-val)
-     (make-struct-type name parent-rtd init-count auto-count auto-val '() (current-inspector) #f '() #f name)]
+     (make-struct-type name parent-rtd init-count auto-count auto-val '() (current-inspector) #f '() #f #f)]
     [(name parent-rtd init-count auto-count auto-val props)
-     (make-struct-type name parent-rtd init-count auto-count auto-val props (current-inspector) #f '() #f name)]
+     (make-struct-type name parent-rtd init-count auto-count auto-val props (current-inspector) #f '() #f #f)]
     [(name parent-rtd init-count auto-count auto-val props insp)
-     (make-struct-type name parent-rtd init-count auto-count auto-val props insp #f '() #f name)]
+     (make-struct-type name parent-rtd init-count auto-count auto-val props insp #f '() #f #f)]
     [(name parent-rtd init-count auto-count auto-val props insp proc-spec)
-     (make-struct-type name parent-rtd init-count auto-count auto-val props insp proc-spec '() #f name)]
+     (make-struct-type name parent-rtd init-count auto-count auto-val props insp proc-spec '() #f #f)]
     [(name parent-rtd init-count auto-count auto-val props insp proc-spec immutables)
-     (make-struct-type name parent-rtd init-count auto-count auto-val props insp proc-spec immutables #f name)]
+     (make-struct-type name parent-rtd init-count auto-count auto-val props insp proc-spec immutables #f #f)]
     [(name parent-rtd init-count auto-count auto-val props insp proc-spec immutables guard)
-     (make-struct-type name parent-rtd init-count auto-count auto-val props insp proc-spec immutables guard name)]
+     (make-struct-type name parent-rtd init-count auto-count auto-val props insp proc-spec immutables guard #f)]
     [(name parent-rtd init-count auto-count auto-val props insp proc-spec immutables guard constructor-name)
      (let* ([install-props!
              (check-make-struct-type-arguments 'make-struct-type name parent-rtd init-count auto-count
@@ -462,7 +491,9 @@
             [auto-field-adder (and (positive? auto*-count)
                                    (let ([pfa (get-field-info-auto-adder parent-fi)])
                                      (lambda (args)
-                                       (args-insert args init-count auto-count auto-val pfa))))])
+                                       (args-insert args init-count auto-count auto-val pfa))))]
+            [constructor-name (or constructor-name
+                                  (string->symbol (string-append "make-" (symbol->string name))))])
        (when (or parent-rtd* auto-field-adder)
          (let ([field-info (make-field-info init*-count auto*-count auto-field-adder)])
            (putprop (record-type-uid rtd) 'field-info field-info)))
@@ -478,9 +509,9 @@
                            (lambda args
                              (apply c (reverse (auto-field-adder (reverse args)))))
                            init*-count))
-                      (or constructor-name name)))
+                      constructor-name))
                    rtd
-                   (or constructor-name name))]
+                   constructor-name)]
              [pred (procedure-rename
                     (lambda (v)
                       (or (record? v rtd)
@@ -499,17 +530,17 @@
 (define struct-type-install-properties!
   (case-lambda
    [(rtd name init-count auto-count parent-rtd)
-    (struct-type-install-properties! rtd name init-count auto-count parent-rtd '() (current-inspector) #f '() #f name #f)]
+    (struct-type-install-properties! rtd name init-count auto-count parent-rtd '() (current-inspector) #f '() #f #f #f)]
    [(rtd name init-count auto-count parent-rtd props)
-    (struct-type-install-properties! rtd name init-count auto-count parent-rtd props (current-inspector) #f '() #f name #f)]
+    (struct-type-install-properties! rtd name init-count auto-count parent-rtd props (current-inspector) #f '() #f #f #f)]
    [(rtd name init-count auto-count parent-rtd props insp)
-    (struct-type-install-properties! rtd name init-count auto-count parent-rtd props insp #f '() #f name #f)]
+    (struct-type-install-properties! rtd name init-count auto-count parent-rtd props insp #f '() #f #f #f)]
    [(rtd name init-count auto-count parent-rtd props insp proc-spec)
-    (struct-type-install-properties! rtd name init-count auto-count parent-rtd props insp proc-spec '() #f name #f)]
+    (struct-type-install-properties! rtd name init-count auto-count parent-rtd props insp proc-spec '() #f #f #f)]
    [(rtd name init-count auto-count parent-rtd props insp proc-spec immutables)
-    (struct-type-install-properties! rtd name init-count auto-count parent-rtd props insp proc-spec immutables #f name #f)]
+    (struct-type-install-properties! rtd name init-count auto-count parent-rtd props insp proc-spec immutables #f #f #f)]
    [(rtd name init-count auto-count parent-rtd props insp proc-spec immutables guard)
-    (struct-type-install-properties! rtd name init-count auto-count parent-rtd props insp proc-spec immutables guard name #f)]
+    (struct-type-install-properties! rtd name init-count auto-count parent-rtd props insp proc-spec immutables guard #f #f)]
    [(rtd name init-count auto-count parent-rtd props insp proc-spec immutables guard constructor-name)
     (struct-type-install-properties! rtd name init-count auto-count parent-rtd props insp proc-spec immutables guard constructor-name #f)]
    [(rtd name init-count auto-count parent-rtd props insp proc-spec immutables guard constructor-name install-props!)
@@ -664,9 +695,9 @@
               (procedure-rename
                 (lambda (v)
                   ($value
-                   (if (impersonator? v)
-                       (impersonate-ref p rtd pos v rec-name (or name 'field))
-                       (p v))))
+                   (if (record? v rtd)
+                       (p v)
+                       (impersonate-ref p rtd pos v rec-name (or name 'field)))))
                 (string->symbol (string-append (symbol->string rec-name)
                                                "-"
                                                (if name
@@ -702,9 +733,9 @@
               (procedure-rename
                (if (struct-type-field-mutable? rtd pos)
                    (lambda (v a)
-                     (if (impersonator? v)
-                         (impersonate-set! p rtd pos abs-pos v a rec-name (or name 'field))
-                         (p v a)))
+                     (if (record? v rtd)
+                         (p v a)
+                         (impersonate-set! p rtd pos abs-pos v a rec-name (or name 'field))))
                    (lambda (v a)
                      (raise-arguments-error name
                                             "cannot modify value of immutable field in structure"
@@ -800,30 +831,36 @@
                            "current inspector cannot extract info for structure type"
                            "structure type" rtd)))
 
-(define/who (struct-type-make-constructor rtd)
-  (check who struct-type? rtd)
-  (let ([rtd* (strip-impersonator rtd)])
-    (check-inspector-access who rtd*)
-    (let ([ctr (struct-type-constructor-add-guards
-                (let* ([c (record-constructor rtd*)]
-                       [fi (struct-type-field-info rtd*)]
-                       [auto-field-adder (get-field-info-auto-adder fi)])
-                  (cond
-                   [auto-field-adder
-                    (procedure-maybe-rename
-                     (procedure-reduce-arity
-                      (lambda args
-                        (apply c (reverse (auto-field-adder (reverse args)))))
-                      (get-field-info-init*-count fi))
-                     (object-name c))]
-                   [else c]))
-                rtd*
-                #f)])
-      (register-struct-constructor! ctr)
-      (cond
-       [(struct-type-chaperone? rtd)
-        (chaperone-constructor rtd ctr)]
-       [else ctr]))))
+(define/who struct-type-make-constructor
+  (case-lambda
+   [(rtd) (struct-type-make-constructor rtd #f)]
+   [(rtd name)
+    (check who struct-type? rtd)
+    (check who symbol? :or-false name)
+    (let ([rtd* (strip-impersonator rtd)])
+      (check-inspector-access who rtd*)
+      (let ([ctr (struct-type-constructor-add-guards
+                  (let* ([c (record-constructor rtd*)]
+                         [fi (struct-type-field-info rtd*)]
+                         [auto-field-adder (get-field-info-auto-adder fi)]
+                         [name (or name
+                                   (string->symbol (format "make-~a" (record-type-name rtd*))))])
+                    (cond
+                     [auto-field-adder
+                      (procedure-rename
+                       (procedure-reduce-arity
+                        (lambda args
+                          (apply c (reverse (auto-field-adder (reverse args)))))
+                        (get-field-info-init*-count fi))
+                       name)]
+                     [else (procedure-rename c name)]))
+                  rtd*
+                  #f)])
+        (register-struct-constructor! ctr)
+        (cond
+         [(struct-type-chaperone? rtd)
+          (chaperone-constructor rtd ctr)]
+         [else ctr])))]))
 
 ;; Called directly from a schemified declaration that has a guard:
 (define (struct-type-constructor-add-guards ctr rtd name)
@@ -1025,7 +1062,7 @@
                                                  "        (procedure-arity-includes/c 2)\n"
                                                  "        (procedure-arity-includes/c 2))")
                                       val)
-                               (cons (gensym) val))))
+                               (cons (#%gensym) val))))
 
 (define-values (prop:authentic authentic? authentic-ref)
   (make-struct-type-property 'authentic (lambda (val info) #t)))

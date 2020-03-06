@@ -658,9 +658,19 @@
           [(quote ,d) d]
           [else (sorry! who "~s is not a constant" x)])))
 
+    (define (name-preinfo-lambda! preinfo name)
+      (when (and (symbol? name)
+                 ;; Avoid replacing a name from an optimized-away `let` pattern:
+                 (not (preinfo-lambda-name preinfo)))
+        (preinfo-lambda-name-set! preinfo
+           (let ([x ($symbol-name name)])
+             (if (pair? x) (or (cdr x) (car x)) x)))))
+    
     (define preinfo-call->preinfo-lambda
-      (lambda (preinfo)
-        (make-preinfo-lambda (preinfo-src preinfo) (preinfo-sexpr preinfo))))
+      (lambda (preinfo name)
+        (let ([new-preinfo (make-preinfo-lambda (preinfo-src preinfo) (preinfo-sexpr preinfo))])
+          (name-preinfo-lambda! new-preinfo name)
+          new-preinfo)))
 
     (define build-quote
       (lambda (d)
@@ -784,6 +794,10 @@
                 (record-equal? e1 e2 (if (eq? ctxt 'test) 'test 'value))
                 (simple? e1))
            e1]
+          [(and (cp0-constant? (lambda (x) (eq? x #f)) e3)
+                (cp0-constant? (lambda (x) (eq? x #t)) e2)
+                (or (boolean-valued? e1) (eq? ctxt 'test)))
+           (make-nontail ctxt e1)]
           [(nanopass-case (Lsrc Expr) (result-exp e1)
              [(if ,e11 ,[result-exp : e12 -> re12] ,[result-exp : e13 -> re13])
               (if (and (cp0-constant? re12) (cp0-constant? re13))
@@ -848,7 +862,7 @@
       (lambda (obj)
         ; okay to copy obj if (eq? (faslin (faslout x)) x) => #t or (in the case of numbers and characters)
         ; the value of (eq? x x) is unspecified
-        (or (symbol? obj)
+        (or (and (symbol? obj) (not (uninterned-symbol? obj)))
             (number? obj)
             (char? obj)
             (boolean? obj)
@@ -2157,7 +2171,8 @@
         (define-inline-constant-parameter (most-negative-fixnum least-fixnum) (constant most-negative-fixnum))
         (define-inline-constant-parameter (most-positive-fixnum greatest-fixnum) (constant most-positive-fixnum))
         (define-inline-constant-parameter (fixnum-width) (constant fixnum-bits))
-        (define-inline-constant-parameter (virtual-register-count) (constant virtual-register-count)))
+        (define-inline-constant-parameter (virtual-register-count) (constant virtual-register-count))
+        (define-inline-constant-parameter (stencil-vector-mask-width) (constant stencil-vector-mask-bits)))
 
       (define-inline 2 directory-separator?
         [(c) (visit-and-maybe-extract* char? ([dc c])
@@ -2394,10 +2409,34 @@
       (define-inline 3 (boolean=? symbol=? r6rs:char=? r6rs:char-ci=? r6rs:string=? r6rs:string-ci=?)
         [(arg1 arg2 . arg*) (handle-equality ctxt arg1 (cons arg2 arg*))])
 
-      (define-inline 3 (ash
-                         bitwise-arithmetic-shift bitwise-arithmetic-shift-left
-                         bitwise-arithmetic-shift-right)
-        [(x y) (handle-shift 3 ctxt x y)])
+      (let ()
+        (define (try-fold-ash-op op ctxt x y)
+          (let ([xval (nanopass-case (Lsrc Expr) (result-exp (value-visit-operand! x))
+                        [(quote ,d) (and (integer? d) (exact? d) d)]
+                        [else #f])]
+                [yval (nanopass-case (Lsrc Expr) (result-exp (value-visit-operand! y))
+                        [(quote ,d) (and (fixnum? d) (fx< -1000 d 1000) d)]
+                        [else #f])])
+            (and xval
+                 yval
+                 (let ([r (guard (c [#t #f]) (op xval yval))])
+                   (cond
+                    [r (residualize-seq '() (list x y) ctxt)
+                       `(quote ,r)]
+                    [else #f])))))
+        (define-syntax define-inline-ash-op
+          (syntax-rules ()
+            [(_ op)
+             (begin
+               (define-inline 2 op
+                 [(x y) (try-fold-ash-op op ctxt x y)])
+               (define-inline 3 op
+                 [(x y) (or (try-fold-ash-op op ctxt x y)
+                            (handle-shift 3 ctxt x y))]))]))
+        (define-inline-ash-op ash)
+        (define-inline-ash-op bitwise-arithmetic-shift)
+        (define-inline-ash-op bitwise-arithmetic-shift-left)
+        (define-inline-ash-op bitwise-arithmetic-shift-right))
 
       (define-inline 3 fxbit-field ; expose internal fx ops for partial optimization
         [(?n ?start ?end)
@@ -2717,6 +2756,9 @@
         (fold (fxlogbit? tfixnum? tfixnum?) boolean? #2%logbit?)
         (fold (fxlogbit0 u<fxwidth-1? tfixnum?) tfixnum? #2%logbit0)
         (fold (fxlogbit1 u<fxwidth-1? tfixnum?) tfixnum? #2%logbit1)
+        (fold (fxpopcount tfixnum?) tfixnum? #2%fxpopcount)
+        (fold (fxpopcount32 tfixnum?) tfixnum? #2%fxpopcount32)
+        (fold (fxpopcount16 tfixnum?) tfixnum? #2%fxpopcount16)
 
         (fold (fxarithmetic-shift tfixnum? s<fxwidth?) tfixnum? #2%bitwise-arithmetic-shift handle-shift)
         (fold (fxarithmetic-shift-left tfixnum? u<fxwidth?) tfixnum? #2%bitwise-arithmetic-shift-left handle-shift)
@@ -3166,7 +3208,7 @@
                       (residualize-seq '() (list ?rtd) ctxt)
                       (finish ctxt sc wd moi
                         (let ([t (cp0-make-temp #f)])
-                          (build-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt)) (list t)
+                          (build-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt) (app-name ctxt)) (list t)
                             (build-primcall 3
                               (if (record-type-sealed? rtd) '$sealed-record? 'record?)
                               (list (build-ref t) rtd-expr))))))
@@ -3176,7 +3218,7 @@
                       (finish ctxt sc wd moi
                         (let ([rtd-t (cp0-make-temp #f)] [t (cp0-make-temp #f)])
                           (build-let (list rtd-t) (list (operand-value ?rtd))
-                            (build-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt)) (list t)
+                            (build-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt) (app-name ctxt)) (list t)
                               (build-primcall 3
                                 (if (record-type-sealed? rtd) '$sealed-record? 'record?)
                                 (list (build-ref t) (build-ref rtd-t))))))))))]))
@@ -3216,7 +3258,7 @@
                                              check*))))
                                    '() fld* t*)
                                  '())])
-                (build-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt)) t*
+                (build-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt) (app-name ctxt)) t*
                   (let ([expr `(record ,rtd ,rtd-e ,(map build-ref t*) ...)])
                     (if (null? check*)
                         expr
@@ -3400,13 +3442,13 @@
                              (cond
                                [(fx= level 3)
                                 (residualize-seq '() (list ?rtd ?field) ctxt)
-                                (build-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt)) (list rec-t) expr)]
+                                (build-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt) (app-name ctxt)) (list rec-t) expr)]
                                [(nanopass-case (Lsrc Expr) rtd-e
                                   [(quote ,d) #t]
                                   [(ref ,maybe-src ,x) #t]
                                   [else #f])
                                 (residualize-seq '() (list ?rtd ?field) ctxt)
-                                (build-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt)) (list rec-t)
+                                (build-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt) (app-name ctxt)) (list rec-t)
                                   `(seq
                                      (if ,(build-primcall 3 'record?
                                             (list (build-ref rec-t) rtd-e))
@@ -3421,7 +3463,7 @@
                                 (let ([rtd-t (cp0-make-temp #t)])
                                   (residualize-seq (list ?rtd) (list ?field) ctxt)
                                   (build-let (list rtd-t) (list (operand-value ?rtd))
-                                    (build-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt)) (list rec-t)
+                                    (build-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt) (app-name ctxt)) (list rec-t)
                                       `(seq
                                          (if ,(build-primcall 3 'record?
                                                 (list (build-ref rec-t) (build-ref rtd-t)))
@@ -3453,7 +3495,7 @@
                                   (cond
                                     [(fx= level 3)
                                      (residualize-seq '() (list ?rtd ?field) ctxt)
-                                     (build-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt))
+                                     (build-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt) (app-name ctxt))
                                        (list rec-t val-t)
                                        expr)]
                                     [(nanopass-case (Lsrc Expr) rtd-e
@@ -3461,7 +3503,7 @@
                                        [(ref ,maybe-src ,x) #t]
                                        [else #f])
                                      (residualize-seq '() (list ?rtd ?field) ctxt)
-                                     (build-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt))
+                                     (build-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt) (app-name ctxt))
                                        (list rec-t val-t)
                                        (make-seq 'value
                                          `(if ,(build-primcall 3 'record?
@@ -3486,7 +3528,7 @@
                                       (let ([rtd-t (cp0-make-temp #t)])
                                         (residualize-seq (list ?rtd) (list ?field) ctxt)
                                         (build-let (list rtd-t) (list (operand-value ?rtd))
-                                          (build-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt))
+                                          (build-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt) (app-name ctxt))
                                             (list rec-t val-t)
                                             (make-seq 'value
                                               `(if ,(build-primcall 3 'record?
@@ -4597,12 +4639,12 @@
                              (build-lambda (list orig-x p)
                                (maybe-add-procedure-check ?p level "make-parameter" p
                                  (build-let (list x) (list `(call ,(make-preinfo-call) (ref #f ,p) (ref #f ,orig-x)))
-                                   (build-case-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt))
+                                   (build-case-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt) (app-name ctxt))
                                      (list
                                        (list '() (build-ref x))
                                        (list (list v) `(set! #f ,x (call ,(make-preinfo-call) (ref #f ,p) (ref #f ,v))))))))))
                            (build-lambda (list x)
-                             (build-case-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt))
+                             (build-case-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt) (app-name ctxt))
                                (list
                                  (list '() (build-ref x))
                                  (list (list v) `(set! #f ,x (ref #f ,v))))))))
@@ -4640,7 +4682,7 @@
                                    (build-let (list x)
                                      (list (build-primcall 3 '$allocate-thread-parameter
                                              (list `(call ,(make-preinfo-call) (ref #f ,p) (ref #f ,orig-x)))))
-                                     (build-case-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt))
+                                     (build-case-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt) (app-name ctxt))
                                        (list
                                          (list '() (mtp-ref x))
                                          (list (list v) (mtp-set x `(call ,(make-preinfo-call) (ref #f ,p) (ref #f ,v))))))))))
@@ -4648,7 +4690,7 @@
                                (build-let (list x)
                                  (list (build-primcall 3 '$allocate-thread-parameter
                                          (list (build-ref orig-x))))
-                                 (build-case-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt))
+                                 (build-case-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt) (app-name ctxt))
                                    (list
                                      (list '() (mtp-ref x))
                                      (list (list v) (mtp-set x (build-ref v)))))))))
@@ -4672,7 +4714,7 @@
                                  (let ([zero `(quote 0)])
                                    (build-let (list x) (list (build-primcall 3 'cons (list zero zero)))
                                      (build-primcall 3 'cons (list ref-x ref-x))))))
-                         (build-case-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt))
+                         (build-case-lambda (preinfo-call->preinfo-lambda (app-preinfo ctxt) (app-name ctxt))
                            (cons
                              (list '()
                                (let* ([x (cp0-make-temp #t)] [ref-x (build-ref x)])
@@ -4871,12 +4913,7 @@
          (let-values ([(e args) (lift-let e e*)])
            (cp0-call preinfo e (build-operands args env wd moi) ctxt env sc wd name moi)))]
       [(case-lambda ,preinfo ,cl* ...)
-       (when (and (symbol? name)
-                  ;; Avoid replacing a name from an optimized-away `let` pattern:
-                  (not (preinfo-lambda-name preinfo)))
-         (preinfo-lambda-name-set! preinfo
-           (let ([x ($symbol-name name)])
-             (if (pair? x) (cdr x) x))))
+       (name-preinfo-lambda! preinfo name)
        (context-case ctxt
          [(value tail)
           (bump sc 1)
@@ -5004,6 +5041,7 @@
             (or (nanopass-case (Lsrc Expr) (result-exp e0)
                   [(quote ,d)
                    (and (record? d rtd)
+                        (not (csv7:record-field-mutable? rtd index))
                         (make-seq ctxt e0 `(quote ,((csv7:record-field-accessor rtd index) d))))]
                   [(record ,rtd1 ,rtd-expr ,e* ...)
                    (let loop ([e* e*] [re* '()] [index index])

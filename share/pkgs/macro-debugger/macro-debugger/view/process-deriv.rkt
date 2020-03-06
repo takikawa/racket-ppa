@@ -12,12 +12,12 @@
   ;; adjust-deriv/lift : Deriv -> Deriv/#f
   (define (adjust-deriv/lift deriv)
     (match deriv
-      [(Wrap lift-deriv (e1 e2 first lifted-stx second))
+      [(lift-deriv e1 e2 first lifted-stx second)
        (let ([first (adjust-deriv/lift first)])
          (and first
               (let ([e1 (wderiv-e1 first)])
-                (make-lift-deriv e1 e2 first lifted-stx second))))]
-      [(Wrap ecte (e1 e2 '() first second locals2))
+                (make lift-deriv e1 e2 first lifted-stx second))))]
+      [(ecte e1 e2 '() first second locals2)
        ;; Only adjust if no locals...
        (let ([first (adjust-deriv/lift first)])
          (and first
