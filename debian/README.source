@@ -5,6 +5,8 @@ Extra details for PPA:
   * merge upstream (Debian) master into PPA master
   * follow steps below in README.source for upstream branch
   * merge upstream branch into ppa branch (instead of dfsg, etc)
+  * tag ppa branch ('upstream/<racket-ver>-ppa<num>')
+  * merge ppa tag into master
   * adjust debian/changelog and anything else as required for PPA
   * use `./debian/rules get-orig-source` as written below for tarball
   * use `debuild -S -k'...'` to build the package with appropriate PPA key
