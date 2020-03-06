@@ -8,6 +8,9 @@ Files removed, because of license forbidding modifications:
  share/pkgs/srfi-doc/srfi/scribblings/srfi-std/srfi-5.html  |  345 ------------
  share/pkgs/srfi-lib/srfi/32/sort.txt                       | 1069 ------
 
+File(s) removed because of lack of src:
+ src/ChezScheme/zlib/contrib/dotzlib/DotZLib.chm
+
 readline collection notes:
 GNU's readline library is covered by the GPL (found at
 /usr/share/common-licenses/GPL on Debian systems), and that applies to
@@ -66,6 +69,29 @@ License: DFSG. If GPL versus LGPL matters, contact PLT Scheme team.
 File: share/pkgs/icons/save.png
 Copyright: © 2008  David Vignoni
 License: LGPL 2.1
+
+Files: src/ChezScheme
+Copyright © 1984-2019 Cisco Systems, Inc.
+License: Apache 2.0
+ This product includes code developed by Cisco Systems, Inc.
+
+ This product also includes separately copyrighted:
+
+  * Unicode data files from the Unicode Consortium
+
+  * Unicode data-file processing code developed by Abdulaziz Ghuloum and
+    R. Kent Dybvig
+
+  * sorting code developed by Olin Shivers
+
+  * example programs, an html formatting module, and documentation
+    support files developed by R. Kent Dybvig
+
+  * test code and other code used for testing developed by
+    William D Clinger, by Dirk Lutzebaeck, and by Oscar Waddell and
+    R. Kent Dybvig.
+
+  * code derived from C. David Boyer's command-line editor
 
 Files: src/racket/gc/*
 Copyright: 1988, 1989 Hans-J. Boehm, Alan J. Demers

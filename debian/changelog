@@ -4,6 +4,13 @@ racket (7.5+ppa1-2~bionic1) bionic; urgency=medium
 
  -- Asumu Takikawa <asumu@racket-lang.org>  Thu, 21 Nov 2019 14:30:00 -0800
 
+racket (7.5+dfsg2-1) unstable; urgency=medium
+
+  * New upstream bugfix release.
+  * Drop openssl patch, upstream now recognizes 1.0.2
+
+ -- David Bremner <bremner@debian.org>  Mon, 30 Dec 2019 17:47:51 -0400
+
 racket (7.2+dfsg1-2) unstable; urgency=medium
 
   * Upload to unstable.
