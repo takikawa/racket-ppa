@@ -1,0 +1,22 @@
+This component of Racket is primarily distributed under the under the
+Apache 2.0 and MIT licenses. The user can choose the license under
+which they will be using the software.
+
+Additionally, several translations in this package are distributed
+under the GNU Lesser General Public License, version 2.0 or any later
+version. This applies to the following files:
+
+  string-constants/private/japanese-string-constants.rkt
+  string-constants/private/dutch-string-constants.rkt
+  string-constants/private/spanish-string-constants.rkt
+  string-constants/private/korean-string-constants.rkt
+  string-constants/private/russian-string-constants.rkt
+  string-constants/private/ukranian-string-constants.rkt
+
+See the files
+  https://github.com/racket/racket/blob/master/racket/src/LICENSE-APACHE.txt
+and
+  https://github.com/racket/racket/blob/master/racket/src/LICENSE-MIT.txt
+and
+  https://github.com/racket/racket/blob/master/racket/src/LICENSE-LGPL.txt
+for the full text of the licenses.

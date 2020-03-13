@@ -1,44 +1,25 @@
 #lang racket/base
-(require (for-syntax racket/base)
-         syntax/stx)
-(provide stx-disarm
-         stx-car*
-         stx-cdr*
-         syntax-e*
-         stx->list*
-         stx->datum
+(require syntax/stx)
+(provide stx->datum
+         stxd-car
+         stxd-cdr
          syntaxish?
-         syntax-copier)
-
-;; Update for syntax taint: On get, disarm stx on the way, but don't
-;; disarm final stx. On replace, disarm and rearm along the way.
-
-(define (stx-disarm stx)
-  (if (syntax? stx) (syntax-disarm stx (current-code-inspector)) stx))
-
-(define (stx-car* stx)
-  (let ([stx (stx-disarm stx)]) (stx-car stx)))
-
-(define (stx-cdr* stx)
-  (let ([stx (stx-disarm stx)]) (stx-cdr stx)))
-
-(define (syntax-e* stx)
-  (syntax-e (stx-disarm stx)))
-
-(define (stx->list* stx)
-  (if (stx-list? stx)
-      (let loop ([stx stx])
-        (cond [(syntax? stx)
-               (loop (syntax-e* stx))]
-              [(pair? stx)
-               (cons (car stx) (loop (cdr stx)))]
-              [else stx]))
-      #f))
-
-;; ----
+         stx-disarm
+         resyntax
+         restx
+         syntax-armed?
+         syntax-armed/tainted?
+         syntax-unarmed?
+         property:unlocked-by-expander
+         property:artificial
+         datum->artificial-syntax
+         syntax-artificial?)
 
 (define (stx->datum x)
   (syntax->datum (datum->syntax #f x)))
+
+(define (stxd-car x) (stx-car (stx-disarm x)))
+(define (stxd-cdr x) (stx-cdr (stx-disarm x)))
 
 (define (syntaxish? x)
   (or (syntax? x)
@@ -47,58 +28,52 @@
            (syntaxish? (car x))
            (syntaxish? (cdr x)))))
 
-;; ----
+(define insp
+  (variable-reference->module-declaration-inspector
+   (#%variable-reference)))
 
-(define-syntax (syntax-copier stx)
-  (syntax-case stx ()
-    [(syntax-copier hole expr pattern)
-     #'(let ([expr-var expr])
-         (lambda (in-the-hole)
-           (with-syntax ([pattern expr-var])
-             (with-syntax ([hole in-the-hole])
-               (syntax/restamp pattern #'pattern expr-var)))))]))
+(define (stx-disarm stx)
+  (if (syntax? stx) (syntax-disarm stx insp) stx))
 
-(define-syntax syntax/skeleton
-  (syntax-rules ()
-    [(syntax/skeleton old-expr pattern)
-     (syntax/restamp pattern #'pattern old-expr)]))
+(define (resyntax v stx [dstx (stx-disarm stx)] #:rearm? [rearm? #t])
+  (unless (and (syntax? stx) (syntax? dstx))
+    (error 'resyntax "not syntax: ~e, ~e" stx dstx))
+  (let* ([vstx (datum->artificial-inner-syntax v)]
+         [vstx (datum->syntax dstx vstx stx stx)]
+         [vstx (if rearm? (syntax-rearm vstx stx) vstx)])
+    (if (eq? v vstx) vstx (mark-artificial vstx))))
 
-;; FIXME: Need to avoid turning syntax lists into syntax pairs
-(define-syntax (syntax/restamp stx)
-  (syntax-case stx (...)
-    [(syntax/restamp (pa (... ...)) new-expr old-expr)
-     #`(let ([new-parts (stx->list new-expr)]
-             [old-parts (stx->list old-expr)])
-         ;; FIXME 
-         (unless (= (length new-parts) (length old-parts))
-           (printf "** syntax/restamp\n~s\n" (quote-syntax #,stx))
-           (printf "pattern : ~s\n" (syntax->datum #'(pa (... ...))))
-           (printf "old parts: ~s\n" (map syntax->datum old-parts))
-           (printf "new parts: ~s\n" (map syntax->datum new-parts)))
-         (d->so
-          old-expr
-          (map (lambda (new old) (syntax/restamp pa new old))
-               new-parts
-               old-parts)))]
-    [(syntax/restamp (pa . pb) new-expr old-expr)
-     ;; FIXME 
-     #'(begin
-         (unless (and (stx-pair? new-expr) (stx-pair? old-expr))
-           (printf "** syntax/restamp\n~s\n" (quote-syntax #,stx))
-           (printf "pattern : ~s\n" (syntax->datum (quote-syntax (pa . pb))))
-           (printf "old parts: ~s\n" old-expr)
-           (printf "new parts: ~s\n" new-expr))
-         (let ([na (stx-car new-expr)]
-               [nb (stx-cdr new-expr)]
-               [oa (stx-car old-expr)]
-               [ob (stx-cdr old-expr)])
-           (d->so old-expr
-                  (cons (syntax/restamp pa na oa)
-                        (syntax/restamp pb nb ob)))))]
-    [(syntax/restamp pvar new-expr old-expr)
-     #'new-expr]))
+(define (restx v stx [dstx (stx-disarm stx)] #:rearm? [rearm? #t])
+  (if (syntax? stx) (resyntax v stx dstx #:rearm? rearm?) v))
 
-(define (d->so template datum)
-  (if (syntax? template)
-      (datum->syntax template datum template template)
-      datum))
+(define (syntax-armed? stx)
+  (and (not (syntax-tainted? stx))
+       (syntax-tainted? (datum->syntax stx #f))))
+
+(define (syntax-armed/tainted? stx)
+  (syntax-tainted? (datum->syntax stx #f)))
+
+(define (syntax-unarmed? stx)
+  (not (syntax-armed/tainted? stx)))
+
+;; Used to communicate with syntax-browser
+(define property:unlocked-by-expander (gensym 'unlocked-by-expander))
+(define property:artificial (gensym 'artificial))
+
+(define (mark-artificial stx)
+  (syntax-property stx property:artificial #t))
+
+(define (datum->artificial-syntax x)
+  (let loop ([x x])
+    (cond [(pair? x) (mark-artificial (datum->syntax #f (datum->artificial-inner-syntax x)))]
+          [(syntax? x) x]
+          [else (mark-artificial (datum->syntax #f x))])))
+
+(define (datum->artificial-inner-syntax x)
+  (let tailloop ([x x])
+    (cond [(pair? x) (cons (datum->artificial-syntax (car x)) (tailloop (cdr x)))]
+          [(null? x) null]
+          [else (datum->artificial-syntax x)])))
+
+(define (syntax-artificial? stx)
+  (syntax-property stx property:artificial))
