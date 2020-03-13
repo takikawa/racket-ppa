@@ -1,0 +1,2 @@
+# Stripping mzscheme makes it stop working
+racket: unstripped-binary-or-object usr/bin/mzscheme
