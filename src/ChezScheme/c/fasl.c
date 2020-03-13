@@ -178,6 +178,7 @@
 
 #include "system.h"
 #include "zlib.h"
+#include "popcount.h"
 
 #ifdef WIN32
 #include <io.h>
@@ -393,12 +394,12 @@ static uptr uf_uptrin(unbufFaslFile uf) {
   uptr n, m; octet k;
 
   k = uf_bytein(uf);
-  n = k >> 1;
-  while (k & 1) {
+  n = k & 0x7F;
+  while (k & 0x80) {
     k = uf_bytein(uf);
     m = n << 7;
     if (m >> 7 != n) toolarge(uf->path);
-    n = m | (k >> 1);
+    n = m | (k & 0x7F);
   }
 
   return n;
@@ -571,12 +572,12 @@ static uptr uptrin(faslFile f) {
   uptr n, m; octet k;
 
   k = bytein(f);
-  n = k >> 1;
-  while (k & 1) {
+  n = (k & 0x7F);
+  while (k & 0x80) {
     k = bytein(f);
     m = n << 7;
     if (m >> 7 != n) toolarge(f->uf->path);
-    n = m | (k >> 1);
+    n = m | (k & 0x7F);
   }
 
   return n;
@@ -652,6 +653,16 @@ static void faslin(ptr tc, ptr *x, ptr t, ptr *pstrbuf, faslFile f) {
             *x = S_intern3(&STRIT(*pstrbuf, 0), pn, &STRIT(*pstrbuf, pn), un, Sfalse, Sfalse);
             return;
         }
+        case fasl_type_uninterned_symbol: {
+            iptr i, n;
+            ptr str;
+            n = uptrin(f);
+            str = S_string((char *)0, n);
+            for (i = 0; i != n; i += 1) Sstring_set(str, i, uptrin(f));
+            STRTYPE(str) |= string_immutable_flag;
+            *x = S_uninterned(str);
+            return;
+        }
         case fasl_type_ratnum:
             *x = S_rational(FIX(0), FIX(0));
             faslin(tc, &RATNUM(*x), t, pstrbuf, f);
@@ -709,6 +720,15 @@ static void faslin(ptr tc, ptr *x, ptr t, ptr *pstrbuf, faslFile f) {
               else
                 BYTEVECTOR_TYPE(*x) |= bytevector_immutable_flag;
             }
+            return;
+        }
+        case fasl_type_stencil_vector: {
+            uptr mask; iptr n; ptr *p;
+            mask = uptrin(f);
+            *x = S_stencil_vector(mask);
+            p = &INITSTENVECTIT(*x, 0);
+            n = Spopcount(mask);
+            while (n--) faslin(tc, p++, t, pstrbuf, f);
             return;
         }
         case fasl_type_base_rtd: {

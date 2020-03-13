@@ -1,7 +1,8 @@
 #lang scribble/doc
 @(require "web-server.rkt"
           (for-label racket/random
-                     ))
+                     racket/port
+                     racket/serialize))
 
 @title[#:tag "http"]{HTTP: Hypertext Transfer Protocol}
 
@@ -60,11 +61,91 @@ The @web-server implements many HTTP libraries that are provided by this module.
 @defstruct[(binding:file binding) ([filename bytes?]
                                    [headers (listof header?)]
                                    [content bytes?])]{
- Represents the uploading of the file @racket[filename] with the id @racket[id]
- and the content @racket[content], where @racket[headers] are the additional headers from
- the MIME envelope the file was in. (For example, the @racket[#"Content-Type"] header may
- be included by some browsers.)
-}
+
+  Represents the uploading of the file @racket[filename] with the id
+  @racket[id] and the content @racket[content], where @racket[headers]
+  are the additional headers from the MIME envelope the file was in.
+  For example, the @racket[#"Content-Type"] header may be included by
+  some browsers.
+
+  See also @racket[binding:file/port-in], an alternative interface
+  to file uploads that can be significantly more memory efficient.
+
+  @history[#:changed "1.6"
+           @elem{Extended to support a port-based representation:
+              see @racket[binding:file/port-in].}]
+ }
+
+ @deftogether[
+ (@defproc[(binding:file/port-in [binding binding:file/port?])
+           input-port?]
+   @defproc[(binding:file/port? [v any/c]) boolean?]
+   @defproc[(make-binding:file/port [id bytes?]
+                                    [filename bytes?]
+                                    [headers (listof header?)]
+                                    [content-in input-port?])
+            binding:file/port?])]{
+
+  The web server can avoid storing uploaded files in memory.
+  In particular, a @tech[#:doc '(lib "web-server/scribblings/web-server-internal.scrbl")]{
+   safety limits} value can instruct this
+  library to offload files to disk if they are larger than some threshold.
+  Even for file uploads that are not written to disk,
+  the web server initially places the content in an input port,
+  rather than a byte-string, so that storage need not be retained
+  after the content has been read.
+
+  The port-based interface is exposed to programmers,
+  and it can be significantly more memory efficient than
+  the byte-string--based interface.
+  However, the port-based interface is stateful:
+  programmers who use it take responsibility for managing the state
+  of the input port.
+  Read on for details.
+
+  To maintain compatability, the port-based interface uses a private,
+  opaque subtype of @racket[binding:file].
+  Instances of this extended type are recognized by the predicate
+  @racket[binding:file/port?] and are created using
+  @racket[make-binding:file/port], which is like @racket[make-binding:file],
+  but takes the file content as an input port rather than a byte string.
+  Only @racket[binding:file] instances recognized by @racket[binding:file/port?]
+  support @racket[binding:file/port-in].
+  The web server uses @racket[make-binding:file/port] when reading
+  @racket[request] structures, which is the primary way most programs
+  encounter @racket[binding:file] instances:
+  however, deserialized instances (see below) and instances constructed
+  manually using @racket[make-binding:file] do not support the port-based API.
+
+  It is important to be aware of how @racket[binding:file-content]
+  works with port-based instances.
+  The first time @racket[binding:file-content] is called on a
+  port-based instance @racket[v], it consumes the port's remaining content
+  as with @racket[(port->bytes (binding:file/port-in v))],
+  memoizes the result for future calls to @racket[binding:file-content],
+  and closes the input port.
+  This behavior means that:
+  @itemlist[
+ @item{A given byte of input may be either stored in the
+    @racket[binding:file-content] field or read directly by
+    from the input port, but never both; and
+   }
+ @item{If the input port has already been closed directly
+    when @racket[binding:file-content] is called for the first time,
+    @racket[binding:file-content] will raise an exception.
+    }]
+
+  Accessing the @racket[binding:file-content] field indirectly,
+  such as by using @racket[match], has the same behavior as calling
+  @racket[binding:file-content] directly.
+  In particular, calling @racket[serialize] on a @racket[binding:file]
+  instance implicitly uses @racket[binding:file-content],
+  and deserialized instances are effectively constructed using
+  @racket[make-binding:file].
+
+  @history[#:added "1.6"]
+ }
+
 
 @defproc[(bindings-assq [id bytes?]
                         [binds (listof binding?)])
@@ -83,7 +164,7 @@ Like @racket[bindings-assq], but returns a list of all bindings matching @racket
                     [uri url?]
                     [headers/raw (listof header?)]
                     [bindings/raw-promise (promise/c (listof binding?))]
-                    [post-data/raw (or/c false/c bytes?)]
+                    [post-data/raw (or/c #f bytes?)]
                     [host-ip string?]
                     [host-port number?]
                     [client-ip string?])]{
@@ -93,6 +174,10 @@ Like @racket[bindings-assq], but returns a list of all bindings matching @racket
  POST data.
 
  You are @bold{unlikely to need to construct} a request struct.
+
+ @history[#:changed "1.6"
+          @elem{Fixed to answer @racket[#f] to @racket[serializable?],
+             as all @racket[request] instances contain non-serializable pieces.}]
 }
 
 @defproc[(request-bindings/raw [r request?])
@@ -137,8 +222,8 @@ they are provided for compatibility with old code.}
                        (cons/c symbol? bytes?)))]{
  Translates the @racket[request-bindings/raw] of @racket[req] by
  interpreting @racket[bytes?] as @racket[string?]s, except in the case
- of @racket[binding:file] bindings, which are left as is. Ids are then
- translated into lowercase symbols.
+ of @racket[binding:file] bindings, whose contents are returned as
+ bytes. Ids are then translated into lowercase symbols.
 }
 
 @defproc[(request-headers [req request?])
@@ -345,6 +430,18 @@ Equivalent to
                as the result (instead of demanding @racket[void?]).}]
 }
 
+@defproc[(response/empty [#:code code number? 200]
+                         [#:message message (or/c false/c bytes?) #f]
+                         [#:cookies cookies (listof cookie?) '()]
+                         [#:seconds seconds number? (current-seconds)]
+                         [#:headers headers (listof header?) '()])
+         response?]{
+Generates a response with an empty body. The usual @tt{Content-Type} header will be absent, unless passed in via @racket[headers]. Equivalent to
+@racketblock[(response code message seconds #f headers (λ (o) (write-bytes #"" o)))], with the understanding that if @racket[message] is missing (or @racket[#f]), it will be inferred from @racket[code] using the association between status codes and messages found in RFCs 7231 and 7235. See the documentation for @racket[response/full] for the table of built-in status codes.
+
+@history[#:added "1.6"]
+}
+
 @defthing[TEXT/HTML-MIME-TYPE bytes?]{Equivalent to @racket[#"text/html; charset=utf-8"].}
 
 @defthing[APPLICATION/JSON-MIME-TYPE bytes?]{Equivalent to @racket[#"application/json; charset=utf-8"].}
@@ -466,8 +563,8 @@ You can also generate random bytes using something like OpenSSL or @tt{/dev/rand
  @link["https://www.madboa.com/geek/openssl/#random-data"]{this FAQ} lists a few options.
 
  @defproc*[([(make-id-cookie
-              [name (and/c string? cookie-name?)]
-              [value (and/c string? cookie-value?)]
+              [name cookie-name?]
+              [value cookie-value?]
               [#:key secret-salt bytes?]
               [#:path path (or/c path/extension-value? #f) #f]
               [#:expires expires (or/c date? #f) #f]
@@ -480,9 +577,9 @@ You can also generate random bytes using something like OpenSSL or @tt{/dev/rand
                (or/c path/extension-value? #f) #f])
              cookie?]
             [(make-id-cookie
-              [name (and/c string? cookie-name?)]
+              [name cookie-name?]
               [secret-salt bytes?]
-              [value (and/c string? cookie-value?)]
+              [value cookie-value?]
               [#:path path (or/c path/extension-value? #f) #f]
               [#:expires expires (or/c date? #f) #f]
               [#:max-age max-age
@@ -493,7 +590,8 @@ You can also generate random bytes using something like OpenSSL or @tt{/dev/rand
               [#:extension extension
                (or/c path/extension-value? #f) #f])
              cookie?])]{
-  Generates an authenticated cookie named @racket[name] containing @racket[value], signed with @racket[secret-salt].
+  Generates an authenticated cookie named @racket[name] containing @racket[value],
+  signed with @racket[secret-salt].
 
   The calling conventions allow @racket[secret-salt] to be given either as a keyword
   argument (mirroring the style of @racket[make-cookie]) or a by-position argument
@@ -511,20 +609,27 @@ You can also generate random bytes using something like OpenSSL or @tt{/dev/rand
     @racket[secure], @racket[extension],
     and @racket[http-only?] (which is @racket[#true] by default).
     Allowed @racket[secret-salt] to be given with the keyword
-    @racket[#:key] instead of by position.
+    @racket[#:key] instead of by position.}
+ #:changed "1.6"
+ @elem{Changed to accept any @racket[cookie-name?] or @racket[cookie-value?]
+    (rather than only strings) for the @racket[name] and @racket[value] arguments,
+    respectively, for consistency with @racket[make-cookie].
+    Fixed a bug that had incorrectly truncated cookie signatures:
+    note that previous versions of this library will not recognize cookies
+    created by the fixed @racket[make-id-cookie] as validly signed, and vice versa.
     }]
  }
 
  @defproc*[([(request-id-cookie [request request?]
-                                [#:name name (and/c string? cookie-name?)]
+                                [#:name name cookie-name?]
                                 [#:key secret-salt bytes?]
                                 [#:timeout timeout real? +inf.0]
                                 [#:shelf-life shelf-life real? +inf.0])
              (or/c #f (and/c string? cookie-value?))]
-            [(request-id-cookie [name (and/c string? cookie-name?)]
+            [(request-id-cookie [name cookie-name?]
                                 [secret-salt bytes?]
                                 [request request?]
-                                [#:timeout timeout number? +inf.0]
+                                [#:timeout timeout real? +inf.0]
                                 [#:shelf-life shelf-life real? +inf.0])
              (or/c #f (and/c string? cookie-value?))])]{
   Extracts the first authenticated cookie named @racket[name]
@@ -539,13 +644,21 @@ You can also generate random bytes using something like OpenSSL or @tt{/dev/rand
            @elem{Added @racket[shelf-life] argument and
               support for giving @racket[name] and @racket[secret-salt]
               by keyword instead of by position.
-              Added support for @rfc6265 as with @racket[make-cookie].}]
+              Added support for @rfc6265 as with @racket[make-cookie].}
+            #:changed "1.6"
+           @elem{Changed @racket[name] argument to accept any @racket[cookie-name?]
+              as with @racket[make-id-cookie].
+              Corrected the documented contract for the @racket[timeout] argument.
+              Fixed a bug that had incorrectly truncated cookie signatures:
+              note that the fixed @racket[request-id-cookie] will reject cookies
+              created by previous versions of this library, and vice versa.
+              }]
  }
 
 @defproc[(valid-id-cookie? [cookie any/c]
-                           [#:name name (and/c string? cookie-name?)]
+                           [#:name name cookie-name?]
                            [#:key secret-salt bytes?]
-                           [#:timeout timeout number? +inf.0]
+                           [#:timeout timeout real? +inf.0]
                            [#:shelf-life shelf-life real? +inf.0])
          (or/c #f (and/c string? cookie-value?))]{
   Recognizes authenticated cookies named @racket[name] that were
@@ -570,7 +683,15 @@ You can also generate random bytes using something like OpenSSL or @tt{/dev/rand
   The default value, @racket[+inf.0], permits all properly named and
   signed cookies.
 
-  @history[#:added "1.3"]
+  @history[#:added "1.3"
+           #:changed "1.6"
+           @elem{Changed @racket[name] argument to accept any @racket[cookie-name?]
+              as with @racket[make-id-cookie].
+              Corrected the documented contract for the @racket[timeout] argument.
+              Fixed a bug that had incorrectly truncated cookie signatures:
+              note that the fixed @racket[valid-id-cookie?] will reject cookies
+              created by previous versions of this library, and vice versa.
+              }]
  }
 
  @defproc[(logout-id-cookie [name cookie-name?]
@@ -594,7 +715,10 @@ You can also generate random bytes using something like OpenSSL or @tt{/dev/rand
 
   @history[#:changed "1.3"
            @elem{Added support for @rfc6265 as with @racket[make-cookie],
-              including adding the @racket[domain] argument.}]
+              including adding the @racket[domain] argument.}
+           #:changed "1.6"
+           @elem{Fixed to accept any @racket[cookie-name?] for the @racket[name]
+              argument, as was previously documented.}]
  }
 
  @defproc[(make-secret-salt/file [secret-salt-path path-string?])

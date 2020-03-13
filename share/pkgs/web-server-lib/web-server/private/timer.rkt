@@ -1,6 +1,22 @@
 #lang racket/base
+
 (require racket/contract
          racket/async-channel)
+
+;; Timeout plan
+;; ============
+;;
+;; For each connection:
+;;   * start timeout on connection startup.
+;;
+;; For each request on a connection:
+;;   * reset timeout when request data comes in,
+;;   * reset timeout before the response is handled by the application,
+;;   * reset timeout after the application hands the response back,
+;;   * reset timeout for every chunk of data sent to the client.
+;;
+;; The application may further adjust its allotted timeout for handling
+;; requests by using the dispatcher in the dispatch-timeout module.
 
 (struct timer-manager (thread timer-ch))
 (define-struct timer (tm evt expire-seconds action)
@@ -90,24 +106,13 @@
 
 
 (provide/contract
- [timer-manager?
-  (-> any/c boolean?)]
+ [timer-manager? (-> any/c boolean?)]
  [struct timer ([tm timer-manager?]
                 [evt evt?]
                 [expire-seconds number?]
-                [action (-> void)])]
+                [action (-> any/c)])]
  [start-timer-manager (-> timer-manager?)]
- [start-timer (timer-manager? number? (-> void) . -> . timer?)]
- [reset-timer! (timer? number? . -> . void)]
- [increment-timer! (timer? number? . -> . void)]
- [cancel-timer! (timer? . -> . void)])
-
-;; --- timeout plan
-
-;; start timeout on connection startup
-;; for POST requests increase the timeout proportionally when content-length is read
-;; adjust timeout in read-to-eof
-;; adjust timeout to starting timeout for next request with persistent connections
-
-;; adjust timeout proportionally when responding
-;; for servlet - make it a day until the output is produced
+ [start-timer (timer-manager? number? (-> any/c) . -> . timer?)]
+ [reset-timer! (timer? number? . -> . any/c)]
+ [increment-timer! (timer? number? . -> . any/c)]
+ [cancel-timer! (timer? . -> . any/c)])

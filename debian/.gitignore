@@ -1,9 +1,0 @@
-tmp/
-racket/
-racket-common/
-racket-doc/
-plt-scheme/
-plt-scheme-doc/
-stamp-*
-*.log
-*.substvars

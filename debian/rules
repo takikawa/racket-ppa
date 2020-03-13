@@ -24,6 +24,10 @@ ifneq (,$(filter noopt,$(DEB_BUILD_OPTIONS)))
     DEB_CONFIGURE_EXTRA_FLAGS += --enable-noopt
 endif
 
+# Explicitly enable useprefix for unix-style build (needed for v7.6)
+# See https://github.com/racket/racket/issues/3046
+DEB_CONFIGURE_EXTRA_FLAGS += --enable-useprefix
+
 # Support for generating ".orig.tar.gz" from git
 
 SOURCEPKG=$(shell dpkg-parsechangelog | sed  -n 's/^Source: \(.*\)/\1/p')

@@ -19,6 +19,7 @@
          (prefix-in image-core: mrlib/image-core)
          mrlib/include-bitmap
          mrlib/close-icon
+         mrlib/panel-wob
          net/sendurl
          net/url
          
@@ -1415,7 +1416,8 @@
                file-menu:get-save-item
                file-menu:get-save-as-item
                file-menu:get-revert-item
-               file-menu:get-print-item)
+               file-menu:get-print-item
+               get-eventspace)
       
       (define resizable-panel (drr-named-undefined 'resizable-panel))
       (define definitions-canvas (drr-named-undefined 'definitions-canvas))
@@ -1634,7 +1636,10 @@
       
       (define/private (set-logger-text-field-bg-color good?)
         (send logger-text-field set-field-background 
-              (send the-color-database find-color (if good? "white" "pink"))))
+              (color-prefs:lookup-in-color-scheme
+               (if good?
+                   'framework:basic-canvas-background
+                   'framework:failed-background-color))))
       
       (define/private (log-shown?)
         (and logger-gui-content-panel
@@ -1650,6 +1655,14 @@
         (when logger-gui-text 
           (define admin (send logger-gui-text get-admin))
           (define canvas (send logger-gui-text get-canvas))
+          (define (adjust-color start)
+            (when (white-on-black-panel-scheme?)
+              (define sd (make-object style-delta%))
+              (send sd set-delta-foreground "white")
+              (send logger-gui-text change-style
+                    sd
+                    start
+                    (send logger-gui-text last-position))))
           (when (and canvas admin)
             (define logger-messages (send interactions-text get-logger-messages))
             (cond
@@ -1663,6 +1676,7 @@
                                    #t))
                (send logger-gui-text begin-edit-sequence)
                (send logger-gui-text lock #f)
+               (define start (send logger-gui-text last-position))
                (case (car command)
                  [(add-line) (void)]
                  [(clear-last-and-add-line)
@@ -1685,12 +1699,14 @@
                        (send logger-gui-text
                              paragraph-start-position
                              (send logger-gui-text last-paragraph))))
+               (adjust-color start)
                (send logger-gui-text end-edit-sequence)
                (send logger-gui-text lock #t)]
               [else
                (send logger-gui-text begin-edit-sequence)
                (send logger-gui-text lock #f)
                (send logger-gui-text erase)
+               (define start (send logger-gui-text last-position))
                
                (define (insert-one msg)
                  (send logger-gui-text insert msg 0 0)) 
@@ -1701,7 +1717,8 @@
                  (for ([msg (in-list (cdr (send interactions-text get-logger-messages)))])
                    (insert-one "\n")
                    (insert-one msg)))
-               
+
+               (adjust-color start)
                (send logger-gui-text lock #t)
                (send logger-gui-text end-edit-sequence)]))))
       
@@ -2927,24 +2944,27 @@
 
       ;; returns #f if we should abort `Run`, #t if it is okay to `Run`
       (define/private (check-if-unsaved-tabs-and-maybe-save)
-        (define save-candidates (get-unsaved-candidate-tabs #t))
         (cond
-          [(null? save-candidates) #t]
+          [(preferences:get 'drracket:dont-ask-about-saving-files-on-tab-switch?) #t]
           [else
-           (define-values (cancel-run? do-save?)
-             (does-user-want-to-save-all-unsaved-files? save-candidates))
+           (define save-candidates (get-unsaved-candidate-tabs #t))
            (cond
-             [cancel-run? #f]
-             [do-save?
-              (define continue?
-                (let/ec k
-                  (for ([tab (in-list save-candidates)])
-                    (unless (send (send tab get-defs) save-file/gui-error)
-                      (k #f)))
-                  #t))
-              (update-tabs-labels)
-              continue?]
-             [else #t])]))
+             [(null? save-candidates) #t]
+             [else
+              (define-values (cancel-run? do-save?)
+                (does-user-want-to-save-all-unsaved-files? save-candidates))
+              (cond
+                [cancel-run? #f]
+                [do-save?
+                 (define continue?
+                   (let/ec k
+                     (for ([tab (in-list save-candidates)])
+                       (unless (send (send tab get-defs) save-file/gui-error)
+                         (k #f)))
+                     #t))
+                 (update-tabs-labels)
+                 continue?]
+                [else #t])])]))
 
       (define/private (save-all-unsaved-files)
         (let/ec k
@@ -2954,7 +2974,9 @@
         (update-tabs-labels))
 
       (define/private (get-unsaved-candidate-tabs skip-me?)
-        (define focused-frame (get-top-level-focus-window))
+        (define focused-frame (or (get-top-level-focus-window)
+                                  (let ([ft (frame:lookup-focus-table (get-eventspace))])
+                                    (and (pair? ft) (car ft)))))
         (for*/list ([frame (in-list (send (group:get-the-frame-group) get-frames))]
                     #:when (is-a? frame drracket:unit:frame<%>)
                     [tab (in-list (send frame get-tabs))]
@@ -5103,6 +5125,8 @@
         (send sdb set-size-add (send normal-control-font get-point-size))
         (send sdb set-size-in-pixels-off #t)
         (send sdb set-weight-on 'bold)
+        (when (white-on-black-panel-scheme?)
+          (send sdb set-delta-foreground "white"))
         (define sd (make-object style-delta%))
         (send sd copy sdb)
         (send sd set-weight-on 'normal)
@@ -5197,10 +5221,12 @@
     (define (background sd)
       (let ([txt (send tb get-editor)])
         (send txt change-style sd 0 (send txt last-position))))
-    
-    (send clear-sd set-delta-background "white")
+
+    (send clear-sd set-delta-background
+          (if (white-on-black-panel-scheme?) "black" "white"))
     (send yellow-sd set-delta-background "yellow")
-    (send black-foreground-sd set-delta-foreground "black")
+    (send black-foreground-sd set-delta-foreground
+          (if (white-on-black-panel-scheme?) "white" "black"))
     (send gray-foreground-sd set-delta-foreground "gray")
     (send d set-alignment 'left 'center)
     (send bp set-alignment 'right 'center)
@@ -5236,7 +5262,7 @@
           (if (member (car (car l)) (map car (cdr l)))
               (loop (cdr l))
               (cons (car l) (loop (cdr l))))]))))
-  
+
   (define language-label-message%
     (class name-message%
       (init-field frame)
@@ -5244,8 +5270,11 @@
       
       (inherit set-message)
       (define yellow? #f)
-      (define/override (get-background-color) (and yellow? "yellow"))
-      (define/public (set-yellow y?) 
+      (define/override (get-background-color)
+        (and yellow?
+             (color-prefs:lookup-in-color-scheme
+              'framework:warning-background-color)))
+      (define/public (set-yellow y?)
         (set! yellow? y?)
         (refresh))
       (define/public (set-yellow/lang y? lang) 

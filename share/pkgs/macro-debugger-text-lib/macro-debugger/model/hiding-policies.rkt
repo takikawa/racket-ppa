@@ -1,6 +1,6 @@
 #lang racket/base
 (require racket/match
-         "reductions-config.rkt"
+         "reductions-util.rkt"
          "../util/mpi.rkt")
 (provide policy->predicate)
 
@@ -97,7 +97,7 @@
   (match condition
     [(list 'free=? the-id)
      (lambda (id)
-       (free-identifier=? id the-id (phase)))]
+       (free-identifier=? id the-id (the-phase)))]
     [(list 'lexical)
      (lambda (id)
        (eq? (get-binding id) 'lexical))]
@@ -140,7 +140,7 @@
                                   (binding-def-module binding)))))]
     [(list 'phase>=? num)
      (lambda (id)
-       (>= (phase) num))]
+       (>= (the-phase) num))]
     [(cons 'and conditions)
      (let ([predicates (map condition->predicate conditions)])
        (lambda (id)
@@ -191,7 +191,7 @@
 
 ;; get-binding : id -> binding
 (define (get-binding id)
-  (identifier-binding id (phase)))
+  (identifier-binding id (the-phase)))
 
 ;; binding-def-module : binding -> module-path
 (define (binding-def-module binding)

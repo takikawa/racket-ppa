@@ -44,8 +44,8 @@
   (define arity:n (ensure-number arity))
   (define found:n (ensure-number found))
   (define fn-is-large (> arity:n found:n))
-  (format "~a erwartet ~a~a~a~a Argument~a, aber ~a~a gefunden"
-          (or name "") (if name ": " "")
+  (format "~a~a erwartet ~a~a~a Argument~a, aber ~a~a gefunden"
+          (or name "") (if name ":" "")
           (if at-least "mindestens " "")
           (if (or (= arity:n 0) fn-is-large) "" "nur ")
           (if (= arity:n 0) "kein" arity:n) (plural-e arity:n)
@@ -77,7 +77,7 @@
 	  (else
            (define str (symbol->string s))
 	   (substring str 0 (sub1 (string-length str)))))]
-       [(null? s) "einen unmöglicher Wert"]
+       [(null? s) "einen unmöglichen Wert"]
        [(not (list? s)) ctc] ;; ???
        [(eq? 'or/c (car s))
         (format-enum "oder" (map loop (cdr s)))]
@@ -139,7 +139,9 @@
                 (lambda (all one two three) (argcount-error-message one two three #t)))
           (list #px"([^\n]*): arity mismatch;\n[^\n]*\n  expected[^:]*: (\\d+)\n  given[^:]*: (\\d+)(?:\n  arguments[.][.][.]:(?:\n   [^\n]*)*)?"
                 (lambda (all one two three) (argcount-error-message one two three)))
-          (list #px"contract violation\n  expected: (.*?)\n  given: ([^\n]*)(?:\n  argument position: ([^\n]*))?"
+	  (list #px"([^\n]*): expects( at least)? (\\d+) arguments, but found( only)? (\\d+)"
+                (lambda (all one two three four five) (argcount-error-message one three five two)))
+	  (list #px"contract violation\n  expected: (.*?)\n  given: ([^\n]*)(?:\n  argument position: ([^\n]*))?"
                 (lambda (all ctc given pos) (contract-error-message ctc given pos)))
           (list #rx"^procedure "
                 (lambda (all) ""))

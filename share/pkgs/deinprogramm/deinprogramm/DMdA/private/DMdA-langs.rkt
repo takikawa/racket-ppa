@@ -210,7 +210,10 @@
 				 obj signature message blame))))))
                  (scheme-test-data (list (drscheme:rep:current-rep) drs-eventspace test-display%))
                  (test-execute tests-on?)
-		 (signature-checking-enabled? (preferences:get 'signatures:enable-checking?))
+		 (signature-checking-enabled?
+		  (if (preferences:default-set? 'signatures:enable-checking?) ; Signatures tool not present
+		      (preferences:get 'signatures:enable-checking?)
+		      #t))
                  (test-format (make-formatter (lambda (v o)
 						(render-value/format (if (procedure? v)
 									 generic-proc

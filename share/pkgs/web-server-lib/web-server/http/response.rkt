@@ -1,26 +1,46 @@
 #lang racket/base
+
 (require racket/contract
          file/md5
          racket/port
          racket/list
          racket/match
-         (only-in srfi/1/list fold)
          xml/xml
          web-server/private/connection-manager
+         (submod web-server/private/connection-manager private)
          web-server/http/request-structs
          web-server/http/response-structs
-         web-server/private/util)
+         web-server/private/util
+         syntax/parse/define
+         (for-syntax racket/base
+                     syntax/parse/lib/function-header))
 
-(provide/contract
- [print-headers (output-port? (listof header?) . -> . void)]
- [rename ext:output-response output-response (connection? response? . -> . void)]
- [rename ext:output-response/method output-response/method (connection? response? bytes? . -> . void)]
- [rename ext:output-file output-file (connection? path-string? bytes? (or/c bytes? false/c) (or/c pair? false/c) . -> . void)])
+(provide
+ (contract-out
+  [print-headers
+   (output-port? (listof header?) . -> . any)]
+  [output-response
+   (connection? response? . -> . any)]
+  [output-response/method
+   (connection? response? bytes? . -> . any)]
+  [output-file
+   (connection? path-string? bytes? (or/c bytes? #f) (or/c pair? #f) . -> . any)]))
+
+(define-simple-macro (define/ext (~and (name:id conn:id arg:formal ...) fun-header)
+                       body:expr ...+)
+  (define fun-header
+    (with-handlers ([exn:fail? (λ (e)
+                                 (kill-connection! conn)
+                                 (raise e))])
+      body ...
+      (flush-output (connection-o-port conn)))))
+
+
 
 (define (output-response conn resp)
   (output-response/method conn resp #"GET"))
 
-(define (output-response/method conn resp meth)
+(define/ext (output-response/method conn resp meth)
   (cond
     [(or
       ;; If it is terminated, just continue
@@ -43,8 +63,8 @@
 ;;       header for *all* clients.
 (define-syntax-rule (maybe-header h k v)
   (if (hash-has-key? h k)
-    empty
-    (list (header k v))))
+      empty
+      (list (header k v))))
 (define-syntax-rule (maybe-headers h [k v] ...)
   (append (maybe-header h k v)
           ...))
@@ -104,13 +124,15 @@
         [else #f])))
 
 (define (output-response-body conn bresp)
+  ;; This function gets whatever time is left after the headers were
+  ;; written to write its body to the client.
   (define o-port (connection-o-port conn))
   ((response-output bresp) o-port)
   (flush-output o-port))
 
 (define (output-response-body/chunked conn bresp)
   ;; Flush the headers immediately since the response handler can wait
-  ;; indefinitely before writing anything out to the output port.
+  ;; a while before writing anything out to the output port.
   (flush-output (connection-o-port conn))
 
   (define-values (from-servlet to-chunker) (make-pipe))
@@ -130,6 +152,10 @@
       (define bytes-read-or-eof
         (read-bytes-avail! buffer from-servlet))
       (unless (eof-object? bytes-read-or-eof)
+        ;; For every chunk, increase the connection timeout s.t.
+        ;; a responder can run indefinitely as long as it writes
+        ;; *something* every (current-send-timeout) seconds.
+        (reset-connection-response-send-timeout! conn)
         (fprintf to-client "~a\r\n" (number->string bytes-read-or-eof 16))
         (write-bytes buffer to-client 0 bytes-read-or-eof)
         (fprintf to-client "\r\n")
@@ -142,6 +168,8 @@
 
 ; seconds->gmt-string : Nat -> String
 ; format is rfc1123 compliant according to rfc2068 (http/1.1)
+(module+ testing
+  (provide seconds->gmt-string))
 (define (seconds->gmt-string s)
   (let* ([local-date (seconds->date s)]
          [date (seconds->date (- s (date-time-zone-offset local-date)))])
@@ -165,16 +193,6 @@
 (define DAYS
   #("Sun" "Mon" "Tue" "Wed" "Thu" "Fri" "Sat"))
 
-(define (ext:wrap f)
-  (lambda (conn . args)
-    (with-handlers ([exn:fail? (lambda (exn)
-                                 (kill-connection! conn)
-                                 (raise exn))])
-      (apply f conn args)
-      (flush-output (connection-o-port conn)))))
-
-(define ext:output-response
-  (ext:wrap output-response))
 
 ;; output-file: connection
 ;;              path
@@ -197,7 +215,7 @@
 ;; A boundary is generated only if a multipart/byteranges response needs
 ;; to be generated (i.e. if a Ranges header was specified with more than
 ;; one range in it).
-(define (output-file conn file-path method maybe-mime-type ranges)
+(define/ext (output-file conn file-path method maybe-mime-type ranges)
   (output-file/boundary
    conn
    file-path
@@ -216,6 +234,11 @@
 ;;              (U bytes #f)
 ;;           -> void
 (define (output-file/boundary conn file-path method maybe-mime-type ranges boundary)
+  ;; Ensure there is enough time left to write the first chunk of
+  ;; response data. `output-file-range' then resets the connection
+  ;; timeout once for every chunk it's able to write to the client.
+  (reset-connection-response-send-timeout! conn)
+
   ; total-file-length : integer
   (define total-file-length
     (file-size file-path))
@@ -255,16 +278,16 @@
                 (- (cdar converted-ranges) (caar converted-ranges))
                 ; Multiple ranges: content-length is the length of the multipart,
                 ; including content, headers and boundaries:
-                (fold (lambda (range headers accum)
-                        (+ accum                       ; length so far
-                           (bytes-length headers)      ; length of the headers and header newlinw
-                           (- (cdr range) (car range)) ; length of the content
-                           2))                         ; length of the content newline
-                      (+ (* (+ boundary-length 4)
-                            (length converted-ranges)) ; length of the intermediate boundaries
-                         (+ boundary-length 6))        ; length of the final boundary
-                      converted-ranges
-                      multipart-headers))])
+                (+ (for/sum ([range (in-list converted-ranges)]
+                             [headers (in-list multipart-headers)])
+                     (+ (bytes-length headers)      ; length of the headers and header newline
+                        (- (cdr range) (car range)) ; length of the content
+                        2))                         ; length of the content newline
+                   ; length of the intermediate boundaries
+                   (* (+ boundary-length 4)
+                      (length converted-ranges))
+                   ; length of the final boundary
+                   (+ boundary-length 6)))])
       ; Send a 206 iff ranges were specified in the request:
       (output-response-head
        conn
@@ -272,13 +295,10 @@
            (make-206-response modified-seconds maybe-mime-type total-content-length total-file-length converted-ranges boundary)
            (make-200-response modified-seconds maybe-mime-type total-content-length)))
       ; Send the appropriate file content:
+      ; TODO: What if we want to output-file during a POST?
       (when (bytes-ci=? method #"GET")
-        (adjust-connection-timeout! ; Give it one second per byte.
-         conn
-         (apply + (map (lambda (range)
-                         (- (cdr range) (car range)))
-                       converted-ranges)))
-        (with-handlers ([exn:fail? (lambda (exn) (network-error 'output-file (exn-message exn)))])
+        (with-handlers ([exn:fail? (lambda (exn)
+                                     (network-error 'output-file "~a" (exn-message exn)))])
           (call-with-input-file* file-path
             (lambda (input)
               (if (= (length converted-ranges) 1)
@@ -286,7 +306,8 @@
                   ; in their simplest form:
                   (output-file-range conn input (caar converted-ranges) (cdar converted-ranges))
                   ; Multiple ranges are encoded as multipart/byteranges:
-                  (let loop ([ranges converted-ranges] [multipart-headers multipart-headers])
+                  (let loop ([ranges converted-ranges]
+                             [multipart-headers multipart-headers])
                     (match ranges
                       [(list)
                        ; Final boundary (must start on new line; ends with a new line)
@@ -313,7 +334,7 @@
                 (print-headers out (list (make-header #"Content-Type" maybe-mime-type))))
               (print-headers out (list (make-content-range-header start end total-file-length)))
               (begin0 (get-output-bytes out)
-                      (close-output-port out)))]))
+                (close-output-port out)))]))
        converted-ranges))
 
 ;; output-file-range : connection file-input-port integer integer -> void
@@ -321,7 +342,19 @@
 ;; start must be inclusive; end must be exclusive.
 (define (output-file-range conn input start end)
   (file-position input start)
-  (let ([limited-input (make-limited-input-port input (- end start) #f)])
+  (define custodian (make-custodian))
+  (parameterize ([current-custodian custodian])
+    (define limited-input (make-limited-input-port input (- end start) #f))
+    (thread
+     (lambda _
+       (let loop ()
+         ;; Every time the limited-input is read from, reset
+         ;; the connection timeout and give the client another
+         ;; `response-send-timeout` seconds' worth of lease.
+         (sync (port-progress-evt limited-input))
+         (unless (port-closed? limited-input)
+           (reset-connection-response-send-timeout! conn)
+           (loop)))))
     (copy-port limited-input (connection-o-port conn))
     (close-input-port limited-input)))
 
@@ -420,8 +453,3 @@
                (string->bytes/utf-8
                 (format "bytes ~a-~a/~a" start (sub1 end) total-file-length))))
 
-(define ext:output-file
-  (ext:wrap output-file))
-
-(define ext:output-response/method
-  (ext:wrap output-response/method))
