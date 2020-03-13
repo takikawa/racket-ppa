@@ -4,7 +4,8 @@
          racket/list
          "sig.rkt"
          "../preferences.rkt"
-         mred/mred-sig)
+         mred/mred-sig
+         mrlib/panel-wob)
 
 (import mred^
         [prefix preferences: framework:preferences^]
@@ -33,7 +34,11 @@
 
 (preferences:set-default 'framework:ascii-art-enlarge #f boolean?)
 
-(preferences:set-default 'framework:color-scheme 'classic symbol?)
+(preferences:set-default 'framework:color-scheme
+                         (if (white-on-black-panel-scheme?)
+                             'white-on-black
+                             'classic)
+                         symbol?)
 
 (preferences:set-default 'framework:column-guide-width
                          '(#f 102)
@@ -212,7 +217,7 @@
 
 (set-square-bracket-nonum-pref 'framework:square-bracket:for/fold for/folds)
 
-(preferences:set-default 'framework:white-on-black? #f boolean?)
+(preferences:set-default 'framework:white-on-black? (white-on-black-panel-scheme?) boolean?)
 
 (preferences:set-default 'framework:case-sensitive-search?
                          #f
@@ -564,9 +569,23 @@
                                       #:style (racket:short-sym->style-name sym)
                                       color
                                       white-on-black-color))
-  
-(preferences:set-default 'framework:coloring-active #t boolean?)
 
+(color-prefs:add-color-scheme-entry 'framework:program-contour-current-location-bar
+                                    "light blue"
+                                    (make-object color% 93 104 158))
+(preferences:set-default 'framework:coloring-active #t boolean?)
+(color-prefs:add-color-scheme-entry 'framework:line-numbers-current-line-number-background
+                                    "forestgreen"
+                                    (make-object color% 108 186 112))
+(color-prefs:add-color-scheme-entry 'framework:line-numbers-current-line-number-foreground
+                                    "white"
+                                    "black")
+(color-prefs:add-color-scheme-entry 'framework:line-numbers-when-word-wrapping
+                                    "darkgray"
+                                    "darkgray")
+(color-prefs:add-color-scheme-entry 'framework:line-numbers
+                                    "black"
+                                    "lightgray")
 (color-prefs:add-color-scheme-entry 'framework:default-text-color "black" "white")
 (color-prefs:register-color-scheme-entry-change-callback
  'framework:default-text-color
@@ -576,6 +595,12 @@
  (color-prefs:lookup-in-color-scheme 'framework:default-text-color))
 
 (color-prefs:add-color-scheme-entry 'framework:misspelled-text-color "black" "white")
+
+(color-prefs:add-color-scheme-entry 'framework:warning-background-color
+                                    "yellow"
+                                    (make-object color% #x9b #x87 #x0c))
+(color-prefs:add-color-scheme-entry 'framework:failed-search-background-color "pink" "firebrick")
+(color-prefs:add-color-scheme-entry 'framework:disabled-background-color "gray" "dim gray")
 
 (color-prefs:set-default/color-scheme 'framework:delegatee-overview-color
                                       "light blue"

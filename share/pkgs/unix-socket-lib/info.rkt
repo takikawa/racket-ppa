@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define package-content-state (quote (built "7.5"))) (define collection (quote multi)) (define version "1.2") (define deps (quote (("base" #:version "7.2.0.6")))) (define pkg-authors (quote (ryanc)))))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "7.6"))) (define collection (quote multi)) (define version "1.2") (define deps (quote (("base" #:version "7.2.0.6")))) (define pkg-authors (quote (ryanc)))))

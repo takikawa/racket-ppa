@@ -234,7 +234,7 @@
 
         (define symbol-complex (trans (seqs L (arbno (alt L D)))))
 
-        ;; Accomodate things like 10_1 and 10.12.1 in `availability` attributes:
+        ;; Accommodate things like 10_1 and 10.12.1 in `availability` attributes:
         (define pseudo-symbol-complex (trans (alt*
                                               (seqs (arbno D) "_" (arbno D))
                                               (seqs (one+ D) "[.]" (one+ D) "[.]" (one+ D)))))
@@ -915,6 +915,7 @@
                __inline_isnanl __inline_isnan __inline_signbit __inline_signbitf __inline_signbitd __inline_signbitl
                __builtin_popcount __builtin_clz __builtin_isnan __builtin_isinf __builtin_signbit
                __builtin_signbitf __builtin_signbitd __builtin_signbitl __builtin_isinf_sign __builtin_trap
+               __FLOAT_BITS __DOUBLE_BITS
                _Generic
                __inline_isinff __inline_isinfl __inline_isinfd __inline_isnanf __inline_isnand __inline_isinf
                floor floorl ceil ceill round roundl fmod fmodl modf modfl fabs fabsl __maskrune _errno __errno

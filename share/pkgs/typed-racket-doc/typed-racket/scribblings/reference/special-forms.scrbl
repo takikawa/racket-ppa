@@ -232,6 +232,7 @@ variants.
 @defform[(for/or   type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for/sum type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for/product type-ann-maybe (for-clause ...) expr ...+)]
+@defform[(for/last type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for/set type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for*/list type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for*/hash type-ann-maybe (for-clause ...) expr ...+)]
@@ -241,6 +242,7 @@ variants.
 @defform[(for*/or   type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for*/sum type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for*/product type-ann-maybe (for-clause ...) expr ...+)]
+@defform[(for*/last type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for*/set type-ann-maybe (for-clause ...) expr ...+)]
 ]]{
 These behave like their non-annotated counterparts, with the exception
@@ -253,35 +255,41 @@ annotated with a @racket[Listof] type. All annotations are optional.
 @deftogether[[
 @defform[(for/and type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for/first type-ann-maybe (for-clause ...) expr ...+)]
-@defform[(for/last type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for*/and type-ann-maybe (for-clause ...) expr ...+)]
 @defform[(for*/first type-ann-maybe (for-clause ...) expr ...+)]
-@defform[(for*/last type-ann-maybe (for-clause ...) expr ...+)]
 ]]{
 Like the above, except they are not yet supported by the typechecker.
 }
 
 @deftogether[[
-@defform[(for/lists type-ann-maybe ([id : t] ...)
+@defform[(for/lists type-ann-maybe ([id : t] ... maybe-result)
            (for-clause ...)
            expr ...+)]
-@defform[(for/fold  type-ann-maybe ([id : t init-expr] ...)
+@defform[(for/fold  type-ann-maybe ([id : t init-expr] ... maybe-result)
            (for-clause ...)
-           expr ...+)]]]{
+           expr ...+)
+         #:grammar
+         ([maybe-result (code:line)
+                        (code:line #:result result-expr)])]]]{
 These behave like their non-annotated counterparts. Unlike the above,
 @racket[#:when] clauses can be used freely with these.
+@history[#:changed "1.11" @elem{Added the @racket[#:result] form.}]
 }
 
 @deftogether[[
 @defform[(for* void-ann-maybe (for-clause ...)
            expr ...+)]
-@defform[(for*/lists type-ann-maybe ([id : t] ...)
+@defform[(for*/lists type-ann-maybe ([id : t] ... maybe-result)
            (for-clause ...)
            expr ...+)]
-@defform[(for*/fold  type-ann-maybe ([id : t init-expr] ...)
+@defform[(for*/fold  type-ann-maybe ([id : t init-expr] ... maybe-result)
            (for-clause ...)
-           expr ...+)]]]{
+           expr ...+)
+         #:grammar
+         ([maybe-result (code:line)
+                        (code:line #:result result-expr)])]]]{
 These behave like their non-annotated counterparts.
+@history[#:changed "1.11" @elem{Added the @racket[#:result] form.}]
 }
 
 @defform/subs[(do : u ([id : t init-expr step-expr-maybe] ...)
@@ -651,10 +659,12 @@ be used as a predicate in @racket[if] expressions in Typed Racket.
                         [left  : IntTree]
                         [right : IntTree])]))]
 
-@index["opaque"]{The fourth case} defines a new type @racket[t].  @racket[pred], imported from
-module @racket[m], is a predicate for this type.  The type is defined
-as precisely those values to which @racket[pred] produces
-@racket[#t].  @racket[pred] must have type @racket[(Any -> Boolean)].
+@index["opaque"]{The fourth case} defines a new @deftech{opaque type} @racket[t] using the
+function @racket[pred] as a @seclink["Generating_Predicates_Automatically"]{predicate}.
+(Module @racket[m] must provide @racket[pred] and @racket[pred] must have type
+@racket[(Any -> Boolean)].)
+The type @racket[t] is defined as precisely those values that @racket[pred]
+returns @racket[#t] for.
 Opaque types must be required lexically before they are used.
 
 @ex[(require/typed racket/base

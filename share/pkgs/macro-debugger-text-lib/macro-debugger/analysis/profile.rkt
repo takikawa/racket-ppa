@@ -14,6 +14,7 @@
          syntax/modcode
          setup/collects ;; setup/path-to-relative
          macro-debugger/model/deriv
+         macro-debugger/model/deriv-util
          "private/util.rkt")
 (provide (all-defined-out))
 
@@ -169,7 +170,7 @@
   (#%expression
     (match deriv
       ;; ====
-      [(mrule z1 z2 rs ?1 me1 locals me2 ?2 etx next)
+      [(mrule z1 z2 rs de1 ?1 me1 locals me2 ?2 etx retx next)
        (define macro-id (and (pair? rs) (resolves->macro-id rs (phase))))
        (define macro-scope (and z1 me1 (get-new-scope z1 me1 (phase))))
        (define z1-scope (get-macro-scope z1 scope=>context (phase)))
@@ -180,82 +181,18 @@
        (recur locals next)
        (when macro-id
          (define adj (apply + (map profile/local (or locals null))))
-         (push! mocs (moc context* (term-size z1) (term-size etx) adj))
+         (push! mocs (moc context* (term-size z1) (term-size retx) adj))
          (when #f
            (eprintf "* macro-id ~e\n" macro-id)
            (eprintf "  ctx = ~e\n" context)
            (eprintf "  from (~s): ~e\n" (term-size z1) (syntax->datum z1))
-           (eprintf "  to   (~s): ~e\n" (term-size etx) (syntax->datum etx))
+           (eprintf "  to   (~s): ~e\n" (term-size retx) (syntax->datum retx))
            (unless (zero? adj)
              (eprintf "  with local adjustment: ~s\n" adj))))]
       ;; ====
-      [(lift-deriv z1 z2 first lift-stx second)
-       (recur first second)]
-      [(tagrule z1 z2 tagged-stx next)
-       (recur next)]
-      [(lift/let-deriv z1 z2 first lift-stx second)
-       (recur first second)]
-      [(local-exn exn)
-       (void)]
-      [(local-expansion z1 z2 for-stx? me1 inner lifted me2 opaque)
-       (if for-stx? (recur/phase-up inner) (recur inner))]
-      [(local-lift expr ids)
-       (void)]
-      [(local-lift-end decl)
-       (void)]
-      [(local-lift-require req expr mexpr)
-       (void)]
-      [(local-lift-provide prov)
-       (void)]
-      [(local-bind names ?1 renames bindrhs)
-       (recur bindrhs)]
-      [(local-value name ?1 resolves bound? binding)
-       (void)]
-      [(track-origin before after)
-       (void)]
-      [(local-remark contents)
-       (void)]
-      [(p:variable z1 z2 rs ?1)
-       (void)]
-      [(p:module z1 z2 rs ?1 locals tag rename check tag2 check2 ?3 body shift)
-       (recur locals check check2 body)]
-      [(p:#%module-begin z1 z2 rs ?1 me body ?2 subs)
-       (recur body subs)]
-      [(p:define-syntaxes z1 z2 rs ?1 prep rhs locals)
-       (recur prep locals)
-       (recur/phase-up rhs)]
-      [(p:define-values z1 z2 rs ?1 rhs)
-       (recur rhs)]
-      [(p:begin-for-syntax z1 z2 rs ?1 prep body locals)
-       (recur prep locals)
-       (recur/phase-up body)]
-      [(p:#%expression z1 z2 rs ?1 inner untag)
-       (recur inner)]
-      [(p:if z1 z2 rs ?1 test then else)
-       (recur test then else)]
-      [(p:wcm z1 z2 rs ?1 key mark body)
-       (recur key mark body)]
-      [(p:set! _ _ _ _ id-resolves ?2 rhs)
-       (recur rhs)]
-      [(p:set!-macro _ _ _ _ deriv)
-       (recur deriv)]
-      [(p:#%app _ _ _ _ lderiv)
-       (recur lderiv)]
-      [(p:begin _ _ _ _ lderiv)
-       (recur lderiv)]
-      [(p:begin0 _ _ _ _ first lderiv)
-       (recur first lderiv)]
-      [(p:lambda _ _ _ _ renames body)
-       (recur body)]
-      [(p:case-lambda _ _ _ _ renames+bodies)
-       (recur renames+bodies)]
-      [(p:let-values _ _ _ _ renames rhss body)
-       (recur rhss body)]
-      [(p:letrec-values _ _ _ _ renames rhss body)
-       (recur rhss body)]
-      [(p:letrec-syntaxes+values z1 _ rs _ srenames prep sbindrhss vrenames vrhss body tag)
+      [(p:letrec-syntaxes+values z1 _ rs de1 _ srenames prep sbindrhss vrhss body)
        (recur prep sbindrhss vrhss body)
-       (when tag ;; means syntax bindings get dropped
+       (when #t ;; syntax bindings get dropped
          (define rhss-size
            (for/sum ([bind (in-list (or sbindrhss null))])
              (+ (term-size (node-z2 (bind-syntaxes-rhs bind)))
@@ -271,63 +208,10 @@
            (when #f
              (eprintf "* lsv-id-id = ~e\n" lsv-id)
              (eprintf "  ctx       = ~e\n" context))))]
-      [(p:provide _ _ _ _ inners ?2)
-       (recur inners)]
-      [(p:require _ _ _ _ locals)
-       (recur locals)]
-      [(p:submodule _ _ _ _ exp)
-       (recur exp)]
-      [(p:submodule* _ _ _ _)
-       (void)]
-      [(p:#%stratified-body _ _ _ _ bderiv)
-       (recur bderiv)]
-      [(p:stop _ _ _ _) (void)]
-      [(p:unknown _ _ _ _) (void)]
-      [(p:#%top _ _ _ _) (void)]
-      [(p:#%datum _ _ _ _) (void)]
-      [(p:quote _ _ _ _) (void)]
-      [(p:quote-syntax z1 z2 _ _) (void)]
-      [(p:#%variable-reference _ _ _ _) (void)]
-      [(lderiv _ _ ?1 derivs)
-       (recur derivs)]
-      [(bderiv _ _ _ pass1 trans pass2)
-       (recur pass1 pass2)]
-      [(b:error ?1) (void)]
-      [(b:expr head)
-       (recur head)]
-      [(b:splice head ?1 tail ?2)
-       (recur head)]
-      [(b:defvals head ?1 rename ?2)
-       (recur head)]
-      [(b:defstx head ?1 rename ?2 prep bindrhs)
-       (recur head prep bindrhs)]
-      [(bind-syntaxes rhs locals)
-       (recur/phase-up rhs)
-       (recur locals)]
-      [(clc ?1 renames body)
-       (recur body)]
-      [(module-begin/phase pass1 pass2 pass3)
-       (recur pass1 pass2 pass3)]
-      [(mod:prim head rename prim)
-       (recur head prim)]
-      [(mod:splice head rename ?1 tail)
-       (recur head)]
-      [(mod:lift head locals renames tail)
-       (recur head locals)]
-      [(mod:lift-end tail)
-       (void)]
-      [(mod:cons head locals)
-       (recur head locals)]
-      [(mod:skip)
-       (void)]
-      ;; Shouldn't occur in module expansion.
-      ;; (Unless code calls 'expand' at compile-time; weird, but possible.)
-      [(ecte _ _ locals first second locals2)
-       (recur locals first second locals2)]
-      [(bfs:lift lderiv lifts)
-       (recur lderiv)]
-      [#f
-       (void)])))
+      ;; ====
+      ;; Otherwise, recur through children
+      [deriv (for-subnodes deriv #:recur recur #:recur/phase-up recur/phase-up)])))
+
 
 ;; profile/local : LocalAction -> Integer
 ;; Adjustment to mrule's delta due to local actions.
@@ -339,10 +223,10 @@
        ;; Then macro is not responsible for the difference, so *subtract*
        ;; the delta z2-z1; equivalently, add z1-z2.
        (- (term-size z1) (term-size z2))]
-      [(local-lift expr ids) ;; (define-values [] []) : 5 nodes
-       (+ (term-size expr) (term-size ids))]
-      [(local-lift-end decl)
-       (term-size decl)]
+      [(local-lift-expr ids orig renamed) ;; (define-values [] []) : 5 nodes
+       (+ (term-size orig) (term-size ids))]
+      [(local-lift-end orig renamed wrapped)
+       (term-size orig)]
       [(local-lift-require req expr mexpr) ;; (require []) : 4 nodes
        (+ 4 (term-size req))]
       [(local-lift-provide prov) ;; (provide []) : 4 nodes

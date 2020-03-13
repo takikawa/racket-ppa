@@ -456,7 +456,7 @@
     (load-file (->*m ((or/c path-string? input-port? #f))
                      (tab-snip-filetype/c any/c any/c)
                      void?))
-    (other-equal-to? (->m (is-a?/c image-snip%)
+    (other-equal-to? (->m (is-a?/c snip%)
                           (any/c any/c . -> . boolean?)
                           boolean?))
     (resize (->m (>=/c 0)

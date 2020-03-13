@@ -84,13 +84,9 @@
   (send error-delta set-delta-foreground (make-object color% 255 0 0))
   
   ;; get-error-color : -> (instanceof color%)
-  (define get-error-color
-    (let ([w-o-b (make-object color% 63 0 0)]
-          [b-o-w (make-object color% "PINK")])
-      (λ ()
-        (if (preferences:get 'framework:white-on-black?)
-            w-o-b
-            b-o-w))))
+  (define (get-error-color)
+    (color-prefs:lookup-in-color-scheme
+     'drracket:error-background-highlighting))
   
   (define arrow-cursor (make-object cursor% 'arrow))
   (define (clickable-snip-mixin snip%)
@@ -699,7 +695,8 @@
         (send-out " in:"
                   (λ (snp)
                     (send snp set-style
-                          (send (editor:get-standard-style-list) find-named-style "Standard")))))
+                          (send (editor:get-standard-style-list) find-named-style
+                                (editor:get-default-color-style-name))))))
       (cond
         [(null? exprs) (void)]
         [(null? (cdr exprs))
@@ -854,7 +851,9 @@
   (define (add-ec/text dis1 editions1 defs ints tab-panel error-text)
     (cond
       [(pair? dis1)
-       (define text1 (new (text:wide-snip-mixin text:hide-caret/selection%)))
+       (define text1 (new (text:wide-snip-mixin
+                           (editor:standard-style-list-mixin
+                            text:hide-caret/selection%))))
        (define ec1 (new (canvas:color-mixin canvas:wide-snip%)
                         [parent tab-panel]
                         [editor text1]))
@@ -1011,13 +1010,19 @@
               start-pos end-pos
               (λ (ed start end)
                 (open-and-highlight-in-file (list di) edition))))
-      
+
       (unless (zero? skip-count)
+        (define before (send text last-position))
         (send text insert " skipped ")
         (send text insert (number->string skip-count))
         (send text insert " duplicate frame")
         (unless (= skip-count 1)
-          (send text insert "s")))
+          (send text insert "s"))
+        (send text change-style
+              (send (send text get-style-list) find-named-style
+                    (editor:get-default-color-style-name))
+              before
+              (send text last-position)))
       (send text insert #\newline)
       
       (when (and start span)
@@ -1067,11 +1072,18 @@
                  (values (send frame get-editor) void)]
                 [else (values #f void)]))]
            [(path? normalized-file)
-            (let ([text (new text:basic%)])
-              (if (send text load-file normalized-file)
-                  (values text 
-                          (λ () (send text on-close)))
-                  (values #f (λ () (void)))))]
+            (define text (new (editor:standard-style-list-mixin text:basic%)))
+            (cond
+              [(send text load-file normalized-file)
+               (send text change-style
+                     (send (send text get-style-list) find-named-style
+                           (editor:get-default-color-style-name))
+                     0
+                     (send text last-position))
+               (values text
+                       (λ () (send text on-close)))]
+              [else
+               (values #f (λ () (void)))])]
            [else
             (values #f void)])]
         [(is-a? file editor<%>)
@@ -1089,13 +1101,12 @@
           (let ([p (send text last-position)])
             (send text insert snip p p)
             (send text insert #\newline)
-            (when (preferences:get 'framework:white-on-black?)
-              (send text change-style white-on-black-style p (+ p 1))))))
+            (send text change-style
+                  (send (send text get-style-list) find-named-style
+                        (editor:get-default-color-style-name))
+                  p (+ p 1)))))
       (close-text)))
-  
-  (define white-on-black-style (make-object style-delta%))
-  (define stupid-internal-define-syntax1 (send white-on-black-style set-delta-foreground "white"))
-  
+
   ;; copy/highlight-text : text number number -> text
   ;; copies the range from `start' to `finish', including the entire paragraph at
   ;; each end and highlights the characters corresponding the original range,
@@ -2016,7 +2027,7 @@
                                      (stretchable-height #f)))
           (define profile-left-side (new-vertical-panel% [parent profile-info-panel]))
           (set! profile-info-editor-canvas 
-                (new canvas:basic% 
+                (new canvas:color%
                      (parent profile-info-panel)
                      (editor (send (get-current-tab) get-profile-info-text))))
           (define profile-message (instantiate message% ()
@@ -2093,7 +2104,9 @@
   ;; GUI. They only manage the profiling information reported
   ;; in the bottom window
   (define profile-text% 
-    (class text:line-spacing%
+    (class (text:foreground-color-mixin
+            (editor:standard-style-list-mixin
+             text:line-spacing%))
       (init-field tab)
       
       ;; clear-profile-display : -> void
@@ -2110,7 +2123,8 @@
       (inherit lock is-locked?
                get-canvas hide-caret get-snip-location
                begin-edit-sequence end-edit-sequence 
-               erase insert)
+               erase insert get-start-position
+               change-style get-style-list default-style-name)
       
       ;; clear-old-results : -> void
       ;; removes the profile highlighting
@@ -2192,14 +2206,18 @@
               (let ([after (send src-loc-editor last-position)])
                 (cond
                   [(string? expr-src)
-                   (send src-loc-editor change-style (gui-utils:get-clickback-delta) before after)
+                   (send src-loc-editor change-style
+                         (gui-utils:get-clickback-delta (preferences:get 'framework:white-on-black?))
+                         before after)
                    (let ([after (send src-loc-editor last-position)])
                      (send src-loc-editor set-clickback 
                            before after 
                            (λ (text start end)
                              (open-file-and-goto-position expr-src (syntax-position expr)))))]
                   [(is-a? expr-src editor:basic<%>)
-                   (send src-loc-editor change-style (gui-utils:get-clickback-delta) before after)
+                   (send src-loc-editor change-style
+                         (gui-utils:get-clickback-delta (preferences:get 'framework:white-on-black?))
+                         before after)
                    (send src-loc-editor set-clickback
                          before after
                          (λ (text start end)
@@ -2293,15 +2311,23 @@
         (set! time-editor #f)
         (set! count-editor #f))
       (define/private (initialize-editors)
-        (set! src-loc-editor (instantiate text% ()))
-        (set! time-editor (instantiate text% ()))
-        (set! count-editor (instantiate text% ()))
+        (set! src-loc-editor (new profile-content-text%))
+        (set! time-editor (new profile-content-text%))
+        (set! count-editor (new profile-content-text%))
         (send src-loc-editor set-styles-sticky #f)            
         (send time-editor set-styles-sticky #f)
         (send count-editor set-styles-sticky #f)
-        (insert (instantiate editor-snip% (time-editor)))
-        (insert (instantiate editor-snip% (count-editor)))
-        (insert (instantiate editor-snip% (src-loc-editor)))
+        (define (insert-es e)
+          (define es (new editor-snip% [editor e]))
+          (send es use-style-background #t)
+          (define before (get-start-position))
+          (insert es)
+          (change-style (send (get-style-list) find-named-style (default-style-name))
+                        before
+                        (+ before 1)))
+        (insert-es time-editor)
+        (insert-es count-editor)
+        (insert-es src-loc-editor)
         (insert-title (string-constant profiling-col-function) src-loc-editor)
         (insert-title (string-constant profiling-col-time-in-msec) time-editor)
         (insert-title (string-constant profiling-col-calls) count-editor))
@@ -2314,6 +2340,8 @@
       
       (super-new)
       (hide-caret #t)))
+
+  (define profile-content-text% (text:foreground-color-mixin text:standard-style-list%))
   
   ;; format-percentage : number[0 <= n <= 1] -> string
   ;; formats the number as a percentage string with trailing zeros,

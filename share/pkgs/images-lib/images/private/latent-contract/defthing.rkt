@@ -3,7 +3,7 @@
 ;; Definitions with contracts and contract documentation.
 
 (require racket/contract "../latent-contract.rkt" racket/provide racket/match
-         (for-syntax racket/base racket/list racket/syntax syntax/parse racket/provide-transform)
+         (for-syntax racket/base racket/list racket/syntax syntax/parse syntax/strip-context racket/provide-transform)
          (prefix-in s. scribble/manual)
          (prefix-in s. scribble/core)
          (prefix-in s. scribble/html-properties))
@@ -64,8 +64,8 @@
              (syntax-case doc-stx ()
                [(ctx . pre-flows)
                 (with-syntax ([doc-name      (datum->syntax #'ctx (syntax-e #'name))]
-                              [doc-contract  (quote-syntax contract)]
-                              [doc-value     (quote-syntax value)])
+                              [doc-contract  (replace-context #'ctx (quote-syntax contract))]
+                              [doc-value     (replace-context #'ctx (quote-syntax value))])
                   (syntax/loc doc-stx
                     (s.defthing doc-name doc-contract #:value doc-value
                                 . pre-flows)))])))))]
@@ -78,7 +78,7 @@
              (syntax-case doc-stx ()
                [(ctx . pre-flows)
                 (with-syntax ([doc-name      (datum->syntax #'ctx (syntax-e #'name))]
-                              [doc-contract  (quote-syntax contract)])
+                              [doc-contract  (replace-context #'ctx (quote-syntax contract))])
                   (syntax/loc doc-stx
                     (s.defthing doc-name doc-contract . pre-flows)))])))))]))
 
@@ -106,8 +106,8 @@
              (syntax-case doc-stx ()
                [(ctx . pre-flows)
                 (with-syntax ([doc-name    (datum->syntax #'ctx (syntax-e #'name))]
-                              [doc-args    (quote-syntax (arg ...))]
-                              [doc-result  (quote-syntax result)]
+                              [doc-args    (replace-context #'ctx (quote-syntax (arg ...)))]
+                              [doc-result  (replace-context #'ctx (quote-syntax result))]
                               [doc-body    (quote-syntax #'wrapped-body)])
                   (syntax/loc doc-stx
                     (s.defproc (doc-name . doc-args) doc-result #:value doc-body
@@ -127,8 +127,8 @@
              (syntax-case doc-stx ()
                [(ctx . pre-flows)
                 (with-syntax ([doc-name    (datum->syntax #'ctx (syntax-e #'name))]
-                              [doc-args    (quote-syntax (arg ...))]
-                              [doc-result  (quote-syntax result)])
+                              [doc-args    (replace-context #'ctx (quote-syntax (arg ...)))]
+                              [doc-result  (replace-context #'ctx (quote-syntax result))])
                   (syntax/loc doc-stx
                     (s.defproc (doc-name . doc-args) doc-result . pre-flows)))])))))]))
 
@@ -145,8 +145,8 @@
                [(ctx . pre-flows)
                 (with-syntax ([doc-name      (datum->syntax #'ctx (syntax-e #'name))]
                               [doc-arg       (datum->syntax #'ctx (syntax-e #'arg))]
-                              [doc-contract  (quote-syntax contract)]
-                              [doc-default   (quote-syntax default)])
+                              [doc-contract  (replace-context #'ctx (quote-syntax contract))]
+                              [doc-default   (replace-context #'ctx (quote-syntax default))])
                   #'(s.defparam doc-name doc-arg doc-contract #:value doc-default
                                 . pre-flows))])))))]
     [(_ name:id contract:expr default:expr)

@@ -146,6 +146,11 @@
     (scheme-object)
     scheme-object))
 
+(define string->uninterned-symbol
+  (foreign-procedure "(cs)s_uninterned"
+    (scheme-object)
+    scheme-object))
+
 (define $intern2
   (foreign-procedure "(cs)s_intern2"
     (scheme-object scheme-object)
@@ -1190,6 +1195,19 @@
   (lambda (s)
     (#3%immutable-fxvector? s)))
 
+(define stencil-vector-mask
+   (lambda (v)
+      (#2%stencil-vector-mask v)))
+
+(define-who $make-stencil-vector
+  (lambda (len mask)
+    ($oops who "should only be used as inlined with GC disabled")))
+
+; not safe; assumes `val` is older than `v`
+(define $stencil-vector-set!
+  (lambda (v i val)
+    ($stencil-vector-set! v i val)))
+
 ; not safe
 (define $record-ref
    (lambda (v i)
@@ -1261,6 +1279,8 @@
 
 (define gensym? (lambda (x) (gensym? x)))
 
+(define uninterned-symbol? (lambda (x) (uninterned-symbol? x)))
+
 (define fixnum? (lambda (x) (fixnum? x)))
 
 (define bignum? (lambda (x) (bignum? x)))
@@ -1272,6 +1292,8 @@
 (define vector? (lambda (x) (vector? x)))
 
 (define fxvector? (lambda (x) (fxvector? x)))
+
+(define stencil-vector? (lambda (x) (stencil-vector? x)))
 
 (define procedure? (lambda (x) (procedure? x)))
 

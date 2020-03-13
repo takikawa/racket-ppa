@@ -37,6 +37,7 @@
           continuation-mark-set-first
           continuation-mark-set->list
           continuation-mark-set->list*
+          continuation-mark-set->iterator
           continuation-mark-set->context
           current-continuation-marks
           (rename [continuation-marks rumble:continuation-marks]) ; wrapped at threads layer
@@ -86,6 +87,7 @@
           linklet-instantiate-key ; not exported to Racket
           set-error-display-eprintf! ; not exported to Racket
           set-log-system-message! ; not exported to Racket
+          set-convert-source-file-descriptor-path! ; not exported to Racket
 
           current-inspector
           make-inspector
@@ -158,9 +160,10 @@
           primitive?
           primitive-closure?
           primitive-result-arity
-          make-jit-procedure ; not exported to racket
-          |#%name|           ; not exported to racket
-          |#%method-arity|   ; not exported to racket
+          make-jit-procedure    ; not exported to racket
+          make-interp-procedure ; not exported to racket
+          |#%name|              ; not exported to racket
+          |#%method-arity|      ; not exported to racket
 
           equal?
           equal?/recur
@@ -199,6 +202,7 @@
           raise-result-arity-error
           raise-type-error
           raise-binding-result-arity-error ; not exported to Racket
+          raise-definition-result-arity-error ; not exported to Racket
 
           (rename [make-unquoted-printing-string unquoted-printing-string])
           unquoted-printing-string?
@@ -207,6 +211,7 @@
           make-struct-type-property
           struct-type-property?
           struct-type-property-accessor-procedure?
+          struct-type-property-predicate-procedure?
           make-struct-type
           struct-type-install-properties! ; not exported to Racket
           structure-type-lookup-prefab-uid ; not exported to Racket
@@ -272,7 +277,7 @@
           unsafe-weak-hash-iterate-key+value unsafe-weak-hash-iterate-pair
           unsafe-hash-seal!    ; not exported to racket
 
-          hash? hash-eq? hash-equal? hash-eqv? hash-weak? immutable-hash?
+          hash? hash-eq? hash-equal? hash-eqv? hash-weak?
           hash-count
           hash-keys-subset?
           eq-hashtable->hash   ; not exported to racket
@@ -317,6 +322,7 @@
           string->uninterned-symbol
           string->unreadable-symbol
           symbol->string
+          symbol->immutable-string
 
           list?
           list-pair?
@@ -363,6 +369,7 @@
 
           keyword?
           keyword->string
+          keyword->immutable-string
           string->keyword
           keyword<?
 
@@ -404,6 +411,8 @@
           make-flrectangular
           gcd
           lcm
+          fllog flatan
+          fxquotient
 
           random
           random-seed
@@ -635,9 +644,9 @@
           ptr-ref/double ptr-set!/double  ; not exported to Racket
           ptr-ref/float ptr-set!/float    ; not exported to Racket
 
-          unsafe-unbox
+          (rename [inline:unsafe-unbox unsafe-unbox]
+                  [inline:unsafe-set-box! unsafe-set-box!])
           unsafe-unbox*
-          unsafe-set-box!
           unsafe-set-box*!
           unsafe-box*-cas!
 
@@ -646,12 +655,12 @@
           unsafe-set-mcar!
           unsafe-set-mcdr!
 
-          unsafe-vector-ref
-          unsafe-vector-set!
+          (rename [inline:unsafe-vector-ref unsafe-vector-ref]
+                  [inline:unsafe-vector-set! unsafe-vector-set!]
+                  [inline:unsafe-vector-length unsafe-vector-length])
           unsafe-vector*-ref
           unsafe-vector*-set!
           unsafe-vector*-cas!
-          unsafe-vector-length
           unsafe-vector*-length
 
           unsafe-fxvector-length
@@ -661,6 +670,7 @@
           unsafe-bytes-length
           unsafe-bytes-ref
           unsafe-bytes-set!
+          unsafe-bytes-copy!
 
           unsafe-undefined
           check-not-unsafe-undefined
@@ -670,8 +680,8 @@
           unsafe-string-ref
           unsafe-string-set!
 
-          unsafe-struct-ref
-          unsafe-struct-set!
+          (rename [inline:unsafe-struct-ref unsafe-struct-ref]
+                  [inline:unsafe-struct-set! unsafe-struct-set!])
           unsafe-struct*-ref
           unsafe-struct*-set!
           unsafe-struct*-cas!
