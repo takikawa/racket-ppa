@@ -1,6 +1,7 @@
 #lang racket/base
 (require "match.rkt"
-         "wrap.rkt")
+         "wrap.rkt"
+         "gensym.rkt")
 
 ;; Convert `lambda`s to make them fully closed, which is compatible
 ;; with JIT compilation of the `lambda` or separate ahead-of-time
@@ -33,7 +34,7 @@
 
 (struct convert-mode (sizes called? lift? no-more-conversions?))
 
-(define lifts-id (gensym 'jits))
+(define lifts-id (string->uninterned-symbol "_jits"))
 
 (define (jitify-schemified-linklet v
                                    need-extract?
@@ -55,11 +56,14 @@
         [`(self ,m ,orig-id) orig-id]
         [`(self ,m) (extract-id m id)]
         [`,_ id]))
-    (define captures (hash-keys
-                      ;; `extract-id` for different `id`s can produce the
-                      ;; same `id`, so hash and then convert to a list
-                      (for/hash ([id (in-list ids)])
-                        (values (extract-id (hash-ref env id) id) #t))))
+    (define (id<? a b) (symbol<? (unwrap a) (unwrap b)))
+    (define captures (sort
+                      (hash-keys
+                       ;; `extract-id` for different `id`s can produce the
+                       ;; same `id`, so hash and then convert to a list
+                       (for/hash ([id (in-list ids)])
+                         (values (extract-id (hash-ref env id) id) #t)))
+                      id<?))
     (define jitted-proc
       (or (match (and name
                       (hash-ref free-vars (unwrap name) #f)
@@ -88,10 +92,12 @@
                 ,name)]
             [else v])))
     (define arity-mask (argss->arity-mask argss))
+    (define i-name (or (wrap-property v 'inferred-name)
+                       name))
     (cond
       [(and (null? captures)
             (no-lifts? body-lifts))
-       (define e (extractable-annotation jitted-proc arity-mask name))
+       (define e (extractable-annotation jitted-proc arity-mask i-name))
        (define-values (get-e new-lifts)
          (cond
            [(convert-mode-need-lift? convert-mode) (add-lift e lifts)]
@@ -108,7 +114,7 @@
                                                         (cons lifts-id captures))
                                              ,jitted-proc))
                                          arity-mask
-                                         name))
+                                         i-name))
        (define-values (all-captures new-lifts)
          (cond
            [(no-lifts? body-lifts)
@@ -468,7 +474,7 @@
                                                           [new-rhs (in-list rev-new-rhss)])
                   `(let (,(cond
                             [(hash-ref rhs-free (unwrap id) #f)
-                             `[,(gensym 'ignored) (set-box! ,id ,new-rhs)]]
+                             `[,(deterministic-gensym "ignored") (set-box! ,id ,new-rhs)]]
                             [(hash-ref mutables (unwrap id) #f)
                              `[,id (box ,new-rhs)]]
                             [else `[,id ,new-rhs]]))
@@ -573,7 +579,7 @@
   (define (activate-self env name)
     (cond
       [name
-       (define (genself) (gensym 'self))
+       (define (genself) (deterministic-gensym "self"))
        (define u (unwrap name))
        (define new-m
          (match (hash-ref env u #f)
@@ -821,8 +827,9 @@
           (body-record-sizes! body sizes))]))
 
   ;; ----------------------------------------
-  
-  (top))
+
+  (with-deterministic-gensym
+    (top)))
 
 ;; ============================================================
 
