@@ -1,3 +1,9 @@
+racket (7.6+dfsg1-1) unstable; urgency=medium
+
+  * New upstream bugfix release
+
+ -- David Bremner <bremner@debian.org>  Fri, 13 Mar 2020 16:57:27 -0300
+
 racket (7.5+dfsg2-1) unstable; urgency=medium
 
   * New upstream bugfix release.
