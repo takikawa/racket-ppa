@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "7.6"))) (define collection (quote multi)) (define deps (quote ("base" "draw-lib" "gui-lib" "string-constants-lib"))) (define pkg-desc "Functions for constructing icons and logos") (define pkg-authors (quote (ntoronto)))))

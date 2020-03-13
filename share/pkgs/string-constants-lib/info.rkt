@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "7.6"))) (define collection (quote multi)) (define deps (quote ("base"))) (define pkg-desc "String constants to support internationalization, especially in DrRacket") (define pkg-authors (quote (robby))) (define version "1.30")))

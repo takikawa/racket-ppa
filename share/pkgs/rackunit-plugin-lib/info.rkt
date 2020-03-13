@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "7.6"))) (define collection (quote multi)) (define deps (quote ("base" "rackunit-lib" "rackunit-gui" "gui-lib" "drracket-plugin-lib"))) (define pkg-desc "RackUnit testing framework DrRacket plugin") (define pkg-authors (quote (ryanc noel)))))

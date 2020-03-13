@@ -1,0 +1,38 @@
+;; This file was created by make-log-based-eval
+((begin
+   (require contract-profile
+            racket/contract
+            (only-in racket/file file->string)
+            racket/list))
+ ((3) 0 () 0 () () (c values c (void)))
+ #""
+ #"")
+((define/contract
+  (sum* numbers)
+  (-> (listof integer?) integer?)
+  (for/fold ((total 0)) ((n (in-list numbers))) (+ total n)))
+ ((3) 0 () 0 () () (c values c (void)))
+ #""
+ #"")
+((contract-profile (sum* (range (expt 10 7))))
+ ((3) 0 () 0 () () (q values 49999995000000))
+ #"Running time is 47.84% contracts\n1094/2287 ms\n\n(-> (listof integer?) integer?)                                  1094 ms\n#<blame>::-1                                                    \n    sum*                                                         1094 ms\n\n"
+ #"")
+((define/contract
+  (vector-max* vec-of-numbers)
+  (-> (vectorof list?) integer?)
+  (for/fold
+   ((total 0))
+   ((numbers (in-vector vec-of-numbers)))
+   (+ total (sum* numbers))))
+ ((3) 0 () 0 () () (c values c (void)))
+ #""
+ #"")
+((contract-profile (vector-max* (make-vector 10 (range (expt 10 7)))))
+ ((3) 0 () 0 () () (q values 499999950000000))
+ #"Running time is 93.76% contracts\n4180/4458 ms\n\n(-> (vectorof (listof any/c)) integer?)                          1939 ms\n#<blame>::-1                                                    \n    vector-max*                                                  1939 ms\n\n(-> (listof integer?) integer?)                                  2241 ms\n#<blame>::-1                                                    \n    sum*                                                         2241 ms\n\n"
+ #"")
+((contract-profile-thunk (lambda () (sum* (range (expt 10 7)))))
+ ((3) 0 () 0 () () (q values 49999995000000))
+ #"Running time is 44.16% contracts\n908/2056 ms\n\n(-> (listof integer?) integer?)                                  908 ms\n#<blame>::-1                                                    \n    sum*                                                         908 ms\n\n"
+ #"")

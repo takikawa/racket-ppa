@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "7.6"))) (define collection (quote multi)) (define deps (quote ("scheme-lib" "base" "compatibility-lib"))) (define build-deps (quote ("rackunit-lib"))) (define pkg-desc "implementation (no documentation) part of \"parser-tools\"") (define pkg-authors (quote (mflatt)))))

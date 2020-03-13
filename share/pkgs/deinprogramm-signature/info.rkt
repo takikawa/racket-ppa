@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "7.6"))) (define collection (quote multi)) (define deps (quote ("base" "compatibility-lib" "drracket-plugin-lib" "gui-lib" "htdp-lib" "scheme-lib" "srfi-lib" "string-constants-lib"))) (define pkg-desc "Signature support for teaching languages") (define pkg-authors (quote (sperber)))))

@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "7.6"))) (define collection (quote multi)) (define deps (quote ("rackunit-lib" "class-iop-lib" "data-lib" "gui-lib" "base"))) (define pkg-desc "RackUnit test runner GUI") (define pkg-authors (quote (ryanc)))))
