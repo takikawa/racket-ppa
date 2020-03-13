@@ -1821,6 +1821,20 @@
   @{Extracts the z component of @racket[xyz].})
 
  (proc-doc/names
+  color-model:hsl->rgb
+  (-> (real-in 0 360) (real-in 0 1) (real-in 0 1)
+      (values byte? byte? byte?))
+  (hue saturation lightness)
+  @{Computes rgb color values for the hsl color inputs.})
+
+ (proc-doc/names
+  color-model:rgb->hsl
+  (-> byte? byte? byte?
+      (values (real-in 0 360) (real-in 0 1) (real-in 0 1)))
+  (red green blue)
+  @{Computes hsl color values for the rgb color inputs.})
+
+ (proc-doc/names
   color-prefs:set-default/color-scheme
   (-> symbol?
       (or/c (is-a?/c color%) string?)
@@ -2065,6 +2079,17 @@
             In order to return @racket[#t], @racket[name] must have been
             passed as the first argument to @racket[color-prefs:add-color-scheme-entry]
             and the @racket[#:style] argument must have also been passed.})
+
+ (proc-doc/names
+  color-prefs:color-scheme-color-name?
+  (-> any/c boolean?)
+  (name)
+  @{Returns @racket[#t] if @racket[name] is a known color scheme name,
+            and is connected to a color. 
+            
+            In order to return @racket[#t], @racket[name] must have been
+            passed as the first argument to @racket[color-prefs:add-color-scheme-entry]
+            and the @racket[#:style] argument must have also been omitted or be @racket[#f].})
  
  (proc-doc 
   color-prefs:lookup-in-color-scheme

@@ -910,7 +910,8 @@
       (declare-intrinsic dofretu32* dofretu32* (%ac0 %ts %td %cp %ac1) (%ac0) (%xp))
       (declare-intrinsic get-room get-room () (%xp) (%xp))
       (declare-intrinsic scan-remembered-set scan-remembered-set () () ())
-      (declare-intrinsic reify-cc reify-cc (%xp %ac0 %ts) () (%td))
+      (declare-intrinsic reify-1cc reify-1cc (%xp %ac0 %ts) () (%td))
+      (declare-intrinsic maybe-reify-cc maybe-reify-cc (%xp %ac0 %ts) () (%td))
       (declare-intrinsic dooverflow dooverflow () () ())
       (declare-intrinsic dooverflood dooverflood () (%xp) ())
       ; a dorest routine takes all of the register and frame arguments from the rest
@@ -1224,7 +1225,7 @@
               [(string? x) x]
               [(symbol? x)
                (let ([name ($symbol-name x)])
-                 (if (pair? name) (cdr name) name))]
+                 (if (pair? name) (or (cdr name) (car name)) name))]
               [(eq? #f x) #f]
               [else (error 'np-discover-names "x is not a name" x)]))))
       (Expr : Expr (ir name moi) -> Expr ()
@@ -1657,6 +1658,14 @@
            [else
             ;; Check dynamically for attachment, and also reify for tail
             `(let ([,x (attachment-consume ,e1)]) ,body)])]
+        [(call ,info ,mdcl ,pr
+               (case-lambda ,info2 (clause (,x) ,interface ,[body mode -> body])))
+         (guard (and (memq mode '(tail tail/none tail/some))
+                     (eq? (primref-name pr) 'call/cc)
+                     (= interface 1)))
+         ;; Since we're in tail position, we can just reify the continuation and
+         ;; put the stack link in the argument variable.
+         `(let ([,x (continuation-get)]) ,body)]
         [(call ,info ,mdcl ,[e 'non/none -> e] ,[e* 'non/none -> e*] ...)
          (let ([info (case mode
                        [(non/some) (info-call->shifting-info-call info)]
@@ -2204,7 +2213,7 @@
                         b*)
                       c))))))
           (module (make-bank deposit retain borrow)
-            ; NB: borrowing is probably cubic at present
+            ; NB: borrowing is probably cubic at pre<sent
             ; might should represent bank as a prefix tree
             (define sort-free
               (lambda (free*)
@@ -2871,9 +2880,9 @@
            (cond
              [(and
                (or (not (info-call-shift-attachment? info))
-                   ;; FIXME: need a less fragile way to avoid multiple results
-                   ;; Exclude inlined primitives that return more than one value:
-                   (not (memq (primref-name pr) '(values call/cc call-with-current-continuation call/1cc))))
+                   ;; Note: single-valued also implies that the primitive doesn't
+                   ;; tail-call an arbitary function (which might inspect attachments):
+                   (all-set? (prim-mask single-valued) (primref-flags pr)))
                (handle-prim (info-call-src info) (info-call-sexpr info) (primref-level pr) (primref-name pr) e*))
               => (lambda (e)
                    (let ([e (Expr e)])
@@ -4471,7 +4480,103 @@
                    (%inline - ,e1
                       ,(build-fx*
                          (build-fx/ src sexpr e1 e2)
-                         e2 #f)))]))))
+                         e2 #f)))]))
+            (let ()
+              (define-syntax build-fx
+                (lambda (x)
+                  (syntax-case x ()
+                    [(_ op a1 a2)
+                     #`(%inline op
+                                #,(if (number? (syntax->datum #'a1))
+                                      #`(immediate a1)
+                                      #`,a1)
+                                #,(if (number? (syntax->datum #'a2))
+                                      #`(immediate a2)
+                                      #`,a2))])))
+              (define (build-popcount16 e)
+                (constant-case popcount-instruction
+                  [(#t) (build-fix (%inline popcount ,e))] ; no unfix needed, since not specialized to 16-bit
+                  [else
+                   (let ([x (make-tmp 'x 'uptr)]
+                         [x2 (make-tmp 'x2 'uptr)]
+                         [x3 (make-tmp 'x3 'uptr)]
+                         [x4 (make-tmp 'x4 'uptr)])
+                     `(let ([,x ,(build-unfix e)])
+                        (let ([,x2 ,(build-fx - x (build-fx logand (build-fx srl x 1) #x5555))])
+                          (let ([,x3 ,(build-fx + (build-fx logand x2 #x3333) (build-fx logand (build-fx srl x2 2) #x3333))])
+                            (let ([,x4 ,(build-fx logand (build-fx + x3 (build-fx srl x3 4)) #x0f0f)])
+                              ,(build-fix (build-fx logand (build-fx + x4 (build-fx srl x4 8)) #x1f)))))))]))
+              (define (build-popcount32 e)
+                (constant-case popcount-instruction
+                  [(#t) (build-fix (%inline popcount ,e))] ; no unfix needed, since not specialized to 32-bit
+                  [else
+                   (let ([x (make-tmp 'x 'uptr)]
+                         [x2 (make-tmp 'x2 'uptr)]
+                         [x3 (make-tmp 'x3 'uptr)]
+                         [x4 (make-tmp 'x4 'uptr)])
+                     `(let ([,x ,(build-unfix e)])
+                        (let ([,x2 ,(build-fx - x (build-fx logand (build-fx srl x 1) #x55555555))])
+                          (let ([,x3 ,(build-fx + (build-fx logand x2 #x33333333) (build-fx logand (build-fx srl x2 2) #x33333333))])
+                            (let ([,x4 ,(build-fx logand (build-fx + x3 (build-fx srl x3 4)) #x0f0f0f0f)])
+                              ,(build-fix (build-fx logand (build-fx srl (build-fx * x4 #x01010101) 24) #x3f)))))))]))
+              (define (build-popcount e)
+                (constant-case popcount-instruction
+                  [(#t) (build-fix (%inline popcount ,e))] ; no unfix needed
+                  [else
+                   (constant-case ptr-bits
+                     [(32) (build-popcount32 e)]
+                     [(64)
+                      (let ([x (make-tmp 'x 'uptr)]
+                            [x2 (make-tmp 'x2 'uptr)]
+                            [x3 (make-tmp 'x3 'uptr)]
+                            [x4 (make-tmp 'x4 'uptr)]
+                            [x5 (make-tmp 'x5 'uptr)])
+                        `(let ([,x ,e]) ; no unfix needed
+                           (let ([,x2 ,(build-fx - x (build-fx logand (build-fx srl x 1) #x5555555555555555))])
+                             (let ([,x3 ,(build-fx + (build-fx logand x2 #x3333333333333333) (build-fx logand (build-fx srl x2 2) #x3333333333333333))])
+                               (let ([,x4 ,(build-fx logand (build-fx + x3 (build-fx srl x3 4)) #x0f0f0f0f0f0f0f0f)])
+                                 (let ([,x5 ,(build-fx logand (build-fx + x4 (build-fx srl x4 8)) #x00ff00ff00ff00ff)])
+                                   ,(build-fix (build-fx logand (build-fx srl (build-fx * x5 #x0101010101010101) 56) #x7f))))))))])]))
+              (define-inline 3 fxpopcount
+                [(e)
+                 (bind #f (e)
+                   (build-popcount e))])
+              (define-inline 2 fxpopcount
+                [(e)
+                 (bind #t (e)
+                   `(if ,(build-and
+                          (%type-check mask-fixnum type-fixnum ,e)
+                          (%inline >= ,e (immediate ,0)))
+                        ,(build-popcount e)
+                        ,(build-libcall #t #f sexpr fxpopcount e)))])
+              (define-inline 3 fxpopcount32
+                [(e)
+                 (bind #f (e)
+                   (build-popcount32 e))])
+              (define-inline 2 fxpopcount32
+                [(e)
+                 (bind #t (e)
+                       `(if ,(constant-case ptr-bits
+                               [(32)
+                                (build-and (%type-check mask-fixnum type-fixnum ,e)
+                                           (%inline >= ,e (immediate ,0)))]
+                               [(64)
+                                (build-and (%type-check mask-fixnum type-fixnum ,e)
+                                           (%inline u< ,e (immediate ,(fix #x100000000))))])
+                            ,(build-popcount32 e)
+                            ,(build-libcall #t #f sexpr fxpopcount32 e)))])
+              (define-inline 3 fxpopcount16
+                [(e)
+                 (bind #f (e)
+                   (build-popcount16 e))])
+              (define-inline 2 fxpopcount16
+                [(e)
+                 (bind #f (e)
+                       `(if ,(build-and
+                              (%type-check mask-fixnum type-fixnum ,e)
+                              (%inline u< ,e (immediate ,(fix #x10000))))
+                            ,(build-popcount16 e)
+                            ,(build-libcall #t #f sexpr fxpopcount16 e)))]))))
         (let ()
           (define do-fxsll
             (lambda (e1 e2)
@@ -4980,6 +5085,7 @@
           (typed-object-pred vector? mask-vector type-vector)
           (typed-object-pred mutable-vector? mask-mutable-vector type-mutable-vector)
           (typed-object-pred immutable-vector? mask-mutable-vector type-immutable-vector)
+          (typed-object-pred stencil-vector? mask-stencil-vector type-stencil-vector)
           (typed-object-pred thread? mask-thread type-thread))
         (define-inline 3 $bigpositive?
           [(e) (%type-check mask-signed-bignum type-positive-bignum
@@ -5368,7 +5474,8 @@
           (def-len fxvector-length fxvector-type-disp fxvector-length-offset)
           (def-len string-length string-type-disp string-length-offset)
           (def-len bytevector-length bytevector-type-disp bytevector-length-offset)
-          (def-len $bignum-length bignum-type-disp bignum-length-offset))
+          (def-len $bignum-length bignum-type-disp bignum-length-offset)
+          (def-len stencil-vector-mask stencil-vector-type-disp stencil-vector-mask-offset))
         (let ()
           (define-syntax def-len
             (syntax-rules ()
@@ -5385,7 +5492,8 @@
           (def-len vector-length mask-vector type-vector vector-type-disp vector-length-offset)
           (def-len fxvector-length mask-fxvector type-fxvector fxvector-type-disp fxvector-length-offset)
           (def-len string-length mask-string type-string string-type-disp string-length-offset)
-          (def-len bytevector-length mask-bytevector type-bytevector bytevector-type-disp bytevector-length-offset))
+          (def-len bytevector-length mask-bytevector type-bytevector bytevector-type-disp bytevector-length-offset)
+          (def-len stencil-vector-mask mask-stencil-vector type-stencil-vector stencil-vector-type-disp stencil-vector-mask-offset))
         ; TODO: consider adding integer?, integer-valued?, rational?, rational-valued?,
         ; real?, and real-valued?
         (let ()
@@ -8395,6 +8503,35 @@
               (nanopass-case (L7 Expr) e-i
                 [(quote ,d)
                  (guard (target-fixnum? d))
+                 (%mref ,e-v ,(+ (fix d) (constant stencil-vector-data-disp)))]
+                [else (%mref ,e-v ,e-i ,(constant stencil-vector-data-disp))]))
+            (define-inline 3 stencil-vector-ref
+              [(e-v e-i) (go e-v e-i)]))
+          (let ()
+            (define (go e-v e-i e-new)
+              (nanopass-case (L7 Expr) e-i
+                [(quote ,d)
+                 (guard (target-fixnum? d))
+                 (build-dirty-store e-v (+ (fix d) (constant stencil-vector-data-disp)) e-new)]
+                [else (build-dirty-store e-v e-i (constant stencil-vector-data-disp) e-new)]))
+            (define-inline 3 stencil-vector-set!
+              [(e-v e-i e-new) (go e-v e-i e-new)]))
+          (let ()
+            (define (go e-v e-i e-new)
+              `(set!
+                 ,(nanopass-case (L7 Expr) e-i
+                    [(quote ,d)
+                     (guard (target-fixnum? d))
+                     (%mref ,e-v ,(+ (fix d) (constant stencil-vector-data-disp)))]
+                    [else (%mref ,e-v ,e-i ,(constant stencil-vector-data-disp))])
+                 ,e-new))
+            (define-inline 3 $stencil-vector-set!
+              [(e-v e-i e-new) (go e-v e-i e-new)]))
+          (let ()
+            (define (go e-v e-i)
+              (nanopass-case (L7 Expr) e-i
+                [(quote ,d)
+                 (guard (target-fixnum? d))
                  (%mref ,e-v ,(+ (fix d) (constant record-data-disp)))]
                 [else (%mref ,e-v ,e-i ,(constant record-data-disp))]))
             (define-inline 3 $record-ref
@@ -9175,6 +9312,69 @@
 
         (let ()
           (meta-assert (= (constant log2-ptr-bytes) (constant fixnum-offset)))
+          (let ()
+            (define build-stencil-vector-type
+              (lambda (e-mask) ; e-mask is used only once
+                (%inline logor
+                         (immediate ,(constant type-stencil-vector))
+                         ,(%inline sll ,e-mask (immediate ,(fx- (constant stencil-vector-mask-offset)
+                                                                (constant fixnum-offset)))))))
+            (define do-stencil-vector
+              (lambda (e-mask e-val*)
+                (list-bind #f (e-val*)
+                  (bind #f (e-mask)
+                      (let ([t-vec (make-tmp 'tvec)])
+                        `(let ([,t-vec ,(%constant-alloc type-typed-object
+                                                         (fx+ (constant header-size-stencil-vector)
+                                                              (fx* (length e-val*) (constant ptr-bytes))))])
+                           ,(let loop ([e-val* e-val*] [i 0])
+                              (if (null? e-val*)
+                                  `(seq
+                                     (set! ,(%mref ,t-vec ,(constant stencil-vector-type-disp))
+                                           ,(build-stencil-vector-type e-mask))
+                                     ,t-vec)
+                                  `(seq
+                                    (set! ,(%mref ,t-vec ,(fx+ i (constant stencil-vector-data-disp))) ,(car e-val*))
+                                    ,(loop (cdr e-val*) (fx+ i (constant ptr-bytes))))))))))))
+            (define do-make-stencil-vector
+              (lambda (e-length e-mask)
+                (bind #t (e-length)
+                      (bind #f (e-mask)
+                            (let ([t-vec (make-tmp 'tvec)])
+                              `(let ([,t-vec (alloc ,(make-info-alloc (constant type-typed-object) #f #f)
+                                                    ,(%inline logand
+                                                        ,(%inline + ,e-length
+                                                             (immediate ,(fx+ (constant header-size-stencil-vector)
+                                                                              (fx- (constant byte-alignment) 1))))
+                                                         (immediate ,(- (constant byte-alignment)))))])
+                               ,(%seq
+                                 (set! ,(%mref ,t-vec ,(constant stencil-vector-type-disp))
+                                       ,(build-stencil-vector-type e-mask))
+                                 ;; Content not filled! This function is meant to be called by
+                                 ;; `$stencil-vector-update`, which has GC disabled between
+                                 ;; allocation and filling in the data
+                                 ,t-vec)))))))
+            (define-inline 3 stencil-vector
+              [(e-mask . e-val*)
+               (do-stencil-vector e-mask e-val*)])
+            (define-inline 2 $make-stencil-vector
+              [(e-length e-mask) (do-make-stencil-vector e-length e-mask)])
+            (define-inline 3 $make-stencil-vector
+              [(e-length e-mask) (do-make-stencil-vector e-length e-mask)])
+            (define-inline 3 stencil-vector-update
+              [(e-vec e-sub-mask e-add-mask . e-val*)
+               `(call ,(make-info-call src sexpr #f #f #f) #f
+                      ,(lookup-primref 3 '$stencil-vector-update)
+                      ,e-vec ,e-sub-mask ,e-add-mask ,e-val* ...)])
+            (define-inline 3 stencil-vector-truncate!
+              [(e-vec e-mask)
+               (bind #f (e-vec e-mask)
+                 `(seq
+                   (set! ,(%mref ,e-vec ,(constant stencil-vector-type-disp))
+                         ,(build-stencil-vector-type e-mask))
+                   ,(%constant svoid)))])))
+        (let ()
+          (meta-assert (= (constant log2-ptr-bytes) (constant fixnum-offset)))
           (define-inline 3 $make-eqhash-vector
             [(e-length)
              (let ([t-vec (make-tmp 'tvec)]
@@ -9494,8 +9694,18 @@
                (%type-check mask-symbol type-symbol ,e)
                (bind #t ([t (%mref ,e ,(constant symbol-name-disp))])
                  `(if ,t
-                      ,(%type-check mask-pair type-pair ,t)
+                      ,(build-and (%type-check mask-pair type-pair ,t)
+                                  (build-and (%mref ,t ,(constant pair-cdr-disp))
+                                             (%constant strue)))
                       ,(%constant strue)))))])
+        (define-inline 2 uninterned-symbol?
+          [(e)
+           (bind #t (e)
+             (build-and
+               (%type-check mask-symbol type-symbol ,e)
+               (bind #t ([t (%mref ,e ,(constant symbol-name-disp))])
+                     (build-and (%type-check mask-pair type-pair ,t)
+                                (build-not (%mref ,t ,(constant pair-cdr-disp)))))))])
         (let ()
           (define build-make-symbol
             (lambda (e-name)
@@ -9518,13 +9728,17 @@
                 (set! ,(%mref ,t ,(constant pair-cdr-disp)) ,e-pname)
                 (set! ,(%mref ,t ,(constant pair-car-disp)) ,(%constant sfalse))
                 ,(build-make-symbol t))))
-          (define-inline 3 gensym
+          (define-inline 3 $gensym
             [() (build-make-symbol (%constant sfalse))]
             [(e-pname) (bind #f (e-pname) (go e-pname))]
             [(e-pname e-uname) #f])
+          (define-inline 3 gensym
+            [() (build-make-symbol (%constant sfalse))]
+            [(e-pname) (and (constant? immutable-string? e-pname) (go e-pname))]
+            [(e-pname e-uname) #f])
           (define-inline 2 gensym
             [() (build-make-symbol (%constant sfalse))]
-            [(e-pname) (and (constant? string? e-pname) (go e-pname))]
+            [(e-pname) (and (constant? immutable-string? e-pname) (go e-pname))]
             [(e-pname e-uname) #f]))
         (define-inline 3 symbol->string
           [(e-sym)
@@ -9532,7 +9746,10 @@
              (bind #t ([e-name (%mref ,e-sym ,(constant symbol-name-disp))])
                `(if ,e-name
                     (if ,(%type-check mask-pair type-pair ,e-name)
-                        ,(%mref ,e-name ,(constant pair-cdr-disp))
+                        ,(bind #t ([e-cdr (%mref ,e-name ,(constant pair-cdr-disp))])
+                               `(if ,e-cdr
+                                    ,e-cdr
+                                    ,(%mref ,e-name ,(constant pair-car-disp))))
                         ,e-name)
                     ,(%primcall #f sexpr $gensym->pretty-name ,e-sym))))])
         (define-inline 3 $fxaddress
@@ -10090,6 +10307,7 @@
          (Triv* e*
            (lambda (t*)
              (k `(attachment-set ,aop ,t* ...))))]
+        [(continuation-get) (k `(continuation-get))]
         [(foreign-call ,info ,e0 ,e1* ...)
          (Triv* (cons e0 e1*)
            (lambda (t*)
@@ -10451,6 +10669,8 @@
          `(set! ,lvalue (attachment-get ,t* ...))]
         [(set! ,[lvalue] (attachment-consume ,[t*] ...))
          `(set! ,lvalue (attachment-consume ,t* ...))]
+        [(set! ,[lvalue] (continuation-get))
+         `(set! ,lvalue (continuation-get))]
         [(label ,l ,[ebody]) `(seq (label ,l) ,ebody)]
         [(trap-check ,ioc ,[ebody]) `(seq (trap-check ,ioc) ,ebody)]
         [(overflow-check ,[ebody]) `(seq (overflow-check) ,ebody)]
@@ -10469,7 +10689,8 @@
                        ,(f `(seq (label ,(car l*)) ,(car e*)) (cdr l*) (cdr e*)))))
               (label ,join)))]
         [(values ,info ,t* ...) `(nop)]
-        [(attachment-get ,t* ...) `(nop)])
+        [(attachment-get ,t* ...) `(nop)]
+        [(continuation-get) `(nop)])
       (Tail : Expr (ir) -> Tail ()
         [(inline ,info ,prim ,[t*] ...)
          (guard (pred-primitive? prim))
@@ -10668,11 +10889,11 @@
                           x)))))
           (define add-reify-cc-save
             (lambda (live-reg* e)
-              ;; Save and restore any live registers that may be used by the `reify-cc` instrinsic.
+              ;; Save and restore any live registers that may be used by the `reify-1cc` instrinsic.
               ;; Since we can't use temporaries at this point --- %sfp is already moved --- manually
               ;; allocate a few registers (that may not be real registers) and hope that we
               ;; have enough.
-              (let* ([reify-cc-modify-reg* (intrinsic-modify-reg* reify-cc)]
+              (let* ([reify-cc-modify-reg* (intrinsic-modify-reg* reify-1cc)]
                      [tmp-reg* (reg-list %ac1 %yp)]
                      [save-reg* (fold-left (lambda (reg* r)
                                              (cond
@@ -10729,7 +10950,7 @@
                                            [(mref ,x1 ,x2 ,imm) (cons x1 (cons x2 live-reg*))]
                                            [else live-reg*]))
                                    (%seq
-                                    (set! ,%td (inline ,(intrinsic-info-asmlib reify-cc #f) ,%asmlibcall))
+                                    (set! ,%td (inline ,(intrinsic-info-asmlib reify-1cc #f) ,%asmlibcall))
                                     (set! ,%ts ,(%mref ,%td ,(constant continuation-attachments-disp)))
                                     (set! ,(%mref ,%td ,(constant continuation-attachments-disp)) ,(%mref ,%ts ,(constant pair-cdr-disp)))))
                                  ,e)]
@@ -11788,7 +12009,7 @@
                                   `(set! ,lvalue ,t)
                                   (%seq
                                    (set! ,lvalue ,t) 
-                                   (set! ,%td (inline ,(intrinsic-info-asmlib reify-cc #f) ,%asmlibcall))))
+                                   (set! ,%td (inline ,(intrinsic-info-asmlib reify-1cc #f) ,%asmlibcall))))
                              ;; Reified with attachment
                              ,(let ([get `(set! ,lvalue ,(%mref ,ats ,(constant pair-car-disp)))])
                                 (if consume?
@@ -11801,7 +12022,7 @@
                         `(set! ,lvalue ,t)
                         (%seq
                          (set! ,lvalue ,t)
-                         (set! ,%td (inline ,(intrinsic-info-asmlib reify-cc #f) ,%asmlibcall))))))))))
+                         (set! ,%td (inline ,(intrinsic-info-asmlib reify-1cc #f) ,%asmlibcall))))))))))
       (Program : Program (ir) -> Program ()
         [(labels ([,l* ,le*] ...) ,l)
          `(labels ([,l* ,(map CaseLambdaExpr le* l*)] ...) ,l)])
@@ -11827,17 +12048,18 @@
            [(dorest3) (make-do-rest 3 frame-args-offset)]
            [(dorest4) (make-do-rest 4 frame-args-offset)]
            [(dorest5) (make-do-rest 5 frame-args-offset)]
-           [(reify-cc)
+           [(reify-1cc maybe-reify-cc)
             (let ([other-reg* (fold-left (lambda (live* kill) (remq kill live*))
                                          (vector->list regvec)
                                          ;; Registers used by `reify-cc-help` output,
                                          ;; plus `%ts` so that we have one to allocate
-                                         (reg-list %xp %td %ac0 %ts))])
-              `(lambda ,(make-named-info-lambda "reify-cc" '(0)) 0 ()
+                                         (reg-list %xp %td %ac0 %ts))]
+                  [1cc? (eq? sym 'reify-1cc)])
+              `(lambda ,(make-named-info-lambda (if 1cc? "reify-1cc" "maybe-reify-cc") '(0)) 0 ()
                 ,(asm-enter
                    (%seq
                      (check-live ,other-reg* ...)
-                     ,(reify-cc-help #t #t
+                     ,(reify-cc-help 1cc? 1cc?
                        (lambda (reg)
                          (if (eq? reg %td)
                              `(asm-return ,%td ,other-reg* ...)
@@ -11997,7 +12219,9 @@
         [(attachment-get ,t* ...)
          ($oops who "Effect is responsible for handling attachment-gets")]
         [(attachment-consume ,t* ...)
-         ($oops who "Effect is responsible for handling attachment-consumes")])
+         ($oops who "Effect is responsible for handling attachment-consumes")]
+        [(continuation-get)
+         ($oops who "Effect is responsible for handling continuatio-get")])
       (Effect : Effect (ir) -> Effect ()
         [(do-rest ,fixed-args)
          (if (fx<= fixed-args dorest-intrinsic-max)
@@ -12115,10 +12339,14 @@
                      (if ,(%inline eq? ,(%mref ,%td ,(constant continuation-attachments-disp)) ,ats)
                          (nop)
                          (set! ,ats ,(%mref ,ats ,(constant pair-cdr-disp))))
-                     (set! ,%td (inline ,(intrinsic-info-asmlib reify-cc #f) ,%asmlibcall)))
+                     (set! ,%td (inline ,(intrinsic-info-asmlib reify-1cc #f) ,%asmlibcall)))
                  ,(make-push)))]
              [else
-              ($oops who "unexpected attachment-set mode ~s" aop)]))])
+              ($oops who "unexpected attachment-set mode ~s" aop)]))]
+        [(set! ,[lvalue] (continuation-get))
+         (%seq
+          (set! ,%td (inline ,(intrinsic-info-asmlib maybe-reify-cc #f) ,%asmlibcall))
+          (set! ,lvalue ,%td))])
       (Tail : Tail  (ir) -> Tail  ()
         [(entry-point (,x* ...) ,dcl ,mcp ,tlbody)
          (unless (andmap (lambda (x) (eq? (uvar-type x) 'ptr)) x*)

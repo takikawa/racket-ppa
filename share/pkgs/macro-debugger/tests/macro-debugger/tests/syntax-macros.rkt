@@ -26,7 +26,7 @@
          (myor 'a 'b)
          [#:steps (macro (let ((t 'a)) (if t t (myor 'b))))
                   (macro (let-values (((t) 'a)) (if t t (myor 'b))))
-                  (rename-let-values (let-values (((t) 'a)) (if t t (myor 'b))))
+                  (rename-letX (let-values (((t) 'a)) (if t t (myor 'b))))
                   (macro (let-values (((t) 'a)) (if t t 'b)))]
          #:no-hidden-steps)
 
@@ -111,6 +111,113 @@
                                        (#%expression #rx"^lifted")))
                  (macro (begin (define-values (#rx"^lifted") 'a)
                                (#%expression #rx"^lifted")))])
+
+  (test "pid0 with Tid"
+        (pid0 (Tid 'a))
+        [#:steps
+         (macro (Tid 'a))
+         (macro 'a)]
+        [#:hidden-steps
+         (macro (pid0 'a))])
+
+  (test "pid1 with Tid"
+        (pid1 (Tid 'a))
+        [#:steps
+         (macro (#%plain-app values (Tid 'a)))
+         (macro (#%plain-app values 'a))]
+        [#:hidden-steps
+         (macro (pid1 'a))])
+
+  (test "pid2 with Tid"
+        (pid2 (Tid 'a))
+        [#:steps
+         (macro (let-values () (Tid 'a)))
+         (rename-letX _)
+         (macro (let-values () 'a))]
+        [#:hidden-steps
+         (macro (pid2 'a))])
+
+  (test "pid3 with Tid"
+        (pid3 (Tid 'a))
+        [#:steps
+         (macro (let ([x (Tid 'a)]) x))
+         (macro (let-values ([(x) (Tid 'a)]) x))
+         (rename-letX _)
+         (macro (let-values ([(x) 'a]) x))]
+        [#:hidden-steps
+         (macro (pid3 'a))])
+
+  (test "pid4 with Tid"
+        (pid4 (Tid 'a))
+        #;[#:steps ...] ;; complicated, skip it
+        [#:hidden-steps
+         (macro (pid4 'a))])
+
+  (test "pid5 with Tid"
+        (pid5 (Tid 'a))
+        #;[#:steps ...] ;; complicated, skip it
+        [#:hidden-steps
+         (macro (pid5 'a))])
+
+  (test "pidn with Tid"
+        (pidn (Tid 'a))
+        #;[#:steps ...] ;; complicated, skip it
+        [#:hidden-steps
+         (macro (pidn 'a))])
+
+  (test "pidn with Tid x2"
+        (pidn (Tid (pidn (Tid 'a))))
+        #;[#:steps ...] ;; complicated, skip it
+        [#:hidden-steps
+         (macro (pidn (pidn (Tid 'a))))
+         (macro (pidn (pidn 'a)))])
+
+  (test "sclist2 with Tid x2"
+        (sclist2 (Tid 'a) (Tid 'b))
+        #;[#:steps ...] ;; complicated, skip it
+        [#:hidden-steps
+         (macro (sclist2 'a (Tid 'b)))
+         (macro (sclist2 'a 'b))])
+
+  (test "scplist2 with Tid x2"
+        (scplist2 (Tid 'a) (Tid 'b))
+        #;[#:steps ...] ;; complicated, skip it
+        [#:hidden-steps
+         (macro (scplist2 'a (Tid 'b)))
+         (macro (scplist2 'a 'b))])
+
+  (test "protected scplist2 from pid0"
+        (pid0 (scplist2 (Tid 'a) (Tid 'b)))
+        [#:hidden-steps
+         (macro (pid0 (scplist2 'a (Tid 'b))))
+         (macro (pid0 (scplist2 'a 'b)))])
+
+  (test "protected scplist2 from pid1"
+        (pid1 (scplist2 (Tid 'a) (Tid 'b)))
+        [#:hidden-steps
+         (macro (pid1 (scplist2 'a (Tid 'b))))
+         (macro (pid1 (scplist2 'a 'b)))])
+
+  (test "protected scplist2e from pid0 in let-values"
+        (let-values () (pid0 (scplist2e (Tid 'a) (Tid 'b))))
+        [#:hidden-steps
+         (rename-letX _)
+         (macro (let-values () (pid0 (scplist2e 'a (Tid 'b)))))
+         (macro (let-values () (pid0 (scplist2e 'a 'b))))])
+
+  (test "protected scplist2 from pid0 in let-values"
+        (let-values () (pid0 (scplist2 (Tid 'a) (Tid 'b))))
+        [#:hidden-steps
+         (rename-letX _)
+         (macro (let-values () (pid0 (scplist2 'a (Tid 'b)))))
+         (macro (let-values () (pid0 (scplist2 'a 'b))))])
+
+  (test "protected scplist2 from pid1 in let-values"
+        (let-values () (pid1 (scplist2 (Tid 'a) (Tid 'b))))
+        [#:hidden-steps
+         (rename-letX _)
+         (macro (let-values () (pid1 (scplist2 'a (Tid 'b)))))
+         (macro (let-values () (pid1 (scplist2 'a 'b))))])
 
   [#:suite "set! macros"
            (test "set! (macro)"

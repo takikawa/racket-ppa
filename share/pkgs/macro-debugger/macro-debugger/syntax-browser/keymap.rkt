@@ -8,7 +8,6 @@
 
 (define keymap/popup%
   (class* keymap% (keymap/popup<%>)
-    (init editor)
     (super-new)
     (inherit add-function
              map-function
@@ -30,11 +29,7 @@
       (define admin (send editor get-admin))
       (define menu (new popup-menu%))
       (add-context-menu-items menu)
-      (send admin popup-menu menu x y))
-
-    ;; FIXME: move out of constructor to use sites
-    (chain-to-keymap (send editor get-keymap) #t)
-    (send editor set-keymap this)))
+      (send admin popup-menu menu x y))))
 
 (define syntax-keymap%
   (class keymap/popup%
@@ -57,7 +52,7 @@
                     (when stx
                       (send the-clipboard set-clipboard-string
                             (let ([out (open-output-string)])
-                              (pretty-print (syntax->datum stx) out)
+                              (pretty-write (syntax->datum stx) out)
                               (get-output-string out))
                             (send event get-time-stamp)))))
 
@@ -82,7 +77,7 @@
                           sym)))))
 
     (define/override (add-context-menu-items menu)
-      (new menu-item% (label "Copy") (parent menu)
+      (new menu-item% (label "Copy term") (parent menu)
            (demand-callback
             (lambda (i)
               (send i enable (and (selected-syntax) #t))))

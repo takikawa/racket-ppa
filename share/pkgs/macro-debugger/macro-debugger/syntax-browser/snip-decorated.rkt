@@ -12,7 +12,8 @@
                     snip-class))
 
 (provide decorated-syntax-snip%
-         snip-class)
+         snip-class
+         make-syntax-snip)
 
 (define top-aligned
   (make-object style-delta% 'change-alignment 'top))
@@ -189,6 +190,10 @@
 (define (show-properties-icon)
   (make-object image-snip%
     (collection-file-path "syncheck.png" "icons")))
+
+(define (make-syntax-snip stx
+                          #:controller [controller (new controller%)])
+  (new decorated-syntax-snip% (syntax stx) (controller controller)))
 
 
 ;; SNIPCLASS

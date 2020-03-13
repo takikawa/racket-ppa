@@ -2511,6 +2511,7 @@
                                 "apple" 'banana
                                 (make-vfasl-demo 10 "11")
                                 (vector 1 'two "three")
+                                (stencil-vector 30 'one 2.0 0+3i "four")
                                 (box 88)
                                 "" '#() '#vu8() (make-fxvector 0)
                                 (string->immutable-string "") (vector->immutable-vector '#())
@@ -2523,7 +2524,8 @@
                                   (positive? (string-length a)))
                              (and (vector? a)
                                   (positive? (vector-length a)))
-                             (box? a))
+                             (box? a)
+                             (stencil-vector? a))
                          (equal? a b))
                     (and (vfasl-demo? a)
                          (vfasl-demo? b)
@@ -2531,7 +2533,9 @@
                                  (vfasl-demo-x b))
                          (equal? (vfasl-demo-y a)
                                  (vfasl-demo-y b)))
-                    (printf "~s ~s\n" a b)))
+                    (begin
+                      (printf "~s ~s\n" a b)
+                      #f)))
               vfasl-content
               v))
     (compile-to-file (list `(define (vfasled) ',vfasl-content)
@@ -5424,6 +5428,14 @@
       (let ([l2 (eval 'fasl-immutable-round-trip)])
         (and (equal? l l2)
              (immutable? l2))))
+    (define (round-trip-symbol sym)
+      (let-values ([(o get) (open-bytevector-output-port)])
+        (fasl-write sym o)
+        (let ([s (fasl-read (open-bytevector-input-port (get)))])
+          (and (symbol? s)
+               (immutable-string? (symbol->string s))
+               (or (not (gensym? s))
+                   (immutable-string? (gensym->unique-string s)))))))
     #t)
 
   (immutable? immutable-objs)
@@ -5432,6 +5444,10 @@
   (round-trip immutable-zero-objs)
   (round-trip-via-strip immutable-objs)
   (round-trip-via-strip immutable-zero-objs)
+
+  (round-trip-symbol 'hello)
+  (round-trip-symbol (string->symbol "hola"))
+  (round-trip-symbol (gensym "bonjour"))
 
   ;; Make sure `fasl-read` didn't mark "mutable" null values
   ;; as immutable:

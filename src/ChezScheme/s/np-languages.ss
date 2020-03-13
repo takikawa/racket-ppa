@@ -395,7 +395,8 @@
     (Expr (e body)
       (+ (attachment-set aop e* ...)
          (attachment-get e* ...)
-         (attachment-consume e* ...))))
+         (attachment-consume e* ...)
+         (continuation-get))))
 
  ; moves all case lambda expressions into rhs of letrec
   (define-language L5 (extends L4.9375)
@@ -572,6 +573,7 @@
   (declare-primitive logor value #t)
   (declare-primitive logxor value #t)
   (declare-primitive lognot value #t)
+  (declare-primitive popcount value #t) ; x86_64 only
   (declare-primitive move value #t)
   (declare-primitive * value #t)
   (declare-primitive */ovfl value #f)
@@ -672,7 +674,8 @@
          (mvcall info e t)                       => (mvcall e t)
          (foreign-call info t t* ...)
          (attachment-get t* ...)
-         (attachment-consume t* ...)))
+         (attachment-consume t* ...)
+         (continuation-get)))
     (Expr (e body)
       (- lvalue
          (values info e* ...)
@@ -687,7 +690,8 @@
          (mvcall info e1 e2)
          (foreign-call info e e* ...)
          (attachment-get e* ...)
-         (attachment-consume e* ...))
+         (attachment-consume e* ...)
+         (continuation-get))
       (+ rhs
          (values info t* ...)
          (set! lvalue rhs))))

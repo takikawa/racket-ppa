@@ -1,10 +1,21 @@
 #lang racket/base
 (require racket/class
-         "interfaces.rkt")
-(provide new-macro-scopes-partition
+         racket/class/iop)
+(provide partition<%>
+         new-macro-scopes-partition
          new-all-scopes-partition
          partition-choices
          identifier=-choices)
+
+(define-interface partition<%> ()
+  (;; get-partition : any -> number
+   get-partition
+
+   ;; same-partition? : any any -> number
+   same-partition?
+
+   ;; count : -> number
+   count))
 
 (define (new-macro-scopes-partition)
   (new macro-scopes-partition%))

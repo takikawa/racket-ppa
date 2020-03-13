@@ -1,8 +1,10 @@
 #lang racket/base
 (require racket/match
-         racket/string)
+         racket/string
+         syntax/modcollapse)
 
 (provide mpi->list
+         collapse-mpi->string
          mpi->string
          self-mpi?)
 
@@ -24,6 +26,12 @@
                             " <= ")]
               [(null? mps) "this module"]))
       (format "~s" mpi)))
+
+;; collapse-mpi->string : module-path-index -> string
+(define (collapse-mpi->string mpi)
+  (cond [(and mpi (collapse-module-path-index mpi))
+         => (lambda (mod) (format "~s" mod))]
+        [else (mpi->string mpi)]))
 
 ;; self-mpi? : module-path-index -> bool
 (define (self-mpi? mpi)

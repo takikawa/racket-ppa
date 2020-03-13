@@ -82,6 +82,7 @@ extern ptr S_null_immutable_vector PROTO((void));
 extern ptr S_null_immutable_fxvector PROTO((void));
 extern ptr S_null_immutable_bytevector PROTO((void));
 extern ptr S_null_immutable_string PROTO((void));
+extern ptr S_stencil_vector PROTO((uptr mask));
 extern ptr S_record PROTO((iptr n));
 extern ptr S_closure PROTO((ptr cod, iptr n));
 extern ptr S_mkcontinuation PROTO((ISPC s, IGEN g, ptr nuate, ptr stack,
@@ -177,6 +178,7 @@ extern ptr S_intern3 PROTO((const string_char *pname, iptr plen, const string_ch
 extern ptr S_intern4 PROTO((ptr sym));
 extern void S_intern_gensym PROTO((ptr g));
 extern void S_retrofit_nonprocedure_code PROTO((void));
+extern ptr S_mkstring PROTO((const string_char *s, iptr n));
 
 /* io.c */
 extern IBOOL S_file_existsp PROTO((const char *inpath, IBOOL followp));
@@ -315,6 +317,7 @@ extern void S_prim_init PROTO((void));
 extern ptr S_strerror PROTO((INT errnum));
 extern void S_prim5_init PROTO((void));
 extern void S_dump_tc PROTO((ptr tc));
+extern ptr S_uninterned PROTO((ptr x));
 
 /* print.c */
 extern void S_print_init PROTO((void));
