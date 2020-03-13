@@ -1,0 +1,88 @@
+#!/usr/bin/make -f
+
+include /usr/share/cdbs/1/rules/debhelper.mk
+include /usr/share/cdbs/1/class/autotools.mk
+include debian/racket-arch.mk
+
+DEB_HOST_ARCH ?= $(shell dpkg-architecture -qDEB_HOST_ARCH)
+DEB_CONFIGURE_SCRIPT := $(CURDIR)/src/configure
+MZDYN := mzdyn3m.o
+
+# keep the collect build from using every available core, unless 
+# explicitly enabled.
+ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
+    ifeq ($(shell dpkg-architecture -qDEB_BUILD_ARCH_BITS),64)
+	NUMJOBS = $(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
+    else
+	NUMJOBS = 1
+    endif
+else
+    NUMJOBS = 1
+endif
+
+ifneq (,$(filter noopt,$(DEB_BUILD_OPTIONS)))
+    DEB_CONFIGURE_EXTRA_FLAGS += --enable-noopt
+endif
+
+# Explicitly enable useprefix for unix-style build (needed for v7.6)
+# See https://github.com/racket/racket/issues/3046
+DEB_CONFIGURE_EXTRA_FLAGS += --enable-useprefix
+
+# Support for generating ".orig.tar.gz" from git
+
+SOURCEPKG=$(shell dpkg-parsechangelog | sed  -n 's/^Source: \(.*\)/\1/p')
+UPSTREAM=$(shell dpkg-parsechangelog |  sed -n 's/^Version: \(.*\)-[^-]*/\1/p')
+ORIG=${SOURCEPKG}_${UPSTREAM}.orig.tar.gz
+
+DEB_MAKE_ENVVARS += HOME=/nonexistant PLT_SETUP_OPTIONS="-j $(NUMJOBS) $(PLT_EXTRA)"
+
+DEB_BUILDDIR := $(DEB_SRCDIR)/build
+
+DEB_DH_INSTALL_ARGS_racket-common := -X${RACKET_ARCH} -X$(MZDYN) -X/tests/
+DEB_DH_INSTALL_ARGS_racket-doc := -Xrelease
+DEB_DH_COMPRESS_ARGS := -X.sxref -X.sqlite
+
+# don't compress rkt source files since some are needed for
+# docs such as the quick.scrbl example and blueboxes.rktd files
+DEB_COMPRESS_EXCLUDE_ALL := .scrbl .rkt .rktd
+
+DEB_DH_BUILDDEB_ARGS := -- -Zxz
+
+# do not strip mzscheme, as this causes it to stop working
+# do not strip mred, as this fails on some arches
+DEB_DH_STRIP_ARGS_racket := -Xbin/mzscheme -Xbin/mred
+
+DEB_MAKE_INSTALL_TARGET= no-run
+
+common-install-arch:: do-install-arch
+common-install-indep:: do-install-indep
+
+do-install-arch: PLT_EXTRA=--no-docs --no-zo
+do-install-arch:
+	$(DEB_MAKE_ENVVARS) $(MAKE) -C $(DEB_BUILDDIR) install DESTDIR=$(CURDIR)/debian/tmp
+	rm -f $(CURDIR)/debian/tmp/usr/bin/planet
+
+do-install-indep: PLT_EXTRA=--no-launcher --no-install --no-post-install
+do-install-indep:
+	$(DEB_MAKE_ENVVARS) $(MAKE) -C $(DEB_BUILDDIR) install DESTDIR=$(CURDIR)/debian/tmp
+
+cleanbuilddir/racket::
+	rm -rf build
+	rm -rf include # This got created at build-time
+	rm -f debian/mzconfig.h debian/racket-arch.mk
+
+debian/racket-arch.mk: debian/racket-arch.c
+	touch debian/mzconfig.h && cpp -Isrc -Idebian -o - $< | tail -1 > $@
+
+get-orig-source:
+	git archive --format=tar --prefix=racket-${UPSTREAM}/ upstream/${UPSTREAM} | gzip -9 > ../${ORIG}
+
+PATCH_EXPORT_SCRIPT = /usr/share/gitpkg/hooks/quilt-patches-deb-export-hook
+
+export-patches: 
+	[ ! -r debian/patches ] || \
+	grep "^\#.*$(notdir $(PATCH_EXPORT_SCRIPT))" debian/patches/series
+	rm -rf debian/patches
+	bash $(PATCH_EXPORT_SCRIPT)
+
+.PHONY: git-orig-source export-patches
