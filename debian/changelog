@@ -1,9 +1,11 @@
-racket (7.6+dfsg1-2) UNRELEASED; urgency=medium
+racket (7.6+dfsg1-2) unstable; urgency=medium
 
-  * Revert upstream commit 17bc6262938f, attempting to get building on
-    armhf.
+  * Revert upstream commit 17bc6262938f (Closes: #948789). This might or
+    might not re-introduce numerical problems on armhf
+    (https://github.com/racket/racket/issues/2773). Reports welcome.
+  * Switch to debrebase and (hopefully dgit) for maintenence.
 
- -- David Bremner <bremner@debian.org>  Wed, 15 Apr 2020 12:06:00 -0300
+ -- David Bremner <bremner@debian.org>  Wed, 15 Apr 2020 18:56:52 -0300
 
 racket (7.6+dfsg1-1) unstable; urgency=medium
 
