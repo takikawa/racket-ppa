@@ -1,9 +1,9 @@
-racket (7.6+dfsg1-3) UNRELEASED; urgency=medium
+racket (7.6+dfsg1-3) unstable; urgency=medium
 
-  * Restore upstream commit 17bc6262938f, try a different armhf gmp fix from Paulo
-    Matos (upstream commit 392dc33ce)
+  * Restore upstream commit 17bc6262938f, try a different armhf gmp fix
+    from Paulo Matos (upstream commit 392dc33ce)
 
- -- David Bremner <bremner@debian.org>  Tue, 21 Apr 2020 20:58:11 -0300
+ -- David Bremner <bremner@debian.org>  Wed, 22 Apr 2020 11:27:27 -0300
 
 racket (7.6+dfsg1-2) unstable; urgency=medium
 
