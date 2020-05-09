@@ -4,7 +4,7 @@
 (provide #%app #%top (rename-out (sdp-module-begin #%module-begin)) #%datum #%top-interaction
 	 require lib planet provide
 	 define let let* letrec lambda λ cond if else and or
-	 define-record-functions
+	 define-record define-record-functions
 	 match
 	 .. ... .... ..... ......
 	 check-expect check-within check-error check-member-of check-range check-satisfied

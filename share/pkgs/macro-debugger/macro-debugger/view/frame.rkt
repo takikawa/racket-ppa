@@ -209,6 +209,19 @@
       (notify:menu-option/notify-box extras-menu
                                      "Highlight redex/contractum"
                                      (get-field highlight-foci? config))
+      (let ([taint-icons-menu
+             (new (get-menu%)
+                  (label "Show taint icons")
+                  (parent extras-menu))])
+        (define choices
+          '((char . "Use Unicode characters")
+            (snip . "Use custom snips")
+            (#f   . "Do not show")))
+        (define taint-icons-box
+          (linked-notify-box (get-field taint-icons config) choices))
+        (notify:menu-group/notify-box taint-icons-menu
+                                      (map cdr choices)
+                                      taint-icons-box))
       #|
       (notify:menu-option/notify-box extras-menu
                                      "Highlight frontier"
@@ -262,6 +275,20 @@
       (fixup-menu menu))
     (frame:remove-empty-menus this)
     (frame:reorder-menus this)))
+
+;; Linked notify boxes
+
+(define (linked-notify-box old-nb old=>new)
+  (define new=>old (map (lambda (p) (cons (cdr p) (car p))) old=>new))
+  (define (new->old v) (cond [(assoc v new=>old) => cdr] [else #f]))
+  (define (old->new v) (cond [(assoc v old=>new) => cdr] [else #f]))
+  (define new-nb (new notify:notify-box% (value (old->new (send old-nb get)))))
+  ;; Need to compare with current value to avoid notification loops:
+  (define ((forward convert to-nb) v)
+    (let ([v* (convert v)]) (unless (equal? v* (send to-nb get)) (send to-nb set v*))))
+  (send new-nb listen (forward new->old old-nb))
+  (send old-nb listen (forward old->new new-nb))
+  new-nb)
 
 ;; Stolen from stepper
 

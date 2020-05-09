@@ -727,6 +727,11 @@
            (eqv? (read-char x) #\a)
            (char-ready? x)
            (eof-object? (read-char x))))
+   (parameterize ([current-input-port (open-input-string "a")])
+      (and (char-ready?)
+           (eqv? (read-char) #\a)
+           (char-ready?)
+           (eof-object? (read-char))))
  )
 
 (mat clear-input-port ; test interactively
@@ -1042,31 +1047,43 @@
  )
 
 (mat cp1in-verify-format-warnings
-   (warning? (parameterize ([#%$suppress-primitive-inlining #f])
+   (warning? (parameterize ([#%$suppress-primitive-inlining #f]
+                            [current-eval compile])
                (eval '(lambda () (import scheme) (format "~a~~~s" 5)))))
-   (warning? (parameterize ([#%$suppress-primitive-inlining #f])
+   (warning? (parameterize ([#%$suppress-primitive-inlining #f]
+                            [current-eval compile])
                (eval '(lambda () (import scheme) (format "~a~a~a~s" 1 2 3 4 5 6)))))
-   (warning? (parameterize ([#%$suppress-primitive-inlining #f])
+   (warning? (parameterize ([#%$suppress-primitive-inlining #f]
+                            [current-eval compile])
                (eval '(mat/cf (lambda () (import scheme) (format "~a~~~s" 5))))))
-   (warning? (parameterize ([#%$suppress-primitive-inlining #f])
+   (warning? (parameterize ([#%$suppress-primitive-inlining #f]
+                            [current-eval compile])
                (eval '(mat/cf (lambda () (import scheme) (format "~a~a~a~s" 1 2 3 4 5 6))))))
 
-   (warning? (parameterize ([#%$suppress-primitive-inlining #f])
+   (warning? (parameterize ([#%$suppress-primitive-inlining #f]
+                            [current-eval compile])
                (eval '(lambda () (import scheme) (printf "abc~s")))))
-   (warning? (parameterize ([#%$suppress-primitive-inlining #f])
+   (warning? (parameterize ([#%$suppress-primitive-inlining #f]
+                            [current-eval compile])
                (eval '(lambda () (import scheme) (printf "~%~abc~adef~ag~s~~~%" 1 2 3 4 5)))))
-   (warning? (parameterize ([#%$suppress-primitive-inlining #f])
+   (warning? (parameterize ([#%$suppress-primitive-inlining #f]
+                            [current-eval compile])
                (eval '(mat/cf (lambda () (import scheme) (printf "abc~s"))))))
-   (warning? (parameterize ([#%$suppress-primitive-inlining #f])
+   (warning? (parameterize ([#%$suppress-primitive-inlining #f]
+                            [current-eval compile])
                (eval '(mat/cf (lambda () (import scheme) (printf "~%~abc~adef~ag~s~~~%" 1 2 3 4 5))))))
 
-   (warning? (parameterize ([#%$suppress-primitive-inlining #f])
+   (warning? (parameterize ([#%$suppress-primitive-inlining #f]
+                            [current-eval compile])
                (eval '(lambda (p) (import scheme) (fprintf p "abc~s")))))
-   (warning? (parameterize ([#%$suppress-primitive-inlining #f])
+   (warning? (parameterize ([#%$suppress-primitive-inlining #f]
+                            [current-eval compile])
                (eval '(lambda (p) (import scheme) (fprintf p "~%~abc~adef~ag~s~~~%" 1 2 3 4 5)))))
-   (warning? (parameterize ([#%$suppress-primitive-inlining #f])
+   (warning? (parameterize ([#%$suppress-primitive-inlining #f]
+                            [current-eval compile])
                (eval '(mat/cf (lambda (p) (import scheme) (fprintf p "abc~s"))))))
-   (warning? (parameterize ([#%$suppress-primitive-inlining #f])
+   (warning? (parameterize ([#%$suppress-primitive-inlining #f]
+                            [current-eval compile])
                (eval '(mat/cf (lambda (p) (import scheme) (fprintf p "~%~abc~adef~ag~s~~~%" 1 2 3 4 5))))))
 )
 
@@ -1654,25 +1671,24 @@
     #t)
   (error?
     (let* ([ip (open-file-input-port "testfile.ss")]
-           [sfd (#%$source-file-descriptor "testfile.ss" ip)]
+           [sfd (make-source-file-descriptor "testfile.ss" ip #t)]
            [ip (transcoded-port ip (native-transcoder))])
       (dynamic-wind
         void
-        (lambda () (read-token ip sfd))
+        (lambda () (read-token ip sfd 0))
         (lambda () (close-input-port ip)))))
   (let ()
     (with-output-to-file "testfile.ss"
       (lambda () (display "\neat\n"))
       'replace)
     #t)
-  ; $transcoded-source-port is no more
-  #;(equal?
+  (equal?
     (let-values ([vals (let* ([ip (open-file-input-port "testfile.ss")]
-                              [sfd (#%$source-file-descriptor "testfile.ss" ip)]
-                              [ip (#%$transcoded-source-port ip (native-transcoder))])
+                              [sfd (make-source-file-descriptor "testfile.ss" ip #t)]
+                              [ip (transcoded-port ip (native-transcoder))])
                          (dynamic-wind
                            void
-                           (lambda () (read-token ip sfd))
+                           (lambda () (read-token ip sfd 0))
                            (lambda () (close-input-port ip))))])
       vals)
     '(atomic eat 1 4))

@@ -77,11 +77,10 @@
   (let ([tmp f])
     (if (#%procedure? tmp)
         tmp
-        (slow-extract-procedure tmp n-args))))
+        (#3%$app/no-inline slow-extract-procedure tmp n-args))))
 
 (define (slow-extract-procedure f n-args)
-  (pariah ; => don't inline enclosing procedure
-   (do-extract-procedure f f n-args #f not-a-procedure)))
+  (do-extract-procedure f f n-args #f not-a-procedure))
 
 ;; Returns a host-Scheme procedure, but first checks arity so that
 ;; checking and reporting use the right top-level function, and
@@ -133,15 +132,15 @@
              orig-f
              (and n-args (fx+ n-args 1))
              (lambda (v)
-               (cond
-                [(not v) (case-lambda)]
-                [else
-                 (case-lambda
-                  [() (v f)]
-                  [(a) (v f a)]
-                  [(a b) (v f a b)]
-                  [(a b c) (v f a b c)]
-                  [args (chez:apply v f args)])]))
+               (let ([proc (case-lambda
+                            [() (v f)]
+                            [(a) (v f a)]
+                            [(a b) (v f a b)]
+                            [(a b c) (v f a b c)]
+                            [args (chez:apply v f args)])])
+                 (if success-k
+                     (success-k proc)
+                     proc)))
              wrong-arity-wrapper)]))]))]
    [else (fail-k orig-f)]))
 
@@ -377,7 +376,7 @@
         (let ([name (wrapper-procedure-data f)])
           (and (#%vector? name)
                (method-wrapper-vector? name)))
-        #f)]
+        (procedure-is-method-by-name? f))]
    [(record? f)
     (or (method-arity-error? f)
         (let ([v (struct-property-ref prop:procedure (record-rtd f) #f)])
@@ -392,8 +391,47 @@
            [else (procedure-is-method? v)])))]
    [else #f]))
 
-(define-syntax-rule (|#%method-arity| e)
-  (procedure->method e))
+(define (procedure-is-method-by-name? proc)
+  (let ([n (#%$code-name (#%$closure-code proc))])
+    (and n
+         (fx>= (string-length n) 2)
+         (or (char=? #\[ (string-ref n 0))
+             (char=? #\] (string-ref n 0)))
+         (char=? #\! (string-ref n 1)))))
+
+(define-syntax (|#%method-arity| stx)
+  (syntax-case stx (|#%name|)
+    [(_ (|#%name| name e))
+     ;; Encode method-arity property in the procedure name; see
+     ;; "object-name.ss" for more information about encoding
+     (let ([n (#%symbol->string (#%syntax->datum #'name))])
+       (let ([new-name
+              (#%string->symbol
+               (cond
+                [(= 0 (string-length n))
+                 ;; "]" indicates encoded, and "!" indicates method
+                 "]!"]
+                [(or (char=? #\[ (string-ref n 0))
+                     (char=? #\] (string-ref n 0)))
+                 ;; Path-based, no name, or escaped:
+                 (cond
+                  [(= 1 (string-length n))
+                   ;; No name or empty, so change to method
+                   (string-append n "!")]
+                  [(char=? #\! (string-ref n 1))
+                   ;; Already marked as a method
+                   n]
+                  [(char=? #\^ (string-ref n 1))
+                   ;; Currently marked as "not a method"
+                   (string-append (#%substring n 0 1) "!" (#%substring n 2 (string-length n)))]
+                  [else
+                   ;; Currently a path-based name or escaped name
+                   (string-append (#%substring n 0 1) "!" (#%substring n 1 (string-length n)))])]
+                [else
+                 ;; Add an escape so we can mark as a method:
+                 (string-append "]!" n)]))])
+         #`(|#%name| #,(#%datum->syntax #'name new-name) e)))]
+    [(_ e) #'(procedure->method e)]))
 
 ;; ----------------------------------------
 
@@ -450,6 +488,7 @@
      (do-procedure-reduce-arity-mask proc mask name)]
     [(proc mask) (procedure-reduce-arity-mask proc mask #f)]))
 
+;; see also `procedure-rename*` in "struct.ss"
 (define (do-procedure-reduce-arity-mask proc mask name)
   (cond
    [(and (wrapper-procedure? proc)
@@ -462,13 +501,15 @@
                                       (vector (or name (#%vector-ref v 0))
                                               (#%vector-ref v 1)
                                               'method)]
-                                     [name (vector name
+                                     [name (vector (or name (#%vector-ref v 0))
                                                    (#%vector-ref v 1))]
                                      [else v])))]
    [(#%procedure? proc)
     (make-arity-wrapper-procedure proc
                                   mask
-                                  (vector name proc))]
+                                  (if (procedure-is-method-by-name? proc)
+                                      (vector name proc 'method)
+                                      (vector name proc)))]
    [(reduced-arity-procedure? proc)
     (do-procedure-reduce-arity-mask (reduced-arity-procedure-proc proc)
                                     mask

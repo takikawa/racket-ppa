@@ -453,7 +453,7 @@
                       (runtime-judgment-form-proc a-runtime-judgment-form)
                       (runtime-judgment-form-mode a-runtime-judgment-form)
                       inputs
-                      #f
+                      derivation-init
                       (runtime-judgment-form-cache a-runtime-judgment-form)
                       (runtime-judgment-form-lang a-runtime-judgment-form)
                       (runtime-judgment-form-original-contract-expression a-runtime-judgment-form)
@@ -619,9 +619,6 @@
                                '())))
      (and (include-jf-rulename) rulename)
      this-output)))
-
-(define include-entire-derivation (make-parameter #f))
-(define include-jf-rulename (make-parameter #f))
 
 (define (verify-name-ok orig-name the-name)
   (unless (symbol? the-name)
@@ -885,6 +882,13 @@
                   mode-stx mode
                   position-contracts invariant clauses rule-names)
     (parse-judgment-form-body body syn-err-name stx (identifier? orig) orig-mode is-relation?))
+  (when (and (identifier? orig)
+             (free-identifier=? judgment-form-name orig))
+    (raise-syntax-error syn-err-name
+                        "judgment form extension must extend a different judgment form, not itself"
+                        stx
+                        orig
+                        (list judgment-form-name)))
   (define definitions
     (with-syntax ([judgment-form-runtime-proc
                    (syntax-property (forward-errortrace-prop

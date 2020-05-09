@@ -1159,7 +1159,7 @@ static int is_proc_spec_proc(Scheme_Object *p, int init_field_count)
 
 static int is_local_ref(Scheme_Object *e, int p, int r, Scheme_IR_Local **vars)
 /* Does `e` refer to...
-    In resolved mode: variables at offet `p` though `p+r`?
+    In resolved mode: variables at offset `p` though `p+r`?
     In optimizer IR mode: variables in `vars`? */
 {
   if (!vars && SAME_TYPE(SCHEME_TYPE(e), scheme_local_type)) {
@@ -5692,8 +5692,8 @@ static void merge_types(Optimize_Info *src_info, Optimize_Info *info, Scheme_Has
     /* Remove variables from `types` that we're supposed to skip */
     i = scheme_hash_tree_next(skip_vars, -1);
     while (i != -1) {
-      scheme_hash_tree_index(types, i, &var, NULL);
-      scheme_hash_tree_set(types, var, NULL);
+      scheme_hash_tree_index(skip_vars, i, &var, NULL);
+      types = scheme_hash_tree_set(types, var, NULL);
       i = scheme_hash_tree_next(skip_vars, i);
     }
   }
@@ -6135,7 +6135,7 @@ static Scheme_Object *optimize_branch(Scheme_Object *o, Optimize_Info *info, int
     info->single_result = 1;
     info->kclock = init_kclock;
 
-  } else if (info->escapes) {
+  } else if (else_info->escapes) {
     info->preserves_marks = then_info->preserves_marks;
     info->single_result = then_info->single_result;
     info->kclock = then_info->kclock;
@@ -6143,10 +6143,10 @@ static Scheme_Object *optimize_branch(Scheme_Object *o, Optimize_Info *info, int
     info->escapes = 0;
 
   } else if (then_info->escapes) {
-      info->preserves_marks = else_info->preserves_marks;
-      info->single_result = else_info->single_result;
-      merge_types(else_info, info, NULL);
-      info->escapes = 0;
+    info->preserves_marks = else_info->preserves_marks;
+    info->single_result = else_info->single_result;
+    merge_types(else_info, info, NULL);
+    info->escapes = 0;
 
   } else {
     int new_preserves_marks, new_single_result;
@@ -8096,6 +8096,8 @@ static Scheme_Object *optimize_lets(Scheme_Object *form, Optimize_Info *info, in
                avoid the possibility of N^2 behavior. */
             if (!OPT_DISCOURAGE_EARLY_INLINE)
               rhs_info->letrec_not_twice++;
+            inline_fuel = rhs_info->inline_fuel;
+            rhs_info->inline_fuel >>= 1;
             use_psize = rhs_info->use_psize;
             rhs_info->use_psize = info->use_psize;
 
@@ -8111,6 +8113,7 @@ static Scheme_Object *optimize_lets(Scheme_Object *form, Optimize_Info *info, in
             
             if (!OPT_DISCOURAGE_EARLY_INLINE)
               --rhs_info->letrec_not_twice;
+            rhs_info->inline_fuel = inline_fuel;
             rhs_info->use_psize = use_psize;
 
             irlv->value = value;

@@ -5,7 +5,7 @@
 	 require lib planet provide
          let let* letrec lambda λ define
 	 cond if else and or quote
-         define-record-functions
+         define-record define-record-functions
 	 match
          .. ... .... ..... ......
 	 check-expect check-within check-error check-member-of check-range check-satisfied
