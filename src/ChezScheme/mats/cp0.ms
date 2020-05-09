@@ -910,7 +910,7 @@
     'a)
  ; verify optimization of or pattern
   (equivalent-expansion?
-    (parameterize ([#%$suppress-primitive-inlining #f] [run-cp0 (lambda (cp0 x) (cp0 x))] [optimize-level 2])
+    (parameterize ([#%$suppress-primitive-inlining #f] [run-cp0 (lambda (cp0 x) (cp0 x))] [optimize-level 2] [compile-profile #f])
       (expand/optimize
         '(lambda (x y) (if (not (or (fx< x y) (fx> y x))) x y))))
     '(lambda (x.0 y.1)
@@ -918,7 +918,7 @@
            y.1
            x.0)))
   (equivalent-expansion?
-    (parameterize ([#%$suppress-primitive-inlining #f] [run-cp0 (lambda (cp0 x) (cp0 x))] [optimize-level 2])
+    (parameterize ([#%$suppress-primitive-inlining #f] [run-cp0 (lambda (cp0 x) (cp0 x))] [optimize-level 2] [compile-profile #f])
       (expand/optimize
         '(lambda (x y) (if (or (fx< x y) (fx> y x)) x y))))
     '(lambda (x y) (if (if (#2%fx< x y) #t (#3%fx> y x)) x y)))
@@ -2255,10 +2255,10 @@
   (equivalent-expansion?
     (parameterize ([enable-cp0 #t] [#%$suppress-primitive-inlining #f])
       ;; don't fold primitive in test context with bad apply convention
-      (expand/optimize '(if (#%apply #%eof-object 1 2 3) 4 5)))
+      (expand/optimize '(if (#%apply #%pair? 1 2 3) 4 5)))
     (if (= (optimize-level) 3)
-        '(if (#3%apply #3%eof-object 1 2 3) 4 5)
-        '(if (#2%apply #2%eof-object 1 2 3) 4 5)))
+        '(if (#3%apply #3%pair? 1 2 3) 4 5)
+        '(if (#2%apply #2%pair? 1 2 3) 4 5)))
   (equivalent-expansion?
     (parameterize ([enable-cp0 #t] [#%$suppress-primitive-inlining #f])
       ;; don't fold primitive in effect context with bad apply convention
@@ -2845,7 +2845,7 @@
     ; does push (make-message-condition y) because it is pure, even though one of the vars (z) is assigned
     '(lambda (y) (let ([z #f]) (#3%list (lambda () (set! z 15) z) (#3%make-message-condition y)))))
   (equivalent-expansion?
-    (parameterize ([#%$suppress-primitive-inlining #f] [run-cp0 (lambda (cp0 x) (cp0 x))] [optimize-level 2])
+    (parameterize ([#%$suppress-primitive-inlining #f] [run-cp0 (lambda (cp0 x) (cp0 x))] [optimize-level 2] [compile-profile #f])
       (expand/optimize
         '(let ()
            (define-record foo ((immutable boolean x)))
@@ -2858,7 +2858,7 @@
          #t
          e2))
   (equivalent-expansion?
-    (parameterize ([#%$suppress-primitive-inlining #f] [run-cp0 (lambda (cp0 x) (cp0 x))] [optimize-level 3])
+    (parameterize ([#%$suppress-primitive-inlining #f] [run-cp0 (lambda (cp0 x) (cp0 x))] [optimize-level 3] [compile-profile #f])
       (expand/optimize
         '(let ()
            (define-record foo ((immutable boolean x)))

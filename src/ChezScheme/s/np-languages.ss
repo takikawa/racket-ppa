@@ -49,7 +49,7 @@
     L5 unparse-L5 L6 unparse-L6 L7 unparse-L7
     L9 unparse-L9 L9.5 unparse-L9.5 L9.75 unparse-L9.75
     L10 unparse-L10 L10.5 unparse-L10.5 L11 unparse-L11
-    L11.5 unparse-L11.5 L12 unparse-L12 L13 unparse-L13 L13.5 unparse-L13.5 L14 unparse-L14
+    L12 unparse-L12 L12.5 unparse-L12.5 L13 unparse-L13 L13.5 unparse-L13.5 L14 unparse-L14
     L15a unparse-L15a L15b unparse-L15b L15c unparse-L15c L15d unparse-L15d
     L15e unparse-L15e
     L16 unparse-L16
@@ -70,6 +70,8 @@
     local-label-trap-check local-label-trap-check-set!
     direct-call-label? make-direct-call-label
     direct-call-label-referenced direct-call-label-referenced-set!
+    return-point-label? make-return-point-label
+    return-point-label-compact? return-point-label-compact?-set!
     Lsrc Lsrc? Ltype Ltype? unparse-Ltype unparse-Lsrc
     lookup-primref primref? primref-level primref-name primref-flags primref-arity
     preinfo-src preinfo-sexpr preinfo-lambda-name preinfo-lambda-flags preinfo-lambda-libspec
@@ -274,6 +276,16 @@
         (lambda (name)
           ((pargs->new name) #f)))))
 
+  (define-record-type return-point-label
+    (parent local-label)
+    (nongenerative)
+    (sealed #t)
+    (fields (mutable compact?))
+    (protocol
+      (lambda (pargs->new)
+        (lambda (name)
+          ((pargs->new name) #f)))))
+
   (module ()
     (define lookup-unique-label
       (let ([ht (make-eq-hashtable)])
@@ -296,6 +308,10 @@
   (define maybe-label?
     (lambda (x)
       (or (eq? x #f) (label? x))))
+
+  (define return-label?
+    (lambda (x)
+      (or (eq? x 'continue) (maybe-label? x))))
 
  ; language to replace prelex with uvar, create info records out of some of the complex
  ; records, and make sure other record types have been discarded.  also formally sets up
@@ -385,18 +401,25 @@
 
   (define attachment-op?
     (lambda (x)
-      (memq x '(push pop set reify-and-set))))
+      (memq x '(push pop set reify-and-set check-and-set))))
+
+  (define continuation-op?
+    (lambda (x)
+      (memq x '(set redirect-and-set))))
 
  ; exposes continuation-attachment operations
   (define-language L4.9375 (extends L4.875)
     (terminals
-     (+ (attachment-op (aop))))
+     (+ (attachment-op (aop)))
+     (+ (continuation-op (cop)))
+     (+ (boolean (reified))))
     (entry CaseLambdaExpr)
     (Expr (e body)
-      (+ (attachment-set aop e* ...)
-         (attachment-get e* ...)
-         (attachment-consume e* ...)
-         (continuation-get))))
+      (+ (attachment-set aop (maybe e))
+         (attachment-get reified (maybe e))
+         (attachment-consume reified (maybe e))
+         (continuation-get)
+         (continuation-set cop e1 e2))))
 
  ; moves all case lambda expressions into rhs of letrec
   (define-language L5 (extends L4.9375)
@@ -561,6 +584,7 @@
   (declare-primitive -/ovfl value #f)
   (declare-primitive -/eq value #f)
   (declare-primitive asmlibcall value #f)
+  (declare-primitive cpuid value #t) ; x86_64 only, actually side-effects ebx/ecx/edx
   (declare-primitive fstpl value #f) ; x86 only
   (declare-primitive fstps value #f) ; x86 only
   (declare-primitive get-double value #t) ; x86_64
@@ -673,8 +697,8 @@
          (inline info prim t* ...)               => (inline info prim t* ...)
          (mvcall info e t)                       => (mvcall e t)
          (foreign-call info t t* ...)
-         (attachment-get t* ...)
-         (attachment-consume t* ...)
+         (attachment-get reified (maybe t))
+         (attachment-consume reified (maybe t))
          (continuation-get)))
     (Expr (e body)
       (- lvalue
@@ -689,8 +713,8 @@
          (set! lvalue e)
          (mvcall info e1 e2)
          (foreign-call info e e* ...)
-         (attachment-get e* ...)
-         (attachment-consume e* ...)
+         (attachment-get reified (maybe e))
+         (attachment-consume reified (maybe e))
          (continuation-get))
       (+ rhs
          (values info t* ...)
@@ -740,7 +764,8 @@
          (trap-check ioc e)
          (overflow-check e)
          (profile src)
-         (attachment-set aop e* ...)))
+         (attachment-set aop (maybe e))
+         (continuation-set cop e1 e2)))
     (Tail (tl tlbody)
       (+ rhs
          (if p0 tl1 tl2)
@@ -771,17 +796,11 @@
             (mvset (mdcl t0 t1 ...) (t* ...) ((x** ...) interface* l*) ...)
          (mvcall info mdcl (maybe t0) t1 ... (t* ...)) => (mvcall mdcl t0 t1 ... (t* ...))
          (foreign-call info t t* ...)
-         (attachment-set aop t* ...)
+         (attachment-set aop (maybe t))
+         (continuation-set cop t1 t2)
          (tail tl))))
 
-  (define-language L11.5 (extends L11)
-    (entry Program)
-    (terminals
-      (- (boolean (ioc))))
-    (Effect (e body)
-      (- (trap-check ioc))))
-
-  (define-language L12 (extends L11.5)
+  (define-language L12 (extends L11)
     (terminals
       (- (fixnum (interface offset))
          (label (l)))
@@ -802,6 +821,13 @@
          ; mventry-point can appear only within an mvset ebody
          ; ideally, grammar would reflect this
          (mventry-point (x* ...) l))))
+
+  (define-language L12.5 (extends L12)
+    (entry Program)
+    (terminals
+      (- (boolean (ioc))))
+    (Effect (e ebody)
+      (- (trap-check ioc))))
 
   (define exact-integer?
     (lambda (x)
@@ -824,10 +850,11 @@
       (immediate (imm fs))
       (exact-integer (lpm))
       (info (info))
-      (maybe-label (mrvl))
+      (return-label (mrvl))
       (label (l rpl))
       (source-object (src))
-      (symbol (sym)))
+      (symbol (sym))
+      (boolean (as-fallthrough)))
     (Program (prog)
       (labels ([l* le*] ...) l)                   => (letrec ([l* le*] ...) (l)))
     (CaseLambdaExpr (le)
@@ -858,7 +885,7 @@
       (overflood-check)
       (fcallable-overflow-check)
       (new-frame info rpl* ... rpl)
-      (return-point info rpl mrvl (cnfv* ...))
+      (return-point info rpl mrvl as-fallthrough (cnfv* ...))
       (rp-header mrvl fs lpm)
       (remove-frame info)
       (restore-local-saves info)
@@ -955,7 +982,8 @@
       (live-info (live-info))
       (info (info))
       (label (l rpl))
-      (maybe-label (mrvl))
+      (return-label (mrvl))
+      (boolean (error-on-values as-fallthrough))
       (fixnum (max-fv offset))
       (block (block entry-block)))
     (Program (pgm)
@@ -980,8 +1008,9 @@
       (overflow-check live-info)
       (overflood-check live-info)
       (fcallable-overflow-check live-info)
-      (return-point info rpl mrvl (cnfv* ...))
+      (return-point info rpl mrvl as-fallthrough (cnfv* ...))
       (rp-header mrvl fs lpm)
+      (rp-compact-header error-on-values fs lpm)
       (remove-frame live-info info)
       (restore-local-saves live-info info)
       (shift-arg live-info reg imm info)
@@ -1004,7 +1033,7 @@
     (Effect (e)
       (- (remove-frame live-info info)
          (restore-local-saves live-info info)
-         (return-point info rpl mrvl (cnfv* ...))
+         (return-point info rpl mrvl as-fallthrough (cnfv* ...))
          (shift-arg live-info reg imm info)
          (check-live live-info reg* ...))
       (+ (fp-offset live-info imm)))

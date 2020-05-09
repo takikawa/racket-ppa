@@ -84,6 +84,11 @@
     ()
     scheme-object))
 
+(define $dequeue-scheme-signals
+  (foreign-procedure "(cs)dequeue_scheme_signals"
+    (ptr)
+    ptr))
+
 (define-who $show-allocation
   (let ([fp (foreign-procedure "(cs)s_showalloc" (boolean string) void)])
     (case-lambda
@@ -369,6 +374,10 @@
   (lambda (f . args)
     (#2%apply f args)))
 
+(define $app/no-inline
+  (lambda (f . args)
+    (#2%apply f args)))
+
 (define call-with-values
   (lambda (producer consumer)
     (unless (procedure? producer)
@@ -394,6 +403,27 @@
     (unless (procedure? p)
       ($oops who "~s is not a procedure" p))
     (#3%call/cc p)))
+
+;; calls `p` with the continuation `c` and either no immediate
+;; attachments or the given attachments `as` that must be either
+;; the same as the attachments saved by `c` or one immediate
+;; attachment extending those attachments
+(define-who call-in-continuation
+  (case-lambda
+   [(c p)
+    (unless (procedure? p)
+      ($oops who "~s is not a procedure" p))
+    (#2%call-in-continuation c (lambda () (p)))]
+   [(c as p)
+    (unless (procedure? p)
+      ($oops who "~s is not a procedure" p))
+    (#2%call-in-continuation c as (lambda () (p)))]))
+
+;; checks `c` and consistency of `as` with `c`, and also runs any needed winders
+(define $assert-continuation
+  (case-lambda
+   [(c) (#2%$assert-continuation c)]
+   [(c as) (#2%$assert-continuation c as)]))
 
 (define-who call-setting-continuation-attachment
   (lambda (v p)
@@ -593,6 +623,10 @@
       (unless (and (fixnum? ticks) (fx> ticks 0))
          ($oops '$set-timer "~s is not a positive fixnum" ticks))
       ($set-timer ticks)))
+
+(define $get-timer
+  (lambda ()
+    ($get-timer)))
 
 (define $fx+?
    (lambda (x y)
@@ -1536,6 +1570,28 @@
     ; tconc is assumed to be valid at all call sites
     (#3%$install-ftype-guardian obj tconc)))
 
+(define guardian?
+  (lambda (g)
+    (#3%guardian? g)))
+
+(define-who unregister-guardian
+  (let ([fp (foreign-procedure "(cs)unregister_guardian" (scheme-object) scheme-object)])
+    (define probable-tconc? ; full tconc? could be expensive ...
+      (lambda (x)
+        (and (pair? x) (pair? (car x)) (pair? (cdr x)))))
+    (lambda (g)
+      (unless (guardian? g) ($oops who "~s is not a guardian" g))
+      ; at present, guardians should have either one free variable (the tcond) or two(the tconc and an ftd)
+      ; but we just look for a probable tconc among whatever free variables it has
+      (fp (let ([n ($code-free-count ($closure-code g))])
+            (let loop ([i 0])
+              (if (fx= i n)
+                  ($oops #f "failed to find a tconc among the free variables of guardian ~s" g)
+                  (let ([x ($closure-ref g i)])
+                    (if (probable-tconc? x)
+                        x
+                        (loop (fx+ i 1)))))))))))
+
 (define-who $ftype-guardian-oops
   (lambda (ftd obj)
     ($oops 'ftype-guardian "~s is not an ftype pointer of the expected type ~s" obj ftd)))
@@ -1553,6 +1609,48 @@
   (foreign-procedure "(cs)s_ptr_in_heap" (ptr) boolean))
 
 (define $event (lambda () ($event)))
+
+(let ()
+  (define (inc)
+    ;; make up for decrement that will happen immediately on retry:
+    (let ([t ($get-timer)])
+      (when (fx< t (most-positive-fixnum))
+        ($set-timer (fx+ t 1)))))
+
+  (set! $event-and-resume
+        (case-lambda
+         [(proc)
+          ($event)
+          (inc)
+          (proc)]
+         [(proc arg)
+          ($event)
+          (inc)
+          (proc arg)]
+         [(proc arg1 arg2)
+          ($event)
+          (inc)
+          (proc arg1 arg2)]
+         [(proc arg1 arg2 arg3)
+          ($event)
+          (inc)
+          (proc arg1 arg2 arg3)]
+         [(proc arg1 arg2 arg3 arg4)
+          ($event)
+          (inc)
+          (proc arg1 arg2 arg3 arg4)]
+         ;; Cases above should cover `event-resume-max-preferred-arg-cnt`,
+         ;; including `proc` in th count
+         [(proc . args)
+          ($event)
+          (inc)
+          (apply proc args)]))
+
+  (set! $event-and-resume*
+        (lambda (proc+args)
+          ($event)
+          (inc)
+          (apply (car proc+args) (cdr proc+args)))))
 
 (define $tc (lambda () ($tc)))
 (define $thread-list (lambda () ($thread-list)))
@@ -1601,6 +1699,7 @@
 (when-feature pthreads
 
 (define $raw-collect-cond (lambda () ($raw-collect-cond)))
+(define $raw-collect-thread0-cond (lambda () ($raw-collect-thread0-cond)))
 (define $raw-tc-mutex (lambda () ($raw-tc-mutex)))
 (define fork-thread)
 (define make-mutex)
@@ -1617,6 +1716,7 @@
 (define $close-resurrected-mutexes&conditions)
 (define $tc-mutex)
 (define $collect-cond)
+(define $collect-thread0-cond)
 (define get-initial-thread)
 (let ()
 ; scheme-object's below are mutex and condition addresses, which are
@@ -1793,6 +1893,7 @@
 
 (set! $tc-mutex ($make-mutex ($raw-tc-mutex) '$tc-mutex))
 (set! $collect-cond ($make-condition ($raw-collect-cond) '$collect-cond))
+(set! $collect-thread0-cond ($make-condition ($raw-collect-thread0-cond) '$collect-thread0-cond))
 
 (set! get-initial-thread
   (let ([thread (car (ts))])
@@ -1820,9 +1921,9 @@
   (define-tc-parameter $sfd (lambda (x) (or (eq? x #f) (source-file-descriptor? x))) "a source-file descriptor or #f" #f)
   (define-tc-parameter $current-mso (lambda (x) (or (eq? x #f) (procedure? x))) "a procedure or #f" #f)
   (define-tc-parameter $target-machine symbol? "a symbol")
-  (define-tc-parameter optimize-level (lambda (x) (and (fixnum? x) (fx<= 0 x 3))) "valid optimize level" 0)
-  (define-tc-parameter $compile-profile (lambda (x) (memq x '(#f source block))) "valid compile-profile flag" #f)
-  (define-tc-parameter subset-mode (lambda (mode) (memq mode '(#f system))) "valid subset mode" #f)
+  (define-tc-parameter optimize-level (lambda (x) (and (fixnum? x) (fx<= 0 x 3))) "a valid optimize level" 0)
+  (define-tc-parameter $compile-profile (lambda (x) (memq x '(#f source block))) "a valid compile-profile flag" #f)
+  (define-tc-parameter subset-mode (lambda (mode) (memq mode '(#f system))) "a valid subset mode" #f)
   (define-tc-parameter default-record-equal-procedure (lambda (x) (or (eq? x #f) (procedure? x))) "a procedure or #f" #f)
   (define-tc-parameter default-record-hash-procedure (lambda (x) (or (eq? x #f) (procedure? x))) "a procedure or #f" #f)
 )
@@ -2049,6 +2150,12 @@
 (define-who ($record-type-descriptor r)
   (unless ($record? r) ($oops who "~s is not a record" r))
   (#3%$record-type-descriptor r))
+
+;; Assumes that the record that has only pointer fields:
+(define-who ($record-type-field-count rtd)
+  (unless (record-type-descriptor? rtd)
+    ($oops who "~s is not a record type descriptor" rtd))
+  ($record-type-field-count rtd))
 
 (define-who utf8->string
   (let ()

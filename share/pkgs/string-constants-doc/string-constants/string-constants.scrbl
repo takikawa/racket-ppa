@@ -47,6 +47,23 @@ that DrRacket's GUI supports.}
  Like @racket[string-constant-in-current-language?], but without compile-time checking.
 }
 
+@defproc[(string-constant-language? [v any/c]) boolean?]{
+ Determines if @racket[v] is a symbol naming a
+ language that is supported by the string constants library.
+ The symbol @racket['english] is guaranteed to return @racket[#t].
+}
+
+@defproc[(call-with-current-language [sc-language string-constant-langauge?]
+                                     [thunk (-> any)])
+         any]{
+ Calls @racket[thunk]; in the dynamic extent of the call, all uses of
+ @racket[string-constant] and @racket[dynamic-string-constant] will
+ use string constants from @racket[sc-language].
+
+ This function is designed to facilitate testing of libraries that use
+ string constants, so they can work regardless of the user's language
+ setting.
+}
 
 @defform[(this-language)]{
 

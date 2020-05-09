@@ -17,7 +17,7 @@
 		     (signature-rule ...)
 		     (pattern-rule ...))
   (racketgrammar*
-   #:literals (define define-record-procedures lambda cond if and or let letrec let* begin match
+   #:literals (define define-record lambda cond if and or let letrec let* begin match
 		#;require lib planet
 		check-expect check-within check-error check-satisfied
 		signature :
@@ -29,13 +29,13 @@
      test-case
      #;library-require]
    [definition @#,racket[(define id expr)]
-     @#,racket[(define-record-procedures id id id (field (... ...)))]
-     @#,racket[(define-record-procedures id id (field (... ...)))]
-     @#,racket[(define-record-procedures-parametric (id id (... ...)) id id (id (... ...)))]
+     @#,racket[(define-record id id (id id) (... ...))]
+     @#,racket[(define-record id id id (id id) (... ...))]
+     @#,racket[(define-record (id id (... ...)) id id (id id) (... ...))]
      @#,racket[(: id sig)]
      def-rule ...]
    prod ...
-   [expr @#,racket[(code:line (expr expr (... ...)) (code:comment @#,seclink["application"]{Prozedurapplikation}))]
+   [expr @#,racket[(code:line (expr expr (... ...)) (code:comment @#,seclink["application"]{Funktionsapplikation}))]
 	 @#,racket[#t]
 	 @#,racket[#f]
 	 @#,racket[number]
@@ -53,12 +53,11 @@
 	 @#,racket[(for-all ((id sig) (... ...)) expr)]
 	 @#,racket[(==> expr expr)]
 	 expr-rule ...]
-   [field id (id id)]
    [sig  id
 	      @#,racket[(predicate expr)]
 	      @#,racket[(enum expr (... ...))]
 	      @#,racket[(mixed sig (... ...))]
-	      @#,racket[(code:line (sig (... ...) -> sig) (code:comment @#,seclink["proc-signature"]{Prozedur-Signatur}))]
+	      @#,racket[(code:line (sig (... ...) -> sig) (code:comment @#,seclink["proc-signature"]{Funktions-Signatur}))]
 	      @#,racket[(list-of sig)]
 	      @#,racket[(nonempty-list-of sig)]
 	      @#,racket[(code:line %a %b %c (code:comment @#,seclink["signature-variable"]{Signatur-Variable}))]

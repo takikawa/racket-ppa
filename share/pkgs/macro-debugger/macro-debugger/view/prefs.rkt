@@ -1,5 +1,6 @@
 #lang racket/base
 (require racket/class
+         racket/contract/base
          framework/preferences
          "interfaces.rkt"
          "../syntax-browser/prefs.rkt"
@@ -15,6 +16,7 @@
 (preferences:set-default 'MacroStepper:PropertiesShown? #f boolean?)
 (preferences:set-default 'MacroStepper:PropertiesPanelPercentage 1/3 number?)
 (preferences:set-default 'MacroStepper:DrawArrows? #t boolean?)
+(preferences:set-default 'MacroStepper:DisplayTaintIcons 'char (or/c 'char 'snip #f))
 
 (preferences:set-default 'MacroStepper:MacroHidingMode "Disable" string?)
 (preferences:set-default 'MacroStepper:ShowHidingPanel? #t boolean?)
@@ -38,6 +40,7 @@
 (define pref:props-shown? (preferences:get/set 'MacroStepper:PropertiesShown?))
 (define pref:props-percentage (preferences:get/set 'MacroStepper:PropertiesPanelPercentage))
 (define pref:draw-arrows? (preferences:get/set 'MacroStepper:DrawArrows?))
+(define pref:taint-icons (preferences:get/set 'MacroStepper:DisplayTaintIcons))
 
 (define pref:macro-hiding-mode (preferences:get/set 'MacroStepper:MacroHidingMode))
 (define pref:show-hiding-panel? (preferences:get/set 'MacroStepper:ShowHidingPanel?))
@@ -68,6 +71,7 @@
       (props-percentage pref:props-percentage)
       (props-shown? pref:props-shown?)
       (draw-arrows? pref:draw-arrows?)
+      (taint-icons pref:taint-icons)
       (macro-hiding-mode pref:macro-hiding-mode)
       (show-hiding-panel? pref:show-hiding-panel?)
       (identifier=? pref:identifier=?)

@@ -1,6 +1,7 @@
 #lang racket/base
 (require racket/contract
          racket/class
+         racket/path
          syntax/modread
          "private/syncheck/traversals.rkt"
          "private/syncheck/syncheck-intf.rkt"
@@ -8,10 +9,12 @@
 
 (provide
  (contract-out
-  [show-content (-> (or/c path-string?
-                          (and/c syntax?
-                                 has-path-string-source?))
-                    (listof vector?))]
+  [show-content (->* ((or/c path-string?
+                            (and/c syntax?
+                                   has-path-string-source?)))
+                     (#:fully-expanded? any/c
+                      #:namespace (or/c #f namespace?))
+                     (listof vector?))]
   [make-traversal 
    (-> namespace?
        (or/c path-string? #f)
@@ -50,8 +53,11 @@
  syncheck:add-unused-require
  syncheck:color-range)
 
-(define (show-content file-or-stx)
-  (define ns (make-base-namespace))
+(define (show-content file-or-stx
+                      #:fully-expanded? [fully-expanded? #f]
+                      #:namespace [_namespace #f])
+  (define expand? (or (not fully-expanded?) (not (syntax? file-or-stx))))
+  (define ns (or _namespace (make-base-namespace)))
   (define src
     (cond
       [(path-string? file-or-stx)
@@ -62,7 +68,7 @@
   
   (parameterize ([current-annotations o])
     (define-values (expanded-expression expansion-completed) 
-      (make-traversal ns src))
+      (make-traversal ns (path-only src)))
     (cond
       [(path-string? file-or-stx)
        (parameterize ([current-namespace ns])
@@ -77,8 +83,9 @@
       [else 
        (parameterize ([current-namespace ns])
          (expanded-expression
-          (expand
-           file-or-stx)))])
+          (if expand?
+              (expand file-or-stx)
+              file-or-stx)))])
     (expansion-completed))
   
   (send o get-trace))

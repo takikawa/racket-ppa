@@ -42,6 +42,10 @@ static void install_library_entry(n, x) ptr n, x; {
         S_G.nonprocedure_code = x;
         S_retrofit_nonprocedure_code();
     }
+#ifdef X86_64
+    if (n == FIX(library_cpu_features))
+      x86_64_set_popcount_present(x);
+#endif
 }
 
 ptr S_lookup_library_entry(n, errorp) iptr n; IBOOL errorp; {
@@ -123,6 +127,7 @@ static void create_c_entry_vector() {
     install_c_entry(CENTRY_split_and_resize, proc2ptr(S_split_and_resize));
 #ifdef PTHREADS
     install_c_entry(CENTRY_raw_collect_cond, (ptr)&S_collect_cond);
+    install_c_entry(CENTRY_raw_collect_thread0_cond, (ptr)&S_collect_thread0_cond);
     install_c_entry(CENTRY_raw_tc_mutex, (ptr)&S_tc_mutex);
     install_c_entry(CENTRY_activate_thread, proc2ptr(S_activate_thread));
     install_c_entry(CENTRY_deactivate_thread, proc2ptr(Sdeactivate_thread));
@@ -131,6 +136,7 @@ static void create_c_entry_vector() {
     install_c_entry(CENTRY_handle_values_error, proc2ptr(S_handle_values_error));
     install_c_entry(CENTRY_handle_mvlet_error, proc2ptr(S_handle_mvlet_error));
     install_c_entry(CENTRY_handle_arg_error, proc2ptr(S_handle_arg_error));
+    install_c_entry(CENTRY_handle_event_detour, proc2ptr(S_handle_event_detour));
     install_c_entry(CENTRY_foreign_entry, proc2ptr(S_foreign_entry));
     install_c_entry(CENTRY_install_library_entry, proc2ptr(scheme_install_library_entry));
     install_c_entry(CENTRY_get_more_room, proc2ptr(S_get_more_room));
@@ -171,6 +177,7 @@ void S_prim_init() {
     Sforeign_symbol("(cs)check_heap_enabledp", (void *)s_check_heap_enabledp);
     Sforeign_symbol("(cs)enable_check_heap", (void *)s_enable_check_heap);
     Sforeign_symbol("(cs)check_heap_errors", (void *)s_check_heap_errors);
+    Sforeign_symbol("(cs)count_size_increments", (void *)S_count_size_increments);
     Sforeign_symbol("(cs)lookup_library_entry", (void *)S_lookup_library_entry);
     Sforeign_symbol("(cs)link_code_object", (void *)s_link_code_object);
     Sforeign_symbol("(cs)lookup_c_entry", (void *)S_lookup_c_entry);
@@ -185,6 +192,7 @@ void S_prim_init() {
     Sforeign_symbol("(cs)enable_object_counts", (void *)S_enable_object_counts);
     Sforeign_symbol("(cs)set_enable_object_counts", (void *)S_set_enable_object_counts);
     Sforeign_symbol("(cs)object_counts", (void *)S_object_counts);
+    Sforeign_symbol("(cs)unregister_guardian", (void *)S_unregister_guardian);
     Sforeign_symbol("(cs)fire_collector", (void *)S_fire_collector);
     Sforeign_symbol("(cs)enable_object_backreferences", (void *)S_enable_object_backreferences);
     Sforeign_symbol("(cs)set_enable_object_backreferences", (void *)S_set_enable_object_backreferences);

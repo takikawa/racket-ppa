@@ -10,7 +10,9 @@
          macro-debugger/syntax-browser/interfaces
          "prefs.rkt"
          "util.rkt"
-         "../util/logger.rkt")
+         "../util/logger.rkt"
+         (only-in "icons/lock.rkt" lock-icon-snip%)
+         (only-in "icons/tainted.rkt" tainted-icon-snip%))
 (provide print-syntax-to-editor
          code-style)
 
@@ -28,6 +30,8 @@
 (define (print-syntax-to-editor stx text controller config columns
                                 [insertion-point (send text last-position)])
   (define output-port (open-output-string/count-lines))
+  (define taint-icon-locs (and (send/i config config<%> get-taint-icons)
+                               (if (replace-taint-icons? config text) (box null) #t)))
   (define range
     (with-log-time "** pretty-print-syntax"
       (pretty-print-syntax stx output-port 
@@ -36,7 +40,8 @@
                            (send/i config config<%> get-suffix-option)
                            (send config get-pretty-styles)
                            columns
-                           (send config get-pretty-abbrev?))))
+                           (send config get-pretty-abbrev?)
+                           #:taint-icons taint-icon-locs)))
   (define output-string (get-output-string output-port))
   (define output-length (sub1 (string-length output-string))) ;; skip final newline
   (log-macro-stepper-debug "size of pretty-printed text: ~s" output-length)
@@ -45,7 +50,10 @@
   (with-unlock text
     (with-log-time "inserting pretty-printed text"
       (uninterruptible
-       (send text insert output-length output-string insertion-point)))
+       (if (box? taint-icon-locs)
+           (insert-string/replace-icons text output-string output-length insertion-point
+                                        (reverse (unbox taint-icon-locs)))
+           (send text insert output-length output-string insertion-point))))
     (new display%
          (text text)
          (controller controller)
@@ -53,6 +61,16 @@
          (range range)
          (start-position insertion-point)
          (end-position (+ insertion-point output-length)))))
+
+(define (replace-taint-icons? config text)
+  (let loop ([mode (send config get-taint-icons)])
+    (case mode
+      [(snip) #t]
+      [(char)
+       (define font (send (code-style text #f) get-font))
+       (not (for/and ([c (in-list '(#\🔒 #\🔓 #\💥))])
+              (send font screen-glyph-exists? c)))]
+      [else #f])))
 
 ;; display%
 ;; Note: must call refresh method to finish styling.
@@ -285,6 +303,25 @@
           ((#\{) 
            (string-set! string start #\{)
            (string-set! string (sub1 end) #\})))))))
+
+(define (insert-string/replace-icons text s len insertion-point locs)
+  (define (loop start locs) ;; already processed s up to start
+    (cond [(null? locs)
+           (flush start len)]
+          [else
+           (flush start (car locs))
+           (case (string-ref s (car locs))
+             [(#\🔒 #\🔓) ;; LOCK, OPEN LOCK
+              (send text insert (new lock-icon-snip%) (+ insertion-point (car locs)))]
+             [(#\💥) ;; COLLISION SYMBOL
+              (send text insert (new tainted-icon-snip%) (+ insertion-point (car locs)))]
+             [else
+              (send text insert (string-ref s (car locs)) (+ insertion-point (car locs)))])
+           (loop (add1 (car locs)) (cdr locs))]))
+  (define (flush start end)
+    (when (< start end)
+      (send text insert (substring s start end) (+ insertion-point start))))
+  (loop 0 locs))
 
 (define (open-output-string/count-lines)
   (let ([os (open-output-string)])

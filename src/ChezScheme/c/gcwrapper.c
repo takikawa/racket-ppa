@@ -33,6 +33,7 @@ void S_gc_init() {
   S_checkheap = 0; /* 0 for disabled, 1 for enabled */
   S_checkheap_errors = 0; /* count of errors detected by checkheap */
   checkheap_noisy = 0; /* 0 for error output only; 1 for more noisy output */
+  S_G.prcgeneration = static_generation;
 
   if (S_checkheap) {
     printf(checkheap_noisy ? "NB: check_heap is enabled and noisy\n" : "NB: check_heap_is_enabled\n");
@@ -127,9 +128,11 @@ void S_gc_init() {
   INITVECTIT(S_G.countof_names, countof_oblist) = S_intern((const unsigned char *)"oblist");
     S_G.countof_size[countof_guardian] = 0;
   INITVECTIT(S_G.countof_names, countof_ephemeron) = S_intern((const unsigned char *)"ephemeron");
-    S_G.countof_size[countof_ephemeron] = 0;
+    S_G.countof_size[countof_ephemeron] = size_ephemeron;
   INITVECTIT(S_G.countof_names, countof_stencil_vector) = S_intern((const unsigned char *)"stencil-vector");
     S_G.countof_size[countof_stencil_vector] = 0;
+  INITVECTIT(S_G.countof_names, countof_record) = S_intern((const unsigned char *)"record");
+    S_G.countof_size[countof_record] = 0;
   for (i = 0; i < countof_types; i += 1) {
     if (Svector_ref(S_G.countof_names, i) == FIX(0)) {
       fprintf(stderr, "uninitialized countof_name at index %d\n", i);
@@ -274,6 +277,33 @@ void Sunlock_object(x) ptr x; {
   tc_mutex_release()
 }
 
+ptr s_help_unregister_guardian(ptr *pls, ptr tconc, ptr result) {
+  ptr rep, ls;
+  while ((ls = *pls) != Snil) {
+    if (GUARDIANTCONC(ls) == tconc) {
+      result = Scons(((rep = GUARDIANREP(ls)) == ftype_guardian_rep ? GUARDIANOBJ(ls) : rep), result);
+      *pls = ls = GUARDIANNEXT(ls);
+    } else {
+      ls = *(pls = &GUARDIANNEXT(ls));
+    }
+  }
+  return result;
+}
+
+ptr S_unregister_guardian(ptr tconc) {
+  ptr result, tc; IGEN g;
+  tc_mutex_acquire()
+  tc = get_thread_context();
+  /* in the interest of thread safety, gather entries only in the current thread, ignoring any others */
+  result = s_help_unregister_guardian(&GUARDIANENTRIES(tc), tconc, Snil);
+  /* plus, of course, any already known to the storage-management system */
+  for (g = 0; g <= static_generation; INCRGEN(g)) {
+    result = s_help_unregister_guardian(&S_G.guardians[g], tconc, result);
+  }
+  tc_mutex_release()
+  return result;
+}
+
 #ifndef WIN32
 void S_register_child_process(INT child) {
   tc_mutex_acquire()
@@ -323,29 +353,31 @@ ptr S_object_counts(void) {
 
  /* add primary types w/nonozero counts to the alist */
   for (i = 0 ; i < countof_types; i += 1) {
-    ptr inner_alist = Snil;
-    for (g = 0; g <= static_generation; INCRGEN(g)) {
-      IGEN gcurrent = g;
-      uptr count = S_G.countof[g][i];
-      uptr bytes = S_G.bytesof[g][i];
+    if (i != countof_record) { /* covered by rtd-specific counts */
+      ptr inner_alist = Snil;
+      for (g = 0; g <= static_generation; INCRGEN(g)) {
+        IGEN gcurrent = g;
+        uptr count = S_G.countof[g][i];
+        uptr bytes = S_G.bytesof[g][i];
 
-      if (g == S_G.new_max_nonstatic_generation) {
-        while (g < S_G.max_nonstatic_generation) {
-          g += 1;
-          /* NB: S_G.max_nonstatic_generation + 1 <= static_generation, but coverity complains about overrun */
-          /* coverity[overrun-buffer-val] */
-          count += S_G.countof[g][i];
-          /* coverity[overrun-buffer-val] */
-          bytes += S_G.bytesof[g][i];
+        if (g == S_G.new_max_nonstatic_generation) {
+          while (g < S_G.max_nonstatic_generation) {
+            g += 1;
+            /* NB: S_G.max_nonstatic_generation + 1 <= static_generation, but coverity complains about overrun */
+            /* coverity[overrun-buffer-val] */
+            count += S_G.countof[g][i];
+            /* coverity[overrun-buffer-val] */
+            bytes += S_G.bytesof[g][i];
+          }
+        }
+
+        if (count != 0) {
+          if (bytes == 0) bytes = count * S_G.countof_size[i];
+          inner_alist = Scons(Scons((gcurrent == static_generation ? S_G.static_id : FIX(gcurrent)), Scons(Sunsigned(count), Sunsigned(bytes))), inner_alist);
         }
       }
-
-      if (count != 0) {
-        if (bytes == 0) bytes = count * S_G.countof_size[i];
-        inner_alist = Scons(Scons((gcurrent == static_generation ? S_G.static_id : FIX(gcurrent)), Scons(Sunsigned(count), Sunsigned(bytes))), inner_alist);
-      }
+      if (inner_alist != Snil) outer_alist = Scons(Scons(Svector_ref(S_G.countof_names, i), inner_alist), outer_alist);
     }
-    if (inner_alist != Snil) outer_alist = Scons(Scons(Svector_ref(S_G.countof_names, i), inner_alist), outer_alist);
   }
 
   tc_mutex_release()
@@ -380,7 +412,7 @@ ptr S_object_backreferences(void) {
 void Scompact_heap() {
   ptr tc = get_thread_context();
   S_pants_down += 1;
-  S_gc_oce(tc, S_G.max_nonstatic_generation, static_generation);
+  S_gc_oce(tc, S_G.max_nonstatic_generation, static_generation, Sfalse);
   S_pants_down -= 1;
 }
 
@@ -727,9 +759,9 @@ void S_fixup_counts(ptr counts) {
   RTDCOUNTSTIMESTAMP(counts) = S_G.gctimestamp[0];
 }
 
-void S_do_gc(IGEN mcg, IGEN tg) {
+ptr S_do_gc(IGEN mcg, IGEN tg, ptr count_roots) {
   ptr tc = get_thread_context();
-  ptr code;
+  ptr code, result;
 
   code = CP(tc);
   if (Sprocedurep(code)) code = CLOSCODE(code);
@@ -749,7 +781,7 @@ void S_do_gc(IGEN mcg, IGEN tg) {
     new_g = S_G.new_max_nonstatic_generation;
     old_g = S_G.max_nonstatic_generation;
    /* first, collect everything to old_g */
-    S_gc(tc, old_g, old_g);
+    result = S_gc(tc, old_g, old_g, count_roots);
    /* now transfer old_g info to new_g, and clear old_g info */
     for (s = 0; s <= max_real_space; s += 1) {
       S_G.first_loc[s][new_g] = S_G.first_loc[s][old_g]; S_G.first_loc[s][old_g] = FIX(0);
@@ -824,11 +856,14 @@ void S_do_gc(IGEN mcg, IGEN tg) {
       }
     }
 
+   /* tell profile_release_counters to scan only through new_g */
+    if (S_G.prcgeneration == old_g) S_G.prcgeneration = new_g;
+
    /* finally reset max_nonstatic_generation */
     S_G.min_free_gen = S_G.new_min_free_gen;
     S_G.max_nonstatic_generation = new_g;
   } else {
-    S_gc(tc, mcg, tg);
+    result = S_gc(tc, mcg, tg, count_roots);
   }
   S_pants_down -= 1;
 
@@ -838,12 +873,16 @@ void S_do_gc(IGEN mcg, IGEN tg) {
   S_reset_allocation_pointer(tc);
 
   Sunlock_object(code);
+
+  return result;
 }
 
 
-void S_gc(ptr tc, IGEN mcg, IGEN tg) {
-  if (tg == static_generation || S_G.enable_object_counts || S_G.enable_object_backreferences)
-    S_gc_oce(tc, mcg, tg);
+ptr S_gc(ptr tc, IGEN mcg, IGEN tg, ptr count_roots) {
+  if (tg == static_generation
+      || S_G.enable_object_counts || S_G.enable_object_backreferences
+      || (count_roots != Sfalse))
+    return S_gc_oce(tc, mcg, tg, count_roots);
   else
-    S_gc_ocd(tc, mcg, tg);
+    return S_gc_ocd(tc, mcg, tg, Sfalse);
 }

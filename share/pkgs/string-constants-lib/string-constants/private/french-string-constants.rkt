@@ -92,6 +92,8 @@
   ;;; when translating this constant, substitute name of actual language for `English'
   (is-this-your-native-language "Le Français est-il votre langue maternelle ?")
 
+  (#:define drr "DrRacket")
+
   (are-you-sure-you-want-to-switch-languages
    "Ceci va changer le langage utilisé par l'interface graphique, ce qui va nécessiter un redémarrage de DrRacket. Êtes-vous certain de vouloir continuer ?")
 
@@ -115,8 +117,8 @@
   (warning "Avertissement")
   (error "Erreur")
   (close "Fermer") ;; as in, close an open window or tab. must match close-menu-item
-                   ;; in the sense that, when the &s have been stripped from
-                   ;; close-menu-item, it must be the same string as this.
+  ;; in the sense that, when the &s have been stripped from
+  ;; close-menu-item, it must be the same string as this.
   (close-window "Fermer la fenêtre")
   (stop "Stop")
   (&stop "&Stop") ;; for use in button and menu item labels, with short cut.
@@ -138,6 +140,15 @@
   (tool-web-sites "Sites web d'outils")   ;; menu item title
   (plt-homepage "Racket")
   (pbd-homepage "Program by Design")
+
+  ;; having an issue (replaces the bug report form, whose string constants are below)
+  (have-an-issue? "Avez-vous un problème ?…")
+  (use-github-or-the-mailing-list-for-issues
+   "Si vous avez trouvé un bogue dans Racket ou DrRacket, merci de soumettre le problème sur"
+   " GitHub.\n\nSi vous avez trouvé quelque chose d'étrange, mais"
+   " vous n'êtes pas certain qu'il s'agisse d'un bogue ou non, posez la question sur notre liste de diffusion.")
+  (visit-mailing-lists "Visiter les listes de diffusion") ;; button in dialog
+  (visit-github "Visiter GitHub") ;; button in dialog, goes to 'open issue' page
 
   ;;; bug report form
   (cancel-bug-report? "Annuler la soumission du rapport de bogue ?")
@@ -165,30 +176,45 @@
   (bug-report-synthesized-information "Information Synthétisée")  ;; dialog title
   (bug-report-show-synthesized-info "Montrer l'information synthétisée")
   (bug-report-submit "Soumettre")
-  (close-and-save-bug-report "Fermer && Sauvegarder") ;; button in bug report dialog, next to cancel and bug-report-submit
-  (bug-report-submit-menu-item "Soumettre un rapport de bogue…") ;; in Help Menu (drs & help desk)
-  (saved-bug-reports-menu-item "Rapports de bogues sauvegardés") ;; in Help Menu, submenu title
-  (disacard-all-saved-bug-reports "Abondonner tous les rapports de bogues sauvegardés") ;; menu item: only shows up when there is more than one saved bug report
-  (no-saved-bug-reports "Aucun rapport de bogue n'a été sauvegardé") ;; an info message that shows up as a disabled menu item when no saved bug reports are around
-  (new-bug-report "Nouveau rapport de bogue") ;; button label the user sees when there are saved bug reports, but the user asks to save another one.
-  (close-and-save "Fermer et sauvegarder") ;; button on the bottom of the bug report form
+    ;; button in bug report dialog, next to cancel and bug-report-submit
+  (close-and-save-bug-report "Fermer && Sauvegarder")
+  ;; same as above, but used when there are saved bug reports
+  (bug-report-submit-menu-item "Soumettre un rapport de bogue…")
+  ;; in Help Menu, submenu title
+  (saved-bug-reports-menu-item "Rapports de bogues sauvegardés")
+  ;; menu item: only shows up when there is more than one saved bug report
+  (disacard-all-saved-bug-reports "Abondonner tous les rapports de bogues sauvegardés")
+  ;; an info message that shows up as a disabled menu item when no saved bug reports are around
+  (no-saved-bug-reports "Aucun rapport de bogue n'a été sauvegardé")
+  ;; button label the user sees when there are saved bug reports,
+  ;; but the user asks to save another one.
+  (new-bug-report "Nouveau rapport de bogue")
+  ;; button on the bottom of the bug report form
+  (close-and-save "Fermer et sauvegarder")
   (saved-unsubmitted-bug-reports "Rapports de bogues sauvegardés mais non-soumis :")
-  ;; the above string constant is next to previous line in same dialog, followed by list of bug report subjects (as buttons)
+  ;; the above string constant is next to previous line in same dialog, followed by
+  ;; list of bug report subjects (as buttons)
   (error-sending-bug-report "Erreur durant la soumission du rapport de bogue.")
   (error-sending-bug-report-expln
    "Une erreur s'est produite pendant la soumission de votre rapport de bogue."
-   " Si votre connexion Internet fonctionne correctement, veuillez visiter :\n\n    http://bugs.racket-lang.org/\n\n"
-   " et soumettre votre bogue en utilisant notre formulaire web en ligne. Nous sommes désolés pour vos difficultés.\n\nLe message d'erreur est :\n~a")
+   " Si votre connexion Internet fonctionne correctement, veuillez visiter :\n\n"
+   "    http://bugs.racket-lang.org/\n\net"
+   " soumettre votre bogue en utilisant notre formulaire web en ligne. Nous sommes désolés pour vos difficultés.\n\nLe message d'erreur est :\n~a")
   (illegal-bug-report "Formulaire de soumission de bogue incomplet.")
   (pls-fill-in-field "Merci de compléter le champ « ~a ».")
   (malformed-email-address "Adresse email malformée.")
-  (pls-fill-in-either-description-or-reproduce "Veuillez remplir soit le champ « Description », soit le champ « Etapes à suivre pour reproduire le bogue ».")
+  (pls-fill-in-either-description-or-reproduce
+   "Veuillez remplir soit le champ « Description », soit le champ « Etapes à suivre pour reproduire le bogue ».")
 
   ;;; check syntax
   (check-syntax "Vérifier") ; "Syntaxe" ; "Vérificateur de syntaxe" est long...
   (cs-italic "Italique")
   (cs-bold "Gras")
   (cs-underline "Souligné")
+  (cs-smoothing-default "Défaut")
+  (cs-smoothing-partial "Partiellement lissé")
+  (cs-smoothing-full "Lissé")
+  (cs-smoothing-none "Non lissé")
   (cs-change-color "Changer la couleur")
   (cs-foreground-color "Couleur d'avant-plan")
   (cs-background-color "Couleur d'arrière-plan")
@@ -204,7 +230,8 @@
   (cs-rename-var "Renommer ~a")
   (cs-rename-id "Renommer l'identificateur")
   (cs-rename-var-to "Renommer « ~a » en :")
-  (cs-name-duplication-error "Le nouveau nom que vous avez choisi, ~s, est en conflit avec un autre nom préexistant dans le même contexte.")
+  (cs-name-duplication-error
+   "Le nouveau nom que vous avez choisi, ~s, est en conflit avec un autre nom préexistant dans le même contexte.")
   (cs-rename-anyway "Renommer quand même")
   (cs-status-init "Vérificateur de syntaxe : initialisation de l'environnement pour le code de l'utilisateur")
   (cs-status-coloring-program "Vérificateur de syntaxe : coloriage d'une expression")
@@ -217,7 +244,8 @@
   (cs-view-docs "Documentation pour « ~a »")
   (cs-view-docs-from "~a dans ~a")  ;; a completed version of the line above
   ;; (cs-view-docs) is put into the first ~a and a list of modules (separated by commas)
-  ;; is put into the second ~a. Use check syntax and right-click on a documented variable (eg, 'require') to see this in use
+  ;; is put into the second ~a. Use check syntax and right-click on a documented variable
+  ;; (eg, 'require') to see this in use
 
   (cs-lexical-variable "variable lexicale")
   (cs-set!d-variable "variable modifiée")
@@ -228,7 +256,8 @@
   (cs-binder-count "~a sources de référence")
   (cs-zero-varrefs "pas de référence") ;  de cette variable...
   (cs-one-varref "1 référence")
-  (cs-n-varrefs "~a références") ;; expected to have one ~a formatter that will accept a number
+  ;; expected to have one ~a formatter that will accept a number
+  (cs-n-varrefs "~a références")
 
   (cs-contract-my-obligation "Contrat: obligation de ce module")
   (cs-contract-their-obligation "Contrat: obligation des modules clients")
@@ -239,8 +268,10 @@
   (cs-add-prefix-for-require "Ajouter un préfixe pour « require »")
   (cs-prefix-require-title "Préfixe pour « require »")
   (cs-prefix-require "Choisissez un préfixe à ajouter à chaque variable importée")
-  (cs-all-binders-are-prefixed "Tous les « require » ont déjà un préfixe; essayez plutôt de renommer")
-  (cs-the-binder-is-prefixed "Le « require » a déjà un préfixe; essayez plutôt de le renommer")
+  (cs-all-binders-are-prefixed
+   "Tous les « require » ont déjà un préfixe; essayez plutôt de renommer")
+  (cs-the-binder-is-prefixed
+   "Le « require » a déjà un préfixe; essayez plutôt de le renommer")
 
   ;; mode sub-menu in the "view" menu
   (cs-check-syntax-mode "Mode de vérification syntaxique")
@@ -252,11 +283,13 @@
   (sc-read-more... "lire plus…")
   (sc-f2-to-un/lock "F2 pour (dé)verrouiller")
 
-  ;; the online check syntax status messages (mouse over the bottom right of drracket's window to see the messages during online expansion's various phases)
+  ;; the online check syntax status messages (mouse over the bottom right of drracket's
+  ;; window to see the messages during online expansion's various phases)
   (online-expansion-running "Expansion en arrière-plan en cours") ; used to be "Vérification syntaxique" instead of "Expansion"
   (online-expansion-only-raw-text-files-supported "Seul les fichiers texte purs sont supportés")
   (online-expansion-abnormal-termination "Expansion en arrière-plan terminée anormalement")
-  (online-expansion-abnormal-termination-out-of-memory "Expansion en arrière-plan terminée anormalement (plus de mémoire disponible)")
+  (online-expansion-abnormal-termination-out-of-memory
+   "Expansion en arrière-plan terminée anormalement (plus de mémoire disponible)")
   (online-expansion-finished-successfully "Expansion en arrière-plan terminée correctement")
 
   (jump-to-error "Aller à l'erreur")
@@ -264,7 +297,8 @@
   (online-expansion-is-disabled "L'expansion en arrière-plan est désactivée")
   ; these next two show up in the bar along the bottom of the drracket window
   (online-expansion-pending "Expansion en cours…")
-  (online-expansion-finished "Expansion terminée") ;; note: there may still be errors in this case
+  ;; note: there may still be errors in this case
+  (online-expansion-finished "Expansion terminée")
   ; the next two show up in a menu when you click on the circle in the bottom right corner
   (disable-online-expansion "Désactiver l'expansion en arrière-plan")
   (enable-online-expansion "Activer l'expansion en arrière-plan")
@@ -288,9 +322,12 @@
   (running "en cours")
   (not-running "en attente") ; "en attente" ; pause ?
 
-  (install-package-button "Installer ~a") ;; button label: ~a is filled with the name of a pkg
-  (update-catalog "Mettre à jour le catalogue") ;; button label; shown when there is a missing module, but no matching package
-  (updating-catalog-from "Mise à jour à partir de ~a…") ;; message label; used as a status message when updating the pkg catalog
+  ;; button label: ~a is filled with the name of a pkg
+  (install-package-button "Installer ~a")
+  ;; button label; shown when there is a missing module, but no matching package
+  (update-catalog "Mettre à jour le catalogue")
+  ;; message label; used as a status message when updating the pkg catalog
+  (updating-catalog-from "Mise à jour à partir de ~a…")
 
   ;;; misc
   (welcome-to-something "Bienvenue dans ~a.")
@@ -317,7 +354,8 @@
    "ATTENTION : la fenêtre de définition a changé. Cliquez sur Exécuter.")
 
   (editor-changed-since-srcloc-recorded
-   "Le contenu de cet éditeur a changé depuis que la position du code source a été enregistrée, donc la section de code surlignée peut ne plus correspondre à la position correcte.")
+   "Le contenu de cet éditeur a changé depuis que la position du code source a été enregistrée,"
+   " donc la section de code surlignée peut ne plus correspondre à la position correcte.")
 
   (file-is-not-saved "Le fichier « ~a » n'a pas été sauvegardé.")
   (save "Sauvegarder")
@@ -360,7 +398,8 @@
   (preferences-colors "Couleurs") ;; used in the preferences dialog
 
   ;; parenthesis color scheme string constants
-  (parenthesis-color-scheme "Couleurs des parenthèses") ;; label for the choice% menu in the preferences dialog
+  ; label for the choice% menu in the preferences dialog
+  (parenthesis-color-scheme "Couleurs des parenthèses")
   (paren-color-basic-grey "Gris simple")
   (paren-color-shades-of-gray "Nuances de gris")
   (paren-color-shades-of-blue "Nuances de bleu")
@@ -407,15 +446,18 @@
   (plt:hd:refreshing-manuals-finished "Terminé.")
   (plt:hd:about-help-desk "A propos de l'Aide")
   (plt:hd:help-desk-about-string
-   "L'Aide est une source complète d'information à propos des logiciels du PLT, y compris DrRacket, MzScheme et MrEd.\n\nVersion ~a\nCopyright (c) ~a-~a PLT.")
+   "L'Aide est une source complète d'information à propos des logiciels"
+   " Racket.\n\nVersion ~a\nCopyright (c) ~a-~a PLT.")
   (plt:hd:help-on-help "Aide de l'Aide")
   (plt:hd:help-on-help-details
-   "Pour obtenir de l'aide sur comment utiliser l'Aide, suivez le premier lien `Help Desk' à partir de la page principale de l'Aide"
-   " (pour trouver la page principale, si vous n'y êtes pas déjà, cliquez sur le boutton `Maison' qui apparaît en haut de la fenêtre de l'Aide).")
+   "Pour obtenir de l'aide sur comment utiliser l'Aide, suivez le premier lien `Help Desk' à partir de la page principale de l'Aide."
+   " (Pour trouver la page principale, si vous n'y êtes pas déjà, cliquez sur le boutton `Maison'"
+   " qui apparaît en haut de la fenêtre de l'Aide.)")
   (reload "Rafraîchir")
   (plt:hd:ask-about-separate-browser
    "Vous avez sélectionné un lien vers une page sur le world-wide web."
-   " Voulez-vous voir cette page en utilisant le navigateur de l'Aide ou voulez-vous utiliser un navigateur séparé ?")
+   " Voulez-vous voir cette page en utilisant le navigateur de l'Aide,"
+   " ou voulez-vous utiliser un navigateur séparé ?")
   (plt:hd:homebrew-browser "Navigateur de l'Aide") ;; choice for the above string (in a button)
   (plt:hd:separate-browser "Navigateur séparé") ;; other choice for the above string (also in a button)
   (plt:hd:external-link-in-help "URLs externes dans l'Aide")
@@ -431,14 +473,33 @@
   ;; in the preferences dialog in drscheme there is example text for help desk font size.
   ;; clicking the links in that text produces a dialog with this message
   (help-desk-this-is-just-example-text
-   "Ceci est simplement un morceau de texte pour pouvoir choisir la taille de la police.  Ouvrez l'Aide (dans le menu Aide) pour suivre ces liens.")
+   "Ceci est simplement un morceau de texte pour pouvoir choisir la taille de la police."
+   " Ouvrez l'Aide (dans le menu Aide) pour suivre ces liens.")
 
   ;; this appears in the bottom part of the frame the first time the user hits `f1'
   ;; (assuming nothing else has loaded the documentation index first)
   ;; see also: cs-status-loading-docs-index
   (help-desk-loading-documentation-index "Aide: chargement de l'index de la documentation")
 
-  ; help desk htty proxy
+  ;; the next four are all in the same dialog box (only one of the first two appears)
+  (help-desk-materialize-docs-something-changed
+   "DrRacket a détecté un possible problème avec l'index de la documentation."
+   " Voulez-vous essayer de réparer le problème (ceci peut prendre quelques"
+   " moments) ?\n\nDe manière plus détaillée, le répertoire de documentation ~a n'existe pas,"
+   " et la recherche dans le navigateur est donc susceptible d'échouer.")
+  (help-desk-materialize-docs-first-time
+   "DrRacket a détecté un possible problème avec l'index de la documentation."
+   " Voulez-vous essayer de réparer le problème (ceci peut prendre quelques"
+   " moments) ?\n\nDe manière plus détaillée, DrRacket n'a pas matérialisé"
+   " la documentation utilisateur auparavant,"
+   " et la recherche dans le navigateur est donc susceptible d'échouer.")
+  (help-desk-do-nothing "Ne rien faire")
+  (help-desk-materialize-user-docs "Matérialiser la doc utilisateur")
+  ; this is used in a dialog to let the user know that work is being done based on
+  ; choices made from the previous dialog in the above four string constants
+  (help-desk-materializing-user-docs... "Matérialisation de la documentation utilisateur...")
+
+  ; Help desk htty proxy
   (http-proxy "Proxy HTTP")
   (proxy-direct-connection "Connexion directe")
   (proxy-use-proxy "Utiliser le proxy :")
@@ -455,8 +516,10 @@
   (browser-command-line-label "Ligne de commande :") ; label for radio button that is followed by text boxes
   (choose-browser "Choisissez un navigateur")
   (no-browser "Demander plus tard")
-  (browser-cmdline-expl-line-1 "(La ligne de commande est la concaténation du préfixe, de l'URL,") ; explanatory text for dialog, line 1
-  (browser-cmdline-expl-line-2 "et du suffixe, sans espace additionel entre eux.)") ; ... line 2. (Anyone need more lines?)
+  ; explanatory text for dialog, line 1
+  (browser-cmdline-expl-line-1 "(La ligne de commande est la concaténation du préfixe, de l'URL,")
+  ; ... line 2. (Anyone need more lines?)
+  (browser-cmdline-expl-line-2 "et du suffixe, sans espace additionel entre eux.)")
   (install? "Installer ?")  ;; if a .plt file is found (title of dialog)
   (you-have-selected-an-installable-package "Vous avez sélectionné un logiciel qui peut être installé.") ; package => paquetage, pas tres clair...
   (do-you-want-to-install-it? "Voulez-vous l'installer ?")
@@ -479,7 +542,9 @@
   ; an error message from a primitive operation is appended to the end of this message.
   (install-plt-error-downloading "Une erreur est survenue pendant le téléchargement du"
                                  " fichier .plt.\n\nDétails :\n")
-  (install-plt-error-header "Une erreur est survenue pendant la vérification de la validité du ficher .plt que vous avez téléchargé.  Vérifiez l'URL et essayez à nouveau.")
+  (install-plt-error-header
+   "Une erreur est survenue pendant la vérification de la"
+   " validité du ficher .plt que vous avez téléchargé.  Vérifiez l'URL et essayez à nouveau.")
 
   ;; install plt file when opened in drscheme strings
   (install-plt-file "Installer ~a ou l'ouvrir pour édition ?")
@@ -488,7 +553,8 @@
 
   (plt-installer-progress-window-title "Progresssion de l'installation") ;; frame title
   (plt-installer-abort-installation "Abandonner l'installation") ;; button label
-  (plt-installer-aborted "Installation abandonnée.") ;; msg that appears in the installation window when installation is aborted
+  ;; msg that appears in the installation window when installation is aborted
+  (plt-installer-aborted "Installation abandonnée.")
 
   ;;; about box
   (about-drscheme-frame-title "À propos de DrRacket")
@@ -503,29 +569,37 @@
   (yes "Oui")
   (no "Non")
 
- ;; saving image (right click on an image to see the text)
+  ;; saving image (right click on an image to see the text)
   (save-image "Sauvegarder l'image…")
 
   ;;; preferences
   (preferences "Préférences")
   (error-saving-preferences "Erreur durant la sauvegarde des préférences : ~a.")
   (error-saving-preferences-title "Erreur durant la sauvegarde des préférences")
-  (steal-the-lock-and-retry "Casser le verrou et réessayer") ;; in the preferences error dialog; this happens when the lockfile exists (after 3 pref writes).
+  ;; in the preferences error dialog; this happens when the lockfile exists (after 3 pref writes).
+  (steal-the-lock-and-retry "Casser le verrou et réessayer")
 
   (error-reading-preferences "Erreur durant la lecture des préférences.")
-  (error-reading-preferences-explanation "Le fichier de préférences est verrouillé, ce qui empêche la lecture de la préférence ~a")
+  (error-reading-preferences-explanation
+   "Le fichier de préférences est verrouillé, ce qui empêche la lecture de la préférence ~a")
   ;; in the above, ~a is filled with the name of the preference (a symbol)
   (dont-ask-again-until-drracket-restarted "Ne pas redemander (jusqu'à ce que DrRacket soit redémarré)")
-  ; difference between the above and below is one comes with a question (steal the lock or not) and the other with just a notation saying "the file is locked"
+  ; difference between the above and below is one comes with a question (steal the lock or not)
+  ;; and the other with just a notation saying "the file is locked"
   (dont-notify-again-until-drracket-restarted "Ne pas renotifier (jusqu'à ce que DrRacket soit redémarré)")
-  (prefs-file-locked "Le fichier de préférences est verrouillé (car le fichier ~a existe), donc vos préférences n'ont pu être sauvegardées.  Annuler le changement des préférences ?")
+  (prefs-file-locked
+   "Le fichier de préférences est verrouillé (car le fichier ~a existe),"
+   " donc vos préférences n'ont pu être sauvegardées.  Annuler le changement des préférences ?")
   (try-again "Essayer à nouveau") ;; button label
   (give-up-and-use-the-default "Abandonner et utiliser la valeur par défaut") ;; button label
 
-  (prefs-file-still-locked "Le fichier de préférences est toujours verrouillé (car le fichier ~a existe), donc vos changements ne vont pas être sauvegardés.")
+  (prefs-file-still-locked
+   "Le fichier de préférences est toujours verrouillé (car le fichier ~a existe),"
+   " donc vos changements ne vont pas être sauvegardés.")
   (prefs-file-locked-nothing-doing
    "Le fichier de préférences est verrouillé (via ~s), donc vos changements de préférences ne peuvent être sauvegardés.")
-   ;; the  ~s is filled with the lockfile; this string is (currently) used only on windows where lockfiles are less friendly (and there is no steal fallback)
+  ;; the  ~s is filled with the lockfile; this string is (currently) used only on
+  ;; windows where lockfiles are less friendly (and there is no steal fallback)
 
   (scheme-prefs-panel-label "Racket")
   (warnings-prefs-panel-label "Avertissements")
@@ -545,8 +619,10 @@
   (show-status-line "Montrer la barre de status.")
   (count-columns-from-one "Compter les lignes et colonnes à partir de un.")
   (display-line-numbers "Montrer les numéros de ligne et de colonne, pas la distance depuis le début de l'éditeur.")
-  (show-line-and-column-numbers "Montrer les numéros de ligne et de colonne") ; used for popup menu; right click on line/column box in bottom of drs window
-  (show-character-offsets "Montrer la distance depuis le début de l'éditeur") ; used for popup menu; right click on line/column box in bottom of drs window
+  ; used for popup menu; right click on line/column box in bottom of drs window
+  (show-line-and-column-numbers "Montrer les numéros de ligne et de colonne")
+  ; used for popup menu; right click on line/column box in bottom of drs window
+  (show-character-offsets "Montrer la distance depuis le début de l'éditeur")
   (enable-keybindings-in-menus "Activer les raccourcis clavier dans les menus (ceci remplace les raccourcis clavier Emacs)")
   (printing-mode "Mode d'impression")
   (print-using-platform-specific-mode "Impression dépendante de la plateforme")
@@ -561,39 +637,45 @@
   (online-coloring-active "Colorier la syntaxe interactivement")
   (open-files-in-tabs "Ouvrir les fichiers dans de nouveaux onglets (pas dans de nouvelles fenêtres)")
   (show-interactions-on-execute "Automatiquement montrer la fenêtre d'interaction lors de l'exécution d'un programme")
-  (switch-to-module-language-automatically "Automatiquement utiliser le langage « module » lors de l'ouverture d'un fichier contenant un module")
-  (interactions-beside-definitions "Mettre la fenêtre d'interaction à côté de la fenêtre de définition") ;; in preferences, below the checkbox one line above this one
+  (switch-to-module-language-automatically
+   "Automatiquement utiliser le langage « module » lors de l'ouverture d'un fichier contenant un module")
+  ;; in preferences, below the checkbox one line above this one
+  (interactions-beside-definitions "Mettre la fenêtre d'interaction à côté de la fenêtre de définition")
+  ;; just like the above, but capitalized for appearance in a menu item
   (show-line-numbers "Montrer les numéros de lignes")
   (show-line-numbers/menu "Montrer les &numéros de lignes")  ;; just like the above, but capitalized for appearance in a menu item
   (hide-line-numbers/menu "Cacher les &numéros de lignes")
   (show-line-numbers-in-definitions "Numéros de ligne dans la fenêtre de définition")
   ;; the constant above shows up in the popup menu item in the bottom of
-  ;; the drracket window; controls the line numbers on each line in the definitions; used in a checkable menu item
+  ;; the drracket window; controls the line numbers on each line in the definitions;
+  ;; used in a checkable menu item
   (reflow-paragraph-maximum-width "Largeur maximale lors de la refusion des paragraphes")
   (maximum-char-width-guide-pref-check-box "Guide pour la largeur maximum de texte")
   (hide-column-width-guide "Cacher le guide de largeur de texte pour les fichiers avec ~a colonnes")
   (show-column-width-guide "Montrer le guide de largeur de texte à partir de ~a colonnes") ;; filled with a number > 2
   (limit-interactions-size "Limiter la taille de la fenêtre d'interaction")
-  (background-color "Arrière-plan") ;; this is in the color section already, so shorten the name a little
-  (default-text-color "Couleur du texte") ;; used for configuring colors, but doesn't need the word "color"
+  ;; this is in the color section already, so shorten the name a little
+  (background-color "Arrière-plan")
+  ;; used for configuring colors, but doesn't need the word "color"
+  (default-text-color "Couleur du texte")
   (choose-a-background-color "Sélectionnez une couleur d'arrière-plan")
   (revert-to-defaults "Retour de toutes les préférences aux valeurs par défaut")
-  (undo-changes "Fermer sans rien changer") ;; used in the preferences dialog to undo preference changes
+  ;; used in the preferences dialog to undo preference changes
+  (undo-changes "Fermer sans rien changer")
 
   (color-schemes "Régime de couleurs") ;; the label in the preferences dialog for the color scheme panel
   (classic-color-scheme "Classique") ;; formerly called 'black on white'
   (modern-color-scheme "Moderne")   ;; an attempt to be more color-blind friendly
-  (white-on-black-color-scheme "Blanc sur noir") ;; clicking the buttons changes the color schemes to some defaults that've been set up.
+  ;; clicking the buttons changes the color schemes to some defaults that've been set up.
+  (white-on-black-color-scheme "Blanc sur noir")
   ; drracket additions to the color scheme dialog; two buttons
   (design-your-own-color-schemes "Concevoir vos propres régimes de couleurs") ; pointer to (english-only) docs
   (style-and-color-names "Noms de styles et de couleurs")
 
   (add-spacing-between-lines "Ajouter un pixel d'espace supplémentaire entre les lignes")
 
-  (editor-x-selection-mode "Requérir une opération de copie explicite avant de coller / Ne pas automatiquement copier la sélection")
-
-
-  ; title of the color choosing dialog
+  (editor-x-selection-mode "Requérir une opération de copie explicite avant"
+                           " de coller / Ne pas automatiquement copier la sélection")
 
   ; should have entire alphabet
   (font-example-string "aâàbcçdeéêèëfghiîïjklmnoôpqrstuûùüvwxyz")
@@ -633,12 +715,13 @@
   ; warning message when lockfile is around
   (waiting-for-pref-lock "Attente sur le fichier de verrouillage des préférences…")
   (pref-lock-not-gone
-   "Les préférences sont verrouillées par le fichier :\n\n   ~a\n\nqui empêche les préférences d'être sauvegardées. Assurez-vous qu'aucun logiciel Racket n'est en cours d'exécution et effacer le fichier.")
+   "Les préférences sont verrouillées par le fichier :\n\n   ~a\n\nqui empêche les préférences d'être sauvegardées."
+   " Assurez-vous qu'aucun logiciel Racket n'est en cours d'exécution et effacer le fichier.")
   (still-locked-exit-anyway? "Les préférences n'ont pu être sauvegardées correctement. Quitter quand même ?")
 
   ;;; indenting preferences panel
   (indenting-prefs-panel-label "Indentation")
-  (indenting-prefs-extra-regexp "Regexp extra") ; Expression régulière supplémentaire est trop long
+  (indenting-prefs-extra-regexp "Regexp extra") ; "Expression régulière supplémentaire" est trop long
 
   (square-bracket-prefs-panel-label "Crochet")
 
@@ -698,7 +781,8 @@
   (mfs-case-sensitive-label "Différentier les lettres majuscules des minuscules")
   (mfs-no-matches-found "Rien n'a été trouvé.")
   (mfs-search-interrupted "Recherche avortée.")
-  (mfs-drscheme-multi-file-search-title "Recherche dans des fichiers multiples pour « ~a » - DrRacket") ;; the ~a format specifier is filled in with the search string
+  ;; the ~a format specifier is filled in with the search string
+  (mfs-drscheme-multi-file-search-title "Recherche dans des fichiers multiples pour « ~a » - DrRacket")
 
   ;;;reverting a file
   (are-you-sure-revert
@@ -838,7 +922,8 @@
   (find-case-sensitive-menu-item "Recherche sensible à la casse")
 
   (complete-word "Compléter le mot") ; the complete word menu item in the edit menu
-  (no-completions "… pas de complétion connue") ; shows up in the completions menu when there are no completions (in italics)
+  ; shows up in the completions menu when there are no completions (in italics)
+  (no-completions "… pas de complétion connue")
 
   (overwrite-mode "Mode d'écrasement")
   (enable-overwrite-mode-keybindings "Activer les raccourcis clavier pour le mode d'écrasement")
@@ -858,7 +943,8 @@
   (keybindings-add-user-defined-keybindings/planet "Ajouter des raccourcis clavier à partir de PLaneT…")
   (keybindings-menu-remove "Enlever ~a")
   (keybindings-choose-user-defined-file "Sélectionnez un fichier contenant des raccourcis clavier.")
-  (keybindings-planet-malformed-spec "Cette spécification de fichier PLaneT est malformée : ~a") ; the string will be what the user typed in
+  ; the string will be what the user typed in
+  (keybindings-planet-malformed-spec "Cette spécification de fichier PLaneT est malformée : ~a")
   (keybindings-type-planet-spec "Veuillez spécifier un fichier PLaneT (sans le « require »)")
 
   ; first ~a will be a string naming the file or planet package where the keybindings come from;
@@ -866,7 +952,8 @@
   (keybindings-error-installing-file "Erreur durant l'installation des raccourcis clavier provenants du fichier PLaneT ~a:\n\n~a")
 
   (user-defined-keybinding-error "Erreur durant l'exécution du raccourci clavier ~a\n\n~a")
-  (user-defined-keybinding-malformed-file "Le fichier ~a ne contient pas un module écrit dans le langage framework/keybinding-lang.")
+  (user-defined-keybinding-malformed-file
+   "Le fichier ~a ne contient pas un module écrit dans le langage framework/keybinding-lang.")
   (user-defined-keybinding-malformed-file/found-lang
    "Le fichier ~a ne contient pas un module écrit dans le"
    " langage framework/keybinding-lang. Le langage ~s a été trouvé à la place.")
@@ -891,7 +978,8 @@
   (prev-tab "Onglet précédent")
   (move-current-tab-right "Déplacer à &droite")
   (move-current-tab-left "Déplacer à &gauche")
-  ;; menu item in the windows menu under mac os x. first ~a is filled with a number between 1 and 9; second one is the filename of the tab
+  ;; menu item in the windows menu under mac os x. first ~a is filled
+  ;; with a number between 1 and 9; second one is the filename of the tab
   (tab-i "Onglet ~a : ~a")
   (tab-i/no-name "Onglet ~a")
   (last-tab "Dernier onglet: ~a")
@@ -958,7 +1046,8 @@
   (autosave-recovered! "Recouvré !") ;; status of an autosave file
   (autosave-deleted "Effacé")       ;; status of an autosave file
 
-  (autosave-error-deleting "Erreur durant l'effacement de ~a\n\n~a") ;; first is a filename, second is an error message from mz.
+  ;; first is a filename, second is an error message from racket.
+  (autosave-error-deleting "Erreur durant l'effacement de ~a\n\n~a")
   (autosave-delete-button "Effacer")
   (autosave-delete-title "Effacer")  ;; title of a dialog asking for deletion confirmation
   (autosave-done "Continuer")
@@ -966,35 +1055,60 @@
   ;; appears in the file dialog
   (autosave-restore-to-where? "Sélectionnez un répertoire où sauvegarder le fichier auto-sauvegardé.")
 
-
   ;;; file modified warning
   (file-has-been-modified
    "Ce fichier a été modifié depuis sa dernière sauvegarde. Voulez-vous écraser les modifications ?")
   (overwrite-file-button-label "Écraser")
 
   (definitions-modified
-   "Le texte de la fenêtre de définition a été modifié directement sur le disque dur. Sauvegardez ou retournez à la version sur le disque.")
+   "Le texte de la fenêtre de définition a été modifié directement dans le système de fichiers;"
+   " sauvegardez ou retournez à la version du système de fichiers.")
+
+  ;; for a dialog that appears when Run is clicked and there are unsaved files
+  ; the ~a is filled with a filename (same string that appears in a tab)
+  (one-file-not-saved-do-the-save?
+   "Le fichier « ~a » n'est pas sauvegardé ; sauvegarder avant d'exécuter ?")
+  ; the string is suffixed with a list of filenames (which are separated by newlines)
+  (many-files-not-saved-do-the-save?
+   "D'autres fichiers ne sont pas sauvegardés ; sauvegarder avant d'exécuter ?\n\nFichiers : ")
+  ; button label to go ahead with saving
+  (save-all-files "Sauvegarder tous les fichiers")
+  ; check box in the dialog and also used in the preferences dialog
+  (save-after-switching-tabs "Sauvegarder les fichiers lors des changements d'onglets ou de fenêtres")
+  (dont-ask-about-saving-after-switching-tabs
+   "Ne pas poser de question et ne pas sauvegarder les fichiers lors de l'exécution avec des onglets ou des fenêtres non sauvegardés")
+  
   (drscheme-internal-error "Erreur interne de DrRacket.")
 
   ;;; tools
-  (invalid-tool-spec "La spécification d'outil qui se trouve dans le fichier info.rkt de la collection ~a est invalide. Espérait soit une chaîne de caractères, soit une liste de chaînes de caractères, trouvé : ~e")
+  (invalid-tool-spec
+   "La spécification d'outil qui se trouve dans le fichier info.rkt de la collection ~a est invalide."
+  " Espérait soit une chaîne de caractères, soit une liste de chaînes de caractères, trouvé : ~e")
   (error-invoking-tool-title "Erreur durant l'invocation de l'outil ~s;~s")
-  (error-loading-tool-title "Erreur durant le chargement de l'outil ~s\n~a") ;; ~s filled with a path, ~a filled with an error message from an exn
+  ;; ~s filled with a path, ~a filled with an error message from an exn
+  (error-loading-tool-title "Erreur durant le chargement de l'outil ~s\n~a")
   (tool-tool-names-same-length
-   "`tool-names' et `tools' ne sont pas des listes de la même longueur, dans le fichier info.rkt pour ~s. Trouvé ~e et ~e")
+   "`tool-names' et `tools' ne sont pas des listes de la même longueur,"
+   " dans le fichier info.rkt pour ~s. Trouvé ~e et ~e")
   (tool-tool-icons-same-length
-   "`tool-icons' et `tools' ne sont pas des listes de la même longueur, dans le fichier info.rkt pour ~s. Trouvé ~e et ~e")
+   "`tool-icons' et `tools' ne sont pas des listes de la même longueur,"
+   " dans le fichier info.rkt pour ~s. Trouvé ~e et ~e")
   (tool-tool-urls-same-length
-   "`tool-urls' et `tools' ne sont pas des listes de la même longueur, dans le fichier info.rkt pour ~s. Trouvé ~e et ~e")
+   "`tool-urls' et `tools' ne sont pas des listes de la même longueur,"
+   " dans le fichier info.rkt pour ~s. Trouvé ~e et ~e")
   (error-getting-info-tool
    "erreur durant le chargement du fichier info.rkt pour ~s")
-  (tool-error-phase1 "Erreur durant la phase 1 pour l'outil ~s; ~s")
-  (tool-error-phase2 "Erreur durant la phase 2 oour l'outil ~s; ~s")
+  (tool-error-phase1 "Erreur durant la phase 1 pour l'outil ~s ; ~s")
+  (tool-error-phase2 "Erreur durant la phase 2 oour l'outil ~s ; ~s")
   ;; tool preferences panel
-  (tool-config-changes "Les changements dans la configuration d'outil prendront effet au prochain démarrage de DrRacket.")
+  (tool-config-changes
+   "Les changements dans la configuration d'outil prendront effet au prochain démarrage de DrRacket.")
   (installed-tools "Outils installés")
-  (tool-prefs-panel-tool:-label "Outil: ")
+  (tool-prefs-panel-tool:-label "Outil : ")
+  (tool-prefs-panel-title "Outils")
   (load-tool-when-drracket-starts? "Charger l'outil quand DrRacket démarre ?")
+  (load-tool-load "Charger l'outil")
+  (load-tool-skip "Sauter l'outil")
   (unnamed-tool "outil anonyme ~a")
   (note-that-tool-loaded " (chargé)")
   (note-that-tool-was-skipped " (sauté)")
@@ -1040,7 +1154,8 @@
   (print-interactions "Imprimer les interactions…")
   (new-tab "Nouvel onglet")
   (close-tab "Fermer l'onglet")
-  (close-tab-amp "Fermer l'onglet") ;; like close-tab, but with an ampersand on the same letter as the one in close-menu-item
+   ;; like close-tab, but with an ampersand on the same letter as the one in close-menu-item
+  (close-tab-amp "Fermer l'onglet")
 
   ;;; edit menu
   (split-menu-item-label "Di&viser")
@@ -1055,7 +1170,8 @@
   (execute-menu-item-label "Exécuter")
   (execute-menu-item-help-string "Réexécuter le programme de la fenêtre de définition.")
   (ask-quit-menu-item-label "Demander au programme de quitter")
-  (ask-quit-menu-item-help-string "Utilise break-thread pour stopper la tâche principale de l'évaluation courante")
+  (ask-quit-menu-item-help-string
+   "Utilise break-thread pour stopper la tâche principale de l'évaluation courante")
   (force-quit-menu-item-label "Forcer le programme à quitter")
   (force-quit-menu-item-help-string "Utilise custodian-shutdown-all pour terminer toute l'évaluation courante")
   (limit-memory-menu-item-label "Limiter la mémoire…")
@@ -1101,9 +1217,12 @@
   (save-a-mzscheme-stand-alone-executable "Sauvegarder un exécutable autonome de type Racket")
   (save-a-mred-distribution "Sauvegarder une distribution GRacket")
   (save-a-mzscheme-distribution "Sauvegarder une distribution Racket")
-  (error-creating-executable "Erreur durant la crétion de l'exécutable :") ;; this is suffixed with an error message ala error-display-handler
+  ;; this is suffixed with an error message ala error-display-handler
+  (error-creating-executable "Erreur durant la crétion de l'exécutable :")
 
-  (definitions-not-saved "La fenêtre de définition n'a pas été sauvegardée. L'exécutable va utiliser la dernière version sauvegardée de la fenêtre de définition. Continuer ?")
+  (definitions-not-saved
+   "La fenêtre de définition n'a pas été sauvegardée. L'exécutable va utiliser la"
+   " dernière version sauvegardée de la fenêtre de définition. Continuer ?")
   ;; The "-explanatory-label" variants are the labels used for the radio buttons in
   ;;  the "Create Executable..." dialog for the "(module ...)" language.
   (launcher "Lanceur")
@@ -1122,7 +1241,8 @@
   (~a-must-end-with-~a
    "Le nom de fichier ~a\n\n  ~a\n\nest illégal. Le nom de fichier doit se terminer par « .~a ».")
   (macosx-executables-must-end-with-app
-   "Le nom de fichier\n\n  ~a\n\nest illégal. Sous Mac OS, un exécutable doit être un répertoire dont le nom se termine par .app.")
+   "Le nom de fichier\n\n  ~a\n\nest illégal. Sous Mac OS, un exécutable"
+   " doit être un répertoire dont le nom se termine par .app.")
   (warning-directory-will-be-replaced
    "ATTENTION : le répertoire :\n\n  ~a\n\nva être remplacé. Voulez-vous continuer ?")
 
@@ -1157,8 +1277,10 @@
   (numerator "Numérateur")
   (denominator "Dénominateur")
   (insert-number/bad-whole-part "La partie entière du nombre doit être intégrale")
-  (insert-number/bad-numerator "Le numérateur du nombre doit être un entier non-négatif")
-  (insert-number/bad-denominator "Le dénominateur du nombre doit être un entier positif")
+  (insert-number/bad-numerator
+   "Le numérateur du nombre doit être un entier non-négatif")
+  (insert-number/bad-denominator
+   "Le dénominateur du nombre doit être un entier positif")
   (insert-fraction-menu-item-label "Insérer une fraction…")
 
   ;; number snip popup menu
@@ -1177,7 +1299,8 @@
   (drscheme-teachpack-message-title "DrRacket teachpack")
   (already-added-teachpack "Le teachpack ~a a déjà été ajouté.")
 
-  ; ~a is filled with the teachpack's name; the message appears in the teachpack selection dialog when a user installs a new teachpack
+  ; ~a is filled with the teachpack's name; the message appears in the
+  ; teachpack selection dialog when a user installs a new teachpack
   (compiling-teachpack "Compilation du teachpack ~a…")
   (teachpack-pre-installed "Teachpacks préinstallés")
   (teachpack-pre-installed/htdp "Teachpacks HtDP préinstallés")
@@ -1189,9 +1312,13 @@
    "Avertissement : le teachpack ~a déjà installé est en conflit avec ~a (le nom ~a est exporté par les deux)")
    ;; a button label; the two ~a are filled with teachpack names
   (remove-and-add-teachpack "Supprimer ~a et ajouter ~a")
-  (teachpack-already-installed "Un teachpack nommé '~a' a déjà été installé.  Voulez-vous l'écraser ?")
-  ; ~a is filled with a list of language names. Each name is separated by a newline and is indented two spaces (no commas, no 'and')
-  (teachpacks-only-in-languages "Le menu pour les teachpacks n'est disponible que pour les langages suivants : ~a\n\nPour les autres langages, utilisez « require » à la place.")
+  (teachpack-already-installed
+   "Un teachpack nommé '~a' a déjà été installé.  Voulez-vous l'écraser ?")
+  ; ~a is filled with a list of language names. Each name is separated
+  ; by a newline and is indented two spaces (no commas, no 'and')
+  (teachpacks-only-in-languages
+   "Le menu pour les teachpacks n'est disponible que pour les langages suivants : ~a\n\nPour"
+   " les autres langages, utilisez « require » à la place.")
 
 
   ;;; Language dialog
@@ -1262,7 +1389,8 @@
   (advanced-one-line-summary "Intermédiaire plus lambda et mutation")
   (how-to-design-programs "How to Design Programs") ;; should agree with MIT Press on this one...
   (pretty-big-scheme "Assez gros Scheme")
-  (pretty-big-scheme-one-line-summary "Ajoute de la syntaxe et des fonctions provenants des languages HtDP, mzscheme, et mred/mred")
+  (pretty-big-scheme-one-line-summary
+   "Ajoute de la syntaxe et des fonctions provenants des languages HtDP, mzscheme, et mred/mred")
   (r5rs-language-name "R5RS")
   (r5rs-one-line-summary "R5RS, de base")
   (expander "Expanseur") ; compression, compresseur, compresser => expansion, expanseur, expanser (expandeur, expander fait trop franglais et expandion n'existe pas)
@@ -1276,7 +1404,11 @@
 
   (module-language-name "Déterminer le langage à partir du code source")
   (module-language-one-line-summary "La ligne #lang spécifie le langage utilisé")
-  (module-language-auto-text "Ligne #lang automatique") ;; shows up in the details section of the module language
+   ;; shows up in the details section of the module language
+  (module-language-auto-text "Ligne #lang automatique")
+  (module-language-auto-text-most-recent "Ligne #lang utilisée la plus récemment")
+  ; to the right of this string is a text entry field whose content is the #lang line that'll be used.
+  (module-language-auto-text-always-same "Toujours utiliser la même ligne #lang : ")
   ;; the next four string constants show up in the REPL in DrRacket in the "Racket Language",
   ;; which is also the "Determine language from source" language. They are put right after the name
   ;; of the language from the "#lang" line at the beginning of the source file
@@ -1296,7 +1428,8 @@
   ;; the next two string constants appear in the
   ;; language dialog with a list
   ;; of example languages appearing between them
-  (racket-language-discussion "Utilisez #lang en début de programme pour spécifier le dialecte à utiliser.  Par example :\n\n")
+  (racket-language-discussion
+   "Utilisez #lang en début de programme pour spécifier le dialecte à utiliser.  Par example :\n\n")
   (racket-language-discussion-end "\n… et bien d'autres")
 
   ;; the next three string constants are put into a message-box dialog
@@ -1309,9 +1442,13 @@
   (racket-dialect-in-buffer-message
    "En général vous devez spécifier un dialecte en éditant directement votre programme,"
    " pas en sélectionnant un des choix du dialogue de langage.")
-  (racket-dialect-add-new-#lang-line "Néanmoins, voulez-vous que j'ajoute « ~a » en début de votre programme ?") ; la fenêtre de définitions
-  (racket-dialect-replace-#lang-line "Néanmoins, voulez-vous que je remplace « ~a » en début de votre programme par « ~a » ?")
-  (racket-dialect-already-same-#lang-line "Dans le cas présent vous avez déjà « ~a » en début de votre programme; vous pouvez donc tout de suite commencer à programmer !")
+  (racket-dialect-add-new-#lang-line
+   "Néanmoins, voulez-vous que j'ajoute « ~a » en début de votre programme ?") ; la fenêtre de définitions
+  (racket-dialect-replace-#lang-line
+   "Néanmoins, voulez-vous que je remplace « ~a » en début de votre programme par « ~a » ?")
+  (racket-dialect-already-same-#lang-line
+   "Vous avez déjà « ~a » en début de votre programme;"
+   " vous pouvez donc tout de suite commencer à programmer !")
 
   ;; in the dialog containing the above strings, one of these is a button that appears
   (add-#lang-line "Ajouter la ligne #lang")
@@ -1377,10 +1514,12 @@
   (profiling-no-information-available
    "Pas d'information de profilage disponible. Assurez vous que"
    " le profilage ait été activé pour ce langage et que vous ayez exécuté le programme.")
-  (profiling-clear? "Modifier le contenu de la fenêtre de définition invalide le profil. Voulez-vous continuer ?")
+  (profiling-clear?
+   "Modifier le contenu de la fenêtre de définition invalide le profil. Voulez-vous continuer ?")
 
   ;; test coverage
-  (test-coverage-clear? "Modifier le contenu de la fenêtre de définition invalide l'information de couverture de vos tests. Voulez-vous continuer ?")
+  (test-coverage-clear?
+   "Modifier le contenu de la fenêtre de définition invalide l'information de couverture de vos tests. Voulez-vous continuer ?")
   (test-coverage-clear-and-do-not-ask-again "Oui, et ne me redemandez pas")
   (test-coverage-ask? "Demander à propos de l'invalidation de l'information de couverture des tests ?")
   (test-coverage-entirely-covered "Toutes les expressions sont couvertes")
@@ -1394,27 +1533,32 @@
   (tracing-enable-tracing "Activer le traçage")
   (tracing-show-tracing-window "Montrer le traçage")
   (tracing-hide-tracing-window "Cacher le traçage")
-  (tracing-tracing-nothing-to-show "Aucun résultat de traçage n'est disponible. Assurez-vous que votre langage supporte le traçage et que le traçage est activé.")
+  (tracing-tracing-nothing-to-show
+   "Aucun résultat de traçage n'est disponible pour l'instant. (Assurez-vous que votre langage"
+   " supporte le traçage et que le traçage est activé.)")
 
   ;;; repl stuff
   (evaluation-terminated "Évaluation terminée.")
   (evaluation-terminated-explanation
-   "Le tâche d'évaluation n'est plus en exécution, toute évaluation est donc impossible jusqu'à la prochaine exécution.")
+   "Le tâche d'évaluation n'est plus en exécution,"
+   " toute évaluation est donc impossible jusqu'à la prochaine exécution.")
 
   ; The next three constants show up in the same dialog as the above evaluation-terminated string
   ; constants.
   ; The first two show up only when the user calls 'exit' (possibly with a status code).
   ; The third shows up when the program runs out of memory.
   (exited-successfully "Évaluation terminée avec succès.")
-  (exited-with-error-code "Évaluation terminée avec le code d'erreur ~a.") ;; ~a is filled in with a number between 1 and 255
+  ;; ~a is filled in with a number between 1 and 255
+  (exited-with-error-code "Évaluation terminée avec le code d'erreur ~a.")
   (program-ran-out-of-memory "Le programme est à cours de mémoire.")
 
   (show-evaluation-terminated-dialog "Montrer le dialogue ‘évaluation terminée’")
   (evaluation-terminated-ask "Montrer ce dialogue la prochaine fois")
 
-  (last-stack-frame "Montrer le dernier appel de fonction sur la pile.")
-  (last-stack-frames "Montrer les derniers ~a appels de fonction sur la pile.")
-  (next-stack-frames "Montrer les ~a appels de fonction suivants sur la pile.")
+  (last-stack-frame "Montrer le dernier appel de fonction sur la pile")
+  (last-stack-frames "Montrer les derniers ~a appels de fonction sur la pile")
+  (next-stack-frames "Montrer les ~a appels de fonction suivants sur la pile")
+  (more-stack-frames "Montrer plus d'appels de fonction sur la pile")
 
   ;;; welcoming message in repl
   (language "Langage")
@@ -1422,6 +1566,10 @@
   (teachpack "Teachpack")
   (welcome-to "Bienvenue dans")
   (version "version")
+  ;; The following is shown on 2nd line of welcome message in repl.
+  ;; It is concatenated at end of: "language": LANGUAGE "; memory limit:" LIMIT
+  ;; therefore you get to decide punctuation for your language here
+  (memory-limit "; limite mémoire :")
 
   ;;; kill evaluation dialog
   (kill-evaluation? "Voulez-vous tuer l'évaluation ?")
@@ -1430,8 +1578,8 @@
   (kill? "Tuer ?")
 
   ;;; version checker
-  (version:update-menu-item "Rechercher des mises à jour…")
-  (version:update-check "Recherche de mises à jour") ; dialog title, with the next line
+  (version:update-menu-item   "Rechercher des mises à jour…")
+  (version:update-check       "Recherche de mises à jour") ; dialog title, with the next line
   (version:connecting-server  "Connection au serveur de version Racket")
   (version:results-title      "Vérification de la version")
   (version:do-periodic-checks "Périodiquement rechercher de nouvelles mises à jour de Racket ?")
@@ -1460,22 +1608,27 @@
   (module-browser "Navigateur de modules") ;; frame title
   (module-browser... "Navigateur de &modules…") ;; menu item title
   (module-browser-in-file "Navigateur de m&odules pour ~a") ;; menu item title; ~a is filled with a filename
-  (module-browser-no-file "Navigateur de modules pour ce fichier") ;; menu item title for above menu item; used when there is no saved file
+  ;; menu item title for above menu item; used when there is no saved file
+  (module-browser-no-file "Navigateur de modules pour ce fichier")
   (module-browser-error-expanding "Erreur durant l'expansion du programme :\n\n~a")
   (module-browser-show-lib-paths "Montrer les fichiers chargés à l'aide de chemins de fichiers du type (lib ..)")
   (module-browser-progress "Navigateur de modules : ~a") ;; prefix in the status line
   (module-browser-compiling-defns "Navigateur de modules : compilation des définitions")
-  (module-browser-show-lib-paths/short "(require (lib …))") ;; check box label in show module browser pane in drscheme window.
-  (module-browser-show-planet-paths/short "(require (planet …))") ;; check box label in show module browser pane in drscheme window.
+  ;; check box label in show module browser pane in drscheme window.
+  (module-browser-show-lib-paths/short "(require (lib …))")
+  ;; check box label in show module browser pane in drscheme window.
+  (module-browser-show-planet-paths/short "(require (planet …))")
   (module-browser-refresh "Rafraîchir") ;; button label in show module browser pane in drscheme window.
-  (module-browser-highlight "Chercher") ;; used to search in the graph; the label on a text-field% object
+  ;; used to search in the graph; the label on a text-field% object
+  (module-browser-highlight "Chercher")
   (module-browser-only-in-plt-and-module-langs
    "Le navigateur de modules n'est disponible que pour les programmes qui contiennent des modules.")
   (module-browser-name-length "Noms")
   (module-browser-name-short "courts")
   (module-browser-name-medium "moyens")
   (module-browser-name-long "longs")
-  (module-browser-name-very-long "longs, avec phases")  ;; like 'Long' but shows the phases where this file is loaded
+    ;; like 'Long' but shows the phases where this file is loaded
+  (module-browser-name-very-long "longs, avec phases")
   (module-browser-open-all "Ouvrir tous les fichiers montrés ici")
 
   (happy-birthday-matthias "Joyeux anniversaire, Matthias !")
@@ -1483,7 +1636,9 @@
   (happy-birthday-shriram "Joyeux anniversaire, Shriram !")
 
   (mrflow-using-default-language-title "Langage par défaut utilisé")
-  (mrflow-using-default-language "Le langage actuellement utilisé n'a pas de table de types défini pour ses primitives. R5RS Scheme est utilisé à la place.")
+  (mrflow-using-default-language
+   "Le langage actuellement utilisé n'a pas de table de types"
+   " défini pour ses primitives. R5RS Scheme est utilisé à la place.")
   (mrflow-button-title "Analyzer")
   ;(mrflow-unknown-style-delta-error-title "Delta de Style de boîte inconnu")
   ;(mrflow-unknown-style-delta-error "Delta de style de boîte inconnu : ~a")
@@ -1542,7 +1697,8 @@
   (stepper-jump-to-selected "au début de la sélection")
   (stepper-jump-to-previous-application "au pas d'application précédent")
   (stepper-jump-to-next-application "au pas d'application suivant")
-  (stepper-out-of-steps "Arrivé à la fin de l'évaluation sans trouver le type de pas que vous recherchiez.")
+  (stepper-out-of-steps
+   "Arrivé à la fin de l'évaluation sans trouver le type de pas que vous recherchiez.")
   (stepper-no-such-step/title "Pas non trouvé")
   (stepper-no-such-step "Impossible de trouver un pas qui satisfasse ce critère.")
   (stepper-no-such-step/earlier "Impossible de trouver un pas précédent qui satisfasse ce critère.")
@@ -1558,10 +1714,6 @@
 
   (stepper-no-last-step "Pas de pas final pour l'instant.")
 
-
-
-
-
   (debug-tool-button-name "Déboguer")
 
   (dialog-back "Précédent")
@@ -1569,7 +1721,8 @@
   ;; warnings about closing a drscheme frame when the program
   ;; might still be doing something interesting
   (program-is-still-running "Le programme dans la fenêtre de définition est toujours en cours d'exécution. Fermer la fenêtre quand même ?")
-  (program-has-open-windows "Le programme dans la fenêtre de définition a d'autres fenêtres ouvertes. Fermer la fenêtre quand même ?")
+  (program-has-open-windows
+   "Le programme dans la fenêtre de définition a d'autres fenêtres ouvertes. Fermer la fenêtre quand même ?")
 
   ;; ml-command-line-arguments is for the command line arguments
   ;; label in the module language details in the language dialog.
@@ -1615,7 +1768,8 @@
   (profj-intermediate-lang "Intermédiaire")
   (profj-intermediate-lang-one-line-summary "Langage Java restreint pour l'enseignement des etudiants niveau intermédiaire")
   (profj-intermediate-access-lang "Intermédiaire + accès")
-  (profj-intermediate-access-lang-one-line-summary "Langage Java restreint pour l'enseignement des etudiants niveau intermédiaire, avec modificateurs d'accès")
+  (profj-intermediate-access-lang-one-line-summary
+   "Langage Java restreint pour l'enseignement des etudiants niveau intermédiaire, avec modificateurs d'accès")
   (profj-dynamic-lang "Java + types dynamiques")
   (profj-dynamic-lang-one-summary "Java, plus types dynamiques")
 
@@ -1632,19 +1786,23 @@
   (profj-coverage-color-heading "Couleurs de couverture") ; Heading for preference to choose coverage colors
   (profj-coverage-color-covered "expressions couvertes")
 
-  (profj-language-config-display-preferences "Préférences pour l'affichage") ; Heading for preferences controlling printing
+  ; Heading for preferences controlling printing
+  (profj-language-config-display-preferences "Préférences pour l'affichage")
   (profj-language-config-display-style "Styles d'affichage")
   (profj-language-config-display-field "Classe et champs")
   (profj-language-config-class "Classe")
   (profj-language-config-display-array "Montrer le contenu des tableaux ?")
-  (profj-language-config-testing-preferences "Préférences pour les tests") ; Heading for preferences controlling test behavior
-  ;(profj-language-config-testing-enable "Montrer le résultat des tests lors de l'exécution ?") ; Run should be the word found on the Run button
+  ; Heading for preferences controlling test behavior
+  (profj-language-config-testing-preferences "Préférences pour les tests")
+  ; Run should be the word found on the Run button
+  ;(profj-language-config-testing-enable "Montrer le résultat des tests lors de l'exécution ?")
   (profj-language-config-testing-coverage "Collecter l'information de couverture durant les tests ?")
   (profj-language-config-support-test-language "Supporter l'extension de langage « test » ?")
   (profj-language-config-testing-check "Permettre les expressions de type « check » ?") ; check should not be translated
   (profj-language-config-classpath "Chemin d'accès aux classes")
   (profj-language-config-choose-classpath-directory "Choisissez le répertoire à ajouter au chemin d'accès aux classes")
-  (profj-language-config-classpath-display "Montrer la valeur actuelle") ; Button label to print the current classpath
+  ; Button label to print the current classpath
+  (profj-language-config-classpath-display "Montrer la valeur actuelle")
 
   (profj-test-name-close-to-example "Le nom de classe ~a contient un mot qui ressemble au mot « Example ».")
   (profj-test-name-example-miscapitalized "Le mot « example » dans le nom de classe ~a doit être écrit « Example »")
@@ -1677,7 +1835,9 @@
   (test-engine-enable-tests "Activer les tests")
   (test-engine-disable-tests "Désactiver les tests")
   (test-engine-enable-disable-tests-only-in-teaching-languages
-   "Le menu « Activer/Désactiver les tests » est utilisé pour activer et désactiver le support pour les tests dans les langages d'enseignement HtDP et DMdA uniquement. Utilisez la section « Montrer les détails » dans la fenêtre de sélection du langage pour controller les sous-modules qui sont exécutés par le langage Racket.")
+   "Le menu « Activer/Désactiver les tests » est utilisé pour activer et désactiver le support"
+   " pour les tests dans les langages d'enseignement HtDP et DMdA uniquement. Utilisez la section « Montrer les détails »"
+   " dans la fenêtre de sélection du langage pour controller les sous-modules qui sont exécutés par le langage Racket.")
 
   (test-engine-ran-1-test "1 test exécuté.")
   (test-engine-ran-1-check "1 contrôle exécuté.")
@@ -1831,12 +1991,15 @@
   (bug-track-forget "Oublier")
   (bug-track-forget-all "Oublier tous")
 
-  ;; planet status messages in the bottom of the drscheme window; the ~a is filled with the name of the package
+  ;; planet status messages in the bottom of the drscheme window;
+  ;; the ~a is filled with the name of the package
   (planet-downloading "PLaneT: téléchargement de ~a…")
   (planet-installing "PLaneT: installation de ~a…")
   (planet-finished "PLaneT: ~a à jour.")
   (planet-docs-building "PLaneT: compilation des docs (déclenché par ~a)…")
-  (planet-no-status "PLaneT") ;; this can happen when there is status shown in a different and then the user switches to a tab where planet hasn't been used
+  ;; this can happen when there is status shown in a different and then
+  ;; the user switches to a tab where planet hasn't been used
+  (planet-no-status "PLaneT")
 
   (bug-report-field-pkg "Information système du logiciel") ; package -> paquetage, bibliothèque ?
 
@@ -1844,11 +2007,13 @@
   ;; the first three strings are in the dialog that appears. The last one is in the preferences dialog
   (normalize "Normaliser")
   (leave-alone "Ne pas changer")
-  (normalize-string-info "La chaîne de caractères à coller contient des ligatures ou des caractères non-normalisés. Normaliser la chaîne ?")
+  (normalize-string-info
+   "La chaîne de caractères à coller contient des ligatures ou des caractères non-normalisés. Normaliser la chaîne ?") ;; XXX
   (normalize-string-preference "Normaliser les chaînes de caractères durant le collage")
   (ask-about-normalizing-strings "Demander à propos de la normalisation des chaînes de caractères")
 
-  (always-use-platform-specific-linefeed-convention "Toujours utiliser la convention spécifique au système d'exploitation pour les fins de lignes")
+  (always-use-platform-specific-linefeed-convention
+   "Toujours utiliser la convention spécifique au système d'exploitation pour les fins de lignes")
 
   ;; optimization coach
   (hide-optimization-coach "Cacher l'informateur d'optimisation") ; better than "entraîneur"...
@@ -1864,13 +2029,16 @@
   ;; (technically, editors that implement color:text<%>)
   (spell-check-string-constants "Vérification orthographique des chaînes de caractères constantes")
   (spell-check-scribble-text "Vérification orthographique du texte (entre {} dans Scribble)")
-  (spelling-dictionaries "Dictionnaires orthographiques") ; (sub)menu whose items are the different possible dictionaries
+  ; (sub)menu whose items are the different possible dictionaries
+  (spelling-dictionaries "Dictionnaires orthographiques")
   (default-spelling-dictionary "Dictionnaire par défaut") ; first item in menu from previous line
   (misspelled-text-color "Couleur de texte pour les erreurs orthographiques") ;; in the preferences dialog
   (cannot-find-ispell-or-aspell-path "Programmes 'aspell' ou 'ispell' introuvables")
   ; puts the path to the spell program in the ~a and then the error message
   ; is put following this string (with a blank line in between)
   (spell-program-wrote-to-stderr-on-startup "Le programme de vérification orthographique (~a) à émit un message d'erreur :")
+  (spell-program-did-not-respond-after-some-seconds
+   "Le programme de vérification orthographique (~a) n'à pas répondu après ~a secondes")
   (spell-skip-to-next-misspelled-word "Sauter au mot incorrect suivant") ;; menu item
   (spell-suggest-corrections "Suggérer de possibles corrections…") ;; menu item
   (spell-correction-suggestions "Suggestions de corrections") ;; dialog title
@@ -1886,11 +2054,14 @@
   (install-pkg-dialog-title "Installation de paquetage")
   (install-pkg-source-label "Source du paquetage")
   (install-pkg-package-name "Nom du paquetage")
-  (install-pkg-package-source-desc "Une source de paquetage est un nom de paquetage, un fichier, un répertoire, un URL, ou une référence vers GitHub")
+  (install-pkg-package-source-desc
+   "Une source de paquetage est un nom de paquetage, un fichier, un répertoire, un URL, ou une référence vers GitHub")
   (install-pkg-infer "Inférer")
   (install-pkg-use "Utiliser") ; as opposed to "Infer", label for text box
   (install-pkg-type-label "Type de source de paquetage")
   (install-pkg-file "Fichier")
+  (install-pkg-link "Lien")
+  (install-pkg-static-link "Lien statique")
   (install-pkg-dir "Répertoire")
   (install-pkg-dir-url "Répertoire distant")
   (install-pkg-file-url "Fichier distant")
@@ -1917,6 +2088,7 @@
   (install-pkg-default "Par défaut")
   (install-pkg-scope-label "Champ d'application du paquetage")
   (install-pkg-default-scope-label "Champ d'application par défaut pour le paquetage") ; for picking the scope to be default
+  (install-pkg-default-scope-changed "Champ d'application par défaut a été correctement changé vers ~a") ; confirming message after change
   (install-pkg-installation "Une installation Racket spécifique")
   (install-pkg-user "Un utilisateur et une version de Racket spécifiques")
   (install-pkg-set-as-default "Fixer comme défaut")
@@ -1926,6 +2098,16 @@
   (install-pkg-update-package-list "Mettre à jour la liste des paquetages")
   (install-pkg-stop-update "Arrêter la mise à jour")
   (install-pkg-filter "Filtre")
+  (install-pkg-match "~a/~a correspondance")
+  (install-pkg-package "Paquetage")
+  (install-pkg-author "Auteur")
+  (install-pkg-description "Description")
+  (install-pkg-tags "Étiquettes")
+  (install-pkg-checksum "Somme de contrôle")
+  (install-pkg-source "Source")
+  (install-pkg-catalog "Catalogue")
+  (install-pkg-scope "Champ d'application")
+  (install-pkg-name "Nom")
   (install-pkg-update-catalogs? "Mettre à jour la base de données pour refléter l'ensemble des catalogues configurés ?")
   (install-pkg-currently-configured-are "Les catalogues actuellement configurés sont")
   (install-pkg-database-recorded-are "Les catalogues enregistrés dans la base de données sont")
@@ -1945,24 +2127,44 @@
   (install-pkg-close-terminal-output "Fermer la sortie de données")
   (install-pkg-show-all-options "Montrer toutes les options")
   (install-pkg-migrate-available-installations "Installations disponibles")
+  ;; all ~a will be substituted with the different single characters
+  ;; conveying the state, by default these are ✓*!=@
+  (install-pkg-legend "~a : installé ; ~a : auto-installé ; ~a : pas de champ d'application par défaut ; ~a : installé comme un lien ; ~a : installé à partir d'un URL")
   (pkg-manager-menu-item "Gestionnaire de paquetages…")  
+  (install-pkg-title "Gestionnaire de paquetages")
   ;; where ~a gets an installation name:
   (install-pkg-packages-for "Paquetages pour ~a")
-  (install-pkg-really-remove-installation "Êtes-vous sûr de vouloir supprimer tous les paquetages installés et toutes les informations pour ~a ?")
+  (install-pkg-really-remove-installation
+   "Êtes-vous sûr de vouloir supprimer tous les paquetages installés et toutes les informations pour ~a ?")
+  (install-pkg-installer "Installateur de paquetages")
+  (install-pkg-copy "Copier le message")
+  (install-pkg-installation "installation")
+  (install-pkg-user "utilisateur")
+  (install-pkg-any "N'importe lequel") ;; any file type
+  (install-pkg-bad "mauvais") ;; bad (not supported) file type
+  (install-pkg-catalogs "Catalogues de paquetages")
+  (install-pkg-updating "Mise à jour de la liste de paquetages…")
+  (install-pkg-updating-from "Misa à jour à partir de ~a…")
+  (install-pkg-details-from "Obtention des détails pour ~a à partir de ~a…")
   
   (install-pkg-abort-set-scope "Abandonner le changement de champ d'application")
 
   (install-pkg-dependencies-fail "Échec : annule l'installation ou la mise à jour si des dépendances manquent")
-  (install-pkg-dependencies-force "Force : installe même si des dépendances manquent ou ont la mauvaise version")
-  (install-pkg-dependencies-search-ask "Demande : demande à propos de chaque dépendance manquante (non-supporté par l'interface graphique)")
-  (install-pkg-dependencies-search-auto "Auto : installe automatiquement les dépendances qui manquent ou qui ont la mauvaise version")
-  (install-pkg-dependencies-search-auto+update "Auto + Mise à jour : automatiquement met à jour toutes les dépendances possibles")
+  (install-pkg-dependencies-force
+   "Force : installe même si des dépendances manquent ou ont la mauvaise version")
+  (install-pkg-dependencies-search-ask
+   "Demande : demande à propos de chaque dépendance manquante (non-supporté par l'interface graphique)")
+  (install-pkg-dependencies-search-auto
+   "Auto : installe automatiquement les dépendances qui manquent ou qui ont la mauvaise version")
+  (install-pkg-dependencies-search-auto+update
+   "Auto + Mise à jour : automatiquement met à jour toutes les dépendances possibles")
 
   (install-pkg-dependencies-mode "Mode pour les dépendances")
 
   (install-pkg-dependencies-search-ask-not-supported-in-gui
    "Le mode «demande» pour les dépendances n'est pas supporté dans cet installeur graphique.")
-  ;; "~a" is pre-":" part of `install-pkg-dependencies-fail' or `install-pkg-dependencies-search-auto':
+  ;; "~a" is pre-":" part of `install-pkg-dependencies-fail'
+  ;; or `install-pkg-dependencies-search-auto':
   (install-pkg-deps-is "Le mode par défaut pour les dépendances est ~a")
 
   (install-pkg-package-catalogs "Catalogues pour les paquetages") ; label for a list box

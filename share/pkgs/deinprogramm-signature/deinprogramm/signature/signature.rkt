@@ -15,7 +15,8 @@
 	 procedure-to-blame?
 	 procedure-to-blame-proc procedure-to-blame-syntax
 	 make-type-variable-info type-variable-info?
-	 signature-checking-enabled?)
+	 signature-checking-enabled?
+	 (struct-out exn:fail:contract:signature))
 
 (require scheme/promise
 	 mzlib/struct
@@ -89,11 +90,18 @@
 (define (signature-update-info-promise sig inf)
   (struct-copy signature sig (info-promise inf)))
 
+(define-struct (exn:fail:contract:signature exn:fail:contract) (obj signature blame)
+  #:transparent)
+
 ; message may be #f
-(define signature-violation-proc (make-parameter (lambda (obj signature message blame)
-						  (raise (make-exn:fail:contract (or message
-										     (format "got ~e" obj))
-										 (current-continuation-marks))))))
+(define signature-violation-proc
+  (make-parameter
+   (lambda (obj signature message blame)
+     (raise (make-exn:fail:contract:signature (or message
+						  (format "got ~e" obj))
+					      (current-continuation-marks)
+					      obj signature blame)))))
+
 (define (signature-violation obj signature msg blame)
   ((signature-violation-proc) obj signature msg blame))
 

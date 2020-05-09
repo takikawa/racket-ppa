@@ -868,8 +868,7 @@ all of the names in the tools library, for use defining keybindings
   drracket:debug:show-backtrace-window
   (->* (string?
         (or/c exn? 
-              (listof srcloc?)
-              (non-empty-listof (cons/c string? (listof srcloc?)))))
+              (listof srcloc?)))
        ((or/c #f (is-a?/c drracket:rep:text<%>))
         (or/c #f (is-a?/c drracket:unit:definitions-text<%>)))
        void?)
@@ -878,39 +877,18 @@ all of the names in the tools library, for use defining keybindings
     (defs #f)))
   @{Shows the backtrace window you get when clicking on the bug in
     DrRacket's REPL.
-    
-    This function simply calls @racket[drracket:debug:show-backtrace-window/edition-pairs],
-    using @racket[drracket:debug:srcloc->edition/pair].
-    })
- 
- (proc-doc/names
-  drracket:debug:srcloc->edition/pair
-  (->* (srcloc?
-        (or/c #f (is-a?/c drracket:rep:text<%>))
-        (or/c #f (is-a?/c drracket:unit:definitions-text<%>)))
-       ((or/c #f (and/c hash? hash-equal?)))
-       (or/c #f (cons/c (let ([weak-box-containing-an-editor?
-                               (λ (x) (and (weak-box? x)
-                                           (let ([v (weak-box-value x)])
-                                             (or (not v)
-                                                 (is-a? v editor<%>)))))])
-                          weak-box-containing-an-editor?)
-                        number?)))
-  ((srcloc ints defs)
-   ((cache #f)))
-  @{Constructs a edition pair from a source location,
-    returning the current edition of the editor editing
-    the source location (if any).
-    
-    The @racket[ints] and @racket[defs] arguments are used to map source locations, 
-    in the case that the source location corresponds to the definitions
-    window (when it has not been saved) or the interactions window. This calls
-    @racket[normalize-path], so to avoid the severe performance penalty that can
-    incur on some filesystems, the @racket[cache] argument is consulted and updated, 
-    when it is provided. Use this argument if you're calling 
-    @racket[drracket:debug:srcloc->edition/pair] a number of times in a loop, when you
-    do not expect the filesystem to change across iterations of the loop. The initial
-    argument should be an empty equal hash (e.g., @racket[(make-hash)]).
+
+ If @racket[dis] is a list of @racket[srcloc?], then this function simply
+ calls @racket[drracket:debug:show-backtrace-window/edition-pairs],
+ passing @racket[error-message], @racket[dis], and a list of @racket[#f]
+ that is as long as @racket[dis].
+
+ If @racket[dis] is an @racket[exn:fail?], then this function calls
+ @racket[drracket:debug:show-backtrace-window/edition-pairs/two], extracting
+ the builtin stack trace (via @racket[continuation-mark-set->context])
+ and an errortrace stack trace from
+ the continuation marks in @racket[exn].
+
     })
  
  

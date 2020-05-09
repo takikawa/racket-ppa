@@ -141,6 +141,15 @@ please adhere to these guidelines:
   (plt-homepage "Racket")
   (pbd-homepage "Program by Design")
 
+  ;; having an issue (replaces the bug report form, whose string constants are below)
+  (have-an-issue? "Having an Issue?…")
+  (use-github-or-the-mailing-list-for-issues
+   "If you have found a bug in Racket or DrRacket, please open an issue on"
+   " GitHub.\n\nIf you have found something that does not make sense, but"
+   " you are not sure if it is a bug or not, try asking on the mailing list.")
+  (visit-mailing-lists "Visit Mailing Lists") ;; button in dialog
+  (visit-github "Visit GitHub") ;; button in dialog, goes to 'open issue' page
+
   ;;; bug report form
   (cancel-bug-report? "Cancel Bug Report?")
   (are-you-sure-cancel-bug-report?
@@ -167,7 +176,7 @@ please adhere to these guidelines:
   (bug-report-synthesized-information "Synthesized Information")  ;; dialog title
   (bug-report-show-synthesized-info "Show Synthesized Info")
   (bug-report-submit "Submit")
-  ;; button in bug report dialog, next to cancel and bug-report-submit
+    ;; button in bug report dialog, next to cancel and bug-report-submit
   (close-and-save-bug-report "Close && Save")
   ;; same as above, but used when there are saved bug reports
   (bug-report-submit-menu-item "Submit Bug Report…")
@@ -196,14 +205,6 @@ please adhere to these guidelines:
   (malformed-email-address "Malformed email address")
   (pls-fill-in-either-description-or-reproduce
    "Please fill in either the Description field or the Steps to Reproduce field.")
-
-  (have-an-issue? "Having an issue? ...")
-  (use-github-or-the-mailing-list-for-issues
-   "If you have found a bug in Racket or DrRacket, please open an issue on GitHub.\n\nIf"
-   " you found something that does not make sense, but you are not sure if it is"
-   " a bug or not, try asking on the mailing list.")
-  (visit-github "Visit GitHub")
-  (visit-mailing-list "Visit Mailing Lists")
 
   ;;; check syntax
   (check-syntax "Check Syntax")
@@ -1104,7 +1105,10 @@ please adhere to these guidelines:
    "Changes to tool configuration will take effect the next time you start DrRacket.")
   (installed-tools "Installed tools")
   (tool-prefs-panel-tool:-label "Tool: ")
+  (tool-prefs-panel-title "Tools")
   (load-tool-when-drracket-starts? "Load the tool when DrRacket starts?")
+  (load-tool-load "Load the tool")
+  (load-tool-skip "Skip the tool")
   (unnamed-tool "unnamed tool ~a")
   (note-that-tool-loaded " (loaded)")
   (note-that-tool-was-skipped " (skipped)")
@@ -1554,6 +1558,7 @@ please adhere to these guidelines:
   (last-stack-frame "show the last stack frame")
   (last-stack-frames "show the last ~a stack frames")
   (next-stack-frames "show the next ~a stack frames")
+  (more-stack-frames "show more stack frames")
 
   ;;; welcoming message in repl
   (language "Language")
