@@ -1,6 +1,6 @@
-;; Bulgarian translation of Racket string constants file, version: 1.29
+;; Bulgarian translation of Racket string constants file, version: 1.31
 ;; This file is distributed under the same terms as Racket
-;; Copyright on translation: Alexander Shopov <ash@kambanaria.org>, 2015, 2016, 2017, 2018, 2019.
+;; Copyright on translation: Alexander Shopov <ash@kambanaria.org>, 2015, 2016, 2017, 2018, 2019, 2020.
 
 (module bulgarian-string-constants "string-constant-lang.rkt"
  ;;; when translating this constant, substitute name of actual language for `English'
@@ -921,6 +921,8 @@
  (save-all-files "Запазване на всички файлове")
  ; check box in the dialog and also used in the preferences dialog
  (save-after-switching-tabs "Запазване на файловете при смяна на подпрозорец")
+ (dont-ask-about-saving-after-switching-tabs
+  "Без питане и запазване на незапазени прозорци и подпрозорци при натискането на „Изпълнение“")
 
  (drscheme-internal-error "Вътрешна грешка на DrRacket")
 
@@ -1364,6 +1366,7 @@
  (last-stack-frame "показване на последния кадър от стека")
  (last-stack-frames "показване на предишните ~a кадъра от стека")
  (next-stack-frames "показване на следващите ~a кадъра от стека")
+ (more-stack-frames "показване на още кадри от стека")
 
  ;;; welcoming message in repl
  (language "Език")

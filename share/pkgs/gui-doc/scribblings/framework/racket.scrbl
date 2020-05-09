@@ -81,6 +81,12 @@
 
   @defmethod*[(((tabify-all) void?))]{
     Tabs all lines.
+
+  Indentation results depend on the graphical context associated with the object;
+  if there is not one, the indentation is based on the assumption that a fixed-width
+  font is used. If the object is viewed in an @racket[editor-canvas%]
+  and @racket[top-level-window<%>], the actual font information is used to determine
+  the initial number of spaces on a line.
   }
 
  @defmethod[#:mode public-final
@@ -97,6 +103,12 @@
   that follows an open parenthesis. If it returns @racket[#f], then the
   user's preferences (from the @onscreen{Indenting} panel of the @onscreen{Editing}
   panel in the preferences dialog) are used.
+
+  Indentation results depend on the graphical context associated with the object;
+  if there is not one, the indentation is based on the assumption that a fixed-width
+  font is used. If the object is viewed in an @racket[editor-canvas%]
+  and @racket[top-level-window<%>], the actual font information is used to determine
+  the initial number of spaces on a line.
 
   @history[#:added "1.9"
            #:changed "1.26" @list{Added the @racket[get-head-sexp-type] argument.}]

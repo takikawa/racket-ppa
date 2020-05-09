@@ -21,7 +21,7 @@
                               heap-size
                               location?
                               heap-value?
-                              heap-set! heap-ref with-heap
+                              heap-set! heap-ref with-heap current-heap
                               get-root-set read-root set-root! make-root)
                      plai/scribblings/fake-collector2
                      plai/scribblings/fake-mutator2
@@ -130,7 +130,9 @@ Determines if @racket[v] is a root.
           (gc:deref (gc:alloc-flat 2)))
         2)
   ]}
-                                                     
+
+@defthing[current-heap (parameter/c (vectorof heap-value?))]{Bound to the current heap inside of @racket[with-heap].}
+
 @defform[(with-roots (root-var ...) expr1 expr2 ...)
          #:contracts ([root-var location?])]{
   Evaluates each of @racket[expr1] and the @racket[expr2]s in

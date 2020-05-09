@@ -202,7 +202,7 @@ of Chez Scheme to compile Chez Scheme boot files.
 
  * Obtain a sufficiently new Racket implementation, possibly by
    following the directions in "../README.txt" to build the
-   traditional implemenation of Racket. No extra packages are needed
+   traditional implementation of Racket. No extra packages are needed
    beyond a minimal Racket build.
 
  * Set the current directory to a "ChezScheme" directory --- either a
@@ -253,7 +253,7 @@ Structure
 
 The Racket-on-Chez implementation is in layers. The immediate layer
 over Chez Scheme is called "Rumble", and it implements delimited
-continuations, structures, chaperones and impersonators, engines (for                                          
+continuations, structures, chaperones and impersonators, engines (for
 threads), and similar base functionality. The Rumble layer is
 implemented in Chez Scheme.
 
@@ -380,8 +380,8 @@ the "bytecode" form.
 Set `PLT_LINKLET_SHOW_CP0` to see the Schemified form of a linklet
 after expansion and optimization by Chez Scheme's cp0.
 
-Set `PLT_LINKLET_SHOW_ASM` to see the assembly form of a linklet after
-compilation by Chez Scheme. Assembly format uses Chez Scheme's
+Set `PLT_LINKLET_SHOW_ASSEMBLY` to see the assembly form of a linklet
+after compilation by Chez Scheme. Assembly format uses Chez Scheme's
 abstraction of architecture-specific machine instructions (where the
 assembly is translated to actual machine code in a fairly
 straightforward way).
@@ -539,3 +539,55 @@ configuration:
    Effectiveness: Avoids improvement to stack traces, but also avoids
    increases load time and memory use of Racket programs by as much as
    50%.
+
+Inlining Expectations
+---------------------
+
+Chez Scheme will inline small Rumble functions as long as the inlined
+function body refers only to primitives and other identifiers that are
+explicitly defined in the Rumble library body. The "explicily defined"
+part can be tricky, particularly since inling will consider the
+function body after other inlining is already applied. For example,
+given
+
+  (define (list? v)
+    (or (null? v)
+        (and (pair? v)
+             (slow-list? v))))
+
+  (define (slow-list? v)
+    (let loop ([v v] [depth 0])
+      ....))
+
+then `list?` probably will not be inlined, because the call to
+`slow-list?` within `list?` is likely to be inlined, so that `list?`
+ends up calling the `loop` function nested within `slow-list?` (and
+`loop` is not defined at the level of the library body).
+
+The `$app/no-inline` primitive is useful to prevent unproductive
+inlining, particularly to enable other, productive inlining. For
+example,
+
+  (define (list? v)
+    (or (null? v)
+        (and (pair? v)
+             (#%$app/no-inline slow-list? v))))
+
+is likely to make `list?` inlinable, since the reference to
+`slow-list?` is preserved.
+
+Chez Scheme will inline small Rumble functions independent of the
+amount of inlining that has already happened at the call site of the
+Rumble function. To prevent code explosion and endless inlining
+cycles, however, it will not perform further inlining of a Rumble
+function that is referenced by code introduced by inlining another
+Rumble function.
+
+Using a macro to force inlining can be ok, but that technique should
+be used sparingly. Note that a reference to a primitive in a macro
+will be compiled as a safe reference to the primitive, since the
+conversion of a primitive reference to unsafe or not based on
+`(optimize-level)` is an expansion-time operation. So, macros that are
+meant to expand to uses of unsafe operations should refer to the
+operations using `#3%`; beware that such a reference will stay unsafe,
+even if `UNSAFE_COMP` is disabled in the makefile.

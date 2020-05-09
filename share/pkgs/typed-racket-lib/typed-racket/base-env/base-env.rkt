@@ -1286,7 +1286,8 @@
 [values (-polydots (a b) (cl->*
                            (-> (-values null))
                            (->acc (list a) a null)
-                           ((list a) (b b) . ->... . (make-ValuesDots (list (-result a)) b 'b))))]
+                           ((list a) (b b) . ->... . (make-ValuesDots (list (-result a)) b 'b))
+                           (->* (list) Univ ManyUniv)))]
 [call-with-values
   (-polydots (b a)
     (cl->*
@@ -3493,7 +3494,7 @@
         (?N (-opt -Integer))
         (ind-pair (-pair -Index -Index))
         (sel (-> (-lst (-opt ind-pair)) (-opt ind-pair)))
-        (output (-opt (-pair ind-pair (-lst (-opt ind-pair)))))
+        (output (Un (-lst ind-pair) (-lst (-lst (-opt ind-pair)))))
         (-Input (Un -String -Input-Port -Bytes -Path)))
    (->optkey -Pattern -Input (N ?N -Bytes) #:match-select sel #f output)))
 

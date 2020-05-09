@@ -109,6 +109,9 @@
     ((null? (cdr args)) (k (car args)))
     (else (#2%apply k args)))) ; library apply not available yet
 
+;; before anything that returns multiple values
+(define-hand-coded-library-entry values-error)
+
 ;;; dounderflow & nuate must come before callcc
 (define-hand-coded-library-entry dounderflow)
 (define-hand-coded-library-entry nuate)
@@ -126,11 +129,13 @@
 (define-hand-coded-library-entry dofretu16*)
 (define-hand-coded-library-entry dofretu32*)
 (define-hand-coded-library-entry domvleterr)
-(define-hand-coded-library-entry values-error)
 (define-hand-coded-library-entry bytevector=?)
 (define-hand-coded-library-entry $wrapper-apply)
 (define-hand-coded-library-entry wrapper-apply)
 (define-hand-coded-library-entry arity-wrapper-apply)
+(define-hand-coded-library-entry event-detour)
+(define-hand-coded-library-entry popcount-slow) ; before fxpopcount use
+(define-hand-coded-library-entry cpu-features)  ; before fxpopcount use
 
 (define $instantiate-code-object ($hand-coded '$instantiate-code-object))
 
@@ -498,7 +503,7 @@
 (define-library-entry (fx<= x y) (fxnonfixnum2 'fx<= x y))
 (define-library-entry (fx>= x y) (fxnonfixnum2 'fx>= x y))
 (define-library-entry (fx=? x y) (fxnonfixnum2 'fx=? x y))
-(define-library-entry (fx<? x y) (fxnonfixnum2 'fx< x y))
+(define-library-entry (fx<? x y) (fxnonfixnum2 'fx<? x y))
 (define-library-entry (fx>? x y) (fxnonfixnum2 'fx>? x y))
 (define-library-entry (fx<=? x y) (fxnonfixnum2 'fx<=? x y))
 (define-library-entry (fx>=? x y) (fxnonfixnum2 'fx>=? x y))
@@ -1122,7 +1127,7 @@
           (let ([handler $signal-interrupt-handler])
             ($tc-field 'signal-interrupt-pending ($tc) #f)
             (keyboard)
-            (handler x))
+            (for-each handler ($dequeue-scheme-signals ($tc))))
           (keyboard))))
   (define (keyboard)
     (if ($tc-field 'keyboard-interrupt-pending ($tc))
@@ -1380,6 +1385,18 @@
 
 (define-library-entry (apply3 p x1 x2 x3 ls)
   (doapply p (x1 x2 x3) ls))
+
+(define-library-entry ($check-continuation c check-as? as)
+  (let ([who 'call-in-other-continuation])
+    (unless ($continuation? c)
+      ($oops who "~s is not a continuation" c))
+    (when check-as?
+      (unless (let ([c-as ($continuation-attachments c)])
+                (or (eq? as c-as)
+                    (and (pair? as)
+                         (eq? (cdr as) c-as))))
+        ($oops who "~s is not an extension of of the attachments of ~s" as c)))
+    ($do-wind ($current-winders) ($continuation-winders c))))
 
 (define-library-entry (eqv? x y)
   (if (eq? x y) 

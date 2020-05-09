@@ -10,12 +10,15 @@
 ;; FIXME: Need to disable printing of structs with custom-write property
 
 ;; pretty-print-syntax : syntax port partition number SuffixOption hasheq number bool
+;;                       #:taint-icons (or/c #f #t (box/c (Listof Nat)))
 ;;                    -> range%
 (define (pretty-print-syntax stx port
-                             primary-partition colors suffix-option styles columns abbrev?)
+                             primary-partition colors suffix-option styles columns abbrev?
+                             #:taint-icons [taint-icons #f])
   (define range-builder (new range-builder%))
   (define-values (datum ht:flat=>stx ht:stx=>flat)
-    (syntax->datum/tables stx primary-partition colors suffix-option abbrev?))
+    (syntax->datum/tables stx primary-partition colors suffix-option abbrev?
+                          #:taint-icons? (and taint-icons #t)))
   (define identifier-list
     (filter identifier? (hash-map ht:stx=>flat (lambda (k v) k))))
   (define (flat=>stx obj)
@@ -28,6 +31,8 @@
   (define (pp-pre-hook obj port)
     (when (flat=>stx obj)
       (send range-builder push! (current-position)))
+    (when (and (box? taint-icons) (wrapped-stx? obj))
+      (set-box! taint-icons (cons (current-position) (unbox taint-icons))))
     (send range-builder set-start obj (current-position)))
   (define (pp-post-hook obj port)
     (define stx (flat=>stx obj))
