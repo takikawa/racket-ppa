@@ -1,3 +1,9 @@
+racket (7.7+dfsg1-1) UNRELEASED; urgency=medium
+
+  * Update to new upstream version 7.7+dfsg1.
+
+ -- David Bremner <bremner@debian.org>  Sat, 01 Aug 2020 11:49:15 -0300
+
 racket (7.6+dfsg1-3) unstable; urgency=medium
 
   * Restore upstream commit 17bc6262938f, try a different armhf gmp fix
