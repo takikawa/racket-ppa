@@ -73,13 +73,13 @@ aus dem @racket[let]-Ausdruck.
 
 @defform[(letrec ((id expr) ...) expr)]{
 Ein @racket[letrec]-Ausdruck ist
-ähnlich zum entsprechenden @racket[let]-Ausdruck, mit dem Unterschied, daß sich
+ähnlich zum entsprechenden @racket[let]-Ausdruck, mit dem Unterschied, dass sich
 die @racket[expr]s aus den Bindungen auf die gebundenen Namen beziehen
 dürfen.}
 
 @defform[(let* ((id expr) ...) expr)]{
 Ein @racket[let*]-Ausdruck ist ähnlich zum entsprechenden
-@racket[let]-Ausdruck, mit dem Unterschied, daß sich die @racket[expr]s
+@racket[let]-Ausdruck, mit dem Unterschied, dass sich die @racket[expr]s
 aus den Bindungen auf die Namen beziehen dürfen, die jeweils vor dem
 @racket[expr] gebunden wurden. Beispiel:
 
@@ -107,12 +107,12 @@ sich also auf das @racket[a] aus dem @racket[let*]-Ausdruck, nicht das
 Zu den Patterns aus der "Anfänger"-Sprache kommen noch drei neue hinzu:
 
 @itemlist[
-@item{Das Pattern @racket[empty] paßt auf die leere Liste.}
+@item{Das Pattern @racket[empty] passt auf die leere Liste.}
 
-@item{Das Pattern @racket[(make-pair pattern pattern)] paßt auf Paare, bei
+@item{Das Pattern @racket[(make-pair pattern pattern)] passt auf Paare, bei
   denen die beiden inneren Patterns auf @racket[first] bzw. @racket[rest] passen.}
 
-@item{Das Pattern [(list pattern ...)] paßt auf Listen, die genauso
+@item{Das Pattern [(list pattern ...)] passt auf Listen, die genauso
 viele Elemente haben, wie Teil-Patterns im @racket[list]-Pattern
 stehen und bei denen die inneren Patterns auf die Listenelemente
 passen.

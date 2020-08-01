@@ -38,6 +38,7 @@ EXTERN char *Sdefaultheapdirs;
 EXTERN s_thread_key_t S_tc_key;
 EXTERN scheme_mutex_t S_tc_mutex;
 EXTERN s_thread_cond_t S_collect_cond;
+EXTERN s_thread_cond_t S_collect_thread0_cond;
 EXTERN INT S_tc_mutex_depth;
 #endif
 
@@ -117,6 +118,8 @@ EXTERN struct S_G_struct {
     ptr nuate_id;
     ptr null_continuation_id;
     ptr collect_request_pending_id;
+    ptr event_and_resume_id;
+    ptr event_and_resume_star_id;
 
   /* gc.c */
     ptr guardians[static_generation+1];
@@ -133,6 +136,7 @@ EXTERN struct S_G_struct {
     ptr countof_names;
     ptr gcbackreference[static_generation+1];
     uptr phantom_sizes[static_generation+1];
+    IGEN prcgeneration;
 
   /* intern.c */
     iptr oblist_length;

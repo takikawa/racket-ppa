@@ -206,6 +206,8 @@
     (send config listen-pretty-abbrev?
           (lambda (_) (update/preserve-view)))
     (send*/i config config<%>
+      (listen-taint-icons
+       (lambda (mode) (update/preserve-view)))
       (listen-show-hiding-panel?
        (lambda (show?) (show-macro-hiding-panel show?)))
       (listen-split-context?

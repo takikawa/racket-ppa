@@ -13,6 +13,8 @@
 	 (for-syntax syntax/kerncase)
 	 (for-syntax racket/struct-info))
 
+(require (only-in test-engine/racket-tests test))
+
 (define-syntax (print-results stx)
   (syntax-case stx ()
     ((_ expr)
@@ -138,7 +140,8 @@
 	  ;; the module-expansion machinery can be used to handle
 	  ;; requires, etc.:
 	  #`(#%plain-module-begin
-	     (module-continue (e1 ...) () ())))))
+	     (module-continue (e1 ...) () ())
+              (module+ test (test))))))
 
      ;; module-continue
      (lambda (stx)

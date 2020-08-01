@@ -320,7 +320,7 @@
 
     (define new-url
       (ormap (λ (h)
-               (match (regexp-match #rx#"^Location: (.*)$" h)
+               (match (regexp-match #rx#"^(?i:Location): (.*)$" h)
                  [#f #f]
                  [(list _ m1b)
                   (define m1 (bytes->string/utf-8 m1b))
@@ -523,7 +523,7 @@
                            #:method [method-bss #"GET"]
                            #:headers [headers-bs empty]
                            #:data [data #f]
-                           #:content-decode [decodes '(gzip)])
+                           #:content-decode [decodes '(gzip deflate)])
   (unless (member (url-scheme u) '(#f "http" "https"))
     (error 'http-sendrecv/url "URL scheme ~e not supported" (url-scheme u)))
   (define ssl?

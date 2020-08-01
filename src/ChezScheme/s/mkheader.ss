@@ -41,6 +41,7 @@
         (fold-right (lambda (x rest) 
                       (case x
                         [(#\-) (cons #\_ rest)]
+                        [(#\+) (cons #\_ rest)]
                         [(#\?) (cons #\p rest)]
                         [(#\>) rest]
                         [(#\*) (cons #\s rest)]
@@ -75,6 +76,9 @@
          (lambda (a)
            (apply
              (lambda (field type disp len)
+               (putprop (string->symbol (format "~a-~a" struct field)) '*c-ref* (if len
+                                                                                    (cons name len)
+                                                                                    name))
                (if len
                    (def (format "~s(x,i)" name)
                         (format (if (eq? ref &ref) "(~a+i)" "(~a[i])")
@@ -169,7 +173,9 @@
 
   (set-who! mkscheme.h
     (lambda (ofn target-machine)
-      (fluid-let ([op (open-output-file ofn 'replace)])
+      (fluid-let ([op (if (output-port? ofn)
+                          ofn
+                          (open-output-file ofn 'replace))])
         (comment "scheme.h for Chez Scheme Version ~a (~a)" scheme-version target-machine)
   
         (nl)
@@ -705,7 +711,9 @@
 
   (set! mkequates.h
     (lambda (ofn)
-      (fluid-let ([op (open-output-file ofn 'replace)])
+      (fluid-let ([op (if (output-port? ofn)
+                          ofn
+                          (open-output-file ofn 'replace))])
         (comment "equates.h for Chez Scheme Version ~a" scheme-version)
   
         (nl)
@@ -735,8 +743,10 @@
             (cond
               [(getprop x '*constant* #f) =>
                (lambda (k)
-                 (let ([type (getprop x '*constant-ctype* #f)])
-                   (def (sanitize x)
+                 (let ([type (getprop x '*constant-ctype* #f)]
+                       [c-name (sanitize x)])
+                   (putprop x '*c-name* c-name)
+                   (def c-name
                      (if (or (fixnum? k) (bignum? k))
                          (if (< k 0)
                              (if (or (not type) (eq? type 'int))
@@ -970,6 +980,9 @@
         (defref RPHEADERLIVEMASK rp-header livemask)
         (defref RPHEADERTOPLINK rp-header toplink)
 
+        (defref RPCOMPACTHEADERMASKANDSIZE rp-compact-header mask+size+mode)
+        (defref RPCOMPACTHEADERTOPLINK rp-compact-header toplink)
+
         (nl)
         (comment "machine types")
         (pr "#define machine_type_names ")
@@ -990,6 +1003,7 @@
 
         (nl)
         (comment "threads")
+        (defref THREADTYPE thread type)
         (defref THREADTC thread tc)
 
         (nl)
@@ -1027,6 +1041,10 @@
              (libspec-index (lookup-libspec nonprocedure-code)))
         (def "library_dounderflow"
              (libspec-index (lookup-libspec dounderflow)))
+        (def "library_popcount_slow"
+             (libspec-index (lookup-libspec popcount-slow)))
+        (def "library_cpu_features"
+             (libspec-index (lookup-libspec cpu-features)))
 
       )))
 )

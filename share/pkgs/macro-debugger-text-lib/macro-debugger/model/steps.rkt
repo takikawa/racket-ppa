@@ -115,5 +115,5 @@
               (or (not kinds) (and (memq kind kinds) #t)))]
         [else #f]))
 
-(define (rename-step? x) (step-type? x #:kinds '(sc)))
-(define (rewrite-step? x) (step-type? x #:kinds '(rw er)))
+(define (rename-step? x) (step-type? (protostep-type x) #:kinds '(sc)))
+(define (rewrite-step? x) (step-type? (protostep-type x) #:kinds '(rw er)))

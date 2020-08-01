@@ -114,6 +114,11 @@ typedef int IFASLCODE;      /* fasl type codes */
 #define addr_get_segment(p) ((uptr)(p) >> segment_offset_bits)
 #define ptr_get_segment(p) (((uptr)(p) + typemod - 1) >> segment_offset_bits)
 
+#define segment_bitmap_bytes    (bytes_per_segment >> (log2_ptr_bytes+3))
+#define segment_bitmap_index(p) ((((uptr)p + (typemod-1)) & (bytes_per_segment - 1)) >> log2_ptr_bytes)
+#define segment_bitmap_byte(p)  (segment_bitmap_index(p) >> 3)
+#define segment_bitmap_bit(p)   ((uptr)1 << (segment_bitmap_index(p) & 0x7))
+
 #define SPACE(p) SegmentSpace(ptr_get_segment(p))
 #define GENERATION(p) SegmentGeneration(ptr_get_segment(p))
 
@@ -136,9 +141,12 @@ typedef struct _seginfo {
   ptr trigger_guardians;                    /* guardians to re-check if object in segment is copied out */
   ptr locked_objects;                       /* list of objects (including duplicates) for locked in this segment */
   ptr unlocked_objects;                     /* list of objects (no duplicates) for formerly locked */
+  octet *locked_mask;                       /* bitmap of locked objects, used only during GC */
 #ifdef PRESERVE_FLONUM_EQ
   octet *forwarded_flonums;                 /* bitmap of flonums whose payload is a forwarding pointer */
 #endif
+  octet *counting_mask;                     /* bitmap of counting roots during a GC */
+  octet *measured_mask;                     /* bitmap of objects that have been measured */
   octet dirty_bytes[cards_per_segment];     /* one dirty byte per card */
 } seginfo;
 
@@ -272,9 +280,22 @@ typedef struct _bucket_pointer_list {
 #define FWDMARKER(p) FORWARDMARKER((uptr)UNTYPE_ANY(p))
 #define FWDADDRESS(p) FORWARDADDRESS((uptr)UNTYPE_ANY(p))
 
-#define ENTRYFRAMESIZE(x) RPHEADERFRAMESIZE((uptr)(x) - size_rp_header)
-#define ENTRYOFFSET(x) RPHEADERTOPLINK((uptr)(x) - size_rp_header)
-#define ENTRYLIVEMASK(x) RPHEADERLIVEMASK((uptr)(x) - size_rp_header)
+#define ISENTRYCOMPACT(x) (RPCOMPACTHEADERMASKANDSIZE((uptr)(x) - size_rp_compact_header) & compact_header_mask)
+#define COMPACTENTRYFIELD(x, offset) (RPCOMPACTHEADERMASKANDSIZE((uptr)(x) - size_rp_compact_header) >> offset)
+
+#define ENTRYFRAMESIZE(x) (ISENTRYCOMPACT(x)                            \
+                           ? ((COMPACTENTRYFIELD(x, compact_frame_words_offset) & compact_frame_words_mask) << log2_ptr_bytes) \
+                           : RPHEADERFRAMESIZE((uptr)(x) - size_rp_header))
+#define ENTRYOFFSET(x) (ISENTRYCOMPACT(x)                               \
+                        ? RPCOMPACTHEADERTOPLINK((uptr)(x) - size_rp_compact_header) \
+                        : RPHEADERTOPLINK((uptr)(x) - size_rp_header))
+#define ENTRYOFFSETADDR(x) (ISENTRYCOMPACT(x)                               \
+                            ? &RPCOMPACTHEADERTOPLINK((uptr)(x) - size_rp_compact_header) \
+                            : &RPHEADERTOPLINK((uptr)(x) - size_rp_header))
+#define ENTRYLIVEMASK(x) (ISENTRYCOMPACT(x)                             \
+                          ? FIX(COMPACTENTRYFIELD(x, compact_frame_mask_offset)) \
+                          : RPHEADERLIVEMASK((uptr)(x) - size_rp_header))
+#define ENTRYNONCOMPACTLIVEMASKADDR(x) (&RPHEADERLIVEMASK((uptr)(x) - size_rp_header))
 
 #define PORTFD(x) ((iptr)PORTHANDLER(x))
 #define PORTGZFILE(x) ((gzFile)(PORTHANDLER(x)))
@@ -305,7 +326,7 @@ typedef struct {
    thread count is zero, in which case we don't signal.  collection
    is not permitted to happen when interrupts are disabled, so we
    don't let anything happen in that case. */
-#define deactivate_thread(tc) {\
+#define deactivate_thread_signal_collect(tc, check_collect) {  \
   if (ACTIVE(tc)) {\
     ptr code;\
     tc_mutex_acquire()\
@@ -314,14 +335,17 @@ typedef struct {
     Slock_object(code);\
     SETSYMVAL(S_G.active_threads_id,\
      FIX(UNFIX(SYMVAL(S_G.active_threads_id)) - 1));\
-    if (Sboolean_value(SYMVAL(S_G.collect_request_pending_id))\
+    if (check_collect \
+        && Sboolean_value(SYMVAL(S_G.collect_request_pending_id))  \
         && SYMVAL(S_G.active_threads_id) == FIX(0)) {\
       s_thread_cond_signal(&S_collect_cond);\
+      s_thread_cond_signal(&S_collect_thread0_cond);\
     }\
     ACTIVE(tc) = 0;\
     tc_mutex_release()\
   }\
 }
+#define deactivate_thread(tc) deactivate_thread_signal_collect(tc, 1) 
 #define reactivate_thread(tc) {\
   if (!ACTIVE(tc)) {\
     tc_mutex_acquire()\
@@ -387,3 +411,8 @@ typedef struct {
 
 #define INCRGEN(g) (g = g == S_G.max_nonstatic_generation ? static_generation : g+1)
 #define IMMEDIATE(x) (Sfixnump(x) || Simmediatep(x))
+
+/* For `memcpy_aligned, that the first two arguments are word-aligned
+   and it would be ok to round up the length to a word size. But
+   probably the compiler does a fine job with plain old `mempcy`. */
+#define memcpy_aligned memcpy
