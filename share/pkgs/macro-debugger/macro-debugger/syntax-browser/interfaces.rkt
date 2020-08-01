@@ -21,6 +21,7 @@
 ;; config<%>
 (define-interface config<%> ()
   ((methods:notify suffix-option
+                   taint-icons
                    syntax-font-size
                    colors
                    width

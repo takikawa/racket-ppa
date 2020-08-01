@@ -452,12 +452,23 @@
          ; make sure no collection occurs before profile data is dumped
          (parameterize ([compile-profile #t] [collect-request-handler void])
            (load "testfile.ss" compile)
-           (profile-dump-data "testfile.pd"))
+           (profile-dump-data "testfile.pd" (remp preexisting-profile-dump-entry? (profile-dump))))
          ; make sure collections are restarted
          (collect)))
      "(11 10 1 10 0)\n")
    (begin
      (profile-load-data "testfile.pd")
+     #t)
+   (equal?
+     (with-output-to-string
+       (lambda ()
+         (load "testfile.ss" compile)))
+     "(1 11 1 10 0)\n")
+   (begin
+     (profile-clear-database)
+     #t)
+   (begin
+     (profile-load-data "testfile.pd" "testfile.pd")
      #t)
    (equal?
      (with-output-to-string
@@ -560,7 +571,7 @@
         (parameterize ([compile-profile #t]) (load "testfile.ss" compile))))
     "AAAAAAAAAAB")
   (begin
-    (profile-dump-data "testfile.pd")
+    (profile-dump-data "testfile.pd" (remp preexisting-profile-dump-entry? (profile-dump)))
     (profile-load-data "testfile.pd")
     #t)
   (equal?
@@ -3649,7 +3660,156 @@
      (f (lambda (x) (values x x)) (list 1 2))))
 
  )
- 
+
+(mat call-in-continuation
+  (error? (call-in-continuation 1))
+  (error? (call-in-continuation 1 (lambda () 0)))
+  (error? (call-in-continuation (lambda args args) (lambda () 0)))
+  (error? (call/cc (lambda (k) (call-in-continuation k #f (lambda () 0)))))
+  (error? (call/cc (lambda (k) (call-in-continuation k (list 1 2 3) (lambda () 0)))))
+
+  (equal? 10 (+ 1 (call/cc (lambda (k) (call-in-continuation k (lambda () 9))))))
+  (equal? 10 (+ 1 (call/cc (lambda (k) (call-in-continuation k (continuation-next-attachments k) (lambda () 9))))))
+  (equal? 11 (+ 1 (call/cc (lambda (k) (* 0 (call-in-continuation k (lambda () 10)))))))
+  (equal? 'done (let ([maybe-k (call/cc (lambda (k) k))])
+                  (if (symbol? maybe-k)
+                      maybe-k
+                      (* 0 (call-in-continuation maybe-k (lambda () 'done))))))
+  (equal? 'second (let-values ([(maybe-k result) (call/cc (lambda (k) (values k #f)))])
+                    (if (symbol? maybe-k)
+                        result
+                        (* 0 (call-in-continuation maybe-k (lambda () (values 'done 'second)))))))
+
+  (begin
+    (define (attachments-in-continuation k)
+      (call-in-continuation
+       k
+       (lambda ()
+         (current-continuation-attachments))))
+    (define (same-attachments-in-continuation k)
+      (call-in-continuation
+       k
+       (current-continuation-attachments)
+       (lambda ()
+         (current-continuation-attachments))))
+    (define (sub-attachments-in-continuation k)
+      (call-in-continuation
+       k
+       (current-continuation-attachments)
+       (lambda ()
+         (call-setting-continuation-attachment
+          'inside2
+          (lambda ()
+            (current-continuation-attachments))))))
+    #t)
+
+  (equal? '(outside)
+          (call-setting-continuation-attachment
+           'outside
+           (lambda ()
+             (#%$value
+              (call-setting-continuation-attachment
+               'tail
+               (lambda ()
+                 (call/cc
+                  (lambda (k)
+                    (call-setting-continuation-attachment
+                     'inside
+                     (lambda ()
+                       (+ 1
+                          (attachments-in-continuation k))))))))))))
+
+  (equal? '(inside outside)
+          (call-setting-continuation-attachment
+           'outside
+           (lambda ()
+             (#%$value
+              (call-setting-continuation-attachment
+               'tail
+               (lambda ()
+                 (call/cc
+                  (lambda (k)
+                    (call-setting-continuation-attachment
+                     'inside
+                     (lambda ()
+                       (+ 1
+                          (same-attachments-in-continuation k))))))))))))
+
+  (equal? '(inside2 outside)
+          (call-setting-continuation-attachment
+           'outside
+           (lambda ()
+             (#%$value
+              (call-setting-continuation-attachment
+               'tail
+               (lambda ()
+                 (call/cc
+                  (lambda (k)
+                    (call-setting-continuation-attachment
+                     'inside
+                     (lambda ()
+                       (+ 1
+                          (sub-attachments-in-continuation k))))))))))))
+
+  (equal? '(unknown)
+          (list
+           (call/cc
+            (lambda (k)
+              (call-consuming-continuation-attachment
+               'unknown
+               (lambda (v)
+                 (call-in-continuation
+                  k
+                  (lambda () v))))))))
+
+  (equal? '(also-unknown)
+          (list
+           (call/cc
+            (lambda (k)
+              (call-in-continuation
+               k
+               (lambda () 
+                 (call-consuming-continuation-attachment
+                  'also-unknown
+                  (lambda (v)
+                    v))))))))
+
+  (equal? '(known)
+          (list
+           (call/cc
+            (lambda (k)
+              (call-in-continuation
+               k
+               (lambda ()
+                 (call-setting-continuation-attachment
+                  'known
+                  (lambda ()
+                    (call-getting-continuation-attachment
+                     'still-unknown
+                     (lambda (v)
+                       v))))))))))
+
+  (equal? '(here in out)
+          (let ([did '()])
+            (let ([k (dynamic-wind
+                         (lambda () (set! did (cons 'in did)))
+                         (lambda () (call/cc (lambda (k) k)))
+                         (lambda () (void)))])
+              (cond
+               [(procedure? k)
+                (set! did '())
+                (dynamic-wind
+                    (lambda () (void))
+                    (lambda () (call-in-continuation
+                                k
+                                (lambda ()
+                                  (set! did (cons 'here did))
+                                  'no)))
+                    (lambda () (set! did (cons 'out did))))]
+               [else did]))))
+
+)
+
 ;;; section 4-7:
 
 (mat engine
@@ -4194,8 +4354,53 @@
      (let ([v (make-self #f)])
        (self-v-set! v v)
        (check-self-referencing v self-v)))
-  )
 
+   (parameterize ([collect-request-handler void])
+     (define (get-all g) (let ([q (g)]) (if q (cons q (get-all g)) '())))
+     (module (insist)
+       (define ($insist e? expr expected got)
+         (unless (e? got expected)
+           (errorf #f "expected ~s to return ~s, got ~s" expr expected got)))
+       (define-syntax insist
+         (syntax-rules ()
+           [(_ ?e? ?expr ?expected)
+            ($insist ?e? '?expr ?expected ?expr)])))
+     (let ([g1 (make-guardian)] [g2 (make-guardian)])
+       (let ([x (box (cons 'a 'b))] [y (box (cons 'c 'd))])
+         (insist eq? (unregister-guardian g1) '())
+         (insist eq? (unregister-guardian g2) '())
+         (g1 (unbox x))
+         (g1 (unbox y))
+         (g2 (unbox x))
+         (g1 (unbox y))
+         (g1 (unbox x))
+         (collect 0 0)
+         (g2 (unbox x))
+         (g1 (cons 'e 'f))
+         (g2 (unbox x))
+         (g1 (unbox x))
+         (g2 (cons 'g 'h))
+         (insist eq? (get-all g1) '())
+         (insist eq? (get-all g2) '())
+         (let ([q (unregister-guardian g2)])
+           (unless (and (= (length q) 4) (equal? (remove '(g . h) q) (list (unbox x) (unbox x) (unbox x))))
+             (errorf #f "expected (unregister-guardian g2) to contain x = (a . b), x = (a . b), and (g . h), got ~s" q)))
+         (insist eq? (unregister-guardian g2) '())
+         (insist eq? (get-all g1) '())
+         (insist eq? (get-all g2) '())
+         (collect 0 0)
+         (insist equal? (get-all g1) '((e . f)))
+         (insist eq? (get-all g2) '())
+         (g2 (unbox x))
+         (set-box! x #f)
+         (collect 0 0)
+         (insist equal? (get-all g1) '((a . b) (a . b) (a . b)))
+         (insist equal? (get-all g2) '((a . b)))
+         (insist equal? (unregister-guardian g1) '((c . d) (c . d)))
+         (insist eq? (unregister-guardian g2) '())
+         (pretty-print (list g1 g2 x y)))) ; keep 'em live
+     #t)
+ )
 
 (mat refcount-guardians
   (error? ; unrecognized ftype
@@ -4336,6 +4541,86 @@
       (assert (not (regular-g)))
       (assert (not (g)))
       #t))
+
+   (parameterize ([collect-request-handler void])
+     (define-ftype A (struct (refcount iptr) (uid int)))
+     (define (get-all g)
+       (let ([a (g)])
+         (if a
+             (begin
+               (unless (eqv? (ftype-ref A (refcount) a) 0)
+                 (errorf 'get-all "nonzero refcount ~s, uid ~s" (ftype-ref A (refcount) a) (ftype-ref A (uid) a)))
+               (cons a (get-all g)))
+             '())))
+     (module (insist)
+       (define ($insist e? expr expected got)
+         (unless (e? got expected)
+           (errorf #f "expected ~s to return ~s, got ~s" expr expected got)))
+       (define-syntax insist
+         (syntax-rules ()
+           [(_ ?e? ?expr ?expected)
+            ($insist ?e? '?expr ?expected ?expr)])))
+     (define (get-uid a) (ftype-ref A (uid) a))
+     (define (fritter addr refcount uid)
+       (let ([a (make-ftype-pointer A addr)])
+         (ftype-set! A (refcount) a refcount)
+         (ftype-set! A (uid) a uid)
+         (box a)))
+     (let ([x-addr (foreign-alloc (ftype-sizeof A))] [y-addr (foreign-alloc (ftype-sizeof A))] [z-addr (foreign-alloc (ftype-sizeof A))])
+       (let ([x1 (fritter x-addr 6 73)] [x2 (box (make-ftype-pointer A x-addr))] [y (fritter y-addr 2 57)] [z (fritter z-addr 2 91)])
+         (let ([g1 (ftype-guardian A)] [g2 (ftype-guardian A)])
+           (insist eq? (unregister-guardian g1) '())
+           (insist eq? (unregister-guardian g2) '())
+           (g1 (unbox x1))
+           (g2 (unbox x1))
+           (g1 (unbox x1))
+           (g1 (unbox x2))
+           (g2 (unbox x1))
+           (g1 (unbox y))
+           (g1 (unbox y))
+           (g2 (unbox z))
+           (g1 (unbox z))
+           (insist eq? (get-all g1) '())
+           (insist eq? (get-all g2) '())
+           (let ([q (unregister-guardian g2)])
+             (define (decr-refcount! a) (ftype-locked-decr! A (refcount) a))
+             (unless (and (= (length q) 3) (memq (unbox x1) (memq (unbox x1) q)) (memq (unbox z) q))
+               (errorf #f "expected (unregister-guardian g2) to contain x/uid 73, x/uid 73, and z/uid 91, got ~s" (map get-uid q)))
+             (map decr-refcount! q))
+           (insist eq? (unregister-guardian g2) '())
+           (insist eq? (get-all g1) '())
+           (insist eq? (get-all g2) '())
+           (pretty-print z) ; keep it live
+           (set-box! z #f)
+           (collect 0 0)
+           (insist equal? (map get-uid (get-all g1)) '(91))
+           (insist eq? (get-all g2) '())
+           (g2 (unbox x1))
+           (pretty-print x1) ; keep it live
+           (set-box! x1 #f)
+           (collect 0 0)
+           (insist eq? (get-all g1) '())
+           (insist eq? (get-all g2) '())
+           (insist eq? (unregister-guardian g2) '())
+           (insist eqv? (ftype-ref A (refcount) (unbox x2)) 1)
+           (pretty-print x2) ; keep it live
+           (set-box! x2 #f)
+           (collect 0 0)
+           (insist equal? (map get-uid (get-all g1)) '(73))
+           (insist equal? (map get-uid (get-all g2)) '())
+           (insist eq? (unregister-guardian g2) '())
+           (pretty-print y) ; keep it live
+           (set-box! y #f)
+           (collect 0 0)
+           (insist equal? (map get-uid (get-all g1)) '(57))
+           (insist equal? (map get-uid (get-all g2)) '())
+           (insist eq? (unregister-guardian g1) '())
+           (insist eq? (unregister-guardian g2) '())
+           (pretty-print (list g1 g2 x y)))) ; keep 'em live
+       (foreign-free x-addr)
+       (foreign-free y-addr)
+       (foreign-free z-addr))
+     #t)
   )
 
 (mat weak-cons

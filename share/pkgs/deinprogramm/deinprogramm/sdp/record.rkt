@@ -1,6 +1,6 @@
 #lang scheme/base
 
-(provide define-record-functions)
+(provide define-record)
 
 (require scheme/promise
 	 mzlib/struct
@@ -44,7 +44,7 @@
 	       (cdr list)
 	       (cons (proc i (car list)) rev-result))))))
 
-(define-syntax define-record-functions*
+(define-syntax define-record*
   (lambda (x)
     (syntax-case x ()
       ((_ ?stx
@@ -284,21 +284,21 @@
 	      "Dieser Name gehört einer eingebauten Funktion"
 	      id))))))
 
-;; (define-record-functions :pare kons pare? (kar integer) (kdr list-of-integers))
+;; (define-record :pare kons pare? (kar integer) (kdr list-of-integers))
 
-(define-syntax define-record-functions
+(define-syntax define-record
   (lambda (x)
     (syntax-case x ()
       ((_ ?type-spec)
        (raise-syntax-error 
         #f 
-        "Zu wenige Operanden für define-record-functions" x))
+        "Zu wenige Operanden für define-record" x))
       ((_ ?type-spec ?constructor)	; nullary case
-       #'(define-record-functions ?type-spec ?constructor dummy-predicate))
+       #'(define-record ?type-spec ?constructor dummy-predicate))
       ((_ ?type-spec
           ?constructor
           (?accessor ?signature) ?field-spec ...)
-       #'(define-record-functions ?type-spec ?constructor dummy-predicate (?accessor ?signature) ?field-spec ...))
+       #'(define-record ?type-spec ?constructor dummy-predicate (?accessor ?signature) ?field-spec ...))
       
       ((_ ?type-spec
           ?constructor
@@ -345,7 +345,7 @@
 
 	 
          (with-syntax ((?stx x))
-           #'(define-record-functions* ?stx ?type-spec
+           #'(define-record* ?stx ?type-spec
                ?constructor
                ?predicate
                ?field-spec ...)))))))

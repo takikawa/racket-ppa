@@ -25,7 +25,7 @@
 ;; reader change (interning strings, etc) highlights the issue.
 
 (define PRINT-PROTECTION? #t)
-(define show-tainted-stx? (make-parameter #t))
+(define show-taint-info? (make-parameter #f))
 
 (struct wrapped-stx (contents mode)
   #:property prop:custom-write
@@ -38,7 +38,7 @@
     [(armed) "🔒"]
     [(armed-unlocked) "🔓"]
     [(tainted) "💥"]
-    [else ""]))
+    [else " "]))
 
 (define (syntax-armed-unlocked? stx)
   (and (syntax? stx) (syntax-property stx property:unlocked-by-expander)))
@@ -76,8 +76,10 @@
 ;;   - a hashtable mapping S-expressions to syntax objects
 ;;   - a hashtable mapping syntax objects to S-expressions
 ;; Syntax objects which are eq? will map to same flat values
-(define (syntax->datum/tables stx partition limit suffixopt abbrev?)
-  (table stx partition limit suffixopt abbrev?))
+(define (syntax->datum/tables stx partition limit suffixopt abbrev?
+                              #:taint-icons? [taint-icons? #f])
+  (parameterize ((show-taint-info? taint-icons?))
+    (table stx partition limit suffixopt abbrev?)))
 
 ;; table : syntax maybe-partition% maybe-num SuffixOption boolean -> (values s-expr hashtable hashtable)
 (define (table stx partition limit suffixopt abbrev?)
@@ -106,8 +108,9 @@
         flat)
       (define (loop obj)
         (cond [(not (syntax? obj)) (loop* obj)]
-              [(and (syntax-tainted? obj) (show-tainted-stx?))
-               (parameterize ((show-tainted-stx? #f))
+              [(not (show-taint-info?)) (link! obj (loop* obj))]
+              [(syntax-tainted? obj)
+               (parameterize ((show-taint-info? #f))
                  (link! obj (wrapped-stx (loop* obj) 'tainted)))]
               [(syntax-armed-unlocked? obj)
                (link! obj (wrapped-stx (loop* obj) 'armed-unlocked))]

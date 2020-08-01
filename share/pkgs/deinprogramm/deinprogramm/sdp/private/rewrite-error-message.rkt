@@ -175,7 +175,9 @@
   (define replacements
     (list
      (list #rx"expected a `\\)` to close `\\(`"
-	   (lambda (all) "zur offenen Klammer fehlt die geschlossene"))))
+	   (lambda (all) "zur offenen Klammer fehlt die geschlossene"))
+     (list #rx"no expression after a sequence of internal definitions"
+	   (lambda (all) "nach den internen Definitionen muss noch ein Ausdruck kommen"))))
   (for/fold ([msg msg]) ([repl. replacements])
     (regexp-replace* (first repl.) msg (second repl.))))
 

@@ -339,8 +339,8 @@
        (defer-or-not dl? `(foreign (,conv* ...) ,name ,e (,arg-type* ...) ,result-type))]
       [(fcallable (,conv* ...) ,[undefer : e dl?] (,arg-type* ...) ,result-type)
        (defer-or-not dl? `(fcallable (,conv* ...) ,e (,arg-type* ...) ,result-type))]
-      [(cte-optimization-loc ,box ,[undefer : e dl?])
-       (defer-or-not dl? `(cte-optimization-loc ,box ,e))]
+      [(cte-optimization-loc ,box ,[undefer : e dl?] ,exts)
+       (defer-or-not dl? `(cte-optimization-loc ,box ,e ,exts))]
       [(pariah) (values x #f)]
       [(profile ,src) (values x #f)]
       [(moi) (values x #f)]
@@ -558,8 +558,8 @@
        (defer-or-not dl? `(foreign (,conv* ...) ,name ,e (,arg-type* ...) ,result-type))]
       [(fcallable (,conv* ...) ,[cpvalid : e dl?] (,arg-type* ...) ,result-type)
        (defer-or-not dl? `(fcallable (,conv* ...) ,e (,arg-type* ...) ,result-type))]
-      [(cte-optimization-loc ,box ,[cpvalid : e dl?])
-       (defer-or-not dl? `(cte-optimization-loc ,box ,e))]
+      [(cte-optimization-loc ,box ,[cpvalid : e dl?] ,exts)
+       (defer-or-not dl? `(cte-optimization-loc ,box ,e ,exts))]
       [(pariah) (values x #f)]
       [(profile ,src) (values x #f)]
       [(moi) (values x #f)]
@@ -568,4 +568,7 @@
 
   (set! $cpvalid
     (lambda (x)
-      (if (= (optimize-level) 3) x (cpvalid x)))))
+      (if (or (= (optimize-level) 3)
+              (enable-unsafe-variable-reference))
+          x
+          (cpvalid x)))))

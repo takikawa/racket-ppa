@@ -26,6 +26,23 @@
                      #;[optimize-level (max (optimize-level) 2)])
         (expand/optimize y)))]))
 
+(define-syntax cptypes/once-equivalent-expansion?
+  ; Replace the default value of run-cp0 with a version that calls
+  ; cp0 only once instead of twice.
+  ; This is useful to test some reductions that are shared with cp0
+  ; or that should be executed in a single pass.
+  (syntax-rules ()
+    [(_ x y)
+     (equivalent-expansion?
+      (parameterize ([run-cp0 (lambda (cp0 c) (cp0 c))]
+                     [#%$suppress-primitive-inlining #f]
+                     #;[optimize-level (max (optimize-level) 2)])
+        (expand/optimize x))
+      (parameterize ([run-cp0 (lambda (cp0 c) (#3%$cptypes c))]
+                     [#%$suppress-primitive-inlining #f]
+                     #;[optimize-level (max (optimize-level) 2)])
+        (expand/optimize y)))]))
+
 (define-syntax cptypes/nocp0-equivalent-expansion?
   ; When run-cp0 is call, use #3%$cptypes insted of the cp0 function provided.
   ; This disables the reductions in cp0.ss, so it's posible to see
@@ -245,8 +262,8 @@
     '(lambda (x y) (if (if (vector? x) (vector? y) #t) (void) (vector? x)))
     '(lambda (x y) (if (if (vector? x) (vector? y) #t) (void) #t)))
   (cptypes-equivalent-expansion?
-    '(lambda (t) (let ([x (if t (begin (newline) #f) #f)]) (number? x)))
-    '(lambda (t) (let ([x (if t (begin (newline) #f) #f)]) #f)))
+    '(lambda (t) (let ([x (if t (begin (newline) #f) #f)]) (display x) (number? x)))
+    '(lambda (t) (let ([x (if t (begin (newline) #f) #f)]) (display x) #f)))
   (cptypes-equivalent-expansion?
     '(lambda (t) (let ([x (if t 1 2)]) (fixnum? x)))
     '(lambda (t) (let ([x (if t 1 2)]) #t)))
@@ -334,6 +351,26 @@
           '(lambda (x y z f)
             (let ([t (vector? x)])
               (if (if y #f z) (f t 1) (f t 2))))))
+  (cptypes-equivalent-expansion?
+     '(lambda (t b)
+       (if (if t (newline) (unbox b)) (vector? b) (box? b)))
+     '(lambda (t b)
+       (if (if t (newline) (unbox b)) (vector? b) #t)))
+  (cptypes-equivalent-expansion?
+     '(lambda (t b)
+       (if (if t (unbox b) (newline)) (vector? b) (box? b)))
+     '(lambda (t b)
+       (if (if t (unbox b) (newline)) (vector? b) #t)))
+  (cptypes-equivalent-expansion?
+     '(lambda (t b)
+       (if (if t #f (unbox b)) (vector? b) (box? b)))
+     '(lambda (t b)
+       (if (if t #f (unbox b)) #f (box? b))))
+  (cptypes-equivalent-expansion?
+     '(lambda (t b)
+       (if (if t (unbox b) #f) (vector? b) (box? b)))
+     '(lambda (t b)
+       (if (if t (unbox b) #f) #f (box? b))))
 )
 
 (mat cptype-directly-applied-case-lambda
@@ -650,6 +687,12 @@
   (not (cptypes-equivalent-expansion?
          '(lambda (x) (when (number? x) (#2%odd? x)))
          '(lambda (x) (when (number? x) (#3%odd? x)))))
+  (cptypes-equivalent-expansion?
+    '(lambda (x) (when (number? x) (#2%exact? x)))
+    '(lambda (x) (when (number? x) (#3%exact? x))))
+  (not (cptypes-equivalent-expansion?
+         '(lambda (x) (#2%exact? x))
+         '(lambda (x) (#3%exact? x))))
 )
 
 (mat cptypes-rest-argument
@@ -665,4 +708,407 @@
   (cptypes/nocp0-equivalent-expansion?
     '((lambda (x . r) (null? r)) 1 2)
     '((lambda (x . r) #f) 1 2))
+)
+
+(mat cptypes-delay
+  (cptypes-equivalent-expansion?
+    '(lambda (b) (map (lambda (x) (box? b)) (unbox b)))
+    '(lambda (b) (map (lambda (x) #t) (unbox b))))
+  (cptypes-equivalent-expansion?
+    '(lambda (b) (list (lambda (x) (box? b)) (unbox b)))
+    '(lambda (b) (list (lambda (x) #t) (unbox b))))
+  (cptypes-equivalent-expansion?
+    '(lambda (b) (list (unbox b) (lambda (x) (box? b))))
+    '(lambda (b) (list (unbox b) (lambda (x) #t))))
+)
+
+(mat cptypes-call-with-values
+  ; The single value case is handled by cp0
+  (cptypes-equivalent-expansion?
+    '(lambda (v)
+       (call-with-values
+        (lambda () (vector-ref v 0))
+        (lambda (y) (list (vector? v) (vector-ref v 1) y))))
+    '(lambda (v)
+       (call-with-values
+        (lambda () (vector-ref v 0))
+        (lambda (y) (list #t (vector-ref v 1) y)))))
+  (cptypes-equivalent-expansion?
+    '(lambda (t)
+       (call-with-values
+        (lambda () (if t (box 2) (box 3)))
+        (lambda (y) (list y (box? y)))))
+    '(lambda (t)
+       (call-with-values
+        (lambda () (if t (box 2) (box 3)))
+        (lambda (y) (list y #t)))))
+  (cptypes-equivalent-expansion?
+    '(lambda (t b)
+       (call-with-values
+        (lambda () (if t 1 2))
+        (lambda (y) (display (unbox b))))
+       (box? b))
+    '(lambda (t b)
+       (call-with-values
+        (lambda () (if t 1 2))
+        (lambda (y) (display (unbox b))))
+       #t))
+  (cptypes-equivalent-expansion?
+    '(lambda (b)
+       (call-with-values
+        (lambda () (if (unbox b) 1 2))
+        (lambda (y) (display y)))
+       (box? b))
+    '(lambda (b)
+       (call-with-values
+        (lambda () (if (unbox b) 1 2))
+        (lambda (y) (display y)))
+       #t))
+
+  (cptypes-equivalent-expansion?
+    '(lambda (b)
+       (call-with-values
+        (lambda () (if (unbox b) 1 (values 2 3)))
+        (lambda (x y) (list x y (box? b)))))
+    '(lambda (b)
+       (call-with-values
+        (lambda () (if (unbox b) 1 (values 2 3)))
+        (lambda (x y) (list x y #t)))))
+  (cptypes-equivalent-expansion?
+    '(lambda (t b)
+       (call-with-values
+        (lambda () (if t 1 (values 2 3)))
+        (lambda (x y) (display (list x y (unbox b)))))
+       (box? b))
+    '(lambda (t b)
+       (call-with-values
+        (lambda () (if t 1 (values 2 3)))
+        (lambda (x y) (display (list x y (unbox b)))))
+       #t))
+  (cptypes-equivalent-expansion?
+    '(lambda (b)
+       (call-with-values
+        (lambda () (if (unbox b) 1 (values 2 3)))
+        (lambda (x y) (display (list x y))))
+       (box? b))
+    '(lambda (b)
+       (call-with-values
+        (lambda () (if (unbox b) 1 (values 2 3)))
+        (lambda (x y) (display (list x y))))
+       #t))
+
+  (cptypes-equivalent-expansion?
+    '(lambda (b)
+       (call-with-values
+        (case-lambda 
+          [() (if (unbox b) 1 (values 2 3))]
+          [(x) (error 'e "")])
+        (lambda (x y) (list x y (box? b)))))
+    '(lambda (b)
+       (call-with-values
+        (case-lambda 
+          [() (if (unbox b) 1 (values 2 3))]
+          [(x) (error 'e "")])
+        (lambda (x y) (list x y #t)))))
+  (cptypes-equivalent-expansion?
+    '(lambda (t b)
+       (call-with-values
+        (lambda () (if t 1 (values 2 3)))
+        (case-lambda
+         [(x y) (display (list x y (unbox b)))]
+         [(x) (error 'e "")]))
+       (box? b))
+    '(lambda (t b)
+       (call-with-values
+        (lambda () (if t 1 (values 2 3)))
+        (case-lambda
+         [(x y) (display (list x y (unbox b)))]
+         [(x) (error 'e "")]))
+       #t))
+  (cptypes-equivalent-expansion?
+    '(lambda (b)
+       (call-with-values
+        (case-lambda 
+          [() (if (unbox b) 1 (values 2 3))]
+          [(x) (error 'e "")])
+        (lambda (x y) (display (list x y))))
+       (box? b))
+    '(lambda (b)
+       (call-with-values
+        (case-lambda 
+          [() (if (unbox b) 1 (values 2 3))]
+          [(x) (error 'e "")])
+        (lambda (x y) (display (list x y))))
+       #t))
+
+  (cptypes-equivalent-expansion?
+    '(lambda (t b)
+       (call-with-values
+        (begin (display (unbox b)) (lambda () (if t 1 (values b 2))))
+        (lambda (x y) (list x y (box? b)))))
+    '(lambda (t b)
+       (call-with-values
+        (begin (display (unbox b)) (lambda () (if t 1 (values b 2))))
+        (lambda (x y) (list x y #t)))))
+  ; This is difficult to handle in cptypes, so I ignored it.
+  ; But it is anyway handled by cp0.
+  #;(cptypes-equivalent-expansion?
+      '(lambda (t b)
+         (call-with-values
+          (lambda () (if t 1 (values b (box? b))))
+          (begin (display (unbox b)) (lambda (x y) (list x y b)))))
+      '(lambda (t b)
+         (call-with-values
+          (lambda () (if t 1 (values b #t)))
+          (begin (display (unbox b)) (lambda (x y) (list x y b))))))
+
+  (cptypes-equivalent-expansion?
+    '(lambda (t)
+       (number?
+        (call-with-values
+         (lambda () (if t 1 (values 2 3)))
+         (case-lambda [(x y) 2] [(x) 1]))))
+    '(lambda (t)
+       (call-with-values
+        (lambda () (if t 1 (values 2 3)))
+        (case-lambda [(x y) 2] [(x) 1]))
+       #t))
+  (cptypes-equivalent-expansion?
+    '(lambda (t)
+       (number?
+        (call-with-values
+         (lambda () (if t 1 (values 2 3)))
+         (case-lambda [(x y) 2] [(x) (error 'e "")]))))
+    '(lambda (t)
+       (call-with-values
+        (lambda () (if t 1 (values 2 3)))
+        (case-lambda [(x y) 2] [(x) (error 'e "")]))
+       #t))
+
+  (cptypes-equivalent-expansion?
+    '(lambda (t f)
+       (call-with-values
+        (lambda () (if t 1 (values 2 3)))
+         f)
+       (procedure? f))
+    '(lambda (t f)
+       (call-with-values
+        (lambda () (if t 1 (values 2 3)))
+         f)
+       #t))
+  (cptypes-equivalent-expansion?
+    '(lambda (t f)
+       (call-with-values
+        f
+        (lambda (x y) (+ x y)))
+       (procedure? f))
+    '(lambda (t f)
+       (call-with-values
+        f
+        (lambda (x y) (+ x y)))
+       #t))
+  (cptypes-equivalent-expansion?
+    '(lambda (t f)
+       (when (box? f)
+         (call-with-values
+          (lambda () (if t 1 (values 2 3)))
+          f)
+         111))
+    '(lambda (t f)
+       (when (box? f)
+         (call-with-values
+          (lambda () (if t 1 (values 2 3)))
+          f)
+         222)))
+  (cptypes-equivalent-expansion?
+    '(lambda (t f)
+       (when (box? f)
+         (call-with-values
+          f
+          (lambda (x y) (+ x y)))
+         111))
+    '(lambda (t f)
+       (when (box? f)
+         (call-with-values
+          f
+          (lambda (x y) (+ x y)))
+         222)))
+)
+
+(mat cptypes-apply
+  (cptypes-equivalent-expansion?
+    '(lambda (l b)
+       (apply (lambda (x) (display (list (unbox b) x))) l)
+       (box? b))
+    '(lambda (l b)
+       (apply (lambda (x) (display (list (unbox b) x))) l)
+       #t))
+  (cptypes-equivalent-expansion?
+    '(lambda (l b)
+       (apply (lambda (x y) (display (list (unbox b) x))) 7 l)
+       (box? b))
+    '(lambda (l b)
+       (apply (lambda (x y) (display (list (unbox b) x))) 7 l)
+       #t))
+  (cptypes-equivalent-expansion?
+    '(lambda (l b)
+       (apply (lambda (x) (display (list b x))) (unbox b))
+       (box? b))
+    '(lambda (l b)
+       (apply (lambda (x) (display (list b x))) (unbox b))
+       #t))
+  (cptypes-equivalent-expansion?
+    '(lambda (l b)
+       (apply (lambda (x y) (display (list b x y))) 7 (unbox b))
+       (box? b))
+    '(lambda (l b)
+       (apply (lambda (x y) (display (list b x y))) 7 (unbox b))
+       #t))
+
+  (cptypes-equivalent-expansion?
+    ; with #3% the argument may be inlined and then executed in reverse order
+    '(lambda (l b)
+       (#2%apply (lambda (x y) (list (box? b) x y)) 7 (unbox b)))
+    '(lambda (l b)
+       (#2%apply (lambda (x y) (list #t x y)) 7 (unbox b))))
+
+  (cptypes-equivalent-expansion?
+    '(lambda (l b)
+       (apply
+        (case-lambda 
+          [(x) (list (unbox b) x)]
+          [(x y) (error 'e "")])
+        l)
+       (box? b)) 
+    '(lambda (l b)
+       (apply
+        (case-lambda 
+          [(x) (list (unbox b) x)]
+          [(x y) (error 'e "")])
+        l)
+       #t)) 
+
+  (cptypes-equivalent-expansion?
+    '(lambda (l)
+       (number?
+        (apply (lambda (x y) (+ x y)) l)))
+    '(lambda (l)
+       (apply (lambda (x y) (+ x y)) l)
+       #t))
+  (cptypes-equivalent-expansion?
+    '(lambda (l)
+       (number?
+        (apply
+         (case-lambda
+          [(x y) (+ x y)]
+          [()  (error 'e "")])
+         l)))
+    '(lambda (l)
+       (apply
+        (case-lambda
+         [(x y) (+ x y)]
+         [()  (error 'e "")])
+        l)
+       #t))
+
+  (cptypes-equivalent-expansion?
+    '(lambda (f l)
+       (apply f l)
+       (procedure? f))
+    '(lambda (f l)
+       (apply f l)
+       #t))
+  (cptypes-equivalent-expansion?
+    '(lambda (t f)
+       (when (box? f)
+         (apply f l)
+         111))
+    '(lambda (t f)
+       (when (box? f)
+         (apply f l)
+         222)))
+)
+
+(mat cptypes-dynamic-wind
+  (cptypes-equivalent-expansion?
+    '(lambda (f)
+       (box? (dynamic-wind (lambda (x) #f) (lambda () (box (f))) (lambda () #f))))
+    '(lambda (f)
+       (begin
+         (dynamic-wind (lambda (x) #f) (lambda () (box (f))) (lambda () #f))
+         #t)))
+
+  (cptypes-equivalent-expansion?
+    '(lambda (b)
+       (dynamic-wind (lambda (x) (unbox b)) (lambda () #f) (lambda () #f))
+       (box? b))
+    '(lambda (b)
+       (dynamic-wind (lambda (x) (unbox b)) (lambda () #f) (lambda () #f))
+       #t))
+  (cptypes-equivalent-expansion?
+    '(lambda (b)
+       (dynamic-wind (lambda (x) #f) (lambda () (unbox b)) (lambda () #f))
+       (box? b))
+    '(lambda (b)
+       (dynamic-wind (lambda (x) #f) (lambda () (unbox b)) (lambda () #f))
+       #t))
+  (cptypes-equivalent-expansion?
+    '(lambda (b)
+       (dynamic-wind (lambda (x) #f) (lambda () #f) (lambda () (unbox b)))
+       (box? b))
+    '(lambda (b)
+       (dynamic-wind (lambda (x) #f) (lambda () #f) (lambda () (unbox b)))
+       #t))
+
+  (cptypes-equivalent-expansion?
+    '(lambda (b)
+       (dynamic-wind (lambda (x) (unbox b)) (lambda () (box? b)) (lambda () #f)))
+    '(lambda (b)
+       (dynamic-wind (lambda (x) (unbox b)) (lambda () #t) (lambda () #f))))
+  (cptypes-equivalent-expansion?
+    '(lambda (b)
+       (dynamic-wind (lambda (x) (unbox b)) (lambda () #f) (lambda () (box? b))))
+    '(lambda (b)
+       (dynamic-wind (lambda (x) (unbox b)) (lambda () #f) (lambda () #t) )))
+  (not (cptypes-equivalent-expansion?
+         '(lambda (b)
+            (dynamic-wind (lambda () #f) (lambda (x) (unbox b)) (lambda () (box? b))))
+         '(lambda (b)
+            (dynamic-wind (lambda () #f) (lambda (x) (unbox b)) (lambda () #t)))))
+)
+
+(mat cptypes-result-type
+  ; test the special case for predicates
+  (cptypes-equivalent-expansion?
+    '(number? (optimize-level))
+    '(begin (optimize-level) #t))
+  ; this does't work for now, test a few weaker versions
+  #;(cptypes-equivalent-expansion?
+      '(eq? (optimize-level 0) (void))
+      '(begin (optimize-level 0) #t))
+  (cptypes-equivalent-expansion?
+    '(number? (optimize-level 0))
+    '(begin (optimize-level 0) #f))
+  (parameterize ([optimize-level 0])
+    (eq? (optimize-level 0) (void)))
+)
+
+(mat cptypes-drop
+  (cptypes/once-equivalent-expansion?
+    '(pair? (list 1 (display 2) 3))
+    '(begin (display 2) #t))
+  (cptypes/once-equivalent-expansion?
+    '(vector? (list 1 (display 2) 3))
+    '(begin (display 2) #f))
+  (cptypes/once-equivalent-expansion?
+    '(pair? (list 1 (vector 2 (display 3) 4)))
+    '(begin (display 3) #t))
+  (cptypes/once-equivalent-expansion?
+    '(vector? (list 1 (vector 2 (display 3) 4)))
+    '(begin (display 3) #f))
+  ; regression test: check that the compiler doesn't loop forever
+  ; when the return arity is unknown
+  (cptypes-equivalent-expansion?
+    '(lambda (f) (box? (box (f))))
+    '(lambda (f) (#3%$value (f)) #t))
 )

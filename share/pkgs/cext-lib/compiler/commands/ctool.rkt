@@ -91,7 +91,11 @@
          ""))]
       [("--c-mods")
        ,(lambda (f name) (mods-output name) 'c-mods)
-       ((,(format "Write C-embeddable module bytecode to <file>") "")
+       ((,(format "Write C-embeddable compiled modules to <file>") "")
+        "file")]
+      [("--mods")
+       ,(lambda (f name) (mods-output name) 'mods)
+       ((,(format "Write raw embeddable compiled modules to <file>") "")
         "file")]]
      [help-labels ""]
      [once-any
@@ -200,7 +204,7 @@
       [("++lib")
        ,(lambda (f l)
           (exe-embedded-libraries (append (exe-embedded-libraries) (list l))))
-       ("Embed <lib> in --c-mods output" "lib")]]
+       ("Embed <lib> in `--c-mods` or `--mods` output" "lib")]]
      [once-each
       [("--runtime")
        ,(lambda (f dir)
@@ -286,7 +290,7 @@
         (list (find-include-dir)))
        (when (compiler:option:somewhat-verbose)
          (printf " [output to \"~a\"]\n" out-file))))]
-  [(c-mods)
+  [(c-mods mods)
    (let ([dest (mods-output)])
      (let-values ([(in out) (make-pipe)])
        (parameterize ([current-output-port out])
@@ -312,24 +316,36 @@
                         (open-input-bytes (file->bytes tmp))
                         (delete-file tmp)))
                      in)])
-         (fprintf out "#ifdef MZ_XFORM\n")
-         (fprintf out "XFORM_START_SKIP;\n")
-         (fprintf out "#endif\n")
-         (fprintf out "static void declare_modules(Scheme_Env *env) {\n")
-         (fprintf out "  static unsigned char data[] = {")
-         (let loop ([pos 0])
-           (let ([b (read-byte in)])
-             (when (zero? (modulo pos 20)) (fprintf out "\n    "))
-             (unless (eof-object? b) (fprintf out "~a," b) (loop (add1 pos)))))
-         (fprintf out "0\n  };\n")
-         (fprintf out "  scheme_register_embedded_load(~a, (const char *)data);\n"
-                  (file-position in))
-         (fprintf out "  scheme_embedded_load(~a, (const char *)data, 1);\n"
-                  (file-position in))
-         (fprintf out "}\n")
-         (fprintf out "#ifdef MZ_XFORM\n")
-         (fprintf out "XFORM_END_SKIP;\n")
-         (fprintf out "#endif\n")
+         (case mode
+           [(mods)
+            (copy-port in out)]
+           [else
+            (fprintf out "#ifdef MZ_XFORM\n")
+            (fprintf out "XFORM_START_SKIP;\n")
+            (fprintf out "#endif\n")
+            (fprintf out "static void declare_modules(~a) {\n"
+                     (case (system-type 'vm)
+                       [(racket) "Scheme_Env *env"]
+                       [else ""]))
+            (fprintf out "  static unsigned char data[] = {")
+            (let loop ([pos 0])
+              (let ([b (read-byte in)])
+                (when (zero? (modulo pos 20)) (fprintf out "\n    "))
+                (unless (eof-object? b) (fprintf out "~a," b) (loop (add1 pos)))))
+            (fprintf out "0\n  };\n")
+            (case (system-type 'vm)
+              [(racket)
+               (fprintf out "  scheme_register_embedded_load(~a, (const char *)data);\n"
+                        (file-position in))
+               (fprintf out "  scheme_embedded_load(~a, (const char *)data, 1);\n"
+                        (file-position in))]
+              [else
+               (fprintf out "  racket_embedded_load_bytes((const char *)data, ~a, 1);\n"
+                        (file-position in))])
+            (fprintf out "}\n")
+            (fprintf out "#ifdef MZ_XFORM\n")
+            (fprintf out "XFORM_END_SKIP;\n")
+            (fprintf out "#endif\n")])
          (close-output-port out)))
      (when (compiler:option:somewhat-verbose)
        (printf " [output to \"~a\"]\n" dest)))]

@@ -328,7 +328,7 @@
                  [(_ foo e1 e2) e1] ...
                  [(_ bar e1 e2) e2]))))])))
 
-(define-constant scheme-version #x0905030A)
+(define-constant scheme-version #x09050319)
 
 (define-syntax define-machine-types
   (lambda (x)
@@ -445,21 +445,24 @@
 (define-constant fasl-type-weak-pair 30)
 (define-constant fasl-type-eq-hashtable 31)
 (define-constant fasl-type-symbol-hashtable 32)
-(define-constant fasl-type-group 33)
+; 33
 (define-constant fasl-type-visit 34)
 (define-constant fasl-type-revisit 35)
+(define-constant fasl-type-visit-revisit 36)
 
-(define-constant fasl-type-immutable-vector 36)
-(define-constant fasl-type-immutable-string 37)
-(define-constant fasl-type-immutable-fxvector 38)
-(define-constant fasl-type-immutable-bytevector 39)
-(define-constant fasl-type-immutable-box 40)
+(define-constant fasl-type-immutable-vector 37)
+(define-constant fasl-type-immutable-string 38)
+(define-constant fasl-type-immutable-fxvector 39)
+(define-constant fasl-type-immutable-bytevector 40)
+(define-constant fasl-type-immutable-box 41)
 
-(define-constant fasl-type-stencil-vector 41)
+(define-constant fasl-type-stencil-vector 42)
 
-(define-constant fasl-type-begin 42)
-(define-constant fasl-type-phantom 43)
-(define-constant fasl-type-uninterned-symbol 44)
+(define-constant fasl-type-begin 43)
+(define-constant fasl-type-phantom 44)
+(define-constant fasl-type-uninterned-symbol 45)
+
+(define-constant fasl-type-terminator 127)
 
 (define-constant fasl-fld-ptr 0)
 (define-constant fasl-fld-u8 1)
@@ -500,7 +503,7 @@
   (sparc reloc-sparcabs reloc-sparcrel)
   (sparc64 reloc-sparc64abs reloc-sparc64rel)
   (ppc reloc-ppccall reloc-ppcload)
-  (x86_64 reloc-x86_64-call reloc-x86_64-jump)
+  (x86_64 reloc-x86_64-call reloc-x86_64-jump reloc-x86_64-popcount)
   (arm32 reloc-arm32-abs reloc-arm32-call reloc-arm32-jump)
   (ppc32 reloc-ppc32-abs reloc-ppc32-call reloc-ppc32-jump))
 
@@ -541,10 +544,11 @@
 (define-constant COMPRESS-LZ4 1)
 (define-constant COMPRESS-FORMAT-BITS 3)
 
-(define-constant COMPRESS-LOW 0)
-(define-constant COMPRESS-MEDIUM 1)
-(define-constant COMPRESS-HIGH 2)
-(define-constant COMPRESS-MAX 3)
+(define-constant COMPRESS-MIN 0)
+(define-constant COMPRESS-LOW 1)
+(define-constant COMPRESS-MEDIUM 2)
+(define-constant COMPRESS-HIGH 3)
+(define-constant COMPRESS-MAX 4)
 
 (define-constant SICONV-DUNNO 0)
 (define-constant SICONV-INVALID 1)
@@ -600,10 +604,6 @@
 (define-constant ERROR_NONCONTINUABLE_INTERRUPT 6)
 (define-constant ERROR_VALUES 7)
 (define-constant ERROR_MVLET 8)
-
-;;; object-file tags
-(define-constant visit-tag 0)
-(define-constant revisit-tag 1)
 
 ;;; allocation spaces
 (define-constant space-locked #x20)         ; lock flag
@@ -662,11 +662,13 @@
       (pure-typed-object "p-tobj" #\r 9) ;
       (impure-record "ip-rec" #\s 10)    ;
       (impure-typed-object "ip-tobj" #\t 11) ; as needed (instead of impure) for backtraces
-      (closure "closure" #\l 12))        ; as needed (instead of pure/impure) for backtraces
+      (closure "closure" #\l 12)         ; as needed (instead of pure/impure) for backtraces
+      (count-pure "count-pure" #\y 13)     ; like pure, but delayed for counting from roots
+      (count-impure "count-impure" #\z 14)); like impure-typed-object, but delayed for counting from roots
     (unswept
-      (data "data" #\d 13)))             ; unswept objects allocated here
+      (data "data" #\d 15)))             ; unswept objects allocated here
   (unreal
-    (empty "empty" #\e 14)))             ; available segments
+    (empty "empty" #\e 16)))             ; available segments
 
 ;;; enumeration of types for which gc tracks object counts
 ;;; also update gc.c
@@ -698,7 +700,8 @@
 (define-constant countof-oblist 24)
 (define-constant countof-ephemeron 25)
 (define-constant countof-stencil-vector 26)
-(define-constant countof-types 27)
+(define-constant countof-record 27)
+(define-constant countof-types 28)
 
 ;;; type-fixnum is assumed to be all zeros by at least by vector, fxvector,
 ;;; and bytevector index checks
@@ -767,12 +770,13 @@
 (define-constant type-phantom          #b01111110)
 (define-constant type-record                #b111)
 
-(define-constant code-flag-system           #b000001)
-(define-constant code-flag-continuation     #b000010)
-(define-constant code-flag-template         #b000100)
-(define-constant code-flag-mutable-closure  #b001000)
-(define-constant code-flag-arity-in-closure #b010000)
-(define-constant code-flag-single-valued    #b100000)
+(define-constant code-flag-system           #b0000001)
+(define-constant code-flag-continuation     #b0000010)
+(define-constant code-flag-template         #b0000100)
+(define-constant code-flag-guardian         #b0001000)
+(define-constant code-flag-mutable-closure  #b0010000)
+(define-constant code-flag-arity-in-closure #b0100000)
+(define-constant code-flag-single-valued    #b1000000)
 
 (define-constant fixnum-bits
   (case (constant ptr-bits)
@@ -858,6 +862,10 @@
 (define-constant type-continuation-code
   (fxlogor (constant type-code)
            (fxsll (constant code-flag-continuation)
+                  (constant code-flags-offset))))
+(define-constant type-guardian-code
+  (fxlogor (constant type-code)
+           (fxsll (constant code-flag-guardian)
                   (constant code-flags-offset))))
 (define-constant type-code-mutable-closure
   (fxlogor (constant type-code)
@@ -946,6 +954,9 @@
            (fx- (fxsll 1 (constant code-flags-offset)) 1)))
 (define-constant mask-continuation-code
   (fxlogor (fxsll (constant code-flag-continuation) (constant code-flags-offset))
+           (fx- (fxsll 1 (constant code-flags-offset)) 1)))
+(define-constant mask-guardian-code
+  (fxlogor (fxsll (constant code-flag-guardian) (constant code-flags-offset))
            (fx- (fxsll 1 (constant code-flags-offset)) 1)))
 (define-constant mask-code-mutable-closure
   (fxlogor (fxsll (constant code-flag-mutable-closure) (constant code-flags-offset))
@@ -1359,7 +1370,7 @@
    [ptr data 0]))
 
 (define-primitive-structure-disps thread type-typed-object
-  ([ptr type] [uptr tc]))
+  ([iptr type] [uptr tc]))
 
 (define-constant virtual-register-count 16)
 
@@ -1402,6 +1413,7 @@
    [ptr timer-ticks]
    [ptr disable-count]
    [ptr signal-interrupt-pending]
+   [ptr signal-interrupt-queue]
    [ptr keyboard-interrupt-pending]
    [ptr threadno]
    [ptr current-input]
@@ -1461,11 +1473,11 @@
 (define-primitive-structure-disps record-type type-typed-object
   ([ptr type]
    [ptr parent]
-   [ptr size]
-   [ptr pm]
-   [ptr mpm]
+   [ptr size]  ; total record size in bytes, including type tag
+   [ptr pm]    ; pointer mask, where low bit corresponds to type tag
+   [ptr mpm]   ; mutable-pointer mask, where low bit for type is always 0
    [ptr name]
-   [ptr flds]
+   [ptr flds]  ; either a list of `fld` vectors or a fixnum count
    [ptr flags]
    [ptr uid]
    [ptr counts]))
@@ -1522,10 +1534,10 @@
    [ptr link]))
 
 (define-primitive-structure-disps rp-header typemod
-  ([ptr livemask]
-   [uptr toplink]
-   [iptr frame-size]
-   [uptr mv-return-address]))
+  ([uptr toplink]
+   [uptr mv-return-address]
+   [ptr livemask]
+   [iptr frame-size])) ; low bit is 0 to distinguish from a `rp-compact-header`
 (define-constant return-address-mv-return-address-disp
   (- (constant rp-header-mv-return-address-disp) (constant size-rp-header)))
 (define-constant return-address-frame-size-disp
@@ -1534,6 +1546,32 @@
   (- (constant rp-header-toplink-disp) (constant size-rp-header)))
 (define-constant return-address-livemask-disp
   (- (constant rp-header-livemask-disp) (constant size-rp-header)))
+
+(define-primitive-structure-disps rp-compact-header typemod
+  ([uptr toplink]
+   [iptr mask+size+mode])) ; low bit is 1 to distinguish from a `rp-header`
+;; mask+size+mode: bit 0 is 1 [=> compact-header-mask]
+;;
+;;                 bit 1 is 0 for mv-return-address = return-address
+;;                 bit 1 is 1 for mv-return-address = values-error
+;;
+;;                 bits 2 through 1+compact-frame-size-bits = frame size in words
+;;
+;;                 remaining bits are livemask
+(define-constant compact-header-mask              #b01)
+(define-constant compact-header-values-error-mask #b10)
+(define-constant compact-frame-words-offset 2)
+(define-constant compact-frame-words-bits
+  (constant-case ptr-bits
+    [(32) 4]
+    [(64) 5]))
+(define-constant compact-frame-max-words (fx- (expt 2 (constant compact-frame-words-bits)) 1))
+(define-constant compact-frame-words-mask (constant compact-frame-max-words))
+(define-constant compact-frame-mask-offset (fx+ 2 (constant compact-frame-words-bits)))
+(define-constant compact-return-address-toplink-disp
+  (- (constant rp-compact-header-toplink-disp) (constant size-rp-compact-header)))
+(define-constant compact-return-address-mask+size+mode-disp
+  (- (constant rp-compact-header-mask+size+mode-disp) (constant size-rp-compact-header)))
 
 (define-syntax bigit-type
   (lambda (x)
@@ -1545,8 +1583,9 @@
     (with-syntax ([type (datum->syntax #'* (filter-scheme-type 'string-char))])
       #''type)))
 
-(define-constant annotation-debug 1)
-(define-constant annotation-profile 2)
+(define-constant annotation-debug   #b0001)
+(define-constant annotation-profile #b0010)
+(define-constant annotation-all     #b0011)
 
 (eval-when (compile load eval)
 (define flag->mask
@@ -1643,6 +1682,10 @@
   (unsafe                   #b00001000000000000000000)
   (unrestricted             #b00010000000000000000000)
   (safeongoodargs           #b00100000000000000000000)
+  (cptypes2                 #b01000000000000000000000)
+  (cptypes3                 cptypes2)
+  (cptypes2x                cptypes2)
+  (cptypes3x                cptypes2)
   (arith-op                 (or proc pure true))
   (alloc                    (or proc discard true))
   ; would be nice to check that these and only these actually have cp0 partial folders
@@ -1660,7 +1703,12 @@
   (boolean-valued                #b0010000000)
   (single-valued-known           #b0100000000)
   (single-valued                 #b1000000000)
-)
+  )
+
+(define-flags preinfo-call-mask
+  (unchecked                    #b01)
+  (no-inline                    #b10)
+  )
 
 (define-syntax define-flag-field
   (lambda (exp)
@@ -1821,50 +1869,6 @@
   (syntax-rules ()
     ((_ x) (let ((t x)) (and (pair? t) (symbol? (car t)))))))
 
-;;; bitset constants
-
-;; For a bitset ranging over all fixnum values, use an array of ...
-;; array of fixnums, where the lo bits of a key fixnum are used to
-;; index a bit within one bitset fixnum.
-(define-constant eq-bitset-lo-bits (fx- (integer-length (constant fixnum-bits)) 1))
-
-;; Using `$fxaddress` discards typemod bits, but we may be able to
-;; discard additional bits due to allocation alignment:
-(define-constant eq-bitset-discard-bits (fx- (log2 (constant byte-alignment))
-                                             (log2 (constant typemod))))
-
-(constant-case ptr-bits
-  [(64)
-   ;; Break fixnum into 5 levels: [l1:14] [l2:14] [l3:14] [l4:14-discard] [lo:5]
-   (define-constant eq-bitset-l1-bits 14)
-   (define-constant eq-bitset-l2-bits 14)
-   (define-constant eq-bitset-l3-bits 14)]
-  [(32)
-   ;; Break fixnum into 3 levels: [l1:13] [l4:13-discard] [lo:4]
-   (define-constant eq-bitset-l1-bits 13)
-   (define-constant eq-bitset-l2-bits 0)
-   (define-constant eq-bitset-l3-bits 0)])
-
-(define-constant eq-bitset-l4-bits (fx- (constant fixnum-bits)
-                                        (constant eq-bitset-l1-bits)
-                                        (constant eq-bitset-l2-bits)
-                                        (constant eq-bitset-l3-bits)
-                                        (constant eq-bitset-lo-bits)
-                                        (constant eq-bitset-discard-bits)))
-
-(define-constant eq-bitset-l1-shift (fx- (constant fixnum-bits) (constant eq-bitset-l1-bits)))
-(define-constant eq-bitset-l2-shift (fx- (constant fixnum-bits) (constant eq-bitset-l1-bits)
-                                         (constant eq-bitset-l2-bits)))
-(define-constant eq-bitset-l3-shift (fx- (constant fixnum-bits) (constant eq-bitset-l1-bits)
-                                         (constant eq-bitset-l2-bits) (constant eq-bitset-l3-bits)))
-(define-constant eq-bitset-l4-shift (fx+ (constant eq-bitset-lo-bits)
-                                         (constant eq-bitset-discard-bits)))
-
-(define-constant eq-bitset-l2-mask (fx- (fxsll 1 (constant eq-bitset-l2-bits)) 1))
-(define-constant eq-bitset-l3-mask (fx- (fxsll 1 (constant eq-bitset-l3-bits)) 1))
-(define-constant eq-bitset-l4-mask (fx- (fxsll 1 (constant eq-bitset-l4-bits)) 1))
-(define-constant eq-bitset-lo-mask (fx- (fxsll 1 (constant eq-bitset-lo-bits)) 1))
-
 ;;; heap/stack mangement constants
 
 (define-constant collect-interrupt-index 1)
@@ -1952,6 +1956,10 @@
 ;;; underflow limit determines how much we're willing to copy on
 ;;; stack underflow/continuation invocation
 (define-constant underflow-limit (* (constant ptr-bytes) 16))
+
+;; Number of arguments (including procedure) that can be handled
+;; by `$event-and-resume` without allocating:
+(define-constant event-resume-max-preferred-arg-cnt 5)
 
 ;;; check assumptions
 (let ([x (fxsrl (constant type-char)
@@ -2524,6 +2532,7 @@
      (domvleterr #f 0 #f #f)
      (doargerr #f 0 #f #f)
      (get-room #f 0 #f #f)
+     (event-detour #f 0 #f #f)
      (map1 #f 2 #f #t)
      (map2 #f 3 #f #t)
      (for-each1 #f 2 #f #t)
@@ -2591,6 +2600,7 @@
      (apply1 #f 3 #f #t)
      (apply2 #f 4 #f #t)
      (apply3 #f 5 #f #t)
+     ($check-continuation #f 3 #f #t)
      (logand #f 2 #f #t)
      (logor #f 2 #f #t)
      (logxor #f 2 #f #t)
@@ -2716,6 +2726,8 @@
      ($wrapper-apply #f 0 #f #f)
      (wrapper-apply #f 0 #f #f)
      (arity-wrapper-apply #f 0 #f #f)
+     (popcount-slow #f 0 #f #t)
+     (cpu-features #f 0 #f #t)
   ))
 
 (let ()
@@ -2746,6 +2758,7 @@
      thread-list
      split-and-resize
      raw-collect-cond
+     raw-collect-thread0-cond
      raw-tc-mutex
      activate-thread
      deactivate-thread
@@ -2753,6 +2766,7 @@
      handle-values-error
      handle-mvlet-error
      handle-arg-error
+     handle-event-detour
      foreign-entry
      install-library-entry
      get-more-room

@@ -24,6 +24,8 @@
          this-language all-languages set-language-pref)
 (provide
  (contract-out
+  [string-constant-language? (-> any/c boolean?)]
+  [call-with-current-language (-> string-constant-language? (-> any) any)]
   [string-constant? (-> any/c boolean?)]
   [dynamic-string-constant (-> string-constant? string?)]
   [dynamic-string-constants (-> string-constant? (listof string?))]
@@ -97,14 +99,22 @@
       (with-handlers ([exn:fail? (lambda (_) (default-language))])
         (get-preference 'plt:human-language (lambda () (default-language))))))
 
-(define the-sc
-  (or (for/or ([sc (in-list available-string-constant-sets)])
-        (and (equal? language (sc-language-name sc))
-             sc))
-      first-string-constant-set))
+(define (language-sc language)
+  (for/or ([sc (in-list available-string-constant-sets)])
+    (and (equal? language (sc-language-name sc))
+         sc)))
+
+(define (string-constant-language? x) (and (language-sc x) #t))
+
+(define the-sc (make-parameter (or (language-sc language)
+                                   first-string-constant-set)))
+
+(define (call-with-current-language language thunk)
+  (parameterize ((the-sc (language-sc language)))
+    (thunk)))
 
 (define (dynamic-string-constant key) 
-  (dynamic-string-constant/who the-sc key 'dynamic-string-constant))
+  (dynamic-string-constant/who (the-sc) key 'dynamic-string-constant))
 
 (define (dynamic-string-constants key)
   (for/list ([sc (in-list available-string-constant-sets)])
@@ -120,7 +130,7 @@
                           (error who
                                  "unknown string-constant\n  key: ~e" key))))))
 (define (dynamic-string-constant-in-current-language? key)
-  (hash-has-key? (sc-constants the-sc) key))
+  (hash-has-key? (sc-constants (the-sc)) key))
 
 (define (string-constant? sym)
   (and (hash-ref (sc-constants first-string-constant-set) sym #f)

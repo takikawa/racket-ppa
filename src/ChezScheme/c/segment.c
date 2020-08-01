@@ -230,7 +230,6 @@ static void initialize_seginfo(seginfo *si, ISPC s, IGEN g) {
   si->generation = g;
   si->sorted = 0;
   si->min_dirty_byte = 0xff;
-  si->trigger_ephemerons = NULL;
   for (d = 0; d < cards_per_segment; d += sizeof(ptr)) {
     iptr *dp = (iptr *)(si->dirty_bytes + d);
     /* fill sizeof(iptr) bytes at a time with 0xff */
@@ -241,9 +240,12 @@ static void initialize_seginfo(seginfo *si, ISPC s, IGEN g) {
   si->trigger_guardians = 0;
   si->locked_objects = Snil;
   si->unlocked_objects = Snil;
+  si->locked_mask = NULL;
 #ifdef PRESERVE_FLONUM_EQ
   si->forwarded_flonums = NULL;
 #endif
+  si->counting_mask = NULL;
+  si->measured_mask = NULL;
 }
 
 iptr S_find_segments(s, g, n) ISPC s; IGEN g; iptr n; {
