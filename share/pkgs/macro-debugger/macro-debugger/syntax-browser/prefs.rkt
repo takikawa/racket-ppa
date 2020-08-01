@@ -1,5 +1,6 @@
 #lang racket/base
 (require racket/class
+         racket/contract/base
          framework/preferences
          macro-debugger/syntax-browser/interfaces
          framework/notify)
@@ -15,12 +16,14 @@
 (preferences:set-default 'SyntaxBrowser:PropertiesPanelPercentage 1/3 number?)
 (preferences:set-default 'SyntaxBrowser:PropertiesPanelShown #t boolean?)
 (preferences:set-default 'SyntaxBrowser:DrawArrows? #t boolean?)
+(preferences:set-default 'SyntaxBrowser:DisplayTaintIcons 'char (or/c 'char 'snip #f))
 
 (define pref:width (preferences:get/set 'SyntaxBrowser:Width))
 (define pref:height (preferences:get/set 'SyntaxBrowser:Height))
 (define pref:props-percentage (preferences:get/set 'SyntaxBrowser:PropertiesPanelPercentage))
 (define pref:props-shown? (preferences:get/set 'SyntaxBrowser:PropertiesPanelShown))
 (define pref:draw-arrows? (preferences:get/set 'SyntaxBrowser:DrawArrows?))
+(define pref:taint-icons (preferences:get/set 'SyntaxBrowser:DisplayTaintIcons))
 
 (define pref:invert-colors? (preferences:get/set 'framework:white-on-black?))
 
@@ -73,7 +76,8 @@
       (height pref:height)
       (props-percentage pref:props-percentage)
       (props-shown? pref:props-shown?)
-      (draw-arrows? pref:draw-arrows?))
+      (draw-arrows? pref:draw-arrows?)
+      (taint-icons pref:taint-icons))
 
     (super-new)))
 

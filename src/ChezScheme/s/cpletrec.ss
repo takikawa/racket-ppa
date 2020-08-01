@@ -56,6 +56,7 @@ Handling letrec and letrec*
   (include "base-lang.ss")
 
   (define rtd-flds (csv7:record-field-accessor #!base-rtd 'flds))
+  (define rtd-mpm (csv7:record-field-accessor #!base-rtd 'mpm))
 
   (define-pass lift-profile-forms : Lsrc (ir) -> Lsrc ()
     (definitions
@@ -370,11 +371,16 @@ Handling letrec and letrec*
          (values
            `(record ,rtd ,rtd-expr ,e* ...)
            (and (and rtd-pure? pure?)
-                (andmap
-                  (lambda (fld)
-                    (and (not (fld-mutable? fld))
-                         (eq? (filter-foreign-type (fld-type fld)) 'scheme-object)))
-                  (rtd-flds rtd)))))]
+                (let ([flds (rtd-flds rtd)])
+                  (cond
+                   [(fixnum? flds)
+                    (eqv? 0 (rtd-mpm rtd))]
+                   [else
+                    (andmap
+                      (lambda (fld)
+                        (and (not (fld-mutable? fld))
+                             (eq? (filter-foreign-type (fld-type fld)) 'scheme-object)))
+                      flds)])))))]
       [(record-type ,rtd ,e) (Expr e)]
       [(record-cd ,rcd ,rtd-expr ,e) (Expr e)]
       [(immutable-list (,[e* pure?*] ...) ,[e pure?])
@@ -382,8 +388,8 @@ Handling letrec and letrec*
       [,pr (values pr #t)]
       [(moi) (values ir #t)]
       [(pariah) (values ir #t)]
-      [(cte-optimization-loc ,box ,[e pure?])
-       (values `(cte-optimization-loc ,box ,e) pure?)]
+      [(cte-optimization-loc ,box ,[e pure?] ,exts)
+       (values `(cte-optimization-loc ,box ,e ,exts) pure?)]
       [(profile ,src) (values ir #f)]
       [else (sorry! who "unhandled record ~s" ir)])
     (CaseLambdaClause : CaseLambdaClause (ir) -> CaseLambdaClause ()

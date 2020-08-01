@@ -700,7 +700,18 @@
          `(set! ,(make-live-info) ,z ,t)))])
 
   (define-instruction value popcount
-    [(op (z ur) (x ur mem)) `(set! ,(make-live-info) ,z (asm ,info ,asm-popcount ,x))])
+    [(op (z ur) (x ur mem))
+     ;; Direct POPCNT instruction variant, works with corresponding `popcount-op`:
+     #;
+     `(set! ,(make-live-info) ,z (asm ,info ,(asm-popcount (info-inline? info)) ,x))
+
+     ;; Link-editable variant, for corresponding `popcount-op`:
+     (let ([urcx (make-precolored-unspillable 'urcx %rcx)]
+           [urax (make-precolored-unspillable 'urax %rax)])
+       (seq
+        `(set! ,(make-live-info) ,urcx ,x)
+        `(set! ,(make-live-info) ,urax (asm ,info ,(asm-popcount (info-inline? info)) ,urcx))
+        `(set! ,(make-live-info) ,z ,urax)))])
 
   (define-instruction value move
     [(op (z mem) (x ur imm32))
@@ -969,6 +980,16 @@
      (safe-assert (and (info-kill*? info) (memq %rdx (info-kill*-kill* info))))
      `(set! ,(make-live-info) ,z (asm ,info ,asm-read-time-stamp-counter))])
 
+  ;; currently returns ECX from CPUID function 1
+  (define-instruction value cpuid
+    [(op (z ur))
+     (safe-assert (eq? z %rax))
+     (safe-assert (and (info-kill*? info)
+                       (memq %rbx (info-kill*-kill* info))
+                       (memq %rcx (info-kill*-kill* info))
+                       (memq %rdx (info-kill*-kill* info))))
+     `(set! ,(make-live-info) ,z (asm ,info ,asm-cpuid))])
+
   ; NB: shouldn't need to list (info-kill*-live*-live* info) ... here, since we've already
   ; NB: computed spillable/register live sets
   (define-instruction effect (c-call)
@@ -998,7 +1019,8 @@
                      asm-mul asm-muli asm-addop asm-add asm-sub asm-negate asm-sub-negate
                      asm-pop asm-shiftop asm-sll asm-logand asm-lognot
                      asm-logtest asm-fl-relop asm-relop asm-push asm-indirect-jump asm-literal-jump
-                     asm-direct-jump asm-return-address asm-jump asm-conditional-jump asm-data-label asm-rp-header
+                     asm-direct-jump asm-return-address asm-jump asm-conditional-jump asm-data-label
+                     asm-rp-header asm-rp-compact-header
                      asm-lea1 asm-lea2 asm-indirect-call asm-condition-code
                      asm-fl-cvt asm-fl-store asm-fl-load asm-flt asm-trunc asm-div asm-popcount
                      asm-exchange asm-pause asm-locked-incr asm-locked-decr asm-locked-cmpxchg
@@ -1007,6 +1029,7 @@
                      asm-enter asm-foreign-call asm-foreign-callable
                      asm-inc-profile-counter
                      asm-inc-cc-counter asm-read-time-stamp-counter asm-read-performance-monitoring-counter
+                     asm-cpuid
                      ; threaded version specific
                      asm-get-tc asm-activate-thread asm-deactivate-thread asm-unactivate-thread
                      ; machine dependent exports
@@ -1142,6 +1165,8 @@
   (define-op locked-cmpxchg (*) locked-cmpxchg-op)
 
   (define-op popcount (*) popcount-op)
+
+  (define-op cpuid     two-byte-op     #b1111 #b10100010)
 
   ; also do inc-reg dec-reg
 
@@ -1582,17 +1607,68 @@
               [3 op-code]
               [0 (fxlogand (ax-ea-reg-code reg) 7)]))))))
 
+  ;; Direct POPCNT instruction variant:
+  #;
   (define popcount-op
-    (lambda (op size dest-reg src-ea code*)
-      (begin
-        (emit-code (op dest-reg src-ea code*)
-          (build byte #xF3)
-          (ax-ea-rex (if (eq? size 'quad) 1 0) src-ea dest-reg size)
-          (build byte #x0F)
-          (build byte #xB8)
-          (ax-ea-modrm-reg src-ea dest-reg)
-          (ax-ea-sib src-ea)
-          (ax-ea-addr-disp src-ea)))))
+    (lambda (op size dest-reg src-ea inline? code*)
+      (let ([code* (emit-code (op src-ea dest-reg code*)
+                     (build byte #xF3)
+                     (ax-ea-rex (if (eq? size 'quad) 1 0) src-ea dest-reg size)
+                     (build byte #x0F)
+                     (build byte #xB8)
+                     (ax-ea-modrm-reg src-ea dest-reg)
+                     (ax-ea-sib src-ea)
+                     (ax-ea-addr-disp src-ea))])
+        (if (not (and (ax-register? src-ea)
+                      (fx= (ax-ea-reg-code src-ea)
+                           (ax-ea-reg-code dest-reg))))
+            (emit xor dest-reg dest-reg code*) ; avoid false dependency
+            code*))))
+
+  ;; Link-editable variant:
+  (define popcount-op
+    (let ([target `(x86_64-popcount ,(constant code-data-disp) (library ,(lookup-libspec popcount-slow)))])
+      (lambda (op size dest-rax src-rcx inline? code*)
+        (safe-assert (and (ax-register? dest-rax) (ax-register? src-rcx)))
+        (record-case dest-rax
+          [(reg) dest-rax
+           (record-case src-rcx
+            [(reg) src-rcx
+             (safe-assert (and (eq? dest-rax %rax) (eq? src-rcx %rcx)))
+             (cond
+              [(not inline?)
+               ;; Set up a call to `popcount-slow`, which the linker
+               ;; can replace with a POPCNT instruction:
+               (asm-helper-call code* target dest-rax)]
+              [else
+               ;; Used for the body of `popcount-slow`.
+               ;; This is the sequence generated by LLVM's __builtin_popcountl()
+               ;; __builtin_popcountl() intrinsic, but with pushes and pops
+               ;; to save used registers other than the result register %rax.
+               (emit-literal-code (op dest-rax src-rcx code*)
+                 51              ; pushq   %rcx
+                 57              ; pushq   %rdi
+                 48 89 c8        ; movq    %rcx, %rax
+                 48 d1 e8        ; shrq    %rax
+                 48 bf 55 55 55 55 55 55 55 55 ; movabsq $6148914691236517205, %rdi
+                 48 21 c7        ; andq    %rax, %rdi
+                 48 29 f9        ; subq    %rdi, %rcx
+                 48 b8 33 33 33 33 33 33 33 33 ; movabsq $3689348814741910323, %rax
+                 48 89 cf        ; movq    %rcx, %rdi
+                 48 21 c7        ; andq    %rax, %rdi
+                 48 c1 e9 02     ; shrq    $2, %rcx
+                 48 21 c1        ; andq    %rax, %rcx
+                 48 01 f9        ; addq    %rdi, %rcx
+                 48 89 c8        ; movq    %rcx, %rax
+                 48 c1 e8 04     ; shrq    $4, %rax
+                 48 8d 04 08     ; leaq    (%rax,%rcx), %rax
+                 48 bf 0f 0f 0f 0f 0f 0f 0f 0f ; movabsq $1085102592571150095, %rdi
+                 48 21 c7        ; andq    %rax, %rdi
+                 48 b8 01 01 01 01 01 01 01 01 ; movabsq $72340172838076673, %rax
+                 48 0f af c7     ; imulq   %rdi, %rax
+                 48 c1 e8 38     ; shrq    $56, %rax
+                 5f              ; popq    %rdi
+                 59)])])]))))    ; popq    %rcx
 
   (define-syntax emit-code
     (lambda (x)
@@ -1801,7 +1877,7 @@
   (define asm-size
     (lambda (x)
       (case (car x)
-        [(asm x86_64-jump x86_64-call) 0]
+        [(asm x86_64-jump x86_64-call x86_64-popcount) 0]
         [(byte) 1]
         [(word) 2]
         [(long) 4]
@@ -1984,9 +2060,10 @@
         (emit mulsi src1 src0 dest code*))))
 
   (define asm-popcount
-    (lambda (code* dest src)
-      (Trivit (src)
-        (emit popcount (cons 'reg dest) src code*))))
+    (lambda (inline?)
+      (lambda (code* dest src)
+        (Trivit (dest src)
+          (emit popcount dest src inline? code*)))))
 
   (define-who asm-addop
     (lambda (op)
@@ -2017,6 +2094,15 @@
       ; rdx is an implied dest and included in info's kill list
       (safe-assert (eq? dest %rax))
       (emit rdtsc code*)))
+
+  (define asm-cpuid
+    (lambda (code* dest)
+      ; rbx/rcx/rdx is an implied dest and included in info's kill list
+      (safe-assert (eq? dest %rax))
+      (emit movi '(imm 1) (cons 'reg %rax)
+        (emit cpuid
+          (emit mov (cons 'reg %rcx) (cons 'reg %rax)
+             code*)))))
 
   (define asm-inc-profile-counter
     (lambda (code* dest src)
@@ -2478,21 +2564,42 @@
                         (library-code ,(lookup-libspec values-error)))])
       (lambda (code* mrvl fs lpm func code-size)
         (let ([size (constant-case ptr-bits [(32) 'long] [(64) 'quad])])
-          (cons*
-            (if (target-fixnum? lpm)
-                `(,size . ,(fix lpm))
-                `(abs 0 (object ,lpm)))
-            (aop-cons* `(asm livemask: ,(format "~b" lpm))
-              '(code-top-link)
-              (aop-cons* `(asm code-top-link)
-                `(,size . ,fs)
-                (aop-cons* `(asm "frame size:" ,fs)
-                  (if mrvl
-                      (asm-data-label code* mrvl 0 func code-size)
-                      (cons*
-                        mrv-error
-                        (aop-cons* `(asm "mrv point:" ,mrv-error)
-                          code*)))))))))))
+          (let* ([code* (cons* `(,size . ,fs)
+                               (aop-cons* `(asm "frame size:" ,fs)
+                                          code*))]
+                 [code* (cons* (if (target-fixnum? lpm)
+                                   `(,size . ,(fix lpm))
+                                   `(abs 0 (object ,lpm)))
+                               (aop-cons* `(asm livemask: ,(format "~b" lpm))
+                                          code*))]
+                 [code* (if mrvl
+                            (asm-data-label code* mrvl 0 func code-size)
+                            (cons*
+                             mrv-error
+                             (aop-cons* `(asm "mrv point:" ,mrv-error)
+                                        code*)))]
+                 [code* (cons*
+                         '(code-top-link)
+                         (aop-cons* `(asm code-top-link)
+                                    code*))])
+            code*)))))
+
+  (define asm-rp-compact-header
+    (lambda (code* err? fs lpm func code-size)
+      (let ([size (constant-case ptr-bits [(32) 'long] [(64) 'quad])])
+        (let* ([code* (cons* `(,size . ,(fxior (constant compact-header-mask)
+                                               (if err?
+                                                   (constant compact-header-values-error-mask)
+                                                   0)
+                                               (fxsll fs (constant compact-frame-words-offset))
+                                               (fxsll lpm (constant compact-frame-mask-offset))))
+                             (aop-cons* `(asm "mrv pt:" (,lpm ,fs ,(if err? 'error 'continue)))
+                                        code*))]
+               [code* (cons*
+                         '(code-top-link)
+                         (aop-cons* `(asm code-top-link)
+                                    code*))])
+            code*))))
 
   (define-syntax asm-enter
     (lambda (x)
@@ -3388,10 +3495,10 @@
                        '()
                        '())]
               [else
-               (values(lambda (x)
-                        `(set! ,%Cretval ,x))
-                      (list %Cretval)
-                      '())]))
+               (values (lambda (x)
+                         `(set! ,%Cretval ,x))
+                       (list %Cretval)
+                       '())]))
           (define (unactivate result-regs)
             (let ([e `(seq
                        (set! ,%Carg1 ,(%mref ,%sp ,(+ (push-registers-size result-regs) (if-feature windows 72 176))))

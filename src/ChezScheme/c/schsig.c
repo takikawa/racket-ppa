@@ -425,6 +425,7 @@ static void handle_call_error(tc, type, x) ptr tc; iptr type; ptr x; {
 void S_handle_docall_error() {
     ptr tc = get_thread_context();
 
+    AC0(tc) = (ptr)0;
     handle_call_error(tc, ERROR_CALL_NONPROCEDURE, CP(tc));
 }
 
@@ -456,6 +457,38 @@ void S_handle_mvlet_error() {
     ptr tc = get_thread_context();
 
     handle_call_error(tc, ERROR_MVLET, Sfalse);
+}
+
+void S_handle_event_detour() {
+    ptr tc = get_thread_context();
+    ptr resume_proc = CP(tc);
+    ptr resume_args = Snil;
+    iptr argcnt, stack_avail, i;
+
+    argcnt = (iptr)AC0(tc);
+    stack_avail = (((uptr)ESP(tc) - (uptr)SFP(tc)) >> log2_ptr_bytes) - 1;
+
+    if (argcnt < (stack_avail + asm_arg_reg_cnt)) {
+      /* Avoid allocation by passing arguments directly. The compiler
+         will only use `detour-event` when the expected number is
+         small enough to avoid allocation (unless the function expected
+         to allocate a list of arguments, anyway). */
+      for (i = argcnt; i > 0; i--)
+        S_put_scheme_arg(tc, i+1, S_get_scheme_arg(tc, i));
+      S_put_scheme_arg(tc, 1, resume_proc);
+      CP(tc) = S_symbol_value(S_G.event_and_resume_id);
+      AC0(tc) = (ptr)(argcnt+1);
+    } else {
+      /* We're assuming that either at least one argument can go in a
+         register or stack slop will save us. */
+      for (i = argcnt; i > 0; i--)
+        resume_args = Scons(S_get_scheme_arg(tc, i), resume_args);
+      resume_args = Scons(resume_proc, resume_args);
+ 
+      CP(tc) = S_symbol_value(S_G.event_and_resume_star_id);
+      S_put_scheme_arg(tc, 1, resume_args);
+      AC0(tc) = (ptr)1;
+    }
 }
 
 static void keyboard_interrupt(ptr tc) {
@@ -502,15 +535,23 @@ void S_noncontinuable_interrupt() {
 }
 
 #ifdef WIN32
+ptr S_dequeue_scheme_signals(ptr tc) {
+  return Snil;
+}
+
+ptr S_allocate_scheme_signal_queue() {
+  return (ptr)0;
+}
+
+void S_register_scheme_signal(sig) iptr sig; {
+  S_error("register_scheme_signal", "unsupported in this version");
+}
+
 /* code courtesy Bob Burger, burgerrg@sagian.com
    We cannot call noncontinuable_interrupt, because we are not allowed
    to perform a longjmp inside a signal handler; instead, we don't
    handle the signal, which will cause the process to terminate.
 */
-
-void S_register_scheme_signal(sig) iptr sig; {
-    S_error("register_scheme_signal", "unsupported in this version");
-}
 
 static BOOL WINAPI handle_signal(DWORD dwCtrlType) {
   switch (dwCtrlType) {
@@ -539,6 +580,8 @@ static void init_signal_handlers() {
 #include <signal.h>
 
 static void handle_signal PROTO((INT sig, siginfo_t *si, void *data));
+static IBOOL enqueue_scheme_signal PROTO((ptr tc, INT sig));
+static ptr allocate_scheme_signal_queue PROTO((void));
 static void forward_signal_to_scheme PROTO((INT sig));
 
 #define RESET_SIGNAL {\
@@ -548,18 +591,88 @@ static void forward_signal_to_scheme PROTO((INT sig));
     sigprocmask(SIG_UNBLOCK,&set,(sigset_t *)0);\
 }
 
+/* we buffer up to SIGNALQUEUESIZE - 1 unhandled signals, the start dropping them. */
+#define SIGNALQUEUESIZE 64
+static IBOOL scheme_signals_registered;
+
+/* we use a simple queue for pending signals.  signals are enqueued only by the
+   C signal handler and dequeued only by the Scheme event handler.  since the signal
+   handler and event handler run in the same thread, there's no need for locks
+   or write barriers. */
+
+struct signal_queue {
+  INT head;
+  INT tail;
+  INT data[SIGNALQUEUESIZE];
+};
+
+static IBOOL enqueue_scheme_signal(ptr tc, INT sig) {
+  struct signal_queue *queue = (struct signal_queue *)(SIGNALINTERRUPTQUEUE(tc));
+  /* ignore the signal if we failed to allocate the queue */
+  if (queue == NULL) return 0;
+  INT tail = queue->tail;
+  INT next_tail = tail + 1;
+  if (next_tail == SIGNALQUEUESIZE) next_tail = 0;
+  /* ignore the signal if the queue is full */
+  if (next_tail == queue->head) return 0;
+  queue->data[tail] = sig;
+  queue->tail = next_tail;
+  return 1;
+}
+
+ptr S_dequeue_scheme_signals(ptr tc) {
+  ptr ls = Snil;
+  struct signal_queue *queue = (struct signal_queue *)(SIGNALINTERRUPTQUEUE(tc));
+  if (queue == NULL) return ls;
+  INT head = queue->head;
+  INT tail = queue->tail;
+  INT i = tail;
+  while (i != head) {
+    if (i == 0) i = SIGNALQUEUESIZE;
+    i -= 1;
+    ls = Scons(Sfixnum(queue->data[i]), ls);
+  }
+  queue->head = tail;
+  return ls;
+}
+
 static void forward_signal_to_scheme(sig) INT sig; {
   ptr tc = get_thread_context();
 
-  SIGNALINTERRUPTPENDING(tc) = Sfixnum(sig);
-  SOMETHINGPENDING(tc) = Strue;
+  if (enqueue_scheme_signal(tc, sig)) {
+    SIGNALINTERRUPTPENDING(tc) = Strue;
+    SOMETHINGPENDING(tc) = Strue;
+  }
   RESET_SIGNAL
+}
+
+static ptr allocate_scheme_signal_queue() {
+  /* silently fail to allocate space for signals if malloc returns NULL */
+  struct signal_queue *queue = malloc(sizeof(struct signal_queue));
+  if (queue != (struct signal_queue *)0) {
+    queue->head = queue->tail = 0;
+  }
+  return (ptr)queue;
+}
+
+ptr S_allocate_scheme_signal_queue() {
+  return scheme_signals_registered ? allocate_scheme_signal_queue() : (ptr)0;
 }
 
 void S_register_scheme_signal(sig) iptr sig; {
     struct sigaction act;
 
-    sigemptyset(&act.sa_mask);
+    tc_mutex_acquire()
+    if (!scheme_signals_registered) {
+      ptr ls;
+      scheme_signals_registered = 1;
+      for (ls = S_threads; ls != Snil; ls = Scdr(ls)) {
+        SIGNALINTERRUPTQUEUE(THREADTC(Scar(ls))) = S_allocate_scheme_signal_queue();
+      }
+    }
+    tc_mutex_release()
+
+    sigfillset(&act.sa_mask);
     act.sa_flags = 0;
     act.sa_handler = forward_signal_to_scheme;
     sigaction(sig, &act, (struct sigaction *)0);
@@ -688,10 +801,20 @@ void S_schsig_init() {
                            FIX(0),
                            FIX(0),
                            Snil,
-                           Sfalse));
+                           Snil));
 
         S_protect(&S_G.error_id);
         S_G.error_id = S_intern((const unsigned char *)"$c-error");
+
+        S_protect(&S_G.event_and_resume_id);
+        S_G.event_and_resume_id = S_intern((const unsigned char *)"$event-and-resume");
+
+        S_protect(&S_G.event_and_resume_star_id);
+        S_G.event_and_resume_star_id = S_intern((const unsigned char *)"$event-and-resume*");
+
+#ifndef WIN32
+        scheme_signals_registered = 0;
+#endif
     }
 
 

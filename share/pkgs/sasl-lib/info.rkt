@@ -1,1 +1,1 @@
-(module info setup/infotab (#%module-begin (define package-content-state (quote (built "7.6"))) (define version "1.0") (define collection "sasl") (define deps (quote (("base" #:version "6.10")))) (define pkg-authors (quote (ryanc)))))
+(module info setup/infotab (#%module-begin (define package-content-state (quote (built "7.7"))) (define version "1.0") (define collection "sasl") (define deps (quote (("base" #:version "6.10")))) (define pkg-authors (quote (ryanc)))))

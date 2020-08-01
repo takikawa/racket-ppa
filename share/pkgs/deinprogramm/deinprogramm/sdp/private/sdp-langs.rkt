@@ -33,8 +33,8 @@
 	 lang/private/continuation-mark-key
          deinprogramm/sdp/private/rewrite-error-message
 	 
-	 (only-in test-engine/scheme-gui make-formatter)
-	 test-engine/scheme-tests
+	 (only-in test-engine/racket-gui make-formatter)
+	 test-engine/racket-tests
 	 lang/private/tp-dialog
 	 (lib "test-display.scm" "test-engine")
 	 deinprogramm/signature/signature
@@ -175,7 +175,7 @@
           (define/override (on-execute settings run-in-user-thread)
             (let ([drs-namespace (current-namespace)]
                   [scheme-test-module-name
-                   ((current-module-name-resolver) '(lib "test-engine/scheme-tests.rkt") #f #f #t)]
+                   ((current-module-name-resolver) '(lib "test-engine/racket-tests.rkt") #f #f #t)]
                   [scheme-signature-module-name
                    ((current-module-name-resolver) '(lib "deinprogramm/signature/signature-german.rkt") #f #f #t)]
                   [tests-on? (preferences:get 'test-engine:enable?)])
@@ -1085,7 +1085,7 @@
 				     (and mark
 					  (or (and (path? (car mark))
 						   ;; exclude paths that result from macro expansion,
-						   ;; specifically define-record-functions
+						   ;; specifically define-record
 						   ;; see racket/drracket#157
 						   (not (deinprogramm-path? (car mark))))
 					      (symbol? (car mark)))))

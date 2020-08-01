@@ -2,9 +2,9 @@
 
 (require syntax/docprovide)
 
-(require test-engine/scheme-tests
+(require test-engine/racket-tests
 	 (lib "test-info.scm" "test-engine")
-	 test-engine/scheme-tests
+	 test-engine/racket-tests
 	 scheme/class)
 
 (require deinprogramm/signature/module-begin
@@ -32,7 +32,8 @@
 (provide provide lib planet rename-out require #%datum #%module-begin #%top-interaction) ; so we can use this as a language
 
 (provide (all-from-out deinprogramm/sdp/record))
-(provide (all-from-out test-engine/scheme-tests))
+(provide (rename-out (define-record define-record-functions)))
+(provide (all-from-out test-engine/racket-tests))
 (provide signature define-contract :
 	 contract ; legacy
 	 one-of ; deprecated
@@ -306,10 +307,10 @@
   (string-append (string string ... -> string)
 		 "Hängt Zeichenketten zu einer Zeichenkette zusammen")
 
-  (strings-list->string ((list string) -> string)
+  (strings-list->string ((list-of string) -> string)
 			"Eine Liste von Zeichenketten in eine Zeichenkette umwandeln")
 
-  (string->strings-list (string -> (list string))
+  (string->strings-list (string -> (list-of string))
 			"Eine Zeichenkette in eine Liste von Zeichenketten mit einzelnen Zeichen umwandeln")
 
   (string-length (string -> natural)
@@ -326,6 +327,8 @@
 		  "Zeichenkette in Symbol umwandeln"))
  
  ("Verschiedenes"
+  (signature? (any -> boolean)
+	      "feststellen, ob ein Wert eine Signatur ist")
   (equal? (%a %b -> boolean)
 	  "zwei Werte auf Gleichheit testen")
   (eq? (%a %b -> boolean)
@@ -337,11 +340,11 @@
   (violation (string -> unspecific)
 	     "Programmm mit Fehlermeldung abbrechen")
 
-  (map ((%a -> %b) (list %a) -> (list %b))
+  (map ((%a -> %b) (list-of %a) -> (list-of %b))
        "Funktion auf alle Elemente einer Liste anwenden, Liste der Resultate berechnen")
-  (for-each ((%a -> %b) (list %a) -> unspecific)
+  (for-each ((%a -> %b) (list-of %a) -> unspecific)
 	    "Funktion von vorn nach hinten auf alle Elemente einer Liste anwenden")
-  (apply (function (list %a) -> %b)
+  (apply (function (list-of %a) -> %b)
 	 "Funktion auf Liste ihrer Argumente anwenden")
   (read (-> any)
 	"Externe Repräsentation eines Werts in der REPL einlesen und den zugehörigen Wert liefern")))
