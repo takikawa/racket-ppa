@@ -844,6 +844,7 @@ enable_gcov
 enable_noopt
 enable_ubsan
 enable_jitframe
+enable_werror
 enable_crossany
 '
       ac_precious_vars='build_alias
@@ -1508,6 +1509,7 @@ Optional Features:
   --enable-noopt          drop -O C flags (useful for low-level debugging)
   --enable-ubsan          compile with -fsanitize=undefined
   --enable-jitframe       x86_64: use frame pointer for internal calls
+  --enable-werror         compile sources with warnings as errors
   --enable-crossany       Record own cross target as machine-independent
 
 Some influential environment variables:
@@ -2732,6 +2734,7 @@ if test "${enable_libs+set}" = set; then :
 fi
 
 
+
 # Check whether --enable-libffi was given.
 if test "${enable_libffi+set}" = set; then :
   enableval=$enable_libffi;
@@ -2909,6 +2912,12 @@ if test "${enable_jitframe+set}" = set; then :
 fi
 
 
+# Check whether --enable-werror was given.
+if test "${enable_werror+set}" = set; then :
+  enableval=$enable_werror;
+fi
+
+
 # Check whether --enable-crossany was given.
 if test "${enable_crossany+set}" = set; then :
   enableval=$enable_crossany;
@@ -3010,7 +3019,7 @@ fi
 
 
 unixstyle=no
-if test "${enable_useprefix}" = "yes" -a "${prefix}" != "NONE" ; then
+if test "${enable_origtree}" != "yes" -a "${enable_useprefix}" != "no" ; then
   if test "${prefix}" != "NONE" ; then
     unixstyle=yes
   fi
@@ -3276,6 +3285,14 @@ show_explicitly_disabled "${enable_strip}" "Debug-symbol stripping"
 show_explicitly_enabled "${enable_libs}" "Installation of static libraries (if any)"
 show_explicitly_disabled "${enable_libs}" "Installation of static libraries (if any)"
 
+INSTALL_LIBS_ENABLE=no-install
+
+if test "${enable_libs}" != "no" ; then
+  # Intended to be canceled for some platforms:
+  INSTALL_LIBS_ENABLE=install
+fi
+
+
 show_explicitly_disabled "${enable_mac64}" "64-bit Mac OS"
 
 show_explicitly_enabled "${enable_libfw}" "Frameworks-to-system"
@@ -3410,8 +3427,6 @@ MAIN_VARIANT=3m
 
 INSTALL_SETUP_FLAGS=
 INSTALL_SETUP_RACKET_FLAGS=
-
-INSTALL_LIBS_ENABLE=no-install
 
 use_flag_pthread=yes
 use_flag_posix_pthread=no
@@ -4794,11 +4809,6 @@ if test "${enable_foreign}" = "yes" ; then
 fi
 if test "${enable_jit}" = "yes" ; then
   check_for_mprotect=yes
-fi
-
-if test "${enable_libs}" != "no" ; then
-  # Canceled for some platforms below:
-  INSTALL_LIBS_ENABLE=install
 fi
 
 ############## platform tests ################
@@ -7019,6 +7029,11 @@ else
   PLAIN_CC='$(CC)'
   FOREIGN_CONVENIENCE=""
   FOREIGN_OBJSLIB="\$(FOREIGN_OBJS)"
+fi
+
+# Last but not least, if Werror was requested, add it now
+if test "${enable_werror}" = "yes"; then
+  CFLAGS="-Werror ${CFLAGS}"
 fi
 
 ############## final output ################

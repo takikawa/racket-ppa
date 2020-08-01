@@ -9,6 +9,9 @@
 
           linklet-import-variables
           linklet-export-variables
+          linklet-fasled-code+arguments      ; for tools like `raco decompile`
+          linklet-interpret-jitified?        ; for `raco decompile`
+          linklet-interpret-jitified-extract ; for `raco decompile`
           
           instance?
           make-instance
@@ -42,6 +45,7 @@
           primitive->compiled-position
           compiled-position->primitive
           primitive-in-category?
+          primitive-lookup
 
           omit-debugging?             ; not exported to racket
           platform-independent-zo-mode? ; not exported to racket
@@ -57,6 +61,7 @@
           variable-set!/check-undefined
           variable-ref
           variable-ref/no-check
+          set-consistent-variables!/define
           make-instance-variable-reference
           jitified-extract-closed
           jitified-extract
@@ -149,6 +154,15 @@
   (define (primitive->compiled-position prim) #f)
   (define (compiled-position->primitive pos) #f)
   (define (primitive-in-category? sym cat) #f)
+
+  (define (primitive-lookup sym)
+    (unless (symbol? sym)
+      (raise-argument-error 'primitive-lookup "symbol?" sym))
+    (call-with-system-wind
+     (lambda ()
+       (guard
+        (c [else #f])
+        (eval sym)))))
 
   (define root-logger (|#%app| current-logger))
 
@@ -765,10 +779,30 @@
           i)])]))
               
   (define (linklet-import-variables linklet)
+    (unless (linklet? linklet)
+        (raise-argument-error 'linklet-import-variables "linklet?" linklet))
     (linklet-importss linklet))
 
   (define (linklet-export-variables linklet)
+    (unless (linklet? linklet)
+        (raise-argument-error 'linklet-export-variables "linklet?" linklet))
     (map (lambda (e) (if (pair? e) (car e) e)) (linklet-exports linklet)))
+
+  (define (linklet-fasled-code+arguments linklet)
+    (unless (linklet? linklet)
+      (raise-argument-error 'linklet-fasled-code+arguments "linklet?" linklet))
+    (case (linklet-preparation linklet)
+      [(faslable faslable-strict faslable-unsafe lazy)
+       (values (linklet-format linklet) (linklet-code linklet) (linklet-paths linklet))]
+      [else (values #f #f #f)]))
+
+  (define (linklet-interpret-jitified? v)
+    (wrapped-code? v))
+
+  (define (linklet-interpret-jitified-extract v)
+    (unless (wrapped-code? v)
+      (raise-argument-error 'linklet-interpret-jitified-extract "linklet-interpret-jitified?" v))
+    (force-wrapped-code v))
 
   ;; ----------------------------------------
 
@@ -836,6 +870,12 @@
 
   (define (variable-ref/no-check var)
     (variable-val var))
+
+  (define (set-consistent-variables!/define vars vals)
+    (let loop ([i 0])
+      (unless (fx= i (#%vector-length vars))
+        (variable-set!/define (#%vector-ref vars i) (#%vector-ref vals i) 'consistent)
+        (loop (fx+ i 1)))))
 
   ;; Find variables or values needed from an instance for a linklet's
   ;; imports
@@ -1212,6 +1252,8 @@
      variable-set!/define
      variable-ref
      variable-ref/no-check
+     variable-set!/define
+     set-consistent-variables!/define
      make-instance-variable-reference
      unbox/check-undefined
      set-box!/check-undefined
@@ -1238,4 +1280,22 @@
 
   (enable-arithmetic-left-associative #t)
   (expand-omit-library-invocations #t)
-  (enable-error-source-expression #f))
+  (enable-error-source-expression #f)
+
+  ;; Avoid gensyms for generated record-tyope UIDs. Otherwise,
+  ;; printing one of those gensyms --- perhaps when producing a trace
+  ;; via `dump-memory-stats` --- causes the gensym to be permanent
+  ;; (since it has properties).
+  (current-generate-id (lambda (sym) (gensym sym)))
+
+  ;; Since the schemify layer inserts `|#%app|` any time the rator of
+  ;; an application might not be a procedure, we can avoid redundant
+  ;; checks for other applications by enabling unsafe mode. Ditto for
+  ;; potential early reference to `letrec`-bound variables. But do that
+  ;; only if we're compiling the primitive layer in unsafe mode.
+  (meta-cond
+   [(>= (optimize-level) 3)
+    (enable-unsafe-application #t)
+    (enable-unsafe-variable-reference #t)]
+   [else
+    (void)]))
