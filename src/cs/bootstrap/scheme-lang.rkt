@@ -3,6 +3,7 @@
                      racket/match)
          (prefix-in r: racket/include)
          racket/fixnum
+         racket/flonum
          racket/vector
          racket/splicing
          racket/pretty
@@ -119,7 +120,6 @@
                      [mpair? binding?]
                      [fx+ r6rs:fx+]
                      [fx- r6rs:fx-]
-                     [< $fxu<]
                      [add1 fx1+]
                      [sub1 fx1-]
                      [add1 1+]
@@ -141,6 +141,7 @@
                      [bitwise-and logand]
                      [bitwise-bit-set? fxbit-set?]
                      [integer-length bitwise-length]
+                     [->fl fixnum->flonum]
                      [+ cfl+]
                      [- cfl-]
                      [* cfl*]
@@ -179,6 +180,7 @@
                      [logbit1 fxlogbit1]
                      [logbit0 fxlogbit0]
                      [logtest fxlogtest])
+         $fxu<
          fxsrl
          fxbit-field
          fxpopcount
@@ -267,6 +269,7 @@
          enable-cross-library-optimization
          enable-arithmetic-left-associative
          enable-type-recovery
+         fasl-compressed
          current-expand
          current-generate-id
          internal-defines-as-letrec*
@@ -805,6 +808,11 @@
 (define (logtest a b)
   (not (eqv? 0 (bitwise-and a b))))
 
+(define ($fxu< a b)
+  (if (< a 0)
+      #f
+      (< a b)))
+
 (define (fxsrl v amt)
   (if (and (v . fx< . 0)
            (amt . fx> . 0))
@@ -1079,6 +1087,7 @@
 (define enable-cross-library-optimization (make-parameter #t))
 (define enable-arithmetic-left-associative (make-parameter #f))
 (define enable-type-recovery (make-parameter #t))
+(define fasl-compressed (make-parameter #f))
 
 (define current-generate-id (make-parameter gensym))
 

@@ -196,10 +196,10 @@ For @tech{flonums}: Unchecked versions of @racket[make-flrectangular],
 @defproc[(unsafe-fx->fl [a fixnum?]) flonum?]
 @defproc[(unsafe-fl->fx [a flonum?]) fixnum?]
 )]{
-Unchecked conversion of a fixnum to an integer flonum and vice versa.
-These are similar to the safe bindings @racket[->fl] and @racket[fl->exact-integer],
-but further constrained to consume or produce a fixnum.
-}
+Unchecked versions of @racket[fx->fl] and @racket[fl->fx].
+
+@history[#:changed "7.7.0.8" @elem{Changed @racket[unsafe-fl->fx] to truncate.}]}
+
 
 @defproc[(unsafe-flrandom [rand-gen pseudo-random-generator?]) (and flonum? (>/c 0) (</c 1))]{
 
@@ -292,6 +292,16 @@ A vector's size can never be larger than a @tech{fixnum}, so even
 
 @history[#:changed "6.11.0.2" @elem{Added @racket[unsafe-vector*-cas!].}]}
 
+
+@defproc[(unsafe-vector*->immutable-vector! [v (and/c vector? (not/c impersonator?))]) (and/c vector? immutable?)]{
+
+Similar to @racket[vector->immutable-vector], but potentially destroys
+@racket[v] and reuses it space, so @racket[v] must not be used after
+calling @racket[unsafe-vector*->immutable-vector!].
+
+@history[#:added "7.7.0.6"]}
+
+
 @deftogether[(
 @defproc[(unsafe-string-length [str string?]) fixnum?]
 @defproc[(unsafe-string-ref [str string?] [k fixnum?])
@@ -304,6 +314,14 @@ Unsafe versions of @racket[string-length], @racket[string-ref], and
 only when the result will be a Latin-1 character. A string's size can
 never be larger than a @tech{fixnum} (so even @racket[string-length]
 always returns a fixnum).}
+
+@defproc[(unsafe-string->immutable-string! [str string?]) (and/c string? immutable?)]{
+
+Similar to @racket[string->immutable-string], but potentially destroys
+@racket[str] and reuses it space, so @racket[str] must not be used
+after calling @racket[unsafe-string->immutable-string!].
+
+@history[#:added "7.7.0.6"]}
 
 
 @deftogether[(
@@ -325,6 +343,15 @@ A bytes's size can never be larger than a
 fixnum).
 
 @history[#:changed "7.5.0.15" @elem{Added @racket[unsafe-bytes-copy!].}]}
+
+
+@defproc[(unsafe-bytes->immutable-bytes! [bstr bytes?]) (and/c bytes? immutable?)]{
+
+Similar to @racket[bytes->immutable-bytes], but potentially destroys
+@racket[bstr] and reuses it space, so @racket[bstr] must not be used
+after calling @racket[unsafe-bytes->immutable-bytes!].
+
+@history[#:added "7.7.0.6"]}
 
 
 @deftogether[(
@@ -642,10 +669,9 @@ aliases for the corresponding safe bindings.}
 @defproc[(unsafe-fx->extfl [a fixnum?]) extflonum?]
 @defproc[(unsafe-extfl->fx [a extflonum?]) fixnum?]
 )]{
-Unchecked conversion of a @tech{fixnum} to an integer @tech{extflonum} and vice versa.
-These are similar to the safe bindings @racket[->extfl] and @racket[extfl->exact-integer],
-but further constrained to consume or produce a fixnum.
-}
+Unchecked (potentially) versions of @racket[fx->extfl] and @racket[extfl->fx].
+
+@history[#:changed "7.7.0.8" @elem{Changed @racket[unsafe-fl->fx] to truncate.}]}
 
 @deftogether[(
 @defproc[(unsafe-extflvector-length [v extflvector?]) fixnum?]

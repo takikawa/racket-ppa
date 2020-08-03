@@ -60,7 +60,8 @@
   
   
   ;; label is boolean or string
-  (define-struct link (snip dark-pen light-pen dark-brush light-brush dark-text light-text dx dy [label #:mutable]))
+  (define-struct link (snip dark-pen light-pen dark-brush light-brush dark-text light-text dx dy 
+                            [label #:mutable]))
   
   ;; add-links : (is-a?/c graph-snip<%>) (is-a?/c graph-snip<%>) -> void
   ;;           : (is-a?/c graph-snip<%>) (is-a?/c graph-snip<%>) pen pen brush brush -> void
@@ -80,13 +81,13 @@
                               dx dy
                               label)]))
   
-  (define (add-links/text-colors parent child
-                                 dark-pen light-pen dark-brush light-brush
-                                 dark-text light-text 
+  (define (add-links/text-colors prnt child
+                                 dark-pen lite-pen dark-brush lite-brush
+                                 dark-txt lite-txt 
                                  dx dy
-                                 label)
-    (send parent add-child child)
-    (send child add-parent parent dark-pen light-pen dark-brush light-brush dark-text light-text dx dy label))
+                                 lbl)
+    (send prnt add-child child)
+    (send child add-parent prnt dark-pen lite-pen dark-brush lite-brush dark-txt lite-txt dx dy lbl))
 
   (define (remove-links parent child)
     (send parent remove-child child)
@@ -102,11 +103,11 @@
       (define children null)
       (define/public (get-children) children)
       (define/public (add-child child)
-        (unless (memq child children)
+        (unless (member child children object=?)
           (set! children (cons child children))))
       (define/public (remove-child child)
-        (when (memq child children)
-          (set! children (remq child children))))
+        (when (member child children object=?)
+          (set! children (remove child children object=?))))
       
       (define parent-links null)
       (define/public (get-parent-links) parent-links)
@@ -119,7 +120,7 @@
           [(parent dark-pen light-pen dark-brush light-brush dx dy)
            (add-parent parent dark-pen light-pen dark-brush light-brush #f #f dx dy #f)]
           [(parent dark-pen light-pen dark-brush light-brush dark-text light-text dx dy label)
-           (unless (memf (lambda (parent-link) (eq? (link-snip parent-link) parent)) parent-links)
+           (unless (memf (lambda (parent-link) (object=? (link-snip parent-link) parent)) parent-links)
              (define admin (get-admin))
              (when admin
                (define ed (send admin get-editor))
@@ -138,16 +139,16 @@
                                     label)
                          parent-links)))]))
       (define/public (remove-parent parent) 
-        (when (memf (lambda (parent-link) (eq? (link-snip parent-link) parent)) parent-links)
+        (when (memf (lambda (parent-link) (object=? (link-snip parent-link) parent)) parent-links)
           (set! parent-links
                 (remove
                  parent
                  parent-links
-                 (lambda (parent parent-link) (eq? (link-snip parent-link) parent))))))
+                 (lambda (parent parent-link) (object=? (link-snip parent-link) parent))))))
       (define/public (set-parent-link-label parent label)
         (let ([parent-link
                (cond [(memf (lambda (parent-link)
-                              (eq? (link-snip parent-link) parent))
+                              (object=? (link-snip parent-link) parent))
                             parent-links)
                       => car]
                      [else #f])])
@@ -155,11 +156,11 @@
             (set-link-label! parent-link label))))
       
       (define/public (has-self-loop?)
-        (memq this (get-children)))
+        (member this (get-children) object=?))
       
       (define/public (find-shortest-path other)
-        (define visited-ht (make-hasheq))
-        (define (first-view? n) 
+        (define visited-ht (make-hasheq)) ;; should be based on object=?
+        (define (first-view? n)
           (hash-ref visited-ht n (lambda () 
                                    (hash-set! visited-ht n #f)
                                    #t)))
@@ -177,7 +178,8 @@
                     (inner-loop 
                      (cdr paths)
                      (cons 
-                      (map (lambda (child) (cons child path)) (filter first-view? (send (car path) get-children)))
+                      (map (lambda (child) (cons child path))
+                           (filter first-view? (send (car path) get-children)))
                       acc)))]))])))
       
       (super-new)
@@ -337,10 +339,10 @@
         
       ;; set-equal : (listof snip) (listof snip) -> boolean
       ;; typically lists will be small (length 1),
-      ;; so use andmap/memq rather than hash-tables
+      ;; so use andmap/member rather than hashes
       (define/private (set-equal los1 los2)
-        (and (andmap (lambda (s1) (memq s1 los2)) los1)
-             (andmap (lambda (s2) (memq s2 los1)) los2)
+        (and (andmap (lambda (s1) (member s1 los2 object=?)) los1)
+             (andmap (lambda (s2) (member s2 los1 object=?)) los2)
              #t))
       
       ;; invalidate-to-children/parents : snip dc -> void
@@ -366,7 +368,9 @@
       (define/private (run-pending-invalidate-rectangle)
         (define the-pending-invalidate-rectangle pending-invalidate-rectangle)
         (set! pending-invalidate-rectangle #f)
-        (invalidate-bitmap-cache . the-pending-invalidate-rectangle))
+        (match the-pending-invalidate-rectangle
+          [(list l t r b)
+           (invalidate-bitmap-cache l t (- r l) (- b t))]))
       
       (define/private (save-rectangle-to-invalidate l t r b)
         (unless pending-invalidate-rectangle-timer
@@ -394,7 +398,7 @@
               [else 
                (let* ([c/p (car c/p-snips)]
                       [rect
-                       (if (eq? c/p main-snip)
+                       (if (object=? c/p main-snip)
                            (let-values ([(sx sy sw sh) (get-position c/p)]
                                         [(_1 h _2 _3) (send (get-dc) get-text-extent "yX"
                                                             edge-label-font)])
@@ -506,7 +510,7 @@
                 (let ([dx (+ dx (link-dx from-link))]
                       [dy (+ dy (link-dy from-link))])
                   (cond
-                    [(eq? from to)
+                    [(object=? from to)
                      (set-pen/brush from-link dark-lines?)
                      (draw-self-connection dx dy (link-snip from-link) from-link dark-lines?)]
                     [else
@@ -517,25 +521,28 @@
               text-len))
           
           (define (draw-self-connection dx dy snip the-link dark-lines?)
-            (let*-values ([(sx sy sw sh) (get-position snip)]
-                          [(s1x s1y) (values (+ sx sw) (+ sy (* sh 1/2)))]
-                          [(s2x s2y) (values (+ sx sw self-offset) (+ sy (* 3/4 sh) (* 1/2 self-offset)))]
-                          [(s3x s3y) (values (+ sx sw) (+ sy sh self-offset))]
-                          [(b12x b12y) (values s2x s1y)]
-                          [(b23x b23y) (values s2x s3y)]
+            (let*-values
+                ([(sx sy sw sh) (get-position snip)]
+                 [(s1x s1y) (values (+ sx sw) (+ sy (* sh 1/2)))]
+                 [(s2x s2y) (values (+ sx sw self-offset) (+ sy (* 3/4 sh) (* 1/2 self-offset)))]
+                 [(s3x s3y) (values (+ sx sw) (+ sy sh self-offset))]
+                 [(b12x b12y) (values s2x s1y)]
+                 [(b23x b23y) (values s2x s3y)]
                           
-                          [(s4x s4y) (values (- sx arrowhead-short-side)
-                                             (+ sy (* sh 1/2)))]
-                          [(s5x s5y) (values (- sx arrowhead-short-side self-offset)
-                                             (+ sy (* 3/4 sh) (* 1/2 self-offset)))]
-                          [(s6x s6y) (values (- sx arrowhead-short-side)
-                                             (+ sy sh self-offset))]
-                          [(b45x b45y) (values s5x s4y)]
-                          [(b56x b56y) (values s5x s6y)])
+                 [(s4x s4y) (values (- sx arrowhead-short-side)
+                                    (+ sy (* sh 1/2)))]
+                 [(s5x s5y) (values (- sx arrowhead-short-side self-offset)
+                                    (+ sy (* 3/4 sh) (* 1/2 self-offset)))]
+                 [(s6x s6y) (values (- sx arrowhead-short-side)
+                                    (+ sy sh self-offset))]
+                 [(b45x b45y) (values s5x s4y)]
+                 [(b56x b56y) (values s5x s6y)])
               
               (update-arrowhead-polygon s4x s4y sx s4y point1 point2 point3 point4)
-              (send dc draw-spline (+ dx s1x) (+ dy s1y) (+ dx b12x) (+ dy b12y) (+ dx s2x) (+ dy s2y))
-              (send dc draw-spline (+ dx s2x) (+ dy s2y) (+ dx b23x) (+ dy b23y) (+ dx s3x) (+ dy s3y))
+              (send dc draw-spline (+ dx s1x) (+ dy s1y) (+ dx b12x) (+ dy b12y) (+ dx s2x)
+                    (+ dy s2y))
+              (send dc draw-spline (+ dx s2x) (+ dy s2y) (+ dx b23x) (+ dy b23y) (+ dx s3x) 
+                    (+ dy s3y))
               (send dc draw-line (+ dx s3x) (+ dy s3y) (+ dx s6x) (+ dy s6y))
               
               (when (and edge-labels? (link-label the-link))
@@ -551,8 +558,10 @@
                           0
                           0))))
               
-              (send dc draw-spline (+ dx s4x) (+ dy s4y) (+ dx b45x) (+ dy b45y) (+ dx s5x) (+ dy s5y))
-              (send dc draw-spline (+ dx s5x) (+ dy s5y) (+ dx b56x) (+ dy b56y) (+ dx s6x) (+ dy s6y))
+              (send dc draw-spline (+ dx s4x) (+ dy s4y) (+ dx b45x) (+ dy b45y) (+ dx s5x) 
+                    (+ dy s5y))
+              (send dc draw-spline (+ dx s5x) (+ dy s5y) (+ dx b56x) (+ dy b56y) (+ dx s6x) 
+                    (+ dy s6y))
               (send dc draw-polygon points dx dy)))
           
           (define (draw-non-self-connection dx dy from-link dark-lines? to)
@@ -606,7 +615,8 @@
                           [else
                            (draw-single-edge dc dx dy from to from-x from-y to-x to-y arrow-point-ok?)
                            (when (and edge-labels? (link-label from-link))
-                             (let-values ([(text-len h d v) (send dc get-text-extent (link-label from-link))])
+                             (let-values ([(text-len h d v) 
+                                           (send dc get-text-extent (link-label from-link))])
                                (let* ([arrow-end-x (send point3 get-x)]
                                       [arrow-end-y (send point3 get-y)]
                                       [arrowhead-end (make-rectangular arrow-end-x arrow-end-y)]
@@ -653,8 +663,8 @@
                left top right bottom 
                (lambda (from-link to)
                  (let ([from (link-snip from-link)])
-                   (when (and (or (memq from currently-overs)
-                                  (memq to currently-overs))
+                   (when (and (or (member from currently-overs object=?)
+                                  (member to currently-overs object=?))
                               draw-dark-lines?)
                      (set! pairs (cons (cons from-link to) pairs)))
                    (unless draw-dark-lines?
@@ -667,7 +677,7 @@
             (send dc set-pen old-pen)
             (send dc set-text-foreground old-fg)
             (send dc set-brush old-brush)))
-      
+
       (define/public (draw-single-edge dc dx dy from to from-x from-y to-x to-y arrow-point-ok?)
         (send dc draw-line
               (+ dx from-x) (+ dy from-y) 
@@ -692,7 +702,7 @@
             (let ([from (link-snip from-link)])
               (when (send from get-admin)
                 (cond
-                  [(eq? from to)
+                  [(object=? from to)
                    (f from-link to)]
                   [else
                    (let*-values ([(xf yf wf hf) (get-position from)]
@@ -771,7 +781,7 @@
         (let ([check-one-way
                (lambda (way)
                  (let loop ([snip snip])
-                   (or (memq snip currently-overs)
+                   (or (member snip currently-overs object=?)
                        (and (is-a? snip graph-snip<%>)
                             (loop (car (way snip)))))))])
           (or (check-one-way (lambda (snip) (send snip get-children)))

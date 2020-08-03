@@ -3399,7 +3399,7 @@ static Scheme_Object *do_chaperone_procedure(const char *name, const char *whati
                                              int argc, Scheme_Object *argv[], int is_unsafe)
 {
   Scheme_Chaperone *px, *px2;
-  Scheme_Object *val = argv[0], *orig, *naya, *r, *app_mark;
+  Scheme_Object *val = argv[0], *orig, *r, *app_mark;
   Scheme_Object *props;
 
   if (SCHEME_CHAPERONEP(val))
@@ -3416,9 +3416,8 @@ static Scheme_Object *do_chaperone_procedure(const char *name, const char *whati
   }
 
   orig = get_or_check_arity(val, -1, NULL, 1);
-  if (SCHEME_FALSEP(argv[1]))
-    naya = scheme_false;
-  else {
+  if (!SCHEME_FALSEP(argv[1])) {
+    Scheme_Object *naya;
     naya = get_or_check_arity(argv[1], -1, NULL, 1);
 
     if (!is_subarity(orig, naya, pass_self ? 1 : 0))
@@ -4786,7 +4785,8 @@ static void copy_in_runstack(Scheme_Thread *p, Scheme_Saved_Stack *isaved, int s
 static void copy_in_mark_stack(Scheme_Thread *p, Scheme_Cont_Mark *cont_mark_stack_copied,
 			       MZ_MARK_STACK_TYPE cms, MZ_MARK_STACK_TYPE base_cms,
 			       intptr_t copied_offset, Scheme_Object **_sub_conts,
-                               int clear_caches)
+                               int clear_caches,
+                               MZ_MARK_POS_TYPE new_mark_pos)
      /* Copies in the mark stack up to depth cms, but assumes that the
 	stack up to depth base_cms is already in place (probably in
 	place for a dynamic-wind context in an continuation
@@ -4828,6 +4828,10 @@ static void copy_in_mark_stack(Scheme_Thread *p, Scheme_Cont_Mark *cont_mark_sta
       p->cont_mark_stack_segments = segs;
     }
   }
+
+  /* Updated after potential GC: */
+  MZ_CONT_MARK_POS = new_mark_pos;
+  MZ_CONT_MARK_STACK = cms;
 
   if (_sub_conts) {
     if (*_sub_conts) {
@@ -5322,12 +5326,11 @@ static MZ_MARK_STACK_TYPE exec_dyn_wind_pres(Scheme_Dynamic_Wind_List *dwl,
            dynamic-wind context. Clear cached info on restore
            if there's a prompt. */
         DW_PrePost_Proc pre = dwl->dw->pre;
-        MZ_CONT_MARK_POS = dwl->dw->envss.cont_mark_pos;
-        MZ_CONT_MARK_STACK = dwl->dw->envss.cont_mark_stack;
         copy_in_mark_stack(p, cont->cont_mark_stack_copied, 
-                           MZ_CONT_MARK_STACK, copied_cms,
+                           dwl->dw->envss.cont_mark_stack, copied_cms,
                            cont->cont_mark_offset, _sub_conts,
-                           clear_cm_caches);
+                           clear_cm_caches,
+                           dwl->dw->envss.cont_mark_pos);
         copied_cms = MZ_CONT_MARK_STACK;
 
         if (!skip_dws)
@@ -5931,12 +5934,11 @@ static void restore_continuation(Scheme_Cont *cont, Scheme_Thread *p, int for_pr
 
   /* Finish copying cont mark stack back in. */
     
-  MZ_CONT_MARK_POS = cont->ss.cont_mark_pos;
-  MZ_CONT_MARK_STACK = cont->ss.cont_mark_stack;
   copy_in_mark_stack(p, cont->cont_mark_stack_copied, 
-                     MZ_CONT_MARK_STACK, copied_cms,
+                     cont->ss.cont_mark_stack, copied_cms,
                      cont->cont_mark_offset, &sub_conts,
-                     clear_cm_caches);
+                     clear_cm_caches,
+                     cont->ss.cont_mark_pos);
         
   if (SAME_OBJ(result, SCHEME_MULTIPLE_VALUES)) {
     p->ku.multiple.array = mv;
@@ -6328,7 +6330,7 @@ void scheme_takeover_stacks(Scheme_Thread *p)
       op->cont_mark_stack_swapped = swapped;
     }
     *(p->cont_mark_stack_owner) = p;
-    copy_in_mark_stack(p, p->cont_mark_stack_swapped, MZ_CONT_MARK_STACK, 0, 0, NULL, 0);
+    copy_in_mark_stack(p, p->cont_mark_stack_swapped, MZ_CONT_MARK_STACK, 0, 0, NULL, 0, MZ_CONT_MARK_POS);
     p->cont_mark_stack_swapped = NULL;
   }
 }
@@ -8760,13 +8762,9 @@ static Scheme_Object *get_set_cont_mark_by_pos(Scheme_Object *key,
     bottom = 0;
   } else {
     startpos = (intptr_t)MZ_CONT_MARK_STACK;
-    if (!p->cont_mark_stack_segments)
-      findpos = 0;
     bottom = p->cont_mark_stack_bottom;
   }
   
-  findpos = startpos;
-
   /* binary search: */
   while (bottom < startpos) {
     findpos = ((bottom + startpos) / 2) - down_delta;
@@ -9012,10 +9010,6 @@ Scheme_Lightweight_Continuation *scheme_capture_lightweight_continuation(Scheme_
   Scheme_Cont_Mark *seg;
   Scheme_Lightweight_Continuation *lw;
   void *stack;
-
-#ifndef MZ_PRECISE_GC
-  return NULL;
-#endif
 
   storage[1] = p;
 

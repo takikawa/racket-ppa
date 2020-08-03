@@ -670,7 +670,7 @@
                                                 ;; All fields must be reported as mutable, because
                                                 ;; we might need to mutate to create cyclic data:
                                                 (sub1 (bitwise-arithmetic-shift-left 1 total-count)))]
-             [mutables (prefab-key-mutables prefab-key)])
+             [mutables (prefab-key-mutables prefab-key total-count)])
         (with-global-lock
          (cond
           [(prefab-ref prefab-key+count code)
@@ -750,31 +750,34 @@
       (let* ([abs-pos (+ pos (position-based-mutator-offset pbm))]
              [p (record-field-mutator rtd abs-pos)]
              [rec-name (record-type-name rtd)]
-             [name (string->symbol
-                    (string-append "set-"
-                                   (symbol->string rec-name)
-                                   "-"
-                                   (if name
-                                       (symbol->string name)
-                                       (string-append "field" (number->string pos)))
-                                   "!"))]
+             [mut-name (string->symbol
+                        (string-append "set-"
+                                       (symbol->string rec-name)
+                                       "-"
+                                       (if name
+                                           (symbol->string name)
+                                           (string-append "field" (number->string pos)))
+                                       "!"))]
              [wrap-p
               (procedure-rename
                (if (struct-type-field-mutable? rtd pos)
                    (lambda (v a)
                      (if (record? v rtd)
                          (p v a)
-                         (impersonate-set! p rtd pos abs-pos v a rec-name (or name 'field))))
+                         (impersonate-set! p rtd pos abs-pos v a rec-name name)))
                    (lambda (v a)
-                     (raise-arguments-error name
-                                            "cannot modify value of immutable field in structure"
-                                            "structure" v
-                                            "field index" pos)))
-               name)])
+                     (cannot-modify-by-pos-error mut-name v pos)))
+               mut-name)])
         (register-struct-field-mutator! wrap-p rtd pos)
         wrap-p))]
    [(pbm pos)
     (make-struct-field-mutator pbm pos #f)]))
+
+(define (cannot-modify-by-pos-error name v pos)
+  (raise-arguments-error name
+                         "cannot modify value of immutable field in structure"
+                         "structure" v
+                         "field index" pos))
 
 ;; Takes constructor arguments and adds auto-argument values.
 ;; Receives and returns `args` is in reverse order.
@@ -942,7 +945,7 @@
                     (or (record? v rtd*)
                         (and (impersonator? v)
                              (record? (impersonator-val v) rtd*)))))])
-      (register-struct-constructor! pred)
+      (register-struct-predicate! pred)
       pred)))
 
 ;; ----------------------------------------

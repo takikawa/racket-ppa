@@ -685,8 +685,9 @@
          (let ([debug-GC? (log-level?* root-logger 'debug 'GC)]
                [debug-GC:major? (log-level?* root-logger 'debug 'GC:major)])
            (when (or debug-GC? debug-GC:major?)
-             (let ([msg (chez:format "GC: 0:atexit peak ~a; alloc ~a; major ~a; minor ~a; ~ams"
+             (let ([msg (chez:format "GC: 0:atexit peak ~a(~a); alloc ~a; major ~a; minor ~a; ~ams"
                                      (K "" peak-mem)
+                                     (K "+" (- (maximum-memory-bytes) peak-mem))
                                      (K "" (- (+ (bytes-deallocated) (bytes-allocated)) (initial-bytes-allocated)))
                                      major-gcs
                                      minor-gcs
@@ -721,7 +722,7 @@
                (parse-logging-spec "syslog" spec "in PLTSYSLOG environment variable" #f)
                '()))))
 
-   (define gcs-on-exit? (and (getenv "PLT_GCS_ON_EXIT")))
+   (define gcs-on-exit? (and (getenv "PLT_GCS_ON_EXIT") #t))
 
    (define (initialize-place!)
      (current-command-line-arguments remaining-command-line-arguments)
@@ -817,6 +818,9 @@
       (lambda ()
         (let ([f (dynamic-require mod sym)])
           (f pch)))))
+   (set-destroy-place!
+    (lambda ()
+      (io-place-destroy!)))
 
    (let ([a (or addon-dir
                 (getenv-bytes "PLTADDONDIR"))])
@@ -829,6 +833,18 @@
         (lambda args
           (dump-memory-stats)
           (apply orig args)))))
+
+   (when (getenv "PLT_MAX_COMPACT_GC")
+     (in-place-minimum-generation 254))
+
+   (let ([s (getenv "PLT_INCREMENTAL_GC")])
+     (when (and s
+                (>= (string-length s) 1)
+                (#%memv (string-ref s 0) '(#\0 #\n #\N)))
+       (set-incremental-collection-enabled! #f)))
+
+   (when (getenv "PLTDISABLEGC")
+     (collect-request-handler void))
 
    (when version?
      (display (banner)))

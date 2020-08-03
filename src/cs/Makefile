@@ -4,7 +4,9 @@
 RACKET = ../../bin/racket
 SCHEME = scheme
 
-# Controls whether Racket layers are built as unsafe:
+# Controls whether Racket layers are built as unsafe; beware that
+# building some Racket libraries using safe mode may require setting
+# `PLT_CS_COMPILE_LIMIT` to 1000 (instead of 10000):
 UNSAFE_COMP = --unsafe
 
 # Controls whether compiled code is compressed:
@@ -127,8 +129,7 @@ LINKLET_SRCS = linklet/version.ss \
                linklet/performance.ss \
                linklet/annotation.ss \
                linklet/compress.ss \
-               linklet/cross-compile.ss \
-               linklet/db.ss
+               linklet/cross-compile.ss
 
 $(BUILDDIR)linklet.$(CSO): linklet.sls $(LINKLET_SRCS) $(LINKLET_DEPS) $(COMPILE_FILE_DEPS)
 	$(COMPILE_FILE) linklet.sls $(LINKLET_DEPS)

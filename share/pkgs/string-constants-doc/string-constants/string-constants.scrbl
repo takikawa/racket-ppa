@@ -87,7 +87,9 @@ running DrRacket.}
 To add string constants to DrRacket, see the file
 @filepath{private/english-string-constants.rkt}
 and the other string constants files in the @filepath{private}
-directory.
+directory. (Some string constants files that have a less permissive
+license are also available on the pkg server in the
+@tt{string-constants-lib-lgpl} pkg.)
   
 Each file has the same format. They are each modules in the
 @racket[string-constants/private/string-constant-lang] language. The
@@ -101,6 +103,20 @@ string constants will be set there and translated into each of the
 other language files.  In addition, the
 @filepath{english-string-constants.rkt} file should contain hints about
 the context of the strings whose symbol name might not be clear.
+
+To add a new set of string constants, pull requests on the
+@link["https://github.com/racket/string-constants"]{string
+ constants repository} are welcome, but adding a definition of
+@tt{string-constants-info} to a value that satisfies the
+contract
+@racketblock[(listof (list/c symbol? regexp? regexp?
+                             (and/c module-path? (not/c path-string?))))]
+to a collection-level @filepath{info.rkt} file allows string constants
+to be added via other packages. The first element of each list
+must be the name of the language, the second and third are regular
+expressions that are used to match the result of @racket[system-language+country]
+to determine if the string constant set should be used (by default).
+The final element is an absolute module path to the file containing the string constants.
 
 @; ----------------------------------------------------------------------
 
