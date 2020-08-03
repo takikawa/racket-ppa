@@ -544,7 +544,7 @@
                 boolean?))]{
     Queries the use for a file name and saves the file with that name.
 
-    Returns @racket[#f] if the user cancells the file-choosing
+    Returns @racket[#f] if the user cancels the file-choosing
     dialog and returns @racket[#t] otherwise.
   }
   @defmethod*[(((get-canvas) (is-a?/c canvas%)))]{
@@ -891,18 +891,18 @@
   }
 
   @defmethod*[#:mode override
-              (((edit-menu:find-again-callback (item (is-a?/c menu-item%))
+              (((edit-menu:find-next-callback (item (is-a?/c menu-item%))
                                                (evt (is-a?/c control-event%)))
                 void?))]{
     Calls @method[frame:searchable unhide-search] and then
     @method[frame:searchable<%> search].
   }
 
-  @defmethod*[#:mode override (((edit-menu:create-find-again?) boolean?))]{
+  @defmethod*[#:mode override (((edit-menu:create-find-next?) boolean?))]{
     returns @racket[#t].
   }
 
-  @defmethod*[#:mode override (((edit-menu:find-again-backwards-callback
+  @defmethod*[#:mode override (((edit-menu:find-previous-callback
                                  (item (is-a?/c menu-item%))
                                  (evt (is-a?/c control-event%)))
                                 void?))]{
@@ -910,7 +910,7 @@
     @method[frame:searchable<%> search].
   }
 
-  @defmethod*[#:mode override (((edit-menu:create-find-again-backwards?) boolean?))]{
+  @defmethod*[#:mode override (((edit-menu:create-find-previous?) boolean?))]{
     returns @racket[#t].
   }
 

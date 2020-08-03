@@ -58,6 +58,13 @@ void S_segment_init() {
   }
   S_G.number_of_nonstatic_segments = 0;
   S_G.number_of_empty_segments = 0;
+
+  if (seginfo_space_disp != offsetof(seginfo, space))
+    S_error_abort("seginfo_space_disp is wrong");
+  if (seginfo_generation_disp != offsetof(seginfo, generation))
+    S_error_abort("seginfo_generation_disp is wrong");
+  if (seginfo_list_bits_disp != offsetof(seginfo, list_bits))
+    S_error_abort("seginfo_list_bits_disp is wrong");
 }
 
 static uptr membytes = 0;
@@ -229,6 +236,10 @@ static void initialize_seginfo(seginfo *si, ISPC s, IGEN g) {
   si->space = s;
   si->generation = g;
   si->sorted = 0;
+  si->old_space = 0;
+  si->use_marks = 0;
+  si->must_mark = 0;
+  si->list_bits = NULL;
   si->min_dirty_byte = 0xff;
   for (d = 0; d < cards_per_segment; d += sizeof(ptr)) {
     iptr *dp = (iptr *)(si->dirty_bytes + d);
@@ -238,9 +249,7 @@ static void initialize_seginfo(seginfo *si, ISPC s, IGEN g) {
   si->has_triggers = 0;
   si->trigger_ephemerons = 0;
   si->trigger_guardians = 0;
-  si->locked_objects = Snil;
-  si->unlocked_objects = Snil;
-  si->locked_mask = NULL;
+  si->marked_mask = NULL;
 #ifdef PRESERVE_FLONUM_EQ
   si->forwarded_flonums = NULL;
 #endif
@@ -380,6 +389,9 @@ static seginfo *allocate_segments(nreq) uptr nreq; {
       si->space = space_empty;
       si->generation = 0;
       si->sorted = 1; /* inserting in reverse order, so emptys are always sorted */
+      si->old_space = 0;
+      si->use_marks = 0;
+      si->must_mark = 0;
       si->next = chunk->unused_segs;
       chunk->unused_segs = si;
     }
@@ -432,6 +444,10 @@ uptr S_maxmembytes(void) {
 
 void S_resetmaxmembytes(void) {
   maxmembytes = membytes;
+}
+
+void S_adjustmembytes(iptr amt) {
+  if ((membytes += amt) > maxmembytes) maxmembytes = membytes;
 }
 
 static void expand_segment_table(uptr base, uptr end, seginfo *si) {

@@ -4,10 +4,11 @@
 ;; See manual for information.
 
 (require "stacktrace.rkt"
-         "errortrace-key.rkt"
+         (prefix-in ek: "errortrace-key.rkt")
          "private/utils.rkt"
          racket/contract/base
          racket/unit
+         racket/list
          (for-template racket/base "errortrace-key.rkt")
          (for-syntax racket/base))
 
@@ -15,143 +16,53 @@
 ;; Test coverage run-time support
 (define test-coverage-enabled (make-parameter #f))
 
-(define test-coverage-state '())
-(define (initialize-test-coverage) (set! test-coverage-state '()))
-
 (define (initialize-test-coverage-point expr)
-  (when (and (syntax-position expr)
-             (syntax-span expr))
-    (set! test-coverage-state (cons (list (syntax-source expr)
-                                          (syntax-position expr)
-                                          (syntax-span expr))
-                                    test-coverage-state))))
+  (define hash (ek:test-coverage-info))
+  (define info (stx->test-coverage-info expr))
+  (when (and hash info)
+    (hash-set! hash 'base
+               (cons info
+                     (hash-ref hash 'base '())))))
+
+(define (test-covered expr)
+  (syntax-case expr ()
+    [(mod name . reste)
+     (and (identifier? #'mod)
+          (free-identifier=? #'mod
+                             (namespace-module-identifier)
+                             (namespace-base-phase)))
+     ;; don't annotate module expressions
+     #f]
+    [_
+     (let ([info (stx->test-coverage-info expr)])
+       (and info
+            #`(#%plain-app ek:test-covered '#,(stx->test-coverage-info expr))))]))
+
+(define (stx->test-coverage-info expr)
+  (and (syntax-position expr)
+       (syntax-span expr)
+       (syntax-source expr)
+       (list (syntax-source expr)
+             (syntax-position expr)
+             (+ (syntax-position expr) (syntax-span expr)))))
 
 ;; get-coverage : -> (values (listof (list src number number)) (listof (list src number number)))
 ;; the first result is a (minimized) set of ranges for all of the code that could be executed
 ;; the second result is the set of ranges that were actually executed.
 (define (get-coverage) 
-  (let* ([hash (test-coverage-info)]
-         [all (hash-ref hash 'base '())]
-         [covered '()])
-    (hash-for-each hash (lambda (x y) (unless (eq? x 'base) (set! covered (cons x covered)))))
-    (values all covered)))
-
-(define code-insp (variable-reference->module-declaration-inspector
-                   (#%variable-reference)))
-(define (disarm stx)
-  (syntax-disarm stx code-insp))
-
-(define (transform-all-modules stx proc [in-mod-id (namespace-module-identifier)])
-  (syntax-case stx ()
-    [(mod name init-import mb)
-     (syntax-case (disarm #'mb) (#%plain-module-begin)
-       [(#%plain-module-begin body ...)
-        (let ()
-          (define ((handle-top-form phase) expr)
-            (define disarmed-expr (disarm expr))
-            (syntax-case* disarmed-expr (begin-for-syntax module module*)
-                          (lambda (a b)
-                            (free-identifier=? a b phase 0))
-              [(begin-for-syntax body ...)
-               (syntax-rearm
-                #`(#,(car (syntax-e disarmed-expr))
-                    #,@(map (handle-top-form (add1 phase)) 
-                            (syntax->list #'(body ...))))
-                expr)]
-              [(module . _)
-               (syntax-rearm
-                (transform-all-modules disarmed-expr proc #f)
-                expr)]
-              [(module* name init-import . _)
-               (let ([shift (if (syntax-e #'init-import)
-                                0
-                                phase)])
-                 (syntax-rearm
-                  (syntax-shift-phase-level
-                   (transform-all-modules (syntax-shift-phase-level disarmed-expr (- shift)) proc #f)
-                   shift)
-                  expr))]
-              [else expr]))
-          (define mod-id (or in-mod-id #'mod))
-          (proc
-           (copy-props
-            stx
-            #`(#,mod-id name init-import
-                        #,(syntax-rearm
-                           #`(#%plain-module-begin
-                              . #,(map (handle-top-form 0) (syntax->list #'(body ...))))
-                           #'mb)))
-           mod-id))])]))
-    
-(define (add-test-coverage-init-code stx)
-  (transform-all-modules
-   stx
-   (lambda (stx mod-id)
-     (syntax-case stx ()
-       [(mod name init-import mb)
-        (syntax-case (disarm #'mb) (#%plain-module-begin)
-          [(#%plain-module-begin b1 body ...)
-           (copy-props
-            stx
-            #`(#,mod-id name init-import
-               #,(syntax-rearm
-                  #`(#%plain-module-begin
-                     b1 ;; the requires that were introduced earlier
-                     (#%plain-app init-test-coverage '#,(remove-duplicates test-coverage-state))
-                     body ...)
-                  #'mb)))])]))))
+  (define hash (ek:test-coverage-info))
+  (define all (hash-ref hash 'base '()))
+  (define covered
+    (for/list ([(k v) (in-hash hash)]
+               #:unless (equal? k 'base))
+      k))
+  (values (remove-duplicates (sort all string<? #:key (λ (x) (format "~s" x))))
+          (remove-duplicates (sort covered string<? #:key (λ (x) (format "~s" x))))))
 
 (define (annotate-covered-file filename-path [display-string #f])
   (annotate-file filename-path
                  (map (λ (c) (cons (car c) (if (cdr c) 1 0))) (get-coverage))
                  display-string))
-
-
-;; The next procedure is called by `annotate' and `annotate-top' to wrap
-;; expressions with test suite coverage information.  Returning the
-;; first argument means no tests coverage information is collected.
-
-;; test-coverage-point : syntax syntax integer -> (values syntax info)
-;; sets a test coverage point for a single expression
-(define (test-coverage-point body expr phase)
-  (if (and (test-coverage-enabled) (zero? phase))
-      (syntax-case expr ()
-        [(mod name . reste)
-         (and (identifier? #'mod)
-              (free-identifier=? #'mod 
-                                 (namespace-module-identifier)
-                                 (namespace-base-phase)))
-         ;; don't annotate module expressions
-         body]
-        [_
-         (cond
-           [(and (syntax-source expr)
-                 (number? (syntax-position expr))
-                 (number? (syntax-position expr)))
-            (initialize-test-coverage-point expr)
-            (with-syntax ([src (datum->syntax #f (syntax-source expr) (quote-syntax here))]
-                          [start-pos (syntax-position expr)]
-                          [end-pos (+ (syntax-position expr) (syntax-span expr))]
-                          [body body])
-              #'(begin (#%plain-app test-covered '(src start-pos end-pos)) body))]
-           [else
-            body])])
-      body))
-
-;; remove-duplicates : (listof X) -> (listof X)
-(define (remove-duplicates l)
-  (let ([ht (make-hash)])
-    (for-each (lambda (x) (hash-set! ht x #t)) l)
-    (sort (hash-map ht (lambda (x y) x))
-          (lambda (x y)
-            (cond
-              [(= (list-ref x 1) (list-ref y 1))
-               (< (list-ref x 2) (list-ref y 2))]
-              [else
-               (< (list-ref x 1) (list-ref y 1))])))))
-
-(define (copy-props orig new)
-  (datum->syntax orig (syntax-e new) orig orig))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Profiling run-time support
@@ -253,7 +164,7 @@
     (if loc
         (with-syntax ([expr expr]
                       [loc loc]
-                      [et-key (syntax-shift-phase-level #'errortrace-key (- phase base-phase))]
+                      [et-key (syntax-shift-phase-level #'ek:errortrace-key (- phase base-phase))]
                       [wcm (syntax-shift-phase-level #'with-continuation-mark (- phase base-phase))])
           (execute-point
            mark
@@ -267,56 +178,7 @@
   (and (syntax-source s)
        (syntax-property s 'errortrace:annotate)))
 
-;; Add the 'errortrace:annotate property every in an original syntax
-;; object, so that we can recognize pieces from the original program
-;; after expansion:
-(define (add-annotate-property s)
-  (cond
-   [(syntax? s)
-    (define new-s (syntax-rearm 
-                   (let ([s (disarm s)])
-                     (datum->syntax s
-                                    (add-annotate-property (syntax-e s))
-                                    s
-                                    s))
-                   s))
-    ;; We could check for "original" syntax here, because partial expansion
-    ;; of top-level forms happens before the compile handler gets
-    ;; control. As a compromise for programs that may use errortrace
-    ;; with `eval` and S-expressions or non-`syntax-original?` arrangements, we add
-    ;; the property everywhere:
-    (if #t ; (syntax-original? s)
-        (syntax-property new-s
-                         'errortrace:annotate #t
-                         ;; preserve the property in bytecode:
-                         #t)
-        new-s)]
-   [(pair? s)
-    (cons (add-annotate-property (car s))
-          (add-annotate-property (cdr s)))]
-   [(vector? s)
-    (for/vector #:length (vector-length s) ([e (in-vector s)])
-                (add-annotate-property e))]
-   [(box? s) (box (add-annotate-property (unbox s)))]
-   [(prefab-struct-key s)
-    => (lambda (k)
-         (apply make-prefab-struct
-                k
-                (add-annotate-property (cdr (vector->list (struct->vector s))))))]
-   [(and (hash? s) (immutable? s))
-    (cond
-     [(hash-eq? s)
-      (for/hasheq ([(k v) (in-hash s)])
-        (values k (add-annotate-property v)))]
-     [(hash-eqv? s)
-      (for/hasheqv ([(k v) (in-hash s)])
-        (values k (add-annotate-property v)))]
-     [else
-      (for/hash ([(k v) (in-hash s)])
-        (values k (add-annotate-property v)))])]
-   [else s]))
-
-(define-values/invoke-unit/infer stacktrace/filter@)
+(define-values/invoke-unit/infer stacktrace/filter/errortrace-annotate@)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Execute counts
@@ -433,7 +295,7 @@
   (let loop ([n (error-context-display-depth)]
              [l (map st-mark-source
                      (continuation-mark-set->list (exn-continuation-marks x)
-                                                  errortrace-key))])
+                                                  ek:errortrace-key))])
     (cond
       [(or (zero? n) (null? l)) (void)]
       [(pair? l)
@@ -493,71 +355,8 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(define errortrace-annotate
-  (lambda (top-e)
-    (define (normal e)
-      (define expanded-e (expand-syntax (add-annotate-property e)))
-      (parameterize ([original-stx e]
-                     [expanded-stx expanded-e])
-        (annotate-top expanded-e (namespace-base-phase))))
-    (syntax-case top-e ()
-      [(mod name . reste)
-       (and (identifier? #'mod)
-            (free-identifier=? #'mod 
-                               (namespace-module-identifier)
-                               (namespace-base-phase)))
-       (if (eq? (syntax-e #'name) 'errortrace-key)
-           top-e
-           (let ([expanded-e (normal top-e)])
-             (cond
-              [(has-cross-phase-declare?
-                (syntax-case expanded-e ()
-                  [(mod name init-import mb) #'mb]))
-               expanded-e]
-              [else
-               (initialize-test-coverage)
-               (add-test-coverage-init-code
-                (transform-all-modules 
-                 expanded-e
-                 (lambda (top-e mod-id)
-                   (syntax-case top-e ()
-                     [(mod name init-import mb)
-                      (syntax-case (disarm #'mb) (#%plain-module-begin)
-                        [(#%plain-module-begin body ...)
-                         (let ([meta-depth ((count-meta-levels 0) #'(begin body ...))])
-                           (copy-props
-                            top-e
-                            #`(#,mod-id name init-import
-                                        #,(syntax-rearm
-                                           #`(#%plain-module-begin
-                                              #,(generate-key-imports meta-depth)
-                                              body ...)
-                                           #'mb))))])]))))])))]
-      [_else
-       (let ([e (normal top-e)])
-         (let ([meta-depth ((count-meta-levels 0) e)])
-           ;; We need to force the `require`s now, so that `e` can be compiled.
-           ;; It doesn't work to reply on `begin` unrolling for a top-level `eval`,
-           ;; because we're in a compile handler and already committed to a single form.
-           (for ([i (in-range meta-depth)])
-             (namespace-require `(for-meta ,(add1 i) errortrace/errortrace-key)))
-           #`(begin
-               #,(generate-key-imports meta-depth)
-               #,e)))])))
-
-(define (has-cross-phase-declare? e)
-  (for/or ([a (in-list (or (syntax->list e) '()))])
-    (syntax-case* a (#%declare begin) (lambda (a b)
-                                        (free-identifier=? a b 0 (namespace-base-phase)))
-      [(#%declare kw ...)
-       (for/or ([kw (in-list (syntax->list #'(kw ...)))])
-         (eq? (syntax-e kw) '#:cross-phase-persistent))]
-      [(begin . e)
-       (has-cross-phase-declare? #'e)]
-      [_ #f])))
-
 (define-namespace-anchor orig-namespace)
-                      
+
 (define (make-errortrace-compile-handler)
   (let ([orig (current-compile)]
         [reg (namespace-module-registry (current-namespace))]
@@ -580,12 +379,11 @@
                 (not (compiled-expression? (if (syntax? e)
                                                (syntax-e e)
                                                e))))
-           (let ([e2 (errortrace-annotate
-                      (if (syntax? e)
-                          e
-                          (namespace-syntax-introduce
-                           (datum->syntax #f e))))])
-             e2)
+           (errortrace-annotate
+            (if (syntax? e)
+                e
+                (namespace-syntax-introduce
+                 (datum->syntax #f e))))
            e)
        immediate-eval?))))
 
@@ -628,6 +426,6 @@
          ;; need to rename here to avoid having to rename when the unit is invoked.
          (rename-out [test-coverage-enabled coverage-counts-enabled])
          get-coverage
-         test-coverage-info
+         (rename-out [ek:test-coverage-info test-coverage-info])
          
          annotate-top)

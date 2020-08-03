@@ -272,8 +272,7 @@
 
    (set! flabs
       (lambda (x)
-         (unless (flonum? x) (flargerr 'flabs x))
-         (#3%flabs x)))
+         (#2%flabs x)))
 
    (set! flround
       (lambda (x)
@@ -318,13 +317,8 @@
          ($flonum-sign x)))
 
    (set-who! flonum->fixnum
-      (let ([flmnf (fixnum->flonum (most-negative-fixnum))]
-            [flmpf (fixnum->flonum (most-positive-fixnum))])
-         (lambda (x)
-            (unless (flonum? x) (flargerr who x))
-            (unless (fl<= flmnf x flmpf)
-               ($oops who "result for ~s would be outside of fixnum range" x))
-            (#3%flonum->fixnum x))))
+     (lambda (x)
+       (#2%flonum->fixnum x)))
 )
 
 (let ()
@@ -682,8 +676,7 @@
 
    (set! fixnum->flonum
       (lambda (x)
-         (unless (fixnum? x) (fxargerr 'fixnum->flonum x))
-         (#3%fixnum->flonum x)))
+         (#2%fixnum->flonum x)))
 
    (set-who! fxlength
      (lambda (x)

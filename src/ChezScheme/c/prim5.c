@@ -35,6 +35,9 @@ static ptr s_fltofx PROTO((ptr x));
 static ptr s_weak_pairp PROTO((ptr p));
 static ptr s_ephemeron_cons PROTO((ptr car, ptr cdr));
 static ptr s_ephemeron_pairp PROTO((ptr p));
+static ptr s_box_immobile PROTO((ptr p));
+static ptr s_make_immobile_vector PROTO((uptr len, ptr fill));
+static ptr s_make_immobile_bytevector PROTO((uptr len));
 static ptr s_oblist PROTO((void));
 static ptr s_bigoddp PROTO((ptr n));
 static ptr s_float PROTO((ptr x));
@@ -176,24 +179,55 @@ static ptr s_fltofx(x) ptr x; {
 
 static ptr s_weak_pairp(p) ptr p; {
   seginfo *si;
-  return Spairp(p) && (si = MaybeSegInfo(ptr_get_segment(p))) != NULL && (si->space & ~space_locked) == space_weakpair ? Strue : Sfalse;
+  return Spairp(p) && (si = MaybeSegInfo(ptr_get_segment(p))) != NULL && si->space == space_weakpair ? Strue : Sfalse;
 }
 
 static ptr s_ephemeron_cons(car, cdr) ptr car, cdr; {
   ptr p;
 
   tc_mutex_acquire()
-  find_room(space_ephemeron, 0, type_pair, size_ephemeron, p);
+  p = S_ephemeron_cons_in(0, car, cdr);
   tc_mutex_release()
-  INITCAR(p) = car;
-  INITCDR(p) = cdr;
 
   return p;
 }
 
 static ptr s_ephemeron_pairp(p) ptr p; {
   seginfo *si;
-  return Spairp(p) && (si = MaybeSegInfo(ptr_get_segment(p))) != NULL && (si->space & ~space_locked) == space_ephemeron ? Strue : Sfalse;
+  return Spairp(p) && (si = MaybeSegInfo(ptr_get_segment(p))) != NULL && si->space == space_ephemeron ? Strue : Sfalse;
+}
+
+static ptr s_box_immobile(p) ptr p; {
+  ptr b = S_box2(p, 1);
+  S_immobilize_object(b);
+  return b;
+}
+
+static ptr s_make_immobile_bytevector(uptr len) {
+  ptr b = S_bytevector2(len, 1);
+  S_immobilize_object(b);
+  return b;
+}
+
+static ptr s_make_immobile_vector(uptr len, ptr fill) {
+  ptr v;
+  uptr i;
+
+  tc_mutex_acquire()
+  v = S_vector_in(space_immobile_impure, 0, len);
+  tc_mutex_release()
+
+  S_immobilize_object(v);
+  
+  for (i = 0; i < len; i++)
+    INITVECTIT(v, i) = fill;
+
+  if (!(len & 0x1)) {
+    /* pad, since we're not going to copy on a GC */
+    INITVECTIT(v, len) = FIX(0);
+  }
+
+  return v;
 }
 
 static ptr s_oblist() {
@@ -508,7 +542,7 @@ static void s_showalloc(IBOOL show_dump, const char *outfn) {
 
     fprintf(out, "\nMap of occupied segments:\n");
     for (ls = sorted_chunks; ls != Snil; ls = Scdr(ls)) {
-      seginfo *si; ISPC real_s;
+      seginfo *si;
 
       chunk = Scar(ls);
 
@@ -545,11 +579,9 @@ static void s_showalloc(IBOOL show_dump, const char *outfn) {
         }
 
         si = &chunk->sis[i];
-        real_s = si->space;
-        s = real_s & ~(space_locked | space_old);
+        s = si->space;
         if (s < 0 || s > max_space) s = space_bogus;
-        spaceline[segwidth+segsprinted] =
-          real_s & (space_locked | space_old) ? toupper(spacechar[s]) : spacechar[s];
+        spaceline[segwidth+segsprinted] = spacechar[s];
 
         g = si->generation;
         genline[segwidth+segsprinted] =
@@ -1265,7 +1297,7 @@ static void c_exit(UNUSED I32 status) {
 #else /* defined(__STDC__) || defined(USE_ANSI_PROTOTYPES) */
 extern double sin(), cos(), tan(), asin(), acos(), atan(), atan2();
 extern double sinh(), cosh(), tanh(), exp(), log(), pow(), sqrt();
-extern double floor(), ceil(), HYPOT();
+extern double floor(), ceil(), round(), trunc(), HYPOT();
 #ifdef ARCHYPERBOLIC
 extern double asinh(), acosh(), atanh();
 #endif /* ARCHHYPERBOLIC */
@@ -1279,6 +1311,9 @@ static double s_exp(x) double x; { return exp(x); }
 
 static double s_log PROTO((double x));
 static double s_log(x) double x; { return log(x); }
+
+static double s_log2 PROTO((double x, double y));
+static double s_log2(x, y) double x, y; { return log(x) / log(y); }
 
 static double s_pow PROTO((double x, double y));
 #if (machine_type == machine_type_i3fb || machine_type == machine_type_ti3fb)
@@ -1343,6 +1378,12 @@ static double s_floor(x) double x; { return floor(x); }
 
 static double s_ceil PROTO((double x));
 static double s_ceil(x) double x; { return ceil(x); }
+
+static double s_round PROTO((double x));
+static double s_round(x) double x; { return rint(x); }
+
+static double s_trunc PROTO((double x));
+static double s_trunc(x) double x; { return trunc(x); }
 
 static double s_hypot PROTO((double x, double y));
 static double s_hypot(x, y) double x, y; { return HYPOT(x, y); }
@@ -1414,12 +1455,12 @@ static s_thread_rv_t s_backdoor_thread_start(p) void *p; {
   display("backdoor thread started\n")
   (void) Sactivate_thread();
   display("thread activated\n")
-  Scall0((ptr)p);
+  Scall0((ptr)Sunbox(p));
   (void) Sdeactivate_thread();
   display("thread deactivated\n")
   (void) Sactivate_thread();
   display("thread reeactivated\n")
-  Scall0((ptr)p);
+  Scall0((ptr)Sunbox(p));
   Sdestroy_thread();
   display("thread destroyed\n")
   s_thread_return;
@@ -1509,6 +1550,8 @@ void S_dump_tc(ptr tc) {
   fflush(stdout);
 }
 
+#define proc2ptr(x) (ptr)(iptr)(x)
+
 void S_prim5_init() {
     if (!S_boot_time) return;
 
@@ -1535,6 +1578,9 @@ void S_prim5_init() {
     Sforeign_symbol("(cs)s_weak_pairp", (void *)s_weak_pairp);
     Sforeign_symbol("(cs)s_ephemeron_cons", (void *)s_ephemeron_cons);
     Sforeign_symbol("(cs)s_ephemeron_pairp", (void *)s_ephemeron_pairp);
+    Sforeign_symbol("(cs)box_immobile", (void *)s_box_immobile);
+    Sforeign_symbol("(cs)make_immobile_vector", (void *)s_make_immobile_vector);
+    Sforeign_symbol("(cs)make_immobile_bytevector", (void *)s_make_immobile_bytevector);
     Sforeign_symbol("(cs)continuation_depth", (void *)S_continuation_depth);
     Sforeign_symbol("(cs)single_continuation", (void *)S_single_continuation);
     Sforeign_symbol("(cs)c_exit", (void *)c_exit);
@@ -1724,6 +1770,25 @@ void S_prim5_init() {
 #endif
     Sforeign_symbol("(cs)s_profile_counters", (void *)s_profile_counters);
     Sforeign_symbol("(cs)s_profile_release_counters", (void *)s_profile_release_counters);
+
+    S_install_c_entry(CENTRY_flfloor, proc2ptr(s_floor));
+    S_install_c_entry(CENTRY_flceiling, proc2ptr(s_ceil));
+    S_install_c_entry(CENTRY_flround, proc2ptr(s_round));
+    S_install_c_entry(CENTRY_fltruncate, proc2ptr(s_trunc));
+    S_install_c_entry(CENTRY_flsin, proc2ptr(s_sin));
+    S_install_c_entry(CENTRY_flcos, proc2ptr(s_cos));
+    S_install_c_entry(CENTRY_fltan, proc2ptr(s_tan));
+    S_install_c_entry(CENTRY_flasin, proc2ptr(s_asin));
+    S_install_c_entry(CENTRY_flacos, proc2ptr(s_acos));
+    S_install_c_entry(CENTRY_flatan, proc2ptr(s_atan));
+    S_install_c_entry(CENTRY_flatan2, proc2ptr(s_atan2));
+    S_install_c_entry(CENTRY_flexp, proc2ptr(s_exp));
+    S_install_c_entry(CENTRY_fllog, proc2ptr(s_log));
+    S_install_c_entry(CENTRY_fllog2, proc2ptr(s_log2));
+    S_install_c_entry(CENTRY_flexpt, proc2ptr(s_pow));
+    S_install_c_entry(CENTRY_flsqrt, proc2ptr(s_sqrt));
+
+    S_check_c_entry_vector();
 }
 
 static ptr s_get_reloc(co, with_offsets) ptr co; IBOOL with_offsets; {

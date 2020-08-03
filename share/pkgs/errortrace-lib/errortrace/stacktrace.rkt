@@ -1,9 +1,12 @@
 #lang racket/base
+
 (require racket/unit
          syntax/kerncase
          syntax/stx
          syntax/source-syntax
-         (for-template racket/base)
+         "private/utils.rkt"
+         "errortrace-key.rkt"
+         (for-template racket/base "errortrace-key.rkt")
          (for-syntax racket/base)) ; for matching
 
 (define original-stx (make-parameter #f))
@@ -13,6 +16,8 @@
 (provide stacktrace@ stacktrace^ stacktrace-imports^
          stacktrace/annotator-imports^ stacktrace/annotator@
          stacktrace-filter^ stacktrace/annotator/filter@ stacktrace/filter@
+         stacktrace/errortrace-annotate^ stacktrace/errortrace-annotate@
+         stacktrace/filter/errortrace-annotate@
          original-stx expanded-stx)
 
 (define-signature stacktrace-imports^
@@ -42,6 +47,10 @@
 (define-signature stacktrace-filter^
   (should-annotate?))
 
+(define-signature test-coverage-init^
+  (initialize-test-coverage
+   ))
+
 ;; The intentionally-undocumented format of bindings introduced by `make-st-mark` is:
 ;; (cons syntax? (cons syntax? srcloc-list))
 
@@ -58,8 +67,24 @@
    st-mark-source
    st-mark-bindings))
 
+(define-signature errortrace-annotate^
+  (errortrace-annotate))
+
+(define-signature stacktrace/errortrace-annotate^
+  ((open stacktrace^)
+   (open errortrace-annotate^)))
+
 (define base-phase
   (variable-reference->module-base-phase (#%variable-reference)))
+
+(define orig-inspector (variable-reference->module-declaration-inspector
+                        (#%variable-reference)))
+
+(define (rearm orig new)
+  (syntax-rearm new orig))
+
+(define (disarm orig)
+  (syntax-disarm orig orig-inspector))
 
 (define-unit stacktrace/annotator/filter@
   (import stacktrace/annotator-imports^
@@ -325,15 +350,6 @@
            [bodyl (map (lambda (b) (annotate b phase)) bodys)])
       (rebuild expr (map cons bodys bodyl))))
   
-  (define orig-inspector (variable-reference->module-declaration-inspector
-                          (#%variable-reference)))
-  
-  (define (rearm orig new)
-    (syntax-rearm new orig))
-  
-  (define (disarm orig)
-    (syntax-disarm orig orig-inspector))
-
   (define (rebuild expr replacements)
     (let loop ([expr expr] [same-k (lambda () expr)] [diff-k (lambda (x) x)])
       (let ([a (assq expr replacements)])
@@ -667,6 +683,166 @@
     (parameterize ([current-recover-table (make-hash)])
       (no-cache-annotate-named name expr phase))))
 
+(define-unit stacktrace/annotator/filter/errortrace-annotate@
+  (import stacktrace^)
+  (export errortrace-annotate^)
+
+  (define (errortrace-annotate top-e [in-compile-handler? #t])
+    (define (normal e)
+      (define expanded-e (expand-syntax (add-annotate-property e)))
+      (parameterize ([original-stx e]
+                     [expanded-stx expanded-e])
+        (annotate-top expanded-e (namespace-base-phase))))
+    (syntax-case top-e ()
+      [(mod name . reste)
+       (and (identifier? #'mod)
+            (free-identifier=? #'mod
+                               (namespace-module-identifier)
+                               (namespace-base-phase)))
+       (if (eq? (syntax-e #'name) 'errortrace-key)
+           top-e
+           (let ([expanded-e (normal top-e)])
+             (cond
+               [(has-cross-phase-declare?
+                 (syntax-case expanded-e ()
+                   [(mod name init-import mb) #'mb]))
+                expanded-e]
+               [else
+                (transform-all-modules
+                 expanded-e
+                 (lambda (top-e mod-id)
+                   (syntax-case top-e ()
+                     [(mod name init-import mb)
+                      (syntax-case (disarm #'mb) (#%plain-module-begin)
+                        [(#%plain-module-begin body ...)
+                         (let ([meta-depth ((count-meta-levels 0) #'(begin body ...))])
+                           (copy-props
+                            top-e
+                            #`(#,mod-id name init-import
+                                        #,(syntax-rearm
+                                           #`(#%plain-module-begin
+                                              #,(generate-key-imports meta-depth)
+                                              body ...)
+                                           #'mb))))])])))])))]
+      [_else
+       (let ()
+         (define e (normal top-e))
+         (define meta-depth ((count-meta-levels 0) e))
+         (when in-compile-handler?
+           ;; We need to force the `require`s now, so that `e` can be compiled.
+           ;; It doesn't work to reply on `begin` unrolling for a top-level `eval`,
+           ;; because we're in a compile handler and already committed to a single form.
+           (for ([i (in-range meta-depth)])
+             (namespace-require `(for-meta ,(add1 i) errortrace/errortrace-key))))
+         #`(begin
+             #,(generate-key-imports meta-depth)
+             #,e))]))
+
+  (define (has-cross-phase-declare? e)
+    (for/or ([a (in-list (or (syntax->list e) '()))])
+      (syntax-case* a (#%declare begin) (lambda (a b)
+                                          (free-identifier=? a b 0 (namespace-base-phase)))
+        [(#%declare kw ...)
+         (for/or ([kw (in-list (syntax->list #'(kw ...)))])
+           (eq? (syntax-e kw) '#:cross-phase-persistent))]
+        [(begin . e)
+         (has-cross-phase-declare? #'e)]
+        [_ #f])))
+
+  ;; Add the 'errortrace:annotate property everywhere in an original syntax
+  ;; object, so that we can recognize pieces from the original program
+  ;; after expansion:
+  (define (add-annotate-property s)
+    (cond
+      [(syntax? s)
+       (define new-s (syntax-rearm
+                      (let ([s (disarm s)])
+                        (datum->syntax s
+                                       (add-annotate-property (syntax-e s))
+                                       s
+                                       s))
+                      s))
+       ;; We could check for "original" syntax here, because partial expansion
+       ;; of top-level forms happens before the compile handler gets
+       ;; control. As a compromise for programs that may use errortrace
+       ;; with `eval` and S-expressions or non-`syntax-original?` arrangements, we add
+       ;; the property everywhere:
+       (if #t ; (syntax-original? s)
+           (syntax-property new-s
+                            'errortrace:annotate #t
+                            ;; preserve the property in bytecode:
+                            #t)
+           new-s)]
+      [(pair? s)
+       (cons (add-annotate-property (car s))
+             (add-annotate-property (cdr s)))]
+      [(vector? s)
+       (for/vector #:length (vector-length s) ([e (in-vector s)])
+         (add-annotate-property e))]
+      [(box? s) (box (add-annotate-property (unbox s)))]
+      [(prefab-struct-key s)
+       => (lambda (k)
+            (apply make-prefab-struct
+                   k
+                   (add-annotate-property (cdr (vector->list (struct->vector s))))))]
+      [(and (hash? s) (immutable? s))
+       (cond
+         [(hash-eq? s)
+          (for/hasheq ([(k v) (in-hash s)])
+            (values k (add-annotate-property v)))]
+         [(hash-eqv? s)
+          (for/hasheqv ([(k v) (in-hash s)])
+            (values k (add-annotate-property v)))]
+         [else
+          (for/hash ([(k v) (in-hash s)])
+            (values k (add-annotate-property v)))])]
+      [else s]))
+
+  (define (transform-all-modules stx proc [in-mod-id (namespace-module-identifier)])
+    (syntax-case stx ()
+      [(mod name init-import mb)
+       (syntax-case (disarm #'mb) (#%plain-module-begin)
+         [(#%plain-module-begin body ...)
+          (let ()
+            (define ((handle-top-form phase) expr)
+              (define disarmed-expr (disarm expr))
+              (syntax-case* disarmed-expr (begin-for-syntax module module*)
+                (lambda (a b)
+                  (free-identifier=? a b phase 0))
+                [(begin-for-syntax body ...)
+                 (syntax-rearm
+                  #`(#,(car (syntax-e disarmed-expr))
+                     #,@(map (handle-top-form (add1 phase))
+                             (syntax->list #'(body ...))))
+                  expr)]
+                [(module . _)
+                 (syntax-rearm
+                  (transform-all-modules disarmed-expr proc #f)
+                  expr)]
+                [(module* name init-import . _)
+                 (let ([shift (if (syntax-e #'init-import)
+                                  0
+                                  phase)])
+                   (syntax-rearm
+                    (syntax-shift-phase-level
+                     (transform-all-modules (syntax-shift-phase-level disarmed-expr (- shift)) proc #f)
+                     shift)
+                    expr))]
+                [else expr]))
+            (define mod-id (or in-mod-id #'mod))
+            (proc
+             (copy-props
+              stx
+              #`(#,mod-id name init-import
+                          #,(syntax-rearm
+                             #`(#%plain-module-begin
+                                . #,(map (handle-top-form 0) (syntax->list #'(body ...))))
+                             #'mb)))
+             mod-id))])]))
+
+  (define (copy-props orig new)
+    (datum->syntax orig (syntax-e new) orig orig)))
+
 ;; --------------------------------------------------
 
 (define-unit test-coverage-point@
@@ -738,3 +914,18 @@
   (link [((annotate-if-source : stacktrace-filter^)) annotate-if-source@]
         [((coverage-point : stacktrace/annotator-imports^)) test-coverage-point@ in annotate-if-source]
         [((out : stacktrace^)) stacktrace/annotator/filter@ coverage-point annotate-if-source]))
+
+(define-compound-unit stacktrace/filter/errortrace-annotate@
+  (import (in : stacktrace-imports^)
+          (filter : stacktrace-filter^))
+  (export out1 out2)
+  (link [((coverage-point : stacktrace/annotator-imports^)) test-coverage-point@ in filter]
+        [((out1 : stacktrace^)) stacktrace/annotator/filter@ coverage-point filter]
+        [((out2 : errortrace-annotate^)) stacktrace/annotator/filter/errortrace-annotate@ out1]))
+
+(define-compound-unit stacktrace/errortrace-annotate@
+  (import (in : stacktrace/annotator-imports^))
+  (export out1 out2)
+  (link [((annotate-if-source : stacktrace-filter^)) annotate-if-source@]
+        [((out1 : stacktrace^)) stacktrace/annotator/filter@ in annotate-if-source]
+        [((out2 : errortrace-annotate^)) stacktrace/annotator/filter/errortrace-annotate@ out1]))

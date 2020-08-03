@@ -893,9 +893,9 @@ please adhere to these guidelines:
   (input-syntax "Input-syntaks")
   (dynamic-properties "Dynamiske egenskaber")
   (output-syntax "Output-syntaks")
-  (no-debugging-or-profiling "Ingen debugning eller profilering")
+  (no-debugging-or-profiling "Ingen fejlsøgningsinformation eller profilering")
   (debugging "Debugging")
-  (debugging-and-profiling "Debugning og profilering")
+  (debugging-and-profiling "Fejlsøgningsinformation og profilering")
   (test-coverage "Syntaktisk dækning af testsuiten")
   (show-details-button-label "Vis detaljer")
   (hide-details-button-label "Skjul detaljer")
@@ -933,6 +933,54 @@ please adhere to these guidelines:
   (experimental-languages "Eksperimentelle sprog")
   (initial-language-category "Startsprog")
   (no-language-chosen "Intet sprog valgt")
+  (other-languages "Andre sprog")
+
+  (module-language-name "Bestem sprog ud fra kildetekst")
+  (module-language-one-line-summary "#lang-linjen bestemmer det aktuelle sprog")
+  (module-language-auto-text "Automatisk #lang-linje") ;; shows up in the details section of the module language
+  ;; the next four string constants show up in the REPL in DrRacket in the "Racket Language",
+  ;; which is also the "Determine language from source" language. They are put right after the name
+  ;; of the language from the "#lang" line at the beginning of the source file
+  (module-language-repl-no-annotations "")
+  (module-language-repl-debug-annotations ", med fejlsøgningsinformation")
+  (module-language-repl-debug/profile-annotations ", med fejlsøgningsinformation og profilering")
+  (module-language-repl-test-annotations ", med testdækning")
+
+  (module-language-#lang-error-more-information "Mere information")
+  (module-language-#lang-flush-cache "Genindlæs")
+  (module-language-#lang-flush-cache-menu-item "Genindlæs #lang-udvidelser")
+
+  ;; for the upper portion of the language dialog
+  (the-racket-language "Sproget Racket")
+  (choose-a-language "Bestem sprog")
+  
+  ;; the next two string constants appear in the
+  ;; language dialog with a list
+  ;; of example languages appearing between them
+  (racket-language-discussion "Begynd dit program med #lang for at udpege den ønskede dialekt. For eksempel:\n\n")
+  (racket-language-discussion-end "\n… og mange flere")
+  
+  ;; the next three string constants are put into a message-box dialog
+  ;; that appears when the user clicks on the example #lang languages
+  ;; in the language dialog. The first one always appears and then either
+  ;; the second or the third appears. The second one has the clicked
+  ;; on #lang line placed into the ~a, and third one has the 
+  ;; current #lang line in the first ~a and the clicked on in the second one.
+  ;; The two comments are separated by a blank line.
+  (racket-dialect-in-buffer-message 
+   "Racket-dialekter bestemmes typisk ved at redigere direkte i bufferen,"
+   " ikke ved at vælge disse muligheder i sprogdialogen.")
+  (racket-dialect-add-new-#lang-line "Skal jeg alligevel tilføje “~a” i definitionsvinduets første linje?")
+  (racket-dialect-replace-#lang-line "Du har allerede “~a” i din fil; skal jeg erstat det med “~a”?")
+  (racket-dialect-already-same-#lang-line "Du har allerede “~a” i din fil; så alt er klar til at komme i gang!")
+  
+  ;; in the dialog containing the above strings, one of these is a button that appears
+  (add-#lang-line "Tilføj #lang-linje")
+  (replace-#lang-line "Erstat #lang-linje")
+  
+  ;; for the 'new drracket user' dialog
+  (use-language-in-source "Brug det sprog, som er erklæret i programteksten")
+  
   
   ;(module-language-one-line-summary "En kørsel åbner en REPL i i modulets sammenhæng, inkluderer modulets deklarede sprog")
   
@@ -1132,7 +1180,7 @@ please adhere to these guidelines:
   (stepper-next-application "Funktionskald")
   (stepper-jump-to-beginning "Hjem")
   
-  (debug-tool-button-name "Debug")
+  (debug-tool-button-name "Fejlsøgning")
   
   (dialog-back "Tilbage")
   
@@ -1243,6 +1291,175 @@ please adhere to these guidelines:
   (gui-tool-show-gui-toolbar "Vis GUI-værktøjslinjen")
   (gui-tool-hide-gui-toolbar "Skjul GUI-værktøjslinjen")
   (gui-tool-insert-gui "Indsæt GUI")
+
+  ;; contract violation tracking
   
+  ; tooltip for new planet icon in drscheme window (must have a planet violation logged to see it)
+  (show-planet-contract-violations "Vis PLaneT kontraktovertrædelser")
+
+    
+  ;; planet status messages in the bottom of the drscheme window; the ~a is filled with the name of the package
+  (planet-downloading "PLaneT: Downloader ~a…")
+  (planet-installing "PLaneT: Installerer ~a…")
+  (planet-finished "PLaneT: Færdig med ~a.")
+  (planet-docs-building "PLaneT: Bygger dokumentation (udløst af ~a)…")
+  (planet-no-status "PLaneT") ;; this can happen when there is status shown in a different and then the user switches to a tab where planet hasn't been used
+  
+  (bug-report-field-pkg "Information om pakkehåndteringssystemet")
+  
+  ;; string normalization. To see this, paste some text with a ligature into DrRacket
+  ;; the first three strings are in the dialog that appears. The last one is in the preferences dialog
+  (normalize "Normalisér")
+  (leave-alone "Lad være")
+  (normalize-string-info "Strengen, som du har indsat, indeholder ligaturer eller andre ikke-normliserede tegn. Normalisér dem?")
+  (normalize-string-preference "Normalisér indsatte strenge")
+  (ask-about-normalizing-strings "Spørg før strengnormalisering")
+  
+  (always-use-platform-specific-linefeed-convention "Brug altid den platformspecifikke linjeendelseskonvention")
+
+  ;; optimization coach
+  (hide-optimization-coach "Skjul optimeringscoachen")
+  (show-optimization-coach "Vis optimeringscoachen")
+
+  ;; labels used (in a big font) in the background of the definitions and interactions windows
+  (definitions-window-label "definitioner")
+  (interactions-window-label "interaktioner")
+  (hide-defs/ints-label "Skjul overskriften definitioner/interaktioner") ;; popup menu
+  (show-defs/ints-label "Vis overskriften definitioner/interaktioner") ;; preferences checkbox
+
+  ;; menu item in the 'edit' menu; applies to editors with programs in them
+  ;; (technically, editors that implement color:text<%>)
+  (spell-check-string-constants "Stavekontrol i strengkonstanter")
+  (spell-check-scribble-text "Stavekontrol i tekst (mellem {} i Scribble)")
+  (spelling-dictionaries "Ordbøger til stavekontrol") ; (sub)menu whose items are the different possible dictionaries
+  (default-spelling-dictionary "Standardordbog") ; first item in menu from previous line
+  (misspelled-text-color "Farve ved stavefejl") ;; in the preferences dialog  
+  (cannot-find-ispell-or-aspell-path "Kan ikke finde aspell eller ispell")
+  ; puts the path to the spell program in the ~a and then the error message
+  ; is put following this string (with a blank line in between)
+  (spell-program-wrote-to-stderr-on-startup "Stavekontrolprogrammet (~a) viste en fejlmeddelelse:")
+  (spell-skip-to-next-misspelled-word "Spring frem til næste stavefejl") ;; menu item
+  (spell-suggest-corrections "Foreslå staverettelser…") ;; menu item
+  (spell-correction-suggestions "Foreslåede Staverettelser") ;; dialog title
+  (spell-choose-replacement-word "Vælg et erstatningsord") ;; label in dialog 
+  
+  ;; GUI for installing a pkg package; available via File|Install Package...
+  (install-pkg-install-by-source "Gør hvad jeg mener")      ; tab label
+  (install-pkg-install-from-list "Tilgængeligt i kataloget")  ; tab label
+  (install-pkg-install-installed "Installeret")    ; tab label
+  (install-pkg-migrate-from "Kopi fra version")           ; tab label
+  (install-pkg-settings "Indstillinger")                        ; tab label
+  (install-pkg-menu-item... "Installér pakke…")
+  (install-pkg-dialog-title "Installér Pakke")
+  (install-pkg-source-label "Pakkekilde")
+  (install-pkg-package-name "Pakkenavn")
+  (install-pkg-package-source-desc "En pakkekilde er et pakkenavn, fil, mappe, URL, eller GitHub-henvisning")
+  (install-pkg-infer "Udled")
+  (install-pkg-use "Brug") ; as opposed to "Infer", label for text box
+  (install-pkg-type-label "Pakkekildetype")
+  (install-pkg-file "Fil")
+  (install-pkg-dir "Mappe")
+  (install-pkg-dir-url "Fjernmappe")
+  (install-pkg-file-url "Fjernfil")
+  (install-pkg-git "Git-repository")
+  (install-pkg-github "GitHub")
+  (install-pkg-name "Navn (udspørg resolver)")
+  (install-pkg-inferred-as "Type udledt til at være ~a") ; ~a gets install-pkg-{file,dir,...}
+  (install-pkg-link-dirs "Lokalmappe som link")
+  (install-pkg-file-or-dir? "Vælg fil eller mappe?")
+  (install-pkg-force? "Se bort fra konflikter")
+  (install-pkg-replace? "Opdateringer kan erstatte eksisterende installationer")
+  (install-pkg-dry-run? "Prøveinstallation (intet ændres)")
+  (install-pkg-command-line "Tilsvarende kommandolinje:")
+  (install-pkg-error-installing-title "Fejl ved pakkeinstallering")
+  (install-pkg-action-label "Handling")
+  (install-pkg-install "Installér")
+  (install-pkg-update "Opdatér")
+  (install-pkg-setup "Opsætning") ; for button
+  (install-pkg-setup-long "Opsætning af nuværende installering") ; for menu
+  (install-pkg-remove "Fjern")
+  (install-pkg-do-not-remove "Fjern ikke")
+  (install-pkg-action-inferred-to-be-update "Handling udledt til at være Opdatér")
+  (install-pkg-action-inferred-to-be-install "Handling udledt til at være Installér")
+  (install-pkg-default "Standard")
+  (install-pkg-scope-label "Anvendelsesområde til pakker")
+  (install-pkg-default-scope-label "Standardanvendelsesområde") ; for picking the scope to be default
+  (install-pkg-installation "Bestemt Racket-installering")
+  (install-pkg-user "Bestemt bruger og Racket-version")
+  (install-pkg-set-as-default "Brug som standard")
+  (install-pkg-scope-is "Anvendelsesområde til pakker er ~a") ; ~a gets install-pkg-{installation,user,shared}
+  (install-pkg-select-package-directory "Vælg pakkemappe")
+  (install-pkg-select-package-file "Vælg pakkefil")
+  (install-pkg-update-package-list "Genindlæs pakkeliste")
+  (install-pkg-stop-update "Stop genindlæsning")
+  (install-pkg-filter "Filtrér")
+  (install-pkg-update-catalogs? "Opdatér database til at passe sammen med de valgte kataloger?")
+  (install-pkg-currently-configured-are "De valgte kataloger er")
+  (install-pkg-database-recorded-are "Katalogerne i databasen er")
+  (install-pkg-update-catalogs "Opdatér")
+  (install-pkg-do-not-update-catalogs "Opdatér ikke")
+  (install-pkg-really-remove? "Er du sikker på, at du vil fjerne de følgende valgte pakker?")
+  (install-pkg-promote "Forfrem fra automatisk installeret")
+  (install-pkg-demote "Degrader til automatisk installeret")
+  (install-pkg-abort-install "Afbryd installering")
+  (install-pkg-abort-update "Afbryd opdatering")
+  (install-pkg-abort-remove "Afbryd fjernelse")
+  (install-pkg-abort-demote "Afbryd degradering")
+  (install-pkg-abort-promote "Afbryd forfremmelse")
+  (install-pkg-abort-migrate "Afbryd migrering")
+  (install-pkg-abort-setup "Afbryd opsætning")
+  (install-pkg-abort-generic-action "Afbryd handling")
+  (install-pkg-close-terminal-output "Luk output")
+  (install-pkg-show-all-options "Vis alle muligheder")
+  (install-pkg-migrate-available-installations "Tilgængelige installationer")
+  (pkg-manager-menu-item "Pakkehåndtering…")
+  ;; where ~a gets an installation name:
+  (install-pkg-packages-for "Pakker for ~a")
+  (install-pkg-really-remove-installation "Er du sikker på, at du vil fjerne alle installerede pakker og information for ~a?")
+  
+  (install-pkg-abort-set-scope "Afbryd ændring af anvendelsesområde")
+
+  (install-pkg-dependencies-fail "Fejl: afbryder installering/opdatering hvis afhængigheder mangles")
+  (install-pkg-dependencies-force "Tving: installér på trods af mangler eller versionsmisforhold ved afhængigheder")
+  (install-pkg-dependencies-search-ask "Spørg: spørg ved hvér manglende afhængighed (virker ikke i GUI)")
+  (install-pkg-dependencies-search-auto "Auto: installér automatisk afhængigheder som mangler eller har forkert version")
+  (install-pkg-dependencies-search-auto+update "Auto + Opdater: Opdater afhængigheder når det er muligt")
+
+  (install-pkg-dependencies-mode "Afhængighedsindstilling")
+
+  (install-pkg-dependencies-search-ask-not-supported-in-gui
+   "“Spørg“ ved afhængigheder understøttes ikke i GUI.")
+  ;; "~a" is pre-":" part of `install-pkg-dependencies-fail' or `install-pkg-dependencies-search-auto':
+  (install-pkg-deps-is "Standard for afhængighedshåndtering er ~a")
+
+  (install-pkg-package-catalogs "Pakkekataloger") ; label for a list box
+  (install-pkg-add-package-catalog "Tilføj pakkekatalog")
+
+  (install-pkg-not-rentrant "Installering og opdatering kan ikke afvikles samtidigt;"
+                            " enten abryd den ene eller vent på at den bliver færdig.")
+  
+  ;; open a file via a collection path (new "Open" menu item in DrRacket)
+  (open-require-path "Åbn Require-sti…")
+  (enter-subcollection "Gå ind i subcollection") ; button in new dialog
+  (path-to-racket-binary "Sti til programmet")
+  (use-a-different-racket "Brug en anden Racket")
+
+  ;; adding racket/bin to the path; only under mac os x
+  ; first ~a is filled with either the empty string or an error message from elsewhere
+  ;  (bracketed by some newlines to separate it out)
+  ; second ~a is filled with /etc/paths.d/racket (or some other path like it in the future)
+  ; third ~a is filled with the path to the bin directory of the current drracket
+  (adding-racket/bin-to-path-failed 
+   "Fejl under forsøg ved at opsætte Racket til kommandolinjen. ~a"
+   " kunne ikke skabe “~a” med indhold “~a”.")
+  ; first and third ~a are filled with /etc/paths.d/racket (or some other path like it in the future)
+  ; and the second one is filled with the path to the bin directory that was put into that file.
+  (added-racket/bin-to-path
+   "Du bør nu kunne bruge racket og de tilknyttede værktøjer ved"
+   " kommandolinjen.\n\n"
+   " Standardstien PATH blev instillet for alle brugere ved at ændre filen"
+   " ~a til at pege på ~a. Du kan trække denne indstilling tilbage ved at slette"
+   " ~a.")
+  (add-racket/bin-to-path "Indstil kommandolinje for Racket…") ;; menu item label
   )
    

@@ -321,6 +321,18 @@
          ($oops who "~s is not a valid vector length" n))
        (make-vector n)]))
 
+(define-who make-immobile-vector
+  (let ([$make-immobile-vector (foreign-procedure "(cs)make_immobile_vector" (uptr ptr) ptr)])
+   (case-lambda
+      [(n x)
+       (unless (and (fixnum? n) (not ($fxu< (constant maximum-vector-length) n)))
+         ($oops who "~s is not a valid vector length" n))
+       ($make-immobile-vector n x)]
+      [(n)
+       (unless (and (fixnum? n) (not ($fxu< (constant maximum-vector-length) n)))
+         ($oops who "~s is not a valid vector length" n))
+       ($make-immobile-vector n 0)])))
+
 (define $make-eqhash-vector
   (case-lambda
     [(n)
@@ -603,6 +615,36 @@
       (unless ($continuation? x)
          ($oops '$continuation-return-offset "~s is not a continuation" x))
       ($continuation-return-offset x)))
+
+(define-who $continuation-return-frame-words
+   (lambda (x)
+      (unless ($continuation? x)
+         ($oops who "~s is not a continuation" x))
+      ($continuation-return-frame-words x)))
+
+(define-who $continuation-stack-return-code
+   (lambda (x i)
+      (unless ($continuation? x)
+         ($oops who "~s is not a continuation" x))
+      (unless (and (fixnum? i) (fx< 0 i ($continuation-stack-clength x)))
+         ($oops who "invalid index ~s" i))
+      ($continuation-stack-return-code x i)))
+
+(define-who $continuation-stack-return-offset
+   (lambda (x i)
+      (unless ($continuation? x)
+         ($oops who "~s is not a continuation" x))
+      (unless (and (fixnum? i) (fx< 0 i ($continuation-stack-clength x)))
+         ($oops who "invalid index ~s" i))
+      ($continuation-stack-return-offset x i)))
+
+(define-who $continuation-stack-return-frame-words
+   (lambda (x i)
+      (unless ($continuation? x)
+         ($oops who "~s is not a continuation" x))
+      (unless (and (fixnum? i) (fx< 0 i ($continuation-stack-clength x)))
+         ($oops who "invalid index ~s" i))
+      ($continuation-stack-return-frame-words x i)))
 
 (define void
    (lambda ()
@@ -1125,6 +1167,14 @@
         ($top-level-bound? s)
         ($oops '$top-level-bound? "~s is not a symbol" s))))
 
+(define memory-order-acquire
+  (lambda ()
+    (memory-order-acquire)))
+
+(define memory-order-release
+  (lambda ()
+    (memory-order-release)))
+
 (define-who $bignum-length
   (lambda (n)
     (unless (bignum? n) ($oops who "~s is not a bignum" n))
@@ -1278,6 +1328,8 @@
 (define box (lambda (x) (box x)))
 
 (define box-immutable (lambda (x) (box-immutable x)))
+
+(define box-immobile (foreign-procedure "(cs)box_immobile" (ptr) ptr))
 
 (define unbox
    (lambda (b)
@@ -1804,7 +1856,7 @@
        (when (eq? addr 0)
          ($oops 'mutex-acquire "mutex is defunct"))
        (let ([r ((if block? ma ma-nb) addr)])
-         ($keep-live m)
+         (keep-live m)
          r))]))
 
 (set! mutex-release
@@ -1849,8 +1901,8 @@
       (when (eq? maddr 0)
         ($oops 'condition-wait "mutex is defunct"))
       (let ([r (cw caddr maddr t)])
-        ($keep-live c)
-        ($keep-live m)
+        (keep-live c)
+        (keep-live m)
         r))]))
 
 (set! condition-broadcast
@@ -1995,12 +2047,21 @@
 (define $maybe-seginfo
   (lambda (x)
     ($maybe-seginfo x)))
+(define $seginfo
+  (lambda (x)
+    ($seginfo x)))
 (define $seginfo-generation
   (lambda (x)
     ($seginfo-generation x)))
 (define $seginfo-space
   (lambda (x)
     ($seginfo-space x)))
+(define-who $list-bits-ref
+  (lambda (x)
+    (unless (pair? x) ($oops who "~s is not a pair" x))
+    ($list-bits-ref x)))
+(define-who $list-bits-set!
+  (foreign-procedure "(cs)list_bits_set" (ptr iptr) void))
 
 (let ()
   (define $phantom-bytevector-adjust!
@@ -2538,9 +2599,9 @@
   (lambda ()
     (#3%$read-time-stamp-counter)))
 
-(define $keep-live
+(define keep-live
   (lambda (x)
-    (#2%$keep-live x)))
+    (#2%keep-live x)))
 
 (when-feature windows
 (let ()
