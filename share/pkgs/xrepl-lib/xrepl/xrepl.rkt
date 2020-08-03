@@ -394,7 +394,7 @@
                   (reverse commands-or-sections)))))
   (with-wrapped-output
    (if cmd
-       (begin (show-cmd cmd "; ")
+       (begin (show-cmd cmd 0)
               (printf ";   usage: ,~a" arg)
               (let ([a (command-argline cmd)]) (when a (printf " ~a" a)))
               (printf "\n")
@@ -856,12 +856,27 @@
 ;;     (cmderror 'continue "no break exception to continue from")))
 
 (define last-backtrace #f)
+(define last-exn #f)
 (defcommand (backtrace bt) #f
   "see a backtrace of the last exception"
   ["Display the last exception with its backtrace."]
   (printf "; ~a\n"
           (regexp-replace* #rx"\n+" (or last-backtrace "(no backtrace)")
                            "\n; ")))
+
+(defcommand (exn) "[id]"
+  "see the previous exception"
+  ["Display the most recent exception, or bind it to `id`."]
+  (cond [(getarg 'syntax 'opt)
+         =>
+         (lambda (id)                      
+           (unless (identifier? id)
+             (cmderror "expected an identifier, got: ~s" (syntax->datum id)))
+           (unless last-exn
+             (cmderror "no prior exception"))
+           (eval `(define ,id ,last-exn)))]
+         [last-exn (printf "; ~s\n" last-exn)]
+         [else (printf "; (no exception)")]))
 
 (define (time/proc thunk times)
   (define throw
@@ -1594,11 +1609,16 @@
       (orig str exn)
       (let* ([s (get-output-string (current-error-port))]
              [s (regexp-replace* #rx"^\n+|\n+$" s "")]
-             [s (regexp-replace* #rx"\n\n+" s "\n")])
+             [s (regexp-replace* #rx"\n\n+" s "\n")]
+             [s (if (equal? str s)
+                    (string-append s "\n(no backtrace)")
+                    s)])
         ;; temporary hack: this is always on since it shows all fields,
         ;; so ",bt" is now really a generic "more info"
         (and ; (not (equal? str s))
-             (begin (set! last-backtrace s) #t)))))
+         (begin (set! last-backtrace s)
+                (set! last-exn exn)
+                #t)))))
   (define msg "[,bt for context]")
   (parameterize ([current-output-port (current-error-port)])
     (let* ([s (regexp-replace* #rx"^\n+|\n+$" str "")]

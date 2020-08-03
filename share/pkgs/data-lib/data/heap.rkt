@@ -23,60 +23,78 @@
 (define (vt-leftchild? n) (odd? n))
 (define (vt-rightchild? n) (even? n))
 
-
 ;; Operations
 
+;; Instead of exchanging the parent and the child at each iteration,
+;; only the child is updated, whereas the parent needs to be update
+;; only once, after the loop.
 (define (heapify-up <=? vec n)
-  (unless (vt-root? n)
-    (let* ([parent (vt-parent n)]
-           [n-key (vector-ref vec n)]
-           [parent-key (vector-ref vec parent)])
-      (unless (<=? parent-key n-key)
-        (vector-set! vec parent n-key)
-        (vector-set! vec n parent-key)
-        (heapify-up <=? vec parent)))))
+  (define n-key (vector-ref vec n))
+  (define new-n
+    (let loop ([n n])
+      (cond
+        [(vt-root? n) n]
+        [else
+         (define parent (vt-parent n))
+         (define parent-key (vector-ref vec parent))
+         (cond
+           [(<=? parent-key n-key)
+            n]
+           [else
+            (vector-set! vec n parent-key)
+            #;(vector-set! vec parent key) ; this can wait until after the loop
+            (loop parent)])])))
+  (unless (= n new-n)
+    ; All parent updates are collapsed into this one:
+    (vector-set! vec new-n n-key)))
 
+;; See comment for heapify-up
 (define (heapify-down <=? vec n size)
-  (let ([left (vt-leftchild n)]
-        [right (vt-rightchild n)]
-        [n-key (vector-ref vec n)])
-    (when (< left size)
-      (let ([left-key (vector-ref vec left)])
-        (let-values ([(child child-key)
-                      (if (< right size)
-                          (let ([right-key (vector-ref vec right)])
-                            (if (<=? left-key right-key)
-                                (values left left-key)
-                                (values right right-key)))
-                          (values left left-key))])
-          (unless (<=? n-key child-key)
+  (define n-key (vector-ref vec n))
+  (define new-n
+    (let loop ([n n])
+      (define left (vt-leftchild n))
+      (define right (vt-rightchild n))
+      (cond
+        [(< left size)
+         (define left-key (vector-ref vec left))
+         (define-values (child child-key)
+           (if (< right size)
+             (let ([right-key (vector-ref vec right)])
+               (if (<=? left-key right-key)
+                 (values left left-key)
+                 (values right right-key)))
+             (values left left-key)))
+         (cond
+           [(<=? n-key child-key) n]
+           [else
             (vector-set! vec n child-key)
-            (vector-set! vec child n-key)
-            (heapify-down <=? vec child size)))))))
+            #;(vector-set! vec child n-key) ; this can wait until after the loop
+            (loop child)])]
+        [else n])))
+  (unless (= n new-n)
+    (vector-set! vec new-n n-key)))
 
-(define (subheap? <=? vec n size)
-  (let ([left (vt-leftchild n)]
-        [right (vt-rightchild n)])
-    (and (if (< left size)
-             (<=? (vector-ref vec n) (vector-ref vec left))
-             #t)
-         (if (< right size)
-             (<=? (vector-ref vec n) (vector-ref vec right))
-             #t))))
+(define (fittest-block-size n)
+  (max MIN-SIZE
+       (expt 2 (integer-length (- n 1))
+             #;(exact-ceiling (log (max 1 n) 2)))))
 
+;; Grow the vector to the fittest 2^n ≥ new-size-min
 (define (grow-vector v1 new-size-min)
-  (let ([new-size (let loop ([size (vector-length v1)])
-                    (if (>= size new-size-min)
-                        size
-                        (loop (* size 2))))])
-    (let ([v2 (make-vector new-size #f)])
-      (vector-copy! v2 0 v1 0)
-      v2)))
+  (define new-size
+    (max (vector-length v1)
+         (fittest-block-size new-size-min)))
+  (define v2 (make-vector new-size #f))
+  (vector-copy! v2 0 v1 0)
+  v2)
 
-(define (shrink-vector v1)
-  (let ([v2 (make-vector (quotient (vector-length v1) 2) #f)])
-    (vector-copy! v2 0 v1 0 (vector-length v2))
-    v2))
+;; Shrink to the fittest vector of size 2^n ≥ new-size-min
+(define (shrink-vector v1 new-size-min)
+  (define new-size (fittest-block-size new-size-min))
+  (define v2 (make-vector new-size #f))
+  (vector-copy! v2 0 v1 0 new-size)
+  v2)
 
 ;; Heaps
 
@@ -88,8 +106,7 @@
 
 (define (vector->heap <=? vec0 [start 0] [end (vector-length vec0)])
   (define size (- end start))
-  (define len (let loop ([len MIN-SIZE]) (if (<= size len) len (loop (* 2 len)))))
-  (define vec (make-vector len #f))
+  (define vec (make-vector (fittest-block-size size) #f))
   ;; size <= length(vec)
   (vector-copy! vec 0 vec0 start end)
   (for ([n (in-range (sub1 size) -1 -1)])
@@ -134,11 +151,9 @@
      (vector-ref vec 0)]))
 
 (define (heap-remove-min! h)
-  (match h
-    [(heap vec size <=?)
-     (when (zero? size)
-       (error 'heap-remove-min! "empty heap"))
-     (heap-remove-index! h 0)]))
+  (when (zero? (heap-count h))
+    (error 'heap-remove-min! "empty heap"))
+  (heap-remove-index! h 0))
 
 (define (heap-remove-index! h index)
   (match h
@@ -170,7 +185,7 @@
            ;; otherwise we need to heapify up
            (heapify-up <=? vec index)])])
      (when (< MIN-SIZE size (quotient (vector-length vec) 4))
-       (set-heap-vec! h (shrink-vector vec)))
+       (set-heap-vec! h (shrink-vector vec size)))
      (set-heap-count! h sub1-size)]))
 
 (define (heap-get-index h v same?)
@@ -197,10 +212,14 @@
                          (or (search left left-key) (search-right))
                          (search-right))))])))]))
 
+;; Returns whether the removal was successful, that is,
+;; whether v was indeed in the heap.
 (define (heap-remove! h v #:same? [same? equal?])
-  (match (heap-get-index h v same?)
-    [#f (void)]
-    [n (heap-remove-index! h n)]))
+  (define idx (heap-get-index h v same?))
+  (and idx
+       (begin
+         (heap-remove-index! h idx)
+         #t)))
 
 (define (in-heap h)
   (in-heap/consume! (heap-copy h)))
@@ -259,7 +278,7 @@
  [heap-add-all! (-> heap? (or/c list? vector? heap?) void?)]
  [heap-min (-> heap? any/c)]
  [heap-remove-min! (-> heap? void?)]
- [heap-remove! (->* (heap? any/c) [#:same? (-> any/c any/c any/c)] void?)]
+ [heap-remove! (->* (heap? any/c) [#:same? (-> any/c any/c any/c)] boolean?)]
 
  [vector->heap (-> (-> any/c any/c any/c) vector? heap?)]
  [heap->vector (-> heap? vector?)]
@@ -271,7 +290,9 @@
 (provide heap-sort!)
 
 (module+ test-util
-  (provide valid-heap?)
+  (provide valid-heap?
+           fittest-block-size
+           MIN-SIZE)
   (define (valid-heap? a-heap)
     (match a-heap
       [(heap vec size <=?)

@@ -32,7 +32,8 @@
          viewable-stack?
          ;; provided only for backwards compatibility (exported via debug unit)
          srcloc->edition/pair
-         get-editions)
+         get-editions
+         errortrace-stack-item->srcloc)
 
 (provide
  (contract-out
@@ -159,16 +160,17 @@
 
 (define (cms->errortrace-viewable-stack cms interesting-editors
                                         #:share-cache [a-viewable-stack #f])
-  (define (errortrace-stack-item->srcloc x)
-    (make-srcloc (list-ref x 1)
-                 (list-ref x 2)
-                 (list-ref x 3)
-                 (list-ref x 4)
-                 (list-ref x 5)))
   (build-viewable-stack (continuation-mark-set->list cms errortrace-key)
                         errortrace-stack-item->srcloc
                         interesting-editors
                         a-viewable-stack))
+
+(define (errortrace-stack-item->srcloc x)
+  (make-srcloc (vector-ref x 0)
+               (vector-ref x 1)
+               (vector-ref x 2)
+               (vector-ref x 3)
+               (vector-ref x 4)))
 
 (define (cms->builtin-viewable-stack cms interesting-editors
                                      #:share-cache [a-viewable-stack #f])
@@ -202,7 +204,7 @@
 (define (get-port-name-matches-cache a-viewable-stack)
   (if a-viewable-stack
       (viewable-stack-port-name-matches-cache a-viewable-stack)
-      (make-weak-hash)))
+      (make-weak-hasheq)))
 
 (define (get-interesting-editions interesting-editors)
   (define interesting-editor-editions (make-weak-hash))
@@ -308,9 +310,13 @@
     [else #f]))
 
 (define (port-name-matches?/use-cache txt src port-name-matches-cache)
-  (if port-name-matches-cache
-      (hash-ref! port-name-matches-cache (cons txt src) (λ () (send txt port-name-matches? src)))
-      (send txt port-name-matches? src)))
+  (cond
+    [port-name-matches-cache
+     (define txt-cache (hash-ref! port-name-matches-cache txt (λ () (make-weak-hash))))
+     (hash-ref! txt-cache src
+                (λ () (send txt port-name-matches? src)))]
+    [else
+     (send txt port-name-matches? src)]))
 
 (define (viewable-stack->red-arrows-backtrace-srclocs a-viewable-stack)
   (match-define (viewable-stack stack-items stack-item->srcloc interesting-editor-editions port-name-matches-cache env)

@@ -55,7 +55,7 @@
         [user 'user]
         [(path-string? given-scope)
          ;; This can happens when a #:scope value is given a path programmatically.
-         ;; Make it easier on clients by alloing that.
+         ;; Make it easier on clients by allowing that.
          (path->complete-path given-scope)]
         [scope-dir (path->complete-path scope-dir)]
         [else
@@ -541,6 +541,10 @@
              scope-flags ...
              #:handlers
              (lambda (accum . key+vals)
+               (define default-scope-scope (and (terminal-port? (current-output-port))
+                                                (parameterize ([current-pkg-scope 'user])
+                                                  (with-pkg-lock/read-only
+                                                    (pkg-config-default-scope-scope)))))
                (call-with-package-scope
                 'config
                 scope scope-dir installation user #f #f #f #f
@@ -548,10 +552,12 @@
                   (if set
                       (with-pkg-lock
                        (pkg-config #t key+vals
-                                   #:from-command-line? #t))
+                                   #:from-command-line? #t
+                                   #:default-scope-scope default-scope-scope))
                       (with-pkg-lock/read-only
                        (pkg-config #f key+vals
-                                   #:from-command-line? #t))))))
+                                   #:from-command-line? #t
+                                   #:default-scope-scope default-scope-scope))))))
              (list "key" "val")]
             ;; ----------------------------------------
             [catalog-show
@@ -602,6 +608,7 @@
             ;; ----------------------------------------
             [catalog-archive
              "Copy catalog plus packages"
+             (define include-list (make-parameter #f))
              #:once-each
              [#:bool from-config () "Include currently configured catalogs last"]
              [(#:str state-database #f) state () "Read/write <state-database> as state of <dest-dir>"]
@@ -610,6 +617,17 @@
              [(#:sym mode [fail skip continue] 'fail) pkg-fail ()
               ("Select handling of package-download failure;"
                "<mode>s: fail (the default), skip, continue (but with exit status of 5)")]
+             #:multi
+             [(#:str pkg #f) include () "Include <pkg> in new catalog"
+              (include-list (cons pkg (or (include-list) '())))]
+             #:once-each
+             [#:bool include-deps () "Include dependencies of specified packages"]
+             [(#:strs sys subpath #f) include-deps-platform () "Include one platform's dependencies"]
+             #:multi
+             [(#:str pkg #f) exclude () "Exclude <pkg> from new catalog"
+              (exclude-list (cons pkg (exclude-list)))]
+             #:once-each
+             [#:bool fast-file-copy () "Copy a local file package as-is"]
              #:args (dest-dir . src-catalog)
              (parameterize ([current-pkg-error (pkg-error 'catalog-archive)]
                             [current-pkg-lookup-version (or version
@@ -620,6 +638,13 @@
                                       #:from-config? from-config
                                       #:state-catalog state
                                       #:relative-sources? relative
+                                      #:include (include-list)
+                                      #:include-deps? include-deps
+                                      #:include-deps-sys+subpath (and include-deps-platform
+                                                                      (cons (string->symbol (car include-deps-platform))
+                                                                            (string->path (cadr include-deps-platform))))
+                                      #:exclude (exclude-list)
+                                      #:fast-file-copy? fast-file-copy
                                       #:package-exn-handler (case pkg-fail
                                                               [(fail) (lambda (name exn) (raise exn))]
                                                               [(skip continue)

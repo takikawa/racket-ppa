@@ -1,10 +1,9 @@
 #lang scribble/doc
 
 @(require scribble/manual
-         scribble/basic
-         scribble/extract
-         scheme/class
-         scheme/contract)
+          scribble/basic
+          scribble/extract
+          (only-in scribble/core make-numberer style))
 
 @title{Konstruktionsanleitungen}
 
@@ -13,8 +12,18 @@ Dein Programm!}.
 
 @table-of-contents[]
 
-@section{Ablauf} Gehe bei der Konstruktion einer Funktion in folgender
-  Reihenfolge vor:
+@;{number sections from 0, to match book}
+
+@(define ka-style
+   (style
+     'numberer
+     (list
+      (make-numberer (lambda (number parent-number)
+                       (values (number->string number) (+ 1 number)))
+		     0))))
+
+@section[#:style ka-style]{Ablauf}
+Gehe bei der Konstruktion einer Funktion in folgender Reihenfolge vor:
 @itemize[
   @item{Kurzbeschreibung}
   @item{Datenanalyse}
@@ -109,7 +118,7 @@ und Information beschreibt.
 
 @section{Fallunterscheidung: Datenanalyse} Versuche, für die
   Datendefinition eine Formulierung “...  ist eins der
-  folgenden” zu finden. Wenn da möglich ist, beschreibt Deine
+  folgenden” zu finden. Wenn das möglich ist, beschreibt Deine
   Datendefinition eine @italic{Fallunterscheidung}.  Schreibe dann
   eine Auflistung aller Fälle, jeder Fall auf eine separate Zeile:
   

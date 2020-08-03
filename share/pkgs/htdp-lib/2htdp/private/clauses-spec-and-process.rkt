@@ -16,7 +16,9 @@
          racket/list
          racket/bool
          (for-syntax racket/base syntax/parse)
+
          (for-template "clauses-spec-aux.rkt"
+	               htdp/error
                        racket
                        (rename-in lang/prim (first-order->higher-order f2h))))
 
@@ -39,21 +41,24 @@
              extra ...
              [_ (err tag p msg)])))]))
 
-(define-syntax function-with-arity
-  (syntax-rules ()
-    [(_ arity)
-     (lambda (tag)
-       (lambda (p [tag tag])
-         (syntax-case p ()
-           [(_ x) #`(proc> #,tag (f2h x) arity)]
-           [_ (err tag p)])))]
-    [(_ arity #:except extra ...)
-     (lambda (tag)
-       (lambda (p [tag tag])
-         (syntax-case p ()
-           [(_ x) #`(proc> #,tag (f2h x) arity)]
-           extra ...
-           [_ (err tag p)])))]))
+(define-syntax (function-with-arity stx)
+  (syntax-case stx ()
+    [(_ arity) #'(function-with-arity arity #:except)]
+    [(_ N #:except [(name check>) ...] ...)
+     (syntax/loc
+	 stx
+	 (lambda (tag)
+	   (lambda (p [tag tag])
+	     (syntax-case p ()
+	       [(_ x)
+		(quasisyntax/loc p
+		  (let ([tag #,tag][f (f2h x)][ar N][place "first"])
+		    (check-proc tag f ar place (if (> ar 1) (format "~a arguments" ar) "one argument"))
+		    f))]
+	       [(_ name ...)
+		(quasisyntax/loc p (list check> ...))]
+	       ...
+	       [_ (err tag p)]))))]))
 
 (define (err spec p . xtras)
   (define x (cadr spec))

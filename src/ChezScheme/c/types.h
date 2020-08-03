@@ -114,24 +114,32 @@ typedef int IFASLCODE;      /* fasl type codes */
 #define addr_get_segment(p) ((uptr)(p) >> segment_offset_bits)
 #define ptr_get_segment(p) (((uptr)(p) + typemod - 1) >> segment_offset_bits)
 
-#define segment_bitmap_bytes    (bytes_per_segment >> (log2_ptr_bytes+3))
-#define segment_bitmap_index(p) ((((uptr)p + (typemod-1)) & (bytes_per_segment - 1)) >> log2_ptr_bytes)
-#define segment_bitmap_byte(p)  (segment_bitmap_index(p) >> 3)
-#define segment_bitmap_bit(p)   ((uptr)1 << (segment_bitmap_index(p) & 0x7))
+#define segment_bitmap_bytes      (bytes_per_segment >> (log2_ptr_bytes+3))
+#define segment_bitmap_index(p)   ((((uptr)(p) + (typemod-1)) & ~(typemod-1) & (bytes_per_segment - 1)) >> log2_ptr_bytes)
+#define segment_bitmap_byte(p)    (segment_bitmap_index(p) >> 3)
+#define segment_bitmap_bits(p, b) ((uptr)(b) << (segment_bitmap_index(p) & 0x7))
+#define segment_bitmap_bit(p)     segment_bitmap_bits(p,1)
 
 #define SPACE(p) SegmentSpace(ptr_get_segment(p))
 #define GENERATION(p) SegmentGeneration(ptr_get_segment(p))
+#define OLDSPACE(p) SegmentOldSpace(ptr_get_segment(p))
 
 #define ptr_align(size) (((size)+byte_alignment-1) & ~(byte_alignment-1))
+
+#define MUST_MARK_INFINITY 3
 
 /* The inlined implementation of primitives like `weak-pair?`
    rely on the first two fields of `seginfo`: */
 typedef struct _seginfo {
   unsigned char space;                      /* space the segment is in */
   unsigned char generation;                 /* generation the segment is in */
-  unsigned char sorted : 1;                 /* sorted indicator---possibly to be incorporated into space flags? */
+  unsigned char old_space : 1;              /* set during GC to indcate space being collected */
+  unsigned char use_marks : 1;              /* set during GC to indicate space to mark in place instead of copy */
+  unsigned char sorted : 1;                 /* sorted indicator */
   unsigned char has_triggers : 1;           /* set if trigger_ephemerons or trigger_guardians is set */
+  unsigned char must_mark : 2;              /* a form of locking, where 3 counts as "infinite" */
   octet min_dirty_byte;                     /* dirty byte for full segment, effectively min(dirty_bytes) */
+  octet *list_bits;                         /* for `$list-bits-ref` and `$list-bits-set!` */
   uptr number;                              /* the segment number */
   struct _chunkinfo *chunk;                 /* the chunk this segment belongs to */
   struct _seginfo *next;                    /* pointer to the next seginfo (used in occupied_segments and unused_segs */
@@ -139,9 +147,8 @@ typedef struct _seginfo {
   struct _seginfo *dirty_next;              /* pointer to the next seginfo on the DirtySegments list */
   ptr trigger_ephemerons;                   /* ephemerons to re-check if object in segment is copied out */
   ptr trigger_guardians;                    /* guardians to re-check if object in segment is copied out */
-  ptr locked_objects;                       /* list of objects (including duplicates) for locked in this segment */
-  ptr unlocked_objects;                     /* list of objects (no duplicates) for formerly locked */
-  octet *locked_mask;                       /* bitmap of locked objects, used only during GC */
+  octet *marked_mask;                       /* bitmap of live objects for a segment in "compacting" mode */
+  uptr marked_count;                        /* number of marked bytes in segment */
 #ifdef PRESERVE_FLONUM_EQ
   octet *forwarded_flonums;                 /* bitmap of flonums whose payload is a forwarding pointer */
 #endif

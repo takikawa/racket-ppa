@@ -68,17 +68,36 @@
   or cancel was clicked.
   }
 
-  @defmethod*[(((load-file/gui-error (filename (or/c string? #f) #f) (format (or/c (quote guess) (quote standard) (quote text) (quote text-force-cr) (quote same) (quote copy)) (quote guess)) (show-errors? boolean? #t)) boolean?))]{
-    This method is an alternative to 
-    @method[editor<%> load-file]. Rather than showing errors via the original stdout, it
-    opens a dialog with an error message showing the error.
+  @defmethod[(load-file/gui-error [filename (or/c string? #f) #f]
+                                  [format (or/c 'guess 'standard 'text 'text-force-cr 'same 'copy) 'guess]
+                                  [show-errors? boolean? #t])
+             boolean?]{
 
-    The result indicates if an error happened (the error has
-    already been shown to the user). It returns @racket[#t] if
-    no error occurred and @racket[#f] if an error occurred.
+  Loads @racket[filename], much like
+  @method[editor<%> load-file]. Rather than showing errors via
+  the original stdout, however, it shows a dialog box when an
+  error occurs.
 
+  The result indicates if an error happened (the error has
+  already been shown to the user). It returns @racket[#t] if
+  no error occurred and @racket[#f] if an error occurred.
   }
-  @defmethod*[(((on-close) void?))]{
+
+ @defmethod[(revert/gui-error [show-errors? boolean? #t])
+            boolean?]{
+  Reverts the content of the editor to the file on the disk,
+  showing errors to the user via @method[editor:basic<%> load-file/gui-error].
+
+  The result indicates if an error happened (the error has
+  already been shown to the user). It returns @racket[#t] if
+  no error occurred and @racket[#f] if an error occurred.
+
+  If @method[editor<%> get-filename] returns @racket[#f] or
+  if the filename is a temporary filename, the buffer is unchanged
+  and the result is @racket[#f].
+  }
+
+  @defmethod[(on-close) void?]{
 
     This method is called when an editor is closed.
     Typically, this method is called when the frame
@@ -90,9 +109,10 @@
     See also @method[editor:basic<%> can-close?] and @method[editor:basic<%>
     close].
 
-    Does nothing.
+    Default: does nothing.
   }
-  @defmethod*[(((can-close?) boolean?))]{
+  @defmethod[(can-close?) boolean?]{
+
     This method is called to query the editor if is okay to
     close the editor. Although there is no visible effect
     associated with closing an editor, there may be some cleanup
@@ -102,7 +122,6 @@
     See also
     @method[editor:basic<%> on-close] and
     @method[editor:basic<%> close].
-
 
     Returns @racket[#t].
   }
@@ -423,7 +442,9 @@
   The result of this mixin uses the same initialization arguments as the
   mixin's argument.
 
-  @defmethod*[#:mode augment (((on-save-file (filename path?) (format (one-of/c (quote guess) (quote standard) (quote text) (quote text-force-cr) (quote same) (quote copy)))) bool))]{
+ @defmethod[#:mode augment (on-save-file [filename path?]
+                                         [format (or/c 'guess 'standard 'text 'text-force-cr 'same 'copy)])
+            boolean?]{
 
     If a backup file has not been created this session for this file,
     deletes any existing backup file and copies the old save file into the
@@ -445,6 +466,40 @@
     is out of date.
   }
 }
+
+@definterface[editor:autoload<%> (editor:basic<%>)]{
+ This interface does not add any methods, but signals
+ that the given class was produced by @racket[editor:autoload-mixin].
+}
+@defmixin[editor:autoload-mixin (editor:basic<%>) (editor:autoload<%>)]{
+
+ The result of this mixin uses @racket[filesystem-change-evt] to track
+ changes to the file that this editor uses to save into, offering to
+ revert the buffer to match the file when the file changes.
+
+ @defmethod[#:mode override (set-filename [filename (or/c path-string? #f)]
+                                          [temporary? any/c #f])
+            void?]{
+  Tracks changes to the @racket[filename].
+ }
+
+ @defmethod[#:mode augment (on-close) void?]{
+  Uses @racket[filesystem-change-evt-cancel] to stop tracking changes.
+ }
+
+ @defmethod[#:mode augment (on-save-file [filename path?]
+                                         [format (or/c 'guess 'standard 'text 'text-force-cr 'same 'copy)])
+            void?]{
+  Temporarily disables tracking of the file so that saving doesn't trigger
+  the offer to revert the buffer.
+ }
+ @defmethod[#:mode augment (after-save-file [success? any/c]) void?]{
+  Re-enables tracking of the file after the disabled
+  change in @method[editor:autoload-mixin on-save-file].
+}
+}
+
+
 @definterface[editor:info<%> (editor:basic<%>)]{
   An @racket[editor<%>] matching this interface provides information about its
   lock state to its @racket[top-level-window<%>].

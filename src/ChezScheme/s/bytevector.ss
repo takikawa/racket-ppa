@@ -511,6 +511,21 @@
          ($oops who "~s is not a valid bytevector length" n))
        (#3%make-bytevector n)]))
 
+  (set-who! make-immobile-bytevector
+    (let ([$make-immobile-bytevector (foreign-procedure "(cs)make_immobile_bytevector" (uptr) ptr)])
+      (case-lambda
+       [(n fill)
+        (unless (and (fixnum? n) (not ($fxu< (constant maximum-bytevector-length) n)))
+          ($oops who "~s is not a valid bytevector length" n))
+        (unless (fill? fill) (invalid-fill-value who fill))
+        (let ([bv ($make-immobile-bytevector n)])
+          (#3%bytevector-fill! bv fill)
+          bv)]
+       [(n)
+        (unless (and (fixnum? n) (not ($fxu< (constant maximum-bytevector-length) n)))
+          ($oops who "~s is not a valid bytevector length" n))
+        ($make-immobile-bytevector n)])))
+
   (set! bytevector? (lambda (x) (#2%bytevector? x)))
 
   (set! bytevector-length
@@ -717,16 +732,11 @@
 
   (set-who! bytevector-ieee-double-native-ref
     (lambda (v i)
-      (if ($bytevector-ref-check? 64 v i)
-          (#3%bytevector-ieee-double-native-ref v i)
-          (if (bytevector? v)
-              (invalid-index who v i)
-              (not-a-bytevector who v)))))
+      (#2%bytevector-ieee-double-native-ref v i)))
 
   (set-who! bytevector-ieee-single-native-set!
     (lambda (v i x)
       (if ($bytevector-set!-check? 32 v i)
-         ; inline routine checks to make sure x is a real number
           (#3%bytevector-ieee-single-native-set! v i x)
           (if (mutable-bytevector? v)
               (invalid-index who v i)
@@ -734,12 +744,7 @@
 
   (set-who! bytevector-ieee-double-native-set!
     (lambda (v i x)
-      (if ($bytevector-set!-check? 64 v i)
-         ; inline routine checks to make sure x is a real number
-          (#3%bytevector-ieee-double-native-set! v i x)
-          (if (mutable-bytevector? v)
-              (invalid-index who v i)
-              (not-a-mutable-bytevector who v)))))
+      (#2%bytevector-ieee-double-native-set! v i x)))
 
   (set-who! bytevector-copy
     (lambda (v)

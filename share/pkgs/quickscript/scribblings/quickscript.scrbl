@@ -24,10 +24,10 @@
 
 @section{Introduction}
 
-Quickscript's purpose is to make it easy to extend DrRacket with small Racket scripts
-that can be used in the definition (or interaction) window, or to graphically interact with the user.
+Quickscript's makes it easy to extend DrRacket with small Racket scripts
+to automate some actions in the editor, while avoiding the need to restart DrRacket.
 
-Creating a new script is as easy as a click on a menu item.
+Creating a new script is as easy as a click on @gui{Scripts | New script…}.
 Each script is automatically added as an item to the @gui{Scripts} menu, without needing to restart DrRacket.
 A keyboard shortcut can be assigned to a script (via the menu item).
 By default, a script takes as input the currently selected text, and outputs the replacement text.
@@ -36,11 +36,7 @@ like DrRacket's frame and the definition or interaction editor.
 
 @section{Installation}
 
-To install, either look for @tt{quickscript} in the DrRacket menu @gui{File|Package Manager},
-or run the raco command:
-@commandline{raco pkg install quickscript}
-
-You need to restart DrRacket. Now you should have a new item @gui{Scripts} in the menu bar.
+Quickscript is installed automatically with DrRacket, so you don't need to do anything.
 
 @subsection{Quickscript Extra}
 
@@ -67,14 +63,15 @@ This creates and opens the file reverse.rkt in the user's scripts directory.
 Also, a new item automatically appears in the @gui{Scripts} menu.
 
 In the .rkt file that just opened in DrRacket, modify the @racket[define-script] definition to the following:
+@margin-note{Don't name your script function @racket[reverse], it would shadow Racket's own and make the script hang.}
+@margin-note{If you later change the @racket[#:label] property, you will need to reload the menu by clicking on
+@gui{Scripts|Manage scripts|Reload scripts menu} after saving the file).}
 @(racketblock
-  (define-script reverse
+  (define-script reverse-selection
     #:label "Reverse"
     (λ (selection) 
       (list->string (reverse (string->list selection))))))
 and save the file.
-(Note: if you later change the @racket[label] property, you will need to reload the menu by clicking on
-@gui{Scripts|Manage scripts|Reload scripts menu} after saving the file).
 
 Then go to a new tab, type some text, select it, and click on @gui{Scripts|Reverse}, and voilà!
 
@@ -266,12 +263,14 @@ There are some additional properties:
   If @racket[message-box], the return value (if a string) is displayed in a @racket[message-box].
   If @racket[clipboard], the return value (if a string) is copied to the clipboard.
   If @racket[#f], the return value is not used.
+
+  If this value is changed, make sure to reload the menu with
+  @gui{Scripts | Manage scripts | Reload menu}.
  }
  @item{@racket[#:persistent]
 
   If they keyword @racket[#:persistent] is @emph{not} provided,
-  each invocation of the script is done in a fresh namespace
-  that is discarded when the procedure finishes.
+  each invocation of the script is done in a fresh namespace.
 
   But if @racket[#:persistent] is provided, a fresh namespace is created only
   the first time it is invoked, and the same namespace is re-used for the subsequent invocations.
@@ -295,8 +294,14 @@ There are some additional properties:
   If the script is persistent, the counter increases at each invocation of the script via the menu,
   whereas it always displays 1 if the script is not persistent.
 
-  Note: Persistent scripts can be "unloaded" by clicking on the @gui{Scripts|Manage scripts|Unload persistent scripts} menu item.
-  In the previous example, this will reset the counter.
+  @bold{Note:} Persistent scripts can be "unloaded" by clicking on the
+  @gui{Scripts|Manage scripts|Unload persistent scripts} menu item.
+  In the previous example, this will reset the counter. Make sure to unload a persistent script
+  after editing it.
+
+  @bold{Technical point:} The script's procedure is called @emph{outside} of the namespace that was
+  used to @racket[dynamic-require] it, and inside DrRacket frame's namespace so as to have access
+  to objects in this frame.
 
   @;See a more detailed example in @example-link{persistent-counter.rkt}.
 
@@ -342,6 +347,43 @@ either do so through the @gui{File|Package Manager} menu in DrRacket,
 or run @tt{raco pkg update quickscript}.
 
 The user's scripts will not be modified in the process.
+
+@section{Distributing your own scripts}
+
+The @emph{simplest} way to distribute a small script s to publish it as a
+@hyperlink["https://gist.github.com/"]{gist}
+or on @hyperlink["http://pasterack.org/"]{PasteRack}, and share the link.
+A user can then copy/paste the contents into a new script.
+Don't forget to include a permissive license such as MIT/Apache 2.
+
+
+The @emph{best} way to distribute scripts is by creating a package---the user only has to install
+the package.
+Assuming your scripts are stored in the @racket["scripts"] subdirectory,
+include a file (say @racket["register.rkt"]) at the root directory of
+the package containing the following code:
+@margin-note{If the file @racket["register.rkt"] is not at the root,
+                         the runtime-path needs to be modified accordingly.}
+@codeblock|{
+#lang racket/base
+(require (for-syntax racket/base
+                     racket/runtime-path
+                     (only-in quickscript/library
+                              add-third-party-script-directory!)))
+
+;; This file is going to be called during setup and will automatically
+;; register the scripts subdirectory in quickscript's library.
+(begin-for-syntax
+  (define-runtime-path script-dir "scripts")
+  (add-third-party-script-directory! script-dir))
+  }|
+
+You can see an example with
+@hyperlink["https://github.com/Metaxal/quickscript-extra"]{quickscript-extra}.
+
+Don't forget to register your package on the
+@hyperlink["https://pkgs.racket-lang.org/"]{Racket server}.
+
 
 @section{License}
 
