@@ -237,9 +237,14 @@ m4_include(../ac/sdk_show.m4)
 
 if test "${enable_racket}" != "" ; then
   if test "${enable_racket}" = "auto" ; then
-     echo "=== Creating and using local Racket executable"
+    echo "=== Creating and using local Racket executable"
   else
-     echo "=== Using Racket executable ${enable_racket}"
+    if test ! -f "${enable_racket}"; then
+      echo "cannot find racket executable in ${enable_racket}"
+      exit 1
+    else
+      echo "=== Using Racket executable ${enable_racket}"
+    fi	
   fi 
 fi
 
@@ -607,7 +612,7 @@ case "$host_os" in
       ppc|powerpc)
        ;;
       alpha)
-       EXTRA_GMP_OBJ="gmp_alpha_gcc.o"
+       EXTRA_GMP_OBJ='gmp_alpha_gcc.$(LTO)'
        EXTRA_GMP_DEP='$(EXTRA_GMP_DEP_FILE)'
        ;;
       i386|i486|i586|i686)
@@ -615,7 +620,7 @@ case "$host_os" in
        check_for_unwind=REG_ESP
        ;;
       arm*)
-       EXTRA_GMP_OBJ="gmp_arm_gcc.o"
+       EXTRA_GMP_OBJ='gmp_arm_gcc.$(LTO)'
        EXTRA_GMP_DEP='$(EXTRA_GMP_DEP_FILE)'
        ;;
       *)
@@ -627,7 +632,7 @@ case "$host_os" in
     if test "$CC" = "cc" ; then 
       COMPFLAGS="$COMPFLAGS -ieee_with_inexact -assume noaligned_objects"
     elif test "$CC" = "gcc" ; then 
-      EXTRA_GMP_OBJ="gmp_alpha_gcc.o"
+      EXTRA_GMP_OBJ='gmp_alpha_gcc.$(LTO)'
       EXTRA_GMP_DEP='$(EXTRA_GMP_DEP_FILE)'
     fi
     ;;
@@ -708,11 +713,6 @@ case "$host_os" in
     # Use -Wno-nullability-completeness if supported
     try_no_nullability_completeness=yes
 
-    # ".a" is typically not useful, since we always build a ".dylib":
-    if test "${enable_libs}" = "" ; then
-      INSTALL_LIBS_ENABLE=no-install
-    fi
-
     SO_SUFFIX=.dylib
 
     if test "${need_cc_in_extras}" = "yes" ; then
@@ -752,6 +752,10 @@ case "$host_os" in
       fi
       if test "${enable_embedfw}" = "yes" ; then
         strip_needs_dash_s=yes
+      fi
+      # ".a" is typically not useful, since we always build a ".dylib":
+      if test "${enable_libs}" = "" ; then
+        INSTALL_LIBS_ENABLE=no-install
       fi
     else
       PREFLAGS="$PREFLAGS -DXONX "
@@ -1405,6 +1409,7 @@ if test "${enable_shared}" = "yes" ; then
   WXLIBS=WXLIBSDYN
   ICP="${LIBTOOLPROG} --mode=install cp"
   ICP_LIB="${LIBTOOLPROG} --mode=install install -s"
+  ICP_STATIC_LIB='$(NOOP)'
   MRLIBINSTALL="install-lib"
   LIBFINISH="${LIBTOOLPROG} --mode=finish"
   LTO="lo"
@@ -1418,6 +1423,7 @@ else
   WXLIBS=WXLIBSNORM
   ICP=cp
   ICP_LIB=cp
+  ICP_STATIC_LIB=cp
   MRLIBINSTALL="install-no-lib"
   LIBFINISH=echo
   LTO="o"
@@ -1495,6 +1501,7 @@ AC_SUBST(WXLIBS)
 AC_SUBST(WXVARIANT)
 AC_SUBST(ICP)
 AC_SUBST(ICP_LIB)
+AC_SUBST(ICP_STATIC_LIB)
 AC_SUBST(MRLIBINSTALL)
 
 AC_SUBST(MAKE_FINISH)

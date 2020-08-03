@@ -1,0 +1,32 @@
+name: Build RacketCI Docker Image
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - '.github/images/Dockerfile'
+      - '.github/workflows/docker-racketci.yml'
+
+jobs:
+  build-image:
+    runs-on: ubuntu-18.04
+
+    env:
+      IMAGE_NAME: racket-ci
+      VERSION: ${{ github.sha }}
+      
+    steps:
+      - uses: actions/checkout@v2
+      - name: Build image
+        working-directory: ./.github/images
+        run: docker build --tag image .
+      - name: Log into registry
+        run: echo "${{ secrets.DOCKER_TOKEN }}" | docker login -u pmatos --password-stdin
+      - name: Push image
+        run: |
+          IMAGE_ID=racket/$IMAGE_NAME
+          docker tag image $IMAGE_ID:$VERSION
+          docker push $IMAGE_ID:$VERSION
+          docker tag image $IMAGE_ID:latest
+          docker push $IMAGE_ID:latest
