@@ -19,6 +19,7 @@
          net/url
          syntax/toplevel
          browser/external
+         mrlib/panel-wob
          (only-in mzlib/struct make-->vector)
 
          ;; ensure that this module is always loaded since it is shared below for pretty big
@@ -322,7 +323,9 @@
             (language-settings
              (get-selected-language)
              (get-selected-language-settings)))))
-    
+
+    (define wob-style-delta (new style-delta%))
+    (send wob-style-delta set-delta-foreground "white")
     ;; fill-language-dialog :
     ;;    (vertical-panel panel language-setting -> language-setting)
     ;;    (union dialog #f) [...more stuff...]
@@ -670,6 +673,8 @@
                  (define/override (on-paint)
                    (define dc (get-dc))
                    (send dc set-font normal-control-font)
+                   (when (white-on-black-panel-scheme?)
+                     (send dc set-text-foreground "white"))
                    (send dc draw-text "..." 0 0))
                  (define/override (on-event evt)
                    (when (send evt button-up?)
@@ -935,6 +940,9 @@
                         (when second-number
                           (send item set-second-number second-number))
                         (send text insert position)
+                        (when (white-on-black-panel-scheme?)
+                          (send text change-style wob-style-delta
+                                0 (send text last-position)))
                         (when delta
                           (cond
                             [(list? delta)
@@ -968,7 +976,10 @@
                                     (send editor insert "\n")
                                     (send editor insert position)
                                     (send editor change-style small-size-delta pos (+ pos 1))
-                                    (send editor change-style section-style-delta 
+                                    (send editor change-style
+                                          (if (white-on-black-panel-scheme?)
+                                              wob-section-style-delta
+                                              bow-section-style-delta)
                                           (+ pos 1) (send editor last-position)))
                                   x)
                                 (let* ([new-list (send hier-list new-list
@@ -981,7 +992,11 @@
                                     (send new-list set-second-number second-number))
                                   (send new-list set-allow-selection #t)
                                   (send new-list open)
-                                  (send (send new-list get-editor) insert position)
+                                  (define editor (send new-list get-editor))
+                                  (send editor insert position)
+                                  (when (white-on-black-panel-scheme?)
+                                    (send editor change-style wob-style-delta
+                                          0 (send editor last-position)))
                                   (hash-set! ht (string->symbol position) x)
                                   x))))])
                    (cond
@@ -1356,7 +1371,9 @@
            (send t change-style 
                  (send (send t get-style-list) basic-style)
                  before (send t last-position))])
-        (send t change-style size-sd before (send t last-position)))
+        (send t change-style size-sd before (send t last-position))
+        (when (white-on-black-panel-scheme?)
+          (send t change-style wob-style-delta before (send t last-position))))
       (when (send normal-control-font get-size-in-pixels)
         (send size-sd set-size-in-pixels-on #t))
       (let loop ([strs (regexp-split #rx"#lang" (string-constant racket-language-discussion))])
@@ -1512,8 +1529,10 @@
             by)
       (send canvas min-height (+ (ceiling (inexact->exact (unbox by))) 24)))
     
-    (define section-style-delta (make-object style-delta% 'change-bold))
-    (send section-style-delta set-delta-foreground "medium blue")
+    (define bow-section-style-delta (make-object style-delta% 'change-bold))
+    (send bow-section-style-delta set-delta-foreground "medium blue")
+    (define wob-section-style-delta (make-object style-delta% 'change-bold))
+    (send wob-section-style-delta set-delta-foreground "DeepSkyBlue")
     (define small-size-delta (make-object style-delta% 'change-size 9))
     
     (define (add-welcome dialog welcome-before-panel welcome-after-panel)
@@ -2204,7 +2223,10 @@
       (define green-style
         (let ([list (editor:get-standard-style-list)]
               [green-style-delta (make-object style-delta% 'change-family 'default)])
-          (send green-style-delta set-delta-foreground "DarkViolet")
+          (send green-style-delta set-delta-foreground
+                (if (preferences:get 'framework:white-on-black?)
+                    (make-object color% 170 151 240)
+                    "DarkViolet"))
           (send green-style-delta set-delta 'change-italic)
           (send list
                 find-or-create-style
@@ -2252,15 +2274,15 @@
                      [right-margin 0]
                      [top-margin 0]
                      [bottom-margin 0])
-          (inherit get-flags set-flags set-style)
+          (inherit get-flags set-flags set-style use-style-background)
+          (use-style-background #t)
           (set-flags (cons 'handles-events (get-flags)))
           
           (send txt insert words)
-          (send txt change-style link-sd 0 (send txt last-position))))
-      
-      (define link-sd (make-object style-delta% 'change-underline #t))
-      (send link-sd set-delta-foreground "blue")
-      (send link-sd set-family 'default)
+          (send txt change-style
+                (gui-utils:get-clickback-delta (preferences:get 'framework:white-on-black?))
+                0
+                (send txt last-position))))
       
       (main))
     
@@ -2296,13 +2318,6 @@
         (space-em-out)
         (fix-msg-sizes)
         (send dialog show #t))
-      
-      (define (insert-red-message)
-        (new canvas-message% 
-             (parent qa-panel)
-             (font (get-font #:style 'italic))
-             (label (string-constant must-choose-language))
-             (color (send the-color-database find-color "red"))))
       
       (define (space-em-out)
         (send qa-panel change-children
@@ -2350,7 +2365,10 @@
         (new canvas-message%
              (parent racketeer-panel) 
              (label (string-constant use-language-in-source))
-             (color (send the-color-database find-color "blue"))
+             (color (send the-color-database find-color
+                          (if (white-on-black-panel-scheme?)
+                              "deepskyblue"
+                              "blue")))
              (callback (λ () (change-current-lang-to
                               (λ (x) (is-a? x drracket:module-language:module-language<%>)))))
              (font (get-font #:underlined #t))))
@@ -2400,7 +2418,7 @@
           (init-field label
                       [font (get-font)]
                       [callback void]
-                      [color (send the-color-database find-color "black")])
+                      [color #f])
           
           (define/override (on-event evt)
             (cond
@@ -2415,7 +2433,11 @@
               [(string? label)
                (define old-font (send dc get-font))
                (define old-tf (send dc get-text-foreground))
-               (send dc set-text-foreground color)
+               (send dc set-text-foreground
+                     (or color
+                         (if (white-on-black-panel-scheme?)
+                             (send the-color-database find-color "lightgray")
+                             (send the-color-database find-color "black"))))
                (send dc set-font font)
                (send dc draw-text label 0 0 #t)
                (send dc set-font old-font)
@@ -2449,7 +2471,10 @@
         (new canvas-message%
              (parent panel2) 
              (label lang-name)
-             (color (send the-color-database find-color "blue"))
+             (color (send the-color-database find-color
+                          (if (white-on-black-panel-scheme?)
+                              "deepskyblue"
+                              "blue")))
              (callback (λ () (change-current-lang-to lang)))
              (font (get-font #:underlined #t)))
         (new canvas-message% (parent panel2) (label (string-constant start-with-after))))

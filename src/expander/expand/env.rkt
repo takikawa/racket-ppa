@@ -1,5 +1,6 @@
 #lang racket/base
-(require "../common/memo.rkt"
+(require racket/symbol
+         "../common/memo.rkt"
          "../syntax/syntax.rkt"
          "../syntax/error.rkt"
          "../syntax/scope.rkt"
@@ -32,7 +33,9 @@
          add-bulk-binding!
          add-local-binding!
          
-         binding-lookup)
+         binding-lookup
+
+         existing-binding-key)
 
 ;; ----------------------------------------
 
@@ -110,9 +113,10 @@
   (define c (add1 (unbox counter)))
   (set-box! counter c)
   (define sym (syntax-content id))
-  (define key (string->uninterned-symbol (string-append (symbol->string (or local-sym sym))
-                                                        "_"
-                                                        (number->string c))))
+  (define key (string->uninterned-symbol (string-append-immutable
+                                          (symbol->immutable-string (or local-sym sym))
+                                          "_"
+                                          (number->string c))))
   (add-binding-in-scopes! (syntax-scope-set id phase) sym (make-local-binding key #:frame-id frame-id))
   key)
 
@@ -173,3 +177,11 @@
     (raise-syntax-error #f
                         "cannot use identifier tainted by macro transformation"
                         id)))
+
+;; ----------------------------------------
+
+(define (existing-binding-key id phase)
+  (define b (resolve+shift id phase #:immediate? #t))
+  (unless (local-binding? b)
+    (raise-syntax-error #f "expected an existing local binding for an already-expanded identifier" id))
+  (local-binding-key b))

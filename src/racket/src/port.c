@@ -411,7 +411,7 @@ void scheme_init_port_places(void)
      custodian). */
 
   if (!stdin_refcount) {
-    /* Referece counts are needed for stdio and places; start
+    /* Reference counts are needed for stdio and places; start
        at 1 in main place, but then cancel initial count */
     stdin_refcount = malloc_refcount(1, 0);
     stdout_refcount = malloc_refcount(1, 0);
@@ -1043,6 +1043,7 @@ XFORM_NONGCING static void do_count_lines(Scheme_Port *ip, const char *buffer, i
       ip->column = 0;
   } else {
     ip->charsSinceNewline += c;
+    ip->was_cr = 0;
   }
 
   /* Do the last line to get the column count right and to
@@ -3970,16 +3971,6 @@ Scheme_Object *scheme_open_output_file_with_mode(const char *name, const char *w
   return scheme_do_open_output_file((char *)who, 0, 3, a, 0, 0);
 }
 
-#ifdef WINDOWS_FILE_HANDLES
-static int win_seekable(intptr_t fd)
-{
-  /* SetFilePointer() requires " a file stored on a seeking device".
-     I'm not sure how to test that, so we approximate as "regular
-     file". */
-  return GetFileType((HANDLE)fd) == FILE_TYPE_DISK;
-}
-#endif
-
 static Scheme_Object *
 do_file_position(const char *who, int argc, Scheme_Object *argv[], int can_false)
 {
@@ -5174,6 +5165,8 @@ fd_flush_done(Scheme_Object *port)
 
   op = scheme_output_port_record(port);
 
+  if (op->closed) return 1;
+
   fop = (Scheme_FD *)op->port_data;
 
   return !fop->flushing;
@@ -5296,6 +5289,9 @@ static intptr_t flush_fd(Scheme_Output_Port *op,
                                           (Scheme_Object *)op, 0.0,
                                           enable_break);
         END_ESCAPEABLE();
+
+        if (op->closed)
+          return 0;
       } else if (len == RKTIO_WRITE_ERROR) {
         if (consume_buffer) {
           /* Drop unsuccessfully flushed bytes. This isn't the
@@ -5448,12 +5444,15 @@ fd_close_output(Scheme_Output_Port *port)
   if (fop->bufcount)
     flush_fd(port, NULL, 0, 0, 0, 0);
 
-  if (fop->flushing && !scheme_force_port_closed)
+  if (fop->flushing && fop->bufcount && !scheme_force_port_closed) {
     wait_until_fd_flushed(port, 0);
+    if (port->closed)
+      return;
+  }
 
   if (!scheme_force_port_closed && fop->fd) {
     /* Check for flushing at the rktio level (not to be confused
-       with pulmber flushes): */
+       with plumber flushes): */
     while (!rktio_poll_write_flushed(scheme_rktio, fop->fd)) {
       scheme_block_until(end_fd_flush_done, end_fd_flush_needs_wakeup, (Scheme_Object *)fop, 0.0);
     }
@@ -5957,10 +5956,16 @@ static void child_mref_done(Scheme_Subprocess *sp)
 static int subp_done(Scheme_Object *so)
 {
   Scheme_Subprocess *sp = (Scheme_Subprocess*)so;
+  int done;
 
   if (!sp->proc) return 1;
 
-  return rktio_poll_process_done(scheme_rktio, sp->proc);
+  done = rktio_poll_process_done(scheme_rktio, sp->proc);
+
+  if (done)
+    child_mref_done(sp);
+
+  return done;
 }
 
 static void subp_needs_wakeup(Scheme_Object *so, void *fds)

@@ -257,8 +257,55 @@
     (let* ([luv-a (xyz->luv (rgb->xyz r-a g-a b-a))]
            [luv-b (xyz->luv (rgb->xyz r-b g-b b-b))])
       (luv-distance luv-a luv-b)))
-  
+
   ;;(rgb-color-distance 0 0 0 0 0 0)
   ;; (print-struct #t)
   ;; (xyz->luv (make-xyz 95.0 100.0 141.0))
   ;; (xyz->luv (make-xyz 60.0 80.0 20.0))
+
+;; formulas from https://en.wikipedia.org/wiki/HSL_and_HSV
+(define (rgb->hsl r255 g255 b255)
+  (define r (/ r255 255))
+  (define g (/ g255 255))
+  (define b (/ b255 255))
+  (define MAX (max r g b))
+  (define MIN (min r g b))
+  (define Δ (- MAX MIN))
+  (define H1
+    (cond
+      [(= Δ 0) 0]
+      [(= MAX r) (* 60      (/ (- g b) Δ))]
+      [(= MAX g) (* 60 (+ 2 (/ (- b r) Δ)))]
+      [(= MAX b) (* 60 (+ 4 (/ (- r g) Δ)))]))
+  (define H (if (H1 . < . 0) (+ H1 360) H1))
+  (define L (/ (+ MAX MIN) 2))
+  (define S
+    (cond
+      [(= MAX 0) 0]
+      [(= MIN 1) 0]
+      [else
+       (/ (- MAX L)
+          (min L (- 1 L)))]))
+  (values H S L))
+
+(define (hsl->rgb H S L)
+  (define C (* (- 1 (abs (- (* 2 L) 1))) S))
+  (define H* (/ H 60))
+  (define X (* C (- 1 (abs (- (MOD H* 2) 1)))))
+  (define-values (R1 G1 B1)
+    (cond
+      [(<= H* 1) (values C X 0)]
+      [(<= H* 2) (values X C 0)]
+      [(<= H* 3) (values 0 C X)]
+      [(<= H* 4) (values 0 X C)]
+      [(<= H* 5) (values X 0 C)]
+      [(<= H* 6) (values C 0 X)]))
+  (define m (- L (/ C 2)))
+  (define-values (R G B)
+    (values (+ R1 m) (+ G1 m) (+ B1 m)))
+  (define (to-255 n) (inexact->exact (round (* n 255))))
+  (values (to-255 R) (to-255 G) (to-255 B)))
+
+;; definition taken from fortran's docs ...
+(define (MOD A P)
+  (- A (* (floor (/ A P)) P)))

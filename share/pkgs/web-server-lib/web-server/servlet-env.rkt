@@ -14,6 +14,7 @@
          web-server/http
          web-server/stuffers
          web-server/configuration/responders
+         web-server/safety-limits
          web-server/private/mime-types
          web-server/servlet/setup
          web-server/servlet/servlet-structs
@@ -46,12 +47,13 @@
                   #:launch-browser? boolean?
                   #:quit? boolean?
                   #:banner? boolean?
-                  #:listen-ip (or/c false/c string?)
+                  #:listen-ip (or/c #f string?)
                   #:port listen-port-number?
-                  #:max-waiting exact-nonnegative-integer?
+                  #:max-waiting timeout/c
+                  #:safety-limits safety-limits?
                   #:ssl? boolean?
-                  #:ssl-cert (or/c false/c path-string?)
-                  #:ssl-key (or/c false/c path-string?)
+                  #:ssl-cert (or/c #f path-string?)
+                  #:ssl-key (or/c #f path-string?)
                   #:manager manager?
                   #:servlet-namespace (listof module-path?)
                   #:server-root-path path-string?
@@ -66,10 +68,10 @@
                   #:mime-types-path path-string?
                   #:servlet-path string?
                   #:servlet-regexp regexp?
-                  #:log-file (or/c false/c path-string? output-port?)
+                  #:log-file (or/c #f path-string? output-port?)
                   #:log-format (or/c log:log-format/c log:format-req/c))
                  . ->* .
-                 void)])
+                 any)])
 
 ;; utility for conveniently chaining dispatchers
 (define (dispatcher-sequence . dispatchers)
@@ -95,9 +97,10 @@
          #:listen-ip
          [listen-ip "127.0.0.1"]
          #:port
-         [the-port 8000]         
-         #:max-waiting
-         [max-waiting 511]
+         [the-port 8000]
+
+         #:max-waiting [_max-waiting 511]
+         #:safety-limits [limits (make-safety-limits #:max-waiting _max-waiting)]
 
          #:manager
          [manager
@@ -133,7 +136,7 @@
            (build-path server-root-path "conf" "not-found.html"))]
          #:servlet-loading-responder
          [responders-servlet-loading servlet-loading-responder]
-         #:servlet-responder 
+         #:servlet-responder
          [responders-servlet servlet-error-responder]
 
          #:mime-types-path
@@ -141,7 +144,7 @@
                             (if (file-exists? p)
                               p
                               (build-path default-web-root "mime.types")))]
-         
+
          #:ssl?
          [ssl? #f]
          #:ssl-cert
@@ -155,13 +158,13 @@
          [log-format 'apache-default])
   (define (dispatcher sema)
     (dispatcher-sequence
-     (and log-file (log:make #:format 
+     (and log-file (log:make #:format
                              (if (symbol? log-format)
-                                 (log:log-format->format log-format)
-                                 log-format)
+                               (log:log-format->format log-format)
+                               log-format)
                              #:log-path log-file))
      (and quit? (filter:make #rx"^/quit$" (quit-server sema)))
-     (dispatch/servlet 
+     (dispatch/servlet
       start
       #:regexp servlet-regexp
       #:stateless? stateless?
@@ -170,7 +173,7 @@
       #:manager manager
       #:responders-servlet-loading
       responders-servlet-loading
-      #:responders-servlet 
+      #:responders-servlet
       responders-servlet)
      (let-values ([(clear-cache! url->servlet)
                    (servlets:make-cached-url->servlet
@@ -179,7 +182,7 @@
                      (fsmap:make-url->valid-path
                       (fsmap:make-url->path servlets-root)))
                     (make-default-path->servlet
-                     #:make-servlet-namespace 
+                     #:make-servlet-namespace
                      (make-make-servlet-namespace #:to-be-copied-module-specs servlet-namespace)))])
        (servlets:make url->servlet))
      (map (lambda (extra-files-path)
@@ -194,12 +197,12 @@
       #:indices (list "index.html" "index.htm"))
      (lift:make (compose any->response file-not-found-responder))))
   (serve/launch/wait
-   dispatcher  
+   dispatcher
    #:connection-close? connection-close?
-   #:launch-path (if launch-browser? servlet-path #f) 
-   #:banner? banner?   
+   #:launch-path (if launch-browser? servlet-path #f)
+   #:banner? banner?
    #:listen-ip listen-ip
    #:port the-port
-   #:max-waiting max-waiting
+   #:safety-limits limits
    #:ssl-cert ssl-cert
    #:ssl-key ssl-key))

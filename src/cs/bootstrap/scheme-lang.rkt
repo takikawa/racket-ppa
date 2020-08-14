@@ -1,10 +1,13 @@
 #lang racket/base
-(require (for-syntax racket/base)
+(require (for-syntax racket/base
+                     racket/match)
          (prefix-in r: racket/include)
          racket/fixnum
+         racket/flonum
          racket/vector
          racket/splicing
          racket/pretty
+         racket/dict
          "config.rkt"
          (for-syntax "config.rkt")
          (for-syntax "constant.rkt")
@@ -41,12 +44,13 @@
          letrec*
          putprop getprop remprop
          $sputprop $sgetprop $sremprop
-         prim-mask
+         define-flags
          $primitive
          $tc $tc-field $thread-tc
          enumerate
          $make-record-type
          $make-record-type-descriptor
+         $make-record-type-descriptor*
          $make-record-constructor-descriptor
          $record
          $record?
@@ -76,12 +80,15 @@
          record-type-opaque?
          record-type-parent
          record-type-field-names
+         record-type-field-indices
          csv7:record-type-field-names
+         csv7:record-type-field-indices
          csv7:record-type-field-decls
          (rename-out [record-rtd $record-type-descriptor])
          record?
          record-type-uid
          $object-ref
+         stencil-vector?
          (rename-out [s:vector-sort vector-sort]
                      [s:vector-sort! vector-sort!])
          vector-for-each
@@ -92,12 +99,14 @@
          $set-top-level-value!
          $profile-source-data?
          $compile-profile
+         compile-profile
          $optimize-closures
          $profile-block-data?
          run-cp0
          generate-interrupt-trap
          $track-dynamic-closure-counts
          $suppress-primitive-inlining
+         uninterned-symbol? string->uninterned-symbol
          debug-level
          scheme-version-number
          scheme-fork-version-number
@@ -111,7 +120,6 @@
                      [mpair? binding?]
                      [fx+ r6rs:fx+]
                      [fx- r6rs:fx-]
-                     [< $fxu<]
                      [add1 fx1+]
                      [sub1 fx1-]
                      [add1 1+]
@@ -133,6 +141,7 @@
                      [bitwise-and logand]
                      [bitwise-bit-set? fxbit-set?]
                      [integer-length bitwise-length]
+                     [->fl fixnum->flonum]
                      [+ cfl+]
                      [- cfl-]
                      [* cfl*]
@@ -150,6 +159,7 @@
                      [s:error $oops]
                      [error $undefined-violation]
                      [error errorf]
+                     [error warningf]
                      [make-bytes make-bytevector]
                      [bytes bytevector]
                      [bytes-length bytevector-length]
@@ -170,8 +180,12 @@
                      [logbit1 fxlogbit1]
                      [logbit0 fxlogbit0]
                      [logtest fxlogtest])
+         $fxu<
          fxsrl
          fxbit-field
+         fxpopcount
+         fxpopcount32
+         fxpopcount16
          bitwise-bit-count
          bitwise-arithmetic-shift-right
          bytevector-u16-native-ref
@@ -220,16 +234,16 @@
          $ht-minlen
          $ht-veclen
          (rename-out [hash? hashtable?]
-                     [hash-ref/pair hashtable-ref]
-                     [hash-ref/pair eq-hashtable-ref]
+                     [hash-ref/pair/dict hashtable-ref]
+                     [hash-ref/pair/dict eq-hashtable-ref]
                      [hash-ref-cell eq-hashtable-cell]
-                     [hash-set!/pair hashtable-set!]
+                     [hash-set!/pair/dict hashtable-set!]
                      [hash-remove! eq-hashtable-delete!]
                      [equal-hash-code string-hash]
-                     [hash-set!/pair symbol-hashtable-set!]
+                     [hash-set!/pair/dict symbol-hashtable-set!]
                      [hash-has-key? symbol-hashtable-contains?]
                      [hash-has-key? eq-hashtable-contains?]
-                     [hash-ref/pair symbol-hashtable-ref]
+                     [hash-ref/pair/dict symbol-hashtable-ref]
                      [hash-ref-cell symbol-hashtable-cell])
          bignum?
          ratnum?
@@ -255,6 +269,7 @@
          enable-cross-library-optimization
          enable-arithmetic-left-associative
          enable-type-recovery
+         fasl-compressed
          current-expand
          current-generate-id
          internal-defines-as-letrec*
@@ -281,6 +296,7 @@
          (rename-out [s:open-output-file open-output-file])
          $open-bytevector-list-output-port
          open-bytevector-output-port
+         native-transcoder
          port-file-compressed!
          file-buffer-size
          $source-file-descriptor
@@ -584,15 +600,33 @@
                                                            (lambda lhs (values . flat-lhs)))])]))])
        #'(let-values ([lhs rhs] ...) body ...))]))
 
-(define-values (prim-flags->bits primvec get-priminfo)
+(define-values (primvec get-priminfo)
   (get-primdata $sputprop scheme-dir))
 
-(define-syntax prim-mask
-  (syntax-rules (or)
-    [(_ (or flag ...))
-     (prim-flags->bits '(flag ...))]
-    [(_ flag)
-     (prim-flags->bits '(flag))]))
+(begin-for-syntax
+  (define (make-flags->bits specs)
+    (define bits
+      (for/fold ([bits #hasheq()]) ([spec (in-list specs)])
+        (define (get-val v)
+          (if (number? v) v (hash-ref bits v)))
+        (match spec
+          [`(,name (or ,vals ...))
+           (hash-set bits name (apply bitwise-ior (map get-val vals)))]
+          [`(,name ,val)
+           (hash-set bits name (get-val val))])))
+    (lambda (flags)
+      (apply bitwise-ior (for/list ([flag (in-list flags)])
+                           (hash-ref bits flag))))))
+
+(define-syntax (define-flags stx)
+  (syntax-case stx ()
+    [(_ name spec ...)
+     #'(define-syntax name
+         (let ([flags->bits (make-flags->bits '(spec ...))])
+           (lambda (stx)
+             (syntax-case stx (or)
+               [(_ . flags)
+                (flags->bits 'flags)]))))]))
 
 (define-syntax $primitive
   (syntax-rules ()
@@ -622,6 +656,12 @@
 
 (define ($make-record-constructor-descriptor rtd prcd protocol who)
   (make-record-constructor-descriptor rtd prcd protocol))
+
+(define ($make-record-type-descriptor* base-rtd name parent uid sealed? opaque? num-fields mutability-mask who . extras)
+  (define fields (for ([i (in-range num-fields)])
+                   (list (if (bitwise-bit-set? mutability-mask i) 'mutable 'immutable)
+                         (string->symbol (format "f~a" i)))))
+  (apply $make-record-type-descriptor base-rtd name parent uid sealed? opaque? fields who extras))
 
 (define-syntax-rule (s:module (id ...) body ...)
   (begin
@@ -743,6 +783,22 @@
     [(proc . vecs)
      (list->vector (apply map proc (map vector->list vecs)))]))
 
+(define (stencil-vector? v) #f)
+
+(define (fxpopcount32 x)
+  (let* ([x (- x (bitwise-and (arithmetic-shift x -1) #x55555555))]
+         [x (+ (bitwise-and x #x33333333) (bitwise-and (arithmetic-shift x -2) #x33333333))]
+         [x (bitwise-and (+ x (arithmetic-shift x -4)) #x0f0f0f0f)]
+         [x (+ x (arithmetic-shift x -8) (arithmetic-shift x -16) (arithmetic-shift x -24))])
+    (bitwise-and x #x3f)))
+
+(define (fxpopcount x)
+  (fx+ (fxpopcount32 (bitwise-and x #xffffffff))
+       (fxpopcount32 (arithmetic-shift x -32))))
+
+(define (fxpopcount16 x)
+  (fxpopcount32 (bitwise-and x #xffff)))
+
 (define (logbit? m n)
   (bitwise-bit-set? n m))
 (define (logbit1 i n)
@@ -751,6 +807,11 @@
   (bitwise-and (bitwise-not (arithmetic-shift 1 i)) n))
 (define (logtest a b)
   (not (eqv? 0 (bitwise-and a b))))
+
+(define ($fxu< a b)
+  (if (< a 0)
+      #f
+      (< a b)))
 
 (define (fxsrl v amt)
   (if (and (v . fx< . 0)
@@ -842,6 +903,7 @@
   #f)
 
 (define $compile-profile (make-parameter #f))
+(define compile-profile $compile-profile)
 (define $optimize-closures (make-parameter #t))
 (define $profile-block-data? (make-parameter #f))
 (define run-cp0 (make-parameter error))
@@ -881,14 +943,25 @@
           (eq? eql? =))
      (make-hash)]
     [else
-     (error 'make-hashtable
-            "??? ~s ~s" hash eql?)]))
+     (make-custom-hash eql? hash (lambda (a) 1))]))
 
 (define (make-weak-eq-hashtable)
   (make-weak-hasheq))
 
+(define (hash-ref/pair/dict ht key def-v)
+  (if (hash? ht)
+      (hash-ref/pair ht key def-v)
+      (dict-ref ht key def-v)))
+
+(define (hash-set!/pair/dict ht key v)
+  (if (hash? ht)
+      (hash-set!/pair ht key v)
+      (dict-set! ht key v)))
+
 (define (hashtable-keys ht)
-  (list->vector (hash-keys ht)))
+  (list->vector (if (hash? ht)
+                    (hash-keys ht)
+                    (dict-keys ht))))
 
 (define (hashtable-entries ht)
   (define ps (hash-values ht))
@@ -1014,6 +1087,7 @@
 (define enable-cross-library-optimization (make-parameter #t))
 (define enable-arithmetic-left-associative (make-parameter #f))
 (define enable-type-recovery (make-parameter #t))
+(define fasl-compressed (make-parameter #f))
 
 (define current-generate-id (make-parameter gensym))
 
@@ -1102,10 +1176,13 @@
             (define bv (get-output-bytes p))
             (values (list bv) (bytes-length bv)))))
 
-(define (open-bytevector-output-port)
+(define (open-bytevector-output-port [transcoder #f])
   (define p (open-output-bytes))
   (values p
           (lambda () (get-output-bytes p))))
+
+(define (native-transcoder)
+  #f)
 
 (define (port-file-compressed! p)
   (void))

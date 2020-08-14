@@ -64,6 +64,8 @@ rktio_udp_sendto_in
 rktio_udp_recvfrom
 rktio_udp_recvfrom_in
 rktio_udp_set_receive_buffer_size
+rktio_udp_set_ttl
+rktio_udp_get_ttl
 rktio_udp_get_multicast_loopback
 rktio_udp_set_multicast_loopback
 rktio_udp_get_multicast_ttl

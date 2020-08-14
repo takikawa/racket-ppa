@@ -313,7 +313,7 @@ Renders a text string as an icon. For example,
                                (make-font #:weight 'bold #:underlined? #t)
                                #:color "lightskyblue" #:height 44)]
 
-The size of @racket[font] is ignored. If @racket[trim?] is @racket[#f], the drawn text is not cropped before rendering.
+The size and face of @racket[font] are ignored. If @racket[trim?] is @racket[#f], the drawn text is not cropped before rendering.
 Otherwise, it is cropped to the smallest rectangle containing all the non-zero-alpha pixels.
 Rendering very small glyphs shows the difference dramatically:
 @interaction[#:eval icons-eval

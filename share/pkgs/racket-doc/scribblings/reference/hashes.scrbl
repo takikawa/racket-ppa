@@ -254,7 +254,7 @@ later mappings overwrite earlier mappings.
 
 @defproc[(hash-ref [hash hash?]
                    [key any/c]
-                   [failure-result (failure-result/c any/c)
+                   [failure-result failure-result/c
                                    (lambda ()
                                      (raise (make-exn:fail:contract ....)))])
          any]{
@@ -276,7 +276,7 @@ result:
 
 @defproc[(hash-ref-key [hash hash?]
                        [key any/c]
-                       [failure-result (failure-result/c any/c)
+                       [failure-result failure-result/c
                                        (lambda ()
                                          (raise (make-exn:fail:contract ....)))])
          any]{
@@ -345,7 +345,7 @@ will be determined as described in the documentation to
 
 @history[#:added "7.4.0.3"]}
 
-@defproc[(hash-ref! [hash hash?] [key any/c] [to-set (failure-result/c any/c)])
+@defproc[(hash-ref! [hash hash?] [key any/c] [to-set failure-result/c])
          any]{
 
 Returns the value for @racket[key] in @racket[hash].  If no value is
@@ -368,7 +368,7 @@ Returns @racket[#t] if @racket[hash] contains a value for the given
 @defproc[(hash-update! [hash (and/c hash? (not/c immutable?))]
                        [key any/c]
                        [updater (any/c . -> . any/c)]
-                       [failure-result (failure-result/c any/c)
+                       [failure-result failure-result/c
                                        (lambda ()
                                          (raise (make-exn:fail:contract ....)))])
          void?]{
@@ -385,7 +385,7 @@ concurrent updates.
 @defproc[(hash-update [hash (and/c hash? immutable?)]
                       [key any/c]
                       [updater (any/c . -> . any/c)]
-                      [failure-result (failure-result/c any/c)
+                      [failure-result failure-result/c
                                       (lambda ()
                                         (raise (make-exn:fail:contract ....)))])
           (and/c hash? immutable?)]{
@@ -689,43 +689,6 @@ the result is @racket[(values bad-index-v bad-index-v)] if
 
 Returns a mutable hash table with the same mappings, same
 key-comparison mode, and same key-holding strength as @racket[hash].}
-
-
-@defproc[(eq-hash-code [v any/c]) fixnum?]{
-
-Returns a @tech{fixnum}; for any two calls with @racket[eq?] values,
-the returned number is the same.
-
-@margin-note{Equal @tech{fixnums} are always @racket[eq?].}}
-
-
-@defproc[(eqv-hash-code [v any/c]) fixnum?]{
-
-Returns a @tech{fixnum}; for any two calls with @racket[eqv?] values,
-the returned number is the same.}
-
-
-@defproc[(equal-hash-code [v any/c]) fixnum?]{
-
-Returns a @tech{fixnum}; for any two calls with @racket[equal?] values,
-the returned number is the same. A hash code is computed even when
-@racket[v] contains a cycle through pairs, vectors, boxes, and/or
-inspectable structure fields. See also @racket[gen:equal+hash].
-
-For any @racket[v] that could be produced by @racket[read], if
-@racket[v2] is produced by @racket[read] for the same input
-characters, the @racket[(equal-hash-code v)] is the same as
-@racket[(equal-hash-code v2)] --- even if @racket[v] and @racket[v2]
-do not exist at the same time (and therefore could not be compared by
-calling @racket[equal?]).
-
-@history[#:changed "6.4.0.12" @elem{Strengthened guarantee for @racket[read]able values.}]}
-
-
-@defproc[(equal-secondary-hash-code [v any/c]) fixnum?]{
-
-Like @racket[equal-hash-code], but computes a secondary value suitable
-for use in double hashing.}
 
 @;------------------------------------------------------------------------
 @section{Additional Hash Table Functions}

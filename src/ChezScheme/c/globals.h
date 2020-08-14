@@ -38,6 +38,7 @@ EXTERN char *Sdefaultheapdirs;
 EXTERN s_thread_key_t S_tc_key;
 EXTERN scheme_mutex_t S_tc_mutex;
 EXTERN s_thread_cond_t S_collect_cond;
+EXTERN s_thread_cond_t S_collect_thread0_cond;
 EXTERN INT S_tc_mutex_depth;
 #endif
 
@@ -117,13 +118,18 @@ EXTERN struct S_G_struct {
     ptr nuate_id;
     ptr null_continuation_id;
     ptr collect_request_pending_id;
+    ptr event_and_resume_id;
+    ptr event_and_resume_star_id;
 
   /* gc.c */
     ptr guardians[static_generation+1];
+    ptr locked_objects[static_generation+1];
+    ptr unlocked_objects[static_generation+1];
     IGEN min_free_gen;
     IGEN new_min_free_gen;
     IGEN max_nonstatic_generation;
     IGEN new_max_nonstatic_generation;
+    IGEN min_mark_gen;
     uptr countof[static_generation+1][countof_types];
     uptr bytesof[static_generation+1][countof_types];
     uptr gctimestamp[static_generation+1];
@@ -132,10 +138,10 @@ EXTERN struct S_G_struct {
     ptr static_id;
     ptr countof_names;
     ptr gcbackreference[static_generation+1];
-    uptr phantom_sizes[static_generation+1];
+    IGEN prcgeneration;
+    uptr bytes_finalized;
 
   /* intern.c */
-    iptr *oblist_length_pointer;
     iptr oblist_length;
     iptr oblist_count;
     bucket **oblist;

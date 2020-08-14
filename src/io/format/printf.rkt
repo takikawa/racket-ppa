@@ -1,7 +1,9 @@
 #lang racket/base
 (require "../print/main.rkt"
          (submod "../print/main.rkt" internal)
-         "../port/string-output.rkt")
+         "../print/mode.rkt"
+         "../port/string-output.rkt"
+         "../port/output-port.rkt")
 
 (provide do-printf)
 
@@ -86,13 +88,13 @@
               (write-string "\n" o)
               (next i args)]
              [(#\a #\A)
-              (do-display who (car args) o)
+              (display-via-handler who (car args) o)
               (next i (cdr args))]
              [(#\s #\S)
-              (do-write who (car args) o)
+              (write-via-handler who (car args) o)
               (next i (cdr args))]
              [(#\v #\V)
-              (do-global-print who (car args) o)
+              (print-via-handler who (car args) o PRINT-MODE/UNQUOTED)
               (next i (cdr args))]
              [(#\e #\E)
               (parameterize ([print-unreadable #t])
@@ -105,15 +107,15 @@
               (let ([i (add1 i)])
                 (case (string-ref fmt i)
                   [(#\a #\A)
-                   (do-display who (car args) o (error-print-width))
+                   (do-display who (car args) (->core-output-port o) (error-print-width))
                    (next i (cdr args))]
                   [(#\s #\S)
-                   (do-write who (car args) o (error-print-width))
+                   (do-write who (car args) (->core-output-port o) (error-print-width))
                    (next i (cdr args))]
                   [(#\v #\V)
                    ;; Intentionally using `do-print` instead of
                    ;; `do-global-print`:
-                   (do-print who (car args) o 0 (error-print-width))
+                   (do-print who (car args) (->core-output-port o) 0 (error-print-width))
                    (next i (cdr args))]))]
              [(#\x #\X)
               (write-string (number->string (car args) 16) o)
@@ -193,5 +195,16 @@
 (define (value->string v)
   ((error-value->string-handler) v (error-print-width)))
 
-(define (arguments->string args)
-  "")
+(define (arguments->string fmt+args)
+  (define args (cdr fmt+args))
+  (if (or (null? args) (<= (length args) 50))
+      (parameterize ([error-print-width
+                      (max 2 (round (/ (error-print-width) (length args))))])
+        (apply string-append
+               "; "
+               "arguments were: "
+               (let loop ([ss (map value->string args)])
+                 (if (or (null? ss) (null? (cdr ss)))
+                     ss
+                     (cons (car ss) (cons " " (loop (cdr ss))))))))
+      ""))

@@ -66,6 +66,10 @@ static Scheme_Object *unsafe_string_set (int argc, Scheme_Object *argv[]);
 static Scheme_Object *unsafe_bytes_len (int argc, Scheme_Object *argv[]);
 static Scheme_Object *unsafe_bytes_ref (int argc, Scheme_Object *argv[]);
 static Scheme_Object *unsafe_bytes_set (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_bytes_copy_bang (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_bytes_immutable_bang (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_string_immutable_bang (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_vector_immutable_bang (int argc, Scheme_Object *argv[]);
 
 void
 scheme_init_vector (Scheme_Startup_Env *env)
@@ -349,6 +353,30 @@ scheme_init_unsafe_vector (Scheme_Startup_Env *env)
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_NARY_INLINED);
   scheme_addto_prim_instance("unsafe-bytes-set!", p, env);
   scheme_unsafe_bytes_set_proc = p;
+
+  scheme_addto_prim_instance("unsafe-bytes-copy!",
+			     scheme_make_prim_w_arity(unsafe_bytes_copy_bang,
+						      "unsafe-bytes-copy!",
+						      3, 5),
+			     env);
+
+  scheme_addto_prim_instance("unsafe-bytes->immutable-bytes!",
+			     scheme_make_prim_w_arity(unsafe_bytes_immutable_bang,
+						      "unsafe-bytes->immutable-bytes!",
+						      1, 1),
+			     env);
+
+  scheme_addto_prim_instance("unsafe-string->immutable-string!",
+			     scheme_make_prim_w_arity(unsafe_string_immutable_bang,
+						      "unsafe-string->immutable-string!",
+						      1, 1),
+			     env);
+
+  scheme_addto_prim_instance("unsafe-vector*->immutable-vector!",
+			     scheme_make_prim_w_arity(unsafe_vector_immutable_bang,
+						      "unsafe-vector*->immutable-vector!",
+						      1, 1),
+			     env);
 
   scheme_addto_prim_instance("unsafe-impersonate-vector",
 			     scheme_make_prim_w_arity(unsafe_impersonate_vector,
@@ -1330,4 +1358,68 @@ static Scheme_Object *unsafe_bytes_set (int argc, Scheme_Object *argv[])
 {
   SCHEME_BYTE_STR_VAL(argv[0])[SCHEME_INT_VAL(argv[1])] = (char)SCHEME_INT_VAL(argv[2]);
   return scheme_void;
+}
+
+static Scheme_Object *unsafe_bytes_copy_bang (int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *s1, *s2;
+  intptr_t istart, ifinish;
+  intptr_t ostart;
+
+  s1 = argv[0];
+  ostart = SCHEME_INT_VAL(argv[1]);
+  s2 = argv[2];
+  if (argc > 3) {
+    istart = SCHEME_INT_VAL(argv[3]);
+    if (argc > 4)
+      ifinish = SCHEME_INT_VAL(argv[4]);
+    else
+      ifinish = SCHEME_BYTE_STRLEN_VAL(s2);
+  } else {
+    istart = 0;
+    ifinish = SCHEME_BYTE_STRLEN_VAL(s2);
+  }
+
+  memmove(SCHEME_BYTE_STR_VAL(s1) XFORM_OK_PLUS ostart,
+	  SCHEME_BYTE_STR_VAL(s2) XFORM_OK_PLUS istart,
+	  (ifinish - istart));
+
+  return scheme_void;
+}
+
+static Scheme_Object *unsafe_bytes_immutable_bang (int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *o = argv[0];
+
+  if (!SCHEME_BYTE_STRINGP(o))
+    scheme_wrong_contract("unsafe-bytes->immutable-bytes!", "bytes?", 0, argc, argv);
+
+  SCHEME_SET_IMMUTABLE(o);
+
+  return o;
+}
+
+static Scheme_Object *unsafe_string_immutable_bang (int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *o = argv[0];
+
+  if (!SCHEME_CHAR_STRINGP(o))
+    scheme_wrong_contract("unsafe-string->immutable-string!", "string?", 0, argc, argv);
+
+  SCHEME_SET_IMMUTABLE(o);
+
+  return o;
+}
+
+static Scheme_Object *unsafe_vector_immutable_bang (int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *o = argv[0];
+
+  if (!SCHEME_VECTORP(o))
+    scheme_wrong_contract("unsafe-vector*->immutable-vector!", "(and/c vector? (not/c impersonator?))",
+                          0, argc, argv);
+
+  SCHEME_SET_IMMUTABLE(o);
+
+  return o;
 }

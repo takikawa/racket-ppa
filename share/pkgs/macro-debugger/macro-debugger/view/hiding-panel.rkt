@@ -70,7 +70,7 @@ TODO
            (stretchable-width #f)
            (alignment '(left top))))
     (define right-pane
-      (new vertical-pane%
+      (new horizontal-pane%
            (parent customize-panel)))
 
     (define mode-selector
@@ -162,7 +162,7 @@ TODO
               (send delete-ctl enable (pair? (send c get-selections)))))))
 
     (define look-button-pane
-      (new horizontal-pane% (parent right-pane) (stretchable-width #f)))
+      (new vertical-pane% (parent right-pane) (stretchable-width #f)))
 
     (define delete-ctl
       (new button% (parent look-button-pane) (label "Delete rule") (enabled #f)

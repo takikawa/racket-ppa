@@ -332,7 +332,7 @@ The style classes:
 
   [@css{versionbox} @elem{Outer wrapper for version}]
   [@css{version} @elem{Inner wrapper for version in the case of search box and/or navigation.}]
-  [@css{versionNoNav} @elem{Inner wrapper for version in the acse of no search box and navigation.}]
+  [@css{versionNoNav} @elem{Inner wrapper for version in the case of no search box and navigation.}]
 
   [@spacer @spacer]
 
@@ -518,6 +518,23 @@ style:
 
  @item{@ltxd[0]{postDoc} --- called after the document content; the 
        default does nothing.}
+
+ @item{A set of commands that control the basic set of Latex packages that are loaded:
+  @itemlist[@item{@ltxd[0]{packageGraphicx}, defaults to @tt{\usepackage{graphicx}}}
+            @item{@ltxd[0]{packageHyperref}, defaults to @tt{\usepackage{hyperref}}}
+            @item{@ltxd[0]{renewrmdefault}, defaults to @tt{\renewcommand{\rmdefault}{ptm}}}
+            @item{@ltxd[0]{packageRelsize}, defaults to @tt{\usepackage{relsize}}}
+            @item{@ltxd[0]{packageMathabx}, defaults to @tt{\usepackage{mathabx}}}
+            @item{@ltxd[0]{packageWasysym}, defaults to @tt{\let\leftmoon\relax \let\rightmoon\relax \let\fullmoon\relax \let\newmoon\relax \let\diameter\relax \usepackage{wasysym}}}
+            @item{@ltxd[0]{packageTxfonts}, defaults to @tt{\usepackage{txfonts}}}
+            @item{@ltxd[0]{packageTextcomp}, defaults to @tt{\usepackage{textcomp}}}
+            @item{@ltxd[0]{packageFramed}, defaults to @tt{\usepackage{framed}}}
+            @item{@ltxd[0]{packageHyphenat}, defaults to @tt{\usepackage[htt]{hyphenat}}}
+            @item{@ltxd[0]{packageColor}, defaults to @tt{\usepackage[usenames,dvipsnames]{color}}}
+            @item{@ltxd[0]{doHypersetup}, defaults to @tt{\hypersetup{bookmarks=true,bookmarksopen=true,bookmarksnumbered=true}}}
+            @item{@ltxd[0]{packageTocstyle}, defaults to @tt{\IfFileExists{tocstyle.sty}{\usepackage{tocstyle}\usetocstyle{standard}}{}}}
+            @item{@ltxd[0]{packageCJK}, defaults to @tt{\IfFileExists{CJK.sty}{\usepackage{CJK}}{}}}]
+  @history[#:changed "1.36" @list{Added @ltx{packageTxfonts}}]}
 
  @item{@ltxd[0]{sectionNewpage} --- called before each top-level
        section starts; the default does nothing, while the

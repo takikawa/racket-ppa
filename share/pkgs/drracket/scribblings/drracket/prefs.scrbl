@@ -129,8 +129,10 @@ The @onscreen{Editing} panel consists of several sub-panels:
             DrRacket enables the insert keybinding to swap into
             overwrite mode}
       @item{@PrefItem{Enable automatic parentheses} --- If checked,
-             typing an open parenthesis, curley brace, square bracket, or a double quote
-             character automatically inserts a matching one.}
+             typing an open parenthesis, curly brace, square bracket, double quote,
+             or vertical bar character automatically inserts a matching one.
+             Additionally, backspace will automatically remove matched empty pairs
+             of such characters when the caret is between them in many cases.}
       @item{@PrefItem{Add one pixel of extra space between lines} ---
              If checked, then an extra pixel of whitespace is added
              between lines in the editor. The default value is platform-specific;
@@ -280,6 +282,13 @@ The @onscreen{Editing} panel consists of several sub-panels:
  @item{@PrefItem{Save files whenever switching tabs or windows} ---
   If checked, DrRacket will automatically save any unsaved files
   when switching between windows or tabs.}
+ 
+ @item{@PrefItem{Don't ask and don't save files when
+   clicking Run with unsaved tabs or windows} --- If checked,
+  DrRacket will not show a warning dialog about unsaved tabs
+  when clicking the @onscreen{Run} button, nor will it save
+  the files automatically. If this is checked, the previous
+  checkbox's value is ignored.}
 
 ]
 

@@ -45,16 +45,12 @@ See @racket[begin-busy-cursor].
 }
 
 @defproc*[([(file-creator-and-type [filename path?]
-                                   [creator-string (lambda (s) (and (bytes? s)
-                                                                    (= 4 (bytes-length s))))]
-                                   [type-bytes (lambda (s) (and (bytes? s)
-                                                                 (= 4 (bytes-length s))))])
+                                   [creator-bytes (and/c bytes? #rx#"^....$")]
+                                   [type-bytes (and/c bytes? #rx#"^....$")])
             void?]
            [(file-creator-and-type [filename path?])
-            (values (lambda (s) (and (bytes? s)
-                                (= 4 (bytes-length s))))
-                    (lambda (s) (and (bytes? s)
-                                (= 4 (bytes-length s)))))])]{
+            (values (and/c bytes? #rx#"^....$")
+                    (and/c bytes? #rx#"^....$"))])]{
 
 Gets or sets the creator and type of a file in Mac OS.
 
@@ -404,15 +400,18 @@ Registers a ``blit'' to occur when garbage collection starts and
  ends. When garbage collection starts, @racket[on] is drawn at
  location @racket[x] and @racket[y] within @racket[canvas], if
  @racket[canvas] is shown.  When garbage collection ends, the drawing
- is reverted, possibly by drawing the @racket[off] bitmap.
+ is reverted. On some platforms, the drawing is reverted by drawing
+ the @racket[off] bitmap and on some platforms the drawing is reverted
+ automatically, without a need for the @racket[off] bitmap.
 
-The background behind @racket[on] is unspecified, so @racket[on]
- should be a solid image, and the canvas's scale or scrolling is not
- applied to the drawing. Only the portion of @racket[on] within
+The background behind @racket[on] may or may not be the usual contents
+ of the @racket[canvas], so @racket[on]
+ should be a solid image. Neither the canvas's scale nor its scroll position is
+ applied when drawing the bitmaps. Only the portion of @racket[on] within
  @racket[w] and @racket[h] pixels is used; if @racket[on-x] and
  @racket[on-y] are specified, they specify an offset within the bitmap
- that is used for drawing, and @racket[off-x] and @racket[off-y]
- similarly specify an offset within @racket[off].
+ that is used for drawing; similarly @racket[off-x] and @racket[off-y]
+ specify an offset within @racket[off].
 
 The blit is automatically unregistered if @racket[canvas] becomes
  invisible and inaccessible.  Multiple registrations can be installed

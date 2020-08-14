@@ -14,7 +14,7 @@
 ;;; limitations under the License.
 
 ;;; regression and other tests that don't fit somewhere more logical
-  
+
 (define-syntax biglet
   (lambda (x)
     (syntax-case x ()
@@ -1057,6 +1057,7 @@
   (error? (compute-size-increments (list 0) '()))
   (begin
     (define pair-size (compute-size (cons 1 2)))
+    (define ephemeron-size (compute-size (ephemeron-cons 1 2)))
     #t)
   (equal? (list pair-size pair-size)
           (compute-size-increments (list (cons 1 2) (cons 3 4))))
@@ -1070,25 +1071,25 @@
     (equal? (compute-size-increments ls)
             (reverse (compute-size-increments (reverse ls)))))
   ;; Ephemeron(s) found before key:
-  (equal? (list pair-size (* 2 pair-size))
+  (equal? (list ephemeron-size (* 2 pair-size))
           (compute-size-increments (let* ([p (cons 0 0)]
                                           [e (ephemeron-cons p (cons 0 0))])
                                      (list e p))))
-  (equal? (list pair-size (* 3 pair-size))
+  (equal? (list ephemeron-size (* 3 pair-size))
           (let* ([v (cons 1 2)]
                  [e (ephemeron-cons v (cons 3 4))])
             (compute-size-increments (list e (cons v #f)))))
-  (equal? (list (* 4 pair-size) (* 4 pair-size))
+  (equal? (list (* 2 (+ ephemeron-size pair-size)) (* 4 pair-size))
           (let* ([v (cons 1 2)]
                  [e* (list (ephemeron-cons v (cons 3 4))
                            (ephemeron-cons v (cons 5 6)))])
             (compute-size-increments (list e* (cons v #f)))))
   ;; Key found before ephemeron(s):
-  (equal? (list (* 2 pair-size) (* 2 pair-size))
+  (equal? (list (* 2 pair-size) (+ ephemeron-size pair-size))
           (let* ([v (cons 1 2)]
                  [e (ephemeron-cons v (cons 3 4))])
             (compute-size-increments (list (cons v #f) e))))
-  (equal? (list (* 2 pair-size) (* 6 pair-size))
+  (equal? (list (* 2 pair-size) (+ (* 4 pair-size) (* 2 ephemeron-size)))
           (let* ([v (cons 1 2)]
                  [e* (list (ephemeron-cons v (cons 3 4))
                            (ephemeron-cons v (cons 5 6)))])
@@ -1150,6 +1151,99 @@
             (or (eq? (current-eval) interpret) ; interpreter continuaton is not precise enough
                 (and (> (car pre-sizes) N)
                      (< (car post-sizes) N)))))))
+  )
+
+(mat collect+compute-size-increments
+  (eq? (void) (collect 0 0 #f))
+  (eq? '() (collect 0 0 '()))
+
+  (error? (collect 0 0 'not-a-list))
+  (error? (collect 0 0 0))
+  (error? (collect 'not-a-generation 0 '()))
+  (error? (collect 0 'not-a-generation '()))
+  (error? (collect 1 0 '()))
+  
+  (begin
+    (define-record-type count-wrap (fields val))
+    (collect 0 0 (list (make-count-wrap 0))) ; take care of one-time initialization costs
+    (define wrap-size (car (collect 0 0 (list (make-count-wrap 0))))) ; includes rtd
+    (define just-wrap-size (cadr (collect 0 0 (list (make-count-wrap 0) (make-count-wrap 1)))))
+    (define pair-size (compute-size (cons 1 2)))
+    (define ephemeron-size (compute-size (ephemeron-cons 1 2)))
+    #t)
+  (equal? (list pair-size pair-size)
+          (collect 0 0 (list (cons 1 2) (cons 3 4))))
+  (equal? (list (* 3 pair-size) pair-size)
+          (let ([l (list 1 2)])
+            (collect 0 0 (list (cons 3 l) (cons 4 l)))))
+  (equal? (list pair-size)
+          (collect 0 0 (list (weak-cons (make-bytevector 100) #f))))
+  ;; Ephemeron(s) found before key:
+  (equal? (list ephemeron-size (+ (* 2 pair-size) wrap-size))
+          (collect 0 0 (let* ([p (make-count-wrap (cons 0 0))]
+                              [e (ephemeron-cons p (cons 0 0))])
+                         (list e p))))
+  (equal? (list ephemeron-size (+ (* 3 pair-size) wrap-size))
+          (let* ([v (make-count-wrap (cons 1 2))]
+                 [e (ephemeron-cons v (cons 3 4))])
+            (collect 0 0 (list e (cons v #f)))))
+  (equal? (list (* 2 (+ ephemeron-size pair-size)) (+ (* 4 pair-size) wrap-size))
+          (let* ([v (make-count-wrap (cons 1 2))]
+                 [e* (list (ephemeron-cons v (cons 3 4))
+                           (ephemeron-cons v (cons 5 6)))])
+            (collect 0 0 (list e* (cons v #f)))))
+  ;; Key found before ephemeron(s):
+  (equal? (list (+ (* 2 pair-size) wrap-size) (+ ephemeron-size pair-size))
+          (let* ([v (make-count-wrap (cons 1 2))]
+                 [e (ephemeron-cons v (cons 3 4))])
+            (collect 0 0 (list (cons v #f) e))))
+  (equal? (list (* 2 pair-size) (+ (* 4 pair-size) (* 2 ephemeron-size)))
+          (let* ([v (cons 1 2)]
+                 [e* (list (ephemeron-cons v (cons 3 4))
+                           (ephemeron-cons v (cons 5 6)))])
+            (collect 0 0 (list (cons v #f) e*))))
+  ;; Weakly held objects:
+  (equal? '(0)
+          (let* ([v (make-count-wrap (cons 1 2))]
+                 [ls (weak-cons v '())])
+            (collect 0 0 ls)))
+  (equal? (list wrap-size pair-size (+ just-wrap-size pair-size))
+          (let* ([v (make-count-wrap (cons 1 2))]
+                 [ls (cons* (make-count-wrap 0) (cons v 1) (weak-cons v '()))])
+            (collect 0 0 ls)))
+  (equal? (list 0 (+ wrap-size (* 2 pair-size)))
+          (let* ([v (make-count-wrap (cons 1 2))]
+                 [ls (weak-cons v (cons (cons v 1) '()))])
+            (collect 0 0 ls)))
+  (equal? #!bwp
+          (let* ([v (make-count-wrap (cons 1 2))]
+                 [ls (weak-cons v '())])
+            (collect 0 0 ls)
+            (car ls)))
+  ;; These calls will encounter many kinds of objects, just to make
+  ;; sure they don't fail:
+  (list? (collect 0 0 (list (call/cc values))))
+  (list? (collect (collect-maximum-generation) (collect-maximum-generation) (list (call/cc values))))
+
+  (let ()
+    (define e (ephemeron-cons #t (gensym)))
+    (collect 0 1)
+    (let ([g (gensym)])
+      (set-car! e g)
+      (set! g #f)
+      ;; For this collection, `e` is both on the dirty list
+      ;; and involved in measuring; make sure those roles
+      ;; don't conflict
+      (collect 1 1 (list e))
+      (equal? e (cons #!bwp #!bwp))))
+
+  (let ()
+    (define e (ephemeron-cons #t 'other))
+    (collect 0 1)
+    (let ([g (gensym)])
+      (set-car! e g)
+      (collect 1 1 (list e))
+      (equal? e (cons g 'other))))
 )
 
 (mat compute-composition
@@ -1614,639 +1708,6 @@
        0))
 )
 
-(mat compile-profile
-  (error? ; invalid argument
-    (compile-profile 'src))
-  (eqv?
-    (parameterize ([compile-profile #t])
-      (compile-profile))
-    'source)
-  (eqv?
-    (parameterize ([compile-profile 'source])
-      (compile-profile))
-    'source)
-  (eqv?
-    (parameterize ([compile-profile 'block])
-      (compile-profile))
-    'block)
-  (error? ; incorrect argument count
-    (profile-dump '()))
-  (error? ; incorrect argument count
-    (profile-clear '()))
-  (error? ; incorrect argument count
-    (profile-dump-list #t '() 3))
-  (error? ; invalid dump
-    (profile-dump-list #f 17))
-  (error? ; invalid dump
-    (profile-dump-list #f '(17)))
-  (error? ; invalid dump
-    (profile-dump-list #f '((a . 17))))
-  (error? ; invalid dump
-    (profile-dump-list #f `((,(make-source-object (source-file-descriptor "abc" 34) 0 3) . q))))
-  (error? ; incorrect argument count
-    (profile-dump-html "" '() 3))
-  (error? ; not a string
-    (profile-dump-html '(prefix)))
-  (error? ; invalid dump
-    (profile-dump-html "profile" 17))
-  (error? ; invalid dump
-    (profile-dump-html "profile" '(17)))
-  (error? ; invalid dump
-    (profile-dump-html "profile" '((a . 17))))
-  (error? ; invalid dump
-    (profile-dump-html "profile" `((,(make-source-object (source-file-descriptor "abc" 34) 0 3) . q))))
-  (error? ; incorrect argument count
-    (profile-dump-data))
-  (error? ; incorrect argument count
-    (profile-dump-data "profile.data" '() 'q))
-  (error? ; not a string
-    (profile-dump-data #t))
-  (error? ; invalid dump
-    (profile-dump-data "profile.data" 17))
-  (error? ; invalid dump
-    (profile-dump-data "profile.data" '(17)))
-  (error? ; invalid dump
-    (profile-dump-data "profile.data" '((a . 17))))
-  (error? ; invalid dump
-    (profile-dump-data "profile.data" `((,(make-source-object (source-file-descriptor "abc" 34) 0 3) . q))))
-  (error? ; not a string
-    (profile-load-data 'what?))
-  (eqv? (parameterize ([compile-profile #t])
-          (compile
-            '(let ()
-               (define (f x) (if (= x 0) 1 (* x (f (- x 1)))))
-               (f 3))))
-        6)
-  (eqv? (parameterize ([compile-profile #t])
-          (compile
-            '(let ()
-               (define fat+
-                 (lambda (x y)
-                   (if (zero? y)
-                       x
-                       (fat+ (1+ x) (1- y)))))
-               (define fatfib
-                 (lambda (x)
-                   (if (< x 2)
-                       1
-                       (fat+ (fatfib (1- x)) (fatfib (1- (1- x)))))))
-               (fatfib 20))))
-         10946)
-  (equal?
-    (parameterize ([compile-profile #t])
-      (compile
-        '(let ()
-           (define $values (lambda (n) (lambda () (apply values (make-list n)))))
-           (define foo
-             (lambda (n)
-               (call/cc
-                 (lambda (k)
-                   (with-exception-handler
-                     (lambda (c) (collect) (k 'okay))
-                     (lambda ()
-                       (define f (case-lambda))
-                       (let ([x (random 10)])
-                         (call-with-values ($values n) f))))))))
-           (list (foo 0) (foo 1) (foo 3) (foo 10) (foo 100) (foo 1000)))))
-    '(okay okay okay okay okay okay))
-  ; no longer recording (useless) profiling information when source file & position aren't available
-  #;(let ([ls (profile-dump)])
-    (and (list? ls)
-      (not (null? ls))))
-  (eqv? (profile-clear) (void))
-  (or (eq? (compile-profile) 'source) (andmap zero? (map cdr (profile-dump))))
-  (begin (set! cp-fatfib (void)) #t) ; release fatfib
-
-  (begin (define $old-cp (compile-profile)) #t)
-  ; this collect is here to make it more likely that we won't get a generation 1
-  ; collection cementing in place the code that defines cp-fact
-  (begin (collect 1) #t)
-  (mat/cf (testfile "testfile")
-    (eval-when (compile) (compile-profile 'source))
-    (define (cp-fact x) (if (= x 0) 1 (* x (cp-fact (- x 1))))))
-  (eq? (compile-profile) $old-cp)
-  ; drop code that defines cp-fact so it won't show up in profile-dump-list in
-  ; hopes of resolving potential issue with comparison to pdl further down
-  (begin (collect (collect-maximum-generation)) #t)
-  (= (cp-fact 10) 3628800)
-  (begin
-    (define-values (pdl pdl2)
-      (with-interrupts-disabled
-        (values
-          (profile-dump-list #t (profile-dump))
-          (profile-dump-list))))
-    #t)
-  (equal? pdl pdl2)
-  (not (null? pdl))
-  (begin
-    (rm-rf "testdir")
-    (mkdir "testdir")
-    (parameterize ([gensym-prefix 0]) (profile-dump-html "testdir/" (profile-dump)))
-    #t)
-  (file-exists? "testdir/profile.html")
-  (file-exists? "testdir/testfile.ss.html")
-
-  (begin (define $old-cp (compile-profile)) #t)
-  (mat/cf (testfile "testfile-block")
-    (eval-when (compile) (compile-profile 'block))
-    (define (cp-fact-block x) (if (= x 0) 1 (* x (cp-fact-block (- x 1))))))
-  (eq? (compile-profile) $old-cp)
-  (= (cp-fact-block 10) 3628800)
-  (or (equal? (compile-profile) 'source) (equal? (profile-dump-list) pdl))
-  (begin
-    (profile-dump-html)
-    #t)
-  (file-exists? "profile.html")
-  (file-exists? "testfile.ss.html")
-  (not (file-exists? "testfile2.ss.html"))
-
-  (eqv? (profile-clear) (void))
-
-  (mat/cf (testfile "testfile")
-    (eval-when (compile) (compile-profile #t))
-    (define (cp-fact x) (if (= x 0) 1 (* x (cp-fact (- x 1))))))
-  (= (cp-fact 10) 3628800)
-  (eqv? (profile-dump-data "testfile1.pd") (void))
-  (file-exists? "testfile1.pd")
-  (eqv? (profile-load-data "testfile1.pd") (void))
-  (begin
-    (define $cp-ip (open-file-input-port "testfile.ss"))
-    (define $cp-sfd (make-source-file-descriptor "testfile.ss" $cp-ip))
-    (define $qw (lambda (bfp efp) (profile-query-weight (make-source-object $cp-sfd bfp efp))))
-    #t)
-
-  (eqv? (close-port $cp-ip) (void))
-
-  (eqv? ($qw 0 0) 0.0) ; bfp, efp combination not in database
-  (eqv? ; file not in database
-    (let* ([ip (open-file-input-port "Mf-base")]
-           [sfd (make-source-file-descriptor "Mf-base" ip)])
-      (close-port ip)
-      (profile-query-weight (make-source-object sfd 0 0)))
-    #f)
-  ((lambda (x) (and (memv x (list 0.0 (/ 1.0 11.0))) #t)) ($qw 0 42))
-  ((lambda (x) (and (memv x (list 0.0 (/ 1.0 11.0))) #t)) ($qw 43 102))
-  (eqv? ($qw 63 101) 1.0)
-  (eqv? ($qw 75 76) (fl/ 1.0 11.0))
-  (eqv? ($qw 77 100) (fl/ 10.0 11.0))
-  ((lambda (x) (and (memv x (list 0.0 (/ 1.0 11.0))) #t)) ($qw 103 127))
-  (eqv? ($qw 119 126) 0.0)
-  (eqv? ($qw 120 125) 0.0)
-  (eqv? (profile-clear) (void))
-  (= (cp-fact 5) 120)
-  (eqv? (profile-dump-data "testfile2.pd") (void))
-  (eqv? (profile-load-data "testfile2.pd") (void))
-  ((lambda (x) (and (memv x (list 0.0 (/ 1.0 11.0) (fl/ (/ 1.0 11.0) 2.0))) #t)) ($qw 0 42))
-  (eqv? ($qw 21 40) 0.0)
-  ((lambda (x) (and (memv x (list 0.0 (/ 1.0 11.0) (fl/ (/ 1.0 11.0) 2.0))) #t)) ($qw 43 102))
-  (eqv? ($qw 63 101) 1.0)
-  (eqv? ($qw 75 76) (fl/ (fl+ (/ 1.0 11.0) (fl/ 1.0 6.0)) 2.0))
-  (eqv? ($qw 77 100) (fl/ (fl+ (fl/ 10.0 11.0) (fl/ 5.0 6.0)) 2.0))
-  ((lambda (x) (and (memv x (list 0.0 (/ 1.0 11.0) (fl/ (/ 1.0 11.0) 2.0))) #t)) ($qw 103 127))
-  (eqv? ($qw 119 126) 0.0)
-  (eqv? ($qw 120 125) 0.0)
-  (eqv? (profile-clear) (void))
-
-  ; make sure all is well when compiled with source profile info
-  (mat/cf (testfile "testfile")
-    (eval-when (compile) (compile-profile 'block))
-    (define (cp-fact x) (if (= x 0) 1 (* x (cp-fact (- x 1))))))
-  (eqv? (profile-dump-data "testfile3.pd") (void))
-  (file-exists? "testfile3.pd")
-  (eqv? (profile-load-data "testfile3.pd") (void))
-  ; and again with block profile info
-  (mat/cf (testfile "testfile")
-    (eval-when (compile) (compile-profile #f))
-    (define (cp-fact x) (if (= x 0) 1 (* x (cp-fact (- x 1))))))
-  (= (cp-fact 5) 120)
-
-  (eqv? (profile-clear-database) (void))
-  (eqv? ($qw 0 42) #f)
-  (eqv? ($qw 77 100) #f)
-
-  ; make sure record-ref, record-type, and record-cd are properly handled by
-  ; find-source in pdhtml
-  (mat/cf
-    (eval-when (compile) (compile-profile #t))
-    (library (A) (export make-foo foo? foo-x) (import (chezscheme)) (define-record-type foo (fields x)))
-    (let ()
-      (import (A))
-      (define add-foo-xs
-        (lambda ls
-          (let f ([ls ls] [sum 0])
-            (if (null? ls) sum (f (cdr ls) (+ (foo-x (car ls)) sum))))))
-      ; make sure this is still around when we call profile-dump-list
-      (set! $add-foo-xs add-foo-xs)
-      (pretty-print (add-foo-xs (make-foo 1) (make-foo 2) (make-foo 3)))))
-  (not (null? (profile-dump-list)))
-  (eqv? (profile-clear) (void))
-  (begin (set! $add-foo-xs #f) #t)
-
-  (vector? (profile-palette))
-  (vector?
-    (parameterize ([profile-palette (vector-map
-                                      (lambda (p) (cons "white" (car p)))
-                                      (profile-palette))])
-      (profile-palette)))
-  (parameterize ([profile-palette
-                  '#(("black" . "white")
-                     ("red" . "white")
-                     ("blue" . "black"))])
-    (= (vector-length (profile-palette)) 3))
-  (error? (profile-palette '#()))
-  (error? (profile-palette '#(("black" . "white"))))
-  (error? (profile-palette '#(("black" . "white") ("red" . "white"))))
-  (error?
-    (profile-palette
-      '#(("black" . "white")
-         #("red" "white")
-         ("blue" . "black"))))
-  (error?
-    (profile-palette
-      '#(("black" . "white")
-         ("red" . "white")
-         ("blue" . black))))
-  (error?
-    (profile-palette
-      '#(("black" . "white")
-         ("red" . "white")
-         (#x0000ff . "black"))))
-  ; test for proper counts in the presence of control operators
-  (begin
-    (define $return)
-    (define $retry)
-    (with-output-to-file "testfile-cp1.ss"
-      (lambda ()
-        (display-string "\
-(define $frumble
-  (lambda (ls)
-    (if (null? ls)
-        1
-        (let ([n (car ls)])
-          (if (eqv? n 0)
-              (call/cc (lambda (k) (set! $retry k) ($return 0)))
-              (let ([q ($frumble (cdr ls))])
-                (add1 (* q n))))))))
-"))
-      'replace)
-    (profile-clear)
-    (parameterize ([enable-cp0 #t] [#%$suppress-primitive-inlining #f] [optimize-level 2] [compile-profile #t])
-      (load "testfile-cp1.ss" compile))
-    #t)
-  (eqv?
-    ($frumble (make-list 100 5))
-    9860761315262647567646607066034827870915080438862787559628486633300781)
-  (equal?
-    (filter (lambda (x) (equal? (cadr x) "testfile-cp1.ss")) (profile-dump-list))
-    '((101 "testfile-cp1.ss" 36 258 3 5)
-      (101 "testfile-cp1.ss" 40 50 3 9)
-      (101 "testfile-cp1.ss" 41 46 3 10)
-      (101 "testfile-cp1.ss" 47 49 3 16)
-      (100 "testfile-cp1.ss" 69 257 5 9)
-      (100 "testfile-cp1.ss" 78 86 5 18)
-      (100 "testfile-cp1.ss" 79 82 5 19)
-      (100 "testfile-cp1.ss" 83 85 5 23)
-      (100 "testfile-cp1.ss" 99 256 6 11)
-      (100 "testfile-cp1.ss" 103 113 6 15)
-      (100 "testfile-cp1.ss" 104 108 6 16)
-      (100 "testfile-cp1.ss" 109 110 6 21)
-      (100 "testfile-cp1.ss" 111 112 6 23)
-      (100 "testfile-cp1.ss" 193 255 8 15)
-      (100 "testfile-cp1.ss" 202 221 8 24)
-      (100 "testfile-cp1.ss" 203 211 8 25)
-      (100 "testfile-cp1.ss" 212 220 8 34)
-      (100 "testfile-cp1.ss" 213 216 8 35)
-      (100 "testfile-cp1.ss" 217 219 8 39)
-      (100 "testfile-cp1.ss" 240 254 9 17)
-      (100 "testfile-cp1.ss" 241 245 9 18)
-      (100 "testfile-cp1.ss" 246 253 9 23)
-      (100 "testfile-cp1.ss" 247 248 9 24)
-      (100 "testfile-cp1.ss" 249 250 9 26)
-      (100 "testfile-cp1.ss" 251 252 9 28)
-      (1 "testfile-cp1.ss" 0 260 1 1)
-      (1 "testfile-cp1.ss" 19 259 2 3)
-      (1 "testfile-cp1.ss" 59 60 4 9)
-      (0 "testfile-cp1.ss" 128 178 7 15)
-      (0 "testfile-cp1.ss" 129 136 7 16)
-      (0 "testfile-cp1.ss" 137 177 7 24)
-      (0 "testfile-cp1.ss" 149 164 7 36)
-      (0 "testfile-cp1.ss" 162 163 7 49)
-      (0 "testfile-cp1.ss" 165 176 7 52)
-      (0 "testfile-cp1.ss" 166 173 7 53)
-      (0 "testfile-cp1.ss" 174 175 7 61)))
-  (eqv? 
-    (call/cc
-      (lambda (k)
-        (set! $return k)
-        (let ([ans ($frumble (append (make-list 50 5) (list 0) (make-list 50 7)))])
-          ($return ans))))
-    0)
-  (equal?
-    (filter (lambda (x) (equal? (cadr x) "testfile-cp1.ss")) (profile-dump-list))
-    '((152 "testfile-cp1.ss" 36 258 3 5)
-      (152 "testfile-cp1.ss" 40 50 3 9)
-      (152 "testfile-cp1.ss" 41 46 3 10)
-      (152 "testfile-cp1.ss" 47 49 3 16)
-      (151 "testfile-cp1.ss" 69 257 5 9)
-      (151 "testfile-cp1.ss" 78 86 5 18)
-      (151 "testfile-cp1.ss" 79 82 5 19)
-      (151 "testfile-cp1.ss" 83 85 5 23)
-      (151 "testfile-cp1.ss" 99 256 6 11)
-      (151 "testfile-cp1.ss" 103 113 6 15)
-      (151 "testfile-cp1.ss" 104 108 6 16)
-      (151 "testfile-cp1.ss" 109 110 6 21)
-      (151 "testfile-cp1.ss" 111 112 6 23)
-      (150 "testfile-cp1.ss" 193 255 8 15)
-      (150 "testfile-cp1.ss" 202 221 8 24)
-      (150 "testfile-cp1.ss" 203 211 8 25)
-      (150 "testfile-cp1.ss" 212 220 8 34)
-      (150 "testfile-cp1.ss" 213 216 8 35)
-      (150 "testfile-cp1.ss" 217 219 8 39)
-      (100 "testfile-cp1.ss" 240 254 9 17)
-      (100 "testfile-cp1.ss" 241 245 9 18)
-      (100 "testfile-cp1.ss" 246 253 9 23)
-      (100 "testfile-cp1.ss" 247 248 9 24)
-      (100 "testfile-cp1.ss" 249 250 9 26)
-      (100 "testfile-cp1.ss" 251 252 9 28)
-      (1 "testfile-cp1.ss" 0 260 1 1)
-      (1 "testfile-cp1.ss" 19 259 2 3)
-      (1 "testfile-cp1.ss" 59 60 4 9)
-      (1 "testfile-cp1.ss" 128 178 7 15)
-      (1 "testfile-cp1.ss" 129 136 7 16)
-      (1 "testfile-cp1.ss" 137 177 7 24)
-      (1 "testfile-cp1.ss" 149 164 7 36)
-      (1 "testfile-cp1.ss" 162 163 7 49)
-      (1 "testfile-cp1.ss" 165 176 7 52)
-      (1 "testfile-cp1.ss" 166 173 7 53)
-      (1 "testfile-cp1.ss" 174 175 7 61)))
-  (eqv?
-    (call/cc
-      (lambda (k)
-        (set! $return k)
-        ($retry 1)))
-    111022302462515654042363166809082031)
-  (equal?
-    (filter (lambda (x) (equal? (cadr x) "testfile-cp1.ss")) (profile-dump-list))
-    '((152 "testfile-cp1.ss" 36 258 3 5)
-      (152 "testfile-cp1.ss" 40 50 3 9)
-      (152 "testfile-cp1.ss" 41 46 3 10)
-      (152 "testfile-cp1.ss" 47 49 3 16)
-      (151 "testfile-cp1.ss" 69 257 5 9)
-      (151 "testfile-cp1.ss" 78 86 5 18)
-      (151 "testfile-cp1.ss" 79 82 5 19)
-      (151 "testfile-cp1.ss" 83 85 5 23)
-      (151 "testfile-cp1.ss" 99 256 6 11)
-      (151 "testfile-cp1.ss" 103 113 6 15)
-      (151 "testfile-cp1.ss" 104 108 6 16)
-      (151 "testfile-cp1.ss" 109 110 6 21)
-      (151 "testfile-cp1.ss" 111 112 6 23)
-      (150 "testfile-cp1.ss" 193 255 8 15)
-      (150 "testfile-cp1.ss" 202 221 8 24)
-      (150 "testfile-cp1.ss" 203 211 8 25)
-      (150 "testfile-cp1.ss" 212 220 8 34)
-      (150 "testfile-cp1.ss" 213 216 8 35)
-      (150 "testfile-cp1.ss" 217 219 8 39)
-      (150 "testfile-cp1.ss" 240 254 9 17)
-      (150 "testfile-cp1.ss" 241 245 9 18)
-      (150 "testfile-cp1.ss" 246 253 9 23)
-      (150 "testfile-cp1.ss" 247 248 9 24)
-      (150 "testfile-cp1.ss" 249 250 9 26)
-      (150 "testfile-cp1.ss" 251 252 9 28)
-      (1 "testfile-cp1.ss" 0 260 1 1)
-      (1 "testfile-cp1.ss" 19 259 2 3)
-      (1 "testfile-cp1.ss" 59 60 4 9)
-      (1 "testfile-cp1.ss" 128 178 7 15)
-      (1 "testfile-cp1.ss" 129 136 7 16)
-      (1 "testfile-cp1.ss" 137 177 7 24)
-      (1 "testfile-cp1.ss" 149 164 7 36)
-      (1 "testfile-cp1.ss" 162 163 7 49)
-      (1 "testfile-cp1.ss" 165 176 7 52)
-      (1 "testfile-cp1.ss" 166 173 7 53)
-      (1 "testfile-cp1.ss" 174 175 7 61)))
-  (begin
-    (collect (collect-maximum-generation)) ; drop code object for the define and lambda
-    (profile-release-counters) ; drop proile information for the dropped code object
-    #t)
-  (equal?
-    (filter (lambda (x) (equal? (cadr x) "testfile-cp1.ss")) (profile-dump-list))
-    '((152 "testfile-cp1.ss" 36 258 3 5)
-      (152 "testfile-cp1.ss" 40 50 3 9)
-      (152 "testfile-cp1.ss" 41 46 3 10)
-      (152 "testfile-cp1.ss" 47 49 3 16)
-      (151 "testfile-cp1.ss" 69 257 5 9)
-      (151 "testfile-cp1.ss" 78 86 5 18)
-      (151 "testfile-cp1.ss" 79 82 5 19)
-      (151 "testfile-cp1.ss" 83 85 5 23)
-      (151 "testfile-cp1.ss" 99 256 6 11)
-      (151 "testfile-cp1.ss" 103 113 6 15)
-      (151 "testfile-cp1.ss" 104 108 6 16)
-      (151 "testfile-cp1.ss" 109 110 6 21)
-      (151 "testfile-cp1.ss" 111 112 6 23)
-      (150 "testfile-cp1.ss" 193 255 8 15)
-      (150 "testfile-cp1.ss" 202 221 8 24)
-      (150 "testfile-cp1.ss" 203 211 8 25)
-      (150 "testfile-cp1.ss" 212 220 8 34)
-      (150 "testfile-cp1.ss" 213 216 8 35)
-      (150 "testfile-cp1.ss" 217 219 8 39)
-      (150 "testfile-cp1.ss" 240 254 9 17)
-      (150 "testfile-cp1.ss" 241 245 9 18)
-      (150 "testfile-cp1.ss" 246 253 9 23)
-      (150 "testfile-cp1.ss" 247 248 9 24)
-      (150 "testfile-cp1.ss" 249 250 9 26)
-      (150 "testfile-cp1.ss" 251 252 9 28)
-      (1 "testfile-cp1.ss" 59 60 4 9)
-      (1 "testfile-cp1.ss" 128 178 7 15)
-      (1 "testfile-cp1.ss" 129 136 7 16)
-      (1 "testfile-cp1.ss" 137 177 7 24)
-      (1 "testfile-cp1.ss" 149 164 7 36)
-      (1 "testfile-cp1.ss" 162 163 7 49)
-      (1 "testfile-cp1.ss" 165 176 7 52)
-      (1 "testfile-cp1.ss" 166 173 7 53)
-      (1 "testfile-cp1.ss" 174 175 7 61)))
-  ; test profiling with compiled files
-  (begin
-    (with-output-to-file "testfile-cp2.ss"
-      (lambda ()
-        (display-string "\
-(define cp2-fib
-  (rec fib
-    (lambda (n)
-      (cond
-        [(fx= n 0) 1]
-        [(fx= n 1) 1]
-        [else (+ (fib (- n 1)) (fib (- n 2)))]))))
-"))
-      'replace)
-    (parameterize ([enable-cp0 #t] [#%$suppress-primitive-inlining #f] [optimize-level 2] [compile-profile #t])
-      (compile-file "testfile-cp2"))
-    (profile-clear)
-    (load "testfile-cp2.so")
-    #t)
-  (eqv? (cp2-fib 10) 89)
-  (equal?
-    (filter (lambda (x) (equal? (cadr x) "testfile-cp2.ss")) (profile-dump-list))
-    '((177 "testfile-cp2.ss" 49 146 4 7)
-      (177 "testfile-cp2.ss" 64 73 5 10)
-      (177 "testfile-cp2.ss" 65 68 5 11)
-      (177 "testfile-cp2.ss" 69 70 5 15)
-      (177 "testfile-cp2.ss" 71 72 5 17)
-      (143 "testfile-cp2.ss" 86 95 6 10)
-      (143 "testfile-cp2.ss" 87 90 6 11)
-      (143 "testfile-cp2.ss" 91 92 6 15)
-      (143 "testfile-cp2.ss" 93 94 6 17)
-      (88 "testfile-cp2.ss" 113 144 7 15)
-      (88 "testfile-cp2.ss" 114 115 7 16)
-      (88 "testfile-cp2.ss" 116 129 7 18)
-      (88 "testfile-cp2.ss" 117 120 7 19)
-      (88 "testfile-cp2.ss" 121 128 7 23)
-      (88 "testfile-cp2.ss" 122 123 7 24)
-      (88 "testfile-cp2.ss" 124 125 7 26)
-      (88 "testfile-cp2.ss" 126 127 7 28)
-      (88 "testfile-cp2.ss" 130 143 7 32)
-      (88 "testfile-cp2.ss" 131 134 7 33)
-      (88 "testfile-cp2.ss" 135 142 7 37)
-      (88 "testfile-cp2.ss" 136 137 7 38)
-      (88 "testfile-cp2.ss" 138 139 7 40)
-      (88 "testfile-cp2.ss" 140 141 7 42)
-      (55 "testfile-cp2.ss" 96 97 6 20)
-      (34 "testfile-cp2.ss" 74 75 5 20)
-      (1 "testfile-cp2.ss" 0 149 1 1)
-      (1 "testfile-cp2.ss" 18 148 2 3)
-      (1 "testfile-cp2.ss" 23 26 2 8)
-      (1 "testfile-cp2.ss" 31 147 3 5)))
-  (begin
-    (collect (collect-maximum-generation)) ; drop code object for the define and lambda
-    (profile-release-counters) ; drop proile information for the dropped code object
-    #t)
-  (equal?
-    (filter (lambda (x) (equal? (cadr x) "testfile-cp2.ss")) (profile-dump-list))
-    '((177 "testfile-cp2.ss" 49 146 4 7)
-      (177 "testfile-cp2.ss" 64 73 5 10)
-      (177 "testfile-cp2.ss" 65 68 5 11)
-      (177 "testfile-cp2.ss" 69 70 5 15)
-      (177 "testfile-cp2.ss" 71 72 5 17)
-      (143 "testfile-cp2.ss" 86 95 6 10)
-      (143 "testfile-cp2.ss" 87 90 6 11)
-      (143 "testfile-cp2.ss" 91 92 6 15)
-      (143 "testfile-cp2.ss" 93 94 6 17)
-      (88 "testfile-cp2.ss" 113 144 7 15)
-      (88 "testfile-cp2.ss" 114 115 7 16)
-      (88 "testfile-cp2.ss" 116 129 7 18)
-      (88 "testfile-cp2.ss" 117 120 7 19)
-      (88 "testfile-cp2.ss" 121 128 7 23)
-      (88 "testfile-cp2.ss" 122 123 7 24)
-      (88 "testfile-cp2.ss" 124 125 7 26)
-      (88 "testfile-cp2.ss" 126 127 7 28)
-      (88 "testfile-cp2.ss" 130 143 7 32)
-      (88 "testfile-cp2.ss" 131 134 7 33)
-      (88 "testfile-cp2.ss" 135 142 7 37)
-      (88 "testfile-cp2.ss" 136 137 7 38)
-      (88 "testfile-cp2.ss" 138 139 7 40)
-      (88 "testfile-cp2.ss" 140 141 7 42)
-      (55 "testfile-cp2.ss" 96 97 6 20)
-      (34 "testfile-cp2.ss" 74 75 5 20)))
-  (eqv? (profile-clear) (void))
-  (begin
-    (with-output-to-file "testfile.ss"
-      (lambda ()
-        (pretty-print
-          '(define f (lambda () 0))))
-      'replace)
-    (parameterize ([compile-profile #t]) (load "testfile.ss" compile))
-    #t)
-  (begin
-    (with-output-to-file "testfile.ss"
-      (lambda ()
-        (pretty-print
-          '(define f (lambda () 1))))
-      'replace)
-    #t)
-  (eqv? (f) 0)
-  (warning? ; unmodified source file not found
-    (profile-dump-list))
-  (warning? ; unmodified source file not found
-    (profile-dump-list #t))
-  (warning? ; unmodified source file not found
-    (profile-dump-list #t (profile-dump)))
-  (warning? ; unmodified source file not found
-    (profile-dump-list #t (profile-dump)))
-  (guard (c [else #f])
-    (profile-dump-list #f)
-    #t)
-  (guard (c [else #f])
-    (profile-dump-list #f (profile-dump))
-    #t)
-  (eqv? (profile-clear) (void))
-)
-
-(mat profile-form
-  (error? ; invalid syntax
-    (profile))
-  (error? ; invalid syntax
-    (profile 1 2 3))
-  (error? ; not a source object
-    (profile 3))
-  (begin
-    (define str "(ugh (if \x3b2;))")
-    (define bv (string->utf8 str))
-    (define ip (open-bytevector-input-port bv))
-    (define sfd (make-source-file-descriptor "foo" ip #t))
-    #t)
-  (eq? (eval `(profile ,(make-source-object sfd 2 3))) (void))
-  (begin
-    (define compile-triv-file
-      (lambda (ifn ofn)
-        (define insert-profile-forms
-          (lambda (x)
-            (unless (annotation? x) (errorf 'compile-triv-file "expected an annotation, got ~s" x))
-            (let ([src (annotation-source x)] [exp (annotation-expression x)])
-              `(begin (profile ,src)
-                 ,(syntax-case exp ()
-                    [(?do-times n e)
-                      (eq? (annotation-expression #'?do-times) 'do-times)
-                      (let ([n (annotation-expression #'n)])
-                        `(do ([i ,n (fx- i 1)]) ((fx= i 0)) ,(insert-profile-forms #'e)))]
-                    [(?print string)
-                      (eq? (annotation-expression #'?print) 'print)
-                      `(printf "~a\n" ,(annotation-expression #'string))]
-                    [else (syntax-error exp)])))))
-        (define parse
-          (lambda (ifn)
-            (let ([ip (open-file-input-port ifn)])
-              (let ([sfd (make-source-file-descriptor ifn ip #t)])
-                (let ([ip (transcoded-port ip (native-transcoder))])
-                  (let f ([bfp 0])
-                    (let-values ([(x bfp) (get-datum/annotations ip sfd bfp)])
-                      (if (eof-object? x)
-                          (begin (close-port ip) '())
-                          (cons x (f bfp))))))))))
-        (parameterize ([compile-profile 'source] [generate-profile-forms #f])
-          (compile-to-file (list `(define (triv) ,@(map insert-profile-forms (parse ifn)))) ofn))))
-    #t)
-  (begin
-    (with-output-to-file "testfile-triv.ss"
-      (lambda ()
-        (pretty-print '(do-times 10 (print "hello")))
-        (pretty-print '(do-times 5 (print "goodbye"))))
-      'replace)
-    (compile-triv-file "testfile-triv.ss" "testfile-triv.so")
-    (load "testfile-triv.so")
-    #t)
-  (equal?
-    (with-output-to-string triv)
-    "hello\nhello\nhello\nhello\nhello\nhello\nhello\nhello\nhello\nhello\ngoodbye\ngoodbye\ngoodbye\ngoodbye\ngoodbye\n")
-  (equal?
-    (sort
-      ; sort by bfp
-      (lambda (x y) (< (list-ref x 2) (list-ref y 2)))
-      (filter (lambda (x) (equal? (list-ref x 1) "testfile-triv.ss")) (profile-dump-list)))
-    '((1 "testfile-triv.ss" 0 29 1 1)
-      (10 "testfile-triv.ss" 13 28 1 14)
-      (1 "testfile-triv.ss" 30 60 2 1)
-      (5 "testfile-triv.ss" 42 59 2 13)))
-  (eqv? (profile-clear) (void))
-)
-
 (mat generate-procedure-source-information
   (begin
     (define the-source
@@ -2316,11 +1777,12 @@
       'replace)
     (with-output-to-file "testfile-sff-1c.ss"
       (lambda ()
+        (pretty-print '(define preexisting-entries (length (profile-dump))))
         (pretty-print '(eval-when (compile) (import (add-prefix (testfile-sff-1a) sff-1a-))))
         (pretty-print '(eval-when (compile) (import (add-prefix (testfile-sff-1b) sff-1b-))))
         (pretty-print '(pretty-print (list (sff-1a-x 3) sff-1b-y)))
         (pretty-print '(pretty-print (not (((inspect/object sff-1a-x) 'code) 'source))))
-        (pretty-print '(pretty-print (null? (profile-dump-list)))))
+        (pretty-print '(pretty-print (= (length (profile-dump)) preexisting-entries))))
       'replace)
     (separate-compile
       '(lambda (x)
@@ -2330,65 +1792,50 @@
            (compile-file x)))
       'sff-1c)
     #t)
+  (begin
+    (define (go)
+      (separate-eval
+        '(define preexisting-entries
+           (with-exception-handler
+             (lambda (c) (unless (warning? c) (raise-continuable c)))
+             (lambda () (length (profile-dump-list)))))
+        '(import (testfile-sff-1a))
+        '(import (testfile-sff-1b))
+        '(define-syntax so?
+           (lambda (x)
+             (syntax-case x ()
+               [(_ q) (and (syntax->annotation #'q) #t)])))
+        '(list a (b so?) (x 3) y)
+        '(not (((inspect/object x) 'code) 'source))
+        '(define all-entries
+           (with-exception-handler
+             (lambda (c) (unless (warning? c) (raise-continuable c)))
+             (lambda () (length (profile-dump-list)))))
+        '(= all-entries preexisting-entries)))
+    #t)
   (equal?
-    (separate-eval
-      '(import (testfile-sff-1a))
-      '(import (testfile-sff-1b))
-      '(define-syntax so?
-         (lambda (x)
-           (syntax-case x ()
-             [(_ q) (and (syntax->annotation #'q) #t)])))
-      '(list a (b so?) (x 3) y)
-      '(not (((inspect/object x) 'code) 'source))
-      '(null? (profile-dump-list)))
+    (go)
     "(120 #t 6 24)\n#f\n#f\n")
   (strip-and-check "testfile-sff-1a.so" "testfile-sff-1a.so"
     (fasl-strip-options inspector-source))
   (strip-and-check "testfile-sff-1b.so" "testfile-sff-1b.so"
     (fasl-strip-options inspector-source))
   (equal?
-    (separate-eval
-      '(import (testfile-sff-1a))
-      '(import (testfile-sff-1b))
-      '(define-syntax so?
-         (lambda (x)
-           (syntax-case x ()
-             [(_ q) (and (syntax->annotation #'q) #t)])))
-      '(list a (b so?) (x 3) y)
-      '(not (((inspect/object x) 'code) 'source))
-      '(null? (profile-dump-list)))
+    (go)
     "(120 #t 6 24)\n#t\n#f\n")
   (strip-and-check "testfile-sff-1a.so" "testfile-sff-1a.so"
     (fasl-strip-options profile-source))
   (strip-and-check "testfile-sff-1b.so" "testfile-sff-1b.so"
     (fasl-strip-options profile-source))
   (equal?
-    (separate-eval
-      '(import (testfile-sff-1b))
-      '(import (testfile-sff-1a))
-      '(define-syntax so?
-         (lambda (x)
-           (syntax-case x ()
-             [(_ q) (and (syntax->annotation #'q) #t)])))
-      '(list a (b so?) (x 3) y)
-      '(not (((inspect/object x) 'code) 'source))
-      '(null? (profile-dump-list)))
+    (go)
     "(120 #t 6 24)\n#t\n#t\n")
   (strip-and-check "testfile-sff-1a.so" "testfile-sff-1a.so"
     (fasl-strip-options source-annotations))
   (strip-and-check "testfile-sff-1b.so" "testfile-sff-1b.so"
     (fasl-strip-options source-annotations))
   (equal?
-    (separate-eval
-      '(import (testfile-sff-1b))
-      '(import (testfile-sff-1a))
-      '(define-syntax so?
-         (lambda (x)
-           (syntax-case x ()
-             [(_ q) (and (syntax->annotation #'q) #t)])))
-      '(list a (b so?) (x 3) y)
-      '(not (((inspect/object x) 'code) 'source))
-      '(null? (profile-dump-list)))
+    (go)
     "(120 #f 6 24)\n#t\n#t\n")
   (strip-and-check "testfile-sff-1a.so" "testfile-sff-1a.so"
     (fasl-strip-options compile-time-information))
@@ -2404,8 +1851,8 @@
       '(expand 'b)
       '(load "testfile-sff-1c.so")
       '(guard (c [else (display-condition c) (newline) #t]) (eval '(import (testfile-sff-1b)))))
-    "Exception: loading testfile-sff-1b.so did not define compile-time information for library (testfile-sff-1b)\n#t\n\
-     Exception: loading testfile-sff-1a.so did not define compile-time information for library (testfile-sff-1a)\n#t\n\
+    "Exception: loading testfile-sff-1b.so did not define library (testfile-sff-1b)\n#t\n\
+     Exception: loading testfile-sff-1a.so did not define library (testfile-sff-1a)\n#t\n\
      a\nb\n\
      (6 24)\n#t\n#t\n\
      Exception: loading testfile-sff-1b.so did not define compile-time information for library (testfile-sff-1b)\n#t\n\
@@ -2470,6 +1917,53 @@
     (strip-fasl-file "testfile-sff-3.so" "testfile-sff-3.so"
       (fasl-strip-options compile-time-information))
     (= (object-file-size "testfile-sff-3.so") n))
+  (begin
+    (mkfile "testfile-sff-4.ss"
+      '(library (testfile-sff-4) (export a b c) (import (chezscheme))
+         (define-syntax a (identifier-syntax 12))
+         (define b 13)
+         (meta define c 14)))
+    (mkfile "testfile-sff-4p.ss"
+      '(import (chezscheme) (testfile-sff-4))
+      '(write b))
+    (separate-compile
+      '(lambda (x) (parameterize ([compile-imported-libraries #t]) (compile-program x)))
+      'sff-4p)
+    #t)
+  (equal?
+    (separate-eval
+      '(let ()
+         (import (testfile-sff-4))
+         (define-syntax cc (lambda (x) c))
+         (printf "a = ~s, b = ~s, c = ~s\n" a b cc)))
+    "a = 12, b = 13, c = 14\n")
+  (equal?
+    (separate-eval
+      '(let ([x (with-output-to-string (lambda () (load-program "testfile-sff-4p.so")))])
+         (printf "b = ~a, a = ~s\n" x (eval 'a (environment '(testfile-sff-4))))))
+    "b = 13, a = 12\n")
+  (begin
+    (strip-fasl-file "testfile-sff-4.so" "testfile-sff-4.so"
+      (fasl-strip-options compile-time-information))
+    #t)
+  (error? ; no compile-time info
+    (separate-eval
+      '(let ()
+         (import (testfile-sff-4))
+         (list a b))))
+  (error? ; no compile-time info
+    (separate-eval
+      '(let ([x (with-output-to-string (lambda () (load-program "testfile-sff-4p.so")))])
+         (printf "b = ~a, a = ~s\n" x (eval 'a (environment '(testfile-sff-4)))))))
+  (error? ; no compile-time info
+    (separate-eval
+      '(let ([x (with-output-to-string (lambda () (load-program "testfile-sff-4p.so")))])
+         (printf "b = ~a, a = ~s\n" x (eval '(let () (import (testfile-sff-4)) a))))))
+  (error? ; no compile-time info
+    (separate-eval
+      '(parameterize ([import-notify #t])
+         (let ([x (with-output-to-string (lambda () (load-program "testfile-sff-4p.so")))])
+           (printf "b = ~a, a = ~s\n" x (eval '(let () (import (testfile-sff-4)) a)))))))
 )
 
 (mat $fasl-file-equal?
@@ -2511,6 +2005,7 @@
                                 "apple" 'banana
                                 (make-vfasl-demo 10 "11")
                                 (vector 1 'two "three")
+                                (stencil-vector 30 'one 2.0 0+3i "four")
                                 (box 88)
                                 "" '#() '#vu8() (make-fxvector 0)
                                 (string->immutable-string "") (vector->immutable-vector '#())
@@ -2523,7 +2018,8 @@
                                   (positive? (string-length a)))
                              (and (vector? a)
                                   (positive? (vector-length a)))
-                             (box? a))
+                             (box? a)
+                             (stencil-vector? a))
                          (equal? a b))
                     (and (vfasl-demo? a)
                          (vfasl-demo? b)
@@ -2531,7 +2027,9 @@
                                  (vfasl-demo-x b))
                          (equal? (vfasl-demo-y a)
                                  (vfasl-demo-y b)))
-                    (printf "~s ~s\n" a b)))
+                    (begin
+                      (printf "~s ~s\n" a b)
+                      #f)))
               vfasl-content
               v))
     (compile-to-file (list `(define (vfasled) ',vfasl-content)
@@ -3218,6 +2716,8 @@
   (time=? (cost-center-time $cc-3) (make-time 'time-duration 0 0))
 )
 
+
+
 (mat lock-object
   (begin
     (define $locked-objects (foreign-procedure "(cs)locked_objects" () ptr))
@@ -3564,7 +3064,7 @@
       (set-car! p 'yes)
       (unlock-object v)
       (equal? '(yes . 2) (vector-ref v (sub1 N)))))
-)
+  )
 
 (mat eval-order
   (eqv? (call/cc (lambda (k) (0 (k 1)))) 1)
@@ -5194,34 +4694,35 @@
              (#2%display 1))))
 )
 
-(mat $read-time-stamp-counter
+(unless (memq (machine-type) '(arm32le tarm32le arm64le tarm64le)) ; timestamp counter tends to be priviledged on Arm
+  (mat $read-time-stamp-counter
 
-  (let ([t (#%$read-time-stamp-counter)])
-    (and (integer? t) (exact? t)))
+    (let ([t (#%$read-time-stamp-counter)])
+      (and (integer? t) (exact? t)))
 
-  (let ()
-    ;; NB: pulled from thread.ms, to use as a delay
-    (define fat+
-      (lambda (x y)
-        (if (zero? y)
-            x
-            (fat+ (1+ x) (1- y)))))
-    (define fatfib
-      (lambda (x)
-        (if (< x 2)
-            1
-            (fat+ (fatfib (1- x)) (fatfib (1- (1- x)))))))
-    (let loop ([count 10] [success 0])
-      (if (fx= count 0)
-          (>= success 9)
-          (let ([t0 (#%$read-time-stamp-counter)])
-            (fatfib 26)
-            (let ([t1 (#%$read-time-stamp-counter)])
-              (loop (fx- count 1)
-                    (if (< t0 t1)
-                        (fx+ success 1)
-                        success)))))))
-)
+    (let ()
+      ;; NB: pulled from thread.ms, to use as a delay
+      (define fat+
+        (lambda (x y)
+          (if (zero? y)
+              x
+              (fat+ (1+ x) (1- y)))))
+      (define fatfib
+        (lambda (x)
+          (if (< x 2)
+              1
+              (fat+ (fatfib (1- x)) (fatfib (1- (1- x)))))))
+      (let loop ([count 10] [success 0])
+        (if (fx= count 0)
+            (>= success 9)
+            (let ([t0 (#%$read-time-stamp-counter)])
+              (fatfib 26)
+              (let ([t1 (#%$read-time-stamp-counter)])
+                (loop (fx- count 1)
+                      (if (< t0 t1)
+                          (fx+ success 1)
+                          success)))))))
+    ))
 
 (mat procedure-arity-mask
   (equal? (procedure-arity-mask (lambda () #f)) 1)
@@ -5278,13 +4779,36 @@
     (define should-be-named-h (let ([f (let ([h (lambda (x) x)]) h)]) f))
     (define should-be-named-i (letrec ([f (let ([i (lambda (x) x)]) i)]) f))
     (define should-be-named-j (let ([f (letrec ([j (lambda (x) x)]) j)]) f))
+    (define (result-should-be-named-mk-CP)
+      (let ([struct:CP (make-record-type-descriptor* 'CP #f #f #f #f 1 1)])
+        (let ([mk-CP (record-constructor (make-record-constructor-descriptor
+                                          struct:CP #f #f))])
+          mk-CP)))
     #t)
   (ok-name? (procedure-name procedure-name) "procedure-name")
   (ok-name? (procedure-name should-be-named-f) "f")
   (ok-name? (procedure-name should-be-named-g) "g")
   (ok-name? (procedure-name should-be-named-h) "h")
   (ok-name? (procedure-name should-be-named-i) "i")
-  (ok-name? (procedure-name should-be-named-j) "j"))
+  (ok-name? (procedure-name should-be-named-j) "j")
+
+  (or (not (enable-cp0))
+      (let ([gx (make-guardian)])
+        (ok-name? (procedure-name gx) "gx")))
+  (or (not (enable-cp0))
+      (ok-name? (procedure-name (result-should-be-named-mk-CP)) "mk-CP"))
+
+  (or (not (enable-cp0))
+      (andmap ok-name?
+              (map
+               procedure-name
+               (let ([f (lambda (g)
+                          (g (lambda (x) x)))])
+                 (list (f (lambda (a) a))
+                       (f (lambda (b) b)))))
+              '("a" "b")))
+  )
+
 
 (mat wrapper-procedure
   (error? (make-wrapper-procedure))
@@ -5392,7 +4916,6 @@
       (and
        (equal? (wrapper-procedure-data a) g)
        (begin (unlock-object a) #t))))
-
   )
 
 (mat fasl-immutable
@@ -5424,6 +4947,14 @@
       (let ([l2 (eval 'fasl-immutable-round-trip)])
         (and (equal? l l2)
              (immutable? l2))))
+    (define (round-trip-symbol sym)
+      (let-values ([(o get) (open-bytevector-output-port)])
+        (fasl-write sym o)
+        (let ([s (fasl-read (open-bytevector-input-port (get)))])
+          (and (symbol? s)
+               (immutable-string? (symbol->string s))
+               (or (not (gensym? s))
+                   (immutable-string? (gensym->unique-string s)))))))
     #t)
 
   (immutable? immutable-objs)
@@ -5433,6 +4964,10 @@
   (round-trip-via-strip immutable-objs)
   (round-trip-via-strip immutable-zero-objs)
 
+  (round-trip-symbol 'hello)
+  (round-trip-symbol (string->symbol "hola"))
+  (round-trip-symbol (gensym "bonjour"))
+
   ;; Make sure `fasl-read` didn't mark "mutable" null values
   ;; as immutable:
   (mutable-vector? '#())
@@ -5441,6 +4976,12 @@
   (mutable-bytevector? '#vu8())
   
  )
+
+(mat show-allocation
+  (begin
+    (#%$show-allocation #t)
+    #t)
+)
 
 (mat current-generate-id
   (begin
@@ -5510,6 +5051,63 @@
   (find-define-m-as-one (expand '(let () (import (define-m-as-one)) m)))
 )
 
+(mat enable-unsafe-application
+  (begin
+   (define (get-uncprep-form e)
+     (let ([r #f])
+       (parameterize ([run-cp0 (lambda (cp0 e)
+                                 (parameterize ([enable-unsafe-application #f])
+                                   (set! r (#%$uncprep e)))
+                                 e)])
+         (expand/optimize e))
+       r))
+   #t)
+  (equivalent-expansion? (get-uncprep-form '(lambda (x) (x)))
+                         '(lambda (x) (x)))
+  (equivalent-expansion? (parameterize ([enable-unsafe-application #t])
+                           (get-uncprep-form '(lambda (x) (x))))
+                         (if (= 3 (optimize-level))
+                             '(lambda (x) (x))
+                             '(lambda (x) (#3%$app x))))
+  )
+
+(mat enable-unsafe-variable-reference
+  (begin
+   (define (get-uncprep-form e)
+     (let ([r #f])
+       (parameterize ([run-cp0 (lambda (cp0 e)
+                                 (set! r (#%$uncprep e))
+                                 e)])
+         (expand/optimize e))
+       r))
+   #t)
+  (equivalent-expansion? (parameterize ([#%$suppress-primitive-inlining #f])
+                           (get-uncprep-form '(lambda (x) (letrec ([y y]) (+ y x)))))
+                         (if (= 3 (optimize-level))
+                             '(lambda (x)
+                                (letrec ([y y])
+                                  (#3%+ y x)))
+                             '(lambda (x)
+                                (let ([valid? #f])
+                                  (letrec ([y (begin
+                                                (if valid?
+                                                    (#2%void)
+                                                    (#2%$source-violation #f #f #t "attempt to reference undefined variable ~s" 'y))
+                                                y)])
+                                    (set! valid?  #t)
+                                    (#2%+ y x))))))
+  (equivalent-expansion? (parameterize ([enable-unsafe-variable-reference #t]
+                                        [#%$suppress-primitive-inlining #f])
+                           (get-uncprep-form '(lambda (x) (letrec ([y y]) (+ y x)))))
+                         (if (= 3 (optimize-level))
+                             '(lambda (x)
+                                (letrec ([y y])
+                                  (#3%+ y x)))
+                             '(lambda (x)
+                                (letrec ([y y])
+                                  (#2%+ y x)))))
+  )
+
 (mat phantom-bytevector
   (phantom-bytevector? (make-phantom-bytevector 0))
   (not (phantom-bytevector? 10))
@@ -5540,10 +5138,12 @@
      (bytes-allocated)
      (* 2.25 $pre-allocated))
 
-  ;; No big change to `(current-memory-bytes)`
-  (< (* 0.75 $pre-memory)
+  ;; Big change to `(current-memory-bytes)`
+  (< (+ (* 0.75 $pre-allocated)
+        $pre-memory)
      (current-memory-bytes)
-     (* 1.25 $pre-memory))
+     (+ (* 1.25 $pre-memory)
+        $pre-memory))
 
   ;; Same change after GC
   (begin
@@ -5587,5 +5187,184 @@
     (< (* 0.75 $pre-allocated)
        (bytes-allocated)
        (* 1.25 $pre-allocated)))
+  )
 
-)
+(mat immobile
+  (error? (box-immobile))
+  (error? (box-immobile 1 2))
+
+  (error? (make-immobile-vector))
+  (error? (make-immobile-vector 'a))
+  (error? (make-immobile-vector -10))
+  (error? (make-immobile-vector (expt 2 100)))
+  (error? (make-immobile-vector 10 1 2))
+
+  (error? (make-immobile-bytevector))
+  (error? (make-immobile-bytevector 'a))
+  (error? (make-immobile-byte-vector -10))
+  (error? (make-immobile-bytevector (expt 2 100)))
+  (error? (make-immobile-bytevector 10 1024))
+  (error? (make-immobile-bytevector 10 1 2))
+
+  (box? (box-immobile 10))
+  (vector? (make-immobile-vector 10))
+  (eqv? 0 (vector-ref (make-immobile-vector 10) 9))
+  (bytevector? (make-immobile-bytevector 10))
+  (eqv? 0 (bytevector-u8-ref (make-immobile-bytevector 10 0) 9))
+
+  (begin
+    (define (make-objects)
+      (let loop ([i 16])
+        (cond
+          [(zero? i) '()]
+          [else
+           (let* ([b (box-immobile (format "box ~a" i))]
+                  [b-addr (#%$fxaddress b)]
+                  [v (make-immobile-vector (expt 2 i) b)]
+                  [v-addr (#%$fxaddress v)]
+                  [s (make-immobile-bytevector (expt 2 i) i)]
+                  [s-addr (#%$fxaddress s)])
+             (cons (list i
+                         b b-addr
+                         v v-addr
+                         s s-addr)
+                   (loop (sub1 i))))])))
+    (define (check-objects l)
+      (let loop ([l l])
+        (or (null? l)
+            (let-values ([(i b b-addr v v-addr s s-addr) (apply values (car l))])
+              (and (equal? (format "box ~a" i) (unbox b))
+                   (equal? (format "box ~a" i) (unbox (vector-ref v (sub1 (vector-length v)))))
+                   (eqv? i (bytevector-u8-ref s (sub1 (bytevector-length s))))
+                   (eqv? b-addr (#%$fxaddress b))
+                   (eqv? v-addr (#%$fxaddress v))
+                   (eqv? s-addr (#%$fxaddress s))
+                   (loop (cdr l)))))))
+    (define (mutate-objects l)
+      (let loop ([l l])
+        (or (null? l)
+            (let-values ([(i b b-addr v v-addr s s-addr) (apply values (car l))])
+              (set-box! b (format "box ~a" i))
+              (vector-set! v (sub1 (vector-length v)) (box (unbox b)))
+              (loop (cdr l))))))
+    #t)
+
+  (with-interrupts-disabled
+   (let ([objs (make-objects)])
+     (and (check-objects objs)
+          (begin
+            (collect 0 1)
+            (and
+             (check-objects objs)
+             (begin
+               (mutate-objects objs)
+               (collect 0 0)
+               (and
+                (check-objects objs)
+                (begin
+                  (collect (collect-maximum-generation))
+                  (check-objects objs)))))))))
+
+  (or
+   (not (threaded?))
+   (let ([m (make-mutex)]
+         [c (make-condition)]
+         [running 4])
+     (let thread-loop ([t running])
+       (unless (= t 0)
+         (fork-thread
+          (lambda ()
+            (let loop ([i 1000] [objs '()] [addrs '()])
+              (cond
+                [(= i 0)
+                 (mutex-acquire m)
+                 (set! running (sub1 running))
+                 (condition-signal c)
+                 (mutex-release m)]
+                [else
+                 (let ([v (case (modulo i 3)
+                            [(0) (box-immobile objs)]
+                            [(1) (make-immobile-vector i objs)]
+                            [(2) (make-immobile-bytevector i)])])
+                   (let ([objs (cons v objs)]
+                         [addrs (cons (#%$fxaddress v) addrs)])
+                     (collect-rendezvous)
+                     (let check ([objs objs] [addrs addrs])
+                       (unless (null? objs)
+                         (let ([v (car objs)])
+                           (unless (= (#%$fxaddress v) (car addrs))
+                             (error 'immobile "address changed: ~s" v))
+                           (cond
+                             [(box? v)
+                              (unless (eq? (unbox v) (cdr objs))
+                                (error 'immobile "bad box content"))]
+                             [(vector? v)
+                              (let loop ([j 0])
+                                (unless (= j (vector-length v))
+                                  (unless (eq? (cdr objs) (vector-ref v j))
+                                    (error 'immobile "bad vector content"))
+                                  (loop (add1 j))))]
+                             [(bytevector? v)
+                              (void)]
+                             [else
+                              (error 'immobile "bad object: ~s" v)]))
+                         (check (cdr objs) (cdr addrs))))
+                     (loop (sub1 i) objs addrs)))]))))
+         (thread-loop (sub1 t))))
+     (mutex-acquire m)
+     (let loop ()
+       (unless (= running 0)
+         (condition-wait c m)
+         (loop)))
+     (mutex-release m)
+     ;; Wait for threads to exit
+     (let ()
+       (define $threads (foreign-procedure "(cs)threads" () scheme-object))
+       (let loop ()
+         (unless (= 1 (length ($threads)))
+           (sleep (make-time 'time-duration 10000 0))
+           (loop))))
+     #t))
+
+  )
+
+(mat compacting
+  ;; try to provoke the GC into putting a record into marked
+  ;; (instead of copied) space and check the write barrier there
+  (let loop ([N 2])
+    (or (= N 8192)
+        (let sel-loop ([sels (list car cadr)])
+          (cond
+            [(null? sels) (loop (* N 2))]
+            [else
+             (let ()
+               (define rtd (make-record-type
+                            "r"
+                            (let loop ([i N])
+                              (if (zero? i)
+                                  (list '[ptr y])
+                                  (cons `[uptr ,(string->symbol (format "x~a" i))]
+                                        (loop (sub1 i)))))))
+               
+               (define (make-r)
+                 (apply (record-constructor rtd)
+                        (let loop ([i N])
+                          (if (zero? i)
+                              '(the-y-value)
+                              (cons 0 (loop (sub1 i)))))))
+               
+               (define r-y (record-accessor rtd N))
+               (define set-r-y! (record-mutator rtd N))
+               
+               (define rs (list (make-r)
+                                (make-r)
+                                (make-r)))
+               (collect (collect-maximum-generation))
+               (set! rs (list (car rs) (caddr rs)))
+               (collect (collect-maximum-generation))
+               (set-r-y! ((car sels) rs) (string-copy "new-string-to-go"))
+               (collect)
+               (and (equal? (r-y ((car sels) rs))
+                            "new-string-to-go")
+                    (sel-loop (cdr sels))))]))))
+  )

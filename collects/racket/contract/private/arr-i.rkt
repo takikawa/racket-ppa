@@ -340,7 +340,7 @@
 ;;              -> (values (listof (or/c pre/pos arg) (listof (or/c #f nat)))
 ;; sorts the arguments according to the dependency order.
 ;; returns them in the reverse of that order, ie expressions that need
-;; to be evaluted first come later in the list.
+;; to be evaluated first come later in the list.
 ;; the second result maps back from the sorted order
 ;;   (in the first result) to the original order (in `args`)
 (define-for-syntax (find-ordering args)
@@ -371,7 +371,7 @@ evaluted left-to-right.)
         (arg/res-var arg)
         (hash-ref pre/post-fake-vars arg)))
 
-  ;; track the indicies into `args` for the nodes in the graph
+  ;; track the indices into `args` for the nodes in the graph
   ;; and do the same thing but only for the subset that are actually args
   ;; (unfortuntately we rely on `eq?` here)
   (define numbers (make-hasheq))
@@ -1140,15 +1140,18 @@ evaluted left-to-right.)
             (procedure-arity-includes? orig-ctc 1))
        (if (or indy-blame? (orig-ctc obj))
            obj
-           (raise-predicate-blame-error-failure blame obj neg-party
-                                                (contract-name orig-ctc)))]
+           ;; this will signal the violation
+           (undep-and-apply-the-contract orig-ctc obj blame neg-party chaperone?))]
       [(and indy-blame? (flat-contract? orig-ctc))
        obj]
       [else
-       (define ctc (if chaperone?
-                       (coerce-chaperone-contract '->i orig-ctc)
-                       (coerce-contract '->i orig-ctc)))
-       (((get/build-late-neg-projection ctc) blame) obj neg-party)]))
+       (undep-and-apply-the-contract orig-ctc obj blame neg-party chaperone?)]))
+
+  (define (undep-and-apply-the-contract orig-ctc obj blame neg-party chaperone?)
+    (define ctc (if chaperone?
+                    (coerce-chaperone-contract '->i orig-ctc)
+                    (coerce-contract '->i orig-ctc)))
+    (((get/build-late-neg-projection ctc) blame) obj neg-party))
 
   (define (un-dep/chaperone orig-ctc obj blame neg-party indy-blame?)
     (un-dep/maybe-chaperone orig-ctc obj blame neg-party #t indy-blame?))

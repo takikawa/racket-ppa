@@ -106,10 +106,12 @@ THREAD_LOCAL_DECL(static intptr_t process_time_at_swap);
 THREAD_LOCAL_DECL(static intptr_t process_time_skips);
 
 THREAD_LOCAL_DECL(static intptr_t max_gc_pre_used_bytes);
-#ifdef MZ_PRECISE_GC
 THREAD_LOCAL_DECL(static int num_major_garbage_collections);
 THREAD_LOCAL_DECL(static int num_minor_garbage_collections);
 THREAD_LOCAL_DECL(static intptr_t max_code_page_total);
+
+#ifndef MZ_PRECISE_GC
+static intptr_t gc_pre_used_bytes;
 #endif
 
 #ifdef RUNSTACK_IS_GLOBAL
@@ -147,9 +149,10 @@ ROSYM Scheme_Object *scheme_break_enabled_key;
 
 THREAD_LOCAL_DECL(static Scheme_Object *configuration_callback_cache[2]);
 
-THREAD_LOCAL_DECL(intptr_t scheme_total_gc_time);
-THREAD_LOCAL_DECL(static intptr_t start_this_gc_time);
-THREAD_LOCAL_DECL(static intptr_t end_this_gc_time);
+static int gcs_on_exit;
+THREAD_LOCAL_DECL(uintptr_t scheme_total_gc_time);
+THREAD_LOCAL_DECL(static uintptr_t start_this_gc_time);
+THREAD_LOCAL_DECL(static uintptr_t end_this_gc_time);
 THREAD_LOCAL_DECL(static double start_this_gc_real_time);
 THREAD_LOCAL_DECL(static double end_this_gc_real_time);
 static void get_ready_for_GC(void);
@@ -180,6 +183,7 @@ ROSYM static Scheme_Object *read_symbol, *write_symbol, *execute_symbol, *delete
 ROSYM static Scheme_Object *client_symbol, *server_symbol;
 ROSYM static Scheme_Object *major_symbol, *minor_symbol, *incremental_symbol;
 ROSYM static Scheme_Object *cumulative_symbol;
+ROSYM static Scheme_Object *gc_symbol, *gc_major_symbol;
 ROSYM static Scheme_Object *racket_symbol;
 
 THREAD_LOCAL_DECL(static int do_atomic = 0);
@@ -387,6 +391,8 @@ static Scheme_Object *will_executor_sema(Scheme_Object *w, int *repost);
 
 static Scheme_Object *check_break_now(int argc, Scheme_Object *args[]);
 
+static Scheme_Object *memory_order(int argc, Scheme_Object *args[]);
+
 static Scheme_Object *unsafe_start_atomic(int argc, Scheme_Object **argv);
 static Scheme_Object *unsafe_end_atomic(int argc, Scheme_Object **argv);
 static Scheme_Object *unsafe_start_breakable_atomic(int argc, Scheme_Object **argv);
@@ -428,6 +434,8 @@ static int post_system_idle();
 static Scheme_Object *current_stats(int argc, Scheme_Object *args[]);
 
 static void log_peak_memory_use();
+static char *gc_unscaled_num(char *nums, intptr_t v);
+static char *gc_num(char *nums, intptr_t v);
 
 SHARED_OK static Scheme_Object **config_map;
 
@@ -513,6 +521,11 @@ void scheme_init_thread(Scheme_Startup_Env *env)
   REGISTER_SO(cumulative_symbol);
   cumulative_symbol = scheme_intern_symbol("cumulative");
 
+  REGISTER_SO(gc_symbol);
+  REGISTER_SO(gc_major_symbol);
+  gc_symbol = scheme_intern_symbol("GC");
+  gc_major_symbol = scheme_intern_symbol("GC:major");
+
   REGISTER_SO(racket_symbol);
   racket_symbol = scheme_intern_symbol("racket");
 
@@ -597,7 +610,9 @@ void scheme_init_thread(Scheme_Startup_Env *env)
   ADD_PRIM_W_ARITY("custodian-require-memory"              , custodian_require_mem, 3, 3, env);
   ADD_PRIM_W_ARITY("custodian-limit-memory"                , custodian_limit_mem  , 2, 3, env);
   ADD_PRIM_W_ARITY("custodian-memory-accounting-available?", custodian_can_mem    , 0, 0, env);
-  
+
+  ADD_FOLDING_PRIM("memory-order-acquire", memory_order, 0, 0, 1, env);
+  ADD_FOLDING_PRIM("memory-order-release", memory_order, 0, 0, 1, env);
 
   ADD_FOLDING_PRIM("evt?"                      , evt_p                        , 1, 1 , 1, env);
   ADD_PRIM_W_ARITY2("sync"                     , sch_sync                     , 0, -1, 0, -1, env);
@@ -611,6 +626,9 @@ void scheme_init_thread(Scheme_Startup_Env *env)
   ADD_PRIM_W_ARITY("phantom-bytes?", phantom_bytes_p, 1, 1, env);
   ADD_PRIM_W_ARITY("make-phantom-bytes", make_phantom_bytes, 1, 1, env);
   ADD_PRIM_W_ARITY("set-phantom-bytes!", set_phantom_bytes, 2, 2, env);
+
+  if (scheme_getenv("PLT_GCS_ON_EXIT"))
+    gcs_on_exit = 1;
 }
 
 void
@@ -809,7 +827,7 @@ static Scheme_Object *current_memory_use(int argc, Scheme_Object *args[])
 
   if (cumulative) {
 #ifdef MZ_PRECISE_GC
-    retval = GC_get_memory_ever_allocated();
+    retval = GC_get_memory_ever_used();
 #else
     retval = GC_get_total_bytes();
 #endif
@@ -855,7 +873,7 @@ static void adjust_limit_table(Scheme_Custodian *c)
 {
   /* If a custodian has a limit and any object or children, then it
      must not be collected and merged with its parent. To prevent
-     collection, we register the custodian in the `limite_custodians'
+     collection, we register the custodian in the `limited_custodians'
      table. */
   if (c->has_limit) {
     if (c->elems || CUSTODIAN_FAM(c->children)) {
@@ -1456,8 +1474,8 @@ Scheme_Thread *scheme_do_close_managed(Scheme_Custodian *m, Scheme_Exit_Closer_F
   m->shut_down = 1;
 
   /* Need to kill children first, transitively, so find
-     last decendent. The family will be the global-list from
-     m to this last decendent, inclusive. */
+     last descendant. The family will be the global-list from
+     m to this last descendant, inclusive. */
   for (c = m; CUSTODIAN_FAM(c->children); ) {
     for (c = CUSTODIAN_FAM(c->children); CUSTODIAN_FAM(c->sibling); ) {
       c = CUSTODIAN_FAM(c->sibling);
@@ -1576,8 +1594,10 @@ Scheme_Thread *scheme_do_close_managed(Scheme_Custodian *m, Scheme_Exit_Closer_F
     m->mrefs = NULL;
     m->shut_down = 1;
     
-    if (SAME_OBJ(m, start))
+    if (SAME_OBJ(m, start)) {
+      adjust_limit_table(m);
       break;
+    }
     next_m = CUSTODIAN_FAM(m->global_prev);
 
     /* Remove this custodian from its parent */
@@ -1946,6 +1966,11 @@ void scheme_run_atexit_closers_on_all(Scheme_Exit_Closer_Func alt)
      will have terminated everything else anyway. For a
      polite exit, other threads can run. */
 
+  if (gcs_on_exit) {
+    scheme_collect_garbage();
+    scheme_collect_garbage();
+  }
+
   log_peak_memory_use();
 
   savebuf = scheme_current_thread->error_buf;
@@ -2039,6 +2064,8 @@ void scheme_schedule_custodian_close(Scheme_Custodian *c)
 
 static void check_scheduled_kills()
 {
+  int force_gc = 0;
+
   if (scheme_no_stack_overflow) {
     /* don't shutdown something that may be in an atomic callback */
     return;
@@ -2049,6 +2076,16 @@ static void check_scheduled_kills()
     k = SCHEME_CAR(scheduled_kills);
     scheduled_kills = SCHEME_CDR(scheduled_kills);
     do_close_managed((Scheme_Custodian *)k);
+    force_gc = 1;
+  }
+
+  if (force_gc) {
+    /* A shutdown in response to a memory limit merits another major
+       GC to clean up and reset the expected heap size. Otherwise, if
+       another limit is put in place, it will be checked (on a major
+       GC) even later, which will set the major-GC trigger even
+       higher, and so on. */
+    scheme_collect_garbage();
   }
 }
 
@@ -4546,7 +4583,7 @@ void scheme_break_main_thread_at(void *p)
 }
 
 void scheme_break_main_thread()
-/* Calling this function from an arbitary
+/* Calling this function from an arbitrary
    thread is dangerous when therad locals are enabled. */
 {
   scheme_break_main_thread_at((void *)&delayed_break_ready);
@@ -4830,8 +4867,8 @@ void scheme_thread_block(float sleep_time)
   shrink_cust_box_array();
 
   /* Scheduling queries might involve callbacks through the FFI that put
-     the runtime system into `scheme_no_stack_overflow` mode. Immitate
-     the foriegn-call entry point with an extra check that we have enough
+     the runtime system into `scheme_no_stack_overflow` mode. Imitate
+     the foreign-call entry point with an extra check that we have enough
      stack to survive in foreign functions. */
   if (!scheme_no_stack_overflow && scheme_is_stack_too_shallow()) {
     p->sleep_end = sleep_time; /* an abuse of the `sleep_end` field to
@@ -6421,7 +6458,9 @@ static void *splice_ptr_array(void **a, int al, void **b, int bl, int i)
 {
   void **r;
   int j;
-  
+
+  MZ_ASSERT (a != NULL || b != NULL);
+
   r = MALLOC_N(void*, al + bl - 1);
 
   if (a)
@@ -8813,6 +8852,19 @@ static Scheme_Object *will_executor_sema(Scheme_Object *w, int *repost)
 /*                         GC preparation and timing                      */
 /*========================================================================*/
 
+/* We don't currently support threads on a platform with a weaked
+   memory model than x86, and no memory-order operations are needed on
+   x86. */
+
+static Scheme_Object *memory_order(int argc, Scheme_Object *args[])
+{
+  return scheme_void;
+}
+
+/*========================================================================*/
+/*                         GC preparation and timing                      */
+/*========================================================================*/
+
 typedef struct Scheme_GC_Pre_Post_Callback_Desc {
   /* All pointer fields => allocate with GC_malloc() */
   Scheme_Object *boxed_key;
@@ -8921,7 +8973,7 @@ static void run_gc_callbacks(int pre)
       for (j = 0; j < SCHEME_VEC_SIZE(acts); j++) {
         act = SCHEME_VEC_ELS(acts)[j];
         protocol = SCHEME_VEC_ELS(act)[0];
-        /* The set of suported protocols is arbitary, based on what we've needed
+        /* The set of supported protocols is arbitrary, based on what we've needed
            so far. */
         if (!strcmp(SCHEME_SYM_VAL(protocol), "int->void")) {
           gccb_Int_to_Void proc;
@@ -9164,7 +9216,7 @@ static void prepare_thread_for_GC(Scheme_Object *t)
       
     /* zero unused part of last mark stack segment */
     segpos = ((intptr_t)p->cont_mark_stack >> SCHEME_LOG_MARK_SEGMENT_SIZE);
-    
+
     if (segpos < p->cont_mark_seg_count) {
       Scheme_Cont_Mark *seg = p->cont_mark_stack_segments[segpos];
       int stackpos = ((intptr_t)p->cont_mark_stack & SCHEME_MARK_SEGMENT_MASK);
@@ -9230,7 +9282,11 @@ static void get_ready_for_GC()
   start_this_gc_time = scheme_get_process_milliseconds();
 
 #ifndef MZ_PRECISE_GC
-  max_gc_pre_used_bytes = GC_get_memory_use();
+  {
+    gc_pre_used_bytes = GC_get_memory_use();
+    if (max_gc_pre_used_bytes < gc_pre_used_bytes)
+      max_gc_pre_used_bytes = gc_pre_used_bytes;
+  }
 #endif
 
 #ifdef MZ_USE_FUTURES
@@ -9334,53 +9390,48 @@ static void done_with_GC()
 #ifndef MZ_PRECISE_GC
   {
     Scheme_Logger *logger = scheme_get_gc_logger();
-    if (logger) {
-      char buf[64];
+    int debug_gc = 0, debug_gc_major = 0;
+
+    if (logger && scheme_log_level_topic_p(logger, SCHEME_LOG_DEBUG, gc_symbol))
+      debug_gc = 1;
+    if (logger && scheme_log_level_topic_p(logger, SCHEME_LOG_DEBUG, gc_major_symbol))
+      debug_gc_major = 1;
+
+    if (debug_gc || debug_gc_major) {
+      char buf[128], nums[128];
       intptr_t buflen;
+      intptr_t post_use = GC_get_memory_use();
+
+      memset(nums, 0, sizeof(nums));
 
       sprintf(buf,
-              "in %" PRIdPTR " msec",
-              end_this_gc_time - start_this_gc_time);
+              "GC: MAJ @ %sK; free %sK %" PRIdPTR "ms @ %" PRIdPTR,
+              gc_num(nums, gc_pre_used_bytes), gc_num(nums, gc_pre_used_bytes - post_use),
+              end_this_gc_time - start_this_gc_time,
+              start_this_gc_time);
       buflen = strlen(buf);
 
-      scheme_log_message(logger, SCHEME_LOG_DEBUG, buf, buflen, NULL);
+      if (debug_gc)
+        scheme_log_name_pfx_message(logger, SCHEME_LOG_DEBUG, gc_symbol, buf, buflen, NULL, 0);
+      if (debug_gc_major)
+        scheme_log_name_pfx_message(logger, SCHEME_LOG_DEBUG, gc_major_symbol, buf, buflen, NULL, 0);
+      
+
     }
+    num_major_garbage_collections++;
+    if (scheme_code_page_total > max_code_page_total)
+      max_code_page_total = scheme_code_page_total;
   }
 #endif
 }
 
+#ifdef MZ_USE_PLACES
+# define PLACE_ID_FORMAT "%d:"
+#else
+# define PLACE_ID_FORMAT ""
+#endif
+
 #ifdef MZ_PRECISE_GC
-static char *gc_unscaled_num(char *nums, intptr_t v)
-/* format a number with commas */
-{
-  int i, j, len, clen, c, d;
-  for (i = 0; nums[i] || nums[i+1]; i++) {
-  }
-  i++;
-
-  sprintf(nums+i, "%" PRIdPTR, v);
-  for (len = 0; nums[i+len]; len++) { }
-  clen = len + ((len + ((nums[i] == '-') ? -2 : -1)) / 3);
-  
-  c = 0;
-  d = (clen - len);
-  for (j = i + clen - 1; j > i; j--) {
-    if (c == 3) {
-      nums[j] = ',';
-      d--;
-      c = 0;
-    } else {
-      nums[j] = nums[j - d];
-      c++;
-    }
-  }
-
-  return nums + i;
-}
-static char *gc_num(char *nums, intptr_t v)
-{
-  return gc_unscaled_num(nums, v/1024);  /* bytes => kbytes */
-}
 
 #ifdef MZ_XFORM
 END_XFORM_SKIP;
@@ -9392,6 +9443,7 @@ static void inform_GC(int master_gc, int major_gc, int inc_gc,
                       intptr_t post_child_places_used)
 {
   Scheme_Logger *logger;
+  int debug_gc = 0, debug_gc_major = 0;
 
   if (!master_gc) {
     if ((pre_used > max_gc_pre_used_bytes)
@@ -9407,19 +9459,18 @@ static void inform_GC(int master_gc, int major_gc, int inc_gc,
     num_minor_garbage_collections++;
 
   logger = scheme_get_gc_logger();
-  if (logger && scheme_log_level_p(logger, SCHEME_LOG_DEBUG)) {
+  if (logger && scheme_log_level_topic_p(logger, SCHEME_LOG_DEBUG, gc_symbol))
+    debug_gc = 1;
+  if (logger && major_gc && scheme_log_level_topic_p(logger, SCHEME_LOG_DEBUG, gc_major_symbol))
+    debug_gc_major = 1;
+  
+  if (debug_gc || debug_gc_major) {
     /* Don't use scheme_log(), because it wants to allocate a buffer
        based on the max value-print width, and we may not be at a
        point where parameters are available. */
     char buf[256], nums[128];
     intptr_t buflen, delta, admin_delta;
     Scheme_Object *vec, *v;
-
-#ifdef MZ_USE_PLACES
-# define PLACE_ID_FORMAT "%d:"
-#else
-# define PLACE_ID_FORMAT ""
-#endif
 
     vec = scheme_false;
     if (!master_gc && gc_info_prefab) {
@@ -9450,7 +9501,7 @@ static void inform_GC(int master_gc, int major_gc, int inc_gc,
     delta = pre_used - post_used;
     admin_delta = (pre_admin - post_admin) - delta;
     sprintf(buf,
-            "" PLACE_ID_FORMAT "%s @ %sK(+%sK)[+%sK];"
+            "GC: " PLACE_ID_FORMAT "%s @ %sK(+%sK)[+%sK];"
             " free %sK(%s%sK) %" PRIdPTR "ms @ %" PRIdPTR,
 #ifdef MZ_USE_PLACES
             scheme_current_place_id,
@@ -9465,7 +9516,10 @@ static void inform_GC(int master_gc, int major_gc, int inc_gc,
 
     END_XFORM_SKIP;
 
-    scheme_log_message(logger, SCHEME_LOG_DEBUG, buf, buflen, vec);
+    if (debug_gc)
+      scheme_log_name_pfx_message(logger, SCHEME_LOG_DEBUG, gc_symbol, buf, buflen, vec, 0);
+    if (debug_gc_major)
+      scheme_log_name_pfx_message(logger, SCHEME_LOG_DEBUG, gc_major_symbol, buf, buflen, vec, 0);
   }
 
 #ifdef MZ_USE_PLACES
@@ -9474,47 +9528,96 @@ static void inform_GC(int master_gc, int major_gc, int inc_gc,
   }
 #endif
 }
+#endif
 
 static void log_peak_memory_use()
 {
-  Scheme_Logger *logger;
   if (max_gc_pre_used_bytes > 0) {
+    Scheme_Logger *logger;
+    int debug_gc = 0, debug_gc_major = 0;
+    
     logger = scheme_get_gc_logger();
-    if (logger && scheme_log_level_p(logger, SCHEME_LOG_INFO)) {
-      char buf[256], nums[128], *num, *numc, *numt, *num2;
-      intptr_t buflen, allocated_bytes;
+    if (logger && scheme_log_level_topic_p(logger, SCHEME_LOG_INFO, gc_symbol))
+      debug_gc = 1;
+    if (logger && scheme_log_level_topic_p(logger, SCHEME_LOG_INFO, gc_major_symbol))
+      debug_gc_major = 1;
+
+    if (debug_gc || debug_gc_major) {
+      char buf[256], nums[128], *num, *numc, *numt, *num2, *numa;
+      intptr_t buflen, allocated_bytes, max_bytes;
 #ifdef MZ_PRECISE_GC
-      allocated_bytes = GC_get_memory_ever_allocated();
+      allocated_bytes = GC_get_memory_ever_used();
 #else
       allocated_bytes = GC_get_total_bytes();
 #endif
+#ifdef MZ_PRECISE_GC
+      max_bytes = GC_get_memory_max_allocated();
+#else
+      max_bytes = GC_get_memory_peak_use();
+#endif
       memset(nums, 0, sizeof(nums));
-      num = gc_num(nums, max_gc_pre_used_bytes);     
+      num = gc_num(nums, max_gc_pre_used_bytes);
+      numa = gc_num(nums, max_bytes - max_gc_pre_used_bytes);
       numc = gc_num(nums, max_code_page_total);
       numt = gc_num(nums, allocated_bytes);
       num2 = gc_unscaled_num(nums, scheme_total_gc_time);
       sprintf(buf,
-              "" PLACE_ID_FORMAT "atexit peak %sK[+%sK]; alloc %sK; major %d; minor %d; %sms",
+              "GC: " PLACE_ID_FORMAT "atexit peak %sK(+%sK)[+%sK]; alloc %sK; major %d; minor %d; %sms",
 #ifdef MZ_USE_PLACES
               scheme_current_place_id,
 #endif
               num,
+              numa,
               numc,
               numt,
               num_major_garbage_collections,
               num_minor_garbage_collections,
               num2);
       buflen = strlen(buf);
-      scheme_log_message(logger, SCHEME_LOG_INFO, buf, buflen, scheme_false);
+
+      if (debug_gc)
+        scheme_log_name_pfx_message(logger, SCHEME_LOG_INFO, gc_symbol, buf, buflen, scheme_false, 0);
+      if (debug_gc_major)
+        scheme_log_name_pfx_message(logger, SCHEME_LOG_INFO, gc_major_symbol, buf, buflen, scheme_false, 0);
+
       /* Setting to a negative value ensures that we log the peak only once: */
       max_gc_pre_used_bytes = -1;
     }
   }
 }
 
-#else
- static void log_peak_memory_use() {}
-#endif
+static char *gc_unscaled_num(char *nums, intptr_t v)
+/* format a number with commas */
+{
+  int i, j, len, clen, c, d;
+  for (i = 0; nums[i] || nums[i+1]; i++) {
+  }
+  i++;
+
+  sprintf(nums+i, "%" PRIdPTR, v);
+  for (len = 0; nums[i+len]; len++) { }
+  clen = len + ((len + ((nums[i] == '-') ? -2 : -1)) / 3);
+  
+  c = 0;
+  d = (clen - len);
+  for (j = i + clen - 1; j > i; j--) {
+    if (c == 3) {
+      nums[j] = ',';
+      d--;
+      c = 0;
+    } else {
+      nums[j] = nums[j - d];
+      c++;
+    }
+  }
+
+  return nums + i;
+}
+
+static char *gc_num(char *nums, intptr_t v)
+{
+  return gc_unscaled_num(nums, v/1024);  /* bytes => kbytes */
+}
 
 /*========================================================================*/
 /*                                 stats                                  */

@@ -43,7 +43,8 @@
   (provide future*-lock
            set-future*-state!
            future-suspend
-           future-notify-dependent))
+           future-notify-dependent
+           wakeup-this-place))
 
 (define (init-future-place!)
   (init-future-logging-place!))
@@ -287,7 +288,7 @@
         (lock-release (future*-lock f))
         (touch s)
         (touch f)])]
-    [(box? s) ; => dependent on fsemaphore
+    [(or (box? s) (eq? s 'fsema)) ; => dependent on fsemaphore
      (cond
        [(current-future)
         ;; Lots to wait on, so give up on the current future for now
@@ -652,7 +653,10 @@
 
 ;; lock-free synchronization to check whether the box content is #f
 (define (worker-pinged? w)
-  (box-cas! (worker-ping w) #t #t))
+  (cond
+    [(box-cas! (worker-ping w) #t #t) #t]
+    [(box-cas! (worker-ping w) #f #f) #f]
+    [else (worker-pinged? w)]))
 
 ;; called with scheduler lock
 (define (check-in w)

@@ -1,6 +1,9 @@
 #lang racket/base
 (require racket/flonum
          racket/fixnum
+         racket/symbol
+         racket/keyword
+         racket/unsafe/undefined
          "../common/check.rkt"
          "../port/output-port.rkt"
          "../port/input-port.rkt"
@@ -45,7 +48,11 @@
          (all-from-out "parameter.rkt"))
 
 (module+ internal
-  (provide do-display
+  (provide display-via-handler
+           write-via-handler
+           print-via-handler
+
+           do-display
            do-write
            do-print
            do-global-print
@@ -53,6 +60,9 @@
            install-do-global-print!))
 
 (define/who (display v [o (current-output-port)])
+  (display-via-handler who v o))
+
+(define (display-via-handler who v o)
   (let ([co (->core-output-port o who)])
     (define display-handler (core-output-port-display-handler co))
     (if display-handler
@@ -74,6 +84,9 @@
      (void)]))
 
 (define/who (write v [o (current-output-port)])
+  (write-via-handler who v o))
+
+(define (write-via-handler who v o)
   (let ([co (->core-output-port o who)])
     (define write-handler (core-output-port-write-handler co))
     (if write-handler
@@ -87,6 +100,9 @@
   (void))
 
 (define/who (print v [o (current-output-port)] [quote-depth PRINT-MODE/UNQUOTED])
+  (print-via-handler who v o quote-depth))
+
+(define/who (print-via-handler who v o quote-depth)
   (let ([co (->core-output-port o who)])
     (check who print-mode? #:contract "(or/c 0 1)" quote-depth)
     (define print-handler (core-output-port-print-handler co))
@@ -106,19 +122,19 @@
   (set! do-global-print
         (lambda (who v o [quote-depth-in PRINT-MODE/UNQUOTED] [max-length #f])
           (define global-print (param))
-          (define quote-depth (if (print-as-expression) quote-depth-in WRITE-MODE))
           (cond
             [(eq? global-print default-value)
+             (define quote-depth (if (print-as-expression) quote-depth-in WRITE-MODE))
              (do-print who v o quote-depth max-length)]
             [(not max-length)
-             (global-print v o quote-depth)]
+             (global-print v o quote-depth-in)]
             [else
              ;; There's currently no way to communicate `max-length`
              ;; to the `global-print` function, but we should only get
              ;; here when `o` is a string port for errors, so write to
              ;; a fresh string port and truncate as needed.
              (define o2 (open-output-bytes))
-             (global-print v o2 quote-depth)
+             (global-print v o2 quote-depth-in)
              (define bstr (get-output-bytes o2))
              (if ((bytes-length bstr) . <= . max-length)
                  (unsafe-write-bytes who bstr o)
@@ -143,12 +159,20 @@
 (define (sub3 n) (and n (- n 3)))
 
 (define (dots max-length o)
-  (when (eq? max-length 'full)
-    (write-string "..." o)))
+  (cond
+    [(eq? max-length 'full)
+     (write-string "..." o)]
+    [(pair? max-length)
+     ;; pending bytes fit after all
+     (write-bytes (cdr max-length) o)]
+    [else (void)]))
 
 ;; ----------------------------------------
 
-;; Returns the max length that is still available
+;; Returns the max length that is still available, where 'full
+;; means that more than three items would otherwise have been
+;; written, and a pair indicates that some bytes/characters are
+;; pending until the rest of the writes are determined
 (define (p who v mode o max-length graph config)
   (cond
     [(and graph (hash-ref graph v #f))
@@ -187,6 +211,7 @@
               (hash? v)
               (prefab-struct-key v)
               (and (custom-write? v)
+                   (not (struct-type? v))
                    (not (printable-regexp? v))
                    (not (eq? 'self (custom-print-quotable-accessor v 'self))))))
      ;; Since this value is not marked for constructor mode,
@@ -213,14 +238,14 @@
        [else (print-bytes v o max-length)])]
     [(symbol? v)
      (cond
-       [(eq? mode DISPLAY-MODE) (write-string/max (symbol->string v) o max-length)]
+       [(eq? mode DISPLAY-MODE) (write-string/max (symbol->immutable-string v) o max-length)]
        [else (print-symbol v o max-length config)])]
     [(keyword? v)
      (let ([max-length (write-string/max "#:" o max-length)])
        (cond
-         [(eq? mode DISPLAY-MODE) (write-string/max (keyword->string v) o max-length)]
+         [(eq? mode DISPLAY-MODE) (write-string/max (keyword->immutable-string v) o max-length)]
          [else
-          (print-symbol (string->symbol (keyword->string v)) o max-length config
+          (print-symbol (string->symbol (keyword->immutable-string v)) o max-length config
                         #:for-keyword? #t)]))]
     [(char? v)
      (cond
@@ -279,7 +304,8 @@
      (fail-unreadable who v)]
     [(mpair? v)
      (print-mlist p who v mode o max-length graph config)]
-    [(custom-write? v)
+    [(and (not (struct-type? v))
+          (custom-write? v))
      (let ([o/m (make-output-port/max o max-length)])
        (set-port-handlers-to-recur!
         o/m
@@ -291,10 +317,10 @@
           (config-get config print-struct))
      (cond
        [(eq? mode PRINT-MODE/UNQUOTED)
-        (define l (vector->list (struct->vector v)))
+        (define l (vector->list (struct->vector v struct-dots)))
         (define alt-list-constructor
           ;; strip "struct:" from the first element of `l`:
-          (string-append "(" (substring (symbol->string (car l)) 7)))
+          (string-append "(" (substring (symbol->immutable-string (car l)) 7)))
         (print-list p who (cdr l) mode o max-length graph config #f alt-list-constructor)]
        [(prefab-struct-key v)
         => (lambda (key)
@@ -318,13 +344,15 @@
      (print-named "output-port" v mode o max-length)]
     [(unquoted-printing-string? v)
      (write-string/max (unquoted-printing-string-value v) o max-length)]
+    [(eq? v unsafe-undefined)
+     (write-string/max "#<unsafe-undefined>" o max-length)]
     [else
      ;; As a last resort, fall back to the host `format`:
      (write-string/max (format "~s" v) o max-length)]))
 
 (define (fail-unreadable who v)
   (raise (exn:fail
-          (string-append (symbol->string who)
+          (string-append (symbol->immutable-string who)
                          ": printing disabled for unreadable value"
                          "\n  value: "
                          (parameterize ([print-unreadable #t])
@@ -335,3 +363,5 @@
   (when (and (eq? mode WRITE-MODE)
              (not (config-get config print-unreadable)))
     (fail-unreadable who v)))
+
+(define struct-dots (unquoted-printing-string "..."))

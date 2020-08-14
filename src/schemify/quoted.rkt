@@ -1,6 +1,7 @@
 #lang racket/base
 (require racket/extflonum
-         racket/fixnum)
+         racket/fixnum
+         racket/unsafe/undefined)
 
 (provide lift-quoted?
          large-quoted?)
@@ -12,7 +13,7 @@
       [for-cify?
        (not (or (and (exact-integer? q)
                      ;; always a fixnum:
-                     (<= (- (expt 2 29)) q (expt 2 29)))
+                     (<= (- (expt 2 29)) q (sub1 (expt 2 29))))
                 (boolean? q)
                 (null? q)
                 (void? q)))]
@@ -32,7 +33,19 @@
       [(box? q) (lift-quoted? (unbox q))]
       [(prefab-struct-key q) #t]
       [(extflonum? q) #t]
-      [else #f])))
+      [(or (null? q)
+           (number? q)
+           (char? q)
+           (boolean? q)
+           (and (symbol? q)
+                ;; lift out gensym for sharing across phases
+                (or (symbol-interned? q)
+                    (symbol-unreadable? q)))
+           (eof-object? q)
+           (void? q)
+           (eq? q unsafe-undefined))
+       #f]
+      [else #t])))
 
 ;; Check whether a quoted value is large enough to be worth representing
 ;; in fasl format:

@@ -30,6 +30,7 @@
          drracket/private/rectangle-intersect
          pkg/lib
          pkg/gui
+         mrlib/panel-wob
          framework/private/logging-timer
          (submod "frame.rkt" install-pkg)
          (for-syntax racket/base)
@@ -783,8 +784,10 @@
     (define (turn-on/off-auto-text-text-box on?)
       (send auto-text-text-box enable on?)
       (send auto-text-text-box set-field-background
-            (send the-color-database find-color
-                  (if on? "white" "gray"))))
+            (color-prefs:lookup-in-color-scheme
+             (if on?
+                 'framework:basic-canvas-background
+                 'framework:disabled-background-color))))
     
     ;; data associated with each item in listbox : boolean
     ;; indicates if the entry is the default paths.
@@ -1413,7 +1416,10 @@
               (for/list ([range (in-list ranges)]) 
                 (define pos (vector-ref range 0))
                 (define span (vector-ref range 1))
-                (highlight-range (- pos 1) (+ pos span -1) "gold"))))
+                (highlight-range (- pos 1) (+ pos span -1)
+                                 (if (preferences:get 'framework:white-on-black?)
+                                     (make-object color% 145 107 0)
+                                     "gold")))))
       
       (define/public (set-margin-error-ranges rngs)
         (unless (equal? online-error-ranges rngs)
@@ -1982,7 +1988,9 @@
       (define/override (on-paint)
         (define dc (get-dc))
         (define-values (cw ch) (get-client-size))
-        (send dc set-text-foreground (if err? "firebrick" "black"))
+        (send dc set-text-foreground (if (white-on-black-panel-scheme?)
+                                         (if err? "pink" "white")
+                                         (if err? "firebrick" "black")))
         (define-values (tot-th gap-space) (height/gap-space dc))
         (for/fold ([y (- (/ ch 2) (/ tot-th 2))]) ([msg (in-list msgs)])
           (define-values (tw th td ta) (send dc get-text-extent msg))

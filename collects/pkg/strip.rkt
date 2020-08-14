@@ -69,6 +69,15 @@
   (check-directory-exists 'generate-stripped-directory "source " dir)
   (check-directory-exists 'generate-stripped-directory "destination " dest-dir)
 
+  (define compiled-dir
+    (case mode
+      [(binary binary-lib)
+       (define l (use-compiled-file-paths))
+       (if (pair? l)
+           (car l)
+           "compiled")]
+      [else #f]))
+
   (define drop-keep-ns (make-base-namespace))
   (define (add-drop+keeps dir base drops keeps)
     (define get-info (get-info/full dir #:namespace drop-keep-ns))
@@ -115,7 +124,7 @@
                   #t)))
     (values (add drops more-drops)
             (add keeps more-keeps)))
-  
+
   (define (drop-by-default? path get-p)
     (define bstr (path->bytes path))
     (define (immediate-doc/css-or-doc/js?)
@@ -139,7 +148,7 @@
                (and (regexp-match? #rx"[.](?:ss|rkt)$" bstr)
                     (not (equal? #"info.rkt" bstr))
                     (file-exists? (let-values ([(base name dir?) (split-path (get-p))])
-                                    (build-path base "compiled" (path-add-suffix name #".zo")))))
+                                    (build-path base compiled-dir (path-add-suffix name #".zo")))))
                (immediate-doc/css-or-doc/js?)
                (case mode
                  [(binary-lib)
@@ -172,28 +181,26 @@
       [else #f]))
   
   (define (fixup new-p path src-base level)
-    (case mode
-      [(binary binary-lib built)
-       (define bstr (path->bytes path))
-       (cond
-        [(regexp-match? #rx"[.]html$" bstr)
-         (fixup-html new-p)]
-        [else
-         (case mode
-           [(binary binary-lib)
+    (define bstr (path->bytes path))
+    (cond
+      [(and (not (eq? mode 'source)) (regexp-match? #rx"[.]html$" bstr))
+       (fixup-html new-p)]
+      [else
+       (case mode
+         [(binary binary-lib)
+          (cond
+            [(equal? #"info.rkt" bstr)
+             (fixup-info new-p src-base level mode)]
+            [(regexp-match? #rx"[.]zo$" bstr)
+             (fixup-zo new-p)])]
+         [(built source)
+          (when (or (eq? level 'package)
+                    (eq? level 'package+collection))
             (cond
-             [(equal? #"info.rkt" bstr)
-              (fixup-info new-p src-base level mode)]
-             [(regexp-match? #rx"[.]zo$" bstr)
-              (fixup-zo new-p)])]
-           [(built)
-            (when (or (eq? level 'package)
-                      (eq? level 'package+collection))
-              (cond
-               [(equal? #"info.rkt" bstr)
-                (fixup-info new-p src-base level mode)]
-               [else (void)]))]
-           [else (void)])])]))
+              [(equal? #"info.rkt" bstr)
+               (fixup-info new-p src-base level mode)]
+              [else (void)]))]
+         [else (void)])]))
   
   (define (explore base   ; containing directory relative to `dir`, 'base at start
                    paths  ; paths in `base'
@@ -260,9 +267,7 @@
        [else 'package]))) 
   
   (explore 'same (directory-list dir) drops keeps #f level)
-  (case mode
-    [(binary binary-lib built) (unmove-files dir dest-dir drop-keep-ns)]
-    [else (void)])
+  (unmove-files dir dest-dir drop-keep-ns)
   (case mode
     [(built binary binary-lib)
      (create-info-as-needed mode dest-dir level)]
@@ -364,7 +369,9 @@
               [(binary binary-lib)
                `((define assume-virtual-sources #t))]
               [else '()])
-          (define package-content-state '(,mode ,(version)))
+          ,@(case mode
+              [(source) '()]
+              [else `((define package-content-state '(,mode ,(version))))])
           . ,(filter values
                      (map (fixup-info-definition get-info mode) defns)))))
     (define new-content
@@ -374,27 +381,28 @@
         ;; In case of `(module ...)` instead of `#lang ...`:
         [`(module info ,info-lib . ,defns)
          (convert-mod info-lib defns)]))
-    ;; write updated:
-    (call-with-output-file* 
-     new-p
-     #:exists 'truncate
-     (lambda (out)
-       (write new-content out)
-       (newline out)))
-    ;; sanity check:
-    (unless (get-info/full dir #:namespace (make-base-namespace))
-      (error 'pkg-binary-create "rewrite failed"))
-    ;; compile it, if not package-level:
-    (when (strip-binary-compile-info)
-      (unless (eq? level 'package)
-        (managed-compile-zo new-p)))))
+    (unless (equal? new-content content)
+      ;; write updated:
+      (call-with-output-file* 
+       new-p
+       #:exists 'truncate
+       (lambda (out)
+         (write new-content out)
+         (newline out)))
+      ;; sanity check:
+      (unless (get-info/full dir #:namespace (make-base-namespace))
+        (error 'pkg-binary-create "rewrite failed"))
+      ;; compile it, if not package-level:
+      (when (strip-binary-compile-info)
+        (unless (eq? level 'package)
+          (managed-compile-zo new-p))))))
 
 (define ((fixup-info-definition get-info mode) defn)
   (match defn
     [`(define package-content-state . ,v) #f]
     [_
      (case mode
-       [(built) defn]
+       [(built source) defn]
        [else
         (match defn
           [`(define build-deps . ,v) #f]

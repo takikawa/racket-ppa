@@ -12,3 +12,6 @@
   (g 4))
 
 (require 'm)
+
+(module ds lang/htdp-beginner
+  (define-struct pt (x y)))

@@ -457,7 +457,7 @@
          (case ((object) 'type)
             [(pair) (ref-list n)]
             [(continuation procedure vector fxvector bytevector string record
-              ftype-struct ftype-union ftype-array ftype-bits)
+              ftype-struct ftype-union ftype-array ftype-bits stencil-vector)
              (ref n)]
             [else (invalid-movement)]))))
 
@@ -496,6 +496,7 @@
          [(vector) vector-dispatch-table]
          [(fxvector) fxvector-dispatch-table]
          [(bytevector) bytevector-dispatch-table]
+         [(stencil-vector) stencil-vector-dispatch-table]
          [(record) record-dispatch-table]
          [(string) string-dispatch-table]
          [(box) box-dispatch-table]
@@ -1009,6 +1010,31 @@
    [("length" . "l")
     "display bytevector length"
     (() (show "   ~d elements" ((object) 'length)))]
+
+   [("ref" . "r")
+    "inspect [nth] element"
+    (() (ref 0))
+    ((n) (ref n))]
+
+   [("show" . "s")
+     "show [n] elements"
+     (() (display-refs ((object) 'length)))
+     ((n)
+      (range-check n ((object) 'length))
+      (display-refs n))]
+
+))
+
+(define stencil-vector-dispatch-table
+ (make-dispatch-table
+
+   [("length" . "l")
+    "display stencil vector length"
+    (() (show "   ~d elements" ((object) 'length)))]
+
+   [("mask" . "m")
+    "display stencil vector mask"
+    (() (show "   #x~x" ((object) 'mask)))]
 
    [("ref" . "r")
     "inspect [nth] element"
@@ -1895,6 +1921,19 @@
         [write (p) (write x p)]
         [print (p) (pretty-print x p)]))
 
+    (define make-stencil-vector-object
+      (make-object-maker stencil-vector (x)
+        [value () x]
+        [length () (stencil-vector-length x)]
+        [mask () (stencil-vector-mask x)]
+        [ref (i)
+          (unless (and (fixnum? i) (fx< -1 i (stencil-vector-length x)))
+            ($oops 'stencil-vector-object "invalid index ~s" i))
+          (make-object (stencil-vector-ref x i))]
+        [size (g) (compute-size x g)]
+        [write (p) (write x p)]
+        [print (p) (pretty-print x p)]))
+
     (define make-phantom-object
       (make-object-maker phantom-bytevector (x)
         [value () x]
@@ -2022,7 +2061,9 @@
     (define make-record-object
       (lambda (x)
         (let* ((rtd ($record-type-descriptor x))
-               (fields (csv7:record-type-field-names rtd)))
+               (fields (if (record-type-named-fields? rtd)
+                           (csv7:record-type-field-names rtd)
+                           (csv7:record-type-field-indices rtd))))
           (define check-field
             (lambda (f)
               (unless (or (and (symbol? f) (memq f fields))
@@ -2142,7 +2183,7 @@
 
     (define get-reloc-objs
       (foreign-procedure "(cs)s_get_reloc"
-        (scheme-object) scheme-object))
+        (scheme-object boolean) scheme-object))
 
     (module (get-code-src get-code-sexpr)
       (include "types.ss")
@@ -2161,13 +2202,15 @@
         [name () ($code-name x)]
         [info () (make-object ($code-info x))]
         [free-count () ($code-free-count x)]
+        [arity-mask () ($code-arity-mask x)]
         [source ()
           (cond
             [(get-code-sexpr x) => make-object]
             [else #f])]
         [source-path () (return-source (get-code-src x))]
         [source-object () (get-code-src x)]
-        [reloc () (make-object (get-reloc-objs x))]
+        [reloc () (make-object (get-reloc-objs x #f))]
+        [reloc+offset () (make-object (get-reloc-objs x #t))]
         [size (g) (compute-size x g)]
         [write (p) (write x p)]
         [print (p) (pretty-print x p)]))
@@ -2238,8 +2281,12 @@
                                (values (make-vector count) count cp))
                            (let ([obj (vector-ref vals i)] [var* (vector-ref vars i)])
                              (cond
-                               [(eq? obj cookie)
-                                (unless (null? var*) ($oops who "expected value for ~s but it was not in lpm" (car var*)))
+                               [(and (eq? obj cookie)
+                                     (or (null? var*)
+                                         ;; unboxed variable?
+                                         (not (and (pair? var*) (box? (car var*)) (null? (cdr var*))))))
+                                (unless (null? var*)
+                                  ($oops who "expected value for ~s but it was not in lpm" (car var*)))
                                 (f (fx1+ i) count cp cpvar*)]
                                [(null? var*)
                                 (let-values ([(v frame-count cp) (f (fx1+ i) (fx1+ count) cp cpvar*)])
@@ -2267,7 +2314,12 @@
                                                                           (vector->list var)))]
                                                [else
                                                  (let-values ([(v frame-count cp) (g (cdr var*) (fx1+ count) cp cpvar*)])
-                                                   (vector-set! v count (make-variable-object obj var))
+                                                   (vector-set! v count (cond
+                                                                          [(box? var)
+                                                                           ;; unboxed variable
+                                                                           (make-variable-object '<unboxed-flonum> (unbox var))]
+                                                                          [else
+                                                                           (make-variable-object obj var)]))
                                                    (values v frame-count cp))])))))]))))
                      (lambda (v frame-count cp)
                        (real-make-continuation-object x (rp-info-src rpi) (rp-info-sexpr rpi) cp v frame-count pos))))))]
@@ -2383,6 +2435,7 @@
           [(vector? x) (make-vector-object x)]
           [(fxvector? x) (make-fxvector-object x)]
           [(bytevector? x) (make-bytevector-object x)]
+          [(stencil-vector? x) (make-stencil-vector-object x)]
           ; ftype-pointer? test must come before record? test
           [($ftype-pointer? x) (make-ftype-pointer-object x)]
           [(or (record? x) (and (eq? (subset-mode) 'system) ($record? x)))
@@ -2445,7 +2498,6 @@
   (define align
     (lambda (n)
       (fxlogand (fx+ n (fx- (constant byte-alignment) 1)) (fx- (constant byte-alignment)))))
-  (include "bitset.ss")
 
   (define (thread->stack-objects thread)
     (with-tc-mutex
@@ -2463,8 +2515,15 @@
                x*]
               [else
                (let* ([ret ($object-ref 'scheme-object frame 0)]
-                      [size ($object-ref 'scheme-object ret (constant return-address-frame-size-disp))]
-                      [livemask ($object-ref 'scheme-object ret (constant return-address-livemask-disp))]
+                      [mask+size+mode ($object-ref 'iptr ret (constant compact-return-address-mask+size+mode-disp))]
+                      [compact? (fxlogtest mask+size+mode (constant compact-header-mask))]
+                      [size (if (not compact?)
+                                ($object-ref 'scheme-object ret (constant return-address-frame-size-disp))
+                                (fxand (fxsrl mask+size+mode (constant compact-frame-words-offset))
+                                       (constant compact-frame-words-mask)))]
+                      [livemask (if (not compact?)
+                                    ($object-ref 'scheme-object ret (constant return-address-livemask-disp))
+                                    (fxsrl mask+size+mode (constant compact-frame-mask-offset)))]
                       [next-frame (fx- frame size)])
                  (let frame-loop ([p (fx+ next-frame 1)] [livemask livemask] [x* x*])
                    (if (eqv? livemask 0)
@@ -2491,92 +2550,50 @@
          (map (lambda (disp) ($object-ref 'scheme-object tc disp))
               tc-ptr-offsets)]))))
 
-  ;; call with interrupts disabled if not `single-inspect-mode?`
-  (set-who! $compute-size-increments
-    (rec $compute-size-increments
+  (set-who! $compute-size
+    (rec $compute-size
       (case-lambda
-       [(x* maxgen) ($compute-size-increments x* maxgen #f (make-eq-bitset))]
-       [(x* maxgen single-inspect-mode? size-ht-or-bitset)
-         (define ephemeron-triggers #f)
-         (define ephemeron-triggers-bitset #f)
-         (define ephemeron-non-keys (and (not single-inspect-mode?) (make-eq-hashtable)))
-         (define cookie (and single-inspect-mode?
-                             (cons 'date 'nut))) ; recreate on each call to $compute-size-increments
+        [(x maxgen) ($compute-size x maxgen (make-eq-hashtable))]
+        [(x maxgen size-ht)
+         (define cookie (cons 'date 'nut)) ; recreate on each call to $compute-size
          (define compute-size
            (lambda (x)
-             (let ([si ($maybe-seginfo x)])
-               (cond
-                [(or (not si)
-                     (fx> ($seginfo-generation si) maxgen))
-                 0]
-                [single-inspect-mode?
-                 (let ([a (eq-hashtable-cell size-ht-or-bitset x #f)])
+             (if (or ($immediate? x)
+                     (let ([g ($generation x)])
+                       (or (not g) (fx> g maxgen))))
+                 0
+                 (let ([a (eq-hashtable-cell size-ht x #f)])
                    (cond
-                    [(cdr a) =>
-                     (lambda (p)
-                       ; if we find our cookie, return 0 to avoid counting shared structure twice.
-                       ; otherwise, (car p) must be a cookie from an earlier call to $compute-size,
-                       ; so return the recorded size
-                       (if (eq? (car p) cookie)
-                           0
-                           (begin
-                             (set-car! p cookie)
-                             (cdr p))))]
-                    [else
-                     (let ([p (cons cookie 0)])
-                       (set-cdr! a p)
-                       (let ([size (really-compute-size x si)])
-                         (set-cdr! p size)
-                         size))]))]
-                [else
-                 (cond
-                  [(eq-bitset-member? size-ht-or-bitset x) 0]
-                  [else
-                   (eq-bitset-add! size-ht-or-bitset x)
-                   (let ([size (really-compute-size x si)])
-                     (let ([ds (and ephemeron-triggers-bitset
-                                    (eq-bitset-member? ephemeron-triggers-bitset x)
-                                    (eq-hashtable-ref ephemeron-triggers x #f))])
-                       (cond
-                        [ds
-                         (eq-hashtable-delete! ephemeron-triggers x)
-                         (fold-left (lambda (size d) (fx+ size (compute-size d)))
-                                    size
-                                    ds)]
-                        [else size])))])]))))
+                     [(cdr a) =>
+                      (lambda (p)
+                        ; if we find our cookie, return 0 to avoid counting shared structure twice.
+                        ; otherwise, (car p) must be a cookie from an earlier call to $compute-size,
+                        ; so return the recorded size
+                        (if (eq? (car p) cookie)
+                            0
+                            (begin
+                              (set-car! p cookie)
+                              (cdr p))))]
+                     [else
+                      (let ([p (cons cookie 0)])
+                        (set-cdr! a p)
+                        (let ([size (really-compute-size x)])
+                          (set-cdr! p size)
+                          size))])))))
          (define really-compute-size
-           (lambda (x si)
+           (lambda (x)
              (cond
                [(pair? x)
-                (let ([space ($seginfo-space si)])
+                (let ([space ($seginfo-space ($maybe-seginfo x))])
                   (cond
-                   [(and (eqv? space (constant space-weakpair))
-                         (not single-inspect-mode?))
-                    (fx+ (constant size-pair) (compute-size (cdr x)))]
-                   [(and (eqv? space (constant space-ephemeron))
-                         (not single-inspect-mode?)
-                         (let ([a (car x)])
-                           (not (or ($immediate? a)
-                                    (let ([g ($generation a)])
-                                      (or (not g) (fx> g maxgen)))
-                                    (and (eq-bitset-member? size-ht-or-bitset a)
-                                         (not (eq-hashtable-ref ephemeron-non-keys a #f)))))))
-                    (let ([d (cdr x)])
-                      (unless ($immediate? d)
-                        (unless ephemeron-triggers-bitset
-                          (set! ephemeron-triggers-bitset (make-eq-bitset))
-                          (set! ephemeron-triggers (make-eq-hashtable)))
-                        (let ([v (car x)])
-                          (eq-bitset-add! ephemeron-triggers-bitset v)
-                          (let ([a (eq-hashtable-cell ephemeron-triggers v '())])
-                            (set-cdr! a (cons d (cdr a)))))))
-                    (constant size-pair)]
+                   [(eqv? space (constant space-ephemeron))
+                    (fx+ (constant size-ephemeron) (compute-size (car x)) (compute-size (cdr x)))]
                    [else
                     (fx+ (constant size-pair) (compute-size (car x)) (compute-size (cdr x)))]))]
                [(symbol? x)
                 (fx+ (constant size-symbol)
                   (compute-size (#3%$top-level-value x))
-                  (compute-size (property-list x))
+                  (compute-size ($symbol-property-list x))
                   (compute-size ($system-property-list x))
                   (compute-size ($symbol-name x)))]
                [(vector? x)
@@ -2587,14 +2604,32 @@
                     ((fx= i n) size)))]
                [(fxvector? x) (align (fx+ (constant header-size-fxvector) (fx* (fxvector-length x) (constant ptr-bytes))))]
                [(bytevector? x) (align (fx+ (constant header-size-bytevector) (bytevector-length x)))]
+               [(stencil-vector? x)
+                (let ([n (stencil-vector-length x)])
+                  (do ([i 0 (fx+ i 1)]
+                       [size (align (fx+ (constant header-size-stencil-vector) (fx* (stencil-vector-length x) (constant ptr-bytes))))
+                         (fx+ size (compute-size (stencil-vector-ref x i)))])
+                    ((fx= i n) size)))]
                [($record? x)
                 (let ([rtd ($record-type-descriptor x)])
-                  (fold-left (lambda (size fld)
-                               (if (eq? (fld-type fld) 'scheme-object)
-                                   (fx+ size (compute-size ($object-ref 'scheme-object x (fld-byte fld))))
-                                   size))
-                    (fx+ (align (rtd-size rtd)) (compute-size rtd))
-                    (rtd-flds rtd)))]
+                  (let ([flds (rtd-flds rtd)])
+                    (cond
+                     [(fixnum? flds)
+                      (let loop ([i 0] [size (fx+ (align (rtd-size rtd)) (compute-size rtd))])
+                        (cond
+                         [(fx= i flds) size]
+                         [else (loop (fx+ i 1)
+                                     (fx+ size (compute-size ($record-ref x i))))]))]
+                     [else
+                      (let loop ([size (fx+ (align (rtd-size rtd)) (compute-size rtd))] [flds flds])
+                        (cond
+                          [(null? flds) size]
+                          [else
+                           (let ([fld (car flds)])
+                             (loop (if (eq? (fld-type fld) 'scheme-object)
+                                       (fx+ size (compute-size ($object-ref 'scheme-object x (fld-byte fld))))
+                                       size)
+                                   (cdr flds)))]))])))]
                [(string? x) (align (fx+ (constant header-size-string) (fx* (string-length x) (constant string-char-bytes))))]
                [(box? x) (fx+ (constant size-box) (compute-size (unbox x)))]
                [(flonum? x) (constant size-flonum)]
@@ -2638,7 +2673,8 @@
                       (if (fx= i n)
                           size
                           (let ([r ($get-reloc x i)])
-                            (and r
+                            (if (not r)
+                                 0
                                  (let ([type (logand (bitwise-arithmetic-shift-right r (constant reloc-type-offset)) (constant reloc-type-mask))])
                                    (if (logtest r (constant reloc-extended-format))
                                        (let ([addr (fx+ addr ($get-reloc x (fx+ i 2)))])
@@ -2682,35 +2718,9 @@
                 (fx+ (constant size-tlc)
                   (phantom-bytevector-length x))]
                [else ($oops who "missing case for ~s" x)])))
-         (cond
-          [single-inspect-mode?
-            ; ensure size-ht isn't counted in the size of any object
-           (eq-hashtable-set! size-ht-or-bitset size-ht-or-bitset (cons cookie 0))
-           (map compute-size x*)]
-          [else
-           ; ensure bitset isn't counted in the size of any object
-           (eq-bitset-add! size-ht-or-bitset size-ht-or-bitset)
-           ;; Stop at each element of `x` when getting results for other elements,
-           ;; but don't treat later elements as already-reached ephemeron keys:
-           (for-each (lambda (x)
-                       (eq-bitset-add! size-ht-or-bitset x)
-                       (eq-hashtable-set! ephemeron-non-keys x #t))
-                     x*)
-           ;; Traverse `x*` in order:
-           (let loop ([x* x*])
-             (cond
-              [(null? x*) '()]
-              [else
-               (let ([x (car x*)])
-                 (eq-bitset-remove! size-ht-or-bitset x)
-                 (eq-hashtable-delete! ephemeron-non-keys x)
-                 (cons (compute-size x)
-                       (loop (cdr x*))))]))])])))
-
-  (set-who! $compute-size
-    (case-lambda
-     [(x maxgen) (car ($compute-size-increments (list x) maxgen #t (make-eq-hashtable)))]
-     [(x maxgen size-ht) (car ($compute-size-increments (list x) maxgen #t size-ht))]))
+         ; ensure size-ht isn't counted in the size of any object
+         (eq-hashtable-set! size-ht size-ht (cons cookie 0))
+         (compute-size x)])))
 
   (set-who! $compute-composition
     (lambda (x maxgen)
@@ -2736,7 +2746,7 @@
                               (vector-set! count-vec i (cons 1 size))))]
                        ...))))])))
       (define-counters (type-names type-counts incr!)
-        pair symbol vector fxvector bytevector string box flonum bignum ratnum exactnum
+        pair symbol vector fxvector bytevector stencil-vector string box flonum bignum ratnum exactnum
         inexactnum continuation stack procedure code-object reloc-table port thread tlc
         rtd-counts phantom)
       (define compute-composition!
@@ -2758,7 +2768,7 @@
             [(symbol? x)
              (incr! symbol (constant size-symbol))
              (compute-composition! (#3%$top-level-value x))
-             (compute-composition! (property-list x))
+             (compute-composition! ($symbol-property-list x))
              (compute-composition! ($system-property-list x))
              (compute-composition! ($symbol-name x))]
             [(vector? x)
@@ -2766,6 +2776,14 @@
              (vector-for-each compute-composition! x)]
             [(fxvector? x) (incr! fxvector (align (fx+ (constant header-size-fxvector) (fx* (fxvector-length x) (constant ptr-bytes)))))]
             [(bytevector? x) (incr! bytevector (align (fx+ (constant header-size-bytevector) (bytevector-length x))))]
+            [(stencil-vector? x)
+             (let ([len (stencil-vector-length x)])
+               (incr! stencil-vector (align (fx+ (constant header-size-stencil-vector) (fx* len (constant ptr-bytes)))))
+               (let loop ([i len])
+                 (unless (fx= i 0)
+                   (let ([i (fx- i 1)])
+                     (compute-composition! (stencil-vector-ref x i))
+                     (loop i)))))]
             [($record? x)
              (let ([rtd ($record-type-descriptor x)])
                (let ([p (eq-hashtable-ref rtd-ht rtd #f)] [size (align (rtd-size rtd))])
@@ -2775,10 +2793,18 @@
                        (set-cdr! p (fx+ (cdr p) size)))
                      (eq-hashtable-set! rtd-ht rtd (cons 1 size))))
                (compute-composition! rtd)
-               (for-each (lambda (fld)
-                           (when (eq? (fld-type fld) 'scheme-object)
-                             (compute-composition! ($object-ref 'scheme-object x (fld-byte fld)))))
-                 (rtd-flds rtd)))]
+               (let ([flds (rtd-flds rtd)])
+                 (cond
+                  [(fixnum? flds)
+                   (let loop ([i 0])
+                     (unless (fx= i flds)
+                       (compute-composition! ($record-ref x i))
+                       (loop (fx+ i 1))))]
+                  [else
+                   (for-each (lambda (fld)
+                               (when (eq? (fld-type fld) 'scheme-object)
+                                 (compute-composition! ($object-ref 'scheme-object x (fld-byte fld)))))
+                     (rtd-flds rtd))])))]
             [(string? x) (incr! string (align (fx+ (constant header-size-string) (fx* (string-length x) (constant string-char-bytes)))))]
             [(box? x)
              (incr! box (constant size-box))
@@ -2909,7 +2935,7 @@
                       [(symbol? x)
                        (construct-proc
                          (#3%$top-level-value x)
-                         (property-list x)
+                         ($symbol-property-list x)
                          ($system-property-list x)
                          ($symbol-name x) next-proc)]
                       [(vector? x)
@@ -2918,16 +2944,30 @@
                            (if (fx= i n)
                                next-proc
                                (construct-proc (vector-ref x i) (f (fx+ i 1))))))]
+                      [(stencil-vector? x)
+                       (let ([n (stencil-vector-length x)])
+                         (let f ([i 0])
+                           (if (fx= i n)
+                               next-proc
+                               (construct-proc (stencil-vector-ref x i) (f (fx+ i 1))))))]
                       [($record? x)
                        (let ([rtd ($record-type-descriptor x)])
                          (construct-proc rtd
-                           (let f ([flds (rtd-flds rtd)])
-                             (if (null? flds)
-                                 next-proc
-                                 (let ([fld (car flds)])
-                                   (if (eq? (fld-type fld) 'scheme-object)
-                                       (construct-proc ($object-ref 'scheme-object x (fld-byte fld)) (f (cdr flds)))
-                                       (f (cdr flds))))))))]
+                           (let ([flds (rtd-flds rtd)])
+                             (cond
+                              [(fixnum? flds)
+                               (let loop ([i 0])
+                                 (if (fx= i flds)
+                                     next-proc
+                                     (construct-proc ($record-ref x i) (loop (fx+ i 1)))))]
+                              [else
+                               (let f ([flds (rtd-flds rtd)])
+                                 (if (null? flds)
+                                     next-proc
+                                     (let ([fld (car flds)])
+                                       (if (eq? (fld-type fld) 'scheme-object)
+                                           (construct-proc ($object-ref 'scheme-object x (fld-byte fld)) (f (cdr flds)))
+                                           (f (cdr flds))))))]))))]
                       [(or (fxvector? x) (bytevector? x) (string? x) (flonum? x) (bignum? x)
                            ($inexactnum? x) ($rtd-counts? x) (phantom-bytevector? x))
                        next-proc]
@@ -3017,14 +3057,14 @@
       [(x g) ($compute-size x (filter-generation who g))]))
 
   (set-who! compute-size-increments
-    (rec compute-size-increments
-      (case-lambda
-       [(x*) (compute-size-increments x* (collect-maximum-generation))]
-       [(x* g)
-        (unless (list? x*) ($oops who "~s is not a list" x*))
-        (let ([g (filter-generation who g)])
-          (with-interrupts-disabled
-           ($compute-size-increments x* g)))])))
+    (let ([count_size_increments (foreign-procedure "(cs)count_size_increments" (ptr int) ptr)])
+      (rec compute-size-increments
+        (case-lambda
+         [(x*) (compute-size-increments x* (collect-maximum-generation))]
+         [(x* g)
+          (unless (list? x*) ($oops who "~s is not a list" x*))
+          (let ([g (filter-generation who g)])
+            (count_size_increments x* g))]))))
 
   (set-who! compute-composition
     (case-lambda

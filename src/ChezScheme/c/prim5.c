@@ -35,6 +35,9 @@ static ptr s_fltofx PROTO((ptr x));
 static ptr s_weak_pairp PROTO((ptr p));
 static ptr s_ephemeron_cons PROTO((ptr car, ptr cdr));
 static ptr s_ephemeron_pairp PROTO((ptr p));
+static ptr s_box_immobile PROTO((ptr p));
+static ptr s_make_immobile_vector PROTO((uptr len, ptr fill));
+static ptr s_make_immobile_bytevector PROTO((uptr len));
 static ptr s_oblist PROTO((void));
 static ptr s_bigoddp PROTO((ptr n));
 static ptr s_float PROTO((ptr x));
@@ -85,7 +88,7 @@ static IBOOL s_fd_regularp PROTO((INT fd));
 static void s_nanosleep PROTO((ptr sec, ptr nsec));
 static ptr s_set_collect_trip_bytes PROTO((ptr n));
 static void c_exit PROTO((I32 status));
-static ptr s_get_reloc PROTO((ptr co));
+static ptr s_get_reloc PROTO((ptr co, IBOOL with_offsets));
 #ifdef PTHREADS
 static s_thread_rv_t s_backdoor_thread_start PROTO((void *p));
 static iptr s_backdoor_thread PROTO((ptr p));
@@ -116,7 +119,7 @@ static ptr s_multibytetowidechar PROTO((unsigned cp, ptr inbv));
 static ptr s_widechartomultibyte PROTO((unsigned cp, ptr inbv));
 #endif
 static ptr s_profile_counters PROTO((void));
-static void s_set_profile_counters PROTO((ptr counters));
+static ptr s_profile_release_counters PROTO((void));
 
 #define require(test,who,msg,arg) if (!(test)) S_error1(who, msg, arg)
 
@@ -166,7 +169,7 @@ static iptr s_fxdiv(x, y) iptr x, y; {
 
 static ptr s_trunc_rem(x, y) ptr x, y; {
   ptr q, r;
-  S_trunc_rem(x, y, &q, &r);
+  S_trunc_rem(get_thread_context(), x, y, &q, &r);
   return Scons(q, r);
 }
 
@@ -176,21 +179,55 @@ static ptr s_fltofx(x) ptr x; {
 
 static ptr s_weak_pairp(p) ptr p; {
   seginfo *si;
-  return Spairp(p) && (si = MaybeSegInfo(ptr_get_segment(p))) != NULL && (si->space & ~space_locked) == space_weakpair ? Strue : Sfalse;
+  return Spairp(p) && (si = MaybeSegInfo(ptr_get_segment(p))) != NULL && si->space == space_weakpair ? Strue : Sfalse;
 }
 
 static ptr s_ephemeron_cons(car, cdr) ptr car, cdr; {
   ptr p;
 
   tc_mutex_acquire()
-  p = S_cons_in(space_ephemeron, 0, car, cdr);
+  p = S_ephemeron_cons_in(0, car, cdr);
   tc_mutex_release()
+
   return p;
 }
 
 static ptr s_ephemeron_pairp(p) ptr p; {
   seginfo *si;
-  return Spairp(p) && (si = MaybeSegInfo(ptr_get_segment(p))) != NULL && (si->space & ~space_locked) == space_ephemeron ? Strue : Sfalse;
+  return Spairp(p) && (si = MaybeSegInfo(ptr_get_segment(p))) != NULL && si->space == space_ephemeron ? Strue : Sfalse;
+}
+
+static ptr s_box_immobile(p) ptr p; {
+  ptr b = S_box2(p, 1);
+  S_immobilize_object(b);
+  return b;
+}
+
+static ptr s_make_immobile_bytevector(uptr len) {
+  ptr b = S_bytevector2(len, 1);
+  S_immobilize_object(b);
+  return b;
+}
+
+static ptr s_make_immobile_vector(uptr len, ptr fill) {
+  ptr v;
+  uptr i;
+
+  tc_mutex_acquire()
+  v = S_vector_in(space_immobile_impure, 0, len);
+  tc_mutex_release()
+
+  S_immobilize_object(v);
+  
+  for (i = 0; i < len; i++)
+    INITVECTIT(v, i) = fill;
+
+  if (!(len & 0x1)) {
+    /* pad, since we're not going to copy on a GC */
+    INITVECTIT(v, len) = FIX(0);
+  }
+
+  return v;
 }
 
 static ptr s_oblist() {
@@ -505,7 +542,7 @@ static void s_showalloc(IBOOL show_dump, const char *outfn) {
 
     fprintf(out, "\nMap of occupied segments:\n");
     for (ls = sorted_chunks; ls != Snil; ls = Scdr(ls)) {
-      seginfo *si; ISPC real_s;
+      seginfo *si;
 
       chunk = Scar(ls);
 
@@ -542,11 +579,9 @@ static void s_showalloc(IBOOL show_dump, const char *outfn) {
         }
 
         si = &chunk->sis[i];
-        real_s = si->space;
-        s = real_s & ~(space_locked | space_old);
+        s = si->space;
         if (s < 0 || s > max_space) s = space_bogus;
-        spaceline[segwidth+segsprinted] =
-          real_s & (space_locked | space_old) ? toupper(spacechar[s]) : spacechar[s];
+        spaceline[segwidth+segsprinted] = spacechar[s];
 
         g = si->generation;
         genline[segwidth+segsprinted] =
@@ -962,6 +997,27 @@ static ptr s_strings_to_gensym(ptr pname_str, ptr uname_str) {
                    pname_str, uname_str);
 }
 
+ptr S_uninterned(x) ptr x; {
+  ptr sym;
+  static uptr hc;
+
+  require(Sstringp(x),"string->uninterned-symbol","~s is not a string",x);
+  if (!(STRTYPE(x) & string_immutable_flag))
+    x = S_mkstring(&STRIT(x, 0), Sstring_length(x));
+
+  sym = S_symbol(Scons(x, Sfalse));
+
+  /* Wraparound on `hc++` is ok. It's technically illegal with
+     threads, since multiple thread might increment `hc` at the same
+     time; we don't care if we miss an increment sometimes, and we
+     assume compilers won't take this as a license for arbitrarily bad
+     behavior: */
+  hc++;
+  INITSYMHASH(sym) = FIX(hc);
+
+  return sym;
+}
+
 static ptr s_mkdir(const char *inpath, INT mode) {
   INT status; ptr res; char *path;
 
@@ -1241,7 +1297,7 @@ static void c_exit(UNUSED I32 status) {
 #else /* defined(__STDC__) || defined(USE_ANSI_PROTOTYPES) */
 extern double sin(), cos(), tan(), asin(), acos(), atan(), atan2();
 extern double sinh(), cosh(), tanh(), exp(), log(), pow(), sqrt();
-extern double floor(), ceil(), HYPOT();
+extern double floor(), ceil(), round(), trunc(), HYPOT();
 #ifdef ARCHYPERBOLIC
 extern double asinh(), acosh(), atanh();
 #endif /* ARCHHYPERBOLIC */
@@ -1255,6 +1311,9 @@ static double s_exp(x) double x; { return exp(x); }
 
 static double s_log PROTO((double x));
 static double s_log(x) double x; { return log(x); }
+
+static double s_log2 PROTO((double x, double y));
+static double s_log2(x, y) double x, y; { return log(x) / log(y); }
 
 static double s_pow PROTO((double x, double y));
 #if (machine_type == machine_type_i3fb || machine_type == machine_type_ti3fb)
@@ -1319,6 +1378,12 @@ static double s_floor(x) double x; { return floor(x); }
 
 static double s_ceil PROTO((double x));
 static double s_ceil(x) double x; { return ceil(x); }
+
+static double s_round PROTO((double x));
+static double s_round(x) double x; { return rint(x); }
+
+static double s_trunc PROTO((double x));
+static double s_trunc(x) double x; { return trunc(x); }
 
 static double s_hypot PROTO((double x, double y));
 static double s_hypot(x, y) double x, y; { return HYPOT(x, y); }
@@ -1390,12 +1455,12 @@ static s_thread_rv_t s_backdoor_thread_start(p) void *p; {
   display("backdoor thread started\n")
   (void) Sactivate_thread();
   display("thread activated\n")
-  Scall0((ptr)p);
+  Scall0((ptr)Sunbox(p));
   (void) Sdeactivate_thread();
   display("thread deactivated\n")
   (void) Sactivate_thread();
   display("thread reeactivated\n")
-  Scall0((ptr)p);
+  Scall0((ptr)Sunbox(p));
   Sdestroy_thread();
   display("thread destroyed\n")
   s_thread_return;
@@ -1446,8 +1511,25 @@ static ptr s_profile_counters(void) {
   return S_G.profile_counters;
 }
 
-static void s_set_profile_counters(ptr counters) {
-  S_G.profile_counters = counters;
+/* s_profile_release_counters assumes and maintains the property that each pair's
+   tail is not younger than the pair and thereby avoids dirty sets. */
+static ptr s_profile_release_counters(void) {
+  ptr tossed, *p_keep, *p_toss, ls;
+  p_keep = &S_G.profile_counters;
+  p_toss = &tossed;
+  for (ls = *p_keep; ls != Snil && (MaybeSegInfo(ptr_get_segment(ls)))->generation <= S_G.prcgeneration; ls = Scdr(ls)) {
+    if (Sbwp_objectp(CAAR(ls))) {
+      *p_toss = ls;
+      p_toss = &Scdr(ls);
+    } else {
+      *p_keep = ls;
+      p_keep = &Scdr(ls);
+    }
+  }
+  *p_keep = ls;
+  *p_toss = Snil;
+  S_G.prcgeneration = 0;
+  return tossed;
 }
 
 void S_dump_tc(ptr tc) {
@@ -1467,6 +1549,8 @@ void S_dump_tc(ptr tc) {
   }
   fflush(stdout);
 }
+
+#define proc2ptr(x) (ptr)(iptr)(x)
 
 void S_prim5_init() {
     if (!S_boot_time) return;
@@ -1494,6 +1578,9 @@ void S_prim5_init() {
     Sforeign_symbol("(cs)s_weak_pairp", (void *)s_weak_pairp);
     Sforeign_symbol("(cs)s_ephemeron_cons", (void *)s_ephemeron_cons);
     Sforeign_symbol("(cs)s_ephemeron_pairp", (void *)s_ephemeron_pairp);
+    Sforeign_symbol("(cs)box_immobile", (void *)s_box_immobile);
+    Sforeign_symbol("(cs)make_immobile_vector", (void *)s_make_immobile_vector);
+    Sforeign_symbol("(cs)make_immobile_bytevector", (void *)s_make_immobile_bytevector);
     Sforeign_symbol("(cs)continuation_depth", (void *)S_continuation_depth);
     Sforeign_symbol("(cs)single_continuation", (void *)S_single_continuation);
     Sforeign_symbol("(cs)c_exit", (void *)c_exit);
@@ -1516,6 +1603,7 @@ void S_prim5_init() {
     Sforeign_symbol("(cs)s_intern3", (void *)s_intern3);
     Sforeign_symbol("(cs)s_strings_to_gensym", (void *)s_strings_to_gensym);
     Sforeign_symbol("(cs)s_intern_gensym", (void *)S_intern_gensym);
+    Sforeign_symbol("(cs)s_uninterned", (void *)S_uninterned);
     Sforeign_symbol("(cs)cputime", (void *)S_cputime);
     Sforeign_symbol("(cs)realtime", (void *)S_realtime);
     Sforeign_symbol("(cs)clock_gettime", (void *)S_clock_gettime);
@@ -1584,6 +1672,7 @@ void S_prim5_init() {
     Sforeign_symbol("(cs)lognot", (void *)S_lognot);
     Sforeign_symbol("(cs)fxmul", (void *)s_fxmul);
     Sforeign_symbol("(cs)fxdiv", (void *)s_fxdiv);
+    Sforeign_symbol("(cs)s_big_negate", (void *)S_big_negate);
     Sforeign_symbol("(cs)add", (void *)S_add);
     Sforeign_symbol("(cs)gcd", (void *)S_gcd);
     Sforeign_symbol("(cs)mul", (void *)S_mul);
@@ -1619,6 +1708,7 @@ void S_prim5_init() {
 #else
     Sforeign_symbol("(cs)directory_list", (void *)S_directory_list);
 #endif
+    Sforeign_symbol("(cs)dequeue_scheme_signals", (void *)S_dequeue_scheme_signals);
     Sforeign_symbol("(cs)register_scheme_signal", (void *)S_register_scheme_signal);
 
     Sforeign_symbol("(cs)exp", (void *)s_exp);
@@ -1679,13 +1769,36 @@ void S_prim5_init() {
     Sforeign_symbol("(cs)s_widechartomultibyte", (void *)s_widechartomultibyte);
 #endif
     Sforeign_symbol("(cs)s_profile_counters", (void *)s_profile_counters);
-    Sforeign_symbol("(cs)s_set_profile_counters", (void *)s_set_profile_counters);
+    Sforeign_symbol("(cs)s_profile_release_counters", (void *)s_profile_release_counters);
+
+    S_install_c_entry(CENTRY_flfloor, proc2ptr(s_floor));
+    S_install_c_entry(CENTRY_flceiling, proc2ptr(s_ceil));
+    S_install_c_entry(CENTRY_flround, proc2ptr(s_round));
+    S_install_c_entry(CENTRY_fltruncate, proc2ptr(s_trunc));
+    S_install_c_entry(CENTRY_flsin, proc2ptr(s_sin));
+    S_install_c_entry(CENTRY_flcos, proc2ptr(s_cos));
+    S_install_c_entry(CENTRY_fltan, proc2ptr(s_tan));
+    S_install_c_entry(CENTRY_flasin, proc2ptr(s_asin));
+    S_install_c_entry(CENTRY_flacos, proc2ptr(s_acos));
+    S_install_c_entry(CENTRY_flatan, proc2ptr(s_atan));
+    S_install_c_entry(CENTRY_flatan2, proc2ptr(s_atan2));
+    S_install_c_entry(CENTRY_flexp, proc2ptr(s_exp));
+    S_install_c_entry(CENTRY_fllog, proc2ptr(s_log));
+    S_install_c_entry(CENTRY_fllog2, proc2ptr(s_log2));
+    S_install_c_entry(CENTRY_flexpt, proc2ptr(s_pow));
+    S_install_c_entry(CENTRY_flsqrt, proc2ptr(s_sqrt));
+
+    S_check_c_entry_vector();
 }
 
-static ptr s_get_reloc(co) ptr co; {
+static ptr s_get_reloc(co, with_offsets) ptr co; IBOOL with_offsets; {
   ptr t, ls; uptr a, m, n;
 
   require(Scodep(co),"s_get_reloc","~s is not a code object",co);
+
+  if (s_generation(co) == FIX(static_generation))
+    return Snil;
+
   ls = Snil;
   t = CODERELOC(co);
   m = RELOCSIZE(t);
@@ -1704,13 +1817,17 @@ static ptr s_get_reloc(co) ptr co; {
     a += code_off;
     obj = S_get_code_obj(RELOC_TYPE(entry), co, a, item_off);
     if (!Sfixnump(obj)) {
-      ptr x;
-      for (x = ls; ; x = Scdr(x)) {
-        if (x == Snil) {
-          ls = Scons(obj,ls);
-          break;
-        } else if (Scar(x) == obj)
-          break;
+      if (with_offsets) {
+        ls = Scons(Scons(obj, FIX(a-code_data_disp)), ls);
+      } else {
+        ptr x;
+        for (x = ls; ; x = Scdr(x)) {
+          if (x == Snil) {
+            ls = Scons(obj,ls);
+            break;
+          } else if (Scar(x) == obj)
+            break;
+        }
       }
     }
   }

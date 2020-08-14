@@ -244,6 +244,17 @@ EXPORT double_float call_df(ptr code, double_float x, int m, int k) {
   return (*((double_float (*) (double_float))Sforeign_callable_entry_point(code)))(x + m) + k;
 }
 
+EXPORT double_float call_varargs_df(ptr code, double_float x, int m, int k) {
+  return (*((double_float (*) (double, ...))Sforeign_callable_entry_point(code)))(x - m, x + m) + k;
+}
+
+EXPORT double_float call_varargs_i7df(ptr code, int i,
+                                      double_float a, double_float b, double_float c,
+                                      double_float d, double_float e, double_float f,
+                                      double_float g) {
+  return (*((double_float (*) (int, ...))Sforeign_callable_entry_point(code)))(i, a, b, c, d, e, f, g);
+}
+
 EXPORT u8 *u8_star_to_u8_star(u8 *s) {
   return s == (u8 *)0 ? (u8 *)0 : s + 1;
 }
@@ -441,6 +452,18 @@ EXPORT void call_many_times(void (*f)(iptr))
     a = b; b = c; c = d; d = e;
     e = g; g = h; h = i; i = j;
     j = k+2; k = l+2; l = m+2; m = m+2;
+  }
+}
+
+EXPORT void call_many_times_bv(void (*f)(char *s))
+{
+  /* make this sensible as u8*, u16*, and u32* */
+  char buf[8] = { 1, 2, 3, 4, 0, 0, 0, 0 };
+  int x;
+
+  for (x = 0; x < 1000000; x++) {
+    buf[0] = (x & 63) + 1;
+    f(buf);
   }
 }
 

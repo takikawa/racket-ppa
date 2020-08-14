@@ -1,3 +1,10 @@
+7.8
+- Bug fixes and type updates.
+7.7
+- Bug fixes and type updates.
+7.6
+- Remove optimization of float-complex division.
+- Improve `for/...` support.
 7.5
 - Initial support for struct type properties.
 7.4

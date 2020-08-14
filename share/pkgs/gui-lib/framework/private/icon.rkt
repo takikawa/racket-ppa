@@ -7,7 +7,8 @@
          racket/runtime-path
          "bday.rkt"
          "sig.rkt"
-         mred/mred-sig)
+         mred/mred-sig
+         mrlib/panel-wob)
 
 (provide icon@)
 
@@ -19,6 +20,7 @@
 (define-runtime-path paren-bitmap-path '(lib "paren.xbm" "icons"))
 (define-runtime-path mrf-bitmap-path '(lib "mrf.png" "icons"))
 (define-runtime-path gc-on-bitmap-path '(lib "recycle.png" "icons"))
+(define-runtime-path gc-wob-on-bitmap-path '(lib "wob-recycle.png" "icons"))
 
 (define-runtime-path up-down-mask-path '(lib "up-down-mask.xbm" "icons"))
 (define-runtime-path up-down-csr-path '(lib "up-down-cursor.xbm" "icons"))
@@ -62,27 +64,39 @@
   
   (define mrf-on-bitmap (delay/sync (make-object bitmap% mrf-bitmap-path)))
   (define gc-on-bitmap (delay/sync (read-bitmap gc-on-bitmap-path #:try-@2x? #t)))
+  (define gc-wob-on-bitmap (delay/sync (read-bitmap gc-wob-on-bitmap-path #:try-@2x? #t)))
   
-  (define (make-off-bitmap onb)
+  (define (make-off-bitmap onb [wob? #f])
     (let* ([bitmap (make-object bitmap%
                      (send onb get-width)
                      (send onb get-height))]
            [bdc (make-object bitmap-dc% bitmap)])
       (send bdc clear)
+      (when wob?
+        (send bdc set-pen "black" 1 'transparent)
+        (send bdc set-brush "black" 'solid)
+        (send bdc draw-rectangle 0 0
+              (send onb get-width)
+              (send onb get-height)))
       (send bdc set-bitmap #f)
       bitmap))
   
   (define mrf-off-bitmap (delay/sync (make-off-bitmap (force mrf-on-bitmap))))
   (define gc-off-bitmap (delay/sync (make-off-bitmap (force gc-on-bitmap))))
+  (define gc-wob-off-bitmap (delay/sync (make-off-bitmap (force gc-wob-on-bitmap) #t)))
   
   (define (get-gc-on-bitmap)
     (force
      (if (mrf-bday?)
          mrf-on-bitmap
-         gc-on-bitmap)))
+         (if (white-on-black-panel-scheme?)
+             gc-wob-on-bitmap
+             gc-on-bitmap))))
   
   (define (get-gc-off-bitmap)
     (force
      (if (mrf-bday?)
          mrf-off-bitmap
-         gc-off-bitmap))))
+         (if (white-on-black-panel-scheme?)
+             gc-wob-off-bitmap
+             gc-off-bitmap)))))

@@ -10,12 +10,15 @@
 ;; FIXME: Need to disable printing of structs with custom-write property
 
 ;; pretty-print-syntax : syntax port partition number SuffixOption hasheq number bool
+;;                       #:taint-icons (or/c #f #t (box/c (Listof Nat)))
 ;;                    -> range%
 (define (pretty-print-syntax stx port
-                             primary-partition colors suffix-option styles columns abbrev?)
+                             primary-partition colors suffix-option styles columns abbrev?
+                             #:taint-icons [taint-icons #f])
   (define range-builder (new range-builder%))
   (define-values (datum ht:flat=>stx ht:stx=>flat)
-    (syntax->datum/tables stx primary-partition colors suffix-option abbrev?))
+    (syntax->datum/tables stx primary-partition colors suffix-option abbrev?
+                          #:taint-icons? (and taint-icons #t)))
   (define identifier-list
     (filter identifier? (hash-map ht:stx=>flat (lambda (k v) k))))
   (define (flat=>stx obj)
@@ -28,6 +31,8 @@
   (define (pp-pre-hook obj port)
     (when (flat=>stx obj)
       (send range-builder push! (current-position)))
+    (when (and (box? taint-icons) (wrapped-stx? obj))
+      (set-box! taint-icons (cons (current-position) (unbox taint-icons))))
     (send range-builder set-start obj (current-position)))
   (define (pp-post-hook obj port)
     (define stx (flat=>stx obj))
@@ -36,7 +41,8 @@
     (let ([start (send range-builder get-start obj)]
           [end (current-position)])
       (when (and start stx)
-        (send range-builder add-range stx (cons start end)))))
+        (define pstart (+ start (if (wrapped-stx? obj) 1 0)))
+        (send range-builder add-range stx (range stx start pstart end)))))
 
   (unless (syntax? stx)
     (raise-type-error 'pretty-print-syntax "syntax" stx))
@@ -72,10 +78,12 @@
         [else #f]))
 
 (define (pp-remap-stylable obj)
-  (and (id-syntax-dummy? obj)
-       (let ([remap (id-syntax-dummy-remap obj)])
-         (and (not (memq remap special-expression-keywords))
-              remap))))
+  (cond [(wrapped-stx? obj)
+         (pp-remap-stylable (wrapped-stx-contents obj))]
+        [(id-syntax-dummy? obj)
+         (let ([remap (id-syntax-dummy-remap obj)])
+           (and (not (memq remap special-expression-keywords)) remap))]
+        [else #f]))
 
 (define (pp-better-style-table styles)
   (define style-list (for/list ([(k v) (in-hash styles)]) (cons k v)))
@@ -108,8 +116,6 @@
        (map cdr style-list))))
   |#)
 
-(define-local-member-name range:get-ranges)
-
 ;; range-builder%
 (define range-builder%
   (class object%
@@ -122,13 +128,10 @@
     (define/public (get-start obj)
       (hash-ref starts obj #f))
 
-    (define/public (add-range obj range)
-      (hash-set! ranges obj (cons range (get-ranges obj))))
+    (define/public (add-range stx r)
+      (hash-set! ranges stx (cons r (hash-ref ranges stx null))))
 
-    (define (get-ranges obj)
-      (hash-ref ranges obj null))
-
-    (define/public (range:get-ranges) ranges)
+    (define/public (get-ranges-table) ranges)
 
     ;; ----
 
@@ -147,7 +150,7 @@
       (set! working-subs null))
 
     (define/public (pop! stx end)
-      (define latest (make-treerange stx working-start end (reverse working-subs)))
+      (define latest (treerange stx working-start end (reverse working-subs)))
       (set! working-start (car saved-starts))
       (set! working-subs (car saved-subss))
       (set! saved-starts (cdr saved-starts))
@@ -163,7 +166,7 @@
     (init-field identifier-list)
     (super-new)
 
-    (define ranges (hash-copy (send range-builder range:get-ranges)))
+    (define ranges (send range-builder get-ranges-table))
     (define subs (reverse (send range-builder get-subs)))
 
     (define/public (get-ranges obj)
@@ -181,11 +184,7 @@
     (define sorted-ranges
       (delay
         (sort 
-         (apply append 
-                (hash-map
-                 ranges
-                 (lambda (k vs)
-                   (map (lambda (v) (make-range k (car v) (cdr v))) vs))))
+         (apply append (hash-values ranges))
          (lambda (x y)
            (>= (- (range-end x) (range-start x))
                (- (range-end y) (range-start y)))))))

@@ -64,7 +64,13 @@
                                                              #f))]
                [else #`(define-values (var ...) #,(expr-iterator #'expr #f code-insp #f))]))]
       [(define-syntaxes (var ...) expr)
-       #`(define-syntaxes (var ...) #,(expr-iterator #'expr #f code-insp #t))]
+       ;; Handling of phase-1 code isn't right, because introduced code
+       ;; is not phase-shifted. So, skip phase-1 code for now:
+       #;#`(define-syntaxes (var ...) #,(expr-iterator #'expr #f code-insp #t))
+       stx]
+      [(begin-for-syntax . _)
+       ;; Ditto:
+       stx]
       [(begin . top-level-exprs)
        #`(begin #,@(map top-level-expr-iterator (syntax->list #'top-level-exprs)))]
       [(#%require . require-specs)
@@ -97,7 +103,7 @@
                                                                       #,calltrace-key))])
                                              (#,print-call-trace 
                                               (quote-syntax #,name-guess)
-                                              #,(syntax-original? name-guess)
+                                              #,(and (syntax? name-guess) (syntax-original? name-guess))
                                               (#,stx-protector-stx #,(make-stx-protector stx))
                                               (list #,@arglist-proper)
                                               #,improper?
@@ -110,7 +116,7 @@
                         (syntax->datum stx))]))]
            [let-values-abstraction
             (lambda (stx)
-              (kernel-syntax-case stx #f
+              (kernel-syntax-case (syntax-disarm stx insp) #f
                 [(kwd (((variable ...) rhs) ...) . bodies)
                  (let* ([clause-fn 
                          (lambda (vars rhs)
@@ -129,7 +135,7 @@
                         "unexpected let(rec) expression: ~a"
                         stx
                         ;(syntax->datum stx)
-                        )]))]) 
+                        )]))])
        (kernel-syntax-case (syntax-disarm stx insp) trans?-expr
          [var-stx
           (identifier? (syntax var-stx))

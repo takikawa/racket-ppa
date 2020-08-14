@@ -273,7 +273,7 @@ Scheme_Config *scheme_init_error_escape_proc(Scheme_Config *config)
   %- = skip int
 
   %L = line number as intptr_t, -1 means no line
-  %R = get error numebr and string from rktio
+  %R = get error number and string from rktio
   %e = error number for strerror()
   %E = error number for platform-specific error string
   %Z = potential platform-specific error number; additional char*
@@ -796,7 +796,7 @@ void scheme_init_error(Scheme_Startup_Env *env)
   scheme_raise_arity_error_proc =                  scheme_make_noncm_prim(raise_arity_error, "raise-arity-error", 2, -1);
   scheme_addto_prim_instance("raise-arity-error",  scheme_raise_arity_error_proc, env);
   ESCAPING_NONCM_PRIM("raise-arity-mask-error",     raise_arity_mask_error, 2, -1, env);
-  ESCAPING_NONCM_PRIM("raise-result-arity-error",   raise_result_arity_error, 2, -1, env);
+  ESCAPING_NONCM_PRIM("raise-result-arity-error",   raise_result_arity_error, 3, -1, env);
 
   ADD_PARAMETER("error-display-handler",       error_display_handler,      MZCONFIG_ERROR_DISPLAY_HANDLER,       env);
   ADD_PARAMETER("error-value->string-handler", error_value_string_handler, MZCONFIG_ERROR_PRINT_VALUE_HANDLER,   env);
@@ -1157,20 +1157,6 @@ void scheme_log_w_data(Scheme_Logger *logger, int level, int flags,
   buffer[len] = 0;
 
   scheme_log_message(logger, level, buffer, len, data);
-}
-
-int scheme_log_level_p(Scheme_Logger *logger, int level)
-{
-  if (!logger) {
-    Scheme_Config *config;
-    config = scheme_current_config();
-    logger = (Scheme_Logger *)scheme_get_param(config, MZCONFIG_LOGGER);
-  }
-
-  if (logger->local_timestamp < SCHEME_INT_VAL(logger->root_timestamp[0]))
-    update_want_level(logger, NULL);
-
-  return (logger->want_level >= level);
 }
 
 static char *error_write_to_string_w_max(Scheme_Object *v, int len, intptr_t *lenout)
@@ -3063,7 +3049,7 @@ static Scheme_Object *good_print_width(int c, Scheme_Object **argv)
   int ok;
 
   ok = (SCHEME_INTP(argv[0]) 
-	? (SCHEME_INT_VAL(argv[0]) > 3)
+	? (SCHEME_INT_VAL(argv[0]) >= 3)
 	: (SCHEME_BIGNUMP(argv[0])
 	   ? SCHEME_BIGPOS(argv[0])
 	   : 0));
@@ -3658,6 +3644,33 @@ static int get_want_level(Scheme_Logger *logger, Scheme_Object *name)
   }
 }
 
+int scheme_log_level_topic_p(Scheme_Logger *logger, int level, Scheme_Object *name)
+{
+  if (!logger) {
+    Scheme_Config *config;
+    config = scheme_current_config();
+    logger = (Scheme_Logger *)scheme_get_param(config, MZCONFIG_LOGGER);
+  }
+
+  if (!name) {
+    if (logger->local_timestamp < SCHEME_INT_VAL(logger->root_timestamp[0]))
+      update_want_level(logger, NULL);
+
+    return (logger->want_level >= level);
+  } else {
+    int want_level;
+
+    want_level = get_want_level(logger, name);
+
+    return (want_level >= level);
+  }
+}
+
+int scheme_log_level_p(Scheme_Logger *logger, int level)
+{
+  return scheme_log_level_topic_p(logger, level, NULL);
+}
+
 Scheme_Object *extract_all_levels(Scheme_Logger *logger)
 {
   Scheme_Hash_Table *names;
@@ -3792,7 +3805,7 @@ void scheme_log_name_pfx_message(Scheme_Logger *logger, int level, Scheme_Object
     }
 
     if (extract_spec_level(logger->stderr_level, name) >= level) {
-      if (name) {
+      if (name && prefix_msg) {
         intptr_t slen;
         slen = SCHEME_SYM_LEN(name);
         fwrite(SCHEME_SYM_VAL(name), slen, 1, stderr);
@@ -3803,7 +3816,7 @@ void scheme_log_name_pfx_message(Scheme_Logger *logger, int level, Scheme_Object
     }
 
     if (extract_spec_level(logger->stdout_level, name) >= level) {
-      if (name) {
+      if (name && prefix_msg) {
         intptr_t slen;
         slen = SCHEME_SYM_LEN(name);
         fwrite(SCHEME_SYM_VAL(name), slen, 1, stdout);
@@ -3962,17 +3975,21 @@ void scheme_glib_log_message(const char *log_domain,
 void *scheme_glib_log_message_test(char *str)
   XFORM_SKIP_PROC
 {
-  int i;
-  for (i = 0; str[i]; i++) {
-    if (str[i] == ';') {
-      str[i] = 0;
-      scheme_glib_log_message("test", mzG_LOG_LEVEL_WARNING, str, NULL);
-      str[i] = ';';
-      str = str + i + 1;
-      i = 0;
+  if (!str) {
+    scheme_glib_log_message(NULL, mzG_LOG_LEVEL_WARNING, "test", NULL);
+  } else {
+    int i;
+    for (i = 0; str[i]; i++) {
+      if (str[i] == ';') {
+        str[i] = 0;
+        scheme_glib_log_message("test", mzG_LOG_LEVEL_WARNING, str, NULL);
+        str[i] = ';';
+        str = str + i + 1;
+        i = 0;
+      }
     }
+    scheme_glib_log_message("test", mzG_LOG_LEVEL_WARNING, str, NULL);
   }
-  scheme_glib_log_message("test", mzG_LOG_LEVEL_WARNING, str, NULL);
   return NULL;
 }
 
@@ -4072,7 +4089,7 @@ log_message(int argc, Scheme_Object *argv[])
   bytes = scheme_char_string_to_byte_string(bytes);
   pos++;
 
-  if (argc >= (pos+1))
+  if (argc > (pos+1))
     pfx = SCHEME_TRUEP(argv[pos+1]);
   else
     pfx = 1;

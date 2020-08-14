@@ -17,66 +17,66 @@
 (if-feature windows
   (define-registers
     (reserved
-      [%tc  %r14           #t 14]
-      [%sfp %r13           #t 13]
-      [%ap  %rdi           #t  7]
+      [%tc  %r14           #t 14 uptr]
+      [%sfp %r13           #t 13 uptr]
+      [%ap  %rdi           #t  7 uptr]
       #;[%esp]
       #;[%eap]
       #;[%trap])
     (allocable
-      [%ac0 %rbp           #t  5]
-      [%xp  %r12           #t 12]
-      [%ts  %rax %Cretval  #f  0]
-      [%td  %rbx           #t  3]
-      [%ac1 %r10 %deact    #f 10]
-      [%yp  %r11           #f 11]
-      [%cp  %r15           #t 15]
-      [#;%ret %rsi           #t  6]
-      [     %rdx %Carg2    #f  2]
-      [     %r8  %Carg3    #f  8]
-      [     %r9  %Carg4    #f  9]
-      [     %rcx %Carg1    #f  1]) ; last to avoid use as a Scheme argument
+      [%ac0 %rbp           #t  5 uptr]
+      [%xp  %r12           #t 12 uptr]
+      [%ts  %rax %Cretval  #f  0 uptr]
+      [%td  %rbx           #t  3 uptr]
+      [%ac1 %r10 %deact    #f 10 uptr]
+      [%yp  %r11           #f 11 uptr]
+      [%cp  %r15           #t 15 uptr]
+      [#;%ret %rsi         #t  6 uptr]
+      [     %rdx %Carg2    #f  2 uptr]
+      [     %r8  %Carg3    #f  8 uptr]
+      [     %r9  %Carg4    #f  9 uptr]
+      [     %rcx %Carg1    #f  1 uptr] ; last to avoid use as a Scheme argument
+      [%fp1                #f  4 fp]
+      [%fp2                #f  5 fp])
     (machine-dependent
-      [%Cfparg1 %Cfpretval #f  0]
-      [%Cfparg2            #f  1]
-      [%Cfparg3            #f  2]
-      [%Cfparg4            #f  3]
-      [%flreg1             #f  4]  ; xmm 0-5 are caller-save
-      [%flreg2             #f  5]  ; xmm 6-15 are callee-save
-      [%sp                 #t  4]))
+      [%Cfparg1 %Cfpretval #f  0 fp]  ; xmm 0-5 are caller-save
+      [%Cfparg2            #f  1 fp]  ; xmm 6-15 are callee-save
+      [%Cfparg3            #f  2 fp]
+      [%Cfparg4            #f  3 fp]
+      [%sp                 #t  4 uptr]))
   (define-registers
     (reserved
-      [%tc  %r14           #t 14]
-      [%sfp %r13           #t 13]
-      [%ap  %r9  %Carg6    #f  9]
+      [%tc  %r14           #t 14 uptr]
+      [%sfp %r13           #t 13 uptr]
+      [%ap  %r9  %Carg6    #f  9 uptr]
       #;[%esp]
       #;[%eap]
       #;[%trap])
     (allocable
-      [%ac0 %rbp           #t  5]
-      [%xp  %r12           #t 12]
-      [%ts  %rax %Cretval  #f  0]
-      [%td  %rbx           #t  3]
-      [%ac1 %r10 %deact    #f 10]
-      [%yp  %r11           #f 11]
-      [%cp  %r15           #t 15]
-      [#;%ret %r8  %Carg5    #f  8]
-      [     %rdi %Carg1    #f  7]
-      [     %rsi %Carg2    #f  6]
-      [     %rdx %Carg3    #f  2]
-      [     %rcx %Carg4    #f  1])
+      [%ac0 %rbp           #t  5 uptr]
+      [%xp  %r12           #t 12 uptr]
+      [%ts  %rax %Cretval  #f  0 uptr]
+      [%td  %rbx           #t  3 uptr]
+      [%ac1 %r10 %deact    #f 10 uptr]
+      [%yp  %r11           #f 11 uptr]
+      [%cp  %r15           #t 15 uptr]
+      [#;%ret %r8  %Carg5  #f  8 uptr]
+      [     %rdi %Carg1    #f  7 uptr]
+      [     %rsi %Carg2    #f  6 uptr]
+      [     %rdx %Carg3    #f  2 uptr]
+      [     %rcx %Carg4    #f  1 uptr]
+      [%fp1                #f  8 fp]
+      [%fp2                #f  9 fp])
     (machine-dependent
-      [%Cfparg1 %Cfpretval #f  0]
-      [%Cfparg2            #f  1]
-      [%Cfparg3            #f  2]
-      [%Cfparg4            #f  3]
-      [%Cfparg5            #f  4]
-      [%Cfparg6            #f  5]
-      [%Cfparg7            #f  6]
-      [%Cfparg8            #f  7]
-      [%flreg1             #f  8]
-      [%flreg2             #f  9]
-      [%sp                 #t  4])))
+      [%Cfparg1 %Cfpretval #f  0 fp]
+      [%Cfparg2            #f  1 fp]
+      [%Cfparg3            #f  2 fp]
+      [%Cfparg4            #f  3 fp]
+      [%Cfparg5            #f  4 fp]
+      [%Cfparg6            #f  5 fp]
+      [%Cfparg7            #f  6 fp]
+      [%Cfparg8            #f  7 fp]
+      [%sp                 #t  4 uptr])))
 
 ;;; SECTION 2: instructions
 (module (md-handle-jump) ; also sets primitive handlers
@@ -100,6 +100,18 @@
     (lambda (x)
       (or (lmem? x) (literal@? x))))
 
+  (define fpmem?
+    (lambda (x)
+      (nanopass-case (L15c Triv) x
+        [(mref ,lvalue0 ,lvalue1 ,imm ,type) (eq? type 'fp)]
+        [else #f])))
+
+  (define-syntax mem-of-type?
+    (lambda (stx)
+      (syntax-case stx (mem fpmem)
+        [(_ mem e) #'(lmem? e)]
+        [(_ fpmem e) #'(fpmem? e)])))
+
   (define real-imm32?
     (lambda (x)
       (nanopass-case (L15c Triv) x
@@ -117,6 +129,7 @@
 
   (define lvalue->ur
     (lambda (x k)
+      (safe-assert (not (fpmem? x)))
       (if (mref? x)
           (let ([u (make-tmp 'u)])
             (seq
@@ -127,24 +140,24 @@
   (define mref->mref
     (lambda (a k)
       (define return
-        (lambda (x0 x1 imm)
-          (k (with-output-language (L15d Triv) `(mref ,x0 ,x1 ,imm)))))
+        (lambda (x0 x1 imm type)
+          (k (with-output-language (L15d Triv) `(mref ,x0 ,x1 ,imm ,type)))))
       (nanopass-case (L15c Triv) a
-        [(mref ,lvalue0 ,lvalue1 ,imm)
+        [(mref ,lvalue0 ,lvalue1 ,imm ,type)
          (lvalue->ur lvalue0
            (lambda (x0)
              (lvalue->ur lvalue1
                (lambda (x1)
                  (if (signed-32? imm)
-                     (return x0 x1 imm)
+                     (return x0 x1 imm type)
                      (let ([u (make-tmp 'u)])
                        (seq
                          (build-set! ,u (immediate ,imm))
                          (if (eq? x1 %zero)
-                             (return x0 u 0)
+                             (return x0 u 0 type)
                              (seq
                                (build-set! ,u (asm ,null-info ,asm-add ,u ,x1))
-                               (return x0 u 0))))))))))])))
+                               (return x0 u 0 type))))))))))])))
 
   (define mem->mem
     (lambda (a k)
@@ -153,20 +166,27 @@
          (let ([u (make-tmp 'u)])
            (seq
              (build-set! ,u ,(literal@->literal a))
-             (k (with-output-language (L15d Lvalue) `(mref ,u ,%zero 0)))))]
+             (k (with-output-language (L15d Lvalue) `(mref ,u ,%zero 0 ptr)))))]
         [else (mref->mref a k)])))
+
+  (define literal->literal
+    (lambda (a)
+      (nanopass-case (L15c Triv) a
+        [(literal ,info) (with-output-language (L15d Triv) `(literal ,info))])))
 
   (define-syntax coercible?
     (syntax-rules ()
       [(_ ?a ?aty*)
        (let ([a ?a] [aty* ?aty*])
-         (or (memq 'ur aty*)
+         (or (and (memq 'ur aty*) (not (or (fpmem? a) (fpur? a))))
+             (and (memq 'fpur aty*) (or (fpmem? a) (fpur? a)))
              (or (and (memq 'imm32 aty*) (imm32? a))
                  (and (memq 'imm aty*) (imm? a))
                  (and (memq 'zero aty*) (imm0? a))
                  (and (memq 'real-imm32 aty*) (real-imm32? a))
                  (and (memq 'negatable-real-imm32 aty*) (negatable-real-imm32? a))
-                 (and (memq 'mem aty*) (mem? a)))))]))
+                 (and (memq 'mem aty*) (mem? a))
+                 (and (memq 'fpmem aty*) (fpmem? a)))))]))
 
   (define-syntax coerce-opnd ; passes k something compatible with aty*
     (syntax-rules ()
@@ -174,6 +194,7 @@
        (let ([a ?a] [aty* ?aty*] [k ?k])
          (cond
            [(and (memq 'mem aty*) (mem? a)) (mem->mem a k)]
+           [(and (memq 'fpmem aty*) (fpmem? a)) (mem->mem a k)]
            [(and (memq 'imm32 aty*) (imm32? a)) (k (imm->imm a))]
            [(and (memq 'imm aty*) (imm? a)) (k (imm->imm a))]
            [(and (memq 'zero aty*) (imm0? a)) (k (imm->imm a))]
@@ -195,6 +216,18 @@
                        (build-set! ,u ,a)
                        (k u)))))]
               [else (sorry! 'coerce-opnd "unexpected operand ~s" a)])]
+           [(memq 'fpur aty*)
+            (cond
+              [(fpur? a) (k a)]
+              [(fpmem? a)
+               (mem->mem a
+                 (lambda (a)
+                   (let ([u (make-tmp 'u 'fp)])
+                     (seq
+                       (build-set! ,u ,a)
+                       (k u)))))]
+              [else
+               (sorry! 'coerce-opnd "unexpected operand ~s" a)])]
            [else (sorry! 'coerce-opnd "cannot coerce ~s to ~s" a aty*)]))]))
 
   (define set-ur=mref
@@ -254,7 +287,7 @@
                         [(ur? c) (#,k c b)]
                         [(mref? c)
                          (nanopass-case (L15c Triv) c
-                           [(mref ,lvalue0 ,lvalue1 ,imm)
+                           [(mref ,lvalue0 ,lvalue1 ,imm ,type)
                            ; TODO: does this use too many registers? (no longer special casing fv x0, x1 case)
                             (lvalue->ur lvalue0
                               (lambda (x0)
@@ -263,23 +296,30 @@
                                     (let ([u1 (make-tmp 'u)])
                                       (if (signed-32? imm)
                                           (seq
-                                            (build-set! ,u1 (mref ,x0 ,x1 ,imm))
+                                            (build-set! ,u1 (mref ,x0 ,x1 ,imm ,type))
                                             (#,k u1 b)
-                                            (build-set! (mref ,x0 ,x1 ,imm) ,u1))
+                                            (build-set! (mref ,x0 ,x1 ,imm ,type) ,u1))
                                           (let ([u2 (make-tmp 'u)])
                                             (seq
                                               (build-set! ,u2 ,imm)
                                               (build-set! ,x1 (asm ,null-info ,asm-add ,x1 ,u2))
-                                              (build-set! ,u1 (mref ,x0 ,x1 0))
+                                              (build-set! ,u1 (mref ,x0 ,x1 0 ,type))
                                               (#,k u1 b)
-                                              (build-set! (mref ,x0 ,x1 0) ,u1)))))))))])]
+                                              (build-set! (mref ,x0 ,x1 0 ,type) ,u1)))))))))])]
                         ; can't be literal@ since literals can't be lvalues
                         [else (sorry! '#,(datum->syntax #'* who) "unexpected operand ~s" c)])))
                   (next c a b)))))
 
+      (define mem-type?
+        (lambda (t)
+          (syntax-case t (mem fpmem)
+            [mem #t]
+            [fpmem #t]
+            [else #f])))
+
       (define make-value-clause
         (lambda (fmt)
-          (syntax-case fmt (mem ur xp)
+          (syntax-case fmt (mem fpmem ur fpur xp)
             [(op (c mem) (a ?c) (b bty* ...))
              (bound-identifier=? #'?c #'c)
              (acsame-mem #'c #'a #'b #'(bty* ...) #'(lambda (c b) (rhs c c b)))]
@@ -292,9 +332,10 @@
             [(op (c ur) (a aty* ...) (b ?c))
              (bound-identifier=? #'?c #'c)
              (acsame-ur #'c #'b #'a #'(aty* ...) #'(lambda (c a) (rhs c a c)))]
-            [(op (c mem) (a aty ...) (b bty ...))
+            [(op (c xmem) (a aty ...) (b bty ...))
+             (mem-type? #'xmem)
              #`(lambda (c a b)
-                 (if (and (lmem? c) (coercible? a '(aty ...)) (coercible? b '(bty ...)))
+                 (if (and (mem-of-type? xmem c) (coercible? a '(aty ...)) (coercible? b '(bty ...)))
                      (coerce-opnd b '(bty ...)
                        (lambda (b)
                          (coerce-opnd a '(aty ...)
@@ -311,6 +352,22 @@
                              (if (ur? c)
                                  (rhs c a b)
                                  (let ([u (make-tmp 'u)])
+                                   (seq
+                                     (rhs u a b)
+                                     (mref->mref c
+                                       (lambda (c)
+                                         (build-set! ,c ,u))))))))))
+                     (next c a b)))]
+            [(op (c fpur) (a aty ...) (b bty ...))
+             #`(lambda (c a b)
+                 (if (and (coercible? a '(aty ...)) (coercible? b '(bty ...)))
+                     (coerce-opnd b '(bty ...)
+                       (lambda (b)
+                         (coerce-opnd a '(aty ...)
+                           (lambda (a)
+                             (if (fpur? c)
+                                 (rhs c a b)
+                                 (let ([u (make-tmp 'u 'fp)])
                                    (seq
                                      (rhs u a b)
                                      (mref->mref c
@@ -359,9 +416,10 @@
                                  (rhs u u)
                                  (build-set! ,c ,u))))))
                      (next c a)))]
-            [(op (c mem) (a aty ...))
+            [(op (c xmem) (a aty ...))
+             (mem-type? #'xmem)
              #`(lambda (c a)
-                 (if (and (lmem? c) (coercible? a '(aty ...)))
+                 (if (and (mem-of-type? xmem c) (coercible? a '(aty ...)))
                      (coerce-opnd a '(aty ...)
                        (lambda (a)
                          (mem->mem c
@@ -382,6 +440,20 @@
                                      (rhs u a)
                                      (build-set! ,c ,u))))))))
                      (next c a)))]
+            [(op (c fpur) (a aty ...))
+             #`(lambda (c a)
+                 (if (coercible? a '(aty ...))
+                     (coerce-opnd a '(aty ...)
+                       (lambda (a)
+                         (if (fpur? c)
+                             (rhs c a)
+                             (mem->mem c
+                               (lambda (c)
+                                 (let ([u (make-tmp 'u 'fp)])
+                                   (seq
+                                     (rhs u a)
+                                     (build-set! ,c ,u))))))))
+                     (next c a)))]
             [(op (c ur))
              #`(lambda (c)
                  (if (ur? c)
@@ -392,9 +464,10 @@
                            (seq
                              (rhs u)
                              (build-set! ,c ,u)))))))]
-            [(op (c mem))
+            [(op (c xmem))
+             (mem-type? #'xmem)
              #`(lambda (c)
-                 (if (lmem? c)
+                 (if (mem-of-type? xmem c)
                      (mem->mem c
                        (lambda (c)
                          (rhs c)))
@@ -699,6 +772,20 @@
          (go info op t t y)
          `(set! ,(make-live-info) ,z ,t)))])
 
+  (define-instruction value popcount
+    [(op (z ur) (x ur mem))
+     ;; Direct POPCNT instruction variant, works with corresponding `popcount-op`:
+     #;
+     `(set! ,(make-live-info) ,z (asm ,info ,(asm-popcount (info-inline? info)) ,x))
+
+     ;; Link-editable variant, for corresponding `popcount-op`:
+     (let ([urcx (make-precolored-unspillable 'urcx %rcx)]
+           [urax (make-precolored-unspillable 'urax %rax)])
+       (seq
+        `(set! ,(make-live-info) ,urcx ,x)
+        `(set! ,(make-live-info) ,urax (asm ,info ,(asm-popcount (info-inline? info)) ,urcx))
+        `(set! ,(make-live-info) ,z ,urax)))])
+
   (define-instruction value move
     [(op (z mem) (x ur imm32))
      `(set! ,(make-live-info) ,z ,x)]
@@ -778,35 +865,57 @@
                  `(set! ,(make-live-info) ,u (asm ,null-info ,(asm-lea2 0) ,y ,z))
                  `(asm ,info ,(asm-store (info-load-type info)) ,x ,u (immediate 0) ,w))))))])
 
-  (define-instruction effect (load-single->double load-double->single)
-    [(op (x ur) (y ur) (z imm32))
-     `(asm ,info ,(asm-fl-cvt op (info-loadfl-flreg info)) ,x ,y ,z)])
+  (define-instruction value (load-single->double)
+    [(op (x fpur) (y fpmem))
+     `(set! ,(make-live-info) ,x (asm ,info ,(asm-fl-cvt 'single->double) ,y))])
 
-  (define-instruction effect (store-single->double)
-    [(op (x ur) (y ur) (z imm32))
-     `(asm ,info ,(asm-store-single->double (info-loadfl-flreg info)) ,x ,y ,z)])
+  (define-instruction value (single->double double->single)
+    [(op (x fpur) (y fpmem fpur))
+     `(set! ,(make-live-info) ,x (asm ,info ,(asm-fl-cvt op) ,y))])
 
-  (define-instruction effect (store-single store-double)
-    [(op (x ur) (y ur) (z imm32))
-     `(asm ,info ,(asm-fl-store op (info-loadfl-flreg info)) ,x ,y ,z)])
+  (define-instruction effect (store-double->single)
+    [(op (x fpmem) (y fpmem fpur))
+     (let ([u (make-tmp 'u 'fp)])
+       (seq
+        `(set! ,(make-live-info) ,u (asm ,null-info ,(asm-fl-cvt 'double->single) ,y))
+        `(asm ,info ,asm-store-single ,x ,u)))])
 
-  (define-instruction effect (load-double load-single)
-    [(op (x ur) (y ur) (z imm32))
-     `(asm ,info ,(asm-fl-load op (info-loadfl-flreg info)) ,x ,y ,z)])
+  (define-instruction effect (store-single)
+    [(op (x fpmem) (y fpur))
+     `(asm ,info ,asm-store-single ,x ,y)])
+
+  (define-instruction value (load-single)
+    [(op (x fpur) (y fpmem))
+     `(set! ,(make-live-info) ,x (asm ,info ,asm-load-single ,y))])
 
   (define-instruction value (get-double)
-    [(op (z ur))
-     `(set! ,(make-live-info) ,z
-        (asm ,info ,(asm-get-double (info-loadfl-flreg info))))])
+    [(op (z ur) (y fpur))
+     `(set! ,(make-live-info) ,z (asm ,info ,asm-get-double ,y))])
 
-  (define-instruction effect (flt)
-    [(op (x mem ur) (y ur)) `(asm ,info ,asm-flt ,x ,y)])
+  (define-instruction value (fpt)
+    [(op (x fpur) (y ur)) `(set! ,(make-live-info) ,x (asm ,info ,asm-fpt ,y))])
 
-  (define-instruction effect (fl+ fl- fl/ fl*)
-    [(op (x ur) (y ur) (z ur)) `(asm ,info ,(asm-flop-2 op) ,x ,y ,z)])
+  (define-instruction value (fpmove)
+    [(op (x fpmem) (y fpur)) `(set! ,(make-live-info) ,x (asm ,info ,asm-fpmove ,y))]
+    [(op (x fpur) (y fpmem)) `(set! ,(make-live-info) ,x (asm ,info ,asm-fpmove ,y))]
+    [(op (x fpur) (y fpur)) `(set! ,(make-live-info) ,x ,y)])
 
-  (define-instruction effect (flsqrt)
-    [(op (x ur) (y ur)) `(asm ,info ,asm-flsqrt ,x ,y)])
+  (define-instruction value (fpcastto)
+    [(op (x mem) (y fpur)) `(set! ,(make-live-info) ,x (asm ,info ,asm-fpmove ,y))]
+    [(op (x ur) (y fpmem)) `(set! ,(make-live-info) ,x (asm ,info ,asm-move ,y))]
+    [(op (x ur) (y fpur)) `(set! ,(make-live-info) ,x (asm ,info ,asm-fpcast ,y))])
+
+  (define-instruction value (fpcastfrom)
+    [(op (x fpmem) (y ur)) `(set! ,(make-live-info) ,x (asm ,info ,asm-move ,y))]
+    [(op (x fpur) (y mem)) `(set! ,(make-live-info) ,x (asm ,info ,asm-fpmove ,y))]
+    [(op (x fpur) (y ur)) `(set! ,(make-live-info) ,x (asm ,info ,asm-fpcast ,y))])
+
+  (define-instruction value (fp+ fp- fp* fp/)
+    [(op (x fpur) (y fpmem fpur) (z fpmem fpur))
+     `(set! ,(make-live-info) ,x (asm ,info ,(asm-fpop-2 op) ,y ,z))])
+
+  (define-instruction value (fpsqrt)
+    [(op (x fpur) (y fpmem fpur)) `(set! ,(make-live-info) ,x (asm ,info ,asm-fpsqrt ,y))])
 
   (define-instruction effect inc-cc-counter
     [(op (x ur) (y imm32 ur) (z imm32 ur)) `(asm ,info ,asm-inc-cc-counter ,x ,y ,z)])
@@ -814,8 +923,8 @@
   (define-instruction effect inc-profile-counter 
     [(op (x ur mem) (y imm32 ur)) `(asm ,info ,asm-inc-profile-counter ,x ,y)])
 
-  (define-instruction value (trunc)
-    [(op (z ur) (x ur)) `(set! ,(make-live-info) ,z (asm ,info ,asm-trunc ,x))])
+  (define-instruction value (fptrunc)
+    [(op (z ur) (x fpmem fpur)) `(set! ,(make-live-info) ,z (asm ,info ,asm-fptrunc ,x))])
 
   (define-instruction value get-tc
     [(op (z ur))
@@ -860,14 +969,17 @@
        (seq
          `(set! ,(make-live-info) ,urax (asm ,null-info ,asm-kill))
          `(asm ,info ,(asm-c-simple-call (info-c-simple-call-entry info)) ,urax)))])
-
+  
   (define-instruction value pop
     [(op (z ur)) `(set! ,(make-live-info) ,z (asm ,info ,asm-pop))])
 
-  (define-instruction pred (fl= fl< fl<=)
-    [(op (x ur) (y ur))
+  (define-instruction pred (fp= fp< fp<=)
+    [(op (x fpmem) (y fpur))
      (let ([info (make-info-condition-code op #t #f)]) ; NB: reversed? flag is assumed to be #t
-       (values '() `(asm ,info ,(asm-fl-relop info) ,x ,y)))])
+       (values '() `(asm ,info ,(asm-fp-relop info) ,x ,y)))]
+    [(op (x fpur) (y fpur))
+     (let ([info (make-info-condition-code op #t #f)]) ; NB: reversed? flag is assumed to be #t
+       (values '() `(asm ,info ,(asm-fp-relop info) ,x ,y)))])
 
   (define-instruction pred (eq? u< < > <= >=)
     ; the idea (following from the intel x86/x86_64 documentation)
@@ -928,7 +1040,7 @@
                   `(set! ,(make-live-info) ,uts (immediate 1))
                   `(set! ,(make-live-info) ,uts
                      (asm ,info ,asm-exchange ,uts
-                       (mref ,x ,y ,imm)))))])
+                       (mref ,x ,y ,imm uptr)))))])
            `(asm ,info-cc-eq ,asm-eq ,uts (immediate 0))))]))
 
   (define-instruction effect (locked-incr!)
@@ -966,6 +1078,16 @@
      (safe-assert (and (info-kill*? info) (memq %rdx (info-kill*-kill* info))))
      `(set! ,(make-live-info) ,z (asm ,info ,asm-read-time-stamp-counter))])
 
+  ;; currently returns ECX from CPUID function 1
+  (define-instruction value cpuid
+    [(op (z ur))
+     (safe-assert (eq? z %rax))
+     (safe-assert (and (info-kill*? info)
+                       (memq %rbx (info-kill*-kill* info))
+                       (memq %rcx (info-kill*-kill* info))
+                       (memq %rdx (info-kill*-kill* info))))
+     `(set! ,(make-live-info) ,z (asm ,info ,asm-cpuid))])
+
   ; NB: shouldn't need to list (info-kill*-live*-live* info) ... here, since we've already
   ; NB: computed spillable/register live sets
   (define-instruction effect (c-call)
@@ -994,16 +1116,19 @@
                      asm-move asm-move/extend asm-load asm-store asm-swap asm-library-call asm-library-jump
                      asm-mul asm-muli asm-addop asm-add asm-sub asm-negate asm-sub-negate
                      asm-pop asm-shiftop asm-sll asm-logand asm-lognot
-                     asm-logtest asm-fl-relop asm-relop asm-push asm-indirect-jump asm-literal-jump
-                     asm-direct-jump asm-return-address asm-jump asm-conditional-jump asm-data-label asm-rp-header
+                     asm-logtest asm-fp-relop asm-relop asm-push asm-indirect-jump asm-literal-jump
+                     asm-direct-jump asm-return-address asm-jump asm-conditional-jump asm-data-label
+                     asm-rp-header asm-rp-compact-header
                      asm-lea1 asm-lea2 asm-indirect-call asm-condition-code
-                     asm-fl-cvt asm-fl-store asm-fl-load asm-flt asm-trunc asm-div
+                     asm-fl-cvt asm-store-single asm-load-single asm-fpt asm-fptrunc asm-div asm-popcount
                      asm-exchange asm-pause asm-locked-incr asm-locked-decr asm-locked-cmpxchg
-                     asm-flop-2 asm-flsqrt asm-c-simple-call
+                     asm-fpsqrt asm-fpop-2 asm-fpmove asm-fpcast
+                     asm-c-simple-call
                      asm-save-flrv asm-restore-flrv asm-return asm-c-return asm-size
                      asm-enter asm-foreign-call asm-foreign-callable
                      asm-inc-profile-counter
                      asm-inc-cc-counter asm-read-time-stamp-counter asm-read-performance-monitoring-counter
+                     asm-cpuid
                      ; threaded version specific
                      asm-get-tc asm-activate-thread asm-deactivate-thread asm-unactivate-thread
                      ; machine dependent exports
@@ -1013,6 +1138,9 @@
     (case-lambda
       [(x) (record-case x [(reg) r #t] [else #f])]
       [(x reg) (record-case x [(reg) r (eq? r reg)] [else #f])]))
+
+  (define ax-fp-register?
+    (lambda (x) (record-case x [(reg) r (eq? 'fp (reg-type r))] [else #f])))
 
   (define ax-ea-reg-code
     (lambda (ea)
@@ -1138,6 +1266,10 @@
 
   (define-op locked-cmpxchg (*) locked-cmpxchg-op)
 
+  (define-op popcount (*) popcount-op)
+
+  (define-op cpuid     two-byte-op     #b1111 #b10100010)
+
   ; also do inc-reg dec-reg
 
   ; the following are forms of the call instruction and push the return address
@@ -1145,7 +1277,7 @@
   #;(define-op bsrl      branch-always-op long #b11101000) ; pc-relative
   (define-op bsr       bsr-op)
 
-  ; the following are forms of the jmp instruction
+  ; the followin<g are forms of the jmp instruction
   (define-op jmp       jump-op #b100) ; reg/mem indirect
   (define-op bra       bra-op)
 
@@ -1193,7 +1325,7 @@
   (define sse-op2
     (lambda (op prefix-code dstreg-op-code srcreg-op-code w source dest code*)
       (cond
-        [(ax-register? source)
+        [(ax-fp-register? source)
          (emit-code (op source dest code*)
            (build byte prefix-code)
            (ax-ea-rex w dest source #f)
@@ -1202,7 +1334,7 @@
            (ax-ea-modrm-reg dest source)
            (ax-ea-sib dest)
            (ax-ea-addr-disp dest))]
-        [(ax-register? dest)
+        [(ax-fp-register? dest)
          (emit-code (op source dest code*)
            (build byte prefix-code)
            (ax-ea-rex w source dest #f)
@@ -1577,6 +1709,69 @@
               [3 op-code]
               [0 (fxlogand (ax-ea-reg-code reg) 7)]))))))
 
+  ;; Direct POPCNT instruction variant:
+  #;
+  (define popcount-op
+    (lambda (op size dest-reg src-ea inline? code*)
+      (let ([code* (emit-code (op src-ea dest-reg code*)
+                     (build byte #xF3)
+                     (ax-ea-rex (if (eq? size 'quad) 1 0) src-ea dest-reg size)
+                     (build byte #x0F)
+                     (build byte #xB8)
+                     (ax-ea-modrm-reg src-ea dest-reg)
+                     (ax-ea-sib src-ea)
+                     (ax-ea-addr-disp src-ea))])
+        (if (not (and (ax-register? src-ea)
+                      (fx= (ax-ea-reg-code src-ea)
+                           (ax-ea-reg-code dest-reg))))
+            (emit xor dest-reg dest-reg code*) ; avoid false dependency
+            code*))))
+
+  ;; Link-editable variant:
+  (define popcount-op
+    (let ([target `(x86_64-popcount ,(constant code-data-disp) (library ,(lookup-libspec popcount-slow)))])
+      (lambda (op size dest-rax src-rcx inline? code*)
+        (safe-assert (and (ax-register? dest-rax) (ax-register? src-rcx)))
+        (record-case dest-rax
+          [(reg) dest-rax
+           (record-case src-rcx
+            [(reg) src-rcx
+             (safe-assert (and (eq? dest-rax %rax) (eq? src-rcx %rcx)))
+             (cond
+              [(not inline?)
+               ;; Set up a call to `popcount-slow`, which the linker
+               ;; can replace with a POPCNT instruction:
+               (asm-helper-call code* target dest-rax)]
+              [else
+               ;; Used for the body of `popcount-slow`.
+               ;; This is the sequence generated by LLVM's __builtin_popcountl(),
+               ;; but with pushes and pops to save used registers other than the
+               ;; result register %rax.
+               (emit-literal-code (op dest-rax src-rcx code*)
+                 51              ; pushq   %rcx
+                 57              ; pushq   %rdi
+                 48 89 c8        ; movq    %rcx, %rax
+                 48 d1 e8        ; shrq    %rax
+                 48 bf 55 55 55 55 55 55 55 55 ; movabsq $6148914691236517205, %rdi
+                 48 21 c7        ; andq    %rax, %rdi
+                 48 29 f9        ; subq    %rdi, %rcx
+                 48 b8 33 33 33 33 33 33 33 33 ; movabsq $3689348814741910323, %rax
+                 48 89 cf        ; movq    %rcx, %rdi
+                 48 21 c7        ; andq    %rax, %rdi
+                 48 c1 e9 02     ; shrq    $2, %rcx
+                 48 21 c1        ; andq    %rax, %rcx
+                 48 01 f9        ; addq    %rdi, %rcx
+                 48 89 c8        ; movq    %rcx, %rax
+                 48 c1 e8 04     ; shrq    $4, %rax
+                 48 8d 04 08     ; leaq    (%rax,%rcx), %rax
+                 48 bf 0f 0f 0f 0f 0f 0f 0f 0f ; movabsq $1085102592571150095, %rdi
+                 48 21 c7        ; andq    %rax, %rdi
+                 48 b8 01 01 01 01 01 01 01 01 ; movabsq $72340172838076673, %rax
+                 48 0f af c7     ; imulq   %rdi, %rax
+                 48 c1 e8 38     ; shrq    $56, %rax
+                 5f              ; popq    %rdi
+                 59)])])]))))    ; popq    %rcx
+
   (define-syntax emit-code
     (lambda (x)
       (define build-maybe-cons*
@@ -1589,6 +1784,25 @@
         [(_ (op opnd ... ?code*) chunk ...)
          (build-maybe-cons* #'(chunk ...)
            #'(aop-cons* `(asm ,op ,opnd ...) ?code*))])))
+
+  (define-syntax emit-literal-code
+    (lambda (x)
+      (syntax-case x ()
+        [(_ (op opnd ... ?code*) hexlike ...)
+         #`(emit-code (op opnd ... ?code*) (encode-hex-like hexlike) ...)])))
+
+  (define-syntax encode-hex-like
+    (lambda (x)
+      (syntax-case x ()
+        [(k hexlike)
+         (let ([n (let ([v (syntax->datum #'hexlike)])
+                    (if (number? v)
+                        ;; parsed as decimal; reparse as hex
+                        (string->number (number->string v) 16)
+                        ;; parsed as ymbol
+                        (string->number (symbol->string v) 16)))])
+           (with-syntax ([n (datum->syntax #'k n)])
+             #`(build byte n)))])))
 
   (define-who ax-size-code
     (lambda (x)
@@ -1765,7 +1979,7 @@
   (define asm-size
     (lambda (x)
       (case (car x)
-        [(asm x86_64-jump x86_64-call) 0]
+        [(asm x86_64-jump x86_64-call x86_64-popcount) 0]
         [(byte) 1]
         [(word) 2]
         [(long) 4]
@@ -1796,12 +2010,12 @@
             [else (sorry! who "unexpected op ~s" op)])))))
 
   (define asm-fl-cvt
-    (lambda (op flreg)
-      (lambda (code* base index offset)
-        (let ([src (build-mem-opnd base index offset)])
+    (lambda (op)
+      (lambda (code* dest-reg src)
+        (Trivit (src)
           (case op
-            [(load-single->double) (emit sse.cvtss2sd src (cons 'reg flreg) code*)]
-            [(load-double->single) (emit sse.cvtsd2ss src (cons 'reg flreg) code*)])))))
+            [(single->double) (emit sse.cvtss2sd src (cons 'reg dest-reg) code*)]
+            [(double->single) (emit sse.cvtsd2ss src (cons 'reg dest-reg) code*)])))))
 
   (define asm-store-single->double
     (lambda (flreg)
@@ -1810,61 +2024,76 @@
           (emit sse.cvtss2sd flreg flreg
             (emit sse.movsd flreg dest code*))))))
 
-  (define asm-fl-store
-    (lambda (op flreg)
-      (lambda (code* base index offset)
-        (let ([dest (build-mem-opnd base index offset)])
-          (case op
-            [(store-single) (emit sse.movss (cons 'reg flreg) dest code*)]
-            [(store-double) (emit sse.movsd (cons 'reg flreg) dest code*)])))))
+  (define asm-store-single
+    (lambda (code* dest flreg)
+      (Trivit (dest)
+        (emit sse.movss (cons 'reg flreg) dest code*))))
 
-  (define asm-fl-load
-    (lambda (op flreg)
-      (lambda (code* base index offset)
-        (let ([src (build-mem-opnd base index offset)])
-          (case op
-            [(load-single) (emit sse.movss src (cons 'reg flreg) code*)]
-            [(load-double) (emit sse.movsd src (cons 'reg flreg) code*)])))))
+  (define asm-load-single
+    (lambda (code* flreg src)
+      (Trivit (src)
+        (emit sse.movss src (cons 'reg flreg) code*))))
 
   (define asm-get-double
-    (lambda (flreg)
-      (lambda (code* dst)
-        (emit sse.movd (cons 'reg flreg) (cons 'reg dst) code*))))
+    (lambda (code* dst flreg)
+      (emit sse.movd (cons 'reg flreg) (cons 'reg dst) code*)))
 
-  (define asm-flt
-    (lambda (code* src flonumreg)
-      (Trivit (src)
-        (let ([dest `(disp ,(constant flonum-data-disp) ,flonumreg)]
-              [flreg (cons 'reg %flreg1)])
-          (emit sse.cvtsi2sd src flreg
-            (emit sse.movsd flreg dest code*))))))
+  (define asm-fpt
+    (lambda (code* dest src)
+      (Trivit (dest src)
+         (emit sse.cvtsi2sd src dest code*))))
 
-  (define asm-flop-2
+  (define asm-fpop-2
     (lambda (op)
-      (lambda (code* src1 src2 dest)
-        (let ([src1 `(disp ,(constant flonum-data-disp) ,src1)]
-              [src2 `(disp ,(constant flonum-data-disp) ,src2)]
-              [dest `(disp ,(constant flonum-data-disp) ,dest)])
-          (let ([code* (emit sse.movsd (cons 'reg %flreg1) dest code*)])
-            (let ([code* (case op
-                           [(fl+) (emit sse.addsd src2 (cons 'reg %flreg1) code*)]
-                           [(fl-) (emit sse.subsd src2 (cons 'reg %flreg1) code*)]
-                           [(fl*) (emit sse.mulsd src2 (cons 'reg %flreg1) code*)]
-                           [(fl/) (emit sse.divsd src2 (cons 'reg %flreg1) code*)])])
-              (emit sse.movsd src1 (cons 'reg %flreg1) code*)))))))
+      (lambda (code* dest-reg src1 src2)
+        (define (emit-it src dest code*)
+          (case op
+            [(fp+) (emit sse.addsd src dest code*)]
+            [(fp-) (emit sse.subsd src dest code*)]
+            [(fp*) (emit sse.mulsd src dest code*)]
+            [(fp/) (emit sse.divsd src dest code*)]))
+        (cond
+          [(eq? dest-reg src1)
+           (Trivit (dest-reg src2)
+             (emit-it src2 dest-reg code*))]
+          [(eq? dest-reg src2)
+           (if (memq op '(fp+ fp*))
+               (Trivit (dest-reg src1)
+                 (emit-it src1 dest-reg code*))
+               ;; Assuming that any subtraction or division will be
+               ;; done before we try to fill C arguments...
+               (Trivit (dest-reg src1 src2)
+                 (emit sse.movsd src2 (cons 'reg %Cfparg1)
+                   (emit sse.movsd src1 dest-reg
+                         (emit-it (cons 'reg %Cfparg1) dest-reg code*)))))]
+          [else
+           (Trivit (dest-reg src1 src2)
+             (if (equal? src1 src2)
+                 ;; avoid redundant load
+                 (emit sse.movsd src1 dest-reg
+                       (emit-it dest-reg dest-reg code*))
+                 (emit sse.movsd src1 dest-reg
+                       (emit-it src2 dest-reg code*))))]))))
 
-  (define asm-flsqrt
-    (lambda (code* src dest)
-      (let ([src `(disp ,(constant flonum-data-disp) ,src)]
-            [dest `(disp ,(constant flonum-data-disp) ,dest)])
-        (emit sse.sqrtsd src (cons 'reg %flreg1)
-          (emit sse.movsd (cons 'reg %flreg1) dest code*)))))
+  (define asm-fpsqrt
+    (lambda (code* dest-reg src)
+      (Trivit (dest-reg src)
+        (emit sse.sqrtsd src dest-reg code*))))
 
-  (define asm-trunc
-    (lambda (code* dest flonumreg)
-      (Trivit (dest)
-        (let ([src `(disp ,(constant flonum-data-disp) ,flonumreg)])
-          (emit sse.cvttsd2si src dest code*)))))
+  (define asm-fpmove
+    (lambda (code* dest src)
+      (Trivit (dest src)
+        (emit sse.movsd src dest code*))))
+
+  (define asm-fpcast
+    (lambda (code* dest src)
+      (Trivit (dest src)
+        (emit sse.movd src dest code*))))
+
+  (define asm-fptrunc
+    (lambda (code* dest src)
+      (Trivit (dest src)
+        (emit sse.cvttsd2si src dest code*))))
 
   (define asm-load
     (lambda (type)
@@ -1947,6 +2176,12 @@
       (Trivit (dest src0 src1)
         (emit mulsi src1 src0 dest code*))))
 
+  (define asm-popcount
+    (lambda (inline?)
+      (lambda (code* dest src)
+        (Trivit (dest src)
+          (emit popcount dest src inline? code*)))))
+
   (define-who asm-addop
     (lambda (op)
       (case op
@@ -1976,6 +2211,15 @@
       ; rdx is an implied dest and included in info's kill list
       (safe-assert (eq? dest %rax))
       (emit rdtsc code*)))
+
+  (define asm-cpuid
+    (lambda (code* dest)
+      ; rbx/rcx/rdx is an implied dest and included in info's kill list
+      (safe-assert (eq? dest %rax))
+      (emit movi '(imm 1) (cons 'reg %rax)
+        (emit cpuid
+          (emit mov (cons 'reg %rcx) (cons 'reg %rax)
+             code*)))))
 
   (define asm-inc-profile-counter
     (lambda (code* dest src)
@@ -2178,14 +2422,12 @@
             (let-values ([(l1 l2) (if i? (values l2 l1) (values l1 l2))])
               (asm-conditional-jump info l2 l1 offset)))))))
 
-  (define asm-fl-relop
+  (define asm-fp-relop
     (lambda (info)
       (lambda (l1 l2 offset x y)
         (values
-          (let ([x `(disp ,(constant flonum-data-disp) ,x)]
-                [y `(disp ,(constant flonum-data-disp) ,y)])
-            (emit sse.movsd y (cons 'reg %flreg1)
-              (emit sse.ucomisd x (cons 'reg %flreg1) '())))
+          (Trivit (x y)
+            (emit sse.ucomisd x y '()))
           (asm-conditional-jump info l1 l2 offset)))))
 
   (define asm-relop
@@ -2288,7 +2530,8 @@
 
   (define asm-direct-jump
     (lambda (l offset)
-      (asm-helper-jump '() (make-funcrel 'x86_64-jump l offset))))
+      (let ([offset (adjust-return-point-offset offset l)])
+        (asm-helper-jump '() (make-funcrel 'x86_64-jump l offset)))))
 
   (define asm-literal-jump
     (lambda (info)
@@ -2308,10 +2551,11 @@
         (or (cond
               [(local-label-offset l) =>
                (lambda (offset)
-                 (let ([disp (fx- next-addr (fx- offset incr-offset))])
-                   (and (signed-32? disp)
-                        (Trivit (dest)
-                          (emit lea `(riprel ,disp) dest '())))))]
+                 (let ([incr-offset (adjust-return-point-offset incr-offset l)])
+                   (let ([disp (fx- next-addr (fx- offset incr-offset))])
+                     (and (signed-32? disp)
+                          (Trivit (dest)
+                            (emit lea `(riprel ,disp) dest '()))))))]
                [else #f])
             (asm-move '() dest (with-output-language (L16 Triv) `(label-ref ,l ,incr-offset)))))))
 
@@ -2400,11 +2644,11 @@
               [(carry) (i? bcc bcs)]
               ; unordered: zf,pf,cf <- 111; gt: 000; lt: 001; eq: 100
               ; reversed & inverted: !(fl< y x) = !(fl> x y) iff zf = 1 & cf = 1
-              [(fl<) bls]
+              [(fp<) bls]
               ; reversed & inverted: !(fl<= y x) = !(fl>= x y) iff cf = 1
-              [(fl<=) bcs]
+              [(fp<=) bcs]
               ; inverted: !(fl= x y) iff zf = 0 or cf (or pf) = 1
-              [(fl=) (or bne bcs)]))))))
+              [(fp=) (or bne bcs)]))))))
 
   (define asm-data-label
     (lambda (code* l offset func code-size)
@@ -2437,21 +2681,42 @@
                         (library-code ,(lookup-libspec values-error)))])
       (lambda (code* mrvl fs lpm func code-size)
         (let ([size (constant-case ptr-bits [(32) 'long] [(64) 'quad])])
-          (cons*
-            (if (target-fixnum? lpm)
-                `(,size . ,(fix lpm))
-                `(abs 0 (object ,lpm)))
-            (aop-cons* `(asm livemask: ,(format "~b" lpm))
-              '(code-top-link)
-              (aop-cons* `(asm code-top-link)
-                `(,size . ,fs)
-                (aop-cons* `(asm "frame size:" ,fs)
-                  (if mrvl
-                      (asm-data-label code* mrvl 0 func code-size)
-                      (cons*
-                        mrv-error
-                        (aop-cons* `(asm "mrv point:" ,mrv-error)
-                          code*)))))))))))
+          (let* ([code* (cons* `(,size . ,fs)
+                               (aop-cons* `(asm "frame size:" ,fs)
+                                          code*))]
+                 [code* (cons* (if (target-fixnum? lpm)
+                                   `(,size . ,(fix lpm))
+                                   `(abs 0 (object ,lpm)))
+                               (aop-cons* `(asm livemask: ,(format "~b" lpm))
+                                          code*))]
+                 [code* (if mrvl
+                            (asm-data-label code* mrvl 0 func code-size)
+                            (cons*
+                             mrv-error
+                             (aop-cons* `(asm "mrv point:" ,mrv-error)
+                                        code*)))]
+                 [code* (cons*
+                         '(code-top-link)
+                         (aop-cons* `(asm code-top-link)
+                                    code*))])
+            code*)))))
+
+  (define asm-rp-compact-header
+    (lambda (code* err? fs lpm func code-size)
+      (let ([size (constant-case ptr-bits [(32) 'long] [(64) 'quad])])
+        (let* ([code* (cons* `(,size . ,(fxior (constant compact-header-mask)
+                                               (if err?
+                                                   (constant compact-header-values-error-mask)
+                                                   0)
+                                               (fxsll fs (constant compact-frame-words-offset))
+                                               (fxsll lpm (constant compact-frame-mask-offset))))
+                             (aop-cons* `(asm "mrv pt:" (,lpm ,fs ,(if err? 'error 'continue)))
+                                        code*))]
+               [code* (cons*
+                         '(code-top-link)
+                         (aop-cons* `(asm code-top-link)
+                                    code*))])
+            code*))))
 
   (define-syntax asm-enter
     (lambda (x)
@@ -2561,17 +2826,15 @@
 
     (module (push-registers pop-registers push-registers-size)
       (define (move-registers regs load?)
-        (define vfp (make-vfp))
-        (define (fp-reg? reg)
-          (let loop ([i (fx- (vector-length vfp) 1)])
-            (or (eq? reg (vector-ref vfp i))
-                (and (fx> i 0) (loop (fx- i 1))))))
+        (define (fp-reg? reg) (eq? (reg-type reg) 'fp))
         (with-output-language (L13 Effect)
           (let loop ([regs regs] [offset 0])
             (let* ([reg (car regs)]
                    [e (cond
                        [(fp-reg? reg)
-                        `(inline ,(make-info-loadfl reg) ,(if load? %load-double %store-double) ,%sp ,%zero (immediate ,offset))]
+                        (if load?
+                            `(set! ,reg ,(%mref ,%sp ,%zero ,offset fp))
+                            `(set! ,(%mref ,%sp ,%zero ,offset fp) ,reg))]
                        [load? `(set! ,reg ,(%mref ,%sp ,offset))]
                        [else `(set! ,(%mref ,%sp ,offset) ,reg)])]
                    [regs (cdr regs)])
@@ -2604,34 +2867,31 @@
       (with-output-language (L13 Effect)
         (letrec ([load-double-stack
                   (lambda (offset)
-                    (lambda (x) ; requires var
-                      (%seq
-                        (inline ,(make-info-loadfl %flreg1) ,%load-double ,x ,%zero ,(%constant flonum-data-disp))
-                        (inline ,(make-info-loadfl %flreg1) ,%store-double ,%sp ,%zero (immediate ,offset)))))]
+                    (lambda (x) ; unboxed
+                      `(set! ,(%mref ,%sp ,%zero ,offset fp) ,x)))]
                  [load-single-stack
                   (lambda (offset)
-                    (lambda (x) ; requires var
-                      (%seq
-                        (inline ,(make-info-loadfl %flreg1) ,%load-double->single ,x ,%zero ,(%constant flonum-data-disp))
-                        (inline ,(make-info-loadfl %flreg1) ,%store-single ,%sp ,%zero (immediate ,offset)))))]
+                    (lambda (x) ; unboxed
+                      (%inline store-double->single ,(%mref ,%sp ,%zero ,offset fp) ,x)))]
                  [load-int-stack
                   (lambda (offset)
                     (lambda (rhs) ; requires rhs
                       `(set! ,(%mref ,%sp ,offset) ,rhs)))]
                  [load-double-reg
                   (lambda (fpreg)
-                    (lambda (x) ; requires var
-                      `(inline ,(make-info-loadfl fpreg) ,%load-double ,x ,%zero ,(%constant flonum-data-disp))))]
+                    (lambda (x) ; unboxed
+                      `(set! ,fpreg ,x)))]
                  [load-double-reg2
                   (lambda (fpreg ireg)
-                    (lambda (x) ; requires var
+                    (lambda (x) ; unboxed
                       (%seq
-                       (inline ,(make-info-loadfl fpreg) ,%load-double ,x ,%zero ,(%constant flonum-data-disp))
-                       (set! ,ireg (inline ,(make-info-loadfl fpreg) ,%get-double)))))]
+                        (set! ,fpreg ,x)
+                        ;; To support the varargs convention, copy the value into a GP register
+                        (set! ,ireg ,(%inline get-double ,fpreg)))))]
                  [load-single-reg
                   (lambda (fpreg)
-                    (lambda (x) ; requires var
-                      `(inline ,(make-info-loadfl fpreg) ,%load-double->single ,x ,%zero ,(%constant flonum-data-disp))))]
+                    (lambda (x) ; unboxed
+                      `(set! ,fpreg ,(%inline double->single ,x))))]
                  [load-int-reg
                   (lambda (type ireg)
                     (lambda (x)
@@ -2678,10 +2938,10 @@
                           (cond
                            [(fx= size 4)
                             ;; Must be the last element
-                            `(inline ,(make-info-loadfl (vector-ref vfp ifp)) ,%load-single ,x ,%zero (immediate ,x-offset))]
+                            `(set! ,(vector-ref vfp ifp) ,(%inline load-single ,(%mref ,x ,%zero ,x-offset fp)))]
                            [else
                             `(seq
-                              (inline ,(make-info-loadfl (vector-ref vfp ifp)) ,%load-double ,x ,%zero (immediate ,x-offset))
+                              (set! ,(vector-ref vfp ifp) ,(%mref ,x ,%zero ,x-offset fp))
                               ,(loop (fx- size 8) iint (fx+ ifp 1) (cdr classes) (fx+ x-offset 8)))])]
                          ;; Remaining cases are integers:
                          [(>= size 8)
@@ -2882,8 +3142,8 @@
                 `(seq
                   ,(loop (cdr classes) (fx+ offset 8) iregs (cdr fpregs) (fx- size 8))
                   ,(case size
-                     [(4) `(inline ,(make-info-loadfl (car fpregs)) ,%store-single ,%rcx ,%zero (immediate ,offset))]
-                     [else `(inline ,(make-info-loadfl (car fpregs)) ,%store-double ,%rcx ,%zero (immediate ,offset))]))]
+                     [(4) (%inline store-single ,(%mref ,%rcx ,%zero ,offset fp) ,(car fpregs))]
+                     [else `(set! ,(%mref ,%rcx ,%zero ,offset fp) ,(car fpregs))]))]
                [else
                 `(seq
                   ,(loop (cdr classes) (fx+ offset 8) (cdr iregs) fpregs (fx- size 8))
@@ -2959,40 +3219,43 @@
                    [result-classes (classify-type result-type)]
                    [result-size (classified-size result-type)]
                    [fill-result-here? (result-fits-in-registers? result-classes)]
+                   [result-reg* (get-result-regs fill-result-here? result-type result-classes)]
                    [adjust-active? (if-feature pthreads (memq 'adjust-active conv*) #f)])
               (with-values (do-args (if fill-result-here? (cdr arg-type*) arg-type*) (make-vint) (make-vfp))
                 (lambda (frame-size nfp locs live* fp-live*)
                   (with-values (add-save-fill-target fill-result-here? frame-size locs)
                     (lambda (frame-size locs)
                       (returnem frame-size locs
-                        (lambda (t0)
+                        (lambda (t0 not-varargs?)
                           (let* ([t (if adjust-active? %deact t0)] ; need a register if `adjust-active?`
+                                 [kill* (add-caller-save-registers result-reg*)]                                 
                                  [c-call
                                   (add-deactivate adjust-active? t0 (append fp-live* live*)
-                                   (get-result-regs fill-result-here? result-type result-classes)
+                                   result-reg*
                                    (if-feature windows
                                      (%seq
                                        (set! ,%sp ,(%inline - ,%sp (immediate 32)))
-                                       (inline ,(make-info-kill*-live* (reg-list %rax %rdx) live*) ,%c-call ,t)
+                                       (inline ,(make-info-kill*-live* kill* (append fp-live* live*)) ,%c-call ,t)
                                        (set! ,%sp ,(%inline + ,%sp (immediate 32))))
                                      (%seq
-                                       ;; System V ABI varargs functions require count of fp regs used in %al register.
-                                       ;; since we don't know if the callee is a varargs function, we always set it.
-                                       (set! ,%rax (immediate ,nfp))
-                                       (inline ,(make-info-kill*-live* (reg-list %rax %rdx) (cons %rax live*)) ,%c-call ,t))))])
+                                      ,(if not-varargs?
+                                           `(nop)
+                                           ;; System V ABI varargs functions require count of fp regs used in %al register.
+                                           ;; since we don't know if the callee is a varargs function, we always set it.
+                                           `(set! ,%rax (immediate ,nfp)))
+                                      ,(let ([live* (append fp-live* live*)])
+                                         `(inline ,(make-info-kill*-live* kill* (if not-varargs? live* (cons %rax live*))) ,%c-call ,t)))))])
                             (cond
                              [fill-result-here?
                               (add-fill-result c-call (fx- frame-size (constant ptr-bytes)) result-classes result-size)]
                              [else c-call])))
                         (nanopass-case (Ltype Type) result-type
                           [(fp-double-float)
-                           (lambda (lvalue)
-                             `(inline ,(make-info-loadfl %Cfpretval) ,%store-double ,lvalue ,%zero
-                                ,(%constant flonum-data-disp)))]
+                           (lambda (lvalue) ; unboxed
+                             `(set! ,lvalue ,%Cfpretval))]
                           [(fp-single-float)
-                           (lambda (lvalue)
-                             `(inline ,(make-info-loadfl %Cfpretval) ,%store-single->double ,lvalue ,%zero
-                                ,(%constant flonum-data-disp)))]
+                           (lambda (lvalue) ; unboxed
+                             `(set! ,lvalue ,(%inline single->double ,%Cfpretval)))]
                           [(fp-integer ,bits)
                            (case bits
                              [(8) (lambda (lvalue) `(set! ,lvalue ,(%inline sext8 ,%rax)))]
@@ -3065,16 +3328,14 @@
         (let ()
           (define load-double-stack
             (lambda (offset)
-              (lambda (x) ; requires var
-                (%seq
-                  (inline ,(make-info-loadfl %flreg1) ,%load-double ,%sp ,%zero (immediate ,offset))
-                  (inline ,(make-info-loadfl %flreg1) ,%store-double ,x ,%zero ,(%constant flonum-data-disp))))))
+              (lambda (x) ; boxed (always a var)
+                `(set! ,(%mref ,x ,%zero ,(constant flonum-data-disp) fp)
+                       ,(%mref ,%sp ,%zero ,offset fp)))))
           (define load-single-stack
             (lambda (offset)
-              (lambda (x) ; requires var
-                (%seq
-                  (inline ,(make-info-loadfl %flreg1) ,%load-single->double ,%sp ,%zero (immediate ,offset))
-                  (inline ,(make-info-loadfl %flreg1) ,%store-double ,x ,%zero ,(%constant flonum-data-disp))))))
+              (lambda (x) ; boxed (always a var)
+                `(set! ,(%mref ,x ,%zero ,(constant flonum-data-disp) fp)
+                       ,(%inline load-single->double ,(%mref ,%sp ,%zero ,offset fp))))))
           (define load-int-stack
             (lambda (type offset)
               (lambda (lvalue)
@@ -3114,15 +3375,13 @@
                         [(fp-double-float)
                          (if (< i 4)
                              (%seq
-                               (inline ,(make-info-loadfl (vector-ref vfp i)) ,%store-double
-                                 ,%sp ,%zero (immediate ,isp))
+                               (set! ,(%mref ,%sp ,%zero ,isp fp) ,(vector-ref vfp i))
                                ,(f (cdr types) (fx+ i 1) (fx+ isp 8)))
                              (f (cdr types) i isp))]
                         [(fp-single-float)
                          (if (< i 4)
                              (%seq
-                               (inline ,(make-info-loadfl (vector-ref vfp i)) ,%store-single
-                                 ,%sp ,%zero (immediate ,isp))
+                               ,(%inline store-single ,(%mref ,%sp ,%zero ,isp fp) ,(vector-ref vfp i))
                                ,(f (cdr types) (fx+ i 1) (fx+ isp 8)))
                              (f (cdr types) i isp))]
                         [(fp-ftd& ,ftd)
@@ -3137,8 +3396,7 @@
                                     (eq? 'float (caar ($ftd->members ftd))))
                                ;; float or double
                                `(seq
-                                 (inline ,(make-info-loadfl (vector-ref vfp i)) ,%store-double
-                                         ,%sp ,%zero (immediate ,isp))
+                                 (set! ,(%mref ,%sp ,%zero ,isp fp) ,(vector-ref vfp i))
                                  ,(f (cdr types) (fx+ i 1) (fx+ isp 8)))]
                               [else
                                ;; integer
@@ -3172,15 +3430,13 @@
                         [(fp-double-float)
                          (if (< ifp 8)
                              (%seq
-                               (inline ,(make-info-loadfl (vector-ref vfp ifp)) ,%store-double
-                                 ,%sp ,%zero (immediate ,isp))
+                               (set! ,(%mref ,%sp ,%zero ,isp fp) ,(vector-ref vfp ifp))
                                ,(f (cdr types) iint (fx+ ifp 1) (fx+ isp 8)))
                              (f (cdr types) iint ifp isp))]
                         [(fp-single-float)
                          (if (< ifp 8)
                              (%seq
-                               (inline ,(make-info-loadfl (vector-ref vfp ifp)) ,%store-single
-                                 ,%sp ,%zero (immediate ,isp))
+                               ,(%inline store-single ,(%mref ,%sp ,%zero ,isp fp) ,(vector-ref vfp ifp))
                                ,(f (cdr types) iint (fx+ ifp 1) (fx+ isp 8)))
                              (f (cdr types) iint ifp isp))]
                         [(fp-ftd& ,ftd)
@@ -3199,8 +3455,7 @@
                                  (f (cdr types) iint ifp isp)]
                                 [(eq? (car classes) 'sse)
                                  `(seq
-                                   (inline ,(make-info-loadfl (vector-ref vfp ifp)) ,%store-double
-                                           ,%sp ,%zero (immediate ,isp))
+                                   (set! ,(%mref ,%sp ,%zero ,isp fp) ,(vector-ref vfp ifp))
                                    ,(reg-loop (cdr classes) iint (fx+ ifp 1) (+ isp 8)))]
                                 [else
                                  `(seq
@@ -3320,7 +3575,7 @@
                            (fx+ offset 8)
                            int*
                            (cdr fp*)
-                           (cons `(inline ,(make-info-loadfl (car fp*)) ,%load-double ,%sp ,%zero (immediate ,offset))
+                           (cons `(set! ,(car fp*) ,(%mref ,%sp ,%zero ,offset fp))
                                  accum)
                            live*
                            (cons (car fp*) fp-live*))]))]
@@ -3332,14 +3587,14 @@
                          '())])]
               [(fp-double-float)
                (values
-                (lambda (x)
-                  `(inline ,(make-info-loadfl %Cfpretval) ,%load-double ,x ,%zero ,(%constant flonum-data-disp)))
+                (lambda (x) ; boxed (always a var)
+                  `(set! ,%Cfpretval ,(%mref ,x ,%zero ,(constant flonum-data-disp) fp)))
                 '()
                 (list %Cfpretval))]
               [(fp-single-float)
                (values
-                (lambda (x)
-                  `(inline ,(make-info-loadfl %Cfpretval) ,%load-double->single ,x ,%zero ,(%constant flonum-data-disp)))
+                (lambda (x) ; boxed (always a var)
+                  `(set! ,%Cfpretval ,(%inline double->single ,(%mref ,x ,%zero ,(constant flonum-data-disp) fp))))
                 '()
                 (list %Cfpretval))]
               [(fp-void)
@@ -3347,10 +3602,10 @@
                        '()
                        '())]
               [else
-               (values(lambda (x)
-                        `(set! ,%Cretval ,x))
-                      (list %Cretval)
-                      '())]))
+               (values (lambda (x)
+                         `(set! ,%Cretval ,x))
+                       (list %Cretval)
+                       '())]))
           (define (unactivate result-regs)
             (let ([e `(seq
                        (set! ,%Carg1 ,(%mref ,%sp ,(+ (push-registers-size result-regs) (if-feature windows 72 176))))
@@ -3454,5 +3709,5 @@
                              (set! ,%rbp ,(%inline pop))
                              (set! ,%rbx ,(%inline pop))
                              (set! ,%sp ,(%inline + ,%sp (immediate 136)))))
-                        (asm-c-return ,null-info ,callee-save-regs ... ,result-regs ...))))))))))))))
+                        (asm-c-return ,null-info ,callee-save-regs ... ,result-regs ... ,result-fp-regs ...))))))))))))))
   )

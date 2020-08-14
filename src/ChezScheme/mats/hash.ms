@@ -1674,7 +1674,10 @@
           [wht (make-weak-eq-hashtable)]
           [eht (make-ephemeron-eq-hashtable)])
       (let ([ls2 (map (lambda (a1) (eq-hashtable-cell ht (car a1) (cdr a1))) ls1)]
-            [ls2-2 (map (lambda (a1) (eq-hashtable-try-atomic-cell ht (car a1) (cdr a1))) ls1)]
+            [ls2-2 (map (lambda (a1) (let loop ()
+                                       (define c (eq-hashtable-try-atomic-cell ht (car a1) (cdr a1)))
+                                       (or c (loop))))
+                        ls1)]
             [ls3 (map (lambda (a1) (hashtable-cell wht (car a1) (cdr a1))) ls1)]
             [ls4 (map (lambda (a1) (hashtable-cell eht (car a1) (cdr a1))) ls1)])
         (let ([ls2* (map (lambda (a1) (eq-hashtable-ref-cell ht (car a1))) ls1)]
@@ -3828,6 +3831,11 @@
          (exact? hc)
          (>= hc 0)
          (= (string-ci-hash "HelLo") hc)))
+  (let ([hc (equal-hash (stencil-vector 3 'one 'two))])
+    (and (integer? hc)
+         (exact? hc)
+         (>= hc 0)
+         (= (equal-hash (stencil-vector 3 'one 'two)) hc)))
   (let f ([ls (oblist)])
     (define okay?
       (lambda (x)
@@ -3937,19 +3945,20 @@
     (with-output-to-file "testfile.ss"
       (lambda ()
         (pretty-print
-          '(begin
-             (define-syntax $feh-ls
+          '(module ($feh-ls $feh-ht)
+             (define-syntax ls
                (let ([ls '(1 2 3)])
                  (lambda (x)
                    #`(quote #,(datum->syntax #'* ls)))))
+             (define $feh-ls ls)
              (define $feh-ht
                (let ()
                  (define-syntax a
                    (let ([ht (make-eq-hashtable)])
                      (eq-hashtable-set! ht 'q 'p)
-                     (eq-hashtable-set! ht $feh-ls (cdr $feh-ls))
-                     (eq-hashtable-set! ht (cdr $feh-ls) (cddr $feh-ls))
-                     (eq-hashtable-set! ht (cddr $feh-ls) $feh-ls)
+                     (eq-hashtable-set! ht ls (cdr ls))
+                     (eq-hashtable-set! ht (cdr ls) (cddr ls))
+                     (eq-hashtable-set! ht (cddr ls) ls)
                      (lambda (x) #`(quote #,(datum->syntax #'* ht)))))
                  a)))))
       'replace)

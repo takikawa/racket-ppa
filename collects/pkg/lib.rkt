@@ -1,5 +1,6 @@
 #lang racket/base
 (require racket/contract/base
+         (only-in racket/set set/c)
          net/url
          "path.rkt"
          "private/desc.rkt"
@@ -84,8 +85,12 @@
         pkg-desc?)]
   [pkg-config
    (->* (boolean? (listof string?))
-        (#:from-command-line? boolean?)
+        (#:from-command-line? boolean?
+         #:default-scope-scope (or/c package-scope/c #f))
         void?)]
+  [pkg-config-default-scope-scope
+   (->* ()
+        (or/c package-scope/c #f))]
   [pkg-new
    (-> path-string? void?)]
   [pkg-create
@@ -196,6 +201,11 @@
                         #:state-catalog (or/c path-string? #f)
                         #:relative-sources? boolean?
                         #:quiet? boolean?
+                        #:include (or/c #f (listof string?))
+                        #:include-deps? boolean?
+                        #:include-deps-sys+subpath (or/c #f (cons/c symbol? path-for-some-system?))
+                        #:exclude (or/c #f (listof string?))
+                        #:fast-file-copy? boolean?
                         #:package-exn-handler (string? exn:fail? . -> . any))
         void?)]
   [pkg-archive-pkgs
@@ -232,7 +242,7 @@
                           path?
                           (or/c #f string?)
                           boolean?
-                          (listof module-path?)))]
+                          (set/c module-path? #:cmp 'equal #:kind 'immutable)))]
   [pkg-config-catalogs
    (-> (listof string?))]
   [pkg-catalog-update-local

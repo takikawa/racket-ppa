@@ -17,13 +17,12 @@
 #include "system.h"
 
 /* locally defined functions */
-static IBOOL memqp PROTO((ptr x, ptr ls));
-static IBOOL remove_first_nomorep PROTO((ptr x, ptr *pls, IBOOL look));
 static void segment_tell PROTO((uptr seg));
 static void check_heap_dirty_msg PROTO((char *msg, ptr *x));
 static IBOOL dirty_listedp PROTO((seginfo *x, IGEN from_g, IGEN to_g));
 static void check_dirty_space PROTO((ISPC s));
 static void check_dirty PROTO((void));
+static void check_locked_object PROTO((ptr p, IBOOL locked, IGEN g, IBOOL aftergc, IGEN mcg));
 
 static IBOOL checkheap_noisy;
 
@@ -33,6 +32,7 @@ void S_gc_init() {
   S_checkheap = 0; /* 0 for disabled, 1 for enabled */
   S_checkheap_errors = 0; /* count of errors detected by checkheap */
   checkheap_noisy = 0; /* 0 for error output only; 1 for more noisy output */
+  S_G.prcgeneration = static_generation;
 
   if (S_checkheap) {
     printf(checkheap_noisy ? "NB: check_heap is enabled and noisy\n" : "NB: check_heap_is_enabled\n");
@@ -49,11 +49,14 @@ void S_gc_init() {
 
   for (g = 0; g <= static_generation; g++) {
     S_G.guardians[g] = Snil;
+    S_G.locked_objects[g] = Snil;
+    S_G.unlocked_objects[g] = Snil;
   }
   S_G.max_nonstatic_generation = 
     S_G.new_max_nonstatic_generation = 
       S_G.min_free_gen = 
-        S_G.new_min_free_gen = default_max_nonstatic_generation;
+        S_G.new_min_free_gen =
+          S_G.min_mark_gen = default_max_nonstatic_generation;
 
   for (g = 0; g <= static_generation; g += 1) {
     for (i = 0; i < countof_types; i += 1) {
@@ -126,8 +129,14 @@ void S_gc_init() {
     S_G.countof_size[countof_guardian] = size_guardian_entry;
   INITVECTIT(S_G.countof_names, countof_oblist) = S_intern((const unsigned char *)"oblist");
     S_G.countof_size[countof_guardian] = 0;
-  INITVECTIT(S_G.countof_names, countof_ephemeron) = S_intern((const unsigned char *)"ephemron");
-    S_G.countof_size[countof_ephemeron] = 0;
+  INITVECTIT(S_G.countof_names, countof_ephemeron) = S_intern((const unsigned char *)"ephemeron");
+    S_G.countof_size[countof_ephemeron] = size_ephemeron;
+  INITVECTIT(S_G.countof_names, countof_stencil_vector) = S_intern((const unsigned char *)"stencil-vector");
+    S_G.countof_size[countof_stencil_vector] = 0;
+  INITVECTIT(S_G.countof_names, countof_record) = S_intern((const unsigned char *)"record");
+    S_G.countof_size[countof_record] = 0;
+  INITVECTIT(S_G.countof_names, countof_phantom) = S_intern((const unsigned char *)"phantom");
+    S_G.countof_size[countof_phantom] = 0;
   for (i = 0; i < countof_types; i += 1) {
     if (Svector_ref(S_G.countof_names, i) == FIX(0)) {
       fprintf(stderr, "uninitialized countof_name at index %d\n", i);
@@ -159,6 +168,60 @@ void S_set_minfreegen(IGEN g) {
   S_G.new_min_free_gen = g;
   if (S_G.new_max_nonstatic_generation == S_G.max_nonstatic_generation) {
     S_G.min_free_gen = g;
+  }
+}
+
+IGEN S_minmarkgen(void) {
+  return S_G.min_mark_gen;
+}
+
+void S_set_minmarkgen(IGEN g) {
+  S_G.min_mark_gen = g;
+}
+
+void S_immobilize_object(x) ptr x; {
+  seginfo *si;
+
+  if (IMMEDIATE(x))
+    si = NULL;
+  else
+    si = MaybeSegInfo(ptr_get_segment(x));
+ 
+  if ((si != NULL) && (si->generation != static_generation)) {
+    tc_mutex_acquire()
+
+    /* Try a little to to support cancellation of segment-level
+     * immobilzation --- but we don't try too hard */
+    if (si->must_mark < MUST_MARK_INFINITY)
+      si->must_mark++;
+
+    /* Note: for `space_new`, `must_mark` doesn't really mean all
+       objects must be marked; only those in the locked list must be
+       marked. Non-locked objects on `space_new` cannot be immobilized. */
+
+    tc_mutex_release()
+  }
+}
+
+void S_mobilize_object(x) ptr x; {
+  seginfo *si;
+
+  if (IMMEDIATE(x))
+    si = NULL;
+  else
+    si = MaybeSegInfo(ptr_get_segment(x));
+
+  if ((si != NULL) && (si->generation != static_generation)) {
+    tc_mutex_acquire()
+
+    if (si->must_mark == 0)
+      S_error_abort("S_mobilize_object(): object was definitely not immobilzed");
+
+    /* See S_immobilize_object() about this vague try at canceling immobilation: */
+    if (si->must_mark < MUST_MARK_INFINITY)
+      --si->must_mark;
+  
+    tc_mutex_release()
   }
 }
 
@@ -197,7 +260,7 @@ IBOOL Slocked_objectp(x) ptr x; {
   tc_mutex_acquire()
 
   ans = 0;
-  for (ls = si->locked_objects; ls != Snil; ls = Scdr(ls)) {
+  for (ls = S_G.locked_objects[g]; ls != Snil; ls = Scdr(ls)) {
     if (x == Scar(ls)) {
       ans = 1;
       break;
@@ -210,18 +273,14 @@ IBOOL Slocked_objectp(x) ptr x; {
 }
 
 ptr S_locked_objects(void) {
-  IGEN g; ptr ans; ptr ls; ISPC s; seginfo *si;
+  IGEN g; ptr ans; ptr ls;
 
   tc_mutex_acquire()
 
   ans = Snil;
   for (g = 0; g <= static_generation; INCRGEN(g)) {
-    for (s = 0; s <= max_real_space; s += 1) {
-      for (si = S_G.occupied_segments[s][g]; si != NULL; si = si->next) {
-        for (ls = si->locked_objects; ls != Snil; ls = Scdr(ls)) {
-          ans = Scons(Scar(ls), ans);
-        }
-      }
+    for (ls = S_G.locked_objects[g]; ls != Snil; ls = Scdr(ls)) {
+      ans = Scons(Scar(ls), ans);
     }
   }
 
@@ -233,43 +292,71 @@ ptr S_locked_objects(void) {
 void Slock_object(x) ptr x; {
   seginfo *si; IGEN g;
 
-  tc_mutex_acquire()
-
  /* weed out pointers that won't be relocated */
   if (!IMMEDIATE(x) && (si = MaybeSegInfo(ptr_get_segment(x))) != NULL && (g = si->generation) != static_generation) {
+    tc_mutex_acquire()
     S_pants_down += 1;
+    /* immobilize */
+    if (si->must_mark < MUST_MARK_INFINITY)
+      si->must_mark++;
    /* add x to locked list. remove from unlocked list */
-    si->locked_objects = S_cons_in((g == 0 ? space_new : space_impure), g, x, si->locked_objects);
+    S_G.locked_objects[g] = S_cons_in((g == 0 ? space_new : space_impure), g, x, S_G.locked_objects[g]);
     if (S_G.enable_object_counts) {
       if (g != 0) S_G.countof[g][countof_pair] += 1;
     }
-    if (si->space & space_locked)
-      (void)remove_first_nomorep(x, &si->unlocked_objects, 0);
+    (void)remove_first_nomorep(x, &S_G.unlocked_objects[g], 0);
     S_pants_down -= 1;
+    tc_mutex_release()
   }
-
-  tc_mutex_release()
 }
 
 void Sunlock_object(x) ptr x; {
   seginfo *si; IGEN g;
 
-  tc_mutex_acquire()
-
   if (!IMMEDIATE(x) && (si = MaybeSegInfo(ptr_get_segment(x))) != NULL && (g = si->generation) != static_generation) {
+    tc_mutex_acquire()
     S_pants_down += 1;
+    /* mobilize, if we haven't lost track */
+    if (si->must_mark < MUST_MARK_INFINITY)
+      --si->must_mark;
    /* remove first occurrence of x from locked list. if there are no
       others, add x to unlocked list */
-    if (remove_first_nomorep(x, &si->locked_objects, si->space & space_locked)) {
-      si->unlocked_objects = S_cons_in((g == 0 ? space_new : space_impure), g, x, si->unlocked_objects);
+    if (remove_first_nomorep(x, &S_G.locked_objects[g], (si->space == space_new) && (si->generation > 0))) {
+      S_G.unlocked_objects[g] = S_cons_in((g == 0 ? space_new : space_impure), g, x, S_G.unlocked_objects[g]);
       if (S_G.enable_object_counts) {
         if (g != 0) S_G.countof[g][countof_pair] += 1;
       }
     }
     S_pants_down -= 1;
+    tc_mutex_release()
   }
+}
 
+ptr s_help_unregister_guardian(ptr *pls, ptr tconc, ptr result) {
+  ptr rep, ls;
+  while ((ls = *pls) != Snil) {
+    if (GUARDIANTCONC(ls) == tconc) {
+      result = Scons(((rep = GUARDIANREP(ls)) == ftype_guardian_rep ? GUARDIANOBJ(ls) : rep), result);
+      *pls = ls = GUARDIANNEXT(ls);
+    } else {
+      ls = *(pls = &GUARDIANNEXT(ls));
+    }
+  }
+  return result;
+}
+
+ptr S_unregister_guardian(ptr tconc) {
+  ptr result, tc; IGEN g;
+  tc_mutex_acquire()
+  tc = get_thread_context();
+  /* in the interest of thread safety, gather entries only in the current thread, ignoring any others */
+  result = s_help_unregister_guardian(&GUARDIANENTRIES(tc), tconc, Snil);
+  /* plus, of course, any already known to the storage-management system */
+  for (g = 0; g <= static_generation; INCRGEN(g)) {
+    result = s_help_unregister_guardian(&S_G.guardians[g], tconc, result);
+  }
   tc_mutex_release()
+  return result;
 }
 
 #ifndef WIN32
@@ -321,29 +408,31 @@ ptr S_object_counts(void) {
 
  /* add primary types w/nonozero counts to the alist */
   for (i = 0 ; i < countof_types; i += 1) {
-    ptr inner_alist = Snil;
-    for (g = 0; g <= static_generation; INCRGEN(g)) {
-      IGEN gcurrent = g;
-      uptr count = S_G.countof[g][i];
-      uptr bytes = S_G.bytesof[g][i];
+    if (i != countof_record) { /* covered by rtd-specific counts */
+      ptr inner_alist = Snil;
+      for (g = 0; g <= static_generation; INCRGEN(g)) {
+        IGEN gcurrent = g;
+        uptr count = S_G.countof[g][i];
+        uptr bytes = S_G.bytesof[g][i];
 
-      if (g == S_G.new_max_nonstatic_generation) {
-        while (g < S_G.max_nonstatic_generation) {
-          g += 1;
-          /* NB: S_G.max_nonstatic_generation + 1 <= static_generation, but coverity complains about overrun */
-          /* coverity[overrun-buffer-val] */
-          count += S_G.countof[g][i];
-          /* coverity[overrun-buffer-val] */
-          bytes += S_G.bytesof[g][i];
+        if (g == S_G.new_max_nonstatic_generation) {
+          while (g < S_G.max_nonstatic_generation) {
+            g += 1;
+            /* NB: S_G.max_nonstatic_generation + 1 <= static_generation, but coverity complains about overrun */
+            /* coverity[overrun-buffer-val] */
+            count += S_G.countof[g][i];
+            /* coverity[overrun-buffer-val] */
+            bytes += S_G.bytesof[g][i];
+          }
+        }
+
+        if (count != 0) {
+          if (bytes == 0) bytes = count * S_G.countof_size[i];
+          inner_alist = Scons(Scons((gcurrent == static_generation ? S_G.static_id : FIX(gcurrent)), Scons(Sunsigned(count), Sunsigned(bytes))), inner_alist);
         }
       }
-
-      if (count != 0) {
-        if (bytes == 0) bytes = count * S_G.countof_size[i];
-        inner_alist = Scons(Scons((gcurrent == static_generation ? S_G.static_id : FIX(gcurrent)), Scons(Sunsigned(count), Sunsigned(bytes))), inner_alist);
-      }
+      if (inner_alist != Snil) outer_alist = Scons(Scons(Svector_ref(S_G.countof_names, i), inner_alist), outer_alist);
     }
-    if (inner_alist != Snil) outer_alist = Scons(Scons(Svector_ref(S_G.countof_names, i), inner_alist), outer_alist);
   }
 
   tc_mutex_release()
@@ -372,13 +461,20 @@ ptr S_object_backreferences(void) {
   return ls;
 }
 
+seginfo *S_ptr_seginfo(ptr p) {
+  return MaybeSegInfo(ptr_get_segment(p)); 
+}
+
 /* Scompact_heap().  Compact into as few O/S chunks as possible and
  * move objects into static generation
  */
 void Scompact_heap() {
   ptr tc = get_thread_context();
+  IBOOL eoc = S_G.enable_object_counts;
   S_pants_down += 1;
-  S_gc_oce(tc, S_G.max_nonstatic_generation, static_generation);
+  S_G.enable_object_counts = 1;
+  S_gc_oce(tc, S_G.max_nonstatic_generation, static_generation, Sfalse);
+  S_G.enable_object_counts = eoc;
   S_pants_down -= 1;
 }
 
@@ -409,13 +505,14 @@ static void segment_tell(seg) uptr seg; {
   } else {
     printf(" generation=%d", si->generation);
     s = si->space;
-    s1 = si->space & ~(space_old|space_locked);
+    s1 = si->space;
     if (s1 < 0 || s1 > max_space)
       printf(" space-bogus (%d)", s);
     else {
       printf(" space-%s", spacename[s1]);
-      if (s & space_old) printf(" oldspace");
-      if (s & space_locked) printf(" locked");
+      if (si->old_space) printf(" oldspace");
+      if (si->must_mark) printf(" mustmark");
+      if (si->marked_mask) printf(" marked");
     }
     printf("\n");
   }
@@ -440,7 +537,7 @@ static void check_heap_dirty_msg(msg, x) char *msg; ptr *x; {
     printf("to   "); segment_tell(addr_get_segment(*x));
 }
 
-void S_check_heap(aftergc) IBOOL aftergc; {
+void S_check_heap(aftergc, mcg) IBOOL aftergc; IGEN mcg; {
   uptr seg; INT d; ISPC s; IGEN g; IDIRTYBYTE dirty; IBOOL found_eos; IGEN pg;
   ptr p, *pp1, *pp2, *nl;
   iptr i;
@@ -479,6 +576,10 @@ void S_check_heap(aftergc) IBOOL aftergc; {
     seginfo *si;
     for (g = 0; g <= S_G.max_nonstatic_generation; INCRGEN(g)) {
       for (si = S_G.occupied_segments[s][g]; si != NULL; si = si->next) {
+        if (si->generation != g) {
+          S_checkheap_errors += 1;
+          printf("!!! segment in wrong occupied_segments list\n");
+        }
         nonstatic_segments += 1;
       }
     }
@@ -525,13 +626,18 @@ void S_check_heap(aftergc) IBOOL aftergc; {
         s = si->space;
         g = si->generation;
 
+        if (si->use_marks)
+          printf("!!! use_marks set on generation %d segment %#tx\n", g, (ptrdiff_t)seg);
+
         if (s == space_new) {
-          if (g != 0) {
+          if (g != 0 && !si->marked_mask) {
             S_checkheap_errors += 1;
             printf("!!! unexpected generation %d segment %#tx in space_new\n", g, (ptrdiff_t)seg);
           }
-        } else if (s == space_impure || s == space_symbol || s == space_pure || s == space_weakpair /* || s == space_ephemeron */) {
-          /* out of date: doesn't handle space_port, space_continuation, space_code, space_pure_typed_object, space_impure_record */
+        } else if (s == space_impure || s == space_symbol || s == space_pure || s == space_weakpair || s == space_ephemeron
+                   || s == space_immobile_impure || s == space_count_pure || s == space_count_impure || s == space_closure) {
+          /* doesn't handle: space_port, space_continuation, space_code, space_pure_typed_object,
+                             space_impure_record, or impure_typed_object */
           nl = (ptr *)S_G.next_loc[s][g];
 
           /* check for dangling references */
@@ -539,23 +645,52 @@ void S_check_heap(aftergc) IBOOL aftergc; {
           pp2 = (ptr *)build_ptr(seg + 1, 0);
           if (pp1 <= nl && nl < pp2) pp2 = nl;
 
-          while (pp1 != pp2) {
-            seginfo *psi; ISPC ps;
-            p = *pp1;
-            if (p == forward_marker) break;
-            if (!IMMEDIATE(p) && (psi = MaybeSegInfo(ptr_get_segment(p))) != NULL && ((ps = psi->space) & space_old || ps == space_empty)) {
-              S_checkheap_errors += 1;
-              printf("!!! dangling reference at %#tx to %#tx\n", (ptrdiff_t)pp1, (ptrdiff_t)p);
-              printf("from: "); segment_tell(seg);
-              printf("to:   "); segment_tell(ptr_get_segment(p));
-            }
-            pp1 += 1;
+          while (pp1 < pp2) {
+            if (!si->marked_mask || (si->marked_mask[segment_bitmap_byte(pp1)] & segment_bitmap_bit(pp1))) {
+              int a;
+              for (a = 0; (a < ptr_alignment) && (pp1 < pp2); a++) {
+#define         in_ephemeron_pair_part(pp1, seg) ((((uptr)(pp1) - (uptr)build_ptr(seg, 0)) % size_ephemeron) < size_pair)
+                if ((s == space_ephemeron) && !in_ephemeron_pair_part(pp1, seg)) {
+                  /* skip non-pair part of ephemeron */
+                } else {
+                  p = *pp1;
+                  if (p == forward_marker) {
+                    pp1 = pp2; /* break out of outer loop */
+                    break;
+                  } else if (!IMMEDIATE(p)) {
+                    seginfo *psi = MaybeSegInfo(ptr_get_segment(p));
+                    if (psi != NULL) {
+                      if ((psi->space == space_empty)
+                          || psi->old_space
+                          || (psi->marked_mask && !(psi->marked_mask[segment_bitmap_byte(p)] & segment_bitmap_bit(p)))) {
+                        S_checkheap_errors += 1;
+                        printf("!!! dangling reference at %#tx to %#tx%s\n", (ptrdiff_t)pp1, (ptrdiff_t)p, (aftergc ? " after gc" : ""));
+                        printf("from: "); segment_tell(seg);
+                        printf("to:   "); segment_tell(ptr_get_segment(p));
+                        {
+                          ptr l;
+                          for (l = S_G.locked_objects[psi->generation]; l != Snil; l = Scdr(l))
+                            if (Scar(l) == p)
+                              printf(" in locked\n");
+                          for (l = S_G.unlocked_objects[psi->generation]; l != Snil; l = Scdr(l))
+                            if (Scar(l) == p)
+                              printf(" in unlocked\n");
+                        }
+                      }
+                    }
+                  }
+                }
+                pp1 += 1;
+              }
+            } else
+              pp1 += ptr_alignment;
           }
 
           /* verify that dirty bits are set appropriately */
           /* out of date: doesn't handle space_impure_record, space_port, and maybe others */
           /* also doesn't check the SYMCODE for symbols */
-          if (s == space_impure || s == space_symbol || s == space_weakpair /* || s == space_ephemeron */) {
+          if (s == space_impure || s == space_symbol || s == space_weakpair || s == space_ephemeron
+              || s == space_immobile_impure || s == space_closure) {
             found_eos = 0;
             pp2 = pp1 = build_ptr(seg, 0);
             for (d = 0; d < cards_per_segment; d += 1) {
@@ -580,40 +715,58 @@ void S_check_heap(aftergc) IBOOL aftergc; {
 #endif
 
               dirty = 0xff;
-              while (pp1 != pp2) {
-                seginfo *psi;
-                p = *pp1;
-
-                if (p == forward_marker) {
-                  found_eos = 1;
-                  break;
-                }
-                if (!IMMEDIATE(p) && (psi = MaybeSegInfo(ptr_get_segment(p))) != NULL && (pg = psi->generation) < g) {
-                  if (pg < dirty) dirty = pg;
-                  if (si->dirty_bytes[d] > pg) {
-                    S_checkheap_errors += 1;
-                    check_heap_dirty_msg("!!! INVALID", pp1);
+              while (pp1 < pp2) {
+                if (!si->marked_mask || (si->marked_mask[segment_bitmap_byte(pp1)] & segment_bitmap_bit(pp1))) {
+                  int a;
+                  for (a = 0; (a < ptr_alignment) && (pp1 < pp2); a++) {
+                    if ((s == space_ephemeron) && !in_ephemeron_pair_part(pp1, seg)) {
+                      /* skip non-pair part of ephemeron */
+                    } else {
+                      p = *pp1;
+                      
+                      if (p == forward_marker) {
+                        found_eos = 1;
+                        pp1 = pp2;
+                        break;
+                      } else if (!IMMEDIATE(p)) {
+                        seginfo *psi = MaybeSegInfo(ptr_get_segment(p));
+                        if ((psi != NULL) && ((pg = psi->generation) < g)) {
+                          if (pg < dirty) dirty = pg;
+                          if (si->dirty_bytes[d] > pg) {
+                            S_checkheap_errors += 1;
+                            check_heap_dirty_msg("!!! INVALID", pp1);
+                          } else if (checkheap_noisy)
+                            check_heap_dirty_msg("... ", pp1);
+                        }
+                      }
+                    }
+                    pp1 += 1;
                   }
-                  else if (checkheap_noisy)
-                    check_heap_dirty_msg("... ", pp1);
+                } else {
+                  pp1 += ptr_alignment;
                 }
-                pp1 += 1;
               }
+              
               if (checkheap_noisy && si->dirty_bytes[d] < dirty) {
                 /* sweep_dirty won't sweep, and update dirty byte, for
                    cards with dirty pointers to segments older than the
                    maximum copyied generation, so we can get legitimate
                    conservative dirty bytes even after gc */
                 printf("... Conservative dirty byte %x (%x) %sfor segment %#tx card %d ",
-                    si->dirty_bytes[d], dirty,
-                    (aftergc ? "after gc " : ""),
-                    (ptrdiff_t)seg, d);
+                       si->dirty_bytes[d], dirty,
+                       (aftergc ? "after gc " : ""),
+                       (ptrdiff_t)seg, d);
                 segment_tell(seg);
               }
             }
           }
         }
-        if (aftergc && s != space_empty && !(s & space_locked) && (g == 0 || (s != space_impure && s != space_symbol && s != space_port && s != space_weakpair && s != space_ephemeron && s != space_impure_record))) {
+        if (aftergc
+            && (s != space_empty)
+            && (g == 0
+                || (s != space_new && s != space_impure && s != space_symbol && s != space_port && s != space_weakpair && s != space_ephemeron
+                    && s != space_impure_record && s != space_impure_typed_object
+                    && s != space_immobile_impure && s != space_count_impure && s != space_closure))) {
           for (d = 0; d < cards_per_segment; d += 1) {
             if (si->dirty_bytes[d] != 0xff) {
               S_checkheap_errors += 1;
@@ -626,6 +779,21 @@ void S_check_heap(aftergc) IBOOL aftergc; {
       }
       chunk = chunk->next;
     }
+  }
+
+  {
+    for (g = 0; g <= S_G.max_nonstatic_generation; INCRGEN(g)) {
+      ptr l;
+      for (l = S_G.locked_objects[g]; l != Snil; l = Scdr(l))
+        check_locked_object(Scar(l), 1, g, aftergc, mcg);
+      for (l = S_G.unlocked_objects[g]; l != Snil; l = Scdr(l))
+        check_locked_object(Scar(l), 0, g, aftergc, mcg);
+    }
+  }
+
+  if (S_checkheap_errors) {
+    printf("heap check failed%s\n", (aftergc ? " after gc" : ""));
+    exit(1);
   }
 }
 
@@ -643,7 +811,6 @@ static void check_dirty_space(ISPC s) {
 
   for (from_g = 0; from_g <= static_generation; from_g += 1) {
     for (si = S_G.occupied_segments[s][from_g]; si != NULL; si = si->next) {
-      if (si->space & space_locked) continue;
       min_to_g = 0xff;
       for (d = 0; d < cards_per_segment; d += 1) {
         to_g = si->dirty_bytes[d];
@@ -683,7 +850,7 @@ static void check_dirty() {
         }
       } else {
         while (si != NULL) {
-          ISPC s = si->space & ~space_locked;
+          ISPC s = si->space;
           IGEN g = si->generation;
           IGEN mingval = si->min_dirty_byte;
           if (g != from_g) {
@@ -694,7 +861,9 @@ static void check_dirty() {
             S_checkheap_errors += 1;
             printf("!!! (check_dirty): dirty byte = %d for segment %#tx in %d -> %d dirty list\n", mingval, (ptrdiff_t)(si->number), from_g, to_g);
           }
-          if (s != space_new && s != space_impure && s != space_symbol && s != space_port && s != space_impure_record && s != space_weakpair && s != space_ephemeron) {
+          if (s != space_new && s != space_impure && s != space_symbol && s != space_port
+              && s != space_impure_record && s != space_impure_typed_object && s != space_immobile_impure 
+              && s != space_weakpair && s != space_ephemeron) {
             S_checkheap_errors += 1;
             printf("!!! (check_dirty): unexpected space %d for dirty segment %#tx\n", s, (ptrdiff_t)(si->number));
           }
@@ -710,8 +879,38 @@ static void check_dirty() {
   check_dirty_space(space_impure_record);
   check_dirty_space(space_weakpair);
   check_dirty_space(space_ephemeron);
+  check_dirty_space(space_immobile_impure);
 
   fflush(stdout);
+}
+
+static void check_locked_object(ptr p, IBOOL locked, IGEN g, IBOOL aftergc, IGEN mcg)
+{
+  const char *what = (locked ? "locked" : "unlocked");
+  seginfo *psi = MaybeSegInfo(ptr_get_segment(p));
+  if (!psi) {
+    S_checkheap_errors += 1;
+    printf("!!! generation %d %s object has no segment: %p\n", g, what, p);
+  } else {
+    if (psi->generation != g) {
+      S_checkheap_errors += 1;
+      printf("!!! generation %d %s object in generation %d segment: %p\n", g, what, psi->generation, p);
+    }
+    if (!psi->must_mark && locked) {
+      S_checkheap_errors += 1;
+      printf("!!! generation %d %s object not on must-mark page: %p\n", g, what, p);
+    }
+    if (!psi->marked_mask) {
+      if (aftergc && (psi->generation <= mcg)) {
+        S_checkheap_errors += 1;
+        printf("!!! %s object not in marked segment: %p\n", what, p);
+        printf(" in: "); segment_tell(psi->number);
+      }
+    } else if (!(psi->marked_mask[segment_bitmap_byte(p)] & segment_bitmap_bit(p))) {
+      S_checkheap_errors += 1;
+      printf("!!! generation %d %s object not marked: %p\n", g, what, p);
+    }
+  }
 }
 
 void S_fixup_counts(ptr counts) {
@@ -725,9 +924,9 @@ void S_fixup_counts(ptr counts) {
   RTDCOUNTSTIMESTAMP(counts) = S_G.gctimestamp[0];
 }
 
-void S_do_gc(IGEN mcg, IGEN tg) {
+ptr S_do_gc(IGEN mcg, IGEN tg, ptr count_roots) {
   ptr tc = get_thread_context();
-  ptr code;
+  ptr code, result;
 
   code = CP(tc);
   if (Sprocedurep(code)) code = CLOSCODE(code);
@@ -747,7 +946,7 @@ void S_do_gc(IGEN mcg, IGEN tg) {
     new_g = S_G.new_max_nonstatic_generation;
     old_g = S_G.max_nonstatic_generation;
    /* first, collect everything to old_g */
-    S_gc(tc, old_g, old_g);
+    result = S_gc(tc, old_g, old_g, count_roots);
    /* now transfer old_g info to new_g, and clear old_g info */
     for (s = 0; s <= max_real_space; s += 1) {
       S_G.first_loc[s][new_g] = S_G.first_loc[s][old_g]; S_G.first_loc[s][old_g] = FIX(0);
@@ -761,6 +960,8 @@ void S_do_gc(IGEN mcg, IGEN tg) {
       }
     }
     S_G.guardians[new_g] = S_G.guardians[old_g]; S_G.guardians[old_g] = Snil;
+    S_G.locked_objects[new_g] = S_G.locked_objects[old_g]; S_G.locked_objects[old_g] = Snil;
+    S_G.unlocked_objects[new_g] = S_G.unlocked_objects[old_g]; S_G.unlocked_objects[old_g] = Snil;
     S_G.buckets_of_generation[new_g] = S_G.buckets_of_generation[old_g]; S_G.buckets_of_generation[old_g] = NULL;
     if (S_G.enable_object_counts) {
       INT i; ptr ls;
@@ -822,11 +1023,14 @@ void S_do_gc(IGEN mcg, IGEN tg) {
       }
     }
 
+   /* tell profile_release_counters to scan only through new_g */
+    if (S_G.prcgeneration == old_g) S_G.prcgeneration = new_g;
+
    /* finally reset max_nonstatic_generation */
     S_G.min_free_gen = S_G.new_min_free_gen;
     S_G.max_nonstatic_generation = new_g;
   } else {
-    S_gc(tc, mcg, tg);
+    result = S_gc(tc, mcg, tg, count_roots);
   }
   S_pants_down -= 1;
 
@@ -836,12 +1040,15 @@ void S_do_gc(IGEN mcg, IGEN tg) {
   S_reset_allocation_pointer(tc);
 
   Sunlock_object(code);
+
+  return result;
 }
 
-
-void S_gc(ptr tc, IGEN mcg, IGEN tg) {
-  if (tg == static_generation || S_G.enable_object_counts || S_G.enable_object_backreferences)
-    S_gc_oce(tc, mcg, tg);
+ptr S_gc(ptr tc, IGEN mcg, IGEN tg, ptr count_roots) {
+  if (tg == static_generation
+      || S_G.enable_object_counts || S_G.enable_object_backreferences
+      || (count_roots != Sfalse))
+    return S_gc_oce(tc, mcg, tg, count_roots);
   else
-    S_gc_ocd(tc, mcg, tg);
+    return S_gc_ocd(tc, mcg, tg, Sfalse);
 }

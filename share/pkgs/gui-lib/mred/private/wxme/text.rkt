@@ -58,7 +58,32 @@
 (define show-outline-for-inactive?
   (and (get-preference* 'GRacket:outline-inactive-selection) #t))
 
-(define caret-pen (send the-pen-list find-or-create-pen "BLACK" 1 'xor))
+(define black-caret-pen (send the-pen-list find-or-create-pen "BLACK" 1 'solid))
+(define white-caret-pen (send the-pen-list find-or-create-pen "WHITE" 1 'solid))
+(define (color->caret-pen color invert?)
+  (define r (send color red))
+  (define g (send color green))
+  (define b (send color blue))
+  (cond
+    [(and (= r 255) (= g 255) (= b 255))
+     (if invert?
+         black-caret-pen
+         white-caret-pen)]
+    [(and (= r 0) (= g 0) (= b 0))
+     (if invert?
+         white-caret-pen
+         black-caret-pen)]
+    [else
+     (make-object pen%
+       (if invert?
+           (make-object color% 
+             (- 255 r)
+             (- 255 g)
+             (- 255 b))
+           color)
+       (send black-caret-pen get-width)
+       'solid)]))
+
 (define outline-pen (send the-pen-list find-or-create-pen "BLACK" 0 'transparent))
 (define outline-inactive-pen (send the-pen-list find-or-create-pen (get-highlight-background-color) 1 'solid))
 (define outline-brush (send the-brush-list find-or-create-brush (get-highlight-background-color) 'solid))
@@ -538,7 +563,7 @@
                               (set! track-clickback click)
                               (when s-admin
                                 (send s-admin update-cursor))
-                              (set-clickback-hilited?! track-clickback #t)))
+                              (set-clickback-hilited track-clickback #t)))
                         (begin
                           (set! dragstart now)
                           (set! dragging? #t)
@@ -561,7 +586,7 @@
                     (let ([cb (if (x . >= . 0)
                                   (find-clickback now y)
                                   #f)])
-                      (set-clickback-hilited?! track-clickback (eq? cb track-clickback)))])]
+                      (set-clickback-hilited track-clickback (eq? cb track-clickback)))])]
                  [(send event button-up?)
                   (cond
                    [dragging?
@@ -569,7 +594,7 @@
                    [tracking?
                     (set! tracking? #f)
                     (when (clickback-hilited? track-clickback)
-                      (set-clickback-hilited?! track-clickback #f)
+                      (set-clickback-hilited track-clickback #f)
                       (let ([click track-clickback])
                         ((clickback-f click) this (clickback-start click) (clickback-end click))))
                     (when s-admin
@@ -579,7 +604,7 @@
                   (when tracking?
                     (set! tracking? #f)
                     (when (clickback-hilited? track-clickback)
-                      (set-clickback-hilited?! track-clickback #f)
+                      (set-clickback-hilited track-clickback #f)
                       (let ([click track-clickback])
                         ((clickback-f click) this (clickback-start click) (clickback-end click)))))
                   (when s-admin
@@ -2532,7 +2557,7 @@
         
         (begin-edit-sequence)
         (flash-on (clickback-start c) (clickback-end c) #f #f 0)
-        (do-change-style (clickback-start c) (clickback-end c) #f (clickback-delta c) #f)
+        (do-change-style (clickback-start c) (clickback-end c) #f (clickback-delta c) #f #f)
         (end-edit-sequence)
 
         (set-clickback-unhilite! c (s-end-intercept))]
@@ -2540,7 +2565,7 @@
         (perform-undo-list (clickback-unhilite c))
         (set-clickback-unhilite! c null)
         (flash-off)])
-      (set-clickback-hilited?! (and on? #t))))
+      (set-clickback-hilited?! c (and on? #t))))
 
   ;; ----------------------------------------
 
@@ -2957,7 +2982,7 @@
                                                  [p p])
                                         (let-boxes ([w 0.0])
                                             (when dc (send snip get-extent dc X topy w #f #f #f #f #f))
-                                          (if (and (x . > . w) (snip->next snip) dc)
+                                        (if (and (x . > . w) (snip->next snip) dc)
                                               (loop (snip->next snip)
                                                     (+ X w)
                                                     (- x w)
@@ -3041,6 +3066,12 @@
         (set! flow-locked? #t)
         (let ([c (snip->count snip)])
           (cond
+            [((or snip-width (send snip partial-offset dc X Y c)) . <= . x)
+             (when how-close
+               (set-box! how-close 100.0))
+             (set! write-locked? wl?)
+             (set! flow-locked? fl?)
+             c]
             [(= c 1)
              (set! write-locked? wl?)
              (set! flow-locked? fl?)
@@ -3050,15 +3081,7 @@
                              (- snip-width x)
                              (- x))))
              0]
-            [((send snip partial-offset dc X Y c) . <= . x)
-             (begin
-               (when how-close
-                 (set-box! how-close 100.0))
-               (set! write-locked? wl?)
-               (set! flow-locked? fl?)
-               c)]
-
-             [else
+            [else
               ;; binary search for position within snip:
               (let loop ([range c]
                          [i (quotient c 2)]
@@ -5283,7 +5306,7 @@
                              (not (= last-draw-blue blue)))
                         
                         (do-redraw (send s-offscreen get-dc) top bottom left right 
-                                   (- top) (- left) show-caret show-xsel? bg-color)
+                                   (- top) (- left) show-caret show-xsel? bg-color #f)
                         
                         (set! last-draw-l left)
                         (set! last-draw-t top)
@@ -5320,7 +5343,8 @@
                       (dynamic-wind
                           void
                           (lambda ()
-                            (do-redraw dc top bottom left right (- y) (- x) show-caret show-xsel? bg-color))
+                            (do-redraw dc top bottom left right (- y) (- x) show-caret show-xsel? bg-color
+                                       (and (not bg-color) fg)))
                           (lambda ()
                             (send dc set-clipping-region rgn)
                             
@@ -5336,7 +5360,7 @@
           (end-sequence-lock)))]))
   
   ;; performs the actual drawing operations
-  (define/private (do-redraw dc starty endy leftx rightx dy dx show-caret show-xsel? bg-color)
+  (define/private (do-redraw dc starty endy leftx rightx dy dx show-caret show-xsel? bg-color caret-color)
     (let ([wl? write-locked?])
 
       (set! flow-locked? #t)
@@ -5385,18 +5409,10 @@
 
                  [local-caret-pen
                   (if bg-color
-                      (let ([r (send bg-color red)]
-                            [g (send bg-color green)]
-                            [b (send bg-color blue)])
-                        (if (and (= r 255) (= g 255) (= b 255))
-                            caret-pen
-                            (make-object pen% (make-object color% 
-                                                           (- 255 r)
-                                                           (- 255 g)
-                                                           (- 255 b))
-                                         (send caret-pen get-width) 
-                                         'solid)))
-                      caret-pen)])
+                      (color->caret-pen bg-color #t)
+                      (if caret-color
+                          (color->caret-pen caret-color #f)
+                          black-caret-pen))])
 
             (call-on-paint #t)
             
@@ -5884,7 +5900,7 @@
                                                        (+ y (if (zero? i) 0 1))
                                                        (+ y (- h 1 unline))
                                                        0 W (+ (- y) vm) hm
-                                                       'no-caret #f #f)
+                                                       'no-caret #f #f #f)
                                             (when (page . <= . 0)
                                               (send dc end-page))))
                                         #f)

@@ -8,8 +8,10 @@
          racket/list
          racket/set
          racket/path
+         ffi/unsafe/vm
          (only-in '#%linklet compiled-position->primitive)
-         "private/deserialize.rkt")
+         "private/deserialize.rkt"
+         "private/chez.rkt")
 
 (provide decompile)
 
@@ -82,7 +84,8 @@
                (list '#:key k '#:value (decompile v #:to-linklets? to-linklets?))]))))]
        [else
         (decompile-module top)])]
-    [(linkl? top)
+    [(or (linkl? top)
+         (linklet? top))
      (decompile-linklet top)]
     [(faslable-correlated-linklet? top)
      (strip-correlated (faslable-correlated-linklet-expr top))]
@@ -113,6 +116,7 @@
           [(faslable-correlated-linklet? l)
            (compile-linklet (strip-correlated (faslable-correlated-linklet-expr l))
                             (faslable-correlated-linklet-name l))]
+          [(linklet? l) l]
           [else
            (let ([o (open-output-bytes)])
              (zo-marshal-to (linkl-bundle (hasheq 'data l)) o)
@@ -186,7 +190,7 @@
              `((begin-for-all
                  (define (.get-syntax-literal! pos)
                    ....
-                   ,(decompile-data-linklet l)
+                   ,@(decompile-data-linklet l)
                    ....)))
              null))))
 
@@ -240,7 +244,31 @@
     [(struct faslable-correlated-linklet (expr name))
      (match (strip-correlated expr)
        [`(linklet ,imports ,exports ,body-l ...)
-        body-l])]))
+        body-l])]
+    [(? linklet?)
+     (case (system-type 'vm)
+       [(chez-scheme)
+        (define-values (fmt code args) ((vm-primitive 'linklet-fasled-code+arguments) l))
+        (cond
+          [code
+           (define uncompressed-code
+             (if (regexp-match? #rx#"^\0\0\0\0chez" code)
+                 code
+                 (vm-eval `(bytevector-uncompress ,code))))
+           (case fmt
+             [(compile)
+              (define proc ((vm-eval `(load-compiled-from-port (open-bytevector-input-port ,uncompressed-code)))))
+              (let ([proc (decompile-chez-procedure (if (null? args) proc (apply proc args)))])
+                (if (null? args)
+                    proc
+                    (cons proc (map (vm-primitive 'force-unfasl) args))))]
+             [(interpret)
+              (define bytecode (vm-eval `(fasl-read (open-bytevector-input-port ,uncompressed-code))))
+              (list `(#%interpret ,(unwrap-chez-interpret-jitified bytecode)))]
+             [else
+              '(....)])]
+          [else
+           `(....)])])]))
 
 (define (decompile-data-linklet l)
   (match l

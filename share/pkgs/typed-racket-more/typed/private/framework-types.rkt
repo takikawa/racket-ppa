@@ -872,14 +872,12 @@
     (Class #:row-var r #:implements Frame:Searchable<%>
            [edit-menu:find-callback (-> Boolean)]
            [edit-menu:create-find? (-> #t)]
-           ; FIXME: doc says "Overrides <method not found>" from here on
-           [edit-menu:find-again-callback
+           [edit-menu:find-next-callback
             (Menu-Item%-Instance Control-Event%-Instance -> Void)]
-           [edit-menu:create-find-again? (-> #t)]
-           [edit-menu:find-again-backwards-callback
+           [edit-menu:create-find-next? (-> #t)]
+           [edit-menu:find-previous-callback
             (Menu-Item%-Instance Control-Event%-Instance -> Void)]
-           [edit-menu:create-find-again-backwards? (-> #t)]
-           ; end bug doc saying "Overrides <method not found>"
+           [edit-menu:create-find-previous? (-> #t)]
            [edit-menu:create-replace-all? (-> #t)]
            [edit-menu:create-find-case-sensitive? (-> #t)])))
 
@@ -1835,3 +1833,11 @@
     (Class #:row-var r
            #:implements Text%
            #:implements Text:Line-Numbers<%>)))
+
+(provide Color-Prefs:Known-Color-Scheme-Name
+         Color-Prefs:Color-Scheme-Style-Name Color-Prefs:Color-Scheme-Color-Name)
+(define-type Color-Prefs:Known-Color-Scheme-Name
+  (U Color-Prefs:Color-Scheme-Style-Name Color-Prefs:Color-Scheme-Color-Name))
+(require/typed framework
+ [#:opaque Color-Prefs:Color-Scheme-Style-Name color-prefs:color-scheme-style-name?]
+ [#:opaque Color-Prefs:Color-Scheme-Color-Name color-prefs:color-scheme-color-name?])

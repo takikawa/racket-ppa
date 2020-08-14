@@ -441,6 +441,14 @@ The recognized @tech{style properties} are as follows:
        listing except when those sub-parts are top-level entries in
        the listing.}
 
+ @item{@indexed-racket['no-toc+aux] --- As a @tech{style property} for
+       the main part of a rendered page, causes the HTML output to not
+       include a margin box for the main table of contents, ``on this
+       page'', or tables with the @racket['aux] style property. The
+       @racket['no-toc+aux] property effectively implies
+       @racket['no-toc] and @racket['no-sidebar], but also suppresses
+       @racket['aux] tables.}
+
  @item{@indexed-racket['no-toc] --- As a @tech{style property} for the main part of a
        rendered page, causes the HTML output to not include a margin box
        for the main table of contents; the ``on this page'' box that
@@ -541,7 +549,8 @@ sub-parts).
 The @racket[parts] field contains sub-parts.
 
 @history[#:changed "1.25" @elem{Added @racket['no-index] support.}
-         #:changed "1.26" @elem{Added @racket[link-render-style] support.}]}
+         #:changed "1.26" @elem{Added @racket[link-render-style] support.}
+         #:changed "1.27" @elem{Added @racket['no-toc+aux] support.}]}
 
 
 @defstruct[paragraph ([style style?] [content content?])]{
@@ -589,10 +598,6 @@ The currently recognized @tech{style properties} are as follows:
 
  @item{@racket[attributes] structure --- Provides additional HTML
        attributes for the @tt{<p>}, @tt{<div>}, or alternate tag.}
-
- @item{@racket[body-id] structure --- For HTML, uses the given string
-       as an @tt{id} attribute of the @tt{<p>}, @tt{<div>}, or
-       alternate tag.}
 
  @item{@indexed-racket['never-indents] --- For Latex and @tech{compound
        paragraphs}; see @racket[compound-paragraph].}
@@ -649,9 +654,6 @@ The following @tech{style properties} are currently recognized:
  @item{@racket[attributes] structure --- Provides additional HTML
        attributes for the @tt{<table>} tag.}
 
- @item{@racket[body-id] structure --- For HTML, uses the given string
-       as an @tt{id} attribute of the @tt{<table>} tag.}
-
  @item{@indexed-racket['aux] --- For HTML, include the table in the
        table-of-contents display for the enclosing part.}
 
@@ -697,9 +699,6 @@ The following @tech{style properties} are currently recognized:
 
  @item{@racket[attributes] structure --- Provides additional HTML
        attributes for the @tt{<ul>} or @tt{<ol>} tag.}
-
- @item{@racket[body-id] structure --- For HTML, uses the given string
-       as an @tt{id} attribute of the @tt{<ul>} or @tt{<ol>} tag.}
 
  @item{@indexed-racket['never-indents] --- For Latex and @tech{compound
        paragraphs}; see @racket[compound-paragraph].}
@@ -748,9 +747,6 @@ The following @tech{style properties} are currently recognized:
 
  @item{@racket[attributes] structure --- Provides additional HTML
        attributes for the @tt{<blockquote>} tag.}
-
- @item{@racket[body-id] structure --- For HTML, uses the given string
-       as an @tt{id} attribute of the @tt{<blockquote>} tag.}
 
  @item{@indexed-racket['never-indents] --- For Latex and @tech{compound
        paragraphs}; see @racket[compound-paragraph].}
@@ -801,9 +797,6 @@ for Latex output (see @secref["extra-style"]). The following
 
  @item{@racket[attributes] structure --- Provides additional HTML
        attributes for the @tt{<p>} or alternate tag.}
-
- @item{@racket[body-id] structure --- For HTML, uses the given string
-       as an @tt{id} attribute of the @tt{<p>} or alternate tag.}
 
  @item{@indexed-racket['never-indents] --- For Latex within another
        @tech{compound paragraph}; see above.}
@@ -913,9 +906,6 @@ The following @tech{style properties} are currently recognized:
 
  @item{@racket[xexpr-property] structure --- For HTML, supplies literal
        HTML to render before and after @racket[content].}
-
-  @item{@racket[body-id] structure --- For HTML uses the given
-        string as an @tt{id} attribute of the @tt{<span>} tag.}
 
   @item{@indexed-racket['aux] --- Intended for use in titles, where the
         auxiliary part of the title can be omitted in hyperlinks. See,
@@ -1722,7 +1712,7 @@ tag.}
 
 Use as a @tech{style property} for an @racket[element],
 @racket[paragraph], or @racket[compound-paragraph] to substitute an
-alternate HTML tag (instead of @tt{<span>}, @tt{<p>}, @tt{div},
+alternate HTML tag (instead of @tt{<span>}, @tt{<p>}, @tt{<div>},
 @|etc|).}
 
 
@@ -1818,7 +1808,7 @@ Like @racket[css-style-addition], but for a JavaScript file instead of a CSS fil
 @defstruct[body-id ([value string?])]{
 
 Used as a @tech{style property} to associate an @tt{id} attribute with
-an HTML tag.}
+an HTML tag within a main @racket[part].}
 
 
 @defstruct[document-source ([module-path module-path?])]{
@@ -1858,13 +1848,15 @@ For a @racket[part] that corresponds to an HTML page, adds content to
 the @tt{<head>} tag.}
 
 
-@defstruct[render-convertible-as ([types (listof (or/c 'png-bytes 'svg-bytes))])]{
+@defstruct[render-convertible-as ([types (listof (or/c 'png-bytes 'svg-bytes 'gif-bytes))])]{
  For a @racket[part] that corresponds to an HTML page,
  controls how objects that subscribe to the @racketmodname[file/convertible]
  protocol are rendered.
       
  The alternatives in the @racket[types] field are tried in order
  and the first one that succeeds is used in the html output.
+
+ @history[#:changed "1.34" @elem{Added support for  @racket['gif-bytes].}]
 }
 
 @defstruct[part-link-redirect ([url url?])]{
@@ -1958,7 +1950,7 @@ arguments to the element's command in Latex output.}
 @defstruct[command-optional ([arguments (listof string?)])]{
                                                   
  Used as a @tech{style property} on a @racket[element] to add
- a optional arguments to the element's command in Latex output.
+ optional arguments to the element's command in Latex output.
 
  @history[#:added "1.20"]
 }
@@ -1970,4 +1962,15 @@ arguments to the element's command in Latex output.}
  the Latex class file uses a short title.
 
  @history[#:added "1.20"]
+}
+
+@defstruct[table-row-skip ([amount string?])]{
+
+ Used as a @tech{style property} in @racket[table-cells] to specify a
+ spacing adjustment between the cell's row and the row afterward, such
+ as @racket["1ex"] to increase the space or @racket["-1ex"] to
+ decrease it. If multiple cells on a row provide this property, the
+ first one in the row is used.
+
+ @history[#:added "1.33"]
 }

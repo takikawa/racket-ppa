@@ -24,7 +24,8 @@
          scribble/xref
          net/url
          racket/place
-         racket/future)
+         racket/future
+         mrlib/syntax-browser)
 
 (import [prefix drracket:app: drracket:app^]
         [prefix drracket:unit: drracket:unit^]
@@ -88,6 +89,7 @@
                          string-ending-with-newline?)
 
 (preferences:set-default 'drracket:save-files-on-tab-switch? #f boolean?)
+(preferences:set-default 'drracket:dont-ask-about-saving-files-on-tab-switch? #f boolean?)
 
 (preferences:set-default 'drracket:inline-overview-shown? #f boolean?)
 
@@ -345,16 +347,18 @@
 
 (let ([make-check-box
        (λ (pref-sym string parent [extra-functionality #f])
-         (let ([q (make-object check-box%
-                    string
-                    parent
-                    (λ (checkbox evt)
-                      (define value (send checkbox get-value))
-                      (preferences:set pref-sym value)
-                      (when extra-functionality
-                        (extra-functionality value))))])
-           (preferences:add-callback pref-sym (λ (p v) (send q set-value v)))
-           (send q set-value (preferences:get pref-sym))))])
+         (define check-box
+           (new check-box%
+                [label string]
+                [parent parent]
+                [callback (λ (checkbox evt)
+                            (define value (send checkbox get-value))
+                            (preferences:set pref-sym value)
+                            (when extra-functionality
+                              (extra-functionality value)))]))
+         (preferences:add-callback pref-sym (λ (p v) (send check-box set-value v)))
+         (send check-box set-value (preferences:get pref-sym))
+         check-box)])
   (preferences:add-to-general-checkbox-panel
    (λ (editor-panel)
      (make-check-box 'drracket:open-in-tabs 
@@ -382,10 +386,17 @@
                      (string-constant test-coverage-summary)
                      editor-panel)
 
-     (make-check-box 'drracket:save-files-on-tab-switch?
-                     (string-constant save-after-switching-tabs)
-                     editor-panel)
-     ))
+     (define save-files-on-tab-switch-check-box
+       (make-check-box 'drracket:save-files-on-tab-switch?
+                       (string-constant save-after-switching-tabs)
+                       editor-panel))
+     (send save-files-on-tab-switch-check-box enable
+           (not (preferences:get 'drracket:dont-ask-about-saving-files-on-tab-switch?)))
+     (make-check-box 'drracket:dont-ask-about-saving-files-on-tab-switch?
+                     (string-constant dont-ask-about-saving-after-switching-tabs)
+                     editor-panel
+                     (λ (nv) (send save-files-on-tab-switch-check-box enable (not nv))))
+     (void)))
   
   (preferences:add-to-editor-checkbox-panel
    (λ (editor-panel)
@@ -431,7 +442,9 @@
                    (send cb set-value on?)
                    (send sl set-value (cdr v))))])
        (preferences:add-callback 'drracket:repl-buffer-size (λ (p v) (update-controls v)))
-       (update-controls (preferences:get 'drracket:repl-buffer-size)))))
+       (update-controls (preferences:get 'drracket:repl-buffer-size)))
+
+     (void)))
   
   (preferences:add-to-warnings-checkbox-panel
    (λ (warnings-panel)
@@ -443,7 +456,8 @@
                      warnings-panel)
      (make-check-box 'drracket:show-killed-dialog
                      (string-constant show-evaluation-terminated-dialog)
-                     warnings-panel))))
+                     warnings-panel)
+     (void))))
 
 (drracket:debug:add-prefs-panel)
 (install-help-browser-preference-panel)
@@ -625,6 +639,9 @@
   [else
    (preferences:set 'framework:exit-when-no-frames #t)]) 
 
+(color-prefs:add-color-scheme-entry 'drracket:language-name-and-memory-use-at-top-of-interactions
+                                    "dark green"
+                                    "pale green")
 
 (define repl-error-pref 'drracket:read-eval-print-loop:error-color)
 (define repl-out-pref 'drracket:read-eval-print-loop:out-color)
@@ -657,6 +674,9 @@
                                             repl-out-pref
                                             "text:ports out"
                                             (string-constant repl-out-color))))
+(color-prefs:add-color-scheme-entry 'drracket:error-background-highlighting
+                                    "pink"
+                                    (make-object color% 117 0 0))
 
 
 (define test-coverage-on-style-pref (string->symbol drracket:debug:test-coverage-on-style-name))
@@ -687,6 +707,35 @@
 (drracket:module-language:initialize-prefs-panel)
 
 (editor:set-change-font-size-when-monitors-change? #t)
+
+(define (add-and-monitor-render-syntax-style name bow-color wob-color)
+  (define (set-the-color wob? bkg-color)
+    (define sl (editor:get-standard-style-list))
+    (define st (send sl new-named-style name (send sl basic-style)))
+    (define sd (make-object style-delta%))
+    (send sd set-delta-foreground
+          (if wob? wob-color bow-color))
+    (send sd set-delta-background bkg-color)
+    (send st set-delta sd))
+  (set-the-color (preferences:get 'framework:white-on-black?)
+                 (color-prefs:lookup-in-color-scheme
+                  'framework:basic-canvas-background))
+  (preferences:add-callback
+   'framework:white-on-black?
+   (λ (name b) (set-the-color b
+                              (color-prefs:lookup-in-color-scheme
+                               'framework:basic-canvas-background))))
+  (color-prefs:register-color-scheme-entry-change-callback
+   'framework:basic-canvas-background
+   (λ (bkg-color) (set-the-color (preferences:get 'framework:white-on-black?)
+                             bkg-color))))
+
+(add-and-monitor-render-syntax-style render-syntax-subtitle-color-style-name
+                                     "navy"
+                                     "CornflowerBlue")
+(add-and-monitor-render-syntax-style render-syntax-focused-syntax-color-style-name
+                                     "forestgreen"
+                                     "limegreen")
 
 (let* ([find-frame
         (λ (item)

@@ -13,7 +13,6 @@
          "properties.rkt"
          "text.rkt"
          "util.rkt"
-         macro-debugger/util/eomap
          macro-debugger/util/logger
          macro-debugger/util/mpi)
 (provide widget%)
@@ -31,7 +30,13 @@
       (new vertical-panel% (parent parent)))
     (define -split-panel
       (new panel:horizontal-dragable% (parent -main-panel)))
-    (define -text (new browser-text%))
+    (define -text (new browser-text% (keymap (setup-keymap))))
+    (let loop ([win parent])
+      (cond
+        [(is-a? win frame:searchable<%>)
+         (send win set-text-to-search -text)]
+        [(is-a? win area-container<%>)
+         (loop (send win get-parent))]))
     (define -ecanvas
       (new canvas:color% (parent -split-panel) (editor -text)))
     (define -props-panel
@@ -43,7 +48,6 @@
 
     (define/public (setup-keymap)
       (new syntax-keymap% 
-           (editor -text)
            (controller controller)
            (config config)))
 
@@ -137,13 +141,13 @@
          (for ([subst (in-list substitutions)])
            (for ([r (in-list (send/i range range<%> get-ranges (car subst)))])
              (send -text insert (cdr subst)
-                   (+ offset (car r))
-                   (+ offset (cdr r))
+                   (+ offset (range-start r))
+                   (+ offset (range-end r))
                    #f)
              (send -text change-style
                    (code-style -text (send/i config config<%> get-syntax-font-size))
-                   (+ offset (car r))
-                   (+ offset (cdr r))
+                   (+ offset (range-start r))
+                   (+ offset (range-end r))
                    #f))))
         ;; Apply highlighting
         (with-log-time "highlights"
@@ -162,9 +166,9 @@
          (when (send config get-draw-arrows?)
           (define (definite-phase id)
             (and definites
-                 (or (eomap-ref definites id #f)
+                 (or (hash-ref definites id #f)
                      (for/or ([shifted (in-list (hash-ref shift-table id null))])
-                       (eomap-ref definites shifted #f)))))
+                       (hash-ref definites shifted #f)))))
 
           (define phase-binder-table (make-hash))
           (define (get-binder-table phase)
@@ -197,25 +201,29 @@
     (define/private (add-binding-arrow start binder-r id-r phase)
       ;; phase = #f means not definite binding (ie, "?" arrow)
       (send -text add-arrow
-            (+ start (car binder-r))
-            (+ start (cdr binder-r))
-            (+ start (car id-r))
-            (+ start (cdr id-r))
+            (+ start (range-start binder-r))
+            (+ start (range-end binder-r))
+            (+ start (range-start id-r))
+            (+ start (range-end id-r))
             (if phase "blue" "purple")
             (cond [(equal? phase 0) #f]
                   [phase (format "phase ~s" phase)]
                   [else "?"])
             (if phase 'end 'start)))
 
-    (define/private (add-binding-billboard start range id definite?)
-      (match (identifier-binding id)
+    (define/private (add-binding-billboard start range id phase)
+      (match (identifier-binding id (or phase 0))
         [(list-rest src-mod src-name nom-mod nom-name _)
          (for ([id-r (in-list (send/i range range<%> get-ranges id))])
            (send -text add-billboard
-                 (+ start (car id-r))
-                 (+ start (cdr id-r))
-                 (string-append "from " (mpi->string src-mod))
-                 (if definite? "blue" "purple")))]
+                 (+ start (range-start id-r))
+                 (+ start (range-end id-r))
+                 (string-append
+                  (cond [(and phase (not (eqv? phase 0)))
+                         (format "(phase ~s) " phase)]
+                        [else ""])
+                  "from " (collapse-mpi->string src-mod))
+                 (if phase "blue" "purple")))]
         [_ (void)]))
 
     (define/public (add-separator)
@@ -241,11 +249,10 @@
       (let ([admin (send -text get-admin)]
             [w-box (box 0.0)])
         (send admin get-view #f #f w-box #f)
-        (sub1 (inexact->exact (floor (/ (unbox w-box) char-width))))))
+        (- (inexact->exact (floor (/ (unbox w-box) char-width))) 2)))
 
     ;; Initialize
     (super-new)
-    (setup-keymap)
 
     (send/i config config<%> listen-props-shown?
            (lambda (show?)

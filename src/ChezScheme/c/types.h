@@ -114,19 +114,32 @@ typedef int IFASLCODE;      /* fasl type codes */
 #define addr_get_segment(p) ((uptr)(p) >> segment_offset_bits)
 #define ptr_get_segment(p) (((uptr)(p) + typemod - 1) >> segment_offset_bits)
 
+#define segment_bitmap_bytes      (bytes_per_segment >> (log2_ptr_bytes+3))
+#define segment_bitmap_index(p)   ((((uptr)(p) + (typemod-1)) & ~(typemod-1) & (bytes_per_segment - 1)) >> log2_ptr_bytes)
+#define segment_bitmap_byte(p)    (segment_bitmap_index(p) >> 3)
+#define segment_bitmap_bits(p, b) ((uptr)(b) << (segment_bitmap_index(p) & 0x7))
+#define segment_bitmap_bit(p)     segment_bitmap_bits(p,1)
+
 #define SPACE(p) SegmentSpace(ptr_get_segment(p))
 #define GENERATION(p) SegmentGeneration(ptr_get_segment(p))
+#define OLDSPACE(p) SegmentOldSpace(ptr_get_segment(p))
 
 #define ptr_align(size) (((size)+byte_alignment-1) & ~(byte_alignment-1))
+
+#define MUST_MARK_INFINITY 3
 
 /* The inlined implementation of primitives like `weak-pair?`
    rely on the first two fields of `seginfo`: */
 typedef struct _seginfo {
   unsigned char space;                      /* space the segment is in */
   unsigned char generation;                 /* generation the segment is in */
-  unsigned char sorted : 1;                 /* sorted indicator---possibly to be incorporated into space flags? */
+  unsigned char old_space : 1;              /* set during GC to indcate space being collected */
+  unsigned char use_marks : 1;              /* set during GC to indicate space to mark in place instead of copy */
+  unsigned char sorted : 1;                 /* sorted indicator */
   unsigned char has_triggers : 1;           /* set if trigger_ephemerons or trigger_guardians is set */
+  unsigned char must_mark : 2;              /* a form of locking, where 3 counts as "infinite" */
   octet min_dirty_byte;                     /* dirty byte for full segment, effectively min(dirty_bytes) */
+  octet *list_bits;                         /* for `$list-bits-ref` and `$list-bits-set!` */
   uptr number;                              /* the segment number */
   struct _chunkinfo *chunk;                 /* the chunk this segment belongs to */
   struct _seginfo *next;                    /* pointer to the next seginfo (used in occupied_segments and unused_segs */
@@ -134,11 +147,13 @@ typedef struct _seginfo {
   struct _seginfo *dirty_next;              /* pointer to the next seginfo on the DirtySegments list */
   ptr trigger_ephemerons;                   /* ephemerons to re-check if object in segment is copied out */
   ptr trigger_guardians;                    /* guardians to re-check if object in segment is copied out */
-  ptr locked_objects;                       /* list of objects (including duplicates) for locked in this segment */
-  ptr unlocked_objects;                     /* list of objects (no duplicates) for formerly locked */
+  octet *marked_mask;                       /* bitmap of live objects for a segment in "compacting" mode */
+  uptr marked_count;                        /* number of marked bytes in segment */
 #ifdef PRESERVE_FLONUM_EQ
   octet *forwarded_flonums;                 /* bitmap of flonums whose payload is a forwarding pointer */
 #endif
+  octet *counting_mask;                     /* bitmap of counting roots during a GC */
+  octet *measured_mask;                     /* bitmap of objects that have been measured */
   octet dirty_bytes[cards_per_segment];     /* one dirty byte per card */
 } seginfo;
 
@@ -227,6 +242,7 @@ typedef struct _bucket_pointer_list {
 /* size macros for variable-sized objects */
 
 #define size_vector(n) ptr_align(header_size_vector + (n)*ptr_bytes)
+#define size_stencil_vector(n) ptr_align(header_size_stencil_vector + (n)*ptr_bytes)
 #define size_closure(n) ptr_align(header_size_closure + (n)*ptr_bytes)
 #define size_string(n) ptr_align(header_size_string + (n)*string_char_bytes)
 #define size_fxvector(n) ptr_align(header_size_fxvector + (n)*ptr_bytes)
@@ -271,9 +287,22 @@ typedef struct _bucket_pointer_list {
 #define FWDMARKER(p) FORWARDMARKER((uptr)UNTYPE_ANY(p))
 #define FWDADDRESS(p) FORWARDADDRESS((uptr)UNTYPE_ANY(p))
 
-#define ENTRYFRAMESIZE(x) RPHEADERFRAMESIZE((uptr)(x) - size_rp_header)
-#define ENTRYOFFSET(x) RPHEADERTOPLINK((uptr)(x) - size_rp_header)
-#define ENTRYLIVEMASK(x) RPHEADERLIVEMASK((uptr)(x) - size_rp_header)
+#define ISENTRYCOMPACT(x) (RPCOMPACTHEADERMASKANDSIZE((uptr)(x) - size_rp_compact_header) & compact_header_mask)
+#define COMPACTENTRYFIELD(x, offset) (RPCOMPACTHEADERMASKANDSIZE((uptr)(x) - size_rp_compact_header) >> offset)
+
+#define ENTRYFRAMESIZE(x) (ISENTRYCOMPACT(x)                            \
+                           ? ((COMPACTENTRYFIELD(x, compact_frame_words_offset) & compact_frame_words_mask) << log2_ptr_bytes) \
+                           : RPHEADERFRAMESIZE((uptr)(x) - size_rp_header))
+#define ENTRYOFFSET(x) (ISENTRYCOMPACT(x)                               \
+                        ? RPCOMPACTHEADERTOPLINK((uptr)(x) - size_rp_compact_header) \
+                        : RPHEADERTOPLINK((uptr)(x) - size_rp_header))
+#define ENTRYOFFSETADDR(x) (ISENTRYCOMPACT(x)                               \
+                            ? &RPCOMPACTHEADERTOPLINK((uptr)(x) - size_rp_compact_header) \
+                            : &RPHEADERTOPLINK((uptr)(x) - size_rp_header))
+#define ENTRYLIVEMASK(x) (ISENTRYCOMPACT(x)                             \
+                          ? FIX(COMPACTENTRYFIELD(x, compact_frame_mask_offset)) \
+                          : RPHEADERLIVEMASK((uptr)(x) - size_rp_header))
+#define ENTRYNONCOMPACTLIVEMASKADDR(x) (&RPHEADERLIVEMASK((uptr)(x) - size_rp_header))
 
 #define PORTFD(x) ((iptr)PORTHANDLER(x))
 #define PORTGZFILE(x) ((gzFile)(PORTHANDLER(x)))
@@ -304,7 +333,7 @@ typedef struct {
    thread count is zero, in which case we don't signal.  collection
    is not permitted to happen when interrupts are disabled, so we
    don't let anything happen in that case. */
-#define deactivate_thread(tc) {\
+#define deactivate_thread_signal_collect(tc, check_collect) {  \
   if (ACTIVE(tc)) {\
     ptr code;\
     tc_mutex_acquire()\
@@ -313,14 +342,17 @@ typedef struct {
     Slock_object(code);\
     SETSYMVAL(S_G.active_threads_id,\
      FIX(UNFIX(SYMVAL(S_G.active_threads_id)) - 1));\
-    if (Sboolean_value(SYMVAL(S_G.collect_request_pending_id))\
+    if (check_collect \
+        && Sboolean_value(SYMVAL(S_G.collect_request_pending_id))  \
         && SYMVAL(S_G.active_threads_id) == FIX(0)) {\
       s_thread_cond_signal(&S_collect_cond);\
+      s_thread_cond_signal(&S_collect_thread0_cond);\
     }\
     ACTIVE(tc) = 0;\
     tc_mutex_release()\
   }\
 }
+#define deactivate_thread(tc) deactivate_thread_signal_collect(tc, 1) 
 #define reactivate_thread(tc) {\
   if (!ACTIVE(tc)) {\
     tc_mutex_acquire()\
@@ -386,3 +418,8 @@ typedef struct {
 
 #define INCRGEN(g) (g = g == S_G.max_nonstatic_generation ? static_generation : g+1)
 #define IMMEDIATE(x) (Sfixnump(x) || Simmediatep(x))
+
+/* For `memcpy_aligned, that the first two arguments are word-aligned
+   and it would be ok to round up the length to a word size. But
+   probably the compiler does a fine job with plain old `mempcy`. */
+#define memcpy_aligned memcpy

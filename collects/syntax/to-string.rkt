@@ -20,6 +20,17 @@
           (when c
             (display (make-string (max 0 (- c col)) #\space))
             (set! col c))))
+      (define quotes-table
+        #hasheq((quote . "'")
+                (quasiquote . "`")
+                (unquote . ",")
+                (unquote-splicing . ",@")
+                (syntax . "#'")
+                (quasisyntax . "#`")
+                (unsyntax . "#,")
+                (unsyntax-splicing . "#,@")))
+      (define (get-quote c)
+        (hash-ref quotes-table (syntax-e (car (syntax-e c)))))
       (parameterize ([current-output-port s]
                      [read-case-sensitive #t])
         (define (loop init-line!)
@@ -27,7 +38,10 @@
             (cond
               [(eq? 'code:blank (syntax-e c))
                (advance c init-line!)]
-              [(eq? '_ (syntax-e c)) (void)]
+              [(eq? '_ (syntax-e c)) 
+               (advance c init-line!)
+               (printf "_")
+               (set! col (+ col 1))]
               [(eq? '... (syntax-e c))
                (void)]
               [(and (pair? (syntax-e c))
@@ -47,18 +61,36 @@
                                    (printf "; ")))
                            l))]
               [(and (pair? (syntax-e c))
-                    (eq? (syntax-e (car (syntax-e c))) 'quote))
+                    (hash-has-key? quotes-table (syntax-e (car (syntax-e c))))
+                    (eq? (syntax-span (car (syntax-e c)))
+                         (string-length (get-quote c))))
+               ;; The above conditions detect the shorthand form of quote and friends
+               ;; The shorthand form will read, for instance, '<form>
+               ;; as (quote <form>), so the result is guaranteed to be a syntax list
+               ;; with exactly two elements in it.
                (advance c init-line!)
-               (printf "'")
+               (printf (get-quote c))
+               (set! col (+ col (string-length (get-quote c))))
                (let ([i (cadr (syntax->list c))])
-                 (set! col (or (syntax-column i) col))
                  ((loop init-line!) i))]
               [(pair? (syntax-e c))
                (advance c init-line!)
                (define c-paren-shape (syntax-property c 'paren-shape))
                (printf "~a" (or c-paren-shape #\())
                (set! col (+ col 1))
-               (map (loop init-line!) (syntax->list c))
+               (define se (syntax-e c))
+               (define (build-string-from-pair sp)
+                 (cond
+                   [(syntax? sp)
+                    (printf " . ")
+                    (set! col (+ col 3))
+                    ((loop init-line!) sp)]
+                   [else
+                    ((loop init-line!) (car sp))
+                    (build-string-from-pair (cdr sp))]))
+               (if (list? se)
+                   (map (loop init-line!) se)
+                   (build-string-from-pair se))
                (printf (case c-paren-shape
                          [(#\[) "]"]
                          [(#\{) "}"]

@@ -109,10 +109,14 @@
     ((null? (cdr args)) (k (car args)))
     (else (#2%apply k args)))) ; library apply not available yet
 
+;; before anything that returns multiple values
+(define-hand-coded-library-entry values-error)
+
 ;;; dounderflow & nuate must come before callcc
 (define-hand-coded-library-entry dounderflow)
 (define-hand-coded-library-entry nuate)
-(define-hand-coded-library-entry reify-cc)
+(define-hand-coded-library-entry reify-1cc)
+(define-hand-coded-library-entry maybe-reify-cc)
 (define-hand-coded-library-entry callcc)
 (define-hand-coded-library-entry call1cc)
 (define-hand-coded-library-entry dofargint32)
@@ -125,11 +129,13 @@
 (define-hand-coded-library-entry dofretu16*)
 (define-hand-coded-library-entry dofretu32*)
 (define-hand-coded-library-entry domvleterr)
-(define-hand-coded-library-entry values-error)
 (define-hand-coded-library-entry bytevector=?)
 (define-hand-coded-library-entry $wrapper-apply)
 (define-hand-coded-library-entry wrapper-apply)
 (define-hand-coded-library-entry arity-wrapper-apply)
+(define-hand-coded-library-entry event-detour)
+(define-hand-coded-library-entry popcount-slow) ; before fxpopcount use
+(define-hand-coded-library-entry cpu-features)  ; before fxpopcount use
 
 (define $instantiate-code-object ($hand-coded '$instantiate-code-object))
 
@@ -297,6 +303,14 @@
   (define index-oops
     (lambda (who x i)
       ($oops who "~s is not a valid index for ~s" i x)))
+  (define bytevector-index-oops
+    ;; for consistency with error before library entry was introduced:
+    (lambda (who x i)
+      ($oops who "invalid index ~s for bytevector ~s" i x)))
+
+  (define stencil-vector-oops
+    (lambda (who x)
+      ($oops who "~s is not a vector" x)))
 
   (define-library-entry (char->integer x) (char-oops 'char->integer x))
 
@@ -387,6 +401,19 @@
 
   (define-library-entry (bytevector-length v)
     (bytevector-oops 'bytevector-length v))
+
+  (define-library-entry (stencil-vector-mask v)
+    (stencil-vector-oops 'stencil-vector-mask v))
+
+  (define-library-entry (bytevector-ieee-double-native-ref v i)
+    (if (bytevector? v)
+        (bytevector-index-oops 'bytevector-ieee-double-native-ref v i)
+        (bytevector-oops 'bytevector-ieee-double-native-ref v)))
+
+  (define-library-entry (bytevector-ieee-double-native-set! v i)
+    (if (mutable-bytevector? v)
+        (bytevector-index-oops 'bytevector-ieee-double-native-set! v i)
+        (mutable-bytevector-oops 'bytevector-ieee-double-native-set! v)))
 
   (define-library-entry (char=? x y) (char-oops 'char=? (if (char? x) y x)))
   (define-library-entry (char<? x y) (char-oops 'char<? (if (char? x) y x)))
@@ -491,7 +518,7 @@
 (define-library-entry (fx<= x y) (fxnonfixnum2 'fx<= x y))
 (define-library-entry (fx>= x y) (fxnonfixnum2 'fx>= x y))
 (define-library-entry (fx=? x y) (fxnonfixnum2 'fx=? x y))
-(define-library-entry (fx<? x y) (fxnonfixnum2 'fx< x y))
+(define-library-entry (fx<? x y) (fxnonfixnum2 'fx<? x y))
 (define-library-entry (fx>? x y) (fxnonfixnum2 'fx>? x y))
 (define-library-entry (fx<=? x y) (fxnonfixnum2 'fx<=? x y))
 (define-library-entry (fx>=? x y) (fxnonfixnum2 'fx>=? x y))
@@ -511,6 +538,10 @@
 (define-library-entry (fxxor x y) (fxnonfixnum2 'fxxor x y))
 (define-library-entry (fxand x y) (fxnonfixnum2 'fxand x y))
 (define-library-entry (fxnot x) (fxnonfixnum1 'fxnot x))
+(define-library-entry (fixnum->flonum x) (fxnonfixnum1 'fixnum->flonum x))
+(define-library-entry (fxpopcount x) ($oops 'fxpopcount32 "~s is not a non-negative fixnum" x))
+(define-library-entry (fxpopcount32 x) ($oops 'fxpopcount32 "~s is not a 32-bit fixnum" x))
+(define-library-entry (fxpopcount16 x) ($oops 'fxpopcount16 "~s is not a 16-bit fixnum" x))
 
 (define-library-entry (fxsll x y)
   (cond
@@ -643,8 +674,32 @@
   (define-library-entry (fl* x y) (flonum-oops 'fl* (if (flonum? x) y x)))
   (define-library-entry (fl/ x y) (flonum-oops 'fl/ (if (flonum? x) y x)))
   (define-library-entry (flnegate x) (flonum-oops 'fl- x))
+  (define-library-entry (flabs x) (flonum-oops 'flabs x))
+
+  (define-library-entry (flsqrt x) (flonum-oops 'flsqrt x))
+  (define-library-entry (flround x) (flonum-oops 'flround x))
+  (define-library-entry (flfloor x) (flonum-oops 'flfloor x))
+  (define-library-entry (flceiling x) (flonum-oops 'flceiling x))
+  (define-library-entry (fltruncate x) (flonum-oops 'fltruncate x))
+  (define-library-entry (flsin x) (flonum-oops 'flsin x))
+  (define-library-entry (flcos x) (flonum-oops 'flcos x))
+  (define-library-entry (fltan x) (flonum-oops 'fltan x))
+  (define-library-entry (flasin x) (flonum-oops 'flasin x))
+  (define-library-entry (flacos x) (flonum-oops 'flacos x))
+  (define-library-entry (flatan x) (flonum-oops 'flatan x))
+  (define-library-entry (flatan2 x y) (flonum-oops 'flatan (if (flonum? x) y x)))
+  (define-library-entry (flexp x) (flonum-oops 'flexp x))
+  (define-library-entry (fllog x) (flonum-oops 'fllog x))
+  (define-library-entry (fllog2 x y) (flonum-oops 'fllog (if (flonum? x) y x)))
+  (define-library-entry (flexpt x y) (flonum-oops 'flexpt (if (flonum? x) y x)))
+
+  (define-library-entry (flonum->fixnum x) (if (flonum? x)
+                                               ($oops 'flonum->fixnum "result for ~s would be outside of fixnum range" x)
+                                               (flonum-oops 'flonum->fixnum x)))
 )
 
+;; Now using `rint` via a C entry
+#;
 (define-library-entry (flround x)
  ; assumes round-to-nearest-or-even
   (float-type-case
@@ -1112,7 +1167,7 @@
           (let ([handler $signal-interrupt-handler])
             ($tc-field 'signal-interrupt-pending ($tc) #f)
             (keyboard)
-            (handler x))
+            (for-each handler ($dequeue-scheme-signals ($tc))))
           (keyboard))))
   (define (keyboard)
     (if ($tc-field 'keyboard-interrupt-pending ($tc))
@@ -1370,6 +1425,18 @@
 
 (define-library-entry (apply3 p x1 x2 x3 ls)
   (doapply p (x1 x2 x3) ls))
+
+(define-library-entry ($check-continuation c check-as? as)
+  (let ([who 'call-in-other-continuation])
+    (unless ($continuation? c)
+      ($oops who "~s is not a continuation" c))
+    (when check-as?
+      (unless (let ([c-as ($continuation-attachments c)])
+                (or (eq? as c-as)
+                    (and (pair? as)
+                         (eq? (cdr as) c-as))))
+        ($oops who "~s is not an extension of of the attachments of ~s" as c)))
+    ($do-wind ($current-winders) ($continuation-winders c))))
 
 (define-library-entry (eqv? x y)
   (if (eq? x y) 

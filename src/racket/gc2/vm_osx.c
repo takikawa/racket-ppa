@@ -236,7 +236,7 @@ static unsigned long determine_max_heap_size()
 
 /* The catch_exception_raise() functions are treated specially by the
    linker, and Mach looks them up at run time. We provide
-   GC_... variants due to linker confusion when the implementaiton of
+   GC_... variants due to linker confusion when the implementation of
    these are in a framework instead of the main binary, so that the
    main binary needs to define them and jump to the implemenations
    here. (This linker problem seems to occur when we use
@@ -426,6 +426,10 @@ void GC_detach_current_thread_exceptions_from_handler()
 static void macosx_init_exception_handler(int isMASTERGC)
 {
   kern_return_t retval;
+
+  /* Note: the `designate_modified` function relies on the fact that
+     all exceptions (at least within a place) go through the same
+     handler thread, so it can skip the lock on modified pages. */
 
   if (!isMASTERGC) {
     GC_attach_current_thread_exceptions_to_handler();

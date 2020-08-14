@@ -8,7 +8,7 @@
 ;; the rest are used by the thread, io, etc., layers for directly
 ;; accessed variables.
 
-(define NUM-PLACE-REGISTERS 128) ; 3 thorugh 126 available for subsystems
+(define NUM-PLACE-REGISTERS 128) ; 3 through 126 available for subsystems
 
 (define LOCAL_TABLE-INDEX 0)
 (define ASYNC-CALLBACK-REGISTER-INDEX 1)
@@ -91,7 +91,8 @@
                                     (set-box! place-esc-box esc)
                                     (thunk)
                                     0))])
-                     (finish-proc result)))))
+                     (finish-proc result)
+                     (do-destroy-place)))))
   ;; Must be called within an engine, used for memory accounting:
   (define (current-place-roots)
     (list (place-registers)
@@ -104,6 +105,10 @@
 (define do-start-place void)
 (define (set-start-place! proc)
   (set! do-start-place proc))
+
+(define do-destroy-place void)
+(define (set-destroy-place! proc)
+  (set! do-destroy-place proc))
 
 (define (start-place pch path sym in out err cust plumber)
   (let ([finish (do-start-place pch path sym in out err cust plumber)])

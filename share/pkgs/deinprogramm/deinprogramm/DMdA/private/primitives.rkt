@@ -2,9 +2,9 @@
 
 (require syntax/docprovide)
 
-(require test-engine/scheme-tests
+(require test-engine/racket-tests
 	 (lib "test-info.scm" "test-engine")
-	 test-engine/scheme-tests
+	 test-engine/racket-tests
 	 scheme/class)
 
 (require deinprogramm/signature/module-begin
@@ -29,7 +29,7 @@
 (provide provide lib planet rename-out require #%datum #%module-begin #%top-interaction) ; so we can use this as a language
 
 (provide (all-from-out deinprogramm/DMdA/define-record-procedures))
-(provide (all-from-out test-engine/scheme-tests))
+(provide (all-from-out test-engine/racket-tests))
 (provide signature define-contract :
 	 contract ; legacy
 	 -> mixed one-of predicate combined list-of)

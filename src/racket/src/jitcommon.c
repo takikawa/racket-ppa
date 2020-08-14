@@ -82,7 +82,7 @@ static int save_struct_temp(mz_jit_state *jitter, int reg)
   jit_movr_p(JIT_V(3), reg);
 #endif
 #ifdef MZ_USE_JIT_I386
-# ifdef X86_ALIGN_STACK
+# ifdef JIT_X86_ALIGN_STACK
   mz_set_local_p(reg, JIT_LOCAL3);
 # else
   jit_pushr_p(reg);
@@ -101,7 +101,7 @@ static int restore_struct_temp(mz_jit_state *jitter, int reg)
   jit_movr_p(reg, JIT_V(3));
 #endif
 #ifdef MZ_USE_JIT_I386
-# ifdef X86_ALIGN_STACK
+# ifdef JIT_X86_ALIGN_STACK
   mz_get_local_p(reg, JIT_LOCAL3);
 # else
   jit_popr_p(reg);
@@ -190,7 +190,7 @@ static Scheme_Object **ts_scheme_on_demand(Scheme_Object **rs) XFORM_SKIP_PROC
 static int common0(mz_jit_state *jitter, void *_data)
 {
   int in;
-  GC_CAN_IGNORE jit_insn *ref;
+  GC_CAN_IGNORE jit_insn *ref USED_ONLY_FOR_FUTURES;
 
   /* *** check_arity_code *** */
   /* Called as a function: */
@@ -1714,7 +1714,7 @@ int scheme_generate_struct_op(mz_jit_state *jitter, int kind, int for_branch,
     } else {
       mz_patch_ucbranch(bref_true);
 #ifdef MZ_USE_JIT_I386
-# ifndef X86_ALIGN_STACK
+# ifndef JIT_X86_ALIGN_STACK
       jit_popr_p(JIT_V1);
 # endif
 #endif
@@ -1919,8 +1919,8 @@ static int common4(mz_jit_state *jitter, void *_data)
     mz_prolog(JIT_R2);
     JIT_UPDATE_THREAD_RSPTR();
     jit_prepare(3);
-    jit_pusharg_p(JIT_R0);
-    jit_pusharg_p(JIT_V1);
+    jit_pusharg_i(JIT_R0);
+    jit_pusharg_i(JIT_V1);
     jit_pusharg_p(JIT_R1);
     (void)mz_finish_lwe(ts_unsafe_struct_refs, ref);
     jit_retval(JIT_R0);

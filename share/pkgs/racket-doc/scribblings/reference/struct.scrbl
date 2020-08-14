@@ -27,7 +27,7 @@ associated with the structure type, and the corresponding arguments
 are omitted from the constructor procedure. All automatic fields in a
 structure type follow the non-automatic fields.
 
-A structure type can be created as a @pidefterm{structure subtype} of
+A structure type can be created as a @deftech{structure subtype} of
 an existing base structure type. An instance of a structure subtype
 can always be used as an instance of the base structure type, but the
 subtype gets its own predicate procedure, and it may have its own
@@ -392,15 +392,29 @@ impersonator.
 (p-ref struct:c)
 ]}
 
+
 @defproc[(struct-type-property? [v any/c]) boolean?]{
 
 Returns @racket[#t] if @racket[v] is a @tech{structure type property
 descriptor} value, @racket[#f] otherwise.}
 
+
 @defproc[(struct-type-property-accessor-procedure? [v any/c]) boolean?]{
 
 Returns @racket[#t] if @racket[v] is an accessor procedure produced
 by @racket[make-struct-type-property], @racket[#f] otherwise.}
+
+
+@defproc[(struct-type-property-predicate-procedure? [v any/c]
+                                                    [prop (or/c struct-type-property? #f) #f])
+         boolean?]{
+
+Returns @racket[#t] if @racket[v] is a predicate procedure produced by
+@racket[make-struct-type-property] and either @racket[prop] is
+@racket[#f] or it was produced by the same call to
+@racket[make-struct-type-property], @racket[#f] otherwise.
+
+@history[#:added "7.5.0.11"]}
 
 @;------------------------------------------------------------------------
 @include-section["generic.scrbl"]
@@ -412,8 +426,9 @@ by @racket[make-struct-type-property], @racket[#f] otherwise.}
               ((fld-id [field-id expr]
                        [field-id #:parent parent-id expr]))]{
 
-Creates a new instance of the structure type @racket[id] with the same
-field values as the structure produced by @racket[struct-expr], except
+Creates a new instance of the structure type @racket[id] (which is defined via a
+@seclink["define-struct"]{structure type defining form} such as @racket[struct])
+with the same field values as the structure produced by @racket[struct-expr], except
 that the value of each supplied @racket[field-id] is instead
 determined by the corresponding @racket[expr]. If @racket[#:parent]
 is specified, the @racket[parent-id] must be bound to a parent
@@ -424,12 +439,11 @@ encapsulates information about a structure type (i.e., like the
 initial identifier bound by @racket[struct]), and the binding
 must supply a constructor, a predicate, and all field accessors.
 
-Each @racket[field-id] is combined with @racket[id] 
-(or @racket[parent-id], if present) to form
-@racket[id]@racketidfont{-}@racket[field-id] (using the lexical
-context of @racket[field-id]), which must be one of the accessor
-bindings in @racket[id]. The accessor bindings determined by different
-@racket[field-id]s must be distinct. The order of the
+Each @racket[field-id] must correspond to a @racket[field-id] in
+the @seclink["define-struct"]{structure type defining forms} of @racket[id]
+(or @racket[parent-id], if present). The accessor bindings determined by different
+@racket[field-id]s under the same @racket[id] (or @racket[parent-id], if present)
+must be distinct. The order of the
 @racket[field-id]s need not match the order of the corresponding
 fields in the structure type.
 
@@ -775,7 +789,8 @@ derived from @racket[struct:struct-info] or with the
 @racket[prop:struct-info] property that also implements
 @racket[prop:procedure], and where the instance is further is wrapped
 by @racket[make-set!-transformer]. In addition, the representation may
-implement the @racket[prop:struct-auto-info] property.
+implement the @racket[prop:struct-auto-info] and
+@racket[prop:struct-field-info] properties.
 
 Use @racket[struct-info?] to recognize all allowed forms of the
 information, and use @racket[extract-struct-info] to obtain a list
@@ -815,6 +830,9 @@ specified through a transformer binding to such a value.}
 
 Encapsulates a thunk that returns structure-type information in list
 form. Note that accessors are listed in reverse order, as mentioned in @secref{structinfo}.}
+Note that the field names are not well-defined for struct-type informations
+that are created with this method, so it is likely not going to work well
+with forms like @racket[struct-copy] and @racket[struct*].
       
 @(struct-eval '(require (for-syntax racket/base)))
 @(struct-eval '(require racket/match))
@@ -901,6 +919,37 @@ identifiers from a value that implements the
 subset of the accessor identifiers for the structure type described by
 @racket[sai], and the second list should be a subset of the mutator
 identifiers. The two subsets correspond to @racket[#:auto] fields.}
+
+@deftogether[(
+@defthing[prop:struct-field-info struct-type-property?]
+@defproc[(struct-field-info? [v any/c]) boolean?]
+@defproc[(struct-field-info-list [sfi struct-field-info?]) (listof symbol?)])]{
+
+The @racket[prop:struct-field-info] property is implemented to provide
+static information about field names in a structure type. The property
+value must be a procedure that accepts an instance structure to which
+the property is given, and the result must be a list of symbols
+suitable as a result from @racket[struct-field-info-list].
+
+The @racket[struct-field-info?] predicate recognizes values that
+implement the @racket[prop:struct-field-info] property.
+
+The @racket[struct-field-info-list] function extracts a list of
+symbols from a value that implements the @racket[prop:struct-field-info] property.
+The list should contain every immediate field name
+(that is, not including fields from its super struct type)
+in the reverse order.
+
+@examples[#:escape no-escape
+#:eval struct-eval
+(struct foo (x))
+(struct bar foo (y z))
+(define-syntax (get-bar-field-names stx)
+  #`'#,(struct-field-info-list (syntax-local-value #'bar)))
+(get-bar-field-names)
+]
+
+@history[#:added "7.7.0.9"]}
 
 @; ----------------------------------------------------------------------
 

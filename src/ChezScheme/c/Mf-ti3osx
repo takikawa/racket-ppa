@@ -17,7 +17,7 @@ m = ti3osx
 Cpu = I386
 
 mdclib = -liconv -lm ${ncursesLib}
-C = ${CC} ${CPPFLAGS} -m32 -Wpointer-arith -Wall -Wextra -Wno-implicit-fallthrough -Werror -O2 -msse2 -I/opt/X11/include/ ${CFLAGS}
+C = ${CC} ${CPPFLAGS} -m32 -Wpointer-arith -Wall -Wextra -Wno-implicit-fallthrough -Werror -g -O2 -msse2 -I/opt/X11/include/ ${CFLAGS}
 o = o
 mdsrc = i3le.c
 mdobj = i3le.o
@@ -40,7 +40,7 @@ ${Scheme}: ${Kernel} ${KernelLinkDeps} ${Main}
 	$C -o ${Scheme} ${Main} ${Kernel} ${mdclib} ${KernelLinkLibs} ${LDFLAGS}
 
 ../zlib/configure.log:
-	(cd ../zlib; CFLAGS="${CFLAGS} -m32" ./configure)
+	(cd ../zlib; ${SetConfigEnv} CFLAGS="${CFLAGS} -m32" ./configure)
 
 ../lz4/lib/liblz4.a: ${LZ4Sources}
-	(cd ../lz4/lib; CFLAGS="${CFLAGS} -m32" ${MAKE} liblz4.a)
+	(cd ../lz4/lib; ${SetConfigEnv} CFLAGS="${CFLAGS} -m32" ${MAKE} liblz4.a)

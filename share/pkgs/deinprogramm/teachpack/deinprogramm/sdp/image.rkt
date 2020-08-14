@@ -1,11 +1,13 @@
 #lang racket/base
 (provide (all-from-out teachpack/2htdp/image)
+	 (all-from-out lang/posn)
 	 image mode image-color color y-place x-place
 	 pulled-point angle side-count step-count
-	 real-valued-posn
+	 posn real-valued-posn
 	 pen pen-style pen-cap pen-join)
 
 (require teachpack/2htdp/image)
+(require lang/posn)
 (require deinprogramm/signature/signature)
 (require deinprogramm/signature/signature-syntax)
 (require deinprogramm/signature/signature-german)
@@ -20,6 +22,7 @@
 (define angle (signature angle (predicate angle?)))
 (define side-count (signature side-count (predicate side-count?)))
 (define step-count (signature step-count (predicate step-count?)))
+(define posn (signature posn (predicate posn?)))
 (define real-valued-posn (signature real-valued-posn (predicate real-valued-posn?)))
 (define pen (signature pen (predicate pen?)))
 (define pen-style (signature pen-style (predicate pen-style?)))

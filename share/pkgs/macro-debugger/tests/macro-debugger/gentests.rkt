@@ -1,7 +1,7 @@
 #lang racket/base
 (require rackunit)
 (require macro-debugger/model/debug
-         macro-debugger/model/stx-util
+         (only-in macro-debugger/model/stx-util stx->datum)
          "gentest-framework.rkt"
          "test-setup.rkt")
 (provide mk-deriv-test
@@ -124,7 +124,9 @@
                      (map bigframe-term (state-lctx (protostep-s1 thing)))))]))
 
 (define (interesting-step? st)
-  (not (memq (protostep-type st) '(resolve-variable rename-block))))
+  (define type (protostep-type st))
+  (or (step-type? type #:kinds '(rw ac er))
+      (and (memq type '(rename-lambda rename-letX)) #t)))
 
 (define (reduction-sequence? rs)
   (andmap protostep? rs))
@@ -141,7 +143,8 @@
                               (for/list ([step actual])
                                 (format "~s: ~s\n"
                                         (protostep-type step)
-                                        (stx->datum (step-term2 step)))))))]
+                                        (and (step? step)
+                                             (stx->datum (step-term2 step))))))))]
         [else 'ok]))
 
 (define (compare-steps actual expected [prev-details #f])

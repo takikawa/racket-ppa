@@ -41,6 +41,7 @@
         (fold-right (lambda (x rest) 
                       (case x
                         [(#\-) (cons #\_ rest)]
+                        [(#\+) (cons #\_ rest)]
                         [(#\?) (cons #\p rest)]
                         [(#\>) rest]
                         [(#\*) (cons #\s rest)]
@@ -75,6 +76,9 @@
          (lambda (a)
            (apply
              (lambda (field type disp len)
+               (putprop (string->symbol (format "~a-~a" struct field)) '*c-ref* (if len
+                                                                                    (cons name len)
+                                                                                    name))
                (if len
                    (def (format "~s(x,i)" name)
                         (format (if (eq? ref &ref) "(~a+i)" "(~a[i])")
@@ -169,7 +173,9 @@
 
   (set-who! mkscheme.h
     (lambda (ofn target-machine)
-      (fluid-let ([op (open-output-file ofn 'replace)])
+      (fluid-let ([op (if (output-port? ofn)
+                          ofn
+                          (open-output-file ofn 'replace))])
         (comment "scheme.h for Chez Scheme Version ~a (~a)" scheme-version target-machine)
   
         (nl)
@@ -248,6 +254,7 @@
         (deftotypep "Sfxvectorp" ($ mask-fxvector) ($ type-fxvector))
         (deftotypep "Sbytevectorp" ($ mask-bytevector) ($ type-bytevector))
         (deftotypep "Sstringp" ($ mask-string) ($ type-string))
+        (deftotypep "Sstencil_vectorp" ($ mask-stencil-vector) ($ type-stencil-vector))
         (deftotypep "Sbignump" ($ mask-bignum) ($ type-bignum))
         (deftotypep "Sboxp" ($ mask-box) ($ type-box))
         (deftotypep "Sinexactnump" ($ mask-inexactnum) ($ type-inexactnum))
@@ -297,6 +304,12 @@
 
         (defref Sunbox box ref)
   
+        (def "Sstencil_vector_length(x)"
+          (format "Spopcount(((uptr)~a)>>~d)"
+            (access "x" vector type)
+            ($ stencil-vector-mask-offset)))
+        (defref Sstencil_vector_ref vector data)
+        
         (export "iptr" "Sinteger_value" "(ptr)")
         (def "Sunsigned_value(x)" "(uptr)Sinteger_value(x)")
         (export (constant typedef-i32) "Sinteger32_value" "(ptr)")
@@ -643,8 +656,8 @@
             (pr "                        \"cmp r12, #0\\n\\t\"\\~%")
             (pr "                        \"bne 1f\\n\\t\"\\~%")
             (pr "                        \"mov r12, #1\\n\\t\"\\~%")
-            (pr "                        \"strex r11, r12, [%0]\\n\\t\"\\~%")
-            (pr "                        \"cmp r11, #0\\n\\t\"\\~%")
+            (pr "                        \"strex r7, r12, [%0]\\n\\t\"\\~%")
+            (pr "                        \"cmp r7, #0\\n\\t\"\\~%")
             (pr "                        \"beq 2f\\n\\t\"\\~%")
             (pr "                        \"1:\\n\\t\"\\~%")
             (pr "                        \"ldr r12, [%0, #0]\\n\\t\"\\~%")
@@ -654,7 +667,7 @@
             (pr "                        \"2:\\n\\t\"\\~%")
             (pr "                        :                \\~%")
             (pr "                        : \"r\" (addr)\\~%")
-            (pr "                        : \"cc\", \"memory\", \"r12\", \"r11\")~%")
+            (pr "                        : \"cc\", \"memory\", \"r12\", \"r7\")~%")
 
             (nl)
             (pr "#define UNLOCK(addr)     \\~%")
@@ -670,14 +683,14 @@
             (pr "                        \"0:\\n\\t\"\\~%")
             (pr "                        \"ldrex r12, [%1, #0]\\n\\t\"\\~%")
             (pr "                        \"add r12, r12, #1\\n\\t\"\\~%")
-            (pr "                        \"strex r11, r12, [%1]\\n\\t\"\\~%")
-            (pr "                        \"cmp r11, #0\\n\\t\"\\~%")
+            (pr "                        \"strex r7, r12, [%1]\\n\\t\"\\~%")
+            (pr "                        \"cmp r7, #0\\n\\t\"\\~%")
             (pr "                        \"bne 0b\\n\\t\"\\~%")
             (pr "                        \"cmp r12, #0\\n\\t\"\\~%")
             (pr "                        \"moveq %0, #1\\n\\t\"\\~%")
             (pr "                        : \"=&r\" (ret)\\~%")
             (pr "                        : \"r\" (addr)\\~%")
-            (pr "                        : \"cc\", \"memory\", \"r12\", \"r11\")~%")
+            (pr "                        : \"cc\", \"memory\", \"r12\", \"r7\")~%")
 
             (nl)
             (pr "#define LOCKED_DECR(addr, ret) \\~%")
@@ -685,20 +698,91 @@
             (pr "                        \"0:\\n\\t\"\\~%")
             (pr "                        \"ldrex r12, [%1, #0]\\n\\t\"\\~%")
             (pr "                        \"sub r12, r12, #1\\n\\t\"\\~%")
-            (pr "                        \"strex r11, r12, [%1]\\n\\t\"\\~%")
-            (pr "                        \"cmp r11, #0\\n\\t\"\\~%")
+            (pr "                        \"strex r7, r12, [%1]\\n\\t\"\\~%")
+            (pr "                        \"cmp r7, #0\\n\\t\"\\~%")
             (pr "                        \"bne 0b\\n\\t\"\\~%")
             (pr "                        \"cmp r12, #0\\n\\t\"\\~%")
             (pr "                        \"moveq %0, #1\\n\\t\"\\~%")
             (pr "                        : \"=&r\" (ret)\\~%")
             (pr "                        : \"r\" (addr)\\~%")
-            (pr "                        : \"cc\", \"memory\", \"r12\", \"r11\")~%")]
+            (pr "                        : \"cc\", \"memory\", \"r12\", \"r7\")~%")]
+          [(arm64)
+            (pr "#define INITLOCK(addr)     \\~%")
+            (pr "  __asm__ __volatile__ (\"mov x12, #0\\n\\t\"\\~%")
+            (pr "                        \"str x12, [%0, #0]\\n\\t\"\\~%")
+            (pr "                        :             \\~%")
+            (pr "                        : \"r\" (addr)\\~%")
+            (pr "                        :\"memory\", \"x12\")~%")
+
+            (nl)
+            (pr "#define SPINLOCK(addr)      \\~%")
+            (pr "  __asm__ __volatile__ (\"0:\\n\\t\"\\~%")
+            (pr "                        \"ldxr x12, [%0, #0]\\n\\t\"\\~%")
+            (pr "                        \"cmp x12, #0\\n\\t\"\\~%")
+            (pr "                        \"bne 1f\\n\\t\"\\~%")
+            (pr "                        \"mov x12, #1\\n\\t\"\\~%")
+            (pr "                        \"stxr w7, x12, [%0]\\n\\t\"\\~%")
+            (pr "                        \"cmp w7, #0\\n\\t\"\\~%")
+            (pr "                        \"beq 2f\\n\\t\"\\~%")
+            (pr "                        \"1:\\n\\t\"\\~%")
+            (pr "                        \"ldr x12, [%0, #0]\\n\\t\"\\~%")
+            (pr "                        \"cmp x12, #0\\n\\t\"\\~%")
+            (pr "                        \"beq 0b\\n\\t\"\\~%")
+            (pr "                        \"b 1b\\n\\t\"\\~%")
+            (pr "                        \"2:\\n\\t\"\\~%")
+            (pr "                        :                \\~%")
+            (pr "                        : \"r\" (addr)\\~%")
+            (pr "                        : \"cc\", \"memory\", \"x12\", \"x7\")~%")
+
+            (nl)
+            (pr "#define UNLOCK(addr)     \\~%")
+            (pr "  __asm__ __volatile__ (\"mov x12, #0\\n\\t\"\\~%")
+            (pr "                        \"str x12, [%0, #0]\\n\\t\"\\~%")
+            (pr "                        :             \\~%")
+            (pr "                        : \"r\" (addr)\\~%")
+            (pr "                        :\"memory\", \"x12\")~%")
+
+            (nl)
+            (pr "#define LOCKED_INCR(addr, ret) \\~%")
+            (pr "  __asm__ __volatile__ (\"mov %0, #0\\n\\t\"\\~%")
+            (pr "                        \"0:\\n\\t\"\\~%")
+            (pr "                        \"ldxr x12, [%1, #0]\\n\\t\"\\~%")
+            (pr "                        \"add x12, x12, #1\\n\\t\"\\~%")
+            (pr "                        \"stxr w7, x12, [%1]\\n\\t\"\\~%")
+            (pr "                        \"cmp w7, #0\\n\\t\"\\~%")
+            (pr "                        \"bne 0b\\n\\t\"\\~%")
+            (pr "                        \"cmp x12, #0\\n\\t\"\\~%")
+            (pr "                        \"bne 1f\\n\\t\"\\~%")
+            (pr "                        \"mov %0, #1\\n\\t\"\\~%")
+            (pr "                        \"1:\\n\\t\"\\~%")
+            (pr "                        : \"=&r\" (ret)\\~%")
+            (pr "                        : \"r\" (addr)\\~%")
+            (pr "                        : \"cc\", \"memory\", \"x12\", \"x7\")~%")
+
+            (nl)
+            (pr "#define LOCKED_DECR(addr, ret) \\~%")
+            (pr "  __asm__ __volatile__ (\"mov %0, #0\\n\\t\"\\~%")
+            (pr "                        \"0:\\n\\t\"\\~%")
+            (pr "                        \"ldxr x12, [%1, #0]\\n\\t\"\\~%")
+            (pr "                        \"sub x12, x12, #1\\n\\t\"\\~%")
+            (pr "                        \"stxr w7, x12, [%1]\\n\\t\"\\~%")
+            (pr "                        \"cmp w7, #0\\n\\t\"\\~%")
+            (pr "                        \"bne 0b\\n\\t\"\\~%")
+            (pr "                        \"cmp x12, #0\\n\\t\"\\~%")
+            (pr "                        \"bne 1f\\n\\t\"\\~%")
+            (pr "                        \"mov %0, #1\\n\\t\"\\~%")
+            (pr "                        \"1:\\n\\t\"\\~%")
+            (pr "                        : \"=&r\" (ret)\\~%")
+            (pr "                        : \"r\" (addr)\\~%")
+            (pr "                        : \"cc\", \"memory\", \"x12\", \"x7\")~%")]
           [else
             ($oops who "asm locking code is not yet defined for ~s" (constant architecture))]))))
 
   (set! mkequates.h
     (lambda (ofn)
-      (fluid-let ([op (open-output-file ofn 'replace)])
+      (fluid-let ([op (if (output-port? ofn)
+                          ofn
+                          (open-output-file ofn 'replace))])
         (comment "equates.h for Chez Scheme Version ~a" scheme-version)
   
         (nl)
@@ -728,8 +812,10 @@
             (cond
               [(getprop x '*constant* #f) =>
                (lambda (k)
-                 (let ([type (getprop x '*constant-ctype* #f)])
-                   (def (sanitize x)
+                 (let ([type (getprop x '*constant-ctype* #f)]
+                       [c-name (sanitize x)])
+                   (putprop x '*c-name* c-name)
+                   (def c-name
                      (if (or (fixnum? k) (bignum? k))
                          (if (< k 0)
                              (if (or (not type) (eq? type 'int))
@@ -797,10 +883,10 @@
         (definit INITBOXREF box ref)
         (defset SETBOXREF box ref)
 
+        (defref EPHEMERONPREVREF ephemeron prev-ref)
+        (definit INITEPHEMERONPREVREF ephemeron prev-ref)
         (defref EPHEMERONNEXT ephemeron next)
         (definit INITEPHEMERONNEXT ephemeron next)
-        (defref EPHEMERONTRIGGERNEXT ephemeron trigger-next)
-        (definit INITEPHEMERONTRIGGERNEXT ephemeron trigger-next)
 
         (defref TLCTYPE tlc type)
         (defref TLCKEYVAL tlc keyval)
@@ -845,6 +931,9 @@
 
         (defref BYTEVECTOR_TYPE bytevector type)
         (defref BVIT bytevector data)
+
+        (defref STENVECTTYPE stencil-vector type)
+        (definit INITSTENVECTIT stencil-vector data)
 
         (defref INEXACTNUM_TYPE inexactnum type)
         (defref INEXACTNUM_REAL_PART inexactnum real)
@@ -960,6 +1049,9 @@
         (defref RPHEADERLIVEMASK rp-header livemask)
         (defref RPHEADERTOPLINK rp-header toplink)
 
+        (defref RPCOMPACTHEADERMASKANDSIZE rp-compact-header mask+size+mode)
+        (defref RPCOMPACTHEADERTOPLINK rp-compact-header toplink)
+
         (nl)
         (comment "machine types")
         (pr "#define machine_type_names ")
@@ -980,6 +1072,7 @@
 
         (nl)
         (comment "threads")
+        (defref THREADTYPE thread type)
         (defref THREADTC thread tc)
 
         (nl)
@@ -1017,6 +1110,10 @@
              (libspec-index (lookup-libspec nonprocedure-code)))
         (def "library_dounderflow"
              (libspec-index (lookup-libspec dounderflow)))
+        (def "library_popcount_slow"
+             (libspec-index (lookup-libspec popcount-slow)))
+        (def "library_cpu_features"
+             (libspec-index (lookup-libspec cpu-features)))
 
       )))
 )

@@ -162,7 +162,8 @@
 (define-type Brush-List%
   (Class [find-or-create-brush
           (case->
-           ((U (Instance Color%) String) Brush-Style -> (Option (Instance Brush%))))]))
+           ((Instance Color%) Brush-Style -> (Instance Brush%))
+           (String Brush-Style -> (Option (Instance Brush%))))]))
 
 (define-type Pen%
   (Class (init [color (U String (Instance Color%)) #:optional]
@@ -954,7 +955,7 @@
          [get-editor (-> (Instance Text%))]
          [get-field-background (-> (Instance Color%))]
          [get-value (-> String)]
-         [set-field-background ((Instance Color%) -> Void)]
+         [set-field-background ((U #f (Instance Color%)) -> Void)]
          [set-value (String -> Void)]))
 
 (define-type Combo-Field%
@@ -2114,6 +2115,7 @@
          [get-extent
           ((Option (Boxof Real)) (Option (Boxof Real)) -> Void)]
          [get-file ((Option Path) -> (Option Path-String))]
+         [get-file-creator-and-type (-> (Values (Option Bytes) (Option Bytes)))]
          [get-filename
           (->* () ((Option (Boxof Any))) (Option Path-String))]
          [get-flattened-text (-> String)]
@@ -2309,6 +2311,7 @@
          [set-cursor
           (case-> ((Option (Instance Cursor%)) -> Void)
                   ((Option (Instance Cursor%)) Any -> Void))]
+         [set-file-creator-and-type ((Option Bytes) (Option Bytes) -> Void)]
          [set-filename
           (case-> ((Option Path-String) -> Void)
                   ((Option Path-String) Any -> Void))]

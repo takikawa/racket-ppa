@@ -12,7 +12,7 @@ AC_CANONICAL_SYSTEM
 
 AC_DISABLE_OPTION_CHECKING
 
-AC_ARG_ENABLE(shared,     [  --enable-shared         create shared libraries (ok, but not recommended)])
+AC_ARG_ENABLE(shared,     [  --enable-shared         create shared libraries (not currently supported)])
 AC_ARG_ENABLE(standalone, [  --enable-standalone     create a standalone shared library])
 AC_ARG_ENABLE(pthread,    [  --enable-pthread        link with pthreads (usually auto-enabled if needed)])
 AC_ARG_ENABLE(iconv,      [  --enable-iconv          use iconv (usually auto-enabled)])
@@ -25,6 +25,7 @@ AC_ARG_ENABLE(mach,       [  --enable-mach=<mach>    Use Chez Scheme machine typ
 AC_ARG_ENABLE(target,     [  --enable-target=<mach>  Cross-build for Chez Scheme machine type <mach>])
 m4_include(../ac/natipkg_arg.m4)
 m4_include(../ac/sdk_arg.m4)
+m4_include(../ac/instlib_arg.m4)
 m4_include(../ac/strip_arg.m4)
 m4_include(../ac/ubsan_arg.m4)
 AC_ARG_ENABLE(csdefault,  [  --enable-csdefault      use CS as default build])
@@ -60,6 +61,14 @@ show_explicitly_set()
   fi
 }
 
+if test "${enable_shared}" = "yes" ; then
+  echo "=== Canceling --enable-shared"
+  echo "    Building Racket CS as a shared library is not currently"
+  echo "    supported --- but Racket executables get the benefits of"
+  echo "    sharing, anyway, by going through a shared executable"
+  enable_shared=no
+fi
+
 show_explicitly_enabled "${enable_pthread}" "pthreads"
 show_explicitly_disabled "${enable_pthread}" "pthreads"
 show_explicitly_disabled "${enable_compress}" "Compressed code"
@@ -78,6 +87,7 @@ if test "${enable_csonly}" = "yes" ; then
 fi
 show_explicitly_enabled "${enable_csdefault}" "executables without suffix"
 
+m4_include(../ac/instlib.m4)
 m4_include(../ac/sdk_show.m4)
 m4_include(../ac/strip_show.m4)
 
@@ -143,8 +153,10 @@ INSTALL_SETUP_RACKET_FLAGS=
 
 Z_LIB_DEP='$(OWN_Z_LIB)'
 Z_LIB='$(OWN_Z_LIB)'
+Z_LIB_UNPACK='$(AR) x $(OWN_Z_LIB)'
 LZ4_LIB_DEP='$(OWN_LZ4_LIB)'
 LZ4_LIB='$(OWN_LZ4_LIB)'
+LZ4_LIB_UNPACK='$(AR) x $(OWN_LZ4_LIB)'
 
 enable_pthread_by_default=yes
 
@@ -222,6 +234,11 @@ case "$host_os" in
     LIBS="${LIBS} -lrt -luuid"
     CPPFLAGS="${CPPFLAGS} -DELF_FIND_BOOT_SECTION"
     ELF_COMP="--expect-elf"
+    AC_CHECK_HEADER(uuid/uuid.h, ok_uuid=yes, ok_uuid=no)
+    if test "${ok_uuid}" != "yes"; then
+      echo Could not find uuid/uuid.h, needed for Chez Scheme
+      exit 1
+    fi
     ;;
   osf1*)
     ;;
@@ -235,6 +252,10 @@ case "$host_os" in
     NOT_MINGW="mingw"
     if `which ${host}-windres > /dev/null` ; then
       WINDRES="${host}-windres"
+    fi
+    # ".a" is typically not useful, since we always build a DLL:
+    if test "${enable_libs}" = "" ; then
+      INSTALL_LIBS_ENABLE=no-install
     fi
     ;;
   cygwin*)
@@ -254,6 +275,7 @@ case "$host_os" in
       strip_needs_dash_s=yes
     fi
 
+    PROPAGATE_SUB_CONFIGURE=no
     m4_include(../ac/sdk_mac.m4)
 
     if test "${enable_libfw}" = "yes" ; then
@@ -293,12 +315,6 @@ case "$host_os" in
     ;;
 esac
 
-case "$host_cpu" in
-  arm*)
-    enable_pthread_by_default=no
-    ;;
-esac
-
 if test "${enable_pthread}" = "" ; then
   if test "${enable_pthread_by_default}" = "yes" ; then
     enable_pthread=yes
@@ -321,6 +337,9 @@ case "$MACH_HOST_CPU" in
     ;;
   arm*)
     MACH="${thread_prefix}arm32${MACH_OS}"
+    ;;
+  aarch64*)
+    MACH="${thread_prefix}arm64${MACH_OS}"
     ;;
   power*)
     MACH="${thread_prefix}ppc32${MACH_OS}"
@@ -376,6 +395,9 @@ elif test "${build_os}_${build_cpu}" != "${host_os}_${host_cpu}" ; then
     arm*)
       BUILD_MACH="${BUILD_THREAD_PREFIX}arm32${BUILD_OS}"
       ;;
+    aarch64*)
+      BUILD_MACH="${BUILD_THREAD_PREFIX}arm64${BUILD_OS}"
+      ;;
     power*)
       BUILD_MACH="${BUILD_THREAD_PREFIX}ppc32${BUILD_OS}"
       ;;
@@ -405,15 +427,18 @@ fi
 ############## Racket and Chez Scheme ################
 
 SCHEME_SRC=../../ChezScheme
+SCHEME_SRC_NOW="$SCHEME_SRC"
 MAKE_BUILD_SCHEME=checkout
 
 if test "${enable_scheme}" != "" ; then
   SCHEME_SRC="${enable_scheme}"
+  SCHEME_SRC_NOW="$SCHEME_SRC"
   MAKE_BUILD_SCHEME=none
 else
   # Check for a directory packaged with a source distribution
   if test -d "${srcdir}/../../ChezScheme" ; then
     MAKE_BUILD_SCHEME=copy
+    SCHEME_SRC_NOW="${srcdir}/../../ChezScheme"
   fi
 fi
 
@@ -467,44 +492,7 @@ fi
 
 AC_LANG_C
 
-iconv_lib_flag=""
-if test "${skip_iconv_check}" = "no" ; then
- if test "${enable_iconv}" = "yes" ; then
-  AC_CHECK_HEADER(iconv.h, enable_iconv=yes, enable_iconv=no)
-  if test "${enable_iconv}" = "yes" ; then  
-    # Does it all work, now?
-    AC_TRY_RUN(
-[   #include <iconv.h>]
-[   #include <langinfo.h>]
-    int main() {
-[     iconv_open("UTF-8", "UTF-8");]
-      return 0;
-    }, enable_iconv=yes, enable_iconv=no, enable_iconv=yes)
-    if test "${enable_iconv}" = "no" ; then  
-      # Try adding -liconv ?
-      #  We did not use AC_CHECK_LIB because iconv is sometimes macro-renamed
-      ORIG_LIBS="$LIBS"
-      LIBS="$LIBS -liconv"
-      AC_TRY_RUN(
-[     #include <iconv.h>]
-[     #include <langinfo.h>]
-      int main() {
-[     iconv_open("UTF-8", "UTF-8");]
-      return 0;
-      }, enable_iconv=yes, enable_iconv=no, enable_iconv=yes)
-      if test "${enable_iconv}" = "no" ; then
-        LIBS="$ORIG_LIBS"
-      else
-        iconv_lib_flag=" -liconv"      
-      fi
-    fi
-  fi
- fi
- [ msg="iconv is usable" ]
- AC_MSG_CHECKING($msg)
- iconv_usage_result="$enable_iconv$iconv_lib_flag"
- AC_MSG_RESULT($iconv_usage_result)
-fi
+m4_include(../ac/iconv.m4)
 if test "${enable_iconv}" = "no" ; then
   AC_DEFINE(RKTIO_NO_ICONV,1,[Do not use iconv])
 fi
@@ -535,14 +523,14 @@ fi
 ############## zlib and LZ4 ################
 
 if test "${enable_libz}" != "no" ; then
-  if test ! -d "$SCHEME_SRC/zlib" ; then
+  if test ! -d "$SCHEME_SRC_NOW/zlib" ; then
     echo "No libz in Scheme directory, so trying installed"
     enable_libz=yes
   fi
 fi
 
 if test "${enable_liblz4}" != "no" ; then
-  if test ! -d "$SCHEME_SRC/lz4" ; then
+  if test ! -d "$SCHEME_SRC_NOW/lz4" ; then
     echo "No lz4 in Scheme directory, so trying installed"
     enable_liblz4=yes
   fi
@@ -565,6 +553,7 @@ if test "${enable_libz}" = "yes" ; then
   else
     Z_LIB_DEP=""
     Z_LIB="-lz"
+    Z_LIB_UNPACK='$(NOOP)'
     extra_scheme_config_args="${extra_scheme_config_args} ZLIB=-lz"
   fi
 fi
@@ -586,8 +575,44 @@ if test "${enable_liblz4}" = "yes" ; then
   else
     LZ4_LIB_DEP=""
     LZ4_LIB="-llz4"
+    LZ4_LIB_UNPACK='$(NOOP)'
     extra_scheme_config_args="${extra_scheme_config_args} LZ4=-llz4"
   fi
+fi
+
+############## other inferred machine properties ################
+
+AC_CHECK_SIZEOF([void *])
+
+m4_include(../ac/valid_sizeof.m4)
+
+############## subconfigure ################
+
+# Before libtool setup
+
+CPPFLAGS="$CPPFLAGS $PREFLAGS"
+
+SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CC="'"'"${CC}"'"'
+SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CFLAGS="'"'"${CFLAGS}"'"'
+SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} LDFLAGS="'"'"${LDFLAGS}"'"'
+SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} AR="'"'"${AR}"'"'
+SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} ARFLAGS="'"'"${ARFLAGS}"'"'
+SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} RANLIB="'"'"${RANLIB}"'"'
+SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} WINDRES="'"'"${WINDRES}"'"'
+SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CPPFLAGS="'"'"${CPPFLAGS}"'"'
+
+# Make sure the --enable-pthread result is propagated:
+if test "${enable_pthread}" = "yes" ; then
+  SUB_CONFIGURE_EXTRAS="$SUB_CONFIGURE_EXTRAS --enable-pthread"
+else
+  SUB_CONFIGURE_EXTRAS="$SUB_CONFIGURE_EXTRAS --disable-pthread"
+fi
+
+# Make sure the --enable-iconv result is propagated:
+if test "${enable_iconv}" = "yes" ; then
+  SUB_CONFIGURE_EXTRAS="$SUB_CONFIGURE_EXTRAS --enable-iconv"
+else
+  SUB_CONFIGURE_EXTRAS="$SUB_CONFIGURE_EXTRAS --disable-iconv"
 fi
 
 ############## libtool ################
@@ -604,8 +629,8 @@ if test "${enable_shared}" = "yes" ; then
   abssrcdir=`(cd ${srcdir}; pwd)`
 
   if test "${LIBTOOLPROG}" = "" ; then  
-    (cd ../lt; sh ${abssrcdir}/../lt/configure --enable-shared --disable-static)
-    LIBTOOLPROG=`pwd`/../lt/libtool
+    (cd ../../lt; sh ${abssrcdir}/../../lt/configure --enable-shared --disable-static)
+    LIBTOOLPROG=`pwd`/../../lt/libtool
   fi
 
   if test "${need_gcc_static_libgcc}" = "yes" ; then
@@ -651,10 +676,6 @@ else
   fi
 fi
 
-############## other inferred machine properties ################
-
-AC_CHECK_SIZEOF([void *])
-
 ############## final output ################
 
 # Pass certain configure args on to rktio
@@ -676,16 +697,6 @@ do
   esac
 done
 
-SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CC="'"'"${CC}"'"'
-SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CFLAGS="'"'"${CFLAGS}"'"'
-SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} LDFLAGS="'"'"${LDFLAGS}"'"'
-SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} AR="'"'"${AR}"'"'
-SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} ARFLAGS="'"'"${ARFLAGS}"'"'
-SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} RANLIB="'"'"${RANLIB}"'"'
-SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} WINDRES="'"'"${WINDRES}"'"'
-
-CPPFLAGS="$CPPFLAGS $PREFLAGS"
-
 SCHEME_CONFIG_ARGS="--machine=${MACH} --disable-x11 ${disable_curses_arg} ${extra_scheme_config_args}"
 SCHEME_CROSS_CONFIG_ARGS="--machine=${TARGET_MACH} --disable-x11 ${disable_curses_arg} ${extra_scheme_config_args}"
 
@@ -701,6 +712,7 @@ AC_SUBST(RANLIB)
 AC_SUBST(STATIC_AR)
 AC_SUBST(WINDRES)
 AC_SUBST(ICP)
+AC_SUBST(ICP_LIB)
 AC_SUBST(STRIP_DEBUG)
 AC_SUBST(STRIP_LIB_DEBUG)
 AC_SUBST(RKTLINKER)
@@ -723,8 +735,10 @@ AC_SUBST(MINGW)
 AC_SUBST(NOT_MINGW)
 AC_SUBST(Z_LIB_DEP)
 AC_SUBST(Z_LIB)
+AC_SUBST(Z_LIB_UNPACK)
 AC_SUBST(LZ4_LIB_DEP)
 AC_SUBST(LZ4_LIB)
+AC_SUBST(LZ4_LIB_UNPACK)
 AC_SUBST(CONFIGURE_RACKET_SO_COMPILE)
 AC_SUBST(COMPRESS_COMP)
 AC_SUBST(BOOT_COMPRESS_COMP)
@@ -743,6 +757,7 @@ AC_SUBST(CROSS_COMPILE_TARGET_KIND)
 AC_SUBST(RUN_RACKET)
 AC_SUBST(INSTALL_SETUP_FLAGS)
 AC_SUBST(INSTALL_SETUP_RACKET_FLAGS)
+AC_SUBST(INSTALL_LIBS_ENABLE)
 
 makefiles="Makefile"
 

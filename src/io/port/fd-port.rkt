@@ -32,12 +32,14 @@
          prop:fd-place-message-opener)
 
 ;; in atomic mode
-(define (fd-close fd fd-refcount)
+(define (fd-close fd fd-refcount
+                  #:discard-errors? [discard-errors? #f])
   (set-box! fd-refcount (sub1 (unbox fd-refcount)))
   (when (zero? (unbox fd-refcount))
     (fd-semaphore-update! fd 'remove)
     (define v (rktio_close rktio fd))
-    (when (rktio-error? v)
+    (when (and (rktio-error? v)
+               (not discard-errors?))
       (end-atomic)
       (raise-rktio-error #f v "error closing stream port"))))
 
@@ -213,10 +215,24 @@
        #:break newline?
        (void)))]
 
+  ;; in atomic mode, but may leave it temporarily
+  [flush-rktio-buffer-fully
+   (lambda ()
+     (unless (rktio-flushed?)
+       (end-atomic)
+       (sync (rktio-fd-flushed-evt this))
+       (start-atomic)
+       (flush-rktio-buffer-fully)))]
+
   #:static
   [flush-buffer/external
    (lambda ()
      (flush-buffer-fully #f))]
+
+  [rktio-flushed?
+   (lambda ()
+     (or (not bstr)
+         (rktio_poll_write_flushed rktio fd)))]
 
   #:override
   ;; in atomic mode
@@ -258,6 +274,7 @@
   [close
    (lambda ()
      (flush-buffer-fully #f) ; can temporarily leave atomic mode
+     (flush-rktio-buffer-fully) ; can temporarily leave atomic mode
      (when bstr ; <- in case a concurrent close succeeded
        (send fd-output-port this on-close)
        (when flush-handle
@@ -458,6 +475,29 @@
            (values #f fde)])]))))
 
 ;; ----------------------------------------
+;; Wait on rktio-level flushing. At the time of writing, this is
+;; needed only for Windows so old that Racket CS doesn't run on it,
+;; but here just in case rktio or something else changes.
+
+(struct rktio-fd-flushed-evt (p)
+  #:property
+  prop:evt
+  (poller
+   (lambda (ffe ctx)
+     (define p  (rktio-fd-flushed-evt-p ffe))
+     (cond
+       [(send fd-output-port p rktio-flushed?)
+        (values '(#t) #f)]
+       [else
+        (sandman-poll-ctx-add-poll-set-adder!
+         ctx
+         (lambda (ps)
+           (if (send fd-output-port p rktio-flushed?)
+               (rktio_poll_set_add_nosleep rktio ps)
+               (rktio_poll_add rktio (fd-output-port-fd p) ps RKTIO_POLL_FLUSH))))
+        (values #f (list ffe))]))))
+
+;; ----------------------------------------
 
 (define (register-fd-close custodian fd fd-refcount flush-handle port)
   (unsafe-custodian-register custodian
@@ -469,7 +509,7 @@
                                (if (input-port? port)
                                    (send fd-input-port port on-close)
                                    (send fd-output-port port on-close))
-                               (fd-close fd fd-refcount)
+                               (fd-close fd fd-refcount #:discard-errors? #t)
                                (set-closed-state! port))
                              #f
                              #f))

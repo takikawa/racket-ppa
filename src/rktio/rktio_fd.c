@@ -108,6 +108,7 @@ static void deinit_fd(rktio_fd_t *rfd, int full_close)
 
 #define DELAYED_CONSOLE_HANDLE ((HANDLE)-2)
 static void force_console(rktio_fd_t *rfd);
+static HANDLE get_std_handle(int which);
 
 static long WINAPI WindowsFDReader(Win_FD_Input_Thread *th);
 static void WindowsFDICleanup(Win_FD_Input_Thread *th, int close_mode);
@@ -282,7 +283,7 @@ rktio_fd_t *rktio_std_fd(rktio_t *rktio, int which)
     which = STD_ERROR_HANDLE;
     break;
   }
-  h = GetStdHandle(which);
+  h = get_std_handle(which);
   if ((h == INVALID_HANDLE_VALUE) || (h == NULL)) {
     h = DELAYED_CONSOLE_HANDLE; /* => open a console on demand */
   }
@@ -731,6 +732,12 @@ int poll_write_ready_or_flushed(rktio_t *rktio, rktio_fd_t *rfd, int check_flush
     /* Pipe output that can block or needs a background flush */
     int retval;
     Win_FD_Output_Thread *oth = rfd->oth;
+
+    if (check_flushed && rfd->oth->nonblocking) {
+      /* Not Windows 95, so any written data really is in the pipe, as
+         good as flushed, and we don't really need to ask the thread. */
+      return RKTIO_POLL_READY;
+    }
 
     WaitForSingleObject(oth->lock_sema, INFINITE);
     if (oth->nonblocking) {
@@ -1417,7 +1424,7 @@ intptr_t rktio_write(rktio_t *rktio, rktio_fd_t *rfd, const char *buffer, intptr
 	if (towrite)
 	  ok = WriteConsoleW((HANDLE)rfd->fd, w_buffer, towrite, &winwrote, NULL);
 	else {
-	  /* can happend if can_leftover is > 0 */
+	  /* can happen if can_leftover is > 0 */
 	  ok = 1;
 	  winwrote = 0;
 	}
@@ -1979,6 +1986,31 @@ static void WindowsFDOCleanup(Win_FD_Output_Thread *oth, int close_mode)
 
 #ifdef RKTIO_SYSTEM_WINDOWS
 
+#ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
+# define ENABLE_VIRTUAL_TERMINAL_PROCESSING  0x4
+#endif
+
+static HANDLE get_std_handle(int which) {
+  HANDLE h;
+
+  h = GetStdHandle(which);
+
+  if ((h == INVALID_HANDLE_VALUE) || (h == NULL))
+    return h;
+
+  if ((which == STD_OUTPUT_HANDLE) || (which == STD_ERROR_HANDLE)) {
+    if (GetFileType(h) == FILE_TYPE_CHAR) {
+      /* Try to enable ANSI escape codes, which should work for a recent
+         enough version of Windows */
+      DWORD mode = 0;
+      GetConsoleMode(h, &mode);
+      SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    }
+  }
+
+  return h;
+}
+
 static void force_console(rktio_fd_t *rfd) {
   /* DELAYED_CONSOLE_HANDLE is used to indicate that a console should be created on demand */
   if (rfd->fd == DELAYED_CONSOLE_HANDLE) {
@@ -1991,7 +2023,7 @@ static void force_console(rktio_fd_t *rfd) {
       which = STD_INPUT_HANDLE;
     else
       which = STD_OUTPUT_HANDLE;
-    h = GetStdHandle(which);
+    h = get_std_handle(which);
 
     rfd->fd = h;
   }

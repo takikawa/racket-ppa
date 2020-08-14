@@ -300,7 +300,7 @@
                                    dx dy)
                        (when label
                          (let* ([lx (+ endx dx fw)]
-                                [ly (- (+ endy dy) fh)])
+                                [ly (+ (+ endy dy) fh)])
                            (send* dc
                              (set-brush billboard-brush)
                              (set-font (billboard-font dc))
@@ -463,8 +463,12 @@ Like clickbacks, but:
                 (text:region-data-mixin
                  (text:hide-caret/selection-mixin
                   (text:foreground-color-mixin
-                   (editor:standard-style-list-mixin text:basic%)))))))))
+                   (text:searching-mixin
+                    (editor:keymap-mixin
+                     (editor:standard-style-list-mixin text:basic%)))))))))))
+      (init-field keymap)
       (inherit set-autowrap-bitmap get-style-list)
+      (define/override (get-keymaps) (list keymap))
       (define/override (default-style-name) browser-text-default-style-name)
       (super-new (auto-wrap #t))
       (let* ([sl (get-style-list)]

@@ -84,6 +84,11 @@
     ()
     scheme-object))
 
+(define $dequeue-scheme-signals
+  (foreign-procedure "(cs)dequeue_scheme_signals"
+    (ptr)
+    ptr))
+
 (define-who $show-allocation
   (let ([fp (foreign-procedure "(cs)s_showalloc" (boolean string) void)])
     (case-lambda
@@ -143,6 +148,11 @@
 
 (define string->symbol
   (foreign-procedure "(cs)s_intern"
+    (scheme-object)
+    scheme-object))
+
+(define string->uninterned-symbol
+  (foreign-procedure "(cs)s_uninterned"
     (scheme-object)
     scheme-object))
 
@@ -311,6 +321,18 @@
          ($oops who "~s is not a valid vector length" n))
        (make-vector n)]))
 
+(define-who make-immobile-vector
+  (let ([$make-immobile-vector (foreign-procedure "(cs)make_immobile_vector" (uptr ptr) ptr)])
+   (case-lambda
+      [(n x)
+       (unless (and (fixnum? n) (not ($fxu< (constant maximum-vector-length) n)))
+         ($oops who "~s is not a valid vector length" n))
+       ($make-immobile-vector n x)]
+      [(n)
+       (unless (and (fixnum? n) (not ($fxu< (constant maximum-vector-length) n)))
+         ($oops who "~s is not a valid vector length" n))
+       ($make-immobile-vector n 0)])))
+
 (define $make-eqhash-vector
   (case-lambda
     [(n)
@@ -364,6 +386,10 @@
   (lambda (f . args)
     (#2%apply f args)))
 
+(define $app/no-inline
+  (lambda (f . args)
+    (#2%apply f args)))
+
 (define call-with-values
   (lambda (producer consumer)
     (unless (procedure? producer)
@@ -389,6 +415,27 @@
     (unless (procedure? p)
       ($oops who "~s is not a procedure" p))
     (#3%call/cc p)))
+
+;; calls `p` with the continuation `c` and either no immediate
+;; attachments or the given attachments `as` that must be either
+;; the same as the attachments saved by `c` or one immediate
+;; attachment extending those attachments
+(define-who call-in-continuation
+  (case-lambda
+   [(c p)
+    (unless (procedure? p)
+      ($oops who "~s is not a procedure" p))
+    (#2%call-in-continuation c (lambda () (p)))]
+   [(c as p)
+    (unless (procedure? p)
+      ($oops who "~s is not a procedure" p))
+    (#2%call-in-continuation c as (lambda () (p)))]))
+
+;; checks `c` and consistency of `as` with `c`, and also runs any needed winders
+(define $assert-continuation
+  (case-lambda
+   [(c) (#2%$assert-continuation c)]
+   [(c as) (#2%$assert-continuation c as)]))
 
 (define-who call-setting-continuation-attachment
   (lambda (v p)
@@ -569,6 +616,36 @@
          ($oops '$continuation-return-offset "~s is not a continuation" x))
       ($continuation-return-offset x)))
 
+(define-who $continuation-return-frame-words
+   (lambda (x)
+      (unless ($continuation? x)
+         ($oops who "~s is not a continuation" x))
+      ($continuation-return-frame-words x)))
+
+(define-who $continuation-stack-return-code
+   (lambda (x i)
+      (unless ($continuation? x)
+         ($oops who "~s is not a continuation" x))
+      (unless (and (fixnum? i) (fx< 0 i ($continuation-stack-clength x)))
+         ($oops who "invalid index ~s" i))
+      ($continuation-stack-return-code x i)))
+
+(define-who $continuation-stack-return-offset
+   (lambda (x i)
+      (unless ($continuation? x)
+         ($oops who "~s is not a continuation" x))
+      (unless (and (fixnum? i) (fx< 0 i ($continuation-stack-clength x)))
+         ($oops who "invalid index ~s" i))
+      ($continuation-stack-return-offset x i)))
+
+(define-who $continuation-stack-return-frame-words
+   (lambda (x i)
+      (unless ($continuation? x)
+         ($oops who "~s is not a continuation" x))
+      (unless (and (fixnum? i) (fx< 0 i ($continuation-stack-clength x)))
+         ($oops who "invalid index ~s" i))
+      ($continuation-stack-return-frame-words x i)))
+
 (define void
    (lambda ()
       (void)))
@@ -588,6 +665,10 @@
       (unless (and (fixnum? ticks) (fx> ticks 0))
          ($oops '$set-timer "~s is not a positive fixnum" ticks))
       ($set-timer ticks)))
+
+(define $get-timer
+  (lambda ()
+    ($get-timer)))
 
 (define $fx+?
    (lambda (x y)
@@ -1086,6 +1167,14 @@
         ($top-level-bound? s)
         ($oops '$top-level-bound? "~s is not a symbol" s))))
 
+(define memory-order-acquire
+  (lambda ()
+    (memory-order-acquire)))
+
+(define memory-order-release
+  (lambda ()
+    (memory-order-release)))
+
 (define-who $bignum-length
   (lambda (n)
     (unless (bignum? n) ($oops who "~s is not a bignum" n))
@@ -1190,6 +1279,19 @@
   (lambda (s)
     (#3%immutable-fxvector? s)))
 
+(define stencil-vector-mask
+   (lambda (v)
+      (#2%stencil-vector-mask v)))
+
+(define-who $make-stencil-vector
+  (lambda (len mask)
+    ($oops who "should only be used as inlined with GC disabled")))
+
+; not safe; assumes `val` is older than `v`
+(define $stencil-vector-set!
+  (lambda (v i val)
+    ($stencil-vector-set! v i val)))
+
 ; not safe
 (define $record-ref
    (lambda (v i)
@@ -1227,6 +1329,8 @@
 
 (define box-immutable (lambda (x) (box-immutable x)))
 
+(define box-immobile (foreign-procedure "(cs)box_immobile" (ptr) ptr))
+
 (define unbox
    (lambda (b)
       (if (box? b)
@@ -1261,6 +1365,8 @@
 
 (define gensym? (lambda (x) (gensym? x)))
 
+(define uninterned-symbol? (lambda (x) (uninterned-symbol? x)))
+
 (define fixnum? (lambda (x) (fixnum? x)))
 
 (define bignum? (lambda (x) (bignum? x)))
@@ -1272,6 +1378,8 @@
 (define vector? (lambda (x) (vector? x)))
 
 (define fxvector? (lambda (x) (fxvector? x)))
+
+(define stencil-vector? (lambda (x) (stencil-vector? x)))
 
 (define procedure? (lambda (x) (procedure? x)))
 
@@ -1514,6 +1622,28 @@
     ; tconc is assumed to be valid at all call sites
     (#3%$install-ftype-guardian obj tconc)))
 
+(define guardian?
+  (lambda (g)
+    (#3%guardian? g)))
+
+(define-who unregister-guardian
+  (let ([fp (foreign-procedure "(cs)unregister_guardian" (scheme-object) scheme-object)])
+    (define probable-tconc? ; full tconc? could be expensive ...
+      (lambda (x)
+        (and (pair? x) (pair? (car x)) (pair? (cdr x)))))
+    (lambda (g)
+      (unless (guardian? g) ($oops who "~s is not a guardian" g))
+      ; at present, guardians should have either one free variable (the tcond) or two(the tconc and an ftd)
+      ; but we just look for a probable tconc among whatever free variables it has
+      (fp (let ([n ($code-free-count ($closure-code g))])
+            (let loop ([i 0])
+              (if (fx= i n)
+                  ($oops #f "failed to find a tconc among the free variables of guardian ~s" g)
+                  (let ([x ($closure-ref g i)])
+                    (if (probable-tconc? x)
+                        x
+                        (loop (fx+ i 1)))))))))))
+
 (define-who $ftype-guardian-oops
   (lambda (ftd obj)
     ($oops 'ftype-guardian "~s is not an ftype pointer of the expected type ~s" obj ftd)))
@@ -1531,6 +1661,48 @@
   (foreign-procedure "(cs)s_ptr_in_heap" (ptr) boolean))
 
 (define $event (lambda () ($event)))
+
+(let ()
+  (define (inc)
+    ;; make up for decrement that will happen immediately on retry:
+    (let ([t ($get-timer)])
+      (when (fx< t (most-positive-fixnum))
+        ($set-timer (fx+ t 1)))))
+
+  (set! $event-and-resume
+        (case-lambda
+         [(proc)
+          ($event)
+          (inc)
+          (proc)]
+         [(proc arg)
+          ($event)
+          (inc)
+          (proc arg)]
+         [(proc arg1 arg2)
+          ($event)
+          (inc)
+          (proc arg1 arg2)]
+         [(proc arg1 arg2 arg3)
+          ($event)
+          (inc)
+          (proc arg1 arg2 arg3)]
+         [(proc arg1 arg2 arg3 arg4)
+          ($event)
+          (inc)
+          (proc arg1 arg2 arg3 arg4)]
+         ;; Cases above should cover `event-resume-max-preferred-arg-cnt`,
+         ;; including `proc` in th count
+         [(proc . args)
+          ($event)
+          (inc)
+          (apply proc args)]))
+
+  (set! $event-and-resume*
+        (lambda (proc+args)
+          ($event)
+          (inc)
+          (apply (car proc+args) (cdr proc+args)))))
 
 (define $tc (lambda () ($tc)))
 (define $thread-list (lambda () ($thread-list)))
@@ -1579,6 +1751,7 @@
 (when-feature pthreads
 
 (define $raw-collect-cond (lambda () ($raw-collect-cond)))
+(define $raw-collect-thread0-cond (lambda () ($raw-collect-thread0-cond)))
 (define $raw-tc-mutex (lambda () ($raw-tc-mutex)))
 (define fork-thread)
 (define make-mutex)
@@ -1595,6 +1768,7 @@
 (define $close-resurrected-mutexes&conditions)
 (define $tc-mutex)
 (define $collect-cond)
+(define $collect-thread0-cond)
 (define get-initial-thread)
 (let ()
 ; scheme-object's below are mutex and condition addresses, which are
@@ -1682,7 +1856,7 @@
        (when (eq? addr 0)
          ($oops 'mutex-acquire "mutex is defunct"))
        (let ([r ((if block? ma ma-nb) addr)])
-         ($keep-live m)
+         (keep-live m)
          r))]))
 
 (set! mutex-release
@@ -1727,8 +1901,8 @@
       (when (eq? maddr 0)
         ($oops 'condition-wait "mutex is defunct"))
       (let ([r (cw caddr maddr t)])
-        ($keep-live c)
-        ($keep-live m)
+        (keep-live c)
+        (keep-live m)
         r))]))
 
 (set! condition-broadcast
@@ -1771,6 +1945,7 @@
 
 (set! $tc-mutex ($make-mutex ($raw-tc-mutex) '$tc-mutex))
 (set! $collect-cond ($make-condition ($raw-collect-cond) '$collect-cond))
+(set! $collect-thread0-cond ($make-condition ($raw-collect-thread0-cond) '$collect-thread0-cond))
 
 (set! get-initial-thread
   (let ([thread (car (ts))])
@@ -1798,9 +1973,9 @@
   (define-tc-parameter $sfd (lambda (x) (or (eq? x #f) (source-file-descriptor? x))) "a source-file descriptor or #f" #f)
   (define-tc-parameter $current-mso (lambda (x) (or (eq? x #f) (procedure? x))) "a procedure or #f" #f)
   (define-tc-parameter $target-machine symbol? "a symbol")
-  (define-tc-parameter optimize-level (lambda (x) (and (fixnum? x) (fx<= 0 x 3))) "valid optimize level" 0)
-  (define-tc-parameter $compile-profile (lambda (x) (memq x '(#f source block))) "valid compile-profile flag" #f)
-  (define-tc-parameter subset-mode (lambda (mode) (memq mode '(#f system))) "valid subset mode" #f)
+  (define-tc-parameter optimize-level (lambda (x) (and (fixnum? x) (fx<= 0 x 3))) "a valid optimize level" 0)
+  (define-tc-parameter $compile-profile (lambda (x) (memq x '(#f source block))) "a valid compile-profile flag" #f)
+  (define-tc-parameter subset-mode (lambda (mode) (memq mode '(#f system))) "a valid subset mode" #f)
   (define-tc-parameter default-record-equal-procedure (lambda (x) (or (eq? x #f) (procedure? x))) "a procedure or #f" #f)
   (define-tc-parameter default-record-hash-procedure (lambda (x) (or (eq? x #f) (procedure? x))) "a procedure or #f" #f)
 )
@@ -1872,12 +2047,21 @@
 (define $maybe-seginfo
   (lambda (x)
     ($maybe-seginfo x)))
+(define $seginfo
+  (lambda (x)
+    ($seginfo x)))
 (define $seginfo-generation
   (lambda (x)
     ($seginfo-generation x)))
 (define $seginfo-space
   (lambda (x)
     ($seginfo-space x)))
+(define-who $list-bits-ref
+  (lambda (x)
+    (unless (pair? x) ($oops who "~s is not a pair" x))
+    ($list-bits-ref x)))
+(define-who $list-bits-set!
+  (foreign-procedure "(cs)list_bits_set" (ptr iptr) void))
 
 (let ()
   (define $phantom-bytevector-adjust!
@@ -2027,6 +2211,12 @@
 (define-who ($record-type-descriptor r)
   (unless ($record? r) ($oops who "~s is not a record" r))
   (#3%$record-type-descriptor r))
+
+;; Assumes that the record that has only pointer fields:
+(define-who ($record-type-field-count rtd)
+  (unless (record-type-descriptor? rtd)
+    ($oops who "~s is not a record type descriptor" rtd))
+  ($record-type-field-count rtd))
 
 (define-who utf8->string
   (let ()
@@ -2409,9 +2599,9 @@
   (lambda ()
     (#3%$read-time-stamp-counter)))
 
-(define $keep-live
+(define keep-live
   (lambda (x)
-    (#2%$keep-live x)))
+    (#2%keep-live x)))
 
 (when-feature windows
 (let ()

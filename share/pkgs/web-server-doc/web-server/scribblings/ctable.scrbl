@@ -31,7 +31,8 @@ structures.
 @index{Web Server configuration table}
 The configuration table format is:
 
-@index{port} @index{max-waiting} @index{initial-connection-timeout}
+@index{port} @index{max-waiting}
+@index{initial-connection-timeout}
 @index{default-host-table} @index{virtual-host-table}
 
 @racketblock[
@@ -105,5 +106,5 @@ This function reads a @racket[configuration-table] from @racket[path].
          void]{
 This function writes a @racket[configuration-table] to @racket[path].
 }
-              
+
 }

@@ -142,8 +142,6 @@ static void configure_environment(Scheme_Object *mod)
   Scheme_Object *mli, *dyreq, *a[3], *gi, *v, *vs;
   Scheme_Object *submod, *cr, *mdp, *mpij;
 
-  cr = scheme_intern_symbol("configure-runtime");
-
   /* Modern style: look for `runtime-configure' submodule to initialize
      the configuration: */
 
@@ -1154,7 +1152,6 @@ static int run_from_cmd_line(int argc, char *_argv[],
     } else {
       /* No switches => -u mode */
       script_mode = 1;
-      no_more_switches = 1;
       sprog = argv[0];
       evals_and_loads[num_enl] = argv[0];
       eval_kind[num_enl++] = mzcmd_REQUIRE_FILE;
@@ -1302,6 +1299,13 @@ static int run_from_cmd_line(int argc, char *_argv[],
   
   if (no_compiled)
     scheme_set_compiled_file_paths(scheme_make_null());
+  else {
+    char *s;
+    s = getenv("PLT_ZO_PATH");
+    if (s)
+      scheme_set_compiled_file_paths(scheme_make_pair(scheme_make_path(s),
+                                                      scheme_make_null()));
+  }
 
   /* Setup compiled-file search path: */
   if (!compiled_paths) {
@@ -1436,7 +1440,7 @@ static int run_from_cmd_line(int argc, char *_argv[],
          "Default options:\n"
          " If only configuration options are provided, -i is added\n"
          " If only configuration options are before the first argument, -u is added\n"
-         " If -t/-l/-p/-u apears before the first -i/-e/-f/-r, -n is added\n"
+         " If -t/-l/-p/-u appears before the first -i/-e/-f/-r, -n is added\n"
          " <init-lib> defaults to " INITIAL_NAMESPACE_MODULE "\n"
          "Switch syntax:\n"
 	 " Multiple single-letter switches can be collapsed, with arguments placed\n"

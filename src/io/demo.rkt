@@ -15,6 +15,22 @@
 (path->string (current-directory))
 (set-string->number?! string->number)
 
+(let ()
+  (define-values (i o) (make-pipe 4096))
+
+  (define done? #f)
+
+  (thread (lambda ()
+            (sync (system-idle-evt))
+            (set! done? #t)
+            (close-input-port i)))
+
+  ;; Should error:
+  (let loop ()
+    (write-bytes #"hello" o)
+    (unless done?
+      (loop))))
+
 (define-syntax-rule (test expect rhs)
   (let ([e expect]
         [v rhs])
@@ -113,16 +129,47 @@
 (fprintf (current-output-port) "*~v*" '!!!)
 (newline)
 
+(parameterize ([error-print-width 5])
+  (test "abc" (format "~.a" "abc"))
+  (test "abcde" (format "~.a" "abcde"))
+  (test "ab..." (format "~.a" "abcdef"))
+  (test "abc" (format "~.a" #"abc"))
+  (test "abcde" (format "~.a" #"abcde"))
+  (test "ab..." (format "~.a" #"abcdef"))
+  (test "ab..." (format "~.a" 'abcdef))
+  (test "\"ab\"" (format "~.s" "ab"))
+  (test "\"abc\"" (format "~.s" "abc"))
+  (test "\"a..." (format "~.s" "abcde"))
+  (test "#\"a\"" (format "~.s" #"a"))
+  (test "#\"ab\"" (format "~.s" #"ab"))
+  (test "#\"..." (format "~.s" #"abc"))
+  (test "#\"..." (format "~.s" #"abcdef"))
+  (test "|a b|" (format "~.s" '|a b|))
+  (test "|a..." (format "~.s" '|a bx|))
+  (test "(1 2)" (format "~.a" '(1 2)))
+  (test "(1..." (format "~.a" '(10 2))))
+
 (test "no: hi 10"
       (with-handlers ([exn:fail? exn-message])
         (error 'no "hi ~s" 10)))
 
-(test "error: format string requires 1 arguments, given 3"
+(test "error: format string requires 1 arguments, given 3; arguments were: 1 2 3"
       (with-handlers ([exn:fail? exn-message])
         (error 'no "hi ~s" 1 2 3)))
-(test "error: format string requires 2 arguments, given 1"
+(test "error: format string requires 2 arguments, given 1; arguments were: 8"
       (with-handlers ([exn:fail? exn-message])
         (error 'no "hi ~s ~s" 8)))
+(test "error: format string requires 2 arguments, given 100"
+      (with-handlers ([exn:fail? exn-message])
+        (apply error 'no "hi ~s ~s" (for/list ([i 100]) i))))
+(test "error: format string requires 2 arguments, given 51"
+      (with-handlers ([exn:fail? exn-message])
+        (apply error 'no "hi ~s ~s" (for/list ([i 51]) i))))
+(test (apply string-append
+             "error: format string requires 2 arguments, given 50; arguments were:"
+             (for/list ([i 50]) (string-append " " (number->string i))))
+      (with-handlers ([exn:fail? exn-message])
+        (apply error 'no "hi ~s ~s" (for/list ([i 50]) i))))
 
 (define infinite-ones 
   (make-input-port 'ones
@@ -400,7 +447,6 @@
   (test (void) (file-position out 10))
   (test #"hola!!\0\0\0\0" (get-output-bytes out)))
 
-(log-error "start")
 (let ()
   (define-values (i o) (make-pipe))
   (port-count-lines! i)
@@ -428,7 +474,6 @@
   (write-bytes #"!" o)
   (test '(3 1 8) (next-location o))
 
-(log-error "here")
   (test #"x\r" (read-bytes 2 i))
   (test '(3 0 7) (next-location i))
   (test #"\n!" (read-bytes 2 i))

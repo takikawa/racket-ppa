@@ -1,6 +1,7 @@
 #lang racket/base
 (require "match.rkt"
-         "wrap.rkt")
+         "wrap.rkt"
+         "gensym.rkt")
 
 ;; Reduces closure allocation by lifting bindings that are only used
 ;; in calls that have the right number of arguments.
@@ -50,13 +51,13 @@
 ;; bound-variable sets
 (define empty-frees+binds (cons #hasheq() #hasheq()))
 
-(define (lift-in-schemified-linklet v)
+(define (lift-in-schemified-linklet v [leave-loops-intact? #f])
   ;; Match outer shape of a linklet produced by `schemify-linklet`
   ;; and lift in the linklet body:
   (let loop ([v v])
     (match v
       [`(lambda ,args . ,body)
-       (define new-body (lift-in-schemified-body body))
+       (define new-body (lift-in-schemified-body body leave-loops-intact?))
        (if (for/and ([old (in-list body)]
                      [new (in-list new-body)])
              (eq? old new))
@@ -68,11 +69,11 @@
            v
            `(let* ,bindings ,new-body))])))
 
-(define (lift-in-schemified-body body)
+(define (lift-in-schemified-body body [leave-loops-intact? #f])
   (for/list ([v (in-list body)])
-    (lift-in-schemified v)))
+    (lift-in-schemified v leave-loops-intact?)))
 
-(define (lift-in-schemified v)
+(define (lift-in-schemified v leave-loops-intact?)
   ;; Quick pre-check: do any lifts appear to be possible?
   (define (lift-in? v)
     (match v
@@ -185,9 +186,12 @@
        (define lifts (make-hasheq))
        (define locals (add-args args #hasheq()))
        (define frees+binds/ignored (compute-seq-lifts! body empty-frees+binds lifts locals))
+       (define loops (if leave-loops-intact?
+                         (find-seq-loops body lifts #hasheq() #hasheq())
+                         #hasheq()))
        (let ([lifts (if (zero? (hash-count lifts))
                         lifts
-                        (close-and-convert-lifts lifts))])
+                        (close-and-convert-lifts lifts loops))])
          (cond
            [(zero? (hash-count lifts)) v]
            [else
@@ -418,12 +422,136 @@
          (remove-frees/add-binds ids frees+binds lifts))]))
 
   ;; ----------------------------------------
+  ;; Pass 1b (optonal): find loops that don't need to be lifted,
+  ;; on the assumption they'll be recognized as loops
+
+  ;; Returns updated `loops` table
+  (define (find-loops v lifts loop-if-tail loops)
+    (match v
+      [`(letrec . ,_)
+       (find-letrec-loops v lifts loop-if-tail loops)]
+      [`(letrec* . ,_)
+       (find-letrec-loops v lifts loop-if-tail loops)]
+      [`((letrec ([,id ,rhs]) ,rator) ,rands ...)
+       (find-loops `(letrec ([,id ,rhs]) (,rator . ,rands)) lifts loop-if-tail loops)]
+      [`((letrec* ([,id ,rhs]) ,rator) ,rands ...)
+       (find-loops `(letrec ([,id ,rhs]) (,rator . ,rands)) lifts loop-if-tail loops)]
+      [`(let . ,_)
+       (find-let-loops v lifts loop-if-tail loops)]
+      [`(lambda ,args . ,body)
+       (find-seq-loops body lifts #hasheq() loops)]
+      [`(case-lambda [,argss . ,bodys] ...)
+       (for/fold ([loops loops]) ([body (in-list bodys)])
+         (find-seq-loops body lifts #hasheq() loops))]
+      [`(begin . ,vs)
+       (find-seq-loops vs lifts loop-if-tail loops)]
+      [`(begin0 ,v . ,vs)
+       (define new-loops (find-loops v lifts #hasheq() loops))
+       (if (null? vs)
+           new-loops
+           (find-seq-loops vs lifts #hasheq() new-loops))]
+      [`(quote . ,_) loops]
+      [`(if ,tst ,thn ,els)
+       (let* ([loops (find-loops tst lifts #hasheq() loops)]
+              [loops (find-loops thn lifts loop-if-tail loops)]
+              [loops (find-loops els lifts loop-if-tail loops)])
+         loops)]
+      [`(with-continuation-mark* ,_ ,key ,val ,body)
+       (let* ([loops (find-loops key lifts #hasheq() loops)]
+              [loops (find-loops val lifts #hasheq() loops)])
+         (find-loops body lifts loop-if-tail loops))]
+      [`(set! ,id ,rhs)
+       (find-loops rhs lifts #hasheq() loops)]
+      [`(#%variable-reference . ,_)
+       (error 'internal-error "lift: unexpected variable reference")]
+      [`(call-with-values ,producer ,consumer)
+       (let ([loops (find-loops producer lifts #hasheq() loops)])
+         (find-loops-in-tail-called consumer lifts loop-if-tail loops))]
+      [`(,rator . ,rands)
+       (define f (unwrap rator))
+       (let ([loops
+              (cond
+                [(and (symbol? f)
+                      (hash-ref loop-if-tail f #f))
+                 => (lambda (bx)
+                      (set-box! bx #t) ; record reference to loop
+                      loops)]
+                [else (find-loops rator lifts #hasheq() loops)])])
+         (for/fold ([loops loops]) ([rand (in-list rands)])
+           (find-loops rand lifts #hasheq() loops)))]
+      [`,_
+       (define x (unwrap v))
+       (if (symbol? x)
+           (hash-remove loops x)
+           loops)]))
+
+  (define (find-seq-loops vs lifts loop-if-tail loops)
+    (let loop ([vs vs] [loops loops])
+      (cond
+        [(wrap-null? (wrap-cdr vs))
+         (find-loops (wrap-car vs) lifts loop-if-tail loops)]
+        [else
+         (loop (wrap-cdr vs)
+               (find-loops (wrap-car vs) lifts #hasheq() loops))])))
+
+  (define (find-let-loops v lifts loop-if-tail loops)
+    (match v
+      [`(,_ ([,_ ,rhss] ...) . ,body)
+       (define new-loops
+         (for/fold ([loops loops]) ([rhs (in-list rhss)])
+           (find-loops rhs lifts #hasheq() loops)))
+       (find-seq-loops body lifts loop-if-tail new-loops)]))
+
+  (define (find-letrec-loops v lifts loop-if-tail loops)
+    (match v
+      [`(,_ ([,id ,rhs]) (,id2 . ,rands))
+       (define u-id (unwrap id))
+       (cond
+         [(and (eq? (unwrap id2) u-id)
+               (hash-ref lifts u-id #f))
+          ;; It's liftable, so potentially a loop
+          (let* ([loops (hash-set loops u-id #t)]
+                 [loops (for/fold ([loops loops]) ([rand (in-list rands)])
+                          (find-loops rand lifts #hasheq() loops))])
+            (cond
+              [(not (hash-ref loops u-id #f))
+               (find-loops rhs #hasheq() loops)]
+              [else
+               (define new-loop-if-tail
+                 (hash-set (for/hasheq ([(id bx) (in-hash loop-if-tail)])
+                             (values id (box #f)))
+                           u-id (box #f)))
+               (define new-loops
+                 (find-loops-in-tail-called rhs lifts new-loop-if-tail loops))
+               (cond
+                 [(hash-ref new-loops u-id #f)
+                  new-loops]
+                 [else
+                  ;; Not a loop, so any reference added in `new-loop-if-tail`
+                  ;; is also to a non-loop
+                  (for/fold ([loops new-loops]) ([(id bx) (in-hash new-loop-if-tail)])
+                    (if (unbox bx)
+                        (hash-remove loops id)
+                        loops))])]))]
+         [else (find-let-loops v lifts loop-if-tail loops)])]
+      [`,_ (find-let-loops v lifts loop-if-tail loops)]))
+
+  (define (find-loops-in-tail-called v lifts loop-if-tail loops)
+    (match v
+      [`(lambda ,args . ,body)
+       (find-seq-loops body lifts loop-if-tail loops)]
+      [`(case-lambda [,argss . ,bodys] ...)
+       (for/fold ([loops loops]) ([body (in-list bodys)])
+         (find-seq-loops body lifts loop-if-tail loops))]
+      [`,_ (find-loops v lifts #hasheq() loops)]))
+       
+  ;; ----------------------------------------
   ;; Bridge between pass 1 and 2: transitive closure of free variables
 
   ;; Close a liftable's free variables over other variables needed by
   ;; other lifted functions that it calls. Also, clear `mutated` and
   ;; `var-ref` information from `lifts` in the returned table.
-  (define (close-and-convert-lifts lifts)
+  (define (close-and-convert-lifts lifts loops)
     (define new-lifts (make-hasheq))
     ;; Copy over `liftable`s:
     (for ([(f info) (in-hash lifts)])
@@ -484,6 +612,9 @@
     (for ([(f info) (in-hash lifts)])
       (when (eq? info '#:empty)
         (hash-set! new-lifts f info)))
+    ;; Remove any loops, which should be left alone after all
+    (for ([f (in-hash-keys loops)])
+      (hash-remove! new-lifts f))
     ;; Return new lifts
     new-lifts)
 
@@ -592,7 +723,7 @@
            (define new-rhs (convert-lifted-calls-in-expr rhs lifts frees empties))
            (cond
              [(indirected? (hash-ref lifts (unwrap id) #f))
-              `[,(gensym) (unsafe-set-box*! ,id ,new-rhs)]]
+              `[,(deterministic-gensym "seq") (unsafe-set-box*! ,id ,new-rhs)]]
              [else `[,id ,new-rhs]])))
        (define new-bindings
          (if (null? bindings)
@@ -620,9 +751,17 @@
   ;; Create bindings for lifted functions, adding new arguments
   ;; as the functions are lifted
   (define (extract-lifted-bindings lifts empties)
-    (for/list ([(f proc) (in-hash lifts)]
-               #:when (liftable? proc))
-      (let* ([new-args (liftable-frees proc)]
+    (define liftables
+      ;; Improve determinsism by sorting liftables:
+      (sort (for/list ([(f proc) (in-hash lifts)]
+                       #:when (liftable? proc))
+              (cons f proc))
+            symbol<?
+            #:key car))
+    (for/list ([f+proc (in-list liftables)])
+      (let* ([f (car f+proc)]
+             [proc (cdr f+proc)]
+             [new-args (liftable-frees proc)]
              [frees (for/hash ([arg (in-list new-args)])
                       (values arg #t))]
              [rhs (liftable-expr proc)])
@@ -636,7 +775,6 @@
                                                  [body (in-list bodys)])
                                         (let ([body (convert-lifted-calls-in-seq/box-mutated body args lifts frees empties)])
                                           `[,(append new-args args) . ,body]))))])])))
-
 
   ;; ----------------------------------------
   ;; Helpers
@@ -749,14 +887,63 @@
   (define (lift-if-empty v lifts empties new-v)
     (cond
       [(hash-ref lifts v #f)
-       (define id (gensym 'procz))
+       (define id (deterministic-gensym "procz"))
        (set-box! empties (cons `[,id ,new-v] (unbox empties)))
        id]
       [else new-v]))
-   
+
   ;; ----------------------------------------
   ;; Go
   
   (if (lift-in? v)
-      (lift-in v)
+      (with-deterministic-gensym
+        (lift-in v))
       v))
+
+;; ============================================================
+
+(module+ main
+  (require racket/pretty)
+  (pretty-print
+   (lift-in-schemified-linklet
+    '(lambda ()
+       (define f0
+         (lambda ()
+           (letrec ([loop (lambda (x)
+                            (if (zero? x)
+                                (let ([z 0])
+                                  z)
+                                (call-with-values
+                                 (lambda () (values 1 10))
+                                 (lambda (v1 v2)
+                                   (loop (sub1 x))))))])
+             (loop 8))))
+       (define f0
+         (lambda ()
+           (letrec ([l1 (lambda (x)
+                          (if (zero? x)
+                              'done
+                              (letrec ([l2 (lambda (y)
+                                             (if (zero? y)
+                                                 (l1 (sub1 x))
+                                                 (l2 (sub1 y))))])
+                                (l2 10))))])
+             (l1 8))))
+       (define f2
+         (lambda ()
+           (letrec ([not-a-loop (lambda (x)
+                                  (if (zero? x)
+                                      0
+                                      (add1 (not-a-loop (sub1 x)))))])
+             (not-a-loop 8))))
+       (define f3
+         (lambda ()
+           (letrec ([nl1 (lambda (x)
+                           (if (zero? x)
+                               0
+                               (letrec ([nl2 (lambda (y)
+                                               (nl1 (nl2 (sub1 x))))])
+                                 (nl2 10))))])
+             (nl1 8))))
+       10)
+    #t)))

@@ -9,6 +9,9 @@
 
           linklet-import-variables
           linklet-export-variables
+          linklet-fasled-code+arguments      ; for tools like `raco decompile`
+          linklet-interpret-jitified?        ; for `raco decompile`
+          linklet-interpret-jitified-extract ; for `raco decompile`
           
           instance?
           make-instance
@@ -42,6 +45,7 @@
           primitive->compiled-position
           compiled-position->primitive
           primitive-in-category?
+          primitive-lookup
 
           omit-debugging?             ; not exported to racket
           platform-independent-zo-mode? ; not exported to racket
@@ -57,6 +61,7 @@
           variable-set!/check-undefined
           variable-ref
           variable-ref/no-check
+          set-consistent-variables!/define
           make-instance-variable-reference
           jitified-extract-closed
           jitified-extract
@@ -68,7 +73,9 @@
           (only (io)
                 path?
                 complete-path?
+                split-path
                 path->string
+                path-element->string
                 path->bytes
                 bytes->path
                 string->bytes/utf-8
@@ -88,6 +95,7 @@
                 find-system-path
                 build-path
                 format
+                error-print-source-location
                 ;; Used by cross-compiler:
                 get-original-error-port
                 subprocess
@@ -95,7 +103,6 @@
                 write-bytes
                 flush-output
                 read-bytes
-                split-path
                 path->complete-path
                 file-exists?)
           (only (thread)
@@ -118,6 +125,7 @@
     (cond
      [(getenv "PLT_CS_JIT") 'jit]
      [(getenv "PLT_CS_MACH") 'mach]
+     [(getenv "PLT_CS_INTERP") 'interp]
      [else 'mach]))
 
   (define linklet-compilation-limit
@@ -129,28 +137,31 @@
                            n))))
              10000)))
 
-  (define no-future-jit-db? (getenv "PLT_NO_FUTURE_JIT_CACHE")) ; => don't calculate key for cache
-  (define jit-db-path (let ([bstr (environment-variables-ref
-                                   (|#%app| current-environment-variables)
-                                   (string->utf8 "PLT_JIT_CACHE"))])
-                        (cond
-                         [(equal? bstr '#vu8()) #f] ; empty value disables the JIT cache
-                         [(not bstr)
-                          (build-path (find-system-path 'addon-dir)
-                                      "cs-jit.sqlite")]
-                         [else (bytes->path bstr)])))
-
   ;; For "main.sps" to select the default ".zo" directory name:
-  (define platform-independent-zo-mode? (eq? linklet-compilation-mode 'jit))
+  (define platform-independent-zo-mode? (not (eq? linklet-compilation-mode 'mach)))
 
   (define (primitive->compiled-position prim) #f)
   (define (compiled-position->primitive pos) #f)
   (define (primitive-in-category? sym cat) #f)
 
+  (define (primitive-lookup sym)
+    (unless (symbol? sym)
+      (raise-argument-error 'primitive-lookup "symbol?" sym))
+    (call-with-system-wind
+     (lambda ()
+       (guard
+        (c [else #f])
+        (eval sym)))))
+
   (define root-logger (|#%app| current-logger))
 
   (define omit-debugging? (not (getenv "PLT_CS_DEBUG")))
   (define measure-performance? (getenv "PLT_LINKLET_TIMES"))
+
+  ;; The difference between this and `PLT_CS_INTERP` is that
+  ;; this one keeps using existing compiled code in a machine-specific
+  ;; "compiled" directory:
+  (define default-compile-quick? (getenv "PLT_LINKLET_COMPILE_QUICK"))
 
   (define compress-code? (cond
                           [(getenv "PLT_LINKLET_COMPRESS") #t]
@@ -203,7 +214,6 @@
   (include "linklet/read.ss")
   (include "linklet/annotation.ss")
   (include "linklet/performance.ss")
-  (include "linklet/db.ss")
 
   ;; `compile`, `interpret`, etc. have `dynamic-wind`-based state
   ;; that need to be managed correctly when swapping Racket
@@ -221,7 +231,7 @@
                                        (compile e))
                                      (compile e)))))]
      [(e) (compile* e #t)]))
-  (define (interpret* e)
+  (define (interpret* e) ; result is not safe for space
     (call-with-system-wind (lambda () (interpret e))))
   (define (fasl-write* s o)
     (call-with-system-wind (lambda () (fasl-write s o))))
@@ -246,12 +256,14 @@
     (unsafe-hash-seal! primitives)
     ;; prropagate table to the rumble layer
     (install-primitives-table! primitives))
-  
-  (define (outer-eval s paths format)
+
+  ;; Runs the result of `interpretable-jitified-linklet`
+  (define (run-interpret s paths)
+    (interpret-linklet s paths))
+
+  (define (compile-to-proc s paths format)
     (if (eq? format 'interpret)
-        (interpret-linklet s paths primitives variable-ref variable-ref/no-check
-                           variable-set! variable-set!/define
-                           make-arity-wrapper-procedure)
+        (run-interpret s paths)
         (let ([proc (compile* s)])
           (if (null? paths)
               proc
@@ -298,7 +310,7 @@
                   (fasl-read (open-bytevector-input-port bv)))])
           (performance-region
            'outer
-           (outer-eval r paths format)))]
+           (run-interpret r paths)))]
        [else
         (let ([proc (performance-region
                      'faslin-code
@@ -329,28 +341,6 @@
          (fx= (char->integer #\e) (bytevector-u8-ref bv 6))
          (fx= (char->integer #\z) (bytevector-u8-ref bv 7))))
 
-  (define-values (lookup-code insert-code delete-code)
-    (let ([get-procs!-maker
-           (lambda (retry)
-             (lambda args
-               (let-values ([(lookup insert delete) (get-code-database-procedures)])
-                 (set! lookup-code lookup)
-                 (set! insert-code insert)
-                 (set! delete-code delete)
-                 (apply retry args))))])
-      (values (get-procs!-maker (lambda (hash) (lookup-code hash)))
-              (get-procs!-maker (lambda (hash code) (insert-code hash code)))
-              (get-procs!-maker (lambda (hash) (delete-code hash))))))
-
-  (define (add-code-hash a)
-    (cond
-     [no-future-jit-db? a]
-     [else
-      ;; Combine an annotation with a hash code in a vector
-      (let-values ([(o get) (open-bytevector-output-port)])
-        (fasl-write* (cons (version) a) o)
-        (vector (sha1-bytes (get)) a))]))
-
   (define-record-type wrapped-code
     (fields (mutable content) ; bytevector for 'lambda mode; annotation or (vector hash annotation) for 'jit mode
             arity-mask
@@ -363,38 +353,17 @@
           f
           (performance-region
            'on-demand
-           (let ([f (if (and (vector? f)
-                             (or (not jit-db-path)
-                                 (wrong-jit-db-thread?)))
-                        (vector-ref f 1)
-                        f)])
-             (cond
-              [(bytevector? f)
-               (let* ([f (code-from-bytevector f)])
-                 (wrapped-code-content-set! wc f)
-                 f)]
-              [(vector? f)
-               (when jit-demand-on?
-                 (show "JIT demand" (strip-nested-annotations (vector-ref f 1))))
-               (let* ([hash (vector-ref f 0)]
-                      [code (lookup-code hash)])
-                 (cond
-                  [code
-                   (let* ([f (eval-from-bytevector code '() 'compile)])
-                     (wrapped-code-content-set! wc f)
-                     f)]
-                  [else
-                   (let ([code (compile-to-bytevector (vector-ref f 1) '() 'compile)])
-                     (insert-code hash code)
-                     (let* ([f (eval-from-bytevector code '() 'compile)])
-                       (wrapped-code-content-set! wc f)
-                       f))]))]
-              [else
-               (let ([f (compile* f)])
-                 (when jit-demand-on?
-                   (show "JIT demand" (strip-nested-annotations (wrapped-code-content wc))))
-                 (wrapped-code-content-set! wc f)
-                 f)]))))))
+           (cond
+             [(bytevector? f)
+              (let* ([f (code-from-bytevector f)])
+                (wrapped-code-content-set! wc f)
+                f)]
+             [else
+              (let ([f (compile* f)])
+                (when jit-demand-on?
+                  (show "JIT demand" (strip-nested-annotations (wrapped-code-content wc))))
+                (wrapped-code-content-set! wc f)
+                f)])))))
 
   (define (jitified-extract-closed wc)
     (let ([f (wrapped-code-content wc)])
@@ -448,7 +417,7 @@
 
   (define-record-type linklet
     (fields (mutable code) ; the procedure or interpretable form
-            paths          ; list of paths; if non-empty, `code` expects them as arguments
+            paths          ; list of paths and other fasled; if non-empty, `code` expects them as arguments
             format         ; 'compile or 'interpret (where the latter may have compiled internal parts)
             (mutable preparation) ; 'faslable, 'faslable-strict, 'faslable-unsafe, 'callable, 'lazy, or (cons 'cross <machine>)
             importss-abi   ; ABI for each import, in parallel to `importss`
@@ -522,20 +491,33 @@
                                         m))))
       (define enforce-constant? (|#%app| compile-enforce-module-constants))
       (define inline? (not (|#%app| compile-context-preservation-enabled)))
+      (define quick-mode? (or default-compile-quick?
+                              (and (not serializable?)
+                                   (#%memq 'quick options))))
+      (define sfd-cache (if serializable?
+                            ;; For determinism: a fresh, non-weak cache per linklet
+                            (make-hash)
+                            ;; For speed and more flexible sharing: a weak, place-local cache
+                            (get-nonserializable-sfd-cache)))
       (performance-region
        'schemify
        (define jitify-mode?
          (or (eq? linklet-compilation-mode 'jit)
-             (and (linklet-bigger-than? c linklet-compilation-limit serializable?)
+             (and (eq? linklet-compilation-mode 'mach)
+                  (linklet-bigger-than? c linklet-compilation-limit serializable?)
                   (log-message root-logger 'info 'linklet "compiling only interior functions for large linklet" #f)
                   #t)))
-       (define format (if jitify-mode? 'interpret 'compile))
+       (define format (if (or jitify-mode?
+                              quick-mode?
+                              (eq? linklet-compilation-mode 'interp))
+                          'interpret
+                          'compile))
        ;; Convert the linklet S-expression to a `lambda` S-expression:
        (define-values (impl-lam importss exports new-import-keys importss-abi exports-info)
          (schemify-linklet (show "linklet" c)
                            serializable?
                            (not (#%memq 'uninterned-literal options))
-                           jitify-mode?
+                           (eq? format 'interpret)
                            (|#%app| compile-allow-set!-undefined)
                            #f ;; safe mode
                            enforce-constant?
@@ -550,7 +532,9 @@
                                (lambda (key) (values #f #f #f)))
                            import-keys))
        (define impl-lam/lifts
-         (lift-in-schemified-linklet (show pre-lift-on? "pre-lift" impl-lam)))
+         (lift-in-schemified-linklet (show pre-lift-on? "pre-lift" impl-lam)
+                                     ;; preserve loop forms?
+                                     (not (eq? linklet-compilation-mode 'interp))))
        (define impl-lam/jitified
          (cond
            [(not jitify-mode?) impl-lam/lifts]
@@ -572,10 +556,8 @@
                                           [(jit)
                                            ;; Preserve annotated `lambda` source for on-demand compilation:
                                            (lambda (expr arity-mask name)
-                                             (let ([a (correlated->annotation (xify expr))])
-                                               (make-wrapped-code (if serializable?
-                                                                      (add-code-hash a)
-                                                                      a)
+                                             (let ([a (correlated->annotation (xify expr) serializable? sfd-cache)])
+                                               (make-wrapped-code a
                                                                   arity-mask
                                                                   (extract-inferred-name expr name))))]
                                           [else
@@ -588,25 +570,25 @@
                                                                    (lambda (s) (cross-compile cross-machine s))
                                                                    compile*-to-bytevector)
                                                                compile*)
-                                                           (show lambda-on? "lambda" (correlated->annotation expr)))])
+                                                           (show lambda-on? "lambda" (correlated->annotation expr serializable? sfd-cache)))])
                                                 (if serializable?
                                                     (make-wrapped-code code arity-mask (extract-inferred-name expr name))
                                                     code))))])))]))
        (define-values (paths impl-lam/paths)
          (if serializable?
-             (extract-paths-from-schemified-linklet impl-lam/jitified (not jitify-mode?))
+             (extract-paths-and-fasls-from-schemified-linklet impl-lam/jitified (eq? format 'compile))
              (values '() impl-lam/jitified)))
        (define impl-lam/interpable
          (let ([impl-lam (case (and jitify-mode?
                                     linklet-compilation-mode)
                            [(mach) (show post-lambda-on? "post-lambda" impl-lam/paths)]
                            [else (show "schemified" impl-lam/paths)])])
-           (if jitify-mode?
-               (interpretable-jitified-linklet impl-lam correlated->datum)
-               (correlated->annotation impl-lam))))
+           (if (eq? format 'interpret)
+               (interpretable-jitified-linklet impl-lam serializable?)
+               (correlated->annotation impl-lam serializable? sfd-cache))))
        (when known-on?
          (show "known" (hash-map exports-info (lambda (k v) (list k v)))))
-       (when (and cp0-on? (not jitify-mode?))
+       (when (and cp0-on? (eq? format 'compile))
          (show "cp0" (#%expand/optimize (correlated->annotation impl-lam/paths))))
        (performance-region
         'compile-linklet
@@ -615,8 +597,8 @@
                                      (if cross-machine
                                          (make-cross-compile-to-bytevector cross-machine)
                                          compile-to-bytevector)
-                                     outer-eval)
-                                 (show (and jitify-mode? post-interp-on?) "post-interp" impl-lam/interpable)
+                                     compile-to-proc)
+                                 (show (and (eq? format 'interpret) post-interp-on?) "post-interp" impl-lam/interpable)
                                  paths
                                  format)
                                 paths
@@ -695,8 +677,18 @@
      [(linklet import-instances target-instance)
       (instantiate-linklet linklet import-instances target-instance #f)]
      [(linklet import-instances target-instance use-prompt?)
+      (unless (linklet? linklet)
+        (raise-argument-error 'instantiate-linklet "linklet?" linklet))
+      (let loop ([l import-instances])
+        (unless (null? l)
+          (if (and (pair? l)
+                   (instance? (car l)))
+              (loop (cdr l))
+              (raise-argument-error 'instantiate-linklet "(listof instance?)" import-instances))))
       (cond
        [target-instance
+        (unless (instance? target-instance)
+          (raise-argument-error 'instantiate-linklet "(or/c instance? #f)" target-instance))
         ;; Instantiate into the given instance and return the
         ;; result of the linklet body:
         (with-continuation-mark
@@ -737,10 +729,30 @@
           i)])]))
               
   (define (linklet-import-variables linklet)
+    (unless (linklet? linklet)
+        (raise-argument-error 'linklet-import-variables "linklet?" linklet))
     (linklet-importss linklet))
 
   (define (linklet-export-variables linklet)
+    (unless (linklet? linklet)
+        (raise-argument-error 'linklet-export-variables "linklet?" linklet))
     (map (lambda (e) (if (pair? e) (car e) e)) (linklet-exports linklet)))
+
+  (define (linklet-fasled-code+arguments linklet)
+    (unless (linklet? linklet)
+      (raise-argument-error 'linklet-fasled-code+arguments "linklet?" linklet))
+    (case (linklet-preparation linklet)
+      [(faslable faslable-strict faslable-unsafe lazy)
+       (values (linklet-format linklet) (linklet-code linklet) (linklet-paths linklet))]
+      [else (values #f #f #f)]))
+
+  (define (linklet-interpret-jitified? v)
+    (wrapped-code? v))
+
+  (define (linklet-interpret-jitified-extract v)
+    (unless (wrapped-code? v)
+      (raise-argument-error 'linklet-interpret-jitified-extract "linklet-interpret-jitified?" v))
+    (force-wrapped-code v))
 
   ;; ----------------------------------------
 
@@ -809,6 +821,12 @@
   (define (variable-ref/no-check var)
     (variable-val var))
 
+  (define (set-consistent-variables!/define vars vals)
+    (let loop ([i 0])
+      (unless (fx= i (#%vector-length vars))
+        (variable-set!/define (#%vector-ref vars i) (#%vector-ref vals i) 'consistent)
+        (loop (fx+ i 1)))))
+
   ;; Find variables or values needed from an instance for a linklet's
   ;; imports
   (define (extract-imported-variabless target-inst insts symss imports-abis accum)
@@ -844,14 +862,28 @@
                            "importing instance" (unquoted-printing-string (format "~a" (instance-name target-inst)))))
 
   (define (identify-module var)
-    (let ([i (car (variable-inst-box var))])
+    (cond
+     [(error-print-source-location)
+      (let ([i (car (variable-inst-box var))])
+        (cond
+         [(eq? i #!bwp)
+          ""]
+         [(instance-name i)
+          => (lambda (name)
+               (#%format "\n  module: ~a" name))]
+         [else ""]))]
+     [else ""]))
+
+  (define (indentify-internal-name var)
+    (cond
+     [(error-print-source-location)
       (cond
-       [(eq? i #!bwp)
+       [(eq? (variable-name var) (variable-source-name var))
         ""]
-       [(instance-name i)
-        => (lambda (name)
-             (#%format "\n  module: ~a" name))]
-       [else ""])))
+       [else
+        (string-append "\n  internal name: "
+                       (symbol->string  (variable-name var)))])]
+     [else ""]))
 
   (define (raise-undefined var set?)
     (raise
@@ -862,11 +894,13 @@
         (string-append "set!: assignment disallowed;\n"
                        " cannot set variable before its definition\n"
                        "  variable: " (symbol->string (variable-source-name var))
-                       (identify-module var))]
+                       (identify-module var)
+                       (indentify-internal-name var))]
        [else
         (string-append (symbol->string (variable-source-name var))
                        ": undefined;\n cannot reference an identifier before its definition"
-                       (identify-module var))])
+                       (identify-module var)
+                       (indentify-internal-name var))])
       (current-continuation-marks)
       (variable-name var))))
 
@@ -1074,10 +1108,11 @@
   ;; --------------------------------------------------
 
   (define module-prompt-handler
-    (lambda (arg)
-      (abort-current-continuation
+    (lambda args
+      (apply
+       abort-current-continuation
        (default-continuation-prompt-tag)
-       arg)))
+       args)))
 
   (define call-with-module-prompt
     (case-lambda
@@ -1102,7 +1137,7 @@
          (call-with-values proc
            (lambda vals
              (unless (= (length syms) (length vals))
-               (raise-binding-result-arity-error syms vals))
+               (raise-definition-result-arity-error syms vals))
              (let loop ([vars vars] [vals vals] [modes modes])
                (unless (null? vars)
                  (do-variable-set! (car vars) (car vals) (car modes) #t)
@@ -1167,6 +1202,8 @@
      variable-set!/define
      variable-ref
      variable-ref/no-check
+     variable-set!/define
+     set-consistent-variables!/define
      make-instance-variable-reference
      unbox/check-undefined
      set-box!/check-undefined
@@ -1174,6 +1211,12 @@
      jitified-extract-closed))
 
   ;; --------------------------------------------------
+
+  (interpreter-link! primitives
+                     correlated->datum
+                     variable-ref variable-ref/no-check
+                     variable-set! variable-set!/define
+                     make-interp-procedure)
 
   (when omit-debugging?
     (generate-inspector-information (not omit-debugging?))
@@ -1186,4 +1229,23 @@
   (set-foreign-eval! eval/foreign)
 
   (enable-arithmetic-left-associative #t)
-  (expand-omit-library-invocations #t))
+  (expand-omit-library-invocations #t)
+  (enable-error-source-expression #f)
+
+  ;; Avoid gensyms for generated record-tyope UIDs. Otherwise,
+  ;; printing one of those gensyms --- perhaps when producing a trace
+  ;; via `dump-memory-stats` --- causes the gensym to be permanent
+  ;; (since it has properties).
+  (current-generate-id (lambda (sym) (gensym sym)))
+
+  ;; Since the schemify layer inserts `|#%app|` any time the rator of
+  ;; an application might not be a procedure, we can avoid redundant
+  ;; checks for other applications by enabling unsafe mode. Ditto for
+  ;; potential early reference to `letrec`-bound variables. But do that
+  ;; only if we're compiling the primitive layer in unsafe mode.
+  (meta-cond
+   [(>= (optimize-level) 3)
+    (enable-unsafe-application #t)
+    (enable-unsafe-variable-reference #t)]
+   [else
+    (void)]))

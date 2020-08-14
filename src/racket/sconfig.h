@@ -122,6 +122,9 @@
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "arm-" SPLS_LINUX
 #  define FFI_CALLBACK_NEED_INT_CLEAR
 # endif
+# if defined(__aarch64__)
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "aarch64-" SPLS_LINUX
+# endif
 # if defined(__x86_64__)
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "x86_64-" SPLS_LINUX
 #  define REGISTER_POOR_MACHINE
@@ -147,12 +150,16 @@
 #if defined(__i386__)
 # define MZ_USE_JIT_I386
 # define MZ_JIT_USE_MPROTECT
-# define MZ_USE_DWARF_LIBUNWIND
+# ifndef MZ_NO_UNWIND_SUPPORT
+#  define MZ_USE_DWARF_LIBUNWIND
+# endif
 #endif
 #if defined(__x86_64__)
 # define MZ_USE_JIT_X86_64
 # define MZ_JIT_USE_MPROTECT
-# define MZ_USE_DWARF_LIBUNWIND
+# ifndef MZ_NO_UNWIND_SUPPORT
+#  define MZ_USE_DWARF_LIBUNWIND
+# endif
 #endif
 #if defined(__powerpc__) && !defined(__powerpc64__)
 # define MZ_USE_JIT_PPC

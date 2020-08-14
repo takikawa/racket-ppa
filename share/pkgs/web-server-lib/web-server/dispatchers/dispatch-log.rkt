@@ -6,7 +6,7 @@
          racket/match
          racket/contract)
 (require web-server/dispatchers/dispatch
-         web-server/http)  
+         web-server/http)
 (define format-req/c (request? . -> . string?))
 (define log-format/c (symbols 'parenthesized-default 'extended 'apache-default))
 
@@ -19,14 +19,18 @@
  [apache-default-format format-req/c]
  [interface-version dispatcher-interface-version/c]
  [make (->* ()
-            (#:format format-req/c
+            (#:format (or/c log-format/c format-req/c)
              #:log-path (or/c path-string? output-port?))
             dispatcher/c)])
 
 (define interface-version 'v1)
 (define (make #:format [format paren-format]
               #:log-path [log-path "log"])
-  (define log-message (make-log-message log-path format))
+  (define final-format
+    (if (symbol? format)
+        (log-format->format format)
+        format))
+  (define log-message (make-log-message log-path final-format))
   (lambda (conn req)
     (log-message req)
     (next-dispatcher)))
@@ -67,7 +71,7 @@
             (referer ,(let ([R (headers-assq* #"Referer" (request-headers/raw req))])
                         (if R
                             (header-value R)
-                            #f)))                                              
+                            #f)))
             (uri ,(url->string (request-uri req)))
             (time ,(current-seconds)))))
 
@@ -78,7 +82,7 @@
      (lambda ()
        (let loop ([log-p #f])
          (sync
-          (handle-evt 
+          (handle-evt
            log-ch
            (match-lambda
              [(list req)

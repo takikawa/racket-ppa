@@ -50,7 +50,7 @@ m4_include(../ac/natipkg_arg.m4)
 AC_ARG_ENABLE(shared,  [  --enable-shared         create shared libraries (ok, but not recommended)])
 AC_ARG_ENABLE(dynlib,  [  --enable-dynlib         same as --enable-shared])
 AC_ARG_ENABLE(lt,      [  --enable-lt=<prog>      use <prog> instead of libtool; disable to use bundled], LIBTOOLPROG="$enableval", enable_lt=default)
-AC_ARG_ENABLE(libs,    [  --enable-libs           install static libraries (enabled by default for Unix)])
+m4_include(../ac/instlib_arg.m4)
 
 AC_ARG_ENABLE(libffi,  [  --enable-libffi         use installed libffi (enabled by default for Unix)], , enable_libffi=default)
 
@@ -80,6 +80,8 @@ m4_include(../ac/strip_arg.m4)
 AC_ARG_ENABLE(noopt,   [  --enable-noopt          drop -O C flags (useful for low-level debugging)])
 m4_include(../ac/ubsan_arg.m4)
 AC_ARG_ENABLE(jitframe,[  --enable-jitframe       x86_64: use frame pointer for internal calls])
+
+AC_ARG_ENABLE(werror,  [  --enable-werror         compile sources with warnings as errors])  
 
 m4_include(../ac/crossany_arg.m4)
 
@@ -229,16 +231,20 @@ show_explicitly_enabled "${enable_jitframe}" "jitframe"
 show_explicitly_enabled "${enable_noopt}" "No-optimization" "Note that this mode is intended only for debugging purposes"
 m4_include(../ac/strip_show.m4)
 
-show_explicitly_enabled "${enable_libs}" "Installation of static libraries (if any)"
-show_explicitly_disabled "${enable_libs}" "Installation of static libraries (if any)"
+m4_include(../ac/instlib.m4)
 
 m4_include(../ac/sdk_show.m4)
 
 if test "${enable_racket}" != "" ; then
   if test "${enable_racket}" = "auto" ; then
-     echo "=== Creating and using local Racket executable"
+    echo "=== Creating and using local Racket executable"
   else
-     echo "=== Using Racket executable ${enable_racket}"
+    if test ! -f "${enable_racket}"; then
+      echo "cannot find racket executable in ${enable_racket}"
+      exit 1
+    else
+      echo "=== Using Racket executable ${enable_racket}"
+    fi	
   fi 
 fi
 
@@ -297,14 +303,13 @@ MAIN_VARIANT=3m
 INSTALL_SETUP_FLAGS=
 INSTALL_SETUP_RACKET_FLAGS=
 
-INSTALL_LIBS_ENABLE=no-install
-
 use_flag_pthread=yes
 use_flag_posix_pthread=no
 mzrt_needs_pthread=yes
 skip_iconv_check=no
 check_page_size=yes
 try_no_nullability_completeness=no
+check_for_unwind=no
 
 if test "${enable_cify}" = "yes" ; then
   STARTUP_AS_BYTECODE=_bytecode
@@ -460,21 +465,34 @@ if test "$ARFLAGS" = '' ; then
 fi
 SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} AR_FLAGS="'"'"${ARFLAGS}"'"'
 
+is_gmake=`make -v no-such-target-we-hope 2>&1 | grep "GNU Make"`
+
 # If using gcc, we want all warnings:
-if test "$CC" = "gcc" ; then 
+changequote(<<, >>)dnl
+is_gcc=`$CC -v 2>&1 | tail -n 1 | grep -E '^gcc version [[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+ \([^\)]+\)[[:space:]]*$'`
+changequote([, ])dnl
+
+# We also need to test if $CC is gcc itself because on mac,
+# where clang impersonates gcc, although is_gcc is false, we want
+# to use it as if it was gcc.
+# See https://github.com/racket/racket/pull/2897#pullrequestreview-314906673
+if test "$is_gcc" != "" || test "`basename $CC`" = "gcc"; then
   COMPFLAGS="$COMPFLAGS -Wall"
 
   # Use -MMD when we have gcc and gnumake:
-  is_gmake=`make -v no-such-target-we-hope 2>&1 | grep "GNU Make"`
   if test "$is_gmake" = "" ; then
     WX_MMD_FLAG=""
   else
     WX_MMD_FLAG="-MMD"
-    INCLUDEDEP="-include"
   fi
 
   # Compile mzdyn.o with -fPIC
   DYN_CFLAGS="-fPIC"
+fi
+
+# When GNU Make is present, use version.mak
+if test "$is_gmake" != ""; then
+   INCLUDEDEP="-include"
 fi
 
 if test "$REZ" = '' ; then 
@@ -521,11 +539,6 @@ if test "${enable_foreign}" = "yes" ; then
 fi
 if test "${enable_jit}" = "yes" ; then
   check_for_mprotect=yes
-fi
-
-if test "${enable_libs}" != "no" ; then
-  # Canceled for some platforms below:
-  INSTALL_LIBS_ENABLE=install
 fi
 
 ############## platform tests ################
@@ -594,18 +607,20 @@ case "$host_os" in
       x86_64)
        enable_parallel_by_default=yes
        CGC_X86_64="1"
+       check_for_unwind=REG_RSP
        ;;
       ppc|powerpc)
        ;;
       alpha)
-       EXTRA_GMP_OBJ="gmp_alpha_gcc.o"
+       EXTRA_GMP_OBJ='gmp_alpha_gcc.$(LTO)'
        EXTRA_GMP_DEP='$(EXTRA_GMP_DEP_FILE)'
        ;;
       i386|i486|i586|i686)
        enable_parallel_by_default=yes
+       check_for_unwind=REG_ESP
        ;;
       arm*)
-       EXTRA_GMP_OBJ="gmp_arm_gcc.o"
+       EXTRA_GMP_OBJ='gmp_arm_gcc.$(LTO)'
        EXTRA_GMP_DEP='$(EXTRA_GMP_DEP_FILE)'
        ;;
       *)
@@ -617,7 +632,7 @@ case "$host_os" in
     if test "$CC" = "cc" ; then 
       COMPFLAGS="$COMPFLAGS -ieee_with_inexact -assume noaligned_objects"
     elif test "$CC" = "gcc" ; then 
-      EXTRA_GMP_OBJ="gmp_alpha_gcc.o"
+      EXTRA_GMP_OBJ='gmp_alpha_gcc.$(LTO)'
       EXTRA_GMP_DEP='$(EXTRA_GMP_DEP_FILE)'
     fi
     ;;
@@ -698,11 +713,6 @@ case "$host_os" in
     # Use -Wno-nullability-completeness if supported
     try_no_nullability_completeness=yes
 
-    # ".a" is typically not useful, since we always build a ".dylib":
-    if test "${enable_libs}" = "" ; then
-      INSTALL_LIBS_ENABLE=no-install
-    fi
-
     SO_SUFFIX=.dylib
 
     if test "${need_cc_in_extras}" = "yes" ; then
@@ -739,6 +749,13 @@ case "$host_os" in
         else
           FRAMEWORK_PREFIX='$(FRAMEWORK_REL_PREFIX)'
         fi
+      fi
+      if test "${enable_embedfw}" = "yes" ; then
+        strip_needs_dash_s=yes
+      fi
+      # ".a" is typically not useful, since we always build a ".dylib":
+      if test "${enable_libs}" = "" ; then
+        INSTALL_LIBS_ENABLE=no-install
       fi
     else
       PREFLAGS="$PREFLAGS -DXONX "
@@ -864,44 +881,7 @@ AC_MSG_RESULT($using_gnu_cpp)
 
 # Although rktio takes care of iconv, we need to know whether
 # to link to it
-iconv_lib_flag=""
-if test "${skip_iconv_check}" = "no" ; then
- if test "${enable_iconv}" = "yes" ; then
-  AC_CHECK_HEADER(iconv.h, enable_iconv=yes, enable_iconv=no)
-  if test "${enable_iconv}" = "yes" ; then  
-    # Does it all work, now?
-    AC_TRY_RUN(
-[   #include <iconv.h>]
-[   #include <langinfo.h>]
-    int main() {
-[     iconv_open("UTF-8", "UTF-8");]
-      return 0;
-    }, enable_iconv=yes, enable_iconv=no, enable_iconv=yes)
-    if test "${enable_iconv}" = "no" ; then  
-      # Try adding -liconv ?
-      #  We did not use AC_CHECK_LIB because iconv is sometimes macro-renamed
-      ORIG_LIBS="$LIBS"
-      LIBS="$LIBS -liconv"
-      AC_TRY_RUN(
-[     #include <iconv.h>]
-[     #include <langinfo.h>]
-      int main() {
-[     iconv_open("UTF-8", "UTF-8");]
-      return 0;
-      }, enable_iconv=yes, enable_iconv=no, enable_iconv=yes)
-      if test "${enable_iconv}" = "no" ; then
-        LIBS="$ORIG_LIBS"
-      else
-        iconv_lib_flag=" -liconv"      
-      fi
-    fi
-  fi
- fi
- [ msg="iconv is usable" ]
- AC_MSG_CHECKING($msg)
- iconv_usage_result="$enable_iconv$iconv_lib_flag"
- AC_MSG_RESULT($iconv_usage_result)
-fi
+m4_include(../ac/iconv.m4)
 
 if test "${check_for_mprotect}" = "yes" ; then
   [ msg="for mmap and mprotect" ]
@@ -937,6 +917,22 @@ if test "${check_for_mprotect}" = "yes" ; then
       echo "Senora GC is required due to mprotect() failure"
     fi
   fi
+fi
+
+if test "${check_for_unwind}" != "no" ; then
+  [ msg="for unwind support" ]
+  AC_MSG_CHECKING($msg)
+  AC_COMPILE_IFELSE([AC_LANG_SOURCE([
+     #include <inttypes.h>
+     #define __USE_GNU
+     #include <ucontext.h>
+     int main() {
+        return ${check_for_unwind};
+     }])], can_unwind=yes, can_unwind=no)
+  if test "$can_unwind" = "no" ; then
+    AC_DEFINE(MZ_NO_UNWIND_SUPPORT,1,[Missing ucontext support])
+  fi
+  AC_MSG_RESULT($can_unwind)
 fi
 
 if test "${check_page_size}" = "yes" ; then
@@ -1009,6 +1005,8 @@ AC_CHECK_SIZEOF(long)
 AC_CHECK_SIZEOF(long long)
 AC_CHECK_SIZEOF([void *])
 AC_CHECK_SIZEOF(bool, unused, [#include <stdbool.h>])
+
+m4_include(../ac/valid_sizeof.m4)
 
 AC_TYPE_INTPTR_T
 AC_TYPE_UINTPTR_T
@@ -1383,7 +1381,20 @@ if test "${enable_shared}" = "yes" ; then
   if test "$INCLUDEDEP" = "-include" ; then
     plt_lib_version="\$(FWVERSION)"
   else
-    plt_lib_version=`grep " MZSCHEME_VERSION " ${srcdir}/racket/src/schvers.h | cut -d '"' -f 2`
+    VERSION_X=`grep 'define MZSCHEME_VERSION_X ' ${srcdir}/racket/src/schvers.h | cut -d ' ' -f 3`
+    VERSION_Y=`grep 'define MZSCHEME_VERSION_Y ' ${srcdir}/racket/src/schvers.h | cut -d ' ' -f 3`
+    VERSION_Z=`grep 'define MZSCHEME_VERSION_Z ' ${srcdir}/racket/src/schvers.h | cut -d ' ' -f 3`
+    VERSION_W=`grep 'define MZSCHEME_VERSION_W ' ${srcdir}/racket/src/schvers.h | cut -d ' ' -f 3`
+
+    if test "${VERSION_W}" != "0" ; then
+      plt_lib_version="${VERSION_X}.${VERSION_Y}.${VERSION_Z}.${VERSION_W}"
+    else
+      if test "${VERSION_Z}" != "0" ; then
+        plt_lib_version="${VERSION_X}.${VERSION_Y}.${VERSION_Z}"
+      else
+        plt_lib_version="${VERSION_X}.${VERSION_Y}"
+      fi
+    fi
   fi
 
   AR="${LIBTOOLPROG} --mode=link --tag=CC $CC${need_gcc_static_libgcc}${ar_libtool_no_undefined} -release ${plt_lib_version} -rpath ${abslibdir} \$(ARLIBFLAGS) -o"
@@ -1398,6 +1409,7 @@ if test "${enable_shared}" = "yes" ; then
   WXLIBS=WXLIBSDYN
   ICP="${LIBTOOLPROG} --mode=install cp"
   ICP_LIB="${LIBTOOLPROG} --mode=install install -s"
+  ICP_STATIC_LIB='$(NOOP)'
   MRLIBINSTALL="install-lib"
   LIBFINISH="${LIBTOOLPROG} --mode=finish"
   LTO="lo"
@@ -1411,6 +1423,7 @@ else
   WXLIBS=WXLIBSNORM
   ICP=cp
   ICP_LIB=cp
+  ICP_STATIC_LIB=cp
   MRLIBINSTALL="install-no-lib"
   LIBFINISH=echo
   LTO="o"
@@ -1420,6 +1433,11 @@ else
   PLAIN_CC='$(CC)'
   FOREIGN_CONVENIENCE=""
   FOREIGN_OBJSLIB="\$(FOREIGN_OBJS)"
+fi
+
+# Last but not least, if Werror was requested, add it now
+if test "${enable_werror}" = "yes"; then
+  CFLAGS="-Werror ${CFLAGS}"
 fi
 
 ############## final output ################
@@ -1483,6 +1501,7 @@ AC_SUBST(WXLIBS)
 AC_SUBST(WXVARIANT)
 AC_SUBST(ICP)
 AC_SUBST(ICP_LIB)
+AC_SUBST(ICP_STATIC_LIB)
 AC_SUBST(MRLIBINSTALL)
 
 AC_SUBST(MAKE_FINISH)

@@ -32,7 +32,7 @@
 (define (currently-in-engine?)
   (current-engine-complete-or-expire))
 
-;; An engine is repesented by a procedure that takes three arguments, where the
+;; An engine is represented by a procedure that takes three arguments, where the
 ;; procedure must be tail-called either within `call-with-engine-completion` or
 ;; in an engine call's `complete-or-expire` callback:
 ;;   * ticks: number of ticks to run before exire
@@ -77,10 +77,10 @@
                     init-break-enabled-cell))))
 
 ;; Internal: creates an engine procedure to be called within `call-with-engine-completion`
-;; or from an enginer procedure's `complete-or-expire` callback
+;; or from an engine procedure's `complete-or-expire` callback
 (define (create-engine to-saves proc cell-state)
   (case-lambda
-   ;; For `continuation-marks`:
+   ;; For `continuation-marks` and `engine-roots`:
    [() to-saves]
    ;; Normal engine case:
    [(ticks prefix complete-or-expire)
@@ -184,6 +184,10 @@
          (current-engine-complete-or-expire #f)
          (current-engine-cell-state empty-engine-cell-state)
          (complete-or-expire #f results remain-ticks))))))
+
+(define (engine-roots e)
+  (let ([mc (e)])
+    (cons e mc)))
 
 (define (make-empty-thread-cell-values)
   (make-ephemeron-eq-hashtable))

@@ -36,9 +36,10 @@ TO DO:
          racket/tcp
          racket/string
          racket/lazy-require
-         racket/runtime-path
+         racket/include
          "libcrypto.rkt"
-         "libssl.rkt")
+         "libssl.rkt"
+         (for-syntax racket/base))
 (lazy-require
  ["private/win32.rkt" (load-win32-store)]
  ["private/macosx.rkt" (load-macosx-keychain)])
@@ -84,7 +85,7 @@ TO DO:
         (list/c 'macosx-keychain path-string?)))
 
 (provide
- ssl-dh4096-param-path
+ ssl-dh4096-param-bytes
  (contract-out
   [ssl-available? boolean?]
   [ssl-load-fail-reason (or/c #f string?)]
@@ -103,7 +104,7 @@ TO DO:
          #:certificate-chain (or/c path-string? #f))
         ssl-server-context?)]
   [ssl-server-context-enable-dhe!
-   (->* (ssl-server-context?) (path-string?) void?)]
+   (->* (ssl-server-context?) ((or/c path-string? bytes?)) void?)]
   [ssl-server-context-enable-ecdhe!
    (->* (ssl-server-context?) (curve/c) void?)]
   [ssl-client-context?
@@ -160,6 +161,8 @@ TO DO:
    (c-> ssl-port? (or/c bytes? #f))]
   [ssl-peer-issuer-name
    (c-> ssl-port? (or/c bytes? #f))]
+  [ssl-channel-binding
+   (c-> ssl-port? (or/c 'tls-unique 'tls-server-end-point) bytes?)]
   [ports->ssl-ports
    (->* [input-port?
          output-port?]
@@ -172,7 +175,7 @@ TO DO:
          #:hostname (or/c string? #f)]
         (values input-port? output-port?))]
   [ssl-listen
-   (->* [(integer-in 1 (sub1 (expt 2 16)))]
+   (->* [listen-port-number?]
         [exact-nonnegative-integer?
          any/c
          (or/c string? #f)
@@ -324,6 +327,8 @@ TO DO:
   #:wrap (deallocator))
 (define-ssl SSL_get_peer_certificate (_fun _SSL* -> _X509*/null)
   #:wrap (allocator X509_free))
+(define-ssl SSL_get_certificate (_fun _SSL* -> _X509*/null)
+  #:wrap (allocator X509_free))
 
 (define-crypto X509_get_subject_name (_fun _X509* -> _X509_NAME*))
 (define-crypto X509_get_issuer_name (_fun _X509* -> _X509_NAME*))
@@ -349,27 +354,45 @@ TO DO:
 (define-crypto X509_NAME_get_entry (_fun _X509_NAME* _int -> _X509_NAME_ENTRY*/null))
 (define-crypto X509_NAME_ENTRY_get_data (_fun _X509_NAME_ENTRY* -> _ASN1_STRING*))
 (define-crypto X509_get_ext_d2i (_fun _X509* _int _pointer _pointer -> _STACK*/null))
-(define sk_num
-  (or (get-ffi-obj 'sk_num libcrypto (_fun _STACK* -> _int)
-                   (lambda () #f))
-      (get-ffi-obj 'OPENSSL_sk_num libcrypto (_fun _STACK* -> _int)
-                   (make-not-available 'sk_num))))
-(define sk_GENERAL_NAME_value
-  (or (get-ffi-obj 'sk_value libcrypto (_fun _STACK* _int -> _GENERAL_NAME-pointer) 
-                   (lambda () #f))
-      (get-ffi-obj 'OPENSSL_sk_value libcrypto (_fun _STACK* _int -> _GENERAL_NAME-pointer) 
-                   (make-not-available "sk_GENERAL_NAME_value"))))
-(define sk_pop_free
-  (or (get-ffi-obj 'sk_pop_free libcrypto (_fun _STACK* _fpointer -> _void) 
-                   (lambda () #f))
-      (get-ffi-obj 'OPENSSL_sk_pop_free libcrypto (_fun _STACK* _fpointer -> _void)
-                   (make-not-available "sk_pop_free"))))
+(define-crypto sk_num (_fun _STACK* -> _int)
+  #:fail (lambda ()
+           (define-crypto OPENSSL_sk_num (_fun _STACK* -> _int))
+           OPENSSL_sk_num))
+(define-crypto sk_GENERAL_NAME_value (_fun _STACK* _int -> _GENERAL_NAME-pointer)
+  #:c-id sk_value
+  #:fail (lambda ()
+           (define-crypto OPENSSL_sk_value (_fun _STACK* _int -> _GENERAL_NAME-pointer))
+           OPENSSL_sk_value))
+(define-crypto sk_pop_free (_fun _STACK* _fpointer -> _void)
+  #:fail (lambda ()
+           (define-crypto OPENSSL_sk_pop_free (_fun _STACK* _fpointer -> _void))
+           OPENSSL_sk_pop_free))
 
 ;; (define-crypto X509_get_default_cert_area (_fun -> _string))
 (define-crypto X509_get_default_cert_dir  (_fun -> _string))
 (define-crypto X509_get_default_cert_file (_fun -> _string))
 (define-crypto X509_get_default_cert_dir_env (_fun -> _string))
 (define-crypto X509_get_default_cert_file_env (_fun -> _string))
+
+(define-ssl SSL_get_peer_finished (_fun _SSL* _pointer _size -> _size))
+(define-ssl SSL_get_finished (_fun _SSL* _pointer _size -> _size))
+
+(define-cpointer-type _EVP_MD*)
+(define-crypto EVP_sha224 (_fun -> _EVP_MD*/null))
+(define-crypto EVP_sha256 (_fun -> _EVP_MD*/null))
+(define-crypto EVP_sha384 (_fun -> _EVP_MD*/null))
+(define-crypto EVP_sha512 (_fun -> _EVP_MD*/null))
+(define-crypto EVP_MD_size (_fun _EVP_MD* -> _int))
+
+(define-ssl OBJ_find_sigid_algs
+  (_fun _int (alg : (_ptr o _int)) (_pointer = #f) -> (r : _int)
+        -> (if (> r 0) alg 0)))
+
+(define-ssl X509_get_signature_nid
+  (_fun _X509* -> _int))
+
+(define-ssl X509_digest
+  (_fun _X509* _EVP_MD* _pointer (_ptr i _uint) -> _int))
 
 (define (x509-root-sources)
   (cond
@@ -408,15 +431,22 @@ TO DO:
      ;; Log error only if *no* cert source exists (eg, on Debian/Ubuntu, default
      ;; cert file does not exist).
      (unless (or (ormap file-exists? cert-files) (ormap directory-exists? cert-dirs))
-       (log-openssl-error
-        "x509-root-sources: cert sources do not exist: ~s, ~s; ~a"
-        cert-file0 cert-dirs0
-        (format "override using ~a, ~a"
-                (X509_get_default_cert_file_env)
-                (X509_get_default_cert_dir_env))))
+       (set! complain-on-cert
+             (lambda ()
+               (log-openssl-error
+                "x509-root-sources: cert sources do not exist: ~s, ~s; ~a"
+                cert-file0 cert-dirs0
+                (format "override using ~a, ~a"
+                        (X509_get_default_cert_file_env)
+                        (X509_get_default_cert_dir_env))))))
      (log-openssl-debug "using cert sources: ~s, ~s" cert-files cert-dirs)
      (append cert-files (map (lambda (p) (list 'directory p)) cert-dirs))]
     [else null]))
+
+(define complain-on-cert void)
+(define (maybe-complain-on-cert)
+  (complain-on-cert)
+  (set! complain-on-cert void))
 
 (define ssl-default-verify-sources
   (make-parameter
@@ -475,7 +505,22 @@ TO DO:
 (define SSL_TLSEXT_ERR_OK 0)
 (define SSL_TLSEXT_ERR_NOACK 3)
 
-(define-runtime-path ssl-dh4096-param-path "dh4096.pem")
+(define NID_md5 4)
+(define NID_sha1 64)
+(define NID_sha224 675)
+(define NID_sha256 672)
+(define NID_sha384 673)
+(define NID_sha512 674)
+
+(define ssl-dh4096-param-bytes
+  (include/reader "dh4096.pem" (lambda (src port)
+                                 (let loop ([accum '()])
+                                   (define bstr (read-bytes 4096 port))
+                                   (if (eof-object? bstr)
+                                       (if (null? accum)
+                                           eof
+                                           (datum->syntax #'here (apply bytes-append (reverse accum))))
+                                       (loop (cons bstr accum)))))))
 
 ;; Make this bigger than 4096 to accommodate at least
 ;; 4096 of unencrypted data
@@ -746,8 +791,10 @@ TO DO:
   (SSL_CTX_ctrl ctx SSL_CTRL_OPTIONS SSL_OP_SINGLE_ECDH_USE #f)
   (void))
 
-(define (ssl-server-context-enable-dhe! context [path ssl-dh4096-param-path])
-  (define params (call-with-input-file path port->bytes))
+(define (ssl-server-context-enable-dhe! context [ssl-dh4096-param ssl-dh4096-param-bytes])
+  (define params (if (bytes? ssl-dh4096-param)
+                     ssl-dh4096-param
+                     (call-with-input-file* ssl-dh4096-param port->bytes)))
   (define params-bio (BIO_new_mem_buf params (bytes-length params)))
   (check-valid params-bio 'ssl-server-context-enable-dhe! "loading Diffie-Hellman parameters")
   (with-failure
@@ -836,6 +883,7 @@ TO DO:
         [else (bad-source)]))
 
 (define (ssl-load-default-verify-sources! ctx)
+  (maybe-complain-on-cert)
   (for ([src (in-list (ssl-default-verify-sources))])
     (ssl-load-verify-source! ctx src #:try? #t)))
 
@@ -981,6 +1029,7 @@ TO DO:
 (define context-cache #f)
 
 (define (ssl-secure-client-context)
+  (maybe-complain-on-cert)
   (let ([locs (ssl-default-verify-sources)])
     (define (reset)
       (let* ([now (current-seconds)]
@@ -1547,7 +1596,8 @@ TO DO:
       (if (eq? 'listener input?)
           (ssl-listener-l mzssl)
           (if input? (mzssl-i mzssl) (mzssl-o mzssl))))
-    (cond [(tcp-port? port) (tcp-addresses port port-numbers?)]
+    (cond [(or (tcp-port? port) (tcp-listener? port))
+           (tcp-addresses port port-numbers?)]
           [else (error 'ssl-addresses "not connected to TCP port")])))
 
 (define (ssl-abandon-port p)
@@ -1666,6 +1716,43 @@ TO DO:
   (let* ([lit-parts (string-split glob #rx"[*]" #:trim? #f)]
          [lit-rxs (for/list ([part (in-list lit-parts)]) (regexp-quote part #f))])
     (regexp (string-join lit-rxs ".*"))))
+
+(define (ssl-channel-binding p type)
+  ;; Reference: https://tools.ietf.org/html/rfc5929
+  (define who 'ssl-channel-binding)
+  (define-values (mzssl _in?) (lookup 'ssl-channel-binding p))
+  (define ssl (mzssl-ssl mzssl))
+  (case type
+    [(tls-unique)
+     (define MAX_FINISH_LEN 50) ;; usually 12 bytes, but be cautious (see RFC 5246 7.4.9)
+     (define get-finished ;; assumes no session resumption
+       (cond [(mzssl-server? mzssl) SSL_get_peer_finished]
+             [else SSL_get_finished]))
+     (define buf (make-bytes MAX_FINISH_LEN))
+     (define r (get-finished ssl buf (bytes-length buf)))
+     (cond [(zero? r) (error who "unable to get TLS Finished message")]
+           [(< 0 r MAX_FINISH_LEN) (subbytes buf 0 r)]
+           [else (error who "internal error: TLS Finished message too large")])]
+    [(tls-server-end-point)
+     (define x509
+       (cond [(mzssl-server? mzssl) (SSL_get_certificate ssl)]
+             [else (SSL_get_peer_certificate ssl)]))
+     (unless x509 (error who "failed to get server certificate"))
+     (define sig-nid (X509_get_signature_nid x509))
+     (define hash-nid (OBJ_find_sigid_algs sig-nid))
+     (define hash-evp ;; change md5, sha1 to sha256, per RFC 5929 4.1
+       (cond [(or (= hash-nid NID_md5) (= hash-nid NID_sha1)) (EVP_sha256)]
+             [(= hash-nid NID_sha224) (EVP_sha224)]
+             [(= hash-nid NID_sha256) (EVP_sha256)]
+             [(= hash-nid NID_sha384) (EVP_sha384)]
+             [(= hash-nid NID_sha512) (EVP_sha512)]
+             [else (error who "unsupported digest in certificate")]))
+     (define buflen (EVP_MD_size hash-evp))
+     (unless (> buflen 0) (error who "internal error: bad digest length"))
+     (define buf (make-bytes buflen))
+     (define r (X509_digest x509 hash-evp buf buflen))
+     (X509_free x509)
+     (if (> r 0) buf (error who "internal error: certificate digest failed"))]))
 
 (define (ssl-port? v)
   (and (hash-ref ssl-ports v #f) #t))

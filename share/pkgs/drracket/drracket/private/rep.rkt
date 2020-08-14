@@ -33,7 +33,6 @@ TODO
          "stack-checkpoint.rkt"
          "parse-logger-args.rkt"
          "insulated-read-language.rkt"
-         "stack-checkpoint.rkt"
          
          ;; the dynamic-require below loads this module, 
          ;; so we make the dependency explicit here, even
@@ -322,40 +321,36 @@ TODO
                             (λ (p v) (adjust-alt-as-meta v)))
   (adjust-alt-as-meta (preferences:get 'framework:alt-as-meta))
   
-  (define drs-font-delta (make-object style-delta% 'change-family 'decorative))
+  (define (get-error-delta)
+    (define error-delta (make-object style-delta%
+                          'change-style
+                          'italic))
+    (send error-delta set-delta-foreground (make-object color% 255 0 0))
+    error-delta)
+
+  (define (get-error-text-style-delta)
+    (define error-text-style-delta (make-object style-delta%))
+    (send error-text-style-delta set-delta-foreground (make-object color% 200 0 0))
+    error-text-style-delta)
   
-  (define output-delta (make-object style-delta%)) ; used to be 'change-weight 'bold
-  (define result-delta (make-object style-delta%)) ; used to be 'change-weight 'bold
-  (define error-delta (make-object style-delta%
-                        'change-style
-                        'italic))
-  (send error-delta set-delta-foreground (make-object color% 255 0 0))
-  (define (get-error-delta) error-delta)
-  (send result-delta set-delta-foreground (make-object color% 0 0 175))
-  (send output-delta set-delta-foreground (make-object color% 150 0 150))
-  
-  (define error-text-style-delta (make-object style-delta%))
-  (send error-text-style-delta set-delta-foreground (make-object color% 200 0 0))
-  
-  (define grey-delta (make-object style-delta%))
-  (send grey-delta set-delta-foreground "GREY")
-  
-  (define welcome-delta (make-object style-delta% 'change-family 'decorative))
-  (define click-delta (gui-utils:get-clickback-delta))
-  (define red-delta (make-object style-delta%))
-  (define dark-green-delta (make-object style-delta%))
-  (send* red-delta
-    (copy welcome-delta)
-    (set-delta-foreground "RED"))  
-  (send* dark-green-delta
-    (copy welcome-delta)
-    (set-delta-foreground "dark green"))
-  (define warning-style-delta (make-object style-delta% 'change-bold))
-  (send* warning-style-delta
-    (set-delta-foreground "BLACK")
-    (set-delta-background "YELLOW"))
-  (define (get-welcome-delta) welcome-delta)
-  (define (get-dark-green-delta) dark-green-delta)
+  (define (click-delta)
+    (gui-utils:get-clickback-delta (preferences:get 'framework:white-on-black?)))  
+
+  (define (get-warning-style-delta)
+    (define warning-style-delta (make-object style-delta% 'change-bold))
+    (send* warning-style-delta
+      (set-delta-foreground "BLACK")
+      (set-delta-background "YELLOW"))
+    warning-style-delta)
+  (define (get-welcome-delta) (make-object style-delta% 'change-family 'decorative))
+  (define (get-dark-green-delta)
+    (define dark-green-delta (make-object style-delta%))
+    (send* dark-green-delta
+      (copy (get-welcome-delta))
+      (set-delta-foreground
+       (color-prefs:lookup-in-color-scheme
+        'drracket:language-name-and-memory-use-at-top-of-interactions)))
+    dark-green-delta)
   
   ;; is-default-settings? : language-settings -> boolean
   ;; determines if the settings in `language-settings'
@@ -648,10 +643,8 @@ TODO
         (set-error-ranges raw-locs)
         (define locs (or (get-error-ranges) '())) ;; calling set-error-range cleans up the locs
         (define error-arrows (and raw-error-arrows (cleanup-locs raw-error-arrows)))
-        
         (for ([loc (in-list locs)])
           (send (srcloc-source loc) begin-edit-sequence #t #f))
-        
         (when color?
           (define resets
             (for/list ([loc (in-list locs)])
@@ -685,9 +678,8 @@ TODO
               (when (eq? first-file definitions-text) ;; only move set the cursor in the defs window
                 (send first-file set-position first-start first-start))
               (send first-file scroll-to-position first-start #f first-finish)))
-          
+
           (for-each (λ (loc) (send (srcloc-source loc) end-edit-sequence)) locs)
-          
           (when first-loc
             
             (when (eq? first-file definitions-text)
@@ -891,6 +883,7 @@ TODO
              ;; user-exit-code (union #f byte?)
              ;; #f indicates that exit wasn't called. Integer indicates exit code
              (user-exit-code #f))
+      (define gc-on-run? #f)
             
       (define/public (get-user-language-settings) user-language-settings)
       (define/public (get-user-custodian) user-custodian)
@@ -911,7 +904,7 @@ TODO
           (let ([start (get-unread-start-point)])
             (insert-before message)
             (let ([end (get-unread-start-point)])
-              (change-style warning-style-delta start end)
+              (change-style (get-warning-style-delta) start end)
               (insert-before "\n")))
           (end-edit-sequence)
           (when locked? (lock #t))))
@@ -922,8 +915,10 @@ TODO
       (define/public (set-show-no-user-evaluation-message? b)
         (set! show-no-user-evaluation-message? b))
       
-      (define/private (cleanup)
+      (define/private (cleanup) ;; =Kernel=, =Handler=
         (set! in-evaluation? #f)
+        (define memory-killed? (not (custodian-box-value memory-killed-cust-box)))
+        (set! gc-on-run? memory-killed?)
         (update-running #f)
         (unless (and (get-user-thread) (thread-running? (get-user-thread)))
           (lock #t)
@@ -931,36 +926,56 @@ TODO
             (no-user-evaluation-message
              (get-frame)
              user-exit-code
-             (not (custodian-box-value memory-killed-cust-box))))
+             memory-killed?))
           (set! show-no-user-evaluation-message? #t)))
       
       (field (need-interaction-cleanup? #f))
       
-      (define/private (no-user-evaluation-message frame exit-code memory-killed?)
-        (define-values (cms1 cms2)
+      (define/private (no-user-evaluation-message frame exit-code memory-killed?)  ;; =Kernel=, =Handler=
+        (define defs (send frame get-definitions-text))
+        (define-values (vs1 vs2)
           (let ([ut (get-user-thread)])
             (cond
               [ut
                (define cms (continuation-marks ut))
-               (values (drracket:debug:cms->srclocs cms)
-                       (cut-stack-at-checkpoint cms))]
-              [else (values '() '())])))
+               (define interesting-editors
+                 (list defs (send frame get-interactions-text)))
+               (define a-viewable-stack (cms->errortrace-viewable-stack cms interesting-editors))
+               (values a-viewable-stack
+                       (cms->builtin-viewable-stack cms interesting-editors
+                                                    #:share-cache a-viewable-stack))]
+              [else (values (empty-viewable-stack)
+                            (empty-viewable-stack))])))
         (no-user-evaluation-dialog frame exit-code memory-killed? #t)
         (set-insertion-point (last-position))
-        (define have-some-stack? (or (pair? cms1) (pair? cms2)))
+        (define have-some-stack? (not (and (empty-viewable-stack? vs1)
+                                           (empty-viewable-stack? vs2))))
         (when have-some-stack?
-          (insert-stacktrace cms1 cms2
-                             (send frame get-definitions-text)
-                             (send frame get-interactions-text)
-                             memory-killed?))
+          (insert-stacktrace vs1 vs2 memory-killed?))
         (insert-warning
          (string-append (if have-some-stack? "" "\n")
                         "Interactions disabled"
                         (if memory-killed?
                             "; out of memory"
-                            ""))))
+                            "")))
 
-      (define/private (insert-stacktrace cms1 cms2 defs ints memory-killed?)
+        ;; as kind of a cheap trick we use the next event boundary
+        ;; to escape the edit seqence that the rep is currently in,
+        ;; as the error arrows will be erased by the end of the edit
+        ;; sequence if we don't do that. We use a high priority event
+        ;; so that any keystrokes from the user or what not will be
+        ;; guaranteed to come after that (and thus will, properly,
+        ;; reset the error arrows)
+        (queue-callback
+         (λ ()
+           (define src-locs (get-exn-source-locs defs #f vs1 vs2))
+           (define arrows (viewable-stack->red-arrows-backtrace-srclocs
+                           (if (empty-viewable-stack? vs1)
+                               vs2
+                               vs1)))
+           (highlight-errors src-locs arrows))))
+
+      (define/private (insert-stacktrace vs1 vs2 memory-killed?)
         (define locked? (is-locked?))
         (when locked? (lock #f))
         (begin-edit-sequence)
@@ -970,11 +985,7 @@ TODO
            (cond
              [memory-killed? (string-constant program-ran-out-of-memory)]
              [else (string-constant evaluation-terminated)])
-           cms1
-           (drracket:debug:get-editions cache defs ints cms1)
-           cms2
-           (drracket:debug:get-editions cache defs ints cms2)
-           defs ints))
+           vs1 vs2))
         (insert-before note)
         (insert-before " ")
         (end-edit-sequence)
@@ -1338,6 +1349,9 @@ TODO
           (custodian-limit-memory user-custodian-parent 
                                   custodian-limit
                                   user-custodian-parent))
+        (when gc-on-run?
+          (collect-garbage)
+          (set! gc-on-run? #f))
         (let ([user-eventspace (parameterize ([current-custodian user-custodian])
                                  (make-eventspace #:suspend-to-kill? #t))])
           (set! user-eventspace-box (make-weak-box user-eventspace))
@@ -1776,6 +1790,8 @@ TODO
         (set-position (last-position) (last-position))
         
         (set! setting-up-repl? #t)
+        (define welcome-delta (get-welcome-delta))
+        (define dark-green-delta (get-dark-green-delta))
         (insert/delta this (string-append (string-constant language) ": ") welcome-delta)
         (let-values (((before after)
                       (insert/delta
@@ -1786,7 +1802,7 @@ TODO
                      ((url) (extract-language-url user-language-settings)))
           (when url
             (set-clickback before after (λ args (send-url url))
-                           click-delta)))
+                           (click-delta))))
         (unless (is-default-settings? user-language-settings)
           (insert/delta this (string-append " [" (string-constant custom) "]") dark-green-delta))
         (when custodian-limit
@@ -1820,18 +1836,19 @@ TODO
         (begin-edit-sequence)
         (freeze-colorer)
         (set! setting-up-repl? #t)
+        (define welcome-delta (get-welcome-delta))
         (insert/delta this (string-append (string-constant welcome-to) " ") welcome-delta)
         (let-values ([(before after)
                       (insert/delta this 
                                     (string-constant drscheme)
-                                    click-delta
-                                    drs-font-delta)])
+                                    (click-delta)
+                                    welcome-delta)])
           (insert/delta this (format (string-append ", " (string-constant version) " ~a [~a].\n") 
                                      (version:version) (system-type 'gc))
                         welcome-delta)
           (set-clickback before after 
                          (λ args (drracket:app:about-drscheme))
-                         click-delta))
+                         (click-delta)))
         (set! setting-up-repl? #f)
         (send context disable-evaluation)
         (reset-console)
@@ -2156,9 +2173,6 @@ TODO
         [(null? (cdr o)) null]
         [else (cons (car o) (loop (cdr o)))])))
   
-  (define input-delta (make-object style-delta%))
-  (send input-delta set-delta-foreground (make-object color% 0 150 0))
-  
   ;; insert-error-in-text : (is-a?/c text%)
   ;;                        (union #f (is-a?/c drracket:rep:text<%>))
   ;;                        string?
@@ -2233,11 +2247,11 @@ TODO
                          (number? line)
                          (number? col))
                 (insert-file-name/icon src pos span line col))
-              (insert/delta text (format "~a" (exn-message exn)) error-delta)
+              (insert/delta text (format "~a" (exn-message exn)) (get-error-delta))
               (when (and (error-print-source-location)
                          (syntax? expr))
                 (insert/delta text " in: ")
-                (insert/delta text (format "~s" (syntax->datum expr)) error-text-style-delta))
+                (insert/delta text (format "~s" (syntax->datum expr)) (get-error-text-style-delta)))
               (insert/delta text "\n")
               (when (and (is-a? src text:basic<%>)
                          (number? pos)
@@ -2263,9 +2277,10 @@ TODO
                        (number? span))
               (highlight-errors (list (list src (- pos 1) (+ pos -1 span))))))]
         [(exn? exn)
-         (insert/delta text (format "~a" (exn-message exn)) error-delta)
+         (insert/delta text (format "~a" (exn-message exn)) (get-error-delta))
          (insert/delta text "\n")]
         [else
+         (define error-delta (get-error-delta))
          (insert/delta text "uncaught exception: " error-delta)
          (insert/delta text (format "~s" exn) error-delta)
          (insert/delta text "\n")])

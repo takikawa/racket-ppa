@@ -20,10 +20,13 @@
  *
  * <fasl-group> -> <fasl header><fasl-object>*
  *
- * <fasl-header> -> {header}\0\0\0chez<uptr version><uptr machine-type>
+ * <fasl-header> -> {header}\0\0\0chez<uptr version><uptr machine-type>(<bootfile-name> ...)
  *
- * <fasl-object> -> {fasl-size}<uptr size> # size in bytes of following <fasl>
- *                             <fasl>
+ * <bootfile-name> -> <octet char>*
+ *
+ * <fasl-object> -> <situation>{fasl-size}<uptr size><fasl> # size is the size in bytes of the following <fasl>
+ *
+ * <situation> -> {visit}{revisit}{visit-revisit}
  *
  * <fasl> -> {pair}<uptr n><fasl elt1>...<fasl eltn><fasl last-cdr>
  *
@@ -63,7 +66,7 @@
  *
  *        -> {library-code}<uptr index>
  *
- *        -> {graph}<uptr graph-length>
+ *        -> {graph}<uptr graph-length><fasl object>
  *
  *        -> {graph-def}<uptr index><fasl object>
  *
@@ -178,6 +181,7 @@
 
 #include "system.h"
 #include "zlib.h"
+#include "popcount.h"
 
 #ifdef WIN32
 #include <io.h>
@@ -211,7 +215,7 @@ typedef struct faslFileObj {
 static INT uf_read PROTO((unbufFaslFile uf, octet *s, iptr n));
 static octet uf_bytein PROTO((unbufFaslFile uf));
 static uptr uf_uptrin PROTO((unbufFaslFile uf));
-static ptr fasl_entry PROTO((ptr tc, unbufFaslFile uf));
+static ptr fasl_entry PROTO((ptr tc, IFASLCODE situation, unbufFaslFile uf));
 static ptr bv_fasl_entry PROTO((ptr tc, ptr bv, IFASLCODE ty, uptr offset, uptr len, unbufFaslFile uf));
 static void fillFaslFile PROTO((faslFile f));
 static void bytesin PROTO((octet *s, iptr n, faslFile f));
@@ -231,6 +235,10 @@ static uptr arm32_get_abs PROTO((void *address));
 static void arm32_set_jump PROTO((void *address, uptr item, IBOOL callp));
 static uptr arm32_get_jump PROTO((void *address));
 #endif /* ARMV6 */
+#ifdef AARCH64
+static void arm64_set_abs PROTO((void *address, uptr item));
+static uptr arm64_get_abs PROTO((void *address));
+#endif /* AARCH64 */
 #ifdef PPC32
 static void ppc32_set_abs PROTO((void *address, uptr item));
 static uptr ppc32_get_abs PROTO((void *address));
@@ -240,6 +248,7 @@ static uptr ppc32_get_jump PROTO((void *address));
 #ifdef X86_64
 static void x86_64_set_jump PROTO((void *address, uptr item, IBOOL callp));
 static uptr x86_64_get_jump PROTO((void *address));
+static void x86_64_set_popcount PROTO((void *address, uptr item));
 #endif /* X86_64 */
 #ifdef SPARC64
 static INT extract_reg_from_sethi PROTO((void *address));
@@ -286,7 +295,7 @@ void S_fasl_init() {
 #endif
 }
 
-ptr S_fasl_read(ptr file, IBOOL gzflag, ptr path) {
+ptr S_fasl_read(ptr file, IBOOL gzflag, IFASLCODE situation, ptr path) {
   ptr tc = get_thread_context();
   ptr x; struct unbufFaslFileObj uffo;
 
@@ -300,7 +309,7 @@ ptr S_fasl_read(ptr file, IBOOL gzflag, ptr path) {
     uffo.type = UFFO_TYPE_FD;
     uffo.fd = GET_FD(file);
   }
-  x = fasl_entry(tc, &uffo);
+  x = fasl_entry(tc, situation, &uffo);
   tc_mutex_release()
   return x;
 }
@@ -325,7 +334,7 @@ ptr S_boot_read(glzFile file, const char *path) {
   uffo.path = Sstring_utf8(path, -1);
   uffo.type = UFFO_TYPE_GZ;
   uffo.file = file;
-  return fasl_entry(tc, &uffo);
+  return fasl_entry(tc, fasl_type_visit_revisit, &uffo);
 }
 
 #define GZ_IO_SIZE_T unsigned int
@@ -377,9 +386,25 @@ static INT uf_read(unbufFaslFile uf, octet *s, iptr n) {
   return 0;
 }
 
+
 int S_fasl_stream_read(void *stream, octet *dest, iptr n)
 {
   return uf_read((unbufFaslFile)stream, dest, n);
+}
+
+static void uf_skipbytes(unbufFaslFile uf, iptr n) {
+  switch (uf->type) {
+    case UFFO_TYPE_GZ:
+       if (S_glzseek(uf->file, (long)n, SEEK_CUR) == -1) {
+         S_error1("", "error seeking ~a", uf->path);
+       }
+       break;
+    case UFFO_TYPE_FD:
+       if (LSEEK(uf->fd, n, SEEK_CUR) == -1) {
+         S_error1("", "error seeking ~a", uf->path);
+       }
+       break;
+  }
 }
 
 static octet uf_bytein(unbufFaslFile uf) {
@@ -393,12 +418,12 @@ static uptr uf_uptrin(unbufFaslFile uf) {
   uptr n, m; octet k;
 
   k = uf_bytein(uf);
-  n = k >> 1;
-  while (k & 1) {
+  n = k & 0x7F;
+  while (k & 0x80) {
     k = uf_bytein(uf);
     m = n << 7;
     if (m >> 7 != n) toolarge(uf->path);
-    n = m | (k >> 1);
+    n = m | (k & 0x7F);
   }
 
   return n;
@@ -427,64 +452,85 @@ char *S_lookup_machine_type(uptr n) {
     return "unknown";
 }
 
-static ptr fasl_entry(ptr tc, unbufFaslFile uf) {
+static ptr fasl_entry(ptr tc, IFASLCODE situation, unbufFaslFile uf) {
   ptr x; ptr strbuf = S_G.null_string;
-  octet tybuf[1]; IFASLCODE ty;
-  struct faslFileObj ffo; octet buf[SBUFSIZ];
+  octet tybuf[1]; IFASLCODE ty, fmt; iptr size;
 
-  if (uf_read(uf, tybuf, 1) < 0) return Seof_object; 
-  ty = tybuf[0];
+  for (;;) {
+    if (uf_read(uf, tybuf, 1) < 0) return Seof_object; 
+    ty = tybuf[0];
 
-  while (ty == fasl_type_header) {
-    uptr n; ICHAR c;
-  
-   /* check for remainder of magic number */
-    if (uf_bytein(uf) != 0 ||
-        uf_bytein(uf) != 0 ||
-        uf_bytein(uf) != 0 || 
-        uf_bytein(uf) != 'c' || 
-        uf_bytein(uf) != 'h' || 
-        uf_bytein(uf) != 'e' || 
-        uf_bytein(uf) != 'z')
-      S_error1("", "malformed fasl-object header found in ~a", uf->path);
-  
-    if ((n = uf_uptrin(uf)) != scheme_version)
-      S_error2("", "incompatible fasl-object version ~a found in ~a", S_string(S_format_scheme_version(n), -1), uf->path);
-  
-    if ((n = uf_uptrin(uf)) != machine_type_any && n != machine_type)
-      S_error2("", "incompatible fasl-object machine-type ~a found in ~a", S_string(S_lookup_machine_type(n), -1), uf->path);
-  
-    if (uf_bytein(uf) != '(')
-      S_error1("", "malformed fasl-object header found in ~a", uf->path);
-  
-    while ((c = uf_bytein(uf)) != ')')
-      if (c < 0) S_error1("", "malformed fasl-object header found in ~a", uf->path);
-
-    ty = uf_bytein(uf);
-  }
-
-  if ((ty != fasl_type_fasl_size)
-      && (ty != fasl_type_vfasl_size))
-    S_error1("", "malformed fasl-object header found in ~a", uf->path);
-
-  ffo.size = uf_uptrin(uf);
-
-  if (ty == fasl_type_vfasl_size) {
-    if (S_vfasl_boot_mode == -1) {
-      S_vfasl_boot_mode = 1;
-      Scompact_heap();
-    }
-    x = S_vfasl((ptr)0, uf, 0, ffo.size);
-  } else {
-    ffo.buf = buf;
-    ffo.next = ffo.end = ffo.buf;
-    ffo.uf = uf;
+    while (ty == fasl_type_header) {
+      uptr n; ICHAR c;
     
-    faslin(tc, &x, S_G.null_vector, &strbuf, &ffo);
-  }
+     /* check for remainder of magic number */
+      if (uf_bytein(uf) != 0 ||
+          uf_bytein(uf) != 0 ||
+          uf_bytein(uf) != 0 || 
+          uf_bytein(uf) != 'c' || 
+          uf_bytein(uf) != 'h' || 
+          uf_bytein(uf) != 'e' || 
+          uf_bytein(uf) != 'z')
+        S_error1("", "malformed fasl-object header (missing magic word) found in ~a", uf->path);
+    
+      if ((n = uf_uptrin(uf)) != scheme_version)
+        S_error2("", "incompatible fasl-object version ~a found in ~a", S_string(S_format_scheme_version(n), -1), uf->path);
+    
+      if ((n = uf_uptrin(uf)) != machine_type_any && n != machine_type)
+        S_error2("", "incompatible fasl-object machine-type ~a found in ~a", S_string(S_lookup_machine_type(n), -1), uf->path);
+    
+      if (uf_bytein(uf) != '(')
+        S_error1("", "malformed fasl-object header (missing open paren) found in ~a", uf->path);
+    
+      while ((c = uf_bytein(uf)) != ')')
+        if (c < 0) S_error1("", "malformed fasl-object header (missing close paren) found in ~a", uf->path);
+  
+      ty = uf_bytein(uf);
+    }
+  
+    switch (ty) {
+      case fasl_type_visit:
+      case fasl_type_revisit:
+      case fasl_type_visit_revisit:
+        break;
+      case fasl_type_terminator:
+        return Seof_object;
+      default:
+        S_error2("", "malformed fasl-object header (missing situation, got ~s) found in ~a", FIX(ty), uf->path);
+        return (ptr)0;
+    }
 
-  S_flush_instruction_cache(tc);
-  return x;
+    fmt = uf_bytein(uf);
+    if ((fmt != fasl_type_fasl_size) && (fmt != fasl_type_vfasl_size))
+      S_error1("", "malformed fasl-object header (missing fasl-size) found in ~a", uf->path);
+  
+    size = uf_uptrin(uf);
+  
+    if (ty == situation || situation == fasl_type_visit_revisit || ty == fasl_type_visit_revisit) {
+      struct faslFileObj ffo; octet buf[SBUFSIZ];
+
+      ffo.size = size;
+      
+      if (fmt == fasl_type_vfasl_size) {
+        if (S_vfasl_boot_mode) {
+          /* compact every time, because running previously loaded
+             boot code may have interned symbols, for example */
+          S_vfasl_boot_mode = 1;
+          Scompact_heap();
+        }
+        x = S_vfasl((ptr)0, uf, 0, ffo.size);
+      } else {
+        ffo.buf = buf;
+        ffo.next = ffo.end = ffo.buf;
+        ffo.uf = uf;
+        faslin(tc, &x, S_G.null_vector, &strbuf, &ffo);
+      }
+      S_flush_instruction_cache(tc);
+      return x;
+    } else {
+      uf_skipbytes(uf, size);
+    }
+  }
 }
 
 static ptr bv_fasl_entry(ptr tc, ptr bv, int ty, uptr offset, uptr len, unbufFaslFile uf) {
@@ -571,12 +617,12 @@ static uptr uptrin(faslFile f) {
   uptr n, m; octet k;
 
   k = bytein(f);
-  n = k >> 1;
-  while (k & 1) {
+  n = (k & 0x7F);
+  while (k & 0x80) {
     k = bytein(f);
     m = n << 7;
     if (m >> 7 != n) toolarge(f->uf->path);
-    n = m | (k >> 1);
+    n = m | (k & 0x7F);
   }
 
   return n;
@@ -652,6 +698,16 @@ static void faslin(ptr tc, ptr *x, ptr t, ptr *pstrbuf, faslFile f) {
             *x = S_intern3(&STRIT(*pstrbuf, 0), pn, &STRIT(*pstrbuf, pn), un, Sfalse, Sfalse);
             return;
         }
+        case fasl_type_uninterned_symbol: {
+            iptr i, n;
+            ptr str;
+            n = uptrin(f);
+            str = S_string((char *)0, n);
+            for (i = 0; i != n; i += 1) Sstring_set(str, i, uptrin(f));
+            STRTYPE(str) |= string_immutable_flag;
+            *x = S_uninterned(str);
+            return;
+        }
         case fasl_type_ratnum:
             *x = S_rational(FIX(0), FIX(0));
             faslin(tc, &RATNUM(*x), t, pstrbuf, f);
@@ -662,7 +718,6 @@ static void faslin(ptr tc, ptr *x, ptr t, ptr *pstrbuf, faslFile f) {
             faslin(tc, &EXACTNUM_REAL_PART(*x), t, pstrbuf, f);
             faslin(tc, &EXACTNUM_IMAG_PART(*x), t, pstrbuf, f);
             return;
-        case fasl_type_group:
         case fasl_type_vector:
         case fasl_type_immutable_vector: {
             iptr n; ptr *p;
@@ -709,6 +764,15 @@ static void faslin(ptr tc, ptr *x, ptr t, ptr *pstrbuf, faslFile f) {
               else
                 BYTEVECTOR_TYPE(*x) |= bytevector_immutable_flag;
             }
+            return;
+        }
+        case fasl_type_stencil_vector: {
+            uptr mask; iptr n; ptr *p;
+            mask = uptrin(f);
+            *x = S_stencil_vector(mask);
+            p = &INITSTENVECTIT(*x, 0);
+            n = Spopcount(mask);
+            while (n--) faslin(tc, p++, t, pstrbuf, f);
             return;
         }
         case fasl_type_base_rtd: {
@@ -783,7 +847,7 @@ static void faslin(ptr tc, ptr *x, ptr t, ptr *pstrbuf, faslFile f) {
                 break;
               case eq_hashtable_subtype_ephemeron:
               default:
-                keyval = S_cons_in(space_ephemeron, 0, FIX(0), FIX(0));
+                keyval = S_ephemeron_cons_in(0, FIX(0), FIX(0));
                 break;
               }
               faslin(tc, &INITCAR(keyval), t, pstrbuf, f);
@@ -894,7 +958,7 @@ static void faslin(ptr tc, ptr *x, ptr t, ptr *pstrbuf, faslFile f) {
             IBOOL sign; iptr n; ptr t; bigit *p;
             sign = bytein(f);
             n = uptrin(f);
-            t = S_bignum(n, sign);
+            t = S_bignum(tc, n, sign);
             p = &BIGIT(t, 0);
             while (n--) *p++ = (bigit)uptrin(f);
             *x = S_normalize_bignum(t);
@@ -906,7 +970,7 @@ static void faslin(ptr tc, ptr *x, ptr t, ptr *pstrbuf, faslFile f) {
             faslin(tc, &INITCDR(*x), t, pstrbuf, f);
             return;
         case fasl_type_ephemeron:
-            *x = S_cons_in(space_ephemeron, 0, FIX(0), FIX(0));
+            *x = S_ephemeron_cons_in(0, FIX(0), FIX(0));
             faslin(tc, &INITCAR(*x), t, pstrbuf, f);
             faslin(tc, &INITCDR(*x), t, pstrbuf, f);
             return;
@@ -982,18 +1046,6 @@ static void faslin(ptr tc, ptr *x, ptr t, ptr *pstrbuf, faslFile f) {
         case fasl_type_graph_ref:
             *x = Svector_ref(t, uptrin(f));
             return;
-        case fasl_type_visit: {
-            ptr p;
-            *x = p = Scons(FIX(visit_tag), FIX(0));
-            faslin(tc, &INITCDR(p), t, pstrbuf, f);
-            return;
-        }
-        case fasl_type_revisit: {
-            ptr p;
-            *x = p = Scons(FIX(revisit_tag), FIX(0));
-            faslin(tc, &INITCDR(p), t, pstrbuf, f);
-            return;
-        }
         case fasl_type_begin: {
             uptr n = uptrin(f) - 1; ptr v;
             while (n--)
@@ -1249,6 +1301,13 @@ void S_set_code_obj(who, typ, p, n, x, o) char *who; IFASLCODE typ; iptr n, o; p
             arm32_set_jump(address, item, 1);
             break;
 #endif /* ARMV6 */
+#ifdef AARCH64
+        case reloc_arm64_abs:
+        case reloc_arm64_jump:
+        case reloc_arm64_call:
+            arm64_set_abs(address, item);
+            break;
+#endif /* AARCH64 */
 #ifdef PPC32
         case reloc_ppc32_abs:
             ppc32_set_abs(address, item);
@@ -1272,6 +1331,9 @@ void S_set_code_obj(who, typ, p, n, x, o) char *who; IFASLCODE typ; iptr n, o; p
             break;
         case reloc_x86_64_call:
             x86_64_set_jump(address, item, 1);
+            break;
+        case reloc_x86_64_popcount:
+            x86_64_set_popcount(address, item);
             break;
 #endif /* X86_64 */
 #ifdef SPARC64
@@ -1324,6 +1386,13 @@ ptr S_get_code_obj(typ, p, n, o) IFASLCODE typ; iptr n, o; ptr p; {
             item = arm32_get_jump(address);
             break;
 #endif /* ARMV6 */
+#ifdef AARCH64
+        case reloc_arm64_abs:
+        case reloc_arm64_jump:
+        case reloc_arm64_call:
+            item = arm64_get_abs(address);
+            break;
+#endif /* AARCH64 */
 #ifdef PPC32
         case reloc_ppc32_abs:
             item = ppc32_get_abs(address);
@@ -1343,6 +1412,9 @@ ptr S_get_code_obj(typ, p, n, o) IFASLCODE typ; iptr n, o; ptr p; {
         case reloc_x86_64_jump:
         case reloc_x86_64_call:
             item = x86_64_get_jump(address);
+            break;
+        case reloc_x86_64_popcount:
+            item = (uptr)Svector_ref(S_G.library_entry_vector, library_popcount_slow) + o;
             break;
 #endif /* X86_64 */
 #ifdef SPARC64
@@ -1428,6 +1500,28 @@ static uptr arm32_get_jump(void *address) {
 }
 #endif /* ARMV6 */
 
+#ifdef AARCH64
+
+/* Address pieces in a movz,movk,movk,movk sequence are at its 5-20 */
+#define ADDRESS_BITS_SHIFT 5
+#define ADDRESS_BITS_MASK  ((U32)0x1fffe0)
+
+static void arm64_set_abs(void *address, uptr item) {
+  ((U32 *)address)[0] = ((((U32 *)address)[0] & ~ADDRESS_BITS_MASK) | ((item & 0xFFFF) << ADDRESS_BITS_SHIFT));
+  ((U32 *)address)[1] = ((((U32 *)address)[1] & ~ADDRESS_BITS_MASK) | (((item >> 16) & 0xFFFF) << ADDRESS_BITS_SHIFT));
+  ((U32 *)address)[2] = ((((U32 *)address)[2] & ~ADDRESS_BITS_MASK) | (((item >> 32) & 0xFFFF) << ADDRESS_BITS_SHIFT));
+  ((U32 *)address)[3] = ((((U32 *)address)[3] & ~ADDRESS_BITS_MASK) | (((item >> 48) & 0xFFFF) << ADDRESS_BITS_SHIFT));
+}
+
+static uptr arm64_get_abs(void *address) {
+  return ((uptr)((((U32 *)address)[0] & ADDRESS_BITS_MASK) >> ADDRESS_BITS_SHIFT)
+          | ((uptr)((((U32 *)address)[1] & ADDRESS_BITS_MASK) >> ADDRESS_BITS_SHIFT) << 16)
+          | ((uptr)((((U32 *)address)[2] & ADDRESS_BITS_MASK) >> ADDRESS_BITS_SHIFT) << 32)
+          | ((uptr)((((U32 *)address)[3] & ADDRESS_BITS_MASK) >> ADDRESS_BITS_SHIFT) << 48));
+}
+
+#endif /* AARCH64 */
+
 #ifdef PPC32
 
 #define UPDATE_ADDIS(item, instr) (((instr) & ~0xFFFF) | (((item) >> 16) & 0xFFFF))
@@ -1489,18 +1583,20 @@ static uptr ppc32_get_jump(void *address) {
 #endif /* PPC32 */
 
 #ifdef X86_64
+
 static void x86_64_set_jump(void *address, uptr item, IBOOL callp) {
   I64 disp = (I64)item - ((I64)address + 5); /* 5 = size of call instruction */
   if ((I32)disp == disp) {
     *(octet *)address = callp ? 0xE8 : 0xE9;  /* call or jmp disp32 opcode */
     *(I32 *)((uptr)address + 1) = (I32)disp;
-    *((octet *)address + 5) = 0x90; /* nop */
-    *((octet *)address + 6) = 0x90; /* nop */
-    *((octet *)address + 7) = 0x90; /* nop */
-    *((octet *)address + 8) = 0x90; /* nop */
-    *((octet *)address + 9) = 0x90; /* nop */
-    *((octet *)address + 10) = 0x90; /* nop */
-    *((octet *)address + 11) = 0x90; /* nop */
+    /* 7-byte nop: */
+    *((octet *)address + 5) = 0x0F;
+    *((octet *)address + 6) = 0x1F;
+    *((octet *)address + 7) = 0x80;
+    *((octet *)address + 8) = 0x00;
+    *((octet *)address + 9) = 0x00;
+    *((octet *)address + 10) = 0x00;
+    *((octet *)address + 11) = 0x00;
   } else {
     *(octet *)address = 0x48; /* REX w/REX.w set */
     *((octet *)address + 1)= 0xB8;  /* MOV imm64 to RAX */
@@ -1518,6 +1614,36 @@ static uptr x86_64_get_jump(void *address) {
    /* must be short form: call/jmp */
     return ((uptr)address + 5) + *(I32 *)((uptr)address + 1);
 }
+
+static int popcount_present;
+
+static void x86_64_set_popcount(void *address, uptr item) {
+  if (!popcount_present) {
+    x86_64_set_jump(address, item, 1);
+  } else {
+    *((octet *)address + 0) = 0x48; /* REX */
+    *((octet *)address + 1) = 0x31; /* XOR RAX, RAX - avoid false dependency */
+    *((octet *)address + 2) = 0xc0;
+    *((octet *)address + 3) = 0xF3;
+    *((octet *)address + 4) = 0x48; /* REX */
+    *((octet *)address + 5) = 0x0F; /* POPCNT */
+    *((octet *)address + 6) = 0xB8;
+    *((octet *)address + 7) = 0xC1; /* RCX -> RAX */
+    /* 4-byte nop: */
+    *((octet *)address + 8) = 0x0F;
+    *((octet *)address + 9) = 0x1F;
+    *((octet *)address + 10) = 0x40;
+    *((octet *)address + 11) = 0x00;
+  }
+}
+
+void x86_64_set_popcount_present(ptr code) {
+  /* cpu_features returns ECX after CPUID for function 1 */
+  int (*cpu_features)() = (int (*)())((uptr)code + code_data_disp);
+  if (cpu_features() & (1 << 23))
+    popcount_present = 1;
+}
+
 #endif /* X86_64 */
 
 #ifdef SPARC64

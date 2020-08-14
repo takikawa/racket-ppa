@@ -67,5 +67,6 @@
 
 (define macro-stepper-frame%
   (macro-stepper-frame-mixin
-   (frame:standard-menus-mixin
-    (frame:basic-mixin frame%))))
+   (frame:searchable-mixin
+    (frame:standard-menus-mixin
+     (frame:basic-mixin frame%)))))

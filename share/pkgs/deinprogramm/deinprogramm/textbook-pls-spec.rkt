@@ -8,4 +8,4 @@
               "DeinProgramm"
               (string-constant teaching-languages)
               "DeinProgramm"
-              "Die Macht der Abstraktion - Anfänger")))
+              "Schreibe Dein Programm! - Anfänger")))

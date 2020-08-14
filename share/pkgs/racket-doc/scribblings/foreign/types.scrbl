@@ -418,11 +418,13 @@ See @secref["foreign:tagged-pointers"] for creating pointer types that
 use these tags for safety. A @racket[#f] value is converted to
 @cpp{NULL} and vice versa.
 
-The address referenced by a @racket[_pointer] value must not refer to
+As a result type, the address referenced by a @racket[_pointer] value must not refer to
 memory managed by the garbage collector (unless the address
 corresponds to a value that supports interior pointers and that is
 otherwise referenced to preserve the value from garbage collection).
 The reference is not traced or updated by the garbage collector.
+As an argument type, @racket[_pointer] works for a reference to either
+GC-managed memory or not.
 
 The @racket[equal?] predicate equates C pointers (including pointers
 for @racket[_gcpointer] and possibly containing an offset) when they
@@ -433,11 +435,13 @@ case the equality rules of the relevant structure types apply.}
 
 @defthing[_gcpointer ctype?]{
 
-Like @racket[_pointer], but for a C pointer value that can refer to memory
-managed by the garbage collector.
+The same as @racket[_pointer] as an argument type, but as a result
+type, @racket[_gcpointer] corresponds to a C pointer value that refers
+to memory managed by the garbage collector.
 
-Although a @racket[_gcpointer] can reference to memory that is not
-managed by the garbage collector, beware of using an address that
+In the @3m[] and @CGC[] variants of Racket, a @racket[_gcpointer] result
+pointer can reference to memory that is not
+managed by the garbage collector, but beware of using an address that
 might eventually become managed by the garbage collector. For example,
 if a reference is created by @racket[malloc] with @racket['raw] and
 released by @racket[free], then the @racket[free] may allow the memory
@@ -445,9 +449,8 @@ formerly occupied by the reference to be used later by the garbage
 collector.
 
 The @racket[cpointer-gcable?] function returns @racket[#t] for a
-cpointer generated via the @racket[_gcpointer] type, while it
-generates @racket[#f] for a cpointer generated via the
-@racket[_cpointer] type.}
+cpointer generated via the @racket[_gcpointer] result type. See
+@racket[cpointer-gcable?] for more information.}
 
 
 @deftogether[(
@@ -895,7 +898,7 @@ Casts @racket[ptr-or-proc] to a function pointer of type @racket[fun-type].}
 
 A literal used in @racket[_fun] forms. (It's unfortunate that this
 literal has the same name as @racket[->] from
-@racketmodname[racket/contract], but it's a different binding.}}
+@racketmodname[racket/contract], but it's a different binding.)}
 
 @; ----------------------------------------------------------------------
 
@@ -1013,7 +1016,7 @@ Examples:
 
 Creates a C pointer type, where @racket[mode] indicates input or
 output pointers (or both).  The @racket[mode] can be one of the
-following:
+following (matched as a symbol independent of binding):
 
 @itemize[
 
@@ -1055,7 +1058,11 @@ following type:
 
 creates a function that calls the foreign function with a fresh
 integer pointer, and use the value that is placed there as a second
-return value.}
+return value.
+
+@history[#:changed "7.7.0.6" @elem{The modes @racket[i], @racket[o],
+                                   and @racket[io] match as symbols
+                                   instead of free identifiers.}]}
 
 
 @defform[(_box type)]{
@@ -1074,10 +1081,18 @@ Example:
       -> (values res (unbox boxed)))
 ]}
 
-@defform/subs[(_list mode type maybe-len)
+@defform/subs[#:literals (atomic raw atomic nonatomic tagged
+                          atomic-interior interior
+                          stubborn uncollectable eternal)
+              (_list mode type maybe-len maybe-mode)
               ([mode i o io]
                [maybe-len code:blank
-                          len-expr])]{
+                          len-expr]
+               [maybe-mode code:blank
+                           atomic
+                           raw atomic nonatomic tagged
+                           atomic-interior interior
+                           stubborn uncollectable eternal])]{
 
 A @tech{custom function type} that is similar to @racket[_ptr], except
 that it is used for converting lists to/from C vectors.  The optional
@@ -1086,6 +1101,8 @@ the post code, and in the pre code of an output mode to allocate the
 block.  (If the length is 0, then NULL is passed in and an empty list is
 returned.)  In either case, it can refer to a previous binding for the
 length of the list which the C function will most likely require.
+The @racket[maybe-mode], if provided, is quoted and passed to @racket[malloc]
+as needed to allocate the C representation.
 
 For example, the following type corresponds to a function that takes
 a vector argument of type @tt{*float} (from a Racket list input)
@@ -1109,9 +1126,14 @@ return two values, the vector and the boolean.
       [vec : (_list o _float len)]
       -> [res : _bool]
       -> (values vec res))
-]}
+]
 
-@defform[(_vector mode type maybe-len)]{
+@history[#:changed "7.7.0.2" @elem{Added @racket[maybe-mode].}]
+         #:changed "7.7.0.6" @elem{The modes @racket[i], @racket[o],
+                                   and @racket[io] match as symbols
+                                   instead of free identifiers.}]}
+
+@defform[(_vector mode type maybe-len maybe-mode)]{
 
 A @tech{custom function type} like @racket[_list], except that it uses
 Racket vectors instead of lists.
@@ -1128,7 +1150,12 @@ Examples:
       -> (values vec res))
 ]
 
-See @racket[_list] for more explanation about the examples.}
+See @racket[_list] for more explanation about the examples.
+
+@history[#:changed "7.7.0.2" @elem{Added @racket[maybe-mode].}
+         #:changed "7.7.0.6" @elem{The modes @racket[i], @racket[o],
+                                   and @racket[io] match as symbols
+                                   instead of free identifiers.}]}
 
 
 @defform*[#:id _bytes
@@ -1141,10 +1168,13 @@ type; a byte string is passed as @racket[_bytes] without any copying.
 Beware that a Racket byte string is not necessarily nul terminated;
 see also @racket[_bytes/nul-terminated].
 
-In the @3m[] and @CGC[] variants of Racket, a C non-NULL @cpp{char*}
-is converted to a Racket byte string without copying. In the @CS[]
-variant, conversion requires copying to represent a C @cpp{char*}
-result as a Racket byte string. In both cases, the C result must have
+In the @3m[] and @CGC[] variants of Racket, a C non-NULL result value
+is converted to a Racket byte string without copying; the pointer is
+treated as potentially managed by the garbage collector (see
+@racket[_gcpointer] for caveats). In the @CS[] variant of Racket,
+conversion requires copying to represent a C @cpp{char*}
+result as a Racket byte string, and the original pointer is @emph{not}
+treated as managed by the garbage collector. In both cases, the C result must have
 a nul terminator to determine the Racket byte string's length.
 
 A @racket[(_bytes o len-expr)] form is a @tech{custom function type}.
@@ -1181,6 +1211,7 @@ As usual, @racket[_bytes/nul-terminated] treats @racket[#f] as
 results.
 
 @history[#:added "6.12.0.2"]}
+
 
 @; ------------------------------------------------------------
 
@@ -1728,7 +1759,7 @@ a-union-val
 ]}
 
 
-@defproc[(union-ptr [u array?]) cpointer?]{
+@defproc[(union-ptr [u union?]) cpointer?]{
 
 Extracts the pointer for a union's storage.
 

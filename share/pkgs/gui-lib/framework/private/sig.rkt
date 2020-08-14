@@ -153,6 +153,7 @@
      info<%>
      file<%>
      backup-autosave<%>
+     autoload<%>
      basic-mixin
      standard-style-list-mixin
      keymap-mixin
@@ -160,6 +161,7 @@
      info-mixin
      file-mixin
      backup-autosave-mixin
+     autoload-mixin
      font-size-message%))
   (define-signature editor^ extends editor-class^
     (get-standard-style-list
@@ -387,6 +389,7 @@
      get-current-color-scheme-name
      known-color-scheme-name?
      color-scheme-style-name?
+     color-scheme-color-name?
      lookup-in-color-scheme
      set-in-color-scheme
      register-color-scheme-entry-change-callback
@@ -441,7 +444,9 @@
      xyz-z
      rgb-color-distance
      rgb->xyz
-     xyz->rgb))
+     xyz->rgb
+     hsl->rgb
+     rgb->hsl))
   
   (define-signature early-init^ ())
   

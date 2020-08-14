@@ -27,6 +27,9 @@
 (provide render-mixin
          render-multi-mixin)
 
+(define (number->decimal-string s)
+  (number->string (if (integer? s) s (exact->inexact s))))
+
 (define as-literal
   (let ([loc (xml:make-location 0 0 0)])
     (lambda strings (xml:make-cdata loc loc (string-append* strings)))))
@@ -107,7 +110,7 @@
 (define extra-breaking? (make-parameter #f))
 (define current-version (make-parameter (version)))
 (define current-part-files (make-parameter #f))
-(define current-render-convertible-requests (make-parameter '(png@2x-bytes png-bytes svg-bytes)))
+(define current-render-convertible-requests (make-parameter '(png@2x-bytes png-bytes svg-bytes gif-bytes)))
 
 (define (url->string* u)
   (parameterize ([current-url-encode-mode 'unreserved])
@@ -226,6 +229,7 @@
         ([class "searchbox"]
          [style ,(sa "color: "dimcolor";")]
          [type "text"]
+         [tabindex "1"]
          [value ,emptylabel]
          [title "Enter a search string to search the manuals"]
          [onkeypress ,(format "return DoSearchKey(event, this, ~s, ~s);"
@@ -905,7 +909,9 @@
                        (head-extra-xexpr p)))
                  (body ([id ,(or (extract-part-body-id d ri)
                                  "scribble-racket-lang-org")])
-                   ,@(render-toc-view d ri)
+                   ,@(if (part-style? d 'no-toc+aux)
+                         null
+                         (render-toc-view d ri))
                    (div ([class "maincolumn"])
                      (div ([class "main"])
                        ,@(parameterize ([current-version (extract-version d)])
@@ -1467,12 +1473,7 @@
                              (if (and (not (list? cvt))
                                       (equal? request 'png@2x-bytes))
                                  (/ v 2.0)
-                                 v))]
-                    [number->decimal-string (lambda (s)
-                                              (number->string
-                                               (if (integer? s)
-                                                   s
-                                                   (exact->inexact s))))])
+                                 v))])
                (list
                 (add-padding
                  cvt
@@ -1493,6 +1494,23 @@
                     `(img
                       ([src ,(install-file "pict.svg" bstr)]
                        [type "image/svg+xml"]))))))]
+          [(and (equal? request 'gif-bytes) (convert e 'gif-bytes))
+           =>
+           (lambda (gif-bytes)
+             (define gif-src (install-file "pict.gif" gif-bytes))
+
+             ;; GIFs store their width and height in the first 4 bytes of the logical screen
+             ;; descriptor, which comes after the 6-byte long header block. The width and height are
+             ;; each represented by 2-byte wide little-endian unsigned fields.
+             (define width (+ (bytes-ref gif-bytes 6) (* (bytes-ref gif-bytes 7) 256)))
+             (define height (+ (bytes-ref gif-bytes 8) (* (bytes-ref gif-bytes 9) 256)))
+
+             (define image-tag
+               `(img ([src ,gif-src]
+                      [type "image/gif"]
+                      [width ,(number->decimal-string width)]
+                      [height ,(number->decimal-string height)])))
+             (list image-tag))]
           [else #f])))
 
     ;; Add padding for a bounding-box conversion reply:
@@ -1607,6 +1625,7 @@
        (cond
         [(symbol? name)
          (case name
+           [(emph) '([class "emph"])]
            [(italic) '([style "font-style: italic"])]
            [(bold) '([style "font-weight: bold"])]
            [(tt) '([class "stt"])]

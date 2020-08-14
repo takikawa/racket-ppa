@@ -75,7 +75,7 @@ same for @racket[0.0f0] and @racket[-0.0f0] (which are single-precision variants
 @racketvalfont{-nan.0} refers to the same constant as @racket[+nan.0],
 and @racketvalfont{-nan.f} is the same as @racketvalfont{+nan.f}.
 
-Calculations with infinites produce results consistent with IEEE
+Calculations with infinities produce results consistent with IEEE
 double- or single-precision floating point where IEEE specifies the result; in
 cases where IEEE provides no specification,
 the result corresponds to the limit approaching
@@ -172,7 +172,8 @@ Return @racket[#t] if @racket[v] is a @techlink{fixnum}, @racket[#f]
 otherwise.
 
 Note: the result of this function is platform-dependent, so using it in
-syntax transformers can lead to platform-dependent bytecode files.}
+syntax transformers can lead to platform-dependent bytecode files.
+See also @racket[fixnum-for-every-system?].}
 
 
 @defproc[(flonum? [v any/c]) boolean?]{
@@ -463,7 +464,7 @@ Coerces @racket[q] to an exact number, finds the numerator of the
 @mz-examples[(numerator 5) (numerator 34/8) (numerator 2.3)]}
 
 
-@defproc[(denominator [q rational?]) integer?]{
+@defproc[(denominator [q rational?]) (and/c integer? positive?)]{
 
 Coerces @racket[q] to an exact number, finds the denominator of the
  number expressed in its simplest fractional form, and returns this
@@ -1292,15 +1293,19 @@ Returns @racket[(* z z)].}
 
 @defproc[(sgn [x real?]) (or/c (=/c -1) (=/c 0) (=/c 1) +nan.0 @#,racketvalfont{+nan.f})]{
 
-Returns the sign of @racket[x] as either @math{-1}, @math{0},
-@math{1}, or not-a-number.
+Returns the sign of @racket[x] as either @math{-1}, @math{0} (or a signed-zero variant, when
+inexact), @math{1}, or not-a-number.
 
 @mz-examples[
 #:eval math-eval
 (sgn 10)
 (sgn -10.0)
 (sgn 0)
+(sgn -0.0)
+(sgn +0.0)
 (sgn +nan.0)
+(sgn +inf.0)
+(sgn -inf.0)
 ]}
 
 @defproc[(conjugate [z number?]) number?]{

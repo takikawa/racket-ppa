@@ -1609,14 +1609,15 @@ accepted and propagated to the superclass.}
               ([maybe-link code:blank
                            (code:line #:link-target? link-target?-expr)]
                [maybe-mode code:blank
+                           (code:line #:mode public)
+                           (code:line #:mode public-final)
                            (code:line #:mode override)
                            (code:line #:mode override-final)
-                           (code:line #:mode public-final)
                            (code:line #:mode augment)
                            (code:line #:mode augment-final)
-                           (code:line #:mode pubment)
                            (code:line #:mode extend)
-                           (code:line #:mode extend-final)])]{
+                           (code:line #:mode extend-final)
+                           (code:line #:mode pubment)])]{
 
 Like @racket[defproc], but for a method within a @racket[defclass] or
 @racket[definterface] body.
@@ -1626,7 +1627,10 @@ method from a superclass, and so on. (For these purposes, use
 @racket[#:mode override] when refining a method of an implemented
 interface.) The @racket[extend] mode is like @racket[override], but
 the description of the method should describe only extensions to the
-superclass implementation.}
+superclass implementation. When @racket[maybe-mode] is not supplied,
+it defaults to @racket[public].
+
+@history[#:changed "1.35" @elem{Added a check against invalid @racket[maybe-mode].}]}
 
 @defform[(defmethod* maybe-mode maybe-link
                      ([(id arg-spec ...)
@@ -1714,9 +1718,8 @@ Typesets the given combination of a GUI's menu and item name.}
 @tech{decode}d @racket[pre-content] as a file name (e.g., in
 typewriter font and in quotes).}
 
-@defproc[(exec [pre-content pre-content?] ...) element?]{Typesets the
-@tech{decode}d @racket[pre-content] as a command line (e.g., in
-typewriter font).}
+@defproc[(exec [content content?] ...) element?]{Typesets the
+@racket[content] as a command line (e.g., in typewriter font).}
 
 @defproc[(envvar [pre-content pre-content?] ...) element?]{Typesets the given
 @tech{decode}d @racket[pre-content] as an environment variable (e.g.,
@@ -1821,7 +1824,7 @@ For example:
 @racketblock[@tech[#:doc '(lib "scribblings/reference/reference.scrbl")]{blame object}]
 
 creates a link to @tech[#:doc '(lib "scribblings/reference/reference.scrbl")]{blame object} in
-@other-doc['(lib "scribblings/guide/guide.scrbl")].
+@other-doc['(lib "scribblings/reference/reference.scrbl")].
 
 With the default style files, the hyperlink created by @racket[tech]
 is somewhat quieter than most hyperlinks: the underline in HTML output
@@ -2028,7 +2031,7 @@ that is hyperlinked to an explanation.}
 
 @defthing[undefined-const element?]{Returns an element for @|undefined-const|.}
 
-@defproc[(commandline [pre-content pre-content?] ...) paragraph?]{Produces
+@defproc[(commandline [content content?] ...) paragraph?]{Produces
 an inset command-line example (e.g., in typewriter font).}
 
 @defproc[(inset-flow [pre-flow pre-flow?] ...) nested-flow?]{
@@ -2201,7 +2204,7 @@ For HTML rendering:
        @filepath{manual-style.css} from the @filepath{scribble}
        collection in @racket[html-defaults].}
 
- @item{The file @filepath{manual-files.css} from the
+ @item{The file @filepath{manual-fonts.css} from the
        @filepath{scribble} collection is designated as an additional
        accompanying file in @racket[html-defaults].}
 

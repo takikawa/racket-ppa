@@ -194,25 +194,32 @@
           (lambda (what maybe-src id p x)
             (if (and p (not (eq? (proxy-state p) 'protected)))
                 (let ([valid-flag (prelex-info-valid-flag id)])
-                  (if valid-flag
-                      (let ([name (prelex-name id)])
-                        (let ([mesg (format "attempt to ~a undefined variable ~~s" what)])
-                          (when (undefined-variable-warnings)
-                            ($source-warning #f maybe-src #t (format "possible ~a" mesg) name))
-                          (if (prelex-referenced valid-flag)
-                              (set-prelex-multiply-referenced! valid-flag #t)
-                              (set-prelex-referenced! valid-flag #t))
-                          `(seq
-                             (if (ref #f ,valid-flag)
-                                 (quote ,(void))
-                                 (call ,(make-preinfo-call) ,(lookup-primref 2 '$source-violation)
-                                   (quote #f)
-                                   (quote ,maybe-src)
-                                   (quote #t)
-                                   (quote ,mesg)
-                                   (quote ,name)))
-                             ,x)))
-                      x))
+                  (cond
+                   [valid-flag
+                    (if (prelex-referenced valid-flag)
+                        (set-prelex-multiply-referenced! valid-flag #t)
+                        (set-prelex-referenced! valid-flag #t))
+                    (if (enable-error-source-expression)
+                        (let ([name (prelex-name id)])
+                          (let ([mesg (format "attempt to ~a undefined variable ~~s" what)])
+                            (when (undefined-variable-warnings)
+                              ($source-warning #f maybe-src #t (format "possible ~a" mesg) name))
+                            `(seq
+                              (if (ref #f ,valid-flag)
+                                  (quote ,(void))
+                                  (call ,(make-preinfo-call) ,(lookup-primref 2 '$source-violation)
+                                        (quote #f)
+                                        (quote ,maybe-src)
+                                        (quote #t)
+                                        (quote ,mesg)
+                                        (quote ,name)))
+                              ,x)))
+                        `(seq
+                          (if (ref #f ,valid-flag)
+                              (quote ,(void))
+                              (call ,(make-preinfo-call) ,(lookup-primref 2 '$unknown-undefined-violation)))
+                          ,x))]
+                   [else x]))
                 x))))
 
       ; wl = worklist
@@ -332,8 +339,8 @@
        (defer-or-not dl? `(foreign (,conv* ...) ,name ,e (,arg-type* ...) ,result-type))]
       [(fcallable (,conv* ...) ,[undefer : e dl?] (,arg-type* ...) ,result-type)
        (defer-or-not dl? `(fcallable (,conv* ...) ,e (,arg-type* ...) ,result-type))]
-      [(cte-optimization-loc ,box ,[undefer : e dl?])
-       (defer-or-not dl? `(cte-optimization-loc ,box ,e))]
+      [(cte-optimization-loc ,box ,[undefer : e dl?] ,exts)
+       (defer-or-not dl? `(cte-optimization-loc ,box ,e ,exts))]
       [(pariah) (values x #f)]
       [(profile ,src) (values x #f)]
       [(moi) (values x #f)]
@@ -551,8 +558,8 @@
        (defer-or-not dl? `(foreign (,conv* ...) ,name ,e (,arg-type* ...) ,result-type))]
       [(fcallable (,conv* ...) ,[cpvalid : e dl?] (,arg-type* ...) ,result-type)
        (defer-or-not dl? `(fcallable (,conv* ...) ,e (,arg-type* ...) ,result-type))]
-      [(cte-optimization-loc ,box ,[cpvalid : e dl?])
-       (defer-or-not dl? `(cte-optimization-loc ,box ,e))]
+      [(cte-optimization-loc ,box ,[cpvalid : e dl?] ,exts)
+       (defer-or-not dl? `(cte-optimization-loc ,box ,e ,exts))]
       [(pariah) (values x #f)]
       [(profile ,src) (values x #f)]
       [(moi) (values x #f)]
@@ -561,4 +568,7 @@
 
   (set! $cpvalid
     (lambda (x)
-      (if (= (optimize-level) 3) x (cpvalid x)))))
+      (if (or (= (optimize-level) 3)
+              (enable-unsafe-variable-reference))
+          x
+          (cpvalid x)))))

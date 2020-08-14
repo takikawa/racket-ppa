@@ -266,20 +266,26 @@
          (if (null? xr) x1 (append x1 (f (car xr) (cdr xr)))))])))
 
 (define-who append!
-  (rec append!
+  (let ()
+    (define (do-append! x1 x2)
+      (if (null? x1)
+          x2
+          (let f ([ls x1])
+            (if (null? (cdr ls))
+                (begin (set-cdr! ls x2) x1)
+                (f (cdr ls))))))
     (case-lambda
       [() '()]
       [(x1 x2)
        ($list-length x1 who)
-       (if (null? x1)
-           x2
-           (let f ([ls x1])
-             (if (null? (cdr ls))
-                 (begin (set-cdr! ls x2) x1)
-                 (f (cdr ls)))))]
+       (do-append! x1 x2)]
       [(x1 . xr)
        (let f ([x1 x1] [xr xr])
-         (if (null? xr) x1 (append! x1 (f (car xr) (cdr xr)))))])))
+         (if (null? xr)
+             x1
+             (begin
+               ($list-length x1 who) ; make sure all checks occur before first set-cdr!
+               (do-append! x1 (f (car xr) (cdr xr))))))])))
 
 (define-who reverse
   (lambda (ls)
@@ -786,3 +792,31 @@
   (set! enumerate
     (lambda (ls)
       ($iota (fx- ($list-length ls 'enumerate) 1) '()))))
+
+(define list-assuming-immutable?
+  ;; Use list bits to record discovered listness:
+  ;;   0 => unknown
+  ;;   1 => is a list
+  ;;   2 => not a list
+  ;; Record this information half-way to the point that the
+  ;; decision is made (i.e., a kind of path compression)
+  (lambda (v)
+    (or (null? v)
+        (and (pair? v)
+             (let loop ([fast (cdr v)] [slow v] [slow-step? #f])
+               (let ([return (lambda (bits)
+                               ($list-bits-set! slow bits)
+                               (fx= bits 1))])
+                 (cond
+                   [(null? fast) (return 1)]
+                   [(not (pair? fast)) (return 2)]
+                   [(eq? fast slow) (return 2)] ; cycle
+                   [else
+                    (let ([bits ($list-bits-ref fast)])
+                      (cond
+                        [(fx= bits 0)
+                         (if slow-step?
+                             (loop (cdr fast) (cdr slow) #f)
+                             (loop (cdr fast) slow #t))]
+                        [else
+                         (return bits)]))])))))))

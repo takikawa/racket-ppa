@@ -177,7 +177,7 @@
                                                 (retry-loop #f #f #f)))))))
                  (maybe-save-objects objs "objs")
 
-                 ;; Convert deltas into full objects withing `tmp`:
+                 ;; Convert deltas into full objects within `tmp`:
                  (rewrite-deltas objs tmp status)]))
              
              (maybe-save-objects obj-ids "all-objs")
@@ -397,7 +397,7 @@
   (values ref-commit want-commits))
 
 ;; ----------------------------------------
-;; A "pkt" is the basic unit of communiation in many parts
+;; A "pkt" is the basic unit of communication in many parts
 ;; of the git protocol. The first four bytes specify the
 ;; length of the package (including those bytes).
 
@@ -730,7 +730,7 @@
           [(#"120000")
            (define target (bytes->path (object->bytes tmp (this-object-location))))
            (when strict-links?
-             (check-unpack-path 'git-checkout target))
+             (check-unpack-path 'git-checkout target #:kind "link"))
            (make-file-or-directory-link target (build-path dest-dir fn))]
           [(#"160000")
            ;; submodule; just make a directory placeholder

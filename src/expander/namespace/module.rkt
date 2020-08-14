@@ -80,7 +80,7 @@
                 get-all-variables) ; for `module->indirect-exports`
   #:authentic)
 
-;; [*] Beware that tabels in `provides` may map non-interned symbols
+;; [*] Beware that tables in `provides` may map non-interned symbols
 ;;     to provided bindings, in case something like a lifted
 ;;     identifier was provided. Since lifting generates a locally
 ;;     deterministic unreadable symbol that is intended to be specific
@@ -205,7 +205,7 @@
     ;; Register this module's exports for use in resolving bulk
     ;; bindings, so that bulk bindings can be shared among other
     ;; modules when unmarshaling; we don't do this without
-    ;; `with-submodules?` to avoid loeaking submodules being
+    ;; `with-submodules?` to avoid leaking submodules being
     ;; expanded, but see also `bind-all-provides!`
     (register-bulk-provide! (namespace-bulk-binding-registry ns)
                             mod-name
@@ -223,7 +223,9 @@
 
     (define at-phase (hash-ref (namespace-module-instances ns) phase))
     (hash-set! at-phase mod-name (make-module-instance m-ns m))
-               
+
+    (set-module-instance-shifted-requires! prior-mi #f)
+
     (when visit?
       (namespace-module-visit! ns (namespace-mpi m-ns) phase))
     (when run?
@@ -233,24 +235,27 @@
   (when (module-cross-phase-persistent? prior-m)
     (raise-arguments-error 'module
                            "cannot redeclare cross-phase persistent module"
-                           "module name" mod-name))
+                           "module name" (module-name->error-string mod-name)))
   (when (and prior-mi
              (or (module-instance-attached? prior-mi)
                  (not (inspector-superior? (current-code-inspector)
                                            (namespace-inspector (module-instance-namespace prior-mi))))))
     (raise-arguments-error 'module
                            "current code inspector cannot redeclare module"
-                           "module name" mod-name)))
+                           "module name" (module-name->error-string mod-name))))
 
 (define (raise-unknown-module-error who mod-name)
   (raise-arguments-error who
                          "unknown module" 
-                         "module name" mod-name))
+                         "module name" (module-name->error-string mod-name)))
 
 (define (namespace->module-linklet-info ns name phase-level)
   (define m (namespace->module ns name))
   (and m
        ((module-phase-level-linklet-info-callback m) phase-level ns (module-inspector m))))
+
+(define (module-name->error-string mod-name)
+  (unquoted-printing-string (format "~a" mod-name)))
 
 ;; ----------------------------------------
 
@@ -284,6 +289,7 @@
                             [declaration-inspector (module-inspector m)]
                             [inspector (namespace-inspector existing-m-ns)]))
   (define mi (make-module-instance m-ns m))
+  (set-module-instance-attached?! mi #t)
   (cond
    [(module-cross-phase-persistent? m)
     (small-hash-set! (namespace-phase-to-namespace m-ns) 0 m-ns)
@@ -369,7 +375,8 @@
 (define (namespace-module-instantiate! ns mpi instance-phase #:run-phase [run-phase (namespace-phase ns)]
                                        #:skip-run? [skip-run? #f]
                                        #:otherwise-available? [otherwise-available? #t]
-                                       #:seen [seen #hasheq()])
+                                       #:seen [seen #hasheq()]
+                                       #:seen-list [seen-list null])
   (unless (module-path-index? mpi)
     (error "not a module path index:" mpi))
   (define name (module-path-index-resolve mpi #t))
@@ -382,7 +389,8 @@
     (run-module-instance! mi ns #:run-phase run-phase
                           #:skip-run? skip-run?
                           #:otherwise-available? otherwise-available?
-                          #:seen seen))
+                          #:seen seen
+                          #:seen-list seen-list))
   ;; If the module is cross-phase persistent, make sure it's instantiated
   ;; at phase 0 and registered in `ns` as phaseless; otherwise
   (cond
@@ -408,7 +416,8 @@
 (define (run-module-instance! mi ns #:run-phase run-phase
                               #:skip-run? skip-run? 
                               #:otherwise-available? otherwise-available?
-                              #:seen [seen #hasheq()])
+                              #:seen [seen #hasheq()]
+                              #:seen-list [seen-list null])
   (performance-region
    ['eval 'requires]
    ;; Nothing to do if we've run this phase already and made the
@@ -429,8 +438,12 @@
      (define bulk-binding-registry (namespace-bulk-binding-registry m-ns))
      
      (when (hash-ref seen mi #f)
-       (error 'require "import cycle detected during module instantiation"))
-     
+       (error 'require
+              (apply string-append
+                     "import cycle detected during module instantiation\n"
+                     "  dependency chain:"
+                     (module-instances->indented-module-names mi seen-list))))
+
      ;; If we haven't shifted required mpis already, do that
      (unless (module-instance-shifted-requires mi)
        (set-module-instance-shifted-requires!
@@ -450,7 +463,8 @@
                                         #:run-phase run-phase
                                         #:skip-run? skip-run?
                                         #:otherwise-available? otherwise-available?
-                                        #:seen (hash-set seen mi #t))))
+                                        #:seen (hash-set seen mi #t)
+                                        #:seen-list (cons mi seen-list))))
      
      ;; Run or make available phases of the module body:
      (unless (label-phase? instance-phase)
@@ -558,3 +572,19 @@
                             'provided))))))
   (set-module-access! m access)
   access)
+
+;; ----------------------------------------
+
+(define (module-instances->indented-module-names mi seen-list)
+  (let ([mi->name (lambda (mi)
+                    (format "\n   ~a" (module-path-index-resolve
+                                       (namespace-mpi (module-instance-namespace mi)))))])
+    (cons
+     (mi->name mi)
+     (let loop ([seen-list seen-list])
+       (cond
+         [(null? seen-list) '()]
+         [(eq? mi (car seen-list))
+          (list (mi->name mi))]
+         [else
+          (cons (mi->name (car seen-list)) (loop (cdr seen-list)))])))))

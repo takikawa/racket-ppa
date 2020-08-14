@@ -70,7 +70,6 @@
 
     (define/override (setup-keymap)
       (new stepper-keymap%
-           (editor (get-text))
            (config (send/i macro-stepper widget<%> get-config))
            (controller controller)
            (macro-stepper macro-stepper)))

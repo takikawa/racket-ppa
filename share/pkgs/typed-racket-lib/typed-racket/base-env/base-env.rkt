@@ -15,8 +15,10 @@
   (only-in racket/private/pre-base new-apply-proc)
   compatibility/mlist
   (only-in file/convertible prop:convertible)
-  (only-in mzlib/pconvert-prop prop:print-converter)
+  (only-in mzlib/pconvert-prop prop:print-converter prop:print-convert-constructor-name)
   racket/logging
+  racket/symbol
+  racket/keyword
   racket/private/stx
   (only-in mzscheme make-namespace)
   (only-in racket/match/runtime match:error matchable? match-equality-test syntax-srclocs))
@@ -51,17 +53,11 @@
           make-ListDots))
 
 ;; Racket Reference
-;; Section 4.1
-[boolean? (make-pred-ty B)]
-[not (make-pred-ty (-val #f))]
+;; Section 4.1 (Equality)
 [equal? (-> Univ Univ B)]
 [eqv? (-> Univ Univ B)]
 [eq? (-> Univ Univ B)]
-
 [equal?/recur (-> Univ Univ (-> Univ Univ Univ) B)]
-[immutable? (asym-pred Univ B (-PS (-is-type 0 (Un -Bytes -BoxTop -String (-Immutable-HT Univ Univ) (-ivec Univ)))
-                                   (-not-type 0 (Un (-Immutable-HT Univ Univ) (-ivec Univ)))))]
-
 
 ;; we can't use -Self for the second argument in the first fucntion, because
 ;; -Self denotes the exact struct instance from which property values are
@@ -69,6 +65,13 @@
 [prop:equal+hash (-struct-property (-lst* (-> -Self -Imp (-> Univ Univ B) Univ)
                                           (-> -Self (-> Univ -Int) -Int)
                                           (-> -Self (-> Univ -Int) -Int)))]
+
+;; Section 4.2 (Booleans)
+[boolean? (make-pred-ty B)]
+[not (make-pred-ty (-val #f))]
+
+[immutable? (asym-pred Univ B (-PS (-is-type 0 (Un -Bytes -BoxTop -String (-Immutable-HT Univ Univ) (-ivec Univ)))
+                                   (-not-type 0 (Un (-Immutable-HT Univ Univ) (-ivec Univ)))))]
 
 ;; Section 4.1.1 (racket/bool)
 [true (-val #t)]
@@ -78,10 +81,12 @@
 [false? (make-pred-ty (-val #f))]
 [xor (-> Univ Univ Univ)]
 
-;; Section 4.2 (Numbers)
+;; Section 4.3 (Numbers)
 ;; These are mostly defined in base-env-numeric.rkt
 
-;; Section 4.2.2.7 (Random Numbers)
+[single-flonum-available? (-> B)]
+
+;; Section 4.3.2.7 (Random Numbers)
 [random
   (cl->* (->opt -Int -Int [-Pseudo-Random-Generator] -NonNegFixnum)
          (->opt -Int [-Pseudo-Random-Generator] -NonNegFixnum)
@@ -98,7 +103,7 @@
 [vector->pseudo-random-generator!
  (-> -Pseudo-Random-Generator (make-HeterogeneousVector (list -PosInt -PosInt -PosInt -PosInt -PosInt -PosInt)) -Void)]
 
-;; Section 4.2.2.8 (Number-String Conversions)
+;; Section 4.3.2.8 (Number-String Conversions)
 [number->string (->opt N [N] -String)]
 [string->number (->opt -String [N] (Un (-val #f) N))]
 
@@ -108,11 +113,11 @@
 
 [order-of-magnitude (cl-> [(-PosInt) -Nat] [(-PosReal) -Int])]
 
-;; Section 4.2.5.3 (ExtFlonum-Bytes Conversions)
+;; Section 4.3.5.3 (ExtFlonum-Bytes Conversions)
 [floating-point-bytes->extfl (->opt -Bytes [Univ -Nat -Nat] -ExtFlonum)]
 [extfl->floating-point-bytes (->opt -ExtFlonum [Univ -Bytes -Nat] -Bytes)]
 
-;; Section 4.3 (Strings)
+;; Section 4.4 (Strings)
 [string? (make-pred-ty -String)]
 ;make-string (in Index)
 [string (->* '() -Char -String)]
@@ -126,6 +131,7 @@
 ;string-copy! (in Index)
 [string-fill! (-> -String -Char -Void)]
 [string-append (->* null -String -String)]
+[string-append-immutable (->* null -String -String)]
 
 [string->list (-String . -> . (-lst -Char))]
 [list->string ((-lst -Char) . -> . -String)]
@@ -164,7 +170,7 @@
 [string-locale-upcase (-> -String -String)]
 [string-locale-downcase (-> -String -String)]
 
-;; Section 4.3.5 (racket/string)
+;; Section 4.4.5 (racket/string)
 [string-append*
  (cl->* (-> (-lst -String) -String)
         (-> -String (-lst -String) -String))]
@@ -199,7 +205,7 @@
 [string-prefix? (-> -String -String -Boolean)]
 [string-suffix? (-> -String -String -Boolean)]
 
-;; Section 4.3.6 (racket/format)
+;; Section 4.4.6 (racket/format)
 [~a (->optkey []
               #:rest Univ
               #:separator -String #f
@@ -307,7 +313,7 @@
                #:right-pad-string -String #f
                -String)]
 
-;; Section 4.4 (Byte Strings)
+;; Section 4.5 (Byte Strings)
 [bytes (->* (list) -Integer -Bytes)]
 [bytes? (make-pred-ty -Bytes)]
 [make-bytes (cl-> [(-Integer -Integer) -Bytes]
@@ -378,7 +384,7 @@
 [bytes-append* ((-lst -Bytes) . -> . -Bytes)]
 [bytes-join ((-lst -Bytes) -Bytes . -> . -Bytes)]
 
-;; Section 4.5 (Characters)
+;; Section 4.6 (Characters)
 [char? (make-pred-ty -Char)]
 [char=? (->* (list -Char -Char) -Char B)]
 [char<=? (->* (list -Char -Char) -Char B)]
@@ -416,7 +422,7 @@
 [integer->char (-> -Integer -Char)]
 [char-utf-8-length (-> -Char (apply Un (map -val '(1 2 3 4 5 6))))]
 
-;; Section 4.6 (Symbols)
+;; Section 4.7 (Symbols)
 [symbol? (make-pred-ty Sym)]
 [symbol-interned? (-> Sym B)]
 [symbol-unreadable? (-> Sym B)]
@@ -426,8 +432,10 @@
 [string->unreadable-symbol (-String . -> . Sym)]
 [gensym (->opt [(Un Sym -String)] Sym)]
 [symbol<? (->* (list -Symbol -Symbol) -Symbol -Boolean)]
+;; Section 4.7.1 (racket/symbol)
+[symbol->immutable-string (Sym . -> . -String)]
 
-;; Section 4.7 (Regular Expressions)
+;; Section 4.8 (Regular Expressions)
 [regexp? (make-pred-ty -Regexp)]
 [pregexp? (make-pred-ty -PRegexp)]
 [byte-regexp? (make-pred-ty -Byte-Regexp)]
@@ -485,13 +493,15 @@
   [-> -String -String]
   [-> -Bytes -Bytes])]
 
-;; Section 4.8 (Keywords)
+;; Section 4.9 (Keywords)
 [keyword? (make-pred-ty -Keyword)]
 [string->keyword (-String . -> . -Keyword)]
 [keyword->string (-Keyword . -> . -String)]
 [keyword<? (->* (list -Keyword -Keyword) -Keyword B)]
+;; Section 4.9.1 (racket/keyword)
+[keyword->immutable-string (-Keyword . -> . -String)]
 
-;; Section 4.9 (Pairs and Lists)
+;; Section 4.10 (Pairs and Lists)
 [car   (-poly (a b)
               (cl->*
                (->acc (list (-pair a b)) a (list -car))
@@ -675,6 +685,10 @@
                         . -> . (-opt (-pair a b)))))]
 [assf  (-poly (a b) ((a . -> . Univ) (-lst (-pair a b))
                      . -> . (-opt (-pair a b))))]
+[index-of (-poly (a b)
+                 (cl->* ((-lst a) Univ . -> . (-opt -Index))
+                        ((-lst a) b (-> a b Univ)
+                           . -> . (-opt -Index))))]
 
 [list? (make-pred-ty (-lst Univ))]
 [list (-poly (a) (->* '() a (-lst a)))]
@@ -726,7 +740,7 @@
                           . ->key . (-lst a))))]
 |#
 
-;; Section 4.9.7 (racket/list)
+;; Section 4.10.7 (racket/list)
 [filter-map (-polydots (c a b)
                        ((list
                          ((list a) (b b) . ->... . (-opt c))
@@ -817,10 +831,10 @@
 [remf (-poly (a) (-> (-> a Univ) (-lst a) (-lst a)))]
 [remf* (-poly (a) (-> (-> a Univ) (-lst a) (-lst a)))]
 
-;; Section 4.9.8 (Immutable Cyclic Data)
+;; Section 4.10.8 (Immutable Cyclic Data)
 [make-reader-graph (-> Univ Univ)]
 
-;; Section 4.10 (Mutable Pairs)
+;; Section 4.11 (Mutable Pairs)
 [mcons (-poly (a b) (-> a b (-mpair a b)))]
 [mcar (-poly (a b)
              (cl->* (-> (-mpair a b) a)
@@ -852,7 +866,7 @@
 [mreverse! (-poly (a) (-> (-mlst a) (-mlst a)))]
 [mappend (-poly (a) (->* (list) (-mlst a) (-mlst a)))]
 
-;; Section 4.11 (Vectors)
+;; Section 4.12 (Vectors)
 [vector? (make-pred-ty -VectorTop)]
 [vector->list (-poly (a) (cl->* (-> (-vec a) (-lst a))
                                 (-> -VectorTop (-lst Univ))))]
@@ -871,7 +885,7 @@
 [vector-member (-poly (a) (Univ (-vec a) . -> . (-opt -Index)))]
 ;; [vector->values no good type here]
 
-;; Section 4.11.1 (racket/vector)
+;; Section 4.12.1 (racket/vector)
 [vector-count (-polydots (a b)
                          ((list
                            ((list a) (b b) . ->... . Univ)
@@ -907,7 +921,7 @@
 [vector-split-at-right
  (-poly (a) ((-vec a) -Integer . -> . (-values (list (-mvec a) (-mvec a)))))]
 
-;; Section 4.12 (Boxes)
+;; Section 4.13 (Boxes)
 [box (-poly (a) (a . -> . (-box a)))]
 [box-immutable (-poly (a) (a . -> . (-box a)))]
 [unbox (-poly (a) (cl->*
@@ -926,7 +940,7 @@
 [unsafe-box*-cas! (-poly (a) ((-box a) a a . -> . -Boolean))]
 [box? (make-pred-ty -BoxTop)]
 
-;; Section 4.13 (Hash Tables)
+;; Section 4.14 (Hash Tables)
 [hash? (make-pred-ty -HashTableTop)]
 [hash-eq? (-> -HashTableTop B)]
 [hash-eqv? (-> -HashTableTop B)]
@@ -980,9 +994,13 @@
                                     [(-HashTableTop) -HashTableTop]))]
 
 [hash-map (-poly (a b c) (cl-> [((-HT a b) (a b . -> . c)) (-lst c)]
-                               [(-HashTableTop (Univ Univ . -> . c)) (-lst c)]))]
+                               [((-HT a b) (a b . -> . c) Univ) (-lst c)]
+                               [(-HashTableTop (Univ Univ . -> . c)) (-lst c)]
+                               [(-HashTableTop (Univ Univ . -> . c) Univ) (-lst c)]))]
 [hash-for-each (-poly (a b c) (cl-> [((-HT a b) (-> a b c)) -Void]
-                                    [(-HashTableTop (-> Univ Univ c)) -Void]))]
+                                    [((-HT a b) (-> a b c) Univ) -Void]
+                                    [(-HashTableTop (-> Univ Univ c)) -Void]
+                                    [(-HashTableTop (-> Univ Univ c) Univ) -Void]))]
 [hash-count (-> -HashTableTop -Index)]
 [hash-empty? (-> -HashTableTop -Boolean)]
 [hash-keys (-poly (a b) (cl-> [((-HT a b)) (-lst a)]
@@ -1066,7 +1084,7 @@
 [make-immutable-custom-hash (->opt (-> Univ Univ Univ) (-> Univ -Nat) [(-> Univ -Nat)] Univ)]
 [make-weak-custom-hash (->opt (-> Univ Univ Univ) (-> Univ -Nat) [(-> Univ -Nat)] Univ)]
 
-;; Section 4.14 (Sequences and Streams)
+;; Section 4.15 (Sequences and Streams)
 [sequence? (make-pred-ty -SequenceTop)]
 [in-sequences
  (-polydots (a) (->* '() (-seq-dots '() a 'a) (-seq-dots '() a 'a)))]
@@ -1122,7 +1140,7 @@
 ; The untyped version works with multi-valued sequences, but we can't express that:
 [sequence-add-between (-poly (a) ((-seq a) a . -> . (-seq a)))]
 
-;; Section 4.16 (Sets)
+;; Section 4.17 (Sets)
 [set (-poly (e) (->* (list) e (-set e)))]
 [seteqv (-poly (e) (->* (list) e (-set e)))]
 [seteq (-poly (e) (->* (list) e (-set e)))]
@@ -1156,7 +1174,7 @@
 [list->seteqv (-poly (e) (-> (-lst e) (-set e)))]
 [set->list (-poly (e) (-> (-set e) (-lst e)))]
 
-;; Section 4.17 (Procedures)
+;; Section 4.18 (Procedures)
 [procedure? (make-pred-ty top-func)]
 [compose (-poly (a b c) (-> (-> b c) (-> a b) (-> a c)))]
 [compose1 (-poly (a b c) (-> (-> b c) (-> a b) (-> a c)))]
@@ -1205,7 +1223,7 @@
 (primitive? (-> Univ B))
 (primitive-closure? (-> Univ B))
 
-;; Section 4.18 (Void and Undefined)
+;; Sections 4.19 & 4.20 (Void and Undefined)
 [void (->* '() Univ -Void)]
 [void? (make-pred-ty -Void)]
 
@@ -1237,6 +1255,7 @@
 
 [struct-type-property? (make-pred-ty (-struct-property -Bottom))]
 [struct-type-property-accessor-procedure? (-> Univ B)]
+[struct-type-property-predicate-procedure? (->opt Univ [(-opt (-struct-property -Bottom))] B)]
 
 ;; Section 5.6 (Structure Utilities)
 [struct->vector (Univ . -> . (-vec Univ))]
@@ -1282,7 +1301,8 @@
 [values (-polydots (a b) (cl->*
                            (-> (-values null))
                            (->acc (list a) a null)
-                           ((list a) (b b) . ->... . (make-ValuesDots (list (-result a)) b 'b))))]
+                           ((list a) (b b) . ->... . (make-ValuesDots (list (-result a)) b 'b))
+                           (->* (list) Univ ManyUniv)))]
 [call-with-values
   (-polydots (b a)
     (cl->*
@@ -1305,6 +1325,10 @@
 [raise-mismatch-error (-> Sym -String Univ (Un))]
 ;raise-arity-error
 [raise-syntax-error (->opt (-opt Sym) -String [Univ Univ (-lst (-Syntax Univ))] (Un))]
+
+[unquoted-printing-string? (make-pred-ty -Unquoted-Printing-String)]
+[unquoted-printing-string (-> -String -Unquoted-Printing-String)]
+[unquoted-printing-string-value (-> -Unquoted-Printing-String -String)]
 
 [call-with-exception-handler (-poly (a) (-> (-> Univ a) (-> a) a))]
 [uncaught-exception-handler (-Param (-> Univ ManyUniv) (-> Univ ManyUniv))]
@@ -2802,6 +2826,8 @@
                 ((Un -TCP-Listener -Port) (-val #t) . -> . (-values (list -String -Index -String -Index))))]
 
 [tcp-port? (asym-pred Univ B (-PS (-is-type 0 (Un -Input-Port -Output-Port)) -tt))]
+[port-number? (Univ . -> . B)]
+[listen-port-number? (Univ . -> . B)]
 
 ;; Section 15.3.2 (racket/udp)
 [udp-open-socket (->opt [(-opt -String) (-opt -Int)] -UDP-Socket)]
@@ -3089,7 +3115,7 @@
 [version (-> -String)]
 [banner (-> -String)]
 
-[current-command-line-arguments (-Param (-vec -String) (-mvec -String))]
+[current-command-line-arguments (-Param (-vec -String) (-vec -String))]
 [current-thread-initial-stack-size (-Param -PosInt -PosInt)]
 [vector-set-performance-stats! (cl->* [-> (-vec -Int) -Void]
                                       [-> (-vec -Int) -False -Void]
@@ -3167,6 +3193,8 @@
 [unsafe-struct*-ref top-func]
 [unsafe-struct-set! top-func]
 [unsafe-struct*-set! top-func]
+[unsafe-fxvector-length (-FxVector . -> . -Index)]
+[unsafe-fxvector-ref (-FxVector -Fixnum . -> . -Fixnum)]
 
 ;; Section 17.4 (Unsafe Undefined)
 [check-not-unsafe-undefined (-poly (a) (-> a -Symbol a))]
@@ -3487,7 +3515,7 @@
         (?N (-opt -Integer))
         (ind-pair (-pair -Index -Index))
         (sel (-> (-lst (-opt ind-pair)) (-opt ind-pair)))
-        (output (-opt (-pair ind-pair (-lst (-opt ind-pair)))))
+        (output (Un (-lst ind-pair) (-lst (-lst (-opt ind-pair)))))
         (-Input (Un -String -Input-Port -Bytes -Path)))
    (->optkey -Pattern -Input (N ?N -Bytes) #:match-select sel #f output)))
 
@@ -3497,3 +3525,4 @@
 
 ;; MzLib: Legacy Libraries
 [prop:print-converter (-struct-property (-> -Self (-> Univ Univ) Univ))]
+[prop:print-convert-constructor-name (-struct-property -Symbol)]

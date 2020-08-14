@@ -21,7 +21,6 @@
            #:with (expand* ...) (list (quasisyntax/loc #'c
                                         ((v.ann-name ...) seq-expr))
                                       #'#:when #''#t))
-  ;; Note: #:break and #:final clauses don't ever typecheck
   (pattern (~seq (~and kw (~or #:when #:unless #:break #:final)) guard:expr)
            #:with (expand ...) (list #'kw #'guard)
            #:with (expand* ...) #'(expand ...)))
@@ -36,7 +35,11 @@
   #:attributes (ann-name init ty)
   (pattern (:optionally-annotated-name init:expr)))
 
+(define-splicing-syntax-class result-clause
+  #:description "result clause"
+  (pattern (~seq #:result result-expr:expr)))
+
 (define-syntax-class accumulator-bindings
   #:description "accumumulator bindings"
-  #:attributes ((ann-name 1) (init 1) (ty 1))
-  (pattern (:accumulator-binding ...)))
+  #:attributes ((ann-name 1) (init 1) (ty 1) result)
+  (pattern (:accumulator-binding ... (~optional result:result-clause))))

@@ -119,6 +119,7 @@
 (namespace-require ''nanopass ns)
 
 (namespace-require scheme-lang-mod ns)
+
 (reset-toplevels '(run-cp0
                    errorf
                    $oops
@@ -174,6 +175,8 @@
        [`(eval-when ,_ (define ,m . ,rhs))
         (when (define-for-syntax? m)
           (orig-eval `(begin-for-syntax (define ,m . ,rhs))))]
+       [`(define-flags . ,_)
+        (orig-eval e)]
        [_ (void)])))
 
   (set-current-expand-set-callback!
@@ -190,10 +193,15 @@
      (call-with-expressions
       (build-path scheme-dir "s/syntax.ss")
       (lambda (e)
-        (when (and (pair? e)
-                   (eq? 'define-syntax (car e)))
-          ((current-expand) `(define-syntax ,(cadr e)
-                               ',(orig-eval (caddr e)))))))
+        (let loop ([e e])
+          (cond
+            [(and (pair? e)
+                  (eq? 'define-syntax (car e)))
+             ((current-expand) `(define-syntax ,(cadr e)
+                                  ',(orig-eval (caddr e))))]
+            [(and (pair? e)
+                  (eq? 'begin (car e)))
+             (for-each loop  (cdr e))]))))
      (status "Install evaluator")
      (current-eval
       (let ([e (current-eval)])
@@ -278,6 +286,8 @@
        (match e
          [`(let () ,es ...)
           (for-each loop es)]
+         [`(begin ,es ...)
+          (for-each loop es)]
          [`(define-syntax ,id . ,_)
           (when (want-syntax? id)
             (eval e))]
@@ -294,6 +304,8 @@
        (match e
          [`(let () ,es ...)
           (for-each loop es)]
+         [`(begin ,es ...)
+          (for-each loop es)]
          [`(set-who! $fasl-strip-options . ,_)
           (eval e)]
          [`(set-who! $make-fasl-strip-options . ,_)
@@ -306,6 +318,10 @@
    (lambda (e)
      (let loop ([e e])
        (match e
+         [`(let () ,es ...)
+          (for-each loop es)]
+         [`(begin ,es ...)
+          (for-each loop es)]
          [`(define $format-scheme-version . ,_)
           (eval e)]
          [`(define ($compiled-file-header? . ,_) . ,_)
@@ -317,14 +333,16 @@
    (build-path scheme-dir "s/front.ss")
    (lambda (e)
      ;; Skip `package-stubs`, which would undo "syntax.ss" definitions
-     (match e
-       [`(package-stubs . ,_) (void)]
-       [`(define-who make-parameter . ,_) (void)]
-       [_ (eval e)])))
+     (let loop ([e e])
+       (match e
+         [`(package-stubs . ,_) (void)]
+         [`(define-who make-parameter . ,_) (void)]
+         [`(begin . ,es) (for-each loop es)]
+         [_ (eval e)]))))
   ((orig-eval 'current-eval) eval)
   ((orig-eval 'current-expand) (current-expand))
   ((orig-eval 'enable-type-recovery) #f)
-
+  
   (status "Define $filter-foreign-type")
   (eval `(define $filter-foreign-type
            (lambda (ty)
@@ -338,6 +356,16 @@
   (eval `(mkscheme.h ,(path->string (build-path out-subdir "scheme.h")) ,target-machine))
   (eval `(mkequates.h ,(path->string (build-path out-subdir "equates.h"))))
   (plumber-flush-all (current-plumber))
+
+  (let ([mkgc.ss (build-path scheme-dir "s/mkgc.ss")])
+    (when (file-exists? mkgc.ss)
+      (status "Load mkgc")
+      (load-ss (build-path scheme-dir "s/mkgc.ss"))
+      (status "Generate GC")
+      (eval `(mkgc-ocd.inc ,(path->string (build-path out-subdir "gc-ocd.inc"))))
+      (eval `(mkgc-oce.inc ,(path->string (build-path out-subdir "gc-oce.inc"))))
+      (eval `(mkvfasl.inc ,(path->string (build-path out-subdir "vfasl.inc"))))
+      (plumber-flush-all (current-plumber))))
 
   (when (getenv "MAKE_BOOT_FOR_CROSS")
     ;; Working bootfiles are not needed for a cross build (only the
@@ -363,6 +391,8 @@
                       "back.ss"))])
     (status (format "Load ~a" s))
     (load-ss (build-path scheme-dir "s" s)))
+
+  ((orig-eval 'fasl-compressed) #f)
 
   (let ([failed? #f])
     (for ([src (append petite-sources scheme-sources)])

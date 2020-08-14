@@ -79,6 +79,71 @@ static char *get_self_path(char *exec_file)
   }
 }
 # undef USE_GENERIC_GET_SELF_PATH
+
+static long find_rktboot_section(char *me)
+{
+  const struct mach_header *mh;
+  const struct load_command *lc;
+  int i;
+
+  mh = _dyld_get_image_header(0);
+
+  lc = (void *)((char *)mh + ((mh->magic == 0xfeedfacf) ? sizeof(struct mach_header_64) : sizeof(struct mach_header)));
+
+  for (i = 0; i < mh->ncmds; i++) {
+    if (lc->cmd == LC_SEGMENT) {
+      const struct segment_command *sc = (struct segment_command *)lc;
+      if (!strcmp(sc->segname, "__RKTBOOT"))
+        return sc->fileoff;
+    } else if (lc->cmd == LC_SEGMENT_64) {
+      const struct segment_command_64 *sc = (struct segment_command_64 *)lc;
+      if (!strcmp(sc->segname, "__RKTBOOT"))
+        return sc->fileoff;
+    }
+    lc = (void *)((char *)lc + lc->cmdsize);
+  }
+
+  return 0;
+}
+#endif
+
+#if defined(OS_X) && !defined(RACKET_XONX)
+
+# include <mach-o/dyld.h>
+# define RACKET_USE_FRAMEWORK 1
+
+static const char *get_framework_path() {
+  int i, c, len;
+  const char *s;
+  
+  c = _dyld_image_count();
+  for (i = 0; i < c; i++) {
+    s = _dyld_get_image_name(i);
+    len = strlen(s);
+    if ((len > 7) && !strcmp("/Racket", s + len - 7)) {
+      char *s2;
+      s2 = strdup(s);
+      strcpy(s2 + len - 6, "boot");
+      return s2;
+    }
+  }
+
+  return "???";
+}
+
+static char *path_append(const char *p1, char *p2) {
+  int l1, l2;
+  char *s;
+  l1 = strlen(p1);
+  l2 = strlen(p2);
+  s = malloc(l1 + l2 + 2);
+  memcpy(s, p1, l1);
+  s[l1] = '/';
+  memcpy(s + l1 + 1, p2, l2);
+  s[l1+l2+1] = 0;
+  return s;
+}
+
 #endif
 
 #if defined(__linux__)
@@ -211,7 +276,7 @@ static int scheme_utf8_encode(unsigned int *path, int zero_offset, int len,
   return WideCharToMultiByte(CP_UTF8, 0, (wchar_t *)path, len, dest, dest_len, NULL, NULL);
 }
 
-# include "../start/parse_cmdl.inc"
+# include "../start/cmdl_to_argv.inc"
 
 # undef USE_GENERIC_GET_SELF_PATH
 #endif
@@ -349,8 +414,13 @@ static int bytes_main(int argc, char **argv,
 		      /* for Windows and X11 GUI modes */
 		      int wm_is_gracket_or_x11_arg_count, char *gracket_guid_or_x11_args)
 {
-  char *boot_exe, *exec_file = argv[0], *run_file = NULL;
-  int pos1, pos2, pos3;
+  char *boot_exe;
+  char *exec_file = argv[0], *run_file = NULL;
+  char *boot1_path, *boot2_path, *boot3_path;
+  int boot1_offset, boot2_offset, boot3_offset;
+#ifdef OS_X
+  int boot_images_in_exe = 1;
+#endif
   long boot_offset;
   long segment_offset;
 #ifdef WIN32
@@ -365,6 +435,16 @@ static int bytes_main(int argc, char **argv,
     argc--;
     argv++;
   }
+
+  extract_built_in_arguments(&exec_file, &run_file, &argc, &argv);
+  if (!run_file)
+    run_file = exec_file;
+
+  segment_offset = get_segment_offset();
+
+  memcpy(&boot1_offset, boot_file_data + boot_file_offset, sizeof(boot1_offset));
+  memcpy(&boot2_offset, boot_file_data + boot_file_offset + 4, sizeof(boot2_offset));
+  memcpy(&boot3_offset, boot_file_data + boot_file_offset + 8, sizeof(boot3_offset));
 
 #ifdef WIN32
   parse_embedded_dlls();
@@ -386,36 +466,70 @@ static int bytes_main(int argc, char **argv,
   boot_exe = get_self_path(exec_file);
 #endif
 
-  extract_built_in_arguments(&exec_file, &run_file, &argc, &argv);
-  if (!run_file)
-    run_file = exec_file;
-
-  segment_offset = get_segment_offset();
-
-  memcpy(&pos1, boot_file_data + boot_file_offset, sizeof(pos1));
-  memcpy(&pos2, boot_file_data + boot_file_offset + 4, sizeof(pos2));
-  memcpy(&pos3, boot_file_data + boot_file_offset + 8, sizeof(pos2));
-
 #ifdef ELF_FIND_BOOT_SECTION
   boot_offset = find_boot_section(boot_exe);
+#elif defined(OS_X)
+  boot_offset = find_rktboot_section(boot_exe);
+  if (!boot_offset) boot_images_in_exe = 0;
 #elif WIN32
   boot_offset = find_resource_offset(dll_path, 259, boot_rsrc_offset);
 #else
   boot_offset = 0;
 #endif
 
-  pos1 += boot_offset;
-  pos2 += boot_offset;
-  pos3 += boot_offset;
+  boot1_offset += boot_offset;
+  boot2_offset += boot_offset;
+  boot3_offset += boot_offset;
 
-  racket_boot(argc, argv, exec_file, run_file,
-	      boot_exe, segment_offset,
-              extract_coldir(), extract_configdir(), extract_dlldir(),
-              pos1, pos2, pos3,
-              CS_COMPILED_SUBDIR, RACKET_IS_GUI,
-	      wm_is_gracket_or_x11_arg_count, gracket_guid_or_x11_args,
-	      embedded_dll_open, scheme_dll_find_object, embedded_dll_close);
-  
+  boot1_path = boot2_path = boot3_path = boot_exe;
+
+#if defined(OS_X) && !defined(RACKET_XONX)
+  if (!boot_images_in_exe) {
+    const char *fw_path = get_framework_path();
+    boot1_path = path_append(fw_path, "petite.boot");
+    boot2_path = path_append(fw_path, "scheme.boot");
+    boot3_path = path_append(fw_path, "racket.boot");
+    boot1_offset = boot2_offset = boot3_offset = 0;
+  }
+#endif
+
+  {
+    racket_boot_arguments_t ba;
+
+    memset(&ba, 0, sizeof(ba));
+
+    ba.boot1_path = boot1_path;
+    ba.boot1_offset = boot1_offset;
+    ba.boot2_path = boot2_path;
+    ba.boot2_offset = boot2_offset;
+    ba.boot3_path = boot3_path;
+    ba.boot3_offset = boot3_offset;
+                
+    ba.argc = argc;
+    ba.argv = argv;
+    ba.exec_file = exec_file;
+    ba.run_file = run_file;
+    ba.collects_dir = extract_coldir();
+    ba.config_dir = extract_configdir();
+    ba.dll_dir = extract_dlldir();
+
+    ba.cs_compiled_subdir = CS_COMPILED_SUBDIR;
+
+    ba.segment_offset = segment_offset;
+
+    ba.dll_open = embedded_dll_open;
+    ba.dll_find_object = scheme_dll_find_object;
+    ba.dll_close = embedded_dll_close;
+
+    ba.exit_after = 1;
+
+    ba.is_gui = RACKET_IS_GUI;
+    ba.wm_is_gracket_or_x11_arg_count = wm_is_gracket_or_x11_arg_count;
+    ba.gracket_guid_or_x11_args = gracket_guid_or_x11_args;
+
+    racket_boot(&ba);
+  }
+
   return 0;
 }
 

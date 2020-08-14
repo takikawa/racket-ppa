@@ -369,6 +369,14 @@
             (y))))
   (error? (apply zero? 0))
   (error? (if (apply eof-object 1 2) 3 4))
+
+  (equivalent-expansion?
+   (expand/optimize '(lambda (t) (#3%$value (if t 1 (values 3 3 3))) #t))
+   (if (eqv? (optimize-level) 3)
+       '(lambda (x) #t)
+       '(lambda (x)
+          (#3%$value (if x 1 (#2%values 3 3 3)))
+          #t)))
 )
 
 (cp0-mat cp0-mrvs
@@ -910,7 +918,7 @@
     'a)
  ; verify optimization of or pattern
   (equivalent-expansion?
-    (parameterize ([#%$suppress-primitive-inlining #f] [run-cp0 (lambda (cp0 x) (cp0 x))] [optimize-level 2])
+    (parameterize ([#%$suppress-primitive-inlining #f] [run-cp0 (lambda (cp0 x) (cp0 x))] [optimize-level 2] [compile-profile #f])
       (expand/optimize
         '(lambda (x y) (if (not (or (fx< x y) (fx> y x))) x y))))
     '(lambda (x.0 y.1)
@@ -918,7 +926,7 @@
            y.1
            x.0)))
   (equivalent-expansion?
-    (parameterize ([#%$suppress-primitive-inlining #f] [run-cp0 (lambda (cp0 x) (cp0 x))] [optimize-level 2])
+    (parameterize ([#%$suppress-primitive-inlining #f] [run-cp0 (lambda (cp0 x) (cp0 x))] [optimize-level 2] [compile-profile #f])
       (expand/optimize
         '(lambda (x y) (if (or (fx< x y) (fx> y x)) x y))))
     '(lambda (x y) (if (if (#2%fx< x y) #t (#3%fx> y x)) x y)))
@@ -1232,8 +1240,8 @@
            (fl+) (fl+ 3.0) (fl+ 3.0 4.0) (fl+ x) (fl+ x 0.0) (fl+ x -0.0) (fl+ 0.0 x) (fl+ -0.0 x) (fl+ x 3.0)
            (fl+ x 3.0 4.0) (fl+ 3.0 x 4.0) (fl+ 3.0 x -3.0) (fl+ (truncate -.5) x (/ -inf.0)) (fl+ 3.0 x 4.0 y 5.0)
            (fl+ 3.0 x +nan.0 y 5.0))))
-    '(#3%list 0.0 3.0 7.0 x (#3%fl+ 0.0 x) x (#3%fl+ 0.0 x) x (#3%fl+ 3.0 x)
-       (#3%fl+ 7.0 x) (#3%fl+ 7.0 x) (#3%fl+ 0.0 x) x (#3%fl+ 12.0 x y)
+    '(#3%list 0.0 3.0 7.0 (#3%fl+ x) (#3%fl+ 0.0 x) (#3%fl+ x) (#3%fl+ 0.0 x) (#3%fl+ x) (#3%fl+ 3.0 x)
+       (#3%fl+ 7.0 x) (#3%fl+ 7.0 x) (#3%fl+ 0.0 x) (#3%fl+ x) (#3%fl+ 12.0 x y)
        +nan.0))
   (equivalent-expansion?
     (parameterize ([#%$suppress-primitive-inlining #f]
@@ -1330,8 +1338,8 @@
            (fl*) (fl* 3.0) (fl* 3.0 4.0) (fl* x) (fl* x 1.0) (fl* 1.0 x) (fl* x 3.0)
            (fl* x 3.0 4.0) (fl* 3.0 x 4.0) (fl* 3.0 x #i1/3) (fl* 3.0 x 4.0 y 5.0)
            (fl* 3.0 x 4.0 y +nan.0))))
-    '(#3%list 1.0 3.0 12.0 x x x (#3%fl* 3.0 x)
-       (#3%fl* 12.0 x) (#3%fl* 12.0 x) x (#3%fl* 60.0 x y)
+    '(#3%list 1.0 3.0 12.0 (#3%fl* x) (#3%fl* x) (#3%fl* x) (#3%fl* 3.0 x)
+       (#3%fl* 12.0 x) (#3%fl* 12.0 x) (#3%fl* x) (#3%fl* 60.0 x y)
        +nan.0))
   (equivalent-expansion?
     (parameterize ([#%$suppress-primitive-inlining #f]
@@ -1828,7 +1836,7 @@
            (fl+) (fl+ 3.0) (fl+ 3.0 4.0) (fl+ x) (fl+ x 0.0) (fl+ x -0.0) (fl+ 0.0 x) (fl+ -0.0 x) (fl+ x 3.0)
            (fl+ x 3.0 4.0) (fl+ 3.0 x 4.0) (fl+ 3.0 x -3.0) (fl+ (truncate -.5) x (/ -inf.0)) (fl+ 3.0 x 4.0 y 5.0)
            (fl+ +nan.0 x 3.0 y 5.0) (fl+ 3.0 x +nan.0 y 5.0))))
-    '(#3%list 0.0 3.0 7.0 x (#3%fl+ x 0.0) (#3%fl+ x -0.0) (#3%fl+ 0.0 x) x (#3%fl+ x 3.0)
+    '(#3%list 0.0 3.0 7.0 (#3%fl+ x) (#3%fl+ x 0.0) (#3%fl+ x -0.0) (#3%fl+ 0.0 x) (#3%fl+ x) (#3%fl+ x 3.0)
        (#3%fl+ x 3.0 4.0) (#3%fl+ 3.0 x 4.0) (#3%fl+ 3.0 x -3.0) (#3%fl+ x -0.0) (#3%fl+ 3.0 x 4.0 y 5.0)
        +nan.0 (#3%fl+ 3.0 x +nan.0 y 5.0)))
   (equivalent-expansion?
@@ -1934,7 +1942,7 @@
            (fl*) (fl* 3.0) (fl* 3.0 4.0) (fl* x) (fl* x 1.0) (fl* 1.0 x) (fl* x 3.0)
            (fl* x 3.0 4.0) (fl* 3.0 x 4.0) (fl* 3.0 x #i1/3) (fl* 3.0 x 4.0 y 5.0)
            (fl* +nan.0 x 3.0 y 4.0) (fl* 3.0 x 4.0 y +nan.0))))
-    '(#3%list 1.0 3.0 12.0 x (#3%fl* x 1.0) x (#3%fl* x 3.0)
+    '(#3%list 1.0 3.0 12.0 (#3%fl* x) (#3%fl* x 1.0) (#3%fl* x) (#3%fl* x 3.0)
        (#3%fl* x 3.0 4.0) (#3%fl* 3.0 x 4.0) (#3%fl* 3.0 x #i1/3) (#3%fl* 3.0 x 4.0 y 5.0)
        +nan.0 (#3%fl* +3.0 x 4.0 y +nan.0)))
   (equivalent-expansion?
@@ -2255,10 +2263,10 @@
   (equivalent-expansion?
     (parameterize ([enable-cp0 #t] [#%$suppress-primitive-inlining #f])
       ;; don't fold primitive in test context with bad apply convention
-      (expand/optimize '(if (#%apply #%eof-object 1 2 3) 4 5)))
+      (expand/optimize '(if (#%apply #%pair? 1 2 3) 4 5)))
     (if (= (optimize-level) 3)
-        '(if (#3%apply #3%eof-object 1 2 3) 4 5)
-        '(if (#2%apply #2%eof-object 1 2 3) 4 5)))
+        '(if (#3%apply #3%pair? 1 2 3) 4 5)
+        '(if (#2%apply #2%pair? 1 2 3) 4 5)))
   (equivalent-expansion?
     (parameterize ([enable-cp0 #t] [#%$suppress-primitive-inlining #f])
       ;; don't fold primitive in effect context with bad apply convention
@@ -2845,7 +2853,7 @@
     ; does push (make-message-condition y) because it is pure, even though one of the vars (z) is assigned
     '(lambda (y) (let ([z #f]) (#3%list (lambda () (set! z 15) z) (#3%make-message-condition y)))))
   (equivalent-expansion?
-    (parameterize ([#%$suppress-primitive-inlining #f] [run-cp0 (lambda (cp0 x) (cp0 x))] [optimize-level 2])
+    (parameterize ([#%$suppress-primitive-inlining #f] [run-cp0 (lambda (cp0 x) (cp0 x))] [optimize-level 2] [compile-profile #f])
       (expand/optimize
         '(let ()
            (define-record foo ((immutable boolean x)))
@@ -2858,7 +2866,7 @@
          #t
          e2))
   (equivalent-expansion?
-    (parameterize ([#%$suppress-primitive-inlining #f] [run-cp0 (lambda (cp0 x) (cp0 x))] [optimize-level 3])
+    (parameterize ([#%$suppress-primitive-inlining #f] [run-cp0 (lambda (cp0 x) (cp0 x))] [optimize-level 3] [compile-profile #f])
       (expand/optimize
         '(let ()
            (define-record foo ((immutable boolean x)))
@@ -3034,6 +3042,13 @@
          (not (equivalent-expansion?
                (expand/optimize `(lambda (g) ,(mk `(g))))
                '(lambda (g) (g))))
+         ;; When moving into an ignored position, ensure single valued
+         ;; in safe mode:
+         (equivalent-expansion?
+          (expand/optimize `(lambda (g) ,(mk `(g)) 0))
+          (if (= 3 (optimize-level))
+              '(lambda (g) (g) 0)
+              '(lambda (g) (#3%$value (g)) 0)))
          ;; Ditto, but in a nested procedure:
          (not (equivalent-expansion?
                (expand/optimize `(lambda () (lambda (g) ,(mk `(g)))))
@@ -3111,4 +3126,18 @@
      (equivalent-expansion?
       (expand/optimize '(let ([g1 (begin (unknown) (void))]) 10))
       '(begin (unknown) 10)))
+
+   (or (not (enable-cp0))
+       (eq? (current-eval) interpret)
+       (equal? (let ([mk (lambda (g)
+                           (letrec ([f (lambda (x)
+                                         (if (= x 100)
+                                             (g)
+                                             (f (add1 x))))])
+                             (lambda () (f 101))))])
+                 (map procedure-known-single-valued?
+                      (list (mk (lambda () 1))
+                            (mk (lambda () (values 1 2))))))
+               '(#t #f)))
+
 )

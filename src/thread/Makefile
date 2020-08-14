@@ -25,14 +25,15 @@ GLOBALS = --no-global \
           ++global-ok pre-poll-callbacks \
           ++global-ok queued-shutdowns \
           ++global-ok compute-memory-sizes \
+          ++global-ok "computed-memory-sizes?" \
           ++global-ok custodians-with-limits \
           ++global-ok make-place-ports+fds \
           ++global-ok pthread-count \
           ++global-ok "logging-future-events?" \
           ++global-ok log-future-event \
           ++global-ok "logging-place-events?" \
-          ++global-ok log-place-event
-
+          ++global-ok log-place-event \
+          ++global-ok thread-engine-for-roots
 
 GENERATE_ARGS = -t main.rkt \
                 --check-depends $(BUILDDIR)compiled/thread-dep.rktd \

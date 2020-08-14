@@ -7,5 +7,6 @@
            (->* [(or/c 'sha1 'sha256)
                  string?
                  string?]
-                [#:authorization-id (or/c #f string?)]
+                [#:authorization-id (or/c #f string?)
+                 #:channel-binding (or/c boolean? (list/c symbol? bytes?))]
                 sasl-ctx?)]))

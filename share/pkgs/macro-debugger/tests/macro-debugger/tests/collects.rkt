@@ -10,12 +10,12 @@
 (define verbose (make-parameter #f))
 (define (vprintf fmt . args) (when (verbose) (apply printf fmt args)))
 
-(define (test-libs name mods #:reductions? [reductions? #f])
+(define (test-libs name mods #:reductions? [reductions? #f] #:hiding? [hiding? #f])
   (test-suite name
     (for ([m mods])
-      (test-lib m #:reductions? reductions?))))
+      (test-lib m #:reductions? reductions? #:hiding? hiding?))))
 
-(define (test-lib m #:reductions? [reductions? #f])
+(define (test-lib m #:reductions? [reductions? #f] #:hiding? [hiding? #f])
   (test-case (format "~s" m)
     (vprintf "tracing ~s ... " m)
     (let ([deriv (trace-module m)])
@@ -23,7 +23,10 @@
       (check-pred ok-node? deriv "Expansion error")
       (when reductions?
         (vprintf "stepping ... ")
-        (check-steps deriv hide-none-policy)))
+        (check-steps deriv hide-none-policy)
+        (when hiding?
+          (vprintf "hiding ... ")
+          (check-steps deriv standard-policy))))
     (vprintf "ok\n")))
 
 (define (check-steps deriv policy)
@@ -114,4 +117,12 @@
   (require rackunit/text-ui)
   (parameterize ((verbose #t))
     (run-tests
-     (test-libs "Trace and step collections" modules-for-test #:reductions? #t))))
+     (test-libs "Trace and step collections" modules-for-test
+                #:reductions? #t #:hiding? #f))))
+
+(module+ main
+  (require rackunit/text-ui)
+  (parameterize ((verbose #t))
+    (run-tests
+     (test-libs "Trace and step collections" modules-for-test
+                #:reductions? #t #:hiding? #t))))

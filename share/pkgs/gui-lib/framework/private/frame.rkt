@@ -32,7 +32,8 @@
         [prefix menu: framework:menu^]
         [prefix racket: framework:racket^]
         [prefix exit: framework:exit^]
-        [prefix comment-box: framework:comment-box^])
+        [prefix comment-box: framework:comment-box^]
+        [prefix color-prefs: framework:color-prefs^])
 
 (export (rename framework:frame^ 
                 [-editor<%> editor<%>]
@@ -1547,26 +1548,7 @@
         #t))
     
     (define/public (revert)
-      (let* ([edit (get-editor)]
-             [b (box #f)]
-             [filename (send edit get-filename b)])
-        (when (and filename
-                   (not (unbox b)))
-          (let ([start
-                 (if (is-a? edit text%)
-                     (send edit get-start-position)
-                     #f)])
-            (send edit begin-edit-sequence)
-            (let ([status (send edit load-file/gui-error
-                                filename
-                                'guess
-                                #f)])
-              (if status
-                  (begin
-                    (when (is-a? edit text%)
-                      (send edit set-position start start))
-                    (send edit end-edit-sequence))
-                  (send edit end-edit-sequence)))))))
+      (send (get-editor) revert/gui-error))
     
     (define/override file-menu:create-revert? (λ () #t))
     (define/override file-menu:save-callback
@@ -2009,7 +1991,7 @@
   (set! old-search-highlight void))
 
 (define find/replace-text%
-  (class text:keymap%
+  (class (text:foreground-color-mixin  text:keymap%)
     (init-field pref-sym)
     (inherit get-canvas get-text last-position insert find-first-snip
              get-admin invalidate-bitmap-cache
@@ -2232,7 +2214,10 @@
               (let ([pen (send dc get-pen)]
                     [brush (send dc get-brush)])
                 (send dc set-pen "black" 1 'transparent)
-                (send dc set-brush "pink" 'solid)
+                (send dc set-brush
+                      (color-prefs:lookup-in-color-scheme
+                       'framework:failed-search-background-color)
+                      'solid)
                 (send dc draw-rectangle (+ dx view-x) (+ view-y dy) view-width view-height)
                 (send dc set-pen pen)
                 (send dc set-brush brush)))))))
@@ -2305,7 +2290,7 @@
             (send tlw unhide-search-and-toggle-focus)))))
 
 (define searchable-canvas% 
-  (class editor-canvas% 
+  (class (canvas:color-mixin canvas:basic%)
     (inherit refresh get-dc get-client-size)
     (define red? #f)
     (define/public (is-red?) red?)
@@ -2320,7 +2305,10 @@
             (let ([pen (send dc get-pen)]
                   [brush (send dc get-brush)])
               (send dc set-pen "black" 1 'transparent)
-              (send dc set-brush "pink" 'solid)
+              (send dc set-brush
+                    (color-prefs:lookup-in-color-scheme
+                     'framework:failed-search-background-color)
+                    'solid)
               (send dc draw-rectangle 0 0 cw ch)
               (send dc set-pen pen)
               (send dc set-brush brush)))))
@@ -2798,6 +2786,9 @@
 
 (define bday-click-canvas%
   (class canvas%
+    (inherit get-dc)
+    (define/override (on-paint)
+      (send (get-dc) draw-bitmap (icon:get-gc-off-bitmap) 0 0))
     (define/override (on-event evt)
       (cond
         [(and (mrf-bday?)

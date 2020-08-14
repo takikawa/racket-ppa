@@ -79,6 +79,7 @@
          define-record-type
          record-type-descriptor
          make-record-type-descriptor
+         make-record-type-descriptor*
          make-record-constructor-descriptor
          (rename-out [s:struct-type? record-type-descriptor?])
          record-constructor-descriptor
@@ -134,6 +135,12 @@
          fixnum-width
          set-car!
          set-cdr!
+         bytevector-copy!
+         bytevector-ieee-double-native-set!
+         bytevector-ieee-double-native-ref
+         bytevector-u64-native-set!
+         bytevector-u64-native-ref
+         call-with-bytevector-output-port
          make-compile-time-value
          optimize-level)
 
@@ -595,6 +602,12 @@
 (define (make-record-type-descriptor name parent uid s? o? fields)
   (do-$make-record-type base-rtd parent name fields s? o? null #:uid uid))
 
+(define (make-record-type-descriptor* name parent uid s? o? num-fields mutability-mask)
+  (define fields (for ([i (in-range num-fields)])
+                   (list (if (bitwise-bit-set? mutability-mask i) 'mutable 'immutable)
+                         (string->symbol (format "f~a" i)))))
+  (do-$make-record-type base-rtd parent name fields s? o? null #:uid uid))
+
 (define (make-record-constructor-descriptor rtd parent-rcd protocol)
   (rec-cons-desc rtd parent-rcd protocol))
 
@@ -764,6 +777,24 @@
             (define (set-car! p v) (unsafe-set-mcar! p v))
             (define (set-cdr! p v) (unsafe-set-mcdr! p v)))])]))
 (define-mutable-pair-hacks set-car! set-cdr!)
+
+(define (bytevector-copy! src src-start dst dst-start n)
+  (bytes-copy! dst dst-start src src-start (+ src-start n)))
+
+(define (bytevector-ieee-double-native-set! bv pos val)
+  (real->floating-point-bytes val 8 (system-big-endian?) bv pos))
+(define (bytevector-ieee-double-native-ref bv pos)
+  (floating-point-bytes->real bv (system-big-endian?) pos (+ pos 8)))
+
+(define (bytevector-u64-native-set! bv pos val)
+  (integer->integer-bytes val 8 #f (system-big-endian?) bv pos))
+(define (bytevector-u64-native-ref bv pos)
+  (integer-bytes->integer bv #f (system-big-endian?) pos (+ pos 8)))
+
+(define (call-with-bytevector-output-port proc)
+  (define o (open-output-bytes))
+  (proc o)
+  (get-output-bytes o))
 
 (define (fixnum-width) (or fixnum-bits 63))
 

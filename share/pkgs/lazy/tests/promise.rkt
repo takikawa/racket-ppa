@@ -168,6 +168,8 @@
              (thread (lambda () (channel-put ch 'x)))
              (test (force p) => 99))
            (test (force (delayer (+ 1 "2"))) =error>
+                 #rx"contract violation.*expected: number|not a number")
+           (test (force (delayer (current-custodian (make-custodian)) (+ 1 "2"))) =error>
                  #rx"contract violation.*expected: number|not a number")))
   (t delay/sync)
   (t delay/idle)

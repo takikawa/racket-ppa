@@ -37,71 +37,9 @@
   (if kernel? kernel-namespace testing-namespace))
 
 (define helper-module
-  '(module helper scheme/base
-     (require (for-syntax scheme/base))
-     (provide Tid
-              Tlist
-              Tlet
-              Tleid
-              Tlift
-              myor
-              the-current-output-port
-              wrong
-              pre-id
-              id
-              leid
-              lift)
-     (define-syntax (id stx)
-       (syntax-case stx ()
-         [(id x) #'x]))
-     (define-syntax (pre-id stx)
-       (syntax-case stx ()
-         [(pre-id x) #'(id x)]))
-     (define-syntax (leid stx)
-       (syntax-case stx ()
-         [(leid e)
-          (with-syntax ([ee (local-expand #'e 'expression null)])
-            #`(#%expression ee))]))
-     (define-syntax (lift stx)
-       (syntax-case stx ()
-         [(lift e)
-          (with-syntax ([v (syntax-local-lift-expression #'e)])
-            #'(#%expression v))]))
-     (define-syntax wrong
-       (lambda (stx)
-         (raise-syntax-error #f "macro blows up here!" stx)))
-     (define-syntax (Tid stx)
-       (syntax-case stx ()
-         [(Tid e) #'e]))
-     (define-syntax (Tlist stx)
-       (syntax-case stx ()
-         [(Tlist e) #'(list e)]))
-     (define-syntax (Tlet stx)
-       (syntax-case stx ()
-         [(Tlet x e b) #'((lambda (x) b) e)]))
-     (define-syntax (Tleid stx)
-       (syntax-case stx ()
-         [(Tleid e)
-          (with-syntax ([ee (local-expand #'e 'expression null)])
-            #`(#%expression ee))]))
-     (define-syntax (Tlift stx)
-       (syntax-case stx ()
-         [(Tlift e)
-          (with-syntax ([v (syntax-local-lift-expression #'e)])
-            #'(#%expression v))]))
-     (define-syntax (myor stx)
-       (syntax-case stx ()
-         [(myor x)
-          #'x]
-         [(myor x y ...)
-          #'(let ((t x))
-              (if t t (myor y ...)))]))
-     (define-syntax the-current-output-port
-       (make-set!-transformer
-        (lambda (stx)
-          (syntax-case stx (set!)
-            [(set! the-current-output-port op)
-             #'(#%plain-app current-output-port op)]))))))
+  '(module helper racket/base
+     (require tests/macro-debugger/helper/helper)
+     (provide (all-from-out tests/macro-debugger/helper/helper))))
 
 (define kernel-namespace (make-base-empty-namespace))
 (parameterize ((current-namespace kernel-namespace))
@@ -128,7 +66,6 @@
   (eval '(require scheme/base))
   (eval '(require (for-syntax scheme/base)))
   (eval helper-module)
-
   (eval '(require 'helper)))
 
 ;; Specialized macro hiding tests

@@ -33,7 +33,9 @@ Clicking the @onscreen{Run} button evaluates the program in the
 definitions window, making the program's definitions available in the
 interactions window. Given the definition of @racket[square] as in the
 figure above, typing @racket[(square 2)] in the interactions window
-produces the result @racket[4].
+produces the result @racket[4]. Clicking the @onscreen{Run} button 
+again resets the interactions window and re-evaluates the definitions 
+window.
 
 The signature boxes (available via the blue quarter circle in the upper right corner) provide access
 to the summary information from the documentation.
@@ -772,7 +774,7 @@ A module browser window contains a square for each
 
 @section[#:tag "color-scheme"]{Color Schemes}
 
-DrRacket comes with three different color schemes, available in the preferences dialog's
+DrRacket comes with a selection of color schemes, available in the preferences dialog's
 @onscreen{color} panel.
 
 You can add your own color schemes to DrRacket, too. The first step is to

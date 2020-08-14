@@ -20,7 +20,6 @@
 static void install_library_entry PROTO((ptr n, ptr x));
 static void scheme_install_library_entry PROTO((void));
 static void create_library_entry_vector PROTO((void));
-static void install_c_entry PROTO((iptr i, ptr x));
 static void create_c_entry_vector PROTO((void));
 static void s_instantiate_code_object PROTO((void));
 static void s_link_code_object PROTO((ptr co, ptr objs));
@@ -42,6 +41,10 @@ static void install_library_entry(n, x) ptr n, x; {
         S_G.nonprocedure_code = x;
         S_retrofit_nonprocedure_code();
     }
+#ifdef X86_64
+    if (n == FIX(library_cpu_features))
+      x86_64_set_popcount_present(x);
+#endif
 }
 
 ptr S_lookup_library_entry(n, errorp) iptr n; IBOOL errorp; {
@@ -81,7 +84,7 @@ ptr int2ptr(iptr f)
 #define proc2ptr(x) (ptr)(iptr)(x)
 #endif /* HPUX */
 
-static void install_c_entry(i, x) iptr i; ptr x; {
+void S_install_c_entry(i, x) iptr i; ptr x; {
     if (i < 0 || i >= c_entry_vector_size)
         S_error1("install_c_entry", "invalid index ~s", FIX(i));
     if (Svector_ref(S_G.c_entry_vector, i) != Sfalse)
@@ -112,39 +115,46 @@ static void create_c_entry_vector() {
     for (i = 0; i < c_entry_vector_size; i++)
         INITVECTIT(S_G.c_entry_vector, i) = Sfalse;
 
-    install_c_entry(CENTRY_thread_context, proc2ptr(S_G.thread_context));
-    install_c_entry(CENTRY_get_thread_context, proc2ptr(s_get_thread_context));
-    install_c_entry(CENTRY_handle_apply_overflood, proc2ptr(S_handle_apply_overflood));
-    install_c_entry(CENTRY_handle_docall_error, proc2ptr(S_handle_docall_error));
-    install_c_entry(CENTRY_handle_overflow, proc2ptr(S_handle_overflow));
-    install_c_entry(CENTRY_handle_overflood, proc2ptr(S_handle_overflood));
-    install_c_entry(CENTRY_handle_nonprocedure_symbol, proc2ptr(S_handle_nonprocedure_symbol));
-    install_c_entry(CENTRY_thread_list, (ptr)&S_threads);
-    install_c_entry(CENTRY_split_and_resize, proc2ptr(S_split_and_resize));
+    S_install_c_entry(CENTRY_thread_context, proc2ptr(S_G.thread_context));
+    S_install_c_entry(CENTRY_get_thread_context, proc2ptr(s_get_thread_context));
+    S_install_c_entry(CENTRY_handle_apply_overflood, proc2ptr(S_handle_apply_overflood));
+    S_install_c_entry(CENTRY_handle_docall_error, proc2ptr(S_handle_docall_error));
+    S_install_c_entry(CENTRY_handle_overflow, proc2ptr(S_handle_overflow));
+    S_install_c_entry(CENTRY_handle_overflood, proc2ptr(S_handle_overflood));
+    S_install_c_entry(CENTRY_handle_nonprocedure_symbol, proc2ptr(S_handle_nonprocedure_symbol));
+    S_install_c_entry(CENTRY_thread_list, (ptr)&S_threads);
+    S_install_c_entry(CENTRY_split_and_resize, proc2ptr(S_split_and_resize));
 #ifdef PTHREADS
-    install_c_entry(CENTRY_raw_collect_cond, (ptr)&S_collect_cond);
-    install_c_entry(CENTRY_raw_tc_mutex, (ptr)&S_tc_mutex);
-    install_c_entry(CENTRY_activate_thread, proc2ptr(S_activate_thread));
-    install_c_entry(CENTRY_deactivate_thread, proc2ptr(Sdeactivate_thread));
-    install_c_entry(CENTRY_unactivate_thread, proc2ptr(S_unactivate_thread));
+    S_install_c_entry(CENTRY_raw_collect_cond, (ptr)&S_collect_cond);
+    S_install_c_entry(CENTRY_raw_collect_thread0_cond, (ptr)&S_collect_thread0_cond);
+    S_install_c_entry(CENTRY_raw_tc_mutex, (ptr)&S_tc_mutex);
+    S_install_c_entry(CENTRY_activate_thread, proc2ptr(S_activate_thread));
+    S_install_c_entry(CENTRY_deactivate_thread, proc2ptr(Sdeactivate_thread));
+    S_install_c_entry(CENTRY_unactivate_thread, proc2ptr(S_unactivate_thread));
 #endif /* PTHREADS */
-    install_c_entry(CENTRY_handle_values_error, proc2ptr(S_handle_values_error));
-    install_c_entry(CENTRY_handle_mvlet_error, proc2ptr(S_handle_mvlet_error));
-    install_c_entry(CENTRY_handle_arg_error, proc2ptr(S_handle_arg_error));
-    install_c_entry(CENTRY_foreign_entry, proc2ptr(S_foreign_entry));
-    install_c_entry(CENTRY_install_library_entry, proc2ptr(scheme_install_library_entry));
-    install_c_entry(CENTRY_get_more_room, proc2ptr(S_get_more_room));
-    install_c_entry(CENTRY_scan_remembered_set, proc2ptr(S_scan_remembered_set));
-    install_c_entry(CENTRY_instantiate_code_object, proc2ptr(s_instantiate_code_object));
-    install_c_entry(CENTRY_Sreturn, proc2ptr(S_return));
-    install_c_entry(CENTRY_Scall_one_result, proc2ptr(S_call_one_result));
-    install_c_entry(CENTRY_Scall_any_results, proc2ptr(S_call_any_results));
-    install_c_entry(CENTRY_segment_info, proc2ptr(S_segment_info));
-    install_c_entry(CENTRY_bignum_mask_test, proc2ptr(S_bignum_mask_test));
+    S_install_c_entry(CENTRY_handle_values_error, proc2ptr(S_handle_values_error));
+    S_install_c_entry(CENTRY_handle_mvlet_error, proc2ptr(S_handle_mvlet_error));
+    S_install_c_entry(CENTRY_handle_arg_error, proc2ptr(S_handle_arg_error));
+    S_install_c_entry(CENTRY_handle_event_detour, proc2ptr(S_handle_event_detour));
+    S_install_c_entry(CENTRY_foreign_entry, proc2ptr(S_foreign_entry));
+    S_install_c_entry(CENTRY_install_library_entry, proc2ptr(scheme_install_library_entry));
+    S_install_c_entry(CENTRY_get_more_room, proc2ptr(S_get_more_room));
+    S_install_c_entry(CENTRY_scan_remembered_set, proc2ptr(S_scan_remembered_set));
+    S_install_c_entry(CENTRY_instantiate_code_object, proc2ptr(s_instantiate_code_object));
+    S_install_c_entry(CENTRY_Sreturn, proc2ptr(S_return));
+    S_install_c_entry(CENTRY_Scall_one_result, proc2ptr(S_call_one_result));
+    S_install_c_entry(CENTRY_Scall_any_results, proc2ptr(S_call_any_results));
+    S_install_c_entry(CENTRY_segment_info, proc2ptr(S_segment_info));
+    S_install_c_entry(CENTRY_bignum_mask_test, proc2ptr(S_bignum_mask_test));
+}
+
+void S_check_c_entry_vector() {
+    INT i;
 
     for (i = 0; i < c_entry_vector_size; i++) {
 #ifndef PTHREADS
-      if (i == CENTRY_raw_collect_cond || i == CENTRY_raw_tc_mutex
+      if (i == CENTRY_raw_collect_cond || i == CENTRY_raw_collect_thread0_cond
+          || i == CENTRY_raw_tc_mutex
           || i == CENTRY_activate_thread || i == CENTRY_deactivate_thread
           || i == CENTRY_unactivate_thread)
         continue;
@@ -164,6 +174,7 @@ void S_prim_init() {
 
     Sforeign_symbol("(cs)fixedpathp", (void *)S_fixedpathp);
     Sforeign_symbol("(cs)bytes_allocated", (void *)S_compute_bytes_allocated);
+    Sforeign_symbol("(cs)bytes_finalized", (void *)S_bytes_finalized);
     Sforeign_symbol("(cs)curmembytes", (void *)S_curmembytes);
     Sforeign_symbol("(cs)maxmembytes", (void *)S_maxmembytes);
     Sforeign_symbol("(cs)resetmaxmembytes", (void *)S_resetmaxmembytes);
@@ -171,6 +182,7 @@ void S_prim_init() {
     Sforeign_symbol("(cs)check_heap_enabledp", (void *)s_check_heap_enabledp);
     Sforeign_symbol("(cs)enable_check_heap", (void *)s_enable_check_heap);
     Sforeign_symbol("(cs)check_heap_errors", (void *)s_check_heap_errors);
+    Sforeign_symbol("(cs)count_size_increments", (void *)S_count_size_increments);
     Sforeign_symbol("(cs)lookup_library_entry", (void *)S_lookup_library_entry);
     Sforeign_symbol("(cs)link_code_object", (void *)s_link_code_object);
     Sforeign_symbol("(cs)lookup_c_entry", (void *)S_lookup_c_entry);
@@ -181,14 +193,19 @@ void S_prim_init() {
     Sforeign_symbol("(cs)maxgen", (void *)S_maxgen);
     Sforeign_symbol("(cs)set_maxgen", (void *)S_set_maxgen);
     Sforeign_symbol("(cs)minfreegen", (void *)S_minfreegen);
+    Sforeign_symbol("(cs)set_minmarkgen", (void *)S_set_minmarkgen);
+    Sforeign_symbol("(cs)minmarkgen", (void *)S_minmarkgen);
     Sforeign_symbol("(cs)set_minfreegen", (void *)S_set_minfreegen);
     Sforeign_symbol("(cs)enable_object_counts", (void *)S_enable_object_counts);
     Sforeign_symbol("(cs)set_enable_object_counts", (void *)S_set_enable_object_counts);
     Sforeign_symbol("(cs)object_counts", (void *)S_object_counts);
+    Sforeign_symbol("(cs)unregister_guardian", (void *)S_unregister_guardian);
     Sforeign_symbol("(cs)fire_collector", (void *)S_fire_collector);
     Sforeign_symbol("(cs)enable_object_backreferences", (void *)S_enable_object_backreferences);
     Sforeign_symbol("(cs)set_enable_object_backreferences", (void *)S_set_enable_object_backreferences);
     Sforeign_symbol("(cs)object_backreferences", (void *)S_object_backreferences);
+    Sforeign_symbol("(cs)list_bits_ref", (void *)S_list_bits_ref);
+    Sforeign_symbol("(cs)list_bits_set", (void *)S_list_bits_set);
 }
 
 static void s_instantiate_code_object() {
@@ -206,6 +223,8 @@ static void s_instantiate_code_object() {
     tc_mutex_acquire()
     new = S_code(tc, CODETYPE(old), CODELEN(old));
     tc_mutex_release()
+
+    S_immobilize_object(new);
 
     oldreloc = CODERELOC(old);
     size = RELOCSIZE(oldreloc);

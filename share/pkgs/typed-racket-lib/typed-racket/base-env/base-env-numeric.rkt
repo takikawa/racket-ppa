@@ -754,8 +754,7 @@
 
 [=
  (from-cases
-   (-> -Real -RealZero B : (-PS (-is-type 0 -RealZeroNoNan) (-not-type 0 -RealZeroNoNan)))
-   (-> -RealZero -Real B : (-PS (-is-type 1 -RealZeroNoNan) (-not-type 1 -RealZeroNoNan)))
+  (commutative-equality/strict-prop -Real -RealZeroNoNan)
   (map (lambda (t) (commutative-equality/prop -ExactNumber t))
        (list -One -PosByte -Byte -PosIndex -Index
              -PosFixnum -NonNegFixnum -NegFixnum -NonPosFixnum -Fixnum
@@ -1626,7 +1625,7 @@
              (-NonNegSignFlonum -Flonum . -> . -NonNegFlonum)
              (-PosReal -NonNegFlonum . -> . (Un -NonNegFlonum -One))
              (-NonNegFlonum -Flonum . -> . -Flonum)
-             (-NonNegFlonum -Real . -> . (Un -NonNegFlonum -One))
+             (-NonNegSignFlonum -Real . -> . (Un -NonNegFlonum -One))
              ;; even integer exponents can give complex results
              ;; too large exponents turn into infinities, and (expt -inf.0 -inf.0) => nan.0+nan.0i
              ;; so no narrower cases for those. fixnums are ok, though
@@ -1646,6 +1645,7 @@
              (-InexactReal (Un -NegFixnum -PosFixnum) . -> . -InexactReal)
              (-InexactReal -InexactReal . -> . (Un -InexactReal -InexactComplex))
              (-Real -Nat . -> . -Real)
+             (-Rat -Int . -> . -Real)
              (-FloatComplex -FloatComplex . -> . -FloatComplex)
              (-FloatComplex -Flonum . -> . (Un -FloatComplex -Flonum))
              (-FloatComplex -InexactReal . -> . (Un -FloatComplex -InexactReal))

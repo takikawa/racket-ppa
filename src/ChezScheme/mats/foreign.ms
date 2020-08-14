@@ -184,7 +184,7 @@
       (error? (load-shared-object 3))
     )
    ]
-  [(i3le ti3le a6le ta6le arm32le tarm32le ppc32le tppc32le)
+  [(i3le ti3le a6le ta6le arm32le tarm32le arm64le tarm64le ppc32le tppc32le)
    (mat load-shared-object
       (file-exists? "foreign1.so")
       (begin (load-shared-object "./foreign1.so") #t)
@@ -1038,6 +1038,12 @@
     (define call-u64 (foreign-procedure "call_u64" (ptr unsigned-64 int int) unsigned-64))
     (define call-sf (foreign-procedure "call_sf" (ptr single-float int int) single-float))
     (define call-df (foreign-procedure "call_df" (ptr double-float int int) double-float))
+    (define call-varargs-df (foreign-procedure "call_varargs_df" (ptr double-float int int) double-float))
+    (define call-varargs-i7df (foreign-procedure "call_varargs_i7df" (ptr int
+                                                                          double-float double-float double-float
+                                                                          double-float double-float double-float
+                                                                          double-float)
+                                                 double-float))
     (define ($test-call-int signed? size call-int make-fc)
       (define n10000 (expt 256 size))
       (define nffff (- n10000 1))
@@ -1151,6 +1157,22 @@
         (double-float) double-float)
       73.25 7 23)
     108.25)
+  (equal?
+    (call-varargs-df
+      (foreign-callable
+        __varargs
+        (lambda (x y) (+ x y 5))
+        (double-float double-float) double-float)
+      10.25 20 300)
+    325.5)
+  (equal?
+    (call-varargs-i7df
+      (foreign-callable
+        __varargs
+        (lambda (i a b c d e f g) (+ i a b c d e f g 7))
+        (int double-float double-float double-float double-float double-float double-float double-float) double-float)
+      1 2.2 3.2 4.5 6.7 8.9 10.1 11.5)
+    55.1)
 
   (error?
     (call-i8
@@ -1211,6 +1233,13 @@
       (foreign-callable
         (lambda (x) '(- x 7))
         (double-float) double-float)
+      73.25 0 0))
+  (error?
+    (call-varargs-df
+      (foreign-callable
+        __varargs
+        (lambda (x y) '(- x 7))
+        (double-float double-float) double-float)
       73.25 0 0))
 
   (begin
@@ -2002,6 +2031,19 @@
  )
 
 (mat foreign-callable
+  (begin
+    ;; We don't have to use `lock-object` on the result of a `foreign-callable`,
+    ;; because it is immobile. We have to keep it live, though.
+    (define-syntax with-object-kept-live
+      (lambda (x)
+        (syntax-case x ()
+          [(_ id expr)
+           (identifier? #'id)
+           #'(let ([v expr])
+               (keep-live id)
+               v)])))
+    #t)
+
   (error? ; spam is not a procedure
     (foreign-callable 'spam () void))
   (error? ; spam is not a procedure
@@ -2085,19 +2127,16 @@
     (define args3 (list #f #\newline -51293 3.1415 2.5 #f))
     (let ()
       (define addr
-        (begin
-          (lock-object Fargtest)
-          (foreign-callable-entry-point Fargtest)))
-      (dynamic-wind
-        void
-        (lambda ()
+        (foreign-callable-entry-point Fargtest))
+      (let ()
           (collect (collect-maximum-generation))
           (collect (collect-maximum-generation))
-          (and
+          (with-object-kept-live
+           Fargtest
+           (and
             (equal? (apply Sargtest addr args1) (reverse args1))
             (equal? (apply Sargtest addr args2) (reverse args2))
-            (equal? (apply Sargtest addr args3) (reverse args3))))
-        (lambda () (unlock-object Fargtest)))))
+            (equal? (apply Sargtest addr args3) (reverse args3)))))))
   (let ()
     (define Fargtest2
       (foreign-callable
@@ -2114,19 +2153,16 @@
     (define args3 (list -7500 #x987654 #\? +inf.0 3210 #\7))
     (let ()
       (define addr
-        (begin
-          (lock-object Fargtest2)
-          (foreign-callable-entry-point Fargtest2)))
-      (dynamic-wind
-        void
-        (lambda ()
+        (foreign-callable-entry-point Fargtest2))
+      (let ()
           (collect (collect-maximum-generation))
           (collect (collect-maximum-generation))
-          (and
+          (with-object-kept-live
+           Fargtest2
+           (and
             (equal? (apply Sargtest2 addr args1) (reverse args1))
             (equal? (apply Sargtest2 addr args2) (reverse args2))
-            (equal? (apply Sargtest2 addr args3) (reverse args3))))
-        (lambda () (unlock-object Fargtest2)))))
+            (equal? (apply Sargtest2 addr args3) (reverse args3)))))))
   (let ()
     (define Frvtest_int32
       (foreign-callable
@@ -2229,9 +2265,9 @@
     (let ([x 5])
       (define call-twice (foreign-procedure "call_twice" (void* int int) void))
       (let ([co (foreign-callable (lambda (y) (set! x (+ x y))) (int) void)])
-        (lock-object co)
-        (call-twice (foreign-callable-entry-point co) 7 31)
-        (unlock-object co))
+        (with-object-kept-live
+         co
+         (call-twice (foreign-callable-entry-point co) 7 31)))
       x)
     43)
   (equal?
@@ -2247,7 +2283,6 @@
       (define callback
         (lambda (p)
           (let ([code (foreign-callable p (char) void)])
-            (lock-object code)
             (foreign-callable-entry-point code))))
       (let ()
         (define ouch
@@ -2278,9 +2313,9 @@
    ; this form needs to be after the preceding form and not part of it, so that when
    ; we lock code we don't also lock the code object created by foreign-procedure
    (begin
-     (lock-object code)
-     ((foreign-procedure (foreign-callable-entry-point code) () scheme-object))
-     (unlock-object code)
+     (with-object-kept-live
+      code
+      ((foreign-procedure (foreign-callable-entry-point code) () scheme-object)))
      #t)
 
   (not (locked-object?
@@ -2408,11 +2443,11 @@
             (define fptr (make-ftype-pointer foo f))
             (define g (ftype-ref foo () fptr))
             (with-exception-handler
-              (lambda (c) (*k* *m*))
-              (lambda ()
-                (call/cc
-                  (lambda (k)
-                    (fluid-let ([*k* k]) (f $stack-depth $base-value))))))
+             (lambda (c) (*k* *m*))
+             (lambda ()
+               (call/cc
+                (lambda (k)
+                  (fluid-let ([*k* k]) (f $stack-depth $base-value))))))
             (unlock-object
               (foreign-callable-code-object
                 (ftype-pointer-address fptr)))
@@ -2491,8 +2526,7 @@
               (ftype-pointer-address fptr)))
           *m*)
         (+ $stack-depth $base-value)))
-  ;; Make sure that a callable is suitably locked, and that it's
-  ;; unlocked when the C stack is popped by an escape
+  ;; A callable isn't locked, but it's immobile
   (equal?
     (let ()
       (define Sinvoke2
@@ -2502,9 +2536,7 @@
       (define Fcons
         (foreign-callable
           (lambda (k y)
-            ;; Escape with locked, which should be #t
-            ;; because a callable is locked while it's
-            ;; called:
+            (collect) ; might crash if `Fcons` were mobile
             (k (locked-object? Fcons)))
           (scheme-object iptr)
           scheme-object))
@@ -2515,7 +2547,7 @@
        ;; Escape from callable:
        (let ([v ($with-exit-proc (lambda (k) (Sinvoke2 Fcons k 5)))])
          (list v (locked-object? Fcons)))))
-    '((#t #f) (#t #f)))
+    '((#f #f) (#f #f)))
 
   ;; Make sure the code pointer for a call into a
   ;; foreign procedure is correctly saved for locking
@@ -2534,10 +2566,35 @@
              (set! v (add1 v))
              (loop (bitwise-arithmetic-shift-right n 1))))))
      (define handler (foreign-callable work (long) void))
-     (lock-object handler)
-     (call_many_times (foreign-callable-entry-point handler))
+     (with-object-kept-live
+      handler
+      (call_many_times (foreign-callable-entry-point handler)))
+     (unlock-object handler)
      v)
    14995143)
+
+  (equal?
+   (let ()
+     (define v 0)
+     (define call_many_times_bv (foreign-procedure "call_many_times_bv" (void*) void))
+     (define work
+       (lambda (bv)
+         (set! v (+ v (bytevector-u8-ref bv 0)))
+         ;; Varying work, as above:
+         (let loop ([n (bitwise-and (bytevector-u8-ref bv 1) #xFFFF)])
+           (unless (zero? n)
+             (set! v (add1 v))
+             (loop (bitwise-arithmetic-shift-right n 1))))))
+     (define handlers (list (foreign-callable work (u8*) void)
+                            (foreign-callable work (u16*) void)
+                            (foreign-callable work (u32*) void)))
+     (map lock-object handlers)
+     (for-each (lambda (handler)
+                 (call_many_times_bv (foreign-callable-entry-point handler)))
+               handlers)
+     (map unlock-object handlers)
+     v)
+   103500000)
 
   ;; regression test related to saving registers that hold allocated
   ;; callable argument
@@ -2557,9 +2614,9 @@
                            (eqv? i3 2))))
               (int u8* u8* u8* u8* int u8* u8* int)
               void)])
-    (lock-object cb)
-    (call-with-many-args (foreign-callable-entry-point cb))
-    (unlock-object cb)
+    (with-object-kept-live
+     cb
+     (call-with-many-args (foreign-callable-entry-point cb)))
     result)
 
 )
@@ -2668,7 +2725,7 @@
       (machine-case
         [(i3ob ti3ob a6ob ta6ob a6s2 ta6s2 i3s2 ti3s2 i3qnx ti3qnx i3nb ti3nb a6nb ta6nb)
          '(load-shared-object "libc.so")]
-        [(i3le ti3le a6le ta6le arm32le tarm32le ppc32le tppc32le)
+        [(i3le ti3le a6le ta6le arm32le tarm32le arm64le tarm64le ppc32le tppc32le)
          '(load-shared-object "libc.so.6")]
         [(i3fb ti3fb a6fb ta6fb)
          '(load-shared-object "libc.so.7")]
@@ -2683,7 +2740,7 @@
       (separate-eval
         `(begin
            ,load-libc
-           (define f (foreign-procedure "printf" (string double) int))
+           (define f (foreign-procedure __varargs "printf" (string double) int))
            (f "(%g)" 3.5)
            (void)))
       read)
@@ -2693,7 +2750,7 @@
       (separate-eval
         `(begin
            ,load-libc
-           (define f (foreign-procedure "printf" (string double double double double double double) int))
+           (define f (foreign-procedure __varargs "printf" (string double double double double double double) int))
            (f "(%g %g %g %g %g %g)" 3.5 2.5 -1.5 6.75 8.25 -9.5)
            (void)))
       read)
@@ -2703,7 +2760,7 @@
       (separate-eval
         `(begin
            ,load-libc
-           (define f (foreign-procedure "printf" (string double double double double double double double double) int))
+           (define f (foreign-procedure __varargs "printf" (string double double double double double double double double) int))
            (f "(%g %g %g %g %g %g %g %g)" 3.5 2.5 -1.5 6.75 8.25 -9.5 1e32 -4.5)
            (void)))
       read)
@@ -2713,11 +2770,30 @@
       (separate-eval
         `(begin
            ,load-libc
-           (define f (foreign-procedure "printf" (string double double double double double double double double double double) int))
+           (define f (foreign-procedure __varargs "printf" (string double double double double double double double double double double) int))
            (f "(%g %g %g %g %g %g %g %g %g %g)" 3.5 2.5 -1.5 6.75 8.25 -9.5 1e32 -4.5 7.25 -0.5)
            (void)))
       read)
     '(3.5 2.5 -1.5 6.75 8.25 -9.5 1e32 -4.5 7.25 -0.5))
+
+  (equal? (let ([cb (foreign-callable __varargs
+                                      (lambda (x y) (+ x y 5))
+                                      (double-float double-float) double-float)])
+            (with-object-kept-live
+             cb
+             ((foreign-procedure __varargs (foreign-callable-entry-point cb)
+                                 (double-float double-float) double-float)
+              3.4 5.5)))
+          13.9)
+  (equal? (let ([cb (foreign-callable __varargs
+                                      (lambda (x y) (+ x y 5))
+                                      (double-float double-float) single-float)])
+            (with-object-kept-live
+             cb
+             ((foreign-procedure __varargs (foreign-callable-entry-point cb)
+                                 (double-float double-float) single-float)
+              3.5 -5.25)))
+          3.25)
 )
 
 (mat structs
@@ -2970,8 +3046,8 @@
   (check-union [x float 58.0] [y int 0])
   (check-union [x double 68.0] [y int 0])
 
-  ;; Check that `__collect_safe` saves a argument and result floating-point registers
-  ;; while activating and deacttiving a thread
+  ;; Check that `__collect_safe` saves argument and result floating-point registers
+  ;; while activating and deactivating a thread
   (let ()
     (define-ftype T (struct [d double] [i integer-8] [n int]))
     (define sum_pre_double_double_double_double_double_double_double_double

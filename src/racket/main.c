@@ -19,7 +19,7 @@
 /*    STANDALONE_WITH_EMBEDDED_EXTENSION builds an executable with
       built-in extensions. The extension is initialized by calling
       scheme_initialize(env), where `env' is the initial environment.
-      By default, command-line parsing, the REPL, and initilization
+      By default, command-line parsing, the REPL, and initialization
       file loading are turned off. */
 
 #ifdef STANDALONE_WITH_EMBEDDED_EXTENSION
@@ -281,7 +281,7 @@ START_XFORM_SKIP;
 # endif
 
 #if defined(__MINGW32__) || defined(WINMAIN_ALREADY)
-# include "../start/parse_cmdl.inc"
+# include "../start/cmdl_to_argv.inc"
 #endif
 
 #ifdef DOS_FILE_SYSTEM

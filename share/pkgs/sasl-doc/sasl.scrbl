@@ -1,6 +1,6 @@
 #lang scribble/doc
 @(require scribble/manual
-          (for-label racket/base racket/contract
+          (for-label racket/base racket/contract openssl
                      sasl sasl/saslprep sasl/plain sasl/scram sasl/cram-md5))
 
 @title{SASL: Simple Authentication and Security Layer}
@@ -128,9 +128,10 @@ on their arguments when appropriate.
 
 This module implements the @hyperlink["https://tools.ietf.org/html/rfc5802"]{@tt{SCRAM}}
 family of authentication mechanisms, namely
-@as-index{@hyperlink["https://tools.ietf.org/html/rfc5802"]{@tt{SCRAM-SHA-1}}} and
-@as-index{@hyperlink["https://tools.ietf.org/html/rfc7677"]{@tt{SCRAM-SHA-256}}}.
-The @tt{-PLUS} variants, which add channel binding, are not implemented.
+@as-index{@hyperlink["https://tools.ietf.org/html/rfc5802"]{@tt{SCRAM-SHA-1}
+and @tt{SCRAM-SHA-1-PLUS}}} and
+@as-index{@hyperlink["https://tools.ietf.org/html/rfc7677"]{@tt{SCRAM-SHA-256}
+and @tt{SCRAM-SHA-256-PLUS}}}.
 
 The @tt{SCRAM} protocol family has the following structure:
 @itemlist[#:style 'ordered
@@ -146,14 +147,34 @@ itself to the client. Messages are represented as strings.
 @defproc[(make-scram-client-ctx [digest (or/c 'sha1 'sha256)]
                                 [authentication-id string?]
                                 [password string?]
-                                [#:authorization-id authorization-id (or/c string? #f) #f])
+                                [#:authorization-id authorization-id (or/c string? #f) #f]
+                                [#:channel-binding channel-binding
+                                                   (or/c #f #t (list/c symbol? bytes?))
+                                                   #f])
          sasl-ctx?]{
 
 Creates a @tt{SCRAM} protocol context. The @racket[digest] argument selects
 between @tt{SCRAM-SHA-1} and @tt{SCRAM-SHA-256}. The @racket[authentication-id],
 @racket[password], and (if provided) @racket[authorization-id] arguments are
 automatically processed using @racket[saslprep].
-}
+
+The @racket[channel-binding] argument must have the form @racket[(list
+_cb-type _cb-data)] if the server offered and the client selected a
+mechanism with channel binding, indicated with a @tt{-PLUS} suffix,
+such as @tt{SCRAM-SHA-1-PLUS}. The @racket[_cb-type] must be a symbol
+naming a channel binding type, such as @racket['tls-unique], and
+@racket[_cb-data] must be a byte string containing the corresponding
+data. The available channel binding types depend on the application
+and the channel. For example, one common type of channel is TLS; use
+@racket[ssl-channel-binding] to get channel binding data for a TLS
+connection. The @racket[channel-binding] argument should be
+@racket[#t] if the client supports channel binding but the server did
+not offer a @tt{PLUS} option. The @racket[channel-binding] argument
+should be @racket[#f] if the client does not support channel binding
+(for example, if the channel is not a TLS connection).
+
+@history[#:changed "1.1" @elem{Added the @racket[#:channel-binding]
+argument and support for @tt{PLUS} mechanism variants.}]}
 
 @; ----------------------------------------
 @section[#:tag "sasl-cram-md5"]{@tt{CRAM-MD5} Authentication}

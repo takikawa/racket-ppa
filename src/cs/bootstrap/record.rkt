@@ -36,7 +36,9 @@
          record-type-opaque?
          record-type-parent
          record-type-field-names
+         record-type-field-indices
          csv7:record-type-field-names
+         csv7:record-type-field-indices
          csv7:record-type-field-decls
          record-writer
          $object-ref)
@@ -332,8 +334,15 @@
        [(size)
         (assert-accessor)
         (lambda (rtd)
-          (* (add1 (length ((csv7:record-field-accessor base-rtd 'flds) rtd)))
-             ptr-bytes))]
+          (let loop ([flds ((csv7:record-field-accessor base-rtd 'flds) rtd)] [x ptr-bytes])
+            (cond
+              [(null? flds) x]
+              [(eq? (fld-type (car flds)) 'double)
+               (let ([x (if (zero? (modulo x max-float-alignment))
+                            x
+                            (+ x (- 8 (modulo x max-float-alignment))))])
+                 (loop (cdr flds) (+ x 8)))]
+              [else (loop (cdr flds) (+ x ptr-bytes))])))]
        [(pm)
         (assert-accessor)
         (lambda (rtd)
@@ -484,6 +493,18 @@
     [else
      (map fld-name (hash-ref rtd-fields rtd))]))
 
+;; all fields, including from parent
+(define (csv7:record-type-field-indices rtd)
+  (cond
+    [(base-rtd? rtd)
+     (for/list ([f (in-list base-rtd-fields)]
+                [i (in-naturals)])
+       i)]
+    [else
+     (for/list ([f (in-list (hash-ref rtd-fields rtd))]
+                [i (in-naturals)])
+       i)]))
+
 ;; does not include parent fields
 (define (record-type-field-names rtd)
   (cond
@@ -495,6 +516,17 @@
      (define all-fields (hash-ref rtd-fields rtd))
      (define fields (reverse (take (reverse all-fields) init-cnt)))
      (list->vector (map fld-name fields))]))
+
+;; does not include parent fields
+(define (record-type-field-indices rtd)
+  (cond
+    [(base-rtd? rtd)
+     (list->vector (csv7:record-type-field-indices rtd))]
+    [else
+     (define-values (r-name init-cnt auto-cnt ref set immutables super skipped?)
+       (struct-type-info rtd))
+     (for/vector ([i (in-range init-cnt)])
+       i)]))
 
 (define (csv7:record-type-field-decls rtd)
   (map (lambda (v) (list (if (fld-mutable? v) 'mutable 'immutable) (fld-type v) (fld-name v)))
@@ -512,12 +544,21 @@
   (void))
 
 (define (fix-offsets flds)
-  (let loop ([flds flds] [offset (+ record-ptr-offset ptr-bytes)])
+  (let loop ([flds flds] [offset ptr-bytes])
     (unless (null? flds)
-      (set-fld-byte! (car flds) offset)
-      (loop (cdr flds) (+ offset ptr-bytes))))
+      (cond
+        [(eq? (fld-type (car flds)) 'double)
+         (let ([offset (if (zero? (modulo offset max-float-alignment))
+                           offset
+                           (+ offset (- 8 (modulo offset max-float-alignment))))])
+           (set-fld-byte! (car flds)  (+ record-ptr-offset offset))
+           (loop (cdr flds) (+ offset 8)))]
+        [else
+         (set-fld-byte! (car flds)  (+ record-ptr-offset offset))
+         (loop (cdr flds) (+ offset ptr-bytes))])))
   flds)
 
+;; assumes that `v` has only pointer-sized fields
 (define ($object-ref type v offset)
   (cond
     [(flonum? v)

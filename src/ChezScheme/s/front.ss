@@ -106,6 +106,10 @@
 
 (define enable-arithmetic-left-associative ($make-thread-parameter #f (lambda (x) (and x #t))))
 
+(define enable-unsafe-application ($make-thread-parameter #f (lambda (x) (and x #t))))
+
+(define enable-unsafe-variable-reference ($make-thread-parameter #f (lambda (x) (and x #t))))
+
 (define-who current-generate-id
   ($make-thread-parameter
    (lambda (sym)
@@ -116,6 +120,8 @@
      p)))
 
 (define enable-type-recovery ($make-thread-parameter #t (lambda (x) (and x #t))))
+
+(define enable-error-source-expression ($make-thread-parameter #t (lambda (x) (and x #t))))
 
 (define machine-type
   (lambda ()

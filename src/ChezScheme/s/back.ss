@@ -66,6 +66,17 @@
          ($oops who "new release minimum generation must not be be greater than collect-maximum-generation"))
        ($set-release-minimum-generation! g)])))
 
+(define-who in-place-minimum-generation
+  (let ([$get-mark-minimum-generation (foreign-procedure "(cs)minmarkgen" () fixnum)]
+        [$set-mark-minimum-generation! (foreign-procedure "(cs)set_minmarkgen" (fixnum) void)])
+    (case-lambda
+      [() ($get-mark-minimum-generation)]
+      [(g)
+       (unless (and (fixnum? g) (fx>= g 0)) ($oops who "invalid generation ~s" g))
+       (let ([limit (fx- (constant static-generation) 1)])
+         (when (fx> g limit) ($oops who "~s exceeds maximum supported value ~s" g limit)))
+       ($set-mark-minimum-generation! g)])))
+
 (define-who enable-object-counts
   (let ([$get-enable-object-counts (foreign-procedure "(cs)enable_object_counts" () boolean)]
         [$set-enable-object-counts (foreign-procedure "(cs)set_enable_object_counts" (boolean) void)])
@@ -126,6 +137,11 @@
     (lambda (x)
       (and x #t))))
 
+(define-who generate-covin-files
+  ($make-thread-parameter #f
+    (lambda (x)
+      (and x #t))))
+
 (define $enable-check-prelex-flags
   ($make-thread-parameter #f
     (lambda (x)
@@ -182,6 +198,7 @@
     [()
      (let ([x ($tc-field 'compress-level ($tc))])
        (cond
+         [(eqv? x (constant COMPRESS-MIN)) 'minimum]
          [(eqv? x (constant COMPRESS-LOW)) 'low]
          [(eqv? x (constant COMPRESS-MEDIUM)) 'medium]
          [(eqv? x (constant COMPRESS-HIGH)) 'high]
@@ -190,6 +207,7 @@
     [(x)
      ($tc-field 'compress-level ($tc)
        (case x
+         [(minimum) (constant COMPRESS-MIN)]
          [(low) (constant COMPRESS-LOW)]
          [(medium) (constant COMPRESS-MEDIUM)]
          [(high) (constant COMPRESS-HIGH)]

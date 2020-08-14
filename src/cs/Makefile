@@ -4,7 +4,9 @@
 RACKET = ../../bin/racket
 SCHEME = scheme
 
-# Controls whether Racket layers are built as unsafe:
+# Controls whether Racket layers are built as unsafe; beware that
+# building some Racket libraries using safe mode may require setting
+# `PLT_CS_COMPILE_LIMIT` to 1000 (instead of 10000):
 UNSAFE_COMP = --unsafe
 
 # Controls whether compiled code is compressed:
@@ -22,7 +24,7 @@ CROSS_COMP =
 COMPILE_FILE = $(SCHEME) --script compile-file.ss $(UNSAFE_COMP) $(COMPRESS_COMP) $(DEBUG_COMP) $(CROSS_COMP) --dest "$(BUILDDIR)"
 COMPILE_FILE_DEPS = compile-file.ss include.ss place-register.ss 
 
-RACKET_SETUP_ARGS = ../../bin/racket ../../bin/racket ../collects ../etc 0 true false 0 ""
+RACKET_SETUP_ARGS = false ../../bin/racket ../../bin/racket ../collects ../etc 0 true false 0 ""
 
 PRIMITIVES_TABLES = primitive/kernel.ss primitive/unsafe.ss primitive/flfxnum.ss \
                     primitive/paramz.ss primitive/extfl.ss primitive/network.ss \
@@ -127,8 +129,7 @@ LINKLET_SRCS = linklet/version.ss \
                linklet/performance.ss \
                linklet/annotation.ss \
                linklet/compress.ss \
-               linklet/cross-compile.ss \
-               linklet/db.ss
+               linklet/cross-compile.ss
 
 $(BUILDDIR)linklet.$(CSO): linklet.sls $(LINKLET_SRCS) $(LINKLET_DEPS) $(COMPILE_FILE_DEPS)
 	$(COMPILE_FILE) linklet.sls $(LINKLET_DEPS)
@@ -255,6 +256,9 @@ RUMBLE_SRCS = rumble/define.ss \
               rumble/object-name.ss \
               rumble/arity.ss \
               rumble/intmap.ss \
+              rumble/patricia.ss \
+              rumble/hamt-stencil.ss \
+              rumble/hamt-vector.ss \
               rumble/hash.ss \
               rumble/datum.ss \
 	      rumble/lock.ss \

@@ -3,7 +3,7 @@
          racket/promise
          "model/trace.rkt"
          "model/reductions.rkt"
-         "model/reductions-config.rkt"
+         "model/reductions-util.rkt"
          "model/steps.rkt"
          "syntax-browser/partition.rkt"
          "syntax-browser/pretty-helper.rkt"

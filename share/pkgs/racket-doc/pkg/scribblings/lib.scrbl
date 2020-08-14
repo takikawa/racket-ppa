@@ -3,6 +3,7 @@
           (for-label (except-in racket/base
                                 remove)
                      racket/contract/base
+                     (only-in racket/set set/c)
                      pkg
                      pkg/lib
                      (only-in pkg/db current-pkg-catalog-file)
@@ -186,10 +187,10 @@ is a directory within @racket[path]).
                     [#:in-place? in-place? boolean? #f]
                     [#:namespace namespace namespace? (make-base-namespace)]
                     [#:strip strip (or/c #f 'source 'binary 'binary-lib) #f]
-                    [#:force-strip? force-string? boolean? #f]
+                    [#:force-strip? force-strip? boolean? #f]
                     [#:use-cache? use-cache? boolean? #f]
                     [#:quiet? quiet? boolean? #t])
-         (values string? path? (or/c #f string?) boolean? (listof module-path?))]{
+         (values string? path? (or/c #f string?) boolean? (set/c module-path?))]{
 
 Locates the implementation of the package specified by @racket[desc]
 and downloads and unpacks it to a temporary directory (as needed).
@@ -220,7 +221,8 @@ needed, and a list of module paths provided by the package.}
 
 
 @defproc[(pkg-config [set? boolean?] [keys/vals list?]
-                     [#:from-command-line? from-command-line? boolean? #f])
+                     [#:from-command-line? from-command-line? boolean? #f]
+                     [#:default-scope-scope default-scope-scope (or/c #f 'installation 'user (and/c path? complete-path?)) #f])
          void?]{
 
 Implements @racket[pkg-config-command].
@@ -228,8 +230,17 @@ Implements @racket[pkg-config-command].
 If @racket[from-command-line?]  is true, error messages may suggest
 specific command-line flags for @command-ref{config}.
 
+If @racket[default-scope-scope] is not @racket[#f], then it specifies
+potentially narrower scope than @racket[(current-pkg-scope)] where
+@racket['default-scope] is configured. That information may trigger
+output to warn a user that a @racket['default-scope] setting in a
+wider scope does not have any effect. See also
+@racket[pkg-config-default-scope-scope].
+
 The package lock must be held (allowing writes if @racket[set?] is true); see
-@racket[with-pkg-lock].}
+@racket[with-pkg-lock].
+
+@history[#:changed "7.7.0.9" @elem{Added the @racket[#:default-scope-scope] argument.}]}
 
 
 @defproc[(pkg-create [format (or/c 'zip 'tgz 'plt 'MANIFEST)]
@@ -262,7 +273,7 @@ is true, error messages may suggest specific command-line flags for
                            [#:use-trash? use-trash? boolean? #f]
                            [#:from-command-line? from-command-line? boolean? #f]
                            [#:strip strip (or/c #f 'source 'binary 'binary-lib) #f]
-                           [#:force-strip? force-string? boolean? #f]
+                           [#:force-strip? force-strip? boolean? #f]
                            [#:multi-clone-mode multi-clone-mode (or/c 'fail 'force 'convert 'ask) 'fail]
                            [#:pull-mode pull-mode (or/c 'ff-only 'try 'rebase) 'ff-only]
                            [#:link-dirs? link-dirs? boolean? #f]
@@ -319,7 +330,7 @@ The package lock must be held; see @racket[with-pkg-lock].
                           [#:use-trash? use-trash? boolean? #f]
                           [#:from-command-line? from-command-line? boolean? #f]
                           [#:strip strip (or/c #f 'source 'binary 'binary-lib) #f]
-                          [#:force-strip? force-string? boolean? #f]
+                          [#:force-strip? force-strip? boolean? #f]
                           [#:lookup-for-clone? lookup-for-clone? boolean? #f]
                           [#:multi-clone-mode multi-clone-mode (or/c 'fail 'force 'convert 'ask) 'fail]
                           [#:pull-mode pull-mode (or/c 'ff-only 'try 'rebase) 'ff-only]
@@ -438,7 +449,7 @@ The package lock must be held to allow reads; see
                            [#:quiet? quiet? boolean? #f]
                            [#:from-command-line? from-command-line? boolean? #f]
                            [#:strip strip (or/c #f 'source 'binary 'binary-lib) #f]
-                           [#:force-strip? force-string? boolean? #f]
+                           [#:force-strip? force-strip? boolean? #f]
                            [#:dry-run? dry-run? boolean? #f])
          (or/c 'skip
                #f
@@ -495,6 +506,13 @@ for extracting existing catalog information.
                               [#:from-config? from-config? boolean? #f]
                               [#:state-catalog state-catalog (or/c #f path-string?) #f]
                               [#:relative-sources? relative-sources? boolean? #f]
+                              [#:include includes (or/c #f (listof string?)) #f]
+                              [#:include-deps? include-deps? boolean? #f]
+                              [#:include-deps-sys+subtype include-deps-sys+subtype (or/c #f (cons/c symbol?
+                                                                                                    path-for-some-system?))
+                                                           #f]
+                              [#:exclude excludes (listof string?) '()]
+                              [#:fast-file-copy? fast-file-copy? boolean? #f]
                               [#:quiet? quiet? boolean? #f]
                               [#:package-exn-handler package-exn-handler (string? exn:fail? . -> . any) (lambda (_pkg-name _exn) (raise _exn))])
          void?]{
@@ -512,7 +530,10 @@ The @racket[current-pkg-lookup-version] parameter determines the version
 for extracting existing catalog information.
 
 @history[#:added "6.0.1.7"
-         #:changed "6.0.1.13" @elem{Added the @racket[#:package-exn-handler] argument.}]}
+         #:changed "6.0.1.13" @elem{Added the @racket[#:package-exn-handler] argument.}
+         #:changed "7.7.0.1" @elem{Added the @racket[#:include], @racket[#:include-deps?],
+                                   @racket[#:include-deps-platform],
+                                   @racket[#:exclude], and @racket[#:fast-file-copy?] arguments.}]}
 
 @defproc[(pkg-archive-pkgs [dest-dir path-string?]
                            [pkgs (listof path-string?)]
@@ -732,3 +753,18 @@ platform-specific installations as determined by
 files.
 
 @history[#:added "6.0.1.13"]}
+
+
+@defproc[(pkg-config-default-scope-scope) (or/c #f 'user 'installation (and/c path? complete-path?))]{
+
+Reports the narrowest scope that is at least as wide as
+@racket[current-pkg-scope] and that has a configuration for
+@racket['default-scope]. The result can be useful with
+@racket[pkg-config].
+
+The package lock must be held; see @racket[with-pkg-lock]. Note that
+@racket[pkg-config] cannot necessarily call
+@racket[pkg-config-default-scope-scope] itself, because it may be
+called with a lock that is wider than the narrowest relevant scope.
+
+@history[#:added "7.7.0.9"]}

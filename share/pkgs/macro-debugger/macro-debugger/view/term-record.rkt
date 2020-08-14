@@ -10,7 +10,7 @@
          macro-debugger/model/deriv-util
          macro-debugger/model/deriv-parser
          macro-debugger/model/trace
-         macro-debugger/model/reductions-config
+         macro-debugger/model/reductions-util
          macro-debugger/model/reductions
          macro-debugger/model/steps
          "cursor.rkt")

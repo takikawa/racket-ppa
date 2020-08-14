@@ -24,19 +24,26 @@
 
 ;; 1: C->S
 
+;; CB = #f | #t | (list cb-type cb-data)
+
 (define (make-scram-client-ctx digest authcid password
+                               #:channel-binding [cb #f]
                                #:authorization-id [authzid #f]
                                #:client-nonce [client-nonce0 #f])
   (define h (make-hasheq))
   (hash-set! h 'digest digest)
-  (define! h cbind #f)
+  (define! h cbind cb)
   (define! h p-authcid (saslprep authcid #:who 'make-scram-client-ctx))
   (define! h p-authzid (and authzid (saslprep authzid #:who 'make-scram-client-ctx)))
   (define! h p-password (string->bytes/utf-8 (saslprep password)))
   (define! h gs2-header
-    (string-append (cond [(string? cbind) (format "p=~a" cbind)]
-                         [else (if cbind "y" "n")])
-                   "," (if p-authzid (format "a=~a" (encode-name p-authzid)) "") ","))
+    (format "~a,~a,"
+            (match cbind
+              [(list cb-type cb-data)
+               (format "p=~a" cb-type)]
+              ['#t "y"]
+              ['#f "n"])
+            (if p-authzid (format "a=~a" (encode-name p-authzid)) "")))
   (define! h client-nonce (or client-nonce0 (generate-client-nonce)))
   (define! h msg-c1/bare (format "n=~a,r=~a" (encode-name p-authcid) client-nonce))
   (define! h msg-c1 (string-append gs2-header msg-c1/bare))
@@ -90,8 +97,9 @@
   (define! h server-key (hmac digest salted-password #"Server Key"))
 
   ;; cbind-input = gs2-header [ cbind-data ] -- present iff gs2-cbind-flag="p"
-  (define cbind-data (if (string? cbind) (fatal ctx "unimplemented") ""))
-  (define! h cbind-input (string-append gs2-header cbind-data))
+  (define cbind-data
+    (match cbind [(list cb-type cb-data) cb-data] [_ #""]))
+  (define! h cbind-input (bytes-append (string->bytes/utf-8 gs2-header) cbind-data))
   ;; channel-binding = "c=" <base64 encoding of cbind-input>
   ;; client-final-message-wo-proof = channel-binding "," nonce ["," extensions]
   (define! h msg-c2/no-proof (format "c=~a,r=~a" (->base64-bytes cbind-input) nonce))

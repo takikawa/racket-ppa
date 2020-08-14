@@ -3,9 +3,9 @@
 ;; more-scheme : case, do, etc. - remaining syntax
 
 (module more-scheme '#%kernel
-  (#%require "small-scheme.rkt" "define.rkt" '#%paramz "case.rkt" "logger.rkt"
+  (#%require "define-et-al.rkt" "qq-and-or.rkt" "cond.rkt" "define.rkt" '#%paramz "case.rkt" "logger.rkt"
              "member.rkt"
-             (for-syntax '#%kernel "stx.rkt" "small-scheme.rkt" "stxcase-scheme.rkt" "qqstx.rkt"))
+             (for-syntax '#%kernel "stx.rkt" "define-et-al.rkt" "qq-and-or.rkt" "cond.rkt" "stxcase-scheme.rkt" "qqstx.rkt"))
 
   ;; For `old-case`:
   (define-syntax case-test
@@ -258,8 +258,9 @@
                                      #'select-handler/breaks-as-is)
                                e bpz
                                (list (cons pred-name handler-name) ...)))
-                            (lambda ()
-                              expr1 expr ...)))))))])))])
+                            #,(syntax/loc stx
+                                (lambda ()
+                                  expr1 expr ...))))))))])))])
       (values (wh #t) (wh #f))))
 
   (define (call-with-exception-handler exnh thunk)
