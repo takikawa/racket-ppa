@@ -1,30 +1,20 @@
-# Quickscript: A script system for DrRacket
+# Quickscript: Scripting engine for DrRacket
 
-Quickscript is a tool for DrRacket which allows to quickly and easily extend DrRacket features, without having to restart it.
+Quickscript [[docs](http://pkg-build.racket-lang.org/doc/quickscript/index.html)] is a tool for DrRacket which allows to quickly and easily extend DrRacket features, without having to restart it.
 The scripts are automatically accessible from a new menu in DrRacket.
 
-[[Slides from RacketCon 2018](https://drive.google.com/open?id=1ZDtEZ5XIWemWXC5L4Qu-FhuDieRPHwvU)]
+The [slides from RacketCon 2018](https://github.com/Metaxal/quickscript/blob/master/docs/racketcon-2018-quickscript.pdf) provide more context on the why of Quickscript.
 
-*Note:* Quickscript (but not yet quickscript-extra) now comes bundled with DrRacket.
 
 ## 1. Installation
 
-* From DrRacket:
-In DrRacket, in `File|Package` `manager|Source`, type
-`https://github.com/Metaxal/quickscript.git`.
-
-* Or from the command line:
-```
-raco pkg install https://github.com/Metaxal/quickscript.git
-```
-
-You will need to restart DrRacket. A new `Scripts` menu should appear.
+Quickscript (but not yet quickscript-extra) now comes bundled with DrRacket.
 
 You may want to install [additional scripts](https://github.com/Metaxal/quickscript-extra), but Quickscript can also be used alone.
 
 ## 2. Usage
 
-Have a look at the new menu.
+Have a look at the `Scripts` menu in DrRacket.
 
 See the [docs](http://pkg-build.racket-lang.org/doc/quickscript/index.html) for more information.
 

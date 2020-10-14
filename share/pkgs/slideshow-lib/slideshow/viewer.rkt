@@ -110,7 +110,7 @@
 	(set! given-slide-count (add1 given-slide-count))
 	(given->main!)
 	(if config:printing?
-	    (send progress-display set-label (number->string slide-count))
+	    (report-progress)
 	    (begin
 	      (send f slide-changed (sub1 slide-count))
 	      (when (and target-page (= target-page (sub1 slide-count)))
@@ -1193,6 +1193,12 @@
                            (/ (- ch ush) 2)
                            usw ush))))))
 
+    (define (maybe-set-smoothing dc)
+      (when config:smoothing?
+        ; When printing, there is no known pixel grid, so 'aligned drawing
+        ; doesn't make sense; see racket/draw#26.
+        (send dc set-smoothing (if config:printing? 'smoothed 'aligned))))
+
       (define paint-slide
 	(case-lambda
 	 [(canvas dc) (paint-slide canvas dc current-page)]
@@ -1221,8 +1227,7 @@
 		 [my (/ (- ch ush) 2)])
 	    (define clip-rgn (paint-letterbox dc cw ch usw ush #t))
 
-            (when config:smoothing?
-              (send dc set-smoothing 'aligned))
+            (maybe-set-smoothing dc)
             (send dc set-scale (* extra-scale-x sx) (* extra-scale-y sy))
 
 	    ;; Draw the slide
@@ -1339,8 +1344,9 @@
       (define c-both (make-object two-c% f-both))
 
       (define (viewer:pict->pre-render-pict p)
-        (case (system-type)
-          [(macosx)
+        (cond
+          [(and (not config:printing?)
+                (eq? (system-type) 'macosx))
            (let ([bm (send c make-bitmap
                            (inexact->exact (ceiling (pict-width p)))
                            (inexact->exact (ceiling (pict-height p))))])
@@ -1529,8 +1535,7 @@
 
       (define (do-print)
 	(let ([ps-dc (dc-for-text-size)])
-	  (when config:smoothing?
-	    (send ps-dc set-smoothing 'aligned)) ; for printer-dc%
+          (maybe-set-smoothing ps-dc) ; for printer-dc%
 	  (let loop ([start? #f][l (list-tail talk-slide-list current-page)][n current-page])
 	    (unless (null? l)
 	      (set! current-page n)
@@ -1564,34 +1569,53 @@
 	      (send ps-dc end-page)
 	      (loop #t (cdr l) (add1 n))))
 	  (parameterize ([current-security-guard original-security-guard])
-	    (send ps-dc end-doc))
-	  (exit)))
+	    (send ps-dc end-doc))))
 
       ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ;;                Progress for Print             ;;
       ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-      (define-values (progress-window progress-display)
-	(if config:printing?
-	    (parameterize ([current-eventspace (make-eventspace)])
-	      (let* ([f (make-object (class frame%
-				       (define/augment (on-close) (exit))
-				       (super-instantiate ()))
-				     "Progress")]
-		     [h (instantiate horizontal-panel% (f)
-				     (stretchable-width #f)
-				     (stretchable-height #f))])
-		(make-object message% "Building slide: " h)
-		(let ([d (make-object message% "0000" h)])
-		  (send d set-label "1")
-		  (send f center)
-		  (send f show #t)
-		  (values f d))))
-	    (values #f #f)))
+      (define report-progress
+        (case config:progress-mode
+          [(none) void]
+
+          [(text)
+           (lambda ()
+             (printf "\rBuilding slide ~a..." slide-count)
+             (flush-output))]
+
+          [(gui)
+           (parameterize ([current-eventspace (make-eventspace)])
+             (define frame (make-object (class frame%
+                                          (define/augment (on-close) (exit))
+                                          (super-instantiate ()))
+                             "Progress"))
+             (define panel (instantiate horizontal-panel% (frame)
+                             (stretchable-width #f)
+                             (stretchable-height #f)))
+             (make-object message% "Building slide: " panel)
+
+             (define display (make-object message% "0000" panel))
+             (send display set-label "1")
+             (send frame center)
+             (send frame show #t)
+             
+             (lambda ()
+               (send display set-label (number->string slide-count))))]))
 
       (define (viewer:done-making-slides)
 	(when config:printing?
-	  (do-print)))
+          (when (eq? config:progress-mode 'text)
+            (displayln " done.")
+            (display "Printing slides...")
+            (flush-output))
+
+          (do-print)
+
+          (when (eq? config:progress-mode 'text)
+            (displayln " done."))
+
+          (exit)))
 
       (when config:printing?
         ;; Just before exiting normally, print the slides:

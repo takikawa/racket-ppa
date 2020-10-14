@@ -419,6 +419,11 @@ scope}. Search then proceeds in a configured order, where
 @exec{installation} @tech{package scope} typically precedes other
 directory @tech{package scopes}.
 
+The default package scope is determined by first checking the
+configuration at @racket['user] scope, and then checking for
+configuration in wider scopes like @racket['installation]. If the
+default package scope is not configured in any scope, then it defaults
+to @racket['user].
 
 @; ----------------------------------------
 
@@ -466,25 +471,34 @@ sub-commands.
    @item{@exec{fail} --- Cancels the installation if dependencies are uninstalled or version requirements are unmet. 
         This behavior is the default for non-@tech{interactive mode}.}
    @item{@exec{force} --- Installs the package(s) despite missing dependencies or version requirements.
-         Forcing an installation may leave package content in an inconsistent state.}
+         Forcing an installation may leave package content in an inconsistent state. Implied packages
+         via @racketidfont{implies} or @racketidfont{update-implies} (see @secref["metadata"]) are not updated,
+         even if @DFlag{ignore-implies} is not specified.}
    @item{@exec{search-ask} --- Looks for dependencies (when uninstalled) or updates (when version requirements are unmet)
          via the configured @tech{package catalogs},
          but asks the user whether packages should be installed or updated. This behavior is the default in @tech{interactive mode}.}
-   @item{@exec{search-auto} --- Like @exec{search-ask}, but does not ask for permission to install or update.}
-  ]}
+   @item{@exec{search-auto} --- Like @exec{search-ask}, but does not ask for permission to install or update a dependency.}
+  ]
+
+         Unless @DFlag{ignore-implies} is specified, when a package is updated or installed, any package that
+         it implies via @racketidfont{implies} or @racketidfont{update-implies} (see @secref["metadata"]) is automatically
+         updated independent of @exec{fail}, @exec{search-ask}, or @exec{search-auto}, but implied dependencies
+         are not updated for @exec{force} behavior.}
 
   @item{@DFlag{auto} --- Shorthand for @exec{@DFlag{deps} search-auto}.}
 
   @item{@DFlag{update-deps} --- With @exec{search-ask} or @exec{search-auto} dependency behavior, checks
         already-installed dependencies transitively for updates (even when
-        not forced by version requirements), asking or automatically updating a
-        package when an update is available. When a package is updated or installed,
-        unless @DFlag{skip-implies} is specified, any package that
-        it implies (see @secref["metadata"]) is automatically updated independent of the behavior
-        requested via @DFlag{update-deps} and @DFlag{deps}.}
+        not forced by version requirements, @racketidfont{implies}, or @racketidfont{update-implies}), asking or automatically updating a
+        package when an update is available.
 
-  @item{@DFlag{skip-implies} --- Disables special treatment of dependencies that are listed
-        in @racketidfont{implies} (see @secref["metadata"]) for an installed or updated package.}
+        Unless @DFlag{ignore-implies} or @exec{@DFlag{deps} force} is specified, when a package is updated or installed,
+        any package that it implies @racketidfont{implies} or @racketidfont{update-implies} (see @secref["metadata"]) is
+        automatically updated independent of the behavior requested via @DFlag{update-deps}.}
+
+  @item{@DFlag{ignore-implies} --- Disables special treatment of dependencies that are listed
+        in @racketidfont{implies} or @racketidfont{update-implies} (see @secref["metadata"])
+        for an installed or updated package.}
 
   @item{@DFlag{link} --- Implies @exec{--type dir}
         and links the existing directory as an installed package, instead of copying the
@@ -714,7 +728,7 @@ the given @nonterm{pkg-source}s.
  @item{@DFlag{auto} --- Shorthand for @exec{@DFlag{deps} search-auto} plus @DFlag{update-deps}.}
  @item{@DFlag{update-deps} --- Same as for @command-ref{install}, but
        implied by @DFlag{auto} only for @command-ref{update}.}
- @item{@DFlag{skip-implies} --- Same as for @command-ref{install}.}
+ @item{@DFlag{ignore-implies} --- Same as for @command-ref{install}.}
  @item{@DFlag{link} --- Same as for @command-ref{install}, but a
        directory package source is treated as a link by default only
        when it does not correspond to a link or a Git repository
@@ -1100,9 +1114,33 @@ for @nonterm{key}.
          @item{@exec{continue} --- like @exec{skip}, but @exec{raco pkg catalog-archive}
                exits with a status code of @exec{5} if any package was skipped.}
        ]}
+
+ @item{@DFlag{include} @nonterm{pkg} --- Can be specified multiple times. If @DFlag{include} is
+       specified at least once, then the archive and generated catalog includes only
+       the @nonterm{pkg}s specified with @DFlag{include}, plus the dependencies
+       of each @nonterm{pkg} if @DFlag{include-deps} is specified, modulo packages
+       excluded via @DFlag{exclude}.}
+ @item{@DFlag{include-deps} --- Modifies the @DFlag{includes} @nonterm{pkg} flag to imply all
+       dependencies of @nonterm{pkg}.}
+ @item{@DFlag{include-deps-platform} @nonterm{sys} @nonterm{subpath} --- Modifies @DFlag{include-deps}
+       to imply only dependencies that match the platform @nonterm{sys}, which should be
+       a possible result of @racket[(system-type)], and @nonterm{subpath}, which should be
+       a possible result of @racket[(system-library-subpath #f)]}
+ @item{@DFlag{exclude} @nonterm{pkg} --- Can be specified multiple times. Removes @nonterm{pkg}
+       from the set of packages in the archive and generated catalog. If @DFlag{include} is
+       used for the same @nonterm{pkg}, then @DFlag{exclude} takes
+       precedence. If @DFlag{include} is used with
+       @DFlag{include-deps} for @nonterm{pkg} or a package that depends on @nonterm{pkg},
+       then @DFlag{exclude} stops the consideration of @nonterm{pkg}'s
+       dependencies (but does not necessarily exclude the dependencies, because they
+       may be dependencies of an included package).}
+ @item{@DFlag{fast-file-copy} --- Directly copies package files from the @nonterm{src-catalog}s
+       when available on the local filesystem, instead of extracting and repacking.}
  ]
 
- @history[#:added "6.0.17"]
+ @history[#:added "6.0.17"
+          #:changed "7.7.0.1" @elem{Added @DFlag{include}, @DFlag{include-deps}, @DFlag{include-deps-platform},
+                                    @DFlag{exclude}, and @DFlag{fast-file-copy}.}]
 }
 
 @subcommand{@command/toc{archive} @nonterm{option} ... @nonterm{dest-dir} @nonterm{pkg} ...

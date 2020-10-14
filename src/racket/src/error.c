@@ -3975,17 +3975,21 @@ void scheme_glib_log_message(const char *log_domain,
 void *scheme_glib_log_message_test(char *str)
   XFORM_SKIP_PROC
 {
-  int i;
-  for (i = 0; str[i]; i++) {
-    if (str[i] == ';') {
-      str[i] = 0;
-      scheme_glib_log_message("test", mzG_LOG_LEVEL_WARNING, str, NULL);
-      str[i] = ';';
-      str = str + i + 1;
-      i = 0;
+  if (!str) {
+    scheme_glib_log_message(NULL, mzG_LOG_LEVEL_WARNING, "test", NULL);
+  } else {
+    int i;
+    for (i = 0; str[i]; i++) {
+      if (str[i] == ';') {
+        str[i] = 0;
+        scheme_glib_log_message("test", mzG_LOG_LEVEL_WARNING, str, NULL);
+        str[i] = ';';
+        str = str + i + 1;
+        i = 0;
+      }
     }
+    scheme_glib_log_message("test", mzG_LOG_LEVEL_WARNING, str, NULL);
   }
-  scheme_glib_log_message("test", mzG_LOG_LEVEL_WARNING, str, NULL);
   return NULL;
 }
 
@@ -4085,7 +4089,7 @@ log_message(int argc, Scheme_Object *argv[])
   bytes = scheme_char_string_to_byte_string(bytes);
   pos++;
 
-  if (argc >= (pos+1))
+  if (argc > (pos+1))
     pfx = SCHEME_TRUEP(argv[pos+1]);
   else
     pfx = 1;

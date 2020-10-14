@@ -48,7 +48,7 @@
           (set! debugging? saved-debugging?)
           (when saved-eo (current-expand-observe saved-eo))))))
   (define (new-eval expr)
-    (cond [(and debugging? (not (compiled-expression? expr)))
+    (cond [(and debugging? (not (stx-compiled-expression? expr)))
            (define-values (e-expr events derivp)
              (trace*
               (cond [(syntax? expr) expr]
@@ -63,6 +63,9 @@
      (lambda () (apply original-module-resolver args))))
   (values new-eval new-module-resolver))
 
+(define (stx-compiled-expression? v)
+  (or (compiled-expression? v)
+      (and (syntax? v) (compiled-expression? (syntax-e v)))))
 
 (provide/contract
  [expand/step

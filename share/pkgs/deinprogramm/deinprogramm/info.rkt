@@ -5,7 +5,7 @@
 (define tools '("sdp/private/sdp-langs.rkt" "DMdA/private/DMdA-langs.rkt"))
 
 (define tool-icons '(("logo-small.png" "deinprogramm") ("dmda-logo.png" "deinprogramm")))
-(define tool-names '("DeinProgramm" "DeinProgramm"))
+(define tool-names '("DeinProgramm SDP" "DeinProgramm DMdA"))
 (define tool-urls '("http://www.deinprogramm.de/" "http://www.deinprogramm.de/dmda/"))
 
 (define compile-omit-paths

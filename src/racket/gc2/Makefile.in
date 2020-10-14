@@ -379,7 +379,9 @@ $(XSRCDIR)/main.c: $(XFORMDEP)
 @INCLUDEDEP@ foreign.d
 @INCLUDEDEP@ main.d
 
-$(XSRCDIR)/mzobj.cxx: $(XFORMDEP) $(srcdir)/../../mzcom/mzobj.cxx
+CMDL_DEPS = $(srcdir)/../../start/parse_cmdl.inc $(srcdir)/../../start/cmdl_to_argv.inc
+
+$(XSRCDIR)/mzobj.cxx: $(XFORMDEP) $(srcdir)/../../mzcom/mzobj.cxx $(CMDL_DEPS)
 	$(XFORM_NOPRECOMP) $(XSRCDIR)/mzobj.cxx $(DEF_C_DIRS) $(srcdir)/../../mzcom/mzobj.cxx
 
 salloc.@LTO@: $(XSRCDIR)/salloc.c
@@ -502,10 +504,10 @@ foreign.@LTO@: $(XSRCDIR)/foreign.c
 main.@LTO@: $(XSRCDIR)/main.c
 	$(CC) $(ALL_CFLAGS) -c $(XSRCDIR)/main.c -o main.@LTO@
 
-$(SRCDIR)/gmp_alpha_gcc.@LTO@: $(SRCDIR)/gmp/gmp_alpha_gcc.s
-	$(AS) -o $(SRCDIR)/gmp_alpha_gcc.@LTO@ $(SRCDIR)/gmp/gmp_alpha_gcc.s
-$(SRCDIR)/gmp_arm_gcc.@LTO@: $(SRCDIR)/gmp/gmp_arm_gcc.s
-	$(AS) -o $(SRCDIR)/gmp_arm_gcc.@LTO@ $(SRCDIR)/gmp/gmp_arm_gcc.s
+gmp_alpha_gcc.@LTO@: $(SRCDIR)/gmp/gmp_alpha_gcc.s
+	$(AS) -o gmp_alpha_gcc.@LTO@ $(SRCDIR)/gmp/gmp_alpha_gcc.s
+gmp_arm_gcc.@LTO@: $(SRCDIR)/gmp/gmp_arm_gcc.s
+	$(CC) -o gmp_arm_gcc.@LTO@ -c $(SRCDIR)/gmp/gmp_arm_gcc.S
 
 mzcom.@LTO@: $(srcdir)/../../mzcom/mzcom.cxx
 	$(CC) -DMZCOM_3M $(ALL_CFLAGS) -fno-exceptions -c $(srcdir)/../../mzcom/mzcom.cxx -o mzcom.@LTO@
@@ -581,7 +583,8 @@ LIBRKTIO_FOR_DLL = $(LIBRKTIO_FOR_DLL_@LIBSFX@)
 LIBRKTIO_FOR_LIB = $(LIBRKTIO_FOR_LIB_@LIBSFX@)
 LIBRKTIO_UP_FOR_LIB = $(LIBRKTIO_UP_FOR_LIB_@LIBSFX@)
 
-EXTRA_GMP_DEP_FILE = $(SRCDIR)/@EXTRA_GMP_OBJ@
+LTO=@LTO@ # Need for replacement of EXTRA_GMP_OBJ which carries the variable
+EXTRA_GMP_DEP_FILE = @EXTRA_GMP_OBJ@
 EXTRA_GMP = @EXTRA_GMP_DEP@
 
 EXTRA_OBJS_T = $(EXTRA_GMP) ../src/unwind.@LTO@ $(@FOREIGN_IF_USED@_LIB) $(LIBRKTIO_FOR_DLL)
@@ -620,7 +623,7 @@ MACLIBRKT_LINK_static = $(MACLIBRKT_LIBS)
 
 ../lib/libracket3mxxxxxxx.dll: ../libracket3m.@LIBSFX@ ../mzsj86g.o $(LIBRKTIO)
 	mkdir -p ../lib
-	@MZLINKER@ -shared -o ../lib/libracket3mxxxxxxx.dll ../mzsj86g.o -Wl,--output-def -Wl,libracket3m.def -Wl,--whole-archive ../libracket3m.@LIBSFX@ -Wl,--no-whole-archive $(LIBRKTIO) @LDFLAGS@ -lshell32 -luser32 -lws2_32 -static-libgcc @LIBS@
+	@MZLINKER@ -shared -o ../lib/libracket3mxxxxxxx.dll ../mzsj86g.o -Wl,--output-def -Wl,libracket3m.def -Wl,--whole-archive ../libracket3m.@LIBSFX@ -Wl,--no-whole-archive $(LIBRKTIO) @LDFLAGS@ -lshell32 -luser32 -lws2_32 -lwinmm -static-libgcc @LIBS@
 
 libracket3m.dll.a: ../lib/libracket3mxxxxxxx.dll
 	@DLLTOOL@ --def libracket3m.def -D libracket3mxxxxxxx.dll --output-exp libracket3mxxxxxxx.exp --output-lib libracket3mxxxxxxx.lib --output-delaylib libracket3m.dll.a

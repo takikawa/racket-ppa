@@ -424,12 +424,12 @@
        [(? Union? t)
         (match (normalize-type t)
           [(HashTableTop:)
-           ;; NOTE: this is a special case to make `HashTableTop` produce a flat contract.
+           ;; NOTE: this is a special case to make `HashTableTop` produce a flat contract in casts.
            ;; Without this case:
            ;; - `HashTableTop` would make a chaperone contract
            ;; - because `HashTableTop` is a union containing `(Immutable-HashTable Any Any)`
            ;; - and `Any` makes a chaperone contract
-           hash?/sc]
+           (only-untyped hash?/sc)]
           [(Union-all-flat: elems)
            (apply or/sc (merge-overlapping-scs (map t->sc elems)))]
           [t (t->sc t)])]
@@ -499,8 +499,21 @@
        [(Mutable-VectorTop:)
         (only-untyped mutable-vector?/sc)]
        [(Box: t) (box/sc (t->sc/both t))]
-       [(Pair: t1 t2)
-        (cons/sc (t->sc t1) (t->sc t2))]
+       [(Pair: t-car t-cdr)
+        ;; look ahead as long as t-cdr is a Pair
+        (define-values [t-last rev-sc*]
+          (let loop ((t t-cdr)
+                     (sc* (list (t->sc t-car))))
+            (match t
+             [(Pair: t-car t-cdr)
+              (loop t-cdr (cons (t->sc t-car) sc*))]
+             [_
+              (values t sc*)])))
+        (if (eq? -Null t-last)
+          (apply list/sc (reverse rev-sc*))
+          (for/fold ((sc-cdr (t->sc t-last)))
+                    ((sc (in-list rev-sc*)))
+            (cons/sc sc sc-cdr)))]
        [(Async-Channel: t) (async-channel/sc (t->sc t))]
        [(Promise: t)
         (promise/sc (t->sc t))]

@@ -1027,6 +1027,19 @@ please adhere to these guidelines:
   (autosave-recover "Recover")
   (autosave-unknown-filename "<<unknown>>")
 
+  ;;; autoloading
+  (autoload-file-changed-on-disk
+   "The file has changed on the disk. Do you want"
+   " to revert the buffer's contents to match the file on disk?")
+  (autoload-file-changed-on-disk-editor-dirty
+   "The file has changed on the disk. Do you want"
+   " to revert the buffer's contents to match the file on"
+   " disk?\n\nDoing so risks losing unsaved changes.")
+  (autoload-automatically-reload "Automatically Reload Changed Files")
+  (autoload-when-the-editor-isnt-dirty "When the editor has not been modified")
+  (autoload-never-revert "Never")
+  (autoload-ask-about-reverting "Ask me each time")
+
   ;; these are labels in a dialog that drscheme displays
   ;; if you have leftover autosave files. to see the dialog,
   ;; start up drscheme and modify (but don't save) a file

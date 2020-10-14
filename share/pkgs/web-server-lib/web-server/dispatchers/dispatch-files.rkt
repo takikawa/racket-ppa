@@ -1,7 +1,8 @@
 #lang racket/base
 (require net/url
          racket/match
-         racket/contract)
+         racket/contract
+         racket/bool)
 
 (require web-server/dispatchers/dispatch
          web-server/private/util
@@ -24,6 +25,12 @@
   (and (regexp-match #rx"/$" path)
        #t))
 
+; path? -> boolean?
+(define (can-emit-file? path)
+  (and (file-exists? path)
+       (member 'read (file-or-directory-permissions path))
+       #t))
+
 (define interface-version 'v1)
 
 (define (make #:url->path url->path
@@ -33,22 +40,33 @@
     (define uri (request-uri req))
     (define method (request-method req))
     (define-values (path _) (url->path uri))
-    (cond [(file-exists? path)
-           (output-file conn path method (path->mime-type path)
-                        (read-range-header (request-headers/raw req)))]
+    (define is-head? (bytes-ci=? method #"HEAD"))
+    (define is-get? (bytes-ci=? method #"GET"))
+    (define (emit-file-response path)
+      (output-file conn
+                   path
+                   method
+                   (path->mime-type path)
+                   (read-range-header (request-headers/raw req))))
+    (define path/string (url-path->string (url-path uri)))
+    (define (emit-index-if-possible dir)
+      (let/ec esc
+        (for-each (lambda (dir-default)
+                    (define full-name (build-path dir dir-default))
+                    (when (can-emit-file? full-name)
+                      (esc (emit-file-response full-name))))
+                  indices)
+        (next-dispatcher)))
+    (cond [(nor is-head? is-get?)
+           (next-dispatcher)]
+          [(can-emit-file? path)
+           (emit-file-response path)]
           [(directory-exists? path)
-           (if (looks-like-directory? (url-path->string (url-path uri)))
-               (let/ec esc
-                 (for-each (lambda (dir-default)
-                             (define full-name (build-path path dir-default))
-                             (when (file-exists? full-name)
-                               (esc (output-file conn full-name method (path->mime-type full-name)
-                                                 (read-range-header (request-headers/raw req))))))
-                           indices)
-                 (next-dispatcher))
-               (output-response 
+           (if (looks-like-directory? path/string)
+               (emit-index-if-possible path)
+               (output-response
                 conn
-                (redirect-to (string-append (url-path->string (url-path uri)) "/"))))]
+                (redirect-to (string-append path/string "/"))))]
           [else (next-dispatcher)])))
 
 ;; read-range-header : (listof header) -> (U (alist-of (U integer #f) (U integer #f)) #f)

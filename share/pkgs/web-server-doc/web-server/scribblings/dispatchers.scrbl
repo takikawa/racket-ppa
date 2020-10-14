@@ -153,7 +153,7 @@ URLs to paths on the filesystem.
 }}
 
 @; ------------------------------------------------------------
-@section[#:tag "dispatch-filter"]{Filtering Requests}
+@section[#:tag "dispatch-filter"]{Filtering Requests by URL}
 @a-dispatcher[web-server/dispatchers/dispatch-filter
               @elem{defines a dispatcher constructor
                  that calls an underlying dispatcher
@@ -163,6 +163,19 @@ URLs to paths on the filesystem.
          dispatcher/c]{
  Calls @racket[inner] if the URL path of the request, converted to
  a string, matches @racket[regex]. Otherwise, calls @racket[next-dispatcher].
+}}
+
+@; ------------------------------------------------------------
+@section[#:tag "dispatch-method"]{Filtering Requests by Method}
+@a-dispatcher[web-server/dispatchers/dispatch-method
+              @elem{defines a dispatcher constructor
+                 that calls an underlying dispatcher
+                 provided the request method belongs to a given list.}]{
+
+@defproc[(make (method (or/c symbol? (listof symbol?))) (inner dispatcher/c))
+         dispatcher/c]{
+ Calls @racket[inner] if the method of the request, converted to
+ a string, case-insensitively matches @racket[method] (if method is a symbol, or, if a list, one of the elements of @racket[method]). Otherwise, calls @racket[next-dispatcher].
 }}
 
 @; ------------------------------------------------------------
@@ -194,7 +207,7 @@ a URL that refreshes the password file, servlet cache, etc.}
 @defthing[paren-format format-req/c]{
  Formats a request by:
  @racketblock[
-  (format 
+  (format
    "~s\n"
    (list 'from (request-client-ip req)
          'to (request-host-ip req)
@@ -206,12 +219,12 @@ a URL that refreshes the password file, servlet cache, etc.}
 @defthing[extended-format format-req/c]{
  Formats a request by:
  @racketblock[
-  (format 
+  (format
    "~s\n"
    `((client-ip ,(request-client-ip req))
      (host-ip ,(request-host-ip req))
-     (referer 
-      ,(let ([R (headers-assq* 
+     (referer
+      ,(let ([R (headers-assq*
                  #"Referer"
                  (request-headers/raw req))])
          (if R
@@ -226,7 +239,7 @@ a URL that refreshes the password file, servlet cache, etc.}
  Formats a request like Apache's default. However, Apache's default
  includes information about the response to a request, which this
  function does not have access to, so it defaults the last two fields
- to 200 and 512.
+ to @racket[200] and @racket[512].
 
 }
 
@@ -241,15 +254,20 @@ a URL that refreshes the password file, servlet cache, etc.}
  @racket['apache-default] to @racket[apache-default-format].
 }
 
-@defproc[(make [#:format format format-req/c paren-format]
+@defproc[(make [#:format format (or/c log-format/c format-req/c) paren-format]
                [#:log-path log-path (or/c path-string? output-port?) "log"])
          dispatcher/c]{
  Logs requests to @racket[log-path], which can be either a filepath or an @racket[output-port?],
- using @racket[format] to format the requests.
+ using @racket[format] to format the requests. (If @racket[format] is a symbol, a log formatter
+ will be tacitly made using @racket[log-format->format].)
  Then invokes @racket[next-dispatcher].
 
- @history[#:changed "1.3"
-          @elem{Allow @racket[log-path] to be an @racket[output-port?]}]
+ @history[
+   #:changed "1.3"
+   @elem{Allow @racket[log-path] to be an @racket[output-port?]}
+   #:changed "1.8"
+   @elem{Allow @racket[format] to be a symbol (more precisely, a @racket[log-format/c]).}
+]
 }}
 
 @; ------------------------------------------------------------
@@ -336,7 +354,7 @@ Creates a denied procedure from an authorized procedure.
                [#:indices indices (listof string?) (list "index.html" "index.htm")])
          dispatcher/c]{
  Uses @racket[url->path] to extract a path from the URL in the request
- object. If this path does not exist, then the dispatcher does not apply and 
+ object. If this path does not exist, then the dispatcher does not apply and
  @racket[next-dispatcher] is invoked.
  If the path is a directory, then the @racket[indices] are checked in order
  for an index file to serve. In that case, or in the case of a path that is
@@ -344,7 +362,25 @@ Creates a denied procedure from an authorized procedure.
  Type of the path. The file is then
  streamed out the connection object.
 
- This dispatcher supports HTTP Range GET requests and HEAD requests.}}
+ This dispatcher supports HTTP Range GET requests and HEAD
+ requests. If the request's method is neither HEAD nor GET,
+ @racket[next-dispatcher] will be called.
+
+ If the path works out to something on disk (either as a
+ file, or, if the path refers to directory, one of the
+ specified @racket[indices] files in that directory), it
+ needs to be readable by the process that is running the web
+ server. Existing but unreadable files are handled as
+ non-existing files.}
+
+@history[
+  #:changed "1.7"
+  @elem{Support for non-{GET,HEAD} requests.}
+  #:changed "1.7"
+  @elem{Treat unreadable files as non-existing files.}
+]
+
+}
 
 @; ------------------------------------------------------------
 @include-section["dispatch-servlets.scrbl"]
@@ -359,7 +395,7 @@ Creates a denied procedure from an authorized procedure.
          thread?]{
  Starts a thread that calls @racket[(collect-garbage)] every @racket[time] seconds.
 }
-                 
+
 @defproc[(make)
          dispatcher/c]{
  Returns a dispatcher that prints memory usage on every request.
@@ -375,7 +411,7 @@ Creates a denied procedure from an authorized procedure.
                [#:over-limit over-limit (symbols 'block 'kill-new 'kill-old) 'block])
          dispatcher/c]{
  Returns a dispatcher that defers to @racket[inner] for work, but will forward a maximum of @racket[limit] requests concurrently.
-         
+
  If there are no additional spaces inside the limit and a new request is received, the @racket[over-limit] option determines what is done.
  The default (@racket['block]) causes the new request to block until an old request is finished being handled.
  If @racket[over-limit] is @racket['kill-new], then the new request handler is killed---a form of load-shedding.
@@ -393,7 +429,7 @@ Creates a denied procedure from an authorized procedure.
 Consider this example:
 @racketmod[
  racket
- 
+
 (require web-server/web-server
          web-server/http
          web-server/http/response
@@ -420,7 +456,7 @@ Consider this example:
                                   <)))))
              (request-method req)))
           #:over-limit 'block))
-        (lambda (conn req)          
+        (lambda (conn req)
           (output-response/method
            conn
            (response/full 200 #"Okay"
