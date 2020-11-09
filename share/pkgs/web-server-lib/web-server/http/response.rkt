@@ -1,11 +1,10 @@
 #lang racket/base
 
-(require racket/contract
-         file/md5
+(require file/md5
+         racket/contract
          racket/port
          racket/list
          racket/match
-         xml/xml
          web-server/private/connection-manager
          (submod web-server/private/connection-manager private)
          web-server/http/request-structs
@@ -13,6 +12,8 @@
          web-server/private/util
          syntax/parse/define
          (for-syntax racket/base
+                     racket/list
+                     syntax/parse
                      syntax/parse/lib/function-header))
 
 (provide
@@ -29,13 +30,12 @@
 (define-simple-macro (define/ext (~and (name:id conn:id arg:formal ...) fun-header)
                        body:expr ...+)
   (define fun-header
-    (with-handlers ([exn:fail? (λ (e)
-                                 (kill-connection! conn)
-                                 (raise e))])
+    (with-handlers ([exn:fail?
+                     (λ (e)
+                       (kill-connection! conn)
+                       (raise e))])
       body ...
       (flush-output (connection-o-port conn)))))
-
-
 
 (define (output-response conn resp)
   (output-response/method conn resp #"GET"))
@@ -54,65 +54,85 @@
        (output-response-body conn resp))]
     ;; Otherwise, use chunked encoding
     [else
-     (output-response-head conn resp
-                           (list (header #"Transfer-Encoding" #"chunked")))
+     (output-response-head conn resp #t)
      (output-response-body/chunked conn resp)]))
 
 ;; Write the headers portion of a response to an output port.
 ;; NOTE: According to RFC 2145 the server should write HTTP/1.1
 ;;       header for *all* clients.
-(define-syntax-rule (maybe-header h k v)
-  (if (hash-has-key? h k)
-      empty
-      (list (header k v))))
-(define-syntax-rule (maybe-headers h [k v] ...)
-  (append (maybe-header h k v)
-          ...))
+(define-syntax (add-missing-headers stx)
+  (syntax-parse stx
+    [(_ hs:expr [name:bytes value:expr] ...+)
+     #'(let ([res hs])
+         (define to-add
+           (for/fold ([to-add (list name ...)])
+                     ([h (in-list hs)])
+             (remove (header-field h) to-add bytes-ci=?)))
+         (let ([value-e value])
+           (when (and value-e (member name to-add bytes-ci=?))
+             (set! res (cons (header name value-e) res)))) ...
+         res)]))
 
-(define (output-response-head conn bresp [more-hs empty])
-  (fprintf (connection-o-port conn)
-           "HTTP/1.1 ~a ~a\r\n"
-           (response-code bresp)
-           (response-message bresp))
-  (define hs (append (response-headers bresp) more-hs))
-  (define seen? (make-hash))
-  (for ([h (in-list hs)])
-    (hash-set! seen? (header-field h) #t))
-  (output-headers
-   conn
-   (append
-    (maybe-headers
-     seen?
-     [#"Date"
-      (string->bytes/utf-8 (seconds->gmt-string (current-seconds)))]
-     [#"Last-Modified"
-      (string->bytes/utf-8 (seconds->gmt-string (response-seconds bresp)))]
-     [#"Server"
-      #"Racket"])
-    (if (response-mime bresp)
-        (maybe-headers
-         seen?
-         [#"Content-Type"
-          (response-mime bresp)])
-        empty)
-    (if (connection-close? conn)
-        (maybe-headers
-         seen?
-         [#"Connection" #"close"])
-        empty)
-    hs)))
+;; Compile-time fprintf specialized to byte strings.
+(define-syntax (cprintf stx)
+  (define (parse-fmt bs)
+    (filter-not
+     (lambda (sub)
+       (equal? sub #""))
+     (add-between (regexp-split #rx#"~a" bs) 'arg)))
+
+  (syntax-parse stx
+    [(_ fmt:bytes arg-e:expr ...)
+     #'(cprintf (current-output-port) fmt arg-e ...)]
+
+    [(_ out-e:expr fmt:bytes arg-e:expr ...)
+     #:with out-id (datum->syntax #'out-e 'out)
+     #:with (write-e ...) (for/fold ([exprs null]
+                                     [args (syntax-e #'(arg-e ...))]
+                                     #:result (reverse exprs))
+                                    ([chunk (in-list (parse-fmt (syntax->datum #'fmt)))])
+                            (if (eq? chunk 'arg)
+                                (values
+                                 (cons #`(display #,(car args) out-id) exprs)
+                                 (cdr args))
+                                (values
+                                 (cons #`(write-bytes #,(datum->syntax #'fmt chunk) out-id) exprs)
+                                 args)))
+     #'(let ([out-id out-e])
+         write-e ...)]))
+
+(define (output-response-head conn bresp [chunked? #f])
+  (cprintf
+   (connection-o-port conn)
+   #"HTTP/1.1 ~a ~a\r\n"
+   (response-code bresp)
+   (response-message bresp))
+
+  (define hs
+    (add-missing-headers
+     (response-headers bresp)
+     [#"Connection"        (and (connection-close? conn) #"close")]
+     [#"Content-Type"      (response-mime bresp)]
+     [#"Date"              (seconds->gmt-bytes (current-seconds))]
+     [#"Last-Modified"     (seconds->gmt-bytes (response-seconds bresp))]
+     [#"Server"            #"Racket"]
+     [#"Transfer-Encoding" (and chunked? #"chunked")]))
+
+  (output-headers conn hs))
 
 ;; output-headers : connection (list-of header) -> void
 (define (output-headers conn headers)
   (print-headers (connection-o-port conn) headers))
 
 ;; print-headers : output-port (list-of header) -> void
-(define (print-headers out headers)
-  (for-each (match-lambda
-              [(struct header (field value))
-               (fprintf out "~a: ~a\r\n" field value)])
-            headers)
-  (fprintf out "\r\n"))
+(define (print-headers out hs)
+  (for ([h (in-list hs)])
+    (cprintf
+     out
+     #"~a: ~a\r\n"
+     (header-field h)
+     (header-value h)))
+  (write-bytes #"\r\n" out))
 
 ; RFC 2616 Section 4.4
 (define (terminated-response? r)
@@ -138,15 +158,30 @@
   (define-values (from-servlet to-chunker) (make-pipe))
   (define to-client (connection-o-port conn))
   (define to-chunker-t
-    (thread (λ ()
-              ((response-output bresp) to-chunker)
-              (close-output-port to-chunker))))
+    (thread
+     (λ ()
+       ;; When errors occur, we immediately kill the connection to
+       ;; make it clear to the client that something went wrong.  By
+       ;; doing this, we ensure that the terminating chunk won't be
+       ;; sent and the client can't misinterpret the response as
+       ;; successful.  This is in line with how other web servers
+       ;; behave.
+       ;;
+       ;; See: https://github.com/racket/web-server/pull/93
+       (with-handlers ([exn:fail?
+                        (lambda (e)
+                          (kill-connection! conn)
+                          (close-output-port to-chunker)
+                          (raise e))])
+         ((response-output bresp) to-chunker)
+         (close-output-port to-chunker)))))
 
   ;; The client might go away while the response is being generated,
   ;; in which case the output port will be closed so we have to
   ;; gracefully back out when that happens.
-  (with-handlers ([exn:fail? (lambda (e)
-                               (kill-thread to-chunker-t))])
+  (with-handlers ([exn:fail?
+                   (lambda (_)
+                     (kill-thread to-chunker-t))])
     (define buffer (make-bytes 16384))
     (let loop ()
       (define bytes-read-or-eof
@@ -156,42 +191,80 @@
         ;; a responder can run indefinitely as long as it writes
         ;; *something* every (current-send-timeout) seconds.
         (reset-connection-response-send-timeout! conn)
-        (fprintf to-client "~a\r\n" (number->string bytes-read-or-eof 16))
+        (cprintf to-client #"~a\r\n" (number->string bytes-read-or-eof 16))
         (write-bytes buffer to-client 0 bytes-read-or-eof)
-        (fprintf to-client "\r\n")
+        (write-bytes #"\r\n" to-client)
         (flush-output to-client)
         (loop)))
     (thread-wait to-chunker-t)
-    (fprintf to-client "0\r\n")
-    (fprintf to-client "\r\n")
+    (write-bytes #"0\r\n\r\n" to-client)
     (flush-output to-client)))
 
-; seconds->gmt-string : Nat -> String
+; seconds->gmt-bytes : exact-integer -> bytes
 ; format is rfc1123 compliant according to rfc2068 (http/1.1)
+(define (seconds->gmt-bytes s)
+  (define d (seconds->date s #f))
+  (define t (make-bytes 29 32))  ;; #\space = 32
+  (begin0 t
+    (write-week-day! t (date-week-day d))
+    (write-zero-padded! t 5 (date-day d))
+    (write-month! t (date-month d))
+    (write-number! t 15 (date-year d))
+    (write-zero-padded! t 17 (date-hour d))
+    (bytes-set! t 19 58) ;; #\:
+    (write-zero-padded! t 20 (date-minute d))
+    (bytes-set! t 22 58) ;; #\:
+    (write-zero-padded! t 23 (date-second d))
+    (bytes-copy! t 26 #"GMT")))
+
 (module+ testing
-  (provide seconds->gmt-string))
-(define (seconds->gmt-string s)
-  (let* ([local-date (seconds->date s)]
-         [date (seconds->date (- s (date-time-zone-offset local-date)))])
-    (format "~a, ~a ~a ~a ~a:~a:~a GMT"
-            (vector-ref DAYS (date-week-day date))
-            (two-digits (date-day date))
-            (vector-ref MONTHS (sub1 (date-month date)))
-            (date-year date)
-            (two-digits (date-hour date))
-            (two-digits (date-minute date))
-            (two-digits (date-second date)))))
+  (provide seconds->gmt-bytes))
 
-; two-digits : num -> str
-(define (two-digits n)
-  (let ([str (number->string n)])
-    (if (< n 10) (string-append "0" str) str)))
+(define-syntax-rule (write-zero-padded! dest dest-start e)
+  (let ([n e])
+    (cond
+      [(< n 10)
+       (bytes-set! dest dest-start 48)  ;; #\0 = 48
+       (bytes-set! dest (add1 dest-start) (+ n 48))]
 
-(define MONTHS
-  #("Jan" "Feb" "Mar" "Apr" "May" "Jun" "Jul" "Aug" "Sep" "Oct" "Nov" "Dec"))
+      [else
+       (write-number! dest (add1 dest-start) n)])))
 
-(define DAYS
-  #("Sun" "Mon" "Tue" "Wed" "Thu" "Fri" "Sat"))
+(define-syntax-rule (write-month! dest m)
+  (bytes-copy!
+   dest 8
+   (case m
+     [(1)  #"Jan"]
+     [(2)  #"Feb"]
+     [(3)  #"Mar"]
+     [(4)  #"Apr"]
+     [(5)  #"May"]
+     [(6)  #"Jun"]
+     [(7)  #"Jul"]
+     [(8)  #"Aug"]
+     [(9)  #"Sep"]
+     [(10) #"Oct"]
+     [(11) #"Nov"]
+     [(12) #"Dev"])))
+
+(define-syntax-rule (write-week-day! dest d)
+  (bytes-copy!
+   dest 0
+   (case d
+     [(0) #"Sun,"]
+     [(1) #"Mon,"]
+     [(2) #"Tue,"]
+     [(3) #"Wed,"]
+     [(4) #"Thu,"]
+     [(5) #"Fri,"]
+     [(6) #"Sat,"])))
+
+(define-syntax-rule (write-number! dest dest-end num)
+  (let loop ([k dest-end] [n num])
+    (define d (remainder n 10))
+    (bytes-set! dest k (+ d 48))  ;; #\0
+    (when (>= n 10)
+      (loop (sub1 k) (quotient n 10)))))
 
 
 ;; output-file: connection
@@ -226,13 +299,13 @@
        (md5 (string->bytes/utf-8 (number->string (current-inexact-milliseconds))))
        #f)))
 
-;; output-file: connection
-;;              path
-;;              symbol
-;;              bytes
-;;              (U (listof (U byte-range-spec suffix-byte-range-spec)) #f)
-;;              (U bytes #f)
-;;           -> void
+;; output-file/boundary: connection
+;;                       path
+;;                       symbol
+;;                       bytes
+;;                       (U (listof (U byte-range-spec suffix-byte-range-spec)) #f)
+;;                       (U bytes #f)
+;;                       -> void
 (define (output-file/boundary conn file-path method maybe-mime-type ranges boundary)
   ;; Ensure there is enough time left to write the first chunk of
   ;; response data. `output-file-range' then resets the connection
@@ -301,28 +374,32 @@
                                      (network-error 'output-file "~a" (exn-message exn)))])
           (call-with-input-file* file-path
             (lambda (input)
-              (if (= (length converted-ranges) 1)
-                  ; Single ranges (in 200 or 206 responses) are sent straight out
-                  ; in their simplest form:
-                  (output-file-range conn input (caar converted-ranges) (cdar converted-ranges))
-                  ; Multiple ranges are encoded as multipart/byteranges:
-                  (let loop ([ranges converted-ranges]
-                             [multipart-headers multipart-headers])
-                    (match ranges
-                      [(list)
-                       ; Final boundary (must start on new line; ends with a new line)
-                       (fprintf (connection-o-port conn) "--~a--\r\n" boundary)
-                       (void)]
-                      [(list-rest (list-rest start end) rest)
-                       ; Intermediate boundary (must start on new line; ends with a new line)
-                       (fprintf (connection-o-port conn) "--~a\r\n" boundary)
-                       ; Headers and new line
-                       (display (car multipart-headers) (connection-o-port conn))
-                       ; Content
-                       (output-file-range conn input start end)
-                       ; Newline before next field
-                       (fprintf (connection-o-port conn) "\r\n")
-                       (loop rest (cdr multipart-headers))]))))))))))
+              (cond
+                ; Single ranges (in 200 or 206 responses) are sent straight out
+                ; in their simplest form:
+                [(= (length converted-ranges) 1)
+                 (output-file-range conn input (caar converted-ranges) (cdar converted-ranges))]
+
+                ; Multiple ranges are encoded as multipart/byteranges:
+                [else
+                 (define out (connection-o-port conn))
+                 (let loop ([ranges converted-ranges]
+                            [multipart-headers multipart-headers])
+                   (match ranges
+                     [(list)
+                      ; Final boundary (must start on new line; ends with a new line)
+                      (cprintf out #"--~a--\r\n" boundary)
+                      (void)]
+                     [(list-rest (list-rest start end) rest)
+                      ; Intermediate boundary (must start on new line; ends with a new line)
+                      (cprintf out #"--~a\r\n" boundary)
+                      ; Headers and new line
+                      (display (car multipart-headers) out)
+                      ; Content
+                      (output-file-range conn input start end)
+                      ; Newline before next field
+                      (write-bytes #"\r\n" out)
+                      (loop rest (cdr multipart-headers))]))]))))))))
 
 ;; prerender-multipart/byteranges-headers : bytes (alist-of integer integer) integer -> (list-of bytes)
 (define (prerender-multipart/byteranges-headers maybe-mime-type converted-ranges total-file-length)
@@ -452,4 +529,3 @@
   (make-header #"Content-Range"
                (string->bytes/utf-8
                 (format "bytes ~a-~a/~a" start (sub1 end) total-file-length))))
-

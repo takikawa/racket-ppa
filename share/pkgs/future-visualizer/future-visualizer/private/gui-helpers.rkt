@@ -1,9 +1,9 @@
 #lang racket/gui
 (require framework 
          pict
-         "display.rkt" 
-         "constants.rkt" 
-         "pict-canvas.rkt") 
+         future-visualizer/private/display 
+         future-visualizer/private/constants 
+         future-visualizer/private/pict-canvas) 
 (provide label 
          mt-label 
          bold-label 

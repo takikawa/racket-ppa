@@ -184,6 +184,9 @@
 
 (define place-done-prompt (make-continuation-prompt-tag 'place-done))
 
+(define-values (prop:unsafe-authentic-override unsafe-authentic-override? unsafe-authentic-override-ref)
+  (make-struct-type-property 'unsafe-authentic-override))
+
 ;; Beware that this implementation of `fork-place` doesn't support
 ;; rktio-based blocking in different places. So, be careful of the
 ;; preliminary tests that you might try with the "io" layer and
@@ -236,6 +239,7 @@
                   'engine-timeout engine-timeout
                   'engine-return (lambda args
                                    (error "engine-return: not ready"))
+                  'engine-roots (lambda (e) '()) ; used only for memory accounting
                   'call-with-engine-completion call-with-engine-completion
                   'current-process-milliseconds current-process-milliseconds
                   'set-ctl-c-handler! set-ctl-c-handler!
@@ -269,7 +273,7 @@
                   'get-thread-id (lambda () 0)
                   'current-place-roots (lambda () '())
                   'get-initial-place (lambda () #f)
-                  'call-with-current-place-continuation call/cc
+                  'call-with-current-continuation-roots (lambda (proc) (proc null))
                   'make-condition (lambda () (make-semaphore))
                   'condition-wait (lambda (c s)
                                     (semaphore-post s)
@@ -285,7 +289,8 @@
                   'mutex-release (lambda (s) (semaphore-post s))
                   'call-as-asynchronous-callback (lambda (thunk) (thunk))
                   'post-as-asynchronous-callback (lambda (thunk) (thunk))
-                  'continuation-current-primitive (lambda (k) #f)))
+                  'continuation-current-primitive (lambda (k) #f)
+                  'prop:unsafe-authentic-override prop:unsafe-authentic-override))
 
 ;; add dummy definitions that implement pthreads and conditions etc.
 ;; dummy definitions that error

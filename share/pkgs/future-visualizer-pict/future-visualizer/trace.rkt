@@ -1,6 +1,6 @@
 #lang racket/base
 (require racket/contract
-         "private/visualizer-data.rkt")
+         future-visualizer/private/visualizer-data)
 (provide (struct-out future-event)
          (struct-out gc-info)
          (struct-out indexed-future-event)

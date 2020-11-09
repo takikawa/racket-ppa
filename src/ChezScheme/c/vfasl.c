@@ -167,6 +167,7 @@ static ptr copy(vfasl_info *vfi, ptr pp, seginfo *si);
 static uptr sweep(vfasl_info *vfi, ptr p);
 static int is_rtd(ptr tf, vfasl_info *vfi);
 
+static IFASLCODE abs_reloc_variant(IFASLCODE type);
 static ptr vfasl_encode_relocation(vfasl_info *vfi, ptr obj);
 static void relink_code(ptr co, ptr sym_base, ptr *vspaces, uptr *vspace_offsets, IBOOL to_static);
 static ptr find_pointer_from_offset(uptr p_off, ptr *vspaces, uptr *vspace_offsets);
@@ -252,7 +253,7 @@ ptr S_vfasl(ptr bv, void *stream, iptr offset, iptr input_len)
         if (sz > 0) {
           if ((s == vspace_reloc) && !S_G.retain_static_relocation) {
             thread_find_room(tc, typemod, sz, vspaces[s])
-          } else { 
+          } else {
             find_room(vspace_spaces[s], static_generation, typemod, sz, vspaces[s])
           }
           if (S_fasl_stream_read(stream, vspaces[s], sz) < 0)
@@ -523,6 +524,13 @@ ptr S_vfasl(ptr bv, void *stream, iptr offset, iptr input_len)
     while (cl != end_closures) {
       ptr code = CLOSCODE(cl);
       code = ptr_add(code, code_delta);
+
+#if 0
+      printf("%p ", code);
+      S_prin1(CODENAME(code));
+      printf("\n");
+#endif
+
       SETCLOSCODE(cl,code);
       cl = ptr_add(cl, size_closure(CLOSLEN(cl)));
     }
@@ -533,6 +541,7 @@ ptr S_vfasl(ptr bv, void *stream, iptr offset, iptr input_len)
     ptr sym_base = vspaces[vspace_symbol];
     ptr code = TYPE(vspaces[vspace_code], type_typed_object);
     ptr code_end = TYPE(VSPACE_END(vspace_code), type_typed_object);
+    S_record_code_mod(tc, (uptr)vspaces[vspace_code], (uptr)code_end - (uptr)code);
     while (code != code_end) {
       relink_code(code, sym_base, vspaces, vspace_offsets, to_static);
       code = ptr_add(code, size_code(CODELEN(code)));
@@ -1076,6 +1085,27 @@ static int is_rtd(ptr tf, vfasl_info *vfi)
 #define VFASL_RELOC_TAG(p) (UNFIX(p) & ((1 << VFASL_RELOC_TAG_BITS) - 1))
 #define VFASL_RELOC_POS(p) (UNFIX(p) >> VFASL_RELOC_TAG_BITS)
 
+/* Picks a relocation variant that fits into the actual relocation's
+   shape, but holds an absolue value */
+static IFASLCODE abs_reloc_variant(IFASLCODE type) {
+  if (type == reloc_abs)
+    return reloc_abs;
+#if defined(I386) || defined(X86_64)
+  return reloc_abs;
+#elif defined(ARMV6)
+  return reloc_arm32_abs;
+#elif defined(AARCH64)
+  return reloc_arm64_abs;
+#elif defined(PPC32)
+  if (type == reloc_ppc32_abs)
+    return reloc_ppc32_abs;
+  else
+    return reloc_abs;
+#else
+  >> need to fill in for this platform <<
+#endif
+}
+
 static ptr vfasl_encode_relocation(vfasl_info *vfi, ptr obj) {
   ptr pos;
   int which_singleton;
@@ -1083,12 +1113,15 @@ static ptr vfasl_encode_relocation(vfasl_info *vfi, ptr obj) {
   if ((which_singleton = detect_singleton(obj))) {
     obj = FIX(VFASL_RELOC_SINGLETON(which_singleton));
   } else if ((pos = vfasl_hash_table_ref(S_G.c_entries, obj))) {
+    pos = (ptr)((uptr)pos - 1);
     if ((uptr)pos == CENTRY_install_library_entry)
       vfi->installs_library_entry = 1;
     obj = FIX(VFASL_RELOC_C_ENTRY(pos));
   } else if ((pos = vfasl_hash_table_ref(S_G.library_entries, obj))) {
+    pos = (ptr)((uptr)pos - 1);
     obj = FIX(VFASL_RELOC_LIBRARY_ENTRY(pos));
   } else if ((pos = vfasl_hash_table_ref(S_G.library_entry_codes, obj))) {
+    pos = (ptr)((uptr)pos - 1);
     obj = FIX(VFASL_RELOC_LIBRARY_ENTRY_CODE(pos));
   } else if (Ssymbolp(obj)) {
     obj = vfasl_relocate_help(vfi, obj);
@@ -1135,7 +1168,7 @@ static void relink_code(ptr co, ptr sym_base, ptr *vspaces, uptr *vspace_offsets
             code_off = RELOC_CODE_OFFSET(entry);
         }
         a += code_off;
-        obj = S_get_code_obj(reloc_abs, co, a, item_off);
+        obj = S_get_code_obj(abs_reloc_variant(RELOC_TYPE(entry)), co, a, item_off);
 
         if (IMMEDIATE(obj)) {
           if (Sfixnump(obj)) {
@@ -1234,14 +1267,14 @@ static void fasl_init_entry_tables()
 
     for (i = Svector_length(S_G.c_entry_vector); i--; ) {
       ptr entry = Svector_ref(S_G.c_entry_vector, i);
-      vfasl_hash_table_set(S_G.c_entries, entry, (ptr)i);
+      vfasl_hash_table_set(S_G.c_entries, entry, (ptr)(i+1));
     }
 
     for (i = Svector_length(S_G.library_entry_vector); i--; ) {
       ptr entry = Svector_ref(S_G.library_entry_vector, i);
       if (entry != Sfalse) {
-        vfasl_hash_table_set(S_G.library_entries, entry, (ptr)i);
-        vfasl_hash_table_set(S_G.library_entry_codes, CLOSCODE(entry), (ptr)i);
+        vfasl_hash_table_set(S_G.library_entries, entry, (ptr)(i+1));
+        vfasl_hash_table_set(S_G.library_entry_codes, CLOSCODE(entry), (ptr)(i+1));
       }
     }
   }

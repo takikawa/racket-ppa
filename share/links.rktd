@@ -132,6 +132,7 @@
  (root "pkgs/errortrace-doc")
  (root "pkgs/profile-doc")
  (root "pkgs/r5rs-doc")
+ (root "pkgs/future-visualizer-pict")
  (root "pkgs/srfi-lite-lib")
  (root "pkgs/srfi-lib")
  (root "pkgs/html-doc")

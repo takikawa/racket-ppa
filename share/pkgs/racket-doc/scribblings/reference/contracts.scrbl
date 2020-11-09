@@ -773,13 +773,26 @@ The lazy annotations ensure that this contract does not
 change the running time of operations that do not
 inspect the entire tree.
 
-@racketblock[(struct bt (val left right))
-             (define (bst/c lo hi)
-               (or/c #f
-                     (struct/dc bt
-                                [val (between/c lo hi)]
-                                [left (val) #:lazy (bst lo val)]
-                                [right (val) #:lazy (bst val hi)])))]
+ @examples[#:eval (contract-eval) #:once
+           (struct bt (val left right))
+           (define (bst/c lo hi)
+             (or/c #f
+                   (struct/dc bt
+                              [val (between/c lo hi)]
+                              [left (val) #:lazy (bst/c lo val)]
+                              [right (val) #:lazy (bst/c val hi)])))
+
+           (define/contract not-really-a-bst
+             (bst/c -inf.0 +inf.0)
+             (bt 5
+                 (bt 4
+                     (bt 2 #f #f)
+                     (bt 6 #f #f))
+                 #f))
+
+           (bt-right not-really-a-bst)
+           (bt-val (bt-left (bt-left not-really-a-bst)))
+           (eval:error (bt-right (bt-left not-really-a-bst)))]
 
 @history[#:changed "6.0.1.6" @elem{Added @racket[#:inv].}]
 }
@@ -1825,7 +1838,7 @@ earlier fields.}}
   (code:line)
   (code:line #:unprotected-submodule submodule-name)]
  [contract-out-item
-  (struct id/super ((id contract-expr) ...)
+  (struct id/ignored ((id contract-expr) ...)
     struct-option)
   (rename orig-id id contract-expr)
   (id contract-expr)
@@ -1834,8 +1847,8 @@ earlier fields.}}
   (code:line #:∀ poly-variables)
   (code:line #:forall poly-variables)]
  [poly-variables id (id ...)]
- [id/super id
-           (id super-id)]
+ [id/ignored id
+             (id ignored-id)]
  [struct-option (code:line)
                 #:omit-constructor])]{
 
@@ -1863,13 +1876,8 @@ first variable (the internal name) with the name specified by the
 second variable (the external name).
 
 The @racket[struct] form of @racket[contract-out]
-provides a structure-type definition, and each field has a contract
-that dictates the contents of the fields. The structure-type
-definition must appear before the @racket[provide] clause within the
-enclosing module. If the structure type has a parent, the second
-@racket[struct] form (above) must be used, with the first name
-referring to the structure type to export and the second name
-referring to the parent structure type. Unlike a @racket[struct]
+provides a structure-type definition @racket[id], and each field has a contract
+that dictates the contents of the fields. Unlike a @racket[struct]
 definition, however, all of the fields (and their contracts) must be
 listed. The contract on the fields that the sub-struct shares with its
 parent are only used in the contract for the sub-struct's constructor, and
@@ -1877,7 +1885,10 @@ the selector or mutators for the super-struct are not provided. The
 exported structure-type name always doubles as a constructor, even if
 the original structure-type name does not act as a constructor.
 If the @racket[#:omit-constructor] option is present, the constructor
-is not provided.
+is not provided. The second form of @racket[id/ignored], which has both
+@racket[id] and @racket[ignored-id], is deprecated and allowed
+in the grammar only for backward compatability, where @racket[ignored-id] is ignored.
+The first form should be used instead.
 
 Note that if the struct is created with @racket[serializable-struct]
 or @racket[define-serializable-struct], @racket[contract-out] does not
@@ -1905,7 +1916,8 @@ is bound to vectors of two elements, the exported identifier and a
 syntax object for the expression that produces the contract controlling
 the export.
 
-@history[#:changed "7.3.0.3" @list{Added @racket[#:unprotected-submodule].}]
+@history[#:changed "7.3.0.3" @list{Added @racket[#:unprotected-submodule].}
+         #:changed "7.7.0.9" @list{Started ignoring @racket[ignored-id].}]
 }
 
 @defform[(recontract-out id ...)]{
@@ -2277,7 +2289,7 @@ accepted by the third argument to @racket[datum->syntax].
 @deftogether[(
 @defproc[(make-contract
           [#:name name any/c 'anonymous-contract]
-          [#:first-order test (-> any/c any/c) (λ (x) #t)]
+          [#:first-order first-order (-> any/c any/c) (λ (x) #t)]
           [#:late-neg-projection
            late-neg-proj
            (or/c #f (-> blame? (-> any/c any/c any/c)))
@@ -2293,7 +2305,7 @@ accepted by the third argument to @racket[datum->syntax].
           [#:projection proj (-> blame? (-> any/c any/c))
            (λ (b)
              (λ (x)
-               (if (test x)
+               (if (first-order x)
                  x
                  (raise-blame-error
                   b x
@@ -2309,7 +2321,7 @@ accepted by the third argument to @racket[datum->syntax].
          contract?]
 @defproc[(make-chaperone-contract
           [#:name name any/c 'anonymous-chaperone-contract]
-          [#:first-order test (-> any/c any/c) (λ (x) #t)]
+          [#:first-order first-order (-> any/c any/c) (λ (x) #t)]
           [#:late-neg-projection
            late-neg-proj
            (or/c #f (-> blame? (-> any/c any/c any/c)))
@@ -2325,7 +2337,7 @@ accepted by the third argument to @racket[datum->syntax].
           [#:projection proj (-> blame? (-> any/c any/c))
            (λ (b)
              (λ (x)
-               (if (test x)
+               (if (first-order x)
                  x
                  (raise-blame-error
                   b x
@@ -2341,7 +2353,7 @@ accepted by the third argument to @racket[datum->syntax].
          chaperone-contract?]
 @defproc[(make-flat-contract
           [#:name name any/c 'anonymous-flat-contract]
-          [#:first-order test (-> any/c any/c) (λ (x) #t)]
+          [#:first-order first-order (-> any/c any/c) (λ (x) #t)]
           [#:late-neg-projection
            late-neg-proj
            (or/c #f (-> blame? (-> any/c any/c any/c)))
@@ -2357,7 +2369,7 @@ accepted by the third argument to @racket[datum->syntax].
           [#:projection proj (-> blame? (-> any/c any/c))
            (λ (b)
              (λ (x)
-               (if (test x)
+               (if (first-order x)
                  x
                  (raise-blame-error
                   b x
@@ -2384,12 +2396,13 @@ higher-order contracts is @racketresult[anonymous-contract], for
 @tech{chaperone contracts} is @racketresult[anonymous-chaperone-contract], and for
 @tech{flat contracts} is @racketresult[anonymous-flat-contract].
 
-The first-order predicate @racket[test] is used to determine which values
+The first-order predicate @racket[first-order] is used to determine which values
 the contract applies to.  This test is used
 by @racket[contract-first-order-passes?], and indirectly by @racket[or/c]
-and @racket[from-or/c] to determine which higher-order contract to wrap a
+and @racket[first-or/c] to determine which higher-order contract to wrap a
 value with when there are multiple higher-order contracts to choose from.
-The default test accepts any value. The predicate should be influenced by
+The default value accepts any value, but it must match the behavior of the
+projection argument (see below for how). The predicate should be influenced by
 the value of @racket[(contract-first-order-okay-to-give-up?)] (see it's documentation
 for more explanation).
 
@@ -2423,21 +2436,22 @@ The @racket[val-first-proj] is like @racket[late-neg-proj], except with
 an extra layer of currying.
 
 At least one of the @racket[late-neg-proj], @racket[proj],
- @racket[val-first-proj], or @racket[test] must be non-@racket[#f].
+ @racket[val-first-proj], or @racket[first-order] must be non-@racket[#f].
 
 The projection arguments (@racket[late-neg-proj], @racket[proj], and
- @racket[val-first-proj]) must be in sync with the @racket[test] argument.
- In particular, if the test argument returns @racket[#f] for some value,
+ @racket[val-first-proj]) must be in sync with the @racket[first-order] argument.
+ In particular, if the @racket[first-order] argument returns @racket[#f] for some value,
  then the projections must raise a blame error for that value and if the
- test argument returns @racket[#t] for some value, then the projection must
+ @racket[first-order] argument returns @racket[#t] for some value, then the projection must
  not signal any blame for this value, unless there are higher-order interactions
- later. In other words, for @tech{flat contracts}, the @racket[test] and
- @racket[projection] arguments must check the same predicate (which is
- why thee default projection uses the @racket[test] argument directly).
+ later. In other words, for @tech{flat contracts}, the @racket[first-order] and
+ @racket[projection] arguments must check the same predicate. For convenience, the
+ the default projection uses the @racket[first-order] argument, signalling an error
+ when it returns @racket[#f] and never signalling one otherwise.
 
 Projections for @tech{chaperone contracts} must produce a value that passes
 @racket[chaperone-of?] when compared with the original, uncontracted value.
-Projections for @tech{flat contracts} must fail precisely when the first-order test
+Projections for @tech{flat contracts} must fail precisely when @racket[first-order]
 does, and must produce the input value unchanged otherwise.  Applying a
 @tech{flat contract} may result in either an application of the predicate, or the
 projection, or both; therefore, the two must be consistent.  The existence of a

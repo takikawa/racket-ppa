@@ -12,6 +12,9 @@
 ;;; See the License for the specific language governing permissions and
 ;;; limitations under the License.
 
+;; ---------------------------------------------------------------------
+;; Initial helper macros and functions:
+
 (define-syntax disable-unbound-warning
   (syntax-rules ()
     ((_ name ...)
@@ -190,6 +193,13 @@
   (lambda (x)
     (syntax-error x "misplaced aux keyword")))
 
+;; ---------------------------------------------------------------------
+;; Libspec representation:
+
+;; A libspec is a description of a runtime function to be represenced
+;; by machine code, where the linker will find the library funtion and
+;; update code to reference it as code is loaded/linked
+
 ;; layout of our flags field:
 ;; bit 0: needs head space?
 ;; bit 1 - 9: upper 9 bits of index (lower bit is the needs head space index
@@ -290,6 +300,9 @@
          (fxlogand (libspec-flags libspec)
            (fxlognot (fxsll 1 (constant libspec-does-not-expect-headroom-index))))))]))
 
+;; ---------------------------------------------------------------------
+;; More helpers:
+
 (define-syntax return-values
   (syntax-rules ()
     ((_ args ...) (values args ...))))
@@ -328,7 +341,14 @@
                  [(_ foo e1 e2) e1] ...
                  [(_ bar e1 e2) e2]))))])))
 
-(define-constant scheme-version #x09050319)
+(define-syntax log2
+  (syntax-rules ()
+    [(_ n) (integer-length (- n 1))]))
+
+;; ---------------------------------------------------------------------
+;; Version and machine types:
+
+(define-constant scheme-version #x09050320)
 
 (define-syntax define-machine-types
   (lambda (x)
@@ -363,15 +383,15 @@
   i3qnx     ti3qnx
   arm32le   tarm32le
   ppc32le   tppc32le
+  arm64le   tarm64le
 )
 
 (include "machine.def")
 
 (define-constant machine-type-name (cdr (assv (constant machine-type) (constant machine-type-alist))))
 
-(define-syntax log2
-  (syntax-rules ()
-    [(_ n) (integer-length (- n 1))]))
+;; ---------------------------------------------------------------------
+;; Some object-layout constants:
 
 ; a string-char is a 32-bit equivalent of a ptr char: identical to a
 ; ptr char on 32-bit machines and the low-order half of a ptr char on
@@ -409,6 +429,23 @@
 ; This is safe since we never forward flonums.
 (define-constant byte-alignment
   (max (constant typemod) (* 2 (constant ptr-bytes))))
+(define-constant ptr-alignment
+  (/ (constant byte-alignment) (constant ptr-bytes)))
+
+;; Stack alignment may be needed for unboxed floating-point values:
+(constant-case ptr-bits
+  [(32) (define-constant stack-word-alignment 2)]
+  [(64) (define-constant stack-word-alignment 1)])
+
+;; seginfo offsets, must be consistent with `seginfo` in "types.h"
+(define-constant seginfo-space-disp 0)
+(define-constant seginfo-generation-disp 1)
+(define-constant seginfo-list-bits-disp (constant ptr-bytes))
+
+(define-constant list-bits-mask (- (expt 2 (constant ptr-alignment)) 1))
+
+;; ---------------------------------------------------------------------
+;; Fasl encoding tags:
 
 ;;; fasl codes---see fasl.c for documentation of representation
 
@@ -480,6 +517,12 @@
   (bytevector (constant fasl-type-header) 0 0 0
     (char->integer #\c) (char->integer #\h) (char->integer #\e) (char->integer #\z)))
 
+;; ---------------------------------------------------------------------
+;; Relocation repersentation
+
+;; A recolcation tells the linker where to update machine code to link
+;; in library functions, literal Scheme objects, etc.
+
 (define-syntax define-enumerated-constants
   (lambda (x)
     (syntax-case x ()
@@ -505,6 +548,7 @@
   (ppc reloc-ppccall reloc-ppcload)
   (x86_64 reloc-x86_64-call reloc-x86_64-jump reloc-x86_64-popcount)
   (arm32 reloc-arm32-abs reloc-arm32-call reloc-arm32-jump)
+  (arm64 reloc-arm64-abs reloc-arm64-call reloc-arm64-jump)
   (ppc32 reloc-ppc32-abs reloc-ppc32-call reloc-ppc32-jump))
 
 (constant-case ptr-bits
@@ -526,6 +570,9 @@
    (define-constant reloc-item-offset-mask #x3ffff)])
 
 (macro-define-structure (reloc type item-offset code-offset long?))
+
+;; ---------------------------------------------------------------------
+;; Some flags to cooperate with the C-implemented kernel:
 
 (define-constant SERROR    #x0000)
 (define-constant STRVNCATE #x0001) ; V for U to avoid msvc errno.h conflict
@@ -605,9 +652,8 @@
 (define-constant ERROR_VALUES 7)
 (define-constant ERROR_MVLET 8)
 
-;;; allocation spaces
-(define-constant space-locked #x20)         ; lock flag
-(define-constant space-old #x40)            ; oldspace flag
+;; ---------------------------------------------------------------------
+;; GC constants
 
 (define-syntax define-alloc-spaces
   (lambda (x)
@@ -634,10 +680,6 @@
                        [(cchar ...) #'(real-cchar ... unreal-cchar ... last-unreal-cchar)]
                        [(value ...) #'(real-value ... unreal-value ... last-unreal-value)])
            (with-syntax ([(space-name ...) (map (lambda (n) (construct-name n "space-" n)) #'(name ...))])
-             (unless (< (syntax->datum #'last-unreal-value) (constant space-locked))
-               ($oops 'define-alloc-spaces "conflict with space-locked"))
-             (unless (< (syntax->datum #'last-unreal-value) (constant space-old))
-               ($oops 'define-alloc-spaces "conflict with space-old"))
              #'(begin
                  (define-constant space-name value) ...
                  (define-constant real-space-alist '((real-name . real-value) ...))
@@ -663,12 +705,14 @@
       (impure-record "ip-rec" #\s 10)    ;
       (impure-typed-object "ip-tobj" #\t 11) ; as needed (instead of impure) for backtraces
       (closure "closure" #\l 12)         ; as needed (instead of pure/impure) for backtraces
-      (count-pure "count-pure" #\y 13)     ; like pure, but delayed for counting from roots
-      (count-impure "count-impure" #\z 14)); like impure-typed-object, but delayed for counting from roots
+      (immobile-impure "im-impure" #\I 13) ; like impure, but for immobile objects
+      (count-pure "cnt-pure" #\y 14)     ; like pure, but delayed for counting from roots
+      (count-impure "cnt-impure" #\z 15)); like impure-typed-object, but delayed for counting from roots
     (unswept
-      (data "data" #\d 15)))             ; unswept objects allocated here
+      (data "data" #\d 16)               ; unswept objects allocated here
+      (immobile-data "im-data" #\D 17))) ; like data, but non-moving
   (unreal
-    (empty "empty" #\e 16)))             ; available segments
+    (empty "empty" #\e 18)))             ; available segments
 
 ;;; enumeration of types for which gc tracks object counts
 ;;; also update gc.c
@@ -701,9 +745,13 @@
 (define-constant countof-ephemeron 25)
 (define-constant countof-stencil-vector 26)
 (define-constant countof-record 27)
-(define-constant countof-types 28)
+(define-constant countof-phantom 28)
+(define-constant countof-types 29)
 
-;;; type-fixnum is assumed to be all zeros by at least by vector, fxvector,
+;; ---------------------------------------------------------------------
+;; Tags that are part of the pointer represeting an object:
+
+;;; type-fixnum is assumed to be all zeros by at least vector, fxvector,
 ;;; and bytevector index checks
 (define-constant type-fixnum           0) ; #b100/#b000 32-bit, #b000 64-bit
 (define-constant type-pair         #b001)
@@ -713,6 +761,9 @@
 (define-constant type-closure      #b101)
 (define-constant type-immediate    #b110)
 (define-constant type-typed-object #b111)
+
+;; ---------------------------------------------------------------------
+;; Immediate values; note that these all end with `type-immediate`:
 
 ;;; note: for type-char, leave at least fixnum-offset zeros at top of
 ;;; type byte to simplify char->integer conversion
@@ -728,6 +779,10 @@
 (define-constant ptr black-hole         #b01000110)
 (define-constant ptr sbwp               #b01001110)
 (define-constant ptr ftype-guardian-rep #b01010110)
+
+;; ---------------------------------------------------------------------
+;; Initial type word in an object that is represented by a
+;; `type-typed-object` pointer:
 
 ;;; on 32-bit machines, vectors get two primary tag bits, including
 ;;; one for the immutable flag, and so do bytevectors, so their maximum
@@ -770,6 +825,9 @@
 (define-constant type-phantom          #b01111110)
 (define-constant type-record                #b111)
 
+;; ---------------------------------------------------------------------
+;; Bit and byte offsets for different types of objects:
+
 (define-constant code-flag-system           #b0000001)
 (define-constant code-flag-continuation     #b0000010)
 (define-constant code-flag-template         #b0000100)
@@ -787,6 +845,26 @@
                  (- (expt 2 (- (constant fixnum-bits) 1)) 1))
 (define-constant iptr most-negative-fixnum
                  (- (expt 2 (- (constant fixnum-bits) 1))))
+
+(define-constant double too-negative-flonum-for-fixnum
+  (cond
+    ;; 64-bit fixnums: -1.0 is the same flonum
+    [(fl= (exact->inexact (constant most-negative-fixnum))
+          (fl- (exact->inexact (constant most-negative-fixnum)) 1.0))
+     ;; Find the next lower flonum:
+     (let loop ([amt 2.0])
+       (let ([v (fl- (exact->inexact (constant most-negative-fixnum)) amt)])
+         (if (fl= v (exact->inexact (constant most-negative-fixnum)))
+             (loop (fl* 2.0 amt))
+             v)))]
+    [else
+     (fl- (exact->inexact (constant most-negative-fixnum)) 1.0)]))
+
+(define-constant double too-positive-flonum-for-fixnum
+  ;; Although adding 1.0 doesn't change the flonum for
+  ;; 64-bit fixnums, the flonum doesn't fit in a fixnum, so
+  ;; this is the upper bbound we want either way:
+  (fl+ (exact->inexact (constant most-positive-fixnum)) 1.0))
 
 (define-constant fixnum-offset (- (constant ptr-bits) (constant fixnum-bits)))
 
@@ -879,6 +957,9 @@
   (fxlogor (constant type-code)
            (fxsll (constant code-flag-single-valued)
                   (constant code-flags-offset))))
+
+;; ---------------------------------------------------------------------
+;; Masks and offsets for checking types:
 
 ;; type checks are generally performed by applying the mask to the object
 ;; then comparing against the type code.  a mask equal to
@@ -1009,6 +1090,9 @@
 (define-constant stencil-vector-mask-offset  (integer-length (constant mask-stencil-vector)))
 (define-constant stencil-vector-mask-bits    (fx- (constant ptr-bits)
                                                   (constant stencil-vector-mask-offset)))
+
+;; ---------------------------------------------------------------------
+;; Helpers to define object layouts:
 
 ;;; record-datatype must be defined before we include layout.ss
 ;;; (maybe should move into that file??)
@@ -1233,6 +1317,9 @@
                      (define-constant name-field-disp field-disp)
                      ...))))))])))
 
+;; ---------------------------------------------------------------------
+;; Object layouts:
+
 (define-primitive-structure-disps typed-object type-typed-object
   ([iptr type]))
 
@@ -1249,8 +1336,8 @@
 (define-primitive-structure-disps ephemeron type-pair
   ([ptr car]
    [ptr cdr]
-   [ptr next] ; `next` is needed by the GC to keep track of pending ephemerons
-   [ptr trigger-next])) ; `trigger-next` is similar, but for segment-specific lists
+   [ptr prev-ref] ; `prev-ref` and `next` are used by the GC
+   [ptr next]))
 
 (define-primitive-structure-disps tlc type-typed-object
   ([iptr type]
@@ -1444,7 +1531,8 @@
    [void* lz4-out-buffer]
    [U64 instr-counter]
    [U64 alloc-counter]
-   [ptr parameters]))
+   [ptr parameters]
+   [double fpregs (constant asm-fpreg-max)]))
 
 (define tc-field-list
   (let f ([ls (oblist)] [params '()])
@@ -1583,6 +1671,9 @@
     (with-syntax ([type (datum->syntax #'* (filter-scheme-type 'string-char))])
       #''type)))
 
+;; ---------------------------------------------------------------------
+;; Flags and structures for the compiler's internal communcation:
+
 (define-constant annotation-debug   #b0001)
 (define-constant annotation-profile #b0010)
 (define-constant annotation-all     #b0011)
@@ -1682,6 +1773,7 @@
   (unsafe                   #b00001000000000000000000)
   (unrestricted             #b00010000000000000000000)
   (safeongoodargs           #b00100000000000000000000)
+  (unboxed-arguments        #b10000000000000000000000) ; always accepts unboxed 'flonum arguments, up to inline-args-limit
   (cptypes2                 #b01000000000000000000000)
   (cptypes3                 cptypes2)
   (cptypes2x                cptypes2)
@@ -1690,7 +1782,9 @@
   (alloc                    (or proc discard true))
   ; would be nice to check that these and only these actually have cp0 partial folders
   (partial-folder           (or cp02 cp03))
-)
+  )
+
+(define-constant inline-args-limit 10)
 
 (define-flags cp0-info-mask
   (pure-known                    #b0000000001)
@@ -1800,7 +1894,10 @@
   (syntax-rules ()
     ((_ x)
      (float-type-case
-       [(ieee) (fx= ($flonum-exponent x) #x7ff)]))))
+      [(ieee) (fx= ($flonum-exponent x) #x7ff)]))))
+
+;; #t => incompatibility with older Chez Scheme:
+(define-constant nan-single-comparison-true? #t)
 
 (define-syntax on-reset
   (syntax-rules ()
@@ -1869,7 +1966,8 @@
   (syntax-rules ()
     ((_ x) (let ((t x)) (and (pair? t) (symbol? (car t)))))))
 
-;;; heap/stack mangement constants
+;; ---------------------------------------------------------------------
+;; Heap/stack mangement constants:
 
 (define-constant collect-interrupt-index 1)
 (define-constant timer-interrupt-index 2)
@@ -1979,6 +2077,9 @@
          (lambda () (mutex-release $tc-mutex) (enable-interrupts)))])
     (identifier-syntax critical-section)))
 
+;; ---------------------------------------------------------------------
+;; More object-representation flags and offsets:
+
 (define-constant hashtable-default-size 8)
 
 (define-constant eq-hashtable-subtype-normal 0)
@@ -2007,6 +2108,9 @@
 (define-constant time-utc 4)
 (define-constant time-collector-cpu 5)
 (define-constant time-collector-real 6)
+
+;; ---------------------------------------------------------------------
+;; General helpers for the compiler and runtime implementation:
 
 (define-syntax default-run-cp0
   (lambda (x)
@@ -2379,7 +2483,20 @@
        #`(let ([x arg])
            (unless (pred x)
              ($oops who #,(format "~~s is not a ~a" (datum type)) x)))])))
- 
+
+;; ---------------------------------------------------------------------
+;; Library entries and C entries
+
+;; A library entry connects with a libspec to describe a library
+;; function that can be referenced directly by machine code and that
+;; will need to be updated by the linker. The C-implemented kernel may
+;; also refer to these values.
+
+;; A C entry is a pointer communicated from the C-implemented kernel
+;; to the compiler and runtime system. The linker deals with them in a
+;; similar way --- it's just that the refer to C functions and globals
+;; instead of Scheme-implemented functions.
+
 (eval-when (load eval)
 (define-syntax lookup-libspec
   (lambda (x)
@@ -2499,6 +2616,7 @@
      (cfl/ #f 2 #f #t)
      (negate #f 1 #f #t)
      (flnegate #f 1 #t #t)
+     (flabs #f 1 #t #t)
      (call-error #f 0 #f #f)
      (unsafe-unread-char #f 2 #f #t)
      (map-car #f 1 #f #t)
@@ -2519,6 +2637,7 @@
      (fxsll #f 2 #f #t)
      (fxsrl #f 2 #t #t)
      (fxsra #f 2 #t #t)
+     (fixnum->flonum #f 1 #t #t)
      (append #f 2 #f #t)
      (values-error #f 0 #f #f)
      (dooverflow #f 0 #f #f)
@@ -2636,6 +2755,8 @@
      (bytevector-s8-set! #f 3 #f #t)
      (bytevector-u8-set! #f 3 #f #t)
      (bytevector=? #f 2 #f #f)
+     (bytevector-ieee-double-native-ref #f 2 #t #t)
+     (bytevector-ieee-double-native-set! #f 2 #t #t)
      (real->flonum #f 2 #f #t)
      (unsafe-port-eof? #f 1 #f #t)
      (unsafe-lookahead-u8 #f 1 #f #t)
@@ -2660,6 +2781,23 @@
      (fl>? #f 2 #t #t)
      (fl<=? #f 2 #t #t)
      (fl>=? #f 2 #t #t)
+     (flsqrt #f 1 #t #t)
+     (flround #f 1 #t #t)
+     (flfloor #f 1 #t #t)
+     (flceiling #f 1 #t #t)
+     (fltruncate #f 1 #t #t)
+     (flsin #f 1 #t #t)
+     (flcos #f 1 #t #t)
+     (fltan #f 1 #t #t)
+     (flasin #f 1 #t #t)
+     (flacos #f 1 #t #t)
+     (flatan #f 1 #t #t)
+     (flatan2 #f 2 #t #t)
+     (flexp #f 1 #t #t)
+     (fllog #f 1 #t #t)
+     (fllog2 #f 2 #t #t)
+     (flexpt #f 2 #t #t)
+     (flonum->fixnum #f 1 #t #t)
      (bitwise-and #f 2 #f #t)
      (bitwise-ior #f 2 #f #t)
      (bitwise-xor #f 2 #f #t)
@@ -2777,5 +2915,20 @@
      Scall-any-results
      segment-info
      bignum-mask-test
-     ))
+     flfloor
+     flceiling
+     flround
+     fltruncate
+     flsin
+     flcos
+     fltan
+     flasin
+     flacos
+     flatan
+     flatan2
+     flexp
+     fllog
+     fllog2
+     flexpt
+     flsqrt))
 )

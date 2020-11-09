@@ -4,7 +4,7 @@
          racket/bool 
          future-visualizer/trace
          "private/visualizer-gui.rkt"  
-         "private/visualizer-drawing.rkt") 
+         future-visualizer/private/visualizer-drawing) 
 
 (provide visualize-futures 
          (contract-out 

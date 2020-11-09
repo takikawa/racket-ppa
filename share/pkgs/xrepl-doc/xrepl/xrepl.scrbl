@@ -189,6 +189,16 @@ available.
   backtrace for the last error.
 }
 
+@defcmd[exn]{
+  While the @cmd[backtrace] command shows the backtrace for the last error,
+  the @cmd[exn] command shows the entire exception. This may be useful to
+  see the type of exception, for example.
+
+  In addition, you can specify an identifier to bind the last exception to,
+  in which case the exception is not printed. This is bound with @racket[define],
+  thus updating any previous top-level binding with that name.
+}
+
 @defcmd[time]{
   Times execution of an expression (or expressions).  This is similar to
   @racket{time} but the information that is displayed is a bit easier to

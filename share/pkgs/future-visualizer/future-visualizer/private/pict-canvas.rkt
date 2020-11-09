@@ -1,7 +1,7 @@
 #lang racket/gui
 (require framework 
          pict 
-         "display.rkt") 
+         future-visualizer/private/display) 
 (provide pict-canvas%) 
 
 
