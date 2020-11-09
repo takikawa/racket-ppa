@@ -1,8 +1,14 @@
-racket (7.8+ppa1-1~groovy1) groovy; urgency=medium
+racket (7.9+ppa1-1~bionic1) bionic; urgency=medium
 
   * PPA release
 
- -- Asumu Takikawa <asumu@racket-lang.org>  Sat, 09 May 2020 14:00:00 -0800
+ -- Asumu Takikawa <asumu@racket-lang.org>  Sun, 08 Nov 2020 19:00:00 -0800
+
+racket (7.8+dfsg1-1) unstable; urgency=medium
+
+  * Update to new upstream version 7.8+dfsg1.
+
+ -- David Bremner <bremner@debian.org>  Mon, 03 Aug 2020 16:48:09 -0300
 
 racket (7.6+dfsg1-3) unstable; urgency=medium
 
