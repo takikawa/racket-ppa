@@ -255,7 +255,7 @@ in order to make the results be platform independent.
                                               [end-py (real-in 0 1)]
                                               [actual? boolean?]
                                               [phase-level (or/c exact-nonnegative-integer? #f)]
-                                              [require-arrow (or/c boolean? 'module-lang-require)]
+                                              [require-arrow (or/c boolean? 'module-lang)]
                                               [name-dup? (-> string? boolean?)])
             void?]{
    Called to indicate that there should be an arrow between the locations described by the first 
@@ -271,7 +271,7 @@ in order to make the results be platform independent.
    The @racket[require-arrow] argument indicates if this arrow points from
    an imported identifier to its corresponding @racket[require]. Any true value means
    that it points to an import via @racket[require]; @racket[#t] means it was a normal
-   @racket[require] and @racket['module-lang-require] means it comes from the implicit require
+   @racket[require] and @racket['module-lang] means it comes from the implicit require
    that a module language provides.
    
    The @racket[name-dup?] predicate returns @racket[#t]
@@ -280,7 +280,7 @@ in order to make the results be platform independent.
    the time the program was expanded).
 
    @history[#:changed "1.1" @list{Changed @racket[require-arrow] to sometimes
-               be @racket['module-lang-require].}]
+               be @racket['module-lang].}]
    
  }
  @defmethod[(syncheck:add-tail-arrow [from-source-obj (not/c #f)]
@@ -347,8 +347,13 @@ in order to make the results be platform independent.
  @defmethod[(syncheck:add-definition-target [source-obj (not/c #f)]
                                             [start exact-nonnegative-integer?]
                                             [finish exact-nonnegative-integer?]
-                                            [style-name any/c]) void?]{
-     
+                                            [id symbol?]
+                                            [mods (listof symbol?)])
+            void?]{
+  Called to indicate a top-level definition at the location spanned by @racket[start]
+  and @racket[finish]. The @racket[id] argument is the name of the defined variable
+  and the @racket[mods] are the submodules enclosing the definition, which will be empty
+  if the definition is in the top-level module.
   }
                                                       
  @defmethod[(syncheck:color-range [source-obj (not/c #f)]

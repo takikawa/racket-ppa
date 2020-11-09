@@ -2,6 +2,7 @@
 
 (require typed/racket/class typed/racket/draw racket/match racket/list racket/math racket/flonum
          (only-in math fl vector->flvector)
+         (only-in typed/pict pict? pict-height)
          "../common/type-doc.rkt"
          "../common/types.rkt"
          "../common/math.rkt"
@@ -77,7 +78,9 @@
                          [outline-color : (List Real Real Real)]
                          [pen-color : (List Real Real Real)]
                          [pen-width : Nonnegative-Real]
-                         [pen-style : Plot-Pen-Style-Sym])
+                         [pen-style : Plot-Pen-Style-Sym]
+                         [size-or-scale : (U (List '= Nonnegative-Real) Nonnegative-Real)]
+                         [angle : Nonnegative-Real])
   #:transparent)
 
 
@@ -94,7 +97,8 @@
                      [ry-ticks (Listof tick)]
                      [ry-far-ticks (Listof tick)]
                      [rz-ticks (Listof tick)]
-                     [rz-far-ticks (Listof tick)])
+                     [rz-far-ticks (Listof tick)]
+                     [legend (Listof legend-entry)])
          (init-field [dc (Instance DC<%>)]
                      [dc-x-min Real]
                      [dc-y-min Real]
@@ -110,6 +114,7 @@
          [get-z-far-ticks (-> (Listof tick))]
          [get-bounds-rect (-> Rect)]
          [get-clip-rect (-> Rect)]
+         [get-area-bounds-rect (-> Rect)]
          [get-render-tasks  (-> render-tasks)]
          [set-render-tasks  (-> render-tasks Void)]
          [start-plot (-> Void)]
@@ -128,6 +133,7 @@
          [put-font-family (-> Font-Family Void)]
          [put-font-attribs (-> Nonnegative-Real (U #f String) Font-Family Void)]
          [put-text-foreground (-> Plot-Color Void)]
+         [put-arrow-head (-> (U (List '= Nonnegative-Real) Nonnegative-Real) Nonnegative-Real Void)]
          [reset-drawing-params (-> Void)]
          [put-lines (-> (Listof (Vectorof Real)) Void)]
          [put-line (-> (Vectorof Real) (Vectorof Real) Void)]
@@ -135,13 +141,13 @@
          [put-rect (-> Rect Void)]
          [put-text (->* [String (Vectorof Real)] [Anchor Real Real Boolean Integer] Void)]
          [put-glyphs (->* [(Listof (Vectorof Real)) Point-Sym Nonnegative-Real] [Integer] Void)]
-         [put-arrow (-> (Vectorof Real) (Vectorof Real) Void)]
+         [put-arrow (->* ((Vectorof Real) (Vectorof Real)) (Boolean) Void)]
          ))
 
 (: 3d-plot-area% 3D-Plot-Area%)
 (define 3d-plot-area%
   (class object%
-    (init-field bounds-rect rx-ticks rx-far-ticks ry-ticks ry-far-ticks rz-ticks rz-far-ticks)
+    (init-field bounds-rect rx-ticks rx-far-ticks ry-ticks ry-far-ticks rz-ticks rz-far-ticks legend)
     (init-field dc dc-x-min dc-y-min dc-x-size dc-y-size)
     (super-new)
     
@@ -367,13 +373,55 @@
          (vector (fl+ area-x-mid (fl* x area-per-view-x))
                  (fl- area-y-mid (fl* z area-per-view-z))))))
     
+    (: title-margin Real)
+    (define title-margin
+      (let ([title (plot-title)])
+        (cond [(and (plot-decorations?) title)
+               (if (pict? title)
+                   (+ (pict-height title) (* 1/2 char-height))
+                   (* 3/2 char-height))]
+              [else  0])))
+
+    (: init-left-margin Real)
+    (: init-right-margin Real)
     (: init-top-margin Real)
-    (define init-top-margin (if (and (plot-decorations?) (plot-title)) (* 3/2 char-height) 0))
-    
+    (: init-bottom-margin Real)
+    (define-values (init-left-margin init-right-margin init-top-margin init-bottom-margin)
+      (let* ([legend-anchor (plot-legend-anchor)]
+             [legend-rect (and (outside-anchor? legend-anchor)
+                               (not (empty? legend))
+                               (send pd calculate-legend-rect
+                                     legend
+                                     (vector (ivl dc-x-min (+ dc-x-min dc-x-size))
+                                             (ivl dc-y-min (+ dc-y-min dc-y-size)))
+                                     (legend-anchor->anchor legend-anchor)))]
+             [none (λ () (values 0 0 title-margin 0))])
+        (cond
+          [legend-rect
+           (match-define (vector (ivl x- x+) (ivl y- y+)) legend-rect)
+           (define gap (* 2 (pen-gap)))
+           (define width  (if (and x- x+) (+ gap (- x+ x-)) 0))
+           (define height (if (and y- y+) (+ gap (- y+ y-)) 0))
+           (define remaining-x-size (- dc-x-size width))
+           (define remaining-y-size (- dc-y-size title-margin height))
+           (case legend-anchor
+             [(outside-top-left outside-top outside-top-right outside-global-top)
+              (if (< remaining-y-size 0) (none) (values 0 0 (+ title-margin height) 0))]
+             [(outside-left-top outside-left outside-left-bottom)
+              (if (< remaining-x-size 0) (none) (values width 0 title-margin 0))]
+             [(outside-right-top outside-right outside-right-bottom)
+              (if (< remaining-x-size 0) (none) (values 0 width  title-margin 0))]
+             [(outside-bottom-left outside-bottom outside-bottom-right)
+              (if (< remaining-y-size 0) (none) (values 0 0 title-margin height))]
+             ;; unreachable code ...
+             [else  (none)])]
+          [else (none)])))
+
     ;; Initial view->dc
     (: view->dc (-> FlVector (Vectorof Real)))
-    (define view->dc (make-view->dc 0 0 init-top-margin 0))
-    
+    (define view->dc (make-view->dc init-left-margin init-right-margin
+                                    init-top-margin init-bottom-margin))
+
     (: x-axis-angle (-> Real))
     (define (x-axis-angle)
       (match-define (vector dx dy) (v- (norm->dc (flvector 0.5 0.0 0.0))
@@ -903,7 +951,9 @@
     (define: top : Real  0)
     (define: bottom : Real  0)
     (let-values ([(left-val right-val top-val bottom-val)
-                  (margin-fixpoint 0 dc-x-size 0 dc-y-size 0 0 init-top-margin 0
+                  (margin-fixpoint 0 dc-x-size 0 dc-y-size
+                                   init-left-margin  init-right-margin
+                                   init-top-margin   init-bottom-margin
                                    (λ ([left : Real] [right : Real] [top : Real] [bottom : Real])
                                      (get-param-vs/set-view->dc! left right top bottom)))])
       (set! left left-val)
@@ -920,6 +970,9 @@
     (define area-y-min top)
     (define area-y-max (- dc-y-size bottom))
     
+    (define/public (get-area-bounds-rect)
+      (vector (ivl area-x-min area-x-max) (ivl area-y-min area-y-max)))
+
     ;; ===============================================================================================
     ;; Plot decoration
     
@@ -927,7 +980,9 @@
     (define/private (draw-title)
       (define title (plot-title))
       (when (and (plot-decorations?) title)
-        (send pd draw-text title (vector (* 1/2 dc-x-size) (ann 0 Real)) 'top)))
+        (if (string? title)
+            (send pd draw-text title (vector (* 1/2 dc-x-size) (ann 0 Real)) 'top)
+            (send pd draw-pict title  (vector (* 1/2 dc-x-size) (ann 0 Real)) 'top 0))))
     
     (: draw-back-axes (-> Void))
     (define/private (draw-back-axes)
@@ -974,8 +1029,10 @@
     (define/private (draw-labels ps)
       (for ([p  (in-list ps)])
         (match-define (list label v anchor angle) p)
-        (when label
-          (send pd draw-text label v anchor angle 0 #t))))
+        (cond ((string? label)
+               (send pd draw-text label v anchor angle 0 #t))
+              ((pict? label)
+               (send pd draw-pict label v anchor 0)))))
     
     ;; ===============================================================================================
     ;; Render list and its BSP representation
@@ -1217,13 +1274,14 @@
     
     (: draw-arrow (-> arrow-data Void))
     (define/private (draw-arrow data)
-      (match-define (arrow-data alpha v1 v2 outline-color pen-color pen-width pen-style) data)
+      (match-define (arrow-data alpha v1 v2 outline-color pen-color pen-width pen-style size-or-scale angle) data)
       (let ([v1  (norm->dc v1)]
             [v2  (norm->dc v2)])
         (send pd set-alpha alpha)
         (send pd set-pen outline-color (+ 2 pen-width) 'solid)
         (send pd draw-arrow v1 v2)
         (send pd set-pen pen-color pen-width pen-style)
+        (send pd set-arrow-head size-or-scale angle)
         (send pd draw-arrow v1 v2)))
     
     (: draw-points (-> points Void))
@@ -1247,6 +1305,8 @@
     (define/public (start-plot)
       (send pd reset-drawing-params)
       (send pd clear)
+      (when (and (not (empty? legend)) (outside-anchor? (plot-legend-anchor)))
+        (draw-legend legend))
       (draw-title)
       (draw-labels (get-back-label-params))
       (draw-ticks (get-back-tick-params))
@@ -1266,13 +1326,21 @@
       (send pd reset-drawing-params)
       (draw-front-axes)
       (draw-ticks (get-front-tick-params))
-      (draw-labels (get-front-label-params)))
+      (draw-labels (get-front-label-params))
+      (when (and (not (empty? legend)) (inside-anchor? (plot-legend-anchor)))
+        (draw-legend legend)))
     
     (define/public (draw-legend legend-entries)
-      (define gap-size (+ (pen-gap) tick-radius))
+      (define outside? (outside-anchor? (plot-legend-anchor)))
+      (define gap-size (+ (pen-gap) (if outside? 0 tick-radius)))
+      (define-values (x-min x-max y-min y-max)
+        (if outside?
+            (values dc-x-min (+ dc-x-min dc-x-size)
+                    (+ title-margin dc-y-min) (+ dc-y-min dc-y-size))
+            (values area-x-min area-x-max area-y-min area-y-max)))
       (send pd draw-legend legend-entries
-            (vector (ivl (+ area-x-min gap-size) (- area-x-max gap-size))
-                    (ivl (+ area-y-min gap-size) (- area-y-max gap-size)))))
+            (vector (ivl (+ x-min gap-size) (- x-max gap-size))
+                    (ivl (+ y-min gap-size) (- y-max gap-size)))))
     
     (define/public (end-plot)
       (send pd restore-drawing-params))
@@ -1309,6 +1377,12 @@
     
     (: text-foreground (List Real Real Real))
     (define text-foreground '(0 0 0))
+
+    (: pa-arrow-head-size-or-scale (U (List '= Nonnegative-Real) Nonnegative-Real))
+    (: pa-arrow-head-angle Nonnegative-Real)
+    (define pa-arrow-head-size-or-scale (arrow-head-size-or-scale))
+    (define pa-arrow-head-angle (arrow-head-angle))
+
     
     ;; Drawing parameter accessors
     
@@ -1344,6 +1418,10 @@
     (define/public (put-text-foreground c)
       (set! text-foreground (->pen-color c)))
     
+    (define/public (put-arrow-head size-or-scale angle)
+      (set! pa-arrow-head-size-or-scale size-or-scale)
+      (set! pa-arrow-head-angle angle))
+
     (define/public (reset-drawing-params)
       (put-alpha (plot-foreground-alpha))
       (put-pen (plot-foreground) (plot-line-width) 'solid)
@@ -1494,16 +1572,17 @@
                                            (plot->norm (assert v values)))
                                          vs))))))
     
-    (define/public (put-arrow v1 v2)
+    (define/public (put-arrow v1 v2 [draw-outside? #f])
       (let ([v1  (exact-vector3d v1)]
             [v2  (exact-vector3d v2)])
-        (when (and v1 v2 (in-bounds? v1))
+        (when (and v1 v2 (or draw-outside? (in-bounds? v1)))
           (cond [(in-bounds? v2)
                  (define c (v* (v+ v1 v2) 1/2))
                  (define outline-color (->brush-color (plot-background)))
                  (add-shape! plot3d-area-layer
                              (points (arrow-data alpha (plot->norm v1) (plot->norm v2)
-                                                 outline-color pen-color pen-width pen-style)
+                                                 outline-color pen-color pen-width pen-style
+                                                 pa-arrow-head-size-or-scale pa-arrow-head-angle)
                                      (list (plot->norm c))))]
                 [else
                  (put-line v1 v2)]))))

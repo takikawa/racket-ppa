@@ -1,7 +1,7 @@
 #lang racket/base
 (require racket/file
 	 racket/system
-	 "../../cs/bootstrap/parse-makefile.rkt")
+	 "../../ChezScheme/rktboot/parse-makefile.rkt")
 
 (provide recompile)
 
@@ -32,9 +32,10 @@
       (define (src->so src) (regexp-replace #rx"[.]ss$" src ".so"))
       (write-system-config o)
       (for ([f (in-list '("cmacros.ss" "priminfo.ss"))])
-	   (write `(load ,f) o))
+        (write `(compile-file ,f) o)
+        (write `(load ,(src->so f)) o))
       (for ([f (in-list (append petite-srcs scheme-srcs))])
-	   (write `(compile-file ,f) o))
+        (write `(compile-file ,f) o))
       (write `($make-boot-file ,(format "../boot/~a/petite.boot" machine)
                                ',(string->symbol machine) '()
                                ,@(map src->so petite-srcs))

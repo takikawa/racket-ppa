@@ -27,8 +27,6 @@
    (generate-interrupt-trap #f)
    ($track-dynamic-closure-counts #f))
 
-"library.ss (includes #<void> just before)"
-
 (eval-when (compile)
 (define-syntax define-library-entry
   (lambda (x)
@@ -141,8 +139,6 @@
 
 ;;; set up $nuate for overflow
 (define $nuate ($closure-code (call/1cc (lambda (k) k))))
-
-"making closure counters!"
 
 (set! #{raw-ref-count bhowt6w0coxl0s2y-1} '#[#{profile-counter b5vnnom9h4o4uny0-2} 0])
 (set! #{raw-create-count bhowt6w0coxl0s2y-2} '#[#{profile-counter b5vnnom9h4o4uny0-2} 0])
@@ -681,6 +677,7 @@
   (define-library-entry (flfloor x) (flonum-oops 'flfloor x))
   (define-library-entry (flceiling x) (flonum-oops 'flceiling x))
   (define-library-entry (fltruncate x) (flonum-oops 'fltruncate x))
+  (define-library-entry (flsingle x) (flonum-oops 'flsingle x))
   (define-library-entry (flsin x) (flonum-oops 'flsin x))
   (define-library-entry (flcos x) (flonum-oops 'flcos x))
   (define-library-entry (fltan x) (flonum-oops 'fltan x))

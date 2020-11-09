@@ -239,8 +239,8 @@ please adhere to these guidelines:
   (cs-status-expanding-expression "Check Syntax: expanding expression")
   (cs-status-loading-docs-index "Check Syntax: loading documentation index")
   (cs-syncheck-running "Check Syntax Running")
-  (cs-mouse-over-import "binding “~s” imported from “~s”")
-  (cs-mouse-over-import/library-only "imported from “~s”")
+  (cs-mouse-over-import "binding “~s” imported from ~s")
+  (cs-mouse-over-import/library-only "imported from ~s")
   (cs-view-docs "View documentation for “~a”")
   (cs-view-docs-from "~a from ~a")  ;; a completed version of the line above
   ;; (cs-view-docs) is put into the first ~a and a list of modules (separated by commas)

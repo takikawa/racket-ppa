@@ -20,6 +20,9 @@
 #include <limits.h>
 #ifdef WIN32
 #include <io.h>
+#ifdef __MINGW32__
+# include <unistd.h>
+#endif
 #else /* WIN32 */
 #include <sys/file.h>
 #include <dirent.h>
@@ -51,9 +54,7 @@
 #endif /* PTHREADS */
 
 /* locally defined functions */
-static ptr new_open_output_fd_helper PROTO((const char *filename, INT mode,
-             INT flags, INT no_create, INT no_fail, INT no_truncate,
-             INT append, INT lock, INT replace, INT compressed));
+static ptr new_open_output_fd_helper PROTO((const char *filename, INT mode, INT flags, INT options));
 static INT lockfile PROTO((INT fd));
 static int is_valid_zlib_length(iptr count);
 static int is_valid_lz4_length(iptr count);
@@ -77,7 +78,7 @@ static int is_valid_lz4_length(iptr count);
   do { body;                                            \
     if (ok) { flag = 0; }                               \
     else {                                              \
-      INT errnum;                                       \
+      INT errnum = 0;                                   \
       S_glzerror((fd),&errnum);                         \
       S_glzclearerr((fd));                              \
       if (errnum == Z_ERRNO) {                          \
@@ -98,7 +99,7 @@ static int is_valid_lz4_length(iptr count);
   do { body;                                            \
     if (ok) { flag = 0; break; }                        \
     else {                                              \
-      INT errnum;                                       \
+      INT errnum = 0;                                   \
       S_glzerror((fd),&errnum);                         \
       S_glzclearerr((fd));                              \
       if (errnum == Z_ERRNO) {                          \
@@ -116,7 +117,7 @@ static int is_valid_lz4_length(iptr count);
   do { body;                                            \
     if (ok) { flag = 0; }                               \
     else {                                              \
-      INT errnum;                                       \
+      INT errnum = 0;                                   \
       S_glzerror((fd),&errnum);                         \
       S_glzclearerr((fd));                              \
       if (errnum == Z_ERRNO) { flag = 1; }              \
@@ -134,6 +135,11 @@ static int is_valid_lz4_length(iptr count);
 #define O_BINARY 0
 #endif /* O_BINARY */
 
+#ifdef WIN32
+# define WIN32_UNUSED UNUSED
+#else
+# define WIN32_UNUSED
+#endif
 
 /* These functions are intended for use immediately upon opening
  * (lockfile) fd.  They need to be redesigned for general-purpose 
@@ -144,9 +150,12 @@ static INT lockfile(INT fd) { return FLOCK(fd, LOCK_EX); }
 #ifdef LOCKF
 static INT lockfile(INT fd) { return lockf(fd, F_LOCK, (off_t)0); }
 #endif
+#if !defined(FLOCK) && !defined(LOCKF)
+static INT lockfile(INT fd) { return fd >= 0; }
+#endif
 
-#define MAKE_GZXFILE(x) Sinteger((iptr)x)
-#define GZXFILE_GZFILE(x) ((glzFile)Sinteger_value(x))
+#define MAKE_GZXFILE(x) Sinteger((iptr)TO_PTR(x))
+#define GZXFILE_GZFILE(x) ((glzFile)TO_VOIDP(Sinteger_value(x)))
 
 INT S_gzxfile_fd(ptr x) {
   return GZXFILE_GZFILE(x)->fd;
@@ -273,10 +282,7 @@ ptr S_compress_output_fd(INT fd) {
   return Sbox(MAKE_GZXFILE(file));
 }
 
-static ptr new_open_output_fd_helper(
-  const char *infilename, INT mode, INT flags,
-  IBOOL no_create, IBOOL no_fail, IBOOL no_truncate,
-  IBOOL append, IBOOL lock, IBOOL replace, IBOOL compressed) {
+static ptr new_open_output_fd_helper( const char *infilename, INT mode, INT flags, INT options) {
   char *filename;
   INT saved_errno = 0;
   iptr error;
@@ -284,14 +290,14 @@ static ptr new_open_output_fd_helper(
   ptr tc = get_thread_context();
 
   flags |=
-    (no_create ? 0 : O_CREAT) |
-    ((no_fail || no_create) ? 0 : O_EXCL) |
-    (no_truncate ? 0 : O_TRUNC) |
-    ((!append) ? 0 : O_APPEND);
+    ((options & open_fd_no_create) ? 0 : O_CREAT) |
+    ((options & (open_fd_no_fail | open_fd_no_create)) ? 0 : O_EXCL) |
+    ((options & open_fd_no_truncate) ? 0 : O_TRUNC) |
+    ((!(options & open_fd_append)) ? 0 : O_APPEND);
 
   filename = S_malloc_pathname(infilename);
   
-  if (replace && UNLINK(filename) != 0 && errno != ENOENT) {
+  if ((options & open_fd_replace) && UNLINK(filename) != 0 && errno != ENOENT) {
     ptr str = S_strerror(errno);
     switch (errno) {
       case EACCES:
@@ -324,7 +330,7 @@ static ptr new_open_output_fd_helper(
     }
   }
   
-  if (lock) {
+  if (options & open_fd_lock) {
     DEACTIVATE(tc)
     error = lockfile(fd);
     saved_errno = errno;
@@ -335,7 +341,7 @@ static ptr new_open_output_fd_helper(
     }
   }
   
-  if (!compressed) {
+  if (!(options & open_fd_compressed)) {
     return MAKE_FD(fd);
   }
 
@@ -349,27 +355,19 @@ static ptr new_open_output_fd_helper(
   return MAKE_GZXFILE(file);
 }
 
-ptr S_new_open_output_fd(
-  const char *filename, INT mode,
-  IBOOL no_create, IBOOL no_fail, IBOOL no_truncate,
-  IBOOL append, IBOOL lock, IBOOL replace, IBOOL compressed) {
+ptr S_new_open_output_fd(const char *filename, INT mode, INT options) {
   return new_open_output_fd_helper(
     filename, mode, O_BINARY | O_WRONLY,
-    no_create, no_fail, no_truncate,
-    append, lock, replace, compressed);
+    options);
 }
 
-ptr S_new_open_input_output_fd(
-  const char *filename, INT mode,
-  IBOOL no_create, IBOOL no_fail, IBOOL no_truncate,
-  IBOOL append, IBOOL lock, IBOOL replace, IBOOL compressed) {
-  if (compressed)
+ptr S_new_open_input_output_fd(const char *filename, INT mode, INT options) {
+  if (options & open_fd_compressed)
     return Sstring("compressed input/output files not supported");
   else
     return new_open_output_fd_helper(
       filename, mode, O_BINARY | O_RDWR,
-      no_create, no_fail, no_truncate,
-      append, lock, replace, 0);
+      options);
 }
 
 ptr S_close_fd(ptr file, IBOOL gzflag) {
@@ -413,6 +411,26 @@ ptr S_close_fd(ptr file, IBOOL gzflag) {
 
 #ifdef WIN32
 #define IO_SIZE_T unsigned int
+static HANDLE hStdin = NULL;
+static iptr read_console(char* buf, unsigned size) {
+  static char u8buf[1024];
+  static int u8i = 0;
+  static int u8n = 0;
+  iptr n = 0;
+  do {
+    for (; size > 0 && u8n > 0; size--, u8n--, n++)
+      *buf++ = u8buf[u8i++];
+    if (n == 0 && size > 0) {
+      wchar_t wbuf[256];
+      DWORD wn;
+      if (!ReadConsoleW(hStdin, wbuf, 256, &wn, NULL) || wn == 0)
+        return 0;
+      u8n = WideCharToMultiByte(CP_UTF8, 0, wbuf, wn, u8buf, 1024, NULL, NULL);
+      u8i = 0;
+    }
+  } while (n == 0);
+  return n;
+}
 #else /* WIN32 */
 #define IO_SIZE_T size_t
 #endif /* WIN32 */
@@ -434,17 +452,28 @@ ptr S_bytevector_read(ptr file, ptr bv, iptr start, iptr count, IBOOL gzflag) {
 
   LOCKandDEACTIVATE(tc, bv)
 #ifdef WIN32
-  if (!gzflag && fd == 0) {
+  if (!gzflag && fd == 0 && hStdin != NULL) {
     DWORD error_code;
     SetConsoleCtrlHandler(NULL, TRUE);
     SetLastError(0);
-    m = _read(0, &BVIT(bv,start), (IO_SIZE_T)count);
+    m = read_console((char *)&BVIT(bv,start), (IO_SIZE_T)count);
     error_code = GetLastError();
-    SetConsoleCtrlHandler(NULL, FALSE);
     if (m == 0 && error_code == 0x3e3) {
+      /* Guard against Windows calling the ConsoleCtrlHandler after we
+       * turn it back on by waiting a bit. */
+      Sleep(1);
+#ifdef PTHREADS
+      /* threaded io.ss doesn't handle interrupts because
+       * with-tc-mutex disables them, so bail out. */
+      SetConsoleCtrlHandler(NULL, FALSE);
+      REACTIVATEandUNLOCK(tc, bv)
+      S_noncontinuable_interrupt();
+#else
       KEYBOARDINTERRUPTPENDING(tc) = Strue;
       SOMETHINGPENDING(tc) = Strue;
+#endif
     }
+    SetConsoleCtrlHandler(NULL, FALSE);
   } else
 #endif /* WIN32 */
   {
@@ -674,7 +703,7 @@ ptr S_set_fd_pos(ptr file, ptr pos, IBOOL gzflag) {
   }
 }
 
-ptr S_get_fd_non_blocking(ptr file, IBOOL gzflag) {
+ptr S_get_fd_non_blocking(WIN32_UNUSED ptr file, WIN32_UNUSED IBOOL gzflag) {
 #ifdef WIN32
   return Sfalse;
 #else /* WIN32 */
@@ -692,7 +721,7 @@ ptr S_get_fd_non_blocking(ptr file, IBOOL gzflag) {
 #endif /* WIN32 */
 }
 
-ptr S_set_fd_non_blocking(ptr file, IBOOL x, IBOOL gzflag) {
+ptr S_set_fd_non_blocking(WIN32_UNUSED ptr file, WIN32_UNUSED IBOOL x, WIN32_UNUSED IBOOL gzflag) {
 #ifdef WIN32
   return Sstring("unsupported");
 #else /* WIN32 */
@@ -770,10 +799,19 @@ void S_new_io_init() {
     S_set_symbol_value(S_intern((const unsigned char *)"$c-bufsiz"), Sinteger(SBUFSIZ));
   }
 #ifdef WIN32
+  { /* Get the console input handle for reading Unicode characters */
+    HANDLE h;
+    DWORD mode;
+    if ((h = GetStdHandle(STD_INPUT_HANDLE)) != INVALID_HANDLE_VALUE
+        && GetConsoleMode(h, &mode))
+      hStdin = h;
+  }
  /* transcoder, if any, does its own cr, lf translations */
   _setmode(_fileno(stdin), O_BINARY);
   _setmode(_fileno(stdout), O_BINARY);
   _setmode(_fileno(stderr), O_BINARY);
+  /* Set the console output to handle UTF-8 */
+  SetConsoleOutputCP(CP_UTF8);
 #endif /* WIN32 */
 }
 

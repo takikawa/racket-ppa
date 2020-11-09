@@ -372,7 +372,7 @@ static int UNC_stat(rktio_t *rktio, const char *dirname, int *flags, int *isdir,
 
   wp = WIDE_PATH_temp(copy);
   if (!wp) {
-    /* Treat invalid path as non-existent */
+    /* Treat invalid path as non-existent; `WIDE_PATH_temp` set the error */
     free(copy);
     return 0;
   }
@@ -385,6 +385,8 @@ static int UNC_stat(rktio_t *rktio, const char *dirname, int *flags, int *isdir,
     if ((GET_FF_ATTRIBS(fad) & FF_A_LINK) && !same_path) {
       if (islink) {
 	*islink = 1;
+        if (isdir)
+          *isdir = (GET_FF_ATTRIBS(fad) & FF_A_DIR);
 	return 1;
       } else {
 	/* Resolve a link by opening the link and then getting
@@ -585,6 +587,46 @@ int rktio_link_exists(rktio_t *rktio, const char *filename)
       return 0;
   }
 #endif
+}
+
+int rktio_file_type(rktio_t *rktio, rktio_const_string_t filename)
+/* Windows: check for special filenames before calling */
+{
+#ifdef RKTIO_SYSTEM_WINDOWS
+  {
+    int islink, isdir;
+    if (UNC_stat(rktio, filename, NULL, &isdir, &islink, NULL, NULL, NULL, -1)) {
+      if (islink) {
+        if (isdir)
+          return RKTIO_FILE_TYPE_DIRECTORY_LINK;
+        else
+          return RKTIO_FILE_TYPE_LINK;
+      } else if (isdir)
+        return RKTIO_FILE_TYPE_DIRECTORY;
+      else
+        return RKTIO_FILE_TYPE_FILE;
+    } else
+      return RKTIO_FILE_TYPE_ERROR;
+  }
+#else
+  {
+    struct MSC_IZE(stat) buf;
+    while (1) {
+      if (!MSC_W_IZE(lstat)(MSC_WIDE_PATH_temp(filename), &buf))
+	break;
+      else if (errno != EINTR)
+	return RKTIO_FILE_TYPE_ERROR;
+    }
+
+    if (S_ISLNK(buf.st_mode))
+      return RKTIO_FILE_TYPE_LINK;
+    else if (S_ISDIR(buf.st_mode))
+      return RKTIO_FILE_TYPE_DIRECTORY;
+    else
+      return RKTIO_FILE_TYPE_FILE;
+  }
+#endif
+  
 }
 
 char *rktio_get_current_directory(rktio_t *rktio)
@@ -986,16 +1028,21 @@ int rktio_make_link(rktio_t *rktio, const char *src, const char *dest, int dest_
 {
 #if defined(RKTIO_SYSTEM_WINDOWS)
   init_procs();
-    
+
+# ifndef SYMBOLIC_LINK_FLAG_DIRECTORY
+#  define SYMBOLIC_LINK_FLAG_DIRECTORY 0x1
+# endif
+# ifndef SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE
+#  define SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE 0x2
+# endif
+
   if (CreateSymbolicLinkProc) {
-    int flags;
+    int flags = SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE;
     wchar_t *src_w;
     wchar_t *dest_w;
 
     if (dest_is_directory)
-      flags = 0x1; /* directory */
-    else
-      flags = 0; /* file */
+      flags |= SYMBOLIC_LINK_FLAG_DIRECTORY; /* directory */
 
     src_w = WIDE_PATH_copy(src);
     if (!src_w) return 0;
@@ -1867,6 +1914,20 @@ static char *append_paths(char *a, char *b, int free_a, int free_b)
   return s;
 }
 
+#ifdef RKTIO_SYSTEM_UNIX
+static int directory_or_file_exists(rktio_t *rktio, char *dir, char *maybe_file)
+{
+  if (maybe_file) {
+    int r;
+    char *path = append_paths(dir, maybe_file, 0, 0);
+    r = rktio_file_exists(rktio, path);
+    free(path);
+    return r;
+  } else
+    return rktio_directory_exists(rktio, dir);
+}
+#endif
+
 char *rktio_system_path(rktio_t *rktio, int which)
 {
 #ifdef RKTIO_SYSTEM_UNIX
@@ -1898,21 +1959,64 @@ char *rktio_system_path(rktio_t *rktio, int which)
   
   {
     /* Everything else is in ~: */
-    char *home_str, *alt_home, *home;
+    char *home_str, *alt_home, *home, *prefer_home_str = NULL, *prefer_home;
+    char *home_file = NULL, *prefer_home_file = NULL;
+    int free_prefer_home_str = 0;
+
+    alt_home = rktio_getenv(rktio, "PLTUSERHOME");
 
     if ((which == RKTIO_PATH_PREF_DIR) 
-	|| (which == RKTIO_PATH_PREF_FILE)
-	|| (which == RKTIO_PATH_ADDON_DIR)) {
-#if defined(OS_X) && !defined(XONX)
+        || (which == RKTIO_PATH_PREF_FILE)
+        || (which == RKTIO_PATH_ADDON_DIR)
+        || (which == RKTIO_PATH_CACHE_DIR)
+        || (which == RKTIO_PATH_INIT_DIR)
+        || (which == RKTIO_PATH_INIT_FILE)) {
+#if defined(OS_X) && !defined(RACKET_XONX) && !defined(XONX)
       if (which == RKTIO_PATH_ADDON_DIR)
 	home_str = "~/Library/Racket/";
-      else
+      else if (which == RKTIO_PATH_CACHE_DIR)
+	home_str = "~/Library/Caches/Racket/";
+      else if ((which == RKTIO_PATH_INIT_DIR)
+               || (which == RKTIO_PATH_INIT_FILE)) {
+        prefer_home_str = "~/Library/Racket/";
+        prefer_home_file = "racketrc.rktl";
+        home_str = "~/";
+        home_file = ".racketrc";
+      } else
 	home_str = "~/Library/Preferences/";
 #else
-      home_str = "~/.racket/";
-#endif 
+      char *envvar, *xdg_dir;
+      if (which == RKTIO_PATH_ADDON_DIR) {
+        prefer_home_str = "~/.local/share/racket/";
+        envvar = "XDG_DATA_HOME";
+      } else if (which == RKTIO_PATH_CACHE_DIR) {
+        prefer_home_str = "~/.cache/racket/";
+        envvar = "XDG_CACHE_HOME";
+      } else {
+        prefer_home_str = "~/.config/racket/";
+        envvar = "XDG_CONFIG_HOME";
+      }
+      if (alt_home)
+        xdg_dir = NULL;
+      else
+        xdg_dir = rktio_getenv(rktio, envvar);
+      /* xdg_dir is invalid if it is not an absolute path */
+      if (xdg_dir && (strlen(xdg_dir) > 0) && (xdg_dir[0] == '/')) {
+        prefer_home_str = append_paths(xdg_dir, "racket/", 1, 0);
+        free_prefer_home_str = 1;
+      } else {
+        if (xdg_dir) free(xdg_dir);
+      }
+
+      if ((which == RKTIO_PATH_INIT_DIR) || (which == RKTIO_PATH_INIT_FILE)) {
+        home_str = "~/";
+        home_file = ".racketrc";
+      } else { /* RKTIO_PATH_{ADDON_DIR,PREF_DIR,PREF_FILE,CACHE_DIR} */
+        home_str = "~/.racket/";
+      }
+#endif
     } else {
-#if defined(OS_X) && !defined(XONX)
+#if defined(OS_X) && !defined(RACKET_XONX) && !defined(XONX)
       if (which == RKTIO_PATH_DESK_DIR)
 	home_str = "~/Desktop/";
       else if (which == RKTIO_PATH_DOC_DIR)
@@ -1922,31 +2026,60 @@ char *rktio_system_path(rktio_t *rktio, int which)
         home_str = "~/";
     }
 
-    alt_home = rktio_getenv(rktio, "PLTUSERHOME");
-    if (alt_home)
-      home = append_paths(alt_home, home_str + 2, 1, 0);
-    else {
-      home = rktio_expand_user_tilde(rktio, home_str);
-      
-      if (!home) {
-        /* Something went wrong with the user lookup. Just drop "~'. */
-        int h_len = strlen(home_str);
-        home = (char *)malloc(h_len - 2 + 1);
-        strcpy(home, home_str+2);
+    /* If `prefer_home_str` is non-NULL, it must be `malloc`ed */
+
+    if (prefer_home_str) {
+      if (alt_home)
+        prefer_home = append_paths(alt_home, prefer_home_str + 2, 0, 0);
+      else
+        prefer_home = rktio_expand_user_tilde(rktio, prefer_home_str);
+      if (free_prefer_home_str)
+        free(prefer_home_str);
+
+      if (directory_or_file_exists(rktio, prefer_home, prefer_home_file))
+        home_str = NULL;
+    } else
+      prefer_home = NULL;
+
+    if (home_str) {
+      if (alt_home)
+        home = append_paths(alt_home, home_str + 2, 1, 0);
+      else
+        home = rktio_expand_user_tilde(rktio, home_str);
+
+      if (prefer_home) {
+        if (!directory_or_file_exists(rktio, home, home_file)) {
+          free(home);
+          home = prefer_home;
+        } else {
+          free(prefer_home);
+          prefer_home = NULL;
+        }
       }
-    }
-    
+    } else
+      home = prefer_home;
+
+    /* At this point, we're using `home`, but `prefer_home` can still
+       be non-NULL and equal to `home` to mean that we should use
+       XDG-style file names. */
+
     if ((which == RKTIO_PATH_PREF_DIR) || (which == RKTIO_PATH_INIT_DIR) 
 	|| (which == RKTIO_PATH_HOME_DIR) || (which == RKTIO_PATH_ADDON_DIR)
-	|| (which == RKTIO_PATH_DESK_DIR) || (which == RKTIO_PATH_DOC_DIR))
+	|| (which == RKTIO_PATH_DESK_DIR) || (which == RKTIO_PATH_DOC_DIR)
+        || (which == RKTIO_PATH_CACHE_DIR))
       return home;
 
-    if (which == RKTIO_PATH_INIT_FILE)
-      return append_paths(home, ".racketrc", 1, 0);
+    if (which == RKTIO_PATH_INIT_FILE) {
+      if (prefer_home)
+        return append_paths(prefer_home, "racketrc.rktl", 1, 0);
+      else
+        return append_paths(home, ".racketrc", 1, 0);
+    }
+
     if (which == RKTIO_PATH_PREF_FILE) {
-#if defined(OS_X) && !defined(XONX)
+#if defined(OS_X) && !defined(RACKET_XONX) && !defined(XONX)
       return append_paths(home, "org.racket-lang.prefs.rktd", 1, 0);
-#else      
+#else
       return append_paths(home, "racket-prefs.rktd", 1, 0);
 #endif
     } else {
@@ -1994,6 +2127,7 @@ char *rktio_system_path(rktio_t *rktio, int which)
       int which_folder;
 
       if ((which == RKTIO_PATH_ADDON_DIR)
+          || (which == RKTIO_PATH_CACHE_DIR) /* maybe CSIDL_LOCAL_APPDATA instead? */
 	  || (which == RKTIO_PATH_PREF_DIR)
 	  || (which == RKTIO_PATH_PREF_FILE)) 
 	which_folder = CSIDL_APPDATA;
@@ -2087,6 +2221,7 @@ char *rktio_system_path(rktio_t *rktio, int which)
       return home;
 
     if ((which == RKTIO_PATH_ADDON_DIR)
+        || (which == RKTIO_PATH_CACHE_DIR)
 	|| (which == RKTIO_PATH_PREF_DIR)
 	|| (which == RKTIO_PATH_PREF_FILE)) {
       home = append_paths(home, "Racket", 1, 0);
