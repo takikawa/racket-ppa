@@ -1,4 +1,3 @@
-"print.ss"
 ;;; print.ss
 ;;; Copyright 1984-2017 Cisco Systems, Inc.
 ;;;
@@ -14,6 +13,7 @@
 ;;; See the License for the specific language governing permissions and
 ;;; limitations under the License.
 
+(begin
 (eval-when (compile)
 (define-constant cycle-node-max 1000)
 
@@ -611,7 +611,7 @@ floating point returns with (1 0 -1 ...).
 (define wrhelp
    (lambda (x r lev len d? env p)
      (define void? (lambda (x) (eq? x (void))))
-     (define black-hole? (lambda (x) (eq? x '#0=#0#)))
+     (define black-hole? (lambda (x) (eq? x '#3=#3#)))
      (define base-rtd? (lambda (x) (eq? x #!base-rtd)))
      (if-feature pthreads
        (begin
@@ -756,7 +756,8 @@ floating point returns with (1 0 -1 ...).
            (and (code-info? info) (code-info-src info))) =>
          (lambda (src)
            (fprintf p " at ~a:~a"
-             (path-last (source-file-descriptor-name (source-sfd src)))
+             (let ([fn (source-file-descriptor-name (source-sfd src))])
+               (if (string? fn) (path-last fn) fn))
              (if (source-2d? src)
                  (format "~a.~a" (source-2d-line src) (source-2d-column src))
                  (source-bfp src))))])))
@@ -1058,7 +1059,15 @@ floating point returns with (1 0 -1 ...).
                    (if (fx< s 0)
                        (write-char #\- p)
                        (when force-sign (write-char #\+ p)))
-                   (if (or (fx> r 10) (fx< -4 e 10))
+                   (if (or (fx> r 10) (cond
+                                        [(fx< e -4) #f]
+                                        [(fx< e 14) #t]
+                                        [else
+                                         (let ([digits (let loop ([ls ls] [digits 0])
+                                                         (if (fx< (car ls) 0)
+                                                             digits
+                                                             (loop (cdr ls) (fx+ digits 1))))])
+                                           (fx< (fx- e digits) 3))]))
                        (free-format e ls p)
                        (free-format-exponential e ls r p))))
               (cond
@@ -1375,3 +1384,4 @@ floating point returns with (1 0 -1 ...).
       (unless (or (not x) (and (fixnum? x) (fx> x 0)) (and (bignum? x) ($bigpositive? x)))
         ($oops 'print-precision "~s is not a positive exact integer or #f" x))
       x)))
+)

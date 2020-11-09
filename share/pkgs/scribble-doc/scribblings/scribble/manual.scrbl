@@ -555,6 +555,11 @@ sub-form in a procedure being documented).}
 @defproc[(racketparenfont [pre-content pre-content?] ...) element?]{Like
 @racket[racketplainfont], but colored like parentheses.}
 
+@defproc[(racketoptionalfont [pre-content pre-content?] ...) element?]{Like
+@racket[racketplainfont], but colored as optional.
+@history[#:added "1.36"]
+}
+
 @defproc[(racketmetafont [pre-content pre-content?] ...) element?]{Like
 @racket[racketplainfont], but colored as meta-syntax, such as backquote or
 unquote.}
@@ -596,6 +601,7 @@ in a form definition.}
 @defproc[(schemevarfont [pre-content pre-content?] ...) element?]
 @defproc[(schemekeywordfont [pre-content pre-content?] ...) element?]
 @defproc[(schemeparenfont [pre-content pre-content?] ...) element?]
+@defproc[(schemeoptionalfont [pre-content pre-content?] ...) element?]
 @defproc[(schememetafont [pre-content pre-content?] ...) element?]
 @defproc[(schemeerror [pre-content pre-content?] ...) element?]
 @defproc[(schememodfont [pre-content pre-content?] ...) element?]
@@ -830,7 +836,7 @@ Equivalent to @racket[defmodule] variants @racket[#:no-declare].}
                          ellipses+]
                [options (code:line maybe-kind maybe-link maybe-id)]
                [maybe-kind code:blank
-                           (code:line #:kind kind-string-expr)]
+                           (code:line #:kind kind-content-expr)]
                [maybe-link code:blank
                            (code:line #:link-target? link-target?-expr)]
                [maybe-id code:blank
@@ -939,8 +945,8 @@ by the @racket[current-display-width] parameter.
 
 An optional @racket[#:kind] specification chooses the decorative
 label, which defaults to @racket["procedure"]. A @racket[#f]
-result for @racket[kind-string-expr] uses the default, otherwise
-@racket[kind-string-expr] should produce a string. An alternate
+result for @racket[kind-content-expr] uses the default, otherwise
+@racket[kind-content-expr] should produce content in the sense of @racket[content?]. An alternate
 label should be all lowercase.
 
 If @racket[#:id [src-id dest-id-expr]] is supplied, then
@@ -1001,7 +1007,7 @@ Examples:
                 pre-flow ...)
               ([options (code:line maybe-kind maybe-link maybe-id maybe-literals)]
                [maybe-kind code:blank
-                           (code:line #:kind kind-string-expr)]
+                           (code:line #:kind kind-content-expr)]
                [maybe-link code:blank
                            (code:line #:link-target? link-target?-expr)]
                [maybe-id code:blank
@@ -1022,7 +1028,7 @@ result of @racket[id-expr]) whose syntax is described by
 @racket[id], then @racket[form-datum] must have the form @racket[(id
 . _datum)].
 
-If @racket[#:kind kind-string-expr] is supplied, it is used in the
+If @racket[#:kind kind-content-expr] is supplied, it is used in the
 same way as for @racket[defproc], but the default kind is
 @racket["syntax"].
 
@@ -1332,7 +1338,7 @@ Like @racket[defparam], but the contract on a parameter argument is
                 pre-flow ...)
               ([options (code:line maybe-kind maybe-link maybe-id)]
                [maybe-kind code:blank
-                           (code:line #:kind kind-string-expr)]
+                           (code:line #:kind kind-content-expr)]
                [maybe-link code:blank
                            (code:line #:link-target? link-target?-expr)]
                [maybe-id code:blank
@@ -1342,7 +1348,7 @@ Like @racket[defparam], but the contract on a parameter argument is
 
 Like @racket[defproc], but for a non-procedure binding.
 
-If @racket[#:kind kind-string-expr] is supplied,
+If @racket[#:kind kind-content-expr] is supplied,
 it is used in the same way as for
 @racket[defproc], but the default kind is @racket["value"].
 
@@ -1609,14 +1615,15 @@ accepted and propagated to the superclass.}
               ([maybe-link code:blank
                            (code:line #:link-target? link-target?-expr)]
                [maybe-mode code:blank
+                           (code:line #:mode public)
+                           (code:line #:mode public-final)
                            (code:line #:mode override)
                            (code:line #:mode override-final)
-                           (code:line #:mode public-final)
                            (code:line #:mode augment)
                            (code:line #:mode augment-final)
-                           (code:line #:mode pubment)
                            (code:line #:mode extend)
-                           (code:line #:mode extend-final)])]{
+                           (code:line #:mode extend-final)
+                           (code:line #:mode pubment)])]{
 
 Like @racket[defproc], but for a method within a @racket[defclass] or
 @racket[definterface] body.
@@ -1626,7 +1633,10 @@ method from a superclass, and so on. (For these purposes, use
 @racket[#:mode override] when refining a method of an implemented
 interface.) The @racket[extend] mode is like @racket[override], but
 the description of the method should describe only extensions to the
-superclass implementation.}
+superclass implementation. When @racket[maybe-mode] is not supplied,
+it defaults to @racket[public].
+
+@history[#:changed "1.35" @elem{Added a check against invalid @racket[maybe-mode].}]}
 
 @defform[(defmethod* maybe-mode maybe-link
                      ([(id arg-spec ...)
@@ -1820,7 +1830,7 @@ For example:
 @racketblock[@tech[#:doc '(lib "scribblings/reference/reference.scrbl")]{blame object}]
 
 creates a link to @tech[#:doc '(lib "scribblings/reference/reference.scrbl")]{blame object} in
-@other-doc['(lib "scribblings/guide/guide.scrbl")].
+@other-doc['(lib "scribblings/reference/reference.scrbl")].
 
 With the default style files, the hyperlink created by @racket[tech]
 is somewhat quieter than most hyperlinks: the underline in HTML output

@@ -232,13 +232,14 @@ Parameters that determine if the first (exact coverage) or second
 (profiler-based coverage) are enabled. Remember that setting
 @racket[instrumenting-enabled] to @racket[#f] also disables both.}
 
-@defproc[(get-coverage) (listof (cons/c syntax? boolean?))]{
-
-Returns a list of pairs, one for each instrumented expression.  The
-first element of the pair is a @racket[syntax?] object (usually containing
-source location information) for the original expression, and the
-second element of the pair indicates if the code has been executed.
-This list is snapshot of the current state of the computation.}
+@defproc[(get-coverage)
+         (values (listof (list/c any/c natural? natural?))
+                 (listof (list/c any/c natural? natural?)))]{
+ Returns a snapshot of the state of the test coverage
+ expressions. The first result is all of the expressions that
+ are being monitored and the second result is all of the
+ monitored expressions that have been covered.
+}
 
 @defproc[(get-execute-counts) (list (cons/c syntax? number?))]{
 Returns a list of pairs, one for each instrumented expression.  The
@@ -342,8 +343,13 @@ for use as an error display handler.}
 
 Macro-expands and instruments the given top-level form. If the form is
 a module named @racketidfont{errortrace-key}, no instrumentation is
-applied. This annotation function is used by
-@racket[errortrace-compile-handler].}
+applied. See the signature element
+@sigelem[stacktrace/errortrace-annotate^ errortrace-annotate]
+(of @racket[stacktrace/errortrace-annotate^])
+for more detail.
+
+This annotation function is used by @racket[errortrace-compile-handler].
+}
 
 @defproc[(annotate-top [stx any/c][phase-level exact-integer?]) any/c]{
 
@@ -352,7 +358,7 @@ for @racket[stx]; @racket[(namespace-base-phase)] is typically the
 right value for the @racket[phase-level] argument.
 
 Unlike @racket[errortrace-annotate], there no special case for
-a module named @racket[errortrace-key]. Also, if @racket[stx] is a module
+a module named @racketidfont{errortrace-key}. Also, if @racket[stx] is a module
 declaration, it is not enriched with imports to explicitly load
 Errortrace run-time support.}
 
@@ -393,6 +399,19 @@ Imports @racket[stacktrace/annotator-imports^] and @racket[stacktrace-filter^] a
 
 @history[#:added "1.2"]}
 
+@defthing[stacktrace/errortrace-annotate@ unit?]{
+
+Imports @racket[stacktrace/annotator-imports^] and exports @racket[stacktrace/errortrace-annotate^].
+
+@history[#:added "1.3"]}
+
+@defthing[stacktrace/filter/errortrace-annotate@ unit?]{
+
+Imports @racket[stacktrace/imports^] and @racket[stacktrace-filter^]
+and exports @racket[stacktrace/errortrace-annotate^].
+
+@history[#:added "1.3"]}
+
 
 @defsignature[stacktrace^ ()]{
 
@@ -425,6 +444,30 @@ binding information (if available) as a list of two element (syntax?
 any/c) lists. The @racketout[st-mark-bindings] function is currently
 hardwired to return @racket[null]. }
 
+}
+
+@defsignature[stacktrace/errortrace-annotate^ (stacktrace^)]{
+ Extends the support for annotation to better support
+ use in the @racket[current-compile] handler and to
+ add explicit requires for errortrace's runtime support.
+
+ @history[#:added "1.3"]
+
+ @defproc[(errortrace-annotate [stx syntax?]
+                               [in-compile-handler? boolean? #t])
+          syntax?]{
+  Adds the property @racket['errortrace:annotate] to everywhere inside
+  @racket[stx], and expands it.
+  If @racket[stx] is a module (but not named @racketidfont{errortrace-key}
+  module nor a @tech[#:doc '(lib "scribblings/reference/reference.scrbl")]{cross-phase persistent} module),
+  calls @racketout[annotate-top] with the expanded code and inserts appropriate requires
+  to the @racketidfont{errortrace-key} module.
+
+  If @racket[in-compile-handler?] is true, also calls @racket[namespace-require]
+  to load @racketidfont{errortrace-key}.
+
+  See also @racket[original-stx] and @racket[expanded-stx].
+ }
 }
 
 @defsignature[stacktrace-imports^ ()]{
@@ -598,6 +641,18 @@ source location according to @racket[syntax-source].
    syntax property} @racket['errortrace:annotate].
 
 }}
+
+@defparam[original-stx stx (or/c syntax? #f) #:value #f]{
+A parameter set by @sigelem[stacktrace/errortrace-annotate^ errortrace-annotate]
+ when it is called (to be used by @racketin[with-mark], etc)
+ to its input.
+}
+
+@defparam[expanded-stx stx (or/c syntax? #f) #:value #f]{
+A parameter set by @sigelem[stacktrace/errortrace-annotate^ errortrace-annotate]
+ when it is called (to be used by @racketin[with-mark], @racketin[test-covered], etc)
+ to the expanded version of its input.
+}
 
 
 @section{Errortrace Key}

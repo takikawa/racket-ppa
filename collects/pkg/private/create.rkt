@@ -35,7 +35,7 @@
                                (find-files file-exists?)))])
              (display f)
              (newline))))]
-      [else
+      [_
        (define pkg (format "~a.~a" pkg-name create:format))
        (define actual-dest-dir (if dest-dir
                                    (path->complete-path dest-dir)
@@ -100,6 +100,7 @@
               (apply zip pkg/complete content
                      #:path-prefix (and (add-directory-layer? content)
                                         pkg-name)
+                     #:system-type 'unix ; for consistency across platforms
                      #:get-timestamp file-or-directory-timestamp
                      #:utc-timestamps? #t
                      #:round-timestamps-down? #t)))]

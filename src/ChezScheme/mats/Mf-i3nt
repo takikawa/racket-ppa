@@ -13,13 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-m = i3nt
+m ?= i3nt
 
 fsrc = foreign1.c foreign2.c foreign3.c foreign4.c
 fobj = foreign1.so
 mdclean = cat_flush.exe cat_flush.obj foreign1.exp foreign1.lib foreign1.obj foreign2.obj foreign3.obj
 
 include Mf-base
+
+export MSYS_NO_PATHCONV=1
 
 foreign1.so: $(fsrc)
 	cmd.exe /c "vs.bat x86 && cl /DWIN32 /Fe$@ /I${Include} /LD /MD /nologo ../bin/$m/csv953.lib $(fsrc)"

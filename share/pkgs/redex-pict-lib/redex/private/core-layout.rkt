@@ -106,22 +106,19 @@
                                  (atomic-rewrite-table))])
            e)]))
   
-  ;; compound-rewrite-table : (listof lw) -> (listof (union lw pict string))
-  (define compound-rewrite-table 
-    (make-parameter 
-     `((in-hole ,(λ (args)
-                   (let ([context (list-ref args 2)]
-                         [thing-in-hole (list-ref args 3)])
-                     (if (and (lw? thing-in-hole)
-                              (equal? (lw-e thing-in-hole) 'hole))
-                         (list (blank) context (blank))
-                         (list (blank) 
-                               context 
-                               "" 
-                               (basic-text "[" (default-style))
-                               thing-in-hole
-                               (basic-text "]" (default-style)))))))
-       (hide-hole ,(λ (args)
+;; compound-rewrite-table : (listof lw) -> (listof (union lw pict string))
+(define compound-rewrite-table 
+  (make-parameter 
+   `((in-hole ,(λ (args)
+                 (let ([context (list-ref args 2)]
+                       [thing-in-hole (list-ref args 3)])
+                   (list (blank)
+                         context
+                         ""
+                         (basic-text "[" (default-style))
+                         thing-in-hole
+                         (basic-text "]" (default-style))))))
+     (hide-hole ,(λ (args)
                      (list (blank)
                            (list-ref args 2)
                            (blank))))
@@ -171,7 +168,6 @@
   ;; pict : pict
   (define-struct (pict-token token) (pict) #:inspector (make-inspector))
   
-  ;; spacer : number
   (define-struct (spacer-token token) () #:inspector (make-inspector))
 
   ;; pict : pict
@@ -643,10 +639,11 @@
                           [(< (token-span spacer)
                               col)
                            (cons (make-line (line-n line)
-                                            (insert-new-token col
-                                                              new-token
-                                                              (token-column spacer)
-                                                              tokens))
+                                            (cons spacer
+                                                  (insert-new-token col
+                                                                    new-token
+                                                                    (token-column spacer)
+                                                                    (cdr tokens))))
                                  (cdr lines))]))))]))))
                   
   ;; insert-new-token : number token number (listof token) -> (listof token)

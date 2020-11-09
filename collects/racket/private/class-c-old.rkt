@@ -1540,11 +1540,11 @@
     (fail '(expected: "an object" given: "~e") obj))
   (let ([cls (object-ref/unwrap obj)])
     (let ([method-ht (class-method-ht cls)])
-      (for ([m methods])
+      (for ([m (in-list methods)])
         (unless (hash-ref method-ht m #f)
           (fail "no public method ~a" m))))
     (let ([field-ht (class-field-ht cls)])
-      (for ([m fields])
+      (for ([m (in-list fields)])
         (unless (hash-ref field-ht m #f)
           (fail "no public field ~a" m)))))
   #t)
@@ -1668,7 +1668,18 @@
                      [bindings bindings])
          (syntax/loc stx
            (let bindings
-             (make-base-object/c methods method-ctcs fields field-ctcs)))))]))
+             (build-base-object/c methods method-ctcs fields field-ctcs)))))]))
+
+(define (build-base-object/c methods method-ctcs fields field-ctcs)
+  (make-base-object/c
+   methods
+   (for/list ([method-ctc (in-list method-ctcs)])
+     (cond [(just-check-existence? method-ctc) method-ctc]
+           [else (coerce-contract 'object/c method-ctc)]))
+   fields
+   (for/list ([field-ctc (in-list field-ctcs)])
+     (cond [(just-check-existence? field-ctc) field-ctc]
+           [else (coerce-contract 'object/c field-ctc)]))))
 
 ;; make-wrapper-object: contract object blame neg-party
 ;;                      (listof symbol) (listof contract?) (listof symbol) (listof contract?)

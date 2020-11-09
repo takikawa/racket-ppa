@@ -1,4 +1,21 @@
+Version 7.9, October 2020
+Improve Racket CS place-local allocation, add parallel GC,
+ and merge Chez Scheme GC support for incremental promotion
+Change stack traces to suppress built-in functions
+Use XDG filesystem conventions by default on Unix
+Bug repairs and other changes noted in the documentation
+
+Version 7.8, July 2020
+Add unboxed flonum arithmetic to Racket CS
+Add Racket CS improved GC accounting and 'incremental mode
+Add Racket CS AArch32 and AArch64 support, including
+ places/futures (which are not available in BC)
+Bug repairs and other changes noted in the documentation
+
 Version 7.7, April 2020
+Add support for embedding Racket CS in other applications
+Switch Racket CS immutable hash table to HAMTs, based on
+ stencil vectors in the Chez Scheme
 Bug repairs and other changes noted in the documentation
 
 Version 7.6, January 2019
@@ -21,6 +38,7 @@ Version 7.2, January 2019
 Bug repairs and other changes noted in the documentation
 
 Version 7.1, October 2018
+Added sha1-bytes, sha224-bytes, and sha256-bytes
 Bug repairs and other changes noted in the documentation
 
 Version 7.0, July 2018
@@ -1788,7 +1806,7 @@ Changed initial setting of current-library-collection-paths
 Unit definitions and embedded definitions are not allowed
  to shadow syntax or macro names; this restriction resolves
  all potential ambiguity resulting from shadowing syntax
-Changed display for symbols containg special characters:
+Changed display for symbols containing special characters:
  the special characters are not escaped (or bar-quoted)
 Changed write to use the value of (read-accept-bar-quote)
  for printing symbols containing special characters; if

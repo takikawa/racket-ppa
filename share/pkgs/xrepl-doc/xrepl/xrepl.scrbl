@@ -113,7 +113,7 @@ available.
 }
 
 @defcmd[describe]{
-  For each of the specified names, describe where where it is coming
+  For each of the specified names, describe where it is coming
   from and how it was defined if it names a known binding.  In addition,
   describe the module (list its imports and exports) that is named by
   arguments that are known module names.
@@ -187,6 +187,16 @@ available.
   Whenever an error is displayed, XREPL will not show its context
   printout.  Instead, use the @cmd[backtrace] command to display the
   backtrace for the last error.
+}
+
+@defcmd[exn]{
+  While the @cmd[backtrace] command shows the backtrace for the last error,
+  the @cmd[exn] command shows the entire exception. This may be useful to
+  see the type of exception, for example.
+
+  In addition, you can specify an identifier to bind the last exception to,
+  in which case the exception is not printed. This is bound with @racket[define],
+  thus updating any previous top-level binding with that name.
 }
 
 @defcmd[time]{

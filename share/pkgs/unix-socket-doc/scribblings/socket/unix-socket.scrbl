@@ -45,7 +45,7 @@ the platform-specific length (108 bytes on Linux, 104 bytes on BSD and
 Mac OS X). Example: @racket["/tmp/mysocket"].}
 
 @item{If @racket[v] is a bytestring (@racket[bytes?]), it represents
-an abstract socket name, supported on ly on Linux. The first byte of
+an abstract socket name, supported only on Linux. The first byte of
 @racket[v] must be NUL, and its length must be less than or equal to
 108 bytes. Such a value refers to a socket in the Linux abstract
 socket namespace. Example: @racket[#"\0mysocket"].
@@ -81,6 +81,10 @@ A unix socket listener acts as a synchronizable event. It is ready
 when a client connection is ready to be accepted (see
 @racket[unix-socket-accept]), and its synchronization result is the
 listener itself.
+}
+
+@defproc[(unix-socket-close-listener [listener unix-socket-listener?]) void?]{
+Closes a unix socket listener.  The socket file must be deleted separately (e.g. using @racket[delete-file].)
 }
 
 @defproc[(unix-socket-accept [listener unix-socket-listener?])

@@ -4,7 +4,10 @@
          racket/promise)
 
 (provide decompile-chez-procedure
-         unwrap-chez-interpret-jitified)
+         unwrap-chez-interpret-jitified
+         current-can-disassemble)
+
+(define current-can-disassemble (make-parameter #t))
 
 (define (decompile-chez-procedure p)
   (unless (procedure? p)
@@ -77,7 +80,7 @@
     (vm-eval
      `(let ([code ',code]
             [memcpy ',(lambda (to from len)
-                        (memcpy to (cast from _intptr _pointer) len))])
+                        (memcpy to (cast from _uintptr _pointer) len))])
         (lock-object code)
         (let* ([code-p (($primitive $object-address) code ,code-pointer-adjust)]
                [length (foreign-ref 'uptr code-p (foreign-sizeof 'uptr))]
@@ -106,7 +109,8 @@
          null))
    ;; Show machine/assembly code:
    (cond
-     [(force disassemble-bytes)
+     [(and (current-can-disassemble)
+           (force disassemble-bytes))
       => (lambda (disassemble-bytes)
            (define o (open-output-bytes))
            (parameterize ([current-output-port o])

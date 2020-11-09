@@ -79,7 +79,9 @@
  [(threaded?)
   (define (place-enabled?) #t)
   (define (fork-place thunk finish-proc)
+    (do-prepare-for-place)
     (fork-thread (lambda ()
+                   (collect-trip-for-allocating-places! +1)
                    (init-virtual-registers)
                    (place-registers (vector-copy place-register-inits))
                    (root-thread-cell-values (make-empty-thread-cell-values))
@@ -91,20 +93,29 @@
                                     (set-box! place-esc-box esc)
                                     (thunk)
                                     0))])
-                     (finish-proc result)))))
+                     (finish-proc result)
+                     (collect-trip-for-allocating-places! -1)
+                     (do-destroy-place)))))
   ;; Must be called within an engine, used for memory accounting:
   (define (current-place-roots)
-    (make-strongly-reachable-for-accounting
-     (list (place-registers)
-           (current-engine-thread-cell-values))))]
+    (list (place-registers)
+          (current-engine-thread-cell-values)))]
  [else
   (define (place-enabled?) #f)
   (define (fork-place thunk finish-proc) #f)
   (define (current-place-roots) '())])
 
+(define do-prepare-for-place void)
+(define (set-prepare-for-place! proc)
+  (set! do-prepare-for-place proc))
+
 (define do-start-place void)
 (define (set-start-place! proc)
   (set! do-start-place proc))
+
+(define do-destroy-place void)
+(define (set-destroy-place! proc)
+  (set! do-destroy-place proc))
 
 (define (start-place pch path sym in out err cust plumber)
   (let ([finish (do-start-place pch path sym in out err cust plumber)])

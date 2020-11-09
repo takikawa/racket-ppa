@@ -110,9 +110,6 @@
    (define gracket-guid-or-x11-args (list-ref the-command-line-arguments 9))
 
    (seq
-    (when (foreign-entry? "racket_exit")
-      (#%exit-handler (foreign-procedure "racket_exit" (int) void)))
-
     (when (eq? 'windows (system-type))
       (unsafe-register-process-global (string->bytes/utf-8 "PLT_WM_IS_GRACKET")
 				      (ptr-add #f wm-is-gracket-or-x11-arg-count))
@@ -127,22 +124,23 @@
         (unsafe-register-process-global (string->bytes/utf-8 "PLT_X11_ARGUMENT_COUNT")
 				        (ptr-add #f wm-is-gracket-or-x11-arg-count))
         (unsafe-register-process-global (string->bytes/utf-8 "PLT_X11_ARGUMENTS")
-				        (ptr-add #f (#%string->number gracket-guid-or-x11-args 16))))))
+				        (ptr-add #f (#%string->number (substring gracket-guid-or-x11-args 2) 16))))))
 
    (define compiled-file-paths
-     (list (->path (cond
-                    [cs-compiled-subdir?
-                     (build-path "compiled"
-                                 (cond
-                                  [(getenv-bytes "PLT_ZO_PATH")
-                                   => (lambda (s)
-                                        (unless (and (not (equal? s #vu8()))
-                                                     (relative-path? (->path s)))
-                                          (error 'racket "PLT_ZO_PATH environment variable is not a valid path"))
-                                        (->path s))]
-                                  [platform-independent-zo-mode? "cs"]
-                                  [else (symbol->string (machine-type))]))]
-                    [else "compiled"]))))
+     (list (cond
+             [(getenv-bytes "PLT_ZO_PATH")
+              => (lambda (s)
+                   (unless (and (not (equal? s #vu8()))
+                                (relative-path? (->path s)))
+                     (error 'racket "PLT_ZO_PATH environment variable is not a valid path"))
+                   (->path s))]
+             [cs-compiled-subdir?
+              (build-path "compiled"
+                          (->path
+                           (cond
+                             [platform-independent-zo-mode? "cs"]
+                             [else (symbol->string (machine-type))])))]
+             [else "compiled"])))
    (define user-specific-search-paths? #t)
    (define load-on-demand? #t)
    (define compile-target-machine (if (getenv "PLT_COMPILE_ANY")
@@ -556,6 +554,9 @@
               (flags-loop null (see saw 'non-config))]
              [("-j" "--no-jit")
               (loop (cdr args))]
+             [("-Z")
+              (let-values ([(ignored rest-args) (next-arg "argument to ignore" arg within-arg args)])
+                (flags-loop rest-args saw))]
              [("-h" "--help")
               (show-help)
               (exit)]
@@ -674,31 +675,35 @@
                    (when debug-GC:major?
                      (log-message* root-logger 'debug 'GC:major msg data #f in-interrupt?)))))))))))
 
-   (seq
-    (exit-handler
-     (let ([orig (exit-handler)]
-           [root-logger (current-logger)])
-       (lambda (v)
-         (when gcs-on-exit?
-           (collect-garbage)
-           (collect-garbage))
-         (let ([debug-GC? (log-level?* root-logger 'debug 'GC)]
-               [debug-GC:major? (log-level?* root-logger 'debug 'GC:major)])
-           (when (or debug-GC? debug-GC:major?)
-             (let ([msg (chez:format "GC: 0:atexit peak ~a; alloc ~a; major ~a; minor ~a; ~ams"
-                                     (K "" peak-mem)
-                                     (K "" (- (+ (bytes-deallocated) (bytes-allocated)) (initial-bytes-allocated)))
-                                     major-gcs
-                                     minor-gcs
-                                     (let ([t (sstats-gc-cpu (statistics))])
-                                       (+ (* (time-second t) 1000)
-                                          (quotient (time-nanosecond t) 1000000))))])
-               (when debug-GC?
-                 (log-message root-logger 'info 'GC msg #f #f))
-               (when debug-GC:major?
-                 (log-message root-logger 'info 'GC:major msg #f #f)))))
-         (linklet-performance-report!)
-         (|#%app| orig v)))))
+   (define (initialize-exit-handler!)
+     (when (foreign-entry? "racket_exit")
+       (#%exit-handler (foreign-procedure "racket_exit" (int) void)))
+     (#%exit-handler
+      (let ([orig (#%exit-handler)]
+            [root-logger (current-logger)])
+        (lambda (v)
+          (when gcs-on-exit?
+            (collect-garbage)
+            (collect-garbage))
+          (let ([debug-GC? (log-level?* root-logger 'debug 'GC)]
+                [debug-GC:major? (log-level?* root-logger 'debug 'GC:major)])
+            (when (or debug-GC? debug-GC:major?)
+              (let ([msg (chez:format "GC: 0:atexit peak ~a(~a); alloc ~a; major ~a; minor ~a; ~ams"
+                                      (K "" peak-mem)
+                                      (K "+" (- (maximum-memory-bytes) peak-mem))
+                                      (K "" (- (+ (bytes-deallocated) (bytes-allocated)) (initial-bytes-allocated)))
+                                      major-gcs
+                                      minor-gcs
+                                      (let ([t (sstats-gc-cpu (statistics))])
+                                        (+ (* (time-second t) 1000)
+                                           (quotient (time-nanosecond t) 1000000))))])
+                (when debug-GC?
+                  (log-message root-logger 'info 'GC msg #f #f))
+                (when debug-GC:major?
+                  (log-message root-logger 'info 'GC:major msg #f #f)))))
+          (linklet-performance-report!)
+          (custodian-shutdown-root-at-exit)
+          (|#%app| orig v)))))
 
    (define stderr-logging
      (or stderr-logging-arg
@@ -721,7 +726,7 @@
                (parse-logging-spec "syslog" spec "in PLTSYSLOG environment variable" #f)
                '()))))
 
-   (define gcs-on-exit? (and (getenv "PLT_GCS_ON_EXIT")))
+   (define gcs-on-exit? (and (getenv "PLT_GCS_ON_EXIT") #t))
 
    (define (initialize-place!)
      (current-command-line-arguments remaining-command-line-arguments)
@@ -800,8 +805,27 @@
                (when as-predefined?
                  (set! embedded-load-in-places (cons (list path start end bstr) embedded-load-in-places))))))
            (escape))))))
-       
+
    (set-make-place-ports+fds! make-place-ports+fds)
+
+   (set-prepare-for-place!
+    (lambda ()
+      ;; Force visit of modules to make sure that we don't end up
+      ;; with a race later by trying to visit the module in a place:
+      (call-with-system-wind
+       (lambda ()
+         (for-each (lambda (lib)
+                     (#%$visit-library lib '() #f))
+                   '((chezscheme)
+                     (rumble)
+                     (thread)
+                     (io)
+                     (regexp)
+                     (schemify)
+                     (linklet)
+                     (expander)))
+         ;; Only need to visit once (although multiple time is ok)
+         (set-prepare-for-place! void)))))
 
    (set-start-place!
     (lambda (pch mod sym in out err cust plumber)
@@ -817,6 +841,9 @@
       (lambda ()
         (let ([f (dynamic-require mod sym)])
           (f pch)))))
+   (set-destroy-place!
+    (lambda ()
+      (io-place-destroy!)))
 
    (let ([a (or addon-dir
                 (getenv-bytes "PLTADDONDIR"))])
@@ -830,12 +857,25 @@
           (dump-memory-stats)
           (apply orig args)))))
 
+   (when (getenv "PLT_MAX_COMPACT_GC")
+     (in-place-minimum-generation 254))
+
+   (let ([s (getenv "PLT_INCREMENTAL_GC")])
+     (when (and s
+                (>= (string-length s) 1)
+                (#%memv (string-ref s 0) '(#\0 #\n #\N)))
+       (set-incremental-collection-enabled! #f)))
+
+   (when (getenv "PLTDISABLEGC")
+     (collect-request-handler void))
+
    (when version?
      (display (banner)))
    (call/cc ; Chez Scheme's `call/cc`, used here to escape from the Racket-thread engine loop
     (lambda (entry-point-k)
       (call-in-main-thread
        (lambda ()
+         (initialize-exit-handler!)
          (initialize-place!)
 
          (when init-library

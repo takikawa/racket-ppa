@@ -1,4 +1,22 @@
 ------------------------------------------------------------------------
+Version 7.9				  [Mon Oct 26 09:06:42 EDT 2020]
+
+* restrict string comparison function at the BSL and BSL+ level to two
+  arguments. The relaxed versions allow for making bad mistakes.
+
+* introduce number->string-digits for rendering numbers in a useful
+  manner (say, for amounts)
+
+------------------------------------------------------------------------
+Version 7.8				  [Wed Jul 29 13:13:57 EDT 2020]
+
+* improving the error reporting of universe in #lang racket
+  without affecting the teaching language operations 
+* bug fixes
+
+* noticed a misbehavior in test-engine/tests/check-ordered.rkt
+
+------------------------------------------------------------------------
 Version 7.7				  [Tue Apr 28 20:38:26 EDT 2020]
 
 * no changes 

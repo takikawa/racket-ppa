@@ -65,7 +65,7 @@
                               #:explode? explode?)]
           [else
            (split-after-drive p #:explode? explode?)])])]
-     [(and ((bytes-length bstr) . > . 2)
+     [(and ((bytes-length bstr) . >= . 2)
            (drive-letter? (bytes-ref bstr 0))
            (eq? (bytes-ref bstr 1) (char->integer #\:)))
       (split-after-drive p
@@ -268,7 +268,9 @@
                                            (if (eqv? (bytes-ref bstr 8) (char->integer #\\))
                                                #""
                                                #"\\")
-                                           (subbytes bstr 8))
+                                           (subbytes bstr 8 (let ([len (bytes-length bstr)])
+                                                              (if is-dir? (sub1 len) len))))
+                                                                
                              'windows))
                (cond
                  [explode? (list elem base)]

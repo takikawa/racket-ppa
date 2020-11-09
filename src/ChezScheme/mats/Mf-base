@@ -34,6 +34,8 @@
 # For example, "make o=2 cp0=t ctb=8192" causes the mats to be run at
 # optimize level 2 with cp0 enabled and collect-trip-bytes set to 8192.
 
+include Mf-config
+
 ifeq (${OS},Windows_NT)
   dirsep = ;
 else
@@ -84,6 +86,10 @@ eval = $(defaulteval)
 defaultctb = (collect-trip-bytes)
 ctb = $(defaultctb)
 
+# cn defines the value to which collect-notify is set: f for #f, t for #t
+defaultcn = f
+cn = $(defaultcn)
+
 # cgr is the value to which collect-generation-radix is set.
 defaultcgr = (collect-generation-radix)
 cgr = $(defaultcgr)
@@ -91,6 +97,10 @@ cgr = $(defaultcgr)
 # cmg is the value to which collect-maximum-generation is set.
 defaultcmg = (collect-maximum-generation)
 cmg = $(defaultcmg)
+
+# ipmg is the value to which in-place-minimum-generation is set.
+defaultipmg = (in-place-minimum-generation)
+ipmg = $(defaultipmg)
 
 # rmg is the value to which release-minimum-generation is set.
 defaultrmg = (release-minimum-generation)
@@ -158,9 +168,11 @@ $(objdir)/%.mo : %.ms mat.so
              '(heap-check-interval ${hci})'\
              '(#%$$enable-check-prelex-flags #${ecpf})'\
              '(compile-profile #$p)'\
+             '(collect-notify #${cn})'\
              '(collect-trip-bytes ${ctb})'\
              '(collect-generation-radix ${cgr})'\
              '(collect-maximum-generation ${cmg})'\
+             '(in-place-minimum-generation ${ipmg})'\
              '(enable-object-counts #${eoc})'\
              '(commonization-level ${cl})'\
              '(compile-interpret-simple #${cis})'\
@@ -182,9 +194,11 @@ $(objdir)/%.mo : %.ms mat.so
              '(heap-check-interval ${hci})'\
              '(#%$$enable-check-prelex-flags #${ecpf})'\
              '(compile-profile #$p)'\
+             '(collect-notify #${cn})'\
              '(collect-trip-bytes ${ctb})'\
              '(collect-generation-radix ${cgr})'\
              '(collect-maximum-generation ${cmg})'\
+             '(in-place-minimum-generation ${ipmg})'\
              '(enable-object-counts #${eoc})'\
              '(commonization-level ${cl})'\
              '(compile-interpret-simple #${cis})'\
@@ -256,8 +270,8 @@ partialx:
 	$(MAKE) allxhelp o=3 eval=interpret cp0=t rmg=2
 
 allx: prettyclean
-	$(MAKE) allxhelp o=0
-	$(MAKE) allxhelp o=3
+	$(MAKE) allxhelp o=0 eoc=f
+	$(MAKE) allxhelp o=3 eoc=f
 	$(MAKE) allxhelp o=0 cp0=t cl=3
 	$(MAKE) allxhelp o=3 cp0=t cl=3
 	$(MAKE) allxhelp o=0 spi=t rmg=2 p=t
@@ -356,9 +370,11 @@ script.all$o makescript$o:
              '(heap-check-interval ${hci})'\
              '(#%$$enable-check-prelex-flags #${ecpf})'\
              '(compile-profile #$p)'\
+             '(collect-notify #${cn})'\
              '(collect-trip-bytes ${ctb})'\
              '(collect-generation-radix ${cgr})'\
              '(collect-maximum-generation ${cmg})'\
+             '(in-place-minimum-generation ${ipmg})'\
              '(enable-object-counts #${eoc})'\
              '(commonization-level ${cl})'\
              '(compile-interpret-simple #${cis})'\
@@ -384,12 +400,12 @@ source:
 
 source$o: ${src} mat.ss oop.ss ht.ss cat_flush.c ${fsrc} freq.in freq.out m4test.in m4test.out script.all$o prettytest.ss ftype.h
 
-rootsrc = $(shell cd ../../mats; echo *)
+rootsrc = $(shell cd ${upupsrcdir}/mats; echo *)
 ${rootsrc}:
 ifeq ($(OS),Windows_NT)
-	cp -p ../../mats/$@ $@
+	cp -p ${upupsrcdir}/mats/$@ $@
 else
-	ln -s ../../mats/$@ $@
+	ln -s ${upupsrcdir}/mats/$@ $@
 endif
 
 prettytest.ss:

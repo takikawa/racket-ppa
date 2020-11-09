@@ -1,4 +1,3 @@
-"7.ss"
 ;;; 7.ss
 ;;; Copyright 1984-2017 Cisco Systems, Inc.
 ;;; 
@@ -16,6 +15,7 @@
 
 ;;; system operations
 
+(begin
 (define scheme-start
   (make-parameter
     (lambda fns (for-each load fns) (new-cafe))
@@ -86,6 +86,13 @@
       [(g) (ba (filter-generation g) -1)]
       [(g s) (ba (if g (filter-generation g) -1) (if s (filter-space s) -1))])))
 
+(define-who bytes-finalized
+  (let ([bf (foreign-procedure "(cs)bytes_finalized"
+              ()
+              scheme-object)])
+    (lambda ()
+      (bf))))
+
 (define $spaces (lambda () (map car (constant real-space-alist))))
 
 (define current-memory-bytes (foreign-procedure "(cs)curmembytes" () uptr))
@@ -118,10 +125,17 @@
                       (p path)
                       (loop (cdr ls))))))))))
 
+(set! $compressed-warning
+  (let ([warned? #f])
+    (lambda (who p)
+      (unless warned?
+        (set! warned? #t)
+        (warningf who "fasl file content is compressed internally; compressing the file (~s) is redundant and can slow fasl writing and reading significantly" p)))))
+
 (set-who! fasl-read
   (let ()
-    (define $fasl-read (foreign-procedure "(cs)fasl_read" (ptr boolean fixnum ptr) ptr))
-    (define $bv-fasl-read (foreign-procedure "(cs)bv_fasl_read" (ptr int uptr uptr ptr) ptr))
+    (define $fasl-read (foreign-procedure "(cs)fasl_read" (int int ptr ptr) ptr))
+    (define $bv-fasl-read (foreign-procedure "(cs)bv_fasl_read" (ptr int uptr uptr ptr ptr) ptr))
     (define (get-uptr p)
       (let ([k (get-u8 p)])
         (let f ([k k] [n (fxand k #x7F)])
@@ -129,12 +143,19 @@
               (let ([k (get-u8 p)])
                 (f k (logor (ash n 7) (fxand k #x7F))))
               n))))
-    (define (malformed p) ($oops who "malformed fasl-object header found in ~s" p))
+    (define (get-uptr/bytes p)
+      (let ([k (get-u8 p)])
+        (let f ([k k] [n (fxand k #x7F)] [bytes 1])
+          (if (fxlogbit? 7 k)
+              (let ([k (get-u8 p)])
+                (f k (logor (ash n 7) (fxand k #x7F)) (fx+ bytes 1)))
+              (values n bytes)))))
+    (define (malformed p what) ($oops who "malformed fasl-object found in ~s (~a)" p what))
     (define (check-header p)
       (let ([bv (make-bytevector 8 (constant fasl-type-header))])
         (unless (and (eqv? (get-bytevector-n! p bv 1 7) 7)
                      (bytevector=? bv (constant fasl-header)))
-          (malformed p)))
+          (malformed p "invalid header")))
       (let ([n (get-uptr p)])
         (unless (= n (constant scheme-version))
           ($oops who "incompatible fasl-object version ~a found in ~s"
@@ -146,21 +167,36 @@
              (lambda (a)
                ($oops who "incompatible fasl-object machine-type ~s found in ~s"
                  (cdr a) p))]
-            [else (malformed p)])))
+            [else (malformed p "unrecognized machine type")])))
       (unless (and (eqv? (get-u8 p) (char->integer #\()) ;)
                    (let f ()
                      (let ([n (get-u8 p)])
                        (and (not (eof-object? n)) ;(
                             (or (eqv? n (char->integer #\))) (f))))))
-        (malformed p)))
-    (define (go p situation)
+        (malformed p "invalid list of base boot files")))
+    (define (call-with-bytevector-and-offset p len proc)
+      ;; fasl-read directly from the port buffer if it has `len`
+      ;; bytes ready, which works for a bytevector port; disable
+      ;; interrupt to make sure the bytes stay available (and
+      ;; `$bv-fasl-read` take tc-mutex, anyway)
+      ((with-interrupts-disabled
+        (let ([idx (binary-port-input-index p)])
+          (cond
+            [(<= len (fx- (binary-port-input-size p) idx))
+             (let ([result (proc (binary-port-input-buffer p) idx)])
+               (set-binary-port-input-index! p (fx+ idx len))
+               (lambda () result))]
+            [else
+             ;; Call `get-bytevector-n`, etc. with interrupts reenabled
+             (lambda ()
+               (proc (get-bytevector-n p len) 0))])))))
+    (define (go p situation externals)
       (define (go1)
         (if (and ($port-flags-set? p (constant port-flag-file))
+                 (or (not ($port-flags-set? p (constant port-flag-compressed)))
+                     (begin ($compressed-warning who p) #f))
                  (eqv? (binary-port-input-count p) 0))
-            ($fasl-read ($port-info p)
-              ($port-flags-set? p (constant port-flag-compressed))
-              situation
-              (port-name p))
+            ($fasl-read ($port-info p) situation (port-name p) externals)
             (let fasl-entry ()
               (let ([ty (get-u8 p)])
                 (cond
@@ -174,49 +210,53 @@
                    (go2 (eqv? situation (constant fasl-type-visit)))]
                   [(eqv? ty (constant fasl-type-visit-revisit))
                    (go2 #f)]
-                  [else (malformed p)])))))
+                  [else (malformed p "invalid situation")])))))
       (define (go2 skip?)
-        (let ([ty (get-u8 p)])
-          (cond
-            [(or (eqv? ty (constant fasl-type-fasl-size))
-                 (eqv? ty (constant fasl-type-vfasl-size)))
-             (let ([len (get-uptr p)])
-               (if skip?
-                   (begin
-                     (if (and (port-has-port-position? p) (port-has-set-port-position!? p))
-                         (set-port-position! p (+ (port-position p) len))
-                         (get-bytevector-n p len))
-                     (go1))
-                   (let ([name (port-name p)])
-                     ;; fasl-read directly from the port buffer if it has `len`
-                     ;; bytes ready, which works for a bytevector port; disable
-                     ;; interrupt to make sure the bytes stay available (and
-                     ;; `$bv-fasl-read` takes tc-mutex, anyway)
-                     ((with-interrupts-disabled
-                       (let ([idx (binary-port-input-index p)])
-                         (cond
-                          [(<= len (fx- (binary-port-input-size p) idx))
-                           (let ([result ($bv-fasl-read (binary-port-input-buffer p) ty
-                                                        idx len name)])
-                             (set-binary-port-input-index! p (+ idx len))
-                             (lambda () result))]
-                          [else
-                           ;; Call `get-bytevector-n`, etc. with interrupts reenabled
-                           (lambda ()
-                             ($bv-fasl-read (get-bytevector-n p len) ty 0 len name))])))))))]
-            [else (malformed p)])))
+        (let ([n (get-uptr p)])
+          (if skip?
+              (begin
+                (if (and (port-has-port-position? p) (port-has-set-port-position!? p))
+                    (set-port-position! p (+ (port-position p) n))
+                    (get-bytevector-n p n))
+                (go1))
+              (let* ([compressed-flag (get-u8 p)]
+                     [kind (get-u8 p)])
+                (cond
+                  [(or (eqv? compressed-flag (constant fasl-type-gzip)) (eqv? compressed-flag (constant fasl-type-lz4)))
+                   (let-values ([(dest-size dest-size-bytes) (get-uptr/bytes p)])
+                     (let* ([src-size (- n 2 dest-size-bytes)]
+                            [bv (call-with-bytevector-and-offset
+                                 p src-size
+                                 (lambda (bv offset)
+                                   ($bytevector-uncompress bv offset src-size dest-size
+                                      (if (eqv? compressed-flag (constant fasl-type-gzip))
+                                          (constant COMPRESS-GZIP)
+                                          (constant COMPRESS-LZ4)))))])
+                       ($bv-fasl-read bv kind 0 dest-size (port-name p) externals)))]
+                  [(eqv? compressed-flag (constant fasl-type-uncompressed))
+                   (let ([len (- n 2)])
+                     (call-with-bytevector-and-offset
+                      p len
+                      (lambda (bv offset)
+                        ($bv-fasl-read bv kind offset len (port-name p) externals))))]
+                  [else (malformed p "invalid compression")])))))
       (unless (and (input-port? p) (binary-port? p))
         ($oops who "~s is not a binary input port" p))
       (go1))
+    (define (parse-situation situation)
+      (case situation
+        [(visit) (constant fasl-type-visit)]
+        [(revisit) (constant fasl-type-revisit)]
+        [(load) (constant fasl-type-visit-revisit)]
+        [else ($oops who "invalid situation ~s" situation)]))
     (case-lambda
-      [(p) (go p (constant fasl-type-visit-revisit))]
-      [(p situation)
-       (go p
-         (case situation
-           [(visit) (constant fasl-type-visit)]
-           [(revisit) (constant fasl-type-revisit)]
-           [(load) (constant fasl-type-visit-revisit)]
-           [else ($oops who "invalid situation ~s" situation)]))])))
+      [(p) (go p (constant fasl-type-visit-revisit) '#())]
+      [(p situation) (go p (parse-situation situation) '#())]
+      [(p situation externals)
+       (let ([situation (parse-situation situation)])
+         (unless (vector? externals)
+           ($oops who "not a vector ~s" externals))
+         (go p situation externals))])))
 
 (define ($compiled-file-header? ip)
   (let ([pos (port-position ip)])
@@ -230,12 +270,12 @@
 
 (let ()
   (define do-load-binary
-    (lambda (who fn ip situation for-import? importer)
+    (lambda (who fn ip situation for-import? importer externals)
       (let ([load-binary (make-load-binary who fn situation for-import? importer)])
-        (let ([x (fasl-read ip situation)])
+        (let ([x (fasl-read ip situation externals)])
           (unless (eof-object? x)
             (let loop ([x x])
-              (let ([next-x (fasl-read ip situation)])
+              (let ([next-x (fasl-read ip situation externals)])
                 (if (eof-object? next-x)
                     (load-binary x)
                     (begin (load-binary x) (loop next-x))))))))))
@@ -263,7 +303,7 @@
          [(program-info? x) ($install-program-desc x)]
          [(recompile-info? x) (void)]
          [(Lexpand? x) ($interpret-backend x situation for-import? importer fn)]
-                                        ; NB: this is here to support the #t inserted by compile-file-help2 after header information
+         ; NB: this is here to support the #t inserted by compile-file-help2 after header information
          [(eq? x #t) (void)]
          ;; for vfasl combinations:
          [(vector? x) (run-vector x)]
@@ -286,15 +326,11 @@
                                       fp
                                       (loop fp))))))
                         (begin (set-port-position! ip start-pos) 0)))])
-          (port-file-compressed! ip)
           (if ($compiled-file-header? ip)
               (begin
-                (do-load-binary who fn ip situation for-import? importer)
+                (do-load-binary who fn ip situation for-import? importer '#())
                 (close-port ip))
               (begin
-                (when ($port-flags-set? ip (constant port-flag-compressed))
-                  (close-port ip)
-                  ($oops who "missing header for compiled file ~s" fn))
                 (unless ksrc
                   (close-port ip)
                   ($oops who "~a is not a compiled file" fn))
@@ -310,22 +346,27 @@
       (make-load-binary '$make-load-binary fn 'load #f #f)))
 
   (set-who! load-compiled-from-port
-    (lambda (ip)
-      (unless (and (input-port? ip) (binary-port? ip))
-        ($oops who "~s is not a binary input port" ip))
-      (do-load-binary who (port-name ip) ip 'load #f #f)))
+    (rec load-compiled-from-port
+      (case-lambda
+       [(ip) (load-compiled-from-port ip '#())]
+       [(ip externals)
+        (unless (and (input-port? ip) (binary-port? ip))
+          ($oops who "~s is not a binary input port" ip))
+        (unless (vector? externals)
+          ($oops who "~s is not a vector" ip))
+        (do-load-binary who (port-name ip) ip 'load #f #f externals)])))
 
   (set-who! visit-compiled-from-port
     (lambda (ip)
       (unless (and (input-port? ip) (binary-port? ip))
         ($oops who "~s is not a binary input port" ip))
-      (do-load-binary who (port-name ip) ip 'visit #f #f)))
+      (do-load-binary who (port-name ip) ip 'visit #f #f '#())))
 
   (set-who! revisit-compiled-from-port
     (lambda (ip)
       (unless (and (input-port? ip) (binary-port? ip))
         ($oops who "~s is not a binary input port" ip))
-      (do-load-binary who (port-name ip) ip 'revisit #f #f)))
+      (do-load-binary who (port-name ip) ip 'revisit #f #f '#())))
 
   (set-who! load-program
     (rec load-program
@@ -754,23 +795,23 @@
   (define gc-count 0)
   (define start-bytes 0)
   (define docollect
-    (let ([do-gc (foreign-procedure "(cs)do_gc" (int int ptr) ptr)])
+    (let ([do-gc (foreign-procedure "(cs)do_gc" (int int int ptr) ptr)])
       (lambda (p)
         (with-tc-mutex
           (unless (= $active-threads 1)
             ($oops 'collect "cannot collect when multiple threads are active"))
-          (let-values ([(trip g gtarget count-roots) (p gc-trip)])
+          (let-values ([(trip g gmintarget gmaxtarget count-roots) (p gc-trip)])
             (set! gc-trip trip)
-            (let ([cpu (current-time 'time-thread)] [real (current-time 'time-monotonic)])
+            (let ([cpu (current-time 'time-process)] [real (current-time 'time-monotonic)])
               (set! gc-bytes (+ gc-bytes (bytes-allocated)))
               (when (collect-notify)
                 (fprintf (console-output-port)
                   "~%[collecting generation ~s into generation ~s..."
-                  g gtarget)
+                  g gmaxtarget)
                 (flush-output-port (console-output-port)))
               (when (eqv? g (collect-maximum-generation))
                 ($clear-source-lines-cache))
-              (let ([gc-result (do-gc g gtarget count-roots)])
+              (let ([gc-result (do-gc g gmintarget gmaxtarget count-roots)])
                 ($close-resurrected-files)
                 (when-feature pthreads
                   ($close-resurrected-mutexes&conditions))
@@ -778,7 +819,7 @@
                   (fprintf (console-output-port) "done]~%")
                   (flush-output-port (console-output-port)))
                 (set! gc-bytes (- gc-bytes (bytes-allocated)))
-                (set! gc-cpu (add-duration gc-cpu (time-difference (current-time 'time-thread) cpu)))
+                (set! gc-cpu (add-duration gc-cpu (time-difference (current-time 'time-process) cpu)))
                 (set! gc-real (add-duration gc-real (time-difference (current-time 'time-monotonic) real)))
                 (set! gc-count (1+ gc-count))
                 gc-result)))))))
@@ -813,14 +854,15 @@
         (docollect
           (lambda (gct)
             (let ([gct (+ gct 1)])
-              (let loop ([g (collect-maximum-generation)])
-                (if (= (modulo gct (expt (collect-generation-radix) g)) 0)
-                    (if (fx= g (collect-maximum-generation))
-                        (values 0 g g #f)
-                        (values gct g (fx+ g 1) #f))
-                    (loop (fx- g 1)))))))))
+              (let ([cmg (collect-maximum-generation)])
+                (let loop ([g cmg])
+                  (if (= (modulo gct (expt (collect-generation-radix) g)) 0)
+                      (if (fx= g cmg)
+                          (values 0 g (fxmin g 1) g #f)
+                          (values gct g 1 (fx+ g 1) #f))
+                      (loop (fx- g 1))))))))))
     (define collect2
-      (lambda (g gtarget count-roots)
+      (lambda (g gmintarget gmaxtarget count-roots)
         (docollect
           (lambda (gct)
             (values 
@@ -834,24 +876,44 @@
                         (+ gct (modulo (- n gct) n))))
                     (let ([next (trip g)] [limit (trip (fx+ g 1))])
                       (if (< next limit) next (- limit 1)))))
-              g gtarget count-roots)))))
+              g gmintarget gmaxtarget count-roots)))))
     (case-lambda
       [() (collect0)]
       [(g)
-       (unless (and (fixnum? g) (fx<= 0 g (collect-maximum-generation)))
-         ($oops who "invalid generation ~s" g))
-       (collect2 g (if (fx= g (collect-maximum-generation)) g (fx+ g 1)) #f)]
-      [(g gtarget) (collect g gtarget #f)]
-      [(g gtarget count-roots)
-       (unless (and (fixnum? g) (fx<= 0 g (collect-maximum-generation)))
-         ($oops who "invalid generation ~s" g))
-       (unless (if (fx= g (collect-maximum-generation))
-                   (or (eqv? gtarget g) (eq? gtarget 'static))
-                   (or (eqv? gtarget g) (eqv? gtarget (fx+ g 1))))
-         ($oops who "invalid target generation ~s for generation ~s" gtarget g))
+       (let ([cmg (collect-maximum-generation)])
+         (unless (and (fixnum? g) (fx<= 0 g cmg))
+           ($oops who "invalid generation ~s" g))
+         (let ([gtarget (if (fx= g cmg) g (fx+ g 1))])
+           (collect2 g gtarget gtarget #f)))]
+      [(g gtarget)
+       (let ([cmg (collect-maximum-generation)])
+         (unless (and (fixnum? g) (fx<= 0 g cmg))
+           ($oops who "invalid generation ~s" g))
+         (unless (if (fx= g cmg)
+                     (or (eqv? gtarget g) (eq? gtarget 'static))
+                     (or (eqv? gtarget g) (eqv? gtarget (fx+ g 1))))
+           ($oops who "invalid target generation ~s for generation ~s" gtarget g)))
+       (let ([gtarget (if (eq? gtarget 'static) (constant static-generation) gtarget)])
+         (collect2 g gtarget gtarget #f))]
+      [(g gmintarget gmaxtarget) (collect g gmintarget gmaxtarget #f)]
+      [(g gmintarget gmaxtarget count-roots)
+       (let ([cmg (collect-maximum-generation)])
+         (unless (and (fixnum? g) (fx<= 0 g cmg))
+           ($oops who "invalid generation ~s" g))
+         (unless (if (fx= g cmg)
+                     (or (eqv? gmaxtarget g) (eq? gmaxtarget 'static))
+                     (or (eqv? gmaxtarget g) (eqv? gmaxtarget (fx+ g 1))))
+           ($oops who "invalid maximum target generation ~s for generation ~s" gmaxtarget g))
+         (unless (or (eqv? gmintarget gmaxtarget)
+                     (and (fixnum? gmintarget)
+                          (fx<= 1 gmintarget (if (fixnum? gmaxtarget) gmaxtarget cmg))))
+           ($oops who "invalid minimum target generation ~s for generation ~s and maximum target generation ~s" gmintarget g gmaxtarget)))
        (unless (or (not count-roots) (list? count-roots))
          ($oops who "invalid counting-roots list ~s" count-roots))
-       (collect2 g (if (eq? gtarget 'static) (constant static-generation) gtarget) count-roots)])))
+       (collect2 g
+         (if (eq? gmintarget 'static) (constant static-generation) gmintarget)
+         (if (eq? gmaxtarget 'static) (constant static-generation) gmaxtarget)
+         count-roots)])))
 
 (set! collect-rendezvous
   (let ([fire-collector (foreign-procedure "(cs)fire_collector" () void)])
@@ -1556,3 +1618,4 @@
         [() (print-pass-stats #f ($pass-stats))]
         [(key) (print-pass-stats key ($pass-stats))]
         [(key psl*) (print-pass-stats key psl*)]))))
+)

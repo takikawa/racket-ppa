@@ -31,14 +31,12 @@
                               (code:line #:constructor-name constructor-id)
                               (code:line #:extra-constructor-name constructor-id)
                               (code:line #:reflection-name symbol-expr)
-                              (code:line #:methods gen:name method-defs)
+                              (code:line #:methods gen:name-id method-defs)
                               #:omit-define-syntaxes
                               #:omit-define-values]
                [field-option #:mutable
                              #:auto]
-               [method-defs (definition ...)])
-               #:contracts
-               ([gen:name identifier?])]{
+               [method-defs (definition ...)])]{
 
 Creates a new @techlink{structure type} (or uses a pre-existing
 structure type if @racket[#:prefab] is specified), and binds
@@ -132,7 +130,7 @@ The @racket[#:inspector], @racket[#:auto-value], and @racket[#:guard]
 options specify an inspector, value for automatic fields, and guard
 procedure, respectively. See @racket[make-struct-type] for more
 information on these attributes of a structure type.  The
-@racket[#:property] option, which is the only one that can be supplied
+@racket[#:property] option, which can be supplied
 multiple times, attaches a property value to the structure type; see
 @secref["structprops"] for more information on properties. The
 @racket[#:transparent] option is a shorthand for @racket[#:inspector
@@ -224,10 +222,10 @@ name, as do the various procedures that are bound by @racket[struct].
   (eval:error (circle-radius "bad"))
 ]
 
-If @racket[#:methods gen:name method-defs] is provided, then
-@racket[gen:name] must be a transformer binding for the static
+If @racket[#:methods gen:name-id method-defs] is provided (potentially multiple times), then
+@racket[gen:name-id] must be a transformer binding for the static
 information about a generic interface produced by @racket[define-generics].
-The @racket[method-defs] define the methods of the @racket[gen:name]
+The @racket[method-defs] define the methods of the @racket[gen:name-id]
 interface. A @racket[define/generic] form or auxiliary definitions
 and expressions may also appear in @racket[method-defs].
 

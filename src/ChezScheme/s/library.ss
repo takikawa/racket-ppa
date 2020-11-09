@@ -27,8 +27,6 @@
    (generate-interrupt-trap #f)
    ($track-dynamic-closure-counts #f))
 
-"library.ss (includes #<void> just before)"
-
 (eval-when (compile)
 (define-syntax define-library-entry
   (lambda (x)
@@ -141,8 +139,6 @@
 
 ;;; set up $nuate for overflow
 (define $nuate ($closure-code (call/1cc (lambda (k) k))))
-
-"making closure counters!"
 
 (set! #{raw-ref-count bhowt6w0coxl0s2y-1} '#[#{profile-counter b5vnnom9h4o4uny0-2} 0])
 (set! #{raw-create-count bhowt6w0coxl0s2y-2} '#[#{profile-counter b5vnnom9h4o4uny0-2} 0])
@@ -303,6 +299,11 @@
   (define index-oops
     (lambda (who x i)
       ($oops who "~s is not a valid index for ~s" i x)))
+  (define bytevector-index-oops
+    ;; for consistency with error before library entry was introduced:
+    (lambda (who x i)
+      ($oops who "invalid index ~s for bytevector ~s" i x)))
+
   (define stencil-vector-oops
     (lambda (who x)
       ($oops who "~s is not a vector" x)))
@@ -399,6 +400,16 @@
 
   (define-library-entry (stencil-vector-mask v)
     (stencil-vector-oops 'stencil-vector-mask v))
+
+  (define-library-entry (bytevector-ieee-double-native-ref v i)
+    (if (bytevector? v)
+        (bytevector-index-oops 'bytevector-ieee-double-native-ref v i)
+        (bytevector-oops 'bytevector-ieee-double-native-ref v)))
+
+  (define-library-entry (bytevector-ieee-double-native-set! v i)
+    (if (mutable-bytevector? v)
+        (bytevector-index-oops 'bytevector-ieee-double-native-set! v i)
+        (mutable-bytevector-oops 'bytevector-ieee-double-native-set! v)))
 
   (define-library-entry (char=? x y) (char-oops 'char=? (if (char? x) y x)))
   (define-library-entry (char<? x y) (char-oops 'char<? (if (char? x) y x)))
@@ -523,6 +534,7 @@
 (define-library-entry (fxxor x y) (fxnonfixnum2 'fxxor x y))
 (define-library-entry (fxand x y) (fxnonfixnum2 'fxand x y))
 (define-library-entry (fxnot x) (fxnonfixnum1 'fxnot x))
+(define-library-entry (fixnum->flonum x) (fxnonfixnum1 'fixnum->flonum x))
 (define-library-entry (fxpopcount x) ($oops 'fxpopcount32 "~s is not a non-negative fixnum" x))
 (define-library-entry (fxpopcount32 x) ($oops 'fxpopcount32 "~s is not a 32-bit fixnum" x))
 (define-library-entry (fxpopcount16 x) ($oops 'fxpopcount16 "~s is not a 16-bit fixnum" x))
@@ -658,8 +670,33 @@
   (define-library-entry (fl* x y) (flonum-oops 'fl* (if (flonum? x) y x)))
   (define-library-entry (fl/ x y) (flonum-oops 'fl/ (if (flonum? x) y x)))
   (define-library-entry (flnegate x) (flonum-oops 'fl- x))
+  (define-library-entry (flabs x) (flonum-oops 'flabs x))
+
+  (define-library-entry (flsqrt x) (flonum-oops 'flsqrt x))
+  (define-library-entry (flround x) (flonum-oops 'flround x))
+  (define-library-entry (flfloor x) (flonum-oops 'flfloor x))
+  (define-library-entry (flceiling x) (flonum-oops 'flceiling x))
+  (define-library-entry (fltruncate x) (flonum-oops 'fltruncate x))
+  (define-library-entry (flsingle x) (flonum-oops 'flsingle x))
+  (define-library-entry (flsin x) (flonum-oops 'flsin x))
+  (define-library-entry (flcos x) (flonum-oops 'flcos x))
+  (define-library-entry (fltan x) (flonum-oops 'fltan x))
+  (define-library-entry (flasin x) (flonum-oops 'flasin x))
+  (define-library-entry (flacos x) (flonum-oops 'flacos x))
+  (define-library-entry (flatan x) (flonum-oops 'flatan x))
+  (define-library-entry (flatan2 x y) (flonum-oops 'flatan (if (flonum? x) y x)))
+  (define-library-entry (flexp x) (flonum-oops 'flexp x))
+  (define-library-entry (fllog x) (flonum-oops 'fllog x))
+  (define-library-entry (fllog2 x y) (flonum-oops 'fllog (if (flonum? x) y x)))
+  (define-library-entry (flexpt x y) (flonum-oops 'flexpt (if (flonum? x) y x)))
+
+  (define-library-entry (flonum->fixnum x) (if (flonum? x)
+                                               ($oops 'flonum->fixnum "result for ~s would be outside of fixnum range" x)
+                                               (flonum-oops 'flonum->fixnum x)))
 )
 
+;; Now using `rint` via a C entry
+#;
 (define-library-entry (flround x)
  ; assumes round-to-nearest-or-even
   (float-type-case

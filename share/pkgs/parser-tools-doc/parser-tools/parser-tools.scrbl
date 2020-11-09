@@ -33,8 +33,10 @@ style lexer and parser generators.
 @defform/subs[#:literals (repetition union intersection complement concatenation
                           char-range char-complement
                           eof special special-comment)
-              (lexer [trigger action-expr] ...)
-              ([trigger re
+              (lexer maybe-suppress-warnings [trigger action-expr] ...)
+              ([maybe-suppress-warnings (code:line)
+                                        #:suppress-warnings]
+               [trigger re
                         (eof)
                         (special)
                         (special-comment)]
@@ -239,9 +241,15 @@ are a few examples, using @racket[:] prefixed SRE syntax:
     @filepath{.rkt} file containing a @racket[lexer] form is loaded),
     the lexer generator is run.  To avoid this overhead place the
     lexer into a module and compile the module to a @filepath{.zo}
-    bytecode file.}
+    bytecode file.
 
-@defform[(lexer-src-pos (trigger action-expr) ...)]{
+ If the lexer can accept the empty string, a message is sent
+ to @racket[current-logger]. These warnings can be disabled
+ by giving the @racket[#:suppress-warnings] flag.
+
+ @history[#:changed "7.7.0.7" @elem{Add @racket[#:suppress-warnings] flag.}]}
+
+@defform[(lexer-src-pos maybe-suppress-warnings [trigger action-expr] ...)]{
 
 Like @racket[lexer], but for each @racket[_action-result] produced by
 an @racket[action-expr], returns @racket[(make-position-token
@@ -612,8 +620,9 @@ be the right choice when using @racket[lexer] in other situations.
       is that an invalid token was received.  The second and third
       arguments will be the name and the value of the token at which
       the error was detected.  The fourth and fifth arguments, if
-      present, provide the source positions of that token.}
+      present, provide the source positions of that token.
 
+      In both cases, the function is allowed to accept an additional keyword argument named @racket[#:stack]. This argument is a representation of the parsing automata's stack. This can, for example, be used to generate context-sensitive error messages as described in @link["https://dl.acm.org/citation.cfm?id=937563.937566"]{Generating LR syntax error messages from examples}, by Clinton L. Jeffrey.}
 
       @item{@racket[(precs (assoc token-id ...) ...)]
       @italic{OPTIONAL}

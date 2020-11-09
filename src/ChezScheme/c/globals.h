@@ -40,6 +40,13 @@ EXTERN scheme_mutex_t S_tc_mutex;
 EXTERN s_thread_cond_t S_collect_cond;
 EXTERN s_thread_cond_t S_collect_thread0_cond;
 EXTERN INT S_tc_mutex_depth;
+EXTERN scheme_mutex_t S_gc_tc_mutex;
+EXTERN IBOOL S_use_gc_tc_mutex;
+EXTERN int S_collect_waiting_threads;
+EXTERN ptr S_collect_waiting_tcs[maximum_parallel_collect_threads];
+# ifdef IMPLICIT_ATOMIC_AS_EXPLICIT
+EXTERN s_thread_mutex_t S_implicit_mutex;
+# endif
 #endif
 
 /* segment.c */
@@ -68,6 +75,7 @@ EXTERN ptr S_foreign_dynamic;
 EXTERN struct S_G_struct {
   /* scheme.c */
     double thread_context[size_tc / sizeof(double)];
+    thread_gc main_thread_gc;
     ptr active_threads_id;
     ptr error_invoke_code_object;
     ptr invoke_code_object;
@@ -89,18 +97,17 @@ EXTERN struct S_G_struct {
     ptr threadno;
 
   /* segment.c */
-    seginfo *occupied_segments[max_real_space+1][static_generation+1];
+    seginfo *occupied_segments[static_generation+1][max_real_space+1];
     uptr number_of_nonstatic_segments;
     uptr number_of_empty_segments;
 
   /* alloc.c */
     ptr *protected[max_protected];
     uptr protect_next;
-    ptr first_loc[max_real_space+1][static_generation+1];
-    ptr base_loc[max_real_space+1][static_generation+1];
-    ptr next_loc[max_real_space+1][static_generation+1];
-    iptr bytes_left[max_real_space+1][static_generation+1];
-    uptr bytes_of_space[max_real_space+1][static_generation+1];
+    uptr bytes_of_space[static_generation+1][max_real_space+1];
+    uptr bytes_of_generation[static_generation+1];
+    uptr bitmask_overhead[static_generation+1];
+    uptr g0_bytes_after_last_gc;
     uptr collect_trip_bytes;
     ptr nonprocedure_code;
     ptr null_string;
@@ -111,6 +118,7 @@ EXTERN struct S_G_struct {
     ptr null_immutable_vector;
     ptr null_immutable_fxvector;
     ptr null_immutable_bytevector;
+    ptr zero_length_bignum;
     seginfo *dirty_segments[DIRTY_SEGMENT_LISTS];
 
   /* schsig.c */
@@ -123,10 +131,13 @@ EXTERN struct S_G_struct {
 
   /* gc.c */
     ptr guardians[static_generation+1];
+    ptr locked_objects[static_generation+1];
+    ptr unlocked_objects[static_generation+1];
     IGEN min_free_gen;
     IGEN new_min_free_gen;
     IGEN max_nonstatic_generation;
     IGEN new_max_nonstatic_generation;
+    IGEN min_mark_gen;
     uptr countof[static_generation+1][countof_types];
     uptr bytesof[static_generation+1][countof_types];
     uptr gctimestamp[static_generation+1];
@@ -135,8 +146,10 @@ EXTERN struct S_G_struct {
     ptr static_id;
     ptr countof_names;
     ptr gcbackreference[static_generation+1];
-    uptr phantom_sizes[static_generation+1];
     IGEN prcgeneration;
+    uptr bytes_finalized;
+    dirtycardinfo *new_dirty_cards;
+    IBOOL must_mark_gen0;
 
   /* intern.c */
     iptr oblist_length;

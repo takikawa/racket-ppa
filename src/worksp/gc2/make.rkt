@@ -1,15 +1,14 @@
 #lang racket/base
 (require racket/system
          racket/cmdline
-	 (for-label "../../racket/gc2/xform-mod.rkt"))
+	 (for-label "../../bc/gc2/xform-mod.rkt"))
 
-(define suffix "")
+(define bc-suffix "")
 
 (command-line
  #:once-each
- [("--build-level") level "Specify a suffix-determining build level"
-                    (unless (equal? level "all")
-                      (set! suffix level))]
+ [("--suffix") suffix "Specify an executable suffix"
+               (set! bc-suffix suffix)]
  #:args ()
  (void))
 
@@ -148,7 +147,7 @@
                              "-o"
                              dest
                              src)))])
-            (dynamic-require "../../racket/gc2/xform-mod.rkt" #f)
+            (dynamic-require "../../bc/gc2/xform-mod.rkt" #f)
             (set! success? #t)))))
       (unless success? 
         (when (file-exists? dest)
@@ -175,7 +174,7 @@
     (unless (system- (format "~a ~a /MT /Zi /GS- ~a /c ~a /Fdxsrc/ /Fo~a" cl.exe flags opt-flags c o))
       (error "failed compile"))))
 
-(define common-deps (list "../../racket/gc2/xform-mod.rkt"))
+(define common-deps (list "../../bc/gc2/xform-mod.rkt"))
 
 (define (find-build-file d f)
   (define (find-release d2)
@@ -196,22 +195,23 @@
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (define mz-inc
-  (string-append "/I../../racket/include "
+  (string-append "/I../../bc/include "
+                 "/I../../version "
 		 "/I../../rktio "
 		 "/I../librktio "
 		 "/I../libracket "
 		 "/I.. "))
 
-(try "precomp.c" (list* "../../racket/src/schvers.h"
+(try "precomp.c" (list* "../../version/racket_version.h"
 			common-deps)
      "xsrc/precomp.h" #f 
-     (string-append mz-inc "/I ../../racket/src")
+     (string-append mz-inc "/I ../../bc/src")
      #f "" "" #f #f)
 
 (for-each
  (lambda (x)
-   (try (format "../../racket/src/~a.c" x)
-	(list* (format "../../racket/src/~a.c" x)
+   (try (format "../../bc/src/~a.c" x)
+	(list* (format "../../bc/src/~a.c" x)
 	       common-deps)
 	(format "xsrc/~a.c" x)
 	(format "xsrc/~a.obj" x)
@@ -231,8 +231,10 @@
       ""
       "/D MZ_NO_LIBRACKET_DLL "))
 
-(try "../../racket/main.c"
-     (list* "../../racket/main.c"
+(try "../../bc/main.c"
+     (list* "../../bc/main.c"
+            "../bc_suffix.h"
+            "../mzconfig.h"
 	    common-deps)
      "xsrc/main.c"
      "xsrc/main.obj"
@@ -243,33 +245,33 @@
      #f
      #t)
 
-(try "../../foreign/foreign.c"
-     (list* "../../foreign/foreign.c"
+(try "../../bc/foreign/foreign.c"
+     (list* "../../bc/foreign/foreign.c"
 	    common-deps)
      "xsrc/foreign.c"
      "xsrc/foreign.obj"
      (string-append
       mz-inc
       "/I../libffi "
-      "/I../../foreign/libffi/src/x86 "
-      "/I../../foreign/libffi/include "
-      "/I../../racket/src ")
+      "/I../../bc/foreign/libffi/src/x86 "
+      "/I../../bc/foreign/libffi/include "
+      "/I../../bc/src ")
      #f
      ""
      ""
      #f
      #f)
 
-(c-compile "../../racket/gc2/gc2.c" "xsrc/gc2.obj"
+(c-compile "../../bc/gc2/gc2.c" "xsrc/gc2.obj"
            (append
 	    (list "../mzconfig.h")
-	    (map (lambda (f) (build-path "../../racket/" f))
+	    (map (lambda (f) (build-path "../../bc/" f))
 		 '("include/scheme.h"
 		   "include/schthread.h"
 		   "sconfig.h"
 		   "src/schpriv.h"
 		   "src/stypes.h"))
-	    (map (lambda (f) (build-path "../../racket/gc2/" f))
+	    (map (lambda (f) (build-path "../../bc/gc2/" f))
 		 '("gc2.c"
 		   "newgc.c"
 		   "vm_win.c"
@@ -283,12 +285,12 @@
 		"/D MZ_GC_BACKTRACE "
 		"")
 	    mz-inc))
-(c-compile "../../racket/src/mzsj86.c" "xsrc/mzsj86.obj" '() mz-inc)
+(c-compile "../../bc/src/mzsj86.c" "xsrc/mzsj86.obj" '() mz-inc)
 
 (define dll "../../../lib/libracket3mxxxxxxx.dll")
-(define exe (format "../../../Racket~a.exe" suffix))
+(define exe (format "../../../Racket~a.exe" bc-suffix))
 
-(define libs "kernel32.lib user32.lib ws2_32.lib shell32.lib advapi32.lib")
+(define libs "kernel32.lib user32.lib ws2_32.lib shell32.lib advapi32.lib winmm.lib")
 
 (define (link-dll objs delayloads sys-libs dll link-options exe?)
   (let ([ms (if (file-exists? dll)
@@ -384,13 +386,13 @@
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(define wx-inc (string-append "/I ../../racket/include "
+(define wx-inc (string-append "/I ../../bc/include "
 			      "/I .. "
 			      "/I ../../racket "
-			      "/I ../../racket/gc2 "))
+			      "/I ../../bc/gc2 "))
 
-(try "../../gracket/grmain.c"
-     (list* "../../gracket/grmain.c"
+(try "../../bc/gracket/grmain.c"
+     (list* "../../bc/gracket/grmain.c"
 	    common-deps)
      "xsrc/grmain.c"
      "xsrc/grmain.obj"
@@ -405,7 +407,7 @@
 
 (check-rc "gracket.res" "../gracket/gracket.rc" "../gracket/gracket.ico")
 
-(define gui-exe (format "../../../lib/GRacket~a.exe" suffix))
+(define gui-exe (format "../../../lib/GRacket~a.exe" bc-suffix))
 
 (link-exe (list
            "gracket.res"
@@ -417,9 +419,9 @@
 (system- (format "mt.exe -manifest ../gracket/gracket.manifest -outputresource:~a;1"
                  gui-exe))
 
-(system- (format "~a /MT /O2 /DMZ_PRECISE_GC /I../../racket/include /I.. /c ../../racket/dynsrc/mzdyn.c /Fomzdyn3m.obj"
+(system- (format "~a /MT /O2 /DMZ_PRECISE_GC /I../../bc/include /I.. /c ../../bc/dynsrc/mzdyn.c /Fomzdyn3m.obj"
 		 cl.exe))
-(system- (format "lib.exe -machine:~a -def:../../racket/dynsrc/mzdyn.def -out:mzdyn3m.lib"
+(system- (format "lib.exe -machine:~a -def:../../bc/dynsrc/mzdyn.def -out:mzdyn3m.lib"
 		 (if win64? "x64" "X86")))
 
 (define (copy-file/diff src dest)
@@ -433,6 +435,6 @@
 (copy-file/diff "mzdyn3m.exp" "../../../lib/msvc/mzdyn3m.exp")
 (copy-file/diff "mzdyn3m.obj" "../../../lib/msvc/mzdyn3m.obj")
 
-(when (equal? suffix "")
+(when (equal? bc-suffix "")
   (parameterize ([current-command-line-arguments (vector "../../../lib/system.rktd")])
-    (dynamic-require "../../racket/mksystem.rkt" #f)))
+    (dynamic-require "../../bc/mksystem.rkt" #f)))

@@ -1,5 +1,7 @@
 
 (define collect-request (box #f))
+(define request-incremental? #f)
+(define disable-incremental? #f)
 
 (define (set-collect-handler!)
   (collect-request-handler (lambda ()
@@ -29,6 +31,12 @@
 
 (define (set-reachable-size-increments-callback! proc)
   (set! reachable-size-increments-callback proc))
+
+(define allocating-places 1)
+(define (collect-trip-for-allocating-places! delta)
+  (with-global-lock
+   (set! allocating-places (+ allocating-places delta))
+   (collect-trip-bytes (* allocating-places (* 8 1024 1024)))))
 
 ;; Replicate the counting that `(collect)` would do
 ;; so that we can report a generation to the notification
@@ -94,17 +102,32 @@
                    (cond
                      [(null? roots)
                       ;; Plain old collection, after all:
-                      (collect gen)
+                      (collect gen 1 gen)
                       #f]
                      [else
                       (let ([domains (weaken-accounting-domains domains)])
                         ;; Accounting collection:
-                        (let ([counts (collect gen gen (weaken-accounting-roots roots))])
+                        (let ([counts (collect gen 1 gen (weaken-accounting-roots roots))])
                           (lambda () (k counts domains))))])))]
+               [(and request-incremental?
+                     (fx= gen (sub1 (collect-maximum-generation))))
+                ;; "Incremental" mode by not promoting to the maximum generation
+                (collect gen 1 gen)
+                #f]
+               [(fx= gen 0)
+                ;; Plain old minor collection:
+                (collect 0 1 1)
+                #f]
+               [(fx= gen (collect-maximum-generation))
+                ;; Plain old major collection:
+                (collect gen 1 gen)
+                #f]
                [else
-                ;; Plain old collection:
-                (collect gen)
+                ;; Plain old collection that does not necessairy promote to `gen`+1:
+                (collect gen 1 (fx+ gen 1))
                 #f])])
+        (when (fx= gen (collect-maximum-generation))
+          (set! request-incremental? #f))
         (let ([post-allocated (bytes-allocated)]
               [post-allocated+overhead (current-memory-bytes)]
               [post-time (real-time)]
@@ -114,8 +137,8 @@
           ;; `post-allocated+overhead` seems to be too long a wait, because
           ;; that value may include underused pages that have locked objects.
           ;; Using just `post-allocated` is too small, because it may force an
-          ;; immediate major GC too soon. Split the difference.
-          (set! trigger-major-gc-allocated (* GC-TRIGGER-FACTOR post-allocated))
+            ;; immediate major GC too soon. Split the difference.
+          (set! trigger-major-gc-allocated (* GC-TRIGGER-FACTOR (- post-allocated (bytes-finalized))))
           (set! trigger-major-gc-allocated+overhead (* GC-TRIGGER-FACTOR post-allocated+overhead)))
         (update-eq-hash-code-table-size!)
         (update-struct-procs-table-sizes!)
@@ -145,7 +168,8 @@
    [(request)
     (cond
      [(eq? request 'incremental)
-      (void)]
+      (unless disable-incremental?
+        (set! request-incremental? #t))]
      [else
       (let ([req (case request
                    [(minor) 0]
@@ -187,11 +211,10 @@
                 (current-continuation-marks))))
       (immediate-allocation-check n))))
 
-;; ----------------------------------------
+(define (set-incremental-collection-enabled! on?)
+  (set! disable-incremental? (not on?)))
 
-;; Any value wrapped as `strongly-reachable-for-accounting` will
-;; be `cons`ed instead of `weak-cons`ed for accounting purposes
-(define-record-type strongly-reachable-for-accounting (fields content))
+;; ----------------------------------------
 
 (define (weaken-accounting-roots roots)
   (let loop ([roots roots])
@@ -202,8 +225,6 @@
              [rest (loop (cdr roots))])
          (cond
            [(thread? root) (cons root rest)]
-           [(strongly-reachable-for-accounting? root)
-            (cons (strongly-reachable-for-accounting-content root) rest)]
            [else
             (weak-cons root rest)]))])))
 
@@ -324,10 +345,10 @@
       (unless skip-counts?
         (#%fprintf (current-error-port) "Begin RacketCS\n")
         (for-each (lambda (e)
-                    (chez:fprintf (current-error-port)
-                                  (layout-line (chez:format "~a" (car e))
+                    (chez:display (layout-line (chez:format "~a" (car e))
                                                ((get-count #f) e) ((get-bytes #f) e)
-                                               ((get-count #t) e) ((get-bytes #t) e))))
+                                               ((get-count #t) e) ((get-bytes #t) e))
+				  (current-error-port)))
                   (list-sort (lambda (a b) (< ((get-bytes #f) a) ((get-bytes #f) b))) counts))
         (#%fprintf (current-error-port) (layout-line "total"
                                                      (apply + (map (get-count #f) counts))
@@ -363,7 +384,8 @@
                                             (cond
                                              [(zero? len) (void)]
                                              [(not o) (set-box! prev-trace (reverse accum))]
-                                             [(#%memq o (unbox prev-trace))
+                                             [(and (not (null? o))
+                                                   (#%memq o (unbox prev-trace)))
                                               => (lambda (l)
                                                    (#%printf " <- DITTO\n")
                                                    (set-box! prev-trace (append (reverse accum) l)))]
@@ -452,7 +474,7 @@
               (raise-arguments-error who "bad 'every value" "given" every-n))
             (loop (cddr args) flags max-path-length every-n))]
          [else
-          (raise-arguments-error who "unreognized argument;\n try 'help for more information" "given" (car args))])))]))
+          (raise-arguments-error who "unrecognized argument;\n try 'help for more information" "given" (car args))])))]))
 
 (define (make-struct-name-predicate name)
   (lambda (o)
@@ -482,6 +504,7 @@
 
 (define/who (make-phantom-bytes k)
   (check who exact-nonnegative-integer? k)
+  (guard-large-allocation who "byte string" k 1)
   (let ([ph (create-phantom-bytes (make-phantom-bytevector k))])
     (when (or (>= (bytes-allocated) trigger-major-gc-allocated)
               (>= (current-memory-bytes) trigger-major-gc-allocated+overhead))
@@ -491,6 +514,8 @@
 (define/who (set-phantom-bytes! phantom-bstr k)
   (check who phantom-bytes? phantom-bstr)
   (check who exact-nonnegative-integer? k)
+  (when (> k (phantom-bytevector-length (phantom-bytes-pbv phantom-bstr)))
+    (guard-large-allocation who "byte string" k 1))
   (set-phantom-bytevector-length! (phantom-bytes-pbv phantom-bstr) k))
 
 ;; ----------------------------------------

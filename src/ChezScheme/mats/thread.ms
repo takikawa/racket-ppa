@@ -129,7 +129,7 @@
       (lambda (start stop target)
         (let ([t (time-difference stop start)])
           (<= (abs (- (+ (time-second t) (* (time-nanosecond t) 1e-9)) target))
-              0.1))))
+              0.2))))
     (andmap procedure? (list $threads $fib $thread-check $time-in-range?)))
   ($thread-check)
   (not (= (let ([n #f])
@@ -751,11 +751,11 @@
                                            (collect))])
                            (chew 0)))
                        (set! q (+ q 7)))])
-              (lock-object p)
-              (bt p)
-              (let f () (when (= q 0) ($yield) (f)))
-              (let f () (unless (= (length ($threads)) 1) ($yield) (f)))
-              (unlock-object p))
+              (let ([b (box-immobile p)])
+                (bt b)
+                (let f () (when (= q 0) ($yield) (f)))
+                (let f () (unless (= (length ($threads)) 1) ($yield) (f)))
+                (set-box! b #f)))
             (unless (= q 14) (errorf #f "~s isn't 14" q))
             (f (- n 1)))))
       'cool)
@@ -1568,7 +1568,64 @@
         (set! done? #t)
         (condition-broadcast c))
       (equal? gc-ids (list (get-thread-id)))))
+  )
+
+(mat memory-consistency
+  (equal? (memory-order-acquire) (void))
+  (equal? (memory-order-release) (void))
+  ;; Try to make a thread see a partially constructed box
+  (let ([ids '(one two three four)])
+    (let ([m (make-mutex)]
+          [c (make-condition)]
+          [ok? #t]
+          [running (length ids)]
+          [v (make-vector 1000 (box (car ids)))])
+      (let loop ([i running])
+        (unless (= i 0)
+          (fork-thread (lambda ()
+                         (let ([id (list-ref ids (sub1 i))]
+                               [failed? #f])
+                           (let loop ([j 10000])
+                             (cond
+                               [(fx= j 0)
+                                (mutex-acquire m)
+                                (set! running (sub1 running))
+                                (condition-signal c)
+                                (set! ok? (and ok? (not failed?)))
+                                (mutex-release m)]
+                               [else
+                                (let loop ([i 0])
+                                  (unless (fx= i (vector-length v))
+                                    (let ([b (vector-ref v i)])
+                                      (unless (and (box? b)
+                                                   (memq (unbox b) ids))
+                                        (set! failed? #t)))
+                                    (vector-set! v i (box id))
+                                    (loop (fx+ i 1))))
+                                (loop (fx- j 1))])))))
+          (loop (sub1 i))))
+      (mutex-acquire m)
+      (let loop ()
+        (cond
+          [(not (zero? running))
+           (condition-wait c m)
+           (loop)]
+          [else
+           (mutex-release m)]))
+      ok?))
 )
-  
+
+(mat wait-for-threads
+  (begin
+    ;; To avoid breaking later tests that use `(collect)`,
+    ;; wait for any threads created here to exit
+    (let ()
+      (define $threads (foreign-procedure "(cs)threads" () scheme-object))
+      (let loop ()
+        (unless (= 1 (length ($threads)))
+          (sleep (make-time 'time-duration 10000 0))
+          (loop))))
+    #t)
+)
 
 )

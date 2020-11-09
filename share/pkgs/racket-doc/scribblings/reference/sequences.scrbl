@@ -539,10 +539,10 @@ each element in the sequence.
                (void))
     (eval:alts (for/list ([f (in-directory)])
                   f)
-               (map string->path '("main.rkt"
-                                   "compiled"
+               (map string->path '("compiled"
                                    "compiled/main_rkt.dep"
-                                   "compiled/main_rkt.zo")))
+                                   "compiled/main_rkt.zo"
+                                   "main.rkt")))
     (eval:alts (for/list ([f (in-directory "compiled")])
                  f)
                (map string->path '("main_rkt.dep"
@@ -1192,6 +1192,8 @@ stream, but plain lists can be used as streams, and functions such as
   @racket[body] will not be evaluated until the resulting stream is forced. This
   allows @racket[for/stream] and @racket[for*/stream] to iterate over infinite
   sequences, unlike their finite counterparts.
+
+  Please note that these forms do not support returning @tech{multiple values}.
 
   @examples[#:eval sequence-evaluator
     (for/stream ([i '(1 2 3)]) (* i i))

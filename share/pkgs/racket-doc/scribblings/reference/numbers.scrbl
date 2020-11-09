@@ -87,8 +87,9 @@ numbers). In particular, adding, multiplying, subtracting, and
 dividing exact numbers always produces an exact result.
 
 A @deftech{fixnum} is an exact integer whose two's complement
-representation fit into 31 bits on a 32-bit platform or 63 bits on a
-64-bit platform; furthermore, no allocation is required when computing
+representation fits into 30 or 31 bits (depending on the Racket variant)
+on a 32-bit platform or 61 or 63 bits (depending on the Racket variant) on a
+64-bit platform. No allocation is required when computing
 with fixnums. See also the @racketmodname[racket/fixnum] module, below.
 
 Two fixnums that are @racket[=] are also the same
@@ -464,7 +465,7 @@ Coerces @racket[q] to an exact number, finds the numerator of the
 @mz-examples[(numerator 5) (numerator 34/8) (numerator 2.3)]}
 
 
-@defproc[(denominator [q rational?]) integer?]{
+@defproc[(denominator [q rational?]) (and/c integer? positive?)]{
 
 Coerces @racket[q] to an exact number, finds the denominator of the
  number expressed in its simplest fractional form, and returns this
@@ -1293,15 +1294,19 @@ Returns @racket[(* z z)].}
 
 @defproc[(sgn [x real?]) (or/c (=/c -1) (=/c 0) (=/c 1) +nan.0 @#,racketvalfont{+nan.f})]{
 
-Returns the sign of @racket[x] as either @math{-1}, @math{0},
-@math{1}, or not-a-number.
+Returns the sign of @racket[x] as either @math{-1}, @math{0} (or a signed-zero variant, when
+inexact), @math{1}, or not-a-number.
 
 @mz-examples[
 #:eval math-eval
 (sgn 10)
 (sgn -10.0)
 (sgn 0)
+(sgn -0.0)
+(sgn +0.0)
 (sgn +nan.0)
+(sgn +inf.0)
+(sgn -inf.0)
 ]}
 
 @defproc[(conjugate [z number?]) number?]{

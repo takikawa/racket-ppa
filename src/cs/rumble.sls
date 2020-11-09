@@ -49,11 +49,14 @@
           chaperone-continuation-mark-key
           call-with-system-wind ; not exported to Racket
 
+          call-with-current-continuation-roots ; not exported to Racket
+
           ;; not exported to Racket:
           make-engine
           engine-block
           engine-timeout
           engine-return
+          engine-roots
           call-with-engine-completion
           set-ctl-c-handler!
           get-ctl-c-handler
@@ -88,7 +91,6 @@
           linklet-instantiate-key ; not exported to Racket
           set-error-display-eprintf! ; not exported to Racket
           set-log-system-message! ; not exported to Racket
-          set-convert-source-file-descriptor-path! ; not exported to Racket
 
           current-inspector
           make-inspector
@@ -482,6 +484,7 @@
           set-reachable-size-increments-callback! ; not exported to Racket
           set-custodian-memory-use-proc!          ; not exported to Racket
           set-immediate-allocation-check-proc!    ; not exported to Racket
+          set-incremental-collection-enabled!     ; not exported to Racket
           unsafe-add-collect-callbacks
           unsafe-remove-collect-callbacks
 
@@ -565,6 +568,7 @@
           unsafe-flfloor
           unsafe-flceiling
           unsafe-fltruncate
+          unsafe-flsingle
 
           unsafe-flsin
           unsafe-flcos
@@ -598,7 +602,9 @@
           unsafe-extfl->fx unsafe-fx->extfl unsafe-extflsqrt
           unsafe-extflvector-length unsafe-extflvector-ref unsafe-extflvector-set!
 
+          set-prepare-for-place!     ; not exported to Racket
           set-start-place!           ; not exported to Racket
+          set-destroy-place!         ; not exported to Racket
           fork-place                 ; not exported to Racket
           start-place                ; not exported to Racket
           place-enabled?
@@ -696,6 +702,10 @@
           unsafe-f64vector-set!
           unsafe-f80vector-set!
           unsafe-f80vector-ref
+
+          unsafe-bytes->immutable-bytes!
+          unsafe-string->immutable-string!
+          unsafe-vector*->immutable-vector!
 
           ;; --- not exported to Racket: ---
           make-pthread-parameter

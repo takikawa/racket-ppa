@@ -26,6 +26,13 @@
         (flonum->fixnum (* (+ (ash (most-positive-fixnum) -1) 1) 1.0)))
    (eq? (most-negative-fixnum)
         (flonum->fixnum (* (most-negative-fixnum) 1.0)))
+   (eq? (+ (ash (most-positive-fixnum) -1) 1)
+        (flonum->fixnum (fl+ (* (+ (ash (most-positive-fixnum) -1) 1) 1.0) 0.5)))
+   (or (not (fixnum? (inexact->exact (exact->inexact (most-positive-fixnum)))))
+       (eq? (most-positive-fixnum)
+            (flonum->fixnum (fl+ (* (most-positive-fixnum) 1.0) 0.5))))
+   (eq? (most-negative-fixnum)
+        (flonum->fixnum (fl- (* (most-negative-fixnum) 1.0) 0.5)))
    (eq? (flonum->fixnum 0.0) 0)
    (eq? (flonum->fixnum 1.0) 1)
    (eq? (flonum->fixnum +4.5) +4)
@@ -661,6 +668,28 @@
     (fl= (flround -0.5000000000000001) -1.0)
  )
 
+(mat flsingle
+    (error? (flsingle))
+    (error? (flsingle 2.0 3.0))
+    (error? (flsingle 'a))
+    (error? (flsingle 3))
+    (error? (flsingle 2+1.0i))
+    (error? (flsingle 2+1i))
+    (eqv? (flsingle 19.0) 19.0)
+    (eqv? (flsingle -19.0) -19.0)
+    (eqv? (flsingle +nan.0) +nan.0)
+    (eqv? (flsingle +inf.0) +inf.0)
+    (eqv? (flsingle -inf.0) -inf.0)
+    (fl~= (flsingle 1.25e38) 1.2500000360947476e38)
+    (fl~= (flsingle 1.25e-37) 1.2500000449239123e-37)
+    (fl~= (flsingle -1.25e38) -1.2500000360947476e38)
+    (fl~= (flsingle -1.25e-37) -1.2500000449239123e-37)
+    (eqv? (flsingle 1e100) +inf.0)
+    (eqv? (flsingle -1e100) -inf.0)
+    (eqv? (flsingle 1e-100) 0.0)
+    (eqv? (flsingle -1e-100) -0.0)
+ )
+
 (mat flinteger?
     (error? (flinteger? 'a))
     (error? (flinteger? "hi"))
@@ -1038,3 +1067,137 @@
     '((3.0 . -2.0) (-2.0 . -2.0) (-3.0 . -2.0) (2.0 . -2.0)
       (0.0 . 4.0) (0.0 . -4.0) (-0.0 . 4.0) (0.0 . -4.0)))
 )
+
+(mat fp-unboxing
+  (begin
+    (define-syntax check-loop-allocation
+      (syntax-rules ()
+        [(_ proc) ; proc should allocate only its result flonum
+         (or (eq? (current-eval) interpret)
+             (#%$suppress-primitive-inlining)
+             (let ([before (+ (bytes-allocated) (bytes-deallocated))]
+                   [N 100000])
+               (and
+                (box?
+                 (let loop ([i N] [bx (box 0.0)])
+                   (if (zero? i)
+                       bx
+                       (loop (sub1 i) (let ([v (unbox bx)])
+                                        (box (proc v)))))))
+                (let ([allocated (- (+ (bytes-allocated) (bytes-deallocated)) before)]
+                      [expected (* N (+ (compute-size 1.0)
+                                        (compute-size (box #f))))])
+                  (printf "~s ~s\n" allocated expected)
+                  (<= expected allocated (* 1.2 expected))))))]))
+    #t)
+
+  (check-loop-allocation (lambda (v) (fl+ v v)))
+  (check-loop-allocation (lambda (v) (fl* v v)))
+  (check-loop-allocation (lambda (v) (fl- v 1.0)))
+  (check-loop-allocation (lambda (v) (fl/ v 2.0)))
+
+  (check-loop-allocation (lambda (v) (fl+ v 2.0 v)))
+  (check-loop-allocation (lambda (v) (fl+ v (fl* 2.0 v))))
+
+  (check-loop-allocation (lambda (v) (fl+ v v v)))
+  (check-loop-allocation (lambda (v) (fl+ v (fl* v v) (fl/ v 2.0))))
+
+  (check-loop-allocation (lambda (v) (flabs v)))
+  (check-loop-allocation (lambda (v) (fl- v)))
+
+  (check-loop-allocation (lambda (v) (flabs (fl+ v v))))
+  (check-loop-allocation (lambda (v) (fl- (fl+ v v))))
+
+  (check-loop-allocation (lambda (v) (flround v)))
+  (check-loop-allocation (lambda (v) (fltruncate v)))
+  (check-loop-allocation (lambda (v) (flfloor v)))
+  (check-loop-allocation (lambda (v) (flceiling v)))
+  
+  (check-loop-allocation (lambda (v) (flsqrt v)))
+  (check-loop-allocation (lambda (v) (flsin v)))
+  (check-loop-allocation (lambda (v) (flcos v)))
+  (check-loop-allocation (lambda (v) (fltan v)))
+  (check-loop-allocation (lambda (v) (flasin v)))
+  (check-loop-allocation (lambda (v) (flacos v)))
+  (check-loop-allocation (lambda (v) (flatan v)))
+  (check-loop-allocation (lambda (v) (flatan v v)))
+  (check-loop-allocation (lambda (v) (flexp v)))
+  (check-loop-allocation (lambda (v) (fllog v)))
+  (check-loop-allocation (lambda (v) (fllog v v)))
+  (check-loop-allocation (lambda (v) (flexpt v v)))
+
+  (let ([i 0])
+    (check-loop-allocation (lambda (v) (begin
+                                         (set! i (add1 i))
+                                         (fl+ v (fixnum->flonum i))))))
+  (let ([i 0])
+    (check-loop-allocation (lambda (v) (begin
+                                         (set! i (flonum->fixnum v))
+                                         (fl+ v 1.0)))))
+
+  (check-loop-allocation (lambda (v) (let ([u (fl+ v v)])
+                                       (fl* u u))))
+
+  (check-loop-allocation (lambda (v) (if (fl= (fl+ v (fl* 2.0 v)) 7.0)
+                                         (fl+ v 1.0)
+                                         (fl- v 1.0))))
+  (check-loop-allocation (lambda (v) (if (fl< (fl+ v v) v)
+                                         (fl+ v 1.0)
+                                         (fl- v 1.0))))
+  (check-loop-allocation (lambda (v) (if (fl> (fl+ v v) v)
+                                         (fl+ v 1.0)
+                                         (fl- v 1.0))))
+  (check-loop-allocation (lambda (v) (if (fl<= (fl+ v v) v)
+                                         (fl+ v 1.0)
+                                         (fl- v 1.0))))
+  (check-loop-allocation (lambda (v) (if (fl>= (fl+ v v) v)
+                                         (fl+ v 1.0)
+                                         (fl- v 1.0))))
+
+  (check-loop-allocation (lambda (v)
+                           ;; The two single-argument `fl+`s here should work as
+                           ;; a hint for unboxing in the loop
+                           (let loop ([n 100] [v (fl+ v)])
+                             (if (fx= n 0)
+                                 (fl+ v)
+                                 (loop (fx- n 1) (fl+ v 1.0))))))
+
+  (let ([bv (make-bytevector 8 0)])
+    (check-loop-allocation (lambda (v) (fl+ v (bytevector-ieee-double-native-ref bv 0)))))
+  (let ([bv (make-bytevector 8 0)])
+    (check-loop-allocation (lambda (v) (begin
+                                         (bytevector-ieee-double-native-set! bv 0 (fl+ v 0.1))
+                                         (fl* v 0.99)))))
+  (let ([bv (make-bytevector 8 0)])
+    (check-loop-allocation (lambda (v) (let ([v (fl+ v 1.0)])
+                                         (bytevector-ieee-double-native-set! bv 0 v)
+                                         (fl* v 0.99)))))
+  (or (not (enable-cp0))
+      (let ()
+        (define-record pseudo-random-generator
+          ((mutable double x10) (mutable double x11) (mutable double x12)
+           (mutable double x20) (mutable double x21) (mutable double x22))
+          ())
+        (let ([s (make-pseudo-random-generator 1.0 2.0 3.0 4.0 5.0 6.0)])
+          (check-loop-allocation (lambda (v) (let ([v (fl+ (pseudo-random-generator-x10 s) 1.0)])
+                                               (set-pseudo-random-generator-x11! s v)
+                                               (set-pseudo-random-generator-x12! s v)
+                                               (pseudo-random-generator-x20 s)))))))
+
+  (begin
+    (define many-compare
+      (lambda (a b c d e f g h i j k)
+        (fl<= a b c d e f g h i j k)))
+    (many-compare 1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0 9.0 10.0 11.0))
+
+  (begin
+    (define many-add
+      (lambda (a b c d e f g h i j k)
+        (fl+ a b c d e f g h i j k)))
+    (fl= 66.0 (many-add 1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0 9.0 10.0 11.0)))
+
+  (eqv? (let ([x 4.0]) (fl+ x)) 4.0)
+  (eqv? (let ([x 4.0]) (fl+ (fl- x 1.0))) 3.0)
+  (eqv? (let ([x 5.0]) (fl* x)) 5.0)
+
+  )

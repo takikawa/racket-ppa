@@ -516,8 +516,10 @@ static rktio_addrinfo_lookup_t *start_lookup(rktio_t *rktio, rktio_addrinfo_look
   
   if (!rktio->ghbn_started) {
     rktio->ghbn_run = 1;
-    if (!ghbn_init(rktio))
+    if (!ghbn_init(rktio)) {
+      free_lookup(lookup);
       return NULL;
+    }
     rktio->ghbn_started = 1;
   }
 
@@ -1063,7 +1065,9 @@ intptr_t rktio_socket_read(rktio_t *rktio, rktio_fd_t *rfd, char *buffer, intptr
 {
   rktio_socket_t s = rktio_fd_socket(rktio, rfd);
   int rn;
-  
+
+  len = LIMIT_REQUEST_SIZE(len);
+
   do {
     rn = recv(s, buffer, len, 0);
   } while ((rn == -1) && NOT_WINSOCK(errno == EINTR));
@@ -1141,7 +1145,7 @@ static intptr_t do_socket_write(rktio_t *rktio, rktio_fd_t *rfd, const char *buf
 
 intptr_t rktio_socket_write(rktio_t *rktio, rktio_fd_t *rfd, const char *buffer, intptr_t len)
 {
-  return do_socket_write(rktio, rfd, buffer, len, NULL);
+  return do_socket_write(rktio, rfd, buffer, LIMIT_REQUEST_SIZE(len), NULL);
 }
 
 /*========================================================================*/

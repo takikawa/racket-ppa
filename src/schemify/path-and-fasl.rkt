@@ -60,7 +60,7 @@
 
 (define (make-path->compiled-path who)
   (define path->relative-path-elements (make-path->relative-path-elements #:who who))
-  (lambda (orig-p)
+  (lambda (orig-p [for-srcloc? #f])
     (cond
       [(to-fasl? orig-p)
        (define v (force-unfasl orig-p))
@@ -95,7 +95,8 @@
          [(path? p)
           (or (path->relative-path-elements p)
               (cond
-                [(path-for-srcloc? orig-p)
+                [(or for-srcloc?
+                     (path-for-srcloc? orig-p))
                  ;; Can't make relative, so create a string that keeps up
                  ;; to two path elements
                  (truncate-path p)]
@@ -125,20 +126,36 @@
     [else (relative-path-elements->path e)]))
 
 (define (force-unfasl tf)
-  (define vb (to-fasl-vb tf))
-  (define v (unbox vb))
   (cond
-    [(bytes? v)
-     (define v2 (parameterize ([current-load-relative-directory (to-fasl-wrt tf)])
-                  (fasl->s-exp v
-                               #:datum-intern? #t
-                               #:external-lifts (to-fasl-lifts tf))))
-     (box-cas! vb v v2)
-     (set-to-fasl-wrt! tf #f)
-     (unbox vb)]
+    [(not (to-fasl? tf))
+     ;; act as identity on other values for the benefit of `raco decompile`
+     tf]
     [else
-     ;; already forced (or never fasled)
-     v]))
+     (define vb (to-fasl-vb tf))
+     (define v (unbox vb))
+     (cond
+       [(bytes? v)
+        (define v2 (parameterize ([current-load-relative-directory (to-fasl-wrt tf)])
+                     (fasl->s-exp v
+                                  #:datum-intern? #t
+                                  #:external-lifts (to-fasl-lifts tf))))
+        (let loop ()
+          (cond
+            [(box-cas! vb v v2)
+             (set-to-fasl-wrt! tf #f)
+             v2]
+            [else
+             (let ([v (unbox vb)])
+               (cond
+                 [(bytes? v)
+                  ;; must be a spurious CAS failure
+                  (loop)]
+                 [else
+                  ;; other thread beat us to it
+                  v]))]))]
+       [else
+        ;; already forced (or never fasled)
+        v])]))
 
 (define (cannot-fasl v)
   (error 'write

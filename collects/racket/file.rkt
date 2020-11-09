@@ -51,16 +51,18 @@
   (unless (path-string? path)
     (raise-argument-error 'delete-directory/files "path-string?" path))
   (let loop ([path path])
-    (cond
-     [(or (link-exists? path) (file-exists? path))
-      (delete-file* path)]
-     [(directory-exists? path)
-      (for-each (lambda (e) (loop (build-path path e)))
-                (directory-list path))
-      (delete-directory path)]
-     [else
-      (when must-exist?
-        (raise-not-a-file-or-directory 'delete-directory/files path))])))
+    (case (file-or-directory-type path)
+      [(file link)
+       (delete-file* path)]
+      [(directory)
+       (for-each (lambda (e) (loop (build-path path e)))
+                 (directory-list path))
+       (delete-directory path)]
+      [(directory-link)
+       (delete-directory path)]
+      [else
+       (when must-exist?
+         (raise-not-a-file-or-directory 'delete-directory/files path))])))
 
 (define (delete-file* path)
   (cond
@@ -763,7 +765,8 @@
 (define (file->x who f file-mode read-x x-append)
   (check-path who f)
   (check-file-mode who file-mode)
-  (let ([sz (file-size f)])
+  (let ([sz (with-handlers ([exn:fail:filesystem? (lambda (_) 0)])
+                             (file-size f))])
     (call-with-input-file* f #:mode file-mode
       (lambda (in)
         ;; There's a good chance that `file-size' gets all the data:

@@ -1,4 +1,3 @@
-"back.ss"
 ;;; back.ss
 ;;; Copyright 1984-2017 Cisco Systems, Inc.
 ;;; 
@@ -14,6 +13,7 @@
 ;;; See the License for the specific language governing permissions and
 ;;; limitations under the License.
 
+(begin
 (define-who trace-output-port
    ($make-thread-parameter
       (console-output-port)
@@ -44,8 +44,8 @@
          x)))
 
 (define-who collect-maximum-generation
-  (let ([$get-maximum-generation (foreign-procedure "(cs)maxgen" () fixnum)]
-        [$set-maximum-generation! (foreign-procedure "(cs)set_maxgen" (fixnum) void)])
+  (let ([$get-maximum-generation (foreign-procedure "(cs)maxgen" () int)]
+        [$set-maximum-generation! (foreign-procedure "(cs)set_maxgen" (int) void)])
     (case-lambda
       [() ($get-maximum-generation)]
       [(g)
@@ -56,8 +56,8 @@
        ($set-maximum-generation! g)])))
 
 (define-who release-minimum-generation
-  (let ([$get-release-minimum-generation (foreign-procedure "(cs)minfreegen" () fixnum)]
-        [$set-release-minimum-generation! (foreign-procedure "(cs)set_minfreegen" (fixnum) void)])
+  (let ([$get-release-minimum-generation (foreign-procedure "(cs)minfreegen" () int)]
+        [$set-release-minimum-generation! (foreign-procedure "(cs)set_minfreegen" (int) void)])
     (case-lambda
       [() ($get-release-minimum-generation)]
       [(g)
@@ -65,6 +65,17 @@
        (unless (fx<= g (collect-maximum-generation))
          ($oops who "new release minimum generation must not be be greater than collect-maximum-generation"))
        ($set-release-minimum-generation! g)])))
+
+(define-who in-place-minimum-generation
+  (let ([$get-mark-minimum-generation (foreign-procedure "(cs)minmarkgen" () int)]
+        [$set-mark-minimum-generation! (foreign-procedure "(cs)set_minmarkgen" (int) void)])
+    (case-lambda
+      [() ($get-mark-minimum-generation)]
+      [(g)
+       (unless (and (fixnum? g) (fx>= g 0)) ($oops who "invalid generation ~s" g))
+       (let ([limit (fx- (constant static-generation) 1)])
+         (when (fx> g limit) ($oops who "~s exceeds maximum supported value ~s" g limit)))
+       ($set-mark-minimum-generation! g)])))
 
 (define-who enable-object-counts
   (let ([$get-enable-object-counts (foreign-procedure "(cs)enable_object_counts" () boolean)]
@@ -144,7 +155,7 @@
         ($oops who "~s is not a procedure" x))
       x)))
 
-(define compile-compressed
+(define fasl-compressed
   ($make-thread-parameter #t (lambda (x) (and x #t))))
 
 (define compile-file-message
@@ -203,6 +214,9 @@
          [(maximum) (constant COMPRESS-MAX)]
          [else ($oops who "~s is not a supported level" x)]))]))
 
+(define-who compile-omit-concatenate-support
+  ($make-thread-parameter #f (lambda (x) (and x #t))))
+
 (define-who debug-level
   ($make-thread-parameter
     1
@@ -215,3 +229,4 @@
   ($make-thread-parameter #t (lambda (x) (and x #t))))
 
 (set! $scheme-version (string->symbol ($format-scheme-version (constant scheme-version))))
+)

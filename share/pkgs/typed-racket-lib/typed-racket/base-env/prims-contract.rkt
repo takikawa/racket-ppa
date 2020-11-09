@@ -12,7 +12,7 @@
 ;;
 ;; - their implementations (under the same names) are defined at phase
 ;;   0 using `define` in the main module
-;; 
+;;
 ;; - the `forms` submodule uses `lazy-require` to load the
 ;;   implementations of the forms
 
@@ -24,7 +24,7 @@
 
 (module forms racket/base
   (require (for-syntax racket/lazy-require racket/base))
-  (begin-for-syntax 
+  (begin-for-syntax
     (lazy-require [(submod "..")
                    (require/opaque-type
                     require-typed-signature
@@ -81,6 +81,7 @@
          racket/struct-info
          syntax/struct
          syntax/location
+         "../utils/require-contract.rkt"
          (for-template "../utils/any-wrap.rkt")
          "../utils/tc-utils.rkt"
          "../private/syntax-properties.rkt"
@@ -107,13 +108,15 @@
   #`(#,(ignore-some-expr-property #'#%expression ty) #,expr))
 
 (define-syntax-class opt-parent
+  #:commit
   #:attributes (nm parent)
   (pattern nm:id #:with parent #'#f)
   (pattern (nm:id parent:id)))
 
 (define-syntax-class typed-field
+  #:commit
   #:attributes (field type)
-  #:literals (:)
+  #:datum-literals (:)
   (pattern [field:id : type]))
 
 (define-values (require/typed-legacy require/typed unsafe-require/typed)
@@ -177,7 +180,7 @@
                              #,@(if unsafe? #'(unsafe-kw) #'())
                              #,lib))
    (pattern sig:signature-clause #:attr spec
-     #`(require-typed-signature sig.sig-name (sig.var ...) (sig.type ...) #,lib))
+     (quasisyntax/loc #'sig (require-typed-signature sig.sig-name (sig.var ...) (sig.type ...) #,lib)))
    (pattern sc:simple-clause #:attr spec
      #`(require/typed #:internal sc.nm sc.ty #,lib
                       #,@(if unsafe? #'(unsafe-kw) #'()))))
@@ -221,7 +224,7 @@
                   ;; need this indirection since `hidden` may expand
                   ;; to a different identifier that TR doesn't know about
                   #,(ignore #'(define hidden2 hidden))
-                  (rename-without-provide nm.nm hidden2)
+                  (rename-without-provide nm.nm hidden2 hidden)
                   #,(internal #'(require/typed-internal hidden2 ty . sm))))])]))
   (values (r/t-maker #t #f) (r/t-maker #f #f) (r/t-maker #f #t))))
 
@@ -236,18 +239,12 @@
      #'(begin (require/typed lib [r t])
               (provide r)
               (require/typed/provide lib other-clause ...))]
-    [(_ lib (~and clause [#:struct name:id ([f:id (~datum :) t] ...)
+    [(_ lib (~and clause [#:struct nm:opt-parent
+                                   (body:typed-field ...)
                                    option ...])
         other-clause ...)
      #'(begin (require/typed lib clause)
-              (provide (struct-out name))
-              (require/typed/provide lib other-clause ...))]
-    [(_ lib (~and clause [#:struct (name:id parent:id)
-                                   ([f:id (~datum :) t] ...)
-                                   option ...])
-        other-clause ...)
-     #'(begin (require/typed lib clause)
-              (provide (struct-out name))
+              (provide (struct-out nm.nm))
               (require/typed/provide lib other-clause ...))]
     [(_ lib (~and clause [#:opaque t:id pred:id])
         other-clause ...)
@@ -509,6 +506,12 @@
                                              orig-sels orig-muts orig-parent)
                                (apply values (extract-struct-info/checked
                                               (quote-syntax orig-struct-info))))
+
+                             (void
+                               (validate-struct-fields
+                                 #'nm (syntax-e #'(fld ...))
+                                 (reverse orig-sels)
+                                 'require/typed '#,stx))
 
                              (define (id-drop sels muts num)
                                (cond

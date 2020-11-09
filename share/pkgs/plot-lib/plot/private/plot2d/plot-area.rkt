@@ -26,6 +26,7 @@
                      [rx-far-ticks (Listof tick)]
                      [ry-ticks (Listof tick)]
                      [ry-far-ticks (Listof tick)]
+                     [legend (Listof legend-entry)]
                      [dc (Instance DC<%>)]
                      [dc-x-min Real]
                      [dc-y-min Real]
@@ -57,13 +58,14 @@
          [put-font-attribs (-> Nonnegative-Real (U #f String) Font-Family Void)]
          [put-text-foreground (-> Plot-Color Void)]
          [reset-drawing-params (-> Void)]
+         [put-arrow-head (-> (U (List '= Nonnegative-Real) Nonnegative-Real) Nonnegative-Real Void)]
          [put-lines (-> (Listof (Vectorof Real)) Void)]
          [put-line (-> (Vectorof Real) (Vectorof Real) Void)]
          [put-polygon (-> (Listof (Vectorof Real)) Void)]
          [put-rect (-> Rect Void)]
          [put-text (->* [String (Vectorof Real)] [Anchor Real Real Boolean] Void)]
          [put-glyphs (-> (Listof (Vectorof Real)) Point-Sym Nonnegative-Real Void)]
-         [put-arrow (-> (Vectorof Real) (Vectorof Real) Void)]
+         [put-arrow (->* ((Vectorof Real) (Vectorof Real)) (Boolean) Void)]
          [put-tick (-> (Vectorof Real) Real Real Void)]
          [put-pict (->* [pict (Vectorof Real)] [Anchor Real] Void)]
          ))
@@ -71,7 +73,7 @@
 (: 2d-plot-area% 2D-Plot-Area%)
 (define 2d-plot-area%
   (class object%
-    (init-field bounds-rect rx-ticks rx-far-ticks ry-ticks ry-far-ticks)
+    (init-field bounds-rect rx-ticks rx-far-ticks ry-ticks ry-far-ticks legend)
     (init-field dc dc-x-min dc-y-min dc-x-size dc-y-size)
     (super-new)
 
@@ -224,14 +226,99 @@
          (vector (+ area-x-min (* x area-per-view-x))
                  (- area-y-max (* y area-per-view-y))))))
 
+
+    (: title-margin Real)
+    (define title-margin
+      (let ([title (plot-title)])
+        (cond [(and (plot-decorations?) title)
+               (if (pict? title)
+                   (+ (pict-height title) (* 1/2 char-height))
+                   (* 3/2 char-height))]
+              [else  0])))
+
+    ;; legend margin calculation and preparation of draw function
+    (: legend-print (-> (Listof legend-entry) Void))
+    (: init-left-margin Real)
+    (: init-right-margin Real)
     (: init-top-margin Real)
-    (define init-top-margin
-      (cond [(and (plot-decorations?) (plot-title))  (* 3/2 char-height)]
-            [else  0]))
+    (: init-bottom-margin Real)
+    (define-values (legend-print init-left-margin init-right-margin init-top-margin init-bottom-margin)
+      (let* ([legend-anchor (plot-legend-anchor)]
+             [legend-rect (and (outside-anchor? legend-anchor)
+                               (not (empty? legend))
+                               (send pd calculate-legend-rect
+                                     legend
+                                     (vector (ivl dc-x-min (+ dc-x-min dc-x-size))
+                                             (ivl dc-y-min (+ dc-y-min dc-y-size)))
+                                     (legend-anchor->anchor legend-anchor)))]
+             [gap (pen-gap)]
+             [make-print
+              (λ ([get-bounds : (-> (Listof Real))])
+                (λ ([legend-entries : (Listof legend-entry)])
+                  (match-define (list x-min x-max y-min y-max gap-size) (get-bounds))
+                  (send pd draw-legend legend-entries
+                        (vector (ivl (+ x-min gap-size) (- x-max gap-size))
+                                (ivl (+ y-min gap-size) (- y-max gap-size))))))]
+             [make-none (λ ([get-bounds : (-> (Listof Real))])
+                          (values (make-print get-bounds) 0 0 title-margin 0))]
+             [none (λ () (make-none (λ () (list area-x-min area-x-max area-y-min area-y-max
+                                                (+ gap tick-radius)))))])
+        (cond
+          [legend-rect
+           (define double-gap (* 2 gap))
+           (define tripple-gap (* 3 gap))
+
+           ;; legend with and height
+           (match-define (vector (ivl x- x+) (ivl y- y+)) legend-rect)
+           (define width  (if (and x- x+) (+ double-gap (- x+ x-)) 0))
+           (define height (if (and y- y+) (+ double-gap (- y+ y-)) 0))
+
+           ;; the maximum width/height for the plot+axis-labels
+           (define remaining-x-size (- dc-x-size width))
+           (define remaining-y-size (- dc-y-size title-margin height))
+
+           ;; Align with dc/title
+           (define t-print
+             (make-print
+              (λ ()
+                (list dc-x-min (+ dc-x-min dc-x-size)
+                      (+ title-margin dc-y-min) (+ dc-y-min dc-y-size) gap))))
+           ;; Align with plot-area
+           (define v-print
+             (make-print
+              (λ ()
+                (list dc-x-min (+ dc-x-min dc-x-size)
+                      (- area-y-min gap) (+ area-y-max gap) gap))))
+           (define h-print
+             (make-print
+              (λ ()
+                (list (- area-x-min gap) (+ area-x-max gap)
+                      (+ title-margin dc-y-min) (+ dc-y-min dc-y-size) gap))))
+           
+           (case legend-anchor
+             [(outside-global-top)
+              (values t-print 0 0
+                      (+ title-margin (if (< remaining-y-size 0) 0 height) tripple-gap) 0)]
+             [(outside-top-left outside-top outside-top-right)
+              (values h-print 0 0
+                      (+ title-margin (if (< remaining-y-size 0) 0 height) tripple-gap) 0)]
+             [(outside-left-top outside-left outside-left-bottom)
+              (values v-print (+ (if (< remaining-x-size 0) 0 width) tripple-gap) 0
+                      title-margin 0)]
+             [(outside-right-top outside-right outside-right-bottom)
+              (values v-print 0 (+ (if (< remaining-x-size 0) 0 width) tripple-gap)
+                      title-margin 0)]
+             [(outside-bottom-left outside-bottom outside-bottom-right)
+              (values h-print 0 0
+                      title-margin (+ (if (< remaining-y-size 0) 0 height) tripple-gap))]
+             ;; unreachable code, but TR complains about 1 vs 5 values if not present
+             [else (none)])]
+          [else (none)])))
 
     (: view->dc (-> (Vectorof Real) (Vectorof Real)))
     ;; Initial view->dc (draws labels and half of every tick off the allotted space on the dc)
-    (define view->dc (make-view->dc 0 0 init-top-margin 0))
+    (define view->dc (make-view->dc init-left-margin init-right-margin
+                                    init-top-margin init-bottom-margin))
 
     ;; ===============================================================================================
     ;; Tick and label constants
@@ -469,9 +556,15 @@
 
     (: get-y-label-params (-> Label-Params))
     (define (get-y-label-params)
-      (define offset (vector (+ max-y-tick-offset max-y-tick-label-width half-char-height)
+      (define label (plot-y-label))
+      (define half-label-width (if (pict? label)
+                                   (* 1/2 (pict-width label))
+                                   half-char-height))
+      (define offset (vector (+ max-y-tick-offset max-y-tick-label-width half-label-width)
                              (ann 0 Real)))
-      (list (plot-y-label) (v- (view->dc (vector 0.0 0.5)) offset) 'bottom (/ pi 2)))
+      (if (string? label)
+          (list label (v- (view->dc (vector 0.0 0.5)) offset) 'bottom (/ pi 2))
+          (list label (v- (view->dc (vector 0.0 0.5)) offset) 'center 0)))
 
     (: get-x-far-label-params (-> Label-Params))
     (define (get-x-far-label-params)
@@ -481,9 +574,15 @@
 
     (: get-y-far-label-params (-> Label-Params))
     (define (get-y-far-label-params)
-      (define offset (vector (+ max-y-far-tick-offset max-y-far-tick-label-width half-char-height)
+      (define label (plot-y-far-label))
+      (define half-label-width (if (pict? label)
+                                   (* 1/2 (pict-width label))
+                                   half-char-height))
+      (define offset (vector (+ max-y-far-tick-offset max-y-far-tick-label-width half-label-width)
                              (ann 0 Real)))
-      (list (plot-y-far-label) (v+ (view->dc (vector 1.0 0.5)) offset) 'top (/ pi 2)))
+      (if (string? label)
+          (list label (v+ (view->dc (vector 1.0 0.5)) offset) 'top (/ pi 2))
+          (list label (v+ (view->dc (vector 1.0 0.5)) offset) 'center 0)))
 
 
     ;; -----------------------------------------------------------------------------------------------
@@ -535,7 +634,9 @@
     (define: top : Real  0)
     (define: bottom : Real  0)
     (let-values ([(left-val right-val top-val bottom-val)
-                  (margin-fixpoint 0 dc-x-size init-top-margin dc-y-size 0 0 init-top-margin 0
+                  (margin-fixpoint 0 dc-x-size 0 dc-y-size
+                                   init-left-margin  init-right-margin
+                                   init-top-margin   init-bottom-margin
                                    (λ ([left : Real] [right : Real] [top : Real] [bottom : Real])
                                      (get-param-vs/set-view->dc! left right top bottom)))])
       (set! left left-val)
@@ -593,7 +694,9 @@
     (define (draw-title)
       (define title (plot-title))
       (when (and (plot-decorations?) title)
-        (send pd draw-text title (vector (* 1/2 dc-x-size) (ann 0 Real)) 'top)))
+        (if (string? title)
+            (send pd draw-text title (vector (* 1/2 dc-x-size) (ann 0 Real)) 'top)
+            (send pd draw-pict title  (vector (* 1/2 dc-x-size) (ann 0 Real)) 'top))))
 
     (: draw-axes (-> Void))
     (define (draw-axes)
@@ -627,8 +730,10 @@
     (define (draw-labels)
       (for ([p  (in-list (get-all-label-params))])
         (match-define (list label v anchor angle) p)
-        (when label
-          (send pd draw-text label v anchor angle 0 #t))))
+        (cond ((pict? label)
+               (send pd draw-pict label v anchor 0))
+              ((string? label)
+               (send pd draw-text label v anchor angle 0 #t)))))
 
     ;; ===============================================================================================
     ;; Public drawing control (used by plot/dc)
@@ -636,6 +741,8 @@
     (define/public (start-plot)
       (send pd reset-drawing-params)
       (send pd clear)
+      (when (and (not (empty? legend)) (outside-anchor? (plot-legend-anchor)))
+        (draw-legend legend))
       (draw-title)
       (draw-axes)
       (draw-ticks)
@@ -651,13 +758,12 @@
 
     (define/public (end-renderers)
       (clear-clip-rect)
-      (send pd reset-drawing-params))
+      (send pd reset-drawing-params)
+      (when (and (not (empty? legend)) (inside-anchor? (plot-legend-anchor)))
+        (draw-legend legend)))
 
     (define/public (draw-legend legend-entries)
-      (define gap-size (+ (pen-gap) tick-radius))
-      (send pd draw-legend legend-entries
-            (vector (ivl (+ area-x-min gap-size) (- area-x-max gap-size))
-                    (ivl (+ area-y-min gap-size) (- area-y-max gap-size)))))
+      (legend-print legend-entries))
 
     (define/public (end-plot)
       (send pd restore-drawing-params))
@@ -678,6 +784,8 @@
     (define/public (put-font-size size) (send pd set-font-size size))
     (define/public (put-font-attribs size face family) (send pd set-font-attribs size face family))
     (define/public (put-text-foreground color) (send pd set-text-foreground color))
+
+    (define/public (put-arrow-head size-or-scale angle) (send pd set-arrow-head size-or-scale angle))
 
     (define/public (reset-drawing-params)
       (put-alpha (plot-foreground-alpha))
@@ -764,10 +872,10 @@
                                     vs)
                 symbol size))))
 
-    (define/public (put-arrow v1 v2)
+    (define/public (put-arrow v1 v2 [draw-outside? #f])
       (let ([v1  (exact-vector2d v1)]
             [v2  (exact-vector2d v2)])
-        (when (and v1 v2 (in-bounds? v1))
+        (when (and v1 v2 (or draw-outside? (in-bounds? v1)))
           (send pd draw-arrow (plot->dc v1) (plot->dc v2)))))
 
     (define/public (put-tick v r angle)

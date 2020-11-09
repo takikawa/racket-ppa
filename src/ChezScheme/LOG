@@ -1990,3 +1990,129 @@
     compress_io.c, new_io.c, externs.h,
     bytevector.ms, mats/Mf-base, root-experr*
     io.stex, objects.stex, release_notes.stex
+- fix fasl-read signature
+    primdata.ss
+- console I/O on Windows now supports Unicode characters in the BMP
+    expeditor.c, new-io.c, release_notes.stex
+- the collector now releases bignum temporaries in the collector
+  rather than relocating them so we don't keep around huge bignum
+  temporaries forever.
+     gc.c
+- removed the presumably useless vector-handling code from load()
+  which used to be required to handle fasl groups.
+     scheme.c
+- object files are no longer compressed as a whole, and the parameter
+  compile-compressed is no longer defined.  instead, the individual
+  fasl objects within an object file are compressed whenever the
+  new parameter fasl-compressed is set to its default value, #t.
+  this allows the fasl reader to seek past portions of an object
+  file that are not of interest, i.e., visit-only code and data
+  when "revisiting" an object file and revisit-only code and data
+  when "visiting" an object file.  the compressed portions are
+  compressed using the format and level specified by the compress-format
+  and compress-level parameters.  the C-coded fasl reader and
+  boot-file loader no longer handle compressed files; these are
+  handled, less efficiently, by the Scheme entry point (fasl-read).
+  a warning exception is raised the first time a program attempts
+  to create or read a compressed fasl file.
+    7.ss, s/Mf-base, back.ss, bytevector.ss, cmacros.ss, compile.ss,
+    fasl-helpers.ss, fasl.ss, primdata.ss, strip.ss, syntax.ss,
+    externs.h, fasl.c, gc.c, scheme.c, thread.c,
+    mats/6.ms, mats/7.ms, mats/bytevector.ms, mats/misc.ms, patch*,
+    root-experr*,
+    intro.stex, use.stex, io.stex, system.stex,
+    release_notes.stex
+- added begin wrappers around many of the Scheme source files that
+  contained multiple expressions to cut down the number of top-level
+  fasl objects and increase compressibility.  also removed the
+  string filenames for debugging at the start of each file that had
+  one---these are best inserted universally by a modified compile-file
+  during a debugging session when desired.  also removed unnecessary
+  top-level placeholder definitions for the assignments that follow.
+    4.ss, 5_1.ss, 5_2.ss, 5_3.ss, 5_7.ss, 6.ss, 7.ss, bytevector.ss,
+    cafe.ss, cback.ss, compile.ss, cp0.ss, cpcommonize.ss, cpletrec.ss,
+    cpnanopass.ss, cprep.ss, cpvalid.ss, date.ss, engine.ss, enum.ss,
+    env.ss, event.ss, exceptions.ss, expeditor.ss, fasl.ss, foreign.ss,
+    format.ss, front.ss, ftype.ss, inspect.ss, interpret.ss, io.ss,
+    library.ss, mathprims.ss, newhash.ss, pdhtml.ss, pretty.ss,
+    prims.ss, primvars.ss, print.ss, read.ss, record.ss, reloc.ss,
+    strnum.ss, syntax.ss, trace.ss
+- updated bullyx patches
+    patch*
+- fixed csug copyright year substititions and changed revisiondate
+  to not be generated, making the csug build reproducible
+    newrelease csug/csug.stex
+- fixed Windows build using MSYS2
+    c/Mf-a6nt, c/Mf-i3nt, c/Mf-ta6nt, c/Mf-ti3nt, mats/Mf-a6nt,
+    mats/Mf-i3nt, mats/Mf-ta6nt, mats/Mf-ti3nt 
+- fixed build on Linux with musl libc
+    expeditor.c
+- extended primitive folding to primitives that return multiple
+  values.
+    cp0.ss, primdata.ss,
+    cp0.ms
+- fix handling of calling code's address for locking around a callable
+  that has a u8*, u16*, or u32* argument, which could cause the
+  cp register copy in the thread context to be changed before
+  S_call_help gets it
+    cpnanopass.ss, schlib.c, foreign2.c, foreign.ms
+- the collector now promotes objects one generation higher at a time
+  by default.  previously, it promoted every live oldspace object to
+  the selected target generation, which could result in objects
+  prematurely skipping one or more generations and thus being
+  retained longer than their ages justify.  the biggest cost in
+  terms of code complexity and performance is the recording of
+  pointers from older newspace objects to younger newspace objects
+  that could not previously occur.
+    gc.c, alloc.c, externs.h
+- the collect procedure now takes an additional optional minimum
+  target generation argument to allow the new default behavior to
+  be overridden.
+    7.ss, primdata.ss,
+    gcwrapper.c,
+    7.ms, root-experr*
+- added cn flag to control collect-notify
+    mats/Mf-base
+- resweep_weak_pairs now sets sweep_loc to orig_next_loc rather than
+  first_loc since the latter could result in unnecessary sweeping of
+  existing target-generation weak pairs.
+    gc.c
+- added set of S_child_processes[newg] to S_child_processes[oldg]
+  in S_do_gc code handling decreases in the maximum generation.
+    gcwrapper.c
+- a specialized variant of the collector is used in the common case
+  where the max copied generation is 0, the min and max target
+  generations are 1, and there are no locked generation 0 objects
+  is now used. with the default collection parameters and no locking
+  of generation 0 objects, these collections account for 3/4 of all
+  collections.
+    gc.c, gc-011.c (new), gcwrapper.c, externs.h, c/Mf-base
+- maybe-fire-collector no longer tries to be so precise and instead
+  just counts the number of generation-bytes allocated since the
+  last gc.  suprisingly, rebuilding the s directory requires about
+  the same number of collections with this coarser (and less
+  expensive) measurement.  this change also fixes a problem with
+  too-frequent collections when the maximum-generation is set to
+  zero.  to make the determination even less expensive, a running
+  total of bytes in each generation is now maintained in a new
+  bytes_of_generation vector, and maybe-fire-collector is no longer
+  called when the collector is running.
+    alloc.c, gc.c, gcwrapper.c, globals.h
+- copy now copies two pairs at once only if they are in the same
+  segment, which saves a few memonry references and tests and turns
+  out not to reduce the number of opportunities significantly in
+  tested programs.
+    gc.c
+- occupied_segments, first_loc, base_loc, next_loc, bytes_left,
+  bytes_of_space, sweep_loc, and orig_next_loc are now indexed
+  by [g][s] rather than [s][g] to improve locality in the default
+  (and common) case where there are only a handful of active
+  generations.
+    globals.h, types.h, segment.c, gc.c, gcwrapper.c, prim5.c
+- documented change to collect procedure
+    smgmt.stex, release_notes.stex
+- now maintaining 16-byte architectural stack alignment (if the
+  incoming stack is so aligned) on all x86 platforms except
+  i3nt/ti3nt.  more recent versions of gcc sometimes generate sse
+  instructions that require 16-byte stack alignment.
+    x86.ss

@@ -3,6 +3,8 @@
 
 @(define MzAdd (italic "Racket-specific:"))
 
+@(define (litchar~ s) (litchar (regexp-replace* "~" s " ")))
+
 @title[#:tag "windowspaths"]{Windows Paths}
 
 In general, a Windows pathname consists of an optional drive specifier
@@ -243,7 +245,7 @@ with a different parent than @litchar{d}, the path nevertheless refers
 to @litchar{f} in the same directory as @litchar{d}. A relative-path
 link is parsed as if prefixed with @litchar{\\?\REL} paths, except
 that @litchar{..}  and @litchar{.} elements are allowed throughout the
-path, and any number of redundant @litchar{/} separators are allowed.
+path, and any number of redundant @litchar{\} separators are allowed.
 
 Windows paths are @techlink{cleanse}d as follows: In paths that start
 @litchar{\\?\}, redundant @litchar{\}s are removed, an extra
@@ -310,8 +312,8 @@ already. Otherwise, if no indicators or redundant separators are in
 For @racket[(split-path _path)] producing @racket[_base],
 @racket[_name], and @racket[_must-be-dir?], splitting a path that does
 not start with @litchar{\\?\} can produce parts that start with
-@litchar{\\?\}. For example, splitting @litchar{C:/x~/aux/}
-produces @litchar{\\?\C:\x~\} and @litchar{\\?\REL\\aux};
+@litchar{\\?\}. For example, splitting @litchar~{C:/x~/aux/} twice
+produces @litchar~{\\?\REL\\x~} and @litchar{\\?\REL\\aux};
 the @litchar{\\?\} is needed in these cases to preserve a
 trailing space after @litchar{x} and to avoid referring to the AUX
 device instead of an @filepath{aux} file.

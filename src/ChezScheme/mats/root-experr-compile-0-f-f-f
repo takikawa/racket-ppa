@@ -33,16 +33,14 @@ primvars.mo:Expected error testing (fxpopcount (quote #!eof)): Exception in fxpo
 primvars.mo:Expected error testing (fxpopcount (quote #f)): Exception in fxpopcount32: #f is not a non-negative fixnum
 primvars.mo:Expected error testing (hashtable-cells (quote ((a . b)))): Exception in hashtable-size: ((a . b)) is not a hashtable
 primvars.mo:Expected error testing (hashtable-cells (quote #f)): Exception in hashtable-size: #f is not a hashtable
+primvars.mo:Expected error testing (load-compiled-from-port 1.0+2.0i (quote "a")): Exception in load-compiled-from-port: 1.0+2.0i is not a binary input port
+primvars.mo:Expected error testing (load-compiled-from-port 1.0+2.0i (quote #f)): Exception in load-compiled-from-port: 1.0+2.0i is not a binary input port
 primvars.mo:Expected error testing (make-input-port (quote 0) "a"): Exception in make-input-port: fixnum handler no longer supported; use open-fd-input-port
 primvars.mo:Expected error testing (make-input/output-port (quote 0) "a" "a"): Exception in make-input/output-port: fixnum handler no longer supported; use open-fd-input-port
 primvars.mo:Expected error testing (make-output-port (quote 0) "a"): Exception in make-output-port: fixnum handler no longer supported; use open-fd-input-port
-primvars.mo:Expected error testing (make-record-type-descriptor* (quote a) *rtd (quote a) 1.0+2.0i 1.0+2.0i (quote q) (- (most-negative-fixnum) 1)): Exception in make-record-type-descriptor*: invalid field count q
-primvars.mo:Expected error testing (make-record-type-descriptor* (quote a) *rtd (quote a) 1.0+2.0i 1.0+2.0i (quote 1152921504606846976) (- (most-negative-fixnum) 1)): Exception in make-record-type-descriptor*: invalid field count 1152921504606846976
-primvars.mo:Expected error testing (make-record-type-descriptor* (quote a) *rtd (quote a) 1.0+2.0i 1.0+2.0i (quote -1152921504606846977) (- (most-negative-fixnum) 1)): Exception in make-record-type-descriptor*: invalid field count -1152921504606846977
-primvars.mo:Expected error testing (make-record-type-descriptor* (quote a) *rtd (quote a) 1.0+2.0i 1.0+2.0i (quote #f) (- (most-negative-fixnum) 1)): Exception in make-record-type-descriptor*: invalid field count #f
-primvars.mo:Expected error testing (make-record-type-descriptor* (quote a) *rtd (quote a) 1.0+2.0i 1.0+2.0i -1 (quote 2.0)): Exception in make-record-type-descriptor*: invalid field count -1
-primvars.mo:Expected error testing (make-record-type-descriptor* (quote a) *rtd (quote a) 1.0+2.0i 1.0+2.0i -1 (quote 1/2)): Exception in make-record-type-descriptor*: invalid field count -1
-primvars.mo:Expected error testing (make-record-type-descriptor* (quote a) *rtd (quote a) 1.0+2.0i 1.0+2.0i -1 (quote #f)): Exception in make-record-type-descriptor*: invalid field count -1
+primvars.mo:Expected error testing (make-record-type-descriptor* (quote a) *rtd (quote a) 1.0+2.0i 1.0+2.0i 0 (quote 2.0)): Exception in make-record-type-descriptor*: invalid mutability mask 2.0 for field count 0
+primvars.mo:Expected error testing (make-record-type-descriptor* (quote a) *rtd (quote a) 1.0+2.0i 1.0+2.0i 0 (quote 1/2)): Exception in make-record-type-descriptor*: invalid mutability mask 1/2 for field count 0
+primvars.mo:Expected error testing (make-record-type-descriptor* (quote a) *rtd (quote a) 1.0+2.0i 1.0+2.0i 0 (quote #f)): Exception in make-record-type-descriptor*: invalid mutability mask #f for field count 0
 primvars.mo:Expected error testing (make-sstats (quote "no-time") *time (- (most-negative-fixnum) 1) (- (most-negative-fixnum) 1) *time *time (- (most-negative-fixnum) 1)): Exception in make-sstats: cpu value "no-time" is not a time record
 primvars.mo:Expected error testing (make-sstats (quote #f) *time (- (most-negative-fixnum) 1) (- (most-negative-fixnum) 1) *time *time (- (most-negative-fixnum) 1)): Exception in make-sstats: cpu value #f is not a time record
 primvars.mo:Expected error testing (make-sstats *time (quote "no-time") (- (most-negative-fixnum) 1) (- (most-negative-fixnum) 1) *time *time (- (most-negative-fixnum) 1)): Exception in make-sstats: real value "no-time" is not a time record
@@ -68,58 +66,6 @@ primvars.mo:Expected error testing (pseudo-random-generator-next! (quote #!eof) 
 primvars.mo:Expected error testing (pseudo-random-generator-next! (quote #f) *pseudo-random-generator): Exception: variable *pseudo-random-generator is not bound
 primvars.mo:Expected error testing (set-wrapper-procedure! 1.0+2.0i (quote 0)): Exception in set-wrapper-procedure!: 1.0+2.0i is not a wrapper procedure
 primvars.mo:Expected error testing (set-wrapper-procedure! 1.0+2.0i (quote #f)): Exception in set-wrapper-procedure!: 1.0+2.0i is not a wrapper procedure
-primvars.mo:Expected error testing (stencil-vector (quote -1)): Exception in stencil-vector: invalid mask -1
-primvars.mo:Expected error testing (stencil-vector (quote a)): Exception in stencil-vector: invalid mask a
-primvars.mo:Expected error testing (stencil-vector (quote 18446744073709551616)): Exception in stencil-vector: invalid mask 18446744073709551616
-primvars.mo:Expected error testing (stencil-vector (quote #f)): Exception in stencil-vector: invalid mask #f
-primvars.mo:Expected error testing (stencil-vector (quote -1) 1.0+2.0i): Exception in stencil-vector: invalid mask -1
-primvars.mo:Expected error testing (stencil-vector (quote a) 1.0+2.0i): Exception in stencil-vector: invalid mask a
-primvars.mo:Expected error testing (stencil-vector (quote 18446744073709551616) 1.0+2.0i): Exception in stencil-vector: invalid mask 18446744073709551616
-primvars.mo:Expected error testing (stencil-vector (quote #f) 1.0+2.0i): Exception in stencil-vector: invalid mask #f
-primvars.mo:Expected error testing (stencil-vector (quote -1) 1.0+2.0i 1.0+2.0i): Exception in stencil-vector: invalid mask -1
-primvars.mo:Expected error testing (stencil-vector (quote a) 1.0+2.0i 1.0+2.0i): Exception in stencil-vector: invalid mask a
-primvars.mo:Expected error testing (stencil-vector (quote 18446744073709551616) 1.0+2.0i 1.0+2.0i): Exception in stencil-vector: invalid mask 18446744073709551616
-primvars.mo:Expected error testing (stencil-vector (quote #f) 1.0+2.0i 1.0+2.0i): Exception in stencil-vector: invalid mask #f
-primvars.mo:Expected error testing (stencil-vector (quote -1) 1.0+2.0i 1.0+2.0i 1.0+2.0i): Exception in stencil-vector: invalid mask -1
-primvars.mo:Expected error testing (stencil-vector (quote a) 1.0+2.0i 1.0+2.0i 1.0+2.0i): Exception in stencil-vector: invalid mask a
-primvars.mo:Expected error testing (stencil-vector (quote 18446744073709551616) 1.0+2.0i 1.0+2.0i 1.0+2.0i): Exception in stencil-vector: invalid mask 18446744073709551616
-primvars.mo:Expected error testing (stencil-vector (quote #f) 1.0+2.0i 1.0+2.0i 1.0+2.0i): Exception in stencil-vector: invalid mask #f
-primvars.mo:Expected error testing (stencil-vector-truncate! (stencil-vector 7 1 2 3) (quote -1)): Exception in stencil-vector-truncate!: invalid mask -1
-primvars.mo:Expected error testing (stencil-vector-truncate! (stencil-vector 7 1 2 3) (quote a)): Exception in stencil-vector-truncate!: invalid mask a
-primvars.mo:Expected error testing (stencil-vector-truncate! (stencil-vector 7 1 2 3) (quote 18446744073709551616)): Exception in stencil-vector-truncate!: invalid mask 18446744073709551616
-primvars.mo:Expected error testing (stencil-vector-truncate! (stencil-vector 7 1 2 3) (quote #f)): Exception in stencil-vector-truncate!: invalid mask #f
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) (quote -1) 0): Exception in stencil-vector-update: invalid removal mask -1
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) (quote a) 0): Exception in stencil-vector-update: invalid removal mask a
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) (quote 18446744073709551616) 0): Exception in stencil-vector-update: invalid removal mask 18446744073709551616
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) (quote #f) 0): Exception in stencil-vector-update: invalid removal mask #f
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) 0 (quote -1)): Exception in stencil-vector-update: invalid addition mask -1
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) 0 (quote a)): Exception in stencil-vector-update: invalid addition mask a
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) 0 (quote 18446744073709551616)): Exception in stencil-vector-update: invalid addition mask 18446744073709551616
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) 0 (quote #f)): Exception in stencil-vector-update: invalid addition mask #f
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) (quote -1) 0 1.0+2.0i): Exception in stencil-vector-update: invalid removal mask -1
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) (quote a) 0 1.0+2.0i): Exception in stencil-vector-update: invalid removal mask a
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) (quote 18446744073709551616) 0 1.0+2.0i): Exception in stencil-vector-update: invalid removal mask 18446744073709551616
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) (quote #f) 0 1.0+2.0i): Exception in stencil-vector-update: invalid removal mask #f
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) 0 (quote -1) 1.0+2.0i): Exception in stencil-vector-update: invalid addition mask -1
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) 0 (quote a) 1.0+2.0i): Exception in stencil-vector-update: invalid addition mask a
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) 0 (quote 18446744073709551616) 1.0+2.0i): Exception in stencil-vector-update: invalid addition mask 18446744073709551616
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) 0 (quote #f) 1.0+2.0i): Exception in stencil-vector-update: invalid addition mask #f
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) (quote -1) 0 1.0+2.0i 1.0+2.0i): Exception in stencil-vector-update: invalid removal mask -1
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) (quote a) 0 1.0+2.0i 1.0+2.0i): Exception in stencil-vector-update: invalid removal mask a
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) (quote 18446744073709551616) 0 1.0+2.0i 1.0+2.0i): Exception in stencil-vector-update: invalid removal mask 18446744073709551616
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) (quote #f) 0 1.0+2.0i 1.0+2.0i): Exception in stencil-vector-update: invalid removal mask #f
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) 0 (quote -1) 1.0+2.0i 1.0+2.0i): Exception in stencil-vector-update: invalid addition mask -1
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) 0 (quote a) 1.0+2.0i 1.0+2.0i): Exception in stencil-vector-update: invalid addition mask a
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) 0 (quote 18446744073709551616) 1.0+2.0i 1.0+2.0i): Exception in stencil-vector-update: invalid addition mask 18446744073709551616
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) 0 (quote #f) 1.0+2.0i 1.0+2.0i): Exception in stencil-vector-update: invalid addition mask #f
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) (quote -1) 0 1.0+2.0i 1.0+2.0i 1.0+2.0i): Exception in stencil-vector-update: invalid removal mask -1
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) (quote a) 0 1.0+2.0i 1.0+2.0i 1.0+2.0i): Exception in stencil-vector-update: invalid removal mask a
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) (quote 18446744073709551616) 0 1.0+2.0i 1.0+2.0i 1.0+2.0i): Exception in stencil-vector-update: invalid removal mask 18446744073709551616
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) (quote #f) 0 1.0+2.0i 1.0+2.0i 1.0+2.0i): Exception in stencil-vector-update: invalid removal mask #f
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) 0 (quote -1) 1.0+2.0i 1.0+2.0i 1.0+2.0i): Exception in stencil-vector-update: invalid addition mask -1
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) 0 (quote a) 1.0+2.0i 1.0+2.0i 1.0+2.0i): Exception in stencil-vector-update: invalid addition mask a
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) 0 (quote 18446744073709551616) 1.0+2.0i 1.0+2.0i 1.0+2.0i): Exception in stencil-vector-update: invalid addition mask 18446744073709551616
-primvars.mo:Expected error testing (stencil-vector-update (stencil-vector 7 1 2 3) 0 (quote #f) 1.0+2.0i 1.0+2.0i 1.0+2.0i): Exception in stencil-vector-update: invalid addition mask #f
 primvars.mo:Expected error testing (vector->pseudo-random-generator (quote "a")): Exception in vector->pseudo-random-generator: not a valid pseudo-random generator state vector "a"
 primvars.mo:Expected error testing (vector->pseudo-random-generator (quote #f)): Exception in vector->pseudo-random-generator: not a valid pseudo-random generator state vector #f
 primvars.mo:Expected error testing (vector->pseudo-random-generator! (quote #f) (quote #(a))): Exception in vector->pseudo-random-generator!: not a pseudo-random generator #f
@@ -4043,8 +3989,9 @@ misc.mo:Expected error in mat compute-size-increments: "compute-size-increments:
 misc.mo:Expected error in mat collect+compute-size-increments: "collect: invalid counting-roots list not-a-list".
 misc.mo:Expected error in mat collect+compute-size-increments: "collect: invalid counting-roots list 0".
 misc.mo:Expected error in mat collect+compute-size-increments: "collect: invalid generation not-a-generation".
-misc.mo:Expected error in mat collect+compute-size-increments: "collect: invalid target generation not-a-generation for generation 0".
-misc.mo:Expected error in mat collect+compute-size-increments: "collect: invalid target generation 0 for generation 1".
+misc.mo:Expected error in mat collect+compute-size-increments: "collect: invalid minimum target generation not-a-generation for generation 0 and maximum target generation 0".
+misc.mo:Expected error in mat collect+compute-size-increments: "collect: invalid maximum target generation not-a-generation for generation 0".
+misc.mo:Expected error in mat collect+compute-size-increments: "collect: invalid maximum target generation 0 for generation 1".
 misc.mo:Expected error in mat compute-composition: "compute-composition: invalid generation -1".
 misc.mo:Expected error in mat compute-composition: "compute-composition: invalid generation "static"".
 misc.mo:Expected error in mat make-object-finder: "make-object-finder: 17 is not a procedure".
@@ -4215,6 +4162,19 @@ misc.mo:Expected error in mat wrapper-procedure: "set-wrapper-procedure-data!: #
 misc.mo:Expected error in mat phantom-bytevector: "make-phantom-bytevector: -1 is not a valid phantom bytevector length".
 misc.mo:Expected error in mat phantom-bytevector: "make-phantom-bytevector: 1267650600228229401496703205376 is not a valid phantom bytevector length".
 misc.mo:Expected error in mat phantom-bytevector: "make-phantom-bytevector: x is not a valid phantom bytevector length".
+misc.mo:Expected error in mat immobile: "incorrect argument count in call (box-immobile)".
+misc.mo:Expected error in mat immobile: "incorrect argument count in call (box-immobile 1 2)".
+misc.mo:Expected error in mat immobile: "incorrect argument count in call (make-immobile-vector)".
+misc.mo:Expected error in mat immobile: "make-immobile-vector: a is not a valid vector length".
+misc.mo:Expected error in mat immobile: "make-immobile-vector: -10 is not a valid vector length".
+misc.mo:Expected error in mat immobile: "make-immobile-vector: 1267650600228229401496703205376 is not a valid vector length".
+misc.mo:Expected error in mat immobile: "incorrect argument count in call (make-immobile-vector 10 1 2)".
+misc.mo:Expected error in mat immobile: "incorrect argument count in call (make-immobile-bytevector)".
+misc.mo:Expected error in mat immobile: "make-immobile-bytevector: a is not a valid bytevector length".
+misc.mo:Expected error in mat immobile: "variable make-immobile-byte-vector is not bound".
+misc.mo:Expected error in mat immobile: "make-immobile-bytevector: 1267650600228229401496703205376 is not a valid bytevector length".
+misc.mo:Expected error in mat immobile: "make-immobile-bytevector: 1024 is not a valid fill value".
+misc.mo:Expected error in mat immobile: "incorrect argument count in call (make-immobile-bytevector 10 1 2)".
 cp0.mo:Expected error in mat cp0-regression: "attempt to reference undefined variable x".
 cp0.mo:Expected error in mat cp0-regression: "incorrect argument count in call (g)".
 cp0.mo:Expected error in mat cp0-regression: "incorrect argument count in call (cont0 (quote x))".
@@ -4493,6 +4453,12 @@ cp0.mo:Expected error in mat expand/optimize-output: "expand/optimize-output: #<
 6.mo:Expected error in mat pretty-print: "incorrect argument count in call (pretty-format (quote foo) (quote x) (quote x))".
 6.mo:Expected error in mat pretty-print: "pretty-format: 3 is not a symbol".
 6.mo:Expected error in mat pretty-print: "pretty-format: invalid format (bad 0 ... ... 0 format)".
+6.mo:Expected error in mat fasl: "separate-eval: Warning in fasl-write: fasl file content is compressed internally; compressing the file (#<binary output port testfile.ss>) is redundant and can slow fasl writing and reading significantly
+6.mo:Expected error in mat fasl: "separate-eval: Warning in fasl-read: fasl file content is compressed internally; compressing the file (#<binary input port testfile.ss>) is redundant and can slow fasl writing and reading significantly
+6.mo:Expected error in mat fasl: "fasl-write: #() is not #f or a procedure".
+6.mo:Expected error in mat fasl: "fasl-write: 10 is not #f or a procedure".
+6.mo:Expected error in mat fasl: "fasl-read: not a vector #f".
+6.mo:Expected error in mat fasl: "fasl-read: not a vector 10".
 6.mo:Expected warning in mat cp1in-verify-format-warnings: "compile: too few arguments for control string "~a~~~s" in call to format".
 6.mo:Expected warning in mat cp1in-verify-format-warnings: "compile: too many arguments for control string "~a~a~a~s" in call to format".
 6.mo:Expected warning in mat cp1in-verify-format-warnings: "compile: too few arguments for control string "~a~~~s" in call to format at line 1, char 28 of testfile.ss".
@@ -7602,7 +7568,7 @@ format.mo:Expected error in mat format-dollar: "format: expected real number for
 7.mo:Expected error in mat exit: "exit: unexpected return from exit handler".
 7.mo:Expected error in mat abort: "abort: unexpected return from abort handler".
 7.mo:Expected error in mat collect: "collect-maximum-generation: invalid generation -1".
-7.mo:Expected error in mat collect: "collect-maximum-generation: 10000 exceeds maximum supported value 254".
+7.mo:Expected error in mat collect: "collect-maximum-generation: 10000 exceeds maximum supported value 6".
 7.mo:Expected error in mat collect: "collect-maximum-generation: invalid generation static".
 7.mo:Expected error in mat collect: "release-minimum-generation: invalid generation -1".
 7.mo:Expected error in mat collect: "release-minimum-generation: new release minimum generation must not be be greater than collect-maximum-generation".
@@ -7611,6 +7577,18 @@ format.mo:Expected error in mat format-dollar: "format: expected real number for
 7.mo:Expected error in mat collect: "collect: invalid generation -1".
 7.mo:Expected error in mat collect: "collect: invalid target generation 0 for generation 1".
 7.mo:Expected error in mat collect: "collect: invalid generation static".
+7.mo:Expected error in mat collect: "collect: invalid generation static".
+7.mo:Expected error in mat collect: "collect: invalid generation static".
+7.mo:Expected error in mat collect: "collect: invalid generation 17".
+7.mo:Expected error in mat collect: "collect: invalid generation -1".
+7.mo:Expected error in mat collect: "collect: invalid maximum target generation 2 for generation 3".
+7.mo:Expected error in mat collect: "collect: invalid maximum target generation dynamic for generation 3".
+7.mo:Expected error in mat collect: "collect: invalid maximum target generation 3 for generation 0".
+7.mo:Expected error in mat collect: "collect: invalid maximum target generation 3 for generation 0".
+7.mo:Expected error in mat collect: "collect: invalid minimum target generation 2 for generation 0 and maximum target generation 1".
+7.mo:Expected error in mat collect: "collect: invalid minimum target generation 2 for generation 0 and maximum target generation 0".
+7.mo:Expected error in mat collect: "collect: invalid minimum target generation 0 for generation 4 and maximum target generation static".
+7.mo:Expected error in mat collect: "collect: invalid minimum target generation -1 for generation 4 and maximum target generation static".
 7.mo:Expected error in mat sstats: "make-sstats: cpu value 0 is not a time record".
 7.mo:Expected error in mat sstats: "make-sstats: real value 0 is not a time record".
 7.mo:Expected error in mat sstats: "make-sstats: bytes value 0.0 is not an exact integer".
@@ -8992,7 +8970,6 @@ enum.mo:Expected error in mat enumeration: "make-record-type: cannot extend seal
 8.mo:Expected error in mat top-level-syntax-functions: "define-top-level-syntax: cannot modify immutable environment #<environment>".
 8.mo:Expected error in mat top-level-syntax-functions: "top-level-syntax: p is not defined".
 8.mo:Expected error in mat top-level-syntax-functions: "top-level-syntax: cond is not defined".
-8.mo:Expected error in mat annotations: "make-source-file-descriptor: #f is not a string".
 8.mo:Expected error in mat annotations: "make-source-file-descriptor: 17 is not a binary input port".
 8.mo:Expected error in mat annotations: "make-source-file-descriptor: #<input port string> is not a binary input port".
 8.mo:Expected error in mat annotations: "make-source-file-descriptor: #<binary input port foo> does not support port-position and set-port-position!".
@@ -9046,7 +9023,6 @@ enum.mo:Expected error in mat enumeration: "make-record-type: cannot extend seal
 8.mo:Expected error in mat annotations: "get-datum/annotations: #<sfd foo> is not a valid file position".
 8.mo:Expected error in mat annotations: "get-datum/annotations: -5 is not a valid file position".
 8.mo:Expected error in mat annotations: "get-datum/annotations: 5.0 is not a valid file position".
-8.mo:Expected error in mat annotations: "source-file-descriptor: spam is not a string".
 8.mo:Expected error in mat annotations: "source-file-descriptor: -1 is not an exact nonnegative integer".
 8.mo:Expected error in mat annotations: "source-file-descriptor: 1.0 is not an exact nonnegative integer".
 8.mo:Expected error in mat annotations: "locate-source: "spam" is not a source-file descriptor".
@@ -9745,6 +9721,12 @@ fl.mo:Expected error in mat flround: "flround: 2.0+1.0i is not a flonum".
 fl.mo:Expected error in mat flround: "flround: 2+1i is not a flonum".
 fl.mo:Expected error in mat flround: "flround: 19 is not a flonum".
 fl.mo:Expected error in mat flround: "flround: 2/3 is not a flonum".
+fl.mo:Expected error in mat flsingle: "incorrect argument count in call (flsingle)".
+fl.mo:Expected error in mat flsingle: "incorrect argument count in call (flsingle 2.0 3.0)".
+fl.mo:Expected error in mat flsingle: "flsingle: a is not a flonum".
+fl.mo:Expected error in mat flsingle: "flsingle: 3 is not a flonum".
+fl.mo:Expected error in mat flsingle: "flsingle: 2.0+1.0i is not a flonum".
+fl.mo:Expected error in mat flsingle: "flsingle: 2+1i is not a flonum".
 fl.mo:Expected error in mat flinteger?: "flinteger?: a is not a flonum".
 fl.mo:Expected error in mat flinteger?: "flinteger?: "hi" is not a flonum".
 fl.mo:Expected error in mat flinteger?: "flinteger?: (3 . 4) is not a flonum".
@@ -9993,6 +9975,7 @@ foreign.mo:Expected error in mat foreign-fixed-types: "foreign-callable: invalid
 foreign.mo:Expected error in mat foreign-fixed-types: "foreign-callable: invalid return value (- x 7) from #<procedure>".
 foreign.mo:Expected error in mat foreign-fixed-types: "foreign-callable: invalid return value (- x 7) from #<procedure>".
 foreign.mo:Expected error in mat foreign-fixed-types: "foreign-callable: invalid return value (- x 7) from #<procedure>".
+foreign.mo:Expected error in mat foreign-fixed-types: "foreign-callable: invalid return value (- x 7) from #<procedure>".
 foreign.mo:Expected error in mat foreign-C-types: "int-to-int: invalid foreign-procedure argument qqq".
 foreign.mo:Expected error in mat foreign-C-types: "unsigned-to-unsigned: invalid foreign-procedure argument qqq".
 foreign.mo:Expected error in mat foreign-C-types: "unsigned-int-to-unsigned-int: invalid foreign-procedure argument qqq".
@@ -10050,8 +10033,8 @@ foreign.mo:Expected error in mat foreign-ftype: "invalid foreign-procedure resul
 foreign.mo:Expected error in mat foreign-ftype: "invalid foreign-procedure result type specifier hag".
 foreign.mo:Expected error in mat foreign-ftype: "invalid (non-base) foreign-procedure argument ftype A".
 foreign.mo:Expected error in mat foreign-ftype: "invalid (non-base) foreign-procedure result ftype A".
-foreign.mo:Expected error in mat foreign-ftype: "invalid (swapped) foreign-procedure argument ftype swap-fixnum".
-foreign.mo:Expected error in mat foreign-ftype: "invalid (swapped) foreign-procedure result ftype swap-fixnum".
+foreign.mo:Expected error in mat foreign-ftype: "invalid (not native) foreign-procedure argument ftype swap-fixnum".
+foreign.mo:Expected error in mat foreign-ftype: "invalid (not native) foreign-procedure result ftype swap-fixnum".
 foreign.mo:Expected error in mat foreign-ftype: "invalid syntax (define-ftype foo (function "wtf" () void) +)".
 foreign.mo:Expected error in mat foreign-ftype: "invalid function-ftype convention "wtf"".
 foreign.mo:Expected error in mat foreign-ftype: "invalid function-ftype argument type specifier void".
@@ -10304,7 +10287,7 @@ ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-b
 ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-base-type field unsupported (ftype-locked-incr! A (f f2 0) x)".
 ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-integer or non-word-size field unsupported (ftype-locked-incr! A (f f2 0 f3a) x)".
 ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-base-type field unsupported (ftype-locked-incr! A (g) x)".
-ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on swapped field unsupported (ftype-locked-incr! A (h) x)".
+ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-native field unsupported (ftype-locked-incr! A (h) x)".
 ftype.mo:Expected error in mat ftype-lock-operations: "invalid syntax (ftype-locked-decr!)".
 ftype.mo:Expected error in mat ftype-lock-operations: "invalid syntax (ftype-locked-decr! A)".
 ftype.mo:Expected error in mat ftype-lock-operations: "invalid syntax (ftype-locked-decr! A x)".
@@ -10320,7 +10303,7 @@ ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-b
 ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-base-type field unsupported (ftype-locked-decr! A (f f2 0) x)".
 ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-integer or non-word-size field unsupported (ftype-locked-decr! A (f f2 0 f3a) x)".
 ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-base-type field unsupported (ftype-locked-decr! A (g) x)".
-ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on swapped field unsupported (ftype-locked-decr! A (h) x)".
+ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-native field unsupported (ftype-locked-decr! A (h) x)".
 ftype.mo:Expected error in mat ftype-lock-operations: "invalid syntax (ftype-init-lock!)".
 ftype.mo:Expected error in mat ftype-lock-operations: "invalid syntax (ftype-init-lock! A)".
 ftype.mo:Expected error in mat ftype-lock-operations: "invalid syntax (ftype-init-lock! A x)".
@@ -10336,7 +10319,7 @@ ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-b
 ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-base-type field unsupported (ftype-init-lock! A (f f2 0) x)".
 ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-integer or non-word-size field unsupported (ftype-init-lock! A (f f2 0 f3a) x)".
 ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-base-type field unsupported (ftype-init-lock! A (g) x)".
-ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on swapped field unsupported (ftype-init-lock! A (h) x)".
+ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-native field unsupported (ftype-init-lock! A (h) x)".
 ftype.mo:Expected error in mat ftype-lock-operations: "invalid syntax (ftype-lock!)".
 ftype.mo:Expected error in mat ftype-lock-operations: "invalid syntax (ftype-lock! A)".
 ftype.mo:Expected error in mat ftype-lock-operations: "invalid syntax (ftype-lock! A x)".
@@ -10352,7 +10335,7 @@ ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-b
 ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-base-type field unsupported (ftype-lock! A (f f2 0) x)".
 ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-integer or non-word-size field unsupported (ftype-lock! A (f f2 0 f3a) x)".
 ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-base-type field unsupported (ftype-lock! A (g) x)".
-ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on swapped field unsupported (ftype-lock! A (h) x)".
+ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-native field unsupported (ftype-lock! A (h) x)".
 ftype.mo:Expected error in mat ftype-lock-operations: "invalid syntax (ftype-spin-lock!)".
 ftype.mo:Expected error in mat ftype-lock-operations: "invalid syntax (ftype-spin-lock! A)".
 ftype.mo:Expected error in mat ftype-lock-operations: "invalid syntax (ftype-spin-lock! A x)".
@@ -10368,7 +10351,7 @@ ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-b
 ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-base-type field unsupported (ftype-spin-lock! A (f f2 0) x)".
 ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-integer or non-word-size field unsupported (ftype-spin-lock! A (f f2 0 f3a) x)".
 ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-base-type field unsupported (ftype-spin-lock! A (g) x)".
-ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on swapped field unsupported (ftype-spin-lock! A (h) x)".
+ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-native field unsupported (ftype-spin-lock! A (h) x)".
 ftype.mo:Expected error in mat ftype-lock-operations: "invalid syntax (ftype-unlock!)".
 ftype.mo:Expected error in mat ftype-lock-operations: "invalid syntax (ftype-unlock! A)".
 ftype.mo:Expected error in mat ftype-lock-operations: "invalid syntax (ftype-unlock! A x)".
@@ -10384,7 +10367,7 @@ ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-b
 ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-base-type field unsupported (ftype-unlock! A (f f2 0) x)".
 ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-integer or non-word-size field unsupported (ftype-unlock! A (f f2 0 f3a) x)".
 ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-base-type field unsupported (ftype-unlock! A (g) x)".
-ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on swapped field unsupported (ftype-unlock! A (h) x)".
+ftype.mo:Expected error in mat ftype-lock-operations: "locked operation on non-native field unsupported (ftype-unlock! A (h) x)".
 ftype.mo:Expected error in mat ftype-bits: "ftype-set!: invalid value 113886 for bit field of size 1".
 ftype.mo:Expected error in mat ftype-bits: "ftype-set!: invalid value #\a for bit field of size 3".
 ftype.mo:Expected error in mat ftype-bits: "ftype-set!: invalid value oops for bit field of size 14".

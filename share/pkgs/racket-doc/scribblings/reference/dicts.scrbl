@@ -2,7 +2,8 @@
 @(require "mz.rkt" (for-label racket/generic))
 
 @(define dict-eval (make-base-eval))
-@examples[#:hidden #:eval dict-eval (require racket/dict racket/generic racket/contract)]
+@examples[#:hidden #:eval dict-eval
+          (require racket/dict racket/generic racket/contract racket/string)]
 
 @title[#:tag "dicts"]{Dictionaries}
 
@@ -199,7 +200,7 @@ only supported for dictionary types that directly implement them.
 
 @defproc[(dict-ref [dict dict?]
                    [key any/c]
-                   [failure-result (failure-result/c any/c)
+                   [failure-result failure-result/c
                                    (lambda () (raise (make-exn:fail ....)))])
          any]{
 
@@ -491,7 +492,7 @@ Supported for any @racket[dict] that implements @racket[dict-ref] and
 @defproc[(dict-update! [dict (and/c dict? (not/c immutable?))]
                        [key any/c]
                        [updater (any/c . -> . any/c)]
-                       [failure-result (failure-result/c any/c)
+                       [failure-result failure-result/c
                                        (lambda () (raise (make-exn:fail ....)))]) void?]{
 
 Composes @racket[dict-ref] and @racket[dict-set!] to update an
@@ -517,7 +518,7 @@ v
 @defproc[(dict-update [dict dict?]
                       [key any/c]
                       [updater (any/c . -> . any/c)]
-                      [failure-result (failure-result/c any/c)
+                      [failure-result failure-result/c
                                       (lambda () (raise (make-exn:fail ....)))])
           (and/c dict? immutable?)]{
 
@@ -1013,5 +1014,53 @@ See also @racket[define-custom-hash-types].
 
 
 }
+
+@section{Passing keyword arguments in dictionaries}
+
+@defproc[
+ (keyword-apply/dict [proc procedure?]
+                     [kw-dict dict?] ; (dict/c keyword? any/c)
+                     [pos-arg any/c] ...
+                     [pos-args (listof any/c)]
+                     [#:<kw> kw-arg any/c] ...)
+ any]{
+Applies the @racket[proc] using the positional arguments
+from @racket[(list* pos-arg ... pos-args)], and the keyword
+arguments from @racket[kw-dict] in addition to the directly
+supplied keyword arguments in the @racket[#:<kw> kw-arg]
+ sequence.
+
+All the keys in @racket[kw-dict] must be keywords.
+The keywords in the @racket[kw-dict] do not have to be
+sorted. However, the keywords in @racket[kw-dict] and the
+directly supplied @racket[#:<kw>] keywords must not overlap.
+The given @racket[proc] must accept all of the keywords in
+@racket[kw-dict] plus the @racket[#:<kw>]s.
+
+@examples[
+#:eval dict-eval
+(define (sundae #:ice-cream [ice-cream '("vanilla")]
+                #:toppings [toppings '("brownie-bits")]
+                #:sprinkles [sprinkles "chocolate"]
+                #:syrup [syrup "caramel"])
+  (format "A sundae with ~a ice cream, ~a, ~a sprinkles, and ~a syrup."
+          (string-join ice-cream #:before-last " and ")
+          (string-join toppings #:before-last " and ")
+          sprinkles
+          syrup))
+(keyword-apply/dict sundae '((#:ice-cream . ("chocolate"))) '())
+(keyword-apply/dict sundae
+                    (hash '#:toppings '("cookie-dough")
+                          '#:sprinkles "rainbow"
+                          '#:syrup "chocolate")
+                    '())
+(keyword-apply/dict sundae
+                    #:sprinkles "rainbow"
+                    (hash '#:toppings '("cookie-dough")
+                          '#:syrup "chocolate")
+                    '())
+]
+@history[#:added "7.9"]}
+
 
 @close-eval[dict-eval]

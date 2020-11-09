@@ -489,7 +489,7 @@ the title area in @racket['top] layout mode, which is like
 
 Produces a number that corresponds to the current margin, which
 surrounds every side of the slide. The client area for a slide
-corresponds to the display area (which is always 1024 by 768) minus
+corresponds to the display area (which is either 1024 by 768 or 1360 by 766) minus
 this margin on each side. The default margin is @racket[20].
 
 The margin can be adjusted via @racket[set-margin!].}
@@ -570,17 +570,17 @@ title. The default is @racket["black"].}
                                         pict?)]{
 
 Parameter whose value is a function for assembling slide content into
-a single pict; the assembling function takes a string for the title
-(or @racket[#f]), a separation for the title (if any) and pict, and a
-pict for the slide content (not counting the title).
-
-The result is of the assembler is @racket[ct-superimpose]d with the
-client area, but the result pict might draw outside the client region
-to paint the screen margins, too.
+a single pict. An assembling function takes: a title, a vertical space amount,
+and a pict for the slide content (not counting the title).
 
 The default assembler uses @racket[titlet] to turn a title string (if
-any) to a pict. See also @racket[current-titlet] and
+any) to a pict and uses the vertical space to put the title pict above
+the slide content. See also @racket[current-titlet] and
 @racket[set-title-h!].
+
+The result of the assembler is @racket[ct-superimpose]d with the
+client area, but the resulting pict might draw outside the client region
+to paint the screen margins, too.
 
 The slide assembler is @emph{not} responsible for adding page
 numbers to the slide; that job belongs to the viewer. See also

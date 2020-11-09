@@ -1,4 +1,3 @@
-"5_3.ss"
 ;;; 5_3.ss
 ;;; Copyright 1984-2017 Cisco Systems, Inc.
 ;;; 
@@ -24,6 +23,7 @@
 ;;; dangerous: -0.0, +inf.0, -inf.0, 1e100, 1e-100, 0.1
 ;;; safe: 0.0, +nan.0, 1.0, 2.0, 0.5
 
+(begin
 (eval-when (compile)
 
    (define-constant max-float-exponent
@@ -662,6 +662,10 @@
          [($exactnum?) (and (floatable? (real-part x))
                              (floatable? (imag-part x)))]
          [else #t])))
+
+(define exact-integer-fits-float?
+  (lambda (x)
+    (<= (- (expt 2 53)) x (expt 2 53))))
 
 (define exact-inexact-compare?
    ; e is an exact number, i is a flonum
@@ -1471,8 +1475,8 @@
                  0)]
             [(eq? x 1) 1]
             [(eq? x 2) (if (< y 0) (/ (ash 1 (- y))) (ash 1 y))]
-            [(and (flonum? x) (floatable? y)) ($flexpt x (inexact y))]
-            [(and ($inexactnum? x) (floatable? y)) (exp (* y (log x)))]
+            [(and (flonum? x) (exact-integer-fits-float? y)) ($flexpt x (inexact y))]
+            [(and ($inexactnum? x) (exact-integer-fits-float? y)) (exp (* y (log x)))]
             [(not (number? x)) (nonnumber-error 'expt x)]
             [(ratnum? x)
              (if (< y 0)
@@ -1482,10 +1486,14 @@
             [else
              (let ()
                (define (f x n)
-                 (if (eq? n 1)
-                     x
-                     (let ([s (f x (ash n -1))])
-                        (if (even? n) (* s s) (* (* s s) x)))))
+                 (let loop ([i (integer-length n)] [a 1])
+                   (let ([a (if (bitwise-bit-set? n i)
+                                (* a x)
+                                a)])
+                     (if (fx= i 0)
+                         a
+                         (loop (fx- i 1)
+                               (* a a))))))
                (if (< y 0)
                    (if (or (fixnum? x) (bignum? x))
                        (/ (f x (- y)))
@@ -2624,9 +2632,7 @@
   (set-who! fxbit-count
     (lambda (n)
       (unless (fixnum? n) ($oops who "~s is not a fixnum" n))
-      (if (fx< n 0)
-          (fxnot ($fxbit-count (fxnot n)))
-          ($fxbit-count n))))
+      ($fxbit-count n)))
   (set-who! bitwise-bit-count
     (lambda (n)
       (cond
@@ -2782,7 +2788,7 @@
           [(fixnum? x)
            (unless (fxpositive? x) ($oops who "not a positive exact integer ~s" x))
            (meta-cond
-            [(fixnum? 4294967087)
+            [(<= (constant most-negative-fixnum) 4294967087 (constant most-positive-fixnum))
              (if (fx< x 4294967087)
                  (random-int s x)
                  (random-integer s x))]
@@ -3283,3 +3289,4 @@
              [k (- end start) (- k w-1)])
             ((<= k w-1) (logor (sll m^ k) ($fxreverse m k))))))))
 )))))))
+)

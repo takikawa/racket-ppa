@@ -239,8 +239,8 @@ please adhere to these guidelines:
   (cs-status-expanding-expression "Check Syntax: expanding expression")
   (cs-status-loading-docs-index "Check Syntax: loading documentation index")
   (cs-syncheck-running "Check Syntax Running")
-  (cs-mouse-over-import "binding “~s” imported from “~s”")
-  (cs-mouse-over-import/library-only "imported from “~s”")
+  (cs-mouse-over-import "binding “~s” imported from ~s")
+  (cs-mouse-over-import/library-only "imported from ~s")
   (cs-view-docs "View documentation for “~a”")
   (cs-view-docs-from "~a from ~a")  ;; a completed version of the line above
   ;; (cs-view-docs) is put into the first ~a and a list of modules (separated by commas)
@@ -1026,6 +1026,19 @@ please adhere to these guidelines:
   (autosave-details "Details")
   (autosave-recover "Recover")
   (autosave-unknown-filename "<<unknown>>")
+
+  ;;; autoloading
+  (autoload-file-changed-on-disk
+   "The file has changed on the disk. Do you want"
+   " to revert the buffer's contents to match the file on disk?")
+  (autoload-file-changed-on-disk-editor-dirty
+   "The file has changed on the disk. Do you want"
+   " to revert the buffer's contents to match the file on"
+   " disk?\n\nDoing so risks losing unsaved changes.")
+  (autoload-automatically-reload "Automatically Reload Changed Files")
+  (autoload-when-the-editor-isnt-dirty "When the editor has not been modified")
+  (autoload-never-revert "Never")
+  (autoload-ask-about-reverting "Ask me each time")
 
   ;; these are labels in a dialog that drscheme displays
   ;; if you have leftover autosave files. to see the dialog,

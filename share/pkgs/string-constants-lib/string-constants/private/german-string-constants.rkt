@@ -125,8 +125,8 @@
  (cs-status-expanding-expression "Syntaxprüfung: Ausdruck expandieren")
  (cs-status-loading-docs-index "Syntaxprüfung: Dokumentations-Index laden")
  (cs-syncheck-running "Syntaxprüfung läuft")
- (cs-mouse-over-import "Bindung „~s“ importiert aus „~s“")
- (cs-mouse-over-import/library-only "importiert aus „~s“")
+ (cs-mouse-over-import "Bindung „~s“ importiert aus ~s")
+ (cs-mouse-over-import/library-only "importiert aus ~s")
  
 
  (cs-view-docs "Dokumentation für „~a“ anschauen")
@@ -851,7 +851,21 @@
  (autosave-details "Details")
  (autosave-recover "Zurückholen")
  (autosave-unknown-filename "<<unbekannt>>")
-  
+
+
+   ;;; autoloading
+  (autoload-file-changed-on-disk
+   "Die Datei auf der Platte hat sich geändert."
+   " Editor-Inhalt durch Datei auf der Platte ersetzen?")
+  (autoload-file-changed-on-disk-editor-dirty
+   "Die Datei hat sich auf der Platte geändert."
+   " Editor-Inhalt durch Datei auf der Platte ersetzen?"
+   " \n\nDabei könnten Änderungen verlorengehen.")
+  (autoload-automatically-reload "Geänderte Dateien automatisch neu laden")
+  (autoload-when-the-editor-isnt-dirty "Wenn der Editor nicht geändert wurde")
+  (autoload-never-revert "Niemals")
+  (autoload-ask-about-reverting "Jedesmal fragen")
+
   ;; these are labels in a dialog that drscheme displays
   ;; if you have leftover autosave files. to see the dialog,
   ;; start up drscheme and modify (but don't save) a file
@@ -894,11 +908,11 @@
   "Die Datei “~a” ist nicht gespeichert; vor Start speichern?")
  ; the string is suffixed with a list of filenames (which are separated by newlines)
  (many-files-not-saved-do-the-save?
-  "Manche andere Dateien Dateien sind nicht gespeichert; vor Start speichern?\n\nDateien:")
+  "Manche andere Dateien sind nicht gespeichert; vor Start speichern?\n\nDateien:")
  ; button label to go ahead with saving
  (save-all-files "Alle Dateien speichern")
  ; check box in the dialog and also used in the preferences dialog
- (save-after-switching-tabs "Dateien speichern immeer bei Tab- oder Fenster-Wechsel")
+ (save-after-switching-tabs "Dateien beim Tab- oder Fenster-Wechsel speichern")
 
  (dont-ask-about-saving-after-switching-tabs
   "Nicht fragen und nicht speichern, wenn Start gedrückt wurde bei nicht gespeicherten Tabs oder Fenstern")

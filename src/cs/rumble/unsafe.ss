@@ -59,6 +59,7 @@
 (define unsafe-flfloor (unsafe-primitive flfloor))
 (define unsafe-flceiling (unsafe-primitive flceiling))
 (define unsafe-fltruncate (unsafe-primitive fltruncate))
+(define unsafe-flsingle (unsafe-primitive flsingle))
 
 (define unsafe-flsin (unsafe-primitive flsin))
 (define unsafe-flcos (unsafe-primitive flcos))
@@ -71,7 +72,7 @@
 (define unsafe-flsqrt (unsafe-primitive flsqrt))
 (define unsafe-flexpt (unsafe-primitive flexpt))
 
-(define (unsafe-flrandom gen) (random gen))
+(define (unsafe-flrandom gen) (pseudo-random-generator-next! gen))
 
 (define unsafe-vector*-length (unsafe-primitive vector-length))
 (define unsafe-vector*-ref (unsafe-primitive vector-ref))
@@ -171,6 +172,37 @@
   (#3%real-part c))
 (define (unsafe-flimag-part c)
   (#3%imag-part c))
+
+(define-syntax (immutable-constant stx)
+  (syntax-case stx ()
+    [(i-c v)
+     (datum->syntax
+      #'i-c
+      (list 'quote
+            (let ([v (#%syntax->datum #'v)])
+              (cond
+                [(bytevector? v) (bytevector->immutable-bytevector v)]
+                [(string? v) (string->immutable-string v)]
+                [(#%vector? v) (#%vector->immutable-vector v)]))))]))
+
+(define (unsafe-bytes->immutable-bytes! s)
+  (cond
+    [(= (bytes-length s) 0) (immutable-constant #vu8())]
+    [else
+     (#%$bytevector-set-immutable! s)
+     s]))
+(define (unsafe-string->immutable-string! s)
+  (cond
+    [(= (string-length s) 0) (immutable-constant "")]
+    [else
+     (#%$string-set-immutable! s)
+     s]))
+(define (unsafe-vector*->immutable-vector! v)
+  (cond
+    [(= (vector-length v) 0)  (immutable-constant #())]
+    [else
+     (#%$vector-set-immutable! v)
+     v]))
 
 ;; The black hole object is an immediate in Chez Scheme,
 ;; so a use is compact and the optimize can recognize

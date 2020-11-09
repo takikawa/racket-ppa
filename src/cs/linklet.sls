@@ -137,17 +137,6 @@
                            n))))
              10000)))
 
-  (define no-future-jit-db? (getenv "PLT_NO_FUTURE_JIT_CACHE")) ; => don't calculate key for cache
-  (define jit-db-path (let ([bstr (environment-variables-ref
-                                   (|#%app| current-environment-variables)
-                                   (string->utf8 "PLT_JIT_CACHE"))])
-                        (cond
-                         [(equal? bstr '#vu8()) #f] ; empty value disables the JIT cache
-                         [(not bstr)
-                          (build-path (find-system-path 'addon-dir)
-                                      "cs-jit.sqlite")]
-                         [else (bytes->path bstr)])))
-
   ;; For "main.sps" to select the default ".zo" directory name:
   (define platform-independent-zo-mode? (not (eq? linklet-compilation-mode 'mach)))
 
@@ -225,7 +214,6 @@
   (include "linklet/read.ss")
   (include "linklet/annotation.ss")
   (include "linklet/performance.ss")
-  (include "linklet/db.ss")
 
   ;; `compile`, `interpret`, etc. have `dynamic-wind`-based state
   ;; that need to be managed correctly when swapping Racket
@@ -247,8 +235,32 @@
     (call-with-system-wind (lambda () (interpret e))))
   (define (fasl-write* s o)
     (call-with-system-wind (lambda () (fasl-write s o))))
+  (define (fasl-write/paths* s o)
+    (call-with-system-wind (lambda ()
+                             (call-getting-sfd-paths
+                              (lambda (pred)
+                                (fasl-write s o pred))))))
+  (define (fasl-write-code* s o)
+    (call-with-system-wind (lambda ()
+                             (parameterize ([fasl-compressed compress-code?])
+                               (call-getting-sfd-paths
+                                (lambda (pred)
+                                  (fasl-write s o pred 'omit-rtds)))))))
   (define (compile-to-port* s o)
-    (call-with-system-wind (lambda () (compile-to-port s o))))
+    (call-with-system-wind (lambda ()
+                             (parameterize ([fasl-compressed compress-code?])
+                               (call-getting-sfd-paths
+                                (lambda (pred)
+                                  (compile-to-port s o #f #f #f (machine-type) #f pred 'omit-rtds)))))))
+
+  (define (call-getting-sfd-paths proc)
+    (let ([sfd-paths '()])
+      (proc (lambda (v)
+              (and (path? v)
+                   (begin
+                     (set! sfd-paths (cons v sfd-paths))
+                     #t))))
+      (list->vector (reverse sfd-paths))))
 
   (define (eval/foreign e mode)
     (performance-region
@@ -266,7 +278,7 @@
        (hash-for-each (cdr table) (lambda (k v) (hash-set! primitives k v))))
      tables)
     (unsafe-hash-seal! primitives)
-    ;; prropagate table to the rumble layer
+    ;; propagate table to the rumble layer
     (install-primitives-table! primitives))
 
   ;; Runs the result of `interpretable-jitified-linklet`
@@ -281,105 +293,58 @@
               proc
               (#%apply proc paths)))))
 
+  ;; returns code bytevector and sfd-paths vector
   (define (compile*-to-bytevector s)
     (let-values ([(o get) (open-bytevector-output-port)])
-      (compile-to-port* (list `(lambda () ,s)) o)
-      (get)))
+      (let ([sfd-paths (compile-to-port* (list `(lambda () ,s)) o)])
+        (values (get) sfd-paths))))
 
-  (define (compile-to-bytevector s paths format)
-    (let ([bv (cond
-               [(eq? format 'interpret)
-                (let-values ([(o get) (open-bytevector-output-port)])
-                  (fasl-write* s o)
-                  (get))]
-               [else (compile*-to-bytevector s)])])
-      (if compress-code?
-          (bytevector-compress bv)
-          bv)))
+  ;; returns code bytevector and sfd-paths vector
+  (define (compile-to-bytevector s format)
+    (cond
+      [(eq? format 'interpret)
+       (let-values ([(o get) (open-bytevector-output-port)])
+         (let ([sfd-paths (fasl-write-code* s o)])
+           (values (get) sfd-paths)))]
+      [else (compile*-to-bytevector s)]))
 
-  (define (make-cross-compile-to-bytevector machine)
-    (lambda (s paths format)
-      (let ([bv (cond
-                 [(eq? format 'interpret) (cross-fasl-to-string machine s)]
-                 [else (cross-compile machine s)])])
-        (if compress-code?
-            (bytevector-compress bv)
-            bv))))
+  ;; returns code bytevector and sfd-paths vector
+  (define (cross-compile-to-bytevector machine s format)
+    (cond
+      [(eq? format 'interpret) (cross-fasl-to-string machine s)]
+      [else (cross-compile machine s)]))
 
-  (define (eval-from-bytevector c-bv paths format)
-    (let ([bv (if (bytevector-uncompressed-fasl? c-bv)
-                  c-bv
-                  (begin
-                    (add-performance-memory! 'uncompress (bytevector-length c-bv))
-                    (performance-region
-                     'uncompress
-                     (bytevector-uncompress c-bv))))])
-      (add-performance-memory! 'faslin-code (bytevector-length bv))
-      (cond
-       [(eq? format 'interpret)
-        (let ([r (performance-region
-                  'faslin-code
-                  (fasl-read (open-bytevector-input-port bv)))])
-          (performance-region
-           'outer
-           (run-interpret r paths)))]
-       [else
-        (let ([proc (performance-region
-                     'faslin-code
-                     (code-from-bytevector bv))])
-          (if (null? paths)
-              proc
-              (#%apply proc paths)))])))
+  (define (eval-from-bytevector bv paths sfd-paths format)
+    (add-performance-memory! 'faslin-code (bytevector-length bv))
+    (cond
+      [(eq? format 'interpret)
+       (let ([r (performance-region
+                 'faslin-code
+                 (fasl-read (open-bytevector-input-port bv) 'load sfd-paths))])
+         (performance-region
+          'outer
+          (run-interpret r paths)))]
+      [else
+       (let ([proc (performance-region
+                    'faslin-code
+                    (code-from-bytevector bv sfd-paths))])
+         (if (null? paths)
+             proc
+             (#%apply proc paths)))]))
 
-  (define (code-from-bytevector bv)
+  (define (code-from-bytevector bv sfd-paths)
     (let ([i (open-bytevector-input-port bv)])
-      (let ([r (load-compiled-from-port i)])
+      (let ([r (load-compiled-from-port i sfd-paths)])
         (performance-region
          'outer
          (r)))))
 
-  (define (bytevector-uncompressed-fasl? bv)
-    ;; There's not actually a way to distinguish a fasl header from a
-    ;; compression header, but the fasl header as a compression header
-    ;; would mean a > 1GB uncompressed bytevector, so we can safely
-    ;; assume that it's a fasl stream in that case.
-    (and (> (bytevector-length bv) 8)
-         (fx= 0 (bytevector-u8-ref bv 0))
-         (fx= 0 (bytevector-u8-ref bv 1))
-         (fx= 0 (bytevector-u8-ref bv 2))
-         (fx= 0 (bytevector-u8-ref bv 3))
-         (fx= (char->integer #\c) (bytevector-u8-ref bv 4))
-         (fx= (char->integer #\h) (bytevector-u8-ref bv 5))
-         (fx= (char->integer #\e) (bytevector-u8-ref bv 6))
-         (fx= (char->integer #\z) (bytevector-u8-ref bv 7))))
-
-  (define-values (lookup-code insert-code delete-code)
-    (let ([get-procs!-maker
-           (lambda (retry)
-             (lambda args
-               (let-values ([(lookup insert delete) (get-code-database-procedures)])
-                 (set! lookup-code lookup)
-                 (set! insert-code insert)
-                 (set! delete-code delete)
-                 (apply retry args))))])
-      (values (get-procs!-maker (lambda (hash) (lookup-code hash)))
-              (get-procs!-maker (lambda (hash code) (insert-code hash code)))
-              (get-procs!-maker (lambda (hash) (delete-code hash))))))
-
-  (define (add-code-hash a)
-    (cond
-     [no-future-jit-db? a]
-     [else
-      ;; Combine an annotation with a hash code in a vector
-      (let-values ([(o get) (open-bytevector-output-port)])
-        (fasl-write* (cons (version) a) o)
-        (vector (sha1-bytes (get)) a))]))
-
   (define-record-type wrapped-code
     (fields (mutable content) ; bytevector for 'lambda mode; annotation or (vector hash annotation) for 'jit mode
+            sfd-paths
             arity-mask
             name)
-    (nongenerative #{wrapped-code p6o2m72rgmi36pm8vy559b-0}))
+    (nongenerative #{wrapped-code p6o2m72rgmi36pm8vy559b-1}))
 
   (define (force-wrapped-code wc)
     (let ([f (wrapped-code-content wc)])
@@ -387,38 +352,17 @@
           f
           (performance-region
            'on-demand
-           (let ([f (if (and (vector? f)
-                             (or (not jit-db-path)
-                                 (wrong-jit-db-thread?)))
-                        (vector-ref f 1)
-                        f)])
-             (cond
-              [(bytevector? f)
-               (let* ([f (code-from-bytevector f)])
-                 (wrapped-code-content-set! wc f)
-                 f)]
-              [(vector? f)
-               (when jit-demand-on?
-                 (show "JIT demand" (strip-nested-annotations (vector-ref f 1))))
-               (let* ([hash (vector-ref f 0)]
-                      [code (lookup-code hash)])
-                 (cond
-                  [code
-                   (let* ([f (eval-from-bytevector code '() 'compile)])
-                     (wrapped-code-content-set! wc f)
-                     f)]
-                  [else
-                   (let ([code (compile-to-bytevector (vector-ref f 1) '() 'compile)])
-                     (insert-code hash code)
-                     (let* ([f (eval-from-bytevector code '() 'compile)])
-                       (wrapped-code-content-set! wc f)
-                       f))]))]
-              [else
-               (let ([f (compile* f)])
-                 (when jit-demand-on?
-                   (show "JIT demand" (strip-nested-annotations (wrapped-code-content wc))))
-                 (wrapped-code-content-set! wc f)
-                 f)]))))))
+           (cond
+             [(bytevector? f)
+              (let* ([f (code-from-bytevector f (wrapped-code-sfd-paths wc))])
+                (wrapped-code-content-set! wc f)
+                f)]
+             [else
+              (let ([f (compile* f)])
+                (when jit-demand-on?
+                  (show "JIT demand" (strip-nested-annotations (wrapped-code-content wc))))
+                (wrapped-code-content-set! wc f)
+                f)])))))
 
   (define (jitified-extract-closed wc)
     (let ([f (wrapped-code-content wc)])
@@ -473,6 +417,7 @@
   (define-record-type linklet
     (fields (mutable code) ; the procedure or interpretable form
             paths          ; list of paths and other fasled; if non-empty, `code` expects them as arguments
+            sfd-paths      ; vector of additional source-location paths intercepted during fasl
             format         ; 'compile or 'interpret (where the latter may have compiled internal parts)
             (mutable preparation) ; 'faslable, 'faslable-strict, 'faslable-unsafe, 'callable, 'lazy, or (cons 'cross <machine>)
             importss-abi   ; ABI for each import, in parallel to `importss`
@@ -480,11 +425,12 @@
             name           ; name of the linklet (for debugging purposes)
             importss       ; list of list of import symbols
             exports)       ; list of export symbol-or-pair, pair is (cons export-symbol src-symbol)
-    (nongenerative #{linklet Zuquy0g9bh5vmeespyap4g-2}))
+    (nongenerative #{linklet Zuquy0g9bh5vmeespyap4g-3}))
 
   (define (set-linklet-code linklet code preparation)
     (make-linklet code
                   (linklet-paths linklet)
+                  (linklet-sfd-paths linklet)
                   (linklet-format linklet)
                   preparation
                   (linklet-importss-abi linklet)
@@ -493,9 +439,10 @@
                   (linklet-importss linklet)
                   (linklet-exports linklet)))
 
-  (define (set-linklet-paths linklet paths)
+  (define (set-linklet-paths linklet paths sfd-paths)
     (make-linklet (linklet-code linklet)
                   paths
+                  sfd-paths
                   (linklet-format linklet)
                   (linklet-preparation linklet)
                   (linklet-importss-abi linklet)
@@ -507,6 +454,7 @@
   (define (set-linklet-preparation linklet preparation)
     (make-linklet (linklet-code linklet)
                   (linklet-paths linklet)
+                  (linklet-sfd-paths linklet)
                   (linklet-format linklet)
                   preparation
                   (linklet-importss-abi linklet)
@@ -549,6 +497,11 @@
       (define quick-mode? (or default-compile-quick?
                               (and (not serializable?)
                                    (#%memq 'quick options))))
+      (define sfd-cache (if serializable?
+                            ;; For determinism: a fresh, non-weak cache per linklet
+                            (make-hash)
+                            ;; For speed and more flexible sharing: a weak, place-local cache
+                            (get-nonserializable-sfd-cache)))
       (performance-region
        'schemify
        (define jitify-mode?
@@ -582,7 +535,9 @@
                                (lambda (key) (values #f #f #f)))
                            import-keys))
        (define impl-lam/lifts
-         (lift-in-schemified-linklet (show pre-lift-on? "pre-lift" impl-lam)))
+         (lift-in-schemified-linklet (show pre-lift-on? "pre-lift" impl-lam)
+                                     ;; preserve loop forms?
+                                     (not (eq? linklet-compilation-mode 'interp))))
        (define impl-lam/jitified
          (cond
            [(not jitify-mode?) impl-lam/lifts]
@@ -604,10 +559,9 @@
                                           [(jit)
                                            ;; Preserve annotated `lambda` source for on-demand compilation:
                                            (lambda (expr arity-mask name)
-                                             (let ([a (correlated->annotation (xify expr) serializable?)])
-                                               (make-wrapped-code (if serializable?
-                                                                      (add-code-hash a)
-                                                                      a)
+                                             (let ([a (correlated->annotation (xify expr) serializable? sfd-cache)])
+                                               (make-wrapped-code a
+                                                                  #f
                                                                   arity-mask
                                                                   (extract-inferred-name expr name))))]
                                           [else
@@ -615,15 +569,13 @@
                                            (lambda (expr arity-mask name)
                                              (performance-region
                                               'compile-nested
-                                              (let ([code ((if serializable?
-                                                               (if cross-machine
-                                                                   (lambda (s) (cross-compile cross-machine s))
-                                                                   compile*-to-bytevector)
-                                                               compile*)
-                                                           (show lambda-on? "lambda" (correlated->annotation expr serializable?)))])
+                                              (let ([expr (show lambda-on? "lambda" (correlated->annotation expr serializable? sfd-cache))])
                                                 (if serializable?
-                                                    (make-wrapped-code code arity-mask (extract-inferred-name expr name))
-                                                    code))))])))]))
+                                                    (let-values ([(code sfd-paths) (if cross-machine
+                                                                                       (cross-compile cross-machine expr)
+                                                                                       (compile*-to-bytevector expr))])
+                                                      (make-wrapped-code code sfd-paths arity-mask (extract-inferred-name expr name)))
+                                                    (compile* expr)))))])))]))
        (define-values (paths impl-lam/paths)
          (if serializable?
              (extract-paths-and-fasls-from-schemified-linklet impl-lam/jitified (eq? format 'compile))
@@ -635,7 +587,7 @@
                            [else (show "schemified" impl-lam/paths)])])
            (if (eq? format 'interpret)
                (interpretable-jitified-linklet impl-lam serializable?)
-               (correlated->annotation impl-lam serializable?))))
+               (correlated->annotation impl-lam serializable? sfd-cache))))
        (when known-on?
          (show "known" (hash-map exports-info (lambda (k v) (list k v)))))
        (when (and cp0-on? (eq? format 'compile))
@@ -643,30 +595,31 @@
        (performance-region
         'compile-linklet
         ;; Create the linklet:
-        (let ([lk (make-linklet ((if serializable?
-                                     (if cross-machine
-                                         (make-cross-compile-to-bytevector cross-machine)
-                                         compile-to-bytevector)
-                                     compile-to-proc)
-                                 (show (and (eq? format 'interpret) post-interp-on?) "post-interp" impl-lam/interpable)
-                                 paths
-                                 format)
-                                paths
-                                format
-                                (if serializable? (if cross-machine (cons 'cross cross-machine) 'faslable) 'callable)
-                                importss-abi
-                                exports-info
-                                name
-                                importss
-                                exports)])
-          (show "compiled" 'done)
-          ;; In general, `compile-linklet` is allowed to extend the set
-          ;; of linklet imports if `import-keys` is provided (e.g., for
-          ;; cross-linklet optimization where inlining needs a new
-          ;; direct import)
-          (if import-keys
-              (values lk new-import-keys)
-              lk))))]))
+        (let ([impl (show (and (eq? format 'interpret) post-interp-on?) "post-interp" impl-lam/interpable)])
+          (let-values ([(code sfd-paths)
+                        (if serializable?
+                            (if cross-machine
+                                (cross-compile-to-bytevector cross-machine impl format)
+                                (compile-to-bytevector impl format))
+                            (values (compile-to-proc impl paths format) '#()))])
+            (let ([lk (make-linklet code
+                                    paths
+                                    sfd-paths
+                                    format
+                                    (if serializable? (if cross-machine (cons 'cross cross-machine) 'faslable) 'callable)
+                                    importss-abi
+                                    exports-info
+                                    name
+                                    importss
+                                    exports)])
+              (show "compiled" 'done)
+              ;; In general, `compile-linklet` is allowed to extend the set
+              ;; of linklet imports if `import-keys` is provided (e.g., for
+              ;; cross-linklet optimization where inlining needs a new
+              ;; direct import)
+              (if import-keys
+                  (values lk new-import-keys)
+                  lk))))))]))
 
   (define (lookup-linklet-or-instance get-import key)
     ;; Use the provided callback to get an linklet for the
@@ -710,12 +663,15 @@
        (set-linklet-code linklet (linklet-code linklet) 'lazy)]
       [(faslable-strict)
        (set-linklet-code linklet
-                         (eval-from-bytevector (linklet-code linklet) (linklet-paths linklet) (linklet-format linklet))
+                         (eval-from-bytevector (linklet-code linklet)
+                                               (linklet-paths linklet)
+                                               (linklet-sfd-paths linklet)
+                                               (linklet-format linklet))
                          'callable)]
       [(faslable-unsafe)
        (raise (|#%app|
                exn:fail
-               "eval-linklet: cannot use linklet loaded with non-original code inspector"
+               "eval-linklet: cannot use unsafe linklet loaded with non-original code inspector"
                (current-continuation-marks)))]
       [else
        linklet]))
@@ -746,7 +702,10 @@
           (begin
            (when (eq? 'lazy (linklet-preparation linklet))
              ;; Trigger lazy conversion of code from bytevector
-             (let ([code (eval-from-bytevector (linklet-code linklet) (linklet-paths linklet) (linklet-format linklet))])
+             (let ([code (eval-from-bytevector (linklet-code linklet)
+                                               (linklet-paths linklet)
+                                               (linklet-sfd-paths linklet)
+                                               (linklet-format linklet))])
                (with-interrupts-disabled
                 (when (eq? 'lazy (linklet-preparation linklet))
                   (linklet-code-set! linklet code)
@@ -764,7 +723,10 @@
                (apply
                 (if (eq? 'callable (linklet-preparation linklet))
                     (linklet-code linklet)
-                    (eval-from-bytevector (linklet-code linklet) (linklet-paths linklet) (linklet-format linklet)))
+                    (eval-from-bytevector (linklet-code linklet)
+                                          (linklet-paths linklet)
+                                          (linklet-sfd-paths linklet)
+                                          (linklet-format linklet)))
                 (make-variable-reference target-instance #f)
                 (extract-imported-variabless target-instance
                                              import-instances
@@ -793,8 +755,8 @@
       (raise-argument-error 'linklet-fasled-code+arguments "linklet?" linklet))
     (case (linklet-preparation linklet)
       [(faslable faslable-strict faslable-unsafe lazy)
-       (values (linklet-format linklet) (linklet-code linklet) (linklet-paths linklet))]
-      [else (values #f #f #f)]))
+       (values (linklet-format linklet) (linklet-code linklet) (linklet-sfd-paths linklet) (linklet-paths linklet))]
+      [else (values #f #f #f #f)]))
 
   (define (linklet-interpret-jitified? v)
     (wrapped-code? v))
@@ -897,7 +859,11 @@
           (when (eq? (variable-val var) variable-undefined)
             (raise-linking-failure "is uninitialized" target-inst inst sym))
           (let ([v (if import-abi
-                       (variable-val var)
+                       (let ([v (variable-val var)])
+                         (when (eq? import-abi 'proc)
+                           (unless (#%procedure? v)
+                             (raise-linking-failure "was expected to have a procedure value" target-inst inst sym)))
+                         v)
                        var)])
             (cons v
                   (extract-imported-variables target-inst inst (cdr syms) (cdr imports-abi) accum)))))]))
@@ -920,7 +886,7 @@
           ""]
          [(instance-name i)
           => (lambda (name)
-               (#%format "\n  module: ~a" name))]
+               (#%format "\n  in module: ~a" name))]
          [else ""]))]
      [else ""]))
 
@@ -1107,7 +1073,7 @@
 
   (define (check-constance who mode)
     (unless (or (not mode) (eq? mode 'constant) (eq? mode 'consistent))
-      (raise-argument-error who "(or/c #f 'constant 'consistant)" mode)))
+      (raise-argument-error who "(or/c #f 'constant 'consistent)" mode)))
 
   ;; --------------------------------------------------
 
@@ -1281,8 +1247,10 @@
   (enable-arithmetic-left-associative #t)
   (expand-omit-library-invocations #t)
   (enable-error-source-expression #f)
+  (fasl-compressed #f)
+  (compile-omit-concatenate-support #t)
 
-  ;; Avoid gensyms for generated record-tyope UIDs. Otherwise,
+  ;; Avoid gensyms for generated record-type UIDs. Otherwise,
   ;; printing one of those gensyms --- perhaps when producing a trace
   ;; via `dump-memory-stats` --- causes the gensym to be permanent
   ;; (since it has properties).

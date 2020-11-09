@@ -17,7 +17,7 @@
  (contract-out
   [fail-check (->* () (string?) void?)]
   [current-check-handler (parameter/c (-> any/c any))]
-  [current-check-around (parameter/c (-> (-> void?) any))]
+  [current-check-around (parameter/c (-> (-> any/c) any))]
   [plain-check-around (-> (-> void?) void?)]))
 
 (provide check-around
@@ -104,6 +104,7 @@
           (with-default-check-info* infos
             (λ () ((current-check-around) (λ () body ... (void))))))
       'pub)))
+                                      
 
 (define-simple-macro (define-check (name:id formal:id ...) body:expr ...)
   (begin
@@ -112,9 +113,15 @@
       (with-syntax ([loc (datum->syntax #f 'loc stx)])
         (syntax-parse stx
           [(chk . args)
-           #'((check-impl #:location (syntax->location #'loc)
-                          #:expression '(chk . args))
-              . args)]
+           #'(let ([location (syntax->location #'loc)])
+               (with-default-check-info*
+                (list (make-check-name 'name)
+                      (make-check-location location)
+                      (make-check-expression '(chk . args)))
+                (λ ()
+                  ((check-impl #:location location
+                               #:expression '(chk . args))
+                   . args))))]
           [chk:id
            #'(check-impl #:location (syntax->location #'loc)
                          #:expression 'chk)])))))

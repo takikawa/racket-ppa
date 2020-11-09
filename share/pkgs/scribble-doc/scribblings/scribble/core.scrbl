@@ -417,7 +417,7 @@ The recognized @tech{style properties} are as follows:
 
  @item{@tech{numberer} --- A @tech{numberer} created with
        @racket[make-numberer] determines a representation of the
-       part's section number as an extension of it's patent's number.
+       part's section number as an extension of it's parent's number.
        A @tech{numberer} overrides the default representation, which
        is a natural number or (in the case of an accompanying
        @racket['grouper] property) a Roman numeral. If a
@@ -706,7 +706,7 @@ The following @tech{style properties} are currently recognized:
 ]}
 
 
-@defstruct[nested-flow ([style any/c]
+@defstruct[nested-flow ([style style?]
                         [blocks (listof block?)])]{
 
 A @techlink{nested flow} has a style and a @tech{flow}.
@@ -1712,7 +1712,7 @@ tag.}
 
 Use as a @tech{style property} for an @racket[element],
 @racket[paragraph], or @racket[compound-paragraph] to substitute an
-alternate HTML tag (instead of @tt{<span>}, @tt{<p>}, @tt{div},
+alternate HTML tag (instead of @tt{<span>}, @tt{<p>}, @tt{<div>},
 @|etc|).}
 
 
@@ -1848,13 +1848,15 @@ For a @racket[part] that corresponds to an HTML page, adds content to
 the @tt{<head>} tag.}
 
 
-@defstruct[render-convertible-as ([types (listof (or/c 'png-bytes 'svg-bytes))])]{
+@defstruct[render-convertible-as ([types (listof (or/c 'png-bytes 'svg-bytes 'gif-bytes))])]{
  For a @racket[part] that corresponds to an HTML page,
  controls how objects that subscribe to the @racketmodname[file/convertible]
  protocol are rendered.
       
  The alternatives in the @racket[types] field are tried in order
  and the first one that succeeds is used in the html output.
+
+ @history[#:changed "1.34" @elem{Added support for  @racket['gif-bytes].}]
 }
 
 @defstruct[part-link-redirect ([url url?])]{

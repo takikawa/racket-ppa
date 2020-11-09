@@ -173,12 +173,12 @@
                      (unless repb
                        (error 'subpattern->path "hole has ellipses: ~s, ~s" hole p0))
                      (set-box! repb subpath)
-                     null)]
+                     (empty-path))]
                [else #f])]
         [(== hole)
          (when repb
            (error 'subpattern->path "hole does not have ellipses: ~s, ~s" hole p0))
-         null]
+         (empty-path)]
         [else #f])))
   (let ([repb (and rep? (box #f))])
     (cond [(outerloop p0 repb)

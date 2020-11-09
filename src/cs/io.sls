@@ -60,7 +60,7 @@
     (define-ftype uintptr_t uptr)
     (define-ftype rktio_int64_t integer-64)
     (define-ftype function-pointer uptr)
-    (define _uintptr _uint64)
+    (define _uintptr (if (> (fixnum-width) 32) _uint64 _uint32))
     (define NULL 0)
 
     (define (<< a b) (bitwise-arithmetic-shift-left a b))
@@ -445,7 +445,9 @@
   ;; kind of a hack, it's much simpler to implement that here and
   ;; export the function pointer as a primitive.
   
-  (export glib-log-message)
+  (export glib-log-message
+          ;; Make sure the callable is retained:
+          glib-log-message-callable)
 
   (define G_LOG_LEVEL_ERROR    2)
   (define G_LOG_LEVEL_CRITICAL 3)
@@ -454,7 +456,7 @@
   (define G_LOG_LEVEL_INFO     6)
   (define G_LOG_LEVEL_DEBUG    7)
   
-  (define glib-log-message
+  (define-values (glib-log-message glib-log-message-callable)
     (let ([glib-log-message
            (lambda (domain glib-level message)
              (let ([level (cond
@@ -467,7 +469,10 @@
                (let ([go (lambda ()
                            (unsafe-start-atomic)
                            (disable-interrupts)
-                           (log-message* (unsafe-root-logger) level #f (string-append domain ": " message) #f #f #f)
+                           (let ([message (if domain
+                                              (string-append domain ": " message)
+                                              message)])
+                             (log-message* (unsafe-root-logger) level #f message #f #f #f))
                            (enable-interrupts)
                            (unsafe-end-atomic))])
                  (cond
@@ -475,8 +480,9 @@
                   [else
                    (post-as-asynchronous-callback go)]))))])
       (let ([callable (foreign-callable __collect_safe glib-log-message (string int string) void)])
-        (lock-object callable)
-        (foreign-callable-entry-point callable))))
+        (values
+         (foreign-callable-entry-point callable)
+         callable))))
   
   ;; ----------------------------------------
 
@@ -520,6 +526,5 @@
   (set-make-async-callback-poll-wakeup! unsafe-make-signal-received)
   (set-get-machine-info! get-machine-info)
   (set-processor-count! (1/processor-count))
-  (set-convert-source-file-descriptor-path! 1/string->path)
   (install-future-logging-procs! logging-future-events? log-future-event)
   (install-place-logging-procs! logging-place-events? log-place-event))

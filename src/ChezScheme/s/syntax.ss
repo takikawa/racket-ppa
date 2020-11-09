@@ -1,4 +1,3 @@
-"syntax.ss"
 ;;; syntax.ss
 ;;; Copyright 1984-2017 Cisco Systems, Inc.
 ;;; 
@@ -4867,7 +4866,6 @@
                                           fp
                                           (loop fp))))))
                             (begin (set-port-position! ip start-pos) 0)))])
-              (port-file-compressed! ip)
               (if ($compiled-file-header? ip)
                   (let ([x (fasl-read ip)])
                     (close-port ip)
@@ -5210,7 +5208,6 @@
                                             fp
                                             (loop fp))))))
                               (begin (set-port-position! ip start-pos) 0)))])
-                (port-file-compressed! ip)
                 (unless ($compiled-file-header? ip) ($oops who "missing header for compiled file ~s" fn))
                 (let ([x (fasl-read ip)])
                   (unless (recompile-info? x) ($oops who "expected recompile info at start of ~s, found ~a" fn x)))
@@ -7510,6 +7507,7 @@
 
 (current-expand sc-expand)
 
+(begin
 ;;; syntax-rules/syntax-case aux keywords
 (define-syntax ...
   (lambda (x)
@@ -8920,39 +8918,40 @@
     (define squawk
       (lambda (x)
         (syntax-error x (format "invalid ~s convention" who))))
-    (let loop ([conv* conv*] [accum '()] [keep-accum '()])
+    (let loop ([conv* conv*] [selected #f] [accum '()] [keep-accum '()])
       (cond
         [(null? conv*) (datum->syntax #'filter-conv keep-accum)]
         [else
          (let* ([orig-c (car conv*)]
-                [c (syntax->datum orig-c)]
-                [c (cond
-                     [(not c) #f]
-                     [(eq? c '__collect_safe) 'adjust-active]
-                     [else
-                      (case ($target-machine)
-                        [(i3nt ti3nt)
-                         (case c
-                           [(__stdcall) 'i3nt-stdcall]
-                           [(__cdecl) #f]
-                           [(__com) 'i3nt-com]
-                           [else (squawk orig-c)])]
-                        [(ppcnt)
-                         (case c
-                           [(__stdcall __cdecl) #f]
-                           [else (squawk orig-c)])]
-                        [else (squawk orig-c)])])])
-           (when (member c accum)
-             (syntax-error orig-c (format "redundant ~s convention" who)))
-           (unless (or (null? accum)
-                       (eq? c 'adjust-active)
-                       (and (eq? 'adjust-active (car accum))
-                            (null? (cdr accum))))
-             (syntax-error orig-c (format "conflicting ~s convention" who)))
-           (loop (cdr conv*) (cons c accum)
-                 (if c
-                     (cons c keep-accum)
-                     keep-accum)))]))))
+                [c (syntax->datum orig-c)])
+           (let-values ([(c select?)
+                         (cond
+                           [(not c) (values #f #f)]
+                           [(eq? c '__collect_safe) (values 'adjust-active #f)]
+                           [(eq? c '__varargs) (values 'varargs #f)]
+                           [else
+                            (values
+                             (case ($target-machine)
+                               [(i3nt ti3nt)
+                                (case c
+                                  [(__stdcall) 'i3nt-stdcall]
+                                  [(__cdecl) #f]
+                                  [(__com) 'i3nt-com]
+                                  [else (squawk orig-c)])]
+                               [(ppcnt)
+                                (case c
+                                  [(__stdcall __cdecl) #f]
+                                  [else (squawk orig-c)])]
+                               [else (squawk orig-c)])
+                             #t)])])
+             (when (member c accum)
+               (syntax-error orig-c (format "redundant ~s convention" who)))
+             (when (and select? selected)
+               (syntax-error orig-c (format "conflicting ~s convention" who)))
+             (loop (cdr conv*) (if select? c selected) (cons c accum)
+                   (if c
+                       (cons c keep-accum)
+                       keep-accum))))]))))
 
 (define $make-foreign-procedure
   (lambda (who conv* foreign-name ?foreign-addr type* result-type)
@@ -8960,6 +8959,9 @@
       (define (check-strings-allowed)
         (when (memq 'adjust-active (syntax->datum conv*))
           ($oops who "string argument not allowed with __collect_safe procedure")))
+      (define (check-floats-allowed)
+        (when (memq 'varargs (syntax->datum conv*))
+          ($oops who "float argument not allowed for __varargs procedure")))
       (with-syntax ([conv* conv*]
                     [foreign-name foreign-name]
                     [?foreign-addr ?foreign-addr]
@@ -9056,6 +9058,9 @@
                                                         ($fp-string->utf32 x 'big)
                                                         (err ($moi) x)))))
                                        (u32*))]
+                                   [(single-float)
+                                    (check-floats-allowed)
+                                    #f]
                                    [else #f])
                                  (if (or ($ftd? type) ($ftd-as-box? type))
                                      (let ([ftd (if ($ftd? type) type (unbox type))])
@@ -9151,6 +9156,9 @@
       (define (check-strings-allowed)
         (when (memq 'adjust-active (syntax->datum conv*))
           ($oops who "string result not allowed with __collect_safe callable")))
+      (define (check-floats-allowed)
+        (when (memq 'varargs (syntax->datum conv*))
+          ($oops who "float argument not allowed for __varargs procedure")))
       (with-syntax ([conv* conv*] [?proc ?proc])
         (with-syntax ([((actual (t ...) (arg ...)) ...)
                        (map
@@ -9240,6 +9248,9 @@
                                     #`((mod x #x100000000000000)
                                        (x)
                                        (unsigned-64)))]
+                                 [(single-float)
+                                  (check-floats-allowed)
+                                  #f]
                                  [else #f])
                                (with-syntax ([(x) (generate-temporaries #'(*))])
                                  #`(x (x) (#,(datum->syntax #'foreign-callable type))))))
@@ -10259,7 +10270,6 @@
       (case-lambda
         [(ifn bip) (make-source-file-descriptor ifn bip #f)]
         [(ifn bip reset?)
-         (unless (string? ifn) ($oops who "~s is not a string" ifn))
          (unless (and (input-port? bip) (binary-port? bip))
            ($oops who "~s is not a binary input port" bip))
          (when reset?
@@ -10268,7 +10278,6 @@
          ($source-file-descriptor ifn bip reset?)])))
   (set-who! source-file-descriptor
     (lambda (path checksum)
-      (unless (string? path) ($oops who "~s is not a string" path))
       (unless (if (fixnum? checksum) (fx>= checksum 0) (and (bignum? checksum) ($bigpositive? checksum)))
         ($oops who "~s is not an exact nonnegative integer" checksum))
       (%make-source-file-descriptor path (ash checksum -16) (logand checksum #xffff))))
@@ -10331,3 +10340,4 @@
 
 (set-who! $annotation-options (make-enumeration '(debug profile)))
 (set-who! $make-annotation-options (enum-set-constructor $annotation-options))
+)

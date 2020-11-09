@@ -2,13 +2,13 @@
 (require framework 
          data/interval-map 
          mrlib/hierlist
-         "visualizer-drawing.rkt" 
-         "visualizer-data.rkt" 
-         "gui-helpers.rkt" 
-         "graph-drawing.rkt"
-         "display.rkt" 
-         "constants.rkt" 
-         "pict-canvas.rkt")    
+         future-visualizer/private/visualizer-drawing 
+         future-visualizer/private/visualizer-data 
+         future-visualizer/private/gui-helpers 
+         future-visualizer/private/graph-drawing
+         future-visualizer/private/display 
+         future-visualizer/private/constants 
+         future-visualizer/private/pict-canvas)    
 
 (provide show-visualizer) 
 

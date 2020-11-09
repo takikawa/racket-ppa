@@ -10,24 +10,19 @@
 
 (define-runtime-path here ".")
 
-(define scheme-dir-provided? #f)
-(define abs-scheme-dir (build-path here 'up "build" "ChezScheme"))
+(define scheme-dir (build-path 'up "ChezScheme"))
 (define pull? #f)
 (define static-libs? #t)
+(define install-boot? #t) ; currently always enabled
 (define machine (if (= 32 (system-type 'word))
 		    "ti3nt"
 		    "ta6nt"))
-(define cs-suffix "CS")
+(define cs-suffix "")
 (define boot-mode "--chain")
 (define extra-repos-base #f)
-(define git-clone-args '())
 
 (command-line
  #:once-each
- [("--scheme-dir") dir "Select the Chez Scheme build directory, unless <dir> is \"\""
-                   (unless (equal? dir "")
-                     (set! scheme-dir-provided? #t)
-                     (set! abs-scheme-dir (path->complete-path dir)))]
  [("--pull") "Use `git pull` on auto-cloned Chez Scheme repo"
              (set! pull? #t)]
  [("--racketcs-suffix") str "Select the suffix for RacketCS"
@@ -39,16 +34,13 @@
  [("--extra-repos-base") url "Clone repos from <url>ChezScheme/.git, etc."
                          (unless (equal? url "")
                            (set! extra-repos-base url))]
- [("--disable-libs") "Disable installaton of non-embedded boot files"
+ [("--disable-libs") "Disable installaton of static libraries (currently ignored)"
                      (set! static-libs? #f)]
  #:args
- clone-arg
- (set! git-clone-args clone-arg))
+ ()
+ (void))
 
 (current-directory here)
-
-(define scheme-dir (find-relative-path (current-directory)
-                                       (simplify-path abs-scheme-dir)))
 
 (define (system*! prog . args)
   (printf "{in ~a}\n" (current-directory))
@@ -71,49 +63,6 @@
 
 ;; ----------------------------------------
 
-;; Download Chez Scheme source
-(let ([submodules '("nanopass"  "stex"   "zlib"   "lz4")]
-      [readmes    '("ReadMe.md" "ReadMe" "README" "README.md")])  
-  (define (clone from to [git-clone-args '()])
-    (apply system*! (append
-                     (list "git"
-                           "clone")
-                     git-clone-args
-                     (list from to))))
-  (define bundled-src-dir (build-path here 'up "ChezScheme"))
-  (cond
-    [(directory-exists? bundled-src-dir)
-     (unless (directory-exists? scheme-dir)
-       (copy-directory/files bundled-src-dir scheme-dir))]
-    [extra-repos-base
-     ;; Intentionally not using `git-clone-args`, because dumb transport
-     ;; (likely for `extra-repos-base`) does not support shallow copies
-     (unless (directory-exists? scheme-dir)
-       (clone (format "~aChezScheme/.git" extra-repos-base)
-              scheme-dir))
-     (for ([submodule (in-list submodules)]
-           [readme (in-list readmes)])
-       (define dir (build-path scheme-dir submodule))
-       (unless (file-exists? (build-path dir readme))
-         (clone (format "~a~a/.git" extra-repos-base submodule)
-                (build-path scheme-dir submodule))))
-     (when pull?
-       (parameterize ([current-directory scheme-dir])
-         (system*! "git" "pull")
-         (for ([submodule (in-list submodules)])
-           (parameterize ([current-directory (build-path submodule)])
-             (system*! "git" "pull" "origin" "master")))))]
-    [else
-     (unless (directory-exists? scheme-dir)
-       (clone "https://github.com/racket/ChezScheme"
-              scheme-dir
-              git-clone-args))
-     (when pull?
-       (parameterize ([current-directory scheme-dir])
-         (system*! "git" "pull")
-         (system*! "git" "submodule" "init")
-         (system*! "git" "submodule" "update")))]))
-
 ;; Bootstrap Chez Scheme boot files
 (let/ec esc
   (parameterize ([current-environment-variables
@@ -125,7 +74,7 @@
 				       (orig-exit v))))])
     (putenv "SCHEME_SRC" (path->string scheme-dir))
     (putenv "MACH" machine)
-    (dynamic-require (build-path here 'up "cs" "bootstrap" "make-boot.rkt") #f)))
+    (dynamic-require (build-path scheme-dir "rktboot" "make-boot.rkt") #f)))
 
 ;; Prepare to use Chez Scheme makefile
 (prep-chez-scheme scheme-dir machine)
@@ -153,35 +102,39 @@
 
 ;; ----------------------------------------
 
-(define (build-layer name
-		     #:dir [dir name]
-		     #:skip-make? [skip-make? #f])
-  (parameterize ([current-directory (build-path 'up dir)])
-    (make-directory* (build-path build-dir "compiled"))
-    (unless skip-make?
-      (system*! "nmake"
-		(format "~a-src-generate" name)
-		(format "BUILDDIR=~a" build-dir)
-		(format "RACKET=~a ~a ~a" chain-racket "ignored" (build-path build-dir "compiled/ignored.d"))))))
+;; We could regenerate schemified layers in development mode
+;; (which on Unix is done by `make` in `racket/src/cs`).
 
-(build-layer "expander")
-(build-layer "thread")
-(build-layer "io")
-(build-layer "regexp")
+(when #f
+  (define (build-layer name
+                       #:dir [dir name]
+                       #:skip-make? [skip-make? #f])
+    (parameterize ([current-directory (build-path 'up dir)])
+      (make-directory* (build-path build-dir "compiled"))
+      (unless skip-make?
+        (system*! "nmake"
+                  (format "~a-src-generate" name)
+                  (format "BUILDDIR=~a" build-dir)
+                  (format "RACKET=~a ~a ~a" chain-racket "ignored" (build-path build-dir "compiled/ignored.d"))))))
 
-(build-layer "schemify")
-(build-layer "known" #:dir "schemify")
+  (build-layer "expander")
+  (build-layer "thread")
+  (build-layer "io")
+  (build-layer "regexp")
+
+  (build-layer "schemify")
+  (build-layer "known" #:dir "schemify"))
 
 ;; ----------------------------------------
 
 (define scheme (build-path scheme-dir machine "bin" machine "scheme.exe"))
-(define rel-scheme (build-path 'up "worksp"
-			       (if (relative-path? scheme)
-				   scheme
-				   (find-relative-path (current-directory) scheme))))
-
-;; Environment variable used by ".sls" files to find ".scm" files
-(putenv "COMPILED_SCM_DIR" "../build/compiled/")
+(define scheme-boot (build-path scheme-dir machine "boot" machine))
+(define (path->relative p)
+  (if (relative-path? p)
+      p
+      (find-relative-path (current-directory) p)))
+(define rel-scheme (build-path 'up "worksp" (path->relative scheme)))
+(define rel-scheme-boot (build-path 'up "worksp" (path->relative scheme-boot)))
 
 (parameterize ([current-directory (build-path 'up "cs")])
   (define convert.d (build-path build-dir "compiled" "convert.d"))
@@ -191,7 +144,9 @@
 	    (format "RACKET=~a" rel-racket)
 	    (format "SCHEME=~a" rel-scheme)
 	    (format "BUILDDIR=../build/") ; need forward slashes
-	    (format "CONVERT_RACKET=~a" chain-racket)))
+	    (format "CONVERT_RACKET=~a" chain-racket)
+            (format "BOOTSTRAPPED=~a" "done")
+            (format "EXTRA_COMPILE_DEPS=~a/petite.boot ~a/scheme.boot" rel-scheme-boot rel-scheme-boot)))
 
 ;; ----------------------------------------
 
@@ -263,6 +218,7 @@
          "ignored" "../build/ignored.d"
          args))
 
+(make-directory* "../../lib")
 (bootstrap-racket! "../cs/c/embed-boot.rkt"
                    "++exe" "../build/raw_racketcs.exe" (format "../../Racket~a.exe" cs-suffix)
                    "++exe" "../build/raw_gracketcs.exe" (format "../../lib/GRacket~a.exe" cs-suffix)
@@ -297,6 +253,7 @@
 (make-directory* "../../etc")
 (make-directory* "../../doc")
 (make-directory* "../../share")
+(make-directory* "../../include")
 
 (copy-file "../LICENSE-libscheme.txt"
            "../../share/LICENSE-libscheme.txt"
@@ -312,6 +269,16 @@
            #t)
 (copy-file "../LICENSE-GPL.txt"
            "../../share/LICENSE-GPL.txt"
+           #t)
+
+(copy-file "../cs/c/api.h"
+           "../../include/racketcs.h"
+           #t)
+(copy-file "../cs/c/boot.h"
+           "../../include/racketcsboot.h"
+           #t)
+(copy-file (build-path scheme-dir machine "boot" machine "scheme.h")
+           "../../include/chezscheme.h"
            #t)
 
 (parameterize ([current-directory "mzstart"])
@@ -332,7 +299,7 @@
           machine
           "machine")
 
-(when static-libs?
+(when install-boot?
   (bootstrap-racket! "../cs/c/add-terminator.rkt"
                      "../build/petite-v.boot"
                      "../../lib/petite.boot")

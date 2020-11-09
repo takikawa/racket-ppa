@@ -12,12 +12,9 @@
          framework
          framework/private/srcloc-panel
          mrlib/name-message
-         mrlib/bitmap-label
-         mrlib/include-bitmap
          mrlib/switchable-button
          mrlib/cache-image-snip
          (prefix-in image-core: mrlib/image-core)
-         mrlib/include-bitmap
          mrlib/close-icon
          mrlib/panel-wob
          net/sendurl
@@ -606,14 +603,6 @@
                                               ""))))
           
           (define/augment (after-save-file success?)
-            (when success?
-              (let ([filename (get-filename)])
-                (when filename
-                  ;; if a filesystem error happens, just give up
-                  ;; on setting the file creator and type.
-                  (with-handlers ([exn:fail:filesystem? void])
-                    (let-values ([(creator type) (file-creator-and-type filename)])
-                      (file-creator-and-type filename #"DrSc" type))))))
             (when save-file-metadata
               (let ([modified? (is-modified?)]
                     [locked? (is-locked?)])
@@ -935,8 +924,11 @@
           (set-max-undo-history 'forever)
 
           (inherit set-inline-overview-enabled?)
-          (set-inline-overview-enabled? (preferences:get 'drracket:inline-overview-shown?))))))
-  
+          (set-inline-overview-enabled? (preferences:get 'drracket:inline-overview-shown?))
+
+          (inherit set-file-creator-and-type)
+          (set-file-creator-and-type #"DrSc" #f)))))
+
   (define (get-module-language/settings)
     (let* ([module-language
             (and (preferences:get 'drracket:switch-to-module-language-automatically?)
@@ -2378,6 +2370,10 @@
           (toggle-show/hide-definitions)
           (update-shown)))
       (define/public (ensure-rep-shown rep)
+        (unless (is-a? rep drracket:rep:text<%>)
+          (raise-argument-error 'ensure-rep-shown
+                                (format "~s" '(is-a?/c drracket:rep:text<%>))
+                                rep))
         (unless (eq? rep interactions-text)
           (let loop ([tabs tabs])
             (unless (null? tabs)
@@ -2969,8 +2965,9 @@
       (define/private (save-all-unsaved-files)
         (let/ec k
           (for ([tab (in-list (get-unsaved-candidate-tabs #f))])
-            (unless (send (send tab get-defs) save-file/gui-error)
-              (k (void)))))
+            (parameterize ([editor:doing-autosave? #t])
+              (unless (send (send tab get-defs) save-file #f 'same #f)
+                (k (void))))))
         (update-tabs-labels))
 
       (define/private (get-unsaved-candidate-tabs skip-me?)

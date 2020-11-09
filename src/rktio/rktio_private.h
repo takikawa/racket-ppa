@@ -11,6 +11,9 @@
 #ifdef RKTIO_USE_PTHREADS
 # include <pthread.h>
 #endif
+#ifdef RKTIO_USE_XLOCALE
+# include <xlocale.h>
+#endif
 
 #if defined(RKTIO_SYSTEM_UNIX) && !defined(RKTIO_STATIC_FDSET_SIZE)
 # define USE_DYNAMIC_FDSET_SIZE
@@ -132,6 +135,10 @@ struct rktio_t {
 #ifdef OS_X
   int macos_kernel_version; /* e.g., 10 => 10.6, 15 => 10.11 */
 #endif
+
+#ifdef RKTIO_USE_XLOCALE
+  locale_t locale;
+#endif
 };
 
 /*========================================================================*/
@@ -141,6 +148,7 @@ struct rktio_t {
 void rktio_alloc_global_poll_set(rktio_t *rktio);
 void rktio_free_global_poll_set(rktio_t *rktio);
 int rktio_initialize_signal(rktio_t *rktio);
+void rktio_free_signal(rktio_t *rktio);
 
 #ifdef USE_FAR_RKTIO_FDCALLS
 
@@ -275,6 +283,9 @@ typedef char WIDE_PATH_t;
 
 #endif
 
+void rktio_convert_init(rktio_t *rktio);
+void rktio_convert_deinit(rktio_t *rktio);
+
 /*========================================================================*/
 /* Hash table                                                             */
 /*========================================================================*/
@@ -298,6 +309,12 @@ intptr_t rktio_hash_string(const char *s);
 /*========================================================================*/
 /* Misc                                                                   */
 /*========================================================================*/
+
+/* On Mac OS, for example, `read` and `write` expect a value less than
+   2GB. Use 32MB as a limit that is very large, but still likely small
+   enough for all OSes. */
+#define MAX_READ_WRITE_REQUEST_BYTES (32 * 1048576)
+#define LIMIT_REQUEST_SIZE(n) (((n) > MAX_READ_WRITE_REQUEST_BYTES) ? MAX_READ_WRITE_REQUEST_BYTES : (n))
 
 void rktio_get_posix_error(rktio_t *rktio);
 #define get_posix_error() rktio_get_posix_error(rktio)
