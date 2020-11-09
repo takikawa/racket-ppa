@@ -1,11 +1,13 @@
 #lang racket/base
 (require racket/class
+         racket/match
          racket/file file/convertible
          "snip-flags.rkt"
          "load-one.rkt"
          "style.rkt"
          "private.rkt"
          racket/draw/private/syntax
+         (only-in racket/draw/private/bitmap specialize-unknown-kind)
          racket/draw)
 
 (provide snip%
@@ -831,39 +833,41 @@
               (send f get dx)
               (send f get dy)
               (send f get relative))
-
-          (let-values ([(loadfile
-                         type
-                         inlined?
-                         backing-scale)
-                        (if (and (equal? filename #"")
-                                 can-inline?
-                                 (positive? type))
-                            ;; read inlined image
-                            (let-boxes ([len 0])
-                                (send f get-fixed len)
-                              (if (and (len . > . 0)
-                                       (send f ok?))
-                                  (let-values ([(in out) (make-pipe)]
-                                               [(backing-scale)
-                                                (if (= type 4)
-                                                    (send f get-inexact)
-                                                    1.0)])
-                                    (for ([i (in-range len)])
-                                      (display (send f get-unterminated-bytes) out))
-                                    (close-output-port out)
-                                    (values in
-                                            'unknown/alpha
-                                            #t
-                                            backing-scale))
-                                  (values filename
-                                          (int->img-type type)
-                                          #f
-                                          1.0)))
-                            (values filename
-                                    (int->img-type type)
-                                    #f
-                                    1.0))])
+            (define-values (loadfile
+                            kind
+                            inlined?
+                            backing-scale)
+              (cond
+                [(and (equal? filename #"")
+                      can-inline?
+                      (positive? type))
+                 ;; read inlined image
+                 (define len (send f get-fixed-exact))
+                 (cond
+                   [(and (len . > . 0)
+                         (send f ok?))
+                    (let-values ([(in out) (make-pipe)]
+                                 [(backing-scale)
+                                  (if (= type 4)
+                                      (send f get-inexact)
+                                      1.0)])
+                      (for ([i (in-range len)])
+                        (display (send f get-unterminated-bytes) out))
+                      (close-output-port out)
+                      (values in
+                              'unknown/alpha
+                              #t
+                              backing-scale))]
+                   [else
+                    (values filename
+                            (int->img-type type)
+                            #f
+                            1.0)])]
+                [else
+                 (values filename
+                         (int->img-type type)
+                         #f
+                         1.0)]))
             ;; the call to create an image-snip% object
             ;; here should match the way that super-make-object
             ;; is called in wxme/image.rkt
@@ -873,14 +877,14 @@
                                          (if (bytes? loadfile)
                                              (bytes->path loadfile)
                                              loadfile))
-                                     type
+                                     kind
                                      (positive? relative) 
                                      inlined?
                                      backing-scale)])
               (send snip resize w h)
               (send snip set-offset dx dy)
 
-              snip)))))))
+              snip))))))
 
 ;; ------------------------------------------------------------
 
@@ -932,6 +936,7 @@
   (define viewdx 0.0)
   (define viewdy 0.0)
   (define contents-changed? #f)
+  (define bytes-from-png-fallback #f)
 
   (super-new)
 
@@ -1049,26 +1054,47 @@
         ;; inline the image
         (let ([lenpos (send f tell)])
           (send f put-fixed 0)
-
           (when (eq? write-mode 'scaled-pm)
             (send f put (send bm get-backing-scale)))
+          (define data-from-file (send bm get-data-from-file))
+          (define (png-bytes-fallback)
+            (unless bytes-from-png-fallback
+              (define bp (open-output-bytes))
+              (send bm save-file bp 'png #:unscaled? #t)
+              (close-output-port bp)
+              (set! bytes-from-png-fallback (get-output-bytes bp)))
+            (open-input-bytes bytes-from-png-fallback))
+          (define in
+            (match data-from-file
+              [(vector kind bg-color bytes)
+               (cond
+                 [(saved-data-compatible-with-loading-code? kind bg-color bytes)
+                  (open-input-bytes bytes)]
+                 [else (png-bytes-fallback)])]
+              [#f
+               (png-bytes-fallback)]))
+             (define num-lines
+               (let loop ([numlines 0])
+                 (let ([s (read-bytes IMG-MOVE-BUF-SIZE in)])
+                   (if (eof-object? s)
+                       numlines
+                       (begin
+                         (send f put-unterminated s)
+                         (loop (add1 numlines)))))))
+             (define end (send f tell))
+             (send f jump-to lenpos)
+             (send f put-fixed num-lines)
+             (send f jump-to end)))))
 
-          (let ([num-lines
-                 (let-values ([(in out) (make-pipe)])
-                   (send bm save-file out 'png #:unscaled? #t)
-                   (close-output-port out)
-                   (let loop ([numlines 0])
-                     (let ([s (read-bytes IMG-MOVE-BUF-SIZE in)])
-                       (if (eof-object? s)
-                           numlines
-                           (begin
-                             (send f put-unterminated s)
-                             (loop (add1 numlines)))))))])
-            
-            (let ([end (send f tell)])
-              (send f jump-to lenpos)
-              (send f put-fixed num-lines)
-              (send f jump-to end)))))))
+  (define/private (saved-data-compatible-with-loading-code? kind bg-color bytes)
+    (and (not bg-color)
+         (case kind
+           [(unknown/apha) #t]
+           [(unknown/mask unknown)
+            (equal? (specialize-unknown-kind (open-input-bytes bytes) kind)
+                    (specialize-unknown-kind (open-input-bytes bytes) 'unknown/alpha))]
+           [else
+            (equal? kind (specialize-unknown-kind (open-input-bytes bytes) 'unknown/alpha))])))
   
   (def/public (load-file [(make-or-false (make-alts path-string? input-port?)) [name #f]]
                          [image-type? [kind 'unknown]]
@@ -1120,8 +1146,8 @@
             (let ([nbm (if s-admin
                            (send s-admin call-with-busy-cursor
                                  (lambda ()
-                                   (make-object bitmap% fullpath kind)))
-                           (make-object bitmap% fullpath kind #f #f backing-scale))])
+                                   (make-object bitmap% fullpath kind #f #f 1.0 #t)))
+                           (make-object bitmap% fullpath kind #f #f backing-scale #t))])
               (when (send nbm ok?)
                 (do-set-bitmap nbm #f #f))))))
       ;; for refresh:

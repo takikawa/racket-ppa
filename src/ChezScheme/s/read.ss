@@ -1,4 +1,3 @@
-"read.ss"
 ;;; read.ss
 ;;; Copyright 1984-2017 Cisco Systems, Inc.
 ;;; 
@@ -18,6 +17,7 @@
 ;(define read)
 ;(define $read)
 
+(begin
 (let ()
 (include "types.ss")
 
@@ -1633,13 +1633,14 @@
                          dir name))))
                (search name (cdr dir*)))))
     (let ([name (source-file-descriptor-name sfd)])
-      (or (and ($fixed-path? name) (source-port name))
-          (let ([dir* (append (source-directories) (map car (library-directories)))])
-            (let pathloop ([name name])
-              (or (search name dir*)
-                  (let ([rest (path-rest name)])
-                    (and (not (string=? rest name))
-                         (pathloop rest))))))))))
+      (and (string? name)
+           (or (and ($fixed-path? name) (source-port name))
+               (let ([dir* (append (source-directories) (map car (library-directories)))])
+                 (let pathloop ([name name])
+                   (or (search name dir*)
+                       (let ([rest (path-rest name)])
+                         (and (not (string=? rest name))
+                              (pathloop rest)))))))))))
 
 (let ([source-lines-cache (make-weak-eq-hashtable)])
 
@@ -1872,3 +1873,4 @@
   (char-name 'alarm #\bel)
   (char-name 'nel #\nel)
   (char-name 'ls #\ls))
+)

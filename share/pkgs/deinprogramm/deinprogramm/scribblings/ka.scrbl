@@ -484,7 +484,7 @@ Beispiel:
 
 @section{Natürliche Zahlen als Eingabe, mit Akkumulator: Schablone}
 
-Wenn Du eine Funktion schreibst, die eine Liste akzeptiert und
+Wenn Du eine Funktion schreibst, die eine natürliche Zahl akzeptiert und
 einen Akkumulator   benutzen soll, gehe folgendermaßen vor:
 
 @itemlist[#:style 'ordered

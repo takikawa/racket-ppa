@@ -19,15 +19,17 @@
 #include <setjmp.h>
 #include <limits.h>
 #ifdef WIN32
+#include <io.h>
 #include <time.h>
 #else
 #include <sys/time.h>
 #endif
+#include <fcntl.h>
 #include <stddef.h>
 
-extern iptr vfasl_load_time;
-extern iptr vfasl_fix_time;
-extern iptr vfasl_relocs;
+#ifndef O_BINARY
+#define O_BINARY 0
+#endif /* O_BINARY */
 
 static INT boot_count;
 static IBOOL verbose;
@@ -44,7 +46,7 @@ static void idiot_checks PROTO((void));
 static INT run_script PROTO((const char *who, const char *scriptfile, INT argc, const char *argv[], IBOOL programp));
 
 extern void scheme_include(void);
-  
+
 static void main_init() {
     ptr tc = get_thread_context();
     ptr p;
@@ -53,7 +55,7 @@ static void main_init() {
   /* create dependency for linker */
     scheme_statics();
 
-  /* force thread inline allocation to go through find_room until ready */
+  /* force thread inline newspace allocation to go through find_room until ready */
     AP(tc) = (ptr)0;
     EAP(tc) = (ptr)0;
     REAL_EAP(tc) = (ptr)0;
@@ -64,8 +66,8 @@ static void main_init() {
     if (S_boot_time) S_G.protect_next = 0;
 
     S_segment_init();
-    S_alloc_init();
     S_thread_init();
+    S_alloc_init();
     S_intern_init();
     S_gc_init();
     S_number_init();
@@ -119,10 +121,10 @@ static void main_init() {
     CODEFREE(p) = 0;
     CODEINFO(p) = Sfalse;
     CODEPINFOS(p) = Snil;
-    RPHEADERFRAMESIZE(&CODEIT(p, 0)) = 0;
-    RPHEADERLIVEMASK(&CODEIT(p, 0)) = 0;
-    RPHEADERTOPLINK(&CODEIT(p, 0)) =
-       (uptr)&RPHEADERTOPLINK(&CODEIT(p, 0)) - (uptr)p;
+    RPHEADERFRAMESIZE(TO_PTR(&CODEIT(p, 0))) = 0;
+    RPHEADERLIVEMASK(TO_PTR(&CODEIT(p, 0))) = 0;
+    RPHEADERTOPLINK(TO_PTR(&CODEIT(p, 0))) =
+        (uptr)TO_PTR(&RPHEADERTOPLINK(TO_PTR(&CODEIT(p, 0)))) - (uptr)p;
     S_protect(&S_G.dummy_code_object);
     S_G.dummy_code_object = p;
 
@@ -182,6 +184,7 @@ static void idiot_checks() {
               (long)sizeof(short), short_bits);
     oops = 1;
   }
+#ifndef PORTABLE_BYTECODE
   if (sizeof(long) * 8 != long_bits) {
     fprintf(stderr, "sizeof(long) * 8 [%ld] != long_bits [%d]\n",
               (long)sizeof(long), long_bits);
@@ -194,11 +197,13 @@ static void idiot_checks() {
     oops = 1;
   }
 #endif
+#endif
   if (sizeof(wchar_t) * 8 != wchar_bits) {
     fprintf(stderr, "sizeof(wchar_t) * 8 [%ld] != wchar_bits [%d]\n",
               (long)sizeof(wchar_t), wchar_bits);
     oops = 1;
   }
+#ifndef PORTABLE_BYTECODE
   if (sizeof(size_t) * 8 != size_t_bits) {
     fprintf(stderr, "sizeof(size_t) * 8 [%ld] != size_t_bits [%d]\n",
               (long)sizeof(size_t), size_t_bits);
@@ -221,6 +226,7 @@ static void idiot_checks() {
               (long)sizeof(time_t), time_t_bits);
     oops = 1;
   }
+#endif
   if (sizeof(bigit) * 8 != bigit_bits) {
     fprintf(stderr, "sizeof(bigit) * 8 [%ld] != bigit_bits [%d]\n",
               (long)sizeof(bigit), bigit_bits);
@@ -285,6 +291,7 @@ static void idiot_checks() {
   }
 #define big 0
 #define little 1
+#define unknown 2
   if (native_endianness == big) {
     uptr x[1];
     *x = 1;
@@ -292,7 +299,7 @@ static void idiot_checks() {
       fprintf(stderr, "endianness claimed to be big, appears to be little\n");
       oops = 1;
     }
-  } else {
+  } else if (native_endianness == little) {
     uptr x[1];
     *x = 1;
     if (*(char *)x == 0) {
@@ -312,7 +319,7 @@ static void idiot_checks() {
     fprintf(stderr, "cards_per_segment is not a multiple of sizeof(iptr)\n");
     oops = 1;
   }
-  if (((uptr)(&((seginfo *)0)->dirty_bytes[0]) & (sizeof(iptr) - 1)) != 0) {
+  if (((uptr)TO_PTR(&((seginfo *)0)->dirty_bytes[0]) & (sizeof(iptr) - 1)) != 0) {
     /* gc sometimes processes dirty bytes sizeof(iptr) bytes at a time */
     fprintf(stderr, "dirty_bytes[0] is not iptr-aligned wrt to seginfo struct\n");
     oops = 1;
@@ -322,6 +329,13 @@ static void idiot_checks() {
     fprintf(stderr, "vector type/length field does not look like a fixnum\n");
     oops = 1;
   }
+
+  if ((((code_flag_continuation << code_flags_offset) | (code_flag_mutable_closure << code_flags_offset))
+       & (uptr)forward_marker) != 0) {
+    /* parallel GC relies on not confusing a forward marker with code flags */
+    fprintf(stderr, "code flags overlap with forwadr_marker\n");
+    oops = 1;
+  } 
 
   if (oops) S_abnormal_exit();
 }
@@ -363,14 +377,16 @@ static void check_ap(tc) ptr tc; {
         (void) fprintf(stderr, "ap is not double word aligned\n");
         S_abnormal_exit();
     }
-    if ((ptr *)AP(tc) > (ptr *)EAP(tc)) {
+    if ((uptr)AP(tc) > (uptr)EAP(tc)) {
         (void) fprintf(stderr, "ap is greater than eap\n");
         S_abnormal_exit();
     }
 }
 
 void S_generic_invoke(tc, code) ptr tc; ptr code; {
-#if defined(PPCAIX)
+#if defined(PORTABLE_BYTECODE)
+  S_pb_interp(tc, (void *)&CODEIT(code,0));
+#elif defined(PPCAIX)
     struct {caddr_t entry, toc, static_link;} hdr;
     hdr.entry = (caddr_t)&CODEIT(code,0);
     hdr.toc = (caddr_t)0;
@@ -424,7 +440,7 @@ static const char *path_last(p) const char *p; {
 #ifdef WIN32
   char c;
 
-  if ((c = *p) >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z')
+  if (((c = *p) >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))
     if (*(p + 1) == ':')
       p += 2;
 #endif
@@ -560,7 +576,7 @@ static IBOOL next_path(path, name, ext, sp, dsp) char *path; const char *name, *
 /* BOOT FILES */
 
 typedef struct {
-  glzFile file;
+  INT fd;
   char path[PATH_MAX];
 } boot_desc;
 
@@ -568,25 +584,21 @@ typedef struct {
 static boot_desc bd[MAX_BOOT_FILES];
 
 /* locally defined functions */
-static uptr zget_uptr PROTO((glzFile file, uptr *pn));
-static INT zgetstr PROTO((glzFile file, char *s, iptr max));
-static IBOOL find_boot PROTO((const char *name, const char *ext, int fd, IBOOL errorp));
+static octet get_u8 PROTO((INT fd));
+static uptr get_uptr PROTO((INT fd, uptr *pn));
+static INT get_string PROTO((INT fd, char *s, iptr max, INT *c));
+static IBOOL find_boot PROTO((const char *name, const char *ext, IBOOL direct_pathp, int fd, IBOOL errorp));
 static void load PROTO((ptr tc, iptr n, IBOOL base));
 static void check_boot_file_state PROTO((const char *who));
 
-static IBOOL find_boot(name, ext, fd, errorp) const char *name, *ext; int fd; IBOOL errorp; {
+static IBOOL find_boot(name, ext, direct_pathp, fd, errorp) const char *name, *ext; int fd; IBOOL direct_pathp, errorp; {
   char pathbuf[PATH_MAX], buf[PATH_MAX];
   uptr n = 0;
   INT c;
   const char *path;
-#ifdef WIN32
-  wchar_t *expandedpath;
-#else
   char *expandedpath;
-#endif
-  glzFile file;
 
-  if ((fd != -1) || S_fixedpathp(name)) {
+  if ((fd != -1) || direct_pathp || S_fixedpathp(name)) {
     if (strlen(name) >= PATH_MAX) {
       fprintf(stderr, "boot-file path is too long %s\n", name);
       S_abnormal_exit();
@@ -594,22 +606,13 @@ static IBOOL find_boot(name, ext, fd, errorp) const char *name, *ext; int fd; IB
 
     path = name;
 
-    if (fd != -1) {
-      file = S_glzdopen_input(fd);
-    } else {
-#ifdef WIN32
-      expandedpath = S_malloc_wide_pathname(path);
-      file = S_glzopen_input_w(expandedpath);
-#else
+    if (fd == -1) {
       expandedpath = S_malloc_pathname(path);
-      file = S_glzopen_input(expandedpath);
-#endif
-      /* assumption (seemingly true based on a glance at the source code):
-         S_glzopen_input doesn't squirrel away a pointer to expandedpath. */
+      fd = OPEN(expandedpath, O_BINARY|O_RDONLY, 0);
       free(expandedpath);
     }
 
-    if (!file) {
+    if (fd == -1) {
       if (errorp) {
         fprintf(stderr, "cannot open boot file %s\n", path);
         S_abnormal_exit();
@@ -621,22 +624,22 @@ static IBOOL find_boot(name, ext, fd, errorp) const char *name, *ext; int fd; IB
     if (verbose) fprintf(stderr, "trying %s...opened\n", path);
 
    /* check for magic number */
-    if (S_glzgetc(file) != fasl_type_header ||
-        S_glzgetc(file) != 0 ||
-        S_glzgetc(file) != 0 ||
-        S_glzgetc(file) != 0 ||
-        S_glzgetc(file) != 'c' ||
-        S_glzgetc(file) != 'h' ||
-        S_glzgetc(file) != 'e' ||
-        S_glzgetc(file) != 'z') {
+    if (get_u8(fd) != fasl_type_header ||
+        get_u8(fd) != 0 ||
+        get_u8(fd) != 0 ||
+        get_u8(fd) != 0 ||
+        get_u8(fd) != 'c' ||
+        get_u8(fd) != 'h' ||
+        get_u8(fd) != 'e' ||
+        get_u8(fd) != 'z') {
       fprintf(stderr, "malformed fasl-object header in %s\n", path);
       S_abnormal_exit();
     }
 
    /* check version */
-    if (zget_uptr(file, &n) != 0) {
+    if (get_uptr(fd, &n) != 0) {
       fprintf(stderr, "unexpected end of file on %s\n", path);
-      S_glzclose(file);
+      CLOSE(fd);
       S_abnormal_exit();
     }
 
@@ -644,21 +647,21 @@ static IBOOL find_boot(name, ext, fd, errorp) const char *name, *ext; int fd; IB
       fprintf(stderr, "%s is for Version %s; ", path, S_format_scheme_version(n));
      /* use separate fprintf since S_format_scheme_version returns static string */
       fprintf(stderr, "need Version %s\n", S_format_scheme_version(scheme_version));
-      S_glzclose(file);
+      CLOSE(fd);
       S_abnormal_exit();
     }
 
    /* check machine type */
-    if (zget_uptr(file, &n) != 0) {
+    if (get_uptr(fd, &n) != 0) {
       fprintf(stderr, "unexpected end of file on %s\n", path);
-      S_glzclose(file);
+      CLOSE(fd);
       S_abnormal_exit();
     }
 
     if (n != machine_type) {
       fprintf(stderr, "%s is for machine-type %s; need machine-type %s\n", path,
               S_lookup_machine_type(n), S_lookup_machine_type(machine_type));
-      S_glzclose(file);
+      CLOSE(fd);
       S_abnormal_exit();
     }
   } else {
@@ -679,17 +682,10 @@ static IBOOL find_boot(name, ext, fd, errorp) const char *name, *ext; int fd; IB
         }
       }
 
-#ifdef WIN32
-      expandedpath = S_malloc_wide_pathname(path);
-      file = S_glzopen_input_w(expandedpath);
-#else
       expandedpath = S_malloc_pathname(path);
-      file = S_glzopen_input(expandedpath);
-#endif
-      /* assumption (seemingly true based on a glance at the source code):
-         S_glzopen_input doesn't squirrel away a pointer to expandedpath. */
+      fd = OPEN(expandedpath, O_BINARY|O_RDONLY, 0);
       free(expandedpath);
-      if (!file) {
+      if (fd == -1) {
         if (verbose) fprintf(stderr, "trying %s...cannot open\n", path);
         continue;
       }
@@ -697,23 +693,23 @@ static IBOOL find_boot(name, ext, fd, errorp) const char *name, *ext; int fd; IB
       if (verbose) fprintf(stderr, "trying %s...opened\n", path);
 
      /* check for magic number */
-      if (S_glzgetc(file) != fasl_type_header ||
-          S_glzgetc(file) != 0 ||
-          S_glzgetc(file) != 0 ||
-          S_glzgetc(file) != 0 ||
-          S_glzgetc(file) != 'c' ||
-          S_glzgetc(file) != 'h' ||
-          S_glzgetc(file) != 'e' ||
-          S_glzgetc(file) != 'z') {
+      if (get_u8(fd) != fasl_type_header ||
+          get_u8(fd) != 0 ||
+          get_u8(fd) != 0 ||
+          get_u8(fd) != 0 ||
+          get_u8(fd) != 'c' ||
+          get_u8(fd) != 'h' ||
+          get_u8(fd) != 'e' ||
+          get_u8(fd) != 'z') {
         if (verbose) fprintf(stderr, "malformed fasl-object header in %s\n", path);
-        S_glzclose(file);
+        CLOSE(fd);
         continue;
       }
 
      /* check version */
-      if (zget_uptr(file, &n) != 0) {
+      if (get_uptr(fd, &n) != 0) {
         if (verbose) fprintf(stderr, "unexpected end of file on %s\n", path);
-        S_glzclose(file);
+        CLOSE(fd);
         continue;
       }
 
@@ -723,14 +719,14 @@ static IBOOL find_boot(name, ext, fd, errorp) const char *name, *ext; int fd; IB
          /* use separate fprintf since S_format_scheme_version returns static string */
           fprintf(stderr, "need Version %s\n", S_format_scheme_version(scheme_version));
         }
-        S_glzclose(file);
+        CLOSE(fd);
         continue;
       }
 
      /* check machine type */
-      if (zget_uptr(file, &n) != 0) {
+      if (get_uptr(fd, &n) != 0) {
         if (verbose) fprintf(stderr, "unexpected end of file on %s\n", path);
-        S_glzclose(file);
+        CLOSE(fd);
         continue;
       }
 
@@ -738,7 +734,7 @@ static IBOOL find_boot(name, ext, fd, errorp) const char *name, *ext; int fd; IB
         if (verbose)
           fprintf(stderr, "%s is for machine-type %s; need machine-type %s\n", path,
                   S_lookup_machine_type(n), S_lookup_machine_type(machine_type));
-        S_glzclose(file);
+        CLOSE(fd);
         continue;
       }
 
@@ -748,58 +744,61 @@ static IBOOL find_boot(name, ext, fd, errorp) const char *name, *ext; int fd; IB
 
   if (verbose) fprintf(stderr, "version and machine type check\n");
 
-  if (S_glzgetc(file) != '(') {  /* ) */
+  if (get_u8(fd) != '(') {  /* ) */
     fprintf(stderr, "malformed boot file %s\n", path);
-    S_glzclose(file);
+    CLOSE(fd);
     S_abnormal_exit();
   }
 
   /* ( */
-  if ((c = S_glzgetc(file)) == ')') {
+  if ((c = get_u8(fd)) == ')') {
     if (boot_count != 0) {
       fprintf(stderr, "base boot file %s must come before other boot files\n", path);
-      S_glzclose(file);
+      CLOSE(fd);
       S_abnormal_exit();
     }
   } else {
     if (boot_count == 0) {
       for (;;) {
-        S_glzungetc(c, file);
        /* try to load heap or boot file this boot file requires */
-        if (zgetstr(file, buf, PATH_MAX) != 0) {
+        if (get_string(fd, buf, PATH_MAX, &c) != 0) {
           fprintf(stderr, "unexpected end of file on %s\n", path);
-          S_glzclose(file);
+          CLOSE(fd);
           S_abnormal_exit();
         }
-        if (find_boot(buf, ".boot", -1, 0)) break;
-        if ((c = S_glzgetc(file)) == ')') {
+        if (find_boot(buf, ".boot", 0, -1, 0)) break;
+        if (c == ')') {
           char *sep; char *wastebuf[8];
-          fprintf(stderr, "cannot find subordinate boot file ");
-          S_glzrewind(file);
-          (void) S_glzread(file, wastebuf, 8); /* magic number */
-          (void) zget_uptr(file, &n); /* version */
-          (void) zget_uptr(file, &n); /* machine type */
-          (void) S_glzgetc(file);        /* open paren */
-          for (sep = ""; ; sep = "or ") {
-            if ((c = S_glzgetc(file)) == ')') break;
-            S_glzungetc(c, file);
-            (void) zgetstr(file, buf, PATH_MAX);
+          fprintf(stderr, "cannot find subordinate boot file");
+          if (LSEEK(fd, 0, SEEK_SET) != 0 || READ(fd, wastebuf, 8) != 8) { /* attempt to rewind and read magic number */
+            fprintf(stderr, "---retry with verbose flag for more information\n");
+            CLOSE(fd);
+            S_abnormal_exit();
+          }
+          (void) get_uptr(fd, &n); /* version */
+          (void) get_uptr(fd, &n); /* machine type */
+          (void) get_u8(fd);        /* open paren */
+          c = get_u8(fd);
+          for (sep = " "; ; sep = "or ") {
+            if (c == ')') break;
+            (void) get_string(fd, buf, PATH_MAX, &c);
             fprintf(stderr, "%s%s.boot ", sep, buf);
           }
           fprintf(stderr, "required by %s\n", path);
-          S_glzclose(file);
+          CLOSE(fd);
           S_abnormal_exit();
         }
       }
     }
 
    /* skip to end of header */
-    while ((c = S_glzgetc(file)) != ')') {
+    while (c != ')') {
       if (c < 0) {
         fprintf(stderr, "malformed boot file %s\n", path);
-        S_glzclose(file);
+        CLOSE(fd);
         S_abnormal_exit();
       }
+      c = get_u8(fd);
     }
   }
 
@@ -808,21 +807,27 @@ static IBOOL find_boot(name, ext, fd, errorp) const char *name, *ext; int fd; IB
     S_abnormal_exit();
   }
 
-  bd[boot_count].file = file;
+  bd[boot_count].fd = fd;
   strcpy(bd[boot_count].path, path);
   boot_count += 1;
 
   return 1;
 }
 
-static uptr zget_uptr(glzFile file, uptr *pn) {
+static octet get_u8(INT fd) {
+  octet buf[1];
+  if (READ(fd, &buf, 1) != 1) return -1;
+  return buf[0];
+}
+
+static uptr get_uptr(INT fd, uptr *pn) {
   uptr n, m; int c; octet k;
 
-  if ((c = S_glzgetc(file)) < 0) return -1;
+  if ((c = get_u8(fd)) < 0) return -1;
   k = (octet)c;
   n = k & 0x7F;
   while (k & 128) {
-    if ((c = S_glzgetc(file)) < 0) return -1;
+    if ((c = get_u8(fd)) < 0) return -1;
     k = (octet)c;
     m = n << 7;
     if (m >> 7 != n) return -1;
@@ -832,19 +837,17 @@ static uptr zget_uptr(glzFile file, uptr *pn) {
   return 0;
 }
 
-static INT zgetstr(file, s, max) glzFile file; char *s; iptr max; {
-  ICHAR c;
-
+static INT get_string(fd, s, max, c) INT fd; char *s; iptr max; INT *c; {
   while (max-- > 0) {
-    if ((c = S_glzgetc(file)) < 0) return -1;
-    if (c == ' ' || c == ')') {
-      if (c == ')') S_glzungetc(c, file);
+    if (*c < 0) return -1;
+    if (*c == ' ' || *c == ')') {
+      if (*c == ' ') *c = get_u8(fd);
       *s = 0;
       return 0;
     }
-    *s++ = c;
+    *s++ = *c;
+    *c = get_u8(fd);
   }
-
   return -1;
 }
 
@@ -861,53 +864,52 @@ static int set_load_binary(iptr n) {
   return 0;
 }
 
+static void boot_element(ptr tc, ptr x, iptr n) {
+  if (Sprocedurep(x)) {
+    S_initframe(tc, 0);
+    x = boot_call(tc, x, 0);
+  } else if (Sprocedurep(S_G.load_binary) || set_load_binary(n)) {
+    S_initframe(tc, 1);
+    S_put_arg(tc, 1, x);
+    x = boot_call(tc, S_G.load_binary, 1);
+  } else if (Svectorp(x)) {
+    /* sequence combination by vfasl, where vectors are not nested */
+    iptr i;
+    for (i = 0; i < Svector_length(x); i++)
+      boot_element(tc, Svector_ref(x, i), n);
+  }
+}
+
 static void load(tc, n, base) ptr tc; iptr n; IBOOL base; {
   ptr x; iptr i;
 
   if (base) {
-    S_G.error_invoke_code_object = S_boot_read(bd[n].file, bd[n].path);
+    S_G.error_invoke_code_object = S_boot_read(bd[n].fd, bd[n].path);
     if (!Scodep(S_G.error_invoke_code_object)) {
       (void) fprintf(stderr, "first object on boot file not code object\n");
       S_abnormal_exit();
     }
 
-    S_G.invoke_code_object = S_boot_read(bd[n].file, bd[n].path);
+    S_G.invoke_code_object = S_boot_read(bd[n].fd, bd[n].path);
     if (!Scodep(S_G.invoke_code_object)) {
       (void) fprintf(stderr, "second object on boot file not code object\n");
       S_abnormal_exit();
     }
-    S_G.base_rtd = S_boot_read(bd[n].file, bd[n].path);
+    S_G.base_rtd = S_boot_read(bd[n].fd, bd[n].path);
     if (!Srecordp(S_G.base_rtd)) {
       S_abnormal_exit();
     }
   }
 
   i = 0;
-  while (i++ < LOADSKIP && S_boot_read(bd[n].file, bd[n].path) != Seof_object);
+  while (i++ < LOADSKIP && S_boot_read(bd[n].fd, bd[n].path) != Seof_object);
 
-  while ((x = S_boot_read(bd[n].file, bd[n].path)) != Seof_object) {
+  while ((x = S_boot_read(bd[n].fd, bd[n].path)) != Seof_object) {
     if (loadecho) {
       printf("%ld: ", (long)i);
       fflush(stdout);
     }
-    if (Sprocedurep(x)) {
-      S_initframe(tc, 0);
-      x = boot_call(tc, x, 0);
-    } else if (Sprocedurep(S_G.load_binary) || set_load_binary(n)) {
-      S_initframe(tc, 1);
-      S_put_arg(tc, 1, x);
-      x = boot_call(tc, S_G.load_binary, 1);
-    } else if (Svectorp(x)) {
-      iptr j, n;
-      n = Svector_length(x);
-      for (j = 0; j < n; j += 1) {
-        ptr y = Svector_ref(x, j);
-        if (Sprocedurep(y)) {
-          S_initframe(tc, 0);
-          INITVECTIT(x, j) = boot_call(tc, y, 0);
-        }
-      }
-    }
+    boot_element(tc, x, n);
     if (loadecho) {
       S_prin1(x);
       putchar('\n');
@@ -917,7 +919,7 @@ static void load(tc, n, base) ptr tc; iptr n; IBOOL base; {
   }
 
   S_G.load_binary = Sfalse;
-  S_glzclose(bd[n].file);
+  CLOSE(bd[n].fd);
 }
 
 /***************************************************************************/
@@ -1045,12 +1047,17 @@ static void check_boot_file_state(const char *who) {
 
 extern void Sregister_boot_file(name) const char *name; {
   check_boot_file_state("Sregister_boot_file");
-  find_boot(name, "", -1, 1);
+  find_boot(name, "", 0, -1, 1);
+}
+
+extern void Sregister_boot_direct_file(name) const char *name; {
+  check_boot_file_state("Sregister_boot_direct_file");
+  find_boot(name, "", 1, -1, 1);
 }
 
 extern void Sregister_boot_file_fd(name, fd) const char *name; int fd; {
   check_boot_file_state("Sregister_boot_file_fd");
-  find_boot(name, "", fd, 1);
+  find_boot(name, "", 1, fd, 1);
 }
 
 extern void Sregister_heap_file(UNUSED const char *path) {
@@ -1105,7 +1112,7 @@ extern void Sbuild_heap(kernel, custom_init) const char *kernel; void (*custom_i
     }
 #endif
 
-    if (!find_boot(name, ".boot", -1, 0)) {
+    if (!find_boot(name, ".boot", 0, -1, 0)) {
       fprintf(stderr, "cannot find compatible %s.boot in search path\n  \"%s%s\"\n",
               name,
               Sschemeheapdirs, Sdefaultheapdirs);
@@ -1113,7 +1120,7 @@ extern void Sbuild_heap(kernel, custom_init) const char *kernel; void (*custom_i
     }
   }
 
-  S_vfasl_boot_mode = -1; /* to static generation after compacting initial */
+  S_vfasl_boot_mode = 1; /* to static generation after compacting */
 
   if (boot_count != 0) {
     INT i = 0;
@@ -1128,7 +1135,7 @@ extern void Sbuild_heap(kernel, custom_init) const char *kernel; void (*custom_i
      * thread context and hence there is no parent thread context.  */
     tc = (ptr)THREADTC(S_create_thread_object("startup", tc));
 #ifdef PTHREADS
-    s_thread_setspecific(S_tc_key, tc);
+    s_thread_setspecific(S_tc_key, TO_VOIDP(tc));
 #endif
 
     /* #scheme-init enables interrupts */

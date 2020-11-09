@@ -33,6 +33,7 @@
          unsafe-custodian-unregister
          custodian-register-thread
          custodian-register-place
+         custodian-shutdown-root-at-exit
          raise-custodian-is-shut-down
          unsafe-add-post-custodian-shutdown
          check-queued-custodian-shutdown
@@ -115,13 +116,19 @@
 (define (do-custodian-register cust obj callback
                                #:at-exit? [at-exit? #f]
                                #:weak? [weak? #f]
+                               #:late? [late? #f]
                                #:gc-root? [gc-root? #f])
   (atomically
    (cond
      [(custodian-shut-down? cust) #f]
      [else
       (define we (and (not weak?)
-                      (host:make-will-executor void)))
+                      (if late?
+                          ;; caller is responsible for ensuring that a late
+                          ;; executor makes sense for `obj` --- especially
+                          ;; that it doesn't refer back to itself
+                          (host:make-late-will-executor void)
+                          (host:make-will-executor void))))
       (hash-set! (custodian-children cust)
                  obj
                  (cond
@@ -148,8 +155,8 @@
             (set-custodian-self-reference! cust cref)
             cref))])))
 
-(define (unsafe-custodian-register cust obj callback at-exit? weak?)
-  (do-custodian-register cust obj callback #:at-exit? at-exit? #:weak? weak?))
+(define (unsafe-custodian-register cust obj callback at-exit? weak? [late? #f])
+  (do-custodian-register cust obj callback #:at-exit? at-exit? #:weak? weak? #:late? late?))
 
 (define (custodian-register-thread cust obj callback)
   (do-custodian-register cust obj callback #:weak? #t #:gc-root? #t))
@@ -222,6 +229,10 @@
   ;; should be swapped out
   (post-shutdown-action))
 
+(define (custodian-shutdown-root-at-exit)
+  (atomically
+   (do-custodian-shutdown-all root-custodian #t)))
+
 ;; Custodians across all places that have a queued shutdown. Hold the
 ;; memory-limit lock and also disable interrupts (or OK as a GC
 ;; callback) while modifying this list:
@@ -292,13 +303,15 @@
   (eq? (custodian-place c) current-place))
 
 ;; In atomic mode
-(define (do-custodian-shutdown-all c)
+(define (do-custodian-shutdown-all c [only-at-exit? #f])
   (unless (custodian-shut-down? c)
     (set-custodian-shut-down! c)
     (when (custodian-sync-futures? c)
       (futures-sync-for-custodian-shutdown))
     (for ([(child callback) (in-hash (custodian-children c) #f)])
-      (when child
+      (when (and child
+                 (or (not only-at-exit?)
+                     (at-exit-callback? callback)))
         (if (procedure-arity-includes? callback 2)
             (callback child c)
             (callback child))))

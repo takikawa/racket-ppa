@@ -4,6 +4,8 @@
          "../path/path.rkt"
          "../path/parameter.rkt"
          "../path/directory-path.rkt"
+         "../path/cleanse.rkt"
+         (only-in "../path/windows.rkt" special-filename?)
          "../host/rktio.rkt"
          "../host/thread.rkt"
          "../host/error.rkt"
@@ -19,6 +21,7 @@
 (provide directory-exists?
          file-exists?
          link-exists?
+         file-or-directory-type
          make-directory
          directory-list
          current-force-delete-permissions
@@ -46,11 +49,40 @@
 
 (define/who (file-exists? p)
   (check who path-string? p)
-  (rktio_file_exists rktio (->host p who '(exists))))
+  (define host-path (->host p who '(exists)))
+  (cond
+    [(and (eq? 'windows (system-type))
+          (special-filename? host-path #:immediate? #f))
+     #t]
+    [else
+     (rktio_file_exists rktio host-path)]))
 
 (define/who (link-exists? p)
   (check who path-string? p)
   (rktio_link_exists rktio (->host p who '(exists))))
+
+(define/who (file-or-directory-type p [must-exist? #f])
+  (check who path-string? p)
+  (define host-path (->host p who '(exists)))
+  (cond
+    [(and (eq? 'windows (system-type))
+          (special-filename? host-path #:immediate? #f))
+     'file]
+    [else
+     (define r (rktio_file_type rktio host-path))
+     (cond
+       [(eqv? r RKTIO_FILE_TYPE_FILE) 'file]
+       [(eqv? r RKTIO_FILE_TYPE_DIRECTORY) 'directory]
+       [(eqv? r RKTIO_FILE_TYPE_LINK) 'link]
+       [(eqv? r RKTIO_FILE_TYPE_DIRECTORY_LINK) 'directory-link]
+       [else
+        (and must-exist?
+             (raise-filesystem-error who
+                                     r
+                                     (format (string-append
+                                              "access failed\n"
+                                              "  path: ~a")
+                                             (host-> host-path))))])]))
 
 (define/who (make-directory p)
   (check who path-string? p)
@@ -114,7 +146,7 @@
              [else
               (rktio_free fnp)
               (end-atomic)
-              (loop (cons (host-> fn) accum))]))])))))
+              (loop (cons (host-element-> fn) accum))]))])))))
 
 (define/who (delete-file p)
   (check who path-string? p)
@@ -344,7 +376,8 @@
 
 (define (do-resolve-path p who)
   (check who path-string? p)
-  (define host-path (->host p who '(exists)))
+  (define p-path (->path p))
+  (define host-path (->host p-path who '(exists)))
   (define host-path/no-sep (host-path->host-path-without-trailing-separator host-path))
   (start-atomic)
   (define r0 (rktio_readlink rktio host-path/no-sep))
@@ -357,10 +390,10 @@
   (cond
     [(rktio-error? r)
      ;; Errors are not reported, but are treated like non-links
-     (define new-path (host-> host-path))
+     (define new-path (cleanse-path p-path))
      ;; If cleansing didn't change p, then return an `eq?` path
      (cond
-       [(equal? new-path p) p]
+       [(equal? new-path p-path) p-path]
        [else new-path])]
     [else (host-> r)]))
 

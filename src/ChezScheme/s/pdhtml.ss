@@ -1,4 +1,3 @@
-"pdhtml.ss"
 ;;; pdhtml.ss
 ;;; Copyright 1984-2017 Cisco Systems, Inc.
 ;;;
@@ -56,6 +55,7 @@
 ;;;  source annotation around the transformer output so that the source info for t>
 ;;;  when expression is transferred to the generated if expression.
 
+(begin
 (let ()
   (include "types.ss")
   (module (make-tracker tracker-profile-ct)
@@ -74,13 +74,13 @@
       (lambda (new)
         (lambda ()
           (define sfd-hash
-            (lambda (sfd)
+            (lambda (sfd)<
               (source-file-descriptor-crc sfd)))
           (define sfd=?
             (lambda (sfd1 sfd2)
               (and (fx= (source-file-descriptor-crc sfd1) (source-file-descriptor-crc sfd2))
                    (= (source-file-descriptor-length sfd1) (source-file-descriptor-length sfd2))
-                   (string=? (source-file-descriptor-name sfd1) (source-file-descriptor-name sfd2)))))
+                   (equal? (source-file-descriptor-name sfd1) (source-file-descriptor-name sfd2)))))
           (new (make-hashtable sfd-hash sfd=?))))))
   (define *local-profile-trackers* '())
   (define op+ car)
@@ -496,9 +496,11 @@
                                     (source-file-descriptor-crc y))
                                  (= (source-file-descriptor-length x)
                                     (source-file-descriptor-length y))
-                                 (string=?
-                                   (path-last (source-file-descriptor-name x))
-                                   (path-last (source-file-descriptor-name y)))))))])
+                                 (let ([maybe-path-last (lambda (p)
+                                                          (if (string? p) (path-last p) p))])
+                                   (equal?
+                                    (maybe-path-last (source-file-descriptor-name x))
+                                    (maybe-path-last (source-file-descriptor-name y))))))))])
       (define (open-source sfd)
         (cond
           [(hashtable-ref fdata-ht sfd #f)]
@@ -622,9 +624,11 @@
                         (source-file-descriptor-crc y))
                      (= (source-file-descriptor-length x)
                         (source-file-descriptor-length y))
-                     (string=?
-                       (path-last (source-file-descriptor-name x))
-                       (path-last (source-file-descriptor-name y)))))))))
+                     (let ([maybe-path-last (lambda (p)
+                                              (if (string? p) (path-last p) p))])
+                       (string=?
+                        (maybe-path-last (source-file-descriptor-name x))
+                        (maybe-path-last (source-file-descriptor-name y))))))))))
 
     (define profile-database #f)
     (define profile-source-data? #f)
@@ -1534,4 +1538,5 @@
       (lambda (color)
         (unless (or (eq? color #f) (string? color)) ($oops who "~s is not a string or #f" color))
         color)))
+)
 )

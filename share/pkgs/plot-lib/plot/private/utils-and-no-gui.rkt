@@ -17,7 +17,8 @@
  Alphas
  Labels
  Contour-Levels
- Image-File-Format)
+ Image-File-Format
+ Legend-Anchor)
 
 (require "common/math.rkt")
 
@@ -88,6 +89,7 @@
  plot-legend-font-family
  plot-legend-anchor
  plot-legend-box-alpha
+ plot-legend-layout
  plot-decorations?
  plot-animating?
  plot-pen-color-map
@@ -150,6 +152,12 @@
  vector-field-scale
  vector-field-alpha
  vector-field3d-samples
+ arrows-color
+ arrows-line-width
+ arrows-line-style
+ arrows-alpha
+ arrow-head-size-or-scale
+ arrow-head-angle
  error-bar-width
  error-bar-color
  error-bar-line-width
@@ -161,6 +169,8 @@
  candlestick-line-width
  candlestick-line-style
  candlestick-alpha
+ color-field-samples
+ color-field-alpha
  contour-samples
  contour-levels
  contour-colors
@@ -305,4 +315,6 @@
  (struct-out plot-element)
  (struct-out nonrenderer)
  (struct-out renderer2d)
- (struct-out renderer3d))
+ empty-renderer2d
+ (struct-out renderer3d)
+ empty-renderer3d)

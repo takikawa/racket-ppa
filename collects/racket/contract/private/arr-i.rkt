@@ -83,17 +83,17 @@
       (rng-proj (blame-add-context indy-rng-blame (format "the ~a result of"
                                                           (car rng-pr))))))
   (list* c-or-i-procedure
-         (λ (val mtd?)
+         (λ (val mtd? neg-party)
            (if has-rest
                (check-procedure/more val mtd?
                                      (->i-mandatory-args ctc)
                                      (->i-mandatory-kwds ctc)
                                      (->i-opt-kwds ctc)
-                                     blame #f)
+                                     blame neg-party)
                (check-procedure val mtd?
                                 (->i-mandatory-args ctc) (->i-opt-args ctc)
                                 (->i-mandatory-kwds ctc) (->i-opt-kwds ctc)
-                                blame #f)))
+                                blame neg-party)))
          ctc
          blame swapped-blame ;; used by the #:pre and #:post checking
          (append blames
@@ -969,7 +969,7 @@ evaluted left-to-right.)
      #`(λ #,wrapper-proc-arglist
          (λ (val neg-party)
            (define blame+neg-party (cons blame neg-party))
-           (chk val #,method?)
+           (chk val #,method? neg-party)
            (c-or-i-procedure
             val
             (let ([arg-checker
@@ -985,7 +985,7 @@ evaluted left-to-right.)
                   blame+neg-party
                   (apply arg-checker args)))))
             impersonator-prop:contracted ctc
-            impersonator-prop:blame (blame-add-missing-party blame neg-party)))))))
+            impersonator-prop:blame blame+neg-party))))))
 
 (define-for-syntax (arg/res-to-indy-var indy-arg-vars ordered-args indy-res-vars ordered-ress var)
   (define (try vars ordered)

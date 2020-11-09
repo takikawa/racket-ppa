@@ -41,6 +41,15 @@
        #'(eval-when (compile load eval)
            (putprop 'x '*constant* y))))))
 
+(define-syntax define-constant-default
+  (lambda (x)
+    (syntax-case x ()
+      ((_ x y)
+       (identifier? #'x)
+       #'(eval-when (compile load eval)
+           (unless (getprop 'x '*constant* #f)
+             (putprop 'x '*constant* y)))))))
+
 (eval-when (compile load eval)
 (define lookup-constant
    (let ([flag (box #f)])
@@ -348,7 +357,7 @@
 ;; ---------------------------------------------------------------------
 ;; Version and machine types:
 
-(define-constant scheme-version #x09050320)
+(define-constant scheme-version #x09050327)
 
 (define-syntax define-machine-types
   (lambda (x)
@@ -384,11 +393,17 @@
   arm32le   tarm32le
   ppc32le   tppc32le
   arm64le   tarm64le
+  pb
 )
 
 (include "machine.def")
 
 (define-constant machine-type-name (cdr (assv (constant machine-type) (constant machine-type-alist))))
+
+(define-constant fasl-endianness
+  (constant-case architecture
+    [(pb) 'little]
+    [else (constant native-endianness)]))
 
 ;; ---------------------------------------------------------------------
 ;; Some object-layout constants:
@@ -470,8 +485,8 @@
 (define-constant fasl-type-graph-ref 18)
 (define-constant fasl-type-gensym 19)
 (define-constant fasl-type-exactnum 20)
-(define-constant fasl-type-vfasl-size 21)
-(define-constant fasl-type-fasl-size 22)
+(define-constant fasl-type-uninterned-symbol 21)
+(define-constant fasl-type-stencil-vector 22)
 (define-constant fasl-type-record 23)
 (define-constant fasl-type-rtd 24)
 (define-constant fasl-type-small-integer 25)
@@ -482,7 +497,7 @@
 (define-constant fasl-type-weak-pair 30)
 (define-constant fasl-type-eq-hashtable 31)
 (define-constant fasl-type-symbol-hashtable 32)
-; 33
+(define-constant fasl-type-phantom 33)
 (define-constant fasl-type-visit 34)
 (define-constant fasl-type-revisit 35)
 (define-constant fasl-type-visit-revisit 36)
@@ -493,11 +508,14 @@
 (define-constant fasl-type-immutable-bytevector 40)
 (define-constant fasl-type-immutable-box 41)
 
-(define-constant fasl-type-stencil-vector 42)
+(define-constant fasl-type-begin 42)
 
-(define-constant fasl-type-begin 43)
-(define-constant fasl-type-phantom 44)
-(define-constant fasl-type-uninterned-symbol 45)
+(define-constant fasl-type-uncompressed 43)
+(define-constant fasl-type-gzip 44)
+(define-constant fasl-type-lz4 45)
+
+(define-constant fasl-type-fasl 100)
+(define-constant fasl-type-vfasl 101)
 
 (define-constant fasl-type-terminator 127)
 
@@ -549,7 +567,8 @@
   (x86_64 reloc-x86_64-call reloc-x86_64-jump reloc-x86_64-popcount)
   (arm32 reloc-arm32-abs reloc-arm32-call reloc-arm32-jump)
   (arm64 reloc-arm64-abs reloc-arm64-call reloc-arm64-jump)
-  (ppc32 reloc-ppc32-abs reloc-ppc32-call reloc-ppc32-jump))
+  (ppc32 reloc-ppc32-abs reloc-ppc32-call reloc-ppc32-jump)
+  (pb reloc-pb-abs reloc-pb-proc))
 
 (constant-case ptr-bits
   [(64)
@@ -651,6 +670,14 @@
 (define-constant ERROR_NONCONTINUABLE_INTERRUPT 6)
 (define-constant ERROR_VALUES 7)
 (define-constant ERROR_MVLET 8)
+
+(define-constant open-fd-no-create   #b0000001)
+(define-constant open-fd-no-fail     #b0000010)
+(define-constant open-fd-no-truncate #b0000100)
+(define-constant open-fd-append      #b0001000)
+(define-constant open-fd-lock        #b0010000)
+(define-constant open-fd-replace     #b0100000)
+(define-constant open-fd-compressed  #b1000000)
 
 ;; ---------------------------------------------------------------------
 ;; GC constants
@@ -828,6 +855,8 @@
 ;; ---------------------------------------------------------------------
 ;; Bit and byte offsets for different types of objects:
 
+;; Flags that matter to the GC must apply only to static-generation
+;; objects, and they must not overlap with `forward-marker`
 (define-constant code-flag-system           #b0000001)
 (define-constant code-flag-continuation     #b0000010)
 (define-constant code-flag-template         #b0000100)
@@ -1161,6 +1190,12 @@
                              ,(constant-case ptr-bits
                                 [(32) 'unsigned-32]
                                 [(64) 'unsigned-64]))
+                           ;; `xptr` is the same representation as `ptr`,
+                           ;; but does not refer to a Scheme object:
+                           (xptr .
+                             ,(constant-case ptr-bits
+                                [(32) 'unsigned-32]
+                                [(64) 'unsigned-64]))
                            (void* .
                              ,(constant-case ptr-bits
                                 [(32) 'unsigned-32]
@@ -1356,7 +1391,8 @@
 (define-primitive-structure-disps ratnum type-typed-object
   ([iptr type]
    [ptr numerator]
-   [ptr denominator]))
+   [ptr denominator]
+   [iptr pad])) ; for alignment
 
 (define-primitive-structure-disps vector type-typed-object
   ([iptr type]
@@ -1400,7 +1436,8 @@
 (define-primitive-structure-disps exactnum type-typed-object
   ([iptr type]
    [ptr real]
-   [ptr imag]))
+   [ptr imag]
+   [iptr pad])) ; for alignment
 
 (define-primitive-structure-disps closure type-closure
   ([ptr code]
@@ -1460,31 +1497,33 @@
   ([iptr type] [uptr tc]))
 
 (define-constant virtual-register-count 16)
+(define-constant static-generation 7)
+(define-constant maximum-parallel-collect-threads 16)
 
 ;;; make sure gc sweeps all ptrs
 (define-primitive-structure-disps tc typemod
-  ([void* arg-regs (constant asm-arg-reg-max)]
-   [void* ac0]
-   [void* ac1]
-   [void* sfp]
-   [void* cp]
-   [void* esp]
-   [void* ap]
-   [void* eap]
-   [void* ret]
-   [void* trap]
-   [void* xp]
-   [void* yp]
-   [void* ts]
-   [void* td]
-   [void* real_eap]
+  ([xptr arg-regs (constant asm-arg-reg-max)]
+   [xptr ac0]
+   [xptr ac1]
+   [xptr sfp]
+   [xptr cp]
+   [xptr esp]
+   [xptr ap]
+   [xptr eap]
+   [xptr ret]
+   [xptr trap]
+   [xptr xp]
+   [xptr yp]
+   [xptr ts]
+   [xptr td]
+   [xptr real_eap]
    [ptr virtual-registers (constant virtual-register-count)]
    [ptr guardian-entries]
    [ptr cchain]
    [ptr code-ranges-to-flush]
    [U32 random-seed]
    [I32 active]
-   [void* scheme-stack]
+   [xptr scheme-stack]
    [ptr stack-cache]
    [ptr stack-link]
    [iptr scheme-stack-size]
@@ -1528,11 +1567,14 @@
    [ptr default-record-hash-procedure]
    [ptr compress-format]
    [ptr compress-level]
-   [void* lz4-out-buffer]
+   [xptr lz4-out-buffer]
    [U64 instr-counter]
    [U64 alloc-counter]
    [ptr parameters]
-   [double fpregs (constant asm-fpreg-max)]))
+   [ptr DSTBV]
+   [ptr SRCBV]
+   [double fpregs (constant asm-fpreg-max)]
+   [xptr gc-data]))
 
 (define tc-field-list
   (let f ([ls (oblist)] [params '()])
@@ -1677,6 +1719,8 @@
 (define-constant annotation-debug   #b0001)
 (define-constant annotation-profile #b0010)
 (define-constant annotation-all     #b0011)
+
+(define-constant fasl-omit-rtds     #b0100)
 
 (eval-when (compile load eval)
 (define flag->mask
@@ -1981,7 +2025,6 @@
 (define-constant default-collect-trip-bytes
   (expt 2 (+ 20 (constant log2-ptr-bytes))))
 (define-constant default-heap-reserve-ratio 1.0)
-(define-constant static-generation 255)
 (define-constant default-max-nonstatic-generation 4)
 
 (constant-case address-bits
@@ -2045,11 +2088,11 @@
 (define-constant unscaled-shot-1-shot-flag -1)
 (define-constant scaled-shot-1-shot-flag
   (* (constant unscaled-shot-1-shot-flag) (constant ptr-bytes)))
-;; opportunistic--1-shot-flag is in the continuation length field for
+;; opportunistic-1-shot-flag is in the continuation length field for
 ;; a one-shot continuation that is only treated a 1-shot when
 ;; it's contiguous with the current stack when called, in which case
 ;; the continuation can be just merged back with the current stack
-(define-constant opportunistic-1-shot-flag 0)
+(define-constant opportunistic-1-shot-flag (* -2 (constant ptr-bytes)))
 
 ;;; underflow limit determines how much we're willing to copy on
 ;;; stack underflow/continuation invocation
@@ -2786,6 +2829,7 @@
      (flfloor #f 1 #t #t)
      (flceiling #f 1 #t #t)
      (fltruncate #f 1 #t #t)
+     (flsingle #f 1 #t #t)
      (flsin #f 1 #t #t)
      (flcos #f 1 #t #t)
      (fltan #f 1 #t #t)
@@ -2932,3 +2976,287 @@
      flexpt
      flsqrt))
 )
+
+
+;; ---------------------------------------------------------------------
+;; Portable bytecode - see "pb.ss"
+
+(constant-case architecture
+ [(pb)
+
+  ;; Enumerated constants can be multiplied by the width of another
+  ;; enumeration, which is handy for encoding instructions:
+  (define-syntax define-pb-enum
+    (let ([gen (lambda (id scale all-enums)
+                 (let loop ([enums (cdr all-enums)] [i 0])
+                   (cond
+                     [(null? enums)
+                      #`(define-constant #,id '#,all-enums)]
+                     [else
+                      #`(begin
+                          (define-constant #,(car enums) '#,i)
+                          #,(loop (cdr enums) (fx+ i scale)))])))])
+      (lambda (stx)
+        (syntax-case stx (<<)
+          [(_ id << scale-id
+              enum ...)
+           (gen #'id
+                (let loop ([scale-sym (datum scale-id)])
+                  (if scale-sym
+                      (let ([desc (lookup-constant scale-sym)])
+                        (fx* (length (cdr desc))
+                             (loop (car desc))))
+                      1))
+                #'(scale-id enum ...))]
+          [(_ id enum ...)
+           (gen #'id
+                1
+                #'(#f enum ...))]))))
+
+  ;; Each opcode has variants that are defined by enumerations, where
+  ;; each enumeration must be scaled by a specific other enumerations
+  ;; (and we check consistency in this macro):
+  (define-syntax define-pb-opcode
+    (lambda (stx)
+      (syntax-case stx ()
+        [(_ clause ...)
+         (let c-loop ([clause* #'(clause ...)] [i 0])
+           (cond
+             [(null? clause*)
+              (unless (fx< i 256)
+                (error 'define-pb-opcode "too many combinations: ~a" i))
+              #'(begin)]
+             [else
+              (syntax-case (car clause*) ()
+                [[id field-id ...]
+                 (let ([defns
+                         (let loop ([id #'id] [field-id* #'(field-id ...)] [i i])
+                           (cond
+                             [(null? field-id*)
+                              (list #`(define-constant #,id '#,i))]
+                             [else
+                              (let* ([parent+fields (lookup-constant (syntax->datum (car field-id*)))]
+                                     [parent (car parent+fields)])
+                                (unless (if parent
+                                            (and (pair? (cdr field-id*))
+                                                 (eq? parent (syntax->datum (cadr field-id*))))
+                                            (null? (cdr field-id*)))
+                                  (syntax-error (car field-id*) "misuse use of field"))
+                                (let f-loop ([fields (cdr parent+fields)] [i i])
+                                  (cond
+                                    [(null? fields)
+                                     '()]
+                                    [else
+                                     (let ([defns (loop (datum->syntax id
+                                                                       (string->symbol (format "~a-~a" (syntax->datum id) (car fields))))
+                                                        (cdr field-id*)
+                                                        i)])
+                                       (append
+                                        defns
+                                        (f-loop (cdr fields) (fx+ i (length defns)))))])))]))])
+                   #`(begin
+                       (define-constant id '#,i)
+                       #,@defns
+                       #,(c-loop (cdr clause*) (fx+ i (length defns)))))])]))])))
+
+  ;; Most instrictions have register- and immediate-argument variants:
+  (define-pb-enum pb-argument-types
+    pb-register
+    pb-immediate)
+
+  ;; Some instructions have size variants, always combined
+  ;; with register- and immediate-argument possibilties
+  ;; -- although some combinations may be unimplemented
+  ;; or not make sense, such as immediate-arrgument operations
+  ;; on double-precision floating-point numbers
+  (define-pb-enum pb-sizes << pb-argument-types
+    pb-int8
+    pb-uint8
+    pb-int16
+    pb-uint16
+    pb-int32
+    pb-uint32
+    pb-int64
+    pb-uint64
+    pb-single
+    pb-double)
+  
+  (define-pb-enum pb-move-types
+    pb-i->i
+    pb-d->d
+    pb-i->d
+    pb-d->i
+    pb-s->d
+    pb-d->s
+    pb-d->s->d
+    pb-i-bits->d-bits     ; 64-bit only
+    pb-d-bits->i-bits     ; 64-bit only
+    pb-i-i-bits->d-bits   ; 32-bit only
+    pb-d-lo-bits->i-bits  ; 32-bit only
+    pb-d-hi-bits->i-bits) ; 32-bit only
+
+  (define-pb-enum pb-binaries << pb-argument-types
+    pb-add
+    pb-sub
+    pb-mul
+    pb-div
+    pb-subz
+    pb-and
+    pb-ior
+    pb-xor
+    pb-lsl
+    pb-lsr
+    pb-asr
+    pb-lslo)
+
+  (define-pb-enum pb-signals << pb-binaries
+    pb-no-signal
+    pb-signal)
+
+  (define-pb-enum pb-unaries << pb-argument-types
+    pb-not
+    pb-sqrt)
+
+  (define-pb-enum pb-compares << pb-argument-types
+    pb-eq
+    pb-lt
+    pb-gt
+    pb-le
+    pb-ge
+    pb-ab
+    pb-bl
+    pb-cs
+    pb-cc)
+
+  (define-pb-enum pb-branches << pb-argument-types
+    pb-fals
+    pb-true
+    pb-always)
+
+  (define-pb-enum pb-shifts
+    pb-shift0
+    pb-shift1
+    pb-shift2
+    pb-shift3)
+
+  (define-pb-enum pk-keeps << pb-shifts
+    pb-zero-bits
+    pb-keep-bits)
+
+  (define-pb-opcode
+    [pb-mov16 pk-keeps pb-shifts]
+    [pb-mov pb-move-types]
+    [pb-bin-op pb-signals pb-binaries pb-argument-types]
+    [pb-cmp-op pb-compares pb-argument-types]
+    [pb-fp-bin-op pb-binaries pb-argument-types]
+    [pb-un-op pb-unaries pb-argument-types]
+    [pb-fp-un-op pb-unaries pb-argument-types]
+    [pb-fp-cmp-op pb-compares pb-argument-types]
+    [pb-rev-op pb-sizes pb-argument-types]
+    [pb-ld-op pb-sizes pb-argument-types]
+    [pb-st-op pb-sizes pb-argument-types]
+    [pb-b-op pb-branches pb-argument-types]
+    [pb-b*-op pb-argument-types]
+    [pb-call]
+    [pb-return]
+    [pb-interp]
+    [pb-adr]
+    [pb-inc pb-argument-types]
+    [pb-lock]
+    [pb-cas])
+
+  ;; Only foreign procedures that match specific prototypes are
+  ;; supported, where each prototype must be handled in "pb.c"
+
+  (define-syntax define-pb-prototypes
+    (lambda (stx)
+      (syntax-case stx ()
+        [(moi proto ...)
+         (let loop ([proto* #'(proto ...)] [i 0] [table '()])
+           (cond
+             [(null? proto*)
+              #`(define-constant pb-prototype-table '#,(datum->syntax #'moi table))]
+             [else
+              (let* ([proto (syntax->datum (car proto*))]
+                     [name (datum->syntax
+                            #'moi
+                            (string->symbol
+                             (apply string-append "pb-call" (map (lambda (t)
+                                                                   (string-append "-" (symbol->string t)))
+                                                                 proto))))])
+                #`(begin
+                    (define-constant #,name '#,i)
+                    #,(loop (cdr proto*) (fx+ i 1) (cons (cons proto i) table))))]))])))
+
+  (define-pb-prototypes
+    [void]         ; return void
+    [void uptr]    ; return void, one `uptr` argument
+    [void int32]   ; etc.
+    [void uint32]
+    [void void*]
+    [void uptr uint32]
+    [void int32 uptr]
+    [void int32 int32]
+    [void uptr uptr]
+    [void int32 void*]
+    [void uptr void*]
+    [void void* void*]
+    [void uptr uptr uptr]
+    [void uptr uptr uptr uptr uptr]
+    [int32]
+    [int32 int32]
+    [int32 uptr]
+    [int32 void*]
+    [int32 int32 uptr]
+    [int32 uptr int32]
+    [int32 uptr uptr]
+    [int32 int32 int32]
+    [int32 int32 void*]
+    [int32 void* int32]
+    [int32 double double double double double double]
+    [int32 void* void* void* void* uptr]
+    [uint32]
+    [double double]
+    [double uptr]
+    [double double double]
+    [int32 int32]
+    [int32 int32 uptr]
+    [int32 uptr uptr uptr uptr uptr]
+    [uptr]
+    [uptr uptr]
+    [uptr int32]
+    [uptr void*]
+    [uptr uptr uptr]
+    [uptr uptr int32]
+    [uptr int32 uptr]
+    [uptr uptr int64]
+    [uptr uptr void*]
+    [uptr void* uptr]
+    [uptr void* int32]
+    [uptr void* void*]
+    [uptr uptr int32 int32]
+    [uptr uptr uptr int32]
+    [uptr uptr uptr uptr]
+    [uptr int32 int32 uptr]
+    [uptr void* int32 int32]
+    [uptr void* uptr uptr]
+    [uptr int32 uptr uptr uptr]
+    [uptr int32 int32 uptr uptr]
+    [uptr int32 void* uptr uptr]
+    [uptr uptr uptr uptr uptr]
+    [uptr int32 int32 int32 uptr]
+    [uptr uptr void* uptr uptr]
+    [uptr uptr uptr uptr uptr int32]
+    [uptr uptr uptr uptr uptr uptr]
+    [uptr void* void* void* void* uptr]
+    [uptr uptr int32 uptr uptr uptr uptr]
+    [uptr uptr uptr uptr uptr uptr uptr]
+    [uptr uptr uptr uptr uptr uptr uptr int32]
+    [uptr uptr uptr uptr uptr uptr uptr uptr]
+    [uptr double double double double double double]
+    [void*]
+    [void* uptr])
+
+  ;; end pb
+  ]
+ [else (void)])
