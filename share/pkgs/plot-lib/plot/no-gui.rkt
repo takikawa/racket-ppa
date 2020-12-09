@@ -51,6 +51,14 @@
  error-bars
  candlesticks)
 
+(require "private/plot2d/color-field.rkt")
+(provide
+ color-field)
+
+(require "private/plot2d/arrows.rkt")
+(provide
+ arrows)
+
 (require "private/plot2d/line.rkt")
 (provide
  lines
@@ -129,6 +137,10 @@
  isoline3d
  contours3d
  contour-intervals3d)
+
+(require "private/plot3d/arrows.rkt")
+(provide
+ arrows3d)
 
 (require "private/plot3d/line.rkt")
 (provide

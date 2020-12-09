@@ -47,7 +47,7 @@
      (set! aaaaa 0)
      (load "testfile.so")
      (eqv? aaaaa 7))
-   (parameterize ([compile-compressed #f])
+   (parameterize ([fasl-compressed #f])
      (printf "***** expect \"compile-file\" message:~%")
      (compile-file "testfile")
      (set! aaaaa 0)
@@ -62,7 +62,7 @@
      (load "testfile.so")
      (eqv? aaaaa -7))
    (let ((ip (open-input-string "(let ((x -3) (y -4)) (set! aaaaa (+ x y)))"))
-         (op (open-file-output-port "testfile.so" (file-options replace compressed))))
+         (op (open-file-output-port "testfile.so" (file-options replace #;compressed))))
      (compile-port ip op)
      (close-input-port ip)
      (close-port op)
@@ -98,7 +98,7 @@
       'replace)
     #t)
   (equal?
-    (call-with-port (open-file-output-port "testfile.so" (file-options replace compressed))
+    (call-with-port (open-file-output-port "testfile.so" (file-options replace #;compressed))
       (lambda (op)
         (parameterize ([compile-imported-libraries #t])
           (compile-to-port
@@ -113,7 +113,7 @@
  )
 
 (mat load-compiled-from-port
-  (begin
+  (let ()
     (define-values (o get) (open-bytevector-output-port))
     (compile-to-port '((define lcfp1 'worked) 'loaded) o)
     (eq? 'loaded (load-compiled-from-port (open-bytevector-input-port (get)))))
@@ -138,6 +138,12 @@
   (equal?
     (with-output-to-string (lambda () (printf "result = ~s\n" (revisit-compiled-from-port (open-bytevector-input-port lcfp-bv)))))
     "revisit\nvisit-revisit\nresult = revisit-return\n")
+
+  
+  (let ()
+    (define-values (o get) (open-bytevector-output-port))
+    (compile-to-port '((lambda () 'banana)) o #f #f #f (machine-type) #f (lambda (v) (eq? v 'banana)))
+    (eq? 'apple ((load-compiled-from-port (open-bytevector-input-port (get)) '#(apple)))))
 )
 
 (mat compile-to-file
@@ -861,19 +867,19 @@
       '(printf "qq => ~a\n" qq))
     (delete-file "testfile-mc-2a.so")
     (delete-file "testfile-mc-2.so")
-    (display-string (separate-compile '(lambda (x) (parameterize ([compile-file-message #f] [compile-imported-libraries #t] [compile-compressed #f]) (maybe-compile-program x))) 'mc-2))
+    (display-string (separate-compile '(lambda (x) (parameterize ([compile-file-message #f] [compile-imported-libraries #t] [fasl-compressed #f]) (maybe-compile-program x))) 'mc-2))
     #t)
   (begin
     (let ([p (open-file-input/output-port "testfile-mc-2a.so" (file-options no-create no-fail no-truncate))])
       (set-port-length! p 73)
       (close-port p))
-    (display-string (separate-compile '(lambda (x) (parameterize ([compile-file-message #f] [compile-imported-libraries #t] [compile-compressed #f] [import-notify #t]) (maybe-compile-program x))) 'mc-2))
+    (display-string (separate-compile '(lambda (x) (parameterize ([compile-file-message #f] [compile-imported-libraries #t] [fasl-compressed #f] [import-notify #t]) (maybe-compile-program x))) 'mc-2))
     #t)
   (begin
     (let ([p (open-file-input/output-port "testfile-mc-2.so" (file-options no-create no-fail no-truncate))])
       (set-port-length! p 87)
       (close-port p))
-    (display-string (separate-compile '(lambda (x) (parameterize ([compile-file-message #f] [compile-imported-libraries #t] [compile-compressed #f] [import-notify #t]) (maybe-compile-program x))) 'mc-2))
+    (display-string (separate-compile '(lambda (x) (parameterize ([compile-file-message #f] [compile-imported-libraries #t] [fasl-compressed #f] [import-notify #t]) (maybe-compile-program x))) 'mc-2))
     #t)
   ; make sure maybe-compile-file handles missing include files gracefully
   (begin
@@ -1143,7 +1149,9 @@
   ; regression test to verify that we can evaluate a foreign-callable form inside the procedure to
   ; which scheme-start is set, which was failing because its relocation information was discarded
   ; by the static-generation collection.
-  (equal?
+  (or
+   (case (machine-type) [(pb) #t] [else #f]) ; no callables in pb
+   (equal?
     (begin
       (unless (or (embedded?) (equal? *scheme* (format "../bin/~a/scheme~a" (machine-type) (if (windows?) ".exe" ""))))
         (errorf #f "not testing boot file based on ../boot/~a/petite.boot, since *scheme* isn't ../bin/~a/scheme~a"
@@ -1166,7 +1174,7 @@
           (close-input-port from-stderr)
           (unless (eof-object? err) (error 'bootfile-test2 err))
           out)))
-    "#<code>\n")
+    "#<code>\n"))
 )
 
 (mat hostop
@@ -1174,10 +1182,10 @@
     (separate-compile
       `(lambda (x)
          (call-with-port
-           (open-file-output-port (format "~a.so" x) (file-options compressed replace))
+           (open-file-output-port (format "~a.so" x) (file-options #;compressed replace))
            (lambda (op)
              (call-with-port
-               (open-file-output-port (format "~a.host" x) (file-options compressed replace))
+               (open-file-output-port (format "~a.host" x) (file-options #;compressed replace))
                (lambda (hostop)
                  (compile-to-port
                    '((library (testfile-hop1)
@@ -5191,12 +5199,12 @@ evaluating module init
     (let ()
       (define fake-concatenate-object-files
         (lambda (outfn infn . infn*)
-          (call-with-port (open-file-output-port outfn (file-options compressed replace))
+          (call-with-port (open-file-output-port outfn (file-options #;compressed replace))
             (lambda (op)
               (for-each
                 (lambda (infn)
                   (put-bytevector op
-                    (call-with-port (open-file-input-port infn (file-options compressed)) get-bytevector-all)))
+                    (call-with-port (open-file-input-port infn (file-options #;compressed)) get-bytevector-all)))
                 (cons infn infn*))))))
       (fake-concatenate-object-files "testfile-cof1fooP.so" "testfile-cof1foo.so" "testfile-cof1P.so")
       (fake-concatenate-object-files "testfile-cof1barB.so" "testfile-cof1bar.so" "testfile-cof1B.so"))
@@ -5598,6 +5606,75 @@ evaluating module init
         (collect (collect-maximum-generation))
         (let ([b3 (bytes-allocated)])
           (and (> b2 b1) (< b3 b2))))))
+  (error? ; invalid generation
+    (collect 'static 1 'static))
+  (error? ; invalid generation
+    (collect 'static 1 'static))
+  (error? ; invalid generation
+    (parameterize ([collect-maximum-generation 4])
+      (collect 17 1 17)))
+  (error? ; invalid generation
+    (collect -1 1 'static))
+  (error? ; invalid maximum target generation
+    (parameterize ([collect-maximum-generation 4])
+      (collect 3 1 2)))
+  (error? ; invalid maximum target generation
+    (parameterize ([collect-maximum-generation 4])
+      (collect 3 1 'dynamic)))
+  (error? ; invalid minimum target generation
+    (parameterize ([collect-maximum-generation 4])
+      (collect 0 0 3)))
+  (error? ; invalid minimum target generation
+    (parameterize ([collect-maximum-generation 4])
+      (collect 0 'static 3)))
+  (error? ; invalid minimum target generation
+    (parameterize ([collect-maximum-generation 4])
+      (collect 0 2 1)))
+  (error? ; invalid minimum target generation
+    (parameterize ([collect-maximum-generation 4])
+      (collect 0 2 0)))
+  (error? ; invalid minimum target generation
+    (parameterize ([collect-maximum-generation 4])
+      (collect (collect-maximum-generation) 0 'static)))
+  (error? ; invalid minimum target generation
+    (parameterize ([collect-maximum-generation 4])
+      (collect (collect-maximum-generation) -1 'static)))
+  (parameterize ([collect-maximum-generation (max (collect-maximum-generation) 2)])
+    (with-interrupts-disabled
+      (collect (collect-maximum-generation))
+      (let ([b0-0 (bytes-allocated 0)]
+            [b1-0 (bytes-allocated 1)]
+            [bm-0 (bytes-allocated (collect-maximum-generation))])
+        (let* ([v (make-vector 20000)] [n (compute-size v)])
+          (let ([b0-1 (bytes-allocated 0)]
+                [b1-1 (bytes-allocated 1)]
+                [bm-1 (bytes-allocated (collect-maximum-generation))])
+            (unless (>= (- b0-1 b0-0) n) (errorf 'oops1 "b0-0 = ~s, b0-1 = ~s, b0-2 = ~s" b0-0 b0-1 b0-2))
+            (unless (< (- b1-1 b1-0) n) (errorf 'oops2 "b1-0 = ~s, b1-1 = ~s, b1-2 = ~s" b1-0 b1-1 b1-2))
+            (unless (< (- bm-1 bm-0) n) (errorf 'oops3 "bm-0 = ~s, bm-1 = ~s, bm-2 = ~s" bm-0 bm-1 bm-2))
+            (collect (collect-maximum-generation) 1 (collect-maximum-generation))
+            (let ([b0-2 (bytes-allocated 0)]
+                  [b1-2 (bytes-allocated 1)]
+                  [bm-2 (bytes-allocated (collect-maximum-generation))])
+              (unless (< (- b0-2 b0-0) n) (errorf 'oops4 "b0-0 = ~s, b0-1 = ~s, b0-2 = ~s" b0-0 b0-1 b0-2))
+              (unless (>= (- b1-2 b1-0) n) (errorf 'oops5 "b1-0 = ~s, b1-1 = ~s, b1-2 = ~s" b1-0 b1-1 b1-2))
+              (unless (< (- bm-2 bm-0) n) (errorf 'oops6 "bm-0 = ~s, bm-1 = ~s, bm-2 = ~s" bm-0 bm-1 bm-2))
+              (parameterize ([print-vector-length #t]) (pretty-print v))
+              #t))))))
+  (parameterize ([collect-maximum-generation 4]
+                 [collect-generation-radix 4]
+                 [collect-trip-bytes (expt 2 20)])
+    (collect (collect-maximum-generation))
+    (let ([b0 (maximum-memory-bytes)])
+      (define tail-spin
+        (lambda (n)
+          (do ([i 1 (fx+ i 1)] [next (cons 0 '()) (cdr next)])
+              ((fx= i n))
+            (set-cdr! next (cons i '())))))
+      (tail-spin 50000000)
+      (let ([b1 (maximum-memory-bytes)])
+        (or (< (- b1 b0) (expt 2 24))
+            (errorf #f "b0 = ~s, b1 = ~s, b1-b0 = ~s" b0 b1 (- b1 b0))))))
  )
 
 (mat object-counts
@@ -5624,12 +5701,12 @@ evaluating module init
       (assert (assp record-type-descriptor? hc))
       #t))
   ; a few idiot checks including verification of proper behavior when changing collect-maximum-generation
-  (parameterize ([enable-object-counts #t])
+  (parameterize ([enable-object-counts #t] [collect-maximum-generation (collect-maximum-generation)])
     (pair?
       (with-interrupts-disabled
         (let ([cmg (collect-maximum-generation)])
-          (collect-maximum-generation 4)
-          (collect 4 4)
+          (collect-maximum-generation 3)
+          (collect 3 3)
           (let ()
             (define (locate type gen ls)
               (cond
@@ -5646,42 +5723,42 @@ evaluating module init
             (let ([hc (object-counts)])
               (assert (locate 'box 0 hc))
               (assert (locate (record-type-descriptor flub) 0 hc))
-              (collect-maximum-generation 7)
+              (collect-maximum-generation 6)
               (let ([hc (object-counts)])
                 (assert (locate 'box 0 hc))
                 (assert (locate (record-type-descriptor flub) 0 hc))
-                (collect 7 7)
+                (collect 6 6)
                 (let ()
                   (define q1 (make-flub q0))
                   (define b1 (box b0))
-                  (collect 6 6)
+                  (collect 5 5)
                   (let ()
                     (define q2 (make-flub q1))
                     (define b2 (box b1))
-                    (collect 5 5)
+                    (collect 4 4)
                     (let ([hc (object-counts)])
+                      (assert (locate 'box 4 hc))
                       (assert (locate 'box 5 hc))
                       (assert (locate 'box 6 hc))
-                      (assert (locate 'box 7 hc))
+                      (assert (locate (record-type-descriptor flub) 4 hc))
                       (assert (locate (record-type-descriptor flub) 5 hc))
                       (assert (locate (record-type-descriptor flub) 6 hc))
-                      (assert (locate (record-type-descriptor flub) 7 hc))
-                      (collect-maximum-generation 5)
+                      (collect-maximum-generation 4)
                       (let ([hc (object-counts)])
-                        (assert (locate 'box 5 hc))
+                        (assert (locate 'box 4 hc))
+                        (assert (not (locate 'box 5 hc)))
                         (assert (not (locate 'box 6 hc)))
-                        (assert (not (locate 'box 7 hc)))
-                        (assert (locate (record-type-descriptor flub) 5 hc))
+                        (assert (locate (record-type-descriptor flub) 4 hc))
+                        (assert (not (locate (record-type-descriptor flub) 5 hc)))
                         (assert (not (locate (record-type-descriptor flub) 6 hc)))
-                        (assert (not (locate (record-type-descriptor flub) 7 hc)))
-                        (collect 5 5)
+                        (collect 4 4)
                         (let ([hc (object-counts)])
-                          (assert (locate 'box 5 hc))
+                          (assert (locate 'box 4 hc))
+                          (assert (not (locate 'box 5 hc)))
                           (assert (not (locate 'box 6 hc)))
-                          (assert (not (locate 'box 7 hc)))
-                          (assert (locate (record-type-descriptor flub) 5 hc))
+                          (assert (locate (record-type-descriptor flub) 4 hc))
+                          (assert (not (locate (record-type-descriptor flub) 5 hc)))
                           (assert (not (locate (record-type-descriptor flub) 6 hc)))
-                          (assert (not (locate (record-type-descriptor flub) 7 hc)))
                           (collect-maximum-generation cmg)
                           (collect cmg cmg)
                           (cons q2 b2)))))))))))))

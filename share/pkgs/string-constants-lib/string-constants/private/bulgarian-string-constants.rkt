@@ -152,8 +152,8 @@
   (cs-status-expanding-expression "Проверка на синтаксиса: заместване на израз")
   (cs-status-loading-docs-index "Проверка на синтаксиса: зареждане на индекса на документацията")
   (cs-syncheck-running "Изпълнява се проверка на синтаксиса")
-  (cs-mouse-over-import "Присвояването „~s“ е внесено от „~s“")
-  (cs-mouse-over-import/library-only "внесено от „~s“")
+  (cs-mouse-over-import "Присвояването „~s“ е внесено от ~s")
+  (cs-mouse-over-import/library-only "внесено от ~s")
   (cs-view-docs "Преглед на документацията на „~a“")
   (cs-view-docs-from "~a от „~a“")  ;; a completed version of the line above
   ;; (cs-view-docs) is put into the first ~a and a list of modules (separated by commas)

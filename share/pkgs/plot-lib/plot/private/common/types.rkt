@@ -17,6 +17,7 @@
      'left        'center 'right
      'bottom-left 'bottom 'bottom-right
      'auto))
+(define-predicate anchor? Anchor)
 
 (deftype Color
   (U (List Real Real Real)
@@ -27,7 +28,7 @@
 (deftype Plot-Color
   (U Integer Color))
 
-(deftype Color-Map (Vectorof (List Byte Byte Byte))) 
+(deftype Color-Map (Vectorof (List Byte Byte Byte)))
 
 (deftype Plot-Pen-Style-Sym
   (U 'transparent 'solid    'dot 'long-dash
@@ -79,18 +80,44 @@
 (deftype (Pen-Widths A)        (List-Generator A Nonnegative-Real))
 (deftype (Plot-Brush-Styles A) (List-Generator A Plot-Brush-Style))
 (deftype (Alphas A)            (List-Generator A Nonnegative-Real))
-(deftype (Labels A)            (List-Generator A (U String #f)))
+(deftype (Labels A)            (List-Generator A (U String pict #f)))
 
 (deftype Contour-Levels (U 'auto Positive-Integer (Listof Real)))
 
 (define-type Image-File-Format
-  (U 'png 'jpeg 
-     'xbm 'xpm 'bmp 
+  (U 'png 'jpeg
+     'xbm 'xpm 'bmp
      'ps 'pdf 'svg))
 
 (deftype Legend-Draw-Proc (-> (Instance Plot-Device%) Real Real Void))
 
-(struct legend-entry ([label : String] [draw : Legend-Draw-Proc]) #:transparent)
+(struct legend-entry ([label : (U String pict)] [draw : Legend-Draw-Proc]) #:transparent)
+
+(deftype Legend-Anchor (U Anchor
+                          'no-legend
+                          'outside-global-top
+                          'outside-top-left 'outside-top 'outside-top-right
+                          'outside-left-top 'outside-left 'outside-left-bottom
+                          'outside-right-top 'outside-right 'outside-right-bottom
+                          'outside-bottom-left 'outside-bottom 'outside-bottom-right))
+(define (inside-anchor? [a : Legend-Anchor]) (anchor? a))
+(define (outside-anchor? [a : Legend-Anchor])
+  (and (not (anchor? a)) (not (eq? a 'no-legend))))
+(define (legend-anchor->anchor [a : Legend-Anchor]) : Anchor
+  (if (anchor? a)
+      a
+      (case a
+        [(outside-top-left outside-left-top) 'top-left]
+        [(outside-top outside-global-top) 'top]
+        [(outside-top-right outside-right-top) 'top-right]
+        [(outside-right) 'right]
+        [(outside-bottom-right outside-right-bottom) 'bottom-right]
+        [(outside-bottom) 'bottom]
+        [(outside-bottom-left outside-left-bottom) 'bottom-left]
+        [(outside-left) 'left]
+        [else 'auto])))
+
+(deftype Legend-Layout (List (U 'rows 'columns) Positive-Integer (U 'equal-size 'compact)))
 
 (define-type Plot-Device%
   (Class
@@ -113,9 +140,10 @@
    [set-font-size (-> Real Void)]
    [get-char-height (-> Exact-Rational)]
    [get-char-baseline (-> Exact-Rational)]
-   [get-text-extent (-> String (Values Exact-Rational Exact-Rational Exact-Rational Exact-Rational))]
-   [get-text-width (-> String Exact-Rational)]
+   [get-text-extent (-> (U String pict) (Values Exact-Rational Exact-Rational Exact-Rational Exact-Rational))]
+   [get-text-width (-> (U String pict) Exact-Rational)]
    [set-text-foreground (-> Plot-Color Void)]
+   [set-arrow-head (-> (U (List '= Nonnegative-Real) Nonnegative-Real) Nonnegative-Real Void)]
    [set-clipping-rect (-> Rect Void)]
    [clear-clipping-rect (-> Void)]
    [clear (-> Void)]
@@ -125,11 +153,12 @@
    [draw-lines (-> (Listof (Vectorof Real)) Void)]
    [draw-line (-> (Vectorof Real) (Vectorof Real) Void)]
    [draw-text (->* [String (Vectorof Real)] [Anchor Real Real Boolean] Void)]
-   [get-text-corners (->* [String (Vectorof Real)] [Anchor Real Real] (Listof (Vectorof Real)))]
+   [get-text-corners (->* [(U String pict) (Vectorof Real)] [Anchor Real Real] (Listof (Vectorof Real)))]
    [draw-arrow (-> (Vectorof Real) (Vectorof Real) Void)]
    [get-tick-endpoints (-> (Vectorof Real) Real Real (List (Vectorof Real) (Vectorof Real)))]
    [draw-tick (-> (Vectorof Real) Real Real Void)]
    [draw-arrow-glyph (-> (Vectorof Real) Real Real Void)]
    [draw-glyphs (-> (Listof (Vectorof Real)) Point-Sym Nonnegative-Real Void)]
    [draw-pict (->* [pict (Vectorof Real)] (Anchor Real) Void)]
+   [calculate-legend-rect (-> (Listof legend-entry) Rect Anchor Rect)]
    [draw-legend (-> (Listof legend-entry) Rect Void)]))
