@@ -22,7 +22,7 @@ build:
 	(cd s && $(MAKE) bootstrap)
 
 .PHONY: install
-install: build
+install:
 	$(MAKE) -f Mf-install
 
 .PHONY: uninstall
@@ -44,6 +44,19 @@ coverage:
 .PHONY: bootfiles
 bootfiles: build
 	$(MAKE) -f Mf-boot
+
+.PHONY: reset
+reset:
+	(cd s && $(MAKE) reset)
+
+%.boot:
+	mkdir -p ../boot/$*
+	$(MAKE) -f Mf-boot $*.boot
+
+%.bootquick:
+	(cd c && $(MAKE))
+	mkdir -p ../boot/$*
+	$(MAKE) -f Mf-boot $*.boot o=3 d=0 what=all
 
 .PHONY: bintar
 bintar: build

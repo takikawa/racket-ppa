@@ -712,7 +712,7 @@
      (let loop ([fill fill] [k 0] [f f] [v v] [s s])
        (match fill
          [(cons fill0 fill*)
-          (define path (append pre-path (path-add-ref k sub-path)))
+          (define path (path-append pre-path (path-add-ref k sub-path)))
           (RSbind (run/path reducer f v p s path fill0)
                   (lambda (f v _p s) (loop fill* (add1 k) f v s)))]
          ['() (RSunit f v p s)]))]))
@@ -957,13 +957,13 @@
 (define (honesty-merge-at-path hm1 path hm2)
   (define (loop hm1 path)
     (match path
-      ['() (honesty-merge hm1 hm2)]
-      [(cons 'car path)
+      [(empty-path) (honesty-merge hm1 hm2)]
+      [(path-add-car path)
        (match hm1
          [(cons hm1a hm1b) (cons (loop hm1a path) hm1b)]
          ['T (hmcons (loop 'T path) 'T)]
          ['F 'F])]
-      [(cons (? exact-positive-integer? n) path)
+      [(path-add-cdrs n path)
        (let tailloop ([hm1 hm1] [n n])
          (cond [(zero? n) (loop hm1 path)]
                [else

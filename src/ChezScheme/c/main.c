@@ -47,7 +47,7 @@ static const char *path_last(const char *p) {
   const char *s;
 #ifdef WIN32
   char c;
-  if ((c = *p) >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z')
+  if (((c = *p) >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))
     if (*(p + 1) == ':')
       p += 2;
 
@@ -128,6 +128,12 @@ int main(int argc, const char *argv[]) {
           exit(1);
         }
         Sregister_boot_file(argv[n]);
+      } else if (strcmp(arg,"-B") == 0 || strcmp(arg,"--Boot") == 0) {
+        if (++n == argc) {
+          (void) fprintf(stderr,"%s requires argument\n", arg);
+          exit(1);
+        }
+        Sregister_boot_direct_file(argv[n]);
       } else if (strcmp(arg,"--eedisable") == 0) {
   #ifdef FEATURE_EXPEDITOR
         expeditor_enable = 0;

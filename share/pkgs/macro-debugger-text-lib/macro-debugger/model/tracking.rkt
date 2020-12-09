@@ -57,12 +57,12 @@
 ;; vt-merge-at-path : Stx/VT Path VT -> VT
 (define (vt-merge-at-path vt path sub-vt)
   (let ([sub-vt (if (stx? sub-vt) (vt-base sub-vt) sub-vt)])
-    (if (equal? path null)
+    (if (equal? path (empty-path))
         sub-vt
         (match vt
           [(vt:zoom zoom-ps evt lvt)
            (match-define (vt:zoom '() sub-evt sub-lvt) sub-vt)
-           (let ([path (foldl append path zoom-ps)])
+           (let ([path (foldl path-append path zoom-ps)])
              (vt:zoom zoom-ps
                       (evt-merge-at-path evt path sub-evt)
                       (and CHECK-WITH-LAZY? (lvt-merge-at-path lvt path sub-lvt))))]
@@ -82,7 +82,7 @@
          #;(set! the-vt-error (list 'seek want vt))
          (error 'vt-seek "mismatch in results: e=> ~e, l=> ~e" e-results l-results)))
      (define (cut-prefix p) (foldr path-cut-prefix p zoom-ps))
-     (filter list? (map cut-prefix e-results))]))
+     (filter sexpr-path? (map cut-prefix e-results))]))
 
 ;; vt->stx : VT Path -> Stx
 ;; Note: ignores tracking, only uses base, patches, and zoom.
@@ -107,11 +107,11 @@
      (unless (equal? (stx->datum estx) (stx->datum (lvt->stx lvt)))
        (set! the-vt-error (list who vt))
        (error who "stx mismatch: e=> ~e, l=> ~e" (stx->datum estx) (stx->datum (lvt->stx lvt))))
-     (for ([(stx rpath) (in-hash eh)] #:when (list? rpath))
+     (for ([(stx rpath) (in-hash eh)] #:when (sexpr-path? rpath))
        (define lpaths (lvt-seek stx lvt))
-       (unless (member (reverse rpath) lpaths)
+       (unless (member (path-reverse rpath) lpaths)
          (set! the-vt-error (list who vt))
-         (error who "lookup mismatch on ~e, e=> ~e, l=> ~e" stx (reverse rpath) lpaths)))])
+         (error who "lookup mismatch on ~e, e=> ~e, l=> ~e" stx (path-reverse rpath) lpaths)))])
   vt)
 |#
 
@@ -126,7 +126,7 @@
 ;; evt-base : Stx -> EagerVT
 (define (evt-base stx)
   (define h
-    (let loop ([stx stx] [rpath null] [h '#hash()])
+    (let loop ([stx stx] [rpath (empty-path)] [h '#hash()])
       (cond [(syntax? stx)
              (let ([h (hash-set h stx rpath)])
                (cond [(syntax-armed/tainted? stx) h]
@@ -168,7 +168,7 @@
   (define (hash-forward h from to)
     (cond [(syntax? to)
            (match (hash-ref old-h from #f)
-             [(? list? rpath) (hash-set h to rpath)]
+             [(? sexpr-path? rpath) (hash-set h to rpath)]
              [(delayed from*) (hash-set h to (delayed from*))]
              ['#f h])]
           [else h]))
@@ -182,11 +182,11 @@
                          (hash-forward h from to)]
                         [else ;; arm
                          (match (hash-ref old-h from #f)
-                           [(? list? rpath) (hash-set h to rpath)]
+                           [(? sexpr-path? rpath) (hash-set h to rpath)]
                            ['#f (hash-set h to (delayed from))])])]
                  [(syntax-armed? from) ;; disarm
                   (match (hash-ref old-h from #f)
-                    [(? list? rpath) (handle-disarm from to rpath h)]
+                    [(? sexpr-path? rpath) (handle-disarm from to rpath h)]
                     [(delayed from*) (loop from* to h)]
                     ['#f h])]
                  [else ;; no arm/disarm
@@ -225,17 +225,17 @@
             (hash-add-at-path (hash-remove-with-prefix/suffix h path) path sub-h)))
 
 (define (hash-remove-with-prefix/suffix h prefix)
-  (for/fold ([h h]) ([(k rpath) (in-hash h)] #:when (list? rpath))
+  (for/fold ([h h]) ([(k rpath) (in-hash h)] #:when (sexpr-path? rpath))
     (if (rpath-prefix/suffix? prefix rpath) (hash-remove h k) h)))
 
 (define (rpath-prefix/suffix? prefix rpath)
-  (define path (reverse rpath))
+  (define path (path-reverse rpath))
   (or (path-prefix? prefix path) (path-prefix? path prefix)))
 
 (define (hash-add-at-path h prefix sub-h)
-  (define rprefix (reverse prefix))
+  (define rprefix (path-reverse prefix))
   (for/fold ([h h]) ([(k sub-rpath) (in-hash sub-h)])
-    (hash-set h k (if (list? sub-rpath) (append sub-rpath rprefix) sub-rpath))))
+    (hash-set h k (if (sexpr-path? sub-rpath) (path-append sub-rpath rprefix) sub-rpath))))
 
 ;; evt->stx : EagerVT Path -> Stx
 (define (evt->stx evt)
@@ -246,7 +246,7 @@
   (match evt
     [(vt:eager _ h)
      (match (hash-ref h want #f)
-       [(? list? rpath) (list (reverse rpath))]
+       [(? sexpr-path? rpath) (list (path-reverse rpath))]
        [_ null])]))
 
 ;; ------------------------------------------------------------
@@ -298,9 +298,9 @@
 ;; lvt-base : Stx -> LazyVT
 (define (lvt-base stx)
   (define h
-    (let loop ([stx stx] [rpath null] [h '#hasheq()])
+    (let loop ([stx stx] [rpath (empty-path)] [h '#hasheq()])
       (cond [(syntax? stx)
-             (let ([h (hash-set h stx (reverse rpath))])
+             (let ([h (hash-set h stx (path-reverse rpath))])
                (cond [(syntax-armed/tainted? stx) h]
                      [else (loop (syntax-e stx) rpath h)]))]
             [(pair? stx)
@@ -320,11 +320,11 @@
   (define (loop to from rpath)
     (cond [(syntax? to)
            (when (syntax? from)
-             (hash-set! h to (cons from (reverse rpath))))
+             (hash-set! h to (cons from (path-reverse rpath))))
            (unless (syntax-armed/tainted? to)
              (loop (syntax-e to) from rpath))]
           [(pair? to)
-           (cond [(pair? from) ;; rpath = null
+           (cond [(pair? from) ;; rpath = (empty-path)
                   (loop (car to) (car from) rpath)
                   (loop (cdr to) (cdr from) rpath)]
                  [(and (syntax? from) (syntax-armed/tainted? from))
@@ -335,7 +335,7 @@
                  [else (error 'make-track-hash "mismatch: ~e, ~e" from to)])]
           ;; FIXME: vector, box, prefab
           [else (void)]))
-  (begin (loop to from null) h))
+  (begin (loop to from (empty-path)) h))
 
 ;; lvt-merge-at-path : LazyVT Path LazyVT -> LazyVT
 (define (lvt-merge-at-path vt path sub-vt)
@@ -354,7 +354,7 @@
 
 ;; lvt-seek : Stx LazyVT -> (Listof Path)
 (define (lvt-seek want lvt)
-  (to-list (seek1 want lvt null)))
+  (to-list (seek1 want lvt (empty-path))))
 
 ;; A Seeking is (seeking Stx Path) -- represents an intermediate search point.
 (struct seeking (want narrow) #:prefab)
@@ -372,7 +372,7 @@
   (seek* (list (make-seeking want narrow)) vt))
 
 ;; seek* : Stx LazyVT Path -> (M Path)
-;; PRE: narrow is null or want is armed (or tainted)
+;; PRE: narrow is (empty-path) or want is armed (or tainted)
 (define (seek* ss vt)
   (define unique-ss (remove-duplicates ss))
   (match vt
@@ -392,7 +392,7 @@
                  (cond [(hash-ref h want #f)
                         => (match-lambda
                              [(cons want* narrow*)
-                              (return (make-seeking want* (append narrow* narrow)))])]
+                              (return (make-seeking want* (path-append narrow* narrow)))])]
                        [else (fail)]))
              unique-ss))
      (seek* next-ss in)]
@@ -415,6 +415,3 @@
                (if (path-prefix? at p) (fail) (return p)))
            (do ([p <- (seek* unique-ss to)])
                (return (path-append at p))))]))
-
-;; path-append : Path Path -> Path
-(define (path-append a b) (append a b))

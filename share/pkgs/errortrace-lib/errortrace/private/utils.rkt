@@ -1,7 +1,8 @@
 #lang racket/base
 
 (provide count-meta-levels
-         generate-key-imports)
+         generate-key-imports
+         generate-key-imports-at-phase)
 
 (define base (variable-reference->module-base-phase (#%variable-reference)))
 
@@ -19,7 +20,11 @@
     [_ 0]))
 
 
+;; generate imports for errortrace/errortrace-key at (syntax-local-phase-level)
 (define (generate-key-imports meta-depth)
+  (generate-key-imports-at-phase meta-depth (syntax-local-phase-level)))
+
+(define (generate-key-imports-at-phase meta-depth phase)
   (syntax-shift-phase-level
    (let loop ([meta-depth meta-depth])
      (let ([e ((make-syntax-introducer)
@@ -28,4 +33,4 @@
        (if (zero? meta-depth)
            e
            #`(begin #,e #,(loop (sub1 meta-depth))))))
-   (- (syntax-local-phase-level) base)))
+   (- phase base)))

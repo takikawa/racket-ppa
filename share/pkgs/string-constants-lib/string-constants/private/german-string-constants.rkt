@@ -125,8 +125,8 @@
  (cs-status-expanding-expression "Syntaxprüfung: Ausdruck expandieren")
  (cs-status-loading-docs-index "Syntaxprüfung: Dokumentations-Index laden")
  (cs-syncheck-running "Syntaxprüfung läuft")
- (cs-mouse-over-import "Bindung „~s“ importiert aus „~s“")
- (cs-mouse-over-import/library-only "importiert aus „~s“")
+ (cs-mouse-over-import "Bindung „~s“ importiert aus ~s")
+ (cs-mouse-over-import/library-only "importiert aus ~s")
  
 
  (cs-view-docs "Dokumentation für „~a“ anschauen")
