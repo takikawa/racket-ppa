@@ -1,8 +1,8 @@
 racket (7.9+dfsg1-1) UNRELEASED; urgency=medium
 
-  * Update to new upstream version 7.9+dfsg1.
+  * New upstream release
 
- -- David Bremner <bremner@debian.org>  Sat, 24 Jul 2021 21:05:11 -0300
+ -- David Bremner <bremner@debian.org>  Tue, 08 Dec 2020 20:39:05 -0400
 
 racket (7.8+dfsg1-1) unstable; urgency=medium
 
