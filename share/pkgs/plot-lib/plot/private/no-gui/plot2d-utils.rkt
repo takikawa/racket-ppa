@@ -12,7 +12,7 @@
          "utils.rkt"
          typed/racket/unsafe)
 
-(provide get-renderer-list get-bounds-rect get-ticks)
+(provide get-renderer-list get-bounds-rect get-ticks get-legend-entry-list)
 (unsafe-provide plot-area)
 
 (: get-renderer-list (-> Any (Listof renderer2d)))
@@ -20,7 +20,7 @@
   (cond [(list? renderer-tree)  (append* (map get-renderer-list renderer-tree))]
         [(nonrenderer? renderer-tree)
          (match-define (nonrenderer bounds-rect bounds-fun ticks-fun) renderer-tree)
-         (list (renderer2d bounds-rect bounds-fun ticks-fun #f))]
+         (list (renderer2d bounds-rect bounds-fun ticks-fun #f #f))]
         [(renderer2d? renderer-tree)
          (list renderer-tree)]
         [else
@@ -68,18 +68,28 @@
 (define (plot-area area renderer-list)
   (send area start-plot)
   
-  (define legend-entries
-    (flatten-legend-entries
-     (for/list : (Listof (Treeof legend-entry)) ([rend  (in-list renderer-list)])
-       (match-define (renderer2d rend-bounds-rect _bf _tf render-proc) rend)
-       (send area start-renderer (if rend-bounds-rect
-                                     (rect-inexact->exact rend-bounds-rect)
-                                     (unknown-rect 2)))
-       (if render-proc (render-proc area) empty))))
+  (for ([rend  (in-list renderer-list)])
+    (match-define (renderer2d rend-bounds-rect _bf _tf label-proc render-proc) rend)
+    (when render-proc
+      (send area start-renderer (if rend-bounds-rect
+                                    (rect-inexact->exact rend-bounds-rect)
+                                    (unknown-rect 2)))
+      (render-proc area)))
   
   (send area end-renderers)
-  
-  (when (not (empty? legend-entries))
-    (send area draw-legend legend-entries))
-  
   (send area end-plot))
+
+(: get-legend-entry-list (-> (Listof renderer2d) Rect (Listof legend-entry)))
+(define (get-legend-entry-list renderer-list outer-rect)
+  (match-define (vector (ivl  x-min  x-max) (ivl  y-min  y-max)) outer-rect)
+
+  (cond
+    [(and x-min x-max y-min y-max)
+     (flatten-legend-entries
+      (for*/list : (Listof (Treeof legend-entry))
+        ([rend  (in-list renderer-list)]
+         [label-proc (in-value (renderer2d-label rend))]
+         #:when label-proc)
+        ;; clipping not necessary, levels are always calculated on the complete bounds-rect
+        (label-proc outer-rect)))]
+    [else '()]))

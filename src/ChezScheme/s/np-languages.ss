@@ -616,6 +616,7 @@
   (declare-primitive sll value #t)
   (declare-primitive srl value #t)
   (declare-primitive sra value #t)
+  (declare-primitive slol value #t) ; runtime-detemined endianness only: shift toward lo byte
   (declare-primitive zext8 value #t)
   (declare-primitive zext16 value #t)
   (declare-primitive zext32 value #t) ; 64-bit only
@@ -628,6 +629,7 @@
   (declare-primitive fpt value #t)
   (declare-primitive fpsqrt value #t) ; not implemented for some ppc32 (so we don't use it)
   (declare-primitive fptrunc value #t)
+  (declare-primitive fpsingle value #t)
   (declare-primitive double->single value #t) ; not required by cpnanopass
   (declare-primitive single->double value #t) ; not required by cpnanopass
 
@@ -843,9 +845,10 @@
       (- (mvset info (mdcl (maybe t0) t1 ...) (t* ...) ((x** ...) interface* l*) ...))
       (+ (do-rest fixed-args)
          (mvset info (mdcl (maybe t0) t1 ...) (t* ...) ((x** ...) ...) ebody)
-         ; mventry-point can appear only within an mvset ebody
+         ; mventry-point and mverror-point can appear only within an mvset ebody
          ; ideally, grammar would reflect this
-         (mventry-point (x* ...) l))))
+         (mventry-point (x* ...) l)
+         (mverror-point))))
 
   (define-language L12.5 (extends L12)
     (entry Program)

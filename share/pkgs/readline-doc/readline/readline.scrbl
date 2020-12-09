@@ -166,7 +166,7 @@ defaults to @racket[100].}
 A parameter. If @racket[#f] (the default), then when a line is equal
 to a previous one, the previous one is removed.  If it set to
 @racket['unconsecutive] then this happens only for an line that
-duplicates the previous one, and if it is @racket[#f] then all
+duplicates the previous one, and if it is @racket[#t] then all
 duplicates are kept.}
 
 

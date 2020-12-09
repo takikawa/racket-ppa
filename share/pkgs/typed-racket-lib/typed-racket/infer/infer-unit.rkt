@@ -753,7 +753,7 @@
          (define type
            (for/or ([t (in-list (list -Byte -Index -NonNegFixnum -Nat))])
              (and (subtype S t) t)))
-         (cgen/seq context (seq (list type) -null-end) ts*)]
+         (and type (cgen/seq context (seq (list type) -null-end) ts*))]
         [((or (Mutable-HashTable: k v)
               (Immutable-HashTable: k v)
               (Weak-HashTable: k v))
@@ -845,7 +845,7 @@
           (Immutable-HashTable: t1 t2))
          ;; for immutable hash tables, covariant
          (% cset-meet (cg s1 t1) (cg s2 t2))]
-        [((Struct-Property: t1) (Struct-Property: t2))
+        [((Struct-Property: t1 _) (Struct-Property: t2 _))
          (cg t2 t1)]
         [((Mutable-HashTable: s1 s2)
           (Mutable-HashTable: t1 t2))

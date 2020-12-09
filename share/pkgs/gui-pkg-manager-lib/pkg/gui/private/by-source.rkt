@@ -85,7 +85,9 @@
            [parent source-panel] 
            [min-width 600]
            [label (~a sc-install-pkg-source-label ":")]
-           [callback (λ (_1 _2) 
+           [callback (λ (_1 _2)
+                       (when (regexp-match? #rx"\n" (send tf get-value))
+                         (send tf set-value (regexp-replace* #rx"\n" (send tf get-value) "")))
                        (save-tf!)
                        (adjust-all))]))
     (send tf set-value (or text-field-initial-value 

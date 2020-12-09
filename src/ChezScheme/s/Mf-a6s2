@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-m = a6s2
+m ?= a6s2
 archincludes = x86_64.ss
 
 include Mf-base

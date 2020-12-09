@@ -4,7 +4,9 @@
          "../basic.rkt"
          "../manual-struct.rkt"
          (only-in "../core.rkt" 
-                  make-style make-table-columns)
+                  make-style
+                  make-table-columns
+                  content?)
          "../html-properties.rkt"
          "qsloc.rkt"
          "manual-utils.rkt"
@@ -17,6 +19,7 @@
          "on-demand.rkt"
          scheme/string
          scheme/list
+         racket/contract
          (for-syntax racket/base
                      syntax/parse)
          (for-label racket/base
@@ -126,10 +129,12 @@
     [(_ v)  #'(racketblock0 v)]))
 
 (begin-for-syntax
- (define-splicing-syntax-class kind-kw
-   #:description "#:kind keyword"
-   (pattern (~optional (~seq #:kind kind)
-                       #:defaults ([kind #'#f]))))
+  (define-splicing-syntax-class kind-kw
+    #:attributes (kind) ;; Expr[String/#f]
+    #:description "#:kind keyword"
+    (pattern (~optional (~seq #:kind k))
+             #:declare k (expr/c #'(or/c content? #f) #:name "#:kind argument")
+             #:with kind #'(~? k.c #f)))
 
  (define-splicing-syntax-class value-kw
    #:description "#:value keyword"
@@ -233,7 +238,7 @@
                     [(eq? (arg-id arg) '_...superclass-args...) (to-element (arg-id arg))]
                     [else (to-element (make-var-id (arg-id arg)))])]
            [e (if (arg-ends-optional? arg)
-                (make-element #f (list e "]"))
+                (make-element #f (list e (racketoptionalfont "]")))
                 e)]
            [num-closers (- (arg-depth arg) next-depth)]
            [e (if (zero? num-closers)
@@ -241,7 +246,7 @@
                 (make-element
                  #f (list e (make-closers num-closers))))])
       (if (and show-opt-start? (arg-starts-optional? arg))
-        (make-element #f (list "[" e))
+        (make-element #f (list (racketoptionalfont "[") e))
         e)))
   (define (prototype-depth p)
     (let loop ([p (car p)])
@@ -511,7 +516,7 @@
                    (if one-ok?
                        (list*
                         (if (arg-starts-optional? (car args))
-                            (to-flow (make-element #f (list spacer "[")))
+                            (to-flow (make-element #f (list spacer (racketoptionalfont "["))))
                             flow-spacer)
                         (to-flow ((arg->elem #f) (car args) (next-args-depth (cdr args))))
                         not-end)
@@ -530,7 +535,7 @@
                                 (flow-spacer/n 3)
                                 flow-spacer)
                             (if (arg-starts-optional? (car args))
-                                (to-flow (make-element #f (list spacer "[")))
+                                (to-flow (make-element #f (list spacer (racketoptionalfont "["))))
                                 flow-spacer)
                             (let ([a ((arg->elem #f) (car args) (next-args-depth (cdr args)))]
                                   [next (if dots-next?

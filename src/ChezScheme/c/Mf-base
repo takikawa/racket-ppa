@@ -35,13 +35,13 @@ KernelLib=../boot/$m/libkernel.a
 KernelLibLinkDeps=${zlibDep} ${LZ4Dep}
 KernelLibLinkLibs=${zlibLib} ${LZ4Lib}
 
-kernelsrc=statics.c segment.c alloc.c symbol.c intern.c gcwrapper.c gc-ocd.c gc-oce.c\
+kernelsrc=statics.c segment.c alloc.c symbol.c intern.c gcwrapper.c gc-011.c gc-par.c gc-ocd.c gc-oce.c\
  number.c schsig.c io.c new-io.c print.c fasl.c vfasl.c stats.c foreign.c prim.c prim5.c flushcache.c\
  schlib.c thread.c expeditor.c scheme.c compress-io.c random.c
 
 kernelobj=${kernelsrc:%.c=%.$o} ${mdobj}
 
-kernelhdr=system.h types.h version.h globals.h externs.h segment.h gc.c sort.h thread.h config.h compress-io.h itest.c nocurses.h popcount.h
+kernelhdr=system.h types.h version.h globals.h externs.h segment.h atomic.h gc.c sort.h thread.h config.h compress-io.h itest.c nocurses.h popcount.h
 
 mainsrc=main.c
 
@@ -54,24 +54,26 @@ source: ${kernelsrc} ${kernelhdr} ${mdsrc} ${mainsrc}
 ${Main}: ${mainobj}
 	cp -p ${mainobj} ${Main}
 
-rootsrc=$(shell cd ../../c; echo *)
+rootsrc=$(shell cd "${upupsrcdir}"/c; echo *)
 ${rootsrc}:
 ifeq ($(OS),Windows_NT)
-	cp -p ../../c/$@ $@
+	cp -p "${upupsrcdir}"/c/$@ $@
 else
-	ln -s ../../c/$@ $@
+	ln -s "${upupsrcdir}"/c/$@ $@
 endif
 
 scheme.o: itest.c
 scheme.o main.o: config.h
-${kernelobj}: system.h types.h version.h externs.h globals.h segment.h thread.h sort.h compress-io.h nocurses.h popcount.h
+${kernelobj}: system.h types.h version.h externs.h globals.h segment.h atomic.h thread.h config.h sort.h compress-io.h nocurses.h popcount.h
 ${kernelobj}: ${Include}/equates.h ${Include}/scheme.h
 ${mainobj}: ${Include}/scheme.h
 ${kernelobj}: ${zlibHeaderDep} ${LZ4HeaderDep}
-gc-ocd.o gc-oce.o: gc.c
-gc-ocd.o: ${Include}/gc-ocd.inc
+gc-011.o gc-par.o gc-ocd.o gc-oce.o: gc.c
+gc-011.o gc-ocd.o: ${Include}/gc-ocd.inc
 gc-oce.o: ${Include}/gc-oce.inc
+gc-par.o: ${Include}/gc-par.inc
 vfasl.o: ${Include}/vfasl.inc
+gcwrapper.o: ${Include}/heapcheck.inc
 
 ../zlib/zlib.h ../zlib/zconf.h: ../zlib/configure.log
 

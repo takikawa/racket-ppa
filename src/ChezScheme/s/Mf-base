@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+include Mf-config
+
 MAKEFLAGS += --no-print-directory
 
 # the following flags control various compiler options.  flags prefixed by an x
@@ -33,8 +35,8 @@ i = f
 # cp0 determines the number of cp0 (source optimizer) iterations run
 cp0 = 2
 
-# cc determines whether compiled files are compressed
-cc = t
+# fc determines whether fasl objects are compressed
+fc = t
 
 # xf determines the compression foramt
 xf = (compress-format)
@@ -104,13 +106,17 @@ endif
 
 ProfileDumpSource = source.pd
 ProfileDumpBlock = block.pd
-PetiteBoot = ../boot/$m/petite.boot
-SchemeBoot = ../boot/$m/scheme.boot
+PetiteBootRel = boot/$m/petite.boot
+PetiteBoot = ../${PetiteBootRel}
+SchemeBootRel = boot/$m/scheme.boot
+SchemeBoot = ../${SchemeBootRel}
 Cheader = ../boot/$m/scheme.h
 Cequates = ../boot/$m/equates.h
 Cgcocd = ../boot/$m/gc-ocd.inc
 Cgcoce = ../boot/$m/gc-oce.inc
+Cgcpar = ../boot/$m/gc-par.inc
 Cvfasl = ../boot/$m/vfasl.inc
+Cheapcheck = ../boot/$m/heapcheck.inc
 Revision = ../boot/$m/revision
 
 # The following controls the patch files loaded before compiling, typically used only
@@ -167,11 +173,11 @@ allsrc =\
  np-languages.ss fxmap.ss
 
 # doit uses a different Scheme process to compile each target
-doit: ${PetiteBoot} ${SchemeBoot} ${Cheader} ${Cequates} ${Cgcocd} ${Cgcoce} ${Cvfasl} ${Revision}
+doit: ${PetiteBoot} ${SchemeBoot} ${Cheader} ${Cequates} ${Cgcocd} ${Cgcoce} ${Cgcpar} ${Cvfasl} ${Cheapcheck} ${Revision}
 
 # all uses a single Scheme process to compile all targets.  this is typically
 # faster when most of the targets need to be recompiled.
-all: bootall ${Cheader} ${Cequates} ${Cgcocd} ${Cgcoce} ${Cvfasl} ${Revision}
+all: bootall ${Cheader} ${Cequates} ${Cgcocd} ${Cgcoce} ${Cgcpar} ${Cvfasl} ${Cheapcheck} ${Revision}
 
 # allx runs all up to three times and checks to see if the new boot file is the
 # same as the last, i.e., the system is properly bootstrapped.
@@ -228,7 +234,7 @@ clean: profileclean
              '(optimize-level $o)'\
              '(debug-level $d)'\
              '(commonization-level $(cl))'\
-             '(compile-compressed #$(cc))'\
+             '(fasl-compressed #$(fc))'\
              '(compress-format $(xf))'\
              '(compress-level $(xl))'\
              '(when #$p (compile-profile (quote source)))'\
@@ -257,7 +263,7 @@ clean: profileclean
              '(optimize-level $o)'\
              '(debug-level $d)'\
              '(commonization-level $(cl))'\
-             '(compile-compressed #$(cc))'\
+             '(fasl-compressed #$(fc))'\
              '(compress-format $(xf))'\
              '(compress-level $(xl))'\
              '(when #$p (compile-profile (quote source)))'\
@@ -289,7 +295,7 @@ clean: profileclean
              '(optimize-level $o)'\
              '(debug-level $d)'\
              '(commonization-level $(cl))'\
-             '(compile-compressed #$(cc))'\
+             '(fasl-compressed #$(fc))'\
              '(compress-format $(xf))'\
              '(compress-level $(xl))'\
              '(generate-inspector-information #$i)'\
@@ -302,7 +308,7 @@ clean: profileclean
              '(optimize-level $o)'\
              '(debug-level $d)'\
              '(commonization-level $(cl))'\
-             '(compile-compressed #$(cc))'\
+             '(fasl-compressed #$(fc))'\
              '(compress-format $(xf))'\
              '(compress-level $(xl))'\
              '(when #$(xp) (compile-profile (quote source)))'\
@@ -347,13 +353,24 @@ resetbootlinks:
 	-@echo '(reset-handler abort)'\
                '(for-each'\
                   '(lambda (fn)'\
-                     '(let ([fn (symbol->string fn)])'\
+                     '(let ([fn (format "../~a" fn)]'\
+                           '[bn (format "$upupbootdir/~a" fn)]'\
+                           '[q  (integer->char 34)])'\
                         '(unless (file-symbolic-link? fn)'\
-                           '(when (guard (c [else #f]) (#%$$fasl-file-equal? (format "../~a" fn) fn))'\
-                              '(system (format "ln -sf ../../~a ~a" fn fn))'\
+                           '(when (guard (c [else #f]) (#%$$fasl-file-equal? bn fn))'\
+                              '(system (format "ln -sf ~a~a~a ~a" q fn q fn))'\
                               '(void)))))'\
-                  '(list (quote ${SchemeBoot}) (quote ${PetiteBoot})))'\
+                  '(list (quote ${SchemeBootRel}) (quote ${PetiteBootRel})))'\
              | ${Scheme} -q
+
+keepbootfiles:
+	for x in `echo scheme.boot petite.boot scheme.h equates.h gc-oce.inc gc-ocd.inc gc-par.inc vfasl.inc heapcheck.inc` ; do\
+          if [ ! -h ../boot/$(m)/$$x ] ; then \
+            mv -f ../boot/$(m)/$$x ../../boot/$(m)/$$x ;\
+          elif [ "${upupupbootdir}" != "../../.." ] ; then \
+            cp ../boot/$(m)/$$x ../../boot/$(m)/$$x ;\
+          fi ;\
+        done
 
 ${PetiteBoot}: ${macroobj} ${patchfile} ${baseobj}
 	echo '(reset-handler abort)'\
@@ -378,7 +395,7 @@ cmacros.so: cmacros.ss machine.def layout.ss
              '(optimize-level $o)'\
              '(debug-level $d)'\
              '(commonization-level $(cl))'\
-             '(compile-compressed #$(cc))'\
+             '(fasl-compressed #$(fc))'\
              '(compress-format $(xf))'\
              '(compress-level $(xl))'\
              '(generate-inspector-information #$i)'\
@@ -393,7 +410,7 @@ priminfo.so: priminfo.ss primdata.ss cmacros.so
              '(optimize-level $o)'\
              '(debug-level $d)'\
              '(commonization-level $(cl))'\
-             '(compile-compressed #$(cc))'\
+             '(fasl-compressed #$(fc))'\
              '(compress-format $(xf))'\
              '(compress-level $(xl))'\
              '(generate-inspector-information #$i)'\
@@ -409,7 +426,7 @@ mkheader.so: mkheader.ss cmacros.so primvars.so env.so
              '(optimize-level $o)'\
              '(debug-level $d)'\
              '(commonization-level $(cl))'\
-             '(compile-compressed #$(cc))'\
+             '(fasl-compressed #$(fc))'\
              '(compress-format $(xf))'\
              '(compress-level $(xl))'\
              '(generate-inspector-information #$i)'\
@@ -424,7 +441,7 @@ mkgc.so: mkgc.ss mkheader.so cmacros.so primvars.so env.so
              '(optimize-level 0)'\
              '(debug-level $d)'\
              '(commonization-level $(cl))'\
-             '(compile-compressed #$(cc))'\
+             '(fasl-compressed #$(fc))'\
              '(compress-format $(xf))'\
              '(compress-level $(xl))'\
              '(generate-inspector-information #$i)'\
@@ -439,7 +456,7 @@ nanopass.so: $(shell echo ../nanopass/nanopass/*) ../nanopass/nanopass.ss
              '(optimize-level $o)'\
              '(debug-level $d)'\
              '(commonization-level $(cl))'\
-             '(compile-compressed #$(cc))'\
+             '(fasl-compressed #$(fc))'\
              '(compress-format $(xf))'\
              '(compress-level $(xl))'\
              '(generate-inspector-information #$i)'\
@@ -449,12 +466,12 @@ nanopass.so: $(shell echo ../nanopass/nanopass/*) ../nanopass/nanopass.ss
              '(compile-library "../nanopass/nanopass.ss" "nanopass.so")'\
              | ${Scheme} -q --libdirs "../nanopass${dirsep}${dirsep}." --compile-imported-libraries
 
-rootsrc = $(shell cd ../../s; echo *)
+rootsrc = $(shell cd "${upupsrcdir}"/s; echo *)
 ${rootsrc}:
 ifeq ($(OS),Windows_NT)
-	cp -p ../../s/$@ $@
+	cp -p "${upupsrcdir}"/s/$@ $@
 else
-	ln -s ../../s/$@ $@
+	ln -s "${upupsrcdir}"/s/$@ $@
 endif
 
 script.all: Mf-base
@@ -465,7 +482,7 @@ script.all makescript:
              '(optimize-level $o)'\
              '(debug-level $d)'\
              '(commonization-level $(cl))'\
-             '(compile-compressed #$(cc))'\
+             '(fasl-compressed #$(fc))'\
              '(compress-format $(xf))'\
              '(compress-level $(xl))'\
              '(when #$p (compile-profile (quote source)))'\
@@ -508,7 +525,7 @@ script-static.all:
              '(optimize-level $o)'\
              '(debug-level $d)'\
              '(commonization-level $(cl))'\
-             '(compile-compressed #$(cc))'\
+             '(fasl-compressed #$(fc))'\
              '(compress-format $(xf))'\
              '(compress-level $(xl))'\
              '(when #$p (compile-profile (quote source)))'\
@@ -537,7 +554,7 @@ script-dynamic.all:
              '(optimize-level $o)'\
              '(debug-level $d)'\
              '(commonization-level $(cl))'\
-             '(compile-compressed #$(cc))'\
+             '(fasl-compressed #$(fc))'\
              '(compress-format $(xf))'\
              '(compress-level $(xl))'\
              '(when #$p (compile-profile (quote source)))'\
@@ -579,6 +596,7 @@ setup.so: debug.ss
 
 ${patchobj}: ${macroobj} nanopass.so base-lang.ss expand-lang.ss primref.ss types.ss io-types.ss fasl-helpers.ss hashtable-types.ss env.ss
 cpnanopass.$m cpnanopass.patch: nanopass.so np-languages.ss fxmap.ss ${archincludes}
+cptypes.$m: fxmap.ss
 5_4.$m: ../unicode/unicode-char-cases.ss ../unicode/unicode-charinfo.ss
 
 ${Cheader}: mkheader.so ${macroobj} nanopass.so base-lang.ss expand-lang.ss primref.ss types.ss io-types.ss fasl-helpers.ss hashtable-types.ss
@@ -617,6 +635,15 @@ ${Cgcoce}: mkgc.so ${macroobj} nanopass.so base-lang.ss expand-lang.ss primref.s
           then mv -f ${Cgcoce}.bak ${Cgcoce};\
           else rm -f ${Cgcoce}.bak; fi)
 
+${Cgcpar}: mkgc.so ${macroobj} nanopass.so base-lang.ss expand-lang.ss primref.ss types.ss io-types.ss fasl-helpers.ss hashtable-types.ss
+	(if [ -r ${Cgcpar} ]; then mv -f ${Cgcpar} ${Cgcpar}.bak; fi)
+	echo '(reset-handler abort)'\
+             '(mkgc-par.inc "${Cgcpar}")' |\
+         ${Scheme} -q ${macroobj} mkheader.so mkgc.so
+	(if `cmp -s ${Cgcpar} ${Cgcpar}.bak`;\
+          then mv -f ${Cgcpar}.bak ${Cgcpar};\
+          else rm -f ${Cgcpar}.bak; fi)
+
 ${Cvfasl}: mkgc.so ${macroobj} nanopass.so base-lang.ss expand-lang.ss primref.ss types.ss io-types.ss fasl-helpers.ss hashtable-types.ss
 	(if [ -r ${Cvfasl} ]; then mv -f ${Cvfasl} ${Cvfasl}.bak; fi)
 	echo '(reset-handler abort)'\
@@ -625,6 +652,15 @@ ${Cvfasl}: mkgc.so ${macroobj} nanopass.so base-lang.ss expand-lang.ss primref.s
 	(if `cmp -s ${Cvfasl} ${Cvfasl}.bak`;\
           then mv -f ${Cvfasl}.bak ${Cvfasl};\
           else rm -f ${Cvfasl}.bak; fi)
+
+${Cheapcheck}: mkgc.so ${macroobj} nanopass.so base-lang.ss expand-lang.ss primref.ss types.ss io-types.ss fasl-helpers.ss hashtable-types.ss
+	(if [ -r ${Cheapcheck} ]; then mv -f ${Cheapcheck} ${Cheapcheck}.bak; fi)
+	echo '(reset-handler abort)'\
+             '(mkheapcheck.inc "${Cheapcheck}")' |\
+         ${Scheme} -q ${macroobj} mkheader.so mkgc.so
+	(if `cmp -s ${Cheapcheck} ${Cheapcheck}.bak`;\
+          then mv -f ${Cheapcheck}.bak ${Cheapcheck};\
+          else rm -f ${Cheapcheck}.bak; fi)
 
 .PHONY: ${Revision}
 ${Revision}: update-revision
@@ -639,3 +675,20 @@ prettyclean:
 
 profileclean: prettyclean
 	rm -f ${ProfileDumpSource} ${ProfileDumpBlock}
+
+.PHONY: reset
+reset:
+	$(MAKE) reset-one FILE=petite.boot
+	$(MAKE) reset-one FILE=scheme.boot
+	$(MAKE) reset-one FILE=equates.h
+	$(MAKE) reset-one FILE=scheme.h
+	$(MAKE) reset-one FILE=gc-oce.inc
+	$(MAKE) reset-one FILE=gc-ocd.inc
+	$(MAKE) reset-one FILE=gc-par.inc
+	$(MAKE) reset-one FILE=vfasl.inc
+	$(MAKE) reset-one FILE=heapcheck.inc
+
+.PHONY: reset-one
+reset-one:
+	if [ -f ../boot/${m}/${FILE} ] ; then rm ../boot/${m}/${FILE} ; fi
+	if [ ! -h ../boot/${m}/${FILE} ] ; then ln -s "${upupupbootdir}"/boot/${m}/${FILE} ../boot/${m}/${FILE} ; fi

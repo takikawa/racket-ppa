@@ -23,10 +23,10 @@
          #:x-max (or/c real? #f)
          #:y-min (or/c real? #f)
          #:y-max (or/c real? #f)
-         #:title (or/c string? #f)
-         #:x-label (or/c string? #f)
-         #:y-label (or/c string? #f)
-         #:legend-anchor anchor/c]
+         #:title (or/c string? pict? #f)
+         #:x-label (or/c string? pict? #f)
+         #:y-label (or/c string? pict? #f)
+         #:legend-anchor legend-anchor/c]
         void?)]
    [untyped-plot-bitmap
     (->* [(treeof (or/c renderer2d? nonrenderer?))]
@@ -34,12 +34,12 @@
           #:x-max (or/c real? #f)
           #:y-min (or/c real? #f)
           #:y-max (or/c real? #f)
-          #:title (or/c string? #f)
+          #:title (or/c string? pict? #f)
           #:height (or/c real? #f)
           #:width (or/c real? #f)
-          #:x-label (or/c string? #f)
-          #:y-label (or/c string? #f)
-          #:legend-anchor anchor/c]
+          #:x-label (or/c string? pict? #f)
+          #:y-label (or/c string? pict? #f)
+          #:legend-anchor legend-anchor/c]
          (is-a?/c bitmap%))]
     [untyped-plot-pict
      (->* [(treeof (or/c renderer2d? nonrenderer?))]
@@ -47,12 +47,12 @@
            #:x-max (or/c real? #f)
            #:y-min (or/c real? #f)
            #:y-max (or/c real? #f)
-           #:title (or/c string? #f)
-           #:x-label (or/c string? #f)
+           #:title (or/c string? pict? #f)
+           #:x-label (or/c string? pict? #f)
            #:height (or/c real? #f)
            #:width (or/c real? #f)
-           #:y-label (or/c string? #f)
-           #:legend-anchor anchor/c]
+           #:y-label (or/c string? pict? #f)
+           #:legend-anchor legend-anchor/c]
           pict?)]))
 
 (define untyped-plot/dc plot/dc)

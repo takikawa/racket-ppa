@@ -1013,7 +1013,7 @@ macro expansion in the current definition context.
 In a @tech{syntax transformer} that runs in a non-expression context
 and forces the expansion of subforms with @racket[local-expand], use
 @racket[syntax-local-identifier-as-binding] on an identifier from the
-expansion before moving it into a binding position or comparing with
+expansion before moving it into a binding position or comparing it
 with @racket[bound-identifier=?]. Otherwise, the results can be
 inconsistent with the way that @racket[define] works in the same
 definition context.
@@ -1521,7 +1521,7 @@ Returns @racket[#t] if @racket[v] has the
                    [protect? any/c]
                    [orig-stx syntax?])]{
 
-A structure representing a single imported identifier:
+A structure representing a single exported identifier:
 
 @itemize[
 

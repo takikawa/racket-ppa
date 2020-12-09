@@ -457,10 +457,11 @@ hardwired to return @racket[null]. }
                                [in-compile-handler? boolean? #t])
           syntax?]{
   Adds the property @racket['errortrace:annotate] to everywhere inside
-  @racket[stx], expands it and then calls @racketout[annotate-top] with the result.
+  @racket[stx], and expands it.
   If @racket[stx] is a module (but not named @racketidfont{errortrace-key}
   module nor a @tech[#:doc '(lib "scribblings/reference/reference.scrbl")]{cross-phase persistent} module),
-  inserts appropriate requires to the @racketidfont{errortrace-key} module.
+  calls @racketout[annotate-top] with the expanded code and inserts appropriate requires
+  to the @racketidfont{errortrace-key} module.
 
   If @racket[in-compile-handler?] is true, also calls @racket[namespace-require]
   to load @racketidfont{errortrace-key}.

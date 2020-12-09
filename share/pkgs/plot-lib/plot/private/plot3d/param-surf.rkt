@@ -1,6 +1,7 @@
 #lang typed/racket/base
 
 (require typed/racket/class racket/match racket/list
+         (only-in typed/pict pict)
          plot/utils
          "../common/type-doc.rkt"
          "../common/utils.rkt")
@@ -12,31 +13,27 @@
                              Plot-Color Plot-Brush-Style
                              Plot-Color Nonnegative-Real Plot-Pen-Style
                              Nonnegative-Real
-                             (U #f String)
                              3D-Render-Proc))
-(define ((polygons3d-render-proc vs-fun color style line-color line-width line-style alpha label)
+(define ((polygons3d-render-proc vs-fun color style line-color line-width line-style alpha)
          area)
   (send area put-alpha alpha)
   (send area put-brush color style)
   (send area put-pen line-color line-width line-style)
   (for ([v (in-list (vs-fun))])
-    (send area put-polygon v))
-  
-  (cond [label  (rectangle-legend-entry label color style line-color line-width line-style)]
-        [else   empty]))
+    (send area put-polygon v)))
 
 (: polygons3d-renderer (-> (-> (Listof (Listof (Vectorof Real))))
                            (U #f Real) (U #f Real) (U #f Real) (U #f Real) (U #f Real) (U #f Real)
                            Plot-Color Plot-Brush-Style
                            Plot-Color Nonnegative-Real Plot-Pen-Style
                            Nonnegative-Real
-                           (U #f String)
+                           (U String pict #f)
                            renderer3d))
 (define (polygons3d-renderer vs-thnk x-min x-max y-min y-max z-min z-max
                              color style line-color line-width line-style alpha label)
   (define rvs (filter vrational? (apply append (vs-thnk))))
   (cond
-    [(empty? rvs) (renderer3d #f #f #f #f)]
+    [(empty? rvs) empty-renderer3d]
     [else
      (match-define (list (vector #{rxs : (Listof Real)}
                                  #{rys : (Listof Real)}
@@ -52,8 +49,9 @@
        (renderer3d (vector (ivl x-min x-max)(ivl y-min y-max)(ivl z-min z-max))
                    #f ;surface3d-bounds-fun
                    default-ticks-fun
+                   (and label (λ (_) (rectangle-legend-entry label color style line-color line-width line-style)))
                    (polygons3d-render-proc vs-thnk
-                                           color style line-color line-width line-style alpha label)))]))
+                                           color style line-color line-width line-style alpha)))]))
 (:: polygons3d
     (->* [(Sequenceof (Sequenceof (Sequenceof Real)))]
          [#:x-min (U #f Real) #:x-max (U #f Real)
@@ -65,7 +63,7 @@
           #:line-width Nonnegative-Real
           #:line-style Plot-Pen-Style
           #:alpha Nonnegative-Real
-          #:label (U #f String)]
+          #:label (U String pict #f)]
          renderer3d))
 (define (polygons3d vs
                     #:x-min [x-min #f] #:x-max [x-max #f]
@@ -109,7 +107,7 @@
           #:line-width Nonnegative-Real
           #:line-style Plot-Pen-Style
           #:alpha Nonnegative-Real
-          #:label (U #f String)]
+          #:label (U String pict #f)]
          renderer3d))
 (define (parametric-surface3d f s-min s-max t-min t-max
                               #:x-min [x-min #f] #:x-max [x-max #f]

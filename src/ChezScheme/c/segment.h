@@ -15,9 +15,11 @@
  */
 
 #ifdef WIN32
+# undef FORCEINLINE
 # ifndef __MINGW32__
-#  undef FORCEINLINE
 #  define FORCEINLINE static __forceinline
+# else
+#  define FORCEINLINE static __attribute__((__always_inline__)) inline
 # endif
 #else
 #define FORCEINLINE static inline
@@ -25,31 +27,31 @@
 
 /* segment_info */
 
-#define SEGMENT_T1_SIZE (1<<segment_t1_bits)
+#define SEGMENT_T1_SIZE ((uptr)1<<segment_t1_bits)
 #define SEGMENT_T1_IDX(i) ((i)&(SEGMENT_T1_SIZE-1))
 
 #ifdef segment_t3_bits
 
-#define SEGMENT_T2_SIZE (1<<segment_t2_bits)
+#define SEGMENT_T2_SIZE ((uptr)1<<segment_t2_bits)
 #define SEGMENT_T2_IDX(i) (((i)>>segment_t1_bits)&(SEGMENT_T2_SIZE-1))
-#define SEGMENT_T3_SIZE (1<<segment_t3_bits)
+#define SEGMENT_T3_SIZE ((uptr)1<<segment_t3_bits)
 #define SEGMENT_T3_IDX(i) ((i)>>(segment_t2_bits+segment_t1_bits))
 
 FORCEINLINE seginfo *SegInfo(uptr i) {
-  return S_segment_info[SEGMENT_T3_IDX(i)]->t2[SEGMENT_T2_IDX(i)]->t1[SEGMENT_T1_IDX(i)];
+  return AS_IMPLICIT_ATOMIC(seginfo *, S_segment_info[SEGMENT_T3_IDX(i)]->t2[SEGMENT_T2_IDX(i)]->t1[SEGMENT_T1_IDX(i)]);
 }
 
 FORCEINLINE seginfo *MaybeSegInfo(uptr i) {
   t2table *t2i; t1table *t1i;
-  if ((t2i = S_segment_info[SEGMENT_T3_IDX(i)]) == NULL) return NULL;
-  if ((t1i = t2i->t2[SEGMENT_T2_IDX(i)]) == NULL) return NULL;
-  return t1i->t1[SEGMENT_T1_IDX(i)];
+  if ((t2i = AS_IMPLICIT_ATOMIC(t2table *, S_segment_info[SEGMENT_T3_IDX(i)])) == NULL) return NULL;
+  if ((t1i = AS_IMPLICIT_ATOMIC(t1table *, t2i->t2[SEGMENT_T2_IDX(i)])) == NULL) return NULL;
+  return AS_IMPLICIT_ATOMIC(seginfo *, t1i->t1[SEGMENT_T1_IDX(i)]);
 }
 
 #else /* segment_t3_bits */
 #ifdef segment_t2_bits
 
-#define SEGMENT_T2_SIZE (1<<segment_t2_bits)
+#define SEGMENT_T2_SIZE ((uptr)1<<segment_t2_bits)
 #define SEGMENT_T2_IDX(i) ((i)>>segment_t1_bits)
 #define SEGMENT_T3_SIZE 0
 
