@@ -239,8 +239,8 @@
   (cs-status-expanding-expression "Vérificateur de syntaxe : expansion d'une expression")
   (cs-status-loading-docs-index "Vérificateur de syntaxe : chargement de l'index de la documentation")
   (cs-syncheck-running "Vérificateur de syntaxe en cours d'exécution")
-  (cs-mouse-over-import "l'identificateur « ~s » est importé de « ~s »")
-  (cs-mouse-over-import/library-only "importé de « ~s »")
+  (cs-mouse-over-import "l'identificateur « ~s » est importé de ~s")
+  (cs-mouse-over-import/library-only "importé de ~s")
   (cs-view-docs "Documentation pour « ~a »")
   (cs-view-docs-from "~a dans ~a")  ;; a completed version of the line above
   ;; (cs-view-docs) is put into the first ~a and a list of modules (separated by commas)

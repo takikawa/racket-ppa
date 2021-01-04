@@ -69,7 +69,7 @@
              "https://planet-compats.racket-lang.org")]
       ['default-scope "user"]
       ['installation-name (version)]
-      ['download-cache-dir (build-path (find-system-path 'addon-dir)
+      ['download-cache-dir (build-path (find-system-path 'cache-dir)
                                        "download-cache")]
       ['download-cache-max-files 1024]
       ['download-cache-max-bytes (* 64 1024 1024)]
@@ -133,7 +133,7 @@
 (define (default-pkg-scope)
   (match (default-pkg-scope-as-string)
     ["installation" 'installation]
-    [else 'user]))
+    [_ 'user]))
 (define (default-pkg-scope-as-string)
   (read-pkg-cfg/def 'default-scope))
 

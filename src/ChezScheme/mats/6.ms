@@ -887,6 +887,26 @@
  )
 
 (mat fasl
+  (error?
+    (separate-eval '(let ([op (open-file-output-port "testfile.ss" (file-options compressed replace))])
+                      (fasl-write 3 op))))
+  (error?
+    (separate-eval '(let ([ip (open-file-input-port "testfile.ss" (file-options compressed))])
+                      (fasl-read ip))))
+  (equal?
+    (separate-eval '(with-exception-handler
+                      (lambda (c) (unless (warning? c) (raise-continuable c)))
+                      (lambda ()
+                        (let ([op (open-file-output-port "testfile.ss" (file-options compressed replace))])
+                          (fasl-write 3 op)))))
+    "")
+  (equal?
+    (separate-eval `(with-exception-handler
+                      (lambda (c) (unless (warning? c) (raise-continuable c)))
+                      (lambda ()
+                        (let ([ip (open-file-input-port "testfile.ss" (file-options compressed))])
+                          (fasl-read ip)))))
+    "3\n")
   (pretty-equal?
     (begin
       (call-with-port
@@ -926,10 +946,10 @@
           (open-file-input-port "testfile.ss")
           (get-stuff fasl-read))
         (call-with-port
-          (open-file-input-port "testfile.ss" (file-options compressed))
+          (open-file-input-port "testfile.ss" (file-options #;compressed))
           (get-stuff fasl-read))
         (call-with-port
-          (open-file-input-port "testfile.ss" (file-options compressed))
+          (open-file-input-port "testfile.ss" (file-options #;compressed))
           (get-stuff (lambda (p)
                        (when (eof-object? (lookahead-u8 p)) (printf "done\n"))
                        (fasl-read p))))
@@ -973,6 +993,18 @@
           (weak-pair? (cddr ls))
           (weak-pair? (cdddr ls)))))
     '(#t #f #t #t #f #t))
+
+  (error? (fasl-write 'any (let-values ([(o get) (open-bytevector-output-port)]) o) '#()))
+  (error? (fasl-write 'any (let-values ([(o get) (open-bytevector-output-port)]) o) 10))
+  (error? (fasl-read (open-bytevector-input-port #vu8()) 'load #f))
+  (error? (fasl-read (open-bytevector-input-port #vu8()) 'load 10))
+  
+  (let-values ([(o get) (open-bytevector-output-port)])
+    (fasl-write '(apple (banana cream pie) (vector coconut banana cream)) o (lambda (v)
+                                                                              (or (eq? v 'banana)
+                                                                                  (eq? v 'coconut))))
+    (equal? '(apple (B cream pie) (vector C B cream))
+            (fasl-read (open-bytevector-input-port (get)) 'load '#(B C))))
 )
 
 (mat fasl-depth
@@ -2964,7 +2996,7 @@
   (and (eqv? (get-mode "../mats") (get-mode "../mats/"))
        (eqv? (get-mode "../mats") (get-mode "../mats/.")))
   ; access times are unreliable on contemporary file systems
-  (time? (file-access-time "../../mats/mat.ss"))
+  (time? (file-access-time "mat.ss"))
   (time<=? (file-change-time "mat.ss") (file-change-time "mat.so"))
   (time<=? (file-modification-time "mat.ss") (file-modification-time "mat.so"))
   (equal?

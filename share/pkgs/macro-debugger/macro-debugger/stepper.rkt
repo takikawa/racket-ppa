@@ -73,7 +73,7 @@
  [expand-module/step
   (-> module-path? void?)]
  [macro-stepper-repl
-  (->* [any/c] [#:eval? any/c] any)])
+  (->* [] [any/c #:eval? any/c] any)])
 
 (module+ main
   (require racket/cmdline

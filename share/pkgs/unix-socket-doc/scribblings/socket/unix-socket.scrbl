@@ -83,6 +83,10 @@ when a client connection is ready to be accepted (see
 listener itself.
 }
 
+@defproc[(unix-socket-close-listener [listener unix-socket-listener?]) void?]{
+Closes a unix socket listener.  The socket file must be deleted separately (e.g. using @racket[delete-file].)
+}
+
 @defproc[(unix-socket-accept [listener unix-socket-listener?])
          (values input-port? output-port?)]{
 

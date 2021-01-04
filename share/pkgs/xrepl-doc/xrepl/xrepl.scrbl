@@ -113,7 +113,7 @@ available.
 }
 
 @defcmd[describe]{
-  For each of the specified names, describe where where it is coming
+  For each of the specified names, describe where it is coming
   from and how it was defined if it names a known binding.  In addition,
   describe the module (list its imports and exports) that is named by
   arguments that are known module names.

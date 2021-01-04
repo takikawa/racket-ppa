@@ -1,5 +1,6 @@
 #lang at-exp racket/base
-(require racket/dict
+(require racket/contract
+         racket/dict
          racket/format
          racket/path
          compiler/compilation-path         
@@ -12,6 +13,7 @@
   (require rackunit))
 
 (define version-bytes (string->bytes/utf-8 (version)))
+(define vm-bytes (string->bytes/utf-8 (symbol->string (system-type 'vm))))
 
 (define-logger quickscript)
 
@@ -59,14 +61,16 @@
        (string-append "End  : " str ". Took " (number->string (- (current-milliseconds) ms)) "ms")))))
 
 (define props-default
-  `((label . "My Script 1") ; Should be mandatory
-    (menu-path . ())
-    (shortcut . #f)
-    (shortcut-prefix . #f) ; should be (get-default-shortcut-prefix), but this depends on gui/base
-    (help-string . "My amazing script")
-    (output-to . selection) ; outputs the result in a new tab
-    (persistent? . #f)
-    (os-types . (unix macosx windows)) ; list of supported os types
+  `((name             . #f)
+    (filepath         . #f)
+    (label            . "My Script 1") ; Should be mandatory
+    (menu-path        . ())
+    (shortcut         . #f)
+    (shortcut-prefix  . #f) ; should be (get-default-shortcut-prefix), but this depends on gui/base
+    (help-string      . "My amazing script")
+    (output-to        . selection) ; outputs the result in a new tab
+    (persistent?      . #f)
+    (os-types         . (unix macosx windows)) ; list of supported os types
     ))
 
 (define this-os-type (system-type 'os))
@@ -108,7 +112,8 @@
   (and (dict? v)
        (dict-has-key? v 'label)))
 
-;; Returns a list of dictionaries of the properties of the scripts in script-filename.
+;; Returns a list of dictionaries of the properties of the scripts in script-filename,
+;; augmented with the scripts' function and the script filepath.
 ;; IMPORTANT: Loads the file in the current namespace, so a new namespace should probably
 ;; be created with (make-base-empty-namespace).
 ;; script-filename : path-string?
@@ -122,8 +127,14 @@
             (for/list ([fun (in-list funs)])
               (define maybe-props (dynamic-require the-submod fun))
               (and (property-dict? maybe-props)
-                   (cons fun maybe-props)))))
+                   (list*
+                    (cons 'name fun)
+                    (cons 'filepath script-filepath)
+                    maybe-props)))))
   property-dicts)
+
+(define (prop-dict-ref props key)
+  (dict-ref props key (dict-ref props-default key)))
 
 (module+ test
   (require racket/file)
@@ -146,24 +157,28 @@
       (values (get-property-dicts filepath)
               (get-script-help-string filepath))))
   (check = (length prop-dicts) 1)
-  (define props (cdr (car prop-dicts)))
-  (define proc-sym2 (car (car prop-dicts)))
+  (define props (car prop-dicts))
   (check string=?
          (dict-ref props 'label)
          label)
   (check eq?
-         proc-sym
-         proc-sym2)
+         (prop-dict-ref props 'name)
+         proc-sym)
   (check string=?
-         help-str
-         help-str2)
-  )
+         help-str2
+         help-str))
 
 ;===================;
 ;=== Compilation ===;
 ;===================;
 
-(define (compile-user-scripts files)
+;; TODO: Use `compile-directory-zos` instead, with the directories of the
+;; library and the exclusion files.
+;; This will allow to recompile the dependencies (as for shadow scripts)
+;; while avoiding compiling deactivated scripts.
+
+(define/contract (compile-user-scripts files)
+  (-> (listof path-string?) any)
   ; Docs say generates a compiled file in the "compiled" directory
   ; (thus not in the "compile d/errortrace" directory).
   (define my-compiler (compile-zos #f #:module? #t))
@@ -175,11 +190,15 @@
 ; https://github.com/racket/racket/blob/master/racket/src/expander/compile/read-linklet.rkt#L9
 ; and 'get-cached-compiled':
 ; https://github.com/racket/racket/blob/master/racket/src/expander/run/cache.rkt#L76
-(define (zo-version source-file)
+(define/contract (zo-version source-or-zo-file)
+  (-> path-string? (or/c #f (list/c bytes? bytes?)))
   ; We (only) use "compiled" as modes, because by default DrRacket would place zos in
   ; compiled/errortrace, but the compile-zos used in compile-user-scripts places them in
   ; "compiled".
-  (define zo-file (get-compilation-bytecode-file source-file #:modes '("compiled")))
+  (define zo-file
+    (if (path-has-extension? source-or-zo-file #".zo")
+      source-or-zo-file
+      (get-compilation-bytecode-file source-or-zo-file #:modes '("compiled"))))
   (and (file-exists? zo-file)
        (parameterize ([read-accept-compiled #t])
          (call-with-input-file*
@@ -187,9 +206,14 @@
            (lambda (in)
              (read-bytes 2 in) ; consume "#~"
              (define vers-len (min 63 (read-byte in)))
-             (read-bytes vers-len in))))))
+             (define vers (read-bytes vers-len in))
+             (define vm-len (min 63 (read-byte in)))
+             (define vm (read-bytes vm-len in))
+             (list vers vm))))))
 
 ;; Is the zo file for the given source file having the same version as
 ;; the current (dr)racket one?
-(define (compiled-for-current-version? source-file)
-  (equal? version-bytes (zo-version source-file)))
+(define/contract (compiled-for-current-version? source-file)
+  (-> path-string? boolean?)
+  (equal? (list version-bytes vm-bytes)
+          (zo-version source-file)))

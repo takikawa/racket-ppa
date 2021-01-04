@@ -52,21 +52,33 @@ by @racket[kind], which must be one of the following:
  the current executable is used as the home directory.}
 
  @item{@indexed-racket['pref-dir] --- the standard directory for
- storing the current user's preferences. On Unix, the directory is
- @filepath{.racket} in the @tech{user's home directory}.  On Windows,
- it is @filepath{Racket} in the @tech{user's home directory} if
- determined by @envvar{PLTUSERHOME}, otherwise in the user's
- application-data folder as specified by the Windows registry; the
- application-data folder is usually @filepath{Application Data} in the
- user's profile directory. On Mac OS, the preferences directory
- is @filepath{Library/Preferences} in the
- @tech{user's home directory}. The preferences directory might not exist.}
+ storing the current user's preferences. The preferences directory
+ might not exist.
+
+ On Unix, the preferences directory is normally the @filepath{racket}
+ subdirectory of the path specified by
+ @indexed-envvar{XDG_CONFIG_HOME}, or @filepath{.config/racket} in the
+ @tech{user's home directory} if @envvar{XDG_CONFIG_HOME} is not set
+ to an absolute path or if @envvar{PLTUSERHOME} is set. Either way, if
+ that directory does not exist but a @filepath{.racket} directory
+ exists in the @tech{user's home directory}, then that directory is
+ the preference directory, instead.
+
+ On Windows, the preferences directory is @filepath{Racket} in the
+ @tech{user's home directory} if determined by @envvar{PLTUSERHOME},
+ otherwise in the user's application-data folder as specified by the
+ Windows registry; the application-data folder is usually
+ @filepath{Application Data} in the user's profile directory.
+
+ On Mac OS, the preferences directory is
+ @filepath{Library/Preferences} in the @tech{user's home directory}.}
 
  @item{@indexed-racket['pref-file] --- a file that contains a
  symbol-keyed association list of preference values. The file's
  directory path always matches the result returned for
  @racket['pref-dir]. The file name is @filepath{racket-prefs.rktd} on Unix
- and Windows, and it is @filepath{org.racket-lang.prefs.rktd} on Mac OS. The file's directory might not exist. See also
+ and Windows, and it is @filepath{org.racket-lang.prefs.rktd} on Mac OS.
+ The file's directory might not exist. See also
  @racket[get-preference].}
 
  @item{@indexed-racket['temp-dir] --- the standard directory for
@@ -80,20 +92,33 @@ by @racket[kind], which must be one of the following:
 
  @item{@indexed-racket['init-dir] --- the directory containing the
  initialization file used by the Racket executable.
- It is the same as the @tech{user's home directory}.}
+
+ On Unix, the initialization directory is the same as the result
+ returned for @racket['pref-dir]---unless that directory does not
+ exist and a @filepath{.racketrc} file exists in the @tech{user's home
+ directory}, in which case the home directory is the initialization
+ directory.
+
+ On Windows, the initialization directory is the same as the
+ @tech{user's home directory}.
+
+ On Mac OS, the initialization directory is @filepath{Library/Racket}
+ in the @tech{user's home directory}---unless no
+ @filepath{racketrc.rktl} exists there and a @filepath{.racketrc} file
+ does exist in the home directory, in which case the home directory is
+ the initialization directory.}
 
  @item{@indexed-racket['init-file] --- the file loaded at start-up by
  the Racket executable. The directory part of the
- path is the same path as returned for @racket['init-dir].  The file
- name is platform-specific:
+ path is the same path as returned for @racket['init-dir].
 
-  @itemize[
+ On Windows, the file part of the name is
+ @indexed-file{racketrc.rktl}.
 
-  @item{@|AllUnix|: @indexed-file{.racketrc}}
-
-  @item{Windows: @indexed-file{racketrc.rktl}}
-
-  ]}
+ On Unix and Mac OS, the file part of the name is
+ @indexed-file{racketrc.rktl}---unless the path returned for
+ @racket['init-dir] is the @tech{user's home directory}, in which case
+ the file part of the name is @indexed-file{.racketrc}.}
 
  @item{@indexed-racket['config-dir] --- a directory for
  the installation's configuration. This directory is specified by the
@@ -119,10 +144,39 @@ by @racket[kind], which must be one of the following:
  @indexed-envvar{PLTADDONDIR} environment variable, and it can be
  overridden by the @DFlag{addon} or @Flag{A} command-line flag.  If no
  environment variable or flag is specified, or if the value is not a
- legal path name, then this directory defaults to
- @filepath{Library/Racket} in the @tech{user's home directory} on Mac
- OS and @racket['pref-dir] otherwise.  The directory might not
- exist.}
+ legal path name, then this directory defaults to a platform-specific
+ locations. The directory might not exist.
+
+ On Unix, the default is normally the @filepath{racket} subdirectory
+ of the path specified by @indexed-envvar{XDG_DATA_HOME}, or
+ @filepath{.local/share/racket} in the @tech{user's home directory} if
+ @envvar{XDG_CONFIG_HOME} is not set to an absolute path or if
+ @envvar{PLTUSERHOME} is set. If that directory does not exists but a
+ @filepath{.racket} directory exists in the user's home directory,
+ that the @filepath{.racket} directory path is the default, instead.
+
+ On Windows, the default is the same as the @racket['pref-dir] directory.
+
+ On Mac OS, the default is @filepath{Library/Racket} within the
+ @tech{user's home directory}.}
+
+ @item{@indexed-racket['cache-dir] --- a directory for storing
+ user-specific caches. The directory might not exist.
+
+ On Unix, the cache directory is normally the @filepath{racket}
+ subdirectory of the path specified by
+ @indexed-envvar{XDG_CACHE_HOME}, or @filepath{.cache/racket} in the
+ @tech{user's home directory} if @envvar{XDG_CACHE_HOME} is not set to
+ an absolute path or if @envvar{PLTUSERHOME} is set. If that directory
+ does not exist but a @filepath{.racket} directory exists in the home
+ directory, then the @filepath{.racket} directory is the cache
+ directory, instead.
+
+ On Windows, the cache directory is the same as the result returned
+ for @racket['addon-dir].
+
+ On Mac OS, the cache directory is @filepath{Library/Caches/Racket}
+ within the @tech{user's home directory}.}
 
  @item{@indexed-racket['doc-dir] --- the standard directory for
  storing the current user's documents. On Unix, it's
@@ -191,7 +245,11 @@ by @racket[kind], which must be one of the following:
 
 @history[#:changed "6.0.0.3" @elem{Added @envvar{PLTUSERHOME}.}
          #:changed "6.9.0.1" @elem{Added @racket['host-config-dir]
-                                   and @racket['host-collects-dir].}]}
+                                   and @racket['host-collects-dir].}
+         #:changed "7.8.0.9" @elem{Added @racket['cache-dir], and changed
+                                   to use XDG directories as preferred on Unix
+                                   with the previous paths as a fallback, and
+                                   with similar adjustments for Mac OS.}]}
 
 @defproc[(path-list-string->path-list [str (or/c string? bytes?)]
                                       [default-path-list (listof path?)])
@@ -284,6 +342,21 @@ On Windows, @racket[link-exists?] reports @racket[#t] for both
 symbolic links and junctions.
 
 @history[#:changed "6.0.1.12" @elem{Added support for links on Windows.}]}
+
+
+@defproc[(file-or-directory-type [path path-string?] [must-exist? any/c #f])
+         (or/c 'file 'directory 'link 'directory-link #f)]{
+
+Reports whether @racket[path] refers to a file, directory, link, or
+directory link (in the case of Windows; see also
+@racket[make-file-or-directory-link]), assuming that @racket[path] can
+be accessed.
+
+If @racket[path] cannot be accessed, the result is @racket[#f] if
+@racket[must-exist?] is @racket[#f], otherwise the
+@exnraise[exn:fail:filesystem].
+
+@history[#:added "7.8.0.5"]}
 
 
 @defproc[(delete-file [path path-string?]) void?]{
@@ -472,10 +545,15 @@ successfully,the @exnraise[exn:fail:filesystem].
 
 On Windows XP and earlier, the @exnraise[exn:fail:unsupported]. On
 later versions of Windows, the creation of links tends to be
-disallowed by security policies. Furthermore, a relative-path link is
-parsed specially; see @secref["windowspaths"] for more information.
-When @racket[make-file-or-directory-link] succeeds, it creates a symbolic
-link as opposed to a junction.
+disallowed by security policies. Windows distinguishes between file
+and directory links, and a directory link is created only if
+@racket[to] parses syntactically as a directory (see
+@racket[path->directory-path]). Furthermore, a relative-path link is
+parsed specially by the operating system; see @secref["windowspaths"]
+for more information. When @racket[make-file-or-directory-link]
+succeeds, it creates a symbolic link as opposed to a junction or hard
+link. Beware that directory links must be deleted using
+@racket[delete-directory] instead of @racket[delete-file].
 
 @history[#:changed "6.0.1.12" @elem{Added support for links on Windows.}]}
 

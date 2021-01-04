@@ -4,6 +4,7 @@
          racket/contract
          racket/class
          racket/draw
+         (only-in pict pict?)
          (for-syntax racket/base "plot3d-evil-box.rkt")
          "../../utils.rkt"
          "../common/contract.rkt"
@@ -27,11 +28,11 @@
          #:z-max (or/c real? #f)
          #:angle real?
          #:altitude real?
-         #:title (or/c string? #f)
-         #:x-label (or/c string? #f)
-         #:y-label (or/c string? #f)
-         #:z-label (or/c string? #f)
-         #:legend-anchor anchor/c]
+         #:title (or/c string? pict? #f)
+         #:x-label (or/c string? pict? #f)
+         #:y-label (or/c string? pict? #f)
+         #:z-label (or/c string? pict? #f)
+         #:legend-anchor legend-anchor/c]
         void?)]))
 
 (define-syntax untyped-plot3d/dc

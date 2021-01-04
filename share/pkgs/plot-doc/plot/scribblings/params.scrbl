@@ -101,9 +101,24 @@ The font size (in drawing units), face, and family of the title, axis labels, ti
 The font size (in drawing units), face, and family to prefer for the legend text. If set to @racket[#f], then the corresponding @racket[plot-font-X] parameter is used.
 }
 
-@deftogether[((defparam plot-legend-anchor anchor anchor/c #:value 'top-left)
+@deftogether[((defparam plot-legend-anchor legend-anchor legend-anchor/c #:value 'top-left)
               (defparam plot-legend-box-alpha alpha (real-in 0 1) #:value 2/3))]{
 The placement of the legend and the opacity of its background.
+}
+@defparam[plot-legend-layout layout (list/c (or/c 'columns 'rows) positive-integer? (or/c 'equal-size 'compact)) #:value '(columns 1 equal-size)]{
+Defines the way in which individual entries are placed in the legend. This is a list of three
+ elements:
+@itemlist[@item{the placement direction (@racket['columns] or @racket['rows])}
+          @item{the number of columns or rows}
+          @item{whether all the entries will have the same size (@racket['equal-size]),
+                or the entries will only occupy the minimum size (@racket['compact])}]
+
+For example, the value @racket['(columns 1 equal-size)] will place the legend entries vertically from
+ top to bottom and all entries will have the same height. A value of @racket['(rows 2 'compact)] will
+ place legend entries horizontally on two rows -- this type of layout is useful when the legend is
+ placed at the top or bottom of the plot.
+ 
+@history[#:added "7.9"]
 }
 
 @defparam[plot-tick-size size (>=/c 0) #:value 10]{
@@ -268,7 +283,7 @@ Used as default keyword arguments of @racket[point-label], @racket[function-labe
 @racket[inverse-label], @racket[parametric-label], @racket[polar-label] and @racket[point-label3d].
 }
 
-@section{Vector Fields}
+@section{Vector Fields & Arrows}
 
 @deftogether[((defparam vector-field-samples n exact-positive-integer? #:value 20)
               (defparam vector-field3d-samples n exact-positive-integer? #:value 9))]{
@@ -283,6 +298,22 @@ The default number of samples @racket[vector-field] and @racket[vector-field3d] 
 The default pen color, pen width, pen style, scaling factor, and opacity used by
 @racket[vector-field] and @racket[vector-field3d].
 }
+@deftogether[((defparam arrows-color color plot-color/c #:value 1)
+              (defparam arrows-line-width width (>=/c 0) #:value 2/3)
+              (defparam arrows-line-style style plot-pen-style/c #:value 'solid)
+              (defparam arrows-alpha alpha (real-in 0 1) #:value 1))]{
+The default pen color, pen width, pen style, and opacity used by
+@racket[arrows] and @racket[arrows3d].
+@history[#:added "7.9"]
+}
+
+@deftogether[((defparam arrow-head-size-or-scale size (or/c (>=/c 0) (list/c '= (>=/c 0))) #:value 2/5)
+              (defparam arrow-head-angle alpha (>=/c 0) #:value (/ pi 6)))]{
+The default size and angle of the arrow head in @racket[vector-field], @racket[vector-field3d], @racket[arrows] and @racket[arrows3d].
+When the @racket[arrow-head-size-or-scale] is a number, it is interpreted as a proportion of the arrow length , and will be bigger for longer arrows. When it is in the form @racket[(list '= size)], it is interpreted as the size of the arrow head in drawing units (pixels).
+@history[#:added "7.9"]
+}
+
 
 @section{Error Bars}
 
@@ -308,6 +339,14 @@ value) color can be specified independently. The width parameter will be importa
 in units like days, weeks, or months. Because dates are actually represented as seconds from an epoch, your 
 width should take that into consideration. For example, a width of 86400 may be useful for x-axis values in days 
 as there are 86400 seconds in a day. This candle will be exactly one day in width.
+}
+
+@section{Color fields}
+
+@deftogether[((defparam color-field-samples n exact-positive-integer? #:value 20)
+              (defparam color-field-alpha alpha (real-in 0 1) #:value 1))]{
+The default sample rate and opacity used by @racket[color-field].
+@history[#:added "7.9"]
 }
 
 @section{Contours and Contour Intervals}

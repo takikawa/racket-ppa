@@ -17,7 +17,7 @@
  (contract-out
   [fail-check (->* () (string?) void?)]
   [current-check-handler (parameter/c (-> any/c any))]
-  [current-check-around (parameter/c (-> (-> void?) any))]
+  [current-check-around (parameter/c (-> (-> any/c) any))]
   [plain-check-around (-> (-> void?) void?)]))
 
 (provide check-around
@@ -119,10 +119,9 @@
                       (make-check-location location)
                       (make-check-expression '(chk . args)))
                 (λ ()
-                  ((current-check-around)
-                   (λ () ((check-impl #:location location
-                                      #:expression '(chk . args))
-                          . args))))))]
+                  ((check-impl #:location location
+                               #:expression '(chk . args))
+                   . args))))]
           [chk:id
            #'(check-impl #:location (syntax->location #'loc)
                          #:expression 'chk)])))))

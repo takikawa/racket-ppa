@@ -688,11 +688,15 @@
   (export errortrace-annotate^)
 
   (define (errortrace-annotate top-e [in-compile-handler? #t])
-    (define (normal e)
-      (define expanded-e (expand-syntax (add-annotate-property e)))
+
+    (define (do-expand e)
+      (expand-syntax (add-annotate-property e)))
+
+    (define (do-annotate e expanded-e)
       (parameterize ([original-stx e]
                      [expanded-stx expanded-e])
         (annotate-top expanded-e (namespace-base-phase))))
+
     (syntax-case top-e ()
       [(mod name . reste)
        (and (identifier? #'mod)
@@ -701,7 +705,7 @@
                                (namespace-base-phase)))
        (if (eq? (syntax-e #'name) 'errortrace-key)
            top-e
-           (let ([expanded-e (normal top-e)])
+           (let ([expanded-e (do-expand top-e)])
              (cond
                [(has-cross-phase-declare?
                  (syntax-case expanded-e ()
@@ -709,7 +713,7 @@
                 expanded-e]
                [else
                 (transform-all-modules
-                 expanded-e
+                 (do-annotate top-e expanded-e)
                  (lambda (top-e mod-id)
                    (syntax-case top-e ()
                      [(mod name init-import mb)
@@ -726,7 +730,7 @@
                                            #'mb))))])])))])))]
       [_else
        (let ()
-         (define e (normal top-e))
+         (define e (do-annotate top-e (do-expand top-e)))
          (define meta-depth ((count-meta-levels 0) e))
          (when in-compile-handler?
            ;; We need to force the `require`s now, so that `e` can be compiled.
@@ -735,13 +739,13 @@
            (for ([i (in-range meta-depth)])
              (namespace-require `(for-meta ,(add1 i) errortrace/errortrace-key))))
          #`(begin
-             #,(generate-key-imports meta-depth)
+             #,(generate-key-imports-at-phase meta-depth (namespace-base-phase))
              #,e))]))
 
   (define (has-cross-phase-declare? e)
     (for/or ([a (in-list (or (syntax->list e) '()))])
       (syntax-case* a (#%declare begin) (lambda (a b)
-                                          (free-identifier=? a b 0 (namespace-base-phase)))
+                                          (free-identifier=? a b 0 base-phase))
         [(#%declare kw ...)
          (for/or ([kw (in-list (syntax->list #'(kw ...)))])
            (eq? (syntax-e kw) '#:cross-phase-persistent))]

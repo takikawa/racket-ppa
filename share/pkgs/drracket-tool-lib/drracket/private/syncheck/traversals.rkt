@@ -49,7 +49,7 @@
                            [current-load-relative-directory user-directory])
               (let ([is-module? (syntax-case sexp (module)
                                   [(module . rest) #t]
-                                  [else #f])])
+                                  [_ #f])])
                 (cond
                   [is-module?
                    (let ([phase-to-binders (make-hash)]
@@ -101,7 +101,7 @@
                                                (list 'requires requires)
                                                (list 'require-for-syntaxes require-for-syntaxes)
                                                (list 'require-for-templates require-for-templates)
-                                               (list 'require-for-labels require-for-templates)
+                                               (list 'require-for-labels require-for-labels)
                                                (list 'sub-identifier-binding-directives
                                                      sub-identifier-binding-directives)))))]
                   [else
@@ -127,7 +127,7 @@
                                         (list 'tl-phase-to-tops tl-phase-to-tops)
                                         (list 'tl-templrefs tl-templrefs)
                                         (list 'tl-module-lang-requires tl-module-lang-requires)
-                                        (list 'tl-phase-to-requires tl-module-lang-requires)
+                                        (list 'tl-phase-to-requires tl-phase-to-requires)
                                         (list 'tl-sub-identifier-binding-directives
                                               tl-sub-identifier-binding-directives))))
               (annotate-variables user-namespace
@@ -268,7 +268,7 @@
 
       (syntax-case* stx-obj (#%plain-lambda case-lambda if begin begin0 let-values letrec-values
                                             set! quote quote-syntax with-continuation-mark
-                                            #%plain-app #%top #%plain-module-begin
+                                            #%plain-app #%top
                                             define-values define-syntaxes begin-for-syntax
                                             module module*
                                             #%require #%provide #%declare #%expression)
@@ -339,7 +339,7 @@
         [(set! var e)
          (begin
            (annotate-raw-keyword stx-obj varrefs level-of-enclosing-module)
-
+           (add-origins (list-ref (syntax->list stx-obj) 1) varrefs level-of-enclosing-module)
            ;; tops are used here because a binding free use of a set!'d variable
            ;; is treated just the same as (#%top . x).
            (add-id varsets (syntax var) level-of-enclosing-module)
@@ -401,7 +401,7 @@
            (annotate-raw-keyword stx-obj varrefs level-of-enclosing-module)
            (for ([e (in-list (syntax->list (syntax (exp ...))))])
              (level-loop e (+ level 1))))]
-        [(module m-name lang (#%plain-module-begin bodies ...))
+        [(module m-name lang (mb bodies ...))
          (begin
            (annotate-raw-keyword stx-obj varrefs level-of-enclosing-module)
            (add-module-lang-require module-lang-requires (syntax lang))
@@ -414,7 +414,7 @@
            (hash-cons! sub-requires (syntax->datum (syntax lang)) (syntax lang))
            (for ([body (in-list (syntax->list (syntax (bodies ...))))])
              (mod-loop body module-name)))]
-        [(module* m-name lang (#%plain-module-begin bodies ...))
+        [(module* m-name lang (mb bodies ...))
          (begin
            (annotate-raw-keyword stx-obj varrefs level-of-enclosing-module)
            (define module-name (syntax-e #'m-name))
@@ -458,7 +458,7 @@
                  [(just-meta phase specs ...)
                   (for ([spec (in-list (syntax->list #'(specs ...)))])
                     (loop spec level))]
-                 [else
+                 [_
                   (handle-phaseless-spec spec level)])))
            (define (handle-phaseless-spec stx level)
              (define adjusted-level (and level (+ level level-of-enclosing-module)))
@@ -468,7 +468,15 @@
              (define raw-module-path (phaseless-spec->raw-module-path stx))
              (annotate-require-open user-namespace user-directory raw-module-path level stx)
              (when (original-enough? raw-module-path)
-               (define key (syntax->datum raw-module-path))
+               (define key
+                 (match (syntax->datum raw-module-path)
+                   [`',m
+                    (define we-have-seen-this-sumodule?
+                      (hash-has-key? phase-to-requires (list adjusted-level (cons m mods))))
+                    (if we-have-seen-this-sumodule?
+                        `(submod "." ,m)
+                        `',m)]
+                   [rmp rmp]))
                (hash-set! require-ht
                           key
                           (cons stx (hash-ref require-ht key '())))))
@@ -1198,7 +1206,7 @@
                 symbolic-compare?
               [(prefix pfx . _) #'pfx]
               [(prefix-all-except pfx . _) #'pfx]
-              [other #f]))
+              [_ #f]))
           (when prefix
             (define prefix-source (find-source-editor prefix))
             (define prefix-start (and prefix-source

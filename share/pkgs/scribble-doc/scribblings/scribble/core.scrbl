@@ -417,7 +417,7 @@ The recognized @tech{style properties} are as follows:
 
  @item{@tech{numberer} --- A @tech{numberer} created with
        @racket[make-numberer] determines a representation of the
-       part's section number as an extension of it's patent's number.
+       part's section number as an extension of it's parent's number.
        A @tech{numberer} overrides the default representation, which
        is a natural number or (in the case of an accompanying
        @racket['grouper] property) a Roman numeral. If a
@@ -706,7 +706,7 @@ The following @tech{style properties} are currently recognized:
 ]}
 
 
-@defstruct[nested-flow ([style any/c]
+@defstruct[nested-flow ([style style?]
                         [blocks (listof block?)])]{
 
 A @techlink{nested flow} has a style and a @tech{flow}.

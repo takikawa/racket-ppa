@@ -4,6 +4,7 @@
 
 (require typed/racket/class
          typed/racket/draw
+         (only-in typed/pict pict)
          "type-doc.rkt"
          "types.rkt"
          "draw-attribs.rkt"
@@ -74,7 +75,8 @@
 (defparam plot-legend-font-size size (U Nonnegative-Real #f) #f)
 (defparam plot-legend-font-face face (U String #f) #f)
 (defparam plot-legend-font-family family (U Font-Family #f) #f)
-(defparam plot-legend-anchor anchor Anchor 'top-left)
+(defparam plot-legend-anchor anchor Legend-Anchor 'top-left)
+(defparam plot-legend-layout layout Legend-Layout '(columns 1 equal-size))
 (defparam2 plot-legend-box-alpha alpha Real Nonnegative-Real 2/3 (unit-ivl 'plot-legend-box-alpha))
 (defparam plot-animating? Boolean #f)
 
@@ -141,14 +143,14 @@
 
 ;; Labels
 
-(defparam plot-title (U String #f) #f)
-(defparam plot-x-label (U String #f) "x axis")
-(defparam plot-y-label (U String #f) "y axis")
-(defparam plot-z-label (U String #f) #f)
+(defparam plot-title (U String pict #f) #f)
+(defparam plot-x-label (U String pict #f) "x axis")
+(defparam plot-y-label (U String pict #f) "y axis")
+(defparam plot-z-label (U String pict #f) #f)
 
-(defparam plot-x-far-label (U String #f) #f)
-(defparam plot-y-far-label (U String #f) #f)
-(defparam plot-z-far-label (U String #f) #f)
+(defparam plot-x-far-label (U String pict #f) #f)
+(defparam plot-y-far-label (U String pict #f) #f)
+(defparam plot-z-far-label (U String pict #f) #f)
 
 ;; Axes: transform, ticks
 
@@ -211,6 +213,16 @@
 (defparam2 vector-field-alpha Real Nonnegative-Real 1 (unit-ivl 'vector-field-alpha))
 (defparam vector-field3d-samples Positive-Integer 9)
 
+;;arrow
+
+(defparam  arrows-color Plot-Color 1)
+(defparam2 arrows-line-width Real Nonnegative-Real 2/3
+  (nonnegative-rational 'arrows-line-width))
+(defparam  arrows-line-style Plot-Pen-Style 'solid)
+(defparam2 arrows-alpha Real Nonnegative-Real 1 (unit-ivl 'arrows-alpha))
+(defparam  arrow-head-size-or-scale (U Nonnegative-Real (List '= Nonnegative-Real)) 2/5)
+(defparam  arrow-head-angle Nonnegative-Real 0.5235987755982988);=pi/6=30°
+
 ;; Error bars
 
 (defparam2 error-bar-width Real Nonnegative-Real 6 (nonnegative-rational 'error-bar-width))
@@ -227,6 +239,12 @@
 (defparam2 candlestick-line-width Real Nonnegative-Real 1 (nonnegative-rational 'candlestick-line-width))
 (defparam candlestick-line-style Plot-Pen-Style 'solid)
 (defparam2 candlestick-alpha Real Nonnegative-Real 2/3 (unit-ivl 'candlestick-alpha))
+
+
+;; color fields
+
+(defparam color-field-samples Positive-Integer 20)
+(defparam2 color-field-alpha Real Nonnegative-Real 1 (unit-ivl 'color-field-alpha))
 
 ;; Contours
 

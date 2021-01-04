@@ -1,4 +1,3 @@
-"syntax.ss"
 ;;; syntax.ss
 ;;; Copyright 1984-2017 Cisco Systems, Inc.
 ;;; 
@@ -4867,7 +4866,6 @@
                                           fp
                                           (loop fp))))))
                             (begin (set-port-position! ip start-pos) 0)))])
-              (port-file-compressed! ip)
               (if ($compiled-file-header? ip)
                   (let ([x (fasl-read ip)])
                     (close-port ip)
@@ -5210,7 +5208,6 @@
                                             fp
                                             (loop fp))))))
                               (begin (set-port-position! ip start-pos) 0)))])
-                (port-file-compressed! ip)
                 (unless ($compiled-file-header? ip) ($oops who "missing header for compiled file ~s" fn))
                 (let ([x (fasl-read ip)])
                   (unless (recompile-info? x) ($oops who "expected recompile info at start of ~s, found ~a" fn x)))
@@ -7510,6 +7507,7 @@
 
 (current-expand sc-expand)
 
+(begin
 ;;; syntax-rules/syntax-case aux keywords
 (define-syntax ...
   (lambda (x)
@@ -10272,7 +10270,6 @@
       (case-lambda
         [(ifn bip) (make-source-file-descriptor ifn bip #f)]
         [(ifn bip reset?)
-         (unless (string? ifn) ($oops who "~s is not a string" ifn))
          (unless (and (input-port? bip) (binary-port? bip))
            ($oops who "~s is not a binary input port" bip))
          (when reset?
@@ -10281,7 +10278,6 @@
          ($source-file-descriptor ifn bip reset?)])))
   (set-who! source-file-descriptor
     (lambda (path checksum)
-      (unless (string? path) ($oops who "~s is not a string" path))
       (unless (if (fixnum? checksum) (fx>= checksum 0) (and (bignum? checksum) ($bigpositive? checksum)))
         ($oops who "~s is not an exact nonnegative integer" checksum))
       (%make-source-file-descriptor path (ash checksum -16) (logand checksum #xffff))))
@@ -10344,3 +10340,4 @@
 
 (set-who! $annotation-options (make-enumeration '(debug profile)))
 (set-who! $make-annotation-options (enum-set-constructor $annotation-options))
+)
