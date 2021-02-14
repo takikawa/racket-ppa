@@ -123,16 +123,23 @@
                      menu void)])
             (send i enable #f))))
 
+    (define/override (on-superwindow-activate on?)
+      (unless on?
+        (when mouse-over?
+          (set! mouse-over? #f)
+          (refresh))))
+
     (define/override (on-event evt)
       (unless hidden?
-        (define-values (max-x max-y) (get-size))
-        (define inside?
-          (and (not (send evt leaving?))
-               (<= 0 (send evt get-x) max-x)
-               (<= 0 (send evt get-y) max-y)))
-        (unless (eq? inside? mouse-over?)
-          (set! mouse-over? inside?)
-          (refresh))
+        (cond
+          [(send evt leaving?)
+           (when mouse-over?
+             (set! mouse-over? #f)
+             (refresh))]
+          [(send evt entering?)
+           (unless mouse-over?
+             (set! mouse-over? #t)
+             (refresh))])
 
         (cond
           [(send evt button-down?)

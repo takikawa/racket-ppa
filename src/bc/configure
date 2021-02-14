@@ -695,6 +695,8 @@ PLAIN_CC
 POST_LINKER
 MZLINKER
 REZ
+RESTORE_SIGNATURE
+STRIP_SIGNATURE
 STRIP_LIB_DEBUG
 STRIP_DEBUG
 ARFLAGS
@@ -2907,6 +2909,9 @@ strip_debug_flags=""
 enable_strip_by_default=yes
 strip_needs_dash_s=no
 
+STRIP_SIGNATURE=":"
+RESTORE_SIGNATURE=":"
+
 # Check whether --enable-noopt was given.
 if test "${enable_noopt+set}" = set; then :
   enableval=$enable_noopt;
@@ -3275,8 +3280,8 @@ fi
 if test "${enable_csdefault}" = "" ; then
    if test "${enable_bcdefault}" = "" ; then
       # Pick a default default here, but make it consistent with "src/configure"
-      enable_bcdefault=yes
-      enable_csdefault=no
+      enable_csdefault=yes
+      enable_bcdefault=no
    fi
 fi
 
@@ -4709,14 +4714,22 @@ SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} AR_FLAGS="'"'"${ARFLAGS}"'"'
 
 is_gmake=`make -v no-such-target-we-hope 2>&1 | grep "GNU Make"`
 
-# If using gcc, we want all warnings:
+# If using gcc, we'll want all warnings
+
 is_gcc=`$CC -v 2>&1 | tail -n 1 | grep -E '^gcc version [[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+ \([^\)]+\)[[:space:]]*$'`
+
+if test "$is_gcc" = "" ; then
+  if test "`basename $CC`" = "gcc" ; then
+    is_gcc=yes
+  fi
+fi
+
 
 # We also need to test if $CC is gcc itself because on mac,
 # where clang impersonates gcc, although is_gcc is false, we want
 # to use it as if it was gcc.
 # See https://github.com/racket/racket/pull/2897#pullrequestreview-314906673
-if test "$is_gcc" != "" || test "`basename $CC`" = "gcc"; then
+if test "$is_gcc" != "" ; then
   COMPFLAGS="$COMPFLAGS -Wall"
 
   # Use -MMD when we have gcc and gnumake:
@@ -5370,6 +5383,24 @@ $as_echo "$set_strip_lib" >&6; }
     fi
   fi
 fi
+
+case "$host_os" in
+  darwin*)
+    case "$host_cpu" in
+       aarch64)
+         STRIP_SIGNATURE="codesign --remove-signature"
+         RESTORE_SIGNATURE="codesign -s - --entitlements"
+       ;;
+       *)
+        # Check whether `codesign` can remove signatures
+        touch sig-test-file
+        if `codesign --remove-signature sig-test-file > /dev/null 2>&1` ; then
+           STRIP_SIGNATURE="codesign --remove-signature"
+        fi
+        rm sig-test-file
+        ;;
+    esac
+esac
 
 
 ############## C flags ################
@@ -6940,6 +6971,7 @@ fi
 ############## Racket for Racket ################
 
 if test "${enable_racket}" = "auto" ; then
+  # See also "configure-parent.ac"
   enable_racket="`pwd`/../local/bc/racket3m"
 fi
 
@@ -7158,6 +7190,8 @@ LIBS="$LIBS $EXTRALIBS"
 
 
 
+
+
 mk_needed_dir()
 {
   if test ! -d "$1" ; then
@@ -7225,6 +7259,10 @@ ac_configure="$SHELL $ac_aux_dir/configure"  # Please don't use this var.
 
 subdirs="$subdirs foreign/libffi"
 
+    # Smooth transition from libffi v3.1 to v3.3:
+    if test -h foreign/libffi/include/ffitarget.h ; then
+       rm foreign/libffi/include/ffitarget.h
+    fi
   fi
   FOREIGNTARGET="foreign-stuff"
   FOREIGN_IF_USED="FOREIGN_USED"

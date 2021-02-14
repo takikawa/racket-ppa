@@ -2,12 +2,16 @@
 
 (require syntax/docprovide)
 
-(require test-engine/racket-tests
-	 (lib "test-info.scm" "test-engine")
+(require (only-in test-engine/test-engine
+                  add-failed-check! failed-check
+                  property-error property-fail)
+         (rename-in scheme/base (cons racket-cons))
 	 test-engine/racket-tests
+	 test-engine/syntax
+         test-engine/srcloc
 	 scheme/class)
 
-(require deinprogramm/signature/module-begin
+(require deinprogramm/sdp/private/module-begin
 	 (except-in deinprogramm/signature/signature signature-violation)
 	 (except-in deinprogramm/signature/signature-syntax property))
 
@@ -39,7 +43,7 @@
 	 one-of ; deprecated
 	 -> mixed predicate enum combined list-of nonempty-list-of)
 
-(provide number real rational integer natural
+(provide number real rational integer integer-from-to natural
 	 boolean true false
 	 string symbol
 	 empty-list
@@ -75,8 +79,7 @@
  (sdp-dots ......)
  (sdp-app #%app)
  (sdp-top #%top)
- (sdp-set! set!)
- (module-begin sdp-module-begin))
+ (sdp-set! set!))
 
 (provide sdp-advanced-lambda
 	 sdp-advanced-define)
@@ -349,18 +352,16 @@
   (read (-> any)
 	"Externe Repräsentation eines Werts in der REPL einlesen und den zugehörigen Wert liefern")))
 
-(define real-cons
-  (procedure-rename
-   (lambda (f r)
-     (when (and (not (null? r))
-                (not (pair? r)))
-       (raise
-        (make-exn:fail:contract
-         (string->immutable-string
-          (format "Zweites Argument zu cons ist keine Liste, sondern ~e" r))
-         (current-continuation-marks))))
-     (cons f r))
-   'cons))
+(define cons
+  (lambda (f r)
+    (when (and (not (null? r))
+               (not (pair? r)))
+      (raise
+       (make-exn:fail:contract
+        (string->immutable-string
+         (format "Zweites Argument zu cons ist keine Liste, sondern ~e" r))
+        (current-continuation-marks))))
+    (racket-cons f r)))
 
 (define-syntax sdp-cons
   (let ()
@@ -371,11 +372,11 @@
       prop:procedure
       (lambda (_ stx)
 	(syntax-case stx ()
-	  ((self . args) (syntax/loc stx (real-cons . args)))
-	  (else (syntax/loc stx real-cons)))))
+	  ((self . args) (syntax/loc stx (cons . args)))
+	  (else (syntax/loc stx cons)))))
     (make-cons-info (lambda ()
 		      (list #f
-			    #'real-cons
+			    #'cons
 			    #'cons?
 			    (list #'cdr #'car)
 			    '(#f #f)
@@ -428,7 +429,7 @@
 					   (cdr args))))))
 	      (current-continuation-marks))))
 	  (loop (cdr args)
-		(cons arg seen-rev)))))
+		(racket-cons arg seen-rev)))))
   
 
     (apply append args)))
@@ -461,8 +462,8 @@
      ((empty? lis) '())
      ((pair? lis)
       (if (p? (first lis))
-	  (cons (first lis)
-		(filter p? (rest lis)))
+	  (racket-cons (first lis)
+                       (filter p? (rest lis)))
 	  (filter p? (rest lis))))
      (else
       (raise
@@ -998,6 +999,17 @@
       (string-append (car l) (strings-list->string (cdr l)))))
 
 (define integer (signature/arbitrary arbitrary-integer integer (predicate integer?)))
+(define (integer-from-to lo hi)
+  (unless (integer? lo)
+    (error "Erstes Argument von integer-from-to ist keine ganze Zahl."))
+  (unless (integer? hi)
+    (error "Zweites Argument von integer-from-to ist keine ganze Zahl."))
+  (unless (<= lo hi)
+    (error "Das erste Argument von integer-from-to ist größer als das zweite."))
+  (signature/arbitrary (arbitrary-integer-from-to lo hi) integer-from-to
+                       (predicate (lambda (n)
+                                    (and (integer? n)
+                                         (<= lo n hi))))))
 (define number (signature/arbitrary arbitrary-real number (predicate number?)))
 (define rational (signature/arbitrary arbitrary-rational rational (predicate rational?)))
 (define real (signature/arbitrary arbitrary-real real (predicate real?)))
@@ -1016,7 +1028,7 @@
 (define (false? x)
   (eq? x #f))
 
-(define true (signature truen (enum #t)))
+(define true (signature true (enum #t)))
 (define false (signature false (enum #f)))
 
 (define string (signature/arbitrary arbitrary-printable-ascii-string string (predicate string?)))
@@ -1151,33 +1163,31 @@
     (_ (raise-sdp-syntax-error #f "`check-property' erwartet einen einzelnen Operanden"
 			       stx))))
 
-(define (check-property-error test src-info test-info)
-  (let ((info (send test-info get-info)))
-    (send info add-check)
-    (with-handlers ((exn:fail?
-		     (lambda (e)
-		       (send info property-error e src-info)
-		       (raise e))))
-      (call-with-values
-	  (lambda ()
-	    (with-handlers
-		((exn:assertion-violation?
-		  (lambda (e)
-		    ;; minor kludge to produce comprehensible error message
-		    (if (eq? (exn:assertion-violation-who e) 'coerce->result-generator)
-			(raise (make-exn:fail (string-append "Wert muß Eigenschaft oder boolesch sein: "
-							     ((error-value->string-handler)
-							      (car (exn:assertion-violation-irritants e))
-							      100))
-					      (exn-continuation-marks e)))
-			(raise e)))))
-	      (quickcheck-results (test))))
-	(lambda (ntest stamps result)
-	  (if (check-result? result)
-	      (begin
-		(send info property-failed result src-info)
-		#f)
-	      #t))))))
+(define (check-property-error test srcloc)
+  (with-handlers ((exn:fail?
+                   (lambda (e)
+                     (add-failed-check! (failed-check (property-error srcloc e)
+                                                      (exn-srcloc e))))))
+    (call-with-values
+     (lambda ()
+       (with-handlers
+           ((exn:assertion-violation?
+             (lambda (e)
+               ;; minor kludge to produce comprehensible error message
+               (if (eq? (exn:assertion-violation-who e) 'coerce->result-generator)
+                   (raise (make-exn:fail (string-append "Wert muß Eigenschaft oder boolesch sein: "
+                                                        ((error-value->string-handler)
+                                                         (car (exn:assertion-violation-irritants e))
+                                                         100))
+                                         (exn-continuation-marks e)))
+                   (raise e)))))
+         (quickcheck-results (test))))
+     (lambda (ntest stamps result)
+       (if (check-result? result)
+           (begin
+             (add-failed-check! (failed-check (property-fail srcloc result) #f))
+             #f)
+           #t)))))
 
 (define (expect v1 v2)
   (quickcheck:property () (teach-equal? v1 v2)))

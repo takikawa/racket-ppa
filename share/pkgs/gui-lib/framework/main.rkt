@@ -52,6 +52,7 @@
  (prefix color: framework:color-class^)
  (prefix color-prefs: framework:color-prefs-class^)
  (prefix comment-box: framework:comment-box-class^)
+ (prefix srcloc-snip: framework:srcloc-snip-class^)
  (prefix finder: framework:finder-class^)
  (prefix group: framework:group-class^)
  (prefix canvas: framework:canvas-class^)
@@ -232,6 +233,17 @@
   (is-a?/c snip-class%)
   @{The @racket[snip-class%] object used by @racket[comment-box:snip%].})
 
+ (thing-doc
+  srcloc-snip:snipclass
+  (is-a?/c snip-class%)
+  @{The @racket[snip-class%] object used by @racket[srcloc-snip:snip%].})
+
+ (proc-doc/names
+  srcloc-snip:select-srcloc
+  (srcloc? . -> . void?)
+  (srcloc)
+  @{Finds the editor containing the specified srcloc and selects it.})
+ 
  (proc-doc/names
   version:add-spec
   (any/c any/c . -> . void?)
@@ -1603,6 +1615,24 @@
   @{A parameter that indicates whether or not we are currently saving
     the editor because of an autosave. See also
     @method[editor:backup-autosave<%> do-autosave].})
+ (parameter-doc
+  editor:silent-cancel-on-save-file-out-of-date?
+  (parameter/c boolean?)
+  autosaving?
+  @{A parameter that indicates how to handle the situation
+ where a save happens but the file saved on the disk is newer
+ than the last time this editor was saved.
+
+ If @racket[editor:silent-cancel-on-save-file-out-of-date?]'s value is
+ @racket[#true], then a save that might overwrite some other
+ change is silently ignored and no save actually happens
+ (via @method[editor:basic-mixin can-save-file?]). If it is
+ @racket[#false] (and @racket[editor:doing-autosave?] is also
+ @racket[#false]) then a dialog is opened to ask the user
+ what to do.
+
+ @history[#:added "1.53"]})
+
   (proc-doc/names
   editor:set-current-preferred-font-size
   (-> exact-nonnegative-integer? void?)

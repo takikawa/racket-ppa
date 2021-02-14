@@ -212,23 +212,83 @@
          (ftype-ref rktio_identity_t (a_bits) p)
          (ftype-ref rktio_identity_t (b_bits) p)
          (ftype-ref rktio_identity_t (c_bits) p))))
-    
+
+    (define (in-date-range? si)
+      (if (> (fixnum-width) 32)
+          (<= -9223372036854775808 si 9223372036854775807)
+          (<= -2147483648 si 2147483647)))
+
+    (define unknown-zone-name (string->immutable-string "?"))
+
+    (define (rktio_seconds_to_date* rktio si nsecs get-gmt)
+      (cond
+       [(not (in-date-range? si))
+        (vector RKTIO_ERROR_KIND_RACKET
+                RKTIO_ERROR_TIME_OUT_OF_RANGE)]
+       [else
+        (unsafe-start-atomic)
+        (begin0
+          (let ([p (rktio_seconds_to_date rktio si nsecs get-gmt)])
+            (cond
+             [(vector? p) p]
+             [else
+              (let* ([dt (make-ftype-pointer rktio_date_t (ptr->address p))]
+                     [tzn (address->ptr (ftype-ref rktio_date_t (zone_name) dt))])
+                (begin0
+                  (date*
+                   (ftype-ref rktio_date_t (second) dt)
+                   (ftype-ref rktio_date_t (minute) dt)
+                   (ftype-ref rktio_date_t (hour) dt)
+                   (ftype-ref rktio_date_t (day) dt)
+                   (ftype-ref rktio_date_t (month) dt)
+                   (ftype-ref rktio_date_t (year) dt)
+                   (ftype-ref rktio_date_t (day_of_week) dt)
+                   (ftype-ref rktio_date_t (day_of_year) dt)
+                   (if (fx= 0 (ftype-ref rktio_date_t (is_dst) dt))
+                       #f
+                       #t)
+                   (ftype-ref rktio_date_t (zone_offset) dt)
+                   (ftype-ref rktio_date_t (nanosecond) dt)
+                   (if (eqv? tzn NULL)
+                       unknown-zone-name
+                       (string->immutable-string (utf8->string (rktio_to_bytes tzn)))))
+                  (unless (eqv? tzn NULL)
+                    (rktio_free tzn))
+                  (rktio_free p)))]))
+          (unsafe-end-atomic))]))
+
     (define (rktio_convert_result_to_vector p)
       (let ([p (make-ftype-pointer rktio_convert_result_t (ptr->address p))])
         (vector
          (ftype-ref rktio_convert_result_t (in_consumed) p)
          (ftype-ref rktio_convert_result_t (out_produced) p)
          (ftype-ref rktio_convert_result_t (converted) p))))
-      (define (cast v from to)
-        (let ([p (malloc from)])
-          (ptr-set! p from v)
-          (ptr-ref p to)))
 
+    (define (copy-bytes x i)
+      (let ([bstr (make-bytevector i)])
+        (let loop ([j 0])
+          (unless (fx= j i)
+            (bytes-set! bstr j (foreign-ref 'unsigned-8 x j))
+            (loop (fx+ j 1))))
+        bstr))
+
+    (define (copy-terminated-bytes x)
+      (let loop ([i 0])
+        (if (fx= 0 (foreign-ref 'unsigned-8 x i))
+            (copy-bytes x i)
+            (loop (fx+ i 1)))))
+
+    (define (copy-terminated-shorts x)
+      (let loop ([i 0])
+        (if (fx= 0 (foreign-ref 'unsigned-16 x i))
+            (copy-bytes x i)
+            (loop (fx+ i 2)))))
+      
     (define (rktio_to_bytes fs)
-      (cast (ptr->address fs) _uintptr _bytes))
+      (copy-terminated-bytes (ptr->address fs)))
 
     (define (rktio_to_shorts fs)
-      (cast (ptr->address fs) _uintptr _short_bytes))
+      (copy-terminated-shorts (ptr->address fs)))
 
     ;; Unlike `rktio_to_bytes`, frees the array and strings
     (define rktio_to_bytes_list
@@ -244,7 +304,7 @@
              (let ([bs (foreign-ref 'uptr (ptr->address lls) (* i (foreign-sizeof 'uptr)))])
                (if (not (eqv? NULL bs))
                    (cons (begin0
-                          (cast bs _uintptr _bytes)
+                          (copy-terminated-bytes bs)
                           (rktio_free (make-ptr bs)))
                          (loop (add1 i)))
                    '()))]))
@@ -340,6 +400,7 @@
                                  'rktio_recv_length_ref rktio_recv_length_ref
                                  'rktio_recv_address_ref rktio_recv_address_ref
                                  'rktio_identity_to_vector rktio_identity_to_vector
+                                 'rktio_seconds_to_date* rktio_seconds_to_date*
                                  'rktio_convert_result_to_vector rktio_convert_result_to_vector
                                  'rktio_to_bytes rktio_to_bytes
                                  'rktio_to_bytes_list rktio_to_bytes_list

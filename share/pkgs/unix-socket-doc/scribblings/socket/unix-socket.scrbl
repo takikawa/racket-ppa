@@ -1,7 +1,11 @@
 #lang scribble/manual
-@(require (for-label racket/base
+@(require (for-label net/tcp-sig
+                     racket/base
                      racket/contract
-                     racket/unix-socket))
+                     racket/unit
+                     racket/unix-socket
+                     racket/unix-socket-tcp-unit
+                     web-server/web-server))
 
 @title[#:tag "unix-socket"]{Unix Domain Sockets}
 @author+email["Ryan Culpepper" "ryanc@racket-lang.org"]
@@ -106,4 +110,30 @@ current custodian at the time that @racket[unix-socket-accept-evt] is
 called.
 
 @history[#:added "1.2"]
+}
+
+
+@section{TCP Unit}
+
+@defmodule[racket/unix-socket-tcp-unit]
+
+This module provides an implementation of the @racket[tcp^] signature
+that can be used to make the Web Server listen on a @tech{unix domain
+socket}.
+
+@defproc[(make-unix-socket-tcp@ [socket-path unix-socket-path?]) unit?]{
+
+Returns a unit suitable for use with the Web Server's @racket[serve]
+function.
+
+For example, the following code would instruct the web server to
+listen for connections via a unix socket at @tt{"/var/server.sock"}:
+
+@racketblock[
+(serve
+ #:tcp@ (make-unix-socket-tcp@ "/var/server.sock")
+ #:dispatch a-dispatcher)
+]
+
+@history[#:added "1.3"]
 }
