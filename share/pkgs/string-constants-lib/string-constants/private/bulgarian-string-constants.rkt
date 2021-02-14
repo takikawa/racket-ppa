@@ -1,6 +1,6 @@
-;; Bulgarian translation of Racket string constants file, version: 1.33
+;; Bulgarian translation of Racket string constants file, version: 1.36
 ;; This file is distributed under the same terms as Racket
-;; Copyright on translation: Alexander Shopov <ash@kambanaria.org>, 2015, 2016, 2017, 2018, 2019, 2020.
+;; Copyright on translation: Alexander Shopov <ash@kambanaria.org>, 2015, 2016, 2017, 2018, 2019, 2020, 2021.
 
 (module bulgarian-string-constants "string-constant-lang.rkt"
   ;;; when translating this constant, substitute name of actual language for `English'
@@ -932,6 +932,37 @@
   (autosave-details "Подробности")
   (autosave-recover "Възстановяване")
   (autosave-unknown-filename "«непознат»")
+
+  ;;; autoloading
+  ;; the ~a is replaced with a path
+  (autoload-file-changed-on-disk/with-name
+   "Файлът:\n  ~a\nе променен на диска. Искате ли съдържанието на"
+   " буфера да се върне към състоянието на диска?")
+  ;; One file per line is appended to the end of this message
+  (autoload-files-changed-on-disk/with-name
+   "Има файлове, които са променени на диска. Искате ли съдържанието на"
+   " буферите да се върне към състоянието на диска?\n\nПроменени файлове:")
+  ;; the ~a is replaced with a path
+  (autoload-file-changed-on-disk-editor-dirty/with-name
+   "Файлът:\n  ~a\nе променен и на диска, и в редактора. Искате ли съдържанието на"
+   " буфера да се върне към състоянието на диска?")
+  ;; One file per line is appended to the end of this message
+  (autoload-files-changed-on-disk-editor-dirty/with-name
+   "Има файлове, които са променени и на диска, и в редактора. Искате ли съдържанието на"
+   " буферите да се върне към състоянието на диска?\n\nПроменени файлове:")
+  ;; One file per line is appended to the end of this message
+  (autoload-files-changed-on-disk-editor-dirty&clean/with-name
+   "Има файлове, които са променениъна диска, и други, променени в редактора. Искате ли съдържанието на"
+   " буферите да се върне към състоянието на диска?\n\nПроменени файлове"
+   " (променените в редактора буфери са означени с „◇“):")
+  ;; a specialized version of dont-ask-again-always-current
+  (dont-ask-again-always-current/clean-buffer
+   "Без повече питане за файлове без запазени промени (винаги стандартният избор)")
+
+  (autoload-automatically-reload "Автоматично презареждане на променените файлове")
+  (autoload-when-the-editor-isnt-dirty "Когато няма промяна в редактора")
+  (autoload-never-revert "Никога")
+  (autoload-ask-about-reverting "Питане всеки път")
 
   ;; these are labels in a dialog that drscheme displays
   ;; if you have leftover autosave files. to see the dialog,
@@ -1910,6 +1941,7 @@
   (ask-about-normalizing-strings "Питане за нормализиране на низовете")
 
   (always-use-platform-specific-linefeed-convention "Край на ред според операционната система")
+  (disable-caret-blinking "Без мигане на курсора")
 
   ;; optimization coach
   (hide-optimization-coach "Скриване на помощника за оптимизации")

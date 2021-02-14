@@ -24,7 +24,12 @@
   (exn:fail:contract? exn))
 
 (define (ensure-number n-or-str)
-  (if (string? n-or-str) (string->number n-or-str) n-or-str))
+  (cond
+    ((number? n-or-str)
+     n-or-str)
+    ((string=? n-or-str "no") 0)
+    ((string=? n-or-str "none") 0)
+    (else (string->number n-or-str))))
 
 (define (plural-e n)
   (if (> (ensure-number n) 1) "e" ""))
@@ -44,7 +49,7 @@
   (define arity:n (ensure-number arity))
   (define found:n (ensure-number found))
   (define fn-is-large (> arity:n found:n))
-  (format "~a~a erwartet ~a~a~a Argument~a, aber ~a~a gefunden"
+  (format "~a~a ~a~a~a Argument~a erwartet, aber ~a~a gefunden"
           (or name "") (if name ":" "")
           (if at-least "mindestens " "")
           (if (or (= arity:n 0) fn-is-large) "" "nur ")
@@ -139,6 +144,10 @@
                 (lambda (all one two three) (argcount-error-message one two three #t)))
           (list #px"([^\n]*): arity mismatch;\n[^\n]*\n  expected[^:]*: (\\d+)\n  given[^:]*: (\\d+)(?:\n  arguments[.][.][.]:(?:\n   [^\n]*)*)?"
                 (lambda (all one two three) (argcount-error-message one two three)))
+          ;; see argcount-error-message/stx in racket-tests
+          (list #px"([^\n]*): expects (only )?(at least )?(\\d+|no) arguments?, but found (only )?(none|\\d+)"
+                (lambda (all name _only at-least expects _only2 found)
+                  (argcount-error-message name expects found (and at-least #t))))
 	  (list #px"([^\n]*): expects( at least)? (\\d+) arguments, but found( only)? (\\d+)"
                 (lambda (all one two three four five) (argcount-error-message one three five two)))
 	  (list #px"contract violation\n  expected: (.*?)\n  given: ([^\n]*)(?:\n  argument position: ([^\n]*))?"
@@ -185,3 +194,22 @@
   (if (exn:fail:contract? exn)
       (rewrite-contract-error-message (exn-message exn))
       (rewrite-misc-error-message (exn-message exn))))
+
+(module+ test
+  (require rackunit)
+
+  (check-equal? (rewrite-contract-error-message "foo: expects only 3 arguments, but found 4")
+                "foo: nur 3 Argumente erwartet, aber 4 gefunden")
+  (check-equal? (rewrite-contract-error-message "foo: expects 5 arguments, but found only 4")
+                "foo: 5 Argumente erwartet, aber nur 4 gefunden")
+  (check-equal? (rewrite-contract-error-message "foo: expects at least 5 arguments, but found only 4")
+                "foo: mindestens 5 Argumente erwartet, aber nur 4 gefunden")
+  (check-equal? (rewrite-contract-error-message "foo: expects no argument, but found 4")
+                "foo: kein Argument erwartet, aber 4 gefunden")
+  (check-equal? (rewrite-contract-error-message "foo: expects 1 argument, but found none")
+                "foo: 1 Argument erwartet, aber keins gefunden")
+  (check-equal? (rewrite-contract-error-message "foo: expects at least 1 argument, but found none")
+                "foo: mindestens 1 Argument erwartet, aber keins gefunden"))
+
+  
+           

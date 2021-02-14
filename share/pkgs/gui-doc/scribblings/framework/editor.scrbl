@@ -40,14 +40,14 @@
     @method[editor:basic<%> run-after-edit-sequence]'s argument will be called.
 
   }
-  @defmethod*[(((get-top-level-window) (or/c #f (is-a?/c top-level-window<%>))))]{
+  @defmethod[(get-top-level-window) (or/c #f (is-a?/c top-level-window<%>))]{
     Returns the 
     @racket[top-level-window<%>]
     currently associated with this buffer.
 
-    This does not work for embedded editors.
-
-
+    Note that the result of this method may not currently be displaying this
+    editor (e.g., the editor may be for a tab that's not currently active in
+    DrRacket).
   }
   @defmethod*[(((save-file-out-of-date?) boolean?))]{
     Returns @racket[#t] if the file on disk has been modified, by some other program.
@@ -180,14 +180,18 @@
   This installs the global keymap @racket[keymap:get-global] to
   handle keyboard and mouse mappings not handled by @racket[keymap]. The
   global keymap is created when the framework is invoked.
-  @defmethod*[#:mode augment (((can-save-file? (filename string?) (format symbol?)) boolean?))]{
+
+  @defmethod[#:mode augment (can-save-file? (filename string?) (format symbol?)) boolean?]{
 
     Checks to see if the file on the disk has been modified out
     side of this editor, using
     @method[editor:basic<%> save-file-out-of-date?]. 
     If it has, this method prompts the user to be sure they want to save.
 
-  }
+  See also @racket[editor:doing-autosave?] and
+  @racket[editor:silent-cancel-on-save-file-out-of-date?].
+ }
+
   @defmethod*[#:mode augment (((after-save-file (success? boolean?)) void?))]{
 
     If the current filename is not a temporary filename, this method calls

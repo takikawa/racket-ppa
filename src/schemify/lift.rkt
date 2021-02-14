@@ -141,6 +141,7 @@
          (lift?/seq body))]
       [`(begin . ,vs) (lift?/seq vs)]
       [`(begin0 . ,vs) (lift?/seq vs)]
+      [`(begin-unsafe . ,vs) (lift?/seq vs)]
       [`(quote . ,_) #f]
       [`(if ,tst ,thn ,els)
        (or (lift? tst) (lift? thn) (lift? els))]
@@ -308,6 +309,8 @@
              (cdr new-frees+binds))]
       [`(begin . ,vs)
        (compute-seq-lifts! vs frees+binds lifts locals)]
+      [`(begin-unsafe . ,vs)
+       (compute-seq-lifts! vs frees+binds lifts locals)]
       [`(begin0 . ,vs)
        (compute-seq-lifts! vs frees+binds lifts locals)]
       [`(quote . ,_) frees+binds]
@@ -445,6 +448,8 @@
          (find-seq-loops body lifts #hasheq() loops))]
       [`(begin . ,vs)
        (find-seq-loops vs lifts loop-if-tail loops)]
+      [`(begin-unsafe . ,vs)
+       (find-seq-loops vs lifts loop-if-tail loops)]
       [`(begin0 ,v . ,vs)
        (define new-loops (find-loops v lifts #hasheq() loops))
        (if (null? vs)
@@ -515,12 +520,18 @@
                           (find-loops rand lifts #hasheq() loops))])
             (cond
               [(not (hash-ref loops u-id #f))
-               (find-loops rhs #hasheq() loops)]
+               (find-loops rhs lifts #hasheq() loops)]
               [else
                (define new-loop-if-tail
                  (hash-set (for/hasheq ([(id bx) (in-hash loop-if-tail)])
-                             (values id (box #f)))
-                           u-id (box #f)))
+                             ;; If box is set, create a new one to find out if it's
+                             ;; specifically set here. Otherwise, use existing box
+                             ;; to propagate from here to elsewhere
+                             (if (unbox bx)
+                                 (values id (box #f))
+                                 (values id bx)))
+                           u-id
+                           (box #f)))
                (define new-loops
                  (find-loops-in-tail-called rhs lifts new-loop-if-tail loops))
                (cond
@@ -528,7 +539,7 @@
                   new-loops]
                  [else
                   ;; Not a loop, so any reference added in `new-loop-if-tail`
-                  ;; is also to a non-loop
+                  ;; is also a non-loop
                   (for/fold ([loops new-loops]) ([(id bx) (in-hash new-loop-if-tail)])
                     (if (unbox bx)
                         (hash-remove loops id)
@@ -647,6 +658,8 @@
                                `[,args . ,(convert-lifted-calls-in-seq/box-mutated body args lifts frees empties)]))))]
         [`(begin . ,vs)
          (reannotate v `(begin . ,(convert-lifted-calls-in-seq vs lifts frees empties)))]
+        [`(begin-unsafe . ,vs)
+         (reannotate v `(begin-unsafe . ,(convert-lifted-calls-in-seq vs lifts frees empties)))]
         [`(begin0 . ,vs)
          (reannotate v `(begin0 . ,(convert-lifted-calls-in-seq vs lifts frees empties)))]
         [`(quote . ,_) v]

@@ -1789,7 +1789,7 @@
  (ask-about-normalizing-strings "Bei Normalisierung nachfragen")
  
   (always-use-platform-specific-linefeed-convention "Immer die plattformspezifische Linefeed-Konvention verwenden")
-
+  (disable-caret-blinking "Cursor-Blinken abschalten")
 
   ;; optimization coach
   (hide-optimization-coach "Optimierungs-Coach ausblenden")

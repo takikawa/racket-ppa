@@ -108,6 +108,9 @@ static void check_object(ptr p, uptr seg, ISPC s_in, IBOOL aftergc)
     else if (TYPEP(tf, mask_fxvector, type_fxvector))
     {
     }
+    else if (TYPEP(tf, mask_flvector, type_flvector))
+    {
+    }
     else if (TYPEP(tf, mask_bytevector, type_bytevector))
     {
     }
@@ -303,10 +306,6 @@ static void check_object(ptr p, uptr seg, ISPC s_in, IBOOL aftergc)
                       check_pointer(&(TARGETMACHINE(tc)), 1, p, seg, s_in, aftergc);
                       check_pointer(&(FXLENGTHBV(tc)), 1, p, seg, s_in, aftergc);
                       check_pointer(&(FXFIRSTBITSETBV(tc)), 1, p, seg, s_in, aftergc);
-                      check_pointer(&(NULLIMMUTABLEVECTOR(tc)), 1, p, seg, s_in, aftergc);
-                      check_pointer(&(NULLIMMUTABLEFXVECTOR(tc)), 1, p, seg, s_in, aftergc);
-                      check_pointer(&(NULLIMMUTABLEBYTEVECTOR(tc)), 1, p, seg, s_in, aftergc);
-                      check_pointer(&(NULLIMMUTABLESTRING(tc)), 1, p, seg, s_in, aftergc);
                       check_pointer(&(COMPILEPROFILE(tc)), 1, p, seg, s_in, aftergc);
                       check_pointer(&(SUBSETMODE(tc)), 1, p, seg, s_in, aftergc);
                       check_pointer(&(DEFAULTRECORDEQUALPROCEDURE(tc)), 1, p, seg, s_in, aftergc);
@@ -543,6 +542,14 @@ static uptr size_object(ptr p)
     else if (TYPEP(tf, mask_fxvector, type_fxvector))
     {
       uptr sz = size_fxvector((Sfxvector_length(p)));
+      {
+        uptr p_sz = sz;
+        return p_sz;
+      }
+    }
+    else if (TYPEP(tf, mask_flvector, type_flvector))
+    {
+      uptr sz = size_flvector((Sflvector_length(p)));
       {
         uptr p_sz = sz;
         return p_sz;

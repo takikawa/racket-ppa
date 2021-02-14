@@ -1,3 +1,9 @@
+v8.0
+
+  * added define-overriding-judgment-form
+
+  * improved source location reporting for test- forms
+
 v7.9
 
   * added language-make-::=-pict

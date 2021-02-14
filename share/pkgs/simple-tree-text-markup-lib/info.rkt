@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define collection (quote multi)) (define build-deps (quote ())) (define deps (quote ("base"))) (define pkg-desc "Simple tree-based markup representation for use in the REPL") (define pkg-authors (quote (sperber)))))

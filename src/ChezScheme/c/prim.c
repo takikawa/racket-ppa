@@ -132,6 +132,7 @@ static void create_c_entry_vector() {
     S_install_c_entry(CENTRY_raw_collect_cond, TO_PTR(&S_collect_cond));
     S_install_c_entry(CENTRY_raw_collect_thread0_cond, TO_PTR(&S_collect_thread0_cond));
     S_install_c_entry(CENTRY_raw_tc_mutex, TO_PTR(&S_tc_mutex));
+    S_install_c_entry(CENTRY_raw_terminated_cond, TO_PTR(&S_terminated_cond));
     S_install_c_entry(CENTRY_activate_thread, proc2ptr(S_activate_thread));
     S_install_c_entry(CENTRY_deactivate_thread, proc2ptr(Sdeactivate_thread));
     S_install_c_entry(CENTRY_unactivate_thread, proc2ptr(S_unactivate_thread));
@@ -150,6 +151,9 @@ static void create_c_entry_vector() {
     S_install_c_entry(CENTRY_Scall_any_results, proc2ptr(S_call_any_results));
     S_install_c_entry(CENTRY_segment_info, proc2ptr(S_segment_info));
     S_install_c_entry(CENTRY_bignum_mask_test, proc2ptr(S_bignum_mask_test));
+    S_install_c_entry(CENTRY_null_immutable_vector, TO_PTR(S_G.null_immutable_vector));
+    S_install_c_entry(CENTRY_null_immutable_bytevector, TO_PTR(S_G.null_immutable_bytevector));
+    S_install_c_entry(CENTRY_null_immutable_string, TO_PTR(S_G.null_immutable_string));
 }
 
 void S_check_c_entry_vector() {
@@ -158,7 +162,7 @@ void S_check_c_entry_vector() {
     for (i = 0; i < c_entry_vector_size; i++) {
 #ifndef PTHREADS
       if (i == CENTRY_raw_collect_cond || i == CENTRY_raw_collect_thread0_cond
-          || i == CENTRY_raw_tc_mutex
+          || i == CENTRY_raw_tc_mutex || i == CENTRY_raw_terminated_cond
           || i == CENTRY_activate_thread || i == CENTRY_deactivate_thread
           || i == CENTRY_unactivate_thread)
         continue;
@@ -224,6 +228,8 @@ static void s_instantiate_code_object() {
     cookie = S_get_scheme_arg(tc, 2);
     proc = S_get_scheme_arg(tc, 3);
 
+    S_thread_start_code_write();
+
     new = S_code(tc, CODETYPE(old), CODELEN(old));
 
     S_immobilize_object(new);
@@ -274,12 +280,15 @@ static void s_instantiate_code_object() {
     }
     S_flush_instruction_cache(tc);
 
+    S_thread_end_code_write();
+
     AC0(tc) = new;
 }
 
 static void s_link_code_object(co, objs) ptr co, objs; {
     ptr t; uptr a, m, n;
 
+    S_thread_start_code_write();
     t = CODERELOC(co);
     m = RELOCSIZE(t);
     a = 0;
@@ -298,6 +307,7 @@ static void s_link_code_object(co, objs) ptr co, objs; {
         S_set_code_obj("gc", RELOC_TYPE(entry), co, a, Scar(objs), item_off);
         objs = Scdr(objs);
     }
+    S_thread_end_code_write();
 }
 
 static INT s_check_heap_enabledp(void) {

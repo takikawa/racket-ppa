@@ -210,6 +210,10 @@ Signatur für rationale Zahlen.
 Signatur für ganze Zahlen.
 }
 
+@defproc[(integer-from-to [low integer?] [high integer?]) signature?]{
+Signatur für ganze Zahlen zwischen @racket[low] und @racket[high].
+}
+
 @defidform[natural]{
 Signatur für ganze, nichtnegative Zahlen.
 }
@@ -219,11 +223,11 @@ Signatur für boolesche Werte.
 }
 
 @defidform[true]{
-Signatur für \scheme[#t].
+Signatur für @racket[#t].
 }
 
 @defidform[false]{
-Signatur für \scheme[#f].
+Signatur für @racket[#f].
 }
 
 @defidform[string]{

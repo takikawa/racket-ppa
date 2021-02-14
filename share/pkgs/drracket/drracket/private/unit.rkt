@@ -553,7 +553,7 @@
                           text:info%))))))))))))))])
        ((get-program-editor-mixin)
         (class* definitions-super% (drracket:unit:definitions-text<%>)
-          (inherit get-top-level-window is-locked? lock while-unlocked
+          (inherit is-locked? lock while-unlocked
                    highlight-first-line is-printing?)
           
           (define interactions-text #f)
@@ -659,6 +659,19 @@
           
           (define/override (get-can-close-parent)
             (and tab (send tab get-frame)))
+
+          ;; if we use the tab to get to the top-level frame too
+          ;; soon then we use some GUI controls before they are
+          ;; initialized, so delay this until the file is
+          ;; opened in the definitions window
+          (define allow-top-level-connection #f)
+          (define/public (enable-top-level-window-connection)
+            (set! allow-top-level-connection #t))
+          (define/override (get-top-level-window)
+            (or (super get-top-level-window)
+                (and allow-top-level-connection
+                     tab
+                     (send tab get-frame))))
           
           (inherit is-modified? run-after-edit-sequence)
           (define/override (set-modified mod?)
@@ -1390,7 +1403,8 @@
     update-toolbar-visibility
     show/hide-log
     set-logger-text-field-value
-    show-planet-status)
+    show-planet-status
+    enable-top-level-window-connection)
   
   (define frame-mixin
     (mixin (drracket:frame:<%> frame:status-line<%> frame:searchable-text<%> frame:size-pref<%>)
@@ -2965,7 +2979,7 @@
       (define/private (save-all-unsaved-files)
         (let/ec k
           (for ([tab (in-list (get-unsaved-candidate-tabs #f))])
-            (parameterize ([editor:doing-autosave? #t])
+            (parameterize ([editor:silent-cancel-on-save-file-out-of-date? #t])
               (unless (send (send tab get-defs) save-file #f 'same #f)
                 (k (void))))))
         (update-tabs-labels))
@@ -3080,6 +3094,7 @@
                    200))
             (init-definitions-text new-tab)
             (when filename (send defs load-file filename))
+            (send defs enable-top-level-window-connection)
             (change-to-nth-tab (- (send tabs-panel get-number) 1))
             (send ints initialize-console)
             (send tabs-panel set-selection (- (send tabs-panel get-number) 1))
@@ -3212,26 +3227,34 @@
                    (range (+ i 1) (length tabs))))))
 
       (define/public-final (close-current-tab)
-        (cond
-          [(null? tabs) (void)]
-          [(null? (cdr tabs)) (void)]
-          [else
-           (let loop ([l-tabs tabs])
-             (cond
-               [(null? l-tabs) (error 'close-current-tab "uh oh.3")]
-               [else
-                (let ([tab (car l-tabs)])
-                  (if (eq? tab current-tab)
-                      (when (close-tab tab)
-                        (for-each (lambda (t) (send t set-i (- (send t get-i) 1)))
-                                  (cdr l-tabs))
-                        (set! tabs (remq tab tabs))
-                        (send tabs-panel delete (send tab get-i))
-                        (update-menu-bindings) 
-                        (change-to-tab
-                         (argmax (λ (tab) (send tab get-last-touched)) 
-                                 tabs)))
-                      (loop (cdr l-tabs))))]))]))
+        (close-given-tab current-tab))
+
+      (define/public-final (close-ith-tab i)
+        (when (< i (length tabs))
+          (close-given-tab (list-ref tabs i))))
+
+      (define/public-final (close-given-tab tab-to-close)
+        (define subsequent-tabs
+          (let loop ([l-tabs tabs])
+            (cond
+              [(null? l-tabs) #f]
+              [(eq? (car l-tabs) tab-to-close) (cdr l-tabs)]
+              [else (loop (cdr l-tabs))])))
+        ;; make sure we have at least 2 tabs and the tab we're closing exists
+        (when (and subsequent-tabs (pair? (cdr tabs)))
+          (when (close-tab tab-to-close)
+            (for ([tab (in-list subsequent-tabs)])
+              (send tab set-i (- (send tab get-i) 1)))
+            (set! tabs (remq tab-to-close tabs))
+            (send tabs-panel delete (send tab-to-close get-i))
+            (update-menu-bindings)
+            (cond
+              [(eq? tab-to-close current-tab)
+               (change-to-tab
+                (argmax (λ (tab) (send tab get-last-touched))
+                        tabs))]
+              [else
+               (update-tabs-labels)]))))
       
       ;; a helper private method for close-current-tab -- doesn't close an arbitrary tab.
       (define/private (close-tab tab)
@@ -3362,9 +3385,9 @@
           (super-new)))
       
       (define/override (on-activate active?)
+        (when (preferences:get 'drracket:save-files-on-tab-switch?)
+          (save-all-unsaved-files))
         (when active?
-          (when (preferences:get 'drracket:save-files-on-tab-switch?)
-            (save-all-unsaved-files))
           (send (get-current-tab) touched))
         (super on-activate active?))
       
@@ -3492,15 +3515,19 @@
                       (string-constant hide-overview)
                       (string-constant show-overview)))
                  (parent (get-show-menu))
+                 [demand-callback
+                  (λ (mi)
+                    (send mi set-label
+                          (if (overview-shown?)
+                              (string-constant hide-overview)
+                              (string-constant show-overview))))]
                  (callback
                   (λ (menu evt)
                     (cond
                       [(overview-shown?)
-                       (send menu set-label (string-constant show-overview))
                        (preferences:set 'drracket:inline-overview-shown? #f)
                        (send (send (get-current-tab) get-defs) set-inline-overview-enabled? #f)]
                       [else
-                       (send menu set-label (string-constant hide-overview))
                        (preferences:set 'drracket:inline-overview-shown? #t)
                        (send (send (get-current-tab) get-defs) set-inline-overview-enabled? #t)])))))
           (set-show-menu-sort-key overview-menu-item 301))
@@ -4711,7 +4738,13 @@
                (if (is-a? f drracket:unit:frame<%>)
                    1
                    0))))
-        
+
+      (define/override (find-editor predicate)
+        (or (findf predicate (map (lambda (tab) (send tab get-defs))
+                                  tabs))
+            (findf predicate (map (lambda (tab) (send tab get-ints))
+                                  tabs))))
+                      
       (super-new
        [filename filename]
        [style '(toolbar-button fullscreen-button)]
@@ -4755,16 +4788,22 @@
                               (stretchable-height #f))]
       (define panel-with-tabs (new vertical-pane%
                                    (parent (get-definitions/interactions-panel-parent))))
-      (define tabs-panel (new tab-panel% 
-                              (font small-control-font)
-                              (parent panel-with-tabs)
-                              (stretchable-height #f)
-                              (style '(deleted no-border))
-                              (choices '("first name"))
-                              (callback (λ (x y)
-                                          (let ([sel (send tabs-panel get-selection)])
-                                            (when sel
-                                              (change-to-nth-tab sel)))))))
+      (define tabs-panel (new
+                          (class tab-panel%
+                            (define/override (on-close-request i)
+                              (close-ith-tab i))
+                            (define/augment (on-reorder former-indicies)
+                              (reorder-tabs former-indicies))
+                            (super-new
+                             (font small-control-font)
+                             (parent panel-with-tabs)
+                             (stretchable-height #f)
+                             (style '(deleted no-border))
+                             (choices '("first name"))
+                             (callback (λ (x y)
+                                         (define sel (send tabs-panel get-selection))
+                                         (when sel
+                                           (change-to-nth-tab sel))))))))
       (set! resizable-panel (new (if (preferences:get 'drracket:defs/ints-horizontal)
                                        horizontal-dragable/def-int%
                                        vertical-dragable/def-int%)
@@ -4953,7 +4992,8 @@
       ;; definitions text is connected to the frame, so we do an extra initialization
       ;; now, once we know we have the right connection
       (set-color-status! (send definitions-text is-lexer-valid?))
-      (send definitions-canvas focus)))
+      (send definitions-canvas focus)
+      (send definitions-text enable-top-level-window-connection)))
   
   (define (get-define-popup-name infos vertical?)
     (cond

@@ -140,6 +140,9 @@
 (define (vector->addr bv) ; call with GC disabled or locked object
   (#%$object-address bv vector-content-offset))
 
+(define (flvector->addr bv) ; call with GC disabled or locked object
+  (#%$object-address bv flvector-content-offset))
+
 ;; Convert a raw foreign address to a Scheme value on the
 ;; assumption that the address is the payload of a byte
 ;; string:
@@ -187,7 +190,8 @@
   (cond
    [(integer? memory) memory]
    [(bytes? memory) (bytevector->addr memory)]
-   [(vector? memory) (vector->addr memory)] ; used for immobile cells
+   [(#%vector? memory) (vector->addr memory)] ; used for immobile cells
+   [(flvector? memory) (flvector->addr memory)]
    [else (object->addr memory)]))
 
 ;; ----------------------------------------
@@ -206,6 +210,7 @@
   (or (eqv? v 0)
       (bytes? v)
       (#%vector? v)
+      (flvector? v)
       (exact-nonnegative-integer? v)))
 
 ;; ----------------------------------------
@@ -310,7 +315,7 @@
     (create-compound-ctype (ctype-host-rep type)
                            (ctype-our-rep type)
                            type
-                           racket-to-c
+                           (protect-racket-to-c racket-to-c)
                            c-to-racket
                            (compound-ctype-get-decls type)
                            (compound-ctype-size type)
@@ -320,18 +325,29 @@
     (create-ctype (ctype-host-rep type)
                   (ctype-our-rep type)
                   type
-                  racket-to-c
+                  (protect-racket-to-c racket-to-c)
                   c-to-racket)]))
 
+(define (protect-racket-to-c racket-to-c)
+  ;; Make sure `racket-to-c` is not confused for an internal
+  ;; variant that accepts a `who` argument:
+  (if (and (#%procedure? racket-to-c)
+           (chez:procedure-arity-includes? racket-to-c 2))
+      (lambda (v) (racket-to-c v))
+      racket-to-c))
+
 ;; Apply all the conversion wrappers of `type` to the Scheme value `v`
-(define (s->c type v)
+(define (s->c who type v)
   (let* ([racket-to-c (ctype-scheme->c type)]
          [v (if racket-to-c
-                (|#%app| racket-to-c v)
+                (if (and (#%procedure? racket-to-c)
+                         (chez:procedure-arity-includes? racket-to-c 2))
+                    (racket-to-c who v)
+                    (|#%app| racket-to-c v))
                 v)]
          [next (ctype-basetype type)])
     (if (ctype? next)
-        (s->c next v)
+        (s->c who next v)
         v)))
 
 ;; Apply all the conversion wrapper of `type` to the C value `v`
@@ -361,7 +377,7 @@
 ;; foreign-thread regions. Also, the integer checks built into Chez
 ;; Scheme are more permissive than Racket's.
 
-(define-syntax-rule (checker who ?) (lambda (x) (if (? x) x (bad-ctype-value who x))))
+(define-syntax-rule (checker who ?) (lambda (for-whom x) (if (? x) x (bad-ctype-value for-whom who x))))
 (define-syntax integer-checker
   (syntax-rules (signed unsigned)
     [(_ who signed n int?) (checker who (lambda (x) (and (int? x) (<= (- (expt 2 (- n 1))) x  (- (expt 2 (- n 1)) 1)))))]
@@ -386,10 +402,10 @@
   (checker who (lambda (x) (or (not x) (string? x)))))
 (define-ctype _void 'void 'void (checker who void))
 
-(define (bad-ctype-value type-name v)
-  (raise-arguments-error 'apply
-                         "bad value for conversion"
-                         "ctype" (make-unquoted-printing-string (symbol->string type-name))
+(define (bad-ctype-value who type-name v)
+  (raise-arguments-error who
+                         "given value does not fit primitive C type"
+                         "C type" (make-unquoted-printing-string (symbol->string type-name))
                          "value" v))
 
 ;; Unlike traditional Racket, copies when converting from C:
@@ -460,7 +476,7 @@
         (loop (fx+ i 4)))))
 
 (define-ctype _short_bytes 'void* 'bytes
-  (lambda (x) x)
+  (lambda (form-whom x) x)
   (lambda (x) (let loop ([i 0])
                 (if (fx= 0 (foreign-ref 'unsigned-16 x i))
                     (let ([bstr (make-bytes i)])
@@ -469,37 +485,37 @@
                     (loop (+ i 2))))))
 
 (define-ctype _double* 'double 'double
-  (lambda (x) (if (real? x)
-                  (exact->inexact x)
-                  (bad-ctype-value who x))))
+  (lambda (for-whom x) (if (real? x)
+                           (exact->inexact x)
+                           (bad-ctype-value for-whom who x))))
 
 (define-ctype _ufixnum 'fixnum 'fixnum (checker who fixnum?)) ; historically, no sign check
 (define-ctype _fixint 'integer-32 'fixint (checker who fixnum?))
 (define-ctype _ufixint 'unsigned-32 'ufixint (checker who fixnum?)) ; historically, no sign check
 
 (define-ctype _symbol 'string 'string
-  (lambda (x) (if (symbol? x)
-                  (symbol->string x)
-                  (bad-ctype-value who x)))
+  (lambda (for-whom x) (if (symbol? x)
+                           (symbol->string x)
+                           (bad-ctype-value for-whom who x)))
   (lambda (s) (string->symbol s)))
 
 (define-ctype _longdouble 'double 'double
-  (lambda (x) (bad-ctype-value who x)))
+  (lambda (for-whom x) (bad-ctype-value for-whom who x)))
 
 (define-ctype _pointer 'void* 'pointer
-  (lambda (v) (unwrap-cpointer who v)) ; resolved to an address later (with the GC disabled)
+  (lambda (for-whom v) (unwrap-cpointer for-whom v)) ; resolved to an address later (with the GC disabled)
   (lambda (x) (memory->cpointer x)))
 
 ;; Treated specially by `ptr-ref`
 (define-ctype _fpointer 'void* 'fpointer
-  (lambda (v) (unwrap-cpointer who v)) ; resolved to an address later (with the GC disabled)
+  (lambda (for-whom v) (unwrap-cpointer for-whom v)) ; resolved to an address later (with the GC disabled)
   (lambda (x)
     (if (ffi-obj? x) ; check for `ptr-ref` special case on `ffi-obj`s
         x
         (memory->cpointer x))))
 
 (define-ctype _gcpointer 'void* 'gcpointer
-  (lambda (v) (unwrap-cpointer who v)) ; like `_pointer`: resolved later
+  (lambda (for-whom v) (unwrap-cpointer for-whom v)) ; like `_pointer`: resolved later
   (lambda (x)
     ;; `x` must have been converted to a bytevector or vector before
     ;; the GC was re-enabled
@@ -507,7 +523,7 @@
 
 ;; One-byte stdbool is correct on all currently supported platforms, at least:
 (define-ctype _stdbool 'integer-8 'stdbool
-  (lambda (x) (if x 1 0))
+  (lambda (for-whom x) (if x 1 0))
   (lambda (v) (not (zero? v))))
 
 (define make-cstruct-type
@@ -517,14 +533,13 @@
    [(types abi alignment) (make-cstruct-type types abi alignment 'atomic)]
    [(types abi alignment malloc-mode)
     (let ([make-decls
-           (escapes-ok
-             (lambda (id next!-id)
-               (let-values ([(reps decls) (types->reps types next!-id)])
-                 (append decls
-                         `((define-ftype ,id
-                             (struct ,@(map (lambda (rep)
-                                              `[,(next!-id) ,rep])
-                                            reps))))))))])
+           (lambda (id next!-id)
+             (let-values ([(reps decls) (types->reps types next!-id)])
+               (append decls
+                       `((define-ftype ,id
+                           (struct ,@(map (lambda (rep)
+                                            `[,(next!-id) ,rep])
+                                          reps)))))))])
       (let-values ([(size alignment) (ctypes-sizeof+alignof types alignment)])
         (create-compound-ctype 'struct
                                'struct
@@ -540,14 +555,13 @@
   (for-each (lambda (type) (check who ctype? type))
             types)
   (let ([make-decls
-         (escapes-ok
-           (lambda (id next!-id)
-             (let-values ([(reps decls) (types->reps types next!-id)])
-               (append decls
-                       `((define-ftype ,id
-                           (union ,@(map (lambda (rep)
-                                           `[,(next!-id) ,rep])
-                                         reps))))))))]
+         (lambda (id next!-id)
+           (let-values ([(reps decls) (types->reps types next!-id)])
+             (append decls
+                     `((define-ftype ,id
+                         (union ,@(map (lambda (rep)
+                                         `[,(next!-id) ,rep])
+                                       reps)))))))]
         [size (apply max (map ctype-sizeof types))]
         [alignment (apply max (map ctype-alignof types))])
     (create-compound-ctype 'union
@@ -564,12 +578,11 @@
   (check who ctype? type)
   (check who exact-nonnegative-integer? count)
   (let ([make-decls
-         (escapes-ok
-           (lambda (id next!-id)
-             (let-values ([(reps decls) (types->reps (list type) next!-id)])
-               (append decls
-                       `((define-ftype ,id
-                           (array ,count ,(car reps))))))))]
+         (lambda (id next!-id)
+           (let-values ([(reps decls) (types->reps (list type) next!-id)])
+             (append decls
+                     `((define-ftype ,id
+                         (array ,count ,(car reps)))))))]
         [size (* count (ctype-sizeof type))]
         [alignment (ctype-alignof type)])
     (unless (fixnum? size)
@@ -721,7 +734,17 @@
    [(compound-ctype? c)
     (compound-ctype-alignment c)]
    [else
-    (ctype-sizeof c)]))
+    (case (ctype-host-rep c)
+      [(boolean int) (foreign-alignof 'int)]
+      [(double) (foreign-alignof 'double)]
+      [(float) (foreign-alignof 'float)]
+      [(integer-8 unsigned-8) (foreign-alignof 'integer-8)]
+      [(integer-16 unsigned-16) (foreign-alignof 'integer-16)]
+      [(integer-32 unsigned-32) (foreign-alignof 'integer-32)]
+      [(integer-64 unsigned-64) (foreign-alignof 'integer-64)]
+      [else
+       ;; Everything else is pointer-sized:
+       (foreign-alignof 'void*)])]))
 
 (define/who (cpointer-gcable? p)
   (let ([p (unwrap-cpointer who p)])
@@ -729,7 +752,8 @@
         (and (authentic-cpointer? p)
              (let ([memory (cpointer-memory p)])
                (or (bytes? memory)
-                   (#%vector? memory)))))))
+                   (#%vector? memory)
+                   (flvector? memory)))))))
 
 ;; ----------------------------------------
 
@@ -933,7 +957,8 @@
    [(p type v)
     (check who cpointer? p)
     (check who ctype? type)
-    (foreign-set!* type
+    (foreign-set!* who
+                   type
                    p
                    0
                    v)]
@@ -941,7 +966,8 @@
     (check who cpointer? p)
     (check who ctype? type)
     (check who exact-integer? offset)
-    (foreign-set!* type
+    (foreign-set!* who
+                   type
                    p
                    (* (ctype-sizeof type) offset)
                    v)]
@@ -950,7 +976,8 @@
     (check who ctype? type)
     (check who (lambda (p) (eq? p 'abs)) :contract "'abs" abs-tag)
     (check who exact-integer? offset)
-    (foreign-set!* type
+    (foreign-set!* who
+                   type
                    p
                    offset
                    v)]))
@@ -1026,18 +1053,18 @@
 (define (word-aligned? offset)
   (zero? (fxand offset (fx- ptr-size-in-bytes 1))))
 
-(define (foreign-set!* type orig-p offset orig-v)
+(define (foreign-set!* who type orig-p offset orig-v)
   (let ([p (unwrap-cpointer 'foreign-set!* orig-p)])
     (cond
      [(compound-ctype? type)
       ;; Corresponds to a copy, since `v` is represented by a pointer
       (memcpy* p offset
-               (s->c type orig-v) 0
+               (s->c who type orig-v) 0
                (compound-ctype-size type)
                #f)]
      [else
       (let ([host-rep (ctype-host-rep type)]
-            [v (s->c type orig-v)])
+            [v (s->c who type orig-v)])
         (cond
          [(cpointer-nonatomic? p)
           (let ([offset (+ offset (ptr-offset* p))])
@@ -1472,7 +1499,7 @@
   (make-cpointer vec #f))
 
 (define (flvector->cpointer flvec)
-  (make-cpointer (flvector-bstr flvec) #f))
+  (make-cpointer flvec #f))
 
 ;; ----------------------------------------
 
@@ -1507,45 +1534,44 @@
    [(p in-types out-type)
     (ffi-call p in-types out-type #f #f #f)]
    [(p in-types out-type abi)
-    (ffi-call p in-types out-type abi #f #f)]
+    (ffi-call p in-types out-type abi #f #f #f)]
    [(p in-types out-type abi save-errno)
-    (ffi-call p in-types out-type abi save-errno #f)]
+    (ffi-call p in-types out-type abi save-errno #f #f)]
    [(p in-types out-type abi save-errno orig-place?)
-    (ffi-call p in-types out-type abi save-errno orig-place? #f)]
+    (ffi-call p in-types out-type abi save-errno orig-place? #f #f)]
    [(p in-types out-type abi save-errno orig-place? lock-name)
-    (ffi-call p in-types out-type abi save-errno orig-place? lock-name #f)]
+    (ffi-call p in-types out-type abi save-errno orig-place? lock-name #f #f)]
    [(p in-types out-type abi save-errno orig-place? lock-name blocking?)
+    (ffi-call p in-types out-type abi save-errno orig-place? lock-name blocking? #f)]
+   [(p in-types out-type abi save-errno orig-place? lock-name blocking? varargs-after)
     (check who cpointer? p)
-    (check who (lambda (l)
-                 (and (list? l)
-                      (andmap ctype? l)))
-           :contract "(listof ctype?)"
-           in-types)
-    (check who ctype? out-type)
-    (check who string? :or-false lock-name)
-    ((ffi-call/callable #t in-types out-type abi save-errno lock-name blocking? orig-place? #f #f) p)]))
+    (check-ffi-call who in-types out-type abi varargs-after save-errno lock-name)
+    ((ffi-call/callable #t in-types out-type abi varargs-after save-errno lock-name blocking? orig-place? #f #f) p)]))
 
 (define/who ffi-call-maker
   (case-lambda
    [(in-types out-type)
-    (ffi-call-maker in-types out-type #f #f #f)]
+    (ffi-call-maker in-types out-type #f #f #f #f)]
    [(in-types out-type abi)
-    (ffi-call-maker in-types out-type abi #f #f)]
+    (ffi-call-maker in-types out-type abi #f #f #f)]
    [(in-types out-type abi save-errno)
-    (ffi-call-maker in-types out-type abi save-errno #f)]
+    (ffi-call-maker in-types out-type abi save-errno #f #f)]
    [(in-types out-type abi save-errno orig-place?)
-    (ffi-call-maker in-types out-type abi save-errno orig-place? #f)]
+    (ffi-call-maker in-types out-type abi save-errno orig-place? #f #f)]
    [(in-types out-type abi save-errno orig-place? lock-name)
-    (ffi-call-maker in-types out-type abi save-errno orig-place? lock-name #f)]
+    (ffi-call-maker in-types out-type abi save-errno orig-place? lock-name #f #f)]
    [(in-types out-type abi save-errno orig-place? lock-name blocking?)
-    (check who (lambda (l)
-                 (and (list? l)
-                      (andmap ctype? l)))
-           :contract "(listof ctype?)"
-           in-types)
-    (check who ctype? out-type)
-    (check who string? :or-false lock-name)
-    (ffi-call/callable #t in-types out-type abi save-errno lock-name blocking? orig-place? #f #f)]))
+    (ffi-call-maker in-types out-type abi save-errno orig-place? lock-name blocking? #f)]
+   [(in-types out-type abi save-errno orig-place? lock-name blocking? varargs-after)
+    (check-ffi-call who in-types out-type abi varargs-after save-errno lock-name)
+    (ffi-call/callable #t in-types out-type abi varargs-after save-errno lock-name blocking? orig-place? #f #f)]))
+
+(define (check-ffi-call who in-types out-type abi varargs-after save-errno lock-name)
+  (check-ffi who in-types out-type abi varargs-after)
+  (check who (lambda (save-errno) (#%memq save-errno '(#f posix windows)))
+         :contract "(or/c #f 'posix 'windows)"
+         save-errno)
+  (check who string? :or-false lock-name))
 
 ;; For sanity checking of callbacks during a blocking callout:
 (define-virtual-register currently-blocking? #f)
@@ -1560,11 +1586,14 @@
 
 (define call-locks (make-eq-hashtable))
 
-(define (ffi-call/callable call? in-types out-type abi save-errno lock-name blocking? orig-place? atomic? async-apply)
-  (let* ([conv (case abi
-                 [(stdcall) '__stdcall]
-                 [(sysv) '__cdecl]
-                 [else #f])]
+(define (ffi-call/callable call? in-types out-type abi varargs-after save-errno lock-name blocking? orig-place? atomic? async-apply)
+  (let* ([conv* (let ([conv* (case abi
+                               [(stdcall) '(__stdcall)]
+                               [(sysv) '(__cdecl)]
+                               [else '()])])
+                  (if varargs-after
+                      (cons `(__varargs_after ,varargs-after) conv*)
+                      conv*))]
          [by-value? (lambda (type)
                       ;; An 'array rep is compound, but should be
                       ;; passed as a pointer, so only pass 'struct and
@@ -1607,7 +1636,7 @@
                          (list
                           (lambda (to-wrap)
                             (,(if call? 'foreign-procedure 'foreign-callable)
-                             ,conv
+                             ,@conv*
                              ,@(if (or blocking? async-apply) '(__collect_safe) '())
                              to-wrap
                              ,(map (lambda (in-type id)
@@ -1632,13 +1661,13 @@
                                      ids)
                                 '())))])
             (let* ([wb (with-interrupts-disabled*
-                        (weak-hash-ref ffi-expr->code expr #f))]
+                        (hash-ref ffi-expr->code expr #f))]
                    [code (if wb (car wb) #!bwp)])
               (if (eq? code #!bwp)
                   (let ([code (eval/foreign expr (if call? 'comp-ffi-call 'comp-ffi-back))])
                     (hashtable-set! ffi-code->expr (car code) expr)
                     (with-interrupts-disabled*
-                     (weak-hash-set! ffi-expr->code expr (weak-cons code #f)))
+                     (hash-set! ffi-expr->code expr (weak-cons code #f)))
                     code)
                   code)))]
          [gen-proc (car gen-proc+ret-maker+arg-makers)]
@@ -1658,93 +1687,88 @@
              (not blocking?)
              (not orig-place?)
              (not save-errno)
-             (not lock)
              (#%andmap (lambda (in-type)
                          (case (ctype-host-rep in-type)
                            [(scheme-object struct union) #f]
                            [else #t]))
                        in-types))
-        (lambda (to-wrap)
-          (let* ([proc-p (unwrap-cpointer 'ffi-call to-wrap)]
-                 [proc (and (not (cpointer-needs-lock? proc-p))
-                            (gen-proc (cpointer-address proc-p)))]
-                 [unwrap (lambda (arg in-type)
-                           (let ([c (s->c in-type arg)])
-                             (if (cpointer? c)
-                                 (unwrap-cpointer 'ffi-call c)
-                                 c)))]
-                 [unpack (lambda (arg in-type)
-                           (case (array-rep-to-pointer-rep (ctype-host-rep in-type))
-                             [(void*) (cpointer-address arg)]
-                             [else arg]))])
-            (do-procedure-reduce-arity-mask
-             (cond
-              [proc
-               (case-lambda
-                [()
-                 (c->s out-type (with-interrupts-disabled* (proc)))]
-                [(orig-a)
-                 (let ([a (unwrap orig-a (car in-types))])
-                   (c->s out-type (retain
-                                   orig-a
-                                   (with-interrupts-disabled* (proc (unpack a (car in-types)))))))]
-                [(orig-a orig-b)
-                 (let ([a (unwrap orig-a (car in-types))]
-                       [b (unwrap orig-b (cadr in-types))])
-                   (c->s out-type (retain
-                                   orig-a orig-b
-                                   (with-interrupts-disabled*
-                                    (proc (unpack a (car in-types)) (unpack b (cadr in-types)))))))]
-                [(orig-a orig-b orig-c)
-                 (let ([a (unwrap orig-a (car in-types))]
-                       [b (unwrap orig-b (cadr in-types))]
-                       [c (unwrap orig-c (caddr in-types))])
-                   (c->s out-type (with-interrupts-disabled*
-                                   (retain
-                                    orig-a orig-b orig-c
-                                    (proc (unpack a (car in-types))
-                                          (unpack b (cadr in-types))
-                                          (unpack c (caddr in-types)))))))]
-                [(orig-a orig-b orig-c orig-d)
-                 (let ([a (unwrap orig-a (car in-types))]
-                       [b (unwrap orig-b (cadr in-types))]
-                       [c (unwrap orig-c (caddr in-types))]
-                       [d (unwrap orig-d (cadddr in-types))])
-                   (c->s out-type (retain
-                                   orig-a orig-b orig-c orig-d
-                                   (with-interrupts-disabled*
-                                    (proc (unpack a (car in-types))
-                                          (unpack b (cadr in-types))
-                                          (unpack c (caddr in-types))
-                                          (unpack d (cadddr in-types)))))))]
-                [orig-args
-                 (let ([args (map (lambda (a t) (unwrap a t)) orig-args in-types)])
-                   (c->s out-type (with-interrupts-disabled*
-                                   (retain
-                                    orig-args
-                                    (#%apply proc (map (lambda (a t) (unpack a t)) args in-types))))))])]
-              [else
-               (lambda orig-args
-                 (let ([args (map (lambda (a t) (unwrap a t)) orig-args in-types)])
-                   (c->s out-type (with-interrupts-disabled*
-                                   (retain
-                                    orig-args
-                                    (#%apply (gen-proc (cpointer-address proc-p))
-                                             (map (lambda (a t) (unpack a t)) args in-types)))))))])
-             (fxsll 1 (length in-types))
-             (cpointer->name proc-p))))]
+        (let ([arity-mask (bitwise-arithmetic-shift-left 1 (length in-types))])
+          (lambda (to-wrap)
+            (let* ([proc-p (unwrap-cpointer 'ffi-call to-wrap)]
+                   [proc (and (not (cpointer-needs-lock? proc-p))
+                              (gen-proc (cpointer-address proc-p)))]
+                   [name (cpointer->name proc-p)]
+                   [unwrap (lambda (arg in-type)
+                             (let ([c (s->c name in-type arg)])
+                               (if (cpointer? c)
+                                   (unwrap-cpointer 'ffi-call c)
+                                   c)))]
+                   [unpack (lambda (arg in-type)
+                             (case (array-rep-to-pointer-rep (ctype-host-rep in-type))
+                               [(void*) (cpointer-address arg)]
+                               [else arg]))])
+              (do-procedure-reduce-arity-mask
+               (cond
+                 [proc
+                  (let-syntax ([gen (lambda (stx)
+                                      (syntax-case stx ()
+                                        [(_ id ...)
+                                         (with-syntax ([(type ...) (generate-temporaries #'(id ...))]
+                                                       [(orig ...) (generate-temporaries #'(id ...))])
+                                           (let ([make-proc
+                                                  (lambda (lock)
+                                                    #`(lambda (orig ...)
+                                                        (let ([id (unwrap orig type)] ...)
+                                                          (when #,lock (mutex-acquire #,lock))
+                                                          (let ([r (retain
+                                                                    orig ...
+                                                                    (with-interrupts-disabled*
+                                                                     (proc (unpack id type) ...)))])
+                                                            (when #,lock (mutex-release #,lock))
+                                                            (c->s out-type r)))))])
+                                             #`(let*-values ([(type in-types) (values (car in-types) (cdr in-types))]
+                                                             ...)
+                                                 (if lock
+                                                     #,(make-proc #'lock)
+                                                     #,(make-proc #'#f)))))]))])
+                    (case arity-mask
+                      [(1) (gen)]
+                      [(2) (gen a)]
+                      [(4) (gen a b)]
+                      [(8) (gen a b c)]
+                      [(16) (gen a b c d)]
+                      [(32) (gen a b c d e)]
+                      [(64) (gen a b c d e f)]
+                      [(128) (gen a b c d e f g)]
+                      [(256) (gen a b c d e f g h)]
+                      [else
+                       (lambda orig-args
+                         (let ([args (map (lambda (a t) (unwrap a t)) orig-args in-types)])
+                           (c->s out-type (with-interrupts-disabled*
+                                           (retain
+                                            orig-args
+                                            (#%apply proc (map (lambda (a t) (unpack a t)) args in-types)))))))]))]
+                 [else
+                  (lambda orig-args
+                    (let ([args (map (lambda (a t) (unwrap a t)) orig-args in-types)])
+                      (when lock (mutex-acquire lock))
+                      (let ([r (with-interrupts-disabled*
+                                (retain
+                                 orig-args
+                                 (#%apply (gen-proc (cpointer-address proc-p))
+                                          (map (lambda (a t) (unpack a t)) args in-types))))])
+                        (when lock (mutex-release lock))
+                        (c->s out-type r))))])
+               arity-mask
+               name))))]
        [else
         (lambda (to-wrap)
           (let* ([proc-p (unwrap-cpointer 'ffi-call to-wrap)]
-                 #;
-                 [name (and (ffi-obj? proc-p) (let ([n (cpointer/ffi-obj-name proc-p)])
-                                                (if (bytes? n)
-                                                    (utf8->string n)
-                                                    n)))])
+                 [name (cpointer->name proc-p)])
             (do-procedure-reduce-arity-mask
              (lambda orig-args
                (let* ([args (map (lambda (orig-arg in-type)
-                                   (let ([arg (s->c in-type orig-arg)])
+                                   (let ([arg (s->c name in-type orig-arg)])
                                      (if (and (cpointer? arg)
                                               (not (eq? 'scheme-object (ctype-host-rep in-type))))
                                          (let ([p (unwrap-cpointer 'ffi-call arg)])
@@ -1795,7 +1819,7 @@
                                  (go))))])
                  (c->s out-type r)))
              (fxsll 1 (length in-types))
-             (cpointer->name proc-p))))])]
+             name)))])]
      [else ; callable
       (lambda (to-wrap)
         (gen-proc (lambda args ; if ret-id, includes an extra initial argument to receive the result
@@ -1807,6 +1831,7 @@
                                   (when (currently-blocking?)
                                     (#%printf "non-async in callback during blocking: ~s\n" to-wrap)))
                                 (s->c
+                                 'callback
                                  out-type
                                  (apply to-wrap
                                         (let loop ([args (if ret-id (cdr args) args)] [in-types in-types])
@@ -1832,7 +1857,7 @@
                                                                    (addr->gcpointer-memory arg)]
                                                                   [else arg])]))])
                                               (cons arg (loop (cdr args) (cdr in-types))))])))))
-                              atomic?
+                              (or #t atomic?) ; force all callbacks to be atomic
                               async-apply
                               async-callback-queue)])
                       (if ret-id
@@ -1891,7 +1916,10 @@
      [else
       ;; Inform the scheduler that it's in atomic mode
       (scheduler-start-atomic)
+      ;; Now that the schedule is in atomic mode, reenable interrupts (for GC)
+      (enable-interrupts)
       (let ([v (thunk)])
+        (disable-interrupts)
         (scheduler-end-atomic)
         v)])]
    [(box? async-apply)
@@ -1927,40 +1955,69 @@
 (define/who ffi-callback
   (case-lambda
    [(proc in-types out-type)
-    (ffi-callback proc in-types out-type #f #f #f)]
+    (ffi-callback proc in-types out-type #f #f #f #f)]
    [(proc in-types out-type abi)
-    (ffi-callback proc in-types out-type abi #f #f)]
+    (ffi-callback proc in-types out-type abi #f #f #f)]
    [(proc in-types out-type abi atomic?)
-    (ffi-callback proc in-types out-type abi atomic? #f)]
+    (ffi-callback proc in-types out-type abi atomic? #f #f)]
    [(proc in-types out-type abi atomic? async-apply)
+    (ffi-callback proc in-types out-type abi atomic? #f)]
+   [(proc in-types out-type abi atomic? async-apply varargs-after)
     (check who procedure? proc)
-    (check who (lambda (l)
-                 (and (list? l)
-                      (andmap ctype? l)))
-           :contract "(listof ctype?)"
-           in-types)
-    (check who ctype? out-type)
-    ((ffi-callback-maker in-types out-type abi atomic? async-apply) proc)]))
+    (check-ffi-callback who in-types out-type abi varargs-after async-apply)
+    ((ffi-callback-maker* in-types out-type abi varargs-after atomic? async-apply) proc)]))
 
 (define/who ffi-callback-maker
   (case-lambda
    [(in-types out-type)
-    (ffi-callback-maker in-types out-type #f #f #f)]
+    (ffi-callback-maker in-types out-type #f #f #f #f)]
    [(in-types out-type abi)
-    (ffi-callback-maker in-types out-type abi #f #f)]
+    (ffi-callback-maker in-types out-type abi #f #f #f)]
    [(in-types out-type abi atomic?)
-    (ffi-callback-maker in-types out-type abi atomic? #f)]
+    (ffi-callback-maker in-types out-type abi atomic? #f #f)]
    [(in-types out-type abi atomic? async-apply)
-    (check who (lambda (l)
-                 (and (list? l)
-                      (andmap ctype? l)))
-           :contract "(listof ctype?)"
-           in-types)
-    (check who ctype? out-type)
-    (let ([make-code (ffi-call/callable #f in-types out-type abi #f #f #f #f (and atomic? #t) async-apply)])
-      (lambda (proc)
-        (check 'make-ffi-callback procedure? proc)
-        (create-callback (make-code proc))))]))
+    (ffi-callback-maker in-types out-type abi atomic? async-apply #f)]
+   [(in-types out-type abi atomic? async-apply varargs-after)
+    (check-ffi-callback who in-types out-type abi varargs-after async-apply)
+    (ffi-callback-maker* in-types out-type abi varargs-after atomic? async-apply)]))
+
+(define (ffi-callback-maker* in-types out-type abi varargs-after atomic? async-apply)
+  (let ([make-code (ffi-call/callable #f in-types out-type abi varargs-after #f #f #f #f (and atomic? #t) async-apply)])
+    (lambda (proc)
+      (check 'make-ffi-callback procedure? proc)
+      (create-callback (make-code proc)))))
+
+(define (check-ffi-callback who in-types out-type abi varargs-after async-apply)
+  (check-ffi who in-types out-type abi varargs-after)
+  (check who (lambda (async-apply)
+               (or (not async-apply)
+                   (box? async-apply)
+                   (and (procedure? async-apply)
+                        (unsafe-procedure-and-arity-includes? async-apply 1))))
+         :contract "(or/c #f (procedure-arity-includes/c 1) box?)"
+         async-apply))
+  
+(define (check-ffi who in-types out-type abi varargs-after)
+  (check who (lambda (l)
+               (and (list? l)
+                    (andmap ctype? l)))
+         :contract "(listof ctype?)"
+         in-types)
+  (check who ctype? out-type)
+  (check who (lambda (a) (#%memq a '(#f default stdcall sysv)))
+         :contract "(or/c #f 'default 'stdcall 'sysv)"
+         abi)
+  (check who (lambda (varargs-after) (or (not varargs-after)
+                                         (and (exact-positive-integer? varargs-after))))
+         :contract "(or/c #f exact-positive-integer?)"
+         varargs-after)
+  (when  varargs-after
+    (let ([len (length in-types)])
+      (when (> varargs-after len)
+        (raise-arguments-error who
+                               "varargs-after value is too large"
+                               "given value" varargs-after
+                               "argument count" len)))))
 
 ;; ----------------------------------------
 
@@ -1993,11 +2050,17 @@
 ;; function is called with interrupts disabled
 (define get-errno
   (cond
-   [(foreign-entry? "racket_errno")
+   [(and (not (chez:memq (machine-type) '(a6nt ta6nt i3nt ti3nt)))
+         (foreign-entry? "racket_errno"))
     (foreign-procedure "racket_errno" () int)]
    [else
-    ;; We get here only during a bootstrapping process or in a
-    ;; development mode that is not running in a Racket executable
+    ;; We get here when (i) during a bootstrapping process, (ii) in a
+    ;; development mode that is not running in a Racket executable,
+    ;; or (iii) running on Windows.
+    ;; In the third case, `errno` could be a different one from
+    ;; `_errno` in MSVCRT. Therefore fallback to the foreign function.
+    ;; See `save_errno_values` in `foreign.c` from Racket BC for more
+    ;; information.
     (let ([get-&errno-name
            (case (machine-type)
              [(a6nt ta6nt i3nt ti3nt)

@@ -4,6 +4,7 @@
          "../host/rktio.rkt"
          "../host/error.rkt"
          "../host/thread.rkt"
+         "../host/place-local.rkt"
          "../path/path.rkt"
          "../path/parameter.rkt"
          "../port/output-port.rkt"
@@ -242,7 +243,11 @@
     (unsafe-custodian-unregister sp (subprocess-cust-ref sp))
     (set-subprocess-cust-ref! sp #f)))
 
-(define subprocess-will-executor (make-will-executor))
+(define-place-local subprocess-will-executor (make-will-executor))
+
+(define (subprocess-init!)
+  (set! subprocess-will-executor (make-will-executor)))
+(module+ init (provide subprocess-init!))
 
 (define (register-subprocess-finalizer sp)
   (will-register subprocess-will-executor
@@ -298,7 +303,7 @@
                                  (string->bytes/utf-8 parameters)
                                  (->host (->path dir) who '(exists))
                                  show_mode))
-  (when (rktio-error? r) (raise-rktio-error 'who "failed" r))
+  (when (rktio-error? r) (raise-rktio-error who r "failed"))
   #f)
 
 ;; ----------------------------------------

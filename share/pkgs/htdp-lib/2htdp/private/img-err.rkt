@@ -86,7 +86,7 @@
                [args body] ...)))]
       [(define/chk (fn-name . args) body ...)
        (with-syntax ([(args body) (adjust-case #'fn-name #'args #'(body ...))])
-         #`(define (fn-name . args) body))])))
+         (quasisyntax/loc stx (define (fn-name . args) body)))])))
 
 ;; check/normalize : symbol symbol any number -> any
 ;; based on the name of the argument, checks to see if the input
@@ -161,14 +161,14 @@
                      (>= arg 2))
                 'integer\ greater\ than\ or\ equal\ to\ 2
                 i arg)
-     arg]
+     (inexact->exact arg)]
     [(dx dy x y x1 y1 x2 y2 pull pull1 pull2)
      (check-arg fn-name
                 (real? arg)
                 'real\ number
                 i arg)
      arg]
-    [(factor x-factor y-factor)
+    [(factor x-factor y-factor non-zero-radius)
      (check-arg fn-name
                 (and (real? arg)
                      (positive? arg))
@@ -180,19 +180,37 @@
                 (side-count? arg)
                 'side-count
                 i arg)
-     arg]
+     (inexact->exact arg)]
     [(step-count)
      (check-arg fn-name
                 (step-count? arg)
                 'step-count
                 i arg)
-     arg]
+     (inexact->exact arg)]
     [(angle angle1 angle2 angle-a angle-b angle-c)
      (check-arg fn-name
                 (angle? arg)
                 'angle\ in\ degrees
                 i arg)
      (angle->proper-range arg)]
+    [(angle-between-0-and-360)
+     (check-arg fn-name
+                (angle? arg)
+                'angle\ in\ degrees
+                i arg)
+     (check-arg fn-name
+                (<= 0 arg 360)
+                '|angle between 0 and 360|
+                i arg)
+     (check-arg fn-name
+                (not (= 0 arg))
+                '|angle that is not 0|
+                i arg)
+     (check-arg fn-name
+                (not (= 360 arg))
+                '|angle that is not 360|
+                i arg)
+     arg]
     [(color-only)
      (check-arg fn-name (image-color? arg) 'image-color i arg)
      (cond
@@ -221,9 +239,7 @@
      arg]
     [(font-size)
      (check-arg fn-name (and (integer? arg) (<= 1 arg 255)) 'font-size i arg)
-     (if (exact? arg)
-         arg
-         (inexact->exact arg))]
+     (inexact->exact arg)]
     [(face)
      (check-arg fn-name (or (not arg) (string? arg)) 'face i arg)
      arg]
@@ -292,14 +308,10 @@
                 'list-of-posns-with-real-valued-x-and-y-coordinates
                 i arg)
      arg]
-    [(int0-255-1 int0-255-2 int0-255-3 int0-255-4)
+    [(int-0-255 int0-255-1 int0-255-2 int0-255-3 int0-255-4)
      (check-arg fn-name (and (integer? arg) (<= 0 arg 255)) 
                 'integer\ between\ 0\ and\ 255 i arg)
-     arg]
-    [(int-0-255)
-     (check-arg fn-name (and (integer? arg) (<= 0 arg 255)) 
-                'integer\ between\ 0\ and\ 255 i arg)
-     arg]
+     (inexact->exact arg)]
     
     [(pen-style)
      (check-arg fn-name (pen-style? arg) 'pen-style i arg)
@@ -383,27 +395,3 @@
        (not (or (= arg +inf.0)
                 (= arg -inf.0)
                 (equal? arg +nan.0)))))
-
-(define/contract (angle->proper-range α)
-  (-> real? (between/c 0 360))
-  (let loop ([θ (- α (* 360 (floor (/ α 360))))])
-    (cond [(negative? θ) (+ θ 360)]
-          [(>= θ 360)    (- θ 360)]
-          [else θ])))
-
-(module+ test
-  (require rackunit)
-  (check-equal? (angle->proper-range 1) 1)
-  (check-equal? (angle->proper-range 361) 1)
-  (check-equal? (angle->proper-range 1/2) 1/2)
-  (check-equal? (angle->proper-range -1) 359)
-  (check-equal? (angle->proper-range #e-1.5) #e358.5)
-  (check-equal? (angle->proper-range #e-.1) #e359.9)
-  
-  (check-equal? (angle->proper-range 1.0) 1.0)
-  (check-equal? (angle->proper-range 361.0) 1.0)
-  (check-equal? (angle->proper-range 0.5) 0.5)
-  (check-equal? (angle->proper-range -1.0) 359.0)
-  (check-equal? (angle->proper-range -1.5) 358.5)
-  (check-equal? (angle->proper-range -.1) 359.9)
-  (check-equal? (angle->proper-range #i-7.347880794884119e-016) 0.0))
