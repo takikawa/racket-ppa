@@ -1,8 +1,8 @@
-racket (7.9+ppa3-1~bionic1) bionic; urgency=medium
+racket (8.0+ppa1-1~bionic1) bionic; urgency=medium
 
   * PPA release
 
- -- Asumu Takikawa <asumu@racket-lang.org>  Tue, 17 Nov 2020 15:00:00 -0800
+ -- Asumu Takikawa <asumu@racket-lang.org>  Sun, 02 Feb 2021 12:00:00 -0800
 
 racket (7.9+dfsg1-1) unstable; urgency=medium
 
