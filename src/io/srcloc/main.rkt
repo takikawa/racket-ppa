@@ -1,7 +1,8 @@
 #lang racket/base
 (require "../common/check.rkt"
          "../format/main.rkt"
-         "../path/parameter.rkt")
+         "../path/path.rkt"
+         "../path/user-relative.rkt")
 
 (provide srcloc->string)
 
@@ -15,12 +16,15 @@
                   (adjust-path (srcloc-source s))
                   (srcloc-line s)
                   (srcloc-column s))]
-         [else
+         [(srcloc-position s)
           (format "~a::~s"
                   (adjust-path (srcloc-source s))
-                  (srcloc-position s))])))
+                  (srcloc-position s))]
+         [else
+          (format "~a"
+                  (adjust-path (srcloc-source s)))])))
 
 (define (adjust-path p)
-  (define dir (current-directory-for-user))
-  ;; FIXME
-  p)
+  (cond
+    [(is-path? p) (relative-to-user-directory p)]
+    [else p]))

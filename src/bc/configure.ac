@@ -453,16 +453,13 @@ SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} AR_FLAGS="'"'"${ARFLAGS}"'"'
 
 is_gmake=`make -v no-such-target-we-hope 2>&1 | grep "GNU Make"`
 
-# If using gcc, we want all warnings:
-changequote(<<, >>)dnl
-is_gcc=`$CC -v 2>&1 | tail -n 1 | grep -E '^gcc version [[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+ \([^\)]+\)[[:space:]]*$'`
-changequote([, ])dnl
+m4_include(../ac/is_gcc.m4)
 
 # We also need to test if $CC is gcc itself because on mac,
 # where clang impersonates gcc, although is_gcc is false, we want
 # to use it as if it was gcc.
 # See https://github.com/racket/racket/pull/2897#pullrequestreview-314906673
-if test "$is_gcc" != "" || test "`basename $CC`" = "gcc"; then
+if test "$is_gcc" != "" ; then
   COMPFLAGS="$COMPFLAGS -Wall"
 
   # Use -MMD when we have gcc and gnumake:
@@ -1280,6 +1277,7 @@ fi
 ############## Racket for Racket ################
 
 if test "${enable_racket}" = "auto" ; then
+  # See also "configure-parent.ac"
   enable_racket="`pwd`/../local/bc/racket3m"
 fi
 
@@ -1411,6 +1409,8 @@ AC_SUBST(STATIC_AR)
 AC_SUBST(ARFLAGS)
 AC_SUBST(STRIP_DEBUG)
 AC_SUBST(STRIP_LIB_DEBUG)
+AC_SUBST(STRIP_SIGNATURE)
+AC_SUBST(RESTORE_SIGNATURE)
 AC_SUBST(REZ)
 AC_SUBST(MZLINKER)
 AC_SUBST(POST_LINKER)
@@ -1534,6 +1534,10 @@ if test -d "${srcdir}/foreign" && test "${enable_foreign}" = "yes" ; then
   if test "${have_libffi}" != "yes" ; then
     AC_CONFIG_AUX_DIR( foreign/libffi )
     AC_CONFIG_SUBDIRS( foreign/libffi )
+    # Smooth transition from libffi v3.1 to v3.3:
+    if test -h foreign/libffi/include/ffitarget.h ; then
+       rm foreign/libffi/include/ffitarget.h
+    fi
   fi
   FOREIGNTARGET="foreign-stuff"
   FOREIGN_IF_USED="FOREIGN_USED"

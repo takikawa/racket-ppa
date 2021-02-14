@@ -1,6 +1,7 @@
 #lang racket/base
 
 (require ffi/unsafe
+         ffi/unsafe/atomic
          (only-in '#%foreign ffi-obj)
          setup/dirs)
 (provide readline readline-bytes
@@ -193,6 +194,15 @@
 (unless (terminal-port? real-input-port)
   (log-warning "mzrl warning: input port is not a terminal\n"))
 
+;; Hack: for CS, make the callback non-atomic anyway. This should
+;; be generally ok as long as no one else tries to play the same
+;; trick at the same time
+(define-values (start-nonatomic end-nonatomic)
+  (cond
+    [(eq? 'chez-scheme (system-type 'vm))
+     (values end-atomic start-atomic)]
+    [else
+     (values void void)]))
 
 ;; We need to tell readline to pull content through our own function,
 ;; to avoid buffering issues between C and Racket, and to allow
@@ -208,12 +218,16 @@
                 [(get-ffi-obj "el_wgets" libreadline _fpointer (lambda () #f))
                  ;; libedit (has el_wgets since 2009-12-30)
                  (lambda (_)
+                   (start-nonatomic)
                    (define next-char (read-char real-input-port))
+                   (end-nonatomic)
                    (if (eof-object? next-char) -1 (char->integer next-char)))]
                 [else
                  ;; libreadline
                  (lambda (_)
+                   (start-nonatomic)
                    (define next-byte (read-byte real-input-port))
+                   (end-nonatomic)
                    (if (eof-object? next-byte) -1 next-byte))]))
 
 

@@ -692,7 +692,7 @@
   (not-expression-context stx)
   (syntax-case stx ()
     [(def-form-id lang . body)
-     (do-extended-judgment-form #'lang (syntax-e #'def-form-id) #'body #f stx #f)]))
+     (do-extended-judgment-form #'lang (syntax-e #'def-form-id) #'body #f stx #f #f)]))
 
 (define-syntax (define-extended-judgment-form stx)
   (not-expression-context stx)
@@ -704,7 +704,19 @@
                              "expected a judgment form"
                              stx
                              #'original-id))
-       (do-extended-judgment-form #'lang 'define-extended-judgment-form #'body #'original-id stx #f))]))
+       (do-extended-judgment-form #'lang 'define-extended-judgment-form #'body #'original-id stx #f #f))]))
+
+(define-syntax (define-overriding-judgment-form stx)
+  (not-expression-context stx)
+  (syntax-case stx ()
+    [(def-form-id lang original-id . body)
+     (begin
+       (unless (judgment-form-id? #'original-id)
+         (raise-syntax-error 'define-overriding-judgment-form
+                             "expected a judgment form"
+                             stx
+                             #'original-id))
+       (do-extended-judgment-form #'lang 'define-overriding-judgment-form #'body #'original-id stx #f #t))]))
 
 (define-syntax (define-relation stx)
   (not-expression-context stx)
@@ -723,7 +735,7 @@
                                          #'())]
                       [(clauses ...) pats]
                       [new-body #`(ctc-stx ... clauses ...)])
-         (do-extended-judgment-form #'lang (syntax-e #'def-form-id) #'new-body #f stx #t)))]))
+         (do-extended-judgment-form #'lang (syntax-e #'def-form-id) #'new-body #f stx #t #f)))]))
 
 ;; if relation? is true, then the contract is a list of redex patterns
 ;; if relation? is false, then the contract is a single redex pattern
@@ -872,7 +884,7 @@
      (identifier? #'x)
      id]))
 
-(define-for-syntax (do-extended-judgment-form lang syn-err-name body orig stx is-relation?)
+(define-for-syntax (do-extended-judgment-form lang syn-err-name body orig stx is-relation? overriding-extension?)
   (define nts (definition-nts lang stx syn-err-name))
   (define orig-mode (and orig
                          (judgment-form-id? #'orig) ;; if this fails, there will be a syntax error later
@@ -900,21 +912,22 @@
           #,@(if (identifier? orig) (list #`(void (λ () #,orig))) (list)) ;; for check syntax
           (define-syntax #,judgment-form-name 
             (judgment-form '#,judgment-form-name '#,mode #'judgment-form-runtime-proc
-                           #'mk-judgment-form-proc #'#,lang #'jf-lws
+                           #'mk-judgment-form-procs #'#,lang #'jf-lws
                            '#,rule-names #'judgment-runtime-gen-clauses #'mk-judgment-gen-clauses #'jf-term-proc #,is-relation?
                            #'jf-cache #'the-runtime-judgment-form
                            #'original-contract-expression-id
                            #'compiled-input-contract-pat-id
                            #'compiled-output-contract-pat-id
                            (λ (stx) (expand-to-id #'the-runtime-judgment-form stx))))
-          (define-values (mk-judgment-form-proc
+          (define-values (mk-judgment-form-procs
                           mk-judgment-gen-clauses
                           original-contract-expression
                           judgment-form-input-contract
                           judgment-form-output-contract)
             (compile-judgment-form #,judgment-form-name #,mode #,lang #,clauses #,rule-names #,position-contracts #,invariant
+                                   #,overriding-extension?
                                    #,orig #,stx #,syn-err-name judgment-runtime-gen-clauses))
-          (define judgment-form-runtime-proc (mk-judgment-form-proc #,lang))
+          (define judgment-form-runtime-proc (assemble-judgment-form-procs '#,mode (mk-judgment-form-procs #,lang)))
           (define jf-lws (compiled-judgment-form-lws #,clauses #,judgment-form-name #,stx))
           (define judgment-runtime-gen-clauses (mk-judgment-gen-clauses #,lang (λ () (judgment-runtime-gen-clauses))))
           (define jf-term-proc (make-jf-term-proc #,judgment-form-name #,syn-err-name #,lang #,nts #,mode))
@@ -952,6 +965,27 @@
         definitions))
    'disappeared-use
    (map syntax-local-introduce dup-form-names)))
+
+(define (assemble-judgment-form-procs mode form-procs)
+  (cond
+    [(number? mode)
+     ;; modeless judgment-forms have a hash here not a proc
+     ;; that gets called, so we don't need to do any
+     ;; assembly
+     form-procs]
+    [else
+     (define (judgment-form-proc recur input derivation-init pair-of-boxed-caches
+                                 original-contract-expression
+                                 compiled-input-contract-pat
+                                 compiled-output-contract)
+       (for/fold ([result '()])
+                 ([form-proc-pair (in-list form-procs)])
+         (append ((cdr form-proc-pair) recur input derivation-init pair-of-boxed-caches
+                                       original-contract-expression
+                                       compiled-input-contract-pat
+                                       compiled-output-contract)
+                 result)))
+     judgment-form-proc]))
 
 (define-for-syntax (jf-is-relation? jf-id)
   (judgment-form-relation? (lookup-judgment-form-id jf-id)))
@@ -1324,7 +1358,9 @@
         [else (error syn-error-name "should not happen")]))))
 
 (define-for-syntax (do-compile-judgment-form-proc name mode clauses rule-names
-                                                  nts orig lang syn-error-name)
+                                                  nts orig
+                                                  overriding-extension?
+                                                  lang syn-error-name)
   
   (with-syntax ([(init-jf-derivation-id) (generate-temporaries '(init-jf-derivation-id))])
     
@@ -1377,29 +1413,36 @@
                                                #'((lookup-binding bnds 'names) ...)
                                                body)))))))))]))
     
-    (with-syntax ([(((clause-proc-binding ...) clause-proc-body) ...) (map compile-clause clauses rule-names)])
-      (with-syntax ([(clause-proc-body-backwards ...) (reverse (syntax->list #'(clause-proc-body ...)))])
-        (if (identifier? orig)
-            (with-syntax ([orig-mk (judgment-form-mk-proc (lookup-judgment-form-id orig))])
-              #`(λ (lang)
-                  (let (clause-proc-binding ... ...)
-                    (let ([prev (orig-mk lang)])
-                      (λ (recur input init-jf-derivation-id recur-cache
-                           original-contract-expression
-                           compiled-input-contract-pat
-                           compiled-output-contract-pat)
-                        (append (prev recur input init-jf-derivation-id recur-cache
-                                      original-contract-expression
-                                      compiled-input-contract-pat
-                                      compiled-output-contract-pat)
-                                clause-proc-body-backwards ...))))))
+    (with-syntax ([(((clause-proc-binding ...) clause-proc-body) ...) (map compile-clause clauses rule-names)]
+                  [(rule-names ...) rule-names])
+      (with-syntax ([(new-rules-code ...)
+                     #'((cons rule-names
+                              (λ (recur input init-jf-derivation-id recur-cache
+                                   original-contract-expression
+                                   compiled-input-contract-pat
+                                   compiled-output-contract-pat)
+                                clause-proc-body)) ...)])
+      (if (identifier? orig)
+          (with-syntax ([orig-mks (judgment-form-mk-procs (lookup-judgment-form-id orig))])
             #`(λ (lang)
                 (let (clause-proc-binding ... ...)
-                  (λ (recur input init-jf-derivation-id recur-cache
-                       original-contract-expression
-                       compiled-input-contract-pat
-                       compiled-output-contract-pat)
-                    (append clause-proc-body-backwards ...)))))))))
+                  (let ([prev (orig-mks lang)])
+                    #,(if overriding-extension?
+                          #'(add/override-clauses (list new-rules-code ...) prev)
+                          #'(list* new-rules-code ... prev))))))
+          #`(λ (lang)
+              (let (clause-proc-binding ... ...)
+                (list new-rules-code ...))))))))
+
+(define (add/override-clauses new-clauses old-clauses)
+  (define replacements
+    (for/hash ([clause (in-list new-clauses)]
+               #:when (car clause))
+      (values (car clause) #t)))
+  (append new-clauses
+          (for/list ([old-clause (in-list old-clauses)]
+                     #:unless (hash-ref replacements (car old-clause) #f))
+            old-clause)))
 
 (define (combine-judgment-rhses compiled-lhs input rhs)
   (define mtchs (match-pattern compiled-lhs input))
@@ -1699,13 +1742,15 @@
 
 (define-syntax (compile-judgment-form stx)
   (syntax-case stx ()
-    [(_ judgment-form-name mode-arg lang raw-clauses rule-names ctcs invt orig full-def syn-err-name judgment-form-runtime-gen-clauses)
+    [(_ judgment-form-name mode-arg lang raw-clauses rule-names ctcs invt
+        overriding-extension? orig full-def syn-err-name judgment-form-runtime-gen-clauses)
      (let ([nts (definition-nts #'lang #'full-def (syntax-e #'syn-err-name))]
            [rule-names (syntax->datum #'rule-names)]
            [syn-err-name (syntax-e #'syn-err-name)]
            [clauses (if (jf-is-relation? #'judgment-form-name)
                         (fix-relation-clauses (syntax-e #'judgment-form-name) (syntax->list #'raw-clauses))
                         (syntax->list #'raw-clauses))]
+           [overriding-extension? (syntax-e #'overriding-extension?)]
            [mode (syntax->datum #'mode-arg)])
        (unless (jf-is-relation? #'judgment-form-name)
          (mode-check (syntax-e #'judgment-form-name) mode clauses nts syn-err-name stx))
@@ -1762,6 +1807,7 @@
                                            rule-names
                                            nts
                                            #'orig
+                                           overriding-extension?
                                            #'lang
                                            syn-err-name)]))
        (define gen-stx (with-syntax* ([(comp-clauses ...) 
@@ -2099,6 +2145,7 @@
 (provide define-judgment-form 
          define-relation
          define-extended-judgment-form
+         define-overriding-judgment-form
          judgment-holds
          build-derivations
          generate-lws

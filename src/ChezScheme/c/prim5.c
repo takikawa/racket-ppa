@@ -53,7 +53,9 @@ static void s_showalloc PROTO((IBOOL show_dump, const char *outfn));
 static ptr s_system PROTO((const char *s));
 static ptr s_process PROTO((char *s, IBOOL stderrp));
 static I32 s_chdir PROTO((const char *inpath));
+#ifdef GETWD
 static char *s_getwd PROTO((void));
+#endif
 static ptr s_set_code_byte PROTO((ptr p, ptr n, ptr x));
 static ptr s_set_code_word PROTO((ptr p, ptr n, ptr x));
 static ptr s_set_code_long PROTO((ptr p, ptr n, ptr x));
@@ -97,6 +99,7 @@ static void s_mutex_acquire PROTO((scheme_mutex_t *m));
 static ptr s_mutex_acquire_noblock PROTO((scheme_mutex_t *m));
 static void s_condition_broadcast PROTO((s_thread_cond_t *c));
 static void s_condition_signal PROTO((s_thread_cond_t *c));
+static void s_thread_preserve_ownership PROTO((ptr tc));
 #endif
 static void s_byte_copy(ptr src, iptr srcoff, ptr dst, iptr dstoff, iptr cnt);
 static void s_ptr_copy(ptr src, iptr srcoff, ptr dst, iptr dstoff, iptr cnt);
@@ -208,7 +211,7 @@ static ptr s_box_immobile(p) ptr p; {
 }
 
 static ptr s_make_immobile_bytevector(uptr len) {
-  ptr b = S_bytevector2(len, 1);
+  ptr b = S_bytevector2(get_thread_context(), len, 1);
   S_immobilize_object(b);
   return b;
 }
@@ -269,6 +272,10 @@ static ptr sorted_chunk_list(void) {
 
   for (i = PARTIAL_CHUNK_POOLS; i >= -1; i -= 1) {
     for (chunk = (i == -1) ? S_chunks_full : S_chunks[i]; chunk != NULL; chunk = chunk->next) {
+      ls = Scons(TO_PTR(chunk), ls);
+      n += 1;
+    }
+    for (chunk = (i == -1) ? S_code_chunks_full : S_code_chunks[i]; chunk != NULL; chunk = chunk->next) {
       ls = Scons(TO_PTR(chunk), ls);
       n += 1;
     }
@@ -403,6 +410,7 @@ static void s_showalloc(IBOOL show_dump, const char *outfn) {
   ptr tc = get_thread_context();
 
   tc_mutex_acquire();
+  alloc_mutex_acquire();
 
   if (outfn == NULL) {
     out = stderr;
@@ -627,6 +635,7 @@ static void s_showalloc(IBOOL show_dump, const char *outfn) {
     fclose(out);
   }
 
+  alloc_mutex_release();
   tc_mutex_release();
 }
 
@@ -869,47 +878,64 @@ static char *s_getwd() {
 static ptr s_set_code_byte(p, n, x) ptr p, n, x; {
     I8 *a;
 
+    S_thread_start_code_write();
     a = (I8 *)TO_VOIDP((uptr)p + UNFIX(n));
     *a = (I8)UNFIX(x);
+    S_thread_end_code_write();
+
     return Svoid;
 }
 
 static ptr s_set_code_word(p, n, x) ptr p, n, x; {
     I16 *a;
 
+    S_thread_start_code_write();
     a = (I16 *)TO_VOIDP((uptr)p + UNFIX(n));
     *a = (I16)UNFIX(x);
+    S_thread_end_code_write();
+
     return Svoid;
 }
 
 static ptr s_set_code_long(p, n, x) ptr p, n, x; {
     I32 *a;
 
+    S_thread_start_code_write();
     a = (I32 *)TO_VOIDP((uptr)p + UNFIX(n));
     *a = (I32)(Sfixnump(x) ? UNFIX(x) : Sinteger_value(x));
+    S_thread_end_code_write();
+
     return Svoid;
 }
 
 static void s_set_code_long2(p, n, h, l) ptr p, n, h, l; {
     I32 *a;
 
+    S_thread_start_code_write();
     a = (I32 *)TO_VOIDP((uptr)p + UNFIX(n));
     *a = (I32)((UNFIX(h) << 16) + UNFIX(l));
+    S_thread_end_code_write();
 }
 
 static ptr s_set_code_quad(p, n, x) ptr p, n, x; {
     I64 *a;
 
+    S_thread_start_code_write();
     a = (I64 *)TO_VOIDP((uptr)p + UNFIX(n));
     *a = Sfixnump(x) ? UNFIX(x) : S_int64_value("\\#set-code-quad!", x);
+    S_thread_end_code_write();
+
     return Svoid;
 }
 
 static ptr s_set_reloc(p, n, e) ptr p, n, e; {
     iptr *a;
 
+    S_thread_start_code_write();
     a = (iptr *)(&RELOCIT(CODERELOC(p), UNFIX(n)));
     *a = Sfixnump(e) ? UNFIX(e) : Sinteger_value(e);
+    S_thread_end_code_write();
+
     return e;
 }
 
@@ -922,6 +948,8 @@ static ptr s_make_code(flags, free, name, arity_mark, n, info, pinfos)
                        iptr flags, free, n; ptr name, arity_mark, info, pinfos; {
     ptr co;
 
+    S_thread_start_code_write();
+
     co = S_code(get_thread_context(), type_code | (flags << code_flags_offset), n);
     CODEFREE(co) = free;
     CODENAME(co) = name;
@@ -931,12 +959,17 @@ static ptr s_make_code(flags, free, name, arity_mark, n, info, pinfos)
     if (pinfos != Snil) {
       S_G.profile_counters = Scons(S_weak_cons(co, pinfos), S_G.profile_counters);
     }
+
+    S_thread_end_code_write();
+
     return co;
 }
 
 static ptr s_make_reloc_table(codeobj, n) ptr codeobj, n; {
+    S_thread_start_code_write();
     CODERELOC(codeobj) = S_relocation_table(UNFIX(n));
     RELOCCODE(CODERELOC(codeobj)) = codeobj;
+    S_thread_end_code_write();
     return Svoid;
 }
 
@@ -1315,6 +1348,9 @@ extern double log1p();
 #endif /* LOG1P */
 #endif /* defined(__STDC__) || defined(USE_ANSI_PROTOTYPES) */
 
+static double s_mod PROTO((double x, double y));
+static double s_mod(x, y) double x, y; { return fmod(x, y); }
+
 static double s_exp PROTO((double x));
 static double s_exp(x) double x; { return exp(x); }
 
@@ -1481,7 +1517,11 @@ static iptr s_backdoor_thread(p) ptr p; {
 }
 
 static ptr s_threads() {
-  return S_threads;
+  ptr ts;
+  tc_mutex_acquire();
+  ts = S_threads;
+  tc_mutex_release();
+  return ts;
 }
 
 static void s_mutex_acquire(m) scheme_mutex_t *m; {
@@ -1514,6 +1554,15 @@ static void s_condition_broadcast(s_thread_cond_t *c) {
 static void s_condition_signal(s_thread_cond_t *c) {
   s_thread_cond_signal(c);
 }
+
+/* called with tc mutex held */
+static void s_thread_preserve_ownership(ptr tc) {
+  if (!THREAD_GC(tc)->preserve_ownership) {
+    THREAD_GC(tc)->preserve_ownership = 1;
+    S_num_preserve_ownership_threads++;
+  }
+}
+
 #endif
 
 static ptr s_profile_counters(void) {
@@ -1593,6 +1642,7 @@ void S_prim5_init() {
     Sforeign_symbol("(cs)condition_broadcast", (void *)s_condition_broadcast);
     Sforeign_symbol("(cs)condition_signal", (void *)s_condition_signal);
     Sforeign_symbol("(cs)condition_wait", (void *)S_condition_wait);
+    Sforeign_symbol("(cs)thread_preserve_ownership", (void *)s_thread_preserve_ownership);
 #endif
     Sforeign_symbol("(cs)s_addr_in_heap", (void *)s_addr_in_heap);
     Sforeign_symbol("(cs)s_ptr_in_heap", (void *)s_ptr_in_heap);
@@ -1628,6 +1678,8 @@ void S_prim5_init() {
     Sforeign_symbol("(cs)s_strings_to_gensym", (void *)s_strings_to_gensym);
     Sforeign_symbol("(cs)s_intern_gensym", (void *)S_intern_gensym);
     Sforeign_symbol("(cs)s_uninterned", (void *)S_uninterned);
+    Sforeign_symbol("(cs)symbol_hash32", (void *)S_symbol_hash32);
+    Sforeign_symbol("(cs)symbol_hash64", (void *)S_symbol_hash64);
     Sforeign_symbol("(cs)cputime", (void *)S_cputime);
     Sforeign_symbol("(cs)realtime", (void *)S_realtime);
     Sforeign_symbol("(cs)clock_gettime", (void *)S_clock_gettime);
@@ -1656,9 +1708,7 @@ void S_prim5_init() {
     Sforeign_symbol("(cs)getpid", (void *)s_getpid);
     Sforeign_symbol("(cs)fasl_read", (void *)S_fasl_read);
     Sforeign_symbol("(cs)bv_fasl_read", (void *)S_bv_fasl_read);
-    Sforeign_symbol("(cs)to_vfasl", (void *)S_to_vfasl);
     Sforeign_symbol("(cs)vfasl_to", (void *)S_vfasl_to);
-    Sforeign_symbol("(cs)vfasl_can_combinep", (void *)S_vfasl_can_combinep);
     Sforeign_symbol("(cs)s_decode_float", (void *)s_decode_float);
 
     Sforeign_symbol("(cs)new_open_input_fd", (void *)S_new_open_input_fd);
@@ -1737,6 +1787,7 @@ void S_prim5_init() {
     Sforeign_symbol("(cs)dequeue_scheme_signals", (void *)S_dequeue_scheme_signals);
     Sforeign_symbol("(cs)register_scheme_signal", (void *)S_register_scheme_signal);
 
+    Sforeign_symbol("(cs)mod", (void *)s_mod);
     Sforeign_symbol("(cs)exp", (void *)s_exp);
     Sforeign_symbol("(cs)log", (void *)s_log);
     Sforeign_symbol("(cs)pow", (void *)s_pow);

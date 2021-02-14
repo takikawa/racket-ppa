@@ -1,0 +1,1 @@
+(module info setup/infotab (#%module-begin (define collection (quote multi)) (define build-deps (quote ("scheme-lib" "at-exp-lib" "scribble-lib" "racket-doc" "simple-tree-text-markup-lib"))) (define deps (quote ("base"))) (define pkg-desc "documentation part of \"simple-tree-text-markup\"") (define pkg-authors (quote (sperber)))))

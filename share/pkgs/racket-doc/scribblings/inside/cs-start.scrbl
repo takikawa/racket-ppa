@@ -1,7 +1,7 @@
 #lang scribble/doc
 @(require "utils.rkt")
 
-@title[#:tag "cs-start"]{Starting and Declaring Initial Modules}
+@cs-title[#:tag "cs-start"]{Starting and Declaring Initial Modules}
 
 As sketched in @secref["cs-embedding"], and embedded instance of
 Racket CS is started with @cppi{racket_boot}. Functions such as
@@ -40,19 +40,31 @@ Fields in @cppdef{racket_boot_arguments_t}:
        The image as distributed is self-terminating, so no size or
        ending offset is needed.}
 
+ @item{@cpp{long} @cppdef{boot1_len} --- an optional length in bytes
+       for the first boot image, which is used as a hint for loading
+       the boot file if non-zero. If this hint is provided, it must be
+       at least as large as the boot image bytes, and it must be no
+       longer than the file size after the boot image offset.}
+
  @item{@cpp{const char *} @cppdef{boot2_path} --- like
        @cpp{boot1_path}, but for the image that contains compiler
        functionality, normally called @filepath{scheme.boot}.}
 
  @item{@cpp{long} @cppdef{boot2_offset} --- an offset into
        @cpp{boot2_path} to read for the second boot image.}
-       
+
+ @item{@cpp{long} @cppdef{boot2_len} --- @cpp{boot1_len}, an optional
+       length in bytes for the second boot image.}
+
  @item{@cpp{const char *} @cppdef{boot3_path} --- like
        @cpp{boot1_path}, but for the image that contains Racket
        functionality, normally called @filepath{racket.boot}.}
 
- @item{@cpp{long} @cppdef{boot3_offset} --- an offset into
-       @cpp{boot2_path} to read for the thirf boot image.}
+ @item{@cpp{long} @cppdef{boot3_offset} --- @cpp{boot1_len}, an offset
+       into @cpp{boot2_path} to read for the third boot image.}
+
+ @item{@cpp{long} @cppdef{boot3_len} --- an optional length in bytes
+       for the third boot image.}
 
  @item{@cpp{int} @cpp{argc} and @cpp{char **} @cpp{argv} ---
        command-line arguments to be processed the same as for a
@@ -113,4 +125,8 @@ functions, and @DFlag{c-mods} mode generates C code that calls
 If @var{as_predefined} is true, then the code is loaded during the
 creation of any new Racket @tech[#:doc reference-doc]{place} in the
 new place, so that modules declared by the code are loaded in the new
-place, too.}
+place, too.
+
+These functions are not meant to be called in C code that was called
+from Racket. See also @secref["cs-procs"] for a discussion of
+@emph{entry} points versus @emph{re-entry} points.}

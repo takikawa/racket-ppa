@@ -2,6 +2,7 @@
 (require
   (for-syntax racket/base) ; for help menu
   drracket/tool ; necessary to build a drracket plugin
+  errortrace/errortrace-lib
   framework ; for preferences (too heavy a package?)
   help/search
   net/sendurl ; for the help menu
@@ -10,19 +11,16 @@
   racket/file
   racket/gui/base
   racket/list
-  racket/path ; for filename-extension
-  racket/runtime-path ; for the help menu
   racket/string
   racket/unit
   "base.rkt"
   (prefix-in lib: "library.rkt")
-  "library-gui.rkt"
-  )
+  "library-gui.rkt")
 (provide tool@)
 
 #|
 To debug:
-$ export PLTSTEDDR=debug@quickscript && drracket&
+$ export PLTSTDERR=debug@quickscript && drracket&
 
 If the menu takes a long time to load, it's because the scripts are not compiled.
 Click on Scripts|Manage scripts|Compile user scripts.
@@ -34,46 +32,30 @@ It should then be very fast to load.
   (lib:all-files (lib:load library-file) #:exclude? exclude?))
 
 (define (error-message-box str e)
+  (define sp (open-output-string))
+  (parameterize ([current-error-port sp])
+    (errortrace-error-display-handler (exn-message e) e))
+
   (message-box "Quickscript caught an exception"
-               (string-append str " " (exn-message e))
+               (string-append str " " (get-output-string sp))
                #f '(stop ok)))
 
 (define-syntax with-error-message-box
   (syntax-rules ()
     [(_ str #:error-value err-val body ...)
-     (with-handlers ([exn? (λ (e)
-                             (error-message-box str e)
-                             err-val)])
+     (with-handlers* ([(λ (e) (and (exn? e) (not (exn:break? e))))
+                       (λ (e)
+                         (error-message-box str e)
+                         err-val)])
        body ...)]
     [(_ str body ...)
      (with-error-message-box str #:error-value (void) body ...)]))
 
-;; Recompiles all (enabled or disabled, user and third-party) scripts that are not yet compiled
-;; for the current version.
-;; This is to prevent Quickscript trying to load from compiled after an upgrade of
-;; the Racket system, and displaying one error message for each script.
-;; It is important to recompile disabled scripts too, because these may still be
-;; dependencies of shadowing scripts.
-;; Caveat: Dependencies are not compiled automatically. Hence if a script depends on a collection
-;; (package) then the collection needs to be compiled with the correct version, otherwise
-;; an error will be raised on DrRacket startup.
-;; How to test this works:
-;; - Create a new script or use an old one that is *not* deactivated in the library
-;; - Compile it with another version of racket (install locally, not unix style,
-;; then use its old raco to setup quickscript and make the script)
-;; - In DrRacket, use the quickscript "Compiled version" to make sure it has the old version.
-;; - Exit DrRacket.
-;; - Use the new version of raco to setup (again) quickscript
-;;   If installing a new version of racket, it may be necessary to run:
-;;   $ raco pkg update --link <path-to-local-quickscript>
-;; - Restart DrRacket, the script should be compiled silently with the correct version,
-;;   and no error message should be displayed.
-;; - In the library, check that a quickscript-extra shadowed script does not raise an error
-;;   when clicking on it.
-(define (recompile-all-of-previous-version)
-  (compile-user-scripts
-   (filter (λ (f) (not (compiled-for-current-version? f)))
-           (user-script-files #:exclude? #f))))
+(define (compile-library)
+  (with-error-message-box
+    "Error while compiling scripts:\n"
+  (time-info "Recompiling library"
+             (compile-user-scripts (user-script-files)))))
 
 (define-namespace-anchor a)
 
@@ -304,6 +286,10 @@ It should then be very fast to load.
                       [help-string      help-string]
                       [callback         (λ (it ev) (run-script props))]))))))
 
+        ; Silently recompile for the new version if necessary, at the start up of DrRacket.
+        ; This must be done before building the menus.
+        (compile-library)
+
         (define manage-menu (new menu% [parent scripts-menu] [label "&Manage scripts"]))
         (for ([(lbl cbk)
                (in-dict
@@ -319,7 +305,7 @@ It should then be very fast to load.
                                                       (reload-scripts-menu)))
                   ("&Compile scripts and reload" . ,(λ ()
                                                       (unload-persistent-scripts)
-                                                      (compile-user-scripts (user-script-files))
+                                                      (compile-library)
                                                       (reload-scripts-menu)))
                   ("&Unload persistent scripts"  . ,(λ () (unload-persistent-scripts)))
                   (separator                     . #f)
@@ -332,10 +318,6 @@ It should then be very fast to load.
                    [callback (λ _ (cbk))])))
         (new separator-menu-item% [parent scripts-menu])
 
-        ; Silently recompile for the new version if necessary, at the start up of DrRacket.
-        (with-error-message-box
-            "Error while recompiling all from previous version:\n"
-         (recompile-all-of-previous-version))
         (reload-scripts-menu)
         ))
 

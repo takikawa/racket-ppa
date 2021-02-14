@@ -3,11 +3,10 @@
 (require syntax/docprovide)
 
 (require test-engine/racket-tests
-	 (lib "test-info.scm" "test-engine")
-	 test-engine/racket-tests
+         test-engine/syntax
 	 scheme/class)
 
-(require deinprogramm/signature/module-begin
+(require deinprogramm/DMdA/private/module-begin
 	 (except-in deinprogramm/signature/signature signature-violation)
 	 (except-in deinprogramm/signature/signature-syntax property))
 

@@ -207,6 +207,14 @@
 				 (+ (* 2 (- n)) 1))
 			     gen))))
 
+(define (arbitrary-integer-from-to lower upper)
+  (make-arbitrary (choose-integer lower upper)
+		  (lambda (n gen)
+		    (variant (if (>= n 0)
+				 (* 2 n)
+				 (+ (* 2 (- n)) 1))
+			     gen))))
+
 (define arbitrary-natural
   (make-arbitrary (sized
 		   (lambda (n)

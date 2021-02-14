@@ -19,6 +19,7 @@
          "host/processor-count.rkt"
          "network/main.rkt"
          "foreign/main.rkt"
+         "time/main.rkt"
          "unsafe/main.rkt"
          "machine/main.rkt"
          "run/main.rkt"
@@ -33,6 +34,9 @@
                   shared-ltps-place-init!)
          (only-in "locale/cache.rkt"
                   convert-cache-init!)
+         (only-in "network/address.rkt"
+                  address-init!)
+         (submod "subprocess/main.rkt" init)
          (only-in "locale/parameter.rkt"
                   sync-locale!)
          "port/place.rkt")
@@ -56,6 +60,7 @@
          (all-from-out "host/processor-count.rkt")
          (all-from-out "network/main.rkt")
          (all-from-out "foreign/main.rkt")
+         (all-from-out "time/main.rkt")
          (all-from-out "unsafe/main.rkt")
          (all-from-out "machine/main.rkt")
          (all-from-out "run/main.rkt")
@@ -72,6 +77,8 @@
   (install-error-value->string-handler!)
   (init-current-directory!)
   (init-current-ports! in-fd out-fd err-fd cust plumber)
+  (subprocess-init!)
+  (address-init!)
   (sync-locale!))
 
 (define (io-place-destroy!)
