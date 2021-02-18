@@ -52,7 +52,7 @@ DEB_MAKE_INSTALL_TARGET= no-run
 common-install-arch:: do-install-arch
 common-install-indep:: do-install-indep
 
-do-install-arch: PLT_EXTRA=--no-docs --no-zo
+do-install-arch: PLT_EXTRA=--no-docs
 do-install-arch:
 	$(DEB_MAKE_ENVVARS) $(MAKE) -C $(DEB_BUILDDIR) install DESTDIR=$(CURDIR)/debian/tmp
 	rm -f $(CURDIR)/debian/tmp/usr/bin/planet
