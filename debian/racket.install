@@ -2,5 +2,5 @@
 echo "debian/drracket.desktop	usr/share/applications/"
 echo "usr/bin"
 echo "usr/lib"
-find "usr/share/racket/collects" -name "*.zo"
-find "usr/share/racket/pkgs" -name "*.zo"
+find debian/tmp/usr/share/racket/collects -name "*.zo"
+find debian/tmp/usr/share/racket/pkgs -name "*.zo"
