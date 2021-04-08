@@ -2,7 +2,6 @@
 
 include /usr/share/cdbs/1/rules/debhelper.mk
 include /usr/share/cdbs/1/class/autotools.mk
-include debian/racket-arch.mk
 
 DEB_HOST_ARCH ?= $(shell dpkg-architecture -qDEB_HOST_ARCH)
 DEB_CONFIGURE_SCRIPT := $(CURDIR)/src/configure
@@ -24,10 +23,6 @@ ifneq (,$(filter noopt,$(DEB_BUILD_OPTIONS)))
     DEB_CONFIGURE_EXTRA_FLAGS += --enable-noopt
 endif
 
-# Explicitly enable useprefix for unix-style build (needed for v7.6)
-# See https://github.com/racket/racket/issues/3046
-DEB_CONFIGURE_EXTRA_FLAGS += --enable-useprefix
-
 # Support for generating ".orig.tar.gz" from git
 
 SOURCEPKG=$(shell dpkg-parsechangelog | sed  -n 's/^Source: \(.*\)/\1/p')
@@ -38,7 +33,7 @@ DEB_MAKE_ENVVARS += HOME=/nonexistant PLT_SETUP_OPTIONS="-j $(NUMJOBS) $(PLT_EXT
 
 DEB_BUILDDIR := $(DEB_SRCDIR)/build
 
-DEB_DH_INSTALL_ARGS_racket-common := -X${RACKET_ARCH} -X$(MZDYN) -X/tests/
+DEB_DH_INSTALL_ARGS_racket-common := -X.zo -X.dep -X$(MZDYN) -X/tests/
 DEB_DH_INSTALL_ARGS_racket-doc := -Xrelease
 DEB_DH_COMPRESS_ARGS := -X.sxref -X.sqlite
 
@@ -57,7 +52,7 @@ DEB_MAKE_INSTALL_TARGET= no-run
 common-install-arch:: do-install-arch
 common-install-indep:: do-install-indep
 
-do-install-arch: PLT_EXTRA=--no-docs --no-zo
+do-install-arch: PLT_EXTRA=--no-docs
 do-install-arch:
 	$(DEB_MAKE_ENVVARS) $(MAKE) -C $(DEB_BUILDDIR) install DESTDIR=$(CURDIR)/debian/tmp
 	rm -f $(CURDIR)/debian/tmp/usr/bin/planet

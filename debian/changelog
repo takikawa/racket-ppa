@@ -1,3 +1,14 @@
+racket (8.0+dfsg1-1) UNRELEASED; urgency=medium
+
+  * New upstream release
+  * Build with Chez Scheme backend
+  * TODO
+  - unembed zlib
+  - check d/copyright
+  - upload to experimental
+
+ -- David Bremner <bremner@debian.org>  Thu, 08 Apr 2021 22:07:23 -0300
+
 racket (7.9+dfsg1-1) unstable; urgency=medium
 
   * New upstream release

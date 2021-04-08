@@ -1,3 +1,8 @@
-debian/drracket.desktop	usr/share/applications/
-usr/bin
-usr/lib
+#!/bin/sh
+echo "debian/drracket.desktop	usr/share/applications/"
+echo "usr/bin"
+echo "usr/lib"
+find debian/tmp/usr/share/racket/collects -name "*.zo"
+find debian/tmp/usr/share/racket/collects -name "*.dep"
+find debian/tmp/usr/share/racket/pkgs -name "*.zo"
+find debian/tmp/usr/share/racket/pkgs -name "*.dep"
