@@ -16,11 +16,12 @@ AC_ARG_ENABLE(shared,     [  --enable-shared         create shared libraries (no
 AC_ARG_ENABLE(standalone, [  --enable-standalone     create a standalone shared library])
 AC_ARG_ENABLE(pthread,    [  --enable-pthread        link with pthreads (usually auto-enabled if needed)])
 AC_ARG_ENABLE(iconv,      [  --enable-iconv          use iconv (usually auto-enabled)])
+AC_ARG_ENABLE(wpo,        [  --enable-wpo            agressively optimize Racket core (enabled by default)])
 AC_ARG_ENABLE(compress,   [  --enable-compress       compress compiled code (enabled by default)])
 AC_ARG_ENABLE(compressboot, [  --enable-compressboot   compress boot files])
 m4_include(../ac/path_arg.m4)
-AC_ARG_ENABLE(racket,     [  --enable-racket=<path>  use <path> as Racket to build; or "auto" to create])
-AC_ARG_ENABLE(scheme,     [  --enable-scheme=<path>  obsolete])
+AC_ARG_ENABLE(racket,     [  --enable-racket=<path>  use <path> as Racket for build; or "auto" to create])
+AC_ARG_ENABLE(scheme,     [  --enable-scheme=<path>  use <path> as host's build directory for cross])
 AC_ARG_ENABLE(mach,       [  --enable-mach=<mach>    use Chez Scheme machine type <mach>])
 AC_ARG_ENABLE(target,     [  --enable-target=<mach>  cross-build for Chez Scheme machine type <mach>])
 m4_include(../ac/natipkg_arg.m4)
@@ -108,6 +109,13 @@ else
   AC_DEFINE(CS_COMPILED_SUBDIR,1,[Use a subdirectory of "compiled"])
 fi
 
+show_explicitly_disabled "${enable_wpo}" "Agressive core optimization"
+if test "${enable_wpo}" = "no" ; then
+  ENABLE_OR_DISABLE_WPO="WHEN_WPO=no_ UNLESS_WPO="
+else  
+  ENABLE_OR_DISABLE_WPO=""
+fi
+
 ############## Install targets ################
 
 PREFIX_PATH_RELATIVE=/../..
@@ -149,15 +157,24 @@ LZ4_LIB_DEP='$(OWN_LZ4_LIB)'
 LZ4_LIB='$(OWN_LZ4_LIB)'
 LZ4_LIB_UNPACK='$(AR) x $(OWN_LZ4_LIB)'
 
+CS_HOST_WORKAREA_PREFIX=
+
+PLT_CS_SLSP_SUFFIX=
+
 enable_pthread_by_default=yes
+
+cs_auto_flags=--disable-auto-flags
 
 ###### Autoconfigure #######
 
 AC_PROG_CC
 
+m4_include(../ac/is_gcc.m4)
+
 # If using gcc, we want all warnings:
-if test "$CC" = "gcc" ; then 
+if test "$is_gcc" != "" ; then 
   CFLAGS="$CFLAGS -Wall"
+  cs_auto_flags="${cs_auto_flags} --enable-warning-flags"
 fi
 
 AC_CHECK_LIB(m, fmod)
@@ -189,6 +206,10 @@ disable_curses_arg=--disable-curses
 case "$host_os" in
   solaris2*)
     MACH_OS=s2
+    LIBS="$LIBS -lsocket -lnsl -lintl"
+    use_flag_pthread="no"
+    use_flag_posix_pthread="yes"
+    enable_strip=no
     ;;
   aix*)
     ;;
@@ -236,6 +257,7 @@ case "$host_os" in
     skip_iconv_check=yes
     use_flag_pthread=no
     MACH_OS=nt
+    LIBS="${LIBS} -lshell32 -luser32 -lole32 -lrpcrt4 -luuid -lws2_32 -ladvapi32 -lwinmm"
     MINGW=""
     NOT_MINGW="mingw"
     if `which ${host}-windres > /dev/null` ; then
@@ -326,6 +348,9 @@ case "$MACH_HOST_CPU" in
   x86|i*86)
     MACH="${thread_prefix}i3${MACH_OS}"
     ;;
+  aarch64*|arm64*)
+    MACH="${thread_prefix}arm64${MACH_OS}"
+    ;;
   arm*)
     MACH="${thread_prefix}arm32${MACH_OS}"
     ;;
@@ -383,6 +408,9 @@ elif test "${build_os}_${build_cpu}" != "${host_os}_${host_cpu}" ; then
     x86|i*86)
       BUILD_MACH="${BUILD_THREAD_PREFIX}i3${BUILD_OS}"
       ;;
+    aarch64*|arm64*)
+      BUILD_MACH="${BUILD_THREAD_PREFIX}arm64${BUILD_OS}"
+      ;;
     arm*)
       BUILD_MACH="${BUILD_THREAD_PREFIX}arm32${BUILD_OS}"
       ;;
@@ -430,10 +458,15 @@ SCHEME_DIR=${srcdir}/../../ChezScheme
 MAKE_BUILD_SCHEME=checkout
 
 if test "${enable_scheme}" != "" ; then
-  echo Warning: --enable-scheme=... is obsolete and unsupported
+  CS_HOST_WORKAREA_PREFIX="${enable_scheme}/"
 fi
 
 if test "${enable_racket}" != "" ; then
+  if test "${enable_racket}" = "auto" ; then
+    # See also "configure-parent.ac"
+    enable_racket="`pwd`/../../local/cs/c/racketcs"
+    CS_HOST_WORKAREA_PREFIX=../../local/cs/c/
+  fi
   # In non-cross mode, we interpret `--enable-racket` to supply a
   # Racket used only for generating Chez Scheme boot files
   if test "${CROSS_MODE}" = "cross" ; then
@@ -465,6 +498,7 @@ m4_include(../ac/strip.m4)
 
 if test "${enable_natipkg}" = "yes" ; then
   CONFIGURE_RACKET_SO_COMPILE="${CONFIGURE_RACKET_SO_COMPILE} env PLT_CS_SLSP_SUFFIX=-natipkg"
+  PLT_CS_SLSP_SUFFIX="-natipkg"
 fi
 
 ############## ubsan ################
@@ -661,6 +695,8 @@ if test "${enable_shared}" = "yes" ; then
   STRIP_LIB_DEBUG=":"
   LIBSFX=la
   ICP_LIB="${LIBTOOLPROG} --mode=install install -s"
+
+  CONFIGURE_RACKET_SO_COMPILE="env PLT_CS_MAKE_LINK_SHARED=y"
 else
   ICP=cp
   LTO="o"
@@ -682,8 +718,8 @@ fi
 
 m4_include(../ac/rktio_keep.m4)
 
-SCHEME_CONFIG_ARGS="--machine=${MACH} --disable-x11 ${disable_curses_arg} ${extra_scheme_config_args}"
-SCHEME_CROSS_CONFIG_ARGS="--machine=${TARGET_MACH} --disable-x11 ${disable_curses_arg} ${extra_scheme_config_args}"
+SCHEME_CONFIG_ARGS="--machine=${MACH} --disable-x11 ${disable_curses_arg} ${cs_auto_flags} ${extra_scheme_config_args}"
+SCHEME_CROSS_CONFIG_ARGS="--machine=${TARGET_MACH} --disable-x11 ${cs_auto_flags} ${disable_curses_arg} ${extra_scheme_config_args}"
 
 AC_SUBST(upsrcdir)
 AC_SUBST(CC)
@@ -701,6 +737,8 @@ AC_SUBST(ICP)
 AC_SUBST(ICP_LIB)
 AC_SUBST(STRIP_DEBUG)
 AC_SUBST(STRIP_LIB_DEBUG)
+AC_SUBST(STRIP_SIGNATURE)
+AC_SUBST(RESTORE_SIGNATURE)
 AC_SUBST(RKTLINKER)
 AC_SUBST(POST_LINKER)
 AC_SUBST(INCLUDEDEP)
@@ -738,12 +776,15 @@ AC_SUBST(FRAMEWORK_PREFIX)
 AC_SUBST(FRAMEWORK_REL_INSTALL)
 AC_SUBST(CS_INSTALLED)
 AC_SUBST(CS_COMPILED_SUBDIR)
+AC_SUBST(ENABLE_OR_DISABLE_WPO)
 AC_SUBST(COMP_SUBDIR_CONFIGURE_ARGS)
 AC_SUBST(CROSS_COMPILE_TARGET_KIND)
+AC_SUBST(CS_HOST_WORKAREA_PREFIX)
 AC_SUBST(RUN_RACKET)
 AC_SUBST(INSTALL_SETUP_FLAGS)
 AC_SUBST(INSTALL_SETUP_RACKET_FLAGS)
 AC_SUBST(INSTALL_LIBS_ENABLE)
+AC_SUBST(PLT_CS_SLSP_SUFFIX)
 
 makefiles="Makefile"
 

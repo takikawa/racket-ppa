@@ -53,7 +53,8 @@
                    bstr3 terminator))
    (define pos
      (case (or target (path->string (system-library-subpath #f)))
-       [("x86_64-darwin" "i386-darwin" "x86_64-macosx" "i386-macosx")
+       [("x86_64-darwin" "i386-darwin" "aarch64-darwin"
+         "x86_64-macosx" "i386-macosx" "aarch64-macosx")
         ;; Mach-O
         (copy-file use-src-file dest-file #t)
         (add-plt-segment dest-file data #:name #"__RKTBOOT")
@@ -120,8 +121,12 @@
 
      (file-position o (cdar m))
      (void (write-bytes (integer->integer-bytes pos 4 #t big-endian?) o))
-     (void (write-bytes (integer->integer-bytes (+ pos (bytes-length bstr1) terminator-len) 4 #t big-endian?) o))
-     (void (write-bytes (integer->integer-bytes (+ pos (bytes-length bstr1) (bytes-length bstr2) (* 2 terminator-len)) 4 #t big-endian?) o)))
+     (let ([pos (+ pos (bytes-length bstr1) terminator-len)])
+       (void (write-bytes (integer->integer-bytes pos 4 #t big-endian?) o))
+       (let ([pos (+ pos (bytes-length bstr2) terminator-len)])
+         (void (write-bytes (integer->integer-bytes pos 4 #t big-endian?) o))
+         (let ([pos (+ pos (bytes-length bstr3) terminator-len)])
+           (void (write-bytes (integer->integer-bytes pos 4 #t big-endian?) o))))))
 
    (cond
     [(null? alt-dests)

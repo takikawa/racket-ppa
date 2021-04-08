@@ -622,12 +622,15 @@ ac_includes_default="\
 
 ac_subst_vars='LTLIBOBJS
 LIBOBJS
+PLT_CS_SLSP_SUFFIX
 INSTALL_LIBS_ENABLE
 INSTALL_SETUP_RACKET_FLAGS
 INSTALL_SETUP_FLAGS
 RUN_RACKET
+CS_HOST_WORKAREA_PREFIX
 CROSS_COMPILE_TARGET_KIND
 COMP_SUBDIR_CONFIGURE_ARGS
+ENABLE_OR_DISABLE_WPO
 CS_COMPILED_SUBDIR
 CS_INSTALLED
 FRAMEWORK_REL_INSTALL
@@ -665,6 +668,8 @@ RKTL_PRE
 INCLUDEDEP
 POST_LINKER
 RKTLINKER
+RESTORE_SIGNATURE
+STRIP_SIGNATURE
 STRIP_LIB_DEBUG
 STRIP_DEBUG
 ICP_LIB
@@ -774,6 +779,7 @@ enable_shared
 enable_standalone
 enable_pthread
 enable_iconv
+enable_wpo
 enable_compress
 enable_compressboot
 enable_origtree
@@ -1420,6 +1426,7 @@ Optional Features:
   --enable-standalone     create a standalone shared library
   --enable-pthread        link with pthreads (usually auto-enabled if needed)
   --enable-iconv          use iconv (usually auto-enabled)
+  --enable-wpo            agressively optimize Racket core (enabled by default)
   --enable-compress       compress compiled code (enabled by default)
   --enable-compressboot   compress boot files
   --enable-origtree       install with original directory structure
@@ -1427,8 +1434,8 @@ Optional Features:
   --enable-pkgscope=<s>   set `raco pkg' default: installation, user, or shared
   --enable-docs           build docs on install (enabled by default)
   --enable-usersetup      setup user-specific files on install
-  --enable-racket=<path>  use <path> as Racket to build; or "auto" to create
-  --enable-scheme=<path>  obsolete
+  --enable-racket=<path>  use <path> as Racket for build; or "auto" to create
+  --enable-scheme=<path>  use <path> as host's build directory for cross
   --enable-mach=<mach>    use Chez Scheme machine type <mach>
   --enable-target=<mach>  cross-build for Chez Scheme machine type <mach>
   --enable-natipkg        add "-natipkg" to library subpath
@@ -2528,6 +2535,11 @@ if test "${enable_iconv+set}" = set; then :
   enableval=$enable_iconv;
 fi
 
+# Check whether --enable-wpo was given.
+if test "${enable_wpo+set}" = set; then :
+  enableval=$enable_wpo;
+fi
+
 # Check whether --enable-compress was given.
 if test "${enable_compress+set}" = set; then :
   enableval=$enable_compress;
@@ -2674,6 +2686,9 @@ STRIP_LIB_DEBUG=":"
 strip_debug_flags=""
 enable_strip_by_default=yes
 strip_needs_dash_s=no
+
+STRIP_SIGNATURE=":"
+RESTORE_SIGNATURE=":"
 
 # Check whether --enable-ubsan was given.
 if test "${enable_ubsan+set}" = set; then :
@@ -2853,8 +2868,8 @@ fi
 if test "${enable_csdefault}" = "" ; then
    if test "${enable_bcdefault}" = "" ; then
       # Pick a default default here, but make it consistent with "src/configure"
-      enable_bcdefault=yes
-      enable_csdefault=no
+      enable_csdefault=yes
+      enable_bcdefault=no
    fi
 fi
 
@@ -2969,6 +2984,13 @@ else
 
 $as_echo "#define CS_COMPILED_SUBDIR 1" >>confdefs.h
 
+fi
+
+show_explicitly_disabled "${enable_wpo}" "Agressive core optimization"
+if test "${enable_wpo}" = "no" ; then
+  ENABLE_OR_DISABLE_WPO="WHEN_WPO=no_ UNLESS_WPO="
+else
+  ENABLE_OR_DISABLE_WPO=""
 fi
 
 ############## Install targets ################
@@ -3183,7 +3205,13 @@ LZ4_LIB_DEP='$(OWN_LZ4_LIB)'
 LZ4_LIB='$(OWN_LZ4_LIB)'
 LZ4_LIB_UNPACK='$(AR) x $(OWN_LZ4_LIB)'
 
+CS_HOST_WORKAREA_PREFIX=
+
+PLT_CS_SLSP_SUFFIX=
+
 enable_pthread_by_default=yes
+
+cs_auto_flags=--disable-auto-flags
 
 ###### Autoconfigure #######
 
@@ -3977,9 +4005,21 @@ ac_link='$CC -o conftest$ac_exeext $CFLAGS $CPPFLAGS $LDFLAGS conftest.$ac_ext $
 ac_compiler_gnu=$ac_cv_c_compiler_gnu
 
 
+# If using gcc, we'll want all warnings
+
+is_gcc=`$CC -v 2>&1 | tail -n 1 | grep -E '^gcc version [[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+ \([^\)]+\)[[:space:]]*$'`
+
+if test "$is_gcc" = "" ; then
+  if test "`basename $CC`" = "gcc" ; then
+    is_gcc=yes
+  fi
+fi
+
+
 # If using gcc, we want all warnings:
-if test "$CC" = "gcc" ; then
+if test "$is_gcc" != "" ; then
   CFLAGS="$CFLAGS -Wall"
+  cs_auto_flags="${cs_auto_flags} --enable-warning-flags"
 fi
 
 
@@ -4228,6 +4268,10 @@ disable_curses_arg=--disable-curses
 case "$host_os" in
   solaris2*)
     MACH_OS=s2
+    LIBS="$LIBS -lsocket -lnsl -lintl"
+    use_flag_pthread="no"
+    use_flag_posix_pthread="yes"
+    enable_strip=no
     ;;
   aix*)
     ;;
@@ -4275,6 +4319,7 @@ case "$host_os" in
     skip_iconv_check=yes
     use_flag_pthread=no
     MACH_OS=nt
+    LIBS="${LIBS} -lshell32 -luser32 -lole32 -lrpcrt4 -luuid -lws2_32 -ladvapi32 -lwinmm"
     MINGW=""
     NOT_MINGW="mingw"
     if `which ${host}-windres > /dev/null` ; then
@@ -4361,79 +4406,91 @@ case "$host_os" in
       fi
     fi
 
-    # Force 32-bit build unless mac64 is enabled:
-    if test "${enable_mac64}" != "yes" ; then
-      if test "$host_cpu" != "powerpc" ; then
-        if test "${ORIG_CC}" = "" ; then
-           PREFLAGS="${PREFLAGS} -m32"
-           CPPFLAGS="${CPPFLAGS} -m32"
-           LDFLAGS="${LDFLAGS} -m32"
-           # To make the libffi build work, we have to fold -m32 into CC
-           # instead of CFLAGS:
-           if test "$PROPAGATE_SUB_CONFIGURE" != "no" ; then
-             SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CC="'"'"${CC}"' -m32"'
-           fi
-           need_cc_in_extras=no
-           if test "$build_cpu" = "x86_64" ; then
-             # AG_PROC_CC has already decided that we weren't
-             # cross compiling, so change that decision
-             cross_compiling=yes
-             echo may be cross compiling after all
-           fi
-        fi
-      fi
-    fi
+############## Makefile includes ################
 
-
-    if test "${enable_libfw}" = "yes" ; then
-      FRAMEWORK_INSTALL_DIR=/Library/Frameworks
-      FRAMEWORK_REL_INSTALL=no
-      FRAMEWORK_PREFIX=''
-    elif test "${enable_userfw}" = "yes" ; then
-      FRAMEWORK_INSTALL_DIR=~/Library/Frameworks
-      FRAMEWORK_REL_INSTALL=no
-      FRAMEWORK_PREFIX=''
-    else
-      FRAMEWORK_INSTALL_DIR='${libpltdir}'
-      FRAMEWORK_REL_INSTALL=yes
-      if test "${libpltdir_rel}" = "" ; then
-        FRAMEWORK_PREFIX='$(FRAMEWORK_ABS_PREFIX)'
-      else
-        FRAMEWORK_PREFIX='$(FRAMEWORK_REL_PREFIX)'
-      fi
-    fi
-
-    if test "${enable_mac64}" == "no"; then
-      MACH_HOST_CPU="x86"
-      extra_scheme_config_args="--32"
-    fi
-
-    # -pthread is not needed and triggers a warning
-    use_flag_pthread=no
-
-    # ncurses.h is always available
-    disable_curses_arg=""
-    ;;
-  nto-qnx*)
-    MACH_OS=qnx
-    use_flag_pthread=no
-    ;;
-  *)
-    ;;
-esac
-
-if test "${enable_pthread}" = "" ; then
-  if test "${enable_pthread_by_default}" = "yes" ; then
-    enable_pthread=yes
+if test "$INCLUDEDEP" = "#" ; then
+  is_gmake=`make -v no-such-target-we-hope 2>&1 | grep "GNU Make"`
+  if test "$is_gmake" != "" ; then
+     INCLUDEDEP="-include"
   fi
 fi
 
-############## machine type ################
-
-thread_prefix=""
-if test "${enable_pthread}" = "yes" ; then
-  thread_prefix="t"
+if test "$INCLUDEDEP" != "#" ; then
+  RKTL_PRE="compiled/"
+  RKTL_POST=".rktl"
 fi
+
+############## C flags ################
+
+ac_ext=c
+ac_cpp='$CPP $CPPFLAGS'
+ac_compile='$CC -c $CFLAGS $CPPFLAGS conftest.$ac_ext >&5'
+ac_link='$CC -o conftest$ac_exeext $CFLAGS $CPPFLAGS $LDFLAGS conftest.$ac_ext $LIBS >&5'
+ac_compiler_gnu=$ac_cv_c_compiler_gnu
+
+
+iconv_lib_flag=""
+if test "${skip_iconv_check}" = "no" ; then
+ if test "${enable_iconv}" = "yes" ; then
+  ac_ext=c
+ac_cpp='$CPP $CPPFLAGS'
+ac_compile='$CC -c $CFLAGS $CPPFLAGS conftest.$ac_ext >&5'
+ac_link='$CC -o conftest$ac_exeext $CFLAGS $CPPFLAGS $LDFLAGS conftest.$ac_ext $LIBS >&5'
+ac_compiler_gnu=$ac_cv_c_compiler_gnu
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking how to run the C preprocessor" >&5
+$as_echo_n "checking how to run the C preprocessor... " >&6; }
+# On Suns, sometimes $CPP names a directory.
+if test -n "$CPP" && test -d "$CPP"; then
+  CPP=
+fi
+if test -z "$CPP"; then
+  if ${ac_cv_prog_CPP+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+      # Double quotes because CPP needs to be expanded
+    for CPP in "$CC -E" "$CC -E -traditional-cpp" "/lib/cpp"
+    do
+      ac_preproc_ok=false
+for ac_c_preproc_warn_flag in '' yes
+do
+  # Use a header file that comes with gcc, so configuring glibc
+  # with a fresh cross-compiler works.
+  # Prefer <limits.h> to <assert.h> if __STDC__ is defined, since
+  # <limits.h> exists even on freestanding compilers.
+  # On the NeXT, cc -E runs the code through the compiler's parser,
+  # not just through cpp. "Syntax error" is here to catch this case.
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+#ifdef __STDC__
+# include <limits.h>
+#else
+# include <assert.h>
+#endif
+		     Syntax error
+_ACEOF
+if ac_fn_c_try_cpp "$LINENO"; then :
+
+else
+  # Broken: fails on valid input.
+continue
+fi
+rm -f conftest.err conftest.i conftest.$ac_ext
+
+  # OK, works on sane cases.  Now check whether nonexistent headers
+  # can be detected and how.
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+#include <ac_nonexistent.h>
+_ACEOF
+if ac_fn_c_try_cpp "$LINENO"; then :
+  # Broken: success on invalid input.
+continue
+else
+  # Passes both tests.
+ac_preproc_ok=:
+break
+fi
+rm -f conftest.err conftest.i conftest.$ac_ext
 
 case "$MACH_HOST_CPU" in
   x86_64)
@@ -4442,20 +4499,46 @@ case "$MACH_HOST_CPU" in
   x86|i*86)
     MACH="${thread_prefix}i3${MACH_OS}"
     ;;
+  aarch64*|arm64*)
+    MACH="${thread_prefix}arm64${MACH_OS}"
+    ;;
   arm*)
     MACH="${thread_prefix}arm32${MACH_OS}"
-    ;;
-  aarch64*)
-    MACH="${thread_prefix}arm64${MACH_OS}"
     ;;
   power*)
     MACH="${thread_prefix}ppc32${MACH_OS}"
     ;;
 esac
 
-if test "${enable_mach}" != "" ; then
-  MACH="${enable_mach}"
+    done
+    ac_cv_prog_CPP=$CPP
+
 fi
+  CPP=$ac_cv_prog_CPP
+else
+  ac_cv_prog_CPP=$CPP
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $CPP" >&5
+$as_echo "$CPP" >&6; }
+ac_preproc_ok=false
+for ac_c_preproc_warn_flag in '' yes
+do
+  # Use a header file that comes with gcc, so configuring glibc
+  # with a fresh cross-compiler works.
+  # Prefer <limits.h> to <assert.h> if __STDC__ is defined, since
+  # <limits.h> exists even on freestanding compilers.
+  # On the NeXT, cc -E runs the code through the compiler's parser,
+  # not just through cpp. "Syntax error" is here to catch this case.
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+#ifdef __STDC__
+# include <limits.h>
+#else
+# include <assert.h>
+#endif
+		     Syntax error
+_ACEOF
+if ac_fn_c_try_cpp "$LINENO"; then :
 
 if test "${enable_target}" != "" ; then
   TARGET_MACH=${enable_target}
@@ -4499,11 +4582,11 @@ elif test "${build_os}_${build_cpu}" != "${host_os}_${host_cpu}" ; then
     x86|i*86)
       BUILD_MACH="${BUILD_THREAD_PREFIX}i3${BUILD_OS}"
       ;;
+    aarch64*|arm64*)
+      BUILD_MACH="${BUILD_THREAD_PREFIX}arm64${BUILD_OS}"
+      ;;
     arm*)
       BUILD_MACH="${BUILD_THREAD_PREFIX}arm32${BUILD_OS}"
-      ;;
-    aarch64*)
-      BUILD_MACH="${BUILD_THREAD_PREFIX}arm64${BUILD_OS}"
       ;;
     power*)
       BUILD_MACH="${BUILD_THREAD_PREFIX}ppc32${BUILD_OS}"
@@ -4513,10 +4596,10 @@ elif test "${build_os}_${build_cpu}" != "${host_os}_${host_cpu}" ; then
   MACH=${BUILD_MACH}
   CROSS_MODE="cross"
 else
-  BUILD_MACH=${MACH}
-  TARGET_MACH=${MACH}
-  CROSS_MODE=""
+  # Broken: fails on valid input.
+continue
 fi
+rm -f conftest.err conftest.i conftest.$ac_ext
 
 if test "${CROSS_MODE}" = "cross" ; then
   T_CROSS_MODE="-cross"
@@ -4546,10 +4629,15 @@ SCHEME_DIR=${srcdir}/../../ChezScheme
 MAKE_BUILD_SCHEME=checkout
 
 if test "${enable_scheme}" != "" ; then
-  echo Warning: --enable-scheme=... is obsolete and unsupported
+  CS_HOST_WORKAREA_PREFIX="${enable_scheme}/"
 fi
 
 if test "${enable_racket}" != "" ; then
+  if test "${enable_racket}" = "auto" ; then
+    # See also "configure-parent.ac"
+    enable_racket="`pwd`/../../local/cs/c/racketcs"
+    CS_HOST_WORKAREA_PREFIX=../../local/cs/c/
+  fi
   # In non-cross mode, we interpret `--enable-racket` to supply a
   # Racket used only for generating Chez Scheme boot files
   if test "${CROSS_MODE}" = "cross" ; then
@@ -4717,11 +4805,30 @@ $as_echo "$set_strip_lib" >&6; }
   fi
 fi
 
+case "$host_os" in
+  darwin*)
+    case "$host_cpu" in
+       aarch64)
+         STRIP_SIGNATURE="codesign --remove-signature"
+         RESTORE_SIGNATURE="codesign -s - --entitlements"
+       ;;
+       *)
+        # Check whether `codesign` can remove signatures
+        touch sig-test-file
+        if `codesign --remove-signature sig-test-file > /dev/null 2>&1` ; then
+           STRIP_SIGNATURE="codesign --remove-signature"
+        fi
+        rm sig-test-file
+        ;;
+    esac
+esac
+
 
 ############## natipkg ################
 
 if test "${enable_natipkg}" = "yes" ; then
   CONFIGURE_RACKET_SO_COMPILE="${CONFIGURE_RACKET_SO_COMPILE} env PLT_CS_SLSP_SUFFIX=-natipkg"
+  PLT_CS_SLSP_SUFFIX="-natipkg"
 fi
 
 ############## ubsan ################
@@ -4903,6 +5010,9 @@ $as_echo "$as_me: error: in \`$ac_pwd':" >&2;}
 as_fn_error $? "C preprocessor \"$CPP\" fails sanity check
 See \`config.log' for more details" "$LINENO" 5; }
 fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_path_EGREP" >&5
+$as_echo "$ac_cv_path_EGREP" >&6; }
+ EGREP="$ac_cv_path_EGREP"
 
 ac_ext=c
 ac_cpp='$CPP $CPPFLAGS'
@@ -4967,6 +5077,7 @@ IFS=$as_save_IFS
 else
   ac_cv_path_GREP=$GREP
 fi
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
 
 fi
 { $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_path_GREP" >&5
@@ -5033,6 +5144,7 @@ IFS=$as_save_IFS
 else
   ac_cv_path_EGREP=$EGREP
 fi
+rm -f conftest*
 
    fi
 fi
@@ -5502,6 +5614,8 @@ if test "${enable_shared}" = "yes" ; then
   STRIP_LIB_DEBUG=":"
   LIBSFX=la
   ICP_LIB="${LIBTOOLPROG} --mode=install install -s"
+
+  CONFIGURE_RACKET_SO_COMPILE="env PLT_CS_MAKE_LINK_SHARED=y"
 else
   ICP=cp
   LTO="o"
@@ -5541,8 +5655,14 @@ do
 done
 
 
-SCHEME_CONFIG_ARGS="--machine=${MACH} --disable-x11 ${disable_curses_arg} ${extra_scheme_config_args}"
-SCHEME_CROSS_CONFIG_ARGS="--machine=${TARGET_MACH} --disable-x11 ${disable_curses_arg} ${extra_scheme_config_args}"
+SCHEME_CONFIG_ARGS="--machine=${MACH} --disable-x11 ${disable_curses_arg} ${cs_auto_flags} ${extra_scheme_config_args}"
+SCHEME_CROSS_CONFIG_ARGS="--machine=${TARGET_MACH} --disable-x11 ${cs_auto_flags} ${disable_curses_arg} ${extra_scheme_config_args}"
+
+
+
+
+
+
 
 
 

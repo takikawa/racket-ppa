@@ -2,39 +2,33 @@
 (define-syntax (who stx)
   (syntax-error stx "not bound"))
 
-(define-syntax-rule (define-define/who define/who define)
-  (...
-   (define-syntax (define/who stx)
-     (syntax-case stx ()
-       [(_ (id . args) body ...)
-        #'(define id
-            (fluid-let-syntax ([who (lambda (stx)
-                                      #''id)])
-              (lambda args body ...)))]
-       [(_ id rhs)
-        #'(define id
-            (fluid-let-syntax ([who (lambda (stx)
-                                      #''id)])
-              rhs))]))))
-
-(define-define/who define/who define)
-(define-define/who define/lift/who define/lift)
-(define-define/who define/no-lift/who define/no-lift)
+(define-syntax (define/who stx)
+  (syntax-case stx ()
+    [(_ (id . args) body ...)
+     #'(define id
+         (fluid-let-syntax ([who (lambda (stx)
+                                   #''id)])
+           (lambda args body ...)))]
+    [(_ id rhs)
+     #'(define id
+         (fluid-let-syntax ([who (lambda (stx)
+                                   #''id)])
+           rhs))]))
 
 (define-syntax (check stx)
   (syntax-case stx (:test :contract :or-false)
     [(_ who pred :contract ctc v)
      #`(unless (pred v)
-         (raise-argument-error who ctc v))]
+         (#%$app/no-inline raise-argument-error who ctc v))]
     [(_ who :test test-expr :contract ctc v)
      #`(unless test-expr
-         (raise-argument-error who ctc v))]
+         (#%$app/no-inline raise-argument-error who ctc v))]
     [(_ who :or-false pred v)
      #`(unless (or (not v) (pred v))
-         (raise-argument-error who #,(format "(or/c #f ~a)" (syntax->datum #'pred)) v))]
+         (#%$app/no-inline raise-argument-error who #,(format "(or/c #f ~a)" (syntax->datum #'pred)) v))]
     [(_ who pred :or-false v)
      #`(unless (or (not v) (pred v))
-         (raise-argument-error who #,(format "(or/c ~a #f)" (syntax->datum #'pred)) v))]
+         (#%$app/no-inline raise-argument-error who #,(format "(or/c ~a #f)" (syntax->datum #'pred)) v))]
     [(_ who pred v)
      #`(check who pred :contract #,(format "~a" (syntax->datum #'pred)) v)]))
 

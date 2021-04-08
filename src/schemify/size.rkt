@@ -1,7 +1,6 @@
 #lang racket/base
 (require "wrap.rkt"
-         "match.rkt"
-         "quoted.rkt")
+         "match.rkt")
 
 ;; The `linklet-bigger-than?` function is practically an S-expression
 ;; counter, but it parses expressions properly so it can stop at
@@ -34,15 +33,11 @@
           (leftover-size els (leftover-size thn (leftover-size tst (sub1 size))))]
          [`(with-continuation-mark* ,_ ,key ,val ,body)
           (leftover-size body (leftover-size val (leftover-size key (sub1 size))))]
+         [`(begin-unsafe . ,body)
+          (body-leftover-size body (sub1 size))]
          [`(begin0 . ,body)
           (body-leftover-size body (sub1 size))]
-         [`(quote ,v) (if (and serializable?
-                               (lift-quoted? v #f #t))
-                          ;; pessimistically assume that full
-                          ;; strcuture must be lifted for
-                          ;; serialization:
-                          (s-expr-leftover-size v size)
-                          (sub1 size))]
+         [`(quote ,v) (sub1 size)]
          [`(set! ,id ,rhs) (leftover-size rhs (sub1 size))]
          [`(#%variable-reference . ,_) (sub1 size)]
          [`(,_ . ,_) (body-leftover-size e size)]

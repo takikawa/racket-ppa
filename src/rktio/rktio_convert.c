@@ -266,6 +266,11 @@ void rktio_set_locale(rktio_t *rktio, const char *name)
 #endif
 }
 
+void rktio_set_default_locale(const char *name)
+{
+  setlocale(LC_ALL, name);
+}
+
 void *rktio_push_c_numeric_locale(rktio_t *rktio)
 {
 #ifdef RKTIO_USE_XLOCALE
@@ -356,10 +361,12 @@ static char *nl_langinfo_dup(rktio_t *rktio)
 {
   char *s;
 # if HAVE_CODESET
-#  ifdef RKTIO_USE_XLOCALE
-  s = nl_langinfo_l(CODESET, rktio->locale);
-#  else
+#  if defined(RKTIO_USE_XLOCALE)
+  locale_t old_l = uselocale(rktio->locale);
+#  endif
   s = nl_langinfo(CODESET);
+#  if defined(RKTIO_USE_XLOCALE)
+  uselocale(old_l);
 #  endif
 # else
   /* nl_langinfo doesn't work, so just make up something */
@@ -595,10 +602,9 @@ char *rktio_locale_recase(rktio_t *rktio,
   wchar_t *wc, *ws, wcbuf[RKTIO_WC_BUF_SIZE], cwc;
   const char *s;
   unsigned int j;
-# ifdef RKTIO_USE_XLOCALE
-#  define mz_mbsnrtowcs(t, f, fl, tl, s) mbsrtowcs_l(t, f, tl, s, rktio->locale)
-#  define mz_wcsnrtombs(t, f, fl, tl, s) wcsrtombs_l(t, f, tl, s, rktio->locale)
-# else
+# if defined(RKTIO_USE_XLOCALE)
+  locale_t old_l = uselocale(rktio->locale);
+# endif
   /* The "n" versions are apparently not too standard: */
 #  define mz_mbsnrtowcs(t, f, fl, tl, s) mbsrtowcs(t, f, tl, s)
 #  define mz_wcsnrtombs(t, f, fl, tl, s) wcsrtombs(t, f, tl, s)
@@ -669,6 +675,10 @@ char *rktio_locale_recase(rktio_t *rktio,
   out[ml] = 0;
 
   if (wc != wcbuf) free(wc);
+
+# if defined(RKTIO_USE_XLOCALE)
+  (void)uselocale(old_l);
+# endif
 
   return out;
 #endif
