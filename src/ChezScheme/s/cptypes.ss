@@ -82,10 +82,6 @@ Notes:
     (define true-rec `(quote #t))
     (define false-rec `(quote #f))
     (define null-rec `(quote ()))
-    (define empty-vector-rec `(quote #()))
-    (define empty-string-rec `(quote ""))
-    (define empty-bytevector-rec `(quote #vu8()))
-    (define empty-fxvector-rec `(quote #vfx()))
     (define eof-rec `(quote #!eof))
     (define bwp-rec `(quote #!bwp))
 
@@ -466,7 +462,7 @@ Notes:
                       (predicate-implies? y t)))
                '(char null-or-pair $record
                  gensym uninterned-symbol interned-symbol symbol
-                 fixnum exact-integer flonum real number
+                 fixnum bignum exact-integer flonum real number
                  boolean true ptr))] ; ensure they are order from more restrictive to less restrictive
         [else #f]))
 
@@ -546,6 +542,7 @@ Notes:
       [(string? d) 'string]
       [(bytevector? d) 'bytevector]
       [(fxvector? d) 'fxvector]
+      [(flvector? d) 'flvector]
       [else #f]))
 
   (define (rtd->record-predicate rtd extend?)
@@ -576,6 +573,7 @@ Notes:
       [box? 'box]
       [$record? '$record]
       [fixnum? 'fixnum]
+      [bignum? 'bignum]
       [flonum? 'flonum]
       [real? 'real]
       [number? 'number]
@@ -583,6 +581,7 @@ Notes:
       [string? 'string]
       [bytevector? 'bytevector]
       [fxvector? 'fxvector]
+      [flvector? 'flvector]
       [gensym? 'gensym]
       [uninterned-symbol? 'uninterned-symbol]
       #;[interned-symbol? 'interned-symbol]
@@ -594,7 +593,7 @@ Notes:
       [null? null-rec]
       [eof-object? eof-rec]
       [bwp-object? bwp-rec]
-      [list? (if (not extend?) null-rec 'null-or-pair)]
+      [(list? list-assuming-immutable?) (if (not extend?) null-rec 'null-or-pair)]
       [else ((if extend? cdr car)
              (case name
                [(record? record-type-descriptor?) '(bottom . $record)]
@@ -621,6 +620,7 @@ Notes:
       [box 'box]
       [$record '$record]
       [fixnum 'fixnum]
+      [bignum 'bignum]
       [flonum 'flonum]
       [real 'real]
       [number 'number]
@@ -628,6 +628,7 @@ Notes:
       [string 'string]
       [bytevector 'bytevector]
       [fxvector 'fxvector]
+      [flvector 'flvector]
       [gensym 'gensym]
       [uninterned-symbol 'uninterned-symbol]
       [interned-symbol 'interned-symbol]
@@ -649,6 +650,7 @@ Notes:
                [(record rtd) '(bottom . $record)]
                [(bit length ufixnum pfixnum) '(bottom . fixnum)]
                [(uint sub-uint) '(bottom . exact-integer)]
+               [(index sub-index u8 s8) '(bottom . fixnum)]
                [(sint) '(fixnum . exact-integer)]
                [(uinteger) '(bottom . real)]
                [(integer rational) '(exact-integer . real)]
@@ -717,16 +719,20 @@ Notes:
                   [(null-or-pair) (or (eq? x 'pair)
                                       (check-constant-is? x null?))]
                   [(fixnum) (check-constant-is? x target-fixnum?)]
+                  [(bignum) (check-constant-is? x target-bignum?)]
                   [(exact-integer)
                    (or (eq? x 'fixnum)
+                       (eq? x 'bignum)
                        (check-constant-is? x (lambda (x) (and (integer? x)
                                                               (exact? x)))))]
                   [(flonum) (check-constant-is? x flonum?)]
                   [(real) (or (eq? x 'fixnum)
+                              (eq? x 'bignum)
                               (eq? x 'exact-integer)
                               (eq? x 'flonum)
                               (check-constant-is? x real?))]
                   [(number) (or (eq? x 'fixnum)
+                                (eq? x 'bignum)
                                 (eq? x 'exact-integer)
                                 (eq? x 'flonum)
                                 (eq? x 'real)
@@ -753,6 +759,7 @@ Notes:
                   [(string) (check-constant-is? x string?)] ; i.e. ""
                   [(bytevector) (check-constant-is? x bytevector?)] ; i.e. '#vu8()
                   [(fxvector) (check-constant-is? x fxvector?)] ; i.e. '#vfx()
+                  [(flvector) (check-constant-is? x flvector?)] ; i.e. '#vfl()
                   [(ptr) #t]
                   [else #f])]
                [else #f]))))
@@ -1067,6 +1074,40 @@ Notes:
                  [else
                   (values `(call ,preinfo ,pr ,n) ret ntypes #f #f)]))])
 
+      (define-specialize 2 zero?
+        [(n) (let ([r (get-type n)])
+               (cond
+                 [(predicate-implies? r 'bignum)
+                  (values (make-seq ctxt n false-rec)
+                          false-rec ntypes #f #f)]
+                 [(predicate-implies? r 'fixnum)
+                  (values `(call ,preinfo ,(lookup-primref 3 'fxzero?) ,n)
+                          ret
+                          ntypes
+                          (pred-env-add/ref ntypes n `(quote 0) plxc)
+                          #f)]
+                 [(predicate-implies? r 'exact-integer)
+                  (values `(call ,preinfo ,(lookup-primref 3 'eq?) ,n (quote 0))
+                          ret
+                          ntypes
+                          (pred-env-add/ref ntypes n `(quote 0) plxc)
+                          #f)]
+                 [(predicate-implies? r 'flonum)
+                  (values `(call ,preinfo ,(lookup-primref 3 'flzero?) ,n)
+                          ret
+                          ntypes
+                          #f ; TODO: Add a type for flzero
+                          #f)]
+                 [else
+                  (values `(call ,preinfo ,pr ,n) ret ntypes #f #f)]))])
+
+      (define-specialize 2 fxzero?
+        [(n) (values `(call ,preinfo ,pr ,n)
+                     ret
+                     ntypes
+                     (pred-env-add/ref ntypes n `(quote 0) plxc)
+                     #f)])
+
       (define-specialize 2 atan
         [(n) (let ([r (get-type n)])
                (cond
@@ -1243,12 +1284,13 @@ Notes:
   (define (fold-primref/next preinfo pr e* ctxt oldtypes plxc)
     (let-values ([(t e* r* t* t-t* f-t*)
                   (map-Expr/delayed e* oldtypes plxc)])
-      (let ([ret (primref->result-predicate pr (length e*))])
+      (let* ([len (length e*)]
+             [ret (primref->result-predicate pr len)])
         (let-values ([(ret t)
                       (let loop ([e* e*] [r* r*] [n 0] [ret ret] [t t])
                         (if (null? e*)
                             (values ret t)
-                            (let ([pred (primref->argument-predicate pr n (length e*) #t)])
+                            (let ([pred (primref->argument-predicate pr n len #t)])
                               (loop (cdr e*)
                                     (cdr r*)
                                     (fx+ n 1)
@@ -1357,7 +1399,7 @@ Notes:
                   [(e0 ret0 types0 t-types0 f-types0)
                    (Expr/call e0 'value ntypes oldtypes plxc)])
       (values `(call ,preinfo ,e0 ,e* ...)
-              ret0 types0 t-types0 f-types0)))
+              (if (preinfo-call-no-return? preinfo) 'bottom ret0) types0 t-types0 f-types0)))
 
   (define (map-Expr/delayed e* oldtypes plxc)
     (define first-pass* (map (lambda (e)

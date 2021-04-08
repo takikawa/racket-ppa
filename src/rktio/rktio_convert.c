@@ -606,9 +606,8 @@ char *rktio_locale_recase(rktio_t *rktio,
   locale_t old_l = uselocale(rktio->locale);
 # endif
   /* The "n" versions are apparently not too standard: */
-#  define mz_mbsnrtowcs(t, f, fl, tl, s) mbsrtowcs(t, f, tl, s)
-#  define mz_wcsnrtombs(t, f, fl, tl, s) wcsrtombs(t, f, tl, s)
-# endif
+# define mz_mbsnrtowcs(t, f, fl, tl, s) mbsrtowcs(t, f, tl, s)
+# define mz_wcsnrtombs(t, f, fl, tl, s) wcsrtombs(t, f, tl, s)
 
   /* ----- to wide char ---- */
 

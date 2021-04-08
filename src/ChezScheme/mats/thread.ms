@@ -932,7 +932,7 @@
   (let ([thread-count 2] [iterations 10000])
     (equal?
       (parameterize ([collect-trip-bytes (expt 2 15)]
-                     [collect-generation-radix 1])
+                     [collect-generation-radix 2]) ; using 1 risks extreme slowness via major collections
         (let ([out '()]
               [out-mutex (make-mutex)]
               [out-condition (make-condition)]
@@ -1438,7 +1438,9 @@
                   (if (odd? i)
                       (let loop () (unless (ftype-lock! A (y) a) (printf "waiting\n") (loop)))
                       (ftype-spin-lock! A (y) a))
+                  (memory-order-acquire)
                   (ftype-set! A (x) a ((if (odd? n) + -) (ftype-ref A (x) a) 1.0))
+                  (memory-order-release)
                   (ftype-unlock! A (y) a))))))
         (let loop ()
           (if (equal? (length ls) n)

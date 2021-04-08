@@ -249,9 +249,6 @@ racketcs@OSX@: raw_racketcs
 raw_racketcs@OSX@: main.o $(RKTFW)
 	$(CC) $(CFLAGS) -o raw_racketcs main.o $(MACLIBRKT_LINK_@MACLIBRKT_LINK_MODE@)
 
-raw_racketcs@OSX@:
-	ln -s racketcs raw_racketcs
-
 GRACKET_BIN = GRacketCS.app/Contents/MacOS/GRacketCS
 
 gracketcs@OSX@:
@@ -295,17 +292,6 @@ mac-embed-boot-static:
 	cp $(EMBED_SRC) $(EMBED_DEST)
 	$(STRIP_SIGNATURE) $(EMBED_DEST)
 	$(BOOTSTRAP_RACKET) $(srcdir)/embed-boot.rkt @BOOT_COMPRESS_COMP@ $(EMBED_SRC) $(EMBED_DEST) $(FW_BOOT_DESTS)
-
-link-fw-bootfiles-fw:
-	$(NOOP)
-
-link-fw-bootfiles-static:
-	rm -f petite-v.boot
-	rm -f scheme-v.boot
-	rm -f racket-v.boot
-	ln -s $(FW_BOOT_DEST)/petite.boot petite-v.boot
-	ln -s $(FW_BOOT_DEST)/scheme.boot scheme-v.boot
-	ln -s $(FW_BOOT_DEST)/racket.boot racket-v.boot
 
 link-fw-bootfiles-fw:
 	$(NOOP)
@@ -512,11 +498,6 @@ SYSTEM_RKTD = $(DESTDIR)$(libpltdir)/system$(CS_INSTALLED).rktd
 
 system-install:
 	$(RACKET) -cu "$(srcdir)/gen-system.rkt" $(SYSTEM_RKTD) $(TARGET_MACH) @CROSS_COMPILE_TARGET_KIND@ "$(srcdir)" "@PLT_CS_SLSP_SUFFIX@"
-
-include-install:
-	$(ICP) $(srcdir)/api.h "$(DESTDIR)$(includepltdir)/racketcs.h"
-	$(ICP) $(srcdir)/boot.h "$(DESTDIR)$(includepltdir)/racketcsboot.h"
-	$(ICP) $(SCHEME_INC)/scheme.h "$(DESTDIR)$(includepltdir)/chezscheme.h"
 
 include-install:
 	$(ICP) $(srcdir)/api.h "$(DESTDIR)$(includepltdir)/racketcs.h"

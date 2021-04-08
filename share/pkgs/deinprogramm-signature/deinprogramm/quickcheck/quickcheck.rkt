@@ -1,6 +1,7 @@
 #lang scheme/base
 (provide check check-results make-config
 	 quickcheck quickcheck-results
+         make-result
 	 check-result? result-arguments-list
 	 choose-integer choose-real
 	 choose-ascii-char choose-ascii-letter choose-printable-ascii-char choose-char
@@ -8,7 +9,8 @@
 	 generator-unit generator-bind generator-sequence
 	 sized choose-one-of choose-mixed choose-with-frequencies
 	 arbitrary-boolean arbitrary-char arbitrary-ascii-char arbitrary-printable-ascii-char
-	 arbitrary-integer arbitrary-natural arbitrary-rational arbitrary-real
+	 arbitrary-integer arbitrary-integer-from-to arbitrary-natural
+         arbitrary-rational arbitrary-real
 	 arbitrary-mixed arbitrary-one-of
 	 arbitrary-pair
 	 arbitrary-list arbitrary-nonempty-list

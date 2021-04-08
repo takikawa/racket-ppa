@@ -287,9 +287,9 @@
   (define fxvector-oops
     (lambda (who x)
       ($oops who "~s is not an fxvector" x)))
-  (define mutable-fxvector-oops
+  (define flvector-oops
     (lambda (who x)
-      ($oops who "~s is not a mutable fxvector" x)))
+      ($oops who "~s is not an flvector" x)))
   (define bytevector-oops
     (lambda (who x)
       ($oops who "~s is not a bytevector" x)))
@@ -358,14 +358,29 @@
         (fxvector-oops 'fxvector-ref v)))
 
   (define-library-entry (fxvector-set! v i x)
-    (if (mutable-fxvector? v)
+    (if (fxvector? v)
         (if (and (fixnum? i) ($fxu< i (fxvector-length v)))
             (fixnum-oops 'fxvector-set! x)
             (index-oops 'fxvector-set! v i))
-        (mutable-fxvector-oops 'fxvector-set! v)))
+        (fxvector-oops 'fxvector-set! v)))
 
   (define-library-entry (fxvector-length v)
     (fxvector-oops 'fxvector-length v))
+
+  (define-library-entry (flvector-ref v i)
+    (if (flvector? v)
+        (index-oops 'flvector-ref v i)
+        (flvector-oops 'flvector-ref v)))
+
+  (define-library-entry (flvector-set! v i x)
+    (if (flvector? v)
+        (if (and (fixnum? i) ($fxu< i (flvector-length v)))
+            ($oops 'flvector-set! "~s is not a flonum" x)
+            (index-oops 'flvector-set! v i))
+        (flvector-oops 'flvector-set! v)))
+
+  (define-library-entry (flvector-length v)
+    (flvector-oops 'flvector-length v))
 
   (define-library-entry (bytevector-s8-ref v i)
     (if (bytevector? v)
@@ -507,6 +522,14 @@
 (define-library-entry (fx* x y) (fxoops2 'fx* x y))
 (define-library-entry (fx1+ x) (fxoops1 'fx1+ x))
 (define-library-entry (fx1- x) (fxoops1 'fx1- x))
+
+(define-library-entry (fx+/wraparound x y) (fxoops2 'fx+/wraparound x y))
+(define-library-entry (fx-/wraparound x y) (fxoops2 'fx-/wraparound x y))
+(define-library-entry (fx*/wraparound x y) (fxoops2 'fx*/wraparound x y))
+(define-library-entry (fxsll/wraparound x y)
+  (if (and (fixnum? x) (fixnum? y))
+      (shift-count-oops 'fxsll/wraparound y)
+      (fxoops2 'fxsll/wraparound x y)))
 
 (define-library-entry (fx= x y) (fxnonfixnum2 'fx= x y))
 (define-library-entry (fx< x y) (fxnonfixnum2 'fx< x y))
@@ -1520,6 +1543,11 @@
                    (if (fx<= n2 target)
                        (adjust! h vec n n2)
                        (loop n2)))))))]))
+
+    ;; Must be consistent with `eq_hash` in "../c/segment.h"
+    (define-syntax eq-hash
+      (syntax-rules ()
+        [(_ v-expr) (fixmix ($fxaddress v-expr))]))
   
     (define adjust!
       (lambda (h vec1 n1 n2)
@@ -1529,7 +1557,7 @@
             (let loop ([b (vector-ref vec1 i1)])
               (unless (fixnum? b)
                 (let ([next ($tlc-next b)] [keyval ($tlc-keyval b)])
-                  (let ([i2 (fxlogand ($fxaddress (car keyval)) mask2)])
+                  (let ([i2 (fxlogand (eq-hash (car keyval)) mask2)])
                     ($set-tlc-next! b (vector-ref vec2 i2))
                     (vector-set! vec2 i2 b))
                   (loop next)))))
@@ -1538,26 +1566,26 @@
     (define-library-entry (eq-hashtable-ref h x v)
       (lookup-keyval x
         (let ([vec (ht-vec h)])
-          (vector-ref vec (fxlogand ($fxaddress x) (fx- (vector-length vec) 1))))
+          (vector-ref vec (fxlogand (eq-hash x) (fx- (vector-length vec) 1))))
         cdr v))
   
     (define-library-entry (eq-hashtable-ref-cell h x)
       (lookup-keyval x
         (let ([vec (ht-vec h)])
-          (vector-ref vec (fxlogand ($fxaddress x) (fx- (vector-length vec) 1))))
+          (vector-ref vec (fxlogand (eq-hash x) (fx- (vector-length vec) 1))))
         (lambda (x) x)
         #f))
 
     (define-library-entry (eq-hashtable-contains? h x)
       (lookup-keyval x
         (let ([vec (ht-vec h)])
-          (vector-ref vec (fxlogand ($fxaddress x) (fx- (vector-length vec) 1))))
+          (vector-ref vec (fxlogand (eq-hash x) (fx- (vector-length vec) 1))))
         (lambda (x) #t)
         #f))
   
     (define-library-entry (eq-hashtable-cell h x v)
       (let* ([vec (ht-vec h)]
-             [idx (fxlogand ($fxaddress x) (fx- (vector-length vec) 1))]
+             [idx (fxlogand (eq-hash x) (fx- (vector-length vec) 1))]
              [b (vector-ref vec idx)])
         (lookup-keyval x b
           values
@@ -1575,7 +1603,7 @@
     ;; resizing.
     (define-library-entry (eq-hashtable-try-atomic-cell h x v)
       (let* ([vec (ht-vec h)]
-             [idx (fxlogand ($fxaddress x) (fx- (vector-length vec) 1))]
+             [idx (fxlogand (eq-hash x) (fx- (vector-length vec) 1))]
              [b (vector-ref vec idx)])
         (lookup-keyval x b
           values
@@ -1596,7 +1624,7 @@
       (define do-set!
         (lambda (h x v)
           (let* ([vec (ht-vec h)]
-                 [idx (fxlogand ($fxaddress x) (fx- (vector-length vec) 1))]
+                 [idx (fxlogand (eq-hash x) (fx- (vector-length vec) 1))]
                  [b (vector-ref vec idx)])
             (lookup-keyval x b
               (lambda (keyval) (set-cdr! keyval v))
@@ -1616,7 +1644,7 @@
   
       (define-library-entry (eq-hashtable-update! h x p v)
         (let* ([vec (ht-vec h)]
-               [idx (fxlogand ($fxaddress x) (fx- (vector-length vec) 1))]
+               [idx (fxlogand (eq-hash x) (fx- (vector-length vec) 1))]
                [b (vector-ref vec idx)])
           (lookup-keyval x b
             (lambda (a) (set-cdr! a (p (cdr a))))
@@ -1624,7 +1652,7 @@
   
     (define-library-entry (eq-hashtable-delete! h x)
       (let* ([vec (ht-vec h)]
-             [idx (fxlogand ($fxaddress x) (fx- (vector-length vec) 1))]
+             [idx (fxlogand (eq-hash x) (fx- (vector-length vec) 1))]
              [b (vector-ref vec idx)])
         (unless (fixnum? b)
           (if (eq? (car ($tlc-keyval b)) x)

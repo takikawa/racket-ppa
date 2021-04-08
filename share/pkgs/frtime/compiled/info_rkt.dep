@@ -1,1 +1,1 @@
-("7.9" #f ("a3e1e99046677f1cd10dec5851a8db7d2d400ba9" . "d218d202624c1a299809182f3c24925190a397dc") (collects #"setup" #"infotab.rkt"))
+("8.0" #f ("a3e1e99046677f1cd10dec5851a8db7d2d400ba9" . "dbbf4c448cbc9c9d92bdc4cc01fb386234270a2d") (collects #"setup" #"infotab.rkt"))

@@ -1,0 +1,16 @@
+The "libffi" directory holds a copy of libffi version 3.3.
+The libffi code is distributed under an LGPL-compatible license.
+
+Changes to the source in this copy:
+
+ * Commented out `__attribute__((deprecated))` for `ffi_java_...` to
+   avoid warnings when compiling libffi itself
+
+ * Added $CPPFLAGS to use of $CC in "configure.host"
+
+ * Added preprocessor conditionals for Go closures in "ffi_darwin.c"
+
+ * Adjusted "config.guess" to detect Mac OS AArch64
+
+ * Disable FFI_EXEC_TRAMPOLINE_TABLE for Mac OS AArch64, since
+   we use pthread_jit_write_protect_np() in the Racket wrapper

@@ -103,6 +103,18 @@ static IGEN copy(thread_gc *tgc, ptr p, seginfo *si, ptr *dest)
             }
           }
         }
+        else if (TYPEP(tf, mask_flvector, type_flvector))
+        {
+          ISPC p_spc = space_data;
+          {
+            uptr sz = size_flvector((Sflvector_length(p)));
+            {
+              uptr p_sz = sz;
+              find_gc_room(tgc, p_spc, tg, type_typed_object, p_sz, new_p);
+              memcpy_aligned(&FLVECTOR_TYPE(new_p), &FLVECTOR_TYPE(p), sz);
+            }
+          }
+        }
         else if (TYPEP(tf, mask_bytevector, type_bytevector))
         {
           ISPC p_spc = space_data;
@@ -131,9 +143,9 @@ static IGEN copy(thread_gc *tgc, ptr p, seginfo *si, ptr *dest)
                 INITTLCKEYVAL(new_p) = keyval;
                 if ((next != Sfalse) && (OLDSPACE(keyval)))
                 {
-                  GC_TC_MUTEX_ACQUIRE();
+                  GC_MUTEX_ACQUIRE();
                   tlcs_to_rehash = S_cons_in(tgc -> tc, space_new, 0, new_p, tlcs_to_rehash);
-                  GC_TC_MUTEX_RELEASE();
+                  GC_MUTEX_RELEASE();
                 }
               }
             }
@@ -160,12 +172,12 @@ static IGEN copy(thread_gc *tgc, ptr p, seginfo *si, ptr *dest)
             RATTYPE(new_p) = type_ratnum;
             {
               ptr tmp_p = RATNUM(p);
-              relocate_pure(&tmp_p, p, SIZE);
+              relocate_pure(&tmp_p);
               RATNUM(new_p) = tmp_p;
             }
             {
               ptr tmp_p = RATDEN(p);
-              relocate_pure(&tmp_p, p, SIZE);
+              relocate_pure(&tmp_p);
               RATDEN(new_p) = tmp_p;
             }
           }
@@ -179,12 +191,12 @@ static IGEN copy(thread_gc *tgc, ptr p, seginfo *si, ptr *dest)
             EXACTNUM_TYPE(new_p) = type_exactnum;
             {
               ptr tmp_p = EXACTNUM_REAL_PART(p);
-              relocate_pure(&tmp_p, p, SIZE);
+              relocate_pure(&tmp_p);
               EXACTNUM_REAL_PART(new_p) = tmp_p;
             }
             {
               ptr tmp_p = EXACTNUM_IMAG_PART(p);
-              relocate_pure(&tmp_p, p, SIZE);
+              relocate_pure(&tmp_p);
               EXACTNUM_IMAG_PART(new_p) = tmp_p;
             }
           }
@@ -289,9 +301,9 @@ static IGEN copy(thread_gc *tgc, ptr p, seginfo *si, ptr *dest)
             find_gc_room(tgc, p_spc, tg, type_typed_object, p_sz, new_p);
             PHANTOMTYPE(new_p) = type_phantom;
             PHANTOMLEN(new_p) = PHANTOMLEN(p);
-            GC_TC_MUTEX_ACQUIRE();
+            GC_MUTEX_ACQUIRE();
             (S_G.bytesof[tg])[countof_phantom] += PHANTOMLEN(p);
-            GC_TC_MUTEX_RELEASE();
+            GC_MUTEX_RELEASE();
           }
         }
         else
@@ -376,7 +388,7 @@ static IGEN copy(thread_gc *tgc, ptr p, seginfo *si, ptr *dest)
       else if (t == type_closure)
       {
         ptr code = CLOSCODE(p);
-        relocate_pure(&code, p, SIZE);
+        relocate_pure(&code);
         if ((CODETYPE(code)) & (code_flag_continuation << code_flags_offset))
         {
           ISPC p_spc = space_continuation;
@@ -387,9 +399,9 @@ static IGEN copy(thread_gc *tgc, ptr p, seginfo *si, ptr *dest)
             if ((CONTLENGTH(p)) == opportunistic_1_shot_flag)
             {
               CONTLENGTH(new_p) = CONTCLENGTH(p);
-              GC_TC_MUTEX_ACQUIRE();
+              GC_MUTEX_ACQUIRE();
               conts_to_promote = S_cons_in(tgc -> tc, space_new, 0, new_p, conts_to_promote);
-              GC_TC_MUTEX_RELEASE();
+              GC_MUTEX_RELEASE();
             }
             else
             {
@@ -472,6 +484,7 @@ static IGEN copy(thread_gc *tgc, ptr p, seginfo *si, ptr *dest)
 
 static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
 {
+  FLUSH_REMOTE_BLOCK
   {
     ITYPE t = TYPEBITS(p);
     if (t == type_typed_object)
@@ -479,7 +492,7 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
       ptr tf = TYPEFIELD(p);
       if (TYPEP(tf, mask_record, type_record))
       {
-        relocate_pure(&RECORDINSTTYPE(p), p, size_record_inst((UNFIX((RECORDDESCSIZE(RECORDINSTTYPE(p)))))));
+        relocate_pure(&RECORDINSTTYPE(p));
         {
           ptr rtd = RECORDINSTTYPE(p);
           {
@@ -497,7 +510,7 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
                       ptr* ppend = ((ptr*)(TO_VOIDP((((uptr)(TO_PTR(pp))) + len)))) - 1;
                       while (pp < ppend)
                       {
-                        relocate_impure(&(*(pp)), from_g, p, SIZE);
+                        relocate_impure(&(*(pp)), from_g);
                         pp += 1;
                       }
                     }
@@ -508,7 +521,7 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
                     {
                       if (mask & 1)
                       {
-                        relocate_impure(&(*(pp)), from_g, p, SIZE);
+                        relocate_impure(&(*(pp)), from_g);
                       }
                       mask >>= 1;
                       pp += 1;
@@ -518,7 +531,7 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
               }
               else
               {
-                relocate_pure(&(RECORDDESCPM(rtd)), p, SIZE);
+                relocate_pure(&(RECORDDESCPM(rtd)));
                 num = RECORDDESCPM(rtd);
                 {
                   iptr index = (BIGLEN(num)) - 1;
@@ -530,7 +543,7 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
                     {
                       if (mask & 1)
                       {
-                        relocate_impure(&(*(pp)), from_g, p, SIZE);
+                        relocate_impure(&(*(pp)), from_g);
                       }
                       mask >>= 1;
                       pp += 1;
@@ -559,7 +572,7 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
           ptr *p_p = &INITVECTIT(p, 0);
           for (idx = 0; idx < p_len; idx++)
           {
-            relocate_impure(&(p_p[idx]), from_g, p, SIZE);
+            relocate_impure(&(p_p[idx]), from_g);
           }
         }
       }
@@ -571,7 +584,7 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
           ptr *p_p = &INITSTENVECTIT(p, 0);
           for (idx = 0; idx < p_len; idx++)
           {
-            relocate_impure(&(p_p[idx]), from_g, p, SIZE);
+            relocate_impure(&(p_p[idx]), from_g);
           }
         }
       }
@@ -581,28 +594,31 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
       else if (TYPEP(tf, mask_fxvector, type_fxvector))
       {
       }
+      else if (TYPEP(tf, mask_flvector, type_flvector))
+      {
+      }
       else if (TYPEP(tf, mask_bytevector, type_bytevector))
       {
       }
       else if ((iptr)tf == type_tlc)
       {
-        relocate_impure(&INITTLCHT(p), from_g, p, SIZE);
-        relocate_impure(&INITTLCKEYVAL(p), from_g, p, SIZE);
-        relocate_impure(&INITTLCNEXT(p), from_g, p, SIZE);
+        relocate_impure(&INITTLCHT(p), from_g);
+        relocate_impure(&INITTLCKEYVAL(p), from_g);
+        relocate_impure(&INITTLCNEXT(p), from_g);
       }
       else if (TYPEP(tf, mask_box, type_box))
       {
-        relocate_impure(&INITBOXREF(p), from_g, p, SIZE);
+        relocate_impure(&INITBOXREF(p), from_g);
       }
       else if ((iptr)tf == type_ratnum)
       {
-        relocate_pure(&RATNUM(p), p, SIZE);
-        relocate_pure(&RATDEN(p), p, SIZE);
+        relocate_pure(&RATNUM(p));
+        relocate_pure(&RATDEN(p));
       }
       else if ((iptr)tf == type_exactnum)
       {
-        relocate_pure(&EXACTNUM_REAL_PART(p), p, SIZE);
-        relocate_pure(&EXACTNUM_IMAG_PART(p), p, SIZE);
+        relocate_pure(&EXACTNUM_REAL_PART(p));
+        relocate_pure(&EXACTNUM_IMAG_PART(p));
       }
       else if ((iptr)tf == type_inexactnum)
       {
@@ -612,28 +628,28 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
       }
       else if (TYPEP(tf, mask_port, type_port))
       {
-        relocate_impure(&PORTHANDLER(p), from_g, p, SIZE);
+        relocate_impure(&PORTHANDLER(p), from_g);
         if (((uptr)tf) & PORT_FLAG_OUTPUT)
         {
           iptr n = ((iptr)(PORTOLAST(p))) - ((iptr)(PORTOBUF(p)));
-          relocate_impure(&PORTOBUF(p), from_g, p, SIZE);
+          relocate_impure(&PORTOBUF(p), from_g);
           PORTOLAST(p) = (ptr)(((iptr)(PORTOBUF(p))) + n);
         }
         if (((uptr)tf) & PORT_FLAG_INPUT)
         {
           iptr n = ((iptr)(PORTILAST(p))) - ((iptr)(PORTIBUF(p)));
-          relocate_impure(&PORTIBUF(p), from_g, p, SIZE);
+          relocate_impure(&PORTIBUF(p), from_g);
           PORTILAST(p) = (ptr)(((iptr)(PORTIBUF(p))) + n);
         }
-        relocate_impure(&PORTINFO(p), from_g, p, SIZE);
-        relocate_impure(&PORTNAME(p), from_g, p, SIZE);
+        relocate_impure(&PORTINFO(p), from_g);
+        relocate_impure(&PORTNAME(p), from_g);
       }
       else if (TYPEP(tf, mask_code, type_code))
       {
-        relocate_pure(&CODENAME(p), p, SIZE);
-        relocate_pure(&CODEARITYMASK(p), p, SIZE);
-        relocate_pure(&CODEINFO(p), p, SIZE);
-        relocate_pure(&CODEPINFOS(p), p, SIZE);
+        relocate_pure(&CODENAME(p));
+        relocate_pure(&CODEARITYMASK(p));
+        relocate_pure(&CODEINFO(p));
+        relocate_pure(&CODEPINFOS(p));
         {
           ptr t = CODERELOC(p);
           {
@@ -670,7 +686,7 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
                       a = a + code_off;
                       {
                         ptr obj = S_get_code_obj(RELOC_TYPE(entry), oldco, a, item_off);
-                        relocate_pure(&obj, p, SIZE);
+                        relocate_pure(&obj);
                         S_set_code_obj("gc", RELOC_TYPE(entry), p, a, obj, item_off);
                       }
                     }
@@ -706,7 +722,7 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
                         }
                         else
                         {
-                          RECORD_REMOTE_RANGE(tgc, p, SIZE, t_si);
+                          RECORD_REMOTE(t_si);
                         }
                       }
                     }
@@ -739,10 +755,10 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
               }
             }
             STACKCACHE(tc) = Snil;
-            relocate_pure(&(CCHAIN(tc)), p, SIZE);
-            relocate_pure(&(STACKLINK(tc)), p, SIZE);
-            relocate_pure(&(WINDERS(tc)), p, SIZE);
-            relocate_pure(&(ATTACHMENTS(tc)), p, SIZE);
+            relocate_pure(&(CCHAIN(tc)));
+            relocate_pure(&(STACKLINK(tc)));
+            relocate_pure(&(WINDERS(tc)));
+            relocate_pure(&(ATTACHMENTS(tc)));
             CACHEDFRAME(tc) = Sfalse;
             {
               ptr xcp = FRAME(tc, 0);
@@ -754,7 +770,7 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
                     seginfo* x_si = SegInfo((ptr_get_segment(c_p)));
                     if (x_si -> old_space)
                     {
-                      relocate_code(c_p, x_si, p, SIZE);
+                      relocate_code(c_p, x_si);
                       FRAME(tc, 0) = (ptr)(((uptr)c_p) + co);
                     }
                     {
@@ -784,7 +800,7 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
                                       seginfo* x_si = SegInfo((ptr_get_segment(c_p)));
                                       if (x_si -> old_space)
                                       {
-                                        relocate_code(c_p, x_si, p, SIZE);
+                                        relocate_code(c_p, x_si);
                                         *(pp) = (ptr)(((uptr)c_p) + co);
                                       }
                                       {
@@ -798,7 +814,7 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
                                               pp += 1;
                                               if (mask & 1)
                                               {
-                                                relocate_pure(&(*(pp)), p, SIZE);
+                                                relocate_pure(&(*(pp)));
                                               }
                                               mask >>= 1;
                                             }
@@ -812,12 +828,12 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
                                           }
                                           else if (SEGMENT_IS_LOCAL(n_si, num))
                                           {
-                                            relocate_pure(&(*((ENTRYNONCOMPACTLIVEMASKADDR(oldret)))), p, SIZE);
+                                            relocate_pure(&(*((ENTRYNONCOMPACTLIVEMASKADDR(oldret)))));
                                             num = ENTRYLIVEMASK(oldret);
                                           }
                                           else
                                           {
-                                            RECORD_REMOTE_RANGE(tgc, p, SIZE, n_si);
+                                            RECORD_REMOTE(n_si);
                                             num = S_G.zero_length_bignum;
                                           }
                                           {
@@ -834,7 +850,7 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
                                                   pp += 1;
                                                   if (mask & 1)
                                                   {
-                                                    relocate_pure(&(*(pp)), p, SIZE);
+                                                    relocate_pure(&(*(pp)));
                                                   }
                                                   mask >>= 1;
                                                 }
@@ -854,33 +870,29 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
                           W(tc) = 0;
                           X(tc) = 0;
                           Y(tc) = 0;
-                          relocate_pure(&(THREADNO(tc)), p, SIZE);
-                          relocate_pure(&(CURRENTINPUT(tc)), p, SIZE);
-                          relocate_pure(&(CURRENTOUTPUT(tc)), p, SIZE);
-                          relocate_pure(&(CURRENTERROR(tc)), p, SIZE);
-                          relocate_pure(&(SFD(tc)), p, SIZE);
-                          relocate_pure(&(CURRENTMSO(tc)), p, SIZE);
-                          relocate_pure(&(TARGETMACHINE(tc)), p, SIZE);
-                          relocate_pure(&(FXLENGTHBV(tc)), p, SIZE);
-                          relocate_pure(&(FXFIRSTBITSETBV(tc)), p, SIZE);
-                          relocate_pure(&(NULLIMMUTABLEVECTOR(tc)), p, SIZE);
-                          relocate_pure(&(NULLIMMUTABLEFXVECTOR(tc)), p, SIZE);
-                          relocate_pure(&(NULLIMMUTABLEBYTEVECTOR(tc)), p, SIZE);
-                          relocate_pure(&(NULLIMMUTABLESTRING(tc)), p, SIZE);
-                          relocate_pure(&(COMPILEPROFILE(tc)), p, SIZE);
-                          relocate_pure(&(SUBSETMODE(tc)), p, SIZE);
-                          relocate_pure(&(DEFAULTRECORDEQUALPROCEDURE(tc)), p, SIZE);
-                          relocate_pure(&(DEFAULTRECORDHASHPROCEDURE(tc)), p, SIZE);
-                          relocate_pure(&(COMPRESSFORMAT(tc)), p, SIZE);
-                          relocate_pure(&(COMPRESSLEVEL(tc)), p, SIZE);
-                          relocate_pure(&(PARAMETERS(tc)), p, SIZE);
+                          relocate_pure(&(THREADNO(tc)));
+                          relocate_pure(&(CURRENTINPUT(tc)));
+                          relocate_pure(&(CURRENTOUTPUT(tc)));
+                          relocate_pure(&(CURRENTERROR(tc)));
+                          relocate_pure(&(SFD(tc)));
+                          relocate_pure(&(CURRENTMSO(tc)));
+                          relocate_pure(&(TARGETMACHINE(tc)));
+                          relocate_pure(&(FXLENGTHBV(tc)));
+                          relocate_pure(&(FXFIRSTBITSETBV(tc)));
+                          relocate_pure(&(COMPILEPROFILE(tc)));
+                          relocate_pure(&(SUBSETMODE(tc)));
+                          relocate_pure(&(DEFAULTRECORDEQUALPROCEDURE(tc)));
+                          relocate_pure(&(DEFAULTRECORDHASHPROCEDURE(tc)));
+                          relocate_pure(&(COMPRESSFORMAT(tc)));
+                          relocate_pure(&(COMPRESSLEVEL(tc)));
+                          relocate_pure(&(PARAMETERS(tc)));
                           DSTBV(tc) = Sfalse;
                           SRCBV(tc) = Sfalse;
                           {
                             INT i = 0;
                             while (i < virtual_register_count)
                             {
-                              relocate_pure(&(VIRTREG(tc, i)), p, SIZE);
+                              relocate_pure(&(VIRTREG(tc, i)));
                               i += 1;
                             }
                           }
@@ -915,24 +927,24 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
         }
         else if (p_at_spc == space_weakpair)
         {
-          relocate_impure(&INITCDR(p), from_g, p, SIZE);
+          relocate_impure(&INITCDR(p), from_g);
         }
         else
         {
-          relocate_impure(&INITCAR(p), from_g, p, SIZE);
-          relocate_impure(&INITCDR(p), from_g, p, SIZE);
+          relocate_impure(&INITCAR(p), from_g);
+          relocate_impure(&INITCDR(p), from_g);
         }
       }
     }
     else if (t == type_closure)
     {
       ptr code = CLOSCODE(p);
-      relocate_pure(&code, p, SIZE);
+      relocate_pure(&code);
       if ((CODETYPE(code)) & (code_flag_continuation << code_flags_offset))
       {
         SETCLOSCODE(p, code);
-        relocate_pure(&CONTWINDERS(p), p, SIZE);
-        relocate_impure(&CONTATTACHMENTS(p), from_g, p, SIZE);
+        relocate_pure(&CONTWINDERS(p));
+        relocate_impure(&CONTATTACHMENTS(p), from_g);
         if ((CONTLENGTH(p)) == scaled_shot_1_shot_flag)
         {
         }
@@ -945,14 +957,14 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
             {
               if (!(SEGMENT_IS_LOCAL(s_si, stk)))
               {
-                RECORD_REMOTE_RANGE(tgc, p, SIZE, s_si);
+                RECORD_REMOTE(s_si);
               }
               else
               {
                 CONTSTACK(p) = copy_stack(tgc, CONTSTACK(p), &(CONTLENGTH(p)), CONTCLENGTH(p));
               }
             }
-            relocate_pure(&CONTLINK(p), p, SIZE);
+            relocate_pure(&CONTLINK(p));
             {
               ptr xcp = CONTRET(p);
               {
@@ -963,7 +975,7 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
                     seginfo* x_si = SegInfo((ptr_get_segment(c_p)));
                     if (x_si -> old_space)
                     {
-                      relocate_code(c_p, x_si, p, SIZE);
+                      relocate_code(c_p, x_si);
                       CONTRET(p) = (ptr)(((uptr)c_p) + co);
                     }
                     {
@@ -995,7 +1007,7 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
                                         seginfo* x_si = SegInfo((ptr_get_segment(c_p)));
                                         if (x_si -> old_space)
                                         {
-                                          relocate_code(c_p, x_si, p, SIZE);
+                                          relocate_code(c_p, x_si);
                                           *(pp) = (ptr)(((uptr)c_p) + co);
                                         }
                                         {
@@ -1009,7 +1021,7 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
                                                 pp += 1;
                                                 if (mask & 1)
                                                 {
-                                                  relocate_pure(&(*(pp)), p, SIZE);
+                                                  relocate_pure(&(*(pp)));
                                                 }
                                                 mask >>= 1;
                                               }
@@ -1023,12 +1035,12 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
                                             }
                                             else if (SEGMENT_IS_LOCAL(n_si, num))
                                             {
-                                              relocate_pure(&(*((ENTRYNONCOMPACTLIVEMASKADDR(oldret)))), p, SIZE);
+                                              relocate_pure(&(*((ENTRYNONCOMPACTLIVEMASKADDR(oldret)))));
                                               num = ENTRYLIVEMASK(oldret);
                                             }
                                             else
                                             {
-                                              RECORD_REMOTE_RANGE(tgc, p, SIZE, n_si);
+                                              RECORD_REMOTE(n_si);
                                               num = S_G.zero_length_bignum;
                                             }
                                             {
@@ -1045,7 +1057,7 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
                                                     pp += 1;
                                                     if (mask & 1)
                                                     {
-                                                      relocate_pure(&(*(pp)), p, SIZE);
+                                                      relocate_pure(&(*(pp)));
                                                     }
                                                     mask >>= 1;
                                                   }
@@ -1082,7 +1094,7 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
             ptr *p_p = &CLOSIT(p, 0);
             for (idx = 0; idx < p_len; idx++)
             {
-              relocate_impure(&(p_p[idx]), from_g, p, SIZE);
+              relocate_impure(&(p_p[idx]), from_g);
             }
           }
         }
@@ -1094,7 +1106,7 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
             ptr *p_p = &CLOSIT(p, 0);
             for (idx = 0; idx < p_len; idx++)
             {
-              relocate_pure(&(p_p[idx]), p, SIZE);
+              relocate_pure(&(p_p[idx]));
             }
           }
         }
@@ -1102,19 +1114,19 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
     }
     else if (t == type_symbol)
     {
-      relocate_impure(&INITSYMVAL(p), from_g, p, SIZE);
+      relocate_impure(&INITSYMVAL(p), from_g);
       {
         ptr val = INITSYMVAL(p);
         {
           ptr code = ((Sprocedurep(val))
                       ? (CLOSCODE(val))
                       : (SYMCODE(p)));
-          relocate_pure(&code, p, SIZE);
+          relocate_pure(&code);
           INITSYMCODE(p, code);
-          relocate_impure(&INITSYMPLIST(p), from_g, p, SIZE);
-          relocate_impure(&INITSYMNAME(p), from_g, p, SIZE);
-          relocate_impure(&INITSYMSPLIST(p), from_g, p, SIZE);
-          relocate_impure(&INITSYMHASH(p), from_g, p, SIZE);
+          relocate_impure(&INITSYMPLIST(p), from_g);
+          relocate_impure(&INITSYMNAME(p), from_g);
+          relocate_impure(&INITSYMSPLIST(p), from_g);
+          relocate_impure(&INITSYMHASH(p), from_g);
         }
       }
     }
@@ -1126,204 +1138,211 @@ static void sweep(thread_gc *tgc, ptr p, IGEN from_g)
       S_error_abort("sweep: illegal type");
     }
   }
+  FLUSH_REMOTE(tgc, p);
 }
 
 static void sweep_object_in_old(thread_gc *tgc, ptr p)
 {
-  ITYPE t = TYPEBITS(p);
-  if (t == type_typed_object)
+  FLUSH_REMOTE_BLOCK
   {
-    ptr tf = TYPEFIELD(p);
-    if (TYPEP(tf, mask_record, type_record))
+    ITYPE t = TYPEBITS(p);
+    if (t == type_typed_object)
     {
-      relocate_pure(&RECORDINSTTYPE(p), p, size_record_inst((UNFIX((RECORDDESCSIZE(RECORDINSTTYPE(p)))))));
+      ptr tf = TYPEFIELD(p);
+      if (TYPEP(tf, mask_record, type_record))
       {
-        ptr rtd = RECORDINSTTYPE(p);
+        relocate_pure(&RECORDINSTTYPE(p));
         {
-          uptr len = UNFIX((RECORDDESCSIZE(rtd)));
+          ptr rtd = RECORDINSTTYPE(p);
           {
-            ptr num = RECORDDESCPM(rtd);
-            ptr* pp = &(RECORDINSTIT(p, 0));
-            if (Sfixnump(num))
+            uptr len = UNFIX((RECORDDESCSIZE(rtd)));
             {
+              ptr num = RECORDDESCPM(rtd);
+              ptr* pp = &(RECORDINSTIT(p, 0));
+              if (Sfixnump(num))
               {
-                uptr mask = ((uptr)(UNFIX(num))) >> 1;
-                if (mask == (((uptr)-1) >> 1))
                 {
+                  uptr mask = ((uptr)(UNFIX(num))) >> 1;
+                  if (mask == (((uptr)-1) >> 1))
                   {
-                    ptr* ppend = ((ptr*)(TO_VOIDP((((uptr)(TO_PTR(pp))) + len)))) - 1;
-                    while (pp < ppend)
                     {
-                      relocate_indirect((*(pp)), p, SIZE);
+                      ptr* ppend = ((ptr*)(TO_VOIDP((((uptr)(TO_PTR(pp))) + len)))) - 1;
+                      while (pp < ppend)
+                      {
+                        relocate_indirect((*(pp)));
+                        pp += 1;
+                      }
+                    }
+                  }
+                  else
+                  {
+                    while (mask != 0)
+                    {
+                      if (mask & 1)
+                      {
+                        relocate_indirect((*(pp)));
+                      }
+                      mask >>= 1;
                       pp += 1;
                     }
                   }
                 }
-                else
-                {
-                  while (mask != 0)
-                  {
-                    if (mask & 1)
-                    {
-                      relocate_indirect((*(pp)), p, SIZE);
-                    }
-                    mask >>= 1;
-                    pp += 1;
-                  }
-                }
               }
-            }
-            else
-            {
-              relocate_pure(&(RECORDDESCPM(rtd)), p, SIZE);
-              num = RECORDDESCPM(rtd);
+              else
               {
-                iptr index = (BIGLEN(num)) - 1;
-                bigit mask = (BIGIT(num, index)) >> 1;
-                INT bits = bigit_bits - 1;
-                while (1)
+                relocate_pure(&(RECORDDESCPM(rtd)));
+                num = RECORDDESCPM(rtd);
                 {
-                  do
+                  iptr index = (BIGLEN(num)) - 1;
+                  bigit mask = (BIGIT(num, index)) >> 1;
+                  INT bits = bigit_bits - 1;
+                  while (1)
                   {
-                    if (mask & 1)
+                    do
                     {
-                      relocate_indirect((*(pp)), p, SIZE);
+                      if (mask & 1)
+                      {
+                        relocate_indirect((*(pp)));
+                      }
+                      mask >>= 1;
+                      pp += 1;
+                      bits -= 1;
                     }
-                    mask >>= 1;
-                    pp += 1;
-                    bits -= 1;
+                    while (bits > 0);
+                    if (index == 0)
+                    {
+                      break;
+                    }
+                    index -= 1;
+                    mask = BIGIT(num, index);
+                    bits = bigit_bits;
                   }
-                  while (bits > 0);
-                  if (index == 0)
-                  {
-                    break;
-                  }
-                  index -= 1;
-                  mask = BIGIT(num, index);
-                  bits = bigit_bits;
                 }
               }
             }
           }
         }
       }
-    }
-    else if (TYPEP(tf, mask_vector, type_vector))
-    {
-      uptr len = Svector_length(p);
+      else if (TYPEP(tf, mask_vector, type_vector))
       {
-        uptr idx, p_len = len;
-        ptr *p_p = &INITVECTIT(p, 0);
-        for (idx = 0; idx < p_len; idx++)
+        uptr len = Svector_length(p);
         {
-          relocate_indirect((p_p[idx]), p, SIZE);
-        }
-      }
-    }
-    else if (TYPEP(tf, mask_stencil_vector, type_stencil_vector))
-    {
-      uptr len = Sstencil_vector_length(p);
-      {
-        uptr idx, p_len = len;
-        ptr *p_p = &INITSTENVECTIT(p, 0);
-        for (idx = 0; idx < p_len; idx++)
-        {
-          relocate_indirect((p_p[idx]), p, SIZE);
-        }
-      }
-    }
-    else if (TYPEP(tf, mask_string, type_string))
-    {
-    }
-    else if (TYPEP(tf, mask_fxvector, type_fxvector))
-    {
-    }
-    else if (TYPEP(tf, mask_bytevector, type_bytevector))
-    {
-    }
-    else if ((iptr)tf == type_tlc)
-    {
-      relocate_indirect(INITTLCHT(p), p, SIZE);
-      relocate_indirect(INITTLCKEYVAL(p), p, SIZE);
-      relocate_indirect(INITTLCNEXT(p), p, SIZE);
-    }
-    else if (TYPEP(tf, mask_box, type_box))
-    {
-      relocate_indirect(INITBOXREF(p), p, SIZE);
-    }
-    else if ((iptr)tf == type_ratnum)
-    {
-      relocate_pure(&RATNUM(p), p, SIZE);
-      relocate_pure(&RATDEN(p), p, SIZE);
-    }
-    else if ((iptr)tf == type_exactnum)
-    {
-      relocate_pure(&EXACTNUM_REAL_PART(p), p, SIZE);
-      relocate_pure(&EXACTNUM_IMAG_PART(p), p, SIZE);
-    }
-    else if ((iptr)tf == type_inexactnum)
-    {
-    }
-    else if (TYPEP(tf, mask_bignum, type_bignum))
-    {
-    }
-    else if (TYPEP(tf, mask_port, type_port))
-    {
-      relocate_indirect(PORTHANDLER(p), p, SIZE);
-      if (((uptr)tf) & PORT_FLAG_OUTPUT)
-      {
-        relocate_indirect(PORTOBUF(p), p, SIZE);
-      }
-      if (((uptr)tf) & PORT_FLAG_INPUT)
-      {
-        relocate_indirect(PORTIBUF(p), p, SIZE);
-      }
-      relocate_indirect(PORTINFO(p), p, SIZE);
-      relocate_indirect(PORTNAME(p), p, SIZE);
-    }
-    else if (TYPEP(tf, mask_code, type_code))
-    {
-      relocate_pure(&CODENAME(p), p, SIZE);
-      relocate_pure(&CODEARITYMASK(p), p, SIZE);
-      relocate_pure(&CODEINFO(p), p, SIZE);
-      relocate_pure(&CODEPINFOS(p), p, SIZE);
-      {
-        ptr t = CODERELOC(p);
-        {
-          iptr m = (t
-                    ? (RELOCSIZE(t))
-                    : 0);
+          uptr idx, p_len = len;
+          ptr *p_p = &INITVECTIT(p, 0);
+          for (idx = 0; idx < p_len; idx++)
           {
-            ptr oldco = (t
-                         ? (RELOCCODE(t))
-                         : 0);
+            relocate_indirect((p_p[idx]));
+          }
+        }
+      }
+      else if (TYPEP(tf, mask_stencil_vector, type_stencil_vector))
+      {
+        uptr len = Sstencil_vector_length(p);
+        {
+          uptr idx, p_len = len;
+          ptr *p_p = &INITSTENVECTIT(p, 0);
+          for (idx = 0; idx < p_len; idx++)
+          {
+            relocate_indirect((p_p[idx]));
+          }
+        }
+      }
+      else if (TYPEP(tf, mask_string, type_string))
+      {
+      }
+      else if (TYPEP(tf, mask_fxvector, type_fxvector))
+      {
+      }
+      else if (TYPEP(tf, mask_flvector, type_flvector))
+      {
+      }
+      else if (TYPEP(tf, mask_bytevector, type_bytevector))
+      {
+      }
+      else if ((iptr)tf == type_tlc)
+      {
+        relocate_indirect(INITTLCHT(p));
+        relocate_indirect(INITTLCKEYVAL(p));
+        relocate_indirect(INITTLCNEXT(p));
+      }
+      else if (TYPEP(tf, mask_box, type_box))
+      {
+        relocate_indirect(INITBOXREF(p));
+      }
+      else if ((iptr)tf == type_ratnum)
+      {
+        relocate_pure(&RATNUM(p));
+        relocate_pure(&RATDEN(p));
+      }
+      else if ((iptr)tf == type_exactnum)
+      {
+        relocate_pure(&EXACTNUM_REAL_PART(p));
+        relocate_pure(&EXACTNUM_IMAG_PART(p));
+      }
+      else if ((iptr)tf == type_inexactnum)
+      {
+      }
+      else if (TYPEP(tf, mask_bignum, type_bignum))
+      {
+      }
+      else if (TYPEP(tf, mask_port, type_port))
+      {
+        relocate_indirect(PORTHANDLER(p));
+        if (((uptr)tf) & PORT_FLAG_OUTPUT)
+        {
+          relocate_indirect(PORTOBUF(p));
+        }
+        if (((uptr)tf) & PORT_FLAG_INPUT)
+        {
+          relocate_indirect(PORTIBUF(p));
+        }
+        relocate_indirect(PORTINFO(p));
+        relocate_indirect(PORTNAME(p));
+      }
+      else if (TYPEP(tf, mask_code, type_code))
+      {
+        relocate_pure(&CODENAME(p));
+        relocate_pure(&CODEARITYMASK(p));
+        relocate_pure(&CODEINFO(p));
+        relocate_pure(&CODEPINFOS(p));
+        {
+          ptr t = CODERELOC(p);
+          {
+            iptr m = (t
+                      ? (RELOCSIZE(t))
+                      : 0);
             {
-              iptr a = 0;
+              ptr oldco = (t
+                           ? (RELOCCODE(t))
+                           : 0);
               {
-                iptr n = 0;
-                while (n < m)
+                iptr a = 0;
                 {
+                  iptr n = 0;
+                  while (n < m)
                   {
-                    uptr entry = RELOCIT(t, n);
-                    uptr item_off = 0;
-                    uptr code_off = 0;
-                    n = n + 1;
-                    if (RELOC_EXTENDED_FORMAT(entry))
                     {
-                      item_off = RELOCIT(t, n);
+                      uptr entry = RELOCIT(t, n);
+                      uptr item_off = 0;
+                      uptr code_off = 0;
                       n = n + 1;
-                      code_off = RELOCIT(t, n);
-                      n = n + 1;
-                    }
-                    else
-                    {
-                      item_off = RELOC_ITEM_OFFSET(entry);
-                      code_off = RELOC_CODE_OFFSET(entry);
-                    }
-                    a = a + code_off;
-                    {
-                      ptr obj = S_get_code_obj(RELOC_TYPE(entry), oldco, a, item_off);
-                      relocate_pure(&obj, p, SIZE);
+                      if (RELOC_EXTENDED_FORMAT(entry))
+                      {
+                        item_off = RELOCIT(t, n);
+                        n = n + 1;
+                        code_off = RELOCIT(t, n);
+                        n = n + 1;
+                      }
+                      else
+                      {
+                        item_off = RELOC_ITEM_OFFSET(entry);
+                        code_off = RELOC_CODE_OFFSET(entry);
+                      }
+                      a = a + code_off;
+                      {
+                        ptr obj = S_get_code_obj(RELOC_TYPE(entry), oldco, a, item_off);
+                        relocate_pure(&obj);
+                      }
                     }
                   }
                 }
@@ -1332,20 +1351,200 @@ static void sweep_object_in_old(thread_gc *tgc, ptr p)
           }
         }
       }
+      else if ((iptr)tf == type_thread)
+      {
+        {
+          ptr tc = (ptr)(THREADTC(p));
+          if (tc != ((ptr)0))
+          {
+            STACKCACHE(tc) = Snil;
+            relocate_pure(&(CCHAIN(tc)));
+            relocate_pure(&(STACKLINK(tc)));
+            relocate_pure(&(WINDERS(tc)));
+            relocate_pure(&(ATTACHMENTS(tc)));
+            {
+              ptr xcp = FRAME(tc, 0);
+              {
+                iptr co = (ENTRYOFFSET(xcp)) + (((uptr)xcp) - ((uptr)(TO_PTR((ENTRYOFFSETADDR(xcp))))));
+                {
+                  ptr c_p = (ptr)(((uptr)xcp) - co);
+                  {
+                    seginfo* x_si = SegInfo((ptr_get_segment(c_p)));
+                    if (x_si -> old_space)
+                    {
+                      relocate_code(c_p, x_si);
+                    }
+                    {
+                      uptr base = (uptr)(SCHEMESTACK(tc));
+                      {
+                        uptr fp = (uptr)(SFP(tc));
+                        {
+                          uptr ret = (uptr)(FRAME(tc, 0));
+                          while (fp != base)
+                          {
+                            if (fp < base)
+                            {
+                              S_error_abort("sweep_stack(gc): malformed stack");
+                            }
+                            fp = fp - (ENTRYFRAMESIZE(ret));
+                            {
+                              ptr* pp = (ptr*)(TO_VOIDP(fp));
+                              iptr oldret = ret;
+                              ret = (iptr)(*(pp));
+                              {
+                                ptr xcp = *(pp);
+                                {
+                                  iptr co = (ENTRYOFFSET(xcp)) + (((uptr)xcp) - ((uptr)(TO_PTR((ENTRYOFFSETADDR(xcp))))));
+                                  {
+                                    ptr c_p = (ptr)(((uptr)xcp) - co);
+                                    {
+                                      seginfo* x_si = SegInfo((ptr_get_segment(c_p)));
+                                      if (x_si -> old_space)
+                                      {
+                                        relocate_code(c_p, x_si);
+                                      }
+                                      {
+                                        ptr num = ENTRYLIVEMASK(oldret);
+                                        if (Sfixnump(num))
+                                        {
+                                          {
+                                            uptr mask = UNFIX(num);
+                                            while (mask != 0)
+                                            {
+                                              pp += 1;
+                                              if (mask & 1)
+                                              {
+                                                relocate_pure(&(*(pp)));
+                                              }
+                                              mask >>= 1;
+                                            }
+                                          }
+                                        }
+                                        else
+                                        {
+                                          seginfo* n_si = SegInfo((ptr_get_segment(num)));
+                                          if (!(n_si -> old_space))
+                                          {
+                                          }
+                                          else if (SEGMENT_IS_LOCAL(n_si, num))
+                                          {
+                                            relocate_pure(&(*((ENTRYNONCOMPACTLIVEMASKADDR(oldret)))));
+                                            num = ENTRYLIVEMASK(oldret);
+                                          }
+                                          else
+                                          {
+                                            RECORD_REMOTE(n_si);
+                                            num = S_G.zero_length_bignum;
+                                          }
+                                          {
+                                            iptr index = BIGLEN(num);
+                                            while (index != 0)
+                                            {
+                                              index -= 1;
+                                              {
+                                                INT bits = bigit_bits;
+                                                bigit mask = BIGIT(num, index);
+                                                while (bits > 0)
+                                                {
+                                                  bits -= 1;
+                                                  pp += 1;
+                                                  if (mask & 1)
+                                                  {
+                                                    relocate_pure(&(*(pp)));
+                                                  }
+                                                  mask >>= 1;
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                          relocate_pure(&(THREADNO(tc)));
+                          relocate_pure(&(CURRENTINPUT(tc)));
+                          relocate_pure(&(CURRENTOUTPUT(tc)));
+                          relocate_pure(&(CURRENTERROR(tc)));
+                          relocate_pure(&(SFD(tc)));
+                          relocate_pure(&(CURRENTMSO(tc)));
+                          relocate_pure(&(TARGETMACHINE(tc)));
+                          relocate_pure(&(FXLENGTHBV(tc)));
+                          relocate_pure(&(FXFIRSTBITSETBV(tc)));
+                          relocate_pure(&(COMPILEPROFILE(tc)));
+                          relocate_pure(&(SUBSETMODE(tc)));
+                          relocate_pure(&(DEFAULTRECORDEQUALPROCEDURE(tc)));
+                          relocate_pure(&(DEFAULTRECORDHASHPROCEDURE(tc)));
+                          relocate_pure(&(COMPRESSFORMAT(tc)));
+                          relocate_pure(&(COMPRESSLEVEL(tc)));
+                          relocate_pure(&(PARAMETERS(tc)));
+                          {
+                            INT i = 0;
+                            while (i < virtual_register_count)
+                            {
+                              relocate_pure(&(VIRTREG(tc, i)));
+                              i += 1;
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      else if ((iptr)tf == type_rtd_counts)
+      {
+      }
+      else if ((iptr)tf == type_phantom)
+      {
+      }
+      else
+      {
+        S_error_abort("sweep-in-old: illegal typed object type");
+      }
     }
-    else if ((iptr)tf == type_thread)
+    else if (t == type_pair)
     {
       {
-        ptr tc = (ptr)(THREADTC(p));
-        if (tc != ((ptr)0))
+        ISPC p_at_spc = SPACE(p);
+        if (p_at_spc == space_ephemeron)
         {
-          STACKCACHE(tc) = Snil;
-          relocate_pure(&(CCHAIN(tc)), p, SIZE);
-          relocate_pure(&(STACKLINK(tc)), p, SIZE);
-          relocate_pure(&(WINDERS(tc)), p, SIZE);
-          relocate_pure(&(ATTACHMENTS(tc)), p, SIZE);
+        }
+        else if (p_at_spc == space_weakpair)
+        {
+          relocate_indirect(INITCDR(p));
+        }
+        else
+        {
+          relocate_indirect(INITCAR(p));
+          relocate_indirect(INITCDR(p));
+        }
+      }
+    }
+    else if (t == type_closure)
+    {
+      ptr code = CLOSCODE(p);
+      relocate_pure(&code);
+      if ((CODETYPE(code)) & (code_flag_continuation << code_flags_offset))
+      {
+        SETCLOSCODE(p, code);
+        relocate_pure(&CONTWINDERS(p));
+        relocate_indirect(CONTATTACHMENTS(p));
+        if ((CONTLENGTH(p)) == scaled_shot_1_shot_flag)
+        {
+        }
+        else
+        {
+          relocate_pure(&CONTLINK(p));
           {
-            ptr xcp = FRAME(tc, 0);
+            ptr xcp = CONTRET(p);
             {
               iptr co = (ENTRYOFFSET(xcp)) + (((uptr)xcp) - ((uptr)(TO_PTR((ENTRYOFFSETADDR(xcp))))));
               {
@@ -1354,87 +1553,90 @@ static void sweep_object_in_old(thread_gc *tgc, ptr p)
                   seginfo* x_si = SegInfo((ptr_get_segment(c_p)));
                   if (x_si -> old_space)
                   {
-                    relocate_code(c_p, x_si, p, SIZE);
+                    relocate_code(c_p, x_si);
                   }
                   {
-                    uptr base = (uptr)(SCHEMESTACK(tc));
+                    uptr stack = (uptr)(CONTSTACK(p));
                     {
-                      uptr fp = (uptr)(SFP(tc));
+                      uptr base = stack;
                       {
-                        uptr ret = (uptr)(FRAME(tc, 0));
-                        while (fp != base)
+                        uptr fp = stack + (CONTCLENGTH(p));
                         {
-                          if (fp < base)
+                          uptr ret = (uptr)(CONTRET(p));
+                          while (fp != base)
                           {
-                            S_error_abort("sweep_stack(gc): malformed stack");
-                          }
-                          fp = fp - (ENTRYFRAMESIZE(ret));
-                          {
-                            ptr* pp = (ptr*)(TO_VOIDP(fp));
-                            iptr oldret = ret;
-                            ret = (iptr)(*(pp));
+                            if (fp < base)
                             {
-                              ptr xcp = *(pp);
+                              S_error_abort("sweep_stack(gc): malformed stack");
+                            }
+                            fp = fp - (ENTRYFRAMESIZE(ret));
+                            {
+                              ptr* pp = (ptr*)(TO_VOIDP(fp));
+                              iptr oldret = ret;
+                              ret = (iptr)(*(pp));
                               {
-                                iptr co = (ENTRYOFFSET(xcp)) + (((uptr)xcp) - ((uptr)(TO_PTR((ENTRYOFFSETADDR(xcp))))));
+                                ptr xcp = *(pp);
                                 {
-                                  ptr c_p = (ptr)(((uptr)xcp) - co);
+                                  iptr co = (ENTRYOFFSET(xcp)) + (((uptr)xcp) - ((uptr)(TO_PTR((ENTRYOFFSETADDR(xcp))))));
                                   {
-                                    seginfo* x_si = SegInfo((ptr_get_segment(c_p)));
-                                    if (x_si -> old_space)
+                                    ptr c_p = (ptr)(((uptr)xcp) - co);
                                     {
-                                      relocate_code(c_p, x_si, p, SIZE);
-                                    }
-                                    {
-                                      ptr num = ENTRYLIVEMASK(oldret);
-                                      if (Sfixnump(num))
+                                      seginfo* x_si = SegInfo((ptr_get_segment(c_p)));
+                                      if (x_si -> old_space)
                                       {
-                                        {
-                                          uptr mask = UNFIX(num);
-                                          while (mask != 0)
-                                          {
-                                            pp += 1;
-                                            if (mask & 1)
-                                            {
-                                              relocate_pure(&(*(pp)), p, SIZE);
-                                            }
-                                            mask >>= 1;
-                                          }
-                                        }
+                                        relocate_code(c_p, x_si);
                                       }
-                                      else
                                       {
-                                        seginfo* n_si = SegInfo((ptr_get_segment(num)));
-                                        if (!(n_si -> old_space))
+                                        ptr num = ENTRYLIVEMASK(oldret);
+                                        if (Sfixnump(num))
                                         {
-                                        }
-                                        else if (SEGMENT_IS_LOCAL(n_si, num))
-                                        {
-                                          relocate_pure(&(*((ENTRYNONCOMPACTLIVEMASKADDR(oldret)))), p, SIZE);
-                                          num = ENTRYLIVEMASK(oldret);
+                                          {
+                                            uptr mask = UNFIX(num);
+                                            while (mask != 0)
+                                            {
+                                              pp += 1;
+                                              if (mask & 1)
+                                              {
+                                                relocate_pure(&(*(pp)));
+                                              }
+                                              mask >>= 1;
+                                            }
+                                          }
                                         }
                                         else
                                         {
-                                          RECORD_REMOTE_RANGE(tgc, p, SIZE, n_si);
-                                          num = S_G.zero_length_bignum;
-                                        }
-                                        {
-                                          iptr index = BIGLEN(num);
-                                          while (index != 0)
+                                          seginfo* n_si = SegInfo((ptr_get_segment(num)));
+                                          if (!(n_si -> old_space))
                                           {
-                                            index -= 1;
+                                          }
+                                          else if (SEGMENT_IS_LOCAL(n_si, num))
+                                          {
+                                            relocate_pure(&(*((ENTRYNONCOMPACTLIVEMASKADDR(oldret)))));
+                                            num = ENTRYLIVEMASK(oldret);
+                                          }
+                                          else
+                                          {
+                                            RECORD_REMOTE(n_si);
+                                            num = S_G.zero_length_bignum;
+                                          }
+                                          {
+                                            iptr index = BIGLEN(num);
+                                            while (index != 0)
                                             {
-                                              INT bits = bigit_bits;
-                                              bigit mask = BIGIT(num, index);
-                                              while (bits > 0)
+                                              index -= 1;
                                               {
-                                                bits -= 1;
-                                                pp += 1;
-                                                if (mask & 1)
+                                                INT bits = bigit_bits;
+                                                bigit mask = BIGIT(num, index);
+                                                while (bits > 0)
                                                 {
-                                                  relocate_pure(&(*(pp)), p, SIZE);
+                                                  bits -= 1;
+                                                  pp += 1;
+                                                  if (mask & 1)
+                                                  {
+                                                    relocate_pure(&(*(pp)));
+                                                  }
+                                                  mask >>= 1;
                                                 }
-                                                mask >>= 1;
                                               }
                                             }
                                           }
@@ -1447,34 +1649,6 @@ static void sweep_object_in_old(thread_gc *tgc, ptr p)
                             }
                           }
                         }
-                        relocate_pure(&(THREADNO(tc)), p, SIZE);
-                        relocate_pure(&(CURRENTINPUT(tc)), p, SIZE);
-                        relocate_pure(&(CURRENTOUTPUT(tc)), p, SIZE);
-                        relocate_pure(&(CURRENTERROR(tc)), p, SIZE);
-                        relocate_pure(&(SFD(tc)), p, SIZE);
-                        relocate_pure(&(CURRENTMSO(tc)), p, SIZE);
-                        relocate_pure(&(TARGETMACHINE(tc)), p, SIZE);
-                        relocate_pure(&(FXLENGTHBV(tc)), p, SIZE);
-                        relocate_pure(&(FXFIRSTBITSETBV(tc)), p, SIZE);
-                        relocate_pure(&(NULLIMMUTABLEVECTOR(tc)), p, SIZE);
-                        relocate_pure(&(NULLIMMUTABLEFXVECTOR(tc)), p, SIZE);
-                        relocate_pure(&(NULLIMMUTABLEBYTEVECTOR(tc)), p, SIZE);
-                        relocate_pure(&(NULLIMMUTABLESTRING(tc)), p, SIZE);
-                        relocate_pure(&(COMPILEPROFILE(tc)), p, SIZE);
-                        relocate_pure(&(SUBSETMODE(tc)), p, SIZE);
-                        relocate_pure(&(DEFAULTRECORDEQUALPROCEDURE(tc)), p, SIZE);
-                        relocate_pure(&(DEFAULTRECORDHASHPROCEDURE(tc)), p, SIZE);
-                        relocate_pure(&(COMPRESSFORMAT(tc)), p, SIZE);
-                        relocate_pure(&(COMPRESSLEVEL(tc)), p, SIZE);
-                        relocate_pure(&(PARAMETERS(tc)), p, SIZE);
-                        {
-                          INT i = 0;
-                          while (i < virtual_register_count)
-                          {
-                            relocate_pure(&(VIRTREG(tc, i)), p, SIZE);
-                            i += 1;
-                          }
-                        }
                       }
                     }
                   }
@@ -1484,224 +1658,67 @@ static void sweep_object_in_old(thread_gc *tgc, ptr p)
           }
         }
       }
-    }
-    else if ((iptr)tf == type_rtd_counts)
-    {
-    }
-    else if ((iptr)tf == type_phantom)
-    {
-    }
-    else
-    {
-      S_error_abort("sweep-in-old: illegal typed object type");
-    }
-  }
-  else if (t == type_pair)
-  {
-    {
-      ISPC p_at_spc = SPACE(p);
-      if (p_at_spc == space_ephemeron)
-      {
-      }
-      else if (p_at_spc == space_weakpair)
-      {
-        relocate_indirect(INITCDR(p), p, SIZE);
-      }
       else
       {
-        relocate_indirect(INITCAR(p), p, SIZE);
-        relocate_indirect(INITCDR(p), p, SIZE);
-      }
-    }
-  }
-  else if (t == type_closure)
-  {
-    ptr code = CLOSCODE(p);
-    relocate_pure(&code, p, SIZE);
-    if ((CODETYPE(code)) & (code_flag_continuation << code_flags_offset))
-    {
-      SETCLOSCODE(p, code);
-      relocate_pure(&CONTWINDERS(p), p, SIZE);
-      relocate_indirect(CONTATTACHMENTS(p), p, SIZE);
-      if ((CONTLENGTH(p)) == scaled_shot_1_shot_flag)
-      {
-      }
-      else
-      {
-        relocate_pure(&CONTLINK(p), p, SIZE);
+        uptr len = CODEFREE(code);
+        if ((CODETYPE(code)) & (code_flag_mutable_closure << code_flags_offset))
         {
-          ptr xcp = CONTRET(p);
+          SETCLOSCODE(p, code);
           {
-            iptr co = (ENTRYOFFSET(xcp)) + (((uptr)xcp) - ((uptr)(TO_PTR((ENTRYOFFSETADDR(xcp))))));
+            uptr idx, p_len = len;
+            ptr *p_p = &CLOSIT(p, 0);
+            for (idx = 0; idx < p_len; idx++)
             {
-              ptr c_p = (ptr)(((uptr)xcp) - co);
-              {
-                seginfo* x_si = SegInfo((ptr_get_segment(c_p)));
-                if (x_si -> old_space)
-                {
-                  relocate_code(c_p, x_si, p, SIZE);
-                }
-                {
-                  uptr stack = (uptr)(CONTSTACK(p));
-                  {
-                    uptr base = stack;
-                    {
-                      uptr fp = stack + (CONTCLENGTH(p));
-                      {
-                        uptr ret = (uptr)(CONTRET(p));
-                        while (fp != base)
-                        {
-                          if (fp < base)
-                          {
-                            S_error_abort("sweep_stack(gc): malformed stack");
-                          }
-                          fp = fp - (ENTRYFRAMESIZE(ret));
-                          {
-                            ptr* pp = (ptr*)(TO_VOIDP(fp));
-                            iptr oldret = ret;
-                            ret = (iptr)(*(pp));
-                            {
-                              ptr xcp = *(pp);
-                              {
-                                iptr co = (ENTRYOFFSET(xcp)) + (((uptr)xcp) - ((uptr)(TO_PTR((ENTRYOFFSETADDR(xcp))))));
-                                {
-                                  ptr c_p = (ptr)(((uptr)xcp) - co);
-                                  {
-                                    seginfo* x_si = SegInfo((ptr_get_segment(c_p)));
-                                    if (x_si -> old_space)
-                                    {
-                                      relocate_code(c_p, x_si, p, SIZE);
-                                    }
-                                    {
-                                      ptr num = ENTRYLIVEMASK(oldret);
-                                      if (Sfixnump(num))
-                                      {
-                                        {
-                                          uptr mask = UNFIX(num);
-                                          while (mask != 0)
-                                          {
-                                            pp += 1;
-                                            if (mask & 1)
-                                            {
-                                              relocate_pure(&(*(pp)), p, SIZE);
-                                            }
-                                            mask >>= 1;
-                                          }
-                                        }
-                                      }
-                                      else
-                                      {
-                                        seginfo* n_si = SegInfo((ptr_get_segment(num)));
-                                        if (!(n_si -> old_space))
-                                        {
-                                        }
-                                        else if (SEGMENT_IS_LOCAL(n_si, num))
-                                        {
-                                          relocate_pure(&(*((ENTRYNONCOMPACTLIVEMASKADDR(oldret)))), p, SIZE);
-                                          num = ENTRYLIVEMASK(oldret);
-                                        }
-                                        else
-                                        {
-                                          RECORD_REMOTE_RANGE(tgc, p, SIZE, n_si);
-                                          num = S_G.zero_length_bignum;
-                                        }
-                                        {
-                                          iptr index = BIGLEN(num);
-                                          while (index != 0)
-                                          {
-                                            index -= 1;
-                                            {
-                                              INT bits = bigit_bits;
-                                              bigit mask = BIGIT(num, index);
-                                              while (bits > 0)
-                                              {
-                                                bits -= 1;
-                                                pp += 1;
-                                                if (mask & 1)
-                                                {
-                                                  relocate_pure(&(*(pp)), p, SIZE);
-                                                }
-                                                mask >>= 1;
-                                              }
-                                            }
-                                          }
-                                        }
-                                      }
-                                    }
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
+              relocate_indirect((p_p[idx]));
+            }
+          }
+        }
+        else
+        {
+          SETCLOSCODE(p, code);
+          {
+            uptr idx, p_len = len;
+            ptr *p_p = &CLOSIT(p, 0);
+            for (idx = 0; idx < p_len; idx++)
+            {
+              relocate_pure(&(p_p[idx]));
             }
           }
         }
       }
     }
+    else if (t == type_symbol)
+    {
+      relocate_indirect(INITSYMVAL(p));
+      {
+        ptr val = INITSYMVAL(p);
+        {
+          ptr code = ((Sprocedurep(val))
+                      ? (CLOSCODE(val))
+                      : (SYMCODE(p)));
+          relocate_pure(&code);
+          INITSYMCODE(p, code);
+          relocate_indirect(INITSYMPLIST(p));
+          relocate_indirect(INITSYMNAME(p));
+          relocate_indirect(INITSYMSPLIST(p));
+          relocate_indirect(INITSYMHASH(p));
+        }
+      }
+    }
+    else if (t == type_flonum)
+    {
+    }
     else
     {
-      uptr len = CODEFREE(code);
-      if ((CODETYPE(code)) & (code_flag_mutable_closure << code_flags_offset))
-      {
-        SETCLOSCODE(p, code);
-        {
-          uptr idx, p_len = len;
-          ptr *p_p = &CLOSIT(p, 0);
-          for (idx = 0; idx < p_len; idx++)
-          {
-            relocate_indirect((p_p[idx]), p, SIZE);
-          }
-        }
-      }
-      else
-      {
-        SETCLOSCODE(p, code);
-        {
-          uptr idx, p_len = len;
-          ptr *p_p = &CLOSIT(p, 0);
-          for (idx = 0; idx < p_len; idx++)
-          {
-            relocate_pure(&(p_p[idx]), p, SIZE);
-          }
-        }
-      }
+      S_error_abort("sweep-in-old: illegal type");
     }
   }
-  else if (t == type_symbol)
-  {
-    relocate_indirect(INITSYMVAL(p), p, SIZE);
-    {
-      ptr val = INITSYMVAL(p);
-      {
-        ptr code = ((Sprocedurep(val))
-                    ? (CLOSCODE(val))
-                    : (SYMCODE(p)));
-        relocate_pure(&code, p, SIZE);
-        INITSYMCODE(p, code);
-        relocate_indirect(INITSYMPLIST(p), p, SIZE);
-        relocate_indirect(INITSYMNAME(p), p, SIZE);
-        relocate_indirect(INITSYMSPLIST(p), p, SIZE);
-        relocate_indirect(INITSYMHASH(p), p, SIZE);
-      }
-    }
-  }
-  else if (t == type_flonum)
-  {
-  }
-  else
-  {
-    S_error_abort("sweep-in-old: illegal type");
-  }
+  ASSERT_EMPTY_FLUSH_REMOTE();
 }
 
 static IGEN sweep_dirty_object(thread_gc *tgc, ptr p, IGEN youngest)
 {
+  FLUSH_REMOTE_BLOCK
   {
     ITYPE t = TYPEBITS(p);
     if (t == type_typed_object)
@@ -1722,7 +1739,7 @@ static IGEN sweep_dirty_object(thread_gc *tgc, ptr p, IGEN youngest)
                 {
                   if (mask & 1)
                   {
-                    relocate_dirty(&(*(pp)), youngest, p, SIZE);
+                    relocate_dirty(&(*(pp)), youngest);
                   }
                   mask >>= 1;
                   pp += 1;
@@ -1741,7 +1758,7 @@ static IGEN sweep_dirty_object(thread_gc *tgc, ptr p, IGEN youngest)
                   {
                     if (mask & 1)
                     {
-                      relocate_dirty(&(*(pp)), youngest, p, SIZE);
+                      relocate_dirty(&(*(pp)), youngest);
                     }
                     mask >>= 1;
                     pp += 1;
@@ -1769,7 +1786,7 @@ static IGEN sweep_dirty_object(thread_gc *tgc, ptr p, IGEN youngest)
           ptr *p_p = &INITVECTIT(p, 0);
           for (idx = 0; idx < p_len; idx++)
           {
-            relocate_dirty(&(p_p[idx]), youngest, p, SIZE);
+            relocate_dirty(&(p_p[idx]), youngest);
           }
         }
       }
@@ -1781,7 +1798,7 @@ static IGEN sweep_dirty_object(thread_gc *tgc, ptr p, IGEN youngest)
           ptr *p_p = &INITSTENVECTIT(p, 0);
           for (idx = 0; idx < p_len; idx++)
           {
-            relocate_dirty(&(p_p[idx]), youngest, p, SIZE);
+            relocate_dirty(&(p_p[idx]), youngest);
           }
         }
       }
@@ -1791,18 +1808,21 @@ static IGEN sweep_dirty_object(thread_gc *tgc, ptr p, IGEN youngest)
       else if (TYPEP(tf, mask_fxvector, type_fxvector))
       {
       }
+      else if (TYPEP(tf, mask_flvector, type_flvector))
+      {
+      }
       else if (TYPEP(tf, mask_bytevector, type_bytevector))
       {
       }
       else if ((iptr)tf == type_tlc)
       {
-        relocate_dirty(&INITTLCHT(p), youngest, p, SIZE);
-        relocate_dirty(&INITTLCKEYVAL(p), youngest, p, SIZE);
-        relocate_dirty(&INITTLCNEXT(p), youngest, p, SIZE);
+        relocate_dirty(&INITTLCHT(p), youngest);
+        relocate_dirty(&INITTLCKEYVAL(p), youngest);
+        relocate_dirty(&INITTLCNEXT(p), youngest);
       }
       else if (TYPEP(tf, mask_box, type_box))
       {
-        relocate_dirty(&INITBOXREF(p), youngest, p, SIZE);
+        relocate_dirty(&INITBOXREF(p), youngest);
       }
       else if ((iptr)tf == type_ratnum)
       {
@@ -1818,21 +1838,21 @@ static IGEN sweep_dirty_object(thread_gc *tgc, ptr p, IGEN youngest)
       }
       else if (TYPEP(tf, mask_port, type_port))
       {
-        relocate_dirty(&PORTHANDLER(p), youngest, p, SIZE);
+        relocate_dirty(&PORTHANDLER(p), youngest);
         if (((uptr)tf) & PORT_FLAG_OUTPUT)
         {
           iptr n = ((iptr)(PORTOLAST(p))) - ((iptr)(PORTOBUF(p)));
-          relocate_dirty(&PORTOBUF(p), youngest, p, SIZE);
+          relocate_dirty(&PORTOBUF(p), youngest);
           PORTOLAST(p) = (ptr)(((iptr)(PORTOBUF(p))) + n);
         }
         if (((uptr)tf) & PORT_FLAG_INPUT)
         {
           iptr n = ((iptr)(PORTILAST(p))) - ((iptr)(PORTIBUF(p)));
-          relocate_dirty(&PORTIBUF(p), youngest, p, SIZE);
+          relocate_dirty(&PORTIBUF(p), youngest);
           PORTILAST(p) = (ptr)(((iptr)(PORTIBUF(p))) + n);
         }
-        relocate_dirty(&PORTINFO(p), youngest, p, SIZE);
-        relocate_dirty(&PORTNAME(p), youngest, p, SIZE);
+        relocate_dirty(&PORTINFO(p), youngest);
+        relocate_dirty(&PORTNAME(p), youngest);
       }
       else if (TYPEP(tf, mask_code, type_code))
       {
@@ -1861,12 +1881,12 @@ static IGEN sweep_dirty_object(thread_gc *tgc, ptr p, IGEN youngest)
         }
         else if (p_at_spc == space_weakpair)
         {
-          relocate_dirty(&INITCDR(p), youngest, p, SIZE);
+          relocate_dirty(&INITCDR(p), youngest);
         }
         else
         {
-          relocate_dirty(&INITCAR(p), youngest, p, SIZE);
-          relocate_dirty(&INITCDR(p), youngest, p, SIZE);
+          relocate_dirty(&INITCAR(p), youngest);
+          relocate_dirty(&INITCDR(p), youngest);
         }
       }
     }
@@ -1882,7 +1902,7 @@ static IGEN sweep_dirty_object(thread_gc *tgc, ptr p, IGEN youngest)
             ptr *p_p = &CLOSIT(p, 0);
             for (idx = 0; idx < p_len; idx++)
             {
-              relocate_dirty(&(p_p[idx]), youngest, p, SIZE);
+              relocate_dirty(&(p_p[idx]), youngest);
             }
           }
         }
@@ -1890,19 +1910,19 @@ static IGEN sweep_dirty_object(thread_gc *tgc, ptr p, IGEN youngest)
     }
     else if (t == type_symbol)
     {
-      relocate_dirty(&INITSYMVAL(p), youngest, p, SIZE);
+      relocate_dirty(&INITSYMVAL(p), youngest);
       {
         ptr val = INITSYMVAL(p);
         {
           ptr code = ((Sprocedurep(val))
                       ? (CLOSCODE(val))
                       : (SYMCODE(p)));
-          relocate_dirty(&code, youngest, p, SIZE);
+          relocate_dirty(&code, youngest);
           INITSYMCODE(p, code);
-          relocate_dirty(&INITSYMPLIST(p), youngest, p, SIZE);
-          relocate_dirty(&INITSYMNAME(p), youngest, p, SIZE);
-          relocate_dirty(&INITSYMSPLIST(p), youngest, p, SIZE);
-          relocate_dirty(&INITSYMHASH(p), youngest, p, SIZE);
+          relocate_dirty(&INITSYMPLIST(p), youngest);
+          relocate_dirty(&INITSYMNAME(p), youngest);
+          relocate_dirty(&INITSYMSPLIST(p), youngest);
+          relocate_dirty(&INITSYMHASH(p), youngest);
         }
       }
     }
@@ -1914,13 +1934,15 @@ static IGEN sweep_dirty_object(thread_gc *tgc, ptr p, IGEN youngest)
       S_error_abort("sweep: illegal type");
     }
   }
+  FLUSH_REMOTE(tgc, p);
   return youngest;
 }
 
 static void sweep_record(thread_gc *tgc, ptr p, IGEN from_g)
 {
+  FLUSH_REMOTE_BLOCK
   {
-    relocate_pure(&RECORDINSTTYPE(p), p, size_record_inst((UNFIX((RECORDDESCSIZE(RECORDINSTTYPE(p)))))));
+    relocate_pure(&RECORDINSTTYPE(p));
     {
       ptr rtd = RECORDINSTTYPE(p);
       {
@@ -1938,7 +1960,7 @@ static void sweep_record(thread_gc *tgc, ptr p, IGEN from_g)
                   ptr* ppend = ((ptr*)(TO_VOIDP((((uptr)(TO_PTR(pp))) + len)))) - 1;
                   while (pp < ppend)
                   {
-                    relocate_impure(&(*(pp)), from_g, p, SIZE);
+                    relocate_impure(&(*(pp)), from_g);
                     pp += 1;
                   }
                 }
@@ -1949,7 +1971,7 @@ static void sweep_record(thread_gc *tgc, ptr p, IGEN from_g)
                 {
                   if (mask & 1)
                   {
-                    relocate_impure(&(*(pp)), from_g, p, SIZE);
+                    relocate_impure(&(*(pp)), from_g);
                   }
                   mask >>= 1;
                   pp += 1;
@@ -1959,7 +1981,7 @@ static void sweep_record(thread_gc *tgc, ptr p, IGEN from_g)
           }
           else
           {
-            relocate_pure(&(RECORDDESCPM(rtd)), p, SIZE);
+            relocate_pure(&(RECORDDESCPM(rtd)));
             num = RECORDDESCPM(rtd);
             {
               iptr index = (BIGLEN(num)) - 1;
@@ -1971,7 +1993,7 @@ static void sweep_record(thread_gc *tgc, ptr p, IGEN from_g)
                 {
                   if (mask & 1)
                   {
-                    relocate_impure(&(*(pp)), from_g, p, SIZE);
+                    relocate_impure(&(*(pp)), from_g);
                   }
                   mask >>= 1;
                   pp += 1;
@@ -1992,10 +2014,12 @@ static void sweep_record(thread_gc *tgc, ptr p, IGEN from_g)
       }
     }
   }
+  FLUSH_REMOTE(tgc, p);
 }
 
 static IGEN sweep_dirty_record(thread_gc *tgc, ptr p, IGEN youngest)
 {
+  FLUSH_REMOTE_BLOCK
   {
     {
       ptr rtd = RECORDINSTTYPE(p);
@@ -2010,7 +2034,7 @@ static IGEN sweep_dirty_record(thread_gc *tgc, ptr p, IGEN youngest)
             {
               if (mask & 1)
               {
-                relocate_dirty(&(*(pp)), youngest, p, SIZE);
+                relocate_dirty(&(*(pp)), youngest);
               }
               mask >>= 1;
               pp += 1;
@@ -2029,7 +2053,7 @@ static IGEN sweep_dirty_record(thread_gc *tgc, ptr p, IGEN youngest)
               {
                 if (mask & 1)
                 {
-                  relocate_dirty(&(*(pp)), youngest, p, SIZE);
+                  relocate_dirty(&(*(pp)), youngest);
                 }
                 mask >>= 1;
                 pp += 1;
@@ -2049,58 +2073,64 @@ static IGEN sweep_dirty_record(thread_gc *tgc, ptr p, IGEN youngest)
       }
     }
   }
+  FLUSH_REMOTE(tgc, p);
   return youngest;
 }
 
 static void sweep_symbol(thread_gc *tgc, ptr p, IGEN from_g)
 {
+  FLUSH_REMOTE_BLOCK
   {
     {
-      relocate_impure(&INITSYMVAL(p), from_g, p, SIZE);
+      relocate_impure(&INITSYMVAL(p), from_g);
       {
         ptr val = INITSYMVAL(p);
         {
           ptr code = ((Sprocedurep(val))
                       ? (CLOSCODE(val))
                       : (SYMCODE(p)));
-          relocate_pure(&code, p, SIZE);
+          relocate_pure(&code);
           INITSYMCODE(p, code);
-          relocate_impure(&INITSYMPLIST(p), from_g, p, SIZE);
-          relocate_impure(&INITSYMNAME(p), from_g, p, SIZE);
-          relocate_impure(&INITSYMSPLIST(p), from_g, p, SIZE);
-          relocate_impure(&INITSYMHASH(p), from_g, p, SIZE);
+          relocate_impure(&INITSYMPLIST(p), from_g);
+          relocate_impure(&INITSYMNAME(p), from_g);
+          relocate_impure(&INITSYMSPLIST(p), from_g);
+          relocate_impure(&INITSYMHASH(p), from_g);
         }
       }
     }
   }
+  FLUSH_REMOTE(tgc, p);
 }
 
 static IGEN sweep_dirty_symbol(thread_gc *tgc, ptr p, IGEN youngest)
 {
+  FLUSH_REMOTE_BLOCK
   {
     {
-      relocate_dirty(&INITSYMVAL(p), youngest, p, SIZE);
+      relocate_dirty(&INITSYMVAL(p), youngest);
       {
         ptr val = INITSYMVAL(p);
         {
           ptr code = ((Sprocedurep(val))
                       ? (CLOSCODE(val))
                       : (SYMCODE(p)));
-          relocate_dirty(&code, youngest, p, SIZE);
+          relocate_dirty(&code, youngest);
           INITSYMCODE(p, code);
-          relocate_dirty(&INITSYMPLIST(p), youngest, p, SIZE);
-          relocate_dirty(&INITSYMNAME(p), youngest, p, SIZE);
-          relocate_dirty(&INITSYMSPLIST(p), youngest, p, SIZE);
-          relocate_dirty(&INITSYMHASH(p), youngest, p, SIZE);
+          relocate_dirty(&INITSYMPLIST(p), youngest);
+          relocate_dirty(&INITSYMNAME(p), youngest);
+          relocate_dirty(&INITSYMSPLIST(p), youngest);
+          relocate_dirty(&INITSYMHASH(p), youngest);
         }
       }
     }
   }
+  FLUSH_REMOTE(tgc, p);
   return youngest;
 }
 
 static void sweep_thread(thread_gc *tgc, ptr p)
 {
+  FLUSH_REMOTE_BLOCK
   {
     {
       ptr tc = (ptr)(THREADTC(p));
@@ -2119,10 +2149,10 @@ static void sweep_thread(thread_gc *tgc, ptr p)
           }
         }
         STACKCACHE(tc) = Snil;
-        relocate_pure(&(CCHAIN(tc)), p, SIZE);
-        relocate_pure(&(STACKLINK(tc)), p, SIZE);
-        relocate_pure(&(WINDERS(tc)), p, SIZE);
-        relocate_pure(&(ATTACHMENTS(tc)), p, SIZE);
+        relocate_pure(&(CCHAIN(tc)));
+        relocate_pure(&(STACKLINK(tc)));
+        relocate_pure(&(WINDERS(tc)));
+        relocate_pure(&(ATTACHMENTS(tc)));
         CACHEDFRAME(tc) = Sfalse;
         {
           ptr xcp = FRAME(tc, 0);
@@ -2134,7 +2164,7 @@ static void sweep_thread(thread_gc *tgc, ptr p)
                 seginfo* x_si = SegInfo((ptr_get_segment(c_p)));
                 if (x_si -> old_space)
                 {
-                  relocate_code(c_p, x_si, p, SIZE);
+                  relocate_code(c_p, x_si);
                   FRAME(tc, 0) = (ptr)(((uptr)c_p) + co);
                 }
                 {
@@ -2164,7 +2194,7 @@ static void sweep_thread(thread_gc *tgc, ptr p)
                                   seginfo* x_si = SegInfo((ptr_get_segment(c_p)));
                                   if (x_si -> old_space)
                                   {
-                                    relocate_code(c_p, x_si, p, SIZE);
+                                    relocate_code(c_p, x_si);
                                     *(pp) = (ptr)(((uptr)c_p) + co);
                                   }
                                   {
@@ -2178,7 +2208,7 @@ static void sweep_thread(thread_gc *tgc, ptr p)
                                           pp += 1;
                                           if (mask & 1)
                                           {
-                                            relocate_pure(&(*(pp)), p, SIZE);
+                                            relocate_pure(&(*(pp)));
                                           }
                                           mask >>= 1;
                                         }
@@ -2192,12 +2222,12 @@ static void sweep_thread(thread_gc *tgc, ptr p)
                                       }
                                       else if (SEGMENT_IS_LOCAL(n_si, num))
                                       {
-                                        relocate_pure(&(*((ENTRYNONCOMPACTLIVEMASKADDR(oldret)))), p, SIZE);
+                                        relocate_pure(&(*((ENTRYNONCOMPACTLIVEMASKADDR(oldret)))));
                                         num = ENTRYLIVEMASK(oldret);
                                       }
                                       else
                                       {
-                                        RECORD_REMOTE_RANGE(tgc, p, SIZE, n_si);
+                                        RECORD_REMOTE(n_si);
                                         num = S_G.zero_length_bignum;
                                       }
                                       {
@@ -2214,7 +2244,7 @@ static void sweep_thread(thread_gc *tgc, ptr p)
                                               pp += 1;
                                               if (mask & 1)
                                               {
-                                                relocate_pure(&(*(pp)), p, SIZE);
+                                                relocate_pure(&(*(pp)));
                                               }
                                               mask >>= 1;
                                             }
@@ -2234,33 +2264,29 @@ static void sweep_thread(thread_gc *tgc, ptr p)
                       W(tc) = 0;
                       X(tc) = 0;
                       Y(tc) = 0;
-                      relocate_pure(&(THREADNO(tc)), p, SIZE);
-                      relocate_pure(&(CURRENTINPUT(tc)), p, SIZE);
-                      relocate_pure(&(CURRENTOUTPUT(tc)), p, SIZE);
-                      relocate_pure(&(CURRENTERROR(tc)), p, SIZE);
-                      relocate_pure(&(SFD(tc)), p, SIZE);
-                      relocate_pure(&(CURRENTMSO(tc)), p, SIZE);
-                      relocate_pure(&(TARGETMACHINE(tc)), p, SIZE);
-                      relocate_pure(&(FXLENGTHBV(tc)), p, SIZE);
-                      relocate_pure(&(FXFIRSTBITSETBV(tc)), p, SIZE);
-                      relocate_pure(&(NULLIMMUTABLEVECTOR(tc)), p, SIZE);
-                      relocate_pure(&(NULLIMMUTABLEFXVECTOR(tc)), p, SIZE);
-                      relocate_pure(&(NULLIMMUTABLEBYTEVECTOR(tc)), p, SIZE);
-                      relocate_pure(&(NULLIMMUTABLESTRING(tc)), p, SIZE);
-                      relocate_pure(&(COMPILEPROFILE(tc)), p, SIZE);
-                      relocate_pure(&(SUBSETMODE(tc)), p, SIZE);
-                      relocate_pure(&(DEFAULTRECORDEQUALPROCEDURE(tc)), p, SIZE);
-                      relocate_pure(&(DEFAULTRECORDHASHPROCEDURE(tc)), p, SIZE);
-                      relocate_pure(&(COMPRESSFORMAT(tc)), p, SIZE);
-                      relocate_pure(&(COMPRESSLEVEL(tc)), p, SIZE);
-                      relocate_pure(&(PARAMETERS(tc)), p, SIZE);
+                      relocate_pure(&(THREADNO(tc)));
+                      relocate_pure(&(CURRENTINPUT(tc)));
+                      relocate_pure(&(CURRENTOUTPUT(tc)));
+                      relocate_pure(&(CURRENTERROR(tc)));
+                      relocate_pure(&(SFD(tc)));
+                      relocate_pure(&(CURRENTMSO(tc)));
+                      relocate_pure(&(TARGETMACHINE(tc)));
+                      relocate_pure(&(FXLENGTHBV(tc)));
+                      relocate_pure(&(FXFIRSTBITSETBV(tc)));
+                      relocate_pure(&(COMPILEPROFILE(tc)));
+                      relocate_pure(&(SUBSETMODE(tc)));
+                      relocate_pure(&(DEFAULTRECORDEQUALPROCEDURE(tc)));
+                      relocate_pure(&(DEFAULTRECORDHASHPROCEDURE(tc)));
+                      relocate_pure(&(COMPRESSFORMAT(tc)));
+                      relocate_pure(&(COMPRESSLEVEL(tc)));
+                      relocate_pure(&(PARAMETERS(tc)));
                       DSTBV(tc) = Sfalse;
                       SRCBV(tc) = Sfalse;
                       {
                         INT i = 0;
                         while (i < virtual_register_count)
                         {
-                          relocate_pure(&(VIRTREG(tc, i)), p, SIZE);
+                          relocate_pure(&(VIRTREG(tc, i)));
                           i += 1;
                         }
                       }
@@ -2274,57 +2300,63 @@ static void sweep_thread(thread_gc *tgc, ptr p)
       }
     }
   }
+  FLUSH_REMOTE(tgc, p);
 }
 
 static void sweep_port(thread_gc *tgc, ptr p, IGEN from_g)
 {
+  FLUSH_REMOTE_BLOCK
   {
-    relocate_impure(&PORTHANDLER(p), from_g, p, SIZE);
+    relocate_impure(&PORTHANDLER(p), from_g);
     if (((uptr)TYPEFIELD(p)) & PORT_FLAG_OUTPUT)
     {
       iptr n = ((iptr)(PORTOLAST(p))) - ((iptr)(PORTOBUF(p)));
-      relocate_impure(&PORTOBUF(p), from_g, p, SIZE);
+      relocate_impure(&PORTOBUF(p), from_g);
       PORTOLAST(p) = (ptr)(((iptr)(PORTOBUF(p))) + n);
     }
     if (((uptr)TYPEFIELD(p)) & PORT_FLAG_INPUT)
     {
       iptr n = ((iptr)(PORTILAST(p))) - ((iptr)(PORTIBUF(p)));
-      relocate_impure(&PORTIBUF(p), from_g, p, SIZE);
+      relocate_impure(&PORTIBUF(p), from_g);
       PORTILAST(p) = (ptr)(((iptr)(PORTIBUF(p))) + n);
     }
-    relocate_impure(&PORTINFO(p), from_g, p, SIZE);
-    relocate_impure(&PORTNAME(p), from_g, p, SIZE);
+    relocate_impure(&PORTINFO(p), from_g);
+    relocate_impure(&PORTNAME(p), from_g);
   }
+  FLUSH_REMOTE(tgc, p);
 }
 
 static IGEN sweep_dirty_port(thread_gc *tgc, ptr p, IGEN youngest)
 {
+  FLUSH_REMOTE_BLOCK
   {
-    relocate_dirty(&PORTHANDLER(p), youngest, p, SIZE);
+    relocate_dirty(&PORTHANDLER(p), youngest);
     if (((uptr)TYPEFIELD(p)) & PORT_FLAG_OUTPUT)
     {
       iptr n = ((iptr)(PORTOLAST(p))) - ((iptr)(PORTOBUF(p)));
-      relocate_dirty(&PORTOBUF(p), youngest, p, SIZE);
+      relocate_dirty(&PORTOBUF(p), youngest);
       PORTOLAST(p) = (ptr)(((iptr)(PORTOBUF(p))) + n);
     }
     if (((uptr)TYPEFIELD(p)) & PORT_FLAG_INPUT)
     {
       iptr n = ((iptr)(PORTILAST(p))) - ((iptr)(PORTIBUF(p)));
-      relocate_dirty(&PORTIBUF(p), youngest, p, SIZE);
+      relocate_dirty(&PORTIBUF(p), youngest);
       PORTILAST(p) = (ptr)(((iptr)(PORTIBUF(p))) + n);
     }
-    relocate_dirty(&PORTINFO(p), youngest, p, SIZE);
-    relocate_dirty(&PORTNAME(p), youngest, p, SIZE);
+    relocate_dirty(&PORTINFO(p), youngest);
+    relocate_dirty(&PORTNAME(p), youngest);
   }
+  FLUSH_REMOTE(tgc, p);
   return youngest;
 }
 
 static void sweep_continuation(thread_gc *tgc, ptr p, IGEN from_g)
 {
+  FLUSH_REMOTE_BLOCK
   {
     {
-      relocate_pure(&CONTWINDERS(p), p, SIZE);
-      relocate_impure(&CONTATTACHMENTS(p), from_g, p, SIZE);
+      relocate_pure(&CONTWINDERS(p));
+      relocate_impure(&CONTATTACHMENTS(p), from_g);
       if ((CONTLENGTH(p)) == scaled_shot_1_shot_flag)
       {
       }
@@ -2337,14 +2369,14 @@ static void sweep_continuation(thread_gc *tgc, ptr p, IGEN from_g)
           {
             if (!(SEGMENT_IS_LOCAL(s_si, stk)))
             {
-              RECORD_REMOTE_RANGE(tgc, p, SIZE, s_si);
+              RECORD_REMOTE(s_si);
             }
             else
             {
               CONTSTACK(p) = copy_stack(tgc, CONTSTACK(p), &(CONTLENGTH(p)), CONTCLENGTH(p));
             }
           }
-          relocate_pure(&CONTLINK(p), p, SIZE);
+          relocate_pure(&CONTLINK(p));
           {
             ptr xcp = CONTRET(p);
             {
@@ -2355,7 +2387,7 @@ static void sweep_continuation(thread_gc *tgc, ptr p, IGEN from_g)
                   seginfo* x_si = SegInfo((ptr_get_segment(c_p)));
                   if (x_si -> old_space)
                   {
-                    relocate_code(c_p, x_si, p, SIZE);
+                    relocate_code(c_p, x_si);
                     CONTRET(p) = (ptr)(((uptr)c_p) + co);
                   }
                   {
@@ -2387,7 +2419,7 @@ static void sweep_continuation(thread_gc *tgc, ptr p, IGEN from_g)
                                       seginfo* x_si = SegInfo((ptr_get_segment(c_p)));
                                       if (x_si -> old_space)
                                       {
-                                        relocate_code(c_p, x_si, p, SIZE);
+                                        relocate_code(c_p, x_si);
                                         *(pp) = (ptr)(((uptr)c_p) + co);
                                       }
                                       {
@@ -2401,7 +2433,7 @@ static void sweep_continuation(thread_gc *tgc, ptr p, IGEN from_g)
                                               pp += 1;
                                               if (mask & 1)
                                               {
-                                                relocate_pure(&(*(pp)), p, SIZE);
+                                                relocate_pure(&(*(pp)));
                                               }
                                               mask >>= 1;
                                             }
@@ -2415,12 +2447,12 @@ static void sweep_continuation(thread_gc *tgc, ptr p, IGEN from_g)
                                           }
                                           else if (SEGMENT_IS_LOCAL(n_si, num))
                                           {
-                                            relocate_pure(&(*((ENTRYNONCOMPACTLIVEMASKADDR(oldret)))), p, SIZE);
+                                            relocate_pure(&(*((ENTRYNONCOMPACTLIVEMASKADDR(oldret)))));
                                             num = ENTRYLIVEMASK(oldret);
                                           }
                                           else
                                           {
-                                            RECORD_REMOTE_RANGE(tgc, p, SIZE, n_si);
+                                            RECORD_REMOTE(n_si);
                                             num = S_G.zero_length_bignum;
                                           }
                                           {
@@ -2437,7 +2469,7 @@ static void sweep_continuation(thread_gc *tgc, ptr p, IGEN from_g)
                                                   pp += 1;
                                                   if (mask & 1)
                                                   {
-                                                    relocate_pure(&(*(pp)), p, SIZE);
+                                                    relocate_pure(&(*(pp)));
                                                   }
                                                   mask >>= 1;
                                                 }
@@ -2464,15 +2496,17 @@ static void sweep_continuation(thread_gc *tgc, ptr p, IGEN from_g)
       }
     }
   }
+  FLUSH_REMOTE(tgc, p);
 }
 
 static void sweep_code_object(thread_gc *tgc, ptr p, IGEN from_g)
 {
+  FLUSH_REMOTE_BLOCK
   {
-    relocate_pure(&CODENAME(p), p, SIZE);
-    relocate_pure(&CODEARITYMASK(p), p, SIZE);
-    relocate_pure(&CODEINFO(p), p, SIZE);
-    relocate_pure(&CODEPINFOS(p), p, SIZE);
+    relocate_pure(&CODENAME(p));
+    relocate_pure(&CODEARITYMASK(p));
+    relocate_pure(&CODEINFO(p));
+    relocate_pure(&CODEPINFOS(p));
     {
       ptr t = CODERELOC(p);
       {
@@ -2509,7 +2543,7 @@ static void sweep_code_object(thread_gc *tgc, ptr p, IGEN from_g)
                   a = a + code_off;
                   {
                     ptr obj = S_get_code_obj(RELOC_TYPE(entry), oldco, a, item_off);
-                    relocate_pure(&obj, p, SIZE);
+                    relocate_pure(&obj);
                     S_set_code_obj("gc", RELOC_TYPE(entry), p, a, obj, item_off);
                   }
                 }
@@ -2545,7 +2579,7 @@ static void sweep_code_object(thread_gc *tgc, ptr p, IGEN from_g)
                     }
                     else
                     {
-                      RECORD_REMOTE_RANGE(tgc, p, SIZE, t_si);
+                      RECORD_REMOTE(t_si);
                     }
                   }
                 }
@@ -2559,6 +2593,7 @@ static void sweep_code_object(thread_gc *tgc, ptr p, IGEN from_g)
       }
     }
   }
+  FLUSH_REMOTE(tgc, p);
 }
 
 static uptr size_object(ptr p)
@@ -2607,6 +2642,14 @@ static uptr size_object(ptr p)
     else if (TYPEP(tf, mask_fxvector, type_fxvector))
     {
       uptr sz = size_fxvector((Sfxvector_length(p)));
+      {
+        uptr p_sz = sz;
+        return p_sz;
+      }
+    }
+    else if (TYPEP(tf, mask_flvector, type_flvector))
+    {
+      uptr sz = size_flvector((Sflvector_length(p)));
       {
         uptr p_sz = sz;
         return p_sz;
@@ -2921,6 +2964,42 @@ static IGEN mark_object(thread_gc *tgc, ptr p, seginfo *si)
           }
         }
       }
+      else if (TYPEP(tf, mask_flvector, type_flvector))
+      {
+        uptr sz = size_flvector((Sflvector_length(p)));
+        {
+          uptr p_sz = sz;
+          si->marked_mask[segment_bitmap_byte(p)] |= segment_bitmap_bit(p);
+          {
+            uptr addr = (uptr)UNTYPE(p, type_typed_object);
+            uptr seg = addr_get_segment(addr);
+            uptr end_seg = addr_get_segment(addr + p_sz - 1);
+            if (seg == end_seg) {
+              si->marked_count += p_sz;
+            } else {
+              seginfo *mark_si; IGEN g;
+              si->marked_count += ((uptr)build_ptr(seg+1,0)) - addr;
+              seg++;
+              while (seg < end_seg) {
+                mark_si = SegInfo(seg);
+                g = mark_si->generation;
+                if (!fully_marked_mask[g]) init_fully_marked_mask(tgc, g);
+                mark_si->marked_mask = fully_marked_mask[g];
+                mark_si->marked_count = bytes_per_segment;
+                seg++;
+              }
+              mark_si = SegInfo(end_seg);
+              {
+                if (!mark_si->marked_mask) {
+                  init_mask(tgc, mark_si->marked_mask, mark_si->generation, 0);
+                }
+                /* no need to set a bit: it's enough to have made `marked_mask` non-NULL */
+                mark_si->marked_count += addr + p_sz - (uptr)build_ptr(end_seg,0);
+              }
+            }
+          }
+        }
+      }
       else if (TYPEP(tf, mask_bytevector, type_bytevector))
       {
         uptr sz = size_bytevector((Sbytevector_length(p)));
@@ -2974,9 +3053,9 @@ static IGEN mark_object(thread_gc *tgc, ptr p, seginfo *si)
             ptr keyval = INITTLCKEYVAL(p);
             if ((next != Sfalse) && (OLDSPACE(keyval)))
             {
-              GC_TC_MUTEX_ACQUIRE();
+              GC_MUTEX_ACQUIRE();
               tlcs_to_rehash = S_cons_in(tgc -> tc, space_new, 0, p, tlcs_to_rehash);
-              GC_TC_MUTEX_RELEASE();
+              GC_MUTEX_RELEASE();
             }
           }
         }
@@ -2991,8 +3070,8 @@ static IGEN mark_object(thread_gc *tgc, ptr p, seginfo *si)
       else if ((iptr)tf == type_ratnum)
       {
         uptr p_sz = size_ratnum;
-        relocate_pure(&RATNUM(p), p, SIZE);
-        relocate_pure(&RATDEN(p), p, SIZE);
+        relocate_pure(&RATNUM(p));
+        relocate_pure(&RATDEN(p));
         si->marked_count += p_sz;
         {
           ptr mark_p = p;
@@ -3005,8 +3084,8 @@ static IGEN mark_object(thread_gc *tgc, ptr p, seginfo *si)
       else if ((iptr)tf == type_exactnum)
       {
         uptr p_sz = size_exactnum;
-        relocate_pure(&EXACTNUM_REAL_PART(p), p, SIZE);
-        relocate_pure(&EXACTNUM_IMAG_PART(p), p, SIZE);
+        relocate_pure(&EXACTNUM_REAL_PART(p));
+        relocate_pure(&EXACTNUM_IMAG_PART(p));
         si->marked_count += p_sz;
         {
           ptr mark_p = p;
@@ -3120,9 +3199,9 @@ static IGEN mark_object(thread_gc *tgc, ptr p, seginfo *si)
         uptr p_sz = size_phantom;
         si->marked_mask[segment_bitmap_byte(p)] |= segment_bitmap_bit(p);
         si->marked_count += p_sz;
-        GC_TC_MUTEX_ACQUIRE();
+        GC_MUTEX_ACQUIRE();
         (S_G.bytesof[TARGET_GENERATION(si)])[countof_phantom] += PHANTOMLEN(p);
-        GC_TC_MUTEX_RELEASE();
+        GC_MUTEX_RELEASE();
       }
       else
       {
@@ -3159,16 +3238,16 @@ static IGEN mark_object(thread_gc *tgc, ptr p, seginfo *si)
     else if (t == type_closure)
     {
       ptr code = CLOSCODE(p);
-      relocate_pure(&code, p, SIZE);
+      relocate_pure(&code);
       if ((CODETYPE(code)) & (code_flag_continuation << code_flags_offset))
       {
         uptr p_sz = size_continuation;
         if ((CONTLENGTH(p)) == opportunistic_1_shot_flag)
         {
           CONTLENGTH(p) = CONTCLENGTH(p);
-          GC_TC_MUTEX_ACQUIRE();
+          GC_MUTEX_ACQUIRE();
           conts_to_promote = S_cons_in(tgc -> tc, space_new, 0, p, conts_to_promote);
-          GC_TC_MUTEX_RELEASE();
+          GC_MUTEX_RELEASE();
         }
         else
         {
@@ -3385,6 +3464,9 @@ static IBOOL object_directly_refers_to_self(ptr p)
       {
       }
       else if (TYPEP(tf, mask_fxvector, type_fxvector))
+      {
+      }
+      else if (TYPEP(tf, mask_flvector, type_flvector))
       {
       }
       else if (TYPEP(tf, mask_bytevector, type_bytevector))
