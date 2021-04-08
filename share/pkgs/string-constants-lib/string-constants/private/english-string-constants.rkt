@@ -1028,13 +1028,32 @@ please adhere to these guidelines:
   (autosave-unknown-filename "<<unknown>>")
 
   ;;; autoloading
-  (autoload-file-changed-on-disk
-   "The file has changed on the disk. Do you want"
+  ;; the ~a is replaced with a path
+  (autoload-file-changed-on-disk/with-name
+   "The file:\n  ~a\nhas changed on the disk. Do you want"
    " to revert the buffer's contents to match the file on disk?")
-  (autoload-file-changed-on-disk-editor-dirty
-   "The file has changed on the disk. Do you want"
-   " to revert the buffer's contents to match the file on"
-   " disk?\n\nDoing so risks losing unsaved changes.")
+  ;; One file per line is appended to the end of this message
+  (autoload-files-changed-on-disk/with-name
+   "Some files have changed on the disk. Do you want to revert their"
+   " buffers’ contents to match the files on disk?\n\nFiles changed:")
+  ;; the ~a is replaced with a path
+  (autoload-file-changed-on-disk-editor-dirty/with-name
+   "The file:\n  ~a\nhas changed on the disk and is also modified in the editor."
+   " Do you want to revert the buffer's contents to match the file on disk?")
+  ;; One file per line is appended to the end of this message
+  (autoload-files-changed-on-disk-editor-dirty/with-name
+   "Some files have changed on the disk and they are also modified in the editor."
+   " Do you want to revert their buffers’ contents to match the files on"
+   " disk?\n\nFiles changed:")
+  ;; One file per line is appended to the end of this message
+  (autoload-files-changed-on-disk-editor-dirty&clean/with-name
+   "Some files have changed on the disk and some of them are also modified in the editor."
+   " Do you want to revert their buffers’ contents to match the files on"
+   " disk?\n\nFiles changed (a ◇ indicates that the editor’s version is modified):")
+  ;; a specialized version of dont-ask-again-always-current
+  (dont-ask-again-always-current/clean-buffer
+   "Do not ask again for files with no unsaved edits (always use current choice)")
+
   (autoload-automatically-reload "Automatically Reload Changed Files")
   (autoload-when-the-editor-isnt-dirty "When the editor has not been modified")
   (autoload-never-revert "Never")
@@ -2027,6 +2046,7 @@ please adhere to these guidelines:
 
   (always-use-platform-specific-linefeed-convention
    "Always use the platform-specific linefeed convention")
+  (disable-caret-blinking "Disable caret blinking")
 
   ;; optimization coach
   (hide-optimization-coach "Hide Optimization Coach")

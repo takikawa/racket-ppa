@@ -88,7 +88,7 @@
 		   (?name name)
 		   (?signature-expr (parse-signature #f #'?signature)))
        #'(make-list-signature '?name ?signature-expr ?stx)))
-    ((list-of ?signature)
+    ((list-of ?signature ...)
      (raise-syntax-error #f
 			 "list-of-Signatur darf nur einen Operanden haben."
 			 (syntax ?signature1)))
@@ -97,7 +97,7 @@
 		   (?name name)
 		   (?signature-expr (parse-signature #f #'?signature)))
        #'(make-nonempty-list-signature '?name ?signature-expr ?stx)))
-    ((nonempty-list-of ?signature)
+    ((nonempty-list-of ?signature ...)
      (raise-syntax-error #f
 			 "nonempty-list-of-Signatur darf nur einen Operanden haben."
 			 (syntax ?signature1)))

@@ -25,7 +25,10 @@
          (only-in "r6rs-lang.rkt"
                   make-record-constructor-descriptor
                   set-car!
-                  set-cdr!)
+                  set-cdr!
+                  fixnum-width
+                  most-positive-fixnum
+                  most-negative-fixnum)
          (submod "r6rs-lang.rkt" hash-pair)
          (for-syntax "scheme-struct.rkt"
                      "rcd.rkt"))
@@ -101,6 +104,7 @@
          $compile-profile
          compile-profile
          $optimize-closures
+         $lift-closures
          $profile-block-data?
          run-cp0
          generate-interrupt-trap
@@ -110,6 +114,7 @@
          debug-level
          scheme-version-number
          scheme-fork-version-number
+         native-endianness
          (rename-out [make-parameter $make-thread-parameter]
                      [make-parameter make-thread-parameter]
                      [cons make-binding]
@@ -166,6 +171,7 @@
                      [bytes? bytevector?]
                      [bytes-set! bytevector-u8-set!]
                      [bytes-ref bytevector-u8-ref]
+                     [bytes->immutable-bytes bytevector->immutable-bytevector]
                      [bwp? bwp-object?]
                      [number->string r6rs:number->string]
                      [s:printf printf]
@@ -175,6 +181,10 @@
                      [write-string display-string]
                      [call/ec call/1cc]
                      [s:string->symbol string->symbol])
+         fx+/wraparound
+         fx-/wraparound
+         fx*/wraparound
+         fxsll/wraparound
          logbit? logbit1 logbit0 logtest
          (rename-out [logbit? fxlogbit?]
                      [logbit1 fxlogbit1]
@@ -261,7 +271,6 @@
          immutable-string?
          immutable-vector?
          immutable-bytevector?
-         immutable-fxvector?
          immutable-box?
          require-nongenerative-clause
          generate-inspector-information
@@ -324,7 +333,8 @@
          priminfo-libraries
          $c-bufsiz
          $foreign-procedure
-         make-guardian)
+         make-guardian
+         $lambda/lift-barrier)
 
 (module+ callback
   (provide set-current-expand-set-callback!))
@@ -695,6 +705,7 @@
            [(prelex-was-flags-offset) prelex-was-flags-offset]
            [(prelex-sticky-mask) prelex-sticky-mask]
            [(prelex-is-mask) prelex-is-mask]
+           [(code-flag-lift-barrier) code-flag-lift-barrier]
            [else (error 'constant "unknown: ~s" #'id)])]))
 
 (define $target-machine (make-parameter (string->symbol target-machine)))
@@ -817,11 +828,30 @@
   (if (and (v . fx< . 0)
            (amt . fx> . 0))
       (bitwise-and (fxrshift v amt)
-                   (- (fxlshift 1 (- fixnum-bits amt)) 1))
+                   (- (arithmetic-shift 1 (- (fixnum-width) amt)) 1))
       (fxrshift v amt)))
 
 (define (fxbit-field fx1 fx2 fx3)
   (fxrshift (fxand fx1 (fxnot (fxlshift -1 fx3))) fx2))
+
+(define (wraparound v)
+  (cond
+    [(fixnum? v)
+     v]
+    [(zero? (bitwise-and v (add1 (most-positive-fixnum))))
+     (bitwise-ior v (- -1 (most-positive-fixnum)))]
+    [else
+     (bitwise-and v (most-positive-fixnum))]))
+
+;; Re-implement wraparound so we can use Racket v7.9 and earlier:
+(define (fx+/wraparound x y)
+  (wraparound (+ x y)))
+(define (fx-/wraparound x y)
+  (wraparound (- x y)))
+(define (fx*/wraparound x y)
+  (wraparound (* x y)))
+(define (fxsll/wraparound x y)
+  (wraparound (arithmetic-shift x y)))
 
 (define (bitwise-bit-count fx)
   (cond
@@ -905,6 +935,7 @@
 (define $compile-profile (make-parameter #f))
 (define compile-profile $compile-profile)
 (define $optimize-closures (make-parameter #t))
+(define $lift-closures (make-parameter #t))
 (define $profile-block-data? (make-parameter #f))
 (define run-cp0 (make-parameter error))
 (define generate-interrupt-trap (make-parameter #t))
@@ -928,6 +959,11 @@
   (if (zero? (arithmetic-shift v -24))
       (values maj min sub 0)
       (values maj min sub (bitwise-and 255 v))))
+
+(define (native-endianness)
+  (if (system-big-endian?)
+      'big
+      'little))
 
 (define (make-hashtable hash eql?)
   (cond
@@ -1051,9 +1087,6 @@
   (and any-immutable?
        (bytes? s)
        (immutable? s)))
-
-(define (immutable-fxvector? s)
-  #f)
 
 (define (immutable-box? s)
   (and any-immutable?
@@ -1258,3 +1291,7 @@
     [() #f]
     [(v) (void)]
     [(v rep) (void)]))
+
+(define-syntax $lambda/lift-barrier
+  (syntax-rules ()
+    [(_ fmls body ...) (lambda fmls body ...)]))

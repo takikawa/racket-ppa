@@ -78,8 +78,24 @@
 # endif
 #endif
 
+#if (machine_type == machine_type_arm64osx || machine_type == machine_type_tarm64osx)
+# define OS_ANY_MACOSX
+# if (machine_type == machine_type_tarm64osx)
+#  define PTHREADS
+# endif
+# define FLUSHCACHE
+#endif
+
+#if (machine_type == machine_type_ppc32osx || machine_type == machine_type_tppc32osx)
+# define OS_ANY_MACOSX
+# if (machine_type == machine_type_tppc32osx)
+#  define PTHREADS
+# endif
+# define FLUSHCACHE
+#endif
+
 #if (machine_type == machine_type_pb)
-# if defined(__powerpc__) && !defined(__powerpc64__)
+# if (defined(__powerpc__) || defined(__POWERPC__)) && !defined(__powerpc64__)
 #  define PORTABLE_BYTECODE_BIGENDIAN
 # endif
 # if defined(__linux__)
@@ -97,9 +113,11 @@
 #   define LITTLE_ENDIAN_IEEE_DOUBLE
 #  endif
 # elif defined(_MSC_VER) || defined(__MINGW32__)
-#   define OS_ANY_WINDOWS
+#  define OS_ANY_WINDOWS
 # elif __APPLE__
-#   define OS_ANY_MACOSX
+#  define OS_ANY_MACOSX
+# elif defined(sun)
+#  define OS_ANY_SOLARIS2
 # endif
 #endif
 
@@ -261,7 +279,7 @@ struct timespec;
 #endif
 #if defined(__MINGW32__) && (machine_type == machine_type_ti3nt || machine_type == machine_type_i3nt)
 #define time_t __time64_t
-#define time _time64
+#define GET_TIME _time64
 #endif
 #endif
 
@@ -303,7 +321,18 @@ typedef int tputsputcchar;
 #define USE_MMAP
 #define MMAP_HEAP
 #define IEEE_DOUBLE
-#define LITTLE_ENDIAN_IEEE_DOUBLE
+#if !defined(__POWERPC__)
+# define LITTLE_ENDIAN_IEEE_DOUBLE
+#endif
+#if defined(__arm64__)
+# define S_MAP_CODE  MAP_JIT
+# define S_ENABLE_CODE_WRITE(on) pthread_jit_write_protect_np(!(on))
+# define CANNOT_READ_DIRECTLY_INTO_CODE
+# include <pthread.h>
+#elif defined(__x86_64__)
+/* needed to run under Rosetta2 on ARM Mac OS: */
+# define CANNOT_READ_DIRECTLY_INTO_CODE
+#endif
 #define LDEXP
 #define ARCHYPERBOLIC
 #define GETPAGESIZE() getpagesize()
@@ -382,6 +411,7 @@ typedef int tputsputcchar;
 #define ARCHYPERBOLIC
 #define LOG1P
 #define DEFINE_MATHERR
+#define NO_USELOCALE
 #define GETPAGESIZE() getpagesize()
 typedef char *memcpy_t;
 #define MAKE_NAN(x) { x = 0.0; x = x / x; }
@@ -466,14 +496,31 @@ typedef char tputsputcchar;
 # define WRITE write
 #endif
 
+#ifndef S_PROT_CODE
+# define S_PROT_CODE (PROT_READ | PROT_WRITE | PROT_EXEC)
+#endif
+#ifndef S_MAP_CODE
+# define S_MAP_CODE 0
+#endif
+#ifndef S_ENABLE_CODE_WRITE
+# define S_ENABLE_CODE_WRITE(on) do { } while (0)
+#endif
+
 #ifdef PTHREADS
 # define NO_THREADS_UNUSED /* empty */
 #else
 # define NO_THREADS_UNUSED UNUSED
 #endif
 
+#if defined(__has_feature)
+# if __has_feature(thread_sanitizer)
+#  define NO_THREAD_SANITIZE __attribute__((no_sanitize("thread")))
+#  define IMPLICIT_ATOMIC_AS_EXPLICIT
+# endif
+#endif
+#ifndef NO_THREAD_SANITIZE
+# define NO_THREAD_SANITIZE /* empty */
+#endif
+
 /* Use "/dev/urandom" everywhere except Windows */
 #define USE_DEV_URANDOM_UUID
-
-/* For debugging: */
-/* #define IMPLICIT_ATOMIC_AS_EXPLICIT */

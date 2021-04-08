@@ -286,6 +286,8 @@
                   "~s is not a character"))
   (set! fxvector (frob-proc fxvector make-fxvector fxvector-set! fixnum?
                   "~s is not a fixnum"))
+  (set! flvector (frob-proc flvector make-flvector flvector-set! flonum?
+                  "~s is not a flonum"))
   (set! bytevector
     (let ([fill? (lambda (k) (and (fixnum? k) (fx<= -128 k 255)))])
       (frob-proc bytevector make-bytevector $bytevector-set! fill?
@@ -360,6 +362,28 @@
        ($oops who "~s is not a valid fxvector length" n))
      (make-fxvector n)]))
 
+(define-who make-flvector
+  (case-lambda
+    [(n x)
+     (unless (and (fixnum? n) (not ($fxu< (constant maximum-flvector-length) n)))
+       ($oops who "~s is not a valid flvector length" n))
+     (unless (flonum? x)
+       ($oops who "~s is not a flonum" x))
+     (if (eqv? x 0.0)
+         (make-flvector n)
+         ;; Room for improvement: vector is filled with 0.0, then with `x`:
+         (let ([flv (make-flvector n)])
+           (let loop ([i 0])
+             (if (fx= i n)
+                 flv
+                 (begin
+                   (flvector-set! flv i x)
+                   (loop (fx+ i 1)))))))]
+    [(n)
+     (unless (and (fixnum? n) (not ($fxu< (constant maximum-flvector-length) n)))
+       ($oops who "~s is not a valid flvector length" n))
+     (make-flvector n)]))
+
 (define string-fill!
    (lambda (s c)
       (unless (mutable-string? s)
@@ -370,11 +394,23 @@
 
 (define fxvector-fill!
    (lambda (v n)
-      (unless (mutable-fxvector? v)
-         ($oops 'fxvector-fill! "~s is not a mutable fxvector" v))
+      (unless (fxvector? v)
+         ($oops 'fxvector-fill! "~s is not a fxvector" v))
       (unless (fixnum? n)
-         ($oops 'fxvector-fill! "~s is not a fixnum" n))
+        ($oops 'fxvector-fill! "~s is not a fixnum" n))
       (fxvector-fill! v n)))
+
+(define flvector-fill!
+   (lambda (v x)
+      (unless (flvector? v)
+         ($oops 'flvector-fill! "~s is not a flvector" v))
+      (unless (flonum? x)
+        ($oops 'flvector-fill! "~s is not a flonum" x))
+      (let ([n (flvector-length v)])
+        (let loop ([i 0])
+          (unless (fx= i n)
+            (flvector-set! v i x)
+            (loop (fx+ i 1)))))))
 
 ;;; multiple return values stuff
 
@@ -394,6 +430,17 @@
     (#2%apply f args)))
 
 (define $app/no-inline
+  (lambda (f . args)
+    (#2%apply f args)))
+
+;; Implies no-inline, and in unsafe mode, asserts that the
+;; application will not return
+(define $app/no-return
+  (lambda (f . args)
+    (#2%apply f args)))
+
+;; In unsafe mode, asserts that the applicaiton returns a single value
+(define $app/value
   (lambda (f . args)
     (#2%apply f args)))
 
@@ -699,6 +746,9 @@
 
 (define $fxvector-ref-check? (lambda (v i) ($fxvector-ref-check? v i)))
 (define $fxvector-set!-check? (lambda (v i) ($fxvector-set!-check? v i)))
+
+(define $flvector-ref-check? (lambda (v i) ($flvector-ref-check? v i)))
+(define $flvector-set!-check? (lambda (v i) ($flvector-set!-check? v i)))
 
 (define $ratio-numerator
    (lambda (q)
@@ -1272,19 +1322,17 @@
    (lambda (v i x)
       (#2%fxvector-set! v i x)))
 
-(define-who $fxvector-set-immutable!
-   (lambda (s)
-     (unless (fxvector? s)
-       ($oops who "~s is not a fxvector" s))
-     (#3%$fxvector-set-immutable! s)))
+(define flvector-length
+   (lambda (v)
+      (#2%flvector-length v)))
 
-(define mutable-fxvector?
-  (lambda (s)
-    (#3%mutable-fxvector? s)))
+(define flvector-ref
+   (lambda (v i)
+      (#2%flvector-ref v i)))
 
-(define immutable-fxvector?
-  (lambda (s)
-    (#3%immutable-fxvector? s)))
+(define flvector-set!
+   (lambda (v i x)
+      (#2%flvector-set! v i x)))
 
 (define stencil-vector-mask
    (lambda (v)
@@ -1385,6 +1433,8 @@
 (define vector? (lambda (x) (vector? x)))
 
 (define fxvector? (lambda (x) (fxvector? x)))
+
+(define flvector? (lambda (x) (flvector? x)))
 
 (define stencil-vector? (lambda (x) (stencil-vector? x)))
 
@@ -1755,12 +1805,17 @@
       ($oops '$thread-tc "~s is not a thread" thread))
     ($thread-tc thread)))
 
+)
+
 (when-feature pthreads
 
 (define $raw-collect-cond (lambda () ($raw-collect-cond)))
 (define $raw-collect-thread0-cond (lambda () ($raw-collect-thread0-cond)))
 (define $raw-tc-mutex (lambda () ($raw-tc-mutex)))
+(define $raw-terminated-cond (lambda () ($raw-terminated-cond)))
 (define fork-thread)
+(define thread-join)
+(define thread-preserve-ownership!)
 (define make-mutex)
 (define mutex?)
 (define mutex-name)
@@ -1776,6 +1831,7 @@
 (define $tc-mutex)
 (define $collect-cond)
 (define $collect-thread0-cond)
+(define $terminated-cond)
 (define get-initial-thread)
 (let ()
 ; scheme-object's below are mutex and condition addresses, which are
@@ -1836,6 +1892,29 @@
                              [reset-handler (lambda () (k (void)))])
                 (t)
                 (void))))))))
+
+(set-who! thread-join
+  (lambda (t)
+    (unless (thread? t)
+      ($oops who "~a is not a thread" t))
+    (with-tc-mutex
+     (let f ()
+       (unless (eq? ($thread-tc t) 0)
+         (condition-wait $terminated-cond $tc-mutex)
+         (f))))))
+
+(set-who! thread-preserve-ownership!
+  (let ([preserve! (foreign-procedure "(cs)thread_preserve_ownership" (ptr) void)])
+    (case-lambda
+     [(t)
+      (unless (thread? t)
+        ($oops who "~a is not a thread" t))
+      (with-tc-mutex
+       (let ([tc ($thread-tc t)])
+         (unless (eq? tc 0)
+           (preserve! tc))))]
+     [()
+      (with-tc-mutex (preserve! ($tc)))])))
 
 (set-who! make-mutex
   (case-lambda
@@ -1953,12 +2032,13 @@
 (set! $tc-mutex ($make-mutex ($raw-tc-mutex) '$tc-mutex))
 (set! $collect-cond ($make-condition ($raw-collect-cond) '$collect-cond))
 (set! $collect-thread0-cond ($make-condition ($raw-collect-thread0-cond) '$collect-thread0-cond))
+(set! $terminated-cond ($make-condition ($raw-terminated-cond) '$terminated-cond))
 
 (set! get-initial-thread
   (let ([thread (car (ts))])
     (lambda () thread)))
 ))
-
+(begin
 (let ()
   (define-syntax define-tc-parameter
     (lambda (x)
@@ -2690,6 +2770,11 @@
            (and ($code-arity-in-closure? c)
                 ;; Indirect way of distinguishing from `$make-wrapper-procedure` result:
                 ($code-mutable-closure? c))))))
+
+(define-who wrapper-procedure-procedure
+  (lambda (x)
+    (unless (wrapper-procedure? x) ($oops who "~s is not a wrapper procedure" x))
+    ($closure-ref x 0)))
 
 (define-who set-wrapper-procedure!
   (lambda (x proc)

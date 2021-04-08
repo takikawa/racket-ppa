@@ -13,7 +13,7 @@
          racket/list
          racket/contract
          racket/pretty
-         racket/bool
+         racket/path
          racket/dict
          syntax/id-table
          scribble/manual-struct
@@ -43,6 +43,7 @@
          [tl-module-lang-requires (make-hash)]
          [tl-phase-to-requires (make-hash)]
          [tl-sub-identifier-binding-directives (make-hash)]
+         [user-directory (and user-directory (simple-form-path user-directory))]
          [expanded-expression
           (λ (sexp [ignored void])
             (parameterize ([current-directory (or user-directory (current-directory))]
@@ -1466,10 +1467,20 @@
 ;; add-id : id-set identifier -> void
 (define (add-id mapping id level-of-enclosing-module)
   (when (original-enough? id)
-    (let* ([id (syntax-shift-phase-level id level-of-enclosing-module)]
-           [old (free-id-table-ref mapping id '())]
-           [new (cons id old)])
-      (free-id-table-set! mapping id new))))
+    (define shifted-id (syntax-shift-phase-level id level-of-enclosing-module))
+    (define old (free-id-table-ref mapping shifted-id '()))
+    (define no-span-id
+      (if (syntax-property shifted-id 'implicit-made-explicit)
+          (datum->syntax shifted-id
+                         (syntax-e shifted-id)
+                         (vector (syntax-source shifted-id)
+                                 (syntax-line shifted-id)
+                                 (syntax-column shifted-id)
+                                 (syntax-position shifted-id)
+                                 0)
+                         shifted-id)
+          shifted-id))
+    (free-id-table-set! mapping shifted-id (cons no-span-id old))))
 
 (define (original-enough? x)
   (or (syntax-original? x)

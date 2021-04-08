@@ -7,7 +7,7 @@
          mzlib/pretty
          syntax/docprovide
          scheme/promise
-         test-engine/scheme-tests
+         test-engine/racket-tests
          "posn.rkt")
 
 (require "private/provide-and-scribble.rkt")
@@ -66,9 +66,9 @@
          #%top-interaction
          empty
          
-         signature : -> mixed one-of predicate combined
-         Number Real Rational Integer Natural Boolean True False String Symbol Char Empty-list Any
-         cons-of
+         signature : -> mixed enum predicate combined
+         Number Real Rational Integer Natural Boolean True False String Symbol Char Any
+         ConsOf ListOf EmptyList
          Property
          check-property for-all ==> expect expect-within expect-member-of expect-range)
 

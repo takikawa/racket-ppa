@@ -12,6 +12,7 @@
 # include <pwd.h>
 # include <grp.h>
 # include <dirent.h>
+# include <sys/time.h>
 #endif
 #ifdef RKTIO_SYSTEM_WINDOWS
 # include <shlobj.h>
@@ -636,7 +637,7 @@ char *rktio_get_current_directory(rktio_t *rktio)
  wchar_t *wbuf;
  char *r;
 
- wbuf = malloc(bl);
+ wbuf = malloc(bl * sizeof(wchar_t));
  while (1) {
    need_l = GetCurrentDirectoryW(bl, wbuf);
    if (need_l > bl) {

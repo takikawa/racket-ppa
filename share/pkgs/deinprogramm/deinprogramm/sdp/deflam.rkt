@@ -1,4 +1,6 @@
-#lang deinprogramm/sdp
+#lang racket/base
+
+(require (except-in deinprogramm/sdp/private/primitives lambda λ define))
 
 ;; this file exists so there is a single file that exports
 ;; identifiers named 'define' and 'lambda' that are the 

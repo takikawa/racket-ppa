@@ -44,10 +44,11 @@ cstructs, and another ctype for user-defined ctypes.}
 
 @defproc[(ffi-call [ptr cpointer?] [in-types (listof ctype?)] [out-type ctype?]
                    [abi (or/c #f 'default 'stdcall 'sysv) #f]
-                   [save-errno? any/c]
-                   [orig-place? any/c]
+                   [save-errno? any/c #f]
+                   [orig-place? any/c #f]
                    [lock-name (or/c #f string?) #f]
-                   [blocking? any/c #f])
+                   [blocking? any/c #f]
+                   [varargs-after (or/c #f positive-exact-integer?) #f])
          procedure?]{
 
 The primitive mechanism that creates Racket @tech{callout} values for
@@ -57,10 +58,11 @@ values are marshaled.}
 
 @defproc[(ffi-call-maker [in-types (listof ctype?)] [out-type ctype?]
                    [abi (or/c #f 'default 'stdcall 'sysv) #f]
-                   [save-errno? any/c]
-                   [orig-place? any/c]
+                   [save-errno? any/c #f]
+                   [orig-place? any/c #f]
                    [lock-name (or/c #f string?) #f]
-                   [blocking? any/c #f])
+                   [blocking? any/c #f]
+                   [varargs-after (or/c #f positive-exact-integer?) #f])
          (cpointer . -> . procedure?)]{
 
 A curried variant of @racket[ffi-call] that takes the foreign-procedure pointer
@@ -70,7 +72,8 @@ separately.}
 @defproc[(ffi-callback [proc procedure?] [in-types any/c] [out-type any/c]
                        [abi (or/c #f 'default 'stdcall 'sysv) #f]
                        [atomic? any/c #f]
-                       [async-apply (or/c #f ((-> any) . -> . any)) #f])
+                       [async-apply (or/c #f ((-> any) . -> . any) box?) #f]
+                       [varargs-after (or/c #f positive-exact-integer?) #f])
          ffi-callback?]{
 
 The symmetric counterpart of @racket[ffi-call].  It receives a Racket
@@ -80,7 +83,8 @@ C pointer.}
 @defproc[(ffi-callback-maker [in-types any/c] [out-type any/c]
                        [abi (or/c #f 'default 'stdcall 'sysv) #f]
                        [atomic? any/c #f]
-                       [async-apply (or/c #f ((-> any) . -> . any)) #f])
+                       [async-apply (or/c #f ((-> any) . -> . any) box?) #f]
+                       [varargs-after (or/c #f positive-exact-integer?) #f])
          (procedure? . -> . ffi-callback?)]{
 
 A curried variant of @racket[ffi-callback] that takes the callback procedure
@@ -97,11 +101,11 @@ A predicate for callback values that are created by @racket[ffi-callback].
 
 Creates a ``late'' will executor that readies a will for a value
 @scheme[_v] only if no normal will executor has a will registered for
-@scheme[_v]. In addition, for the @3m[] and @CGC[] variants of Racket,
+@scheme[_v]. In addition, for the @BC[] implementation of Racket,
 normal weak references to @scheme[_v] are cleared before a will for
 @racket[_v] is readied by the late will executor, but late weak
 references created by @racket[make-late-weak-box] and
-@racket[make-late-weak-hasheq] are not. For the @CS[] variant of
+@racket[make-late-weak-hasheq] are not. For the @CS[] implementation of
 Racket, a will is readied for @racket[_v] only when it is not reachable
 from any value that has a late will; if a value @racket[_v] is
 reachable from itself (i.e., through any field of @racket[_v], as

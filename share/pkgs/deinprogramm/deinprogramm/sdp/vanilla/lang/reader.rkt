@@ -1,2 +1,3 @@
-#lang s-exp syntax/module-reader
+#lang s-exp deinprogramm/sdp/private/reader
 deinprogramm/sdp/vanilla
+'vanilla
