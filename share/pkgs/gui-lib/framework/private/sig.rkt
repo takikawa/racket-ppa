@@ -1,6 +1,6 @@
 #lang racket/base
   
-  (require racket/unit "text-sig.rkt")
+  (require racket/unit "text-sig.rkt" "editor-sig.rkt")
   
   (provide (prefix-out framework: (except-out (all-defined-out) framework^))
            framework^)
@@ -19,7 +19,13 @@
     (snip%))
   (define-signature comment-box^ extends comment-box-class^
     (snipclass))
-  
+
+  (define-signature srcloc-snip-class^
+    (snip%))
+  (define-signature srcloc-snip^ extends srcloc-snip-class^
+    (snipclass
+     select-srcloc))
+
   (define-signature menu-class^
     (can-restore<%>
      can-restore-mixin
@@ -144,39 +150,7 @@
      std-get-file 
      get-file
      put-file))
-  
-  (define-signature editor-class^
-    (basic<%>
-     standard-style-list<%>
-     keymap<%>
-     autowrap<%>
-     info<%>
-     file<%>
-     backup-autosave<%>
-     autoload<%>
-     basic-mixin
-     standard-style-list-mixin
-     keymap-mixin
-     autowrap-mixin
-     info-mixin
-     file-mixin
-     backup-autosave-mixin
-     autoload-mixin
-     font-size-message%))
-  (define-signature editor^ extends editor-class^
-    (get-standard-style-list
-     set-standard-style-list-pref-callbacks
-     set-standard-style-list-delta
-     set-default-font-color
-     get-default-color-style-name
-     add-after-user-keymap
-     get-current-preferred-font-size
-     set-current-preferred-font-size
-     font-size-pref->current-font-size
-     set-change-font-size-when-monitors-change?
-     get-change-font-size-when-monitors-change?
-     doing-autosave?))
-  
+
   (define-signature pasteboard-class^
     (basic%
      standard-style-list%
@@ -186,6 +160,13 @@
      info%))
   (define-signature pasteboard^ extends pasteboard-class^
     ())
+
+(define-signature editor-class^
+  ((open editor-misc-class^)
+   (open editor-autoload^)))
+
+(define-signature editor^ extends editor-class^
+  ((open editor-misc-functions^)))
   
 (define-signature text-class^
   ((open text-basic-class^)
@@ -206,7 +187,7 @@
   ((open text-basic-functions^)
    (open text-port-functions^)
    (open text-autocomplete-functions^)))
-  
+
   (define-signature canvas-class^
     (basic<%>
      color<%>
@@ -469,6 +450,7 @@
      (open (prefix color: color^))
      (open (prefix color-prefs: color-prefs^))
      (open (prefix comment-box: comment-box^))
+     (open (prefix srcloc-snip: srcloc-snip^))
      (open (prefix finder: finder^))
      (open (prefix group: group^))
      (open (prefix canvas: canvas^))

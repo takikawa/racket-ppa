@@ -1108,49 +1108,49 @@
                             (let loop ()
                               (unless (check)
                                 (sleep (make-time 'time-duration 10000 0))
-                                (loop))))]
-             [th (fork-thread
-                  (lambda ()
-                    (let ([bstr (make-bytevector N)])
-                      (box-cas! ready #f 'go)
-                      ;; Block so that thread becomes deactivated
-                      (mutex-acquire m)
-                      (mutex-release m)
-                      ;; bstr is retained in the thread's continuation until here
-                      (set-box! saved (bytevector-u8-ref bstr 0))
-                      (pause-until (lambda () (box-cas! ready 'finish 'done)))
-                      ;; Block so that thread becomes deactivated, again
-                      (mutex-acquire m)
-                      (mutex-release m))))])
+                                (loop))))])
         (mutex-acquire m)
-        ;; Wait for thread to start
-        (pause-until (lambda () (eq? 'go (unbox ready))))
-        ;; Wait for thread to become inactive, blocked on the mutex
-        (pause-until (lambda () (= 1 (#%$top-level-value '$active-threads))))
-        ;; Get thread's size, which should include bstr
-        (let ([pre-sizes (compute-size-increments (list th))])
-          (mutex-release m)
-          ;; Wait for bytevector to be discarded in the thread
-          (pause-until (lambda () (unbox saved)))
-          (mutex-acquire m)
-          (set-box! ready 'finish)
-          ;; Wait for thread to become inactive again
+        (let ([th (fork-thread
+                   (lambda ()
+                     (let ([bstr (make-bytevector N)])
+                       (box-cas! ready #f 'go)
+                       ;; Block so that thread becomes deactivated
+                       (mutex-acquire m)
+                       (mutex-release m)
+                       ;; bstr is retained in the thread's continuation until here
+                       (set-box! saved (bytevector-u8-ref bstr 0))
+                       (pause-until (lambda () (box-cas! ready 'finish 'done)))
+                       ;; Block so that thread becomes deactivated, again
+                       (mutex-acquire m)
+                       (mutex-release m))))])
+          ;; Wait for thread to start
+          (pause-until (lambda () (eq? 'go (unbox ready))))
+          ;; Wait for thread to become inactive, blocked on the mutex
           (pause-until (lambda () (= 1 (#%$top-level-value '$active-threads))))
-          ;; Get thread's size, which should'nt include bstr
-          (let ([post-sizes (compute-size-increments (list th))])
+          ;; Get thread's size, which should include bstr
+          (let ([pre-sizes (compute-size-increments (list th))])
             (mutex-release m)
-            ;; Wait for thread to exit
-            (let ()
-              (define $threads (foreign-procedure "(cs)threads" () scheme-object))
-              (pause-until (lambda () (= 1 (length ($threads))))))
-            ;; Make sure `compute-size-increments` doesn't crash on a
-            ;; terminated thread:
-            (compute-size-increments (list th))
-            ;; Main result: detected size of `bstr` in the thread
-            ;; while it was part of the continuation
-            (or (eq? (current-eval) interpret) ; interpreter continuaton is not precise enough
-                (and (> (car pre-sizes) N)
-                     (< (car post-sizes) N)))))))
+            ;; Wait for bytevector to be discarded in the thread
+            (pause-until (lambda () (unbox saved)))
+            (mutex-acquire m)
+            (set-box! ready 'finish)
+            ;; Wait for thread to become inactive again
+            (pause-until (lambda () (= 1 (#%$top-level-value '$active-threads))))
+            ;; Get thread's size, which shouldn't include bstr
+            (let ([post-sizes (compute-size-increments (list th))])
+              (mutex-release m)
+              ;; Wait for thread to exit
+              (let ()
+                (define $threads (foreign-procedure "(cs)threads" () scheme-object))
+                (pause-until (lambda () (= 1 (length ($threads))))))
+              ;; Make sure `compute-size-increments` doesn't crash on a
+              ;; terminated thread:
+              (compute-size-increments (list th))
+              ;; Main result: detected size of `bstr` in the thread
+              ;; while it was part of the continuation
+              (or (eq? (current-eval) interpret) ; interpreter continuation is not precise enough
+                  (and (> (car pre-sizes) N)
+                       (< (car post-sizes) N))))))))
   )
 
 (mat collect+compute-size-increments
@@ -2011,10 +2011,9 @@
                                 (vector 1 'two "three")
                                 (stencil-vector 30 'one 2.0 0+3i "four")
                                 (box 88)
-                                "" '#() '#vu8() (make-fxvector 0)
+                                "" '#() '#vu8() (make-fxvector 0) (make-flvector 0)
                                 (string->immutable-string "") (vector->immutable-vector '#())
-                                (bytevector->immutable-bytevector '#vu8())
-                                (fxvector->immutable-fxvector (make-fxvector 0))))
+                                (bytevector->immutable-bytevector '#vu8())))
     (define (same-vfasl-content? v)
       (andmap (lambda (a b)
                 (or (eqv? a b)
@@ -4698,7 +4697,7 @@
              (#2%display 1))))
 )
 
-(unless (memq (machine-type) '(arm32le tarm32le arm64le tarm64le ; timestamp counter tends to be priviledged on Arm
+(unless (memq (machine-type) '(arm32le tarm32le arm64le tarm64le arm64osx tarm64osx ; timestamp counter tends to be priviledged on Arm
                                        pb)) ; doesn't increment for pb
   (mat $read-time-stamp-counter
 
@@ -4926,21 +4925,22 @@
 (mat fasl-immutable
   (begin
     (define immutable-objs (list (vector->immutable-vector '#(1 2 3))
-                                 (fxvector->immutable-fxvector '#vfx(1 2 3))
                                  (string->immutable-string "abc")
                                  (bytevector->immutable-bytevector #vu8(1 2 3))
-                                 (box-immutable 1)))
+                                 (box-immutable 1)
+                                 ;; Not immutable, but we want to test strip:
+                                 (fxvector 1 2 3)
+                                 (flvector 1.5 2.5 3.5)
+                                 (stencil-vector 6 'a 'b)))
     (define immutable-zero-objs (list (vector->immutable-vector '#())
-                                      (fxvector->immutable-fxvector '#vfx())
                                       (string->immutable-string "")
                                       (bytevector->immutable-bytevector #vu8())
                                       (box-immutable 1)))
     (define (immutable? l)
       (and (immutable-vector? (list-ref l 0))
-           (immutable-fxvector? (list-ref l 1))
-           (immutable-string? (list-ref l 2))
-           (immutable-bytevector? (list-ref l 3))
-           (immutable-box? (list-ref l 4))))
+           (immutable-string? (list-ref l 1))
+           (immutable-bytevector? (list-ref l 2))
+           (immutable-box? (list-ref l 3))))
     (define (round-trip l)
       (let-values ([(o get) (open-bytevector-output-port)])
         (fasl-write l o)
@@ -4976,7 +4976,6 @@
   ;; Make sure `fasl-read` didn't mark "mutable" null values
   ;; as immutable:
   (mutable-vector? '#())
-  (mutable-fxvector? '#vfx())
   (mutable-string? "")
   (mutable-bytevector? '#vu8())
   

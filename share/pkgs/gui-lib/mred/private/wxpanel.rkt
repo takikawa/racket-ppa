@@ -23,7 +23,8 @@
                         wx-grow-box-pane%
                         wx-canvas-panel%
                         wx-vertical-canvas-panel%
-                        wx-horizontal-canvas-panel%))
+                        wx-horizontal-canvas-panel%
+                        do-on-choice-reorder))
 
   (define wx:windowless-panel%
     (class object%
@@ -598,6 +599,9 @@
        [on-active
         (lambda ()
           (for-each (lambda (c) (send c queue-active)) (get-children)))]
+       [on-superwindow-activate
+        (λ (on?)
+          (for-each (lambda (c) (send c queue-superwindow-activate on?)) (get-children)))]
 
        [get-window (lambda () (send (get-parent) get-window))]
        [set-size (lambda (x y w h) 
@@ -621,7 +625,11 @@
        [on-active
         (lambda ()
           (for-each (lambda (c) (send c queue-active)) (get-children))
-          (super-on-active))])
+          (super-on-active))]
+       [on-superwindow-activate
+        (λ (on?)
+          (for-each (lambda (c) (send c queue-superwindow-activate on?)) (get-children))
+          (super on-superwindow-activate on?))])
       (apply super-make-object args)))
 
   (define (wx-make-linear-panel% wx-panel%)
@@ -853,14 +861,22 @@
   ;; "horizontal" and "vertical."
   (define (wx-make-vertical-panel% wx-linear-panel%) (wx-make-horizontal/vertical-panel% wx-linear-panel% #f))
 
+  (define-local-member-name do-on-choice-reorder)
+  
   (define (wx-make-tab% %)
     (class %
-      (inherit gets-focus?)
+      (inherit gets-focus? get-mred)
       (super-new)
       (define/override (tabbing-position x y w h)
         ;; claim that the panel is short and starts above its client area:
         (list this x (- y 16) w 16))
-      (define/override (focus-on-self?) (gets-focus?))))
+      (define/override (focus-on-self?) (gets-focus?))
+      (define/override (on-choice-reorder new-positions)
+        (let ([mred (get-mred)])
+          (when mred (send mred do-on-choice-reorder new-positions))))
+      (define/override (on-choice-close pos)
+        (let ([mred (get-mred)])
+          (when mred (send mred on-close-request pos))))))
 
   (define wx-panel% (wx-make-panel% wx:panel%))
   (define wx-control-panel% (wx-make-panel% wx:panel% const-default-x-margin const-default-y-margin))

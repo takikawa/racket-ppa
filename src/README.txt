@@ -34,33 +34,11 @@ versions of Racket: the original BC implementation that is
 substantially implemented in C, and the CS implementation that is
 implemented in Chez Scheme and Racket (compiled to Chez Scheme).
 
-Racket BC
----------
-
-By default, `configure` and the Windows scripts build the BC
-implementation of Racket.
-
-To build Racket BC on Windows, see See "worksp\README.txt" for
-information.
-
-If you need more information specific to Racket BC, see
-"bc/README.txt".
-
 Racket CS
 ---------
 
-To build Racket CS on Unix variants or Mac OS:
-
- * ... in addition Racket BC: supply `--enable-cs --enable-bc` to
-   `configure`.
-
-   The generated Racket CS executables will have a "cs" suffix. A
-   plain `make` will still build Racket BC; use `make cs` to build and
-   `make install-bc` to install.
-
- * ... by itself: supply `--enable-csdefault` to `configure`.
- 
-   The generated Racket CS executables will *not* have a "cs" suffix.
+By default, `configure` and the Windows scripts build the CS
+implementation of Racket.
 
 Chez Scheme is included in Racket source distributions and the source
 repository.
@@ -70,6 +48,28 @@ information.
 
 If you need more information specific to Racket CS, see
 "cs/README.txt".
+
+Racket BC
+---------
+
+To build Racket BC on Unix variants or Mac OS:
+
+ * ... in addition Racket CS: supply `--enable-cs --enable-bc` to
+   `configure`.
+
+   The generated Racket BC executables will have a "bc" suffix. A
+   plain `make` will still build Racket CS; use `make bc` to build and
+   `make install-bc` to install.
+
+ * ... by itself: supply `--enable-bcdefault` to `configure`.
+ 
+   The generated Racket BC executables will *not* have a "bc" suffix.
+
+To build Racket BC on Windows, see See "worksp\README.txt" for
+information.
+
+If you need more information specific to Racket BC, see
+"bc/README.txt".
 
 
 ========================================================================
@@ -352,7 +352,13 @@ Cross-compilation requires at least two flags to `configure`:
    run `configure` again (with no arguments) in a "local" subdirectory
    to create a build for the current platform.
 
-Some less commonly needed `configure` flags for Racket BC:
+An additional flag is needed for building Racket CS, unless the flag
+`--enable-racket=auto` is used:
+
+ * `--enable-scheme=DIR`, where DIR is a path that has a "ChezScheme"
+   directory where Chez Scheme is built for the host system.
+
+Some less commonly needed `configure` flags are for Racket BC:
 
  * `--enable-stackup`, if the target platform`s stack grows up.
 
@@ -451,7 +457,7 @@ See also the shared sources below, which includes rktio, the macro
 expander, and schemify.
 
 Sources for the Racket BC implementation
--------------------------------------------------
+----------------------------------------
 
  * "bc" --- `racket` BC executable
 

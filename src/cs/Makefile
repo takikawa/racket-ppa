@@ -17,6 +17,11 @@ COMPRESS_COMP = # --compress
 # "--srcloc" for procedure-level source locations:
 DEBUG_COMP = # --debug
 
+# To disable whole-program optimization for "main.sps", set
+# `WHEN_WPO=no_` and `UNLESS_WPO=`.
+WHEN_WPO =
+UNLESS_WPO = no_
+
 # For cross-compiling, set `CROSS_COMP` to `-m <machine>`, where
 # the Chez Scheme directory must have "<machine>/s/xpatch":
 CROSS_COMP =
@@ -92,8 +97,11 @@ setup-v:
 run-wpo: $(BUILDDIR)racket.so ../../bin/racket
 	$(SCHEME) --script $(BUILDDIR)racket.so $(RACKET_SETUP_ARGS) $(ARGS)
 
-$(BUILDDIR)racket.so: $(BUILDDIR)main.so $(COMPILE_FILE_DEPS)
+$(WHEN_WPO)$(BUILDDIR)racket.so: $(BUILDDIR)main.so $(COMPILE_FILE_DEPS)
 	$(COMPILE_FILE) --whole-program $(BUILDDIR)racket.so $(BUILDDIR)main.wpo
+
+$(UNLESS_WPO)$(BUILDDIR)racket.so: $(BUILDDIR)main.so $(COMPILE_FILE_DEPS)
+	cat $(MAIN_DEPS) $(BUILDDIR)main.so > $(BUILDDIR)racket.so
 
 MAIN_SRCS = main/help.ss
 
@@ -144,7 +152,7 @@ $(BUILDDIR)linklet.$(CSO): linklet.sls $(LINKLET_SRCS) $(LINKLET_DEPS) $(COMPILE
 	$(COMPILE_FILE) linklet.sls $(LINKLET_DEPS)
 
 
-$(BUILDDIR)schemify.$(CSO): schemify.sls schemified/schemify.scm schemified/known.scm $(SCHEMIFY_DEPS) $(COMPILE_FILE_DEPS)
+$(BUILDDIR)schemify.$(CSO): schemify.sls schemified/schemify.scm schemified/known.scm $(PRIMITIVES_TABLES) $(SCHEMIFY_DEPS) $(COMPILE_FILE_DEPS)
 	$(COMPILE_FILE) schemify.sls $(SCHEMIFY_DEPS)
 
 $(BOOTSTRAPPED)/schemify.scm: $(BUILDDIR)compiled/schemify.rktl $(CONVERT_DEPS)
@@ -250,8 +258,7 @@ future-demo: $(BUILDDIR)rumble.$(CSO)
 future2-demo: $(BUILDDIR)rumble.$(CSO)
 	$(SCHEME) $(BUILDDIR)chezpart.$(CSO) $(BUILDDIR)rumble.$(CSO) demo/future2.ss
 
-RUMBLE_SRCS = rumble/define.ss \
-              rumble/virtual-register.ss \
+RUMBLE_SRCS = rumble/virtual-register.ss \
               rumble/layout.ss \
               rumble/check.ss \
 	      rumble/syntax-rule.ss \

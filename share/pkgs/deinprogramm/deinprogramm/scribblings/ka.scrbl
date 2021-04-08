@@ -138,7 +138,7 @@ sich um eine @italic{Aufzählung}.
 Schreibe für jede Aufzählung eine Signaturdefinition der Form:
 
 @racketblock[
-(define s (signature (one-of ...)))
+(define s (signature (enum ...)))
 ]
 
 Achte darauf, dass die Anzahl der Fälle der Signaturdefinition der
@@ -158,7 +158,7 @@ Fälle gibt, nach folgendem Muster:
 
 @racketblock[
 (define f
-  (lambda a
+  (lambda (a)
     (cond
       (... ....)
       ...

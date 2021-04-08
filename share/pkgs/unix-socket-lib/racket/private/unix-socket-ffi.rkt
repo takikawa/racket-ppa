@@ -115,6 +115,7 @@
 
 (define-libc fcntl
   (_fun #:save-errno 'posix
+        #:varargs-after 2
         _int _int _int -> _int))
 
 (define-libc getsockopt

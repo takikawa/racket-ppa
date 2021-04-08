@@ -18,7 +18,6 @@
 	 mzlib/compile
 	 drscheme/tool
 	 mred
-	 framework/private/bday
 	 syntax/moddep
 	 mrlib/cache-image-snip
 	 compiler/embed
@@ -33,10 +32,12 @@
 	 lang/private/continuation-mark-key
          lang/private/rewrite-error-message
 	 
-	 (only-in test-engine/racket-gui make-formatter)
-	 test-engine/racket-tests
 	 lang/private/tp-dialog
-	 (lib "test-display.scm" "test-engine")
+         (only-in test-engine/syntax
+                  report-signature-violation! test-execute test)
+	 (except-in test-engine/test-engine signature-violation)
+	 test-engine/test-markup
+	 test-engine/test-display-gui
 	 deinprogramm/signature/signature
          lang/htdp-langs-interface
 	 )
@@ -198,27 +199,29 @@
                  (namespace-attach-module drs-namespace scheme-signature-module-name)
                  (namespace-require scheme-signature-module-name)
 
-		 ;; hack: the test-engine code knows about the test~object name; we do, too
-		 (namespace-set-variable-value! 'test~object (build-test-engine))
+                 (initialize-test-object!)
 		 ;; record signature violations with the test engine
 		 (signature-violation-proc
 		  (lambda (obj signature message blame)
-		    (cond
-		     ((namespace-variable-value 'test~object #f (lambda () #f))
-		      => (lambda (engine)
-			   (send (send engine get-info) signature-failed
-				 obj signature message blame))))))
-                 (scheme-test-data (list (drscheme:rep:current-rep) drs-eventspace test-display%))
+                    (report-signature-violation! obj signature message blame)))
+                 (display-test-results-parameter
+                  (lambda (markup)
+                    (test-display-results! (drscheme:rep:current-rep)
+                                           drs-eventspace
+                                           markup)))
+                 (get-rewritten-error-message-parameter get-rewriten-error-message)
                  (test-execute tests-on?)
 		 (signature-checking-enabled?
 		  (if (preferences:default-set? 'signatures:enable-checking?) ; Signatures tool not present
 		      (preferences:get 'signatures:enable-checking?)
 		      #t))
-                 (test-format (make-formatter (lambda (v o)
-						(render-value/format (if (procedure? v)
-									 generic-proc
+                 (render-value-parameter (λ (v)
+                                           (let ([o (open-output-string)])
+                                             (render-value/format (if (procedure? v)
+                                                                      generic-proc
 									 v)
-								     settings o 40))))
+                                                                  settings o 40)
+                                             (get-output-string o))))
 		 )))
             (super on-execute settings run-in-user-thread)
 
@@ -754,25 +757,25 @@
 
           (define/override (front-end/interaction port settings)
             (let ([reader (get-reader)] ;; DeinProgramm addition:
-					;; needed for test boxes; see
-					;; the code in
-					;; collects/drracket/private/language.rkt
-		  [start? #t]
-                  [done? #f])
+                  ;; needed for test boxes; see
+                  ;; the code in
+                  ;; collects/drracket/private/language.rkt
+                  [done? #f]
+                  [test-object (test-object-copy (current-test-object))])
               (λ ()
                 (cond
-		  [start?
-		   (set! start? #f)
-		   #'(#%plain-app reset-tests)]
                   [done? eof]
                   [else
                    (let ([ans (reader (object-name port) port)])
                      (cond
                        [(eof-object? ans)
-                        (set! done? #t)
-                        #`(test)]
-                       [else
-                        ans]))]))))
+                        (if (test-object=? test-object (current-test-object))
+                            eof
+                            (begin
+                              ; only retest if something has changed
+                              (set! done? #t)
+                              #`(test)))]
+                       [else ans]))]))))
 
           (define/augment (capability-value key)
             (case key

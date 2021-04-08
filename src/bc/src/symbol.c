@@ -613,17 +613,15 @@ const char *scheme_symbol_name_and_size(Scheme_Object *sym, uintptr_t *length, i
 			   && (flags & SCHEME_SNF_FOR_TS)))
 
   if (len) {
-    if (flags & SCHEME_SNF_KEYWORD) {
-      digit_start = 0;
-    } else {
-      int ch = ((unsigned char *)s)[0];
-      digit_start = (((ch < 128) && isdigit(ch)) || (ch == '.')
-		     || (ch == '+') || (ch == '-'));
-      if (ch == '#' && (len == 1 || s[1] != '%'))
-	has_special = 1;
-      if (ch == '.' && len == 1)
-	has_special = 1;
-    }
+    int ch = ((unsigned char *)s)[0];
+    digit_start = ((flags & SCHEME_SNF_KEYWORD)
+                   ? 0
+                   : (((ch < 128) && isdigit(ch)) || (ch == '.')
+                      || (ch == '+') || (ch == '-')));
+    if (ch == '#' && (len == 1 || s[1] != '%'))
+      has_special = 1;
+    if (ch == '.' && len == 1)
+      has_special = 1;
   } else {
     digit_start = 0;
     if (!(flags & SCHEME_SNF_KEYWORD))
@@ -661,7 +659,8 @@ const char *scheme_symbol_name_and_size(Scheme_Object *sym, uintptr_t *length, i
 	/* space is OK in type symbols */
       } else
 	has_space = 1;
-    } else if (isSpecial(ch))
+    } else if (isSpecial(ch)
+               || (ch == 0xFEFF)) /* BOM, treated as whitespace by the reader */
       has_special = 1;
     else if (ch == '|')
       has_pipe = 1;
