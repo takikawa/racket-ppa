@@ -5,6 +5,7 @@ include /usr/share/cdbs/1/class/autotools.mk
 
 DEB_HOST_ARCH ?= $(shell dpkg-architecture -qDEB_HOST_ARCH)
 DEB_CONFIGURE_SCRIPT := $(CURDIR)/src/configure
+DEB_CONFIGURE_EXTRA_FLAGS := --enable-noopt --enable-libz --enable-liblz4
 MZDYN := mzdyn3m.o
 
 # keep the collect build from using every available core, unless 
@@ -65,8 +66,6 @@ cleanbuilddir/racket::
 	rm -rf build
 	rm -rf include # This got created at build-time
 	rm -f debian/mzconfig.h debian/racket-arch.mk
-	rm -rf src/ChezScheme/zlib
-	rm -rf src/ChezScheme/lz4
 
 debian/racket-arch.mk: debian/racket-arch.c
 	touch debian/mzconfig.h && cpp -Isrc -Idebian -o - $< | tail -1 > $@
