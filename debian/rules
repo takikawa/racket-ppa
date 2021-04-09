@@ -65,6 +65,8 @@ cleanbuilddir/racket::
 	rm -rf build
 	rm -rf include # This got created at build-time
 	rm -f debian/mzconfig.h debian/racket-arch.mk
+	rm -rf src/ChezScheme/zlib
+	rm -rf src/ChezScheme/lz4
 
 debian/racket-arch.mk: debian/racket-arch.c
 	touch debian/mzconfig.h && cpp -Isrc -Idebian -o - $< | tail -1 > $@
