@@ -3,7 +3,6 @@ racket (8.0+dfsg1-1) UNRELEASED; urgency=medium
   * New upstream release
   * Build with Chez Scheme backend
   * TODO
-  - unembed zlib
   - check d/copyright
   - upload to experimental
 
