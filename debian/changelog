@@ -1,3 +1,10 @@
+racket (8.0+dfsg1-3) experimental; urgency=medium
+
+  * Use bc backend for all except amd64, arm64, armhf, i386 (enable some
+    ports)
+
+ -- David Bremner <bremner@debian.org>  Sat, 10 Apr 2021 18:00:08 -0300
+
 racket (8.0+dfsg1-2) experimental; urgency=medium
 
   * Use bc backend on armel, mips64el, mipsel, ppc64el, and s390x

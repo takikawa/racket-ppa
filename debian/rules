@@ -8,8 +8,8 @@ DEB_CONFIGURE_SCRIPT := $(CURDIR)/src/configure
 DEB_CONFIGURE_EXTRA_FLAGS := --enable-libz --enable-liblz4
 MZDYN := mzdyn3m.o
 
-# some architectectures are supported only by the old pre-Chez backend
-ifneq (,$(filter $(DEB_HOST_ARCH),armel mips64el mipsel ppc64el s390x))
+# most architectectures are supported only by the old pre-Chez backend
+ifeq (,$(filter $(DEB_HOST_ARCH),amd64 arm64 armhf i386))
     DEB_CONFIGURE_EXTRA_FLAGS += --enable-bcdefault
 endif
 
