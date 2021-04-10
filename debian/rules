@@ -8,6 +8,11 @@ DEB_CONFIGURE_SCRIPT := $(CURDIR)/src/configure
 DEB_CONFIGURE_EXTRA_FLAGS := --enable-noopt --enable-libz --enable-liblz4
 MZDYN := mzdyn3m.o
 
+# some architectectures are supported only by the old pre-Chez backend
+ifneq (,$(filter $(DEB_HOST_ARCH),armel mips64el mipsel ppc64el s390x))
+    DEB_CONFIGURE_EXTRA_FLAGS += --enable-bcdefault
+endif
+
 # keep the collect build from using every available core, unless 
 # explicitly enabled.
 ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
