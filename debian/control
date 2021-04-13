@@ -18,9 +18,8 @@ Depends: ${misc:Depends}, ${shlibs:Depends}, racket-common (= ${source:Version})
 Recommends: racket-doc (>= ${source:Upstream-Version}),
             libglib2.0-0, libpangocairo-1.0-0, libjpeg62-turbo, libpng16-16,
             libgtk2.0-0, libgdk-pixbuf2.0-0, libssl1.1
-Breaks: plt-scheme (<<5.0~)
-Replaces: plt-scheme (<<5.0~)
-Provides: plt-scheme
+Breaks: racket-common (<<8.0~)
+Replaces: racket-common (<<8.0~)
 Description: extensible programming language in the Scheme family
  Racket (previously PLT Scheme) is a programming language suitable for
  scripting and application development, including GUIs and web

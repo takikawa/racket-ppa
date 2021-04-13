@@ -1,3 +1,12 @@
+racket (8.0+dfsg1-4) experimental; urgency=medium
+
+  * Bug fix: "missing Breaks+Replaces: racket-common (<< 8)", thanks
+    to Andreas Beckmann (Closes: #986874).
+  * Drop Breaks/Depends on plt-scheme (package not in oldstable)
+  * Drop provides of plt-scheme.
+
+ -- David Bremner <bremner@debian.org>  Tue, 13 Apr 2021 08:25:15 -0300
+
 racket (8.0+dfsg1-3) experimental; urgency=medium
 
   * Use bc backend for all except amd64, arm64, armhf, i386 (enable some
