@@ -35,13 +35,18 @@
 
 ;; returns: (values host repo branch path)
 (define (split-git-url pkg-url)
-  (values (string->symbol (url-scheme pkg-url))
+  (values (let ([scheme (string->symbol (url-scheme pkg-url))])
+            ;; convert scheme to transport
+            (case scheme
+              [(git+http) 'http]
+              [(git+https) 'https]
+              [else scheme]))
           (url-host pkg-url)
           (url-port pkg-url)
           (string-join (map (compose ~a path/param-path)
                             (url-path/no-slash pkg-url))
                        "/")
-          (or (url-fragment pkg-url) "master")
+          (or (url-fragment pkg-url) 'head)
           (extract-git-path pkg-url)))
 
 (define (split-git-or-hub-url pkg-url #:type [type #f])

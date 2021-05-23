@@ -77,7 +77,9 @@
     ((srcloc-markup? markup)
      (markup->block (srcloc-markup-markup markup)))
     ((framed-markup? markup)
-     (block-box (markup->block (framed-markup-markup markup))))))
+     (block-box (markup->block (framed-markup-markup markup))))
+    ((image-markup? markup)
+     (markup->block (image-markup-alt-markup markup)))))
 
 (define display-markup
   (case-lambda

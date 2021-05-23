@@ -33,9 +33,10 @@ void S_alloc_init() {
         for (g = 0; g <= static_generation; g++) {
             S_G.bytes_of_generation[g] = 0;
             for (s = 0; s <= max_real_space; s++) {
-              S_G.main_thread_gc.base_loc[g][s] = FIX(0); 
-              S_G.main_thread_gc.next_loc[g][s] = FIX(0); 
+              S_G.main_thread_gc.base_loc[g][s] = FIX(0);
+              S_G.main_thread_gc.next_loc[g][s] = FIX(0);
               S_G.main_thread_gc.bytes_left[g][s] = 0;
+              S_G.main_thread_gc.sweep_next[g][s] = NULL;
               S_G.bytes_of_space[g][s] = 0;
             }
         }
@@ -224,6 +225,9 @@ static void close_off_segment(thread_gc *tgc, ptr old, ptr base_loc, ptr sweep_l
     /* in case this is during a GC, add to sweep list */
     si = SegInfo(addr_get_segment(base_loc));
     si->sweep_start = sweep_loc;
+#if defined(WRITE_XOR_EXECUTE_CODE)
+    si->sweep_bytes = bytes;
+#endif
     si->sweep_next = tgc->sweep_next[g][s];
     tgc->sweep_next[g][s] = si;
   }
@@ -255,6 +259,15 @@ ptr S_find_more_gc_room(thread_gc *tgc, ISPC s, IGEN g, iptr n, ptr old) {
   tgc->bytes_left[g][s] = (new_bytes - n) - ptr_bytes;
   tgc->next_loc[g][s] = (ptr)((uptr)new + n);
 
+#if defined(WRITE_XOR_EXECUTE_CODE)
+  if (s == space_code) {
+    /* Ensure allocated code segments are writable. The caller should
+       already have bracketed the writes with calls to start and stop
+       so there is no need for a stop here. */
+    S_thread_start_code_write(tgc->tc, 0, 1, NULL);
+  }
+#endif
+
   if (tgc->during_alloc == 1) maybe_queue_fire_collector(tgc);
 
   tgc->during_alloc -= 1;
@@ -275,6 +288,7 @@ void S_close_off_thread_local_segment(ptr tc, ISPC s, IGEN g) {
   tgc->bytes_left[g][s] = 0;
   tgc->next_loc[g][s] = (ptr)0;
   tgc->sweep_loc[g][s] = (ptr)0;
+  tgc->sweep_next[g][s] = NULL;
 }
 
 /* S_reset_allocation_pointer is always called with allocation mutex
@@ -360,7 +374,7 @@ void S_dirty_set(ptr *loc, ptr x) {
     seginfo *si = SegInfo(addr_get_segment(TO_PTR(loc)));
     if (si->use_marks) {
       /* GC must be in progress */
-      if (!IMMEDIATE(x)) {
+      if (!FIXMEDIATE(x)) {
         seginfo *t_si = SegInfo(ptr_get_segment(x));
         if (t_si->generation < si->generation)
           S_record_new_dirty_card(THREAD_GC(get_thread_context()), loc, t_si->generation);
@@ -1027,6 +1041,9 @@ ptr S_bignum(tc, n, sign) ptr tc; iptr n; IBOOL sign; {
 
     if ((uptr)n > (uptr)maximum_bignum_length)
         S_error("", "invalid bignum size request");
+
+    /* for anything that allocates bignums, make sure scheduling fuel is consumed */
+    USE_TRAP_FUEL(tc, n);
 
     d = size_bignum(n);
     newspace_find_room(tc, type_typed_object, d, p);

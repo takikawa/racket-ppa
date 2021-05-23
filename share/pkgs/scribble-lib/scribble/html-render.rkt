@@ -1,14 +1,14 @@
-#lang scheme/base
+#lang racket/base
 (require "core.rkt"
          "private/render-utils.rkt"
          "html-properties.rkt"
          "private/literal-anchor.rkt"
-         scheme/class
-         scheme/path
-         scheme/file
-         scheme/port
-         scheme/list
-         scheme/string
+         racket/class
+         racket/path
+         racket/file
+         racket/port
+         racket/list
+         racket/string
          file/convertible
          mzlib/runtime-path
          setup/main-doc
@@ -17,11 +17,11 @@
          net/url
          net/uri-codec
          net/base64
-         scheme/serialize
+         racket/serialize
          racket/draw/gif
          pkg/path
          (prefix-in xml: xml/xml)
-         (for-syntax scheme/base)
+         (for-syntax racket/base)
          "search.rkt"
          (except-in "base.rkt" url))
 (provide render-mixin
@@ -847,12 +847,15 @@
                                             pred
                                             get))])
           (unless (bytes? style-file)
+            ;; Note: path is looked up and installed again below
             (unless (lookup-path style-file alt-paths) 
               (install-file style-file)))
-          (unless (lookup-path scribble-css alt-paths) 
-            (install-file scribble-css))
-          (unless (lookup-path script-file alt-paths) 
-            (install-file script-file))
+          (define scribble-css-path
+            (or (lookup-path scribble-css alt-paths) 
+                (install-file scribble-css)))
+          (define script-file-path
+            (or (lookup-path script-file alt-paths) 
+                (install-file script-file)))
           (if (bytes? prefix-file)
               (display prefix-file)
               (call-with-input-file*
@@ -869,26 +872,26 @@
                           [content "width=device-width, initial-scale=0.8"]))
                    ,title
                    ,(scribble-css-contents scribble-css
-                                           (lookup-path scribble-css alt-paths) 
+                                           scribble-css-path
                                            dir-depth)
                    ,@(map (lambda (style-file)
                             (if (or (bytes? style-file) (url? style-file))
                                 (scribble-css-contents style-file #f dir-depth)
-                                (let ([p (lookup-path style-file alt-paths)])
-                                  (unless p (install-file style-file))
+                                (let ([p (or (lookup-path style-file alt-paths)
+                                             (install-file style-file))])
                                   (scribble-css-contents style-file p dir-depth))))
                           (append (extract css-addition? css-addition-path)
                                   (list style-file)
                                   (extract css-style-addition? css-style-addition-path)
                                   style-extra-files))
                    ,(scribble-js-contents script-file
-                                          (lookup-path script-file alt-paths)
+                                          script-file-path
                                           dir-depth)
                    ,@(map (lambda (script-file)
                             (if (or (bytes? script-file) (url? script-file))
                                 (scribble-js-contents script-file #f dir-depth)
-                                (let ([p (lookup-path script-file alt-paths)])
-                                  (unless p (install-file script-file))
+                                (let ([p (or (lookup-path script-file alt-paths)
+                                             (install-file script-file))])
                                   (scribble-js-contents script-file p dir-depth))))
                           (append
                            (extract js-addition? js-addition-path)

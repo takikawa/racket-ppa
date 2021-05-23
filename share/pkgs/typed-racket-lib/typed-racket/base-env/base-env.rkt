@@ -7,6 +7,7 @@
   (except-in racket -> ->* one-of/c class)
   racket/unsafe/ops
   racket/unsafe/undefined
+  racket/hash
   (only-in racket/extflonum floating-point-bytes->extfl extfl->floating-point-bytes)
   ;(only-in rnrs/lists-6 fold-left)
   '#%paramz
@@ -525,9 +526,12 @@
                     [-> (-lst (-lst a)) (-lst a)]))]
 [cadr (-poly (a b c)
              (cl->* [->acc (list (-pair a (-pair b c))) b (list -car -cdr)]
+                    [-> (-pair a (-lst b)) b]
                     [-> (-lst a) a]))]
 [cddr  (-poly (a b c)
               (cl->* [->acc (list (-pair a (-pair b c))) c (list -cdr -cdr)]
+                     [-> (-pair a (-lst b)) (-lst b)]
+                     [-> (-pair a (-pair b (-lst c))) (-lst c)]
                      [-> (-lst a) (-lst a)]))]
 
 [caaar (-poly (a b c d)
@@ -1085,6 +1089,11 @@
 [make-immutable-custom-hash (->opt (-> Univ Univ Univ) (-> Univ -Nat) [(-> Univ -Nat)] Univ)]
 [make-weak-custom-hash (->opt (-> Univ Univ Univ) (-> Univ -Nat) [(-> Univ -Nat)] Univ)]
 
+
+[hash-union (-poly (a b) (->* (list (-Immutable-HT a b))  (-HT a b) (-Immutable-HT a b)))]
+[hash-intersect (-poly (a b) (->* (list (-Immutable-HT a b))  (-HT a b) (-Immutable-HT a b)))]
+[hash-union! (-poly (a b) (->* (list (-Mutable-HT a b))  (-HT a b) -Void))]
+
 ;; Section 4.15 (Sequences and Streams)
 [sequence? (make-pred-ty -SequenceTop)]
 [in-sequences
@@ -1179,8 +1188,8 @@
 [procedure? (make-pred-ty top-func)]
 [compose (-poly (a b c) (-> (-> b c) (-> a b) (-> a c)))]
 [compose1 (-poly (a b c) (-> (-> b c) (-> a b) (-> a c)))]
-[procedure-rename (-> top-func -Symbol top-func)]
-[procedure->method (-> top-func top-func)]
+[procedure-rename (-poly (a) (-> (-Inter top-func a) -Symbol a))]
+[procedure->method (-poly (a)(-> (-Inter top-func a) a))]
 [procedure-closure-contents-eq? (-> top-func top-func -Boolean)]
 ;; keyword-apply - hard to give a type
 [procedure-arity (-> top-func (Un -Nat -Arity-At-Least (-lst (Un -Nat -Arity-At-Least))))]
@@ -2156,10 +2165,10 @@
 ;read-bytes (in index)
 
 ;read-string! (in index)
-[read-bytes! (->opt -Bytes [-Input-Port -Nat -Nat] (Un -PosInt (-val eof)))]
-[read-bytes-avail! (->opt -Bytes [-Input-Port -Nat -Nat] (Un -PosInt (-val eof) (-> (-opt -PosInt) (-opt -Nat) (-opt -PosInt) (-opt -Nat) Univ)))]
+[read-bytes! (->opt -Bytes [-Input-Port -Nat -Nat] (Un -Nat (-val eof)))]
+[read-bytes-avail! (->opt -Bytes [-Input-Port -Nat -Nat] (Un -Nat (-val eof) (-> (-opt -PosInt) (-opt -Nat) (-opt -PosInt) (-opt -Nat) Univ)))]
 [read-bytes-avail!* (->opt -Bytes [-Input-Port -Nat -Nat] (Un -Nat (-val eof) (-> (-opt -PosInt) (-opt -Nat) (-opt -PosInt) (-opt -Nat) Univ)))]
-[read-bytes-avail!/enable-break (->opt -Bytes [-Input-Port -Nat -Nat] (Un -PosInt (-val eof) (-> (-opt -PosInt) (-opt -Nat) (-opt -PosInt) (-opt -Nat) Univ)))]
+[read-bytes-avail!/enable-break (->opt -Bytes [-Input-Port -Nat -Nat] (Un -Nat (-val eof) (-> (-opt -PosInt) (-opt -Nat) (-opt -PosInt) (-opt -Nat) Univ)))]
 
 [peek-string (->opt -Nat -Nat [-Input-Port] (Un -String (-val eof)))]
 [peek-bytes (->opt -Nat -Nat [-Input-Port] (Un -Bytes (-val eof)))]

@@ -1,11 +1,11 @@
-#lang scheme/base
+#lang racket/base
 (require setup/collects
          scribble/core
          (except-in scribble/base author)
          scribble/decode
          scribble/html-properties
          scribble/latex-properties
-         (for-syntax scheme/base))
+         (for-syntax racket/base))
 
 (provide abstract include-abstract
          author author/short

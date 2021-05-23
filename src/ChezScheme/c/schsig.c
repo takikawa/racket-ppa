@@ -25,6 +25,8 @@ static void handle_call_error PROTO((ptr tc, iptr type, ptr x));
 static void init_signal_handlers PROTO((void));
 static void keyboard_interrupt PROTO((ptr tc));
 
+static void (*register_modified_signal)(int);
+
 ptr S_get_scheme_arg(tc, n) ptr tc; iptr n; {
 
     if (n <= asm_arg_reg_cnt) return REGARG(tc, n);
@@ -392,8 +394,8 @@ static void do_error(type, who, s, args) iptr type; const char *who, *s; ptr arg
 #endif /* PTHREADS */
 
     /* in case error is during fasl read: */
-    S_thread_end_code_write();
-    
+    S_thread_end_code_write(tc, static_generation, 0, NULL);
+
     TRAP(tc) = (ptr)1;
     AC0(tc) = (ptr)1;
     CP(tc) = S_symbol_value(S_G.error_id);
@@ -531,6 +533,10 @@ void S_noncontinuable_interrupt() {
   reset_scheme();
   KEYBOARDINTERRUPTPENDING(tc) = Sfalse;
   do_error(ERROR_NONCONTINUABLE_INTERRUPT,"","",Snil);
+}
+
+void Sscheme_register_signal_registerer(void (*registerer)(int)) {
+  register_modified_signal = registerer;
 }
 
 #ifdef WIN32
@@ -726,20 +732,28 @@ static void handle_signal(INT sig, UNUSED siginfo_t *si, UNUSED void *data) {
     }
 }
 
+static void no_op_register(UNUSED int sigid) {
+}
+
+#define SIGACTION(id, act_p, old_p) (register_modified_signal(id), sigaction(id, act_p, old_p))
+
 static void init_signal_handlers() {
     struct sigaction act;
+
+    if (register_modified_signal == NULL)
+      register_modified_signal = no_op_register;
 
     sigemptyset(&act.sa_mask);
 
   /* drop pending keyboard interrupts */
     act.sa_flags = 0;
     act.sa_handler = SIG_IGN;
-    sigaction(SIGINT, &act, (struct sigaction *)0);
+    SIGACTION(SIGINT, &act, (struct sigaction *)0);
 
   /* ignore broken pipe signals */
     act.sa_flags = 0;
     act.sa_handler = SIG_IGN;
-    sigaction(SIGPIPE, &act, (struct sigaction *)0);
+    SIGACTION(SIGPIPE, &act, (struct sigaction *)0);
 
   /* set up to catch SIGINT w/no system call restart */
 #ifdef SA_INTERRUPT
@@ -748,7 +762,7 @@ static void init_signal_handlers() {
     act.sa_flags = SA_SIGINFO;
 #endif /* SA_INTERRUPT */
     act.sa_sigaction = handle_signal;
-    sigaction(SIGINT, &act, (struct sigaction *)0);
+    SIGACTION(SIGINT, &act, (struct sigaction *)0);
 #ifdef BSDI
     siginterrupt(SIGINT, 1);
 #endif
@@ -760,14 +774,14 @@ static void init_signal_handlers() {
     act.sa_flags |= SA_RESTART;
 #endif /* SA_RESTART */
 #ifdef SIGQUIT
-    sigaction(SIGQUIT, &act, (struct sigaction *)0);
+    SIGACTION(SIGQUIT, &act, (struct sigaction *)0);
 #endif /* SIGQUIT */
-    sigaction(SIGILL, &act, (struct sigaction *)0);
-    sigaction(SIGFPE, &act, (struct sigaction *)0);
+    SIGACTION(SIGILL, &act, (struct sigaction *)0);
+    SIGACTION(SIGFPE, &act, (struct sigaction *)0);
 #ifdef SIGBUS
-    sigaction(SIGBUS, &act, (struct sigaction *)0);
+    SIGACTION(SIGBUS, &act, (struct sigaction *)0);
 #endif /* SIGBUS */
-    sigaction(SIGSEGV, &act, (struct sigaction *)0);
+    SIGACTION(SIGSEGV, &act, (struct sigaction *)0);
 }
 
 #endif /* WIN32 */
@@ -775,6 +789,7 @@ static void init_signal_handlers() {
 void S_schsig_init() {
     if (S_boot_time) {
         ptr p;
+        ptr tc = get_thread_context();
 
         S_protect(&S_G.nuate_id);
         S_G.nuate_id = S_intern((const unsigned char *)"$nuate");
@@ -786,15 +801,15 @@ void S_schsig_init() {
         S_protect(&S_G.collect_request_pending_id);
         S_G.collect_request_pending_id = S_intern((const unsigned char *)"$collect-request-pending");
 
-	S_thread_start_code_write();
-        p = S_code(get_thread_context(), type_code | (code_flag_continuation << code_flags_offset), 0);
+        S_thread_start_code_write(tc, 0, 0, NULL);
+        p = S_code(tc, type_code | (code_flag_continuation << code_flags_offset), 0);
         CODERELOC(p) = S_relocation_table(0);
         CODENAME(p) = Sfalse;
         CODEARITYMASK(p) = FIX(0);
         CODEFREE(p) = 0;
         CODEINFO(p) = Sfalse;
         CODEPINFOS(p) = Snil;
-	S_thread_end_code_write();
+        S_thread_end_code_write(tc, 0, 0, NULL);
 
         S_set_symbol_value(S_G.null_continuation_id,
             S_mkcontinuation(space_new,

@@ -46,9 +46,10 @@
                                     (known-struct-constructor (arithmetic-shift 1 (struct-type-info-field-count info)) type struct:s)
                                     a-known-constant))]
               [authentic? (struct-type-info-authentic? info)]
+              [sealed? (struct-type-info-sealed? info)]
               [knowns (hash-set knowns
                                 (unwrap s?)
-                                (known-struct-predicate 2 type struct:s authentic?))]
+                                (known-struct-predicate 2 type struct:s authentic? sealed?))]
               [knowns
                (let* ([immediate-count (struct-type-info-immediate-field-count info)]
                       [parent-count (- (struct-type-info-field-count info)
@@ -76,7 +77,8 @@
                      [`,_ knowns])))])
          (values (hash-set knowns (unwrap struct:s) (known-struct-type type
                                                                        (struct-type-info-field-count info)
-                                                                       (struct-type-info-pure-constructor? info)))
+                                                                       (struct-type-info-pure-constructor? info)
+                                                                       (struct-type-info-sealed? info)))
                  info))]
       [else (values knowns #f)])]
     [`(define-values (,struct:s ,make-s ,s? ,s-ref ,s-set!) ,rhs) ; direct use of `make-struct-type`
@@ -92,11 +94,14 @@
                                      a-known-constant))]
                [knowns (hash-set knowns
                                  (unwrap s?)
-                                 (known-struct-predicate 2 type struct:s (struct-type-info-authentic? info)))])
+                                 (known-struct-predicate 2 type struct:s
+                                                         (struct-type-info-authentic? info)
+                                                         (struct-type-info-sealed? info)))])
           ;; For now, we don't try to track the position-consuming accessor or mutator
           (hash-set knowns (unwrap struct:s) (known-struct-type type
                                                                 (struct-type-info-field-count info)
-                                                                (struct-type-info-pure-constructor? info))))
+                                                                (struct-type-info-pure-constructor? info)
+                                                                (struct-type-info-sealed? info))))
         info)]
       [else (values knowns #f)])]
     [`(define-values (,prop:s ,s? ,s-ref)
@@ -124,7 +129,7 @@
               (for/fold ([knowns knowns]) ([id (in-list ids)]
                                            [rhs (in-list rhss)])
                 (define-values (new-knowns info)
-                  (find-definitions `(define-values (,id) ,rhs)
+                  (find-definitions (propagate-inline-hint v `(define-values (,id) ,rhs))
                                     prim-knowns knowns imports mutated simples unsafe-mode? target
                                     #:optimize? optimize?))
                 new-knowns)
@@ -132,3 +137,10 @@
             [else (values knowns #f)])]
          [`,_  (values knowns #f)]))]
     [`,_ (values knowns #f)]))
+
+;; ----------------------------------------
+
+(define (propagate-inline-hint defn new-defn)
+  (if (wrap-property defn 'compiler-hint:cross-module-inline)
+      (wrap-property-set new-defn 'compiler-hint:cross-module-inline #t)
+      new-defn))

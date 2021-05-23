@@ -1,15 +1,19 @@
 ; Smart constructors and better names for markup
 #lang racket/base
 (require racket/contract
-         (only-in simple-tree-text-markup/data markup?))
+         (only-in simple-tree-text-markup/data markup? record-dc-datum?))
 (provide
  (contract-out
   (srcloc-markup (srcloc? markup? . -> . markup?))
   (framed-markup (markup? . -> . markup?))
+  (image-markup (any/c markup? . -> . markup?))
+  (record-dc-datum (any/c natural-number/c natural-number/c . -> . record-dc-datum?))
   (empty-markup markup?)
   (empty-line markup?)
   (horizontal (markup? ... . -> . markup?))
-  (vertical (markup? ... . -> . markup?))))
+  (vertical (markup? ... . -> . markup?))
+  (markup-transform-image-data ((any/c . -> . any/c) markup? . -> . markup?))))
+   
 (require (rename-in simple-tree-text-markup/data (empty-markup make-empty-markup))
          (only-in racket/list splitf-at append-map))
 
@@ -50,7 +54,7 @@
       ((null? markups) empty-markup)
       ((null? (cdr markups))
        (car markups))
-      (else (horizontal-markup markups)))))
+      (else (horizontal-markup (remove "" markups))))))
 
 (define (flatten-vertical markups)
   (append-map (lambda (markup)
@@ -71,3 +75,23 @@
       (else
        (vertical-markup markups)))))
 
+
+(define (markup-transform-image-data transform-image-data markup)
+  (let recur ((markup  markup))
+    (cond
+      ((string? markup) markup)
+      ((empty-markup? markup) markup)
+      ((horizontal-markup? markup)
+       (horizontal-markup
+        (map recur (horizontal-markup-markups markup))))
+      ((vertical-markup? markup)
+       (vertical-markup
+        (map recur (vertical-markup-markups markup))))
+      ((srcloc-markup? markup)
+       (srcloc-markup (srcloc-markup-srcloc markup)
+                      (recur (srcloc-markup-markup markup))))
+      ((framed-markup? markup)
+       (framed-markup (recur (framed-markup-markup markup))))
+      ((image-markup? markup)
+       (image-markup (transform-image-data (image-markup-data markup))
+                     (recur (image-markup-alt-markup markup)))))))

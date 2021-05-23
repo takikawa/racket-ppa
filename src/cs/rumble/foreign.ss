@@ -24,7 +24,7 @@
                                    (raise-arguments-error 'prop:cpointer
                                                           "index is out of range"
                                                           "index" v))
-                                 (unless (chez:memv v (list-ref info 5))
+                                 (unless (#%memv v (list-ref info 5))
                                    (raise-arguments-error 'prop:cpointer
                                                           "index does not refer to an immutable field"
                                                           "index" v))
@@ -688,7 +688,9 @@
 (define (ctype-malloc-mode c)
   (let ([t (ctype-our-rep c)])
     (if (or (eq? t 'gcpointer)
+            (eq? t 'bytes)
             (eq? t 'scheme)
+            (eq? t 'string)
             (eq? t 'string/ucs-4)
             (eq? t 'string/utf-16))
         'nonatomic
@@ -1435,12 +1437,14 @@
    [(eq? mode 'nonatomic)
     (make-cpointer (#%make-vector (quotient size ptr-size-in-bytes) 0) #f)]
    [(eq? mode 'atomic-interior)
-    ;; This is not quite the same as traditional Racket, because
-    ;; a finalizer is associated with the cpointer (as opposed to
-    ;; the address that is wrapped by the cpointer). Also, interior
-    ;; pointers are not allowed as GCable pointers.
+    ;; This is not quite the same as Racket BC, because interior
+    ;; pointers are not allowed as GCable pointers. So, "interior"
+    ;; just means "doesn't move".
     (let* ([bstr (make-immobile-bytevector size)])
       (make-cpointer bstr #f))]
+   [(eq? mode 'interior)
+    ;; Ditto
+    (make-cpointer (#%make-immobile-vector (quotient size ptr-size-in-bytes) 0) #f)]
    [else
     (raise-unsupported-error 'malloc
                              (format "'~a mode is not supported" mode))]))
@@ -1485,9 +1489,9 @@
   (make-cpointer/cell (addr->vector a) #f))
 
 (define (malloc-mode? v)
-  (chez:memq v '(raw atomic nonatomic tagged
-                     atomic-interior interior
-                     stubborn uncollectable eternal)))
+  (#%memq v '(raw atomic nonatomic tagged
+                  atomic-interior interior
+                  stubborn uncollectable eternal)))
 
 (define (end-stubborn-change p)
   (raise-unsupported-error 'end-stubborn-change))
@@ -1532,39 +1536,48 @@
 (define/who ffi-call
   (case-lambda
    [(p in-types out-type)
-    (ffi-call p in-types out-type #f #f #f)]
+    (ffi-call p in-types out-type #f #f #f #f)]
    [(p in-types out-type abi)
-    (ffi-call p in-types out-type abi #f #f #f)]
+    (ffi-call p in-types out-type abi #f #f #f #f)]
    [(p in-types out-type abi save-errno)
-    (ffi-call p in-types out-type abi save-errno #f #f)]
+    (ffi-call p in-types out-type abi save-errno #f #f #f)]
    [(p in-types out-type abi save-errno orig-place?)
-    (ffi-call p in-types out-type abi save-errno orig-place? #f #f)]
+    (ffi-call p in-types out-type abi save-errno orig-place? #f #f #f)]
    [(p in-types out-type abi save-errno orig-place? lock-name)
-    (ffi-call p in-types out-type abi save-errno orig-place? lock-name #f #f)]
+    (ffi-call p in-types out-type abi save-errno orig-place? lock-name #f #f #f)]
    [(p in-types out-type abi save-errno orig-place? lock-name blocking?)
-    (ffi-call p in-types out-type abi save-errno orig-place? lock-name blocking? #f)]
+    (ffi-call p in-types out-type abi save-errno orig-place? lock-name blocking? #f #f)]
    [(p in-types out-type abi save-errno orig-place? lock-name blocking? varargs-after)
+    (ffi-call p in-types out-type abi save-errno orig-place? lock-name blocking? varargs-after #f)]
+   [(p in-types out-type abi save-errno orig-place? lock-name blocking? varargs-after exns?)
     (check who cpointer? p)
     (check-ffi-call who in-types out-type abi varargs-after save-errno lock-name)
-    ((ffi-call/callable #t in-types out-type abi varargs-after save-errno lock-name blocking? orig-place? #f #f) p)]))
+    ((ffi-call/callable #t in-types out-type abi varargs-after
+                        save-errno lock-name (and blocking? #t) (and orig-place? #t) #f (and exns? #t)
+                        #f)
+     p)]))
 
 (define/who ffi-call-maker
   (case-lambda
    [(in-types out-type)
-    (ffi-call-maker in-types out-type #f #f #f #f)]
+    (ffi-call-maker in-types out-type #f #f #f #f #f)]
    [(in-types out-type abi)
-    (ffi-call-maker in-types out-type abi #f #f #f)]
+    (ffi-call-maker in-types out-type abi #f #f #f #f)]
    [(in-types out-type abi save-errno)
-    (ffi-call-maker in-types out-type abi save-errno #f #f)]
+    (ffi-call-maker in-types out-type abi save-errno #f #f #f)]
    [(in-types out-type abi save-errno orig-place?)
-    (ffi-call-maker in-types out-type abi save-errno orig-place? #f #f)]
+    (ffi-call-maker in-types out-type abi save-errno orig-place? #f #f #f)]
    [(in-types out-type abi save-errno orig-place? lock-name)
-    (ffi-call-maker in-types out-type abi save-errno orig-place? lock-name #f #f)]
+    (ffi-call-maker in-types out-type abi save-errno orig-place? lock-name #f #f #f)]
    [(in-types out-type abi save-errno orig-place? lock-name blocking?)
-    (ffi-call-maker in-types out-type abi save-errno orig-place? lock-name blocking? #f)]
+    (ffi-call-maker in-types out-type abi save-errno orig-place? lock-name blocking? #f #f)]
    [(in-types out-type abi save-errno orig-place? lock-name blocking? varargs-after)
+    (ffi-call-maker in-types out-type abi save-errno orig-place? lock-name blocking? varargs-after #f)]
+   [(in-types out-type abi save-errno orig-place? lock-name blocking? varargs-after exns?)
     (check-ffi-call who in-types out-type abi varargs-after save-errno lock-name)
-    (ffi-call/callable #t in-types out-type abi varargs-after save-errno lock-name blocking? orig-place? #f #f)]))
+    (ffi-call/callable #t in-types out-type abi varargs-after
+                       save-errno lock-name (and blocking? #t) (and orig-place? #t) #f (and exns? #t)
+                       #f)]))
 
 (define (check-ffi-call who in-types out-type abi varargs-after save-errno lock-name)
   (check-ffi who in-types out-type abi varargs-after)
@@ -1586,7 +1599,9 @@
 
 (define call-locks (make-eq-hashtable))
 
-(define (ffi-call/callable call? in-types out-type abi varargs-after save-errno lock-name blocking? orig-place? atomic? async-apply)
+(define (ffi-call/callable call? in-types out-type abi varargs-after
+                           save-errno lock-name blocking? orig-place? atomic? exns?
+                           async-apply)
   (let* ([conv* (let ([conv* (case abi
                                [(stdcall) '(__stdcall)]
                                [(sysv) '(__cdecl)]
@@ -1598,7 +1613,7 @@
                       ;; An 'array rep is compound, but should be
                       ;; passed as a pointer, so only pass 'struct and
                       ;; 'union "by value":
-                      (chez:memq (ctype-host-rep type) '(struct union)))]
+                      (#%memq (ctype-host-rep type) '(struct union)))]
          [array-rep-to-pointer-rep (lambda (host-rep)
                                      (if (eq? host-rep 'array)
                                          'void*
@@ -1686,6 +1701,7 @@
        [(and (not ret-id)
              (not blocking?)
              (not orig-place?)
+             (not exns?)
              (not save-errno)
              (#%andmap (lambda (in-type)
                          (case (ctype-host-rep in-type)
@@ -1787,22 +1803,31 @@
                                         (when blocking? (currently-blocking? #t))
                                         (retain
                                          orig-args
-                                         (let ([r (#%apply (gen-proc (cpointer-address proc-p))
-                                                           (append
-                                                            (if ret-ptr
-                                                                (begin
-                                                                  (lock-cpointer ret-ptr)
-                                                                  (list (ret-maker (cpointer-address ret-ptr))))
-                                                                '())
-                                                            (map (lambda (arg in-type maker)
-                                                                   (let ([host-rep (array-rep-to-pointer-rep
-                                                                                    (ctype-host-rep in-type))])
-                                                                     (case host-rep
-                                                                       [(void*) (cpointer-address arg)]
-                                                                       [(struct union)
-                                                                        (maker (cpointer-address arg))]
-                                                                       [else arg])))
-                                                                 args in-types arg-makers)))])
+                                         (let ([r (let ([args (append
+                                                               (if ret-ptr
+                                                                   (begin
+                                                                     (lock-cpointer ret-ptr)
+                                                                     (list (ret-maker (cpointer-address ret-ptr))))
+                                                                   '())
+                                                               (map (lambda (arg in-type maker)
+                                                                      (let ([host-rep (array-rep-to-pointer-rep
+                                                                                       (ctype-host-rep in-type))])
+                                                                        (case host-rep
+                                                                          [(void*) (cpointer-address arg)]
+                                                                          [(struct union)
+                                                                           (maker (cpointer-address arg))]
+                                                                          [else arg])))
+                                                                    args in-types arg-makers))]
+                                                        [proc (gen-proc (cpointer-address proc-p))])
+                                                    (cond
+                                                      [(not exns?)
+                                                       (#%apply proc args)]
+                                                      [else
+                                                       (call-guarding-foreign-escape
+                                                        (lambda () (#%apply proc args))
+                                                        (lambda ()
+                                                          (when lock (mutex-release lock))
+                                                          (when blocking? (currently-blocking? #f))))]))])
                                            (when lock (mutex-release lock))
                                            (when blocking? (currently-blocking? #f))
                                            (case save-errno
@@ -1815,7 +1840,7 @@
                                             [else r])))))])
                              (if (and orig-place?
                                       (not (eqv? 0 (get-thread-id))))
-                                 (async-callback-queue-call orig-place-async-callback-queue (lambda () (go)) #f #t #t)
+                                 (async-callback-queue-call orig-place-async-callback-queue (lambda (th) (th)) (lambda () (go)) #f #t #t)
                                  (go))))])
                  (c->s out-type r)))
              (fxsll 1 (length in-types))
@@ -1843,7 +1868,7 @@
                                                    [arg (c->s type
                                                               (case (ctype-host-rep type)
                                                                 [(struct union)
-                                                                 ;; Like old Racket, refer to argument on stack:
+                                                                 ;; Like Racket BC, refer to argument on stack:
                                                                  (make-cpointer (ftype-pointer-address arg) #f)
                                                                  #;
                                                                  (let* ([size (compound-ctype-size type)]
@@ -1918,6 +1943,9 @@
       (scheduler-start-atomic)
       ;; Now that the schedule is in atomic mode, reenable interrupts (for GC)
       (enable-interrupts)
+      ;; See also `call-guarding-foreign-escape`, which will need to take
+      ;; appropriate steps if `(thunk)` escapes, which currently means ending
+      ;; the scheduler's atomic mode
       (let ([v (thunk)])
         (disable-interrupts)
         (scheduler-end-atomic)
@@ -1930,7 +1958,8 @@
     ;; and wait for the response
     (let ([known-thread? (eqv? (place-thread-category) PLACE-KNOWN-THREAD)])
       (async-callback-queue-call async-callback-queue
-                                 (lambda () (|#%app| async-apply thunk))
+                                 async-apply
+                                 thunk
                                  ;; If we created this thread by `fork-pthread`, we must
                                  ;; have gotten here by a foreign call, so interrupts are
                                  ;; currently disabled
@@ -1946,6 +1975,48 @@
 (define (set-scheduler-atomicity-callbacks! start-atomic end-atomic)
   (set! scheduler-start-atomic start-atomic)
   (set! scheduler-end-atomic end-atomic))
+
+;; ----------------------------------------
+
+;; Call `thunk` to enter a foreign call while wrapping it with a way
+;; to escape with an exception from a foreign callback during the
+;; call:
+(define (call-guarding-foreign-escape thunk clean-up)
+  ((call-with-c-return
+    (lambda ()
+      (call-with-current-continuation
+       (lambda (esc)
+         (call-with-exception-handler
+          (lambda (x)
+            ;; Deliver an exception re-raise after returning back
+            ;; from `call-with-c-return`:
+            (|#%app| esc (lambda ()
+                           (scheduler-end-atomic) ; error in callback means during atomic mode
+                           (clean-up)
+                           (raise x))))
+          (lambda ()
+            (call-with-values thunk
+              ;; Deliver successful values after returning back from
+              ;; `call-with-c-return`:
+              (case-lambda
+               [(v) (lambda () v)]
+               [args (lambda () (#%apply values args))]))))))))))
+
+;; `call-with-c-return` looks like a foreign function, due to a "cast"
+;; to and from a callback, so returning from `call-with-c-return` will
+;; pop and C frame stacks (via longjmp internally) that were pushed
+;; since `call-with-c-return` was called.
+(define call-with-c-return
+  (let ([call (lambda (thunk) (thunk))])
+    (define-ftype ptr->ptr (function (ptr) ptr))
+    (cond
+      [(not (eq? (machine-type) (#%$target-machine)))
+       (lambda (thunk) (#%error 'call-with-c-return "cannot use while cross-compiling"))]
+      [else
+       (let ([fptr (make-ftype-pointer ptr->ptr call)])
+         (let ([v (ftype-ref ptr->ptr () fptr)])
+           ;; must leave the callable code object locked
+           v))])))
 
 ;; ----------------------------------------
 
@@ -1982,7 +2053,9 @@
     (ffi-callback-maker* in-types out-type abi varargs-after atomic? async-apply)]))
 
 (define (ffi-callback-maker* in-types out-type abi varargs-after atomic? async-apply)
-  (let ([make-code (ffi-call/callable #f in-types out-type abi varargs-after #f #f #f #f (and atomic? #t) async-apply)])
+  (let ([make-code (ffi-call/callable #f in-types out-type abi varargs-after
+                                      #f #f #f #f (and atomic? #t) #f
+                                      async-apply)])
     (lambda (proc)
       (check 'make-ffi-callback procedure? proc)
       (create-callback (make-code proc)))))
@@ -2050,41 +2123,17 @@
 ;; function is called with interrupts disabled
 (define get-errno
   (cond
-   [(and (not (chez:memq (machine-type) '(a6nt ta6nt i3nt ti3nt)))
-         (foreign-entry? "racket_errno"))
-    (foreign-procedure "racket_errno" () int)]
+   [(not (#%memq (machine-type) '(a6nt ta6nt i3nt ti3nt)))
+    (foreign-procedure "(cs)s_errno" () int)]
    [else
-    ;; We get here when (i) during a bootstrapping process, (ii) in a
-    ;; development mode that is not running in a Racket executable,
-    ;; or (iii) running on Windows.
-    ;; In the third case, `errno` could be a different one from
+    ;; On Windows, `errno` could be a different one from
     ;; `_errno` in MSVCRT. Therefore fallback to the foreign function.
     ;; See `save_errno_values` in `foreign.c` from Racket BC for more
     ;; information.
-    (let ([get-&errno-name
-           (case (machine-type)
-             [(a6nt ta6nt i3nt ti3nt)
-              (load-shared-object "msvcrt.dll")
-              "_errno"]
-             [(a6osx ta6osx i3osx ti3osx)
-              (load-shared-object "libc.dylib")
-              "__error"]
-             [(a6le ta6le i3le ti3le)
-              (load-shared-object "libc.so.6")
-              "__errno_location"]
-             [else #f])])
-      (cond
-       [get-&errno-name
-        (let ([get-&errno (foreign-procedure get-&errno-name () void*)])
-          (lambda ()
-            (foreign-ref 'int (get-&errno) 0)))]
-       [else
-        (let ([warned? #f])
-          (lambda ()
-            (unless warned?
-              (set! warned? #t)
-              (#%printf "Warning: not recording actual errno value\n"))
-            0))]))]))
+    (load-shared-object "msvcrt.dll")
+    (let ([get-&errno (foreign-procedure "_errno" () void*)])
+      (lambda ()
+        (foreign-ref 'int (get-&errno) 0)))]))
 
 ;; function is called with interrupts disabled
 (define get-last-error

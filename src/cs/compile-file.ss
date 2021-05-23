@@ -2,7 +2,7 @@
 ;; Check to make we're using a build of Chez Scheme
 ;; that has all the features we need.
 (define-values (need-maj need-min need-sub need-dev)
-  (values 9 5 3 58))
+  (values 9 5 5 4))
 
 (unless (guard (x [else #f]) (eval 'scheme-fork-version-number))
   (error 'compile-file
@@ -66,6 +66,12 @@
       => (lambda (args)
            (fasl-compressed #t)
            (putenv "PLT_CS_MAKE_COMPRESSED" "y") ; for "linklet.sls"
+           (loop args))]
+     [(get-opt args "--compress-more" 0)
+      => (lambda (args)
+           (fasl-compressed #t)
+           (putenv "PLT_CS_MAKE_COMPRESSED" "y") ; for "linklet.sls"
+           (putenv "PLT_CS_MAKE_COMPRESSED_DATA" "y") ; ditto
            (loop args))]
      [(get-opt args "--whole-program" 0)
       => (lambda (args)
@@ -145,7 +151,8 @@
                                    (let ([e (map annotation-expression
                                                  (annotation-expression e))])
                                      (cons e (loop pos))))))))])
-             (compile-to-file exprs dest)))]
+             ;; Pass #t for `force-host-out?' in case  host and target are the same.
+             (compile-to-file exprs dest #f #t)))]
         [else
          ;; Normal mode
          (compile-file src dest)]))]))

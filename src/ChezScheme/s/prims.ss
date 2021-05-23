@@ -434,12 +434,16 @@
     (#2%apply f args)))
 
 ;; Implies no-inline, and in unsafe mode, asserts that the
-;; application will not return
+;; application will not return and that it does not inspect/change
+;; the immediate continuation attachment (so it can be moved to a
+;; more-tail position)
 (define $app/no-return
   (lambda (f . args)
     (#2%apply f args)))
 
 ;; In unsafe mode, asserts that the applicaiton returns a single value
+;; and that it does not inspect/change the immediate continuation
+;; attachment (so it can be moved to a more-tail position)
 (define $app/value
   (lambda (f . args)
     (#2%apply f args)))
@@ -1587,6 +1591,14 @@
      (display-string s)]))
 
 (define $immediate? (lambda (x) ($immediate? x)))
+
+;; Used to communicate fixmediateness from cptypes to cpnanopass:
+(define-who $fixmediate
+  (lambda (x)
+    (if (fixmediate? x)
+        x
+        ($oops who "~s is not a fixnum or immediate value" x))))
+
 (define $inexactnum? (lambda (x) ($inexactnum? x)))
 
 (define $inexactnum-real-part
@@ -2313,7 +2325,21 @@
     ($oops who "~s is not a record type descriptor" rtd))
   (#3%$sealed-record? x rtd))
 
+(define-who ($sealed-record-instance? x rtd)
+  (unless (record? x)
+    ($oops who "~s is not a record" x))
+  (unless (record-type-descriptor? rtd)
+    ($oops who "~s is not a record type descriptor" rtd))
+  (#3%$sealed-record-instance? x rtd))
+
 (define ($record? x) (#3%$record? x))
+
+(define-who (record-instance? x rtd)
+  (unless (record? x)
+    ($oops who "~s is not a record" x))
+  (unless (record-type-descriptor? rtd)
+    ($oops who "~s is not a record type descriptor" rtd))
+  (#3%record-instance? x rtd))
 
 (define-who ($record-type-descriptor r)
   (unless ($record? r) ($oops who "~s is not a record" r))

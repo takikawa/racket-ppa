@@ -105,6 +105,13 @@
       (with-unlock -text
         (send -text insert text)))
 
+    (define/public (add-make-text make-text)
+      (with-unlock -text
+        (define style-name (send -text default-style-name))
+        (define style-list (send -text get-style-list))
+        (define style (send style-list find-named-style style-name))
+        (send -text insert (make-text style))))
+
     (define/public (add-error-text text)
       (with-unlock -text
         (let ([a (send -text last-position)])

@@ -174,6 +174,17 @@
                             [(getenv "PLT_CS_MAKE_COMPRESSED") #t]
                             [else #f])]))
 
+  ;; Note: compressing data also compresses serialized code, which is
+  ;; a redundant layer of compression if `compress-code?`
+  (define compress-data? (cond
+                           [(getenv "PLT_LINKLET_COMPRESS_DATA") #t]
+                           [(getenv "PLT_LINKLET_NO_COMPRESS_DATA") #f]
+                           [else
+                            ;; Default selected at compile time, as above
+                            (meta-cond
+                             [(getenv "PLT_CS_MAKE_COMPRESSED_DATA") #t]
+                             [else #f])]))
+
   (define gensym-on? (getenv "PLT_LINKLET_SHOW_GENSYM"))
   (define pre-jit-on? (getenv "PLT_LINKLET_SHOW_PRE_JIT"))
   (define lambda-on? (getenv "PLT_LINKLET_SHOW_LAMBDA"))
@@ -235,7 +246,9 @@
   (define (interpret* e) ; result is not safe for space
     (call-with-system-wind (lambda () (interpret e))))
   (define (fasl-write* s o)
-    (call-with-system-wind (lambda () (fasl-write s o))))
+    (call-with-system-wind (lambda ()
+                             (parameterize ([fasl-compressed compress-data?])
+                               (fasl-write s o)))))
   (define (fasl-write/literals* s quoteds o)
     (call-with-system-wind (lambda ()
                              (call-getting-literals
@@ -258,6 +271,8 @@
                                (call-getting-literals
                                 quoteds
                                 (lambda (pred)
+                                  ;; If arguments change here, then probably they should change in
+                                  ;; "cross-serve.ss", too:
                                   (compile-to-port s o #f #f #f (machine-type) #f pred 'omit-rtds)))))))
   (define (expand/optimize* e unsafe?)
     (call-with-system-wind (lambda ()
@@ -332,7 +347,7 @@
   ;; returns code bytevector and literals vector
   (define (cross-compile-to-bytevector machine s quoteds format unsafe?)
     (cond
-      [(eq? format 'interpret) (cross-fasl-to-string machine s quoteds)]
+      [(eq? format 'interpret) (cross-fasl-to-string machine s quoteds 'code)]
       [else (cross-compile machine (lambda->linklet-lambda s) quoteds unsafe?)]))
 
   (define (eval-from-bytevector bv literals format)
@@ -1259,36 +1274,6 @@
                      variable-set! variable-set!/define
                      make-interp-procedure)
 
-  (when omit-debugging?
-    (generate-inspector-information (not omit-debugging?))
-    (generate-procedure-source-information #t))
-
-  (when measure-performance?
-    (#%$enable-pass-timing #t)
-    (#%$clear-pass-stats))
-
   (set-foreign-eval! eval/foreign)
 
-  (enable-arithmetic-left-associative #t)
-  (expand-omit-library-invocations #t)
-  (enable-error-source-expression #f)
-  (fasl-compressed #f)
-  (compile-omit-concatenate-support #t)
-
-  ;; Avoid gensyms for generated record-type UIDs. Otherwise,
-  ;; printing one of those gensyms --- perhaps when producing a trace
-  ;; via `dump-memory-stats` --- causes the gensym to be permanent
-  ;; (since it has properties).
-  (current-generate-id (lambda (sym) (gensym sym)))
-
-  ;; Since the schemify layer inserts `|#%app|` any time the rator of
-  ;; an application might not be a procedure, we can avoid redundant
-  ;; checks for other applications by enabling unsafe mode. Ditto for
-  ;; potential early reference to `letrec`-bound variables. But do that
-  ;; only if we're compiling the primitive layer in unsafe mode.
-  (meta-cond
-   [(>= (optimize-level) 3)
-    (enable-unsafe-application #t)
-    (enable-unsafe-variable-reference #t)]
-   [else
-    (void)]))
+  (include "linklet/config.ss"))

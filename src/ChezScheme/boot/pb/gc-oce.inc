@@ -3894,7 +3894,7 @@ static void measure(thread_gc *tgc, ptr p)
     {
       { /* measure */
         ptr r_p = RECORDINSTTYPE(p);
-        if (!IMMEDIATE(r_p))
+        if (!FIXMEDIATE(r_p))
           push_measure(tgc, r_p);
       }
       {
@@ -3919,7 +3919,7 @@ static void measure(thread_gc *tgc, ptr p)
                       {
                         { /* measure */
                           ptr r_p = *(pp);
-                          if (!IMMEDIATE(r_p))
+                          if (!FIXMEDIATE(r_p))
                             push_measure(tgc, r_p);
                         }
                         pp += 1;
@@ -3934,7 +3934,7 @@ static void measure(thread_gc *tgc, ptr p)
                       {
                         { /* measure */
                           ptr r_p = *(pp);
-                          if (!IMMEDIATE(r_p))
+                          if (!FIXMEDIATE(r_p))
                             push_measure(tgc, r_p);
                         }
                       }
@@ -3958,7 +3958,7 @@ static void measure(thread_gc *tgc, ptr p)
                       {
                         { /* measure */
                           ptr r_p = *(pp);
-                          if (!IMMEDIATE(r_p))
+                          if (!FIXMEDIATE(r_p))
                             push_measure(tgc, r_p);
                         }
                       }
@@ -3995,7 +3995,7 @@ static void measure(thread_gc *tgc, ptr p)
           {
             { /* measure */
               ptr r_p = p_p[idx];
-              if (!IMMEDIATE(r_p))
+              if (!FIXMEDIATE(r_p))
                 push_measure(tgc, r_p);
             }
           }
@@ -4015,7 +4015,7 @@ static void measure(thread_gc *tgc, ptr p)
           {
             { /* measure */
               ptr r_p = p_p[idx];
-              if (!IMMEDIATE(r_p))
+              if (!FIXMEDIATE(r_p))
                 push_measure(tgc, r_p);
             }
           }
@@ -4060,17 +4060,17 @@ static void measure(thread_gc *tgc, ptr p)
       measure_total += p_sz;
       { /* measure */
         ptr r_p = INITTLCHT(p);
-        if (!IMMEDIATE(r_p))
+        if (!FIXMEDIATE(r_p))
           push_measure(tgc, r_p);
       }
       { /* measure */
         ptr r_p = INITTLCKEYVAL(p);
-        if (!IMMEDIATE(r_p))
+        if (!FIXMEDIATE(r_p))
           push_measure(tgc, r_p);
       }
       { /* measure */
         ptr r_p = INITTLCNEXT(p);
-        if (!IMMEDIATE(r_p))
+        if (!FIXMEDIATE(r_p))
           push_measure(tgc, r_p);
       }
     }
@@ -4080,7 +4080,7 @@ static void measure(thread_gc *tgc, ptr p)
       measure_total += p_sz;
       { /* measure */
         ptr r_p = INITBOXREF(p);
-        if (!IMMEDIATE(r_p))
+        if (!FIXMEDIATE(r_p))
           push_measure(tgc, r_p);
       }
     }
@@ -4090,12 +4090,12 @@ static void measure(thread_gc *tgc, ptr p)
       measure_total += p_sz;
       { /* measure */
         ptr r_p = RATNUM(p);
-        if (!IMMEDIATE(r_p))
+        if (!FIXMEDIATE(r_p))
           push_measure(tgc, r_p);
       }
       { /* measure */
         ptr r_p = RATDEN(p);
-        if (!IMMEDIATE(r_p))
+        if (!FIXMEDIATE(r_p))
           push_measure(tgc, r_p);
       }
     }
@@ -4105,12 +4105,12 @@ static void measure(thread_gc *tgc, ptr p)
       measure_total += p_sz;
       { /* measure */
         ptr r_p = EXACTNUM_REAL_PART(p);
-        if (!IMMEDIATE(r_p))
+        if (!FIXMEDIATE(r_p))
           push_measure(tgc, r_p);
       }
       { /* measure */
         ptr r_p = EXACTNUM_IMAG_PART(p);
-        if (!IMMEDIATE(r_p))
+        if (!FIXMEDIATE(r_p))
           push_measure(tgc, r_p);
       }
     }
@@ -4133,17 +4133,17 @@ static void measure(thread_gc *tgc, ptr p)
       measure_total += p_sz;
       { /* measure */
         ptr r_p = PORTHANDLER(p);
-        if (!IMMEDIATE(r_p))
+        if (!FIXMEDIATE(r_p))
           push_measure(tgc, r_p);
       }
       { /* measure */
         ptr r_p = PORTINFO(p);
-        if (!IMMEDIATE(r_p))
+        if (!FIXMEDIATE(r_p))
           push_measure(tgc, r_p);
       }
       { /* measure */
         ptr r_p = PORTNAME(p);
-        if (!IMMEDIATE(r_p))
+        if (!FIXMEDIATE(r_p))
           push_measure(tgc, r_p);
       }
     }
@@ -4155,22 +4155,22 @@ static void measure(thread_gc *tgc, ptr p)
         measure_total += p_sz;
         { /* measure */
           ptr r_p = CODENAME(p);
-          if (!IMMEDIATE(r_p))
+          if (!FIXMEDIATE(r_p))
             push_measure(tgc, r_p);
         }
         { /* measure */
           ptr r_p = CODEARITYMASK(p);
-          if (!IMMEDIATE(r_p))
+          if (!FIXMEDIATE(r_p))
             push_measure(tgc, r_p);
         }
         { /* measure */
           ptr r_p = CODEINFO(p);
-          if (!IMMEDIATE(r_p))
+          if (!FIXMEDIATE(r_p))
             push_measure(tgc, r_p);
         }
         { /* measure */
           ptr r_p = CODEPINFOS(p);
-          if (!IMMEDIATE(r_p))
+          if (!FIXMEDIATE(r_p))
             push_measure(tgc, r_p);
         }
         {
@@ -4211,7 +4211,7 @@ static void measure(thread_gc *tgc, ptr p)
                         ptr obj = S_get_code_obj(RELOC_TYPE(entry), oldco, a, item_off);
                         { /* measure */
                           ptr r_p = obj;
-                          if (!IMMEDIATE(r_p))
+                          if (!FIXMEDIATE(r_p))
                             push_measure(tgc, r_p);
                         }
                       }
@@ -4236,22 +4236,22 @@ static void measure(thread_gc *tgc, ptr p)
           STACKCACHE(tc) = Snil;
           { /* measure */
             ptr r_p = CCHAIN(tc);
-            if (!IMMEDIATE(r_p))
+            if (!FIXMEDIATE(r_p))
               push_measure(tgc, r_p);
           }
           { /* measure */
             ptr r_p = STACKLINK(tc);
-            if (!IMMEDIATE(r_p))
+            if (!FIXMEDIATE(r_p))
               push_measure(tgc, r_p);
           }
           { /* measure */
             ptr r_p = WINDERS(tc);
-            if (!IMMEDIATE(r_p))
+            if (!FIXMEDIATE(r_p))
               push_measure(tgc, r_p);
           }
           { /* measure */
             ptr r_p = ATTACHMENTS(tc);
-            if (!IMMEDIATE(r_p))
+            if (!FIXMEDIATE(r_p))
               push_measure(tgc, r_p);
           }
           {
@@ -4262,7 +4262,7 @@ static void measure(thread_gc *tgc, ptr p)
                 ptr c_p = (ptr)(((uptr)xcp) - co);
                 { /* measure */
                   ptr r_p = c_p;
-                  if (!IMMEDIATE(r_p))
+                  if (!FIXMEDIATE(r_p))
                     push_measure(tgc, r_p);
                 }
                 {
@@ -4290,7 +4290,7 @@ static void measure(thread_gc *tgc, ptr p)
                                 ptr c_p = (ptr)(((uptr)xcp) - co);
                                 { /* measure */
                                   ptr r_p = c_p;
-                                  if (!IMMEDIATE(r_p))
+                                  if (!FIXMEDIATE(r_p))
                                     push_measure(tgc, r_p);
                                 }
                                 {
@@ -4306,7 +4306,7 @@ static void measure(thread_gc *tgc, ptr p)
                                         {
                                           { /* measure */
                                             ptr r_p = *(pp);
-                                            if (!IMMEDIATE(r_p))
+                                            if (!FIXMEDIATE(r_p))
                                               push_measure(tgc, r_p);
                                           }
                                         }
@@ -4324,7 +4324,7 @@ static void measure(thread_gc *tgc, ptr p)
                                     {
                                       { /* measure */
                                         ptr r_p = *((ENTRYNONCOMPACTLIVEMASKADDR(oldret)));
-                                        if (!IMMEDIATE(r_p))
+                                        if (!FIXMEDIATE(r_p))
                                           push_measure(tgc, r_p);
                                       }
                                       num = ENTRYLIVEMASK(oldret);
@@ -4349,7 +4349,7 @@ static void measure(thread_gc *tgc, ptr p)
                                             {
                                               { /* measure */
                                                 ptr r_p = *(pp);
-                                                if (!IMMEDIATE(r_p))
+                                                if (!FIXMEDIATE(r_p))
                                                   push_measure(tgc, r_p);
                                               }
                                             }
@@ -4367,82 +4367,82 @@ static void measure(thread_gc *tgc, ptr p)
                       }
                       { /* measure */
                         ptr r_p = THREADNO(tc);
-                        if (!IMMEDIATE(r_p))
+                        if (!FIXMEDIATE(r_p))
                           push_measure(tgc, r_p);
                       }
                       { /* measure */
                         ptr r_p = CURRENTINPUT(tc);
-                        if (!IMMEDIATE(r_p))
+                        if (!FIXMEDIATE(r_p))
                           push_measure(tgc, r_p);
                       }
                       { /* measure */
                         ptr r_p = CURRENTOUTPUT(tc);
-                        if (!IMMEDIATE(r_p))
+                        if (!FIXMEDIATE(r_p))
                           push_measure(tgc, r_p);
                       }
                       { /* measure */
                         ptr r_p = CURRENTERROR(tc);
-                        if (!IMMEDIATE(r_p))
+                        if (!FIXMEDIATE(r_p))
                           push_measure(tgc, r_p);
                       }
                       { /* measure */
                         ptr r_p = SFD(tc);
-                        if (!IMMEDIATE(r_p))
+                        if (!FIXMEDIATE(r_p))
                           push_measure(tgc, r_p);
                       }
                       { /* measure */
                         ptr r_p = CURRENTMSO(tc);
-                        if (!IMMEDIATE(r_p))
+                        if (!FIXMEDIATE(r_p))
                           push_measure(tgc, r_p);
                       }
                       { /* measure */
                         ptr r_p = TARGETMACHINE(tc);
-                        if (!IMMEDIATE(r_p))
+                        if (!FIXMEDIATE(r_p))
                           push_measure(tgc, r_p);
                       }
                       { /* measure */
                         ptr r_p = FXLENGTHBV(tc);
-                        if (!IMMEDIATE(r_p))
+                        if (!FIXMEDIATE(r_p))
                           push_measure(tgc, r_p);
                       }
                       { /* measure */
                         ptr r_p = FXFIRSTBITSETBV(tc);
-                        if (!IMMEDIATE(r_p))
+                        if (!FIXMEDIATE(r_p))
                           push_measure(tgc, r_p);
                       }
                       { /* measure */
                         ptr r_p = COMPILEPROFILE(tc);
-                        if (!IMMEDIATE(r_p))
+                        if (!FIXMEDIATE(r_p))
                           push_measure(tgc, r_p);
                       }
                       { /* measure */
                         ptr r_p = SUBSETMODE(tc);
-                        if (!IMMEDIATE(r_p))
+                        if (!FIXMEDIATE(r_p))
                           push_measure(tgc, r_p);
                       }
                       { /* measure */
                         ptr r_p = DEFAULTRECORDEQUALPROCEDURE(tc);
-                        if (!IMMEDIATE(r_p))
+                        if (!FIXMEDIATE(r_p))
                           push_measure(tgc, r_p);
                       }
                       { /* measure */
                         ptr r_p = DEFAULTRECORDHASHPROCEDURE(tc);
-                        if (!IMMEDIATE(r_p))
+                        if (!FIXMEDIATE(r_p))
                           push_measure(tgc, r_p);
                       }
                       { /* measure */
                         ptr r_p = COMPRESSFORMAT(tc);
-                        if (!IMMEDIATE(r_p))
+                        if (!FIXMEDIATE(r_p))
                           push_measure(tgc, r_p);
                       }
                       { /* measure */
                         ptr r_p = COMPRESSLEVEL(tc);
-                        if (!IMMEDIATE(r_p))
+                        if (!FIXMEDIATE(r_p))
                           push_measure(tgc, r_p);
                       }
                       { /* measure */
                         ptr r_p = PARAMETERS(tc);
-                        if (!IMMEDIATE(r_p))
+                        if (!FIXMEDIATE(r_p))
                           push_measure(tgc, r_p);
                       }
                       {
@@ -4451,7 +4451,7 @@ static void measure(thread_gc *tgc, ptr p)
                         {
                           { /* measure */
                             ptr r_p = VIRTREG(tc, i);
-                            if (!IMMEDIATE(r_p))
+                            if (!FIXMEDIATE(r_p))
                               push_measure(tgc, r_p);
                           }
                           i += 1;
@@ -4498,7 +4498,7 @@ static void measure(thread_gc *tgc, ptr p)
         measure_total += p_sz;
         { /* measure */
           ptr r_p = INITCDR(p);
-          if (!IMMEDIATE(r_p))
+          if (!FIXMEDIATE(r_p))
             push_measure(tgc, r_p);
         }
       }
@@ -4508,12 +4508,12 @@ static void measure(thread_gc *tgc, ptr p)
         measure_total += p_sz;
         { /* measure */
           ptr r_p = INITCAR(p);
-          if (!IMMEDIATE(r_p))
+          if (!FIXMEDIATE(r_p))
             push_measure(tgc, r_p);
         }
         { /* measure */
           ptr r_p = INITCDR(p);
-          if (!IMMEDIATE(r_p))
+          if (!FIXMEDIATE(r_p))
             push_measure(tgc, r_p);
         }
       }
@@ -4524,7 +4524,7 @@ static void measure(thread_gc *tgc, ptr p)
     ptr code = CLOSCODE(p);
     { /* measure */
       ptr r_p = code;
-      if (!IMMEDIATE(r_p))
+      if (!FIXMEDIATE(r_p))
         push_measure(tgc, r_p);
     }
     if ((CODETYPE(code)) & (code_flag_continuation << code_flags_offset))
@@ -4533,12 +4533,12 @@ static void measure(thread_gc *tgc, ptr p)
       measure_total += p_sz;
       { /* measure */
         ptr r_p = CONTWINDERS(p);
-        if (!IMMEDIATE(r_p))
+        if (!FIXMEDIATE(r_p))
           push_measure(tgc, r_p);
       }
       { /* measure */
         ptr r_p = CONTATTACHMENTS(p);
-        if (!IMMEDIATE(r_p))
+        if (!FIXMEDIATE(r_p))
           push_measure(tgc, r_p);
       }
       if ((CONTLENGTH(p)) == scaled_shot_1_shot_flag)
@@ -4548,7 +4548,7 @@ static void measure(thread_gc *tgc, ptr p)
       {
         { /* measure */
           ptr r_p = CONTLINK(p);
-          if (!IMMEDIATE(r_p))
+          if (!FIXMEDIATE(r_p))
             push_measure(tgc, r_p);
         }
         {
@@ -4559,7 +4559,7 @@ static void measure(thread_gc *tgc, ptr p)
               ptr c_p = (ptr)(((uptr)xcp) - co);
               { /* measure */
                 ptr r_p = c_p;
-                if (!IMMEDIATE(r_p))
+                if (!FIXMEDIATE(r_p))
                   push_measure(tgc, r_p);
               }
               {
@@ -4589,7 +4589,7 @@ static void measure(thread_gc *tgc, ptr p)
                                 ptr c_p = (ptr)(((uptr)xcp) - co);
                                 { /* measure */
                                   ptr r_p = c_p;
-                                  if (!IMMEDIATE(r_p))
+                                  if (!FIXMEDIATE(r_p))
                                     push_measure(tgc, r_p);
                                 }
                                 {
@@ -4605,7 +4605,7 @@ static void measure(thread_gc *tgc, ptr p)
                                         {
                                           { /* measure */
                                             ptr r_p = *(pp);
-                                            if (!IMMEDIATE(r_p))
+                                            if (!FIXMEDIATE(r_p))
                                               push_measure(tgc, r_p);
                                           }
                                         }
@@ -4623,7 +4623,7 @@ static void measure(thread_gc *tgc, ptr p)
                                     {
                                       { /* measure */
                                         ptr r_p = *((ENTRYNONCOMPACTLIVEMASKADDR(oldret)));
-                                        if (!IMMEDIATE(r_p))
+                                        if (!FIXMEDIATE(r_p))
                                           push_measure(tgc, r_p);
                                       }
                                       num = ENTRYLIVEMASK(oldret);
@@ -4648,7 +4648,7 @@ static void measure(thread_gc *tgc, ptr p)
                                             {
                                               { /* measure */
                                                 ptr r_p = *(pp);
-                                                if (!IMMEDIATE(r_p))
+                                                if (!FIXMEDIATE(r_p))
                                                   push_measure(tgc, r_p);
                                               }
                                             }
@@ -4686,7 +4686,7 @@ static void measure(thread_gc *tgc, ptr p)
           {
             { /* measure */
               ptr r_p = p_p[idx];
-              if (!IMMEDIATE(r_p))
+              if (!FIXMEDIATE(r_p))
                 push_measure(tgc, r_p);
             }
           }
@@ -4700,27 +4700,27 @@ static void measure(thread_gc *tgc, ptr p)
     measure_total += p_sz;
     { /* measure */
       ptr r_p = INITSYMVAL(p);
-      if (!IMMEDIATE(r_p))
+      if (!FIXMEDIATE(r_p))
         push_measure(tgc, r_p);
     }
     { /* measure */
       ptr r_p = INITSYMPLIST(p);
-      if (!IMMEDIATE(r_p))
+      if (!FIXMEDIATE(r_p))
         push_measure(tgc, r_p);
     }
     { /* measure */
       ptr r_p = INITSYMNAME(p);
-      if (!IMMEDIATE(r_p))
+      if (!FIXMEDIATE(r_p))
         push_measure(tgc, r_p);
     }
     { /* measure */
       ptr r_p = INITSYMSPLIST(p);
-      if (!IMMEDIATE(r_p))
+      if (!FIXMEDIATE(r_p))
         push_measure(tgc, r_p);
     }
     { /* measure */
       ptr r_p = INITSYMHASH(p);
-      if (!IMMEDIATE(r_p))
+      if (!FIXMEDIATE(r_p))
         push_measure(tgc, r_p);
     }
   }

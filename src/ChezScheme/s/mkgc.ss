@@ -393,7 +393,7 @@
       (count countof-vector)]
 
      [stencil-vector
-      ;; Assumes stencil-vector masks look like fixnums;
+      ;; Assumes stencil-vector tags look like immediates or fixnums;
       ;; if not, stencil vectors will need their own space
       (space
        (cond
@@ -2058,7 +2058,7 @@
     (code
      "{ /* measure */"
      (format "  ptr r_p = ~a;" e)
-     "  if (!IMMEDIATE(r_p))"
+     "  if (!FIXMEDIATE(r_p))"
      "    push_measure(tgc, r_p);"
      "}"))
 

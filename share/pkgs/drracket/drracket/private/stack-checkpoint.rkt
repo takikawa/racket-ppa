@@ -7,7 +7,7 @@
          racket/match
          framework
          "interface.rkt")
-(module+ test (require (rename-in rackunit [check r:check]) racket/list))
+(module+ test (require (rename-in rackunit [check r:check]) racket/list racket/bool))
 
 (define oprintf
   (let ([op (current-output-port)])
@@ -33,7 +33,8 @@
          ;; provided only for backwards compatibility (exported via debug unit)
          srcloc->edition/pair
          get-editions
-         errortrace-stack-item->srcloc)
+         errortrace-stack-item->srcloc
+         copy-viewable-stack)
 
 (provide
  (contract-out
@@ -76,10 +77,10 @@
                            viewable-stack?
                            (listof srcloc?))]))
 
-;; run a thunk, and if an exception is raised, make it possible to cut the
+;; run a proc, and if an exception is raised, make it possible to cut the
 ;; stack so that the surrounding context is hidden
 (define checkpoints (make-weak-hasheq))
-(define (call-with-stack-checkpoint thunk)
+(define (call-with-stack-checkpoint proc)
   (define checkpoint #f)
   (call-with-exception-handler
    (λ (exn)
@@ -88,9 +89,7 @@
        (unless (hash-has-key? checkpoints key)
          (hash-set! checkpoints key checkpoint)))
      exn)
-   (lambda ()
-     (set! checkpoint (current-continuation-marks))
-     (thunk))))
+   (λ () (proc (λ (ccm) (set! checkpoint ccm))))))
 ;; returns the stack of the input exception, cutting off any tail that was
 ;; registered as a checkpoint
 (define (cut-stack-at-checkpoint cont-marks)
@@ -112,9 +111,15 @@
   (map cdr (filter cdr stack-with-gaps-and-extra-info)))
 
 (define-syntax-rule (with-stack-checkpoint expr)
-  (call-with-stack-checkpoint (λ () expr)))
+  (call-with-stack-checkpoint (λ (ccm-receiver)
+                                (ccm-receiver (current-continuation-marks))
+                                expr)))
 
 (module+ test
+
+  (define test-suite-start-line-number (syntax-line #'here))
+  (define test-suite-filename (syntax-source #'here))
+
   (let ()
     (define (a x) (+ (f x)))
     (set! a a)
@@ -150,6 +155,11 @@
     (define cut-context (cut-stack-at-checkpoint cms))
     (check-pred pair? all-context)
     (check-not-equal? all-context cut-context)
+    ;; ensure that there are no source locations from the implementation
+    ;; of cut-stack-at-checkpoint in the stack that comes out
+    (check-true (for/and ([a-srcloc (in-list cut-context)])
+                  (implies (equal? (srcloc-source a-srcloc) test-suite-filename)
+                           (test-suite-start-line-number . < . (srcloc-line a-srcloc)))))
     (r:check strict-prefix-of? cut-context all-context)))
 
 (struct viewable-stack (stack-items
@@ -347,6 +357,9 @@
      (and (srcloc? srcloc)
           srcloc)]
     [else #f]))
+
+(define (copy-viewable-stack s)
+  (struct-copy viewable-stack s))
 
 (define (viewable-stack-get-next-items! a-viewable-stack)
   (match-define (viewable-stack stack-items stack-item->srcloc interesting-editor-editions port-name-matches-cache stack-next-items)

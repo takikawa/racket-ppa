@@ -16,6 +16,8 @@ This package comes with separate modules for @emph{inspecting} and
 @emph{constructing} markup -
 @racketmodname[simple-tree-text-markup/data] and
 @racketmodname[simple-tree-text-markup/construct], respectively.
+Markup can also be constructed through a custom output port,
+supplied by @racketmodname[simple-tree-text-markup/port].
 
 There's also a module @racketmodname[simple-tree-text-markup/text]
 that renders markup to text.  Rendering markup to GUI is quite
@@ -26,8 +28,4 @@ engine.
 @include-section["data.scrbl"]
 @include-section["construct.scrbl"]
 @include-section["text.scrbl"]
-
-
-
-
-
+@include-section["port.scrbl"]

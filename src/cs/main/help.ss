@@ -22,6 +22,7 @@
     "  -r <file>, --script <file> : Same as -f <file> -N <file> --\n" 
     "  -u <file>, --require-script <file> : Same as -t <file> -N <file> --\n" 
     "  -k <n> <m> <p> : Load executable-embedded code from offset <n> to <p>\n"
+    "  -Y <file> <n> <m> <p> : Like -k <n> <m> <p>, but from <file>\n"
     "  -m, --main : Call `main' with command-line arguments, print results\n"
     "  [*] Also `require's a `main' submodule, if any\n"
     " Interaction options:\n"
@@ -51,7 +52,8 @@
     "  -U, --no-user-path : Ignore user-specific collects, etc.\n"
     "  -R <paths>, --compiled <paths> : Set compiled-file search roots to <paths>\n"
     "  -C, --cross : Cross-build mode; save current collects and config as host\n"
-    "  -N <file>, --name <file> : Sets `(find-system-path 'run-file)' to <file>\n"))
+    "  -N <file>, --name <file> : Sets `(find-system-path 'run-file)' to <file>\n"
+    "  -E <file>, --exec <file> : Sets `(find-system-path 'exec-file)' to <file>\n"))
   (when gracket?
     (#%printf
      "  -J <name>, ---wm-class <name> : Set WM_CLASS class to <name> (Unix)\n"))
@@ -69,6 +71,7 @@
     "  --cross-server <mach> <comp> <lib> : Drive cross-compiler (as only option)\n"
     " Meta options:\n"
     "  -- : No argument following this switch is used as a switch\n"
+    "  -Z : Ignore the argument following this switch\n"
     "  -h, --help : Show this information and exits, ignoring other options\n"
     "Default options:\n"
     " If only configuration options are provided, -i is added\n"

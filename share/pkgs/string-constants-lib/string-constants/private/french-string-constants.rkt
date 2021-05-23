@@ -1027,6 +1027,38 @@
   (autosave-recover "Recouvrer")
   (autosave-unknown-filename "« inconnu »")
 
+  ;;; autoloading
+  ;; the ~a is replaced with a path
+  (autoload-file-changed-on-disk/with-name
+   "Le fichier :\n  ~a\na changé sur le disque. Voulez-vous"
+   " changer le contenu de l'éditeur pour correspondre au contenu du fichier sur le disque ?")
+  ;; One file per line is appended to the end of this message
+  (autoload-files-changed-on-disk/with-name
+   "Certains fichiers ont changé sur le disque. Voulez-vous"
+   " changer les contenus de l'éditeur pour correspondre aux contenus des fichiers sur le disque ?\n\nFichiers changés :")
+  ;; the ~a is replaced with a path
+  (autoload-file-changed-on-disk-editor-dirty/with-name
+   "Le fichier :\n  ~a\na changé sur le disque et a aussi été modifié dans l'éditeur."
+   " Voulez-vous changer le contenu de l'éditeur pour correspondre au contenu du fichier sur le disque ?")
+  ;; One file per line is appended to the end of this message
+  (autoload-files-changed-on-disk-editor-dirty/with-name
+   "Certains fichiers ont changé sur le disque et ont aussi été modifiés dans l'éditeur."
+   " Voulez-vous changer les contenus de l'éditeur pour correspondre aux contenus des fichiers sur"
+   " le disque ?\n\nFichiers changés :")
+  ;; One file per line is appended to the end of this message
+  (autoload-files-changed-on-disk-editor-dirty&clean/with-name
+   "Certains fichiers ont changé sur le disque et certains de ces fichiers ont aussi été modifiés dans l'éditeur."
+   " Voulez-vous changer les contenus de l'éditeur pour correspondre aux contenus des fichiers sur"
+   " le disque ?\n\nFichiers changés (un ◇ indique que la version dans l'éditeur a été modifiée) :")
+  ;; a specialized version of dont-ask-again-always-current
+  (dont-ask-again-always-current/clean-buffer
+   "Ne pas poser à nouveau de question à propos des fichiers avec des changements non-sauvegardés (toujours utiliser le choix actuel)")
+
+  (autoload-automatically-reload "Automatiquement rafraîchir du disque les fichiers modifiés sur le disque")
+  (autoload-when-the-editor-isnt-dirty "Quand le contenu de l'éditeur n'a pas été modifié")
+  (autoload-never-revert "Jamais")
+  (autoload-ask-about-reverting "Me demander à chaque fois")
+
   ;; these are labels in a dialog that drscheme displays
   ;; if you have leftover autosave files. to see the dialog,
   ;; start up drscheme and modify (but don't save) a file
@@ -1635,35 +1667,6 @@
   (happy-birthday-matthew "Joyeux anniversaire, Matthew !")
   (happy-birthday-shriram "Joyeux anniversaire, Shriram !")
 
-  (mrflow-using-default-language-title "Langage par défaut utilisé")
-  (mrflow-using-default-language
-   "Le langage actuellement utilisé n'a pas de table de types"
-   " défini pour ses primitives. R5RS Scheme est utilisé à la place.")
-  (mrflow-button-title "Analyzer")
-  ;(mrflow-unknown-style-delta-error-title "Delta de Style de boîte inconnu")
-  ;(mrflow-unknown-style-delta-error "Delta de style de boîte inconnu : ~a")
-  (mrflow-popup-menu-show-type "Montrer le type")
-  (mrflow-popup-menu-hide-type "Cacher le type")
-  (mrflow-popup-menu-show-errors "Montrer les erreurs")
-  (mrflow-popup-menu-hide-errors "Cacher les erreurs")
-  ;(mrflow-read-exception-title "Exception lecture")
-  ;(mrflow-read-exception "Exception durant la lecture : ~a")
-  ;(mrflow-syntax-exception-title "Exception syntaxique")
-  ;(mrflow-syntax-exception "Exception syntaxique : ~a")
-  ;(mrflow-unknown-exception-title "Exception inconnue")
-  ;(mrflow-unknown-exception "Exception inconnue : ~a")
-  ;(mrflow-language-primitives-error-title "Erreur pour les primitives du langage")
-  ;(mrflow-language-primitives-error "Mauvais nom de fichier pour la table des types des primitives du langage : ~a")
-
-  (snips-and-arrows-popup-menu-tack-all-arrows "Coller toutes les flèches")
-  (snips-and-arrows-popup-menu-untack-all-arrows "Décoller toutes les flèches")
-  (snips-and-arrows-user-action-disallowed-title "Changements actuellement interdits")
-  (snips-and-arrows-user-action-disallowed
-   "Les changements sont interdits dans les éditeurs qui contiennent des boîtes inserées par un outil."
-   " Cachez toutes les boîtes avant de modifier le contenu de l'éditeur.")
-  ;(snips-and-arrows-changing-terms-warning-title "Changer les termes ne pourra être défait")
-  (snips-and-arrows-hide-all-snips-in-editor "Cacher les boîtes de cet éditeur")
-
   (xml-tool-insert-xml-box "Insérer une boîte XML")
   (xml-tool-insert-scheme-box "Insérer une boîte Racket")
   (xml-tool-insert-scheme-splice-box "Insérer une boîte Racket à raccord")
@@ -1904,7 +1907,7 @@
   ; section header
   (test-engine-signature-violations "Violations de signatures :")
 
-  ; part of one phrase "signature <at line ...> to blame: procedure <...>
+  ; part of one phrase "signature <at line ...> to blame: function <...>
   (test-engine-signature "Le signature")
   (test-engine-to-blame "blame la procédure")
 
@@ -2014,6 +2017,7 @@
 
   (always-use-platform-specific-linefeed-convention
    "Toujours utiliser la convention spécifique au système d'exploitation pour les fins de lignes")
+  (disable-caret-blinking "Désactiver le clignotement du curseur")
 
   ;; optimization coach
   (hide-optimization-coach "Cacher l'informateur d'optimisation") ; better than "entraîneur"...

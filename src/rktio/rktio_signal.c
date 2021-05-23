@@ -68,7 +68,13 @@ void rktio_install_os_signal_handler(rktio_t *rktio)
 #if defined(RKTIO_SYSTEM_UNIX)
   rktio_set_signal_handler(SIGINT, user_break_hit);
   rktio_set_signal_handler(SIGTERM, term_hit);
-  rktio_set_signal_handler(SIGHUP, hup_hit);
+  {
+    struct sigaction sa;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGHUP, NULL, &sa);
+    if (sa.sa_handler != SIG_IGN)
+      rktio_set_signal_handler(SIGHUP, hup_hit);
+  }
 #endif
 
 #if defined(RKTIO_SYSTEM_WINDOWS)
@@ -103,6 +109,52 @@ void rktio_set_signal_handler(int sig_id, void (*proc)(int))
   sigemptyset(&sa.sa_mask);
   sa.sa_flags = 0;
   sa.sa_handler = proc;
+  rktio_will_modify_os_signal_handler(sig_id);
   sigaction(sig_id, &sa, NULL);
+}
+#endif
+
+/*========================================================================*/
+/* Signal handler original state                                          */
+/*========================================================================*/
+
+typedef struct signal_handler_saved_disposition {
+  int sig_id;
+  struct signal_handler_saved_disposition *next;
+#if defined(RKTIO_SYSTEM_UNIX)
+  struct sigaction sa;
+#endif
+} signal_handler_saved_disposition;
+
+static signal_handler_saved_disposition *saved_dispositions;
+
+void rktio_will_modify_os_signal_handler(int sig_id) {
+  signal_handler_saved_disposition *saved;
+
+  for (saved = saved_dispositions; saved; saved = saved->next)
+    if (saved->sig_id == sig_id)
+      return;
+
+  saved = malloc(sizeof(signal_handler_saved_disposition));
+  saved->next = saved_dispositions;
+  saved->sig_id = sig_id;
+  saved_dispositions = saved;
+
+#if defined(RKTIO_SYSTEM_UNIX)
+  sigaction(sig_id, NULL, &saved->sa);
+#endif
+}
+
+#ifdef RKTIO_SYSTEM_UNIX
+/* called in a child thread after `fork */
+void rktio_restore_modified_signal_handlers() {
+  signal_handler_saved_disposition *saved;
+  sigset_t set;
+
+  for (saved = saved_dispositions; saved; saved = saved->next)
+    sigaction(saved->sig_id, &saved->sa, NULL);
+
+  sigemptyset(&set);
+  sigprocmask(SIG_SETMASK, &set, NULL);
 }
 #endif

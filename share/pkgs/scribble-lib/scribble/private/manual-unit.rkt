@@ -1,4 +1,4 @@
-#lang scheme/base
+#lang racket/base
 (require "../decode.rkt"
          "../struct.rkt"
          "manual-vars.rkt"
@@ -6,8 +6,8 @@
          "manual-ex.rkt"
          "manual-proc.rkt"
          racket/contract/base
-         (for-syntax scheme/base)
-         (for-label scheme/base))
+         (for-syntax racket/base)
+         (for-label racket/base))
 
 (provide defsignature
          defsignature/splice

@@ -48,7 +48,9 @@
   (if (and (eq? type 'github)
            use-git-for-github?)
       'git
-      type))
+      (if (eq? type 'git-url)
+          'git
+          type)))
 
 (define (remote-package-checksum pkg download-printf pkg-name
                                  #:type [type #f]
@@ -67,6 +69,11 @@
         [`(url ,pkg-url-str)
          (package-url->checksum pkg-url-str
                                 #:type type
+                                #:download-printf download-printf
+                                #:pkg-name pkg-name)]
+        [`(git ,pkg-url-str)
+         (package-url->checksum pkg-url-str
+                                #:type (or type 'git-url)
                                 #:download-printf download-printf
                                 #:pkg-name pkg-name)]
         [`(clone ,_ ,pkg-url-str)
@@ -206,13 +213,19 @@
                           clone-dir)
          (make-directory* clone-dir)
          (parameterize ([current-directory clone-dir])
-           (git #:status status "clone" "-b" branch pkg-no-query ".")))
+           (apply git #:status status "clone"
+                  (append
+                   (if (eq? branch 'head) null (list "-b" branch))
+                   (list pkg-no-query ".")))))
 
        (unless working-dir
          (parameterize ([current-directory clone-dir])
            (download-printf "Fetching from remote repository ~a\n"
                             pkg-no-query)
-           (git #:status status "fetch" pkg-no-query branch)))
+           (apply git #:status status "fetch"
+                  (append
+                   (list pkg-no-query)
+                   (if (eq? branch 'head) null (list branch))))))
 
        (cond
         [tmp-dir
@@ -225,7 +238,11 @@
          (download-printf "Cloning repository locally for staging\n")
          (git #:status status "clone" "--shared" clone-dir tmp-dir)
          (parameterize ([current-directory tmp-dir])
-           (git #:status status "checkout" (or checksum branch)))
+           (apply git #:status status "checkout"
+                  (cond
+                    [checksum => list]
+                    [(eq? branch 'head) null]
+                    [else (list branch)])))
          (lift-git-directory-content tmp-dir path)]
         [else
          (download-printf "Using clone directory directly for metadata\n")])
@@ -259,7 +276,8 @@
    [(or (eq? type 'file-url)
         (eq? type 'dir-url)
         (eq? type 'github)
-        (eq? type 'git))
+        (eq? type 'git)
+        (eq? type 'git-url))
     (define pkg-url-str (normalize-url type pkg (string->url pkg)))
     (define pkg-url (string->url pkg-url-str))
     (define scheme (url-scheme pkg-url))
@@ -291,7 +309,7 @@
             (make-temporary-file
              (string-append
               "~a-"
-              (regexp-replace* #rx"[:/\\.]" (format "~a.~a" repo branch) "_"))
+              (regexp-replace* #rx"[:/\\.~]" (format "~a.~a" repo branch) "_"))
              'directory))
           
           (define staged? #f)
@@ -679,8 +697,9 @@
     (when check-sums?
       (check-checksum given-checksum checksum "unexpected" pkg #f)
       (check-checksum checksum (install-info-checksum info) "incorrect" pkg #f))
-    (define-values (new-name new-type)  (package-source->name+type source #f))
+    (define-values (new-name new-type) (package-source->name+type source #f))
     (define repo-url (and (or (eq? new-type 'git)
+                              (eq? new-type 'git-url)
                               (eq? new-type 'github))
                           source))
     (case new-type
@@ -771,43 +790,49 @@
                              (current-continuation-marks))))
                          #:transport transport)))))]
     [(github)
-     (match-define (list* user repo branch path)
-                   (split-github-url pkg-url))
+     (match-define (list* user repo url-branch path)
+       (split-github-url pkg-url))
+     (define (query-json path kind)
+       (define api-u
+         (url "https" #f "api.github.com" #f #t
+              (map (λ (x) (path/param x empty))
+                   path)
+              (append query
+                      (if (and (github-client_id)
+                               (github-client_secret))
+                          (list (cons 'client_id (github-client_id))
+                                (cons 'client_secret (github-client_secret)))
+                          empty))
+              #f))
+       (download-printf "Querying GitHub ~a for ~a\n" kind pkg-name)
+       (log-pkg-debug "Querying GitHub at ~a" (url->string api-u))
+       (define api-bs
+         (call/input-url+200
+          api-u port->bytes
+          #:who 'query-github
+          #:headers (list (format "User-Agent: raco-pkg/~a" (version)))))
+       (unless api-bs
+         (error 'package-url->checksum
+                "could not connect to GitHub\n URL: ~a"
+                (url->string 
+                 (struct-copy url api-u
+                              [query query]))))
+       (read-json (open-input-bytes api-bs)))
+     (define branch (cond
+                      [(eq? url-branch 'head)
+                       (define info (query-json (list "repos" user repo) 'head))
+                       (hash-ref info 'default_branch)]
+         [else url-branch]))
      (or
       (for/or ([kind '("branches" "tags")])
-        (define api-u
-          (url "https" #f "api.github.com" #f #t
-               (map (λ (x) (path/param x empty))
-                    (list "repos" user repo kind))
-               (append query
-                       (if (and (github-client_id)
-                                (github-client_secret))
-                           (list (cons 'client_id (github-client_id))
-                                 (cons 'client_secret (github-client_secret)))
-                           empty))
-               #f))
-        (download-printf "Querying GitHub ~a for ~a\n" kind pkg-name)
-        (log-pkg-debug "Querying GitHub at ~a" (url->string api-u))
-        (define api-bs
-          (call/input-url+200
-           api-u port->bytes
-           #:who 'query-github
-           #:headers (list (format "User-Agent: raco-pkg/~a" (version)))))
-        (unless api-bs
-          (error 'package-url->checksum
-                 "could not connect to GitHub\n URL: ~a"
-                 (url->string 
-                  (struct-copy url api-u
-                               [query query]))))
-        (define branches
-          (read-json (open-input-bytes api-bs)))
+        (define branches (query-json (list "repos" user repo kind) kind))
         (unless (and (list? branches)
                      (andmap hash? branches)
                      (andmap (λ (b) (hash-has-key? b 'name)) branches)
                      (andmap (λ (b) (hash-has-key? b 'commit)) branches))
           (error 'package-url->checksum
                  "Invalid response from Github: ~e"
-                 api-bs))
+                 branches))
         (for/or ([b (in-list branches)])
           (and (equal? (hash-ref b 'name) branch)
                (hash-ref (hash-ref b 'commit) 'sha))))
@@ -843,7 +868,7 @@
 ;; `type` in the future.
 (define (normalize-url type str as-url)
   (case type
-    [(git)
+    [(git) ; not git-url, which should not be normalized by adding ".git"
      (cond
       [(equal? "git" (url-scheme as-url))
        str]
