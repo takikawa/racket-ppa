@@ -1,7 +1,7 @@
-#lang scheme/base
-(require scheme/serialize
+#lang racket/base
+(require racket/serialize
          racket/contract/base
-         (for-syntax scheme/base))
+         (for-syntax racket/base))
 
 (provide provide-structs)
 

@@ -806,6 +806,14 @@
   (equal? (number->string #x100 16) "100")
   (equal? (number->string #x100 8) "400")
   (equal? (number->string #x100 16) "100")
+  (equal? (number->string (* 10 (+ 10 (expt 2 100))) 16)
+          "A0000000000000000000000064")
+  (equal? (number->string (* 10 (+ 10 (expt 2 100))) 8)
+          "24000000000000000000000000000000144")
+  (equal? (number->string (* 10 (+ 10 (expt 2 100))) 4)
+          "2200000000000000000000000000000000000000000000001210")
+  (equal? (number->string (* 10 (+ 10 (expt 2 100))) 2)
+          "10100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001100100")
 )
 
 (mat r6rs:number->string
@@ -1779,6 +1787,9 @@
     (eqv? (/ 1e-300+1e-300i (* 4 #e1e-300+1e-300i)) 0.25+0.0i)
     (eqv? (/ 0.0+0.0i 1+1e-320i) 0.0+0.0i)
     (eqv? (/ 0.0+0.0i #e1+1e-320i) 0.0+0.0i)
+    (eqv? (/ (expt 7 150000) (expt 7 100000)) (expt 7 50000))
+    (eqv? (/ (- (expt 7 150000)) (expt 7 100000)) (- (expt 7 50000)))
+    (eqv? (/ (expt 7 150000) (- (expt 7 100000))) (- (expt 7 50000)))
     (test-cp0-expansion eqv? '(/ 1 2) 1/2)
     (test-cp0-expansion eqv? '(/ 1 -2) -1/2)
     (test-cp0-expansion eqv? '(/ 1/2 -2) -1/4)
@@ -2071,6 +2082,7 @@
     (fl= (quotient 3.0 -2.0) -1.0)
     (fl= (quotient -3.0 -2.0) 1.0)
     (fl= (quotient -3.0 2) -1.0)
+    (eqv? (quotient (expt 7 150000) (expt 7 100000)) (expt 7 50000))
     ;; following returns incorrect result in all versions prior to 5.9b
     (eq? (quotient (most-negative-fixnum) (- (most-negative-fixnum))) -1)
  )
@@ -2120,6 +2132,9 @@
     (eqv? (remainder (exact 5.842423430828094e+60) -10) 4)
     (eqv? (remainder (exact -5.842423430828094e+60) 10) -4)
     (eqv? (remainder (exact -5.842423430828094e+60) -10) -4)
+    (eqv? (remainder (sub1 (expt 7 150000)) (expt 7 100000)) (sub1 (expt 7 100000)))
+    (eqv? (remainder (- (sub1 (expt 7 150000))) (expt 7 100000)) (- (sub1 (expt 7 100000))))
+    (eqv? (remainder (sub1 (expt 7 150000)) (- (expt 7 100000))) (sub1 (expt 7 100000)))
     ;; following returns incorrect result with naive algorithm,
     ;; i.e., remainder = (lambda (x,y) (- x (* (quotient x y) y)))
     (fl= (remainder 1e194 10.0) 8.0)
@@ -2168,6 +2183,9 @@
     (eqv? (modulo (exact -5.842423430828094e+60) 10) 6)
     (eqv? (modulo (exact 5.842423430828094e+60) -10) -6)
     (eqv? (modulo (exact -5.842423430828094e+60) -10) -4)
+    (eqv? (modulo (sub1 (expt 7 150000)) (expt 7 100000)) (sub1 (expt 7 100000)))
+    (eqv? (modulo (- (sub1 (expt 7 150000))) (expt 7 100000)) 1)
+    (eqv? (modulo (sub1 (expt 7 150000)) (- (expt 7 100000))) -1)
  )
 
 (mat truncate
@@ -3282,6 +3300,7 @@
    (eqv? (bitwise-arithmetic-shift 0 (- (expt 2 100))) 0)
    (eqv? (bitwise-arithmetic-shift 0 (expt 2 100)) 0)
    (eqv? (bitwise-arithmetic-shift 0 (expt 2 100)) 0)
+   (eqv? (- (expt 16 232)) (bitwise-arithmetic-shift (- 307 (expt 16 240)) -32))
    ($test-right-shift (lambda (x n) (bitwise-arithmetic-shift x (- n))))
 )
 
@@ -3330,6 +3349,7 @@
    (eqv? (bitwise-arithmetic-shift-right #x-8000000000000000 31) #x-100000000)
    (eqv? (bitwise-arithmetic-shift-right #x-8000000000000000 32) #x-80000000)
    (eqv? (bitwise-arithmetic-shift-right #x-8000000000000000 33) #x-40000000)
+   (eqv? (- (expt 16 232)) (bitwise-arithmetic-shift-right (- 307 (expt 16 240)) 32))
    ($test-right-shift (lambda (x n) (bitwise-arithmetic-shift-right x n)))
 )
 

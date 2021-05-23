@@ -107,6 +107,7 @@ extern MZGC_DLLIMPORT void GC_init();
 void scheme_set_stack_base(void *base, int no_auto_statics) XFORM_SKIP_PROC
 {
 #ifdef MZ_PRECISE_GC
+  GC_report_signal_handle_modify = rktio_will_modify_os_signal_handler;
   GC_init_type_tags(_scheme_last_type_, 
                     scheme_pair_type, scheme_mutable_pair_type, scheme_weak_box_type, 
                     scheme_ephemeron_type, scheme_rt_weak_array,
@@ -461,9 +462,18 @@ void scheme_set_signal_handler(int sig_id, Scheme_Signal_Handler_Proc proc) XFOR
 {
 #ifndef WINDOWS_PROCESSES
   struct sigaction sa;
+
+  if (sig_id == SIGHUP) {
+    /* cooperate with `nohup` by keeping SIHGUP as-is when ignored */
+    sigaction(SIGHUP, NULL, &sa);
+    if (sa.sa_handler == SIG_IGN)
+      return;
+  }
+
   sigemptyset(&sa.sa_mask);
   sa.sa_flags = 0;
   sa.sa_handler = (proc ? proc : SIG_IGN);
+  rktio_will_modify_os_signal_handler(sig_id);
   sigaction(sig_id, &sa, NULL);
 #endif
 }
@@ -1655,6 +1665,7 @@ static void install_w_xor_x_handler()
     sigaddset(&act.sa_mask, SIGINT);
     sigaddset(&act.sa_mask, SIGCHLD);
     act.sa_flags = SA_SIGINFO;
+    rktio_will_modify_os_signal_handler(SIG_W_XOR_X);
     sigaction(SIG_W_XOR_X, &act, &oact);
     previous_fault_handler = oact.sa_sigaction;
   }

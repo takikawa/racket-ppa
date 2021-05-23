@@ -1210,13 +1210,11 @@
                set-position get-start-position get-end-position
                highlight-range dc-location-to-editor-location
                begin-edit-sequence end-edit-sequence in-edit-sequence?
-               save-port all-string-snips? find-first-snip)
+               save-port all-string-snips? find-first-snip
+               get-port-name)
 
       (define/public (fetch-data-to-send)
-        (define fn (let* ([b (box #f)]
-                          [n (get-filename b)])
-                     (and (not (unbox b))
-                          n)))
+        (define fn (get-port-name))
         (cond
           [(all-string-snips?)
            (define str (make-string (last-position) #\space))
@@ -1950,7 +1948,7 @@
     (class canvas%
       (init-field msgs err? [copy-msg ""])
       (define menu-items '())
-      (inherit refresh get-dc get-client-size popup-menu)
+      (inherit refresh get-dc get-client-size popup-menu show is-shown?)
       (define/public (set-msgs _msgs _err? _copy-msg _menu-items)
         (unless (string? _copy-msg)
           (raise-argument-error 'error-message%::set-msgs
@@ -1961,8 +1959,15 @@
         (set! err? _err?)
         (set! copy-msg _copy-msg)
         (set! menu-items _menu-items)
-        (set-the-height/dc-font (editor:get-current-preferred-font-size))
-        (refresh))
+        (define no-content-in-msgs?
+          (or (equal? msgs '()) (equal? msgs '(""))))
+        (cond
+          [(and no-content-in-msgs? (not err?))
+           (show #f)]
+          [else
+           (unless (is-shown?) (show #t))
+           (set-the-height/dc-font (editor:get-current-preferred-font-size))
+           (refresh)]))
       (define/override (on-event evt)
         (cond
           [(and (send evt button-down?) err?)
@@ -2396,7 +2401,7 @@
   ;; editor-contents : (or/c bytes? string?) -- if bytes?, then this is in wxme editor format
   ;;                     if string? then it is the contents of the editor as a string
   (define (send-to-place editor-contents 
-                         filename 
+                         port-name
                          prefab-module-settings 
                          show-results 
                          tell-the-tab-show-bkg-running
@@ -2426,7 +2431,7 @@
                (define-values (pc-status-drracket-place pc-status-expanding-place) (place-channel))
                (define to-send
                  (vector-immutable editor-contents
-                                   filename
+                                   port-name
                                    pc-in 
                                    prefab-module-settings
                                    pc-status-expanding-place

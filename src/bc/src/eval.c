@@ -3756,15 +3756,28 @@ Scheme_Object *scheme_eval_string_multi_with_prompt(const char *str, Scheme_Env 
 
 void scheme_embedded_load(intptr_t len, const char *desc, int predefined)
 {
-  Scheme_Object *s, *e, *a[4], *eload;
+  Scheme_Object *s, *e, *f, *a[5], *eload;
+  int argc = 4;
   eload = scheme_get_startup_export("embedded-load");
   if (len < 0) {
-    /* description mode */
+    /* description mode: string embeds start, end, and filename, where
+       a 0-length filename means to find the executable via
+       `(system-path 'exec-file)`. */
+    int slen, elen, foff;
+    slen = strlen(desc);
+    elen = strlen(desc XFORM_OK_PLUS (slen + 1));
+    foff = slen + 1 + elen + 1;
     s = scheme_make_utf8_string(desc);
-    e = scheme_make_utf8_string(desc XFORM_OK_PLUS strlen(desc) XFORM_OK_PLUS 1);
+    e = scheme_make_utf8_string(desc XFORM_OK_PLUS (slen + 1));
+    if (desc[foff] != 0) {
+      f = scheme_make_byte_string(desc XFORM_OK_PLUS foff);
+      argc = 5;
+    } else
+      f = scheme_false;
     a[0] = s;
     a[1] = e;
     a[2] = scheme_false;
+    a[4] = f;
   } else {
     /* content mode */
     a[0] = scheme_false;
@@ -3773,7 +3786,7 @@ void scheme_embedded_load(intptr_t len, const char *desc, int predefined)
     a[2] = s;
   }
   a[3] = (predefined ? scheme_true : scheme_false);
-  (void)scheme_apply(eload, 4, a);
+  (void)scheme_apply(eload, argc, a);
 }
 
 int scheme_is_predefined_module_path(Scheme_Object *m)
@@ -3831,24 +3844,33 @@ void scheme_init_compiled_roots(Scheme_Env *global_env, const char *paths)
   save = p->error_buf;
   p->error_buf = &newbuf;
   if (!scheme_setjmp(newbuf)) {
-    Scheme_Object *rr, *ccfr, *pls2pl, *a[3];
+    Scheme_Object *rr, *ccfr, *fcfr, *pls2pl, *a[3];
 
-    rr = scheme_builtin_value("regexp-replace*");
+    fcfr = scheme_builtin_value("find-compiled-file-roots");
     ccfr = scheme_builtin_value("current-compiled-file-roots");
-    pls2pl = scheme_builtin_value("path-list-string->path-list");
+    if (paths) {
+      rr = scheme_builtin_value("regexp-replace*");
+      pls2pl = scheme_builtin_value("path-list-string->path-list");
+    } else
+      rr = pls2pl = scheme_false;
 
-    if (rr && ccfr && pls2pl) {
-      a[0] = scheme_make_utf8_string("@[(]version[)]");
-      a[1] = scheme_make_utf8_string(paths);
-      a[2] = scheme_make_utf8_string(scheme_version());
-      a[2] = _scheme_apply(rr, 3, a);
+    if (rr && fcfr && ccfr && pls2pl) {
+      if (paths) {
+        a[0] = scheme_make_utf8_string("@[(]version[)]");
+        a[1] = scheme_make_utf8_string(paths);
+        a[2] = scheme_make_utf8_string(scheme_version());
+        a[2] = _scheme_apply(rr, 3, a);
+      }
+        
+      a[1] = _scheme_apply(fcfr, 0, NULL);
 
-      a[0] = scheme_intern_symbol("same");
-      a[1] = scheme_build_path(1, a);
-
-      a[0] = a[2];
-      a[1] = scheme_make_pair(a[1], scheme_null);
-      a[0] = _scheme_apply(pls2pl, 2, a);
+      if (paths) {
+        a[0] = a[2];
+        a[0] = _scheme_apply(pls2pl, 2, a);
+      } else {
+        a[0] = a[1];
+      }
+      
       _scheme_apply(ccfr, 1, a);
     }
   } else {

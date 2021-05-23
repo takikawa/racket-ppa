@@ -659,20 +659,51 @@
             (define s-body (schemify body 'marked))
             (define authentic-key?
               (authentic-valued? key knowns prim-knowns imports mutated))
+            (define (build-wcm s-key s-val s-body)
+              (cond
+                [(aim? target 'cify)
+                 `(with-continuation-mark ,s-key ,s-val ,s-body)]
+                [else
+                 (define mode
+                   (case wcm-state
+                     [(fresh) (if authentic-key? 'push-authentic 'push)]
+                     [else (if authentic-key? 'authentic 'general)]))
+                 `(with-continuation-mark* ,mode ,s-key ,s-val ,s-body)]))
+            (define (build-begin s-key s-val s-body)
+              (cond
+                [(and (simple? s-key prim-knowns knowns imports mutated simples unsafe-mode?)
+                      (simple? s-val prim-knowns knowns imports mutated simples unsafe-mode?))
+                 ;; Avoid `begin` wrapper to help further `with-continuation-mark` optimizations
+                 s-body]
+                [else
+                 `(begin ,(ensure-single-valued s-key knowns prim-knowns imports mutated)
+                         ,(ensure-single-valued s-val knowns prim-knowns imports mutated)
+                         ,s-body)]))
             (cond
-              [(and authentic-key?
-                    (simple? s-body prim-knowns knowns imports mutated simples unsafe-mode? #:result-arity #f))
-               `(begin ,(ensure-single-valued s-key knowns prim-knowns imports mutated)
-                       ,(ensure-single-valued s-val knowns prim-knowns imports mutated)
-                       ,s-body)]
-              [(aim? target 'cify)
-               `(with-continuation-mark ,s-key ,s-val ,s-body)]
+              [authentic-key?
+               (cond
+                 [(simple? s-body prim-knowns knowns imports mutated simples unsafe-mode? #:result-arity #f)
+                  (build-begin s-key s-val s-body)]
+                 [else
+                  ;; Simplify (with-continuation-mark <same-key> <val1>
+                  ;;           (with-continuation-mark <same-key> <val2>
+                  ;;            <body>)
+                  ;; to       (begin <same-key> <val1>
+                  ;;           (with-continuation-mark <same-key> <val2>
+                  ;;            <body>))
+                  ;; as long as <same-key> and <val2> don't use marks
+                  (match s-body
+                    [`(with-continuation-mark* ,mode2 ,s-key2 ,s-val2 ,s-body2)
+                     (cond
+                       [(and (always-eq/no-marks? s-key s-key2 mutated)
+                             (simple? s-val2 prim-knowns knowns imports mutated simples unsafe-mode?))
+                        (build-begin s-key s-val
+                                     ;; rebuild to use current `wcm-state`:
+                                     (build-wcm s-key2 s-val2 s-body2))]
+                       [else (build-wcm s-key s-val s-body)])]
+                    [`,_ (build-wcm s-key s-val s-body)])])]
               [else
-               (define mode
-                 (case wcm-state
-                   [(fresh) (if authentic-key? 'push-authentic 'push)]
-                   [else (if authentic-key? 'authentic 'general)]))
-               `(with-continuation-mark* ,mode ,s-key ,s-val ,s-body)])]
+               (build-wcm s-key s-val s-body)])]
            [`(begin ,exp)
             (schemify exp wcm-state)]
            [`(begin ,exps ...)
@@ -787,10 +818,12 @@
                    (cond
                      [(null? formal-args)
                       (and (null? args)
-                           (schemify/knowns knowns
-                                            inline-fuel
-                                            wcm-state
-                                            `(let-values ,(reverse binds) . ,bodys)))]
+                           (let ([r (schemify/knowns knowns
+                                                     inline-fuel
+                                                     wcm-state
+                                                     `(let-values ,(reverse binds) . ,bodys))])
+                             ;; make suure constant-fold to #f counts as success:
+                             (or r `(quote #f))))]
                      [(null? args) #f]
                      [(not (pair? formal-args))
                       (loop '() '() (cons (list (list formal-args)
@@ -841,21 +874,24 @@
               (define type-id (and (pair? args)
                                    (null? (cdr args))
                                    (inline-type-id k im add-import! mutated imports)))
+              (define unsafe-struct? (if (known-struct-predicate-sealed? k)
+                                         'unsafe-sealed-struct?
+                                         'unsafe-struct?))
               (cond
                 [(not type-id) #f]
                 [(known-struct-predicate-authentic? k)
                  (define tmp (maybe-tmp (car args) 'v))
-                 (define ques `(unsafe-struct? ,tmp ,(schemify type-id 'fresh)))
+                 (define ques `(,unsafe-struct? ,tmp ,(schemify type-id 'fresh)))
                  (wrap-tmp tmp (car args)
                            ques)]
                 [else
                  (define tmp (maybe-tmp (car args) 'v))
                  (define schemified-type-id (schemify type-id 'fresh))
                  (define tmp-type-id (maybe-tmp schemified-type-id 'v))
-                 (define ques `(if (unsafe-struct? ,tmp ,tmp-type-id)
+                 (define ques `(if (,unsafe-struct? ,tmp ,tmp-type-id)
                                    #t
                                    (if (impersonator? ,tmp)
-                                       (unsafe-struct? (impersonator-val ,tmp) ,tmp-type-id)
+                                       (,unsafe-struct? (impersonator-val ,tmp) ,tmp-type-id)
                                        #f)))
                  (wrap-tmp tmp (car args)
                            (wrap-tmp tmp-type-id schemified-type-id 
@@ -873,7 +909,10 @@
                                  `(unsafe-struct*-ref ,tmp ,(known-field-accessor-pos k))
                                  `(if (unsafe-struct? ,tmp ,(schemify type-id 'fresh))
                                       (unsafe-struct*-ref ,tmp ,(known-field-accessor-pos k))
-                                      (,s-rator ,tmp))))
+                                      ,(let ([a `(,s-rator ,tmp)])
+                                         (if (known-field-accessor-authentic? k)
+                                             (cons '#%app/no-return a)
+                                             a)))))
                  (wrap-tmp tmp (car args)
                            sel)]
                 [else #f]))
@@ -891,7 +930,10 @@
                                  `(unsafe-struct*-set! ,tmp ,(known-field-mutator-pos k) ,tmp-rhs)
                                  `(if (unsafe-struct? ,tmp ,(schemify type-id 'fresh))
                                       (unsafe-struct*-set! ,tmp ,(known-field-mutator-pos k) ,tmp-rhs)
-                                      (,s-rator ,tmp ,tmp-rhs))))
+                                      ,(let ([a `(,s-rator ,tmp ,tmp-rhs)])
+                                         (if (known-field-mutator-authentic? k)
+                                             (cons '#%app/no-return a)
+                                             a)))))
                  (wrap-tmp tmp (car args)
                            (wrap-tmp tmp-rhs (cadr args)
                                      mut))]

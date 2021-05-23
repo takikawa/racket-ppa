@@ -1,4 +1,4 @@
-#lang scheme/base
+#lang racket/base
 (require scribble/doclang
          scribble/core
          scribble/base
@@ -6,7 +6,7 @@
          scribble/latex-prefix
          racket/list
          "../private/defaults.rkt"
-         (for-syntax scheme/base))
+         (for-syntax racket/base))
 (provide (except-out (all-from-out scribble/doclang) #%module-begin)
          (all-from-out scribble/sigplan)
          (all-from-out scribble/base)

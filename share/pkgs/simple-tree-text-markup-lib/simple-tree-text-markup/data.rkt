@@ -15,7 +15,19 @@
                   (markup markup?)))
                (struct framed-markup
                  ((markup markup?)))
-               (markup? (any/c . -> . boolean?))))
+               (struct image-markup
+                 ;; can be anything, as long as it's understood by the backend
+                 ;; typical choices:
+                 ;; - image%
+                 ;; - snip%
+                 ;; - record-dc-datum
+                 ((data any/c)
+                  (alt-markup markup?)))
+               (markup? (any/c . -> . boolean?))
+               (struct record-dc-datum
+                 ((datum any/c)
+                  (width natural-number/c)
+                  (height natural-number/c)))))
 
 (define (markup? x)
   (or (string? x)
@@ -23,7 +35,8 @@
       (horizontal-markup? x)
       (vertical-markup? x)
       (srcloc-markup? x)
-      (framed-markup? x)))
+      (framed-markup? x)
+      (image-markup? x)))
 
 (struct empty-markup
   ()
@@ -38,11 +51,22 @@
   #:transparent)
 
 (struct srcloc-markup
-  (srcloc markup))
+  (srcloc markup)
+  #:transparent)
 
 (struct framed-markup
   (markup)
   #:transparent)
+
+(struct image-markup
+  (data alt-markup)
+  #:transparent)
+
+(struct record-dc-datum
+  (datum width height)
+  #:transparent)
+
+  
 
 
 

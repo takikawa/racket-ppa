@@ -339,9 +339,9 @@
   
         (def "Sstencil_vector_length(x)"
           (format "Spopcount(((uptr)~a)>>~d)"
-            (access "x" vector type)
+            (access "x" stencil-vector type)
             ($ stencil-vector-mask-offset)))
-        (defref Sstencil_vector_ref vector data)
+        (defref Sstencil_vector_ref stencil-vector data)
         
         (export "iptr" "Sinteger_value" "(ptr)")
         (def "Sunsigned_value(x)" "(uptr)Sinteger_value(x)")
@@ -445,6 +445,7 @@
         (export "int"  "Sscheme_script" "(const char *, int, const char *[])")
         (export "int"  "Sscheme_program" "(const char *, int, const char *[])")
         (export "void" "Sscheme_deinit" "(void)")
+        (export "void" "Sscheme_register_signal_registerer" "(void (*f)(int))")
 
         (when-feature pthreads
         (nl) (comment "Thread support.")
@@ -734,7 +735,7 @@
             (nl)
             (pr "#define SPINLOCK(addr)      \\~%")
             (pr "  __asm__ __volatile__ (\"0:\\n\\t\"\\~%")
-            (pr "                        \"ldrex r12, [%0, #0]\\n\\t\"\\~%")
+            (pr "                        \"ldrex r12, [%0]\\n\\t\"\\~%")
             (pr "                        \"cmp r12, #0\\n\\t\"\\~%")
             (pr "                        \"bne 1f\\n\\t\"\\~%")
             (pr "                        \"mov r12, #1\\n\\t\"\\~%")
@@ -763,7 +764,7 @@
             (pr "#define LOCKED_INCR(addr, ret) \\~%")
             (pr "  __asm__ __volatile__ (\"mov %0, #0\\n\\t\"\\~%")
             (pr "                        \"0:\\n\\t\"\\~%")
-            (pr "                        \"ldrex r12, [%1, #0]\\n\\t\"\\~%")
+            (pr "                        \"ldrex r12, [%1]\\n\\t\"\\~%")
             (pr "                        \"add r12, r12, #1\\n\\t\"\\~%")
             (pr "                        \"strex r7, r12, [%1]\\n\\t\"\\~%")
             (pr "                        \"cmp r7, #0\\n\\t\"\\~%")
@@ -779,7 +780,7 @@
             (pr "#define LOCKED_DECR(addr, ret) \\~%")
             (pr "  __asm__ __volatile__ (\"mov %0, #0\\n\\t\"\\~%")
             (pr "                        \"0:\\n\\t\"\\~%")
-            (pr "                        \"ldrex r12, [%1, #0]\\n\\t\"\\~%")
+            (pr "                        \"ldrex r12, [%1]\\n\\t\"\\~%")
             (pr "                        \"sub r12, r12, #1\\n\\t\"\\~%")
             (pr "                        \"strex r7, r12, [%1]\\n\\t\"\\~%")
             (pr "                        \"cmp r7, #0\\n\\t\"\\~%")

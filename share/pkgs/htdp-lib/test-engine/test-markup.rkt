@@ -14,14 +14,28 @@
          test-engine/test-engine
          simple-tree-text-markup/construct
          simple-tree-text-markup/text
+         simple-tree-text-markup/port
          (except-in deinprogramm/signature/signature signature-violation) ; clashes with test-engine
          deinprogramm/quickcheck/quickcheck)
 
 (define render-value-parameter (make-parameter
-                                (lambda (v)
-                                  (format "~V" v))))
-(define (render-value v)
-  ((render-value-parameter) v))
+                                (lambda (v port)
+                                  (fprintf port "~V" v))))
+
+(define render-value
+  (case-lambda
+    ((value)
+     (let ((proc (render-value-parameter)))
+       (if (procedure-arity-includes? proc 2)
+           (let ((port (open-output-string)))
+             (proc value port)
+             (get-output-string))
+           (proc value))))
+    ((value port)
+     (let ((proc (render-value-parameter)))
+       (if (procedure-arity-includes? proc 2)
+           (proc value port)
+           (display (proc value) port))))))
 
 (define get-rewritten-error-message-parameter
   (make-parameter exn-message))
@@ -97,11 +111,6 @@
      (check-failures->markup failed-checks)
      (signature-violations->markup signature-violations))))
 
-(define (format-list l)
-  (cond
-   [(null? (cdr l)) (format "and ~a" (car l))]
-   [else (format "~a, ~a" (car l) (format-list (cdr l)))]))
-
 (define (check-failures->markup checks)
   (if (pair? checks)
       (vertical (string-constant test-engine-check-failures)
@@ -120,18 +129,16 @@
       empty-markup))
 
 (define (failed-check->markup failed-check)
-  (horizontal
-   "        "
-   (if (failed-check-srcloc? failed-check)
-       (error-link->markup (failed-check-reason failed-check)
-                           (failed-check-srcloc? failed-check)
-                           (fail-reason-srcloc (failed-check-reason failed-check)))
-       (link->markup (failed-check-reason failed-check)
-                     (fail-reason-srcloc (failed-check-reason failed-check))))))
+  (if (failed-check-srcloc? failed-check)
+      (error-link->markup (failed-check-reason failed-check)
+                          (failed-check-srcloc? failed-check)
+                          (fail-reason-srcloc (failed-check-reason failed-check)))
+      (link->markup (failed-check-reason failed-check)
+                    (fail-reason-srcloc (failed-check-reason failed-check)))))
 
 (define (link->markup reason srcloc)
   (vertical
-   (reason->markup reason)
+   (horizontal "        " (reason->markup reason))
    (srcloc-markup srcloc (format-srcloc srcloc))))
 
 (define (format-srcloc srcloc)
@@ -188,9 +195,11 @@
              (inner-loop (cdr chars) (cons (car chars) rev-seen))))))))
 
 (define (value->markup value)
-  (let* ((text (render-value value))
-         (lines (string-split text "\n")))
-    (apply vertical lines)))
+  (let-values (((port get-markup)
+                (make-markup-output-port/unsafe (lambda (special)
+                                                  (image-markup special "#<image>")))))
+    (render-value value port)
+    (get-markup)))
 
 (define (reason->markup fail)
   (cond
@@ -275,8 +284,8 @@
 
 (define (error-link->markup reason srcloc check-srcloc)
   (vertical
-   (reason->markup reason)
-   (horizontal   
+   (horizontal "        " (reason->markup reason))
+   (horizontal
     (srcloc-markup srcloc (format-srcloc check-srcloc))
     (if srcloc
         (horizontal

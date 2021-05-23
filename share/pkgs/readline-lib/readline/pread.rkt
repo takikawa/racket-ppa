@@ -33,6 +33,7 @@
         (set! last-bstrs (sort (map symbol->bstring syms) bytes<?)))
       last-bstrs)))
 
+;; In CS, this callback runs in atomic mode:
 (define (namespace-completion pat)
   (let* ([pat (if (string? pat) (string->bytes/utf-8 pat) pat)]
          [pat (regexp-quote pat)]

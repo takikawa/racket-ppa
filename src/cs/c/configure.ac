@@ -18,6 +18,7 @@ AC_ARG_ENABLE(pthread,    [  --enable-pthread        link with pthreads (usually
 AC_ARG_ENABLE(iconv,      [  --enable-iconv          use iconv (usually auto-enabled)])
 AC_ARG_ENABLE(wpo,        [  --enable-wpo            agressively optimize Racket core (enabled by default)])
 AC_ARG_ENABLE(compress,   [  --enable-compress       compress compiled code (enabled by default)])
+AC_ARG_ENABLE(compressmore, [  --enable-compressmore   compress compiled code even more])
 AC_ARG_ENABLE(compressboot, [  --enable-compressboot   compress boot files])
 m4_include(../ac/path_arg.m4)
 AC_ARG_ENABLE(racket,     [  --enable-racket=<path>  use <path> as Racket for build; or "auto" to create])
@@ -72,8 +73,11 @@ fi
 show_explicitly_enabled "${enable_pthread}" "pthreads"
 show_explicitly_disabled "${enable_pthread}" "pthreads"
 show_explicitly_disabled "${enable_compress}" "Compressed code"
+show_explicitly_disabled "${enable_compressmore}" "Compressed code even more"
 show_explicitly_enabled "${enable_compressboot}" "Compressed boot files"
+show_explicitly_disabled "${enable_compressboot}" "Compressed boot files"
 show_explicitly_enabled "${enable_xonx}" "Unix style"
+m4_include(../ac/path_show.m4)
 show_explicitly_set "${enable_racket}" "Racket"
 show_explicitly_set "${enable_scheme}" "Chez Scheme build directory"
 show_explicitly_set "${enable_mach}" "machine type"
@@ -163,9 +167,13 @@ PLT_CS_SLSP_SUFFIX=
 
 enable_pthread_by_default=yes
 
+compress_boot_files_by_default=no
+
 cs_auto_flags=--disable-auto-flags
 
 ###### Autoconfigure #######
+
+m4_include(../ac/sdk_ios.m4)
 
 AC_PROG_CC
 
@@ -192,6 +200,7 @@ if test "$ARFLAGS" = '' ; then
   ARFLAGS=rc
 fi
 
+
 WINDRES=windres
 
 ############## platform tests ################
@@ -217,7 +226,8 @@ case "$host_os" in
     MACH_OS=fb
     CFLAGS="${CFLAGS} -I/usr/local/include"
     LDFLAGS="${LDFLAGS} -L/usr/local/lib"
-    LIBS="${LIBS} -liconv -lm -lpthread"
+    LIBS="${LIBS} -lm -lpthread"
+    add_iconv_lib="-liconv"
     CPPFLAGS="${CPPFLAGS} -DELF_FIND_BOOT_SECTION"
     ELF_COMP="--expect-elf"
     ;;
@@ -225,7 +235,8 @@ case "$host_os" in
     MACH_OS=ob
     CFLAGS="${CFLAGS} -I/usr/local/include"
     LDFLAGS="${LDFLAGS} -L/usr/local/lib"
-    LIBS="${LIBS} -liconv -lm -lpthread"
+    LIBS="${LIBS} -lm -lpthread"
+    add_iconv_lib="-liconv"
     LDFLAGS="${LDFLAGS} -Wl,-zwxneeded"
     CPPFLAGS="${CPPFLAGS} -DELF_FIND_BOOT_SECTION"
     ELF_COMP="--expect-elf"
@@ -236,7 +247,8 @@ case "$host_os" in
     ;;
   netbsd*)
     MACH_OS=nb
-    LIBS="${LIBS} /usr/lib/i18n/libiconv_std.a -lm -lpthread"
+    LIBS="${LIBS} -lm -lpthread"
+    add_iconv_lib="/usr/lib/i18n/libiconv_std.a"
     CPPFLAGS="${CPPFLAGS} -DELF_FIND_BOOT_SECTION"
     ELF_COMP="--expect-elf"
     POST_LINKER="paxctl +m"
@@ -245,7 +257,13 @@ case "$host_os" in
     ;;
   linux*)
     MACH_OS=le
-    LIBS="${LIBS} -lrt"
+    case "$host_os" in
+      *linux-android*)
+        ;;
+      *)
+        LIBS="${LIBS} -lrt"
+        ;;
+    esac
     CPPFLAGS="${CPPFLAGS} -DELF_FIND_BOOT_SECTION"
     ELF_COMP="--expect-elf"
     ;;
@@ -260,6 +278,7 @@ case "$host_os" in
     LIBS="${LIBS} -lshell32 -luser32 -lole32 -lrpcrt4 -luuid -lws2_32 -ladvapi32 -lwinmm"
     MINGW=""
     NOT_MINGW="mingw"
+    compress_boot_files_by_default=yes
     if `which ${host}-windres > /dev/null` ; then
       WINDRES="${host}-windres"
     fi
@@ -317,8 +336,10 @@ case "$host_os" in
     # -pthread is not needed and triggers a warning
     use_flag_pthread=no
 
-    # ncurses.h is always available
-    disable_curses_arg=""
+    # ncurses.h is always available, except on iOS
+    if test "${enable_ios}" == "" ; then
+      disable_curses_arg=""
+    fi
     ;;
   nto-qnx*)
     MACH_OS=qnx
@@ -474,9 +495,16 @@ fi
 if test "${enable_compress}" != "no" ; then
   COMPRESS_COMP="--compress"
 fi
+if test "${enable_compressmore}" = "yes" ; then
+  COMPRESS_COMP="--compress-more"
+fi
 
 if test "${enable_compressboot}" = "yes" ; then
   BOOT_COMPRESS_COMP="--compress"
+elif test "${compress_boot_files_by_default}" = "yes" ; then
+  if test "${enable_compressboot}" != "no" ; then
+    BOOT_COMPRESS_COMP="--compress"
+  fi
 fi
 
 DIFF_MACH=skip
@@ -524,6 +552,8 @@ AC_LANG_C
 m4_include(../ac/iconv.m4)
 if test "${enable_iconv}" = "no" ; then
   AC_DEFINE(RKTIO_NO_ICONV,1,[Do not use iconv])
+  extra_scheme_config_args="${extra_scheme_config_args} --disable-iconv"
+  add_iconv_lib=
 fi
 
 if test "${enable_iconv}" = "yes" ; then
@@ -534,6 +564,10 @@ if test "${enable_iconv}" = "yes" ; then
                have_codeset=yes,
               have_codeset=no)
   AC_MSG_RESULT($have_codeset)
+fi
+
+if test "${add_iconv_lib}" != "" ; then
+    LIBS="${LIBS} ${add_iconv_lib}"
 fi
 
 ############### pthread ###################

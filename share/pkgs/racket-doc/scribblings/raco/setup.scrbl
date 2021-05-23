@@ -342,11 +342,11 @@ flags:
 
 When building @exec{racket}, flags can be provided to @exec{raco
 setup} as run by @exec{make install} by setting the
-@as-index{@envvar{PLT_SETUP_OPTIONS}} environment variable. For
+@as-index{@envvar{PLT_SETUP_OPTIONS}} makefile variable. For
 example, the following command line uses a single process to build
 collections during an install:
 
-   @commandline{env PLT_SETUP_OPTIONS="-j 1" make install}
+   @commandline{make install PLT_SETUP_OPTIONS="-j 1"}
 
 Running @exec{raco setup} is sensitive to the
 @envvar{PLT_COMPILED_FILE_CHECK} environment variable in the same way
@@ -1391,9 +1391,20 @@ current-system paths while @racket[get-cross-lib-search-dirs] and
   @racket[#f] if none can be found. A @racket[#f] result is likely only
   in a stand-alone executable that is distributed without libraries.}
 
+@(define-syntax user-path
+   (syntax-rules ()
+     [(_ dir vers)
+      @list{The user-specific path depends on at least
+            @racket[(find-system-path 'addon-dir)] and
+            @racket[vers].}]
+     [(_ dir)
+      (user-path dir (get-installation-name))]))
+
 @defproc[(find-user-collects-dir) path?]{
   Returns a path to the user-specific @filepath{collects} directory; the
-  directory indicated by the returned path may or may not exist.}
+  directory indicated by the returned path may or may not exist.
+
+  @user-path["collects"]}
 
 @defproc[(get-collects-search-dirs) (listof path?)]{
   Returns the same result as @racket[(current-library-collection-paths)],
@@ -1429,7 +1440,9 @@ current-system paths while @racket[get-cross-lib-search-dirs] and
 @defproc[(find-user-links-file [vers string? (get-installation-name)]) path?]{
   Returns a path to the user's @tech[#:doc reference-doc]{collection
   links file}.  The file indicated by the returned path may or may not
-  exist.}
+  exist.
+
+  @user-path["links.rktd" vers]}
 
 @defproc[(get-links-search-files) (listof path?)]{
   Returns a list of paths to installation @tech[#:doc
@@ -1452,7 +1465,9 @@ current-system paths while @racket[get-cross-lib-search-dirs] and
 @defproc[(find-user-pkgs-dir [vers string? (get-installation-name)]) path?]{
   Returns a path to the directory containing packages with
   user-specific scope for installation name @racket[vers]; the directory indicated by
-  the returned path may or may not exist.}
+  the returned path may or may not exist.
+
+  @user-path["pkgs" vers]}
 
 @defproc[(get-pkgs-search-dirs) (listof path?)]{
   Returns a list of paths to the directories containing packages in
@@ -1471,7 +1486,9 @@ current-system paths while @racket[get-cross-lib-search-dirs] and
 
 @defproc[(find-user-doc-dir) path?]{
   Returns a path to a user-specific @filepath{doc} directory. The directory
-  indicated by the returned path may or may not exist.}
+  indicated by the returned path may or may not exist.
+
+  @user-path["doc"]}
 
 @defproc[(get-doc-search-dirs) (listof path?)]{
   Returns a list of paths to search for documentation, not including
@@ -1492,7 +1509,9 @@ current-system paths while @racket[get-cross-lib-search-dirs] and
 
 @defproc[(find-user-lib-dir) path?]{
   Returns a path to a user-specific @filepath{lib} directory; the directory
-  indicated by the returned path may or may not exist.}
+  indicated by the returned path may or may not exist.
+
+  @user-path["lib"]}
 
 @defproc[(get-lib-search-dirs) (listof path?)]{
   Returns a list of paths to search for foreign libraries.
@@ -1554,7 +1573,9 @@ current-system paths while @racket[get-cross-lib-search-dirs] and
 
 @defproc[(find-user-share-dir) path?]{
   Returns a path to a user-specific @filepath{share} directory; the directory
-  indicated by the returned path may or may not exist.}
+  indicated by the returned path may or may not exist.
+
+  @user-path["share"]}
 
 @defproc[(find-include-dir) (or/c path? #f)]{
   Returns a path to the installation's @filepath{include} directory, which
@@ -1565,7 +1586,9 @@ current-system paths while @racket[get-cross-lib-search-dirs] and
 
 @defproc[(find-user-include-dir) path?]{
   Returns a path to a user-specific @filepath{include} directory; the
-  directory indicated by the returned path may or may not exist.}
+  directory indicated by the returned path may or may not exist.
+
+  @user-path["include"]}
 
 @defproc[(get-include-search-dirs) (listof path?)]{
   Returns a list of paths to search for @filepath{.h} files. Unless it is
@@ -1592,12 +1615,16 @@ current-system paths while @racket[get-cross-lib-search-dirs] and
 
 @defproc[(find-user-console-bin-dir) path?]{
   Returns a path to the user's executable directory; the directory
-  indicated by the returned path may or may not exist.}
+  indicated by the returned path may or may not exist.
+
+  @user-path[#f]}
 
 @defproc[(find-user-gui-bin-dir) path?]{
   Returns a path to the user's executable directory for graphical
   programs; the directory indicated by the returned path may or may
-  not exist.}
+  not exist.
+
+  @user-path[#f]}
 
 @defproc[(find-apps-dir) (or/c path? #f)]{
   Returns a path to the installation's directory @filepath{.desktop}
@@ -1609,7 +1636,9 @@ current-system paths while @racket[get-cross-lib-search-dirs] and
 @defproc[(find-user-apps-dir) path?]{
   Returns a path to the user's directory for @filepath{.desktop} files
   (for Unix); the directory indicated by the returned path may or may
-  not exist.}
+  not exist.
+
+  @user-path[#f]}
 
 @defproc[(find-man-dir) (or/c path? #f)]{
   Returns a path to the installation's man-page directory. The result is
@@ -1617,7 +1646,9 @@ current-system paths while @racket[get-cross-lib-search-dirs] and
 
 @defproc[(find-user-man-dir) path?]{
   Returns a path to the user's man-page directory; the directory
-  indicated by the returned path may or may not exist.}
+  indicated by the returned path may or may not exist.
+
+  @user-path["man"]}
 
 @defproc[(get-doc-search-url) string?]{
   Returns a string that is used by the documentation system, augmented
@@ -2132,8 +2163,9 @@ does not match the running Racket's information, then the
 @racketmodname[setup/cross-system] module infers that Racket is being
 run in cross-installation mode.
 
-For example, if an in-place Racket installation for a different
-platform resides at @nonterm{cross-dir}, then
+For example, if an in-place Racket @tech[#:doc guide-doc]{BC}
+installation for a different platform resides at @nonterm{cross-dir},
+then running Racket BC as
 
 @commandline{racket -C -G @nonterm{cross-dir}/etc -X @nonterm{cross-dir}/collects -l- raco pkg}
 
@@ -2145,6 +2177,53 @@ libraries need to run to perform the requested @exec{raco pkg} action
 (e.g., when installing built packages), or as long as the current
 platform's installation already includes those libraries.
 
+For Racket @tech[#:doc guide-doc]{CS}, cross compilation is more
+complicated, because Racket CS @filepath{.zo} files are
+platform-specific:
+
+@itemlist[
+
+ @item{A target installation @nonterm{cross-dir} is needed that
+       includes cross-compilation support for the host platform as
+       plug-in within the installation's
+       @filepath{@nonterm{cross-dir}/lib} directory. That installation
+       might be created by compiling from source on the host platform.
+       Only Racket CS can use a CS cross-compilation plug-in.
+
+       When running @exec{racket} in cross mode, use the
+       @DFlag{cross-compiler} flag to specify the target machine and
+       path to the @filepath{@nonterm{cross-dir}/lib} directory.}
+
+ @item{A flag combination @Flag{MCR} with argument
+       @filepath{@nonterm{absolute-zo-dir}:} is needed to enable
+       @filepath{.zo} file creation for both the host platform (which
+       uses the directory before a @litchar{:}) and the target
+       platform (which uses the normal compiled-file subdirectory when
+       the path after the @litchar{:} is empty).
+
+       The @nonterm{absolute-zo-dir} can be any absolute path. It
+       generally should be populated by running @exec{raco setup} in
+       cross mode before commands like @exec{raco pkg}.}
+
+]
+
+For example, the @exec{raco pkg} example for Racket CS is
+
+@verbatim[#:indent 2]{
+  racket --cross-compiler @nonterm{target-machine} @nonterm{cross-dir}/lib \
+    -MCR @nonterm{absolute-zo-dir}: \
+    -G @nonterm{cross-dir}/etc -X @nonterm{cross-dir}/collects -l- raco pkg
+}
+
+The @nonterm{target-machine} provided to @DFlag{cross-compiler} should
+be the same as the @racketidfont{target-machine} entry in
+@filepath{@nonterm{cross-dir}/lib/systemd.rktd}.
+
+The @Flag{C} flag is shorthand for @DFlag{cross}, @Flag{M} is short
+for @DFlag{compile-any}, @Flag{R} is short for @DFlag{compiled},
+@Flag{G} is short for @DFlag{config}, @Flag{X} is short for
+@DFlag{collects}, and @Flag{MCR} is short for @exec{@Flag{M} @Flag{C}
+@Flag{R}}.
 
 @history[#:added "6.3"]
 

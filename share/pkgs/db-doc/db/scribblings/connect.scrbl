@@ -246,7 +246,7 @@ Base connections are made using the following functions.
                  (or/c exact-nonnegative-integer? +inf.0) 10]
                 [#:busy-retry-delay busy-retry-delay
                  (and/c rational? (not/c negative?)) 0.1]
-                [#:use-place use-place boolean? #f])
+                [#:use-place use-place (or/c boolean? 'os-thread 'place) #f])
          connection?]{
 
   Opens the SQLite database at the file named by @racket[database], if
@@ -272,9 +272,14 @@ Base connections are made using the following functions.
   attempted once. If after @racket[busy-retry-limit] retries the
   operation still does not succeed, an exception is raised.
 
-  If @racket[use-place] is true, the actual connection is created in
-  a distinct @tech/reference{place} for database connections and a
-  proxy is returned; see @secref["ffi-concurrency"].
+  If @racket[use-place] is @racket['os-thread], then queries are executed in a
+  @seclink["Operating_System_Threads" #:doc '(lib
+  "scribblings/foreign/foreign.scrbl")]{separate OS thread}. If
+  @racket[use-place] is @racket['place], the actual connection is created in a
+  distinct @tech/reference{place} for database connections and a proxy is
+  returned. If @racket[use-place] is @racket[#t], then it acts like
+  @racket['os-thread] if available, otherwise like @racket['place]. See
+  @secref["ffi-concurrency"] for more information.
 
   If the connection cannot be made, an exception is raised.
 
@@ -305,7 +310,7 @@ Reports whether the SQLite native library is found, in which case
                         (or/c 'wchar 'utf-8 'latin-1)
                         'wchar]
                        [#:quirks quirks (listof symbol?) null]
-                       [#:use-place use-place boolean? #f])
+                       [#:use-place use-place (or/c boolean? 'place 'os-thread) #f])
          connection?]{
 
   Creates a connection to the ODBC Data Source named @racket[dsn]. The
@@ -341,19 +346,18 @@ Reports whether the SQLite native library is found, in which case
   supported:
   @itemlist[
 
-  @item{@racket['no-c-bigint] --- Don't use @tt{SQL_C_NUMERIC} to
-  fetch @tt{NUMERIC}/@tt{DECIMAL} values.}
-
-  @item{@racket['no-c-numeric] --- Don't use @tt{SQL_C_BIGINT} to bind
+  @item{@racket['no-c-bigint] --- Don't use @tt{SQL_C_BIGINT} to bind
   parameters or fetch field values.}
+
+  @item{@racket['no-c-numeric] --- Don't use @tt{SQL_C_NUMERIC} to
+  fetch @tt{NUMERIC}/@tt{DECIMAL} values.}
 
   ]
   See @secref["odbc-status"] for notes on specific ODBC drivers and
   recommendations for connection options.
 
-  If @racket[use-place] is true, the actual connection is created in
-  a distinct @tech/reference{place} for database connections and a
-  proxy is returned; see @secref["ffi-concurrency"].
+  The @racket[use-place] argument is interpreted the same as for
+  @racket[sqlite3-connect].
 
   If the connection cannot be made, an exception is raised.
 
@@ -370,7 +374,7 @@ Reports whether the SQLite native library is found, in which case
                                (or/c 'wchar 'utf-8 'latin-1)
                                'wchar]
                               [#:quirks quirks (listof symbol?) null]
-                              [#:use-place use-place boolean? #f])
+                              [#:use-place use-place (or/c boolean? 'os-thread 'place) #f])
          connection?]{
 
   Creates a connection using an ODBC connection string containing a

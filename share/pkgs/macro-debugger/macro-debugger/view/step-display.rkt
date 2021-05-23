@@ -6,6 +6,7 @@
          "interfaces.rkt"
          macro-debugger/model/steps
 	 (prefix-in sb: macro-debugger/syntax-browser/interfaces)
+         macro-debugger/syntax-browser/icons/steps-to-arrow
          macro-debugger/view/debug-format)
 
 #;
@@ -263,9 +264,7 @@
     (define/private (insert-step-separator text #:compact? compact?)
       (send*/i sbview sb:syntax-browser<%>
         (add-text (if compact? "" "\n"))
-        (add-text
-         (make-object image-snip%
-                      (collection-file-path "red-arrow.bmp" "icons")))
+        (add-make-text (lambda (style) (new steps-to-arrow-snip% (style style))))
         (add-text "  [")
         (add-text text)
         (add-text "]\n\n")))
