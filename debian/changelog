@@ -1,8 +1,39 @@
-racket (8.0+ppa1-6~bionic1) bionic; urgency=medium
+racket (8.1+ppa1-1~bionic1) bionic; urgency=medium
 
   * PPA release
 
- -- Asumu Takikawa <asumu@racket-lang.org>  Mon, 22 Feb 2021 11:00:00 -0800
+ -- Asumu Takikawa <asumu@racket-lang.org>  Sun, 23 May 2021 13:11:00 -0800
+
+racket (8.0+dfsg1-4) experimental; urgency=medium
+
+  * Bug fix: "missing Breaks+Replaces: racket-common (<< 8)", thanks
+    to Andreas Beckmann (Closes: #986874).
+  * Drop Breaks/Depends on plt-scheme (package not in oldstable)
+  * Drop provides of plt-scheme.
+
+ -- David Bremner <bremner@debian.org>  Tue, 13 Apr 2021 08:25:15 -0300
+
+racket (8.0+dfsg1-3) experimental; urgency=medium
+
+  * Use bc backend for all except amd64, arm64, armhf, i386 (enable some
+    ports)
+
+ -- David Bremner <bremner@debian.org>  Sat, 10 Apr 2021 18:00:08 -0300
+
+racket (8.0+dfsg1-2) experimental; urgency=medium
+
+  * Use bc backend on armel, mips64el, mipsel, ppc64el, and s390x
+  * Don't pass --noopt to configure by default
+
+ -- David Bremner <bremner@debian.org>  Sat, 10 Apr 2021 13:03:07 -0300
+
+racket (8.0+dfsg1-1) experimental; urgency=medium
+
+  * New upstream release
+  * Build with Chez Scheme backend
+  * update debian/copyright for Chez Scheme bundle
+
+ -- David Bremner <bremner@debian.org>  Sat, 10 Apr 2021 08:18:48 -0300
 
 racket (7.9+dfsg1-1) unstable; urgency=medium
 
