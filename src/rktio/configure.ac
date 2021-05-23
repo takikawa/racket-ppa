@@ -175,13 +175,15 @@ if test "${xlocalehon}" = "yes" ; then
 fi
 [ msg="for xlocale functions" ]
 AC_MSG_CHECKING($msg)
-AC_COMPILE_IFELSE([AC_LANG_SOURCE([
+AC_LINK_IFELSE([AC_LANG_SOURCE([
    #ifdef RKTIO_USE_XLOCALE_HEADER
    # include <xlocale.h>
    #endif
    #include <locale.h>
    int main() {
       locale_t l = newlocale(LC_COLLATE_MASK | LC_CTYPE_MASK, "C", NULL);
+      locale_t old_l = uselocale(l);
+      uselocale(old_l);
       freelocale(l);
       return 0;
    }])],

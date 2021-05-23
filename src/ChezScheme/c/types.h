@@ -158,6 +158,9 @@ typedef struct _seginfo {
   struct _seginfo *next;                    /* pointer to the next seginfo (used in occupied_segments and unused_segs) */
   struct _seginfo *sweep_next;              /* next in list of segments allocated during GC => need to sweep */
   ptr sweep_start;                          /* address within segment to start sweep */
+#if defined(WRITE_XOR_EXECUTE_CODE)
+  iptr sweep_bytes;                         /* total number of bytes starting at sweep_start */
+#endif
   struct _seginfo **dirty_prev;             /* pointer to the next pointer on the previous seginfo in the DirtySegments list */
   struct _seginfo *dirty_next;              /* pointer to the next seginfo on the DirtySegments list */
   ptr trigger_ephemerons;                   /* ephemerons to re-check if object in segment is copied out */
@@ -186,7 +189,7 @@ typedef struct _chunkinfo {
   iptr base;                                /* first segment */
   iptr bytes;                               /* size in bytes */
   iptr segs;                                /* size in segments */
-  iptr nused_segs;                          /* number of segments currently in used use */ 
+  iptr nused_segs;                          /* number of segments currently in use */
   struct _chunkinfo **prev;                 /* pointer to previous chunk's next */
   struct _chunkinfo *next;                  /* next chunk */
   struct _seginfo *unused_segs;             /* list of unused segments */
@@ -279,7 +282,7 @@ typedef struct _bucket_pointer_list {
 #define size_record_inst(n) ptr_align(n)
 #define unaligned_size_record_inst(n) (n)
 
-#define rtd_parent(x) INITVECTIT(RECORDDESCANCESTRY(x), 0)
+#define rtd_parent(x) INITVECTIT(RECORDDESCANCESTRY(x), Svector_length(RECORDDESCANCESTRY(x)) - ancestry_parent_offset)
 
 /* type tagging macros */
 
@@ -549,9 +552,17 @@ typedef struct thread_gc {
 #define SETPTRFIELD(x,disp,y) DIRTYSET(((ptr *)TO_VOIDP((uptr)(x)+disp)),(y))
 
 #define INCRGEN(g) (g = g == S_G.max_nonstatic_generation ? static_generation : g+1)
-#define IMMEDIATE(x) (Sfixnump(x) || Simmediatep(x))
+#define FIXMEDIATE(x) (Sfixnump(x) || Simmediatep(x))
 
 /* For `memcpy_aligned, that the first two arguments are word-aligned
    and it would be ok to round up the length to a word size. But
    probably the compiler does a fine job with plain old `mempcy`. */
 #define memcpy_aligned memcpy
+
+#define USE_TRAP_FUEL(tc, n) do {                         \
+    uptr _amt_ = (uptr)(n);                               \
+    if ((uptr)TRAP(tc) > _amt_)                           \
+      TRAP(tc) = (ptr)((uptr)TRAP(tc) - _amt_);           \
+     else                                                 \
+       TRAP(tc) = (ptr)1;                                 \
+  } while (0)

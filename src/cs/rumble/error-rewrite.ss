@@ -59,7 +59,8 @@
                 fxarithmetic-shift-left fxlshift
                 fxsll/wraparound fxlshift/wraparound
                 real->flonum ->fl
-                time-utc->date seconds->date)
+                time-utc->date seconds->date
+                make-record-type-descriptor* make-struct-type)
         (set! rewrites-added? #t)))
     (getprop n 'error-rename n)))
 
@@ -97,6 +98,20 @@
     => (lambda (ctc)
          (format-error-values (string-append "contract violation\n  expected: " ctc "\n  given: ~s")
                               irritants))]
+   [(and (or (eq? who 'list-ref) (eq? who 'list-tail))
+         (equal? str "index ~s is out of range for list ~s"))
+    (format-error-values (string-append "index too large for list\n"
+                                        "  index: ~s\n"
+                                        "  in: ~s")
+                         irritants)]
+   [(and (or (eq? who 'list-ref) (eq? who 'list-tail))
+         (equal? str "index ~s reaches a non-pair in ~s"))
+    (format-error-values (string-append "index reaches a non-pair\n"
+                                        "  index: ~s\n"
+                                        "  in: ~s")
+                         irritants)]
+   [(or (eq? who 'memq) (eq? who 'memv))
+    (format-error-values "not a proper list\n  in: ~s" irritants)]
    [(equal? str  "~s is not a valid index for ~s")
     (cond
      [(exact-nonnegative-integer? (car irritants))
@@ -128,6 +143,11 @@
     (let ([ctc (desc->contract (substring str (string-length is-not-a-str) (string-length str)))])
       (format-error-values (string-append "contract violation\n  expected: " ctc "\n  given: ~s")
                            irritants))]
+   [(equal? str "cannot extend sealed record type ~s as ~s")
+    (format-error-values (string-append "cannot make a subtype of a sealed type\n"
+                                        "  type name: ~s\n"
+                                        "  sealed type: ~s")
+                         (reverse irritants))]
    [(eq? who 'time-utc->date)
     (values "integer is out-of-range" null)]
    [else

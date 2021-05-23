@@ -1,5 +1,6 @@
 #lang scribble/base
-@(require "utils.rkt")
+@(require "utils.rkt"
+          scribble/bnf)
 
 @title[#:style '(grouper toc) #:tag "appendix"]{Appendices}
 
@@ -25,6 +26,75 @@ sources from the @tt{git} repository at
 is one step away from a normal source distribution, and it provides
 build modes that are more suitable for developing Racket itself; see
 @filepath{build.md} in the @tt{git} repository for more information.
+
+@; ----------------------------------------
+
+@section[#:tag "ios-cross-compilation"]{Cross-compiling Racket Sources for iOS}
+
+See @secref[#:doc raco-doc "cross-system"] for general information on
+using Racket in cross-build mode. Everything in this section can be
+adapted to other cross-compilation targets, but iOS is used to make
+the examples concrete.
+
+After cross-compiling Racket CS for iOS according to the source
+distribution's @filepath{src/README.txt} file, you can use that build
+@nonterm{ios-racket-dir} in conjunction with the host build it was
+compiled by to cross-compile Racket modules for iOS by passing the
+following set of flags to the host executable:
+
+@verbatim[#:indent 2]{
+racket  \
+  --compile-any  \
+  --compiled @nonterm{ios-racket-dir}/src/build/cs/c/compiled:  \
+  --cross  \
+  --cross-compiler tarm64osx @nonterm{ios-racket-dir}/lib  \
+  --config @nonterm{ios-racket-dir}/etc  \
+  --collects @nonterm{ios-racket-dir}/collects
+}
+
+The above command runs the host Racket REPL with support for writing
+compiled code for both the host machine and for the @tt{tarm64osx}
+target. The first path to @DFlag{compiled} (before the @litchar{:})
+can be any absolute path, and @filepath{.zo} files for the host
+platform will be written there; specifying the path
+@filepath{@nonterm{ios-racket-dir}/src/build/cs/c/compiled} is meant
+to reuse the directory that was created during cross-compilation
+installation. The second path to @DFlag{compiled} (after @litchar{:})
+is empty, which causes target-platform @filepath{.zo} files to be
+written in the usual @filepath{compiled} subdirectory.
+
+Instruct the host Racket to run library code by
+passing the @Flag{l} flag.  For example, you can setup the target
+Racket's installation with the following command:
+
+@verbatim[#:indent 2]{
+racket  \
+  --compile-any  \
+  --compiled @nonterm{ios-racket-dir}/src/build/cs/c/compiled:  \
+  --cross  \
+  --cross-compiler tarm64osx @nonterm{ios-racket-dir}/lib  \
+  --config @nonterm{ios-racket-dir}/etc  \
+  --collects @nonterm{ios-racket-dir}/collects  \
+  -l-  \
+  raco setup
+}
+
+Finally, you can package up a Racket module and its dependencies for
+use with @cppi{racket_embedded_load_file} (after installing
+@filepath{compiler-lib} and @filepath{cext-lib} for the target Racket)
+with:
+
+@verbatim[#:indent 2]{
+racket  \
+  --compile-any  \
+  --compiled @nonterm{ios-racket-dir}/src/build/cs/c/compiled:  \
+  --cross  \
+  --cross-compiler tarm64osx @nonterm{ios-racket-dir}/lib  \
+  --config @nonterm{ios-racket-dir}/etc  \
+  --collects @nonterm{ios-racket-dir}/collects  \
+  -l-  \
+  raco ctool --mods application.zo src/application.rkt
+}
 
 @; ----------------------------------------
 
@@ -198,7 +268,7 @@ static char *get_self_path()
   char *s;
   uint32_t size = 0;
   int r;
-  
+
   r = _NSGetExecutablePath(NULL, &size);
   s = malloc(size+1);
   r = _NSGetExecutablePath(s, &size);
@@ -235,7 +305,7 @@ int main(int argc, char **argv)
   ba.boot1_offset = find_section("__DATA", "__rktboot1");
   ba.boot2_offset = find_section("__DATA", "__rktboot2");
   ba.boot3_offset = find_section("__DATA", "__rktboot3");
-  
+
   ba.exec_file = argv[0];
   ba.run_file = argv[0];
 
@@ -304,7 +374,7 @@ static long find_resource_offset(wchar_t *path, int id, int type, int encoding)
     DWORD val, got, sec_pos, virtual_addr, rsrcs, pos;
     WORD num_sections, head_size;
     char name[8];
-    
+
     SetFilePointer(fd, 60, 0, FILE_BEGIN);
     ReadFile(fd, &val, 4, &got, NULL);
     SetFilePointer(fd, val+4+2, 0, FILE_BEGIN); /* Skip "PE\0\0" tag and machine */
@@ -327,7 +397,7 @@ static long find_resource_offset(wchar_t *path, int id, int type, int encoding)
         SetFilePointer(fd, 4, 0, FILE_CURRENT); /* skip file size */
         ReadFile(fd, &rsrcs, 4, &got, NULL);
         SetFilePointer(fd, rsrcs, 0, FILE_BEGIN);
-        
+
         /* We're at the resource table; step through 3 layers */
         pos = find_by_id(fd, rsrcs, rsrcs, id);
 	if (pos) {
@@ -364,7 +434,7 @@ static DWORD find_by_id(HANDLE fd, DWORD rsrcs, DWORD pos, int id)
 {
   DWORD got, val;
   WORD name_count, id_count;
-  
+
   SetFilePointer(fd, pos + 12, 0, FILE_BEGIN);
   ReadFile(fd, &name_count, 2, &got, NULL);
   ReadFile(fd, &id_count, 2, &got, NULL);

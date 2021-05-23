@@ -134,7 +134,9 @@ typedef char *memcpy_t;
 #define MAKE_NAN(x) { x = 0.0; x = x / x; }
 #define GETWD(x) getcwd((x),PATH_MAX)
 typedef int tputsputcchar;
-#define LOCKF
+#ifndef __ANDROID__
+# define LOCKF
+#endif
 #define DIRMARKERP(c) ((c) == '/')
 #ifndef DISABLE_X11
 # define LIBX11 "libX11.so"
@@ -149,6 +151,10 @@ typedef int tputsputcchar;
 #define NSECCTIME(sb) (sb).st_ctim.tv_nsec
 #define NSECMTIME(sb) (sb).st_mtim.tv_nsec
 #define ICONV_INBUF_TYPE char **
+#ifdef __ANDROID__
+# define NOFILE 256
+# define NO_USELOCALE
+#endif
 #define UNUSED __attribute__((__unused__))
 #endif
 
@@ -324,9 +330,18 @@ typedef int tputsputcchar;
 #if !defined(__POWERPC__)
 # define LITTLE_ENDIAN_IEEE_DOUBLE
 #endif
+/* for both iPhone and iPhoneSimulator */
+#if defined(TARGET_OS_IPHONE)
+# define SYSTEM(s) ((void)s, -1)
+# define S_PROT_CODE (PROT_WRITE | PROT_READ)
+# define WRITE_XOR_EXECUTE_CODE
+# define WX_UNUSED
+#endif
 #if defined(__arm64__)
-# define S_MAP_CODE  MAP_JIT
-# define S_ENABLE_CODE_WRITE(on) pthread_jit_write_protect_np(!(on))
+# if !defined(TARGET_OS_IPHONE)
+#  define S_MAP_CODE MAP_JIT
+#  define S_ENABLE_CODE_WRITE(on) pthread_jit_write_protect_np(!(on))
+# endif
 # define CANNOT_READ_DIRECTLY_INTO_CODE
 # include <pthread.h>
 #elif defined(__x86_64__)
@@ -343,7 +358,10 @@ typedef int tputsputcchar;
 #define LOCKF
 #define DIRMARKERP(c) ((c) == '/')
 #ifndef DISABLE_X11
-#define LIBX11 "/usr/X11R6/lib/libX11.dylib"
+# define DISABLE_X11
+#endif
+#ifndef DISABLE_X11
+# define LIBX11 "/usr/X11R6/lib/libX11.dylib"
 #endif
 #define _DARWIN_USE_64_BIT_INODE
 #define SECATIME(sb) (sb).st_atimespec.tv_sec
@@ -504,6 +522,12 @@ typedef char tputsputcchar;
 #endif
 #ifndef S_ENABLE_CODE_WRITE
 # define S_ENABLE_CODE_WRITE(on) do { } while (0)
+#endif
+
+/* Signals that an argument is unused when W&X memory pages are
+   supported. Relevant in relation to WRITE_XOR_EXECUTE_CODE. */
+#ifndef WX_UNUSED
+# define WX_UNUSED UNUSED
 #endif
 
 #ifdef PTHREADS

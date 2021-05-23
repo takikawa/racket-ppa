@@ -75,6 +75,16 @@ Represents an analyzed profile result.
 
 ]}
 
+@defproc[(profile-merge [profile profile?] ...)
+         profile?]{
+
+This function combines multiple profiles into a single one. This is
+most useful when the multiple profiles are for multiple runs of the
+same code. The total time for the output profile is the sum of the
+total times of the input profiles, and the total and self times for
+each output profile node is the sum of its total and self times in
+each input profile.}
+
 
 @defstruct*[node ([id      (or/c #f symbol? any/c)]
                   [src     (or/c #f srcloc?)]

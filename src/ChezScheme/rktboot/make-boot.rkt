@@ -96,7 +96,8 @@
                expand
                compile
                error
-               format))))
+               format
+               make-variable-transformer))))
 
 (reset-toplevels)
 
@@ -425,6 +426,7 @@
                       "cpletrec.ss"
                       "cpcommonize.ss"
                       "cpnanopass.ss"
+                      "cpprim.ss"
                       "compile.ss"
                       "back.ss"))])
     (status (format "Load ~a" s))

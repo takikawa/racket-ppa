@@ -351,22 +351,30 @@
            (loop (syntax e)))]
         [(quote datum)
          (annotate-raw-keyword stx-obj varrefs level-of-enclosing-module)]
-        [(quote-syntax datum)
+        [(quote-syntax datum . maybe-hash-colon-local)
          (begin
            (annotate-raw-keyword stx-obj varrefs level-of-enclosing-module)
-           (let loop ([stx #'datum])
-             (cond [(identifier? stx)
-                    (add-id templrefs stx level-of-enclosing-module)]
-                   [(syntax? stx)
-                    (loop (syntax-e stx))]
-                   [(pair? stx)
-                    (loop (car stx))
-                    (loop (cdr stx))]
-                   [(vector? stx)
-                    (for-each loop (vector->list stx))]
-                   [(box? stx)
-                    (loop (unbox stx))]
-                   [else (void)])))]
+           (let loop ([stx #'datum]
+                      [identifiers-as-disappeared-uses?
+                       (syntax-property stx-obj 'identifiers-as-disappeared-uses?)])
+             (cond
+               [(and (not identifiers-as-disappeared-uses?)
+                     (syntax? stx)
+                     (syntax-property stx 'identifiers-as-disappeared-uses?))
+                (loop stx #t)]
+               [(identifier? stx)
+                (add-id (if identifiers-as-disappeared-uses? varrefs templrefs)
+                        stx level-of-enclosing-module)]
+               [(syntax? stx)
+                (loop (syntax-e stx) identifiers-as-disappeared-uses?)]
+               [(pair? stx)
+                (loop (car stx) identifiers-as-disappeared-uses?)
+                (loop (cdr stx) identifiers-as-disappeared-uses?)]
+               [(vector? stx)
+                (for ([e (in-vector stx)])
+                  (loop e identifiers-as-disappeared-uses?))]
+               [(box? stx)
+                (loop (unbox stx) identifiers-as-disappeared-uses?)])))]
         [(with-continuation-mark a b c)
          (begin
            (annotate-raw-keyword stx-obj varrefs level-of-enclosing-module)
@@ -387,7 +395,7 @@
            (add-binders (syntax vars) binders binding-inits #'b
                         level level-of-enclosing-module
                         sub-identifier-binding-directives mods)
-           (add-definition-target (syntax vars) mods)
+           (add-definition-target (syntax vars) mods level)
            (loop (syntax b)))]
         [(define-syntaxes names exp)
          (begin
@@ -395,7 +403,7 @@
            (add-binders (syntax names) binders binding-inits #'exp
                         level level-of-enclosing-module
                         sub-identifier-binding-directives mods)
-           (add-definition-target (syntax names) mods)
+           (add-definition-target (syntax names) mods level)
            (level-loop (syntax exp) (+ level 1)))]
         [(begin-for-syntax exp ...)
          (begin
@@ -1344,12 +1352,14 @@
          (add-id&init&sub-range-binders stx)]))))
 
 ;; add-definition-target : syntax[(sequence of identifiers)] (listof symbol) -> void
-(define (add-definition-target stx mods)
+(define (add-definition-target stx mods phase-level)
   (when mods
     (define defs-text (current-annotations))
     (for ([id (in-list (syntax->list stx))])
       (define source (syntax-source id))
-      (when (and source
+      (define ib (identifier-binding id phase-level))
+      (when (and (list? ib)
+                 source
                  defs-text
                  (syntax-position id)
                  (syntax-span id))
@@ -1359,7 +1369,7 @@
                 source
                 pos-left
                 pos-right
-                (syntax-e id)
+                (list-ref ib 1)
                 mods))))))
 
 ;; annotate-raw-keyword : syntax id-map integer -> void

@@ -157,6 +157,7 @@
 (define-interface syntax-browser<%> ()
   (add-syntax
    add-text
+   add-make-text
    add-error-text
    add-clickback
    add-separator

@@ -526,7 +526,7 @@
      (|#%app|
       p
       (make-composable-continuation
-       (extract-metacontinuation 'call-with-composable-continuation (strip-impersonator tag) #f)
+       (extract-metacontinuation 'call-with-composable-continuation (strip-impersonator tag) (not wind?))
        k
        (current-winders)
        (current-mark-stack)
@@ -721,10 +721,7 @@
                    [(null? current-mc)
                     (unless (or (eq? tag the-default-continuation-prompt-tag)
                                 (eq? tag the-root-continuation-prompt-tag))
-                      (do-raise-arguments-error '|continuation application|
-                                                "continuation includes no prompt with the given tag"
-                                                exn:fail:contract:continuation
-                                                (list "tag" tag)))
+                      (raise-no-prompt-tag '|continuation application| tag))
                     (values accum null)]
                    [(eq? tag (strip-impersonator (metacontinuation-frame-tag (car current-mc))))
                     (values accum current-mc)]
@@ -802,9 +799,7 @@
        [(null? mc)
         (unless (or (eq? tag the-root-continuation-prompt-tag)
                     (eq? tag the-default-continuation-prompt-tag))
-          (do-raise-arguments-error who "continuation includes no prompt with the given tag"
-                                    exn:fail:contract:continuation
-                                    (list "tag" tag)))
+          (raise-no-prompt-tag who tag))
         (check-barrier-ok saw-barrier?)
         '()]
        [else
@@ -823,7 +818,7 @@
     (raise-no-prompt-tag who tag)))
 
 (define (raise-no-prompt-tag who tag)
-  (do-raise-arguments-error who "continuation includes no prompt with the given tag"
+  (do-raise-arguments-error who "no corresponding prompt in the continuation"
                             exn:fail:contract:continuation
                             (list "tag" tag)))
 
@@ -1003,7 +998,7 @@
    [(pair? a)
     (if (eq? key (car a))
         (cons key val)
-        (make-mark-frame (mark-table-add/replace* (pair->mark-table a) key val)
+        (make-mark-frame (mark-table-add/replace* (pair->mark-table a) a key val)
                          #f))]
    [(eq? a 'empty)
     ;; The current frame is the mark-splice frame, so update
@@ -1011,7 +1006,7 @@
     (current-mark-splice (mark-frame-update (current-mark-splice) key val))
     'empty]
    [(mark-frame? a)
-    (make-mark-frame (mark-table-add/replace* (mark-frame-table a) key val)
+    (make-mark-frame (mark-table-add/replace* (mark-frame-table a) a key val)
                      (mark-frame-end-uninterupted? a))]
    [else
     ;; assert: (elem+cache? a)
@@ -1375,15 +1370,15 @@
 (define/who continuation-mark-set->list
   (case-lambda
     [(marks key) (continuation-mark-set->list marks key the-default-continuation-prompt-tag)]
-    [(marks key prompt-tag)
+    [(marks key prompt-tag-in)
      (check who continuation-mark-set? :or-false marks)
-     (check who continuation-prompt-tag? prompt-tag)
-     (maybe-future-barricade prompt-tag)
-     (let ([prompt-tag (strip-impersonator prompt-tag)])
+     (check who continuation-prompt-tag? prompt-tag-in)
+     (maybe-future-barricade prompt-tag-in)
+     (let ([prompt-tag (strip-impersonator prompt-tag-in)])
        (let-values ([(key wrapper) (extract-continuation-mark-key-and-wrapper 'continuation-mark-set->list key)])
          (let chain-loop ([mark-chain (or (and marks
                                                (continuation-mark-set-mark-chain marks))
-                                          (current-mark-chain))])
+                                          (prune-mark-chain-suffix who prompt-tag prompt-tag-in (current-mark-chain)))])
            (cond
             [(null? mark-chain)
              null]
@@ -1427,12 +1422,15 @@
               [(v new-next)
                (values v (lambda () (loop new-next)))])))))]))
 
-(define (do-continuation-mark-set->list* who iterator? marks keys none-v prompt-tag)
+(define (do-continuation-mark-set->list* who iterator? marks keys none-v prompt-tag-in)
   (check who continuation-mark-set? :or-false marks)
   (check who list? keys)
-  (check who continuation-prompt-tag? prompt-tag)
-  (maybe-future-barricade prompt-tag)
-  (let ([prompt-tag (strip-impersonator prompt-tag)])
+  (check who continuation-prompt-tag? prompt-tag-in)
+  (maybe-future-barricade prompt-tag-in)
+  (let* ([prompt-tag (strip-impersonator prompt-tag-in)]
+         [mark-chain (or (and marks
+                              (continuation-mark-set-mark-chain marks))
+                         (prune-mark-chain-suffix who prompt-tag prompt-tag-in (current-mark-chain)))])
     (let-values ([(all-keys all-wrappers)
                   (map/2-values (lambda (k)
                                   (extract-continuation-mark-key-and-wrapper who k))
@@ -1440,9 +1438,7 @@
       (lambda ()
         (let* ([n (length all-keys)]
                [tmp (#%make-vector n)])
-          (let chain-loop ([mark-chain (or (and marks
-                                                (continuation-mark-set-mark-chain marks))
-                                           (current-mark-chain))])
+          (let chain-loop ([mark-chain mark-chain])
             (cond
              [(null? mark-chain)
               null]
@@ -1544,6 +1540,10 @@
            (prune-mark-chain-prefix (escape-continuation-tag k) (current-mark-chain)))
           null)]
         [else
+         ;; A `#f` is used to get the marks for a completed thread.
+         ;; It would make sense to raise an error for any prompt,
+         ;; since the continuaiton is empty, but `continuation-marks`
+         ;; is defined to return empty marks in this case.
          (make-continuation-mark-set null null)]))]))
 
 (define (get-metacontinuation-traces mc)
@@ -1578,7 +1578,7 @@
            (authentic-continuation-mark-key? (impersonator-val v)))))
 
 ;; Like `mark-table-add/replace`, but handles continuation-mark-key impersonators
-(define (mark-table-add/replace* ht k v)
+(define (mark-table-add/replace* ht old-a k v)
   (cond
    [(and (impersonator? k)
          (authentic-continuation-mark-key? (impersonator-val k)))
@@ -1586,14 +1586,20 @@
       (cond
        [(or (continuation-mark-key-impersonator? k)
             (continuation-mark-key-chaperone? k))
-        (let ([new-v (|#%app|
-                      (if (continuation-mark-key-impersonator? k)
-                          (continuation-mark-key-impersonator-set k)
-                          (continuation-mark-key-chaperone-set k))
-                      v)])
-          (unless (or (continuation-mark-key-impersonator? k)
-                      (chaperone-of? new-v v))
-            (raise-chaperone-error 'with-continuation-mark "value" v new-v))
+        (let ([new-v
+               ;; Restore attachment while interposing
+               (call-setting-continuation-attachment
+                old-a
+                (lambda ()
+                  (let ([new-v (|#%app|
+                                (if (continuation-mark-key-impersonator? k)
+                                    (continuation-mark-key-impersonator-set k)
+                                    (continuation-mark-key-chaperone-set k))
+                                v)])
+                    (unless (or (continuation-mark-key-impersonator? k)
+                                (chaperone-of? new-v v))
+                      (raise-chaperone-error 'with-continuation-mark "value" v new-v))
+                    new-v)))])
           (loop (impersonator-next k) new-v))]
        [(impersonator? k)
         (loop (impersonator-next k) v)]

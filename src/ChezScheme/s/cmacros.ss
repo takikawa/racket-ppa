@@ -357,7 +357,7 @@
 ;; ---------------------------------------------------------------------
 ;; Version and machine types:
 
-(define-constant scheme-version #x0905033A)
+(define-constant scheme-version #x09050504)
 
 (define-syntax define-machine-types
   (lambda (x)
@@ -854,7 +854,7 @@
 (define-constant type-exactnum         #b01010110)
 (define-constant type-box               #b0001110) ; bit 3 set for non-numbers
 (define-constant type-immutable-box    #b10001110) ; low 7 bits match `type-box`
-(define-constant type-stencil-vector     #b011110) ; remianing bits for stencil; type looks like immediate
+(define-constant type-stencil-vector     #b011110) ; remaining bits for mask; type looks like immediate
 ; #b00101110 (forward_marker) must not be used
 (define-constant type-code             #b00111110)
 (define-constant type-port             #b11001110)
@@ -1545,6 +1545,7 @@
    [xptr ts]
    [xptr td]
    [xptr real_eap]
+   [xptr save1]
    [ptr virtual-registers (constant virtual-register-count)]
    [ptr guardian-entries]
    [ptr cchain]
@@ -1626,7 +1627,7 @@
 
 (define-primitive-structure-disps record-type type-typed-object
   ([ptr type]
-   [ptr ancestry] ; vector: parent at 0, grandparent at 1, etc.
+   [ptr ancestry] ; (vector #f .... grandparent parent self)
    [ptr size]  ; total record size in bytes, including type tag
    [ptr pm]    ; pointer mask, where low bit corresponds to type tag
    [ptr mpm]   ; mutable-pointer mask, where low bit for type is always 0
@@ -1639,6 +1640,10 @@
 (define-constant rtd-generative #b0001)
 (define-constant rtd-opaque     #b0010)
 (define-constant rtd-sealed     #b0100)
+(define-constant rtd-act-sealed #b1000)
+
+(define-constant ancestry-parent-offset 2)
+(define-constant minimum-ancestry-vector-length 2)
 
 ; we do this as a macro here since we want the freshest version possible
 ; in syntax.ss when we use it as a patch, whereas we want the old
@@ -2191,6 +2196,11 @@
 (define-constant time-utc 4)
 (define-constant time-collector-cpu 5)
 (define-constant time-collector-real 6)
+
+(define-syntax fixmediate?
+  (lambda (stx)
+    (syntax-case stx ()
+      [(_ e) #'(let ([v e]) (or (fixnum? v) ($immediate? v)))])))
 
 ;; ---------------------------------------------------------------------
 ;; vfasl

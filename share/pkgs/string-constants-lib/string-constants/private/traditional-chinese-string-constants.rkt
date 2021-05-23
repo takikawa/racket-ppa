@@ -1287,32 +1287,6 @@
   (happy-birthday-matthew "生日快樂，馬曉！")
   (happy-birthday-shriram "生日快樂，Shriram！")
   
-  (mrflow-using-default-language-title "正在使用默認語言")
-  (mrflow-using-default-language "當前使用的語言並不包含其原素的類型。改用R5RS Scheme。")
-  (mrflow-button-title "分析")
-  ;(mrflow-unknown-style-delta-error-title "Unknown Box Style Delta")
-  ;(mrflow-unknown-style-delta-error "Unknown box style delta: ~a")
-  (mrflow-popup-menu-show-type "顯示類型")
-  (mrflow-popup-menu-hide-type "隱藏類型")
-  (mrflow-popup-menu-show-errors "顯示錯誤")
-  (mrflow-popup-menu-hide-errors "隱藏錯誤")
-  ;(mrflow-read-exception-title "Read Exception")
-  ;(mrflow-read-exception "Read exception: ~a")
-  ;(mrflow-syntax-exception-title "Syntax Exception")
-  ;(mrflow-syntax-exception "Syntax exception: ~a")
-  ;(mrflow-unknown-exception-title "Unknown Exception")
-  ;(mrflow-unknown-exception "Unknown exception: ~a")
-  ;(mrflow-language-primitives-error-title "Language Primitives Error")
-  ;(mrflow-language-primitives-error "Wrong filename for language primitives types table: ~a")
-  
-  (snips-and-arrows-popup-menu-tack-all-arrows "固定所有箭頭")
-  (snips-and-arrows-popup-menu-untack-all-arrows "取消固定所有箭頭")
-  (snips-and-arrows-user-action-disallowed-title "當前不允許用戶改變")
-  (snips-and-arrows-user-action-disallowed
-   "在編輯器中包含由系統插入的段落，所以不允許用戶改變。在修改之前請先隱藏所有這些段落。")
-  ;(snips-and-arrows-changing-terms-warning-title "Changing terms will be undoable")
-  (snips-and-arrows-hide-all-snips-in-editor "在編輯器中隱藏所有段落")
-  
   (xml-tool-insert-xml-box "插入XML框")
   (xml-tool-insert-scheme-box "插入Racket框")
   (xml-tool-insert-scheme-splice-box "插入Racket接合框")
@@ -1471,9 +1445,9 @@
   ; section header
   (test-engine-signature-violations "Signature違規：")
   
-  ; part of one phrase "signature <at line ...> to blame: procedure <...>
+  ; part of one phrase "signature <at line ...> to blame: function <...>
   (test-engine-signature "signature")
-  (test-engine-to-blame "to blame: procedure")
+  (test-engine-to-blame "to blame: function")
   
   (test-engine-no-signature-violations "無signature違規。")
   (test-engine-1-signature-violation "1個signature違規。")

@@ -53,13 +53,13 @@ char *add_to_str(const char *addr, long amt)
 }
 #endif
 
-static char *make_embedded_load(const char *start, const char *end)
+static char *make_embedded_load(const char *file, const char *start, const char *end)
 {
   char *s;
-  int slen, elen;
+  int slen, elen, flen;
 
 #if defined(OS_X) || defined(DOS_FILE_SYSTEM)
-  {
+  if (file == NULL) {
     long fileoff;
     fileoff = get_segment_offset();
     start = add_to_str(start, fileoff);
@@ -67,12 +67,16 @@ static char *make_embedded_load(const char *start, const char *end)
   }
 #endif
 
+  if (!file) file = "";
+
   slen = strlen(start);
   elen = strlen(end);
+  flen = strlen(file);
 
-  s = (char *)malloc(slen + elen + 2);
+  s = (char *)malloc(slen + elen + flen + 3);
   memcpy(s, start, slen + 1);
   memcpy(s + slen + 1, end, elen + 1);
+  memcpy(s + slen + elen + 2, file, flen + 1);
 
   return s;
 }
@@ -701,6 +705,7 @@ static int run_from_cmd_line(int argc, char *_argv[],
   int *eval_kind, num_enl;
   int no_more_switches = 0;
   int show_vers = 0;
+  char *embedding_file;
 #endif
 #if !defined(DONT_RUN_REP) || !defined(DONT_PARSE_COMMAND_LINE)
   int use_repl = 0;
@@ -768,6 +773,8 @@ static int run_from_cmd_line(int argc, char *_argv[],
       argv[0] = "-m";
     else if (!strcmp("--name", argv[0]))
       argv[0] = "-N";
+    else if (!strcmp("--exec", argv[0]))
+      argv[0] = "-E";
     else if (!strcmp("--no-compiled", argv[0]))
       argv[0] = "-c";
     else if (!strcmp("--no-lib", argv[0]))
@@ -996,6 +1003,18 @@ static int run_from_cmd_line(int argc, char *_argv[],
             no_init_ns = 1;
 	  break;
         case 'k':
+        case 'Y':
+          if (*str == 'Y') {
+            if (argc < 2) {
+              PRINTF("%s: missing file name after %s switch\n", 
+                     prog, real_switch);
+              goto show_need_help;
+            }
+            argv++;
+            --argc;
+            embedding_file = argv[0];
+          } else
+            embedding_file = NULL;
 	  if (argc < 4) {
 	    PRINTF("%s: missing %s after %s switch\n", 
 		   prog, 
@@ -1005,18 +1024,19 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	  }
 	  argv++;
 	  --argc;
-	  se = make_embedded_load(argv[0], argv[1]);
+	  se = make_embedded_load(embedding_file, argv[0], argv[1]);
 	  evals_and_loads[num_enl] = se;
 	  argv++;
 	  --argc;
 	  eval_kind[num_enl++] = mzcmd_EMBEDDED_REG;
-	  se = make_embedded_load(argv[0], argv[1]);
+	  se = make_embedded_load(embedding_file, argv[0], argv[1]);
 	  evals_and_loads[num_enl] = se;
 	  argv++;
 	  --argc;
 	  eval_kind[num_enl++] = mzcmd_EMBEDDED;
 	  break;
 	case 'N':
+	case 'E':
 	  if (argc < 2) {
 	    PRINTF("%s: missing name after %s switch\n", 
 		   prog, 
@@ -1025,13 +1045,16 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	  }
 	  argv++;
 	  --argc;
-	  sprog = argv[0];
-          if (!*sprog) {
+          if (!*(argv[0])) {
             PRINTF("%s: empty path after %s switch\n", 
 		   prog, 
 		   real_switch);
 	    goto show_need_help;
           }
+          if (*str == 'N')
+            sprog = argv[0];
+          else
+            prog = argv[0];
           was_config_flag = 1;
 	  break;
 	case 'q':
@@ -1351,8 +1374,7 @@ static int run_from_cmd_line(int argc, char *_argv[],
 
   if (!skip_coll_dirs)
     scheme_init_collection_paths_post(global_env, collects_paths_l, collects_paths_r);
-  if (compiled_paths)
-    scheme_init_compiled_roots(global_env, compiled_paths);
+  scheme_init_compiled_roots(global_env, compiled_paths);
 
   scheme_seal_parameters();
 
@@ -1413,6 +1435,7 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	 "  -r <file>, --script <file> : Same as -f <file> -N <file> --\n" 
 	 "  -u <file>, --require-script <file> : Same as -t <file> -N <file> --\n" 
 	 "  -k <n> <m> <p> : Load executable-embedded code from offset <n> to <p>\n"
+	 "  -Y <file> <n> <m> <p> : Like -k <n> <m> <p>, but from <file>\n"
 	 "  -m, --main : Call `main' with command-line arguments, print results\n"
          "  [*] Also `require's a `main' submodule, if any\n"
 	 " Interaction options:\n"
@@ -1440,6 +1463,7 @@ static int run_from_cmd_line(int argc, char *_argv[],
          "  -R <paths>, --compiled <paths> : Set compiled-file search roots to <paths>\n"
 	 "  -C, --cross : Cross-build mode; save current collects and config as host\n"
 	 "  -N <file>, --name <file> : Sets `(find-system-path 'run-file)' to <file>\n"
+	 "  -E <file>, --exec <file> : Sets `(find-system-path 'exec-file)' to <file>\n"
 # ifdef CMDLINE_STDIO_FLAG
          "  -J <name>, ---wm-class <name> : Set WM_CLASS class to <name> (Unix)\n"
 # endif

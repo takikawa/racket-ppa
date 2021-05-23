@@ -275,6 +275,22 @@ structure type if @racket[field-name] is a symbol.
 For examples, see @racket[make-struct-type].}
 
 
+@defthing[prop:sealed struct-type-property?]{
+
+A @tech{structure type property} that declares a structure type as
+@deftech{sealed}. The value associated with the property is ignored;
+the presence of the property itself makes the structure type
+sealed.
+
+A @tech{sealed} structure type cannot be used as the supertype of
+another structure type. Declaring a structure type as @tech{sealed} is
+typically just a performance hint, since checking for an instance of a
+sealed structure type can be slightly faster than checking for an
+instance of a structure type that might have subtypes.
+
+@history[#:added "8.0.0.7"]}
+
+
 @;------------------------------------------------------------------------
 @section[#:tag "structprops"]{Structure Type Properties}
 
@@ -723,13 +739,13 @@ default), an error is raised. If it is @racket['return-false],
 the inaccessible fields are omitted from the list.
 
 @examples[#:eval struct-eval
-(define-struct open (u v) #:transparent)
-(struct->list (make-open 'a 'b))
+(struct open (u v) #:transparent)
+(struct->list (open 'a 'b))
 (struct->list #s(pre 1 2 3))
-(define-struct (secret open) (x y))
-(eval:error (struct->list (make-secret 0 1 17 22)))
-(struct->list (make-secret 0 1 17 22) #:on-opaque 'return-false)
-(struct->list (make-secret 0 1 17 22) #:on-opaque 'skip)
+(struct secret open (x y))
+(eval:error (struct->list (secret 0 1 17 22)))
+(struct->list (secret 0 1 17 22) #:on-opaque 'return-false)
+(struct->list (secret 0 1 17 22) #:on-opaque 'skip)
 (struct->list 'not-a-struct #:on-opaque 'return-false)
 (struct->list 'not-a-struct #:on-opaque 'skip)
 ]

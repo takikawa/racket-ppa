@@ -72,6 +72,7 @@ static void *glib_log_signal_handle;
 
 /* locals */
 static Scheme_Object *error(int argc, Scheme_Object *argv[]);
+static Scheme_Object *assert_unreachable(int argc, Scheme_Object* argv[]);
 static Scheme_Object *raise_user_error(int argc, Scheme_Object *argv[]);
 static Scheme_Object *raise_type_error(int argc, Scheme_Object *argv[]);
 static Scheme_Object *raise_argument_error(int argc, Scheme_Object *argv[]);
@@ -772,6 +773,12 @@ int scheme_last_error_is_racket(int errid)
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_ALWAYS_ESCAPES); \
   scheme_addto_prim_instance(name, p, env);
 
+void scheme_init_unsafe_error(Scheme_Startup_Env *env)
+{
+  Scheme_Object *p;
+  ESCAPING_NONCM_PRIM("unsafe-assert-unreachable", assert_unreachable, 0, 0, env); 
+}
+
 void scheme_init_error(Scheme_Startup_Env *env)
 {
   Scheme_Object *p;
@@ -808,6 +815,8 @@ void scheme_init_error(Scheme_Startup_Env *env)
   ADD_PARAMETER("error-print-source-location", error_print_srcloc,         MZCONFIG_ERROR_PRINT_SRCLOC,          env);
 
   ADD_NONCM_PRIM("exit",              scheme_do_exit,  0, 1, env);
+
+  ESCAPING_NONCM_PRIM("assert-unreachable", assert_unreachable, 0, 0, env); 
 
   /* logging */
   ADD_NONCM_PRIM("log-level?",        log_level_p,     2, 3, env);
@@ -2709,6 +2718,12 @@ static Scheme_Object *error(int argc, Scheme_Object *argv[])
   return do_error("error", MZEXN_FAIL, argc, argv);
 }
 
+static Scheme_Object *assert_unreachable(int argc, Scheme_Object* argv[])
+{
+  scheme_contract_error("assert-unreachable", "unreachable code reached", NULL);
+  return scheme_void;
+}
+
 static Scheme_Object *raise_user_error(int argc, Scheme_Object *argv[])
 {
   return do_error("raise-user-error", MZEXN_FAIL_USER, argc, argv);
@@ -3177,9 +3192,15 @@ def_error_display_proc(int argc, Scheme_Object *argv[])
 
       /* Print srcloc(s) if present */
       l = scheme_struct_type_property_ref(scheme_source_property, argv[1]);
-      if (l)
+      if (l) {
         l = _scheme_apply(l, 1, &(argv[1]));
-
+        for (w = l; SCHEME_PAIRP(w); w = SCHEME_CDR(w)) {
+          if (!scheme_is_location(SCHEME_CAR(w)))
+            break;
+        }
+        if (!SCHEME_NULLP(w))
+          scheme_wrong_contract("prop:exn:srclocs procedure", "(listof srcloc?)", -1, 1, &l);
+      }
 
       if (l && !SCHEME_NULLP(l)) {
         /* Some exns include srcloc in the msg, so skip the first srcloc of those when needed */

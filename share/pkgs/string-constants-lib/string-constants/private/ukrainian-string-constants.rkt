@@ -1202,32 +1202,6 @@ please adhere to these guidelines:
  (happy-birthday-matthew "З днем народження, Метью!")
  (happy-birthday-shriram "З днем народження, Шрірам!")
 
- (mrflow-using-default-language-title "Мова за замовчуванням")
- (mrflow-using-default-language "У мові, що використовується, не визначена таблиця типів для її примітивів. Зверніться до  стандарту Scheme.")
- (mrflow-button-title "Аналізувати")
- ;(mrflow-unknown-style-delta-error-title "Невідомий стиль блоку дельта")
- ;(mrflow-unknown-style-delta-error "Невідомий стиль блоку дельта: ~a")
- (mrflow-popup-menu-show-type "Показати тип")
- (mrflow-popup-menu-hide-type "Сховати тип")
- (mrflow-popup-menu-show-errors "Показати помилки")
- (mrflow-popup-menu-hide-errors "Сховати помилки")
- ;(mrflow-read-exception-title "Read Exception")
- ;(mrflow-read-exception "Read exception: ~a")
- ;(mrflow-syntax-exception-title "Syntax Exception")
- ;(mrflow-syntax-exception "Syntax Exception: ~a")
- ;(mrflow-unknown-exception-title "Unknown Exception")
- ;(mrflow-unknown-exception "Unknown Exception: ~a")
- ;(mrflow-language-primitives-error-title "Language Primitives Error")
- ;(mrflow-language-primitives-error "Wrong filename for language primitives types table: ~a")
-  
- (snips-and-arrows-popup-menu-tack-all-arrows "З'єднати всі стрілки")
- (snips-and-arrows-popup-menu-untack-all-arrows "Видалити всі стрілки")
- (snips-and-arrows-user-action-disallowed-title "Внесення змін користувачем наразі заборонено")
- (snips-and-arrows-user-action-disallowed "Внесення змін користувачем заборонено в редакторах, які містять елементи з панелі інструментів. Сховайте всі інструменти перед редагуванням.")
- ;(snips-and-arrows-changing-terms-warning-title "Changing terms will be undoable")
- ;(snips-and-arrows-changing-terms-warning "Changing terms in an editor containing snips cannot be undone.  You can either cancel this action, remove the snips, and try the change again, or you can continue with the change, in which case the change will not be undoable (all others changes made before and afterward will still be undoable though).")
- (snips-and-arrows-hide-all-snips-in-editor "Сховати всі інструменти, що вставлені в редактор")
-
  (xml-tool-insert-xml-box "Вставити блок XML")
  (xml-tool-insert-scheme-box "Вставити блок Racket")
  (xml-tool-insert-scheme-splice-box "Приєднати блок Racket")
@@ -1425,7 +1399,7 @@ please adhere to these guidelines:
   ; section header
   (test-engine-signature-violations "Порушення домовленості:")
 
-  ; part of one phrase "signature <at line ...> to blame: procedure <...>
+  ; part of one phrase "signature <at line ...> to blame: function <...>
   (test-engine-signature "домовленість")
   (test-engine-to-blame "порушено: процедура")
 

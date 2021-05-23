@@ -355,6 +355,18 @@
   ((*ref char) buffer)
   (intptr_t start)
   (intptr_t end)))
+(define-function/errno
+ RKTIO_READ_ERROR
+ ()
+ intptr_t
+ rktio_read_converted_in
+ (((ref rktio_t) rktio)
+  ((ref rktio_fd_t) fd)
+  ((*ref char) buffer)
+  (intptr_t start)
+  (intptr_t len)
+  ((*ref char) is_converted)
+  (intptr_t converted_start)))
 (define-function
  ()
  intptr_t
@@ -1171,6 +1183,7 @@
  (ref char)
  rktio_expand_user_tilde
  (((ref rktio_t) rktio) (rktio_const_string_t filename)))
+(define-function () (ref char) rktio_uname (((ref rktio_t) rktio)))
 (define-function
  ()
  (ref rktio_signal_handle_t)
@@ -1194,6 +1207,7 @@
  rktio_install_os_signal_handler
  (((ref rktio_t) rktio)))
 (define-function () int rktio_poll_os_signal (((ref rktio_t) rktio)))
+(define-function () void rktio_will_modify_os_signal_handler ((int sig_id)))
 (define-function () uintptr_t rktio_get_milliseconds ())
 (define-function () double rktio_get_inexact_milliseconds ())
 (define-function

@@ -165,7 +165,9 @@
 			 "`signature' als Operator ergibt keinen Sinn"
 			 stx))
     ((?signature-abstr ?signature ...)
-     (identifier? #'?signature-abstr)
+     (and (identifier? #'?signature-abstr)
+          ;; primarily worried about lambda
+          (not (syntax-local-value #'?signature-abstr (lambda () #f))))
      (with-syntax ((?stx (phase-lift stx))
 		   (?name name)
 		   ((?signature-expr ...) (map (lambda (sig)

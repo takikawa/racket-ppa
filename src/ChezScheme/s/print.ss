@@ -95,7 +95,7 @@
 
 (define hashable?
   (lambda (x)
-    (if ($immediate? x)
+    (if (fixmediate? x)
         (eq? x black-hole)
         (and
           ($object-in-heap? x)
@@ -173,7 +173,9 @@
                  [(and ($record? x) (not (eq? x #!base-rtd)))
                   (when (print-record)
                     ((record-writer ($record-type-descriptor x)) x (bit-sink)
-                     (lambda (x p) ; could check for p == (bit-sink)
+                     (lambda (x p)
+                       (unless (and (output-port? p) (textual-port? p))
+                         ($oops 'write "~s is not a textual output port" p))
                        (find-dupls x (decr lev) len))))]
                  [(box? x) (find-dupls (unbox x) (decr lev) len)]
                  [(eq? x black-hole) (find-dupls x (decr lev) len)])]
@@ -201,7 +203,7 @@
 
   (define cyclic?
     (lambda (x curlev lstlen)
-      (if ($immediate? x)
+      (if (fixmediate? x)
           (if (eq? x black-hole) (not lev) #f)
           (and ($object-in-heap? x)
                (cond
@@ -215,7 +217,9 @@
                            (call/cc
                              (lambda (k)
                                ((record-writer ($record-type-descriptor x)) x (bit-sink)
-                                (lambda (x p) ; could check for p == (bit-sink)
+                                (lambda (x p)
+                                  (unless (and (output-port? p) (textual-port? p))
+                                    ($oops 'write "~s is not a textual output port" p))
                                   (if (cyclic? x (fx+ curlev 1) 0)
                                       (k #t))))
                                #f)))))]
@@ -275,7 +279,7 @@
                          (constant cycle-node-max))])
       (cond
         [(fx= xlev 0) (or (not lev) (fx> lev (constant cycle-node-max)))]
-        [($immediate? x) (if (eq? x black-hole) (not lev) #f)]
+        [(fixmediate? x) (if (eq? x black-hole) (not lev) #f)]
         [else
          (and ($object-in-heap? x)
               (cond
@@ -308,7 +312,9 @@
                       (call/cc
                         (lambda (k)
                           ((record-writer ($record-type-descriptor x)) x (bit-sink)
-                           (lambda (x p) ; could check for p == (bit-sink)
+                           (lambda (x p)
+                             (unless (and (output-port? p) (textual-port? p))
+                               ($oops 'write "~s is not a textual output port" p))
                              (if (down x (fx- xlev 1)) (k #t))))
                           #f)))]
                 [(box? x) (down (unbox x) (fx- xlev 1))]
@@ -316,7 +322,7 @@
 
 (set! $make-graph-env
   (lambda (who x lev len)
-    (and (if ($immediate? x)
+    (and (if (fixmediate? x)
              (eq? x black-hole)
              (and ($object-in-heap? x)
                   (or (pair? x) (vector? x) (stencil-vector? x) (box? x) (and ($record? x) (not (eq? x #!base-rtd))))))
@@ -628,7 +634,6 @@ floating point returns with (1 0 -1 ...).
      (cond
        [($immediate? x)
         (type-case x
-          [(fixnum?) (wrfixnum x r d? p)]
           [(null?) (display-string "()" p)]
           [(boolean?) (display-string (if x "#t" "#f") p)]
           [(char?) (if d? (write-char x p) (wrchar x p))]
@@ -638,6 +643,7 @@ floating point returns with (1 0 -1 ...).
           [(void?) (display-string "#<void>" p)]
           [(black-hole?) (wrblack-hole x r lev len d? env p)]
           [else (display-string "#<garbage>" p)])]
+       [(fixnum? x) (wrfixnum x r d? p)]
        [($object-in-heap? x)
         (type-case x
           [(symbol?)
@@ -706,7 +712,9 @@ floating point returns with (1 0 -1 ...).
                (if (limit? lev)
                    (display-string "#[...]" p)
                    ((record-writer ($record-type-descriptor x)) x p
-                    (lambda (x p) ; could check for p == old p
+                    (lambda (x p)
+                      (unless (and (output-port? p) (textual-port? p))
+                        ($oops 'write "~s is not a textual output port" p))
                       (wr x r (decr lev) len d? env p))))
                (let ([rtd ($record-type-descriptor x)])
                  (cond ; keep in sync with default-record-writer
@@ -910,7 +918,7 @@ floating point returns with (1 0 -1 ...).
        [else
         (wrfixits (fx/ n r) r p)
         (write-char (digit->char (fxremainder n r)) p)])]
-    [(n r d p)
+    [(n r d p) ; add leading zeros as needed to ensure that `d` digits are printed
      (cond
        [(fx< n r)
         (do ([d d (fx- d 1)]) ((fx<= d 1)) (write-char #\0 p))
@@ -931,10 +939,14 @@ floating point returns with (1 0 -1 ...).
 
 (define wrbigits
   (let ()
-   ; divide-and-conquer, treating bignum as two ``big base'' bigits
-   ; first base must be >= sqrt(n); base i+1 must be >= sqrt(base i)
-   ; last base must be <= most-positive-fixnum
+    ;; divide-and-conquer, treating bignum as two "big base" bigits,
+    ;; where a big base is a power of the radix;
+    ;; first base must be >= sqrt(n); base i+1 must be >= sqrt(base i);
+    ;; last base must be <= most-positive-fixnum
     (define largest-fixnum-big-base
+      ;; maps `radix` to `(cons big-base output-digits)` for a fixnum `big-base`,
+      ;; where `output-digits` is the same as `(log big-base radix)`; we need the
+      ;; number of digits in the big base to write out any needed leading `0`s
       (let ([v (make-vector 37)])
         (do ([b 2 (fx+ b 1)])
             ((fx= b 37) v)
@@ -945,6 +957,9 @@ floating point returns with (1 0 -1 ...).
                     (f bb^2 (* d 2))
                     (cons (cons bb d) '()))))))))
     (define (big-bases n r)
+      ;; get a list of spans of big-base digits, where each span's length is
+      ;; a power of two, so it corresponds to some number of squaring of
+      ;; the  big base; pair that with the number of digits in the span
       (let ([iln/2 (bitwise-arithmetic-shift-right (+ (bitwise-length n) 1) 1)])
         (let f ([bb* (vector-ref largest-fixnum-big-base r)])
           (let ([bb (caar bb*)])
@@ -952,14 +967,27 @@ floating point returns with (1 0 -1 ...).
                 bb*
                 (f (cons (cons (* bb bb) (* (cdar bb*) 2)) bb*)))))))
     (lambda (n r p)
-      (let f ([n n] [d 0] [bb* (big-bases n r)])
-        (cond
-          [(fixnum? n) (wrfixits n r d p)]
-          [(> (caar bb*) n) (f n d (cdr bb*))]
-          [else
-           (let ([hi.lo ($quotient-remainder n (caar bb*))])
-             (f (car hi.lo) (- d (cdar bb*)) (cdr bb*))
-             (f (cdr hi.lo) (cdar bb*) (cdr bb*)))])))))
+      (case r
+        [(2 4 8 16 32)
+         ;; For powers of 2, we can stream through the binary representation
+         (let* ([big-base (car (vector-ref largest-fixnum-big-base r))]
+                [bits (bitwise-length (fx- (car big-base) 1))]
+                [digits (cdr big-base)])
+           (let loop ([start (fx* bits (fx- (fxquotient (fx+ (bitwise-length n) (fx- bits 1)) bits) 1))]
+                      [d 0])
+             (wrfixits (bitwise-bit-field n start (fx+ start bits)) r d p)
+             (unless (fx= start 0)
+               (loop (fx- start bits) digits))))]
+        [else
+         ;; Use the general divide-and-conquer approach
+         (let f ([n n] [d 0] [bb* (big-bases n r)])
+           (cond
+             [(fixnum? n) (wrfixits n r d p)]
+             [(> (caar bb*) n) (f n d (cdr bb*))]
+             [else
+              (let ([hi.lo ($quotient-remainder n (caar bb*))])
+                (f (car hi.lo) (- d (cdar bb*)) (cdr bb*))
+                (f (cdr hi.lo) (cdar bb*) (cdr bb*)))]))]))))
 
 (define wrradix
    (lambda (r p)

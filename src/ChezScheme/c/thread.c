@@ -93,6 +93,7 @@ ptr S_create_thread_object(who, p_tc) const char *who; ptr p_tc; {
           tgc->next_loc[g][s] = (ptr)0;
           tgc->bytes_left[g][s] = 0;
           tgc->sweep_loc[g][s] = (ptr)0;
+          tgc->sweep_next[g][s] = NULL;
         }
         tgc->bitmask_overhead[g] = 0;
       }
@@ -256,7 +257,7 @@ static IBOOL destroy_thread(tc) ptr tc; {
       S_scan_dirty((ptr *)EAP(tc), (ptr *)REAL_EAP(tc));
 
      /* close off thread-local allocation */
-      S_thread_start_code_write();
+      S_thread_start_code_write(tc, static_generation, 0, NULL);
       {
         ISPC s; IGEN g;
         thread_gc *tgc = THREAD_GC(tc);
@@ -265,7 +266,7 @@ static IBOOL destroy_thread(tc) ptr tc; {
             if (tgc->next_loc[g][s])
               S_close_off_thread_local_segment(tc, s, g);
       }
-      S_thread_end_code_write();
+      S_thread_end_code_write(tc, static_generation, 0, NULL);
 
       alloc_mutex_release();
 
@@ -276,7 +277,7 @@ static IBOOL destroy_thread(tc) ptr tc; {
 	for (ges = GUARDIANENTRIES(tc); ges != Snil; ges = next) {
 	  obj = GUARDIANOBJ(ges);
 	  next = GUARDIANNEXT(ges);
-	  if (!IMMEDIATE(obj) && (si = MaybeSegInfo(ptr_get_segment(obj))) != NULL && si->generation != static_generation) {
+	  if (!FIXMEDIATE(obj) && (si = MaybeSegInfo(ptr_get_segment(obj))) != NULL && si->generation != static_generation) {
 	    INITGUARDIANNEXT(ges) = target;
 	    target = ges;
 	  }
@@ -455,11 +456,11 @@ void S_condition_free(c) s_thread_cond_t *c; {
 
 #ifdef FEATURE_WINDOWS
 
-static inline int s_thread_cond_timedwait(s_thread_cond_t *cond, s_thread_mutex_t *mutex, int typeno, long sec, long nsec) {
+static inline int s_thread_cond_timedwait(s_thread_cond_t *cond, s_thread_mutex_t *mutex, int typeno, I64 sec, long nsec) {
   if (typeno == time_utc) {
     struct timespec now;
     S_gettime(time_utc, &now);
-    sec -= (long)now.tv_sec;
+    sec -= now.tv_sec;
     nsec -= now.tv_nsec;
     if (nsec < 0) {
       sec -= 1;
@@ -470,7 +471,7 @@ static inline int s_thread_cond_timedwait(s_thread_cond_t *cond, s_thread_mutex_
     sec = 0;
     nsec = 0;
   }
-  if (SleepConditionVariableCS(cond, mutex, sec*1000 + nsec/1000000)) {
+  if (SleepConditionVariableCS(cond, mutex, (DWORD)(sec*1000 + (nsec+500000)/1000000))) {
     return 0;
   } else if (GetLastError() == ERROR_TIMEOUT) {
     return ETIMEDOUT;
@@ -481,12 +482,12 @@ static inline int s_thread_cond_timedwait(s_thread_cond_t *cond, s_thread_mutex_
 
 #else /* FEATURE_WINDOWS */
 
-static inline int s_thread_cond_timedwait(s_thread_cond_t *cond, s_thread_mutex_t *mutex, int typeno, long sec, long nsec) {
+static inline int s_thread_cond_timedwait(s_thread_cond_t *cond, s_thread_mutex_t *mutex, int typeno, I64 sec, long nsec) {
   struct timespec t;
   if (typeno == time_duration) {
     struct timespec now;
     S_gettime(time_utc, &now);
-    t.tv_sec = now.tv_sec + sec;
+    t.tv_sec = (time_t)(now.tv_sec + sec);
     t.tv_nsec = now.tv_nsec + nsec;
     if (t.tv_nsec >= 1000000000) {
       t.tv_sec += 1;
@@ -508,7 +509,7 @@ IBOOL S_condition_wait(c, m, t) s_thread_cond_t *c; scheme_mutex_t *m; ptr t; {
   s_thread_t self = s_thread_self();
   iptr count;
   INT typeno;
-  long sec;
+  I64 sec;
   long nsec;
   INT status;
   IBOOL is_collect;
@@ -523,7 +524,7 @@ IBOOL S_condition_wait(c, m, t) s_thread_cond_t *c; scheme_mutex_t *m; ptr t; {
   if (t != Sfalse) {
     /* Keep in sync with ts record in s/date.ss */
     typeno = Sinteger32_value(Srecord_ref(t,0));
-    sec = Sinteger32_value(Scar(Srecord_ref(t,1)));
+    sec = Sinteger64_value(Scar(Srecord_ref(t,1)));
     nsec = Sinteger32_value(Scdr(Srecord_ref(t,1)));
   } else {
     typeno = 0;

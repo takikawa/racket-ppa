@@ -47,7 +47,9 @@
                            bitwise-not
                            fllog flatan
                            fxquotient
-                           make-flvector flvector-copy)
+                           make-flvector flvector-copy
+                           vector->pseudo-random-generator
+                           vector->pseudo-random-generator!)
                    [make-parameter chez:make-parameter]
                    [date-second chez:date-second]
                    [date-minute chez:date-minute]
@@ -78,8 +80,6 @@
                    [delete-directory chez:delete-directory]
                    [filter chez:filter]
                    [member chez:member]
-                   [memv chez:memv]
-                   [memq chez:memq]
                    [error chez:error]
                    [raise chez:raise]
                    [exit-handler chez:exit-handler]

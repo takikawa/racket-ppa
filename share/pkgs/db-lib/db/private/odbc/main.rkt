@@ -1,5 +1,6 @@
 #lang racket/base
 (require racket/class
+         ffi/unsafe/os-thread
          db/private/generic/interfaces
          db/private/generic/common
          db/private/generic/place-client
@@ -19,24 +20,31 @@
                       #:character-mode [char-mode 'wchar]
                       #:quirks [quirks '()]
                       #:use-place [use-place #f])
-  (cond [use-place
-         (place-connect (list 'odbc dsn user auth strict-parameter-types? char-mode quirks)
-                        odbc-proxy%)]
-        [else
-         (let ([notice-handler (make-handler notice-handler "notice")])
-           (call-with-env 'odbc-connect
-             (lambda (env)
-               (call-with-db 'odbc-connect env
-                 (lambda (db)
-                   (let ([status (SQLConnect db dsn user auth)])
-                     (handle-status* 'odbc-connect status db)
-                     (new connection%
-                          (env env)
-                          (db db)
-                          (notice-handler notice-handler)
-                          (strict-parameter-types? strict-parameter-types?)
-                          (char-mode char-mode)
-                          (quirks quirks))))))))]))
+  (define (connect)
+    (let ([notice-handler (make-handler notice-handler "notice")])
+      (call-with-env 'odbc-connect
+        (lambda (env)
+          (call-with-db 'odbc-connect env
+            (lambda (db)
+              (let ([status (SQLConnect db dsn user auth)])
+                (handle-status* 'odbc-connect status db)
+                (new connection%
+                     (env env)
+                     (db db)
+                     (notice-handler notice-handler)
+                     (strict-parameter-types? strict-parameter-types?)
+                     (char-mode char-mode)
+                     (quirks quirks)))))))))
+  (let ([use-place (normalize-use-place use-place)])
+    (case use-place
+      [(place)
+       (place-connect (list 'odbc dsn user auth strict-parameter-types? char-mode quirks)
+                      odbc-proxy%)]
+      [(os-thread)
+       (define c (connect))
+       (send c use-os-thread #t)
+       c]
+      [else (connect)])))
 
 (define (odbc-driver-connect connection-string
                              #:notice-handler [notice-handler void]
@@ -44,34 +52,44 @@
                              #:character-mode [char-mode 'wchar]
                              #:quirks [quirks '()]
                              #:use-place [use-place #f])
-  (cond [use-place
-         (place-connect (list 'odbc-driver connection-string strict-parameter-types? char-mode quirks)
-                        odbc-proxy%)]
-        [else
-         (let ([notice-handler (make-handler notice-handler "notice")])
-           (call-with-env 'odbc-driver-connect
-             (lambda (env)
-               (call-with-db 'odbc-driver-connect env
-                 (lambda (db)
-                   (let ([status (SQLDriverConnect db connection-string SQL_DRIVER_NOPROMPT)])
-                     (handle-status* 'odbc-driver-connect status db)
-                     (new connection%
-                          (env env)
-                          (db db)
-                          (notice-handler notice-handler)
-                          (strict-parameter-types? strict-parameter-types?)
-                          (char-mode char-mode)
-                          (quirks quirks))))))))]))
+  (define (connect)
+    (let ([notice-handler (make-handler notice-handler "notice")])
+      (call-with-env 'odbc-driver-connect
+        (lambda (env)
+          (call-with-db 'odbc-driver-connect env
+            (lambda (db)
+              (define status (SQLDriverConnect db connection-string SQL_DRIVER_NOPROMPT))
+              (handle-status* 'odbc-driver-connect status db)
+              (new connection%
+                   (env env)
+                   (db db)
+                   (notice-handler notice-handler)
+                   (strict-parameter-types? strict-parameter-types?)
+                   (char-mode char-mode)
+                   (quirks quirks))))))))
+  (let ([use-place (normalize-use-place use-place)])
+    (case use-place
+      [(place)
+       (place-connect (list 'odbc-driver connection-string strict-parameter-types? char-mode quirks)
+                      odbc-proxy%)]
+      [(os-thread)
+       (define c (connect))
+       (send c use-os-thread #t)
+       c]
+      [else (connect)])))
+
+(define (normalize-use-place use-place)
+  (cond [(eq? use-place #t)
+         (if (os-thread-enabled?) 'os-thread 'place)]
+        [else use-place]))
 
 (define (odbc-data-sources)
-  (define server-buf (make-bytes 1024))
-  (define descr-buf (make-bytes 1024))
   (call-with-env 'odbc-data-sources
     (lambda (env)
       (begin0
           (let loop ()
             (let-values ([(status name description)
-                          (SQLDataSources env SQL_FETCH_NEXT server-buf descr-buf)])
+                          (SQLDataSources env SQL_FETCH_NEXT)])
               (cond [(or (= status SQL_SUCCESS) (= status SQL_SUCCESS_WITH_INFO))
                      (cons (list name description) (loop))]
                     [else ;; SQL_NO_DATA
@@ -79,28 +97,23 @@
         (handle-status* 'odbc-data-sources (SQLFreeHandle SQL_HANDLE_ENV env))))))
 
 (define (odbc-drivers)
-  (define driver-buf (make-bytes 1000))
-  (define attr-buf (make-bytes 2000))
   (call-with-env 'odbc-drivers
    (lambda (env)
      (let ([result
             (let loop ()
-              (let-values ([(status name attrlen) ;; & writes to attr-buf
-                            (SQLDrivers env SQL_FETCH_NEXT driver-buf attr-buf)])
+              (let-values ([(status name attrs) (SQLDrivers env SQL_FETCH_NEXT)])
                 (cond [(or (= status SQL_SUCCESS) (= status SQL_SUCCESS_WITH_INFO))
-                       (cons (list name (parse-driver-attrs attr-buf attrlen))
-                             (loop))]
+                       (cons (list name (parse-driver-attrs attrs)) (loop))]
                       [else null])))])  ;; SQL_NO_DATA
        (handle-status* 'odbc-drivers (SQLFreeHandle SQL_HANDLE_ENV env))
        result))))
 
-(define (parse-driver-attrs buf len)
-  (let* ([attrs (regexp-split #rx#"\0" buf 0 len)])
+(define (parse-driver-attrs buf)
+  (let* ([attrs (regexp-split #rx"\0" buf)])
     (filter values
-            (for/list ([p (in-list attrs)]
-                       #:when (positive? (bytes-length p)))
-              (let* ([s (bytes->string/utf-8 p)]
-                     [m (regexp-match-positions #rx"=" s)])
+            (for/list ([s (in-list attrs)]
+                       #:when (positive? (string-length s)))
+              (let* ([m (regexp-match-positions #rx"=" s)])
                 ;; Sometimes (eg iodbc on openbsd), returns ill-formatted attr-buf; just discard
                 (and m
                      (let ([=-pos (caar m)])

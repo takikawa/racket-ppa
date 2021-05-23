@@ -509,12 +509,15 @@
                       #:atomic?     [atomic? #f]
                       #:in-original-place? [orig-place? #f]
                       #:blocking?   [blocking? #f]
+                      #:callback-exns? [callback-exns? #f]
                       #:lock-name   [lock-name #f]
                       #:async-apply [async-apply #f]
                       #:save-errno  [errno   #f])
-  (_cprocedure* itypes otype abi varargs-after wrapper keep atomic? orig-place? blocking? async-apply errno lock-name))
+  (_cprocedure* itypes otype abi varargs-after wrapper keep
+                atomic? orig-place? blocking? callback-exns?
+                async-apply errno lock-name))
 
-;; A lightwegith delay meachnism for a single-argument function when
+;; A lightweight delay mechanism for a single-argument function when
 ;; it's ok (but unlikely) to evaluate `expr` more than once and keep
 ;; the first result:
 (define-syntax-rule (delay/cas expr)
@@ -533,9 +536,12 @@
 
 ;; for internal use
 (define held-callbacks (make-weak-hasheq))
-(define (_cprocedure* itypes otype abi varargs-after wrapper keep atomic? orig-place? blocking? async-apply errno lock-name)
+(define (_cprocedure* itypes otype abi varargs-after wrapper keep
+                      atomic? orig-place? blocking? callback-exns?
+                      async-apply errno lock-name)
   (define make-ffi-callback (delay/cas (ffi-callback-maker itypes otype abi atomic? async-apply varargs-after)))
-  (define make-ffi-call (delay/cas (ffi-call-maker itypes otype abi errno orig-place? lock-name blocking? varargs-after)))
+  (define make-ffi-call (delay/cas (ffi-call-maker itypes otype abi errno
+                                                   orig-place? lock-name blocking? varargs-after callback-exns?)))
   (define-syntax-rule (make-it wrap)
     (make-ctype _fpointer
       (lambda (x)
@@ -572,7 +578,7 @@
 (provide _fun)
 (define-for-syntax _fun-keywords
   `([#:abi ,#'#f] [#:varargs-after ,#'#f] [#:keep ,#'#t] [#:atomic? ,#'#f]
-    [#:in-original-place? ,#'#f] [#:blocking? ,#'#f] [#:lock-name ,#'#f]
+    [#:in-original-place? ,#'#f] [#:blocking? ,#'#f] [#:callback-exns? ,#'#f] [#:lock-name ,#'#f]
     [#:async-apply ,#'#f] [#:save-errno ,#'#f]
     [#:retry #f]))
 (define-syntax (_fun stx)
@@ -737,6 +743,7 @@
                              #,(kwd-ref '#:atomic?)
                              #,(kwd-ref '#:in-original-place?)
                              #,(kwd-ref '#:blocking?)
+                             #,(kwd-ref '#:callback-exns?)
                              #,(kwd-ref '#:async-apply)
                              #,(kwd-ref '#:save-errno)
                              #,(kwd-ref '#:lock-name)))])
@@ -1068,21 +1075,31 @@
       (syntax-case* stx (lit ...) (lambda (a b) (eq? (syntax-e a) (syntax-e b)))
         [pat (syntax-protect (syntax/loc stx tmpl))] ...))))
 
-;; (_ptr <mode> <type>)
+(define-syntax malloc/static-mode
+  (syntax-rules ()
+    [(_ who t #f) (malloc t)]
+    [(_ who t mode) (begin
+                      (check-malloc-mode _who mode)
+                      (malloc t 'mode))]))
+
+;; (_ptr <mode> <type> [<malloc-mode>])
 ;; This is for pointers, where mode indicates input or output pointers (or
 ;; both).  If the mode is `o' (output), then the wrapper will not get an
 ;; argument for it, instead it generates the matching argument.
 (provide _ptr)
 (define-fun-syntax _ptr
   (syntax-rules/symbol-literals (i o io)
-    [(_ i  t) (type: _pointer
-               pre:  (x => (let ([p (malloc t)]) (ptr-set! p t x) p)))]
-    [(_ o  t) (type: _pointer
-               pre:  (malloc t)
-               post: (x => (ptr-ref x t)))]
-    [(_ io t) (type: _pointer
-               pre:  (x => (let ([p (malloc t)]) (ptr-set! p t x) p))
-               post: (x => (ptr-ref x t)))]))
+    [(_ i  t) (_ptr i t #f)]
+    [(_ i  t mode) (type: _pointer
+                          pre:  (x => (let ([p (malloc/static-mode _ptr t mode)]) (ptr-set! p t x) p)))]
+    [(_ o  t) (_ptr o t #f)]
+    [(_ o  t mode) (type: _pointer
+                          pre:  (malloc/static-mode _ptr t mode)
+                          post: (x => (ptr-ref x t)))]
+    [(_ io t) (_ptr io t #f)]
+    [(_ io t mode) (type: _pointer
+                          pre:  (x => (let ([p (malloc/static-mode _ptr t mode)]) (ptr-set! p t x) p))
+                          post: (x => (ptr-ref x t)))]))
 
 ;; (_box <type>)
 ;; This is similar to a (_ptr io <type>) argument, where the input is expected
@@ -1090,10 +1107,11 @@
 (provide _box)
 (define-fun-syntax _box
   (syntax-rules ()
-    [(_ t) (type: _pointer
-            bind: tmp ; need to save the box so we can get back to it
-            pre:  (x => (let ([p (malloc t)]) (ptr-set! p t (unbox x)) p))
-            post: (x => (begin (set-box! tmp (ptr-ref x t)) tmp)))]))
+    [(_ t) (_box t #f)]
+    [(_ t mode) (type: _pointer
+                       bind: tmp ; need to save the box so we can get back to it
+                       pre:  (x => (let ([p (malloc/static-mode _box t mode)]) (ptr-set! p t (unbox x)) p))
+                       post: (x => (begin (set-box! tmp (ptr-ref x t)) tmp)))]))
 
 ;; (_list <mode> <type> [<len>])
 ;; Similar to _ptr, except that it is used for converting lists to/from C
@@ -1105,20 +1123,20 @@
 (provide _list)
 (define-fun-syntax _list
   (syntax-rules/symbol-literals (i o io)
-    [(_ i  t  )      (type: _pointer
+    [(_ i  t  )      (type: _gcpointer
                       pre:  (x => (list->cblock x t)))]
-    [(_ i  t mode)   (type: _pointer
+    [(_ i  t mode)   (type: (malloc-mode-type mode)
                       pre:  (x => (list->cblock x t #:malloc-mode (check-malloc-mode _list mode))))]
-    [(_ o  t n)      (type: _pointer
+    [(_ o  t n)      (type: _gcpointer
                       pre:  (malloc n t)
                       post: (x => (cblock->list x t n)))]
-    [(_ o  t n mode) (type: _pointer
+    [(_ o  t n mode) (type: (malloc-mode-type mode)
                       pre:  (malloc n t (check-malloc-mode _list mode))
                       post: (x => (cblock->list x t n)))]
-    [(_ io t n)      (type: _pointer
+    [(_ io t n)      (type: _gcpointer
                       pre:  (x => (list->cblock x t))
                       post: (x => (cblock->list x t n)))]
-    [(_ io t n mode) (type: _pointer
+    [(_ io t n mode) (type: (malloc-mode-type mode)
                       pre:  (x => (list->cblock x t #:malloc-mode (check-malloc-mode _list mode)))
                       post: (x => (cblock->list x t n)))]))
 
@@ -1127,20 +1145,20 @@
 (provide _vector)
 (define-fun-syntax _vector
   (syntax-rules/symbol-literals (i o io)
-    [(_ i  t  )      (type: _pointer
+    [(_ i  t  )      (type: _gcpointer
                       pre:  (x => (vector->cblock x t)))]
-    [(_ i  t mode)   (type: _pointer
+    [(_ i  t mode)   (type: (malloc-mode-type mode)
                       pre:  (x => (vector->cblock x t #:malloc-mode (check-malloc-mode _vector mode))))]
-    [(_ o  t n)      (type: _pointer
+    [(_ o  t n)      (type: _gcpointer
                       pre:  (malloc n t)
                       post: (x => (cblock->vector x t n)))]
-    [(_ o  t n mode) (type: _pointer
+    [(_ o  t n mode) (type: (malloc-mode-type mode)
                       pre:  (malloc n t (check-malloc-mode _vector mode))
                       post: (x => (cblock->vector x t n)))]
-    [(_ io t n)      (type: _pointer
+    [(_ io t n)      (type: _gcpointer
                       pre:  (x => (vector->cblock x t))
                       post: (x => (cblock->vector x t n)))]
-    [(_ io t n mode) (type: _pointer
+    [(_ io t n mode) (type: (malloc-mode-type mode)
                       pre:  (x => (vector->cblock x t #:malloc-mode (check-malloc-mode _vector mode)))
                       post: (x => (cblock->vector x t n)))]))
 
@@ -1156,6 +1174,11 @@
      (raise-syntax-error (syntax-e #'who)
                          "invalid malloc mode"
                          #'mode)]))
+
+(define-syntax (malloc-mode-type stx)
+  (syntax-case stx (raw)
+    [(_ raw) #'_pointer]
+    [_ #'_gcpointer]))
 
 ;; Reflect the difference between 'racket and 'chez-scheme
 ;; VMs for `_bytes` in `_bytes*`:
@@ -1458,35 +1481,79 @@
   (cond
    [(and (cpointer? p)
          (cpointer-gcable? p))
-    (define from-t (ctype-coretype from-type))
-    (define to-t (ctype-coretype to-type))
+    (define to-ct (ctype-coretype to-type))
+    (define (pointer->gcpointer t)
+      (define ct (ctype-coretype t))
+      (if (eq? ct 'pointer)
+          (_gcable t)
+          t))
     (let loop ([p p])
       (cond
-       [(and (not (zero? (ptr-offset p)))
-             (or (or (eq? to-t 'pointer)
-                     (eq? to-t 'gcpointer))))
-        (define o (ptr-offset p))
-        (define from-t (cpointer-tag p))
-        (define z (ptr-add p (- o)))
-        (when from-t
-          (set-cpointer-tag! z from-t))
-        (define q (loop z))
-        (define to-t (cpointer-tag q))
-        (define r (ptr-add q o))
-        (when to-t
-          (set-cpointer-tag! r to-t))
-        r]
-       [else
-        (if (and (or (eq? from-t 'pointer)
-                     (eq? to-t 'pointer))
-                 (or (eq? from-t 'pointer)
-                     (eq? from-t 'gcpointer))
-                 (or (eq? to-t 'pointer)
-                     (eq? to-t 'gcpointer)))
-            (convert p (_gcable from-type) (_gcable to-type))
-            (convert p from-type to-type))]))]
+        [(coretype-pointer? to-ct)
+         (cond
+           [(not (zero? (ptr-offset p)))
+            (cond
+              [(coretype-plain-pointer? to-ct)
+               (define o (ptr-offset p))
+               (define from-t (cpointer-tag p))
+               (define z (ptr-add p (- o)))
+               (when from-t
+                 (set-cpointer-tag! z from-t))
+               (define q (loop z))
+               (define to-t (cpointer-tag q))
+               (define r (ptr-add q o))
+               (when to-t
+                 (set-cpointer-tag! r to-t))
+               r]
+              [(coretype-noncopying? to-ct)
+               ;; we assume that an interior pointer is ok/wanted
+               (convert p (pointer->gcpointer from-type) to-type)]
+              [else
+               ;; converting to a string or similar;
+               ;; we can't store an offset pointer into
+               ;; GCable memory, so copy to fresh GCable
+               ;; memory, first
+               (define nul-count (case to-ct
+                                   [(string/ucs-4) 4]
+                                   [(string/utf-16) 2]
+                                   [else 1]))
+               (define len (let loop ([i 0] [count nul-count])
+                             (if (zero? (ptr-ref p _byte i))
+                                 (if (= count 1)
+                                     (+ i nul-count)
+                                     (loop (add1 i) (sub1 count)))
+                                 (loop (add1 i) nul-count))))
+               (define p2 (malloc len 'atomic))
+               (memcpy p2 p len)
+               (loop p2)])]
+           [else
+            (convert p (pointer->gcpointer from-type) (pointer->gcpointer to-type))])]
+        [else
+         (convert p from-type to-type)]))]
    [else
     (convert p from-type to-type)]))
+
+(define (coretype-pointer? ct)
+  (memq ct '(pointer
+             gcpointer
+             fpointer
+             bytes
+             scheme
+             string
+             string/ucs-4
+             string/utf-16
+             symbol)))
+
+(define (coretype-plain-pointer? ct)
+  (or (eq? ct 'pointer)
+      (eq? ct 'gcpointer)
+      (eq? ct 'fpointer)))
+
+(define (coretype-noncopying? ct)
+  (or (and (eq? 'racket (system-type 'vm))
+           (or (eq? ct 'bytes)
+               (eq? ct 'string/ucs-4)))
+      (eq? ct 'scheme)))
 
 (define* (_or-null ctype)
   (let ([coretype (ctype-coretype ctype)])
