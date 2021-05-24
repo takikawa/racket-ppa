@@ -1,4 +1,3 @@
-#!/bin/sh
-echo "debian/drracket.desktop	usr/share/applications/"
-echo "usr/bin"
-echo "usr/lib"
+debian/drracket.desktop        usr/share/applications/
+usr/bin
+usr/lib
