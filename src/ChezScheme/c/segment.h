@@ -97,3 +97,40 @@ FORCEINLINE uptr eq_hash(ptr key) {
   iptr x3 = x2 ^ ((x2 >> 8) & (iptr)0xFF);
   return (uptr)x3;
 }
+
+FORCEINLINE ptr S_object_to_reference(ptr p) {
+  if (p == Sfalse)
+    return (ptr)0;
+  else
+    return ((ptr)((uptr)(p) + reference_disp));
+}
+
+FORCEINLINE ptr S_reference_to_object(ptr p) {
+  if (p == (ptr)0)
+    return Sfalse;
+  else
+    return ((ptr)((uptr)(p) - reference_disp));
+}
+
+/* An allocation region needs room at the end of a formarding pointer
+   as a terminator */
+#define allocation_segment_tail_padding ptr_bytes
+
+/* We take advantage of the fact `reference_disp` is less than the
+   minimum allocation size plus `allocation_segment_tail_padding`, so
+   there's no possibility that the referece address for an object will
+   be off of its GC-managed page (even for a pair or an bytevector
+   with an empty payload). */
+#define FOREIGN_REFERENCEP(p) (MaybeSegInfo(addr_get_segment(p)) == NULL)
+
+/* checks whether address is on GC-managed page before adjusting it;
+   it's not ok to check after adjusting if `reference_disp` is more
+   than one word  */
+FORCEINLINE ptr S_maybe_reference_to_object(ptr p) {
+  if (p == (ptr)0)
+    return Sfalse;
+  else if (MaybeSegInfo(addr_get_segment(p)) == NULL)
+    return (ptr)0;
+  else
+    return ((ptr)((uptr)(p) - reference_disp));
+}

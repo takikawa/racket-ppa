@@ -57,6 +57,8 @@
 
 #define IN_FIXNUM_RANGE_ON_ALL_PLATFORMS(v) (((v) >= -1073741824) && ((v) <= 1073741823))
 
+#define MOST_POSITIVE_FIXNUM (((uintptr_t)-1) >> 2)
+#define MOST_NEGATIVE_FIXNUM ((((uintptr_t)-1) >> 1) ^ (((uintptr_t)-1) >> 2))
 
 /* We support 2^SCHEME_PRIM_OPT_INDEX_SIZE combinations of optimization flags: */
 
@@ -377,6 +379,7 @@ void scheme_init_bool(Scheme_Startup_Env *env);
 void scheme_init_syntax(Scheme_Startup_Env *env);
 void scheme_init_marshal(Scheme_Startup_Env *env);
 void scheme_init_error(Scheme_Startup_Env *env);
+void scheme_init_unsafe_error(Scheme_Startup_Env *env);
 void scheme_init_exn(Scheme_Startup_Env *env);
 void scheme_init_debug(Scheme_Startup_Env *env);
 void scheme_init_thread(Scheme_Startup_Env *env);
@@ -700,6 +703,7 @@ extern Scheme_Object *scheme_app_mark_impersonator_property;
 extern Scheme_Object *scheme_no_arity_property;
 
 extern Scheme_Object *scheme_authentic_property;
+extern Scheme_Object *scheme_sealed_property;
 
 extern Scheme_Object *scheme_chaperone_undefined_property;
 
@@ -1019,6 +1023,10 @@ struct Scheme_Hash_Tree {
 Scheme_Object *scheme_intern_literal_string(Scheme_Object *str);
 Scheme_Object *scheme_intern_literal_number(Scheme_Object *num);
 
+#define SCHEME_BT_KIND_WEAK      1
+#define SCHEME_BT_KIND_LATE      2
+#define SCHEME_BT_KIND_EPHEMERON 3
+
 /*========================================================================*/
 /*                    hash functions                                      */
 /*========================================================================*/
@@ -1095,9 +1103,10 @@ typedef struct Scheme_Struct_Type {
   mzshort num_slots;   /* initialized + auto + parent-initialized + parent-auto */
   mzshort num_islots; /* initialized + parent-initialized */
   mzshort name_pos;
-  char authentic; /* 1 => chaperones/impersonators disallowed */
-  char more_flags; /* STRUCT_TYPE_FLAG_NONFAIL_CONSTRUCTOR => constructor never fails
-                      STRUCT_TYPE_FLAG_SYSTEM_OPAQUE => #f for `object-name`, for example */
+  int more_flags; /* STRUCT_TYPE_FLAG_AUTHENTIC => chaperones/impersonators disallowed
+                     STRUCT_TYPE_FLAG_SEALED => subtypes disallowed
+                     STRUCT_TYPE_FLAG_NONFAIL_CONSTRUCTOR => constructor never fails
+                     STRUCT_TYPE_FLAG_SYSTEM_OPAQUE => #f for `object-name`, for example */
 
   Scheme_Object *name;
 
@@ -1131,6 +1140,8 @@ typedef struct Scheme_Struct_Type {
 /* for `more_flags` field */
 #define STRUCT_TYPE_FLAG_NONFAIL_CONSTRUCTOR 0x1
 #define STRUCT_TYPE_FLAG_SYSTEM_OPAQUE       0x2
+#define STRUCT_TYPE_FLAG_AUTHENTIC           0x4
+#define STRUCT_TYPE_FLAG_SEALED              0x8
 
 typedef struct Scheme_Structure
 {
@@ -2035,6 +2046,7 @@ int scheme_is_cm_deeper(struct Scheme_Meta_Continuation *m1, MZ_MARK_POS_TYPE p1
 void scheme_recheck_prompt_and_barrier(struct Scheme_Cont *c);
 
 Scheme_Object *scheme_all_current_continuation_marks(void);
+Scheme_Object *scheme_current_continuation_marks_as(const char *who, Scheme_Object *prompt_tag);
 
 void scheme_about_to_move_C_stack(void);
 
@@ -3107,6 +3119,7 @@ typedef struct {
   int normal_ops;  /* are selectors and predicates in the usual order? */
   int indexed_ops; /* do selectors have the index built in (as opposed to taking an index argument)? */
   int authentic; /* conservatively 0 is ok */
+  int sealed; /* conservatively 0 is ok */
   int nonfail_constructor;
   int prefab;
   int num_gets, num_sets;
@@ -3143,7 +3156,8 @@ Scheme_Object *scheme_make_struct_proc_shape(intptr_t k, Scheme_Object *identity
 #define STRUCT_PROC_SHAPE_GETTER  3
 #define STRUCT_PROC_SHAPE_SETTER  4
 #define STRUCT_PROC_SHAPE_OTHER   5
-#define STRUCT_PROC_SHAPE_MASK    0xF
+#define STRUCT_PROC_SHAPE_MASK    0x7
+#define STRUCT_PROC_SHAPE_SEALED  0x8
 #define STRUCT_PROC_SHAPE_AUTHENTIC       0x10
 #define STRUCT_PROC_SHAPE_NONFAIL_CONSTR  0x20
 #define STRUCT_PROC_SHAPE_PREFAB  0x40
@@ -3660,6 +3674,8 @@ void scheme_rktio_socket_to_input_port(struct rktio_fd_t *fd, Scheme_Object *nam
 void scheme_rktio_socket_to_output_port(struct rktio_fd_t *fd, Scheme_Object *name, int takeover,
                                         Scheme_Object **_outp);
 
+void scheme_rktio_write_all(struct rktio_fd_t *fd, const char *data, intptr_t len);
+
 void scheme_fs_change_properties(int *_supported, int *_scalable, int *_low_latency, int *_file_level);
 
 THREAD_LOCAL_DECL(extern struct rktio_ltps_t *scheme_semaphore_fd_set);
@@ -3826,6 +3842,9 @@ Scheme_Object *scheme_weak_box_value(Scheme_Object *obj);
 Scheme_Bucket_Table *scheme_make_weak_equal_table(void);
 Scheme_Bucket_Table *scheme_make_weak_eqv_table(void);
 Scheme_Bucket_Table *scheme_make_nonlock_equal_bucket_table(void);
+
+Scheme_Bucket_Table *scheme_make_ephemeron_equal_table(void);
+Scheme_Bucket_Table *scheme_make_ephemeron_eqv_table(void);
 
 int scheme_hash_table_equal_rec(Scheme_Hash_Table *t1, Scheme_Object *orig_t1,
                                 Scheme_Hash_Table *t2, Scheme_Object *orig_t2,

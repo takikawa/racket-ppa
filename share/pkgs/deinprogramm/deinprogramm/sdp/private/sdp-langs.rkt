@@ -33,14 +33,14 @@
          deinprogramm/sdp/private/rewrite-error-message
 	 
 	 lang/private/tp-dialog
-         (only-in test-engine/syntax
-                  report-signature-violation! test-execute test)
+         (only-in test-engine/syntax test-execute test)
 	 (except-in test-engine/test-engine signature-violation)
 	 test-engine/test-markup
 	 test-engine/test-display-gui
 	 deinprogramm/signature/signature
+         
          lang/htdp-langs-interface
-	 )
+	 deinprogramm/sdp/private/runtime)
 
 
   (require mzlib/pconvert-prop)
@@ -174,6 +174,9 @@
             (sharing/not-config-panel (get-allow-sharing?) (get-accept-quasiquote?) parent))
           
           (define/override (on-execute settings run-in-user-thread)
+            ;; do this first so we can overide global-port-print-handler
+            (super on-execute settings run-in-user-thread)
+            
             (let ([drs-namespace (current-namespace)]
                   [scheme-test-module-name
                    ((current-module-name-resolver) '(lib "test-engine/racket-tests.rkt") #f #f #t)]
@@ -201,81 +204,38 @@
                  (namespace-require scheme-signature-module-name)
 		 (initialize-test-object!)
 		 ;; record signature violations with the test engine
-		 (signature-violation-proc
-		  (lambda (obj signature message blame)
-                    (report-signature-violation! obj signature message blame)))
                  (display-test-results-parameter
                   (lambda (markup)
                     (test-display-results! (drscheme:rep:current-rep)
                                            drs-eventspace
                                            markup)))
-                 (get-rewritten-error-message-parameter get-rewriten-error-message)
                  (test-execute tests-on?)
 		 (signature-checking-enabled?
 		  (if (preferences:default-set? 'signatures:enable-checking?) ; Signatures tool not present
 		      (preferences:get 'signatures:enable-checking?)
 		      #t))
-                 (render-value-parameter (λ (v)
-                                           (let ([o (open-output-string)])
-                                             (render-value/format (if (procedure? v)
-									 generic-proc
-									 v)
-								     settings o 40)
-                                             (get-output-string o))))
-		 )))
-            (super on-execute settings run-in-user-thread)
-
-	    ;; DeinProgramm addition, copied from language.rkt
-	    (run-in-user-thread
-	     (lambda ()
-	       (global-port-print-handler
-		(lambda (value port)
-		  (let ([converted-value (simple-module-based-language-convert-value value settings)])
-		    (setup-printing-parameters 
-		     (lambda ()
-		       (parameterize ([pretty-print-columns 'infinity])
-			 (pretty-print converted-value port)))
-		     settings
-		     'infinity)))))))
+                 (configure/settings
+                  (sdp-runtime-settings (drscheme:language:simple-settings-printing-style settings)
+                                        (deinprogramm-lang-settings-writing-style settings)
+                                        (drscheme:language:simple-settings-fraction-style settings)
+                                        (drscheme:language:simple-settings-show-sharing settings)
+                                        (drscheme:language:simple-settings-insert-newlines settings)
+                                        (deinprogramm-lang-settings-tracing? settings)))))))
 
           (define/private (teaching-languages-error-value->string settings v len)
             (let ([sp (open-output-string)])
-              (set-printing-parameters settings (λ () (print v sp)))
+              (print v sp)
               (flush-output sp)
               (let ([s (get-output-string sp)])
 		(cond
                  [(<= (string-length s) len) s]
                  [else (string-append (substring s 0 (- len 3)) "...")]))))
 	
-	  ;; set-printing-parameters : settings ( -> TST) -> TST
-	  ;; is implicitly exposed to the stepper.  watch out!  --  john
-          (define/public (set-printing-parameters settings thunk)
-            (parameterize ([pc:booleans-as-true/false #f]
-                           [pc:abbreviate-cons-as-list (get-abbreviate-cons-as-list)]
-                           [pretty-print-show-inexactness #t]
-                           [pretty-print-exact-as-decimal #t]
-                           [pc:use-named/undefined-handler
-                            (lambda (x)
-                              (and (get-use-function-output-syntax?)
-                                   (procedure? x)
-                                   (object-name x)))]
-                           [pc:named/undefined-handler
-                            (lambda (x)
-                              (string->symbol
-                               (format "function:~a" (object-name x))))])
-              (thunk)))
-          
           (define/override (render-value/format value settings port width)
-            (set-printing-parameters
-             settings
-             (lambda ()
-	       (simple-module-based-language-render-value/format value settings port width))))
+            (sdp-render-value/format value port width))
           
           (define/override (render-value value settings port)
-            (set-printing-parameters
-             settings
-             (lambda ()
-               (simple-module-based-language-render-value/format value settings port 'infinity))))
+            (sdp-render-value/format value port 'infinity))
           
           (super-new)))
 
@@ -298,203 +258,6 @@
             ;; May have been declared by lang/htdp-langs tool, if loaded
             (dynamic-require ''drscheme-secrets 'drscheme-inspector))
           (void)))
-
-
-      ;; {
-      ;;   all this copied from collects/drracket/private/language.rkt
-
-      ;; stepper-convert-value : TST settings -> TST 
-     (define (stepper-convert-value value settings)
-        (define ((leave-snips-alone-hook sh) expr basic-convert sub-convert)
-          (if (or (is-a? expr snip%)
-                  ;; FIXME: internal in language.rkt (to-snip-value? expr)
-                  )
-            expr
-            (sh expr basic-convert sub-convert)))
-        ;; mflatt: MINOR HACK - work around temporary
-        ;;         print-convert problems
-        (define (stepper-print-convert v)
-          (or (and (procedure? v) (object-name v))
-              (pc:print-convert v)))
-
-        (case (drscheme:language:simple-settings-printing-style settings)
-          [(write)
-	   (let ((v (convert-explicit value)))
-	     (or (and (procedure? v) (object-name v))
-		 v))]
-          [(current-print) value]
-          [(constructor)
-           (parameterize
-               ([pc:constructor-style-printing #t]
-                [pc:show-sharing
-                 (drscheme:language:simple-settings-show-sharing settings)]
-                [pc:current-print-convert-hook
-                 (leave-snips-alone-hook (pc:current-print-convert-hook))])
-             (stepper-print-convert value))]
-          [(quasiquote)
-           (parameterize
-               ([pc:constructor-style-printing #f]
-                [pc:show-sharing
-                 (drscheme:language:simple-settings-show-sharing settings)]
-                [pc:current-print-convert-hook
-                 (leave-snips-alone-hook (pc:current-print-convert-hook))])
-             (stepper-print-convert value))]
-          [else (error "Internal stepper error: time to resync with simple-module-based-language-convert-value")]))
-
-      ;; set-print-settings ; settings ( -> TST) -> TST
-      (define (set-print-settings language simple-settings thunk)
-        (if (method-in-interface? 'set-printing-parameters (object-interface language))
-          (send language set-printing-parameters simple-settings thunk)
-          ;; assume that the current print-convert context is fine
-          ;; (error 'stepper-tool "language object does not contain set-printing-parameters method")
-          (thunk)))
-
-      ;; simple-module-based-language-render-value/format : TST settings port (union #f (snip% -> void)) (union 'infinity number) -> void
-      (define (simple-module-based-language-render-value/format value settings port width)
-        (if (eq? (drscheme:language:simple-settings-printing-style settings) 'current-print)
-            (parameterize ([current-output-port port])
-              ((current-print) value))
-            (let ([converted-value (simple-module-based-language-convert-value value settings)])
-              (setup-printing-parameters 
-               (lambda ()
-                 (cond
-                   [(drscheme:language:simple-settings-insert-newlines settings)
-                    (if (number? width)
-                        (parameterize ([pretty-print-columns width])
-                          (pretty-print converted-value port))
-                        (pretty-print converted-value port))]
-                   [else
-                    (parameterize ([pretty-print-columns 'infinity])
-                      (pretty-print converted-value port))
-                    (newline port)]))
-               settings
-               width))))
-
-      (define (procedure-output proc)
-	(cond
-	 ((object-name proc)
-	  => (lambda (name)
-	       (string-append "#<function:" (symbol->string name) ">")))
-	 (else "#<function>")))
-
-      (define (signature-output proc)
-	(cond
-	 ((signature-name proc)
-	  => (lambda (name)
-	       (string-append "#<signature:" (symbol->string name) ">")))
-	 (else "#<signature>")))
-      
-      ;; setup-printing-parameters : (-> void) -> void
-      (define (setup-printing-parameters thunk settings width)
-        (let ([use-number-snip?
-                   (lambda (x)
-                     (and (number? x)
-                          (exact? x)
-                          (real? x)
-                          (not (integer? x))))])
-          (parameterize (;; these three handlers aren't used, but are set to override the user's settings
-			 [pretty-print-print-line (lambda (line-number op old-line dest-columns) 
-						     (when (and (not (equal? line-number 0))
-								(not (equal? dest-columns 'infinity)))
-						       (newline op))
-						     0)]
-			 [pretty-print-pre-print-hook (lambda (val port) (void))]
-			 [pretty-print-post-print-hook (lambda (val port) (void))]
-			 
-
-			 [pretty-print-columns width]
-                         [pretty-print-size-hook
-                          (lambda (value display? port)
-                            (cond
-			      [(not (port-writes-special? port)) #f]
-			      [(signature? value) (string-length (signature-output value))]
-			      [(procedure? value) (string-length (procedure-output value))]
-                              [(is-a? value snip%) 1]
-                              [(use-number-snip? value) 1]
-                              [(syntax? value) 1]
-                              [(to-snip-value? value) 1]
-                              [else #f]))]
-                         [pretty-print-print-hook
-                          (lambda (value display? port)
-                            (cond
-			      [(signature? value)
-			       (write-special (signature-output value) port)]
-			      [(procedure? value)
-			       (write-special (procedure-output value) port)]
-                              [(is-a? value snip%)
-                               (write-special value port)
-                               1]
-                              [(use-number-snip? value)
-                               (write-special
-                                (case (drscheme:language:simple-settings-fraction-style settings)
-                                  [(mixed-fraction) 
-                                   (number-snip:make-fraction-snip value #f)]
-                                  [(mixed-fraction-e)
-                                   (number-snip:make-fraction-snip value #t)]
-                                  [(repeating-decimal)
-                                   (number-snip:make-repeating-decimal-snip value #f)]
-                                  [(repeating-decimal-e)
-                                   (number-snip:make-repeating-decimal-snip value #t)])
-                                port)
-                               1]
-                              [(syntax? value)
-                               (write-special (render-syntax/snip value) port)]
-                              [else (write-special (value->snip value) port)]))]
-                         [print-graph
-                          ;; only turn on print-graph when using `write' printing 
-                          ;; style because the sharing is being taken care of
-                          ;; by the print-convert sexp construction when using
-                          ;; other printing styles.
-                          (and (eq? (drscheme:language:simple-settings-printing-style settings) 'write)
-                               (drscheme:language:simple-settings-show-sharing settings))])
-            (thunk))))
-
-      ;; DeinProgramm changes in this procedure
-      ;; simple-module-based-language-convert-value : TST settings -> TST
-      (define (simple-module-based-language-convert-value value settings)
-        (case (drscheme:language:simple-settings-printing-style settings)
-          [(write)
-	   ;; THIS IS THE CHANGE
-	   (case (deinprogramm-lang-settings-writing-style settings)
-	     [(explicit) (convert-explicit value)]
-	     [(datum) value])]
-          [(current-print) value]
-          [(constructor)
-           (parameterize ([pc:constructor-style-printing #t]
-                          [pc:show-sharing (drscheme:language:simple-settings-show-sharing settings)]
-			  [pc:current-print-convert-hook (leave-snips-alone-hook (pc:current-print-convert-hook))])
-             (pc:print-convert value))]
-          [(quasiquote)
-           (parameterize ([pc:constructor-style-printing #f]
-                          [pc:show-sharing (drscheme:language:simple-settings-show-sharing settings)]
-			  [pc:current-print-convert-hook (leave-snips-alone-hook (pc:current-print-convert-hook))])
-             (pc:print-convert value))]))
-
-      ;; leave-snips-alone-hook : any? (any? -> printable) any? -> printable
-      (define ((leave-snips-alone-hook sh) expr basic-convert sub-convert)
-	(if (is-a? expr snip%)
-	    expr
-	    (sh expr basic-convert sub-convert)))
-
-      ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-      ;;
-      ;;  snip/value extensions
-      ;;
-      
-      (define to-snips null)
-      (define-struct to-snip (predicate? >value))
-      (define (add-snip-value predicate constructor)
-        (set! to-snips (cons (make-to-snip predicate constructor) to-snips)))
-      
-      (define (value->snip v)
-        (ormap (lambda (to-snip) (and ((to-snip-predicate? to-snip) v)
-                                      ((to-snip->value to-snip) v)))
-               to-snips))
-      (define (to-snip-value? v)
-        (ormap (lambda (to-snip) ((to-snip-predicate? to-snip) v)) to-snips))
-
-
-      ;; }
 
       ;; sharing/not-config-panel :  boolean boolean parent -> (case-> (-> settings) (settings -> void))
       ;; constructs the config-panel for a language without a sharing option.
@@ -775,7 +538,7 @@
           (define/override (get-style-delta)
             (get-deinprogramm-style-delta))
           
-          (inherit get-reader set-printing-parameters)
+          (inherit get-reader)
           
           (define/override (front-end/complete-program port settings)
 	    (expand-teaching-program port  
@@ -973,19 +736,11 @@
             (class* % (stepper-language<%>)
               (init-field stepper:supported)
               (define/override (stepper:supported?) stepper:supported)
-              (define/override (stepper:show-inexactness?) #t)
-	      (define/override (stepper:print-boolean-long-form?) #f)
-              (define/override (stepper:show-consumed-and/or-clauses?) #f)
-              (define/override (stepper:render-to-sexp val settings language-level)
-                (parameterize ([pc:current-print-convert-hook (make-print-convert-hook settings)])
-                  (set-print-settings
-                   language-level
-                   settings
-                   (lambda () 
-                     (stepper-convert-value val settings)))))
+              (define/override (stepper:print-boolean-long-form?) #f)
               (super-new))
-            (class %
+            (class* % ()
               (init stepper:supported)
+              (define/override (stepper:print-boolean-long-form?) #f)
               (super-new))))
 
       (define (debugger-settings-language %)
@@ -997,16 +752,6 @@
             (class %
               (init [debugger:supported #f])
               (super-new))))
-
-      ;; make-print-convert-hook:
-      ;;   simple-settings -> (TST (TST -> TST) (TST -> TST) -> TST)
-      ;; this code copied from various locations in language.rkt and rep.rkt
-      (define (make-print-convert-hook simple-settings)
-	(lambda (exp basic-convert sub-convert)
-	  (cond
-	   [(is-a? exp snip%)
-	    (send exp copy)]
-	   [else (basic-convert exp)])))
 
       ;; filter/hide-ids : syntax[list] -> listof syntax
       (define (filter/hide-ids ids)

@@ -54,7 +54,7 @@ Racket BC
 
 To build Racket BC on Unix variants or Mac OS:
 
- * ... in addition Racket CS: supply `--enable-cs --enable-bc` to
+ * ... in addition to Racket CS: supply `--enable-cs --enable-bc` to
    `configure`.
 
    The generated Racket BC executables will have a "bc" suffix. A
@@ -218,7 +218,7 @@ Detailed instructions:
     libraries can find the installation directories. At this stage, in
     case you are packaging an installation instead of installing
     directly, you can redirect the installation by setting the
-    "DESTDIR" environment variable to an absolute path for the
+    "DESTDIR" makefile variable to an absolute path for the
     packaging area. For example, `make DESTDIR=/tmp/racket-build
     install` places the installation into "/tmp/racket-build" instead
     of the location originally specified with `--prefix`. The
@@ -231,6 +231,20 @@ Detailed instructions:
     (again, if installed). Use `make plain-install` to install without
     compiling ".zo" files, creating launchers, or building
     documentation.
+
+    For a `--prefix` build, unless `--enable-sharezo` is specified,
+    "compiled" directories containin ".zo" files are moved from
+    "share" to "lib" as the last step of installation. (The
+    "config.rktd" file is updated so that `current-compile-file-roots`
+    is initialized to find the relocated ".zo" files.) For Racket BC,
+    ".zo" files are architecture-independent, and `--enable-sharezo`
+    was the default installation mode through Racket version 8.0. To
+    prepare additional packages (i.e., package that are not included
+    with the source distribution) in installation scope without
+    `--enable-sharezo`, then it's easiest to first install in-place,
+    then configure and install again for a `--prefix` build; that way,
+    the packages installed in-place will get carried along, and their
+    "compiled" directories will be moved appropriately.
 
     If the installation fails because the target directory cannot be
     created, or because the target directory is not the one you want,
@@ -309,9 +323,6 @@ but note the following:
    Mac-style directory structure on top of an existing Unix-style
    directory structure.)
 
- * On Mac OS 10.6 and later, to build Racket in 32-bit mode, use
-   `--disable-mac64`.
-
 
 ========================================================================
  Compiling for Windows
@@ -374,51 +385,105 @@ Some less commonly needed `configure` flags are for Racket BC:
  Cross-compiling for Android
 ========================================================================
 
-[Currently, cross-compilation for Android works only for the Racket BC
- implementation.]
-
-As an example of cross-compiling, to compile for Android on ARM using
-the NDK, use (all on one line)
+As an example of cross-compiling Racket for Android on ARMv7 using the
+NDK, use (all on one line)
 
   configure --host=arm-linux-androideabi 
-            --enable-sysroot="[ndk]/platforms/android-[N]/arch-arm"
+            --enable-sysroot="[sysroot]"
             --enable-racket=auto
 
-where [ndk] is the path to the installed NDK, [N] is a target version
-of Android (such as 14), and
+If you use the NDK script "make-standalone-toolchain.sh" to generate a
+toolchain directory, then include that directory's "bin" in your PATH
+(so that `arm-linux-androideabi-gcc`, etc., are found), and you can
+omit `--enable-sysroot` (or specify [sysroot] as the toolchain
+directory's "sysroot" subdirectory).
+
+In other NDK configurations, you may have
 
  [ndk]/toolchains/arm-linux-androideabi-[comp]/prebuilt/[platform]/bin
 
-is in your PATH (so that a suitable `gcc`, `ar`, etc., are found) for
-the [comp] of your choice and the [platform] used to compile.
+in your PATH (so that `arm-linux-androideabi-gcc`, etc., are found)
+where [ndk] is the path to the installed NDK and for the [comp] of
+your choice and the [platform] used to compile, and then [sysroot] is
+
+ [ndk]/platforms/android-[N]/arch-arm
+
+where [N] is a target version of Android (such as 14).
+
+For 64-bit ARM, replace "arm" above with "aarch64", and replace
+"androideabi" with "android".
+
+When building BC, you may need to add `--disable-cify` for 32-bit ARM
+and `--enable-cify` for 64-bit ARM instead of inheriting the build
+machine's disposition.
 
 
 ========================================================================
  Cross-compiling for iOS
 ========================================================================
 
-[Currently, cross-compilation works only for the Racket BC
- implementation.]
-
 To compile the Racket runtime system as a Framework for iOS, use (all
 on one line)
 
   configure --host=[arch]-apple-darwin
             --enable-ios="[sdk]"
-            --enable-racket=racket
+            --enable-racket=auto
 
 where [arch] is one of
 
  - armv7, armv7s, or aarch64: to run on iOS
- - i386 or x86_64: to run on the simulator
+ - x86_64 or aarch64: to run on the simulator
 
-The [sdk] argument is a path to an iOS SDK, but if it is "iPhoneOS" or
-"iPhoneSimulator", then the corresponding SDK is located in the
-standard place within the XCode application. For example, "iPhoneOS"
-becomes the path (all on one line)
+The [sdk] argument is a path to an iOS SDK for "iPhoneOS" or
+"iPhoneSimulator". The corresponding SDK is located in the standard
+place within the XCode application. For example, "iPhoneOS" becomes
+the path (all on one line)
 
   /Applications/Xcode.app/Contents/Developer/Platforms/
     iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk
+
+To use an existing Racket build for the build platform using
+`--enable-racket`, be sure to include `--enable-scheme` for Racket CS.
+For example, if you have built Racket CS for your machine at
+"/path/to/racket" using the default `make` target, you can configure
+the cross build using that Racket binary and a path to the Chez Scheme
+build folder as follows (all on one line)
+
+  configure --host=[arch]-apple-darwin
+            --enable-ios="[sdk]"
+            --enable-racket=/path/to/racket/bin/racket
+            --enable-scheme=/path/to/racket/src/build/cs/c
+
+Currently, iOS enforces W^X protection on memory pages, which is
+technically a problem for Racket CS. See the note about "writes to
+`space_code` memory" in "ChezScheme/c/segment.c" for the implications.
+If you avoid passing newly-allocated code between threads and avoid
+`#:blocking?` foreign callbacks, you might not run into any issues.
+
+When building BC for iOS, you may need to add `--disable-cify` for
+32-bit target and `--enable-cify` for 64-bit target instead of
+inheriting the build machine's disposition.
+
+
+========================================================================
+ Modifying Racket
+========================================================================
+
+See "cs/README.txt" and "bc/README.txt" for information about
+modifying those implementations of Racket, but one thing they have in
+common is updating the Racket version number. The source for the
+Racket version number is shared in "version/racket_version.h".
+
+The version number for the "base" package needs to be updated
+separately. If this directory is part of a clone of the Git repository
+for Racket, then the "base" version is in "../../pkgs/base/info.rkt".
+
+Unfortunately, there's no single source for the version number in both
+Racket and "base". Those are extracted as subtrees into separate
+distributions, and the point of a version in each place is to detect a
+mismatch between those extracted distributions. The "version.rktl"
+test in Racket's core test suite effectively checks that they're in
+sync within the Racket repo.
 
 
 ========================================================================

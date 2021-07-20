@@ -195,11 +195,18 @@ flags:
         @nonterm{m} and from @nonterm{m} to @nonterm{p}. (On Mac OS,
         @nonterm{n}, @nonterm{m}, and @nonterm{p} are relative to a
         @tt{__PLTSCHEME} segment in the executable. On Windows,
-        they are relative to a resource of type 257 and ID 1.) The first range
+        they are relative to a resource of type 257 and ID 1. On Unix
+        using ELF, they are relative to the @tt{.rackprog} segment
+        in the executable.) The first range
         is loaded in every new @tech{place}, and any modules declared
         in that range are considered predefined in the sense of
         @racket[module-predefined?]. This option is normally embedded
         in a stand-alone binary that also embeds Racket code.}
+
+  @item{@FlagFirst{Y} @nonterm{file} @nonterm{n} @nonterm{m} @nonterm{p} :
+        Like @Flag{k} @nonterm{n} @nonterm{m} @nonterm{p}, but reading
+        from @nonterm{file} (without any adjustment
+        for a segment or resource offset).}
 
   @item{@FlagFirst{m} or @DFlagFirst{main} : Evaluates a call to
         @racketidfont{main} as bound in the top-level environment. All
@@ -331,6 +338,11 @@ flags:
   @item{@FlagFirst{N} @nonterm{file} or @DFlagFirst{name}
         @nonterm{file} : sets the name of the executable as reported
         by @racket[(find-system-path 'run-file)] to
+        @nonterm{file}.}
+
+  @item{@FlagFirst{E} @nonterm{file} or @DFlagFirst{exe}
+        @nonterm{file} : sets the name of the executable as reported
+        by @racket[(find-system-path 'exec-file)] to
         @nonterm{file}.}
 
   @item{@FlagFirst{J} @nonterm{name} or @DFlagFirst{wm-class}
@@ -467,7 +479,9 @@ Extra arguments following the last option are available from the
 
 @history[#:changed "6.90.0.17" @elem{Added @Flag{O}/@DFlag{stdout}.}
          #:changed "7.1.0.5" @elem{Added @Flag{M}/@DFlag{compile-any}.}
-         #:changed "7.8.0.6" @elem{Added @Flag{Z}.}]
+         #:changed "7.8.0.6" @elem{Added @Flag{Z}.}
+         #:changed "8.0.0.10" @elem{Added @Flag{E}.}
+         #:changed "8.0.0.11" @elem{Added @Flag{Y}.}]
 
 @; ----------------------------------------------------------------------
 

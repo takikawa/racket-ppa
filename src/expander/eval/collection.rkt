@@ -2,6 +2,7 @@
 (require racket/private/check
          racket/private/config
          racket/private/place-local
+         racket/private/link-path
          ffi/unsafe/atomic
          "parameter.rkt"
          "shadow-directory.rkt"
@@ -12,7 +13,8 @@
          collection-file-path
          find-library-collection-paths
          find-library-collection-links
-
+         find-compiled-file-roots
+         
          find-col-file
 
          collection-place-init!)
@@ -69,6 +71,12 @@
   (hash-ref config-table
             'installation-name 
             (version)))
+
+(define (coerce-to-relative-path p)
+  (cond
+    [(string? p) (string->path p)]
+    [(bytes? p) (bytes->path p)]
+    [else p]))
 
 (define (coerce-to-path p)
   (cond
@@ -250,7 +258,7 @@
                                             (or (string? (car p))
                                                 (eq? 'root (car p))
                                                 (eq? 'static-root (car p)))
-                                            (path-string? (cadr p))
+                                            (encoded-link-path? (cadr p))
                                             (or (null? (cddr p))
                                                 (regexp? (caddr p)))))
                                      v))
@@ -262,7 +270,7 @@
                             (when (or (null? (cddr p))
                                       (regexp-match? (caddr p) (version)))
                               (let ([dir (simplify-path
-                                          (path->complete-path (cadr p) dir))])
+                                          (path->complete-path (decode-link-path (cadr p)) dir))])
                                 (cond
                                   [(eq? (car p) 'static-root)
                                    ;; multi-collection, constant content:
@@ -452,11 +460,11 @@
              (ormap (lambda (d)
                       (ormap (lambda (mode)
                                (file-exists?
-                                (let ([p (build-path dir mode try-path)])
-                                  (cond
-                                    [(eq? d 'same) p]
-                                    [(relative-path? d) (build-path p d)]
-                                    [else (reroot-path p d)]))))
+                                (let ([dir (cond
+                                             [(eq? d 'same) dir]
+                                             [(relative-path? d) (build-path dir d)]
+                                             [else (reroot-path dir d)])])
+                                  (build-path dir mode try-path))))
                              modes))
                     roots)))))
 
@@ -492,3 +500,10 @@
                    (cons (simplify-path (path->complete-path v (current-directory)))
                          (loop (cdr l)))
                    (loop (cdr l)))))))))))
+
+(define (find-compiled-file-roots)
+  (define ht (get-config-table (find-main-config)))
+  (define paths (hash-ref ht 'compiled-file-roots #f))
+  (or (and (list? paths)
+           (map coerce-to-relative-path paths))
+      (list 'same)))

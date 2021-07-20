@@ -7,9 +7,7 @@
 (provide prefs-base%
          syntax-prefs-base%
          syntax-prefs%
-         syntax-prefs/readonly%
-
-         pref:invert-colors?)
+         syntax-prefs/readonly%)
 
 (preferences:set-default 'SyntaxBrowser:Width 700 number?)
 (preferences:set-default 'SyntaxBrowser:Height 600 number?)
@@ -24,8 +22,6 @@
 (define pref:props-shown? (preferences:get/set 'SyntaxBrowser:PropertiesPanelShown))
 (define pref:draw-arrows? (preferences:get/set 'SyntaxBrowser:DrawArrows?))
 (define pref:taint-icons (preferences:get/set 'SyntaxBrowser:DisplayTaintIcons))
-
-(define pref:invert-colors? (preferences:get/set 'framework:white-on-black?))
 
 (define prefs-base%
   (class object%

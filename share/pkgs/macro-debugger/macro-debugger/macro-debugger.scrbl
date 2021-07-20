@@ -390,9 +390,10 @@ Analyzes @racket[module-to-analyze], detecting useless requires. Each
 module imported by @racket[module-to-analyze] is classified as one of
 KEEP, BYPASS, or DROP. For each required module, one or more lines is
 printed with the module's classification and supporting
-information. Output may be suppressed based on classification via
-@racket[show-keep?], @racket[show-bypass?], and @racket[show-drop?];
-by default, only DROP recommendations are printed.
+information. @margin-note*{When run via @exec{raco check-requires},
+only DROP recommendations are printed by default.} Output may be
+suppressed based on classification via @racket[show-keep?],
+@racket[show-bypass?], and @racket[show-drop?].
 
 Modules required @racket[for-label] are not analyzed.
 

@@ -4,7 +4,7 @@
 
 (require "structs.rkt" "utils.rkt" racket/list)
 
-(provide analyze-samples (all-from-out "structs.rkt"))
+(provide analyze-samples (all-from-out "structs.rkt") profile-merge)
 
 (define-syntax-rule (with-hash <hash> <key> <expr> ...)
   (hash-ref! <hash> <key> (λ () <expr> ...)))
@@ -139,3 +139,60 @@
   (check set=? (get-counts '(1 2 3)) '([1 . 1] [2 . 1] [3 . 1]))
   (check set=? (get-counts '(1 2 2 3 3 3)) '([1 . 1] [2 . 2] [3 . 3]))
   (check set=? (get-counts '(3 1 2 3 2 3)) '([1 . 1] [2 . 2] [3 . 3])))
+
+(define (node-loc node)
+  (cons (node-id node) (node-src node)))
+
+(define (merge-thread-times . ts)
+  (define h (make-hash))
+  (for* ([t (in-list ts)] [tt (in-list t)])
+    (hash-update! h (car tt) (λ (x) (+ x (cdr tt))) 0))
+  h)
+
+(define (profile-merge . ps)
+  (define nodes (make-hash))
+  (define root-node (node #f #f '() 0 0 '() '()))
+  (hash-set! nodes (cons #f #f) root-node)
+  (for* ([p (in-list ps)] [n (profile-nodes p)])
+    (hash-set! nodes (node-loc n) (node (node-id n) (node-src n) '() 0 0 '() '())))
+  (for* ([p ps] [node (profile-nodes p)])
+    (profile-add nodes node))
+  (for ([p ps]) (profile-add nodes (profile-*-node p)))
+  (hash-remove! nodes (cons #f #f))
+  (profile (apply + (map profile-total-time ps))
+           (apply + (map profile-cpu-time ps))
+           (apply + (map profile-sample-number ps))
+           (apply merge-thread-times (map profile-thread-times ps))
+           (hash-values nodes)
+           root-node))
+
+(define (translate table node)
+  (hash-ref table (node-loc node)))
+
+(define (profile-add table node)
+  (define node* (translate table node))
+  (set-node-thread-ids! node* (remove-duplicates (append (node-thread-ids node*) (node-thread-ids node))))
+  (set-node-total! node* (+ (node-total node*) (node-total node)))
+  (set-node-self! node* (+ (node-self node*) (node-self node)))
+  (for ([e (node-callers node)])
+    (define caller* (translate table (edge-caller e)))
+    (define e* (findf (λ (e2) (eq? (edge-caller e2) caller*)) (node-callers node*)))
+    (cond
+      [e*
+       (set-edge-total! e* (+ (edge-total e) (edge-total e*)))
+       (set-edge-caller-time! e* (+ (edge-caller-time e) (edge-caller-time e*)))
+       (set-edge-callee-time! e* (+ (edge-callee-time e) (edge-callee-time e*)))]
+      [else
+       (define e* (struct-copy edge e [caller caller*] [callee node*]))
+       (set-node-callers! node* (cons e* (node-callers node*)))]))
+  (for ([e (node-callees node)])
+    (define callee* (translate table (edge-callee e)))
+    (define e* (findf (λ (e2) (eq? (edge-callee e2) callee*)) (node-callees node*)))
+    (cond
+      [e*
+       (set-edge-total! e* (+ (edge-total e) (edge-total e*)))
+       (set-edge-caller-time! e* (+ (edge-caller-time e) (edge-caller-time e*)))
+       (set-edge-callee-time! e* (+ (edge-callee-time e) (edge-callee-time e*)))]
+      [#f
+       (define e* (struct-copy edge e [callee callee*] [caller node*]))
+       (set-node-callees! node* (cons e* (node-callees node*)))])))

@@ -122,7 +122,7 @@
  that has the same behaviour as the original script file but can be modified @;
  to change its properties;
  @(if drracket-parent?
-      "\n3) Open the shadow script file for edition in DrRacket."
+      "\n3) Open the shadow script file for editing in DrRacket."
       "")
    
  This allows the original script file to be updated (e.g., if part of a package) @;
@@ -172,7 +172,10 @@
     (define (set-msg-help-string dir file)
       (when (and dir file)
         (define filepath (build-path dir file))
-        (define str (or (get-script-help-string filepath) ""))
+        (define str (or (with-handlers* ([exn:fail?
+                                          (λ (e) "Warning: Cannot read script help string.")])
+                          (get-script-help-string filepath))
+                        ""))
         (send msg-help-string set-label str)))
 
     ;;; Widgets

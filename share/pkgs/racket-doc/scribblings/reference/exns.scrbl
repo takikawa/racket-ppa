@@ -97,12 +97,12 @@ exception handler obtains control, and the handler itself is
 (with-handlers ([number? (lambda (n)
                            (+ n 5))])
   (raise 18 #t))
-(define-struct (my-exception exn:fail:user) ())
+(struct my-exception exn:fail:user ())
 (with-handlers ([my-exception? (lambda (e)
                                  #f)])
-  (+ 5 (raise (make-my-exception
-                "failed"
-                (current-continuation-marks)))))
+  (+ 5 (raise (my-exception
+               "failed"
+               (current-continuation-marks)))))
 (eval:error (raise 'failed #t))
 ]}
 
@@ -383,6 +383,10 @@ record, else the @racket[expr] is used if provided and not
 @racket[extra-sources] to produce the @racket[exprs] field, or
 @racket[extra-sources] is used directly for @racket[exprs] if neither
 @racket[expr] nor @racket[sub-expr] is provided and not @racket[#f].
+The @racket[extra-sources] argument is also used directly for
+@racket[exprs] in the unusual case that the @racket[sub-expr] or
+@racket[expr] that would be included in @racket[exprs] cannot be
+converted to a syntax object (because it contains a cycle).
 
 The form name used in the generated error message is determined
 through a combination of the @racket[name], @racket[expr], and
@@ -916,14 +920,12 @@ As an example,
 ;; prop:exn:srcloc protocol.  It carries
 ;; with it the location of the syntax that
 ;; is guilty.
-(define-struct (exn:fail:he-who-shall-not-be-named
-                exn:fail)
+(struct exn:fail:he-who-shall-not-be-named exn:fail
   (a-srcloc)
   #:property prop:exn:srclocs
   (lambda (a-struct)
     (match a-struct
-      [(struct exn:fail:he-who-shall-not-be-named
-         (msg marks a-srcloc))
+      [(exn:fail:he-who-shall-not-be-named msg marks a-srcloc)
        (list a-srcloc)])))
 
 ;; We can play with this by creating a form that
@@ -935,7 +937,7 @@ As an example,
        [(and (identifier? #'expr)
              (eq? (syntax-e #'expr) 'voldemort))
         (quasisyntax/loc stx
-          (raise (make-exn:fail:he-who-shall-not-be-named
+          (raise (exn:fail:he-who-shall-not-be-named
                   "oh dear don't say his name"
                   (current-continuation-marks)
                   (srcloc '#,(syntax-source #'expr)
@@ -957,8 +959,7 @@ As an example,
 (f 7)
 (g 7)  
 ;; The error should highlight the use
-;; of the one-who-shall-not-be-named
-;; in g.
+;; of voldemort in g.
 }|
 
 @defproc[(exn:srclocs? [v any/c]) boolean?]{
@@ -979,6 +980,18 @@ Returns the @racket[srcloc]-getting procedure associated with @racket[v].}
                    [position (or/c exact-positive-integer? #f)]
                    [span (or/c exact-nonnegative-integer? #f)])
                   #:inspector #f]{
+
+A @deftech{source location} is most frequently represented by a
+@racket[srcloc] structure. More generally, a source location has the
+same information as a @racket[srcloc] structure, but potentially
+represented or accessed differently. For example, source-location
+information is accessed from a @tech{syntax object} with functions
+like @racket[syntax-source] and @racket[syntax-line], while
+@racket[datum->syntax] accepts a source location as a list, vector, or
+another syntax object. For ports, a combination of
+@racket[object-name] and @racket[port-next-location] provides location
+information, especially in a port for which counting has been enabled
+through @racket[port-count-lines!].
 
 The fields of a @racket[srcloc] instance are as follows:
 

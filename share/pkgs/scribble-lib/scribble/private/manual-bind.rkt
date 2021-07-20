@@ -1,4 +1,4 @@
-#lang scheme/base
+#lang racket/base
 (require racket/string
          racket/format
          "../struct.rkt"
@@ -10,9 +10,9 @@
          "../html-properties.rkt"
          "manual-ex.rkt"
          racket/contract/base
-         (for-syntax scheme/base)
-         (for-label scheme/base
-                    scheme/class))
+         (for-syntax racket/base)
+         (for-label racket/base
+                    racket/class))
 
 (provide definition-site
          libs->taglet

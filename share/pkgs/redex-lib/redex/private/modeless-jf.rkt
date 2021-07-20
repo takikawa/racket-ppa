@@ -41,6 +41,10 @@
          (set! largest-used-prefix n)
          (string->symbol (format "any_~a" n)))
 
+       (define modeless-jf-name-only-prems-any-counter 0)
+       (define (next-any)
+         (set! modeless-jf-name-only-prems-any-counter (+ modeless-jf-name-only-prems-any-counter 1))
+         (string->symbol (format "any_modeless-jf-name-only-prems-any-~a" modeless-jf-name-only-prems-any-counter)))
        (define-values (modeless-prems
                        modeless-jf-name-only-prems
                        modeless-prem-jf-ids
@@ -71,7 +75,7 @@
                            modeless-prems)
                     (list* #'ellipsis
                            #`(name #,name
-                                   (#,(symbol->string (syntax-e #'form-name)) any (... ...)))
+                                   (#,(symbol->string (syntax-e #'form-name)) #,(next-any) (... ...)))
                            modeless-jf-name-only-prems)
                     (cons #'form-name modeless-prem-jf-ids)
                     (cons name premise-repeat-names)
@@ -91,7 +95,7 @@
               (loop #'more
                     (cons #`(#,(symbol->string (syntax-e #'form-name)) . rest-of-form)
                            modeless-prems)
-                    (cons #`(#,(symbol->string (syntax-e #'form-name)) any (... ...))
+                    (cons #`(#,(symbol->string (syntax-e #'form-name)) #,(next-any) (... ...))
                           modeless-jf-name-only-prems)
                     (cons #'form-name modeless-prem-jf-ids)
                     (cons #f premise-repeat-names)
@@ -112,15 +116,19 @@
        (define/syntax-parse (modeless-prems-syncheck-exp
                              modeless-prem
                              (modeless-prem-names ...)
-                             (modeless-prem-names/ellipses ...))
-         (rewrite-side-conditions/check-errs lang syn-error-name #t #`(#,@modeless-prems)))
+                             (modeless-prem-names/ellipses ...)
+                             ellipsis-number-end)
+         (rewrite-side-conditions/check-errs lang syn-error-name #t #`(#,@modeless-prems)
+                                             #:ellipsis-number-start 0))
 
        (define/syntax-parse (modeless-jf-name-only-prems-syncheck-exp
                              modeless-jf-name-only-prem
                              (modeless-jf-name-only-prem-names ...)
-                             (modeless-jf-name-only-prem-names/ellipses ...))
+                             (modeless-jf-name-only-prem-names/ellipses ...)
+                             ellipsis-number-end-end)
          (rewrite-side-conditions/check-errs lang syn-error-name #t
-                                             #`(#,@modeless-jf-name-only-prems)))
+                                             #`(#,@modeless-jf-name-only-prems)
+                                             #:ellipsis-number-start (syntax-e #'ellipsis-number-end)))
 
        (define/syntax-parse (check-jf-against-deriv-proc ...)
          (for/list ([modeless-prem-jf-id (in-list modeless-prem-jf-ids)])
@@ -170,8 +178,10 @@
        (define/syntax-parse (conc-syncheck-exp
                              conc
                              (conc-names ...)
-                             (conc-names/ellipses ...))
-         (rewrite-side-conditions/check-errs lang syn-error-name #t #'conc-pats))
+                             (conc-names/ellipses ...)
+                             ellipsis-number-conc-end)
+         (rewrite-side-conditions/check-errs lang syn-error-name #t #'conc-pats
+                                             #:ellipsis-number-start (syntax-e #'ellipsis-number-end-end)))
 
        (define-values (body compiled-pattern-identifiers patterns-to-compile)
          (parameterize ([judgment-form-pending-expansion
@@ -253,11 +263,35 @@
                              named-clauses))]
       [else (set! noname-clauses (cons compiled noname-clauses))]))
 
-  #`(λ (lang)
-      (make-hash (list #,@named-clauses
-                       #,@(if (null? noname-clauses)
+  (define hash-stx
+    #`(make-hash (list #,@(if (null? noname-clauses)
                               (list)
-                              (list #`(cons #f (list #,@noname-clauses))))))))
+                              (list #`(cons #f (list #,@noname-clauses))))
+                       #,@named-clauses)))
+  (cond
+    [(identifier? orig)
+     (define jf-record (lookup-judgment-form-id orig))
+     #`(λ (lang)
+         (build-extended-jf-hash
+          (#,(judgment-form-mk-procs jf-record) lang)
+          #,hash-stx))]
+    [else
+     #`(λ (lang)
+         #,hash-stx)]))
+
+(define (build-extended-jf-hash orig-hash new-hash)
+  (define all-keys (remove-duplicates (append (hash-keys orig-hash) (hash-keys new-hash))))
+  (define result (make-hash))
+  (for ([key (in-list all-keys)]
+        #:when key)
+    (hash-set! result
+               key
+               (or (hash-ref new-hash key #f)
+                   (hash-ref orig-hash key))))
+  (define unnamed-rules (append (hash-ref new-hash #f '()) (hash-ref orig-hash #f '())))
+  (unless (null? unnamed-rules)
+    (hash-set! result #f unnamed-rules))
+  result)
 
 (define (check-jf-result-against-derivations only-check-contracts?
                                              derivation get-derivations
@@ -316,12 +350,24 @@
               sub-derivations
               (λ () #f))]
             [else
-             (define known-rules (sort (hash-keys modeless-jf-clause-table) string<?))
-             (error jf-name "unknown rule in derivation\n  rule: ~.s\n  known rules:~a"
-                    rule-name
-                    (apply string-append
-                           (for/list ([rule (in-list known-rules)])
-                             (format "\n   ~s" rule))))]))]
+             (define known-rules
+               (sort (filter values (hash-keys modeless-jf-clause-table))
+                     string<?))
+             (define error-intro
+               (if rule-name
+                   (format "unknown rule in derivation\n  rule: ~.s" rule-name)
+                   "used nameless rule in derivation, but there are no nameless rules in the judgment form"))
+             (define named-rules-str
+               (if (null? known-rules)
+                   ""
+                   (format "\n  named rules:~a"
+                           (apply string-append
+                                  (for/list ([rule (in-list known-rules)])
+                                    (format "\n   ~s" rule))))))
+             (error jf-name
+                    "~a~a"
+                    error-intro
+                    named-rules-str)]))]
        [else #f])]
     [_ #f]))
 

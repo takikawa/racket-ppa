@@ -56,7 +56,7 @@
    
    ;; What about char->integer constraint?
    [unicode  (:or (:: "u" (:** 1 4 digit16))
-                  (:: "U" (:** 1 6 digit16)))]
+                  (:: "U" (:** 1 8 digit16)))]
    
    [character (:or (:: "#\\" any-char)
                    (:: "#\\" character-name)

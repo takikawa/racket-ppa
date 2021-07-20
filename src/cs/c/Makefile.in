@@ -22,6 +22,7 @@ BASE_CFLAGS = @CFLAGS@ @CPPFLAGS@
 CFLAGS = $(BASE_CFLAGS) -I$(SCHEME_TARGET_INC) -I$(srcdir)/../../rktio -Irktio -I.
 LDFLAGS = @LDFLAGS@
 LIBS = @LIBS@
+LINK_DYNAMIC = @LINK_DYNAMIC@
 AR = @AR@
 ARFLAGS = @ARFLAGS@
 RANLIB = @RANLIB@
@@ -49,6 +50,10 @@ ICP_LIB=@ICP_LIB@
 DEFAULT_RACKET = ./raw_racketcs
 RACKET = @RACKET@
 BOOTFILE_RACKET = @BOOTFILE_RACKET@
+
+# Potentially supplied by makefile that calls this one, and
+# overrides `BOOTFILE_RACKET` if non-empty:
+RACKET_FOR_BOOTFILES =
 
 CS_INSTALLED = @CS_INSTALLED@
 
@@ -87,8 +92,12 @@ cs:
 	$(MAKE) starter
 	$(MAKE) repack-@INSTALL_LIBS_ENABLE@-libs
 
+clean:
+	cd $(SCHEME_WORKAREA); $(MAKE) clean
+	cd rktio; $(MAKE) clean
+
 SETUP_BOOT_MODE = @SETUP_BOOT_MODE@
-BOOT_COMPILED_SUBDIR = 
+BOOT_COMPILED_SUBDIR =
 SETUP_COMMON_BOOT = -l- setup $(SETUP_BOOT_MODE) $(srcdir)/../../setup-go.rkt $(builddir)/compiled$(BOOT_COMPILED_SUBDIR)
 
 ABS_SCHEME_WORKAREA = "`$(SCHEME) --script $(srcdir)/../absify.ss --no-trailing-sep $(SCHEME_WORKAREA)`"
@@ -120,7 +129,9 @@ bounce:
 
 scheme:
 	mkdir -p $(SCHEME_WORKAREA)
-	if [ "$(BOOTFILE_RACKET)" != "$(DEFAULT_RACKET)" ] ; \
+	if [ "$(RACKET_FOR_BOOTFILES)" != "" ] ; \
+          then $(MAKE) scheme-via-rktboot BOOTFILE_RACKET="$(RACKET_FOR_BOOTFILES)" SETUP_BOOT_MODE=--chain ; \
+	elif [ "$(BOOTFILE_RACKET)" != "$(DEFAULT_RACKET)" ] ; \
           then $(MAKE) scheme-via-rktboot BOOTFILE_RACKET="$(BOOTFILE_RACKET)" ; \
           else $(MAKE) scheme-via-pb ; fi
 
@@ -131,11 +142,11 @@ scheme-via-rktboot:
 
 scheme-via-rktboot-at:
 	SCHEME_SRC="$(SCHEME_DIR)" MACH="$(MACH)" SCHEME_WORKAREA=$(SCHEME_WORKAREA) $(BOOTSTRAP_BOOTFILE_RACKET) "$(SCHEME_DIR)"/rktboot/make-boot.rkt
-	/bin/sh $(srcdir)/reset_boot.sh $(MACH) $(SCHEME_WORKAREA)
+	$(SHELL) $(srcdir)/reset_boot.sh $(MACH) $(SCHEME_WORKAREA)
 	$(MAKE) mach-make
 
 scheme-via-pb:
-	/bin/sh $(srcdir)/check_boot.sh $(MACH) "$(SCHEME_DIR)" $(SCHEME_WORKAREA)
+	$(SHELL) $(srcdir)/check_boot.sh $(MACH) "$(SCHEME_DIR)" $(SCHEME_WORKAREA)
 	if [ -f boot_pending ] ; then $(MAKE) pb-bootquick ; fi
 	$(MAKE) mach-make
 
@@ -145,11 +156,16 @@ pb-bootquick:
 	cd $(SCHEME_WORKAREA) && $(MAKE) ${MACH}.bootquick
 	$(MAKE) config-scheme
 	cd $(SCHEME_WORKAREA) && $(MAKE) reset
-	/bin/sh $(srcdir)/ready_boot.sh $(MACH) $(SCHEME_WORKAREA)
+	$(SHELL) $(srcdir)/ready_boot.sh $(MACH) $(SCHEME_WORKAREA)
 
 mach-make:
 	$(MAKE) config-scheme
 	cd $(SCHEME_WORKAREA) && $(MAKE)
+
+# Makes cross compilation work more reliably for zlib, because
+# it causes zlib/configure to use given AR, etc.
+CHOST_HACK-cross = env "CHOST=hack-do-not-use"
+CHOST_HACK =
 
 SCHEME_CONFIG_VARS = CC="$(CC)" CFLAGS="$(BASE_CFLAGS)" LDFLAGS="$(LDFLAGS)" LIBS="$(LIBS)" \
                      AR="$(AR)" ARFLAGS="$(ARFLAGS)" RANLIB="$(RANLIB)" \
@@ -161,9 +177,9 @@ config-scheme:
 
 scheme-cross:
 	env MAKE_BOOT_FOR_CROSS=yes SCHEME_SRC="$(SCHEME_DIR)" SCHEME_WORKAREA=$(SCHEME_WORKAREA) MACH="$(TARGET_MACH)" $(BOOTSTRAP_RACKET) "$(SCHEME_DIR)"/rktboot/make-boot.rkt
-	/bin/sh $(srcdir)/reset_boot.sh $(TARGET_MACH) $(SCHEME_WORKAREA)
+	$(SHELL) $(srcdir)/reset_boot.sh $(TARGET_MACH) $(SCHEME_WORKAREA)
 	cd $(SCHEME_WORKAREA) && "$(UP_SCHEME_DIR)"/configure @SCHEME_CROSS_CONFIG_ARGS@ $(SCHEME_CONFIG_VARS)
-	cd $(SCHEME_WORKAREA)/$(TARGET_MACH)/c && $(MAKE) o=o cross=t
+	cd $(SCHEME_WORKAREA)/$(TARGET_MACH)/c && $(CHOST_HACK@T_CROSS_MODE@) $(MAKE) o=o cross=t
 	$(MAKE) $(SCHEME_WORKAREA)/$(TARGET_MACH)/s/xpatch
 
 # Rebuild patch file and cross "petite.boot" and "scheme.boot" when older
@@ -196,12 +212,14 @@ racket.boot: racket.so
 EMBED_DEPS = $(srcdir)/embed-boot.rkt
 
 racketcs@NOT_OSX@@NOT_MINGW@: raw_racketcs petite-v.boot scheme-v.boot racket-v.boot $(EMBED_DEPS)
-	$(BOOTSTRAP_RACKET) $(srcdir)/embed-boot.rkt @ELF_COMP@ @BOOT_COMPRESS_COMP@ raw_racketcs racketcs petite-v.boot scheme-v.boot racket-v.boot
+	$(BOOTSTRAP_RACKET) $(srcdir)/embed-boot.rkt --target $(TARGET_MACH) @BOOT_COMPRESS_COMP@ raw_racketcs racketcs petite-v.boot scheme-v.boot racket-v.boot
 	@POST_LINKER@ racketcs
+	$(RESTORE_SIGNATURE) racketcs
 
 gracketcs@NOT_OSX@@NOT_MINGW@: raw_gracketcs petite-v.boot scheme-v.boot racket-v.boot $(EMBED_DEPS)
-	$(BOOTSTRAP_RACKET) $(srcdir)/embed-boot.rkt @ELF_COMP@ @BOOT_COMPRESS_COMP@ raw_gracketcs gracketcs petite-v.boot scheme-v.boot racket-v.boot
+	$(BOOTSTRAP_RACKET) $(srcdir)/embed-boot.rkt --target $(TARGET_MACH) @BOOT_COMPRESS_COMP@ raw_gracketcs gracketcs petite-v.boot scheme-v.boot racket-v.boot
 	@POST_LINKER@ gracketcs
+	$(RESTORE_SIGNATURE) gracketcs
 
 OWN_Z_LIB = $(SCHEME_TARGET_INC)/../../zlib/libz.a
 OWN_LZ4_LIB = $(SCHEME_TARGET_INC)/../../lz4/lib/liblz4.a
@@ -212,11 +230,11 @@ BOOT_OBJ_DEPS = boot.o $(SCHEME_LIB_DEPS) rktio/librktio.a
 BOOT_OBJS = boot.o $(SCHEME_LIBS) rktio/librktio.a
 
 raw_racketcs@NOT_OSX@: main.o boot.o $(BOOT_OBJ_DEPS)
-	$(CC) $(CFLAGS) -o raw_racketcs main.o $(BOOT_OBJS) $(LDFLAGS) $(LIBS)
+	$(CC) $(CFLAGS) -o raw_racketcs main.o $(BOOT_OBJS) $(LDFLAGS) $(LIBS) $(LINK_DYNAMIC)
 	@POST_LINKER@ raw_racketcs
 
 raw_gracketcs: grmain.o boot.o $(BOOT_OBJ_DEPS)
-	$(CC) $(CFLAGS) -o raw_gracketcs grmain.o $(BOOT_OBJS) $(LDFLAGS) $(LIBS)
+	$(CC) $(CFLAGS) -o raw_gracketcs grmain.o $(BOOT_OBJS) $(LDFLAGS) $(LIBS) $(LINK_DYNAMIC)
 	@POST_LINKER@ raw_gracketcs
 
 petite-v.boot: $(SCHEME_TARGET_INC)/petite.boot
@@ -258,8 +276,8 @@ $(GRACKET_BIN): grmain.o $(RKTFW) $(GRAPPSKEL)
 	$(CC) $(CFLAGS) -o $(GRACKET_BIN)_raw grmain.o $(MACLIBRKT_LINK_@MACLIBRKT_LINK_MODE@)
 	$(MAKE) mac-embed-boot-@MACLIBRKT_LINK_MODE@ EMBED_SRC=$(GRACKET_BIN)_raw EMBED_DEST=$(GRACKET_BIN)
 	/usr/bin/install_name_tool -change "Racket.framework/Versions/$(FWVERSION)_CS/Racket" "@executable_path/../../../Racket.framework/Versions/$(FWVERSION)_CS/Racket" $(GRACKET_BIN)
-	$(RESTORE_SIGNATURE) $(GRACKET_BIN)
 	rm $(GRACKET_BIN)_raw
+	$(RESTORE_SIGNATURE) $(GRACKET_BIN)
 
 $(GRAPPSKEL): $(srcdir)/../../mac/osx_appl.rkt  $(srcdir)/../../version/racket_version.h $(srcdir)/../../mac/icon/GRacket.icns
 	$(BOOTSTRAP_RACKET) $(srcdir)/../../mac/osx_appl.rkt $(srcdir)/../.. "CS"
@@ -387,8 +405,11 @@ install-cross:
 
 SCHEME_XPATCH = $(SCHEME_WORKAREA)/$(TARGET_MACH)/s/xpatch
 
-compile-xpatch.$(TARGET_MACH): $(SCHEME_XPATCH) $(srcdir)/mk-cross-serve.ss $(srcdir)/cross-serve.ss $(srcdir)/../expander/env.ss
-	$(SCHEME) --script $(srcdir)/mk-cross-serve.ss $(srcdir)/cross-serve.ss $(srcdir)/../expander/env.ss
+CROSS_SERVE_DEPS = $(srcdir)/mk-cross-serve.ss $(srcdir)/cross-serve.ss \
+                   $(srcdir)/../expander/env.ss $(srcdir)/../linklet/config.ss
+
+compile-xpatch.$(TARGET_MACH): $(SCHEME_XPATCH) $(CROSS_SERVE_DEPS)
+	$(SCHEME) --script $(srcdir)/mk-cross-serve.ss $(srcdir) cross-serve.ss $(srcdir)/../expander/env.ss
 	cat cross-serve.so $(SCHEME_XPATCH) > compile-xpatch.$(TARGET_MACH)
 
 RACKET_XPATCH = chezpart.$(MACH) rumble.$(MACH)	thread.$(MACH) \
@@ -406,7 +427,9 @@ DEF_COLLECTS_DIR@MINGW@ =
 DEF_CONFIG_DIR@MINGW@ =
 DEF_C_DIRS = $(DEF_COLLECTS_DIR) $(DEF_CONFIG_DIR)
 
-MAIN_DEPS = $(srcdir)/main.c $(srcdir)/boot.h $(srcdir)/../../start/config.inc cs_config.h
+MAIN_DEPS = $(srcdir)/main.c $(srcdir)/boot.h cs_config.h \
+            $(srcdir)/../../start/config.inc \
+            $(srcdir)/../../start/self_exe.inc
 
 main.o: $(MAIN_DEPS)
 	$(CC) $(CFLAGS) $(DEF_C_DIRS) -c -o main.o $(srcdir)/main.c
@@ -417,7 +440,7 @@ grmain.o: $(srcdir)/grmain.c $(MAIN_DEPS) $(srcdir)/../../start/gui_filter.inc
 boot.o: $(srcdir)/boot.c $(srcdir)/../../rktio/rktio.inc $(srcdir)/boot.h
 	$(CC) $(CFLAGS) -c -o boot.o $(srcdir)/boot.c
 
-starter@NOT_MINGW@: $(srcdir)/../../start/ustart.c
+starter@NOT_MINGW@: $(srcdir)/../../start/ustart.c $(srcdir)/../../start/self_exe.inc
 	$(CC) $(CFLAGS) -o starter $(srcdir)/../../start/ustart.c
 
 
@@ -464,7 +487,13 @@ install@NOT_MINGW@:
 	$(MAKE) setup-install $(PROPAGATE_VARIABLES)
 
 setup-install:
+	$(MAKE) do-setup-install@T_CROSS_MODE@
+
+do-setup-install:
 	@RUN_RACKET@ $(SELF_ROOT_CONFIG) $(SETUP_ARGS)
+
+do-setup-install-cross:
+	@RUN_RACKET@ $(SELF_ROOT_CONFIG) -C -M -R `pwd`/compiled: --cross-compiler $(TARGET_MACH) "$(DESTDIR)$(libpltdir)" $(SETUP_ARGS)
 
 no-setup-install:
 	echo done

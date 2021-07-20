@@ -18,10 +18,10 @@
   (unless (or (eq? setup-collects 'skip)
               no-setup?
               (not (member (getenv "PLT_PKG_NOSETUP") '(#f ""))))
-    (define installation? (eq? 'installation (current-pkg-scope)))
+    (define user? (eq? 'user (current-pkg-scope)))
     (unless (setup:setup
-             #:make-user? (not installation?)
-             #:avoid-main? (not installation?)
+             #:make-user? user?
+             #:avoid-main? user?
              #:make-docs? (not no-docs?)
              #:collections (and setup-collects
                                 (map (lambda (s)
@@ -720,9 +720,9 @@
    ([(#:str catalog #f) catalog () "Use <catalog>s instead of configured catalogs"
                         (catalog-list (cons catalog (catalog-list)))])
    #:install-type-flags
-   ([(#:sym type [file dir file-url dir-url git github name] #f) type ("-t")
+   ([(#:sym type [file dir file-url dir-url git git-url github name] #f) type ("-t")
      ("Specify type of <pkg-source>, instead of inferred;"
-      "valid <types>s are: file, dir, file-url, dir-url, git, github, or name")]
+      "valid <types>s are: file, dir, file-url, dir-url, git, git-url, github, or name")]
     [(#:str name #f) name ("-n") ("Specify name of package, instead of inferred;"
                                   "makes sense only when a single <pkg-source> is given")]
     [(#:str checksum #f) checksum () ("Checksum of package, either expected or selected;"
@@ -777,11 +777,11 @@
                link-type
                (not (memq type
                           (case link-type
-                            [(clone) '(git github)]
+                            [(clone) '(git git-url github)]
                             [else '(dir)]))))
       ((current-pkg-error) (format "-t/--type value must be ~a with --~a"
                                    (cond
-                                    [clone "`git' or `github'"]
+                                    [clone "`git', `git-url', or `github'"]
                                     [else "`dir'"])
                                    (cond
                                     [link "link"]

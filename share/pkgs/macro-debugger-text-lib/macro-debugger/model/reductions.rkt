@@ -514,7 +514,7 @@
                                 "within expansion.")
                             (~a "For example, a macro may have caught an "
                                 "exception coming from within a call to `local-expand'."))])
-                 (list (walk/talk 'remark texts))))])]
+                 (walk/talk 'remark texts)))])]
     [#f
      (R)]))
 

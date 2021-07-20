@@ -699,6 +699,10 @@
       [() ((abort-handler)) (unexpected-return who)]
       [(x) ((abort-handler) x) (unexpected-return who)])))
 
+(define-who assert-unreachable
+  (lambda ()
+    ($oops who "unreachable code reached")))
+
 (define $interrupt ($make-thread-parameter void))
 
 (define $format-scheme-version
@@ -767,11 +771,13 @@
     (lambda (t)
       (unless (and (time? t) (eq? (time-type t) 'time-duration))
         ($oops who "~s is not a time record of type time-duration" t))
-      (fp (time-second t) (time-nanosecond t)))))
+      (let ([s (time-second t)])
+        (when (>= s 0)
+          (fp s (time-nanosecond t)))))))
 
 (define $scheme-greeting
   (lambda ()
-    (format "~a\nCopyright 1984-2019 Cisco Systems, Inc.\n"
+    (format "~a\nCopyright 1984-2020 Cisco Systems, Inc.\n"
       (scheme-version))))
 
 (define $session-key #f)

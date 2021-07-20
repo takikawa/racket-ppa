@@ -33,7 +33,7 @@
     [     %r1  %Carg2           #f  1 uptr]
     [     %r2  %Carg3 %reify1   #f  2 uptr]
     [     %r3  %Carg4 %reify2   #f  3 uptr]
-    [     %r4  %Carg5           #f  4 uptr]
+    [     %r4  %Carg5 %save1    #f  4 uptr]
     [     %r5  %Carg6           #f  5 uptr]
     [     %r6  %Carg7           #f  6 uptr]
     [     %r7  %Carg8           #f  7 uptr]
@@ -600,12 +600,20 @@
         (with-output-language (L15d Effect)
           (define add-offset
             (lambda (r)
-              (if (eqv? (nanopass-case (L15d Triv) w [(immediate ,imm) imm]) 0)
-                  (k r)
-                  (let ([u (make-tmp 'u)])
-                    (seq
+              (let ([i (nanopass-case (L15d Triv) w [(immediate ,imm) imm])])
+                (cond
+                  [(eqv? i 0) (k r)]
+                  [(unsigned12? i)
+                   (let ([u (make-tmp 'u)])
+                     (seq
                       `(set! ,(make-live-info) ,u (asm ,null-info ,(asm-add #f) ,r ,w))
-                      (k u))))))
+                      (k u)))]
+                  [else
+                   (let ([u (make-tmp 'u)])
+                     (seq
+                      `(set! ,(make-live-info) ,u ,w)
+                      `(set! ,(make-live-info) ,u (asm ,null-info ,(asm-add #f) ,r ,u))
+                      (k u)))]))))
           (if (eq? y %zero)
               (add-offset x)
               (let ([u (make-tmp 'u)])
@@ -614,7 +622,7 @@
                   (add-offset u)))))))
     ;; NB: compiler implements init-lock! and unlock! as word store of zero 
     (define-instruction pred (lock!)
-      [(op (x ur) (y ur) (w unsigned12))
+      [(op (x ur) (y ur) (w imm-constant))
        (let ([u (make-tmp 'u)]
              [u2 (make-tmp 'u2)])
          (values
@@ -627,7 +635,7 @@
                    `(asm ,null-info ,asm-lock ,r ,u ,u2)))))
            `(asm ,info-cc-eq ,asm-eq ,u (immediate 0))))])
     (define-instruction effect (locked-incr! locked-decr!)
-      [(op (x ur) (y ur) (w unsigned12))
+      [(op (x ur) (y ur) (w imm-constant))
        (lea->reg x y w
          (lambda (r)
            (let ([u1 (make-tmp 'u1)] [u2 (make-tmp 'u2)])
@@ -636,7 +644,7 @@
                `(set! ,(make-live-info) ,u2 (asm ,null-info ,asm-kill))
                `(asm ,null-info ,(asm-lock+/- op) ,r ,u1 ,u2)))))])
     (define-instruction effect (cas)
-      [(op (x ur) (y ur) (w unsigned12) (old ur) (new ur))
+      [(op (x ur) (y ur) (w imm-constant) (old ur) (new ur))
        (lea->reg x y w
          (lambda (r)
 	   (let ([u1 (make-tmp 'u1)] [u2 (make-tmp 'u2)])
@@ -2408,10 +2416,10 @@
 		    (or (andmap double-member? members)
 			(andmap float-member? members)))))]
 	[else #f]))
-    (define int-argument-regs (lambda () (list %Carg1 %Carg2 %Carg3 %Carg4
-                                               %Carg5 %Carg6 %Carg7 %Carg8)))
-    (define fp-argument-regs (lambda () (list %Cfparg1 %Cfparg2 %Cfparg3 %Cfparg4
-                                              %Cfparg5 %Cfparg6 %Cfparg7 %Cfparg8)))
+    (define int-argument-regs (list %Carg1 %Carg2 %Carg3 %Carg4
+                                    %Carg5 %Carg6 %Carg7 %Carg8))
+    (define fp-argument-regs (list %Cfparg1 %Cfparg2 %Cfparg3 %Cfparg4
+                                   %Cfparg5 %Cfparg6 %Cfparg7 %Cfparg8))
     (define save-and-restore
       (lambda (regs e)
         (safe-assert (andmap reg? regs))
@@ -2499,7 +2507,7 @@
 
     (define categorize-arguments
       (lambda (types varargs-after)
-        (let loop ([types types] [int* (int-argument-regs)] [fp* (fp-argument-regs)]
+        (let loop ([types types] [int* int-argument-regs] [fp* fp-argument-regs]
                    [varargs-after varargs-after]
                    ;; accumulate alignment from previous args so we can compute any
                    ;; needed padding and alignment after this next argument

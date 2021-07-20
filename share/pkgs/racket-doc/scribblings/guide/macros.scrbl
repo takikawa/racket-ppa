@@ -16,14 +16,14 @@ use. Racket also supports arbitrary macro transformers that are
 implemented in Racket---or in a macro-extended variant of Racket.
 
 This chapter provides an introduction to Racket macros, but see
-@hyperlink["http://www.greghendershott.com/fear-of-macros/"]{@italic{Fear of
+@hyperlink["https://www.greghendershott.com/fear-of-macros/"]{@italic{Fear of
 Macros}} for an introduction from a different perspective.
 
-Racket includes addional support for macro development: 
-A @hyperlink["https://docs.racket-lang.org/macro-debugger/index.html"]{@italic{macro 
+Racket includes additional support for macro development:
+A @hyperlink["https://docs.racket-lang.org/macro-debugger/index.html"]{@italic{macro
 debugger}} to make it easier for experienced programmers
-to debug their macros and for novices to study their behavior, 
-and of macros. And the @hyperlink["https://docs.racket-lang.org/syntax/index.html"]{@italic{syntax/parse 
+to debug their macros and for novices to study their behavior,
+and of macros. And the @hyperlink["https://docs.racket-lang.org/syntax/index.html"]{@italic{syntax/parse
 library}} for writing macros and specifying syntax that
 automatically validates macro uses and reports syntax
 errors.

@@ -6,8 +6,32 @@
          racket/math)
 (provide one-cell-snip%)
 
+#|
+(define (snip/acquire-default-style-mixin %)
+  (class %
+    (inherit get-count is-owned? set-style)
+    (super-new)
+
+    ;; I'm not sure this strategy is okay.
+    (define/override (set-admin admin)
+      (when admin
+        (when (is-owned?) (super set-admin #f))
+        (define ed (send admin get-editor))
+        (define style-name (send ed default-style-name))
+        (define style-list (send ed get-style-list))
+        (set-style-list style-list)
+        (define style (send style-list find-named-style style-name))
+        (set-style style))
+      (super set-admin admin))
+
+    (define/public (set-style-list style-list)
+      (void))
+    ))
+|#
+
 (define one-cell-snip%
   (class snip%
+    (init-field [text-for-extent "X"])
     (inherit get-style get-admin)
     (super-new)
 
@@ -18,7 +42,7 @@
              (vector->values cached-extent)]
             [else
              (define font (send (get-style) get-font))
-             (define-values (w h d a) (send dc get-text-extent "X" font))
+             (define-values (w h d a) (send dc get-text-extent text-for-extent font))
              (set! cached-extent (vector w h d a))
              (values w h d a)]))
 
@@ -51,9 +75,13 @@
     (define/public (draw-background dc x y w h caret)
       (unless (pair? caret)
         (define bg-color (send (get-style) get-background))
-        (send dc set-pen "black" 1 'transparent)
-        (send dc set-brush bg-color 'solid)
-        (send dc draw-rectangle x y w h)))
+        (define saved-pen (send dc get-pen))
+        (define saved-brush (send dc get-brush))
+        (begin (send dc set-pen "black" 1 'transparent)
+               (send dc set-brush bg-color 'solid)
+               (send dc draw-rectangle x y w h))
+        (send dc set-brush saved-brush)
+        (send dc set-pen saved-pen)))
 
     (define/override (draw dc x y left top right bottom dx dy caret)
       (define-values (w h _d _a) (get/cache-extent dc))

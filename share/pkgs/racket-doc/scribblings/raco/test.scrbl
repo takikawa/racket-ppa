@@ -74,20 +74,24 @@ The @exec{raco test} command accepts several flags:
 
  @item{@DFlag{drdr}
        --- Configures defaults to imitate the DrDr continuous testing
-       system: ignore non-modules, run tests in separate processes,
-       use as many jobs as available processors,
-       set the default timeout to 90 seconds, 
-       create a fresh @envvar{PLTUSERHOME} and @envvar{TMPDIR} for each test,
-       count stderr output as a test failure,
-       quiet program output, 
-       provide empty program input,
-       and print a table of results.}
+       system: ignore non-modules, run tests in separate processes
+       (unless @DFlag{thread} or @DFlag{direct} is specified) use as
+       many jobs as available processors (unless @DFlag{jobs} is
+       specified), set the default timeout to 90 seconds (unless
+       @DFlag{timeout} is specified), create a fresh
+       @envvar{PLTUSERHOME} and @envvar{TMPDIR} for each test, count
+       stderr output as a test failure, quiet program output, provide
+       empty program input, and print a table of results.}
 
  @item{@Flag{s} @nonterm{name} or @DFlag{submodule} @nonterm{name}
        --- Requires the submodule @nonterm{name} rather than @racket[test].
        Supply @Flag{s} or @DFlag{submodule} to run multiple submodules,
        or combine multiple submodules with @DFlag{first-avail} to
-       run the first available of the listed modules.}
+       run the first available of the listed modules.
+       Beware that if you use @Flag{s} multiple times but supply a
+       single module file as an argument, the default mode is still
+       @DFlag{direct} (which likely means fewer fresh module
+       instantiations than @DFlag{process} or @DFlag{place} mode).}
 
  @item{@Flag{r} or @DFlag{run-if-absent}
        --- Requires the top-level module of a file if a relevant submodule is not 
@@ -109,9 +113,10 @@ The @exec{raco test} command accepts several flags:
        via @Flag{s} or @DFlag{submodule}.}
 
  @item{@DFlag{direct}
-      --- Runs each test in a thread. This mode is the default if
+      --- Runs each test in a thread, using a single namespace's module
+      registry to load all tests. This mode is the default if
       a single file is specified. Multiple tests can interfere with
-      each other and the overall test run by exiting, unsafe operations
+      each other and the overall test run by exiting, using unsafe operations
       that block (and thus prevent timeout), and so on.}
 
  @item{@DFlag{process}
@@ -132,7 +137,9 @@ The @exec{raco test} command accepts several flags:
       to @nonterm{seconds}. Use @exec{+inf.0} to allow tests to run without
       limit but allow @racket[timeout] sub-submodule configuration.
       If any test fails due to a timeout, the exit status of @exec{raco test}
-      is 2 (as opposed to 1 for only non-timeout failures or 0 for success).}
+      is 2 (as opposed to 1 for only non-timeout failures or 0 for success).
+      The default timeout corresponds to @exec{+inf.0} if not specified
+      via @DFlag{timeout} or @DFlag{drdr}.}
 
  @item{@DFlag{fresh-user}
       --- When running tests in a separate process, creates a fresh

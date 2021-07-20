@@ -1,13 +1,22 @@
 #lang racket/base
 
 (require "../utils/utils.rkt"
-         (base-env base-types-extra)
-         (except-in (base-env prims) with-handlers λ lambda define)
-         (env type-name-env type-alias-env global-env)
-         (private parse-type type-contract syntax-properties)
-         (typecheck tc-toplevel typechecker)
-         (types utils)
-         (utils lift tc-utils disarm arm literal-syntax-class)
+         "../base-env/base-types-extra.rkt"
+         (except-in "../base-env/prims.rkt" with-handlers λ lambda define)
+         "../env/type-name-env.rkt"
+         "../env/type-alias-env.rkt"
+         "../env/global-env.rkt"
+         "parse-type.rkt"
+         "type-contract.rkt"
+         "syntax-properties.rkt"
+         "../typecheck/tc-toplevel.rkt"
+         "../typecheck/typechecker.rkt"
+         "../types/utils.rkt"
+         "../utils/lift.rkt"
+         "../utils/tc-utils.rkt"
+         "../utils/disarm.rkt"
+         "../utils/arm.rkt"
+         "../utils/literal-syntax-class.rkt"
          racket/promise
          racket/syntax
          syntax/flatten-begin
@@ -23,14 +32,14 @@
                      default-continuation-prompt-tag
                      for/list for/vector for/hash for/hasheq for/hasheqv
                      for/and for/or for/sum for/product for/lists
-                     for/first for/last for/fold for*/list for*/lists
+                     for/first for/last for/fold for/foldr for*/list for*/lists
                      for*/vector for*/hash for*/hasheq for*/hasheqv for*/and
                      for*/or for*/sum for*/product for*/first for*/last
-                     for*/fold)
-          (base-env prims)
+                     for*/fold for*/foldr)
+          "../base-env/prims.rkt"
           (prefix-in c: racket/contract/region))
          (for-label racket/base
-                    (base-env base-types-extra)))
+                    "../base-env/base-types-extra.rkt"))
 
 (define-literal-syntax-class #:for-label Values)
 (define-literal-syntax-class #:for-label values)
@@ -74,7 +83,7 @@
                  ;; this is a parameter to avoid dependency issues
                  [current-type-names
                   (lazy
-                    (append 
+                    (append
                      (type-name-env-map (lambda (id ty)
                                           (cons (syntax-e id) ty)))
                      (type-alias-env-map (lambda (id ty)
@@ -186,4 +195,3 @@
      (with-type-helper stx #'body #'(fv.id ...) #'(fv.ty ...) #'(id ...) #'(ty ...) #f #f (syntax-local-context))]
     [(_ :result-ty fv:free-vars . body)
      (with-type-helper stx #'body #'(fv.id ...) #'(fv.ty ...) #'() #'() #'ty #t (syntax-local-context))]))
-

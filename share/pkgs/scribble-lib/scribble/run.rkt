@@ -1,7 +1,7 @@
 #lang racket/base
 (require "xref.rkt"
          "render.rkt"
-         scheme/cmdline
+         racket/cmdline
          raco/command-name
          (prefix-in text:     "text-render.rkt")
          (prefix-in markdown: "markdown-render.rkt")
@@ -30,6 +30,7 @@
 (define current-directory-depth    (make-parameter 0))
 (define current-quiet              (make-parameter #f))
 (define helper-file-prefix         (make-parameter #f))
+(define keep-existing-helper-files? (make-parameter #f))
 (define doc-command-line-arguments (make-parameter null))
 (define current-image-prefs        (make-parameter null)) ; reverse order
 
@@ -92,6 +93,8 @@
     (current-dest-name name)]
    [("--dest-base") prefix "start support-file names with <prefix>"
     (helper-file-prefix prefix)]
+   [("--keep-at-dest-base") "keep existing files at location of support files"
+    (keep-existing-helper-files? #t)]
    #:multi
    [("++convert") fmt ("prefer image conversion to <fmt> (in given order)"
                        " <fmt> as one of: ps pdf svg png gif")
@@ -145,6 +148,13 @@
    [("--doc-binding") id
     "render document provided as <id> instead of `doc`"
     (set! doc-binding (string->symbol id))]
+   [("--errortrace") "enable errortrace"
+    (with-handlers ([exn:fail:filesystem:missing-module?
+                     (λ (e)
+                       (raise-user-error
+                        'scribble
+                        "errortrace not installed"))])
+      (dynamic-require 'errortrace #f))]
    #:args (file . another-file)
    (let ([files (cons file another-file)])
      (parameterize ([current-command-line-arguments
@@ -175,6 +185,7 @@
           #:style-extra-files (reverse (current-style-extra-files))
           #:extra-files (reverse (current-extra-files))
           #:helper-file-prefix (helper-file-prefix)
+          #:keep-existing-helper-files? (keep-existing-helper-files?)
           #:redirect (and (current-html) (current-redirect))
           #:redirect-main (and (current-html) (current-redirect-main))
           #:directory-depth (current-directory-depth)

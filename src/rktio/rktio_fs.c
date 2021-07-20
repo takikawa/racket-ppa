@@ -13,8 +13,10 @@
 # include <grp.h>
 # include <dirent.h>
 # include <sys/time.h>
+# include <sys/utsname.h>
 #endif
 #ifdef RKTIO_SYSTEM_WINDOWS
+# include <windows.h>
 # include <shlobj.h>
 # include <direct.h>
 # include <sys/stat.h>
@@ -1960,9 +1962,8 @@ char *rktio_system_path(rktio_t *rktio, int which)
   
   {
     /* Everything else is in ~: */
-    char *home_str, *alt_home, *home, *prefer_home_str = NULL, *prefer_home;
+    char *home_str, *alt_home, *home, *default_xdg_home_str = NULL, *xdg_home_str = NULL, *prefer_home;
     char *home_file = NULL, *prefer_home_file = NULL;
-    int free_prefer_home_str = 0;
 
     alt_home = rktio_getenv(rktio, "PLTUSERHOME");
 
@@ -1979,7 +1980,7 @@ char *rktio_system_path(rktio_t *rktio, int which)
 	home_str = "~/Library/Caches/Racket/";
       else if ((which == RKTIO_PATH_INIT_DIR)
                || (which == RKTIO_PATH_INIT_FILE)) {
-        prefer_home_str = "~/Library/Racket/";
+        default_xdg_home_str = "~/Library/Racket/";
         prefer_home_file = "racketrc.rktl";
         home_str = "~/";
         home_file = ".racketrc";
@@ -1988,13 +1989,13 @@ char *rktio_system_path(rktio_t *rktio, int which)
 #else
       char *envvar, *xdg_dir;
       if (which == RKTIO_PATH_ADDON_DIR) {
-        prefer_home_str = "~/.local/share/racket/";
+        default_xdg_home_str = "~/.local/share/racket/";
         envvar = "XDG_DATA_HOME";
       } else if (which == RKTIO_PATH_CACHE_DIR) {
-        prefer_home_str = "~/.cache/racket/";
+        default_xdg_home_str = "~/.cache/racket/";
         envvar = "XDG_CACHE_HOME";
       } else {
-        prefer_home_str = "~/.config/racket/";
+        default_xdg_home_str = "~/.config/racket/";
         envvar = "XDG_CONFIG_HOME";
       }
       if (alt_home)
@@ -2003,8 +2004,7 @@ char *rktio_system_path(rktio_t *rktio, int which)
         xdg_dir = rktio_getenv(rktio, envvar);
       /* xdg_dir is invalid if it is not an absolute path */
       if (xdg_dir && (strlen(xdg_dir) > 0) && (xdg_dir[0] == '/')) {
-        prefer_home_str = append_paths(xdg_dir, "racket/", 1, 0);
-        free_prefer_home_str = 1;
+        xdg_home_str = append_paths(xdg_dir, "racket/", 1, 0);
       } else {
         if (xdg_dir) free(xdg_dir);
       }
@@ -2027,15 +2027,18 @@ char *rktio_system_path(rktio_t *rktio, int which)
         home_str = "~/";
     }
 
-    /* If `prefer_home_str` is non-NULL, it must be `malloc`ed */
+    /* If `xdg_home_str` is non-NULL, it must be an absolute
+       path that is `malloc`ed.
+       If `default_xdg_home_str` is non-NULL, it starts with "~/"
+       and is not `malloc`ed. */
 
-    if (prefer_home_str) {
-      if (alt_home)
-        prefer_home = append_paths(alt_home, prefer_home_str + 2, 0, 0);
+    if (xdg_home_str || default_xdg_home_str) {
+      if (xdg_home_str)
+        prefer_home = xdg_home_str;
+      else if (alt_home)
+        prefer_home = append_paths(alt_home, default_xdg_home_str + 2, 0, 0);
       else
-        prefer_home = rktio_expand_user_tilde(rktio, prefer_home_str);
-      if (free_prefer_home_str)
-        free(prefer_home_str);
+        prefer_home = rktio_expand_user_tilde(rktio, default_xdg_home_str);
 
       if (directory_or_file_exists(rktio, prefer_home, prefer_home_file))
         home_str = NULL;
@@ -2236,3 +2239,92 @@ char *rktio_system_path(rktio_t *rktio, int which)
   }
 #endif
 }
+
+/*========================================================================*/
+/* system information as a string                                         */
+/*========================================================================*/
+
+
+#ifdef RKTIO_SYSTEM_UNIX
+char *rktio_uname(rktio_t *rktio) {
+  char *s;
+  struct utsname u;
+  int ok, len;
+  int syslen, nodelen, rellen, verlen, machlen;
+
+  do {
+    ok = uname(&u);
+  } while ((ok == -1) && (errno == EINTR));
+    
+  if (ok != 0)
+    return strdup("<unknown machine>");
+
+  syslen = strlen(u.sysname);
+  nodelen = strlen(u.nodename);
+  rellen = strlen(u.release);
+  verlen = strlen(u.version);
+  machlen = strlen(u.machine);
+
+  len = (syslen + 1 + nodelen + 1 + rellen + 1 + verlen + 1 + machlen + 1);
+
+  s = malloc(len);
+
+# define ADD_UNAME_STR(sn, slen) do {                  \
+    memcpy(s + len, sn, slen);                         \
+    len += slen;                                       \
+    s[len++] = ' ';                                    \
+  } while (0)
+
+  len = 0;
+  ADD_UNAME_STR(u.sysname, syslen);
+  ADD_UNAME_STR(u.nodename, nodelen);
+  ADD_UNAME_STR(u.release, rellen);
+  ADD_UNAME_STR(u.version, verlen);
+  ADD_UNAME_STR(u.machine, machlen);
+  s[len - 1] = 0;
+
+# undef ADD_UNAME_STR
+  
+  return s;
+}
+#endif
+ 
+#ifdef RKTIO_SYSTEM_WINDOWS
+char *rktio_uname(rktio_t *rktio) {
+  char buff[1024], *r;
+  OSVERSIONINFO info;
+  BOOL hasInfo;
+  char *p;
+  int len;
+
+  info.dwOSVersionInfoSize = sizeof(info);
+
+  GetVersionEx(&info);
+
+  hasInfo = FALSE;
+
+  p = info.szCSDVersion;
+
+  while (p < info.szCSDVersion + sizeof(info.szCSDVersion) &&
+	 *p) {
+    if (*p != ' ') {
+      hasInfo = TRUE;
+      break;
+    }
+    p = p + 1;
+  }
+
+  sprintf(buff,"Windows %s %ld.%ld (Build %ld)%s%s",
+	  (info.dwPlatformId == VER_PLATFORM_WIN32_WINDOWS) ?
+	  "9x" :
+	  (info.dwPlatformId == VER_PLATFORM_WIN32_NT) ?
+	  "NT" : "Unknown platform",
+	  info.dwMajorVersion,info.dwMinorVersion,
+	  (info.dwPlatformId == VER_PLATFORM_WIN32_NT) ?
+	  info.dwBuildNumber :
+	  info.dwBuildNumber & 0xFFFF,
+	  hasInfo ? " " : "",hasInfo ? info.szCSDVersion : "");
+
+  return strdup(buff);
+}
+#endif

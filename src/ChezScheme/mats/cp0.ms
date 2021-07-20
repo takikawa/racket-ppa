@@ -2614,7 +2614,8 @@
                  (begin (#%write 'f) #\y)
                  (begin (#%write 'g) ($zzz-ok))))
              (begin (#%write 'h) 1)))))
-  (expansion-matches?
+  (parameterize ([enable-type-recovery #f])
+   (expansion-matches?
         '(begin (write 'a)
            ((begin (write 'b) string-ref)
             (begin (write 'c)
@@ -2637,7 +2638,7 @@
                  (begin (#%write 'e) ($xxx-ok))
                  (begin (#%write 'f) 'oops)
                  (begin (#%write 'g) ($zzz-ok))))
-             (begin (#%write 'h) 1)))))
+             (begin (#%write 'h) 1))))))
   (expansion-matches?
         `(begin (write 'a)
            ((begin (write 'b) string-ref)
@@ -2730,7 +2731,8 @@
                  (begin (#%write 'f) 121)
                  (begin (#%write 'g) ($zzz-ok))))
              (begin (#%write 'h) 1)))))
-  (expansion-matches?
+  (parameterize ([enable-type-recovery #f])
+   (expansion-matches?
         '(begin (write 'a)
            ((begin (write 'b) fxvector-ref)
             (begin (write 'c)
@@ -2753,7 +2755,7 @@
                  (begin (#%write 'e) ($xxx-ok))
                  (begin (#%write 'f) 'oops)
                  (begin (#%write 'g) ($zzz-ok))))
-             (begin (#%write 'h) 1)))))
+             (begin (#%write 'h) 1))))))
   (expansion-matches?
         `(begin (write 'a)
            ((begin (write 'b) fxvector-ref)
@@ -2894,12 +2896,12 @@
       (expand/optimize
         '(lambda (v)
            (let ([v2 (if (vector? v) v (error))])
-             (let ([q (vector-sort v2)] [n (#3%vector-length v)])
+             (let ([q (vector-sort < v2)] [n (#3%vector-length v)])
                (display "1")
                (list q n))))))
     '(lambda (v)
        (let ([v2 (begin (if (#2%vector? v) (#2%void) (#2%error)) v)])
-         (let ([q (#2%vector-sort v2)] [n (#3%vector-length v)])
+         (let ([q (#2%vector-sort #2%< v2)] [n (#3%vector-length v)])
            (#2%display "1")
            (#2%list q n)))))
   (equivalent-expansion?
@@ -2907,11 +2909,11 @@
       (expand/optimize
         '(lambda (v)
            (let ([v2 (if (vector? v) v (error))])
-             (let ([q (vector-sort v2)] [n (or v 72)])
+             (let ([q (vector-sort < v2)] [n (or v 72)])
                (display "1")
                (list q n))))))
     '(lambda (v)
-       (let ([q (#2%vector-sort (begin (if (#2%vector? v) (#2%void) (#2%error)) v))]
+       (let ([q (#2%vector-sort #2%< (begin (if (#2%vector? v) (#2%void) (#2%error)) v))]
              [n (if v v 72)])
          (#2%display "1")
          (#2%list q n))))
@@ -2923,7 +2925,7 @@
       (syntax-rules ()
         [(_ eqprim) (eqtest eqprim #f)]
         [(_ eqprim generic?)
-         (parameterize ([enable-cp0 #t] [#%$suppress-primitive-inlining #f])
+         (parameterize ([enable-cp0 #t] [#%$suppress-primitive-inlining #f] [enable-type-recovery #f])
            (let ([arity-mask (procedure-arity-mask eqprim)] [primref `($primitive ,(if (= (optimize-level) 3) 3 2) eqprim)])
              (define-syntax ifsafe
                (syntax-rules ()
@@ -3163,6 +3165,7 @@
    (or (not (enable-cp0))
        (not (procedure-known-single-valued? (lambda (f) (#2%$app/value f)))))
    (or (not (enable-cp0))
+       (#%$suppress-primitive-inlining)
        (eq? (current-eval) interpret)
        (procedure-known-single-valued? (case-lambda
                                         [(f) (#3%$app/value f)]
@@ -3171,6 +3174,7 @@
                                                    (#3%$app/value f))])))
 
    (or (not (enable-cp0))
+       (#%$suppress-primitive-inlining)
        (eq? (current-eval) interpret)
        (procedure-known-single-valued? (lambda () (abort 'x))))
    (or (not (enable-cp0))
@@ -3179,6 +3183,7 @@
    (or (not (enable-cp0))
        (not (procedure-known-single-valued? (lambda (f) (#2%$app/no-return f)))))
    (or (not (enable-cp0))
+       (#%$suppress-primitive-inlining)
        (eq? (current-eval) interpret)
        (procedure-known-single-valued? (case-lambda
                                         [(f) (#3%$app/no-return f)]
@@ -3339,3 +3344,28 @@
      (expand/optimize '(#3%$app/value x y))
      '($app/value x y)))
 )
+
+(mat cross-library-inlining
+  (begin
+    ;; Make sure inlining doesn't use the wrong `helper`
+    (library (cross-library-inlining-test)
+      (export a b am bm)
+      (import (rnrs))
+      (define-syntax def
+        (syntax-rules ()
+          [(_ id idm)
+           (begin
+             (define (helper x) (if (zero? x) 'id (helper (- x 1))))
+             (define (id x) (helper x))
+             ;; causes `helper` to be preserved:
+             (define-syntax idm (syntax-rules () [(_) helper])))]))
+      (def a am)
+      (def b bm))
+    #t)
+  (eq? 'a (let ()
+            (import (cross-library-inlining-test))
+            (a 10)))
+  (eq? 'b (let ()
+            (import (cross-library-inlining-test))
+            (b 10)))
+  )

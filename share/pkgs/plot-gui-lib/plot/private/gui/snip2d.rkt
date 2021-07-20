@@ -13,6 +13,7 @@
          plot/private/plot2d/renderer
          plot/private/no-gui/plot2d-utils
          plot/private/common/contract
+         (submod plot/private/common/plotmetrics untyped)
          "worker-thread.rkt"
          "snip.rkt")
 
@@ -35,7 +36,7 @@
 (struct draw-command (animating? plot-bounds-rect width height) #:transparent)
 
 (define 2d-plot-snip%
-  (class plot-snip%
+  (class* plot-snip% (plot-metrics<%>)
     (init init-bm saved-plot-parameters)
     (init-field make-bm plot-bounds-rect area width height)
 
@@ -140,6 +141,7 @@
                 (worker-thread-try-get rth (λ () (values #f #f))))
               (cond [(is-a? new-bm bitmap%)
                      (set! area new-area)
+                     (set! plot-metrics-ok? #f)
                      (set-bitmap new-bm)
                      (set-message-center)
                      #t]
@@ -198,7 +200,7 @@
     (define the-overlay-renderers #f)
 
     (define/public (set-overlay-renderers renderers)
-      (set! the-overlay-renderers renderers)
+      (set! the-overlay-renderers (and renderers (flatten renderers)))
       (refresh))
 
     (define (draw-overlay-renderers dc x y left top right bottom)
@@ -260,7 +262,8 @@
                              '() '() '() '() '()
                              dc
                              dc-x-min dc-y-min
-                             (- dc-x-max dc-x-min) (- dc-y-max dc-y-min)))
+                             (- dc-x-max dc-x-min) (- dc-y-max dc-y-min)
+                             (send area get-aspect-ratio)))
               (plot-area overlay-area the-overlay-renderers)))
 
           (send dc set-origin origin-x origin-y))))
@@ -371,6 +374,23 @@
         (start-update-thread #f)
         (set-update #t))
       (super resize w h))
+
+    (define plot-metrics-ok? #f)
+    (match-define (list bounds ->dc ->plot plane)
+      (send area get-plot-metrics-functions))
+    (define (update-metrics)
+      (match-define (list new-bounds new-->dc new-->plot new-plane)
+        (send area get-plot-metrics-functions))
+      (set! bounds new-bounds)
+      (set! ->dc new-->dc)
+      (set! ->plot new-->plot)
+      (set! plane new-plane)
+      (set! plot-metrics-ok? #t))
+    (define/public (get-plot-bounds) (unless plot-metrics-ok? (update-metrics)) (bounds))
+    (define/public (plot->dc coords) (unless plot-metrics-ok? (update-metrics)) (->dc coords))
+    (define/public (dc->plot coords) (unless plot-metrics-ok? (update-metrics)) (->plot coords))
+    (define/public (plane-vector)    (unless plot-metrics-ok? (update-metrics)) (plane))
+    (define/public (get-plot-metrics-functions) (unless plot-metrics-ok? (update-metrics)) (list bounds ->dc ->plot plane))
     ))
 
 (define (make-2d-plot-snip

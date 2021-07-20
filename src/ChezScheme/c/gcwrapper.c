@@ -185,7 +185,7 @@ void S_set_minmarkgen(IGEN g) {
 void S_immobilize_object(x) ptr x; {
   seginfo *si;
 
-  if (IMMEDIATE(x))
+  if (FIXMEDIATE(x))
     si = NULL;
   else
     si = MaybeSegInfo(ptr_get_segment(x));
@@ -212,7 +212,7 @@ void S_immobilize_object(x) ptr x; {
 void S_mobilize_object(x) ptr x; {
   seginfo *si;
 
-  if (IMMEDIATE(x))
+  if (FIXMEDIATE(x))
     si = NULL;
   else
     si = MaybeSegInfo(ptr_get_segment(x));
@@ -261,7 +261,7 @@ static IBOOL remove_first_nomorep(x, pls, look) ptr x, *pls; IBOOL look; {
 IBOOL Slocked_objectp(x) ptr x; {
   seginfo *si; IGEN g; IBOOL ans; ptr ls;
 
-  if (IMMEDIATE(x) || (si = MaybeSegInfo(ptr_get_segment(x))) == NULL || (g = si->generation) == static_generation) return 1;
+  if (FIXMEDIATE(x) || (si = MaybeSegInfo(ptr_get_segment(x))) == NULL || (g = si->generation) == static_generation) return 1;
 
   tc_mutex_acquire();
 
@@ -299,7 +299,7 @@ void Slock_object(x) ptr x; {
   seginfo *si; IGEN g;
 
  /* weed out pointers that won't be relocated */
-  if (!IMMEDIATE(x) && (si = MaybeSegInfo(ptr_get_segment(x))) != NULL && (g = si->generation) != static_generation) {
+  if (!FIXMEDIATE(x) && (si = MaybeSegInfo(ptr_get_segment(x))) != NULL && (g = si->generation) != static_generation) {
     ptr tc = get_thread_context();
     tc_mutex_acquire();
     THREAD_GC(tc)->during_alloc += 1;
@@ -323,7 +323,7 @@ void Slock_object(x) ptr x; {
 void Sunlock_object(x) ptr x; {
   seginfo *si; IGEN g;
 
-  if (!IMMEDIATE(x) && (si = MaybeSegInfo(ptr_get_segment(x))) != NULL && (g = si->generation) != static_generation) {
+  if (!FIXMEDIATE(x) && (si = MaybeSegInfo(ptr_get_segment(x))) != NULL && (g = si->generation) != static_generation) {
     ptr tc = get_thread_context();
     tc_mutex_acquire();
     THREAD_GC(tc)->during_alloc += 1;
@@ -548,9 +548,13 @@ void S_addr_tell(ptr p) {
   segment_tell(addr_get_segment(p));
 }
 
-static void check_pointer(ptr *pp, IBOOL address_is_meaningful, ptr base, uptr seg, ISPC s, IBOOL aftergc) {
+static void check_pointer(ptr *pp, IBOOL address_is_meaningful, IBOOL is_reference, ptr base, uptr seg, ISPC s, IBOOL aftergc) {
   ptr p = *pp;
-  if (!IMMEDIATE(p)) {
+
+  if (is_reference)
+    p = S_reference_to_object(p);
+
+  if (!FIXMEDIATE(p)) {
     seginfo *psi = MaybeSegInfo(ptr_get_segment(p));
     if (psi != NULL) {
       if ((psi->space == space_empty)
@@ -769,7 +773,7 @@ void S_check_heap(aftergc, mcg) IBOOL aftergc; IGEN mcg; {
           } else if (s == space_impure || s == space_symbol || s == space_pure || s == space_weakpair || s == space_ephemeron
                      || s == space_immobile_impure || s == space_count_pure || s == space_count_impure || s == space_closure
                      || s == space_pure_typed_object || s == space_continuation || s == space_port || s == space_code
-                     || s == space_impure_record || s == space_impure_typed_object) {
+                     || s == space_impure_record || s == space_impure_typed_object || s == space_reference_array) {
             ptr start;
           
             /* check for dangling references */
@@ -884,7 +888,7 @@ void S_check_heap(aftergc, mcg) IBOOL aftergc; IGEN mcg; {
                 if (!si->marked_mask || (si->marked_mask[segment_bitmap_byte(TO_PTR(pp1))] & segment_bitmap_bit(TO_PTR(pp1)))) {
                   int a;
                   for (a = 0; (a < ptr_alignment) && (pp1 < pp2); a++) {
-#define         in_ephemeron_pair_part(pp1, seg) ((((uptr)TO_PTR(pp1) - (uptr)build_ptr(seg, 0)) % size_ephemeron) < size_pair)
+#define             in_ephemeron_pair_part(pp1, seg) ((((uptr)TO_PTR(pp1) - (uptr)build_ptr(seg, 0)) % size_ephemeron) < size_pair)
                     if ((s == space_ephemeron) && !in_ephemeron_pair_part(pp1, seg)) {
                       /* skip non-pair part of ephemeron */
                     } else {
@@ -893,7 +897,7 @@ void S_check_heap(aftergc, mcg) IBOOL aftergc; IGEN mcg; {
                         pp1 = pp2; /* break out of outer loop */
                         break;
                       } else {
-                        check_pointer(pp1, 1, (ptr)0, seg, s, aftergc);
+                        check_pointer(pp1, 1, (s == space_reference_array), (ptr)0, seg, s, aftergc);
                       }
                     }
                     pp1 += 1;
@@ -905,7 +909,7 @@ void S_check_heap(aftergc, mcg) IBOOL aftergc; IGEN mcg; {
 
             /* further verify that dirty bits are set appropriately; only handles some spaces
                to make sure that the dirty byte is not unnecessarily approximate, but we have also
-               checked dirty bytes alerady via `check_pointer` */
+               checked dirty bytes already via `check_pointer` */
             if (s == space_impure || s == space_symbol || s == space_weakpair || s == space_ephemeron
                 || s == space_immobile_impure || s == space_closure) {
               found_eos = 0;
@@ -945,7 +949,7 @@ void S_check_heap(aftergc, mcg) IBOOL aftergc; IGEN mcg; {
                           found_eos = 1;
                           pp1 = pp2;
                           break;
-                        } else if (!IMMEDIATE(p)) {
+                        } else if (!FIXMEDIATE(p)) {
                           seginfo *psi = MaybeSegInfo(ptr_get_segment(p));
                           if ((psi != NULL) && ((pg = psi->generation) < g)) {
                             if (pg < dirty) dirty = pg;

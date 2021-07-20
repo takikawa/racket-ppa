@@ -78,10 +78,11 @@
       ;; Target is what the key is mapped to
       (when (null? (cddr args))
         (raise-arguments-error 'make-readtable
-                               (if key
+                               (if (char? mode)
                                    "expected readtable or #f argument after character argument"
                                    "expected procedure argument after symbol argument")
-                               "given" mode))
+                               (if (char? mode) "character" "symbol")
+                               mode))
       (define target (caddr args))
       
       ;; Update the readtable

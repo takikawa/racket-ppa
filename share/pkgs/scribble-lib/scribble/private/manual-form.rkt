@@ -1,4 +1,4 @@
-#lang scheme/base
+#lang racket/base
 (require "../decode.rkt"
          "../struct.rkt"
          "../scheme.rkt"
@@ -9,11 +9,11 @@
          "manual-vars.rkt"
          "manual-scheme.rkt"
          "manual-bind.rkt"
-         scheme/list
-         (for-syntax scheme/base
+         racket/list
+         (for-syntax racket/base
                      syntax/parse
                      racket/syntax)
-         (for-label scheme/base))
+         (for-label racket/base))
 
 (provide defform defform* defform/subs defform*/subs defform/none
          defidform defidform/inline
@@ -121,7 +121,7 @@
 
 (define-syntax (defform* stx)
   (syntax-parse stx
-    [(_ k:kind-kw lt:link-target?-kw d:id-kw l:literals-kw [spec ...]
+    [(_ k:kind-kw lt:link-target?-kw d:id-kw l:literals-kw [spec ...+]
         subs:subs-kw c:contracts-kw desc ...)
      (syntax/loc stx
        (defform*/subs #:kind k.kind 

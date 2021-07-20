@@ -87,6 +87,9 @@
   ;;; used to memoize pure?, etc.
   (define-threaded cp0-info-hashtable)
 
+  ;; use to preserve sharing with `exts` renaming
+  (define-threaded exts-table)
+
   (module ()
     (define-syntax define-cp0-param
       (syntax-rules ()
@@ -120,7 +123,8 @@
   ; file for cross compilation, because the offsets may be incorrect
   (define rtd-flds (csv7:record-field-accessor #!base-rtd 'flds))
   (define rtd-ancestors (csv7:record-field-accessor #!base-rtd 'ancestors))
-  (define rtd-parent (lambda (x) (vector-ref (rtd-ancestors x) 0)))
+  (define rtd-parent (lambda (x) (let ([a (rtd-ancestors x)])
+                                   (vector-ref a (fx- (vector-length a) (constant ancestry-parent-offset))))))
   (define rtd-size (csv7:record-field-accessor #!base-rtd 'size))
   (define rtd-pm (csv7:record-field-accessor #!base-rtd 'pm))
   (define rtd-mpm (csv7:record-field-accessor #!base-rtd 'mpm))
@@ -842,7 +846,7 @@
              [(and (eq? ctxt 'ignored) (simple1? e2)
                    ;; don't move e1 into a single-value
                    ;; position unless that's ok
-                   (single-valued? e1))
+                   (single-valued/inspect-ok? e1))
               e1]
              [else
               (let ([e1 (nanopass-case (Lsrc Expr) e1
@@ -862,7 +866,7 @@
 
     (define (safe-single-value e1)
       (if (or (fx= (optimize-level) 3)
-              (single-valued? e1))
+              (single-valued/inspect-ok? e1))
           e1
           (build-primcall 3 '$value (list e1))))
 
@@ -910,7 +914,7 @@
       (lambda (ctxt e)
         (context-case ctxt
           [(tail)
-           (if (single-valued-without-inspecting-continuation? e)
+           (if (single-valued? e)
                e
                (build-primcall 3 '$value (list e)))]
           ;; An 'effect, 'ignored, 'value, or 'test position will not
@@ -990,7 +994,7 @@
                 (let loop ([exts exts])
                   (cond
                    [(null? exts) #f]
-                   [(eq? (prelex-name x) (prelex-name (caar exts)))
+                   [(eq? (prelex-uname x) (prelex-uname (caar exts)))
                     (cdar exts)]
                    [else (loop (cdr exts))]))))
             (define (ids->do-clause ids)
@@ -1070,7 +1074,7 @@
 
     (module (pure? ivory? ivory1? simple? simple1? simple/profile? simple/profile1? boolean-valued?
                    single-valued? single-valued single-valued-join single-valued-reduce?
-                   single-valued-without-inspecting-continuation?)
+                   single-valued/inspect-ok?)
 
       ;; The memoization table has, for each key, either a flags integer
       ;; or a pair of a flags integer and a value. The value corresponds to
@@ -1098,8 +1102,9 @@
                      (car val)
                      (let ([r (pred?)])
                        (let ([p (cdr a)])
-                         (unless (pair? p)
-                           (set-cdr! a (cons r p))))
+                         ;; p may have been set meanwhile, but we want to update
+                         ;; the cdr to handle joins around recursive calls
+                         (set-cdr! a (cons r (if (pair? p) (cdr p) p))))
                        r)))))]))
 
       (define-syntax with-memoize
@@ -1353,6 +1358,15 @@
                 (car e*))]
           [else #f]))
 
+      (define (extract-called-procedure/inspect-ok pr e*)
+        (case (primref-name pr)
+          [(call-setting-continuation-attachment
+            call-getting-continuation-attachment
+            call-consuming-continuation-attachment)
+           (and (fx= (length e*) 2)
+                (cadr e*))]
+          [else #f]))
+
       (define-who boolean-valued?
         (lambda (e)
           (with-memoize (boolean-valued-known boolean-valued) e
@@ -1397,8 +1411,9 @@
               [(pariah) #f]
               [else ($oops who "unrecognized record ~s" e)]))))
 
-      ;; Returns #t, #f, or a prelex for a lambda that needs to be
-      ;; single-valued to imply #t. The prelex case is useful to
+      ;; Returns #t, #f, 'value/inspect (single-valued, but may
+      ;; inspect continuation), or a prelex for a lambda that needs to
+      ;; be single-valued to imply #t. The prelex case is useful to
       ;; detect a single-valued loop.
       (define-who single-valued
         (lambda (e)
@@ -1415,9 +1430,15 @@
                         (or (all-set? (prim-mask single-valued) (primref-flags pr))
                             (all-set? (prim-mask abort-op) (primref-flags pr))
                             (and e*
-                                 (let ([proc-e (extract-called-procedure pr e*)])
-                                   (and proc-e
-                                        (memoize (procedure-single-valued proc-e #f))))))]
+                                 (cond
+                                   [(extract-called-procedure pr e*)
+                                    => (lambda (proc-e)
+                                         (memoize (procedure-single-valued proc-e #f)))]
+                                   [(extract-called-procedure/inspect-ok pr e*)
+                                    => (lambda (proc-e)
+                                         (memoize (single-valued-join 'value/inspect
+                                                                      (procedure-single-valued proc-e #f))))]
+                                   [else #f])))]
                        [(case-lambda ,preinfo ,cl* ...)
                         (memoize (or
                                   (all-set? (constant code-flag-single-valued)
@@ -1497,32 +1518,31 @@
            [(eq? a b) a]
            [(eq? a #t) b]
            [(eq? b #t) a]
+           [(eq? a 'value/inspect) b]
+           [(eq? b 'value/inspect) a]
            ;; If `a` and `b` are different prelexes, we currently give
            ;; up, because a prelex is used only to find a
            ;; single-function fixpoint.
            [else #f])))
 
-      (define-who single-valued?
+      (define-who single-valued/inspect-ok?
         (lambda (e)
-          (single-valued-reduce? (single-valued e))))
+          (let ([r (single-valued e)])
+            (or (eq? r 'value/inspect) ; i.e., ok to inspect continuation
+                (single-valued-reduce? r)))))
 
       (define single-valued-reduce?
         (lambda (r)
           (cond
            [(eq? r #t) #t]
            [(eq? r #f) #f]
+           [(eq? r 'value/inspect) #f]
            ;; conservative assumption for a prelex:
            [else #f])))
 
-      (define-who single-valued-without-inspecting-continuation?
+      (define-who single-valued?
         (lambda (e)
-          ;; Single-valued and does not observe or affect the
-          ;; immediate continuation frame (so removing (an enclosing
-          ;; frame would be ok). This currently can be implemented as
-          ;; `single-valued?`, because `single-valued?` does not look
-          ;; into continuation-observing calls like `(call/cc (lambda
-          ;; (k) <body>))` to detect that `<body>` is single valued.
-          (single-valued? e))))
+          (single-valued-reduce? (single-valued e)))))
 
     (define find-call-lambda-clause
       (lambda (exp opnds)
@@ -2473,7 +2493,7 @@
                              [(call ,preinfo ,pr ,e* ...)
                               (guard (eq? (primref-name pr) 'values))
                               e*]
-                             [else (and (single-valued? e)
+                             [else (and (single-valued/inspect-ok? e)
                                         (list e))]))) =>
                     (lambda (args)
                       ; (with-values (values arg ...) c-temp) => (c-temp arg ...)
@@ -2665,7 +2685,7 @@
                         [(null? val*) `(quote ,a)]
                         [(eqv? a ident)
                          (if (and (fx= level 3) (null? (cdr val*)) (direct-result? (car val*)))
-                             (car val*)
+                             (make-nontail (app-ctxt ctxt) (car val*))
                              (if (and (null? (cdr val*))
                                       ;; `op` may require exactly 2 arguments
                                       (eqv? (procedure-arity-mask op) 4))
@@ -3936,19 +3956,19 @@
                            (begin
                              (residualize-seq '() (list ?x) ctxt)
                              false-rec))]))))
-        (define-inline 2 r6rs:record?
-          [(?x) (one-arg-case ?x ctxt)])
-        (define-inline 2 record?
-          [(?x) (one-arg-case ?x ctxt)]
-          [(?x ?rtd)
+        (define two-arg-case
+          (lambda (?x ?rtd level ctxt needs-record?)
            (let ([rtdval (value-visit-operand! ?rtd)])
              (define abandon-ship
                (lambda (xval xres maybe-rtd)
                  (if (definitely-not-a-record? xres)
-                     (begin
-                       (residualize-seq '() (list ?x ?rtd) ctxt)
-                       false-rec)
+                     (cond
+                       [needs-record? #f]
+                       [else
+                        (residualize-seq '() (list ?x ?rtd) ctxt)
+                        false-rec])
                      (and maybe-rtd
+                          (not needs-record?)
                           (begin
                             (residualize-seq (list ?x ?rtd) '() ctxt)
                             (build-primcall (app-preinfo ctxt) 3
@@ -3993,7 +4013,9 @@
                            [(quote ,d1)
                             ; could also return #f here and let folding happen
                             (residualize-seq '() (list ?x ?rtd) ctxt)
-                            (if (record? d1 d0) true-rec false-rec)]
+                            (cond
+                              [(and needs-record? (not (record? d1))) #f]
+                              [else (if (record? d1 d0) true-rec false-rec)])]
                            ; could handle record-type forms if ctrtd recorded rtdrtd (a ctrtd's rtd is always base-ctrtd)
                            [(record ,rtd ,rtd-expr ,e* ...)
                             (guard (let f ([rtd rtd])
@@ -4033,7 +4055,14 @@
                [else
                 (and (fx= level 3)
                      (let ([xval (value-visit-operand! ?x)])
-                       (abandon-ship xval (result-exp/indirect-ref xval) #f)))]))]))
+                       (abandon-ship xval (result-exp/indirect-ref xval) #f)))]))))
+        (define-inline 2 r6rs:record?
+          [(?x) (one-arg-case ?x ctxt)])
+        (define-inline 2 record?
+          [(?x) (one-arg-case ?x ctxt)]
+          [(?x ?rtd) (two-arg-case ?x ?rtd level ctxt #f)])
+        (define-inline 2 record-instance?
+          [(?x ?rtd) (two-arg-case ?x ?rtd level ctxt #t)]))
 
       (define-inline 2 csv7:record-type-field-names
         [(?rtd)
@@ -5233,6 +5262,15 @@
             (make-1seq* 'ignored (list e1 e3))]
            [else
             `(call ,preinfo ,pr ,e1 ,e2 ,e3)]))]
+      [(call ,preinfo ,pr ,e)
+       (guard (eq? (primref-name pr) '$fixmediate))
+       (context-case ctxt
+         [(ignored) (cp0 e ctxt env sc wd name moi)]
+         [else
+          (let ([e (cp0 e 'value env sc wd name moi)])
+            (nanopass-case (Lsrc Expr) e
+              [(quote ,d) e]
+              [else `(call ,preinfo ,pr ,e)]))])]
       [(call ,preinfo ,e ,e* ...)
        (let ()
          (define lift-let
@@ -5432,6 +5470,12 @@
       [(moi) (if moi `(quote ,moi) ir)]
       [(pariah) ir]
       [(cte-optimization-loc ,box ,[cp0 : e ctxt env sc wd name moi -> e] ,exts)
+       (define new-exts (or (hashtable-ref exts-table exts #f)
+                            (let ([new-exts (map (lambda (p)
+                                                   (cons (lookup (car p) env) (cdr p)))
+                                                 exts)])
+                              (hashtable-set! exts-table exts new-exts)
+                              new-exts)))
        (when (enable-cross-library-optimization)
          (let ()
            (define update-box!
@@ -5452,7 +5496,7 @@
                         ;; than supported by the original, since only inlinable clauses
                         ;; are kept
                         (let ([new-cl* (fold-right (lambda (cl cl*)
-                                                     (let ([cl (externally-inlinable cl exts)])
+                                                     (let ([cl (externally-inlinable cl new-exts)])
                                                        (if cl
                                                            (cons cl cl*)
                                                            cl*)))
@@ -5461,7 +5505,7 @@
                               [sv? (andmap (lambda (cl)
                                              (nanopass-case (Lsrc CaseLambdaClause) cl
                                                [(clause (,x* ...) ,interface ,body)
-                                                (single-valued? body)]))
+                                                (single-valued/inspect-ok? body)]))
                                            cl*)])
                           (when (or (pair? new-cl*) sv?)
                             (update-box! box (make-cte-info
@@ -5470,7 +5514,7 @@
                                               sv?))))]
                        [else #f])))]
              [else (void)])))
-       `(cte-optimization-loc ,box ,e ,exts)]
+       `(cte-optimization-loc ,box ,e ,new-exts)]
       [(cpvalid-defer ,e) (sorry! who "cpvalid leaked a cpvalid-defer form ~s" ir)]
       [(profile ,src) ir]
       [else ($oops who "unrecognized record ~s" ir)])
@@ -5484,7 +5528,8 @@
       [(x ltbc?)
        (fluid-let ([likely-to-be-compiled? ltbc?]
                    [opending-list '()]
-                   [cp0-info-hashtable (make-weak-eq-hashtable)])
+                   [cp0-info-hashtable (make-weak-eq-hashtable)]
+                   [exts-table (make-weak-eq-hashtable)])
          (cp0 x 'tail empty-env (new-scorer) (new-watchdog) #f #f))]))))
 
 ; check to make sure all required handlers were seen, after expansion of the

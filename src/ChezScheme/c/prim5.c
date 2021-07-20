@@ -21,7 +21,6 @@
 #include <sys/stat.h>
 #include <limits.h>
 #include <ctype.h>
-#include <time.h>
 
 /* locally defined functions */
 static INT s_errno PROTO((void));
@@ -38,6 +37,11 @@ static ptr s_ephemeron_pairp PROTO((ptr p));
 static ptr s_box_immobile PROTO((ptr p));
 static ptr s_make_immobile_vector PROTO((uptr len, ptr fill));
 static ptr s_make_immobile_bytevector PROTO((uptr len));
+static ptr s_make_reference_bytevector PROTO((uptr len));
+static ptr s_make_immobile_reference_bytevector PROTO((uptr len));
+static ptr s_reference_bytevectorp PROTO((ptr p));
+static ptr s_reference_star_address_object PROTO((ptr p));
+static ptr s_bytevector_reference_star_ref PROTO((ptr p, uptr offset));
 static ptr s_oblist PROTO((void));
 static ptr s_bigoddp PROTO((ptr n));
 static ptr s_float PROTO((ptr x));
@@ -211,7 +215,7 @@ static ptr s_box_immobile(p) ptr p; {
 }
 
 static ptr s_make_immobile_bytevector(uptr len) {
-  ptr b = S_bytevector2(get_thread_context(), len, 1);
+  ptr b = S_bytevector2(get_thread_context(), len, space_immobile_data);
   S_immobilize_object(b);
   return b;
 }
@@ -234,6 +238,36 @@ static ptr s_make_immobile_vector(uptr len, ptr fill) {
   }
 
   return v;
+}
+
+static ptr s_make_reference_bytevector(uptr len) {
+  ptr b = S_bytevector2(get_thread_context(), len, space_reference_array);
+  memset(&BVIT(b, 0), 0, len);
+  return b;
+}
+
+static ptr s_make_immobile_reference_bytevector(uptr len) { 
+  ptr b = s_make_reference_bytevector(len);
+  S_immobilize_object(b);
+  return b;  
+}
+
+static ptr s_reference_bytevectorp(p) ptr p; {
+  seginfo *si;
+  return (si = MaybeSegInfo(ptr_get_segment(p))) != NULL && si->space == space_reference_array ? Strue : Sfalse;
+}
+
+static ptr s_reference_star_address_object(ptr p) {
+  if (p == (ptr)0)
+    return Sfalse;
+  else if (MaybeSegInfo(addr_get_segment(p)))
+    return (ptr)((uptr)p - reference_disp);
+  else
+    return Sunsigned((uptr)p);
+}
+
+static ptr s_bytevector_reference_star_ref(ptr p, uptr offset) {
+  return s_reference_star_address_object(*(ptr *)&BVIT(p, offset));
 }
 
 static ptr s_oblist() {
@@ -877,53 +911,58 @@ static char *s_getwd() {
 
 static ptr s_set_code_byte(p, n, x) ptr p, n, x; {
     I8 *a;
+    ptr tc = get_thread_context();
 
-    S_thread_start_code_write();
     a = (I8 *)TO_VOIDP((uptr)p + UNFIX(n));
+    S_thread_start_code_write(tc, 0, 0, TO_VOIDP(a), sizeof(I8));
     *a = (I8)UNFIX(x);
-    S_thread_end_code_write();
+    S_thread_end_code_write(tc, 0, 0, TO_VOIDP(a), sizeof(I8));
 
     return Svoid;
 }
 
 static ptr s_set_code_word(p, n, x) ptr p, n, x; {
     I16 *a;
+    ptr tc = get_thread_context();
 
-    S_thread_start_code_write();
     a = (I16 *)TO_VOIDP((uptr)p + UNFIX(n));
+    S_thread_start_code_write(tc, 0, 0, TO_VOIDP(a), sizeof(I16));
     *a = (I16)UNFIX(x);
-    S_thread_end_code_write();
+    S_thread_end_code_write(tc, 0, 0, TO_VOIDP(a), sizeof(I16));
 
     return Svoid;
 }
 
 static ptr s_set_code_long(p, n, x) ptr p, n, x; {
     I32 *a;
+    ptr tc = get_thread_context();
 
-    S_thread_start_code_write();
     a = (I32 *)TO_VOIDP((uptr)p + UNFIX(n));
+    S_thread_start_code_write(tc, 0, 0, TO_VOIDP(a), sizeof(I32));
     *a = (I32)(Sfixnump(x) ? UNFIX(x) : Sinteger_value(x));
-    S_thread_end_code_write();
+    S_thread_end_code_write(tc, 0, 0, TO_VOIDP(a), sizeof(I32));
 
     return Svoid;
 }
 
 static void s_set_code_long2(p, n, h, l) ptr p, n, h, l; {
     I32 *a;
+    ptr tc = get_thread_context();
 
-    S_thread_start_code_write();
     a = (I32 *)TO_VOIDP((uptr)p + UNFIX(n));
+    S_thread_start_code_write(tc, 0, 0, TO_VOIDP(a), sizeof(I32));
     *a = (I32)((UNFIX(h) << 16) + UNFIX(l));
-    S_thread_end_code_write();
+    S_thread_end_code_write(tc, 0, 0, TO_VOIDP(a), sizeof(I32));
 }
 
 static ptr s_set_code_quad(p, n, x) ptr p, n, x; {
     I64 *a;
+    ptr tc = get_thread_context();
 
-    S_thread_start_code_write();
     a = (I64 *)TO_VOIDP((uptr)p + UNFIX(n));
+    S_thread_start_code_write(tc, 0, 0, TO_VOIDP(a), sizeof(I64));
     *a = Sfixnump(x) ? UNFIX(x) : S_int64_value("\\#set-code-quad!", x);
-    S_thread_end_code_write();
+    S_thread_end_code_write(tc, 0, 0, TO_VOIDP(a), sizeof(I64));
 
     return Svoid;
 }
@@ -931,10 +970,8 @@ static ptr s_set_code_quad(p, n, x) ptr p, n, x; {
 static ptr s_set_reloc(p, n, e) ptr p, n, e; {
     iptr *a;
 
-    S_thread_start_code_write();
     a = (iptr *)(&RELOCIT(CODERELOC(p), UNFIX(n)));
     *a = Sfixnump(e) ? UNFIX(e) : Sinteger_value(e);
-    S_thread_end_code_write();
 
     return e;
 }
@@ -947,10 +984,11 @@ static ptr s_flush_instruction_cache() {
 static ptr s_make_code(flags, free, name, arity_mark, n, info, pinfos)
                        iptr flags, free, n; ptr name, arity_mark, info, pinfos; {
     ptr co;
+    ptr tc = get_thread_context();
 
-    S_thread_start_code_write();
+    S_thread_start_code_write(tc, 0, 0, NULL, 0);
 
-    co = S_code(get_thread_context(), type_code | (flags << code_flags_offset), n);
+    co = S_code(tc, type_code | (flags << code_flags_offset), n);
     CODEFREE(co) = free;
     CODENAME(co) = name;
     CODEARITYMASK(co) = arity_mark;
@@ -960,16 +998,18 @@ static ptr s_make_code(flags, free, name, arity_mark, n, info, pinfos)
       S_G.profile_counters = Scons(S_weak_cons(co, pinfos), S_G.profile_counters);
     }
 
-    S_thread_end_code_write();
+    S_thread_end_code_write(tc, 0, 0, NULL, 0);
 
     return co;
 }
 
 static ptr s_make_reloc_table(codeobj, n) ptr codeobj, n; {
-    S_thread_start_code_write();
+    ptr tc = get_thread_context();
+
+    S_thread_start_code_write(tc, 0, 0, TO_VOIDP(&CODERELOC(codeobj)), sizeof(ptr));
     CODERELOC(codeobj) = S_relocation_table(UNFIX(n));
     RELOCCODE(CODERELOC(codeobj)) = codeobj;
-    S_thread_end_code_write();
+    S_thread_end_code_write(tc, 0, 0, TO_VOIDP(&CODERELOC(codeobj)), sizeof(ptr));
     return Svoid;
 }
 
@@ -1330,8 +1370,8 @@ static ptr s_set_collect_trip_bytes(n) ptr n; {
     return Svoid;
 }
 
-static void c_exit(UNUSED I32 status) {
-    S_abnormal_exit();
+static void c_exit(I32 status) {
+    exit(status);
 }
 
 #if defined(__STDC__) || defined(USE_ANSI_PROTOTYPES)
@@ -1655,6 +1695,11 @@ void S_prim5_init() {
     Sforeign_symbol("(cs)box_immobile", (void *)s_box_immobile);
     Sforeign_symbol("(cs)make_immobile_vector", (void *)s_make_immobile_vector);
     Sforeign_symbol("(cs)make_immobile_bytevector", (void *)s_make_immobile_bytevector);
+    Sforeign_symbol("(cs)s_make_reference_bytevector", (void *)s_make_reference_bytevector);
+    Sforeign_symbol("(cs)s_make_immobile_reference_bytevector", (void *)s_make_immobile_reference_bytevector);
+    Sforeign_symbol("(cs)s_reference_bytevectorp", (void *)s_reference_bytevectorp);
+    Sforeign_symbol("(cs)s_reference_star_address_object", (void *)s_reference_star_address_object);
+    Sforeign_symbol("(cs)s_bytevector_reference_star_ref", (void *)s_bytevector_reference_star_ref);
     Sforeign_symbol("(cs)continuation_depth", (void *)S_continuation_depth);
     Sforeign_symbol("(cs)single_continuation", (void *)S_single_continuation);
     Sforeign_symbol("(cs)c_exit", (void *)c_exit);
@@ -1756,6 +1801,7 @@ void S_prim5_init() {
     Sforeign_symbol("(cs)s_big_positive_bit_field", (void *)S_big_positive_bit_field);
     Sforeign_symbol("(cs)s_big_eq", (void *)S_big_eq);
     Sforeign_symbol("(cs)s_big_lt", (void *)S_big_lt);
+    Sforeign_symbol("(cs)s_big_trailing_zero_bits", (void *)S_big_trailing_zero_bits);
     Sforeign_symbol("(cs)s_bigoddp", (void *)s_bigoddp);
     Sforeign_symbol("(cs)s_div", (void *)S_div);
     Sforeign_symbol("(cs)s_float", (void *)s_float);
@@ -1773,6 +1819,7 @@ void S_prim5_init() {
     Sforeign_symbol("(cs)s_set_random_seed", (void *)s_set_random_seed);
     Sforeign_symbol("(cs)ss_trunc", (void *)S_trunc);
     Sforeign_symbol("(cs)ss_trunc_rem", (void *)s_trunc_rem);
+    Sforeign_symbol("(cs)s_rational", (void *)S_rational);
     Sforeign_symbol("(cs)sub", (void *)S_sub);
     Sforeign_symbol("(cs)rem", (void *)S_rem);
 #ifdef GETWD
@@ -2079,7 +2126,12 @@ static void s_free(uptr addr) {
 }
 
 #ifdef FEATURE_ICONV
-#ifdef WIN32
+#ifdef DISABLE_ICONV
+# define iconv_t int
+#define ICONV_OPEN(to, from) -1
+#define ICONV(cd, in, inb, out, outb) -1
+#define ICONV_CLOSE(cd) -1
+#elif defined(WIN32)
 typedef void *iconv_t;
 typedef iconv_t (*iconv_open_ft)(const char *tocode, const char *fromcode);
 typedef size_t (*iconv_ft)(iconv_t cd, char **inbuf, size_t *inbytesleft, char **outbuf, size_t *outbytesleft);

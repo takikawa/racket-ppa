@@ -3808,6 +3808,19 @@
                     (lambda () (set! did (cons 'out did))))]
                [else did]))))
 
+  ;; regression test to make sure the compiler doesn't run out of
+  ;; registers:
+  (procedure? (lambda (f a b c)
+                (#3%call-with-values
+                 (lambda ()
+                   (#3%call-with-values
+                    (lambda ()
+                      (call-setting-continuation-attachment
+                       1024
+                       (lambda ()
+                         (#3%$app f a b c))))
+                    fx+/carry))
+                 f)))
 )
 
 ;;; section 4-7:
@@ -4210,7 +4223,7 @@
        (let loop ([tries 3])
          (or (< (/ (measure-guardian-chain-time 10000 get-key ordered?)
                    (measure-guardian-chain-time 1000 get-key ordered?))
-                20)
+                50)
              (and (positive? tries)
                   (loop (sub1 tries))))))
 
@@ -4807,7 +4820,7 @@
    ;; ----------------------------------------
    ;; Check interaction of mutation and incremental generation promotion
 
-   (with-interrupts-disabled
+   (parameterize ([collect-request-handler void] [collect-maximum-generation (max (collect-maximum-generation) 2)])
     (let ([key "key"])
       (let ([e (ephemeron-cons key #f)])
         (collect 0 1 1)

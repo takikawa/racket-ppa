@@ -15,6 +15,7 @@ rktio_fd_is_text_converted
 rktio_fd_is_pending_open
 rktio_fd_modes
 rktio_open
+rktio_open_with_create_permissions
 rktio_close
 rktio_close_noerr
 rktio_dup
@@ -26,6 +27,7 @@ rktio_write
 rktio_read_converted
 rktio_read_in
 rktio_write_in
+rktio_read_converted_in
 rktio_buffered_byte_count
 rktio_poll_read_ready
 rktio_poll_write_ready
@@ -157,6 +159,7 @@ rktio_copy_file_finish_permissions
 rktio_copy_file_stop
 rktio_system_path
 rktio_expand_user_tilde
+rktio_uname
 rktio_get_signal_handle
 rktio_signal_received_at
 rktio_signal_received
@@ -164,8 +167,10 @@ rktio_wait_until_signal_received
 rktio_flush_signals_received
 rktio_install_os_signal_handler
 rktio_poll_os_signal
+rktio_will_modify_os_signal_handler
 rktio_get_milliseconds
 rktio_get_inexact_milliseconds
+rktio_get_inexact_monotonic_milliseconds
 rktio_get_process_milliseconds
 rktio_get_process_children_milliseconds
 rktio_get_seconds

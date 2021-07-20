@@ -1,5 +1,5 @@
-Building Chez Scheme Version 9.5.3.x (Racket variant)
-Copyright 1984-2019 Cisco Systems, Inc.
+Building Chez Scheme Version 9.5.5.x (Racket variant)
+Copyright 1984-2020 Cisco Systems, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -180,25 +180,26 @@ The makefile supports several targets:
 
  * `sudo make install`
 
-   Installs the biult executables, boot files, example files, and
-   manual pages.
+   Installs the built executables, boot files, example files, and
+   manual pages. If the `--installprefix` used with "configure" is
+   writable by the current user, then `sudo` is not necessary.
 
  * `sudo make uninstall`
 
    Uninstalls the executables, boot files, example files, and manual
-   pages.
+   pages. As with `make install`, if the `--installprefix` used with
+   "configure" is writable by the current user, then `sudo` is not
+   necessary.
 
  * `make test`
 
    Runs the build plus runs a set of test programs in various
    different ways, e.g., with different compiler options. It can take
-   30 minutes or more, depending on the speed of the machine. It
-   produces voluminous output, so it's best to redirect its stdout and
-   stderr to a file.
+   on the order of an hour, depending on the speed of the machine.
 
-   A complete run does *not* imply no errors occurred. To check for
-   errors, look at the file "<workarea>/mats/summary", which should
-   contain one line per test run, something like this:
+   At the end of a complete run, the summary recorded in
+   "<workarea>/mats/summary" is shown. It should contain one line per
+   test configuration, something like this:
 
      -------- o=0 --------
      -------- o=3 --------
@@ -214,7 +215,7 @@ The makefile supports several targets:
      -------- o=3 ehc=t eval=interpret --------
 
    If there is anything else in "<workarea>/mats/summary", something
-   unexpected occurred.
+   unexpected occurred. See "IMPLEMENTATION.md" for more information.
 
  * `make <machine type>.boot` or `make <machine type>.bootquick`
 
@@ -237,13 +238,40 @@ The makefile supports several targets:
    represented in "boot", simply add the appropriate subdirectory as
    empty or use `make <machine type>.boot` first.
 
+ * `make docs`
+
+   Runs the build plus generates HTML and PDF versions of the Chez
+   Scheme Users Guide and the release notes. Unlike the other build
+   targets, the documentation is not built in the workarea, but rather
+   in the "csug" and "release_notes" directories (where "configure" is
+   run).
+
+   Building the documentation requires a few prerequisites not required
+   to build the rest of Chez Scheme.  The following must be available
+   in your PATH:
+
+    * A TeX distribution (including latex, pdflatex, dvips, and gs)
+
+    * ppmtogif and pnmcrop (from Netpbm)
+
+   An X11 installation is not required, but ppmtogif does require an
+   "rgb.txt" file, which it will automatically locate in the common
+   X11 installation locations. If ppmtogif fails because it cannot
+   find an "rgb.txt" file, you can use the `RGBDEF` environment
+   variable to specify the path to a file. If your system has an Emacs
+   installation, then you can find an "rgb.txt" file in the "etc"
+   directory of the emacs installation. If your system has a Vim
+   installation, then it might contain an "rgb.txt" in the directory
+   identified by the `VIMRUNTIME` environment variable.
+
  * `make clean`
 
    Removes binaries from the workarea.
 
  * `make distclean`
    
-    Removes "nanopass", "Makefile", and all workareas.
+    Removes "nanopass", "Makefile", built documentation, and all
+    workareas.
 
 
 WINDOWS VIA COMMAND PROMPT

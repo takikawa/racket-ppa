@@ -757,7 +757,8 @@ static int generate_inlined_struct_op(int kind, mz_jit_state *jitter,
     int pos, tpos, jkind, authentic;
 
     tpos = ((Scheme_Struct_Type *)((Scheme_Primitive_Closure *)inline_rator)->val[0])->name_pos;
-    authentic = ((Scheme_Struct_Type *)((Scheme_Primitive_Closure *)inline_rator)->val[0])->authentic;
+    authentic = (((Scheme_Struct_Type *)((Scheme_Primitive_Closure *)inline_rator)->val[0])->more_flags
+                 & STRUCT_TYPE_FLAG_AUTHENTIC);
 
     if (kind == INLINE_STRUCT_PROC_PRED) {
       pos = 0;
@@ -4746,6 +4747,12 @@ int scheme_generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
     return 1;
   } else if (IS_NAMED_PRIM(rator, "unsafe-fl>=")) {
     scheme_generate_nary_arith(jitter, app, 0, CMP_GEQ, for_branch, branch_short, 0, 1, dest);
+    return 1;
+  } else if (IS_NAMED_PRIM(rator, "most-positive-fixnum")) {
+    (void)jit_movi_p(dest, scheme_make_integer(MOST_POSITIVE_FIXNUM));
+    return 1;
+  } else if (IS_NAMED_PRIM(rator, "most-negative-fixnum")) {
+    (void)jit_movi_p(dest, scheme_make_integer(MOST_NEGATIVE_FIXNUM));
     return 1;
   } else if (IS_NAMED_PRIM(rator, "current-future")) { 
     mz_rs_sync();

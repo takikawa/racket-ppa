@@ -49,6 +49,9 @@ TO DO:
 (define protocol-symbol/c
   (or/c 'secure 'auto 'sslv2-or-v3 'sslv2 'sslv3 'tls 'tls11 'tls12))
 
+(define (alpn-protocol-bytes/c v)
+  (and (bytes? v) (< 0 (bytes-length v) 256)))
+
 (define curve-nid-alist
   '((sect163k1 . 721)
     (sect163r1 . 722)
@@ -163,6 +166,8 @@ TO DO:
    (c-> ssl-port? (or/c bytes? #f))]
   [ssl-channel-binding
    (c-> ssl-port? (or/c 'tls-unique 'tls-server-end-point) bytes?)]
+  [ssl-get-alpn-selected
+   (c-> ssl-port? (or/c bytes? #f))]
   [ports->ssl-ports
    (->* [input-port?
          output-port?]
@@ -172,7 +177,8 @@ TO DO:
          #:close-original? any/c
          #:shutdown-on-close? any/c
          #:error/ssl procedure?
-         #:hostname (or/c string? #f)]
+         #:hostname (or/c string? #f)
+         #:alpn (listof alpn-protocol-bytes/c)]
         (values input-port? output-port?))]
   [ssl-listen
    (->* [listen-port-number?]
@@ -192,12 +198,14 @@ TO DO:
   [ssl-connect
    (->* [string?
          (integer-in 1 (sub1 (expt 2 16)))]
-        [(or/c ssl-client-context? protocol-symbol/c)]
+        [(or/c ssl-client-context? protocol-symbol/c)
+         #:alpn (listof alpn-protocol-bytes/c)]
         (values input-port? output-port?))]
   [ssl-connect/enable-break
    (->* [string?
          (integer-in 1 (sub1 (expt 2 16)))]
-        [(or/c ssl-client-context? protocol-symbol/c)]
+        [(or/c ssl-client-context? protocol-symbol/c)
+         #:alpn (listof alpn-protocol-bytes/c)]
         (values input-port? output-port?))]
   [ssl-listener?
    (c-> any/c boolean?)]
@@ -377,6 +385,27 @@ TO DO:
 (define-ssl SSL_get_peer_finished (_fun _SSL* _pointer _size -> _size))
 (define-ssl SSL_get_finished (_fun _SSL* _pointer _size -> _size))
 
+(define-ssl SSL_CTX_set_alpn_protos
+  (_fun _SSL_CTX*
+        (bs : _bytes)
+        (_uint = (bytes-length bs))
+        -> _int)) ;; Note: 0 means success, other means failure!
+(define-ssl SSL_set_alpn_protos
+  (_fun _SSL*
+        (bs : _bytes)
+        (_uint = (bytes-length bs))
+        -> _int)) ;; Note: 0 means success, other means failure!
+(define-ssl SSL_get0_alpn_selected
+  (_fun _SSL*
+        (p : (_ptr o _pointer))
+        (len : (_ptr o _uint))
+        -> _void
+        -> (cond [(and p (> len 0))
+                  (let ([bs (make-bytes len)])
+                    (memcpy bs p len)
+                    bs)]
+                 [else #f])))
+
 (define-cpointer-type _EVP_MD*)
 (define-crypto EVP_sha224 (_fun -> _EVP_MD*/null))
 (define-crypto EVP_sha256 (_fun -> _EVP_MD*/null))
@@ -450,12 +479,12 @@ TO DO:
 
 (define ssl-default-verify-sources
   (make-parameter
-   (case (system-type)
+   (case (system-type 'os*)
      [(windows)
       ;; On Windows, x509-root-sources produces paths like "/usr/local/ssl/certs", which
       ;; aren't useful. So just skip them.
       '((win32-store "ROOT"))]
-     [(macosx)
+     [(macosx darwin)
       '((macosx-keychain "/System/Library/Keychains/SystemRootCertificates.keychain"))]
      [else
       (x509-root-sources)])))
@@ -598,13 +627,14 @@ TO DO:
 
 ;; internal:
 (define-struct mzssl (ssl i o r-bio w-bio pipe-r pipe-w 
-                    buffer lock 
-                    w-closed? r-closed?
-                    flushing? must-write must-read
-                    refcount 
-                    close-original? shutdown-on-close?
+                          buffer lock
+                          w-closed? r-closed?
+                          flushing? must-write must-read
+                          refcount
+                          close-original? shutdown-on-close?
                           error
-                          server?)
+                          server?
+                          in-progress-sema out-progress-sema)
   #:mutable)
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1062,18 +1092,55 @@ TO DO:
       (close-input-port (mzssl-i mzssl))
       (close-output-port (mzssl-o mzssl)))))
 
+(define (in-ready-evt mzssl)
+  (define i (mzssl-i mzssl))
+  ;; Using `i` to indicate that more input is available will usually
+  ;; work, but it's possible for more input to become available and
+  ;; then concurrently pumped in, after which `i` may not be ready
+  ;; again. We can use progress evts if `i` supports that, otherwise
+  ;; make our own progress evt.
+  (choice-evt i
+              (or (and (port-provides-progress-evts? i)
+                       (port-progress-evt i))
+                  (mzssl-in-progress-sema mzssl)
+                  (let ([s (make-semaphore)])
+                    (set-mzssl-in-progress-sema! mzssl s)
+                    s))))
+
+(define (in-progress! mzssl)
+  (define s (mzssl-in-progress-sema mzssl))
+  (when s
+    (semaphore-post s)
+    (set-mzssl-in-progress-sema! mzssl #f)))
+
+(define (out-ready-evt mzssl)
+  ;; Similar to `in-ready-evt`, we may need a kind of
+  ;; progress evt to wait on:
+  (choice-evt (mzssl-o mzssl)
+              (or (mzssl-out-progress-sema mzssl)
+                  (let ([s (make-semaphore)])
+                    (set-mzssl-out-progress-sema! mzssl s)
+                    s))))
+
+(define (out-progress! mzssl)
+  (define s (mzssl-out-progress-sema mzssl))
+  (when s
+    (semaphore-post s)
+    (set-mzssl-out-progress-sema! mzssl #f)))
+
 (define (pump-input-once mzssl need-progress?/out)
   (let ([buffer (mzssl-buffer mzssl)]
         [i (mzssl-i mzssl)]
         [r-bio (mzssl-r-bio mzssl)])
     (let ([n ((if (and need-progress?/out 
-                 (not (output-port? need-progress?/out)))
-            read-bytes-avail! 
-            read-bytes-avail!*)
-        buffer i)])
+                       (not (output-port? need-progress?/out)))
+                  read-bytes-avail!
+                  read-bytes-avail!*)
+              buffer i)])
       (cond
        [(eof-object? n) 
         (BIO_set_mem_eof_return r-bio 0)
+        (in-progress! mzssl)
         eof]
        [(zero? n)
         (when need-progress?/out
@@ -1083,6 +1150,7 @@ TO DO:
         (let ([m (BIO_write r-bio buffer n)])
           (unless (= m n)
             ((mzssl-error mzssl) 'pump-input-once "couldn't write all bytes to BIO!"))
+          (in-progress! mzssl)
           m)]))))
 
 (define (pump-output-once mzssl need-progress? output-blocked-result)
@@ -1095,19 +1163,20 @@ TO DO:
       (if (zero? n)
           (let ([n (BIO_read w-bio buffer (bytes-length buffer))])
             (if (n . <= . 0)
-          (begin
-            (when need-progress?
-              ((mzssl-error mzssl) 'pump-output-once "no output to pump!"))
-            #f)
-          (begin
-            (write-bytes buffer pipe-w 0 n)
-            (pump-output-once mzssl need-progress? output-blocked-result))))
+                (begin
+                  (when need-progress?
+                    ((mzssl-error mzssl) 'pump-output-once "no output to pump!"))
+                  #f)
+                (begin
+                  (write-bytes buffer pipe-w 0 n)
+                  (pump-output-once mzssl need-progress? output-blocked-result))))
           (let ([n ((if need-progress? write-bytes-avail write-bytes-avail*) buffer o 0 n)])
             (if (zero? n)
-          output-blocked-result
-          (begin
-            (port-commit-peeked n (port-progress-evt pipe-r) always-evt pipe-r)
-            #t)))))))
+                output-blocked-result
+                (begin
+                  (out-progress! mzssl)
+                  (port-commit-peeked n (port-progress-evt pipe-r) always-evt pipe-r)
+                  #t)))))))
 
 ;; result is #t if there's more data to send out the
 ;;  underlying output port, but the port is full
@@ -1158,33 +1227,33 @@ TO DO:
                        eof]
                       [(= err SSL_ERROR_WANT_READ)
                        (when enforce-retry?
-                               (set! must-read-len len))
+                         (set! must-read-len len))
                        (let ([n (pump-input-once mzssl #f)])
                          (if (eq? n 0)
                              (let ([out-blocked? (pump-output mzssl)])
-                                     (when enforce-retry?
-                                       (set-mzssl-must-read! mzssl (make-semaphore)))
+                               (when enforce-retry?
+                                 (set-mzssl-must-read! mzssl (make-semaphore)))
                                (wrap-evt (choice-evt
-                                          (mzssl-i mzssl) 
+                                          (in-ready-evt mzssl)
                                           (if out-blocked?
-                                              (mzssl-o mzssl) 
+                                              (out-ready-evt mzssl)
                                               never-evt))
                                          (lambda (x) 0)))
                              (do-read buffer)))]
                       [(= err SSL_ERROR_WANT_WRITE)
-                             (when enforce-retry?
-                               (set! must-read-len len))
+                       (when enforce-retry?
+                         (set! must-read-len len))
                        (if (pump-output-once mzssl #f #f)
                            (do-read buffer)
                            (begin
-                                   (when enforce-retry?
-                                     (set-mzssl-must-read! mzssl (make-semaphore)))
-                             (wrap-evt (mzssl-o mzssl) (lambda (x) 0))))]
+                             (when enforce-retry?
+                               (set-mzssl-must-read! mzssl (make-semaphore)))
+                             (wrap-evt (out-ready-evt mzssl) (lambda (x) 0))))]
                       [else
-                             (set! must-read-len #f)
+                       (set! must-read-len #f)
                        ((mzssl-error mzssl) 'read-bytes 
-                              "SSL read failed ~a"
-                              estr)]))))))]
+                                            "SSL read failed ~a"
+                                            estr)]))))))]
         [top-read
          (lambda (buffer)
            (cond
@@ -1324,9 +1393,9 @@ TO DO:
                                          (when enforce-retry?
                                            (set-mzssl-must-write! mzssl (make-semaphore)))
                                    (wrap-evt (choice-evt
-                                              (mzssl-i mzssl)
+                                              (in-ready-evt mzssl)
                                               (if out-blocked?
-                                                  (mzssl-o mzssl)
+                                                  (out-ready-evt mzssl)
                                                   never-evt))
                                              (lambda (x) #f)))
                                  (do-write len non-block? enable-break?)))]
@@ -1341,7 +1410,7 @@ TO DO:
                                            (begin
                                              (when enforce-retry?
                                                (set-mzssl-must-write! mzssl (make-semaphore)))
-                                             (wrap-evt (mzssl-o mzssl) (lambda (x) #f))))))]
+                                             (wrap-evt (out-ready-evt mzssl) (lambda (x) #f))))))]
                           [else
                            (set! must-write-len #f)
                            ((mzssl-error mzssl) 'write-bytes 
@@ -1470,10 +1539,11 @@ TO DO:
                           #:close-original? [close-original? #f]
                           #:shutdown-on-close? [shutdown-on-close? #f]
                           #:error/ssl [error/ssl error]
-                          #:hostname [hostname #f])
+                          #:hostname [hostname #f]
+                          #:alpn [alpn null])
   (wrap-ports 'port->ssl-ports i o (or context encrypt) mode
               close-original? shutdown-on-close? error/ssl
-              hostname))
+              hostname alpn))
 
 (define (create-ssl who context-or-encrypt-method connect/accept error/ssl)
   (define connect?
@@ -1519,10 +1589,10 @@ TO DO:
 
 (define (wrap-ports who i o context-or-encrypt-method connect/accept
                     close? shutdown-on-close? error/ssl
-                    hostname)
+                    hostname alpn)
   ;; Create the SSL connection:
   (let-values ([(ssl r-bio w-bio connect?)
-          (create-ssl who context-or-encrypt-method connect/accept error/ssl)]
+                (create-ssl who context-or-encrypt-method connect/accept error/ssl)]
                [(verify-hostname?)
                 (cond [(ssl-context? context-or-encrypt-method)
                        (ssl-context-verify-hostname? context-or-encrypt-method)]
@@ -1530,17 +1600,26 @@ TO DO:
     (when (string? hostname)
       (SSL_ctrl/bytes ssl SSL_CTRL_SET_TLSEXT_HOSTNAME
                       TLSEXT_NAMETYPE_host_name (string->bytes/latin-1 hostname)))
+    (when (pair? alpn)
+      (unless (eq? connect/accept 'connect)
+        (error who "ALPN is currently supported only in connect mode"))
+      (define proto-list
+        (apply bytes-append (for/list ([proto (in-list alpn)])
+                              (bytes-append (bytes (bytes-length proto)) proto))))
+      (unless (zero? (SSL_set_alpn_protos ssl proto-list))
+        (error who "failed setting ALPN protocol list")))
 
     ;; connect/accept:
     (let-values ([(buffer) (make-bytes BUFFER-SIZE)]
            [(pipe-r pipe-w) (make-pipe)])
       (let ([mzssl (make-mzssl ssl i o r-bio w-bio pipe-r pipe-w 
-                         buffer (make-semaphore 1) 
-                         #f #f
-                         #f #f #f 2 
-                         close? shutdown-on-close?
+                               buffer (make-semaphore 1)
+                               #f #f
+                               #f #f #f 2
+                               close? shutdown-on-close?
                                error/ssl
-                               (eq? connect/accept 'accept))])
+                               (eq? connect/accept 'accept)
+                               #f #f)])
         (let loop ()
           (let-values ([(status err estr) (save-errors (if connect?
                                                            (SSL_connect ssl)
@@ -1754,6 +1833,11 @@ TO DO:
      (X509_free x509)
      (if (> r 0) buf (error who "internal error: certificate digest failed"))]))
 
+(define (ssl-get-alpn-selected p)
+  (define-values (mzssl _in?) (lookup 'ssl-get-alpn-selected p))
+  (define ssl (mzssl-ssl mzssl))
+  (SSL_get0_alpn_selected ssl))
+
 (define (ssl-port? v)
   (and (hash-ref ssl-ports v #f) #t))
 
@@ -1788,7 +1872,7 @@ TO DO:
                             (close-input-port i)
                             (close-output-port o)
                             (raise exn))])
-      (wrap-ports who i o (ssl-listener-mzctx ssl-listener) 'accept #t #f error/network #f))))
+      (wrap-ports who i o (ssl-listener-mzctx ssl-listener) 'accept #t #f error/network #f null))))
 
 (define (ssl-accept ssl-listener)
   (do-ssl-accept 'ssl-accept tcp-accept ssl-listener))
@@ -1799,7 +1883,7 @@ TO DO:
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; SSL connect
 
-(define (do-ssl-connect who tcp-connect hostname port-k client-context-or-protocol-symbol)
+(define (do-ssl-connect who tcp-connect hostname port-k client-context-or-protocol-symbol alpn)
   (let-values ([(i o) (tcp-connect hostname port-k)])
     ;; See do-ssl-accept for note on race condition here:
     (with-handlers ([void (lambda (exn)
@@ -1807,23 +1891,27 @@ TO DO:
                             (close-output-port o)
                             (raise exn))])
       (wrap-ports who i o client-context-or-protocol-symbol 'connect #t #f error/network
-                  hostname))))
+                  hostname alpn))))
 
 (define (ssl-connect hostname port-k
-                     [client-context-or-protocol-symbol default-encrypt])
+                     [client-context-or-protocol-symbol default-encrypt]
+                     #:alpn [alpn null])
   (do-ssl-connect 'ssl-connect
                   tcp-connect
                   hostname
                   port-k
-                  client-context-or-protocol-symbol))
+                  client-context-or-protocol-symbol
+                  alpn))
 
 (define (ssl-connect/enable-break hostname port-k
-                                  [client-context-or-protocol-symbol default-encrypt])
+                                  [client-context-or-protocol-symbol default-encrypt]
+                                  #:alpn [alpn null])
   (do-ssl-connect 'ssl-connect/enable-break
                   tcp-connect/enable-break
                   hostname
                   port-k
-                  client-context-or-protocol-symbol))
+                  client-context-or-protocol-symbol
+                  alpn))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Initialization

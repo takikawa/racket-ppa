@@ -8,7 +8,6 @@
          racket/list
          racket/set
          syntax/id-set
-         (except-in (path-up "utils/utils.rkt") infer)
          (path-up "rep/type-rep.rkt" "rep/prop-rep.rkt" "rep/object-rep.rkt"
                   "rep/core-rep.rkt" "rep/values-rep.rkt" "rep/fme-utils.rkt"
                   "rep/rep-utils.rkt" "rep/free-ids.rkt"
@@ -22,6 +21,7 @@
                   "utils/tc-utils.rkt"
                   "types/struct-table.rkt"
                   "infer/infer.rkt"
+                  "env/type-name-env.rkt"
                   "types/substitute.rkt")
          (for-syntax racket/base syntax/parse))
 
@@ -573,10 +573,10 @@
 ;; type->sexp : Type -> S-expression
 ;; convert a type to an s-expression that can be printed
 (define (type->sexp type [ignored-names '()])
-  (define (t->s type)
+  (define (t->s type [ignored-names '()])
     (parameterize ([current-print-type-fuel
                     (sub1 (current-print-type-fuel))])
-      (type->sexp type)))
+      (type->sexp type ignored-names)))
   (define (tuple? t)
     (match t
       [(Pair: a (? tuple?)) #t]
@@ -600,13 +600,16 @@
     [(Univ:) 'Any]
     [(Bottom:) 'Nothing]
     ;; struct names are just printed as the original syntax
-    [(Name/struct: id) (syntax-e id)]
+    [(Name/struct: id)
+     (match (lookup-type-name id (lambda () #f))
+       [(and (? Prefab?) ty) (t->s ty (cons id ignored-names))]
+       [_ (syntax-e id)])]
     ;; If a type has a name, then print it with that name.
     ;; However, we expand the alias in some cases
     ;; (i.e., the fuel is > 0) for the :type form.
     [(app has-name? (? values names))
      (=> fail)
-     (when (not (null? ignored-names)) (fail))
+     (unless (null? ignored-names) (fail))
      (define fuel (current-print-type-fuel))
      (cond [(> fuel 0)
             (parameterize ([current-print-type-fuel (sub1 fuel)])
