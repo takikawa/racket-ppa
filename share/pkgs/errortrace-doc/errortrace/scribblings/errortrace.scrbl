@@ -44,7 +44,10 @@ Then,
                @commandline{racket -i -l errortrace}}
 
          @item{To instrument the contents of a collection or package, compile
-               it with: @commandline{raco setup --mode errortrace ...}}
+               it with: @commandline{raco setup -j 1 --mode errortrace
+               ...} Note that because @DFlag{mode} doesn't
+               support parallel builds, @Flag{j 1} is required unless
+               you are building packages on a single-core machine}
          ]
 
 After starting @racketmodname[errortrace] in one of these ways, when an

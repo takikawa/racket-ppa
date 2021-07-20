@@ -115,7 +115,7 @@
           [prefix drracket:get/extend: drracket:get/extend^]
           [prefix drracket:module-overview: drracket:module-overview^]
           [prefix drracket:tools: drracket:tools^]
-          [prefix drracket:init: drracket:init^]
+          [prefix drracket:init: drracket:init/int^]
           [prefix drracket:module-language: drracket:module-language/int^]
           [prefix drracket:module-language-tools: drracket:module-language-tools^]
           [prefix drracket:modes: drracket:modes^]
@@ -550,7 +550,8 @@
                        (text:inline-overview-mixin
                         (text:all-string-snips-mixin
                          (text:ascii-art-enlarge-boxes-mixin
-                          text:info%))))))))))))))])
+                          (number-snip:remove-decimal-looking-number-snips-on-insertion-mixin
+                           text:info%)))))))))))))))])
        ((get-program-editor-mixin)
         (class* definitions-super% (drracket:unit:definitions-text<%>)
           (inherit is-locked? lock while-unlocked
@@ -4388,7 +4389,7 @@
                                                   'drscheme:language-menu-title)]
                                           [parent mb]))
         (define ((send-method method) _1 _2)
-          (define text (get-focus-object))
+          (define text (get-edit-target-object))
           (when (is-a? text racket:text<%>)
             (method text)))
         (define (show/hide-capability-menus)
@@ -4798,7 +4799,7 @@
                              (font small-control-font)
                              (parent panel-with-tabs)
                              (stretchable-height #f)
-                             (style '(deleted no-border))
+                             (style '(deleted no-border can-reorder can-close))
                              (choices '("first name"))
                              (callback (λ (x y)
                                          (define sel (send tabs-panel get-selection))

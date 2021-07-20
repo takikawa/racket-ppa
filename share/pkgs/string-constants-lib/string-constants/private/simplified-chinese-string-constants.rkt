@@ -1392,32 +1392,6 @@
   (happy-birthday-matthew "生日快乐，马晓！")
   (happy-birthday-shriram "生日快乐，Shriram！")
   
-  (mrflow-using-default-language-title "正在使用默认语言")
-  (mrflow-using-default-language "当前使用的语言并不包含其基本运算的类型表。请改用R5RS Scheme。")
-  (mrflow-button-title "分析")
-  ;(mrflow-unknown-style-delta-error-title "Unknown Box Style Delta")
-  ;(mrflow-unknown-style-delta-error "Unknown box style delta: ~a")
-  (mrflow-popup-menu-show-type "显示类型")
-  (mrflow-popup-menu-hide-type "隐藏类型")
-  (mrflow-popup-menu-show-errors "显示错误")
-  (mrflow-popup-menu-hide-errors "隐藏错误")
-  ;(mrflow-read-exception-title "Read Exception")
-  ;(mrflow-read-exception "Read exception: ~a")
-  ;(mrflow-syntax-exception-title "Syntax Exception")
-  ;(mrflow-syntax-exception "Syntax exception: ~a")
-  ;(mrflow-unknown-exception-title "Unknown Exception")
-  ;(mrflow-unknown-exception "Unknown exception: ~a")
-  ;(mrflow-language-primitives-error-title "Language Primitives Error")
-  ;(mrflow-language-primitives-error "Wrong filename for language primitives types table: ~a")
-  
-  (snips-and-arrows-popup-menu-tack-all-arrows "固定所有箭头")
-  (snips-and-arrows-popup-menu-untack-all-arrows "取消固定所有箭头")
-  (snips-and-arrows-user-action-disallowed-title "当前不允许用户改变")
-  (snips-and-arrows-user-action-disallowed
-   "在编辑器中包含由系统插入的段落，所以不允许用户改变。在修改之前请先隐藏所有这些段落。")
-  ;(snips-and-arrows-changing-terms-warning-title "Changing terms will be undoable")
-  (snips-and-arrows-hide-all-snips-in-editor "在编辑器中隐藏所有段落")
-  
   (xml-tool-insert-xml-box "插入XML框")
   (xml-tool-insert-scheme-box "插入Racket框")
   (xml-tool-insert-scheme-splice-box "插入Racket接合框")
@@ -1645,9 +1619,9 @@
   ; section header
   (test-engine-signature-violations "签名违规：")
   
-  ; part of one phrase "signature <at line ...> to blame: procedure <...>
+  ; part of one phrase "signature <at line ...> to blame: function <...>
   (test-engine-signature "签名")
-  (test-engine-to-blame "责任在于：procedure")
+  (test-engine-to-blame "责任在于：function")
   
   (test-engine-no-signature-violations "无签名违规。")
   (test-engine-1-signature-violation "1个签名违规。")

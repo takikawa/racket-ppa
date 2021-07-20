@@ -71,7 +71,7 @@
 
 (define-jpeg/private jpeg_std_error (_fun _jpeg_error_mgr-pointer -> _jpeg_error_mgr-pointer))
 
-(define-jpeg/private jpeg_CreateDecompress/test (_fun _pointer _int _int -> _void)
+(define-jpeg/private jpeg_CreateDecompress/test (_fun #:callback-exns? callback-atomic? _pointer _int _int -> _void)
   #:c-id jpeg_CreateDecompress)
 
 ;; jpeglib offers no way to get the library version number dynamically,
@@ -84,8 +84,7 @@
       (set-jpeg_error_mgr-error_exit! e (cast error-exit (_fun #:atomic? callback-atomic?
                                                                _j_common_ptr -> _void) _fpointer))
       (let ([s (with-handlers ([exn:fail? (lambda (exn) (exn-message exn))])
-                 (guard-foreign-escape
-                  (jpeg_CreateDecompress/test m 0 dummy-size))
+                 (jpeg_CreateDecompress/test m 0 dummy-size)
                  "")])
         (free m)
         (free e)
@@ -626,10 +625,13 @@
      (free m))))
 
 (define create-decompress
+  (lambda (in)
+    (create-decompress/sanitized (sanitize-input-port in))))
+
+(define create-decompress/sanitized
   ((allocator destroy-decompress)
    (lambda (in)
-     (let ([in (sanitize-input-port in)]
-           [m (ptr-cast (malloc _jpeg_decompress_struct 'raw) _jpeg_decompress_struct-pointer)]
+     (let ([m (ptr-cast (malloc _jpeg_decompress_struct 'raw) _jpeg_decompress_struct-pointer)]
            [s (ptr-cast (malloc _jpeg_source_mgr 'raw) _jpeg_source_mgr-pointer)]
            [e (ptr-cast (malloc sizeof_jpeg_error_mgr 'raw) _jpeg_error_mgr-pointer)]
            [b (malloc 'raw BUFFER-SIZE)]
@@ -669,14 +671,18 @@
      (free m))))
 
 (define create-compress
+  (lambda (out)
+    (define funs (box null))
+    (create-compress/sanitized (sanitize-output-port out #:key funs)
+                               funs)))
+
+(define create-compress/sanitized
   ((allocator destroy-compress)
-   (lambda (orig-out)
+   (lambda (out funs)
      (let* ([m (ptr-cast (malloc _jpeg_compress_struct 'raw) _jpeg_compress_struct-pointer)]
-            [out (sanitize-output-port orig-out #:key m)]
             [d (ptr-cast (malloc _jpeg_destination_mgr 'raw) _jpeg_destination_mgr-pointer)]
             [e (ptr-cast (malloc sizeof_jpeg_error_mgr 'raw) _jpeg_error_mgr-pointer)]
-            [b (malloc 'raw BUFFER-SIZE)]
-            [funs (box null)])
+            [b (malloc 'raw BUFFER-SIZE)])
        (set-jpeg_compress_struct-err! m (jpeg_std_error e))
        (set-jpeg_error_mgr-error_exit! e (cast error-exit
                                                (_fun #:keep funs _j_common_ptr -> _void)
@@ -710,22 +716,23 @@
 
 (define-jpeg/private jpeg_CreateDecompress (_fun _j_decompress_ptr _int _int -> _void))
 (define-jpeg/private jpeg_resync_to_restart _fpointer) ; (_fun _j_decompress_ptr _int -> _jbool))
-(define-jpeg jpeg_read_header (_fun _j_decompress_ptr _jbool -> _void))
-(define-jpeg jpeg_start_decompress (_fun _j_decompress_ptr -> _void))
-(define-jpeg jpeg_read_scanlines (_fun _j_decompress_ptr _pointer _int -> _void))
-(define-jpeg jpeg_finish_decompress (_fun _j_decompress_ptr -> _int))
+(define-jpeg jpeg_read_header (_fun #:callback-exns? callback-atomic? _j_decompress_ptr _jbool -> _void))
+(define-jpeg jpeg_start_decompress (_fun #:callback-exns? callback-atomic? _j_decompress_ptr -> _void))
+(define-jpeg jpeg_read_scanlines (_fun #:callback-exns? callback-atomic? _j_decompress_ptr _pointer _int -> _void))
+(define-jpeg jpeg_finish_decompress (_fun #:callback-exns? callback-atomic? _j_decompress_ptr -> _int))
 
 (define-jpeg/private jpeg_CreateCompress (_fun _j_compress_ptr _int _int -> _void))
 (define-jpeg jpeg_set_defaults (_fun _j_compress_ptr -> _int))
 (define-jpeg jpeg_set_quality (_fun _j_compress_ptr _int _jbool -> _int))
-(define-jpeg jpeg_start_compress (_fun _j_compress_ptr _jbool -> _void))
-(define-jpeg jpeg_write_scanlines (_fun _j_compress_ptr _pointer _int -> _void))
-(define-jpeg/private jpeg_finish_compress* (_fun _j_compress_ptr -> _int)
+(define-jpeg jpeg_start_compress (_fun #:callback-exns? callback-atomic? _j_compress_ptr _jbool -> _void))
+(define-jpeg jpeg_write_scanlines (_fun #:callback-exns? callback-atomic? _j_compress_ptr _pointer _int -> _void))
+(define-jpeg/private jpeg_finish_compress* (_fun #:callback-exns? callback-atomic? _j_compress_ptr -> _int)
   #:c-id jpeg_finish_compress)
 
 (define (jpeg_finish_compress m)
+  (define key (cdr (ptr-ref (jpeg_compress_struct-client_data m) _scheme)))
   (jpeg_finish_compress* m)
-  (flush-sanitized-output m))
+  (flush-sanitized-output key))
 
 (provide create-decompress
          destroy-decompress

@@ -11,6 +11,8 @@
 @(define readline "Readline")
 @(define Readline "Readline")
 
+@(define foreign-doc '(lib "scribblings/foreign/foreign.scrbl"))
+
 @title{Readline: Terminal Interaction}
 
 The @filepath{readline} collection (not to be confused with Racket's
@@ -266,7 +268,10 @@ is specified in the same way as the argument for @racket[history-get].}
 Sets @|readline|'s @tt{rl_completion_entry_function} to
 @racket[proc]. The @racket[type] argument, whose possible values are
 from @racketmodname[ffi/unsafe], determines the type of value supplied
-to the @racket[proc].}
+to the @racket[proc].
+
+In the CS variant of Racket, @racket[proc] is called in @tech[#:doc
+foreign-doc]{atomic mode}.}
 
 @defproc[(set-completion-append-character! [c char?])
          void?]{

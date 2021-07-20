@@ -4,17 +4,28 @@
          racket/match racket/list
          (for-syntax racket/base syntax/parse)
          (contract-req)
-         (rep type-rep prop-rep object-rep rep-utils)
-         (utils tc-utils)
+         "../rep/type-rep.rkt"
+         "../rep/prop-rep.rkt"
+         "../rep/object-rep.rkt"
+         "../rep/rep-utils.rkt"
+         "../utils/tc-utils.rkt"
          racket/set
-         (types tc-result resolve update prop-ops subtract path-type)
-         (env type-env-structs lexical-env mvar-env)
-         (only-in (infer infer) intersect)
-         (rename-in (types abbrev)
+         "../types/tc-result.rkt"
+         "../types/resolve.rkt"
+         "../types/update.rkt"
+         "../types/prop-ops.rkt"
+         "../types/subtract.rkt"
+         "../types/path-type.rkt"
+         "../env/type-env-structs.rkt"
+         "../env/lexical-env.rkt"
+         "../env/mvar-env.rkt"
+         (only-in "../infer/infer.rkt" intersect)
+         (rename-in "../types/abbrev.rkt"
                     [-> -->]
                     [->* -->*]
                     [one-of/c -one-of/c])
-         (typecheck tc-metafunctions tc-subst))
+         "tc-metafunctions.rkt"
+         "tc-subst.rkt")
 
 (provide with-lexical-env+props
          with-lexical-env+props-simple
@@ -29,7 +40,19 @@
   (cond
     [(or (null? ps) (andmap TrueProp? ps)) env]
     [else
-     (define-values (props atoms) (combine-props ps (env-props env)))
+     (define-values (props atoms^) (combine-props ps (env-props env)))
+
+     (define atoms (if atoms^
+                        ;; fix the order of paths to the same object.
+                        ;; move objects with fewer path elements forward.
+                        (sort atoms^ (lambda (x y)
+                                       (match* (x y)
+                                         [((TypeProp: (Path: pes1 (? identifier? var1)) _)
+                                           (TypeProp: (Path: pes2 (? identifier? var2)) _))
+                                          #:when (equal? var1 var2)
+                                          (and (< (length pes1) (length pes2)))]
+                                         [(_ _) #f])))
+                        atoms^))
      (cond
        [props
         (let loop ([todo atoms]
@@ -81,12 +104,13 @@
                                              (env-set-id-type Γ x new-t*)
                                              obj
                                              pt)]
-                       [else
-                        (loop ps
-                              (cons (-is-type obj (path-type pes new-t*)) atoms)
-                              negs
-                              (append new-props new)
-                              (env-set-id-type Γ x new-t*))])]))]
+                       [(path-type pes new-t*) => (lambda (pt)
+                                                    (loop ps
+                                                          (cons (-is-type obj pt) atoms)
+                                                          negs
+                                                          (append new-props new)
+                                                          (env-set-id-type Γ x new-t*)))]
+                       [else #f])]))]
                [(TypeProp: obj pt)
                 (update-obj-pos-type new Γ obj pt)]
                ;; process negative info _after_ positive info so we don't miss anything!

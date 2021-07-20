@@ -1,13 +1,21 @@
 #lang racket/base
 
-(require (rename-in "../utils/utils.rkt" [infer infer-in]))
+(require (only-in "../utils/utils.rkt" contract-req define/cond-contract))
 (require racket/match racket/list
          (contract-req)
-         (infer-in infer)
-         (rep core-rep type-rep prop-rep object-rep values-rep rep-utils)
-         (utils tc-utils prefab)
-         (types resolve subtype subtract)
-         (rename-in (types abbrev)
+         "../infer/infer.rkt"
+         "../rep/core-rep.rkt"
+         "../rep/type-rep.rkt"
+         "../rep/prop-rep.rkt"
+         "../rep/object-rep.rkt"
+         "../rep/values-rep.rkt"
+         "../rep/rep-utils.rkt"
+         "../utils/tc-utils.rkt"
+         "../utils/prefab.rkt"
+         "resolve.rkt"
+         "subtype.rkt"
+         "subtract.rkt"
+         (rename-in "abbrev.rkt"
                     [-> -->]
                     [->* -->*]
                     [one-of/c -one-of/c]))
@@ -47,28 +55,34 @@
          ;; struct ops
          ;; (NOTE: we assume path elements to mutable fields
          ;;        are never created)
-         [((Struct: nm par flds proc poly pred props)
-           (StructPE: s idx))
+         [((? Struct? t) (StructPE: s idx))
           #:when (subtype t s)
           ;; Note: this updates fields even if they are not polymorphic.
           ;; Because subtyping is nominal and accessor functions do not
           ;; reflect this, this behavior is unobservable except when a
           ;; variable aliases the field in a let binding
-          (match-define-values (lhs (cons (fld: ty acc-id #f) rhs)) (split-at flds idx))
-          (match (update ty rst)
-            [(Bottom:) -Bottom]
-            [ty (let ([flds (append lhs (cons (make-fld ty acc-id #f) rhs))])
-                  (make-Struct nm par flds proc poly pred props))])]
+          (let/ec fail (Struct-update t flds
+                                      (lambda (flds)
+                                        (list-update flds idx
+                                                     (lambda (v)
+                                                       (fld-update v t
+                                                                   (lambda (ty)
+                                                                     (match (update ty rst)
+                                                                       [(Bottom:) (fail -Bottom)]
+                                                                       [ty ty]))))))))]
 
          ;; prefab struct ops
          ;; (NOTE: we assume path elements to mutable fields
          ;;        are never created)
-         [((Prefab: key flds) (PrefabPE: path-key idx))
+         [((and (Prefab: key _) t) (PrefabPE: path-key idx))
           #:when (prefab-key-subtype? key path-key)
-          (match-define-values (lhs (cons fld-ty rhs)) (split-at flds idx))
-          (match (update fld-ty rst)
-            [(Bottom:) -Bottom]
-            [fld-ty (make-Prefab key (append lhs (cons fld-ty rhs)))])]
+          (let/ec fail (Prefab-update t flds
+                                      (lambda (flds)
+                                        (list-update flds idx
+                                                     (lambda (ty)
+                                                       (match (update ty rst)
+                                                         [(Bottom:) (fail -Bottom)]
+                                                         [ty ty]))))))]
 
          ;; class field ops
          ;;
@@ -98,8 +112,8 @@
           (match path-elem
             [(CarPE:) (intersect t (-pair (update Univ rst) Univ))]
             [(CdrPE:) (intersect t (-pair Univ (update Univ rst)))]
-            [(SyntaxPE:) (intersect t (-syntax-e (update Univ rst)))]
-            [(ForcePE:) (intersect t (-force (update Univ rst)))]
+            [(SyntaxPE:) (intersect t (-Syntax (update Univ rst)))]
+            [(ForcePE:)  (intersect t (-Promise (update Univ rst)))]
             [(PrefabPE: key idx)
              #:when (not (prefab-key/mutable-fields? key))
              (define field-count (prefab-key->field-count key))

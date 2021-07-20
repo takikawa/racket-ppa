@@ -213,7 +213,8 @@
     [(_ e ...)
      (local [(define (do-not-expand? exp)
                (and (identifier? exp)
-                    (free-identifier=? exp #'empty)))
+                    (not (set!-transformer?
+                           (syntax-local-value exp (lambda () #f))))))
              (define exps
                (syntax->list #'(e ...)))
              (define tmps

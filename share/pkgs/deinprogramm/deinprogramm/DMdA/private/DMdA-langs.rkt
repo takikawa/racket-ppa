@@ -215,13 +215,8 @@
 		  (if (preferences:default-set? 'signatures:enable-checking?) ; Signatures tool not present
 		      (preferences:get 'signatures:enable-checking?)
 		      #t))
-                 (render-value-parameter (λ (v)
-                                           (let ([o (open-output-string)])
-                                             (render-value/format (if (procedure? v)
-                                                                      generic-proc
-									 v)
-                                                                  settings o 40)
-                                             (get-output-string o))))
+                 (render-value-parameter (λ (value port)
+                                           (render-value/format value settings port 40)))
 		 )))
             (super on-execute settings run-in-user-thread)
 

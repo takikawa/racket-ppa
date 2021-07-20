@@ -5,13 +5,19 @@
          racket/match
          "signatures.rkt" "tc-metafunctions.rkt"
          "tc-funapp.rkt"
-         (types utils abbrev resolve subtype match-expanders)
-         (typecheck check-below)
-         (private syntax-properties)
-         (utils tc-utils)
+         "../types/utils.rkt"
+         "../types/abbrev.rkt"
+         "../types/resolve.rkt"
+         "../types/subtype.rkt"
+         "../types/match-expanders.rkt"
+         "check-below.rkt"
+         "../private/syntax-properties.rkt"
+         "../utils/tc-utils.rkt"
          (for-syntax racket/base syntax/parse)
          (for-template racket/base)
-         (rep type-rep prop-rep object-rep))
+         "../rep/type-rep.rkt"
+         "../rep/prop-rep.rkt"
+         "../rep/object-rep.rkt")
 
 (import tc-if^ tc-lambda^ tc-app^ tc-let^ tc-expr^)
 (export check-subforms^)
@@ -68,11 +74,13 @@
          (loop (instantiate-poly t (map (λ (n) Univ) ns)))]
         ;; This clause should raise an error via the check-below test
         [_
-         (cond [;; a redundant test, but it ensures an error message below
-                (not (subtype t (-> prop-type Univ)))
-                (parameterize ([current-orig-stx stx])
-                  (check-below t (-> prop-type Univ)))]
-               [else (int-err "get-range-result: should not happen. type ~a prop ~a"
+         (cond
+           [(subtype t -Bottom)]
+           [;; a redundant test, but it ensures an error message below
+            (not (subtype t (-> prop-type Univ)))
+            (parameterize ([current-orig-stx stx])
+              (check-below t (-> prop-type Univ)))]
+           [else (int-err "get-range-result: should not happen. type ~a prop ~a"
                               t prop-type)])
          (ret (Un))])))
 

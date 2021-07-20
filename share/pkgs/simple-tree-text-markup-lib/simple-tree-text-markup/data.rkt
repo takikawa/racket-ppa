@@ -15,7 +15,25 @@
                   (markup markup?)))
                (struct framed-markup
                  ((markup markup?)))
-               (markup? (any/c . -> . boolean?))))
+               (struct image-markup
+                 ;; can be anything, as long as it's understood by the backend
+                 ;; typical choices:
+                 ;; - image%
+                 ;; - snip%
+                 ;; - record-dc-datum
+                 ((data any/c)
+                  (alt-markup markup?)))
+               (markup? (any/c . -> . boolean?))
+               (struct record-dc-datum
+                 ((datum any/c)
+                  (width natural-number/c)
+                  (height natural-number/c)))
+               (struct number-markup
+                 ((number number?)
+                  (exact-prefix (or/c 'always 'never 'when-necessary))
+                  (inexact-prefix (or/c 'always 'never 'when-necessary))
+                  ;; for exact non-integers only
+                  (fraction-view (or/c 'mixed 'improper 'decimal))))))
 
 (define (markup? x)
   (or (string? x)
@@ -23,7 +41,9 @@
       (horizontal-markup? x)
       (vertical-markup? x)
       (srcloc-markup? x)
-      (framed-markup? x)))
+      (framed-markup? x)
+      (image-markup? x)
+      (number-markup? x)))
 
 (struct empty-markup
   ()
@@ -38,13 +58,20 @@
   #:transparent)
 
 (struct srcloc-markup
-  (srcloc markup))
+  (srcloc markup)
+  #:transparent)
 
 (struct framed-markup
   (markup)
   #:transparent)
 
+(struct image-markup
+  (data alt-markup)
+  #:transparent)
 
+(struct record-dc-datum
+  (datum width height)
+  #:transparent)
 
-  
-  
+(struct number-markup (number exact-prefix inexact-prefix fraction-view)
+  #:transparent)

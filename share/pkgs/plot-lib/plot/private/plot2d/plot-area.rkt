@@ -31,7 +31,8 @@
                      [dc-x-min Real]
                      [dc-y-min Real]
                      [dc-x-size Nonnegative-Real]
-                     [dc-y-size Nonnegative-Real])
+                     [dc-y-size Nonnegative-Real]
+                     [aspect-ratio (U Nonnegative-Real #f)])
          [put-clip-rect (-> Rect Void)]
          [clear-clip-rect (-> Void)]
          [get-x-ticks (-> (Listof tick))]
@@ -40,6 +41,7 @@
          [get-y-far-ticks (-> (Listof tick))]
          [get-bounds-rect (-> Rect)]
          [get-clip-rect (-> Rect)]
+         [get-aspect-ratio (-> (U Nonnegative-Real #f))]
          [get-area-bounds-rect (-> Rect)]
          [plot->dc (-> (Vectorof Real) (Vectorof Real))]
          [dc->plot (-> (Vectorof Real) (Vectorof Real))]
@@ -68,13 +70,14 @@
          [put-arrow (->* ((Vectorof Real) (Vectorof Real)) (Boolean) Void)]
          [put-tick (-> (Vectorof Real) Real Real Void)]
          [put-pict (->* [pict (Vectorof Real)] [Anchor Real] Void)]
+         [get-plot-metrics-functions (-> Plot-Metrics-Functions)]
          ))
 
 (: 2d-plot-area% 2D-Plot-Area%)
 (define 2d-plot-area%
   (class object%
     (init-field bounds-rect rx-ticks rx-far-ticks ry-ticks ry-far-ticks legend)
-    (init-field dc dc-x-min dc-y-min dc-x-size dc-y-size)
+    (init-field dc dc-x-min dc-y-min dc-x-size dc-y-size aspect-ratio)
     (super-new)
 
     (: pd (Instance Plot-Device%))
@@ -195,7 +198,11 @@
             [(vector x y)
              (vector +nan.0 +nan.0)])))
 
-    (define/public (plot->dc v) (view->dc (plot->view v)))
+    (: plot->dc (-> (Vectorof Real) (Vectorof Real)))
+    (define (plot->dc v) (view->dc (plot->view v)))
+    (begin
+      (public [public-plot->dc plot->dc])
+      (define (public-plot->dc [v : (Vectorof Real)]) (plot->dc v)))
 
     (define: view-x-size : Real  0)
     (define: view-y-size : Real  0)
@@ -644,6 +651,24 @@
       (set! top top-val)
       (set! bottom bottom-val))
 
+    ;; When an aspect ratio has been defined, adjust the margins so that the
+    ;; actual plot area maintains this ratio.
+    (when (real? aspect-ratio)
+      (let* ([area-width (- dc-x-size left right)]
+             [area-height (- dc-y-size top bottom)]
+             [desired-height (/ area-width (cast aspect-ratio Real))])
+        (if (<= desired-height area-height)
+            (let ([adjust (/ (- area-height desired-height) 2)])
+              (set! top (+ top adjust))
+              (set! bottom (+ bottom adjust)))
+            (let* ([desired-width (* area-height (cast aspect-ratio Real))]
+                   [adjust (/ (- area-width desired-width) 2)])
+              (set! left (+ left adjust))
+              (set! right (+ right adjust)))))
+      (set! view->dc (make-view->dc left right top bottom)))
+
+    (define/public (get-aspect-ratio) aspect-ratio)
+
     (: area-x-min Real)
     (: area-x-max Real)
     (: area-y-min Real)
@@ -684,8 +709,13 @@
       (vector (/ (- x area-x-min) area-per-view-x)
               (/ (- area-y-max y) area-per-view-y)))
 
-    (define/public (dc->plot v)
+    (: dc->plot (-> (Vectorof Real) (Vectorof Real)))
+    (define (dc->plot v)
       (view->plot (dc->view v)))
+
+    (begin
+      (public [public-dc->plot dc->plot])
+      (define (public-dc->plot [v : (Vectorof Real)]) (dc->plot v)))
 
     ;; ===============================================================================================
     ;; Plot decoration
@@ -887,4 +917,18 @@
       (let ([v  (exact-vector2d v)])
         (when (and v (in-bounds? v))
           (send pd draw-pict pict (plot->dc v) anchor dist))))
+
+    (define/public (get-plot-metrics-functions)
+      (list (let ([bounds bounds-rect]
+                  [vect : (Option (Immutable-Vector (Immutable-Vector Real Real) (Immutable-Vector Real Real))) #f])
+              (λ () (or vect
+                        (let ([new (vector-immutable (vector-immutable (assert (ivl-min (vector-ref bounds 0)) real?)
+                                                                       (assert (ivl-max (vector-ref bounds 0)) real?))
+                                                     (vector-immutable (assert (ivl-min (vector-ref bounds 1)) real?)
+                                                                       (assert (ivl-max (vector-ref bounds 1)) real?)))])
+                          (set! vect new)
+                          new))))
+            plot->dc
+            dc->plot
+            (λ () #(0 0 1))))
     ))

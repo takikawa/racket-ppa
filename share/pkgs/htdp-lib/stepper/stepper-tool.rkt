@@ -56,56 +56,7 @@
            (log-stepper-debug "render-to-sexp got a boolean: ~v\n" val))
          (or (and (procedure? val)
                   (object-name val))
-             (parameterize ([pretty-print-show-inexactness (stepper:show-inexactness?)]
-                            [current-print-convert-hook stepper-print-convert-hook])
-               (call-with-values
-                (lambda ()
-                  ;; I'm not sure that these print settings actually need to be set...
-                  ;; or... that they need to be set *here*. They might need to be set
-                  ;; when the pretty-print to the actual width occurs. That is, when
-                  ;; they get converted to strings...
-                  ;; try removing this wrapper when things are working. (2015-10-22)
-                  (call-with-print-settings
-                   language-level
-                   settings
-                   (lambda ()
-                     (drracket:language:simple-module-based-language-convert-value
-                      val
-                      settings))))
-                (lambda args
-                  (match args
-                    [(list value should-be-written?)
-                     (cond [should-be-written?
-                            ;; warning, don't know if this happens in the stepper:
-                            (log-stepper-debug "print-convert returned writable: ~v\n" value)
-                            value]
-                           [else
-                            ;; apparently some values should be written and some should be printed.
-                            ;; Since we formulate a single value to send to the output, this is hard
-                            ;; for us.
-                            ;; A cheap hack is to print the value and then read it again.
-                            ;; Unfortunately, this fails on images. To layer a second hack on
-                            ;; the first one, we intercept this failure and just return the
-                            ;; value.
-                            (with-handlers ([exn:fail:read?
-                                             (λ (exn)
-                                               (log-stepper-debug
-                                                "read fail, print convert returning: ~s\n"
-                                                value)
-                                               value)])
-                              (define result-value
-                                (let ([os-port (open-output-string)])
-                                  (print value os-port)
-                                  (when (boolean? val)
-                                    (log-stepper-debug "string printed by print: ~v\n" (get-output-string os-port)))
-                                  ;; this 'read' is somewhat scary. I'd like to
-                                  ;; get rid of this:
-                                  (read (open-input-string (get-output-string os-port)))))
-                              (log-stepper-debug "print-convert returned string that read mapped to: ~s\n" result-value)
-                              result-value)])]
-                    [(list value)
-                     (log-stepper-debug "render-to-sexp: value returned from convert-value: ~v\n" value)
-                     value]))))))
+             (print-convert val)))
 
        (super-instantiate ())))))
 
@@ -239,8 +190,12 @@
            [parent stepper-button-parent-panel]
            [label (string-constant stepper-button-label)]
            [bitmap step-img]
-           [callback (lambda (dont-care) (send (get-current-tab)
-                                               stepper-button-callback))]))
+           [callback (lambda (dont-care)
+                       (let* ([tab (get-current-tab)]
+                              [language-settings (send (send tab get-defs) get-next-settings)])
+                         (send tab stepper-button-callback
+                               (drracket:language-configuration:language-settings-language language-settings)
+                               (drracket:language-configuration:language-settings-settings language-settings))))]))
 
     (register-toolbar-button stepper-button #:number 59)
 
@@ -347,29 +302,28 @@
 
 
     ;; called from drracket-button.rkt, installed via the #lang htdp/bsl (& co) reader into drracket
-    (define/public (stepper-button-callback)
+    (define/public (stepper-button-callback language settings)
       (cond
         [stepper-frame (send stepper-frame show #t)]
-        [else (create-new-stepper)]))
+        [else (create-new-stepper language settings)]))
 
     ;; open a new stepper window, start it running
-    (define (create-new-stepper)
-      (let* ([language-level
-              (extract-language-level (get-defs))])
-        (if (or (stepper-works-for? language-level)
-                (is-a? language-level drracket:module-language:module-language<%>))
-            (parameterize ([current-directory (or (get-directory) (current-directory))])
-              (set! stepper-frame
-                    (vc-go this
-                           program-expander
-                           dynamic-requirer
-                           (+ 1 (send (get-defs) get-start-position))
-                           (+ 1 (send (get-defs) get-end-position)))))
-            (message-box
-             (string-constant stepper-name)
-             (format (string-constant stepper-language-level-message)
-                     (last (send language-level get-language-position)))))))
-
+    (define (create-new-stepper language settings)
+      (if (or (stepper-works-for? language)
+              (is-a? language drracket:module-language:module-language<%>))
+          (parameterize ([current-directory (or (get-directory) (current-directory))])
+            (set! stepper-frame
+                  (vc-go this
+                         program-expander
+                         dynamic-requirer
+                         language 
+                         settings
+                         (+ 1 (send (get-defs) get-start-position))
+                         (+ 1 (send (get-defs) get-end-position)))))
+          (message-box
+           (string-constant stepper-name)
+           (format (string-constant stepper-language-level-message)
+                   (last (send language get-language-position))))))
     (define/override (enable-evaluation)
       (super enable-evaluation)
       (send (send (get-frame) get-stepper-button) enable #t))

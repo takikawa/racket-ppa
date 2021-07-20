@@ -1,13 +1,17 @@
 #lang racket/base
 
 (require ffi/unsafe
+         ffi/unsafe/os-thread
+         ffi/unsafe/os-async-channel
+         ffi/unsafe/vm
+         ffi/unsafe/schedule
          ffi/unsafe/atomic
          (only-in '#%foreign ffi-obj)
          setup/dirs)
 (provide readline readline-bytes
          add-history add-history-bytes
          history-length history-get history-delete
-         set-completion-function!
+         (protect-out set-completion-function!)
          set-completion-append-character!
          readline-newline readline-redisplay)
 
@@ -70,11 +74,133 @@
             (free x))
           eof))))
 
-(define readline
-  (get-ffi-obj "readline" libreadline (_fun _string -> _string/eof/free)))
+(define use-cs-other-thread?
+  (eq? 'chez-scheme (system-type 'vm)))
 
-(define readline-bytes
-  (get-ffi-obj "readline" libreadline (_fun _bytes/nul-terminated -> _bytes/eof/free)))
+(define-values (readline
+                readline-bytes
+                callback-for-potentially-foreign-thread
+                read-byte/maybe-foreign-thread
+                read-char/maybe-foreign-thread)
+  (let ()
+    (cond
+      [use-cs-other-thread?
+       ;; On CS, rl_getc_function has to be atomic, but we want to
+       ;; read from a Racket input port. So, run `readline` or
+       ;; `readline-bytes` in a separate Scheme thread, and have it
+       ;; request via Scheme-level synchronization.
+       (define readline-ptr (get-ffi-obj "readline" libreadline _fpointer))
+       (define readline-bytes-ptr (get-ffi-obj "readline" libreadline _fpointer))
+       ;; A `context` struct communicates information about an enclosing
+       ;; `readline` request to the callback installed for reading characters/bytes:
+       (struct context (request-ch response-ch break-esc))
+       (define current-context (vm-eval '(make-thread-parameter #f)))
+       ;; To handle errors/breaks, we'll arrange for a request to
+       ;; jump out of an enclosing `readline` call:
+       (define call-with-exit-proc
+         ;; From the Chez Scheme manual, causes a continuation jump to pop C frames:
+         (vm-eval '(lambda (p)
+                     (define th (lambda () (call/cc p)))
+                     (define-ftype ->ptr (function () ptr))
+                     (let ([fptr (make-ftype-pointer ->ptr th)])
+                       (let ([v ((ftype-ref ->ptr () fptr))])
+                         (unlock-object
+                          (foreign-callable-code-object
+                           (ftype-pointer-address fptr)))
+                         v)))))
+       ;; Convert a procedure pointer to a Scheme foreign function:
+       (define (proc-ptr-to-proc proc-ptr)
+         (vm-eval `(foreign-procedure __collect_safe ,(cast proc-ptr _pointer _uintptr)
+                                      (uptr)
+                                      uptr)))
+       ;; Wrapper for a readline proc:
+       (define (make-readline readline to-bytes _result)
+         (lambda (prompt)
+           ;; Convert prompt to an immobile, nul-terminated byte array:
+           (define prompt-bytes (to-bytes prompt))
+           (define len (bytes-length prompt-bytes))
+           (define prompt-mem (malloc (add1 len) 'atomic-interior))
+           (memcpy prompt-mem prompt-bytes len)
+           (ptr-set! prompt-mem _byte len 0)
+           (define prompt-addr (cast prompt-mem _pointer _uintptr))
+           ;; Request to Scheme thread for reading characters:
+           (define request-ch (make-os-async-channel))
+           ;; Response from Scheme thread reading characters:
+           (define response-ch (make-os-async-channel))
+           ;; Response from readline thread (which sends requests to Scheme thread
+           ;; and receives its responses):
+           (define readline-ch (make-os-async-channel))
+           ;; Start a Racket thread can can serve `read-char`/`read-byte` requests,
+           ;; of which there is at most one active at a time:
+           (define request-server
+             (thread
+              (lambda ()
+                (let loop ()
+                  (define proc (sync request-ch))
+                  (define result (proc))
+                  (os-async-channel-put response-ch result)
+                  (loop)))))
+           ;; Run readline in a new thread:
+           (call-in-os-thread
+            (lambda ()
+              ;; in non-Racket Scheme thread
+              (call-with-exit-proc
+               (lambda (k)
+                 (current-context (context request-ch response-ch k))
+                 (os-async-channel-put readline-ch (readline prompt-addr))
+                 (void/reference-sink prompt-mem)))))
+           ;; Wait for the result, and on escape (due to an error or
+           ;; break), communicate the escape also to any request in
+           ;; flight:
+           (dynamic-wind
+            void
+            (lambda ()
+              (define addr (sync readline-ch))
+              ;; Convert result to a [byte] string:
+              (cast addr _uintptr _result))
+            (lambda ()
+              (kill-thread request-server)
+              (set! request-server #f)
+              ;; On behalf of `request-server`, reply with 'escape:
+              (os-async-channel-put response-ch 'escape)))))
+       (define (make-reader read-byte-or-char)
+         ;; Called in a non-Racket Scheme thread:
+         (lambda (input-port)
+           (define ctx (current-context))
+           ;; Bounce the request over to the current request-handler
+           ;; Racket thread by using the current thread's request box
+           (os-async-channel-put (context-request-ch ctx) (lambda () (read-byte-or-char input-port)))
+           (define result (os-async-channel-get (context-response-ch ctx)))
+           (if (eq? result 'escape)
+               ((context-break-esc ctx) #f)
+               result)))
+       (values (make-readline (proc-ptr-to-proc readline-ptr) string->bytes/utf-8 _string/eof/free)
+               (make-readline (proc-ptr-to-proc readline-bytes-ptr) values _bytes/eof/free)
+               (lambda (proc)
+                 (vm-eval `(let ([x (foreign-callable __collect_safe ',proc (uptr) int)])
+                             (lock-object x)
+                             (foreign-callable-entry-point x))))
+               (make-reader read-byte)
+               (make-reader read-char))]
+      [else
+       ;; When callbacks can be non-atomic, then it's all straightforward:
+       (define readline
+         (get-ffi-obj "readline" libreadline (_fun _string -> _string/eof/free)))
+       (define readline-bytes
+         (get-ffi-obj "readline" libreadline (_fun _bytes/nul-terminated -> _bytes/eof/free)))
+       (values readline
+               readline-bytes
+               values ; callback-for-potentially-foreign-thread
+               read-byte
+               read-char)])))
+
+(define-values (start-nonatomic end-nonatomic)
+  (cond
+    [(and (not use-cs-other-thread?)
+          (eq? 'chez-scheme (system-type 'vm)))
+     (values end-atomic start-atomic)]
+    [else
+     (values void void)]))
 
 (define add-history
   (get-ffi-obj "add_history" libreadline (_fun _string -> _void)))
@@ -149,7 +275,10 @@
     [(func type)
      (if func
          (set-ffi-obj! "rl_completion_entry_function" libreadline
-                       (_fun #:keep keep-alive! type _int -> _pointer)
+                       (_fun #:keep keep-alive!
+                             #:async-apply (and use-cs-other-thread?
+                                                (lambda (p) (p)))
+                             type _int -> _pointer)
                        (completion-function func))
          (set-ffi-obj! "rl_completion_entry_function" libreadline _pointer #f))]))
 
@@ -194,41 +323,37 @@
 (unless (terminal-port? real-input-port)
   (log-warning "mzrl warning: input port is not a terminal\n"))
 
-;; Hack: for CS, make the callback non-atomic anyway. This should
-;; be generally ok as long as no one else tries to play the same
-;; trick at the same time
-(define-values (start-nonatomic end-nonatomic)
-  (cond
-    [(eq? 'chez-scheme (system-type 'vm))
-     (values end-atomic start-atomic)]
-    [else
-     (values void void)]))
-
 ;; We need to tell readline to pull content through our own function,
-;; to avoid buffering issues between C and Racket, and to allow
-;; racket threads to run while waiting for input.
-(set-ffi-obj! "rl_getc_function" libreadline (_fun #:keep keep-alive! _pointer -> _int)
-              ;; How does rl_getc_function return Unicode characters?
-              ;; On readline, returns one byte of UTF-8 encoding per call.
-              ;; On libedit w/ "widec" support, returns one whole wchar_t per call.
-              ;; - option (--enable-widec) since version "0:35:0" (2010-04-24)
-              ;; - always enabled since version "0:54:0" (2016-06-18)
-              ;; - no known dynamic test to tell whether enabled, so just assume yes
-              (cond
-                [(get-ffi-obj "el_wgets" libreadline _fpointer (lambda () #f))
-                 ;; libedit (has el_wgets since 2009-12-30)
-                 (lambda (_)
-                   (start-nonatomic)
-                   (define next-char (read-char real-input-port))
-                   (end-nonatomic)
-                   (if (eof-object? next-char) -1 (char->integer next-char)))]
-                [else
-                 ;; libreadline
-                 (lambda (_)
-                   (start-nonatomic)
-                   (define next-byte (read-byte real-input-port))
-                   (end-nonatomic)
-                   (if (eof-object? next-byte) -1 next-byte))]))
+;; to avoid buffering issues between C and Racket, and to allow racket
+;; threads to run while waiting for input. Beware that the function is
+;; called in a non-Racket thread in CS when other-thread mode is on.
+(set-ffi-obj! "rl_getc_function" libreadline (if use-cs-other-thread?
+                                                 _uintptr
+                                                 (_fun #:keep keep-alive! _pointer -> _int))
+              (callback-for-potentially-foreign-thread
+               ;; How does rl_getc_function return Unicode characters?
+               ;; On readline, returns one byte of UTF-8 encoding per call.
+               ;; On libedit w/ "widec" support, returns one whole wchar_t per call.
+               ;; - option (--enable-widec) since version "0:35:0" (2010-04-24)
+               ;; - always enabled since version "0:54:0" (2016-06-18)
+               ;; - no known dynamic test to tell whether enabled, so just assume yes
+               (cond
+                 [(get-ffi-obj "el_wgets" libreadline _fpointer (lambda () #f))
+                  ;; libedit (has el_wgets since 2009-12-30)
+                  (lambda (_)
+                    ;; Racket CS other-thread mode: not currently in a Racket thread
+                    (start-nonatomic)
+                    (define next-char (read-char/maybe-foreign-thread real-input-port))
+                    (end-nonatomic)
+                    (if (eof-object? next-char) -1 (char->integer next-char)))]
+                 [else
+                  ;; libreadline
+                  (lambda (_)
+                    ;; Racket CS other-thread mode: not currently in a Racket thread
+                    (start-nonatomic)
+                    (define next-byte (read-byte/maybe-foreign-thread real-input-port))
+                    (end-nonatomic)
+                    (if (eof-object? next-byte) -1 next-byte))])))
 
 
 ;; force cursor on a new line

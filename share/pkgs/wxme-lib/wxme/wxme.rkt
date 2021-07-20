@@ -18,7 +18,7 @@
     (expect #rx#"^01" port who "unrecognized format (not \"01\")")
     (let ([vers (string->number
                  (bytes->string/latin-1
-                  (expect #rx#"^0[1-9]" port who "unrecognized version")))])
+                  (expect #rx"^(?:0[1-9])|(?:10)" port who "unrecognized version")))])
       (unless (vers . < . 4)
         (expect #rx#"^ ##[ \r\n]" port who "missing \" ## \" tag in the expected place"))
       (let ([header (read-header who port vers snip-filter skip-content?)])
@@ -281,17 +281,52 @@
   ;; ----------------------------------------
 
   (define (read-raw-string who port vers what previously-read-bytes)
-    (let ([v (cond
-              [(vers . >= . 8) (plain-read port)]
-              [else (read-integer who port vers what)])])
-      (unless (and (integer? v)
-                   (exact? v)
-                   (v . >= . 0))
-        (read-error who "non-negative exact integer for string length" what port))
-      (let ([s (cond
-                [(vers . >= . 8) (plain-read port)]
-                [else (read-bytes v port)])])
-        (cond
+    (define v
+      (cond
+        [(vers . >= . 8) (plain-read port)]
+        [else (read-integer who port vers what)]))
+    (unless (and (integer? v)
+                 (exact? v)
+                 (v . >= . 0))
+      (read-error who "non-negative exact integer for string length" what port))
+    (cond
+      [(and (vers . >= . 10) (saved-as-raw-bytes? port))
+       (define (check-for expected-char)
+         (define got-char (read-char port))
+         (unless (equal? got-char expected-char)
+           (read-error who
+                       (format "expected a ~s when reading bytes, got ~s"
+                               expected-char
+                               got-char)
+                       what port)))
+       (let loop ()
+         (define c (peek-char port))
+         (when (char-whitespace? c)
+           (read-char port)
+           (loop)))
+       (check-for #\()
+       (define id (read-integer who port vers what))
+       (define size (read-integer who port vers what))
+       (check-for #\newline)
+       (define bts (read-bytes size port))
+       (unless (and (bytes? bts) (= (bytes-length bts) size))
+         (read-error who
+                     (format "expected ~a bytes, got ~a"
+                             size
+                             (if (bytes? bts)
+                                 (bytes-length bts)
+                                 bts))
+                     what port))
+       (hash-set! previously-read-bytes id bts)
+       (check-for #\newline)
+       (check-for #\))
+       bts]
+      [else
+       (define s
+         (cond
+           [(vers . >= . 8) (plain-read port)]
+           [else (read-bytes v port)]))
+       (cond
          [(bytes? s) 
           (unless (= (bytes-length s) v)
             (read-error who "byte string whose length matches an integer count" what port))
@@ -318,7 +353,33 @@
           values]
          [else
           (read-error who "byte string or byte-string list or reference to earlier byte-string"
-                      what port)]))))
+                      what port)])]))
+
+  ;; in version 10 writing bytes into the stream results in the raw bytes being written
+  ;; out into the stream so we cannot just use `read` anymore. When this happens there
+  ;; is always an open paren followed by two numbers; the first being the id of the
+  ;; bytes (for duplicates written to the stream) and the second is the number of bytes
+  (define (saved-as-raw-bytes? port)
+    (define peek-port (peeking-input-port port))
+    (define (get-next-non-whitespace)
+      (let loop ()
+        (define c (read-char peek-port))
+        (cond
+          [(eof-object? c) #f]
+          [(char-whitespace? c) (loop)]
+          [else c])))
+
+    (define (get-a-number)
+      (let loop ()
+        (define c (read-char peek-port))
+        (cond
+          [(char-whitespace? c) #t]
+          [(char<=? #\0 c #\9) (loop)]
+          [else #f])))
+
+    (and (equal? (get-next-non-whitespace) #\()
+         (get-a-number)
+         (get-a-number)))
 
   (define (read-a-string who port vers what previously-read-bytes)
     (let ([s (read-raw-string who port vers what previously-read-bytes)])
@@ -331,10 +392,12 @@
     (cond
      [(vers . >= . 8)
       (let ([v (plain-read port)])
-        (unless (and (integer? v)
-                     (exact? v)
-                     (<= (- (expt 2 31)) v (expt 2 31)))
-          (read-error who "exact integer between [-2^31,2^31]" what port))
+        (unless (or (and (exact-integer? v)
+                         (<= (- (expt 2 31)) v (expt 2 31)))
+                    (and (real? v)
+                         (inexact? v)))
+          (read-error who "exact integer between [-2^31,2^31] or an inexact real"
+                      what port))
         v)]
      [else
       (let ([b (read-byte port)])

@@ -852,15 +852,30 @@
  (autosave-recover "Zurückholen")
  (autosave-unknown-filename "<<unbekannt>>")
 
+   ;; the ~a is replaced with a path
+  (autoload-file-changed-on-disk/with-name
+   "Die Datei:\n  ~a\nwurde auf der Platte geändert. Wollen Sie"
+   " den Puffer-Inhalt überschreiben, so dass er zur Datei auf der Platte passt?")
+  ;; One file per line is appended to the end of this message
+  (autoload-files-changed-on-disk/with-name
+   "Manche Dateien wurden auf der Platte geändert. Wollen Sie deren Puffer-Inhalte"
+   " überschreiben, so dass sie zu den Dateien auf der Platte passen?\n\nGeänderte Dateien:")
+  ;; the ~a is replaced with a path
+  (autoload-file-changed-on-disk-editor-dirty/with-name
+   "Die Datei:\n  ~a\nwurde auf der Platte geändert und ist editiert worden."
+   " Wollen Sie den Puffer-Inhalt überschreiben, so dass er zur Datei auf der Platte passt?")
+  ;; One file per line is appended to the end of this message
+  (autoload-files-changed-on-disk-editor-dirty/with-name
+   "Manche Dateien wurden auf der Platte geändert und sind editiert worden. Wollen Sie deren Puffer-Inhalte"
+   " überschreiben, so dass sie zu den Dateien auf der Platte passen?\n\nGeänderte Dateien:")
+  ;; One file per line is appended to the end of this message
+  (autoload-files-changed-on-disk-editor-dirty&clean/with-name
+   "Manche Dateien wurden auf der Platte geändert und sind editiert worden. Wollen Sie deren Puffer-Inhalte"
+   " überschreiben, so dass sie zu den Dateien auf der Platte passen?\n\nGeänderte Dateien (◇ bedeutet, dass die Datei editiert wurde):")
+  ;; a specialized version of dont-ask-again-always-current
+  (dont-ask-again-always-current/clean-buffer
+   "Nicht noch einmal fragen bei Dateien ohne ungespeicherte Editierungen (immer diese Auswahl verwendenden)")
 
-   ;;; autoloading
-  (autoload-file-changed-on-disk
-   "Die Datei auf der Platte hat sich geändert."
-   " Editor-Inhalt durch Datei auf der Platte ersetzen?")
-  (autoload-file-changed-on-disk-editor-dirty
-   "Die Datei hat sich auf der Platte geändert."
-   " Editor-Inhalt durch Datei auf der Platte ersetzen?"
-   " \n\nDabei könnten Änderungen verlorengehen.")
   (autoload-automatically-reload "Geänderte Dateien automatisch neu laden")
   (autoload-when-the-editor-isnt-dirty "Wenn der Editor nicht geändert wurde")
   (autoload-never-revert "Niemals")
@@ -1329,7 +1344,7 @@
  
  ;; test coverage
  (test-coverage-clear? "Änderungen im Definitionsfenster machen die Information über Testabdeckung ungültig. Weitermachen?")
- (test-coverage-clear-and-do-not-ask-again "Ja, und nicht nicht wieder fragen")
+ (test-coverage-clear-and-do-not-ask-again "Ja, und nicht noch einmal fragen")
  (test-coverage-ask? "Frage nach dem Löschen der Testabdeckungs-Information")
  (test-coverage-on "Durch Tests abgedeckt")
  (test-coverage-off "Durch Tests nicht abgedeckt")
@@ -1433,32 +1448,6 @@
  (happy-birthday-matthias "Happy Birthday, Matthias!")
  (happy-birthday-matthew "Happy Birthday, Matthew!")
  (happy-birthday-shriram "Happy Birthday, Shriram!")
-
- (mrflow-using-default-language-title "Standard-Sprache verwendet")
- (mrflow-using-default-language "Die momentan verwendete Sprache hat keine Typ-Tabelle für ihre Primitiva.  Verwende stattdessen R5RS-Scheme.")
- (mrflow-button-title "Analyse")
- ;(mrflow-unknown-style-delta-error-title "Unknown Box Style Delta")
- ;(mrflow-unknown-style-delta-error "Unknown box style delta: ~a")
- (mrflow-popup-menu-show-type "Typ einblenden")
- (mrflow-popup-menu-hide-type "Typ ausblenden")
- (mrflow-popup-menu-show-errors "Fehler einblenden")
- (mrflow-popup-menu-hide-errors "Fehler ausblenden")
- ;(mrflow-read-exception-title "Read Exception")
- ;(mrflow-read-exception "Read exception: ~a")
- ;(mrflow-syntax-exception-title "Syntax Exception")
- ;(mrflow-syntax-exception "Syntax exception: ~a")
- ;(mrflow-unknown-exception-title "Unknown Exception")
- ;(mrflow-unknown-exception "Unknown exception: ~a")
- ;(mrflow-language-primitives-error-title "Language Primitives Error")
- ;(mrflow-language-primitives-error "Wrong filename for language primitives types table: ~a")
-  
- (snips-and-arrows-popup-menu-tack-all-arrows "Alle Pfeile befestigen")
- (snips-and-arrows-popup-menu-untack-all-arrows "Alle Pfeile lösen")
- (snips-and-arrows-user-action-disallowed-title "Änderungen durch den Benutzer momentan nicht möglich")
- (snips-and-arrows-user-action-disallowed "In Editoren, die von Tools erzeugte Snips enthalten, sind Änderungen durch den Benutzer nicht möglich. Blenden Sie alle Snips aus, bevor Sie den Inhalt des Editors ändern.")
- ;(snips-and-arrows-changing-terms-warning-title "Changing terms will be undoable")
- ;(snips-and-arrows-changing-terms-warning "Changing terms in an editor containing snips cannot be undone.  You can either cancel this action, remove the snips, and try the change again, or you can continue with the change, in which case the change will not be undoable (all others changes made before and afterward will still be undoable though).")
- (snips-and-arrows-hide-all-snips-in-editor "Alle Snips im Editor ausblenden")
 
  (xml-tool-insert-xml-box "XML-Kasten einfügen")
  (xml-tool-insert-scheme-box "Racket-Kasten einfügen")
@@ -1685,9 +1674,9 @@
   ; section header
   (test-engine-signature-violations "Signaturverletzungen:")
 
-  ; part of one phrase "signature <at line …> to blame: procedure <at line …>
+  ; part of one phrase "signature <at line …> to blame: function <at line …>
   (test-engine-signature "Signatur")
-  (test-engine-to-blame "verantwortlich: Prozedur")
+  (test-engine-to-blame "verantwortlich: Funktion")
 
   (test-engine-no-signature-violations "Keine Signaturverletzungen.")
   (test-engine-1-signature-violation "1 Signaturverletzung.")
@@ -1969,7 +1958,22 @@
    " Standardpfad in PATH wurde für alle Benutzer konfiguriert, indem die Datei"
    " ~a hinzugefügt wurde und auf ~a zeigt. Sie können dies rückgängig machen, indem"
    " Sie ~a löschen.")
+  (adding-racket/bin-no-paths.d
+   "Es war nicht möglich, racket zum Pfad hinzuzufügen, weil /etc/paths.d nicht"
+   " existieren.\n\nEs könnte sein, dass folgender Befehl um Terminal funktioniert, um das"
+   " Verzeichnis zu erzeugen:\n"
+   "    sudo mkdir /etc/paths.d\nDann nochmal versuchen.")
+  (added-racket/bin-to-path/windows
+   "Es sollte jetzt möglich sein, racket und die anderen Tools von der"
+   " Kommandozeile aus zu benutzen.\n\nDer"
+   " Standard-%PATH% wurde konfiguriert, indem der Registry-Eintrag"
+   " HKEY_CURRENT_USER\\Environment\\Path"
+   " auf ~a und ~a zeigt.")
+  (didnt-add-racket/bin-to-path/unix
+   "DrRacket kann den Pfad unter Unix nicht verändern, aber falls Sie wissen,"
+   " wie Sie PATH selbst ändern können,"
+   " fügen Sie\n\n  ~a\n\n"
+   " hinzu.")
   (add-racket/bin-to-path "Kommandozeile für Racket konfigurieren…") ;; menu item label
-
   )
 

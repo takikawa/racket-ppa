@@ -5,7 +5,7 @@
          racket/path
          compiler/compilation-path         
          compiler/cm
-         errortrace/errortrace-lib)
+         "exn-gobbler.rkt")
 
 (provide (all-defined-out))
 
@@ -120,6 +120,9 @@
 ;; be created with (make-base-empty-namespace).
 ;; script-filename : path-string?
 (define (get-property-dicts script-filepath)
+  ; Ensure the script is compiled for the correct version of Racket
+  (compile-user-script script-filepath)
+  
   (define the-submod (make-submod-path script-filepath))
   (dynamic-require the-submod #f)
   (define-values (vars syntaxes) (module->exports the-submod))
@@ -174,29 +177,28 @@
 ;=== Compilation ===;
 ;===================;
 
-(define/contract (compile-user-scripts files)
-  (-> (listof path-string?) any)
+(define/contract (compile-user-script file)
+  (-> path-string? any)
 
-  ; Asynchronous?
-  #;(parameterize ([current-namespace (make-base-empty-namespace)])
-    (parallel-compile-files files))
-  
+  ;; Simple wrapper for now, but may be specialized for efficiency later.
+  (void)
+  #;(compile-user-scripts (list file)))
+
+(define/contract (compile-user-scripts files
+                                       #:exn-gobbler [gb (make-exn-gobbler "Compiling scripts")])
+  (->* [(listof path-string?)]
+       [#:exn-gobbler exn-gobbler?]
+       exn-gobbler?)
+
   ; Synchronous version:
-  (define err-str-port (open-output-string))
-  (parameterize ([current-error-port err-str-port]
-                 [current-namespace (make-base-empty-namespace)])
+  (parameterize ([current-namespace (make-base-empty-namespace)])
     (define cmc (make-caching-managed-compile-zo))
     (for ([f (in-list files)])
-      (with-handlers* ([exn:fail?
-                        (λ (e) (errortrace-error-display-handler (exn-message e) e))])
+      (with-handlers* ([exn:fail? (λ (e) (gobble gb e (path->string f)))])
         (time-info (format "Compiling ~a" (path->string f))
                    (cmc f)))))
-  (define err-str (get-output-string err-str-port))
-  (log-quickscript-info err-str)
-  ; Raise a single exception will all the error messages
-  (unless (string=? err-str "")
-    ; TODO: The context of this exception is now part of the error message. Remove it.
-    (error err-str)))
+  (log-quickscript-info (exn-gobbler->string gb))
+  gb)
 
 (define (zo-file src-file)
   (get-compilation-bytecode-file src-file #:modes '("compiled")))

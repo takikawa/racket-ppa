@@ -52,6 +52,7 @@
          "macro-unwind.rkt"
          "lifting.rkt"
          (only-in test-engine/syntax test-silence)
+         test-engine/test-markup
          
          ;; for breakpoint display
          ;; (commented out to allow nightly testing)
@@ -81,6 +82,12 @@
 
 ; go starts a stepper instance
 ; see provide stmt for contract
+;; a program-expander is called with an init function and an "iter" function
+;; that gets called with an expression and with a continuation that it may
+;; choose to invoke to continue expanding. The dynamic-requirer is used
+;; to dynamically require the user's module; this is required when using a
+;; #lang-based program, where the user's program expands into a single module
+;; definition.
 (define (go program-expander dynamic-requirer receive-result render-settings
             #:disable-error-handling? [disable-error-handling? #f]
             #:raw-step-receiver [raw-step-receiver #f])
@@ -496,13 +503,12 @@
   (define (step-through-expression expanded)
     (define annotated (a:annotate expanded break show-lambdas-as-lambdas?))
     (log-stepper-debug "expression successfully annotated")
-    (parameterize (;; I think this parameterization is pointless in the #lang world
-                   [test-silence #t])
-      (eval-syntax annotated)))
+    (eval-syntax annotated))
 
   ;; given a message and an exception, notify the output to display
   ;; the error (along with the held "before" step if present
-  (define (err-display-handler message exn)
+  (define (err-display-handler _message exn)
+    (define message (get-rewritten-error-message exn))
     (match maybe-held-exp
       [(struct skipped-step ())
        (receive-result (Error-Result message))]

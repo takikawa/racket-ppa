@@ -2,8 +2,8 @@
 @(require (for-label (only-in scribble/core content?)
                      scribble/struct
                      scriblib/autobib
-                     scheme/base
-                     scheme/contract))
+                     racket/base
+                     racket/contract))
 
 @title[#:tag "autobib"]{Bibliographies}
 
@@ -290,4 +290,12 @@ same way as by @racket[make-bib].}
   Defaults to @racket[#f].
   
   @history[#:added "1.5"]
+}
+
+@defparam[url-rendering rendering-function (-> string? any)]{
+  Accepts a URL as a string and renders it for use in a bibliography entry.
+  
+  Defaults to @racket[(λ (url) (link url (make-element 'url (list url))))].
+  
+  @history[#:added "1.39"]
 }

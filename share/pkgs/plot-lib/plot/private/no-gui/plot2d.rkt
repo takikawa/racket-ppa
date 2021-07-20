@@ -1,7 +1,7 @@
 #lang typed/racket/base
 
 (require typed/racket/draw typed/racket/class
-         (only-in typed/pict pict)
+         typed/pict
          "../common/type-doc.rkt"
          "../common/types.rkt"
          "../common/draw.rkt"
@@ -12,10 +12,11 @@
          "../common/nonrenderer.rkt"
          "../common/file-type.rkt"
          "../common/utils.rkt"
+         "../common/plotmetrics.rkt"
          "../plot2d/plot-area.rkt"
          "../plot2d/renderer.rkt"
          "plot2d-utils.rkt"
-         "evil.rkt"
+         (except-in "evil.rkt" dc)
          typed/racket/unsafe)
 
 (unsafe-provide plot/dc
@@ -26,6 +27,7 @@
 ;; ===================================================================================================
 ;; Plot to a given device context
 
+
 (:: plot/dc
     (->* [(Treeof (U renderer2d nonrenderer))
           (Instance DC<%>)
@@ -35,14 +37,16 @@
           #:title (U String pict #f)
           #:x-label (U String pict #f)
           #:y-label (U String pict #f)
+          #:aspect-ratio (U Nonnegative-Real #f)
           #:legend-anchor Legend-Anchor]
-         Void))
+         (Instance Plot-Metrics<%>)))
 (define (plot/dc renderer-tree dc x y width height
                  #:x-min [x-min #f] #:x-max [x-max #f]
                  #:y-min [y-min #f] #:y-max [y-max #f]
                  #:title [title (plot-title)]
                  #:x-label [x-label (plot-x-label)]
                  #:y-label [y-label (plot-y-label)]
+                 #:aspect-ratio [aspect-ratio (plot-aspect-ratio)]
                  #:legend-anchor [legend-anchor (plot-legend-anchor)])
   (define fail/pos (make-raise-argument-error 'plot/dc renderer-tree dc x y width height))
   (define fail/kw (make-raise-keyword-error 'plot/dc))
@@ -55,20 +59,24 @@
     [(and x-max (not (rational? x-max)))  (fail/kw "#f or rational" '#:x-max x-max)]
     [(and y-min (not (rational? y-min)))  (fail/kw "#f or rational" '#:y-min y-min)]
     [(and y-max (not (rational? y-max)))  (fail/kw "#f or rational" '#:y-max y-max)]
+    [(and aspect-ratio (not (and (rational? aspect-ratio) (positive? aspect-ratio))))
+     (fail/kw "#f or positive real" '#:aspect-ratio aspect-ratio)]
     [else
      (define renderer-list (get-renderer-list renderer-tree))
      (define bounds-rect (get-bounds-rect renderer-list x-min x-max y-min y-max))
      (define-values (x-ticks x-far-ticks y-ticks y-far-ticks)
        (get-ticks renderer-list bounds-rect))
      (define legend (get-legend-entry-list renderer-list bounds-rect))
-     
+
      (parameterize ([plot-title          title]
                     [plot-x-label        x-label]
                     [plot-y-label        y-label]
                     [plot-legend-anchor  legend-anchor])
        (define area (make-object 2d-plot-area%
-                      bounds-rect x-ticks x-far-ticks y-ticks y-far-ticks legend dc x y width height))
-       (plot-area area renderer-list))]))
+                      bounds-rect x-ticks x-far-ticks y-ticks y-far-ticks legend dc x y width height aspect-ratio))
+       (plot-area area renderer-list)
+
+       (new plot-metrics% [->metrics-object (λ () area)]))]))
 
 ;; ===================================================================================================
 ;; Plot to a bitmap
@@ -82,8 +90,9 @@
           #:title (U String pict #f)
           #:x-label (U String pict #f)
           #:y-label (U String pict #f)
+          #:aspect-ratio (U Nonnegative-Real #f)
           #:legend-anchor Legend-Anchor]
-         (Instance Bitmap%)))
+         (Instance (Class #:implements Bitmap% #:implements Plot-Metrics<%>))))
 (define (plot-bitmap renderer-tree
                      #:x-min [x-min #f] #:x-max [x-max #f]
                      #:y-min [y-min #f] #:y-max [y-max #f]
@@ -92,12 +101,16 @@
                      #:title [title (plot-title)]
                      #:x-label [x-label (plot-x-label)]
                      #:y-label [y-label (plot-y-label)]
+                     #:aspect-ratio [aspect-ratio (plot-aspect-ratio)]
                      #:legend-anchor [legend-anchor (plot-legend-anchor)])
-  (define bm (make-bitmap width height))
-  (define dc (make-object bitmap-dc% bm))
-  (plot/dc renderer-tree dc 0 0 width height
-           #:x-min x-min #:x-max x-max #:y-min y-min #:y-max y-max
-           #:title title #:x-label x-label #:y-label y-label #:legend-anchor legend-anchor)
+  (define bm : (Instance (Class #:implements Bitmap% #:implements Plot-Metrics<%>))
+    (make-object (plot-metrics-mixin bitmap%) (λ () pm) width height #f #t))
+  (define dc : (Instance DC<%>) (make-object bitmap-dc% bm))
+  (define pm : (Instance Plot-Metrics<%>)
+    (plot/dc renderer-tree dc 0 0 width height
+             #:x-min x-min #:x-max x-max #:y-min y-min #:y-max y-max
+             #:title title #:x-label x-label #:y-label y-label #:legend-anchor legend-anchor
+             #:aspect-ratio aspect-ratio))
   bm)
 
 ;; ===================================================================================================
@@ -112,8 +125,9 @@
           #:title (U String pict #f)
           #:x-label (U String pict #f)
           #:y-label (U String pict #f)
+          #:aspect-ratio (U Nonnegative-Real #f)
           #:legend-anchor Legend-Anchor]
-         Pict))
+         Plot-Pict))
 (define (plot-pict renderer-tree
                    #:x-min [x-min #f] #:x-max [x-max #f]
                    #:y-min [y-min #f] #:y-max [y-max #f]
@@ -122,14 +136,20 @@
                    #:title [title (plot-title)]
                    #:x-label [x-label (plot-x-label)]
                    #:y-label [y-label (plot-y-label)]
+                   #:aspect-ratio [aspect-ratio (plot-aspect-ratio)]
                    #:legend-anchor [legend-anchor (plot-legend-anchor)])
   (define saved-values (plot-parameters))
-  (dc (λ (dc x y)
-        (parameterize/group ([plot-parameters  saved-values])
-          (plot/dc renderer-tree dc x y width height
-                   #:x-min x-min #:x-max x-max #:y-min y-min #:y-max y-max
-                   #:title title #:x-label x-label #:y-label y-label #:legend-anchor legend-anchor)))
-      width height))
+  (define pm : (Option (Instance Plot-Metrics<%>)) #f)
+  (define P : pict
+    (dc (λ (dc x y)
+          (parameterize/group ([plot-parameters  saved-values])
+             (set! pm
+                   (plot/dc renderer-tree dc x y width height
+                            #:x-min x-min #:x-max x-max #:y-min y-min #:y-max y-max
+                            #:title title #:x-label x-label #:y-label y-label #:legend-anchor legend-anchor
+                            #:aspect-ratio aspect-ratio))))
+        width height))
+  (pict->pp P (assert pm)))
 
 ;; ===================================================================================================
 ;; Plot to a file
@@ -145,6 +165,7 @@
           #:title (U String pict #f)
           #:x-label (U String pict #f)
           #:y-label (U String pict #f)
+          #:aspect-ratio (U Nonnegative-Real #f)
           #:legend-anchor Legend-Anchor]
          Void))
 (define (plot-file renderer-tree output [kind 'auto]
@@ -155,6 +176,7 @@
                    #:title [title (plot-title)]
                    #:x-label [x-label (plot-x-label)]
                    #:y-label [y-label (plot-y-label)]
+                   #:aspect-ratio [aspect-ratio (plot-aspect-ratio)]
                    #:legend-anchor [legend-anchor (plot-legend-anchor)])
   (define real-kind
     (cond [(eq? kind 'auto)
@@ -167,7 +189,8 @@
        (plot-bitmap
         renderer-tree
         #:x-min x-min #:x-max x-max #:y-min y-min #:y-max y-max #:width width #:height height
-        #:title title #:x-label x-label #:y-label y-label #:legend-anchor legend-anchor))
+        #:title title #:x-label x-label #:y-label y-label #:legend-anchor legend-anchor
+        #:aspect-ratio aspect-ratio))
      (send bm save-file output real-kind (plot-jpeg-quality))]
     [(ps pdf svg)
      (define dc
@@ -181,7 +204,8 @@
      (plot/dc renderer-tree dc 0 0
               (/ width (inexact->exact x-scale)) (/ height (inexact->exact y-scale))
               #:x-min x-min #:x-max x-max #:y-min y-min #:y-max y-max
-              #:title title #:x-label x-label #:y-label y-label #:legend-anchor legend-anchor)
+              #:title title #:x-label x-label #:y-label y-label #:legend-anchor legend-anchor
+              #:aspect-ratio aspect-ratio)
      (send dc end-page)
      (send dc end-doc)])
   (void))

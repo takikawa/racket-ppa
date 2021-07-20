@@ -19,63 +19,186 @@
                         #:wrap-terminal-action wrap-terminal-action
                         #:package-to-offer package-to-offer)))
 
-(module add-racket-to-macosx-path racket/base
+(module add-racket-to-path racket/base
   (require string-constants 
            racket/system
            racket/gui/base
            racket/class
+           racket/list
            setup/dirs)
   
-  (provide add-menu-macosx-path-item)
+  (provide add-menu-path-item)
   
   (define authopen "/usr/libexec/authopen")
   (define paths.d "/etc/paths.d") 
   
+  (define (add-menu-path-item menu)
+    (case (system-type)
+      [(macosx) (add-menu-macosx-path-item menu)]
+      [(windows) (add-menu-windows-path-item menu)]
+      [(unix) (add-menu-unix-path-item menu)]))
+
+  (define (add-menu-unix-path-item menu)
+    (define console-bin-dir (find-console-bin-dir))
+    (when console-bin-dir
+      (new menu-item%
+           [label (string-constant add-racket/bin-to-path)]
+           [parent menu]
+           [callback (λ (x y)
+                       (message-box
+                        (string-constant drracket)
+                        (format (string-constant didnt-add-racket/bin-to-path/unix)
+                                console-bin-dir)))])))
+
   (define (add-menu-macosx-path-item menu)
-    (when (equal? (system-type) 'macosx)
-      (define bin-dir (find-console-bin-dir))
+    (define bin-dir (find-console-bin-dir))
       (when bin-dir
         (when (file-exists? authopen)
-          (when (directory-exists? paths.d)
-            (define paths.d/racket (build-path paths.d "racket"))
-            (define (add-racket/bin-to-path)
-              (define sp (open-output-string))
-              (define succeeded?
-                (parameterize ([current-input-port 
-                                (open-input-string 
-                                 (format "~a\n" bin-dir))]
-                               [current-output-port sp]
-                               [current-error-port sp])
-                  (system* authopen "-c" "-w" (path->string paths.d/racket))))
-              (define output (get-output-string sp))
-              (define basic-success-message
-                (format (string-constant added-racket/bin-to-path)
-                        paths.d/racket
+          (cond
+            [(directory-exists? paths.d)
+             (define paths.d/racket (build-path paths.d "racket"))
+             (define (add-racket/bin-to-path)
+               (define sp (open-output-string))
+               (define succeeded?
+                 (parameterize ([current-input-port
+                                 (open-input-string
+                                  (format "~a\n" bin-dir))]
+                                [current-output-port sp]
+                                [current-error-port sp])
+                   (system* authopen "-c" "-w" (path->string paths.d/racket))))
+               (define output (get-output-string sp))
+               (define basic-success-message
+                 (format (string-constant added-racket/bin-to-path)
+                         paths.d/racket
+                         bin-dir
+                         paths.d/racket))
+               (cond
+                 [(and (equal? output "") succeeded?)
+                  (message-box (string-constant drracket)
+                               basic-success-message)]
+                 [succeeded?
+                  (message-box (string-constant drracket)
+                               (string-append
+                                basic-success-message
+                                "\n\n" output))]
+                 [else
+                  (message-box (string-constant drracket)
+                               (string-append
+                                (format (string-constant adding-racket/bin-to-path-failed)
+                                        (if (equal? output "")
+                                            ""
+                                            (string-append "\n\n" output "\n\n"))
+                                        paths.d/racket
+                                        bin-dir)))])
+               (void))
+             (new menu-item%
+                  [label (string-constant add-racket/bin-to-path)]
+                  [parent menu]
+                  [callback (λ (x y) (add-racket/bin-to-path))])]
+            [else
+             (new menu-item%
+                  [label (string-constant add-racket/bin-to-path)]
+                  [parent menu]
+                  [callback (λ (x y)
+                              (message-box (string-constant drracket)
+                                           (string-constant adding-racket/bin-no-paths.d)
+                                           #f
+                                           '(stop ok)))])]))))
+
+  (define (add-menu-windows-path-item menu)
+    (new menu-item%
+         [label (string-constant add-racket/bin-to-path)]
+         [parent menu]
+         [callback (λ (x y) (add-path-if-not-present/windows))]))
+
+  (define error-name 'add-to-windows-path)
+
+  (define (add-path-if-not-present/windows)
+    (with-handlers ([exn:fail?
+                     (λ (x)
+                       (message-box (string-constant drracket)
+                                    (exn-message x)))])
+      (add-path-if-not-present/windows/raise-error)))
+
+  (define (add-path-if-not-present/windows/raise-error)
+    (define HKEY_CURRENT_USER "HKEY_CURRENT_USER")
+    (define Environment\\Path "Environment\\Path")
+    (define resource-bytes
+      (get-resource HKEY_CURRENT_USER Environment\\Path
+                    #:type 'bytes))
+    (unless (bytes? resource-bytes)
+      (raise-user-error error-name "could not read the resource ~a\\~a"
+                        HKEY_CURRENT_USER Environment\\Path))
+    (define converted-bytes (reecode resource-bytes "WTF-16" "WTF-8"))
+    (define no-null-bytes (regexp-replace #rx#"\0$" converted-bytes #""))
+    (define already-there (path-list-string->path-list no-null-bytes '()))
+    (define bin-dir (find-console-bin-dir))
+    (define user-console-dir (find-user-console-bin-dir))
+    (unless bin-dir
+      (raise-user-error error-name
+                        "could not find the path to add"))
+    (define has-bin-dir? (member bin-dir already-there))
+    (define has-user-console-dir? (member user-console-dir already-there))
+    (when (and has-bin-dir? has-user-console-dir?)
+      (raise-user-error error-name
+                        "directories already present\n  dir: ~a\n  dir: ~a"
                         bin-dir
-                        paths.d/racket))
-              (cond
-                [(and (equal? output "") succeeded?)
-                 (message-box (string-constant drracket)
-                              basic-success-message)]
-                [succeeded?
-                 (message-box (string-constant drracket)
-                              (string-append
-                               basic-success-message
-                               "\n\n" output))]
-                [else
-                 (message-box (string-constant drracket)
-                              (string-append
-                               (format (string-constant adding-racket/bin-to-path-failed)
-                                       (if (equal? output "")
-                                           ""
-                                           (string-append "\n\n" output "\n\n"))
-                                       paths.d/racket
-                                       bin-dir)))])
-              (void))
-            (new menu-item% 
-                 [label (string-constant add-racket/bin-to-path)]
-                 [parent menu]
-                 [callback (λ (x y) (add-racket/bin-to-path))])))))))
+                        (find-user-console-bin-dir)))
+    (define extended-path-bytes no-null-bytes)
+    (unless has-bin-dir?
+      (set! extended-path-bytes (bytes-append (path->bytes bin-dir) #";" extended-path-bytes)))
+    (unless has-user-console-dir?
+      (set! extended-path-bytes
+            (bytes-append (path->bytes user-console-dir)
+                          #";"
+                          (remove-addon-dir-extensions extended-path-bytes))))
+    (define to-be-written-bytes (reecode (bytes-append extended-path-bytes #"\0") "WTF-8" "WTF-16"))
+    (define result
+      (write-resource HKEY_CURRENT_USER
+                      Environment\\Path
+                      to-be-written-bytes
+                      #:type 'bytes/expand-string))
+    (unless result
+      (raise-user-error error-name
+                        "could not write the resource\n  section: ~s\n  entry: ~s\n  bytes: ~.s"
+                        HKEY_CURRENT_USER
+                        Environment\\Path
+                        to-be-written-bytes))
+    (message-box
+     (string-constant drracket)
+     (format (string-constant added-racket/bin-to-path/windows)
+             bin-dir
+             user-console-dir)))
+
+  (define (reecode resource-bytes from to)
+    (define converter (bytes-open-converter from to))
+    (define-values (converted-bytes amt termination)
+      (bytes-convert converter resource-bytes))
+    (bytes-close-converter converter)
+    (unless (equal? termination 'complete)
+      (raise-user-error error-name
+                        "could not convert from ~a to ~a\n  bytes: ~s"
+                        from to
+                        resource-bytes))
+    converted-bytes)
+
+  (define (remove-addon-dir-extensions bytes)
+    (define dirs (regexp-split #rx#";" bytes))
+    (define exploded-addon (explode-path (find-system-path 'addon-dir)))
+    (define (is-below-addon? dir)
+      (let loop ([addon exploded-addon]
+                 [candidate (explode-path (bytes->path dir))])
+        (cond
+          [(null? addon) #t]
+          [(null? candidate) #f]
+          [else (and (equal? (car addon) (car candidate))
+                     (loop (cdr addon) (cdr candidate)))])))
+    (define w/out-addon (for/list ([dir (in-list dirs)]
+                                   #:when (or (equal? dir #"")
+                                              (not (is-below-addon? dir))))
+                          dir))
+    (apply bytes-append (add-between w/out-addon #";")))
+  )
 
 (module key-bindings racket/base
   
@@ -208,12 +331,10 @@
           [prefix drracket:app: drracket:app^]
           [prefix help: drracket:help-desk^]
           [prefix drracket:multi-file-search: drracket:multi-file-search^]
-          [prefix drracket:init: drracket:init^]
+          [prefix drracket:init: drracket:init/int^]
           [prefix drracket: drracket:interface^])
   (export (rename drracket:frame/int^
                   [-mixin mixin]))
-  
-  (define last-keybindings-planet-attempt "")
   
   (define basics-mixin
     (mixin (frame:standard-menus<%>) (drracket:frame:basics<%>)
@@ -346,28 +467,6 @@
                                            this)])
                             (when filename
                               (add-keybindings-item/update-prefs filename)))))))
-                (new menu-item%
-                     (parent keybindings-menu)
-                     (label (string-constant keybindings-add-user-defined-keybindings/planet))
-                     (callback
-                      (λ (x y)
-                        (define planet-spec
-                          (get-text-from-user (string-constant drscheme)
-                                              (string-constant keybindings-type-planet-spec)
-                                              this
-                                              last-keybindings-planet-attempt))
-                        (when planet-spec
-                          (set! last-keybindings-planet-attempt planet-spec)
-                          (cond
-                            [(planet-string-spec? planet-spec)
-                             =>
-                             (λ (planet-sexp-spec)
-                               (add-keybindings-item/update-prefs planet-sexp-spec))]
-                            [else
-                             (message-box (string-constant drscheme)
-                                          (format (string-constant keybindings-planet-malformed-spec)
-                                                  planet-spec)
-                                          #:dialog-mixin frame:focus-table-mixin)])))))
                 (define ud (preferences:get 'drracket:user-defined-keybindings))
                 (unless (null? ud)
                   (new separator-menu-item% (parent keybindings-menu))
@@ -884,11 +983,11 @@
             (case rslt
               [(1) (send-url "https://lists.racket-lang.org/")]
               [(2) (send-url "https://github.com/racket/racket/issues/new")]))])
-    (add-menu-macosx-path-item menu)
+    (add-menu-path-item menu)
     (drracket:app:add-language-items-to-help-menu menu)))
 
 
-(require (submod "." add-racket-to-macosx-path)
+(require (submod "." add-racket-to-path)
          (submod "." key-bindings))
 
 

@@ -1,4 +1,4 @@
-#lang scheme/base
+#lang racket/base
 (require setup/collects
          racket/contract/base
          scribble/core
@@ -6,7 +6,7 @@
          scribble/decode
          scribble/html-properties
          scribble/latex-properties
-         (for-syntax scheme/base))
+         (for-syntax racket/base))
 
 (provide/contract
  [abstract 
@@ -38,7 +38,7 @@
        block?)]
  [category
   (->* (pre-content? pre-content? pre-content?)
-       ((or/c false/c pre-content?))
+       ((or/c #f pre-content?))
        content?)]
  [terms
   (->* () () #:rest (listof pre-content?)

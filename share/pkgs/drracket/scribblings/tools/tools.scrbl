@@ -572,6 +572,7 @@ Check Syntax collects the values of the
 @indexed-racket[syntax-property]s named
 @indexed-racket['disappeared-use],
 @indexed-racket['disappeared-binding],
+@indexed-racket['identifiers-as-disappeared-uses?],
 @indexed-racket['sub-range-binders], and
 @indexed-racket['mouse-over-tooltips] and uses them to add
 additional arrows to the program text. These properties are
@@ -690,6 +691,14 @@ side and then used at the use side:
 (depth-of my-sexp b)
 (depth-of my-sexp c)
 }
+
+For each syntax object that appears in the fully expanded
+program, DrRacket traverses it looking for identifiers and
+connecting them to likely binding occurrences. When it finds
+such identifiers it draws an arrow with a large question
+mark near the head of the arrow. But, if the syntax object
+has the property @racket['identifiers-as-disappeared-uses?],
+then the arrows are the normal arrow color.
 
 The value of the @racket['sub-range-binders] property is expected
 to be a tree of @racket[cons] pairs (in any configuration) whose leaves
@@ -894,6 +903,7 @@ above for details).
 @include-section["module-language-tools.scrbl"]
 @include-section["module-language.scrbl"]
 @include-section["tracing.scrbl"]
+@include-section["init.scrbl"]
 
 @section{Backwards Compatibility}
 
@@ -931,5 +941,6 @@ library; they are here for backwards compatibility and to provide links to the
 @(tools-include/drs "rep")
 @(tools-include/drs "unit")
 @(tools-include/drs "tracing")
+@(tools-include/drs "init")
 
 @index-section[]

@@ -1,5 +1,16 @@
 Stepper
 -------
+
+Changes for 8.2:
+
+Printing is now unified across the stepper and all
+implementations of teaching languages.
+
+Changes for 8.1:
+
+Stepper now enabled for #lang-based teaching languages.
+Mike Sperber did all of the work to make this happen!
+
 Changes for 8.0:
 
 Bug fix.

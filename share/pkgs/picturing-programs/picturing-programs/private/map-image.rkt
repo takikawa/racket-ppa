@@ -27,7 +27,7 @@
          racket/class
          2htdp/image
          (only-in htdp/error natural?)
-         (only-in mrlib/image-core render-image))
+         (only-in mrlib/image-core render-image string->color-object/f))
 ;(require picturing-programs/book-pictures)
 
 ;(require mrlib/image-core)
@@ -106,10 +106,10 @@
   (unless (or (string? name) (symbol? name))
     (error 'name->color 
            (format "Expected a string or symbol, but received ~v" name)))
-  (let [[result (send the-color-database find-color 
-                      (if (string? name)
-                          name
-                          (symbol->string name)))]]
+  (let [[result (string->color-object/f
+                 (if (string? name)
+                     name
+                     (symbol->string name)))]]
     (if result
         (color%->color result)
         #f)))
@@ -117,6 +117,8 @@
 (module+ test
          (check-expect (name->color "red") (make-color 255 0 0 255))
          (check-expect (name->color "plaid") #f)
+         ;; "grey" is normalized to "gray" by normalize-color-string
+         (check-expect (name->color "grey") (make-color 190 190 190 255))
          (check-error (name->color 7 "name->color: Expected a string or symbol, but received 7"))
          )
 
