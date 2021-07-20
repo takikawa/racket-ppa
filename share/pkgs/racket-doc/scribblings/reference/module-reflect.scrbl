@@ -288,7 +288,8 @@ Returns @racket[#t] if @racket[v] is a @tech{module path index},
 
 
 @defproc[(module-path-index-resolve [mpi module-path-index?]
-                                    [load? any/c #f])
+                                    [load? any/c #f]
+                                    [src-stx (or/c syntax? #f) #f])
          resolved-module-path?]{
 
 Returns a @tech{resolved module path} for the resolved module name,
@@ -301,11 +302,13 @@ on the kind of module paths encapsulated by @racket[mpi], the computed
 resolved name can depend on the value of
 @racket[current-load-relative-directory] or
 @racket[current-directory]. The @racket[load?] argument is propagated as
-the last argument to the @tech{module name resolver}.
+the last argument to the @tech{module name resolver}, while the
+@racket[src-stx] argument is propagated as the next-to-last argument.
 
-See @racket[resolve-module-path-index].
+See also @racket[resolve-module-path-index].
 
-@history[#:changed "6.90.0.16" @elem{Added the @racket[load?] optional argument.}]}
+@history[#:changed "6.90.0.16" @elem{Added the @racket[load?] optional argument.}
+         #:changed "8.2" @elem{Added the @racket[src-stx] optional argument.}]}
 
 
 @defproc[(module-path-index-split [mpi module-path-index?])
@@ -532,7 +535,9 @@ phase}, if it is not yet @tech{instantiate}d. The current @tech{module
 name resolver} may load a module declaration to resolve @racket[mod]
 (see @racket[current-module-name-resolver]); the path is resolved
 relative to @racket[current-load-relative-directory] and/or
-@racket[current-directory].
+@racket[current-directory]. Beware that concurrent @racket[dynamic-require]s
+in namespaces that share a @tech{module registry} can create race
+conditions; see also @racket[namespace-call-with-registry-lock].
 
 If @racket[provided] is @racket[#f], then the result is @|void-const|,
 and the module is not @tech{visit}ed (see @secref["mod-parse"]) or

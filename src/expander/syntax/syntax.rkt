@@ -58,6 +58,7 @@
                 props   ; properties
                 inspector) ; inspector for access to protected bindings
   #:authentic
+  #:sealed
   ;; Custom printer:
   #:property prop:custom-write
   (lambda (s port mode)
@@ -83,8 +84,10 @@
       (intern-properties
        (syntax-props s)
        (lambda ()
+         (define preserve-keys (serialize-state-preserve-prop-keys state))
          (for/hasheq ([(k v) (in-hash (syntax-props s))]
-                      #:when (preserved-property-value? v))
+                      #:when (or (preserved-property-value? v)
+                                 (hash-ref preserve-keys k #f)))
            (values k (check-value-to-preserve (plain-property-value v) syntax?))))
        state))
     (define tamper
@@ -150,7 +153,7 @@
                       (equal? (syntax-srcloc s) (syntax-state-srcloc stx-state)))
            (set-syntax-state-all-sharing?! stx-state #f)))]))
   #:property prop:reach-scopes
-  (lambda (s reach)
+  (lambda (s bulk-shifts reach)
     (define content* (syntax-content* s))
     (reach
      (if (modified-content? content*)
@@ -158,13 +161,16 @@
            (if (propagation? prop)
                ((propagation-ref prop) s)
                (modified-content-content content*)))
-         content*))
-    (reach (syntax-scopes s))
-    (reach (syntax-shifted-multi-scopes s))
+         content*)
+     bulk-shifts)
+    (define shifts (and bulk-shifts
+                        (append bulk-shifts (syntax-mpi-shifts s))))
+    (reach (syntax-scopes s) shifts)
+    (reach (syntax-shifted-multi-scopes s) shifts)
     (for ([(k v) (in-immutable-hash (syntax-props s))]
           #:when (preserved-property-value? v))
-      (reach (plain-property-value v)))
-    (reach (syntax-srcloc s))))
+      (reach (plain-property-value v) bulk-shifts))
+    (reach (syntax-srcloc s) bulk-shifts)))
 
 ;; Property to abstract over handling of propagation for
 ;; serialization; property value takes a syntax object and

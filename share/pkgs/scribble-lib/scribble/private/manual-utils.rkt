@@ -1,11 +1,11 @@
-#lang scheme/base
+#lang racket/base
 (require "../struct.rkt"
          "../base.rkt"
          (only-in "../core.rkt"
                    content?
                    style?)
          racket/contract/base
-         scheme/list)
+         racket/list)
 
 (provide doc-prefix)
 (provide/contract

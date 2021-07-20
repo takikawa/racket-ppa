@@ -1,4 +1,4 @@
-#lang scheme/base
+#lang racket/base
 (require "../decode.rkt"
          "../scheme.rkt"
          "../struct.rkt"
@@ -8,11 +8,12 @@
                   make-nested-flow)
          "../html-properties.rkt"
          racket/contract/base
-         (for-syntax scheme/base
+         (for-syntax racket/base
+                     syntax/parse
                      syntax/kerncase
                      syntax/boundmap)
-         (for-label scheme/base
-                    scheme/class))
+         (for-label racket/base
+                    racket/class))
 
 (define-struct (box-splice splice) ())
 
@@ -192,8 +193,8 @@
     (body-thunk))))
 
 (define-syntax (deftogether stx)
-  (syntax-case stx ()
-    [(_ (def ...) . body)
+  (syntax-parse stx
+    [(_ (def ...+) . body)
      (with-syntax ([((_ (lit ...) (var ...) decl) ...)
                     (map (lambda (def)
                            (let ([exp-def (local-expand 

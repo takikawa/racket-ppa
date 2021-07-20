@@ -360,7 +360,13 @@
                                                      (quasisyntax/loc in
                                                        (rename #,(import-src-mod-path import)
                                                                #,(import-local-id import)
-                                                               #,(import-src-sym import))))))
+                                                               #,(if (eq? (syntax-e (import-orig-stx import))
+                                                                          (import-src-sym import))
+                                                                     (import-orig-stx import)
+                                                                     (datum->syntax
+                                                                      #f
+                                                                      (import-src-sym import)
+                                                                      (import-orig-stx import))))))))
                                    imports)
                               (map (lambda (src)
                                      (mode-wrap (phase+ base-mode (import-source-mode src))
@@ -511,7 +517,7 @@
                                                               (import-mode import)
                                                               (import-req-mode import)
                                                               (import-orig-mode import)
-                                                              new-id))))
+                                                              orig-id))))
                                       imports))])
                          (if (null? l)
                              (raise-syntax-error
@@ -648,7 +654,7 @@
                                                        (import-mode import)
                                                        (import-req-mode import)
                                                        (import-orig-mode import)
-                                                       bind-id)
+                                                       orig-id)
                                           import))
                                   rename-imports)))
                          orig-ids bind-ids))])
@@ -763,7 +769,13 @@
                                        (export-local-id export)
                                        (quasisyntax/loc out
                                          (rename #,(export-local-id export)
-                                                 #,(export-out-sym export))))]
+                                                 #,(if (eq? (syntax-e (export-orig-stx export))
+                                                            (export-out-sym export))
+                                                       (export-orig-stx export)
+                                                       (datum->syntax
+                                                        #f
+                                                        (export-out-sym export)
+                                                        (export-orig-stx export))))))]
                                   [mode (export-mode export)])
                               (let ([phased
                                      (cond

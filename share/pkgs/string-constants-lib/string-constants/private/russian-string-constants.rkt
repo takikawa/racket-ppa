@@ -1209,32 +1209,6 @@ please adhere to these guidelines:
  (happy-birthday-matthew "С днем рождения, Метью!")
  (happy-birthday-shriram "С днем рождения, Шрирам!")
 
- (mrflow-using-default-language-title "Язык, используемый по умолчанию")
- (mrflow-using-default-language "В используемом языке не определена таблица типов для его примитивов. Используйте стандарт Scheme.")
- (mrflow-button-title "Анализировать")
- ;(mrflow-unknown-style-delta-error-title "Неизвестный стиль блока дельта")
- ;(mrflow-unknown-style-delta-error "Неизвестный стиль блока дельта: ~a")
- (mrflow-popup-menu-show-type "Показать тип")
- (mrflow-popup-menu-hide-type "Скрыть тип")
- (mrflow-popup-menu-show-errors "Показать ошибки")
- (mrflow-popup-menu-hide-errors "Скрыть ошибки")
- ;(mrflow-read-exception-title "Исключение при вводе")
- ;(mrflow-read-exception "Исключение при вводе: ~a")
- ;(mrflow-syntax-exception-title "Синтаксическое исключение")
- ;(mrflow-syntax-exception "Синтаксическое исключение: ~a")
- ;(mrflow-unknown-exception-title "Неизвестное исключение")
- ;(mrflow-unknown-exception "Неизвестное исключение: ~a")
- ;(mrflow-language-primitives-error-title "Ошибка в примитивах языка")
- ;(mrflow-language-primitives-error "Неправильное имя файла для таблицы типов примитивов языка: ~a")
-  
- (snips-and-arrows-popup-menu-tack-all-arrows "Соединить все стрелки")
- (snips-and-arrows-popup-menu-untack-all-arrows "Убрать все стрелки")
- (snips-and-arrows-user-action-disallowed-title "Пользовательские изменения в настоящее время запрещены")
- (snips-and-arrows-user-action-disallowed "Пользовательские изменения запрещены в редакторах, содержащих элементы из панели инструментов. Скройте все инструменты перед редактированием.")
- ;(snips-and-arrows-changing-terms-warning-title "Changing terms will be undoable")
- ;(snips-and-arrows-changing-terms-warning "Changing terms in an editor containing snips cannot be undone.  You can either cancel this action, remove the snips, and try the change again, or you can continue with the change, in which case the change will not be undoable (all others changes made before and afterward will still be undoable though).")
- (snips-and-arrows-hide-all-snips-in-editor "Скрыть все инструменты, вставленные в редактор")
-
  (xml-tool-insert-xml-box "Вставить блок XML")
  (xml-tool-insert-scheme-box "Вставить блок Racket")
  (xml-tool-insert-scheme-splice-box "Присоединить блок Racket")
@@ -1432,7 +1406,7 @@ please adhere to these guidelines:
   ; section header
   (test-engine-signature-violations "Нарушения соглашения:")
 
-  ; part of one phrase "signature <at line ...> to blame: procedure <...>
+  ; part of one phrase "signature <at line ...> to blame: function <...>
   (test-engine-signature "соглашение")
   (test-engine-to-blame "нарушено: процедура ")
 

@@ -38,9 +38,18 @@
            arm32le tarm32le arm64le tarm64le
            ppc32le tppc32le)
      'linux]
-    [(a6ob ta6ob i3ob ti3ob) 'openbsd]
-    [(a6fb ta6fb i3fb ti3fb) 'freebsd]
-    [(a6nb ta6nb i3nb ti3nb) 'netbsd]
+    [(a6fb ta6fb i3fb ti3fb
+           arm32fb tarm32fb arm64fb tarm64fb
+           ppc32fb tppc32fb)
+     'freebsd]
+    [(a6ob ta6ob i3ob ti3ob
+           arm32ob tarm32ob arm64ob tarm64ob
+           ppc32ob tppc32ob)
+     'openbsd]
+    [(a6nb ta6nb i3nb ti3nb
+           arm32nb tarm32nb arm64nb tarm64nb
+           ppc32nb tppc32nb)
+     'netbsd]
     [(a6s2 ta6s2 i3s2 ti3s2) 'solaris]
     [(i3qnx) 'qnx]
     [else (error 'system-type "internal error: unknown operating system")]))
@@ -51,6 +60,7 @@
             a6nt ta6nt
             a6le ta6le
             a6ob ta6ob
+            a6nb ta6nb
             a6fb ta6fb
             a6s2 ta6s2)
      'x86_64]
@@ -58,14 +68,27 @@
             i3nt ti3nt
             i3le ti3le
             i3ob ti3ob
+            i3nb ti3nb
             i3fb ti3fb
             i3s2 ti3s2
             i3qnx)
      'i386]
-    [(arm32le tarm32le) 'arm]
-    [(arm64le tarm64le arm64osx tarm64osx) 'aarch64]
+    [(arm32le tarm32le
+              arm32fb tarm32fb
+              arm32ob tarm32ob
+              arm32nb tarm32nb)
+     'arm]
+    [(arm64le tarm64le
+              arm64osx tarm64osx
+              arm64fb tarm64fb
+              arm64ob tarm64ob
+              arm64nb tarm64nb)
+     'aarch64]
     [(ppc32le tppc32le
-              ppc32osx tppc32osx)
+              ppc32osx tppc32osx
+              ppc32fb tppc32fb
+              ppc32ob tppc32ob
+              ppc32nb tppc32nb)
      'ppc]
     [else (error 'system-type "internal error: unknown architecture")]))
 

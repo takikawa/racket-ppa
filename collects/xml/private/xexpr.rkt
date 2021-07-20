@@ -1,11 +1,11 @@
 #lang racket/base
-(require racket/pretty
+(require racket/contract
          racket/list
-         racket/contract
-         "xexpr-core.rkt"
-         "structures.rkt"
+         racket/symbol
          "reader.rkt"
-         "writer.rkt")
+         "structures.rkt"
+         "writer.rkt"
+         "xexpr-core.rkt")
 
 ;; sorting is no longer necessary, since xt3d uses xml->zxexpr, which sorts.
 
@@ -110,7 +110,8 @@
 (define (write-xexpr x [out (current-output-port)]
                      #:insert-newlines? [insert-newlines? #f])
   (define short (empty-tag-shorthand))
-  (let loop ([x x])
+  (define unescaped (current-unescaped-tags))
+  (let loop ([x x] [escape? #t])
     (cond
       ; Element
       [(cons? x)
@@ -122,52 +123,55 @@
              (values (cadr x) (cddr x))
              (values null (cdr x))))
        ; Write opening tag
-       (write-string "<" out)
-       (display name out)
+       (write-bytes #"<" out)
+       (write-string (symbol->immutable-string name) out)
        ; Write attributes
        (for ([att (in-list attrs)])
-         (write-string " " out)
-         (display (car att) out)
-         (write-string "=\"" out)
+         (write-bytes #" " out)
+         (write-string (symbol->immutable-string (car att)) out)
+         (write-bytes #"=\"" out)
          (write-string/escape (cadr att) escape-attribute-table out)
-         (write-string "\"" out))
+         (write-bytes #"\"" out))
        (when insert-newlines?
          (newline out))
        ; Write end of opening tag
-       (if (and (null? content)
-                (case short
-                    [(always) #t]
-                    [(never) #f]
-                    [else (memq (lowercase-symbol name) short)]))
-           (write-string "/>" out)
-           (begin
-             (write-string ">" out)
-             ; Write body
-             (for ([xe (in-list content)])
-               (loop xe))
-             ; Write closing tag
-             (write-string "</" out)
-             (display name out)
-             (write-string ">" out)))]
+       (cond
+         [(and (null? content)
+               (case short
+                 [(always) #t]
+                 [(never) #f]
+                 [else (memq (lowercase-symbol name) short)]))
+          (write-bytes #"/>" out)]
+         [else
+          (write-bytes #">" out)
+          ; Write body
+          (for ([xe (in-list content)])
+            (loop xe (not (memq name unescaped))))
+          ; Write closing tag
+          (write-bytes #"</" out)
+          (write-string (symbol->immutable-string name) out)
+          (write-bytes #">" out)])]
       ; PCData
       [(string? x)
-       (write-string/escape x escape-table out)]
+       (if escape?
+           (write-string/escape x escape-table out)
+           (write-string x out))]
       ; Entities
       [(symbol? x)
-       (write-string "&" out)
-       (display x out)
-       (write-string ";" out)]
+       (write-bytes #"&" out)
+       (write-string (symbol->immutable-string x) out)
+       (write-bytes #";" out)]
       [(valid-char? x)
-       (write-string "&#" out)
-       (display x out)
-       (write-string ";" out)]
+       (write-bytes #"&#" out)
+       (write-string (number->string x) out)
+       (write-bytes #";" out)]
       ; Embedded XML
       [(cdata? x)
-       (write-xml-cdata x 0 void out)]
+       (write-xml-cdata x 0 'none out)]
       [(comment? x)
-       (write-xml-comment x 0 void out)]
+       (write-xml-comment x 0 'none out)]
       [(p-i? x)
-       (write-xml-p-i x 0 void out)]))
+       (write-xml-p-i x 0 'none out)]))
   (void))
 
 ;; given a string, encode it in the style required for attributes. Specifically,

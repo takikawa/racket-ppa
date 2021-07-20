@@ -269,6 +269,7 @@
                            (#:name . #f)
                            (#:only-name? . #f)
                            (#:authentic . #f)
+                           (#:sealed . #f)
                            (#:omit-define-values . #f)
                            (#:omit-define-syntaxes . #f))]
                  [nongen? #f])
@@ -349,10 +350,20 @@
                 (extend-config config '#:inspector #'#f)
                 nongen?)]
          [(eq? '#:authentic (syntax-e (car p)))
+          (when nongen?
+            (bad "cannot use" (car p) " for prefab structure type"))
           (when (lookup config '#:authentic)
             (bad "multiple" "#:authentic" "s" (car p)))
           (loop (cdr p)
                 (extend-config config '#:authentic #'#t)
+                nongen?)]
+         [(eq? '#:sealed (syntax-e (car p)))
+          (when nongen?
+            (bad "cannot use" (car p) " for prefab structure type"))
+          (when (lookup config '#:sealed)
+            (bad "multiple" "#:sealed" "s" (car p)))
+          (loop (cdr p)
+                (extend-config config '#:sealed #'#t)
                 nongen?)]
          [(or (eq? '#:constructor-name (syntax-e (car p)))
               (eq? '#:extra-constructor-name (syntax-e (car p))))
@@ -390,8 +401,12 @@
             (bad "multiple" insp-keys "s" (car p)))
           (when (pair? (lookup config '#:props))
             (bad "cannot use" (car p) " for a structure type with properties"))
+          (when (lookup config '#:sealed)
+            (bad "cannot use" (car p) " for a sealed structure type"))
           (when (lookup config '#:guard)
             (bad "cannot use" (car p) " for a structure type with a guard"))
+          (when (lookup config '#:authentic)
+            (bad "cannot use" (car p) " for an authentic structure type"))
           (loop (cdr p)
                 (extend-config config '#:inspector #''prefab)
                 #t)]
@@ -488,11 +503,16 @@
                                 (values (lookup config '#:inspector)
                                         (lookup config '#:super)
                                         (let ([l (lookup config '#:props)]
-                                              [a (lookup config '#:authentic)])
-                                          (if a
-                                              (cons (cons #'prop:authentic #'#t)
-                                                    l)
-                                              l))
+                                              [a? (lookup config '#:authentic)]
+                                              [s? (lookup config '#:sealed)])
+                                          (let ([l (if a?
+                                                       (cons (cons #'prop:authentic #'#t)
+                                                             l)
+                                                       l)])
+                                            (if s?
+                                                (cons (cons #'prop:sealed #'#t)
+                                                      l)
+                                                l)))
                                         (lookup config '#:auto-value)
                                         (lookup config '#:guard)
                                         (lookup config '#:constructor-name)
@@ -712,7 +732,7 @@
                                           (list
                                            (quote-syntax #,(prune struct:))
                                            (quote-syntax #,(prune (if (and ctor-name self-ctor?)
-                                                                      id
+                                                                      ctor-name
                                                                       make-)))
                                            (quote-syntax #,(prune ?))
                                            (list

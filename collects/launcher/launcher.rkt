@@ -79,33 +79,48 @@
                        v))
                     v)))
 
+(define (find-dir what get-dir get-extra-search-dirs exe fail-ok?)
+  (or (for/or ([dir (in-list (cons (get-dir) (get-extra-search-dirs)))])
+        (and (file-or-directory-type (build-path dir exe) #f)
+             dir))
+      (if fail-ok?
+          #f
+          (error 'find-dir "unable to locate ~s executable: ~a" what exe))))
+
+(define (find-lib-dir-for exe fail-ok?)
+  (find-dir "lib" find-lib-dir get-cross-lib-extra-search-dirs exe fail-ok?))
+(define (find-console-bin-dir-for exe fail-ok?)
+  (find-dir "console-bin" find-console-bin-dir get-console-bin-extra-search-dirs exe fail-ok?))
+(define (find-gui-bin-dir-for exe fail-ok?)
+  (find-dir "gui-bin" find-gui-bin-dir get-gui-bin-extra-search-dirs exe fail-ok?))
+
 (define (variant-available? kind cased-kind-name variant)
   (cond
    [(or (eq? 'unix (cross-system-type))
         (and (eq? 'macosx (cross-system-type))
              (eq? kind 'mzscheme)))
-    (let ([bin-dir (if (eq? kind 'mzscheme)
-                       (find-console-bin-dir)
-                       (find-lib-dir))])
-      (and bin-dir
-           (file-exists?
-            (build-path bin-dir
-                        (format "~a~a" 
-                                (case kind 
-                                  [(mzscheme) 'racket]
-                                  [(mred) 'gracket])
-                                (variant-suffix variant #f))))))]
+    (define exe (format "~a~a"
+                        (case kind
+                          [(mzscheme) 'racket]
+                          [(mred) 'gracket])
+                        (variant-suffix variant #f)))
+    (and (if (eq? kind 'mzscheme)
+             (find-console-bin-dir-for exe #t)
+             (find-lib-dir-for exe #t))
+         #t)]
    [(eq? 'macosx (cross-system-type))
-    ;; kind must be mred, because mzscheme case is caught above
-    (directory-exists? (build-path (find-lib-dir)
-                                   (format "~a~a.app"
-                                           cased-kind-name
-                                           (variant-suffix variant #f))))]
+    ;; `kind` must be 'mred, because 'mzscheme case is caught above
+    (and (find-lib-dir-for (format "~a~a.app"
+                                   cased-kind-name
+                                   (variant-suffix variant #f))
+                           #t)
+         #t)]
    [(eq? 'windows (cross-system-type))
-    (file-exists?
-     (build-path
-      (if (eq? kind 'mzscheme) (find-console-bin-dir) (find-lib-dir))
-      (format "~a~a.exe" cased-kind-name (variant-suffix variant #t))))]
+    (define exe (format "~a~a.exe" cased-kind-name (variant-suffix variant #t)))
+    (and (if (eq? kind 'mzscheme)
+             (find-console-bin-dir-for exe #t)
+             (find-lib-dir-for exe #t))
+         #t)]
    [else (error "unknown system type")]))
 
 (define (available-variants kind)
@@ -160,8 +175,13 @@
   (available-variants 'mzscheme))
 
 (define (install-template dest kind mz mr)
-  (define src (build-path (find-lib-dir)
-                          (if (eq? kind 'mzscheme) mz mr)))
+  (define src (for/or ([lib-dir (in-list (get-lib-search-dirs))])
+                (define p (build-path lib-dir
+                                      (if (eq? kind 'mzscheme) mz mr)))
+                (and (or (file-exists? p)
+                         (directory-exists? p))
+                     p)))
+  (unless src (error "expected launcher template not found"))
   (when (or (file-exists? dest)
             (directory-exists? dest)
             (link-exists? dest))
@@ -173,9 +193,6 @@
                               perms1)])
     (unless (equal? perms1 perms2)
       (file-or-directory-permissions dest perms2))))
-
-(define (script-variant? v)
-  (memq v '(script-3m script-cgc script-cs)))
 
 (define (add-file-suffix path variant mred?)
   (let ([s (variant-suffix
@@ -303,7 +320,7 @@
       (let ([p (append (map (lambda (x) 'up) (cdr d)) b)])
         (if (null? p) #f (apply build-path p))))))
 
-(define (make-relative-path-header dest bindir use-librktdir?)
+(define (make-relative-path-header dest bindir)
   ;; rely only on binaries in /usr/bin:/bin
   (define (has-exe? exe)
     (or (file-exists? (build-path "/usr/bin" exe))
@@ -355,10 +372,8 @@
          "cd \"$saveD\"\n"
          "\n"
          "bindir=\"$D"
-         (if use-librktdir?
-             ""
-             (let ([s (relativize bindir-explode dest-explode)])
-               (if s (string-append "/" (protect-shell-string s)) "")))
+         (let ([s (relativize bindir-explode dest-explode)])
+           (if s (string-append "/" (protect-shell-string s)) ""))
          "\"\n"
          "PATH=\"$saveP\"\n")
         ;; fallback to absolute path header
@@ -379,6 +394,14 @@
          [alt-exe-is-gracket? (and alt-exe
                                    (let ([m (assq 'exe-is-gracket aux)])
                                      (and m (cdr m))))]
+         [use-exe (or alt-exe
+                      (case kind
+                        [(mred) (if (eq? 'macosx (cross-system-type))
+                                    (format "GRacket~a.app/Contents/MacOS/Gracket~a"
+                                            (variant-suffix variant #t)
+                                            (variant-suffix variant #t))
+                                    (string-append "gracket" (variant-suffix variant #f)))]
+                        [(mzscheme) (string-append "racket" (variant-suffix variant #f))]))]
          [x-flags? (and (eq? kind 'mred)
                         (eq? (cross-system-type) 'unix)
                         (not (script-variant? variant)))]
@@ -414,7 +437,7 @@
          [bindir (if alt-exe
                      (let ([m (assq 'exe-is-gracket aux)])
                        (if (and m (cdr m))
-                           (find-lib-dir)
+                           (find-lib-dir-for use-exe #f)
                            (let ([p (path-only dest)])
                              (if (eq? 'macosx (cross-system-type))
                                  (let* ([cdir (or (and addon?
@@ -435,29 +458,19 @@
                                      [else rel]))
                                  p))))
                      (if (eq? kind 'mred)
-                         (find-gui-bin-dir)
-                         (find-console-bin-dir)))]
+                         (if alt-exe
+                             (find-gui-bin-dir-for use-exe #f)
+                             (find-lib-dir-for use-exe #f))
+                         (find-console-bin-dir-for use-exe #f)))]
          [as-relative? (let ([a (assq 'relative? aux)])
                          (and a (cdr a)))]
          [dir-finder
           (if as-relative?
-              (make-relative-path-header dest bindir use-librktdir?)
+              (make-relative-path-header dest bindir)
               (make-absolute-path-header bindir))]
          [exec (format
-                "exec \"${~a}/~a~a\" ~a"
-                (if use-librktdir?
-                    "librktdir"
-                    "bindir")
-                (or alt-exe (case kind
-                              [(mred) (if (eq? 'macosx (cross-system-type))
-                                          (format "GRacket~a.app/Contents/MacOS/Gracket"
-                                                  (variant-suffix variant #t))
-                                          "gracket")]
-                              [(mzscheme) "racket"]))
-                (if alt-exe
-                    ""
-                    (variant-suffix variant (and (eq? kind 'mred)
-                                                 (eq? 'macosx (cross-system-type)))))
+                "exec \"${bindir}/~a\" ~a"
+                use-exe
                 pre-str)]
          [args (format
                 "~a~a ${1+\"$@\"}\n"
@@ -477,21 +490,11 @@
         (newline)
         ;; comments needed to rehack launchers when paths change
         ;; (see setup/unixstyle-install.rkt)
+        (when use-librktdir?
+          (display "# unixstyle-install: use librktdir\n"))
         (display "# {{{ bindir\n")
         (display dir-finder)
         (display "# }}} bindir\n")
-        (when use-librktdir?
-          (display "# {{{ librktdir\n")
-          (display "librktdir=\"$bindir/")
-          (display (find-relative-path (if as-relative?
-                                           (simplify-path
-                                            (let-values ([(base name dir?) (split-path (path->complete-path dest))])
-                                              base))
-                                           bindir)
-                                       (simplify-path
-                                        (find-lib-dir))))
-          (display "\"\n")
-          (display "# }}} librktdir\n"))
         (newline)
         (display (assemble-exec exec args)))))
   (check-desktop aux dest))

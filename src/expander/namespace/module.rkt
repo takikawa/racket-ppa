@@ -270,7 +270,14 @@
         (let ([c-ns (or (namespace-root-namespace ns) ns)])
           (hash-ref (namespace-module-instances c-ns) name #f))
         (and complain-on-failure?
-             (error "no module instance found:" name 0-phase))))
+             (error 'require
+                    (string-append
+                     "namespace mismatch;\n"
+                     " reference to a module that is not instantiated\n"
+                     "  module: ~a\n"
+                     "  phase: ~a")
+                    name
+                    0-phase))))
   (if (and mi check-available-at-phase-level)
       (check-availablilty mi check-available-at-phase-level unavailable-callback)
       mi))
@@ -376,7 +383,8 @@
                                        #:skip-run? [skip-run? #f]
                                        #:otherwise-available? [otherwise-available? #t]
                                        #:seen [seen #hasheq()]
-                                       #:seen-list [seen-list null])
+                                       #:seen-list [seen-list null]
+                                       #:minimum-inspector [minimum-inspector #f])
   (unless (module-path-index? mpi)
     (error "not a module path index:" mpi))
   (define name (module-path-index-resolve mpi #t))
@@ -390,7 +398,8 @@
                           #:skip-run? skip-run?
                           #:otherwise-available? otherwise-available?
                           #:seen seen
-                          #:seen-list seen-list))
+                          #:seen-list seen-list
+                          #:minimum-inspector minimum-inspector))
   ;; If the module is cross-phase persistent, make sure it's instantiated
   ;; at phase 0 and registered in `ns` as phaseless; otherwise
   (cond
@@ -417,7 +426,8 @@
                               #:skip-run? skip-run? 
                               #:otherwise-available? otherwise-available?
                               #:seen [seen #hasheq()]
-                              #:seen-list [seen-list null])
+                              #:seen-list [seen-list null]
+                              #:minimum-inspector [minimum-inspector #f])
   (performance-region
    ['eval 'requires]
    ;; Nothing to do if we've run this phase already and made the
@@ -425,6 +435,14 @@
    (define m-ns (module-instance-namespace mi))
    (define instance-phase (namespace-0-phase m-ns))
    (define run-phase-level (phase- run-phase instance-phase))
+   (define inspector (module-inspector (module-instance-module mi)))
+   (when minimum-inspector
+     (unless (or (eq? inspector minimum-inspector)
+                 (inspector-superior? inspector minimum-inspector))
+       (error 'require
+              "cannot import module with weaker code inspector\n  module: ~a"
+              (module-path-index-resolve
+               (namespace-mpi (module-instance-namespace mi))))))
    (unless (and (or skip-run?
                     (eq? 'started (small-hash-ref (module-instance-phase-level-to-state mi) run-phase-level #f)))
                 (or (not otherwise-available?)
@@ -464,7 +482,8 @@
                                         #:skip-run? skip-run?
                                         #:otherwise-available? otherwise-available?
                                         #:seen (hash-set seen mi #t)
-                                        #:seen-list (cons mi seen-list))))
+                                        #:seen-list (cons mi seen-list)
+                                        #:minimum-inspector inspector)))
      
      ;; Run or make available phases of the module body:
      (unless (label-phase? instance-phase)

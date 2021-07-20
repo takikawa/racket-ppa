@@ -421,6 +421,12 @@
        (syntax-property (datum->syntax #'e (syntax-e #'e) #f #'e)
                         'inferred-name (void))]))
 
+  (define-for-syntax (hide-binding-name stx)
+    (syntax-property stx
+                     'inferred-name
+                     ;; void hides binding name
+                     (void)))
+
   ;; Similar to the above, when we copy source locations from an input
   ;; expression, we need to ensure the source location is copied even if there
   ;; is no source location on the input, but (quasi)syntax/loc doesn’t copy
@@ -1267,17 +1273,15 @@
                   [(keyword? (syntax-e (car l)))
                    (loop (cddr l)
                          (cdr ids)
-                         (cons (list (car ids) (syntax-property (cadr l)
-                                                                'inferred-name
-                                                                ;; void hides binding name
-                                                                (void)))
+                         (cons (list (car ids) (hide-binding-name (cadr l)))
                                bind-accum)
                          arg-accum
                          (cons (cons (car l) (car ids))
                                kw-pairs))]
                   [else (loop (cdr l)
                               (cdr ids)
-                              (cons (list (car ids) (car l)) bind-accum)
+                              (cons (list (car ids) (hide-binding-name (car l)))
+                                    bind-accum)
                               (cons (copy-properties (car ids) (car l)) arg-accum)
                               kw-pairs)])))))))
 
@@ -1346,7 +1350,8 @@
                                                  (if (not lifted?)
                                                      ;; caller didn't lift expressions out
                                                      (let ([ids (generate-temporaries args)])
-                                                       #`(let #,(map list ids args)
+                                                       #`(let #,(map list ids
+                                                                     (map hide-binding-name args))
                                                            #,(k ids)))
                                                      ;; caller already lifted expression:
                                                      (k args)))])
@@ -1877,7 +1882,18 @@
           (apply chaperone-procedure proc wrap-proc props)
           (begin
             (chaperone-arity-match-checking self-arg? name proc wrap-proc props)
-            (let*-values ([(kw-chaperone)
+            (let*-values ([(mark-prop) (let loop ([props props])
+                                         (cond
+                                           [(null? props) #f]
+                                           [(eq? (car props) impersonator-prop:application-mark)
+                                            (cadr props)]
+                                           [else (loop (cddr props))]))]
+                          [(chaperone-procedure/add-mark)
+                           (lambda (proc wrap-proc)
+                             (if mark-prop
+                                 (chaperone-procedure proc wrap-proc impersonator-prop:application-mark mark-prop)
+                                 (chaperone-procedure proc wrap-proc)))]
+                          [(kw-chaperone)
                            (let ([p (keyword-procedure-proc n-wrap-proc)])
                              ;; `extra-arg ...` will be `self-proc` if `self-arg?`:
                              (define-syntax gen-wrapper
@@ -1966,7 +1982,7 @@
                                          (if (okp? n-proc)
                                              ;; All keyword arguments are optional, so need to
                                              ;; chaperone as a plain procedure, too:
-                                             (chaperone-procedure proc wrap-proc)
+                                             (chaperone-procedure/add-mark proc wrap-proc)
                                              ;; Some keyword is required:
                                              proc)
                                          new-procedure-ref
@@ -2015,22 +2031,22 @@
                                          make-optional-keyword-method-impersonator
                                          make-optional-keyword-procedure-impersonator)
                                      (keyword-procedure-checker n-proc)
-                                     (chaperone-procedure (keyword-procedure-proc n-proc)
-                                                          kw-chaperone)
+                                     (chaperone-procedure/add-mark (keyword-procedure-proc n-proc)
+                                                                   kw-chaperone)
                                      (keyword-procedure-required n-proc)
                                      (keyword-procedure-allowed n-proc)
-                                     (chaperone-procedure (okp-ref n-proc 0)
-                                                          (okp-ref n-wrap-proc 0))
+                                     (chaperone-procedure/add-mark (okp-ref n-proc 0)
+                                                                   (okp-ref n-wrap-proc 0))
                                      n-proc)
                                     (chaperone-struct
                                      proc
                                      keyword-procedure-proc
                                      (lambda (self proc)
-                                       (chaperone-procedure proc kw-chaperone))
+                                       (chaperone-procedure/add-mark proc kw-chaperone))
                                      (make-struct-field-accessor okp-ref 0)
                                      (lambda (self proc)
-                                       (chaperone-procedure proc
-                                                            (okp-ref n-wrap-proc 0)))))
+                                       (chaperone-procedure/add-mark proc
+                                                                     (okp-ref n-wrap-proc 0)))))
                                 keyword-procedure-proc)]
                               [else
                                (values
@@ -2040,7 +2056,7 @@
                                            [mk (make-required (car name+fail) (cdr name+fail) (keyword-method? n-proc) #t)])
                                       (mk
                                        (keyword-procedure-checker n-proc)
-                                       (chaperone-procedure (keyword-procedure-proc n-proc) kw-chaperone)
+                                       (chaperone-procedure/add-mark (keyword-procedure-proc n-proc) kw-chaperone)
                                        (keyword-procedure-required n-proc)
                                        (keyword-procedure-allowed n-proc)
                                        n-proc))
@@ -2048,7 +2064,7 @@
                                      n-proc
                                      keyword-procedure-proc
                                      (lambda (self proc)
-                                       (chaperone-procedure proc kw-chaperone))))
+                                       (chaperone-procedure/add-mark proc kw-chaperone))))
                                 keyword-procedure-proc)]))])
               (if (null? props)
                   new-proc

@@ -982,6 +982,10 @@ int rktio_process_init(rktio_t *rktio)
      it's a per-thread setting on Linux, and we want SIGCHLD blocked everywhere. */
   block_sigchld();
 
+  /* We'll set a handler later (possibly after other threads start),
+     so register SIGCHLD now: */
+  rktio_will_modify_os_signal_handler(SIGCHLD);
+
   centralized_start_child_signal_handler();
 #endif
 
@@ -1525,6 +1529,8 @@ rktio_process_result_t *rktio_process(rktio_t *rktio,
 
         rktio_close_fds_after_fork(close_after_len, 0, 1, 2);
       }
+
+      rktio_restore_modified_signal_handlers();
 
       /* Set real CWD: */
       if (!rktio_set_current_directory(rktio, current_directory)) {

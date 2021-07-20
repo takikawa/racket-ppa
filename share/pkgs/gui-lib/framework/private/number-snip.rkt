@@ -1,22 +1,61 @@
 #lang racket/unit
 
   (require "sig.rkt"
+           "interfaces.rkt"
            mred/mred-sig
            racket/class
+           racket/pretty
            "../preferences.rkt"
            string-constants
-           file/convertible)
+           file/convertible
+           simple-tree-text-markup/text)
   
   (import mred^)
   (export (rename framework:number-snip/int^
                   [-snip-class% snip-class%]))
   (init-depend mred^)
-  
+
+  (define (number->string/snip number
+                               #:exact-prefix [exact-prefix 'never] #:inexact-prefix [inexact-prefix 'never]
+                               #:fraction-view [fraction-view #f])
+    (let ([fraction-view (or fraction-view (preferences:get 'framework:fraction-snip-style))])
+      (cond
+        [(or (inexact? number)
+             (integer? number)
+             (not (real? number)))
+         (number-markup->string number
+                                #:exact-prefix exact-prefix #:inexact-prefix inexact-prefix
+                                #:fraction-view fraction-view)]
+        [else
+         (case fraction-view
+           [(#f)
+            (make-fraction-snip number (eq? exact-prefix 'always))]
+           [(mixed improper)
+            (define snip (make-fraction-snip number (eq? exact-prefix 'always)))
+            (send snip set-fraction-view fraction-view)
+            snip]
+           [(decimal)
+            (make-repeating-decimal-snip number (or (eq? exact-prefix 'always)
+                                                    (eq? exact-prefix 'when-necessary)))])])))
+
+  (define (make-pretty-print-size #:exact-prefix [exact-prefix 'never] #:inexact-prefix [inexact-prefix 'never]
+                                  #:fraction-view [fraction-view #f])
+    (lambda (number display? port)
+      (let ([fraction-view (or fraction-view (preferences:get 'framework:fraction-snip-style))])
+        (cond
+          [(or (inexact? number)
+               (integer? number)
+               (not (real? number)))
+           (string-length (number-markup->string number
+                                                 #:exact-prefix exact-prefix #:inexact-prefix inexact-prefix
+                                                 #:fraction-view fraction-view))]
+          [else 1]))))
+    
   ;; make-repeating-decimal-snip : number boolean -> snip
   (define (make-repeating-decimal-snip number e-prefix?)
     (new number-snip%
-      [number number]
-      [decimal-prefix (if e-prefix? "#e" "")]))
+         [number number]
+         [decimal-prefix (if e-prefix? "#e" "")]))
   
   ;; make-fraction-snip : number boolean -> snip
   (define (make-fraction-snip number e-prefix?)
@@ -345,6 +384,17 @@
                           improper-nums
                           "/"
                           dens)])]))
+
+      ;; -> (or/c #f string?)
+      ;; returns a string if this would draw the same way as an ASCII version of the number
+      (define/public (get-fully-computed-finite-decimal-string)
+        (case fraction-view
+          [(mixed) #f]
+          [(decimal)
+           (and (not barred-portion)
+                (not clickable-portion)
+                unbarred-portion)]
+          [(improper) #f]))
       
       (define/override (write f)
         (send f put (string->bytes/utf-8 (number->string number)))
@@ -353,12 +403,13 @@
         (send f put (string->bytes/utf-8 (number->string expansions))))
       
       (define/override (copy)
-        (let ([snip (new number-snip%
-                      [number number]
-                      [decimal-prefix decimal-prefix])])
-          (send snip iterate (max 0 (- expansions 1))) ;; one iteration is automatic
-          (send snip set-fraction-view fraction-view)
-          snip))
+        (define snip
+          (new number-snip%
+               [number number]
+               [decimal-prefix decimal-prefix]))
+        (send snip iterate (max 0 (- expansions 1))) ;; one iteration is automatic
+        (send snip set-fraction-view fraction-view)
+        snip)
       
       (inherit get-style)
       
@@ -554,3 +605,33 @@
       (set-flags (cons 'handles-events (get-flags)))
       (set-snipclass number-snipclass)
       (iterate 1))) ;; calc first digits
+
+(define remove-decimal-looking-number-snips-on-insertion-mixin
+  (mixin ((class->interface text%)) ()
+    (inherit begin-edit-sequence end-edit-sequence
+             insert split-snip find-snip get-snip-position)
+    (define/augment (on-insert start len)
+      (inner (void) on-insert start len)
+      (begin-edit-sequence))
+    (define/augment (after-insert start len)
+      (inner (void) after-insert start len)
+      (split-snip start)
+      (let loop ([snip (find-snip start 'after-or-none)]
+                 [snip-pos start])
+        (when snip
+          (when (< snip-pos (+ start len))
+            (define str
+              (and (is-a? snip number-snip%)
+                   (send snip get-fully-computed-finite-decimal-string)))
+            (cond
+              [str
+               (send snip release-from-owner)
+               (insert str snip-pos snip-pos)
+               (define next-snip-pos (+ snip-pos (string-length str)))
+               (split-snip next-snip-pos)
+               (loop (find-snip next-snip-pos 'after-or-none)
+                     next-snip-pos)]
+              [else (loop (send snip next)
+                          (get-snip-position snip))]))))
+      (end-edit-sequence))
+    (super-new)))

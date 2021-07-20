@@ -6,6 +6,7 @@
          ffi/unsafe/custodian
          "../generic/interfaces.rkt"
          "../generic/common.rkt"
+         "../generic/ffi-common.rkt"
          "../generic/prepared.rkt"
          "../generic/sql-data.rkt"
          "ffi.rkt"
@@ -23,15 +24,17 @@
 ;; == Connection
 
 (define connection%
-  (class* statement-cache% (connection<%>)
+  (class* (ffi-connection-mixin statement-cache%) (connection<%>)
     (init db)
     (init-private db-spec ;; #f or (list path mode)
                   busy-retry-limit
                   busy-retry-delay)
+    (super-new)
 
     (define -db db)
     (define saved-tx-status #f) ;; set by with-lock, only valid while locked
-    (define creg #f) ;; custodian registration
+    (define creg (register-custodian-shutdown this shutdown-connection #:ordered? #t))
+    (register-finalizer this shutdown-connection)
 
     (sqlite3_extended_result_codes db #t)
 
@@ -50,7 +53,9 @@
              check-statement/tx
              dprintf
              prepare1
-             check/invalidate-cache)
+             check/invalidate-cache
+             get-use-os-thread?
+             sync-call-in-os-thread)
     (inherit-field DEBUG?)
 
     (define/override (call-with-lock fsym proc)
@@ -65,9 +70,12 @@
       (begin (start-atomic)
              (unless -db (end-atomic) (error/disconnect-in-lock 'sqlite3))
              (begin0 (let () e ...) (end-atomic))))
+    (define-syntax-rule (A* e ...)
+      (begin (start-atomic) (begin0 (let () e ...) (end-atomic))))
 
     (define/private (get-db fsym)
       (or -db (error/not-connected fsym)))
+    (define/override (-get-db) -db)
 
     (define/public (get-dbsystem) dbsystem)
     (define/override (connected?) (and -db #t))
@@ -103,10 +111,11 @@
                  [saved-last-insert-rowid
                   (and (null? info) (A (sqlite3_last_insert_rowid db)))]
                  [saved-total-changes
-                  (and (null? info) (A (sqlite3_total_changes db)))]
-                 [result
-                  (or cursor?
-                      (step* fsym db stmt #f +inf.0 pst))])
+                  (and (null? info) (A (sqlite3_total_changes db)))])
+            (define-values (result last-insert-rowid total-changes changes)
+              (if cursor?
+                  (values #t #f #f #f)
+                  (get-result fsym stmt #f +inf.0 pst (not (pair? info)))))
             (unless (eq? (get-tx-status) 'invalid)
               (set-tx-status! fsym (read-tx-status)))
             (unless cursor?
@@ -117,10 +126,10 @@
                    (cursor-result info pst (box #f))]
                   [else
                    (simple-result
-                    (let ([last-insert-rowid (A (sqlite3_last_insert_rowid db))])
+                    (let ()
                       ;; Not all statements clear last_insert_rowid, changes; so
                       ;; extra guards to make sure results are relevant.
-                      (define changes? (> (A (sqlite3_total_changes db)) saved-total-changes))
+                      (define changes? (> total-changes saved-total-changes))
                       `((insert-id
                          ;; We want to report insert-id if statement was a *successful* INSERT,
                          ;; but we can't check that directly. Instead, check if either
@@ -136,7 +145,7 @@
                          . ,(and (or (not (= last-insert-rowid saved-last-insert-rowid))
                                      (and changes? (eq? (send pst get-stmt-type) 'insert)))
                                  last-insert-rowid))
-                        (affected-rows . ,(if changes? (A (sqlite3_changes db)) 0)))))])))))
+                        (affected-rows . ,(if changes? changes 0)))))])))))
 
     (define/public (fetch/cursor fsym cursor fetch-size)
       (let ([pst (cursor-result-pst cursor)]
@@ -147,9 +156,11 @@
             (cond [(unbox end-box) #f]
                   [else
                    (let ([stmt (send pst get-handle)])
-                     (begin0 (step* fsym (get-db fsym) stmt end-box fetch-size pst)
-                       (when (unbox end-box)
-                         (send pst after-exec #f))))])))))
+                     (define-values (rows _lii _tc _c)
+                       (get-result fsym stmt end-box fetch-size pst #f))
+                     (when (unbox end-box)
+                       (send pst after-exec #f))
+                     rows)])))))
 
     (define/private (check-statement fsym stmt cursor?)
       (cond [(statement-binding? stmt)
@@ -178,47 +189,84 @@
              [else
               (error/internal* fsym "bad parameter value" '("value" value) param)])))
 
-    (define/private (step* fsym db stmt end-box fetch-limit pst)
+    (define/private (get-result who stmt end-box fetch-limit pst changes?)
       (with-handlers ([exn:fail?
                        (lambda (e)
-                         (A (sqlite3_reset stmt)
-                            (sqlite3_clear_bindings stmt))
+                         (A* (when -db (sqlite3_reset stmt) (sqlite3_clear_bindings stmt)))
                          (raise e))])
-        (let loop ([fetch-limit fetch-limit])
-          (if (zero? fetch-limit)
-              null
-              (let ([c (step fsym db stmt pst)])
-                (cond [c
-                       (cons c (loop (sub1 fetch-limit)))]
-                      [else
-                       (A (sqlite3_reset stmt)
-                          (sqlite3_clear_bindings stmt))
-                       (when end-box (set-box! end-box #t))
-                       null]))))))
+        ((cond [(get-use-os-thread?)
+                (define timeout (inexact->exact (ceiling (* 1000 busy-retry-delay))))
+                (sync-call-in-os-thread
+                 (lambda (db)
+                   (sqlite3_busy_timeout db timeout)
+                   (begin0 (get-result* who db stmt end-box fetch-limit pst changes?)
+                     (sqlite3_busy_timeout db 0))))]
+               [else (get-result* who #f stmt end-box fetch-limit pst changes?)]))))
 
-    (define/private (step fsym db stmt pst)
-      (let ([s (HANDLE fsym (A (sqlite3_step stmt)) pst)])
-        (cond [(= s SQLITE_DONE) #f]
-              [(= s SQLITE_ROW)
-               (let* ([column-count (A (sqlite3_column_count stmt))]
-                      [vec (make-vector column-count)])
-                 (for ([i (in-range column-count)])
-                   (vector-set! vec i
-                                (let ([type (A (sqlite3_column_type stmt i))])
-                                  (cond [(= type SQLITE_NULL)
-                                         sql-null]
-                                        [(= type SQLITE_INTEGER)
-                                         (A (sqlite3_column_int64 stmt i))]
-                                        [(= type SQLITE_FLOAT)
-                                         (A (sqlite3_column_double stmt i))]
-                                        [(= type SQLITE_TEXT)
-                                         (A (sqlite3_column_text stmt i))]
-                                        [(= type SQLITE_BLOB)
-                                         (A (sqlite3_column_blob stmt i))]
-                                        [else
-                                         (error/internal* fsym "unknown column type"
-                                                          "type" type)]))))
-                 vec)])))
+    (define/private (get-result* who os-db stmt end-box fetch-limit pst changes?)
+      ;; os-db is sqlite3_database if in OS thread, #f if in Racket thread
+      (define (call-as-fine-atomic thunk) (if os-db (thunk) (A (thunk))))
+      (define-syntax-rule (FA expr ...) (call-as-fine-atomic (lambda () expr ...)))
+      ;; step* : -> (-> (values (U Vector (-> Error)) Int/#f Nat/#f Nat/#f))
+      (define (step*)
+        (let loop ([fetch-limit fetch-limit] [acc null])
+          (cond [(zero? fetch-limit)
+                 (return (reverse acc))]
+                [(step)
+                 => (lambda (c)
+                      (cond [(procedure? c) c]
+                            [else (loop (sub1 fetch-limit) (cons c acc))]))]
+                [else
+                 (FA (sqlite3_reset stmt) (sqlite3_clear_bindings stmt))
+                 (when end-box (set-box! end-box #t))
+                 (return (reverse acc))])))
+      ;; step : -> (U #f Vector (-> Error))
+      (define (step)
+        (let loop ([iteration 0])
+          (define full-s (FA (sqlite3_step stmt)))
+          (define s (simplify-status full-s))
+          (cond [(= s SQLITE_DONE) #f]
+                [(= s SQLITE_ROW) (FA (-get-row who stmt))]
+                [(and (= s SQLITE_BUSY) (< iteration busy-retry-limit))
+                 ;; Normally, sleep and try again (cooperates w/ scheduler).
+                 ;; In os-thread, can't sleep; see sqlite3_busy_timeout above.
+                 (unless os-db (sleep busy-retry-delay))
+                 (loop (add1 iteration))]
+                [else (lambda () (handle-status who full-s pst))])))
+      ;; return : X -> (-> (values X Int/#f Nat/#f Nat/#f))
+      (define (return rows)
+        (define-values (last-insert-rowid total-changes changes)
+          (if changes?
+              (FA (values (sqlite3_last_insert_rowid (or os-db -db))
+                          (sqlite3_total_changes (or os-db -db))
+                          (sqlite3_changes (or os-db -db))))
+              (values #f #f #f)))
+        (lambda () (values rows last-insert-rowid total-changes changes)))
+      (step*))
+
+    ;; -get-row : Symbol stmt -> (U Vector (-> Error))
+    ;; PRE: in atomic mode
+    (define/private (-get-row fsym stmt)
+      (define column-count (sqlite3_column_count stmt))
+      (define vec (make-vector column-count))
+      (for ([i (in-range column-count)])
+        (define val
+          (let ([type (sqlite3_column_type stmt i)])
+            (cond [(= type SQLITE_NULL)
+                   sql-null]
+                  [(= type SQLITE_INTEGER)
+                   (sqlite3_column_int64 stmt i)]
+                  [(= type SQLITE_FLOAT)
+                   (sqlite3_column_double stmt i)]
+                  [(= type SQLITE_TEXT)
+                   (sqlite3_column_text stmt i)]
+                  [(= type SQLITE_BLOB)
+                   (sqlite3_column_blob stmt i)]
+                  [else
+                   (lambda ()
+                     (error/internal* fsym "unknown column type" "type" type))])))
+        (vector-set! vec i val))
+      vec)
 
     (define/override (classify-stmt sql) (classify-sl-sql sql))
 
@@ -260,27 +308,26 @@
                          (owner this))])
           pst)))
 
-    (define/override (disconnect* _politely?)
-      (super disconnect* _politely?)
-      (real-disconnect #f))
-
-    (define/public (real-disconnect from-custodian?)
-      (call-as-atomic
-       (lambda ()
-         (let ([db -db])
-           (when db
-             (set! -db #f)
-             ;; Unregister custodian shutdown, unless called from custodian.
-             (unless from-custodian? (unregister-custodian-shutdown this creg))
-             (set! creg #f)
-             ;; Free all of connection's prepared statements. This will leave
-             ;; pst objects with dangling foreign objects, so don't try to free
-             ;; them again---check that -db is not-#f.
-             (let ([stmts (hash-keys stmt-table)])
-               (hash-clear! stmt-table)
-               (for-each sqlite3_finalize stmts))
-             (HANDLE 'disconnect (sqlite3_close db))
-             (void))))))
+    (define/override (-get-do-disconnect) ;; PRE: atomic
+      ;; Save and clear fields
+      (define dont-gc this%)
+      (define db -db)
+      (define stmts (hash-keys stmt-table))
+      (set! -db #f)
+      (hash-clear! stmt-table)
+      ;; Unregister custodian shutdown, unless called from custodian.
+      (when creg (unregister-custodian-shutdown this creg))
+      (set! creg #f)
+      ;; Actually disconnect
+      (lambda ()
+        ;; Free all of connection's prepared statements. This will leave
+        ;; pst objects with dangling foreign objects, so don't try to free
+        ;; them again---check that -db is not-#f.
+        (for-each sqlite3_finalize stmts)
+        (HANDLE 'disconnect (sqlite3_close db))
+        (void/reference-sink dont-gc)
+        ;; FIXME: move handle here?
+        void))
 
     (define/public (get-base) this)
 
@@ -310,7 +357,9 @@
     ;; http://www.sqlite.org/lang_transaction.html
 
     (define/private (read-tx-status)
-      (not (A (sqlite3_get_autocommit -db))))
+      ;; Allow this to be called after custodian-disconnect so that in-progress
+      ;; query can complete.
+      (not (A* (if -db (sqlite3_get_autocommit -db) #t))))
 
     (define/override (start-transaction* fsym isolation option)
       ;; Isolation level can be set to READ UNCOMMITTED via pragma, but
@@ -390,14 +439,17 @@
 
     (define dont-gc null)
 
-    (define/public (unsafe-create-function who name arity proc)
+    (define/public (unsafe-create-function who name arity proc
+                                           #:flags [flags null])
       (define wrapped (wrap-fun name proc))
       (call-with-lock who
        (lambda ()
          (set! dont-gc (cons wrapped dont-gc))
-         (HANDLE who (A (sqlite3_create_function_v2 -db name (or arity -1) wrapped))))))
+         (HANDLE who (A (sqlite3_create_function_v2/scalar
+                         -db name (or arity -1) flags wrapped))))))
 
-    (define/public (unsafe-create-aggregate who name arity step final [init #f])
+    (define/public (unsafe-create-aggregate who name arity step final [init #f]
+                                            #:flags [flags null])
       (define aggbox (box init))
       (define wrapped-step (wrap-agg-step name step aggbox init))
       (define wrapped-final (wrap-agg-final name final aggbox init))
@@ -405,8 +457,8 @@
        (lambda ()
          (set! dont-gc (list* wrapped-step wrapped-final dont-gc))
          (HANDLE who
-                 (A (sqlite3_create_aggregate -db name (or arity -1)
-                                              wrapped-step wrapped-final))))))
+                 (A (sqlite3_create_function_v2/aggregate
+                     -db name (or arity -1) flags wrapped-step wrapped-final))))))
 
     ;; == Error handling
 
@@ -444,19 +496,16 @@
 
     (define/public (get-error-message)
       (A (sqlite3_errmsg -db)))
+    ))
 
-    ;; ----
-    (super-new)
-    (let ([shutdown
-           ;; Keep a reference to the class to keep all FFI callout objects
-           ;; (eg, sqlite3_close) used by its methods from being finalized.
-           (let ([dont-gc this%])
-             (lambda (obj)
-               (send obj real-disconnect #t)
-               ;; Dummy result to prevent reference from being optimized away
-               dont-gc))])
-      (register-finalizer this shutdown)
-      (set! creg (register-custodian-shutdown this shutdown)))))
+(define shutdown-connection
+  ;; Keep a reference to the class to keep all FFI callout objects
+  ;; (eg, sqlite3_close) used by its methods from being finalized.
+  (let ([dont-gc connection%])
+    (lambda (obj)
+      (send obj real-disconnect)
+      ;; Dummy result to prevent reference from being optimized away
+      dont-gc)))
 
 ;; ----------------------------------------
 

@@ -18,27 +18,30 @@
 
 ;; ----------------------------------------
 
-(import-class NSScrollView NSTableView NSTableColumn NSCell NSIndexSet)
+(import-class NSScrollView NSTableView NSTableColumn NSCell NSIndexSet NSFont)
 (import-protocol NSTableViewDataSource)
 
 (define NSLineBreakByTruncatingTail 4)
 
 (define during-selection-set? (make-parameter #f))
 
+;; 11.0 and up:
+(define NSTableViewStyleAutomatic 0)
+(define NSTableViewStyleFullWidth 1)
+(define NSTableViewStyleInset 2)
+(define NSTableViewStyleSourceList 3)
+(define NSTableViewStylePlain 4)
+
+(define default-cell-font
+  (and (version-11.0-or-later?)
+       (atomically
+        (let ([f (tell NSFont controlContentFontOfSize: #:type _CGFloat 0.0)])
+          (tellv f retain)
+          f))))
+
 (define-objc-class RacketTableView NSTableView
   #:mixins (FocusResponder KeyMouseResponder CursorDisplayer)
   [wxb]
-  [-a _id (preparedCellAtColumn: [_NSInteger column] row: [_NSInteger row])
-      (let ([wx (->wx wxb)])
-        (tell
-         (let ([c (tell (tell NSCell alloc) initTextCell: #:type _NSString 
-                        (if wx (send wx get-cell column row) "???"))]
-               [font (and wx (send wx get-cell-font))])
-           (tellv c setLineBreakMode: #:type _NSUInteger NSLineBreakByTruncatingTail)
-           (when font
-             (tellv c setFont: font))
-           c)
-         autorelease))]
   [-a _void (doubleClicked: [_id sender])
       (queue-window*-event wxb (lambda (wx) (send wx clicked 'list-box-dclick)))]
   [-a _void (tableViewSelectionDidChange: [_id aNotification])
@@ -56,13 +59,16 @@
   [-a _NSInteger (numberOfRowsInTableView: [_id view])
       (let ([wx (->wx wxb)])
         (send wx number))]
-  [-a _NSString (tableView: [_id aTableView]
-                            objectValueForTableColumn: [_id aTableColumn]
-                            row: [_NSInteger rowIndex])
-      (let ([wx (->wx wxb)])
-        (if wx
-            (send wx get-cell aTableColumn rowIndex)
-            "???"))])
+  [-a _id (tableView: [_id aTableView]
+                      objectValueForTableColumn: [_id aTableColumn]
+                      row: [_NSInteger rowIndex])
+      (define wx (->wx wxb))
+      (define text (if wx (send wx get-cell aTableColumn rowIndex) "???"))
+      (define cell (tell (tell NSCell alloc) initTextCell: #:type _NSString text))
+      (define font (and wx (send wx get-cell-font)))
+      (tellv cell setLineBreakMode: #:type _NSUInteger NSLineBreakByTruncatingTail)
+      (when font (tellv cell setFont: font))
+      (tell cell autorelease)])
 
 (define (remove-nth data i)
   (cond
@@ -106,6 +112,9 @@
             (tellv (tell col headerCell) setStringValue: #:type _NSString title)
             col)))
       (init-font content-cocoa font)
+      (when (version-11.0-or-later?)
+        (tellv content-cocoa setStyle: #:type _NSInteger NSTableViewStyleFullWidth)
+        (tellv content-cocoa setIntercellSpacing: #:type _NSSize (make-NSSize 1.0 1.0)))
       (values content-cocoa cols)))
   (set-ivar! content-cocoa wxb (->wxb this))
 
@@ -168,7 +177,8 @@
 
   (def/public-unimplemented get-label-font)
 
-  (define cell-font (and font (font->NSFont font)))
+  (define cell-font (or (and font (font->NSFont font))
+                        default-cell-font))
   (when cell-font
     (tellv content-cocoa setRowHeight: #:type _CGFloat
            (+ (tell #:type _CGFloat cell-font defaultLineHeightForFont) 2)))

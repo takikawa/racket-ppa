@@ -1,4 +1,4 @@
-#lang scheme/base
+#lang racket/base
 (require racket/contract/base
          "../decode.rkt"
          "../struct.rkt"
@@ -11,15 +11,15 @@
                #:key (or/c string? #f))
            #:rest (listof pre-content?) . ->* . element?)]
  [tech (() 
-        (#:doc (or/c module-path? false/c) 
-         #:tag-prefixes (or/c (listof string?) false/c) 
+        (#:doc (or/c module-path? #f) 
+         #:tag-prefixes (or/c (listof string?) #f) 
          #:key (or/c string? #f)
          #:normalize? any/c)
         #:rest (listof pre-content?) 
         . ->* . element?)]
  [techlink (() 
-            (#:doc (or/c module-path? false/c) 
-             #:tag-prefixes (or/c (listof string?) false/c) 
+            (#:doc (or/c module-path? #f) 
+             #:tag-prefixes (or/c (listof string?) #f) 
              #:key (or/c string? #f)
              #:normalize? any/c)
             #:rest (listof pre-content?) 

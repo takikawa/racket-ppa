@@ -40,6 +40,7 @@
           'collection-file-path collection-file-path
           'find-library-collection-paths find-library-collection-paths
           'find-library-collection-links find-library-collection-links
+          'find-compiled-file-roots find-compiled-file-roots
 
           'current-library-collection-paths current-library-collection-paths
           'current-library-collection-links current-library-collection-links
@@ -76,7 +77,8 @@
           'namespace-set-variable-value! namespace-set-variable-value!
           'namespace-undefine-variable!	namespace-undefine-variable!
           'namespace-mapped-symbols namespace-mapped-symbols 
-          'namespace-base-phase namespace-base-phase          
+          'namespace-base-phase namespace-base-phase
+          'namespace-call-with-registry-lock namespace-call-with-registry-lock
           
           'module-declared? module-declared?
           'module-predefined? module-predefined?

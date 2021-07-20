@@ -165,7 +165,7 @@ Like @racket[read-string], but reads bytes and produces a byte string.}
                        [in input-port? (current-input-port)]
                        [start-pos exact-nonnegative-integer? 0]
                        [end-pos exact-nonnegative-integer? (string-length str)])
-         (or/c exact-positive-integer? eof-object?)]{
+         (or/c exact-nonnegative-integer? eof-object?)]{
 
 Reads characters from @racket[in] like @racket[read-string], but puts
 them into @racket[str] starting from index @racket[start-pos]
@@ -197,7 +197,7 @@ not modified at indices @math{@racket[start-pos]+m} through
                       [in input-port? (current-input-port)]
                       [start-pos exact-nonnegative-integer? 0]
                       [end-pos exact-nonnegative-integer? (bytes-length bstr)])
-         (or/c exact-positive-integer? eof-object?)]{
+         (or/c exact-nonnegative-integer? eof-object?)]{
 Like @racket[read-string!], but reads bytes, puts them into a byte
 string, and returns the number of bytes read.
 
@@ -216,7 +216,7 @@ string, and returns the number of bytes read.
                             [in input-port? (current-input-port)]
                             [start-pos exact-nonnegative-integer? 0]
                             [end-pos exact-nonnegative-integer? (bytes-length bstr)])
-         (or/c exact-positive-integer? eof-object? procedure?)]{
+         (or/c exact-nonnegative-integer? eof-object? procedure?)]{
 
 Like @racket[read-bytes!], but returns without blocking after having
 read the immediately available bytes, and it may return a procedure for
@@ -254,7 +254,7 @@ is not reached.}
                                          [in input-port? (current-input-port)]
                                          [start-pos exact-nonnegative-integer? 0]
                                          [end-pos exact-nonnegative-integer? (bytes-length bstr)])
-         (or/c exact-positive-integer? eof-object? procedure?)]{
+         (or/c exact-nonnegative-integer? eof-object? procedure?)]{
 
 Like @racket[read-bytes-avail!], but breaks are enabled during the
 read (see also @secref["breakhandler"]). If breaking is disabled
@@ -301,7 +301,7 @@ Like @racket[peek-string], but @tech{peeks} bytes and produces a byte string.}
                        [in input-port? (current-input-port)]
                        [start-pos exact-nonnegative-integer? 0]
                        [end-pos exact-nonnegative-integer? (string-length str)])
-         (or/c exact-positive-integer? eof-object?)]{
+         (or/c exact-nonnegative-integer? eof-object?)]{
 Like @racket[read-string!], but for @tech{peek}ing, and with a
 @racket[skip-bytes-amt] argument like @racket[peek-string].}
 
@@ -310,7 +310,7 @@ Like @racket[read-string!], but for @tech{peek}ing, and with a
                       [in input-port? (current-input-port)]
                       [start-pos exact-nonnegative-integer? 0]
                       [end-pos exact-nonnegative-integer? (bytes-length bstr)])
-         (or/c exact-positive-integer? eof-object?)]{
+         (or/c exact-nonnegative-integer? eof-object?)]{
 Like @racket[peek-string!], but @tech{peeks} bytes, puts them into a byte
 string, and returns the number of bytes read.}
 
@@ -516,7 +516,19 @@ applied to @racket[in], then @exnraise[exn:fail:contract].}
 
 Returns @racket[#t] if @racket[(read-byte in)] would not block (at the
 time that @racket[byte-ready?] was called, at least).  Equivalent to
-@racket[(and (sync/timeout 0 in) #t)].}
+@racket[(and (sync/timeout 0 in) #t)].
+
+The @racket[byte-ready?] and @racket[char-ready?] functions are
+appropriate for relatively few applications, because ports are meant
+to support streaming data among concurrent producers and consumers;
+the fact that a byte or character is not ready in some instant does
+not necessarily mean that the producer is finished supplying data.
+(Also, if a port has multiple consumers, data might get consumed
+between the time that a given process uses @racket[byte-ready?] to
+poll the port and the time that it reads data from the port.) Using
+@racket[byte-ready?] makes sense if you are implementing your own
+scheduler or if you know that the port's implementation and use are
+particularly constrained.}
 
 
 @defproc[(char-ready? [in input-port? (current-input-port)])
@@ -525,7 +537,10 @@ time that @racket[byte-ready?] was called, at least).  Equivalent to
 Returns @racket[#t] if @racket[(read-char in)] would not block (at the
 time that @racket[char-ready?] was called, at least). Depending on the
 initial bytes of the stream, multiple bytes may be needed to form a
-UTF-8 encoding.}
+UTF-8 encoding.
+
+See @racket[byte-ready?] for a note on how @racket[byte-ready?] and
+@racket[char-ready?] are rarely the right choice.}
 
 
 @defproc*[([(progress-evt? [v any/c]) boolean?]

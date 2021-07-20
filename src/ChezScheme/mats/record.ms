@@ -755,11 +755,11 @@
              ...
              [else (syntax-error const
                      (format "unhandled value ~s" (constant const)))])]))
-       (define-syntax include
+       (define-syntax include ; defining `include` so that a ".def" can `include` other ".def"s
          (lambda (stx)
            (syntax-case stx ()
              [(k path)
-              #`(#,(datum->syntax #'k 'orig-include) #,(format "../s/~a" (datum path)))])))
+              #`(#,(datum->syntax #'k 'orig-include) #,(format "~a/../s/~a" *mats-dir* (datum path)))])))
        (include "machine.def")
      ; all this work for two constants:
       (define $fd-unaligned-integers (constant unaligned-integers))
@@ -2840,6 +2840,39 @@
 )
 
 (mat record-writer
+  (equal?
+    (with-output-to-string
+      (lambda ()
+        (define-record-type sp (fields lat))
+        (record-writer (type-descriptor sp)
+          (lambda (x p w) (w (sp-lat x) p)))
+        (pretty-print (list (make-sp 'ugh)))))
+    "(ugh)\n")
+  (error? ; 'sp is not an rtd
+    (with-output-to-string
+      (lambda ()
+        (define-record-type sp (fields lat))
+        (record-writer 'sp
+          (lambda (x p w) (w (sp-lat x) p))))))
+  (error? ; "oops" is not a procedure
+    (with-output-to-string
+      (lambda ()
+        (define-record-type sp (fields lat))
+        (record-writer (type-descriptor sp) "oops"))))
+  (error? ; ugh is not a textual output port
+    (with-output-to-string
+      (lambda ()
+        (define-record-type sp (fields lat))
+        (record-writer (type-descriptor sp)
+          (lambda (x p w) (w p (sp-lat x))))
+        (pretty-print (list (make-sp 'ugh))))))
+  (error? ; procedure not a textual output port
+    (with-output-to-string
+      (lambda ()
+        (define-record-type sp (fields lat))
+        (record-writer (type-descriptor sp)
+          (lambda (x p w) (w (sp-lat x) w)))
+        (pretty-print (list (make-sp 'ugh))))))
   (begin
     (define-record $froz (a b) ([c (+ a b)]))
     (define-record $fruz $froz (d))
@@ -6372,10 +6405,10 @@
                        (begin
                          (if (#3%record? b g6) (#2%void) (#3%$record-oops 'unbox b g6))
                          (#3%$object-ref 'scheme-object b ,fixnum?)))])
-             (if (#3%record? b g4) (#2%void) (#3%$record-oops 'set-box! b g4))
+             (if (#3%record-instance? b g4) (#2%void) (#3%$record-oops 'set-box! b g4))
              (#3%$object-set! 'scheme-object b ,fixnum? g7))
            (#2%list
-             (#3%record? b g5)
+             (#3%record-instance? b g5)
              (#3%$object-ref 'scheme-object b ,fixnum?))))))
     (equal?
       (let ()

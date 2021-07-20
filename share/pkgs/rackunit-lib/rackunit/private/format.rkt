@@ -12,6 +12,16 @@
 (module+ for-test
   (provide display-check-info-stack))
 
+;; continuation-mark-set-parameter-value : Continuation-Mark-Set (Parameterof X) -> X
+(module continuation-mark-set-parameter-value racket/base
+  (require (only-in '#%paramz parameterization-key))
+  (provide continuation-mark-set-parameter-value)
+  (define (continuation-mark-set-parameter-value marks param)
+    (call-with-parameterization
+     (continuation-mark-set-first marks parameterization-key)
+     param)))
+(require 'continuation-mark-set-parameter-value)
+
 ;; name-width : integer
 ;;
 ;; Number of characters we reserve for the check-info name column
@@ -76,13 +86,17 @@
          (define one-line-candidate
            (parameterize ([pretty-print-columns 'infinity])
              (format "~a:~a  ~a" name pad (info-value->string value))))
-         (if (<= (string-length one-line-candidate) (pretty-print-columns))
+         (if (short-line? one-line-candidate)
              one-line-candidate
              (format "~a:\n~a"
                      name
                      (string-indent
                       (info-value->string value)
                       multi-line-indent-amount)))]))
+
+(define (short-line? line)
+  (and (<= (string-length line) (pretty-print-columns))
+       (not (string-contains? line "\n"))))
 
 (define (nested-info->string nested verbose? name-width)
   (define infos (nested-info-values nested))
@@ -119,6 +133,11 @@
            (display-check-info-stack (exn:test:check-stack e)
                                      #:verbose? verbose?)
            (display-raised-message e)]
+          [(exn? e)
+           (display-raised-summary "ERROR" e)
+           (display-check-info-stack (exn-check-info e)
+                                     #:verbose? verbose?)
+           (display-raised-message e)]
           [else
            (display-raised-summary "ERROR" e)
            (display-check-info-stack (current-check-info)
@@ -140,3 +159,8 @@
       (parameterize ([error-print-context-length 0])
         ((error-display-handler) desc raised-value))
       (displayln desc)))
+
+;; exn-check-info : Exn -> (Listof Check-Info)
+(define (exn-check-info e)
+  (continuation-mark-set-parameter-value (exn-continuation-marks e)
+                                         current-check-info))

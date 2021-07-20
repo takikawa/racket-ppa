@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <time.h>
 
 #ifndef WIN32
 #include <unistd.h>
@@ -88,7 +89,7 @@ extern ptr S_vector PROTO((iptr n));
 extern ptr S_fxvector PROTO((iptr n));
 extern ptr S_flvector PROTO((iptr n));
 extern ptr S_bytevector PROTO((iptr n));
-extern ptr S_bytevector2 PROTO((ptr tc, iptr n, IBOOL immobile));
+extern ptr S_bytevector2 PROTO((ptr tc, iptr n, ISPC spc));
 extern ptr S_null_immutable_vector PROTO((void));
 extern ptr S_null_immutable_fxvector PROTO((void));
 extern ptr S_null_immutable_bytevector PROTO((void));
@@ -313,6 +314,7 @@ extern ptr S_gcd PROTO((ptr x, ptr y));
 extern ptr S_ash PROTO((ptr x, ptr n));
 extern ptr S_big_positive_bit_field PROTO((ptr x, ptr fxstart, ptr fxend));
 extern ptr S_integer_length PROTO((ptr x));
+extern ptr S_big_trailing_zero_bits PROTO((ptr x));
 extern ptr S_big_first_bit_set PROTO((ptr x));
 extern double S_random_double PROTO((U32 m1, U32 m2,
                U32 m3, U32 m4, double scale));
@@ -393,8 +395,8 @@ extern uptr S_maxmembytes PROTO((void));
 extern void S_resetmaxmembytes PROTO((void));
 extern void S_adjustmembytes PROTO((iptr amt));
 extern void S_move_to_chunk_list PROTO((chunkinfo *chunk, chunkinfo **pchunk_list));
-extern void S_thread_start_code_write(void);
-extern void S_thread_end_code_write(void);
+extern void S_thread_start_code_write PROTO((ptr tc, IGEN maxg, IBOOL current, void *hint, uptr hint_len));
+extern void S_thread_end_code_write PROTO((ptr tc, IGEN maxg, IBOOL current, void *hint, uptr hint_len));
 
 /* stats.c */
 extern void S_stats_init PROTO((void));
@@ -438,7 +440,7 @@ extern INT S_getpagesize(void);
 extern ptr S_LastErrorString(void);
 extern void *S_ntdlopen(const char *path);
 extern void *S_ntdlsym(void *h, const char *s);
-extern char *S_ntdlerror(void);
+extern ptr S_ntdlerror(void);
 extern int S_windows_flock(int fd, int operation);
 extern int S_windows_chdir(const char *pathname);
 extern int S_windows_chmod(const char *pathname, int mode);

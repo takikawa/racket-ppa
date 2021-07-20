@@ -1667,35 +1667,6 @@ please adhere to these guidelines:
   (happy-birthday-matthew "Happy Birthday, Matthew!")
   (happy-birthday-shriram "Happy Birthday, Shriram!")
 
-  (mrflow-using-default-language-title "Default Language Used")
-  (mrflow-using-default-language
-   "The language currently used does not have a type table"
-   " defined for its primitives. Using R5RS Scheme instead.")
-  (mrflow-button-title "Analyze")
-  ;(mrflow-unknown-style-delta-error-title "Unknown Box Style Delta")
-  ;(mrflow-unknown-style-delta-error "Unknown box style delta: ~a")
-  (mrflow-popup-menu-show-type "Show Type")
-  (mrflow-popup-menu-hide-type "Hide Type")
-  (mrflow-popup-menu-show-errors "Show Errors")
-  (mrflow-popup-menu-hide-errors "Hide Errors")
-  ;(mrflow-read-exception-title "Read Exception")
-  ;(mrflow-read-exception "Read exception: ~a")
-  ;(mrflow-syntax-exception-title "Syntax Exception")
-  ;(mrflow-syntax-exception "Syntax exception: ~a")
-  ;(mrflow-unknown-exception-title "Unknown Exception")
-  ;(mrflow-unknown-exception "Unknown exception: ~a")
-  ;(mrflow-language-primitives-error-title "Language Primitives Error")
-  ;(mrflow-language-primitives-error "Wrong filename for language primitives types table: ~a")
-
-  (snips-and-arrows-popup-menu-tack-all-arrows "Tack All Arrows")
-  (snips-and-arrows-popup-menu-untack-all-arrows "Untack All Arrows")
-  (snips-and-arrows-user-action-disallowed-title "User Changes Currently Disallowed")
-  (snips-and-arrows-user-action-disallowed
-   "User changes are disallowed in editors that contain tool-inserted snips."
-   " Hide all snips before modifying the content of the editor.")
-  ;(snips-and-arrows-changing-terms-warning-title "Changing terms will be undoable")
-  (snips-and-arrows-hide-all-snips-in-editor "Hide all snips in editor")
-
   (xml-tool-insert-xml-box "Insert XML Box")
   (xml-tool-insert-scheme-box "Insert Racket Box")
   (xml-tool-insert-scheme-splice-box "Insert Racket Splice Box")
@@ -1936,9 +1907,9 @@ please adhere to these guidelines:
   ; section header
   (test-engine-signature-violations "Signature violations:")
 
-  ; part of one phrase "signature <at line ...> to blame: procedure <...>
+  ; part of one phrase "signature <at line ...> to blame: function <...>
   (test-engine-signature "signature")
-  (test-engine-to-blame "to blame: procedure")
+  (test-engine-to-blame "to blame: function")
 
   (test-engine-no-signature-violations "No signature violations.")
   (test-engine-1-signature-violation "1 signature violation.")
@@ -2072,7 +2043,7 @@ please adhere to these guidelines:
   (spell-program-wrote-to-stderr-on-startup "The spell program (~a) printed an error message:")
   (spell-program-did-not-respond-after-some-seconds
    "The spell program (~a) did not respond after ~a seconds")
-  (spell-skip-to-next-misspelled-word "Skip to Next Mispelled Word") ;; menu item
+  (spell-skip-to-next-misspelled-word "Skip to Next Misspelled Word") ;; menu item
   (spell-suggest-corrections "Suggest Spelling Corrections…") ;; menu item
   (spell-correction-suggestions "Spelling Correction Suggestions") ;; dialog title
   (spell-choose-replacement-word "Select a replacement word") ;; label in dialog
@@ -2228,5 +2199,21 @@ please adhere to these guidelines:
    " default PATH has been configured for all users by adding the file"
    " ~a to point to ~a. You can undo this"
    " configuration by deleting ~a.")
+  (adding-racket/bin-no-paths.d
+   "Failed to add racket to the command line because /etc/paths.d does not"
+   " exist.\n\nIt may work to run this command in the terminal window to"
+   " create the directory:\n"
+   "    sudo mkdir /etc/paths.d\nand then try again.")
+  (added-racket/bin-to-path/windows
+   "You should now be able to use racket and its tools at the"
+   " command-line.\n\nThe"
+   " default %PATH% has been configured via the registry entry"
+   " HKEY_CURRENT_USER\\Environment\\Path"
+   " to point to ~a and ~a.")
+  (didnt-add-racket/bin-to-path/unix
+   "DrRacket cannot update your path under unix, but if you"
+   " know how to adjust your PATH yourself,"
+   " add\n\n  ~a\n\n"
+   " to it.")
   (add-racket/bin-to-path "Configure Command Line for Racket…") ;; menu item label
   )

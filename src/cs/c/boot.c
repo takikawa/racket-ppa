@@ -1,5 +1,8 @@
 #ifndef WIN32
 # include <unistd.h>
+#else
+# include <io.h>
+# include <windows.h>
 #endif
 #include <stdio.h>
 #include <fcntl.h>
@@ -26,6 +29,24 @@
 
 #ifndef BOOT_O_BINARY
 # define BOOT_O_BINARY 0
+#endif
+
+#ifdef WIN32
+int boot_open(const char *path, int flags) {
+  int sz = MultiByteToWideChar(CP_UTF8, 0, path, -1, NULL, 0);
+  wchar_t *w_path = malloc(sz * sizeof(wchar_t));
+  
+  MultiByteToWideChar(CP_UTF8, 0, path, -1, w_path, sz);
+
+  {
+    int r = _wopen(w_path, flags);
+
+    free(w_path);  
+    return r;
+  }
+}
+#else
+# define boot_open open
 #endif
 
 static ptr Sbytevector(char *s)
@@ -81,21 +102,9 @@ static void run_cross_server(char **argv)
   (void)Scall1(c, a);
 }
 
-static void racket_exit(int v)
-{
-  exit(v);
-}
-
-static int racket_errno()
-{
-  return errno;
-}
-
 static void init_foreign()
 {
 # include "rktio.inc"
-  Sforeign_symbol("racket_exit", (void *)racket_exit);
-  Sforeign_symbol("racket_errno", (void *)racket_errno);
 }
 
 void racket_boot(racket_boot_arguments_t *ba)
@@ -108,6 +117,8 @@ void racket_boot(racket_boot_arguments_t *ba)
   if (ba->dll_open)
     rktio_set_dll_procs(ba->dll_open, ba->dll_find_object, ba->dll_close);
 #endif
+
+  Sscheme_register_signal_registerer(rktio_will_modify_os_signal_handler);
 
   Sscheme_init(NULL);
 
@@ -131,13 +142,13 @@ void racket_boot(racket_boot_arguments_t *ba)
     close_fd2 = 1;
 #endif
 
-    fd1 = open(ba->boot1_path, O_RDONLY | BOOT_O_BINARY);
+    fd1 = boot_open(ba->boot1_path, O_RDONLY | BOOT_O_BINARY);
     Sregister_boot_file_fd_region("petite", fd1, ba->boot1_offset, ba->boot1_len, close_fd1);
 
     if (!close_fd1)
       fd2 = fd1;
     else
-      fd2 = open(ba->boot2_path, O_RDONLY | BOOT_O_BINARY);
+      fd2 = boot_open(ba->boot2_path, O_RDONLY | BOOT_O_BINARY);
     Sregister_boot_file_fd_region("scheme", fd2, ba->boot2_offset, ba->boot2_len, close_fd2);
 
 # ifdef RACKET_AS_BOOT
@@ -147,7 +158,7 @@ void racket_boot(racket_boot_arguments_t *ba)
       if (!close_fd2)
         fd3 = fd2;
       else
-        fd3 = open(ba->boot3_path, O_RDONLY | BOOT_O_BINARY);
+        fd3 = boot_open(ba->boot3_path, O_RDONLY | BOOT_O_BINARY);
       Sregister_boot_file_fd_region("racket", fd3, ba->boot3_offset, ba->boot3_len, 1);
     }
 # endif
@@ -159,7 +170,7 @@ void racket_boot(racket_boot_arguments_t *ba)
     /* Don't run Racket as usual. Instead, load the patch
        file and run `serve-cross-compile` */
     run_cross_server(ba->argv);
-    racket_exit(0);
+    exit(0);
   }
 
   {
@@ -181,9 +192,10 @@ void racket_boot(racket_boot_arguments_t *ba)
     l = Scons(Sbytevector(ba->cs_compiled_subdir ? "true" : "false"), l);
     sprintf(segment_offset_s, "%ld", ba->segment_offset);
     l = Scons(Sbytevector(segment_offset_s), l);
+    l = Scons(Sbytevector(ba->k_file ? (char *)ba->k_file : (char *)ba->exec_file), l);
     l = Scons(Sbytevector(ba->config_dir ? (char *)ba->config_dir : "etc"), l);
     l = Scons(parse_coldirs(ba->collects_dir ? (char *)ba->collects_dir : ""), l);
-    l = Scons(Sbytevector(ba->run_file ? (char *)ba->run_file : (char *)ba->exec_file ), l);
+    l = Scons(Sbytevector(ba->run_file ? (char *)ba->run_file : (char *)ba->exec_file), l);
     l = Scons(Sbytevector((char *)ba->exec_file), l);
     l = Scons(Sbytevector(ba->exit_after ? "false" : "true"), l);
 

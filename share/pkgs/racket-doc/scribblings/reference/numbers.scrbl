@@ -71,7 +71,7 @@ or @racketvalfont{-inf.f}, depending on the sign and precision of the dividend. 
 is @racket[eqv?] to itself, and @racketvalfont{+nan.f} is similarly @racket[eqv?] but 
 not @racket[=] to itself. Conversely, @racket[(= 0.0 -0.0)] is
 @racket[#t], but @racket[(eqv? 0.0 -0.0)] is @racket[#f], and the 
-same for @racket[0.0f0] and @racket[-0.0f0] (which are single-precision variants). The datum
+same for @racketvalfont{0.0f0} and @racketvalfont{-0.0f0} (which are single-precision variants). The datum
 @racketvalfont{-nan.0} refers to the same constant as @racket[+nan.0],
 and @racketvalfont{-nan.f} is the same as @racketvalfont{+nan.f}.
 
@@ -100,7 +100,7 @@ when they are @racket[eqv?].
 
 Two real numbers are @racket[eqv?] when they are both inexact with the same precision or both
 exact, and when they are @racket[=] (except for @racket[+nan.0], @racketvalfont{+nan.f},
-@racket[+0.0], @racket[+0.0f0], @racket[-0.0], and @racket[-0.0f0], as noted above). 
+@racket[+0.0], @racketvalfont{+0.0f0}, @racket[-0.0], and @racketvalfont{-0.0f0}, as noted above).
 Two complex numbers are @racket[eqv?] when their real and imaginary parts are @racket[eqv?].
 Two numbers are @racket[equal?] when they are @racket[eqv?].
 
@@ -602,6 +602,10 @@ If @racket[z] is exact @racket[0], the result is as follows:
  @item{otherwise --- result is @racket[0]}
 ]
 
+If @racket[w] is exact @racket[1/2], the result is the same as @racket[(sqrt z)],
+which can be exact. Other fractional powers are not treated specially in this manner:
+@mz-examples[(expt 9 1/2) (expt 9 0.5) (expt 16 1/4) (expt 16 0.25)]
+
 Further special cases when @racket[w] is a @tech{real number}:
 @margin-note*{These special cases correspond to @tt{pow} in C99 @cite["C99"],
 except when @racket[z] is negative and @racket[w] is a not an
@@ -943,8 +947,8 @@ In each case, the number is provided by the given pseudo-random number
 generator (which defaults to the current one, as produced by
 @racket[current-pseudo-random-generator]). The generator maintains an
 internal state for generating numbers. The random number generator
-uses a 54-bit version of L'Ecuyer's MRG32k3a algorithm
-@cite["L'Ecuyer02"].
+uses L'Ecuyer's MRG32k3a algorithm @cite["L'Ecuyer02"] that has a
+state space of practically 192 bits.
 
 @history[#:changed "6.4"]{Added support for ranges.}}
 

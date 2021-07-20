@@ -97,7 +97,6 @@ then it may be treated as if a sequence transformer such as
 @racket[in-list] was used, unless the @racket[seq-expr] has a true
 value for the @indexed-racket['for:no-implicit-optimization] syntax
 property; in most cases this improves performance.
-@history[#:changed "7.8.0.11" @elem{Added support for implicit optimization.}]}
 
 @examples[
 (for ([i '(1 2 3)]
@@ -128,7 +127,8 @@ property; in most cases this improves performance.
   (error "doesn't get here"))
 ]
 
-@history[#:changed "6.7.0.4" @elem{Added support for the optional second result.}]}
+@history[#:changed "6.7.0.4" @elem{Added support for the optional second result.}
+         #:changed "7.8.0.11" @elem{Added support for implicit optimization.}]}
 
 @defform[(for/list (for-clause ...) body-or-break ... body)]{ Iterates like
 @racket[for], but that the last expression in the @racket[body]s must
@@ -374,19 +374,19 @@ terminates, if a @racket[result-expr] is provided then the result of the
 ]
 
 The binding and evaluation order of @racket[accum-id]s and
-@racket[init-expr]s does not follow the textual, left-to-right order
-relative to the @racket[for-clause]s . Instead, the sequence
-expressions in @racket[for-clause]s that determine the outermost
-iteration are evaluated first, the associated identifiers are bound,
-and then the @racket[init-expr]s are evaluated and the
-@racket[accum-id]s are bound. One consequence is that the
-@racket[accum-id]s are not bound in @racket[for-clause]s for the
-outermost initialization. Another consequence is that when a
-@racket[accum-id] is used as a @racket[for-clause] binding for the
-outermost iteration, the @racket[for-clause] binding is shadowed in
-the loop body (even though, syntactically, a @racket[for-clause] is
-closer to the body). A fresh variable for each @racket[accum-id] (at a
-fresh location) is bound to in each nested iteration created by a
+@racket[init-expr]s do not completely follow the textual,
+left-to-right order relative to the @racket[for-clause]s. Instead, the
+sequence expressions in @racket[for-clause]s that determine the
+outermost iteration are evaluated first, then the @racket[init-expr]s
+are evaluated and the @racket[accum-id]s are bound, and finally the
+outermost iteration's identifiers are bound. One consequence is that
+the @racket[accum-id]s are not bound in @racket[for-clause]s for the
+outermost initialization. At the same time, when a @racket[accum-id]
+is used as a @racket[for-clause] binding for the outermost iteration,
+the @racket[for-clause] binding shadows the @racket[accum-id] binding
+in the loop body (which is what you would expect syntactically).
+A fresh variable for each @racket[accum-id] (at a
+fresh location) is bound in each nested iteration that is created by a
 later group for @racket[for-clause]s (after a @racket[#:when] or
 @racket[#:unless], for example).
 

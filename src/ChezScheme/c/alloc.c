@@ -33,9 +33,10 @@ void S_alloc_init() {
         for (g = 0; g <= static_generation; g++) {
             S_G.bytes_of_generation[g] = 0;
             for (s = 0; s <= max_real_space; s++) {
-              S_G.main_thread_gc.base_loc[g][s] = FIX(0); 
-              S_G.main_thread_gc.next_loc[g][s] = FIX(0); 
+              S_G.main_thread_gc.base_loc[g][s] = FIX(0);
+              S_G.main_thread_gc.next_loc[g][s] = FIX(0);
               S_G.main_thread_gc.bytes_left[g][s] = 0;
+              S_G.main_thread_gc.sweep_next[g][s] = NULL;
               S_G.bytes_of_space[g][s] = 0;
             }
         }
@@ -108,7 +109,7 @@ void S_reset_scheme_stack(tc, n) ptr tc; iptr n; {
         if (*x == snil) {
             if (n < default_stack_size) n = default_stack_size;
           /* stacks are untyped objects */
-            find_room(tc, space_new, 0, typemod, n, SCHEMESTACK(tc));
+            find_room(tc, space_new, 0, type_untyped, n, SCHEMESTACK(tc));
             break;
         }
         if ((m = CACHEDSTACKSIZE(*x)) >= n) {
@@ -224,6 +225,9 @@ static void close_off_segment(thread_gc *tgc, ptr old, ptr base_loc, ptr sweep_l
     /* in case this is during a GC, add to sweep list */
     si = SegInfo(addr_get_segment(base_loc));
     si->sweep_start = sweep_loc;
+#if defined(WRITE_XOR_EXECUTE_CODE)
+    si->sweep_bytes = bytes;
+#endif
     si->sweep_next = tgc->sweep_next[g][s];
     tgc->sweep_next[g][s] = si;
   }
@@ -240,7 +244,7 @@ ptr S_find_more_gc_room(thread_gc *tgc, ISPC s, IGEN g, iptr n, ptr old) {
 
   tgc->during_alloc += 1;
 
-  nsegs = (uptr)(n + ptr_bytes + bytes_per_segment - 1) >> segment_offset_bits;
+  nsegs = (uptr)(n + allocation_segment_tail_padding + bytes_per_segment - 1) >> segment_offset_bits;
 
  /* block requests to minimize fragmentation and improve cache locality */
   if (s == space_code && nsegs < 16) nsegs = 16;
@@ -252,8 +256,17 @@ ptr S_find_more_gc_room(thread_gc *tgc, ISPC s, IGEN g, iptr n, ptr old) {
 
   tgc->base_loc[g][s] = new;
   tgc->sweep_loc[g][s] = new;
-  tgc->bytes_left[g][s] = (new_bytes - n) - ptr_bytes;
+  tgc->bytes_left[g][s] = (new_bytes - n) - allocation_segment_tail_padding;
   tgc->next_loc[g][s] = (ptr)((uptr)new + n);
+
+#if defined(WRITE_XOR_EXECUTE_CODE)
+  if (s == space_code) {
+    /* Ensure allocated code segments are writable. The caller should
+       already have bracketed the writes with calls to start and stop
+       so there is no need for a stop here. */
+    S_thread_start_code_write(tgc->tc, 0, 1, NULL, 0);
+  }
+#endif
 
   if (tgc->during_alloc == 1) maybe_queue_fire_collector(tgc);
 
@@ -275,6 +288,7 @@ void S_close_off_thread_local_segment(ptr tc, ISPC s, IGEN g) {
   tgc->bytes_left[g][s] = 0;
   tgc->next_loc[g][s] = (ptr)0;
   tgc->sweep_loc[g][s] = (ptr)0;
+  tgc->sweep_next[g][s] = NULL;
 }
 
 /* S_reset_allocation_pointer is always called with allocation mutex
@@ -360,7 +374,7 @@ void S_dirty_set(ptr *loc, ptr x) {
     seginfo *si = SegInfo(addr_get_segment(TO_PTR(loc)));
     if (si->use_marks) {
       /* GC must be in progress */
-      if (!IMMEDIATE(x)) {
+      if (!FIXMEDIATE(x)) {
         seginfo *t_si = SegInfo(ptr_get_segment(x));
         if (t_si->generation < si->generation)
           S_record_new_dirty_card(THREAD_GC(get_thread_context()), loc, t_si->generation);
@@ -463,7 +477,8 @@ void S_get_more_room() {
   ptr xp; uptr ap, type, size;
 
   xp = XP(tc);
-  if ((type = TYPEBITS(xp)) == 0) type = typemod;
+  type = TYPEBITS(xp);
+  if ((type_untyped != 0) && (type == 0)) type = type_untyped;
   ap = (uptr)UNTYPE(xp, type);
   size = (uptr)((iptr)AP(tc) - (iptr)ap);
 
@@ -713,10 +728,10 @@ ptr S_flvector(n) iptr n; {
 }
 
 ptr S_bytevector(n) iptr n; {
-  return S_bytevector2(get_thread_context(), n, 0);
+  return S_bytevector2(get_thread_context(), n, space_new);
 }
 
-ptr S_bytevector2(tc, n, immobile) ptr tc; iptr n; IBOOL immobile; {
+ptr S_bytevector2(tc, n, spc) ptr tc; iptr n; ISPC spc; {
     ptr p; iptr d;
 
     if (n == 0) return S_G.null_bytevector;
@@ -725,8 +740,8 @@ ptr S_bytevector2(tc, n, immobile) ptr tc; iptr n; IBOOL immobile; {
         S_error("", "invalid bytevector size request");
 
     d = size_bytevector(n);
-    if (immobile)
-      find_room(tc, space_immobile_data, 0, type_typed_object, d, p);
+    if (spc != space_new)
+      find_room(tc, spc, 0, type_typed_object, d, p);
     else
       newspace_find_room(tc, type_typed_object, d, p);
     BYTEVECTOR_TYPE(p) = (n << bytevector_length_offset) | type_bytevector;
@@ -1028,6 +1043,9 @@ ptr S_bignum(tc, n, sign) ptr tc; iptr n; IBOOL sign; {
     if ((uptr)n > (uptr)maximum_bignum_length)
         S_error("", "invalid bignum size request");
 
+    /* for anything that allocates bignums, make sure scheduling fuel is consumed */
+    USE_TRAP_FUEL(tc, n);
+
     d = size_bignum(n);
     newspace_find_room(tc, type_typed_object, d, p);
     BIGTYPE(p) = (uptr)n << bignum_length_offset | sign << bignum_sign_offset | type_bignum;
@@ -1053,7 +1071,7 @@ ptr S_relocation_table(n) iptr n; {
     ptr p; iptr d;
 
     d = size_reloc_table(n);
-    newspace_find_room(tc, typemod, d, p);
+    newspace_find_room(tc, type_untyped, d, p);
     RELOCSIZE(p) = n;
     return p;
 }

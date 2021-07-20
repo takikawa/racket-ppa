@@ -91,8 +91,9 @@ Thread and signal conventions:
 #define RKTIO_EXTERN_NOERR  RKTIO_EXTERN
 #define RKTIO_EXTERN_STEP   RKTIO_EXTERN
 
-#define RKTIO_NULLABLE      /* empty */
-#define RKTIO_BLOCKING      /* empty */
+#define RKTIO_NULLABLE      /* empty; pointer type can be NULL */
+#define RKTIO_BLOCKING      /* empty; function blocks indefinitely */
+#define RKTIO_MSG_QUEUE     /* empty; function can dispatch events on Windows */
 
 /*************************************************/
 /* Initialization and general datatypes          */
@@ -204,7 +205,7 @@ RKTIO_EXTERN rktio_bool_t rktio_fd_is_terminal(rktio_t *rktio, rktio_fd_t *rfd);
 /* The functions mostly report values of recorded mode flags. */
 
 RKTIO_EXTERN rktio_bool_t rktio_fd_is_text_converted(rktio_t *rktio, rktio_fd_t *rfd);
-/* Reports whether `RKTIO_OPEN_TEXT` was use and has an effect. The
+/* Reports whether `RKTIO_OPEN_TEXT` was used and has an effect. The
    `RKTIO_OPEN_TEXT` flag has an effect only on Windows. */
 
 RKTIO_EXTERN rktio_bool_t rktio_fd_is_pending_open(rktio_t *rktio, rktio_fd_t *rfd);
@@ -226,6 +227,16 @@ RKTIO_EXTERN rktio_fd_t *rktio_open(rktio_t *rktio, rktio_const_string_t src, in
    `RKTIO_ERROR_UNSUPPORTED_TEXT_MODE`. If `modes` has `RKTIO_OPEN_WRITE`
    without `RKTIO_OPEN_READ`, then the result may be a file descriptor
    in pending-open mode until the read end is opened. */
+
+RKTIO_EXTERN rktio_fd_t *rktio_open_with_create_permissions(rktio_t *rktio,
+                                                            rktio_const_string_t src,
+                                                            int modes, int perm_bits);
+/* Like `rktio_open`, but accepts permission bits that are used if the
+   file is created (which is only relevant if `modes` includes
+   `RKTIO_OPEN_WRITE`). On Unix, perm_bits are adjusted by a umask.
+   Otherwise, permission bits are treated in the same way as
+   by `rktio_set_file_or_directory_permissions`. */
+#define RKTIO_DEFAULT_PERM_BITS 0666
 
 RKTIO_EXTERN rktio_ok_t rktio_close(rktio_t *rktio, rktio_fd_t *fd);
 /* Can report `RKTIO_ERROR_EXISTS` in place of system error,
@@ -295,8 +306,11 @@ RKTIO_EXTERN_ERR(RKTIO_READ_ERROR)
 intptr_t rktio_read_in(rktio_t *rktio, rktio_fd_t *fd, char *buffer, intptr_t start, intptr_t end);
 RKTIO_EXTERN_ERR(RKTIO_WRITE_ERROR)
 intptr_t rktio_write_in(rktio_t *rktio, rktio_fd_t *fd, const char *buffer, intptr_t start, intptr_t end);
-/* Like `rktio_read` and `rktio_write`, but accepting start and end
-   positions within `buffer`. */
+RKTIO_EXTERN_ERR(RKTIO_READ_ERROR)
+intptr_t rktio_read_converted_in(rktio_t *rktio, rktio_fd_t *fd, char *buffer, intptr_t start, intptr_t len,
+                                 char *is_converted, intptr_t converted_start);
+/* Like `rktio_read`, `rktio_write`, and `rktio_read_converted` but
+   accepting start and end positions within `buffer`. */
 
 RKTIO_EXTERN_NOERR intptr_t rktio_buffered_byte_count(rktio_t *rktio, rktio_fd_t *fd);
 /* Reports the number of bytes that are buffered from the file descriptor.
@@ -972,6 +986,12 @@ RKTIO_EXTERN char *rktio_expand_user_tilde(rktio_t *rktio, rktio_const_string_t 
    Other possible errors are `RKTIO_ERROR_ILL_FORMED_USER` and
    `RKTIO_ERROR_UNKNOWN_USER`. */
 
+RKTIO_EXTERN_NOERR char *rktio_uname(rktio_t *rktio);
+/* Returns a string describing the current machine and installation,
+   similar to the return of `uname -a` on Unix. If machine information
+   cannot be obtained for some reason, the result is a copy of
+   "<unknown machine>". */
+
 /*************************************************/
 /* Sleep and signals                             */
 
@@ -1001,10 +1021,12 @@ RKTIO_EXTERN void rktio_flush_signals_received(rktio_t *rktio);
 
 RKTIO_EXTERN void rktio_install_os_signal_handler(rktio_t *rktio);
 /* Installs OS-level handlers for SIGINT, SIGTERM, and SIGHUP (or
-   Ctl-C on Windows) to signal the handle of `rktio` and also record
+   Ctl-C on Windows) to signal the handle of `rktio` and also records
    the signal for reporting via `rktio_poll_os_signal`. Only one
    `rktio` can be registered this way at a time. This function must
-   not be called in two threads at the same time. */
+   not be called in two threads at the same time; more generally, it
+   can only be called when `rktio_will_modify_os_signal_handler`
+   can be called for SIGINT, etc. */
 
 RKTIO_EXTERN_NOERR int rktio_poll_os_signal(rktio_t *rktio);
 /* Returns one of the following, not counting the last one: */
@@ -1015,6 +1037,17 @@ enum {
   RKTIO_OS_SIGNAL_HUP,
   RKTIO_NUM_OS_SIGNALS
 };
+
+RKTIO_EXTERN void rktio_will_modify_os_signal_handler(int sig_id);
+/* Registers with rktio that an operating-system signal handler is
+   about to be modified within the process but outside of rktio, where
+   `sig_id` is a signal identifier --- such as SIGINT or SIGTERM. This
+   notification allows rktio to record the current signal disposition
+   so that it can be restored after forking a new Unix process. Signal
+   registrations should happen only before multiple threads use rktio,
+   and registration of the signal can happen before any `rktio_init`
+   call. After a signal is registered, trying to re-register it after
+   threads start is harmless. */
 
 /*************************************************/
 /* Time and date                                 */
@@ -1030,16 +1063,21 @@ typedef struct rktio_date_t {
 } rktio_date_t;
 
 RKTIO_EXTERN_NOERR uintptr_t rktio_get_milliseconds(void);
-/* Overflow may cause the result to wrap around to 0, at least on a
-   32-bit platform. */
+/* Wll-clock time. Overflow may cause the result to wrap around to 0,
+   at least on a 32-bit platform. */
 
 RKTIO_EXTERN_NOERR double rktio_get_inexact_milliseconds(void);
-/* No overflow, but won't strictly increase if the system clock is reset. */
+/* Wall-clock time. No overflow, but won't strictly increase if the
+   system clock is reset. */
+
+RKTIO_EXTERN_NOERR double rktio_get_inexact_monotonic_milliseconds(rktio_t *rktio);
+/* Real time like wall-clock time, but will strictly increase,
+   assuming that the host system provides a monotonic clock. */
 
 RKTIO_EXTERN_NOERR uintptr_t rktio_get_process_milliseconds(rktio_t *rktio);
 RKTIO_EXTERN_NOERR uintptr_t rktio_get_process_children_milliseconds(rktio_t *rktio);
-/* Overflow may cause the result to wrap around to 0, at least on a
-   32-bit platform. */
+/* CPU time across all threads withing the process. Overflow may cause
+   the result to wrap around to 0, at least on a 32-bit platform. */
 
 RKTIO_EXTERN_NOERR rktio_timestamp_t rktio_get_seconds(rktio_t *rktio);
 RKTIO_EXTERN rktio_date_t *rktio_seconds_to_date(rktio_t *rktio, rktio_timestamp_t seconds, int nanoseconds, int get_gmt);
@@ -1063,12 +1101,12 @@ enum {
   RKTIO_SW_SHOWNORMAL
 };
 
-RKTIO_EXTERN rktio_ok_t rktio_shell_execute(rktio_t *rktio,
-                                            rktio_const_string_t verb,
-                                            rktio_const_string_t target,
-                                            rktio_const_string_t arg,
-                                            rktio_const_string_t dir,
-                                            int show_mode);
+RKTIO_EXTERN RKTIO_MSG_QUEUE rktio_ok_t rktio_shell_execute(rktio_t *rktio,
+                                                            rktio_const_string_t verb,
+                                                            rktio_const_string_t target,
+                                                            rktio_const_string_t arg,
+                                                            rktio_const_string_t dir,
+                                                            int show_mode);
 /* Supported only on Windows to run `ShellExecute`. The `dir` argument
    needs to have normalized path separators. */
 

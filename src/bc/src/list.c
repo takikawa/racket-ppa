@@ -32,9 +32,6 @@ READ_ONLY Scheme_Object *scheme_unsafe_unbox_star_proc;
 READ_ONLY Scheme_Object *scheme_unsafe_set_box_star_proc;
 
 /* read only locals */
-ROSYM static Scheme_Object *weak_symbol;
-ROSYM static Scheme_Object *equal_symbol;
-
 ROSYM static Scheme_Hash_Tree *empty_hash;
 ROSYM static Scheme_Hash_Tree *empty_hasheq;
 ROSYM static Scheme_Hash_Tree *empty_hasheqv;
@@ -53,6 +50,8 @@ static Scheme_Object *immutablep (int argc, Scheme_Object *argv[]);
 static Scheme_Object *length_prim (int argc, Scheme_Object *argv[]);
 static Scheme_Object *append_prim (int argc, Scheme_Object *argv[]);
 static Scheme_Object *reverse_prim (int argc, Scheme_Object *argv[]);
+static Scheme_Object *memv (int argc, Scheme_Object *argv[]);
+static Scheme_Object *memq (int argc, Scheme_Object *argv[]);
 static Scheme_Object *assv (int argc, Scheme_Object *argv[]);
 static Scheme_Object *assq (int argc, Scheme_Object *argv[]);
 static Scheme_Object *assoc (int argc, Scheme_Object *argv[]);
@@ -99,6 +98,9 @@ static Scheme_Object *make_hasheqv(int argc, Scheme_Object *argv[]);
 static Scheme_Object *make_weak_hash(int argc, Scheme_Object *argv[]);
 static Scheme_Object *make_weak_hasheq(int argc, Scheme_Object *argv[]);
 static Scheme_Object *make_weak_hasheqv(int argc, Scheme_Object *argv[]);
+static Scheme_Object *make_ephemeron_hash(int argc, Scheme_Object *argv[]);
+static Scheme_Object *make_ephemeron_hasheq(int argc, Scheme_Object *argv[]);
+static Scheme_Object *make_ephemeron_hasheqv(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_make_immutable_hash(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_make_immutable_hasheq(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_make_immutable_hasheqv(int argc, Scheme_Object *argv[]);
@@ -110,7 +112,9 @@ static Scheme_Object *hash_p(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_hash_eq_p(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_hash_eqv_p(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_hash_equal_p(int argc, Scheme_Object *argv[]);
+static Scheme_Object *hash_strong_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *hash_weak_p(int argc, Scheme_Object *argv[]);
+static Scheme_Object *hash_ephemeron_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *hash_table_ref_key(int argc, Scheme_Object *argv[]);
 static Scheme_Object *hash_table_put_bang(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_hash_table_put(int argc, Scheme_Object *argv[]);
@@ -343,6 +347,17 @@ scheme_init_list (Scheme_Startup_Env *env)
                                                             | SCHEME_PRIM_AD_HOC_OPT);
   scheme_addto_prim_instance ("list-ref",p, env);
 
+  scheme_addto_prim_instance ("memq",
+			      scheme_make_immed_prim(memq,
+						     "memq",
+						     2, 2),
+			      env);
+  scheme_addto_prim_instance ("memv",
+			      scheme_make_immed_prim(memv,
+						     "memv",
+						     2, 2),
+			      env);
+
   scheme_addto_prim_instance ("assq",
 			      scheme_make_immed_prim(assq,
 						     "assq",
@@ -560,6 +575,18 @@ scheme_init_list (Scheme_Startup_Env *env)
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_ARITY_0_OMITABLE_ALLOCATION);
   scheme_addto_prim_instance("make-weak-hasheqv", p, env);
 
+  p = scheme_make_immed_prim(make_ephemeron_hash, "make-ephemeron-hash", 0, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_ARITY_0_OMITABLE_ALLOCATION);
+  scheme_addto_prim_instance("make-ephemeron-hash", p, env);
+
+  p = scheme_make_immed_prim(make_ephemeron_hasheq, "make-ephemeron-hasheq", 0, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_ARITY_0_OMITABLE_ALLOCATION);
+  scheme_addto_prim_instance("make-ephemeron-hasheq", p, env);
+
+  p = scheme_make_immed_prim(make_ephemeron_hasheqv, "make-ephemeron-hasheqv", 0, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_ARITY_0_OMITABLE_ALLOCATION);
+  scheme_addto_prim_instance("make-ephemeron-hasheqv", p, env);
+
   p = scheme_make_immed_prim(scheme_make_immutable_hash, "make-immutable-hash", 0, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_ARITY_0_OMITABLE_ALLOCATION);
   scheme_addto_prim_instance("make-immutable-hash", p, env);
@@ -613,9 +640,19 @@ scheme_init_list (Scheme_Startup_Env *env)
 						      "hash-equal?",
 						      1, 1, 1),
 			     env);
+  scheme_addto_prim_instance("hash-strong?",
+			     scheme_make_folding_prim(hash_strong_p,
+						      "hash-strong?",
+						      1, 1, 1),
+			     env);
   scheme_addto_prim_instance("hash-weak?",
 			     scheme_make_folding_prim(hash_weak_p,
 						      "hash-weak?",
+						      1, 1, 1),
+			     env);
+  scheme_addto_prim_instance("hash-ephemeron?",
+			     scheme_make_folding_prim(hash_ephemeron_p,
+						      "hash-ephemeron?",
 						      1, 1, 1),
 			     env);
 
@@ -829,12 +866,6 @@ scheme_init_list (Scheme_Startup_Env *env)
 						      1, 1, 1),
 			     env);
 
-  REGISTER_SO(weak_symbol);
-  REGISTER_SO(equal_symbol);
-
-  weak_symbol = scheme_intern_symbol("weak");
-  equal_symbol = scheme_intern_symbol("equal");
-
   REGISTER_SO(empty_hash);
   REGISTER_SO(empty_hasheq);
   REGISTER_SO(empty_hasheqv);
@@ -979,6 +1010,12 @@ scheme_init_unsafe_hash (Scheme_Startup_Env *env)
     scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
   scheme_addto_prim_instance ("unsafe-weak-hash-iterate-first", p, env);
 
+  p = scheme_make_immed_prim(unsafe_bucket_table_iterate_start,
+			     "unsafe-ephemeron-hash-iterate-first", 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |=
+    scheme_intern_prim_opt_flags(SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
+  scheme_addto_prim_instance ("unsafe-ephemeron-hash-iterate-first", p, env);
+
   /* For the rest, only immutable variants can have
      SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL, because a key can disappear
      from mutable variants and trigger an error. */
@@ -998,6 +1035,10 @@ scheme_init_unsafe_hash (Scheme_Startup_Env *env)
 			     "unsafe-weak-hash-iterate-next", 2, 2);
   scheme_addto_prim_instance ("unsafe-weak-hash-iterate-next", p, env);
 
+  p = scheme_make_immed_prim(unsafe_bucket_table_iterate_next,
+			     "unsafe-ephemeron-hash-iterate-next", 2, 2);
+  scheme_addto_prim_instance ("unsafe-ephemeron-hash-iterate-next", p, env);
+
   /* unsafe-hash-iterate-key ---------------------------------------- */
   p = scheme_make_noncm_prim(unsafe_hash_table_iterate_key,
 			     "unsafe-mutable-hash-iterate-key", 2, 3);
@@ -1014,6 +1055,10 @@ scheme_init_unsafe_hash (Scheme_Startup_Env *env)
 			     "unsafe-weak-hash-iterate-key", 2, 3);
   scheme_addto_prim_instance ("unsafe-weak-hash-iterate-key", p, env);
 
+  p = scheme_make_noncm_prim(unsafe_bucket_table_iterate_key,
+			     "unsafe-ephemeron-hash-iterate-key", 2, 3);
+  scheme_addto_prim_instance ("unsafe-ephemeron-hash-iterate-key", p, env);
+
   /* unsafe-hash-iterate-value ---------------------------------------- */
   p = scheme_make_noncm_prim(unsafe_hash_table_iterate_value,
 			     "unsafe-mutable-hash-iterate-value", 2, 3);
@@ -1029,6 +1074,10 @@ scheme_init_unsafe_hash (Scheme_Startup_Env *env)
   p = scheme_make_noncm_prim(unsafe_bucket_table_iterate_value,
 			     "unsafe-weak-hash-iterate-value", 2, 3);
   scheme_addto_prim_instance ("unsafe-weak-hash-iterate-value", p, env);
+
+  p = scheme_make_noncm_prim(unsafe_bucket_table_iterate_value,
+			     "unsafe-ephemeron-hash-iterate-value", 2, 3);
+  scheme_addto_prim_instance ("unsafe-ephemeron-hash-iterate-value", p, env);
 
   /* unsafe-hash-iterate-key+value ---------------------------------------- */
   p = scheme_make_prim_w_arity2(unsafe_hash_table_iterate_key_value,
@@ -1049,6 +1098,11 @@ scheme_init_unsafe_hash (Scheme_Startup_Env *env)
 				2, 3, 2, 2);
   scheme_addto_prim_instance ("unsafe-weak-hash-iterate-key+value", p, env);
 
+  p = scheme_make_prim_w_arity2(unsafe_bucket_table_iterate_key_value,
+				"unsafe-ephemeron-hash-iterate-key+value", 
+				2, 3, 2, 2);
+  scheme_addto_prim_instance ("unsafe-ephemeron-hash-iterate-key+value", p, env);
+
   /* unsafe-hash-iterate-pair ---------------------------------------- */
   p = scheme_make_immed_prim(unsafe_hash_table_iterate_pair,
 			     "unsafe-mutable-hash-iterate-pair", 
@@ -1066,6 +1120,11 @@ scheme_init_unsafe_hash (Scheme_Startup_Env *env)
 			     "unsafe-weak-hash-iterate-pair", 
 			     2, 3);
   scheme_addto_prim_instance ("unsafe-weak-hash-iterate-pair", p, env);
+
+  p = scheme_make_immed_prim(unsafe_bucket_table_iterate_pair,
+			     "unsafe-ephemeron-hash-iterate-pair", 
+			     2, 3);
+  scheme_addto_prim_instance ("unsafe-ephemeron-hash-iterate-pair", p, env);
 }
 
 Scheme_Object *scheme_make_pair(Scheme_Object *car, Scheme_Object *cdr)
@@ -1683,11 +1742,44 @@ scheme_checked_list_ref(int argc, Scheme_Object *argv[])
 static void mem_past_end(const char *name, Scheme_Object *s_arg, Scheme_Object *arg)
 {
   scheme_contract_error(name,
-                        "reached a non-pair",
+                        "not a proper list",
                         "in", 1, arg,
                         "looking for", 1, s_arg,
                         NULL);
 }
+
+#define GEN_MEM(name, scheme_name, comp)                \
+  static Scheme_Object *                                \
+  name (int argc, Scheme_Object *argv[])                \
+  {                                                     \
+    Scheme_Object *list, *turtle;                       \
+    list = turtle = argv[1];                            \
+    while (SCHEME_PAIRP(list))                          \
+      {                                                 \
+        if (comp (argv[0], SCHEME_CAR (list)))          \
+          {                                             \
+            return list;                                \
+          }                                             \
+        list = SCHEME_CDR (list);                       \
+        if (SCHEME_PAIRP(list)) {                       \
+          if (comp (argv[0], SCHEME_CAR (list)))        \
+            {                                           \
+              return list;                              \
+            }                                           \
+          if (SAME_OBJ(list, turtle)) break;            \
+          list = SCHEME_CDR (list);                     \
+          turtle = SCHEME_CDR (turtle);                 \
+          SCHEME_USE_FUEL(1);                           \
+        }                                               \
+      }                                                 \
+    if (!SCHEME_NULLP(list)) {                          \
+      mem_past_end(#scheme_name, argv[0], argv[1]);     \
+    }                                                   \
+    return (scheme_false);                              \
+  }
+
+GEN_MEM(memv, memv, scheme_eqv)
+GEN_MEM(memq, memq, SAME_OBJ)
 
 static void ass_non_pair(const char *name, Scheme_Object *np, Scheme_Object *s_arg, Scheme_Object *arg)
 {
@@ -2097,6 +2189,21 @@ Scheme_Bucket_Table *scheme_make_weak_equal_table(void)
   return t;
 }
 
+Scheme_Bucket_Table *scheme_make_ephemeron_equal_table(void)
+{
+  Scheme_Object *sema;
+  Scheme_Bucket_Table *t;
+  
+  t = scheme_make_bucket_table(20, SCHEME_hash_ephemeron_ptr);
+  
+  sema = scheme_make_sema(1);
+  t->mutex = sema;
+  t->compare = scheme_compare_equal;
+  t->make_hash_indices = make_hash_indices_for_equal;
+
+  return t;
+}
+
 Scheme_Bucket_Table *scheme_make_nonlock_equal_bucket_table(void)
 {
   Scheme_Bucket_Table *t;
@@ -2115,6 +2222,21 @@ Scheme_Bucket_Table *scheme_make_weak_eqv_table(void)
   Scheme_Bucket_Table *t;
   
   t = scheme_make_bucket_table(20, SCHEME_hash_weak_ptr);
+  
+  sema = scheme_make_sema(1);
+  t->mutex = sema;
+  t->compare = compare_eqv;
+  t->make_hash_indices = make_hash_indices_for_eqv;
+
+  return t;
+}
+
+Scheme_Bucket_Table *scheme_make_ephemeron_eqv_table(void)
+{
+  Scheme_Object *sema;
+  Scheme_Bucket_Table *t;
+  
+  t = scheme_make_bucket_table(20, SCHEME_hash_ephemeron_ptr);
   
   sema = scheme_make_sema(1);
   t->mutex = sema;
@@ -2195,6 +2317,27 @@ static Scheme_Object *make_weak_hasheqv(int argc, Scheme_Object *argv[])
   Scheme_Object *ht;
   ht = (Scheme_Object *)scheme_make_weak_eqv_table();
   return fill_table(ht, "make-weak-hasheqv", argc, argv);
+}
+
+static Scheme_Object *make_ephemeron_hash(int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *ht;
+  ht = (Scheme_Object *)scheme_make_ephemeron_equal_table();
+  return fill_table(ht, "make-ephemeron-hash", argc, argv);
+}
+
+static Scheme_Object *make_ephemeron_hasheq(int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *ht;
+  ht = (Scheme_Object *)scheme_make_bucket_table(20, SCHEME_hash_ephemeron_ptr);
+  return fill_table(ht, "make-ephemeron-hasheq", argc, argv);
+}
+
+static Scheme_Object *make_ephemeron_hasheqv(int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *ht;
+  ht = (Scheme_Object *)scheme_make_ephemeron_eqv_table();
+  return fill_table(ht, "make-ephemeron-hasheqv", argc, argv);
 }
 
 static Scheme_Object *make_immutable_table(const char *who, int kind, int argc, Scheme_Object *argv[])
@@ -2496,21 +2639,37 @@ Scheme_Object *scheme_hash_equal_p(int argc, Scheme_Object *argv[])
   return scheme_false;
 }
 
-static Scheme_Object *hash_weak_p(int argc, Scheme_Object *argv[])
+static Scheme_Object *strong_weak_p(const char *who, int weak, int eph, int argc, Scheme_Object *argv[])
 {
   Scheme_Object *o = argv[0];
 
   if (SCHEME_CHAPERONEP(o)) 
     o = SCHEME_CHAPERONE_VAL(o);
 
-  if (SCHEME_BUCKTP(o))
-    return scheme_true;
-  else if (SCHEME_HASHTP(o) || SCHEME_HASHTRP(o))
-    return scheme_false;
+  if (SCHEME_BUCKTP(o)) {
+    if (!weak)
+      return scheme_false;
+    return ((((Scheme_Bucket_Table *)o)->weak == SCHEME_BT_KIND_EPHEMERON)
+            ? (eph ? scheme_true : scheme_false)
+            : (eph ? scheme_false : scheme_true));
+  } else if (SCHEME_HASHTP(o) || SCHEME_HASHTRP(o))
+    return (weak ? scheme_false : scheme_true);
   
-  scheme_wrong_contract("hash-weak?", "hash?", 0, argc, argv);
+  scheme_wrong_contract(who, "hash?", 0, argc, argv);
    
   return NULL;
+}
+
+static Scheme_Object *hash_strong_p(int argc, Scheme_Object *argv[]) {
+  return strong_weak_p("hash-strong?", 0, 0, argc, argv);
+}
+
+static Scheme_Object *hash_weak_p(int argc, Scheme_Object *argv[]) {
+  return strong_weak_p("hash-weak?", 1, 0, argc, argv);
+}
+
+static Scheme_Object *hash_ephemeron_p(int argc, Scheme_Object *argv[]) {
+  return strong_weak_p("hash-ephemeron?", 1, 1, argc, argv);
 }
 
 int scheme_is_hash_table_equal(Scheme_Object *o)
@@ -2790,9 +2949,15 @@ static Scheme_Object *hash_table_clear_bang(int argc, Scheme_Object *argv[])
   }
 
   if (SCHEME_BUCKTP(v)) {
-    scheme_clear_bucket_table((Scheme_Bucket_Table *)v);
+    Scheme_Bucket_Table *t = (Scheme_Bucket_Table *)v;
+    if (t->mutex) scheme_wait_sema(t->mutex, 0);
+    scheme_clear_bucket_table(t);
+    if (t->mutex) scheme_post_sema(t->mutex);
   } else{
-    scheme_clear_hash_table((Scheme_Hash_Table *)v);
+    Scheme_Hash_Table *t = (Scheme_Hash_Table *)v;
+    if (t->mutex) scheme_wait_sema(t->mutex, 0);
+    scheme_clear_hash_table(t);
+    if (t->mutex) scheme_post_sema(t->mutex);
   }
 
   return scheme_void;
@@ -2923,8 +3088,11 @@ static Scheme_Object *do_map_hash_table(int argc,
           v = scheme_chaperone_hash_get(chaperone, v);
           if (!v)
             no_post_key(name, p[0], 0);
-        } else
+        } else {
           v = (Scheme_Object *)bucket->val;
+          if (hash->weak == SCHEME_BT_KIND_EPHEMERON)
+            v = scheme_ephemeron_value(v);
+        }
         if (v) {
           p[1] = v;
           if (keep) {
@@ -2938,6 +3106,8 @@ static Scheme_Object *do_map_hash_table(int argc,
           } else
             _scheme_apply_multi(f, 2, p);
         }
+        /* since we didn't take a lock, the size could have changed */
+        if (i > hash->size) i = hash->size;
       }
     }
   } else if (SCHEME_HASHTP(obj)) {
@@ -2970,6 +3140,8 @@ static Scheme_Object *do_map_hash_table(int argc,
           } else
             _scheme_apply_multi(f, 2, p);
         }
+        /* since we didn't take a lock, the size could have changed */
+        if (i > hash->size) i = hash->size;
       }
     }
   } else {
@@ -3715,12 +3887,21 @@ Scheme_Object *scheme_chaperone_hash_table_filtered_copy(Scheme_Object *obj,
     else
       v2 = scheme_make_immutable_hash(0, NULL);
   } else {
-    if (is_eq)
-      v2 = make_weak_hasheq(0, NULL);
-    else if (is_eqv)
-      v2 = make_weak_hasheqv(0, NULL);
-    else
-      v2 = make_weak_hash(0, NULL);
+    if (((Scheme_Bucket_Table *)v)->weak == SCHEME_BT_KIND_EPHEMERON) {
+      if (is_eq)
+        v2 = make_ephemeron_hasheq(0, NULL);
+      else if (is_eqv)
+        v2 = make_ephemeron_hasheqv(0, NULL);
+      else
+        v2 = make_ephemeron_hash(0, NULL);
+    } else {
+      if (is_eq)
+        v2 = make_weak_hasheq(0, NULL);
+      else if (is_eqv)
+        v2 = make_weak_hasheqv(0, NULL);
+      else
+        v2 = make_weak_hash(0, NULL);
+    }
   }
 
   idx = scheme_hash_table_iterate_start(1, a);

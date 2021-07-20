@@ -753,11 +753,17 @@
           (when maybe-uid
             (eq-hashtable-set! (vfasl-info-rtds vfi) (unpack-symbol maybe-uid) v)
             ;; make sure parent type is earlier
-            (for-each (lambda (fld)
-                        (field-case (car fld*)
-                                    [ptr (elem) (copy elem vfi)]
-                                    [else (void)]))
-                      fld*))
+            (safe-assert (pair? fld*))
+            (let ([ancestry (car fld*)])
+              (field-case ancestry
+                          [ptr (elem)
+                               (fasl-case* elem
+                                 [(vector ty vec)
+                                  (let ([parent (vector-ref vec (fx- (vector-length vec)
+                                                                     (constant ancestry-parent-offset)))])
+                                    (copy parent vfi))]
+                                 [else (safe-assert (not 'vector)) (void)])]
+                          [else (safe-assert (not 'ptr)) (void)])))
           (let* ([vspc (cond
                          [maybe-uid
                           (constant vspace-rtd)]
@@ -1024,7 +1030,7 @@
   (let* ([new-p (find-room 'reloc vfi
                            (constant vspace-reloc)
                            (fx+ (constant header-size-reloc-table) (fx* m (constant ptr-bytes)))
-                           (constant typemod))])
+                           (constant type-untyped))])
     (set-uptr! new-p (constant reloc-table-size-disp) m vfi)
     (set-ptr!/no-record new-p (constant reloc-table-code-disp) code-p vfi)
     (let loop ([n 0] [a 0] [i 0])

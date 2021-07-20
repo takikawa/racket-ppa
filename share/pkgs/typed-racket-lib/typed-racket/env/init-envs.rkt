@@ -3,18 +3,24 @@
 ;; Support for defining the initial TR environment
 
 (require "../utils/utils.rkt"
-         (utils tc-utils)
+         "../utils/tc-utils.rkt"
          "global-env.rkt"
          "type-name-env.rkt"
          "type-alias-env.rkt"
          "mvar-env.rkt"
          "signature-env.rkt"
-         (rep core-rep type-rep
-              prop-rep rep-utils
-              object-rep values-rep
-              free-variance)
+         "struct-name-env.rkt"
+         "../rep/core-rep.rkt"
+         "../rep/type-rep.rkt"
+         "../rep/prop-rep.rkt"
+         "../rep/rep-utils.rkt"
+         "../rep/object-rep.rkt"
+         "../rep/values-rep.rkt"
+         "../rep/free-variance.rkt"
          (for-syntax syntax/parse racket/base)
-         (types abbrev struct-table utils)
+         "../types/abbrev.rkt"
+         "../types/struct-table.rkt"
+         "../types/utils.rkt"
          data/queue
          racket/private/dict racket/list racket/promise
          racket/match
@@ -461,6 +467,11 @@
     type-env-map
     (λ (id ty) #`(register-type #'#,id #,(quote-type ty)))))
 
+(define (struct-name-env-init)
+  (make-init-code
+    struct-name-map
+    (λ (id tname) #`(register-struct-name! #'#,id #'#,tname))))
+
 (define (mvar-env-init-code mvar-env)
   (make-init-code
     (λ (f) (free-id-table-map mvar-env f))
@@ -494,7 +505,8 @@
           (tvariance-env-init-code)
           (mvar-env-init-code mvar-env)
           (signature-env-init-code)
-          (make-struct-table-code)))
+          (make-struct-table-code)
+          (struct-name-env-init)))
 
   ;; get the lifted common expressions for types which need to come first
   (list* (get-extra-type-definitions)

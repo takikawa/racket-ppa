@@ -9,6 +9,8 @@ do
   # Strip away all feature choices
   -enable* | --enable* | -disable* | --disable*)
     ;;
+  -collects* | --collects* | -apps* | --apps* | -pkgs* | --pkgs*)
+    ;;
   *)
     case $fixup_arg in
     *\'*) fixup_arg=`echo "$fixup_arg" | sed "s/'/'\\\\\\\\''/g"` ;;

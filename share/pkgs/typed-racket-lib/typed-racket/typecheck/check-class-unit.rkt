@@ -11,18 +11,32 @@
          syntax/parse
          syntax/stx
          "signatures.rkt"
-         (private parse-type syntax-properties type-annotation)
-         (env lexical-env tvar-env global-env type-alias-helper mvar-env)
-         (base-env annotate-classes)
-         (types utils abbrev subtype resolve generalize)
-         (typecheck check-below internal-forms)
-         (utils tc-utils mutated-vars)
-         (rep object-rep type-rep values-rep)
+         "../private/parse-type.rkt"
+         "../private/syntax-properties.rkt"
+         "../private/type-annotation.rkt"
+         "../env/lexical-env.rkt"
+         "../env/tvar-env.rkt"
+         "../env/global-env.rkt"
+         "../env/type-alias-helper.rkt"
+         "../env/mvar-env.rkt"
+         "../base-env/annotate-classes.rkt"
+         "../types/utils.rkt"
+         "../types/abbrev.rkt"
+         "../types/subtype.rkt"
+         "../types/resolve.rkt"
+         "../types/generalize.rkt"
+         "check-below.rkt"
+         "internal-forms.rkt"
+         "../utils/tc-utils.rkt"
+         "../utils/mutated-vars.rkt"
+         "../rep/object-rep.rkt"
+         "../rep/type-rep.rkt"
+         "../rep/values-rep.rkt"
          (for-syntax racket/base)
          (for-template racket/base
                        (submod "internal-forms.rkt" forms)
-                       (private class-literals)
-                       (utils typed-method-property)))
+                       "../private/class-literals.rkt"
+                       "../utils/typed-method-property.rkt"))
 
 (import tc-expr^)
 (export check-class^)
@@ -269,18 +283,18 @@
   ;; part and typecheck the rest. Let other cases pass through.
   (pattern (#%plain-app (~literal chaperone-procedure)
                         meth (quote #f) (~literal prop:typed-method) (quote #t))
-           #:declare meth (core-method register/method register/self)
-           #:with form #'meth.form)
+           #:with (~var meth^ (core-method register/method register/self)) #'meth
+           #:with form #'meth^.form)
   (pattern (#%plain-app (~literal chaperone-procedure) meth . other-args)
-           #:declare meth (core-method register/method register/self)
-           #:with form #'(#%plain-app chaperone-procedure meth.form . other-args))
+           #:with (~var meth^ (core-method register/method register/self)) #'meth
+           #:with form #'(#%plain-app chaperone-procedure meth^.form . other-args))
   (pattern ((~and head (~or let-values letrec-values))
               ([(meth-name:id) meth] ...)
               meth-name-2:id)
-           #:declare meth (core-method register/method register/self)
+           #:with ((~var meth^ (core-method register/method register/self)) ...) #'(meth ...)
            #:do [(register/method #'meth-name-2)]
            #:with (plam-meth ...)
-                  (for/list ([meth (in-list (syntax->list #'(meth.form ...)))])
+                  (for/list ([meth (in-list (syntax->list #'(meth^.form ...)))])
                     (cond [(plambda-property this-syntax)
                            => (λ (plam) (plambda-property meth plam))]
                           [else meth]))
@@ -290,10 +304,10 @@
   (pattern ((~and head (~or let-values letrec-values))
             ([(meth-name) meth1] ...)
             meth2)
-           #:declare meth1 (core-method register/method register/self)
-           #:declare meth2 (core-method register/method register/self)
+           #:with ((~var meth1^ (core-method register/method register/self)) ...) #'(meth1 ...)
+           #:with (~var meth2^ (core-method register/method register/self)) #'meth2
            #:with form
-                  #'(head ([(meth-name) meth1.form] ...) meth2.form)))
+                  #'(head ([(meth-name) meth1^.form] ...) meth2^.form)))
 
 ;; For detecting field mutations for occurrence typing
 (define-syntax-class (field-assignment local-table)

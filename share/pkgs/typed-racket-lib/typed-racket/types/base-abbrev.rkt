@@ -12,8 +12,10 @@
          "../rep/object-rep.rkt"
          "../rep/base-types.rkt"
          "../rep/numeric-base-types.rkt"
-         (rep values-rep rep-utils free-ids)
-         (env mvar-env)
+         "../rep/values-rep.rkt"
+         "../rep/rep-utils.rkt"
+         "../rep/free-ids.rkt"
+         "../env/mvar-env.rkt"
          racket/match racket/list (prefix-in c: (contract-req))
          (for-syntax racket/base syntax/parse racket/list)
          ;; For contract predicates
@@ -212,6 +214,9 @@
 (define (simple-> doms rng)
   (->* doms rng))
 
+(define (-Inter . ts)
+  (make-Intersection ts))
+
 (define (->acc dom rng path #:var [var (cons 0 0)])
   (define obj (-acc-path path (-id-path var)))
   (make-Fun
@@ -352,3 +357,15 @@
     [(_ (vars ...) ty)
      (let ([vars (-v vars)] ...)
        (make-Some (list 'vars ...) ty))]))
+
+;; abbreviation for existential type results
+(define-syntax -some-res
+  (syntax-rules (:)
+    [(_ (vars ...) ty : #:+ prop+type)
+     (let* ([n (length '(vars ...))]
+            [vars (-v vars)] ...)
+       (make-Values (list
+                     (make-ExitentialResult (list 'vars ...) ty
+                                            (-PS (-is-type 0 prop+type)
+                                                 -tt)
+                                            -empty-obj))))]))

@@ -473,6 +473,10 @@
     (place-image/internal
      image1 (posn-x posn) (posn-y posn) image2 x-place y-place)))
 
+(define/chk (put-image image1 x1 y1 image2)
+  (place-image/internal image1 x1 (- (image-height image2) y1) image2
+                        'middle 'middle))
+
 (define (check-place-images-dependency who images zero-or-more-posns)
   (check-dependencies who
                       (= (length images) (length zero-or-more-posns))
@@ -1580,7 +1584,7 @@
           (bytes-set! bytes (+ j 3) (color-blue c))]
          [else
           (define str (if (string? c) c (symbol->string c)))
-          (define clr (or (send the-color-database find-color str)
+          (define clr (or (string->color-object/f str)
                           (send the-color-database find-color "black")))
           (bytes-set! bytes j 255)  ;; this should probably (send clr alpha) when that's possible
           (bytes-set! bytes (+ j 1) (send clr red))
@@ -1695,6 +1699,7 @@
          place-image/align
          place-images
          place-images/align
+         put-image
          
          save-image
          save-svg-image

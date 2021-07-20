@@ -31,7 +31,7 @@
 
 (require (for-doc racket/base scribble/manual framework/private/mapdesc
                   setup/getinfo racket/pretty string-constants
-                  (for-label string-constants)))
+                  (for-label string-constants racket/pretty)))
 
 (provide-signature-elements
  (prefix application: framework:application-class^)
@@ -194,6 +194,49 @@
     reasons.})
 
  (proc-doc/names
+  number-snip:number->string/snip
+  (->* (number?)
+       (#:exact-prefix (or/c 'always 'never 'when-necessary)
+        #:inexact-prefix (or/c 'always 'never 'when-necessary)
+        #:fraction-view (or/c #f 'mixed 'improper 'decimal))
+       (or/c number-snip:is-number-snip? string?))
+  ((num) ([exact-prefix 'never] [inexact-prefix 'never] [fraction-view #f]))
+
+  @{For a number @racket[num], returns a @tech{number snip} or a
+    string according to the specified format arguments.
+
+   The @racket[exact-prefix] argument specifies whether the representation
+   should carry a @litchar{#e} prefix: Always, never, or when necessary to
+   identify a representation that would otherwise be considered inexact.
+
+   Similarly for @racket[inexact-prefix].  Note however that @racket['when-necessary]
+   is usually equivalent to @racket['never], as inexact numbers are always
+   printed with a decimal dot, which is sufficient to identify a number
+   representation as inexact.
+
+   The @racket[fraction-view] field specifies how exact non-integer reals
+   - fractions - should be rendered: As a mixed fraction, an improper fraction,
+   or a decimal, possibly identifying periodic digits.  For @racket['decimal],
+   if it's not possible to render the number as a decimal exactly, a fraction
+   representation might be generated.  This is currently the case for complex
+   numbers.
+
+   If @racket[fraction-view] is @racket[#f], this option comes from
+   the @racket['framework:fraction-snip-style] preference.})
+
+ (proc-doc/names
+  number-snip:make-pretty-print-size
+  (->* ()
+       (#:exact-prefix (or/c 'always 'never 'when-necessary)
+        #:inexact-prefix (or/c 'always 'never 'when-necessary) 
+        #:fraction-view (or/c #f 'mixed 'improper 'decimal))
+       (number? boolean? output-port? . -> . exact-nonnegative-integer?))
+  (() ([exact-prefix 'never] [inexact-prefix 'never] [fraction-view #f]))
+  @{This returns a procedure usable in a @racket[pretty-print-size-hook] implementation,
+  to go with @racket[number-snip:number->string/snip].  The arguments are as with
+  @racket[number-snip:number->string/snip].})
+ 
+ (proc-doc/names
   number-snip:make-repeating-decimal-snip
   (-> real? boolean? number-snip:is-number-snip?)
   (num show-prefix?)
@@ -227,6 +270,15 @@
   (-> number-snip:is-number-snip? real?)
   (ns)
   @{Returns the number that this @tech{number snip} displays.})
+
+ (proc-doc/names
+  number-snip:remove-decimal-looking-number-snips-on-insertion-mixin
+  (-> (subclass?/c text%) (subclass?/c text%))
+  (text%)
+  @{Overrides the @method[text% on-insert] and
+ @method[text% after-insert] to replace @racket[number-snip%]
+ objects that look like ASCII with their corresponding ASCII
+ text.})
  
  (thing-doc
   comment-box:snipclass
@@ -2158,11 +2210,13 @@
  (proc-doc
   color-prefs:register-color-scheme-entry-change-callback
   (->i ([name color-prefs:known-color-scheme-name?]
-        [fn (name)
-            (-> (if (color-prefs:color-scheme-style-name? name)
-                    (is-a?/c style-delta%)
-                    (is-a?/c color%))
-                any)])
+        [fn (name weak?)
+            (if weak?
+                (procedure-arity-includes/c 1)
+                (-> (if (color-prefs:color-scheme-style-name? name)
+                        (is-a?/c style-delta%)
+                        (is-a?/c color%))
+                    any))])
        ([weak? boolean?])
        [result void?])
   (#f)

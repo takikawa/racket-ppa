@@ -1,4 +1,4 @@
-#lang scheme/base
+#lang racket/base
 
 (require "decode.rkt"
          "core.rkt"
@@ -7,11 +7,11 @@
          "html-properties.rkt"
          "tag.rkt"
          "private/tag.rkt"
-         scheme/list
-         scheme/class
+         racket/list
+         racket/class
          racket/contract/base
          racket/contract/combinator
-         (for-syntax scheme/base))
+         (for-syntax racket/base))
 
 (provide (all-from-out "tag.rkt"))
 
@@ -773,7 +773,7 @@
  [index* (((listof string?) (listof any/c)) ()  #:rest (listof pre-content?) . ->* . index-element?)] ; XXX first any/c wrong in docs 
  [as-index (() () #:rest (listof pre-content?) . ->* . index-element?)]
  [section-index (() () #:rest (listof string?) . ->* . part-index-decl?)]
- [index-section (() (#:tag (or/c false/c string?)) . ->* . part?)])
+ [index-section (() (#:tag (or/c #f string?)) . ->* . part?)])
 
 (define (section-index . elems)
   (make-part-index-decl (map content->string elems) elems))

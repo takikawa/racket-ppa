@@ -361,7 +361,7 @@ several different ways:
  * When `_bytes` is used as an argument type, beware that a byte
    string is not implicitly terminated with a NUL byte. When `_bytes`
    is used as a result type, the C result is copied into a fresh byte
-   string.
+   string. See also `_bytes/nul-terminated`.
 
  * A `_gcpointer` can only refer to the start of an allocated object,
    and never the interior of an 'atomic-interior allocation. Like
@@ -377,12 +377,10 @@ several different ways:
    a `_pointer`, setting the cell will not cooperate correctly with
    the garbage collector.
 
- * Memory allocated with 'nonatomic works only in limited ways. It
-   cannot be usefully passed to foreign functions, since the layout is
-   not actually an array of pointers.
-
  * Callbacks are always in atomic mode (i.e., the `#:atomic?` option
-   in `_fun` and `_cprocedure` is ignored).
+   in `_fun` and `_cprocedure` is ignored). A callback must be
+   declared with `#:callback-exns?` to raise an exception that escapes
+   to an enclosing foreign callout.
 
 Threads, Threads, Atomicity, Atomicity, and Atomicity
 -----------------------------------------------------
@@ -536,3 +534,41 @@ conversion of a primitive reference to unsafe or not based on
 meant to expand to uses of unsafe operations should refer to the
 operations using `#3%`; beware that such a reference will stay unsafe,
 even if `UNSAFE_COMP` is disabled in the makefile.
+
+
+========================================================================
+ Modifying Racket
+========================================================================
+
+If you modify Racket in a way that changes compiled code, including
+changing the set of primitives, be sure to update the version number
+in "../version/racket_version.h", so that various tools know to
+rebuild bytecode.
+
+If you modify the Chez Scheme implementation in "../ChezScheme" in a
+way that changes compiled code, then you should also update the Chez
+Scheme version number in "../ChezScheme/s/cmacro.ss" and in
+"../ChezScheme/makefiles/Mf-install". For more about Chez Scheme's
+implementation and bootstrap, see "../ChezScheme/IMPLEMENTATION.md".
+
+If you're working in a checkout of the Racket Git repo, then when you
+update Chez Scheme in a way that needs new pb bootfiles, the updated
+bootfiles should be pushed to a new branch of the Racket pb repo and
+the Racket repo's top-level makefile should be updated to refer to the
+branch. Assuming that a working `racket` is in your path:
+
+ * Update ".makefile" in the checkout root to set `PB_BRANCH` to a
+   fresh branch name, typically based on the Racket version number.
+
+ * Use `make makemake` in the checkout root to build "Makefile" from
+   ".makefile" using `racket`.
+
+ * Use `make pb-build` in the checkout root to build pb bootfiles
+   using `racket`.
+
+ * Use `make pb-stage` in the checkout root to set up the new branch
+   locally. You could check that "../ChezScheme/boot/pb" looks
+   sensible at this point. The local branch checkout should have a
+   single commit in its history.
+
+ * Use `make pb-push` to push the new branch to the Racket pb repo.

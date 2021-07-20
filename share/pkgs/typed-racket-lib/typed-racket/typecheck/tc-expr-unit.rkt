@@ -1,23 +1,37 @@
 #lang racket/unit
 
 
-(require (rename-in "../utils/utils.rkt" [private private-in])
+(require (except-in "../utils/utils.rkt" infer private)
          racket/match (prefix-in - (contract-req))
          "signatures.rkt"
          "check-below.rkt" "../types/kw-types.rkt"
          "integer-refinements.rkt"
-         (types utils abbrev subtype type-table path-type
-                prop-ops overlap resolve generalize tc-result
-                numeric-tower)
-         (private-in syntax-properties parse-type)
-         (rep type-rep prop-rep object-rep)
-         (only-in (infer infer) intersect)
-         (utils tc-utils identifier)
-         (env lexical-env scoped-tvar-env)
+         "../types/utils.rkt"
+         "../types/abbrev.rkt"
+         "../types/subtype.rkt"
+         "../types/type-table.rkt"
+         "../types/path-type.rkt"
+         "../types/prop-ops.rkt"
+         "../types/overlap.rkt"
+         "../types/resolve.rkt"
+         "../types/generalize.rkt"
+         "../types/tc-result.rkt"
+         "../types/numeric-tower.rkt"
+         "../private/syntax-properties.rkt"
+         "../private/parse-type.rkt"
+         "../rep/type-rep.rkt"
+         "../rep/prop-rep.rkt"
+         "../rep/object-rep.rkt"
+         (only-in "../infer/infer.rkt" intersect)
+         "../utils/tc-utils.rkt"
+         "../utils/identifier.rkt"
+         "../env/lexical-env.rkt"
+         "../env/scoped-tvar-env.rkt"
          racket/list
          racket/private/class-internal
          syntax/parse
-         (typecheck internal-forms tc-envops)
+         "internal-forms.rkt"
+         "tc-envops.rkt"
          racket/sequence
          racket/extflonum
          ;; Needed for current implementation of typechecking letrec-syntax+values
@@ -66,6 +80,18 @@
   (match (single-value e)
     [(tc-result1: t _ _) t]
     [t (int-err "tc-expr returned ~a, not a single tc-result, for ~a" t (syntax->datum e))]))
+
+;; typecheck an expression. The result contains two values
+;; 1. the type of the expression
+;; 2. whether there are type errors during checking the expression
+;;
+;; Unlike tc-expr/check/t? and tc-expr/check?, this function raises or keeps errors from
+;; checking the expression in the error queue.
+;;
+;; tc-expr/t* : Expr -> (values Type Boolean)
+(define (tc-expr/t* expr)
+  (parameterize ([current-type-error? #f])
+    (values (tc-expr/t expr) (current-type-error?))))
 
 (define (tc-expr/check/t e t)
   (match (tc-expr/check e t)
@@ -169,7 +195,8 @@
        (cond
          [(tc-expr/check? #'t.body expected)
           (tc-error/expr #:stx #'t.body (format "Expected a type check error!"))]
-         [else expected])]
+         [else
+          (fix-results expected)])]
       ;; data
       [(quote #f) (ret (-val #f) -false-propset)]
       [(quote #t) (ret (-val #t) -true-propset)]
@@ -287,24 +314,24 @@
          (match expected
            [(tc-result1: fun-type)
             (match-define (list required-pos optional-pos optional-supplied?)
-                          (attribute opt.value))
+              (attribute opt.value))
             (opt-convert fun-type required-pos optional-pos optional-supplied?)]
            [_ #f]))
        (if conv-type
-           (begin (tc-expr/check/type #'fun conv-type) expected)
+           (begin (tc-expr/check/type #'fun conv-type) (fix-results expected))
            (tc-expr/check form #f))]
       [(~and _:kw-lambda^
-         (let-values ([(f) fun])
-           (let-values _
-             (#%plain-app
-              maker
-              lambda-for-kws
-              (case-lambda ; wrapper function
-                (formals . cl-body) ...)
-              (~or (quote (mand-kw:keyword ...))
-                   (~and _ (~bind [(mand-kw 1) '()])))
-              (quote (all-kw:keyword ...))
-              . rst))))
+             (let-values ([(f) fun])
+               (let-values _
+                 (#%plain-app
+                  maker
+                  lambda-for-kws
+                  (case-lambda ; wrapper function
+                    (formals . cl-body) ...)
+                  (~or (quote (mand-kw:keyword ...))
+                       (~and _ (~bind [(mand-kw 1) '()])))
+                  (quote (all-kw:keyword ...))
+                  . rst))))
        (define p (plambda-property form))
        (ret (kw-unconvert (tc-expr/t (plambda-property #'fun p))
                           (syntax->list #'(formals ...))

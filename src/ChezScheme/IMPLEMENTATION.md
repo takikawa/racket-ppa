@@ -14,25 +14,49 @@ Some key files in "s":
 
  * "syntax.ss": the macro expander
 
- * "cpnanopass.ss": the main compiler
+ * "cpnanopass.ss" and "cpprim.ss": the main compiler, where
+   "cpprim.ss" is the part that inlines primitives
 
  * "cp0.ss", "cptypes.ss", "cpletrec.ss", etc.: source-to-source
    passes that apply before the main compiler
 
  * "x86_64.ss", "arm64.ss", etc.: backends that are used by
-   "cpnanopass.ss"
+   "cpnanopass.ss" and "cpprim.ss"
 
- * "ta6os.def", "tarm64le", etc.: one per OS-architecture combination,
-   provides platform-specific constants that feed into "cmacro.ss" and
-   selects the backend used by "cpnanopass.ss"
+ * "ppc32osx.def", "tppc32osx.def", etc., with common combinations
+   produced from the "unix.def" and "tunix.def" templates: provides
+   platform-specific constants that feed into "cmacro.ss" and selects
+   the backend used by "cpnanopass.ss" and "cpprim.ss"
 
 Chez Scheme is a bootstrapped compiler, meaning you need a Chez Scheme
 compiler to build a Chez Scheme compiler. The compiler and makefiles
 support cross-compilation, so you can work from an already supported
 host to cross-compile the boot files and produce the header files for
 a new platform. In particular, the `pb` (portable bytecode) machine
-type can run on any supported hardward and operating system, so having
+type can run on any supported hardware and operating system, so having
 `pb` boot files is one way to get started in a new environment.
+
+# Compiled Files and Boot Files
+
+A Scheme file conventionally uses the suffix ".ss" and it's compiled
+form uses the suffix ".so". The format of a compiled file is closely
+related to the fasl format that is exposed by `fasl-write` and
+`fasl-read`, but you can't compile Scheme code to some value that is
+written with `fasl-write`. Instead, `compile-file` and related
+functions directly generate compiled code in a fasled form that
+includes needed linking information.
+
+A boot file, usually with the suffix ".boot", has the same format as a
+compiled file, but with an extra header that identifies it as a boot
+file and takes care of some singleton objects, such as `#!base-rtd`
+and the stub to invoke compiled code.
+
+The vfasl format is used for the same purposes as the fasl format, but
+mostly for boot files. It is always platform-specific and its content
+is very close to the form that the content will take when loaded into
+memory. It can load especially quickly with streamlined linking and
+interning of symbols and record types, especially in uncompressed
+form. The build scripts do not convert boot files to vfasl format.
 
 # Build System
 
@@ -53,17 +77,22 @@ directory "boot/*machine-type*". (If it doesn't find them, then
 configuration cannot continue.)
 
 The supported machine types are listed in "cmacros.ss" and reflected
-by a "boot/*machine-type*" directory for boot and headers files, a
-"s/*machine-type*.def" file to describe the platform, a
-"s/Mf-*machine-type*" makefile to select relevant files in "s", a
-"c/Mf-*machine-type*" makefile for configration in "c", and a
-"mats/Mf-*machine-type*" makefile to configure testing.
+by a "boot/*machine-type*" directory for boot and headers files and a
+combination of "s/*kind*.def" files to describe the platform. There
+may also be a "s/Mf-*machine-type*" makefile to select relevant files
+in "s", a "c/Mf-*machine-type*" makefile for configration in "c", and
+a "mats/Mf-*machine-type*" makefile to configure testing, but Unix
+machine types are handled by Mf-unix and variables configured in the
+"configure" and "workarea" scripts.
 
 The "workarea" script in the root of the Chez Scheme project is used
 to generate a subdirectory with the appropriate contents to build for
 that particular machine. This is the script that "configure" runs when
 configuring for doing the build, but you can also run the "workarea"
 script on your own, supplying the machine type you'd like to build.
+The directory where you run "configure" or "workarea" is the "build
+directory", while the directory named "*machine-type*" created by
+"workarea" is the "workarea directory".
 
 Bootstrap from scratch by running the Racket program
 "rktboot/main.rkt", which should work even with a relatively old
@@ -88,21 +117,23 @@ handled by having the Scheme compiler generate a couple of C headers:
 "scheme.h" and "equates.h", that the contain the information about the
 Scheme compiler the C kernel needs to do its job.
 
-Most of the work of porting to a new platform is producing a new
-"*machine-type*.def" file, which (except in simple ports to a new
-operating system) will require a new "*ISA*.ss" compiler backend.
-You'll also have to set up all the "Mf-*machine-type*" makefiles and
-update "configure", "cmacro.ss", and "version.h"---plus maybe other
-files, such as "workarea" if you create new dependencies among "Mf-"
-or ".def" files (e.g., "workarea" needs to know that "a6nt.def" uses
-"a6.def" and "nt.def"). Once you have all of the pieces working
-together, you cross-compile boot files, then copy them over to the the
-new machine to start compiling there.
+You can port to a new operating system by imitating the files and
+configuration of a similar supported operating system, but building a
+new backend for a new processor requires much more understanding of
+the compiler and runtime system.
 
-You can port to a new operating system by imitating the files of a
-similar supported oerating system, but building a new backend for a
-new processor requires much more understanding of the compiler and
-runtime system.
+Most of the work of porting to a new architecture is producing a new
+"*ISA*.ss" compiler backend, and there will be a "*arch*.def" file to
+go with it. For all ports, including a new operating system on an
+already-supported architecture, you'll need to update "configure",
+"workarea", "cmacro.ss", and possibly "version.h". If the generic
+"unix.def" and/or "tunix.def" templates do not work for the
+OS--architecture combination, you'll need to create a new
+"*machine-type*.def" file.
+
+Once you have all of the pieces working together, you cross-compile
+boot files, then copy them over to the the new machine to start
+compiling there.
 
 # Adding Functionality
 
@@ -137,32 +168,136 @@ will be compiled as unsafe. While testing and debugging your
 additions, however, you'll probably want to use `make o=0` in the
 "*machine-type*/s" workarea space, which compiles in safe mode.
 
-Tests go in "mats/*...*.ms". In "*machine-type*/mats", you can use
-`make 7.mo` to build and run `7.ms`. Remove `7.mo` to re-run without
-changing `7.ms`. Makefile variables like `o` control the way tests
-are run; for example, use `make o=3 7.mo` to test in unsafe mode.
+# Writing and Running Tests
 
-# Compiled Files and Boot Files
+A group of tests is written in a ".ms" file in the "mats" directory.
+Within a `mat` form after the name for the group of tests, each test
+is written as a expression that produces `#t` for success. Use the
+`error?` form to wrap an expression that is supposed to raise an
+exception in safe mode, but note that the test doesn't describe the
+exception specifically, since the expected error message likely
+depends on the configuration (e.g. safe versus unsafe); more on that
+below.
 
-A Scheme file conventionally uses the suffix ".ss" and it's compiled
-form uses the suffix ".so". The format of a compiled file is closely
-related to the fasl format that is exposed by `fasl-write` and
-`fasl-read`, but you can't compile Scheme code to some value that is
-written with `fasl-write`. Instead, `compile-file` and related
-functions directly generate compiled code in a fasled form that
-includes needed linking information.
+### Running One Set of Tests (no expected-error checking)
 
-A boot file, usually with the suffix ".boot", has the same format as a
-compiled file, but with an extra header that identifies it as a boot
-file and takes care of some singleton objects, such as `#!base-rtd`
-and the stub to invoke compiled code.
+Runs tests in a ".ms" file by going to your build's
+"*machine-type*/mats" directory, then `make` with a ".mo" target. For
+example, use `make 7.mo` to build and run `7.ms`. Delete `7.mo` to run
+`7.ms` again. Makefile variables like `o` control the way tests are
+run; for example, use `make 7.mo o=3` to test in unsafe mode. See the
+source file "mats/Mf-base" for information about the configuration
+options. Running tests to make a ".mo" file prints a lot of output, so
+you'll likely want to redirect stdout and stderr to a file.
 
-The vfasl format is used for the same purposes as the fasl format, but
-mostly for boot files. It is always platform-specific and its content
-is very close to the form that the content will take when loaded into
-memory. It can load especially quickly with streamlined linking and
-interning of symbols and record types, especially in uncompressed
-form. The build scripts do not convert boot files to vfasl format.
+A test failure is recorded in a ".mo" file as a line that contains
+`Bug`, `Error`, or `invalid memory`. That's why the target for making
+a ".mo" file ends by grepping the file. Tests for exceptions produce
+the output `Expected error`, but there's not currently a way to check
+that the exception tests of an individual ".ms" file produce the
+expected error message.
+
+### Running Tests in One Configuration (with expected-error checking)
+
+You can make all ".mo" files with just `make` within your build's
+"*machine-type*/mats". You can provide configuration arguments, too,
+such as `make o=3` to make all ".mo" files in unsafe mode.
+
+In this mode, output ".mo" files are written to a subdirectory that is
+partially configuration-specific, such as "compile-0-f-f-f" for
+`compile` (as opposed to `interpret`) in safe mode (`0` instead of
+`3`), without `suppress-primitive-inlining` enabled (first `f`),
+without cp0 enabled (second `f`), and without
+`compile-interpret-simple` enabled (last `f`). Note that a set of
+tests is not run again if an up-to-date ".mo" file is in the output
+directory, so use `make clean` as needed.
+
+The combination of all ".mo" error messages (from both expected
+exceptions and test failures) is compared against a list of expected
+errors messages for a configuration using `diff`. The `diff` result is
+written to "report-*config*", where *config* is the name of the
+configuration. So, an empty "report-*config*" means success.
+
+The set of expected error messages for a given configuration is
+generated by starting with either "mats/root-experr-compile-0-f-f-f"
+or "mats/root-experr-compile-3-f-f-f" (depending on whether the
+configuration is in unsafe or safe mode) and then applying some number
+of patches from "mats/patch-*config*". That's why the *config* in
+"report-*config*" doesn't identify everything about the configuration;
+it only identifies the combinations that can have different error
+output.
+
+If you add a new test that's expected to have error output (usually to
+check that an exception is correctly raised), then
+"mats/root-experr-*config*" and/or "mats/patch-*config*" files need to
+change. Modifying those files by hand is not practical. Instead, the
+strategy is to make sure that the output diff in "record-*config*" is
+correct, and then use targets like `make root-experr` and `make
+patches` to generate new "root-experr-..." and "patch-..." files:
+
+ * Run `make` and then `make root-experr` to generate a new
+   "root-experr-compile-0-f-f-f", then copy the generated file in the
+   workarea to the source "mats" directory. Often, this step is all
+   that is needed to update expected errors, since expected errors
+   tend to happen only in safe mode, and they tend not to change among
+   other configuration options.
+
+ * If you need to update "root-experr-compile-3-f-f-f", use `make
+   root-experr o=3` after running with `make o=3` and then copy the
+   file from the workarea to the "mats" source directory.
+
+ * After running tests for a configuration with `make` plus
+   configuration options, you may be able to recreate the
+   corresponding patch file using `make xpatch-*config*` with the same
+   configuration options. However, some configurations involve layers
+   of patch files, so it's tricky to get this right by running test
+   configurations one at a time, and it's better to run tests for all
+   configurations.
+
+### Running Tests for All Configurations
+
+To run tests for all configurations, use `make allx` within your
+build's "*machine-type*/mats" directory. Add `-j` followed by *N* to
+run tests using *N* parallel jobs. Using `make allx` implicitly uses
+`make clean` before it runs tests. You can also use `make test`
+directly in your build directory, since that's a shortcut for `make
+allx` in the "*machine-type*/mats" directory.
+
+To support parallel tests, `make allx` write its output in a
+collection of "output-*i*-*o*" directories within
+"*machine-type*/mats", so you can look for "report-*config*" files in
+those subdirectories. As its last step, `make allx` combines a summary
+of reports to a `summary` file directly in "*machine-type*/mats", and
+then it shows that summary as output. As long as that output shows
+only configurations (i.e., no errors), then all tests passed for all
+configurations.
+
+After running `make allx`, if the summary shows only errors that
+reflect out-of-date expectations from "root-experr-..." or "patch-..."
+files, you can use the sequence
+
+```bash
+make root-experr o=0
+make root-experr o=3
+make patches
+```
+
+to create new vesions of the files in the workarea directory. Copy
+changed files to the "mats" source directory; if the only change to a
+patch file is to the line-number hints, then it's probably not worth
+keeping the update (as long as the line numbers are not too far off).
+After copying to source, delete any "root-experr-..." or "patch-..."
+files, and then links are recreated on demand in the workarea space to
+"root-experr-..." or "patch-..." files when they are needed to
+generate expexted-error diffs.
+
+You can run a smaller set of tests using `make partialx` or using
+`make test-some` directly in your build directory. Despite its name,
+`make allx` does not run all available tests. Use `make bullyx` or
+`make test-more` to run a different, more stressfull set of tests. The
+bully tests may cover more configurations than `allx`, so `make
+patches` after `make bullyx` may pick up additional "patch-..." file
+changes.
 
 # Scheme Objects
 
@@ -187,10 +322,10 @@ For example, if "cmacro.ss" says
 
 then that means an address with only the lowest bit set among the low
 three bits refers to a pair. To get the address where the pair content
-is stored, round *up* to the nearest word. So, on a 64-bit machine,
-add 7 to get to the `car` and add 15 to get to the `cdr`. Since
-allocation on a 64-byte machine is 16-byte aligned, the hexadecimal
-form of every pair pointer will end in "9".
+is stored, round *up* to the nearest multiple 8 bytes. So, on a 64-bit
+machine, add 7 to get to the `car` and add 15 to get to the `cdr`.
+Since allocation on a 64-byte machine is 16-byte aligned, the
+hexadecimal form of every pair pointer will end in "9".
 
 The `type-typed-object` type,
 
@@ -204,14 +339,14 @@ of a Scheme record, that first word will be a record-type descriptor
 as a record. The based record type, `#!base-rtd` has itself as its
 record type. Since the type bits are all ones, on a 64-bit machine,
 every object tagged with an additional type workd will end in "F" in
-hexadecimal, and adding 1 to the pointer produces the <address
+hexadecimal, and adding 1 to the pointer produces the address
 containing the record content (which starts with the record type, so
 add 9 instead to get to the first field in the record).
 
 As another example, a vector is represented as `type-typed-object`
 pointer where the first word is a fixnum. That is, a fixnum used a
 type word indicates a vector. The fixnum value is the vector's length
-in wordobjects, but shifted up by 1 bit, and then the low bit is set
+in words/objects, but shifted up by 1 bit, and then the low bit is set
 to 1 for an immutable vector.
 
 Most kinds of Scheme values are represented records, so the layout is
@@ -266,7 +401,7 @@ To the degree that the runtime system needs global state, that state
 is in the thread context (so, it's thread-local), which we'll
 abbreviate as "TC". Some machine register is designated as the `%tc`
 register, and it's initialized on entry to Scheme code. For the
-defintion of TC, see `(define-primitive-structure-disps tc ...)` in
+definition of TC, see `(define-primitive-structure-disps tc ...)` in
 "cmacro.ss".
 
 The first several fields of TC are virtual registers that may be
@@ -305,7 +440,7 @@ frame is the return address, so a frame looks like this:
 
 On entry to a Scheme function, a check ensures that the difference
 between SFP and the end of the current stack segment is big enough to
-accomodate the (spilled) variables of the called function, plus enough
+accommodate the (spilled) variables of the called function, plus enough
 slop to deal with some primitive operations.
 
 A non-tail call moves SFP past all the live variables of the current
@@ -375,12 +510,12 @@ recogizes an immediate application of the `set-car!` primitive and
 inlines its implementation. The `#2%` prefix instructs the compiler to
 inline the safe implementation of `set-car!`, which checks whether its
 first argument is a pair. Look for `define-inline 2 set-car!` in
-"cpnanopass.ss" for that part of the compiler. The content of
-"prims.ss" is compiled in unsafe mode, so that's why safe mode needs
-to be selected explicitly when needed.
+"cpprim.ss" for that part of the compiler. The content of "prims.ss"
+is compiled in unsafe mode, so that's why safe mode needs to be
+selected explicitly when needed.
 
 What if the argument to `set-car!` is not a pair? The implementation
-of inline `set-car!` in "cpnanopass.ss" includes
+of inline `set-car!` in "cpprim.ss" includes
 
 ```scheme
 (build-libcall #t src sexpr set-car! e-pair e-new)
@@ -436,7 +571,7 @@ implementation.
 Finally, some primitives in "prims.ss" are implemented in the kernel
 and simply accessed with `foreign-procedure`. Other parts of the
 implementation also use `foreign-procedure` instead of having a
-defintion in "prims.ss".
+definition in "prims.ss".
 
 If you're looking for math primitives, see "mathprims.ss" instead of
 "prims.ss".
@@ -457,9 +592,9 @@ Compilation
  * performs front-end optimizations on that representation (see
    "cp0.ss", "cptypes.ss", etc.),
 
- * and then compiles to machine code (see "cpnanopass.ss"), which
-   involves many individual passes that convert through many different
-   intermediate forms (see "np-language.ss").
+ * and then compiles to machine code (see "cpnanopass.ss" and
+   "cpprim.ss"), which involves many individual passes that convert
+   through many different intermediate forms (see "np-language.ss").
 
 It's worth noting that Chez Scheme produces machine code directly,
 instead of relying on a system-provided assembler. Chez Scheme also
@@ -723,7 +858,7 @@ backend can assume that a `uvar` wil be replaced later by a register.
 When reading the compiler's implementation, `make-tmp` in most passes
 creates a `uvar` (that may eventually be spilled to a stack-frame
 slot). A `make-tmp` in the instruction-selection pass, however, makes
-an unspillable. In earlies passes of the compiler, new temporaries
+an unspillable. In earliest passes of the compiler, new temporaries
 must be bound with a `let` form (i.e., a `let` in the intermediate
 repressentation) before they can be used; in later passes, a `set!`
 initializes a temporary.
@@ -928,7 +1063,7 @@ instruction for the register--register and the register--immediate
 cases. A more explicit distinction could be made in the output of
 instruction selection, but delaying the choice is anologous to how
 assembly languages often use the same mnemonic for related
-instructions. The `asm-move` and `asm-fpmove` must accomodate
+instructions. The `asm-move` and `asm-fpmove` must accommodate
 register--memory, memory--register, and register--register cases,
 because `set!` forms after instruction selection can have those
 variants.
@@ -985,8 +1120,8 @@ machine-specific linking dierctives can appear. In the case of
 address), `arm32-call` (call an asolute address while setting the link
 register), and a`arm32-jump` (jump to an asolute address). These are
 turned into relocation entries associated with compiled code by steps
-in "compile.ss". Relocaiton entires are used when loding an GCing with
-update routines implemented in "fasl.c".
+in "compile.ss". Relocation entries are used when loading and GCing
+with update routines implemented in "fasl.c".
 
 Typically, a linking directive is written just after some code that is
 generated as installing a dummy value, and theen the update routine in
@@ -999,7 +1134,7 @@ handling in "compile.ss", and the update routine in "fasl.c".
 # Foreign Function ABI
 
 Support for foreign procedures and callables in Chez Scheme boils down
-to foriegn calls and callable stubs for the backend. A backend's
+to foreign calls and callable stubs for the backend. A backend's
 `asm-foreign-call` and `asm-foreign-callbable` function receives an
 `info-foreign` record, which describes the argument and result types
 in relatively primitive forms:

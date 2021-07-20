@@ -1,10 +1,10 @@
-#lang scheme/base
+#lang racket/base
 (require "core.rkt"
          "private/provide-structs.rkt"
          "decode-struct.rkt"
          racket/contract/base
          racket/contract/combinator
-         scheme/list)
+         racket/list)
 
 (define (pre-content? i)
   (or (string? i)
@@ -39,13 +39,13 @@
            (andmap pre-part? v))))
 
 (provide-structs
- [title-decl ([tag-prefix (or/c false/c string?)]
+ [title-decl ([tag-prefix (or/c #f string?)]
               [tags (listof tag?)]
-              [version (or/c string? false/c)]
+              [version (or/c string? #f)]
               [style style?]
               [content content?])]
  [part-start ([depth integer?]
-              [tag-prefix (or/c false/c string?)]
+              [tag-prefix (or/c #f string?)]
               [tags (listof tag?)]
               [style style?]
               [title content?])]

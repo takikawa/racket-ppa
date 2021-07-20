@@ -449,3 +449,18 @@
         [bg (if (pref:invert-colors?) "black" "white")])
     (send sd set-delta-background bg)
     sd))
+
+(define (light-color? c)
+  (define-values (R G B) (values (send c red) (send c green) (send c blue)))
+  (define LL (+ (max R G B) (min R G B)))
+  (> LL 256))
+
+(define invert-colors?
+  (light-color?
+   (color-prefs:lookup-in-color-scheme 'framework:default-text-color)))
+
+(color-prefs:register-color-scheme-entry-change-callback
+ 'framework:default-text-color
+ (lambda (c) (set! invert-colors? (light-color? c))))
+
+(define (pref:invert-colors?) invert-colors?)

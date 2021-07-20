@@ -252,17 +252,21 @@ by @racket[kind], which must be one of the following:
                                    with similar adjustments for Mac OS.}]}
 
 @defproc[(path-list-string->path-list [str (or/c string? bytes?)]
-                                      [default-path-list (listof path?)])
-         (listof path?)]{
+                                      [default-path-list (listof (or/c path? 'same))])
+         (listof (or/c path? 'same))]{
 
 Parses a string or byte string containing a list of paths, and returns
-a list of path strings. On @|AllUnix|, paths in a path list are
+a list of paths. On @|AllUnix|, paths in a path-list string are
 separated by a @litchar{:}; on Windows, paths are separated by a
 @litchar{;}, and all @litchar{"}s in the string are discarded. Whenever the path 
 list contains an empty path, the list
 @racket[default-path-list] is spliced into the returned list of
 paths. Parts of @racket[str] that do not form a valid path are not
-included in the returned list.}
+included in the returned list. The given @racket[str] must not contain
+a nul character or nul byte.
+
+@history[#:changed "8.0.0.10" @elem{Changed to allow @racket['same] in
+                                    @racket[default-path-list].}]}
 
 
 @defproc[(find-executable-path [program path-string?]
@@ -272,6 +276,13 @@ included in the returned list.}
 
 Finds a path for the executable @racket[program], returning
 @racket[#f] if the path cannot be found.
+
+On Windows, if @racket[program] is not found and it has no file
+extension, then the search starts over with @filepath{.exe} added to
+@racket[program], and the result is @racket[#f] only if the path with
+@filepath{.exe} also cannot be found. The result includes the
+extension @filepath{.exe} if only @racket[program] with the extension
+is found.
 
 If @racket[related] is not @racket[#f], then it must be a relative
 path string, and the path found for @racket[program] must be such
@@ -309,7 +320,10 @@ not defined, @racket[program] is prefixed with the current
 directory and used in the search algorithm above. (On Windows, the
 current directory is always implicitly the first item in
 @envvar{PATH}, so @racket[find-executable-path] checks the current
-directory first on Windows.)}
+directory first on Windows.)
+
+@history[#:changed "8.1.0.7" @elem{Added search with @filepath{.exe}
+                                   on Windows.}]}
 
 @;------------------------------------------------------------------------
 @section[#:tag "fileutils"]{Files}
@@ -491,7 +505,7 @@ all three (owner, group, and others) are always the same, and read and
 execute permission are always available. On @|AllUnix|,
 higher bits have a platform-specific meaning.
 
-If an integer is supplied as the second argument, its is used as an
+If an integer is supplied as the second argument, it is used as an
 encoding of properties (mostly permissions) to install for the file.
 
 In all modes, the @exnraise[exn:fail:filesystem] on error (e.g., if no
@@ -830,13 +844,13 @@ compiled. Instead, @racket[expr] is preserved in the module as a
 compile-time expression (in the sense of
 @racket[begin-for-syntax]). Later, at the time that an executable is
 created, the compile-time portion of the module is executed (again),
-and the result of @racket[expr] is the file to be included with the
+and the result of @racket[expr] is the file or directory to be included with the
 executable. The reason for the extra compile-time execution is that
 the result of @racket[expr] might be platform-dependent, so the result
 should not be stored in the (platform-independent) bytecode form of
 the module; the platform at executable-creation time, however, is the
 same as at run time for the executable. Note that @racket[expr] is
-still evaluated at run-time; consequently, avoid procedures like
+still evaluated at run time; consequently, avoid procedures like
 @racket[collection-path], which depends on the source installation,
 and instead use relative paths and forms like @racket[(list 'lib _str
 ...+)].
@@ -845,7 +859,12 @@ If a path is needed only on some platforms and not on others, use
 @racket[define-runtime-path-list] with an @racket[expr] that produces an
 empty list on platforms where the path is not needed.
 
-Beware that @racket[define-runtime-path] in a @tech{phase level} other
+Beware that if @racket[expr] produces the path of a directory when
+creating an executable, the directory's full content (including any
+subdirectories) is included with the executable or eventual
+distribution.
+
+Also beware that @racket[define-runtime-path] in a @tech{phase level} other
 than 0 does not cooperate properly with an executable creator. To work
 around that limitation, put @racket[define-runtime-path] in a separate
 module---perhaps a @tech{submodule} created by @racket[module]---then
