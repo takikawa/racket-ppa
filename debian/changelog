@@ -1,3 +1,9 @@
+racket (8.2+dfsg1-1) experimental; urgency=medium
+
+  * New upstream release
+
+ -- David Bremner <bremner@debian.org>  Tue, 20 Jul 2021 11:05:19 -0300
+
 racket (8.0+dfsg1-4) experimental; urgency=medium
 
   * Bug fix: "missing Breaks+Replaces: racket-common (<< 8)", thanks
